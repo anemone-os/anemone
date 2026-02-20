@@ -1,0 +1,23 @@
+[package]
+name = "anemone-kernel"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anemone-abi = { path = "../anemone-abi" }
+bitflags = { workspace = true }
+fdt = { workspace = true }
+spin = { workspace = true }
+talc = { workspace = true }
+paste = { workspace = true }
+yansi = { workspace = true }
+boxcar = { workspace = true }
+rangemap = { workspace = true }
+buddy-system = { path = "crates/buddy-system", features = ["stats"] }
+idalloc = { path = "crates/idalloc" }
+kernel-macros = { path = "crates/kernel-macros" }
+
+
+[target.'cfg(target_arch = "riscv64")'.dependencies]
+riscv = { workspace = true }
+sbi-rt = { workspace = true }

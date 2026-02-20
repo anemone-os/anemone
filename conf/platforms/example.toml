@@ -1,0 +1,56 @@
+#! Toml schema for platform configuration
+
+# Basic information
+# This section defines how to build Anemone kernel for the target platform.
+
+[build]
+# Name of the target platform, used for identification and will be embedded into kernel
+name = "example-platform"
+# Architecture of the target platform
+# e.g., riscv64, x86_64, arm64, loongarch64
+arch = "riscv64"
+# Target triple for the compiler
+# See conf/arch/[arch]/ for available target triples for each architecture
+target = "riscv64-unknown-anemone-elf"
+# Execution environment for the target platform
+# This include BIOS, UEFI, SBI, UBoot, etc.
+exec_env = "sbi"
+
+[constants]
+# Physical address where RAM starts
+phys_ram_start = 0x80000000
+# Maximum size of physical RAM supported by this platform
+# This will be used when we do optimistic memory mapping during early boot.
+max_phys_ram_size = 0x80000000
+# Load address of the kernel in physical memory
+kernel_la_base = 0x80200000
+# Virtual address where the kernel is mapped during runtime
+kernel_va_base = 0xffffffff80200000
+# Maximum number of CPUs supported by this platform
+max_cpus = 4
+
+# QEMU configuration
+# This section defines how to run the target platform in QEMU,
+# if applicable.
+[qemu]
+# QEMU binary to use
+qemu = "qemu-system-riscv64"
+# QEMU machine type
+machine = "virt"
+# CPU type
+cpu = "rv64"
+# number of CPUs
+smp = 4
+# Amount of memory
+memory = "512M"
+# Platform firmware to use
+bios = "default"
+# Additional QEMU arguments
+args = [
+    "-serial",
+    "mon:stdio",
+    "-device",
+    "virtio-net-device,netdev=net0",
+    "-netdev",
+    "user,id=net0,hostfwd=tcp::2222-:22",
+]

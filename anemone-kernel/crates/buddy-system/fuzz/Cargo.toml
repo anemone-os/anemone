@@ -1,0 +1,23 @@
+[package]
+name = "buddy-system-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+buddy-system = { path = "..", features = ["stats"] }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_buddy_system"
+path = "fuzz_targets/fuzz_buddy_system.rs"
+test = false
+doc = false
+bench = false

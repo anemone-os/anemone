@@ -1,0 +1,34 @@
+{
+    "name": "anemone-dev",
+    "build": {
+        "context": "..",
+        "dockerfile": "../Dockerfile",
+        "target": "fin_dev",
+        "args": {
+            "QEMU_VERSION": "10.0.5",
+            "GNU_VERSION": "2026.01.09"
+        }
+    },
+    // Set your user ID here.
+    // If unfortunately your uid is not 1000, then you might
+    // need to login as root first and create a user with the same uid as your host user.
+    // If that's the case, you may better just develop locally...
+    "remoteUser": "1000",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "donjayamanne.githistory",
+                "github.copilot-chat",
+                "ms-vscode.hexeditor",
+                "ms-python.python",
+                "nefrob.vscode-just-syntax",
+                "rust-lang.rust-analyzer",
+                "tamasfe.even-better-toml"
+            ],
+            "settings": {}
+        }
+    },
+    "mounts": [
+        "source=cargo-cache,target=/usr/local/cargo/registry,type=volume",
+    ]
+}

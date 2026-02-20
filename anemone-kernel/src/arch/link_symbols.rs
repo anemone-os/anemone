@@ -1,0 +1,51 @@
+//! This module provides declarations for symbols that are defined in the linker
+//! script, which are used to determine the layout of the kernel in
+//! memory.
+
+unsafe extern "C" {
+    /// The start of the kernel's image in virtual memory.
+    ///
+    /// The address of this symbol should be equal to
+    /// [`crate::platform_defs::KERNEL_VA_BASE`].
+    pub fn __skernel();
+    /// The end of the kernel's image in virtual memory.
+    pub fn __ekernel();
+
+    /// The start of the text segment (ELF format) of the kernel in virtual
+    /// memory.
+    pub fn __stext();
+
+    /// The end of the text segment (ELF format) of the kernel in virtual
+    /// memory.
+    pub fn __etext();
+
+    /// The start of the read-only data segment (ELF format) of the kernel in
+    pub fn __srodata();
+    /// The end of the read-only data segment (ELF format) of the kernel in
+    pub fn __erodata();
+
+    /// The start of the data segment (ELF format) of the kernel in virtual
+    /// memory.
+    pub fn __sdata();
+    /// The end of the data segment (ELF format) of the kernel in virtual
+    /// memory.
+    pub fn __edata();
+
+    /// The start of the BSS segment (ELF format) of the kernel in virtual
+    /// memory.
+    pub fn __sbss();
+
+    /// The address from which the BSS segment (ELF format) of the kernel in
+    /// virtual memory should be zeroed.
+    pub fn __bss_zero_start();
+
+    /// The end of the BSS segment (ELF format) of the kernel in virtual
+    /// memory.
+    pub fn __ebss();
+
+    /// The start of the per-CPU data segment of the kernel in virtual memory.
+    pub fn __spercpu();
+
+    /// The end of the per-CPU data segment of the kernel in virtual memory.
+    pub fn __epercpu();
+}

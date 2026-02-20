@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = ["anemone-abi", "anemone-kernel", "anemone-kernel/crates/*"]
+exclude = ["scripts/xtask"]
+
+[workspace.dependencies]
+sbi-rt = { version = "0.0.3" }
+elf = { version = "0.8.0", default-features = false, features = ["to_str"] }
+yansi = { version = "1.0.1", default-features = false }
+riscv = { version = "0.16.0" }
+bitflags = { version = "2.10.0" }
+fdt = { version = "0.2.0-alpha1", features = ["pretty-printing"] }
+spin = { version = "0.10.0", default-features = false, features = [
+    "lazy",
+    "use_ticket_mutex",
+    "rwlock",
+] }
+talc = { version = "4.4.3" }
+paste = { version = "1.0.15" }
+# crossbeam-queue = { version = "0.3.12", default-features = false, features = [
+#     "alloc",
+#     "nightly",
+# ] }
+boxcar = { version = "0.2.14" }
+rangemap = { version = "1.7.1" }
+intrusive-collections = { version = "0.10", default-features = false, features = [
+    "nightly",
+] }
+
+
+syn = { version = "2.0", features = ["full"] }
+quote = "1.0"
+proc-macro2 = "1.0"

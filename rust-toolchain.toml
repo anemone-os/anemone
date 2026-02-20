@@ -1,0 +1,12 @@
+[toolchain]
+channel = "nightly-2026-01-31"
+profile = "minimal"
+components = [
+    "rustfmt",
+    "clippy",
+    "llvm-tools",
+    "rust-src",
+    "miri",
+    "rust-analyzer",
+]
+targets = ["riscv64gc-unknown-none-elf", "loongarch64-unknown-none"]

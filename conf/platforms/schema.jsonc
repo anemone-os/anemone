@@ -1,0 +1,126 @@
+// W.I.P.
+// The configuration format is still under HEAVY development and subject to change.
+// Please refer to actual platform configuration files for the
+// current structure and fields.
+{
+    "_comment": "This schema defines the structure of platform configuration files used in the Anemone build system.",
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Platform Configuration",
+    "type": "object",
+    "properties": {
+        "build": {
+            "type": "object",
+            "description": "Basic information about the platform.",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "The name of the platform. This is used for identification and will be built into the image."
+                },
+                "arch": {
+                    "description": "The architecture of the platform (e.g., x86_64, aarch64).",
+                    "enum": [
+                        "riscv64",
+                        "loongarch64"
+                    ]
+                },
+                "target": {
+                    "type": "string",
+                    "description": "The target triple for the platform. This should correspond to the architecture and environment."
+                },
+                "exec_env": {
+                    "type": "string",
+                    "description": "Execution environment for the target platform (e.g., BIOS, UEFI, SBI, UBoot). "
+                }
+            },
+            "required": [
+                "name",
+                "arch",
+                "target",
+                "exec_env"
+            ]
+        },
+        "constants": {
+            "type": "object",
+            "description": "Memory configuration.",
+            "properties": {
+                "phys_ram_start": {
+                    "type": "integer",
+                    "description": "Physical address where RAM starts."
+                },
+                "max_phys_ram_size": {
+                    "type": "integer",
+                    "description": "Maximum size of physical RAM supported by this platform."
+                },
+                "kernel_la_base": {
+                    "type": "integer",
+                    "description": "Load address of the kernel in physical memory."
+                },
+                "kernel_va_base": {
+                    "type": "integer",
+                    "description": "Virtual address where the kernel is mapped during runtime."
+                },
+                "max_cpus": {
+                    "type": "integer",
+                    "description": "The maximum number of CPUs supported by the platform."
+                }
+            },
+            "required": [
+                "phys_ram_start",
+                "max_phys_ram_size",
+                "kernel_la_base",
+                "kernel_va_base",
+                "max_cpus"
+            ]
+        },
+        "qemu": {
+            "type": "object",
+            "description": "This section defines how to run kernel on the target platform using QEMU emulator, if applicable.",
+            "properties": {
+                "qemu": {
+                    "type": "string",
+                    "description": "path to the QEMU executable."
+                },
+                "machine": {
+                    "type": "string",
+                    "description": "the QEMU machine type to use."
+                },
+                "cpu": {
+                    "type": "string",
+                    "description": "type of CPU to emulate."
+                },
+                "smp": {
+                    "type": "integer",
+                    "description": "number of CPU cores to allocate."
+                },
+                "memory": {
+                    "type": "string",
+                    "description": "amount of memory to allocate (e.g., '512M', '2G').",
+                    "pattern": "^[0-9]+[MG]$"
+                },
+                "bios": {
+                    "type": "string",
+                    "description": "path to the BIOS/firmware binary to use."
+                },
+                "args": {
+                    "type": "array",
+                    "description": "additional command-line arguments to pass to QEMU.",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            },
+            "required": [
+                "qemu",
+                "machine",
+                "cpu",
+                "smp",
+                "memory",
+                "bios"
+            ]
+        }
+    },
+    "required": [
+        "build",
+        "constants"
+    ]
+}
