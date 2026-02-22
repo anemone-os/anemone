@@ -103,6 +103,9 @@ core::arch::global_asm!(
     // sstatus
     "   ld t0, 256(sp)",
     "   csrw sstatus, t0",
+    // sepc
+    "   ld t0, 264(sp)",
+    "   csrw sepc, t0",
     // t0/x5
     "   ld t0, 40(sp)",
     // load back sp
@@ -134,7 +137,10 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
 }
 
 unsafe fn arch_recoverable_handler(trapframe: &mut RiscV64TrapFrame, exception: RiscV64Exception) {
-    todo!()
+    unreachable!(
+        "currently there is no architecture-specific recoverable exception, so this code should never be reached. exception: {:?}",
+        exception
+    );
 }
 
 pub unsafe fn use_ktrap_entry() {

@@ -5,7 +5,7 @@ pub trait TrapArch {
 }
 
 pub trait TrapFrameArch {
-    /// Get the system call number from the trap frame.
+    /// Get the system call argument at the given index.
     ///
     /// # Safety
     ///
