@@ -5,12 +5,12 @@ name: CI
 
 on:
   push:
-    branches: [main, feature/ci]
+    branches: [main]
     paths-ignore:
       - "docs/**"
       - "anemone-book/**"
   pull_request:
-    branches: [main, feature/ci]
+    branches: [main]
     paths-ignore:
       - "docs/**"
       - "anemone-book/**"
