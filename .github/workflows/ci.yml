@@ -34,5 +34,6 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
+            --entrypoint /bin/sh \
             anemone:ci \
-            sh -c "just defconfig && just build"
+            -c "just defconfig && just build"
