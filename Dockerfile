@@ -53,3 +53,21 @@ ENV PATH="/opt/gnu-riscv/bin:/opt/qemu/bin:${PATH}"
 # Unset CARGO_HOME so users default to ~/.cargo for registry/cache (avoids permission issues)
 ENV CARGO_HOME=
 ENTRYPOINT [ "bash" ]
+
+FROM ubuntu:24.04 AS fin_ci
+RUN apt update && apt install -y \
+    build-essential \
+    python3 \
+    python3-pip \
+    curl 
+ENV RUSTUP_HOME=/opt/rust/rustup \
+    CARGO_HOME=/opt/rust/cargo \
+    PATH="/opt/rust/cargo/bin:${PATH}"
+RUN mkdir -p /opt/rust/cargo /opt/rust/rustup && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path && \
+    cargo install just && \
+    chmod -R a+rwX /opt/rust
+COPY --from=build_gnu_riscv /build/riscv /opt/gnu-riscv
+ENV PATH="/opt/gnu-riscv/bin:${PATH}"
+ENV CARGO_HOME=
+ENTRYPOINT [ "bash" ]

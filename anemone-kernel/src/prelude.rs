@@ -1,13 +1,17 @@
 pub use crate::{
     arch::*,
     device::*,
-    exception::{ExceptionArch, IntrGuard, IrqFlags},
+    exception::{
+        intr::{IntrArch, IntrGuard, IrqFlags, TrackedIntrGuard},
+        trap::{TrapArch, TrapFrameArch},
+    },
     kconfig_defs::*,
     mm::{addr::*, error::*, frame::*, paging::*, percpu::*},
     platform_defs::*,
     power::*,
     sched::*,
     sync::spinlock::SpinLock,
+    syscall::*,
     syserror::*,
     time::hal::*,
     utils::*,

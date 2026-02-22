@@ -21,6 +21,7 @@ pub mod panic;
 pub mod power;
 pub mod sched;
 pub mod sync;
+pub mod syscall;
 pub mod syserror;
 pub mod time;
 pub mod utils;

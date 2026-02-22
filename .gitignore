@@ -1,5 +1,6 @@
 **/target
-./build
+build
 **/rustc-ice-*
-**/.gdbhistory
-./kconfig
+**/.gdb_history
+kconfig
+etc

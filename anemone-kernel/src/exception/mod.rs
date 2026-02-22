@@ -5,8 +5,9 @@
 //! - bottom halves (e.g. deferred work that needs to be done after an interrupt
 //!   is handled)
 
-mod hal;
-pub use hal::*;
-
 mod preempt_counter;
 pub use preempt_counter::PreemptCounter;
+
+pub mod intr;
+pub mod page_fault;
+pub mod trap;

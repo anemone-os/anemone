@@ -17,8 +17,8 @@ profile = "dev" # Build profile: "dev" or "release". We may add more profiles la
 # Parameters for kernel and loader
 [parameters]
 bootstrap_heap_shift_kb = 10 # Size of bootstrap heap as a power of 2 in KB
-log_buffer_shift_kb = 8 # Log buffer size as a power of 2 in KB, excluding metadata overhead
-log_record_shift_bytes = 8 # Log record size as a power of 2 in bytes
+log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
+log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
 kstack_shift_kb = 5 # Kernel stack size as a power of 2 in KB
 max_processes = 128 # Maximum number of processes
 time_slice_ms = 10 # Time slice duration in milliseconds

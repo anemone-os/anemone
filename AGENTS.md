@@ -1,10 +1,13 @@
 # Anemone 代码代理指引
+- Anemone是一个整体遵循宏内核架构的、主要使用Rust开发的操作系统，支持多架构（当前主要是RiscV64，后续计划支持LoongArch64和x86_64）。
+- **Anemone的核心目标是在不失架构灵活性、高度可扩展性与性能的前提下，尽可能提供对Linux ABI的支持，同时相比于Linux，引入和借鉴更多现代内核的设计。**
 
-## 项目总览（先看这些）
-- 这是一个 Rust `no_std` 内核工程，主内核在 `anemone-kernel/`，ABI 在 `anemone-abi/`，构建编排在 `scripts/xtask/`。
+## 仓库组织
+- 主内核在 `anemone-kernel/`，ABI 在 `anemone-abi/`，构建编排在 `scripts/xtask/`。
 - 用户态相关仓库内联：`anemone-libc/` 与 `anemone-rs/`；符号表工具在 `symtab/`。
 - 根 `Justfile` 只是薄封装，真实逻辑在 `xtask` 子命令（`build/qemu/clean/mrproper`）。
-- 内核入口是 `anemone-kernel/src/main.rs` 的 `kernel_main()`；架构选择通过 `anemone-kernel/src/arch/mod.rs` 的 `arch_select!` 宏完成。
+- 内核的架构无关入口是 `anemone-kernel/src/main.rs` 的 `kernel_main()`；最底层启动代码位于`anemone-kernel/src/arch/<arch>/bootstrap.rs`（如 `riscv64/bootstrap.rs`）。
+- 配置文件在 `conf/`，分为平台（`platforms/*.toml`）和架构（`arch/<arch>/kernel.lds.in`, `target.json`）两类，构建时会生成对应的 Rust 定义和链接脚本。
 
 ## 关键架构边界
 - 平台与构建配置分离：

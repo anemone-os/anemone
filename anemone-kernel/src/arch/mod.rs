@@ -16,11 +16,11 @@ macro_rules! arch_select {
     ($arch:ident, $arch_str:literal) => {
         #[cfg(target_arch = $arch_str)]
         mod $arch;
-
+        #[cfg(target_arch = $arch_str)]
         pub use $crate::arch::$arch::{
             cpu::Cpu as CurCpuArch, exception::Exception as CurExceptionArch,
-            paging::Paging as CurPagingArch, power::Power as CurPowerArch,
-            time::Time as CurTimeArch,
+            exception::Trap as CurTrapArch, paging::Paging as CurPagingArch,
+            power::Power as CurPowerArch, time::Time as CurTimeArch,
         };
     };
 }

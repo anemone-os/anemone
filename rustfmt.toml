@@ -1,3 +1,4 @@
 wrap_comments = true
 imports_granularity = "Crate"
 newline_style = "Unix"
+match_block_trailing_comma = true
