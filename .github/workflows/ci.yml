@@ -1,0 +1,45 @@
+# TODO: Add tests; Support different architectures.
+# TODO: Add ci/cd for docs and book checks and deployments.
+
+name: CI
+
+on:
+  push:
+    branches: [main, feature/ci]
+    paths-ignore:
+      - "docs/**"
+      - "anemone-book/**"
+  pull_request:
+    branches: [main, feature/ci]
+    paths-ignore:
+      - "docs/**"
+      - "anemone-book/**"
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: fin_ci
+          tags: anemone:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build kernel
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            --entrypoint /bin/sh \
+            anemone:ci \
+            -c "just defconfig && just build"

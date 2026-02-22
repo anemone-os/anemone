@@ -5,13 +5,13 @@ use crate::{
     arch::{
         clear_bss,
         riscv64::{
-            paging::{sv39, RiscV64PgDir, RiscV64Pte, RiscV64PteFlags},
+            paging::{RiscV64PgDir, RiscV64Pte, RiscV64PteFlags, sv39},
             time::set_hw_clock_freq,
         },
     },
-    debug::printk::{register_console, Console, ConsoleFlags},
+    debug::printk::{Console, ConsoleFlags, register_console},
     device::discovery::open_firmware::{
-        early_scan_clock_freq, early_scan_cpu_count, EarlyMemoryScanner,
+        EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count,
     },
     prelude::*,
     utils::align::{AlignedBytes, PhantomAligned4096},
@@ -266,6 +266,8 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         // TODO: device, drivers, interrupts, etc.
         // maybe some of these can be deferred to arch-independent initialization
         // code.
+
+        super::exception::use_ktrap_entry();
 
         // okay, we can wake up APs now.
         {

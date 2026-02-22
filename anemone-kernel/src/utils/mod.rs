@@ -9,4 +9,5 @@ pub mod writer;
 
 pub mod circular_log;
 
-pub type Todo = ();
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Todo;
