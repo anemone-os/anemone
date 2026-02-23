@@ -68,7 +68,9 @@ static BOOTSTRAP_PGDIR: RiscV64PgDir = {
     //    actually exists, and the extra mappings won't cause any harm.
     let s_ram_ppn = align_down_power_of_2!(PHYS_RAM_START, 1 << 30) as u64 >> 12;
     let hhdm_start_idx =
-        (((<sv39::Sv39KernelLayout as KernelLayoutTrait<sv39::Sv39PagingArch>>::DIRECT_MAPPING_ADDR as usize) >> 30)
+        (((<sv39::Sv39KernelLayout as KernelLayoutTrait<sv39::Sv39PagingArch>>::DIRECT_MAPPING_ADDR
+            as usize)
+            >> 30)
             & 0x1ff)
             + s_ram_ppn as usize / (512 * 512);
     let hhdm_end_idx = hhdm_start_idx + (align_up_power_of_2!(MAX_PHYS_RAM_SIZE, 1 << 30) >> 30);
@@ -292,12 +294,10 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         }
         sync_all_cpus();
         kinfoln!("bsp {} running...", bsp_id);
-        percpu_test();
+        //percpu_test();
     }
 
-    loop {
-        core::hint::spin_loop();
-    }
+    kernel_main(true)
 }
 
 /// Synchronize all CPUs to ensure they have all executed the code up to this
@@ -320,7 +320,7 @@ unsafe fn ap_entry(ap_id: usize) -> ! {
         kinfoln!("ap {} is starting up...", ap_id);
         mm::percpu::ap_init(ap_id);
 
-        percpu_test();
+        //percpu_test();
 
         mm::kpgdir::activate_kernel_mapping();
 
@@ -329,9 +329,7 @@ unsafe fn ap_entry(ap_id: usize) -> ! {
         kinfoln!("ap {} running...", ap_id);
     }
 
-    loop {
-        core::hint::spin_loop();
-    }
+    kernel_main(false)
 }
 
 fn percpu_test() {

@@ -1,9 +1,20 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Ident, ItemStatic, Token, parse_macro_input, punctuated::Punctuated};
+use syn::{
+    Error, Ident, ItemStatic, StaticMutability, Token, parse_macro_input, punctuated::Punctuated,
+};
 
 pub fn percpu_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as ItemStatic);
+
+    if let StaticMutability::Mut(mut_token) = input.mutability {
+        return Error::new_spanned(
+            mut_token,
+            "#[percpu] does not support static mut; use interior mutability instead",
+        )
+        .to_compile_error()
+        .into();
+    }
 
     let attr_parser = Punctuated::<Ident, Token![,]>::parse_terminated;
     let args = parse_macro_input!(attr with attr_parser);
@@ -14,9 +25,16 @@ pub fn percpu_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut core_local = false;
     for arg in args {
         if arg == "core_local" {
+            if core_local {
+                return Error::new_spanned(arg, "duplicate argument: core_local")
+                    .to_compile_error()
+                    .into();
+            }
             core_local = true;
         } else {
-            panic!("unknown argument: {}", arg);
+            return Error::new_spanned(arg, "unknown argument, expected: core_local")
+                .to_compile_error()
+                .into();
         }
     }
 
@@ -34,6 +52,7 @@ pub fn percpu_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let new_item = quote! {
         #[unsafe(link_section = #section)]
+        #[used]
         #(#attrs)*
         #vis static #name: crate::mm::percpu::PerCpu<#ty> = crate::mm::percpu::PerCpu::new(#init);
     };

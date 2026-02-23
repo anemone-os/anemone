@@ -33,11 +33,12 @@ mod klog {
 
     use super::*;
 
-    pub fn __klog(level: LogLevel, leveled_msg: Arguments) {
-        let mut record = LogRecord::empty(level);
+    pub fn __klog(level: Option<LogLevel>, leveled_msg: Arguments) {
+        let mut record = LogRecord::empty();
         let mut writer = BufferWriter::<{ OverflowBehavior::TRUNCATE }>::new(&mut record.msg);
         let _ = writer.write_fmt(leveled_msg);
         record.len = writer.pos();
+        record.level = level;
 
         let full_msg_str =
             core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
@@ -49,13 +50,16 @@ mod klog {
     macro_rules! kprint {
         ($level:ident, $($arg:tt)*) => {
             $crate::debug::printk::__klog(
-                $crate::debug::printk::LogLevel::$level,
+                Some($crate::debug::printk::LogLevel::$level),
                 format_args!(
                     "[{:>7}] {}",
                     $crate::debug::printk::LogLevel::$level.as_painted(),
                     format_args!($($arg)*)
                 )
             );
+        };
+        ($($arg:tt)*) => {
+            $crate::debug::printk::__klog(None, format_args!($($arg)*));
         };
     }
 
@@ -66,6 +70,9 @@ mod klog {
         };
         ($level:ident, $($arg:tt)*) => {
             $crate::kprint!($level, "{}\n", format_args!($($arg)*));
+        };
+        ($($arg:tt)*) => {
+            $crate::kprint!("{}\n", format_args!($($arg)*));
         };
     }
 

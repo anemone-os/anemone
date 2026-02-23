@@ -3,6 +3,9 @@ name = "anemone-kernel"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+kunit = []
+
 [dependencies]
 anemone-abi = { path = "../anemone-abi" }
 bitflags = { workspace = true }

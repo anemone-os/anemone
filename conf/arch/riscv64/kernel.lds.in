@@ -28,6 +28,10 @@ SECTIONS {
     .rodata : ALIGN(4K) {
         __srodata = .;
         *(.rodata .rodata.*)
+        *(.srodata .srodata.*)
+        __skunit = .;
+        *(.kunit .kunit.*)
+        __ekunit = .;
         __erodata = .;
     }  > VIRT AT> RAM
 

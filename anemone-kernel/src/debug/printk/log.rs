@@ -52,16 +52,16 @@ impl LogLevel {
 
 #[derive(Debug, Clone, Copy)]
 pub struct LogRecord {
-    pub level: LogLevel,
+    pub level: Option<LogLevel>,
     // timestamp: u64, // TODO: add timestamp when we have a clock source
     pub len: usize,
     pub msg: [u8; LOG_RECORD_SIZE],
 }
 
 impl LogRecord {
-    pub const fn empty(level: LogLevel) -> Self {
+    pub const fn empty() -> Self {
         Self {
-            level,
+            level: None,
             len: 0,
             msg: [0; LOG_RECORD_SIZE],
         }
@@ -117,14 +117,14 @@ impl Iterator for Snapshot<'_> {
                 Ok(record) => {
                     self.cur_seq += 1;
                     return Some(record);
-                }
+                },
                 Err(circular_log::ReadErr::Overwritten) => {
                     self.cur_seq = buf.oldest_seq();
                     core::hint::spin_loop();
-                }
+                },
                 Err(circular_log::ReadErr::NotReached) => {
                     unreachable!("we've checked that cur_seq < head_seq")
-                }
+                },
             }
         }
     }
