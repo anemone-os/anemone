@@ -5,7 +5,7 @@
 # This section specifies how to build loader and kernel
 [build]
 platform = "qemu-virt-rv64" # Target platform. The same name as in conf/platforms/*.toml
-profile = "release" # Build profile: "dev" or "release". We may add more profiles later.
+profile = "dev" # Build profile: "dev" or "release". We may add more profiles later.
 
 # Kernel tailoring options
 [features]

@@ -1,7 +1,8 @@
 //! Anemone kernel.
 
-//#![cfg_attr(not(test), no_std)]
-//#![cfg_attr(not(test), no_main)]
+// TODO: Switch to cfg_attr once the crate supports conditional std/no_std for testing.
+// #![cfg_attr(not(test), no_std)]
+// #![cfg_attr(not(test), no_main)]
 #![no_std]
 #![no_main]
 #![allow(unused)]
