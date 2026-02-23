@@ -4,4 +4,7 @@ pub mod discovery;
 
 mod serial;
 
+mod cpu;
+pub use cpu::CpuArchTrait;
+
 pub trait PlatformDevice {}

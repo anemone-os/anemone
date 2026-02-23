@@ -5,7 +5,7 @@ use bitflags::bitflags;
 use crate::prelude::*;
 
 /// The architecture-specific traits and types for paging.
-pub trait PagingArch: Sized {
+pub trait PagingArchTrait: Sized {
     type PgDir: PgDirArch;
     /// The minimum page size supported by the architecture, in bytes.
     const PAGE_SIZE_BYTES: usize;
@@ -47,7 +47,7 @@ pub trait PagingArch: Sized {
     /// Switch to the given page table.
     ///
     /// This function should always do a TLB shootdown.
-    unsafe fn activate_addr_space(pgtbl: &PageTable<Self>);
+    unsafe fn activate_addr_space(pgtbl: &PageTable);
 }
 
 bitflags! {

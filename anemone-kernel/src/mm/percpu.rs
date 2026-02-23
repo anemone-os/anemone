@@ -180,14 +180,16 @@ pub unsafe fn bsp_init<A: FnOnce(usize) -> PhysPageNum>(bsp_id: usize, alloc_fol
 
         let mut cur_vpn = sppn.to_hhdm();
         for cpu_id in 0..ncpus {
-            let percpu_slice =
-                core::slice::from_raw_parts_mut(cur_vpn.to_vaddr().as_ptr_mut::<u8>(), percpu_size);
+            let percpu_slice = core::slice::from_raw_parts_mut(
+                cur_vpn.to_virt_addr().as_ptr_mut::<u8>(),
+                percpu_size,
+            );
             percpu_slice.copy_from_slice(stub_slice);
 
-            PERCPU_BASES[cpu_id] = cur_vpn.to_vaddr().get() as usize;
+            PERCPU_BASES[cpu_id] = cur_vpn.to_virt_addr().get() as usize;
 
             if cpu_id == bsp_id {
-                CpuArch::set_percpu_base(cur_vpn.to_vaddr().as_ptr_mut());
+                CpuArch::set_percpu_base(cur_vpn.to_virt_addr().as_ptr_mut());
                 with_core_local_mut(|core_local| core_local.cpu_id = cpu_id);
             } else {
                 with_core_local_remote_mut(cpu_id, |core_local| core_local.cpu_id = cpu_id);

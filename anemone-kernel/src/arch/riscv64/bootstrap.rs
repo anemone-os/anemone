@@ -13,6 +13,7 @@ use crate::{
     device::discovery::open_firmware::{
         EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count,
     },
+    mm::layout::KernelLayoutTrait,
     prelude::*,
     utils::align::{AlignedBytes, PhantomAligned4096},
 };
@@ -66,8 +67,10 @@ static BOOTSTRAP_PGDIR: RiscV64PgDir = {
     //    it's fine because the kernel will only access the physical memory that
     //    actually exists, and the extra mappings won't cause any harm.
     let s_ram_ppn = align_down_power_of_2!(PHYS_RAM_START, 1 << 30) as u64 >> 12;
-    let hhdm_start_idx = (((sv39::Sv39KernelLayout::DIRECT_MAPPING_ADDR as usize) >> 30) & 0x1ff)
-        + s_ram_ppn as usize / (512 * 512);
+    let hhdm_start_idx =
+        (((<sv39::Sv39KernelLayout as KernelLayoutTrait<sv39::Sv39PagingArch>>::DIRECT_MAPPING_ADDR as usize) >> 30)
+            & 0x1ff)
+            + s_ram_ppn as usize / (512 * 512);
     let hhdm_end_idx = hhdm_start_idx + (align_up_power_of_2!(MAX_PHYS_RAM_SIZE, 1 << 30) >> 30);
     let mut i = hhdm_start_idx;
     while i < hhdm_end_idx {

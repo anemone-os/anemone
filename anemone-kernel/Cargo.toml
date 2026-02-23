@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-libkernel = { path = "libkernel" }
 anemone-abi = { path = "../anemone-abi" }
 bitflags = { workspace = true }
 fdt = { workspace = true }

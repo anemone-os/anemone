@@ -1,7 +1,9 @@
 //! Anemone kernel.
 
-#![cfg_attr(not(test), no_std)]
-#![cfg_attr(not(test), no_main)]
+//#![cfg_attr(not(test), no_std)]
+//#![cfg_attr(not(test), no_main)]
+#![no_std]
+#![no_main]
 #![allow(unused)]
 
 // **IMPORTANT**
@@ -22,11 +24,13 @@ pub mod driver;
 pub mod exception;
 pub mod mm;
 pub mod panic;
+pub mod power;
 pub mod sched;
 pub mod sync;
 pub mod syscall;
 pub mod syserror;
 pub mod time;
+pub mod utils;
 
 use crate::prelude::*;
 

@@ -1,5 +1,3 @@
-use libkernel::libdevice::CpuArchTrait;
-
 use crate::prelude::*;
 
 pub struct RiscV64CpuArch;

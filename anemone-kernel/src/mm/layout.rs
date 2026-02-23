@@ -1,4 +1,4 @@
-use crate::libmm::{PagingArchTrait, PhysAddr, VirtAddr};
+use crate::prelude::*;
 
 /// Intentionally, this trait is not suffixed with "Arch", since the memory
 /// layout is not determined by the architecture, but rather by the platform and

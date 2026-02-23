@@ -1,4 +1,4 @@
-use crate::{libexception::PageFaultInfo, libsyscall::SysNo};
+use crate::{exception::PageFaultInfo, prelude::*};
 
 pub trait TrapArchTrait {
     type TrapFrame: TrapFrameArch;

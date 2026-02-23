@@ -7,6 +7,8 @@
 
 mod preempt_counter;
 pub use preempt_counter::PreemptCounter;
+mod page_fault;
+pub use page_fault::{PageFaultInfo, PageFaultType};
 
 pub mod intr;
 pub mod trap;

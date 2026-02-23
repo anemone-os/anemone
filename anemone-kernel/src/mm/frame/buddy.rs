@@ -30,7 +30,7 @@ impl FrameAllocator for BuddyAllocator {
         let range = range.to_hhdm();
         unsafe {
             let slice = core::slice::from_raw_parts_mut(
-                range.start().to_vaddr().as_ptr_mut::<u8>(),
+                range.start().to_virt_addr().as_ptr_mut::<u8>(),
                 (range.npages() << PagingArch::PAGE_SIZE_BITS) as usize,
             );
             self.buddy
@@ -62,7 +62,7 @@ impl FrameAllocator for BuddyAllocator {
         let range = range.to_hhdm();
         unsafe {
             // we need to convert the PhysPageRange back to VirtPageRange.
-            let vaddr = range.start().to_vaddr();
+            let vaddr = range.start().to_virt_addr();
             let order = (range.npages() as usize)
                 .next_power_of_two()
                 .trailing_zeros() as usize;

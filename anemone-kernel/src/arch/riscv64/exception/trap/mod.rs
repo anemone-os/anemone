@@ -1,4 +1,10 @@
-use crate::prelude::*;
+use crate::{
+    exception::{
+        PageFaultInfo, PageFaultType,
+        trap::{ExceptionReason, InterruptReason, TrapArchTrait, TrapFrameArch, TrapReason},
+    },
+    prelude::*,
+};
 
 mod ktrap;
 pub use ktrap::*;

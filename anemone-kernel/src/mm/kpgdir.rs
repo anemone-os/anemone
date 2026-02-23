@@ -158,7 +158,6 @@ pub unsafe fn init_kernel_mapping() {
 pub unsafe fn activate_kernel_mapping() {
     unsafe {
         let kpgdir = KERNEL_PGDIR.pgdir.lock_irqsave();
-        let root_ppn = kpgdir.root_ppn();
-        PagingArch::activate_addr_space(root_ppn);
+        PagingArch::activate_addr_space(&kpgdir);
     }
 }

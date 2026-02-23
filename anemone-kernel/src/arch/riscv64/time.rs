@@ -2,8 +2,6 @@ use crate::prelude::*;
 
 pub struct RiscV64TimeArch;
 
-use libkernel::libtime::hal::TimeArchTrait;
-
 /// The frequency of the hardware timer in hertz.
 static mut CLOCK_FREQUENCY_HZ: Option<u64> = None;
 

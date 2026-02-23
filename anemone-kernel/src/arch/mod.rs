@@ -1,4 +1,4 @@
-use libkernel::libmm::PagingArchTrait;
+use crate::prelude::*;
 
 pub mod link_symbols;
 

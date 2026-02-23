@@ -1,6 +1,6 @@
 use riscv::register::satp;
 
-use crate::prelude::*;
+use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 
 pub struct Sv39PagingArch;
 
@@ -13,8 +13,8 @@ impl PagingArchTrait for Sv39PagingArch {
 
     const PTE_FLAGS_BITS: usize = super::PTE_FLAGS_BITS;
 
-    unsafe fn activate_addr_space(pgtbl: PhysPageNum) {
-        let satp_val = ((satp::Mode::Sv39 as usize) << 60) | (pgtbl.get() as usize);
+    unsafe fn activate_addr_space(pgtbl: &PageTable) {
+        let satp_val = ((satp::Mode::Sv39 as usize) << 60) | (pgtbl.root_ppn().get() as usize);
         unsafe {
             core::arch::asm!(
                 "csrw   satp, {satp_value}",

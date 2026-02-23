@@ -100,7 +100,7 @@ impl Mapper<'_> {
                 |pte, _ctx| {
                     let ppn = pte.ppn();
                     let pgdir = ppn
-                        .to_paddr()
+                        .to_phys_addr()
                         .to_hhdm()
                         .as_ptr::<PgDir>()
                         .as_ref()
@@ -139,7 +139,7 @@ impl Mapper<'_> {
 
         let mut pgdir = unsafe {
             self.root
-                .to_paddr()
+                .to_phys_addr()
                 .to_hhdm()
                 .as_ptr::<PgDir>()
                 .as_ref()
@@ -168,7 +168,7 @@ impl Mapper<'_> {
                 // branch
                 pgdir = unsafe {
                     pte.ppn()
-                        .to_paddr()
+                        .to_phys_addr()
                         .to_hhdm()
                         .as_ptr::<PgDir>()
                         .as_ref()
@@ -248,7 +248,7 @@ impl Mapper<'_> {
 
         let pgdir = unsafe {
             pgdir_ppn
-                .to_paddr()
+                .to_phys_addr()
                 .to_hhdm()
                 .as_ptr_mut::<PgDir>()
                 .as_mut()
@@ -334,7 +334,7 @@ impl Mapper<'_> {
 
         let mut pgdir = unsafe {
             self.root
-                .to_paddr()
+                .to_phys_addr()
                 .to_hhdm()
                 .as_ptr_mut::<PgDir>()
                 .as_mut()
@@ -368,7 +368,7 @@ impl Mapper<'_> {
                 }
                 pgdir = unsafe {
                     pte.ppn()
-                        .to_paddr()
+                        .to_phys_addr()
                         .to_hhdm()
                         .as_ptr_mut::<PgDir>()
                         .as_mut()

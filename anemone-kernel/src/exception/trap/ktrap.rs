@@ -1,6 +1,9 @@
 //! From-kernel trap handling.
 
-use crate::prelude::*;
+use crate::{
+    exception::trap::hal::{ExceptionReason, TrapArchTrait, TrapReason},
+    prelude::*,
+};
 
 pub unsafe fn ktrap_handler(
     trapframe: &mut <TrapArch as TrapArchTrait>::TrapFrame,

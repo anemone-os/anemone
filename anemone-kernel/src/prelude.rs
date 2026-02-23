@@ -1,15 +1,17 @@
 pub use crate::{
     arch::*,
     device::*,
-    exception::intr::{IntrGuard, TrackedIntrGuard},
+    exception::intr::*,
     kconfig_defs::*,
     mm::{addr::*, error::*, frame::*, paging::*, percpu::*},
     platform_defs::*,
+    power::*,
     sched::*,
-    sync::spinlock::SpinLock,
+    sync::{spinlock::*, *},
     syscall::*,
     syserror::*,
     time::*,
+    utils::*,
     *,
 };
 pub use alloc::{
@@ -19,9 +21,4 @@ pub use alloc::{
     vec::Vec,
 };
 pub use core::{sync::atomic::Ordering, time::Duration};
-pub use libkernel::{
-    libdevice::*, libdriver::*, libexception::*, libmm::*, libpower::*, libsched::*, libsync::*,
-    libsyscall::*, libtime::*, utils::*, *,
-};
-
 pub use kernel_macros::*;

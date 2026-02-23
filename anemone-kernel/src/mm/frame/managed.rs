@@ -53,7 +53,7 @@ impl Frame {
     pub fn as_bytes(&self) -> &'_ [u8] {
         unsafe {
             core::slice::from_raw_parts(
-                self.ppn.to_paddr().to_hhdm().as_ptr(),
+                self.ppn.to_phys_addr().to_hhdm().as_ptr(),
                 PagingArch::PAGE_SIZE_BYTES,
             )
         }
@@ -73,7 +73,7 @@ impl Frame {
     pub fn as_bytes_mut(&mut self) -> &'_ mut [u8] {
         unsafe {
             core::slice::from_raw_parts_mut(
-                self.ppn.to_paddr().to_hhdm().as_ptr_mut(),
+                self.ppn.to_phys_addr().to_hhdm().as_ptr_mut(),
                 PagingArch::PAGE_SIZE_BYTES,
             )
         }
@@ -136,7 +136,7 @@ impl Folio {
     pub fn as_bytes(&self) -> &'_ [u8] {
         unsafe {
             core::slice::from_raw_parts(
-                self.start_ppn.to_paddr().to_hhdm().as_ptr(),
+                self.start_ppn.to_phys_addr().to_hhdm().as_ptr(),
                 (self.npages as usize) * PagingArch::PAGE_SIZE_BYTES,
             )
         }
@@ -151,7 +151,7 @@ impl Folio {
     pub fn as_bytes_mut(&mut self) -> &'_ mut [u8] {
         unsafe {
             core::slice::from_raw_parts_mut(
-                self.start_ppn.to_paddr().to_hhdm().as_ptr_mut(),
+                self.start_ppn.to_phys_addr().to_hhdm().as_ptr_mut(),
                 (self.npages as usize) * PagingArch::PAGE_SIZE_BYTES,
             )
         }
