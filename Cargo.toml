@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["anemone-abi", "anemone-kernel", "anemone-kernel/crates/*"]
+members = [
+    "anemone-abi",
+    "anemone-kernel",
+    "anemone-kernel/crates/*",
+    "anemone-kernel/libkernel",
+]
 exclude = ["scripts/xtask"]
 
 [workspace.dependencies]
@@ -21,7 +26,6 @@ paste = { version = "1.0.15" }
 #     "alloc",
 #     "nightly",
 # ] }
-boxcar = { version = "0.2.14" }
 rangemap = { version = "1.7.1" }
 intrusive-collections = { version = "0.10", default-features = false, features = [
     "nightly",

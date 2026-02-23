@@ -19,7 +19,7 @@
 	- `anemone-kernel/src/platform_defs.rs`
 	- `build/generated/kernel.lds`
 	不要手改这些生成文件。
-- 架构层通过 `Cur*Arch` 访问（`CurCpuArch`, `CurExceptionArch`, `CurPagingArch`, `CurPowerArch`, `CurTimeArch`），入口集中在 `anemone-kernel/src/arch/mod.rs`。
+- 架构层通过 `Cur*Arch` 访问（`CurCpuArch`, `CurExceptionArch`, `PagingArch`, `CurPowerArch`, `CurTimeArch`），入口集中在 `anemone-kernel/src/arch/mod.rs`。
 - 设备发现走 Open Firmware/DTB 路线，内存区注册在 `anemone-kernel/src/device/discovery/open_firmware.rs`（`early_scan_and_register_memory`）。
 - 异常/中断抽象在 `anemone-kernel/src/exception/hal.rs`（`ExceptionArch`, `IrqGuard`），时间抽象在 `anemone-kernel/src/time/hal.rs`（`TimeArch`）。硬件抽象层统一定义在上层模块而非架构模块，在大多数情况下，遵循依赖倒置原则。
 - 低层调度抽象目前占位于 `anemone-kernel/src/sched/hal.rs`，新增架构调度原语先在这里落地。

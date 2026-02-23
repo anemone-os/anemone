@@ -66,7 +66,6 @@ impl Parameters {
 
         format!(
             r#"//! Auto-generated kernel parameters from kconfig, do not edit manually.
-//! This contains both loader and kernel parameters.
 #![allow(unused)]
 
 /// Size of bootstrap heap as a power of 2 in KB
