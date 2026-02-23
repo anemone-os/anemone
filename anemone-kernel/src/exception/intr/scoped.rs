@@ -15,11 +15,11 @@ impl TrackedIntrGuard {
     /// Create a new TrackedIntrGuard by disabling local interrupts and
     /// incrementing the hardirq count.
     pub fn new() -> Self {
-        let prev_flags = CurExceptionArch::current_irq_flags();
+        let prev_flags = IntrArch::current_irq_flags();
 
         // order matters: disable interrupts first and then increment the counter.
         unsafe {
-            CurExceptionArch::local_intr_disable();
+            IntrArch::local_intr_disable();
         }
         with_core_local_mut(|core_local| {
             core_local.preempt_counter_mut().increment_hardirq_count();
@@ -35,7 +35,7 @@ impl Drop for TrackedIntrGuard {
             with_core_local_mut(|core_local| {
                 core_local.preempt_counter_mut().decrement_hardirq_count();
             });
-            CurExceptionArch::restore_local_intr(self.flags);
+            IntrArch::restore_local_intr(self.flags);
         }
     }
 }
@@ -49,10 +49,10 @@ pub struct IntrGuard {
 impl IntrGuard {
     /// Create a new IntrGuard by disabling local interrupts.
     pub fn new() -> Self {
-        let prev_flags = CurExceptionArch::current_irq_flags();
+        let prev_flags = IntrArch::current_irq_flags();
 
         unsafe {
-            CurExceptionArch::local_intr_disable();
+            IntrArch::local_intr_disable();
         }
 
         Self { flags: prev_flags }
@@ -62,7 +62,7 @@ impl IntrGuard {
 impl Drop for IntrGuard {
     fn drop(&mut self) {
         unsafe {
-            CurExceptionArch::restore_local_intr(self.flags);
+            IntrArch::restore_local_intr(self.flags);
         }
     }
 }

@@ -1,0 +1,43 @@
+/// In-kernel unit testing framework, inspired by Linux's KUnit but simplified
+/// for Anemone's needs.
+///
+/// Since we don't support stack unwinding now, a panic in a kunit test will
+/// crash the kernel.
+use crate::prelude::*;
+
+#[repr(C)]
+pub struct KUnit {
+    pub name: &'static str,
+    pub test_fn: fn(),
+}
+
+/// Since we don't support stack unwinding, there is no need to count failed
+/// tests separately - if a test panics, the kernel will crash and we won't
+/// reach the end of the test runner.
+#[cfg(feature = "kunit")]
+pub fn kunit_runner() {
+    // yansi doesn't work well in macros, so we manually print the ANSI codes here
+    const GREEN_BOLD: &str = "\x1b[32;1m";
+    const BOLD: &str = "\x1b[1m";
+    const RESET: &str = "\x1b[0m";
+
+    let kunits = unsafe {
+        use link_symbols::{__ekunit, __skunit};
+
+        let skunit = __skunit as *const () as *const KUnit;
+        let ekunit = __ekunit as *const () as *const KUnit;
+        let count = (ekunit as usize - skunit as usize) / core::mem::size_of::<KUnit>();
+        core::slice::from_raw_parts(skunit, count)
+    };
+
+    kprintln!("{}-- KUnit Test Runner --{}", BOLD, RESET);
+    kprintln!("{}Running {} tests...{}", BOLD, kunits.len(), RESET);
+    for kunit in kunits {
+        kprint!("{}...", kunit.name);
+        // TODO: catch panics and count them as failures
+        (kunit.test_fn)();
+        kprintln!("{}ok{}", GREEN_BOLD, RESET);
+    }
+
+    kprintln!("{}All tests passed!{}", BOLD, RESET);
+}

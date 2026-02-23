@@ -5,7 +5,7 @@ use core::{
     ops::{Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, Not, Sub, SubAssign},
 };
 
-use crate::{int_like, prelude::*};
+use crate::{int_like, mm::layout::KernelLayoutTrait, prelude::*};
 
 int_like!(PhysAddr, u64);
 int_like!(VirtAddr, u64);
@@ -130,13 +130,13 @@ impl Into<VirtAddr> for VirtPageNum {
 
 impl PhysPageNum {
     pub const fn to_phys_addr(&self) -> PhysAddr {
-        PhysAddr::new(self.get() << CurPagingArch::PAGE_SIZE_BITS)
+        PhysAddr::new(self.get() << PagingArch::PAGE_SIZE_BITS)
     }
 }
 
 impl VirtPageNum {
     pub const fn to_virt_addr(&self) -> VirtAddr {
-        VirtAddr::new(self.get() << CurPagingArch::PAGE_SIZE_BITS)
+        VirtAddr::new(self.get() << PagingArch::PAGE_SIZE_BITS)
     }
 }
 
@@ -207,21 +207,21 @@ impl_page_range!(VirtPageRange, VirtPageNum);
 
 impl PhysAddr {
     pub fn to_hhdm(self) -> VirtAddr {
-        CurPagingArch::phys_to_hhdm(self)
+        KernelLayout::phys_to_hhdm(self)
     }
 
     pub fn to_kvirt(self) -> VirtAddr {
-        CurPagingArch::phys_to_kvirt(self)
+        KernelLayout::phys_to_kvirt(self)
     }
 }
 
 impl PhysPageNum {
     pub fn to_hhdm(self) -> VirtPageNum {
-        VirtPageNum::new(self.to_phys_addr().to_hhdm().get() >> CurPagingArch::PAGE_SIZE_BITS)
+        VirtPageNum::new(self.to_phys_addr().to_hhdm().get() >> PagingArch::PAGE_SIZE_BITS)
     }
 
     pub fn to_kvirt(self) -> VirtPageNum {
-        VirtPageNum::new(self.to_phys_addr().to_kvirt().get() >> CurPagingArch::PAGE_SIZE_BITS)
+        VirtPageNum::new(self.to_phys_addr().to_kvirt().get() >> PagingArch::PAGE_SIZE_BITS)
     }
 }
 
@@ -237,11 +237,11 @@ impl PhysPageRange {
 
 impl VirtAddr {
     pub unsafe fn hhdm_to_phys(self) -> PhysAddr {
-        unsafe { CurPagingArch::hhdm_to_phys(self) }
+        unsafe { KernelLayout::hhdm_to_phys(self) }
     }
 
     pub unsafe fn kvirt_to_phys(self) -> PhysAddr {
-        unsafe { CurPagingArch::kvirt_to_phys(self) }
+        unsafe { KernelLayout::kvirt_to_phys(self) }
     }
 
     pub fn as_ptr<T>(&self) -> *const T {
@@ -256,16 +256,14 @@ impl VirtAddr {
 impl VirtPageNum {
     pub unsafe fn hhdm_to_phys(self) -> PhysPageNum {
         unsafe {
-            PhysPageNum::new(
-                self.to_virt_addr().hhdm_to_phys().get() >> CurPagingArch::PAGE_SIZE_BITS,
-            )
+            PhysPageNum::new(self.to_virt_addr().hhdm_to_phys().get() >> PagingArch::PAGE_SIZE_BITS)
         }
     }
 
     pub unsafe fn kvirt_to_phys(self) -> PhysPageNum {
         unsafe {
             PhysPageNum::new(
-                self.to_virt_addr().kvirt_to_phys().get() >> CurPagingArch::PAGE_SIZE_BITS,
+                self.to_virt_addr().kvirt_to_phys().get() >> PagingArch::PAGE_SIZE_BITS,
             )
         }
     }

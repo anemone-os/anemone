@@ -5,7 +5,7 @@ use bitflags::bitflags;
 use crate::prelude::*;
 
 /// The architecture-specific traits and types for paging.
-pub trait PagingArch: Sized {
+pub trait PagingArchTrait: Sized {
     type PgDir: PgDirArch;
     /// The minimum page size supported by the architecture, in bytes.
     const PAGE_SIZE_BYTES: usize;
@@ -44,57 +44,10 @@ pub trait PagingArch: Sized {
     /// to represent the flags in a page table entry.
     const PTE_FLAGS_MASK: u64 = (1 << Self::PTE_FLAGS_BITS) - 1;
 
-    /// The starting virtual address of the direct mapping region, i.e., the
-    /// region where physical memory is directly mapped to virtual memory with a
-    /// fixed offset.
-    ///
-    /// Typically, this address is at the upper half of the virtual address
-    /// space.
-    ///
-    /// e.g. on a riscv sv39 system, the virtual address space is 512 GiB, and
-    /// the direct mapping region starts at 256 GiB, so the offset is 256 GiB.
-    const DIRECT_MAPPING_ADDR: u64;
-
-    /// The offset between the physical address and the virtual address in the
-    /// direct mapping region.
-    const DIRECT_MAPPING_OFFSET: usize = Self::DIRECT_MAPPING_ADDR as usize - 0;
-
-    /// The starting virtual address of the kernel mapping region, i.e., the
-    /// region where the kernel is mapped to virtual memory.
-    const KERNEL_MAPPING_ADDR: u64 = KERNEL_VA_BASE;
-
-    /// The offset between the physical address and the virtual address in the
-    /// kernel mapping region.
-    const KERNEL_MAPPING_OFFSET: usize = (Self::KERNEL_MAPPING_ADDR - KERNEL_LA_BASE) as usize;
-
-    /// Convert a physical address to a virtual address in the direct mapping
-    /// region.
-    fn phys_to_hhdm(paddr: PhysAddr) -> VirtAddr {
-        VirtAddr::new(paddr.get() + Self::DIRECT_MAPPING_OFFSET as u64)
-    }
-
-    /// Convert a virtual address in the direct mapping region to a physical
-    /// address.
-    unsafe fn hhdm_to_phys(vaddr: VirtAddr) -> PhysAddr {
-        PhysAddr::new(vaddr.get() - Self::DIRECT_MAPPING_OFFSET as u64)
-    }
-
-    /// Convert a physical address to a virtual address in the region where the
-    /// kernel is executed.
-    fn phys_to_kvirt(paddr: PhysAddr) -> VirtAddr {
-        VirtAddr::new(paddr.get() + Self::KERNEL_MAPPING_OFFSET as u64)
-    }
-
-    /// Convert a virtual address in the region where the kernel is executed to
-    /// a physical address.
-    unsafe fn kvirt_to_phys(vaddr: VirtAddr) -> PhysAddr {
-        PhysAddr::new(vaddr.get() - Self::KERNEL_MAPPING_OFFSET as u64)
-    }
-
     /// Switch to the given page table.
     ///
     /// This function should always do a TLB shootdown.
-    unsafe fn activate_addr_space(pgtbl: &PageTable<Self>);
+    unsafe fn activate_addr_space(pgtbl: &PageTable);
 }
 
 bitflags! {

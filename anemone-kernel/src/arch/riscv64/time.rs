@@ -1,8 +1,6 @@
 use crate::prelude::*;
 
-pub struct RiscV64Time;
-
-pub use RiscV64Time as Time;
+pub struct RiscV64TimeArch;
 
 /// The frequency of the hardware timer in hertz.
 static mut CLOCK_FREQUENCY_HZ: Option<u64> = None;
@@ -18,7 +16,7 @@ pub(super) unsafe fn set_hw_clock_freq(freq_hz: u64) {
     }
 }
 
-impl TimeArch for RiscV64Time {
+impl TimeArchTrait for RiscV64TimeArch {
     fn current_ticks() -> u64 {
         riscv::register::time::read() as u64
     }

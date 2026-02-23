@@ -1,6 +1,5 @@
-// T.B.D.
+// TODO
 
-use crate::prelude::*;
+use crate::int_like;
 
-/// Syscall Number
 int_like!(SysNo, usize);

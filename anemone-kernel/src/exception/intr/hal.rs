@@ -1,6 +1,4 @@
-use crate::prelude::*;
-
-pub trait IntrArch: Sized {
+pub trait IntrArchTrait: Sized {
     /// IRQ flags representing the state with interrupts enabled.
     const ENABLED_IRQ_FLAGS: IrqFlags;
 

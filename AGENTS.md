@@ -7,21 +7,21 @@
 - 用户态相关仓库内联：`anemone-libc/` 与 `anemone-rs/`；符号表工具在 `symtab/`。
 - 根 `Justfile` 只是薄封装，真实逻辑在 `xtask` 子命令（`build/qemu/clean/mrproper`）。
 - 内核的架构无关入口是 `anemone-kernel/src/main.rs` 的 `kernel_main()`；最底层启动代码位于`anemone-kernel/src/arch/<arch>/bootstrap.rs`（如 `riscv64/bootstrap.rs`）。
-- 配置文件在 `conf/`，分为平台（`platforms/*.toml`）和架构（`arch/<arch>/kernel.lds.in`, `target.json`）两类，构建时会生成对应的 Rust 定义和链接脚本。
+- 配置文件在 `conf/`，分为平台（`platforms/*.toml`）和架构（`arch/<arch>/kernel.lds.in`, `arch/<arch>/*-unknown-anemone-elf.json`）两类，构建时会生成对应的 Rust 定义和链接脚本。
 
 ## 关键架构边界
 - 平台与构建配置分离：
 	- `kconfig`/`conf/.defconfig` 定义 profile、features、parameters。
 	- `conf/platforms/*.toml` 定义架构常量与 QEMU 参数。
-	- `conf/arch/<arch>/kernel.lds.in` 与 `target.json` 是架构模板与目标配置来源。
+	- `conf/arch/<arch>/kernel.lds.in` 与 `conf/arch/<arch>/*-unknown-anemone-elf.json` 是架构模板与目标配置来源。
 - `xtask build` 会**生成**并覆盖：
 	- `anemone-kernel/src/kconfig_defs.rs`
 	- `anemone-kernel/src/platform_defs.rs`
 	- `build/generated/kernel.lds`
 	不要手改这些生成文件。
-- 架构层通过 `Cur*Arch` 访问（`CurCpuArch`, `CurExceptionArch`, `CurPagingArch`, `CurPowerArch`, `CurTimeArch`），入口集中在 `anemone-kernel/src/arch/mod.rs`。
-- 设备发现走 Open Firmware/DTB 路线，内存区注册在 `anemone-kernel/src/device/discovery/open_firmware.rs`（`early_scan_and_register_memory`）。
-- 异常/中断抽象在 `anemone-kernel/src/exception/hal.rs`（`ExceptionArch`, `IrqGuard`），时间抽象在 `anemone-kernel/src/time/hal.rs`（`TimeArch`）。硬件抽象层统一定义在上层模块而非架构模块，在大多数情况下，遵循依赖倒置原则。
+- 架构层通过 `*Arch` 访问（`CpuArch`, `IntrArch`, `TrapArch`, `PagingArch`, `PowerArch`, `TimeArch`, `KernelLayout`），入口集中在 `anemone-kernel/src/arch/mod.rs`。
+- 设备发现走 Open Firmware/DTB 路线，早期内存扫描与注册在 `anemone-kernel/src/device/discovery/open_firmware.rs`（`EarlyMemoryScanner::{new, early_alloc_folio, commit_to_pmm}`）。
+- 异常/中断抽象拆分在 `anemone-kernel/src/exception/intr/hal.rs`（`IntrArchTrait`, `IrqFlags`）与 `anemone-kernel/src/exception/trap/hal.rs`（`TrapArchTrait`）；作用域中断保护在 `anemone-kernel/src/exception/intr/scoped.rs`（`IntrGuard`）。时间抽象在 `anemone-kernel/src/time/hal.rs`（`TimeArchTrait`）。硬件抽象层统一定义在上层模块而非架构模块，在大多数情况下，遵循依赖倒置原则。
 - 低层调度抽象目前占位于 `anemone-kernel/src/sched/hal.rs`，新增架构调度原语先在这里落地。
 
 ## 开发工作流（默认用这些命令）
@@ -34,6 +34,7 @@
 ## 代码约定（本仓库特有）
 - 常用导入统一走 `anemone-kernel/src/prelude.rs`；新模块优先 `use crate::prelude::*;` 保持风格一致。
 - 日志使用内核宏（`kdebugln!`, `kinfoln!`, `kerrln!` 等），实现位于 `anemone-kernel/src/debug/printk/mod.rs`。
+- 内核提供了基本测试框架`kunit`，实现位于`anemone-kernel/src/debug/kunit/`，在内核子系统初始化后、调度开始前运行。
 - 架构相关实现放在 `anemone-kernel/src/arch/<arch>/`，并通过 `Cur*Arch` 别名接入（见 `arch/mod.rs`）。
 - 内核子 crate 放在 `anemone-kernel/crates/`，优先在这里扩展通用能力，再由内核主 crate 引用。
 - `prelude` 统一 re-export：架构别名、内存地址/分页类型、错误、时间/调度 HAL、锁与常用宏，新增模块尽量复用已有导出，避免重复 `use`。

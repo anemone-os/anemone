@@ -54,7 +54,7 @@ impl Frame {
         unsafe {
             core::slice::from_raw_parts(
                 self.ppn.to_phys_addr().to_hhdm().as_ptr(),
-                CurPagingArch::PAGE_SIZE_BYTES,
+                PagingArch::PAGE_SIZE_BYTES,
             )
         }
     }
@@ -74,7 +74,7 @@ impl Frame {
         unsafe {
             core::slice::from_raw_parts_mut(
                 self.ppn.to_phys_addr().to_hhdm().as_ptr_mut(),
-                CurPagingArch::PAGE_SIZE_BYTES,
+                PagingArch::PAGE_SIZE_BYTES,
             )
         }
     }
@@ -137,7 +137,7 @@ impl Folio {
         unsafe {
             core::slice::from_raw_parts(
                 self.start_ppn.to_phys_addr().to_hhdm().as_ptr(),
-                (self.npages as usize) * CurPagingArch::PAGE_SIZE_BYTES,
+                (self.npages as usize) * PagingArch::PAGE_SIZE_BYTES,
             )
         }
     }
@@ -152,7 +152,7 @@ impl Folio {
         unsafe {
             core::slice::from_raw_parts_mut(
                 self.start_ppn.to_phys_addr().to_hhdm().as_ptr_mut(),
-                (self.npages as usize) * CurPagingArch::PAGE_SIZE_BYTES,
+                (self.npages as usize) * PagingArch::PAGE_SIZE_BYTES,
             )
         }
     }

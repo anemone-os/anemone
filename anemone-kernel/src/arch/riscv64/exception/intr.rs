@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-pub struct RiscV64Exception;
+pub struct RiscV64IntrArch;
 
 trait AsSie {
     fn from_sie(sie: bool) -> Self;
@@ -25,7 +25,7 @@ impl AsSie for IrqFlags {
     }
 }
 
-impl IntrArch for RiscV64Exception {
+impl IntrArchTrait for RiscV64IntrArch {
     const ENABLED_IRQ_FLAGS: IrqFlags = IrqFlags::new(1);
     const DISABLED_IRQ_FLAGS: IrqFlags = IrqFlags::new(0);
 

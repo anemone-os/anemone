@@ -5,10 +5,11 @@
 # This section specifies how to build loader and kernel
 [build]
 platform = "qemu-virt-rv64" # Target platform. The same name as in conf/platforms/*.toml
-profile = "dev" # Build profile: "dev" or "release". We may add more profiles later.
+profile = "release" # Build profile: "dev" or "release". We may add more profiles later.
 
 # Kernel tailoring options
 [features]
+kunit = false # Enable KUnit testing
 # fs_ext4 = true # Enable ext4 filesystem support
 # virtio_gpu = true # Enable Virtio GPU support
 # smp = true # Enable Symmetric Multiprocessing support

@@ -1,12 +1,12 @@
 //! From-kernel trap handling.
 
 use crate::{
-    exception::trap::{ExceptionReason, TrapReason},
+    exception::trap::hal::{ExceptionReason, TrapArchTrait, TrapReason},
     prelude::*,
 };
 
 pub unsafe fn ktrap_handler(
-    trapframe: &mut <CurTrapArch as TrapArch>::TrapFrame,
+    trapframe: &mut <TrapArch as TrapArchTrait>::TrapFrame,
     reason: TrapReason,
 ) {
     kdebugln!("handle kernel trap: reason={:?}", reason);

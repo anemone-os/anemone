@@ -46,8 +46,8 @@ impl OomHandler for HeapOomHandler {
                 // kernel's execution, so we don't need to worry about freeing it.
 
                 // 1. the minimum number of pages we need to allocate to satisfy the request.
-                let min_npages = (layout.size() + CurPagingArch::PAGE_SIZE_BYTES)
-                    / CurPagingArch::PAGE_SIZE_BYTES;
+                let min_npages =
+                    (layout.size() + PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES;
 
                 // 2. we tend to allocate a power of two number of pages to reduce
                 //    fragmentation, so we round up to the next power of two.
@@ -88,8 +88,8 @@ impl OomHandler for HeapOomHandler {
                 );
                 let range = folio.leak();
 
-                let len = range.npages() as usize * CurPagingArch::PAGE_SIZE_BYTES;
-                let ptr = CurPagingArch::phys_to_hhdm(range.start().into());
+                let len = range.npages() as usize * PagingArch::PAGE_SIZE_BYTES;
+                let ptr = range.start().to_hhdm().to_virt_addr();
                 let slice: *mut [u8] = core::ptr::slice_from_raw_parts_mut(ptr.as_ptr_mut(), len);
                 let used = talc
                     .claim(Span::from_slice(slice))

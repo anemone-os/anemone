@@ -1,7 +1,9 @@
 // rust analyzer is too dumb for large workspaces where different crates have different targets...
 // ugly workaround: manually specify the linked project and target for the current crate being worked on.
 {
-    "rust-analyzer.cargo.features": [],
+    "rust-analyzer.cargo.features": [
+        "kunit"
+    ],
     // For kernel dev
     "rust-analyzer.linkedProjects": [
         "Cargo.toml",

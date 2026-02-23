@@ -2,8 +2,9 @@
 
 pub mod discovery;
 
-mod cpu;
-pub use cpu::CpuArch;
 mod serial;
+
+mod cpu;
+pub use cpu::CpuArchTrait;
 
 pub trait PlatformDevice {}

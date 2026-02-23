@@ -1,3 +1,5 @@
+use crate::prelude::*;
+
 pub mod link_symbols;
 
 unsafe fn clear_bss() {
@@ -18,9 +20,7 @@ macro_rules! arch_select {
         mod $arch;
         #[cfg(target_arch = $arch_str)]
         pub use $crate::arch::$arch::{
-            cpu::Cpu as CurCpuArch, exception::Exception as CurExceptionArch,
-            exception::Trap as CurTrapArch, paging::Paging as CurPagingArch,
-            power::Power as CurPowerArch, time::Time as CurTimeArch,
+            CpuArch, IntrArch, KernelLayout, PagingArch, PowerArch, TimeArch, TrapArch,
         };
     };
 }

@@ -1,5 +1,4 @@
-//! Kernel timekeeping and timers.
+//! TODO
 
-pub mod hal;
-
-pub mod jiffies;
+mod hal;
+pub use hal::*;

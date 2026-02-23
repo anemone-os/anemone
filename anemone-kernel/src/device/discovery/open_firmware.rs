@@ -55,13 +55,12 @@ mod early {
                     .map(|reg| reg.expect("failed to parse memory reg property"))
                 {
                     // page align the memory regions, and add them to the available set.
-                    let sppn =
-                        (align_down_power_of_2!(region.address, CurPagingArch::PAGE_SIZE_BYTES)
-                            >> CurPagingArch::PAGE_SIZE_BITS) as u64;
+                    let sppn = (align_down_power_of_2!(region.address, PagingArch::PAGE_SIZE_BYTES)
+                        >> PagingArch::PAGE_SIZE_BITS) as u64;
                     let eppn = (align_up_power_of_2!(
                         region.address + region.len,
-                        CurPagingArch::PAGE_SIZE_BYTES
-                    ) >> CurPagingArch::PAGE_SIZE_BITS) as u64;
+                        PagingArch::PAGE_SIZE_BYTES
+                    ) >> PagingArch::PAGE_SIZE_BITS) as u64;
                     if sppn >= eppn {
                         continue;
                     }
@@ -84,15 +83,14 @@ mod early {
                             // for reserved memory we take a subset instead of a superset, which is
                             // different from the available memory.
 
-                            let sppn = (align_up_power_of_2!(
-                                region.address,
-                                CurPagingArch::PAGE_SIZE_BYTES
-                            ) >> CurPagingArch::PAGE_SIZE_BITS)
-                                as u64;
+                            let sppn =
+                                (align_up_power_of_2!(region.address, PagingArch::PAGE_SIZE_BYTES)
+                                    >> PagingArch::PAGE_SIZE_BITS)
+                                    as u64;
                             let eppn = (align_down_power_of_2!(
                                 region.address + region.len,
-                                CurPagingArch::PAGE_SIZE_BYTES
-                            ) >> CurPagingArch::PAGE_SIZE_BITS)
+                                PagingArch::PAGE_SIZE_BYTES
+                            ) >> PagingArch::PAGE_SIZE_BITS)
                                 as u64;
                             avail_set.remove(sppn..eppn);
 
@@ -117,15 +115,15 @@ mod early {
                 // add kernel image as a mappable reserved memory region.
                 let __skernel = align_down_power_of_2!(
                     link_symbols::__skernel as *const () as u64 - KERNEL_VA_BASE + KERNEL_LA_BASE,
-                    CurPagingArch::PAGE_SIZE_BYTES
+                    PagingArch::PAGE_SIZE_BYTES
                 ) as u64;
                 let __ekernel = align_up_power_of_2!(
                     link_symbols::__ekernel as *const () as u64 - KERNEL_VA_BASE + KERNEL_LA_BASE,
-                    CurPagingArch::PAGE_SIZE_BYTES
+                    PagingArch::PAGE_SIZE_BYTES
                 ) as u64;
 
-                let skernel_ppn = __skernel >> CurPagingArch::PAGE_SIZE_BITS;
-                let ekernel_ppn = __ekernel >> CurPagingArch::PAGE_SIZE_BITS;
+                let skernel_ppn = __skernel >> PagingArch::PAGE_SIZE_BITS;
+                let ekernel_ppn = __ekernel >> PagingArch::PAGE_SIZE_BITS;
                 assert!(skernel_ppn < ekernel_ppn);
 
                 avail_set.remove(skernel_ppn..ekernel_ppn);
@@ -177,8 +175,8 @@ mod early {
             if let Some(allocated_ppn) = allocated_ppn {
                 kinfoln!(
                     "EarlyMemoryScanner: allocated folio: {:#x} - {:#x}",
-                    allocated_ppn << CurPagingArch::PAGE_SIZE_BITS,
-                    (allocated_ppn + npages) << CurPagingArch::PAGE_SIZE_BITS
+                    allocated_ppn << PagingArch::PAGE_SIZE_BITS,
+                    (allocated_ppn + npages) << PagingArch::PAGE_SIZE_BITS
                 );
                 PhysPageNum::new(allocated_ppn)
             } else {

@@ -19,9 +19,11 @@
 //! [  ...      | Vmmapping                ] -> Dynamic kernel mappings
 //! [ -2GB to 0 | Kernel Image             ] -> Core kernel executable
 
+// mod hal;
+// pub use hal::*;
+
 mod hal;
 pub use hal::*;
-
 mod mapper;
 pub use mapper::{Mapper, Mapping, Translated, Unmapping};
 mod pagetable;

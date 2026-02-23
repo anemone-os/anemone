@@ -7,7 +7,7 @@ use crate::{
     prelude::*,
 };
 
-const MIN_BLOCK_BYTES: usize = CurPagingArch::PAGE_SIZE_BYTES;
+const MIN_BLOCK_BYTES: usize = PagingArch::PAGE_SIZE_BYTES;
 const NORDER: usize = 11;
 
 pub(super) struct BuddyAllocator {
@@ -31,7 +31,7 @@ impl FrameAllocator for BuddyAllocator {
         unsafe {
             let slice = core::slice::from_raw_parts_mut(
                 range.start().to_virt_addr().as_ptr_mut::<u8>(),
-                (range.npages() << CurPagingArch::PAGE_SIZE_BITS) as usize,
+                (range.npages() << PagingArch::PAGE_SIZE_BITS) as usize,
             );
             self.buddy
                 .add_zone_from_slice(NonNull::new_unchecked(slice));
@@ -54,7 +54,7 @@ impl FrameAllocator for BuddyAllocator {
             // loses the provenance information of the allocated block.
             // We should refine this later, maybe by introducing a new type that can
             // carry the provenance information.
-            PhysPageNum::new(paddr.get() >> CurPagingArch::PAGE_SIZE_BITS as u64)
+            PhysPageNum::new(paddr.get() >> PagingArch::PAGE_SIZE_BITS as u64)
         })
     }
 

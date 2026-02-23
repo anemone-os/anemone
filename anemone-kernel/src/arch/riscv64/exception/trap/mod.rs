@@ -1,7 +1,7 @@
 use crate::{
     exception::{
-        page_fault::{PageFaultInfo, PageFaultType},
-        trap::{ExceptionReason, InterruptReason, TrapReason},
+        PageFaultInfo, PageFaultType,
+        trap::{ExceptionReason, InterruptReason, TrapArchTrait, TrapFrameArch, TrapReason},
     },
     prelude::*,
 };
@@ -9,9 +9,9 @@ use crate::{
 mod ktrap;
 pub use ktrap::*;
 
-pub struct RiscV64Trap;
+pub struct RiscV64TrapArch;
 
-impl TrapArch for RiscV64Trap {
+impl TrapArchTrait for RiscV64TrapArch {
     type TrapFrame = RiscV64TrapFrame;
 }
 

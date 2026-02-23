@@ -6,5 +6,5 @@ use crate::prelude::*;
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     kemergln!("Kernel panic:\n{}", info);
-    unsafe { CurPowerArch::shutdown() }
+    unsafe { PowerArch::shutdown() }
 }

@@ -48,4 +48,10 @@ unsafe extern "C" {
 
     /// The end of the per-CPU data segment of the kernel in virtual memory.
     pub fn __epercpu();
+
+    /// The start of the KUnit test data segment of the kernel in virtual
+    /// memory.
+    pub fn __skunit();
+    /// The end of the KUnit test data segment of the kernel in virtual memory.
+    pub fn __ekunit();
 }

@@ -30,7 +30,7 @@ pub fn run(args: BuildArgs) -> anyhow::Result<()> {
         Err(e) => {
             log_progress!("ERROR", &format!("Failed to read kconfig file: {}", e));
             return Err(e.into());
-        }
+        },
     };
     let kconfig = KConfig::from_str(&kconfig_content)?;
     let platform_config_path = format!("{}/{}.toml", PLATFORM_CONFIGS_PATH, kconfig.build.platform);
