@@ -1,282 +1,127 @@
-//! Strongly-typed wrappers around addresses.
+use crate::prelude::*;
 
-use core::{
-    fmt::Display,
-    ops::{Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, Not, Sub, SubAssign},
-};
-
-use crate::{int_like, prelude::*};
-
-int_like!(PhysAddr, u64);
-int_like!(VirtAddr, u64);
-
-int_like!(PhysPageNum, u64);
-int_like!(VirtPageNum, u64);
-
-macro_rules! impl_addr {
-    ($addr_type:ty) => {
-        impl $addr_type {
-            pub fn lower_32_bits(&self) -> u32 {
-                (self.get() & 0xffffffff) as u32
-            }
-
-            pub fn upper_32_bits(&self) -> u32 {
-                (self.get() >> 32) as u32
-            }
-        }
-    };
+pub trait KernelVirtAddrExt {
+    #[inline(always)]
+    unsafe fn hhdm_to_phys(self) -> PhysAddr;
+    #[inline(always)]
+    unsafe fn kvirt_to_phys(self) -> PhysAddr;
+    #[inline(always)]
+    fn to_vpn(self) -> VirtPageNum;
 }
 
-macro_rules! impl_ops {
-    ($addr_type:ty) => {
-        impl Display for $addr_type {
-            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                write!(f, "0x{:016x}", self.get())
-            }
-        }
-
-        impl Add<u64> for $addr_type {
-            type Output = Self;
-
-            fn add(self, rhs: u64) -> Self::Output {
-                Self::new(self.get() + rhs)
-            }
-        }
-
-        impl AddAssign<u64> for $addr_type {
-            fn add_assign(&mut self, rhs: u64) {
-                *self = Self::new(self.get() + rhs);
-            }
-        }
-
-        impl Sub<u64> for $addr_type {
-            type Output = Self;
-
-            fn sub(self, rhs: u64) -> Self::Output {
-                Self::new(self.get() - rhs)
-            }
-        }
-
-        impl Sub<Self> for $addr_type {
-            type Output = u64;
-
-            fn sub(self, rhs: Self) -> Self::Output {
-                self.get() - rhs.get()
-            }
-        }
-
-        impl SubAssign<u64> for $addr_type {
-            fn sub_assign(&mut self, rhs: u64) {
-                *self = Self::new(self.get() - rhs);
-            }
-        }
-
-        impl BitAnd<u64> for $addr_type {
-            type Output = Self;
-
-            fn bitand(self, rhs: u64) -> Self::Output {
-                Self::new(self.get() & rhs)
-            }
-        }
-
-        impl BitAndAssign<u64> for $addr_type {
-            fn bitand_assign(&mut self, rhs: u64) {
-                *self = Self::new(self.get() & rhs);
-            }
-        }
-
-        impl BitOr<u64> for $addr_type {
-            type Output = Self;
-
-            fn bitor(self, rhs: u64) -> Self::Output {
-                Self::new(self.get() | rhs)
-            }
-        }
-
-        impl BitOrAssign<u64> for $addr_type {
-            fn bitor_assign(&mut self, rhs: u64) {
-                *self = Self::new(self.get() | rhs);
-            }
-        }
-
-        impl Not for $addr_type {
-            type Output = Self;
-
-            fn not(self) -> Self::Output {
-                Self::new(!self.get())
-            }
-        }
-    };
+pub trait KernelPhysAddrExt {
+    #[inline(always)]
+    fn to_hhdm(self) -> VirtAddr;
+    #[inline(always)]
+    fn to_kvirt(self) -> VirtAddr;
+    #[inline(always)]
+    fn to_ppn(self) -> PhysPageNum;
 }
 
-impl_addr!(PhysAddr);
-impl_ops!(PhysAddr);
-impl_addr!(VirtAddr);
-impl_ops!(VirtAddr);
-impl_ops!(PhysPageNum);
-impl_ops!(VirtPageNum);
+pub trait KernelVirtPageNumExt {
+    #[inline(always)]
+    unsafe fn hhdm_to_phys(self) -> PhysPageNum;
+    #[inline(always)]
+    unsafe fn kvirt_to_phys(self) -> PhysPageNum;
+    #[inline(always)]
+    fn to_vaddr(self) -> VirtAddr;
+}
 
-impl Into<PhysAddr> for PhysPageNum {
-    fn into(self) -> PhysAddr {
-        self.to_phys_addr()
+pub trait KernelPhysPageNumExt {
+    #[inline(always)]
+    fn to_hhdm(self) -> VirtPageNum;
+    #[inline(always)]
+    fn to_kvirt(self) -> VirtPageNum;
+    #[inline(always)]
+    fn to_paddr(self) -> PhysAddr;
+}
+
+pub trait KernelPhysPageRangeExt {
+    #[inline(always)]
+    fn to_hhdm(self) -> VirtPageRange;
+    #[inline(always)]
+    fn to_kvirt(self) -> VirtPageRange;
+}
+
+pub trait KernelVirtPageRangeExt {
+    #[inline(always)]
+    unsafe fn hhdm_to_phys(self) -> PhysPageRange;
+    #[inline(always)]
+    unsafe fn kvirt_to_phys(self) -> PhysPageRange;
+}
+
+impl KernelVirtAddrExt for VirtAddr {
+    unsafe fn hhdm_to_phys(self) -> PhysAddr {
+        unsafe { KernelLayout::hhdm_to_phys(self) }
+    }
+
+    unsafe fn kvirt_to_phys(self) -> PhysAddr {
+        unsafe { KernelLayout::kvirt_to_phys(self) }
+    }
+
+    fn to_vpn(self) -> VirtPageNum {
+        VirtPageNum::new(self.get() >> PagingArch::PAGE_SIZE_BITS)
     }
 }
 
-impl Into<VirtAddr> for VirtPageNum {
-    fn into(self) -> VirtAddr {
-        self.to_virt_addr()
+impl KernelPhysAddrExt for PhysAddr {
+    fn to_hhdm(self) -> VirtAddr {
+        KernelLayout::phys_to_hhdm(self)
+    }
+
+    fn to_kvirt(self) -> VirtAddr {
+        KernelLayout::phys_to_kvirt(self)
+    }
+
+    fn to_ppn(self) -> PhysPageNum {
+        PhysPageNum::new(self.get() >> PagingArch::PAGE_SIZE_BITS)
     }
 }
 
-impl PhysPageNum {
-    pub const fn to_phys_addr(&self) -> PhysAddr {
-        PhysAddr::new(self.get() << CurPagingArch::PAGE_SIZE_BITS)
+impl KernelVirtPageNumExt for VirtPageNum {
+    unsafe fn hhdm_to_phys(self) -> PhysPageNum {
+        unsafe { KernelLayout::hhdm_to_phys(self.to_vaddr()).to_ppn() }
+    }
+
+    unsafe fn kvirt_to_phys(self) -> PhysPageNum {
+        unsafe { KernelLayout::kvirt_to_phys(self.to_vaddr()).to_ppn() }
+    }
+
+    fn to_vaddr(self) -> VirtAddr {
+        VirtAddr::new(self.get() << PagingArch::PAGE_SIZE_BITS)
     }
 }
 
-impl VirtPageNum {
-    pub const fn to_virt_addr(&self) -> VirtAddr {
-        VirtAddr::new(self.get() << CurPagingArch::PAGE_SIZE_BITS)
+impl KernelPhysPageNumExt for PhysPageNum {
+    fn to_hhdm(self) -> VirtPageNum {
+        self.to_paddr().to_hhdm().to_vpn()
+    }
+
+    fn to_kvirt(self) -> VirtPageNum {
+        self.to_paddr().to_kvirt().to_vpn()
+    }
+
+    fn to_paddr(self) -> PhysAddr {
+        PhysAddr::new(self.get() << PagingArch::PAGE_SIZE_BITS)
     }
 }
 
-macro_rules! impl_page_range {
-    ($name:ident, $pn_type:ty) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub struct $name {
-            start: $pn_type,
-            npages: u64,
-        }
-        paste::paste! {
-            #[derive(Debug, Clone, Copy)]
-            pub struct [<$name Iter>] {
-                range: $name,
-                next: $pn_type,
-            }
-        }
-        impl $name {
-            pub const fn new(start: $pn_type, npages: u64) -> Self {
-                Self { start, npages }
-            }
-
-            pub const fn start(&self) -> $pn_type {
-                self.start
-            }
-
-            pub const fn end(&self) -> $pn_type {
-                <$pn_type>::new(self.start.get() + self.npages)
-            }
-
-            pub const fn npages(&self) -> u64 {
-                self.npages
-            }
-
-            pub fn contains(&self, pn: $pn_type) -> bool {
-                self.start <= pn && pn < self.end()
-            }
-
-            paste::paste! {
-                pub const fn iter(&self) -> [<$name Iter>] {
-                    [<$name Iter>] {
-                        range: *self,
-                        next: self.start,
-                    }
-                }
-            }
-        }
-        paste::paste! {
-            impl Iterator for [<$name Iter>] {
-                type Item = $pn_type;
-
-                fn next(&mut self) -> Option<Self::Item> {
-                    if self.next < self.range.end() {
-                        let pn = self.next;
-                        self.next += 1;
-                        Some(pn)
-                    } else {
-                        None
-                    }
-                }
-            }
-        }
-    };
-}
-
-impl_page_range!(PhysPageRange, PhysPageNum);
-impl_page_range!(VirtPageRange, VirtPageNum);
-
-impl PhysAddr {
-    pub fn to_hhdm(self) -> VirtAddr {
-        CurPagingArch::phys_to_hhdm(self)
+impl KernelPhysPageRangeExt for PhysPageRange {
+    fn to_hhdm(self) -> VirtPageRange {
+        VirtPageRange::new(self.start().to_hhdm(), self.npages())
     }
 
-    pub fn to_kvirt(self) -> VirtAddr {
-        CurPagingArch::phys_to_kvirt(self)
+    fn to_kvirt(self) -> VirtPageRange {
+        VirtPageRange::new(self.start().to_kvirt(), self.npages())
     }
 }
 
-impl PhysPageNum {
-    pub fn to_hhdm(self) -> VirtPageNum {
-        VirtPageNum::new(self.to_phys_addr().to_hhdm().get() >> CurPagingArch::PAGE_SIZE_BITS)
+impl KernelVirtPageRangeExt for VirtPageRange {
+    unsafe fn hhdm_to_phys(self) -> PhysPageRange {
+        unsafe { PhysPageRange::new(self.start().hhdm_to_phys(), self.npages()) }
     }
 
-    pub fn to_kvirt(self) -> VirtPageNum {
-        VirtPageNum::new(self.to_phys_addr().to_kvirt().get() >> CurPagingArch::PAGE_SIZE_BITS)
-    }
-}
-
-impl PhysPageRange {
-    pub fn to_hhdm(self) -> VirtPageRange {
-        VirtPageRange::new(self.start.to_hhdm(), self.npages)
-    }
-
-    pub fn to_kvirt(self) -> VirtPageRange {
-        VirtPageRange::new(self.start.to_kvirt(), self.npages)
-    }
-}
-
-impl VirtAddr {
-    pub unsafe fn hhdm_to_phys(self) -> PhysAddr {
-        unsafe { CurPagingArch::hhdm_to_phys(self) }
-    }
-
-    pub unsafe fn kvirt_to_phys(self) -> PhysAddr {
-        unsafe { CurPagingArch::kvirt_to_phys(self) }
-    }
-
-    pub fn as_ptr<T>(&self) -> *const T {
-        core::ptr::with_exposed_provenance(self.get() as usize)
-    }
-
-    pub fn as_ptr_mut<T>(&self) -> *mut T {
-        core::ptr::with_exposed_provenance_mut(self.get() as usize)
-    }
-}
-
-impl VirtPageNum {
-    pub unsafe fn hhdm_to_phys(self) -> PhysPageNum {
-        unsafe {
-            PhysPageNum::new(
-                self.to_virt_addr().hhdm_to_phys().get() >> CurPagingArch::PAGE_SIZE_BITS,
-            )
-        }
-    }
-
-    pub unsafe fn kvirt_to_phys(self) -> PhysPageNum {
-        unsafe {
-            PhysPageNum::new(
-                self.to_virt_addr().kvirt_to_phys().get() >> CurPagingArch::PAGE_SIZE_BITS,
-            )
-        }
-    }
-}
-
-impl VirtPageRange {
-    pub unsafe fn hhdm_to_phys(self) -> PhysPageRange {
-        unsafe { PhysPageRange::new(self.start.hhdm_to_phys(), self.npages) }
-    }
-
-    pub unsafe fn kvirt_to_phys(self) -> PhysPageRange {
-        unsafe { PhysPageRange::new(self.start.kvirt_to_phys(), self.npages) }
+    unsafe fn kvirt_to_phys(self) -> PhysPageRange {
+        unsafe { PhysPageRange::new(self.start().kvirt_to_phys(), self.npages()) }
     }
 }

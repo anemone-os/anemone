@@ -1,4 +1,4 @@
-pub trait TimeArch {
+pub trait TimeArchTrait {
     /// Get the frequency of the hardware timer in hertz.
     ///
     /// Before the hardware timer frequency is determined, this function should

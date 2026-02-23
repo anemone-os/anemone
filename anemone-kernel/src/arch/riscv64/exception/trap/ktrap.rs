@@ -1,6 +1,6 @@
 use crate::{
     arch::riscv64::exception::trap::{RiscV64Exception, RiscV64TrapFrame, RiscV64TrapReason},
-    exception::trap::{ExceptionReason, TrapReason, ktrap_handler},
+    exception::trap::ktrap_handler,
     prelude::*,
 };
 

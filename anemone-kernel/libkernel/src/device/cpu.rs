@@ -1,4 +1,4 @@
-pub trait CpuArch {
+pub trait CpuArchTrait {
     /// Returns the number of CPUs in the system.
     fn ncpus() -> usize;
     /// Returns the ID of the current CPU.

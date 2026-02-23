@@ -19,7 +19,7 @@ static KERNEL_PGDIR: KPgDir = KPgDir::new();
 /// kernel's root page directory.
 #[derive(Debug)]
 pub struct KPgDir {
-    pgdir: Lazy<SpinLock<PageTable<CurPagingArch>>>,
+    pgdir: Lazy<SpinLock<PageTable>>,
 }
 
 impl KPgDir {
@@ -31,7 +31,6 @@ impl KPgDir {
 
     unsafe fn map_kvirt(&self) {
         use arch::link_symbols::*;
-        use mm::paging::PteFlags;
         let mut kpgdir = self.pgdir.lock_irqsave();
         let mut mapper = kpgdir.mapper();
 
@@ -42,18 +41,18 @@ impl KPgDir {
                     let vend = [<__e $name>] as *const () as usize;
                     let svpn = VirtPageNum::new((align_down_power_of_2!(
                         vstart as u64,
-                        CurPagingArch::PAGE_SIZE_BYTES) / CurPagingArch::PAGE_SIZE_BYTES) as u64
+                        PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES) as u64
                     );
                     let evpn = VirtPageNum::new((align_up_power_of_2!(
                         vend as u64,
-                        CurPagingArch::PAGE_SIZE_BYTES) / CurPagingArch::PAGE_SIZE_BYTES) as u64
+                        PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES) as u64
                     );
                     let npages = evpn - svpn;
 
                     let pstart = vstart - KERNEL_VA_BASE as usize + KERNEL_LA_BASE as usize;
                     let sppn = PhysPageNum::new((align_down_power_of_2!(
                         pstart as u64,
-                        CurPagingArch::PAGE_SIZE_BYTES) / CurPagingArch::PAGE_SIZE_BYTES) as u64
+                        PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES) as u64
                     );
 
                     mapper.map(Mapping {
@@ -74,7 +73,6 @@ impl KPgDir {
     }
 
     unsafe fn map_hhdm(&self) {
-        use mm::paging::PteFlags;
         let mut kpgdir = self.pgdir.lock_irqsave();
         let mut mapper = kpgdir.mapper();
 
@@ -159,6 +157,8 @@ pub unsafe fn init_kernel_mapping() {
 
 pub unsafe fn activate_kernel_mapping() {
     unsafe {
-        CurPagingArch::activate_addr_space(&KERNEL_PGDIR.pgdir.lock_irqsave());
+        let kpgdir = KERNEL_PGDIR.pgdir.lock_irqsave();
+        let root_ppn = kpgdir.root_ppn();
+        PagingArch::activate_addr_space(root_ppn);
     }
 }

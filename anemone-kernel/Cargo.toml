@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+libkernel = { path = "libkernel" }
 anemone-abi = { path = "../anemone-abi" }
 bitflags = { workspace = true }
 fdt = { workspace = true }
@@ -11,7 +12,6 @@ spin = { workspace = true }
 talc = { workspace = true }
 paste = { workspace = true }
 yansi = { workspace = true }
-boxcar = { workspace = true }
 rangemap = { workspace = true }
 buddy-system = { path = "crates/buddy-system", features = ["stats"] }
 idalloc = { path = "crates/idalloc" }

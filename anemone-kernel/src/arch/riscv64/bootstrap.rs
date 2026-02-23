@@ -5,7 +5,7 @@ use crate::{
     arch::{
         clear_bss,
         riscv64::{
-            paging::{RiscV64PgDir, RiscV64Pte, RiscV64PteFlags, sv39},
+            mm::{RiscV64PgDir, RiscV64Pte, RiscV64PteFlags, sv39},
             time::set_hw_clock_freq,
         },
     },
@@ -41,22 +41,22 @@ static BOOTSTRAP_PGDIR: RiscV64PgDir = {
 
     // 1. map kernel image to -2gb ~ 0
     assert!(k_virt_idx == 510);
-    raw_ptes[k_virt_idx] = RiscV64Pte::new(
+    raw_ptes[k_virt_idx] = RiscV64Pte::arch_new(
         PhysPageNum::new(k_phys_ppn),
         RiscV64PteFlags::BOOTSTRAP_KERNEL,
     );
-    raw_ptes[k_virt_idx + 1] = RiscV64Pte::new(
+    raw_ptes[k_virt_idx + 1] = RiscV64Pte::arch_new(
         PhysPageNum::new(k_phys_ppn + 512 * 512),
         RiscV64PteFlags::BOOTSTRAP_KERNEL,
     );
 
     // 2. direct mapping for code running without page fault
     let direct_idx = k_phys_align_down as usize >> 30;
-    raw_ptes[direct_idx] = RiscV64Pte::new(
+    raw_ptes[direct_idx] = RiscV64Pte::arch_new(
         PhysPageNum::new(k_phys_ppn),
         RiscV64PteFlags::BOOTSTRAP_KERNEL,
     );
-    raw_ptes[direct_idx + 1] = RiscV64Pte::new(
+    raw_ptes[direct_idx + 1] = RiscV64Pte::arch_new(
         PhysPageNum::new(k_phys_ppn + 512 * 512),
         RiscV64PteFlags::BOOTSTRAP_KERNEL,
     );
@@ -66,13 +66,13 @@ static BOOTSTRAP_PGDIR: RiscV64PgDir = {
     //    it's fine because the kernel will only access the physical memory that
     //    actually exists, and the extra mappings won't cause any harm.
     let s_ram_ppn = align_down_power_of_2!(PHYS_RAM_START, 1 << 30) as u64 >> 12;
-    let hhdm_start_idx = (((sv39::Sv39Paging::DIRECT_MAPPING_ADDR as usize) >> 30) & 0x1ff)
+    let hhdm_start_idx = (((sv39::Sv39KernelLayout::DIRECT_MAPPING_ADDR as usize) >> 30) & 0x1ff)
         + s_ram_ppn as usize / (512 * 512);
     let hhdm_end_idx = hhdm_start_idx + (align_up_power_of_2!(MAX_PHYS_RAM_SIZE, 1 << 30) >> 30);
     let mut i = hhdm_start_idx;
     while i < hhdm_end_idx {
         let ppn = s_ram_ppn + ((i - hhdm_start_idx) as u64 * 512 * 512);
-        raw_ptes[i] = RiscV64Pte::new(PhysPageNum::new(ppn), RiscV64PteFlags::BOOTSTRAP_RAM);
+        raw_ptes[i] = RiscV64Pte::arch_new(PhysPageNum::new(ppn), RiscV64PteFlags::BOOTSTRAP_RAM);
         i += 1;
     }
 
@@ -146,7 +146,7 @@ pub unsafe extern "C" fn __nun() -> ! {
         "add t0, t0, t6",
         "li  t6, 0",
         "jr  t0",
-        KERNEL_MAPPING_OFFSET = const super::paging::sv39::Sv39Paging::KERNEL_MAPPING_OFFSET,
+        KERNEL_MAPPING_OFFSET = const sv39::Sv39KernelLayout::KERNEL_MAPPING_OFFSET,
         stack0_lower_bound = sym STACK0,
         KSTACK_KB = const { 1 << KSTACK_SHIFT_KB },
         BOOTSTRAP_PGDIR = sym BOOTSTRAP_PGDIR,
@@ -227,7 +227,7 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
     unsafe {
         clear_bss();
     }
-    let fdt_va = sv39::Sv39Paging::phys_to_hhdm(fdt_pa);
+    let fdt_va = sv39::Sv39KernelLayout::phys_to_hhdm(fdt_pa);
 
     register_earlycon();
 
@@ -277,8 +277,9 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
                 }
                 let sbiret = sbi_rt::hart_start(
                     ap_id,
-                    CurPagingArch::kvirt_to_phys(VirtAddr::new(__nun as *const () as u64)).get()
-                        as usize,
+                    VirtAddr::new(__nun as *const () as u64)
+                        .kvirt_to_phys()
+                        .get() as usize,
                     0,
                 );
                 if sbiret.is_err() {
@@ -301,7 +302,7 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
 unsafe fn sync_all_cpus() {
     static SYNC_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-    let ncpus = CurCpuArch::ncpus();
+    let ncpus = CpuArch::ncpus();
     _ = SYNC_COUNTER.fetch_add(1, Ordering::SeqCst);
     while SYNC_COUNTER.load(Ordering::SeqCst) < ncpus {
         core::hint::spin_loop();
@@ -340,7 +341,7 @@ fn percpu_test() {
         }
         kdebugln!(
             "percpu test: cpu {} has test value {}",
-            CurCpuArch::cur_cpu_id(),
+            CpuArch::cur_cpu_id(),
             *test
         );
     })

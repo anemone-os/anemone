@@ -48,17 +48,18 @@ enum ControlFlow<R> {
 /// **Note that Mapper won't flush the TLB when needed, as should be done by the
 /// caller.**
 #[derive(Debug)]
-pub struct Mapper<'a, P: PagingArch> {
+pub struct Mapper<'a> {
     root: PhysPageNum,
-    _ty: PhantomData<P>,
-    _lifetime: PhantomData<&'a mut PageTable<P>>,
+    _lifetime: PhantomData<&'a mut PageTable>,
 }
 
-impl<'a, P: PagingArch> Mapper<'a, P> {
-    pub(super) fn new(pgtbl: &mut PageTable<P>) -> Self {
+type PgDir = <PagingArch as PagingArchTrait>::PgDir;
+type Pte = <PgDir as PgDirArch>::Pte;
+
+impl Mapper<'_> {
+    pub(super) fn new(pgtbl: &mut PageTable) -> Self {
         Self {
             root: pgtbl.root_ppn(),
-            _ty: PhantomData,
             _lifetime: PhantomData,
         }
     }
@@ -99,23 +100,23 @@ impl<'a, P: PagingArch> Mapper<'a, P> {
                 |pte, _ctx| {
                     let ppn = pte.ppn();
                     let pgdir = ppn
-                        .to_phys_addr()
+                        .to_paddr()
                         .to_hhdm()
-                        .as_ptr::<P::PgDir>()
+                        .as_ptr::<PgDir>()
                         .as_ref()
                         .expect("pgdir ppn should not be null");
 
                     if pgdir.is_empty() {
                         // deallocate the empty page table
                         let ppn = pte.ppn();
-                        *pte = <P::PgDir as PgDirArch>::Pte::ZEROED;
+                        *pte = Pte::ZEROED;
                         let _frame = Frame::from_ppn(ppn);
                     }
                     ControlFlow::Continue
                 },
                 |pte, ctx| {
                     if range.contains(ctx.vpn) {
-                        *pte = <P::PgDir as PgDirArch>::Pte::ZEROED;
+                        *pte = Pte::ZEROED;
                     }
 
                     ControlFlow::Continue
@@ -133,21 +134,20 @@ impl<'a, P: PagingArch> Mapper<'a, P> {
     /// Currently no huge page mappings are considered, so the logic is quite
     /// straightforward.
     pub fn translate(&self, vpn: VirtPageNum) -> Option<Translated> {
-        let levels = CurPagingArch::PAGE_LEVELS;
-        let vpn_bits = CurPagingArch::PTE_PER_PGDIR.trailing_zeros() as usize;
+        let levels = PagingArch::PAGE_LEVELS;
+        let vpn_bits = PagingArch::PTE_PER_PGDIR.trailing_zeros() as usize;
 
         let mut pgdir = unsafe {
             self.root
-                .to_phys_addr()
+                .to_paddr()
                 .to_hhdm()
-                .as_ptr::<P::PgDir>()
+                .as_ptr::<PgDir>()
                 .as_ref()
                 .expect("root ppn should not be null")
         };
 
         for level in (0..levels).rev() {
-            let idx =
-                (vpn.get() as usize >> (level * vpn_bits)) & (CurPagingArch::PTE_PER_PGDIR - 1);
+            let idx = (vpn.get() as usize >> (level * vpn_bits)) & (PagingArch::PTE_PER_PGDIR - 1);
             let pte = &pgdir[idx];
 
             if !pte.is_branch() && !pte.is_leaf() {
@@ -168,9 +168,9 @@ impl<'a, P: PagingArch> Mapper<'a, P> {
                 // branch
                 pgdir = unsafe {
                     pte.ppn()
-                        .to_phys_addr()
+                        .to_paddr()
                         .to_hhdm()
-                        .as_ptr::<P::PgDir>()
+                        .as_ptr::<PgDir>()
                         .as_ref()
                         .expect("pgdir ppn should not be null")
                 };
@@ -199,7 +199,7 @@ struct LeafCtx {
     vpn: VirtPageNum,
 }
 
-impl<'a, P: PagingArch> Mapper<'a, P> {
+impl Mapper<'_> {
     /// Traverse the page table with the given branch and leaf operations.
     ///
     /// **This method does not support huge page mappings yet.**
@@ -216,8 +216,8 @@ impl<'a, P: PagingArch> Mapper<'a, P> {
         order: TraverseOrder,
     ) -> ControlFlow<R>
     where
-        B: FnMut(&mut <P::PgDir as PgDirArch>::Pte, BranchCtx) -> ControlFlow<R>,
-        L: FnMut(&mut <P::PgDir as PgDirArch>::Pte, LeafCtx) -> ControlFlow<R>,
+        B: FnMut(&mut Pte, BranchCtx) -> ControlFlow<R>,
+        L: FnMut(&mut Pte, LeafCtx) -> ControlFlow<R>,
     {
         let (mut branch_op, mut leaf_op) = (branch_op, leaf_op);
         unsafe {
@@ -226,7 +226,7 @@ impl<'a, P: PagingArch> Mapper<'a, P> {
                 &mut branch_op,
                 &mut leaf_op,
                 order,
-                P::PAGE_LEVELS - 1,
+                PagingArch::PAGE_LEVELS - 1,
                 0,
             )
         }
@@ -241,21 +241,21 @@ impl<'a, P: PagingArch> Mapper<'a, P> {
         vpn_prefix: u64,
     ) -> ControlFlow<R>
     where
-        B: FnMut(&mut <P::PgDir as PgDirArch>::Pte, BranchCtx) -> ControlFlow<R>,
-        L: FnMut(&mut <P::PgDir as PgDirArch>::Pte, LeafCtx) -> ControlFlow<R>,
+        B: FnMut(&mut Pte, BranchCtx) -> ControlFlow<R>,
+        L: FnMut(&mut Pte, LeafCtx) -> ControlFlow<R>,
     {
-        let vpn_bits = P::PTE_PER_PGDIR.trailing_zeros() as usize;
+        let vpn_bits = PagingArch::PTE_PER_PGDIR.trailing_zeros() as usize;
 
         let pgdir = unsafe {
             pgdir_ppn
-                .to_phys_addr()
+                .to_paddr()
                 .to_hhdm()
-                .as_ptr_mut::<P::PgDir>()
+                .as_ptr_mut::<PgDir>()
                 .as_mut()
                 .expect("root ppn should not be null")
         };
 
-        for idx in 0..P::PTE_PER_PGDIR {
+        for idx in 0..PagingArch::PTE_PER_PGDIR {
             let pte = &mut pgdir[idx];
             let vpn_prefix = (vpn_prefix << vpn_bits) | (idx as u64);
 
@@ -269,7 +269,7 @@ impl<'a, P: PagingArch> Mapper<'a, P> {
                 match order {
                     TraverseOrder::PreOrder => {
                         match branch_op(pte, ctx) {
-                            ControlFlow::Continue => {}
+                            ControlFlow::Continue => {},
                             r @ ControlFlow::Break(..) => return r,
                         }
                         match unsafe {
@@ -282,10 +282,10 @@ impl<'a, P: PagingArch> Mapper<'a, P> {
                                 vpn_prefix,
                             )
                         } {
-                            ControlFlow::Continue => {}
+                            ControlFlow::Continue => {},
                             r @ ControlFlow::Break(..) => return r,
                         }
-                    }
+                    },
                     TraverseOrder::PostOrder => {
                         match unsafe {
                             Self::do_traverse(
@@ -297,14 +297,14 @@ impl<'a, P: PagingArch> Mapper<'a, P> {
                                 vpn_prefix,
                             )
                         } {
-                            ControlFlow::Continue => {}
+                            ControlFlow::Continue => {},
                             r @ ControlFlow::Break(..) => return r,
                         }
                         match branch_op(pte, ctx) {
-                            ControlFlow::Continue => {}
+                            ControlFlow::Continue => {},
                             r @ ControlFlow::Break(..) => return r,
                         }
-                    }
+                    },
                 }
             } else {
                 assert_eq!(level, 0);
@@ -313,7 +313,7 @@ impl<'a, P: PagingArch> Mapper<'a, P> {
                     vpn: VirtPageNum::new(vpn_prefix),
                 };
                 match leaf_op(pte, ctx) {
-                    ControlFlow::Continue => {}
+                    ControlFlow::Continue => {},
                     r @ ControlFlow::Break(..) => return r,
                 }
             }
@@ -329,21 +329,20 @@ impl<'a, P: PagingArch> Mapper<'a, P> {
         flags: PteFlags,
         remap: bool,
     ) -> Result<(), MmError> {
-        let levels = CurPagingArch::PAGE_LEVELS;
-        let vpn_bits = CurPagingArch::PTE_PER_PGDIR.trailing_zeros() as usize;
+        let levels = PagingArch::PAGE_LEVELS;
+        let vpn_bits = PagingArch::PTE_PER_PGDIR.trailing_zeros() as usize;
 
         let mut pgdir = unsafe {
             self.root
-                .to_phys_addr()
+                .to_paddr()
                 .to_hhdm()
-                .as_ptr_mut::<P::PgDir>()
+                .as_ptr_mut::<PgDir>()
                 .as_mut()
                 .expect("root ppn should not be null")
         };
 
         for level in (0..levels).rev() {
-            let idx =
-                (vpn.get() as usize >> (level * vpn_bits)) & (CurPagingArch::PTE_PER_PGDIR - 1);
+            let idx = (vpn.get() as usize >> (level * vpn_bits)) & (PagingArch::PTE_PER_PGDIR - 1);
             let pte = &mut pgdir[idx];
 
             if level == 0 {
@@ -351,7 +350,7 @@ impl<'a, P: PagingArch> Mapper<'a, P> {
                 if pte.is_valid() && !remap {
                     return Err(MmError::AlreadyMapped);
                 }
-                *pte = <P::PgDir as PgDirArch>::Pte::new(ppn, flags | PteFlags::VALID);
+                *pte = Pte::new(ppn, flags | PteFlags::VALID);
             } else {
                 // branch
                 if !pte.is_branch() {
@@ -365,13 +364,13 @@ impl<'a, P: PagingArch> Mapper<'a, P> {
                     // TODO: for some architectures like x86_64, a single VALID bit is insufficient
                     // to indicate a branch. we may add a new method to PteArch
                     // trait.
-                    *pte = <P::PgDir as PgDirArch>::Pte::new(new_pgdir_ppn, PteFlags::VALID);
+                    *pte = Pte::new(new_pgdir_ppn, PteFlags::VALID);
                 }
                 pgdir = unsafe {
                     pte.ppn()
-                        .to_phys_addr()
+                        .to_paddr()
                         .to_hhdm()
-                        .as_ptr_mut::<P::PgDir>()
+                        .as_ptr_mut::<PgDir>()
                         .as_mut()
                         .expect("pgdir ppn should not be null")
                 };

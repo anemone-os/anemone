@@ -15,11 +15,11 @@ const PTE_FLAGS_MASK: u64 = (1 << PTE_FLAGS_BITS) - 1;
 pub struct RiscV64Pte(u64);
 
 impl RiscV64Pte {
-    pub const fn get(&self) -> u64 {
+    const fn get(&self) -> u64 {
         self.0
     }
 
-    pub const fn new(ppn: PhysPageNum, flags: RiscV64PteFlags) -> Self {
+    pub const fn arch_new(ppn: PhysPageNum, flags: RiscV64PteFlags) -> Self {
         Self((ppn.get() << PTE_FLAGS_BITS) | flags.bits())
     }
 }
@@ -118,7 +118,7 @@ impl PteArch for RiscV64Pte {
 
     fn new(ppn: PhysPageNum, flags: PteFlags) -> Self {
         let flags: RiscV64PteFlags = flags.into();
-        RiscV64Pte::from((ppn.get() << PTE_FLAGS_BITS) | flags.bits())
+        Self::arch_new(ppn, flags)
     }
 
     fn flags(&self) -> PteFlags {

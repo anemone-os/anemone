@@ -1,6 +1,6 @@
 //! System power management.
 
-pub trait PowerArch {
+pub trait PowerArchTrait {
     /// Shut down the system.
     unsafe fn shutdown() -> !;
     /// Reboot the system.

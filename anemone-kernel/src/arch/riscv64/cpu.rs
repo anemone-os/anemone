@@ -1,8 +1,8 @@
+use libkernel::libdevice::CpuArchTrait;
+
 use crate::prelude::*;
 
-pub struct RiscV64Cpu;
-
-pub use RiscV64Cpu as Cpu;
+pub struct RiscV64CpuArch;
 
 static mut NCPUS: usize = 0;
 
@@ -12,7 +12,7 @@ pub(super) unsafe fn set_ncpus(ncpus: usize) {
     }
 }
 
-impl CpuArch for RiscV64Cpu {
+impl CpuArchTrait for RiscV64CpuArch {
     fn ncpus() -> usize {
         let ncpus = unsafe { NCPUS };
         #[cfg(debug_assertions)]

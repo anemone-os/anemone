@@ -1,6 +1,6 @@
 // TODO
 
-use crate::prelude::*;
+use crate::libmm::VirtAddr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageFaultType {

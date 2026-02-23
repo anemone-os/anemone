@@ -1,17 +1,11 @@
-use crate::{
-    exception::{
-        page_fault::{PageFaultInfo, PageFaultType},
-        trap::{ExceptionReason, InterruptReason, TrapReason},
-    },
-    prelude::*,
-};
+use crate::prelude::*;
 
 mod ktrap;
 pub use ktrap::*;
 
-pub struct RiscV64Trap;
+pub struct RiscV64TrapArch;
 
-impl TrapArch for RiscV64Trap {
+impl TrapArchTrait for RiscV64TrapArch {
     type TrapFrame = RiscV64TrapFrame;
 }
 

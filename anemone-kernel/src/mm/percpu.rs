@@ -51,7 +51,7 @@ impl<T> PerCpu<T> {
         F: FnOnce(&T) -> R,
     {
         // TODO: disable preemption
-        unsafe { f(self.get(CurCpuArch::percpu_base())) }
+        unsafe { f(self.get(CpuArch::percpu_base())) }
     }
 
     pub fn with_mut<F, R>(&self, f: F) -> R
@@ -59,7 +59,7 @@ impl<T> PerCpu<T> {
         F: FnOnce(&mut T) -> R,
     {
         // TODO: disable preemption
-        unsafe { f(self.get_mut(CurCpuArch::percpu_base())) }
+        unsafe { f(self.get_mut(CpuArch::percpu_base())) }
     }
 
     pub unsafe fn with_remote<F, R>(&self, cpu_id: usize, f: F) -> R
@@ -162,9 +162,9 @@ pub unsafe fn bsp_init<A: FnOnce(usize) -> PhysPageNum>(bsp_id: usize, alloc_fol
         let stub_base = __spercpu as *const () as usize;
         let stub_end = __epercpu as *const () as usize;
         let percpu_size = stub_end - stub_base;
-        let aligned_size = align_up_power_of_2!(percpu_size, CurPagingArch::PAGE_SIZE_BYTES);
+        let aligned_size = align_up_power_of_2!(percpu_size, PagingArch::PAGE_SIZE_BYTES);
 
-        let ncpus = CurCpuArch::ncpus();
+        let ncpus = CpuArch::ncpus();
 
         // copy template from stub to the allocated frames.
         let stub_slice = core::slice::from_raw_parts(
@@ -174,28 +174,26 @@ pub unsafe fn bsp_init<A: FnOnce(usize) -> PhysPageNum>(bsp_id: usize, alloc_fol
 
         // the allocated frames will never be deallocated since they are used for
         // holding percpu data.
-        let sppn = alloc_folio((aligned_size * ncpus) >> CurPagingArch::PAGE_SIZE_BITS);
+        let sppn = alloc_folio((aligned_size * ncpus) >> PagingArch::PAGE_SIZE_BITS);
 
         // TODO: it there any need to zero out the folio?
 
         let mut cur_vpn = sppn.to_hhdm();
         for cpu_id in 0..ncpus {
-            let percpu_slice = core::slice::from_raw_parts_mut(
-                cur_vpn.to_virt_addr().as_ptr_mut::<u8>(),
-                percpu_size,
-            );
+            let percpu_slice =
+                core::slice::from_raw_parts_mut(cur_vpn.to_vaddr().as_ptr_mut::<u8>(), percpu_size);
             percpu_slice.copy_from_slice(stub_slice);
 
-            PERCPU_BASES[cpu_id] = cur_vpn.to_virt_addr().get() as usize;
+            PERCPU_BASES[cpu_id] = cur_vpn.to_vaddr().get() as usize;
 
             if cpu_id == bsp_id {
-                CurCpuArch::set_percpu_base(cur_vpn.to_virt_addr().as_ptr_mut());
+                CpuArch::set_percpu_base(cur_vpn.to_vaddr().as_ptr_mut());
                 with_core_local_mut(|core_local| core_local.cpu_id = cpu_id);
             } else {
                 with_core_local_remote_mut(cpu_id, |core_local| core_local.cpu_id = cpu_id);
             }
 
-            cur_vpn += (aligned_size / CurPagingArch::PAGE_SIZE_BYTES) as u64;
+            cur_vpn += (aligned_size / PagingArch::PAGE_SIZE_BYTES) as u64;
         }
     }
 
@@ -205,6 +203,6 @@ pub unsafe fn bsp_init<A: FnOnce(usize) -> PhysPageNum>(bsp_id: usize, alloc_fol
 pub unsafe fn ap_init(ap_id: usize) {
     unsafe {
         let base = PERCPU_BASES[ap_id];
-        CurCpuArch::set_percpu_base(core::ptr::with_exposed_provenance_mut(base));
+        CpuArch::set_percpu_base(core::ptr::with_exposed_provenance_mut(base));
     }
 }
