@@ -34,6 +34,7 @@
 ## 代码约定（本仓库特有）
 - 常用导入统一走 `anemone-kernel/src/prelude.rs`；新模块优先 `use crate::prelude::*;` 保持风格一致。
 - 日志使用内核宏（`kdebugln!`, `kinfoln!`, `kerrln!` 等），实现位于 `anemone-kernel/src/debug/printk/mod.rs`。
+- 内核提供了基本测试框架`kunit`，实现位于`anemone-kernel/src/debug/kunit/`，在内核子系统初始化后、调度开始前运行。
 - 架构相关实现放在 `anemone-kernel/src/arch/<arch>/`，并通过 `Cur*Arch` 别名接入（见 `arch/mod.rs`）。
 - 内核子 crate 放在 `anemone-kernel/crates/`，优先在这里扩展通用能力，再由内核主 crate 引用。
 - `prelude` 统一 re-export：架构别名、内存地址/分页类型、错误、时间/调度 HAL、锁与常用宏，新增模块尽量复用已有导出，避免重复 `use`。
