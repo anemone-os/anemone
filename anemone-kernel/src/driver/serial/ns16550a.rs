@@ -42,7 +42,7 @@ impl DriverOps for Ns16550ADriver {
         let fwnode = pdev.fwnode().ok_or(DevError::MissingFwNode)?;
         let frequency = fwnode
             .prop_read_u32("clock-frequency")
-            .ok_or(DevError::MissingFwNode)?;
+            .ok_or(DevError::FwNodeLookupFailed)?;
         state.frequency = frequency;
         kdebugln!("ns16550a: clock frequency = {} Hz", frequency);
 

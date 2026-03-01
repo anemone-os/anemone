@@ -45,6 +45,7 @@ SECTIONS {
         __epercpu = .;
         # If needed, we can add more initcall sections with different priorities, e.g. .initcall.1, .initcall.3, etc.
         # but for now one is enough for our simple kernel.
+        . = ALIGN(8);
         __sinitcall_driver = .;
         *(.initcall.driver .initcall.driver.*)
         __einitcall_driver = .;

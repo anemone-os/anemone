@@ -10,13 +10,13 @@ pub struct RwLock<T: ?Sized> {
 #[derive(Debug)]
 pub struct ReadIrqSaveGuard<'a, T: ?Sized> {
     guard: Option<spin::RwLockReadGuard<'a, T>>,
-    intr_guard: IntrGuard,
+    _intr_guard: IntrGuard,
 }
 
 #[derive(Debug)]
 pub struct WriteIrqSaveGuard<'a, T: ?Sized> {
     guard: Option<spin::RwLockWriteGuard<'a, T>>,
-    intr_guard: IntrGuard,
+    _intr_guard: IntrGuard,
 }
 
 impl<'a, T: ?Sized> Drop for ReadIrqSaveGuard<'a, T> {
@@ -53,14 +53,14 @@ impl<T: ?Sized> RwLock<T> {
     #[track_caller]
     pub fn read_irqsave(&self) -> ReadIrqSaveGuard<'_, T> {
         loop {
-            let intr_guard = IntrGuard::new();
+            let _intr_guard = IntrGuard::new();
             if let Some(guard) = self.lock.try_read() {
                 break ReadIrqSaveGuard {
                     guard: Some(guard),
-                    intr_guard,
+                    _intr_guard,
                 };
             }
-            _ = intr_guard;
+            _ = _intr_guard;
             core::hint::spin_loop();
         }
     }
@@ -68,14 +68,14 @@ impl<T: ?Sized> RwLock<T> {
     #[track_caller]
     pub fn write_irqsave(&self) -> WriteIrqSaveGuard<'_, T> {
         loop {
-            let intr_guard = IntrGuard::new();
+            let _intr_guard = IntrGuard::new();
             if let Some(guard) = self.lock.try_write() {
                 break WriteIrqSaveGuard {
                     guard: Some(guard),
-                    intr_guard,
+                    _intr_guard,
                 };
             }
-            _ = intr_guard;
+            _ = _intr_guard;
             core::hint::spin_loop();
         }
     }

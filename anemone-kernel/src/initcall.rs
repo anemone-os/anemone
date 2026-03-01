@@ -30,6 +30,8 @@ fn collect_initcalls(level: InitCallLevel) -> &'static [InitCall] {
         ),
     };
 
+    assert!(start.is_multiple_of(align_of::<InitCall>()));
+    assert!((end - start).is_multiple_of(size_of::<InitCall>()));
     let initcall_size = core::mem::size_of::<InitCall>();
     let initcall_count = (end - start) / initcall_size;
     unsafe { core::slice::from_raw_parts(start as *const InitCall, initcall_count) }

@@ -11,8 +11,8 @@ use core::ops::Deref;
 /// Pay attention that [`Identity`] is commonly created on stack, so it should
 /// not be too large.
 ///
-/// `kconfig` defines a `MAX_IDENTITY_LEN` constant that every identity type's
-/// length cannot exceed, otherwise it will cause a compile error.
+/// `kconfig` defines a `MAX_IDENTITY_LEN_BYTES` constant that every identity
+/// type's length cannot exceed, otherwise it will cause a compile error.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Identity<const LEN: usize>(heapless::String<LEN>);
 

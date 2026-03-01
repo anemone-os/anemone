@@ -111,7 +111,7 @@ pub struct MonoOnce<T> {
     initialized: AtomicBool,
 }
 
-unsafe impl<T> Sync for MonoOnce<T> {}
+unsafe impl<T: Sync> Sync for MonoOnce<T> {}
 
 impl<T> MonoOnce<T> {
     pub const unsafe fn new() -> Self {

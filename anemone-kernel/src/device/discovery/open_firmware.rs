@@ -364,7 +364,7 @@ pub fn of_platform_discovery() {
                 for c in compatible.clone() {
                     pdev.add_compatible(c);
                 }
-                // resourse parsing
+                // resource parsing
                 // 1. reg
                 if let Some(reg) = child.reg() {
                     for (on_bus_address, length) in reg.iter() {

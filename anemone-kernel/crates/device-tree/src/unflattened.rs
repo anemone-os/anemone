@@ -644,9 +644,11 @@ pub struct DeviceTreeHandle {
 
 // SAFETY: `DeviceTreeHandle` is an owning handle to an arena allocated during
 // parse, and the public API only provides shared references to immutable tree
-// data. Moving the handle across threads transfers ownership of that arena
-// pointer and does not permit concurrent mutable access through this type.
+// data. Moving the handle across threads or accessing it from multiple threads
+// concurrently does not cause any safety issues, as long as the handle itself
+// is not mutated (e.g. dropped) while being accessed.
 unsafe impl Send for DeviceTreeHandle {}
+unsafe impl Sync for DeviceTreeHandle {}
 
 impl DeviceTreeHandle {
     fn device_tree(&self) -> &DeviceTree {

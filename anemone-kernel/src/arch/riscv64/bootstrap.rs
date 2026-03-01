@@ -258,7 +258,7 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         // mark fdt as reserved memory so that it won't be allocated by frame allocator.
         let fdt_npages = (early_scan_fdt_size(fdt_va) + PagingArch::PAGE_SIZE_BYTES - 1)
             / PagingArch::PAGE_SIZE_BYTES;
-        let fdt_ppn = PhysPageNum::new(fdt_pa.get() >> 12);
+        let fdt_ppn = PhysPageNum::new(fdt_pa.get() >> PagingArch::PAGE_SIZE_BITS);
         scanner.mark_as_reserved(fdt_ppn, fdt_npages as u64, RsvMemFlags::FDT);
 
         mm::percpu::bsp_init(bsp_id, |npages| scanner.early_alloc_folio(npages as u64));
