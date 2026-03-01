@@ -19,6 +19,7 @@ pub mod debug;
 pub mod device;
 pub mod driver;
 pub mod exception;
+pub mod initcall;
 pub mod mm;
 pub mod panic;
 pub mod power;
@@ -34,17 +35,12 @@ use crate::prelude::*;
 pub fn kernel_main(is_bsp: bool) -> ! {
     // TODO: init subsystems, spawn init process, etc.
 
-    #[cfg(feature = "kunit")]
     if is_bsp {
+        #[cfg(feature = "kunit")]
         crate::debug::kunit::kunit_runner();
     }
 
     // TODO: start the scheduler, which should never return.
 
     loop {}
-}
-
-#[kunit]
-fn kunit_example() {
-    assert_eq!(1 + 1, 2);
 }

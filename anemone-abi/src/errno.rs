@@ -287,8 +287,8 @@ pub const ENOTRECOVERABLE: Errno = 131;
 pub const ERFKILL: Errno = 132;
 /// Memory page has hardware error
 pub const EHWPOISON: Errno = 133;
-/// Restart of an interrupted system call. For kernel internal use only.
-pub const ERESTARTSYS: Errno = 512;
 
 // Anemone specific errno codes
+// TODO: seemingly we'd better remove these custom errno codes and just adhere
+// to POSIX errno codes.
 pub const ERR_ANEMONE_START: Errno = LINUX_ERRNO_MAX + 1;

@@ -722,9 +722,4 @@ typedef int32_t Errno;
  */
 #define EHWPOISON 133
 
-/**
- * Restart of an interrupted system call. For kernel internal use only.
- */
-#define ERESTARTSYS 512
-
 #define ERR_ANEMONE_START (LINUX_ERRNO_MAX + 1)

@@ -97,6 +97,13 @@ impl<T> MonoFlow<T> {
 /// A container for data that is initialized only once.
 ///
 /// See [`MonoFlow`] for details on the synchronization model.
+///
+/// **In effect, since [`MonoOnce`] does not provide mutable access to the inner
+/// data, it can be simultaneously accessed by multiple control flows**
+///
+/// **The 'Mono' in the name stands for the fact that the action to initialize
+/// the inner data is guaranteed to be performed only once and before any access
+/// to the inner data.**
 #[derive(Debug)]
 pub struct MonoOnce<T> {
     data: UnsafeCell<Option<T>>,
@@ -104,7 +111,7 @@ pub struct MonoOnce<T> {
     initialized: AtomicBool,
 }
 
-unsafe impl<T> Sync for MonoOnce<T> {}
+unsafe impl<T: Sync> Sync for MonoOnce<T> {}
 
 impl<T> MonoOnce<T> {
     pub const unsafe fn new() -> Self {

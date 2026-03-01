@@ -37,6 +37,7 @@ pub struct Parameters {
     pub log_buffer_shift_kb: Option<u64>,
     pub log_record_shift_bytes: Option<u64>,
     pub kstack_shift_kb: Option<u64>,
+    pub max_ident_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
     pub time_slice_ms: Option<u64>,
     pub system_hz: Option<u16>,
@@ -66,7 +67,6 @@ impl Parameters {
 
         format!(
             r#"//! Auto-generated kernel parameters from kconfig, do not edit manually.
-//! This contains both loader and kernel parameters.
 #![allow(unused)]
 
 /// Size of bootstrap heap as a power of 2 in KB
@@ -78,6 +78,11 @@ pub const LOG_BUFFER_SHIFT_KB: u64 = {};
 pub const LOG_RECORD_SHIFT_BYTES: u64 = {};
 /// Kernel stack size as a power of 2 in KB
 pub const KSTACK_SHIFT_KB: u64 = {};
+/// Maximum length of identity strings in bytes
+pub const MAX_IDENT_LEN_BYTES: usize = {};
+/// Maximum length of file names in bytes. This is always equal to MAX_IDENT_LEN_BYTES,
+/// since file names are commonly used as identity strings in kernel objects.
+pub const MAX_FILE_NAME_LEN_BYTES: usize = MAX_IDENT_LEN_BYTES;
 /// Maximum number of processes
 pub const MAX_PROCESSES: u64 = {};
 /// Time slice duration in milliseconds
@@ -89,6 +94,7 @@ pub const SYSTEM_HZ: u16 = {};
             default_or!(log_buffer_shift_kb),
             default_or!(log_record_shift_bytes),
             default_or!(kstack_shift_kb),
+            default_or!(max_ident_len_bytes),
             default_or!(max_processes),
             default_or!(time_slice_ms),
             default_or!(system_hz)

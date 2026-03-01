@@ -17,7 +17,7 @@ pub struct NoPreemptGuard<'a, T: ?Sized> {
 #[derive(Debug)]
 pub struct IrqSaveGuard<'a, T: ?Sized> {
     guard: Option<spin::MutexGuard<'a, T>>,
-    intr_guard: IntrGuard,
+    _intr_guard: IntrGuard,
 }
 
 impl<'a, T: ?Sized> Drop for IrqSaveGuard<'a, T> {
@@ -41,20 +41,22 @@ impl<T> SpinLock<T> {
 }
 
 impl<T: ?Sized> SpinLock<T> {
+    #[track_caller]
     pub fn lock(&self) -> NoPreemptGuard<'_, T> {
         todo!("implement scheduler first");
     }
 
+    #[track_caller]
     pub fn lock_irqsave(&self) -> IrqSaveGuard<'_, T> {
         loop {
-            let intr_guard = IntrGuard::new();
+            let _intr_guard = IntrGuard::new();
             if let Some(guard) = self.lock.try_lock() {
                 break IrqSaveGuard {
                     guard: Some(guard),
-                    intr_guard,
+                    _intr_guard,
                 };
             }
-            _ = intr_guard; // drop to restore interrupts before spinning
+            _ = _intr_guard; // drop to restore interrupts before spinning
             core::hint::spin_loop();
         }
     }

@@ -45,6 +45,11 @@ bitflags! {
         /// Memory that can be used for early allocation before
         /// the frame allocator is initialized.
         const EARLY_ALLOC = 0x0008;
+
+        /// Memory reserved for the Flattened Device Tree blob.
+        ///
+        /// TODO: This flag is in theory needless. We should use a RECLAIMABLE flag instead.
+        const FDT = 0x0010;
     }
 }
 

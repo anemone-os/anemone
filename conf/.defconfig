@@ -5,11 +5,11 @@
 # This section specifies how to build loader and kernel
 [build]
 platform = "qemu-virt-rv64" # Target platform. The same name as in conf/platforms/*.toml
-profile = "release" # Build profile: "dev" or "release". We may add more profiles later.
+profile = "dev" # Build profile: "dev" or "release". We may add more profiles later.
 
 # Kernel tailoring options
 [features]
-kunit = false # Enable KUnit testing
+kunit = true # Enable KUnit testing
 # fs_ext4 = true # Enable ext4 filesystem support
 # virtio_gpu = true # Enable Virtio GPU support
 # smp = true # Enable Symmetric Multiprocessing support
@@ -21,6 +21,7 @@ bootstrap_heap_shift_kb = 10 # Size of bootstrap heap as a power of 2 in KB
 log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
 log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
 kstack_shift_kb = 5 # Kernel stack size as a power of 2 in KB
+max_ident_len_bytes = 256 # Maximum length of identity strings in bytes.
 max_processes = 128 # Maximum number of processes
 time_slice_ms = 10 # Time slice duration in milliseconds
 system_hz = 100 # System timer frequency in hertz, i.e. number of timer interrupts per second
