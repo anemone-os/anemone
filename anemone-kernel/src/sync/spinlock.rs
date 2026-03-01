@@ -41,10 +41,12 @@ impl<T> SpinLock<T> {
 }
 
 impl<T: ?Sized> SpinLock<T> {
+    #[track_caller]
     pub fn lock(&self) -> NoPreemptGuard<'_, T> {
         todo!("implement scheduler first");
     }
 
+    #[track_caller]
     pub fn lock_irqsave(&self) -> IrqSaveGuard<'_, T> {
         loop {
             let intr_guard = IntrGuard::new();

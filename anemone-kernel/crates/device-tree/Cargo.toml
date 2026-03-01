@@ -1,0 +1,10 @@
+[package]
+name = "device-tree"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+alloc = []
+
+[dependencies]
+intrusive-collections = { workspace = true }

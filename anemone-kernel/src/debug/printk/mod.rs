@@ -65,8 +65,8 @@ mod klog {
 
     #[macro_export]
     macro_rules! kprintln {
-        ($level:ident) => {
-            $crate::kprint!($level, "\n");
+        () => {
+            $crate::kprint!("\n");
         };
         ($level:ident, $($arg:tt)*) => {
             $crate::kprint!($level, "{}\n", format_args!($($arg)*));

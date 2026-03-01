@@ -11,7 +11,8 @@ use crate::{
     },
     debug::printk::{Console, ConsoleFlags, register_console},
     device::discovery::open_firmware::{
-        EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count,
+        EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count, early_scan_fdt_size,
+        of_platform_discovery, unflatten_device_tree,
     },
     mm::layout::KernelLayoutTrait,
     prelude::*,
@@ -252,8 +253,13 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         super::cpu::set_ncpus(ncpus);
 
         // physical memory management
-        // early_scan_and_register_memory(fdt_va);
         let mut scanner = EarlyMemoryScanner::new(fdt_va);
+
+        // mark fdt as reserved memory so that it won't be allocated by frame allocator.
+        let fdt_npages = (early_scan_fdt_size(fdt_va) + PagingArch::PAGE_SIZE_BYTES - 1)
+            / PagingArch::PAGE_SIZE_BYTES;
+        let fdt_ppn = PhysPageNum::new(fdt_pa.get() >> 12);
+        scanner.mark_as_reserved(fdt_ppn, fdt_npages as u64, RsvMemFlags::FDT);
 
         mm::percpu::bsp_init(bsp_id, |npages| scanner.early_alloc_folio(npages as u64));
         kinfoln!("percpu data initialized");
@@ -267,6 +273,11 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         kinfoln!("kernel mapping initialized");
         mm::kpgdir::activate_kernel_mapping();
         kinfoln!("kernel mapping activated");
+
+        driver::init();
+
+        unflatten_device_tree(fdt_va);
+        of_platform_discovery();
 
         // TODO: device, drivers, interrupts, etc.
         // maybe some of these can be deferred to arch-independent initialization
@@ -320,8 +331,6 @@ unsafe fn ap_entry(ap_id: usize) -> ! {
         kinfoln!("ap {} is starting up...", ap_id);
         mm::percpu::ap_init(ap_id);
 
-        //percpu_test();
-
         mm::kpgdir::activate_kernel_mapping();
 
         // synchronize with BSP
@@ -330,20 +339,4 @@ unsafe fn ap_entry(ap_id: usize) -> ! {
     }
 
     kernel_main(false)
-}
-
-fn percpu_test() {
-    #[percpu]
-    static TEST: usize = 0;
-
-    TEST.with_mut(|test| {
-        for _ in 0..1000 {
-            *test += 1;
-        }
-        kdebugln!(
-            "percpu test: cpu {} has test value {}",
-            CpuArch::cur_cpu_id(),
-            *test
-        );
-    })
 }

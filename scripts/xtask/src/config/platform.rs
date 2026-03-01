@@ -85,7 +85,6 @@ impl Config {
     pub fn gen_platform_defs(&self) -> String {
         format!(
             r#"//! Auto-generated platform constants, do not edit manually.
-//! This contains both loader and kernel parameters.
 #![allow(unused)]
 
 /// Physical RAM start address

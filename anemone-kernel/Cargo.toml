@@ -14,8 +14,12 @@ spin = { workspace = true }
 talc = { workspace = true }
 paste = { workspace = true }
 yansi = { workspace = true }
+boxcar = { workspace = true }
 rangemap = { workspace = true }
+heapless = { workspace = true }
+hashbrown = { workspace = true }
 buddy-system = { path = "crates/buddy-system", features = ["stats"] }
+device-tree = { path = "crates/device-tree", features = ["alloc"] }
 idalloc = { path = "crates/idalloc" }
 kernel-macros = { path = "crates/kernel-macros" }
 

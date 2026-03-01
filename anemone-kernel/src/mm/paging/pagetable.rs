@@ -1,5 +1,3 @@
-use core::marker::PhantomData;
-
 use crate::prelude::*;
 
 /// PageTable. The container of page directories.

@@ -4,10 +4,10 @@ pub mod int_like;
 pub mod align;
 #[macro_use]
 pub mod macros;
-
-pub mod writer;
-
 pub mod circular_log;
-
+pub mod writer;
+#[macro_use]
+pub mod as_container;
+pub mod identity;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Todo;

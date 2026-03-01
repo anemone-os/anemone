@@ -15,10 +15,6 @@ pub enum MmError {
 
 impl AsErrno for MmError {
     fn as_errno(&self) -> Errno {
-        match self {
-            MmError::OutOfMemory => ENOMEM,
-            MmError::AlreadyMapped => EALREADY,
-            MmError::NotMapped => ENOENT,
-        }
+        todo!()
     }
 }

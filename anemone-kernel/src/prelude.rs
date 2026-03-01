@@ -1,13 +1,14 @@
 pub use crate::{
     arch::*,
-    device::*,
+    device::{error::*, *},
+    driver::*,
     exception::intr::*,
     kconfig_defs::*,
     mm::{addr::*, error::*, frame::*, paging::*, percpu::*},
     platform_defs::*,
     power::*,
     sched::*,
-    sync::{spinlock::*, *},
+    sync::{rwlock::*, spinlock::*, *},
     syscall::*,
     syserror::*,
     time::*,
@@ -16,8 +17,10 @@ pub use crate::{
 };
 pub use alloc::{
     boxed::Box,
+    format,
     string::{String, ToString},
     sync::{Arc, Weak},
+    vec,
     vec::Vec,
 };
 pub use core::{sync::atomic::Ordering, time::Duration};
