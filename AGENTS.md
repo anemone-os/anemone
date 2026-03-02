@@ -22,6 +22,11 @@
 - 架构层通过 `*Arch` 访问（`CpuArch`, `IntrArch`, `TrapArch`, `PagingArch`, `PowerArch`, `TimeArch`, `KernelLayout`），入口集中在 `anemone-kernel/src/arch/mod.rs`。
 - 设备发现走 Open Firmware/DTB 路线，早期内存扫描与注册在 `anemone-kernel/src/device/discovery/open_firmware.rs`（`EarlyMemoryScanner::{new, early_alloc_folio, commit_to_pmm}`）。
 - 异常/中断抽象拆分在 `anemone-kernel/src/exception/intr/hal.rs`（`IntrArchTrait`, `IrqFlags`）与 `anemone-kernel/src/exception/trap/hal.rs`（`TrapArchTrait`）；作用域中断保护在 `anemone-kernel/src/exception/intr/scoped.rs`（`IntrGuard`）。时间抽象在 `anemone-kernel/src/time/hal.rs`（`TimeArchTrait`）。硬件抽象层统一定义在上层模块而非架构模块，在大多数情况下，遵循依赖倒置原则。
+- 设备驱动模型（DDM）借鉴了 Linux 的设计，引入了 `KObject`/`KSet` 作为基础对象管理，并拆分为 `Bus`、`Device`、`Driver` 三大组件：
+	- 系统核心设备模型位于 `anemone-kernel/src/device/`，底层对象在 `kobject.rs`。
+	- 总线抽象在 `bus/mod.rs`（`BusType`），目前已实现了 `platform` 总线。
+	- 设备接口在 `device/mod.rs`（`Device`），驱动接口在 `driver/mod.rs`（`Driver`）。
+	- 驱动通过 `probe` 函数与设备匹配，匹配逻辑由具体的 `BusType` 实现（如 `PlatformBusType::matches`）。
 - 低层调度抽象目前占位于 `anemone-kernel/src/sched/hal.rs`，新增架构调度原语先在这里落地。
 
 ## 开发工作流（默认用这些命令）
