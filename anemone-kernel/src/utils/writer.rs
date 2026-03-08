@@ -43,7 +43,7 @@ impl<const OVERFLOW_BEHAVIOR: usize> Write for BufferWriter<'_, OVERFLOW_BEHAVIO
             match OVERFLOW_BEHAVIOR {
                 OverflowBehavior::PANIC => {
                     panic!("Buffer overflow in BufferWriter");
-                }
+                },
                 OverflowBehavior::TRUNCATE => {
                     // Silently truncate the output if it exceeds the buffer size. This is useful
                     // for log messages where we don't want to panic even if the message is too
@@ -51,10 +51,10 @@ impl<const OVERFLOW_BEHAVIOR: usize> Write for BufferWriter<'_, OVERFLOW_BEHAVIO
                     let available = self.buf.len() - self.pos;
                     self.buf[self.pos..].copy_from_slice(&bytes[..available]);
                     self.pos += available;
-                }
+                },
                 OverflowBehavior::RETURN_ERROR => {
                     return Err(core::fmt::Error);
-                }
+                },
                 _ => unreachable!(),
             }
         } else {

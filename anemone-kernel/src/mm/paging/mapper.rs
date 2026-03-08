@@ -2,19 +2,13 @@ use core::marker::PhantomData;
 
 use crate::prelude::*;
 
-/// A mapping operation.
+/// POD struct representing a mapping operation.
 #[derive(Debug, Clone, Copy)]
 pub struct Mapping {
     pub vpn: VirtPageNum,
     pub ppn: PhysPageNum,
     pub flags: PteFlags,
     pub npages: usize,
-
-    /// Whether to overwrite the existing mapping if the virtual address is
-    /// already mapped. If false, the mapping will fail with an error if the
-    /// virtual address is already mapped. If true, the existing mapping will be
-    /// replaced with the new mapping.
-    pub overwrite: bool,
 }
 
 /// An unmapping operation.
@@ -65,34 +59,115 @@ impl Mapper<'_> {
     }
 
     /// Map a virtual memory region to a physical memory region with the given
-    /// flags.
+    /// flags. Had encountered an already mapped page will cause an error to be
+    /// returned, and all the successfully mapped pages will be rolled back.
     ///
     /// No huge page mapping is involved.
     pub fn map(&mut self, mapping: Mapping) -> Result<(), MmError> {
+        #[derive(Debug)]
+        struct MapTransaction<'a, 'm> {
+            mapper: &'a mut Mapper<'m>,
+            mapping: Mapping,
+            mapped_pages: usize,
+            is_committed: bool,
+        }
+
+        impl<'a, 'm> MapTransaction<'a, 'm> {
+            fn new(mapper: &'a mut Mapper<'m>, mapping: Mapping) -> Self {
+                Self {
+                    mapper,
+                    mapping,
+                    mapped_pages: 0,
+                    is_committed: false,
+                }
+            }
+
+            fn do_map(&mut self) -> Result<(), MmError> {
+                let Mapping {
+                    vpn,
+                    ppn,
+                    flags,
+                    npages,
+                } = self.mapping;
+
+                for i in 0..npages {
+                    let next_vpn = VirtPageNum::new(vpn.get() + i as u64);
+                    let next_ppn = PhysPageNum::new(ppn.get() + i as u64);
+                    self.mapper.map_one(next_vpn, next_ppn, flags, false)?;
+                    self.mapped_pages += 1;
+                }
+
+                Ok(())
+            }
+
+            fn commit(mut self) {
+                self.is_committed = true;
+            }
+        }
+
+        impl Drop for MapTransaction<'_, '_> {
+            fn drop(&mut self) {
+                if !self.is_committed {
+                    knoticeln!(
+                        "MapTransaction::Drop: transaction failed, rolling back the mapped pages"
+                    );
+                    // roll back the mapping of already mapped pages
+                    self.mapper.unmap(Unmapping {
+                        range: VirtPageRange::new(self.mapping.vpn, self.mapped_pages as u64),
+                    });
+                }
+            }
+        }
+
+        let mut transaction = MapTransaction::new(self, mapping);
+        transaction.do_map()?;
+        transaction.commit();
+
+        Ok(())
+    }
+
+    /// Map a virtual memory region to a physical memory region with the given
+    /// flags, even if some of the pages in the region are already mapped.
+    ///
+    /// # Safety
+    ///
+    /// **No atomicity guarantees**
+    ///
+    /// Unless user can ensure success of the operation, it is
+    /// always recommended to first unmap the virtual address and then map
+    /// it again, instead of using overwrite mapping directly.
+    pub unsafe fn map_overwrite(&mut self, mapping: Mapping) -> Result<(), MmError> {
         let Mapping {
             vpn,
             ppn,
             flags,
             npages,
-
-            overwrite,
+            ..
         } = mapping;
         for i in 0..npages {
-            self.map_one(
-                VirtPageNum::new(vpn.get() + i as u64),
-                PhysPageNum::new(ppn.get() + i as u64),
-                flags,
-                overwrite,
-            )?;
+            let next_vpn = VirtPageNum::new(vpn.get() + i as u64);
+            let next_ppn = PhysPageNum::new(ppn.get() + i as u64);
+            self.map_one(next_vpn, next_ppn, flags, true).map_err(|err| {
+                kwarningln!(
+                    "Mapper::map_overwrite: failed to map vpn {:?} to ppn {:?} with flags {:?}: {:?}",
+                    next_vpn,
+                    next_ppn,
+                    flags,
+                    err
+                );
+                err
+            })?;
         }
+
         Ok(())
     }
 
-    /// Unmap a virtual memory region.
+    /// Unmap a virtual memory region and deallocate page tables if they become
+    /// empty after unmapping.
     ///
-    /// This method will deallocate page tables if they become empty after
-    /// unmapping.
-    pub fn unmap(&mut self, unmapping: Unmapping) -> Result<(), MmError> {
+    /// **This method is deliberately designed not to return a [Result] but
+    /// always succeed.**
+    pub fn unmap(&mut self, unmapping: Unmapping) {
         let Unmapping { range } = unmapping;
 
         unsafe {
@@ -112,10 +187,16 @@ impl Mapper<'_> {
                         *pte = Pte::ZEROED;
                         let _frame = Frame::from_ppn(ppn);
                     }
-                    ControlFlow::Continue
+                    ControlFlow::<()>::Continue
                 },
                 |pte, ctx| {
                     if range.contains(ctx.vpn) {
+                        if !pte.is_valid() {
+                            kwarningln!(
+                                "Mapper::unmap: trying to unmap an unmapped page: vpn={:?}",
+                                ctx.vpn
+                            );
+                        }
                         *pte = Pte::ZEROED;
                     }
 
@@ -123,8 +204,10 @@ impl Mapper<'_> {
                 },
                 TraverseOrder::PostOrder,
             ) {
-                ControlFlow::Continue => Ok(()),
-                ControlFlow::Break(err) => Err(err),
+                ControlFlow::Continue => {},
+                ControlFlow::Break(err) => {
+                    unreachable!("unexpected break during unmapping: {:?}", err)
+                },
             }
         }
     }
@@ -207,8 +290,11 @@ impl Mapper<'_> {
     /// # Safety
     ///
     /// Use-after-free and double-free may happen if the branch and leaf
-    /// operations deallocate page tables or page mappings. The caller must
+    /// operations deallocate page tables or page mappings. Caller must
     /// ensure that the operations are safe to perform.
+    ///
+    /// TODO: currently we traverse all Ptes, which is inefficient. we should
+    /// support traverse within a given vpn range.
     unsafe fn traverse<B, L, R>(
         &mut self,
         branch_op: B,
@@ -327,7 +413,7 @@ impl Mapper<'_> {
         vpn: VirtPageNum,
         ppn: PhysPageNum,
         flags: PteFlags,
-        remap: bool,
+        overwrite: bool,
     ) -> Result<(), MmError> {
         let levels = PagingArch::PAGE_LEVELS;
         let vpn_bits = PagingArch::PTE_PER_PGDIR.trailing_zeros() as usize;
@@ -347,7 +433,7 @@ impl Mapper<'_> {
 
             if level == 0 {
                 // leaf reached
-                if pte.is_valid() && !remap {
+                if pte.is_valid() && !overwrite {
                     return Err(MmError::AlreadyMapped);
                 }
                 *pte = Pte::new(ppn, flags | PteFlags::VALID);

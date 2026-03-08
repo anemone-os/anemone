@@ -43,17 +43,12 @@ impl Drop for PageTable {
         let mut mapper = self.mapper();
 
         // unmap all pages
-        match mapper.unmap(Unmapping {
+        mapper.unmap(Unmapping {
             range: VirtPageRange::new(
                 VirtPageNum::new(0),
                 1 << (PagingArch::PAGE_LEVELS * PagingArch::PGDIR_IDX_BITS),
             ),
-        }) {
-            Ok(()) => (),
-            Err(e) => {
-                kerrln!("failed to unmap page table: {:#?}", e);
-            },
-        }
+        });
         let _frame = unsafe { Frame::from_ppn(self.root) };
     }
 }

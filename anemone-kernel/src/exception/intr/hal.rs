@@ -30,6 +30,15 @@ pub trait IntrArchTrait: Sized {
             Self::restore_local_intr(Self::DISABLED_IRQ_FLAGS);
         }
     }
+
+    /// Send an inter-processor interrupt (IPI) to the specified CPU.
+    ///
+    /// This function is expected not to fail, and should panic immediately if
+    /// the operation cannot be completed successfully.
+    ///
+    /// TODO: some architectures support an integer payload, we shall add that
+    /// in the future if needed.
+    fn send_ipi(cpu_id: usize);
 }
 
 /// Interrupt flags for the current CPU. The exact representation is

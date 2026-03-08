@@ -21,12 +21,12 @@ pub fn kunit(attr: TokenStream, item: TokenStream) -> TokenStream {
     kunit::kunit_impl(attr, item)
 }
 
-/// Defines an initcall function, which will be called during kernel
-/// initialization.
+/// Defines an initcall.
 ///
-/// The initcall level is specified as an argument, which determines when the
-/// function will be called during initialization. The function must have the
-/// signature `fn()`.
+/// The function must have the signature `fn()`.
+///
+/// Currently supported levels are:
+/// - `driver`
 #[proc_macro_attribute]
 pub fn initcall(attr: TokenStream, item: TokenStream) -> TokenStream {
     initcall::initcall_impl(attr, item)

@@ -86,12 +86,13 @@ impl KernelLog {
         self.buffer.lock_irqsave().push(record);
     }
 
-    /// Gets a snapshot of the current log records in the kernel log buffer.
+    /// Get an weak iterator of the current log records in the kernel log
+    /// buffer.
     ///
     /// TODO: explain the potential inconsistency, which, however, is harmless
     /// for logging purposes.
-    pub fn snapshot(&self) -> Snapshot<'_> {
-        Snapshot {
+    pub fn iter_weak(&self) -> IterWeak<'_> {
+        IterWeak {
             log: self,
             cur_seq: self.buffer.lock_irqsave().oldest_seq(),
         }
@@ -99,12 +100,12 @@ impl KernelLog {
 }
 
 #[derive(Debug)]
-pub struct Snapshot<'a> {
+pub struct IterWeak<'a> {
     log: &'a KernelLog,
     cur_seq: usize,
 }
 
-impl Iterator for Snapshot<'_> {
+impl Iterator for IterWeak<'_> {
     type Item = LogRecord;
 
     fn next(&mut self) -> Option<Self::Item> {

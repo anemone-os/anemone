@@ -1,7 +1,5 @@
 use core::ops::{Index, IndexMut};
 
-use bitflags::bitflags;
-
 use crate::prelude::*;
 
 pub const PAGE_SIZE_BYTES: usize = 4096;
@@ -130,9 +128,13 @@ impl PteArch for RiscV64Pte {
         PhysPageNum::new(self.get() >> PTE_FLAGS_BITS)
     }
 
-    fn set_flags(&mut self, flags: PteFlags) {
+    unsafe fn set_flags(&mut self, flags: PteFlags) {
         let flags: RiscV64PteFlags = flags.into();
         self.0 = (self.0 & !PTE_FLAGS_MASK) | flags.bits();
+    }
+
+    unsafe fn set_ppn(&mut self, ppn: PhysPageNum) {
+        self.0 = (self.0 & PTE_FLAGS_MASK) | (ppn.get() << PTE_FLAGS_BITS);
     }
 
     fn is_leaf(&self) -> bool {

@@ -42,4 +42,9 @@ impl IntrArchTrait for RiscV64IntrArch {
             }
         }
     }
+
+    fn send_ipi(cpu_id: usize) {
+        let hartmask = sbi_rt::HartMask::from_mask_base(1 << cpu_id, 0);
+        sbi_rt::send_ipi(hartmask).expect("ipi send failed, cannot recover");
+    }
 }

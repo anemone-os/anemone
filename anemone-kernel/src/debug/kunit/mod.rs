@@ -24,10 +24,14 @@ pub fn kunit_runner() {
     let kunits = unsafe {
         use link_symbols::{__ekunit, __skunit};
 
-        let skunit = __skunit as *const () as *const KUnit;
-        let ekunit = __ekunit as *const () as *const KUnit;
-        let count = (ekunit as usize - skunit as usize) / core::mem::size_of::<KUnit>();
-        core::slice::from_raw_parts(skunit, count)
+        let (start, end) = (
+            __skunit as *const () as usize,
+            __ekunit as *const () as usize,
+        );
+        assert!(start.is_multiple_of(align_of::<KUnit>()));
+        assert!((end - start).is_multiple_of(size_of::<KUnit>()));
+        let kunit_count = (end - start) / size_of::<KUnit>();
+        core::slice::from_raw_parts(start as *const KUnit, kunit_count)
     };
 
     kprintln!("{}-- KUnit Test Runner --{}", BOLD, RESET);

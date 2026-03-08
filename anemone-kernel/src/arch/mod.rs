@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{prelude::*, sync::mono::MonoOnce};
 
 pub mod link_symbols;
 

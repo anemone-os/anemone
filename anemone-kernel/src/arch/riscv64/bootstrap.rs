@@ -5,8 +5,8 @@ use crate::{
     arch::{
         clear_bss,
         riscv64::{
+            exception::on_enter_kernel,
             mm::{RiscV64PgDir, RiscV64Pte, RiscV64PteFlags, sv39},
-            time::set_hw_clock_freq,
         },
     },
     debug::printk::{Console, ConsoleFlags, register_console},
@@ -64,8 +64,8 @@ static BOOTSTRAP_PGDIR: RiscV64PgDir = {
     );
 
     // 3. HHDM optimistic mapping for later use in physical memory management
-    //    initialization. We may map more physical memory than actually exists, but
-    //    it's fine because the kernel will only access the physical memory that
+    //    initialization. We probably map more physical memory than actually exists,
+    //    but it's fine because the kernel will only access the physical memory that
     //    actually exists, and the extra mappings won't cause any harm.
     let s_ram_ppn = align_down_power_of_2!(PHYS_RAM_START, 1 << 30) as u64 >> 12;
     let hhdm_start_idx =
@@ -119,7 +119,7 @@ pub unsafe extern "C" fn __nun() -> ! {
         // Calculate offset for current hart.
         "addi    t2, a0, 1",
 
-        // Without following line, the rustc will emit an error saying 'instruction requires
+        // Without following line, rustc will emit an error saying 'instruction requires
         // the following: 'Zmmul' (Integer Multiplication)',
         // even though we have specified the 'm' extension in the target spec.
         // This is a known issue in rustc, and we take this workaround to make
@@ -215,12 +215,11 @@ fn dump_kernel_image_info() {
 #[unsafe(no_mangle)]
 extern "C" fn rusty_nun(hart_id: usize, fdt_pa: PhysAddr) -> ! {
     #[unsafe(link_section = ".bss.nonzero_init")]
-    static mut BSP_ID: Option<usize> = None;
+    static mut BSP_ARRIVED: bool = false;
     unsafe {
-        let bsp_id = *(&raw const BSP_ID);
-        if bsp_id.is_none() {
+        if !BSP_ARRIVED {
             // bsp
-            BSP_ID = Some(hart_id);
+            BSP_ARRIVED = true;
             bsp_entry(hart_id, fdt_pa);
         } else {
             // ap
@@ -233,26 +232,21 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
     unsafe {
         clear_bss();
     }
-    let fdt_va = sv39::Sv39KernelLayout::phys_to_hhdm(fdt_pa);
-
     register_earlycon();
 
     kinfoln!("anemone kernel booting...");
     kinfoln!("bsp id: {}", bsp_id);
-    dump_kernel_image_info();
+
+    let fdt_va = sv39::Sv39KernelLayout::phys_to_hhdm(fdt_pa);
 
     unsafe {
-        // time
-        let hw_freq_hz = early_scan_clock_freq(fdt_va);
-        set_hw_clock_freq(hw_freq_hz);
-        kinfoln!(
-            "set_hw_clock_freq: hardware timer frequency set to {} Hz",
-            hw_freq_hz
-        );
+        // needed by percpu initialization.
         let ncpus = early_scan_cpu_count(fdt_va);
         super::cpu::set_ncpus(ncpus);
+        // needed by timer initialization.
+        let freq_hz = early_scan_clock_freq(fdt_va);
+        super::time::set_hw_clock_freq(freq_hz);
 
-        // physical memory management
         let mut scanner = EarlyMemoryScanner::new(fdt_va);
 
         // mark fdt as reserved memory so that it won't be allocated by frame allocator.
@@ -268,26 +262,26 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         mm::frame::pmm_init();
         kinfoln!("physical memory management initialized");
 
-        // now it's time to initialize KERNEL_PGDIR
         mm::kpgdir::init_kernel_mapping();
         kinfoln!("kernel mapping initialized");
         mm::kpgdir::activate_kernel_mapping();
         kinfoln!("kernel mapping activated");
 
+        // register drivers to bus types
         driver::init();
 
         unflatten_device_tree(fdt_va);
         of_platform_discovery();
 
-        // TODO: device, drivers, interrupts, etc.
-        // maybe some of these can be deferred to arch-independent initialization
-        // code.
-
-        super::exception::use_ktrap_entry();
+        // set up kernel trap handler
+        on_enter_kernel();
+        riscv::register::sstatus::set_sie();
+        // enable ipi
+        riscv::register::sie::set_ssoft();
 
         // okay, we can wake up APs now.
         {
-            for ap_id in 0..ncpus {
+            for ap_id in 0..CpuArch::ncpus() {
                 if ap_id == bsp_id {
                     continue;
                 }
@@ -302,10 +296,9 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
                     panic!("failed to start hart {}: {:?}", ap_id, sbiret);
                 }
             }
+            sync_all_cpus();
         }
-        sync_all_cpus();
         kinfoln!("bsp {} running...", bsp_id);
-        //percpu_test();
     }
 
     kernel_main(true)
@@ -327,9 +320,11 @@ unsafe fn sync_all_cpus() {
 
 unsafe fn ap_entry(ap_id: usize) -> ! {
     unsafe {
-        // early console is already registered, so we can use it to print some info.
         kinfoln!("ap {} is starting up...", ap_id);
+        on_enter_kernel();
         mm::percpu::ap_init(ap_id);
+        riscv::register::sstatus::set_sie();
+        riscv::register::sie::set_ssoft();
 
         mm::kpgdir::activate_kernel_mapping();
 

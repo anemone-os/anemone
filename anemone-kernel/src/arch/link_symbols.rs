@@ -56,10 +56,9 @@ unsafe extern "C" {
     /// The end of the KUnit test data segment of the kernel in virtual memory.
     pub fn __ekunit();
 
-    /// The start of the driver initcall section of the kernel in virtual
-    /// memory.
+    /// The start of the initcall section for driver initcalls.
     pub fn __sinitcall_driver();
-
-    /// The end of the driver initcall section of the kernel in virtual memory.
+    /// The end of the initcall section for driver initcalls.
     pub fn __einitcall_driver();
+
 }

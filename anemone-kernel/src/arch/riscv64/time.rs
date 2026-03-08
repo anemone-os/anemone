@@ -6,11 +6,7 @@ pub struct RiscV64TimeArch;
 static mut CLOCK_FREQUENCY_HZ: Option<u64> = None;
 
 /// Set the frequency of the timer in hertz.
-///
-/// # Safety
-///
-/// Called by bsp bootstrap code.
-pub(super) unsafe fn set_hw_clock_freq(freq_hz: u64) {
+pub unsafe fn set_hw_clock_freq(freq_hz: u64) {
     unsafe {
         CLOCK_FREQUENCY_HZ = Some(freq_hz);
     }

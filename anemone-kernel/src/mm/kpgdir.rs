@@ -10,7 +10,7 @@
 
 use spin::Lazy;
 
-use crate::prelude::*;
+use crate::{exception::broadcast_ipi, mm::layout::KernelLayoutTrait, prelude::*};
 
 static KERNEL_PGDIR: KPgDir = KPgDir::new();
 
@@ -18,7 +18,7 @@ static KERNEL_PGDIR: KPgDir = KPgDir::new();
 /// for mapping kernel memory regions, and serves as a marker type for the
 /// kernel's root page directory.
 #[derive(Debug)]
-pub struct KPgDir {
+struct KPgDir {
     pgdir: Lazy<SpinLock<PageTable>>,
 }
 
@@ -55,13 +55,14 @@ impl KPgDir {
                         PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES) as u64
                     );
 
-                    mapper.map(Mapping {
-                        vpn: svpn,
-                        ppn: sppn,
-                        flags: $flags,
-                        npages: npages as usize,
-                        overwrite: false,
-                    }).expect(concat!("failed to map kernel ", stringify!($name), " segment"));
+                    unsafe {
+                        mapper.map_overwrite(Mapping {
+                            vpn: svpn,
+                            ppn: sppn,
+                            flags: $flags,
+                            npages: npages as usize,
+                        }).expect(concat!("failed to map kernel ", stringify!($name), " segment"));
+                    }
                 }
             }};
         }
@@ -80,20 +81,20 @@ impl KPgDir {
         // currently we use normal page mapping for hhdm region, which is tooooooo
         // slow...
         {
-            let avail_mem_zones = AVAIL_MEM_ZONES.lock_irqsave();
+            sys_mem_zones().with_avail_zones(|avail_mem_zones| {
             for zone in avail_mem_zones.iter() {
                 let range = zone.range();
 
+                unsafe {
                 mapper
-                    .map(Mapping {
+                    .map_overwrite(Mapping {
                         vpn: range.start().to_hhdm(),
                         ppn: range.start(),
                         flags: PteFlags::READ | PteFlags::WRITE,
                         npages: range.npages() as usize,
-                        overwrite: false,
                     })
                     .expect("failed to map direct mapping region");
-
+                }
                 kdebugln!(
                     "mapped direct mapping region:\n\tvirtual page number {} ~ {},\n\tphysical page number {} ~ {},\n\tflags = {:?}",
                     range.start().to_hhdm(),
@@ -103,27 +104,27 @@ impl KPgDir {
                     PteFlags::READ | PteFlags::WRITE,
                 );
             }
+        });
         }
 
         // reserved memory regions
         {
-            let rsv_mem_zones = RSV_MEM_ZONES.lock_irqsave();
-            for zone in rsv_mem_zones.iter() {
-                if zone.flags().is_mappable() {
-                    let range = zone.range();
+            sys_mem_zones().with_rsv_zones(|rsv_mem_zones| {
+                for zone in rsv_mem_zones.iter() {
+                    if zone.flags().is_mappable() {
+                        let range = zone.range();
 
-                    mapper
-                        .map(Mapping {
-                            vpn: range.start().to_hhdm(),
-                            ppn: range.start(),
-                            // TODO: for kvirt region, we may want to map with more fine-grained
-                            // permissions.
-                            flags: PteFlags::READ | PteFlags::WRITE,
-                            npages: range.npages() as usize,
-                            overwrite: false,
-                        })
-                        .expect("failed to map reserved memory region");
-
+                    unsafe {
+                        mapper
+                            .map_overwrite(Mapping {
+                                vpn: range.start().to_hhdm(),
+                                ppn: range.start(),
+                                // TODO: for kvirt region, we may want to map with more fine-grained
+                                // permissions.
+                                flags: PteFlags::READ | PteFlags::WRITE,
+                                npages: range.npages() as usize,
+                            }).expect("failed to map reserved memory region");
+                    }
                     kdebugln!(
                         "mapped reserved memory region to hhdm:\n\tvirtual page number {} ~ {},\n\tphysical page number {} ~ {},\n\tflags = {:?}",
                         range.start().to_hhdm(),
@@ -133,8 +134,33 @@ impl KPgDir {
                         zone.flags(),
                     );
                 }
-            }
+            }});
         }
+    }
+
+    unsafe fn init_virtual_ranges(&self) {
+        let mut kpgdir = self.pgdir.lock_irqsave();
+
+        unsafe {
+            kinfoln!(
+                "preallocate pgdirs for remap region: [{:#x}, {:#x})",
+                KernelLayout::REMAP_REGION.start().get(),
+                KernelLayout::REMAP_REGION.end().get()
+            );
+            PagingArch::prealloc_pgdirs_for_region(&mut kpgdir, KernelLayout::REMAP_REGION);
+        }
+    }
+
+    unsafe fn kmap(&self, mapping: Mapping) -> Result<(), MmError> {
+        let mut kpgdir = self.pgdir.lock_irqsave();
+        let mut mapper = kpgdir.mapper();
+        mapper.map(mapping)
+    }
+
+    unsafe fn kunmap(&self, unmapping: Unmapping) {
+        let mut kpgdir = self.pgdir.lock_irqsave();
+        let mut mapper = kpgdir.mapper();
+        mapper.unmap(unmapping);
     }
 }
 
@@ -142,22 +168,53 @@ impl KPgDir {
 /// regions to the kernel's root page directory, including:
 /// - HHDM region / direct mapping region
 /// - kernel image region / kvirt region
-/// - TODO: vmalloc region, vmemmap region, etc.
+/// - vmalloc region
 ///
-/// Note that, after this function is called, all pgdirs will not be changed at
-/// runtime, only leaf mappings might be changed. So we can safely share the
-/// same pgdir for all processes. (IPI shooting and TLB shootdowns are still
-/// needed when leaf mappings are changed, but that's a different story.)
-pub unsafe fn init_kernel_mapping() {
+/// Note that, after this function is called, all top-level pgdirs will not be
+/// changed at runtime, So we can safely share the same pgdir for all processes.
+/// (TLB shootdowns are still needed when leaf mappings are changed, but that's
+/// a different story.)
+pub fn init_kernel_mapping() {
     unsafe {
         KERNEL_PGDIR.map_kvirt();
         KERNEL_PGDIR.map_hhdm();
+        KERNEL_PGDIR.init_virtual_ranges();
     }
 }
 
+/// Switch to kernel mapping.
 pub unsafe fn activate_kernel_mapping() {
     unsafe {
         let kpgdir = KERNEL_PGDIR.pgdir.lock_irqsave();
         PagingArch::activate_addr_space(&kpgdir);
     }
+}
+
+/// Do a mapping in the global kernel page table.
+///
+/// This is always a non-overwrite mapping, thus the operation itself is
+/// safe.
+///
+/// However, this mapping occurs in the global kernel page table, which is
+/// shared by all processes, so it might cause many many potential issues if
+/// not used carefully. So we mark this function as unsafe.
+pub unsafe fn kmap(mapping: Mapping) -> Result<(), MmError> {
+    unsafe {
+        KERNEL_PGDIR.kmap(mapping)?;
+    }
+    broadcast_ipi(IpiPayload::TlbShootdown { vaddr: None }, false);
+    Ok(())
+}
+
+/// Do an unmapping in the global kernel page table. See [kmap] for details and
+/// safety concerns.
+///
+/// Though an unmapping always succeeds, this function should not be overused,
+/// as it will cause TLB shootdowns to all cores, which is very expensive. So we
+/// mark this function as unsafe.
+pub unsafe fn kunmap(unmapping: Unmapping) {
+    unsafe {
+        KERNEL_PGDIR.kunmap(unmapping);
+    }
+    broadcast_ipi(IpiPayload::TlbShootdown { vaddr: None }, false);
 }

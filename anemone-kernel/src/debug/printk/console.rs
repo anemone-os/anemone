@@ -1,8 +1,6 @@
 //! Console abstraction module.
 use core::fmt::Debug;
 
-use bitflags::bitflags;
-
 use crate::prelude::*;
 
 /// A trait for kernel consoles. Implementations of this trait can represent

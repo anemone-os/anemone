@@ -1,11 +1,10 @@
 //! Strongly-typed wrappers around addresses.
 
+use crate::{int_like, mm::layout::KernelLayoutTrait, prelude::*};
 use core::{
     fmt::Display,
     ops::{Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, Not, Sub, SubAssign},
 };
-
-use crate::{int_like, mm::layout::KernelLayoutTrait, prelude::*};
 
 int_like!(PhysAddr, u64);
 int_like!(VirtAddr, u64);
@@ -142,7 +141,7 @@ impl VirtPageNum {
 
 macro_rules! impl_page_range {
     ($name:ident, $pn_type:ty) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         pub struct $name {
             start: $pn_type,
             npages: u64,
@@ -171,8 +170,12 @@ macro_rules! impl_page_range {
                 self.npages
             }
 
-            pub fn contains(&self, pn: $pn_type) -> bool {
-                self.start <= pn && pn < self.end()
+            pub const fn contains(&self, pn: $pn_type) -> bool {
+                self.start.get() <= pn.get() && pn.get() < self.start.get() + self.npages
+            }
+
+            pub const fn intersects(&self, other: &Self) -> bool {
+                self.start.get() < other.end().get() && other.start.get() < self.end().get()
             }
 
             paste::paste! {

@@ -11,6 +11,9 @@ pub enum MmError {
     AlreadyMapped,
     /// The virtual address is not mapped.
     NotMapped,
+    /// General invalid argument, e.g. an free operation with an invalid address
+    /// or length.
+    InvalidArgument,
 }
 
 impl AsErrno for MmError {

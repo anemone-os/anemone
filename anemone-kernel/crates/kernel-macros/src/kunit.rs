@@ -39,21 +39,30 @@ pub fn kunit_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     if !input.sig.generics.params.is_empty() || input.sig.generics.where_clause.is_some() {
-        return Error::new_spanned(&input.sig.generics, "kunit test function cannot have generics")
-            .to_compile_error()
-            .into();
+        return Error::new_spanned(
+            &input.sig.generics,
+            "kunit test function cannot have generics",
+        )
+        .to_compile_error()
+        .into();
     }
 
     if !input.sig.inputs.is_empty() {
-        return Error::new_spanned(&input.sig.inputs, "kunit test function must have signature fn()")
-            .to_compile_error()
-            .into();
+        return Error::new_spanned(
+            &input.sig.inputs,
+            "kunit test function must have signature fn()",
+        )
+        .to_compile_error()
+        .into();
     }
 
     if input.sig.variadic.is_some() {
-        return Error::new_spanned(&input.sig.variadic, "kunit test function cannot be variadic")
-            .to_compile_error()
-            .into();
+        return Error::new_spanned(
+            &input.sig.variadic,
+            "kunit test function cannot be variadic",
+        )
+        .to_compile_error()
+        .into();
     }
 
     if !matches!(input.sig.output, ReturnType::Default) {

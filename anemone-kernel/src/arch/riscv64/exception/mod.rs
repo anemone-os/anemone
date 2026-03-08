@@ -4,4 +4,4 @@ mod intr;
 pub use intr::RiscV64IntrArch;
 pub use trap::RiscV64TrapArch;
 mod trap;
-pub use trap::use_ktrap_entry;
+pub use trap::on_enter_kernel;

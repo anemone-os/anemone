@@ -1,6 +1,7 @@
+//! NS16550A serial port driver for platform bus.
+
 use core::any::Any;
 
-/// NS16550A serial port driver for platform bus.
 use crate::{
     device::{
         bus::platform::{self, PlatformDevice, PlatformDriver},
