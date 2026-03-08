@@ -37,6 +37,7 @@ pub struct Parameters {
     pub log_buffer_shift_kb: Option<u64>,
     pub log_record_shift_bytes: Option<u64>,
     pub kstack_shift_kb: Option<u64>,
+    pub remap_shift_gb: Option<u64>,
     pub max_ident_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
     pub time_slice_ms: Option<u64>,
@@ -78,6 +79,8 @@ pub const LOG_BUFFER_SHIFT_KB: u64 = {};
 pub const LOG_RECORD_SHIFT_BYTES: u64 = {};
 /// Kernel stack size as a power of 2 in KB
 pub const KSTACK_SHIFT_KB: u64 = {};
+/// Remap region size as a power of 2 in GB
+pub const REMAP_SHIFT_GB: u64 = {};
 /// Maximum length of identity strings in bytes
 pub const MAX_IDENT_LEN_BYTES: usize = {};
 /// Maximum length of file names in bytes. This is always equal to MAX_IDENT_LEN_BYTES,
@@ -94,6 +97,7 @@ pub const SYSTEM_HZ: u16 = {};
             default_or!(log_buffer_shift_kb),
             default_or!(log_record_shift_bytes),
             default_or!(kstack_shift_kb),
+            default_or!(remap_shift_gb),
             default_or!(max_ident_len_bytes),
             default_or!(max_processes),
             default_or!(time_slice_ms),

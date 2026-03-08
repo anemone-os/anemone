@@ -1,7 +1,13 @@
 //! From-kernel trap handling.
 
 use crate::{
-    exception::trap::hal::{ExceptionReason, TrapArchTrait, TrapReason},
+    exception::{
+        ipi::handle_ipi,
+        trap::{
+            InterruptReason,
+            hal::{ExceptionReason, TrapArchTrait, TrapReason},
+        },
+    },
     prelude::*,
 };
 
@@ -37,6 +43,11 @@ pub unsafe fn ktrap_handler(
                 panic!("fatal architecture-specific exception in kernel");
             },
         },
-        TrapReason::Interrupt(interrupt) => todo!(),
+        TrapReason::Interrupt(interrupt) => match interrupt {
+            InterruptReason::Ipi => {
+                handle_ipi();
+            },
+            _ => unimplemented!(),
+        },
     }
 }

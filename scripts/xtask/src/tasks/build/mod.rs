@@ -7,7 +7,7 @@ use clap::Args;
 use xshell::Shell;
 
 use crate::{
-    config::{KConfig, PlatformConfig, kconfig::Profile},
+    config::{kconfig::Profile, KConfig, PlatformConfig},
     log_progress, warn,
     workspace::*,
 };
@@ -142,6 +142,7 @@ impl<'a> BuildContext<'a> {
                 "-Z", // Refer to https://github.com/rust-lang/wg-cargo-std-aware/issues/53 for why this is needed
                 "build-std-features=compiler-builtins-mem",
             ])
+            .args(&["-Z", "json-target-spec"])
             .arg("--target")
             .arg(&format!(
                 "../conf/arch/{}/{}.json",

@@ -30,9 +30,9 @@ pub mod syserror;
 pub mod time;
 pub mod utils;
 
-use crate::prelude::*;
+use crate::{prelude::*, sync::mono::MonoOnce};
 
-pub fn kernel_main(is_bsp: bool) -> ! {
+fn kernel_main(is_bsp: bool) -> ! {
     // TODO: init subsystems, spawn init process, etc.
 
     if is_bsp {

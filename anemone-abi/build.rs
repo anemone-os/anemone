@@ -17,7 +17,7 @@ fn main() {
                         "cargo:warning=Failed to parse source files for cbindgen: {}",
                         error
                     );
-                }
+                },
                 e => panic!("Failed to generate bindings: {:?}", e),
             },
             |bindings| {

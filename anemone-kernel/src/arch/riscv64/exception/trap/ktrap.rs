@@ -1,6 +1,6 @@
 use crate::{
     arch::riscv64::exception::trap::{RiscV64Exception, RiscV64TrapFrame, RiscV64TrapReason},
-    exception::trap::ktrap_handler,
+    exception::trap::{InterruptReason, TrapReason, ktrap_handler},
     prelude::*,
 };
 
@@ -126,7 +126,12 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
 
     unsafe {
         match reason {
-            RiscV64TrapReason::Generic(reason) => ktrap_handler(trapframe, reason),
+            RiscV64TrapReason::Generic(reason) => {
+                if matches!(reason, TrapReason::Interrupt(InterruptReason::Ipi)) {
+                    riscv::register::sip::clear_ssoft();
+                }
+                ktrap_handler(trapframe, reason)
+            },
             RiscV64TrapReason::ArchRecoverable(exception) => {
                 arch_recoverable_handler(trapframe, exception)
             },
@@ -143,7 +148,10 @@ unsafe fn arch_recoverable_handler(trapframe: &mut RiscV64TrapFrame, exception: 
     );
 }
 
-pub unsafe fn use_ktrap_entry() {
+/// Called on the control is transferred to kernel.
+///
+/// Set up trap handler entry point.
+pub fn on_enter_kernel() {
     unsafe {
         unsafe extern "C" {
             fn __ktrap_entry();

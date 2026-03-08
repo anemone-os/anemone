@@ -1,6 +1,6 @@
 //! # Paging Subsystem & Virtual Memory Layout
 //!
-//! The kernel adopts a "Higher Half" memory model. The virtual address space
+//! Anemone adopts the "Higher Half" memory model. The virtual address space
 //! is partitioned into the following primary regions:
 //!
 //! * **User Space (Lower Half):** Occupies the bottom half of the address
@@ -18,9 +18,6 @@
 //! [ 0xffffffc000000000 | Direct Mapping (HHDM)    ] -> Physical memory mirror
 //! [  ...      | Vmmapping                ] -> Dynamic kernel mappings
 //! [ -2GB to 0 | Kernel Image             ] -> Core kernel executable
-
-// mod hal;
-// pub use hal::*;
 
 mod hal;
 pub use hal::*;

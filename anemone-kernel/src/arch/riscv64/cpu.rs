@@ -1,10 +1,10 @@
-use crate::prelude::*;
+use crate::{device::discovery::open_firmware::early_scan_cpu_count, prelude::*};
 
 pub struct RiscV64CpuArch;
 
 static mut NCPUS: usize = 0;
 
-pub(super) unsafe fn set_ncpus(ncpus: usize) {
+pub unsafe fn set_ncpus(ncpus: usize) {
     unsafe {
         NCPUS = ncpus;
     }

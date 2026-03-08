@@ -225,14 +225,15 @@ mod early {
                     let eppn = PhysPageNum::new(avail_region.end);
 
                     let npages = eppn.get() - sppn.get();
-                    add_mem_zone(MemZone::Avail(AvailMemZone::new(sppn, npages)));
+                    sys_mem_zones().add_mem_zone(MemZone::Avail(AvailMemZone::new(sppn, npages)));
                 }
                 for (rsv_region, rsv_flags) in self.rsv_map.iter() {
                     let sppn = PhysPageNum::new(rsv_region.start);
                     let eppn = PhysPageNum::new(rsv_region.end);
 
                     let npages = eppn.get() - sppn.get();
-                    add_mem_zone(MemZone::Rsv(RsvMemZone::new(sppn, npages, *rsv_flags)));
+                    sys_mem_zones()
+                        .add_mem_zone(MemZone::Rsv(RsvMemZone::new(sppn, npages, *rsv_flags)));
                 }
             }
         }

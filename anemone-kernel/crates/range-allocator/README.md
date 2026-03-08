@@ -1,0 +1,3 @@
+range allocator, with metadata stored outside (i.e. non-intrusive).
+
+Internally implemented with 2 BTreeMaps, one for free ranges and one for allocated ranges. The free range map is keyed by the start address of the range, and the allocated range map is keyed by the end address of the range. This allows for efficient allocation and deallocation of ranges, as well as merging of adjacent free ranges. (O(log n) for allocation and deallocation, O(1) for merging).

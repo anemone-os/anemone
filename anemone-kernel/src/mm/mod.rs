@@ -7,5 +7,7 @@ pub mod kpgdir;
 pub mod layout;
 pub mod paging;
 pub mod percpu;
+pub mod remap;
+pub mod zone;
 
 pub mod error;

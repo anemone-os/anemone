@@ -1,7 +1,5 @@
 use core::ops::{Index, IndexMut};
 
-use bitflags::bitflags;
-
 use crate::prelude::*;
 
 /// The architecture-specific traits and types for paging.
@@ -12,6 +10,12 @@ pub trait PagingArchTrait: Sized {
     /// The number of bits in the page offset, i.e., the number of bits needed
     /// to represent the page size.
     const PAGE_SIZE_BITS: usize = Self::PAGE_SIZE_BYTES.trailing_zeros() as usize;
+
+    /// The number of pages per megabyte.
+    const NPAGES_PER_MB: usize = 1024 * 1024 / Self::PAGE_SIZE_BYTES;
+    /// The number of pages per gigabyte.
+    const NPAGES_PER_GB: usize = 1024 * 1024 * 1024 / Self::PAGE_SIZE_BYTES;
+
     /// The number of levels in the page table hierarchy.
     const PAGE_LEVELS: usize;
 
@@ -48,6 +52,34 @@ pub trait PagingArchTrait: Sized {
     ///
     /// This function should always do a TLB shootdown.
     unsafe fn activate_addr_space(pgtbl: &PageTable);
+
+    /// Preallocate page directories for the given virtual address range.
+    ///
+    /// This function is currently used for vmalloc, fixmap, vmemmap and other
+    /// similar virtual memory regions.
+    ///
+    /// **The range is guaranteed to be aligned to GB.**
+    ///
+    /// This function is expected to panic immediately on failure, since kernel
+    /// cannot function properly without the necessary page directories
+    /// for those regions.
+    ///
+    /// TODO: This is a temporary workaround for the lack of sufficiently
+    /// flexible page table management and support for huge page mapping. We
+    /// should eventually implement those features and remove this function.
+    fn prealloc_pgdirs_for_region(pgtbl: &mut PageTable, range: VirtPageRange);
+
+    /// Perform a TLB shootdown for the given virtual address in all virtual
+    /// address spaces on current core.
+    ///
+    /// TODO: extend this to support ASID/PCID-based shootdowns.
+    fn tlb_shootdown(vaddr: VirtAddr);
+
+    /// Perform a TLB shootdown for the whole address space, in all virtual
+    /// address spaces on current core.
+    ///
+    /// TODO: extend this to support ASID/PCID-based shootdowns.
+    fn tlb_shootdown_all();
 }
 
 bitflags! {
@@ -108,10 +140,24 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
         self.is_valid() && !self.is_leaf()
     }
 
-    /// Set the flags of this page table entry to the given flags.
+    /// Set the flags of this page table entry to the given flags, while keeping
+    /// the physical page number unchanged.
     ///
-    /// This function should not modify the physical page number of the entry.
-    fn set_flags(&mut self, flags: PteFlags);
+    /// # Safety
+    ///
+    /// In most cases, a TLB shootdown should be performed after this operation.
+    unsafe fn set_flags(&mut self, flags: PteFlags);
+
+    /// Set the physical page number of this page table entry to the given
+    /// physical page number, while keeping the flags unchanged.
+    ///
+    /// # Safety
+    ///
+    /// In most cases, a TLB shootdown should be performed after this operation.
+    unsafe fn set_ppn(&mut self, ppn: PhysPageNum) {
+        let flags = self.flags();
+        *self = Self::new(ppn, flags);
+    }
 }
 pub trait PgDirArch:
     Sized + Copy + Index<usize, Output = Self::Pte> + IndexMut<usize, Output = Self::Pte>

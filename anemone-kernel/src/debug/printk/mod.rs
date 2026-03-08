@@ -15,8 +15,8 @@ static KERNEL_LOG: KernelLog = KernelLog::new();
 /// Registers a console to receive log output with the specified flags.
 pub fn register_console(console: Arc<dyn Console>, flags: ConsoleFlags) {
     if flags.contains(ConsoleFlags::REPLAY) {
-        let snapshot = KERNEL_LOG.snapshot();
-        for record in snapshot {
+        let it = KERNEL_LOG.iter_weak();
+        for record in it {
             let full_msg_str =
                 core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
             console.output(full_msg_str);
