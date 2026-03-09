@@ -49,6 +49,6 @@ impl Drop for PageTable {
                 1 << (PagingArch::PAGE_LEVELS * PagingArch::PGDIR_IDX_BITS),
             ),
         });
-        let _frame = unsafe { Frame::from_ppn(self.root) };
+        let _frame = unsafe { OwnedFrameHandle::from_ppn(self.root) };
     }
 }

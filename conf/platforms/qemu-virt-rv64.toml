@@ -10,6 +10,8 @@ max_phys_ram_size = 0x80000000      # 2GB
 kernel_la_base = 0x80200000
 kernel_va_base = 0xffffffff80200000
 max_cpus = 4
+frame_section_shift_mb = 7
+
 
 [qemu]
 qemu = "qemu-system-riscv64"

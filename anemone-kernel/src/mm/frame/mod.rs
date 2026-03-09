@@ -12,6 +12,9 @@ mod buddy;
 mod managed;
 pub use managed::*;
 
+mod memmap;
+pub use memmap::{get_frame, init as memmap_init};
+
 static FRAME_ALLOCATOR: Lazy<LockedFrameAllocator<BuddyAllocator>> =
     Lazy::new(|| LockedFrameAllocator::new(BuddyAllocator::new()));
 
@@ -20,9 +23,9 @@ static FRAME_ALLOCATOR: Lazy<LockedFrameAllocator<BuddyAllocator>> =
 /// # Safety
 ///
 /// This function must be called exactly once during kernel initialization,
-/// after all memory zones have been added via [`add_mem_zone`]. The behavior is
-/// undefined if this function is called multiple times or if it is called
-/// before all memory zones have been added.
+/// after all memory zones have been added. The behavior is undefined if this
+/// function is called multiple times or if it is called before all memory zones
+/// have been added.
 pub unsafe fn pmm_init() {
     sys_mem_zones().with_avail_zones(|avail_zones| {
         for zone in avail_zones.iter() {
@@ -39,25 +42,88 @@ pub fn frame_allocator_stats() -> allocator::FrameAllocatorStats {
 }
 
 /// Allocates a contiguous range of physical pages.
-pub fn alloc_frames(npages: usize) -> Option<Folio> {
+pub fn alloc_frames(npages: usize) -> Option<OwnedFolio> {
+    assert_ne!(npages, 0, "Internal error: cannot allocate zero pages");
     FRAME_ALLOCATOR.alloc(npages)
 }
 
 /// Allocates a single physical page.
-pub fn alloc_frame() -> Option<Frame> {
+pub fn alloc_frame() -> Option<OwnedFrameHandle> {
     FRAME_ALLOCATOR.alloc_one()
 }
 
 /// Allocates a contiguous range of physical pages and zeroes them.
-pub fn alloc_frames_zeroed(npages: usize) -> Option<Folio> {
+pub fn alloc_frames_zeroed(npages: usize) -> Option<OwnedFolio> {
     let mut folio = alloc_frames(npages)?;
     folio.as_bytes_mut().fill(0);
     Some(folio)
 }
 
 /// Allocates a single physical page and zeroes it.
-pub fn alloc_frame_zeroed() -> Option<Frame> {
+pub fn alloc_frame_zeroed() -> Option<OwnedFrameHandle> {
     let mut frame = alloc_frame()?;
     frame.as_bytes_mut().fill(0);
     Some(frame)
+}
+
+#[kunit]
+fn alloc_frame_updates_stats_and_refcount() {
+    let before = frame_allocator_stats();
+
+    let frame = alloc_frame().expect("alloc_frame() should succeed during kunit");
+    let ppn = frame.leak();
+
+    assert_eq!(unsafe { get_frame(ppn) }.rc(), 1);
+
+    let during = frame_allocator_stats();
+    assert_eq!(during.used_pages(), before.used_pages() + 1);
+
+    let frame = unsafe { OwnedFrameHandle::from_ppn(ppn) };
+    drop(frame);
+
+    let after = frame_allocator_stats();
+    assert_eq!(after.used_pages(), before.used_pages());
+    assert_eq!(unsafe { get_frame(ppn) }.rc(), 0);
+}
+
+#[kunit]
+fn alloc_frames_updates_stats_and_refcount() {
+    const NPAGES: usize = 4;
+
+    let before = frame_allocator_stats();
+
+    let folio = alloc_frames(NPAGES).expect("alloc_frames() should succeed during kunit");
+    let range = folio.leak();
+
+    for ppn in range.iter() {
+        assert_eq!(unsafe { get_frame(ppn) }.rc(), 1);
+    }
+
+    let during = frame_allocator_stats();
+    assert_eq!(during.used_pages(), before.used_pages() + NPAGES as u64);
+
+    let folio = unsafe { OwnedFolio::from_range(range) };
+    drop(folio);
+
+    let after = frame_allocator_stats();
+    assert_eq!(after.used_pages(), before.used_pages());
+
+    for ppn in range.iter() {
+        assert_eq!(unsafe { get_frame(ppn) }.rc(), 0);
+    }
+}
+
+#[kunit]
+fn alloc_frame_zeroed_returns_zeroed_page() {
+    let frame = alloc_frame_zeroed().expect("alloc_frame_zeroed() should succeed during kunit");
+    assert!(frame.as_bytes().iter().all(|&byte| byte == 0));
+}
+
+#[kunit]
+fn alloc_frames_zeroed_returns_zeroed_folio() {
+    const NPAGES: usize = 2;
+
+    let folio =
+        alloc_frames_zeroed(NPAGES).expect("alloc_frames_zeroed() should succeed during kunit");
+    assert!(folio.as_bytes().iter().all(|&byte| byte == 0));
 }

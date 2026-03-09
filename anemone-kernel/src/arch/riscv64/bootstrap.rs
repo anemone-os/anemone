@@ -231,6 +231,12 @@ extern "C" fn rusty_nun(hart_id: usize, fdt_pa: PhysAddr) -> ! {
 unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
     unsafe {
         clear_bss();
+
+        // set up kernel trap handler
+        on_enter_kernel();
+        riscv::register::sstatus::set_sie();
+        // enable ipi
+        riscv::register::sie::set_ssoft();
     }
     register_earlycon();
 
@@ -259,6 +265,15 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         kinfoln!("percpu data initialized");
 
         scanner.commit_to_pmm();
+        let mut memmap_pages = 0;
+        mm::frame::memmap_init(|npages| {
+            memmap_pages += npages;
+            kdebugln!("memmap init: allocating {} pages", npages);
+            sys_mem_zones()
+                .leak(npages)
+                .expect("no enough memory to initialize memmap")
+        });
+        kdebugln!("memmap initialized, total {} pages", memmap_pages);
         mm::frame::pmm_init();
         kinfoln!("physical memory management initialized");
 
@@ -272,12 +287,6 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
 
         unflatten_device_tree(fdt_va);
         of_platform_discovery();
-
-        // set up kernel trap handler
-        on_enter_kernel();
-        riscv::register::sstatus::set_sie();
-        // enable ipi
-        riscv::register::sie::set_ssoft();
 
         // okay, we can wake up APs now.
         {

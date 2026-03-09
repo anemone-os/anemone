@@ -5,6 +5,11 @@ use crate::prelude::*;
 /// The architecture-specific traits and types for paging.
 pub trait PagingArchTrait: Sized {
     type PgDir: PgDirArch;
+
+    /// The maximum number of bits in the physical page number supported by this
+    /// architecture.
+    const MAX_PPN_BITS: usize;
+
     /// The minimum page size supported by the architecture, in bytes.
     const PAGE_SIZE_BYTES: usize;
     /// The number of bits in the page offset, i.e., the number of bits needed

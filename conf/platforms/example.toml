@@ -28,6 +28,8 @@ kernel_la_base = 0x80200000
 kernel_va_base = 0xffffffff80200000
 # Maximum number of CPUs supported by this platform
 max_cpus = 4
+# Page frame section size as a power of 2 in megabytes.
+frame_section_shift_mb = 7
 
 # QEMU configuration
 # This section defines how to run the target platform in QEMU,

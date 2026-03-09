@@ -2,7 +2,7 @@
 
 use crate::{int_like, mm::layout::KernelLayoutTrait, prelude::*};
 use core::{
-    fmt::Display,
+    fmt::{Debug, Display},
     ops::{Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, Not, Sub, SubAssign},
 };
 
@@ -141,13 +141,13 @@ impl VirtPageNum {
 
 macro_rules! impl_page_range {
     ($name:ident, $pn_type:ty) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(Clone, Copy, PartialEq, Eq, Hash)]
         pub struct $name {
             start: $pn_type,
             npages: u64,
         }
         paste::paste! {
-            #[derive(Debug, Clone, Copy)]
+            #[derive(Clone, Copy)]
             pub struct [<$name Iter>] {
                 range: $name,
                 next: $pn_type,
@@ -207,6 +207,30 @@ macro_rules! impl_page_range {
 
 impl_page_range!(PhysPageRange, PhysPageNum);
 impl_page_range!(VirtPageRange, VirtPageNum);
+
+impl Debug for PhysPageRange {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "[{:#x}, {:#x}) ({} pages)",
+            self.start.to_phys_addr().get(),
+            self.end().to_phys_addr().get(),
+            self.npages
+        )
+    }
+}
+
+impl Debug for VirtPageRange {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "[{:#x}, {:#x}) ({} pages)",
+            self.start.to_virt_addr().get(),
+            self.end().to_virt_addr().get(),
+            self.npages
+        )
+    }
+}
 
 impl PhysAddr {
     pub fn to_hhdm(self) -> VirtAddr {

@@ -57,6 +57,7 @@ pub struct Constants {
     pub kernel_la_base: u64,
     pub kernel_va_base: u64,
     pub max_cpus: usize,
+    pub frame_section_shift_mb: usize,
 }
 
 #[derive(Deserialize, Debug)]
@@ -97,6 +98,8 @@ pub const KERNEL_LA_BASE: u64 = {:#x};
 pub const KERNEL_VA_BASE: u64 = {:#x};
 /// Maximum number of CPUs supported
 pub const MAX_CPUS: usize = {};
+/// Frame section size shift in megabytes
+pub const FRAME_SECTION_SHIFT_MB: usize = {};
 
         "#,
             self.constants.phys_ram_start,
@@ -104,6 +107,7 @@ pub const MAX_CPUS: usize = {};
             self.constants.kernel_la_base,
             self.constants.kernel_va_base,
             self.constants.max_cpus,
+            self.constants.frame_section_shift_mb,
         )
     }
 }
