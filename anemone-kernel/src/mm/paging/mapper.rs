@@ -1,4 +1,4 @@
-use core::marker::PhantomData;
+use core::{marker::PhantomData, mem::ManuallyDrop};
 
 use crate::prelude::*;
 
@@ -69,7 +69,6 @@ impl Mapper<'_> {
             mapper: &'a mut Mapper<'m>,
             mapping: Mapping,
             mapped_pages: usize,
-            is_committed: bool,
         }
 
         impl<'a, 'm> MapTransaction<'a, 'm> {
@@ -78,7 +77,6 @@ impl Mapper<'_> {
                     mapper,
                     mapping,
                     mapped_pages: 0,
-                    is_committed: false,
                 }
             }
 
@@ -100,22 +98,20 @@ impl Mapper<'_> {
                 Ok(())
             }
 
-            fn commit(mut self) {
-                self.is_committed = true;
+            fn commit(self) {
+                let _ = ManuallyDrop::new(self);
             }
         }
 
         impl Drop for MapTransaction<'_, '_> {
             fn drop(&mut self) {
-                if !self.is_committed {
-                    knoticeln!(
-                        "MapTransaction::Drop: transaction failed, rolling back the mapped pages"
-                    );
-                    // roll back the mapping of already mapped pages
-                    self.mapper.unmap(Unmapping {
-                        range: VirtPageRange::new(self.mapping.vpn, self.mapped_pages as u64),
-                    });
-                }
+                knoticeln!(
+                    "MapTransaction::Drop: transaction failed, rolling back the mapped pages"
+                );
+                // roll back the mapping of already mapped pages
+                self.mapper.unmap(Unmapping {
+                    range: VirtPageRange::new(self.mapping.vpn, self.mapped_pages as u64),
+                });
             }
         }
 
@@ -185,7 +181,7 @@ impl Mapper<'_> {
                         // deallocate the empty page table
                         let ppn = pte.ppn();
                         *pte = Pte::ZEROED;
-                        let _frame = Frame::from_ppn(ppn);
+                        let _frame = OwnedFrameHandle::from_ppn(ppn);
                     }
                     ControlFlow::<()>::Continue
                 },

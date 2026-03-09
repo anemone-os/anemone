@@ -1,5 +1,6 @@
 use core::{
     cell::UnsafeCell,
+    mem::MaybeUninit,
     sync::atomic::{AtomicBool, Ordering},
 };
 
@@ -20,7 +21,7 @@ use core::{
 ///
 /// 1. **Sequential Access**: The core requirement for using `MonoFlow`.
 /// 2. **Non-Reentrancy**: The requirement from Rust's aliasing rules. Currently
-///    enforced in debug builds.
+///    enforced in dev builds.
 #[derive(Debug)]
 pub struct MonoFlow<T> {
     data: UnsafeCell<T>,
@@ -99,14 +100,14 @@ impl<T> MonoFlow<T> {
 /// See [`MonoFlow`] for details on the synchronization model.
 ///
 /// **In effect, since [`MonoOnce`] does not provide mutable access to the inner
-/// data, it can be simultaneously accessed by multiple control flows**
+/// data, it can be simultaneously accessed by multiple control flows.**
 ///
 /// **The 'Mono' in the name stands for the fact that the action to initialize
 /// the inner data is guaranteed to be performed only once and before any access
 /// to the inner data.**
 #[derive(Debug)]
 pub struct MonoOnce<T> {
-    data: UnsafeCell<Option<T>>,
+    data: UnsafeCell<MaybeUninit<T>>,
     #[cfg(debug_assertions)]
     initialized: AtomicBool,
 }
@@ -116,7 +117,7 @@ unsafe impl<T: Sync> Sync for MonoOnce<T> {}
 impl<T> MonoOnce<T> {
     pub const unsafe fn new() -> Self {
         MonoOnce {
-            data: UnsafeCell::new(None),
+            data: UnsafeCell::new(MaybeUninit::uninit()),
             #[cfg(debug_assertions)]
             initialized: AtomicBool::new(false),
         }
@@ -124,14 +125,13 @@ impl<T> MonoOnce<T> {
 
     pub fn init<F>(&self, init: F)
     where
-        F: FnOnce() -> T,
+        F: FnOnce(&mut MaybeUninit<T>),
         T: Sized,
     {
         #[cfg(debug_assertions)]
         {
             if !self.initialized.load(Ordering::Acquire) {
-                let value = init();
-                unsafe { *self.data.get() = Some(value) };
+                init(unsafe { &mut *self.data.get() });
                 self.initialized.store(true, Ordering::Release);
             } else {
                 panic!("MonoOnce: already initialized");
@@ -140,17 +140,11 @@ impl<T> MonoOnce<T> {
 
         #[cfg(not(debug_assertions))]
         {
-            let value = init();
-            unsafe { *self.data.get() = Some(value) };
+            init(unsafe { &mut *self.data.get() });
         }
     }
 
     pub fn get(&self) -> &T {
-        unsafe {
-            match &*self.data.get() {
-                Some(value) => value,
-                None => panic!("MonoOnce: not initialized"),
-            }
-        }
+        unsafe { (&*self.data.get()).assume_init_ref() }
     }
 }
