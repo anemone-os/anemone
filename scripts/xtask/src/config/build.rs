@@ -4,14 +4,12 @@ use crate::config::platform::*;
 impl TargetTriple {
     pub fn objdump(&self) -> &'static str {
         match self {
-            Self::RiscV64UnknownAnemoneElf =>{ 
+            Self::RiscV64UnknownAnemoneElf => {
                 if cfg!(target_os = "linux") {
                     "riscv64-unknown-elf-objdump"
-                }
-                else if cfg!(target_os = "macos") {
+                } else if cfg!(target_os = "macos") {
                     "riscv64-elf-objdump"
-                }
-                else {
+                } else {
                     unimplemented!("Objdump for target triple {:?} is not implemented on this platform", self)
                 }
             },
