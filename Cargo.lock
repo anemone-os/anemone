@@ -30,6 +30,7 @@ dependencies = [
  "idalloc",
  "intrusive-collections",
  "kernel-macros",
+ "la-insc",
  "paste",
  "range-allocator",
  "rangemap",
@@ -323,6 +324,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "la-insc"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "paste",
 ]
 
 [[package]]

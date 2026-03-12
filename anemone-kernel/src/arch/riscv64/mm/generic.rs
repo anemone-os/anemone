@@ -79,6 +79,7 @@ impl From<PteFlags> for RiscV64PteFlags {
         if flags.contains(PteFlags::USER) {
             result |= RiscV64PteFlags::USER;
         }
+        // Ignore CACHED and STRONG bits.
         result
     }
 }

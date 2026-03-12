@@ -26,3 +26,4 @@ macro_rules! arch_select {
 }
 
 arch_select!(riscv64, "riscv64");
+arch_select!(loongarch64, "loongarch64");

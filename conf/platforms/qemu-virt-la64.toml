@@ -1,0 +1,21 @@
+[build]
+name = "qemu-virt-la64"
+arch = "loongarch64"
+target = "loongarch64-unknown-anemone-elf"
+exec_env = "sbi"
+
+[constants]
+phys_ram_start = 0x80000000
+max_phys_ram_size = 0x80000000      # 2GB
+kernel_la_base = 0x80200000
+kernel_va_base = 0xffffffff80200000
+max_cpus = 4
+
+[qemu]
+qemu = "qemu-system-riscv64"
+machine = "virt"
+cpu = "rv64"
+smp = 4
+memory = "256M"
+bios = "default"
+args = ["-nographic", "-serial", "mon:stdio"]
