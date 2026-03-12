@@ -11,6 +11,8 @@ pub enum MmError {
     AlreadyMapped,
     /// The virtual address is not mapped.
     NotMapped,
+    /// The physical frame is held by multiple owners.
+    SharedFrame,
     /// General invalid argument, e.g. an free operation with an invalid address
     /// or length.
     InvalidArgument,

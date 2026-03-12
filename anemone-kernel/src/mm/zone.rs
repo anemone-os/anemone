@@ -39,6 +39,11 @@ bitflags! {
         ///
         /// TODO: This flag is in theory needless. We should use a RECLAIMABLE flag instead.
         const FDT = 0x0010;
+
+        /// Memory that is leaked (i.e., not managed by the physical memory manager).
+        ///
+        /// Often used during early boot.
+        const LEAKED = 0x0020;
     }
 }
 
@@ -188,6 +193,51 @@ impl SysMemZones {
             MemZone::Avail(avail_zone) => avail_mem_zones.push(avail_zone),
             MemZone::Rsv(rsv_zone) => rsv_mem_zones.push(rsv_zone),
         }
+    }
+
+    /// Leaks a contiguous range of physical pages from the available memory
+    /// zones, making it reserved thus not managed by the physical memory
+    /// manager.
+    pub fn leak(&self, npages: usize) -> Option<PhysPageNum> {
+        let mut mem_zones = self.mem_zones.lock_irqsave();
+        let mut avail_mem_zones = self.avail_mem_zones.lock_irqsave();
+        let mut rsv_mem_zones = self.rsv_mem_zones.lock_irqsave();
+
+        let mut allocated_sppn = None;
+
+        for avail_zone in avail_mem_zones.iter_mut() {
+            if avail_zone.npages >= npages as u64 {
+                allocated_sppn = Some(avail_zone.start_ppn);
+                avail_zone.start_ppn += npages as u64;
+                avail_zone.npages -= npages as u64;
+                kdebugln!("SysMemZones::leak: leaking {} pages", npages);
+                break;
+            }
+        }
+
+        rsv_mem_zones.push(RsvMemZone::new(
+            allocated_sppn.unwrap(),
+            npages as u64,
+            RsvMemFlags::LEAKED,
+        ));
+
+        // sync with mem_zones
+        for mem_zone in mem_zones.iter_mut() {
+            if let MemZone::Avail(mem_zone) = mem_zone {
+                if mem_zone.start_ppn == allocated_sppn.unwrap() {
+                    mem_zone.start_ppn += npages as u64;
+                    mem_zone.npages -= npages as u64;
+                    break;
+                }
+            }
+        }
+        mem_zones.push(MemZone::Rsv(RsvMemZone::new(
+            allocated_sppn.unwrap(),
+            npages as u64,
+            RsvMemFlags::LEAKED,
+        )));
+
+        allocated_sppn
     }
 }
 

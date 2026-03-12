@@ -32,14 +32,12 @@ mod early {
     use super::*;
 
     #[derive(Debug)]
-    pub struct EarlyMemoryScanner<'a> {
-        _lifetime: PhantomData<&'a ()>,
-
-        avail_set: rangemap::RangeSet<u64>, // ppn, not addr
+    pub struct EarlyMemoryScanner {
+        avail_set: rangemap::RangeSet<u64>,            // ppn, not addr
         rsv_map: rangemap::RangeMap<u64, RsvMemFlags>, // ppn, not addr
     }
 
-    impl EarlyMemoryScanner<'_> {
+    impl EarlyMemoryScanner {
         /// Scan the memory layout (including reserved memory regions) from the
         /// device tree, and return an [EarlyMemoryScanner] instance that holds
         /// the scanned information for later use.
@@ -155,11 +153,10 @@ mod early {
                     __ekernel
                 );
 
-                Self {
-                    _lifetime: PhantomData,
-                    avail_set,
-                    rsv_map,
-                }
+                // 0 is reserved for null pointer semantics.
+                avail_set.remove(0..1);
+
+                Self { avail_set, rsv_map }
             }
         }
 
@@ -323,7 +320,9 @@ pub unsafe fn unflatten_device_tree(fdt_va: VirtAddr) {
         unsafe { Some(NonNull::new_unchecked(ptr)) }
     });
 
-    DEVICE_TREE.init(|| Arc::new(DeviceTree { handle }));
+    DEVICE_TREE.init(|dt| {
+        dt.write(Arc::new(DeviceTree { handle }));
+    });
 }
 
 /// Traverse the unflattened device tree and create devices accordingly.

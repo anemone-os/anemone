@@ -1,4 +1,12 @@
 //! TODO: add FrameOomHandler trait
+//!
+//! **NOTE**
+//!
+//! medadata in memmap is not maintained here. the allocator only serves as an
+//! algorithm to allocate and deallocate physical pages.
+//!
+//! metadata is maintained, instead, in [crate::mm::frame::managed] module, with
+//! RAII types to ensure safety.
 
 use crate::prelude::*;
 
@@ -74,21 +82,19 @@ impl<A: FrameAllocator> LockedFrameAllocator<A> {
         }
     }
 
-    pub fn alloc(&self, npages: usize) -> Option<Folio> {
-        let mut allocator = self.allocator.lock_irqsave();
-        let start_ppn = allocator.alloc(npages)?;
+    pub fn alloc(&self, npages: usize) -> Option<OwnedFolio> {
+        let start_ppn = self.allocator.lock_irqsave().alloc(npages)?;
         unsafe {
-            Some(Folio::from_range(PhysPageRange::new(
+            Some(OwnedFolio::new(PhysPageRange::new(
                 start_ppn,
                 npages as u64,
             )))
         }
     }
 
-    pub fn alloc_one(&self) -> Option<Frame> {
-        let mut allocator = self.allocator.lock_irqsave();
-        let start_ppn = allocator.alloc(1)?;
-        unsafe { Some(Frame::from_ppn(start_ppn)) }
+    pub fn alloc_one(&self) -> Option<OwnedFrameHandle> {
+        let start_ppn = self.allocator.lock_irqsave().alloc(1)?;
+        unsafe { Some(OwnedFrameHandle::new(start_ppn)) }
     }
 
     pub unsafe fn add_range(&self, range: PhysPageRange) {
