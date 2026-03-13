@@ -37,6 +37,7 @@ RUN apt update && apt install -y \
     git \
     openssh-client \
     curl \
+    llvm \
     libglib2.0-0
 # Install Rust in a shared location accessible by all users
 # RUSTUP_HOME and binaries are shared, but each user gets their own ~/.cargo for registry cache
