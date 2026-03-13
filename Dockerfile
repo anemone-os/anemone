@@ -30,7 +30,7 @@ RUN apt update && apt install -y \
     git \
     openssh-client \
     curl \
-    llvm-20 \
+    llvm \
     libglib2.0-0
 # Install Rust in a shared location accessible by all users
 # RUSTUP_HOME and binaries are shared, but each user gets their own ~/.cargo for registry cache
@@ -51,7 +51,7 @@ FROM ubuntu:24.04 AS fin_ci
 RUN apt update && apt install -y \
     build-essential \
     python3 \
-    llvm-20 \
+    llvm \
     python3-pip \
     curl
 ENV RUSTUP_HOME=/opt/rust/rustup \
