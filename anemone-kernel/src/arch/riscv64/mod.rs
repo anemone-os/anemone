@@ -9,6 +9,7 @@ pub(super) mod exception;
 pub(super) mod mm;
 pub(super) mod power;
 pub(super) mod time;
+pub(super) mod sched;
 
 mod bootstrap;
 

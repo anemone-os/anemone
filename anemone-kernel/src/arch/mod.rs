@@ -22,6 +22,12 @@ macro_rules! arch_select {
         pub use $crate::arch::$arch::{
             CpuArch, IntrArch, KernelLayout, PagingArch, PowerArch, TimeArch, TrapArch,
         };
+
+        #[cfg(target_arch = $arch_str)]
+        pub use self::$arch::CpuArch as CurCpuOpsArch;
+
+        #[cfg(target_arch = $arch_str)]
+        pub use self::$arch::ContextSwitchArch as CurContextSwitchArch;
     };
 }
 

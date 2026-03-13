@@ -3,5 +3,5 @@
 mod intr;
 pub use intr::RiscV64IntrArch;
 pub use trap::RiscV64TrapArch;
-mod trap;
+pub mod trap;
 pub use trap::on_enter_kernel;
