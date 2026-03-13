@@ -22,13 +22,6 @@ RUN ../qemu-${QEMU_VERSION}/configure --target-list=riscv64-softmmu --prefix=/op
 RUN make -j$(nproc)
 RUN make install
 
-FROM ubuntu:24.04 AS build_gnu_riscv
-ARG GNU_VERSION=2026.01.09
-WORKDIR /build
-RUN apt update && apt install -y wget xz-utils
-RUN wget https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/${GNU_VERSION}/riscv64-elf-ubuntu-24.04-gcc.tar.xz
-RUN tar xvf riscv64-elf-ubuntu-24.04-gcc.tar.xz
-
 FROM ubuntu:24.04 AS fin_dev
 RUN apt update && apt install -y \
     build-essential \
@@ -45,11 +38,10 @@ ENV RUSTUP_HOME=/opt/rust/rustup \
     PATH="/opt/rust/cargo/bin:${PATH}"
 RUN mkdir -p /opt/rust/cargo /opt/rust/rustup && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path && \
-    cargo install cargo-fuzz just just-lsp && \
+    cargo install cargo-fuzz just just-lsp cargo-binutils && \
     chmod -R a+rwX /opt/rust
 COPY --from=build_qemu /opt/qemu /opt/qemu
-COPY --from=build_gnu_riscv /build/riscv /opt/gnu-riscv
-ENV PATH="/opt/gnu-riscv/bin:/opt/qemu/bin:${PATH}"
+ENV PATH="/opt/qemu/bin:${PATH}"
 # Unset CARGO_HOME so users default to ~/.cargo for registry/cache (avoids permission issues)
 ENV CARGO_HOME=
 ENTRYPOINT [ "bash" ]
@@ -65,9 +57,7 @@ ENV RUSTUP_HOME=/opt/rust/rustup \
     PATH="/opt/rust/cargo/bin:${PATH}"
 RUN mkdir -p /opt/rust/cargo /opt/rust/rustup && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path && \
-    cargo install just && \
+    cargo install just cargo-binutils && \
     chmod -R a+rwX /opt/rust
-COPY --from=build_gnu_riscv /build/riscv /opt/gnu-riscv
-ENV PATH="/opt/gnu-riscv/bin:${PATH}"
 ENV CARGO_HOME=
 ENTRYPOINT [ "bash" ]

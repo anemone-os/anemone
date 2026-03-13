@@ -432,7 +432,7 @@ impl Mapper<'_> {
                 if pte.is_valid() && !overwrite {
                     return Err(MmError::AlreadyMapped);
                 }
-                *pte = Pte::new(ppn, flags | PteFlags::VALID);
+                *pte = Pte::new_leaf(ppn, flags | PteFlags::VALID);
             } else {
                 // branch
                 if !pte.is_branch() {
@@ -443,10 +443,7 @@ impl Mapper<'_> {
                     // all allocated frames will be deallocated automatically.
                     let new_pgdir_ppn = alloc_frame_zeroed().ok_or(MmError::OutOfMemory)?.leak();
 
-                    // TODO: for some architectures like x86_64, a single VALID bit is insufficient
-                    // to indicate a branch. we may add a new method to PteArch
-                    // trait.
-                    *pte = Pte::new(new_pgdir_ppn, PteFlags::VALID);
+                    *pte = Pte::new_branch(new_pgdir_ppn, PteFlags::VALID);
                 }
                 pgdir = unsafe {
                     pte.ppn()
