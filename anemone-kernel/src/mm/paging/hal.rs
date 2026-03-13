@@ -117,11 +117,11 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
     fn new_leaf(ppn: PhysPageNum, flags: PteFlags) -> Self;
 
     /// Create a new branch entry with the given physical page number and
-    /// flags. The physical page number points to a page directory 
+    /// flags. The physical page number points to a page directory
     /// rather than a physical page.
     /// 
     /// **In some architectures, flags except for the valid bit 
-    /// might be ignored to create an branch**
+    /// might be ignored to create an branch.**
     fn new_branch(ppn: PhysPageNum, flags: PteFlags) -> Self;
 
     /// Check if this page table entry is empty, i.e., it is equal to ZEROED.

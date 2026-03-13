@@ -151,7 +151,7 @@ impl PteArch for RiscV64Pte {
     }
     
     fn is_empty(&self) -> bool{
-        self.ppn() == Self::ZEROED.ppn() && self.flags() == Self::ZEROED.flags()
+        self.get() == Self::ZEROED.get()
     }
 }
 
