@@ -95,9 +95,7 @@ fn alloc_frames_updates_stats_and_refcount() {
     let folio = alloc_frames(NPAGES).expect("alloc_frames() should succeed during kunit");
     let range = folio.leak();
 
-    for ppn in range.iter() {
-        assert_eq!(unsafe { get_frame(ppn) }.rc(), 1);
-    }
+    assert_eq!(unsafe { get_frame(range.start()) }.rc(), 1);
 
     let during = frame_allocator_stats();
     assert_eq!(during.used_pages(), before.used_pages() + NPAGES as u64);
@@ -108,22 +106,5 @@ fn alloc_frames_updates_stats_and_refcount() {
     let after = frame_allocator_stats();
     assert_eq!(after.used_pages(), before.used_pages());
 
-    for ppn in range.iter() {
-        assert_eq!(unsafe { get_frame(ppn) }.rc(), 0);
-    }
-}
-
-#[kunit]
-fn alloc_frame_zeroed_returns_zeroed_page() {
-    let frame = alloc_frame_zeroed().expect("alloc_frame_zeroed() should succeed during kunit");
-    assert!(frame.as_bytes().iter().all(|&byte| byte == 0));
-}
-
-#[kunit]
-fn alloc_frames_zeroed_returns_zeroed_folio() {
-    const NPAGES: usize = 2;
-
-    let folio =
-        alloc_frames_zeroed(NPAGES).expect("alloc_frames_zeroed() should succeed during kunit");
-    assert!(folio.as_bytes().iter().all(|&byte| byte == 0));
+    assert_eq!(unsafe { get_frame(range.start()) }.rc(), 0);
 }

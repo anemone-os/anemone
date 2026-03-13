@@ -10,7 +10,7 @@ pub use preempt_counter::PreemptCounter;
 mod page_fault;
 pub use page_fault::{PageFaultInfo, PageFaultType};
 mod ipi;
-pub use ipi::{IpiPayload, broadcast_ipi, send_ipi};
+pub use ipi::{IpiPayload, broadcast_ipi, broadcast_ipi_async, send_ipi, send_ipi_async};
 
 pub mod intr;
 pub mod trap;

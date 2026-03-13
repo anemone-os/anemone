@@ -11,7 +11,7 @@ use crate::{
     prelude::*,
 };
 
-#[derive(Debug, DriverState)]
+#[derive(Debug, PrvData)]
 #[repr(C)]
 struct Ns16550AState {
     base: PhysAddr,
@@ -31,8 +31,8 @@ impl KObjectOps for Ns16550ADriver {}
 
 impl DriverOps for Ns16550ADriver {
     fn probe(&self, device: Arc<dyn Device>) -> Result<(), DevError> {
-        let pdev = (device.as_ref() as &dyn Any)
-            .downcast_ref::<PlatformDevice>()
+        let pdev = device
+            .as_platform_device()
             .ok_or(DevError::DriverIncompatible)?;
 
         let mut state = Ns16550AState {
@@ -47,9 +47,9 @@ impl DriverOps for Ns16550ADriver {
         state.frequency = frequency;
         kdebugln!("ns16550a: clock frequency = {} Hz", frequency);
 
-        for resource in pdev.resources() {
+        for &resource in pdev.resources() {
             match resource {
-                &Resource::Mmio { base, len } => {
+                Resource::Mmio { base, len } => {
                     kdebugln!(
                         "ns16550a: MMIO resource [{:#x}, {:#x})",
                         base.get(),
@@ -61,6 +61,8 @@ impl DriverOps for Ns16550ADriver {
         }
 
         pdev.set_drv_state(Some(Box::new(state)));
+
+        //        request_irq(pdev, &IRQ_HANDLER)?;
 
         Ok(())
     }
@@ -74,6 +76,12 @@ impl PlatformDriver for Ns16550ADriver {
     fn match_table(&self) -> &[&str] {
         &["ns16550a"]
     }
+}
+
+static IRQ_HANDLER: IrqHandler = IrqHandler::new(handle_irq);
+
+fn handle_irq() -> IrqHandleResult {
+    IrqHandleResult::Unhandled
 }
 
 #[initcall(driver)]

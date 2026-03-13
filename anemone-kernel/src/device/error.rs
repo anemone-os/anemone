@@ -25,6 +25,12 @@ pub enum DevError {
     MissingFwNode,
     /// The firmware node has no enough information to probe the device.
     FwNodeLookupFailed,
+    /// No IRQ domain found for the device.
+    NoIrqDomain,
+    /// No interrupt information found for the device.
+    NoInterruptInfo,
+    /// Device has invalid interrupt information.
+    InvalidInterruptInfo,
 }
 
 impl AsErrno for DevError {

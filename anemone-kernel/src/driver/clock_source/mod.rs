@@ -3,4 +3,4 @@
 //! interrupt handler to determine how long to wait before the next interrupt.
 
 #[cfg(target_arch = "riscv64")]
-pub mod riscv64_timer;
+pub mod sbi_timer;

@@ -1,3 +1,11 @@
+//! Here lies the driver framework, and all driver implementations.
+//!
+//! Most drivers implement the [Driver] trait, but some drivers are for system
+//! early initialization and do not fit into the device-driver model, such as
+//! those root interrupt controller drivers and system clock source drivers.
+//! They won't have a corresponding `dyn Driver` object. (So do their
+//! corresponding device objects.)
+
 use core::{any::Any, fmt::Debug};
 
 use crate::{
@@ -7,6 +15,7 @@ use crate::{
 };
 
 pub mod clock_source;
+pub mod intc;
 pub mod serial;
 
 #[derive(Debug)]
@@ -57,14 +66,6 @@ impl Debug for dyn Driver {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let base = DriverData::base(self);
         Debug::fmt(base, f)
-    }
-}
-
-pub trait DriverState: Any + Send + Sync {}
-
-impl Debug for dyn DriverState {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "DriverState {{ ... }}")
     }
 }
 

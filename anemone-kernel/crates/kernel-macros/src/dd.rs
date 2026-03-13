@@ -87,12 +87,3 @@ base_impl!(
         crate::driver::DriverBase
     ],
 );
-
-pub fn drv_state_impl(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
-    let expanded = quote! {
-        impl crate::driver::DriverState for #name {}
-    };
-    expanded.into()
-}

@@ -11,6 +11,7 @@ pub(super) mod power;
 pub(super) mod time;
 
 mod bootstrap;
+mod machine;
 
 pub use cpu::RiscV64CpuArch as CpuArch;
 pub use exception::{RiscV64IntrArch as IntrArch, RiscV64TrapArch as TrapArch};

@@ -6,6 +6,7 @@ use crate::{
         clear_bss,
         riscv64::{
             exception::on_enter_kernel,
+            machine::machine_init,
             mm::{RiscV64PgDir, RiscV64Pte, RiscV64PteFlags, sv39},
         },
     },
@@ -287,6 +288,9 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         driver::init();
 
         unflatten_device_tree(fdt_va);
+
+        machine_init();
+
         of_platform_discovery();
 
         // okay, we can wake up APs now.

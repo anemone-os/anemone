@@ -206,7 +206,8 @@ pub unsafe fn kmap(mapping: Mapping) -> Result<(), MmError> {
     unsafe {
         KERNEL_PTABLE.kmap(mapping)?;
     }
-    broadcast_ipi(IpiPayload::TlbShootdown { vaddr: None }, false);
+    broadcast_ipi_async(IpiPayload::TlbShootdown { vaddr: None })
+        .expect("failed to send TLB shootdown IPI");
     Ok(())
 }
 
@@ -220,5 +221,6 @@ pub unsafe fn kunmap(unmapping: Unmapping) {
     unsafe {
         KERNEL_PTABLE.kunmap(unmapping);
     }
-    broadcast_ipi(IpiPayload::TlbShootdown { vaddr: None }, false);
+    broadcast_ipi_async(IpiPayload::TlbShootdown { vaddr: None })
+        .expect("failed to send TLB shootdown IPI");
 }

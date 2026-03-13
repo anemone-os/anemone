@@ -42,7 +42,22 @@ impl FrameHandle {
     }
 }
 
+impl Clone for FrameHandle {
+    fn clone(&self) -> Self {
+        unsafe {
+            get_frame(self.ppn).inc_ref();
+        }
+        Self { ppn: self.ppn }
+    }
+}
+
 impl OwnedFrameHandle {
+    /// Returns the physical page number of the frame represented by this
+    /// handle.
+    pub fn ppn(&self) -> PhysPageNum {
+        self.inner.ppn
+    }
+
     /// Creates a new `OwnedFrameHandle` from the given physical page number.
     ///
     /// # Safety
@@ -194,7 +209,22 @@ impl Folio {
     }
 }
 
+impl Clone for Folio {
+    fn clone(&self) -> Self {
+        unsafe {
+            get_frame(self.range.start()).inc_ref();
+
+            Self { range: self.range }
+        }
+    }
+}
+
 impl OwnedFolio {
+    /// Returns the physical page range of the folio.
+    pub fn range(&self) -> PhysPageRange {
+        self.inner.range()
+    }
+
     /// Creates a new `OwnedFolio` from the given physical page range.
     ///
     /// # Safety
@@ -212,9 +242,13 @@ impl OwnedFolio {
                 }
             }
 
-            for i in 0..range.npages() {
-                get_frame(range.start() + i).inc_ref();
-            }
+            // an dangerous but necessary optimization.
+            //
+            // we use the first frame's metadata to be on behalf of the whole folio
+            //
+            // according to Folio's contract, it's always safe unless user split the folio
+            // into multiple frames.
+            get_frame(range.start()).inc_ref();
 
             Self {
                 inner: Folio { range },
@@ -233,13 +267,7 @@ impl OwnedFolio {
         unsafe {
             #[cfg(debug_assertions)]
             {
-                for i in 0..range.npages() {
-                    assert_eq!(
-                        get_frame(range.start() + i).rc(),
-                        1,
-                        "Internal error: frames in the same folio have different reference counts"
-                    );
-                }
+                assert_eq!(get_frame(range.start()).rc(), 1,);
             }
         }
 
@@ -312,24 +340,9 @@ impl OwnedFolio {
 impl Drop for Folio {
     fn drop(&mut self) {
         unsafe {
-            #[cfg(debug_assertions)]
-            {
-                let rc = get_frame(self.range.start()).rc();
-                for i in 1..self.range.npages() {
-                    assert_eq!(
-                        get_frame(self.range.start() + i).rc(),
-                        rc,
-                        "Internal error: frames in the same folio have different reference counts"
-                    );
-                }
-            }
-
-            let rc = get_frame(self.range.start()).rc();
-            for i in 0..self.range.npages() {
-                let ppn = self.range.start() + i;
-                let frame = get_frame(ppn);
-                frame.dec_ref();
-            }
+            let frame = get_frame(self.range.start());
+            let rc = frame.rc();
+            frame.dec_ref();
             if rc == 1 {
                 FRAME_ALLOCATOR.dealloc(self.range);
             }

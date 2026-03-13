@@ -19,6 +19,8 @@ rangemap = { workspace = true }
 intrusive-collections = { workspace = true }
 heapless = { workspace = true }
 hashbrown = { workspace = true }
+bimap = { workspace = true }
+fast_radix_trie = { workspace = true }
 buddy-system = { path = "crates/buddy-system", features = ["stats"] }
 device-tree = { path = "crates/device-tree", features = ["alloc"] }
 idalloc = { path = "crates/idalloc" }

@@ -126,6 +126,11 @@ impl<const LEN: usize> core::str::FromStr for Identity<LEN> {
 #[macro_export]
 macro_rules! ident_format {
     ($($arg:tt)*) => {
-        $crate::utils::identity::Identity::<crate::kconfig_defs::MAX_IDENT_LEN_BYTES>::try_from_fmt(core::format_args!($($arg)*))
+        $crate::utils::identity::Identity::<_>::try_from_fmt(core::format_args!($($arg)*))
     };
 }
+
+const GENERAL_IDENTITY_LEN: usize = 32;
+/// [`GeneralIdentity`] is a commonly used identity type with a fixed length of
+/// 32 bytes, which is sufficient for most use cases in kernel.
+pub type GeneralIdentity = Identity<GENERAL_IDENTITY_LEN>;

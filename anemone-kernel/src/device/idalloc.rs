@@ -69,6 +69,7 @@ impl Drop for DeviceId {
     }
 }
 
+/// Allocate a new device ID. Returns `None` if no more IDs are available.
 pub fn alloc_device_id() -> Option<DeviceId> {
     DEV_ID_ALLOCATOR.lock_irqsave().alloc()
 }

@@ -1,3 +1,9 @@
+//! **NOTE**
+//!
+//! Much logic in this module is based on the assumption that an unflattened
+//! device tree will last for the entire lifetime of the kernel, and will never
+//! be modified after it is created.
+
 #[cfg(feature = "alloc")]
 extern crate alloc;
 #[cfg(feature = "alloc")]
@@ -24,6 +30,8 @@ pub struct Property {
     pub(crate) value: NonNull<[u8]>,
     pub(crate) node_properties: LinkedListLink,
 }
+
+pub type PHandle = u32;
 
 impl Property {
     /// Get the name of this property as a string slice, without the trailing
@@ -103,7 +111,7 @@ impl Property {
 
     /// Interpret the value of this property as a phandle, which is just a
     /// big-endian u32.
-    pub fn value_as_phandle(&self) -> Option<u32> {
+    pub fn value_as_phandle(&self) -> Option<PHandle> {
         self.value_as_u32()
     }
 
@@ -196,126 +204,6 @@ impl<'a, 'b, E: PropEncoding> Iterator for PropEncodedArrayIter<'a, 'b, E> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct U32ArrayEncoding;
-impl PropEncoding for U32ArrayEncoding {
-    type Item = u32;
-    #[inline]
-    fn encoded_len(&self) -> usize {
-        4
-    }
-
-    #[inline]
-    fn decode(&self, bytes: &[u8]) -> Option<Self::Item> {
-        Some(u32::from_be_bytes(bytes.try_into().unwrap()))
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct U64ArrayEncoding;
-impl PropEncoding for U64ArrayEncoding {
-    type Item = u64;
-    #[inline]
-    fn encoded_len(&self) -> usize {
-        8
-    }
-
-    #[inline]
-    fn decode(&self, bytes: &[u8]) -> Option<Self::Item> {
-        Some(u64::from_be_bytes(bytes.try_into().unwrap()))
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct RangesEncoding {
-    // these two fields are not implemented via const generics cz they are almost always known at
-    // runtime instead of compile time.
-    child_cells: Cells,
-    parent_cells: Cells,
-}
-
-impl RangesEncoding {
-    pub fn new(child_cells: Cells, parent_cells: Cells) -> Self {
-        Self {
-            child_cells,
-            parent_cells,
-        }
-    }
-}
-
-impl PropEncoding for RangesEncoding {
-    /// (child-bus-address, parent-bus-address, length)
-    ///
-    /// u64 is used to hold both 32-bit and 64-bit values, and the actual size
-    /// of each field is determined by the `child_cells` and `parent_cells`
-    /// fields in this encoding.
-    type Item = (u64, u64, u64);
-
-    #[inline]
-    fn encoded_len(&self) -> usize {
-        ((self.child_cells.addr_cells + self.parent_cells.addr_cells + self.child_cells.size_cells)
-            * 4) as usize
-    }
-
-    fn decode(&self, bytes: &[u8]) -> Option<Self::Item> {
-        fn decode_be_u64(bytes: &[u8]) -> u64 {
-            debug_assert!(bytes.len() <= 8);
-            bytes.iter().fold(0u64, |acc, &b| (acc << 8) | b as u64)
-        }
-
-        let child_addr_end = (self.child_cells.addr_cells * 4) as usize;
-        let parent_addr_end =
-            ((self.child_cells.addr_cells + self.parent_cells.addr_cells) * 4) as usize;
-        let length_end = self.encoded_len();
-
-        let child_addr_bytes = bytes.get(0..child_addr_end).unwrap();
-        let parent_addr_bytes = bytes.get(child_addr_end..parent_addr_end).unwrap();
-        let length_bytes = bytes.get(parent_addr_end..length_end).unwrap();
-
-        let child_addr = decode_be_u64(child_addr_bytes);
-        let parent_addr = decode_be_u64(parent_addr_bytes);
-        let length = decode_be_u64(length_bytes);
-        Some((child_addr, parent_addr, length))
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct RegEncoding {
-    cells: Cells,
-}
-
-impl RegEncoding {
-    pub fn new(cells: Cells) -> Self {
-        Self { cells }
-    }
-}
-
-impl PropEncoding for RegEncoding {
-    /// (address, length)
-    type Item = (u64, u64);
-
-    fn encoded_len(&self) -> usize {
-        ((self.cells.addr_cells + self.cells.size_cells) * 4) as usize
-    }
-
-    fn decode(&self, bytes: &[u8]) -> Option<Self::Item> {
-        fn decode_be_u64(bytes: &[u8]) -> u64 {
-            debug_assert!(bytes.len() <= 8);
-            bytes.iter().fold(0u64, |acc, &b| (acc << 8) | b as u64)
-        }
-
-        let addr_end = (self.cells.addr_cells * 4) as usize;
-        let length_end = self.encoded_len();
-
-        let addr_bytes = bytes.get(0..addr_end).unwrap();
-        let length_bytes = bytes.get(addr_end..length_end).unwrap();
-
-        let addr = decode_be_u64(addr_bytes);
-        let length = decode_be_u64(length_bytes);
-        Some((addr, length))
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct StringList<'a> {
     bytes: &'a [u8],
@@ -381,11 +269,12 @@ pub struct DeviceNode {
     pub(crate) node_children: LinkedListLink,
     /// Linked in the global list of all nodes, for easy traversal.
     pub(crate) node_all: LinkedListLink,
-    // TODO:
-    // node_sibling: LinkedListLink,
 }
 
 impl DeviceNode {
+    pub fn handle(&self) -> DeviceNodeHandle {
+        DeviceNodeHandle { ptr: self }
+    }
     /// Get the name of this node as a string slice, without the trailing null
     /// byte.
     ///
@@ -416,6 +305,16 @@ impl DeviceNode {
     /// Get an iterator over the properties of this node.
     pub fn properties(&self) -> impl Iterator<Item = &Property> {
         self.properties.iter()
+    }
+
+    /// Get a property of this node by name.
+    pub fn property(&self, name: &str) -> Option<&Property> {
+        for prop in self.properties() {
+            if prop.name() == name {
+                return Some(prop);
+            }
+        }
+        None
     }
 
     /// Get an iterator over the children of this node.
@@ -479,20 +378,10 @@ impl DeviceNode {
 
     /// Get the phandle value of this node, if it has a "phandle" property with
     /// a valid phandle value.
-    pub fn phandle(&self) -> Option<u32> {
+    pub fn phandle(&self) -> Option<PHandle> {
         for prop in self.properties() {
             if prop.name() == "phandle" {
                 return prop.value_as_phandle();
-            }
-        }
-        None
-    }
-
-    ///
-    pub fn reg_raw(&self) -> Option<&[u8]> {
-        for prop in self.properties() {
-            if prop.name() == "reg" {
-                return Some(prop.value_as_bytes());
             }
         }
         None
@@ -565,6 +454,50 @@ impl DeviceNode {
         }
         None
     }
+
+    /// Get the "interrupts" property of this node, which describes the
+    /// interrupts of this node, if it exists.
+    ///
+    /// The encoding of the interrupt specifier cells is described by the
+    /// "#interrupt-cells" property of this node, which can be obtained by
+    /// [Self::interrupt_cells].
+    ///
+    /// This crate has already provided some common encodings for interrupt
+    /// specifiers. However if those encodings do not fit your needs, you can
+    /// also define your own encoding by implementing the [PropEncoding] trait.
+    pub fn interrupts<E: PropEncoding>(&self, enc: E) -> Option<PropEncodedArray<'_, E>> {
+        for prop in self.properties() {
+            if prop.name() == "interrupts" {
+                return prop.value_as_prop_encoded_array(enc);
+            }
+        }
+        None
+    }
+
+    /// Get the "#interrupt-cells" property of this node, which describes the
+    /// encoding of the interrupt specifier cells, if it exists.
+    pub fn interrupt_cells(&self) -> Option<u32> {
+        for prop in self.properties() {
+            if prop.name() == "#interrupt-cells" {
+                return prop.value_as_u32();
+            }
+        }
+        None
+    }
+
+    /// Get the "interrupt-parent" property of this node, which is a phandle
+    /// that points to the interrupt controller node of this node, if it
+    /// exists.
+    pub fn interrupt_parent(&self) -> Option<PHandle> {
+        for prop in self.properties() {
+            if prop.name() == "interrupt-parent" {
+                return prop.value_as_phandle();
+            }
+        }
+        None
+    }
+
+    // TODO: 🤔 how to represent "interrupts-extended"?
 }
 
 /// The status property indicates the operational status of a device. The lack
@@ -643,10 +576,9 @@ pub struct DeviceTreeHandle {
 }
 
 // SAFETY: `DeviceTreeHandle` is an owning handle to an arena allocated during
-// parse, and the public API only provides shared references to immutable tree
-// data. Moving the handle across threads or accessing it from multiple threads
-// concurrently does not cause any safety issues, as long as the handle itself
-// is not mutated (e.g. dropped) while being accessed.
+// parsing, and the public API only provides shared references to immutable tree
+// data. Besides, the unflattened tree will last for the entire lifetime of the
+// kernel, so there is no risk of dangling references.
 unsafe impl Send for DeviceTreeHandle {}
 unsafe impl Sync for DeviceTreeHandle {}
 
@@ -671,6 +603,67 @@ impl DeviceTreeHandle {
     /// Get an iterator over all nodes in this device tree.
     pub fn all_nodes(&self) -> impl Iterator<Item = &DeviceNode> {
         self.device_tree().all_nodes.iter()
+    }
+
+    /// Find a node by its path, starting from the root, with each component
+    /// separated by a '/'.
+    ///
+    /// This method does not match the full name of the node, but only the name
+    /// part without the unit address. So if there are multiple nodes with the
+    /// same name but different unit addresses, this method will return the
+    /// first one as the same order as they appear in dts file.
+    pub fn find_node_by_path(&self, path: &str) -> Option<&DeviceNode> {
+        let mut current_node = self.root();
+        for component in path.split('/') {
+            if component.is_empty() {
+                continue;
+            }
+            let mut found = false;
+            for child in current_node.children() {
+                if child.name() == component {
+                    current_node = child;
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return None;
+            }
+        }
+        Some(current_node)
+    }
+
+    /// Find a node by its path, starting from the root, with each component
+    /// separated by a '/'.
+    pub fn find_node_by_full_name_path(&self, path: &str) -> Option<&DeviceNode> {
+        let mut current_node = self.root();
+        for component in path.split('/') {
+            if component.is_empty() {
+                continue;
+            }
+            let mut found = false;
+            for child in current_node.children() {
+                if child.full_name() == component {
+                    current_node = child;
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return None;
+            }
+        }
+        Some(current_node)
+    }
+
+    /// Find a node by its phandle value.
+    pub fn find_node_by_phandle(&self, phandle: PHandle) -> Option<&DeviceNode> {
+        for node in self.all_nodes() {
+            if node.phandle() == Some(phandle) {
+                return Some(node);
+            }
+        }
+        None
     }
 
     // following methods are for convenience, to get commonly used information in a
@@ -724,3 +717,151 @@ pub(crate) struct DeviceTree {
     pub(crate) root: NonNull<DeviceNode>,
     pub(crate) all_nodes: LinkedList<AllNodesAdapter>,
 }
+
+/// A handle to a device node in the device tree.
+///
+/// This does not represent ownership of the node, and there is no associated
+/// mutable state, so it implements [Copy] and [Clone] for easy use.
+///
+/// If the opposite it what you want, you can always wrap this handle in a
+/// newtype struct.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DeviceNodeHandle {
+    pub(crate) ptr: *const DeviceNode,
+}
+
+impl DeviceNodeHandle {
+    pub fn node(&self) -> &DeviceNode {
+        unsafe { &*self.ptr }
+    }
+}
+
+// The same reason as `DeviceTreeHandle` applies here.
+unsafe impl Send for DeviceNodeHandle {}
+unsafe impl Sync for DeviceNodeHandle {}
+
+mod prop_encodings {
+    use super::*;
+    #[derive(Debug, Clone, Copy)]
+    pub struct U32ArrayEncoding;
+    impl PropEncoding for U32ArrayEncoding {
+        type Item = u32;
+        #[inline]
+        fn encoded_len(&self) -> usize {
+            4
+        }
+
+        #[inline]
+        fn decode(&self, bytes: &[u8]) -> Option<Self::Item> {
+            Some(u32::from_be_bytes(bytes.try_into().unwrap()))
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct U64ArrayEncoding;
+    impl PropEncoding for U64ArrayEncoding {
+        type Item = u64;
+        #[inline]
+        fn encoded_len(&self) -> usize {
+            8
+        }
+
+        #[inline]
+        fn decode(&self, bytes: &[u8]) -> Option<Self::Item> {
+            Some(u64::from_be_bytes(bytes.try_into().unwrap()))
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct RangesEncoding {
+        // these two fields are not implemented via const generics cz they are almost always known
+        // at runtime instead of compile time.
+        child_cells: Cells,
+        parent_cells: Cells,
+    }
+
+    impl RangesEncoding {
+        pub fn new(child_cells: Cells, parent_cells: Cells) -> Self {
+            Self {
+                child_cells,
+                parent_cells,
+            }
+        }
+    }
+
+    impl PropEncoding for RangesEncoding {
+        /// (child-bus-address, parent-bus-address, length)
+        ///
+        /// u64 is used to hold both 32-bit and 64-bit values, and the actual
+        /// size of each field is determined by the `child_cells` and
+        /// `parent_cells` fields in this encoding.
+        type Item = (u64, u64, u64);
+
+        #[inline]
+        fn encoded_len(&self) -> usize {
+            ((self.child_cells.addr_cells
+                + self.parent_cells.addr_cells
+                + self.child_cells.size_cells)
+                * 4) as usize
+        }
+
+        fn decode(&self, bytes: &[u8]) -> Option<Self::Item> {
+            fn decode_be_u64(bytes: &[u8]) -> u64 {
+                debug_assert!(bytes.len() <= 8);
+                bytes.iter().fold(0u64, |acc, &b| (acc << 8) | b as u64)
+            }
+
+            let child_addr_end = (self.child_cells.addr_cells * 4) as usize;
+            let parent_addr_end =
+                ((self.child_cells.addr_cells + self.parent_cells.addr_cells) * 4) as usize;
+            let length_end = self.encoded_len();
+
+            let child_addr_bytes = bytes.get(0..child_addr_end).unwrap();
+            let parent_addr_bytes = bytes.get(child_addr_end..parent_addr_end).unwrap();
+            let length_bytes = bytes.get(parent_addr_end..length_end).unwrap();
+
+            let child_addr = decode_be_u64(child_addr_bytes);
+            let parent_addr = decode_be_u64(parent_addr_bytes);
+            let length = decode_be_u64(length_bytes);
+            Some((child_addr, parent_addr, length))
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct RegEncoding {
+        cells: Cells,
+    }
+
+    impl RegEncoding {
+        pub fn new(cells: Cells) -> Self {
+            Self { cells }
+        }
+    }
+
+    impl PropEncoding for RegEncoding {
+        /// (address, length)
+        type Item = (u64, u64);
+
+        fn encoded_len(&self) -> usize {
+            ((self.cells.addr_cells + self.cells.size_cells) * 4) as usize
+        }
+
+        fn decode(&self, bytes: &[u8]) -> Option<Self::Item> {
+            fn decode_be_u64(bytes: &[u8]) -> u64 {
+                debug_assert!(bytes.len() <= 8);
+                bytes.iter().fold(0u64, |acc, &b| (acc << 8) | b as u64)
+            }
+
+            let addr_end = (self.cells.addr_cells * 4) as usize;
+            let length_end = self.encoded_len();
+
+            let addr_bytes = bytes.get(0..addr_end).unwrap();
+            let length_bytes = bytes.get(addr_end..length_end).unwrap();
+
+            let addr = decode_be_u64(addr_bytes);
+            let length = decode_be_u64(length_bytes);
+            Some((addr, length))
+        }
+    }
+}
+pub use prop_encodings::*;

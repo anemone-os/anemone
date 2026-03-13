@@ -8,8 +8,7 @@
 //!
 //! the design can be regarded as a redix tree.
 //!
-//! Anemone's memmap is a bit different from Linux's, as we only track metadata
-//! of available memory, while Linux tracks all RAM pages.
+//! TODO: vmemmap
 
 use core::ptr::NonNull;
 

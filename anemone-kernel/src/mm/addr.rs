@@ -13,14 +13,29 @@ int_like!(PhysPageNum, u64);
 int_like!(VirtPageNum, u64);
 
 macro_rules! impl_addr {
-    ($addr_type:ty) => {
+    ($addr_type:ty, $pn_type:ty) => {
         impl $addr_type {
-            pub fn lower_32_bits(&self) -> u32 {
+            pub const fn lower_32_bits(&self) -> u32 {
                 (self.get() & 0xffffffff) as u32
             }
 
-            pub fn upper_32_bits(&self) -> u32 {
+            pub const fn upper_32_bits(&self) -> u32 {
                 (self.get() >> 32) as u32
+            }
+
+            pub const fn page_offset(&self) -> usize {
+                (self.get() as usize) & (PagingArch::PAGE_SIZE_BYTES - 1)
+            }
+
+            pub const fn page_down(&self) -> $pn_type {
+                <$pn_type>::new(self.get() & !(PagingArch::PAGE_SIZE_BYTES as u64 - 1))
+            }
+
+            pub const fn page_up(&self) -> $pn_type {
+                <$pn_type>::new(
+                    (self.get() + PagingArch::PAGE_SIZE_BYTES as u64 - 1)
+                        & !(PagingArch::PAGE_SIZE_BYTES as u64 - 1),
+                )
             }
         }
     };
@@ -108,9 +123,9 @@ macro_rules! impl_ops {
     };
 }
 
-impl_addr!(PhysAddr);
+impl_addr!(PhysAddr, PhysPageNum);
 impl_ops!(PhysAddr);
-impl_addr!(VirtAddr);
+impl_addr!(VirtAddr, VirtPageNum);
 impl_ops!(VirtAddr);
 impl_ops!(PhysPageNum);
 impl_ops!(VirtPageNum);
