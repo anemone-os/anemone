@@ -38,7 +38,7 @@ ENV RUSTUP_HOME=/opt/rust/rustup \
     PATH="/opt/rust/cargo/bin:${PATH}"
 RUN mkdir -p /opt/rust/cargo /opt/rust/rustup && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path && \
-    cargo install cargo-fuzz just just-lsp && \
+    cargo install cargo-fuzz just just-lsp cargo-binutils && \
     chmod -R a+rwX /opt/rust
 COPY --from=build_qemu /opt/qemu /opt/qemu
 ENV PATH="/opt/qemu/bin:${PATH}"
@@ -57,7 +57,7 @@ ENV RUSTUP_HOME=/opt/rust/rustup \
     PATH="/opt/rust/cargo/bin:${PATH}"
 RUN mkdir -p /opt/rust/cargo /opt/rust/rustup && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path && \
-    cargo install just && \
+    cargo install just cargo-binutils && \
     chmod -R a+rwX /opt/rust
 ENV CARGO_HOME=
 ENTRYPOINT [ "bash" ]
