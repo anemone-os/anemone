@@ -112,14 +112,20 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
     /// A zeroed page table entry, i.e., an invalid entry with no flags set.
     const ZEROED: Self;
 
-    /// Create a new page table entry with the given physical page number and
+    /// Create a new leaf entry with the given physical page number and
     /// flags.
-    fn new(ppn: PhysPageNum, flags: PteFlags) -> Self;
+    fn new_leaf(ppn: PhysPageNum, flags: PteFlags) -> Self;
+
+    /// Create a new branch entry with the given physical page number and
+    /// flags. The physical page number points to a page directory 
+    /// rather than a physical page.
+    /// 
+    /// **In some architectures, flags except for the valid bit 
+    /// might be ignored to create an branch**
+    fn new_branch(ppn: PhysPageNum, flags: PteFlags) -> Self;
 
     /// Check if this page table entry is empty, i.e., it is equal to ZEROED.
-    fn is_empty(&self) -> bool {
-        self.ppn() == Self::ZEROED.ppn() && self.flags() == Self::ZEROED.flags()
-    }
+    fn is_empty(&self) -> bool;
 
     /// Get the flags of this page table entry.
     fn flags(&self) -> PteFlags;
@@ -138,9 +144,6 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
 
     /// Check if this page table entry is a branch entry, i.e., it points to a
     /// page directory rather than a physical page.
-    ///
-    /// This often implies that the entry has the valid bit set, but does not
-    /// have the read/write/execute bits set.
     fn is_branch(&self) -> bool {
         self.is_valid() && !self.is_leaf()
     }
@@ -159,10 +162,7 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
     /// # Safety
     ///
     /// In most cases, a TLB shootdown should be performed after this operation.
-    unsafe fn set_ppn(&mut self, ppn: PhysPageNum) {
-        let flags = self.flags();
-        *self = Self::new(ppn, flags);
-    }
+    unsafe fn set_ppn(&mut self, ppn: PhysPageNum);
 }
 pub trait PgDirArch:
     Sized + Copy + Index<usize, Output = Self::Pte> + IndexMut<usize, Output = Self::Pte>
