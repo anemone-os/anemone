@@ -46,8 +46,8 @@ impl Drop for PageTable {
         unsafe {
             mapper.try_unmap(Unmapping {
                 range: VirtPageRange::new(
-                    KernelLayout::KSPACE_VPN,
-                    1 << (PagingArch::PAGE_LEVELS * PagingArch::PGDIR_IDX_BITS),
+                    VirtPageNum::new(0),
+                    KernelLayout::USPACE_TOP_VPN.get(),
                 ),
             });
         }

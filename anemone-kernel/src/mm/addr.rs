@@ -178,6 +178,10 @@ macro_rules! impl_page_range {
                 self.start.get() < other.end().get() && other.start.get() < self.end().get()
             }
 
+            pub const fn covers(&self, other: &Self) -> bool {
+                self.start.get() <= other.start.get() && other.end().get() <= self.end().get()
+            }
+
             paste::paste! {
                 pub const fn iter(&self) -> [<$name Iter>] {
                     [<$name Iter>] {

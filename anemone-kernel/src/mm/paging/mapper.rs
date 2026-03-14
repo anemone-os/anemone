@@ -116,6 +116,7 @@ impl Mapper<'_> {
                             self.mapper
                                 .map_one(next_vpn, next_ppn, flags, level, true)?;
                         }
+                        self.mapped_pages += level_page_size;
                         index += level_page_size;
                         break;
                     }
@@ -253,7 +254,7 @@ impl Mapper<'_> {
                     ControlFlow::<()>::Continue
                 },
                 |pte, ctx| {
-                    if range.intersects(&VirtPageRange::new(
+                    if range.covers(&VirtPageRange::new(
                         ctx.vpn,
                         (1 << (ctx.level * PagingArch::PGDIR_IDX_BITS)) as u64,
                     )) {
@@ -489,7 +490,6 @@ impl Mapper<'_> {
                     },
                 }
             } else {
-                assert_eq!(level, 0);
                 assert!(pte.is_leaf());
                 let ctx = LeafCtx {
                     vpn: VirtPageNum::new(vpn_prefix),
@@ -540,7 +540,7 @@ impl Mapper<'_> {
     ) -> Result<(), MmError> {
         let levels = PagingArch::PAGE_LEVELS;
 
-        /// Check level_at value
+        // Check level_at value
         debug_assert!(
             level_at < levels,
             "Invalid `level_at` argument: greater than max level id {}: {}",

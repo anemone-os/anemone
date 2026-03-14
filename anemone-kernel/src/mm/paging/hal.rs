@@ -1,6 +1,6 @@
 use core::ops::{Index, IndexMut};
 
-use crate::{mm::layout::KernelLayoutTrait, prelude::*};
+use crate::prelude::*;
 
 /// The architecture-specific traits and types for paging.
 pub trait PagingArchTrait: Sized {
@@ -37,7 +37,7 @@ pub trait PagingArchTrait: Sized {
 
     /// The number of pages per megabyte.
     const NPAGES_PER_MB: usize = 1024 * 1024 / Self::PAGE_SIZE_BYTES;
-    
+
     /// The number of pages per gigabyte.
     const NPAGES_PER_GB: usize = 1024 * 1024 * 1024 / Self::PAGE_SIZE_BYTES;
 
@@ -128,7 +128,7 @@ bitflags! {
         const NONCACHE = 1 << 6;
 
         /// Indicates whether memory accesses is strong ordered in uncached mode.
-        /// **This bit only makes sense when [Self::UNCACHED] is set.**
+        /// **This bit only makes sense when [Self::NONCACHE] is set.**
         const STRONG = 1 << 7;
 
         // Combination flags

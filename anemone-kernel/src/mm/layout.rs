@@ -1,5 +1,3 @@
-use core::fmt::Debug;
-
 use crate::prelude::*;
 
 /// Intentionally, this trait is not suffixed with "Arch", since the memory
@@ -72,14 +70,6 @@ pub trait KernelLayoutTrait<P: PagingArchTrait> {
     /// Base DM VAddr.
     const DIRECT_MAPPING_ADDR: u64 = Self::DIRECT_MAPPING_VPN.get() << P::PAGE_SIZE_BITS;
 
-    /// DM offset between VAddr and PAddr.
-    ///
-    /// `dm_vaddr = paddr + `[Self::DIRECT_MAPPING_OFFSET].
-    const DIRECT_MAPPING_OFFSET: usize = const {
-        let ret = Self::KSPACE_ADDR as usize - 0;
-        ret
-    };
-
     /// Base kernel VPN.
     const KERNEL_VA_BASE_VPN: VirtPageNum;
 
@@ -110,12 +100,12 @@ pub trait KernelLayoutTrait<P: PagingArchTrait> {
 
     /// Convert PAddr to DM VAddr.
     fn phys_to_dm(paddr: PhysAddr) -> VirtAddr {
-        VirtAddr::new(paddr.get() + Self::DIRECT_MAPPING_OFFSET as u64)
+        VirtAddr::new(paddr.get() + Self::DIRECT_MAPPING_ADDR as u64)
     }
 
     /// Convert DM VAddr to PAddr.
     unsafe fn dm_to_phys(vaddr: VirtAddr) -> PhysAddr {
-        PhysAddr::new(vaddr.get() - Self::DIRECT_MAPPING_OFFSET as u64)
+        PhysAddr::new(vaddr.get() - Self::DIRECT_MAPPING_ADDR as u64)
     }
 
     /// Convert PAddr to kernel VAddr.
@@ -127,22 +117,4 @@ pub trait KernelLayoutTrait<P: PagingArchTrait> {
     unsafe fn kvirt_to_phys(vaddr: VirtAddr) -> PhysAddr {
         PhysAddr::new(vaddr.get() - Self::KERNEL_MAPPING_OFFSET as u64)
     }
-}
-
-pub fn debug_print_layout_message(){
-    kdebugln!("Kernel Layout:{{
-    USPACE_TOP_ADDR: {:#x},
-    KSPACE_ADDR: {:#x},
-    FREE_SPACE_ADDR: {:#x},
-    KERNEL_VA_BASE: {:#x},
-    KERNEL_LA_BASE: {:#x},
-    DIRECT_MAPPING_ADDR: {:#x},
-    }}", 
-        KernelLayout::USPACE_TOP_ADDR,
-        KernelLayout::KSPACE_ADDR,
-        KernelLayout::FREE_SPACE_ADDR,
-        KernelLayout::KERNEL_VA_BASE,
-        KernelLayout::KERNEL_LA_BASE,
-        KernelLayout::DIRECT_MAPPING_ADDR
-    );
 }
