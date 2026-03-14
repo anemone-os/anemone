@@ -229,8 +229,6 @@ impl Mapper<'_> {
     ///     mappings within the given range.
     ///
     /// It is only safe when used for rolling back a mapping operation.
-    ///
-    /// Use [Self::unmap_and_split] for normal unmapping operations.
     pub unsafe fn try_unmap(&mut self, unmapping: Unmapping) {
         let Unmapping { range } = unmapping;
 
@@ -277,16 +275,6 @@ impl Mapper<'_> {
                 },
             }
         }
-    }
-
-    /// # Not implemented yet
-    /// Unmap a virtual memory region and deallocate page tables if they become
-    /// empty after unmapping.
-    ///
-    /// When encountered with large pages that is not fully covered by the
-    /// unmapping range, **that large page will be split into normal pages.**
-    pub unsafe fn unmap_and_split(&mut self, unmapping: Unmapping) -> Result<(), MmError> {
-        todo!();
     }
 
     /// Translate a virtual page number to a physical page number and its flags.
