@@ -6,6 +6,9 @@ use crate::prelude::*;
 pub trait PagingArchTrait: Sized {
     type PgDir: PgDirArch;
 
+    /// The maximum level of huge page supported by this architecture.
+    const MAX_HUGE_PAGE_LEVEL: usize;
+
     /// The maximum number of bits in the physical page number supported by this
     /// architecture.
     const MAX_PPN_BITS: usize;
@@ -103,6 +106,17 @@ bitflags! {
         const EXECUTE = 1 << 3;
         const USER = 1 << 4;
 
+        /// Indicates whether memory accesses is cacheable.
+        ///
+        /// **This bit only makes sense in systems that explicitly
+        /// specify the memory access type in the PTE or other metadata describing virtual-address attributes,
+        /// such as Loongarch, otherwise this bit is ignored.**
+        const NONCACHE = 1 << 6;
+
+        /// Indicates whether memory accesses is strong ordered in uncached mode.
+        /// **This bit only makes sense when [Self::UNCACHED] is set.**
+        const STRONG = 1 << 7;
+
         // Combination flags
         // TODO
     }
@@ -112,17 +126,20 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
     /// A zeroed page table entry, i.e., an invalid entry with no flags set.
     const ZEROED: Self;
 
-    /// Create a new leaf entry with the given physical page number and
+    /// Create a new page table entry with the given physical page number and
     /// flags.
-    fn new_leaf(ppn: PhysPageNum, flags: PteFlags) -> Self;
-
-    /// Create a new branch entry with the given physical page number and
-    /// flags. The physical page number points to a page directory
-    /// rather than a physical page.
-    /// 
-    /// **In some architectures, flags except for the valid bit 
-    /// might be ignored to create an branch.**
-    fn new_branch(ppn: PhysPageNum, flags: PteFlags) -> Self;
+    /// ## Implementation
+    ///
+    /// * If flags contain [PteFlags::READ], [PteFlags::WRITE] or
+    ///   [PteFlags::EXECUTE],
+    /// this entry is a leaf entry that points to a physical page.
+    ///
+    /// * Otherwise, this entry is a branch entry that points to a page
+    ///   directory.
+    ///
+    /// If the entry is a branch entry, some flags like [PteFlags::USER],
+    /// [PteFlags::NONCACHE] and [PteFlags::STRONG] (if available) are ignored.
+    fn new(ppn: PhysPageNum, flags: PteFlags) -> Self;
 
     /// Check if this page table entry is empty, i.e., it is equal to ZEROED.
     fn is_empty(&self) -> bool;

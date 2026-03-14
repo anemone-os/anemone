@@ -277,9 +277,9 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         mm::frame::pmm_init();
         kinfoln!("physical memory management initialized");
 
-        mm::kpgdir::init_kernel_mapping();
+        mm::kptable::init_kernel_mapping();
         kinfoln!("kernel mapping initialized");
-        mm::kpgdir::activate_kernel_mapping();
+        mm::kptable::activate_kernel_mapping();
         kinfoln!("kernel mapping activated");
 
         // register drivers to bus types
@@ -335,7 +335,7 @@ unsafe fn ap_entry(ap_id: usize) -> ! {
         riscv::register::sstatus::set_sie();
         riscv::register::sie::set_ssoft();
 
-        mm::kpgdir::activate_kernel_mapping();
+        mm::kptable::activate_kernel_mapping();
 
         // synchronize with BSP
         sync_all_cpus();

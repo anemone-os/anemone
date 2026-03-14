@@ -114,13 +114,7 @@ impl RiscV64Pte {
 impl PteArch for RiscV64Pte {
     const ZEROED: Self = RiscV64Pte(0);
 
-    fn new_leaf(ppn: PhysPageNum, flags: PteFlags) -> Self {
-        let flags: RiscV64PteFlags = flags.into();
-        Self::arch_new(ppn, flags)
-    }
-
-    fn new_branch(ppn: PhysPageNum, mut flags: PteFlags) -> Self {
-        flags.remove(PteFlags::READ | PteFlags::WRITE | PteFlags::EXECUTE);
+    fn new(ppn: PhysPageNum, flags: PteFlags) -> Self {
         let flags: RiscV64PteFlags = flags.into();
         Self::arch_new(ppn, flags)
     }

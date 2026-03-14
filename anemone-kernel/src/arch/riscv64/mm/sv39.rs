@@ -11,6 +11,8 @@ pub struct Sv39PagingArch;
 impl PagingArchTrait for Sv39PagingArch {
     type PgDir = super::RiscV64PgDir;
 
+    const MAX_HUGE_PAGE_LEVEL: usize = 2;
+
     /// On RiscV64, maximum length of physical addresses is 56 bits.
     const MAX_PPN_BITS: usize = 44;
 

@@ -4,7 +4,7 @@ use spin::Lazy;
 
 use crate::{
     mm::{
-        kpgdir::{kmap, kunmap},
+        kptable::{kmap, kunmap},
         layout::KernelLayoutTrait,
     },
     prelude::*,
@@ -96,6 +96,7 @@ impl SysRemaps {
                 ppn: phys_range.start(),
                 npages,
                 flags: PteFlags::READ | PteFlags::WRITE,
+                huge_pages: false,
             })
             .map_err(|e| {
                 self.free(virt_range.start(), virt_range.npages() as usize)
