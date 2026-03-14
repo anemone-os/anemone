@@ -14,7 +14,7 @@ use crate::{
         EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count, early_scan_fdt_size,
         of_platform_discovery, unflatten_device_tree,
     },
-    mm::layout::KernelLayoutTrait,
+    mm::layout::{self, KernelLayoutTrait},
     prelude::*,
     utils::align::{AlignedBytes, PhantomAligned4096},
 };
@@ -243,7 +243,7 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
     kinfoln!("anemone kernel booting...");
     kinfoln!("bsp id: {}", bsp_id);
 
-    let fdt_va = sv39::Sv39KernelLayout::phys_to_hhdm(fdt_pa);
+    let fdt_va = sv39::Sv39KernelLayout::phys_to_dm(fdt_pa);
 
     unsafe {
         // needed by percpu initialization.
@@ -277,10 +277,11 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         mm::frame::pmm_init();
         kinfoln!("physical memory management initialized");
 
-        mm::kpgdir::init_kernel_mapping();
+        mm::kptable::init_kernel_mapping();
         kinfoln!("kernel mapping initialized");
-        mm::kpgdir::activate_kernel_mapping();
+        mm::kptable::activate_kernel_mapping();
         kinfoln!("kernel mapping activated");
+
 
         // register drivers to bus types
         driver::init();
@@ -335,7 +336,7 @@ unsafe fn ap_entry(ap_id: usize) -> ! {
         riscv::register::sstatus::set_sie();
         riscv::register::sie::set_ssoft();
 
-        mm::kpgdir::activate_kernel_mapping();
+        mm::kptable::activate_kernel_mapping();
 
         // synchronize with BSP
         sync_all_cpus();

@@ -6,23 +6,44 @@ use crate::prelude::*;
 pub trait PagingArchTrait: Sized {
     type PgDir: PgDirArch;
 
+    // region: Paging
+
+    /// The maximum level of huge page supported by this architecture.
+    const MAX_HUGE_PAGE_LEVEL: usize;
+
+    /// The number of levels in the page table hierarchy.
+    const PAGE_LEVELS: usize;
+
     /// The maximum number of bits in the physical page number supported by this
     /// architecture.
     const MAX_PPN_BITS: usize;
 
+    // endregion
+
+    // region: Page Size
+
     /// The minimum page size supported by the architecture, in bytes.
     const PAGE_SIZE_BYTES: usize;
+
     /// The number of bits in the page offset, i.e., the number of bits needed
     /// to represent the page size.
-    const PAGE_SIZE_BITS: usize = Self::PAGE_SIZE_BYTES.trailing_zeros() as usize;
+    const PAGE_SIZE_BITS: usize = const {
+        assert!(
+            Self::PAGE_SIZE_BYTES.is_power_of_two(),
+            "page size must be a power of two"
+        );
+        Self::PAGE_SIZE_BYTES.trailing_zeros() as usize
+    };
 
     /// The number of pages per megabyte.
     const NPAGES_PER_MB: usize = 1024 * 1024 / Self::PAGE_SIZE_BYTES;
+
     /// The number of pages per gigabyte.
     const NPAGES_PER_GB: usize = 1024 * 1024 * 1024 / Self::PAGE_SIZE_BYTES;
 
-    /// The number of levels in the page table hierarchy.
-    const PAGE_LEVELS: usize;
+    // endregion
+
+    // region: Page Level Structure
 
     /// The number of page table entries per page directory, i.e., the number of
     /// entries in a page directory.
@@ -47,11 +68,7 @@ pub trait PagingArchTrait: Sized {
         Self::PTE_PER_PGDIR.trailing_zeros() as usize
     };
 
-    /// The number of bits in the page table entry flags.
-    const PTE_FLAGS_BITS: usize;
-    /// The bitmask for the page table entry flags, i.e., the bits that are used
-    /// to represent the flags in a page table entry.
-    const PTE_FLAGS_MASK: u64 = (1 << Self::PTE_FLAGS_BITS) - 1;
+    // endregion
 
     /// Switch to the given page table.
     ///
@@ -103,6 +120,17 @@ bitflags! {
         const EXECUTE = 1 << 3;
         const USER = 1 << 4;
 
+        /// Indicates whether memory accesses is cacheable.
+        ///
+        /// **This bit only makes sense in systems that explicitly
+        /// specify the memory access type in the PTE or other metadata describing virtual-address attributes,
+        /// such as Loongarch, otherwise this bit is ignored.**
+        const NONCACHE = 1 << 6;
+
+        /// Indicates whether memory accesses is strong ordered in uncached mode.
+        /// **This bit only makes sense when [Self::NONCACHE] is set.**
+        const STRONG = 1 << 7;
+
         // Combination flags
         // TODO
     }
@@ -112,17 +140,20 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
     /// A zeroed page table entry, i.e., an invalid entry with no flags set.
     const ZEROED: Self;
 
-    /// Create a new leaf entry with the given physical page number and
+    /// Create a new page table entry with the given physical page number and
     /// flags.
-    fn new_leaf(ppn: PhysPageNum, flags: PteFlags) -> Self;
-
-    /// Create a new branch entry with the given physical page number and
-    /// flags. The physical page number points to a page directory
-    /// rather than a physical page.
-    /// 
-    /// **In some architectures, flags except for the valid bit 
-    /// might be ignored to create an branch.**
-    fn new_branch(ppn: PhysPageNum, flags: PteFlags) -> Self;
+    /// ## Implementation
+    ///
+    /// * If flags contain [PteFlags::READ], [PteFlags::WRITE] or
+    ///   [PteFlags::EXECUTE],
+    /// this entry is a leaf entry that points to a physical page.
+    ///
+    /// * Otherwise, this entry is a branch entry that points to a page
+    ///   directory.
+    ///
+    /// If the entry is a branch entry, some flags like [PteFlags::USER],
+    /// [PteFlags::NONCACHE] and [PteFlags::STRONG] (if available) are ignored.
+    fn new(ppn: PhysPageNum, flags: PteFlags) -> Self;
 
     /// Check if this page table entry is empty, i.e., it is equal to ZEROED.
     fn is_empty(&self) -> bool;
@@ -164,6 +195,8 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
     /// In most cases, a TLB shootdown should be performed after this operation.
     unsafe fn set_ppn(&mut self, ppn: PhysPageNum);
 }
+
+/// A Page Directory should always take just a full page.
 pub trait PgDirArch:
     Sized + Copy + Index<usize, Output = Self::Pte> + IndexMut<usize, Output = Self::Pte>
 {

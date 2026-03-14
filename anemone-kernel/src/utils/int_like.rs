@@ -6,10 +6,11 @@
 //! TODO: implement combinable macros to define different integer-like types
 //! with less boilerplate. e.g. Address, PageNum, Id, etc.
 
+
 #[macro_export]
 macro_rules! int_like {
     ($new_type_name:ident, $backing_type: ident) => {
-        #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone, Copy)]
+        #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
         #[repr(transparent)]
         pub struct $new_type_name($backing_type);
 
@@ -23,6 +24,13 @@ macro_rules! int_like {
             #[inline]
             pub const fn new(x: $backing_type) -> Self {
                 $new_type_name(x)
+            }
+        }
+
+
+        impl core::fmt::Debug for $new_type_name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                write!(f, "{}({:#x})",stringify!($new_type_name), self.0)
             }
         }
 

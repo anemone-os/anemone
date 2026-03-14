@@ -1,4 +1,4 @@
-use core::{marker::PhantomData, mem::ManuallyDrop};
+use core::{cmp::min, marker::PhantomData, mem::ManuallyDrop};
 
 use crate::prelude::*;
 
@@ -9,6 +9,10 @@ pub struct Mapping {
     pub ppn: PhysPageNum,
     pub flags: PteFlags,
     pub npages: usize,
+    /// Only for architectures that support huge page mapping,
+    /// and indicates whether huge page mapping should be used for this mapping
+    /// operation.
+    pub huge_pages: bool,
 }
 
 /// An unmapping operation.
@@ -61,8 +65,6 @@ impl Mapper<'_> {
     /// Map a virtual memory region to a physical memory region with the given
     /// flags. Had encountered an already mapped page will cause an error to be
     /// returned, and all the successfully mapped pages will be rolled back.
-    ///
-    /// No huge page mapping is involved.
     pub fn map(&mut self, mapping: Mapping) -> Result<(), MmError> {
         #[derive(Debug)]
         struct MapTransaction<'a, 'm> {
@@ -86,13 +88,38 @@ impl Mapper<'_> {
                     ppn,
                     flags,
                     npages,
+                    huge_pages: enable_huge_pages,
+                    ..
                 } = self.mapping;
-
-                for i in 0..npages {
-                    let next_vpn = VirtPageNum::new(vpn.get() + i as u64);
-                    let next_ppn = PhysPageNum::new(ppn.get() + i as u64);
-                    self.mapper.map_one(next_vpn, next_ppn, flags, false)?;
-                    self.mapped_pages += 1;
+                let mut index = 0;
+                let max_hpage_level = {
+                    if !enable_huge_pages {
+                        0
+                    } else {
+                        let levels = (vpn.get() ^ ppn.get()).trailing_zeros() as usize
+                            / PagingArch::PGDIR_IDX_BITS;
+                        min(levels, PagingArch::MAX_HUGE_PAGE_LEVEL)
+                    }
+                };
+                while index < npages {
+                    for level in (0..=max_hpage_level).rev() {
+                        let level_page_size = 1 << (level * PagingArch::PGDIR_IDX_BITS);
+                        if (vpn.get() as usize + index) & (level_page_size - 1) != 0 {
+                            continue;
+                        }
+                        if npages - index < level_page_size {
+                            continue;
+                        }
+                        let next_vpn = VirtPageNum::new(vpn.get() + index as u64);
+                        let next_ppn = PhysPageNum::new(ppn.get() + index as u64);
+                        unsafe {
+                            self.mapper
+                                .map_one(next_vpn, next_ppn, flags, level, true)?;
+                        }
+                        self.mapped_pages += level_page_size;
+                        index += level_page_size;
+                        break;
+                    }
                 }
 
                 Ok(())
@@ -109,9 +136,11 @@ impl Mapper<'_> {
                     "MapTransaction::Drop: transaction failed, rolling back the mapped pages"
                 );
                 // roll back the mapping of already mapped pages
-                self.mapper.unmap(Unmapping {
-                    range: VirtPageRange::new(self.mapping.vpn, self.mapped_pages as u64),
-                });
+                unsafe {
+                    self.mapper.try_unmap(Unmapping {
+                        range: VirtPageRange::new(self.mapping.vpn, self.mapped_pages as u64),
+                    });
+                }
             }
         }
 
@@ -138,21 +167,45 @@ impl Mapper<'_> {
             ppn,
             flags,
             npages,
+            huge_pages: enable_huge_pages,
             ..
         } = mapping;
-        for i in 0..npages {
-            let next_vpn = VirtPageNum::new(vpn.get() + i as u64);
-            let next_ppn = PhysPageNum::new(ppn.get() + i as u64);
-            self.map_one(next_vpn, next_ppn, flags, true).map_err(|err| {
-                kwarningln!(
-                    "Mapper::map_overwrite: failed to map vpn {:?} to ppn {:?} with flags {:?}: {:?}",
-                    next_vpn,
-                    next_ppn,
-                    flags,
-                    err
-                );
-                err
-            })?;
+        let mut index = 0;
+        let max_hpage_level = {
+            if !enable_huge_pages {
+                0
+            } else {
+                let levels =
+                    (vpn.get() ^ ppn.get()).trailing_zeros() as usize / PagingArch::PGDIR_IDX_BITS;
+                min(levels, PagingArch::MAX_HUGE_PAGE_LEVEL)
+            }
+        };
+        while index < npages {
+            for level in (0..=max_hpage_level).rev() {
+                let level_page_size = 1 << (level * PagingArch::PGDIR_IDX_BITS);
+                if (vpn.get() as usize + index) & (level_page_size - 1) != 0 {
+                    continue;
+                }
+                if npages - index < level_page_size {
+                    continue;
+                }
+                let next_vpn = VirtPageNum::new(vpn.get() + index as u64);
+                let next_ppn = PhysPageNum::new(ppn.get() + index as u64);
+                unsafe {
+                    self.map_one(next_vpn, next_ppn, flags, level,true).map_err(|err| {
+                        kwarningln!(
+                            "Mapper::map_overwrite: failed to map vpn {:?} to ppn {:?} with flags {:?}: {:?}",
+                            next_vpn,
+                            next_ppn,
+                            flags,
+                            err
+                        );
+                        err
+                    })?;
+                }
+                index += level_page_size;
+                break;
+            }
         }
 
         Ok(())
@@ -161,9 +214,22 @@ impl Mapper<'_> {
     /// Unmap a virtual memory region and deallocate page tables if they become
     /// empty after unmapping.
     ///
+    /// When encountered with large pages that is not fully covered by the
+    /// unmapping range,     **that large page will be skipped and left
+    /// intact**, as we don't want allocate new page tables for
+    ///     splitting the large page, which may cause errors that we don't want
+    /// to handle.
+    ///
     /// **This method is deliberately designed not to return a [Result] but
     /// always succeed.**
-    pub fn unmap(&mut self, unmapping: Unmapping) {
+    ///
+    /// # Safety
+    ///
+    /// This method is unsafe because it cannot always fully unmap
+    ///     mappings within the given range.
+    ///
+    /// It is only safe when used for rolling back a mapping operation.
+    pub unsafe fn try_unmap(&mut self, unmapping: Unmapping) {
         let Unmapping { range } = unmapping;
 
         unsafe {
@@ -186,10 +252,13 @@ impl Mapper<'_> {
                     ControlFlow::<()>::Continue
                 },
                 |pte, ctx| {
-                    if range.contains(ctx.vpn) {
+                    if range.covers(&VirtPageRange::new(
+                        ctx.vpn,
+                        (1 << (ctx.level * PagingArch::PGDIR_IDX_BITS)) as u64,
+                    )) {
                         if !pte.is_valid() {
                             kwarningln!(
-                                "Mapper::unmap: trying to unmap an unmapped page: vpn={:?}",
+                                "Mapper::try_unmap: trying to unmap an unmapped page: vpn={:?}",
                                 ctx.vpn
                             );
                         }
@@ -209,9 +278,6 @@ impl Mapper<'_> {
     }
 
     /// Translate a virtual page number to a physical page number and its flags.
-    ///
-    /// Currently no huge page mappings are considered, so the logic is quite
-    /// straightforward.
     pub fn translate(&self, vpn: VirtPageNum) -> Option<Translated> {
         let levels = PagingArch::PAGE_LEVELS;
         let vpn_bits = PagingArch::PTE_PER_PGDIR.trailing_zeros() as usize;
@@ -229,22 +295,10 @@ impl Mapper<'_> {
             let idx = (vpn.get() as usize >> (level * vpn_bits)) & (PagingArch::PTE_PER_PGDIR - 1);
             let pte = &pgdir[idx];
 
-            if !pte.is_branch() && !pte.is_leaf() {
-                return None;
-            }
-
-            if level == 0 {
-                if !pte.is_leaf() {
+            if pte.is_branch() {
+                if level == 0 {
                     return None;
                 }
-                // leaf reached
-                assert!(pte.is_valid());
-                return Some(Translated {
-                    ppn: pte.ppn(),
-                    flags: pte.flags() & !PteFlags::VALID,
-                });
-            } else {
-                // branch
                 pgdir = unsafe {
                     pte.ppn()
                         .to_phys_addr()
@@ -253,6 +307,27 @@ impl Mapper<'_> {
                         .as_ref()
                         .expect("pgdir ppn should not be null")
                 };
+            } else if pte.is_leaf() {
+                debug_assert!(pte.is_valid());
+                if level == 0 {
+                    return Some(Translated {
+                        ppn: pte.ppn(),
+                        flags: pte.flags() & !PteFlags::VALID,
+                    });
+                } else {
+                    // huge page
+                    let level_offset = level * vpn_bits;
+                    let level_mask = (1 << level_offset) - 1;
+                    let page_offset = vpn.get() & !level_mask;
+                    let ppn_value = pte.ppn().get();
+                    debug_assert!(ppn_value & level_mask == 0);
+                    return Some(Translated {
+                        ppn: PhysPageNum::new(ppn_value + page_offset),
+                        flags: pte.flags() & !PteFlags::VALID,
+                    });
+                }
+            } else {
+                return None;
             }
         }
         None
@@ -276,12 +351,15 @@ struct BranchCtx {
 #[derive(Debug)]
 struct LeafCtx {
     vpn: VirtPageNum,
+    /// The level of the pgdir that contains the branch pte.
+    level: usize,
 }
 
 impl Mapper<'_> {
     /// Traverse the page table with the given branch and leaf operations.
     ///
-    /// **This method does not support huge page mappings yet.**
+    /// **Huge pages will be treated as leaf nodes, and will not be traversed
+    /// into.**
     ///
     /// # Safety
     ///
@@ -314,6 +392,17 @@ impl Mapper<'_> {
         }
     }
 
+    /// Internal method for page table traversal. See [Mapper::traverse] for
+    /// details.
+    ///
+    /// Traverse the page table rooted at `pgdir_ppn`, with the given branch and
+    /// leaf operations, and the current level and vpn prefix.
+    /// This will recursively traverse the branch Ptes.
+    ///
+    /// # Notes
+    ///
+    /// **Huge pages are treated as leaf nodes, and will not be traversed
+    /// into.**
     unsafe fn do_traverse<B, L, R>(
         pgdir_ppn: PhysPageNum,
         branch_op: &mut B,
@@ -389,10 +478,10 @@ impl Mapper<'_> {
                     },
                 }
             } else {
-                assert_eq!(level, 0);
                 assert!(pte.is_leaf());
                 let ctx = LeafCtx {
                     vpn: VirtPageNum::new(vpn_prefix),
+                    level,
                 };
                 match leaf_op(pte, ctx) {
                     ControlFlow::Continue => {},
@@ -404,16 +493,62 @@ impl Mapper<'_> {
         ControlFlow::Continue
     }
 
-    fn map_one(
+    /// Map a single page at level `level_at`.
+    ///
+    /// * If `level_at` is zero, then the page will be mapped as a normal page.
+    ///
+    /// * If `level_at` is greater than zero, then the page will be mapped as a
+    ///   huge page. **Note that this won't check whether the architecture
+    ///   supports huge pages at this level**
+    ///
+    /// This is the most primitive mapping operation, and it won't do any check
+    /// on the existing mapping if `overwrite` is true.
+    ///
+    /// # Safety
+    /// The caller must guarantee that:
+    ///
+    ///     * The `vpn` is aligned to the page size corresponding to `level_at`.
+    ///     * The `level_at` is valid and less than the max level of the paging
+    ///       architecture.
+    ///     * The `flags` are valid for the paging architecture.
+    ///
+    /// # Returns
+    ///     * `Ok(())` if the mapping is successful.
+    ///     * `Err(MmError::AlreadyMapped)` if the target page is already mapped
+    ///       and `overwrite` is false.
+    ///     * `Err(MmError::OutOfMemory)` if the mapping requires allocation of
+    ///       new page tables and the allocation fails.
+    unsafe fn map_one(
         &mut self,
         vpn: VirtPageNum,
         ppn: PhysPageNum,
         flags: PteFlags,
+        level_at: usize,
         overwrite: bool,
     ) -> Result<(), MmError> {
         let levels = PagingArch::PAGE_LEVELS;
+
+        // Check level_at value
+        debug_assert!(
+            level_at < levels,
+            "Invalid `level_at` argument: greater than max level id {}: {}",
+            levels - 1,
+            level_at
+        );
+
         let vpn_bits = PagingArch::PTE_PER_PGDIR.trailing_zeros() as usize;
 
+        /// Check alignment
+        #[cfg(debug_assertions)]
+        {
+            let level_offset = level_at * vpn_bits;
+            debug_assert!(
+                vpn.get() & ((1 << level_offset) - 1) == 0,
+                "Invalid `vpn` argument: not aligned to the specified level: level_at={}, vpn={:#x}",
+                level_at,
+                vpn.get()
+            );
+        }
         let mut pgdir = unsafe {
             self.root
                 .to_phys_addr()
@@ -427,12 +562,13 @@ impl Mapper<'_> {
             let idx = (vpn.get() as usize >> (level * vpn_bits)) & (PagingArch::PTE_PER_PGDIR - 1);
             let pte = &mut pgdir[idx];
 
-            if level == 0 {
+            if level == level_at {
                 // leaf reached
                 if pte.is_valid() && !overwrite {
                     return Err(MmError::AlreadyMapped);
                 }
-                *pte = Pte::new_leaf(ppn, flags | PteFlags::VALID);
+                *pte = Pte::new(ppn, flags | PteFlags::VALID);
+                break;
             } else {
                 // branch
                 if !pte.is_branch() {
@@ -443,7 +579,7 @@ impl Mapper<'_> {
                     // all allocated frames will be deallocated automatically.
                     let new_pgdir_ppn = alloc_frame_zeroed().ok_or(MmError::OutOfMemory)?.leak();
 
-                    *pte = Pte::new_branch(new_pgdir_ppn, PteFlags::VALID);
+                    *pte = Pte::new(new_pgdir_ppn, PteFlags::VALID);
                 }
                 pgdir = unsafe {
                     pte.ppn()

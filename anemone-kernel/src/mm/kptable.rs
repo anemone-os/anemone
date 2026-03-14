@@ -12,27 +12,27 @@ use spin::Lazy;
 
 use crate::{exception::broadcast_ipi, mm::layout::KernelLayoutTrait, prelude::*};
 
-static KERNEL_PGDIR: KPgDir = KPgDir::new();
+static KERNEL_PTABLE: KPTable = KPTable::new();
 
 /// Nothing more than [crate::PageTable]. Just provides some specialized methods
 /// for mapping kernel memory regions, and serves as a marker type for the
 /// kernel's root page directory.
 #[derive(Debug)]
-struct KPgDir {
-    pgdir: Lazy<SpinLock<PageTable>>,
+struct KPTable {
+    ptable: Lazy<SpinLock<PageTable>>,
 }
 
-impl KPgDir {
+impl KPTable {
     pub const fn new() -> Self {
         Self {
-            pgdir: Lazy::new(|| SpinLock::new(PageTable::new())),
+            ptable: Lazy::new(|| SpinLock::new(PageTable::new())),
         }
     }
 
     unsafe fn map_kvirt(&self) {
         use arch::link_symbols::*;
-        let mut kpgdir = self.pgdir.lock_irqsave();
-        let mut mapper = kpgdir.mapper();
+        let mut kptable = self.ptable.lock_irqsave();
+        let mut mapper = kptable.mapper();
 
         macro_rules! map_elf_segment {
             ($name:ident, $flags:expr) => {{
@@ -61,12 +61,12 @@ impl KPgDir {
                             ppn: sppn,
                             flags: $flags,
                             npages: npages as usize,
+                            huge_pages: true,
                         }).expect(concat!("failed to map kernel ", stringify!($name), " segment"));
                     }
                 }
             }};
         }
-
         map_elf_segment!(text, PteFlags::READ | PteFlags::EXECUTE);
         map_elf_segment!(rodata, PteFlags::READ);
         map_elf_segment!(data, PteFlags::READ | PteFlags::WRITE);
@@ -74,26 +74,24 @@ impl KPgDir {
     }
 
     unsafe fn map_hhdm(&self) {
-        let mut kpgdir = self.pgdir.lock_irqsave();
-        let mut mapper = kpgdir.mapper();
-
-        // TODO: switch to huge page mapping.
-        // currently we use normal page mapping for hhdm region, which is tooooooo
-        // slow...
+        let mut kptable = self.ptable.lock_irqsave();
+        let mut mapper = kptable.mapper();
+        
         {
             sys_mem_zones().with_avail_zones(|avail_mem_zones| {
             for zone in avail_mem_zones.iter() {
                 let range = zone.range();
 
                 unsafe {
-                mapper
-                    .map_overwrite(Mapping {
-                        vpn: range.start().to_hhdm(),
-                        ppn: range.start(),
-                        flags: PteFlags::READ | PteFlags::WRITE,
-                        npages: range.npages() as usize,
-                    })
-                    .expect("failed to map direct mapping region");
+                    mapper
+                        .map_overwrite(Mapping {
+                            vpn: range.start().to_hhdm(),
+                            ppn: range.start(),
+                            flags: PteFlags::READ | PteFlags::WRITE,
+                            npages: range.npages() as usize,
+                            huge_pages: true,
+                        })
+                        .expect("failed to map direct mapping region");
                 }
                 kdebugln!(
                     "mapped direct mapping region:\n\tvirtual page number {} ~ {},\n\tphysical page number {} ~ {},\n\tflags = {:?}",
@@ -123,6 +121,7 @@ impl KPgDir {
                                 // permissions.
                                 flags: PteFlags::READ | PteFlags::WRITE,
                                 npages: range.npages() as usize,
+                                huge_pages: true,
                             }).expect("failed to map reserved memory region");
                     }
                     kdebugln!(
@@ -139,7 +138,7 @@ impl KPgDir {
     }
 
     unsafe fn init_virtual_ranges(&self) {
-        let mut kpgdir = self.pgdir.lock_irqsave();
+        let mut kpgdir = self.ptable.lock_irqsave();
 
         unsafe {
             kinfoln!(
@@ -152,15 +151,17 @@ impl KPgDir {
     }
 
     unsafe fn kmap(&self, mapping: Mapping) -> Result<(), MmError> {
-        let mut kpgdir = self.pgdir.lock_irqsave();
+        let mut kpgdir = self.ptable.lock_irqsave();
         let mut mapper = kpgdir.mapper();
         mapper.map(mapping)
     }
 
     unsafe fn kunmap(&self, unmapping: Unmapping) {
-        let mut kpgdir = self.pgdir.lock_irqsave();
+        let mut kpgdir = self.ptable.lock_irqsave();
         let mut mapper = kpgdir.mapper();
-        mapper.unmap(unmapping);
+        unsafe{
+            mapper.try_unmap(unmapping);
+        }
     }
 }
 
@@ -176,16 +177,19 @@ impl KPgDir {
 /// a different story.)
 pub fn init_kernel_mapping() {
     unsafe {
-        KERNEL_PGDIR.map_kvirt();
-        KERNEL_PGDIR.map_hhdm();
-        KERNEL_PGDIR.init_virtual_ranges();
+        kdebugln!("mapping kernel image segments...");
+        KERNEL_PTABLE.map_kvirt();
+        kdebugln!("mapping direct mapping region...");
+        KERNEL_PTABLE.map_hhdm();
+        kdebugln!("preallocating pgdirs for remap and vmalloc region...");
+        KERNEL_PTABLE.init_virtual_ranges();
     }
 }
 
 /// Switch to kernel mapping.
 pub unsafe fn activate_kernel_mapping() {
     unsafe {
-        let kpgdir = KERNEL_PGDIR.pgdir.lock_irqsave();
+        let kpgdir = KERNEL_PTABLE.ptable.lock_irqsave();
         PagingArch::activate_addr_space(&kpgdir);
     }
 }
@@ -200,7 +204,7 @@ pub unsafe fn activate_kernel_mapping() {
 /// not used carefully. So we mark this function as unsafe.
 pub unsafe fn kmap(mapping: Mapping) -> Result<(), MmError> {
     unsafe {
-        KERNEL_PGDIR.kmap(mapping)?;
+        KERNEL_PTABLE.kmap(mapping)?;
     }
     broadcast_ipi(IpiPayload::TlbShootdown { vaddr: None }, false);
     Ok(())
@@ -214,7 +218,7 @@ pub unsafe fn kmap(mapping: Mapping) -> Result<(), MmError> {
 /// mark this function as unsafe.
 pub unsafe fn kunmap(unmapping: Unmapping) {
     unsafe {
-        KERNEL_PGDIR.kunmap(unmapping);
+        KERNEL_PTABLE.kunmap(unmapping);
     }
     broadcast_ipi(IpiPayload::TlbShootdown { vaddr: None }, false);
 }

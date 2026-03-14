@@ -178,6 +178,10 @@ macro_rules! impl_page_range {
                 self.start.get() < other.end().get() && other.start.get() < self.end().get()
             }
 
+            pub const fn covers(&self, other: &Self) -> bool {
+                self.start.get() <= other.start.get() && other.end().get() <= self.end().get()
+            }
+
             paste::paste! {
                 pub const fn iter(&self) -> [<$name Iter>] {
                     [<$name Iter>] {
@@ -234,7 +238,7 @@ impl Debug for VirtPageRange {
 
 impl PhysAddr {
     pub fn to_hhdm(self) -> VirtAddr {
-        KernelLayout::phys_to_hhdm(self)
+        KernelLayout::phys_to_dm(self)
     }
 
     pub fn to_kvirt(self) -> VirtAddr {
@@ -264,7 +268,7 @@ impl PhysPageRange {
 
 impl VirtAddr {
     pub unsafe fn hhdm_to_phys(self) -> PhysAddr {
-        unsafe { KernelLayout::hhdm_to_phys(self) }
+        unsafe { KernelLayout::dm_to_phys(self) }
     }
 
     pub unsafe fn kvirt_to_phys(self) -> PhysAddr {

@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 
 /// PageTable. The container of page directories.
 ///
@@ -42,13 +42,15 @@ impl Drop for PageTable {
     fn drop(&mut self) {
         let mut mapper = self.mapper();
 
-        // unmap all pages
-        mapper.unmap(Unmapping {
-            range: VirtPageRange::new(
-                VirtPageNum::new(0),
-                1 << (PagingArch::PAGE_LEVELS * PagingArch::PGDIR_IDX_BITS),
-            ),
-        });
+        // unmap all userspace pages
+        unsafe {
+            mapper.try_unmap(Unmapping {
+                range: VirtPageRange::new(
+                    VirtPageNum::new(0),
+                    KernelLayout::USPACE_TOP_VPN.get(),
+                ),
+            });
+        }
         let _frame = unsafe { OwnedFrameHandle::from_ppn(self.root) };
     }
 }
