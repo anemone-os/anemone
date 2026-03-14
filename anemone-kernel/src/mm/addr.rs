@@ -234,7 +234,7 @@ impl Debug for VirtPageRange {
 
 impl PhysAddr {
     pub fn to_hhdm(self) -> VirtAddr {
-        KernelLayout::phys_to_hhdm(self)
+        KernelLayout::phys_to_dm(self)
     }
 
     pub fn to_kvirt(self) -> VirtAddr {
@@ -264,7 +264,7 @@ impl PhysPageRange {
 
 impl VirtAddr {
     pub unsafe fn hhdm_to_phys(self) -> PhysAddr {
-        unsafe { KernelLayout::hhdm_to_phys(self) }
+        unsafe { KernelLayout::dm_to_phys(self) }
     }
 
     pub unsafe fn kvirt_to_phys(self) -> PhysAddr {

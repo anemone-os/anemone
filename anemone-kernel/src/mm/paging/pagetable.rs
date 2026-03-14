@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 
 /// PageTable. The container of page directories.
 ///
@@ -46,7 +46,7 @@ impl Drop for PageTable {
         unsafe {
             mapper.try_unmap(Unmapping {
                 range: VirtPageRange::new(
-                    PagingArch::KSPACE_START_VPN,
+                    KernelLayout::KSPACE_VPN,
                     1 << (PagingArch::PAGE_LEVELS * PagingArch::PGDIR_IDX_BITS),
                 ),
             });

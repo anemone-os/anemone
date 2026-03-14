@@ -14,7 +14,7 @@ use crate::{
         EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count, early_scan_fdt_size,
         of_platform_discovery, unflatten_device_tree,
     },
-    mm::layout::KernelLayoutTrait,
+    mm::layout::{self, KernelLayoutTrait},
     prelude::*,
     utils::align::{AlignedBytes, PhantomAligned4096},
 };
@@ -69,7 +69,7 @@ static BOOTSTRAP_PGDIR: RiscV64PgDir = {
     //    actually exists, and the extra mappings won't cause any harm.
     let s_ram_ppn = align_down_power_of_2!(PHYS_RAM_START, 1 << 30) as u64 >> 12;
     let hhdm_start_idx =
-        (((<sv39::Sv39KernelLayout as KernelLayoutTrait<sv39::Sv39PagingArch>>::KSPACE_ADDR
+        (((<sv39::Sv39KernelLayout as KernelLayoutTrait<sv39::Sv39PagingArch>>::DIRECT_MAPPING_ADDR
             as usize)
             >> 30)
             & 0x1ff)
@@ -243,7 +243,7 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
     kinfoln!("anemone kernel booting...");
     kinfoln!("bsp id: {}", bsp_id);
 
-    let fdt_va = sv39::Sv39KernelLayout::phys_to_hhdm(fdt_pa);
+    let fdt_va = sv39::Sv39KernelLayout::phys_to_dm(fdt_pa);
 
     unsafe {
         // needed by percpu initialization.
@@ -281,6 +281,7 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         kinfoln!("kernel mapping initialized");
         mm::kptable::activate_kernel_mapping();
         kinfoln!("kernel mapping activated");
+
 
         // register drivers to bus types
         driver::init();

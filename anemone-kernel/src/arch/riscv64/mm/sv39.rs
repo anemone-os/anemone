@@ -13,14 +13,11 @@ impl PagingArchTrait for Sv39PagingArch {
 
     const MAX_HUGE_PAGE_LEVEL: usize = 2;
 
-    /// On RiscV64, maximum length of physical addresses is 56 bits.
+    const PAGE_LEVELS: usize = 3;
+
     const MAX_PPN_BITS: usize = 44;
 
     const PAGE_SIZE_BYTES: usize = super::PAGE_SIZE_BYTES;
-
-    const PAGE_LEVELS: usize = 3;
-
-    const PTE_FLAGS_BITS: usize = super::PTE_FLAGS_BITS;
 
     unsafe fn activate_addr_space(pgtbl: &PageTable) {
         let satp_val = ((satp::Mode::Sv39 as usize) << 60) | (pgtbl.root_ppn().get() as usize);
@@ -96,9 +93,20 @@ impl PagingArchTrait for Sv39PagingArch {
 pub struct Sv39KernelLayout;
 
 impl KernelLayoutTrait<Sv39PagingArch> for Sv39KernelLayout {
-    const KSPACE_ADDR: u64 = 0xffff_ffc0_0000_0000;
+    const USPACE_TOP_VPN: VirtPageNum = VirtPageNum::new(
+        (1 << (Sv39PagingArch::PAGE_LEVELS * Sv39PagingArch::PGDIR_IDX_BITS) >> 1),
+    );
 
-    const KERNEL_VA_BASE: u64 = KERNEL_VA_BASE;
+    const FREE_SPACE_VPN: VirtPageNum = VirtPageNum::new(
+        (Self::KSPACE_VPN.to_virt_addr().get() + PHYS_RAM_START + MAX_PHYS_RAM_SIZE)
+            >> Sv39PagingArch::PAGE_SIZE_BITS,
+    );
 
-    const KERNEL_LA_BASE: u64 = KERNEL_LA_BASE;
+    const KERNEL_VA_BASE_VPN: VirtPageNum =
+        VirtPageNum::new(KERNEL_VA_BASE >> Sv39PagingArch::PAGE_SIZE_BITS);
+
+    const KERNEL_LA_BASE_VPN: PhysPageNum =
+        PhysPageNum::new(KERNEL_LA_BASE >> Sv39PagingArch::PAGE_SIZE_BITS);
+
+    const DIRECT_MAPPING_VPN: VirtPageNum = Self::KSPACE_VPN;
 }

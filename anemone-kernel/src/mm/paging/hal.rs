@@ -6,26 +6,44 @@ use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 pub trait PagingArchTrait: Sized {
     type PgDir: PgDirArch;
 
+    // region: Paging
+
     /// The maximum level of huge page supported by this architecture.
     const MAX_HUGE_PAGE_LEVEL: usize;
+
+    /// The number of levels in the page table hierarchy.
+    const PAGE_LEVELS: usize;
 
     /// The maximum number of bits in the physical page number supported by this
     /// architecture.
     const MAX_PPN_BITS: usize;
 
+    // endregion
+
+    // region: Page Size
+
     /// The minimum page size supported by the architecture, in bytes.
     const PAGE_SIZE_BYTES: usize;
+
     /// The number of bits in the page offset, i.e., the number of bits needed
     /// to represent the page size.
-    const PAGE_SIZE_BITS: usize = Self::PAGE_SIZE_BYTES.trailing_zeros() as usize;
+    const PAGE_SIZE_BITS: usize = const {
+        assert!(
+            Self::PAGE_SIZE_BYTES.is_power_of_two(),
+            "page size must be a power of two"
+        );
+        Self::PAGE_SIZE_BYTES.trailing_zeros() as usize
+    };
 
     /// The number of pages per megabyte.
     const NPAGES_PER_MB: usize = 1024 * 1024 / Self::PAGE_SIZE_BYTES;
+    
     /// The number of pages per gigabyte.
     const NPAGES_PER_GB: usize = 1024 * 1024 * 1024 / Self::PAGE_SIZE_BYTES;
 
-    /// The number of levels in the page table hierarchy.
-    const PAGE_LEVELS: usize;
+    // endregion
+
+    // region: Page Level Structure
 
     /// The number of page table entries per page directory, i.e., the number of
     /// entries in a page directory.
@@ -40,8 +58,6 @@ pub trait PagingArchTrait: Sized {
         Self::PAGE_SIZE_BYTES / core::mem::size_of::<<Self::PgDir as PgDirArch>::Pte>()
     };
 
-    const KSPACE_START_VPN: VirtPageNum = VirtPageNum::new(KernelLayout::KSPACE_ADDR >> Self::PAGE_SIZE_BITS);
-
     /// Number of bits needed to represent the number of page table entries per
     /// page directory.
     const PGDIR_IDX_BITS: usize = {
@@ -52,11 +68,7 @@ pub trait PagingArchTrait: Sized {
         Self::PTE_PER_PGDIR.trailing_zeros() as usize
     };
 
-    /// The number of bits in the page table entry flags.
-    const PTE_FLAGS_BITS: usize;
-    /// The bitmask for the page table entry flags, i.e., the bits that are used
-    /// to represent the flags in a page table entry.
-    const PTE_FLAGS_MASK: u64 = (1 << Self::PTE_FLAGS_BITS) - 1;
+    // endregion
 
     /// Switch to the given page table.
     ///
@@ -183,6 +195,8 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
     /// In most cases, a TLB shootdown should be performed after this operation.
     unsafe fn set_ppn(&mut self, ppn: PhysPageNum);
 }
+
+/// A Page Directory should always take just a full page.
 pub trait PgDirArch:
     Sized + Copy + Index<usize, Output = Self::Pte> + IndexMut<usize, Output = Self::Pte>
 {
