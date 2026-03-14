@@ -13,12 +13,12 @@ pub trait KernelLayoutTrait<P: PagingArchTrait> {
     ///
     /// e.g. on a riscv sv39 system, the virtual address space is 512 GiB, and
     /// the direct mapping region starts at 256 GiB, so the offset is 256 GiB.
-    const DIRECT_MAPPING_ADDR: u64;
+    const KSPACE_ADDR: u64;
 
     /// The offset between the physical address and the virtual address in the
     /// direct mapping region.
     const DIRECT_MAPPING_OFFSET: usize = const {
-        let ret = Self::DIRECT_MAPPING_ADDR as usize - 0;
+        let ret = Self::KSPACE_ADDR as usize - 0;
         assert!(ret.is_multiple_of(P::PAGE_SIZE_BYTES));
         ret
     };
@@ -41,7 +41,7 @@ pub trait KernelLayoutTrait<P: PagingArchTrait> {
     /// vmalloc and ioremap region.
     const REMAP_REGION: VirtPageRange = VirtPageRange::new(
         VirtPageNum::new(
-            (Self::DIRECT_MAPPING_ADDR + PHYS_RAM_START + MAX_PHYS_RAM_SIZE) >> P::PAGE_SIZE_BITS,
+            (Self::KSPACE_ADDR + PHYS_RAM_START + MAX_PHYS_RAM_SIZE) >> P::PAGE_SIZE_BITS,
         ),
         P::NPAGES_PER_GB as u64 * (1 << REMAP_SHIFT_GB),
     );

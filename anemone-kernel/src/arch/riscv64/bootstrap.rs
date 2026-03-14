@@ -69,7 +69,7 @@ static BOOTSTRAP_PGDIR: RiscV64PgDir = {
     //    actually exists, and the extra mappings won't cause any harm.
     let s_ram_ppn = align_down_power_of_2!(PHYS_RAM_START, 1 << 30) as u64 >> 12;
     let hhdm_start_idx =
-        (((<sv39::Sv39KernelLayout as KernelLayoutTrait<sv39::Sv39PagingArch>>::DIRECT_MAPPING_ADDR
+        (((<sv39::Sv39KernelLayout as KernelLayoutTrait<sv39::Sv39PagingArch>>::KSPACE_ADDR
             as usize)
             >> 30)
             & 0x1ff)

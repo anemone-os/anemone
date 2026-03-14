@@ -159,7 +159,9 @@ impl KPTable {
     unsafe fn kunmap(&self, unmapping: Unmapping) {
         let mut kpgdir = self.ptable.lock_irqsave();
         let mut mapper = kpgdir.mapper();
-        mapper.unmap(unmapping);
+        unsafe{
+            mapper.try_unmap(unmapping);
+        }
     }
 }
 

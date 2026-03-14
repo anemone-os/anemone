@@ -96,7 +96,7 @@ impl PagingArchTrait for Sv39PagingArch {
 pub struct Sv39KernelLayout;
 
 impl KernelLayoutTrait<Sv39PagingArch> for Sv39KernelLayout {
-    const DIRECT_MAPPING_ADDR: u64 = 0xffff_ffc0_0000_0000;
+    const KSPACE_ADDR: u64 = 0xffff_ffc0_0000_0000;
 
     const KERNEL_VA_BASE: u64 = KERNEL_VA_BASE;
 

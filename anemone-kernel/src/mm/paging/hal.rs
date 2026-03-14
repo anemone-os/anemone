@@ -1,6 +1,6 @@
 use core::ops::{Index, IndexMut};
 
-use crate::prelude::*;
+use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 
 /// The architecture-specific traits and types for paging.
 pub trait PagingArchTrait: Sized {
@@ -39,6 +39,8 @@ pub trait PagingArchTrait: Sized {
         );
         Self::PAGE_SIZE_BYTES / core::mem::size_of::<<Self::PgDir as PgDirArch>::Pte>()
     };
+
+    const KSPACE_START_VPN: VirtPageNum = VirtPageNum::new(KernelLayout::KSPACE_ADDR >> Self::PAGE_SIZE_BITS);
 
     /// Number of bits needed to represent the number of page table entries per
     /// page directory.

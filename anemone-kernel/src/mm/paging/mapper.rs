@@ -135,9 +135,11 @@ impl Mapper<'_> {
                     "MapTransaction::Drop: transaction failed, rolling back the mapped pages"
                 );
                 // roll back the mapping of already mapped pages
-                self.mapper.unmap(Unmapping {
-                    range: VirtPageRange::new(self.mapping.vpn, self.mapped_pages as u64),
-                });
+                unsafe {
+                    self.mapper.try_unmap(Unmapping {
+                        range: VirtPageRange::new(self.mapping.vpn, self.mapped_pages as u64),
+                    });
+                }
             }
         }
 
@@ -211,9 +213,24 @@ impl Mapper<'_> {
     /// Unmap a virtual memory region and deallocate page tables if they become
     /// empty after unmapping.
     ///
+    /// When encountered with large pages that is not fully covered by the
+    /// unmapping range,     **that large page will be skipped and left
+    /// intact**, as we don't want allocate new page tables for
+    ///     splitting the large page, which may cause errors that we don't want
+    /// to handle.
+    ///
     /// **This method is deliberately designed not to return a [Result] but
     /// always succeed.**
-    pub fn unmap(&mut self, unmapping: Unmapping) {
+    ///
+    /// # Safety
+    ///
+    /// This method is unsafe because it cannot always fully unmap
+    ///     mappings within the given range.
+    ///
+    /// It is only safe when used for rolling back a mapping operation.
+    ///
+    /// Use [Self::unmap_and_split] for normal unmapping operations.
+    pub unsafe fn try_unmap(&mut self, unmapping: Unmapping) {
         let Unmapping { range } = unmapping;
 
         unsafe {
@@ -236,10 +253,13 @@ impl Mapper<'_> {
                     ControlFlow::<()>::Continue
                 },
                 |pte, ctx| {
-                    if range.contains(ctx.vpn) {
+                    if range.intersects(&VirtPageRange::new(
+                        ctx.vpn,
+                        (1 << (ctx.level * PagingArch::PGDIR_IDX_BITS)) as u64,
+                    )) {
                         if !pte.is_valid() {
                             kwarningln!(
-                                "Mapper::unmap: trying to unmap an unmapped page: vpn={:?}",
+                                "Mapper::try_unmap: trying to unmap an unmapped page: vpn={:?}",
                                 ctx.vpn
                             );
                         }
@@ -256,6 +276,16 @@ impl Mapper<'_> {
                 },
             }
         }
+    }
+
+    /// # Not implemented yet
+    /// Unmap a virtual memory region and deallocate page tables if they become
+    /// empty after unmapping.
+    ///
+    /// When encountered with large pages that is not fully covered by the
+    /// unmapping range, **that large page will be split into normal pages.**
+    pub unsafe fn unmap_and_split(&mut self, unmapping: Unmapping) -> Result<(), MmError> {
+        todo!();
     }
 
     /// Translate a virtual page number to a physical page number and its flags.
@@ -332,6 +362,8 @@ struct BranchCtx {
 #[derive(Debug)]
 struct LeafCtx {
     vpn: VirtPageNum,
+    /// The level of the pgdir that contains the branch pte.
+    level: usize,
 }
 
 impl Mapper<'_> {
@@ -461,6 +493,7 @@ impl Mapper<'_> {
                 assert!(pte.is_leaf());
                 let ctx = LeafCtx {
                     vpn: VirtPageNum::new(vpn_prefix),
+                    level,
                 };
                 match leaf_op(pte, ctx) {
                     ControlFlow::Continue => {},
