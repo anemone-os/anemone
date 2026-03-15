@@ -22,6 +22,10 @@ mrproper:
 build:
     @just xtask build
 
+[doc("Manage configurations. Use `just conf -h` for more details.")]
+conf *args:
+    @just xtask conf {{ args }}
+
 [doc("generate the kconfig file from .defconfig")]
 defconfig:
     @just log "DEFCONFIG" "Copying .defconfig to kconfig"
