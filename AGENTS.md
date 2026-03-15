@@ -19,14 +19,20 @@
 	- `anemone-kernel/src/platform_defs.rs`
 	- `build/generated/kernel.lds`
 	不要手改这些生成文件。
-- 架构层通过 `*Arch` 访问（`CpuArch`, `IntrArch`, `TrapArch`, `PagingArch`, `PowerArch`, `TimeArch`, `KernelLayout`），入口集中在 `anemone-kernel/src/arch/mod.rs`。
-- 设备发现走 Open Firmware/DTB 路线，早期内存扫描与注册在 `anemone-kernel/src/device/discovery/open_firmware.rs`（`EarlyMemoryScanner::{new, early_alloc_folio, commit_to_pmm}`）。
-- 异常/中断抽象拆分在 `anemone-kernel/src/exception/intr/hal.rs`（`IntrArchTrait`, `IrqFlags`）与 `anemone-kernel/src/exception/trap/hal.rs`（`TrapArchTrait`）；作用域中断保护在 `anemone-kernel/src/exception/intr/scoped.rs`（`IntrGuard`）。时间抽象在 `anemone-kernel/src/time/hal.rs`（`TimeArchTrait`）。硬件抽象层统一定义在上层模块而非架构模块，在大多数情况下，遵循依赖倒置原则。
-- 设备驱动模型（DDM）借鉴了 Linux 的设计，引入了 `KObject`/`KSet` 作为基础对象管理，并拆分为 `Bus`、`Device`、`Driver` 三大组件：
-	- 系统核心设备模型位于 `anemone-kernel/src/device/`，底层对象在 `kobject.rs`。
-	- 总线抽象在 `bus/mod.rs`（`BusType`），目前已实现了 `platform` 总线。
-	- 设备接口在 `device/mod.rs`（`Device`），驱动接口在 `driver/mod.rs`（`Driver`）。
-	- 驱动通过 `probe` 函数与设备匹配，匹配逻辑由具体的 `BusType` 实现（如 `PlatformBusType::matches`）。
+- 架构层通过 `*Arch` 访问（`CpuArch`, `IntrArch`, `TrapArch`, `PagingArch`, `TimeArch`, `KernelLayout`），入口集中在 `anemone-kernel/src/arch/mod.rs`。
+- 设备发现目前提供 Open Firmware/DTB 路线，实现在 `anemone-kernel/src/device/discovery/open_firmware.rs`。
+- 设备驱动模型（DDM）目前以 `platform bus` 为主线：
+	- 基础对象 `KObject`/`KSet`，抽象为 `BusType`、`Device`、`Driver` 三层。
+	- 注册路径在 `anemone-kernel/src/device/bus/`：注册 `device/driver` 时会立即尝试匹配并执行 `probe`；匹配由具体总线实现（当前核心是 `PlatformBusType::matches`，按 compatible 表匹配）。
+	- 设备树根仍围绕 `/sys/devices/platform` 的 `ROOT_BUS` 组织，后续再扩展更完整的 `/sys/bus` 视图。
+- IRQ 子系统分层：
+	- 架构本地中断开关与 IRQ flags 抽象在 `anemone-kernel/src/exception/intr/hal.rs`（`IntrArchTrait`、`IrqFlags`）。
+	- 通用 IRQ 逻辑在 `anemone-kernel/src/exception/intr/irq.rs`：`IrqDomain`、`IrqChip`、`CoreIrqChip`、`request_irq`、`handle_irq` 等。
+	- 当前 `irq` 子系统主要处理设备外部中断；timer 与 IPI 仍在 `anemone-kernel/src/exception/` 下分别处理。
+- MM 子系统当前结构：
+	- 顶层在 `anemone-kernel/src/mm/mod.rs`，核心模块包括 `frame`、`paging`、`kmalloc`、`remap`、`zone`、`kptable`。
+	- `zone.rs` 维护可用/保留内存区（`SysMemZones`）；`frame` 的 PMM 初始化会基于可用 zone 建立页帧分配器。
+	- `paging` 采用 higher-half 布局抽象，布局约束由 `KernelLayout` 与架构分页 HAL 共同确定。
 - 低层调度抽象目前占位于 `anemone-kernel/src/sched/hal.rs`，新增架构调度原语先在这里落地。
 
 ## 开发工作流（默认用这些命令）
@@ -35,6 +41,9 @@
 - 运行 QEMU：`just xtask qemu --platform qemu-virt-rv64 --image build/anemone.elf`。
 - 清理：`just clean`；彻底清理（含配置/生成文件）：`just mrproper`。
 - 调试参考：`scripts/qemu-virt-rv64-dbg.just`（`qemu-server` + `gdb-client`）。
+- `xtask` 命令结构（概要）：`conf`（`list/switch`）、`build`、`qemu`、`clean`、`mrproper`。
+	- `build` 过程会先清理并重建 `build/generated/`，再生成 defs/lds，最后调用内核 `cargo build` 并产出 `build/anemone.elf`。
+	- `clean` 清理构建产物；`mrproper` 额外删除 `kconfig` 与生成的 `kconfig_defs.rs/platform_defs.rs`。
 
 ## 代码约定（本仓库特有）
 - 常用导入统一走 `anemone-kernel/src/prelude.rs`；新模块优先 `use crate::prelude::*;` 保持风格一致。
