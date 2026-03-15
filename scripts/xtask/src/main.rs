@@ -7,9 +7,9 @@
 //! directly.
 #![allow(unused)]
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
-use crate::tasks::switch::SwitchArgs;
+use crate::tasks::conf::SwitchArgs;
 
 mod config;
 mod tasks;
@@ -25,10 +25,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "List all available build configurations or its abbrevations")]
-    List,
-    #[command(about = "Switch to a different build configuration")]
-    Switch(SwitchArgs),
+    #[command(about = "Manage Anemone build configurations")]
+    Conf(Conf),
     #[command(about = "Build Anemone")]
     Build(tasks::build::BuildArgs),
     #[command(about = "Run Anemone in QEMU emulator")]
@@ -38,6 +36,20 @@ enum Commands {
     #[command(about = "Clean everything including config files")]
     Mrproper,
 }
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct Conf {
+    #[command(subcommand)]
+    command: ConfCommands,
+}
+
+#[derive(Subcommand)]
+enum ConfCommands {
+    #[command(about = "List all available build configurations or its abbrevations")]
+    List,
+    #[command(about = "Switch to a different build configuration")]
+    Switch(SwitchArgs),
+}
 
 fn main() -> anyhow::Result<()> {
     // xtask cwd: scripts/xtask
@@ -46,8 +58,10 @@ fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
-        Commands::List => tasks::switch::list(),
-        Commands::Switch(args) => tasks::switch::run(args),
+        Commands::Conf(conf) => match conf.command {
+            ConfCommands::List => tasks::conf::list(),
+            ConfCommands::Switch(args) => tasks::conf::switch(args),
+        },
         Commands::Build(args) => tasks::build::run(args),
         Commands::Qemu(args) => tasks::qemu::run(args),
         Commands::Clean => tasks::clean::run(),

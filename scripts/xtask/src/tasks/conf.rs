@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, str::FromStr};
 
 use anyhow::Ok;
 use clap::Args;
@@ -11,7 +11,7 @@ pub struct SwitchArgs {
     pub build_name: String,
 }
 
-pub fn run(args: SwitchArgs) -> anyhow::Result<()> {
+pub fn switch(args: SwitchArgs) -> anyhow::Result<()> {
     log_progress!(
         "SWITCH",
         &format!("Searching build configuration '{}'", args.build_name)
@@ -57,10 +57,10 @@ pub fn run(args: SwitchArgs) -> anyhow::Result<()> {
                 &format!("Switching to build configuration '{}'", args.build_name)
             );
             let platform_config_content = std::fs::read_to_string("kconfig")?;
-            let mut platform_config = KConfig::from_str(&platform_config_content)?;
-            platform_config.build.platform = name;
-            let new_content = toml::to_string(&platform_config)?;
-            std::fs::write("kconfig", new_content)?;
+            // Use toml_edit to update only [build].platform while preserving comments/formatting.
+            let mut doc = toml_edit::DocumentMut::from_str(&platform_config_content)?;
+            doc["build"]["platform"] = toml_edit::value(name);
+            std::fs::write("kconfig", doc.to_string())?;
             log_progress!(
                 "SWITCH",
                 &format!("Switched to build configuration '{}'", args.build_name)
