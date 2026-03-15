@@ -6,6 +6,8 @@
 [build]
 # Name of the target platform, used for identification and will be embedded into kernel
 name = "example-platform"
+# Abbreviations for the platform, used for command line arguments and such.
+abbrs = ["eg", "example"]
 # Architecture of the target platform
 # e.g., riscv64, x86_64, arm64, loongarch64
 arch = "riscv64"

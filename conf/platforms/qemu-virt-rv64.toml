@@ -1,5 +1,6 @@
 [build]
 name = "qemu-virt-rv64"
+abbrs = ["rv", "rv64", "riscv", "riscv64"]
 arch = "riscv64"
 target = "riscv64-unknown-anemone-elf"
 exec_env = "sbi"

@@ -3,11 +3,11 @@
 
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::workspace::*;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 pub enum Profile {
     // debug with some minor customizations
     #[serde(rename = "dev")]
@@ -25,13 +25,13 @@ impl Profile {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 pub struct Build {
     pub platform: String,
     pub profile: Profile,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 pub struct Parameters {
     pub bootstrap_heap_shift_kb: Option<u64>,
     pub log_buffer_shift_kb: Option<u64>,
@@ -106,7 +106,7 @@ pub const SYSTEM_HZ: u16 = {};
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 pub struct Config {
     pub build: Build,
     pub features: HashMap<String, bool>,
