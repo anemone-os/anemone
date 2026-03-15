@@ -7,7 +7,7 @@ use crate::{config::{KConfig, PlatformConfig}, log_progress, workspace::PLATFORM
 
 #[derive(Args)]
 pub struct SwitchArgs {
-    #[arg(help = "Build name of abbrevations")]
+    #[arg(help = "Build name or abbreviation")]
     pub build_name: String,
 }
 
