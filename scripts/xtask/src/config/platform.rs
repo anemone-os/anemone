@@ -1,9 +1,9 @@
 //! This module is used to resolve platform configurations
 //! under the `conf/platforms/` directory.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 pub enum Arch {
     #[serde(rename = "riscv64")]
     RiscV64,
@@ -20,7 +20,7 @@ impl Arch {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 pub enum ExecEnv {
     #[serde(rename = "sbi")]
     Sbi,
@@ -28,7 +28,7 @@ pub enum ExecEnv {
     Uefi,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 pub enum TargetTriple {
     #[serde(rename = "riscv64-unknown-anemone-elf")]
     RiscV64UnknownAnemoneElf,
@@ -42,15 +42,16 @@ impl TargetTriple {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 pub struct Build {
     pub name: String,
+    pub abbrs: Vec<String>,
     pub arch: Arch,
     pub target: TargetTriple,
     pub exec_env: ExecEnv,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 pub struct Constants {
     pub phys_ram_start: u64,
     pub max_phys_ram_size: u64,
@@ -60,7 +61,7 @@ pub struct Constants {
     pub frame_section_shift_mb: usize,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 pub struct Qemu {
     pub qemu: String,
     pub machine: String,
@@ -71,7 +72,7 @@ pub struct Qemu {
     pub args: Option<Vec<String>>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 pub struct Config {
     pub build: Build,
     pub constants: Constants,

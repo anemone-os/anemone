@@ -9,6 +9,8 @@
 
 use clap::{Parser, Subcommand};
 
+use crate::tasks::switch::SwitchArgs;
+
 mod config;
 mod tasks;
 mod workspace;
@@ -23,6 +25,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(about = "List all available build configurations or its abbrevations")]
+    List,
+    #[command(about = "Switch to a different build configuration")]
+    Switch(SwitchArgs),
     #[command(about = "Build Anemone")]
     Build(tasks::build::BuildArgs),
     #[command(about = "Run Anemone in QEMU emulator")]
@@ -40,6 +46,8 @@ fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
+        Commands::List => tasks::switch::list(),
+        Commands::Switch(args) => tasks::switch::run(args),
         Commands::Build(args) => tasks::build::run(args),
         Commands::Qemu(args) => tasks::qemu::run(args),
         Commands::Clean => tasks::clean::run(),

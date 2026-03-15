@@ -22,6 +22,14 @@ mrproper:
 build:
     @just xtask build
 
+[doc("list all available build configurations and their abbreviations")]
+list:
+    @just xtask list
+
+[doc("switch to a different build configuration")]
+switch *args:
+    @just xtask switch {{ args }}
+
 [doc("generate the kconfig file from .defconfig")]
 defconfig:
     @just log "DEFCONFIG" "Copying .defconfig to kconfig"
