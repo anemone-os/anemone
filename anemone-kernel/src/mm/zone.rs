@@ -198,7 +198,11 @@ impl SysMemZones {
     /// Leaks a contiguous range of physical pages from the available memory
     /// zones, making it reserved thus not managed by the physical memory
     /// manager.
-    pub fn leak(&self, npages: usize) -> Option<PhysPageNum> {
+    ///
+    /// # Safety
+    ///
+    /// This function can only be used before [pmm_init] is called.
+    pub unsafe fn leak(&self, npages: usize) -> Option<PhysPageNum> {
         let mut mem_zones = self.mem_zones.lock_irqsave();
         let mut avail_mem_zones = self.avail_mem_zones.lock_irqsave();
         let mut rsv_mem_zones = self.rsv_mem_zones.lock_irqsave();

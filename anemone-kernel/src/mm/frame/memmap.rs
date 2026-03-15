@@ -55,15 +55,7 @@ struct MemSection {
 }
 static_assert!(size_of::<MemSection>().is_multiple_of(PagingArch::PAGE_SIZE_BYTES));
 
-impl MemSection {
-    const EMPTY: Self = Self {
-        frames: [Frame::EMPTY; 1 << FRAME_IN_SECTION_IDX_BITS],
-    };
-}
-
 mod memmap {
-
-    use core::mem::MaybeUninit;
 
     use super::*;
     static MEMMAP: MonoOnce<IndirectLevel> = unsafe { MonoOnce::new() };
@@ -143,7 +135,7 @@ mod memmap {
     /// the PPN of the first allocated page. If no available memory can be
     /// allocated, an immediate panic should be triggered, since kernel
     /// cannot run without memmap.
-    pub unsafe fn init<A>(mut allocator: A)
+    pub unsafe fn init<A>(allocator: A)
     where
         A: FnOnce(usize) -> PhysPageNum,
     {
@@ -225,23 +217,19 @@ mod memmap {
                                     // do an alloc
                                     *entry = bump.alloc(1);
                                     // initialize the allocated page as an indirect level
-                                    unsafe {
-                                        (*entry)
-                                            .to_hhdm()
-                                            .to_virt_addr()
-                                            .as_ptr_mut::<IndirectLevel>()
-                                            .write(IndirectLevel::EMPTY);
-                                    }
+                                    (*entry)
+                                        .to_hhdm()
+                                        .to_virt_addr()
+                                        .as_ptr_mut::<IndirectLevel>()
+                                        .write(IndirectLevel::EMPTY);
                                 }
                                 *entry
                             };
 
-                            cur_level = unsafe {
-                                next_ppn
-                                    .to_hhdm()
-                                    .to_virt_addr()
-                                    .as_ptr_mut::<IndirectLevel>()
-                            };
+                            cur_level = next_ppn
+                                .to_hhdm()
+                                .to_virt_addr()
+                                .as_ptr_mut::<IndirectLevel>();
                         }
 
                         let section_idx = indices[0];
@@ -251,21 +239,19 @@ mod memmap {
                             if entry.get() == 0 {
                                 let section_ppn = bump.alloc(MEMSECTION_NPAGES);
 
-                                unsafe {
-                                    // we can't construct a memsection_ptr and write to it directly,
-                                    // since
-                                    // size_of::<MemSection>() is too large and will overflow the
-                                    // stack. That's why we write to each frame one by one.
-                                    //
-                                    // tbh, i kind of miss cpp's placement new here...
+                                // we can't construct a memsection_ptr and write to it directly,
+                                // since
+                                // size_of::<MemSection>() is too large and will overflow the
+                                // stack. That's why we write to each frame one by one.
+                                //
+                                // tbh, i kind of miss cpp's placement new here...
 
-                                    let frame_ptr =
-                                        section_ppn.to_hhdm().to_virt_addr().as_ptr_mut::<Frame>();
-                                    for i in 0..NFRAMES_PER_SECTION {
-                                        let frame_ptr = frame_ptr.add(i);
-                                        frame_ptr.write(Frame::EMPTY);
-                                        (&mut *frame_ptr).ppn = section_base_ppn + i as u64;
-                                    }
+                                let frame_ptr =
+                                    section_ppn.to_hhdm().to_virt_addr().as_ptr_mut::<Frame>();
+                                for i in 0..NFRAMES_PER_SECTION {
+                                    let frame_ptr = frame_ptr.add(i);
+                                    frame_ptr.write(Frame::EMPTY);
+                                    (&mut *frame_ptr).ppn = section_base_ppn + i as u64;
                                 }
 
                                 *entry = section_ppn;

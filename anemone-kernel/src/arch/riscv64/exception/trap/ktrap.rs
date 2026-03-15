@@ -1,6 +1,5 @@
 use crate::{
-    arch::riscv64::exception::trap::{RiscV64Exception, RiscV64TrapFrame, RiscV64TrapReason},
-    exception::trap::{InterruptReason, TrapReason, ktrap_handler},
+    arch::riscv64::exception::trap::{RiscV64Exception, RiscV64Interrupt, RiscV64TrapFrame},
     prelude::*,
 };
 
@@ -122,36 +121,93 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
-    let reason = RiscV64TrapReason::try_from_raw(trapframe).expect("unknown trap reason");
 
-    unsafe {
+    let scause = riscv::register::scause::read();
+    let code = scause.code();
+    if scause.is_interrupt() {
+        let reason = RiscV64Interrupt::try_from(code)
+            .unwrap_or_else(|_| panic!("unknown interrupt with code {}", code));
+        kdebugln!("received interrupt: {:?}", reason);
         match reason {
-            RiscV64TrapReason::Generic(reason) => {
-                if matches!(reason, TrapReason::Interrupt(InterruptReason::Ipi)) {
+            RiscV64Interrupt::SupervisorSoftware => {
+                handle_ipi();
+                unsafe {
                     riscv::register::sip::clear_ssoft();
                 }
-                ktrap_handler(trapframe, reason)
             },
-            RiscV64TrapReason::ArchRecoverable(exception) => {
-                arch_recoverable_handler(trapframe, exception)
+            RiscV64Interrupt::SupervisorTimer => {
+                // TODO: use a proper value for the next timer interrupt.
+                sbi_rt::set_timer(riscv::register::time::read().wrapping_add(300_000_0) as u64)
+                    .expect("failed to set timer for next timer interrupt");
+                handle_kernel_timer_interrupt();
             },
+            RiscV64Interrupt::SupervisorExternal => handle_irq(),
+        }
+    } else {
+        let stval = riscv::register::stval::read();
+        let reason = RiscV64Exception::try_from(code)
+            .unwrap_or_else(|_| panic!("unknown exception with code {}", code));
+        kdebugln!("received exception: {:?}", reason);
+        match reason {
+            RiscV64Exception::InstructionMisaligned => {
+                panic!("instruction address misaligned: {:#x}", trapframe.sepc)
+            },
+            RiscV64Exception::InstructionAccessFault => {
+                panic!("instruction access fault at address: {:#x}", trapframe.sepc)
+            },
+            RiscV64Exception::IllegalInstruction => {
+                panic!("illegal instruction at address: {:#x}", trapframe.sepc)
+            },
+            RiscV64Exception::Breakpoint => panic!("breakpoint at address: {:#x}", trapframe.sepc),
+            RiscV64Exception::LoadMisaligned => {
+                panic!(
+                    "load address misaligned: sepc {:#x} addr {:#x}",
+                    trapframe.sepc, stval
+                )
+            },
+            RiscV64Exception::LoadAccessFault => {
+                panic!(
+                    "load access fault at address: sepc {:#x} addr {:#x}",
+                    trapframe.sepc, stval
+                )
+            },
+            RiscV64Exception::StoreMisaligned => {
+                panic!(
+                    "store address misaligned: sepc {:#x} addr {:#x}",
+                    trapframe.sepc, stval
+                )
+            },
+            RiscV64Exception::StoreAccessFault => {
+                panic!(
+                    "store access fault at address: sepc {:#x} addr {:#x}",
+                    trapframe.sepc, stval
+                )
+            },
+            RiscV64Exception::UserEnvCall => {
+                panic!(
+                    "ecall from supervisor mode at address: {:#x}",
+                    trapframe.sepc
+                )
+            },
+            RiscV64Exception::InstructionPageFault => handle_kernel_page_fault(PageFaultInfo::new(
+                VirtAddr::new(stval as u64),
+                PageFaultType::Execute,
+            )),
+            RiscV64Exception::LoadPageFault => handle_kernel_page_fault(PageFaultInfo::new(
+                VirtAddr::new(stval as u64),
+                PageFaultType::Read,
+            )),
+            RiscV64Exception::StorePageFault => handle_kernel_page_fault(PageFaultInfo::new(
+                VirtAddr::new(stval as u64),
+                PageFaultType::Write,
+            )),
         }
     }
 
     // back
 }
 
-unsafe fn arch_recoverable_handler(trapframe: &mut RiscV64TrapFrame, exception: RiscV64Exception) {
-    unreachable!(
-        "currently there is no architecture-specific recoverable exception, so this code should never be reached. exception: {:?}",
-        exception
-    );
-}
-
-/// Called on the control is transferred to kernel.
-///
-/// Set up trap handler entry point.
-pub fn on_enter_kernel() {
+pub fn install_ktrap_handler() {
     unsafe {
         unsafe extern "C" {
             fn __ktrap_entry();

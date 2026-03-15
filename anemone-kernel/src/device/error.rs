@@ -31,6 +31,14 @@ pub enum DevError {
     NoInterruptInfo,
     /// Device has invalid interrupt information.
     InvalidInterruptInfo,
+    /// The device is lacking required resources.
+    MissingResource,
+    /// The interrupt is unknown.
+    UnknownInterrupt,
+    /// The interrupt is already requested by another device.
+    IrqAlreadyRequested,
+    /// Failed to remap MMIO region for the device.
+    IoRemapFailed(MmError),
 }
 
 impl AsErrno for DevError {

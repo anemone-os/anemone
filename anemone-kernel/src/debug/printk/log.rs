@@ -52,16 +52,16 @@ impl LogLevel {
 
 #[derive(Debug, Clone, Copy)]
 pub struct LogRecord {
-    pub level: Option<LogLevel>,
+    pub level: LogLevel,
     // timestamp: u64, // TODO: add timestamp when we have a clock source
     pub len: usize,
     pub msg: [u8; LOG_RECORD_SIZE],
 }
 
 impl LogRecord {
-    pub const fn empty() -> Self {
+    pub const fn empty(level: LogLevel) -> Self {
         Self {
-            level: None,
+            level,
             len: 0,
             msg: [0; LOG_RECORD_SIZE],
         }

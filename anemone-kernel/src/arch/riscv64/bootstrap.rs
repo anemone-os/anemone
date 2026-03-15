@@ -5,7 +5,7 @@ use crate::{
     arch::{
         clear_bss,
         riscv64::{
-            exception::on_enter_kernel,
+            exception::{enable_local_irq, install_ktrap_handler},
             machine::machine_init,
             mm::{RiscV64PgDir, RiscV64Pte, RiscV64PteFlags, sv39},
         },
@@ -13,9 +13,10 @@ use crate::{
     debug::printk::{Console, ConsoleFlags, register_console},
     device::discovery::open_firmware::{
         EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count, early_scan_fdt_size,
-        of_platform_discovery, unflatten_device_tree,
+        get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
+        unflatten_device_tree,
     },
-    mm::layout::{self, KernelLayoutTrait},
+    mm::layout::KernelLayoutTrait,
     prelude::*,
     utils::align::{AlignedBytes, PhantomAligned4096},
 };
@@ -175,34 +176,33 @@ fn register_earlycon() {
     }
 
     register_console(
-        Arc::new(SbiEarlyCon),
+        Box::new(SbiEarlyCon),
         ConsoleFlags::EARLY | ConsoleFlags::REPLAY,
     );
 }
 
-fn dump_kernel_image_info() {
-    use link_symbols::*;
-    kinfoln!("kernel image layout:");
-    kinfoln!(
-        "  .text: {:#x} - {:#x}",
-        __stext as *const () as usize,
-        __etext as *const () as usize
-    );
-    kinfoln!(
-        "  .rodata: {:#x} - {:#x}",
-        __srodata as *const () as usize,
-        __erodata as *const () as usize
-    );
-    kinfoln!(
-        "  .data: {:#x} - {:#x}",
-        __sdata as *const () as usize,
-        __edata as *const () as usize
-    );
-    kinfoln!(
-        "  .bss: {:#x} - {:#x}",
-        __sbss as *const () as usize,
-        __ebss as *const () as usize
-    );
+// Register basic power off and reboot handlers that use Sbi calls. This ensures
+// that the system can be powered off or rebooted even if no other power
+// management drivers are available.
+fn register_basic_power_handlers() {
+    struct SbiPower;
+
+    impl PowerOffHandler for SbiPower {
+        unsafe fn poweroff(&self) -> ! {
+            sbi_rt::system_reset(sbi_rt::Shutdown, sbi_rt::NoReason);
+            unreachable!()
+        }
+    }
+
+    impl RebootHandler for SbiPower {
+        unsafe fn reboot(&self) -> ! {
+            sbi_rt::system_reset(sbi_rt::ColdReboot, sbi_rt::NoReason);
+            unreachable!()
+        }
+    }
+
+    register_power_off_handler(Box::new(SbiPower));
+    register_reboot_handler(Box::new(SbiPower));
 }
 
 /// The Rust entry point of the kernel.
@@ -229,18 +229,40 @@ extern "C" fn rusty_nun(hart_id: usize, fdt_pa: PhysAddr) -> ! {
     }
 }
 
+fn parse_bootargs() {
+    of_with_root(|root| {
+        root.children().for_each(|child| {
+            if child.name() == "chosen" {
+                if let Some(stdout_path) = child.property("stdout-path") {
+                    if let Some(stdout_path) = stdout_path.value_as_string() {
+                        kinfoln!("stdout-path: {}", stdout_path);
+
+                        if of_with_node_by_full_name_path(stdout_path, |node| {
+                            get_of_node(node.handle()).mark_as_stdout();
+                        })
+                        .is_err()
+                        {
+                            panic!(
+                                "device tree node specified by stdout-path not found: {}",
+                                stdout_path
+                            );
+                        }
+                    }
+                }
+            }
+        })
+    });
+}
+
 unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
     unsafe {
         clear_bss();
-
-        // set up kernel trap handler
-        on_enter_kernel();
-        riscv::register::sstatus::set_sie();
-        // enable ipi
-        riscv::register::sie::set_ssoft();
     }
-    register_earlycon();
+    register_basic_power_handlers();
+    // set up kernel trap handler
+    install_ktrap_handler();
 
+    register_earlycon();
     kinfoln!("anemone kernel booting...");
     kinfoln!("bsp id: {}", bsp_id);
 
@@ -283,15 +305,16 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         mm::kptable::activate_kernel_mapping();
         kinfoln!("kernel mapping activated");
 
-
         // register drivers to bus types
         driver::init();
 
         unflatten_device_tree(fdt_va);
-
+        parse_bootargs();
         machine_init();
-
         of_platform_discovery();
+
+        enable_local_irq();
+        bsp_pre_kernel_main();
 
         // okay, we can wake up APs now.
         {
@@ -312,10 +335,9 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
             }
             sync_all_cpus();
         }
-        kinfoln!("bsp {} running...", bsp_id);
     }
 
-    kernel_main(true)
+    kernel_main()
 }
 
 /// Synchronize all CPUs to ensure they have all executed the code up to this
@@ -334,18 +356,21 @@ unsafe fn sync_all_cpus() {
 
 unsafe fn ap_entry(ap_id: usize) -> ! {
     unsafe {
-        kinfoln!("ap {} is starting up...", ap_id);
-        on_enter_kernel();
+        install_ktrap_handler();
         mm::percpu::ap_init(ap_id);
-        riscv::register::sstatus::set_sie();
-        riscv::register::sie::set_ssoft();
 
         mm::kptable::activate_kernel_mapping();
 
         // synchronize with BSP
         sync_all_cpus();
+
+        enable_local_irq();
+        // collect previous IPIs sent by bsp before ap starts to run.
+        // the main reason for this is to clear IPI buffers of bsp such that it can send
+        // IPIs to other APs again.
+        riscv::register::sip::set_ssoft();
+
         kinfoln!("ap {} running...", ap_id);
     }
-
-    kernel_main(false)
+    kernel_main()
 }

@@ -4,8 +4,13 @@ use crate::prelude::*;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    broadcast_ipi_async(IpiPayload::StopExecution).expect("failed to send stop execution IPI");
-
     kemergln!("Kernel panic:\n{}", info);
-    unsafe { PowerArch::shutdown() }
+
+    if broadcast_ipi_async(IpiPayload::StopExecution).is_err() {
+        kemergln!("failed to broadcast stop execution IPI to other cores during panic");
+    }
+
+    unsafe {
+        power_off();
+    }
 }

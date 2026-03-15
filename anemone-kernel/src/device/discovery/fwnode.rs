@@ -32,6 +32,8 @@ pub trait FwNode: Sync + Send + Any {
     fn interrupt_parent(&self) -> Option<Arc<dyn FwNode>>;
     fn interrupt_info(&self) -> Option<&[u8]>;
 
+    fn is_stdout(&self) -> bool;
+
     // TODO: add more methods for retrieving information about the hardware, on
     // demand.
 }

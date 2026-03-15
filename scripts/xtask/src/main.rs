@@ -46,6 +46,7 @@ pub struct Conf {
 #[derive(Subcommand)]
 enum ConfCommands {
     #[command(about = "List all available build configurations and its abbrevations")]
+    #[command(visible_alias = "ls")]
     List,
     #[command(about = "Switch to a different build configuration")]
     Switch(SwitchArgs),

@@ -2,7 +2,7 @@ pub use crate::{
     arch::*,
     device::{error::*, *},
     driver::*,
-    exception::{intr::*, *},
+    exception::{intr::*, trap::*, *},
     kconfig_defs::*,
     mm::{addr::*, error::*, frame::*, paging::*, percpu::*, zone::*},
     platform_defs::*,

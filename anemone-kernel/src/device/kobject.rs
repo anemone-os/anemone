@@ -26,7 +26,10 @@ impl KObjectBase {
 impl Debug for dyn KObject {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let base = self.base();
-        Debug::fmt(base, f)
+
+        f.debug_struct("dyn KObject")
+            .field("name", &base.name)
+            .finish()
     }
 }
 

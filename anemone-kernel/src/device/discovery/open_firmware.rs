@@ -7,7 +7,7 @@
 //! `fdt` crate. However, this is not a high priority task, and we can do it in
 //! future when we have more time.
 
-use core::{any::Any, ptr::NonNull};
+use core::ptr::NonNull;
 
 use crate::{
     device::{
@@ -25,7 +25,6 @@ use crate::{
 };
 
 mod early {
-    use core::marker::PhantomData;
 
     use fdt::nodes::cpus::CpuStatus;
 
@@ -292,8 +291,6 @@ pub use early::*;
 use spin::Lazy;
 
 /// Unflattened device tree. In-memory representation.
-/// TODO:
-/// - Runtime-modifiability.
 #[derive(Debug)]
 struct DeviceTree {
     handle: device_tree::DeviceTreeHandle,
@@ -350,6 +347,8 @@ where
     }
 }
 
+/// Unflatten the device tree from the given FDT blob, and initialize the global
+/// `DEVICE_TREE` instance.
 pub unsafe fn unflatten_device_tree(fdt_va: VirtAddr) {
     let parser = unsafe { device_tree::FdtParser::new(fdt_va.as_ptr()) };
     let handle = parser.parse(|layout| {
@@ -515,6 +514,10 @@ bitflags! {
         /// so kernel won't create a PlatformDevice for
         /// it in of_platform_discovery().
         const POPULATED = 1 << 0;
+
+        /// Device with this flag set will be registered as a system console with
+        /// ConsoleFlags::ENABLED bit set.
+        const STDOUT = 1 << 1;
     }
 }
 
@@ -549,6 +552,18 @@ impl OpenFirmwareNode {
     pub fn populated(&self) -> bool {
         OfNodeFlags::from_bits_truncate(self.flags.load(Ordering::SeqCst))
             .contains(OfNodeFlags::POPULATED)
+    }
+
+    /// Mark this node as a system console with ConsoleFlags::ENABLED bit set.
+    pub fn mark_as_stdout(&self) {
+        self.flags
+            .fetch_or(OfNodeFlags::STDOUT.bits(), Ordering::SeqCst);
+    }
+
+    /// Check if this node is marked as a system console.
+    pub fn is_stdout(&self) -> bool {
+        OfNodeFlags::from_bits_truncate(self.flags.load(Ordering::SeqCst))
+            .contains(OfNodeFlags::STDOUT)
     }
 }
 
@@ -612,6 +627,10 @@ impl FwNode for OpenFirmwareNode {
         } else {
             None
         }
+    }
+
+    fn is_stdout(&self) -> bool {
+        self.is_stdout()
     }
 }
 

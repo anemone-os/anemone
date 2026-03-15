@@ -22,19 +22,19 @@ pub trait PrvData: Any + Sync + Send {}
 
 impl dyn PrvData {
     pub fn cast<T: PrvData>(&self) -> Option<&T> {
-        todo!()
+        (self as &dyn Any).downcast_ref::<T>()
     }
 
     pub fn cast_mut<T: PrvData>(&mut self) -> Option<&mut T> {
-        todo!()
+        (self as &mut dyn Any).downcast_mut::<T>()
     }
 
     pub unsafe fn cast_unchecked<T: PrvData>(&self) -> &T {
-        todo!()
+        unsafe { (self as &dyn Any).downcast_unchecked_ref() }
     }
 
     pub unsafe fn cast_unchecked_mut<T: PrvData>(&mut self) -> &mut T {
-        todo!()
+        unsafe { (self as &mut dyn Any).downcast_unchecked_mut() }
     }
 }
 

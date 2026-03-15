@@ -1,6 +1,8 @@
 //! /cpus/cpu@[x]/interrupt-controller drivers.
 //!
 //! initialized during early system boot process.
+//!
+//! Currently unused.
 
 use crate::prelude::*;
 
@@ -8,18 +10,6 @@ use crate::prelude::*;
 pub struct RiscvIntc;
 
 impl IrqChip for RiscvIntc {
-    fn startup(&self) {
-        unsafe {
-            riscv::register::sstatus::set_sie();
-        }
-    }
-
-    fn shutdown(&self) {
-        unsafe {
-            riscv::register::sstatus::clear_sie();
-        }
-    }
-
     fn mask(&self, irq: HwIrq) {
         // possble values of `irq` here can only be 1, 5 and 9, which
         // correspond to software, timer and external interrupts under
@@ -63,7 +53,7 @@ impl IrqChip for RiscvIntc {
         // nothing to do.
     }
 
-    fn xlate(&self, raw: &[u8]) -> Option<InterruptInfo> {
-        unreachable!()
+    fn xlate(&self, _spec: InterruptSpecifier<'_>) -> Option<InterruptInfo> {
+        todo!()
     }
 }

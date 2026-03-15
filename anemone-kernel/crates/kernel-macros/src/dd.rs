@@ -4,7 +4,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DataStruct, DeriveInput, Error, Fields, parse_macro_input};
 
-macro_rules! base_impl {
+macro_rules! gen_impl {
     ($([$derive_fn:ident, $derive:ident, $attr_str:literal, $trait:path, $base_ty:path],)*) => {
         $(
             pub fn $derive_fn(input: TokenStream) -> TokenStream {
@@ -64,7 +64,7 @@ macro_rules! base_impl {
     };
 }
 
-base_impl!(
+gen_impl!(
     [
         kobject_impl,
         KObject,

@@ -1,8 +1,11 @@
 //! Interrupt subsystem.
+//!
+//! Currently, this subsystem only handles external interrupts from devices, and
+//! does not handle CPU-internal interrupts such as timer interrupts and
+//! inter-processor interrupts. They are handled manually in arch-specific code.
 
 use core::fmt::Debug;
 
-use intrusive_collections::LinkedListAtomicLink;
 use spin::Lazy;
 
 use crate::{
@@ -20,6 +23,10 @@ int_like!(VirtIrq, usize);
 /// Each interrupt domain has a bijective mapping between virtual IRQs and
 /// hardware IRQs, and the operations provided by the interrupt controller
 /// associated with this domain.
+///
+/// **LOCK ORDERING**
+///
+/// **map -> ops**
 #[derive(Debug)]
 pub struct IrqDomain {
     /// Currently only for debugging purposes, but maybe we can use it for
@@ -31,18 +38,7 @@ pub struct IrqDomain {
 
     /// Operations provided by the interrupt controller associated with this
     /// domain.
-    ///
-    /// TODO: explain why this field along with `intc_data` is necessary, and
-    /// why we don't use a trait object instead.
-    ops: &'static dyn IrqChip,
-
-    /// For those interrupt controllers initialized before device discovery,
-    /// they don't have an associated device, but they still need to store some
-    /// private data like register base address. This field is for that purpose.
-    /// However for interrupt controllers which do have associated devices,
-    /// `drv_state` field in the corresponding device struct is preferred, which
-    /// has more clear ownership semantics.
-    intc_data: Option<RwLock<Box<dyn PrvData>>>,
+    ops: RwLock<Box<dyn IrqChip>>,
 
     /// Some interrupt controllers may not have an associated device, such as
     /// cpu-internal interrupt  controllers initialized before device
@@ -53,17 +49,11 @@ pub struct IrqDomain {
 }
 
 impl IrqDomain {
-    pub fn new(
-        name: GeneralIdentity,
-        ops: &'static dyn IrqChip,
-        intc_data: Option<RwLock<Box<dyn PrvData>>>,
-        fwnode: Arc<dyn FwNode>,
-    ) -> Self {
+    pub fn new(name: GeneralIdentity, ops: Box<dyn IrqChip>, fwnode: Arc<dyn FwNode>) -> Self {
         Self {
             name,
             map: RwLock::new(BiMap::new()),
-            ops,
-            intc_data,
+            ops: RwLock::new(ops),
             fwnode,
         }
     }
@@ -89,46 +79,22 @@ impl IrqDomain {
 pub struct IrqDesc {
     virq: VirtIrq,
     hwirq: HwIrq,
-    is_masked: AtomicBool,
     trigger: IrqTriggerType,
     flow: &'static dyn IrqFlow,
     domain: Arc<IrqDomain>,
-    handlers: LinkedList<IrqHandlerAdapter>,
-    //inner: RwLock<IrqDescInner>,
-}
-
-#[derive(Debug)]
-pub struct IrqDescInner {
-    handlers: LinkedList<IrqHandlerAdapter>,
-}
-
-#[derive(Debug)]
-pub enum IrqHandleResult {
-    Handled,
-    Unhandled,
-    NotMyInterrupt,
+    handler: &'static IrqHandler,
+    prv_data: Option<Box<dyn PrvData>>,
 }
 
 /// An interrupt handler.
-///
-/// An interrupt line may be shared by multiple interrupt sources. Each source
-/// can register its own handler, and the handlers will be called in order until
-/// one of them claims the interrupt (by returning `Handled`).
-///
-/// Internally, this structure is just a wrapper around a function pointer, with
-/// a linked list link.
 #[derive(Debug)]
 pub struct IrqHandler {
-    func: fn() -> IrqHandleResult,
-    link: LinkedListAtomicLink,
+    func: fn(Option<&mut dyn PrvData>),
 }
 
 impl IrqHandler {
-    pub const fn new(func: fn() -> IrqHandleResult) -> Self {
-        Self {
-            func,
-            link: LinkedListAtomicLink::new(),
-        }
+    pub const fn new(func: fn(Option<&mut dyn PrvData>)) -> Self {
+        Self { func }
     }
 }
 
@@ -146,12 +112,14 @@ impl Debug for dyn IrqFlow {
     }
 }
 
+// TODO: flow guard
+
 #[derive(Debug)]
 pub struct EdgeFlow;
 
 impl IrqFlow for EdgeFlow {
     fn enter(&self, desc: &IrqDesc) {
-        desc.domain.ops.ack(desc.hwirq);
+        desc.domain.ops.read_irqsave().ack(desc.hwirq);
     }
 
     fn exit(&self, desc: &IrqDesc) {}
@@ -162,18 +130,14 @@ pub struct LevelFlow;
 
 impl IrqFlow for LevelFlow {
     fn enter(&self, desc: &IrqDesc) {
-        desc.domain.ops.mask(desc.hwirq);
+        desc.domain.ops.read_irqsave().mask(desc.hwirq);
     }
 
     fn exit(&self, desc: &IrqDesc) {
-        desc.domain.ops.eoi(desc.hwirq);
-        desc.domain.ops.unmask(desc.hwirq);
+        desc.domain.ops.read_irqsave().eoi(desc.hwirq);
+        desc.domain.ops.read_irqsave().unmask(desc.hwirq);
     }
 }
-
-intrusive_adapter!(
-    IrqHandlerAdapter = &'static IrqHandler: IrqHandler { link => LinkedListAtomicLink }
-);
 
 #[derive(Debug, Clone, Copy)]
 pub enum IrqTriggerType {
@@ -187,12 +151,14 @@ pub struct InterruptInfo {
     pub trigger: IrqTriggerType,
 }
 
-pub trait IrqChip: Sync {
-    /// Enable the interrupt controller.
-    fn startup(&self);
-    /// Disable the interrupt controller.
-    fn shutdown(&self);
+#[derive(Debug)]
+pub struct InterruptSpecifier<'a> {
+    pub fwnode: &'a dyn FwNode,
+    pub raw: &'a [u8],
+}
 
+/// Interrupt controller trait.
+pub trait IrqChip: Send + Sync {
     /// Mask the given interrupt line, preventing it from being delivered to the
     /// CPU.
     fn mask(&self, irq: HwIrq);
@@ -211,7 +177,11 @@ pub trait IrqChip: Sync {
 
     /// Translate the raw interrupt specifier from firmware into the
     /// corresponding hardware IRQ number and trigger type.
-    fn xlate(&self, raw: &[u8]) -> Option<InterruptInfo>;
+    fn xlate(&self, spec: InterruptSpecifier<'_>) -> Option<InterruptInfo>;
+
+    fn as_core_irq_chip(&self) -> Option<&dyn CoreIrqChip> {
+        None
+    }
 }
 
 impl Debug for dyn IrqChip {
@@ -222,15 +192,23 @@ impl Debug for dyn IrqChip {
 
 /// Some interrupt controllers must be initialized before device discovery, such
 /// as GIC on ARM and PLIC on RiscV. For these interrupt controllers, there is
-/// no associated device, but we still need to store some private data like
-/// register base address, and provide some initialization function to be called
-/// during early boot process. This trait is for that purpose.
+/// no associated device, so we cannot rely on device discovery to initialize
+/// them. Instead, we need to initialize them manually in the early boot
+/// process, and register them as the root interrupt domain.
 pub trait CoreIrqChip: IrqChip {
     /// Resolve information from the given firmware node, and initialize needed
-    /// data structures. The returned private data will be stored in the
-    /// `intc_data` field of the corresponding interrupt domain, and can be
-    /// accessed by the interrupt controller driver later.
-    fn init(&self, fwnode: Arc<dyn FwNode>) -> Box<dyn PrvData>;
+    /// data structures.
+    fn init(fwnode: &dyn FwNode) -> Box<dyn CoreIrqChip>
+    where
+        Self: Sized;
+
+    /// Root interrupt controllers should be able to self-discover irq number
+    /// and claim interrupts without help from other interrupt controllers,
+    /// since there is no one else to help them.
+    ///
+    /// After this bootstrap process, we can fire up normal chained interrupt
+    /// controllers that rely on parent domains for interrupt information.
+    fn claim(&self) -> Option<HwIrq>;
 }
 
 /// Allocate a new virtual IRQ number.
@@ -266,9 +244,35 @@ static IRQ_DESCS: Lazy<RwLock<HashMap<VirtIrq, IrqDesc>>> =
 static IRQ_DOMAINS: Lazy<RwLock<VecDeque<Arc<IrqDomain>>>> =
     Lazy::new(|| RwLock::new(VecDeque::new()));
 
+static ROOT_IRQ_DOMAIN: MonoOnce<Arc<IrqDomain>> = unsafe { MonoOnce::new() };
+
+/// Register the given interrupt domain as the root interrupt domain.
+///
+/// The root interrupt domain is the first interrupt domain that will be
+/// searched when looking for an interrupt domain for a device. It is usually
+/// the interrupt domain associated with the primary interrupt controller of the
+/// system, such as GIC on ARM and PLIC on RiscV.
+pub unsafe fn register_root_irq_domain(
+    name: GeneralIdentity,
+    ops: Box<dyn CoreIrqChip>,
+    fwnode: Arc<dyn FwNode>,
+) {
+    let domain = Arc::new(IrqDomain::new(name, ops, fwnode));
+
+    IRQ_DOMAINS.write_irqsave().push_back(domain.clone());
+
+    ROOT_IRQ_DOMAIN.init(|root| {
+        root.write(domain.clone());
+    });
+    kinfoln!(
+        "registered root irq domain: {}",
+        ROOT_IRQ_DOMAIN.get().name()
+    );
+}
+
 /// Register a new interrupt domain to the system.
 pub fn register_irq_domain(domain: Arc<IrqDomain>) {
-    kinfoln!("registering new irq domain: {:?}", domain);
+    kinfoln!("registering new irq domain: {}", domain.name());
     IRQ_DOMAINS.write_irqsave().push_back(domain);
 }
 
@@ -285,23 +289,29 @@ pub fn find_irq_domain_by_fwnode(fwnode: &dyn FwNode) -> Option<Arc<IrqDomain>> 
         .cloned()
 }
 
-#[derive(Debug)]
-pub enum RequestIrqError {}
-
 /// Request an IRQ for the given device, and register the given handler to it.
-pub fn request_irq(dev: &dyn Device, handler: &'static IrqHandler) -> Result<(), DevError> {
+pub fn request_irq(
+    dev: &dyn Device,
+    handler: &'static IrqHandler,
+    prv_data: Option<Box<dyn PrvData>>,
+) -> Result<(), DevError> {
     let fwnode = dev.fwnode().ok_or(DevError::MissingFwNode)?;
     let ic = fwnode.interrupt_parent().ok_or(DevError::NoIrqDomain)?;
     let domain = find_irq_domain_by_fwnode(ic.as_ref()).expect("ic exists but no domain found");
+    let ops = domain.ops.read_irqsave();
     let intr_info_raw = fwnode.interrupt_info().ok_or(DevError::NoInterruptInfo)?;
 
-    let InterruptInfo { hwirq, trigger } = domain
-        .ops
-        .xlate(intr_info_raw)
+    let InterruptInfo { hwirq, trigger } = ops
+        .xlate(InterruptSpecifier {
+            fwnode,
+            raw: intr_info_raw,
+        })
         .ok_or(DevError::InvalidInterruptInfo)?;
 
-    let virq = if let Some(virq) = domain.hw2virt(hwirq) {
-        virq
+    drop(ops);
+
+    let virq = if let Some(_) = domain.hw2virt(hwirq) {
+        return Err(DevError::IrqAlreadyRequested);
     } else {
         let virq = unsafe { alloc_virq() };
         domain.map(virq, hwirq);
@@ -311,37 +321,65 @@ pub fn request_irq(dev: &dyn Device, handler: &'static IrqHandler) -> Result<(),
         let desc = IrqDesc {
             virq,
             hwirq,
-            is_masked: AtomicBool::new(true),
             trigger,
             flow: match trigger {
                 IrqTriggerType::Edge => &EdgeFlow,
                 IrqTriggerType::Level => &LevelFlow,
             },
             domain: domain.clone(),
-            handlers: LinkedList::new(IrqHandlerAdapter::new()),
+            handler,
+            prv_data,
         };
         assert!(IRQ_DESCS.write_irqsave().insert(virq, desc).is_none());
 
         virq
     };
 
-    {
-        let mut descs = IRQ_DESCS.write_irqsave();
-        let desc = descs.get_mut(&virq).expect("desc must exist");
-        desc.handlers.push_back(handler);
-    }
+    domain.ops.read_irqsave().unmask(hwirq);
 
     kdebugln!(
-        "requested irq: dev={:?}, handler={:?}, virq={:?}, hwirq={:?}",
-        dev,
-        handler,
-        virq,
-        hwirq
+        "request_irq: dev_id={}, domain={}, virq={}, hwirq={:#x}",
+        dev.name(),
+        domain.name(),
+        virq.get(),
+        hwirq.get()
     );
 
     Ok(())
 }
 
+/// Handle the given hardware IRQ from the root interrupt domain.
 pub fn handle_irq() {
-    todo!()
+    let root_domain = ROOT_IRQ_DOMAIN.get();
+    let ops = root_domain.ops.write_irqsave();
+    let core = ops
+        .as_core_irq_chip()
+        .expect("root irq domain's ops must be a core irq chip");
+    if let Some(hwirq) = core.claim() {
+        drop(ops);
+        handle_domain_irq(root_domain, hwirq).expect("handling root irq must succeed");
+    } else {
+        kwarningln!("claimed no hwirq from root irq domain but got an interrupt");
+    }
+}
+
+/// Handle the given hardware IRQ from the given domain.
+///
+/// This function can be used by those chained interrupt controllers that need
+/// to handle interrupts from their own domain.
+pub fn handle_domain_irq(domain: &IrqDomain, hwirq: HwIrq) -> Result<(), DevError> {
+    let virq = domain.hw2virt(hwirq).ok_or(DevError::UnknownInterrupt)?;
+    // TODO: a read_irqsave should be enouth. we should find a way to avoid taking a
+    // write lock here.
+    let mut descs = IRQ_DESCS.write_irqsave();
+
+    let desc = descs
+        .get_mut(&virq)
+        .expect("desc must exist for allocated virq");
+
+    desc.flow.enter(desc);
+    (desc.handler.func)(desc.prv_data.as_deref_mut());
+    desc.flow.exit(desc);
+
+    Ok(())
 }

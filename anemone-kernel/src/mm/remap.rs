@@ -1,4 +1,9 @@
 //! Vmalloc & ioremap
+//!
+//! TODO: ioremap - multiplex the same virtual mapping for several requests
+//! within the same physical page range
+
+use core::ptr::NonNull;
 
 use spin::Lazy;
 
@@ -34,12 +39,45 @@ impl range_allocator::Rangable for VirtPageRange {
 #[derive(Debug)]
 struct SysRemaps {
     range_allocator: range_allocator::RangeAllocator<VirtPageRange>,
-    io_remapped: BTreeMap<PhysPageNum, IoRemapEntry>,
+
+    // IoRemap
+    io_remapped: BTreeMap<PhysAddr, IoRemapEntry>,
+    // VMalloc
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct IoRange {
+    start: PhysAddr,
+    len: u64,
+}
+
+impl IoRange {
+    fn try_new(start: PhysAddr, len: usize) -> Result<Self, MmError> {
+        if len == 0 {
+            return Err(MmError::InvalidArgument);
+        }
+        let len = len as u64;
+        Ok(Self { start, len })
+    }
+
+    fn end(&self) -> PhysAddr {
+        PhysAddr::new(self.start.get() + self.len)
+    }
+
+    fn intersects(&self, other: &Self) -> bool {
+        self.start.get() < other.end().get() && other.start.get() < self.end().get()
+    }
+
+    fn to_page_range(&self) -> PhysPageRange {
+        let start = self.start.page_down();
+        let end = self.end().page_up();
+        PhysPageRange::new(start, end.get() - start.get())
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 struct IoRemapEntry {
-    phys: PhysPageRange,
+    req: IoRange,
     virt: VirtPageRange,
 }
 
@@ -62,17 +100,15 @@ impl SysRemaps {
             .map_err(|_| MmError::InvalidArgument)
     }
 
-    fn find_io_overlap(&self, phys_range: PhysPageRange) -> Option<IoRemapEntry> {
-        let key = phys_range.start();
-
-        if let Some((_, entry)) = self.io_remapped.range(..=key).next_back() {
-            if entry.phys.intersects(&phys_range) {
+    fn find_io_overlap(&self, req: IoRange) -> Option<IoRemapEntry> {
+        if let Some((_, entry)) = self.io_remapped.range(..=req.start).next_back() {
+            if entry.req.intersects(&req) {
                 return Some(*entry);
             }
         }
 
-        if let Some((_, entry)) = self.io_remapped.range(key..).next() {
-            if entry.phys.intersects(&phys_range) {
+        if let Some((_, entry)) = self.io_remapped.range(req.start..).next() {
+            if entry.req.intersects(&req) {
                 return Some(*entry);
             }
         }
@@ -82,11 +118,12 @@ impl SysRemaps {
 }
 
 impl SysRemaps {
-    unsafe fn ioremap(&mut self, phys_range: PhysPageRange) -> Result<VirtPageRange, MmError> {
-        if self.find_io_overlap(phys_range).is_some() {
+    unsafe fn ioremap(&mut self, req: IoRange) -> Result<(VirtAddr, VirtPageRange), MmError> {
+        if self.find_io_overlap(req).is_some() {
             return Err(MmError::AlreadyMapped);
         }
 
+        let phys_range = req.to_page_range();
         let npages = phys_range.npages() as usize;
         let virt_range = self.alloc(npages).ok_or(MmError::OutOfMemory)?;
 
@@ -105,33 +142,35 @@ impl SysRemaps {
             })?;
         }
 
-        let prev = self.io_remapped.insert(
-            phys_range.start(),
-            IoRemapEntry {
-                phys: phys_range,
-                virt: virt_range,
-            },
-        );
         assert!(
-            prev.is_none(),
+            self.io_remapped
+                .insert(
+                    req.start,
+                    IoRemapEntry {
+                        req,
+                        virt: virt_range,
+                    },
+                )
+                .is_none(),
             "internal error: duplicated ioremap entry after overlap check"
         );
 
-        Ok(virt_range)
+        let vaddr = virt_range.start().to_virt_addr() + req.start.page_offset() as u64;
+
+        Ok((vaddr, virt_range))
     }
 
-    unsafe fn iounmap(&mut self, range: PhysPageRange) -> Result<(), MmError> {
-        let key = range.start();
-        let entry = self.io_remapped.get(&key).ok_or(MmError::NotMapped)?;
+    unsafe fn iounmap(&mut self, req: IoRange) -> Result<(), MmError> {
+        let entry = self.io_remapped.get(&req.start).ok_or(MmError::NotMapped)?;
 
-        if entry.phys != range {
+        if entry.req != req {
             return Err(MmError::InvalidArgument);
         }
 
         // Invariant checked above. Remove should always succeed here.
         let entry = self
             .io_remapped
-            .remove(&key)
+            .remove(&req.start)
             .expect("internal error: ioremap entry disappeared during iounmap");
 
         unsafe {
@@ -147,19 +186,34 @@ impl SysRemaps {
 
 static SYS_REMAPS: Lazy<SpinLock<SysRemaps>> = Lazy::new(|| {
     let mut remaps = SysRemaps::new();
-    unsafe {
-        let remap_region = KernelLayout::REMAP_REGION;
-        remaps
-            .free(remap_region.start(), remap_region.npages() as usize)
-            .expect("failed to initialize remap region");
-    }
+    let remap_region = KernelLayout::REMAP_REGION;
+    remaps
+        .free(remap_region.start(), remap_region.npages() as usize)
+        .expect("failed to initialize remap region");
     SpinLock::new(remaps)
 });
 
 #[derive(Debug)]
 pub struct IoRemap {
-    virt: VirtPageRange,
-    phys: PhysPageRange,
+    virt: VirtAddr,
+    req: IoRange,
+}
+
+impl IoRemap {
+    /// This is how drivers should access the remapped IO region.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure that the remapped MMIO region is valid for the
+    /// intended typed access and respects device-specific ordering.
+    pub fn as_ptr(&self) -> NonNull<[u8]> {
+        unsafe {
+            NonNull::new_unchecked(core::ptr::slice_from_raw_parts_mut(
+                self.virt.as_ptr_mut(),
+                self.req.len as usize,
+            ))
+        }
+    }
 }
 
 impl Drop for IoRemap {
@@ -167,24 +221,31 @@ impl Drop for IoRemap {
         unsafe {
             SYS_REMAPS
                 .lock_irqsave()
-                .iounmap(self.phys)
+                .iounmap(self.req)
                 .expect("failed to iounmap in IoRemap drop");
         }
     }
 }
 
-/// Remap the given physical page range to a virtual page range in the remap
-/// region, and return the virtual page range.
+/// Remap the given physical byte range to a virtual byte range in the remap
+/// region, and return the driver-visible mapping.
 ///
 /// # Safety
 ///
-/// Caller must ensure that the given physical page range is a valid MMIO
-/// region, and that the caller has exclusive access to the given physical page
-/// range.
-pub unsafe fn ioremap(range: PhysPageRange) -> Result<IoRemap, MmError> {
+/// Caller must ensure that the given physical byte range is a valid MMIO
+/// region, and that the caller has exclusive access to that region.
+pub unsafe fn ioremap(start: PhysAddr, len: usize) -> Result<IoRemap, MmError> {
     unsafe {
-        let virt = SYS_REMAPS.lock_irqsave().ioremap(range)?;
-        Ok(IoRemap { virt, phys: range })
+        let req = IoRange::try_new(start, len)?;
+        let (virt, _) = SYS_REMAPS.lock_irqsave().ioremap(req)?;
+        kdebugln!(
+            "ioremap: phys=[{:#x}, {:#x}) -> virt=[{:#x}, {:#x})",
+            req.start.get(),
+            req.end().get(),
+            virt.get(),
+            (virt + req.len).get(),
+        );
+        Ok(IoRemap { virt, req })
     }
 }
 

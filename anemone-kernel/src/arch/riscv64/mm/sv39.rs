@@ -67,17 +67,13 @@ impl PagingArchTrait for Sv39PagingArch {
         for i in 0..ngigabytes {
             let pgdir_idx = root_idx_base + i;
 
-            let pgdir_ppn = unsafe {
-                alloc_frame_zeroed()
-                    .expect("failed to allocate frame for preallocating page directory")
-                    .leak()
-            };
+            let pgdir_ppn = alloc_frame_zeroed()
+                .expect("failed to allocate frame for preallocating page directory")
+                .leak();
 
-            unsafe {
-                // a single V bit is enough
-                debug_assert!(root_kpgdir[pgdir_idx].is_empty());
-                root_kpgdir[pgdir_idx] = RiscV64Pte::arch_new(pgdir_ppn, RiscV64PteFlags::VALID);
-            }
+            // a single V bit is enough
+            debug_assert!(root_kpgdir[pgdir_idx].is_empty());
+            root_kpgdir[pgdir_idx] = RiscV64Pte::arch_new(pgdir_ppn, RiscV64PteFlags::VALID);
         }
     }
 

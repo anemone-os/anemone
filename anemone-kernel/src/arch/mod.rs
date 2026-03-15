@@ -1,4 +1,4 @@
-use crate::{prelude::*, sync::mono::MonoOnce};
+use crate::prelude::*;
 
 pub mod link_symbols;
 
@@ -20,9 +20,14 @@ macro_rules! arch_select {
         mod $arch;
         #[cfg(target_arch = $arch_str)]
         pub use $crate::arch::$arch::{
-            CpuArch, IntrArch, KernelLayout, PagingArch, PowerArch, TimeArch, TrapArch,
+            CpuArch, IntrArch, KernelLayout, PagingArch, TimeArch, TrapArch,
         };
     };
 }
 
 arch_select!(riscv64, "riscv64");
+
+// re-export sub types for convenience.
+pub type PgDir = <PagingArch as PagingArchTrait>::PgDir;
+pub type Pte = <<PagingArch as PagingArchTrait>::PgDir as PgDirArch>::Pte;
+pub type TrapFrame = <TrapArch as TrapArchTrait>::TrapFrame;

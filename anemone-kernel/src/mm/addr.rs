@@ -28,13 +28,13 @@ macro_rules! impl_addr {
             }
 
             pub const fn page_down(&self) -> $pn_type {
-                <$pn_type>::new(self.get() & !(PagingArch::PAGE_SIZE_BYTES as u64 - 1))
+                <$pn_type>::new(self.get() >> PagingArch::PAGE_SIZE_BITS)
             }
 
             pub const fn page_up(&self) -> $pn_type {
                 <$pn_type>::new(
                     (self.get() + PagingArch::PAGE_SIZE_BYTES as u64 - 1)
-                        & !(PagingArch::PAGE_SIZE_BYTES as u64 - 1),
+                        >> PagingArch::PAGE_SIZE_BITS,
                 )
             }
         }

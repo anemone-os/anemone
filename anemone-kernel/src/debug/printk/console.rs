@@ -37,7 +37,7 @@ bitflags! {
 /// flags.
 #[derive(Debug)]
 struct ConsoleDesc {
-    console: Arc<dyn Console>,
+    console: Box<dyn Console>,
     flags: ConsoleFlags,
 }
 
@@ -69,7 +69,7 @@ impl SysConsole {
     }
 
     /// Registers a new console with the system console manager.
-    pub fn register_console(&self, console: Arc<dyn Console>, flags: ConsoleFlags) {
+    pub fn register_console(&self, console: Box<dyn Console>, flags: ConsoleFlags) {
         let mut flags = flags;
         if flags.contains(ConsoleFlags::EARLY) {
             flags |= ConsoleFlags::ENABLED;
@@ -88,19 +88,25 @@ impl SysConsole {
         }
     }
 
-    /// After the system has fully booted, unregister all early consoles and
-    /// enable the first non-early console if no console is enabled yet.
-    ///
-    /// # Safety
-    ///
-    /// Timing.
-    pub unsafe fn on_system_booted(&self) {
+    /// Return false if there are only early consoles registered, true
+    /// otherwise.
+    pub unsafe fn on_system_boot(&self) -> bool {
         let mut consoles = self.consoles.lock_irqsave();
-        consoles.retain(|desc| !desc.flags.contains(ConsoleFlags::EARLY));
-        if !consoles.iter().any(|desc| desc.enabled()) {
-            if let Some(desc) = consoles.first_mut() {
+
+        let mut has_normal_con = false;
+
+        if consoles
+            .iter()
+            .any(|desc| !desc.flags.contains(ConsoleFlags::EARLY))
+        {
+            has_normal_con = true;
+            consoles.retain(|desc| !desc.flags.contains(ConsoleFlags::EARLY));
+            if !consoles.iter().any(|desc| desc.enabled()) {
+                let desc = consoles.first_mut().unwrap();
                 desc.enable();
             }
         }
+
+        has_normal_con
     }
 }

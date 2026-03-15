@@ -129,7 +129,9 @@ impl dyn Device {
 
 impl Debug for dyn Device {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let base = DeviceData::base(self);
-        Debug::fmt(base, f)
+        f.debug_struct("dyn Device")
+            .field("name", &self.name())
+            .field("id", &self.id())
+            .finish()
     }
 }

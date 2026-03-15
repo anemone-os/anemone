@@ -1,10 +1,11 @@
+//! Early initialization routines for qemu virt machine.
+
 use crate::{
     arch::riscv64::machine::MachineDesc,
-    device::discovery::open_firmware::{
-        get_of_node, of_with_node_by_full_name_path, of_with_node_by_path, of_with_root,
-    },
-    driver::intc::plic::Plic,
+    device::discovery::open_firmware::{get_of_node, of_with_node_by_path},
+    driver::intc::sifive_plic::SiFivePlic,
     prelude::*,
+    utils::identity::GeneralIdentity,
 };
 
 #[derive(Debug)]
@@ -29,10 +30,22 @@ impl MachineDesc for QemuVirt {
         };
         plic.mark_populated();
 
-        let plic_state = Plic.init(plic.clone());
+        let plic_ops = SiFivePlic::init(plic.as_ref());
+
+        unsafe {
+            register_root_irq_domain(
+                GeneralIdentity::try_from(plic.node().full_name()).unwrap(),
+                plic_ops,
+                plic,
+            );
+        }
     }
 
     unsafe fn early_init_timer(&self) {
+        // qemu virt machine uses CLINT, which can only be managed under m-mode.
+        // for kernel, SBI is the only way to use the timer. so there is really nothing
+        // to do here.
+
         kinfoln!("initializing timer for qemu virt machine");
     }
 }

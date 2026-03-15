@@ -6,7 +6,7 @@
 //! They won't have a corresponding `dyn Driver` object. (So do their
 //! corresponding device objects.)
 
-use core::{any::Any, fmt::Debug};
+use core::fmt::Debug;
 
 use crate::{
     device::{bus::platform::PlatformDriver, kobject::KObject},
@@ -14,9 +14,13 @@ use crate::{
     prelude::*,
 };
 
-pub mod clock_source;
+// this one must be public for the early boot code to initialize the root
+// interrupt controller.
 pub mod intc;
-pub mod serial;
+
+mod clock_source;
+mod power;
+mod serial;
 
 #[derive(Debug)]
 pub struct DriverBase {
@@ -64,8 +68,9 @@ impl dyn Driver {
 
 impl Debug for dyn Driver {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let base = DriverData::base(self);
-        Debug::fmt(base, f)
+        f.debug_struct("dyn Driver")
+            .field("name", &self.name())
+            .finish()
     }
 }
 

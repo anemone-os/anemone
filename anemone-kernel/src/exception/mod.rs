@@ -8,9 +8,13 @@
 mod preempt_counter;
 pub use preempt_counter::PreemptCounter;
 mod page_fault;
-pub use page_fault::{PageFaultInfo, PageFaultType};
+pub use page_fault::{PageFaultInfo, PageFaultType, handle_kernel_page_fault};
 mod ipi;
-pub use ipi::{IpiPayload, broadcast_ipi, broadcast_ipi_async, send_ipi, send_ipi_async};
+pub use ipi::{
+    IpiPayload, broadcast_ipi, broadcast_ipi_async, handle_ipi, send_ipi, send_ipi_async,
+};
+mod timer;
+pub use timer::handle_kernel_timer_interrupt;
 
 pub mod intr;
 pub mod trap;

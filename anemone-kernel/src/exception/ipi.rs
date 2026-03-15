@@ -12,16 +12,8 @@ use crate::prelude::*;
 
 #[derive(Debug, Clone, Copy)]
 pub enum IpiPayload {
-    TlbShootdown {
-        vaddr: Option<VirtAddr>,
-    },
+    TlbShootdown { vaddr: Option<VirtAddr> },
     StopExecution,
-
-    /// Placeholder for empty payload.
-    ///
-    /// **IPI system internal usage only. Should never be sent by external
-    /// code.**
-    Empty,
 }
 
 #[derive(Debug)]
@@ -93,16 +85,18 @@ mod msg_buffers {
 
     #[percpu]
     pub static MSG_BUFFERS: [IpiMsg; MAX_CPUS] = {
-        // `IpiMsg` cannot implement `Copy`, so we have to do this manually.
+        // `IpiMsg` should not implement `Copy`, so we have to do this manually.
 
         let mut arr = MaybeUninit::<[IpiMsg; MAX_CPUS]>::uninit();
         let mut i = 0;
         while i < MAX_CPUS {
             unsafe {
-                arr.as_mut_ptr()
-                    .cast::<IpiMsg>()
-                    .add(i)
-                    .write(IpiMsg::new(IpiPayload::Empty));
+                arr.as_mut_ptr().cast::<IpiMsg>().add(i).write(IpiMsg {
+                    // temporary payload, it will be overwritten before being sent
+                    payload: IpiPayload::StopExecution,
+                    is_accomplished: AtomicBool::new(true),
+                    link: LinkedListLink::new(),
+                });
             }
             i += 1;
         }
@@ -111,13 +105,15 @@ mod msg_buffers {
 }
 use msg_buffers::*;
 
-/// Find an available IPI message buffer for current core.
+/// Find an available IPI message buffer for current core, and mark it as
+/// occupied.
 ///
 /// The returned pointer points to a [None] value.
-fn find_avail_buf() -> Option<NonNull<IpiMsg>> {
+fn alloc_avail_buf() -> Option<NonNull<IpiMsg>> {
     MSG_BUFFERS.with_mut(|buffers| {
         for buf in buffers.iter_mut() {
-            if let IpiPayload::Empty = buf.payload {
+            if buf.is_accomplished.load(Ordering::Acquire) {
+                buf.is_accomplished.store(false, Ordering::Release);
                 return Some(NonNull::from(buf));
             }
         }
@@ -127,7 +123,7 @@ fn find_avail_buf() -> Option<NonNull<IpiMsg>> {
 
 /// Send an IPI to the target CPU asynchronously.
 pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), AsyncIpiError> {
-    let mut buf_ptr = find_avail_buf().ok_or(AsyncIpiError::NoAvailableBuffer)?;
+    let mut buf_ptr = alloc_avail_buf().ok_or(AsyncIpiError::NoAvailableBuffer)?;
     unsafe { buf_ptr.as_mut().payload = payload };
     let buf_ptr = unsafe { UnsafeRef::from_raw(buf_ptr.as_ptr()) };
 
@@ -145,22 +141,30 @@ pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), AsyncIpi
 /// Broadcast an IPI to all other CPUs asynchronously.
 pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), AsyncIpiError> {
     // check whether empty buffers are enough
+    let ncpus = CpuArch::ncpus();
     let mut navail_bufs = 0;
     MSG_BUFFERS.with(|buffers| {
-        for buf in buffers.iter() {
-            if let IpiPayload::Empty = buf.payload {
+        for (id, buf) in buffers[..ncpus].iter().enumerate() {
+            if id == CpuArch::cur_cpu_id() {
+                continue;
+            }
+            if buf.is_accomplished.load(Ordering::Acquire) {
                 navail_bufs += 1;
             }
         }
     });
-    if navail_bufs < CpuArch::ncpus() - 1 {
+    if navail_bufs < ncpus - 1 {
         return Err(AsyncIpiError::NoAvailableBuffer);
     }
+    let mut sent_bufs = 0;
     MSG_BUFFERS.with_mut(|buffers| {
-        for (id, buf) in buffers.iter_mut().enumerate().skip(1) {
-            if let IpiPayload::Empty = buf.payload {
+        for (id, buf) in buffers[..ncpus].iter_mut().enumerate() {
+            if id == CpuArch::cur_cpu_id() {
+                continue;
+            }
+            if buf.is_accomplished.load(Ordering::Acquire) {
+                buf.is_accomplished.store(false, Ordering::Release);
                 buf.payload = payload;
-
                 let buf_ptr = unsafe { UnsafeRef::from_raw(buf) };
                 unsafe {
                     IPI_QUEUE.with_remote(id, |queue| {
@@ -169,8 +173,10 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), AsyncIpiError> {
                     });
                     IntrArch::send_ipi(id);
                 }
-            } else {
-                panic!("concurrent modification of IPI message buffers detected");
+                sent_bufs += 1;
+            }
+            if sent_bufs >= ncpus - 1 {
+                break;
             }
         }
     });
@@ -186,7 +192,7 @@ pub fn handle_ipi() {
             let Some(msg_ptr) = queue.lock_irqsave().pop_front() else {
                 break;
             };
-            let msg = unsafe { msg_ptr.as_ref() };
+            let msg = msg_ptr.as_ref();
             kdebugln!("handle ipi: payload={:?}", msg.payload);
             match msg.payload {
                 TlbShootdown { vaddr } => {
@@ -202,9 +208,6 @@ pub fn handle_ipi() {
                     loop {
                         core::hint::spin_loop();
                     }
-                },
-                Empty => {
-                    panic!("ipi with empty payload should never be sent");
                 },
             }
         }
