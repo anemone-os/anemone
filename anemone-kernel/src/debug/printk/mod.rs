@@ -39,6 +39,8 @@ pub unsafe fn on_system_boot() {
         let has_normal_con = SYS_CONSOLE.on_system_boot();
         if !has_normal_con {
             kwarningln!("no normal console registered, only early consoles are available");
+        } else {
+            kinfoln!("normal console(s) registered, early consoles have been unregistered");
         }
     }
 }
