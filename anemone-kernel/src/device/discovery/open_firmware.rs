@@ -12,8 +12,8 @@ use core::ptr::NonNull;
 use crate::{
     device::{
         bus::{
-            ROOT_BUS,
             platform::{self, PlatformDevice},
+            ROOT_BUS,
         },
         discovery::fwnode::FwNode,
         idalloc::alloc_device_id,
@@ -644,7 +644,7 @@ static OF_NODES: Lazy<RwLock<HashMap<DeviceNodeHandle, Arc<OpenFirmwareNode>>>> 
 /// Note that each device has only one corresponding [OpenFirmwareNode]
 /// instance, so the returned [OpenFirmwareNode] is always the same for the same
 /// device node handle, **which, in turn, is based on the fact that each
-/// [DeviceNodeHandle] is unique for an unflattened device tree**"
+/// [DeviceNodeHandle] is unique for an unflattened device tree**
 pub fn get_of_node(handle: DeviceNodeHandle) -> Arc<OpenFirmwareNode> {
     let mut of_nodes = OF_NODES.write_irqsave();
     if let Some(node) = of_nodes.get(&handle) {

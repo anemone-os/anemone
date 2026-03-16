@@ -42,9 +42,9 @@ macro_rules! warn {
 
 pub fn cmd_echo(cmd: &std::process::Command) {
     let mut s = String::new();
-    s.push_str(&format!("{}", cmd.get_program().to_str().unwrap()));
+    s.push_str(&format!("{}", cmd.get_program().to_string_lossy()));
     for arg in cmd.get_args() {
-        s.push_str(&format!(" {}", arg.to_str().unwrap()));
+        s.push_str(&format!(" {}", arg.to_string_lossy()));
     }
     println!("$ {}", s);
 }

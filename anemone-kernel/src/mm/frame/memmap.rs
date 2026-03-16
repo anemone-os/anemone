@@ -272,8 +272,21 @@ mod memmap {
     /// [Option]/[Result], since if a [None]/[Err] is returned, it indicates
     /// a serious bug in the kernel, and we should just panic immediately.
     ///
-    /// However, this function is marked as `unsafe`.
-    pub unsafe fn get_frame(ppn: PhysPageNum) -> &'static Frame {
+    /// However, this function is marked as `unsafe`, since:
+    ///
+    /// # Safety
+    ///
+    /// This function does not deal with compound frames (i.e. [Folio]), and if
+    /// caller tries to access a tail page of a compound frame, the behavior is
+    /// undefined. (Currently, those tail pages will remain as free frames after
+    /// a folio allocation. Some debug assertions depend on this fact.)
+    ///
+    /// Unless caller are those system observers (e.g. swapper thread,
+    /// /proc/kpage*, /proc/[pid]/pagemap), you are not expected to call this
+    /// function directly. Instead, you should call higher-level APIs in
+    /// [crate::mm::frame::managed] module, which will perform necessary
+    /// checks and handle compound frames.
+    pub unsafe fn get_frame_raw(ppn: PhysPageNum) -> &'static Frame {
         let in_section_idx = ppn.get() & ((1 << FRAME_IN_SECTION_IDX_BITS) - 1);
 
         let indirect_level_idx_indice = indirect_indices_for(ppn);
@@ -312,7 +325,7 @@ mod memmap {
         unsafe { &*frame_ptr }
     }
 }
-pub use memmap::{get_frame, init};
+pub use memmap::{get_frame_raw, init};
 
 #[derive(Debug)]
 pub struct Frame {

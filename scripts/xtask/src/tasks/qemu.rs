@@ -24,8 +24,6 @@ pub fn run(args: QemuArgs) -> anyhow::Result<()> {
     if let Some(qemu) = &config.qemu {
         log_progress("QEMU", "Launching QEMU emulator...");
 
-        // TODO: elegent echo
-
         let mut cmd = std::process::Command::new(&qemu.qemu);
         cmd.arg("-machine")
             .arg(&qemu.machine)
@@ -46,7 +44,16 @@ pub fn run(args: QemuArgs) -> anyhow::Result<()> {
                     .unwrap_or(&[]),
             );
         cmd_echo(&cmd);
-        cmd.status()?;
+        match cmd.status() {
+            Ok(status) => {
+                if !status.success() {
+                    anyhow::bail!("QEMU exited with status: {}", status);
+                }
+            },
+            Err(e) => {
+                anyhow::bail!("Failed to launch QEMU: {}", e);
+            },
+        }
     } else {
         anyhow::bail!(
             "QEMU configuration not found for platform {}",

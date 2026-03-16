@@ -8,11 +8,11 @@ use spin::Lazy;
 use crate::prelude::*;
 
 pub trait PowerOffHandler: Send {
-    unsafe fn poweroff(&self) -> !;
+    unsafe fn poweroff(&self);
 }
 
 pub trait RebootHandler: Send {
-    unsafe fn reboot(&self) -> !;
+    unsafe fn reboot(&self);
 }
 
 static POWER_OFF_HANDLER: Lazy<SpinLock<Vec<Box<dyn PowerOffHandler>>>> =
@@ -34,7 +34,8 @@ pub fn register_reboot_handler(handler: Box<dyn RebootHandler>) {
 /// Power off the system.
 ///
 /// Internally, this function will call all registered power off handlers in
-/// order until one of them succeeds. If no handler succeeds, it will panic.
+/// order until one of them succeeds. If no handler succeeds, system will be
+/// halted.
 pub unsafe fn power_off() -> ! {
     let handlers = POWER_OFF_HANDLER.lock_irqsave();
     for handler in handlers.iter() {
@@ -51,7 +52,8 @@ pub unsafe fn power_off() -> ! {
 /// Reboot the system.
 ///
 /// Internally, this function will call all registered reboot handlers in
-/// order until one of them succeeds. If no handler succeeds, it will panic.
+/// order until one of them succeeds. If no handler succeeds, system will be
+/// halted.
 pub unsafe fn reboot() -> ! {
     let handlers = REBOOT_HANDLER.lock_irqsave();
     for handler in handlers.iter() {

@@ -7,14 +7,14 @@ use crate::{
         riscv64::{
             exception::{enable_local_irq, install_ktrap_handler},
             machine::machine_init,
-            mm::{RiscV64PgDir, RiscV64Pte, RiscV64PteFlags, sv39},
+            mm::{sv39, RiscV64PgDir, RiscV64Pte, RiscV64PteFlags},
         },
     },
-    debug::printk::{Console, ConsoleFlags, register_console},
+    debug::printk::{register_console, Console, ConsoleFlags},
     device::discovery::open_firmware::{
-        EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count, early_scan_fdt_size,
-        get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
-        unflatten_device_tree,
+        early_scan_clock_freq, early_scan_cpu_count, early_scan_fdt_size, get_of_node,
+        of_platform_discovery, of_with_node_by_full_name_path, of_with_root, unflatten_device_tree,
+        EarlyMemoryScanner,
     },
     mm::layout::KernelLayoutTrait,
     prelude::*,
@@ -188,14 +188,14 @@ fn register_basic_power_handlers() {
     struct SbiPower;
 
     impl PowerOffHandler for SbiPower {
-        unsafe fn poweroff(&self) -> ! {
+        unsafe fn poweroff(&self) {
             sbi_rt::system_reset(sbi_rt::Shutdown, sbi_rt::NoReason);
             unreachable!()
         }
     }
 
     impl RebootHandler for SbiPower {
-        unsafe fn reboot(&self) -> ! {
+        unsafe fn reboot(&self) {
             sbi_rt::system_reset(sbi_rt::ColdReboot, sbi_rt::NoReason);
             unreachable!()
         }

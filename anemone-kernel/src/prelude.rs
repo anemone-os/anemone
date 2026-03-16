@@ -30,7 +30,7 @@ pub use kernel_macros::*;
 
 /// A radix trie mapping 64-bit keys to values of type `V`.
 ///
-/// It's not recommeneded to use other key types, such as [String] and
+/// It's not recommended to use other key types, such as [String] and
 /// [Vec<u8>], as they introduce extra heap allocations.
 pub type RadixTrie<V> = fast_radix_trie::GenericRadixMap<u64, V>;
 pub use bimap::BiMap;

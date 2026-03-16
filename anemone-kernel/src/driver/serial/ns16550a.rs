@@ -278,7 +278,7 @@ impl DriverOps for Ns16550ADriver {
         };
 
         // for this simple driver we do not set drv_state.
-        // irq prv_data is enouth.
+        // irq prv_data is enough.
 
         request_irq(pdev, &IRQ_HANDLER, Some(Box::new(state.clone())))?;
 
