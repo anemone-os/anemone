@@ -2,10 +2,12 @@
 #! This file specifies how the kernel is configured and built.
 #! This is an example configuration file.
 
-# This section specifies how to build loader and kernel
+# This section specifies how to build kernel
 [build]
 platform = "qemu-virt-rv64" # Target platform. The same name as in conf/platforms/*.toml
 profile = "dev" # Build profile: "dev" or "release". We may add more profiles later.
+
+disasm = false # Whether to generate a disassembly file for kernel.
 
 # Kernel tailoring options
 [features]

@@ -2,7 +2,10 @@
 
 use core::mem::ManuallyDrop;
 
-use crate::{mm::frame::FRAME_ALLOCATOR, prelude::*};
+use crate::{
+    mm::frame::{FRAME_ALLOCATOR, memmap::Frame},
+    prelude::*,
+};
 
 #[derive(Debug)]
 pub struct FrameHandle {
@@ -18,7 +21,7 @@ impl TryFrom<FrameHandle> for OwnedFrameHandle {
     type Error = (MmError, FrameHandle);
 
     fn try_from(value: FrameHandle) -> Result<Self, Self::Error> {
-        if unsafe { get_frame(value.ppn) }.is_shared() {
+        if unsafe { get_frame_raw(value.ppn) }.is_shared() {
             Err((MmError::SharedFrame, value))
         } else {
             Ok(Self { inner: value })
@@ -40,9 +43,34 @@ impl FrameHandle {
     pub fn try_into_owned(self) -> Result<OwnedFrameHandle, (MmError, FrameHandle)> {
         OwnedFrameHandle::try_from(self)
     }
+
+    /// Get the underlying [Frame] of this handle.
+    pub fn meta(&self) -> &'static Frame {
+        unsafe { get_frame_raw(self.ppn) }
+    }
+}
+
+impl Clone for FrameHandle {
+    fn clone(&self) -> Self {
+        unsafe {
+            get_frame_raw(self.ppn).inc_ref();
+        }
+        Self { ppn: self.ppn }
+    }
 }
 
 impl OwnedFrameHandle {
+    /// Returns the physical page number of the frame represented by this
+    /// handle.
+    pub fn ppn(&self) -> PhysPageNum {
+        self.inner.ppn
+    }
+
+    /// Get the underlying [Frame] of this handle.
+    pub fn meta(&self) -> &'static Frame {
+        unsafe { get_frame_raw(self.inner.ppn) }
+    }
+
     /// Creates a new `OwnedFrameHandle` from the given physical page number.
     ///
     /// # Safety
@@ -54,9 +82,9 @@ impl OwnedFrameHandle {
     pub unsafe fn new(ppn: PhysPageNum) -> Self {
         unsafe {
             #[cfg(debug_assertions)]
-            assert!(get_frame(ppn).is_free());
+            assert!(get_frame_raw(ppn).is_free());
 
-            get_frame(ppn).inc_ref();
+            get_frame_raw(ppn).inc_ref();
         }
 
         Self {
@@ -74,7 +102,7 @@ impl OwnedFrameHandle {
     pub unsafe fn from_ppn(ppn: PhysPageNum) -> Self {
         unsafe {
             #[cfg(debug_assertions)]
-            assert!(get_frame(ppn).rc() == 1);
+            assert!(get_frame_raw(ppn).rc() == 1);
         }
         Self {
             inner: FrameHandle { ppn },
@@ -141,7 +169,7 @@ impl OwnedFrameHandle {
 impl Drop for FrameHandle {
     fn drop(&mut self) {
         unsafe {
-            let frame = get_frame(self.ppn);
+            let frame = get_frame_raw(self.ppn);
             frame.dec_ref();
             if frame.is_free() {
                 FRAME_ALLOCATOR.dealloc(PhysPageRange::new(self.ppn, 1));
@@ -171,7 +199,7 @@ impl TryFrom<Folio> for OwnedFolio {
 
     fn try_from(value: Folio) -> Result<Self, Self::Error> {
         for i in 0..value.range.npages() {
-            if unsafe { get_frame(value.range.start() + i) }.is_shared() {
+            if unsafe { get_frame_raw(value.range.start() + i) }.is_shared() {
                 return Err((MmError::SharedFrame, value));
             }
         }
@@ -185,6 +213,11 @@ impl Folio {
         self.range
     }
 
+    /// Get the underlying [Frame] of this folio.
+    pub fn meta(&self) -> &'static Frame {
+        unsafe { get_frame_raw(self.range.start()) }
+    }
+
     /// Try to convert this `Folio` into an `OwnedFolio`.
     ///
     /// This will fail if any of the underlying frames is shared, since we
@@ -194,7 +227,27 @@ impl Folio {
     }
 }
 
+impl Clone for Folio {
+    fn clone(&self) -> Self {
+        unsafe {
+            get_frame_raw(self.range.start()).inc_ref();
+
+            Self { range: self.range }
+        }
+    }
+}
+
 impl OwnedFolio {
+    /// Returns the physical page range of the folio.
+    pub fn range(&self) -> PhysPageRange {
+        self.inner.range()
+    }
+
+    /// Get the underlying [Frame] of this folio.
+    pub fn meta(&self) -> &'static Frame {
+        unsafe { get_frame_raw(self.inner.range.start()) }
+    }
+
     /// Creates a new `OwnedFolio` from the given physical page range.
     ///
     /// # Safety
@@ -208,13 +261,17 @@ impl OwnedFolio {
             #[cfg(debug_assertions)]
             {
                 for i in 0..range.npages() {
-                    assert!(get_frame(range.start() + i).is_free());
+                    assert!(get_frame_raw(range.start() + i).is_free());
                 }
             }
 
-            for i in 0..range.npages() {
-                get_frame(range.start() + i).inc_ref();
-            }
+            // an dangerous but necessary optimization.
+            //
+            // we use the first frame's metadata to be on behalf of the whole folio
+            //
+            // according to Folio's contract, it's always safe unless user split the folio
+            // into multiple frames.
+            get_frame_raw(range.start()).inc_ref();
 
             Self {
                 inner: Folio { range },
@@ -233,13 +290,7 @@ impl OwnedFolio {
         unsafe {
             #[cfg(debug_assertions)]
             {
-                for i in 0..range.npages() {
-                    assert_eq!(
-                        get_frame(range.start() + i).rc(),
-                        1,
-                        "Internal error: frames in the same folio have different reference counts"
-                    );
-                }
+                assert_eq!(get_frame_raw(range.start()).rc(), 1,);
             }
         }
 
@@ -312,24 +363,9 @@ impl OwnedFolio {
 impl Drop for Folio {
     fn drop(&mut self) {
         unsafe {
-            #[cfg(debug_assertions)]
-            {
-                let rc = get_frame(self.range.start()).rc();
-                for i in 1..self.range.npages() {
-                    assert_eq!(
-                        get_frame(self.range.start() + i).rc(),
-                        rc,
-                        "Internal error: frames in the same folio have different reference counts"
-                    );
-                }
-            }
-
-            let rc = get_frame(self.range.start()).rc();
-            for i in 0..self.range.npages() {
-                let ppn = self.range.start() + i;
-                let frame = get_frame(ppn);
-                frame.dec_ref();
-            }
+            let frame = get_frame_raw(self.range.start());
+            let rc = frame.rc();
+            frame.dec_ref();
             if rc == 1 {
                 FRAME_ALLOCATOR.dealloc(self.range);
             }

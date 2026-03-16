@@ -7,13 +7,12 @@ pub(super) mod cpu;
 pub(super) mod exception;
 
 pub(super) mod mm;
-pub(super) mod power;
 pub(super) mod time;
 
 mod bootstrap;
+mod machine;
 
 pub use cpu::RiscV64CpuArch as CpuArch;
 pub use exception::{RiscV64IntrArch as IntrArch, RiscV64TrapArch as TrapArch};
 pub use mm::{KernelLayout, RiscV64PagingArch as PagingArch};
-pub use power::RiscV64PowerArch as PowerArch;
 pub use time::RiscV64TimeArch as TimeArch;

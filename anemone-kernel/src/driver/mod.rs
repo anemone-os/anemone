@@ -1,4 +1,12 @@
-use core::{any::Any, fmt::Debug};
+//! Here lies the driver framework, and all driver implementations.
+//!
+//! Most drivers implement the [Driver] trait, but some drivers are for system
+//! early initialization and do not fit into the device-driver model, such as
+//! those root interrupt controller drivers and system clock source drivers.
+//! They won't have a corresponding `dyn Driver` object. (So do their
+//! corresponding device objects.)
+
+use core::fmt::Debug;
 
 use crate::{
     device::{bus::platform::PlatformDriver, kobject::KObject},
@@ -6,8 +14,13 @@ use crate::{
     prelude::*,
 };
 
-pub mod clock_source;
-pub mod serial;
+// this one must be public for the early boot code to initialize the root
+// interrupt controller.
+pub mod intc;
+
+mod clock_source;
+mod power;
+mod serial;
 
 #[derive(Debug)]
 pub struct DriverBase {
@@ -55,16 +68,9 @@ impl dyn Driver {
 
 impl Debug for dyn Driver {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let base = DriverData::base(self);
-        Debug::fmt(base, f)
-    }
-}
-
-pub trait DriverState: Any + Send + Sync {}
-
-impl Debug for dyn DriverState {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "DriverState {{ ... }}")
+        f.debug_struct("dyn Driver")
+            .field("name", &self.name())
+            .finish()
     }
 }
 

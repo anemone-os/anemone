@@ -12,8 +12,8 @@ use core::ptr::NonNull;
 use crate::{
     device::{
         bus::{
-            ROOT_BUS,
             platform::{self, PlatformDevice},
+            ROOT_BUS,
         },
         discovery::fwnode::FwNode,
         idalloc::alloc_device_id,
@@ -25,7 +25,6 @@ use crate::{
 };
 
 mod early {
-    use core::marker::PhantomData;
 
     use fdt::nodes::cpus::CpuStatus;
 
@@ -287,12 +286,11 @@ mod early {
         ncpus
     }
 }
-use device_tree::DeviceStatus;
+use device_tree::{DeviceNodeHandle, DeviceStatus, PHandle};
 pub use early::*;
+use spin::Lazy;
 
 /// Unflattened device tree. In-memory representation.
-/// TODO:
-/// - Runtime-modifiability.
 #[derive(Debug)]
 struct DeviceTree {
     handle: device_tree::DeviceTreeHandle,
@@ -302,6 +300,55 @@ struct DeviceTree {
 /// needed.
 static DEVICE_TREE: MonoOnce<Arc<DeviceTree>> = unsafe { MonoOnce::new() };
 
+pub fn of_with_root<F, R>(f: F) -> R
+where
+    F: FnOnce(&device_tree::DeviceNode) -> R,
+{
+    let device_tree = DEVICE_TREE.get();
+    f(device_tree.handle.root())
+}
+
+/// Find the node by the given path, and execute the provided closure on it if
+/// found.
+pub fn of_with_node_by_path<F, R>(path: &str, f: F) -> Result<R, F>
+where
+    F: FnOnce(&device_tree::DeviceNode) -> R,
+{
+    let device_tree = DEVICE_TREE.get();
+    match device_tree.handle.find_node_by_path(path) {
+        Some(node) => Ok(f(node)),
+        None => Err(f),
+    }
+}
+
+/// Find the node by the given full name path, and execute the provided closure
+/// on it if found.
+pub fn of_with_node_by_full_name_path<F, R>(path: &str, f: F) -> Result<R, F>
+where
+    F: FnOnce(&device_tree::DeviceNode) -> R,
+{
+    let device_tree = DEVICE_TREE.get();
+    match device_tree.handle.find_node_by_full_name_path(path) {
+        Some(node) => Ok(f(node)),
+        None => Err(f),
+    }
+}
+
+/// Find the node by the given phandle, and execute the provided closure on it
+/// if found.
+pub fn of_with_node_by_phandle<F, R>(phandle: PHandle, f: F) -> Result<R, F>
+where
+    F: FnOnce(&device_tree::DeviceNode) -> R,
+{
+    let device_tree = DEVICE_TREE.get();
+    match device_tree.handle.find_node_by_phandle(phandle) {
+        Some(node) => Ok(f(node)),
+        None => Err(f),
+    }
+}
+
+/// Unflatten the device tree from the given FDT blob, and initialize the global
+/// `DEVICE_TREE` instance.
 pub unsafe fn unflatten_device_tree(fdt_va: VirtAddr) {
     let parser = unsafe { device_tree::FdtParser::new(fdt_va.as_ptr()) };
     let handle = parser.parse(|layout| {
@@ -352,11 +399,14 @@ pub fn of_platform_discovery() {
                     continue;
                 }
 
+                let ofnode = get_of_node(child.handle());
+                if ofnode.populated() {
+                    // already populated during early boot process, skip it.
+                    continue;
+                }
+
                 let kobj_base = KObjectBase::new(KObjIdent::try_from(child.full_name()).unwrap());
-                let dev_base = DeviceBase::new(
-                    alloc_device_id().unwrap(),
-                    Some(Box::new(OpenFirmwareNode { node_ptr: child })),
-                );
+                let dev_base = DeviceBase::new(alloc_device_id().unwrap(), Some(ofnode));
                 let mut pdev = PlatformDevice::new(kobj_base, dev_base);
                 // kobj init
                 pdev.set_parent(Some(simple_bus_dev.clone()));
@@ -365,7 +415,7 @@ pub fn of_platform_discovery() {
                     pdev.add_compatible(c);
                 }
                 // resource parsing
-                // 1. reg
+                // 1. mmio
                 if let Some(reg) = child.reg() {
                     for (on_bus_address, length) in reg.iter() {
                         if length == 0 {
@@ -453,35 +503,79 @@ pub fn of_platform_discovery() {
     }
 
     let device_tree = DEVICE_TREE.get();
-    // MMIO resources always reside in lower half of the physical address space.
     let initial_mapping = vec![(0, 0, u64::MAX)];
     of_platform_discovery_inner(device_tree.handle.root(), &ROOT_BUS, &initial_mapping);
 }
 
-#[derive(Debug)]
-pub struct OpenFirmwareNode {
-    /// Pointer to the corresponding node in the unflattened device tree.
-    ///
-    /// This pointer is always valid since the device tree is immutable and will
-    /// never be deallocated.
-    ///
-    /// **However, this is not an appropriate design and just a temporary
-    /// workaround. We should refine device-tree crate later to support our
-    /// needs.**
-    node_ptr: *const device_tree::DeviceNode,
-}
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct OfNodeFlags: u32 {
+        /// Indicates this device node has already been populated during early boot process,
+        /// so kernel won't create a PlatformDevice for
+        /// it in of_platform_discovery().
+        const POPULATED = 1 << 0;
 
-impl OpenFirmwareNode {
-    fn node(&self) -> &device_tree::DeviceNode {
-        unsafe { &*self.node_ptr }
+        /// Device with this flag set will be registered as a system console with
+        /// ConsoleFlags::ENABLED bit set.
+        const STDOUT = 1 << 1;
     }
 }
 
-// See `node_ptr` field of `OpenFirmwareNode` for the safety of this.
-unsafe impl Send for OpenFirmwareNode {}
-unsafe impl Sync for OpenFirmwareNode {}
+#[derive(Debug)]
+pub struct OpenFirmwareNode {
+    handle: DeviceNodeHandle,
+    flags: AtomicU32,
+}
+
+impl OpenFirmwareNode {
+    fn new(handle: DeviceNodeHandle) -> Self {
+        Self {
+            handle,
+            flags: AtomicU32::new(OfNodeFlags::empty().bits()),
+        }
+    }
+
+    /// Get the underlying device tree node, which can be used for property
+    /// reading and other operations.
+    pub fn node(&self) -> &device_tree::DeviceNode {
+        self.handle.node()
+    }
+
+    /// Mark this node as already populated during early boot process, so kernel
+    /// won't create a PlatformDevice for it in of_platform_discovery().
+    pub fn mark_populated(&self) {
+        self.flags
+            .fetch_or(OfNodeFlags::POPULATED.bits(), Ordering::SeqCst);
+    }
+
+    /// Check if this node is already marked as populated.
+    pub fn populated(&self) -> bool {
+        OfNodeFlags::from_bits_truncate(self.flags.load(Ordering::SeqCst))
+            .contains(OfNodeFlags::POPULATED)
+    }
+
+    /// Mark this node as a system console with ConsoleFlags::ENABLED bit set.
+    pub fn mark_as_stdout(&self) {
+        self.flags
+            .fetch_or(OfNodeFlags::STDOUT.bits(), Ordering::SeqCst);
+    }
+
+    /// Check if this node is marked as a system console.
+    pub fn is_stdout(&self) -> bool {
+        OfNodeFlags::from_bits_truncate(self.flags.load(Ordering::SeqCst))
+            .contains(OfNodeFlags::STDOUT)
+    }
+}
 
 impl FwNode for OpenFirmwareNode {
+    fn equals(&self, other: &dyn FwNode) -> bool {
+        if let Some(other_of) = other.as_of_node() {
+            self.handle == other_of.handle
+        } else {
+            false
+        }
+    }
+
     fn prop_read_u32(&self, prop_name: &str) -> Option<u32> {
         self.node()
             .properties()
@@ -506,5 +600,58 @@ impl FwNode for OpenFirmwareNode {
 
     fn prop_read_present(&self, prop_name: &str) -> bool {
         self.node().properties().any(|p| p.name() == prop_name)
+    }
+
+    fn prop_read_raw(&self, prop_name: &str) -> Option<&[u8]> {
+        self.node()
+            .properties()
+            .find(|p| p.name() == prop_name)
+            .map(|p| p.value_as_bytes())
+    }
+
+    fn interrupt_parent(&self) -> Option<Arc<dyn FwNode>> {
+        if let Some(parent) = self.node().interrupt_parent() {
+            of_with_node_by_phandle(parent, |node| node.handle())
+                .ok()
+                .map(get_of_node)
+                .map(|node| node as Arc<dyn FwNode>)
+        } else {
+            None
+        }
+    }
+
+    fn interrupt_info(&self) -> Option<&[u8]> {
+        // TODO: interrupts-extended and interrupt-map
+        if let Some(interrupts) = self.node().property("interrupts") {
+            Some(interrupts.value_as_bytes())
+        } else {
+            None
+        }
+    }
+
+    fn is_stdout(&self) -> bool {
+        self.is_stdout()
+    }
+}
+
+static OF_NODES: Lazy<RwLock<HashMap<DeviceNodeHandle, Arc<OpenFirmwareNode>>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+
+/// Get the [OpenFirmwareNode] corresponding to the given device node handle. If
+/// the node is not found in the cache, create a new one and insert it into the
+/// cache before returning it.
+///
+/// Note that each device has only one corresponding [OpenFirmwareNode]
+/// instance, so the returned [OpenFirmwareNode] is always the same for the same
+/// device node handle, **which, in turn, is based on the fact that each
+/// [DeviceNodeHandle] is unique for an unflattened device tree**
+pub fn get_of_node(handle: DeviceNodeHandle) -> Arc<OpenFirmwareNode> {
+    let mut of_nodes = OF_NODES.write_irqsave();
+    if let Some(node) = of_nodes.get(&handle) {
+        node.clone()
+    } else {
+        let node = Arc::new(OpenFirmwareNode::new(handle));
+        of_nodes.insert(handle, node.clone());
+        node
     }
 }

@@ -2,12 +2,9 @@
 #![cfg_attr(not(test), no_std)]
 
 mod parser;
-mod unflattened;
 pub use parser::FdtParser;
-pub use unflattened::{
-    DeviceNode, DeviceStatus, DeviceTreeHandle, PropEncodedArray, Property, RangesEncoding,
-    RegEncoding, StringList, U32ArrayEncoding, U64ArrayEncoding,
-};
+mod unflattened;
+pub use unflattened::*;
 
 pub mod endian {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

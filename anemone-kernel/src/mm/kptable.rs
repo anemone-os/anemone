@@ -10,7 +10,7 @@
 
 use spin::Lazy;
 
-use crate::{exception::broadcast_ipi, mm::layout::KernelLayoutTrait, prelude::*};
+use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 
 static KERNEL_PTABLE: KPTable = KPTable::new();
 
@@ -76,7 +76,7 @@ impl KPTable {
     unsafe fn map_hhdm(&self) {
         let mut kptable = self.ptable.lock_irqsave();
         let mut mapper = kptable.mapper();
-        
+
         {
             sys_mem_zones().with_avail_zones(|avail_mem_zones| {
             for zone in avail_mem_zones.iter() {
@@ -140,14 +140,12 @@ impl KPTable {
     unsafe fn init_virtual_ranges(&self) {
         let mut kpgdir = self.ptable.lock_irqsave();
 
-        unsafe {
-            kinfoln!(
-                "preallocate pgdirs for remap region: [{:#x}, {:#x})",
-                KernelLayout::REMAP_REGION.start().get(),
-                KernelLayout::REMAP_REGION.end().get()
-            );
-            PagingArch::prealloc_pgdirs_for_region(&mut kpgdir, KernelLayout::REMAP_REGION);
-        }
+        kinfoln!(
+            "preallocate pgdirs for remap region: [{:#x}, {:#x})",
+            KernelLayout::REMAP_REGION.start().get(),
+            KernelLayout::REMAP_REGION.end().get()
+        );
+        PagingArch::prealloc_pgdirs_for_region(&mut kpgdir, KernelLayout::REMAP_REGION);
     }
 
     unsafe fn kmap(&self, mapping: Mapping) -> Result<(), MmError> {
@@ -159,9 +157,15 @@ impl KPTable {
     unsafe fn kunmap(&self, unmapping: Unmapping) {
         let mut kpgdir = self.ptable.lock_irqsave();
         let mut mapper = kpgdir.mapper();
-        unsafe{
+        unsafe {
             mapper.try_unmap(unmapping);
         }
+    }
+
+    fn ktranslate(&self, vpn: VirtPageNum) -> Option<Translated> {
+        let mut kpgdir = self.ptable.lock_irqsave();
+        let mapper = kpgdir.mapper();
+        mapper.translate(vpn)
     }
 }
 
@@ -205,8 +209,13 @@ pub unsafe fn activate_kernel_mapping() {
 pub unsafe fn kmap(mapping: Mapping) -> Result<(), MmError> {
     unsafe {
         KERNEL_PTABLE.kmap(mapping)?;
+        for i in 0..mapping.npages {
+            PagingArch::tlb_shootdown((mapping.vpn + i as u64).to_virt_addr());
+        }
     }
-    broadcast_ipi(IpiPayload::TlbShootdown { vaddr: None }, false);
+    if broadcast_ipi_async(IpiPayload::TlbShootdown { vaddr: None }).is_err() {
+        kwarningln!("failed to send TLB shootdown IPI after kmap");
+    }
     Ok(())
 }
 
@@ -219,6 +228,16 @@ pub unsafe fn kmap(mapping: Mapping) -> Result<(), MmError> {
 pub unsafe fn kunmap(unmapping: Unmapping) {
     unsafe {
         KERNEL_PTABLE.kunmap(unmapping);
+        for i in 0..unmapping.range.npages() {
+            PagingArch::tlb_shootdown((unmapping.range.start() + i as u64).to_virt_addr());
+        }
     }
-    broadcast_ipi(IpiPayload::TlbShootdown { vaddr: None }, false);
+    if broadcast_ipi_async(IpiPayload::TlbShootdown { vaddr: None }).is_err() {
+        kwarningln!("failed to send TLB shootdown IPI after kunmap");
+    }
+}
+
+/// Translate a kernel virtual page number in the global kernel page table.
+pub fn ktranslate(vpn: VirtPageNum) -> Option<Translated> {
+    KERNEL_PTABLE.ktranslate(vpn)
 }

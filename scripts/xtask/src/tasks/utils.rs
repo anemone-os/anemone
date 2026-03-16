@@ -40,6 +40,11 @@ macro_rules! warn {
     };
 }
 
-// pub fn log_progress(topic: &str, msg: &str) {
-//     pretty_log(topic, msg);
-// }
+pub fn cmd_echo(cmd: &std::process::Command) {
+    let mut s = String::new();
+    s.push_str(&format!("{}", cmd.get_program().to_string_lossy()));
+    for arg in cmd.get_args() {
+        s.push_str(&format!(" {}", arg.to_string_lossy()));
+    }
+    println!("$ {}", s);
+}

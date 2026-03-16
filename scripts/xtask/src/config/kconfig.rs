@@ -29,6 +29,8 @@ impl Profile {
 pub struct Build {
     pub platform: String,
     pub profile: Profile,
+
+    pub disasm: bool,
 }
 
 #[derive(Deserialize, Debug, Serialize)]

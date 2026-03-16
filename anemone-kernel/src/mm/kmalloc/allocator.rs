@@ -34,10 +34,11 @@ impl OomHandler for HeapOomHandler {
                 let used = talc
                     .claim(Span::from_array(&raw mut BOOTSTRAP_HEAP.bytes))
                     .expect("bootstrap heap should be claimable");
-                kinfoln!("HeapOomHandler: claimed bootstrap heap {}", used);
+                kinfoln!(noprint, "HeapOomHandler: claimed bootstrap heap {}", used);
                 return Ok(());
             } else {
                 kdebugln!(
+                    noprint,
                     "HeapOomHandler: bootstrap heap already claimed, trying to request memory from frame allocator"
                 );
                 // if pmm is not yet initialized, this will fail and return Err(()).
@@ -95,6 +96,7 @@ impl OomHandler for HeapOomHandler {
                     .claim(Span::from_slice(slice))
                     .expect("should be able to claim folio from frame allocator");
                 kinfoln!(
+                    noprint,
                     "HeapOomHandler: claimed folio of {} pages ({} bytes) from frame allocator",
                     range.npages(),
                     used

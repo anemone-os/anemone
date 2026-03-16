@@ -1,5 +1,4 @@
 # TODO
-# - LoongArch support
 # - Add fin_prod
 
 FROM ubuntu:24.04 AS build_qemu
@@ -18,7 +17,7 @@ RUN apt update && apt install -y build-essential \
 RUN wget https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz
 RUN tar xvf qemu-${QEMU_VERSION}.tar.xz
 WORKDIR /build/build-qemu
-RUN ../qemu-${QEMU_VERSION}/configure --target-list=riscv64-softmmu --prefix=/opt/qemu
+RUN ../qemu-${QEMU_VERSION}/configure --target-list=riscv64-softmmu,loongarch64-softmmu --prefix=/opt/qemu
 RUN make -j$(nproc)
 RUN make install
 

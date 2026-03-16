@@ -1,10 +1,4 @@
-use crate::{
-    exception::{
-        PageFaultInfo, PageFaultType,
-        trap::{ExceptionReason, InterruptReason, TrapArchTrait, TrapFrameArch, TrapReason},
-    },
-    prelude::*,
-};
+use crate::prelude::*;
 
 mod ktrap;
 pub use ktrap::*;
@@ -89,76 +83,44 @@ enum RiscV64Exception {
     StorePageFault = 15,
 }
 
-impl RiscV64Exception {
-    fn try_from_raw(value: usize) -> Option<Self> {
+impl TryFrom<usize> for RiscV64Exception {
+    type Error = ();
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
         match value {
-            0 => Some(Self::InstructionMisaligned),
-            1 => Some(Self::InstructionAccessFault),
-            2 => Some(Self::IllegalInstruction),
-            3 => Some(Self::Breakpoint),
-            4 => Some(Self::LoadMisaligned),
-            5 => Some(Self::LoadAccessFault),
-            6 => Some(Self::StoreMisaligned),
-            7 => Some(Self::StoreAccessFault),
-            8 => Some(Self::UserEnvCall),
-            12 => Some(Self::InstructionPageFault),
-            13 => Some(Self::LoadPageFault),
-            15 => Some(Self::StorePageFault),
-            _ => None,
+            0 => Ok(Self::InstructionMisaligned),
+            1 => Ok(Self::InstructionAccessFault),
+            2 => Ok(Self::IllegalInstruction),
+            3 => Ok(Self::Breakpoint),
+            4 => Ok(Self::LoadMisaligned),
+            5 => Ok(Self::LoadAccessFault),
+            6 => Ok(Self::StoreMisaligned),
+            7 => Ok(Self::StoreAccessFault),
+            8 => Ok(Self::UserEnvCall),
+            12 => Ok(Self::InstructionPageFault),
+            13 => Ok(Self::LoadPageFault),
+            15 => Ok(Self::StorePageFault),
+            _ => Err(()),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-enum RiscV64TrapReason {
-    /// got passed to architecture-agnostic layer
-    Generic(TrapReason),
-    ArchRecoverable(RiscV64Exception),
+pub enum RiscV64Interrupt {
+    SupervisorSoftware = 1,
+    SupervisorTimer = 5,
+    SupervisorExternal = 9,
 }
 
-impl RiscV64TrapReason {
-    fn try_from_raw(trapframe: &RiscV64TrapFrame) -> Option<Self> {
-        use RiscV64Exception::*;
-        let is_interrupt = (trapframe.scause & (1 << 63)) != 0;
-        let code = trapframe.scause as usize & !(1 << 63);
-        if is_interrupt {
-            match code {
-                1 => Some(Self::Generic(TrapReason::Interrupt(InterruptReason::Ipi))),
-                5 => Some(Self::Generic(TrapReason::Interrupt(InterruptReason::Timer))),
-                9 => Some(Self::Generic(TrapReason::Interrupt(
-                    InterruptReason::External,
-                ))),
-                _ => None,
-            }
-        } else {
-            let reason = match RiscV64Exception::try_from_raw(code)? {
-                IllegalInstruction => {
-                    Self::Generic(TrapReason::Exception(ExceptionReason::InvalidOpcode))
-                },
-                InstructionMisaligned | LoadMisaligned | StoreMisaligned => {
-                    Self::Generic(TrapReason::Exception(ExceptionReason::ArchFatal))
-                },
-                InstructionAccessFault | LoadAccessFault | StoreAccessFault => {
-                    // PMP violation or access to non-existent memory, impossible to recover.
-                    Self::Generic(TrapReason::Exception(ExceptionReason::ArchFatal))
-                },
-                Breakpoint => Self::Generic(TrapReason::Exception(ExceptionReason::Breakpoint)),
-                UserEnvCall => Self::Generic(TrapReason::Exception(ExceptionReason::Syscall(
-                    SysNo::new(trapframe.gpr.a::<7>() as usize),
-                ))),
-                InstructionPageFault => {
-                    Self::Generic(TrapReason::Exception(ExceptionReason::PageFault(
-                        PageFaultInfo::new(VirtAddr::new(trapframe.stval), PageFaultType::Execute),
-                    )))
-                },
-                LoadPageFault => Self::Generic(TrapReason::Exception(ExceptionReason::PageFault(
-                    PageFaultInfo::new(VirtAddr::new(trapframe.stval), PageFaultType::Read),
-                ))),
-                StorePageFault => Self::Generic(TrapReason::Exception(ExceptionReason::PageFault(
-                    PageFaultInfo::new(VirtAddr::new(trapframe.stval), PageFaultType::Write),
-                ))),
-            };
-            Some(reason)
+impl TryFrom<usize> for RiscV64Interrupt {
+    type Error = ();
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::SupervisorSoftware),
+            5 => Ok(Self::SupervisorTimer),
+            9 => Ok(Self::SupervisorExternal),
+            _ => Err(()),
         }
     }
 }

@@ -6,6 +6,11 @@
 // **IMPORTANT**
 // **UNSTABLE FEATURES SHOULD BE AVOIDED WHENEVER POSSIBLE, SINCE THEY MAY CAUSE
 // COMPATIBILITY ISSUES IN THE FUTURE.**
+// **EVERY TIME A NEW UNSTABLE FEATURE IS ADDED, IT SHOULD BE DOCUMENTED.**
+
+// This feature must be enabled for zero-cost downcasting of trait objects to get the same
+// efficiency as C's void* and manual casts, which is crucial for the performance of the kernel.
+#![feature(downcast_unchecked)]
 
 extern crate alloc;
 
@@ -32,15 +37,19 @@ pub mod utils;
 
 use crate::{prelude::*, sync::mono::MonoOnce};
 
-fn kernel_main(is_bsp: bool) -> ! {
-    // TODO: init subsystems, spawn init process, etc.
-
-    if is_bsp {
-        #[cfg(feature = "kunit")]
-        crate::debug::kunit::kunit_runner();
+/// Before every core enters [kernel_main], this function must be called on the
+/// BSP to perform necessary preparations.
+fn bsp_pre_kernel_main() {
+    unsafe {
+        debug::printk::on_system_boot();
     }
+    #[cfg(feature = "kunit")]
+    crate::debug::kunit::kunit_runner();
 
-    // TODO: start the scheduler, which should never return.
+    // TODO: init subsystems, spawn init process, etc.
+}
 
+/// Start scheduling user processes.
+fn kernel_main() -> ! {
     loop {}
 }

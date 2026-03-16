@@ -1,4 +1,4 @@
-// TODO
+//! Page fault handling.
 
 use crate::prelude::*;
 
@@ -32,3 +32,17 @@ impl PageFaultInfo {
         self.ty
     }
 }
+
+/// Handle a page fault that occurs in kernel space.
+///
+/// This is always a fatal error currently, since we do not support kernel
+/// swappable pages for now.
+pub fn handle_kernel_page_fault(info: PageFaultInfo) {
+    panic!(
+        "page fault in kernel: addr={:?}, type={:?}",
+        info.fault_addr(),
+        info.fault_type()
+    );
+}
+
+// handle user page fault
