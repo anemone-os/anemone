@@ -1,7 +1,7 @@
 /// Per Cpu data management.
 // TODO: add docs and comments
 use crate::{exception::PreemptCounter, prelude::*};
-use core::{cell::UnsafeCell, ptr::NonNull};
+use core::cell::UnsafeCell;
 
 #[derive(Debug)]
 #[repr(transparent)]

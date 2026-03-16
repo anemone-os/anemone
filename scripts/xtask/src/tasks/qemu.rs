@@ -1,5 +1,9 @@
 //! Run the built OS image in QEMU emulator.
-use crate::{config::PlatformConfig, tasks::utils::log_progress, workspace::*};
+use crate::{
+    config::PlatformConfig,
+    tasks::utils::{cmd_echo, log_progress},
+    workspace::*,
+};
 use clap::Args;
 use xshell::Shell;
 
@@ -19,10 +23,9 @@ pub fn run(args: QemuArgs) -> anyhow::Result<()> {
     let config = PlatformConfig::from_str(&config_content)?;
     if let Some(qemu) = &config.qemu {
         log_progress("QEMU", "Launching QEMU emulator...");
-        let sh = Shell::new()?;
-        let mut cmd = sh.cmd(&qemu.qemu);
-        cmd = cmd
-            .arg("-machine")
+
+        let mut cmd = std::process::Command::new(&qemu.qemu);
+        cmd.arg("-machine")
             .arg(&qemu.machine)
             .arg("-cpu")
             .arg(&qemu.cpu)
@@ -33,13 +36,24 @@ pub fn run(args: QemuArgs) -> anyhow::Result<()> {
             .arg("-bios")
             .arg(&qemu.bios)
             .arg("-kernel")
-            .arg(&args.image);
-        if let Some(args) = &qemu.args {
-            for arg in args {
-                cmd = cmd.arg(arg);
-            }
+            .arg(&args.image)
+            .args(
+                qemu.args
+                    .as_ref()
+                    .map(|args| args.as_slice())
+                    .unwrap_or(&[]),
+            );
+        cmd_echo(&cmd);
+        match cmd.status() {
+            Ok(status) => {
+                if !status.success() {
+                    anyhow::bail!("QEMU exited with status: {}", status);
+                }
+            },
+            Err(e) => {
+                anyhow::bail!("Failed to launch QEMU: {}", e);
+            },
         }
-        cmd.run_echo()?;
     } else {
         anyhow::bail!(
             "QEMU configuration not found for platform {}",

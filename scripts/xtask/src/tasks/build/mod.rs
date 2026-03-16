@@ -163,16 +163,18 @@ impl<'a> BuildContext<'a> {
         let built_kernel_path = format!("{}/anemone-kernel", self.cargo_build_dir());
         std::fs::copy(built_kernel_path, "build/anemone.elf")?;
 
-        log_progress!("DISASM", "Generating kernel disassembly");
+        if self.kconfig.build.disasm {
+            log_progress!("DISASM", "Generating kernel disassembly");
 
-        let disasm = sh
-            .cmd(&self.platform.build.target.objdump())
-            .arg("-d")
-            .arg("-S")
-            .arg("build/anemone.elf")
-            .echo()
-            .read()?;
-        sh.write_file("build/anemone.disasm", disasm)?;
+            let disasm = sh
+                .cmd(&self.platform.build.target.objdump())
+                .arg("-d")
+                .arg("-S")
+                .arg("build/anemone.elf")
+                .echo()
+                .read()?;
+            sh.write_file("build/anemone.disasm", disasm)?;
+        }
         Ok(())
     }
 

@@ -1,10 +1,11 @@
 //! Device module, containing code for initializing and managing devices.
 
-use core::fmt::Debug;
+use core::{any::Any, fmt::Debug};
 
 use crate::{
-    device::{discovery::fwnode::FwNode, kobject::KObject},
+    device::{bus::platform::PlatformDevice, discovery::fwnode::FwNode, kobject::KObject},
     prelude::*,
+    utils::prv_data::PrvData,
 };
 
 pub mod discovery;
@@ -23,14 +24,17 @@ pub use idalloc::{DeviceId, RawDeviceId};
 #[derive(Debug)]
 pub struct DeviceBase {
     id: DeviceId,
-    fwnode: Option<Box<dyn FwNode>>,
+    /// Firmware node associated with this device.
+    ///
+    /// For most virtual or software-emulated devices, this will be `None`.
+    fwnode: Option<Arc<dyn FwNode>>,
     children: RwLock<Vec<Arc<dyn Device>>>,
     driver: RwLock<Option<Arc<dyn Driver>>>,
-    drv_state: RwLock<Option<Box<dyn DriverState>>>,
+    drv_state: RwLock<Option<Box<dyn PrvData>>>,
 }
 
 impl DeviceBase {
-    pub fn new(id: DeviceId, fwnode: Option<Box<dyn FwNode>>) -> Self {
+    pub fn new(id: DeviceId, fwnode: Option<Arc<dyn FwNode>>) -> Self {
         Self {
             id,
             fwnode,
@@ -62,7 +66,7 @@ pub trait Device: DeviceData + DeviceOps {
         *DeviceData::base(self).driver.write_irqsave() = driver;
     }
 
-    fn set_drv_state(&self, state: Option<Box<dyn DriverState>>) {
+    fn set_drv_state(&self, state: Option<Box<dyn PrvData>>) {
         *DeviceData::base(self).drv_state.write_irqsave() = state;
     }
 
@@ -89,7 +93,7 @@ pub trait Device: DeviceData + DeviceOps {
 impl dyn Device {
     pub fn with_drv_state<F, R>(&self, f: F) -> Option<R>
     where
-        F: FnOnce(&dyn DriverState) -> R,
+        F: FnOnce(&dyn PrvData) -> R,
     {
         DeviceData::base(self)
             .drv_state
@@ -100,7 +104,7 @@ impl dyn Device {
 
     pub fn with_drv_state_mut<F, R>(&self, f: F) -> Option<R>
     where
-        F: FnOnce(&mut dyn DriverState) -> R,
+        F: FnOnce(&mut dyn PrvData) -> R,
     {
         DeviceData::base(self)
             .drv_state
@@ -117,11 +121,17 @@ impl dyn Device {
             f(child);
         }
     }
+
+    pub fn as_platform_device(&self) -> Option<&PlatformDevice> {
+        (self as &dyn Any).downcast_ref::<PlatformDevice>()
+    }
 }
 
 impl Debug for dyn Device {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let base = DeviceData::base(self);
-        Debug::fmt(base, f)
+        f.debug_struct("dyn Device")
+            .field("name", &self.name())
+            .field("id", &self.id())
+            .finish()
     }
 }

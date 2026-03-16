@@ -31,3 +31,8 @@ gdb-client:
         -ex "target remote :1234" \
         -ex "file build/anemone.elf" \
         -ex "set architecture riscv:rv64"
+
+lldb-client:
+    lldb \
+        -o "file build/anemone.elf" \
+        -o "gdb-remote 1234"

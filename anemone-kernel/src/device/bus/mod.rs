@@ -36,16 +36,20 @@ pub trait BusType: KObject {
         for driver in BusType::base(self).drivers.read_irqsave().iter() {
             if self.matches(device.as_ref(), driver.as_ref()) {
                 // TODO: probe defer
-                driver.attach_device(device.clone());
-                device.set_driver(Some(driver.clone()));
-                driver.probe(device.clone()).unwrap_or_else(|e| {
-                    kerrln!(
-                        "failed to probe device {} with driver {}: {:?}",
-                        device.name(),
-                        driver.name(),
-                        e
-                    );
-                });
+                match driver.probe(device.clone()) {
+                    Ok(()) => {
+                        driver.attach_device(device.clone());
+                        device.set_driver(Some(driver.clone()));
+                    },
+                    Err(e) => {
+                        kerrln!(
+                            "failed to probe device {} with driver {}: {:?}",
+                            device.name(),
+                            driver.name(),
+                            e
+                        );
+                    },
+                }
                 break;
             }
         }
@@ -57,19 +61,27 @@ pub trait BusType: KObject {
 
     fn register_driver(&mut self, driver: Arc<dyn Driver>) {
         for device in BusType::base(self).devices.read_irqsave().iter() {
+            if device.driver().is_some() {
+                continue;
+            }
+
             if self.matches(device.as_ref(), driver.as_ref()) {
                 // TODO: probe defer
-                driver.attach_device(device.clone());
-                device.set_driver(Some(driver.clone()));
-                driver.probe(device.clone()).unwrap_or_else(|e| {
-                    kerrln!(
-                        "failed to probe device {} with driver {}: {:?}",
-                        device.name(),
-                        driver.name(),
-                        e
-                    );
-                    // TODO: reclaim resources and cleanup state
-                });
+                match driver.probe(device.clone()) {
+                    Ok(()) => {
+                        driver.attach_device(device.clone());
+                        device.set_driver(Some(driver.clone()));
+                    },
+                    Err(e) => {
+                        kerrln!(
+                            "failed to probe device {} with driver {}: {:?}",
+                            device.name(),
+                            driver.name(),
+                            e
+                        );
+                        // TODO: reclaim resources and cleanup state
+                    },
+                }
                 break;
             }
         }
@@ -78,7 +90,6 @@ pub trait BusType: KObject {
             .write_irqsave()
             .add_kobject(driver);
     }
-    // currently we don't support detaching.
 }
 
 impl dyn BusType {
@@ -103,8 +114,9 @@ impl dyn BusType {
 
 impl Debug for dyn BusType {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let base = BusType::base(self);
-        Debug::fmt(base, f)
+        f.debug_struct("dyn BusType")
+            .field("name", &self.name())
+            .finish()
     }
 }
 

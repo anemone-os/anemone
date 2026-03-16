@@ -4,6 +4,7 @@ mod dd;
 mod initcall;
 mod kunit;
 mod percpu;
+mod prv_data;
 
 /// Defines a per-CPU variable.
 ///
@@ -60,9 +61,8 @@ pub fn driver_impl(input: TokenStream) -> TokenStream {
     dd::driver_impl(input)
 }
 
-/// Derives the `DriverState` trait for a struct, which allows it to be used as
-/// the state of a device driver.
-#[proc_macro_derive(DriverState)]
-pub fn drv_state_derive(input: TokenStream) -> TokenStream {
-    dd::drv_state_impl(input)
+/// Derives the `PrvData` trait for a struct.
+#[proc_macro_derive(PrvData)]
+pub fn prv_data_derive(input: TokenStream) -> TokenStream {
+    prv_data::prv_data_impl(input)
 }

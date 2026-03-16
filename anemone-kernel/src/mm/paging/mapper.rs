@@ -51,10 +51,32 @@ pub struct Mapper<'a> {
     _lifetime: PhantomData<&'a mut PageTable>,
 }
 
-type PgDir = <PagingArch as PagingArchTrait>::PgDir;
-type Pte = <PgDir as PgDirArch>::Pte;
-
 impl Mapper<'_> {
+    fn canonicalize_vpn(vpn: u64) -> VirtPageNum {
+        let vpn_bits = PagingArch::PAGE_LEVELS * PagingArch::PGDIR_IDX_BITS;
+        let effective_vpn_bits = u64::BITS as usize - PagingArch::PAGE_SIZE_BITS;
+
+        let low_mask = if vpn_bits == u64::BITS as usize {
+            !0u64
+        } else {
+            (1u64 << vpn_bits) - 1
+        };
+        let mut value = vpn & low_mask;
+
+        let sign_bit = 1u64 << (vpn_bits - 1);
+        if value & sign_bit != 0 {
+            let effective_mask = if effective_vpn_bits == u64::BITS as usize {
+                !0u64
+            } else {
+                (1u64 << effective_vpn_bits) - 1
+            };
+            let sign_extend_mask = effective_mask & !low_mask;
+            value |= sign_extend_mask;
+        }
+
+        VirtPageNum::new(value)
+    }
+
     pub(super) fn new(pgtbl: &mut PageTable) -> Self {
         Self {
             root: pgtbl.root_ppn(),
@@ -480,7 +502,7 @@ impl Mapper<'_> {
             } else {
                 assert!(pte.is_leaf());
                 let ctx = LeafCtx {
-                    vpn: VirtPageNum::new(vpn_prefix),
+                    vpn: Self::canonicalize_vpn(vpn_prefix),
                     level,
                 };
                 match leaf_op(pte, ctx) {

@@ -13,7 +13,7 @@ static SYS_CONSOLE: Lazy<SysConsole> = Lazy::new(|| SysConsole::new());
 static KERNEL_LOG: KernelLog = KernelLog::new();
 
 /// Registers a console to receive log output with the specified flags.
-pub fn register_console(console: Arc<dyn Console>, flags: ConsoleFlags) {
+pub fn register_console(console: Box<dyn Console>, flags: ConsoleFlags) {
     if flags.contains(ConsoleFlags::REPLAY) {
         let it = KERNEL_LOG.iter_weak();
         for record in it {
@@ -26,6 +26,25 @@ pub fn register_console(console: Arc<dyn Console>, flags: ConsoleFlags) {
     SYS_CONSOLE.register_console(console, flags);
 }
 
+/// If there are any non-early consoles registered but none of them is enabled,
+/// enable the first one. If there are only early consoles registered, keep them
+/// as is and print a warning message, as this might indicate a problem with the
+/// console registration order.
+///
+/// # Safety
+///
+/// Timing.
+pub unsafe fn on_system_boot() {
+    unsafe {
+        let has_normal_con = SYS_CONSOLE.on_system_boot();
+        if !has_normal_con {
+            kwarningln!("no normal console registered, only early consoles are available");
+        } else {
+            kinfoln!("normal console(s) registered, early consoles have been unregistered");
+        }
+    }
+}
+
 mod klog {
     use core::fmt::{Arguments, Write};
 
@@ -33,33 +52,79 @@ mod klog {
 
     use super::*;
 
-    pub fn __klog(level: Option<LogLevel>, leveled_msg: Arguments) {
-        let mut record = LogRecord::empty();
-        let mut writer = BufferWriter::<{ OverflowBehavior::TRUNCATE }>::new(&mut record.msg);
-        let _ = writer.write_fmt(leveled_msg);
-        record.len = writer.pos();
-        record.level = level;
+    /// Internal function to log a message.
+    ///
+    /// If `level` is `Some`, the message will be logged with the specified log
+    /// level.
+    ///
+    /// If `noprint` is `true`, the message will not be printed to the console,
+    /// but will still be stored in the kernel log buffer if `level` is `Some`.
+    pub fn __klog(level: Option<LogLevel>, msg: Arguments, noprint: bool) {
+        match level {
+            Some(level) => {
+                let mut record = LogRecord::empty(level);
+                let mut writer =
+                    BufferWriter::<{ OverflowBehavior::TRUNCATE }>::new(&mut record.msg);
+                let _ = writer.write_fmt(msg);
+                record.len = writer.pos();
 
-        let full_msg_str =
-            core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
-        SYS_CONSOLE.output(full_msg_str);
-        KERNEL_LOG.append(record);
+                let full_msg_str =
+                    core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
+
+                if !noprint {
+                    SYS_CONSOLE.output(full_msg_str);
+                }
+
+                KERNEL_LOG.append(record);
+            },
+            None => {
+                if noprint {
+                    return;
+                }
+
+                let mut record = LogRecord::empty(LogLevel::Debug);
+                let mut writer =
+                    BufferWriter::<{ OverflowBehavior::TRUNCATE }>::new(&mut record.msg);
+                let _ = writer.write_fmt(msg);
+                record.len = writer.pos();
+
+                let full_msg_str =
+                    core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
+
+                SYS_CONSOLE.output(full_msg_str);
+            },
+        }
     }
 
     #[macro_export]
     macro_rules! kprint {
+        (noprint, $level:ident, $($arg:tt)*) => {
+            $crate::debug::printk::__klog(
+                Some($crate::debug::printk::LogLevel::$level),
+                format_args!(
+                    "[{:>7}] {}",
+                    $crate::debug::printk::LogLevel::$level.as_painted(),
+                    format_args!($($arg)*),
+                ),
+                true,
+            );
+        };
         ($level:ident, $($arg:tt)*) => {
             $crate::debug::printk::__klog(
                 Some($crate::debug::printk::LogLevel::$level),
                 format_args!(
                     "[{:>7}] {}",
                     $crate::debug::printk::LogLevel::$level.as_painted(),
-                    format_args!($($arg)*)
-                )
+                    format_args!($($arg)*),
+                ),
+                false,
             );
         };
+        (noprint, $($arg:tt)*) => {
+            $crate::debug::printk::__klog(None, format_args!($($arg)*), true);
+        };
         ($($arg:tt)*) => {
-            $crate::debug::printk::__klog(None, format_args!($($arg)*));
+            $crate::debug::printk::__klog(None, format_args!($($arg)*), false);
         };
     }
 
@@ -68,8 +133,17 @@ mod klog {
         () => {
             $crate::kprint!("\n");
         };
+        (noprint) => {
+            $crate::kprint!(noprint, "\n");
+        };
+        (noprint, $level:ident, $($arg:tt)*) => {
+            $crate::kprint!(noprint, $level, "{}\n", format_args!($($arg)*));
+        };
         ($level:ident, $($arg:tt)*) => {
             $crate::kprint!($level, "{}\n", format_args!($($arg)*));
+        };
+        (noprint, $($arg:tt)*) => {
+            $crate::kprint!(noprint, "{}\n", format_args!($($arg)*));
         };
         ($($arg:tt)*) => {
             $crate::kprint!("{}\n", format_args!($($arg)*));
@@ -87,6 +161,9 @@ mod klog {
                 $(
                     #[macro_export]
                     macro_rules! [<k $name>] {
+                        (noprint, $dollar($args:tt)*) => {
+                            $crate::kprint!(noprint, $level, $dollar($args)*);
+                        };
                         ($dollar($args:tt)*) => {
                             $crate::kprint!($level, $dollar($args)*);
                         }
@@ -96,6 +173,12 @@ mod klog {
                     macro_rules! [<k $name ln>] {
                         () => {
                             $crate::kprint!($level, "\n");
+                        };
+                        (noprint) => {
+                            $crate::kprint!(noprint, $level, "\n");
+                        };
+                        (noprint, $dollar($args:tt)*) => {
+                            $crate::kprint!(noprint, $level, "{}\n", format_args!($dollar($args)*));
                         };
                         ($dollar($args:tt)*) => {
                             $crate::kprint!($level, "{}\n", format_args!($dollar($args)*));

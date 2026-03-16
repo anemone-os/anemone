@@ -1,4 +1,4 @@
-use crate::{device::discovery::open_firmware::early_scan_cpu_count, prelude::*};
+use crate::prelude::*;
 
 pub struct RiscV64CpuArch;
 
