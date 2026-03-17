@@ -52,6 +52,7 @@ pub fn send_ipi(cpu_id: usize, payload: IpiPayload) {
             queue.push_back(msg_ptr);
         })
     }
+    kdebugln!("114514");
     IntrArch::send_ipi(cpu_id);
     loop {
         if msg.is_accomplished.load(Ordering::Acquire) {
@@ -134,6 +135,7 @@ pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), AsyncIpi
         })
     }
 
+    kdebugln!("1919810");
     IntrArch::send_ipi(cpu_id);
     Ok(())
 }

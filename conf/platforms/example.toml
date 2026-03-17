@@ -47,7 +47,7 @@ cpu = "rv64"
 smp = 4
 # Amount of memory
 memory = "512M"
-# Platform firmware to use
+# Platform firmware to use, optional
 bios = "default"
 # Additional QEMU arguments
 args = [

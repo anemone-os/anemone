@@ -207,6 +207,7 @@ mod driver_core {
     }
 }
 use driver_core::*;
+pub use driver_core::Ns16550ARegisters;
 
 #[derive(Debug, KObject, Driver)]
 struct Ns16550ADriver {

@@ -33,8 +33,6 @@ pub fn run(args: QemuArgs) -> anyhow::Result<()> {
             .arg(qemu.smp.to_string())
             .arg("-m")
             .arg(&qemu.memory)
-            .arg("-bios")
-            .arg(&qemu.bios)
             .arg("-kernel")
             .arg(&args.image)
             .args(
@@ -43,6 +41,9 @@ pub fn run(args: QemuArgs) -> anyhow::Result<()> {
                     .map(|args| args.as_slice())
                     .unwrap_or(&[]),
             );
+        if let Some(bios) = &qemu.bios {
+            cmd.arg("-bios").arg(bios);
+        }
         cmd_echo(&cmd);
         match cmd.status() {
             Ok(status) => {

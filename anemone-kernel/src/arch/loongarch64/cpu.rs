@@ -27,7 +27,7 @@ impl CpuArchTrait for La64CpuArch {
     fn percpu_base() -> usize {
         let base: usize;
         unsafe {
-            core::arch::asm!("mv {}, tp", out(reg) base);
+            core::arch::asm!("move {}, $tp", out(reg) base);
         }
         base
     }

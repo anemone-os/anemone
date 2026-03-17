@@ -136,6 +136,26 @@ bitflags! {
     }
 }
 
+impl PteFlags {
+    pub fn is_valid(&self) -> bool {
+        self.contains(PteFlags::VALID)
+    }
+    /// **Ignoring the VALID bit, this function checks if the flags indicate a
+    /// directory entry.**
+    pub fn is_branch(&self) -> bool {
+        !self.contains(PteFlags::READ)
+            && !self.contains(PteFlags::WRITE)
+            && !self.contains(PteFlags::EXECUTE)
+    }
+    /// **Ignoring the VALID bit, this function checks if the flags indicate a
+    /// leaf entry.**
+    pub fn is_leaf(&self) -> bool {
+        (self.contains(PteFlags::READ)
+            || self.contains(PteFlags::WRITE)
+            || self.contains(PteFlags::EXECUTE))
+    }
+}
+
 pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
     /// A zeroed page table entry, i.e., an invalid entry with no flags set.
     const ZEROED: Self;
@@ -153,7 +173,7 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
     ///
     /// If the entry is a branch entry, some flags like [PteFlags::USER],
     /// [PteFlags::NONCACHE] and [PteFlags::STRONG] (if available) are ignored.
-    fn new(ppn: PhysPageNum, flags: PteFlags) -> Self;
+    fn new(ppn: PhysPageNum, flags: PteFlags, level: usize) -> Self;
 
     /// Check if this page table entry is empty, i.e., it is equal to ZEROED.
     fn is_empty(&self) -> bool;

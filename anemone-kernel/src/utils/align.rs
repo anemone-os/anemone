@@ -149,6 +149,7 @@ mod bytes {
     def_phantom_aligned!(32);
     def_phantom_aligned!(64);
     def_phantom_aligned!(4096);
+    def_phantom_aligned!(16384);
 }
 /// Re-export alignment helpers and marker types.
 pub use bytes::*;

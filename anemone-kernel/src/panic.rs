@@ -9,7 +9,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     if broadcast_ipi_async(IpiPayload::StopExecution).is_err() {
         kemergln!("failed to broadcast stop execution IPI to other cores during panic");
     }
-
     unsafe {
         power_off();
     }

@@ -32,12 +32,15 @@ pub enum ExecEnv {
 pub enum TargetTriple {
     #[serde(rename = "riscv64-unknown-anemone-elf")]
     RiscV64UnknownAnemoneElf,
+    #[serde(rename = "loongarch64-unknown-anemone-elf")]
+    LoongArch64UnknownAnemoneElf,
 }
 
 impl TargetTriple {
     pub fn as_str(&self) -> &'static str {
         match self {
             TargetTriple::RiscV64UnknownAnemoneElf => "riscv64-unknown-anemone-elf",
+            TargetTriple::LoongArch64UnknownAnemoneElf => "loongarch64-unknown-anemone-elf",
         }
     }
 }
@@ -68,7 +71,7 @@ pub struct Qemu {
     pub cpu: String,
     pub smp: u64,
     pub memory: String,
-    pub bios: String,
+    pub bios: Option<String>,
     pub args: Option<Vec<String>>,
 }
 
