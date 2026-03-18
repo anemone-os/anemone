@@ -5,14 +5,14 @@ use alloc::boxed::Box;
 use la_insc::{
     impl_bits64,
     insc::{InvtlbType, invtlb},
-    reg::{asid, csr::tlbrsave},
+    reg::{asid, csr::pgdl},
     utils::{mem::MemAccessType, privl::PrivilegeLevel},
 };
 
 pub struct LA64PagingArch;
 impl LA64PagingArch {
     unsafe fn get_activated_root_dir() -> &'static LA64PageDirectory {
-        let addr = PhysAddr::new(unsafe { tlbrsave::csr_read() }).to_hhdm();
+        let addr = PhysAddr::new(unsafe { pgdl::csr_read() }).to_hhdm();
         unsafe { &*addr.as_ptr::<LA64PageDirectory>() }
     }
 }
@@ -30,15 +30,8 @@ impl PagingArchTrait for LA64PagingArch {
 
     unsafe fn activate_addr_space(pgtbl: &PageTable) {
         unsafe {
-            tlbrsave::csr_write(pgtbl.root_ppn().get());
+            pgdl::csr_write(pgtbl.root_ppn().get());
         }
-    }
-
-    fn prealloc_pgdirs_for_region(
-        pgtbl: &mut crate::prelude::PageTable,
-        range: crate::prelude::VirtPageRange,
-    ) {
-        todo!()
     }
 
     fn tlb_shootdown(vaddr: VirtAddr) {
@@ -54,6 +47,10 @@ impl PagingArchTrait for LA64PagingArch {
         unsafe {
             invtlb(InvtlbType::NonGlobal);
         }
+    }
+
+    fn setup_direct_mapping_region(pgtable: &mut PageTable) {
+        // do nothing
     }
 }
 
@@ -305,12 +302,15 @@ bitflags! {
     pub struct LA64PteFlags : u64{
         const VALID = 1 << 0;
         const DIRTY = 1 << 1;
-        const LEAF_GLOBAL = 1 << 6;
-        const BRANCH_HUGE = 1 << 6;
         const P_EXIST = 1 << 7;
         const WRITE = 1 << 8;
 
         const IN_LEAF_TABLE = 1 << 9;
+        const GLOBAL = 1 << 10;
+
+        const LA_COMMON_GLOBAL = 1<<6;
+        const LA_HUGE = 1<<6;
+        const LA_HUGE_GLOBAL = 1 << 12;
 
         /// Not Readable
         const NREAD = 1 << (u64::BITS - 3);
@@ -327,11 +327,18 @@ bitflags! {
             | Self::WRITE.bits()
             | Self::DIRTY.bits()
             | Self::P_EXIST.bits()
-            | Self::BRANCH_HUGE.bits();
+            | Self::LA_HUGE.bits();
     }
 }
 
 impl LA64PteFlags {
+    // leaf entry:
+    //      global -> LA_COMMON_GLOBAL
+    // non-leaf entry:
+    //   huge + global -> LA_HUGE + LA_HUGE_GLOBAL
+    //   non-huge + global -> none
+    //   huge + non-global -> LA_HUGE
+
     /// Convert generic PteFlags to LA64PteFlags.
     ///
     /// Only [PteFlags::VALID], [PteFlags::READ], [PteFlags::WRITE] and
@@ -360,12 +367,19 @@ impl LA64PteFlags {
         if !value.contains(PteFlags::EXECUTE) {
             flags |= LA64PteFlags::NEXEC;
         }
-
-        if !in_leaf_table && value.is_leaf() {
-            flags |= LA64PteFlags::BRANCH_HUGE;
-        } else if in_leaf_table {
-            debug_assert!(value.is_leaf());
+        if value.contains(PteFlags::GLOBAL) {
+            flags |= LA64PteFlags::GLOBAL;
+        }
+        if in_leaf_table {
             flags |= LA64PteFlags::IN_LEAF_TABLE;
+            if value.contains(PteFlags::GLOBAL) {
+                flags |= LA64PteFlags::LA_COMMON_GLOBAL;
+            }
+        } else if value.is_leaf() {
+            flags |= LA64PteFlags::LA_HUGE;
+            if value.contains(PteFlags::GLOBAL) {
+                flags |= LA64PteFlags::LA_HUGE_GLOBAL;
+            }
         }
 
         flags
@@ -384,16 +398,8 @@ impl LA64PteFlags {
         if !self.contains(LA64PteFlags::NEXEC) {
             flags |= PteFlags::EXECUTE;
         }
-        #[cfg(debug_assertions)]
-        {
-            if self.contains(LA64PteFlags::BRANCH_HUGE) {
-                debug_assert!(!self.contains(LA64PteFlags::IN_LEAF_TABLE));
-                debug_assert!(flags.is_leaf());
-            }
-            if self.contains(LA64PteFlags::IN_LEAF_TABLE) {
-                debug_assert!(!self.contains(LA64PteFlags::BRANCH_HUGE));
-                debug_assert!(flags.is_leaf());
-            }
+        if self.contains(LA64PteFlags::GLOBAL){
+            flags |= PteFlags::GLOBAL;
         }
         flags
     }

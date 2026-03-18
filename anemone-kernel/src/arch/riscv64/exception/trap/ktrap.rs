@@ -127,7 +127,7 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
     if scause.is_interrupt() {
         let reason = RiscV64Interrupt::try_from(code)
             .unwrap_or_else(|_| panic!("unknown interrupt with code {}", code));
-        kdebugln!("received interrupt: {:?}", reason);
+        //kdebugln!("received interrupt: {:?}", reason);
         match reason {
             RiscV64Interrupt::SupervisorSoftware => {
                 handle_ipi();

@@ -67,85 +67,44 @@ impl KPTable {
                 }
             }};
         }
-        map_elf_segment!(text, PteFlags::READ | PteFlags::EXECUTE);
-        map_elf_segment!(rodata, PteFlags::READ);
-        map_elf_segment!(data, PteFlags::READ | PteFlags::WRITE);
-        map_elf_segment!(bss, PteFlags::READ | PteFlags::WRITE);
+        map_elf_segment!(text, PteFlags::READ | PteFlags::EXECUTE | PteFlags::GLOBAL);
+        map_elf_segment!(rodata, PteFlags::READ | PteFlags::GLOBAL);
+        map_elf_segment!(data, PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL);
+        map_elf_segment!(bss, PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL);
     }
 
-    unsafe fn map_hhdm(&self) {
-        let mut kptable = self.ptable.lock_irqsave();
-        let mut mapper = kptable.mapper();
-
+    fn prealloc_rest_pgdirs(&self) {
+        let kptable = self.ptable.lock_irqsave();
+        let pdir = unsafe {
+            kptable
+                .root_ppn()
+                .to_hhdm()
+                .to_virt_addr()
+                .as_ptr_mut::<PgDir>()
+                .as_mut()
+                .expect("root ppn should not be null")
+        };
+        let mut allocated = 0;
+        for index in (KernelLayout::USPACE_TOP_VPN.get()
+            >> (PagingArch::PGDIR_IDX_BITS * (PagingArch::PAGE_LEVELS - 1)))
+            as usize..PagingArch::PTE_PER_PGDIR
         {
-            sys_mem_zones().with_avail_zones(|avail_mem_zones| {
-            for zone in avail_mem_zones.iter() {
-                let range = zone.range();
-
-                unsafe {
-                    mapper
-                        .map_overwrite(Mapping {
-                            vpn: range.start().to_hhdm(),
-                            ppn: range.start(),
-                            flags: PteFlags::READ | PteFlags::WRITE,
-                            npages: range.npages() as usize,
-                            huge_pages: true,
-                        })
-                        .expect("failed to map direct mapping region");
-                }
-                kdebugln!(
-                    "mapped direct mapping region:\n\tvirtual page number {} ~ {},\n\tphysical page number {} ~ {},\n\tflags = {:?}",
-                    range.start().to_hhdm(),
-                    range.end().to_hhdm(),
-                    range.start(),
-                    range.end(),
-                    PteFlags::READ | PteFlags::WRITE,
+            if pdir[index].is_empty() {
+                let ppn = alloc_frame_zeroed()
+                    .expect("failed to preallocate frames for kernel space page table.")
+                    .leak();
+                pdir[index] = Pte::new(
+                    ppn,
+                    PteFlags::VALID | PteFlags::GLOBAL,
+                    PagingArch::PAGE_LEVELS - 1,
                 );
             }
-        });
+            else{
+                kinfoln!("pgdir for kernel space index {} already allocated, skipping preallocation", index);
+            }
+            allocated += 1;
         }
-
-        // reserved memory regions
-        {
-            sys_mem_zones().with_rsv_zones(|rsv_mem_zones| {
-                for zone in rsv_mem_zones.iter() {
-                    if zone.flags().is_mappable() {
-                        let range = zone.range();
-
-                    unsafe {
-                        mapper
-                            .map_overwrite(Mapping {
-                                vpn: range.start().to_hhdm(),
-                                ppn: range.start(),
-                                // TODO: for kvirt region, we may want to map with more fine-grained
-                                // permissions.
-                                flags: PteFlags::READ | PteFlags::WRITE,
-                                npages: range.npages() as usize,
-                                huge_pages: true,
-                            }).expect("failed to map reserved memory region");
-                    }
-                    kdebugln!(
-                        "mapped reserved memory region to hhdm:\n\tvirtual page number {} ~ {},\n\tphysical page number {} ~ {},\n\tflags = {:?}",
-                        range.start().to_hhdm(),
-                        range.end().to_hhdm(),
-                        range.start(),
-                        range.end(),
-                        zone.flags(),
-                    );
-                }
-            }});
-        }
-    }
-
-    unsafe fn init_virtual_ranges(&self) {
-        let mut kpgdir = self.ptable.lock_irqsave();
-
-        kinfoln!(
-            "preallocate pgdirs for remap region: [{:#x}, {:#x})",
-            KernelLayout::REMAP_REGION.start().get(),
-            KernelLayout::REMAP_REGION.end().get()
-        );
-        PagingArch::prealloc_pgdirs_for_region(&mut kpgdir, KernelLayout::REMAP_REGION);
+        kinfoln!("preallocated {} pgdirs for kernel space", allocated);
     }
 
     unsafe fn kmap(&self, mapping: Mapping) -> Result<(), MmError> {
@@ -183,10 +142,10 @@ pub fn init_kernel_mapping() {
     unsafe {
         kdebugln!("mapping kernel image segments...");
         KERNEL_PTABLE.map_kvirt();
-        kdebugln!("mapping direct mapping region...");
-        KERNEL_PTABLE.map_hhdm();
-        kdebugln!("preallocating pgdirs for remap and vmalloc region...");
-        KERNEL_PTABLE.init_virtual_ranges();
+        kdebugln!("setting up direct mapping region...");
+        PagingArch::setup_direct_mapping_region(&mut KERNEL_PTABLE.ptable.lock_irqsave());
+        kdebugln!("preallocating pgdirs for the rest of kernel space regions...");
+        KERNEL_PTABLE.prealloc_rest_pgdirs();
     }
 }
 

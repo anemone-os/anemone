@@ -75,21 +75,10 @@ pub trait PagingArchTrait: Sized {
     /// This function should always do a TLB shootdown.
     unsafe fn activate_addr_space(pgtbl: &PageTable);
 
-    /// Preallocate page directories for the given virtual address range.
+    /// Set up the direct mapping region.
     ///
-    /// This function is currently used for vmalloc, fixmap, vmemmap and other
-    /// similar virtual memory regions.
-    ///
-    /// **The range is guaranteed to be aligned to GB.**
-    ///
-    /// This function is expected to panic immediately on failure, since kernel
-    /// cannot function properly without the necessary page directories
-    /// for those regions.
-    ///
-    /// TODO: This is a temporary workaround for the lack of sufficiently
-    /// flexible page table management and support for huge page mapping. We
-    /// should eventually implement those features and remove this function.
-    fn prealloc_pgdirs_for_region(pgtbl: &mut PageTable, range: VirtPageRange);
+    /// This function is called during kernel page table initialization.
+    fn setup_direct_mapping_region(pgtable: &mut PageTable);
 
     /// Perform a TLB shootdown for the given virtual address in all virtual
     /// address spaces on current core.
@@ -119,6 +108,13 @@ bitflags! {
         const WRITE = 1 << 2;
         const EXECUTE = 1 << 3;
         const USER = 1 << 4;
+
+        /// Indicates whether this page is global and shared by multiple address spaces.
+        /// An entry marked as global should not be unmapped
+        ///     or have its content changed in one address space,
+        ///     since it may affect other address spaces that share
+        ///     the same global page.
+        const GLOBAL = 1 << 5;
 
         /// Indicates whether memory accesses is cacheable.
         ///
@@ -165,14 +161,16 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
     /// ## Implementation
     ///
     /// * If flags contain [PteFlags::READ], [PteFlags::WRITE] or
-    ///   [PteFlags::EXECUTE],
-    /// this entry is a leaf entry that points to a physical page.
+    ///   [PteFlags::EXECUTE], this entry is a leaf entry that points to a
+    ///   physical page.
     ///
     /// * Otherwise, this entry is a branch entry that points to a page
     ///   directory.
     ///
     /// If the entry is a branch entry, some flags like [PteFlags::USER],
-    /// [PteFlags::NONCACHE] and [PteFlags::STRONG] (if available) are ignored.
+    ///     [PteFlags::NONCACHE] and [PteFlags::STRONG] (if available) are
+    /// ignored.     **However, [PteFlags::GLOBAL] is still meaningful for
+    /// branch entries, and should be kept if set.**
     fn new(ppn: PhysPageNum, flags: PteFlags, level: usize) -> Self;
 
     /// Check if this page table entry is empty, i.e., it is equal to ZEROED.
@@ -197,6 +195,11 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
     /// page directory rather than a physical page.
     fn is_branch(&self) -> bool {
         self.is_valid() && !self.is_leaf()
+    }
+
+    /// Check if this page table entry is a global page.
+    fn is_global(&self) -> bool {
+        self.flags().contains(PteFlags::GLOBAL)
     }
 
     /// Set the flags of this page table entry to the given flags, while keeping
