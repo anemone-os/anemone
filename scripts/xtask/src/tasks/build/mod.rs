@@ -7,8 +7,10 @@ use clap::Args;
 use xshell::Shell;
 
 use crate::{
-    config::{kconfig::Profile, KConfig, PlatformConfig},
-    log_progress, warn,
+    config::{KConfig, PlatformConfig, kconfig::Profile, platform::DtbType},
+    log_progress,
+    tasks::{qemu::gen_qemu_cmd, utils::cmd_echo},
+    warn,
     workspace::*,
 };
 
@@ -83,6 +85,43 @@ impl<'a> BuildContext<'a> {
 
         self.gen_rust_defs()?;
         self.gen_kernel_lds()?;
+
+        if let Some(dtb) = &self.platform.dtb {
+            match dtb.typ {
+                DtbType::Qemu => {
+                    log_progress!("DTB", "Generating DTB from qemu");
+                    if let Some(qemu) = &self.platform.qemu {
+                        let mut cmd = gen_qemu_cmd(qemu, None);
+                        cmd.arg("-machine")
+                            .arg(String::from("dumpdtb=anemone-kernel/src/") + dtb.path.as_str());
+                        cmd_echo(&cmd);
+                        match cmd.status() {
+                            Ok(status) => {
+                                if !status.success() {
+                                    log_progress!("ERROR", "Failed to generate DTB from QEMU");
+                                    anyhow::bail!("Failed to generate DTB from QEMU, qemu exited with status: {}", status);
+                                }
+                            },
+                            Err(e) => {
+                                log_progress!("ERROR", &format!("Failed to generate DTB from QEMU: {}", e));
+                                anyhow::bail!("Failed to generate DTB from QEMU: {}", e);
+                            }
+                        }
+                    } else {
+                        log_progress!(
+                            "ERROR",
+                            "QEMU configuration is required to generate DTB from QEMU"
+                        );
+                        return anyhow::bail!(
+                            "QEMU configuration is required to generate DTB from QEMU"
+                        );
+                    }
+                },
+                DtbType::File => {
+                    todo!();
+                },
+            }
+        }
 
         Ok(())
     }

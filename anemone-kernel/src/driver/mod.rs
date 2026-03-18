@@ -21,6 +21,7 @@ pub mod intc;
 mod clock_source;
 mod power;
 mod serial;
+pub use serial::ns16550a::Ns16550ARegisters;
 
 #[derive(Debug)]
 pub struct DriverBase {

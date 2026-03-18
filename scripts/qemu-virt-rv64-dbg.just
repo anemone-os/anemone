@@ -9,7 +9,7 @@ run:
     qemu-system-riscv64 \
         -machine virt \
         -nographic \
-        -m 256M \
+        -m 1G \
         -smp 4 \
         -bios default \
         -kernel build/anemone.elf \
@@ -19,7 +19,7 @@ qemu-server:
     qemu-system-riscv64 \
         -machine virt \
         -nographic \
-        -m 256M \
+        -m 1G \
         -smp 4 \
         -bios default \
         -kernel build/anemone.elf \

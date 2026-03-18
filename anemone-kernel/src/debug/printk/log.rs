@@ -83,7 +83,8 @@ impl KernelLog {
 
     /// Appends a log record to the kernel log buffer.
     pub fn append(&self, record: LogRecord) {
-        self.buffer.lock_irqsave().push(record);
+        let mut buffer = self.buffer.lock_irqsave();
+        buffer.push(record);
     }
 
     /// Get an weak iterator of the current log records in the kernel log

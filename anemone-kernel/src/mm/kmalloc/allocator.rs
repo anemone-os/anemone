@@ -121,10 +121,15 @@ unsafe impl GlobalAlloc for KernelAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         let mut talc = self.talc.lock_irqsave();
         match unsafe { talc.malloc(layout) } {
-            Ok(ptr) => ptr.as_ptr(),
+            Ok(ptr) => {
+                let res = ptr.as_ptr();
+                res
+            },
             // No need to handle OOM here since the OOM handler will be invoked by `malloc` when
             // allocation fails. We can simply return null pointer to indicate allocation failure.
-            Err(()) => core::ptr::null_mut(),
+            Err(()) => {
+                core::ptr::null_mut()
+            },
         }
     }
 

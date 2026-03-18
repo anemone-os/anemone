@@ -79,6 +79,7 @@ impl From<PteFlags> for RiscV64PteFlags {
         if flags.contains(PteFlags::USER) {
             result |= RiscV64PteFlags::USER;
         }
+        // Ignore CACHED and STRONG bits.
         result
     }
 }
@@ -114,7 +115,7 @@ impl RiscV64Pte {
 impl PteArch for RiscV64Pte {
     const ZEROED: Self = RiscV64Pte(0);
 
-    fn new(ppn: PhysPageNum, flags: PteFlags) -> Self {
+    fn new(ppn: PhysPageNum, flags: PteFlags, _level: usize) -> Self {
         let flags: RiscV64PteFlags = flags.into();
         Self::arch_new(ppn, flags)
     }

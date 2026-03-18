@@ -67,7 +67,6 @@ mod klog {
                     BufferWriter::<{ OverflowBehavior::TRUNCATE }>::new(&mut record.msg);
                 let _ = writer.write_fmt(msg);
                 record.len = writer.pos();
-
                 let full_msg_str =
                     core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
 

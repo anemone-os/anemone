@@ -26,7 +26,7 @@ macro_rules! arch_select {
 }
 
 arch_select!(riscv64, "riscv64");
-
+arch_select!(loongarch64, "loongarch64");
 // re-export sub types for convenience.
 pub type PgDir = <PagingArch as PagingArchTrait>::PgDir;
 pub type Pte = <<PagingArch as PagingArchTrait>::PgDir as PgDirArch>::Pte;

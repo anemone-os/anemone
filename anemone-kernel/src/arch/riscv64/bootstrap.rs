@@ -7,14 +7,14 @@ use crate::{
         riscv64::{
             exception::{enable_local_irq, install_ktrap_handler},
             machine::machine_init,
-            mm::{sv39, RiscV64PgDir, RiscV64Pte, RiscV64PteFlags},
+            mm::{RiscV64PgDir, RiscV64Pte, RiscV64PteFlags, sv39},
         },
     },
-    debug::printk::{register_console, Console, ConsoleFlags},
+    debug::printk::{Console, ConsoleFlags, register_console},
     device::discovery::open_firmware::{
-        early_scan_clock_freq, early_scan_cpu_count, early_scan_fdt_size, get_of_node,
-        of_platform_discovery, of_with_node_by_full_name_path, of_with_root, unflatten_device_tree,
-        EarlyMemoryScanner,
+        EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count, early_scan_fdt_size,
+        get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
+        unflatten_device_tree,
     },
     mm::layout::KernelLayoutTrait,
     prelude::*,
@@ -272,9 +272,13 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         // needed by percpu initialization.
         let ncpus = early_scan_cpu_count(fdt_va);
         super::cpu::set_ncpus(ncpus);
+
         // needed by timer initialization.
-        let freq_hz = early_scan_clock_freq(fdt_va);
-        super::time::set_hw_clock_freq(freq_hz);
+        if let Some(freq_hz) = early_scan_clock_freq(fdt_va) {
+            super::time::set_hw_clock_freq(freq_hz);
+        } else {
+            kwarningln!("failed to scan clock frequency from device tree.");
+        };
 
         let mut scanner = EarlyMemoryScanner::new(fdt_va);
 
@@ -300,6 +304,9 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         mm::frame::pmm_init();
         kinfoln!("physical memory management initialized");
 
+        wake_up_aps(bsp_id);
+        sync_with_counter(&BOOT_SYNC_COUNTER);
+
         mm::kptable::init_kernel_mapping();
         kinfoln!("kernel mapping initialized");
         mm::kptable::activate_kernel_mapping();
@@ -316,53 +323,59 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         enable_local_irq();
         bsp_pre_kernel_main();
 
-        // okay, we can wake up APs now.
-        {
-            for ap_id in 0..CpuArch::ncpus() {
-                if ap_id == bsp_id {
-                    continue;
-                }
-                let sbiret = sbi_rt::hart_start(
-                    ap_id,
-                    VirtAddr::new(__nun as *const () as u64)
-                        .kvirt_to_phys()
-                        .get() as usize,
-                    0,
-                );
-                if sbiret.is_err() {
-                    panic!("failed to start hart {}: {:?}", ap_id, sbiret);
-                }
-            }
-            sync_all_cpus();
-        }
+        sync_with_counter(&INIT_SYNC_COUNTER);
+        sync_with_counter(&FINISH_SYNC_COUNTER);
     }
 
     kernel_main()
 }
 
+unsafe fn wake_up_aps(bsp_id: usize) {
+    unsafe {
+        for ap_id in 0..CpuArch::ncpus() {
+            if ap_id == bsp_id {
+                continue;
+            }
+            kdebugln!("waking up ap {}", ap_id);
+            let sbiret = sbi_rt::hart_start(
+                ap_id,
+                VirtAddr::new(__nun as *const () as u64)
+                    .kvirt_to_phys()
+                    .get() as usize,
+                0,
+            );
+            if sbiret.is_err() {
+                panic!("failed to start hart {}: {:?}", ap_id, sbiret);
+            }
+        }
+    }
+}
+
+static BOOT_SYNC_COUNTER: AtomicUsize = AtomicUsize::new(0);
+static INIT_SYNC_COUNTER: AtomicUsize = AtomicUsize::new(0);
+static FINISH_SYNC_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 /// Synchronize all CPUs to ensure they have all executed the code up to this
 /// point.
-unsafe fn sync_all_cpus() {
-    static SYNC_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
+unsafe fn sync_with_counter(counter: &'static AtomicUsize) {
     let ncpus = CpuArch::ncpus();
-    _ = SYNC_COUNTER.fetch_add(1, Ordering::SeqCst);
-    while SYNC_COUNTER.load(Ordering::SeqCst) < ncpus {
+    _ = counter.fetch_add(1, Ordering::SeqCst);
+    while counter.load(Ordering::SeqCst) < ncpus {
         core::hint::spin_loop();
     }
-
-    // all right, all CPUs have reached this point. We can safely proceed.
 }
 
 unsafe fn ap_entry(ap_id: usize) -> ! {
     unsafe {
         install_ktrap_handler();
+        sync_with_counter(&BOOT_SYNC_COUNTER);
+        kdebugln!("ap {} booting...", ap_id);
         mm::percpu::ap_init(ap_id);
 
-        mm::kptable::activate_kernel_mapping();
-
         // synchronize with BSP
-        sync_all_cpus();
+        sync_with_counter(&INIT_SYNC_COUNTER);
+
+        mm::kptable::activate_kernel_mapping();
 
         enable_local_irq();
         // collect previous IPIs sent by bsp before ap starts to run.
@@ -370,6 +383,7 @@ unsafe fn ap_entry(ap_id: usize) -> ! {
         // IPIs to other APs again.
         riscv::register::sip::set_ssoft();
 
+        sync_with_counter(&FINISH_SYNC_COUNTER);
         kinfoln!("ap {} running...", ap_id);
     }
     kernel_main()

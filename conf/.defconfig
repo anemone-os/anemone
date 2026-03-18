@@ -7,7 +7,7 @@
 platform = "qemu-virt-rv64" # Target platform. The same name as in conf/platforms/*.toml
 profile = "dev" # Build profile: "dev" or "release". We may add more profiles later.
 
-disasm = false # Whether to generate a disassembly file for kernel.
+disasm = true # Whether to generate a disassembly file for kernel.
 
 # Kernel tailoring options
 [features]

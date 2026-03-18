@@ -589,7 +589,7 @@ impl Mapper<'_> {
                 if pte.is_valid() && !overwrite {
                     return Err(MmError::AlreadyMapped);
                 }
-                *pte = Pte::new(ppn, flags | PteFlags::VALID);
+                *pte = Pte::new(ppn, flags | PteFlags::VALID, level);
                 break;
             } else {
                 // branch
@@ -601,7 +601,7 @@ impl Mapper<'_> {
                     // all allocated frames will be deallocated automatically.
                     let new_pgdir_ppn = alloc_frame_zeroed().ok_or(MmError::OutOfMemory)?.leak();
 
-                    *pte = Pte::new(new_pgdir_ppn, PteFlags::VALID);
+                    *pte = Pte::new(new_pgdir_ppn, PteFlags::VALID, level);
                 }
                 pgdir = unsafe {
                     pte.ppn()

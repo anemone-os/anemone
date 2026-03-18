@@ -1,0 +1,27 @@
+[build]
+name = "qemu-virt-la64"
+abbrs = ["la", "la64", "loongarch", "loongarch64"]
+arch = "loongarch64"
+target = "loongarch64-unknown-anemone-elf"
+exec_env = "sbi"
+
+[constants]
+phys_ram_start = 0x80000000
+max_phys_ram_size = 0x80000000      # 2GB
+kernel_la_base = 0x80200000
+kernel_va_base = 0xffffffff80200000
+max_cpus = 4
+frame_section_shift_mb = 7
+
+
+[qemu]
+qemu = "qemu-system-loongarch64"
+machine = "virt"
+cpu = "la464"
+smp = 4
+memory = "4G"
+args = ["-nographic", "-serial", "mon:stdio"]
+
+[dtb]
+path = "arch/loongarch64/generated.dtb"
+type = "qemu"

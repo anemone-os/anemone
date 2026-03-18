@@ -1,6 +1,6 @@
 //! Machine-specific code for early boot.
 
-use crate::device::discovery::open_firmware::of_with_root;
+use crate::{device::discovery::open_firmware::of_with_root, prelude::*};
 
 pub trait MachineDesc: Sync {
     /// Open firmware compatible string for this machine.

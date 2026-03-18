@@ -1,0 +1,1 @@
+Loongarch instruction support

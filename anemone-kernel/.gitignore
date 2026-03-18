@@ -1,2 +1,3 @@
 src/platform_defs.rs
 src/kconfig_defs.rs
+src/arch/loongarch64/generated.dtb

@@ -47,7 +47,7 @@ cpu = "rv64"
 smp = 4
 # Amount of memory
 memory = "512M"
-# Platform firmware to use
+# Platform firmware to use, optional
 bios = "default"
 # Additional QEMU arguments
 args = [
@@ -58,3 +58,12 @@ args = [
     "-netdev",
     "user,id=net0,hostfwd=tcp::2222-:22",
 ]
+
+# Device Tree Blob configuration for the platform, optional
+[dtb]
+# Path to the generated DTB file
+path = "arch/loongarch64/generated.dtb"
+# Type of the DTB source, can be "file" or "qemu"
+type = "file"
+# Source of the DTB, ignored if type is not "file".
+source = "arch/loongarch64/dtb/virt-la64.dts"

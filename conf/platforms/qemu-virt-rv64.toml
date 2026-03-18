@@ -19,6 +19,6 @@ qemu = "qemu-system-riscv64"
 machine = "virt"
 cpu = "rv64"
 smp = 4
-memory = "256M"
+memory = "1G"
 bios = "default"
 args = ["-nographic", "-serial", "mon:stdio"]
