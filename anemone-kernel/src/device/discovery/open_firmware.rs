@@ -12,8 +12,8 @@ use core::ptr::NonNull;
 use crate::{
     device::{
         bus::{
-            platform::{self, PlatformDevice},
             ROOT_BUS,
+            platform::{self, PlatformDevice},
         },
         discovery::fwnode::FwNode,
         idalloc::alloc_device_id,
@@ -26,7 +26,7 @@ use crate::{
 
 mod early {
 
-    use fdt::nodes::cpus::CpuStatus;
+    use fdt::nodes::{cpus::CpuStatus, memory::ReservedMemory};
 
     use super::*;
 
@@ -91,41 +91,44 @@ mod early {
                     );
                     avail_set.insert(sppn..eppn);
                 }
+                if let Some(_) = fdt.root().find_node("/reserved-memory") {
+                    let rsv_mems = fdt.root().reserved_memory();
+                    for rsv_mem in rsv_mems.children() {
+                        if let Some(reg) = rsv_mem.reg() {
+                            for region in reg.iter::<u64, u64>().map(|reg| {
+                                reg.expect("failed to parse reserved memory reg property")
+                            }) {
+                                // for reserved memory we take a subset instead of a superset, which
+                                // is different from the available
+                                // memory.
 
-                for rsv_mem in fdt.root().reserved_memory().children() {
-                    if let Some(reg) = rsv_mem.reg() {
-                        for region in reg
-                            .iter::<u64, u64>()
-                            .map(|reg| reg.expect("failed to parse reserved memory reg property"))
-                        {
-                            // for reserved memory we take a subset instead of a superset, which is
-                            // different from the available memory.
-
-                            let sppn =
-                                (align_up_power_of_2!(region.address, PagingArch::PAGE_SIZE_BYTES)
-                                    >> PagingArch::PAGE_SIZE_BITS)
+                                let sppn = (align_up_power_of_2!(
+                                    region.address,
+                                    PagingArch::PAGE_SIZE_BYTES
+                                ) >> PagingArch::PAGE_SIZE_BITS)
                                     as u64;
-                            let eppn = (align_down_power_of_2!(
-                                region.address + region.len,
-                                PagingArch::PAGE_SIZE_BYTES
-                            ) >> PagingArch::PAGE_SIZE_BITS)
-                                as u64;
-                            avail_set.remove(sppn..eppn);
+                                let eppn = (align_down_power_of_2!(
+                                    region.address + region.len,
+                                    PagingArch::PAGE_SIZE_BYTES
+                                ) >> PagingArch::PAGE_SIZE_BITS)
+                                    as u64;
+                                avail_set.remove(sppn..eppn);
 
-                            let mut rsv_flags = RsvMemFlags::empty();
-                            if rsv_mem.no_map() {
-                                rsv_flags |= RsvMemFlags::NOMAP;
+                                let mut rsv_flags = RsvMemFlags::empty();
+                                if rsv_mem.no_map() {
+                                    rsv_flags |= RsvMemFlags::NOMAP;
+                                }
+                                if rsv_mem.reusable() {
+                                    rsv_flags |= RsvMemFlags::REUSABLE;
+                                }
+                                rsv_map.insert(sppn..eppn, rsv_flags);
+                                kinfoln!(
+                                    "EarlyMemoryScanner: found reserved memory region: {:#x} - {:#x}, flags: {:?}",
+                                    region.address,
+                                    region.address + region.len,
+                                    rsv_flags
+                                );
                             }
-                            if rsv_mem.reusable() {
-                                rsv_flags |= RsvMemFlags::REUSABLE;
-                            }
-                            rsv_map.insert(sppn..eppn, rsv_flags);
-                            kinfoln!(
-                                "EarlyMemoryScanner: found reserved memory region: {:#x} - {:#x}, flags: {:?}",
-                                region.address,
-                                region.address + region.len,
-                                rsv_flags
-                            );
                         }
                     }
                 }
@@ -256,12 +259,9 @@ mod early {
     ///   frequencies, this function will panic. Such platforms are rare, and we
     ///   must rewrite the whole timer HAL to support them. For now, Anemone
     ///   just doesn't support them.
-    pub unsafe fn early_scan_clock_freq(fdt: VirtAddr) -> u64 {
+    pub unsafe fn early_scan_clock_freq(fdt: VirtAddr) -> Option<u64> {
         let fdt = unsafe { fdt::Fdt::from_ptr(fdt.as_ptr()) }.expect("failed to parse device tree");
-        fdt.root()
-            .cpus()
-            .common_timebase_frequency()
-            .expect("no timebase-frequency property found in device tree")
+        fdt.root().cpus().common_timebase_frequency()
     }
 
     /// Scan the CPU count from the device tree.
@@ -277,9 +277,21 @@ mod early {
         let mut ncpus = 0;
 
         for cpu in fdt.root().cpus().iter() {
+            let cpuid = cpu.clone().reg::<u32>().first().unwrap_or_else(|e| {
+                panic!("error finding cpu id for cpu in slot #{:}: {:?}", ncpus, e)
+            });
+
             match cpu.status() {
                 Some(CpuStatus::OKAY) => ncpus += 1,
-                _ => panic!("unsupported CPU status: {:?}", cpu.status()),
+                Some(_) => panic!(
+                    "unsupported CPU status of cpu #{:}: {:?}",
+                    cpuid,
+                    cpu.status()
+                ),
+                None => {
+                    kwarningln!("no status property found for cpu #{:}.", cpuid);
+                    ncpus += 1;
+                },
             }
         }
 

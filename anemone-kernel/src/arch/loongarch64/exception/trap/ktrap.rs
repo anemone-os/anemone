@@ -1,4 +1,4 @@
-use la_insc::reg::exception::Estat;
+use la_insc::reg::{csr::eentry, exception::Estat};
 
 use crate::{
     arch::loongarch64::exception::trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
@@ -9,10 +9,10 @@ use crate::{
 // implemented in follow-up changes.
 core::arch::global_asm!(
     "   .section .text",
-    "   .global __ktrap_entry",
-    "   .balign 16", // Align to 16 bytes for better performance on LoongArch64
+    "   .globl __ktrap_entry",
+    "   .align 16", // Align to 16 bytes for better performance on LoongArch64
     "__ktrap_entry:",
-    "   b __ktrap_entry",
+    "   b __ktrap_entry", //loop
 );
 
 /// This function will call architecture-agnostic trap handler.
@@ -46,16 +46,15 @@ unsafe fn arch_recoverable_handler(trapframe: &mut LA64TrapFrame, exception: LA6
     );
 }
 
-/// Called when control is transferred to kernel.
-///
-/// Set up trap handler entry point.
-pub fn on_enter_kernel() {
+pub fn install_ktrap_handler() {
     unsafe {
         unsafe extern "C" {
-            fn __ktrap_entry();
+            unsafe fn __ktrap_entry();
         }
-
-        // LoongArch sets exception entry via EENTRY CSR.
-        la_insc::reg::csr::eentry::csr_write(__ktrap_entry as *const () as usize as u64);
+        eentry::csr_write(
+            VirtAddr::new(__ktrap_entry as *const () as usize as u64)
+                .kvirt_to_phys()
+                .get(),
+        );
     }
 }

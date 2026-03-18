@@ -20,7 +20,7 @@ impl CpuArchTrait for La64CpuArch {
 
     unsafe fn set_percpu_base(base: *mut u8) {
         unsafe {
-            core::arch::asm!("mv tp, {}", in(reg) base as usize);
+            core::arch::asm!("move $tp, {}", in(reg) base as usize);
         }
     }
 

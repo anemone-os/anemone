@@ -9,7 +9,6 @@ use la_insc::reg::exception::{Estat, IntrFlags};
 
 mod ktrap;
 pub use ktrap::*;
-pub mod tlb_refill;
 
 /// LoongArch64 trap architecture implementation.
 pub struct LA64TrapArch;

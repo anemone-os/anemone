@@ -1,6 +1,6 @@
 //! Bootstrap for Loongarch64 architecture.
 
-use core::arch::naked_asm;
+use core::arch::{global_asm, naked_asm};
 
 use la_insc::{
     reg::{
@@ -14,54 +14,32 @@ use la_insc::{
 use crate::{
     arch::{
         clear_bss,
-        loongarch64::mm::paging::{LA64PageDirectory, create_bootstrap_ptable},
+        loongarch64::{
+            exception::install_ktrap_handler,
+            mm::{
+                BOOT_DMW0, BOOT_DMW1, BOOTSTRAP_PTABLE, PWCH, PWCL,
+                paging::{LA64PageDirectory, create_bootstrap_ptable},
+                refill::__tlb_rfill,
+            },
+        },
+    },
+    device::discovery::open_firmware::{
+        EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count, early_scan_fdt_size,
+        of_platform_discovery, unflatten_device_tree,
     },
     mm::layout::KernelLayoutTrait,
     prelude::*,
-    utils::align::{AlignedBytes, PhantomAligned4096, PhantomAligned16384},
+    utils::align::{AlignedBytes, PhantomAligned8, PhantomAligned4096, PhantomAligned16384},
 };
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bss.stack0")]
-#[used]
 static mut STACK0: [AlignedBytes<
     PhantomAligned4096,
-    [u8; (1 << 10) as usize * 1024],
+    [u8; (1 << KSTACK_SHIFT_KB) as usize * 1024],
 >; MAX_CPUS] = [AlignedBytes::ZEROED; MAX_CPUS];
 
-/// Initial user space
-const BOOT_DMW0: Dmw = Dmw::new(
-    PrivilegeFlags::PLV0,
-    MemAccessType::Cache,
-    Dmw::vseg_from_addr(0),
-);
-
-/// DM space
-const BOOT_DMW1: Dmw = Dmw::new(
-    PrivilegeFlags::PLV0,
-    MemAccessType::Cache,
-    Dmw::vseg_from_addr(KernelLayout::DIRECT_MAPPING_ADDR),
-);
-
-const PWCL: Pwcl = Pwcl::new(
-    PagingArch::PAGE_SIZE_BITS as u8,
-    PagingArch::PGDIR_IDX_BITS as u8,
-    (PagingArch::PAGE_SIZE_BITS + PagingArch::PGDIR_IDX_BITS) as u8,
-    PagingArch::PGDIR_IDX_BITS as u8,
-    (PagingArch::PAGE_SIZE_BITS + 2 * PagingArch::PGDIR_IDX_BITS) as u8,
-    PagingArch::PGDIR_IDX_BITS as u8,
-    PteWidth::WIDTH_64,
-);
-
-const PWCH: Pwch = Pwch::new(
-    0,
-    0,
-    0,
-    0,
-    true,
-);
-
-static BOOTSTRAP_PTABLE: LA64PageDirectory = create_bootstrap_ptable();
+static DTB_BYTES: &[u8] = include_bytes_aligned_as!(PhantomAligned8, "generated.dtb");
 
 #[used]
 static __NUN_KEEPER: unsafe extern "C" fn() -> ! = __nun;
@@ -79,7 +57,7 @@ pub unsafe extern "C" fn __nun() -> ! {
             li.d    $t0, {boot_dmw1}
             csrwr   $t0, {cr_dmw1}
 
-            li.w    $t0, 0x18   // IE=0, PLV=0, DA=0, PG=1
+            li.w    $t0, 0xb8   // IE=0, PLV=0, DA=0, PG=1
             csrwr   $t0, {cr_crmd}
         ",
         // Set up page table configuration
@@ -90,10 +68,10 @@ pub unsafe extern "C" fn __nun() -> ! {
             csrwr   $t0, {cr_pwch}
             li.d    $t2, {k_offset}
             la.global   $t0, {bootstrap_ptable}
-            sub.d       $t0, $t0, $t2
+            #sub.d       $t0, $t0, $t2
             csrwr   $t0, {cr_pgdh}
             la.global   $t0, {bootstrap_ptable}
-            sub.d       $t0, $t0, $t2
+            #sub.d       $t0, $t0, $t2
             csrwr   $t0, {cr_pgdl}
         ",
         // Set up stack
@@ -110,30 +88,41 @@ pub unsafe extern "C" fn __nun() -> ! {
         ",
         // Jump
         "
+            la.global   $t0, {tlb_rfill}
+            #sub.d       $t0, $t0, $t2
+            csrwr       $t0, 0x88
+
             csrrd       $a0, {cr_cpuid} // arg0: hart_id
             la.global   $t0, {rusty_nun}
             or          $t0, $t0, $t2
             jirl        $zero,$t0,0
-
         ",
         boot_dmw0 = const BOOT_DMW0.to_u64(),
         boot_dmw1 = const BOOT_DMW1.to_u64(),
         cr_dmw0 = const CR_DMW0,
         cr_dmw1 = const CR_DMW1,
+
         cr_crmd = const CR_CRMD,
         // cr_prmd = const CR_PRMD,
         cr_cpuid = const CR_CPUID,
+
         pwcl = const PWCL.to_u32(),
         cr_pwcl = const CR_PWCL,
         pwch = const PWCH.to_u32(),
         cr_pwch = const CR_PWCH,
+
         boot_stack = sym STACK0,
         stack_size = const (1 << KSTACK_SHIFT_KB) as usize * 1024,
+
         k_offset = const KernelLayout::KERNEL_MAPPING_OFFSET,
+
         rusty_nun = sym rusty_nun,
+
         bootstrap_ptable = sym BOOTSTRAP_PTABLE,
         cr_pgdh = const CR_PGDH,
         cr_pgdl = const CR_PGDL,
+
+        tlb_rfill = sym __tlb_rfill
     )
 }
 
@@ -144,7 +133,7 @@ extern "C" fn rusty_nun(hart_id: usize) -> ! {
     unsafe {
         if !BSP_ARRIVED {
             BSP_ARRIVED = true;
-            bsp_entry(hart_id, 0x0)
+            bsp_entry(hart_id, VirtAddr::new(DTB_BYTES.as_ptr() as u64))
         } else {
             // ap
             ap_entry(hart_id)
@@ -177,12 +166,66 @@ pub fn register_debugcon() {
     );
 }
 
-unsafe fn bsp_entry(hart_id: usize, dtb_pa: usize) -> ! {
+unsafe fn bsp_entry(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     unsafe {
         clear_bss();
     }
+    install_ktrap_handler();
+    kinfoln!("anemone kernel booting...");
+    kinfoln!("bsp id : {}", bsp_id);
     register_debugcon();
-    kdebugln!("Test..");
+    unsafe {
+        ///
+        let ncpus = early_scan_cpu_count(fdt_va);
+        super::cpu::set_ncpus(ncpus);
+
+        // needed by timer initialization.
+        if let Some(freq_hz) = early_scan_clock_freq(fdt_va) {
+            super::time::set_hw_clock_freq(freq_hz);
+        } else {
+            kwarningln!("failed to scan clock frequency from device tree.");
+        }
+
+        let mut scanner = EarlyMemoryScanner::new(fdt_va);
+
+        // mark fdt as reserved memory so that it won't be allocated by frame allocator.
+        let fdt_npages = (early_scan_fdt_size(fdt_va) + PagingArch::PAGE_SIZE_BYTES - 1)
+            / PagingArch::PAGE_SIZE_BYTES;
+        let fdt_ppn = PhysPageNum::new(fdt_va.kvirt_to_phys().get() >> PagingArch::PAGE_SIZE_BITS);
+        scanner.mark_as_reserved(fdt_ppn, fdt_npages as u64, RsvMemFlags::FDT);
+
+        mm::percpu::bsp_init(bsp_id, |npages| scanner.early_alloc_folio(npages as u64));
+        kinfoln!("percpu data initialized");
+
+        scanner.commit_to_pmm();
+        let mut memmap_pages = 0;
+        mm::frame::memmap_init(|npages| {
+            memmap_pages += npages;
+            kdebugln!("memmap init: allocating {} pages", npages);
+            sys_mem_zones()
+                .leak(npages)
+                .expect("no enough memory to initialize memmap")
+        });
+        kdebugln!("memmap initialized, total {} pages", memmap_pages);
+        mm::frame::pmm_init();
+        kinfoln!("physical memory management initialized");
+
+        mm::kptable::init_kernel_mapping();
+        kinfoln!("kernel mapping initialized");
+        mm::kptable::activate_kernel_mapping();
+        kinfoln!("kernel mapping activated");
+
+        // register drivers to bus types
+        driver::init();
+
+        unflatten_device_tree(fdt_va);
+        //parse_bootargs();
+        //machine_init();
+        of_platform_discovery();
+
+        //enable_local_irq();
+        bsp_pre_kernel_main();
+    }
     // bsp
     loop {}
 }

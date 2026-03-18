@@ -54,10 +54,7 @@ mod bytes {
     macro_rules! include_bytes_aligned_as {
         ($marker:ty, $path:literal) => {{
             use crate::utils::align::*;
-            static ALIGNED: &AlignedBytes<$marker, [u8]> = &AlignedBytes {
-                _align: PhantomAligned::NEW,
-                bytes: *include_bytes!($path),
-            };
+            static ALIGNED: &AlignedBytes<$marker, [u8]> = &AlignedBytes::new(*include_bytes!($path));
             &ALIGNED.bytes
         }};
     }

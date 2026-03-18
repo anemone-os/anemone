@@ -20,7 +20,7 @@ impl LA64PagingArch {
 impl PagingArchTrait for LA64PagingArch {
     type PgDir = LA64PageDirectory;
 
-    const MAX_HUGE_PAGE_LEVEL: usize = 0;
+    const MAX_HUGE_PAGE_LEVEL: usize = 2;
 
     const PAGE_LEVELS: usize = 3;
 
