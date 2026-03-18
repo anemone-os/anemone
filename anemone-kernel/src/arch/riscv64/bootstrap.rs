@@ -274,8 +274,11 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         super::cpu::set_ncpus(ncpus);
 
         // needed by timer initialization.
-        let freq_hz = early_scan_clock_freq(fdt_va);
-        super::time::set_hw_clock_freq(freq_hz);
+        if let Some(freq_hz) = early_scan_clock_freq(fdt_va) {
+            super::time::set_hw_clock_freq(freq_hz);
+        } else {
+            kwarningln!("failed to scan clock frequency from device tree.");
+        };
 
         let mut scanner = EarlyMemoryScanner::new(fdt_va);
 
