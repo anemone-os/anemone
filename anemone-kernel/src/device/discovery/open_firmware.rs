@@ -26,7 +26,7 @@ use crate::{
 
 mod early {
 
-    use fdt::nodes::{cpus::CpuStatus, memory::ReservedMemory};
+    use fdt::nodes::cpus::CpuStatus;
 
     use super::*;
 
