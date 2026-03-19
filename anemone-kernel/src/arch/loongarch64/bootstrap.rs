@@ -143,10 +143,7 @@ extern "C" fn rusty_nun(hart_id: usize) -> ! {
 
 #[cfg(debug_assertions)]
 pub fn register_debugcon() {
-    use crate::{
-        device::console::{Console, ConsoleFlags, register_console},
-        driver::serial::ns16550a::Ns16550ARegisters,
-    };
+    use crate::device::console::{Console, ConsoleFlags, register_console};
 
     let con = unsafe { Ns16550ARegisters::from_raw(0x1fe0_01e0 as *const u8 as *mut u8, 0, 1) };
     pub struct DebugCon {
@@ -225,7 +222,6 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_va: VirtAddr) -> ! {
         //parse_bootargs();
         //machine_init();
         of_platform_discovery();
-
         //enable_local_irq();
         bsp_pre_kernel_main();
     }
