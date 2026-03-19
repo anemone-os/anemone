@@ -45,7 +45,7 @@ fn bsp_pre_kernel_main() {
     }
     #[cfg(feature = "kunit")]
     crate::debug::kunit::kunit_runner();
-    panic!();
+    //panic!();
 
     // TODO: init subsystems, spawn init process, etc.
 }

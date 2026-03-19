@@ -15,11 +15,10 @@ use crate::{
 #[derive(Debug)]
 pub struct DmaRegion {
     folio: OwnedFolio,
-
-    /// buddy system allocates pages in DM region, where no uncached flag is
-    /// set, so we need to do a separate mapping to get an uncached virtual
-    /// mapping for this region.
-    remap: IoRemap,
+    // buddy system allocates pages in DM region, where no uncached flag is
+    // set, so we need to do a separate mapping to get an uncached virtual
+    // mapping for this region.
+    // remap: IoRemap,
 }
 
 impl DmaRegion {
@@ -33,7 +32,8 @@ impl DmaRegion {
     /// The returned pointer is guaranteed to be page-aligned. And the whole
     /// slice is uncached.
     pub fn vaddr(&self) -> NonNull<[u8]> {
-        self.remap.as_ptr()
+        NonNull::from(self.folio.as_bytes())
+        //        self.remap.as_ptr()
     }
 }
 
@@ -48,12 +48,12 @@ pub fn dma_alloc(nbytes: usize) -> Result<DmaRegion, MmError> {
 
     let folio = alloc_frames_zeroed(npages).ok_or(MmError::OutOfMemory)?;
 
-    let remap = unsafe {
-        ioremap(
-            folio.range().start().to_phys_addr(),
-            npages * PagingArch::PAGE_SIZE_BYTES,
-        )
-    }?;
+    // let remap = unsafe {
+    //     ioremap(
+    //         folio.range().start().to_phys_addr(),
+    //         npages * PagingArch::PAGE_SIZE_BYTES,
+    //     )
+    // }?;
 
-    Ok(DmaRegion { folio, remap })
+    Ok(DmaRegion { folio })
 }

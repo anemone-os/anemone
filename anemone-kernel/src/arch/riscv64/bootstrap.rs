@@ -294,15 +294,12 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         kinfoln!("percpu data initialized");
 
         scanner.commit_to_pmm();
-        let mut memmap_pages = 0;
         mm::frame::memmap_init(|npages| {
-            memmap_pages += npages;
             kdebugln!("memmap init: allocating {} pages", npages);
             sys_mem_zones()
                 .leak(npages)
                 .expect("no enough memory to initialize memmap")
         });
-        kdebugln!("memmap initialized, total {} pages", memmap_pages);
         mm::frame::pmm_init();
         kinfoln!("physical memory management initialized");
 
@@ -372,13 +369,13 @@ unsafe fn ap_entry(ap_id: usize) -> ! {
         install_ktrap_handler();
         sync_with_counter(&BOOT_SYNC_COUNTER);
         kdebugln!("ap {} booting...", ap_id);
-        mm::percpu::ap_init(ap_id);
 
         // synchronize with BSP
         sync_with_counter(&INIT_SYNC_COUNTER);
 
         mm::kptable::activate_kernel_mapping();
 
+        mm::percpu::ap_init(ap_id);
         enable_local_irq();
         // collect previous IPIs sent by bsp before ap starts to run.
         // the main reason for this is to clear IPI buffers of bsp such that it can send

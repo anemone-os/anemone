@@ -54,11 +54,20 @@ impl IoRange {
             return Err(MmError::InvalidArgument);
         }
         let len = len as u64;
+        start
+            .get()
+            .checked_add(len)
+            .ok_or(MmError::InvalidArgument)?;
         Ok(Self { start, len })
     }
 
     fn end(&self) -> PhysAddr {
-        PhysAddr::new(self.start.get() + self.len)
+        PhysAddr::new(
+            self.start
+                .get()
+                .checked_add(self.len)
+                .expect("IoRange end overflow must be rejected in try_new"),
+        )
     }
 
     fn intersects(&self, other: &Self) -> bool {
