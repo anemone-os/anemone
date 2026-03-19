@@ -7,7 +7,7 @@ use clap::Args;
 use xshell::Shell;
 
 use crate::{
-    config::{KConfig, PlatformConfig, kconfig::Profile, platform::DtbType},
+    config::{kconfig::Profile, platform::DtbType, KConfig, PlatformConfig},
     log_progress,
     tasks::{qemu::gen_qemu_cmd, utils::cmd_echo},
     warn,
@@ -99,13 +99,19 @@ impl<'a> BuildContext<'a> {
                             Ok(status) => {
                                 if !status.success() {
                                     log_progress!("ERROR", "Failed to generate DTB from QEMU");
-                                    anyhow::bail!("Failed to generate DTB from QEMU, qemu exited with status: {}", status);
+                                    anyhow::bail!(
+                                        "Failed to generate DTB from QEMU, qemu exited with status: {}",
+                                        status
+                                    );
                                 }
                             },
                             Err(e) => {
-                                log_progress!("ERROR", &format!("Failed to generate DTB from QEMU: {}", e));
+                                log_progress!(
+                                    "ERROR",
+                                    &format!("Failed to generate DTB from QEMU: {}", e)
+                                );
                                 anyhow::bail!("Failed to generate DTB from QEMU: {}", e);
-                            }
+                            },
                         }
                     } else {
                         log_progress!(
