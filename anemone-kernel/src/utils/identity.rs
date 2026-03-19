@@ -134,3 +134,7 @@ const GENERAL_IDENTITY_LEN: usize = 32;
 /// [`GeneralIdentity`] is a commonly used identity type with a fixed length of
 /// 32 bytes, which is sufficient for most use cases in kernel.
 pub type GeneralIdentity = Identity<GENERAL_IDENTITY_LEN>;
+
+/// [`AnyIdentity`] is an identity type with the maximum allowed length defined
+/// by `kconfig`. It can be used when we want to all types of identities.
+pub type AnyIdentity = Identity<{ crate::kconfig_defs::MAX_IDENT_LEN_BYTES }>;

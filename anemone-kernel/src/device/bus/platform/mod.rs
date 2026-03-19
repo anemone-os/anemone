@@ -1,9 +1,12 @@
 //! Platform bus.
 
-use spin::Lazy;
+
 
 use crate::{
-    device::{bus::BusType, kobject::KObjIdent},
+    device::{
+        bus::BusType,
+        kobject::{KObjIdent, KObject},
+    },
     prelude::*,
 };
 
@@ -15,18 +18,20 @@ mod driver;
 pub use driver::PlatformDriver;
 
 /// /sys/bus/platform
-static PLATFORM_BUS_TYPE: Lazy<Arc<RwLock<PlatformBusType>>> = Lazy::new(|| {
-    Arc::new(RwLock::new(PlatformBusType::new(
+static PLATFORM_BUS_TYPE: Lazy<RwLock<PlatformBusType>> = Lazy::new(|| {
+    RwLock::new(PlatformBusType::new(
         KObjIdent::try_from("platform").unwrap(),
-    )))
+    ))
 });
 
-pub fn register_device(device: Arc<dyn Device>) {
+/// Register a platform device to the platform bus.
+pub fn register_device(device: Arc<PlatformDevice>) {
     kinfoln!("device {} registered on platform bus", device.name());
     PLATFORM_BUS_TYPE.write_irqsave().register_device(device);
 }
 
-pub fn register_driver(driver: Arc<dyn Driver>) {
+/// Register a platform driver to the platform bus.
+pub fn register_driver(driver: Arc<dyn PlatformDriver>) {
     kinfoln!("driver {} registered on platform bus", driver.name());
     PLATFORM_BUS_TYPE.write_irqsave().register_driver(driver);
 }

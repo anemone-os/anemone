@@ -100,6 +100,8 @@ impl KernelLog {
     }
 }
 
+/// TODO: this iterator now iters over [LogRecord], which is not ideal since it
+/// cause unnecessary copying of log messages. Refine this later.
 #[derive(Debug)]
 pub struct IterWeak<'a> {
     log: &'a KernelLog,

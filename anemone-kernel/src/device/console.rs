@@ -1,0 +1,149 @@
+//! Console subsystem.
+//!
+//! Here lies /dev/console.
+
+use crate::{debug::printk::KERNEL_LOG, prelude::*};
+
+use core::fmt::{Debug, Write};
+
+pub trait Console: Send + Sync {
+    fn output(&self, s: &str);
+}
+
+impl dyn Console {
+    pub fn writer(&self) -> ConsoleWriter<'_> {
+        ConsoleWriter { console: self }
+    }
+}
+
+pub struct ConsoleWriter<'a> {
+    console: &'a dyn Console,
+}
+
+impl Write for ConsoleWriter<'_> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.console.output(s);
+        Ok(())
+    }
+}
+
+struct ConsoleDesc {
+    ops: Arc<dyn Console>,
+    flags: ConsoleFlags,
+}
+
+impl ConsoleDesc {
+    fn enabled(&self) -> bool {
+        self.flags.contains(ConsoleFlags::ENABLED)
+    }
+
+    fn enable(&mut self) {
+        self.flags |= ConsoleFlags::ENABLED;
+    }
+}
+
+impl Debug for ConsoleDesc {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ConsoleDesc").finish()
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy)]
+    pub struct ConsoleFlags: u32 {
+
+        /// Console is used for early boot messages.
+        ///
+        /// If a console is registered with this flag, it will be
+        /// automatically set to enabled during early boot.
+        ///
+        /// Such consoles will be unregistered after the system is fully booted,
+        /// and will not receive log messages emitted after that point.
+        const EARLY = 0b0001;
+        /// When registering a console, also replay all previous log messages to it.
+        const REPLAY = 0b0010;
+        /// Whether the console is enabled.
+        const ENABLED = 0b0100;
+    }
+}
+
+struct ConsoleSubSys {
+    consoles: SpinLock<Vec<ConsoleDesc>>,
+}
+
+impl ConsoleSubSys {
+    fn new() -> Self {
+        Self {
+            consoles: SpinLock::new(Vec::new()),
+        }
+    }
+}
+
+static SUBSYS: Lazy<ConsoleSubSys> = Lazy::new(|| ConsoleSubSys::new());
+
+/// Register a console.
+pub fn register_console(ops: Arc<dyn Console>, mut flags: ConsoleFlags) {
+    if flags.contains(ConsoleFlags::EARLY) {
+        // If the console is registered with EARLY flag, it will be automatically
+        // enabled during early boot.
+        flags |= ConsoleFlags::ENABLED;
+    }
+
+    if flags.contains(ConsoleFlags::REPLAY) {
+        let it = KERNEL_LOG.iter_weak();
+        for record in it {
+            let full_msg_str =
+                core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
+            ops.output(full_msg_str);
+        }
+    }
+
+    SUBSYS
+        .consoles
+        .lock_irqsave()
+        .push(ConsoleDesc { ops, flags });
+}
+
+/// Output a message to all enabled consoles.
+pub fn output(msg: &str) {
+    let consoles = SUBSYS.consoles.lock_irqsave();
+    for con in consoles.iter() {
+        if con.enabled() {
+            con.ops.output(msg);
+        }
+    }
+}
+
+/// If there are any non-early consoles registered but none of them is enabled,
+/// enable the first one. If there are only early consoles registered, keep them
+/// as is and print a warning message, as this might indicate a problem with the
+/// console registration order.
+///
+/// # Safety
+///
+/// Timing.
+pub unsafe fn on_system_boot() {
+    let mut consoles = SUBSYS.consoles.lock_irqsave();
+
+    let mut has_normal_con = false;
+
+    if consoles
+        .iter()
+        .any(|desc| !desc.flags.contains(ConsoleFlags::EARLY))
+    {
+        has_normal_con = true;
+        consoles.retain(|desc| !desc.flags.contains(ConsoleFlags::EARLY));
+        if !consoles.iter().any(|desc| desc.enabled()) {
+            let desc = consoles.first_mut().unwrap();
+            desc.enable();
+        }
+    }
+
+    drop(consoles);
+
+    if !has_normal_con {
+        kwarningln!("no normal console registered, only early consoles are available");
+    } else {
+        kinfoln!("normal console(s) registered, early consoles have been unregistered");
+    }
+}

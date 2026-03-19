@@ -11,12 +11,8 @@ use core::ptr::NonNull;
 
 use crate::{
     device::{
-        bus::{
-            ROOT_BUS,
-            platform::{self, PlatformDevice},
-        },
+        bus::platform::{self, PlatformDevice},
         discovery::fwnode::FwNode,
-        idalloc::alloc_device_id,
         kobject::{KObjIdent, KObject, KObjectBase},
         resource::Resource,
     },
@@ -300,7 +296,6 @@ mod early {
 }
 use device_tree::{DeviceNodeHandle, DeviceStatus, PHandle};
 pub use early::*;
-use spin::Lazy;
 
 /// Unflattened device tree. In-memory representation.
 #[derive(Debug)]
@@ -418,14 +413,11 @@ pub fn of_platform_discovery() {
                 }
 
                 let kobj_base = KObjectBase::new(KObjIdent::try_from(child.full_name()).unwrap());
-                let dev_base = DeviceBase::new(alloc_device_id().unwrap(), Some(ofnode));
+                let dev_base = DeviceBase::new(Some(ofnode));
                 let mut pdev = PlatformDevice::new(kobj_base, dev_base);
                 // kobj init
                 pdev.set_parent(Some(simple_bus_dev.clone()));
-                // pdev init.
-                for c in compatible.clone() {
-                    pdev.add_compatible(c);
-                }
+
                 // resource parsing
                 // 1. mmio
                 if let Some(reg) = child.reg() {
@@ -516,7 +508,7 @@ pub fn of_platform_discovery() {
 
     let device_tree = DEVICE_TREE.get();
     let initial_mapping = vec![(0, 0, u64::MAX)];
-    of_platform_discovery_inner(device_tree.handle.root(), &ROOT_BUS, &initial_mapping);
+    of_platform_discovery_inner(device_tree.handle.root(), &ROOT, &initial_mapping);
 }
 
 bitflags! {

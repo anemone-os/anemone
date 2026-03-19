@@ -6,7 +6,7 @@
 
 use core::fmt::Debug;
 
-use spin::Lazy;
+
 
 use crate::{
     device::discovery::fwnode::FwNode,
@@ -24,9 +24,8 @@ int_like!(VirtIrq, usize);
 /// hardware IRQs, and the operations provided by the interrupt controller
 /// associated with this domain.
 ///
-/// **LOCK ORDERING**
-///
-/// **map -> ops**
+/// **LOCK ORDERING**:
+/// **`map` -> `ops`**
 #[derive(Debug)]
 pub struct IrqDomain {
     /// Currently only for debugging purposes, but maybe we can use it for
@@ -271,9 +270,9 @@ pub unsafe fn register_root_irq_domain(
 }
 
 /// Register a new interrupt domain to the system.
-pub fn register_irq_domain(domain: Arc<IrqDomain>) {
+pub fn register_irq_domain(domain: IrqDomain) {
     kinfoln!("registering new irq domain: {}", domain.name());
-    IRQ_DOMAINS.write_irqsave().push_back(domain);
+    IRQ_DOMAINS.write_irqsave().push_back(Arc::new(domain));
 }
 
 /// Find the interrupt domain associated with the given firmware node.
