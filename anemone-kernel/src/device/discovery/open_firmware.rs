@@ -87,9 +87,9 @@ mod early {
                     );
                     avail_set.insert(sppn..eppn);
                 }
+
                 if let Some(_) = fdt.root().find_node("/reserved-memory") {
-                    let rsv_mems = fdt.root().reserved_memory();
-                    for rsv_mem in rsv_mems.children() {
+                    for rsv_mem in fdt.root().reserved_memory().children() {
                         if let Some(reg) = rsv_mem.reg() {
                             for region in reg.iter::<u64, u64>().map(|reg| {
                                 reg.expect("failed to parse reserved memory reg property")

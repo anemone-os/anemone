@@ -75,9 +75,8 @@ pub struct Qemu {
     pub args: Option<Vec<String>>,
 }
 
-
 #[derive(Deserialize, Debug, Serialize)]
-pub struct Dtb{
+pub struct Dtb {
     pub path: String,
     #[serde(rename = "type")]
     pub typ: DtbType,
@@ -85,11 +84,11 @@ pub struct Dtb{
 }
 
 #[derive(Deserialize, Debug, Serialize)]
-pub enum DtbType{
+pub enum DtbType {
     #[serde(rename = "qemu")]
     Qemu,
     #[serde(rename = "file")]
-    File
+    File,
 }
 
 #[derive(Deserialize, Debug, Serialize)]

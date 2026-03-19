@@ -167,7 +167,7 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
     ///   directory.
     ///
     /// If the entry is a branch entry, some flags like [PteFlags::USER],
-    ///     [PteFlags::NONCACHE] and [PteFlags::STRONG] (if available) are
+    /// [PteFlags::NONCACHE] and [PteFlags::STRONG] (if available) are
     /// ignored.     **However, [PteFlags::GLOBAL] is still meaningful for
     /// branch entries, and should be kept if set.**
     fn new(ppn: PhysPageNum, flags: PteFlags, level: usize) -> Self;

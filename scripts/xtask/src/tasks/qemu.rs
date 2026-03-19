@@ -1,6 +1,6 @@
 //! Run the built OS image in QEMU emulator.
 use crate::{
-    config::{PlatformConfig, platform::Qemu},
+    config::{platform::Qemu, PlatformConfig},
     tasks::utils::{cmd_echo, log_progress},
     workspace::*,
 };
