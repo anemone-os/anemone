@@ -4,4 +4,5 @@ build
 **/.gdb_history
 kconfig
 etc
+disk.img
 .DS_Store

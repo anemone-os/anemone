@@ -1,49 +1,12 @@
 //! Kernel logging and console related functionality.
 
-mod console;
-pub use console::{Console, ConsoleFlags, SysConsole};
-use spin::lazy::Lazy;
 mod log;
 pub use log::{LogLevel, LogRecord};
 
 use crate::prelude::*;
 use log::KernelLog;
 
-static SYS_CONSOLE: Lazy<SysConsole> = Lazy::new(|| SysConsole::new());
-static KERNEL_LOG: KernelLog = KernelLog::new();
-
-/// Registers a console to receive log output with the specified flags.
-pub fn register_console(console: Box<dyn Console>, flags: ConsoleFlags) {
-    if flags.contains(ConsoleFlags::REPLAY) {
-        let it = KERNEL_LOG.iter_weak();
-        for record in it {
-            let full_msg_str =
-                core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
-            console.output(full_msg_str);
-        }
-    }
-
-    SYS_CONSOLE.register_console(console, flags);
-}
-
-/// If there are any non-early consoles registered but none of them is enabled,
-/// enable the first one. If there are only early consoles registered, keep them
-/// as is and print a warning message, as this might indicate a problem with the
-/// console registration order.
-///
-/// # Safety
-///
-/// Timing.
-pub unsafe fn on_system_boot() {
-    unsafe {
-        let has_normal_con = SYS_CONSOLE.on_system_boot();
-        if !has_normal_con {
-            kwarningln!("no normal console registered, only early consoles are available");
-        } else {
-            kinfoln!("normal console(s) registered, early consoles have been unregistered");
-        }
-    }
-}
+pub static KERNEL_LOG: KernelLog = KernelLog::new();
 
 mod klog {
     use core::fmt::{Arguments, Write};
@@ -71,7 +34,7 @@ mod klog {
                     core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
 
                 if !noprint {
-                    SYS_CONSOLE.output(full_msg_str);
+                    device::console::output(full_msg_str);
                 }
 
                 KERNEL_LOG.append(record);
@@ -90,7 +53,7 @@ mod klog {
                 let full_msg_str =
                     core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
 
-                SYS_CONSOLE.output(full_msg_str);
+                device::console::output(full_msg_str);
             },
         }
     }

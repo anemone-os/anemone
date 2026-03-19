@@ -1,7 +1,5 @@
 // Physical frame management.
 
-use spin::Lazy;
-
 use crate::{
     mm::frame::{allocator::LockedFrameAllocator, buddy::BuddyAllocator},
     prelude::*,

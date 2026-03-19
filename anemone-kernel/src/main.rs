@@ -41,10 +41,11 @@ use crate::{prelude::*, sync::mono::MonoOnce};
 /// BSP to perform necessary preparations.
 fn bsp_pre_kernel_main() {
     unsafe {
-        debug::printk::on_system_boot();
+        device::console::on_system_boot();
     }
     #[cfg(feature = "kunit")]
     crate::debug::kunit::kunit_runner();
+    panic!();
 
     // TODO: init subsystems, spawn init process, etc.
 }

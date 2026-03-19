@@ -10,11 +10,13 @@ use crate::{
             mm::{RiscV64PgDir, RiscV64Pte, RiscV64PteFlags, sv39},
         },
     },
-    debug::printk::{Console, ConsoleFlags, register_console},
-    device::discovery::open_firmware::{
-        EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count, early_scan_fdt_size,
-        get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
-        unflatten_device_tree,
+    device::{
+        console::{Console, ConsoleFlags},
+        discovery::open_firmware::{
+            EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count, early_scan_fdt_size,
+            get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
+            unflatten_device_tree,
+        },
     },
     mm::layout::KernelLayoutTrait,
     prelude::*,
@@ -175,8 +177,8 @@ fn register_earlycon() {
         }
     }
 
-    register_console(
-        Box::new(SbiEarlyCon),
+    device::console::register_console(
+        Arc::new(SbiEarlyCon),
         ConsoleFlags::EARLY | ConsoleFlags::REPLAY,
     );
 }

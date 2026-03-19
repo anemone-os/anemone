@@ -13,7 +13,6 @@ pub struct PlatformDevice {
     #[device]
     dev_base: DeviceBase,
     resources: Vec<Resource>,
-    compatibles: Vec<Box<str>>,
 }
 
 impl KObjectOps for PlatformDevice {}
@@ -26,7 +25,6 @@ impl PlatformDevice {
             kobj_base,
             dev_base,
             resources: Vec::new(),
-            compatibles: Vec::new(),
         }
     }
 
@@ -34,15 +32,17 @@ impl PlatformDevice {
         self.resources.push(resource);
     }
 
-    pub fn add_compatible(&mut self, compatible: impl Into<Box<str>>) {
-        self.compatibles.push(compatible.into());
-    }
-
     pub fn resources(&self) -> &[Resource] {
         &self.resources
     }
 
-    pub fn compatibles(&self) -> &[Box<str>] {
-        &self.compatibles
+    pub fn compatibles(&self) -> impl Iterator<Item = &str> {
+        self.fwnode()
+            .expect("platform device has no fwnode")
+            .as_of_node()
+            .expect("platform device not associated with a device tree node")
+            .node()
+            .compatible()
+            .expect("device tree node of a platform device has no compatible property")
     }
 }

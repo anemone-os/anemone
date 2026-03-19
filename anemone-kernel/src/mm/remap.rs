@@ -5,8 +5,6 @@
 
 use core::ptr::NonNull;
 
-use spin::Lazy;
-
 use crate::{
     mm::{
         kptable::{kmap, kunmap},
@@ -32,8 +30,7 @@ impl range_allocator::Rangable for VirtPageRange {
 /// System state related to virtual memory remapping, including vmalloc and
 /// ioremap.
 ///
-/// All IO remapping are uncached for simplicity. TODO: this is currently
-/// unimplemented.
+/// All IO remapping are uncached for simplicity.
 ///
 /// Currently only ioremap is implementeed.
 #[derive(Debug)]
@@ -212,6 +209,13 @@ impl IoRemap {
                 self.virt.as_ptr_mut(),
                 self.req.len as usize,
             ))
+        }
+    }
+
+    pub unsafe fn from_raw_parts(virt: VirtAddr, phys: PhysAddr, len: usize) -> Self {
+        Self {
+            virt,
+            req: IoRange::try_new(phys, len).expect("invalid IoRemap raw parts"),
         }
     }
 }

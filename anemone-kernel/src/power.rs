@@ -3,14 +3,13 @@
 //! TODO: use intrusive linked list to store the handlers to avoid heap
 //! allocation.
 
-use spin::Lazy;
-
 use crate::prelude::*;
 
 pub trait PowerOffHandler: Send {
     unsafe fn poweroff(&self);
 }
 
+/// **This trait expects a cold reboot implementation**
 pub trait RebootHandler: Send {
     unsafe fn reboot(&self);
 }
@@ -37,6 +36,10 @@ pub fn register_reboot_handler(handler: Box<dyn RebootHandler>) {
 /// order until one of them succeeds. If no handler succeeds, system will be
 /// halted.
 pub unsafe fn power_off() -> ! {
+    unsafe {
+        device::shutdown();
+    }
+
     let handlers = POWER_OFF_HANDLER.lock_irqsave();
     for handler in handlers.iter() {
         unsafe {
@@ -55,6 +58,10 @@ pub unsafe fn power_off() -> ! {
 /// order until one of them succeeds. If no handler succeeds, system will be
 /// halted.
 pub unsafe fn reboot() -> ! {
+    unsafe {
+        device::shutdown();
+    }
+
     let handlers = REBOOT_HANDLER.lock_irqsave();
     for handler in handlers.iter() {
         unsafe {

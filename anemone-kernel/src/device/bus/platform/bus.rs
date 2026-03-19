@@ -1,8 +1,6 @@
-use core::any::Any;
-
 use crate::{
     device::{
-        bus::{BusType, BusTypeBase, platform::PlatformDevice},
+        bus::{BusType, BusTypeBase},
         kobject::{KObjIdent, KObjectBase, KObjectOps},
     },
     prelude::*,
@@ -34,15 +32,14 @@ impl BusType for PlatformBusType {
     fn matches(&self, device: &dyn Device, driver: &dyn Driver) -> bool {
         // down cast the general Device and Driver to PlatformDevice and PlatformDriver,
         // then compare their compatible strings.
-        let pdev = (device as &dyn Any)
-            .downcast_ref::<PlatformDevice>()
+        let pdev = device
+            .as_platform_device()
             .expect("device on platform bus is not a platform device");
         let pdrv = driver
             .as_platform_driver()
             .expect("driver on platform bus is not a platform driver");
 
         pdev.compatibles()
-            .iter()
-            .any(|c| pdrv.match_table().iter().any(|&m| c.as_ref() == m))
+            .any(|c| pdrv.match_table().iter().any(|&m| c == m))
     }
 }

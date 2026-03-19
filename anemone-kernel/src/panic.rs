@@ -4,6 +4,9 @@ use crate::prelude::*;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
+    unsafe {
+        IntrArch::local_intr_disable();
+    }
     kemergln!("Kernel panic:\n{}", info);
     if let Err(e) = broadcast_ipi_async(IpiPayload::StopExecution) {
         kemergln!(

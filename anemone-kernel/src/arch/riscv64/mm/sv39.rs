@@ -105,9 +105,8 @@ impl PagingArchTrait for Sv39PagingArch {
 pub struct Sv39KernelLayout;
 
 impl KernelLayoutTrait<Sv39PagingArch> for Sv39KernelLayout {
-    const USPACE_TOP_VPN: VirtPageNum = VirtPageNum::new(
-        (1 << (Sv39PagingArch::PAGE_LEVELS * Sv39PagingArch::PGDIR_IDX_BITS) >> 1),
-    );
+    const USPACE_TOP_VPN: VirtPageNum =
+        VirtPageNum::new(1 << (Sv39PagingArch::PAGE_LEVELS * Sv39PagingArch::PGDIR_IDX_BITS) >> 1);
 
     const FREE_SPACE_VPN: VirtPageNum = VirtPageNum::new(
         (Self::KSPACE_VPN.to_virt_addr().get() + PHYS_RAM_START + MAX_PHYS_RAM_SIZE)

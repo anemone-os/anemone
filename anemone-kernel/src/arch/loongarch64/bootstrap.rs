@@ -158,7 +158,7 @@ extern "C" fn rusty_nun(hart_id: usize) -> ! {
 
 #[cfg(debug_assertions)]
 pub fn register_debugcon() {
-    use crate::debug::printk::{Console, ConsoleFlags, register_console};
+    use crate::device::console::{Console, ConsoleFlags, register_console};
 
     let con = unsafe { Ns16550ARegisters::from_raw(0x1fe0_01e0 as *const u8 as *mut u8, 0, 1) };
     pub struct DebugCon {
@@ -176,7 +176,7 @@ pub fn register_debugcon() {
         con: SpinLock::new(con),
     };
     register_console(
-        Box::new(debug_con),
+        Arc::new(debug_con),
         ConsoleFlags::EARLY | ConsoleFlags::REPLAY,
     );
 }

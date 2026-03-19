@@ -1,7 +1,5 @@
 use crate::prelude::*;
 
-use spin::Lazy;
-
 #[derive(Debug, Clone, Copy)]
 pub struct AvailMemZone {
     start_ppn: PhysPageNum,
