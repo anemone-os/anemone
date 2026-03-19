@@ -92,8 +92,9 @@ impl Mapper<'_> {
     /// will be returned.
     pub fn map(&mut self, mapping: Mapping) -> Result<(), MmError> {
         if mapping.huge_pages && !mapping.flags.contains(PteFlags::GLOBAL) {
-            return Err(MmError::InvalidArgument);
+            panic!("internal error: huge page mapping must be global");
         }
+
         #[derive(Debug)]
         struct MapTransaction<'a, 'm> {
             mapper: &'a mut Mapper<'m>,
@@ -196,8 +197,9 @@ impl Mapper<'_> {
     ///   will be returned.
     pub unsafe fn map_overwrite(&mut self, mapping: Mapping) -> Result<(), MmError> {
         if mapping.huge_pages && !mapping.flags.contains(PteFlags::GLOBAL) {
-            return Err(MmError::InvalidArgument);
+            panic!("internal error: huge page mapping must be global");
         }
+
         let Mapping {
             vpn,
             ppn,
@@ -287,7 +289,7 @@ impl Mapper<'_> {
 
                     if pgdir.is_empty() && !pte.is_global() {
                         // deallocate the empty page table
-                        let ppn = pte.ppn();
+
                         *pte = Pte::ZEROED;
                         let _frame = OwnedFrameHandle::from_ppn(ppn);
                     }

@@ -211,13 +211,6 @@ impl IoRemap {
             ))
         }
     }
-
-    pub unsafe fn from_raw_parts(virt: VirtAddr, phys: PhysAddr, len: usize) -> Self {
-        Self {
-            virt,
-            req: IoRange::try_new(phys, len).expect("invalid IoRemap raw parts"),
-        }
-    }
 }
 
 impl Drop for IoRemap {
