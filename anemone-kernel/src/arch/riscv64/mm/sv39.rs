@@ -19,6 +19,68 @@ impl PagingArchTrait for Sv39PagingArch {
 
     const PAGE_SIZE_BYTES: usize = super::PAGE_SIZE_BYTES;
 
+    fn setup_direct_mapping_region(pgtbl: &mut PageTable) {
+        let mut mapper = pgtbl.mapper();
+
+        {
+            sys_mem_zones().with_avail_zones(|avail_mem_zones| {
+            for zone in avail_mem_zones.iter() {
+                let range = zone.range();
+
+                unsafe {
+                    mapper
+                        .map_overwrite(Mapping {
+                            vpn: range.start().to_hhdm(),
+                            ppn: range.start(),
+                            flags: PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL,
+                            npages: range.npages() as usize,
+                            huge_pages: true,
+                        })
+                        .expect("failed to map direct mapping region");
+                }
+                kdebugln!(
+                    "mapped direct mapping region:\n\tvirtual page number {} ~ {},\n\tphysical page number {} ~ {}",
+                    range.start().to_hhdm(),
+                    range.end().to_hhdm(),
+                    range.start(),
+                    range.end(),
+                );
+            }
+        });
+        }
+
+        // reserved memory regions
+        {
+            sys_mem_zones().with_rsv_zones(|rsv_mem_zones| {
+                for zone in rsv_mem_zones.iter() {
+                    if zone.flags().is_mappable() {
+                        let range = zone.range();
+
+                    unsafe {
+                        mapper
+                            .map_overwrite(Mapping {
+                                vpn: range.start().to_hhdm(),
+                                ppn: range.start(),
+                                // TODO: for kvirt region, we may want to map with more fine-grained
+                                // permissions.
+                                flags: PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL,
+                                npages: range.npages() as usize,
+                                huge_pages: true,
+                            }).expect("failed to map reserved memory region");
+                    }
+                    kdebugln!(
+                        "mapped reserved memory region to hhdm:\n\tvirtual page number {} ~ {},\n\tphysical page number {} ~ {},\n\tflags = {:?}",
+                        range.start().to_hhdm(),
+                        range.end().to_hhdm(),
+                        range.start(),
+                        range.end(),
+                        zone.flags(),
+                    );
+                }
+            }});
+        }
+    }
+
     unsafe fn activate_addr_space(pgtbl: &PageTable) {
         let satp_val = ((satp::Mode::Sv39 as usize) << 60) | (pgtbl.root_ppn().get() as usize);
         unsafe {
