@@ -98,11 +98,8 @@ impl KPTable {
                     PteFlags::VALID | PteFlags::GLOBAL,
                     PagingArch::PAGE_LEVELS - 1,
                 );
+                allocated += 1;
             }
-            else{
-                kinfoln!("pgdir for kernel space index {} already allocated, skipping preallocation", index);
-            }
-            allocated += 1;
         }
         kinfoln!("preallocated {} pgdirs for kernel space", allocated);
     }

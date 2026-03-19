@@ -1,7 +1,5 @@
 use core::{cmp::min, marker::PhantomData, mem::ManuallyDrop};
 
-use fast_radix_trie::map;
-
 use crate::prelude::*;
 
 /// POD struct representing a mapping operation.
@@ -89,8 +87,9 @@ impl Mapper<'_> {
     /// Map a virtual memory region to a physical memory region with the given
     /// flags. Had encountered an already mapped page will cause an error to be
     /// returned, and all the successfully mapped pages will be rolled back.
-    /// 
-    /// Only global pages can be huge pages, or an [MmError::InvalidArgument] will be returned.
+    ///
+    /// Only global pages can be huge pages, or an [MmError::InvalidArgument]
+    /// will be returned.
     pub fn map(&mut self, mapping: Mapping) -> Result<(), MmError> {
         if mapping.huge_pages && !mapping.flags.contains(PteFlags::GLOBAL) {
             return Err(MmError::InvalidArgument);
@@ -193,8 +192,9 @@ impl Mapper<'_> {
     ///
     /// * Some **dangerous** operations, like overwrite mapping a global page,
     /// should be manually avoided.
-    /// 
-    /// * Only global pages can be huge pages, or an [MmError::InvalidArgument] will be returned.
+    ///
+    /// * Only global pages can be huge pages, or an [MmError::InvalidArgument]
+    ///   will be returned.
     pub unsafe fn map_overwrite(&mut self, mapping: Mapping) -> Result<(), MmError> {
         if mapping.huge_pages && !mapping.flags.contains(PteFlags::GLOBAL) {
             return Err(MmError::InvalidArgument);
