@@ -17,6 +17,7 @@ clean:
 [doc("clean the build artifacts of Anemone kernel, including the configuration files")]
 mrproper:
     @just xtask mrproper
+    @rm -f disk.img
 
 [doc("build Anemone kernel")]
 build:
@@ -30,6 +31,12 @@ conf *args:
 defconfig:
     @just log "DEFCONFIG" "Copying .defconfig to kconfig"
     @cp conf/.defconfig ./kconfig
+
+[doc("generate an empty disk image")]
+gendisk size:
+    @just log "GENDISK" "Generating disk image"
+    @rm -f disk.img
+    @fallocate -l {{ size }} disk.img
 
 [private]
 log topic msg:

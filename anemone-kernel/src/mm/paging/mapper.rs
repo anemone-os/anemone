@@ -278,6 +278,7 @@ impl Mapper<'_> {
 
         unsafe {
             match self.traverse(
+                range,
                 |pte, _ctx| {
                     let ppn = pte.ppn();
                     let pgdir = ppn
@@ -298,7 +299,7 @@ impl Mapper<'_> {
                 |pte, ctx| {
                     if range.covers(&VirtPageRange::new(
                         ctx.vpn,
-                        (1 << (ctx.level * PagingArch::PGDIR_IDX_BITS)) as u64,
+                        1u64 << (ctx.level * PagingArch::PGDIR_IDX_BITS),
                     )) {
                         if !pte.is_valid() {
                             kwarningln!(
@@ -412,11 +413,9 @@ impl Mapper<'_> {
     /// Use-after-free and double-free may happen if the branch and leaf
     /// operations deallocate page tables or page mappings. Caller must
     /// ensure that the operations are safe to perform.
-    ///
-    /// TODO: currently we traverse all Ptes, which is inefficient. we should
-    /// support traverse within a given vpn range.
     unsafe fn traverse<B, L, R>(
         &mut self,
+        range: VirtPageRange,
         branch_op: B,
         leaf_op: L,
         order: TraverseOrder,
@@ -429,6 +428,7 @@ impl Mapper<'_> {
         unsafe {
             Self::do_traverse(
                 self.root,
+                range,
                 &mut branch_op,
                 &mut leaf_op,
                 order,
@@ -451,6 +451,7 @@ impl Mapper<'_> {
     /// into.**
     unsafe fn do_traverse<B, L, R>(
         pgdir_ppn: PhysPageNum,
+        range: VirtPageRange,
         branch_op: &mut B,
         leaf_op: &mut L,
         order: TraverseOrder,
@@ -474,9 +475,21 @@ impl Mapper<'_> {
 
         for idx in 0..PagingArch::PTE_PER_PGDIR {
             let pte = &mut pgdir[idx];
-            let vpn_prefix = (vpn_prefix << vpn_bits) | (idx as u64);
 
             if !pte.is_branch() && !pte.is_leaf() {
+                continue;
+            }
+
+            let vpn_prefix = (vpn_prefix << vpn_bits) | (idx as u64);
+            let node_start_vpn = vpn_prefix << (level * vpn_bits);
+            let node_range = VirtPageRange::new(
+                Self::canonicalize_vpn(node_start_vpn),
+                1u64 << (level * vpn_bits),
+            );
+
+            // Prune the traversal tree early when this node's covered range
+            // doesn't overlap with the caller requested range.
+            if !range.intersects(&node_range) {
                 continue;
             }
 
@@ -492,6 +505,7 @@ impl Mapper<'_> {
                         match unsafe {
                             Self::do_traverse(
                                 pte.ppn(),
+                                range,
                                 branch_op,
                                 leaf_op,
                                 order,
@@ -507,6 +521,7 @@ impl Mapper<'_> {
                         match unsafe {
                             Self::do_traverse(
                                 pte.ppn(),
+                                range,
                                 branch_op,
                                 leaf_op,
                                 order,
@@ -526,12 +541,10 @@ impl Mapper<'_> {
             } else {
                 assert!(pte.is_leaf());
 
-                // `vpn_prefix` only contains visited indices. for huge-page leaves, lower-level
-                // indices are implicit zeros, so we must shift them back to get the correct
-                // vpn.
-                let leaf_start_vpn = vpn_prefix << (level * vpn_bits);
+                // `vpn_prefix` only contains visited indices. For huge-page leaves,
+                // lower-level indices are implicit zeros, so we shift them back.
                 let ctx = LeafCtx {
-                    vpn: Self::canonicalize_vpn(leaf_start_vpn),
+                    vpn: Self::canonicalize_vpn(node_start_vpn),
                     level,
                 };
                 match leaf_op(pte, ctx) {

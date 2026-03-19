@@ -43,7 +43,11 @@ static IPI_QUEUE: SpinLock<LinkedList<IpiMsgAdapter>> =
 
 /// Send an IPI to the target CPU, synchronously waiting for the IPI to be
 /// handled before returning.
-pub fn send_ipi(cpu_id: usize, payload: IpiPayload) {
+pub fn send_ipi(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
+    if unsafe { with_core_local_remote(cpu_id, |core_local| !core_local.online()) } {
+        return Err(IpiError::TargetOffline);
+    }
+
     let msg = IpiMsg::new(payload);
     let msg_ptr = unsafe { UnsafeRef::from_raw(&msg) };
     unsafe {
@@ -59,22 +63,34 @@ pub fn send_ipi(cpu_id: usize, payload: IpiPayload) {
         }
         core::hint::spin_loop();
     }
+
+    Ok(())
 }
 
 /// Broadcast an IPI to all other CPUs, synchronously waiting for all of them to
 /// handle the IPI before returning.
-pub fn broadcast_ipi(payload: IpiPayload) {
+pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
     let cur_cpuid = CpuArch::cur_cpu_id();
     let ncpus = CpuArch::ncpus();
+    for id in 0..ncpus {
+        if id != cur_cpuid {
+            if unsafe { with_core_local_remote(id, |core_local| !core_local.online()) } {
+                return Err(IpiError::TargetOffline);
+            }
+        }
+    }
     for id in 0..ncpus {
         if id != cur_cpuid {
             send_ipi(id, payload);
         }
     }
+    Ok(())
 }
 
 #[derive(Debug)]
-pub enum AsyncIpiError {
+pub enum IpiError {
+    TargetOffline,
+    /// This error can only happen when sending an asynchronous IPI.
     NoAvailableBuffer,
 }
 
@@ -122,8 +138,12 @@ fn alloc_avail_buf() -> Option<NonNull<IpiMsg>> {
 }
 
 /// Send an IPI to the target CPU asynchronously.
-pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), AsyncIpiError> {
-    let mut buf_ptr = alloc_avail_buf().ok_or(AsyncIpiError::NoAvailableBuffer)?;
+pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
+    if unsafe { with_core_local_remote(cpu_id, |core_local| !core_local.online()) } {
+        return Err(IpiError::TargetOffline);
+    }
+
+    let mut buf_ptr = alloc_avail_buf().ok_or(IpiError::NoAvailableBuffer)?;
     unsafe { buf_ptr.as_mut().payload = payload };
     let buf_ptr = unsafe { UnsafeRef::from_raw(buf_ptr.as_ptr()) };
 
@@ -139,9 +159,17 @@ pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), AsyncIpi
 }
 
 /// Broadcast an IPI to all other CPUs asynchronously.
-pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), AsyncIpiError> {
+pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
     // check whether empty buffers are enough
     let ncpus = CpuArch::ncpus();
+    for id in 0..ncpus {
+        if id != CpuArch::cur_cpu_id() {
+            if unsafe { with_core_local_remote(id, |core_local| !core_local.online()) } {
+                return Err(IpiError::TargetOffline);
+            }
+        }
+    }
+
     let mut navail_bufs = 0;
     MSG_BUFFERS.with(|buffers| {
         for (id, buf) in buffers[..ncpus].iter().enumerate() {
@@ -154,7 +182,7 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), AsyncIpiError> {
         }
     });
     if navail_bufs < ncpus - 1 {
-        return Err(AsyncIpiError::NoAvailableBuffer);
+        return Err(IpiError::NoAvailableBuffer);
     }
     let mut sent_bufs = 0;
     MSG_BUFFERS.with_mut(|buffers| {

@@ -204,7 +204,7 @@ fn test_gendisk() {
 
     if let Some(gendisk) = gendisk {
         gendisk
-            .write_block(0, [42].repeat(512).as_slice())
+            .write_block(0, [39].repeat(512).as_slice())
             .expect("failed to write block");
     }
 }

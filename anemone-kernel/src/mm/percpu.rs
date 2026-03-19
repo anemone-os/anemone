@@ -118,12 +118,14 @@ where
 pub struct CoreLocal {
     // cur_task
     cpu_id: usize,
+    online: bool,
     preempt_counter: PreemptCounter,
 }
 
 impl CoreLocal {
     pub const ZEROED: Self = Self {
         cpu_id: 0,
+        online: false,
         preempt_counter: PreemptCounter::ZEROED,
     };
 
@@ -137,6 +139,15 @@ impl CoreLocal {
 
     pub fn preempt_counter_mut(&mut self) -> &mut PreemptCounter {
         &mut self.preempt_counter
+    }
+
+    pub fn online(&self) -> bool {
+        self.online
+    }
+
+    pub fn login(&mut self) {
+        self.online = true;
+        core::sync::atomic::fence(Ordering::SeqCst);
     }
 }
 
@@ -199,12 +210,13 @@ pub unsafe fn bsp_init<A: FnOnce(usize) -> PhysPageNum>(bsp_id: usize, alloc_fol
         }
     }
 
-    core::sync::atomic::fence(Ordering::SeqCst);
+    with_core_local_mut(|core_local| core_local.login());
 }
 
 pub unsafe fn ap_init(ap_id: usize) {
     unsafe {
         let base = PERCPU_BASES[ap_id];
         CpuArch::set_percpu_base(core::ptr::with_exposed_provenance_mut(base));
+        with_core_local_mut(|core_local| core_local.login());
     }
 }
