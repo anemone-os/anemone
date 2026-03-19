@@ -79,6 +79,9 @@ impl From<PteFlags> for RiscV64PteFlags {
         if flags.contains(PteFlags::USER) {
             result |= RiscV64PteFlags::USER;
         }
+        if flags.contains(PteFlags::GLOBAL) {
+            result |= RiscV64PteFlags::GLOBAL;
+        }
         // Ignore CACHED and STRONG bits.
         result
     }
@@ -101,6 +104,9 @@ impl From<RiscV64PteFlags> for PteFlags {
         }
         if flags.contains(RiscV64PteFlags::USER) {
             result |= PteFlags::USER;
+        }
+        if flags.contains(RiscV64PteFlags::GLOBAL) {
+            result |= PteFlags::GLOBAL;
         }
         result
     }
@@ -144,8 +150,8 @@ impl PteArch for RiscV64Pte {
                 RiscV64PteFlags::READ | RiscV64PteFlags::WRITE | RiscV64PteFlags::EXECUTE,
             )
     }
-    
-    fn is_empty(&self) -> bool{
+
+    fn is_empty(&self) -> bool {
         self.get() == Self::ZEROED.get()
     }
 }

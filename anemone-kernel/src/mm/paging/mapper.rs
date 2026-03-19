@@ -87,7 +87,13 @@ impl Mapper<'_> {
     /// Map a virtual memory region to a physical memory region with the given
     /// flags. Had encountered an already mapped page will cause an error to be
     /// returned, and all the successfully mapped pages will be rolled back.
+    ///
+    /// Only global pages can be huge pages, or an [MmError::InvalidArgument]
+    /// will be returned.
     pub fn map(&mut self, mapping: Mapping) -> Result<(), MmError> {
+        if mapping.huge_pages && !mapping.flags.contains(PteFlags::GLOBAL) {
+            return Err(MmError::InvalidArgument);
+        }
         #[derive(Debug)]
         struct MapTransaction<'a, 'm> {
             mapper: &'a mut Mapper<'m>,
@@ -178,12 +184,21 @@ impl Mapper<'_> {
     ///
     /// # Safety
     ///
-    /// **No atomicity guarantees**
+    /// * **No atomicity guarantees**
     ///
-    /// Unless user can ensure success of the operation, it is
+    /// * Unless user can ensure success of the operation, it is
     /// always recommended to first unmap the virtual address and then map
     /// it again, instead of using overwrite mapping directly.
+    ///
+    /// * Some **dangerous** operations, like overwrite mapping a global page,
+    /// should be manually avoided.
+    ///
+    /// * Only global pages can be huge pages, or an [MmError::InvalidArgument]
+    ///   will be returned.
     pub unsafe fn map_overwrite(&mut self, mapping: Mapping) -> Result<(), MmError> {
+        if mapping.huge_pages && !mapping.flags.contains(PteFlags::GLOBAL) {
+            return Err(MmError::InvalidArgument);
+        }
         let Mapping {
             vpn,
             ppn,
@@ -241,6 +256,14 @@ impl Mapper<'_> {
     /// intact**, as we don't want allocate new page tables for
     ///     splitting the large page, which may cause errors that we don't want
     /// to handle.
+    /// # Rules
+    ///  * Global Pages won't be unmapped, and will be left intact.
+    ///  * Huge pages that are not fully covered by the unmapping range won't be
+    ///    unmapped.
+    ///  * Empty page tables, except those marked as global, will be
+    ///    deallocated.
+    ///  * Unmapping an already unmapped page is considered a no-op, but will
+    ///    cause a warning to be printed.
     ///
     /// **This method is deliberately designed not to return a [Result] but
     /// always succeed.**
@@ -249,8 +272,6 @@ impl Mapper<'_> {
     ///
     /// This method is unsafe because it cannot always fully unmap
     ///     mappings within the given range.
-    ///
-    /// It is only safe when used for rolling back a mapping operation.
     pub unsafe fn try_unmap(&mut self, unmapping: Unmapping) {
         let Unmapping { range } = unmapping;
 
@@ -265,7 +286,7 @@ impl Mapper<'_> {
                         .as_ref()
                         .expect("pgdir ppn should not be null");
 
-                    if pgdir.is_empty() {
+                    if pgdir.is_empty() && !pte.is_global() {
                         // deallocate the empty page table
                         let ppn = pte.ppn();
                         *pte = Pte::ZEROED;
@@ -284,7 +305,9 @@ impl Mapper<'_> {
                                 ctx.vpn
                             );
                         }
-                        *pte = Pte::ZEROED;
+                        if !pte.is_global() {
+                            *pte = Pte::ZEROED;
+                        }
                     }
 
                     ControlFlow::Continue
@@ -601,7 +624,15 @@ impl Mapper<'_> {
                     // all allocated frames will be deallocated automatically.
                     let new_pgdir_ppn = alloc_frame_zeroed().ok_or(MmError::OutOfMemory)?.leak();
 
-                    *pte = Pte::new(new_pgdir_ppn, PteFlags::VALID, level);
+                    *pte = Pte::new(
+                        new_pgdir_ppn,
+                        if flags.contains(PteFlags::GLOBAL) {
+                            PteFlags::VALID | PteFlags::GLOBAL
+                        } else {
+                            PteFlags::VALID
+                        },
+                        level,
+                    );
                 }
                 pgdir = unsafe {
                     pte.ppn()

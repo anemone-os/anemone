@@ -30,50 +30,66 @@ impl PagingArchTrait for Sv39PagingArch {
         }
     }
 
-    fn prealloc_pgdirs_for_region(pgtbl: &mut PageTable, range: VirtPageRange) {
-        let svpn = range.start();
-        let npages = range.npages() as usize;
-        kdebugln!(
-            "range: [{:#x}, {:#x})",
-            range.start().get(),
-            range.end().get()
-        );
-        debug_assert!(
-            svpn.get()
-                .is_multiple_of(Sv39PagingArch::NPAGES_PER_GB as u64)
-        );
-        debug_assert!(npages.is_multiple_of(Sv39PagingArch::NPAGES_PER_GB));
+    fn setup_direct_mapping_region(kptable: &mut PageTable) {
+        let mut mapper = kptable.mapper();
 
-        // in sv39, a lv.2 pgdir can map 1GB of virtual memory, so we only need
-        // to preallocate lv.2 pgdirs for the given region
+        {
+            sys_mem_zones().with_avail_zones(|avail_mem_zones| {
+            for zone in avail_mem_zones.iter() {
+                let range = zone.range();
 
-        let ngigabytes = npages / Sv39PagingArch::NPAGES_PER_GB;
+                unsafe {
+                    mapper
+                        .map_overwrite(Mapping {
+                            vpn: range.start().to_hhdm(),
+                            ppn: range.start(),
+                            flags: PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL,
+                            npages: range.npages() as usize,
+                            huge_pages: true,
+                        })
+                        .expect("failed to map direct mapping region");
+                }
+                kdebugln!(
+                    "mapped direct mapping region:\n\tvirtual page number {} ~ {},\n\tphysical page number {} ~ {},\n\tflags = {:?}",
+                    range.start().to_hhdm(),
+                    range.end().to_hhdm(),
+                    range.start(),
+                    range.end(),
+                    PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL,
+                );
+            }
+        });
+        }
 
-        let root_kpgdir = unsafe {
-            pgtbl
-                .root_ppn()
-                .to_phys_addr()
-                .to_hhdm()
-                .as_ptr_mut::<RiscV64PgDir>()
-                .as_mut()
-                .expect("pgdir ppn should not be null")
-        };
-
-        // Sv39 root pgdir index is VPN[2], i.e. the highest 9 bits in VPN.
-        let root_idx_base = ((svpn.get()
-            >> ((Sv39PagingArch::PAGE_LEVELS - 1) * Sv39PagingArch::PGDIR_IDX_BITS))
-            & (Sv39PagingArch::PTE_PER_PGDIR as u64 - 1)) as usize;
-
-        for i in 0..ngigabytes {
-            let pgdir_idx = root_idx_base + i;
-
-            let pgdir_ppn = alloc_frame_zeroed()
-                .expect("failed to allocate frame for preallocating page directory")
-                .leak();
-
-            // a single V bit is enough
-            debug_assert!(root_kpgdir[pgdir_idx].is_empty());
-            root_kpgdir[pgdir_idx] = RiscV64Pte::arch_new(pgdir_ppn, RiscV64PteFlags::VALID);
+        // reserved memory regions
+        {
+            sys_mem_zones().with_rsv_zones(|rsv_mem_zones| {
+                for zone in rsv_mem_zones.iter() {
+                    if zone.flags().is_mappable() {
+                        let range = zone.range();
+                        unsafe {
+                            mapper
+                                .map_overwrite(Mapping {
+                                    vpn: range.start().to_hhdm(),
+                                    ppn: range.start(),
+                                    // TODO: for kvirt region, we may want to map with more fine-grained
+                                    // permissions.
+                                    flags: PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL,
+                                    npages: range.npages() as usize,
+                                    huge_pages: true,
+                                }).expect("failed to map reserved memory region");
+                        }
+                        kdebugln!(
+                            "mapped reserved memory region to hhdm:\n\tvirtual page number {} ~ {},\n\tphysical page number {} ~ {},\n\tflags = {:?}",
+                            range.start().to_hhdm(),
+                            range.end().to_hhdm(),
+                            range.start(),
+                            range.end(),
+                            zone.flags(),
+                        );
+                    }
+                }
+            });
         }
     }
 
