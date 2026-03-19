@@ -142,7 +142,7 @@ impl Mapper<'_> {
                         let next_ppn = PhysPageNum::new(ppn.get() + index as u64);
                         unsafe {
                             self.mapper
-                                .map_one(next_vpn, next_ppn, flags, level, true)?;
+                                .map_one(next_vpn, next_ppn, flags, level, false)?;
                         }
                         self.mapped_pages += level_page_size;
                         index += level_page_size;
@@ -362,7 +362,7 @@ impl Mapper<'_> {
                     // huge page
                     let level_offset = level * vpn_bits;
                     let level_mask = (1 << level_offset) - 1;
-                    let page_offset = vpn.get() & !level_mask;
+                    let page_offset = vpn.get() & level_mask;
                     let ppn_value = pte.ppn().get();
                     debug_assert!(ppn_value & level_mask == 0);
                     return Some(Translated {
@@ -523,8 +523,13 @@ impl Mapper<'_> {
                 }
             } else {
                 assert!(pte.is_leaf());
+
+                // `vpn_prefix` only contains visited indices. for huge-page leaves, lower-level
+                // indices are implicit zeros, so we must shift them back to get the correct
+                // vpn.
+                let leaf_start_vpn = vpn_prefix << (level * vpn_bits);
                 let ctx = LeafCtx {
-                    vpn: Self::canonicalize_vpn(vpn_prefix),
+                    vpn: Self::canonicalize_vpn(leaf_start_vpn),
                     level,
                 };
                 match leaf_op(pte, ctx) {
@@ -616,6 +621,11 @@ impl Mapper<'_> {
             } else {
                 // branch
                 if !pte.is_branch() {
+                    if pte.is_leaf() && !overwrite {
+                        // huge page exists.
+                        return Err(MmError::AlreadyMapped);
+                    }
+
                     // allocate a new pgdir
 
                     // no need to undo all previous frame allocations if this fails,
