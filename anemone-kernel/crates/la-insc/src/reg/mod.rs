@@ -6,6 +6,7 @@ pub mod exception;
 pub mod iocsr;
 pub mod pwc;
 pub mod ipi;
+pub mod timer;
 
 /// Use this macro to generate compact bitfield accessors for a 64-bit value
 /// stored in `self.0`.

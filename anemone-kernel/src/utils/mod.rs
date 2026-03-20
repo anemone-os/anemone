@@ -10,6 +10,7 @@ pub mod writer;
 pub mod as_container;
 pub mod identity;
 pub mod prv_data;
+pub mod mmio;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Todo;

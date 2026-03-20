@@ -4,6 +4,7 @@ use crate::reg::{
     dmw::Dmw,
     exception::{Ecfg, Estat},
     pwc::{Pwch, Pwcl},
+    timer::Tcfg,
 };
 
 macro_rules! define_csr {
@@ -169,3 +170,7 @@ define_csr!(32, pwch, 0x1d, Pwch);
 define_csr!(64, pgdl, 0x19);
 define_csr!(64, pgdh, 0x1a);
 define_csr!(64, pgd, 0x1b);
+
+define_csr!(32, tid, 0x40);
+define_csr!(32, ticlr, 0x44);
+define_csr!(64, tcfg, 0x41, Tcfg);

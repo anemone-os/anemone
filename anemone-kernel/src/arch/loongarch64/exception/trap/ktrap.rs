@@ -139,7 +139,9 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
             .unwrap_or_else(|_| panic!("unknown interrupt with flag {:?}", intr_flags));
         match reason {
             LA64Interrupt::Timer => {
-                panic!("Timer is not initialized currently.");
+                kdebugln!("received timer interrupt");
+                TimeArch::claim_timer_interrupt();
+                TimeArch::set_next_trigger(300_000_0);
             },
             LA64Interrupt::Ipi => {
                 handle_ipi();

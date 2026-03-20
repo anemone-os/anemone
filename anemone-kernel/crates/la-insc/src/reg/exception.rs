@@ -44,16 +44,16 @@ bitflags! {
     pub struct IntrFlags: u16 {
         const SoftwareIntr0 = 1 << 0;
         const SoftwareIntr1 = 1 << 1;
-        const InterProessorIntr = 1 << 2;
-        const TimerIntr = 1 << 3;
-        const PerfMonOverflowIntr = 1 << 4;
-        const HardwareIntr0 = 1 << 5;
-        const HardwareIntr1 = 1 << 6;
+        const InterProessorIntr = 1 << 12;
+        const TimerIntr = 1 << 11;
+        const PerfMonOverflowIntr = 1 << 10;
+        const HardwareIntr0 = 1 << 9;
+        const HardwareIntr1 = 1 << 8;
         const HardwareIntr2 = 1 << 7;
-        const HardwareIntr3 = 1 << 8;
-        const HardwareIntr4 = 1 << 9;
-        const HardwareIntr5 = 1 << 10;
-        const HardwareIntr6 = 1 << 11;
-        const HardwareIntr7 = 1 << 12;
+        const HardwareIntr3 = 1 << 6;
+        const HardwareIntr4 = 1 << 5;
+        const HardwareIntr5 = 1 << 4;
+        const HardwareIntr6 = 1 << 3;
+        const HardwareIntr7 = 1 << 2;
     }
 }
