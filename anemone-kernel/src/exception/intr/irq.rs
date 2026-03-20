@@ -6,6 +6,7 @@
 
 use core::fmt::Debug;
 
+use alloc::slice;
 use spin::Lazy;
 
 use crate::{
@@ -145,10 +146,36 @@ pub enum IrqTriggerType {
     Level,
 }
 
+impl IrqTriggerType {
+    pub fn from_linux_convention(value: u32) -> Option<Self> {
+        match value {
+            1 | 2 | 3 => Some(Self::Edge),
+            4 | 8 => Some(Self::Level),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct InterruptInfo {
     pub hwirq: HwIrq,
     pub trigger: IrqTriggerType,
+}
+
+impl InterruptInfo {
+    pub fn parse_2_cell_specifier(specifier: InterruptSpecifier<'_>) -> Option<Self> {
+        if specifier.raw.len() != 8 {
+            return None;
+        }
+        let hwirq = HwIrq::new(u32::from_be_bytes(specifier.raw[0..4].try_into().ok()?) as usize);
+        let trigger_type = IrqTriggerType::from_linux_convention(u32::from_be_bytes(
+            specifier.raw[4..8].try_into().ok()?,
+        ))?;
+        Some(Self {
+            hwirq,
+            trigger: trigger_type,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -300,14 +327,13 @@ pub fn request_irq(
     let domain = find_irq_domain_by_fwnode(ic.as_ref()).expect("ic exists but no domain found");
     let ops = domain.ops.read_irqsave();
     let intr_info_raw = fwnode.interrupt_info().ok_or(DevError::NoInterruptInfo)?;
-
+    kdebugln!("request intr info");
     let InterruptInfo { hwirq, trigger } = ops
         .xlate(InterruptSpecifier {
             fwnode,
             raw: intr_info_raw,
         })
         .ok_or(DevError::InvalidInterruptInfo)?;
-
     drop(ops);
 
     let virq = if let Some(_) = domain.hw2virt(hwirq) {

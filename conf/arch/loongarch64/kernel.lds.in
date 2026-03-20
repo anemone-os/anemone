@@ -16,7 +16,7 @@ MEMORY {
 }
 
 SECTIONS {
-
+    
     .text : ALIGN(4K) {
         __skernel = .;
         __stext = .;
@@ -29,6 +29,7 @@ SECTIONS {
         __srodata = .;
         *(.rodata .rodata.*)
         *(.srodata .srodata.*)
+        . = ALIGN(4K);
         __skunit = .;
         *(.kunit .kunit.*)
         __ekunit = .;

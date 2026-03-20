@@ -132,7 +132,7 @@ impl SysRemaps {
                 vpn: virt_range.start(),
                 ppn: phys_range.start(),
                 npages,
-                flags: PteFlags::READ | PteFlags::WRITE,
+                flags: PteFlags::READ | PteFlags::WRITE | PteFlags::NONCACHE | PteFlags::STRONG,
                 huge_pages: false,
             })
             .map_err(|e| {

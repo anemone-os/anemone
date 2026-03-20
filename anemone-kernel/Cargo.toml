@@ -21,7 +21,7 @@ heapless = { workspace = true }
 hashbrown = { workspace = true }
 bimap = { workspace = true }
 fast_radix_trie = { workspace = true }
-safe-mmio.workspace = true
+safe-mmio = { workspace = true }
 la-insc = { path = "crates/la-insc" }
 buddy-system = { path = "crates/buddy-system", features = ["stats"] }
 device-tree = { path = "crates/device-tree", features = ["alloc"] }

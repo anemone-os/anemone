@@ -5,7 +5,7 @@ pub(super) mod exception;
 
 pub(super) mod mm;
 pub(super) mod time;
-
+mod machine;
 mod bootstrap;
 
 pub use cpu::La64CpuArch as CpuArch;

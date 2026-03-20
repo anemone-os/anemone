@@ -21,8 +21,6 @@ pub fn gen_qemu_cmd(qemu: &Qemu, args: Option<&QemuArgs>) -> std::process::Comma
     let mut cmd = std::process::Command::new(&qemu.qemu);
     cmd.arg("-machine")
         .arg(&qemu.machine)
-        .arg("-cpu")
-        .arg(&qemu.cpu)
         .arg("-smp")
         .arg(qemu.smp.to_string())
         .arg("-m")
@@ -33,6 +31,9 @@ pub fn gen_qemu_cmd(qemu: &Qemu, args: Option<&QemuArgs>) -> std::process::Comma
                 .map(|args| args.as_slice())
                 .unwrap_or(&[]),
         );
+    if let Some(cpu) = &qemu.cpu {
+        cmd.arg("-cpu").arg(cpu);
+    }
     if let Some(args) = args {
         cmd.arg("-kernel").arg(args.image.clone());
     }

@@ -50,7 +50,8 @@ RUN apt update && apt install -y \
     build-essential \
     python3 \
     python3-pip \
-    curl
+    curl \
+    dtc
 ENV RUSTUP_HOME=/opt/rust/rustup \
     CARGO_HOME=/opt/rust/cargo \
     PATH="/opt/rust/cargo/bin:${PATH}"

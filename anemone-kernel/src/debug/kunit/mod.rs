@@ -28,8 +28,16 @@ pub fn kunit_runner() {
             __skunit as *const () as usize,
             __ekunit as *const () as usize,
         );
-        assert!(start.is_multiple_of(align_of::<KUnit>()));
-        assert!((end - start).is_multiple_of(size_of::<KUnit>()));
+        assert!(
+            start.is_multiple_of(align_of::<KUnit>()),
+            "KUnit start address({:#x}) is not properly aligned",
+            start
+        );
+        assert!(
+            (end - start).is_multiple_of(size_of::<KUnit>()),
+            "KUnit end address({:#x}) is not properly aligned",
+            end
+        );
         let kunit_count = (end - start) / size_of::<KUnit>();
         core::slice::from_raw_parts(start as *const KUnit, kunit_count)
     };

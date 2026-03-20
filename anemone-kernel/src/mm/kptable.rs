@@ -12,13 +12,13 @@ use spin::Lazy;
 
 use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 
-static KERNEL_PTABLE: KPTable = KPTable::new();
+pub static KERNEL_PTABLE: KPTable = KPTable::new();
 
 /// Nothing more than [crate::PageTable]. Just provides some specialized methods
 /// for mapping kernel memory regions, and serves as a marker type for the
 /// kernel's root page directory.
 #[derive(Debug)]
-struct KPTable {
+pub struct KPTable {
     ptable: Lazy<SpinLock<PageTable>>,
 }
 
@@ -98,6 +98,7 @@ impl KPTable {
                     PteFlags::VALID | PteFlags::GLOBAL,
                     PagingArch::PAGE_LEVELS - 1,
                 );
+                kdebugln!("preallocated pgdir for kernel space: index {}, ppn {:#x}", index, ppn.get());
                 allocated += 1;
             }
         }
@@ -122,6 +123,12 @@ impl KPTable {
         let mut kpgdir = self.ptable.lock_irqsave();
         let mapper = kpgdir.mapper();
         mapper.translate(vpn)
+    }
+
+    pub fn dump(&self) {
+        let kpgdir = self.ptable.lock_irqsave();
+        kdebugln!("dumping kernel page table...");
+        kpgdir.dump();
     }
 }
 

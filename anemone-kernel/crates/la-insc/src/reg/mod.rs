@@ -2,23 +2,20 @@ pub mod asid;
 pub mod crmd;
 pub mod csr;
 pub mod dmw;
-pub mod pwc;
 pub mod exception;
+pub mod iocsr;
+pub mod pwc;
+pub mod ipi;
 
 /// Use this macro to generate compact bitfield accessors for a 64-bit value
 /// stored in `self.0`.
 ///
 /// Variants:
 /// - **`bitflags`**: Create typed getter and setter using a bitflags-like type.
-///   
-///     Invoke as 
-///     ```
-///     impl_bits64!(bitflags, <basetype>, <name>, <BitflagsType>, <start>, <end>) 
-///     ```
-///     
-///     Provide `<basetype>` for casting (for example `u8`),
-///         and supply a bitflags type that implements `bits() -> uN` and
-///         `from_bits_retain(uN)`.
+///   Invoke as ``` impl_bits64!(bitflags, <basetype>, <name>, <BitflagsType>,
+///   <start>, <end>) ```  Provide `<basetype>` for casting (for example `u8`),
+///   and supply a bitflags type that implements `bits() -> uN` and
+///   `from_bits_retain(uN)`.
 ///
 /// - **`value`**: Create typed getter and setter for a wrapper/value type that
 ///   converts to/from a raw integer.
@@ -117,8 +114,8 @@ macro_rules! impl_bits64 {
 ///
 ///     Invoke as
 ///     ```
-///     impl_bits32!(bitflags, <basetype>, <name>, <BitflagsType>, <start>, <end>)
-///     ```
+///     impl_bits32!(bitflags, <basetype>, <name>, <BitflagsType>, <start>,
+/// <end>)     ```
 ///
 ///     Provide `<basetype>` for casting (for example `u8`),
 ///         and supply a bitflags type that implements `bits() -> uN` and
@@ -222,7 +219,8 @@ macro_rules! impl_bits32 {
 /// ```.
 ///
 /// This expands to:
-/// - `set_<field_name>(value: <FieldType>)`: read CSR, update field, write back.
+/// - `set_<field_name>(value: <FieldType>)`: read CSR, update field, write
+///   back.
 /// - `read_<field_name>() -> <FieldType>`: read CSR and return field value.
 ///
 /// The referenced `csr::<csr_module>` module must provide:
@@ -248,6 +246,5 @@ macro_rules! impl_rw {
                 crmd_csr.$name()
             }
         }
-
     };
 }
