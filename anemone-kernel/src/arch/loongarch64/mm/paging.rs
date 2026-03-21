@@ -9,7 +9,7 @@ use la_insc::{
     insc::{InvtlbType, invtlb},
     reg::{
         asid,
-        csr::{pgdh, pgdl, tlbrentry},
+        csr::{pgdh, pgdl},
     },
     utils::{mem::MemAccessType, privl::PrivilegeLevel},
 };
@@ -73,7 +73,7 @@ pub struct LA64PageDirectory {
 }
 
 /// Create a bootstrap page table.
-/// 
+///
 /// TODO: support different page size and more mapping types
 pub const fn create_bootstrap_ptable() -> LA64PageDirectory {
     let mut pdir = LA64PageDirectory::ZEROED;
@@ -381,14 +381,16 @@ impl LA64PteFlags {
     /// Convert generic [PteFlags] into LoongArch-specific [LA64PteFlags].
     ///
     /// Entry kind specific mapping:
-    /// - If `in_leaf_table` is `true`, set [LA64PteFlags::IN_LEAF_TABLE].
-    ///   For valid entries, also set [LA64PteFlags::LA_VALID] and
-    ///   [LA64PteFlags::P_EXIST]. If global, set [LA64PteFlags::LA_COMMON_GLOBAL].
-    /// 
-    /// - If `in_leaf_table` is `false` and `value.is_leaf()` is `true`, treat it
-    ///   as a huge page entry and set [LA64PteFlags::LA_HUGE]. For valid entries,
-    ///   also set [LA64PteFlags::LA_VALID] and [LA64PteFlags::P_EXIST]. If global,
-    ///   set [LA64PteFlags::LA_HUGE_GLOBAL].
+    /// - If `in_leaf_table` is `true`, set [LA64PteFlags::IN_LEAF_TABLE]. For
+    ///   valid entries, also set [LA64PteFlags::LA_VALID] and
+    ///   [LA64PteFlags::P_EXIST]. If global, set
+    ///   [LA64PteFlags::LA_COMMON_GLOBAL].
+    ///
+    /// - If `in_leaf_table` is `false` and `value.is_leaf()` is `true`, treat
+    ///   it as a huge page entry and set [LA64PteFlags::LA_HUGE]. For valid
+    ///   entries, also set [LA64PteFlags::LA_VALID] and
+    ///   [LA64PteFlags::P_EXIST]. If global, set
+    ///   [LA64PteFlags::LA_HUGE_GLOBAL].
     pub fn from(value: PteFlags, in_leaf_table: bool) -> Self {
         let mut flags = LA64PteFlags::empty();
         if value.contains(PteFlags::VALID) {

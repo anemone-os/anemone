@@ -158,7 +158,7 @@ impl CoreIrqChip for LA7A1000Platic {
 }
 
 impl LA7A1000Platic {
-    fn regs<'a>(&self) -> PlaticRegisters<'a> {
+    fn regs<'a>(&'a self) -> PlaticRegisters<'a> {
         unsafe {
             PlaticRegisters {
                 base: self.remap.as_ptr().as_ptr().cast(),

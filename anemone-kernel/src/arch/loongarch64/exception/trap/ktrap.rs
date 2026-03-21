@@ -17,8 +17,8 @@ core::arch::global_asm!(
     "   addi.d $sp, $sp, -{trapframe_bytes}",
     "   st.d $r0, $sp, 0",
     "   st.d $r1, $sp, 8",
+    "   st.d $r2, $sp, 24",
     // skip sp
-    "   st.d $r3, $sp, 24",
     "   st.d $r4, $sp, 32",
     "   st.d $r5, $sp, 40",
     "   st.d $r6, $sp, 48",
@@ -68,8 +68,8 @@ core::arch::global_asm!(
     // $sp should still point to the trapframe on the stack.
     "   ld.d $r0, $sp, 0",
     "   ld.d $r1, $sp, 8",
+    "   ld.d $r2, $sp, 24",
     // skip $sp
-    "   ld.d $r3, $sp, 24",
     "   ld.d $r4, $sp, 32",
     // skip $t0 which is used for temporary storage later
     "   ld.d $r6, $sp, 48",

@@ -51,7 +51,11 @@ RUN apt update && apt install -y \
     python3 \
     python3-pip \
     curl \
-    dtc
+    libglib2.0-0
+    
+COPY --from=build_qemu /opt/qemu /opt/qemu
+ENV PATH="/opt/qemu/bin:${PATH}"
+
 ENV RUSTUP_HOME=/opt/rust/rustup \
     CARGO_HOME=/opt/rust/cargo \
     PATH="/opt/rust/cargo/bin:${PATH}"

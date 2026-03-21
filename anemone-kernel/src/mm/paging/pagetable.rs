@@ -51,30 +51,3 @@ impl Drop for PageTable {
         let _frame = unsafe { OwnedFrameHandle::from_ppn(self.root) };
     }
 }
-
-impl PageTable {
-    pub fn dump(&self) {
-        let root_pgdir = unsafe { &*(self.root.to_hhdm().to_virt_addr().get() as *const PgDir) };
-        Self::dump_dir(0, root_pgdir, 0);
-    }
-    fn dump_dir(tab: usize, pgdir: &PgDir, level: usize) {
-        for i in 0..PagingArch::PTE_PER_PGDIR {
-            let entry = &pgdir[i];
-            if !entry.is_valid() {
-                continue;
-            }
-            kdebug!("");
-            for _ in 0..tab {
-                kprint!("\t");
-            }
-            if entry.is_leaf() {
-                kprintln!("[{}]({:#x}) LEAF -> {:?}", i, entry.get(), entry);
-            } else {
-                kprintln!("[{}]({:#x}) DIR -> {:?}", i, entry.get(), entry);
-                let next_pgdir =
-                    unsafe { &*(entry.ppn().to_hhdm().to_virt_addr().get() as *const PgDir) };
-                Self::dump_dir(tab + 1, next_pgdir, level + 1);
-            }
-        }
-    }
-}

@@ -124,12 +124,6 @@ impl KPTable {
         let mapper = kpgdir.mapper();
         mapper.translate(vpn)
     }
-
-    pub fn dump(&self) {
-        let kpgdir = self.ptable.lock_irqsave();
-        kdebugln!("dumping kernel page table...");
-        kpgdir.dump();
-    }
 }
 
 /// Initialize the kernel mapping, i.e., map all the necessary kernel memory
