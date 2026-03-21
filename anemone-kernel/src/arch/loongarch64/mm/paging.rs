@@ -1,10 +1,9 @@
+use crate::prelude::*;
+use alloc::boxed::Box;
 use core::{
     fmt::Debug,
     ops::{Index, IndexMut},
 };
-
-use crate::prelude::*;
-use alloc::boxed::Box;
 use la_insc::{
     impl_bits64,
     insc::{InvtlbType, invtlb},
@@ -73,6 +72,9 @@ pub struct LA64PageDirectory {
     entries: [LA64PageTableEntry; LA64PagingArch::PTE_PER_PGDIR],
 }
 
+/// Create a bootstrap page table.
+/// 
+/// TODO: support different page size and more mapping types
 pub const fn create_bootstrap_ptable() -> LA64PageDirectory {
     let mut pdir = LA64PageDirectory::ZEROED;
 
@@ -345,15 +347,19 @@ bitflags! {
         /// while PRLV=1, this PTE can only be accessed by programs whose privilege level equals PLV.
         const RPLV = 1 << (u64::BITS - 1);
 
+        /// All flags in a common entry
         const ALL_COMMON =  Self::VALID.bits() | Self::DIRTY.bits() | Self::P_EXIST.bits() |
                             Self::WRITE.bits() | Self::IN_LEAF_TABLE.bits() | Self::GLOBAL.bits() |
                             Self::LA_COMMON_GLOBAL.bits() |Self::NREAD.bits() | Self::NEXEC.bits() |
                             Self::RPLV.bits();
 
+        /// All flags in a huge entry
         const ALL_HUGE   =  Self::VALID.bits() | Self::DIRTY.bits() | Self::P_EXIST.bits() |
                             Self::WRITE.bits() | Self::IN_LEAF_TABLE.bits() | Self::GLOBAL.bits() |
                             Self::LA_HUGE.bits() | Self::LA_HUGE_GLOBAL.bits() |Self::NREAD.bits() |
                             Self::NEXEC.bits() | Self::RPLV.bits();
+
+        /// Bootstrap entry flags
         const BOOTSTRAP_KERNEL =
             Self::VALID.bits()
             | Self::LA_VALID.bits()
@@ -372,20 +378,17 @@ impl LA64PteFlags {
     //   non-huge + global -> none
     //   huge + non-global -> LA_HUGE
 
-    /// Convert generic PteFlags to LA64PteFlags.
+    /// Convert generic [PteFlags] into LoongArch-specific [LA64PteFlags].
     ///
-    /// Only [PteFlags::VALID], [PteFlags::READ], [PteFlags::WRITE] and
-    /// [PteFlags::EXECUTE] flags are recognized.     Other flags are
-    /// ignored since they are not contained in [LA64PteFlags]. They must be
-    /// manually handled.
-    ///
-    /// * If none of [PteFlags::READ], [PteFlags::WRITE] or [PteFlags::EXECUTE]
-    ///   is set, the resulting LA64PteFlags will have the [LA64PteFlags::DIR]
-    ///   flag set, indicating it's a directory entry.
-    /// * Otherwise, the corresponding [LA64PteFlags::NREAD],
-    ///   [LA64PteFlags::DIRTY] and [LA64PteFlags::NEXEC] flags will be set
-    ///   according to the absence of READ, presence of WRITE and absence of
-    ///   EXECUTE flags in the input PteFlags.
+    /// Entry kind specific mapping:
+    /// - If `in_leaf_table` is `true`, set [LA64PteFlags::IN_LEAF_TABLE].
+    ///   For valid entries, also set [LA64PteFlags::LA_VALID] and
+    ///   [LA64PteFlags::P_EXIST]. If global, set [LA64PteFlags::LA_COMMON_GLOBAL].
+    /// 
+    /// - If `in_leaf_table` is `false` and `value.is_leaf()` is `true`, treat it
+    ///   as a huge page entry and set [LA64PteFlags::LA_HUGE]. For valid entries,
+    ///   also set [LA64PteFlags::LA_VALID] and [LA64PteFlags::P_EXIST]. If global,
+    ///   set [LA64PteFlags::LA_HUGE_GLOBAL].
     pub fn from(value: PteFlags, in_leaf_table: bool) -> Self {
         let mut flags = LA64PteFlags::empty();
         if value.contains(PteFlags::VALID) {

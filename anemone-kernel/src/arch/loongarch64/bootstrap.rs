@@ -45,9 +45,18 @@ static mut STACK0: [AlignedBytes<
 
 static DTB_BYTES: &[u8] = include_bytes_aligned_as!(PhantomAligned8, "generated.dtb");
 
+/// # Note
+/// Because Loongarch64 is booted without SBI,
+///     so the entry point is hard_coded, and the entry point [__nun]
+///     will be seen as not-used by the compiler and ignored.
+///
+/// This static value is used to keep the entry point.
 #[used]
 static __NUN_KEEPER: unsafe extern "C" fn() -> ! = __nun;
 
+/// Entry point of the kernel
+///
+/// TODO: Wake up aps.
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.bootstrap")]

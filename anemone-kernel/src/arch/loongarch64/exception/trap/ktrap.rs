@@ -8,16 +8,10 @@ use crate::{
     prelude::*,
 };
 
-// Placeholder trap entry symbol. Full register save/restore assembly will be
-// implemented in follow-up changes.
 core::arch::global_asm!(
     "   .section .text",
     "   .global __ktrap_entry",
-    // Required by RiscV privileged $spec: "The trap handler must be aligned to a 4-byte
-    // boundary."
-    //
-    // Rust's naked functions currently don't support alignment attributes, that's why
-    // we use global_asm! macro to define the trap entry point.
+    
     "   .balign 4",
     "__ktrap_entry:",
     "   addi.d $sp, $sp, -{trapframe_bytes}",
@@ -153,12 +147,6 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
         let esubcode = estat.esubcode();
         let reason = LA64Exception::try_from((ecode, esubcode))
             .unwrap_or_else(|_| panic!("unknown trap with code {}:{}", ecode, esubcode));
-        kdebugln!(
-            "received trap: {:?}, era: {:#x}, badv: {:#x}",
-            reason,
-            trapframe.era,
-            trapframe.badv
-        );
         match reason {
             LA64Exception::PageModified => {
                 panic!(
@@ -190,14 +178,7 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
     }
 }
 
-unsafe fn arch_recoverable_handler(trapframe: &mut LA64TrapFrame, exception: LA64Exception) {
-    let _ = trapframe;
-    unreachable!(
-        "currently there is no architecture-$specific recoverable exception, so this code should never be reached. exception: {:?}",
-        exception
-    );
-}
-
+/// Set the ktrap handler entry point
 pub fn install_ktrap_handler() {
     unsafe {
         unsafe extern "C" {

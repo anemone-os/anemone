@@ -7,16 +7,11 @@ pub mod descs;
 pub trait MachineDesc: Sync {
     /// Open firmware compatible string for this machine.
     fn compatible(&self) -> &[&str];
-    /// Typically, this function should initialize PLIC.
-    ///
-    /// P.S. we do not take effort to fit '/cpus/cpu@[x]/interrupt-controller's
-    /// into our irq model as well. Tbh I don't see the point of doing so?
-    /// Anyway, leave this for future us if we really need it.
-    ///
-    /// Of course, PLIC device node says how it is connected to the CPU, but we
-    /// can just ignore that and hardcode the connection in the PLIC driver.
+    
+    /// Initialize the interrupt controller
     unsafe fn early_init_intc(&self);
-    /// Currently nothing to do cz we already have SBI timer.
+    
+    /// Initialize the timer
     unsafe fn early_init_timer(&self);
 }
 

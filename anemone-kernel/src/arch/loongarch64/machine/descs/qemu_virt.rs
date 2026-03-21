@@ -38,8 +38,6 @@ impl MachineDesc for Qemu3A5000 {
     }
 
     unsafe fn early_init_timer(&self) {
-        // qemu virt machine uses CLINT, which can only be managed under m-mode.
-        // for kernel, SBI is the only way to use the timer. so there is really
-        // nothing to do here.
+        TimeArch::init();
     }
 }
