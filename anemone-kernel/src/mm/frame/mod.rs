@@ -30,6 +30,7 @@ pub unsafe fn pmm_init() {
     sys_mem_zones().with_avail_zones(|avail_zones| {
         for zone in avail_zones.iter() {
             let range = zone.range();
+            kdebugln!("pmm_init: adding range {:?}", range);
             unsafe {
                 FRAME_ALLOCATOR.add_range(range);
             }

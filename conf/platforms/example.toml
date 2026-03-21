@@ -41,7 +41,7 @@ frame_section_shift_mb = 7
 qemu = "qemu-system-riscv64"
 # QEMU machine type
 machine = "virt"
-# CPU type
+# CPU type, optional
 cpu = "rv64"
 # number of CPUs
 smp = 4

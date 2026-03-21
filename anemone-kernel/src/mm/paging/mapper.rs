@@ -149,7 +149,6 @@ impl Mapper<'_> {
                         break;
                     }
                 }
-
                 Ok(())
             }
 
@@ -644,7 +643,6 @@ impl Mapper<'_> {
                 };
             }
         }
-
         Ok(())
     }
 }

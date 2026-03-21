@@ -4,7 +4,10 @@ use core::arch::{global_asm, naked_asm};
 
 use la_insc::{
     reg::{
-        csr::{CR_CPUID, CR_CRMD, CR_DMW0, CR_DMW1, CR_PGDH, CR_PGDL, CR_PRMD, CR_PWCH, CR_PWCL},
+        csr::{
+            CR_CPUID, CR_CRMD, CR_DMW0, CR_DMW1, CR_PGDH, CR_PGDL, CR_PRMD, CR_PWCH, CR_PWCL,
+            CR_TLBRENTRY,
+        },
         dmw::Dmw,
         pwc::{PteWidth, Pwch, Pwcl},
     },
@@ -15,7 +18,8 @@ use crate::{
     arch::{
         clear_bss,
         loongarch64::{
-            exception::install_ktrap_handler,
+            exception::{enable_local_irq, install_ktrap_handler},
+            machine::machine_init,
             mm::{
                 BOOT_DMW0, BOOT_DMW1, BOOTSTRAP_PTABLE, PWCH, PWCL,
                 paging::{LA64PageDirectory, create_bootstrap_ptable},
@@ -41,9 +45,18 @@ static mut STACK0: [AlignedBytes<
 
 static DTB_BYTES: &[u8] = include_bytes_aligned_as!(PhantomAligned8, "generated.dtb");
 
+/// # Note
+/// Because Loongarch64 is booted without SBI,
+///     so the entry point is hard_coded, and the entry point [__nun]
+///     will be seen as not-used by the compiler and ignored.
+///
+/// This static value is used to keep the entry point.
 #[used]
 static __NUN_KEEPER: unsafe extern "C" fn() -> ! = __nun;
 
+/// Entry point of the kernel
+///
+/// TODO: Wake up aps.
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.bootstrap")]
@@ -90,7 +103,7 @@ pub unsafe extern "C" fn __nun() -> ! {
         "
             la.global   $t0, {tlb_rfill}
             #sub.d       $t0, $t0, $t2
-            csrwr       $t0, 0x88
+            csrwr       $t0, {tlbr_entry}
 
             csrrd       $a0, {cr_cpuid} // arg0: hart_id
             la.global   $t0, {rusty_nun}
@@ -101,6 +114,8 @@ pub unsafe extern "C" fn __nun() -> ! {
         boot_dmw1 = const BOOT_DMW1.to_u64(),
         cr_dmw0 = const CR_DMW0,
         cr_dmw1 = const CR_DMW1,
+
+        tlbr_entry = const CR_TLBRENTRY,
 
         cr_crmd = const CR_CRMD,
         // cr_prmd = const CR_PRMD,
@@ -220,10 +235,10 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_va: VirtAddr) -> ! {
 
         unflatten_device_tree(fdt_va);
         //parse_bootargs();
-        //machine_init();
+        machine_init();
         of_platform_discovery();
 
-        //enable_local_irq();
+        enable_local_irq();
         bsp_pre_kernel_main();
     }
     // bsp

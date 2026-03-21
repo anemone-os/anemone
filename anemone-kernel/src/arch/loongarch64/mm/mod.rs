@@ -1,6 +1,9 @@
 //! Memory Model in LoongArch64
 //! We use direct mapping for hhdm and TLB refill handler, use page table for
-//! user/kernel space and vmalloc/vmmapping. ## Layout
+//! user/kernel space and vmalloc/vmmapping.
+//!
+//! ## Layout
+//!
 //! |                  Address Range                |                   Description                 | Type of Mapping |
 //! | --------------------------------------------- | --------------------------------------------- | --------------- |
 //! | 0x0000_0000_0000_0000 ~ USPACE_MAX            | User Space                                    | Page Table      |

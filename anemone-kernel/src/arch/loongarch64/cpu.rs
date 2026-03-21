@@ -2,6 +2,7 @@ use crate::{device::CpuArchTrait, prelude::with_core_local};
 
 static mut NCPUS: usize = 0;
 
+/// Set the number of CPUs, called during bootstrap
 pub unsafe fn set_ncpus(ncpus: usize) {
     unsafe {
         NCPUS = ncpus;

@@ -45,10 +45,7 @@ impl Drop for PageTable {
         // unmap all userspace pages
         unsafe {
             mapper.try_unmap(Unmapping {
-                range: VirtPageRange::new(
-                    VirtPageNum::new(0),
-                    KernelLayout::USPACE_TOP_VPN.get(),
-                ),
+                range: VirtPageRange::new(VirtPageNum::new(0), KernelLayout::USPACE_TOP_VPN.get()),
             });
         }
         let _frame = unsafe { OwnedFrameHandle::from_ppn(self.root) };

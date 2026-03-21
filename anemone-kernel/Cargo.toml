@@ -21,8 +21,7 @@ heapless = { workspace = true }
 hashbrown = { workspace = true }
 bimap = { workspace = true }
 fast_radix_trie = { workspace = true }
-safe-mmio.workspace = true
-la-insc = { path = "crates/la-insc" }
+safe-mmio = { workspace = true }
 buddy-system = { path = "crates/buddy-system", features = ["stats"] }
 device-tree = { path = "crates/device-tree", features = ["alloc"] }
 idalloc = { path = "crates/idalloc" }
@@ -33,3 +32,7 @@ kernel-macros = { path = "crates/kernel-macros" }
 [target.'cfg(target_arch = "riscv64")'.dependencies]
 riscv = { workspace = true }
 sbi-rt = { workspace = true }
+
+
+[target.'cfg(target_arch = "loongarch64")'.dependencies]
+la-insc = { path = "crates/la-insc" }

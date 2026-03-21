@@ -1,4 +1,8 @@
-use la_insc::reg::crmd;
+use la_insc::reg::{
+    crmd,
+    iocsr::{ipi_enable, ipi_send},
+    ipi::IpiSend,
+};
 
 use crate::prelude::*;
 
@@ -25,6 +29,8 @@ impl IntrArchTrait for LA64IntrArch {
     }
 
     fn send_ipi(cpu_id: usize) {
-        todo!()
+        unsafe {
+            ipi_send::io_csr_write(IpiSend::new(0, cpu_id as u16, false));
+        }
     }
 }

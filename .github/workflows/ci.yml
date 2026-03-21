@@ -42,4 +42,4 @@ jobs:
             -w /workspace \
             --entrypoint /bin/sh \
             anemone:ci \
-            -c "just defconfig && just build"
+            -c "just defconfig && just conf switch rv && just build && just conf switch la && just build"

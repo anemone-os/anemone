@@ -4,8 +4,9 @@ use crate::{
     tasks::utils::{cmd_echo, log_progress},
     workspace::*,
 };
+use anyhow::Ok;
 use clap::{Args, Command};
-use xshell::Shell;
+use xshell::{Cmd, Shell};
 
 #[derive(Args)]
 pub struct QemuArgs {
@@ -17,12 +18,10 @@ pub struct QemuArgs {
     image: String,
 }
 
-pub fn gen_qemu_cmd(qemu: &Qemu, args: Option<&QemuArgs>) -> std::process::Command {
-    let mut cmd = std::process::Command::new(&qemu.qemu);
-    cmd.arg("-machine")
+pub fn gen_qemu_cmd(qemu: &Qemu, args: Option<&QemuArgs>) -> anyhow::Result<Cmd> {
+    let mut cmd = Shell::new()?.cmd(&qemu.qemu);
+    cmd = cmd.arg("-machine")
         .arg(&qemu.machine)
-        .arg("-cpu")
-        .arg(&qemu.cpu)
         .arg("-smp")
         .arg(qemu.smp.to_string())
         .arg("-m")
@@ -33,13 +32,16 @@ pub fn gen_qemu_cmd(qemu: &Qemu, args: Option<&QemuArgs>) -> std::process::Comma
                 .map(|args| args.as_slice())
                 .unwrap_or(&[]),
         );
+    if let Some(cpu) = &qemu.cpu {
+        cmd = cmd.arg("-cpu").arg(cpu);
+    }
     if let Some(args) = args {
-        cmd.arg("-kernel").arg(args.image.clone());
+        cmd = cmd.arg("-kernel").arg(args.image.clone());
     }
     if let Some(bios) = &qemu.bios {
-        cmd.arg("-bios").arg(bios);
+        cmd = cmd.arg("-bios").arg(bios);
     }
-    cmd
+    Ok(cmd)
 }
 
 pub fn run(args: QemuArgs) -> anyhow::Result<()> {
@@ -48,15 +50,11 @@ pub fn run(args: QemuArgs) -> anyhow::Result<()> {
     let config = PlatformConfig::from_str(&config_content)?;
     if let Some(qemu) = &config.qemu {
         log_progress("QEMU", "Launching QEMU emulator...");
-        let mut cmd = gen_qemu_cmd(qemu, Some(&args));
+        let mut cmd = gen_qemu_cmd(qemu, Some(&args))?;
+        match cmd.run_echo() {
+            Result::Ok(()) => {
 
-        cmd_echo(&cmd);
-        match cmd.status() {
-            Ok(status) => {
-                if !status.success() {
-                    anyhow::bail!("QEMU exited with status: {}", status);
-                }
-            },
+            }
             Err(e) => {
                 anyhow::bail!("Failed to launch QEMU: {}", e);
             },

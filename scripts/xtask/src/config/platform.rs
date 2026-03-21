@@ -68,7 +68,7 @@ pub struct Constants {
 pub struct Qemu {
     pub qemu: String,
     pub machine: String,
-    pub cpu: String,
+    pub cpu: Option<String>,
     pub smp: u64,
     pub memory: String,
     pub bios: Option<String>,
