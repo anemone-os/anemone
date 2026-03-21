@@ -1,0 +1,254 @@
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000ddae, tval:0x00000000b1302873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000ddea, tval:0x00000000b1402873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000de26, tval:0x00000000b1502873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000de62, tval:0x00000000b1602873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000de9e, tval:0x00000000b1702873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000deda, tval:0x00000000b1802873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000df16, tval:0x00000000b1902873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000df52, tval:0x00000000b1a02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000df8e, tval:0x00000000b1b02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000dfca, tval:0x00000000b1c02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000e006, tval:0x00000000b1d02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000e042, tval:0x00000000b1e02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000e07e, tval:0x00000000b1f02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000e136, tval:0x00000000da002573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000e18a, tval:0x00000000fb002573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000e1e8, tval:0x0000000030c02573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000002, epc:0x000000008000e216, tval:0x0000000032102573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000003, epc:0x00000000800107e4, tval:0x00000000800107e4, desc=breakpoint
+
+OpenSBI v1.5.1
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name             : riscv-virtio,qemu
+Platform Features         : medeleg
+Platform HART Count       : 4
+Platform IPI Device       : aclint-mswi
+Platform Timer Device     : aclint-mtimer @ 10000000Hz
+Platform Console Device   : uart8250
+Platform HSM Device       : ---
+Platform PMU Device       : ---
+Platform Reboot Device    : syscon-reboot
+Platform Shutdown Device  : syscon-poweroff
+Platform Suspend Device   : ---
+Platform CPPC Device      : ---
+Firmware Base             : 0x80000000
+Firmware Size             : 357 KB
+Firmware RW Offset        : 0x40000
+Firmware RW Size          : 101 KB
+Firmware Heap Offset      : 0x4f000
+Firmware Heap Size        : 41 KB (total), 2 KB (reserved), 11 KB (used), 27 KB (free)
+Firmware Scratch Size     : 4096 B (total), 416 B (used), 3680 B (free)
+Runtime SBI Version       : 2.0
+
+Domain0 Name              : root
+Domain0 Boot HART         : 3
+Domain0 HARTs             : 0*,1*,2*,3*
+Domain0 Region00          : 0x0000000000100000-0x0000000000100fff M: (I,R,W) S/U: (R,W)
+Domain0 Region01          : 0x0000000010000000-0x0000000010000fff M: (I,R,W) S/U: (R,W)
+Domain0 Region02          : 0x0000000002000000-0x000000000200ffff M: (I,R,W) S/U: ()
+Domain0 Region03          : 0x0000000080040000-0x000000008005ffff M: (R,W) S/U: ()
+Domain0 Region04          : 0x0000000080000000-0x000000008003ffff M: (R,X) S/U: ()
+Domain0 Region05          : 0x000000000c400000-0x000000000c5fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region06          : 0x000000000c000000-0x000000000c3fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region07          : 0x0000000000000000-0xffffffffffffffff M: () S/U: (R,W,X)
+Domain0 Next Address      : 0x0000000080200000
+Domain0 Next Arg1         : 0x00000000bfe00000
+Domain0 Next Mode         : S-mode
+Domain0 SysReset          : yes
+Domain0 SysSuspend        : yes
+
+Boot HART ID              : 3
+Boot HART Domain          : root
+Boot HART Priv Version    : v1.12
+Boot HART Base ISA        : rv64imafdch
+Boot HART ISA Extensions  : sstc,zicntr,zihpm,zicboz,zicbom,sdtrig,svadu
+Boot HART PMP Count       : 16
+Boot HART PMP Granularity : 2 bits
+Boot HART PMP Address Bits: 54
+Boot HART MHPM Info       : 16 (0x0007fff8)
+Boot HART Debug Triggers  : 2 triggers
+Boot HART MIDELEG         : 0x0000000000001666
+Boot HART MEDELEG         : 0x0000000000f0b509
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802f74a4, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000ddae, tval:0x00000000b1302873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000ddea, tval:0x00000000b1402873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000de26, tval:0x00000000b1502873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000de62, tval:0x00000000b1602873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000de9e, tval:0x00000000b1702873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000deda, tval:0x00000000b1802873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000df16, tval:0x00000000b1902873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000df52, tval:0x00000000b1a02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000df8e, tval:0x00000000b1b02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000dfca, tval:0x00000000b1c02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000e006, tval:0x00000000b1d02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000e042, tval:0x00000000b1e02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000e07e, tval:0x00000000b1f02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000e136, tval:0x00000000da002573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000e18a, tval:0x00000000fb002573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000e1e8, tval:0x0000000030c02573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000002, epc:0x000000008000e216, tval:0x0000000032102573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802f74a4, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802f74a4, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000ddae, tval:0x00000000b1302873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000ddea, tval:0x00000000b1402873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000de26, tval:0x00000000b1502873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000de62, tval:0x00000000b1602873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000de9e, tval:0x00000000b1702873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000deda, tval:0x00000000b1802873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000df16, tval:0x00000000b1902873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000df52, tval:0x00000000b1a02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000df8e, tval:0x00000000b1b02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000dfca, tval:0x00000000b1c02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000e006, tval:0x00000000b1d02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000e042, tval:0x00000000b1e02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000e07e, tval:0x00000000b1f02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000e136, tval:0x00000000da002573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000e18a, tval:0x00000000fb002573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000e1e8, tval:0x0000000030c02573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000002, epc:0x000000008000e216, tval:0x0000000032102573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000ddae, tval:0x00000000b1302873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000ddea, tval:0x00000000b1402873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000de26, tval:0x00000000b1502873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000de62, tval:0x00000000b1602873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000de9e, tval:0x00000000b1702873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000deda, tval:0x00000000b1802873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000df16, tval:0x00000000b1902873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000df52, tval:0x00000000b1a02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000df8e, tval:0x00000000b1b02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000dfca, tval:0x00000000b1c02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000e006, tval:0x00000000b1d02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000e042, tval:0x00000000b1e02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000e07e, tval:0x00000000b1f02873, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000e136, tval:0x00000000da002573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000e18a, tval:0x00000000fb002573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000e1e8, tval:0x0000000030c02573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000002, epc:0x000000008000e216, tval:0x0000000032102573, desc=illegal_instruction
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000005, epc:0xffffffff802ce68c, tval:0x0000000000000000, desc=s_timer
+riscv_cpu_do_interrupt: hart:2, async:1, cause:0000000000000005, epc:0xffffffff802ce68c, tval:0x0000000000000000, desc=s_timer
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000005, epc:0xffffffff802ce68c, tval:0x0000000000000000, desc=s_timer
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000009, epc:0xffffffff802ebc0a, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000009, epc:0xffffffff802ebc0a, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000009, epc:0xffffffff802ebc0a, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:1, async:0, cause:0000000000000009, epc:0xffffffff802ebc0a, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000001, epc:0xffffffff80252278, tval:0x0000000000000000, desc=s_software
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000009, epc:0xffffffff802ebc0a, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:2, async:1, cause:0000000000000001, epc:0xffffffff80252278, tval:0x0000000000000000, desc=s_software
+riscv_cpu_do_interrupt: hart:0, async:0, cause:0000000000000009, epc:0xffffffff802ebc0a, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000001, epc:0xffffffff80252278, tval:0x0000000000000000, desc=s_software
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000001, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=s_software
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000001, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=s_software
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:2, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:2, async:1, cause:0000000000000001, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=s_software
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000001, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=s_software
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000001, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=s_software
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:2, async:1, cause:0000000000000003, epc:0xffffffff802f6892, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:2, async:1, cause:0000000000000001, epc:0xffffffff802f6892, tval:0x0000000000000000, desc=s_software
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000001, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=s_software
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000001, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=s_software
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:2, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:2, async:1, cause:0000000000000001, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=s_software
+[[32m  DEBUG[0m] request_irq: dev_id=serial@10000000, domain=plic@c000000, virq=2, hwirq=0xa
+[[36m   INFO[0m] serial@10000000: probed
+[[36m   INFO[0m] device test@100000 registered on platform bus
+[[36m   INFO[0m] device virtio_mmio@10008000 registered on platform bus
+[[32m  DEBUG[0m] Sending IPI to CPU 0 with hartmask HartMask { inner: BitVector { hart_mask: 1, hart_mask_base: 0 } }
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000001, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=s_software
+[[32m  DEBUG[0m] IPI sent to CPU 0
+[[32m  DEBUG[0m] #0 trap at sepc 0xffffffff8024cbb0 stval 0x0
+[[32m  DEBUG[0m] Sending IPI to CPU 1 with hartmask HartMask { inner: BitVector { hart_mask: 2, hart_mask_base: 0 } }
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000001, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=s_software
+[[32m  DEBUG[0m] #0 received interrupt: SupervisorSoftware
+[[32m  DEBUG[0m] IPI sent to CPU 1
+[[32m  DEBUG[0m] #1 trap at sepc 0xffffffff8024cbb0 stval 0x0
+[[32m  DEBUG[0m] Sending IPI to CPU 2 with hartmask HartMask { inner: BitVector { hart_mask: 4, hart_mask_base: 0 } }
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:2, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:2, async:1, cause:0000000000000001, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=s_software
+[[32m  DEBUG[0m] #0 handle ipi: payload=TlbShootdown { vaddr: None }
+[[32m  DEBUG[0m] IPI sent to CPU 2
+[[32m  DEBUG[0m] #0 finished handling trap
+[[32m  DEBUG[0m] #2 trap at sepc 0xffffffff8024cbb0 stval 0x0
+[[32m  DEBUG[0m] ioremap: phys=[0x10008000, 0x10009000) -> virt=[0xffffffc100602000, 0xffffffc100603000)
+[[32m  DEBUG[0m] #1 received interrupt: SupervisorSoftware
+[[32m  DEBUG[0m] #2 received interrupt: SupervisorSoftware
+[[32m  DEBUG[0m] #1 handle ipi: payload=TlbShootdown { vaddr: None }
+[[32m  DEBUG[0m] #2 handle ipi: payload=TlbShootdown { vaddr: None }
+[[32m  DEBUG[0m] #1 finished handling trap
+[[32m  DEBUG[0m] #2 finished handling trap
+[[36m   INFO[0m] detected virtio mmio device: vendor id: 0x554d4551, device type: Block, version: Legacy
+[[36m   INFO[0m] virtio_mmio@10008000: probed
+[[36m   INFO[0m] device virtio_mmio@10008000 registered on virtio bus
+riscv_cpu_do_interrupt: hart:2, async:0, cause:000000000000000c, epc:0x0000000000000000, tval:0x0000000000000000, desc=exec_page_fault
+[[32m  DEBUG[0m] Sending IPI to CPU 0 with hartmask HartMask { inner: BitVector { hart_mask: 1, hart_mask_base: 0 } }
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000001, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=s_software
+[[32m  DEBUG[0m] #2 trap at sepc 0x0 stval 0x0
+[[32m  DEBUG[0m] IPI sent to CPU 0
+[[32m  DEBUG[0m] #0 trap at sepc 0xffffffff8024cbb0 stval 0x0
+[[32m  DEBUG[0m] #2 received exception: InstructionPageFault
+[[32m  DEBUG[0m] Sending IPI to CPU 1 with hartmask HartMask { inner: BitVector { hart_mask: 2, hart_mask_base: 0 } }
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000001, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=s_software
+[[1;31m  EMERG[0m] Kernel panic:
+panicked at anemone-kernel/src/exception/page_fault.rs:41:5:
+#2 page fault in kernel: addr=VirtAddr(0x0), type=Execute
+[[32m  DEBUG[0m] #0 received interrupt: SupervisorSoftware
+[[32m  DEBUG[0m] IPI sent to CPU 1
+[[32m  DEBUG[0m] Sending IPI to CPU 0 with hartmask HartMask { inner: BitVector { hart_mask: 1, hart_mask_base: 0 } }
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000003, epc:0xffffffff802b6828, tval:0x0000000000000000, desc=m_software
+[[32m  DEBUG[0m] Sending IPI to CPU 2 with hartmask HartMask { inner: BitVector { hart_mask: 4, hart_mask_base: 0 } }
+riscv_cpu_do_interrupt: hart:3, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:2, async:1, cause:0000000000000003, epc:0xffffffff8022c1e2, tval:0x0000000000000000, desc=m_software
+[[32m  DEBUG[0m] IPI sent to CPU 0
+[[32m  DEBUG[0m] #1 trap at sepc 0xffffffff8024cbb0 stval 0x0
+[[32m  DEBUG[0m] #0 handle ipi: payload=TlbShootdown { vaddr: None }
+[[32m  DEBUG[0m] #1 received interrupt: SupervisorSoftware
+[[32m  DEBUG[0m] Sending IPI to CPU 1 with hartmask HartMask { inner: BitVector { hart_mask: 2, hart_mask_base: 0 } }
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+[[32m  DEBUG[0m] #0 handle ipi: payload=StopExecution
+[[32m  DEBUG[0m] IPI sent to CPU 2
+[[32m  DEBUG[0m] IPI sent to CPU 1
+[[32m  DEBUG[0m] #1 handle ipi: payload=TlbShootdown { vaddr: None }
+[[32m  DEBUG[0m] ioremap: phys=[0x800dd000, 0x800df000) -> virt=[0xffffffc100603000, 0xffffffc100605000)
+[[32m  DEBUG[0m] Sending IPI to CPU 3 with hartmask HartMask { inner: BitVector { hart_mask: 8, hart_mask_base: 0 } }
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000009, epc:0xffffffff802cbbd6, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:3, async:1, cause:0000000000000003, epc:0xffffffff802f1546, tval:0x0000000000000000, desc=m_software
+[[32m  DEBUG[0m] #1 handle ipi: payload=StopExecution
+[[32m  DEBUG[0m] IPI sent to CPU 3
+[[35m NOTICE[0m] rtc@101000: shutdown
+[[35m NOTICE[0m] serial@10000000: shutdown
+riscv_cpu_do_interrupt: hart:2, async:0, cause:0000000000000009, epc:0xffffffff802b9ca0, tval:0x0000000000000000, desc=supervisor_ecall
+riscv_cpu_do_interrupt: hart:0, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:3, async:1, cause:0000000000000003, epc:0xffffffff8024942c, tval:0x0000000000000000, desc=m_software
+riscv_cpu_do_interrupt: hart:1, async:1, cause:0000000000000003, epc:0xffffffff8024cbb0, tval:0x0000000000000000, desc=m_software

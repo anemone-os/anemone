@@ -187,6 +187,13 @@ pub unsafe fn bsp_init<A: FnOnce(usize) -> PhysPageNum>(bsp_id: usize, alloc_fol
         // holding percpu data.
         let sppn = alloc_folio((aligned_size * ncpus) >> PagingArch::PAGE_SIZE_BITS);
 
+        knoticeln!(
+            "percpu data range: [{:#x}, {:#x})",
+            sppn.to_hhdm().get(),
+            (sppn.to_hhdm() + (aligned_size * ncpus) as u64 / PagingArch::PAGE_SIZE_BYTES as u64)
+                .get()
+        );
+
         // TODO: it there any need to zero out the folio?
 
         let mut cur_vpn = sppn.to_hhdm();

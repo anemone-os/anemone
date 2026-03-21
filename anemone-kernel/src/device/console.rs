@@ -69,12 +69,14 @@ bitflags! {
 
 struct ConsoleSubSys {
     consoles: SpinLock<Vec<ConsoleDesc>>,
+    output_guard: SpinLock<()>,
 }
 
 impl ConsoleSubSys {
     fn new() -> Self {
         Self {
             consoles: SpinLock::new(Vec::new()),
+            output_guard: SpinLock::new(()),
         }
     }
 }
@@ -105,12 +107,37 @@ pub fn register_console(ops: Arc<dyn Console>, mut flags: ConsoleFlags) {
 }
 
 /// Output a message to all enabled consoles.
+///
+/// **This function must not cause any reentrancy deadlocks, otherwise the
+/// observability of the system will be compromised.**
+///
+/// TODO: The above requirement also applies to kernel log buffer.
 pub fn output(msg: &str) {
-    let consoles = SUBSYS.consoles.lock_irqsave();
-    for con in consoles.iter() {
-        if con.enabled() {
-            con.ops.output(msg);
-        }
+    // In IRQ-disabled contexts (trap/interrupt or explicit irq-off sections),
+    // spinning on the output lock can deadlock on self-reentry. In normal
+    // contexts, block to preserve log ordering and avoid unnecessary drops.
+    let _output_guard = if IntrArch::current_irq_flags() == IntrArch::DISABLED_IRQ_FLAGS {
+        // let Some(guard) = SUBSYS.output_guard.try_lock_irqsave() else {
+        //     return;
+        // };
+        // guard
+        SUBSYS.output_guard.lock_irqsave()
+    } else {
+        SUBSYS.output_guard.lock_irqsave()
+    };
+
+    let consoles = {
+        let consoles = SUBSYS.consoles.lock_irqsave();
+
+        consoles
+            .iter()
+            .filter(|desc| desc.enabled())
+            .map(|desc| desc.ops.clone())
+            .collect::<Vec<_>>()
+    };
+
+    for console in consoles {
+        console.output(msg);
     }
 }
 

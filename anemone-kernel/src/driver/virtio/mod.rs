@@ -72,6 +72,11 @@ unsafe impl virtio_drivers::Hal for VirtIOHalImpl {
         buffer: core::ptr::NonNull<[u8]>,
         direction: virtio_drivers::BufferDirection,
     ) -> virtio_drivers::PhysAddr {
+        knoticeln!(
+            "sharing buffer with len {} and direction {:?} to virtio device",
+            buffer.len(),
+            direction
+        );
         let bounce = dma_alloc(buffer.len())
             .expect("failed to allocate and share virtio bounce buffer with host");
 
@@ -108,7 +113,6 @@ unsafe impl virtio_drivers::Hal for VirtIOHalImpl {
     ) {
         assert!(paddr.is_multiple_of(PagingArch::PAGE_SIZE_BYTES as u64));
         let ppn = PhysPageNum::new(paddr >> PagingArch::PAGE_SIZE_BITS);
-
         kdebugln!("VirtIOHalImpl::unshare: unsharing bounce buffer with ppn {ppn} for unsharing");
 
         let bounce = VIRTIO_DMAS

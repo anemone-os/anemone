@@ -24,6 +24,8 @@ qemu-server:
         -bios default \
         -kernel build/anemone.elf \
         -serial mon:stdio \
+        -drive file=disk.img,format=raw,if=none,id=hd0 \
+        -device virtio-blk-device,drive=hd0 \
         -S -s
 
 gdb-client:

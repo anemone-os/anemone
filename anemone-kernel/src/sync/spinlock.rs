@@ -60,6 +60,16 @@ impl<T: ?Sized> SpinLock<T> {
             core::hint::spin_loop();
         }
     }
+
+    #[track_caller]
+    pub fn try_lock_irqsave(&self) -> Option<IrqSaveGuard<'_, T>> {
+        let _intr_guard = IntrGuard::new();
+        let guard = self.lock.try_lock()?;
+        Some(IrqSaveGuard {
+            guard: Some(guard),
+            _intr_guard,
+        })
+    }
 }
 
 impl<T: ?Sized> Deref for NoPreemptGuard<'_, T> {

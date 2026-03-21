@@ -88,8 +88,8 @@ impl Mapper<'_> {
     /// flags. Had encountered an already mapped page will cause an error to be
     /// returned, and all the successfully mapped pages will be rolled back.
     ///
-    /// Only global pages can be huge pages, or an [MmError::InvalidArgument]
-    /// will be returned.
+    /// Only global pages can be huge pages, otherwise a panic will be
+    /// triggered.
     pub fn map(&mut self, mapping: Mapping) -> Result<(), MmError> {
         if mapping.huge_pages && !mapping.flags.contains(PteFlags::GLOBAL) {
             panic!("internal error: huge page mapping must be global");
@@ -193,8 +193,8 @@ impl Mapper<'_> {
     /// * Some **dangerous** operations, like overwrite mapping a global page,
     /// should be manually avoided.
     ///
-    /// * Only global pages can be huge pages, or an [MmError::InvalidArgument]
-    ///   will be returned.
+    /// * Only global pages can be huge pages, otherwise a panic will be
+    ///   triggered.
     pub unsafe fn map_overwrite(&mut self, mapping: Mapping) -> Result<(), MmError> {
         if mapping.huge_pages && !mapping.flags.contains(PteFlags::GLOBAL) {
             panic!("internal error: huge page mapping must be global");

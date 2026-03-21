@@ -221,7 +221,11 @@ pub fn handle_ipi() {
                 break;
             };
             let msg = msg_ptr.as_ref();
-            kdebugln!("handle ipi: payload={:?}", msg.payload);
+            kdebugln!(
+                "#{} handle ipi: payload={:?}",
+                CpuArch::cur_cpu_id(),
+                msg.payload
+            );
             match msg.payload {
                 TlbShootdown { vaddr } => {
                     if let Some(vaddr) = vaddr {

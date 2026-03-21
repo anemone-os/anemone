@@ -2,6 +2,8 @@
 
 use crate::prelude::*;
 
+pub static PANIC_OCCURRED: AtomicBool = AtomicBool::new(false);
+
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     unsafe {

@@ -33,7 +33,9 @@ fast_radix_trie = { version = "1.1", default-features = false, features = [
     "realloc",
 ] }
 safe-mmio = { version = "0.3.0" }
-virtio-drivers = { version = "0.13.0", default-features = false, features = [] }
+virtio-drivers = { version = "0.13.0", default-features = false, features = [
+    "alloc",
+] }
 
 syn = { version = "2.0", features = ["full"] }
 quote = "1.0"

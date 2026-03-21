@@ -122,12 +122,23 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
 
+    kdebugln!(
+        "#{} trap at sepc {:#x} stval {:#x}",
+        CpuArch::cur_cpu_id(),
+        trapframe.sepc,
+        trapframe.stval
+    );
+
     let scause = riscv::register::scause::read();
     let code = scause.code();
     if scause.is_interrupt() {
         let reason = RiscV64Interrupt::try_from(code)
             .unwrap_or_else(|_| panic!("unknown interrupt with code {}", code));
-        kdebugln!("received interrupt: {:?}", reason);
+        kdebugln!(
+            "#{} received interrupt: {:?}",
+            CpuArch::cur_cpu_id(),
+            reason
+        );
         match reason {
             RiscV64Interrupt::SupervisorSoftware => {
                 handle_ipi();
@@ -147,7 +158,11 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
         let stval = riscv::register::stval::read();
         let reason = RiscV64Exception::try_from(code)
             .unwrap_or_else(|_| panic!("unknown exception with code {}", code));
-        kdebugln!("received exception: {:?}", reason);
+        kdebugln!(
+            "#{} received exception: {:?}",
+            CpuArch::cur_cpu_id(),
+            reason
+        );
         match reason {
             RiscV64Exception::InstructionMisaligned => {
                 panic!("instruction address misaligned: {:#x}", trapframe.sepc)
@@ -204,6 +219,7 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
         }
     }
 
+    kdebugln!("#{} finished handling trap", CpuArch::cur_cpu_id());
     // back
 }
 

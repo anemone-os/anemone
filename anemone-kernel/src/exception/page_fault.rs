@@ -39,7 +39,8 @@ impl PageFaultInfo {
 /// swappable pages for now.
 pub fn handle_kernel_page_fault(info: PageFaultInfo) {
     panic!(
-        "page fault in kernel: addr={:?}, type={:?}",
+        "#{} page fault in kernel: addr={:?}, type={:?}",
+        CpuArch::cur_cpu_id(),
         info.fault_addr(),
         info.fault_type()
     );

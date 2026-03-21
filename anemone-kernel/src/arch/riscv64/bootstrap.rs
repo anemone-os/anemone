@@ -171,9 +171,13 @@ fn register_earlycon() {
 
     impl Console for SbiEarlyCon {
         fn output(&self, s: &str) {
-            for byte in s.bytes() {
-                let _ = sbi_rt::console_write_byte(byte);
-            }
+            let str_pa = unsafe { VirtAddr::new(s.as_ptr() as u64).kvirt_to_phys() };
+            let pa = sbi_rt::Physical::new(
+                s.bytes().len(),
+                str_pa.lower_32_bits() as usize,
+                str_pa.upper_32_bits() as usize,
+            );
+            let _ = sbi_rt::console_write(pa);
         }
     }
 
@@ -303,13 +307,13 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         mm::frame::pmm_init();
         kinfoln!("physical memory management initialized");
 
-        wake_up_aps(bsp_id);
-        sync_with_counter(&BOOT_SYNC_COUNTER);
-
         mm::kptable::init_kernel_mapping();
         kinfoln!("kernel mapping initialized");
         mm::kptable::activate_kernel_mapping();
         kinfoln!("kernel mapping activated");
+
+        wake_up_aps(bsp_id);
+        sync_with_counter("boot", &BOOT_SYNC_COUNTER);
 
         // register drivers to bus types
         driver::init();
@@ -322,8 +326,8 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         enable_local_irq();
         bsp_pre_kernel_main();
 
-        sync_with_counter(&INIT_SYNC_COUNTER);
-        sync_with_counter(&FINISH_SYNC_COUNTER);
+        sync_with_counter("init", &INIT_SYNC_COUNTER);
+        sync_with_counter("finish", &FINISH_SYNC_COUNTER);
     }
 
     kernel_main()
@@ -356,9 +360,11 @@ static FINISH_SYNC_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Synchronize all CPUs to ensure they have all executed the code up to this
 /// point.
-unsafe fn sync_with_counter(counter: &'static AtomicUsize) {
+#[inline(never)]
+unsafe fn sync_with_counter(name: &str, counter: &'static AtomicUsize) {
     let ncpus = CpuArch::ncpus();
     _ = counter.fetch_add(1, Ordering::SeqCst);
+    knoticeln!("{} sync: +1", name);
     while counter.load(Ordering::SeqCst) < ncpus {
         core::hint::spin_loop();
     }
@@ -367,22 +373,22 @@ unsafe fn sync_with_counter(counter: &'static AtomicUsize) {
 unsafe fn ap_entry(ap_id: usize) -> ! {
     unsafe {
         install_ktrap_handler();
-        sync_with_counter(&BOOT_SYNC_COUNTER);
-        kdebugln!("ap {} booting...", ap_id);
-
-        // synchronize with BSP
-        sync_with_counter(&INIT_SYNC_COUNTER);
-
+        mm::percpu::ap_init(ap_id);
         mm::kptable::activate_kernel_mapping();
 
-        mm::percpu::ap_init(ap_id);
+        sync_with_counter("boot", &BOOT_SYNC_COUNTER);
+        kdebugln!("ap {} booting...", ap_id);
+
         enable_local_irq();
         // collect previous IPIs sent by bsp before ap starts to run.
         // the main reason for this is to clear IPI buffers of bsp such that it can send
         // IPIs to other APs again.
         riscv::register::sip::set_ssoft();
 
-        sync_with_counter(&FINISH_SYNC_COUNTER);
+        // synchronize with BSP
+        sync_with_counter("init", &INIT_SYNC_COUNTER);
+
+        sync_with_counter("finish", &FINISH_SYNC_COUNTER);
         kinfoln!("ap {} running...", ap_id);
     }
     kernel_main()

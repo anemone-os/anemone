@@ -15,10 +15,7 @@ use crate::{
 #[derive(Debug)]
 pub struct DmaRegion {
     folio: OwnedFolio,
-    // buddy system allocates pages in DM region, where no uncached flag is
-    // set, so we need to do a separate mapping to get an uncached virtual
-    // mapping for this region.
-    // remap: IoRemap,
+    //remap: IoRemap,
 }
 
 impl DmaRegion {
@@ -33,7 +30,6 @@ impl DmaRegion {
     /// slice is uncached.
     pub fn vaddr(&self) -> NonNull<[u8]> {
         NonNull::from(self.folio.as_bytes())
-        //        self.remap.as_ptr()
     }
 }
 
@@ -48,12 +44,12 @@ pub fn dma_alloc(nbytes: usize) -> Result<DmaRegion, MmError> {
 
     let folio = alloc_frames_zeroed(npages).ok_or(MmError::OutOfMemory)?;
 
-    // let remap = unsafe {
+    // let _remap = unsafe {
     //     ioremap(
     //         folio.range().start().to_phys_addr(),
-    //         npages * PagingArch::PAGE_SIZE_BYTES,
-    //     )
-    // }?;
+    //         (folio.range().npages() as usize) << PagingArch::PAGE_SIZE_BITS,
+    //     )?
+    // };
 
     Ok(DmaRegion { folio })
 }
