@@ -15,7 +15,7 @@ use crate::{
 #[derive(Debug)]
 pub struct DmaRegion {
     folio: OwnedFolio,
-    //remap: IoRemap,
+    remap: IoRemap,
 }
 
 impl DmaRegion {
@@ -28,8 +28,8 @@ impl DmaRegion {
     ///
     /// The returned pointer is guaranteed to be page-aligned. And the whole
     /// slice is uncached.
-    pub fn vaddr(&self) -> NonNull<[u8]> {
-        NonNull::from(self.folio.as_bytes())
+    pub fn as_ptr(&self) -> NonNull<[u8]> {
+        self.remap.as_ptr()
     }
 }
 
@@ -44,12 +44,12 @@ pub fn dma_alloc(nbytes: usize) -> Result<DmaRegion, MmError> {
 
     let folio = alloc_frames_zeroed(npages).ok_or(MmError::OutOfMemory)?;
 
-    // let _remap = unsafe {
-    //     ioremap(
-    //         folio.range().start().to_phys_addr(),
-    //         (folio.range().npages() as usize) << PagingArch::PAGE_SIZE_BITS,
-    //     )?
-    // };
+    let remap = unsafe {
+        ioremap(
+            folio.range().start().to_phys_addr(),
+            (folio.range().npages() as usize) << PagingArch::PAGE_SIZE_BITS,
+        )?
+    };
 
-    Ok(DmaRegion { folio })
+    Ok(DmaRegion { folio, remap })
 }

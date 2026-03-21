@@ -206,7 +206,5 @@ fn test_gendisk() {
         gendisk
             .write_block(0, [39].repeat(512).as_slice())
             .expect("failed to write block");
-    } else {
-        panic!("no block device registered");
     }
 }

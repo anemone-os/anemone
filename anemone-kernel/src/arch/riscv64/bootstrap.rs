@@ -18,7 +18,7 @@ use crate::{
             unflatten_device_tree,
         },
     },
-    mm::layout::KernelLayoutTrait,
+    mm::{kptable::kmap, layout::KernelLayoutTrait},
     prelude::*,
     utils::align::{AlignedBytes, PhantomAligned4096},
 };
@@ -171,13 +171,37 @@ fn register_earlycon() {
 
     impl Console for SbiEarlyCon {
         fn output(&self, s: &str) {
-            let str_pa = unsafe { VirtAddr::new(s.as_ptr() as u64).kvirt_to_phys() };
-            let pa = sbi_rt::Physical::new(
-                s.bytes().len(),
-                str_pa.lower_32_bits() as usize,
-                str_pa.upper_32_bits() as usize,
-            );
-            let _ = sbi_rt::console_write(pa);
+            // After bsp_primary remaps the boot stack into the REMAP region and
+            // switches to it, any stack-allocated data (e.g. LogRecord.msg) has
+            // a virtual address in the REMAP region, not the kernel-image region.
+            // kvirt_to_phys() only subtracts KERNEL_MAPPING_OFFSET, so it gives
+            // a garbage physical address for REMAP-region pointers, causing SBI
+            // to read from invalid memory and hang.
+            #[unsafe(link_section = ".bss.nonzero_init")]
+            static mut SBI_EARLYCON_BUF: [u8; 512] = [0u8; 512];
+
+            let bytes = s.as_bytes();
+            let mut remaining = bytes;
+
+            // SAFETY: when we reached here, we have already taken the lock of system
+            // console, which ensures that only one CPU can execute this code at the same
+            // time.
+            #[allow(static_mut_refs)]
+            while !remaining.is_empty() {
+                let buf = unsafe { &mut SBI_EARLYCON_BUF };
+                let chunk_len = remaining.len().min(buf.len());
+                buf[..chunk_len].copy_from_slice(&remaining[..chunk_len]);
+
+                let buf_pa = unsafe { VirtAddr::new(buf.as_ptr() as u64).kvirt_to_phys() };
+                let pa = sbi_rt::Physical::new(
+                    chunk_len,
+                    buf_pa.lower_32_bits() as usize,
+                    buf_pa.upper_32_bits() as usize,
+                );
+                let _ = sbi_rt::console_write(pa);
+
+                remaining = &remaining[chunk_len..];
+            }
         }
     }
 
@@ -227,10 +251,10 @@ extern "C" fn rusty_nun(hart_id: usize, fdt_pa: PhysAddr) -> ! {
         if !BSP_ARRIVED {
             // bsp
             BSP_ARRIVED = true;
-            bsp_entry(hart_id, fdt_pa);
+            bsp_primary(hart_id, fdt_pa)
         } else {
             // ap
-            ap_entry(hart_id)
+            ap_primary(hart_id)
         }
     }
 }
@@ -260,7 +284,84 @@ fn parse_bootargs() {
     });
 }
 
-unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
+/// percpu guarded stack top addresses, filled by [`remap_boot_stacks`].
+static GUARDED_STACK_TOPS: MonoOnce<[VirtAddr; MAX_CPUS]> = unsafe { MonoOnce::new() };
+
+/// Remap every CPU's boot stack ([`STACK0`]) into the remap region with a
+/// guard page at the bottom.
+///
+/// # Safety
+///
+/// Must be called by bsp **after** `init_kernel_mapping()` +
+/// `activate_kernel_mapping()` and **before** `wake_up_aps()`.
+unsafe fn remap_boot_stack() {
+    const KSTACK_PAGES: usize = (1 << KSTACK_SHIFT_KB) * 1024 / PagingArch::PAGE_SIZE_BYTES;
+
+    let total_vpages = 1 + KSTACK_PAGES;
+    let stack0_sppn =
+        unsafe { VirtAddr::new(core::ptr::addr_of!(STACK0) as u64).kvirt_to_phys() }.page_down();
+
+    let mut tops: [VirtAddr; MAX_CPUS] = [VirtAddr::new(0); MAX_CPUS];
+
+    for cpu in 0..MAX_CPUS {
+        let cpu_stack_ppn = stack0_sppn + (cpu as u64 * KSTACK_PAGES as u64);
+
+        let vrange = unsafe { mm::remap::alloc_virt_range(total_vpages) }
+            .expect("failed to allocate virtual range for boot stack guard page");
+
+        // The first page is the guard – we simply leave it unmapped. The underlying pte
+        // should be empty.
+        let stack_vpn = vrange.start() + 1;
+        unsafe {
+            kmap(Mapping {
+                vpn: stack_vpn,
+                ppn: cpu_stack_ppn,
+                flags: PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL,
+                npages: KSTACK_PAGES,
+                huge_pages: false,
+            })
+            .expect("failed to map boot stack with guard page");
+        }
+
+        let stack_top = (stack_vpn + KSTACK_PAGES as u64).to_virt_addr();
+
+        tops[cpu] = stack_top;
+
+        kinfoln!(
+            "cpu {}: boot stack remapped with guard page at [{:#x}, {:#x}), stack [{:#x}, {:#x})",
+            cpu,
+            vrange.start().to_virt_addr().get(),
+            stack_vpn.to_virt_addr().get(),
+            stack_vpn.to_virt_addr().get(),
+            stack_top.get(),
+        );
+    }
+
+    GUARDED_STACK_TOPS.init(|g| {
+        g.write(tops);
+    });
+}
+
+#[inline(always)]
+unsafe fn switch_to_secondary(secondary_entry: VirtAddr, arg0: u64, arg1: u64) -> ! {
+    let cpu_id = CpuArch::cur_cpu_id();
+    let new_stack_top = GUARDED_STACK_TOPS.get()[cpu_id];
+
+    unsafe {
+        core::arch::asm!(
+            "mv  sp, {new_top}",
+            "mv  fp, zero",
+            "jr  {entry}",
+            new_top = in(reg) new_stack_top.get(),
+            entry = in(reg) secondary_entry.get(),
+            in("a0") arg0,
+            in("a1") arg1,
+            options(noreturn),
+        )
+    }
+}
+
+unsafe fn bsp_primary(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
     unsafe {
         clear_bss();
     }
@@ -312,6 +413,18 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         mm::kptable::activate_kernel_mapping();
         kinfoln!("kernel mapping activated");
 
+        remap_boot_stack();
+        knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
+        switch_to_secondary(
+            VirtAddr::new(bsp_secondary as *const () as u64),
+            bsp_id as u64,
+            fdt_va.get(),
+        )
+    }
+}
+
+unsafe fn bsp_secondary(bsp_id: usize, fdt_va: VirtAddr) -> ! {
+    unsafe {
         wake_up_aps(bsp_id);
         sync_with_counter("boot", &BOOT_SYNC_COUNTER);
 
@@ -370,16 +483,26 @@ unsafe fn sync_with_counter(name: &str, counter: &'static AtomicUsize) {
     }
 }
 
-unsafe fn ap_entry(ap_id: usize) -> ! {
+unsafe fn ap_primary(ap_id: usize) -> ! {
     unsafe {
         install_ktrap_handler();
         mm::percpu::ap_init(ap_id);
+        enable_local_irq();
         mm::kptable::activate_kernel_mapping();
 
+        switch_to_secondary(
+            VirtAddr::new(ap_secondary as *const () as u64),
+            ap_id as u64,
+            0,
+        )
+    }
+}
+
+unsafe fn ap_secondary(ap_id: usize) -> ! {
+    unsafe {
         sync_with_counter("boot", &BOOT_SYNC_COUNTER);
         kdebugln!("ap {} booting...", ap_id);
 
-        enable_local_irq();
         // collect previous IPIs sent by bsp before ap starts to run.
         // the main reason for this is to clear IPI buffers of bsp such that it can send
         // IPIs to other APs again.

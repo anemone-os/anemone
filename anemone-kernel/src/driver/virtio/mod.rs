@@ -32,18 +32,14 @@ unsafe impl virtio_drivers::Hal for VirtIOHalImpl {
         let dma = dma_alloc(pages * virtio_drivers::PAGE_SIZE)
             .expect("failed to allocate DMA region for virtio");
         let ppn = dma.ppn();
-        let vaddr = dma.vaddr();
-
-        kdebugln!(
-            "VirtIOHalImpl::dma_alloc: allocated DMA region with ppn {ppn} and vaddr {vaddr:p}"
-        );
+        let ptr = dma.as_ptr();
 
         assert!(
             VIRTIO_DMAS.lock_irqsave().insert(ppn, dma).is_none(),
             "internal error: duplicate DMA region for ppn {ppn}"
         );
 
-        (ppn.to_phys_addr().get(), vaddr.cast())
+        (ppn.to_phys_addr().get(), ptr.cast())
     }
 
     unsafe fn dma_dealloc(
@@ -72,22 +68,11 @@ unsafe impl virtio_drivers::Hal for VirtIOHalImpl {
         buffer: core::ptr::NonNull<[u8]>,
         direction: virtio_drivers::BufferDirection,
     ) -> virtio_drivers::PhysAddr {
-        knoticeln!(
-            "sharing buffer with len {} and direction {:?} to virtio device",
-            buffer.len(),
-            direction
-        );
         let bounce = dma_alloc(buffer.len())
             .expect("failed to allocate and share virtio bounce buffer with host");
 
-        kdebugln!(
-            "VirtIOHalImpl::share: allocated bounce buffer with ppn {} and vaddr {:p} for sharing",
-            bounce.ppn(),
-            bounce.vaddr()
-        );
-
         let ppn = bounce.ppn();
-        let ptr = bounce.vaddr();
+        let ptr = bounce.as_ptr();
         if !matches!(direction, virtio_drivers::BufferDirection::DeviceToDriver) {
             let src = buffer.cast::<u8>().as_ptr();
             unsafe {
@@ -113,7 +98,6 @@ unsafe impl virtio_drivers::Hal for VirtIOHalImpl {
     ) {
         assert!(paddr.is_multiple_of(PagingArch::PAGE_SIZE_BYTES as u64));
         let ppn = PhysPageNum::new(paddr >> PagingArch::PAGE_SIZE_BITS);
-        kdebugln!("VirtIOHalImpl::unshare: unsharing bounce buffer with ppn {ppn} for unsharing");
 
         let bounce = VIRTIO_DMAS
             .lock_irqsave()
@@ -123,7 +107,7 @@ unsafe impl virtio_drivers::Hal for VirtIOHalImpl {
         if !matches!(direction, virtio_drivers::BufferDirection::DriverToDevice) {
             let dst = buffer.cast::<u8>().as_ptr();
             unsafe {
-                core::ptr::copy_nonoverlapping(bounce.vaddr().as_ptr().cast(), dst, buffer.len());
+                core::ptr::copy_nonoverlapping(bounce.as_ptr().as_ptr().cast(), dst, buffer.len());
             }
         }
     }

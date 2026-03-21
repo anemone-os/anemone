@@ -258,3 +258,16 @@ pub unsafe fn ioremap(start: PhysAddr, len: usize) -> Result<IoRemap, MmError> {
 pub fn vmalloc(npages: usize) -> Option<Todo> {
     todo!()
 }
+
+/// Allocate a contiguous virtual page range from the remap region.
+///
+/// This is used for dynamic kernel mappings such as stack guard pages.
+/// The caller is responsible for mapping the allocated range.
+pub unsafe fn alloc_virt_range(npages: usize) -> Option<VirtPageRange> {
+    SYS_REMAPS.lock_irqsave().alloc(npages)
+}
+
+/// Free a virtual page range previously allocated by [`alloc_virt_range`].
+pub unsafe fn free_virt_range(start: VirtPageNum, npages: usize) -> Result<(), MmError> {
+    SYS_REMAPS.lock_irqsave().free(start, npages)
+}
