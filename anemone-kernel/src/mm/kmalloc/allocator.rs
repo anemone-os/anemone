@@ -92,7 +92,7 @@ impl OomHandler for HeapOomHandler {
                 let len = range.npages() as usize * PagingArch::PAGE_SIZE_BYTES;
                 let ptr = range.start().to_hhdm().to_virt_addr();
                 let slice: *mut [u8] = core::ptr::slice_from_raw_parts_mut(ptr.as_ptr_mut(), len);
-                let used = talc
+                let _used = talc
                     .claim(Span::from_slice(slice))
                     .expect("should be able to claim folio from frame allocator");
                 knoticeln!(

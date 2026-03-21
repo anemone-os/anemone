@@ -185,7 +185,6 @@ pub fn register_block_device(
 ///
 /// The `devnum` must be a block device major number.
 pub fn get_block_dev(devnum: DevNum) -> Option<Arc<dyn BlockDev>> {
-    let (major, minor) = devnum.decompose();
     SUBSYS
         .devices
         .read_irqsave()

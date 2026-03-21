@@ -1,8 +1,8 @@
+use core::ptr::NonNull;
 use safe_mmio::{
     UniqueMmioPointer, field,
     fields::{ReadOnly, ReadPure, ReadPureWrite, ReadWrite, WriteOnly},
 };
-use core::{marker::PhantomData, ptr::NonNull};
 
 macro_rules! define_combined {
     (read, $type: ident, $name: ident) => {

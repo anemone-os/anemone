@@ -2,7 +2,7 @@
 //! Mostly kernel heap management, but also some temporary allocations for
 //! bootstrapping and other early-stage code.
 
-use crate::{mm::kmalloc::allocator::KernelAllocator, prelude::*};
+use crate::mm::kmalloc::allocator::KernelAllocator;
 
 pub mod allocator;
 

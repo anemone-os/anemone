@@ -145,9 +145,9 @@ impl PteFlags {
     /// **Ignoring the VALID bit, this function checks if the flags indicate a
     /// leaf entry.**
     pub fn is_leaf(&self) -> bool {
-        (self.contains(PteFlags::READ)
+        self.contains(PteFlags::READ)
             || self.contains(PteFlags::WRITE)
-            || self.contains(PteFlags::EXECUTE))
+            || self.contains(PteFlags::EXECUTE)
     }
 }
 

@@ -81,7 +81,7 @@ pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
     }
     for id in 0..ncpus {
         if id != cur_cpuid {
-            send_ipi(id, payload);
+            send_ipi(id, payload)?;
         }
     }
     Ok(())

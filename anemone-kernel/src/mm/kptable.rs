@@ -8,8 +8,6 @@
 //! All processes's upper half virtual address space is identical to the
 //! kernel's upper half.
 
-use core::ops::DerefMut;
-
 use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 
 pub static KERNEL_PTABLE: KPTable = KPTable::new();
@@ -98,7 +96,11 @@ impl KPTable {
                     PteFlags::VALID | PteFlags::GLOBAL,
                     PagingArch::PAGE_LEVELS - 1,
                 );
-                kdebugln!("preallocated pgdir for kernel space: index {}, ppn {:#x}", index, ppn.get());
+                kdebugln!(
+                    "preallocated pgdir for kernel space: index {}, ppn {:#x}",
+                    index,
+                    ppn.get()
+                );
                 allocated += 1;
             }
         }

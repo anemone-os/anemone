@@ -1,10 +1,6 @@
 use riscv::register::satp;
 
-use crate::{
-    arch::riscv64::mm::{RiscV64PgDir, RiscV64Pte, RiscV64PteFlags},
-    mm::layout::KernelLayoutTrait,
-    prelude::*,
-};
+use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 
 pub struct Sv39PagingArch;
 
