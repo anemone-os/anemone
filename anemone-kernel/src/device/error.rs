@@ -39,6 +39,15 @@ pub enum DevError {
     IrqAlreadyRequested,
     /// Failed to remap MMIO region for the device.
     IoRemapFailed(MmError),
+    /// The device number is already registered in current subsystem.
+    DevAlreadyRegistered,
+    /// No available minor number for the device.
+    NoMinorAvailable,
+    /// General probe failure.
+    ProbeFailed,
+    /// Indicates an I/O error occurred during driver operation, such as
+    /// read/write failure.
+    IO,
 }
 
 impl AsErrno for DevError {

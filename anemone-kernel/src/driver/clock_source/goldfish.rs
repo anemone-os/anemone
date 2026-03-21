@@ -80,7 +80,7 @@ impl DriverOps for GoldfishDriver {
     fn probe(&self, device: Arc<dyn Device>) -> Result<(), DevError> {
         let pdev = device
             .as_platform_device()
-            .ok_or(DevError::DriverIncompatible)?;
+            .expect("platform driver should only be probed with platform device");
 
         let (base, len) = pdev
             .resources()
@@ -108,6 +108,8 @@ impl DriverOps for GoldfishDriver {
         kinfoln!("{}: probed", pdev.name());
         Ok(())
     }
+
+    fn shutdown(&self, device: &dyn Device) {}
 
     fn as_platform_driver(&self) -> Option<&dyn platform::PlatformDriver> {
         Some(self)

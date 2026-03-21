@@ -5,8 +5,6 @@
 
 use core::ptr::NonNull;
 
-use spin::Lazy;
-
 use crate::{
     mm::{
         kptable::{kmap, kunmap},
@@ -32,8 +30,7 @@ impl range_allocator::Rangable for VirtPageRange {
 /// System state related to virtual memory remapping, including vmalloc and
 /// ioremap.
 ///
-/// All IO remapping are uncached for simplicity. TODO: this is currently
-/// unimplemented.
+/// All IO remapping are uncached for simplicity.
 ///
 /// Currently only ioremap is implementeed.
 #[derive(Debug)]
@@ -57,11 +54,20 @@ impl IoRange {
             return Err(MmError::InvalidArgument);
         }
         let len = len as u64;
+        start
+            .get()
+            .checked_add(len)
+            .ok_or(MmError::InvalidArgument)?;
         Ok(Self { start, len })
     }
 
     fn end(&self) -> PhysAddr {
-        PhysAddr::new(self.start.get() + self.len)
+        PhysAddr::new(
+            self.start
+                .get()
+                .checked_add(self.len)
+                .expect("IoRange end overflow must be rejected in try_new"),
+        )
     }
 
     fn intersects(&self, other: &Self) -> bool {
@@ -251,4 +257,17 @@ pub unsafe fn ioremap(start: PhysAddr, len: usize) -> Result<IoRemap, MmError> {
 
 pub fn vmalloc(npages: usize) -> Option<Todo> {
     todo!()
+}
+
+/// Allocate a contiguous virtual page range from the remap region.
+///
+/// This is used for dynamic kernel mappings such as stack guard pages.
+/// The caller is responsible for mapping the allocated range.
+pub unsafe fn alloc_virt_range(npages: usize) -> Option<VirtPageRange> {
+    SYS_REMAPS.lock_irqsave().alloc(npages)
+}
+
+/// Free a virtual page range previously allocated by [`alloc_virt_range`].
+pub unsafe fn free_virt_range(start: VirtPageNum, npages: usize) -> Result<(), MmError> {
+    SYS_REMAPS.lock_irqsave().free(start, npages)
 }

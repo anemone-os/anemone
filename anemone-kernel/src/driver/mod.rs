@@ -9,7 +9,10 @@
 use core::fmt::Debug;
 
 use crate::{
-    device::{bus::platform::PlatformDriver, kobject::KObject},
+    device::{
+        bus::{platform::PlatformDriver, virtio::VirtIODriver},
+        kobject::KObject,
+    },
     initcall::{InitCallLevel, run_initcalls},
     prelude::*,
 };
@@ -18,11 +21,14 @@ use crate::{
 // interrupt controller.
 pub mod intc;
 
+mod block;
 mod clock_source;
 mod power;
 mod serial;
 pub use serial::ns16550a::Ns16550ARegisters;
+mod virtio;
 
+/// Common data shared by all drivers.
 #[derive(Debug)]
 pub struct DriverBase {
     devices: RwLock<Vec<Arc<dyn Device>>>,
@@ -42,6 +48,17 @@ pub trait Driver: DriverData + DriverOps {
     }
 }
 
+impl dyn Driver {
+    pub fn for_each_device<F>(&self, mut f: F)
+    where
+        F: FnMut(&Arc<dyn Device>),
+    {
+        for device in DriverData::base(self).devices.read_irqsave().iter() {
+            f(device);
+        }
+    }
+}
+
 impl<T: DriverData + DriverOps> Driver for T {}
 
 pub trait DriverData: KObject {
@@ -51,19 +68,24 @@ pub trait DriverData: KObject {
 pub trait DriverOps {
     fn probe(&self, device: Arc<dyn Device>) -> Result<(), DevError>;
 
+    /// Shutdown the device.
+    ///
+    /// This method is called when the system is shutting down.
+    ///
+    /// Note that this does not mean implementations must actually shut down the
+    /// device. For example, a driver may choose to simply disable the device's
+    /// interrupts and leave it in a quiescent state, or a power-off handler
+    /// driver may just do nothing at all. The exact behavior is up to the
+    /// driver implementation, and the driver framework does not make any
+    /// assumptions on it.
+    fn shutdown(&self, device: &dyn Device);
+
     fn as_platform_driver(&self) -> Option<&dyn PlatformDriver> {
         None
     }
-}
 
-impl dyn Driver {
-    pub fn for_each_device<F>(&self, mut f: F)
-    where
-        F: FnMut(&Arc<dyn Device>),
-    {
-        for device in DriverData::base(self).devices.read_irqsave().iter() {
-            f(device);
-        }
+    fn as_virtio_driver(&self) -> Option<&dyn VirtIODriver> {
+        None
     }
 }
 

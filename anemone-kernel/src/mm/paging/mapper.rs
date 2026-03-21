@@ -88,12 +88,13 @@ impl Mapper<'_> {
     /// flags. Had encountered an already mapped page will cause an error to be
     /// returned, and all the successfully mapped pages will be rolled back.
     ///
-    /// Only global pages can be huge pages, or an [MmError::InvalidArgument]
-    /// will be returned.
+    /// Only global pages can be huge pages, otherwise a panic will be
+    /// triggered.
     pub fn map(&mut self, mapping: Mapping) -> Result<(), MmError> {
         if mapping.huge_pages && !mapping.flags.contains(PteFlags::GLOBAL) {
-            return Err(MmError::InvalidArgument);
+            panic!("internal error: huge page mapping must be global");
         }
+
         #[derive(Debug)]
         struct MapTransaction<'a, 'm> {
             mapper: &'a mut Mapper<'m>,
@@ -142,7 +143,7 @@ impl Mapper<'_> {
                         let next_ppn = PhysPageNum::new(ppn.get() + index as u64);
                         unsafe {
                             self.mapper
-                                .map_one(next_vpn, next_ppn, flags, level, true)?;
+                                .map_one(next_vpn, next_ppn, flags, level, false)?;
                         }
                         self.mapped_pages += level_page_size;
                         index += level_page_size;
@@ -192,12 +193,13 @@ impl Mapper<'_> {
     /// * Some **dangerous** operations, like overwrite mapping a global page,
     /// should be manually avoided.
     ///
-    /// * Only global pages can be huge pages, or an [MmError::InvalidArgument]
-    ///   will be returned.
+    /// * Only global pages can be huge pages, otherwise a panic will be
+    ///   triggered.
     pub unsafe fn map_overwrite(&mut self, mapping: Mapping) -> Result<(), MmError> {
         if mapping.huge_pages && !mapping.flags.contains(PteFlags::GLOBAL) {
-            return Err(MmError::InvalidArgument);
+            panic!("internal error: huge page mapping must be global");
         }
+
         let Mapping {
             vpn,
             ppn,
@@ -276,6 +278,7 @@ impl Mapper<'_> {
 
         unsafe {
             match self.traverse(
+                range,
                 |pte, _ctx| {
                     let ppn = pte.ppn();
                     let pgdir = ppn
@@ -287,7 +290,7 @@ impl Mapper<'_> {
 
                     if pgdir.is_empty() && !pte.is_global() {
                         // deallocate the empty page table
-                        let ppn = pte.ppn();
+
                         *pte = Pte::ZEROED;
                         let _frame = OwnedFrameHandle::from_ppn(ppn);
                     }
@@ -296,7 +299,7 @@ impl Mapper<'_> {
                 |pte, ctx| {
                     if range.covers(&VirtPageRange::new(
                         ctx.vpn,
-                        (1 << (ctx.level * PagingArch::PGDIR_IDX_BITS)) as u64,
+                        1u64 << (ctx.level * PagingArch::PGDIR_IDX_BITS),
                     )) {
                         if !pte.is_valid() {
                             kwarningln!(
@@ -362,7 +365,7 @@ impl Mapper<'_> {
                     // huge page
                     let level_offset = level * vpn_bits;
                     let level_mask = (1 << level_offset) - 1;
-                    let page_offset = vpn.get() & !level_mask;
+                    let page_offset = vpn.get() & level_mask;
                     let ppn_value = pte.ppn().get();
                     debug_assert!(ppn_value & level_mask == 0);
                     return Some(Translated {
@@ -410,11 +413,9 @@ impl Mapper<'_> {
     /// Use-after-free and double-free may happen if the branch and leaf
     /// operations deallocate page tables or page mappings. Caller must
     /// ensure that the operations are safe to perform.
-    ///
-    /// TODO: currently we traverse all Ptes, which is inefficient. we should
-    /// support traverse within a given vpn range.
     unsafe fn traverse<B, L, R>(
         &mut self,
+        range: VirtPageRange,
         branch_op: B,
         leaf_op: L,
         order: TraverseOrder,
@@ -427,6 +428,7 @@ impl Mapper<'_> {
         unsafe {
             Self::do_traverse(
                 self.root,
+                range,
                 &mut branch_op,
                 &mut leaf_op,
                 order,
@@ -449,6 +451,7 @@ impl Mapper<'_> {
     /// into.**
     unsafe fn do_traverse<B, L, R>(
         pgdir_ppn: PhysPageNum,
+        range: VirtPageRange,
         branch_op: &mut B,
         leaf_op: &mut L,
         order: TraverseOrder,
@@ -472,9 +475,21 @@ impl Mapper<'_> {
 
         for idx in 0..PagingArch::PTE_PER_PGDIR {
             let pte = &mut pgdir[idx];
-            let vpn_prefix = (vpn_prefix << vpn_bits) | (idx as u64);
 
             if !pte.is_branch() && !pte.is_leaf() {
+                continue;
+            }
+
+            let vpn_prefix = (vpn_prefix << vpn_bits) | (idx as u64);
+            let node_start_vpn = vpn_prefix << (level * vpn_bits);
+            let node_range = VirtPageRange::new(
+                Self::canonicalize_vpn(node_start_vpn),
+                1u64 << (level * vpn_bits),
+            );
+
+            // Prune the traversal tree early when this node's covered range
+            // doesn't overlap with the caller requested range.
+            if !range.intersects(&node_range) {
                 continue;
             }
 
@@ -490,6 +505,7 @@ impl Mapper<'_> {
                         match unsafe {
                             Self::do_traverse(
                                 pte.ppn(),
+                                range,
                                 branch_op,
                                 leaf_op,
                                 order,
@@ -505,6 +521,7 @@ impl Mapper<'_> {
                         match unsafe {
                             Self::do_traverse(
                                 pte.ppn(),
+                                range,
                                 branch_op,
                                 leaf_op,
                                 order,
@@ -523,8 +540,11 @@ impl Mapper<'_> {
                 }
             } else {
                 assert!(pte.is_leaf());
+
+                // `vpn_prefix` only contains visited indices. For huge-page leaves,
+                // lower-level indices are implicit zeros, so we shift them back.
                 let ctx = LeafCtx {
-                    vpn: Self::canonicalize_vpn(vpn_prefix),
+                    vpn: Self::canonicalize_vpn(node_start_vpn),
                     level,
                 };
                 match leaf_op(pte, ctx) {
@@ -616,6 +636,11 @@ impl Mapper<'_> {
             } else {
                 // branch
                 if !pte.is_branch() {
+                    if pte.is_leaf() && !overwrite {
+                        // huge page exists.
+                        return Err(MmError::AlreadyMapped);
+                    }
+
                     // allocate a new pgdir
 
                     // no need to undo all previous frame allocations if this fails,

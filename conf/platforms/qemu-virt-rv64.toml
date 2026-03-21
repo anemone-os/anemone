@@ -21,4 +21,12 @@ cpu = "rv64"
 smp = 4
 memory = "1G"
 bios = "default"
-args = ["-nographic", "-serial", "mon:stdio"]
+args = [
+    "-nographic",
+    "-serial",
+    "mon:stdio",
+    "-drive",
+    "file=disk.img,format=raw,if=none,id=hd0",
+    "-device",
+    "virtio-blk-device,drive=hd0",
+]

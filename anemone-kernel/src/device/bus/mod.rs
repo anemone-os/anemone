@@ -1,18 +1,17 @@
 pub mod platform;
+pub mod virtio;
 
-use core::{any::Any, fmt::Debug};
-
-use spin::Lazy;
+use core::fmt::Debug;
 
 use crate::{
-    device::{
-        bus::platform::PlatformDevice,
-        idalloc::alloc_device_id,
-        kobject::{KObjIdent, KObject, KObjectBase, KSet},
-    },
+    device::kobject::{KObjIdent, KObject, KSet},
     prelude::*,
 };
 
+/// Common data shared by all bus types.
+///
+/// **LOCK ORDERING**:
+/// **`devices` -> `drivers`**
 #[derive(Debug)]
 pub struct BusTypeBase {
     devices: RwLock<KSet<dyn Device>>,
@@ -38,8 +37,8 @@ pub trait BusType: KObject {
                 // TODO: probe defer
                 match driver.probe(device.clone()) {
                     Ok(()) => {
-                        driver.attach_device(device.clone());
                         device.set_driver(Some(driver.clone()));
+                        driver.attach_device(device.clone());
                     },
                     Err(e) => {
                         kerrln!(
@@ -69,8 +68,8 @@ pub trait BusType: KObject {
                 // TODO: probe defer
                 match driver.probe(device.clone()) {
                     Ok(()) => {
-                        driver.attach_device(device.clone());
                         device.set_driver(Some(driver.clone()));
+                        driver.attach_device(device.clone());
                     },
                     Err(e) => {
                         kerrln!(
@@ -118,35 +117,4 @@ impl Debug for dyn BusType {
             .field("name", &self.name())
             .finish()
     }
-}
-
-/// /sys/devices/platform
-pub static ROOT_BUS: Lazy<Arc<PlatformDevice>> = Lazy::new(|| {
-    Arc::new(PlatformDevice::new(
-        KObjectBase::new(KObjIdent::try_from("platform").unwrap()),
-        DeviceBase::new(alloc_device_id().unwrap(), None),
-    ))
-});
-
-// TODO: implement /sys/bus/
-// currently we have no file system and can't create symlinks.
-// so only /sys/devices/ is available, and all dicovered devices are put under
-// /sys/devices/platform/. in the future when we have a more complete file
-// system, we can create /sys/bus/, /sys/class/, etc. and create symlinks to
-// devices and drivers accordingly.
-
-#[kunit]
-fn ls_devices() {
-    fn ls_devices_inner(device: &dyn Device, prefix: &str) {
-        kprintln!("{}{}", prefix, device.name());
-        let new_prefix = format!("{}{}/", prefix, device.name());
-        if let Some(pdev) = (device as &dyn Any).downcast_ref::<PlatformDevice>() {
-            kprintln!("\tresources: {:x?}", pdev.resources());
-        }
-        device.for_each_child(|child| {
-            ls_devices_inner(child.as_ref(), &new_prefix);
-        });
-    }
-    kprintln!();
-    ls_devices_inner(ROOT_BUS.as_ref(), "");
 }

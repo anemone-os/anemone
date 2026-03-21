@@ -18,9 +18,9 @@ pub struct QemuArgs {
     image: String,
 }
 
-pub fn gen_qemu_cmd(qemu: &Qemu, args: Option<&QemuArgs>) -> anyhow::Result<Cmd> {
-    let mut cmd = Shell::new()?.cmd(&qemu.qemu);
-    cmd = cmd.arg("-machine")
+pub fn gen_qemu_cmd(qemu: &Qemu, args: Option<&QemuArgs>) -> std::process::Command {
+    let mut cmd = std::process::Command::new(&qemu.qemu);
+    cmd.arg("-machine")
         .arg(&qemu.machine)
         .arg("-smp")
         .arg(qemu.smp.to_string())
@@ -33,15 +33,15 @@ pub fn gen_qemu_cmd(qemu: &Qemu, args: Option<&QemuArgs>) -> anyhow::Result<Cmd>
                 .unwrap_or(&[]),
         );
     if let Some(cpu) = &qemu.cpu {
-        cmd = cmd.arg("-cpu").arg(cpu);
+        cmd.arg("-cpu").arg(cpu);
     }
     if let Some(args) = args {
-        cmd = cmd.arg("-kernel").arg(args.image.clone());
+        cmd.arg("-kernel").arg(args.image.clone());
     }
     if let Some(bios) = &qemu.bios {
-        cmd = cmd.arg("-bios").arg(bios);
+        cmd.arg("-bios").arg(bios);
     }
-    Ok(cmd)
+    cmd
 }
 
 pub fn run(args: QemuArgs) -> anyhow::Result<()> {
@@ -50,11 +50,14 @@ pub fn run(args: QemuArgs) -> anyhow::Result<()> {
     let config = PlatformConfig::from_str(&config_content)?;
     if let Some(qemu) = &config.qemu {
         log_progress("QEMU", "Launching QEMU emulator...");
-        let mut cmd = gen_qemu_cmd(qemu, Some(&args))?;
-        match cmd.run_echo() {
-            Result::Ok(()) => {
-
-            }
+        let mut cmd = gen_qemu_cmd(qemu, Some(&args));
+        cmd_echo(&cmd);
+        match cmd.status() {
+            Result::Ok(status) => {
+                if !status.success() {
+                    anyhow::bail!("QEMU exited with status: {}", status);
+                }
+            },
             Err(e) => {
                 anyhow::bail!("Failed to launch QEMU: {}", e);
             },

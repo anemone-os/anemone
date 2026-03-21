@@ -8,8 +8,6 @@
 //! All processes's upper half virtual address space is identical to the
 //! kernel's upper half.
 
-use spin::Lazy;
-
 use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 
 pub static KERNEL_PTABLE: KPTable = KPTable::new();
@@ -98,7 +96,11 @@ impl KPTable {
                     PteFlags::VALID | PteFlags::GLOBAL,
                     PagingArch::PAGE_LEVELS - 1,
                 );
-                kdebugln!("preallocated pgdir for kernel space: index {}, ppn {:#x}", index, ppn.get());
+                kdebugln!(
+                    "preallocated pgdir for kernel space: index {}, ppn {:#x}",
+                    index,
+                    ppn.get()
+                );
                 allocated += 1;
             }
         }
@@ -170,8 +172,8 @@ pub unsafe fn kmap(mapping: Mapping) -> Result<(), MmError> {
             PagingArch::tlb_shootdown((mapping.vpn + i as u64).to_virt_addr());
         }
     }
-    if broadcast_ipi_async(IpiPayload::TlbShootdown { vaddr: None }).is_err() {
-        kwarningln!("failed to send TLB shootdown IPI after kmap");
+    if let Err(e) = broadcast_ipi_async(IpiPayload::TlbShootdown { vaddr: None }) {
+        kwarningln!("failed to send TLB shootdown IPI after kmap: {e:?}");
     }
     Ok(())
 }
@@ -189,8 +191,8 @@ pub unsafe fn kunmap(unmapping: Unmapping) {
             PagingArch::tlb_shootdown((unmapping.range.start() + i as u64).to_virt_addr());
         }
     }
-    if broadcast_ipi_async(IpiPayload::TlbShootdown { vaddr: None }).is_err() {
-        kwarningln!("failed to send TLB shootdown IPI after kunmap");
+    if let Err(e) = broadcast_ipi_async(IpiPayload::TlbShootdown { vaddr: None }) {
+        kwarningln!("failed to send TLB shootdown IPI after kunmap: {e:?}");
     }
 }
 

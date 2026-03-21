@@ -70,15 +70,15 @@ pub trait PagingArchTrait: Sized {
 
     // endregion
 
+    /// Set up the direct mapping region.
+    ///
+    /// This function is called during kernel page table initialization.
+    fn setup_direct_mapping_region(pgtbl: &mut PageTable);
+
     /// Switch to the given page table.
     ///
     /// This function should always do a TLB shootdown.
     unsafe fn activate_addr_space(pgtbl: &PageTable);
-
-    /// Set up the direct mapping region.
-    ///
-    /// This function is called during kernel page table initialization.
-    fn setup_direct_mapping_region(pgtable: &mut PageTable);
 
     /// Perform a TLB shootdown for the given virtual address in all virtual
     /// address spaces on current core.
@@ -110,10 +110,9 @@ bitflags! {
         const USER = 1 << 4;
 
         /// Indicates whether this page is global and shared by multiple address spaces.
-        /// An entry marked as global should not be unmapped
-        ///     or have its content changed in one address space,
-        ///     since it may affect other address spaces that share
-        ///     the same global page.
+        /// An entry marked as global should not be unmapped or have its content changed
+        /// in one address space, since it may affect other address spaces that share
+        /// the same global page.
         const GLOBAL = 1 << 5;
 
         /// Indicates whether memory accesses is cacheable.
@@ -146,9 +145,9 @@ impl PteFlags {
     /// **Ignoring the VALID bit, this function checks if the flags indicate a
     /// leaf entry.**
     pub fn is_leaf(&self) -> bool {
-        (self.contains(PteFlags::READ)
+        self.contains(PteFlags::READ)
             || self.contains(PteFlags::WRITE)
-            || self.contains(PteFlags::EXECUTE))
+            || self.contains(PteFlags::EXECUTE)
     }
 }
 
@@ -168,7 +167,7 @@ pub trait PteArch: Sized + From<u64> + Into<u64> + Copy {
     ///   directory.
     ///
     /// If the entry is a branch entry, some flags like [PteFlags::USER],
-    ///     [PteFlags::NONCACHE] and [PteFlags::STRONG] (if available) are
+    /// [PteFlags::NONCACHE] and [PteFlags::STRONG] (if available) are
     /// ignored.     **However, [PteFlags::GLOBAL] is still meaningful for
     /// branch entries, and should be kept if set.**
     fn new(ppn: PhysPageNum, flags: PteFlags, level: usize) -> Self;

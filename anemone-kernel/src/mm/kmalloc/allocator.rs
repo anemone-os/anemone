@@ -37,7 +37,7 @@ impl OomHandler for HeapOomHandler {
                 kinfoln!(noprint, "HeapOomHandler: claimed bootstrap heap {}", used);
                 return Ok(());
             } else {
-                kdebugln!(
+                knoticeln!(
                     noprint,
                     "HeapOomHandler: bootstrap heap already claimed, trying to request memory from frame allocator"
                 );
@@ -92,14 +92,13 @@ impl OomHandler for HeapOomHandler {
                 let len = range.npages() as usize * PagingArch::PAGE_SIZE_BYTES;
                 let ptr = range.start().to_hhdm().to_virt_addr();
                 let slice: *mut [u8] = core::ptr::slice_from_raw_parts_mut(ptr.as_ptr_mut(), len);
-                let used = talc
+                let _used = talc
                     .claim(Span::from_slice(slice))
                     .expect("should be able to claim folio from frame allocator");
-                kinfoln!(
+                knoticeln!(
                     noprint,
-                    "HeapOomHandler: claimed folio of {} pages ({} bytes) from frame allocator",
-                    range.npages(),
-                    used
+                    "HeapOomHandler: claimed folio {:?} from frame allocator",
+                    range
                 );
                 return Ok(());
             }
@@ -127,9 +126,7 @@ unsafe impl GlobalAlloc for KernelAllocator {
             },
             // No need to handle OOM here since the OOM handler will be invoked by `malloc` when
             // allocation fails. We can simply return null pointer to indicate allocation failure.
-            Err(()) => {
-                core::ptr::null_mut()
-            },
+            Err(()) => core::ptr::null_mut(),
         }
     }
 

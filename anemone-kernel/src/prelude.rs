@@ -37,3 +37,4 @@ pub use bimap::BiMap;
 pub use bitflags::bitflags;
 pub use hashbrown::{HashMap, HashSet};
 pub use intrusive_collections::{LinkedList, LinkedListLink, intrusive_adapter};
+pub use spin::Lazy;

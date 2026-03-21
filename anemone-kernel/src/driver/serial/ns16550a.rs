@@ -4,10 +4,14 @@
 //! - https://datasheet4u.com/datasheets/National-Semiconductor/NS16550A/605590
 //! - https://www.kernel.org/doc/Documentation/devicetree/bindings/serial/8250.yaml
 
+use core::ops::{Deref, DerefMut};
+
 use crate::{
-    debug::printk::{Console, ConsoleFlags, register_console},
     device::{
         bus::platform::{self, PlatformDriver},
+        char::{CharDev, CharDriver, register_char_device, register_char_driver},
+        console::{Console, ConsoleFlags, register_console},
+        devnum::GeneralMinorAllocator,
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
         resource::Resource,
     },
@@ -21,6 +25,14 @@ struct Ns16550AState {
     rc: Arc<Ns16550AStateInner>,
 }
 
+impl Deref for Ns16550AState {
+    type Target = Ns16550AStateInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.rc
+    }
+}
+
 #[derive(Debug)]
 struct Ns16550AStateInner {
     base: PhysAddr,
@@ -31,17 +43,36 @@ struct Ns16550AStateInner {
 
 impl Console for Ns16550AState {
     fn output(&self, s: &str) {
-        let inner = &self.rc;
         let regs = unsafe {
             Ns16550ARegisters::from_raw(
-                inner.remap.as_ptr().as_ptr().cast(),
-                inner.reg_shift,
-                inner.reg_io_width,
+                self.remap.as_ptr().as_ptr().cast(),
+                self.reg_shift,
+                self.reg_io_width,
             )
         };
         let mut regs = regs;
         use core::fmt::Write;
         let _ = write!(regs, "{}", s);
+    }
+}
+
+impl CharDev for Ns16550AState {
+    fn read(&self, buf: &mut [u8]) -> Result<usize, DevError> {
+        unimplemented!()
+    }
+
+    fn write(&self, buf: &[u8]) -> Result<usize, DevError> {
+        let regs = unsafe {
+            Ns16550ARegisters::from_raw(
+                self.remap.as_ptr().as_ptr().cast(),
+                self.reg_shift,
+                self.reg_io_width,
+            )
+        };
+        for byte in buf {
+            while regs.write_byte(*byte).is_none() {}
+        }
+        Ok(buf.len())
     }
 }
 
@@ -206,7 +237,6 @@ mod driver_core {
         }
     }
 }
-use driver_core::*;
 pub use driver_core::Ns16550ARegisters;
 
 #[derive(Debug, KObject, Driver)]
@@ -223,7 +253,7 @@ impl DriverOps for Ns16550ADriver {
     fn probe(&self, device: Arc<dyn Device>) -> Result<(), DevError> {
         let pdev = device
             .as_platform_device()
-            .ok_or(DevError::DriverIncompatible)?;
+            .expect("platform driver should only be probed with platform device");
 
         let fwnode = pdev.fwnode().ok_or(DevError::MissingFwNode)?;
         let uartclk = fwnode
@@ -278,22 +308,58 @@ impl DriverOps for Ns16550ADriver {
             }),
         };
 
-        // for this simple driver we do not set drv_state.
-        // irq prv_data is enough.
+        // TODO: if one of following operation fails, how can we elegantly unwind the
+        // previous successful operations (e.g. free the allocated minor, unmap the MMIO
+        // region, etc.)? we probably need some sort of "transaction" mechanism for
+        // driver probing, just like what we did in memory management when unmapping
+        // mapped pages.
+        //
+        // We should implement something that might be called `ProbeTransaction` or
+        // `ProbeCtx`, which can keep track of the resources allocated during probing
+        // and automatically free them when dropped.
 
-        request_irq(pdev, &IRQ_HANDLER, Some(Box::new(state.clone())))?;
+        let minor = {
+            let mut guard = BOOKKEEPER.lock_irqsave();
+            let (minor_alloc, devices) = guard.deref_mut();
+            let minor = minor_alloc.alloc().ok_or(DevError::NoMinorAvailable)?;
+
+            let prev = devices.insert(minor, state.clone());
+            debug_assert!(
+                prev.is_none(),
+                "minor number {} is already taken",
+                minor.get()
+            );
+            minor
+        };
+
+        pdev.set_drv_state(Some(Box::new(state.clone())));
+
+        register_char_device(
+            DevNum::new(*MAJOR.get(), minor),
+            ident_format!("{}", pdev.name()).unwrap(),
+            Arc::new(state.clone()),
+        )?;
 
         let mut flags = ConsoleFlags::empty();
         if fwnode.is_stdout() {
             flags |= ConsoleFlags::ENABLED;
             kinfoln!("{}: registered as stdout console", pdev.name());
         }
-        register_console(Box::new(state), flags);
+        register_console(Arc::new(state), flags);
+
+        // indeed we should pass state as private data here to save time in irq
+        // handling.
+        //
+        // following code is just a diliberate demonstration of how to use minor number
+        // as a key to retrieve device state.
+        request_irq(pdev, &IRQ_HANDLER, Some(Box::new(minor)))?;
 
         kinfoln!("{}: probed", pdev.name());
 
         Ok(())
     }
+
+    fn shutdown(&self, device: &dyn Device) {}
 
     fn as_platform_driver(&self) -> Option<&dyn PlatformDriver> {
         Some(self)
@@ -306,10 +372,26 @@ impl PlatformDriver for Ns16550ADriver {
     }
 }
 
+impl CharDriver for Ns16550ADriver {
+    fn major(&self) -> MajorNum {
+        *MAJOR.get()
+    }
+}
+
 static IRQ_HANDLER: IrqHandler = IrqHandler::new(handle_irq);
 
 fn handle_irq(prv_data: Option<&mut dyn PrvData>) {
-    let state = unsafe { prv_data.unwrap().cast_unchecked::<Ns16550AState>() };
+    let minor = unsafe { *prv_data.unwrap().cast_unchecked::<MinorNum>() };
+
+    let state = {
+        let bookkeeper = BOOKKEEPER.lock_irqsave();
+        let (_, devices) = bookkeeper.deref();
+        devices
+            .get(&minor)
+            .expect("invalid minor number in irq handler")
+            .clone()
+    };
+
     let inner = &state.rc;
     let regs = unsafe {
         Ns16550ARegisters::from_raw(
@@ -326,6 +408,10 @@ fn handle_irq(prv_data: Option<&mut dyn PrvData>) {
     kdebugln!("ns16550a: handled irq at {:#x}", inner.base.get());
 }
 
+static MAJOR: MonoOnce<MajorNum> = unsafe { MonoOnce::new() };
+static BOOKKEEPER: Lazy<SpinLock<(GeneralMinorAllocator, HashMap<MinorNum, Ns16550AState>)>> =
+    Lazy::new(|| SpinLock::new((GeneralMinorAllocator::new(), HashMap::new())));
+
 #[initcall(driver)]
 fn init() {
     let kobj_base = KObjectBase::new(KObjIdent::try_from("ns16550a").unwrap());
@@ -334,5 +420,14 @@ fn init() {
         kobj_base,
         drv_base,
     });
-    platform::register_driver(driver);
+
+    platform::register_driver(driver.clone());
+    match register_char_driver(driver) {
+        Ok(m) => MAJOR.init(|major| {
+            major.write(m);
+        }),
+        Err(e) => {
+            kerrln!("failed to register ns16550a as a char driver: {:?}", e);
+        },
+    }
 }

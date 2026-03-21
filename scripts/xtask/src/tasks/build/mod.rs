@@ -91,18 +91,24 @@ impl<'a> BuildContext<'a> {
                 DtbType::Qemu => {
                     log_progress!("DTB", "Generating DTB from qemu");
                     if let Some(qemu) = &self.platform.qemu {
-                        let mut cmd = gen_qemu_cmd(qemu, None)?;
-                        cmd = cmd.arg("-machine")
-                            .arg(String::from("dumpdtb=anemone-kernel/src/") + &dtb.path);
-                        
-                        match cmd.run_echo() {
-                            Result::Ok(()) => {
-                                log_progress!("DTB", "Successfully generated DTB from QEMU");
-                            }
+                        let mut cmd = gen_qemu_cmd(qemu, None);
+                        cmd.arg("-machine")
+                            .arg(String::from("dumpdtb=anemone-kernel/src/") + dtb.path.as_str());
+                        cmd_echo(&cmd);
+                        match cmd.status() {
+                            Ok(status) => {
+                                if !status.success() {
+                                    anyhow::bail!("QEMU exited with status: {}", status);
+                                }
+                                log_progress!("DTB", "Successfully generated DTB from qemu");
+                            },
                             Err(e) => {
-                                log_progress!("ERROR", &format!("Failed to generate DTB from QEMU: {}", e));
+                                log_progress!(
+                                    "ERROR",
+                                    &format!("Failed to generate DTB from QEMU: {}", e)
+                                );
                                 anyhow::bail!("Failed to generate DTB from QEMU: {}", e);
-                            }
+                            },
                         }
                     } else {
                         log_progress!(
