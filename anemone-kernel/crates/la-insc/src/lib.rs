@@ -1,10 +1,9 @@
-//! Loongarch64 instruction support.
+//! Basic Loongarch64 instruction support, containing privileged instructions and some csr/iocsr registers.
+//! Only used for kernel.
+//! `[deny(missing_docs)]` is used to ensure all instructions and registers are documented.
 
-//#![deny(missing_docs)]
+#![deny(missing_docs)]
 #![no_std]
-#[cfg(target_arch = "loongarch64")]
 pub mod utils;
-#[cfg(target_arch = "loongarch64")]
 pub mod reg;
-#[cfg(target_arch = "loongarch64")]
 pub mod insc;

@@ -1,3 +1,5 @@
+//! CSR definitions and accessors
+
 use crate::reg::{
     asid::Asid,
     crmd::Crmd,
@@ -10,32 +12,37 @@ use crate::reg::{
 macro_rules! define_csr {
     (64, $name: ident, $num:expr) => {
         paste::paste! {
+            #[doc = concat!("CSR number for CSR `", stringify!($name), "`")]
             pub const [<CR_ $name:upper>]: u16 = $num;
         }
+
+        #[doc = concat!("Accessor for CSR `", stringify!($name), "`")]
         pub mod $name {
             use core::arch::asm;
+            /// Read the CSR value
             #[inline(always)]
             pub unsafe fn csr_read() -> u64 {
                 let val: u64;
-                // 直接用环境中已定义的CSR_NUM，无参数、无冗余
+
                 unsafe {
                     asm!(
                         "csrrd {0}, {1}",
                         out(reg) val,
-                        const $num, // 直接用环境中已定义的常量
+                        const $num,
                         options(nomem, nostack),
                     );
                 }
                 val
             }
 
+            /// Write the CSR value
             #[inline(always)]
             pub unsafe fn csr_write(value: u64) {
                 unsafe{
                     asm!(
-                        "csrwr {0}, {1}", // LoongArch写入CSR指令：csrwr 通用寄存器, CSR编号
-                        in(reg) value, // 要写入的值（环境中预定义）
-                        const $num,     // 环境中预定义的CSR编号
+                        "csrwr {0}, {1}",
+                        in(reg) value,
+                        const $num,
                         options(nomem, nostack)
                     );
                 }
@@ -45,32 +52,36 @@ macro_rules! define_csr {
     };
     (64, $name: ident, $num:expr, $type: ident) => {
         paste::paste! {
+            #[doc = concat!("CSR number for CSR `", stringify!($name), "`")]
             pub const [<CR_ $name:upper>]: u16 = $num;
         }
+        #[doc = concat!("Accessor for CSR `", stringify!($name), "`")]
         pub mod $name {
             use core::arch::asm;
             #[inline(always)]
+            /// Read the CSR value
             pub unsafe fn csr_read() -> super::$type {
                 let val: u64;
-                // 直接用环境中已定义的CSR_NUM，无参数、无冗余
+
                 unsafe {
                     asm!(
                         "csrrd {0}, {1}",
                         lateout(reg) val,
-                        const $num, // 直接用环境中已定义的常量
+                        const $num,
                         options(nomem, nostack),
                     );
                 }
                 super::$type::from_u64(val)
             }
 
+            /// Write the CSR value
             #[inline(always)]
             pub unsafe fn csr_write(value: super::$type) {
                 unsafe{
                     asm!(
-                        "csrwr {0}, {1}", // LoongArch写入CSR指令：csrwr 通用寄存器, CSR编号
-                        in(reg) value.to_u64(), // 要写入的值（环境中预定义）
-                        const $num,     // 环境中预定义的CSR编号
+                        "csrwr {0}, {1}",
+                        in(reg) value.to_u64(),
+                        const $num,
                         options(nomem, nostack)
                     );
                 }
@@ -80,32 +91,36 @@ macro_rules! define_csr {
     };
     (32, $name: ident, $num:expr) => {
         paste::paste! {
+            #[doc = concat!("CSR number for CSR `", stringify!($name), "`")]
             pub const [<CR_ $name:upper>]: u16 = $num;
         }
+        #[doc = concat!("Accessor for CSR `", stringify!($name), "`")]
         pub mod $name {
             use core::arch::asm;
             #[inline(always)]
+            /// Read the CSR value
             pub unsafe fn csr_read() -> u32 {
                 let val: u32;
-                // 直接用环境中已定义的CSR_NUM，无参数、无冗余
+
                 unsafe {
                     asm!(
                         "csrrd {0}, {1}",
                         out(reg) val,
-                        const $num, // 直接用环境中已定义的常量
+                        const $num,
                         options(nomem, nostack),
                     );
                 }
                 val
             }
 
+            /// Write the CSR value
             #[inline(always)]
             pub unsafe fn csr_write(value: u32) {
                 unsafe{
                     asm!(
-                        "csrwr {0}, {1}", // LoongArch写入CSR指令：csrwr 通用寄存器, CSR编号
-                        in(reg) value, // 要写入的值（环境中预定义）
-                        const $num,     // 环境中预定义的CSR编号
+                        "csrwr {0}, {1}",
+                        in(reg) value,
+                        const $num,
                         options(nomem, nostack)
                     );
                 }
@@ -115,32 +130,36 @@ macro_rules! define_csr {
     };
     (32, $name: ident, $num:expr, $type: ident) => {
         paste::paste! {
+            #[doc = concat!("CSR number for CSR `", stringify!($name), "`")]
             pub const [<CR_ $name:upper>]: u16 = $num;
         }
+        #[doc = concat!("Accessor for CSR `", stringify!($name), "`")]
         pub mod $name {
             use core::arch::asm;
+            /// Read the CSR value
             #[inline(always)]
             pub unsafe fn csr_read() -> super::$type {
                 let val: u32;
-                // 直接用环境中已定义的CSR_NUM，无参数、无冗余
+
                 unsafe {
                     asm!(
                         "csrrd {0}, {1}",
                         lateout(reg) val,
-                        const $num, // 直接用环境中已定义的常量
+                        const $num,
                         options(nomem, nostack),
                     );
                 }
                 super::$type::from_u32(val)
             }
 
+            /// Write the CSR value
             #[inline(always)]
             pub unsafe fn csr_write(value: super::$type) {
                 unsafe{
                     asm!(
-                        "csrwr {0}, {1}", // LoongArch写入CSR指令：csrwr 通用寄存器, CSR编号
-                        in(reg) value.to_u32(), // 要写入的值（环境中预定义）
-                        const $num,     // 环境中预定义的CSR编号
+                        "csrwr {0}, {1}",
+                        in(reg) value.to_u32(),
+                        const $num,
                         options(nomem, nostack)
                     );
                 }

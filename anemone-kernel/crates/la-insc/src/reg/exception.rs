@@ -1,17 +1,22 @@
+//! Exception-related register wrappers
+
+#![allow(missing_docs)]
+
+use crate::{impl_bits64, impl_const_u64_converter, impl_rw};
 use bitflags::bitflags;
 
-use crate::{impl_bits64, impl_rw};
 
+/// ECFG register wrapper
 pub struct Ecfg(u64);
 impl Ecfg {
     impl_bits64!(bitflags, u16, local_ie, IntrFlags, 0, 13);
     impl_bits64!(number, vs, u8, 16, 19);
-    pub const fn from_u64(val: u64) -> Ecfg {
-        Ecfg(val)
-    }
-    pub const fn to_u64(&self) -> u64 {
-        self.0
-    }
+    impl_const_u64_converter!();
+    /// Create an Ecfg value with the given local IE and vector number.
+    ///
+    /// Other bits are zero, so we can safely create it from zero.
+    ///
+    /// Reference: `LoongArch-Vol1-v1.10-CN, 7.4.5`
     pub const fn new(local_ie: IntrFlags, vs: u8) -> Ecfg {
         let mut val = 0;
         val |= local_ie.bits() as u64;
@@ -23,23 +28,21 @@ impl Ecfg {
 impl_rw!(ecfg, local_ie, IntrFlags);
 impl_rw!(ecfg, vs, u8);
 
+/// ESTAT register wrapper
+///
+/// In fact, ESTAT is readonly, but write implementation is still provided,
+///     and all writes will be **ignored**.
 pub struct Estat(u64);
 
 impl Estat {
     impl_bits64!(bitflags, u16, is, IntrFlags, 0, 13);
     impl_bits64!(number, ecode, u8, 16, 22);
     impl_bits64!(number, esubcode, u16, 22, 31);
-
-    pub const fn from_u64(val: u64) -> Estat {
-        Estat(val)
-    }
-
-    pub const fn to_u64(&self) -> u64 {
-        self.0
-    }
+    impl_const_u64_converter!();
 }
 
 bitflags! {
+    /// Interrupt flags indicating interrupt types.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct IntrFlags: u16 {
         const SoftwareIntr0 = 1 << 0;
