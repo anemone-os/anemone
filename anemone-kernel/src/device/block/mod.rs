@@ -85,7 +85,7 @@ pub trait BlockDev: Send + Sync {
     /// - `block_idx` specifies the index of the block to write to.
     /// - `buf` is the buffer to write from, whose length is guaranteed to be a
     ///   multiple of [Self::block_size()].
-    fn write_block(&self, block_idx: usize, buf: &[u8]) -> Result<(), DevError>;
+    fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), DevError>;
 }
 
 impl Debug for dyn BlockDev {
@@ -203,7 +203,7 @@ fn test_gendisk() {
 
     if let Some(gendisk) = gendisk {
         gendisk
-            .write_block(0, [39].repeat(512).as_slice())
+            .write_blocks(0, [39].repeat(512).as_slice())
             .expect("failed to write block");
     }
 }

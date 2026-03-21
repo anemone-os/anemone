@@ -59,7 +59,7 @@ impl BlockDev for VirtIOBlkState {
             })
     }
 
-    fn write_block(&self, block_idx: usize, buf: &[u8]) -> Result<(), DevError> {
+    fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), DevError> {
         self.lock_irqsave()
             .write_blocks(block_idx, buf)
             .map_err(|e| {
@@ -98,8 +98,6 @@ impl DriverOps for VirtIOBlkDriver {
             rc: Arc::new(SpinLock::new(drv)),
         };
 
-        //let minor = self.alloc_minor().ok_or(DevError::NoMinorAvailable)?;
-
         let minor = {
             let mut guard = BOOKKEEPER.lock_irqsave();
             let (minor_alloc, devices) = guard.deref_mut();
@@ -120,6 +118,8 @@ impl DriverOps for VirtIOBlkDriver {
             ident_format!("{}", vdev.name()).unwrap(),
             Arc::new(state.clone()),
         )?;
+
+        vdev.set_drv_state(Some(Box::new(state.clone())));
 
         vdev.request_irq(&IRQ_HANDLER, Some(Box::new(state)))?;
 

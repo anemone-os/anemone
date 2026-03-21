@@ -39,6 +39,10 @@ impl DmaRegion {
 /// Internally, the requested size will be rounded up to a multiple of the page
 /// size. And the returned region will always be page-aligned as well.
 pub fn dma_alloc(nbytes: usize) -> Result<DmaRegion, MmError> {
+    if nbytes == 0 {
+        return Err(MmError::InvalidArgument);
+    }
+
     let npages =
         align_up_power_of_2!(nbytes, PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES;
 

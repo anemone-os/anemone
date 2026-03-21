@@ -6,6 +6,8 @@ pub static PANIC_OCCURRED: AtomicBool = AtomicBool::new(false);
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
+    PANIC_OCCURRED.store(true, Ordering::SeqCst);
+
     unsafe {
         IntrArch::local_intr_disable();
     }

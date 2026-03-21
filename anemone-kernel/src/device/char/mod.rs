@@ -59,6 +59,10 @@ impl Debug for CharDevDesc {
     }
 }
 
+/// Character device subsystem state. Singleton instance.
+///
+/// **LOCK ORDERING**:
+/// **`devices` -> `drivers` -> `major_alloc`**
 struct CharDevSubSys {
     devices: RwLock<HashMap<DevNum, CharDevDesc>>,
     drivers: RwLock<HashMap<MajorNum, Arc<dyn CharDriver>>>,

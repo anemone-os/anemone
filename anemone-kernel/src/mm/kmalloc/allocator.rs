@@ -38,7 +38,7 @@ impl OomHandler for HeapOomHandler {
                 return Ok(());
             } else {
                 knoticeln!(
-                    //noprint,
+                    noprint,
                     "HeapOomHandler: bootstrap heap already claimed, trying to request memory from frame allocator"
                 );
                 // if pmm is not yet initialized, this will fail and return Err(()).
@@ -96,7 +96,7 @@ impl OomHandler for HeapOomHandler {
                     .claim(Span::from_slice(slice))
                     .expect("should be able to claim folio from frame allocator");
                 knoticeln!(
-                    //noprint,
+                    noprint,
                     "HeapOomHandler: claimed folio {:?} from frame allocator",
                     range
                 );
