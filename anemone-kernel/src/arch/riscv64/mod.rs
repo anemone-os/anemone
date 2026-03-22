@@ -9,9 +9,11 @@ pub(super) mod exception;
 pub(super) mod mm;
 pub(super) mod time;
 
+mod backtrace;
 mod bootstrap;
 mod machine;
 
+pub use backtrace::RiscV64BacktraceArch as BacktraceArch;
 pub use cpu::RiscV64CpuArch as CpuArch;
 pub use exception::{RiscV64IntrArch as IntrArch, RiscV64TrapArch as TrapArch};
 pub use mm::{KernelLayout, RiscV64PagingArch as PagingArch};

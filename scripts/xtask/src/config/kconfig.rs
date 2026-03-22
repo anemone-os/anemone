@@ -44,6 +44,7 @@ pub struct Parameters {
     pub max_processes: Option<u64>,
     pub time_slice_ms: Option<u64>,
     pub system_hz: Option<u16>,
+    pub backtrace_depth: Option<usize>,
 }
 
 impl Parameters {
@@ -94,6 +95,8 @@ pub const MAX_PROCESSES: u64 = {};
 pub const TIME_SLICE_MS: u64 = {};
 /// System timer frequency in hertz, i.e. number of timer interrupts per second
 pub const SYSTEM_HZ: u16 = {};
+/// Maximum depth of captured backtrace
+pub const BACKTRACE_DEPTH: usize = {};
         "#,
             default_or!(bootstrap_heap_shift_kb),
             default_or!(log_buffer_shift_kb),
@@ -103,7 +106,8 @@ pub const SYSTEM_HZ: u16 = {};
             default_or!(max_ident_len_bytes),
             default_or!(max_processes),
             default_or!(time_slice_ms),
-            default_or!(system_hz)
+            default_or!(system_hz),
+            default_or!(backtrace_depth)
         )
     }
 }
