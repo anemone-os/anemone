@@ -81,7 +81,7 @@ impl CapturedBacktrace {
 
     /// Check whether a frame pointer value looks valid enough to dereference.
     fn is_valid_fp(fp: usize) -> bool {
-        fp != 0 && (fp % core::mem::size_of::<usize>()) == 0
+        fp >= 16 && (fp % core::mem::size_of::<usize>()) == 0
     }
 }
 

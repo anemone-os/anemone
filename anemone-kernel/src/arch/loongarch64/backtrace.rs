@@ -14,10 +14,10 @@ impl BacktraceArchTrait for LA64BacktraceArch {
         // LoongArch64 frame layout with LLVM -C force-frame-pointers:
         //   [fp - 8]  = saved return address ($ra)
         //   [fp - 16] = saved frame pointer ($fp)
-        let ra = unsafe { core::ptr::read((fp - 8) as *const usize) };
-        let prev_fp = unsafe { core::ptr::read((fp - 16) as *const usize) };
+        let ra = unsafe { core::ptr::read(fp.checked_sub(8)? as *const usize) };
+        let prev_fp = unsafe { core::ptr::read(fp.checked_sub(16)? as *const usize) };
 
-        if prev_fp == 0 || prev_fp % core::mem::size_of::<usize>() != 0 {
+        if prev_fp == 0 || prev_fp % core::mem::size_of::<usize>() != 0 || prev_fp <= fp {
             return None;
         }
 
