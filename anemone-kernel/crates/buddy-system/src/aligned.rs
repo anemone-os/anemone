@@ -3,9 +3,13 @@
 pub struct AlignedAddr<const ALIGN: usize>(usize);
 
 impl<const ALIGN: usize> AlignedAddr<ALIGN> {
+    const __VALIDATE: () = assert!(ALIGN.is_power_of_two(), "ALIGN must be a power of two");
+
     pub const ZERO: Self = Self(0);
 
     pub const fn new(addr: usize) -> Option<Self> {
+        let _ = Self::__VALIDATE;
+
         if addr % ALIGN == 0 {
             Some(Self(addr))
         } else {

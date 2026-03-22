@@ -21,3 +21,10 @@ path = "fuzz_targets/fuzz_buddy_system.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_concurrent"
+path = "fuzz_targets/fuzz_concurrent.rs"
+test = false
+doc = false
+bench = false

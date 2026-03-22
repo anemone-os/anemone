@@ -252,7 +252,7 @@ impl<const MIN_BLOCK_BYTES: usize, const NORDER: usize> Zone<MIN_BLOCK_BYTES, NO
         let bits = self.nunits / (1 << order);
         unsafe {
             let offset = self.bitmap_offset[order];
-            let ptr = self.region.as_ptr().cast::<u8>().wrapping_add(offset);
+            let ptr = self.region.as_ptr().cast::<u8>().add(offset);
             BitSlice::from_raw_parts(ptr, bits)
         }
     }
@@ -262,7 +262,7 @@ impl<const MIN_BLOCK_BYTES: usize, const NORDER: usize> Zone<MIN_BLOCK_BYTES, NO
         let bits = self.nunits / (1 << order);
         unsafe {
             let offset = self.bitmap_offset[order];
-            let ptr = self.region.as_ptr().cast::<u8>().wrapping_add(offset);
+            let ptr = self.region.as_ptr().cast::<u8>().add(offset);
             BitSliceMut::from_raw_parts(ptr, bits)
         }
     }
@@ -413,7 +413,41 @@ impl<const MIN_BLOCK_BYTES: usize, const NORDER: usize> Zone<MIN_BLOCK_BYTES, NO
 
         let block_addr = AlignedAddr::<MIN_BLOCK_BYTES>::new(addr.as_ptr() as usize)
             .ok_or(BuddyError::UnalignedAddr)?;
+        // Verify the address falls within the allocable region.  Without this
+        // check, block_idx would underflow (wrapping usize subtraction) when
+        // block_addr < salloc, causing a panic deep in bitmap bounds checks
+        // instead of returning a clean BuddyError::InvalidAddr.
+        if block_addr.as_usize() < self.salloc.as_usize() {
+            return Err(BuddyError::InvalidAddr);
+        }
+
+        // Verify order-level alignment: the address must be aligned to the block
+        // size of the given order, not just MIN_BLOCK_BYTES.  Without this,
+        // integer division truncation in block_idx silently yields a wrong index.
+        let bytes_per_block = MIN_BLOCK_BYTES * (1 << order);
+        if (block_addr.as_usize() - self.salloc.as_usize()) % bytes_per_block != 0 {
+            return Err(BuddyError::UnalignedAddr);
+        }
+
         let block_idx = self.block_idx(block_addr, order);
+        // Verify the block index is within the bitmap for this order so that
+        // mismatched order arguments never cause an out-of-bounds bitmap panic.
+        if block_idx >= self.nunits >> order {
+            return Err(BuddyError::InvalidAddr);
+        }
+
+        // Double-free detection: the block must be currently allocated (bitmap
+        // bit == 0).  If it is already marked free, someone is freeing it twice
+        // which would corrupt the free-list.
+        {
+            let bitmap = self.bitmap_for_order(order);
+            if bitmap
+                .test(block_idx)
+                .expect("Internal error: bitmap index out of bounds")
+            {
+                return Err(BuddyError::DoubleFree);
+            }
+        }
 
         let mut cur_block_idx = block_idx;
         let mut cur_order = order;
