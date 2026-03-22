@@ -20,7 +20,7 @@ macro_rules! arch_select {
         mod $arch;
         #[cfg(target_arch = $arch_str)]
         pub use $crate::arch::$arch::{
-            CpuArch, IntrArch, KernelLayout, PagingArch, TimeArch, TrapArch,
+            BacktraceArch, CpuArch, IntrArch, KernelLayout, PagingArch, TimeArch, TrapArch,
         };
     };
 }
