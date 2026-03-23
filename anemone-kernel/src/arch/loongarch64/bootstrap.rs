@@ -1,17 +1,9 @@
 //! Bootstrap for Loongarch64 architecture.
 
-use core::arch::{global_asm, naked_asm};
+use core::arch::naked_asm;
 
-use la_insc::{
-    reg::{
-        csr::{
-            CR_CPUID, CR_CRMD, CR_DMW0, CR_DMW1, CR_PGDH, CR_PGDL, CR_PRMD, CR_PWCH, CR_PWCL,
-            CR_TLBRENTRY,
-        },
-        dmw::Dmw,
-        pwc::{PteWidth, Pwch, Pwcl},
-    },
-    utils::{mem::MemAccessType, privl::PrivilegeFlags},
+use la_insc::reg::csr::{
+    CR_CPUID, CR_CRMD, CR_DMW0, CR_DMW1, CR_PGDH, CR_PGDL, CR_PWCH, CR_PWCL, CR_TLBRENTRY,
 };
 
 use crate::{
@@ -20,11 +12,7 @@ use crate::{
         loongarch64::{
             exception::{enable_local_irq, install_ktrap_handler},
             machine::machine_init,
-            mm::{
-                BOOT_DMW0, BOOT_DMW1, BOOTSTRAP_PTABLE, PWCH, PWCL,
-                paging::{LA64PageDirectory, create_bootstrap_ptable},
-                refill::__tlb_rfill,
-            },
+            mm::{BOOT_DMW0, BOOT_DMW1, BOOTSTRAP_PTABLE, PWCH, PWCL, refill::__tlb_rfill},
         },
     },
     device::discovery::open_firmware::{
@@ -33,7 +21,7 @@ use crate::{
     },
     mm::layout::KernelLayoutTrait,
     prelude::*,
-    utils::align::{AlignedBytes, PhantomAligned8, PhantomAligned4096, PhantomAligned16384},
+    utils::align::{AlignedBytes, PhantomAligned4096},
 };
 
 #[unsafe(no_mangle)]
@@ -245,7 +233,7 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_va: VirtAddr) -> ! {
         bsp_pre_kernel_main();
     }
     // bsp
-    loop {}
+    kernel_main()
 }
 
 unsafe fn ap_entry(hart_id: usize) -> ! {

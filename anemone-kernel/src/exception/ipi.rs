@@ -70,7 +70,7 @@ pub fn send_ipi(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
 /// Broadcast an IPI to all other CPUs, synchronously waiting for all of them to
 /// handle the IPI before returning.
 pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
-    let cur_cpuid = CpuArch::cur_cpu_id();
+    let cur_cpuid = CpuArch::cur_cpu_id().get();
     let ncpus = CpuArch::ncpus();
     for id in 0..ncpus {
         if id != cur_cpuid {
@@ -163,7 +163,7 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
     // check whether empty buffers are enough
     let ncpus = CpuArch::ncpus();
     for id in 0..ncpus {
-        if id != CpuArch::cur_cpu_id() {
+        if id != CpuArch::cur_cpu_id().get() {
             if unsafe { with_core_local_remote(id, |core_local| !core_local.online()) } {
                 return Err(IpiError::TargetOffline);
             }
@@ -173,7 +173,7 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
     let mut navail_bufs = 0;
     MSG_BUFFERS.with(|buffers| {
         for (id, buf) in buffers[..ncpus].iter().enumerate() {
-            if id == CpuArch::cur_cpu_id() {
+            if id == CpuArch::cur_cpu_id().get() {
                 continue;
             }
             if buf.is_accomplished.load(Ordering::Acquire) {
@@ -187,7 +187,7 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
     let mut sent_bufs = 0;
     MSG_BUFFERS.with_mut(|buffers| {
         for (id, buf) in buffers[..ncpus].iter_mut().enumerate() {
-            if id == CpuArch::cur_cpu_id() {
+            if id == CpuArch::cur_cpu_id().get() {
                 continue;
             }
             if buf.is_accomplished.load(Ordering::Acquire) {
@@ -222,7 +222,7 @@ pub fn handle_ipi() {
             };
             let msg = msg_ptr.as_ref();
             kdebugln!(
-                "#{} handle ipi: payload={:?}",
+                "({}) handle ipi: payload={:?}",
                 CpuArch::cur_cpu_id(),
                 msg.payload
             );

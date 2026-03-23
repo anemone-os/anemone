@@ -4,13 +4,11 @@ pub mod trap;
 pub use intr::LA64IntrArch;
 use la_insc::reg::{
     crmd,
-    csr::{ecfg, tcfg, tid},
-    exception::{Ecfg, IntrFlags}, iocsr::ipi_enable, timer::Tcfg,
+    csr::ecfg,
+    exception::{Ecfg, IntrFlags},
+    iocsr::ipi_enable,
 };
 pub use trap::{LA64TrapArch, install_ktrap_handler};
-
-use crate::{arch::{CpuArch, TimeArch}, device::CpuArchTrait, time::TimeArchTrait};
-
 
 /// Enable local interrupts
 pub fn enable_local_irq() {

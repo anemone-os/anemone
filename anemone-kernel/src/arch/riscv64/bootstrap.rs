@@ -1,4 +1,4 @@
-use core::{arch::naked_asm, sync::atomic::AtomicUsize};
+use core::arch::naked_asm;
 
 use crate::{
     align_down_power_of_2, align_up_power_of_2,
@@ -18,17 +18,14 @@ use crate::{
             unflatten_device_tree,
         },
     },
-    mm::{kptable::kmap, layout::KernelLayoutTrait},
+    mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
-    utils::align::{AlignedBytes, PhantomAligned4096},
+    sync::counter::CpuSync,
 };
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bss.stack0")]
-static mut STACK0: [AlignedBytes<
-    PhantomAligned4096,
-    [u8; (1 << KSTACK_SHIFT_KB) as usize * 1024],
->; MAX_CPUS] = [AlignedBytes::ZEROED; MAX_CPUS];
+static mut STACK0: [RawKernelStack; MAX_CPUS] = [RawKernelStack::ZEROED; MAX_CPUS];
 
 #[unsafe(no_mangle)]
 static BOOTSTRAP_PGDIR: RiscV64PgDir = {
@@ -251,10 +248,10 @@ extern "C" fn rusty_nun(hart_id: usize, fdt_pa: PhysAddr) -> ! {
         if !BSP_ARRIVED {
             // bsp
             BSP_ARRIVED = true;
-            bsp_primary(hart_id, fdt_pa)
+            bsp_setup(hart_id, fdt_pa)
         } else {
             // ap
-            ap_primary(hart_id)
+            ap_setup(hart_id)
         }
     }
 }
@@ -308,7 +305,6 @@ unsafe fn remap_boot_stack() {
 
         let vrange = unsafe { mm::remap::alloc_virt_range(total_vpages) }
             .expect("failed to allocate virtual range for boot stack guard page");
-
         // The first page is the guard – we simply leave it unmapped. The underlying pte
         // should be empty.
         let stack_vpn = vrange.start() + 1;
@@ -328,7 +324,7 @@ unsafe fn remap_boot_stack() {
         tops[cpu] = stack_top;
 
         kinfoln!(
-            "cpu {}: boot stack remapped with guard page at [{:#x}, {:#x}), stack [{:#x}, {:#x})",
+            "cpu #{}: boot stack remapped with guard page at [{:#x}, {:#x}), stack [{:#x}, {:#x})",
             cpu,
             vrange.start().to_virt_addr().get(),
             stack_vpn.to_virt_addr().get(),
@@ -343,8 +339,8 @@ unsafe fn remap_boot_stack() {
 }
 
 #[inline(always)]
-unsafe fn switch_to_secondary(secondary_entry: VirtAddr, arg0: u64, arg1: u64) -> ! {
-    let cpu_id = CpuArch::cur_cpu_id();
+unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
+    let cpu_id = CpuArch::cur_cpu_id().get();
     let new_stack_top = GUARDED_STACK_TOPS.get()[cpu_id];
 
     unsafe {
@@ -353,15 +349,13 @@ unsafe fn switch_to_secondary(secondary_entry: VirtAddr, arg0: u64, arg1: u64) -
             "mv  fp, zero",
             "jr  {entry}",
             new_top = in(reg) new_stack_top.get(),
-            entry = in(reg) secondary_entry.get(),
-            in("a0") arg0,
-            in("a1") arg1,
+            entry = in(reg) dest_entry.get(),
             options(noreturn),
         )
     }
 }
 
-unsafe fn bsp_primary(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
+unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
     unsafe {
         clear_bss();
     }
@@ -370,8 +364,6 @@ unsafe fn bsp_primary(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
     install_ktrap_handler();
 
     register_earlycon();
-    kinfoln!("anemone kernel booting...");
-    kinfoln!("bsp id: {}", bsp_id);
 
     let fdt_va = sv39::Sv39KernelLayout::phys_to_dm(fdt_pa);
 
@@ -379,6 +371,8 @@ unsafe fn bsp_primary(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         // needed by percpu initialization.
         let ncpus = early_scan_cpu_count(fdt_va);
         super::cpu::set_ncpus(ncpus);
+
+        kinfoln!("anemone kernel booting on bsp #{}", bsp_id);
 
         // needed by timer initialization.
         if let Some(freq_hz) = early_scan_clock_freq(fdt_va) {
@@ -415,22 +409,30 @@ unsafe fn bsp_primary(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
 
         remap_boot_stack();
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
-        switch_to_secondary(
-            VirtAddr::new(bsp_secondary as *const () as u64),
-            bsp_id as u64,
-            fdt_va.get(),
-        )
+        add_to_ready(Arc::new(
+            Task::new_kernel(
+                bsp_kinit as *const (),
+                ParameterList::from_2_args(bsp_id as u64, fdt_va.get()),
+                IntrArch::DISABLED_IRQ_FLAGS,
+                TaskFlags::NONE,
+            )
+            .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e)),
+        ));
+        switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
     }
 }
 
-unsafe fn bsp_secondary(bsp_id: usize, fdt_va: VirtAddr) -> ! {
+unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     unsafe {
+        kinfoln!(
+            "bsp #{} kinit running on {}...",
+            bsp_id,
+            current_task_id()
+        );
         wake_up_aps(bsp_id);
-        sync_with_counter("boot", &BOOT_SYNC_COUNTER);
-
+        BOOT_SYNC_COUNTER.sync_with_counter();
         // register drivers to bus types
         driver::init();
-
         unflatten_device_tree(fdt_va);
         parse_bootargs();
         machine_init();
@@ -438,12 +440,13 @@ unsafe fn bsp_secondary(bsp_id: usize, fdt_va: VirtAddr) -> ! {
 
         enable_local_irq();
         bsp_pre_kernel_main();
+        INIT_SYNC_COUNTER.sync_with_counter();
 
-        sync_with_counter("init", &INIT_SYNC_COUNTER);
-        sync_with_counter("finish", &FINISH_SYNC_COUNTER);
+        FINISH_SYNC_COUNTER.sync_with_counter();
+        kinfoln!("bsp #{} kinit finished", bsp_id);
     }
 
-    kernel_main()
+    loop {}
 }
 
 unsafe fn wake_up_aps(bsp_id: usize) {
@@ -467,41 +470,39 @@ unsafe fn wake_up_aps(bsp_id: usize) {
     }
 }
 
-static BOOT_SYNC_COUNTER: AtomicUsize = AtomicUsize::new(0);
-static INIT_SYNC_COUNTER: AtomicUsize = AtomicUsize::new(0);
-static FINISH_SYNC_COUNTER: AtomicUsize = AtomicUsize::new(0);
+static BOOT_SYNC_COUNTER: CpuSync = CpuSync::new("boot");
+static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
+static FINISH_SYNC_COUNTER: CpuSync = CpuSync::new("finish");
 
-/// Synchronize all CPUs to ensure they have all executed the code up to this
-/// point.
-#[inline(never)]
-unsafe fn sync_with_counter(name: &str, counter: &'static AtomicUsize) {
-    let ncpus = CpuArch::ncpus();
-    _ = counter.fetch_add(1, Ordering::SeqCst);
-    knoticeln!("{} sync: +1", name);
-    while counter.load(Ordering::SeqCst) < ncpus {
-        core::hint::spin_loop();
-    }
-}
-
-unsafe fn ap_primary(ap_id: usize) -> ! {
+unsafe fn ap_setup(ap_id: usize) -> ! {
     unsafe {
+        kdebugln!("anemone kernel booting on ap #{}", ap_id);
         install_ktrap_handler();
         mm::percpu::ap_init(ap_id);
-        enable_local_irq();
         mm::kptable::activate_kernel_mapping();
-
-        switch_to_secondary(
-            VirtAddr::new(ap_secondary as *const () as u64),
-            ap_id as u64,
-            0,
-        )
+        BOOT_SYNC_COUNTER.sync_with_counter();
+        add_to_ready(Arc::new(
+            Task::new_kernel(
+                ap_kinit as *const (),
+                ParameterList::from_1_args(ap_id as u64),
+                IntrArch::DISABLED_IRQ_FLAGS,
+                TaskFlags::NONE,
+            )
+            .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e)),
+        ));
+        switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
     }
 }
 
-unsafe fn ap_secondary(ap_id: usize) -> ! {
+unsafe extern "C" fn ap_kinit(ap_id: usize) {
     unsafe {
-        sync_with_counter("boot", &BOOT_SYNC_COUNTER);
-        kdebugln!("ap {} booting...", ap_id);
+        INIT_SYNC_COUNTER.sync_with_counter();
+        kinfoln!(
+            "ap #{} kinit running on {}...",
+            ap_id,
+            current_task_id()
+        );
+        enable_local_irq();
 
         // collect previous IPIs sent by bsp before ap starts to run.
         // the main reason for this is to clear IPI buffers of bsp such that it can send
@@ -509,10 +510,9 @@ unsafe fn ap_secondary(ap_id: usize) -> ! {
         riscv::register::sip::set_ssoft();
 
         // synchronize with BSP
-        sync_with_counter("init", &INIT_SYNC_COUNTER);
 
-        sync_with_counter("finish", &FINISH_SYNC_COUNTER);
-        kinfoln!("ap {} running...", ap_id);
+        FINISH_SYNC_COUNTER.sync_with_counter();
+        kinfoln!("ap #{} kinit finished", ap_id);
     }
-    kernel_main()
+    // exit
 }

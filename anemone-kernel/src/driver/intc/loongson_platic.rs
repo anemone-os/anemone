@@ -2,13 +2,9 @@ use core::marker::PhantomData;
 
 use crate::{
     const_assert,
-    device::discovery::{fwnode::FwNode, open_firmware::OpenFirmwareNode},
-    mm::{
-        kptable::{self, KERNEL_PTABLE},
-        remap::{IoRemap, ioremap},
-    },
+    device::discovery::fwnode::FwNode,
+    mm::remap::{IoRemap, ioremap},
     prelude::*,
-    static_assert,
     utils::mmio::{CombinedReadOnly, CombinedReadPure, CombinedReadPureWrite, CombinedWriteOnly},
 };
 pub struct PlaticRegisters<'a> {
@@ -137,7 +133,6 @@ impl CoreIrqChip for LA7A1000Platic {
             };
             let remap =
                 unsafe { ioremap(base, len as usize) }.expect("failed to remap plic registers");
-            PagingArch::tlb_shootdown_all();
             let mut platic = Self { remap };
 
             kdebugln!(

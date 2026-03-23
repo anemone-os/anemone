@@ -9,6 +9,7 @@ pub mod layout;
 pub mod paging;
 pub mod percpu;
 pub mod remap;
+pub mod stack;
 pub mod zone;
 
 pub mod error;

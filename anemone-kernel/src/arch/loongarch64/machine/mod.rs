@@ -1,16 +1,19 @@
 //! Machine-specific code for early boot.
 
-use crate::{arch::loongarch64::machine::descs::qemu_virt::Qemu3A5000, device::discovery::open_firmware::of_with_root, prelude::*};
+use crate::{
+    arch::loongarch64::machine::descs::qemu_virt::Qemu3A5000,
+    device::discovery::open_firmware::of_with_root,
+};
 
 pub mod descs;
 
 pub trait MachineDesc: Sync {
     /// Open firmware compatible string for this machine.
     fn compatible(&self) -> &[&str];
-    
+
     /// Initialize the interrupt controller
     unsafe fn early_init_intc(&self);
-    
+
     /// Initialize the timer
     unsafe fn early_init_timer(&self);
 }

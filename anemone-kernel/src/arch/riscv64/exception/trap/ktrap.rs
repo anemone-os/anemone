@@ -65,50 +65,55 @@ core::arch::global_asm!(
     "   mv t0, zero",
     "   mv a0, sp",
     "   call {rust_ktrap_entry}",
+
+    "   mv a0, sp",
+
+    "   .global __ktrap_return_to_task",
+    "__ktrap_return_to_task:",
     // all done. restore registers now.
     // sp should still point to the trapframe on the stack.
-    "   ld x0, 0(sp)",
-    "   ld x1, 8(sp)",
-    // skip sp
-    "   ld x3, 24(sp)",
-    "   ld x4, 32(sp)",
+    "   ld x0, 0(a0)",
+    "   ld x1, 8(a0)",
+    "   ld x2, 16(a0)",
+    "   ld x3, 24(a0)",
+    "   ld x4, 32(a0)",
     // skip t0 which is used for temporary storage later
-    "   ld x6, 48(sp)",
-    "   ld x7, 56(sp)",
-    "   ld x8, 64(sp)",
-    "   ld x9, 72(sp)",
-    "   ld x10, 80(sp)",
-    "   ld x11, 88(sp)",
-    "   ld x12, 96(sp)",
-    "   ld x13, 104(sp)",
-    "   ld x14, 112(sp)",
-    "   ld x15, 120(sp)",
-    "   ld x16, 128(sp)",
-    "   ld x17, 136(sp)",
-    "   ld x18, 144(sp)",
-    "   ld x19, 152(sp)",
-    "   ld x20, 160(sp)",
-    "   ld x21, 168(sp)",
-    "   ld x22, 176(sp)",
-    "   ld x23, 184(sp)",
-    "   ld x24, 192(sp)",
-    "   ld x25, 200(sp)",
-    "   ld x26, 208(sp)",
-    "   ld x27, 216(sp)",
-    "   ld x28, 224(sp)",
-    "   ld x29, 232(sp)",
-    "   ld x30, 240(sp)",
-    "   ld x31, 248(sp)",
+    "   ld x6, 48(a0)",
+    "   ld x7, 56(a0)",
+    "   ld x8, 64(a0)",
+    "   ld x9, 72(a0)",
+    // skip a0
+    "   ld x11, 88(a0)",
+    "   ld x12, 96(a0)",
+    "   ld x13, 104(a0)",
+    "   ld x14, 112(a0)",
+    "   ld x15, 120(a0)",
+    "   ld x16, 128(a0)",
+    "   ld x17, 136(a0)",
+    "   ld x18, 144(a0)",
+    "   ld x19, 152(a0)",
+    "   ld x20, 160(a0)",
+    "   ld x21, 168(a0)",
+    "   ld x22, 176(a0)",
+    "   ld x23, 184(a0)",
+    "   ld x24, 192(a0)",
+    "   ld x25, 200(a0)",
+    "   ld x26, 208(a0)",
+    "   ld x27, 216(a0)",
+    "   ld x28, 224(a0)",
+    "   ld x29, 232(a0)",
+    "   ld x30, 240(a0)",
+    "   ld x31, 248(a0)",
     // sstatus
-    "   ld t0, 256(sp)",
+    "   ld t0, 256(a0)",
     "   csrw sstatus, t0",
     // sepc
-    "   ld t0, 264(sp)",
+    "   ld t0, 264(a0)",
     "   csrw sepc, t0",
     // t0/x5
-    "   ld t0, 40(sp)",
+    "   ld t0, 40(a0)",
     // load back sp
-    "   addi sp, sp, {trapframe_bytes}",
+    "   ld a0, 80(a0)",
     // all done.
     "   sret",
     trapframe_bytes = const size_of::<RiscV64TrapFrame>(),
@@ -122,23 +127,11 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
 
-    kdebugln!(
-        "#{} trap at sepc {:#x} stval {:#x}",
-        CpuArch::cur_cpu_id(),
-        trapframe.sepc,
-        trapframe.stval
-    );
-
     let scause = riscv::register::scause::read();
     let code = scause.code();
     if scause.is_interrupt() {
         let reason = RiscV64Interrupt::try_from(code)
             .unwrap_or_else(|_| panic!("unknown interrupt with code {}", code));
-        kdebugln!(
-            "#{} received interrupt: {:?}",
-            CpuArch::cur_cpu_id(),
-            reason
-        );
         match reason {
             RiscV64Interrupt::SupervisorSoftware => {
                 handle_ipi();
@@ -158,11 +151,6 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
         let stval = riscv::register::stval::read();
         let reason = RiscV64Exception::try_from(code)
             .unwrap_or_else(|_| panic!("unknown exception with code {}", code));
-        kdebugln!(
-            "#{} received exception: {:?}",
-            CpuArch::cur_cpu_id(),
-            reason
-        );
         match reason {
             RiscV64Exception::InstructionMisaligned => {
                 panic!("instruction address misaligned: {:#x}", trapframe.sepc)
@@ -219,16 +207,17 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
         }
     }
 
-    kdebugln!("#{} finished handling trap", CpuArch::cur_cpu_id());
+    /* kdebugln!("#{} finished handling trap", CpuArch::cur_cpu_id()); */
     // back
+}
+
+unsafe extern "C" {
+    unsafe fn __ktrap_entry() -> !;
+    pub unsafe fn __ktrap_return_to_task(trapframe: *const RiscV64TrapFrame) -> !;
 }
 
 pub fn install_ktrap_handler() {
     unsafe {
-        unsafe extern "C" {
-            fn __ktrap_entry();
-        }
-
         use riscv::register::stvec;
         stvec::write(stvec::Stvec::new(
             __ktrap_entry as *const () as usize,

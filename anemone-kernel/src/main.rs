@@ -3,6 +3,7 @@
 #![no_std]
 #![no_main]
 #![allow(unused)]
+#![deny(unused_imports)]
 // **IMPORTANT**
 // **UNSTABLE FEATURES SHOULD BE AVOIDED WHENEVER POSSIBLE, SINCE THEY MAY CAUSE
 // COMPATIBILITY ISSUES IN THE FUTURE.**
@@ -32,6 +33,7 @@ pub mod sched;
 pub mod sync;
 pub mod syscall;
 pub mod syserror;
+pub mod task;
 pub mod time;
 pub mod utils;
 
@@ -45,12 +47,12 @@ fn bsp_pre_kernel_main() {
     }
     #[cfg(feature = "kunit")]
     crate::debug::kunit::kunit_runner();
-    panic!();
 
     // TODO: init subsystems, spawn init process, etc.
 }
 
 /// Start scheduling user processes.
 fn kernel_main() -> ! {
+    run_tasks();
     loop {}
 }

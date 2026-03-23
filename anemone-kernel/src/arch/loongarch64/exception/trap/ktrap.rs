@@ -11,7 +11,7 @@ use crate::{
 core::arch::global_asm!(
     "   .section .text",
     "   .global __ktrap_entry",
-    
+
     "   .balign 4",
     "__ktrap_entry:",
     "   addi.d $sp, $sp, -{trapframe_bytes}",
@@ -71,14 +71,14 @@ core::arch::global_asm!(
     "   ld.d $r2, $sp, 24",
     // skip $sp
     "   ld.d $r4, $sp, 32",
-    // skip $t0 which is used for temporary storage later
+    "   ld.d $r5, $sp, 40",
     "   ld.d $r6, $sp, 48",
     "   ld.d $r7, $sp, 56",
     "   ld.d $r8, $sp, 64",
     "   ld.d $r9, $sp, 72",
     "   ld.d $r10, $sp, 80",
     "   ld.d $r11, $sp, 88",
-    "   ld.d $r12, $sp, 96",
+    // skip $t0 which is used for temporary storage later
     "   ld.d $r13, $sp, 104",
     "   ld.d $r14, $sp, 112",
     "   ld.d $r15, $sp, 120",
@@ -133,7 +133,7 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
             .unwrap_or_else(|_| panic!("unknown interrupt with flag {:?}", intr_flags));
         match reason {
             LA64Interrupt::Timer => {
-                kdebugln!("received timer interrupt");
+                //kdebugln!("received timer interrupt");
                 TimeArch::claim_timer_interrupt();
                 TimeArch::set_next_trigger(300_000_0);
             },
@@ -150,16 +150,17 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
         match reason {
             LA64Exception::PageModified => {
                 panic!(
-                    "Page Modified exception at address: {:#x}, this should never happen because the 'DIRTY' bit is always set with 'WRITE' bit.",
-                    trapframe.badv
+                    "Page Modified exception at address: {:#x}, pc: {:#x}, this should never happen because the 'DIRTY' bit is always set with 'WRITE' bit.",
+                    trapframe.badv, trapframe.era
                 )
             },
             LA64Exception::PageInvalidFetch
             | LA64Exception::PageInvalidLoad
             | LA64Exception::PageInvalidStore => {
                 panic!(
-                    "Page Invalid exception at address: {:#x}, caused by {} access. Page fault handler is not implemented yet.",
+                    "Page Invalid exception at address: {:#x}, pc: {:#x}, caused by {} access. Page fault handler is not implemented yet.",
                     trapframe.badv,
+                    trapframe.era,
                     match reason {
                         LA64Exception::PageInvalidFetch => "instruction",
                         LA64Exception::PageInvalidLoad => "load",
@@ -170,7 +171,7 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
             },
             _ => {
                 panic!(
-                    "unhandled exception: {:?}, era: {:#x}, badv: {:#x}",
+                    "unhandled exception: {:?}, pc: {:#x}, badv: {:#x}",
                     reason, trapframe.era, trapframe.badv
                 );
             },

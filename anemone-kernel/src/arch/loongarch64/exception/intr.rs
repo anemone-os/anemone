@@ -1,8 +1,4 @@
-use la_insc::reg::{
-    crmd,
-    iocsr::{ipi_enable, ipi_send},
-    ipi::IpiSend,
-};
+use la_insc::reg::{crmd, iocsr::ipi_send, ipi::IpiSend};
 
 use crate::prelude::*;
 

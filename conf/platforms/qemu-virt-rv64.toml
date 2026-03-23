@@ -10,7 +10,7 @@ phys_ram_start = 0x80000000
 max_phys_ram_size = 0x80000000      # 2GB
 kernel_la_base = 0x80200000
 kernel_va_base = 0xffffffff80200000
-max_cpus = 4
+max_cpus = 14
 frame_section_shift_mb = 7
 
 
@@ -18,15 +18,15 @@ frame_section_shift_mb = 7
 qemu = "qemu-system-riscv64"
 machine = "virt"
 cpu = "rv64"
-smp = 4
+smp = 14
 memory = "1G"
 bios = "default"
 args = [
     "-nographic",
     "-serial",
     "mon:stdio",
-    "-drive",
-    "file=disk.img,format=raw,if=none,id=hd0",
-    "-device",
-    "virtio-blk-device,drive=hd0",
+#    "-drive",
+#    "file=disk.img,format=raw,if=none,id=hd0",
+#    "-device",
+#    "virtio-blk-device,drive=hd0",
 ]

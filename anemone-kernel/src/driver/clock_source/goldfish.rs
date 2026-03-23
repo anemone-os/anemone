@@ -22,7 +22,6 @@ struct GoldfishState {
 }
 
 mod driver_core {
-    use super::*;
 
     const TIME_LOW: usize = 0x00;
     const TIME_HIGH: usize = 0x04;
@@ -64,7 +63,6 @@ mod driver_core {
         // TODO: alarm and interrupt handling.
     }
 }
-use driver_core::*;
 
 #[derive(Debug, KObject, Driver)]
 struct GoldfishDriver {

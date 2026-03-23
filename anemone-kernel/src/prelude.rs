@@ -8,6 +8,7 @@ pub use crate::{
     platform_defs::*,
     power::*,
     sched::*,
+    task::*,
     sync::{rwlock::*, spinlock::*, *},
     syscall::*,
     syserror::*,
