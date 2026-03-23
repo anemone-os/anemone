@@ -39,20 +39,3 @@ pub mod utils;
 
 use crate::{prelude::*, sync::mono::MonoOnce};
 
-/// Before every core enters [kernel_main], this function must be called on the
-/// BSP to perform necessary preparations.
-fn bsp_pre_kernel_main() {
-    unsafe {
-        device::console::on_system_boot();
-    }
-    #[cfg(feature = "kunit")]
-    crate::debug::kunit::kunit_runner();
-
-    // TODO: init subsystems, spawn init process, etc.
-}
-
-/// Start scheduling user processes.
-fn kernel_main() -> ! {
-    run_tasks();
-    loop {}
-}

@@ -424,11 +424,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
 
 unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     unsafe {
-        kinfoln!(
-            "bsp #{} kinit running on {}...",
-            bsp_id,
-            current_task_id()
-        );
+        kinfoln!("bsp #{} kinit running on {}...", bsp_id, current_task_id());
         wake_up_aps(bsp_id);
         BOOT_SYNC_COUNTER.sync_with_counter();
         // register drivers to bus types
@@ -439,11 +435,20 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) -> ! {
         of_platform_discovery();
 
         enable_local_irq();
-        bsp_pre_kernel_main();
+        unsafe {
+            device::console::on_system_boot();
+        }
         INIT_SYNC_COUNTER.sync_with_counter();
 
         FINISH_SYNC_COUNTER.sync_with_counter();
         kinfoln!("bsp #{} kinit finished", bsp_id);
+
+        kinfoln!("running kunit tests");
+
+        #[cfg(feature = "kunit")]
+        crate::debug::kunit::kunit_runner();
+
+        kinfoln!("kunit tests finished");
     }
 
     loop {}
@@ -497,11 +502,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
 unsafe extern "C" fn ap_kinit(ap_id: usize) {
     unsafe {
         INIT_SYNC_COUNTER.sync_with_counter();
-        kinfoln!(
-            "ap #{} kinit running on {}...",
-            ap_id,
-            current_task_id()
-        );
+        kinfoln!("ap #{} kinit running on {}...", ap_id, current_task_id());
         enable_local_irq();
 
         // collect previous IPIs sent by bsp before ap starts to run.

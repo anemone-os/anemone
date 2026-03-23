@@ -227,3 +227,14 @@ pub unsafe fn ap_init(ap_id: usize) {
         with_core_local_mut(|core_local| core_local.login());
     }
 }
+
+/// Check if the target CPU is online.
+///
+/// If the target CPU is the current CPU, it is considered online always.
+pub fn target_online(cpu_id: usize) -> bool {
+    if cpu_id == CpuArch::cur_cpu_id().get() {
+        true
+    } else {
+        unsafe { with_core_local_remote(cpu_id, |core_local| core_local.online()) }
+    }
+}
