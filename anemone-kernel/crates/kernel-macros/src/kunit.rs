@@ -1,15 +1,27 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Error, ItemFn, ReturnType, parse_macro_input};
+use syn::{
+    Error, Ident, ItemFn, ReturnType, Token, parse_macro_input, punctuated::Punctuated,
+};
 
 pub fn kunit_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
-    if !attr.is_empty() {
-        return Error::new_spanned(
-            proc_macro2::TokenStream::from(attr),
-            "#[kunit] does not accept any arguments",
-        )
-        .to_compile_error()
-        .into();
+    let attr_parser = Punctuated::<Ident, Token![,]>::parse_terminated;
+    let args = parse_macro_input!(attr with attr_parser);
+
+    let mut percpu = false;
+    for arg in args {
+        if arg == "percpu" {
+            if percpu {
+                return Error::new_spanned(arg, "duplicate argument: percpu")
+                    .to_compile_error()
+                    .into();
+            }
+            percpu = true;
+        } else {
+            return Error::new_spanned(arg, "unknown argument, expected: percpu")
+                .to_compile_error()
+                .into();
+        }
     }
 
     let input = parse_macro_input!(item as ItemFn);
@@ -76,6 +88,11 @@ pub fn kunit_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let name = &input.sig.ident;
     let kunit_name = format_ident!("__KUNIT_{}", input.sig.ident.to_string().to_uppercase());
+    let kind = if percpu {
+        quote!(crate::debug::kunit::KUnitKind::PerCpu)
+    } else {
+        quote!(crate::debug::kunit::KUnitKind::Plain)
+    };
 
     let new_item = quote! {
         #[cfg(feature = "kunit")]
@@ -84,6 +101,7 @@ pub fn kunit_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         static #kunit_name: crate::debug::kunit::KUnit = crate::debug::kunit::KUnit {
             name: concat!(module_path!(), "::", stringify!(#name)),
             test_fn: #name,
+            kind: #kind,
         };
     };
     let output = quote! {

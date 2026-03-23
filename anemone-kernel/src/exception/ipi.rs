@@ -2,7 +2,7 @@
 //!
 //! **Dynamic memory allocation in IPI sendings are prohibited.**
 //!
-//! Currently only synchronous IPIs are supported.
+//! Both synchronous and asynchronous IPIs are supported.
 
 use core::ptr::NonNull;
 
@@ -12,7 +12,13 @@ use crate::prelude::*;
 
 #[derive(Debug, Clone, Copy)]
 pub enum IpiPayload {
-    TlbShootdown { vaddr: Option<VirtAddr> },
+    TlbShootdown {
+        vaddr: Option<VirtAddr>,
+    },
+    #[cfg(feature = "kunit")]
+    RunKUnitPerCpu {
+        test_fn: fn(),
+    },
     StopExecution,
 }
 
@@ -44,7 +50,10 @@ static IPI_QUEUE: SpinLock<LinkedList<IpiMsgAdapter>> =
 /// Send an IPI to the target CPU, synchronously waiting for the IPI to be
 /// handled before returning.
 pub fn send_ipi(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
-    if unsafe { with_core_local_remote(cpu_id, |core_local| !core_local.online()) } {
+    if cpu_id == CpuArch::cur_cpu_id() {
+        panic!("cannot send ipi to self");
+    }
+    if !target_online(cpu_id) {
         return Err(IpiError::TargetOffline);
     }
 
@@ -73,10 +82,8 @@ pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
     let cur_cpuid = CpuArch::cur_cpu_id();
     let ncpus = CpuArch::ncpus();
     for id in 0..ncpus {
-        if id != cur_cpuid {
-            if unsafe { with_core_local_remote(id, |core_local| !core_local.online()) } {
-                return Err(IpiError::TargetOffline);
-            }
+        if !target_online(id) {
+            return Err(IpiError::TargetOffline);
         }
     }
     for id in 0..ncpus {
@@ -139,7 +146,11 @@ fn alloc_avail_buf() -> Option<NonNull<IpiMsg>> {
 
 /// Send an IPI to the target CPU asynchronously.
 pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
-    if unsafe { with_core_local_remote(cpu_id, |core_local| !core_local.online()) } {
+    if cpu_id == CpuArch::cur_cpu_id() {
+        panic!("cannot send ipi to self");
+    }
+
+    if !target_online(cpu_id) {
         return Err(IpiError::TargetOffline);
     }
 
@@ -164,7 +175,7 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
     let ncpus = CpuArch::ncpus();
     for id in 0..ncpus {
         if id != CpuArch::cur_cpu_id() {
-            if unsafe { with_core_local_remote(id, |core_local| !core_local.online()) } {
+            if !target_online(id) {
                 return Err(IpiError::TargetOffline);
             }
         }
@@ -233,6 +244,11 @@ pub fn handle_ipi() {
                     } else {
                         PagingArch::tlb_shootdown_all();
                     }
+                    msg.is_accomplished.store(true, Ordering::Release);
+                },
+                #[cfg(feature = "kunit")]
+                RunKUnitPerCpu { test_fn } => {
+                    crate::debug::kunit::handle_percpu_ipi_test(test_fn);
                     msg.is_accomplished.store(true, Ordering::Release);
                 },
                 StopExecution => {
