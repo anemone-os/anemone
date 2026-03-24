@@ -40,7 +40,7 @@ static MACHINES: &[&dyn MachineDesc] = &[&Qemu3A5000];
 /// Currently it does:
 /// - Root interrupt controllers initialization.
 /// - Timer initialization.
-pub(super) unsafe fn machine_init() {
+pub unsafe fn machine_init() {
     of_with_root(|root| {
         for compatible in root
             .compatible()

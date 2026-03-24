@@ -17,3 +17,4 @@ pub use exception::{LA64IntrArch as IntrArch, LA64TrapArch as TrapArch};
 pub use mm::{LA64KernelLayout as KernelLayout, LA64PagingArch as PagingArch};
 pub use time::LA64TimeArch as TimeArch;
 pub use sched::LA64SchedArch as SchedArch;
+pub use machine::machine_init;

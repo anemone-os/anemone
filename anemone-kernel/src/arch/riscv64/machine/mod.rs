@@ -40,7 +40,7 @@ static MACHINES: &[&dyn MachineDesc] = &[&qemu_virt::QemuVirt];
 /// Currently it does:
 /// - Root interrupt controllers initialization.
 /// - Timer initialization.
-pub(super) unsafe fn machine_init() {
+pub unsafe fn machine_init() {
     of_with_root(|root| {
         for compatible in root
             .compatible()

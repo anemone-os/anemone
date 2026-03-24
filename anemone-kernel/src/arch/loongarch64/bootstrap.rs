@@ -11,14 +11,12 @@ use crate::{
     arch::{
         clear_bss,
         loongarch64::{
-            exception::{enable_local_irq, install_ktrap_handler},
-            machine::machine_init,
+            exception::install_ktrap_handler,
             mm::{BOOT_DMW0, BOOT_DMW1, BOOTSTRAP_PTABLE, PWCH, PWCL, refill::__tlb_rfill},
         },
     },
     device::discovery::open_firmware::{
-        EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count, of_platform_discovery,
-        unflatten_device_tree,
+        EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count,
     },
     mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
@@ -216,6 +214,9 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
         kinfoln!("kernel mapping activated");
 
         remap_boot_stack();
+
+        BOOT_SYNC_COUNTER.sync_with_counter();
+
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
         add_to_ready(Arc::new(
             Task::new_kernel(
@@ -230,39 +231,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     }
 }
 
-unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
-    unsafe {
-        kinfoln!("bsp #{} kinit running on {}...", bsp_id, current_task_id());
-        BOOT_SYNC_COUNTER.sync_with_counter();
-        // register drivers to bus types
-        driver::init();
-        unflatten_device_tree(fdt_va);
-        // parse_bootargs();
-        machine_init();
-        of_platform_discovery();
-
-        enable_local_irq();
-        unsafe {
-            device::console::on_system_boot();
-        }
-        INIT_SYNC_COUNTER.sync_with_counter();
-        FINISH_SYNC_COUNTER.sync_with_counter();
-        kinfoln!("bsp #{} kinit finished", bsp_id);
-
-        kinfoln!("running kunit tests");
-
-        #[cfg(feature = "kunit")]
-        crate::debug::kunit::kunit_runner();
-
-        kinfoln!("kunit tests finished");
-    }
-
-    loop {}
-}
-
 static BOOT_SYNC_COUNTER: CpuSync = CpuSync::new("boot");
-static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
-static FINISH_SYNC_COUNTER: CpuSync = CpuSync::new("finish");
 
 unsafe fn ap_setup(ap_id: usize) -> ! {
     unsafe {
@@ -282,25 +251,6 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         ));
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64));
     }
-}
-
-unsafe extern "C" fn ap_kinit(ap_id: usize) {
-    unsafe {
-        INIT_SYNC_COUNTER.sync_with_counter();
-        kinfoln!("ap #{} kinit running on {}...", ap_id, current_task_id());
-        enable_local_irq();
-
-        // collect previous IPIs sent by bsp before ap starts to run.
-        // the main reason for this is to clear IPI buffers of bsp such that it can send
-        // IPIs to other APs again.
-        IntrArch::clear_ipi();
-
-        // synchronize with BSP
-
-        FINISH_SYNC_COUNTER.sync_with_counter();
-        kinfoln!("ap #{} kinit finished", ap_id);
-    }
-    // exit
 }
 
 pub fn wake_up_aps(bsp_id: usize, ncpus: usize) {

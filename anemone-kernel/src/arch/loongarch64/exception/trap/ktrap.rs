@@ -146,7 +146,7 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
             LA64Interrupt::Ipi => {
                 handle_ipi();
                 unsafe {
-                    IntrArch::clear_ipi();
+                    IntrArch::claim_ipi();
                 }
             },
             LA64Interrupt::Hardware => handle_irq(),

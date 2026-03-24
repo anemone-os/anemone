@@ -5,8 +5,7 @@ use crate::{
     arch::{
         clear_bss,
         riscv64::{
-            exception::{enable_local_irq, install_ktrap_handler},
-            machine::machine_init,
+            exception::install_ktrap_handler,
             mm::{RiscV64PgDir, RiscV64Pte, RiscV64PteFlags, sv39},
         },
     },
@@ -14,13 +13,10 @@ use crate::{
         console::{Console, ConsoleFlags},
         discovery::open_firmware::{
             EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count, early_scan_fdt_size,
-            get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
-            unflatten_device_tree,
         },
     },
     mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
-    sync::counter::CpuSync,
 };
 
 #[unsafe(no_mangle)]
@@ -256,31 +252,6 @@ extern "C" fn rusty_nun(hart_id: usize, fdt_pa: PhysAddr) -> ! {
     }
 }
 
-fn parse_bootargs() {
-    of_with_root(|root| {
-        root.children().for_each(|child| {
-            if child.name() == "chosen" {
-                if let Some(stdout_path) = child.property("stdout-path") {
-                    if let Some(stdout_path) = stdout_path.value_as_string() {
-                        kinfoln!("stdout-path: {}", stdout_path);
-
-                        if of_with_node_by_full_name_path(stdout_path, |node| {
-                            get_of_node(node.handle()).mark_as_stdout();
-                        })
-                        .is_err()
-                        {
-                            panic!(
-                                "device tree node specified by stdout-path not found: {}",
-                                stdout_path
-                            );
-                        }
-                    }
-                }
-            }
-        })
-    });
-}
-
 /// percpu guarded stack top addresses, filled by [`remap_boot_stacks`].
 static GUARDED_STACK_TOPS: MonoOnce<[VirtAddr; MAX_CPUS]> = unsafe { MonoOnce::new() };
 
@@ -408,6 +379,9 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         kinfoln!("kernel mapping activated");
 
         remap_boot_stack();
+
+        wake_up_aps(bsp_id);
+
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
         add_to_ready(Arc::new(
             Task::new_kernel(
@@ -420,38 +394,6 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         ));
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
     }
-}
-
-unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) -> ! {
-    unsafe {
-        kinfoln!("bsp #{} kinit running on {}...", bsp_id, current_task_id());
-        wake_up_aps(bsp_id);
-        BOOT_SYNC_COUNTER.sync_with_counter();
-        // register drivers to bus types
-        driver::init();
-        unflatten_device_tree(fdt_va);
-        parse_bootargs();
-        machine_init();
-        of_platform_discovery();
-
-        enable_local_irq();
-        unsafe {
-            device::console::on_system_boot();
-        }
-        INIT_SYNC_COUNTER.sync_with_counter();
-
-        FINISH_SYNC_COUNTER.sync_with_counter();
-        kinfoln!("bsp #{} kinit finished", bsp_id);
-
-        kinfoln!("running kunit tests");
-
-        #[cfg(feature = "kunit")]
-        crate::debug::kunit::kunit_runner();
-
-        kinfoln!("kunit tests finished");
-    }
-
-    loop {}
 }
 
 unsafe fn wake_up_aps(bsp_id: usize) {
@@ -475,16 +417,11 @@ unsafe fn wake_up_aps(bsp_id: usize) {
     }
 }
 
-static BOOT_SYNC_COUNTER: CpuSync = CpuSync::new("boot");
-static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
-static FINISH_SYNC_COUNTER: CpuSync = CpuSync::new("finish");
-
 unsafe fn ap_setup(ap_id: usize) -> ! {
     unsafe {
         install_ktrap_handler();
         mm::percpu::ap_init(ap_id);
         mm::kptable::activate_kernel_mapping();
-        BOOT_SYNC_COUNTER.sync_with_counter();
         kdebugln!("anemone kernel booting on ap #{}", ap_id);
 
         add_to_ready(Arc::new(
@@ -498,23 +435,4 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         ));
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
     }
-}
-
-unsafe extern "C" fn ap_kinit(ap_id: usize) {
-    unsafe {
-        INIT_SYNC_COUNTER.sync_with_counter();
-        kinfoln!("ap #{} kinit running on {}...", ap_id, current_task_id());
-        enable_local_irq();
-
-        // collect previous IPIs sent by bsp before ap starts to run.
-        // the main reason for this is to clear IPI buffers of bsp such that it can send
-        // IPIs to other APs again.
-        riscv::register::sip::set_ssoft();
-
-        // synchronize with BSP
-
-        FINISH_SYNC_COUNTER.sync_with_counter();
-        kinfoln!("ap #{} kinit finished", ap_id);
-    }
-    // exit
 }
