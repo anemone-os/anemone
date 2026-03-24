@@ -56,6 +56,7 @@ impl Task {
     ) -> Result<Self, MmError> {
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
+        kdebugln!("Created Task with Kernel Stack at {:?}", stack);
         Ok(Self {
             status: RwLock::new(TaskStatus::Ready),
             flags: flags | TaskFlags::KERNEL,

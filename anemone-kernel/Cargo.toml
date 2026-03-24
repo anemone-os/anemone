@@ -37,3 +37,4 @@ sbi-rt = { workspace = true }
 
 [target.'cfg(target_arch = "loongarch64")'.dependencies]
 la-insc = { path = "crates/la-insc" }
+loongArch64 = "0.2.5"

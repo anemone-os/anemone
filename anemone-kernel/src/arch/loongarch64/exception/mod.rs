@@ -6,7 +6,6 @@ use la_insc::reg::{
     crmd,
     csr::ecfg,
     exception::{Ecfg, IntrFlags},
-    iocsr::ipi_enable,
 };
 pub use trap::{LA64TrapArch, install_ktrap_handler};
 
@@ -16,8 +15,6 @@ pub fn enable_local_irq() {
     use crate::prelude::*;
     unsafe {
         ecfg::csr_write(Ecfg::new(IntrFlags::all(), 0));
-        // only enable ipi 0
-        ipi_enable::io_csr_write(1 << 0);
         crmd::set_ie(true);
     }
 }

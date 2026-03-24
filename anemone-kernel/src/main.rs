@@ -3,7 +3,7 @@
 #![no_std]
 #![no_main]
 #![allow(unused)]
-#![deny(unused_imports)]
+#![warn(unused_imports)]
 // **IMPORTANT**
 // **UNSTABLE FEATURES SHOULD BE AVOIDED WHENEVER POSSIBLE, SINCE THEY MAY CAUSE
 // COMPATIBILITY ISSUES IN THE FUTURE.**

@@ -481,11 +481,11 @@ static FINISH_SYNC_COUNTER: CpuSync = CpuSync::new("finish");
 
 unsafe fn ap_setup(ap_id: usize) -> ! {
     unsafe {
+        BOOT_SYNC_COUNTER.sync_with_counter();
         kdebugln!("anemone kernel booting on ap #{}", ap_id);
         install_ktrap_handler();
         mm::percpu::ap_init(ap_id);
         mm::kptable::activate_kernel_mapping();
-        BOOT_SYNC_COUNTER.sync_with_counter();
         add_to_ready(Arc::new(
             Task::new_kernel(
                 ap_kinit as *const (),

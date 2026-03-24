@@ -1,0 +1,22 @@
+
+use la_insc::utils::privl::PrivilegeLevel;
+
+use crate::task::Privilege;
+
+impl From<Privilege> for PrivilegeLevel{
+    fn from(value: Privilege) -> Self {
+        match value {
+            Privilege::User => PrivilegeLevel::PLV3,
+            Privilege::Kernel => PrivilegeLevel::PLV0,
+        }
+    }
+}
+
+impl Into<Privilege> for PrivilegeLevel {
+    fn into(self) -> Privilege {
+        match self {
+            PrivilegeLevel::PLV3 => Privilege::User,
+            _ => Privilege::Kernel,
+        }
+    }
+}

@@ -9,6 +9,7 @@ mod sched;
 mod backtrace;
 mod machine;
 mod bootstrap;
+mod utils;
 
 pub use backtrace::LA64BacktraceArch as BacktraceArch;
 pub use cpu::La64CpuArch as CpuArch;

@@ -17,7 +17,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
             e
         );
     }
-    kemergln!("Kernel panic:\n{}", info);
+    kemergln!("Kernel panic at {} :\n{}", CpuArch::cur_cpu_id(), info);
     let backtrace = CapturedBacktrace::capture();
     kemergln!("Backtrace:\n{}", backtrace);
 

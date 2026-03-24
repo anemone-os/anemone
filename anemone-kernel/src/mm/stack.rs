@@ -1,3 +1,5 @@
+use core::fmt::Debug;
+
 use crate::{
     prelude::*,
     utils::align::{AlignedBytes, PhantomAligned4096},
@@ -23,10 +25,26 @@ impl KernelStack {
     }
 
     pub fn stack_top(&self) -> VirtAddr {
-        self.frame_folio
-            .range()
-            .end()
-            .to_hhdm()
-            .to_virt_addr()
+        self.frame_folio.range().end().to_hhdm().to_virt_addr()
+    }
+}
+
+impl Debug for KernelStack {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!(
+            "[{:#x},{:#x}]",
+            self.frame_folio
+                .range()
+                .start()
+                .to_hhdm()
+                .to_virt_addr()
+                .get(),
+            self.frame_folio
+                .range()
+                .end()
+                .to_hhdm()
+                .to_virt_addr()
+                .get()
+        ))
     }
 }

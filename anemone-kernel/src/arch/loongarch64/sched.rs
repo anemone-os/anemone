@@ -1,6 +1,9 @@
 use core::arch::naked_asm;
 
-use crate::prelude::*;
+use crate::{
+    arch::loongarch64::exception::trap::{__ktrap_return_to_task, LA64TrapFrame},
+    prelude::*,
+};
 
 #[repr(C)]
 pub struct LA64TaskContext {
@@ -20,16 +23,20 @@ impl TaskContextArch for LA64TaskContext {
     };
 
     fn from_kernel_fn(
-        function: VirtAddr,
-        stack_top: u64,
-        args: &[u64; 7],
+        entry: VirtAddr,
+        stack_top: VirtAddr,
+        irq_flags: IrqFlags,
+        args: ParameterList,
     ) -> Self {
         let mut s = [0; 10];
-        s[1..args.len() + 1].copy_from_slice(args);
-        s[0] = function.get();
+        let args = args.as_array();
+        s[3..args.len() + 3].copy_from_slice(args);
+        s[2] = Privilege::Kernel as u64;
+        s[1] = irq_flags.raw();
+        s[0] = entry.get();
         Self {
             ra: task_guard as *const () as u64,
-            sp: stack_top,
+            sp: stack_top.get(),
             s,
         }
     }
@@ -41,29 +48,6 @@ impl TaskContextArch for LA64TaskContext {
     fn sp(&self) -> u64 {
         self.sp
     }
-}
-
-
-#[unsafe(naked)]
-pub unsafe extern "C" fn task_guard() -> ! {
-    naked_asm!("
-        move $a0, $s1
-        move $a1, $s2
-        move $a2, $s3
-        move $a3, $s4
-        move $a4, $s5
-        move $a5, $s6
-        move $a6, $s7
-        jirl $ra, $s0, 0
-        call {task_exit}
-        call {__task_guard_end}
-    ",
-    task_exit = sym crate::sched::task_exit,
-    __task_guard_end = sym __task_guard_end);
-}
-
-pub unsafe fn __task_guard_end() -> ! {
-    unreachable!("task guard should never return");
 }
 
 pub struct LA64SchedArch;
@@ -115,4 +99,56 @@ pub unsafe extern "C" fn __switch(cur: *mut TaskContext, next: *const TaskContex
             ret
         "
     )
+}
+
+#[unsafe(naked)]
+pub unsafe extern "C" fn task_guard() -> ! {
+    naked_asm!("
+        move $a3, $sp // sp
+        addi.d $sp, $sp, -64
+        st.d $s3, $sp, 0
+        st.d $s4, $sp, 8
+        st.d $s5, $sp, 16
+        st.d $s6, $sp, 24
+        st.d $s7, $sp, 32
+        st.d $s8, $sp, 40
+        st.d $s9, $sp, 48
+        move $a2, $sp // args
+        move $a0, $s0 // entry
+        move $a1, $s1 // irq_flags
+        move $a4, $s2 // prv
+        la $a5, __ret_point // ra
+        call {task_init}
+        __ret_point:
+        call {task_exit}
+        call {task_guard_end}
+    ",
+    task_init = sym __task_run,
+    task_exit = sym crate::sched::task_exit,
+    task_guard_end = sym __task_guard_end);
+}
+
+unsafe extern "C" fn __task_run(
+    entry: *const (),
+    irq_flags: u64,
+    args: *const [u64; 7],
+    sp: u64,
+    prv: Privilege,
+    ra: u64,
+) {
+    let args_parsed =
+        unsafe { args.as_ref() }.expect("task args in kernel stack should never be null");
+    let trapframe = LA64TrapFrame::task_init_frame(
+        entry as u64,
+        sp,
+        IrqFlags::new(irq_flags),
+        prv,
+        args_parsed,
+        ra,
+    );
+    unsafe { __ktrap_return_to_task(&trapframe) }
+}
+
+unsafe extern "C" fn __task_guard_end() -> ! {
+    unreachable!("an exited task should never return");
 }
