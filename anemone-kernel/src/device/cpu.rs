@@ -34,12 +34,12 @@ impl CpuId {
 
 impl Display for CpuId {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_fmt(format_args!("hart #{}", self.0))
+        f.write_fmt(format_args!("core #{}", self.0))
     }
 }
 
 impl Debug for CpuId {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_fmt(format_args!("hart #{}", self.0))
+        f.write_fmt(format_args!("core #{}", self.0))
     }
 }

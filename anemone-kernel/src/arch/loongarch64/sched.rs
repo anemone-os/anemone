@@ -82,7 +82,7 @@ pub unsafe extern "C" fn __switch(cur: *mut TaskContext, next: *const TaskContex
             st.d $s7, $a0, 72
             st.d $s8, $a0, 80
             st.d $s9, $a0, 88
-            # restore $ra, tp & $s0~$s11 of next execution
+            # restore $ra & $s0~$s9 of next execution
             ld.d $ra, $a1, 0
             ld.d $s0, $a1, 16
             ld.d $s1, $a1, 24

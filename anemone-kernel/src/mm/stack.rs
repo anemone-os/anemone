@@ -32,7 +32,7 @@ impl KernelStack {
 impl Debug for KernelStack {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "[{:#x},{:#x}]",
+            "[{:#x},{:#x})",
             self.frame_folio
                 .range()
                 .start()

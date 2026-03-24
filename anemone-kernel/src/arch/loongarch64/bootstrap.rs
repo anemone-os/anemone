@@ -220,7 +220,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
         add_to_ready(Arc::new(
             Task::new_kernel(
                 bsp_kinit as *const (),
-                ParameterList::from_2_args(bsp_id as u64, fdt_va.get()),
+                ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
                 IntrArch::DISABLED_IRQ_FLAGS,
                 TaskFlags::NONE,
             )
@@ -274,11 +274,11 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         add_to_ready(Arc::new(
             Task::new_kernel(
                 ap_kinit as *const (),
-                ParameterList::from_1_args(ap_id as u64),
+                ParameterList::new(&[ap_id as u64]),
                 IntrArch::DISABLED_IRQ_FLAGS,
                 TaskFlags::NONE,
             )
-            .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e)),
+            .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e)),
         ));
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64));
     }

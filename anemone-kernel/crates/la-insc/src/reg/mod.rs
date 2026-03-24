@@ -58,7 +58,7 @@ macro_rules! impl_const_u8_converter {
 
 /// Macro to implement `to_u16` and `from_u16` for a CSR wrapper type.
 #[macro_export]
-macro_rules! impl_const_16_converter {
+macro_rules! impl_const_u16_converter {
     () => {
         /// Convert the type to a `u16` value.
         pub const fn to_u16(&self) -> u16 {

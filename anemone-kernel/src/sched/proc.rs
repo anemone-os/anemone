@@ -1,7 +1,9 @@
 use alloc::sync::Arc;
 use kernel_macros::percpu;
 
-use crate::{prelude::*, sched::idle::clone_current_idle_task, sync::mono::MonoFlow, task::tid::Tid};
+use crate::{
+    prelude::*, sched::idle::clone_current_idle_task, sync::mono::MonoFlow, task::tid::Tid,
+};
 
 /// Per-CPU processor information
 #[percpu]
@@ -114,7 +116,7 @@ pub unsafe fn get_sched_context() -> *const TaskContext {
 pub unsafe fn get_sched_context_mut() -> *mut TaskContext {
     PROCESSOR.with(|f| {
         f.inner
-            .with(|inner| &inner.sched_context as *const TaskContext as *mut TaskContext)
+            .with_mut(|inner| &mut inner.sched_context as *mut TaskContext)
     })
 }
 
@@ -145,7 +147,6 @@ pub unsafe fn switch_out(exit: bool) {
 pub unsafe fn switch_to(task: Arc<Task>) {
     let cur_context = unsafe { get_sched_context_mut() };
     let next_task = task;
-    let next_tid = next_task.tid();
     let next_context = unsafe { next_task.get_task_context() };
     PROCESSOR.with(|proc| {
         proc.inner

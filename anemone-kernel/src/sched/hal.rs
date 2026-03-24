@@ -40,43 +40,28 @@ pub struct ParameterList {
 }
 
 impl ParameterList {
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self { args: [0; 7] }
     }
-    pub fn from_1_args(arg1: u64) -> Self {
-        Self {
-            args: [arg1, 0, 0, 0, 0, 0, 0],
+
+    pub const fn new<const N: usize>(args: &[u64; N]) -> Self {
+        const_assert!(N <= 7, "ParameterList can only hold up to 7 arguments");
+        let mut args_array = [0; 7];
+        let mut i = 0;
+        while i < N {
+            args_array[i] = args[i];
+            i += 1;
         }
+        Self { args: args_array }
     }
-    pub fn from_2_args(arg1: u64, arg2: u64) -> Self {
-        Self {
-            args: [arg1, arg2, 0, 0, 0, 0, 0],
-        }
+
+    pub const fn as_array(&self) -> &[u64; 7] {
+        &self.args
     }
-    pub fn from_3_args(arg1: u64, arg2: u64, arg3: u64) -> Self {
-        Self {
-            args: [arg1, arg2, arg3, 0, 0, 0, 0],
-        }
-    }
-    pub fn from_4_args(arg1: u64, arg2: u64, arg3: u64, arg4: u64) -> Self {
-        Self {
-            args: [arg1, arg2, arg3, arg4, 0, 0, 0],
-        }
-    }
-    pub fn from_5_args(arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> Self {
-        Self {
-            args: [arg1, arg2, arg3, arg4, arg5, 0, 0],
-        }
-    }
-    pub fn from_6_args(arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: u64) -> Self {
-        Self {
-            args: [arg1, arg2, arg3, arg4, arg5, arg6, 0],
-        }
-    }
-    pub fn from_args(args: [u64; 7]) -> Self {
-        Self { args }
-    }
-    pub fn as_array(&self) -> &[u64; 7] {
+}
+
+impl AsRef<[u64; 7]> for ParameterList {
+    fn as_ref(&self) -> &[u64; 7] {
         &self.args
     }
 }

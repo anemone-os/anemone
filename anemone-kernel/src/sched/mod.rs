@@ -6,8 +6,8 @@ use crate::{
 mod hal;
 pub use hal::*;
 
-mod proc;
 mod idle;
+mod proc;
 
 // schedulers
 mod rr;
@@ -18,7 +18,8 @@ pub type Scheduler = rr::RRScheduler;
 /// Exported API for process management.
 pub use proc::{add_to_ready, clone_current_task, current_task_id};
 
-/// Enter the scheduler loop. This function is called bootstrap to enter the scheduler.
+/// Enter the scheduler loop. This function is called by bootstrap code to enter
+/// the scheduler.
 pub fn run_tasks() -> ! {
     loop {
         unsafe {
@@ -28,16 +29,18 @@ pub fn run_tasks() -> ! {
 }
 
 /// Manually triggers a scheduling
-/// 
-/// **Make sure interrupts are disabled before calling this function, otherwise the behavior is undefined.**
+///
+/// **Make sure interrupts are disabled before calling this function, otherwise
+/// the behavior is undefined.**
 pub unsafe fn schedule() {
     unsafe {
         switch_out(false);
     }
 }
 
-/// Called by the task guard when a task is exiting. This function will never return.
-/// 
+/// Called by the task guard when a task is exiting. This function will never
+/// return.
+///
 /// Call this function manually will directly exit the current task.
 pub fn task_exit() -> ! {
     unsafe {

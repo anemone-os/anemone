@@ -412,7 +412,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         add_to_ready(Arc::new(
             Task::new_kernel(
                 bsp_kinit as *const (),
-                ParameterList::from_2_args(bsp_id as u64, fdt_va.get()),
+                ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
                 IntrArch::DISABLED_IRQ_FLAGS,
                 TaskFlags::NONE,
             )
@@ -481,19 +481,20 @@ static FINISH_SYNC_COUNTER: CpuSync = CpuSync::new("finish");
 
 unsafe fn ap_setup(ap_id: usize) -> ! {
     unsafe {
-        BOOT_SYNC_COUNTER.sync_with_counter();
-        kdebugln!("anemone kernel booting on ap #{}", ap_id);
         install_ktrap_handler();
         mm::percpu::ap_init(ap_id);
         mm::kptable::activate_kernel_mapping();
+        BOOT_SYNC_COUNTER.sync_with_counter();
+        kdebugln!("anemone kernel booting on ap #{}", ap_id);
+
         add_to_ready(Arc::new(
             Task::new_kernel(
                 ap_kinit as *const (),
-                ParameterList::from_1_args(ap_id as u64),
+                ParameterList::new(&[ap_id as u64]),
                 IntrArch::DISABLED_IRQ_FLAGS,
                 TaskFlags::NONE,
             )
-            .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e)),
+            .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e)),
         ));
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
     }

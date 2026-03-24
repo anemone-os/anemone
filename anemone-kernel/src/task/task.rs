@@ -89,7 +89,7 @@ impl Task {
 
     pub unsafe fn get_task_context_mut(&self) -> *mut TaskContext {
         self.sched_info
-            .with(|inner| &inner.task_context as *const TaskContext as *mut TaskContext)
+            .with_mut(|inner| &mut inner.task_context as *mut TaskContext)
     }
 }
 
