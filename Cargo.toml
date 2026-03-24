@@ -5,6 +5,7 @@ exclude = ["scripts/xtask"]
 
 [workspace.dependencies]
 sbi-rt = { version = "0.0.3" }
+elf = { version = "0.8.0", default-features = false, features = ["to_str"] }
 yansi = { version = "1.0.1", default-features = false }
 riscv = { version = "0.16.0" }
 bitflags = { version = "2.10.0" }

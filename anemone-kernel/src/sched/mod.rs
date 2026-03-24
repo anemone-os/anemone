@@ -30,7 +30,7 @@ pub fn run_tasks() -> ! {
 /// Manually triggers a scheduling
 /// 
 /// **Make sure interrupts are disabled before calling this function, otherwise the behavior is undefined.**
-pub fn schedule() {
+pub unsafe fn schedule() {
     unsafe {
         switch_out(false);
     }
