@@ -1,7 +1,10 @@
+use core::arch::asm;
+
 use crate::prelude::*;
 
 mod ktrap;
 pub use ktrap::*;
+use riscv::register::sstatus::{self, SPP};
 
 pub struct RiscV64TrapArch;
 
@@ -33,6 +36,10 @@ impl Gpr {
         self.x(2)
     }
 
+    fn fp(&self) -> u64 {
+        self.x(8)
+    }
+
     fn gp(&self) -> u64 {
         self.x(3)
     }
@@ -52,6 +59,41 @@ pub struct RiscV64TrapFrame {
     scause: u64,
 }
 
+impl RiscV64TrapFrame {
+    pub fn task_init_frame(
+        entry: u64,
+        stack_top: u64,
+        irq_flags: IrqFlags,
+        prv: Privilege,
+        args: &[u64; 7],
+        ra: u64,
+    ) -> Self {
+        Self {
+            gpr: Gpr {
+                x: {
+                    let mut x = [0; 32];
+                    x[10..17].copy_from_slice(args);
+                    x[2] = stack_top;
+                    x[1] = ra as u64;
+                    unsafe {
+                        asm!("sd tp, ({0})", in(reg) &x[4]); //tp
+                    }
+                    x
+                },
+            },
+            sstatus: {
+                let mut sstatus = sstatus::read();
+                sstatus.set_spie(irq_flags == IntrArch::ENABLED_IRQ_FLAGS);
+                sstatus.set_spp(SPP::from(prv));
+                sstatus.bits() as u64
+            },
+            sepc: entry,
+            stval: 0,
+            scause: 0,
+        }
+    }
+}
+
 impl TrapFrameArch for RiscV64TrapFrame {
     unsafe fn syscall_args<const IDX: usize>(&self) -> usize {
         const_assert!(IDX < 7);
@@ -63,6 +105,14 @@ impl TrapFrameArch for RiscV64TrapFrame {
         // extension is enabled.
         self.sepc += 4;
     }
+
+    const ZEROED: Self = Self {
+        gpr: Gpr { x: [0; 32] },
+        sstatus: 0,
+        sepc: 0,
+        stval: 0,
+        scause: 0,
+    };
 }
 
 /// Only supervisor-level exceptions are defined here.

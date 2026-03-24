@@ -1,5 +1,11 @@
-use la_insc::reg::{csr::{tcfg, ticlr, tid}, timer::Tcfg};
 use crate::prelude::*;
+use la_insc::{
+    insc::rdtime,
+    reg::{
+        csr::{tcfg, ticlr, tid},
+        timer::Tcfg,
+    },
+};
 
 pub struct LA64TimeArch;
 
@@ -13,7 +19,7 @@ pub unsafe fn set_hw_clock_freq(freq_hz: u64) {
 
 impl TimeArchTrait for LA64TimeArch {
     fn current_ticks() -> u64 {
-        todo!()
+        rdtime(CpuArch::cur_cpu_id().get())
     }
 
     fn hw_freq_hz() -> Option<u64> {
@@ -21,14 +27,13 @@ impl TimeArchTrait for LA64TimeArch {
     }
 
     fn set_next_trigger(ticks: u64) {
-        unsafe
-        {
+        unsafe {
             tcfg::csr_write(Tcfg::new(ticks, true, true));
         }
     }
 }
 
-impl LA64TimeArch{
+impl LA64TimeArch {
     /// Claim a timer interrupt on the current CPU.
     pub fn claim_timer_interrupt() {
         unsafe {
@@ -37,10 +42,10 @@ impl LA64TimeArch{
     }
 
     /// Initialize and start the timer
-    pub fn init(){
-        unsafe{
-            tid::csr_write(CpuArch::cur_cpu_id() as u32);
-             TimeArch::set_next_trigger(300_000_0);
+    pub fn init() {
+        unsafe {
+            tid::csr_write(CpuArch::cur_cpu_id().get() as u32);
+            TimeArch::set_next_trigger(300_000_0);
         }
     }
 }

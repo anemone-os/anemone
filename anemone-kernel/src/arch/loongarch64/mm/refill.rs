@@ -2,8 +2,6 @@ use core::arch::naked_asm;
 
 use la_insc::reg::csr::{CR_PGD, CR_TLBRSAVE};
 
-use crate::{arch::loongarch64::mm::paging::LA64PteFlags, prelude::*};
-
 /// TLB refill handler
 #[unsafe(naked)]
 #[unsafe(no_mangle)]

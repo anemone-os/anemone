@@ -50,7 +50,7 @@ static IPI_QUEUE: SpinLock<LinkedList<IpiMsgAdapter>> =
 /// Send an IPI to the target CPU, synchronously waiting for the IPI to be
 /// handled before returning.
 pub fn send_ipi(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
-    if cpu_id == CpuArch::cur_cpu_id() {
+    if cpu_id == CpuArch::cur_cpu_id().get() {
         panic!("cannot send ipi to self");
     }
     if !target_online(cpu_id) {
@@ -79,7 +79,7 @@ pub fn send_ipi(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
 /// Broadcast an IPI to all other CPUs, synchronously waiting for all of them to
 /// handle the IPI before returning.
 pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
-    let cur_cpuid = CpuArch::cur_cpu_id();
+    let cur_cpuid = CpuArch::cur_cpu_id().get();
     let ncpus = CpuArch::ncpus();
     for id in 0..ncpus {
         if !target_online(id) {
@@ -146,7 +146,7 @@ fn alloc_avail_buf() -> Option<NonNull<IpiMsg>> {
 
 /// Send an IPI to the target CPU asynchronously.
 pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
-    if cpu_id == CpuArch::cur_cpu_id() {
+    if cpu_id == CpuArch::cur_cpu_id().get() {
         panic!("cannot send ipi to self");
     }
 
@@ -174,7 +174,7 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
     // check whether empty buffers are enough
     let ncpus = CpuArch::ncpus();
     for id in 0..ncpus {
-        if id != CpuArch::cur_cpu_id() {
+        if id != CpuArch::cur_cpu_id().get() {
             if !target_online(id) {
                 return Err(IpiError::TargetOffline);
             }
@@ -184,7 +184,7 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
     let mut navail_bufs = 0;
     MSG_BUFFERS.with(|buffers| {
         for (id, buf) in buffers[..ncpus].iter().enumerate() {
-            if id == CpuArch::cur_cpu_id() {
+            if id == CpuArch::cur_cpu_id().get() {
                 continue;
             }
             if buf.is_accomplished.load(Ordering::Acquire) {
@@ -198,7 +198,7 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
     let mut sent_bufs = 0;
     MSG_BUFFERS.with_mut(|buffers| {
         for (id, buf) in buffers[..ncpus].iter_mut().enumerate() {
-            if id == CpuArch::cur_cpu_id() {
+            if id == CpuArch::cur_cpu_id().get() {
                 continue;
             }
             if buf.is_accomplished.load(Ordering::Acquire) {
@@ -233,7 +233,7 @@ pub fn handle_ipi() {
             };
             let msg = msg_ptr.as_ref();
             kdebugln!(
-                "#{} handle ipi: payload={:?}",
+                "({}) handle ipi: payload={:?}",
                 CpuArch::cur_cpu_id(),
                 msg.payload
             );

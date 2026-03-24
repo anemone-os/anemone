@@ -12,9 +12,13 @@ pub(super) mod time;
 mod backtrace;
 mod bootstrap;
 mod machine;
+mod sched;
+mod utils;
 
 pub use backtrace::RiscV64BacktraceArch as BacktraceArch;
 pub use cpu::RiscV64CpuArch as CpuArch;
 pub use exception::{RiscV64IntrArch as IntrArch, RiscV64TrapArch as TrapArch};
 pub use mm::{KernelLayout, RiscV64PagingArch as PagingArch};
+pub use sched::RiscV64SchedArch as SchedArch;
 pub use time::RiscV64TimeArch as TimeArch;
+pub use machine::machine_init;

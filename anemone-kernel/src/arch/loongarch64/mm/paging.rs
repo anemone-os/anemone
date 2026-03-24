@@ -1,5 +1,4 @@
 use crate::prelude::*;
-use alloc::boxed::Box;
 use core::{
     fmt::Debug,
     ops::{Index, IndexMut},
@@ -7,10 +6,7 @@ use core::{
 use la_insc::{
     impl_bits64,
     insc::{InvtlbType, invtlb},
-    reg::{
-        asid,
-        csr::{pgdh, pgdl},
-    },
+    reg::csr::{pgdh, pgdl},
     utils::{mem::MemAccessType, privl::PrivilegeLevel},
 };
 

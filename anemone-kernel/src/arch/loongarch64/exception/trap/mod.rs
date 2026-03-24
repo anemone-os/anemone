@@ -1,11 +1,13 @@
+use core::arch::asm;
+
 use crate::{
-    exception::{
-        PageFaultInfo, PageFaultType,
-        trap::{TrapArchTrait, TrapFrameArch},
-    },
+    exception::trap::{TrapArchTrait, TrapFrameArch},
     prelude::*,
 };
-use la_insc::reg::exception::{Estat, IntrFlags};
+use la_insc::{
+    reg::{csr::prmd, exception::IntrFlags},
+    utils::privl::PrivilegeLevel,
+};
 
 mod ktrap;
 pub use ktrap::*;
@@ -62,7 +64,50 @@ pub struct LA64TrapFrame {
     estat: u64,
 }
 
+impl LA64TrapFrame {
+    pub fn task_init_frame(
+        entry: u64,
+        stack_top: u64,
+        irq_flags: IrqFlags,
+        prv: Privilege,
+        args: &[u64; 7],
+        ra: u64,
+    ) -> Self {
+        Self {
+            gpr: Gpr {
+                x: {
+                    let mut x = [0; 32];
+                    x[4..11].copy_from_slice(args);
+                    x[3] = stack_top;
+                    x[1] = ra as u64;
+                    unsafe {
+                        asm!("st.d $tp, {0}, 0", in(reg) &x[2]); //tp
+                    }
+                    x
+                },
+            },
+            prmd: {
+                let mut prmd = unsafe { prmd::csr_read() };
+                prmd.set_ie(irq_flags == IntrArch::ENABLED_IRQ_FLAGS);
+                prmd.set_plv(PrivilegeLevel::from(prv));
+                prmd.to_u64()
+            },
+            era: entry,
+            badv: 0,
+            estat: 0,
+        }
+    }
+}
+
 impl TrapFrameArch for LA64TrapFrame {
+    const ZEROED: Self = Self {
+        gpr: Gpr { x: [0; 32] },
+        prmd: 0,
+        era: 0,
+        badv: 0,
+        estat: 0,
+    };
+
     /// Read syscall argument IDX from the trap frame.
     unsafe fn syscall_args<const IDX: usize>(&self) -> usize {
         const_assert!(IDX < 7);

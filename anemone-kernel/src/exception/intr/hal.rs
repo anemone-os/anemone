@@ -39,6 +39,10 @@ pub trait IntrArchTrait: Sized {
     /// TODO: some architectures support an integer payload, we shall add that
     /// in the future if needed.
     fn send_ipi(cpu_id: usize);
+
+    unsafe fn claim_ipi();
+
+    unsafe fn init_local_irq();
 }
 
 /// Interrupt flags for the current CPU. The exact representation is

@@ -1,4 +1,4 @@
-use super::paging::{LA64PageDirectory, LA64PagingArch};
+use super::paging::LA64PagingArch;
 use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 
 pub struct LA64KernelLayout;

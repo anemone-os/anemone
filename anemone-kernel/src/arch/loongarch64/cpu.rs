@@ -1,4 +1,7 @@
-use crate::{device::CpuArchTrait, prelude::with_core_local};
+use crate::{
+    device::{CpuArchTrait, CpuId},
+    prelude::with_core_local,
+};
 
 static mut NCPUS: usize = 0;
 
@@ -15,8 +18,8 @@ impl CpuArchTrait for La64CpuArch {
         unsafe { NCPUS }
     }
 
-    fn cur_cpu_id() -> usize {
-        with_core_local(|core_local| core_local.cpu_id())
+    fn cur_cpu_id() -> CpuId {
+        CpuId::new(with_core_local(|core_local| core_local.cpu_id()))
     }
 
     unsafe fn set_percpu_base(base: *mut u8) {

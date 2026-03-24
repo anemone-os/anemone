@@ -1,47 +1,31 @@
 //! Bootstrap for Loongarch64 architecture.
 
-use core::arch::{global_asm, naked_asm};
+use core::arch::naked_asm;
 
-use la_insc::{
-    reg::{
-        csr::{
-            CR_CPUID, CR_CRMD, CR_DMW0, CR_DMW1, CR_PGDH, CR_PGDL, CR_PRMD, CR_PWCH, CR_PWCL,
-            CR_TLBRENTRY,
-        },
-        dmw::Dmw,
-        pwc::{PteWidth, Pwch, Pwcl},
-    },
-    utils::{mem::MemAccessType, privl::PrivilegeFlags},
+use la_insc::reg::csr::{
+    CR_CPUID, CR_CRMD, CR_DMW0, CR_DMW1, CR_PGDH, CR_PGDL, CR_PWCH, CR_PWCL, CR_TLBRENTRY,
 };
+use loongArch64::ipi::csr_mail_send;
 
 use crate::{
     arch::{
         clear_bss,
         loongarch64::{
-            exception::{enable_local_irq, install_ktrap_handler},
-            machine::machine_init,
-            mm::{
-                BOOT_DMW0, BOOT_DMW1, BOOTSTRAP_PTABLE, PWCH, PWCL,
-                paging::{LA64PageDirectory, create_bootstrap_ptable},
-                refill::__tlb_rfill,
-            },
+            exception::install_ktrap_handler,
+            mm::{BOOT_DMW0, BOOT_DMW1, BOOTSTRAP_PTABLE, PWCH, PWCL, refill::__tlb_rfill},
         },
     },
     device::discovery::open_firmware::{
-        EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count, early_scan_fdt_size,
-        of_platform_discovery, unflatten_device_tree,
+        EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count,
     },
-    mm::layout::KernelLayoutTrait,
+    mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
-    utils::align::{AlignedBytes, PhantomAligned8, PhantomAligned4096, PhantomAligned16384},
+    sync::counter::CpuSync,
 };
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bss.stack0")]
-static mut STACK0: [AlignedBytes<
-    PhantomAligned4096,
-    [u8; (1 << KSTACK_SHIFT_KB) as usize * 1024],
->; MAX_CPUS] = [AlignedBytes::ZEROED; MAX_CPUS];
+static mut STACK0: [RawKernelStack; MAX_CPUS] = [RawKernelStack::ZEROED; MAX_CPUS];
 
 static DTB_BYTES: &[u8] = include_bytes_aligned_as!(PhantomAligned8, "generated.dtb");
 
@@ -96,7 +80,7 @@ pub unsafe extern "C" fn __nun() -> ! {
             li.d        $t1, {stack_size}
             addi.d      $t0, $t0, 0x1
             mul.d       $t0, $t0, $t1
-            // add.d       $sp, $sp, $t0
+            add.d       $sp, $sp, $t0
             or          $sp, $sp, $t2
         ",
         // Jump
@@ -148,10 +132,10 @@ extern "C" fn rusty_nun(hart_id: usize) -> ! {
     unsafe {
         if !BSP_ARRIVED {
             BSP_ARRIVED = true;
-            bsp_entry(hart_id, VirtAddr::new(DTB_BYTES.as_ptr() as u64))
+            bsp_setup(hart_id, VirtAddr::new(DTB_BYTES.as_ptr() as u64))
         } else {
             // ap
-            ap_entry(hart_id)
+            ap_setup(hart_id)
         }
     }
 }
@@ -184,47 +168,43 @@ pub fn register_debugcon() {
     );
 }
 
-unsafe fn bsp_entry(bsp_id: usize, fdt_va: VirtAddr) -> ! {
+unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     unsafe {
         clear_bss();
     }
+    //register_basic_power_handlers();
+    // set up kernel trap handler
     install_ktrap_handler();
-    kinfoln!("anemone kernel booting...");
-    kinfoln!("bsp id : {}", bsp_id);
+
     register_debugcon();
+
     unsafe {
-        ///
+        // needed by percpu initialization.
         let ncpus = early_scan_cpu_count(fdt_va);
         super::cpu::set_ncpus(ncpus);
+        kinfoln!("anemone kernel booting on bsp #{}", bsp_id);
+
+        wake_up_aps(bsp_id, ncpus);
 
         // needed by timer initialization.
         if let Some(freq_hz) = early_scan_clock_freq(fdt_va) {
             super::time::set_hw_clock_freq(freq_hz);
         } else {
             kwarningln!("failed to scan clock frequency from device tree.");
-        }
+        };
 
         let mut scanner = EarlyMemoryScanner::new(fdt_va);
-
-        // mark fdt as reserved memory so that it won't be allocated by frame allocator.
-        let fdt_npages = (early_scan_fdt_size(fdt_va) + PagingArch::PAGE_SIZE_BYTES - 1)
-            / PagingArch::PAGE_SIZE_BYTES;
-        let fdt_ppn = PhysPageNum::new(fdt_va.kvirt_to_phys().get() >> PagingArch::PAGE_SIZE_BITS);
-        scanner.mark_as_reserved(fdt_ppn, fdt_npages as u64, RsvMemFlags::FDT);
 
         mm::percpu::bsp_init(bsp_id, |npages| scanner.early_alloc_folio(npages as u64));
         kinfoln!("percpu data initialized");
 
         scanner.commit_to_pmm();
-        let mut memmap_pages = 0;
         mm::frame::memmap_init(|npages| {
-            memmap_pages += npages;
             kdebugln!("memmap init: allocating {} pages", npages);
             sys_mem_zones()
                 .leak(npages)
                 .expect("no enough memory to initialize memmap")
         });
-        kdebugln!("memmap initialized, total {} pages", memmap_pages);
         mm::frame::pmm_init();
         kinfoln!("physical memory management initialized");
 
@@ -233,21 +213,134 @@ unsafe fn bsp_entry(bsp_id: usize, fdt_va: VirtAddr) -> ! {
         mm::kptable::activate_kernel_mapping();
         kinfoln!("kernel mapping activated");
 
-        // register drivers to bus types
-        driver::init();
+        remap_boot_stack();
 
-        unflatten_device_tree(fdt_va);
-        //parse_bootargs();
-        machine_init();
-        of_platform_discovery();
+        BOOT_SYNC_COUNTER.sync_with_counter();
 
-        enable_local_irq();
-        bsp_pre_kernel_main();
+        knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
+        add_to_ready(Arc::new(
+            Task::new_kernel(
+                bsp_kinit as *const (),
+                ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
+                IntrArch::DISABLED_IRQ_FLAGS,
+                TaskFlags::NONE,
+            )
+            .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e)),
+        ));
+        switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
     }
-    // bsp
-    loop {}
 }
 
-unsafe fn ap_entry(hart_id: usize) -> ! {
-    loop {}
+static BOOT_SYNC_COUNTER: CpuSync = CpuSync::new("boot");
+
+unsafe fn ap_setup(ap_id: usize) -> ! {
+    unsafe {
+        BOOT_SYNC_COUNTER.sync_with_counter();
+        kdebugln!("anemone kernel booting on ap #{}", ap_id);
+        install_ktrap_handler();
+        mm::percpu::ap_init(ap_id);
+        mm::kptable::activate_kernel_mapping();
+        add_to_ready(Arc::new(
+            Task::new_kernel(
+                ap_kinit as *const (),
+                ParameterList::new(&[ap_id as u64]),
+                IntrArch::DISABLED_IRQ_FLAGS,
+                TaskFlags::NONE,
+            )
+            .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e)),
+        ));
+        switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64));
+    }
+}
+
+pub fn wake_up_aps(bsp_id: usize, ncpus: usize) {
+    unsafe {
+        let cur_cpu = bsp_id;
+        let st_addr = VirtAddr::new(__nun as *const () as u64)
+            .kvirt_to_phys()
+            .get();
+        for cpu in 0..ncpus {
+            if cpu == cur_cpu {
+                continue;
+            }
+            csr_mail_send(st_addr, cpu, 0);
+            IntrArch::send_ipi(cpu);
+        }
+    }
+}
+
+#[inline(always)]
+unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
+    let cpu_id = CpuArch::cur_cpu_id().get();
+    let new_stack_top = GUARDED_STACK_TOPS.get()[cpu_id];
+
+    unsafe {
+        core::arch::asm!(
+            "move  $sp, {new_top}",
+            "move  $fp, $zero",
+            "jirl  $zero, {entry}, 0 ",
+            new_top = in(reg) new_stack_top.get(),
+            entry = in(reg) dest_entry.get(),
+            options(noreturn),
+        )
+    }
+}
+
+/// percpu guarded stack top addresses, filled by [`remap_boot_stacks`].
+static GUARDED_STACK_TOPS: MonoOnce<[VirtAddr; MAX_CPUS]> = unsafe { MonoOnce::new() };
+
+/// Remap every CPU's boot stack ([`STACK0`]) into the remap region with a
+/// guard page at the bottom.
+///
+/// # Safety
+///
+/// Must be called by bsp **after** `init_kernel_mapping()` +
+/// `activate_kernel_mapping()` and **before** `wake_up_aps()`.
+unsafe fn remap_boot_stack() {
+    const KSTACK_PAGES: usize = (1 << KSTACK_SHIFT_KB) * 1024 / PagingArch::PAGE_SIZE_BYTES;
+
+    let total_vpages = 1 + KSTACK_PAGES;
+    let stack0_sppn =
+        unsafe { VirtAddr::new(core::ptr::addr_of!(STACK0) as u64).kvirt_to_phys() }.page_down();
+
+    let mut tops: [VirtAddr; MAX_CPUS] = [VirtAddr::new(0); MAX_CPUS];
+
+    for cpu in 0..MAX_CPUS {
+        let cpu_stack_ppn = stack0_sppn + (cpu as u64 * KSTACK_PAGES as u64);
+
+        let vrange = unsafe { mm::remap::alloc_virt_range(total_vpages) }
+            .expect("failed to allocate virtual range for boot stack guard page");
+        // The first page is the guard – we simply leave it unmapped. The underlying pte
+        // should be empty.
+        let stack_vpn = vrange.start() + 1;
+        unsafe {
+            kmap(Mapping {
+                vpn: stack_vpn,
+                ppn: cpu_stack_ppn,
+                flags: PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL,
+                npages: KSTACK_PAGES,
+                huge_pages: false,
+            })
+            .expect("failed to map boot stack with guard page");
+        }
+
+        let stack_top = (stack_vpn + KSTACK_PAGES as u64).to_virt_addr();
+
+        tops[cpu] = stack_top;
+
+        kinfoln!(
+            "cpu #{}: boot stack remapped with guard page at [{:#x}, {:#x}), stack [{:#x}, {:#x}), from [{:#x}, {:#x}]",
+            cpu,
+            vrange.start().to_virt_addr().get(),
+            stack_vpn.to_virt_addr().get(),
+            stack_vpn.to_virt_addr().get(),
+            stack_top.get(),
+            cpu_stack_ppn.to_kvirt().to_virt_addr().get(),
+            cpu_stack_ppn.to_kvirt().to_virt_addr().get() + (KSTACK_PAGES as u64 * 4096),
+        );
+    }
+
+    GUARDED_STACK_TOPS.init(|g| {
+        g.write(tops);
+    });
 }

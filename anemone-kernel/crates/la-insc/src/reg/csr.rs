@@ -171,7 +171,7 @@ macro_rules! define_csr {
 
 define_csr!(64, asid, 0x18, Asid);
 define_csr!(64, crmd, 0x0, Crmd);
-define_csr!(64, prmd, 0x1);
+define_csr!(64, prmd, 0x1, Crmd);
 define_csr!(64, ecfg, 0x4, Ecfg);
 define_csr!(64, estat, 0x5, Estat);
 define_csr!(64, era, 0x6);

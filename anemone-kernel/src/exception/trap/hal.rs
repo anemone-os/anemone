@@ -3,6 +3,7 @@ pub trait TrapArchTrait {
 }
 
 pub trait TrapFrameArch {
+    const ZEROED: Self;
     /// Get the system call argument at the given index.
     ///
     /// # Safety

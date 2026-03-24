@@ -410,7 +410,6 @@ impl<const MIN_BLOCK_BYTES: usize, const NORDER: usize> Zone<MIN_BLOCK_BYTES, NO
         if order >= NORDER {
             return Err(BuddyError::InvalidOrder);
         }
-
         let block_addr = AlignedAddr::<MIN_BLOCK_BYTES>::new(addr.as_ptr() as usize)
             .ok_or(BuddyError::UnalignedAddr)?;
         // Verify the address falls within the allocable region.  Without this

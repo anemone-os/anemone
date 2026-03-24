@@ -1,8 +1,10 @@
+use core::fmt::{Debug, Display};
+
 pub trait CpuArchTrait {
     /// Returns the number of CPUs in the system.
     fn ncpus() -> usize;
     /// Returns the ID of the current CPU.
-    fn cur_cpu_id() -> usize;
+    fn cur_cpu_id() -> CpuId;
 
     /// Sets the base address of the per-CPU area for the current CPU.
     ///
@@ -15,4 +17,29 @@ pub trait CpuArchTrait {
     /// TODO: explain why this is needed when we already have
     /// [CpuArch::cur_cpu_id] and [PERCPU_BASES].
     fn percpu_base() -> usize;
+}
+
+pub struct CpuId(usize);
+impl CpuId {
+    #[inline(always)]
+    pub fn new(id: usize) -> Self {
+        Self(id)
+    }
+
+    #[inline(always)]
+    pub fn get(&self) -> usize {
+        self.0
+    }
+}
+
+impl Display for CpuId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!("core #{}", self.0))
+    }
+}
+
+impl Debug for CpuId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!("core #{}", self.0))
+    }
 }

@@ -1,12 +1,10 @@
-//! CSR and IOCSR wrapper
+//! CSR wrapper
 
 pub mod asid;
 pub mod crmd;
 pub mod csr;
 pub mod dmw;
 pub mod exception;
-pub mod iocsr;
-pub mod ipi;
 pub mod pwc;
 pub mod timer;
 
@@ -18,7 +16,7 @@ macro_rules! impl_const_u64_converter {
         pub const fn to_u64(&self) -> u64 {
             self.0
         }
-        
+
         /// Create a new instance of the type from a `u64` value.
         pub const fn from_u64(val: u64) -> Self {
             Self(val)
@@ -42,6 +40,37 @@ macro_rules! impl_const_u32_converter {
     };
 }
 
+/// Macro to implement `to_u8` and `from_u8` for a CSR wrapper type.
+#[macro_export]
+macro_rules! impl_const_u8_converter {
+    () => {
+        /// Convert the type to a `u8` value.
+        pub const fn to_u8(&self) -> u8 {
+            self.0
+        }
+
+        /// Create a new instance of the type from a `u8` value.
+        pub const fn from_u8(val: u8) -> Self {
+            Self(val)
+        }
+    };
+}
+
+/// Macro to implement `to_u16` and `from_u16` for a CSR wrapper type.
+#[macro_export]
+macro_rules! impl_const_u16_converter {
+    () => {
+        /// Convert the type to a `u16` value.
+        pub const fn to_u16(&self) -> u16 {
+            self.0
+        }
+
+        /// Create a new instance of the type from a `u16` value.
+        pub const fn from_u16(val: u16) -> Self {
+            Self(val)
+        }
+    };
+}
 
 /// Use this macro to generate compact bitfield accessors for a 64-bit value
 /// stored in `self.0`.
@@ -49,11 +78,8 @@ macro_rules! impl_const_u32_converter {
 /// Variants:
 ///
 /// - **`bitflags`**: Create typed getter and setter using a bitflags-like type.
-///   
-///     Invoke as 
-///     ``` 
-///     impl_bits64!(bitflags, <basetype>, <name>, <BitflagsType>, <start>, <end>) 
-///     ```
+///   Invoke as ``` impl_bits64!(bitflags, <basetype>, <name>, <BitflagsType>,
+///   <start>, <end>) ```
 ///
 ///     Provide `<basetype>` for casting (for example `u8`),
 ///         and supply a bitflags type that implements `bits() -> uN` and
@@ -192,8 +218,8 @@ macro_rules! impl_bits64 {
 ///
 ///     Invoke as
 ///     ```
-///     impl_bits32!(bitflags, <basetype>, <name>, <BitflagsType>, <start>, <end>)     
-///     ```
+///     impl_bits32!(bitflags, <basetype>, <name>, <BitflagsType>, <start>,
+/// <end>)     ```
 ///
 ///     Provide `<basetype>` for casting (for example `u8`),
 ///         and supply a bitflags type that implements `bits() -> uN` and

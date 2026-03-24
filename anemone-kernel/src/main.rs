@@ -3,6 +3,7 @@
 #![no_std]
 #![no_main]
 #![allow(unused)]
+#![warn(unused_imports)]
 // **IMPORTANT**
 // **UNSTABLE FEATURES SHOULD BE AVOIDED WHENEVER POSSIBLE, SINCE THEY MAY CAUSE
 // COMPATIBILITY ISSUES IN THE FUTURE.**
@@ -32,25 +33,97 @@ pub mod sched;
 pub mod sync;
 pub mod syscall;
 pub mod syserror;
+pub mod task;
 pub mod time;
 pub mod utils;
 
-use crate::{prelude::*, sync::mono::MonoOnce};
+use crate::{
+    device::discovery::open_firmware::{
+        get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
+        unflatten_device_tree,
+    },
+    prelude::*,
+    sync::{counter::CpuSync, mono::MonoOnce},
+};
 
-/// Before every core enters [kernel_main], this function must be called on the
-/// BSP to perform necessary preparations.
-fn bsp_pre_kernel_main() {
+static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
+static FINISH_SYNC_COUNTER: CpuSync = CpuSync::new("finish");
+static KUNIT_SYNC_COUNTER: CpuSync = CpuSync::new("kunit");
+
+unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     unsafe {
-        device::console::on_system_boot();
-    }
-    #[cfg(feature = "kunit")]
-    crate::debug::kunit::kunit_runner();
-    panic!();
+        kinfoln!("bsp #{} kinit running on {}...", bsp_id, current_task_id());
+        // register drivers to bus types
+        driver::init();
+        unflatten_device_tree(fdt_va);
+        parse_bootargs();
+        machine_init();
+        of_platform_discovery();
 
-    // TODO: init subsystems, spawn init process, etc.
+        IntrArch::init_local_irq();
+        unsafe {
+            device::console::on_system_boot();
+        }
+        INIT_SYNC_COUNTER.sync_with_counter();
+
+        FINISH_SYNC_COUNTER.sync_with_counter();
+        kinfoln!("bsp #{} kinit finished", bsp_id);
+
+        #[cfg(feature = "kunit")]
+        {
+            kinfoln!("running kunit tests");
+            crate::debug::kunit::kunit_runner();
+            KUNIT_SYNC_COUNTER.sync_with_counter();
+            kinfoln!("kunit tests finished");
+        }
+    }
+
+    loop {}
 }
 
-/// Start scheduling user processes.
-fn kernel_main() -> ! {
-    loop {}
+unsafe extern "C" fn ap_kinit(ap_id: usize) {
+    unsafe {
+        INIT_SYNC_COUNTER.sync_with_counter();
+        kinfoln!("ap #{} kinit running on {}...", ap_id, current_task_id());
+        IntrArch::init_local_irq();
+
+        // collect previous IPIs sent by bsp before ap starts to run.
+        // the main reason for this is to clear IPI buffers of bsp such that it can send
+        // IPIs to other APs again.
+        IntrArch::claim_ipi();
+
+        // synchronize with BSP
+
+        FINISH_SYNC_COUNTER.sync_with_counter();
+        kinfoln!("ap #{} kinit finished", ap_id);
+
+        #[cfg(feature = "kunit")]
+        KUNIT_SYNC_COUNTER.sync_with_counter();
+    }
+    // exit
+}
+
+fn parse_bootargs() {
+    of_with_root(|root| {
+        root.children().for_each(|child| {
+            if child.name() == "chosen" {
+                if let Some(stdout_path) = child.property("stdout-path") {
+                    if let Some(stdout_path) = stdout_path.value_as_string() {
+                        kinfoln!("stdout-path: {}", stdout_path);
+
+                        if of_with_node_by_full_name_path(stdout_path, |node| {
+                            get_of_node(node.handle()).mark_as_stdout();
+                        })
+                        .is_err()
+                        {
+                            panic!(
+                                "device tree node specified by stdout-path not found: {}",
+                                stdout_path
+                            );
+                        }
+                    }
+                }
+            }
+        })
+    });
 }
