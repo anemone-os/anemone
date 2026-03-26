@@ -45,6 +45,10 @@ SECTIONS {
         *(.percpu)
         __epercpu = .;
         
+        __sinitcall_fs = .;
+        *(.initcall.fs .initcall.fs.*)
+        __einitcall_fs = .;
+
         __sinitcall_driver = .;
         *(.initcall.driver .initcall.driver.*)
         __einitcall_driver = .;

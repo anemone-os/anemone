@@ -119,7 +119,7 @@ pub trait BlockDriver: Driver {
 /// **LOCK ORDERING**:
 /// **`devices` -> `drivers` -> `major_alloc`**
 struct BlockDevSubSys {
-    devices: RwLock<HashMap<DevNum, BlockDevDesc>>,
+    devices: RwLock<HashMap<BlockDevNum, BlockDevDesc>>,
     drivers: RwLock<HashMap<MajorNum, Arc<dyn BlockDriver>>>,
     major_alloc: SpinLock<IdAllocator<OneShotAlloc, IdentityBijection<MajorNum>>>,
 }
@@ -160,11 +160,8 @@ pub fn register_block_driver(driver: Arc<dyn BlockDriver>) -> Result<MajorNum, D
 }
 
 /// Register a block device with the given device number.
-///
-/// The device number must have a valid block device major number (i.e. one that
-/// has been allocated to a block driver).
 pub fn register_block_device(
-    devnum: DevNum,
+    devnum: BlockDevNum,
     name: AnyIdentity,
     device: Arc<dyn BlockDev>,
 ) -> Result<(), DevError> {
@@ -182,9 +179,7 @@ pub fn register_block_device(
 }
 
 /// Get the block device corresponding to the given device number, if it exists.
-///
-/// The `devnum` must be a block device major number.
-pub fn get_block_dev(devnum: DevNum) -> Option<Arc<dyn BlockDev>> {
+pub fn get_block_dev(devnum: BlockDevNum) -> Option<Arc<dyn BlockDev>> {
     SUBSYS
         .devices
         .read_irqsave()

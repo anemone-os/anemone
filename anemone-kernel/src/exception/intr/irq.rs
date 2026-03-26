@@ -9,7 +9,7 @@ use core::fmt::Debug;
 use crate::{
     device::discovery::fwnode::FwNode,
     prelude::*,
-    utils::{identity::GeneralIdentity, prv_data::PrvData},
+    utils::{any_opaque::AnyOpaque, identity::GeneralIdentity},
 };
 
 int_like!(HwIrq, usize);
@@ -80,17 +80,17 @@ pub struct IrqDesc {
     flow: &'static dyn IrqFlow,
     domain: Arc<IrqDomain>,
     handler: &'static IrqHandler,
-    prv_data: Option<Box<dyn PrvData>>,
+    prv_data: MonoOnce<AnyOpaque>,
 }
 
 /// An interrupt handler.
 #[derive(Debug)]
 pub struct IrqHandler {
-    func: fn(Option<&mut dyn PrvData>),
+    func: fn(&AnyOpaque),
 }
 
 impl IrqHandler {
-    pub const fn new(func: fn(Option<&mut dyn PrvData>)) -> Self {
+    pub const fn new(func: fn(&AnyOpaque)) -> Self {
         Self { func }
     }
 }
@@ -316,7 +316,7 @@ pub fn find_irq_domain_by_fwnode(fwnode: &dyn FwNode) -> Option<Arc<IrqDomain>> 
 pub fn request_irq(
     dev: &dyn Device,
     handler: &'static IrqHandler,
-    prv_data: Option<Box<dyn PrvData>>,
+    prv_data: Option<AnyOpaque>,
 ) -> Result<(), DevError> {
     let fwnode = dev.fwnode().ok_or(DevError::MissingFwNode)?;
     let ic = fwnode.interrupt_parent().ok_or(DevError::NoIrqDomain)?;
@@ -350,8 +350,14 @@ pub fn request_irq(
             },
             domain: domain.clone(),
             handler,
-            prv_data,
+            prv_data: unsafe { MonoOnce::new() },
         };
+        if let Some(prv) = prv_data {
+            desc.prv_data.init(|p| {
+                p.write(prv);
+            });
+        }
+
         assert!(IRQ_DESCS.write_irqsave().insert(virq, desc).is_none());
 
         virq
@@ -400,7 +406,7 @@ pub fn handle_domain_irq(domain: &IrqDomain, hwirq: HwIrq) -> Result<(), DevErro
         .expect("desc must exist for allocated virq");
 
     desc.flow.enter(desc);
-    (desc.handler.func)(desc.prv_data.as_deref_mut());
+    (desc.handler.func)(desc.prv_data.get());
     desc.flow.exit(desc);
 
     Ok(())

@@ -12,17 +12,16 @@ use crate::{
     },
     mm::remap::{IoRemap, ioremap},
     prelude::*,
-    utils::prv_data::PrvData,
+    utils::any_opaque::AnyOpaque,
 };
 
-#[derive(Debug, PrvData)]
+#[derive(Debug, Opaque)]
 struct GoldfishState {
     base: PhysAddr,
     remap: IoRemap,
 }
 
 mod driver_core {
-
     const TIME_LOW: usize = 0x00;
     const TIME_HIGH: usize = 0x04;
     const ALARM_LOW: usize = 0x08;
@@ -92,14 +91,9 @@ impl DriverOps for GoldfishDriver {
 
         let state = GoldfishState { base, remap };
 
-        device.set_drv_state(Some(Box::new(state)));
+        request_irq(pdev, &IRQ_HANDLER, None)?;
 
-        request_irq(pdev, &IRQ_HANDLER, None).map_err(|e| {
-            // this step is necessary since the driver state is already set at this point,
-            // and we should clean it up if IRQ request fails.
-            pdev.set_drv_state(None);
-            e
-        })?;
+        device.set_drv_state(AnyOpaque::new(state));
 
         {}
 
@@ -122,7 +116,7 @@ impl PlatformDriver for GoldfishDriver {
 
 static IRQ_HANDLER: IrqHandler = IrqHandler::new(handle_irq);
 
-fn handle_irq(prv_data: Option<&mut dyn PrvData>) {}
+fn handle_irq(prv_data: &AnyOpaque) {}
 
 #[initcall(driver)]
 fn init() {

@@ -38,6 +38,7 @@ pub fn initcall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let level_string = attr.to_string();
     let level_str = level_string.trim();
     let level = match level_str {
+        "fs" => quote!(crate::initcall::InitCallLevel::Fs),
         "driver" => quote!(crate::initcall::InitCallLevel::Driver),
         _ => {
             return Error::new_spanned(

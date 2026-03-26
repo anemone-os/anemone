@@ -8,8 +8,10 @@ use crate::prelude::*;
 #[derive(Debug)]
 #[repr(i8)]
 pub enum InitCallLevel {
-    /// Runs before devices are scanned and registered.
-    Driver = 0,
+    /// Register filesystem drivers.
+    Fs = 0,
+    /// Register generic device drivers.
+    Driver = 1,
 }
 
 #[derive(Debug)]
@@ -24,6 +26,10 @@ fn collect_initcalls(level: InitCallLevel) -> &'static [InitCall] {
     use link_symbols::*;
 
     let (start, end) = match level {
+        InitCallLevel::Fs => (
+            __sinitcall_fs as *const () as usize,
+            __einitcall_fs as *const () as usize,
+        ),
         InitCallLevel::Driver => (
             __sinitcall_driver as *const () as usize,
             __einitcall_driver as *const () as usize,

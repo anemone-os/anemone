@@ -13,7 +13,6 @@ use crate::{
     prelude::*,
 };
 
-
 /// /sys/bus/virtio
 static VIRTIO_BUS_TYPE: Lazy<RwLock<VirtIOBusType>> =
     Lazy::new(|| RwLock::new(VirtIOBusType::new(KObjIdent::try_from("virtio").unwrap())));

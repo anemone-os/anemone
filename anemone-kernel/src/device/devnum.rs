@@ -49,7 +49,7 @@ pub mod block {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PrvData)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Opaque)]
 pub struct MajorNum(usize);
 
 impl MajorNum {
@@ -63,7 +63,7 @@ impl MajorNum {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PrvData)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Opaque)]
 pub struct MinorNum(usize);
 
 impl MinorNum {
@@ -77,42 +77,47 @@ impl MinorNum {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct DevNum {
-    major: MajorNum,
-    minor: MinorNum,
+macro_rules! gen_devnum {
+    ($name:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub struct $name {
+            major: MajorNum,
+            minor: MinorNum,
+        }
+        impl Display for $name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                write!(f, "{}:{}", self.major.get(), self.minor.get())
+            }
+        }
+        impl $name {
+            pub const fn new(major: MajorNum, minor: MinorNum) -> Self {
+                assert!(major.get() < (1 << MAJOR_BITS));
+                assert!(minor.get() < (1 << MINOR_BITS));
+
+                Self { major, minor }
+            }
+
+            pub fn raw(&self) -> usize {
+                (self.major.get() << MINOR_BITS) | self.minor.get()
+            }
+
+            pub fn decompose(&self) -> (MajorNum, MinorNum) {
+                (self.major, self.minor)
+            }
+
+            pub fn major(&self) -> MajorNum {
+                self.major
+            }
+
+            pub fn minor(&self) -> MinorNum {
+                self.minor
+            }
+        }
+    };
 }
 
-impl Display for DevNum {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}:{}", self.major.get(), self.minor.get())
-    }
-}
-
-impl DevNum {
-    pub const fn new(major: MajorNum, minor: MinorNum) -> Self {
-        assert!(major.get() < (1 << MAJOR_BITS));
-        assert!(minor.get() < (1 << MINOR_BITS));
-
-        Self { major, minor }
-    }
-
-    pub fn raw(&self) -> usize {
-        (self.major.get() << MINOR_BITS) | self.minor.get()
-    }
-
-    pub fn decompose(&self) -> (MajorNum, MinorNum) {
-        (self.major, self.minor)
-    }
-
-    pub fn major(&self) -> MajorNum {
-        self.major
-    }
-
-    pub fn minor(&self) -> MinorNum {
-        self.minor
-    }
-}
+gen_devnum!(CharDevNum);
+gen_devnum!(BlockDevNum);
 
 impl From<u64> for MajorNum {
     fn from(value: u64) -> Self {

@@ -9,7 +9,7 @@ use crate::{
         kobject::{KObjIdent, KObject, KObjectBase},
     },
     prelude::*,
-    utils::prv_data::PrvData,
+    utils::any_opaque::AnyOpaque,
 };
 
 pub mod discovery;
@@ -22,7 +22,7 @@ pub mod kobject;
 pub mod resource;
 
 pub mod devnum;
-pub use devnum::{DevNum, MajorNum, MinorNum};
+pub use devnum::{BlockDevNum, CharDevNum, MajorNum, MinorNum};
 
 // subsystems
 pub mod block;
@@ -32,7 +32,7 @@ pub mod console;
 /// Common data shared by all devices.
 ///
 /// **LOCK ORDERING**:
-/// **`drv_state` -> `children` -> `driver`**
+/// `children` -> `driver`**
 #[derive(Debug)]
 pub struct DeviceBase {
     /// Firmware node associated with this device.
@@ -41,7 +41,7 @@ pub struct DeviceBase {
     fwnode: Option<Arc<dyn FwNode>>,
     children: RwLock<Vec<Arc<dyn Device>>>,
     driver: RwLock<Option<Arc<dyn Driver>>>,
-    drv_state: RwLock<Option<Box<dyn PrvData>>>,
+    drv_state: MonoOnce<AnyOpaque>,
 }
 
 impl DeviceBase {
@@ -50,7 +50,7 @@ impl DeviceBase {
             fwnode,
             children: RwLock::new(Vec::new()),
             driver: RwLock::new(None),
-            drv_state: RwLock::new(None),
+            drv_state: unsafe { MonoOnce::new() },
         }
     }
 }
@@ -72,8 +72,10 @@ pub trait Device: DeviceData + DeviceOps {
         *DeviceData::base(self).driver.write_irqsave() = driver;
     }
 
-    fn set_drv_state(&self, state: Option<Box<dyn PrvData>>) {
-        *DeviceData::base(self).drv_state.write_irqsave() = state;
+    fn set_drv_state(&self, state: AnyOpaque) {
+        DeviceData::base(self).drv_state.init(|s| {
+            s.write(state);
+        })
     }
 
     fn add_child(&self, child: Arc<dyn Device>) {
@@ -86,26 +88,8 @@ pub trait Device: DeviceData + DeviceOps {
 }
 
 impl dyn Device {
-    pub fn with_drv_state<F, R>(&self, f: F) -> Option<R>
-    where
-        F: FnOnce(&dyn PrvData) -> R,
-    {
-        DeviceData::base(self)
-            .drv_state
-            .read_irqsave()
-            .as_ref()
-            .map(|s| f(s.as_ref()))
-    }
-
-    pub fn with_drv_state_mut<F, R>(&self, f: F) -> Option<R>
-    where
-        F: FnOnce(&mut dyn PrvData) -> R,
-    {
-        DeviceData::base(self)
-            .drv_state
-            .write_irqsave()
-            .as_mut()
-            .map(|s| f(s.as_mut()))
+    pub fn drv_state(&self) -> &AnyOpaque {
+        DeviceData::base(self).drv_state.get()
     }
 
     pub fn for_each_child<F>(&self, mut f: F)

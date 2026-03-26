@@ -17,10 +17,10 @@ use crate::{
     },
     mm::remap::{IoRemap, ioremap},
     prelude::*,
-    utils::prv_data::PrvData,
+    utils::any_opaque::AnyOpaque,
 };
 
-#[derive(Debug, PrvData, Clone)]
+#[derive(Debug, Opaque, Clone)]
 struct Ns16550AState {
     rc: Arc<Ns16550AStateInner>,
 }
@@ -332,10 +332,10 @@ impl DriverOps for Ns16550ADriver {
             minor
         };
 
-        pdev.set_drv_state(Some(Box::new(state.clone())));
+        pdev.set_drv_state(AnyOpaque::new(state.clone()));
 
         register_char_device(
-            DevNum::new(*MAJOR.get(), minor),
+            CharDevNum::new(*MAJOR.get(), minor),
             ident_format!("{}", pdev.name()).unwrap(),
             Arc::new(state.clone()),
         )?;
@@ -352,7 +352,7 @@ impl DriverOps for Ns16550ADriver {
         //
         // following code is just a diliberate demonstration of how to use minor number
         // as a key to retrieve device state.
-        request_irq(pdev, &IRQ_HANDLER, Some(Box::new(minor)))?;
+        request_irq(pdev, &IRQ_HANDLER, Some(AnyOpaque::new(minor)))?;
 
         kinfoln!("{}: probed", pdev.name());
 
@@ -380,14 +380,14 @@ impl CharDriver for Ns16550ADriver {
 
 static IRQ_HANDLER: IrqHandler = IrqHandler::new(handle_irq);
 
-fn handle_irq(prv_data: Option<&mut dyn PrvData>) {
-    let minor = unsafe { *prv_data.unwrap().cast_unchecked::<MinorNum>() };
+fn handle_irq(prv_data: &AnyOpaque) {
+    let minor = prv_data.cast::<MinorNum>().unwrap();
 
     let state = {
         let bookkeeper = BOOKKEEPER.lock_irqsave();
         let (_, devices) = bookkeeper.deref();
         devices
-            .get(&minor)
+            .get(minor)
             .expect("invalid minor number in irq handler")
             .clone()
     };

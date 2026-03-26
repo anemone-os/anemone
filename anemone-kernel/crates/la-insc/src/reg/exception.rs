@@ -5,7 +5,6 @@
 use crate::{impl_bits64, impl_const_u64_converter, impl_rw};
 use bitflags::bitflags;
 
-
 /// ECFG register wrapper
 pub struct Ecfg(u64);
 impl Ecfg {

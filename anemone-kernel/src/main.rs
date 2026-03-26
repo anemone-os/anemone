@@ -25,6 +25,7 @@ pub mod debug;
 pub mod device;
 pub mod driver;
 pub mod exception;
+pub mod fs;
 pub mod initcall;
 pub mod mm;
 pub mod panic;

@@ -1,10 +1,10 @@
 use proc_macro::TokenStream;
 
+mod any_opaque;
 mod dd;
 mod initcall;
 mod kunit;
 mod percpu;
-mod prv_data;
 
 /// Defines a per-CPU variable.
 ///
@@ -27,6 +27,7 @@ pub fn kunit(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The function must have the signature `fn()`.
 ///
 /// Currently supported levels are:
+/// - `fs`
 /// - `driver`
 #[proc_macro_attribute]
 pub fn initcall(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -61,8 +62,8 @@ pub fn driver_impl(input: TokenStream) -> TokenStream {
     dd::driver_impl(input)
 }
 
-/// Derives the `PrvData` trait for a struct.
-#[proc_macro_derive(PrvData)]
-pub fn prv_data_derive(input: TokenStream) -> TokenStream {
-    prv_data::prv_data_impl(input)
+/// Derives the `Opaque` trait for a struct.
+#[proc_macro_derive(Opaque)]
+pub fn any_opaque_derive(input: TokenStream) -> TokenStream {
+    any_opaque::any_opaque_impl(input)
 }

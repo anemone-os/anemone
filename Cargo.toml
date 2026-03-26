@@ -36,6 +36,7 @@ safe-mmio = { version = "0.3.0" }
 virtio-drivers = { version = "0.13.0", default-features = false, features = [
     "alloc",
 ] }
+typed-path = { version = "0.12.3", default-features = false }
 
 syn = { version = "2.0", features = ["full"] }
 quote = "1.0"

@@ -8,9 +8,10 @@ impl Asid {
     impl_bits64!(number, asid, u16, 0, 10);
 
     /// Create with the given ASID value.
-    /// 
-    /// Other bits a either write-ignored or zero, so we can safely create it from zero.
-    /// 
+    ///
+    /// Other bits a either write-ignored or zero, so we can safely create it
+    /// from zero.
+    ///
     /// Reference: `LoongArch-Vol1-v1.10-CN, 7.5.4`
     pub const fn new(asid: u16) -> Asid {
         let mut res = Asid(0);

@@ -8,6 +8,7 @@ use crate::prelude::*;
 pub enum SysError {
     Mm(MmError),
     Dev(DevError),
+    Fs(FsError),
 }
 
 impl From<MmError> for SysError {
@@ -22,11 +23,18 @@ impl From<DevError> for SysError {
     }
 }
 
+impl From<FsError> for SysError {
+    fn from(fs_error: FsError) -> Self {
+        Self::Fs(fs_error)
+    }
+}
+
 impl AsErrno for SysError {
     fn as_errno(&self) -> anemone_abi::errno::Errno {
         match self {
             SysError::Mm(mm_error) => mm_error.as_errno(),
             SysError::Dev(dev_error) => dev_error.as_errno(),
+            SysError::Fs(fs_error) => fs_error.as_errno(),
         }
     }
 }

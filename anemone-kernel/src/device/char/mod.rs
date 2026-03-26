@@ -64,7 +64,7 @@ impl Debug for CharDevDesc {
 /// **LOCK ORDERING**:
 /// **`devices` -> `drivers` -> `major_alloc`**
 struct CharDevSubSys {
-    devices: RwLock<HashMap<DevNum, CharDevDesc>>,
+    devices: RwLock<HashMap<CharDevNum, CharDevDesc>>,
     drivers: RwLock<HashMap<MajorNum, Arc<dyn CharDriver>>>,
     major_alloc: SpinLock<IdAllocator<OneShotAlloc, IdentityBijection<MajorNum>>>,
 }
@@ -106,11 +106,8 @@ pub fn register_char_driver(driver: Arc<dyn CharDriver>) -> Result<MajorNum, Dev
 }
 
 /// Register a character device with the given device number.
-///
-/// The device number must have a valid character device major number (i.e. one
-/// that has been allocated to a character driver).
 pub fn register_char_device(
-    devnum: DevNum,
+    devnum: CharDevNum,
     name: AnyIdentity,
     device: Arc<dyn CharDev>,
 ) -> Result<(), DevError> {
@@ -129,9 +126,7 @@ pub fn register_char_device(
 
 /// Get the character device corresponding to the given device number, if it
 /// exists.
-///
-/// The `devnum` must be a character device major number.
-pub fn get_char_dev(devnum: DevNum) -> Option<Arc<dyn CharDev>> {
+pub fn get_char_dev(devnum: CharDevNum) -> Option<Arc<dyn CharDev>> {
     SUBSYS
         .devices
         .read_irqsave()
