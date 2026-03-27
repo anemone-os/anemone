@@ -150,7 +150,9 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
     if scause.is_interrupt() {
         let reason = RiscV64Interrupt::try_from(code)
             .unwrap_or_else(|_| panic!("unknown interrupt with code {}", code));
-        handle_intr(reason);
+        unsafe {
+            handle_intr(reason);
+        }
     } else {
         let stval = riscv::register::stval::read();
         let reason = RiscV64Exception::try_from(code)
