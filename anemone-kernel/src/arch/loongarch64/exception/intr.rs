@@ -1,11 +1,11 @@
 use la_insc::reg::{
     crmd,
-    csr::ecfg,
+    csr::{self, ecfg},
     exception::{Ecfg, IntrFlags},
 };
 use loongArch64::{iocsr::iocsr_write_w, ipi::send_ipi_single};
 
-use crate::prelude::*;
+use crate::{arch::loongarch64::exception::trap::LA64Interrupt, prelude::*};
 
 pub struct LA64IntrArch;
 impl IntrArchTrait for LA64IntrArch {
@@ -43,8 +43,30 @@ impl IntrArchTrait for LA64IntrArch {
 
     unsafe fn init_local_irq() {
         unsafe {
+            knoticeln!("({})init local irq...1 cur crmd : {:#x}",CpuArch::cur_cpu_id(), csr::crmd::csr_read().to_u64());
+            crmd::set_ie(false);
+            knoticeln!("({})init local irq...2",CpuArch::cur_cpu_id());
             ecfg::csr_write(Ecfg::new(IntrFlags::all(), 0));
+            knoticeln!("({})init local irq...3",CpuArch::cur_cpu_id());
             crmd::set_ie(true);
+            knoticeln!("({})init local irq...ok",CpuArch::cur_cpu_id());
         }
+    }
+}
+
+pub(super) unsafe fn handle_intr(reason: LA64Interrupt) {
+    match reason {
+        LA64Interrupt::Timer => {
+            //kdebugln!("received timer interrupt");
+            TimeArch::claim_timer_interrupt();
+            TimeArch::set_next_trigger(300_000_0);
+        },
+        LA64Interrupt::Ipi => {
+            handle_ipi();
+            unsafe {
+                IntrArch::claim_ipi();
+            }
+        },
+        LA64Interrupt::Hardware => handle_irq(),
     }
 }

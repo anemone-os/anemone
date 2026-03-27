@@ -1,20 +1,29 @@
 use crate::{
-    arch::riscv64::exception::{intr::handle_intr, trap::{RiscV64Exception, RiscV64Interrupt, RiscV64TrapFrame}},
+    arch::riscv64::exception::{
+        RiscV64TrapFrame,
+        intr::handle_intr,
+        trap::{RiscV64Exception, RiscV64Interrupt},
+    },
+    device::CpuArchTrait,
     prelude::*,
+    sched::{current_task_id, task_exit},
 };
 
 // kernel trap entry point. since kernel doesn't use floating point, we don't
 // need to save/restore floating point registers here.
 core::arch::global_asm!(
     "   .section .text",
-    "   .global __ktrap_entry",
+    "   .global __utrap_entry",
     // Required by RiscV privileged spec: "The trap handler must be aligned to a 4-byte
     // boundary."
     //
     // Rust's naked functions currently don't support alignment attributes, that's why
     // we use global_asm! macro to define the trap entry point.
     "   .balign 4",
-    "__ktrap_entry:",
+    "__utrap_entry:",
+    // switch stack
+    "   csrrw sp, sscratch, sp",
+    // save GPRs
     "   addi sp, sp, -{trapframe_bytes}",
     "   sd x0, 0(sp)",
     "   sd x1, 8(sp)",
@@ -48,8 +57,8 @@ core::arch::global_asm!(
     "   sd x29, 232(sp)",
     "   sd x30, 240(sp)",
     "   sd x31, 248(sp)",
-    // now we have registers to play with. we can calculate previous sp
-    "   addi t0, sp, {trapframe_bytes}",
+    // now we have registers to play with. save sp from sscratch
+    "   csrr t0, sscratch",
     "   sd t0, 16(sp)",
     // csr
     "   csrr t0, sstatus",
@@ -60,18 +69,27 @@ core::arch::global_asm!(
     "   sd t0, 272(sp)",
     "   csrr t0, scause",
     "   sd t0, 280(sp)",
+    "   addi t0, sp, {trapframe_bytes}",
+    "   csrw sscratch, t0",
     // TODO: if this is a device interrupt (timer or external), an interrupt stack
     // should be used, instead of continuing execution on the current stack.
+
+    "   la t0, __ktrap_entry",
+    "   csrw stvec, t0",
+
     "   mv t0, zero",
     "   mv a0, sp",
-    "   call {rust_ktrap_entry}",
+    "   call {rust_utrap_entry}",
 
     "   mv a0, sp",
 
-    "   .global __ktrap_return_to_task",
-    "__ktrap_return_to_task:",
+    "   .global __utrap_return_to_task",
+    "__utrap_return_to_task:",
     // all done. restore registers now.
-    // sp should still point to the trapframe on the stack.
+
+    "   la t0, __utrap_entry",
+    "   csrw stvec, t0",
+
     "   ld x0, 0(a0)",
     "   ld x1, 8(a0)",
     "   ld x2, 16(a0)",
@@ -117,12 +135,12 @@ core::arch::global_asm!(
     // all done.
     "   sret",
     trapframe_bytes = const size_of::<RiscV64TrapFrame>(),
-    rust_ktrap_entry = sym rust_ktrap_entry,
+    rust_utrap_entry = sym rust_utrap_entry,
 );
 
 /// This function will call architecture-agnostic trap handler.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
+unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
@@ -138,58 +156,44 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
         let reason = RiscV64Exception::try_from(code)
             .unwrap_or_else(|_| panic!("unknown exception with code {}", code));
         match reason {
-            RiscV64Exception::InstructionMisaligned => {
-                panic!("instruction address misaligned: {:#x}", trapframe.sepc)
-            },
-            RiscV64Exception::InstructionAccessFault => {
-                panic!("instruction access fault at address: {:#x}", trapframe.sepc)
-            },
-            RiscV64Exception::IllegalInstruction => {
-                panic!("illegal instruction at address: {:#x}", trapframe.sepc)
-            },
-            RiscV64Exception::Breakpoint => panic!("breakpoint at address: {:#x}", trapframe.sepc),
-            RiscV64Exception::LoadMisaligned => {
-                panic!(
-                    "load address misaligned: sepc {:#x} addr {:#x}",
-                    trapframe.sepc, stval
-                )
-            },
-            RiscV64Exception::LoadAccessFault => {
-                panic!(
-                    "load access fault at address: sepc {:#x} addr {:#x}",
-                    trapframe.sepc, stval
-                )
-            },
-            RiscV64Exception::StoreMisaligned => {
-                panic!(
-                    "store address misaligned: sepc {:#x} addr {:#x}",
-                    trapframe.sepc, stval
-                )
-            },
-            RiscV64Exception::StoreAccessFault => {
-                panic!(
-                    "store access fault at address: sepc {:#x} addr {:#x}",
-                    trapframe.sepc, stval
-                )
-            },
             RiscV64Exception::UserEnvCall => {
-                panic!(
-                    "ecall from supervisor mode at address: {:#x}",
-                    trapframe.sepc
-                )
+                kerrln!(
+                    "({}) user {} aborted with user call\n\tuser call not implemented yet",
+                    CpuArch::cur_cpu_id(),
+                    current_task_id(),
+                );
+                task_exit()
             },
-            RiscV64Exception::InstructionPageFault => handle_kernel_page_fault(PageFaultInfo::new(
-                VirtAddr::new(stval as u64),
-                PageFaultType::Execute,
-            )),
-            RiscV64Exception::LoadPageFault => handle_kernel_page_fault(PageFaultInfo::new(
-                VirtAddr::new(stval as u64),
-                PageFaultType::Read,
-            )),
-            RiscV64Exception::StorePageFault => handle_kernel_page_fault(PageFaultInfo::new(
-                VirtAddr::new(stval as u64),
-                PageFaultType::Write,
-            )),
+            RiscV64Exception::Breakpoint => {
+                kerrln!(
+                    "({}) user {} aborted with breakpoint\n\tbreakpoint not implemented yet",
+                    CpuArch::cur_cpu_id(),
+                    current_task_id(),
+                );
+                task_exit()
+            },
+            RiscV64Exception::InstructionPageFault
+            | RiscV64Exception::LoadPageFault
+            | RiscV64Exception::StorePageFault => {
+                kerrln!(
+                    "({}) user {} aborted with page fault {:?} at {:#x}, pc = {:#x}, \n\tcopy-on-write not implemented yet\n\ttask return value not implemented yet",
+                    CpuArch::cur_cpu_id(),
+                    current_task_id(),
+                    reason,
+                    trapframe.stval,
+                    trapframe.sepc
+                );
+                task_exit()
+            },
+            _ => {
+                kerrln!(
+                    "({}) user {} aborted with error {:?}\n\ttask return value not implemented yet",
+                    CpuArch::cur_cpu_id(),
+                    current_task_id(),
+                    reason
+                );
+                task_exit()
+            },
         }
     }
 
@@ -198,16 +202,6 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
 }
 
 unsafe extern "C" {
-    unsafe fn __ktrap_entry() -> !;
-    pub unsafe fn __ktrap_return_to_task(trapframe: *const RiscV64TrapFrame) -> !;
-}
-
-pub fn install_ktrap_handler() {
-    unsafe {
-        use riscv::register::stvec;
-        stvec::write(stvec::Stvec::new(
-            __ktrap_entry as *const () as usize,
-            stvec::TrapMode::Direct,
-        ));
-    }
+    unsafe fn __utrap_entry() -> !;
+    pub unsafe fn __utrap_return_to_task(trapframe: *const RiscV64TrapFrame) -> !;
 }

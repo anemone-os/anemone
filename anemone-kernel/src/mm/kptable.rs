@@ -8,28 +8,35 @@
 //! All processes's upper half virtual address space is identical to the
 //! kernel's upper half.
 
-use crate::{mm::layout::KernelLayoutTrait, prelude::*};
+use crate::{
+    mm::{layout::KernelLayoutTrait, space::MemSpace},
+    prelude::*,
+};
 
-pub static KERNEL_PTABLE: KPTable = KPTable::new();
+pub static KERNEL_MEMSPACE: Lazy<KMemSpace> = Lazy::new(|| KMemSpace::new());
 
-/// Nothing more than [crate::PageTable]. Just provides some specialized methods
+/// Nothing more than [crate::MemSpace]. Just provides some specialized methods
 /// for mapping kernel memory regions, and serves as a marker type for the
 /// kernel's root page directory.
 #[derive(Debug)]
-pub struct KPTable {
-    ptable: Lazy<SpinLock<PageTable>>,
+pub struct KMemSpace {
+    memsp: MemSpace,
 }
 
-impl KPTable {
-    pub const fn new() -> Self {
+impl KMemSpace {
+    pub fn new() -> Self {
         Self {
-            ptable: Lazy::new(|| SpinLock::new(PageTable::new())),
+            memsp: MemSpace::new_empty(),
         }
+    }
+
+    pub fn memspace(&self) -> &MemSpace {
+        &self.memsp
     }
 
     unsafe fn map_kvirt(&self) {
         use arch::link_symbols::*;
-        let mut kptable = self.ptable.lock_irqsave();
+        let mut kptable = self.memsp.table_locked().write_irqsave();
         let mut mapper = kptable.mapper();
 
         macro_rules! map_elf_segment {
@@ -71,22 +78,20 @@ impl KPTable {
         map_elf_segment!(bss, PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL);
     }
 
+    pub fn copy_to_ptable(&self, table: &mut PageTable) {
+        let kptable = self.memsp.table_locked().read_irqsave();
+        let kdir = unsafe { kptable.root_pgdir() };
+        let dir = unsafe { table.root_pgdir_mut() };
+        for index in KernelLayout::KSPACE_START_INDEX..PagingArch::PTE_PER_PGDIR {
+            dir[index] = kdir[index];
+        }
+    }
+
     fn prealloc_rest_pgdirs(&self) {
-        let kptable = self.ptable.lock_irqsave();
-        let pdir = unsafe {
-            kptable
-                .root_ppn()
-                .to_hhdm()
-                .to_virt_addr()
-                .as_ptr_mut::<PgDir>()
-                .as_mut()
-                .expect("root ppn should not be null")
-        };
+        let mut kptable = self.memsp.table_locked().write_irqsave();
+        let pdir = unsafe { kptable.root_pgdir_mut() };
         let mut allocated = 0;
-        for index in (KernelLayout::USPACE_TOP_VPN.get()
-            >> (PagingArch::PGDIR_IDX_BITS * (PagingArch::PAGE_LEVELS - 1)))
-            as usize..PagingArch::PTE_PER_PGDIR
-        {
+        for index in KernelLayout::KSPACE_START_INDEX..PagingArch::PTE_PER_PGDIR {
             if pdir[index].is_empty() {
                 let ppn = alloc_frame_zeroed()
                     .expect("failed to preallocate frames for kernel space page table.")
@@ -96,25 +101,19 @@ impl KPTable {
                     PteFlags::VALID | PteFlags::GLOBAL,
                     PagingArch::PAGE_LEVELS - 1,
                 );
-                kdebugln!(
-                    "preallocated pgdir for kernel space: index {}, ppn {:#x}",
-                    index,
-                    ppn.get()
-                );
-                allocated += 1;
             }
         }
         kinfoln!("preallocated {} pgdirs for kernel space", allocated);
     }
 
     unsafe fn kmap(&self, mapping: Mapping) -> Result<(), MmError> {
-        let mut kpgdir = self.ptable.lock_irqsave();
+        let mut kpgdir = self.memsp.table_locked().write_irqsave();
         let mut mapper = kpgdir.mapper();
         mapper.map(mapping)
     }
 
     unsafe fn kunmap(&self, unmapping: Unmapping) {
-        let mut kpgdir = self.ptable.lock_irqsave();
+        let mut kpgdir = self.memsp.table_locked().write_irqsave();
         let mut mapper = kpgdir.mapper();
         unsafe {
             mapper.try_unmap(unmapping);
@@ -122,7 +121,7 @@ impl KPTable {
     }
 
     fn ktranslate(&self, vpn: VirtPageNum) -> Option<Translated> {
-        let mut kpgdir = self.ptable.lock_irqsave();
+        let mut kpgdir = self.memsp.table_locked().write_irqsave();
         let mapper = kpgdir.mapper();
         mapper.translate(vpn)
     }
@@ -141,19 +140,21 @@ impl KPTable {
 pub fn init_kernel_mapping() {
     unsafe {
         kdebugln!("mapping kernel image segments...");
-        KERNEL_PTABLE.map_kvirt();
+        KERNEL_MEMSPACE.map_kvirt();
         kdebugln!("setting up direct mapping region...");
-        PagingArch::setup_direct_mapping_region(&mut KERNEL_PTABLE.ptable.lock_irqsave());
+        PagingArch::setup_direct_mapping_region(
+            &mut KERNEL_MEMSPACE.memsp.table_locked().write_irqsave(),
+        );
         kdebugln!("preallocating pgdirs for the rest of kernel space regions...");
-        KERNEL_PTABLE.prealloc_rest_pgdirs();
+        KERNEL_MEMSPACE.prealloc_rest_pgdirs();
     }
 }
 
 /// Switch to kernel mapping.
 pub unsafe fn activate_kernel_mapping() {
     unsafe {
-        let kpgdir = KERNEL_PTABLE.ptable.lock_irqsave();
-        PagingArch::activate_addr_space(&kpgdir);
+        let memsp = &KERNEL_MEMSPACE.memsp;
+        PagingArch::activate_addr_space(memsp);
     }
 }
 
@@ -167,7 +168,7 @@ pub unsafe fn activate_kernel_mapping() {
 /// not used carefully. So we mark this function as unsafe.
 pub unsafe fn kmap(mapping: Mapping) -> Result<(), MmError> {
     unsafe {
-        KERNEL_PTABLE.kmap(mapping)?;
+        KERNEL_MEMSPACE.kmap(mapping)?;
         for i in 0..mapping.npages {
             PagingArch::tlb_shootdown((mapping.vpn + i as u64).to_virt_addr());
         }
@@ -186,7 +187,7 @@ pub unsafe fn kmap(mapping: Mapping) -> Result<(), MmError> {
 /// mark this function as unsafe.
 pub unsafe fn kunmap(unmapping: Unmapping) {
     unsafe {
-        KERNEL_PTABLE.kunmap(unmapping);
+        KERNEL_MEMSPACE.kunmap(unmapping);
         for i in 0..unmapping.range.npages() {
             PagingArch::tlb_shootdown((unmapping.range.start() + i as u64).to_virt_addr());
         }
@@ -198,5 +199,5 @@ pub unsafe fn kunmap(unmapping: Unmapping) {
 
 /// Translate a kernel virtual page number in the global kernel page table.
 pub fn ktranslate(vpn: VirtPageNum) -> Option<Translated> {
-    KERNEL_PTABLE.ktranslate(vpn)
+    KERNEL_MEMSPACE.ktranslate(vpn)
 }

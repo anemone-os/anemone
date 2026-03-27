@@ -11,6 +11,8 @@ use la_insc::{
 
 mod ktrap;
 pub use ktrap::*;
+mod utrap;
+pub use utrap::*;
 
 /// LoongArch64 trap architecture implementation.
 pub struct LA64TrapArch;

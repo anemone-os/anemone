@@ -1,7 +1,8 @@
 use core::arch::naked_asm;
 
 use crate::{
-    arch::loongarch64::exception::trap::{__ktrap_return_to_task, LA64TrapFrame},
+    arch::loongarch64::exception::trap::{__ktrap_return_to_task, __utrap_return_to_task, LA64TrapFrame},
+    mm::layout::KernelLayoutTrait,
     prelude::*,
 };
 
@@ -48,6 +49,20 @@ impl TaskContextArch for LA64TaskContext {
     fn sp(&self) -> u64 {
         self.sp
     }
+
+    fn from_user_fn(entry: VirtAddr, kstack_top: VirtAddr, args: ParameterList) -> Self {
+        let mut s = [0; 10];
+        let args = args.as_array();
+        s[3..args.len() + 3].copy_from_slice(args);
+        s[2] = Privilege::User as u64;
+        s[1] = IntrArch::ENABLED_IRQ_FLAGS.raw();
+        s[0] = entry.get();
+        Self {
+            ra: task_guard as *const () as u64,
+            sp: kstack_top.get(),
+            s,
+        }
+    }
 }
 
 pub struct LA64SchedArch;
@@ -55,7 +70,7 @@ pub struct LA64SchedArch;
 impl SchedArchTrait for LA64SchedArch {
     type TaskContext = LA64TaskContext;
 
-    fn switch(cur: *mut crate::prelude::TaskContext, next: *const crate::prelude::TaskContext) {
+    unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext) {
         unsafe {
             __switch(cur, next);
         }
@@ -132,7 +147,7 @@ unsafe extern "C" fn __task_run(
     entry: *const (),
     irq_flags: u64,
     args: *const [u64; 7],
-    sp: u64,
+    ksp: u64,
     prv: Privilege,
     ra: u64,
 ) {
@@ -140,13 +155,23 @@ unsafe extern "C" fn __task_run(
         unsafe { args.as_ref() }.expect("task args in kernel stack should never be null");
     let trapframe = LA64TrapFrame::task_init_frame(
         entry as u64,
-        sp,
+        match prv {
+            Privilege::Kernel => ksp,
+            Privilege::User => KernelLayout::USPACE_TOP_ADDR,
+        },
         IrqFlags::new(irq_flags),
         prv,
         args_parsed,
         ra,
     );
-    unsafe { __ktrap_return_to_task(&trapframe) }
+    knoticeln!("{}({}) starting", current_task_id(), current_task_name());
+
+    unsafe {
+        match prv {
+            Privilege::Kernel => __ktrap_return_to_task(&trapframe),
+            Privilege::User => __utrap_return_to_task(&trapframe),
+        }
+    }
 }
 
 unsafe extern "C" fn __task_guard_end() -> ! {

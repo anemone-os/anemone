@@ -2,7 +2,8 @@ use alloc::sync::Arc;
 use kernel_macros::percpu;
 
 use crate::{
-    prelude::*, sched::idle::clone_current_idle_task, sync::mono::MonoFlow, task::tid::Tid,
+    mm::kptable::KERNEL_MEMSPACE, prelude::*, sched::idle::clone_current_idle_task,
+    sync::mono::MonoFlow, task::tid::Tid,
 };
 
 /// Per-CPU processor information
@@ -58,6 +59,19 @@ pub fn current_task_id() -> Tid {
         .with(|f| {
             f.inner
                 .with(|inner| Some((inner.running_task.as_ref())?.tid()))
+        })
+        .expect("Scheduler not initialized: no running task found")
+}
+
+/// Get a copy of the current task name **without creating a copy of the current
+/// task**
+///
+/// Use this function instead of `clone_current_task().tid()`.
+pub fn current_task_name() -> Box<str> {
+    PROCESSOR
+        .with(|f| {
+            f.inner
+                .with(|inner| Some(Box::from((inner.running_task.as_ref())?.name())))
         })
         .expect("Scheduler not initialized: no running task found")
 }
@@ -136,7 +150,29 @@ pub unsafe fn switch_out(exit: bool) {
         drop(task);
     }
     let sched_context = unsafe { get_sched_context() };
-    SchedArch::switch(context, sched_context);
+    unsafe {
+        SchedArch::switch(context, sched_context);
+    }
+}
+
+unsafe fn switch_memspace(cur_task: &Arc<Task>, next_task: &Arc<Task>) {
+    unsafe {
+        if next_task.memspace().eq(&cur_task.memspace()) {
+            // same addr
+            return;
+        }
+        if let Some(next_memsp) = next_task.memspace() {
+            // user task
+            PagingArch::activate_addr_space(next_memsp.as_ref());
+        } else {
+            // kernel task
+            PagingArch::activate_addr_space(KERNEL_MEMSPACE.memspace());
+        }
+        if let Some(cur_memsp) = cur_task.memspace() {
+            // clear tlb
+            PagingArch::tlb_shootdown_all();
+        }
+    }
 }
 
 /// Switch to the given task.
@@ -148,9 +184,18 @@ pub unsafe fn switch_to(task: Arc<Task>) {
     let cur_context = unsafe { get_sched_context_mut() };
     let next_task = task;
     let next_context = unsafe { next_task.get_task_context() };
-    PROCESSOR.with(|proc| {
-        proc.inner
-            .with_mut(|inner| inner.running_task = Some(next_task))
-    });
-    SchedArch::switch(cur_context, next_context);
+    unsafe {
+        switch_memspace(&clone_current_task(), &next_task);
+        set_running_task(next_task);
+        SchedArch::switch(cur_context, next_context);
+    }
+}
+
+/// Set the current running task
+///
+/// **This function should only be used by the scheduler**
+///
+/// ***Make sure interrupts are disabled before calling this function***
+pub unsafe fn set_running_task(task: Arc<Task>) {
+    PROCESSOR.with(|proc| proc.inner.with_mut(|inner| inner.running_task = Some(task)));
 }

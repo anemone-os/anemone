@@ -1,4 +1,4 @@
-use core::{cmp::min, marker::PhantomData, mem::ManuallyDrop};
+use core::{cmp::min, marker::PhantomData, mem::ManuallyDrop, ptr::copy};
 
 use crate::prelude::*;
 
@@ -82,6 +82,80 @@ impl Mapper<'_> {
             root: pgtbl.root_ppn(),
             _lifetime: PhantomData,
         }
+    }
+
+    /// Fill bytes in the given vaddr range from the source via hhdm.
+    ///
+    /// # Safety
+    ///
+    /// * Access via vaddr bypasses permission checks and may write to
+    ///   unauthorized code regions.
+    /// * This function overwrites existing data.
+    /// * No rollback is possible if an error occurs.
+    pub unsafe fn fill_data(
+        &mut self,
+        vaddr: VirtAddr,
+        source: &[u8],
+        length: u64,
+    ) -> Result<(), MmError> {
+        if source.len() < length as usize {
+            return Err(MmError::InvalidArgument);
+        }
+        if length == 0 {
+            return Ok(());
+        }
+        let vaddr = vaddr;
+        let vaddr_end = VirtAddr::new(vaddr.get().wrapping_add(length));
+        if vaddr_end < vaddr {
+            return Err(MmError::InvalidArgument);
+        }
+        let vpn_st = vaddr.page_down();
+        let vpn_end = vaddr_end.page_up();
+        kdebugln!(
+            "consider vpn st = {:#x}, vpn end = {:#x}",
+            vpn_st.get(),
+            vpn_end.get()
+        );
+        let fp_offset = (vaddr - vpn_st.to_virt_addr()) as usize;
+        let fp_datasz = PagingArch::PAGE_SIZE_BYTES - fp_offset;
+        let fp_ppn = self.translate(vpn_st).ok_or(MmError::NotMapped)?.ppn;
+        unsafe {
+            copy(
+                &source[0],
+                (fp_ppn.to_hhdm().to_virt_addr().get() as usize + fp_offset) as *const u8
+                    as *mut u8,
+                fp_datasz,
+            );
+        }
+        let mut count = 0;
+        for vpn in (vpn_st + 1).get()..(vpn_end - 1).get() {
+            let ppn = self
+                .translate(VirtPageNum::new(vpn))
+                .ok_or(MmError::NotMapped)?
+                .ppn;
+            let addr_st = ppn.to_hhdm().to_virt_addr().get();
+            unsafe {
+                copy(
+                    &source[fp_datasz + count * PagingArch::PAGE_SIZE_BYTES],
+                    addr_st as *const u8 as *mut u8,
+                    PagingArch::PAGE_SIZE_BYTES,
+                );
+            }
+            count += 1;
+        }
+        if vpn_end != vpn_st + 1 {
+            let ed_ppn = self.translate(vpn_end - 1).ok_or(MmError::NotMapped)?.ppn;
+            let addr_st = ed_ppn.to_hhdm().to_virt_addr().get();
+            let data_st = fp_datasz + count * PagingArch::PAGE_SIZE_BYTES;
+            unsafe {
+                copy(
+                    &source[data_st],
+                    addr_st as *const u8 as *mut u8,
+                    length as usize - data_st,
+                );
+            }
+        }
+        Ok(())
     }
 
     /// Map a virtual memory region to a physical memory region with the given
@@ -290,7 +364,6 @@ impl Mapper<'_> {
 
                     if pgdir.is_empty() && !pte.is_global() {
                         // deallocate the empty page table
-
                         *pte = Pte::ZEROED;
                         let _frame = OwnedFrameHandle::from_ppn(ppn);
                     }
@@ -582,7 +655,7 @@ impl Mapper<'_> {
     ///       and `overwrite` is false.
     ///     * `Err(MmError::OutOfMemory)` if the mapping requires allocation of
     ///       new page tables and the allocation fails.
-    unsafe fn map_one(
+    pub unsafe fn map_one(
         &mut self,
         vpn: VirtPageNum,
         ppn: PhysPageNum,
@@ -590,6 +663,9 @@ impl Mapper<'_> {
         level_at: usize,
         overwrite: bool,
     ) -> Result<(), MmError> {
+        if !flags.is_supported_rwx_combination() {
+            return Err(MmError::InvalidArgument);
+        }
         let levels = PagingArch::PAGE_LEVELS;
 
         // Check level_at value

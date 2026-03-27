@@ -1,6 +1,9 @@
 use crate::{
     prelude::*,
-    sched::proc::{fetch_new_task, switch_out, switch_to},
+    sched::{
+        idle::clone_current_idle_task,
+        proc::{fetch_new_task, set_running_task, switch_out, switch_to},
+    },
 };
 
 mod hal;
@@ -16,13 +19,16 @@ mod rr;
 pub type Scheduler = rr::RRScheduler;
 
 /// Exported API for process management.
-pub use proc::{add_to_ready, clone_current_task, current_task_id};
+pub use proc::{add_to_ready, clone_current_task, current_task_id, current_task_name};
 
 /// Enter the scheduler loop. This function is called by bootstrap code to enter
 /// the scheduler.
 pub fn run_tasks() -> ! {
-    loop {
-        unsafe {
+    unsafe {
+        // init task
+        set_running_task(clone_current_idle_task());
+        loop {
+            // switch to next
             switch_to(fetch_new_task());
         }
     }

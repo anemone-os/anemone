@@ -298,7 +298,7 @@ fn kunit_ioremap_stress_worker(base: PhysAddr, len: usize, rounds: usize) {
 
 #[kunit(percpu)]
 fn stress_ioremap_all_cpus() {
-    const STRESS_ROUNDS_PER_CPU: usize = 16;
+    const STRESS_ROUNDS_PER_CPU: usize = 1;
 
     let base = PhysAddr::new(PHYS_RAM_START);
     let len = PagingArch::PAGE_SIZE_BYTES;

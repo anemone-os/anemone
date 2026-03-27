@@ -10,9 +10,14 @@ use crate::{
 /// All the information about a task
 #[repr(C)]
 pub struct Task {
+    tid: TidHandle,
+    name: Box<str>,
+
     status: RwLock<TaskStatus>,
     flags: TaskFlags,
-    tid: TidHandle,
+
+    memsp: Option<Arc<MemSpace>>,
+
     kstack: KernelStack,
     sched_info: MonoFlow<TaskInner>,
 }
@@ -49,6 +54,7 @@ impl Task {
     /// [TaskFlags::KERNEL] will be automatically added to the flags of the
     /// created task, so it's optional.
     pub fn new_kernel(
+        name: impl AsRef<str>,
         entry: *const (),
         args: ParameterList,
         irq_flags: IrqFlags,
@@ -56,12 +62,14 @@ impl Task {
     ) -> Result<Self, MmError> {
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
-        kdebugln!("Created Task with Kernel Stack at {:?}", stack);
+        kdebugln!("created kernel task with kernel stack at {:?}", stack);
         Ok(Self {
             status: RwLock::new(TaskStatus::Ready),
+            name: Box::from(name.as_ref()),
             flags: flags | TaskFlags::KERNEL,
             tid: alloc_tid(),
             kstack: stack,
+            memsp: None,
             sched_info: unsafe {
                 MonoFlow::new(TaskInner {
                     task_context: TaskContext::from_kernel_fn(
@@ -75,13 +83,38 @@ impl Task {
             },
         })
     }
+
+    pub fn new_user(
+        name: impl AsRef<str>,
+        entry: *const (),
+        args: ParameterList,
+        memsp: Arc<MemSpace>,
+    ) -> Result<Self, MmError> {
+        let stack = KernelStack::new()?;
+        let stack_top = stack.stack_top();
+        kdebugln!("create user task with kernel stack at {:?}", stack);
+        Ok(Self {
+            status: RwLock::new(TaskStatus::Ready),
+            name: Box::from(name.as_ref()),
+            flags: TaskFlags::NONE,
+            tid: alloc_tid(),
+            kstack: stack,
+            memsp: Some(memsp),
+            sched_info: unsafe {
+                MonoFlow::new(TaskInner {
+                    task_context: TaskContext::from_user_fn(
+                        VirtAddr::new(entry as u64),
+                        stack_top,
+                        args,
+                    ),
+                    trap_frame: TrapFrame::ZEROED,
+                })
+            },
+        })
+    }
 }
 
 impl Task {
-    pub fn tid(&self) -> Tid {
-        Tid::new(self.tid.get())
-    }
-
     pub unsafe fn get_task_context(&self) -> *const TaskContext {
         self.sched_info
             .with(|inner| &inner.task_context as *const TaskContext)
@@ -94,14 +127,26 @@ impl Task {
 }
 
 impl Task {
+    pub fn tid(&self) -> Tid {
+        Tid::new(self.tid.get())
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn flags(&self) -> TaskFlags {
         self.flags
+    }
+
+    pub fn memspace(&self) -> Option<&Arc<MemSpace>> {
+        self.memsp.as_ref()
     }
 }
 
 impl Drop for Task {
     fn drop(&mut self) {
-        knoticeln!("{} dropped", self.tid());
+        knoticeln!("{}({}) dropped", self.tid(), self.name());
     }
 }
 

@@ -29,15 +29,15 @@ impl PagingArchTrait for LA64PagingArch {
 
     const PAGE_SIZE_BYTES: usize = 4096;
 
-    unsafe fn activate_addr_space(pgtbl: &PageTable) {
+    unsafe fn activate_addr_space(pgtbl: &MemSpace) {
         kdebugln!(
             "Activating page table with root PPN {:#x} addr {:#x}",
-            pgtbl.root_ppn().get(),
-            pgtbl.root_ppn().to_phys_addr().get()
+            pgtbl.table_root_ppn().get(),
+            pgtbl.table_root_ppn().to_phys_addr().get()
         );
         unsafe {
-            pgdl::csr_write(pgtbl.root_ppn().to_phys_addr().get());
-            pgdh::csr_write(pgtbl.root_ppn().to_phys_addr().get());
+            pgdl::csr_write(pgtbl.table_root_ppn().to_phys_addr().get());
+            pgdh::csr_write(pgtbl.table_root_ppn().to_phys_addr().get());
         }
         Self::tlb_shootdown_all();
     }
@@ -182,7 +182,7 @@ impl PgDirArch for LA64PageDirectory {
 pub struct LA64PageTableEntry(u64);
 
 impl LA64PageTableEntry {
-    const PPN_MASK: u64 = 0x0FFF_FFFF_FFFF_F000;
+    const PPN_MASK: u64 = 0x03FF_FFFF_FFFF_F000;
     impl_bits64!(value, u8, la_mat, MemAccessType, 4, 6);
     impl_bits64!(value, u8, la_plv, PrivilegeLevel, 2, 4);
 

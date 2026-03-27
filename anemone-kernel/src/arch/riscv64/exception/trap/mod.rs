@@ -4,6 +4,9 @@ use crate::prelude::*;
 
 mod ktrap;
 pub use ktrap::*;
+mod utrap;
+pub use utrap::*;
+
 use riscv::register::sstatus::{self, SPP};
 
 pub struct RiscV64TrapArch;
@@ -99,7 +102,7 @@ impl TrapFrameArch for RiscV64TrapFrame {
         const_assert!(IDX < 7);
         self.gpr.a::<IDX>() as usize
     }
-
+    
     fn advance_pc(&mut self) {
         // `ecall` instruction is always 4 bytes long even though Compressed
         // extension is enabled.

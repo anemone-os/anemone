@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{arch::riscv64::exception::trap::RiscV64Interrupt, prelude::*};
 
 pub struct RiscV64IntrArch;
 
@@ -45,9 +45,9 @@ impl IntrArchTrait for RiscV64IntrArch {
 
     fn send_ipi(cpu_id: usize) {
         let hartmask = sbi_rt::HartMask::from_mask_base(1 << cpu_id, 0);
-        kdebugln!("Sending IPI to CPU {} with hartmask {:?}", cpu_id, hartmask);
+        // kdebugln!("Sending IPI to CPU {} with hartmask {:?}", cpu_id, hartmask);
         sbi_rt::send_ipi(hartmask).expect("ipi send failed, cannot recover");
-        kdebugln!("IPI sent to CPU {}", cpu_id);
+        // kdebugln!("IPI sent to CPU {}", cpu_id);
     }
 
     unsafe fn claim_ipi() {
@@ -69,5 +69,23 @@ impl IntrArchTrait for RiscV64IntrArch {
             sbi_rt::set_timer(TimeArch::current_ticks().wrapping_add(300_000_0) as u64)
                 .expect("failed to set timer for next timer interrupt");
         }
+    }
+}
+
+pub unsafe fn handle_intr(reason: RiscV64Interrupt) {
+    match reason {
+        RiscV64Interrupt::SupervisorSoftware => {
+            handle_ipi();
+            unsafe {
+                riscv::register::sip::clear_ssoft();
+            }
+        },
+        RiscV64Interrupt::SupervisorTimer => {
+            // TODO: use a proper value for the next timer interrupt.
+            sbi_rt::set_timer(riscv::register::time::read().wrapping_add(300_000_0) as u64)
+                .expect("failed to set timer for next timer interrupt");
+            handle_kernel_timer_interrupt();
+        },
+        RiscV64Interrupt::SupervisorExternal => handle_irq(),
     }
 }

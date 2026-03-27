@@ -20,7 +20,13 @@ pub trait SchedArchTrait {
     type TaskContext: TaskContextArch;
     /// Switch from the current task to the next task. Saves and loads the
     /// callee-saved registers.
-    fn switch(cur: *mut TaskContext, next: *const TaskContext);
+    ///
+    /// **This function does not switch the MemSpace**,
+    /// because a [TaskContext] does not necessarily have a corresponding
+    /// [Task].     It may point to the context of the scheduling loop.
+    /// Therefore, the operation of switching the MemSpace should be
+    /// performed by the scheduling system.
+    unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext);
 }
 
 pub trait TaskContextArch {
@@ -29,6 +35,11 @@ pub trait TaskContextArch {
         entry: VirtAddr,
         stack_top: VirtAddr,
         irq_flags: IrqFlags,
+        args: ParameterList,
+    ) -> Self;
+    fn from_user_fn(
+        entry: VirtAddr,
+        kstack_top: VirtAddr,
         args: ParameterList,
     ) -> Self;
     fn pc(&self) -> u64;

@@ -51,6 +51,10 @@ pub trait KernelLayoutTrait<P: PagingArchTrait> {
     /// Base KSPACE VAddr.
     const KSPACE_ADDR: u64 = Self::KSPACE_VPN.get() << P::PAGE_SIZE_BITS;
 
+    const KSPACE_START_INDEX: usize = (KernelLayout::USPACE_TOP_VPN.get()
+        >> (PagingArch::PGDIR_IDX_BITS * (PagingArch::PAGE_LEVELS - 1)))
+        as usize;
+
     /// First free VPN in KSPACE for page-table-managed regions.
     ///
     /// On some platforms where DM is outside page-table-managed KSPACE, this

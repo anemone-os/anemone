@@ -193,3 +193,7 @@ define_csr!(64, pgd, 0x1b);
 define_csr!(32, tid, 0x40);
 define_csr!(32, ticlr, 0x44);
 define_csr!(64, tcfg, 0x41, Tcfg);
+
+
+define_csr!(64, save0, 0x30);
+define_csr!(64, save1, 0x31);

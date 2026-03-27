@@ -42,7 +42,7 @@ use crate::{
         get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
         unflatten_device_tree,
     },
-    prelude::*,
+    prelude::{image::load_image_from_elf, *},
     sync::{counter::CpuSync, mono::MonoOnce},
 };
 
@@ -50,7 +50,7 @@ static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
 static FINISH_SYNC_COUNTER: CpuSync = CpuSync::new("finish");
 static KUNIT_SYNC_COUNTER: CpuSync = CpuSync::new("kunit");
 
-unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) -> ! {
+unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     unsafe {
         kinfoln!("bsp #{} kinit running on {}...", bsp_id, current_task_id());
         // register drivers to bus types
@@ -77,8 +77,16 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) -> ! {
             kinfoln!("kunit tests finished");
         }
     }
-
-    loop {}
+    let (memsp, entry) = load_image_from_elf(APP0).unwrap();
+    add_to_ready(Arc::new(
+        Task::new_user(
+            "user",
+            entry as *const (),
+            ParameterList::empty(),
+            Arc::new(memsp),
+        )
+        .unwrap(),
+    ));
 }
 
 unsafe extern "C" fn ap_kinit(ap_id: usize) {
@@ -127,3 +135,5 @@ fn parse_bootargs() {
         })
     });
 }
+
+static APP0: &[u8] = include_bytes!("../../build/apps/user-test.elf");

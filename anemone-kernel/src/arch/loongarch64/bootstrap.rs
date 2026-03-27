@@ -220,6 +220,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
         add_to_ready(Arc::new(
             Task::new_kernel(
+                "bsp-kinit",
                 bsp_kinit as *const (),
                 ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
                 IntrArch::DISABLED_IRQ_FLAGS,
@@ -242,6 +243,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         mm::kptable::activate_kernel_mapping();
         add_to_ready(Arc::new(
             Task::new_kernel(
+                "ap-kinit",
                 ap_kinit as *const (),
                 ParameterList::new(&[ap_id as u64]),
                 IntrArch::DISABLED_IRQ_FLAGS,
