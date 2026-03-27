@@ -40,12 +40,9 @@ fn ramfs_load_inode(_sb: &Arc<SuperBlock>, _ino: Ino) -> Result<Arc<Inode>, FsEr
 }
 
 fn ramfs_evict_inode(sb: &SuperBlock, inode: Arc<Inode>) -> Result<(), FsError> {
-    if inode.nlink() != 0 {
-        return Err(FsError::Busy);
-    } else {
-        // ramfs has nothing to flush
-        Ok(())
-    }
+    // ramfs has nothing to do here, since we don't have a backing store to write
+    // back
+    Ok(())
 }
 
 pub(super) static RAMFS_SB_OPS: SuperBlockOps = SuperBlockOps {

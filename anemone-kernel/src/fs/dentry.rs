@@ -3,23 +3,41 @@ use core::fmt::Debug;
 use crate::prelude::*;
 
 pub struct Dentry {
-    name: String,
     parent: Option<Arc<Dentry>>,
     inode: InodeRef,
+    inner: RwLock<DentryInner>,
+}
+
+struct DentryInner {
+    name: String,
+    // For directories this is [Some], otherwise [None].
+    children: Option<HashMap<String, Weak<Dentry>>>,
 }
 
 impl Debug for Dentry {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Dentry").field("name", &self.name).finish()
+        f.debug_struct("Dentry")
+            .field("name", &self.name())
+            .finish()
     }
 }
 
 impl Dentry {
-    /// Create a new positive dentry with an inode.
+    /// Create a new dentry with an inode.
+    ///
+    /// If the inode represents a directory, `children` will be initialized as
+    /// an empty map, otherwise [None].
     pub fn new(name: String, parent: Option<&Arc<Dentry>>, inode: InodeRef) -> Self {
         Self {
-            name,
             parent: parent.map(Arc::clone),
+            inner: RwLock::new(DentryInner {
+                name,
+                children: if inode.ty() == InodeType::Dir {
+                    Some(HashMap::new())
+                } else {
+                    None
+                },
+            }),
             inode,
         }
     }
@@ -27,8 +45,12 @@ impl Dentry {
     /// Get the name of this dentry.
     ///
     /// For the root dentry of a mounted filesystem, this will be "/".
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn name(&self) -> String {
+        self.inner.read_irqsave().name.clone()
+    }
+
+    pub fn rename(&self, new_name: String) {
+        self.inner.write_irqsave().name = new_name;
     }
 
     pub fn inode(&self) -> &InodeRef {
@@ -41,21 +63,54 @@ impl Dentry {
         self.parent.as_ref().map(Arc::clone)
     }
 
-    /// Check if this dentry and another dentry refer to the same location in
-    /// the namespace.
-    ///
-    /// Internally, this compares the names and inodes of the two dentries, and
-    /// recursively compares their parents.
-    pub fn location_eq(&self, other: &Dentry) -> bool {
-        if self.name != other.name || self.inode != other.inode {
-            return false;
+    /// Try to insert a child dentry with the given name.
+    pub fn insert_child(&self, name: String, dentry: &Arc<Dentry>) -> Result<(), FsError> {
+        if let Some(children) = self.inner.write_irqsave().children.as_mut() {
+            if let Some(record) = children.get(&name) {
+                if record.upgrade().is_some() {
+                    return Err(FsError::AlreadyExists);
+                } else {
+                    children.remove(&name);
+                }
+            }
+            children.insert(name, Arc::downgrade(dentry));
+            Ok(())
+        } else {
+            Err(FsError::NotDir)
         }
+    }
 
-        match (&self.parent, &other.parent) {
-            // this is a bit slow...
-            (Some(p1), Some(p2)) => p1.location_eq(p2),
-            (None, None) => true,
-            _ => false,
+    /// Remove a child dentry with the given name.
+    pub fn remove_child(&self, name: &str) -> Result<(), FsError> {
+        if let Some(children) = self.inner.write_irqsave().children.as_mut() {
+            if let Some(existing) = children.get(name).and_then(|weak| weak.upgrade()) {
+                children.remove(name);
+                Ok(())
+            } else {
+                // though the weak reference exists, it's not counted as a child if it can't be
+                // upgraded.
+                Err(FsError::NotFound)
+            }
+        } else {
+            Err(FsError::NotDir)
+        }
+    }
+
+    /// Look up a child dentry with the given name.
+    pub fn lookup_child(&self, name: &str) -> Result<Arc<Dentry>, FsError> {
+        if let Some(children) = self.inner.write_irqsave().children.as_mut() {
+            if let Some(record) = children.get(name) {
+                if let Some(child) = record.upgrade() {
+                    Ok(child)
+                } else {
+                    children.remove(name);
+                    Err(FsError::NotFound)
+                }
+            } else {
+                Err(FsError::NotFound)
+            }
+        } else {
+            Err(FsError::NotDir)
         }
     }
 }

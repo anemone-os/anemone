@@ -3,6 +3,22 @@
 use crate::{fs::root_pathref, prelude::*};
 use typed_path::{Component, UnixComponent};
 
+/// Get or create a child dentry with the given name under the given parent
+/// dentry, and return an [Arc] to it.
+pub fn canonicalize_child(
+    parent: &Arc<Dentry>,
+    name: &str,
+    inode: InodeRef,
+) -> Result<Arc<Dentry>, FsError> {
+    let child = Arc::new(Dentry::new(name.to_string(), Some(parent), inode));
+
+    match parent.insert_child(name.to_string(), &child) {
+        Ok(()) => Ok(child),
+        Err(FsError::AlreadyExists) => parent.lookup_child(name),
+        Err(err) => Err(err),
+    }
+}
+
 /// Resolve a path to a [PathRef], starting from the root of the namespace.
 pub fn resolve(path: &Path) -> Result<PathRef, FsError> {
     if path.components().next().is_none() {
@@ -103,16 +119,19 @@ pub fn resolve_parent_from(from: &PathRef, path: &Path) -> Result<(PathRef, Stri
 }
 
 fn lookup_child(path: &PathRef, name: &str) -> Result<PathRef, FsError> {
+    if let Ok(dentry) = path.dentry().lookup_child(name) {
+        return Ok(follow_mount(PathRef::new(path.mount().clone(), dentry)));
+    }
+
     let dir = path.inode();
     if dir.ty() != InodeType::Dir {
         return Err(FsError::NotDir);
     }
 
     let inode = dir.lookup(name)?;
-    let dentry = Arc::new(Dentry::new(name.to_string(), Some(path.dentry()), inode));
-    let path = PathRef::new(path.mount().clone(), dentry);
+    let dentry = canonicalize_child(path.dentry(), name, inode)?;
 
-    Ok(follow_mount(path))
+    Ok(follow_mount(PathRef::new(path.mount().clone(), dentry)))
 }
 
 fn follow_mount(mut path: PathRef) -> PathRef {

@@ -19,13 +19,25 @@ mod namespace {
     use crate::prelude::*;
 
     pub struct NameSpace {
-        root_dentry: Option<Arc<Dentry>>,
-        // TODO: hashmap to speed up lookups
+        root_path: Option<PathRef>,
+        // currently no transaction atomicity is needed.
+        //tx_lock: RwLock<()>,
     }
 
     impl NameSpace {
         pub fn new() -> Self {
-            Self { root_dentry: None }
+            Self {
+                root_path: None,
+                //                tx_lock: RwLock::new(()),
+            }
+        }
+
+        pub fn root_path(&self) -> Option<PathRef> {
+            self.root_path.clone()
+        }
+
+        pub fn install_root(&mut self, root: PathRef) {
+            self.root_path = Some(root);
         }
     }
 }
@@ -38,19 +50,17 @@ mod vfs {
     /// Virtual file system. Singleton instance.
     ///
     /// **LOCK ORDERING:**
-    /// **`name_space` `fs_list` → `mounts` → `root_mount`**
+    /// **`name_space` -> `fs_list` → `mounts` → `root_mount`**
     struct VfsSubSys {
         namespace: RwLock<NameSpace>,
         fs_list: RwLock<Vec<Arc<FileSystem>>>,
         mounts: RwLock<Vec<Arc<Mount>>>,
-        root_mount: RwLock<Option<Arc<Mount>>>,
     }
 
     static VFS: Lazy<VfsSubSys> = Lazy::new(|| VfsSubSys {
         namespace: RwLock::new(NameSpace::new()),
         fs_list: RwLock::new(Vec::new()),
         mounts: RwLock::new(Vec::new()),
-        root_mount: RwLock::new(None),
     });
 
     /// Register a file system type.
@@ -86,10 +96,10 @@ mod vfs {
     /// If no root mount exists yet, the new mount becomes the root mount.
     pub fn mount(
         fs_name: &str,
-        source: &MountSource,
+        source: MountSource,
         flags: MountFlags,
         mountpoint: Option<&PathRef>,
-    ) -> Result<(), FsError> {
+    ) -> Result<Arc<Mount>, FsError> {
         let fs = get_filesystem(fs_name).ok_or(FsError::NotFound)?;
 
         let (parent, mp_dentry) = match mountpoint {
@@ -97,14 +107,14 @@ mod vfs {
             None => (None, None),
         };
 
-        if parent.is_none() && VFS.root_mount.read_irqsave().is_some() {
+        if parent.is_none() && VFS.namespace.read_irqsave().root_path().is_some() {
             // Mounting a new root when one already exists is not allowed.
             return Err(FsError::AlreadyExists);
         }
 
-        let MountedFileSystem { sb, root_ino } = fs.mount(source, flags)?;
+        let sb = fs.mount(source, flags)?;
 
-        let root_inode = sb.iget(root_ino).expect("root inode must be loadable");
+        let root_inode = sb.root_inode().clone();
         let root_dentry = Arc::new(Dentry::new("/".to_string(), None, root_inode));
 
         let mnt = Arc::new(Mount::new(
@@ -122,11 +132,66 @@ mod vfs {
         }
 
         {
-            let mut root = VFS.root_mount.write_irqsave();
-            if root.is_none() {
-                *root = Some(mnt);
+            let mut namespace = VFS.namespace.write_irqsave();
+            if namespace.root_path().is_none() {
+                namespace.install_root(PathRef::new(mnt.clone(), mnt.root().clone()));
             }
         }
+
+        knoticeln!(
+            "mounted filesystem: {} at {} with flags {:?}",
+            fs_name,
+            mountpoint.map_or("none".to_string(), |mp| mp.to_string()),
+            flags
+        );
+
+        Ok(mnt)
+    }
+
+    pub fn unmount(mount: Arc<Mount>) -> Result<(), FsError> {
+        // cannot unmount root
+        let Some(parent) = mount.parent() else {
+            return Err(FsError::InvalidArgument);
+        };
+
+        if mount.has_children() {
+            knoticeln!("cannot unmount filesystem: superblock still has alive inodes");
+            return Err(FsError::Busy);
+        }
+
+        let sb = mount.sb().clone();
+        let sb_still_used = VFS
+            .mounts
+            .read_irqsave()
+            .iter()
+            .any(|m| !Arc::ptr_eq(m, &mount) && Arc::ptr_eq(m.sb(), &sb));
+
+        if !sb_still_used {
+            if sb.has_alive_inode() {
+                knoticeln!("cannot unmount filesystem: superblock still has alive inodes");
+                return Err(FsError::Busy);
+            }
+        }
+
+        // tear down the superblock if no other mount is using it.
+        if !sb_still_used {
+            // we can not recover
+            sb.try_evict_all()?;
+
+            let fs = sb.fs().clone();
+            fs.remove_sb(|s| Arc::ptr_eq(s, &sb));
+            fs.kill_sb(sb);
+        }
+
+        parent
+            .remove_child(&mount)
+            .expect("mount should be a child of its parent");
+
+        VFS.mounts
+            .write_irqsave()
+            .retain(|m| !Arc::ptr_eq(m, &mount));
+
+        knoticeln!("unmounted filesystem at {:?}", mount.mountpoint().unwrap());
 
         Ok(())
     }
@@ -138,9 +203,9 @@ mod vfs {
     /// Panics if the root mount has not been established yet. This should never
     /// happen after the initial filesystem has been mounted during boot.
     pub fn root_pathref() -> PathRef {
-        let root = VFS.root_mount.read_irqsave();
-        root.as_ref()
-            .map(|m| PathRef::new(m.clone(), m.root().clone()))
+        VFS.namespace
+            .read_irqsave()
+            .root_path()
             .expect("root mount must be established")
     }
 }
@@ -148,15 +213,51 @@ pub use vfs::*;
 
 mod vfs_ops {
     use crate::{
-        fs::namei::{resolve, resolve_parent},
+        fs::{
+            mount, namei::{canonicalize_child, resolve, resolve_parent}, unmount
+        },
         prelude::*,
     };
 
-    pub fn vfs_lookup(path: &PathBuf) -> Result<PathRef, FsError> {
+    pub fn vfs_mount(
+        fs_name: &str,
+        source: MountSource,
+        flags: MountFlags,
+        mountpoint: Option<&Path>,
+    ) -> Result<Arc<Mount>, FsError> {
+        let mountpoint = match mountpoint {
+            Some(mp) => Some(resolve(mp)?),
+            None => None,
+        };
+        mount(fs_name, source, flags, mountpoint.as_ref())
+    }
+
+    pub fn vfs_unmount(mountpoint: &Path) -> Result<(), FsError> {
+        let mountpoint = resolve(mountpoint)?;
+        // The path must point at the root of a mounted filesystem, not an
+        // arbitrary entry inside one.
+        let mount_root = mountpoint.mount().root();
+        if !Arc::ptr_eq(mountpoint.dentry(), &mount_root) {
+            return Err(FsError::NotMounted);
+        }
+        unmount(mountpoint.mount().clone())
+    }
+
+    pub fn vfs_lookup(path: &Path) -> Result<PathRef, FsError> {
         resolve(path)
     }
 
-    pub fn vfs_open(path: &PathBuf) -> Result<File, FsError> {
+    pub fn vfs_create(path: &Path, ty: InodeType) -> Result<PathRef, FsError> {
+        let (parent, name) = resolve_parent(path)?;
+
+        let inode = parent.inode().create(&name, ty)?;
+
+        let dentry = canonicalize_child(parent.dentry(), &name, inode)?;
+
+        Ok(PathRef::new(parent.mount().clone(), dentry))
+    }
+
+    pub fn vfs_open(path: &Path) -> Result<File, FsError> {
         let pathref = resolve(path)?;
         let inode = pathref.inode();
         let OpenedFile { file_ops, prv } = inode.open()?;
@@ -164,30 +265,67 @@ mod vfs_ops {
         Ok(File::new(pathref, file_ops, prv))
     }
 
-    pub fn vfs_mkdir(path: &PathBuf) -> Result<PathRef, FsError> {
+    pub fn vfs_mkdir(path: &Path) -> Result<PathRef, FsError> {
         let (parent, name) = resolve_parent(path)?;
 
         let inode = parent.inode().mkdir(&name)?;
-        Ok(PathRef::new(
-            parent.mount().clone(),
-            Arc::new(Dentry::new(name, Some(parent.dentry()), inode)),
-        ))
+
+        let dentry = canonicalize_child(parent.dentry(), &name, inode)?;
+
+        Ok(PathRef::new(parent.mount().clone(), dentry))
     }
 
-    pub fn vfs_link(old_path: &PathBuf, new_path: &PathBuf) -> Result<(), FsError> {
+    pub fn vfs_link(old_path: &Path, new_path: &Path) -> Result<(), FsError> {
         let target = resolve(old_path)?;
+        if target.inode().ty() == InodeType::Dir {
+            return Err(FsError::IsDir);
+        }
+
         let (parent, name) = resolve_parent(new_path)?;
-        parent.inode().link(&name, target.inode())
+        parent.inode().link(&name, target.inode())?;
+
+        // insert the new dentry into parent.
+        let _dentry = canonicalize_child(parent.dentry(), &name, target.inode().clone())?;
+
+        Ok(())
     }
 
-    pub fn vfs_unlink(path: &PathBuf) -> Result<(), FsError> {
+    pub fn vfs_unlink(path: &Path) -> Result<(), FsError> {
         let (parent, name) = resolve_parent(path)?;
-        parent.inode().unlink(&name)
+        parent.inode().unlink(&name)?;
+
+        // remove the dentry from the cache to prevent stale lookups. the child
+        // may never have been cached, which is not an error.
+        match parent.dentry().remove_child(&name) {
+            Ok(()) | Err(FsError::NotFound) => (),
+            Err(err) => return Err(err),
+        }
+
+        Ok(())
     }
 
-    pub fn vfs_rmdir(path: &PathBuf) -> Result<(), FsError> {
+    pub fn vfs_rmdir(path: &Path) -> Result<(), FsError> {
+        let target = resolve(path)?;
+        if target.inode().ty() != InodeType::Dir {
+            return Err(FsError::NotDir);
+        }
+
         let (parent, name) = resolve_parent(path)?;
-        parent.inode().rmdir(&name)
+
+        if !Arc::ptr_eq(target.mount(), parent.mount()) {
+            return Err(FsError::IsMountPoint);
+        }
+
+        parent.inode().rmdir(&name)?;
+
+        // remove the dentry from the cache to prevent stale lookups. the child
+        // may never have been cached, which is not an error.
+        match parent.dentry().remove_child(&name) {
+            Ok(()) | Err(FsError::NotFound) => (),
+            Err(err) => return Err(err),
+        }
+
+        Ok(())
     }
 }
 pub use vfs_ops::*;
@@ -197,5 +335,552 @@ use crate::initcall::{InitCallLevel, run_initcalls};
 pub fn init() {
     unsafe {
         run_initcalls(InitCallLevel::Fs);
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use crate::{fs::namei::canonicalize_child, prelude::*};
+
+    #[kunit]
+    fn test_vfs_root_lookup() {
+        let root = vfs_lookup(Path::new("/")).unwrap();
+
+        assert_eq!(root.to_string(), "/");
+        assert_eq!(
+            vfs_lookup(Path::new("/kunit-vfs-missing")).unwrap_err(),
+            FsError::NotFound
+        );
+    }
+
+    #[kunit]
+    fn test_vfs_create_lookup_and_cleanup() {
+        let path = Path::new("/kunit-vfs-file");
+
+        assert_eq!(vfs_lookup(path).unwrap_err(), FsError::NotFound);
+
+        let created = vfs_create(path, InodeType::Regular).unwrap();
+        let looked_up = vfs_lookup(path).unwrap();
+
+        assert_eq!(created.to_string(), "/kunit-vfs-file");
+        assert_eq!(looked_up.to_string(), "/kunit-vfs-file");
+        assert_eq!(created.inode(), looked_up.inode());
+        assert_eq!(
+            vfs_create(path, InodeType::Regular).unwrap_err(),
+            FsError::AlreadyExists
+        );
+
+        vfs_unlink(path).unwrap();
+        assert_eq!(vfs_lookup(path).unwrap_err(), FsError::NotFound);
+    }
+
+    #[kunit]
+    fn test_vfs_mkdir_link_and_rmdir() {
+        let dir_path = Path::new("/kunit-vfs-dir");
+        let file_path = Path::new("/kunit-vfs-dir/file");
+        let link_path = Path::new("/kunit-vfs-link");
+
+        let dir = vfs_mkdir(dir_path).unwrap();
+        let file = vfs_create(file_path, InodeType::Regular).unwrap();
+
+        assert_eq!(dir.to_string(), "/kunit-vfs-dir");
+        assert_eq!(file.to_string(), "/kunit-vfs-dir/file");
+        assert_eq!(vfs_rmdir(dir_path).unwrap_err(), FsError::DirNotEmpty);
+
+        vfs_link(file_path, link_path).unwrap();
+        let linked = vfs_lookup(link_path).unwrap();
+
+        assert_eq!(linked.to_string(), "/kunit-vfs-link");
+        assert_eq!(linked.inode(), file.inode());
+        assert_eq!(
+            vfs_link(dir_path, Path::new("/kunit-vfs-dir-link")).unwrap_err(),
+            FsError::IsDir
+        );
+
+        vfs_unlink(link_path).unwrap();
+        vfs_unlink(file_path).unwrap();
+        assert_eq!(vfs_lookup(link_path).unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs_lookup(file_path).unwrap_err(), FsError::NotFound);
+
+        vfs_rmdir(dir_path).unwrap();
+        assert_eq!(vfs_lookup(dir_path).unwrap_err(), FsError::NotFound);
+    }
+
+    #[kunit]
+    fn test_vfs_file_read_write_semantics() {
+        let path = Path::new("/kunit-vfs-rw");
+        let file = vfs_create(path, InodeType::Regular).unwrap();
+
+        let opened = vfs_open(path).unwrap();
+        assert_eq!(opened.pos(), 0);
+
+        assert_eq!(opened.write(b"hello").unwrap(), 5);
+        assert_eq!(opened.pos(), 5);
+
+        opened.seek(2).unwrap();
+        assert_eq!(opened.write(b"X").unwrap(), 1);
+        assert_eq!(opened.pos(), 3);
+
+        opened.seek(8).unwrap();
+        assert_eq!(opened.write(b"Z").unwrap(), 1);
+        assert_eq!(opened.pos(), 9);
+
+        opened.seek(0).unwrap();
+        let mut buf = [0u8; 9];
+        assert_eq!(opened.read(&mut buf).unwrap(), 9);
+        assert_eq!(&buf, b"heXlo\0\0\0Z");
+
+        let second_handle = vfs_open(path).unwrap();
+        assert_eq!(second_handle.pos(), 0);
+
+        let mut prefix = [0u8; 4];
+        assert_eq!(second_handle.read(&mut prefix).unwrap(), 4);
+        assert_eq!(&prefix, b"heXl");
+
+        let mut eof_buf = [0u8; 4];
+        second_handle.seek(32).unwrap();
+        assert_eq!(second_handle.read(&mut eof_buf).unwrap(), 0);
+
+        drop(second_handle);
+        drop(opened);
+
+        assert_eq!(file.inode().ty(), InodeType::Regular);
+        vfs_unlink(path).unwrap();
+        assert_eq!(vfs_lookup(path).unwrap_err(), FsError::NotFound);
+    }
+
+    #[kunit]
+    fn test_vfs_mount_overrides_mountpoint_and_restores_on_unmount() {
+        let mountpoint = Path::new("/kunit-vfs-mnt");
+        let lower = Path::new("/kunit-vfs-mnt/lower-file");
+        let upper = Path::new("/kunit-vfs-mnt/upper-file");
+
+        vfs_mkdir(mountpoint).unwrap();
+        vfs_create(lower, InodeType::Regular).unwrap();
+        assert_eq!(
+            vfs_lookup(lower).unwrap().to_string(),
+            "/kunit-vfs-mnt/lower-file"
+        );
+
+        vfs_mount(
+            "ramfs",
+            MountSource::Pseudo,
+            MountFlags::empty(),
+            Some(mountpoint),
+        )
+        .unwrap();
+
+        assert_eq!(
+            vfs_lookup(mountpoint).unwrap().to_string(),
+            "/kunit-vfs-mnt"
+        );
+        assert_eq!(vfs_lookup(lower).unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs_rmdir(mountpoint).unwrap_err(), FsError::IsMountPoint);
+
+        let file = vfs_create(upper, InodeType::Regular).unwrap();
+        let reopened = vfs_open(upper).unwrap();
+        assert_eq!(reopened.write(b"mounted").unwrap(), 7);
+        reopened.seek(0).unwrap();
+
+        let mut buf = [0u8; 7];
+        assert_eq!(reopened.read(&mut buf).unwrap(), 7);
+        assert_eq!(&buf, b"mounted");
+        assert_eq!(vfs_unmount(upper).unwrap_err(), FsError::NotMounted);
+
+        drop(reopened);
+        drop(file);
+
+        vfs_unmount(mountpoint).unwrap();
+
+        assert_eq!(
+            vfs_lookup(lower).unwrap().to_string(),
+            "/kunit-vfs-mnt/lower-file"
+        );
+        assert_eq!(vfs_lookup(upper).unwrap_err(), FsError::NotFound);
+
+        vfs_unlink(lower).unwrap();
+        vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_unmount_busy_with_active_inode_ref() {
+        let mountpoint = Path::new("/kunit-vfs-busy");
+        let live = Path::new("/kunit-vfs-busy/live");
+
+        vfs_mkdir(mountpoint).unwrap();
+        vfs_mount(
+            "ramfs",
+            MountSource::Pseudo,
+            MountFlags::empty(),
+            Some(mountpoint),
+        )
+        .unwrap();
+
+        let live_ref = vfs_create(live, InodeType::Regular).unwrap();
+        assert_eq!(vfs_unmount(mountpoint).unwrap_err(), FsError::Busy);
+
+        drop(live_ref);
+
+        vfs_unmount(mountpoint).unwrap();
+        vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_unmount_busy_with_child_mount() {
+        let mountpoint = Path::new("/kunit-vfs-parent-mnt");
+        let nested = Path::new("/kunit-vfs-parent-mnt/nested");
+
+        vfs_mkdir(mountpoint).unwrap();
+        vfs_mount(
+            "ramfs",
+            MountSource::Pseudo,
+            MountFlags::empty(),
+            Some(mountpoint),
+        )
+        .unwrap();
+
+        vfs_mkdir(nested).unwrap();
+        vfs_mount(
+            "ramfs",
+            MountSource::Pseudo,
+            MountFlags::empty(),
+            Some(nested),
+        )
+        .unwrap();
+
+        assert_eq!(vfs_unmount(mountpoint).unwrap_err(), FsError::Busy);
+
+        vfs_unmount(nested).unwrap();
+        vfs_rmdir(nested).unwrap();
+        vfs_unmount(mountpoint).unwrap();
+        vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_mount_dot_and_dotdot_traversal() {
+        let mountpoint = Path::new("/kunit-vfs-walk");
+        let host_sibling = Path::new("/kunit-vfs-host-sibling");
+        let inner_dir = Path::new("/kunit-vfs-walk/sub");
+        let inner_file = Path::new("/kunit-vfs-walk/sub/file");
+
+        vfs_mkdir(mountpoint).unwrap();
+        vfs_create(host_sibling, InodeType::Regular).unwrap();
+        vfs_mount(
+            "ramfs",
+            MountSource::Pseudo,
+            MountFlags::empty(),
+            Some(mountpoint),
+        )
+        .unwrap();
+
+        assert_eq!(
+            vfs_lookup(Path::new("/kunit-vfs-walk/."))
+                .unwrap()
+                .to_string(),
+            "/kunit-vfs-walk"
+        );
+
+        vfs_mkdir(inner_dir).unwrap();
+        let inner = vfs_create(inner_file, InodeType::Regular).unwrap();
+
+        assert_eq!(
+            vfs_lookup(Path::new("/kunit-vfs-walk/./sub/./file"))
+                .unwrap()
+                .inode(),
+            inner.inode()
+        );
+        assert_eq!(
+            vfs_lookup(Path::new("/kunit-vfs-walk/sub/.."))
+                .unwrap()
+                .to_string(),
+            "/kunit-vfs-walk"
+        );
+        assert_eq!(
+            vfs_lookup(Path::new("/kunit-vfs-walk/sub/../sub/file"))
+                .unwrap()
+                .inode(),
+            inner.inode()
+        );
+        assert_eq!(
+            vfs_lookup(Path::new("/kunit-vfs-walk/../kunit-vfs-host-sibling"))
+                .unwrap()
+                .to_string(),
+            "/kunit-vfs-host-sibling"
+        );
+
+        drop(inner);
+
+        vfs_unmount(mountpoint).unwrap();
+        vfs_unlink(host_sibling).unwrap();
+        vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_multiple_mounts_are_isolated() {
+        let left_mount = Path::new("/kunit-vfs-left-mnt");
+        let right_mount = Path::new("/kunit-vfs-right-mnt");
+        let left_file = Path::new("/kunit-vfs-left-mnt/file");
+        let right_file = Path::new("/kunit-vfs-right-mnt/file");
+
+        vfs_mkdir(left_mount).unwrap();
+        vfs_mkdir(right_mount).unwrap();
+
+        vfs_mount(
+            "ramfs",
+            MountSource::Pseudo,
+            MountFlags::empty(),
+            Some(left_mount),
+        )
+        .unwrap();
+        vfs_mount(
+            "ramfs",
+            MountSource::Pseudo,
+            MountFlags::empty(),
+            Some(right_mount),
+        )
+        .unwrap();
+
+        let left = vfs_create(left_file, InodeType::Regular).unwrap();
+        assert_eq!(vfs_lookup(right_file).unwrap_err(), FsError::NotFound);
+
+        let right = vfs_create(right_file, InodeType::Regular).unwrap();
+        assert_eq!(vfs_lookup(left_file).unwrap().inode(), left.inode());
+        assert_eq!(vfs_lookup(right_file).unwrap().inode(), right.inode());
+
+        drop(left);
+        drop(right);
+
+        vfs_unmount(left_mount).unwrap();
+        assert_eq!(vfs_lookup(left_file).unwrap_err(), FsError::NotFound);
+        assert_eq!(
+            vfs_lookup(right_file).unwrap().to_string(),
+            "/kunit-vfs-right-mnt/file"
+        );
+
+        vfs_unmount(right_mount).unwrap();
+        vfs_rmdir(left_mount).unwrap();
+        vfs_rmdir(right_mount).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_mount_cycle_stress() {
+        const NROUNDS: usize = 8;
+        const NFILES: usize = 8;
+
+        let mountpoint = Path::new("/kunit-vfs-cycle");
+        vfs_mkdir(mountpoint).unwrap();
+
+        for round in 0..NROUNDS {
+            vfs_mount(
+                "ramfs",
+                MountSource::Pseudo,
+                MountFlags::empty(),
+                Some(mountpoint),
+            )
+            .unwrap();
+
+            for file_idx in 0..NFILES {
+                let path = format!("/kunit-vfs-cycle/file-{round}-{file_idx}");
+                let payload = format!("round-{round}-file-{file_idx}-payload");
+
+                vfs_create(Path::new(&path), InodeType::Regular).unwrap();
+
+                let opened = vfs_open(Path::new(&path)).unwrap();
+                assert_eq!(opened.write(payload.as_bytes()).unwrap(), payload.len());
+                opened.seek(0).unwrap();
+
+                let mut buf = vec![0u8; payload.len()];
+                assert_eq!(opened.read(buf.as_mut_slice()).unwrap(), payload.len());
+                assert_eq!(buf.as_slice(), payload.as_bytes());
+            }
+
+            vfs_unmount(mountpoint).unwrap();
+
+            let vanished = format!("/kunit-vfs-cycle/file-{round}-0");
+            assert_eq!(
+                vfs_lookup(Path::new(&vanished)).unwrap_err(),
+                FsError::NotFound
+            );
+        }
+
+        vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_namespace_churn_stress_under_mount() {
+        const NDIRS: usize = 4;
+        const NFILES_PER_DIR: usize = 6;
+
+        let mountpoint = Path::new("/kunit-vfs-churn");
+        vfs_mkdir(mountpoint).unwrap();
+        vfs_mount(
+            "ramfs",
+            MountSource::Pseudo,
+            MountFlags::empty(),
+            Some(mountpoint),
+        )
+        .unwrap();
+
+        for dir_idx in 0..NDIRS {
+            let dir = format!("/kunit-vfs-churn/dir-{dir_idx}");
+            vfs_mkdir(Path::new(&dir)).unwrap();
+
+            for file_idx in 0..NFILES_PER_DIR {
+                let file = format!("{dir}/file-{file_idx}");
+                let alias = format!("/kunit-vfs-churn/alias-{dir_idx}-{file_idx}");
+                let payload = format!("dir-{dir_idx}-file-{file_idx}-payload");
+
+                let created = vfs_create(Path::new(&file), InodeType::Regular).unwrap();
+                let opened = vfs_open(Path::new(&file)).unwrap();
+
+                assert_eq!(opened.write(payload.as_bytes()).unwrap(), payload.len());
+                opened.seek(0).unwrap();
+
+                let mut buf = vec![0u8; payload.len()];
+                assert_eq!(opened.read(buf.as_mut_slice()).unwrap(), payload.len());
+                assert_eq!(buf.as_slice(), payload.as_bytes());
+
+                if file_idx % 2 == 0 {
+                    vfs_link(Path::new(&file), Path::new(&alias)).unwrap();
+                    assert_eq!(
+                        vfs_lookup(Path::new(&alias)).unwrap().inode(),
+                        created.inode()
+                    );
+                    vfs_unlink(Path::new(&alias)).unwrap();
+                }
+            }
+        }
+
+        for dir_idx in (0..NDIRS).rev() {
+            let dir = format!("/kunit-vfs-churn/dir-{dir_idx}");
+
+            for file_idx in (0..NFILES_PER_DIR).rev() {
+                let file = format!("{dir}/file-{file_idx}");
+                vfs_unlink(Path::new(&file)).unwrap();
+            }
+
+            vfs_rmdir(Path::new(&dir)).unwrap();
+        }
+
+        vfs_unmount(mountpoint).unwrap();
+        vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_direct_multi_mount_same_mountpoint_visibility_switch() {
+        let mountpoint = Path::new("/kunit-vfs-direct-stack");
+        let visible_file = Path::new("/kunit-vfs-direct-stack/visible");
+        let hidden_file = Path::new("/kunit-vfs-direct-stack/hidden");
+
+        let host_mp = vfs_mkdir(mountpoint).unwrap();
+        let first = mount(
+            "ramfs",
+            MountSource::Pseudo,
+            MountFlags::empty(),
+            Some(&host_mp),
+        )
+        .unwrap();
+        let second = mount(
+            "ramfs",
+            MountSource::Pseudo,
+            MountFlags::empty(),
+            Some(&host_mp),
+        )
+        .unwrap();
+
+        assert!(!Arc::ptr_eq(&first, &second));
+        assert!(!Arc::ptr_eq(first.sb(), second.sb()));
+
+        vfs_create(visible_file, InodeType::Regular).unwrap();
+
+        let second_root = PathRef::new(second.clone(), second.root().clone());
+        let hidden_inode = second_root
+            .inode()
+            .create("hidden", InodeType::Regular)
+            .unwrap();
+        canonicalize_child(second_root.dentry(), "hidden", hidden_inode.clone()).unwrap();
+
+        assert_eq!(
+            vfs_lookup(visible_file).unwrap().to_string(),
+            "/kunit-vfs-direct-stack/visible"
+        );
+        assert_eq!(vfs_lookup(hidden_file).unwrap_err(), FsError::NotFound);
+
+        unmount(first).unwrap();
+
+        assert_eq!(vfs_lookup(visible_file).unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs_lookup(hidden_file).unwrap().inode(), &hidden_inode);
+
+        drop(hidden_inode);
+        drop(second_root);
+
+        vfs_unmount(mountpoint).unwrap();
+        vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_direct_multi_mount_stack_stress() {
+        const NLAYERS: usize = 6;
+
+        let mountpoint = Path::new("/kunit-vfs-direct-stack-stress");
+        let host_mp = vfs_mkdir(mountpoint).unwrap();
+        let mut mounts = Vec::new();
+
+        for layer in 0..NLAYERS {
+            let mnt = mount(
+                "ramfs",
+                MountSource::Pseudo,
+                MountFlags::empty(),
+                Some(&host_mp),
+            )
+            .unwrap();
+            let root = PathRef::new(mnt.clone(), mnt.root().clone());
+            let name = format!("layer-{layer}");
+            let inode = root.inode().create(&name, InodeType::Regular).unwrap();
+            canonicalize_child(root.dentry(), &name, inode).unwrap();
+            mounts.push(mnt);
+        }
+
+        for layer in 0..NLAYERS {
+            let path = format!("/kunit-vfs-direct-stack-stress/layer-{layer}");
+            if layer == 0 {
+                assert_eq!(vfs_lookup(Path::new(&path)).unwrap().to_string(), path);
+            } else {
+                assert_eq!(vfs_lookup(Path::new(&path)).unwrap_err(), FsError::NotFound);
+            }
+        }
+
+        for layer in 0..NLAYERS {
+            let current_name = format!("/kunit-vfs-direct-stack-stress/layer-{layer}");
+            unmount(mounts[layer].clone()).unwrap();
+
+            if layer + 1 < NLAYERS {
+                let next_name = format!("/kunit-vfs-direct-stack-stress/layer-{}", layer + 1);
+                assert_eq!(
+                    vfs_lookup(Path::new(&current_name)).unwrap_err(),
+                    FsError::NotFound
+                );
+                assert_eq!(
+                    vfs_lookup(Path::new(&next_name)).unwrap().to_string(),
+                    next_name
+                );
+            } else {
+                assert_eq!(
+                    vfs_lookup(Path::new(&current_name)).unwrap_err(),
+                    FsError::NotFound
+                );
+            }
+        }
+
+        vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_mount_rejects_duplicate_root() {
+        assert_eq!(
+            vfs_mount("ramfs", MountSource::Pseudo, MountFlags::empty(), None).unwrap_err(),
+            FsError::AlreadyExists
+        );
     }
 }

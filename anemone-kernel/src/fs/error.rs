@@ -25,6 +25,10 @@ pub enum FsError {
     DirNotEmpty,
     /// Trying to link across different filesystems.
     CrossDeviceLink,
+    /// Path is not a mountpoint.
+    NotMounted,
+    /// Path is a mountpoint.
+    IsMountPoint,
 }
 
 impl AsErrno for FsError {

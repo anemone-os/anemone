@@ -46,6 +46,7 @@ impl Debug for Mount {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MountSource {
     Block(BlockDevNum),
     Pseudo,
@@ -93,6 +94,29 @@ impl Mount {
         self.children.lock_irqsave().push(Arc::downgrade(child));
     }
 
+    pub fn has_children(&self) -> bool {
+        self.children
+            .lock_irqsave()
+            .iter()
+            .any(|w| w.upgrade().is_some())
+    }
+
+    pub fn remove_child(&self, child: &Arc<Mount>) -> Result<(), FsError> {
+        let mut children = self.children.lock_irqsave();
+        let initial_len = children.len();
+        children.retain(|weak_child| {
+            let Some(strong_child) = weak_child.upgrade() else {
+                return false;
+            };
+            !Arc::ptr_eq(&strong_child, child)
+        });
+        if children.len() == initial_len {
+            Err(FsError::NotFound)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn child_at(&self, mountpoint: &Arc<Dentry>) -> Option<Arc<Mount>> {
         let mut children = self.children.lock_irqsave();
         let mut found = None;
@@ -106,7 +130,7 @@ impl Mount {
                 && child
                     .mountpoint()
                     .as_ref()
-                    .is_some_and(|child_mp| child_mp.location_eq(mountpoint))
+                    .is_some_and(|child_mp| Arc::ptr_eq(child_mp, mountpoint))
             {
                 found = Some(child);
             }

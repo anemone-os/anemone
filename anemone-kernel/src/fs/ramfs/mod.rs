@@ -42,7 +42,7 @@ fn ramfs_reg_data(inode: &InodeRef) -> Result<&RamfsReg, FsError> {
         .ok_or(FsError::NotReg)
 }
 
-fn ramfs_mount(source: &MountSource, _flags: MountFlags) -> Result<MountedFileSystem, FsError> {
+fn ramfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, FsError> {
     if !matches!(source, MountSource::Pseudo) {
         return Err(FsError::InvalidArgument);
     }
@@ -50,16 +50,17 @@ fn ramfs_mount(source: &MountSource, _flags: MountFlags) -> Result<MountedFileSy
     let sb_prv = AnyOpaque::new(RamfsSb::new());
 
     let fs = RAMFS.get().clone();
-    let sb = Arc::new(SuperBlock::new(fs.clone(), &RAMFS_SB_OPS, sb_prv));
-
-    fs.sget(|_| false, Some(|| sb.clone()))
-        .expect("newly created superblock must be added to the file system's superblock list");
 
     let root_ino = Ino::try_from(1u64).unwrap();
     let root_dir_data = RamfsDir::new();
 
     root_dir_data.insert(".".to_string(), root_ino).unwrap();
     root_dir_data.insert("..".to_string(), root_ino).unwrap();
+
+    let sb = Arc::new(SuperBlock::new(fs.clone(), &RAMFS_SB_OPS, sb_prv, root_ino));
+
+    fs.sget(|_| false, Some(|| sb.clone()))
+        .expect("newly created superblock must be added to the file system's superblock list");
 
     let root_inode = Arc::new(Inode::new(
         root_ino,
@@ -75,7 +76,7 @@ fn ramfs_mount(source: &MountSource, _flags: MountFlags) -> Result<MountedFileSy
 
     sb.seed_inode(root_inode);
 
-    Ok(MountedFileSystem { sb, root_ino })
+    Ok(sb)
 }
 
 fn ramfs_kill_sb(sb: Arc<SuperBlock>) {

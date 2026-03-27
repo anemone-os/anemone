@@ -21,9 +21,6 @@ pub(super) struct SuperBlockOps {
     /// from [Drop]. The cache-map lock is **not** held when this runs, so it
     /// is safe to perform blocking I/O (e.g. writeback) here.
     ///
-    /// If nlink is 0, implementations are responsible for deletion of the
-    /// inode.
-    ///
     /// If an [FsError] is returned, the eviction is cancelled and the inode is
     /// re-inserted into the cache. The eviction will be retried later.
     pub evict_inode: fn(&SuperBlock, Arc<Inode>) -> Result<(), FsError>,
@@ -37,6 +34,8 @@ pub struct SuperBlock {
     ops: &'static SuperBlockOps,
     /// Private data for the superblock implementation.
     prv: AnyOpaque,
+    /// Root inode number of this superblock.
+    root_ino: Ino,
     /// Mutable state of superblock.
     inner: RwLock<SuperBlockInner>,
 }
@@ -56,11 +55,17 @@ pub struct SuperBlockInner {
 
 impl SuperBlock {
     /// Create a new superblock.
-    pub(super) fn new(fs: Arc<FileSystem>, ops: &'static SuperBlockOps, prv: AnyOpaque) -> Self {
+    pub(super) fn new(
+        fs: Arc<FileSystem>,
+        ops: &'static SuperBlockOps,
+        prv: AnyOpaque,
+        root_ino: Ino,
+    ) -> Self {
         Self {
             fs,
             ops,
             prv,
+            root_ino,
             inner: RwLock::new(SuperBlockInner {
                 icache: HashMap::new(),
             }),
@@ -75,6 +80,14 @@ impl SuperBlock {
     /// Get the private data for this superblock, if any.
     pub(super) fn prv(&self) -> &AnyOpaque {
         &self.prv
+    }
+
+    /// Get the root inode of this superblock.
+    pub fn root_inode(self: &Arc<Self>) -> InodeRef {
+        // The root inode must always be resident in the cache, as it's pinned by the
+        // mount's root dentry.
+        self.try_iget(self.root_ino)
+            .expect("root inode must be resident in cache")
     }
 }
 
@@ -179,31 +192,53 @@ impl SuperBlock {
         let inode = self.inner.write_irqsave().icache.remove(&ino);
         if let Some(inode) = inode {
             if inode.rc() > 0 {
+                knoticeln!(
+                    "cannot evict inode {:?} from superblock: still has active references {}",
+                    ino,
+                    inode.rc()
+                );
                 self.inner.write_irqsave().icache.insert(ino, inode);
+
                 return Err(FsError::Busy);
             }
-            (self.ops.evict_inode)(self, inode)?;
+            if let Err(e) = (self.ops.evict_inode)(self, inode.clone()) {
+                self.inner.write_irqsave().icache.insert(ino, inode);
+                return Err(e);
+            }
+            knoticeln!("evicted inode {:?} from superblock", ino);
             return Ok(());
         }
         Err(FsError::NotFound)
     }
 
+    /// Check if any inodes in the resident cache have active references, except
+    /// for the root inode(s) owned by the mount's root dentry.
+    pub(super) fn has_alive_inode(&self) -> bool {
+        self.inner
+            .read_irqsave()
+            .icache
+            .values()
+            .any(|inode| inode.rc() > 0 && inode.ino() != self.root_ino)
+    }
+
     /// Evict **all** inodes from the resident cache.
     ///
-    /// If any eviction fails, the cache may be left in a partially evicted
+    /// This operation may fail on the first inode that cannot be evicted. In
+    /// this case, some inodes may have already been evicted while others
+    /// remain. Callers should be prepared to handle this partial eviction
     /// state.
+    ///
+    /// **This operation will not evict the root inode, since it's pinned by the
+    /// mount's root dentry, so it's always referenced and cannot be evicted.**
     pub(super) fn try_evict_all(&self) -> Result<(), FsError> {
-        let inodes: Vec<Arc<Inode>> = {
-            self.inner
-                .write_irqsave()
-                .icache
-                .drain()
-                .map(|(_, v)| v)
-                .collect()
-        };
+        debug_assert!(!self.has_alive_inode());
 
-        for inode in inodes {
-            (self.ops.evict_inode)(self, inode)?;
+        let inos: Vec<Ino> = self.inner.read_irqsave().icache.keys().cloned().collect();
+        for ino in inos {
+            if ino == self.root_ino {
+                continue;
+            }
+            self.try_evict(ino)?;
         }
 
         Ok(())

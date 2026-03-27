@@ -1,3 +1,5 @@
+use core::fmt::{Debug, Display};
+
 use crate::prelude::*;
 
 /// A single [PathRef] determines the absolute location of a file in the
@@ -8,6 +10,21 @@ use crate::prelude::*;
 pub struct PathRef {
     mount: Arc<Mount>,
     dentry: Arc<Dentry>,
+}
+
+impl Debug for PathRef {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PathRef")
+            .field("mount", &self.mount)
+            .field("dentry", &self.dentry)
+            .finish()
+    }
+}
+
+impl Display for PathRef {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.to_pathbuf().display())
+    }
 }
 
 impl PathRef {
@@ -39,9 +56,8 @@ impl PathRef {
         let mut cur_dentry = Some(self.dentry.clone());
 
         while let Some(dentry) = cur_dentry {
-            components.push(dentry.name().to_string());
-
             if let Some(parent) = dentry.parent() {
+                components.push(dentry.name());
                 cur_dentry = Some(parent);
             } else {
                 // reached the root of current mount.
@@ -53,6 +69,7 @@ impl PathRef {
                     cur_dentry = Some(mountpoint);
                 } else {
                     // reached the root of the entire namespace.
+                    components.push("/".to_string());
                     break;
                 }
             }

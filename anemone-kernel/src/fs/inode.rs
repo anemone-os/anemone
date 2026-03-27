@@ -163,6 +163,10 @@ impl Inode {
     pub(super) fn prv(&self) -> &AnyOpaque {
         &self.prv
     }
+
+    pub(super) fn ty(&self) -> InodeType {
+        self.ty
+    }
 }
 
 impl Inode {

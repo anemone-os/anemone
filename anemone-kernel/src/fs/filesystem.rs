@@ -5,16 +5,8 @@ use crate::prelude::*;
 /// VTable a file system type must implement to be mountable.
 pub struct FileSystemOps {
     pub name: &'static str,
-    pub mount: fn(&MountSource, MountFlags) -> Result<MountedFileSystem, FsError>,
+    pub mount: fn(MountSource, MountFlags) -> Result<Arc<SuperBlock>, FsError>,
     pub kill_sb: fn(Arc<SuperBlock>),
-}
-
-/// A mounted file system, consisting of a superblock and the root inode number.
-///
-/// Returned by [FileSystem::mount].
-pub struct MountedFileSystem {
-    pub sb: Arc<SuperBlock>,
-    pub root_ino: Ino,
 }
 
 /// File system type.
@@ -104,8 +96,7 @@ impl FileSystem {
 
     /// Mount a file system from the given source with the given flags.
     ///
-    /// The implementation must return a fully initialized [MountedFileSystem]
-    /// with a superblock and root inode.
+    /// The implementation must return a fully initialized [Arc<SuperBlock>].
     ///
     /// **NOTE**
     ///
@@ -125,19 +116,14 @@ impl FileSystem {
     /// and mounts.
     pub fn mount(
         &self,
-        source: &MountSource,
+        source: MountSource,
         flags: MountFlags,
-    ) -> Result<MountedFileSystem, FsError> {
+    ) -> Result<Arc<SuperBlock>, FsError> {
         (self.ops.mount)(source, flags)
     }
 
     /// Kill a superblock, i.e. clean up all physical resources associated with
     /// the superblock and prepare it for destruction.
-    ///
-    /// The `sb` is guaranteed to have only one strong reference (the one passed
-    /// in), and there is no other reference to the superblock (e.g. exsiting
-    /// [InodeRef]s or [Mount]s) when this function is called, so it's safe to
-    /// perform cleanup and finalization here.
     pub fn kill_sb(&self, sb: Arc<SuperBlock>) {
         (self.ops.kill_sb)(sb);
     }
