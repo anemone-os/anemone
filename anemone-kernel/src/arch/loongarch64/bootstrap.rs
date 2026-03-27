@@ -140,7 +140,6 @@ extern "C" fn rusty_nun(hart_id: usize) -> ! {
     }
 }
 
-#[cfg(debug_assertions)]
 pub fn register_debugcon() {
     use crate::{
         device::console::{Console, ConsoleFlags, register_console},
@@ -214,12 +213,12 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
         kinfoln!("kernel mapping activated");
 
         remap_boot_stack();
-
         BOOT_SYNC_COUNTER.sync_with_counter();
 
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
         add_to_ready(Arc::new(
             Task::new_kernel(
+                "bsp-kinit",
                 bsp_kinit as *const (),
                 ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
                 IntrArch::DISABLED_IRQ_FLAGS,
@@ -242,6 +241,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         mm::kptable::activate_kernel_mapping();
         add_to_ready(Arc::new(
             Task::new_kernel(
+                "ap-kinit",
                 ap_kinit as *const (),
                 ParameterList::new(&[ap_id as u64]),
                 IntrArch::DISABLED_IRQ_FLAGS,
@@ -273,11 +273,9 @@ pub fn wake_up_aps(bsp_id: usize, ncpus: usize) {
 unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
     let cpu_id = CpuArch::cur_cpu_id().get();
     let new_stack_top = GUARDED_STACK_TOPS.get()[cpu_id];
-
     unsafe {
         core::arch::asm!(
             "move  $sp, {new_top}",
-            "move  $fp, $zero",
             "jirl  $zero, {entry}, 0 ",
             new_top = in(reg) new_stack_top.get(),
             entry = in(reg) dest_entry.get(),

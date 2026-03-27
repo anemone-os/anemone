@@ -7,4 +7,5 @@ mod trap;
 pub use trap::install_ktrap_handler;
 pub use trap::RiscV64TrapFrame;
 pub use trap::__ktrap_return_to_task;
+pub use trap::__utrap_return_to_task;
 

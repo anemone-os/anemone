@@ -5,7 +5,7 @@ use la_insc::reg::{
 };
 use loongArch64::{iocsr::iocsr_write_w, ipi::send_ipi_single};
 
-use crate::prelude::*;
+use crate::{arch::loongarch64::exception::trap::LA64Interrupt, prelude::*};
 
 pub struct LA64IntrArch;
 impl IntrArchTrait for LA64IntrArch {
@@ -45,6 +45,24 @@ impl IntrArchTrait for LA64IntrArch {
         unsafe {
             ecfg::csr_write(Ecfg::new(IntrFlags::all(), 0));
             crmd::set_ie(true);
+            knoticeln!("({})local irq initialized", CpuArch::cur_cpu_id());
         }
+    }
+}
+
+pub(super) unsafe fn handle_intr(reason: LA64Interrupt) {
+    match reason {
+        LA64Interrupt::Timer => {
+            //kdebugln!("received timer interrupt");
+            TimeArch::claim_timer_interrupt();
+            TimeArch::set_next_trigger(300_000_0);
+        },
+        LA64Interrupt::Ipi => {
+            handle_ipi();
+            unsafe {
+                IntrArch::claim_ipi();
+            }
+        },
+        LA64Interrupt::Hardware => handle_irq(),
     }
 }

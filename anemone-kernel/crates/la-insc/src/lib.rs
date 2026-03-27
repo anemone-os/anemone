@@ -3,6 +3,7 @@
 //! `[deny(missing_docs)]` is used to ensure all instructions and registers are documented.
 
 #![deny(missing_docs)]
+#![feature(stdarch_loongarch)]
 #![no_std]
 pub mod utils;
 pub mod reg;

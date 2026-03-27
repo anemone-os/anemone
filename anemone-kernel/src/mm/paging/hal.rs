@@ -1,6 +1,6 @@
 use core::ops::{Index, IndexMut};
 
-use crate::prelude::*;
+use crate::{mm::space::MemSpace, prelude::*};
 
 /// The architecture-specific traits and types for paging.
 pub trait PagingArchTrait: Sized {
@@ -78,7 +78,7 @@ pub trait PagingArchTrait: Sized {
     /// Switch to the given page table.
     ///
     /// This function should always do a TLB shootdown.
-    unsafe fn activate_addr_space(pgtbl: &PageTable);
+    unsafe fn activate_addr_space(pgtbl: &MemSpace);
 
     /// Perform a TLB shootdown for the given virtual address in all virtual
     /// address spaces on current core.
@@ -148,6 +148,25 @@ impl PteFlags {
         self.contains(PteFlags::READ)
             || self.contains(PteFlags::WRITE)
             || self.contains(PteFlags::EXECUTE)
+    }
+
+    pub fn extract_rwx(&self) -> Self {
+        let mut res = Self::empty();
+        if self.contains(PteFlags::READ) {
+            res |= PteFlags::READ
+        }
+        if self.contains(PteFlags::WRITE) {
+            res |= PteFlags::WRITE
+        }
+        if self.contains(PteFlags::EXECUTE) {
+            res |= PteFlags::EXECUTE
+        }
+        res
+    }
+
+    /// Only NONE, R, RX, RW, RWX are valid for leaf pages
+    pub fn is_supported_rwx_combination(&self) -> bool {
+        self.is_empty() || self.contains(PteFlags::READ)
     }
 }
 

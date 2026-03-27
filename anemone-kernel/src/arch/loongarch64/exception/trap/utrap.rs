@@ -1,6 +1,5 @@
 use la_insc::reg::{
-    crmd,
-    csr::{CR_BADV, CR_ERA, CR_ESTAT, CR_PRMD, eentry},
+    csr::{CR_BADV, CR_EENTRY, CR_ERA, CR_ESTAT, CR_PRMD, CR_SAVE0, CR_SAVE1},
     exception::Estat,
 };
 
@@ -9,15 +8,21 @@ use crate::{
         intr::handle_intr,
         trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
     },
+    device::CpuArchTrait,
     prelude::*,
+    sched::{current_task_id, task_exit},
 };
 
+// kernel trap entry point. since kernel doesn't use floating point, we don't
+// need to save/restore floating point registers here.
 core::arch::global_asm!(
     "   .section .text",
-    "   .global __ktrap_entry",
+    "   .global __utrap_entry",
 
-    "__ktrap_entry:",
-    "   .align 12",
+    "   .balign 4",
+    "__utrap_entry:",
+    "   csrwr $sp, {save1}",
+    "   csrrd $sp, {save0}",
     "   addi.d $sp, $sp, -{trapframe_bytes}",
     "   st.d $r0, $sp, 0",
     "   st.d $r1, $sp, 8",
@@ -52,7 +57,7 @@ core::arch::global_asm!(
     "   st.d $r30, $sp, 240",
     "   st.d $r31, $sp, 248",
     // now we have registers to play with. we can calculate previous $sp
-    "   addi.d $t0, $sp, {trapframe_bytes}",
+    "   csrrd $t0, {save1}",
     "   st.d $t0, $sp, 24",
     // csr
     "   csrrd $t0, {prmd}",
@@ -65,16 +70,27 @@ core::arch::global_asm!(
     "   st.d $t0, $sp, 280",
     // TODO: if this is a device interrupt (timer or external), an interrupt stack
     // should be used, instead of continuing execution on the current stack.
+
+    "   la $t0, __ktrap_entry",
+    "   csrwr $t0, {eentry}",
+
     "   move $t0, $zero",
     "   move $a0, $sp",
-    "   call {rust_ktrap_entry}",
+    "   call {rust_utrap_entry}",
 
     "   move $a0, $sp",
 
-    "   .global __ktrap_return_to_task",
-    "__ktrap_return_to_task:",
+    "   addi.d $sp, $sp, {trapframe_bytes}",
+    "   csrwr $sp, {save0}",
+
+    "   .global __utrap_return_to_task",
+    "__utrap_return_to_task:",
     // all done. restore registers now.
-    // $sp should still point to the trapframe on the stack.
+
+    "   la $t0, __utrap_entry",
+    "   csrwr $t0, {eentry}",
+
+
     "   ld.d $r0, $a0, 0",
     "   ld.d $r1, $a0, 8",
     "   ld.d $r2, $a0, 16",
@@ -120,16 +136,22 @@ core::arch::global_asm!(
     // all done.
     "   ertn",
     trapframe_bytes = const size_of::<LA64TrapFrame>(),
-    rust_ktrap_entry = sym rust_ktrap_entry,
+    rust_utrap_entry = sym rust_utrap_entry,
     prmd = const CR_PRMD,
     era = const CR_ERA,
     badv = const CR_BADV,
-    estat = const CR_ESTAT
+    estat = const CR_ESTAT,
+    save0 = const CR_SAVE0,
+    save1 = const CR_SAVE1,
+    eentry = const CR_EENTRY,
 );
 
 /// This function will call architecture-agnostic trap handler.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
+
+/// This function will call architecture-agnostic trap handler.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
@@ -145,49 +167,81 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
         }
     } else {
         let esubcode = estat.esubcode();
-        let reason = LA64Exception::try_from((ecode, esubcode))
-            .unwrap_or_else(|_| panic!("unknown trap with code {}:{}", ecode, esubcode));
+        let reason = match LA64Exception::try_from((ecode, esubcode)) {
+            Ok(r) => r,
+            Err(_) => {
+                kerrln!(
+                    "({}) user {} aborted with unknown trap with code {}:{}",
+                    CpuArch::cur_cpu_id(),
+                    current_task_id(),
+                    ecode,
+                    esubcode
+                );
+                task_exit();
+            },
+        };
+
         match reason {
             LA64Exception::PageModified => {
-                panic!(
-                    "Page Modified exception at address: {:#x}, pc: {:#x}, this should never happen because the 'DIRTY' bit is always set with 'WRITE' bit.",
-                    trapframe.badv, trapframe.era
-                )
-            },
-            LA64Exception::PageInvalidFetch
-            | LA64Exception::PageInvalidLoad
-            | LA64Exception::PageInvalidStore => {
-                panic!(
-                    "Page Invalid exception at address: {:#x}, pc: {:#x}, caused by {} access. Page fault handler is not implemented yet.",
+                kerrln!(
+                    "({}) user {} aborted: Page Modified exception at address: {:#x}, pc: {:#x}. \
+             this should never happen because the 'DIRTY' bit is always set with 'WRITE' bit.",
+                    CpuArch::cur_cpu_id(),
+                    current_task_id(),
                     trapframe.badv,
-                    trapframe.era,
-                    match reason {
-                        LA64Exception::PageInvalidFetch => "instruction",
-                        LA64Exception::PageInvalidLoad => "load",
-                        LA64Exception::PageInvalidStore => "store",
-                        _ => unreachable!(),
-                    }
-                )
-            },
-            _ => {
-                panic!(
-                    "unhandled exception: {:?}, pc: {:#x}, badv: {:#x}",
-                    reason, trapframe.era, trapframe.badv
+                    trapframe.era
                 );
+                task_exit()
+            },
+
+            LA64Exception::PageInvalidFetch => {
+                kerrln!(
+                    "({}) user {} aborted: Page Invalid exception at address: {:#x}, pc: {:#x}, caused by instruction access. Page fault handler is not implemented yet.",
+                    CpuArch::cur_cpu_id(),
+                    current_task_id(),
+                    trapframe.badv,
+                    trapframe.era
+                );
+                task_exit()
+            },
+
+            LA64Exception::PageInvalidLoad => {
+                kerrln!(
+                    "({}) user {} aborted: Page Invalid exception at address: {:#x}, pc: {:#x}, caused by load access. Page fault handler is not implemented yet.",
+                    CpuArch::cur_cpu_id(),
+                    current_task_id(),
+                    trapframe.badv,
+                    trapframe.era
+                );
+                task_exit()
+            },
+
+            LA64Exception::PageInvalidStore => {
+                kerrln!(
+                    "({}) user {} aborted: Page Invalid exception at address: {:#x}, pc: {:#x}, caused by store access. Page fault handler is not implemented yet.",
+                    CpuArch::cur_cpu_id(),
+                    current_task_id(),
+                    trapframe.badv,
+                    trapframe.era
+                );
+                task_exit()
+            },
+
+            _ => {
+                kerrln!(
+                    "({}) user {} aborted with unhandled exception: {:?}, pc: {:#x}, badv: {:#x}\n\ttask return value not implemented yet",
+                    CpuArch::cur_cpu_id(),
+                    current_task_id(),
+                    reason,
+                    trapframe.era,
+                    trapframe.badv
+                );
+                task_exit()
             },
         }
     }
 }
-
 unsafe extern "C" {
-    unsafe fn __ktrap_entry() -> !;
-    pub unsafe fn __ktrap_return_to_task(trapframe: *const LA64TrapFrame) -> !;
-}
-
-/// Set the ktrap handler entry point
-pub fn install_ktrap_handler() {
-    unsafe {
-        crmd::set_ie(false);
-        eentry::csr_write(VirtAddr::new(__ktrap_entry as *const () as usize as u64).get());
-    }
+    unsafe fn __utrap_entry() -> !;
+    pub unsafe fn __utrap_return_to_task(trapframe: *const LA64TrapFrame) -> !;
 }

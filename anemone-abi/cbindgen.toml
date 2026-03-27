@@ -16,3 +16,4 @@ rename_variants = "None"
 
 [defines]
 "target_arch = riscv64" = "__ANEMONE_ARCH_RISCV64__"
+"target_arch = loongarch64" = "__ANEMONE_ARCH_LOONGARCH64__"

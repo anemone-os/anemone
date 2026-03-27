@@ -17,6 +17,7 @@ pub extern "C" fn idle() -> ! {
 static IDLE_TASK: Lazy<Arc<Task>> = Lazy::new(|| {
     let res = Arc::new(
         Task::new_kernel(
+            "idle",
             idle as *const (),
             ParameterList::empty(),
             IntrArch::ENABLED_IRQ_FLAGS,

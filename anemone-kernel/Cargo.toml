@@ -28,6 +28,7 @@ device-tree = { path = "crates/device-tree", features = ["alloc"] }
 idalloc = { path = "crates/idalloc" }
 range-allocator = { path = "crates/range-allocator" }
 kernel-macros = { path = "crates/kernel-macros" }
+elf = { workspace = true }
 
 
 [target.'cfg(target_arch = "riscv64")'.dependencies]

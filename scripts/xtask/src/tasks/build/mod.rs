@@ -3,6 +3,12 @@
 //! Build Anemone kernel for targeted platforms
 //! (e.g., QEMU, or real hardware), and produce bootable images.
 
+use std::{
+    fs::{self, File},
+    io::{BufRead, BufReader},
+    path::Path,
+};
+
 use clap::Args;
 use xshell::Shell;
 
@@ -82,7 +88,13 @@ impl<'a> BuildContext<'a> {
             .arg("-p")
             .arg("build/generated")
             .run_echo()?;
+        Shell::new()?
+            .cmd("mkdir")
+            .arg("-p")
+            .arg("build/apps")
+            .run_echo()?;
 
+        self.build_apps()?;
         self.gen_rust_defs()?;
         self.gen_kernel_lds()?;
 
@@ -126,6 +138,75 @@ impl<'a> BuildContext<'a> {
             }
         }
 
+        Ok(())
+    }
+
+    fn build_apps(&self) -> anyhow::Result<()> {
+        let build_dir = Path::new("anemone-apps");
+        let apps_file = build_dir.join("app_list.txt");
+        if !fs::exists(&build_dir)? {
+            log_progress!("ERROR", "Directory 'anemone-apps' not found");
+            return anyhow::bail!("Directory 'anemone-apps' not found");
+        }
+        if !fs::exists(&apps_file)? {
+            log_progress!("ERROR", "File 'anemone-apps/app_list.txt' not found");
+            return anyhow::bail!("File 'anemone-apps/app_list.txt' not found");
+        }
+        let file = File::open(&apps_file)?;
+        let reader = BufReader::new(file);
+        let sh = Shell::new()?;
+        for line in reader.lines() {
+            let line = line?;
+            let name = line.trim();
+            if !name.is_empty() {
+                // build app
+                log_progress!("COMPILE", format!("Compiling app '{}'", name).as_str());
+                let dir = build_dir.join(name);
+
+                let mut build = sh
+                    .with_current_dir(dir)
+                    .cmd("cargo")
+                    .arg("build")
+                    .args(&[
+                        "-Z",
+                        "build-std=core,alloc",
+                        "-Z", // Refer to https://github.com/rust-lang/wg-cargo-std-aware/issues/53 for why this is needed
+                        "build-std-features=compiler-builtins-mem"
+                    ])
+                    .args(&["-Z", "json-target-spec"])
+                    .arg("--target")
+                    .arg(&format!(
+                        "../../conf/arch/{}/{}.json",
+                        self.platform.build.arch.as_str(),
+                        self.platform.build.target.as_str()
+                    ));
+
+                for arg in self.kconfig.build.profile.as_cargo_arg() {
+                    build = build.arg(arg);
+                }
+                
+                build.run_echo()?;
+
+                let built_kernel_path = format!("{}/{}", self.cargo_build_dir(), name);
+                std::fs::copy(built_kernel_path, format!("build/apps/{}.elf", name))?;
+
+                if self.kconfig.build.disasm {
+                    log_progress!(
+                        "DISASM",
+                        format!("Generating disassembly for app '{}'", name).as_ref()
+                    );
+
+                    let disasm = sh
+                        .cmd(&self.platform.build.target.objdump())
+                        .arg("-d")
+                        .arg("-S")
+                        .arg(format!("build/apps/{}.elf", name))
+                        .echo()
+                        .read()?;
+                    sh.write_file(format!("build/apps/{}.disasm", name), disasm)?;
+                }
+            }
+        }
         Ok(())
     }
 

@@ -26,6 +26,30 @@ impl PageTable {
         self.root
     }
 
+    /// Get a mutable reference to the root [PgDir]
+    pub unsafe fn root_pgdir_mut(&mut self) -> &mut PgDir {
+        unsafe {
+            self.root_ppn()
+                .to_hhdm()
+                .to_virt_addr()
+                .as_ptr_mut::<PgDir>()
+                .as_mut()
+                .expect("root ppn should not be null")
+        }
+    }
+
+    /// Get a reference to the root [PgDir]
+    pub unsafe fn root_pgdir(&self) -> &PgDir {
+        unsafe {
+            self.root_ppn()
+                .to_hhdm()
+                .to_virt_addr()
+                .as_ptr::<PgDir>()
+                .as_ref()
+                .expect("root ppn should not be null")
+        }
+    }
+
     /// Get a mapper for this page table.
     ///
     /// The lifetime of the returned mapper is tied to the mutable reference of
@@ -41,7 +65,6 @@ impl PageTable {
 impl Drop for PageTable {
     fn drop(&mut self) {
         let mut mapper = self.mapper();
-
         // unmap all userspace pages
         unsafe {
             mapper.try_unmap(Unmapping {
