@@ -124,7 +124,7 @@ impl Mapper<'_> {
                 &source[0],
                 (fp_ppn.to_hhdm().to_virt_addr().get() as usize + fp_offset) as *const u8
                     as *mut u8,
-                fp_datasz,
+                min(fp_datasz, length as usize),
             );
         }
         let mut count = 0;

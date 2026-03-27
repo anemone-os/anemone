@@ -18,6 +18,7 @@
 #define LINUX_SYSNO_MAX 512
 #endif
 
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
 /**
  * The Linux kernel actually does not define a maximum syscall number,
  * but it's obvious that syscall numbers won't exceed this value, on any
@@ -26,6 +27,7 @@
  * Anemone defines its own syscall number starting from this value.
  */
 #define LINUX_SYSNO_MAX 512
+#endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
 #define SYS_READ 63

@@ -1,7 +1,10 @@
 use core::fmt::Debug;
 
 use crate::{
-    mm::kptable::{kmap, kunmap},
+    mm::{
+        kptable::{kmap, kunmap},
+        remap::free_virt_range,
+    },
     prelude::*,
     utils::align::{AlignedBytes, PhantomAligned4096},
 };
@@ -55,6 +58,8 @@ impl Drop for KernelStack {
             kunmap(Unmapping {
                 range: self.vpn_range,
             });
+            free_virt_range(self.vpn_range.start(), self.vpn_range.npages() as usize)
+                .expect("internal error: failed to free virt range for kernel stack");
         }
     }
 }
