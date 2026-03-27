@@ -16,10 +16,10 @@ use crate::{
     },
     driver::virtio::VirtIOHalImpl,
     prelude::*,
-    utils::prv_data::PrvData,
+    utils::any_opaque::AnyOpaque,
 };
 
-#[derive(PrvData)]
+#[derive(Opaque)]
 struct VirtIOBlkState {
     rc: Arc<SpinLock<VirtIOBlk<VirtIOHalImpl, SomeTransport<'static>>>>,
 }
@@ -114,29 +114,30 @@ impl DriverOps for VirtIOBlkDriver {
         };
 
         register_block_device(
-            DevNum::new(*MAJOR.get(), minor),
+            BlockDevNum::new(*MAJOR.get(), minor),
             ident_format!("{}", vdev.name()).unwrap(),
             Arc::new(state.clone()),
         )?;
 
-        vdev.set_drv_state(Some(Box::new(state.clone())));
+        vdev.request_irq(&IRQ_HANDLER, Some(AnyOpaque::new(state.clone())))?;
 
-        vdev.request_irq(&IRQ_HANDLER, Some(Box::new(state)))?;
+        vdev.set_drv_state(AnyOpaque::new(state));
 
         Ok(())
     }
 
     fn shutdown(&self, device: &dyn Device) {
-        device.with_drv_state(|state| {
-            let state = unsafe { state.cast_unchecked::<VirtIOBlkState>() };
-            state
-                .lock_irqsave()
-                .flush()
-                .map_err(|e| {
-                    kerrln!("failed to flush virtio block device during shutdown: {e}");
-                })
-                .ok();
-        });
+        let state = device
+            .drv_state()
+            .cast::<VirtIOBlkState>()
+            .expect("virtio block device should have VirtIOBlkState as driver state");
+        state
+            .lock_irqsave()
+            .flush()
+            .map_err(|e| {
+                kerrln!("failed to flush virtio block device during shutdown: {e}");
+            })
+            .ok();
     }
 
     fn as_virtio_driver(&self) -> Option<&dyn VirtIODriver> {
@@ -158,7 +159,7 @@ impl BlockDriver for VirtIOBlkDriver {
 
 static IRQ_HANDLER: IrqHandler = IrqHandler::new(irq_handler);
 
-fn irq_handler(_prv_data: Option<&mut dyn PrvData>) {}
+fn irq_handler(_prv_data: &AnyOpaque) {}
 
 static MAJOR: MonoOnce<MajorNum> = unsafe { MonoOnce::new() };
 static BOOKKEEPER: Lazy<SpinLock<(GeneralMinorAllocator, HashMap<MinorNum, VirtIOBlkState>)>> =

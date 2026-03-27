@@ -18,7 +18,7 @@ bitflags! {
 /// Privilege Levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
-pub enum PrivilegeLevel{
+pub enum PrivilegeLevel {
     /// PLV0
     PLV0 = 0,
     /// PLV1
@@ -29,10 +29,10 @@ pub enum PrivilegeLevel{
     PLV3 = 3,
 }
 
-impl PrivilegeLevel{
+impl PrivilegeLevel {
     /// From u8, used by macros, returns None if the value is invalid
-    pub const fn from_value(value: u8) -> Option<Self>{
-        match value{
+    pub const fn from_value(value: u8) -> Option<Self> {
+        match value {
             0 => Some(Self::PLV0),
             1 => Some(Self::PLV1),
             2 => Some(Self::PLV2),
@@ -42,8 +42,8 @@ impl PrivilegeLevel{
     }
 
     /// From u8, used by macros
-    pub const fn from_value_or_default(value: u8) -> Self{
-        match value{
+    pub const fn from_value_or_default(value: u8) -> Self {
+        match value {
             0 => Self::PLV0,
             1 => Self::PLV1,
             2 => Self::PLV2,
@@ -53,7 +53,7 @@ impl PrivilegeLevel{
     }
 
     /// Get the u8 value of the enum, used by macros
-    pub const fn value(&self) -> u8{
+    pub const fn value(&self) -> u8 {
         *self as u8
     }
 }

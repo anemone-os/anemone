@@ -3,6 +3,7 @@ pub use crate::{
     device::{error::*, *},
     driver::*,
     exception::{intr::*, trap::*, *},
+    fs::{dentry::*, error::*, file::*, filesystem::*, inode::*, mount::*, path::*, superblock::*},
     kconfig_defs::*,
     mm::{addr::*, error::*, frame::*, paging::*, percpu::*, space::*, zone::*},
     platform_defs::*,
@@ -34,6 +35,8 @@ pub use kernel_macros::*;
 /// It's not recommended to use other key types, such as [String] and
 /// [Vec<u8>], as they introduce extra heap allocations.
 pub type RadixTrie<V> = fast_radix_trie::GenericRadixMap<u64, V>;
+pub type Path = typed_path::Path<typed_path::UnixEncoding>;
+pub type PathBuf = typed_path::PathBuf<typed_path::UnixEncoding>;
 pub use bimap::BiMap;
 pub use bitflags::bitflags;
 pub use hashbrown::{HashMap, HashSet};

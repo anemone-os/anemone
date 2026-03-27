@@ -1,7 +1,5 @@
 //! Platform bus.
 
-
-
 use crate::{
     device::{
         bus::BusType,

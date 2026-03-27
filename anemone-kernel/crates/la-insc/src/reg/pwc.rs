@@ -14,7 +14,7 @@ impl Pwcl {
     impl_bits32!(number, dir2width, u8, 25, 30);
     impl_bits32!(bitflags, u8, ptewidth, PteWidth, 30, 32);
     impl_const_u32_converter!();
-    
+
     /// Create a PWCL value.
     pub const fn new(
         ptbase: u8,

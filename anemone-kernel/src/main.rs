@@ -25,6 +25,7 @@ pub mod debug;
 pub mod device;
 pub mod driver;
 pub mod exception;
+pub mod fs;
 pub mod initcall;
 pub mod mm;
 pub mod panic;
@@ -41,10 +42,7 @@ use crate::{
     device::discovery::open_firmware::{
         get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
         unflatten_device_tree,
-    },
-    mm::layout::KernelLayoutTrait,
-    prelude::{image::load_image_from_elf, *},
-    sync::{counter::CpuSync, mono::MonoOnce},
+    }, fs::vfs_mount, mm::layout::KernelLayoutTrait, prelude::{image::load_image_from_elf, *}, sync::{counter::CpuSync, mono::MonoOnce}
 };
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
@@ -54,6 +52,8 @@ static KUNIT_SYNC_COUNTER: CpuSync = CpuSync::new("kunit");
 unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     unsafe {
         kinfoln!("bsp #{} kinit running on {}...", bsp_id, current_task_id());
+        // register filesystem drivers
+        fs::init();
         // register drivers to bus types
         driver::init();
         unflatten_device_tree(fdt_va);
@@ -69,6 +69,9 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
 
         FINISH_SYNC_COUNTER.sync_with_counter();
         kinfoln!("bsp #{} kinit finished", bsp_id);
+
+        // mount a ramfs as temporary root filesystem.
+        vfs_mount("ramfs", MountSource::Pseudo, MountFlags::empty(), None).unwrap();
 
         #[cfg(feature = "kunit")]
         {

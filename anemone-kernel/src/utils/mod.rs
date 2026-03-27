@@ -8,8 +8,8 @@ pub mod circular_log;
 pub mod writer;
 #[macro_use]
 pub mod as_container;
+pub mod any_opaque;
 pub mod identity;
-pub mod prv_data;
 pub mod mmio;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

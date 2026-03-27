@@ -1,8 +1,6 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{
-    Error, Ident, ItemFn, ReturnType, Token, parse_macro_input, punctuated::Punctuated,
-};
+use syn::{Error, Ident, ItemFn, ReturnType, Token, parse_macro_input, punctuated::Punctuated};
 
 pub fn kunit_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr_parser = Punctuated::<Ident, Token![,]>::parse_terminated;

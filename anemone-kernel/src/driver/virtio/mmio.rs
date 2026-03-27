@@ -14,7 +14,7 @@ use virtio_drivers::transport::{
 /// representing the VirtIO MMIO transport, such that the Mmio remap will remain
 /// valid as long as the transport device exists. The actual VirtIO device will
 /// hold the transport and use it to access the device registers.
-#[derive(Debug, PrvData)]
+#[derive(Debug, Opaque)]
 struct MmioTransportState {
     remap: IoRemap,
 }
@@ -31,6 +31,7 @@ use crate::{
     },
     mm::remap::{IoRemap, ioremap},
     prelude::*,
+    utils::any_opaque::AnyOpaque,
 };
 
 #[derive(Debug, KObject, Driver)]
@@ -83,7 +84,7 @@ impl DriverOps for MmioTransportDriver {
                     );
 
                     let state = MmioTransportState { remap };
-                    pdev.set_drv_state(Some(Box::new(state)));
+                    pdev.set_drv_state(AnyOpaque::new(state));
 
                     // create virtio device and attach it to virtio bus
                     let kobj_base = KObjectBase::new(ident_format!("{}", pdev.name()).unwrap());

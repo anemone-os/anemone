@@ -8,7 +8,7 @@ use crate::{
         kobject::{KObject, KObjectBase, KObjectOps},
     },
     prelude::*,
-    utils::prv_data::PrvData,
+    utils::any_opaque::AnyOpaque,
 };
 
 #[derive(Debug, KObject, Device)]
@@ -73,7 +73,7 @@ impl VirtIODevice {
     pub fn request_irq(
         &self,
         handler: &'static IrqHandler,
-        prv_data: Option<Box<dyn PrvData>>,
+        prv_data: Option<AnyOpaque>,
     ) -> Result<(), DevError> {
         let kobj = self
             .parent()
