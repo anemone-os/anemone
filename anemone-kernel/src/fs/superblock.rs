@@ -189,26 +189,24 @@ impl SuperBlock {
     /// Internally, this calls the backend's `evict_inode` callback to allow it
     /// to perform any necessary cleanup or writeback.
     pub(super) fn try_evict(&self, ino: Ino) -> Result<(), FsError> {
-        let inode = self.inner.write_irqsave().icache.remove(&ino);
-        if let Some(inode) = inode {
+        let mut icache = self.inner.write_irqsave();
+        if let Some(inode) = icache.icache.get(&ino) {
             if inode.rc() > 0 {
-                knoticeln!(
-                    "cannot evict inode {:?} from superblock: still has active references {}",
-                    ino,
-                    inode.rc()
-                );
-                self.inner.write_irqsave().icache.insert(ino, inode);
-
                 return Err(FsError::Busy);
             }
-            if let Err(e) = (self.ops.evict_inode)(self, inode.clone()) {
-                self.inner.write_irqsave().icache.insert(ino, inode);
-                return Err(e);
-            }
-            knoticeln!("evicted inode {:?} from superblock", ino);
-            return Ok(());
+        } else {
+            return Err(FsError::NotFound);
         }
-        Err(FsError::NotFound)
+
+        let Some(inode) = icache.icache.remove(&ino) else {
+            unreachable!()
+        };
+        if let Err(e) = (self.ops.evict_inode)(self, inode.clone()) {
+            icache.icache.insert(ino, inode);
+            return Err(e);
+        }
+        knoticeln!("evicted inode {:?} from superblock", ino);
+        return Ok(());
     }
 
     /// Check if any inodes in the resident cache have active references, except
