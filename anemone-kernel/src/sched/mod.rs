@@ -24,6 +24,7 @@ pub use proc::{add_to_ready, clone_current_task, current_task_id, current_task_n
 /// Enter the scheduler loop. This function is called by bootstrap code to enter
 /// the scheduler.
 pub fn run_tasks() -> ! {
+    kinfoln!("scheduler started");
     unsafe {
         // init task
         set_running_task(clone_current_idle_task());

@@ -1,5 +1,6 @@
 //! CSR definitions and accessors
 
+
 use crate::reg::{
     asid::Asid,
     crmd::Crmd,
@@ -18,33 +19,20 @@ macro_rules! define_csr {
 
         #[doc = concat!("Accessor for CSR `", stringify!($name), "`")]
         pub mod $name {
-            use core::arch::asm;
+            use core::arch::loongarch64::{csrrd, csrwr};
             /// Read the CSR value
             #[inline(always)]
             pub unsafe fn csr_read() -> u64 {
-                let val: u64;
-
-                unsafe {
-                    asm!(
-                        "csrrd {0}, {1}",
-                        out(reg) val,
-                        const $num,
-                        options(nomem, nostack),
-                    );
+                unsafe{
+                    csrrd::<$num>() as u64
                 }
-                val
             }
 
             /// Write the CSR value
             #[inline(always)]
             pub unsafe fn csr_write(value: u64) {
                 unsafe{
-                    asm!(
-                        "csrwr {0}, {1}",
-                        in(reg) value,
-                        const $num,
-                        options(nomem, nostack)
-                    );
+                    csrwr::<$num>(value as i64);
                 }
             }
         }
@@ -57,20 +45,11 @@ macro_rules! define_csr {
         }
         #[doc = concat!("Accessor for CSR `", stringify!($name), "`")]
         pub mod $name {
-            use core::arch::asm;
+            use core::arch::loongarch64::{csrrd, csrwr};
             #[inline(always)]
             /// Read the CSR value
             pub unsafe fn csr_read() -> super::$type {
-                let val: u64;
-
-                unsafe {
-                    asm!(
-                        "csrrd {0}, {1}",
-                        lateout(reg) val,
-                        const $num,
-                        options(nomem, nostack),
-                    );
-                }
+                let val = unsafe { csrrd::<$num>() } as u64;
                 super::$type::from_u64(val)
             }
 
@@ -78,12 +57,7 @@ macro_rules! define_csr {
             #[inline(always)]
             pub unsafe fn csr_write(value: super::$type) {
                 unsafe{
-                    asm!(
-                        "csrwr {0}, {1}",
-                        in(reg) value.to_u64(),
-                        const $num,
-                        options(nomem, nostack)
-                    );
+                    csrwr::<$num>(value.to_u64() as i64);
                 }
             }
         }
@@ -96,20 +70,11 @@ macro_rules! define_csr {
         }
         #[doc = concat!("Accessor for CSR `", stringify!($name), "`")]
         pub mod $name {
-            use core::arch::asm;
+            use core::arch::loongarch64::{csrrd, csrwr};
             #[inline(always)]
             /// Read the CSR value
             pub unsafe fn csr_read() -> u32 {
-                let val: u32;
-
-                unsafe {
-                    asm!(
-                        "csrrd {0}, {1}",
-                        out(reg) val,
-                        const $num,
-                        options(nomem, nostack),
-                    );
-                }
+                let val = unsafe { csrrd::<$num>() } as u32;
                 val
             }
 
@@ -117,12 +82,7 @@ macro_rules! define_csr {
             #[inline(always)]
             pub unsafe fn csr_write(value: u32) {
                 unsafe{
-                    asm!(
-                        "csrwr {0}, {1}",
-                        in(reg) value,
-                        const $num,
-                        options(nomem, nostack)
-                    );
+                    csrwr::<$num>(value as i64);
                 }
             }
         }
@@ -135,20 +95,11 @@ macro_rules! define_csr {
         }
         #[doc = concat!("Accessor for CSR `", stringify!($name), "`")]
         pub mod $name {
-            use core::arch::asm;
+            use core::arch::loongarch64::{csrrd, csrwr};
             /// Read the CSR value
             #[inline(always)]
             pub unsafe fn csr_read() -> super::$type {
-                let val: u32;
-
-                unsafe {
-                    asm!(
-                        "csrrd {0}, {1}",
-                        lateout(reg) val,
-                        const $num,
-                        options(nomem, nostack),
-                    );
-                }
+                let val = unsafe { csrrd::<$num>() } as u32;
                 super::$type::from_u32(val)
             }
 
@@ -156,12 +107,7 @@ macro_rules! define_csr {
             #[inline(always)]
             pub unsafe fn csr_write(value: super::$type) {
                 unsafe{
-                    asm!(
-                        "csrwr {0}, {1}",
-                        in(reg) value.to_u32(),
-                        const $num,
-                        options(nomem, nostack)
-                    );
+                    csrwr::<$num>(value.to_u32() as i64);
                 }
             }
         }

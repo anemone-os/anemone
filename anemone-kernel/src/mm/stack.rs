@@ -29,7 +29,7 @@ impl KernelStack {
             kmap(Mapping {
                 vpn: stack_vpn,
                 ppn: frame_folio.range().start(),
-                flags: PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL,
+                flags: PteFlags::READ | PteFlags::WRITE,
                 npages: NPAGES,
                 huge_pages: false,
             })?;
@@ -56,7 +56,6 @@ impl Drop for KernelStack {
                 range: self.vpn_range,
             });
         }
-        kdebugln!("Dropping memspace.");
     }
 }
 

@@ -36,8 +36,9 @@ impl PagingArchTrait for LA64PagingArch {
             pgtbl.table_root_ppn().to_phys_addr().get()
         );
         unsafe {
-            pgdl::csr_write(pgtbl.table_root_ppn().to_phys_addr().get());
-            pgdh::csr_write(pgtbl.table_root_ppn().to_phys_addr().get());
+            let value = pgtbl.table_root_ppn().to_phys_addr().get();
+            pgdl::csr_write(value);
+            pgdh::csr_write(value);
         }
         Self::tlb_shootdown_all();
     }
@@ -64,6 +65,7 @@ impl PagingArchTrait for LA64PagingArch {
 
 #[derive(Clone, Copy)]
 #[repr(align(4096))]
+#[repr(C)]
 pub struct LA64PageDirectory {
     entries: [LA64PageTableEntry; LA64PagingArch::PTE_PER_PGDIR],
 }
@@ -179,6 +181,7 @@ impl PgDirArch for LA64PageDirectory {
 /// while those without `la_` are architecture-agnostic,
 /// converted from/to the loongarch-specific properties when necessary.
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct LA64PageTableEntry(u64);
 
 impl LA64PageTableEntry {

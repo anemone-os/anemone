@@ -58,9 +58,3 @@ impl PartialEq for MemSpace {
 }
 
 impl Eq for MemSpace {}
-
-impl Drop for MemSpace{
-    fn drop(&mut self) {
-        kdebugln!("Dropping memspace.");
-    }
-}

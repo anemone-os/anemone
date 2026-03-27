@@ -43,13 +43,9 @@ impl IntrArchTrait for LA64IntrArch {
 
     unsafe fn init_local_irq() {
         unsafe {
-            knoticeln!("({})init local irq...1 cur crmd : {:#x}",CpuArch::cur_cpu_id(), csr::crmd::csr_read().to_u64());
-            crmd::set_ie(false);
-            knoticeln!("({})init local irq...2",CpuArch::cur_cpu_id());
             ecfg::csr_write(Ecfg::new(IntrFlags::all(), 0));
-            knoticeln!("({})init local irq...3",CpuArch::cur_cpu_id());
             crmd::set_ie(true);
-            knoticeln!("({})init local irq...ok",CpuArch::cur_cpu_id());
+            knoticeln!("({})local irq initialized", CpuArch::cur_cpu_id());
         }
     }
 }

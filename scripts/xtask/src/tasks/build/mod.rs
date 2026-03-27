@@ -180,6 +180,11 @@ impl<'a> BuildContext<'a> {
                         self.platform.build.arch.as_str(),
                         self.platform.build.target.as_str()
                     ));
+
+                for arg in self.kconfig.build.profile.as_cargo_arg() {
+                    build = build.arg(arg);
+                }
+                
                 build.run_echo()?;
 
                 let built_kernel_path = format!("{}/{}", self.cargo_build_dir(), name);
