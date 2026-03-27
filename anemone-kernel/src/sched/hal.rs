@@ -37,11 +37,7 @@ pub trait TaskContextArch {
         irq_flags: IrqFlags,
         args: ParameterList,
     ) -> Self;
-    fn from_user_fn(
-        entry: VirtAddr,
-        kstack_top: VirtAddr,
-        args: ParameterList,
-    ) -> Self;
+    fn from_user_fn(entry: VirtAddr, ustack_top: VirtAddr, kstack_top: VirtAddr) -> Self;
     fn pc(&self) -> u64;
     fn sp(&self) -> u64;
 }

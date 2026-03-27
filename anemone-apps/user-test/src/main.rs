@@ -7,6 +7,7 @@ use anemone_abi::syscall::syscall;
 
 #[unsafe(no_mangle)]
 pub fn _start() {
+    loop{}
     unsafe {
         syscall(114514, 0, 0, 0, 0, 0, 0);
     }

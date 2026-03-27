@@ -42,6 +42,7 @@ use crate::{
         get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
         unflatten_device_tree,
     },
+    mm::layout::KernelLayoutTrait,
     prelude::{image::load_image_from_elf, *},
     sync::{counter::CpuSync, mono::MonoOnce},
 };
@@ -82,8 +83,8 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         Task::new_user(
             "user",
             entry as *const (),
-            ParameterList::empty(),
             Arc::new(memsp),
+            VirtAddr::new(KernelLayout::USPACE_TOP_ADDR),
         )
         .unwrap(),
     ));

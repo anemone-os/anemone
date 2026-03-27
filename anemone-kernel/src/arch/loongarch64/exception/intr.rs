@@ -1,6 +1,6 @@
 use la_insc::reg::{
     crmd,
-    csr::{self, ecfg},
+    csr::ecfg,
     exception::{Ecfg, IntrFlags},
 };
 use loongArch64::{iocsr::iocsr_write_w, ipi::send_ipi_single};

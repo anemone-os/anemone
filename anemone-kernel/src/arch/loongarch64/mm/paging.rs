@@ -76,6 +76,7 @@ pub struct LA64PageDirectory {
 pub const fn create_bootstrap_ptable() -> LA64PageDirectory {
     let mut pdir = LA64PageDirectory::ZEROED;
 
+    // align to GB
     let k_phys_align_down = align_down_power_of_2!(KERNEL_LA_BASE, 1 << 30);
     let k_phys_ppn = k_phys_align_down as u64 >> 12;
     let k_virt_idx = (KERNEL_VA_BASE >> 30) as usize & 0x1ff;
@@ -185,7 +186,8 @@ impl PgDirArch for LA64PageDirectory {
 pub struct LA64PageTableEntry(u64);
 
 impl LA64PageTableEntry {
-    const PPN_MASK: u64 = 0x03FF_FFFF_FFFF_F000;
+    const FLAG_MASK: u64 = 0xFC00_0000_0000_0FFF;
+    const PPN_OFFSET: usize = PagingArch::PAGE_SIZE_BITS;
     impl_bits64!(value, u8, la_mat, MemAccessType, 4, 6);
     impl_bits64!(value, u8, la_plv, PrivilegeLevel, 2, 4);
 
@@ -195,7 +197,7 @@ impl LA64PageTableEntry {
         mat: MemAccessType,
         plv: PrivilegeLevel,
     ) -> Self {
-        let mut entry = LA64PageTableEntry((ppn.get() << 12) & Self::PPN_MASK);
+        let mut entry = LA64PageTableEntry((ppn.get() << Self::PPN_OFFSET) & !Self::FLAG_MASK);
         unsafe {
             entry.set_la_flags_from_empty(flags);
         }
@@ -281,7 +283,7 @@ impl PteArch for LA64PageTableEntry {
     }
 
     fn ppn(&self) -> PhysPageNum {
-        PhysPageNum::new((self.0 & Self::PPN_MASK) >> 12)
+        PhysPageNum::new((self.0 & !Self::FLAG_MASK) >> Self::PPN_OFFSET)
     }
 
     fn is_leaf(&self) -> bool {
@@ -301,8 +303,8 @@ impl PteArch for LA64PageTableEntry {
 
     unsafe fn set_ppn(&mut self, ppn: PhysPageNum) {
         let mut value = self.0;
-        value &= !Self::PPN_MASK;
-        value |= (ppn.get() << 12) & Self::PPN_MASK;
+        value &= !Self::FLAG_MASK;
+        value |= (ppn.get() << Self::PPN_OFFSET) & !Self::FLAG_MASK;
         self.0 = value;
     }
 }

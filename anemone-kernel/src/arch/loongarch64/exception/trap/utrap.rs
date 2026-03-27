@@ -80,6 +80,9 @@ core::arch::global_asm!(
 
     "   move $a0, $sp",
 
+    "   addi.d $sp, $sp, {trapframe_bytes}",
+    "   csrwr $sp, {save0}",
+
     "   .global __utrap_return_to_task",
     "__utrap_return_to_task:",
     // all done. restore registers now.
@@ -87,8 +90,6 @@ core::arch::global_asm!(
     "   la $t0, __utrap_entry",
     "   csrwr $t0, {eentry}",
 
-    "   addi.d $t0, $sp, {trapframe_bytes}",
-    "   csrwr $t0, {save0}",
 
     "   ld.d $r0, $a0, 0",
     "   ld.d $r1, $a0, 8",

@@ -87,25 +87,25 @@ impl Task {
     pub fn new_user(
         name: impl AsRef<str>,
         entry: *const (),
-        args: ParameterList,
         memsp: Arc<MemSpace>,
+        ustack_top: VirtAddr,
     ) -> Result<Self, MmError> {
-        let stack = KernelStack::new()?;
-        let stack_top = stack.stack_top();
-        kdebugln!("create user task with kernel stack at {:?}", stack);
+        let ustack = KernelStack::new()?;
+        let kstack_top = ustack.stack_top();
+        kdebugln!("create user task with kernel stack at {:?}", ustack);
         Ok(Self {
             status: RwLock::new(TaskStatus::Ready),
             name: Box::from(name.as_ref()),
             flags: TaskFlags::NONE,
             tid: alloc_tid(),
-            kstack: stack,
+            kstack: ustack,
             memsp: Some(memsp),
             sched_info: unsafe {
                 MonoFlow::new(TaskInner {
                     task_context: TaskContext::from_user_fn(
                         VirtAddr::new(entry as u64),
-                        stack_top,
-                        args,
+                        ustack_top,
+                        kstack_top,
                     ),
                     trap_frame: TrapFrame::ZEROED,
                 })

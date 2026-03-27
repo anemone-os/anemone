@@ -15,6 +15,7 @@ pub struct UserSpace {
 }
 
 impl UserSpace {
+
     pub fn new(heap_start: VirtPageNum, page_table: &mut PageTable) -> Result<Self, MmError> {
         let stack = MemArea::prealloc(
             KernelLayout::USPACE_TOP_VPN,
@@ -89,6 +90,14 @@ impl UserSpace {
         unsafe { mapper.fill_data(vaddr, source, psize as u64)? }
         // TODO: fill 0
         Ok(())
+    }
+
+    pub fn stack(&self) -> &MemArea {
+        &self.stack
+    }
+
+    pub fn heap(&self) -> &MemArea {
+        &self.heap
     }
 }
 

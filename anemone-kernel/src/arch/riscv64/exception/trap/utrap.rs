@@ -69,8 +69,6 @@ core::arch::global_asm!(
     "   sd t0, 272(sp)",
     "   csrr t0, scause",
     "   sd t0, 280(sp)",
-    "   addi t0, sp, {trapframe_bytes}",
-    "   csrw sscratch, t0",
     // TODO: if this is a device interrupt (timer or external), an interrupt stack
     // should be used, instead of continuing execution on the current stack.
 
@@ -83,9 +81,11 @@ core::arch::global_asm!(
 
     "   mv a0, sp",
 
+    "   addi sp, sp, {trapframe_bytes}",
+    "   csrw sscratch, sp",
+
     "   .global __utrap_return_to_task",
     "__utrap_return_to_task:",
-    // all done. restore registers now.
 
     "   la t0, __utrap_entry",
     "   csrw stvec, t0",
@@ -205,5 +205,9 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
 
 unsafe extern "C" {
     unsafe fn __utrap_entry() -> !;
+
+    /// Return from trap to user task, or enter the user task from kernel.
+    /// 
+    /// **Make sure `sscratch` points to the kernel stack top before calling this function**, and the trapframe is valid.
     pub unsafe fn __utrap_return_to_task(trapframe: *const RiscV64TrapFrame) -> !;
 }
