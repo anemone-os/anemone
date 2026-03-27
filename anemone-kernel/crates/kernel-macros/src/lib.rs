@@ -5,6 +5,7 @@ mod dd;
 mod initcall;
 mod kunit;
 mod percpu;
+mod syscall;
 
 /// Defines a per-CPU variable.
 ///
@@ -32,6 +33,31 @@ pub fn kunit(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn initcall(attr: TokenStream, item: TokenStream) -> TokenStream {
     initcall::initcall_impl(attr, item)
+}
+
+/// Defines a syscall handler.
+///
+/// Example usage:
+/// ```
+/// #[syscall(no = anemone_abi::syscall::SYS_FOO)]
+/// fn sys_foo(arg1: usize, arg2: u32) -> Result<u64, SysError> {
+///     // ...
+/// }
+/// ```
+///
+/// Custom validation can be added to syscall arguments by annotating them with
+/// `#[validate_with(...)]`:
+/// ```
+/// #[syscall(no = anemone_abi::syscall::SYS_FOO)]
+/// fn sys_foo(#[validate_with(my_validator)] arg1: usize) -> Result<u64, SysError> {
+///     // ...
+/// }
+/// ```
+/// where `my_validator` is a function with the signature `fn(usize,
+/// &SyscallCtx) -> Result<ValidatedArgType, SysError>`.
+#[proc_macro_attribute]
+pub fn syscall(attr: TokenStream, item: TokenStream) -> TokenStream {
+    syscall::syscall_impl(attr, item)
 }
 
 /// Derives the `KObjectData` trait for a struct.

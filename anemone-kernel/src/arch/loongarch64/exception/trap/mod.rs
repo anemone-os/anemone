@@ -24,34 +24,34 @@ impl TrapArchTrait for LA64TrapArch {
 #[derive(Debug)]
 #[repr(C)]
 struct Gpr {
-    x: [u64; 32],
+    r: [u64; 32],
 }
 
 impl Gpr {
     /// Read a general-purpose register by raw index.
-    fn x(&self, index: usize) -> u64 {
-        self.x[index]
+    fn r(&self, index: usize) -> u64 {
+        self.r[index]
     }
 
     /// Return the return-address register value.
     fn ra(&self) -> u64 {
-        self.x(1)
+        self.r(1)
     }
 
     /// Return the thread-pointer register value.
     fn tp(&self) -> u64 {
-        self.x(2)
+        self.r(2)
     }
 
     /// Return the stack-pointer register value.
     fn sp(&self) -> u64 {
-        self.x(3)
+        self.r(3)
     }
 
     /// Return syscall/argument register aN.
     fn a<const N: usize>(&self) -> u64 {
         const_assert!(N < 8, "LoongArch has only 8 argument registers (a0-a7)");
-        self.x(4 + N)
+        self.r(4 + N)
     }
 }
 
@@ -77,15 +77,15 @@ impl LA64TrapFrame {
     ) -> Self {
         Self {
             gpr: Gpr {
-                x: {
-                    let mut x = [0; 32];
-                    x[4..11].copy_from_slice(args);
-                    x[3] = stack_top;
-                    x[1] = ra as u64;
+                r: {
+                    let mut r = [0; 32];
+                    r[4..11].copy_from_slice(args);
+                    r[3] = stack_top;
+                    r[1] = ra as u64;
                     unsafe {
-                        asm!("st.d $tp, {0}, 0", in(reg) &x[2]); //tp
+                        asm!("st.d $tp, {0}, 0", in(reg) &r[2]); //tp
                     }
-                    x
+                    r
                 },
             },
             prmd: {
@@ -103,7 +103,7 @@ impl LA64TrapFrame {
 
 impl TrapFrameArch for LA64TrapFrame {
     const ZEROED: Self = Self {
-        gpr: Gpr { x: [0; 32] },
+        gpr: Gpr { r: [0; 32] },
         prmd: 0,
         era: 0,
         badv: 0,
@@ -116,9 +116,17 @@ impl TrapFrameArch for LA64TrapFrame {
         self.gpr.a::<IDX>() as usize
     }
 
+    unsafe fn syscall_no(&self) -> usize {
+        self.gpr.a::<7>() as usize
+    }
+
     /// Advance exception return address to the next instruction.
     fn advance_pc(&mut self) {
         self.era += 4;
+    }
+
+    unsafe fn set_syscall_ret_val(&mut self, retval: u64) {
+        self.gpr.r[4] = retval; // a0
     }
 }
 

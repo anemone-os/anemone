@@ -123,6 +123,14 @@ impl<T> MonoOnce<T> {
         }
     }
 
+    pub const fn from_init(init: T) -> Self {
+        MonoOnce {
+            data: UnsafeCell::new(MaybeUninit::new(init)),
+            #[cfg(debug_assertions)]
+            initialized: AtomicBool::new(true),
+        }
+    }
+
     pub fn init<F>(&self, init: F)
     where
         F: FnOnce(&mut MaybeUninit<T>),

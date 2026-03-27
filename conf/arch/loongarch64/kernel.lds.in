@@ -33,6 +33,9 @@ SECTIONS {
         __skunit = .;
         *(.kunit .kunit.*)
         __ekunit = .;
+        __ssyscall = .;
+        *(.syscall .syscall.*)
+        __esyscall = .;
         __erodata = .;
     }  > VIRT AT> RAM
 
