@@ -10,7 +10,7 @@ pub trait TrapFrameArch {
     ///
     /// This is only meaningful in a syscall context, and the behavior is
     /// undefined otherwise.
-    unsafe fn syscall_args<const IDX: usize>(&self) -> usize;
+    unsafe fn syscall_args<const IDX: usize>(&self) -> u64;
 
     /// Get the system call number.
     ///

@@ -98,9 +98,9 @@ impl RiscV64TrapFrame {
 }
 
 impl TrapFrameArch for RiscV64TrapFrame {
-    unsafe fn syscall_args<const IDX: usize>(&self) -> usize {
+    unsafe fn syscall_args<const IDX: usize>(&self) -> u64 {
         const_assert!(IDX < 7);
-        self.gpr.a::<IDX>() as usize
+        self.gpr.a::<IDX>()
     }
 
     unsafe fn syscall_no(&self) -> usize {

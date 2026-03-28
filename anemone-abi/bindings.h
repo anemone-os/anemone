@@ -7,27 +7,27 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#if defined(__ANEMONE_ARCH_RISCV64__)
 /**
  * The Linux kernel actually does not define a maximum syscall number,
- * but it's obvious that syscall numbers won't exceed this value, on any
- * architecture.
+ * but it's obvious that syscall numbers won't exceed this value minus one, on
+ * any architecture.
  *
  * Anemone defines its own syscall number starting from this value.
  */
 #define LINUX_SYSNO_MAX 512
-#endif
 
-#if defined(__ANEMONE_ARCH_LOONGARCH64__)
 /**
- * The Linux kernel actually does not define a maximum syscall number,
- * but it's obvious that syscall numbers won't exceed this value, on any
- * architecture.
+ * The syscall number where Anemone-specific syscalls start.
  *
- * Anemone defines its own syscall number starting from this value.
+ * Currently unused.
  */
-#define LINUX_SYSNO_MAX 512
-#endif
+#define SYS_ANEMONE_START (LINUX_SYSNO_MAX + 0)
+
+/**
+ * Syscall (Linux or Anemone-native) numbers will not exceed this value minus
+ * one.
+ */
+#define ANEMONE_SYSNO_MAX 1024
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
 #define SYS_READ 63
@@ -44,13 +44,6 @@
 #if defined(__ANEMONE_ARCH_RISCV64__)
 #define SYS_CLOSE 57
 #endif
-
-/**
- * The syscall number where Anemone-specific syscalls start.
- *
- * Currently unused.
- */
-#define SYS_ANEMONE_START (LINUX_SYSNO_MAX + 0)
 
 /**
  * Type representing errno values.

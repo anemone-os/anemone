@@ -33,6 +33,7 @@ SECTIONS {
         __skunit = .;
         *(.kunit .kunit.*)
         __ekunit = .;
+        . = ALIGN(4K);
         __ssyscall = .;
         *(.syscall .syscall.*)
         __esyscall = .;

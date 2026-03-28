@@ -2,31 +2,16 @@
 
 use crate::prelude::*;
 
+/// Raw syscall registers.
 #[derive(Debug, Clone, Copy)]
 pub struct SyscallRegs {
     pub sysno: usize,
-    pub args: [usize; 6],
+    pub args: [u64; 6],
 }
 
-pub struct SyscallCtx {
-    task: Arc<Task>,
-    // TODO
-}
+pub type RawSyscallFn = fn(&SyscallRegs) -> Result<u64, SysError>;
 
-impl SyscallCtx {
-    pub fn capture() -> Self {
-        Self {
-            task: clone_current_task(),
-        }
-    }
-
-    pub fn task(&self) -> &Arc<Task> {
-        &self.task
-    }
-}
-
-pub type RawSyscallFn = fn(&SyscallRegs, &SyscallCtx) -> Result<u64, SysError>;
-
+/// Syscall handler descriptor, collected into [super::SyscallTable].
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct SyscallHandler {
@@ -36,36 +21,48 @@ pub struct SyscallHandler {
     pub handler: RawSyscallFn,
 }
 
+/// Trait for converting raw syscall arguments to typed values.
+///
+/// **Method `try_from_syscall_arg` is guaranteed to be called only in a syscall
+/// context.**
 pub trait TryFromSyscallArg: Sized {
-    fn try_from_syscall_arg(raw: u64, ctx: &SyscallCtx) -> Result<Self, SysError>;
+    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError>;
 }
 
 macro_rules! gen_basic_try_from_syscall_arg {
-    ($ty:ty) => {
+    (unsigned, $ty:ty) => {
         impl TryFromSyscallArg for $ty {
-            fn try_from_syscall_arg(raw: u64, _ctx: &SyscallCtx) -> Result<Self, SysError> {
-                <$ty>::try_from(raw).map_err(|_| KernelError::InvalidArgument.into())
+            fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+                if raw <= <$ty>::MAX as u64 {
+                    Ok(raw as $ty)
+                } else {
+                    Err(KernelError::InvalidArgument.into())
+                }
             }
         }
     };
-    () => {};
+    (signed, $ty:ty) => {
+        impl TryFromSyscallArg for $ty {
+            fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+                let signed = raw as i64;
+                if signed >= <$ty>::MIN as i64 && signed <= <$ty>::MAX as i64 {
+                    Ok(signed as $ty)
+                } else {
+                    Err(KernelError::InvalidArgument.into())
+                }
+            }
+        }
+    };
 }
 
-gen_basic_try_from_syscall_arg!(u8);
-gen_basic_try_from_syscall_arg!(u16);
-gen_basic_try_from_syscall_arg!(u32);
-gen_basic_try_from_syscall_arg!(u64);
-gen_basic_try_from_syscall_arg!(usize);
+gen_basic_try_from_syscall_arg!(unsigned, u8);
+gen_basic_try_from_syscall_arg!(unsigned, u16);
+gen_basic_try_from_syscall_arg!(unsigned, u32);
+gen_basic_try_from_syscall_arg!(unsigned, u64);
+gen_basic_try_from_syscall_arg!(unsigned, usize);
 
-gen_basic_try_from_syscall_arg!(i8);
-gen_basic_try_from_syscall_arg!(i16);
-gen_basic_try_from_syscall_arg!(i32);
-gen_basic_try_from_syscall_arg!(i64);
-gen_basic_try_from_syscall_arg!(isize);
-
-pub(super) fn invalid_syscall_handler(
-    _regs: &SyscallRegs,
-    _ctx: &SyscallCtx,
-) -> Result<u64, SysError> {
-    Err(KernelError::NoSys.into())
-}
+gen_basic_try_from_syscall_arg!(signed, i8);
+gen_basic_try_from_syscall_arg!(signed, i16);
+gen_basic_try_from_syscall_arg!(signed, i32);
+gen_basic_try_from_syscall_arg!(signed, i64);
+gen_basic_try_from_syscall_arg!(signed, isize);

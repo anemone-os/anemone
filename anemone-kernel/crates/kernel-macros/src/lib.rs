@@ -39,7 +39,7 @@ pub fn initcall(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// Example usage:
 /// ```
-/// #[syscall(no = anemone_abi::syscall::SYS_FOO)]
+/// #[syscall(anemone_abi::syscall::SYS_FOO)]
 /// fn sys_foo(arg1: usize, arg2: u32) -> Result<u64, SysError> {
 ///     // ...
 /// }
@@ -48,13 +48,14 @@ pub fn initcall(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Custom validation can be added to syscall arguments by annotating them with
 /// `#[validate_with(...)]`:
 /// ```
-/// #[syscall(no = anemone_abi::syscall::SYS_FOO)]
+/// #[syscall(anemone_abi::syscall::SYS_FOO)]
 /// fn sys_foo(#[validate_with(my_validator)] arg1: usize) -> Result<u64, SysError> {
 ///     // ...
 /// }
 /// ```
-/// where `my_validator` is a function with the signature `fn(usize,
-/// &SyscallCtx) -> Result<ValidatedArgType, SysError>`.
+/// where `my_validator` is a function with the signature `fn(u64) ->
+/// Result<ValidatedArgType, SysError>`, and `ValidatedArgType` is the type of
+/// `arg1`.
 #[proc_macro_attribute]
 pub fn syscall(attr: TokenStream, item: TokenStream) -> TokenStream {
     syscall::syscall_impl(attr, item)

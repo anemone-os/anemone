@@ -3,8 +3,8 @@
 use anemone_abi::syscall::ANEMONE_SYSNO_MAX;
 
 use crate::{
-    prelude::*,
-    syscall::handler::{SyscallHandler, invalid_syscall_handler},
+    prelude::{handler::SyscallRegs, *},
+    syscall::handler::SyscallHandler,
 };
 
 pub mod handler;
@@ -13,7 +13,12 @@ const INVALID_SYSCALL: SyscallHandler = SyscallHandler {
     sysno: 0,
     nargs: 0,
     name: "invalid",
-    handler: invalid_syscall_handler,
+    handler: {
+        pub(super) fn invalid_syscall_handler(_regs: &SyscallRegs) -> Result<u64, SysError> {
+            Err(KernelError::NoSys.into())
+        }
+        invalid_syscall_handler
+    },
 };
 
 /// Syscall handler table. Singleton instance.
@@ -22,14 +27,11 @@ struct SyscallTable {
     handlers: [SyscallHandler; ANEMONE_SYSNO_MAX as usize],
 }
 
-static SYSCALL_TABLE: MonoOnce<SyscallTable> = MonoOnce::from_init(SyscallTable {
-    handlers: [SyscallHandler {
-        sysno: 0,
-        nargs: 0,
-        name: "invalid",
-        handler: invalid_syscall_handler,
-    }; ANEMONE_SYSNO_MAX as usize],
-});
+static SYSCALL_TABLE: MonoOnce<SyscallTable> = unsafe {
+    MonoOnce::from_partial_initialized(SyscallTable {
+        handlers: [INVALID_SYSCALL; ANEMONE_SYSNO_MAX as usize],
+    })
+};
 
 pub fn register_syscall_handlers() {
     SYSCALL_TABLE.init(|s| {
@@ -51,14 +53,22 @@ pub fn register_syscall_handlers() {
         for handler in handlers {
             unsafe {
                 assert!(handler.sysno < ANEMONE_SYSNO_MAX as usize);
-                if handler_ptr.add(handler.sysno).read().sysno != 0 {
+
+                let h = &*handler_ptr.add(handler.sysno);
+
+                if h.sysno != 0 {
                     panic!(
                         "duplicate syscall number {} for handlers {} and {}",
-                        handler.sysno,
-                        handler_ptr.add(handler.sysno).read().name,
-                        handler.name,
+                        handler.sysno, h.name, handler.name,
                     );
                 }
+
+                knoticeln!(
+                    "registering syscall handler {} for syscall number {}",
+                    handler.name,
+                    handler.sysno
+                );
+
                 handler_ptr.add(handler.sysno).write(*handler);
             }
         }
@@ -69,7 +79,9 @@ pub fn register_syscall_handlers() {
 ///
 /// For syscall occurring in kernel space, arch-specific code should just panic
 /// immediately, and this function should never be called.
-pub fn handle_syscall(trapframe: &mut TrapFrame, sysno: usize) {
+pub fn handle_syscall(trapframe: &mut TrapFrame) {
+    let sysno = unsafe { trapframe.syscall_no() };
+
     let handler = SYSCALL_TABLE
         .get()
         .handlers
@@ -77,7 +89,7 @@ pub fn handle_syscall(trapframe: &mut TrapFrame, sysno: usize) {
         .copied()
         .unwrap_or(INVALID_SYSCALL);
 
-    let regs = handler::SyscallRegs {
+    let regs = SyscallRegs {
         sysno,
         args: unsafe {
             [
@@ -90,9 +102,8 @@ pub fn handle_syscall(trapframe: &mut TrapFrame, sysno: usize) {
             ]
         },
     };
-    let ctx = handler::SyscallCtx::capture();
 
-    let retval = match (handler.handler)(&regs, &ctx) {
+    let retval = match (handler.handler)(&regs) {
         Ok(retval) => retval,
         Err(err) => (-(i64::from(err.as_errno()))) as u64,
     };
@@ -103,22 +114,31 @@ pub fn handle_syscall(trapframe: &mut TrapFrame, sysno: usize) {
     trapframe.advance_pc();
 }
 
-#[syscall(no = anemone_abi::syscall::SYS_READ)]
-fn sys_read(test: usize) -> Result<u64, SysError> {
-    kerrln!("sys_read called with arg: {}", test);
-    Ok(test as u64 + 1)
+#[syscall(39)]
+fn sys_foo(a: usize, b: i32) -> Result<u64, SysError> {
+    Ok((a as u64) + (b as u64))
 }
 
-fn my_validator(raw: u64, _ctx: &handler::SyscallCtx) -> Result<u32, SysError> {
-    if raw > 100 {
+#[syscall(42)]
+fn sys_bar(
+    #[validate_with(nonzero)] x: usize,
+    #[validate_with(greater_than_zero)] y: i32,
+) -> Result<u64, SysError> {
+    Ok((x as u64) * (y as u64))
+}
+
+fn nonzero(arg: u64) -> Result<usize, SysError> {
+    if arg == 0 {
         Err(KernelError::InvalidArgument.into())
     } else {
-        Ok(raw as u32)
+        Ok(arg as usize)
     }
 }
 
-#[syscall(no = 42)]
-fn sys_foo(#[sysarg(validate_with = my_validator)] arg1: u32) -> Result<u64, SysError> {
-    kerrln!("sys_foo called with arg: {}", arg1);
-    Ok(arg1 as u64 + 2)
+fn greater_than_zero(arg: u64) -> Result<i32, SysError> {
+    if arg == 0 {
+        Err(KernelError::InvalidArgument.into())
+    } else {
+        Ok(arg as i32)
+    }
 }

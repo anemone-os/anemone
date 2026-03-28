@@ -123,11 +123,16 @@ impl<T> MonoOnce<T> {
         }
     }
 
-    pub const fn from_init(init: T) -> Self {
+    /// Create a new [`MonoOnce`] with the inner data already initialized.
+    ///
+    /// This does not make any guarantee on the initialization of the inner
+    /// data, and is only a convenience function for cases where the inner data
+    /// can be initialized at compile time.
+    pub const unsafe fn from_partial_initialized(init: T) -> Self {
         MonoOnce {
             data: UnsafeCell::new(MaybeUninit::new(init)),
             #[cfg(debug_assertions)]
-            initialized: AtomicBool::new(true),
+            initialized: AtomicBool::new(false),
         }
     }
 
