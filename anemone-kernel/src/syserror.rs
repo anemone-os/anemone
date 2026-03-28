@@ -9,6 +9,24 @@ pub enum SysError {
     Mm(MmError),
     Dev(DevError),
     Fs(FsError),
+
+    Kernel(KernelError),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KernelError {
+    /// The syscall number is invalid (i.e. no handler registered for it).
+    NoSys,
+    /// The syscall is valid, but not yet implemented.
+    NotYetImplemented,
+    /// The syscall arguments are invalid.
+    InvalidArgument,
+}
+
+impl AsErrno for KernelError {
+    fn as_errno(&self) -> anemone_abi::errno::Errno {
+        todo!()
+    }
 }
 
 impl From<MmError> for SysError {
@@ -29,12 +47,19 @@ impl From<FsError> for SysError {
     }
 }
 
+impl From<KernelError> for SysError {
+    fn from(kernel_error: KernelError) -> Self {
+        Self::Kernel(kernel_error)
+    }
+}
+
 impl AsErrno for SysError {
     fn as_errno(&self) -> anemone_abi::errno::Errno {
         match self {
             SysError::Mm(mm_error) => mm_error.as_errno(),
             SysError::Dev(dev_error) => dev_error.as_errno(),
             SysError::Fs(fs_error) => fs_error.as_errno(),
+            SysError::Kernel(kernel_error) => kernel_error.as_errno(),
         }
     }
 }

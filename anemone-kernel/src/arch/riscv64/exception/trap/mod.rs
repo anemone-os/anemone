@@ -98,15 +98,23 @@ impl RiscV64TrapFrame {
 }
 
 impl TrapFrameArch for RiscV64TrapFrame {
-    unsafe fn syscall_args<const IDX: usize>(&self) -> usize {
+    unsafe fn syscall_args<const IDX: usize>(&self) -> u64 {
         const_assert!(IDX < 7);
-        self.gpr.a::<IDX>() as usize
+        self.gpr.a::<IDX>()
     }
-    
+
+    unsafe fn syscall_no(&self) -> usize {
+        self.gpr.a::<7>() as usize
+    }
+
     fn advance_pc(&mut self) {
         // `ecall` instruction is always 4 bytes long even though Compressed
         // extension is enabled.
         self.sepc += 4;
+    }
+
+    unsafe fn set_syscall_ret_val(&mut self, retval: u64) {
+        self.gpr.x[10] = retval; // a0
     }
 
     const ZEROED: Self = Self {

@@ -52,6 +52,7 @@ static KUNIT_SYNC_COUNTER: CpuSync = CpuSync::new("kunit");
 unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     unsafe {
         kinfoln!("bsp #{} kinit running on {}...", bsp_id, current_task_id());
+        syscall::register_syscall_handlers();
         // register filesystem drivers
         fs::init();
         // register drivers to bus types

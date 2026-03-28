@@ -159,12 +159,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             .unwrap_or_else(|_| panic!("unknown exception with code {}", code));
         match reason {
             RiscV64Exception::UserEnvCall => {
-                kerrln!(
-                    "({}) user {} aborted with user call\n\tuser call not implemented yet",
-                    CpuArch::cur_cpu_id(),
-                    current_task_id(),
-                );
-                task_exit()
+                handle_syscall(trapframe);
             },
             RiscV64Exception::Breakpoint => {
                 kerrln!(
@@ -207,7 +202,8 @@ unsafe extern "C" {
     unsafe fn __utrap_entry() -> !;
 
     /// Return from trap to user task, or enter the user task from kernel.
-    /// 
-    /// **Make sure `sscratch` points to the kernel stack top before calling this function**, and the trapframe is valid.
+    ///
+    /// **Make sure `sscratch` points to the kernel stack top before calling
+    /// this function**, and the trapframe is valid.
     pub unsafe fn __utrap_return_to_task(trapframe: *const RiscV64TrapFrame) -> !;
 }

@@ -56,6 +56,13 @@ unsafe extern "C" {
     /// The end of the KUnit test data segment of the kernel in virtual memory.
     pub fn __ekunit();
 
+    /// The start of the syscall handler data segment of the kernel in virtual
+    /// memory.
+    pub fn __ssyscall();
+    /// The end of the syscall handler data segment of the kernel in virtual
+    /// memory.
+    pub fn __esyscall();
+
     /// The start of the initcall section for filesystem driver initcalls.
     pub fn __sinitcall_fs();
     /// The end of the initcall section for filesystem driver initcalls.

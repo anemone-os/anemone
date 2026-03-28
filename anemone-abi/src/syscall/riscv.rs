@@ -1,15 +1,6 @@
 //! System call conventions and numbers.
 //! Architecture-specific.
 
-/// The Linux kernel actually does not define a maximum syscall number,
-/// but it's obvious that syscall numbers won't exceed this value, on any
-/// architecture.
-///
-/// Anemone defines its own syscall number starting from this value.
-pub const LINUX_SYSNO_MAX: u64 = 0x200;
-
-/// Anemone-native syscall numbers.
-
 pub unsafe fn syscall(
     sysno: u64,
     arg0: u64,

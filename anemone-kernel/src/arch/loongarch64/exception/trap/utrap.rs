@@ -182,6 +182,9 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         };
 
         match reason {
+            LA64Exception::Syscall => {
+                handle_syscall(trapframe);
+            },
             LA64Exception::PageModified => {
                 kerrln!(
                     "({}) user {} aborted: Page Modified exception at address: {:#x}, pc: {:#x}. \
