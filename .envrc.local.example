@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# Copy this file to .envrc.local and adjust the paths for your machine.
+# Keep developer-specific toolchain settings out of the shared .envrc.
+
+# lwext4 requires musl cross-compilation toolchains. 
+export LWEXT4_TOOLCHAIN_RISCV64="$HOME/toolchains/riscv64-linux-musl-cross"
+export LWEXT4_TOOLCHAIN_LOONGARCH64="$HOME/toolchains/loongarch64-linux-musl-cross"

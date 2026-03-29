@@ -1,42 +1,54 @@
 //! Virtual file system and filesystem drivers.
 
 // vfs infrastructure
-pub mod dentry;
-pub mod error;
-pub mod file;
-pub mod filesystem;
-pub mod inode;
-pub mod mount;
-pub mod namei;
-pub mod path;
-pub mod superblock;
+mod dentry;
+mod error;
+mod file;
+mod filesystem;
+mod inode;
+mod mount;
+mod namei;
+mod path;
+mod superblock;
 
 // filesystem drivers
-pub mod devfs;
-pub mod ramfs;
+mod devfs;
+mod ext4;
+mod ramfs;
+
+pub use self::{
+    dentry::Dentry,
+    error::FsError,
+    file::{DirContext, DirEntry, File, FileOps},
+    filesystem::{FileSystem, FileSystemOps},
+    inode::{Ino, InoIsZero, InodeOps, InodeRef, InodeType, OpenedFile},
+    mount::{Mount, MountFlags, MountSource},
+    path::PathRef,
+    superblock::SuperBlock,
+};
 
 mod namespace {
     use crate::prelude::*;
 
-    pub struct NameSpace {
+    pub(super) struct NameSpace {
         root_path: Option<PathRef>,
         // currently no transaction atomicity is needed.
         //tx_lock: RwLock<()>,
     }
 
     impl NameSpace {
-        pub fn new() -> Self {
+        pub(super) fn new() -> Self {
             Self {
                 root_path: None,
                 //                tx_lock: RwLock::new(()),
             }
         }
 
-        pub fn root_path(&self) -> Option<PathRef> {
+        pub(super) fn root_path(&self) -> Option<PathRef> {
             self.root_path.clone()
         }
 
-        pub fn install_root(&mut self, root: PathRef) {
+        pub(super) fn install_root(&mut self, root: PathRef) {
             self.root_path = Some(root);
         }
     }
@@ -208,13 +220,48 @@ mod vfs {
             .root_path()
             .expect("root mount must be established")
     }
+
+    fn mounted_superblocks() -> Vec<Arc<SuperBlock>> {
+        let mounts = VFS.mounts.read_irqsave();
+        let mut superblocks = Vec::new();
+
+        for mount in mounts.iter() {
+            let sb = mount.sb().clone();
+            if superblocks
+                .iter()
+                .any(|existing| Arc::ptr_eq(existing, &sb))
+            {
+                continue;
+            }
+            superblocks.push(sb);
+        }
+
+        superblocks
+    }
+
+    /// Called when the system is shutting down. This will flush all cached data
+    /// to storage devices of file systems, if exist, and perform any necessary
+    /// cleanup.
+    pub unsafe fn on_shutdown() {
+        for sb in mounted_superblocks() {
+            if let Err(err) = sb.fs().sync_fs(&sb) {
+                kerrln!(
+                    "failed to sync filesystem {} during shutdown: {:?}",
+                    sb.fs().name(),
+                    err
+                );
+            }
+        }
+    }
 }
 pub use vfs::*;
 
 mod vfs_ops {
     use crate::{
         fs::{
-            mount, namei::{canonicalize_child, resolve, resolve_parent}, unmount
+            mount,
+            namei::{canonicalize_child, resolve, resolve_parent},
+            unmount,
         },
         prelude::*,
     };
@@ -332,7 +379,7 @@ pub use vfs_ops::*;
 
 use crate::initcall::{InitCallLevel, run_initcalls};
 
-pub fn init() {
+pub fn register_filesystem_drivers() {
     unsafe {
         run_initcalls(InitCallLevel::Fs);
     }
@@ -361,7 +408,9 @@ mod kunits {
         assert_eq!(vfs_lookup(path).unwrap_err(), FsError::NotFound);
 
         let created = vfs_create(path, InodeType::Regular).unwrap();
+        knoticeln!("1");
         let looked_up = vfs_lookup(path).unwrap();
+        knoticeln!("2");
 
         assert_eq!(created.to_string(), "/kunit-vfs-file");
         assert_eq!(looked_up.to_string(), "/kunit-vfs-file");
@@ -725,6 +774,7 @@ mod kunits {
         for dir_idx in 0..NDIRS {
             let dir = format!("/kunit-vfs-churn/dir-{dir_idx}");
             vfs_mkdir(Path::new(&dir)).unwrap();
+            knoticeln!("1");
 
             for file_idx in 0..NFILES_PER_DIR {
                 let file = format!("{dir}/file-{file_idx}");
@@ -747,6 +797,7 @@ mod kunits {
                         vfs_lookup(Path::new(&alias)).unwrap().inode(),
                         created.inode()
                     );
+                    knoticeln!("3");
                     vfs_unlink(Path::new(&alias)).unwrap();
                 }
             }
@@ -757,9 +808,11 @@ mod kunits {
 
             for file_idx in (0..NFILES_PER_DIR).rev() {
                 let file = format!("{dir}/file-{file_idx}");
+                knoticeln!("2");
                 vfs_unlink(Path::new(&file)).unwrap();
             }
 
+            knoticeln!("4");
             vfs_rmdir(Path::new(&dir)).unwrap();
         }
 

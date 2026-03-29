@@ -29,6 +29,8 @@ pub enum FsError {
     NotMounted,
     /// Path is a mountpoint.
     IsMountPoint,
+    /// No more entries to iterate (used by `iterate` file operation).
+    NoMoreEntries,
 }
 
 impl AsErrno for FsError {

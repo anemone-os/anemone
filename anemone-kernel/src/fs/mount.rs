@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use crate::prelude::*;
+use crate::{device::block::BlockDev, prelude::*};
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,9 +46,9 @@ impl Debug for Mount {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum MountSource {
-    Block(BlockDevNum),
+    Block(Arc<dyn BlockDev>),
     Pseudo,
 }
 

@@ -37,6 +37,7 @@ pub fn register_reboot_handler(handler: Box<dyn RebootHandler>) {
 /// halted.
 pub unsafe fn power_off() -> ! {
     unsafe {
+        fs::on_shutdown();
         device::shutdown();
     }
 
@@ -59,6 +60,7 @@ pub unsafe fn power_off() -> ! {
 /// halted.
 pub unsafe fn reboot() -> ! {
     unsafe {
+        fs::on_shutdown();
         device::shutdown();
     }
 

@@ -92,6 +92,10 @@ pub(super) struct Inode {
     /// The cache pool's `Arc` represents residency; this counter tracks
     /// business-level active usage.
     rc: AtomicUsize,
+    /// Whether this inode is currently reachable from the superblock's ino
+    /// index. Unlinked-but-still-alive inodes are resident ghosts with this
+    /// flag cleared.
+    indexed: AtomicBool,
     /// Link count is inode-local metadata. Multi-object atomicity is provided
     /// by filesystem transaction locks, not by exposing an inode inner lock.
     nlink: AtomicU64,
@@ -109,6 +113,7 @@ impl Debug for Inode {
             .field("ino", &self.ino)
             .field("ty", &self.ty)
             .field("rc", &self.rc.load(Ordering::Relaxed))
+            .field("indexed", &self.indexed.load(Ordering::Relaxed))
             .finish()
     }
 }
@@ -134,6 +139,7 @@ impl Inode {
             sb: Arc::downgrade(&sb),
             prv,
             rc: AtomicUsize::new(0),
+            indexed: AtomicBool::new(false),
             nlink: AtomicU64::new(1),
         }
     }
@@ -146,10 +152,19 @@ impl Inode {
         self.nlink.load(Ordering::Acquire)
     }
 
+    pub(super) fn indexed(&self) -> bool {
+        self.indexed.load(Ordering::Acquire)
+    }
+
+    pub(super) fn set_indexed(&self, indexed: bool) {
+        self.indexed.store(indexed, Ordering::Release);
+    }
+
     pub(super) fn inc_nlink(&self) {
         self.nlink.fetch_add(1, Ordering::AcqRel);
     }
 
+    #[track_caller]
     pub(super) fn dec_nlink(&self) {
         let prev = self
             .nlink
@@ -191,6 +206,7 @@ impl Inode {
     ///
     /// **Only Vfs itself can call this method. File system drivers should
     /// not.**
+    #[track_caller]
     pub(super) fn dec_rc(&self) -> usize {
         let prev = self.rc.fetch_sub(1, Ordering::Relaxed);
         debug_assert!(prev > 0, "rc underflow on inode {:?}", self.ino);

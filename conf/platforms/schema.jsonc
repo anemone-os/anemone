@@ -72,6 +72,39 @@
                 "max_cpus"
             ]
         },
+        "rootfs": {
+            "type": "object",
+            "description": "Root filesystem configuration.",
+            "properties": {
+                "fstype": {
+                    "type": "string",
+                    "description": "Filesystem type used for the initial root mount."
+                },
+                "source": {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": [
+                                "block",
+                                "pseudo"
+                            ]
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "Device-tree full-name path used to identify the root block device."
+                        }
+                    },
+                    "required": [
+                        "type"
+                    ]
+                }
+            },
+            "required": [
+                "fstype",
+                "source"
+            ]
+        },
         "qemu": {
             "type": "object",
             "description": "This section defines how to run kernel on the target platform using QEMU emulator, if applicable.",

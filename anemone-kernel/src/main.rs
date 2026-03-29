@@ -42,7 +42,11 @@ use crate::{
     device::discovery::open_firmware::{
         get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
         unflatten_device_tree,
-    }, fs::vfs_mount, mm::layout::KernelLayoutTrait, prelude::{image::load_image_from_elf, *}, sync::{counter::CpuSync, mono::MonoOnce}
+    },
+    fs::vfs_mount,
+    mm::layout::KernelLayoutTrait,
+    prelude::{image::load_image_from_elf, *},
+    sync::{counter::CpuSync, mono::MonoOnce},
 };
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
@@ -53,10 +57,8 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     unsafe {
         kinfoln!("bsp #{} kinit running on {}...", bsp_id, current_task_id());
         syscall::register_syscall_handlers();
-        // register filesystem drivers
-        fs::init();
-        // register drivers to bus types
-        driver::init();
+        fs::register_filesystem_drivers();
+        driver::register_builtin_drivers();
         unflatten_device_tree(fdt_va);
         parse_bootargs();
         machine_init();
@@ -71,8 +73,9 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         FINISH_SYNC_COUNTER.sync_with_counter();
         kinfoln!("bsp #{} kinit finished", bsp_id);
 
-        // mount a ramfs as temporary root filesystem.
-        vfs_mount("ramfs", MountSource::Pseudo, MountFlags::empty(), None).unwrap();
+        mount_rootfs();
+
+        panic!();
 
         #[cfg(feature = "kunit")]
         {
@@ -92,6 +95,34 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         )
         .unwrap(),
     ));
+}
+
+fn mount_rootfs() {
+    match ROOTFS_SOURCE_KIND {
+        "pseudo" => {
+            vfs_mount(
+                ROOTFS_FS_TYPE,
+                MountSource::Pseudo,
+                MountFlags::empty(),
+                None,
+            )
+            .unwrap();
+        },
+        "block" => {
+            let rootfs_path = ROOTFS_SOURCE_PATH
+                .expect("rootfs source path must be configured for block-backed rootfs");
+            let root_dev = device::block::get_block_dev_by_of_full_name_path(rootfs_path)
+                .unwrap_or_else(|| panic!("rootfs block device not found: {}", rootfs_path));
+            vfs_mount(
+                ROOTFS_FS_TYPE,
+                MountSource::Block(root_dev),
+                MountFlags::empty(),
+                None,
+            )
+            .unwrap();
+        },
+        other => panic!("unsupported rootfs source kind: {}", other),
+    }
 }
 
 unsafe extern "C" fn ap_kinit(ap_id: usize) {

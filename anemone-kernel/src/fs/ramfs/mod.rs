@@ -18,14 +18,14 @@ mod inode;
 mod superblock;
 
 #[inline(always)]
-fn ramfs_sb_data(sb: &SuperBlock) -> &RamfsSb {
+fn ramfs_sb(sb: &SuperBlock) -> &RamfsSb {
     sb.prv()
         .cast::<RamfsSb>()
         .expect("ramfs superblock must have RamfsSb private data")
 }
 
 #[inline(always)]
-fn ramfs_dir_data(inode: &InodeRef) -> Result<&RamfsDir, FsError> {
+fn ramfs_dir(inode: &InodeRef) -> Result<&RamfsDir, FsError> {
     inode
         .inode()
         .prv()
@@ -34,7 +34,7 @@ fn ramfs_dir_data(inode: &InodeRef) -> Result<&RamfsDir, FsError> {
 }
 
 #[inline(always)]
-fn ramfs_reg_data(inode: &InodeRef) -> Result<&RamfsReg, FsError> {
+fn ramfs_reg(inode: &InodeRef) -> Result<&RamfsReg, FsError> {
     inode
         .inode()
         .prv()
@@ -57,7 +57,13 @@ fn ramfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock
     root_dir_data.insert(".".to_string(), root_ino).unwrap();
     root_dir_data.insert("..".to_string(), root_ino).unwrap();
 
-    let sb = Arc::new(SuperBlock::new(fs.clone(), &RAMFS_SB_OPS, sb_prv, root_ino));
+    let sb = Arc::new(SuperBlock::new(
+        fs.clone(),
+        &RAMFS_SB_OPS,
+        sb_prv,
+        root_ino,
+        source,
+    ));
 
     fs.sget(|_| false, Some(|| sb.clone()))
         .expect("newly created superblock must be added to the file system's superblock list");
@@ -79,13 +85,17 @@ fn ramfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock
     Ok(sb)
 }
 
-fn ramfs_kill_sb(sb: Arc<SuperBlock>) {
-    // no-op
+fn ramfs_kill_sb(sb: Arc<SuperBlock>) {}
+
+fn ramfs_sync_fs(_sb: &SuperBlock) -> Result<(), FsError> {
+    // no-op, since ramfs is purely in-memory and has no backing store to sync to.
+    Ok(())
 }
 
-pub static RAMFS_FS_OPS: FileSystemOps = FileSystemOps {
+static RAMFS_FS_OPS: FileSystemOps = FileSystemOps {
     name: "ramfs",
     mount: ramfs_mount,
+    sync_fs: ramfs_sync_fs,
     kill_sb: ramfs_kill_sb,
 };
 

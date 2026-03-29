@@ -82,8 +82,8 @@ pub trait Device: DeviceData + DeviceOps {
         DeviceData::base(self).children.write_irqsave().push(child);
     }
 
-    fn fwnode(&self) -> Option<&dyn FwNode> {
-        DeviceData::base(self).fwnode.as_deref()
+    fn fwnode(&self) -> Option<&Arc<dyn FwNode>> {
+        DeviceData::base(self).fwnode.as_ref()
     }
 }
 

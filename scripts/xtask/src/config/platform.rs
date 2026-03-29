@@ -84,6 +84,36 @@ pub struct Dtb {
 }
 
 #[derive(Deserialize, Debug, Serialize)]
+pub struct RootFs {
+    pub fstype: String,
+    pub source: RootFsSource,
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+pub struct RootFsSource {
+    #[serde(rename = "type")]
+    pub ty: RootFsSourceType,
+    pub path: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+pub enum RootFsSourceType {
+    #[serde(rename = "block")]
+    Block,
+    #[serde(rename = "pseudo")]
+    Pseudo,
+}
+
+impl RootFsSourceType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RootFsSourceType::Block => "block",
+            RootFsSourceType::Pseudo => "pseudo",
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Serialize)]
 pub enum DtbType {
     #[serde(rename = "qemu")]
     Qemu,
@@ -95,6 +125,7 @@ pub enum DtbType {
 pub struct Config {
     pub build: Build,
     pub constants: Constants,
+    pub rootfs: Option<RootFs>,
     pub qemu: Option<Qemu>,
     pub dtb: Option<Dtb>,
 }
@@ -105,6 +136,23 @@ impl Config {
         Ok(config)
     }
     pub fn gen_platform_defs(&self) -> String {
+        let rootfs_fstype = self
+            .rootfs
+            .as_ref()
+            .map(|rootfs| rootfs.fstype.as_str())
+            .unwrap_or("ramfs");
+        let rootfs_source_kind = self
+            .rootfs
+            .as_ref()
+            .map(|rootfs| rootfs.source.ty.as_str())
+            .unwrap_or("pseudo");
+        let rootfs_source_path = self
+            .rootfs
+            .as_ref()
+            .and_then(|rootfs| rootfs.source.path.as_deref())
+            .map(|path| format!("Some({path:?})"))
+            .unwrap_or_else(|| "None".to_string());
+
         format!(
             r#"//! Auto-generated platform constants, do not edit manually.
 #![allow(unused)]
@@ -121,6 +169,12 @@ pub const KERNEL_VA_BASE: u64 = {:#x};
 pub const MAX_CPUS: usize = {};
 /// Frame section size shift in megabytes
 pub const FRAME_SECTION_SHIFT_MB: usize = {};
+/// Root filesystem type
+pub const ROOTFS_FS_TYPE: &str = {:?};
+/// Root filesystem source kind
+pub const ROOTFS_SOURCE_KIND: &str = {:?};
+/// Root filesystem source path in device tree full-name form
+pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
 
         "#,
             self.constants.phys_ram_start,
@@ -129,6 +183,9 @@ pub const FRAME_SECTION_SHIFT_MB: usize = {};
             self.constants.kernel_va_base,
             self.constants.max_cpus,
             self.constants.frame_section_shift_mb,
+            rootfs_fstype,
+            rootfs_source_kind,
+            rootfs_source_path,
         )
     }
 }
