@@ -77,9 +77,9 @@ impl PagingArchTrait for Sv39PagingArch {
         }
     }
 
-    unsafe fn activate_addr_space(memsp: &MemSpace) {
+    unsafe fn activate_addr_space(table: &PageTable) {
         let satp_val =
-            ((satp::Mode::Sv39 as usize) << 60) | (memsp.table_root_ppn().get() as usize);
+            ((satp::Mode::Sv39 as usize) << 60) | (table.root_ppn().get() as usize);
         unsafe {
             core::arch::asm!(
                 "csrw   satp, {satp_value}",

@@ -3,7 +3,7 @@
 use anemone_abi::syscall::ANEMONE_SYSNO_MAX;
 
 use crate::{
-    prelude::{dt::c_string, handler::SyscallRegs, *},
+    prelude::{dt::c_readonly_string, handler::SyscallRegs, *},
     syscall::handler::SyscallHandler,
 };
 
@@ -115,36 +115,12 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) {
     trapframe.advance_pc();
 }
 
+/// Temporary output syscall
 #[syscall(100)]
-fn sys_print(#[validate_with(c_string::<255>)] a: *const str) -> Result<u64, SysError> {
-    
+fn sys_print(#[validate_with(c_readonly_string::<255>)] a: Box<str>) -> Result<u64, SysError> {
     let a = unsafe { &*a };
     for line in a.split('\n') {
         kinfoln!("(user {}) {}", current_task_id(), line);
     }
     Ok(0)
-}
-
-#[syscall(42)]
-fn sys_bar(
-    #[validate_with(nonzero)] x: usize,
-    #[validate_with(greater_than_zero)] y: i32,
-) -> Result<u64, SysError> {
-    Ok((x as u64) * (y as u64))
-}
-
-fn nonzero(arg: u64) -> Result<usize, SysError> {
-    if arg == 0 {
-        Err(KernelError::InvalidArgument.into())
-    } else {
-        Ok(arg as usize)
-    }
-}
-
-fn greater_than_zero(arg: u64) -> Result<i32, SysError> {
-    if arg == 0 {
-        Err(KernelError::InvalidArgument.into())
-    } else {
-        Ok(arg as i32)
-    }
 }

@@ -395,6 +395,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
                 ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
                 IntrArch::DISABLED_IRQ_FLAGS,
                 TaskFlags::NONE,
+                None,
             )
             .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e)),
         ));
@@ -437,6 +438,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
                 ParameterList::new(&[ap_id as u64]),
                 IntrArch::DISABLED_IRQ_FLAGS,
                 TaskFlags::NONE,
+                None,
             )
             .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e)),
         ));

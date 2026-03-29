@@ -64,6 +64,7 @@ impl PageTable {
 
 impl Drop for PageTable {
     fn drop(&mut self) {
+        let root_ppn = self.root_ppn();
         let mut mapper = self.mapper();
         // unmap all userspace pages
         unsafe {
@@ -72,5 +73,6 @@ impl Drop for PageTable {
             });
         }
         let _frame = unsafe { OwnedFrameHandle::from_ppn(self.root) };
+        kdebugln!("page table with root ppn {:?} dropped", self.root);
     }
 }

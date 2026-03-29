@@ -117,11 +117,11 @@ pub unsafe extern "C" fn __switch(cur: *mut TaskContext, next: *const TaskContex
     )
 }
 
-
 /// Task guard for a user task, but the user task does not return.
 ///
 /// Parameters in `a0` - `a6` are not available for user tasks.
-/// User tasks only accept string-based parameters, which are passed in its stack, and set up before entering the task.
+/// User tasks only accept string-based parameters, which are passed in its
+/// stack, and set up before entering the task.
 ///
 /// ## Arguments
 ///
@@ -218,11 +218,12 @@ pub unsafe extern "C" fn kernel_task_guard() -> ! {
         la a6, __kret_point // ra
         call {task_run}
         __kret_point:
+        li a0, 0
         call {task_exit}
         call {task_guard_end}
     ",
     task_run = sym __task_run,
-    task_exit = sym crate::sched::task_exit,
+    task_exit = sym crate::sched::kernel_exit,
     task_guard_end = sym __kernel_task_guard_end,
     kernel_prv = const Privilege::Kernel as u64,
     );
@@ -258,7 +259,6 @@ unsafe extern "C" fn __task_run(
     );
 
     knoticeln!("{}({}) starting", current_task_id(), current_task_name());
-
     unsafe {
         match prv {
             Privilege::Kernel => __ktrap_return_to_task(&trapframe),

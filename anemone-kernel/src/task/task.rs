@@ -12,14 +12,16 @@ use crate::{
 pub struct Task {
     tid: TidHandle,
     name: Box<str>,
-
-    status: RwLock<TaskStatus>,
     flags: TaskFlags,
-
-    memsp: Option<Arc<MemSpace>>,
-
     kstack: KernelStack,
     sched_info: MonoFlow<TaskInner>,
+    uspace: Option<Arc<UserSpace>>,
+
+    parent: RwLock<Option<Weak<Task>>>,
+    children: RwLock<Vec<Arc<Task>>>,
+
+    pub exit_code: AtomicI32,
+    pub status: RwLock<TaskStatus>,
 }
 
 impl Debug for Task {
@@ -41,24 +43,22 @@ impl Display for Task {
 pub struct TaskInner {
     /// Used for soft switching
     task_context: TaskContext,
-    /// Used for trap handling
-    trap_frame: TrapFrame,
 }
 
 impl Task {
-    /// Create a new kernel task.
+    /// Create a new kernel task with a kernel stack and kernel entry context.
     ///
-    /// Parameters represented in [ParameterList] will be passed to the entry
-    /// function, with C-Style calling convention
+    /// Parameters represented in [ParameterList] are passed to the entry
+    /// function using the C calling convention.
     ///
-    /// [TaskFlags::KERNEL] will be automatically added to the flags of the
-    /// created task, so it's optional.
+    /// [TaskFlags::KERNEL] is added automatically.
     pub fn new_kernel(
         name: impl AsRef<str>,
         entry: *const (),
         args: ParameterList,
         irq_flags: IrqFlags,
         flags: TaskFlags,
+        parent: Option<Weak<Task>>,
     ) -> Result<Self, MmError> {
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
@@ -69,7 +69,7 @@ impl Task {
             flags: flags | TaskFlags::KERNEL,
             tid: alloc_tid(),
             kstack: stack,
-            memsp: None,
+            uspace: None,
             sched_info: unsafe {
                 MonoFlow::new(TaskInner {
                     task_context: TaskContext::from_kernel_fn(
@@ -78,17 +78,21 @@ impl Task {
                         irq_flags,
                         args,
                     ),
-                    trap_frame: TrapFrame::ZEROED,
                 })
             },
+            parent: RwLock::new(parent),
+            children: RwLock::new(vec![]),
+            exit_code: AtomicI32::new(0),
         })
     }
 
+    /// Create a new user task with a kernel stack and user-space entry context.
     pub fn new_user(
         name: impl AsRef<str>,
         entry: *const (),
-        memsp: Arc<MemSpace>,
+        uspace: Arc<UserSpace>,
         ustack_top: VirtAddr,
+        parent: Option<Weak<Task>>,
     ) -> Result<Self, MmError> {
         let ustack = KernelStack::new()?;
         let kstack_top = ustack.stack_top();
@@ -99,7 +103,7 @@ impl Task {
             flags: TaskFlags::NONE,
             tid: alloc_tid(),
             kstack: ustack,
-            memsp: Some(memsp),
+            uspace: Some(uspace),
             sched_info: unsafe {
                 MonoFlow::new(TaskInner {
                     task_context: TaskContext::from_user_fn(
@@ -107,19 +111,34 @@ impl Task {
                         ustack_top,
                         kstack_top,
                     ),
-                    trap_frame: TrapFrame::ZEROED,
                 })
             },
+            parent: RwLock::new(parent),
+            children: RwLock::new(vec![]),
+            exit_code: AtomicI32::new(0),
         })
+    }
+
+    /// Get the parent task ID, if the parent task exists.
+    ///
+    /// This function will return [None] only if this task has no parent, e.g.
+    /// the init task, the idle task, a exited task or the kinit task.
+    pub fn parent_tid(&self) -> Option<Tid> {
+        self.parent
+            .read()
+            .as_ref()
+            .and_then(|weak| weak.upgrade().map(|parent| parent.tid()))
     }
 }
 
 impl Task {
+    /// Get the task context used by the scheduler.
     pub unsafe fn get_task_context(&self) -> *const TaskContext {
         self.sched_info
             .with(|inner| &inner.task_context as *const TaskContext)
     }
 
+    /// Get a mutable pointer to the task context used by the scheduler.
     pub unsafe fn get_task_context_mut(&self) -> *mut TaskContext {
         self.sched_info
             .with_mut(|inner| &mut inner.task_context as *mut TaskContext)
@@ -127,20 +146,24 @@ impl Task {
 }
 
 impl Task {
+    /// Get the task ID.
     pub fn tid(&self) -> Tid {
         Tid::new(self.tid.get())
     }
 
+    /// Get the task name.
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// Get the task flags.
     pub fn flags(&self) -> TaskFlags {
         self.flags
     }
 
-    pub fn memspace(&self) -> Option<&Arc<MemSpace>> {
-        self.memsp.as_ref()
+    /// Get the user-space memory context of this task, if any.
+    pub fn uspace(&self) -> Option<&Arc<UserSpace>> {
+        self.uspace.as_ref()
     }
 }
 

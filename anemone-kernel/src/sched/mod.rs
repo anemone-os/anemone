@@ -15,6 +15,9 @@ mod proc;
 // schedulers
 mod rr;
 
+mod api;
+pub use api::*;
+
 /// Default Scheduler
 pub type Scheduler = rr::RRScheduler;
 
@@ -44,17 +47,5 @@ pub fn run_tasks() -> ! {
 pub unsafe fn schedule() {
     unsafe {
         switch_out(false);
-    }
-}
-
-/// Called by the task guard when a task is exiting. This function will never
-/// return.
-///
-/// Call this function manually will directly exit the current task.
-pub fn task_exit() -> ! {
-    unsafe {
-        IntrArch::local_intr_disable();
-        switch_out(true);
-        unreachable!("should never return to an exited task");
     }
 }

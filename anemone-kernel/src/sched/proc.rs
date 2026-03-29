@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use kernel_macros::percpu;
 
 use crate::{
-    mm::kptable::KERNEL_MEMSPACE, prelude::*, sched::idle::clone_current_idle_task,
+    mm::kptable::activate_kernel_mapping, prelude::*, sched::idle::clone_current_idle_task,
     sync::mono::MonoFlow, task::tid::Tid,
 };
 
@@ -93,7 +93,7 @@ pub fn clone_current_task() -> Arc<Task> {
 }
 
 /// Capture the current task with a reference to it.
-/// 
+///
 /// This function will disable preemption during the execution of the closure.
 pub fn with_current_task<F: Fn(&Arc<Task>) -> R, R>(f: F) -> R {
     PROCESSOR
@@ -169,20 +169,20 @@ pub unsafe fn switch_out(exit: bool) {
     }
 }
 
-unsafe fn switch_memspace(cur_task: &Arc<Task>, next_task: &Arc<Task>) {
+unsafe fn switch_uspace(cur_task: &Arc<Task>, next_task: &Arc<Task>) {
     unsafe {
-        if next_task.memspace().eq(&cur_task.memspace()) {
+        if next_task.uspace().eq(&cur_task.uspace()) {
             // same addr
             return;
         }
-        if let Some(next_memsp) = next_task.memspace() {
+        if let Some(next_usersp) = next_task.uspace() {
             // user task
-            PagingArch::activate_addr_space(next_memsp.as_ref());
+            next_usersp.activate();
         } else {
             // kernel task
-            PagingArch::activate_addr_space(KERNEL_MEMSPACE.memspace());
+            activate_kernel_mapping();
         }
-        if let Some(cur_memsp) = cur_task.memspace() {
+        if let Some(cur_memsp) = cur_task.uspace() {
             // clear tlb
             PagingArch::tlb_shootdown_all();
         }
@@ -199,7 +199,7 @@ pub unsafe fn switch_to(task: Arc<Task>) {
     let next_task = task;
     let next_context = unsafe { next_task.get_task_context() };
     unsafe {
-        switch_memspace(&clone_current_task(), &next_task);
+        switch_uspace(&clone_current_task(), &next_task);
         set_running_task(next_task);
         SchedArch::switch(cur_context, next_context);
     }

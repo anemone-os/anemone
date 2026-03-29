@@ -45,7 +45,7 @@ use crate::{
     },
     fs::vfs_mount,
     mm::layout::KernelLayoutTrait,
-    prelude::{dt::user_pointer, image::load_image_from_elf, *},
+    prelude::{image::load_image_from_elf, *},
     sync::{counter::CpuSync, mono::MonoOnce},
 };
 
@@ -86,16 +86,19 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
             kinfoln!("kunit tests finished");
         }
     }
-    let image = load_image_from_elf(APP0, &["command0"]).unwrap();
-    add_to_ready(Arc::new(
-        Task::new_user(
-            "user",
-            image.entry as *const (),
-            Arc::new(image.memsp),
-            VirtAddr::new(KernelLayout::USPACE_TOP_ADDR),
-        )
-        .unwrap(),
-    ));
+    for _ in 0..3 {
+        let image = load_image_from_elf(APP0, &["command0"]).unwrap();
+        add_to_ready(Arc::new(
+            Task::new_user(
+                "user",
+                image.entry as *const (),
+                Arc::new(image.memsp),
+                VirtAddr::new(KernelLayout::USPACE_TOP_ADDR),
+                None,
+            )
+            .unwrap(),
+        ));
+    }
 }
 
 unsafe extern "C" fn ap_kinit(ap_id: usize) {

@@ -35,6 +35,15 @@ pub mod linux {
     pub const SYS_WRITE: u64 = 64;
     pub const SYS_OPENAT: u64 = 56;
     pub const SYS_CLOSE: u64 = 57;
+
+    pub const SYS_EXIT: u64 = 93;
+    pub const SYS_SCHED_YIELD: u64 = 124;
+
+    pub const SYS_GETPID: u64 = 172;
+    pub const SYS_GETPPID: u64 = 173;
+    pub const SYS_CLONE: u64 = 220;
+
+    pub const SYS_BRK: u64 = 214;
 }
 
 pub use linux::*;

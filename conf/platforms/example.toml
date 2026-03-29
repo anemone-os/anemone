@@ -28,6 +28,12 @@ max_phys_ram_size = 0x80000000
 kernel_la_base = 0x80200000
 # Virtual address where the kernel is mapped during runtime
 kernel_va_base = 0xffffffff80200000
+# Maximum size of the user stack
+max_user_stack_size = 0x800000      # 8MB
+# Initial size of the user stack, which will be pre-allocated during process creation.
+init_user_stack_size = 0x4000       # 16KB
+# Maximum size of the user heap
+max_heap_size = 0x2000000000        # 128GB
 # Maximum number of CPUs supported by this platform
 max_cpus = 4
 # Page frame section size as a power of 2 in megabytes.

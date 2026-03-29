@@ -215,11 +215,12 @@ pub unsafe extern "C" fn kernel_task_guard() -> ! {
         la $a6, __kret_point
         call {task_run}
         __kret_point:
+        li.d $a0, 0
         call {task_exit}
         call {task_guard_end}
     ",
     task_run = sym __task_run,
-    task_exit = sym crate::sched::task_exit,
+    task_exit = sym crate::kernel_exit,
     task_guard_end = sym __kernel_task_guard_end,
     kernel_prv = const Privilege::Kernel as u64,
     );

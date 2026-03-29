@@ -10,7 +10,7 @@ use crate::{
     },
     device::CpuArchTrait,
     prelude::*,
-    sched::{current_task_id, task_exit},
+    sched::{current_task_id, kernel_exit},
 };
 
 // kernel trap entry point. since kernel doesn't use floating point, we don't
@@ -177,7 +177,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     ecode,
                     esubcode
                 );
-                task_exit();
+                kernel_exit(-1)
+                //TODO: Error code;
             },
         };
 
@@ -194,7 +195,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     trapframe.badv,
                     trapframe.era
                 );
-                task_exit()
+                kernel_exit(-1)
+                //TODO: Error code
             },
 
             LA64Exception::PageInvalidFetch => {
@@ -205,7 +207,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     trapframe.badv,
                     trapframe.era
                 );
-                task_exit()
+                kernel_exit(-1)
+                //TODO: Error code
             },
 
             LA64Exception::PageInvalidLoad => {
@@ -216,7 +219,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     trapframe.badv,
                     trapframe.era
                 );
-                task_exit()
+                kernel_exit(-1)
+                //TODO: Error code
             },
 
             LA64Exception::PageInvalidStore => {
@@ -227,7 +231,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     trapframe.badv,
                     trapframe.era
                 );
-                task_exit()
+                kernel_exit(-1)
+                //TODO: Error code
             },
 
             _ => {
@@ -239,7 +244,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     trapframe.era,
                     trapframe.badv
                 );
-                task_exit()
+                kernel_exit(-1)
+                //TODO: Error code
             },
         }
     }

@@ -29,14 +29,14 @@ impl PagingArchTrait for LA64PagingArch {
 
     const PAGE_SIZE_BYTES: usize = 4096;
 
-    unsafe fn activate_addr_space(pgtbl: &MemSpace) {
+    unsafe fn activate_addr_space(pgtbl: &PageTable) {
         kdebugln!(
             "Activating page table with root PPN {:#x} addr {:#x}",
-            pgtbl.table_root_ppn().get(),
-            pgtbl.table_root_ppn().to_phys_addr().get()
+            pgtbl.root_ppn().get(),
+            pgtbl.root_ppn().to_phys_addr().get()
         );
         unsafe {
-            let value = pgtbl.table_root_ppn().to_phys_addr().get();
+            let value = pgtbl.root_ppn().to_phys_addr().get();
             pgdl::csr_write(value);
             pgdh::csr_write(value);
         }

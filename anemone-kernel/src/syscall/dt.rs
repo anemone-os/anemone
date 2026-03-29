@@ -1,16 +1,16 @@
 use core::{slice, str};
 
-use crate::prelude::*;
+use crate::{fs::vfs_lookup, prelude::*};
 
 /// Check the pages containing the user pointer for the specified permissions
 /// and return a pointer to the user data if valid.
 pub fn user_pointer<T: Sized>(rwx_flags: PteFlags, arg: u64) -> Result<*const T, SysError> {
     let flags = PteFlags::USER | rwx_flags;
     with_current_task(|task| -> Result<(), SysError> {
-        let Some(memspace) = task.memspace() else {
+        let Some(memspace) = task.uspace() else {
             return Err(MmError::NotMapped.into());
         };
-        let mut table = memspace.table_locked().write();
+        let mut table = memspace.page_table_mut();
         let va = VirtAddr::new(arg);
         let va_end = VirtAddr::new(arg.wrapping_add(size_of::<T>() as u64));
         if va_end < va {
@@ -31,7 +31,17 @@ pub fn user_pointer<T: Sized>(rwx_flags: PteFlags, arg: u64) -> Result<*const T,
     Ok(arg as *const T)
 }
 
-pub fn c_string<const MAX_LEN: usize>(arg: u64) -> Result<*const str, SysError> {
+/// Validate that the address is inside user space and return it as a virtual address.
+pub fn user_vaddr(arg: u64) -> Result<VirtAddr, SysError> {
+    if arg < KernelLayout::USPACE_TOP_ADDR {
+        Ok(VirtAddr::new(arg))
+    } else {
+        Err(MmError::InvalidArgument.into())
+    }
+}
+
+/// Validate a user C string pointer and return a borrowed raw string slice pointer.
+pub fn c_readonly_string_ptr<const MAX_LEN: usize>(arg: u64) -> Result<*const str, SysError> {
     let st_pointer = arg as *const u8;
     user_pointer::<u8>(PteFlags::READ, arg)?;
     let mut ed_pointer = st_pointer;
@@ -55,5 +65,42 @@ pub fn c_string<const MAX_LEN: usize>(arg: u64) -> Result<*const str, SysError> 
         ))
     }
     .unwrap();
-    Ok(str as *const str)
+    Ok(str)
+}
+
+/// Validate a user C string pointer and copy it into a boxed string.
+pub fn c_readonly_string<const MAX_LEN: usize>(arg: u64) -> Result<Box<str>, SysError> {
+    let c_str = c_readonly_string_ptr::<MAX_LEN>(arg)?;
+    Ok(Box::from(unsafe { &*c_str }))
+}
+
+/// Validate a user path string and convert it into a kernel-owned `Path`.
+pub fn file_path(arg: u64) -> Result<Box<Path>, SysError> {
+    let c_str = c_readonly_string_ptr::<1024>(arg)?;
+    let path = Box::from(Path::new(unsafe { &*c_str }));
+    Ok(path)
+}
+
+/// Validate a user path string and resolve it to an existing file path.
+pub fn existing_file(arg: u64) -> Result<PathRef, SysError> {
+    let path_ref = file_path(arg)?;
+    vfs_lookup(unsafe { path_ref.as_ref() }).map_err(|e| e.into())
+}
+
+/// Validate that the argument is non-zero and convert it to `usize`.
+fn nonzero(arg: u64) -> Result<usize, SysError> {
+    if arg == 0 {
+        Err(KernelError::InvalidArgument.into())
+    } else {
+        Ok(arg as usize)
+    }
+}
+
+/// Validate that the argument is non-zero and convert it to `i32`.
+fn greater_than_zero(arg: u64) -> Result<i32, SysError> {
+    if arg == 0 {
+        Err(KernelError::InvalidArgument.into())
+    } else {
+        Ok(arg as i32)
+    }
 }

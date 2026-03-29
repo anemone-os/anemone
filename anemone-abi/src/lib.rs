@@ -5,3 +5,4 @@ pub mod errno;
 pub mod fs;
 pub mod process;
 pub mod syscall;
+pub mod mm;

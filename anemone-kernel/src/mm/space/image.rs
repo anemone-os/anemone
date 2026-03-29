@@ -1,16 +1,28 @@
+//! ELF image loader utilities for constructing a [UserSpace].
+//!
+//! The main helper [load_image_from_elf] parses an ELF binary and builds a
+//! [UserTaskImage] that contains the created [UserSpace], the ELF entry
+//! point and the argv-like command vector.
 use elf::{ElfBytes, ParseError, abi, endian::AnyEndian};
 
-use crate::{
-    mm::layout::KernelLayoutTrait,
-    prelude::{user::UserSpace, *},
-};
+use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 
+/// Result of loading an ELF into a new address space.
+///
+/// - memsp: constructed [UserSpace] with segments mapped
+/// - entry: ELF entry point
+/// - command: argv-like strings
 pub struct UserTaskImage {
-    pub memsp: MemSpace,
+    pub memsp: UserSpace,
     pub entry: u64,
     pub command: Vec<Box<str>>,
 }
 
+/// Parse `data` as an ELF file and produce a [UserTaskImage].
+///
+/// Validates PT_LOAD segments, creates a [UserSpace] via [UserSpace::new_user],
+/// maps pages and copies segment data using [UserSpace::add_segment]. Returns
+/// [ElfLoadError] on parse, segment validation, or memory errors.
 pub fn load_image_from_elf(
     data: &[u8],
     command: &[impl AsRef<str>],
@@ -72,27 +84,22 @@ pub fn load_image_from_elf(
         };
         segments.push(segdata);
     }
-    let memspace = MemSpace::copy_from_kernel();
-    let mut table_guard = memspace.table_locked().write_irqsave();
-    let mut uspace =
-        UserSpace::new(heap_start.page_up(), &mut *table_guard).map_err(|e| ElfLoadError::Mm(e))?;
+    let mut usersp = UserSpace::new_user().map_err(|e| ElfLoadError::Mm(e))?;
     for segment in &segments {
         unsafe {
-            uspace
+            usersp
                 .add_segment(
                     segment.vaddr,
                     segment.memsz as usize,
                     segment.filesz as usize,
                     segment.data,
                     segment.rwx_flags,
-                    &mut *table_guard,
                 )
                 .map_err(|e| ElfLoadError::Mm(e))?;
         }
     }
-    drop(table_guard);
     Ok(UserTaskImage {
-        memsp: memspace,
+        memsp: usersp,
         entry,
         command: command.iter().map(|s| Box::from(s.as_ref())).collect(),
     })

@@ -8,8 +8,8 @@
     "rust-analyzer.linkedProjects": [
         "Cargo.toml",
     ],
-    "rust-analyzer.cargo.target": "riscv64gc-unknown-none-elf",
-    //"rust-analyzer.cargo.target": "loongarch64-unknown-none",
+    //"rust-analyzer.cargo.target": "riscv64gc-unknown-none-elf",
+    "rust-analyzer.cargo.target": "loongarch64-unknown-none",
     "rust-analyzer.cargo.allTargets": false,
     // For xtask dev under std
     // "rust-analyzer.linkedProjects": [
