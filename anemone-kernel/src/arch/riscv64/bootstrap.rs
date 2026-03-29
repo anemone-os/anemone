@@ -1,5 +1,7 @@
 use core::arch::naked_asm;
 
+use riscv::register::sstatus;
+
 use crate::{
     align_down_power_of_2, align_up_power_of_2,
     arch::{
@@ -240,6 +242,9 @@ fn register_basic_power_handlers() {
 extern "C" fn rusty_nun(hart_id: usize, fdt_pa: PhysAddr) -> ! {
     #[unsafe(link_section = ".bss.nonzero_init")]
     static mut BSP_ARRIVED: bool = false;
+    unsafe {
+        sstatus::set_sum();
+    }
     unsafe {
         if !BSP_ARRIVED {
             // bsp

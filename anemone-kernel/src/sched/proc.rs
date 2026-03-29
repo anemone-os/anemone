@@ -92,6 +92,20 @@ pub fn clone_current_task() -> Arc<Task> {
         .expect("Scheduler not initialized: no running task found")
 }
 
+/// Capture the current task with a reference to it.
+/// 
+/// This function will disable preemption during the execution of the closure.
+pub fn with_current_task<F: Fn(&Arc<Task>) -> R, R>(f: F) -> R {
+    PROCESSOR
+        .with(|p| {
+            p.inner.with(|inner| {
+                let running_task = inner.running_task.as_ref()?;
+                Some(f(running_task))
+            })
+        })
+        .expect("Scheduler not initialized: no running task found")
+}
+
 /// Get a const [TaskContext] pointer **without creating a copy of the current
 /// task**
 ///

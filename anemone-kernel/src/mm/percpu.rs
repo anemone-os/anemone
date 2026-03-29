@@ -46,20 +46,52 @@ impl<T> PerCpu<T> {
         }
     }
 
+    /// Run a closure with a reference to the per-CPU value using the current
+    /// per-CPU base address.
+    ///
+    /// ## Safety
+    /// **This function does not disable preemption. If preemption occurs during
+    /// its execution and operations other than reading are performed, it may
+    /// result in undefined behavior.**
+    ///
+    /// Use [Self::with] instead.
+    pub unsafe fn unsafe_with<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&T) -> R,
+    {
+        unsafe { f(self.get(CpuArch::percpu_base())) }
+    }
+
+    /// Run a closure with a reference to the per-CPU value using the current
+    /// per-CPU base address.
+    ///
+    /// This function disables preemption during its execution.
     pub fn with<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&T) -> R,
     {
-        // TODO: disable preemption
-        unsafe { f(self.get(CpuArch::percpu_base())) }
+        unsafe {
+            let _preem_guard = PreemptGuard::new();
+            let res = f(self.get(CpuArch::percpu_base()));
+            drop(_preem_guard);
+            res
+        }
     }
 
+    /// Run a closure with a mutable reference to the per-CPU value using the
+    /// current per-CPU base address.
+    ///
+    /// This function disables preemption during its execution.
     pub fn with_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut T) -> R,
     {
-        // TODO: disable preemption
-        unsafe { f(self.get_mut(CpuArch::percpu_base())) }
+        unsafe {
+            let _preem_guard = PreemptGuard::new();
+            let res = f(self.get_mut(CpuArch::percpu_base()));
+            drop(_preem_guard);
+            res
+        }
     }
 
     pub unsafe fn with_remote<F, R>(&self, cpu_id: usize, f: F) -> R
@@ -85,6 +117,17 @@ where
     F: FnOnce(&CoreLocal) -> R,
 {
     CORE_LOCAL.with(f)
+}
+
+/// ## Safety
+/// **This function does not disable preemption. If preemption occurs during
+/// its execution and operations other than reading are performed, it may
+/// result in undefined behavior.**
+pub fn unsafe_with_core_local<F, R>(f: F) -> R
+where
+    F: FnOnce(&CoreLocal) -> R,
+{
+    unsafe { CORE_LOCAL.unsafe_with(f) }
 }
 
 pub fn with_core_local_mut<F, R>(f: F) -> R
@@ -133,12 +176,8 @@ impl CoreLocal {
         self.cpu_id
     }
 
-    pub fn preempt_counter(&self) -> PreemptCounter {
-        self.preempt_counter
-    }
-
-    pub fn preempt_counter_mut(&mut self) -> &mut PreemptCounter {
-        &mut self.preempt_counter
+    pub fn preempt_counter(&self) -> &PreemptCounter {
+        &self.preempt_counter
     }
 
     pub fn online(&self) -> bool {

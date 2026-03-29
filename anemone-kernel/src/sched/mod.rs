@@ -19,7 +19,9 @@ mod rr;
 pub type Scheduler = rr::RRScheduler;
 
 /// Exported API for process management.
-pub use proc::{add_to_ready, clone_current_task, current_task_id, current_task_name};
+pub use proc::{
+    add_to_ready, clone_current_task, current_task_id, current_task_name, with_current_task,
+};
 
 /// Enter the scheduler loop. This function is called by bootstrap code to enter
 /// the scheduler.

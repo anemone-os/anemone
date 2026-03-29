@@ -5,11 +5,20 @@ use crate::{
     prelude::{user::UserSpace, *},
 };
 
-pub fn load_image_from_elf(data: &[u8]) -> Result<(MemSpace, u64), ElfLoadError> {
-    let file_raw =
+pub struct UserTaskImage {
+    pub memsp: MemSpace,
+    pub entry: u64,
+    pub command: Vec<Box<str>>,
+}
+
+pub fn load_image_from_elf(
+    data: &[u8],
+    command: &[impl AsRef<str>],
+) -> Result<UserTaskImage, ElfLoadError> {
+    let elf_bytes =
         ElfBytes::<AnyEndian>::minimal_parse(data).map_err(|e| ElfLoadError::Parse(e))?;
-    let entry = file_raw.ehdr.e_entry;
-    let seg_headers = file_raw
+    let entry = elf_bytes.ehdr.e_entry;
+    let segment_headers = elf_bytes
         .segments()
         .ok_or(ElfLoadError::Segment(SegmentError::HeaderNotFound))
         .map_err(|e| ElfLoadError::Segment(SegmentError::HeaderNotFound))?;
@@ -22,11 +31,12 @@ pub fn load_image_from_elf(data: &[u8]) -> Result<(MemSpace, u64), ElfLoadError>
     }
     let mut segments = vec![];
     let mut heap_start = VirtAddr::new(0);
-    for seg_header in seg_headers {
+    for seg_header in segment_headers {
         if seg_header.p_type != abi::PT_LOAD {
+            // ignore
             continue;
         }
-        let data = file_raw
+        let data = elf_bytes
             .segment_data(&seg_header)
             .map_err(|e| ElfLoadError::Parse(e))?;
         let filesz = seg_header.p_filesz;
@@ -35,6 +45,10 @@ pub fn load_image_from_elf(data: &[u8]) -> Result<(MemSpace, u64), ElfLoadError>
         let vaddr_end = vaddr + memsz;
         if vaddr_end < vaddr || vaddr_end.get() > KernelLayout::KSPACE_ADDR {
             return Err(ElfLoadError::Segment(SegmentError::InvalidSegmentData));
+        }
+        if vaddr_end > heap_start {
+            // update heap start
+            heap_start = vaddr_end;
         }
         let mut rwx_flags = PteFlags::empty();
         if seg_header.p_flags & abi::PF_R != 0 {
@@ -57,17 +71,14 @@ pub fn load_image_from_elf(data: &[u8]) -> Result<(MemSpace, u64), ElfLoadError>
             rwx_flags,
         };
         segments.push(segdata);
-        if vaddr_end > heap_start {
-            heap_start = vaddr_end;
-        }
     }
     let memspace = MemSpace::copy_from_kernel();
     let mut table_guard = memspace.table_locked().write_irqsave();
-    let mut user_space =
+    let mut uspace =
         UserSpace::new(heap_start.page_up(), &mut *table_guard).map_err(|e| ElfLoadError::Mm(e))?;
     for segment in &segments {
         unsafe {
-            user_space
+            uspace
                 .add_segment(
                     segment.vaddr,
                     segment.memsz as usize,
@@ -80,7 +91,11 @@ pub fn load_image_from_elf(data: &[u8]) -> Result<(MemSpace, u64), ElfLoadError>
         }
     }
     drop(table_guard);
-    Ok((memspace, entry))
+    Ok(UserTaskImage {
+        memsp: memspace,
+        entry,
+        command: command.iter().map(|s| Box::from(s.as_ref())).collect(),
+    })
 }
 
 #[derive(Debug)]

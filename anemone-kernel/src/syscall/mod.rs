@@ -3,10 +3,11 @@
 use anemone_abi::syscall::ANEMONE_SYSNO_MAX;
 
 use crate::{
-    prelude::{handler::SyscallRegs, *},
+    prelude::{dt::c_string, handler::SyscallRegs, *},
     syscall::handler::SyscallHandler,
 };
 
+pub mod dt;
 pub mod handler;
 
 const INVALID_SYSCALL: SyscallHandler = SyscallHandler {
@@ -114,9 +115,14 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) {
     trapframe.advance_pc();
 }
 
-#[syscall(39)]
-fn sys_foo(a: usize, b: i32) -> Result<u64, SysError> {
-    Ok((a as u64) + (b as u64))
+#[syscall(100)]
+fn sys_print(#[validate_with(c_string::<255>)] a: *const str) -> Result<u64, SysError> {
+    
+    let a = unsafe { &*a };
+    for line in a.split('\n') {
+        kinfoln!("(user {}) {}", current_task_id(), line);
+    }
+    Ok(0)
 }
 
 #[syscall(42)]

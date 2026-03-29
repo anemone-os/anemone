@@ -1,3 +1,5 @@
+use core::ops::Index;
+
 use range_allocator::Rangable;
 
 use crate::{mm::layout::KernelLayoutTrait, prelude::*};
@@ -15,7 +17,6 @@ pub struct UserSpace {
 }
 
 impl UserSpace {
-
     pub fn new(heap_start: VirtPageNum, page_table: &mut PageTable) -> Result<Self, MmError> {
         let stack = MemArea::prealloc(
             KernelLayout::USPACE_TOP_VPN,
@@ -87,8 +88,21 @@ impl UserSpace {
                 }
             }
         }
-        unsafe { mapper.fill_data(vaddr, source, psize as u64)? }
-        // TODO: fill 0
+        unsafe {
+            mapper.fill_data(vaddr, source, psize as u64)?;
+        }
+        if vsize > psize {
+            struct ZeroData;
+            impl Index<usize> for ZeroData {
+                type Output = u8;
+                fn index(&self, index: usize) -> &Self::Output {
+                    &0
+                }
+            }
+            unsafe {
+                mapper.fill_data(vaddr + psize as u64, &ZeroData, (vsize - psize) as u64)?;
+            }
+        }
         Ok(())
     }
 

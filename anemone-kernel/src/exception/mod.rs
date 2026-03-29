@@ -6,7 +6,7 @@
 //!   is handled)
 
 mod preempt_counter;
-pub use preempt_counter::PreemptCounter;
+pub use preempt_counter::{PreemptCounter, PreemptGuard};
 mod page_fault;
 pub use page_fault::{PageFaultInfo, PageFaultType, handle_kernel_page_fault};
 mod ipi;

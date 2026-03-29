@@ -42,7 +42,11 @@ use crate::{
     device::discovery::open_firmware::{
         get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
         unflatten_device_tree,
-    }, fs::vfs_mount, mm::layout::KernelLayoutTrait, prelude::{image::load_image_from_elf, *}, sync::{counter::CpuSync, mono::MonoOnce}
+    },
+    fs::vfs_mount,
+    mm::layout::KernelLayoutTrait,
+    prelude::{dt::user_pointer, image::load_image_from_elf, *},
+    sync::{counter::CpuSync, mono::MonoOnce},
 };
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
@@ -82,12 +86,12 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
             kinfoln!("kunit tests finished");
         }
     }
-    let (memsp, entry) = load_image_from_elf(APP0).unwrap();
+    let image = load_image_from_elf(APP0, &["command0"]).unwrap();
     add_to_ready(Arc::new(
         Task::new_user(
             "user",
-            entry as *const (),
-            Arc::new(memsp),
+            image.entry as *const (),
+            Arc::new(image.memsp),
             VirtAddr::new(KernelLayout::USPACE_TOP_ADDR),
         )
         .unwrap(),

@@ -16,6 +16,8 @@ pub enum MmError {
     /// General invalid argument, e.g. an free operation with an invalid address
     /// or length.
     InvalidArgument,
+    /// Permission denied, e.g. trying to write to a read-only page.
+    PermissionDenied,
 }
 
 impl AsErrno for MmError {

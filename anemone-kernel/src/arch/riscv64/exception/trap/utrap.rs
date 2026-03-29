@@ -193,9 +193,6 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             },
         }
     }
-
-    /* kdebugln!("#{} finished handling trap", CpuArch::cur_cpu_id()); */
-    // back
 }
 
 unsafe extern "C" {

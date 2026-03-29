@@ -1,4 +1,4 @@
-use core::{cmp::min, marker::PhantomData, mem::ManuallyDrop, ptr::copy};
+use core::{cmp::min, marker::PhantomData, mem::ManuallyDrop, ops::Index, ptr::copy};
 
 use crate::prelude::*;
 
@@ -92,15 +92,14 @@ impl Mapper<'_> {
     ///   unauthorized code regions.
     /// * This function overwrites existing data.
     /// * No rollback is possible if an error occurs.
+    /// * This function does not validate that the index is within the valid
+    ///   index range of `source`.
     pub unsafe fn fill_data(
         &mut self,
         vaddr: VirtAddr,
-        source: &[u8],
+        source: &(impl Index<usize, Output = u8> + ?Sized),
         length: u64,
     ) -> Result<(), MmError> {
-        if source.len() < length as usize {
-            return Err(MmError::InvalidArgument);
-        }
         if length == 0 {
             return Ok(());
         }
