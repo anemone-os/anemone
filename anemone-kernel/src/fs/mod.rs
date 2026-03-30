@@ -13,6 +13,7 @@ mod superblock;
 
 // filesystem drivers
 mod devfs;
+#[cfg(feature = "fs_ext4")]
 mod ext4;
 mod ramfs;
 
