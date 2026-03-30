@@ -65,6 +65,12 @@ args = [
     "user,id=net0,hostfwd=tcp::2222-:22",
 ]
 
+# Root filesystem configuration, default to an pseudo ramfs if not specified.
+[rootfs]
+fstype = "ext4"                                                 # Filesystem type, e.g., ext4, ramfs, etc.
+source = { type = "block", path = "/soc/virtio_mmio@10008000" }
+
+
 # Device Tree Blob configuration for the platform, optional
 [dtb]
 # Path to the generated DTB file

@@ -7,6 +7,166 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#define O_RDONLY 0
+
+#define O_WRONLY 1
+
+#define O_RDWR 2
+
+#define O_ACCMODE 3
+
+#define O_CREAT 64
+
+#define O_EXCL 128
+
+#define O_NOCTTY 256
+
+#define O_TRUNC 512
+
+#define O_APPEND 1024
+
+#define O_NONBLOCK 2048
+
+#define O_NDELAY O_NONBLOCK
+
+#define O_DSYNC 4096
+
+#define O_ASYNC 8192
+
+#define O_DIRECT 16384
+
+#define O_LARGEFILE 32768
+
+#define O_DIRECTORY 65536
+
+#define O_NOFOLLOW 131072
+
+#define O_NOATIME 262144
+
+#define O_CLOEXEC 524288
+
+#define O_SYNC 1052672
+
+#define O_PATH 2097152
+
+#define O_TMPFILE 4259840
+
+#define S_IFMT 61440
+
+#define S_IFSOCK 49152
+
+#define S_IFLNK 40960
+
+#define S_IFREG 32768
+
+#define S_IFBLK 24576
+
+#define S_IFDIR 16384
+
+#define S_IFCHR 8192
+
+#define S_IFIFO 4096
+
+#define S_ISUID 2048
+
+#define S_ISGID 1024
+
+#define S_ISVTX 512
+
+#define S_IRWXU 448
+
+#define S_IRUSR 256
+
+#define S_IWUSR 128
+
+#define S_IXUSR 64
+
+#define S_IRWXG 56
+
+#define S_IRGRP 32
+
+#define S_IWGRP 16
+
+#define S_IXGRP 8
+
+#define S_IRWXO 7
+
+#define S_IROTH 4
+
+#define S_IWOTH 2
+
+#define S_IXOTH 1
+
+#define AT_FDCWD -100
+
+#define AT_SYMLINK_NOFOLLOW 256
+
+#define AT_REMOVEDIR 512
+
+#define AT_SYMLINK_FOLLOW 1024
+
+#define AT_NO_AUTOMOUNT 2048
+
+#define AT_EMPTY_PATH 4096
+
+#define AT_STATX_SYNC_TYPE 24576
+
+#define AT_STATX_SYNC_AS_STAT 0
+
+#define AT_STATX_FORCE_SYNC 8192
+
+#define AT_STATX_DONT_SYNC 16384
+
+#define TYPE 1
+
+#define MODE 2
+
+#define NLINK 4
+
+#define UID 8
+
+#define GID 16
+
+#define ATIME 32
+
+#define MTIME 64
+
+#define CTIME 128
+
+#define INO 256
+
+#define SIZE 512
+
+#define BLOCKS 1024
+
+#define BASIC_STATS 2047
+
+#define BTIME 2048
+
+#define MNT_ID 4096
+
+#define DIOALIGN 8192
+
+#define ALL 16383
+
+#define ATTRIBUTE_COMPRESSED 4
+
+#define ATTRIBUTE_IMMUTABLE 16
+
+#define ATTRIBUTE_APPEND 32
+
+#define ATTRIBUTE_NODUMP 64
+
+#define ATTRIBUTE_ENCRYPTED 2048
+
+#define ATTRIBUTE_AUTOMOUNT 4096
+
+#define ATTRIBUTE_MOUNT_ROOT 8192
+
+#define ATTRIBUTE_VERITY 1048576
+
+#define ATTRIBUTE_DAX 2097152
+
 /**
  * The Linux kernel actually does not define a maximum syscall number,
  * but it's obvious that syscall numbers won't exceed this value minus one, on

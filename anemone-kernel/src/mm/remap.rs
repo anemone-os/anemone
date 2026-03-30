@@ -244,13 +244,7 @@ pub unsafe fn ioremap(start: PhysAddr, len: usize) -> Result<IoRemap, MmError> {
     unsafe {
         let req = IoRange::try_new(start, len)?;
         let (virt, _) = SYS_REMAPS.lock_irqsave().ioremap(req)?;
-        kdebugln!(
-            "ioremap: phys=[{:#x}, {:#x}) -> virt=[{:#x}, {:#x})",
-            req.start.get(),
-            req.end().get(),
-            virt.get(),
-            (virt + req.len).get(),
-        );
+
         Ok(IoRemap { virt, req })
     }
 }

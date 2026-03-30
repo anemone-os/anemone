@@ -12,7 +12,7 @@ disasm = true # Whether to generate a disassembly file for kernel.
 # Kernel tailoring options
 [features]
 kunit = true # Enable KUnit testing
-# fs_ext4 = true # Enable ext4 filesystem support
+fs_ext4 = true # Enable ext4 filesystem support
 # virtio_gpu = true # Enable Virtio GPU support
 # smp = true # Enable Symmetric Multiprocessing support
 # intr_stack = true # Enable Interrupt Stack support

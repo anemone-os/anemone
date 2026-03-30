@@ -1,5 +1,5 @@
 use crate::{
-    fs::ramfs::{ramfs_dir_data, ramfs_reg_data},
+    fs::ramfs::{ramfs_dir, ramfs_reg},
     prelude::*,
 };
 
@@ -17,7 +17,7 @@ impl RamfsFile {
 
 fn ramfs_read(file: &File, buf: &mut [u8]) -> Result<usize, FsError> {
     let inode = file.inode();
-    let reg_data = ramfs_reg_data(inode)?;
+    let reg_data = ramfs_reg(inode)?;
     let data = reg_data.data.read_irqsave();
 
     let pos = file.pos();
@@ -34,7 +34,7 @@ fn ramfs_read(file: &File, buf: &mut [u8]) -> Result<usize, FsError> {
 
 fn ramfs_write(file: &File, buf: &[u8]) -> Result<usize, FsError> {
     let inode = file.inode();
-    let reg_data = ramfs_reg_data(inode)?;
+    let reg_data = ramfs_reg(inode)?;
     let mut data = reg_data.data.write_irqsave();
 
     let pos = file.pos();
@@ -56,6 +56,7 @@ fn ramfs_write(file: &File, buf: &[u8]) -> Result<usize, FsError> {
         }
     }
 
+    inode.inode().set_size(data.len() as u64);
     file.set_pos(pos + buf.len());
     Ok(buf.len())
 }
@@ -68,10 +69,14 @@ fn ramfs_seek(file: &File, pos: usize) -> Result<(), FsError> {
 
 fn ramfs_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, FsError> {
     let inode = file.inode();
-    let dir_data = ramfs_dir_data(inode)?;
-    let (name, ino) = dir_data
-        .get_by_offset(ctx.offset())
-        .ok_or(FsError::NotFound)?;
+    let dir_data = ramfs_dir(inode)?;
+
+    let entry = dir_data.get_by_offset(ctx.offset());
+    if entry.is_none() {
+        return Err(FsError::NoMoreEntries);
+    }
+    let (name, ino) = entry.unwrap();
+
     ctx.advance(1);
 
     let inode = inode.sb().iget(ino).expect("ino exists but failed to load");

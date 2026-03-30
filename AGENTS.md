@@ -25,6 +25,11 @@
 	- 基础对象 `KObject`/`KSet`，抽象为 `BusType`、`Device`、`Driver` 三层。
 	- 注册路径在 `anemone-kernel/src/device/bus/`：注册 `device/driver` 时会立即尝试匹配并执行 `probe`；匹配由具体总线实现（当前核心是 `PlatformBusType::matches`，按 compatible 表匹配）。
 	- 设备树根仍围绕 `/sys/devices/platform` 的 `ROOT_BUS` 组织，后续再扩展更完整的 `/sys/bus` 视图。
+- fs / VFS 当前仍是“先把 namespace 跑通”的阶段：
+	- `anemone-kernel/src/fs/` 里仍以 big-lock 为主，`SuperBlock`/`Dentry`/`Mount` 的共享状态优先靠大锁保护，先避免死锁和复杂交叉锁顺序。
+	- 现在的 namespace 与存储层仍然分离：`PathRef` 只是 `mount + dentry`，还没有完整的 dcache、negative dentry，也没有通用的按路径 open/create 前端或 fd 表系统调用。
+	- `namei.rs` 的路径解析仍在演进中，处理绝对路径、空路径和父目录回退时要格外小心，不要假设它已经覆盖 Linux 级别的全部语义。
+	- `ramfs` 是当前最完整的轻量后端，`ext4` 主要是 `lwext4-rust` 的包装层；碰 `ext4` 时要留意属性缓存与卸载/evict 路径仍有未收口的行为。
 - IRQ 子系统分层：
 	- 架构本地中断开关与 IRQ flags 抽象在 `anemone-kernel/src/exception/intr/hal.rs`（`IntrArchTrait`、`IrqFlags`）。
 	- 通用 IRQ 逻辑在 `anemone-kernel/src/exception/intr/irq.rs`：`IrqDomain`、`IrqChip`、`CoreIrqChip`、`request_irq`、`handle_irq` 等。
@@ -33,7 +38,11 @@
 	- 顶层在 `anemone-kernel/src/mm/mod.rs`，核心模块包括 `frame`、`paging`、`kmalloc`、`remap`、`zone`、`kptable`。
 	- `zone.rs` 维护可用/保留内存区（`SysMemZones`）；`frame` 的 PMM 初始化会基于可用 zone 建立页帧分配器。
 	- `paging` 采用 higher-half 布局抽象，布局约束由 `KernelLayout` 与架构分页 HAL 共同确定。
-- 低层调度抽象目前占位于 `anemone-kernel/src/sched/hal.rs`，新增架构调度原语先在这里落地。
+- 进程 / 调度目前以 `anemone-kernel/src/sched/` 为主：
+	- `sched/proc.rs` 持有每 CPU 的 `ProcessorInfo`，其中 `MonoFlow` 保护的 `ProcessorInner` 只允许单线程、非重入访问；相关 accessor 默认要求已经满足 IRQ / preempt 纪律。
+	- `schedule()` 与 `task_exit()` 都假设调用点已经关中断；`task_exit()` 会主动关本地中断后再切换，不能在未理解当前 IRQ 状态时直接调用。
+	- idle task 是 per-CPU 的，调度回落到 idle 时要保持内核对 IRQ 状态的预期，避免把 CPU 留在关中断状态。
+	- 新增或修改任务/进程路径时，优先检查 `sched/proc.rs`、`sched/idle.rs` 和 `task/task.rs`，不要只盯着 `sched/hal.rs`。
 
 ## 开发工作流（默认用这些命令）
 - 初始化配置：`just defconfig`（复制 `conf/.defconfig` 到仓库根 `kconfig`）。

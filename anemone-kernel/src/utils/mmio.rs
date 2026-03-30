@@ -7,8 +7,6 @@ use safe_mmio::{
 macro_rules! define_combined {
     (read, $type: ident, $name: ident) => {
         paste::paste! {
-
-
             #[repr(C)]
             struct [<$name Fields>]{
                 lower: $type<u32>,
