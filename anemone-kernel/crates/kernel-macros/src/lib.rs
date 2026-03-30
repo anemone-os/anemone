@@ -53,9 +53,21 @@ pub fn initcall(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     // ...
 /// }
 /// ```
-/// where `my_validator` is a function with the signature `fn(u64) ->
-/// Result<ValidatedArgType, SysError>`, and `ValidatedArgType` is the type of
-/// `arg1`.
+/// The expression inside `#[validate_with(...)]` can be any callable
+/// expression, such as a function item, a closure, or a factory call that
+/// returns a closure:
+/// ```
+/// #[syscall(anemone_abi::syscall::SYS_FOO)]
+/// fn sys_foo(
+///     #[validate_with(|raw| validate_user_ptr(raw, UserPtrAccess::Read))]
+///     arg1: UserPtr<u8>,
+/// ) -> Result<u64, SysError> {
+///     // ...
+/// }
+/// ```
+/// The callable must accept a single `u64` syscall argument and return
+/// `Result<ValidatedArgType, SysError>`, where `ValidatedArgType` is the type
+/// of the annotated parameter.
 #[proc_macro_attribute]
 pub fn syscall(attr: TokenStream, item: TokenStream) -> TokenStream {
     syscall::syscall_impl(attr, item)

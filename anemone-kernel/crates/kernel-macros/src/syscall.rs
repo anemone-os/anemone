@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Error, Expr, FnArg, ItemFn, Pat, Path};
+use syn::{Error, Expr, FnArg, ItemFn, Pat};
 
 pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let sysno_expr = syn::parse_macro_input!(attr as Expr);
@@ -71,7 +71,7 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         let arg_ty = &arg.ty;
         let arg_index = syn::Index::from(index);
 
-        let mut validate_with: Option<Path> = None;
+        let mut validate_with: Option<Expr> = None;
         for attr in &arg.attrs {
             if !attr.path().is_ident("validate_with") {
                 continue;
@@ -83,8 +83,8 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
                     .into();
             }
 
-            match attr.parse_args::<Path>() {
-                Ok(path) => validate_with = Some(path),
+            match attr.parse_args::<Expr>() {
+                Ok(expr) => validate_with = Some(expr),
                 Err(err) => return err.to_compile_error().into(),
             }
         }
@@ -92,7 +92,8 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         arg_bindings.push(match validate_with {
             Some(validate_with) => quote! {
-                let #arg_name: #arg_ty = #validate_with(regs.args[#arg_index])?;
+                let __validate_with = (#validate_with);
+                let #arg_name: #arg_ty = __validate_with(regs.args[#arg_index])?;
             },
             None => quote! {
                 let #arg_name = <#arg_ty as crate::syscall::handler::TryFromSyscallArg>::try_from_syscall_arg(
