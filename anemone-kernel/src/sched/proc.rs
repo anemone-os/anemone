@@ -14,6 +14,7 @@ pub struct ProcessorInfo {
     /// Scheduler is per-CPU
     sched: RwLock<Scheduler>,
     inner: MonoFlow<ProcessorInner>,
+    need_resched: AtomicBool,
 }
 
 pub struct ProcessorInner {
@@ -31,7 +32,20 @@ impl ProcessorInfo {
             })
         },
         sched: RwLock::new(Scheduler::EMPTY),
+        need_resched: AtomicBool::new(false),
     };
+}
+
+pub fn set_resched_flag() {
+    unsafe {
+        PROCESSOR.unsafe_with(|proc| {
+            proc.need_resched.store(true, Ordering::SeqCst);
+        })
+    }
+}
+
+pub fn fetch_clear_resched_flag() -> bool {
+    unsafe { PROCESSOR.unsafe_with(|proc| proc.need_resched.fetch_and(false, Ordering::SeqCst)) }
 }
 
 /// Add a task to the ready queue of the current processor.
@@ -48,7 +62,7 @@ pub fn fetch_new_task() -> Arc<Task> {
         .with(|f| {
             f.sched.write_irqsave().fetch_next() // intr is already disabled in scheduler
         })
-        .unwrap_or(clone_current_idle_task())
+        .unwrap_or_else(|| clone_current_idle_task())
 }
 
 /// Get the current task id **without creating a copy of the current task**
@@ -67,11 +81,11 @@ pub fn current_task_id() -> Tid {
 /// task**
 ///
 /// Use this function instead of `clone_current_task().tid()`.
-pub fn current_task_name() -> Box<str> {
+pub fn current_task_cmdline() -> Box<str> {
     PROCESSOR
         .with(|f| {
             f.inner
-                .with(|inner| Some(Box::from((inner.running_task.as_ref())?.name())))
+                .with(|inner| Some(Box::from((inner.running_task.as_ref())?.cmdline())))
         })
         .expect("Scheduler not initialized: no running task found")
 }
@@ -95,7 +109,7 @@ pub fn clone_current_task() -> Arc<Task> {
 /// Capture the current task with a reference to it.
 ///
 /// This function will disable preemption during the execution of the closure.
-pub fn with_current_task<F: Fn(&Arc<Task>) -> R, R>(f: F) -> R {
+pub fn with_current_task<F: FnOnce(&Arc<Task>) -> R, R>(f: F) -> R {
     PROCESSOR
         .with(|p| {
             p.inner.with(|inner| {
@@ -171,20 +185,18 @@ pub unsafe fn switch_out(exit: bool) {
 
 unsafe fn switch_uspace(cur_task: &Arc<Task>, next_task: &Arc<Task>) {
     unsafe {
-        if next_task.uspace().eq(&cur_task.uspace()) {
+        let next_uspace = next_task.clone_uspace();
+        let cur_uspace = cur_task.clone_uspace();
+        if next_uspace.eq(&cur_uspace) {
             // same addr
             return;
         }
-        if let Some(next_usersp) = next_task.uspace() {
+        if let Some(next_usersp) = next_uspace {
             // user task
             next_usersp.activate();
         } else {
             // kernel task
             activate_kernel_mapping();
-        }
-        if let Some(cur_memsp) = cur_task.uspace() {
-            // clear tlb
-            PagingArch::tlb_shootdown_all();
         }
     }
 }
@@ -200,8 +212,22 @@ pub unsafe fn switch_to(task: Arc<Task>) {
     let next_context = unsafe { next_task.get_task_context() };
     unsafe {
         switch_uspace(&clone_current_task(), &next_task);
-        set_running_task(next_task);
+        exchange_running_task(next_task);
         SchedArch::switch(cur_context, next_context);
+    }
+}
+
+/// Switch to the given task.
+///
+/// **This function should only be used by the scheduler**
+///
+/// ***Make sure interrupts are disabled before calling this function***
+pub unsafe fn load_context(new: TaskContext) -> ! {
+    unsafe {
+        kinfoln!("load new context for {}", current_task_id());
+        let mut _wasted = TaskContext::ZEROED;
+        SchedArch::switch(&mut _wasted, &new);
+        unreachable!("should never return to a wasted context");
     }
 }
 
@@ -212,4 +238,21 @@ pub unsafe fn switch_to(task: Arc<Task>) {
 /// ***Make sure interrupts are disabled before calling this function***
 pub unsafe fn set_running_task(task: Arc<Task>) {
     PROCESSOR.with(|proc| proc.inner.with_mut(|inner| inner.running_task = Some(task)));
+}
+
+/// Get the current running task
+///
+/// **This function should only be used by the scheduler**
+///
+/// ***Make sure interrupts are disabled before calling this function***
+pub unsafe fn exchange_running_task(task: Arc<Task>) -> Arc<Task> {
+    PROCESSOR.with(|proc| {
+        proc.inner.with_mut(|inner| {
+            let prev_task = inner
+                .running_task
+                .replace(task)
+                .expect("No running task found");
+            prev_task
+        })
+    })
 }

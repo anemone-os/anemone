@@ -15,7 +15,6 @@ use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 pub struct UserTaskImage {
     pub memsp: UserSpace,
     pub entry: u64,
-    pub command: Vec<Box<str>>,
 }
 
 /// Parse `data` as an ELF file and produce a [UserTaskImage].
@@ -23,10 +22,7 @@ pub struct UserTaskImage {
 /// Validates PT_LOAD segments, creates a [UserSpace] via [UserSpace::new_user],
 /// maps pages and copies segment data using [UserSpace::add_segment]. Returns
 /// [ElfLoadError] on parse, segment validation, or memory errors.
-pub fn load_image_from_elf(
-    data: &[u8],
-    command: &[impl AsRef<str>],
-) -> Result<UserTaskImage, ElfLoadError> {
+pub fn load_image_from_elf(data: &[u8]) -> Result<UserTaskImage, ElfLoadError> {
     let elf_bytes =
         ElfBytes::<AnyEndian>::minimal_parse(data).map_err(|e| ElfLoadError::Parse(e))?;
     let entry = elf_bytes.ehdr.e_entry;
@@ -98,10 +94,10 @@ pub fn load_image_from_elf(
                 .map_err(|e| ElfLoadError::Mm(e))?;
         }
     }
+    kdebugln!("ELF loaded: entry = {:#x}, heap_start = {:#x}", entry, heap_start.get());
     Ok(UserTaskImage {
         memsp: usersp,
         entry,
-        command: command.iter().map(|s| Box::from(s.as_ref())).collect(),
     })
 }
 

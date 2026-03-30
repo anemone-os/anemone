@@ -1,4 +1,4 @@
-use core::{cmp::min, marker::PhantomData, mem::ManuallyDrop, ops::Index, ptr::copy};
+use core::{cmp::min, marker::PhantomData, mem::ManuallyDrop, ptr::copy};
 
 use crate::prelude::*;
 
@@ -97,7 +97,7 @@ impl Mapper<'_> {
     pub unsafe fn fill_data(
         &mut self,
         vaddr: VirtAddr,
-        source: &(impl Index<usize, Output = u8> + ?Sized),
+        source: Option<&[u8]>,
         length: u64,
     ) -> Result<(), MmError> {
         if length == 0 {
@@ -110,21 +110,27 @@ impl Mapper<'_> {
         }
         let vpn_st = vaddr.page_down();
         let vpn_end = vaddr_end.page_up();
-        kdebugln!(
-            "consider vpn st = {:#x}, vpn end = {:#x}",
-            vpn_st.get(),
-            vpn_end.get()
-        );
         let fp_offset = (vaddr - vpn_st.to_virt_addr()) as usize;
         let fp_datasz = PagingArch::PAGE_SIZE_BYTES - fp_offset;
         let fp_ppn = self.translate(vpn_st).ok_or(MmError::NotMapped)?.ppn;
         unsafe {
-            copy(
-                &source[0],
-                (fp_ppn.to_hhdm().to_virt_addr().get() as usize + fp_offset) as *const u8
-                    as *mut u8,
-                min(fp_datasz, length as usize),
-            );
+            match source {
+                Some(data) => {
+                    copy(
+                        &data[0],
+                        (fp_ppn.to_hhdm().to_virt_addr().get() as usize + fp_offset) as *const u8
+                            as *mut u8,
+                        min(fp_datasz, length as usize),
+                    );
+                },
+                None => {
+                    for i in 0..min(fp_datasz, length as usize) {
+                        ((fp_ppn.to_hhdm().to_virt_addr().get() as usize + fp_offset + i)
+                            as *mut u8)
+                            .write_volatile(0);
+                    }
+                },
+            }
         }
         let mut count = 0;
         for vpn in (vpn_st + 1).get()..(vpn_end - 1).get() {
@@ -134,11 +140,20 @@ impl Mapper<'_> {
                 .ppn;
             let addr_st = ppn.to_hhdm().to_virt_addr().get();
             unsafe {
-                copy(
-                    &source[fp_datasz + count * PagingArch::PAGE_SIZE_BYTES],
-                    addr_st as *const u8 as *mut u8,
-                    PagingArch::PAGE_SIZE_BYTES,
-                );
+                match source {
+                    Some(data) => {
+                        copy(
+                            &data[fp_datasz + count * PagingArch::PAGE_SIZE_BYTES],
+                            addr_st as *const u8 as *mut u8,
+                            PagingArch::PAGE_SIZE_BYTES,
+                        );
+                    },
+                    None => {
+                        for i in 0..PagingArch::PAGE_SIZE_BYTES {
+                            ((addr_st as usize + i) as *mut u8).write_volatile(0);
+                        }
+                    },
+                }
             }
             count += 1;
         }
@@ -147,11 +162,20 @@ impl Mapper<'_> {
             let addr_st = ed_ppn.to_hhdm().to_virt_addr().get();
             let data_st = fp_datasz + count * PagingArch::PAGE_SIZE_BYTES;
             unsafe {
-                copy(
-                    &source[data_st],
-                    addr_st as *const u8 as *mut u8,
-                    length as usize - data_st,
-                );
+                match source {
+                    Some(data) => {
+                        copy(
+                            &data[data_st],
+                            addr_st as *const u8 as *mut u8,
+                            length as usize - data_st,
+                        );
+                    },
+                    None => {
+                        for i in 0..(length as usize - data_st) {
+                            ((addr_st as usize + i) as *mut u8).write_volatile(0);
+                        }
+                    },
+                }
             }
         }
         Ok(())

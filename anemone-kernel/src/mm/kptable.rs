@@ -23,7 +23,9 @@ pub struct KPTable {
 impl KPTable {
     pub fn new() -> Self {
         Self {
-            ptable: RwLock::new(PageTable::new()),
+            ptable: RwLock::new(
+                PageTable::new().expect("failed to allocate frame for root page directory"),
+            ),
         }
     }
 

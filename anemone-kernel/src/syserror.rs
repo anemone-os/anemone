@@ -9,7 +9,6 @@ pub enum SysError {
     Mm(MmError),
     Dev(DevError),
     Fs(FsError),
-
     Kernel(KernelError),
 }
 

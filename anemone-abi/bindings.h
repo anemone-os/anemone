@@ -33,7 +33,15 @@
 #define SYS_READ 63
 #endif
 
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_READ 63
+#endif
+
 #if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_WRITE 64
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
 #define SYS_WRITE 64
 #endif
 
@@ -41,8 +49,64 @@
 #define SYS_OPENAT 56
 #endif
 
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_OPENAT 56
+#endif
+
 #if defined(__ANEMONE_ARCH_RISCV64__)
 #define SYS_CLOSE 57
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_CLOSE 57
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_EXIT 93
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_EXIT 93
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_SCHED_YIELD 124
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_SCHED_YIELD 124
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_GETPID 172
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_GETPID 172
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_GETPPID 173
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_GETPPID 173
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_CLONE 220
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_CLONE 220
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_BRK 214
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_BRK 214
 #endif
 
 /**

@@ -13,7 +13,7 @@ kernel_va_base = 0xffffffff80200000
 max_user_stack_size = 0x800000      # 8MB
 init_user_stack_size = 0x4000       # 16KB
 max_heap_size = 0x2000000000        # 128GB
-max_cpus = 14
+max_cpus = 16
 frame_section_shift_mb = 7
 
 
@@ -21,7 +21,7 @@ frame_section_shift_mb = 7
 qemu = "qemu-system-riscv64"
 machine = "virt"
 cpu = "rv64"
-smp = 14
+smp = 16
 memory = "1G"
 bios = "default"
 args = [

@@ -4,7 +4,7 @@ members = [
     "anemone-abi",
     "anemone-kernel",
     "anemone-kernel/crates/*",
-    "anemone-apps/user-test",
+    "anemone-apps/*",
 ]
 exclude = ["scripts/xtask"]
 

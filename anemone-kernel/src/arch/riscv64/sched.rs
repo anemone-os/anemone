@@ -258,7 +258,7 @@ unsafe extern "C" fn __task_run(
         ra,
     );
 
-    knoticeln!("{}({}) starting", current_task_id(), current_task_name());
+    knoticeln!("{}({}) starting", current_task_id(), current_task_cmdline());
     unsafe {
         match prv {
             Privilege::Kernel => __ktrap_return_to_task(&trapframe),

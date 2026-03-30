@@ -34,15 +34,8 @@ pub mod refill;
 pub use layout::LA64KernelLayout;
 pub use paging::LA64PagingArch;
 
-/// Initial user space
-pub const BOOT_DMW0: Dmw = Dmw::new(
-    PrivilegeFlags::PLV0,
-    MemAccessType::Cache,
-    Dmw::vseg_from_addr(0),
-);
-
 /// DM space
-pub const BOOT_DMW1: Dmw = Dmw::new(
+pub const BOOT_DMW0_DM: Dmw = Dmw::new(
     PrivilegeFlags::PLV0,
     MemAccessType::Cache,
     Dmw::vseg_from_addr(LA64KernelLayout::DIRECT_MAPPING_ADDR),

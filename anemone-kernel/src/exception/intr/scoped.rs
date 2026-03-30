@@ -8,11 +8,13 @@ pub struct IntrGuard {
 
 impl IntrGuard {
     /// Create a new IntrGuard by disabling local interrupts.
-    pub fn new() -> Self {
+    pub fn new(enable: bool) -> Self {
         let prev_flags = IntrArch::current_irq_flags();
 
-        unsafe {
-            IntrArch::local_intr_disable();
+        if enable {
+            unsafe { IntrArch::local_intr_enable() };
+        } else {
+            unsafe { IntrArch::local_intr_disable() };
         }
 
         Self { flags: prev_flags }

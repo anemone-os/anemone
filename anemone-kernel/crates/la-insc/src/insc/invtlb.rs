@@ -5,16 +5,16 @@ pub unsafe fn invtlb(invt_type: InvtlbType) {
     unsafe {
         match invt_type {
             InvtlbType::All => {
-                core::arch::asm!("invtlb 0,$r0,$r0");
+                core::arch::asm!("invtlb 0,$zero,$zero");
             },
             InvtlbType::Global => {
-                core::arch::asm!("invtlb 2,$r0,$r0");
+                core::arch::asm!("invtlb 2,$zero,$zero");
             },
             InvtlbType::NonGlobal => {
-                core::arch::asm!("invtlb 3,$r0,$r0");
+                core::arch::asm!("invtlb 3,$zero,$zero");
             },
             InvtlbType::NonGlobalWithAsid { asid } => {
-                core::arch::asm!("invtlb 4,{0},$r0", in(reg) asid);
+                core::arch::asm!("invtlb 4,{0},$zero", in(reg) asid);
             },
             InvtlbType::NonGlobalWithAsidAndVaddr { asid, vaddr } => {
                 core::arch::asm!("invtlb 5,{0},{1}", in(reg) asid, in(reg) vaddr);

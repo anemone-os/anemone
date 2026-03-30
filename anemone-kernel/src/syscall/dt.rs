@@ -7,7 +7,7 @@ use crate::{fs::vfs_lookup, prelude::*};
 pub fn user_pointer<T: Sized>(rwx_flags: PteFlags, arg: u64) -> Result<*const T, SysError> {
     let flags = PteFlags::USER | rwx_flags;
     with_current_task(|task| -> Result<(), SysError> {
-        let Some(memspace) = task.uspace() else {
+        let Some(memspace) = task.clone_uspace() else {
             return Err(MmError::NotMapped.into());
         };
         let mut table = memspace.page_table_mut();
@@ -31,7 +31,8 @@ pub fn user_pointer<T: Sized>(rwx_flags: PteFlags, arg: u64) -> Result<*const T,
     Ok(arg as *const T)
 }
 
-/// Validate that the address is inside user space and return it as a virtual address.
+/// Validate that the address is inside user space and return it as a virtual
+/// address.
 pub fn user_vaddr(arg: u64) -> Result<VirtAddr, SysError> {
     if arg < KernelLayout::USPACE_TOP_ADDR {
         Ok(VirtAddr::new(arg))
@@ -40,7 +41,8 @@ pub fn user_vaddr(arg: u64) -> Result<VirtAddr, SysError> {
     }
 }
 
-/// Validate a user C string pointer and return a borrowed raw string slice pointer.
+/// Validate a user C string pointer and return a borrowed raw string slice
+/// pointer.
 pub fn c_readonly_string_ptr<const MAX_LEN: usize>(arg: u64) -> Result<*const str, SysError> {
     let st_pointer = arg as *const u8;
     user_pointer::<u8>(PteFlags::READ, arg)?;

@@ -14,11 +14,9 @@ pub struct PageTable {
 
 impl PageTable {
     /// Create a new Mapper with a newly allocated root page directory.
-    pub fn new() -> Self {
-        let root = alloc_frame_zeroed()
-            .expect("failed to allocate frame for root page directory")
-            .leak();
-        Self { root }
+    pub fn new() -> Result<Self, MmError> {
+        let root = alloc_frame_zeroed().ok_or(MmError::OutOfMemory)?.leak();
+        Ok(Self { root })
     }
 
     /// Get the physical page number of the root page directory.

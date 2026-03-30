@@ -11,17 +11,25 @@ use crate::{
 #[repr(C)]
 pub struct Task {
     tid: TidHandle,
-    name: Box<str>,
-    flags: TaskFlags,
     kstack: KernelStack,
     sched_info: MonoFlow<TaskInner>,
-    uspace: Option<Arc<UserSpace>>,
 
-    parent: RwLock<Option<Weak<Task>>>,
-    children: RwLock<Vec<Arc<Task>>>,
+    pub info: RwLock<TaskInfo>,
+    related: RwLock<TaskRelatedInfo>,
 
     pub exit_code: AtomicI32,
     pub status: RwLock<TaskStatus>,
+}
+
+pub struct TaskRelatedInfo {
+    pub parent: Option<Weak<Task>>,
+    pub children: Vec<Arc<Task>>,
+}
+
+pub struct TaskInfo {
+    pub cmdline: Box<str>,
+    pub flags: TaskFlags,
+    pub uspace: Option<Arc<UserSpace>>,
 }
 
 impl Debug for Task {
@@ -29,7 +37,7 @@ impl Debug for Task {
         f.debug_struct("Task")
             .field("tid", &self.tid())
             .field("status", &*self.status.read())
-            .field("flags", &self.flags)
+            .field("flags", &self.flags())
             .finish()
     }
 }
@@ -58,18 +66,16 @@ impl Task {
         args: ParameterList,
         irq_flags: IrqFlags,
         flags: TaskFlags,
-        parent: Option<Weak<Task>>,
+        parent: Option<&Arc<Task>>,
     ) -> Result<Self, MmError> {
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
+        let parent = parent.and_then(|arc| Some(Arc::downgrade(arc)));
         kdebugln!("created kernel task with kernel stack at {:?}", stack);
         Ok(Self {
             status: RwLock::new(TaskStatus::Ready),
-            name: Box::from(name.as_ref()),
-            flags: flags | TaskFlags::KERNEL,
             tid: alloc_tid(),
             kstack: stack,
-            uspace: None,
             sched_info: unsafe {
                 MonoFlow::new(TaskInner {
                     task_context: TaskContext::from_kernel_fn(
@@ -80,30 +86,35 @@ impl Task {
                     ),
                 })
             },
-            parent: RwLock::new(parent),
-            children: RwLock::new(vec![]),
+            info: RwLock::new(TaskInfo {
+                cmdline: (String::from("@kernel/") + name.as_ref()).into_boxed_str(),
+                flags: flags | TaskFlags::KERNEL,
+                uspace: None,
+            }),
+            related: RwLock::new(TaskRelatedInfo {
+                parent,
+                children: vec![],
+            }),
             exit_code: AtomicI32::new(0),
         })
     }
 
     /// Create a new user task with a kernel stack and user-space entry context.
     pub fn new_user(
-        name: impl AsRef<str>,
+        cmdline: impl AsRef<str>,
         entry: *const (),
         uspace: Arc<UserSpace>,
         ustack_top: VirtAddr,
-        parent: Option<Weak<Task>>,
+        parent: Option<&Arc<Task>>,
     ) -> Result<Self, MmError> {
         let ustack = KernelStack::new()?;
         let kstack_top = ustack.stack_top();
+        let parent = parent.and_then(|arc| Some(Arc::downgrade(arc)));
         kdebugln!("create user task with kernel stack at {:?}", ustack);
         Ok(Self {
             status: RwLock::new(TaskStatus::Ready),
-            name: Box::from(name.as_ref()),
-            flags: TaskFlags::NONE,
             tid: alloc_tid(),
             kstack: ustack,
-            uspace: Some(uspace),
             sched_info: unsafe {
                 MonoFlow::new(TaskInner {
                     task_context: TaskContext::from_user_fn(
@@ -113,8 +124,15 @@ impl Task {
                     ),
                 })
             },
-            parent: RwLock::new(parent),
-            children: RwLock::new(vec![]),
+            info: RwLock::new(TaskInfo {
+                cmdline: Box::from(cmdline.as_ref()),
+                flags: TaskFlags::NONE,
+                uspace: Some(uspace),
+            }),
+            related: RwLock::new(TaskRelatedInfo {
+                parent,
+                children: vec![],
+            }),
             exit_code: AtomicI32::new(0),
         })
     }
@@ -124,8 +142,9 @@ impl Task {
     /// This function will return [None] only if this task has no parent, e.g.
     /// the init task, the idle task, a exited task or the kinit task.
     pub fn parent_tid(&self) -> Option<Tid> {
-        self.parent
+        self.related
             .read()
+            .parent
             .as_ref()
             .and_then(|weak| weak.upgrade().map(|parent| parent.tid()))
     }
@@ -152,24 +171,32 @@ impl Task {
     }
 
     /// Get the task name.
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn cmdline(&self) -> Box<str> {
+        self.info.read().cmdline.clone()
     }
 
     /// Get the task flags.
     pub fn flags(&self) -> TaskFlags {
-        self.flags
+        self.info.read().flags
     }
 
     /// Get the user-space memory context of this task, if any.
-    pub fn uspace(&self) -> Option<&Arc<UserSpace>> {
-        self.uspace.as_ref()
+    pub fn clone_uspace(&self) -> Option<Arc<UserSpace>> {
+        self.info.read().uspace.clone()
+    }
+
+    pub unsafe fn set_info(&self, info: TaskInfo) {
+        *self.info.write() = info;
+    }
+
+    pub fn kstack(&self) -> &KernelStack {
+        &self.kstack
     }
 }
 
 impl Drop for Task {
     fn drop(&mut self) {
-        knoticeln!("{}({}) dropped", self.tid(), self.name());
+        knoticeln!("{}({}) dropped", self.tid(), self.cmdline());
     }
 }
 

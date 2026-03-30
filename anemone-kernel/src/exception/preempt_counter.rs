@@ -25,6 +25,10 @@ impl PreemptCounter {
         unsafe { self.decrease() };
         res
     }
+
+    pub fn allow(&self) -> bool {
+        self.0.load(Ordering::SeqCst) == 0
+    }
 }
 
 #[derive(Debug)]
@@ -41,8 +45,15 @@ impl PreemptGuard {
 
 impl Drop for PreemptGuard {
     fn drop(&mut self) {
-        unsafe {
-            unsafe_with_core_local(|local| local.preempt_counter().decrease());
+        let intr_guard = IntrGuard::new(false);
+        if unsafe {
+            unsafe_with_core_local(|local| local.preempt_counter().decrease() == 0)
+                && fetch_clear_resched_flag()
+        } {
+            unsafe {
+                schedule();
+            }
         }
+        drop(intr_guard);
     }
 }

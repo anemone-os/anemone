@@ -5,7 +5,7 @@ use crate::{
     prelude::*,
 };
 use la_insc::{
-    reg::{csr::prmd, exception::IntrFlags},
+    reg::{csr::crmd, exception::IntrFlags},
     utils::privl::PrivilegeLevel,
 };
 
@@ -89,7 +89,7 @@ impl LA64TrapFrame {
                 },
             },
             prmd: {
-                let mut prmd = unsafe { prmd::csr_read() };
+                let mut prmd = unsafe { crmd::csr_read() };
                 prmd.set_ie(irq_flags == IntrArch::ENABLED_IRQ_FLAGS);
                 prmd.set_plv(PrivilegeLevel::from(prv));
                 prmd.to_u64()

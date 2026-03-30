@@ -2,8 +2,15 @@
 
 use core::arch::naked_asm;
 
-use la_insc::reg::csr::{
-    CR_CPUID, CR_CRMD, CR_DMW0, CR_DMW1, CR_PGDH, CR_PGDL, CR_PWCH, CR_PWCL, CR_TLBRENTRY,
+use la_insc::{
+    reg::{
+        csr::{
+            CR_CPUID, CR_CRMD, CR_DMW0, CR_DMW1, CR_DMW2, CR_PGDH, CR_PGDL, CR_PWCH, CR_PWCL,
+            CR_TLBRENTRY, dmw2,
+        },
+        dmw::Dmw,
+    },
+    utils::{mem::MemAccessType, privl::PrivilegeFlags},
 };
 use loongArch64::ipi::csr_mail_send;
 
@@ -12,7 +19,7 @@ use crate::{
         clear_bss,
         loongarch64::{
             exception::install_ktrap_handler,
-            mm::{BOOT_DMW0, BOOT_DMW1, BOOTSTRAP_PTABLE, PWCH, PWCL, refill::__tlb_rfill},
+            mm::{BOOT_DMW0_DM, BOOTSTRAP_PTABLE, PWCH, PWCL, refill::__tlb_rfill},
         },
     },
     device::discovery::open_firmware::{
@@ -22,6 +29,8 @@ use crate::{
     prelude::*,
     sync::counter::CpuSync,
 };
+
+const TEMP_IO_SPACE: u64 = 0x8000_0000_0000_0000;
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bss.stack0")]
@@ -54,6 +63,9 @@ pub unsafe extern "C" fn __nun() -> ! {
             li.d    $t0, {boot_dmw1}
             csrwr   $t0, {cr_dmw1}
 
+            li.d    $t0, {boot_dmw2}
+            csrwr   $t0, {cr_dmw2}
+
             li.w    $t0, 0xb8   // IE=0, PLV=0, DA=0, PG=1
             csrwr   $t0, {cr_crmd}
         ",
@@ -71,7 +83,7 @@ pub unsafe extern "C" fn __nun() -> ! {
             #sub.d       $t0, $t0, $t2
             csrwr   $t0, {cr_pgdl}
         ",
-        // Set up stack
+        // Set up stack and refill handler
         "
 
             li.d        $t2, {k_offset}
@@ -82,22 +94,39 @@ pub unsafe extern "C" fn __nun() -> ! {
             mul.d       $t0, $t0, $t1
             add.d       $sp, $sp, $t0
             or          $sp, $sp, $t2
-        ",
-        // Jump
-        "
+
+
             la.global   $t0, {tlb_rfill}
             #sub.d       $t0, $t0, $t2
             csrwr       $t0, {tlbr_entry}
+        ",
+        // Jump
+        "
+            // remove dmw1
+            li.d    $t0, 0
+            csrwr   $t0, {cr_dmw1}
 
             csrrd       $a0, {cr_cpuid} // arg0: hart_id
             la.global   $t0, {rusty_nun}
             or          $t0, $t0, $t2
             jirl        $zero,$t0,0
         ",
-        boot_dmw0 = const BOOT_DMW0.to_u64(),
-        boot_dmw1 = const BOOT_DMW1.to_u64(),
+        boot_dmw0 = const BOOT_DMW0_DM.to_u64(),
+        // temporary
+        boot_dmw1 = const Dmw::new(
+                PrivilegeFlags::PLV0,
+                MemAccessType::Cache,
+                Dmw::vseg_from_addr(0),
+            ).to_u64(),
+        // temporary IO space
+        boot_dmw2 = const Dmw::new(
+                PrivilegeFlags::PLV0,
+                MemAccessType::StrongNonCache,
+                Dmw::vseg_from_addr(TEMP_IO_SPACE),
+            ).to_u64(),
         cr_dmw0 = const CR_DMW0,
         cr_dmw1 = const CR_DMW1,
+        cr_dmw2 = const CR_DMW2,
 
         tlbr_entry = const CR_TLBRENTRY,
 
@@ -146,7 +175,14 @@ pub fn register_debugcon() {
         driver::Ns16550ARegisters,
     };
 
-    let con = unsafe { Ns16550ARegisters::from_raw(0x1fe0_01e0 as *const u8 as *mut u8, 0, 1) };
+    const DEBUG_CON_REG: u64 = 0x1fe0_01e0;
+    let con = unsafe {
+        Ns16550ARegisters::from_raw(
+            (TEMP_IO_SPACE + DEBUG_CON_REG) as *const u8 as *mut u8,
+            0,
+            1,
+        )
+    };
     pub struct DebugCon {
         con: SpinLock<Ns16550ARegisters>,
     }
@@ -156,6 +192,14 @@ pub fn register_debugcon() {
         fn output(&self, s: &str) {
             use core::fmt::Write;
             let _ = self.con.lock_irqsave().write_str(s);
+        }
+    }
+    impl Drop for DebugCon {
+        fn drop(&mut self) {
+            unsafe {
+                // remove temporary IO space
+                dmw2::csr_write(Dmw::from_u64(0));
+            }
         }
     }
     let debug_con = DebugCon {

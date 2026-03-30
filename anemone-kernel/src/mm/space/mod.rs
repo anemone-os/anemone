@@ -6,7 +6,7 @@
 //! rest of the kernel when accessing user page tables.
 use core::{
     mem::swap,
-    ops::{Deref, DerefMut, Index},
+    ops::{Deref, DerefMut},
 };
 
 use range_allocator::Rangable;
@@ -54,14 +54,17 @@ pub struct UserSpace {
 pub struct UserSpaceInner {
     table: PageTable,
     ustack: MemArea,
+    /// Only used during task initialization, the initial stack pointer for the
+    /// user stack.
+    uinit_sp: VirtAddr,
     uheap: MemArea,
     ubrk: VirtAddr,
     seg_frames: Vec<FrameHandle>,
 }
 impl UserSpace {
-    pub fn new_empty() -> Self {
-        let table = PageTable::new();
-        Self {
+    pub fn new_empty() -> Result<Self, MmError> {
+        let table = PageTable::new()?;
+        Ok(Self {
             table_ppn: table.root_ppn(),
             inner: RwLock::new(UserSpaceInner {
                 table,
@@ -72,6 +75,7 @@ impl UserSpace {
                     PteFlags::READ | PteFlags::WRITE | PteFlags::USER | PteFlags::VALID,
                 )
                 .unwrap(),
+                uinit_sp: KernelLayout::USPACE_TOP_VPN.to_virt_addr(),
                 uheap: MemArea::new(
                     VirtPageNum::new(0),
                     MAX_HEAP_PAGES as usize,
@@ -82,11 +86,11 @@ impl UserSpace {
                 ubrk: VirtPageNum::new(0).to_virt_addr(),
                 seg_frames: vec![],
             }),
-        }
+        })
     }
 
     pub fn new_user() -> Result<Self, MmError> {
-        let mut table = PageTable::new();
+        let mut table = PageTable::new()?;
         KERNEL_PTABLE.copy_to_ptable(&mut table);
         let stack = MemArea::prealloc(
             KernelLayout::USPACE_TOP_VPN,
@@ -108,7 +112,7 @@ impl UserSpace {
             table_ppn: table.root_ppn(),
             inner: RwLock::new(UserSpaceInner {
                 table,
-
+                uinit_sp: KernelLayout::USPACE_TOP_VPN.to_virt_addr(),
                 ustack: stack,
                 uheap: heap,
                 ubrk: VirtPageNum::new(0).to_virt_addr(),
@@ -164,7 +168,11 @@ impl UserSpace {
                     mapper.map_one(
                         vpn,
                         frame.ppn(),
-                        rwx_flags | PteFlags::USER | PteFlags::VALID,
+                        PteFlags::READ
+                            | PteFlags::WRITE
+                            | PteFlags::EXECUTE
+                            | PteFlags::USER
+                            | PteFlags::VALID,
                         0,
                         false,
                     )?;
@@ -173,18 +181,11 @@ impl UserSpace {
             }
         }
         unsafe {
-            mapper.fill_data(vaddr, source, psize as u64)?;
+            mapper.fill_data(vaddr, Some(source), psize as u64)?;
         }
         if vsize > psize {
-            struct ZeroData;
-            impl Index<usize> for ZeroData {
-                type Output = u8;
-                fn index(&self, index: usize) -> &Self::Output {
-                    &0
-                }
-            }
             unsafe {
-                mapper.fill_data(vaddr + psize as u64, &ZeroData, (vsize - psize) as u64)?;
+                mapper.fill_data(vaddr + psize as u64, None, (vsize - psize) as u64)?;
             }
         }
         inner.seg_frames.extend(frames);
@@ -208,10 +209,10 @@ impl UserSpace {
         {
             return Err(MmError::OutOfMemory);
         }
-        let brk_ppn = brk.page_up();
-        if inner.uheap.vpn_range.end() > brk_ppn {
+        let new_brk_vpn = brk.page_up();
+        if inner.uheap.vpn_range.end() > new_brk_vpn {
             // shrink heap
-            let mut count = inner.uheap.vpn_range.end() - brk_ppn;
+            let mut count = inner.uheap.vpn_range.end() - new_brk_vpn;
             let mut uheap = MemArea::EMPTY;
             swap(&mut inner.uheap, &mut uheap);
             let mut mapper = inner.table.mapper();
@@ -225,48 +226,60 @@ impl UserSpace {
                 }
             }
             swap(&mut inner.uheap, &mut uheap);
-        } else if brk_ppn > inner.uheap.vpn_range.end() {
+        } else if new_brk_vpn > inner.uheap.vpn_range.end() {
             let mut uheap = MemArea::EMPTY;
             swap(&mut inner.uheap, &mut uheap);
             let mut grown: usize = 0;
             // grow heap
-            while uheap.vpn_range.end().to_virt_addr() < brk {
-                uheap.grow(&mut inner.table).map_err(|e| {
-                    // roll back the changes to the page table and the heap area
-                    kerr!(
-                        "out of memory when growing heap area, unmapping {} pages",
-                        grown
-                    );
-                    let mut mapper = inner.table.mapper();
-                    unsafe {
-                        mapper.try_unmap(Unmapping {
-                            range: VirtPageRange::new(
-                                uheap.vpn_range.end() - grown as u64,
-                                grown as u64,
-                            ),
-                        }); // unmap the newly mapped pages
-                        while grown > 0 {
-                            uheap.shrink();
-                            grown -= 1;
-                        }
-                    }
-
-                    swap(&mut inner.uheap, &mut uheap);
-                    e
-                })?;
-                grown += 1;
-                if grown % 3000 == 0 {
-                    kdebugln!(
-                        "grown heap to {} pages ( {} MiB)",
-                        uheap.pages(),
-                        uheap.pages() * 4 / 1024
-                    );
-                }
-            }
+            let cur_heapend_vpn = uheap.vpn_range.end().to_virt_addr().page_up();
+            let count = (new_brk_vpn - cur_heapend_vpn) as usize;
+            let res = uheap.try_grow(&mut inner.table, count);
             swap(&mut inner.uheap, &mut uheap);
+            res?;
         }
         inner.ubrk = brk;
         Ok(())
+    }
+
+    /// Push data onto the user init stack, returning pointer to the data on the
+    /// stack.
+    ///
+    /// Returns [MmError::ArgumentTooLarge] if the task init stack is not large
+    /// enough to hold the data.
+    ///
+    /// ## Safety
+    /// **Invoke this function when the stack is in use may lead to undefined
+    /// behavior**
+    pub unsafe fn push_to_init_stack<A: Sized>(&self, data: &[u8]) -> Result<VirtAddr, MmError> {
+        let align = align_of::<A>() as u64;
+        let mut inner = self.inner.write();
+        let mut stack_area_top = inner.ustack.vpn_range.end().to_virt_addr().get();
+        let mut sp = inner.uinit_sp.get() - data.len() as u64;
+        sp = align_down!(sp, align) as u64;
+        if sp < inner.ustack.vpn_range.start().to_virt_addr().get() {
+            return Err(MmError::ArgumentTooLarge);
+        }
+        let mut mapper = inner.table.mapper();
+        unsafe {
+            mapper
+                .fill_data(VirtAddr::new(sp), Some(data), data.len() as u64)
+                .expect("stack push should not fail after ensuring the stack is large enough");
+        }
+        drop(mapper);
+        let sp = VirtAddr::new(sp);
+        inner.uinit_sp = sp;
+        Ok(sp)
+    }
+
+    /// Move the init stack pointer to the top of the user stack.
+    ///
+    /// This will not deallocate the old stack
+    ///
+    /// ## Safety
+    /// **Invoke this function when the stack is in use may lead to undefined
+    /// behavior**
+    pub unsafe fn clear_stack(&self) {
+        self.inner.write().uinit_sp = self.inner.read().ustack.vpn_range.end().to_virt_addr()
     }
 
     pub fn page_table(&self) -> USpacePTableReadGuard<'_> {
@@ -373,10 +386,42 @@ impl MemArea {
         self.max_pages
     }
 
+    pub fn try_grow(&mut self, page_table: &mut PageTable, pages: usize) -> Result<(), MmError> {
+        let mut grown = self.pages();
+        for _ in 0..pages {
+            match self.grow(page_table) {
+                Ok(()) => {
+                    grown += 1;
+                },
+                Err(e) => {
+                    kinfoln!(
+                        "out of memory when growing mem area, unmapping {} pages",
+                        grown
+                    );
+                    let mut mapper = page_table.mapper();
+                    unsafe {
+                        mapper.try_unmap(Unmapping {
+                            range: VirtPageRange::new(
+                                self.vpn_range.end() - grown as u64,
+                                grown as u64,
+                            ),
+                        }); // unmap the newly mapped pages
+                        while grown > 0 {
+                            self.shrink();
+                            grown -= 1;
+                        }
+                    }
+                    return Err(e);
+                },
+            }
+        }
+        Ok(())
+    }
+
     /// Grow the area by one page.
     pub fn grow(&mut self, page_table: &mut PageTable) -> Result<(), MmError> {
         if self.pages() + 1 > self.max_pages {
-            return Err(MmError::InvalidArgument);
+            return Err(MmError::OutOfMemory);
         }
         let frame = unsafe {
             alloc_frame()

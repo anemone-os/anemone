@@ -1,7 +1,7 @@
 //! Error used throughout the memory management subsystem.
 
 use crate::prelude::*;
-use anemone_abi::errno::*;
+use anemone_abi::errno::{self, *};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MmError {
@@ -16,12 +16,20 @@ pub enum MmError {
     /// General invalid argument, e.g. an free operation with an invalid address
     /// or length.
     InvalidArgument,
+    /// The argument is too large than the allowed maximum.
+    ArgumentTooLarge,
     /// Permission denied, e.g. trying to write to a read-only page.
     PermissionDenied,
 }
 
 impl AsErrno for MmError {
     fn as_errno(&self) -> Errno {
-        todo!()
+        match self {
+            MmError::OutOfMemory => errno::ENOMEM,
+            MmError::AlreadyMapped | MmError::NotMapped | MmError::SharedFrame => errno::EFAULT,
+            MmError::InvalidArgument => errno::EINVAL,
+            MmError::PermissionDenied => errno::EACCES,
+            MmError::ArgumentTooLarge => errno::E2BIG,
+        }
     }
 }
