@@ -46,6 +46,7 @@ RUN apt update && apt install -y \
     git \
     openssh-client \
     curl \
+    cmake \
     libglib2.0-0 \
     libslirp0
 COPY --from=build_lwext4_toolchains /opt/toolchains /opt/toolchains
@@ -71,7 +72,9 @@ RUN apt update && apt install -y \
     build-essential \
     python3 \
     python3-pip \
+    git \
     curl \
+    cmake \
     libglib2.0-0 \
     libslirp0
 
