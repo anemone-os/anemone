@@ -113,32 +113,3 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) {
     }
     trapframe.advance_pc();
 }
-
-#[syscall(39)]
-fn sys_foo(a: usize, b: i32) -> Result<u64, SysError> {
-    Ok((a as u64) + (b as u64))
-}
-
-#[syscall(42)]
-fn sys_bar(
-    #[validate_with(nonzero)] x: usize,
-    #[validate_with(greater_than_zero)] y: i32,
-) -> Result<u64, SysError> {
-    Ok((x as u64) * (y as u64))
-}
-
-fn nonzero(arg: u64) -> Result<usize, SysError> {
-    if arg == 0 {
-        Err(KernelError::InvalidArgument.into())
-    } else {
-        Ok(arg as usize)
-    }
-}
-
-fn greater_than_zero(arg: u64) -> Result<i32, SysError> {
-    if arg == 0 {
-        Err(KernelError::InvalidArgument.into())
-    } else {
-        Ok(arg as i32)
-    }
-}
