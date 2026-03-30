@@ -47,11 +47,12 @@ RUN apt update && apt install -y \
     openssh-client \
     curl \
     cmake \
+    libclang-dev \
     libglib2.0-0 \
     libslirp0
 COPY --from=build_lwext4_toolchains /opt/toolchains /opt/toolchains
 ENV LWEXT4_TOOLCHAIN_RISCV64=/opt/toolchains/riscv64-linux-musl-cross \
-    LWEXT4_TOOLCHAIN_LOONGARCH64=/opt/toolchains/loongarch64-linux-musl-cross
+    LWEXT4_TOOLCHAIN_LOONGARCH64=/opt/toolchains/loongarch64-linux-musl-cross 
 # Install Rust in a shared location accessible by all users
 # RUSTUP_HOME and binaries are shared, but each user gets their own ~/.cargo for registry cache
 ENV RUSTUP_HOME=/opt/rust/rustup \
@@ -75,12 +76,14 @@ RUN apt update && apt install -y \
     git \
     curl \
     cmake \
+    libclang-dev \
     libglib2.0-0 \
     libslirp0
 
 COPY --from=build_lwext4_toolchains /opt/toolchains /opt/toolchains
 ENV LWEXT4_TOOLCHAIN_RISCV64=/opt/toolchains/riscv64-linux-musl-cross \
-    LWEXT4_TOOLCHAIN_LOONGARCH64=/opt/toolchains/loongarch64-linux-musl-cross
+    LWEXT4_TOOLCHAIN_LOONGARCH64=/opt/toolchains/loongarch64-linux-musl-cross 
+#    LIBCLANG_PATH=/usr/lib/llvm-18/lib
 
 COPY --from=build_qemu /opt/qemu /opt/qemu
 ENV PATH="/opt/qemu/bin:${PATH}"
