@@ -1,4 +1,5 @@
-use core::fmt::Debug;
+use anemone_abi::fs::linux::{mode as linux_mode, stat::Stat as LinuxStat};
+use core::{fmt::Debug, time::Duration};
 
 use crate::{prelude::*, utils::any_opaque::AnyOpaque};
 
@@ -30,6 +31,9 @@ pub struct InodeOps {
     ///
     /// So we put this method here.
     pub open: fn(&InodeRef) -> Result<OpenedFile, FsError>,
+
+    /// Query inode metadata in a filesystem-neutral shape.
+    pub get_attr: fn(&InodeRef) -> Result<InodeStat, FsError>,
 }
 
 pub struct OpenedFile {
@@ -80,6 +84,223 @@ pub enum InodeType {
     // Symlink is not supported yet.
 }
 
+impl InodeType {
+    /// Convert to Linux's mode bits, with only file type bits set.
+    pub const fn to_linux_mode_bits(self) -> u32 {
+        match self {
+            Self::Regular => linux_mode::S_IFREG,
+            Self::Dir => linux_mode::S_IFDIR,
+            Self::Dev => linux_mode::S_IFCHR,
+        }
+    }
+}
+
+bitflags! {
+    /// Permission bits for an inode.
+    ///
+    /// We simply re-export Linux's permission bits here, since it's good enough.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct InodePerm: u16 {
+        /// Set-user-ID on execution.
+        const ISUID = linux_mode::S_ISUID as u16;
+        /// Set-group-ID on execution.
+        const ISGID = linux_mode::S_ISGID as u16;
+        /// Sticky bit.
+        const ISVTX = linux_mode::S_ISVTX as u16;
+
+        /// Read permission, owner.
+        const IRUSR = linux_mode::S_IRUSR as u16;
+        /// Write permission, owner.
+        const IWUSR = linux_mode::S_IWUSR as u16;
+        /// Execute permission, owner.
+        const IXUSR = linux_mode::S_IXUSR as u16;
+        /// Read permission, group.
+        const IRGRP = linux_mode::S_IRGRP as u16;
+        /// Write permission, group.
+        const IWGRP = linux_mode::S_IWGRP as u16;
+        /// Execute permission, group.
+        const IXGRP = linux_mode::S_IXGRP as u16;
+        /// Read permission, others.
+        const IROTH = linux_mode::S_IROTH as u16;
+        /// Write permission, others.
+        const IWOTH = linux_mode::S_IWOTH as u16;
+        /// Execute permission, others.
+        const IXOTH = linux_mode::S_IXOTH as u16;
+
+        /// Shortcut for all read/write/execute permissions for owner.
+        const RWXU = linux_mode::S_IRWXU as u16;
+        /// Shortcut for all read/write/execute permissions for group.
+        const RWXG = linux_mode::S_IRWXG as u16;
+        /// Shortcut for all read/write/execute permissions for others.
+        const RWXO = linux_mode::S_IRWXO as u16;
+    }
+}
+
+/// Device number for inodes' underlying device.
+///
+/// For regular files and directories, this is `DeviceId::None`. For device
+/// files, this is the actual device number.
+///
+/// This type is actually seldom used in kernel code. It's mainly for
+/// compatibility with Linux's `st_dev` and `st_rdev` fields in `struct stat`,
+/// which are exposed to userspace and expected to be in a certain format.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceId {
+    #[default]
+    None,
+    Char(CharDevNum),
+    Block(BlockDevNum),
+    Raw(u64),
+}
+
+impl DeviceId {
+    /// Get the raw device number.
+    pub fn raw(self) -> u64 {
+        match self {
+            Self::None => 0,
+            Self::Char(devnum) => devnum.raw() as u64,
+            Self::Block(devnum) => devnum.raw() as u64,
+            Self::Raw(value) => value,
+        }
+    }
+}
+
+/// Unlike Linux's way, we explicit split file type and permission bits into two
+/// fields, which is more clear and less error-prone.
+///
+/// This can be regarded as Linux's `mode_t`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InodeMode {
+    ty: InodeType,
+    perm: InodePerm,
+}
+
+impl InodeMode {
+    pub const fn new(ty: InodeType, perm: InodePerm) -> Self {
+        Self { ty, perm }
+    }
+
+    pub const fn ty(self) -> InodeType {
+        self.ty
+    }
+
+    pub const fn perm(self) -> InodePerm {
+        self.perm
+    }
+
+    /// Convert to Linux's mode bits.
+    pub const fn to_linux_mode(self) -> u32 {
+        self.ty.to_linux_mode_bits() | self.perm.bits() as u32
+    }
+}
+
+/// Metadata of an inode, in a filesystem-neutral shape.
+///
+/// Each filesystem must at least store these fields.
+///
+/// TODO: some fields are set to dummy values for now, since we haven't
+/// implemented all needed features.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InodeStat {
+    /// Device ID of the filesystem this inode belongs to.
+    pub fs_dev: DeviceId,
+    pub ino: Ino,
+    pub mode: InodeMode,
+    pub nlink: u64,
+    pub uid: u32,
+    pub gid: u32,
+    /// Note the difference between `fs_dev` and `rdev`.
+    pub rdev: DeviceId,
+    /// Idk why Linux uses i64 for this field. We'll use u64 here.
+    pub size: u64,
+    /// Access time.
+    pub atime: Duration,
+    /// Modification time.
+    pub mtime: Duration,
+    /// Status change time.
+    pub ctime: Duration,
+}
+
+impl InodeStat {
+    /// This, in fact, is not the block size of either the block size of
+    /// underlying storage or the IO block size of the filesystem. It's the
+    /// "preferred block size for efficient filesystem I/O", which is a very
+    /// vague concept and can be decided by each filesystem itself. For
+    /// simplicity we just set it to 4096 for all filesystems.
+    pub const fn linux_blksize() -> i32 {
+        4096
+    }
+
+    /// No matter what the actual block size of the underlying storage is, value
+    /// of this field is always calculated, according to POSIX, as `(size + 511)
+    /// / 512`, i.e., the number of 512-byte blocks this file occupies.
+    pub const fn linux_blocks(self) -> i64 {
+        ((self.size + 511) / 512) as i64
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct InodeMeta {
+    /// Link count is inode-local metadata. Multi-object atomicity is provided
+    /// by filesystem transaction locks, not by exposing an inode inner lock.
+    pub nlink: u64,
+    /// Size of file in bytes.
+    pub size: u64,
+    /// Access time.
+    pub atime: Duration,
+    /// Modification time.
+    pub mtime: Duration,
+    /// Status change time.
+    pub ctime: Duration,
+}
+
+impl InodeMeta {
+    pub const ZERO: Self = Self {
+        nlink: 0,
+        size: 0,
+        atime: Duration::ZERO,
+        mtime: Duration::ZERO,
+        ctime: Duration::ZERO,
+    };
+}
+
+impl InodeStat {
+    /// Convert to Linux's `struct stat`.
+    pub fn to_linux_stat(self) -> LinuxStat {
+        LinuxStat {
+            st_dev: self.fs_dev.raw(),
+            st_ino: self.ino.get(),
+            st_mode: self.mode.to_linux_mode(),
+            st_nlink: self.nlink.min(u32::MAX as u64) as u32,
+            st_uid: self.uid,
+            st_gid: self.gid,
+            st_rdev: self.rdev.raw(),
+            __pad1: 0,
+            st_size: self.size as i64,
+            st_blksize: Self::linux_blksize(),
+            __pad2: 0,
+            st_blocks: self.linux_blocks(),
+            st_atime: self.atime.as_secs() as i64,
+            st_atime_nsec: self.atime.subsec_nanos() as u64,
+            st_mtime: self.mtime.as_secs() as i64,
+            st_mtime_nsec: self.mtime.subsec_nanos() as u64,
+            st_ctime: self.ctime.as_secs() as i64,
+            st_ctime_nsec: self.ctime.subsec_nanos() as u64,
+            __unused: [0; 2],
+        }
+    }
+}
+
+impl From<InodeStat> for LinuxStat {
+    fn from(value: InodeStat) -> Self {
+        value.to_linux_stat()
+    }
+}
+
+/// Index Node, core abstraction of a file in VFS.
+///
+/// I think name this struct `Vnode` may sounds cooler? But `Inode` is more
+/// traditional and less confusing, so let's stick to it.
 pub(super) struct Inode {
     ino: Ino,
     ty: InodeType,
@@ -96,15 +317,13 @@ pub(super) struct Inode {
     /// index. Unlinked-but-still-alive inodes are resident ghosts with this
     /// flag cleared.
     indexed: AtomicBool,
-    /// Link count is inode-local metadata. Multi-object atomicity is provided
-    /// by filesystem transaction locks, not by exposing an inode inner lock.
-    nlink: AtomicU64,
-}
 
-impl PartialEq for Inode {
-    fn eq(&self, other: &Self) -> bool {
-        self.ino == other.ino && self.sb.ptr_eq(&other.sb)
-    }
+    /// Cached metadata that can be updated by the inode's file operations
+    /// without accesing underlying filesystem, thus speeding up common
+    /// operations like `stat` and `write`.
+    ///
+    /// TODO: dirty flag
+    meta: RwLock<InodeMeta>,
 }
 
 impl Debug for Inode {
@@ -120,11 +339,32 @@ impl Debug for Inode {
 
 // No Drop impl — eviction is handled by explicit controlled paths only,
 // never by the last Arc destructor. See `SuperBlock::evict` / `evict_all`.
+//
+// Handling eviction in Drop is definitely a bad design, cz we lost control over
+// when it happens, and we might even end up in deadlocks if we're not careful
+// enough!
+
+macro_rules! gen_set_xtime {
+    ($($time:ident),*) => {
+        paste::paste! {
+            $(
+                pub(super) fn [<set_ $time>](&self, time: Duration) {
+                    self.meta.write_irqsave().$time = time;
+                }
+            )*
+        }
+    };
+}
 
 impl Inode {
     /// Create a new inode, with:
     ///
-    /// - `nlink` initialized to 1
+    /// - 'meta' set to [InodeMeta::ZERO]
+    ///
+    /// With that being said, the newly created inode is not fully initialized
+    /// until the caller sets the correct metadata and link count, and links it
+    /// to the superblock's ino index if necessary. **So backend filesystem
+    /// drivers are responsible for completing the initialization.**
     pub(super) fn new(
         ino: Ino,
         ty: InodeType,
@@ -132,6 +372,7 @@ impl Inode {
         sb: Arc<SuperBlock>,
         prv: AnyOpaque,
     ) -> Self {
+        let meta = InodeMeta::ZERO;
         Self {
             ino,
             ty,
@@ -140,7 +381,7 @@ impl Inode {
             prv,
             rc: AtomicUsize::new(0),
             indexed: AtomicBool::new(false),
-            nlink: AtomicU64::new(1),
+            meta: RwLock::new(meta),
         }
     }
 
@@ -149,7 +390,13 @@ impl Inode {
     }
 
     pub(super) fn nlink(&self) -> u64 {
-        self.nlink.load(Ordering::Acquire)
+        self.meta.read_irqsave().nlink
+    }
+
+    /// This method can be used when we want to update multiple fields in `meta`
+    /// at once, to avoid intermediate states that violate invariants.
+    pub(super) fn meta_snapshot(&self) -> InodeMeta {
+        *self.meta.read_irqsave()
     }
 
     pub(super) fn indexed(&self) -> bool {
@@ -161,17 +408,23 @@ impl Inode {
     }
 
     pub(super) fn inc_nlink(&self) {
-        self.nlink.fetch_add(1, Ordering::AcqRel);
+        self.meta.write_irqsave().nlink += 1;
+    }
+
+    pub(super) fn set_nlink(&self, nlink: u64) {
+        self.meta.write_irqsave().nlink = nlink;
+    }
+
+    /// See `meta_snapshot` for the rationale of this method.
+    pub(super) fn set_meta(&self, meta: InodeMeta) {
+        *self.meta.write_irqsave() = meta;
     }
 
     #[track_caller]
     pub(super) fn dec_nlink(&self) {
-        let prev = self
-            .nlink
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |nlink| {
-                nlink.checked_sub(1)
-            });
-        debug_assert!(prev.is_ok(), "nlink underflow on inode {:?}", self.ino);
+        let mut meta = self.meta.write_irqsave();
+        debug_assert!(meta.nlink > 0, "nlink underflow on inode {:?}", self.ino);
+        meta.nlink -= 1;
     }
 
     /// Get the private data of this inode.
@@ -179,9 +432,37 @@ impl Inode {
         &self.prv
     }
 
+    pub(super) fn sb(&self) -> Arc<SuperBlock> {
+        if let Some(sb) = self.sb.upgrade() {
+            sb
+        } else {
+            panic!("inode's superblock has been dropped");
+        }
+    }
+
     pub(super) fn ty(&self) -> InodeType {
         self.ty
     }
+
+    pub(super) fn set_size(&self, size: u64) {
+        self.meta.write_irqsave().size = size;
+    }
+
+    pub(super) fn update_size_max(&self, size: u64) {
+        let mut meta = self.meta.write_irqsave();
+        meta.size = meta.size.max(size);
+    }
+
+    /// When more than one time field needs to be updated, it's better to update
+    /// them in one shot to avoid intermediate states that violate invariants.
+    pub(super) fn set_times(&self, atime: Duration, mtime: Duration, ctime: Duration) {
+        let mut meta = self.meta.write_irqsave();
+        meta.atime = atime;
+        meta.mtime = mtime;
+        meta.ctime = ctime;
+    }
+
+    gen_set_xtime!(atime, mtime, ctime);
 }
 
 impl Inode {
@@ -268,6 +549,22 @@ impl InodeRef {
         self.inode().nlink()
     }
 
+    pub fn size(&self) -> u64 {
+        self.inode().meta.read_irqsave().size
+    }
+
+    pub fn atime(&self) -> Duration {
+        self.inode().meta.read_irqsave().atime
+    }
+
+    pub fn mtime(&self) -> Duration {
+        self.inode().meta.read_irqsave().mtime
+    }
+
+    pub fn ctime(&self) -> Duration {
+        self.inode().meta.read_irqsave().ctime
+    }
+
     /// Get the superblock that this inode belongs to.
     pub fn sb(&self) -> Arc<SuperBlock> {
         if let Some(sb) = self.inode().sb.upgrade() {
@@ -311,5 +608,9 @@ impl InodeRef {
     /// [File] object finally.
     pub fn open(&self) -> Result<OpenedFile, FsError> {
         (self.inode().ops.open)(self)
+    }
+
+    pub fn get_attr(&self) -> Result<InodeStat, FsError> {
+        (self.inode().ops.get_attr)(self)
     }
 }

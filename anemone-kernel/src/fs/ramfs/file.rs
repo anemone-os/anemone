@@ -56,6 +56,7 @@ fn ramfs_write(file: &File, buf: &[u8]) -> Result<usize, FsError> {
         }
     }
 
+    inode.inode().set_size(data.len() as u64);
     file.set_pos(pos + buf.len());
     Ok(buf.len())
 }

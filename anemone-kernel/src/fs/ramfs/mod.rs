@@ -78,7 +78,7 @@ fn ramfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock
 
     // though there are 3 links pointing to the root inode, we only count 2 here,
     // which is the traditional way of Unix filesystems.
-    root_inode.inc_nlink();
+    root_inode.set_nlink(2);
 
     sb.seed_inode(root_inode);
 

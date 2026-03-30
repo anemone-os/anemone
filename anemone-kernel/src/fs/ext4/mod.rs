@@ -178,12 +178,7 @@ pub(super) fn map_vfs_inode_type(ty: InodeType) -> Result<LwExt4InodeType, FsErr
 }
 
 fn ext4_sync_cached_nlink(inode: &Arc<Inode>, target: u64) {
-    while inode.nlink() < target {
-        inode.inc_nlink();
-    }
-    while inode.nlink() > target {
-        inode.dec_nlink();
-    }
+    inode.set_nlink(target);
 }
 
 fn ext4_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, FsError> {

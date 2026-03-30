@@ -1,4 +1,5 @@
 use anemone_abi::errno::ENOENT;
+use lwext4_rust::InodeType as LwExt4InodeType;
 
 use crate::{
     fs::ext4::{
@@ -36,7 +37,7 @@ fn ext4_create_child(dir: &InodeRef, name: &str, ty: InodeType) -> Result<InodeR
         ext4_sb(&sb).with_fs(|fs| {
             match fs.lookup(dir.ino().get() as u32, name) {
                 Ok(_) => return Err(FsError::AlreadyExists),
-                Err(err) if err.code == ENOENT as i32 => {}
+                Err(err) if err.code == ENOENT as i32 => {},
                 Err(err) => return Err(map_ext4_error(err)),
             }
 
@@ -62,6 +63,45 @@ fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, FsError> {
     Ok(OpenedFile {
         file_ops,
         prv: AnyOpaque::new(Ext4File::new()),
+    })
+}
+
+fn ext4_mode_from_attr(node_type: LwExt4InodeType, raw_mode: u32) -> Result<InodeMode, FsError> {
+    let ty = map_lwext4_inode_type(node_type)?;
+    let perm = InodePerm::from_bits_retain((raw_mode & 0o7777) as u16);
+    Ok(InodeMode::new(ty, perm))
+}
+
+fn ext4_fs_dev(sb: &SuperBlock) -> DeviceId {
+    match sb.backing() {
+        MountSource::Block(dev) => DeviceId::Block(dev.devnum()),
+        MountSource::Pseudo => DeviceId::None,
+    }
+}
+
+fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
+    let sb = inode.sb();
+    let attr = ext4_sb(&sb).read_tx(|| {
+        ext4_sb(&sb).with_fs(|fs| {
+            let mut attr = lwext4_rust::FileAttr::default();
+            fs.get_attr(inode.ino().get() as u32, &mut attr)
+                .map_err(map_ext4_error)?;
+            Ok(attr)
+        })
+    })?;
+
+    Ok(InodeStat {
+        fs_dev: ext4_fs_dev(&sb),
+        ino: inode.ino(),
+        mode: ext4_mode_from_attr(attr.node_type, attr.mode)?,
+        nlink: attr.nlink,
+        uid: attr.uid,
+        gid: attr.gid,
+        rdev: DeviceId::None,
+        size: attr.size,
+        atime: attr.atime,
+        mtime: attr.mtime,
+        ctime: attr.ctime,
     })
 }
 
@@ -164,6 +204,7 @@ pub(super) static EXT4_DIR_INODE_OPS: InodeOps = InodeOps {
     mkdir: ext4_mkdir,
     rmdir: ext4_rmdir,
     open: ext4_open,
+    get_attr: ext4_get_attr,
 };
 
 pub(super) static EXT4_REG_INODE_OPS: InodeOps = InodeOps {
@@ -174,6 +215,7 @@ pub(super) static EXT4_REG_INODE_OPS: InodeOps = InodeOps {
     mkdir: |_, _| Err(FsError::NotDir),
     rmdir: |_, _| Err(FsError::NotDir),
     open: ext4_open,
+    get_attr: ext4_get_attr,
 };
 
 pub(super) static EXT4_DEV_INODE_OPS: InodeOps = InodeOps {
@@ -184,4 +226,5 @@ pub(super) static EXT4_DEV_INODE_OPS: InodeOps = InodeOps {
     mkdir: |_, _| Err(FsError::NotDir),
     rmdir: |_, _| Err(FsError::NotDir),
     open: |_| Err(FsError::NotSupported),
+    get_attr: ext4_get_attr,
 };

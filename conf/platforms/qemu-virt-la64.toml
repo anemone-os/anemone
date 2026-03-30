@@ -13,7 +13,6 @@ kernel_va_base = 0xffffffff80200000
 max_cpus = 4
 frame_section_shift_mb = 7
 
-
 [qemu]
 qemu = "qemu-system-loongarch64"
 machine = "virt"
@@ -21,6 +20,7 @@ machine = "virt"
 smp = 4
 memory = "4G"
 args = ["-nographic", "-serial", "mon:stdio"]
+
 
 [dtb]
 path = "arch/loongarch64/generated.dtb"

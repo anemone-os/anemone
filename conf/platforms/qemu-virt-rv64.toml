@@ -26,7 +26,7 @@ args = [
     "-serial",
     "mon:stdio",
     "-drive",
-    "file=rootfs.img,format=raw,if=none,id=x0",
+    "file=rootfs-rv.img,format=raw,if=none,id=x0",
     "-device",
     "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
     "-no-reboot",

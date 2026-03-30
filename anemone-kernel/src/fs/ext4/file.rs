@@ -48,6 +48,7 @@ fn ext4_write(file: &File, buf: &[u8]) -> Result<usize, FsError> {
                 .map_err(map_ext4_error)
         })
     })?;
+    inode.inode().update_size_max((pos + n) as u64);
     file.set_pos(pos + n);
     Ok(n)
 }

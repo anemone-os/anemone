@@ -17,6 +17,9 @@ pub(super) struct SuperBlockOps {
 
     /// Called when an inode is being evicted from the resident cache.
     ///
+    /// Currently we don't have a page cache, so this method is almostly the
+    /// same as `sync_inode`.
+    ///
     /// This callback runs from an explicit, controlled eviction path — never
     /// from [Drop]. The cache-map lock is **not** held when this runs, so it
     /// is safe to perform blocking I/O (e.g. writeback) here.
@@ -24,6 +27,13 @@ pub(super) struct SuperBlockOps {
     /// If an [FsError] is returned, the eviction is cancelled and the inode is
     /// re-inserted into the cache. The eviction will be retried later.
     pub evict_inode: fn(&SuperBlock, Arc<Inode>) -> Result<(), FsError>,
+
+    /// Write back the inode to the backing store. This is used to synchronize
+    /// metadata updates that may have been made to the inode while it was
+    /// resident in the cache.
+    ///
+    /// **Note that this operation only writes back metadata, not file data.**
+    pub sync_inode: fn(&InodeRef) -> Result<(), FsError>,
 }
 
 /// A superblock represents a mounted file system instance.

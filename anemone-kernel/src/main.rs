@@ -75,8 +75,6 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
 
         mount_rootfs();
 
-        panic!();
-
         #[cfg(feature = "kunit")]
         {
             kinfoln!("running kunit tests");

@@ -1,6 +1,6 @@
 use crate::{
     fs::{
-        inode::Inode,
+        inode::{Inode, InodeMode, InodePerm},
         ramfs::{
             file::{RAMFS_DIR_FILE_OPS, RAMFS_REG_FILE_OPS, RamfsFile},
             ramfs_dir, ramfs_sb,
@@ -151,6 +151,7 @@ fn ramfs_create(dir: &InodeRef, name: &str, ty: InodeType) -> Result<InodeRef, F
             sb.clone(),
             new_prv,
         ));
+        new_inode.inc_nlink();
         if let InodeType::Dir = ty {
             // "." & ".."
             let new_dir_data = new_inode.prv().cast::<RamfsDir>().unwrap();
@@ -238,6 +239,40 @@ fn ramfs_rmdir(dir: &InodeRef, name: &str) -> Result<(), FsError> {
     })
 }
 
+fn ramfs_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
+    let meta = inode.inode().meta_snapshot();
+
+    Ok(InodeStat {
+        fs_dev: DeviceId::None,
+        ino: inode.ino(),
+        mode: InodeMode::new(inode.ty(), ramfs_default_perm(inode.ty())),
+        nlink: meta.nlink,
+        uid: 0,
+        gid: 0,
+        rdev: DeviceId::None,
+        size: meta.size,
+        atime: meta.atime,
+        mtime: meta.mtime,
+        ctime: meta.ctime,
+    })
+}
+
+fn ramfs_default_perm(ty: InodeType) -> InodePerm {
+    match ty {
+        InodeType::Dir => {
+            InodePerm::RWXU
+                | InodePerm::IRGRP
+                | InodePerm::IXGRP
+                | InodePerm::IROTH
+                | InodePerm::IXOTH
+        },
+        InodeType::Regular => {
+            InodePerm::IRUSR | InodePerm::IWUSR | InodePerm::IRGRP | InodePerm::IROTH
+        },
+        InodeType::Dev => InodePerm::empty(),
+    }
+}
+
 pub(super) static RAMFS_DIR_INODE_OPS: InodeOps = InodeOps {
     create: ramfs_create,
     lookup: ramfs_lookup,
@@ -246,6 +281,7 @@ pub(super) static RAMFS_DIR_INODE_OPS: InodeOps = InodeOps {
     unlink: ramfs_unlink,
     mkdir: ramfs_mkdir,
     rmdir: ramfs_rmdir,
+    get_attr: ramfs_get_attr,
 };
 
 pub(super) static RAMFS_REG_INODE_OPS: InodeOps = InodeOps {
@@ -256,4 +292,5 @@ pub(super) static RAMFS_REG_INODE_OPS: InodeOps = InodeOps {
     unlink: |_, _| Err(FsError::NotDir),
     mkdir: |_, _| Err(FsError::NotDir),
     rmdir: |_, _| Err(FsError::NotDir),
+    get_attr: ramfs_get_attr,
 };

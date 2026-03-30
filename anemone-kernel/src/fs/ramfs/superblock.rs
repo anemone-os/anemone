@@ -40,6 +40,11 @@ fn ramfs_load_inode(_sb: &Arc<SuperBlock>, _ino: Ino) -> Result<Arc<Inode>, FsEr
 }
 
 fn ramfs_evict_inode(sb: &SuperBlock, inode: Arc<Inode>) -> Result<(), FsError> {
+    // the same as sync_inode.
+    Ok(())
+}
+
+fn ramfs_sync_inode(inode: &InodeRef) -> Result<(), FsError> {
     // ramfs has nothing to do here, since we don't have a backing store to write
     // back
     Ok(())
@@ -48,4 +53,5 @@ fn ramfs_evict_inode(sb: &SuperBlock, inode: Arc<Inode>) -> Result<(), FsError> 
 pub(super) static RAMFS_SB_OPS: SuperBlockOps = SuperBlockOps {
     load_inode: ramfs_load_inode,
     evict_inode: ramfs_evict_inode,
+    sync_inode: ramfs_sync_inode,
 };

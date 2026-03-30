@@ -21,7 +21,10 @@ pub use self::{
     error::FsError,
     file::{DirContext, DirEntry, File, FileOps},
     filesystem::{FileSystem, FileSystemOps},
-    inode::{Ino, InoIsZero, InodeOps, InodeRef, InodeType, OpenedFile},
+    inode::{
+        DeviceId, Ino, InoIsZero, InodeMeta, InodeMode, InodeOps, InodePerm, InodeRef, InodeStat,
+        InodeType, OpenedFile,
+    },
     mount::{Mount, MountFlags, MountSource},
     path::PathRef,
     superblock::SuperBlock,
@@ -33,15 +36,12 @@ mod namespace {
     pub(super) struct NameSpace {
         root_path: Option<PathRef>,
         // currently no transaction atomicity is needed.
-        //tx_lock: RwLock<()>,
+        // tx_lock: RwLock<()>,
     }
 
     impl NameSpace {
         pub(super) fn new() -> Self {
-            Self {
-                root_path: None,
-                //                tx_lock: RwLock::new(()),
-            }
+            Self { root_path: None }
         }
 
         pub(super) fn root_path(&self) -> Option<PathRef> {
@@ -312,6 +312,10 @@ mod vfs_ops {
         Ok(File::new(pathref, file_ops, prv))
     }
 
+    pub fn vfs_get_attr(path: &Path) -> Result<InodeStat, FsError> {
+        resolve(path)?.inode().get_attr()
+    }
+
     pub fn vfs_mkdir(path: &Path) -> Result<PathRef, FsError> {
         let (parent, name) = resolve_parent(path)?;
 
@@ -387,6 +391,8 @@ pub fn register_filesystem_drivers() {
 
 #[cfg(feature = "kunit")]
 mod kunits {
+    use anemone_abi::fs::linux::mode as linux_mode;
+
     use super::*;
     use crate::{fs::namei::canonicalize_child, prelude::*};
 
@@ -497,6 +503,102 @@ mod kunits {
         assert_eq!(file.inode().ty(), InodeType::Regular);
         vfs_unlink(path).unwrap();
         assert_eq!(vfs_lookup(path).unwrap_err(), FsError::NotFound);
+    }
+
+    #[kunit]
+    fn test_vfs_get_attr_reports_basic_metadata() {
+        let dir_path = Path::new("/kunit-vfs-attr-dir");
+        let child_dir_path = Path::new("/kunit-vfs-attr-dir/subdir");
+        let file_path = Path::new("/kunit-vfs-attr-dir/file");
+
+        let dir = vfs_mkdir(dir_path).unwrap();
+        let dir_attr = vfs_get_attr(dir_path).unwrap();
+
+        assert_eq!(dir_attr.ino, dir.inode().ino());
+        assert_eq!(dir_attr.mode.ty(), InodeType::Dir);
+        assert_eq!(dir_attr.mode.to_linux_mode(), linux_mode::S_IFDIR | 0o755);
+        assert_eq!(dir_attr.nlink, 2);
+        assert_eq!(dir_attr.uid, 0);
+        assert_eq!(dir_attr.gid, 0);
+        // dir size is filesystem-specific.
+        assert_eq!(dir_attr.rdev, DeviceId::None);
+
+        let file = vfs_create(file_path, InodeType::Regular).unwrap();
+        let file_attr = vfs_get_attr(file_path).unwrap();
+
+        assert_eq!(file_attr.ino, file.inode().ino());
+        assert_eq!(file_attr.mode.ty(), InodeType::Regular);
+        assert_eq!(file_attr.mode.to_linux_mode(), linux_mode::S_IFREG | 0o644);
+        assert_eq!(file_attr.nlink, 1);
+        assert_eq!(file_attr.uid, 0);
+        assert_eq!(file_attr.gid, 0);
+        assert_eq!(file_attr.size, 0);
+        assert_eq!(file_attr.rdev, DeviceId::None);
+
+        vfs_mkdir(child_dir_path).unwrap();
+        assert_eq!(vfs_get_attr(dir_path).unwrap().nlink, 3);
+
+        vfs_rmdir(child_dir_path).unwrap();
+        assert_eq!(vfs_get_attr(dir_path).unwrap().nlink, 2);
+
+        vfs_unlink(file_path).unwrap();
+        vfs_rmdir(dir_path).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_get_attr_tracks_hard_link_counts() {
+        let file_path = Path::new("/kunit-vfs-attr-link-src");
+        let link_path = Path::new("/kunit-vfs-attr-link-dst");
+
+        let created = vfs_create(file_path, InodeType::Regular).unwrap();
+        assert_eq!(vfs_get_attr(file_path).unwrap().nlink, 1);
+
+        vfs_link(file_path, link_path).unwrap();
+
+        let src_attr = vfs_get_attr(file_path).unwrap();
+        let dst_attr = vfs_get_attr(link_path).unwrap();
+        assert_eq!(src_attr.ino, created.inode().ino());
+        assert_eq!(dst_attr.ino, created.inode().ino());
+        assert_eq!(src_attr.nlink, 2);
+        assert_eq!(dst_attr.nlink, 2);
+
+        vfs_unlink(file_path).unwrap();
+
+        let remaining = vfs_get_attr(link_path).unwrap();
+        assert_eq!(remaining.ino, created.inode().ino());
+        assert_eq!(remaining.nlink, 1);
+
+        vfs_unlink(link_path).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_get_attr_tracks_size_after_writes() {
+        let path = Path::new("/kunit-vfs-attr-size");
+
+        vfs_create(path, InodeType::Regular).unwrap();
+        let opened = vfs_open(path).unwrap();
+
+        let initial = vfs_get_attr(path).unwrap();
+        assert_eq!(initial.size, 0);
+        assert_eq!(initial.linux_blocks(), 0);
+
+        assert_eq!(opened.write(b"abc").unwrap(), 3);
+        let after_append = opened.get_attr().unwrap();
+        assert_eq!(after_append.size, 3);
+        assert_eq!(after_append.linux_blocks(), 1);
+        assert_eq!(after_append.nlink, 1);
+
+        opened.seek(8).unwrap();
+        assert_eq!(opened.write(b"z").unwrap(), 1);
+
+        let after_hole = vfs_get_attr(path).unwrap();
+        assert_eq!(after_hole.size, 9);
+        assert_eq!(after_hole.linux_blocks(), 1);
+        assert_eq!(after_hole.mode.ty(), InodeType::Regular);
+        assert_eq!(after_hole.mode.to_linux_mode(), linux_mode::S_IFREG | 0o644);
+
+        drop(opened);
+        vfs_unlink(path).unwrap();
     }
 
     #[kunit]
