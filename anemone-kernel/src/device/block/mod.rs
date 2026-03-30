@@ -4,7 +4,14 @@ use core::fmt::Debug;
 
 use idalloc::{IdAllocator, IdentityBijection, OneShotAlloc};
 
-use crate::{prelude::*, utils::identity::AnyIdentity};
+use crate::{
+    device::discovery::{
+        fwnode::FwNode,
+        open_firmware::{get_of_node, of_with_node_by_full_name_path},
+    },
+    prelude::*,
+    utils::identity::AnyIdentity,
+};
 
 /// Nothing too much. Just a simple wrapper to prevent invalid block sizes.
 ///
@@ -61,6 +68,8 @@ impl TryFrom<usize> for BlockSize {
 /// A block device is a device that can be read/written in fixed-size blocks.
 /// Examples include hard drives, SSDs, or virtual block devices like ramdisks.
 pub trait BlockDev: Send + Sync {
+    fn devnum(&self) -> BlockDevNum;
+
     /// Get the block size of this device. This is the minimum unit of
     /// read/write operations.
     ///
@@ -99,6 +108,7 @@ impl Debug for dyn BlockDev {
 
 struct BlockDevDesc {
     name: AnyIdentity,
+    fwnode: Option<Arc<dyn FwNode>>,
     ops: Arc<dyn BlockDev>,
 }
 
@@ -112,6 +122,13 @@ impl Debug for BlockDevDesc {
 
 pub trait BlockDriver: Driver {
     fn major(&self) -> MajorNum;
+}
+
+pub struct BlockDeviceRegistration {
+    pub devnum: BlockDevNum,
+    pub name: AnyIdentity,
+    pub fwnode: Option<Arc<dyn FwNode>>,
+    pub device: Arc<dyn BlockDev>,
 }
 
 /// Block device subsystem state. Singleton instance.
@@ -159,22 +176,26 @@ pub fn register_block_driver(driver: Arc<dyn BlockDriver>) -> Result<MajorNum, D
     Ok(major)
 }
 
-/// Register a block device with the given device number.
-pub fn register_block_device(
-    devnum: BlockDevNum,
-    name: AnyIdentity,
-    device: Arc<dyn BlockDev>,
-) -> Result<(), DevError> {
+/// Register a block device with metadata describing its provenance.
+pub fn register_block_device(registration: BlockDeviceRegistration) -> Result<(), DevError> {
     let mut devices = SUBSYS.devices.write_irqsave();
-    if devices.contains_key(&devnum) {
+    if devices.contains_key(&registration.devnum) {
         return Err(DevError::DevAlreadyRegistered);
     }
 
-    let desc = BlockDevDesc { name, ops: device };
+    let desc = BlockDevDesc {
+        name: registration.name,
+        fwnode: registration.fwnode,
+        ops: registration.device,
+    };
 
-    kinfoln!("register {:?} as block device with devnum {}", desc, devnum);
+    kinfoln!(
+        "register {:?} as block device with devnum {}",
+        desc,
+        registration.devnum
+    );
 
-    devices.insert(devnum, desc);
+    devices.insert(registration.devnum, desc);
     Ok(())
 }
 
@@ -187,18 +208,16 @@ pub fn get_block_dev(devnum: BlockDevNum) -> Option<Arc<dyn BlockDev>> {
         .map(|desc| desc.ops.clone())
 }
 
-#[kunit]
-fn test_gendisk() {
-    let gendisk = SUBSYS
-        .devices
-        .read_irqsave()
-        .iter()
-        .next()
-        .map(|(_, desc)| desc.ops.clone());
+pub fn get_block_dev_by_of_full_name_path(path: &str) -> Option<Arc<dyn BlockDev>> {
+    let root_fwnode =
+        of_with_node_by_full_name_path(path, |node| get_of_node(node.handle())).ok()?;
 
-    if let Some(gendisk) = gendisk {
-        gendisk
-            .write_blocks(0, [39].repeat(512).as_slice())
-            .expect("failed to write block");
-    }
+    SUBSYS.devices.read_irqsave().values().find_map(|desc| {
+        let desc_fwnode = desc.fwnode.as_ref()?;
+        if desc_fwnode.equals(root_fwnode.as_ref()) {
+            Some(desc.ops.clone())
+        } else {
+            None
+        }
+    })
 }

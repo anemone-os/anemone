@@ -5,6 +5,7 @@ edition = "2024"
 
 [features]
 kunit = []
+fs_ext4 = []
 
 [dependencies]
 anemone-abi = { path = "../anemone-abi" }
@@ -24,6 +25,7 @@ fast_radix_trie = { workspace = true }
 safe-mmio = { workspace = true }
 virtio-drivers = { workspace = true }
 typed-path = { workspace = true }
+lwext4_rust = { workspace = true }
 buddy-system = { path = "crates/buddy-system", features = ["stats"] }
 device-tree = { path = "crates/device-tree", features = ["alloc"] }
 idalloc = { path = "crates/idalloc" }

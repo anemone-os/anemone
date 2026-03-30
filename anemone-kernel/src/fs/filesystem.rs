@@ -6,6 +6,11 @@ use crate::prelude::*;
 pub struct FileSystemOps {
     pub name: &'static str,
     pub mount: fn(MountSource, MountFlags) -> Result<Arc<SuperBlock>, FsError>,
+
+    /// Synchronize filesystem state associated with the given superblock to its
+    /// backing store.
+    pub sync_fs: fn(&SuperBlock) -> Result<(), FsError>,
+
     pub kill_sb: fn(Arc<SuperBlock>),
 }
 
@@ -126,5 +131,11 @@ impl FileSystem {
     /// the superblock and prepare it for destruction.
     pub fn kill_sb(&self, sb: Arc<SuperBlock>) {
         (self.ops.kill_sb)(sb);
+    }
+
+    /// Synchronize filesystem state associated with a superblock to its
+    /// backing store.
+    pub fn sync_fs(&self, sb: &SuperBlock) -> Result<(), FsError> {
+        (self.ops.sync_fs)(sb)
     }
 }

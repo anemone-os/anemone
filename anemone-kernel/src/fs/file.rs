@@ -88,4 +88,8 @@ impl File {
     pub fn iterate(&self, ctx: &mut DirContext) -> Result<DirEntry, FsError> {
         (self.ops.iterate)(self, ctx)
     }
+
+    pub fn get_attr(&self) -> Result<InodeStat, FsError> {
+        self.inode().get_attr()
+    }
 }

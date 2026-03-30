@@ -2,7 +2,8 @@
 // ugly workaround: manually specify the linked project and target for the current crate being worked on.
 {
     "rust-analyzer.cargo.features": [
-        "kunit"
+        "kunit",
+        "fs_ext4"
     ],
     // For kernel dev
     "rust-analyzer.linkedProjects": [

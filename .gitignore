@@ -6,6 +6,5 @@ kconfig
 etc
 disk.img
 .DS_Store
-rootfs.img
+rootfs*.img
 .envrc.local
-lwext4_rust

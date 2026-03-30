@@ -5,6 +5,7 @@ use virtio_drivers::transport::SomeTransport;
 use crate::{
     device::{
         bus::platform::PlatformDevice,
+        discovery::fwnode::FwNode,
         kobject::{KObject, KObjectBase, KObjectOps},
     },
     prelude::*,
@@ -62,6 +63,21 @@ impl VirtIODevice {
     /// layer drivers probe the transport device.
     pub fn take_transport(&self) -> Option<SomeTransport<'static>> {
         self.transport.lock_irqsave().take()
+    }
+
+    pub fn transport_fwnode(&self) -> Arc<dyn FwNode> {
+        let kobj = self
+            .parent()
+            .expect("virtio device should have parent transport device")
+            .upgrade()
+            .expect("parent device should be alive");
+        let transport_dev = (kobj.as_ref() as &dyn Any)
+            .downcast_ref::<PlatformDevice>()
+            .expect("transport device should be a platform device");
+        transport_dev
+            .fwnode()
+            .cloned()
+            .expect("as a platform device, transport device should have a fwnode")
     }
 
     /// VirtIO devices are created dynamically when transport layer drivers

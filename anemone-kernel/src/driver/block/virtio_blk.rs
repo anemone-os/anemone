@@ -9,7 +9,10 @@ use virtio_drivers::{device::blk::VirtIOBlk, transport::SomeTransport};
 
 use crate::{
     device::{
-        block::{BlockDev, BlockDriver, BlockSize, register_block_device, register_block_driver},
+        block::{
+            BlockDev, BlockDeviceRegistration, BlockDriver, BlockSize, register_block_device,
+            register_block_driver,
+        },
         bus::virtio::VirtIODriver,
         devnum::GeneralMinorAllocator,
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
@@ -21,7 +24,12 @@ use crate::{
 
 #[derive(Opaque)]
 struct VirtIOBlkState {
-    rc: Arc<SpinLock<VirtIOBlk<VirtIOHalImpl, SomeTransport<'static>>>>,
+    rc: Arc<SpinLock<VirtIOBlkStateInner>>,
+}
+
+struct VirtIOBlkStateInner {
+    devnum: BlockDevNum,
+    blk: VirtIOBlk<VirtIOHalImpl, SomeTransport<'static>>,
 }
 
 impl Clone for VirtIOBlkState {
@@ -33,7 +41,7 @@ impl Clone for VirtIOBlkState {
 }
 
 impl Deref for VirtIOBlkState {
-    type Target = SpinLock<VirtIOBlk<VirtIOHalImpl, SomeTransport<'static>>>;
+    type Target = SpinLock<VirtIOBlkStateInner>;
 
     fn deref(&self) -> &Self::Target {
         &self.rc
@@ -41,17 +49,22 @@ impl Deref for VirtIOBlkState {
 }
 
 impl BlockDev for VirtIOBlkState {
+    fn devnum(&self) -> BlockDevNum {
+        self.lock_irqsave().devnum
+    }
+
     fn block_size(&self) -> BlockSize {
         // 512 bytes
         BlockSize::new(1)
     }
 
     fn total_blocks(&self) -> usize {
-        self.lock_irqsave().capacity() as usize
+        self.lock_irqsave().blk.capacity() as usize
     }
 
     fn read_blocks(&self, block_idx: usize, buf: &mut [u8]) -> Result<(), DevError> {
         self.lock_irqsave()
+            .blk
             .read_blocks(block_idx, buf)
             .map_err(|e| {
                 kerrln!("failed to read blocks from virtio block device: {e}");
@@ -61,6 +74,7 @@ impl BlockDev for VirtIOBlkState {
 
     fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), DevError> {
         self.lock_irqsave()
+            .blk
             .write_blocks(block_idx, buf)
             .map_err(|e| {
                 kerrln!("failed to write blocks to virtio block device: {e}");
@@ -95,7 +109,10 @@ impl DriverOps for VirtIOBlkDriver {
         })?;
 
         let state = VirtIOBlkState {
-            rc: Arc::new(SpinLock::new(drv)),
+            rc: Arc::new(SpinLock::new(VirtIOBlkStateInner {
+                devnum: BlockDevNum::new(*MAJOR.get(), MinorNum::new(0)), /* placeholder, will be updated after minor number is allocated */
+                blk: drv,
+            })),
         };
 
         let minor = {
@@ -113,11 +130,19 @@ impl DriverOps for VirtIOBlkDriver {
             minor
         };
 
-        register_block_device(
-            BlockDevNum::new(*MAJOR.get(), minor),
-            ident_format!("{}", vdev.name()).unwrap(),
-            Arc::new(state.clone()),
-        )?;
+        let devnum = BlockDevNum::new(*MAJOR.get(), minor);
+
+        state.lock_irqsave().devnum = devnum;
+
+        // use transport's fwnode as block device's fwnode.
+        let transport_fwnode = vdev.transport_fwnode();
+
+        register_block_device(BlockDeviceRegistration {
+            devnum,
+            name: ident_format!("{}", vdev.name()).unwrap(),
+            fwnode: Some(transport_fwnode),
+            device: Arc::new(state.clone()),
+        })?;
 
         vdev.request_irq(&IRQ_HANDLER, Some(AnyOpaque::new(state.clone())))?;
 
@@ -133,6 +158,7 @@ impl DriverOps for VirtIOBlkDriver {
             .expect("virtio block device should have VirtIOBlkState as driver state");
         state
             .lock_irqsave()
+            .blk
             .flush()
             .map_err(|e| {
                 kerrln!("failed to flush virtio block device during shutdown: {e}");

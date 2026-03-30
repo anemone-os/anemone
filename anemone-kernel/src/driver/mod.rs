@@ -97,7 +97,7 @@ impl Debug for dyn Driver {
     }
 }
 
-pub fn init() {
+pub fn register_builtin_drivers() {
     unsafe {
         run_initcalls(InitCallLevel::Driver);
     }

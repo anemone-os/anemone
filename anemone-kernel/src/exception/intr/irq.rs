@@ -326,7 +326,7 @@ pub fn request_irq(
     kdebugln!("request intr info");
     let InterruptInfo { hwirq, trigger } = ops
         .xlate(InterruptSpecifier {
-            fwnode,
+            fwnode: fwnode.as_ref(),
             raw: intr_info_raw,
         })
         .ok_or(DevError::InvalidInterruptInfo)?;

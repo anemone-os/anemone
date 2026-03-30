@@ -3,7 +3,7 @@ pub use crate::{
     device::{error::*, *},
     driver::*,
     exception::{intr::*, trap::*, *},
-    fs::{dentry::*, error::*, file::*, filesystem::*, inode::*, mount::*, path::*, superblock::*},
+    fs::*,
     kconfig_defs::*,
     mm::{addr::*, error::*, frame::*, paging::*, percpu::*, space::*, zone::*},
     platform_defs::*,
@@ -17,6 +17,7 @@ pub use crate::{
     utils::*,
     *,
 };
+
 pub use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet, VecDeque},
