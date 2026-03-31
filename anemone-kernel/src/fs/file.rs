@@ -1,6 +1,7 @@
 use crate::{prelude::*, utils::any_opaque::AnyOpaque};
 
 /// VTable a file must implement to support file operations.
+#[derive(Debug)]
 pub struct FileOps {
     pub read: fn(&File, buf: &mut [u8]) -> Result<usize, FsError>,
     pub write: fn(&File, buf: &[u8]) -> Result<usize, FsError>,
@@ -35,6 +36,7 @@ impl DirContext {
     }
 }
 
+#[derive(Debug)]
 pub struct File {
     path: PathRef,
     ops: &'static FileOps,

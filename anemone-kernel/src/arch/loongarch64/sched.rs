@@ -253,6 +253,11 @@ unsafe extern "C" fn __task_run(
         args_parsed,
         ra,
     );
+    if let Privilege::User = prv {
+        unsafe {
+            trapframe.set_syscall_ret_val(running_stack_top);
+        }
+    }
 
     knoticeln!("{}({}) starting", current_task_id(), current_task_cmdline());
 

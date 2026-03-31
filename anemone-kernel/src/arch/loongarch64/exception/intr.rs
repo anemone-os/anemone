@@ -58,10 +58,11 @@ pub(super) unsafe fn handle_intr(reason: LA64Interrupt) {
             TimeArch::set_next_trigger(300_000_0);
         },
         LA64Interrupt::Ipi => {
-            handle_ipi();
+            // claiming after handling will result in missing IPI, leading to queue congestion.
             unsafe {
                 IntrArch::claim_ipi();
             }
+            handle_ipi();
         },
         LA64Interrupt::Hardware => handle_irq(),
     }

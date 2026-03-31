@@ -45,9 +45,9 @@ use crate::{
     },
     fs::vfs_mount,
     mm::layout::KernelLayoutTrait,
-    prelude::{image::load_image_from_elf, *},
+    prelude::*,
     sync::{counter::CpuSync, mono::MonoOnce},
-    task::execve::kernel_execve_from_image,
+    task::execve::kernel_execve,
 };
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
@@ -84,9 +84,22 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
             kinfoln!("kunit tests finished");
         }
     }
+    /*
+    let file = vfs_open(Path::new("/")).unwrap();
+    let mut ctx = DirContext::new();
+    loop {
+        match file.iterate(&mut ctx) {
+            Ok(entry) => {
+                kdebugln!("file/dir {}", entry.name);
+            },
+            Err(e) => {
+                kdebugln!("{:?}", e);
+                break;
+            },
+        }
+    }*/
 
-    let image = load_image_from_elf(APP0).unwrap();
-    kernel_execve_from_image(image, "user", ["argv"], ["envp"]);
+    kernel_execve(&"/user-test", &[&"/user-test bcde"]).unwrap();
 }
 
 fn mount_rootfs() {

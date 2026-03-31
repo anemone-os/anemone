@@ -3,9 +3,18 @@
 //! The main helper [load_image_from_elf] parses an ELF binary and builds a
 //! [UserTaskImage] that contains the created [UserSpace], the ELF entry
 //! point and the argv-like command vector.
-use elf::{ElfBytes, ParseError, abi, endian::AnyEndian};
+use elf::abi::{PF_W, PF_X, PT_LOAD};
+use goblin::{
+    elf::program_header::PF_R,
+    elf64::{
+        header::{Header, SIZEOF_EHDR},
+        program_header::ProgramHeader,
+    },
+};
 
-use crate::{mm::layout::KernelLayoutTrait, prelude::*};
+use crate::{mm::layout::KernelLayoutTrait, prelude::*, utils::data::FileDataSource};
+
+const MAX_UIMAGE_FILE_SZ: u64 = 16 * 1024 * 1024 * 1024; // 16GiB
 
 /// Result of loading an ELF into a new address space.
 ///
@@ -17,99 +26,100 @@ pub struct UserTaskImage {
     pub entry: u64,
 }
 
-/// Parse `data` as an ELF file and produce a [UserTaskImage].
-///
-/// Validates PT_LOAD segments, creates a [UserSpace] via [UserSpace::new_user],
-/// maps pages and copies segment data using [UserSpace::add_segment]. Returns
-/// [ElfLoadError] on parse, segment validation, or memory errors.
-pub fn load_image_from_elf(data: &[u8]) -> Result<UserTaskImage, ElfLoadError> {
-    let elf_bytes =
-        ElfBytes::<AnyEndian>::minimal_parse(data).map_err(|e| ElfLoadError::Parse(e))?;
-    let entry = elf_bytes.ehdr.e_entry;
-    let segment_headers = elf_bytes
-        .segments()
-        .ok_or(ElfLoadError::Segment(SegmentError::HeaderNotFound))
-        .map_err(|e| ElfLoadError::Segment(SegmentError::HeaderNotFound))?;
-    struct SegData<'a> {
-        data: &'a [u8],
-        vaddr: VirtAddr,
+pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, SysError> {
+    let file = vfs_open(Path::new(path.as_ref()))?;
+    let size = file.get_attr()?.size;
+    if size > MAX_UIMAGE_FILE_SZ {
+        return Err(MmError::InvalidArgument.into());
+    }
+    file.seek(0);
+    // ELF header
+    let mut elf_header_bytes = [0; SIZEOF_EHDR];
+    file.read(&mut elf_header_bytes);
+    let elf_header = Header::from_bytes(&elf_header_bytes);
+    let entry = elf_header.e_entry;
+    // Program Headers
+    let program_hds_offset = elf_header.e_phoff;
+    let program_hds_esize = elf_header.e_phentsize as u64;
+    let program_hd_num = elf_header.e_phnum as u64;
+    let mut ph_data_boxed = unsafe {
+        Box::<[u8]>::new_uninit_slice((program_hds_esize * program_hd_num) as usize).assume_init()
+    };
+    file.seek(program_hds_offset as usize)?;
+    file.read(ph_data_boxed.as_mut())?;
+    let headers = unsafe {
+        ProgramHeader::from_raw_parts(
+            ph_data_boxed.as_ptr() as *const ProgramHeader,
+            program_hd_num as usize,
+        )
+    };
+    struct SegData {
+        offset: u64,
         filesz: u64,
+        vaddr: VirtAddr,
         memsz: u64,
         rwx_flags: PteFlags,
     }
     let mut segments = vec![];
     let mut heap_start = VirtAddr::new(0);
-    for seg_header in segment_headers {
-        if seg_header.p_type != abi::PT_LOAD {
-            // ignore
+    for header in headers {
+        if header.p_type != PT_LOAD{
             continue;
         }
-        let data = elf_bytes
-            .segment_data(&seg_header)
-            .map_err(|e| ElfLoadError::Parse(e))?;
-        let filesz = seg_header.p_filesz;
-        let memsz = seg_header.p_memsz;
-        let vaddr = VirtAddr::new(seg_header.p_vaddr);
+        let offset = header.p_offset;
+        let filesz = header.p_filesz;
+        let vaddr = VirtAddr::new(header.p_vaddr);
+        let memsz = header.p_memsz;
         let vaddr_end = vaddr + memsz;
         if vaddr_end < vaddr || vaddr_end.get() > KernelLayout::KSPACE_ADDR {
-            return Err(ElfLoadError::Segment(SegmentError::InvalidSegmentData));
+            return Err(MmError::InvalidArgument.into());
         }
         if vaddr_end > heap_start {
             // update heap start
             heap_start = vaddr_end;
         }
+        let flags_raw = header.p_flags;
         let mut rwx_flags = PteFlags::empty();
-        if seg_header.p_flags & abi::PF_R != 0 {
+        if flags_raw & PF_R != 0 {
             rwx_flags |= PteFlags::READ;
         }
-        if seg_header.p_flags & abi::PF_W != 0 {
+        if flags_raw & PF_W != 0 {
             rwx_flags |= PteFlags::WRITE;
         }
-        if seg_header.p_flags & abi::PF_X != 0 {
+        if flags_raw & PF_X != 0 {
             rwx_flags |= PteFlags::EXECUTE;
         }
         if rwx_flags.is_empty() || !rwx_flags.is_supported_rwx_combination() {
-            return Err(ElfLoadError::Mm(MmError::InvalidArgument));
+            return Err(MmError::InvalidArgument.into());
         }
-        let segdata = SegData {
-            data,
+        segments.push(SegData {
+            offset,
             filesz,
-            memsz,
             vaddr,
+            memsz,
             rwx_flags,
-        };
-        segments.push(segdata);
+        });
     }
-    let mut usersp = UserSpace::new_user().map_err(|e| ElfLoadError::Mm(e))?;
+    let mut usersp = UserSpace::new_user()?;
     for segment in &segments {
         unsafe {
-            usersp
-                .add_segment(
-                    segment.vaddr,
-                    segment.memsz as usize,
-                    segment.filesz as usize,
-                    segment.data,
-                    segment.rwx_flags,
-                )
-                .map_err(|e| ElfLoadError::Mm(e))?;
+            usersp.add_segment::<SysError>(
+                segment.vaddr,
+                segment.memsz as usize,
+                segment.filesz as usize,
+                &FileDataSource::new(&file, segment.offset as usize),
+                segment.rwx_flags,
+            )?;
         }
     }
-    kdebugln!("ELF loaded: entry = {:#x}, heap_start = {:#x}", entry, heap_start.get());
+
+    kdebugln!(
+        "ELF loaded: entry = {:#x}, heap_start = {:#x}",
+        entry,
+        heap_start.get()
+    );
     Ok(UserTaskImage {
         memsp: usersp,
         entry,
     })
-}
-
-#[derive(Debug)]
-pub enum ElfLoadError {
-    Parse(ParseError),
-    Mm(MmError),
-    Segment(SegmentError),
-}
-
-#[derive(Debug)]
-pub enum SegmentError {
-    HeaderNotFound,
-    InvalidSegmentData,
 }

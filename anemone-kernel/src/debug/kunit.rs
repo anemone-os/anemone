@@ -109,7 +109,7 @@ pub fn run_percpu_test(test_fn: fn()) {
 
     PERCPU_KUNIT_BARRIER.reset();
 
-    broadcast_ipi_async(IpiPayload::RunKUnitPerCpu { test_fn })
+    broadcast_ipi_async(IpiPayload::RunKUnitPerCpu { test_fn }, true)
         .expect("failed to dispatch percpu kunit");
 
     PERCPU_KUNIT_BARRIER.mark_ready();

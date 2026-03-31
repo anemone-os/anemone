@@ -249,7 +249,7 @@ unsafe extern "C" fn __task_run(
 ) {
     let args_parsed =
         unsafe { a_args.as_ref() }.expect("task args in kernel stack should never be null");
-    let trapframe = RiscV64TrapFrame::task_init_frame(
+    let mut trapframe = RiscV64TrapFrame::task_init_frame(
         entry as u64,
         running_stack_top,
         IrqFlags::new(irq_flags),
@@ -257,6 +257,11 @@ unsafe extern "C" fn __task_run(
         args_parsed,
         ra,
     );
+    if let Privilege::User = prv {
+        unsafe {
+            trapframe.set_syscall_ret_val(running_stack_top);
+        }
+    }
 
     knoticeln!("{}({}) starting", current_task_id(), current_task_cmdline());
     unsafe {

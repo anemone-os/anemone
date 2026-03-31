@@ -1,8 +1,12 @@
 [package]
-name = "user-test"
+name = "user-lib"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 anemone-abi = { path = "../../anemone-abi" }
-user-lib = { path = "../user-lib" }
+spin = {workspace = true}
+talc = {workspace = true}
+
+[lib]
+crate-type = ["rlib"]

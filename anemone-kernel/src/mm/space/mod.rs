@@ -5,13 +5,18 @@
 //! small helpers such as `MemArea` and page-table guard types used by the
 //! rest of the kernel when accessing user page tables.
 use core::{
+    fmt::Debug,
     mem::swap,
     ops::{Deref, DerefMut},
 };
 
 use range_allocator::Rangable;
 
-use crate::{mm::kptable::KERNEL_PTABLE, prelude::*};
+use crate::{
+    mm::kptable::KERNEL_PTABLE,
+    prelude::*,
+    utils::data::{DataSource, SliceDataSource, ZeroDataSource},
+};
 
 mod api;
 pub use api::*;
@@ -134,14 +139,14 @@ impl UserSpace {
     ///  * This function does not validate address range conflicts with existing
     ///    mappings, potentially causing code/data overwrites.
     ///  * **Call after the heap area is initialized will lead to panic.**.
-    pub unsafe fn add_segment(
+    pub unsafe fn add_segment<TErr: Debug + From<MmError>>(
         &self,
         vaddr: VirtAddr,
         vsize: usize,
         psize: usize,
-        source: &[u8],
+        source: &impl DataSource<TError = impl Into<TErr>>,
         rwx_flags: PteFlags,
-    ) -> Result<(), MmError> {
+    ) -> Result<(), TErr> {
         let mut inner = self.inner.write();
         debug_assert!(inner.uheap.vpn_range.len() == 0);
         let vaddr_ed = vaddr + vsize as u64;
@@ -158,7 +163,7 @@ impl UserSpace {
             if let Some(translated) = mapper.translate(vpn) {
                 if translated.flags.extract_rwx() != rwx_flags {
                     // segment with different flags is already mapped in this page
-                    return Err(MmError::AlreadyMapped);
+                    return Err(TErr::from(MmError::AlreadyMapped));
                 }
             } else {
                 unsafe {
@@ -181,15 +186,24 @@ impl UserSpace {
             }
         }
         unsafe {
-            mapper.fill_data(vaddr, Some(source), psize as u64)?;
+            mapper.fill_data(vaddr, source, psize as u64)?;
         }
         if vsize > psize {
             unsafe {
-                mapper.fill_data(vaddr + psize as u64, None, (vsize - psize) as u64)?;
+                mapper.fill_data(
+                    vaddr + psize as u64,
+                    &ZeroDataSource::<MmError>::new(),
+                    (vsize - psize) as u64,
+                )?;
             }
         }
         inner.seg_frames.extend(frames);
         Ok(())
+    }
+
+    /// Get the program break
+    pub fn brk(&self) -> VirtAddr {
+        self.inner.read().ubrk
     }
 
     pub fn set_brk(&self, brk: VirtAddr) -> Result<(), MmError> {
@@ -238,6 +252,7 @@ impl UserSpace {
             res?;
         }
         inner.ubrk = brk;
+        kinfoln!("brk of {} set to {}", current_task_id(), brk);
         Ok(())
     }
 
@@ -262,7 +277,11 @@ impl UserSpace {
         let mut mapper = inner.table.mapper();
         unsafe {
             mapper
-                .fill_data(VirtAddr::new(sp), Some(data), data.len() as u64)
+                .fill_data::<MmError>(
+                    VirtAddr::new(sp),
+                    &SliceDataSource::new(data),
+                    data.len() as u64,
+                )
                 .expect("stack push should not fail after ensuring the stack is large enough");
         }
         drop(mapper);

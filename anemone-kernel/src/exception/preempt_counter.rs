@@ -45,15 +45,15 @@ impl PreemptGuard {
 
 impl Drop for PreemptGuard {
     fn drop(&mut self) {
-        let intr_guard = IntrGuard::new(false);
-        if unsafe {
-            unsafe_with_core_local(|local| local.preempt_counter().decrease() == 0)
-                && fetch_clear_resched_flag()
-        } {
-            unsafe {
-                schedule();
+        with_intr_disabled(|| {
+            if unsafe {
+                unsafe_with_core_local(|local| local.preempt_counter().decrease() == 0)
+                    && fetch_clear_resched_flag()
+            } {
+                unsafe {
+                    schedule();
+                }
             }
-        }
-        drop(intr_guard);
+        });
     }
 }

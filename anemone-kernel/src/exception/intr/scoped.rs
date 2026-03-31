@@ -28,3 +28,10 @@ impl Drop for IntrGuard {
         }
     }
 }
+
+pub fn with_intr_disabled<F: FnOnce() -> R, R>(f: F) -> R {
+    let guard = IntrGuard::new(false);
+    let res = f();
+    drop(guard);
+    res
+}

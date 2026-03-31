@@ -75,10 +75,12 @@ impl IntrArchTrait for RiscV64IntrArch {
 pub unsafe fn handle_intr(reason: RiscV64Interrupt) {
     match reason {
         RiscV64Interrupt::SupervisorSoftware => {
-            handle_ipi();
+            // claiming after handling will result in missing IPI, leading to queue
+            // congestion.
             unsafe {
                 riscv::register::sip::clear_ssoft();
             }
+            handle_ipi();
         },
         RiscV64Interrupt::SupervisorTimer => {
             // TODO: use a proper value for the next timer interrupt.

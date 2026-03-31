@@ -20,6 +20,8 @@ pub enum MmError {
     ArgumentTooLarge,
     /// Permission denied, e.g. trying to write to a read-only page.
     PermissionDenied,
+    /// The address is not properly aligned
+    NotAligned,
 }
 
 impl AsErrno for MmError {
@@ -30,6 +32,7 @@ impl AsErrno for MmError {
             MmError::InvalidArgument => errno::EINVAL,
             MmError::PermissionDenied => errno::EACCES,
             MmError::ArgumentTooLarge => errno::E2BIG,
+            MmError::NotAligned => errno::EINVAL,
         }
     }
 }

@@ -121,8 +121,6 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) {
 #[syscall(100)]
 fn sys_print(#[validate_with(c_readonly_string::<255>)] a: Box<str>) -> Result<u64, SysError> {
     let a = unsafe { &*a };
-    for line in a.split('\n') {
-        kinfoln!("(user {}) {}", current_task_id(), line);
-    }
+    kprint!("{}", a);
     Ok(0)
 }

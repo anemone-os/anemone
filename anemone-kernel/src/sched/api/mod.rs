@@ -33,8 +33,8 @@ pub fn kernel_exit(exit_code: i32) -> ! {
 /// Call this function manually will directly exit the current task.
 pub fn kernel_yield() {
     unsafe {
-        let guard = IntrGuard::new(false);
-        schedule();
-        drop(guard);
+        with_intr_disabled(|| {
+            schedule();
+        });
     }
 }

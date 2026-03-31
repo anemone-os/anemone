@@ -170,7 +170,7 @@ pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError
 }
 
 /// Broadcast an IPI to all other CPUs asynchronously.
-pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
+pub fn broadcast_ipi_async(payload: IpiPayload, spin: bool) -> Result<(), IpiError> {
     // check whether empty buffers are enough
     let ncpus = CpuArch::ncpus();
     for id in 0..ncpus {
@@ -181,22 +181,28 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
         }
     }
 
-    let mut navail_bufs = 0;
-    MSG_BUFFERS.with(|buffers| {
-        for (id, buf) in buffers[..ncpus].iter().enumerate() {
-            if id == CpuArch::cur_cpu_id().get() {
-                continue;
+    MSG_BUFFERS.with_mut(|buffers| {
+        let mut navail_bufs = 0;
+        loop {
+            for (id, buf) in buffers[..ncpus].iter().enumerate() {
+                if id == CpuArch::cur_cpu_id().get() {
+                    continue;
+                }
+                if buf.is_accomplished.load(Ordering::Acquire) {
+                    navail_bufs += 1;
+                }
             }
-            if buf.is_accomplished.load(Ordering::Acquire) {
-                navail_bufs += 1;
+            if navail_bufs < ncpus - 1 {
+                if spin {
+                    navail_bufs = 0;
+                } else {
+                    return Err(IpiError::NoAvailableBuffer);
+                }
+            } else {
+                break;
             }
         }
-    });
-    if navail_bufs < ncpus - 1 {
-        return Err(IpiError::NoAvailableBuffer);
-    }
-    let mut sent_bufs = 0;
-    MSG_BUFFERS.with_mut(|buffers| {
+        let mut sent_bufs = 0;
         for (id, buf) in buffers[..ncpus].iter_mut().enumerate() {
             if id == CpuArch::cur_cpu_id().get() {
                 continue;
@@ -218,8 +224,8 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
                 break;
             }
         }
-    });
-    Ok(())
+        Ok(())
+    })
 }
 
 /// IPI handler.

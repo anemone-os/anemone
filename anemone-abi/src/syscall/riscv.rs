@@ -1,7 +1,7 @@
 //! System call conventions and numbers.
 //! Architecture-specific.
 
-pub unsafe fn syscall(
+pub unsafe fn syscall_raw(
     sysno: u64,
     arg0: u64,
     arg1: u64,
@@ -27,6 +27,24 @@ pub unsafe fn syscall(
     ret
 }
 
+pub unsafe fn syscall(
+    sysno: u64,
+    arg0: u64,
+    arg1: u64,
+    arg2: u64,
+    arg3: u64,
+    arg4: u64,
+    arg5: u64,
+) -> Result<u64, Errno> {
+    let res = unsafe { syscall_raw(sysno, arg0, arg1, arg2, arg3, arg4, arg5) };
+    let res = res as i64;
+    if res < 0 {
+        Err(-res as i32)
+    } else {
+        Ok(res as u64)
+    }
+}
+
 /// One primary objective of Anemone is to provide solid compatibility with
 /// Linux syscalls. Therefore, we define Linux syscall numbers here for
 /// reference.
@@ -42,8 +60,11 @@ pub mod linux {
     pub const SYS_GETPID: u64 = 172;
     pub const SYS_GETPPID: u64 = 173;
     pub const SYS_CLONE: u64 = 220;
+    pub const SYS_EXECVE: u64 = 221;
 
     pub const SYS_BRK: u64 = 214;
 }
 
 pub use linux::*;
+
+use crate::errno::Errno;

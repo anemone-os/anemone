@@ -1,4 +1,4 @@
-use core::{slice, str};
+use core::{ffi::CStr, slice, str};
 
 use crate::{fs::vfs_lookup, prelude::*};
 
@@ -41,14 +41,21 @@ pub fn user_vaddr(arg: u64) -> Result<VirtAddr, SysError> {
     }
 }
 
-/// Validate a user C string pointer and return a borrowed raw string slice
-/// pointer.
-pub fn c_readonly_string_ptr<const MAX_LEN: usize>(arg: u64) -> Result<*const str, SysError> {
-    let st_pointer = arg as *const u8;
-    user_pointer::<u8>(PteFlags::READ, arg)?;
+/// Validate a user C array
+pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq>(
+    terminator: T,
+    include_terminator: bool,
+    arg: u64,
+) -> Result<*const [T], SysError> {
+    if arg % align_of::<T>() as u64 != 0 {
+        return Err(SysError::Mm(MmError::NotAligned));
+    }
+    let st_pointer = arg as *const T;
+    user_pointer::<T>(PteFlags::READ, arg)?;
     let mut ed_pointer = st_pointer;
     let mut ed_vpn = VirtAddr::new(arg).page_down();
-    while unsafe { *ed_pointer } != 0 {
+    let mut len = 0;
+    while !unsafe { &*ed_pointer }.eq(&terminator) {
         let next_ed_pointer = (ed_pointer as u64).wrapping_add(1);
         if next_ed_pointer <= arg {
             return Err(MmError::InvalidArgument.into());
@@ -59,21 +66,45 @@ pub fn c_readonly_string_ptr<const MAX_LEN: usize>(arg: u64) -> Result<*const st
             ed_vpn = ed_vpn_new;
         }
         ed_pointer = unsafe { ed_pointer.add(1) };
+        len += 1;
+        if len > MAX_LEN {
+            return Err(SysError::Kernel(KernelError::InvalidArgument));
+        }
     }
-    let str = unsafe {
-        str::from_utf8(slice::from_raw_parts(
-            st_pointer,
-            ed_pointer.offset_from(st_pointer) as usize,
-        ))
+    if include_terminator {
+        Ok(unsafe { slice::from_raw_parts(st_pointer, len + 1) })
+    } else {
+        Ok(unsafe { slice::from_raw_parts(st_pointer, len) })
     }
-    .unwrap();
-    Ok(str)
+}
+
+/// Validate a user C string pointer and return a borrowed raw string slice
+/// pointer.
+pub fn c_readonly_string_ptr<const MAX_LEN: usize>(arg: u64) -> Result<*const str, SysError> {
+    unsafe {
+        let ptr = unsafe { &*c_readonly_array_ptr::<MAX_LEN, _>(0u8, true, arg)? };
+        let str = CStr::from_ptr(&ptr[0]);
+        let str = str
+            .to_str()
+            .map_err(|_| SysError::Mm(MmError::InvalidArgument))?;
+        Ok(str)
+    }
 }
 
 /// Validate a user C string pointer and copy it into a boxed string.
 pub fn c_readonly_string<const MAX_LEN: usize>(arg: u64) -> Result<Box<str>, SysError> {
     let c_str = c_readonly_string_ptr::<MAX_LEN>(arg)?;
     Ok(Box::from(unsafe { &*c_str }))
+}
+
+pub fn c_readonly_string_array(arg: u64) -> Result<Vec<Box<str>>, SysError> {
+    let array = unsafe { &*c_readonly_array_ptr::<1024, _>(0u64, false, arg)? };
+    let mut res = vec![];
+    for ptr in array {
+        let str = c_readonly_string::<1024>(*ptr)?;
+        res.push(str);
+    }
+    Ok(res)
 }
 
 /// Validate a user path string and convert it into a kernel-owned `Path`.

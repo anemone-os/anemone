@@ -415,9 +415,7 @@ mod kunits {
         assert_eq!(vfs_lookup(path).unwrap_err(), FsError::NotFound);
 
         let created = vfs_create(path, InodeType::Regular).unwrap();
-        knoticeln!("1");
         let looked_up = vfs_lookup(path).unwrap();
-        knoticeln!("2");
 
         assert_eq!(created.to_string(), "/kunit-vfs-file");
         assert_eq!(looked_up.to_string(), "/kunit-vfs-file");
@@ -877,7 +875,6 @@ mod kunits {
         for dir_idx in 0..NDIRS {
             let dir = format!("/kunit-vfs-churn/dir-{dir_idx}");
             vfs_mkdir(Path::new(&dir)).unwrap();
-            knoticeln!("1");
 
             for file_idx in 0..NFILES_PER_DIR {
                 let file = format!("{dir}/file-{file_idx}");
@@ -900,7 +897,6 @@ mod kunits {
                         vfs_lookup(Path::new(&alias)).unwrap().inode(),
                         created.inode()
                     );
-                    knoticeln!("3");
                     vfs_unlink(Path::new(&alias)).unwrap();
                 }
             }
@@ -911,11 +907,9 @@ mod kunits {
 
             for file_idx in (0..NFILES_PER_DIR).rev() {
                 let file = format!("{dir}/file-{file_idx}");
-                knoticeln!("2");
                 vfs_unlink(Path::new(&file)).unwrap();
             }
 
-            knoticeln!("4");
             vfs_rmdir(Path::new(&dir)).unwrap();
         }
 

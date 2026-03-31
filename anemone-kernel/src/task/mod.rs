@@ -1,7 +1,7 @@
 mod task;
 pub use task::*;
-pub mod tid;
 mod api;
+pub mod tid;
 pub use api::*;
 
 /// Privilege Level of a control flow
@@ -10,4 +10,8 @@ pub use api::*;
 pub enum Privilege {
     Kernel = 0,
     User = 1,
+}
+
+pub enum TaskError {
+    ImageTooLarge,
 }

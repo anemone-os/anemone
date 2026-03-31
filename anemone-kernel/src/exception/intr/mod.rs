@@ -4,7 +4,7 @@ mod hal;
 pub use hal::*;
 
 mod scoped;
-pub use scoped::IntrGuard;
+pub use scoped::{IntrGuard, with_intr_disabled};
 
 mod irq;
 pub use irq::*;
