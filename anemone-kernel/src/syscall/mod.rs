@@ -119,8 +119,7 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) {
 
 /// Temporary output syscall
 #[syscall(100)]
-fn sys_print(#[validate_with(c_readonly_string)] a: Box<str>) -> Result<u64, SysError> {
-    let a = unsafe { &*a };
-    kprint!("{}", a);
+fn sys_print(#[validate_with(c_readonly_string)] val: Box<str>) -> Result<u64, SysError> {
+    kprint!("{}", val);
     Ok(0)
 }

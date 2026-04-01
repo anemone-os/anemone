@@ -9,7 +9,7 @@ use crate::prelude::{
 
 #[syscall(SYS_EXECVE)]
 pub fn execve(
-    #[validate_with(c_readonly_string::<>)] path: Box<str>,
+    #[validate_with(c_readonly_string)] path: Box<str>,
     #[validate_with(c_readonly_string_array)] argv: Vec<Box<str>>,
 ) -> Result<u64, SysError> {
     kernel_execve(&path, argv.as_slice())?;
@@ -44,9 +44,9 @@ pub fn kernel_execve_from_image(
             total_len += 1;
         }
         // insert pointers
-        unsafe { memsp.push_to_init_stack::<u64>(&0u64.to_ne_bytes()) };
+        unsafe { memsp.push_to_init_stack::<u64>(&0u64.to_ne_bytes())? };
         for pointer in pointers.iter().rev() {
-            unsafe { memsp.push_to_init_stack::<u64>(&pointer.get().to_ne_bytes()) };
+            unsafe { memsp.push_to_init_stack::<u64>(&pointer.get().to_ne_bytes())? };
         }
         // insert count
         unsafe {

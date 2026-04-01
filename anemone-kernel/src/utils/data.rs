@@ -48,10 +48,10 @@ impl DataSource for SliceDataSource<'_> {
     type TError = MmError;
 
     fn copy_to(&self, offset: usize, dest: &mut [u8]) -> Result<(), Self::TError> {
-        if dest.len() > self.slice.len() {
+        if offset + dest.len() > self.slice.len() {
             return Err(MmError::InvalidArgument);
         }
-        dest.copy_from_slice(&self.slice[0..dest.len()]);
+        dest.copy_from_slice(&self.slice[offset..offset + dest.len()]);
         Ok(())
     }
 }

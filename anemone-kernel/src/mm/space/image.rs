@@ -28,25 +28,31 @@ pub struct UserTaskImage {
 
 /// Load an ELF image from a file
 pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, SysError> {
-    
     let file = vfs_open(Path::new(path.as_ref()))?;
     let size = file.get_attr()?.size;
     if size > MAX_UIMAGE_FILE_SZ {
         return Err(MmError::InvalidArgument.into());
     }
-    file.seek(0);
+    file.seek(0)?;
     // ELF header
     let mut elf_header_bytes = [0; SIZEOF_EHDR];
-    file.read(&mut elf_header_bytes);
+    file.read(&mut elf_header_bytes)?;
     let elf_header = Header::from_bytes(&elf_header_bytes);
     let entry = elf_header.e_entry;
     // Program Headers
     let program_hds_offset = elf_header.e_phoff;
     let program_hds_esize = elf_header.e_phentsize as u64;
     let program_hd_num = elf_header.e_phnum as u64;
-    let mut ph_data_boxed = unsafe {
-        Box::<[u8]>::new_uninit_slice((program_hds_esize * program_hd_num) as usize).assume_init()
-    };
+    if program_hds_esize != size_of::<ProgramHeader>() as u64 {
+        return Err(MmError::InvalidArgument.into());
+    }
+    let mut ph_data_boxed = vec![
+        0;
+        program_hds_esize
+            .checked_mul(program_hd_num)
+            .ok_or(MmError::InvalidArgument)? as usize
+    ]
+    .into_boxed_slice();
     file.seek(program_hds_offset as usize)?;
     file.read(ph_data_boxed.as_mut())?;
     let headers = unsafe {
@@ -72,7 +78,7 @@ pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, Sys
         let filesz = header.p_filesz;
         let vaddr = VirtAddr::new(header.p_vaddr);
         let memsz = header.p_memsz;
-        let vaddr_end = vaddr + memsz;
+        let vaddr_end = VirtAddr::new(vaddr.get().wrapping_add(memsz));
         if vaddr_end < vaddr || vaddr_end.get() > KernelLayout::KSPACE_ADDR {
             return Err(MmError::InvalidArgument.into());
         }
@@ -93,6 +99,16 @@ pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, Sys
         }
         if rwx_flags.is_empty() || !rwx_flags.is_supported_rwx_combination() {
             return Err(MmError::InvalidArgument.into());
+        }
+        if rwx_flags == PteFlags::WRITE | PteFlags::EXECUTE | PteFlags::READ {
+            kwarningln!(
+                "suspicious RWX segment in ELF, this is usually a security risk: offset = {:#x}, filesz = {:#x}, vaddr = {:#x}, memsz = {:#x}, flags = {:?}",
+                offset,
+                filesz,
+                vaddr.get(),
+                memsz,
+                rwx_flags
+            );
         }
         segments.push(SegData {
             offset,

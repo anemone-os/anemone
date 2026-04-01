@@ -155,7 +155,7 @@ impl UserSpace {
         rwx_flags: PteFlags,
     ) -> Result<(), TErr> {
         let mut inner = self.inner.write();
-        debug_assert!(inner.uheap.vpn_range.len() == 0);
+        assert!(inner.uheap.vpn_range.len() == 0);
         let vaddr_ed = vaddr + vsize as u64;
         let vpn_st = vaddr.page_down();
         let vpn_ed = vaddr_ed.page_up();
@@ -180,11 +180,7 @@ impl UserSpace {
                     mapper.map_one(
                         vpn,
                         frame.ppn(),
-                        PteFlags::READ
-                            | PteFlags::WRITE
-                            | PteFlags::EXECUTE
-                            | PteFlags::USER
-                            | PteFlags::VALID,
+                        rwx_flags | PteFlags::USER | PteFlags::VALID,
                         0,
                         false,
                     )?;
@@ -304,11 +300,12 @@ impl UserSpace {
     /// **Invoke this function when the stack is in use may lead to undefined
     /// behavior**
     pub unsafe fn clear_stack(&self) {
-        self.inner.write().uinit_sp = self.inner.read().ustack.vpn_range.end().to_virt_addr()
+        let mut inner = self.inner.write();
+        inner.uinit_sp = inner.ustack.vpn_range.end().to_virt_addr()
     }
 
     /// Get the maximum user stack space for this address space.
-    /// 
+    ///
     /// It's a fixed range.
     pub fn max_stack_space(&self) -> VirtPageRange {
         self.inner.read().ustack.vpn_range

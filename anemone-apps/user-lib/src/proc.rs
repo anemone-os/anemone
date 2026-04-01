@@ -1,23 +1,22 @@
 use core::str::FromStr;
 
-use alloc::{boxed::Box, ffi::CString, vec::Vec};
+use alloc::{ffi::CString, vec, vec::Vec};
 use anemone_abi::{
     errno::{self, Errno},
     syscall::{SYS_EXECVE, SYS_EXIT, SYS_SCHED_YIELD, syscall},
 };
 
 pub fn execve(path: impl AsRef<str>, argv: &[impl AsRef<str>]) -> Result<u64, Errno> {
-    let mut args = unsafe { Box::new_uninit_slice(argv.len() + 1).assume_init() };
-    let argv: Vec<CString> = argv
+    let mut args = vec![0; argv.len() + 1].into_boxed_slice();
+    let argv = argv
         .iter()
-        .flat_map(|s| CString::from_str(s.as_ref()).map_err(|_| errno::EINVAL))
-        .collect();
+        .map(|s| CString::from_str(s.as_ref()).map_err(|_| errno::EINVAL))
+        .collect::<Result<Vec<CString>, Errno>>()?;
     for i in 0..argv.len() {
         args[i] = argv[i].as_c_str().as_ptr() as u64;
     }
     args[argv.len()] = 0;
-    let path = CString::from_str(path.as_ref())
-        .map_err(|_| errno::EINVAL)?;
+    let path = CString::from_str(path.as_ref()).map_err(|_| errno::EINVAL)?;
     let path_ptr = path.as_c_str().as_ptr() as u64;
     unsafe {
         syscall(

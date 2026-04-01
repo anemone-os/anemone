@@ -71,7 +71,7 @@ pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq + Copy>(
         let mut ed_vpn = VirtAddr::new(arg).page_down();
         let mut len = 0;
         while !unsafe { &*ed_pointer }.eq(&terminator) {
-            let next_ed_pointer = (ed_pointer as u64).wrapping_add(1);
+            let next_ed_pointer = (ed_pointer as u64).wrapping_add(size_of::<T>() as u64);
             if next_ed_pointer <= arg {
                 return Err(MmError::InvalidArgument.into());
             }
@@ -80,7 +80,7 @@ pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq + Copy>(
                 validate_user_pointer::<u8>(PteFlags::READ, &mut *table, next_ed_pointer as u64)?;
                 ed_vpn = ed_vpn_new;
             }
-            ed_pointer = unsafe { ed_pointer.add(1) };
+            ed_pointer = next_ed_pointer as *const T;
             len += 1;
             if len > MAX_LEN {
                 return Err(SysError::Kernel(KernelError::InvalidArgument));
@@ -89,8 +89,7 @@ pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq + Copy>(
         let slice = unsafe {
             slice::from_raw_parts(st_pointer, len + if include_terminator { 1 } else { 0 })
         };
-        let mut res = unsafe { Box::new_uninit_slice(slice.len()).assume_init() };
-        res.copy_from_slice(slice);
+        let res: Box<[T]> = slice.into();
         drop(table);
         Ok(res)
     })
