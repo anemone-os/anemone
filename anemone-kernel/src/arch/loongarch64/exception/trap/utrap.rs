@@ -10,11 +10,11 @@ use crate::{
     },
     device::CpuArchTrait,
     prelude::*,
-    sched::{current_task_id, task_exit},
+    sched::{current_task_id, kernel_exit},
 };
 
-// kernel trap entry point. since kernel doesn't use floating point, we don't
-// need to save/restore floating point registers here.
+// User trap entry point. The kernel does not save or restore floating-point
+// registers here because user-mode traps currently do not use them.
 core::arch::global_asm!(
     "   .section .text",
     "   .global __utrap_entry",
@@ -146,10 +146,7 @@ core::arch::global_asm!(
     eentry = const CR_EENTRY,
 );
 
-/// This function will call architecture-agnostic trap handler.
-#[unsafe(no_mangle)]
-
-/// This function will call architecture-agnostic trap handler.
+/// User trap entry used by the assembly stub.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
@@ -177,7 +174,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     ecode,
                     esubcode
                 );
-                task_exit();
+                kernel_exit(-1)
+                //TODO: Error code;
             },
         };
 
@@ -194,7 +192,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     trapframe.badv,
                     trapframe.era
                 );
-                task_exit()
+                kernel_exit(-1)
+                //TODO: Error code
             },
 
             LA64Exception::PageInvalidFetch => {
@@ -205,7 +204,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     trapframe.badv,
                     trapframe.era
                 );
-                task_exit()
+                kernel_exit(-1)
+                //TODO: Error code
             },
 
             LA64Exception::PageInvalidLoad => {
@@ -216,7 +216,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     trapframe.badv,
                     trapframe.era
                 );
-                task_exit()
+                kernel_exit(-1)
+                //TODO: Error code
             },
 
             LA64Exception::PageInvalidStore => {
@@ -227,7 +228,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     trapframe.badv,
                     trapframe.era
                 );
-                task_exit()
+                kernel_exit(-1)
+                //TODO: Error code
             },
 
             _ => {
@@ -239,7 +241,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     trapframe.era,
                     trapframe.badv
                 );
-                task_exit()
+                kernel_exit(-1)
+                //TODO: Error code
             },
         }
     }

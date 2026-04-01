@@ -3,9 +3,10 @@
     "build": {
         "context": "..",
         "dockerfile": "../Dockerfile",
+        "options": ["--platform=linux/amd64"],
         "target": "fin_dev",
         "args": {
-            "QEMU_VERSION": "10.0.5",
+            "QEMU_VERSION": "10.2.1",
             "GNU_VERSION": "2026.01.09"
         }
     },

@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 anemone-abi = { path = "../../anemone-abi" }
+user-lib = { path = "../user-lib" }

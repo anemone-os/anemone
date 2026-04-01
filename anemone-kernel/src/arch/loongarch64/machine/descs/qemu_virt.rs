@@ -4,14 +4,17 @@ use crate::{
 };
 use crate::prelude::*;
 
+/// QEMU virt machine description for the Loongson 3A5000-compatible board.
 #[derive(Debug)]
 pub struct Qemu3A5000;
 
 impl MachineDesc for Qemu3A5000 {
+    /// Device-tree compatible string used by QEMU virt.
     fn compatible(&self) -> &[&str] {
         &["linux,dummy-loongson3"]
     }
 
+    /// Bring up the platform interrupt controller discovered from firmware.
     unsafe fn early_init_intc(&self) {
         kinfoln!("initializing interrupt controller for qemu virt machine");
 
@@ -37,6 +40,7 @@ impl MachineDesc for Qemu3A5000 {
         }
     }
 
+    /// Initialize the machine timer through the common time architecture hook.
     unsafe fn early_init_timer(&self) {
         TimeArch::init();
     }

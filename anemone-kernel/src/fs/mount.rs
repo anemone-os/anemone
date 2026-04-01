@@ -91,18 +91,18 @@ impl Mount {
     }
 
     pub fn add_child(&self, child: &Arc<Mount>) {
-        self.children.lock_irqsave().push(Arc::downgrade(child));
+        self.children.lock().push(Arc::downgrade(child));
     }
 
     pub fn has_children(&self) -> bool {
         self.children
-            .lock_irqsave()
+            .lock()
             .iter()
             .any(|w| w.upgrade().is_some())
     }
 
     pub fn remove_child(&self, child: &Arc<Mount>) -> Result<(), FsError> {
-        let mut children = self.children.lock_irqsave();
+        let mut children = self.children.lock();
         let initial_len = children.len();
         children.retain(|weak_child| {
             let Some(strong_child) = weak_child.upgrade() else {
@@ -118,7 +118,7 @@ impl Mount {
     }
 
     pub fn child_at(&self, mountpoint: &Arc<Dentry>) -> Option<Arc<Mount>> {
-        let mut children = self.children.lock_irqsave();
+        let mut children = self.children.lock();
         let mut found = None;
 
         children.retain(|weak_child| {

@@ -11,7 +11,13 @@ pub struct SpinLock<T: ?Sized> {
 
 #[derive(Debug)]
 pub struct NoPreemptGuard<'a, T: ?Sized> {
-    guard: spin::MutexGuard<'a, T>,
+    guard: Option<spin::MutexGuard<'a, T>>,
+    _preem_guard: PreemptGuard,
+}
+impl<'a, T: ?Sized> Drop for NoPreemptGuard<'a, T> {
+    fn drop(&mut self) {
+        _ = self.guard.take();
+    }
 }
 
 #[derive(Debug)]
@@ -43,13 +49,23 @@ impl<T> SpinLock<T> {
 impl<T: ?Sized> SpinLock<T> {
     #[track_caller]
     pub fn lock(&self) -> NoPreemptGuard<'_, T> {
-        todo!("implement scheduler first");
+        loop {
+            let _preem_guard = PreemptGuard::new();
+            if let Some(guard) = self.lock.try_lock() {
+                break NoPreemptGuard {
+                    guard: Some(guard),
+                    _preem_guard,
+                };
+            }
+            _ = _preem_guard; // drop to restore interrupts before spinning
+            core::hint::spin_loop();
+        }
     }
 
     #[track_caller]
     pub fn lock_irqsave(&self) -> IrqSaveGuard<'_, T> {
         loop {
-            let _intr_guard = IntrGuard::new();
+            let _intr_guard = IntrGuard::new(false);
             if let Some(guard) = self.lock.try_lock() {
                 break IrqSaveGuard {
                     guard: Some(guard),
@@ -63,7 +79,7 @@ impl<T: ?Sized> SpinLock<T> {
 
     #[track_caller]
     pub fn try_lock_irqsave(&self) -> Option<IrqSaveGuard<'_, T>> {
-        let _intr_guard = IntrGuard::new();
+        let _intr_guard = IntrGuard::new(false);
         let guard = self.lock.try_lock()?;
         Some(IrqSaveGuard {
             guard: Some(guard),
@@ -76,13 +92,16 @@ impl<T: ?Sized> Deref for NoPreemptGuard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &*self.guard
+        self.guard.as_ref().expect("lock should be held").deref()
     }
 }
 
 impl<T: ?Sized> DerefMut for NoPreemptGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.guard
+        self.guard
+            .as_mut()
+            .expect("lock should be held")
+            .deref_mut()
     }
 }
 

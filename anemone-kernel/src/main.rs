@@ -12,6 +12,7 @@
 // This feature must be enabled for zero-cost downcasting of trait objects to get the same
 // efficiency as C's void* and manual casts, which is crucial for the performance of the kernel.
 #![feature(downcast_unchecked)]
+#![feature(allocator_api)]
 
 extern crate alloc;
 
@@ -45,8 +46,9 @@ use crate::{
     },
     fs::vfs_mount,
     mm::layout::KernelLayoutTrait,
-    prelude::{image::load_image_from_elf, *},
+    prelude::*,
     sync::{counter::CpuSync, mono::MonoOnce},
+    task::execve::kernel_execve,
 };
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
@@ -65,6 +67,8 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         of_platform_discovery();
 
         IntrArch::init_local_irq();
+        percpu_login();
+
         unsafe {
             device::console::on_system_boot();
         }
@@ -83,16 +87,8 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
             kinfoln!("kunit tests finished");
         }
     }
-    let (memsp, entry) = load_image_from_elf(APP0).unwrap();
-    add_to_ready(Arc::new(
-        Task::new_user(
-            "user",
-            entry as *const (),
-            Arc::new(memsp),
-            VirtAddr::new(KernelLayout::USPACE_TOP_ADDR),
-        )
-        .unwrap(),
-    ));
+
+    kernel_execve(&"/user-test", &[&"/user-test", &"1"]).unwrap();
 }
 
 fn mount_rootfs() {
@@ -128,6 +124,7 @@ unsafe extern "C" fn ap_kinit(ap_id: usize) {
         INIT_SYNC_COUNTER.sync_with_counter();
         kinfoln!("ap #{} kinit running on {}...", ap_id, current_task_id());
         IntrArch::init_local_irq();
+        percpu_login();
 
         // collect previous IPIs sent by bsp before ap starts to run.
         // the main reason for this is to clear IPI buffers of bsp such that it can send
@@ -142,6 +139,7 @@ unsafe extern "C" fn ap_kinit(ap_id: usize) {
         #[cfg(feature = "kunit")]
         KUNIT_SYNC_COUNTER.sync_with_counter();
     }
+    kernel_execve(&"/user-test", &[&"/user-test", &"1"]).unwrap();
     // exit
 }
 
@@ -169,5 +167,3 @@ fn parse_bootargs() {
         })
     });
 }
-
-static APP0: &[u8] = include_bytes!("../../build/apps/user-test.elf");

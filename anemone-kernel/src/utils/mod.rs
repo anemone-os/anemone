@@ -9,6 +9,7 @@ pub mod writer;
 #[macro_use]
 pub mod as_container;
 pub mod any_opaque;
+pub mod data;
 pub mod identity;
 pub mod mmio;
 

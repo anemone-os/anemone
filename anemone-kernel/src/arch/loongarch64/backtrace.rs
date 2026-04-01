@@ -1,5 +1,6 @@
 use crate::debug::backtrace::{BacktraceArchTrait, UnwindFrame};
 
+/// LoongArch64 backtrace implementation.
 pub struct LA64BacktraceArch;
 
 impl BacktraceArchTrait for LA64BacktraceArch {

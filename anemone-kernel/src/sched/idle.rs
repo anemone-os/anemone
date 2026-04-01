@@ -22,6 +22,7 @@ static IDLE_TASK: Lazy<Arc<Task>> = Lazy::new(|| {
             ParameterList::empty(),
             IntrArch::ENABLED_IRQ_FLAGS,
             TaskFlags::IDLE,
+            None,
         )
         .unwrap_or_else(|e| panic!("failed to create idle tasks: {:?}", e)),
     );

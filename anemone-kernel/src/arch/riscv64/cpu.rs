@@ -23,7 +23,7 @@ impl CpuArchTrait for RiscV64CpuArch {
     }
 
     fn cur_cpu_id() -> CpuId {
-        CpuId::new(with_core_local(|core_local| core_local.cpu_id()))
+        CpuId::new(unsafe_with_core_local(|core_local| core_local.cpu_id()))
     }
 
     unsafe fn set_percpu_base(base: *mut u8) {

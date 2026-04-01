@@ -46,20 +46,52 @@ impl<T> PerCpu<T> {
         }
     }
 
+    /// Run a closure with a reference to the per-CPU value using the current
+    /// per-CPU base address.
+    ///
+    /// ## Safety
+    /// **This function does not disable preemption. If preemption occurs during
+    /// its execution and operations other than reading are performed, it may
+    /// result in undefined behavior.**
+    ///
+    /// Use [Self::with] instead.
+    pub unsafe fn unsafe_with<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&T) -> R,
+    {
+        unsafe { f(self.get(CpuArch::percpu_base())) }
+    }
+
+    /// Run a closure with a reference to the per-CPU value using the current
+    /// per-CPU base address.
+    ///
+    /// This function disables preemption during its execution.
     pub fn with<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&T) -> R,
     {
-        // TODO: disable preemption
-        unsafe { f(self.get(CpuArch::percpu_base())) }
+        unsafe {
+            let _preem_guard = PreemptGuard::new();
+            let res = f(self.get(CpuArch::percpu_base()));
+            drop(_preem_guard);
+            res
+        }
     }
 
+    /// Run a closure with a mutable reference to the per-CPU value using the
+    /// current per-CPU base address.
+    ///
+    /// This function disables preemption during its execution.
     pub fn with_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut T) -> R,
     {
-        // TODO: disable preemption
-        unsafe { f(self.get_mut(CpuArch::percpu_base())) }
+        unsafe {
+            let _preem_guard = PreemptGuard::new();
+            let res = f(self.get_mut(CpuArch::percpu_base()));
+            drop(_preem_guard);
+            res
+        }
     }
 
     pub unsafe fn with_remote<F, R>(&self, cpu_id: usize, f: F) -> R
@@ -75,6 +107,7 @@ impl<T> PerCpu<T> {
     {
         unsafe { f(self.get_mut(PERCPU_BASES[cpu_id])) }
     }
+
 }
 
 #[percpu(core_local)]
@@ -85,6 +118,17 @@ where
     F: FnOnce(&CoreLocal) -> R,
 {
     CORE_LOCAL.with(f)
+}
+
+/// ## Safety
+/// **This function does not disable preemption. If preemption occurs during
+/// its execution and operations other than reading are performed, it may
+/// result in undefined behavior.**
+pub fn unsafe_with_core_local<F, R>(f: F) -> R
+where
+    F: FnOnce(&CoreLocal) -> R,
+{
+    unsafe { CORE_LOCAL.unsafe_with(f) }
 }
 
 pub fn with_core_local_mut<F, R>(f: F) -> R
@@ -118,14 +162,14 @@ where
 pub struct CoreLocal {
     // cur_task
     cpu_id: usize,
-    online: bool,
+    online: AtomicBool,
     preempt_counter: PreemptCounter,
 }
 
 impl CoreLocal {
     pub const ZEROED: Self = Self {
         cpu_id: 0,
-        online: false,
+        online: AtomicBool::new(false),
         preempt_counter: PreemptCounter::ZEROED,
     };
 
@@ -133,20 +177,16 @@ impl CoreLocal {
         self.cpu_id
     }
 
-    pub fn preempt_counter(&self) -> PreemptCounter {
-        self.preempt_counter
-    }
-
-    pub fn preempt_counter_mut(&mut self) -> &mut PreemptCounter {
-        &mut self.preempt_counter
+    pub fn preempt_counter(&self) -> &PreemptCounter {
+        &self.preempt_counter
     }
 
     pub fn online(&self) -> bool {
-        self.online
+        self.online.load(Ordering::SeqCst)
     }
 
-    pub fn login(&mut self) {
-        self.online = true;
+    fn login(&self) {
+        self.online.store(true, Ordering::SeqCst);
         core::sync::atomic::fence(Ordering::SeqCst);
     }
 }
@@ -216,15 +256,12 @@ pub unsafe fn bsp_init<A: FnOnce(usize) -> PhysPageNum>(bsp_id: usize, alloc_fol
             cur_vpn += (aligned_size / PagingArch::PAGE_SIZE_BYTES) as u64;
         }
     }
-
-    with_core_local_mut(|core_local| core_local.login());
 }
 
 pub unsafe fn ap_init(ap_id: usize) {
     unsafe {
         let base = PERCPU_BASES[ap_id];
         CpuArch::set_percpu_base(core::ptr::with_exposed_provenance_mut(base));
-        with_core_local_mut(|core_local| core_local.login());
     }
 }
 
@@ -237,4 +274,8 @@ pub fn target_online(cpu_id: usize) -> bool {
     } else {
         unsafe { with_core_local_remote(cpu_id, |core_local| core_local.online()) }
     }
+}
+
+pub fn percpu_login() {
+    with_core_local(|core_local| core_local.login());
 }

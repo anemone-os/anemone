@@ -1,97 +1,143 @@
-use elf::{ElfBytes, ParseError, abi, endian::AnyEndian};
-
-use crate::{
-    mm::layout::KernelLayoutTrait,
-    prelude::{user::UserSpace, *},
+//! ELF image loader utilities for constructing a [UserSpace].
+//!
+//! The main helper [load_image_from_file] parses an ELF binary and builds a
+//! [UserTaskImage] that contains the created [UserSpace] and the ELF entry
+//! point.
+use goblin::{
+    elf::program_header::{PF_R, PF_W, PF_X, PT_LOAD},
+    elf64::{
+        header::{Header, SIZEOF_EHDR},
+        program_header::ProgramHeader,
+    },
 };
 
-pub fn load_image_from_elf(data: &[u8]) -> Result<(MemSpace, u64), ElfLoadError> {
-    let file_raw =
-        ElfBytes::<AnyEndian>::minimal_parse(data).map_err(|e| ElfLoadError::Parse(e))?;
-    let entry = file_raw.ehdr.e_entry;
-    let seg_headers = file_raw
-        .segments()
-        .ok_or(ElfLoadError::Segment(SegmentError::HeaderNotFound))
-        .map_err(|e| ElfLoadError::Segment(SegmentError::HeaderNotFound))?;
-    struct SegData<'a> {
-        data: &'a [u8],
-        vaddr: VirtAddr,
+use crate::{mm::layout::KernelLayoutTrait, prelude::*, utils::data::FileDataSource};
+
+const MAX_UIMAGE_FILE_SZ: u64 = 16 * 1024 * 1024 * 1024; // 16GiB
+
+/// Result of loading an ELF into a new address space.
+///
+/// - `memsp`: constructed [UserSpace] with segments mapped
+/// - `entry`: ELF entry point
+pub struct UserTaskImage {
+    /// Constructed [UserSpace] with loaded segments.
+    pub memsp: UserSpace,
+    /// ELF entry point.
+    pub entry: u64,
+}
+
+/// Load an ELF image from a file
+pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, SysError> {
+    let file = vfs_open(Path::new(path.as_ref()))?;
+    let size = file.get_attr()?.size;
+    if size > MAX_UIMAGE_FILE_SZ {
+        return Err(MmError::InvalidArgument.into());
+    }
+    file.seek(0)?;
+    // ELF header
+    let mut elf_header_bytes = [0; SIZEOF_EHDR];
+    file.read(&mut elf_header_bytes)?;
+    let elf_header = Header::from_bytes(&elf_header_bytes);
+    let entry = elf_header.e_entry;
+    // Program Headers
+    let program_hds_offset = elf_header.e_phoff;
+    let program_hds_esize = elf_header.e_phentsize as u64;
+    let program_hd_num = elf_header.e_phnum as u64;
+    if program_hds_esize != size_of::<ProgramHeader>() as u64 {
+        return Err(MmError::InvalidArgument.into());
+    }
+    let mut ph_data_boxed = vec![
+        0;
+        program_hds_esize
+            .checked_mul(program_hd_num)
+            .ok_or(MmError::InvalidArgument)? as usize
+    ]
+    .into_boxed_slice();
+    file.seek(program_hds_offset as usize)?;
+    file.read(ph_data_boxed.as_mut())?;
+    let headers = unsafe {
+        ProgramHeader::from_raw_parts(
+            ph_data_boxed.as_ptr() as *const ProgramHeader,
+            program_hd_num as usize,
+        )
+    };
+    struct SegData {
+        offset: u64,
         filesz: u64,
+        vaddr: VirtAddr,
         memsz: u64,
         rwx_flags: PteFlags,
     }
     let mut segments = vec![];
     let mut heap_start = VirtAddr::new(0);
-    for seg_header in seg_headers {
-        if seg_header.p_type != abi::PT_LOAD {
+    for header in headers {
+        if header.p_type != PT_LOAD {
             continue;
         }
-        let data = file_raw
-            .segment_data(&seg_header)
-            .map_err(|e| ElfLoadError::Parse(e))?;
-        let filesz = seg_header.p_filesz;
-        let memsz = seg_header.p_memsz;
-        let vaddr = VirtAddr::new(seg_header.p_vaddr);
-        let vaddr_end = vaddr + memsz;
+        let offset = header.p_offset;
+        let filesz = header.p_filesz;
+        let vaddr = VirtAddr::new(header.p_vaddr);
+        let memsz = header.p_memsz;
+        let vaddr_end = VirtAddr::new(vaddr.get().wrapping_add(memsz));
         if vaddr_end < vaddr || vaddr_end.get() > KernelLayout::KSPACE_ADDR {
-            return Err(ElfLoadError::Segment(SegmentError::InvalidSegmentData));
+            return Err(MmError::InvalidArgument.into());
         }
+        if vaddr_end > heap_start {
+            // update heap start
+            heap_start = vaddr_end;
+        }
+        let flags_raw = header.p_flags;
         let mut rwx_flags = PteFlags::empty();
-        if seg_header.p_flags & abi::PF_R != 0 {
+        if flags_raw & PF_R != 0 {
             rwx_flags |= PteFlags::READ;
         }
-        if seg_header.p_flags & abi::PF_W != 0 {
+        if flags_raw & PF_W != 0 {
             rwx_flags |= PteFlags::WRITE;
         }
-        if seg_header.p_flags & abi::PF_X != 0 {
+        if flags_raw & PF_X != 0 {
             rwx_flags |= PteFlags::EXECUTE;
         }
         if rwx_flags.is_empty() || !rwx_flags.is_supported_rwx_combination() {
-            return Err(ElfLoadError::Mm(MmError::InvalidArgument));
+            return Err(MmError::InvalidArgument.into());
         }
-        let segdata = SegData {
-            data,
+        if rwx_flags == PteFlags::WRITE | PteFlags::EXECUTE | PteFlags::READ {
+            kwarningln!(
+                "suspicious RWX segment in ELF, this is usually a security risk: offset = {:#x}, filesz = {:#x}, vaddr = {:#x}, memsz = {:#x}, flags = {:?}",
+                offset,
+                filesz,
+                vaddr.get(),
+                memsz,
+                rwx_flags
+            );
+        }
+        segments.push(SegData {
+            offset,
             filesz,
-            memsz,
             vaddr,
+            memsz,
             rwx_flags,
-        };
-        segments.push(segdata);
-        if vaddr_end > heap_start {
-            heap_start = vaddr_end;
-        }
+        });
     }
-    let memspace = MemSpace::copy_from_kernel();
-    let mut table_guard = memspace.table_locked().write_irqsave();
-    let mut user_space =
-        UserSpace::new(heap_start.page_up(), &mut *table_guard).map_err(|e| ElfLoadError::Mm(e))?;
+    let mut usersp = UserSpace::new_user()?;
     for segment in &segments {
         unsafe {
-            user_space
-                .add_segment(
-                    segment.vaddr,
-                    segment.memsz as usize,
-                    segment.filesz as usize,
-                    segment.data,
-                    segment.rwx_flags,
-                    &mut *table_guard,
-                )
-                .map_err(|e| ElfLoadError::Mm(e))?;
+            usersp.add_segment::<SysError>(
+                segment.vaddr,
+                segment.memsz as usize,
+                segment.filesz as usize,
+                &FileDataSource::new(&file, segment.offset as usize),
+                segment.rwx_flags,
+            )?;
         }
     }
-    drop(table_guard);
-    Ok((memspace, entry))
-}
 
-#[derive(Debug)]
-pub enum ElfLoadError {
-    Parse(ParseError),
-    Mm(MmError),
-    Segment(SegmentError),
-}
-
-#[derive(Debug)]
-pub enum SegmentError {
-    HeaderNotFound,
-    InvalidSegmentData,
+    kdebugln!(
+        "ELF loaded: entry = {:#x}, heap_start = {:#x}",
+        entry,
+        heap_start.get()
+    );
+    Ok(UserTaskImage {
+        memsp: usersp,
+        entry,
+    })
 }

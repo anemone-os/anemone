@@ -1,6 +1,6 @@
 use core::ops::{Index, IndexMut};
 
-use crate::{mm::space::MemSpace, prelude::*};
+use crate::prelude::*;
 
 /// The architecture-specific traits and types for paging.
 pub trait PagingArchTrait: Sized {
@@ -78,7 +78,7 @@ pub trait PagingArchTrait: Sized {
     /// Switch to the given page table.
     ///
     /// This function should always do a TLB shootdown.
-    unsafe fn activate_addr_space(pgtbl: &MemSpace);
+    unsafe fn activate_addr_space(table: &PageTable);
 
     /// Perform a TLB shootdown for the given virtual address in all virtual
     /// address spaces on current core.

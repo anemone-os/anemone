@@ -53,7 +53,7 @@ impl FileSystem {
         P: Fn(&Arc<SuperBlock>) -> bool,
         S: FnOnce() -> Arc<SuperBlock>,
     {
-        let mut sb_list = self.sb_list.write_irqsave();
+        let mut sb_list = self.sb_list.write();
 
         // first try to find an existing superblock that matches the prediction
         for weak_sb in sb_list.iter() {
@@ -80,7 +80,7 @@ impl FileSystem {
     where
         P: Fn(&Arc<SuperBlock>) -> bool,
     {
-        let mut sb_list = self.sb_list.write_irqsave();
+        let mut sb_list = self.sb_list.write();
         sb_list.retain(|weak_sb| {
             if let Some(sb) = weak_sb.upgrade() {
                 !prediction(&sb)

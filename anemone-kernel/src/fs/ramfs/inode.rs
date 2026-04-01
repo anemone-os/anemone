@@ -23,7 +23,7 @@ impl RamfsDir {
     }
 
     pub(super) fn get_by_offset(&self, offset: usize) -> Option<(String, Ino)> {
-        let children = self.children.read_irqsave();
+        let children = self.children.read();
         children
             .1
             .get(offset)
@@ -31,12 +31,12 @@ impl RamfsDir {
     }
 
     pub(super) fn get_by_name(&self, name: &str) -> Option<Ino> {
-        let children = self.children.read_irqsave();
+        let children = self.children.read();
         children.0.get(name).copied()
     }
 
     pub(super) fn insert(&self, name: String, ino: Ino) -> Result<(), FsError> {
-        let mut children = self.children.write_irqsave();
+        let mut children = self.children.write();
         if children.0.contains_key(&name) {
             return Err(FsError::AlreadyExists);
         }
@@ -46,7 +46,7 @@ impl RamfsDir {
     }
 
     pub(super) fn remove(&self, name: &str) -> Option<Ino> {
-        let mut children = self.children.write_irqsave();
+        let mut children = self.children.write();
         if let Some(ino) = children.0.remove(name) {
             if let Some(pos) = children.1.iter().position(|n| n == name) {
                 children.1.remove(pos);
@@ -58,12 +58,12 @@ impl RamfsDir {
     }
 
     pub(super) fn contains(&self, name: &str) -> bool {
-        let children = self.children.read_irqsave();
+        let children = self.children.read();
         children.0.contains_key(name)
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        let children = self.children.read_irqsave();
+        let children = self.children.read();
         children.0.len() == 2
     }
 }

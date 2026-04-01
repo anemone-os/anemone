@@ -68,6 +68,7 @@ impl SchedArchTrait for RiscV64SchedArch {
     type TaskContext = TaskContext;
     unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext) {
         unsafe {
+            debug_assert!(IntrArch::current_irq_flags() == IntrArch::DISABLED_IRQ_FLAGS);
             __switch(cur, next);
         }
     }
@@ -117,11 +118,11 @@ pub unsafe extern "C" fn __switch(cur: *mut TaskContext, next: *const TaskContex
     )
 }
 
-
 /// Task guard for a user task, but the user task does not return.
 ///
 /// Parameters in `a0` - `a6` are not available for user tasks.
-/// User tasks only accept string-based parameters, which are passed in its stack, and set up before entering the task.
+/// User tasks only accept string-based parameters, which are passed in its
+/// stack, and set up before entering the task.
 ///
 /// ## Arguments
 ///
@@ -218,11 +219,12 @@ pub unsafe extern "C" fn kernel_task_guard() -> ! {
         la a6, __kret_point // ra
         call {task_run}
         __kret_point:
+        li a0, 0
         call {task_exit}
         call {task_guard_end}
     ",
     task_run = sym __task_run,
-    task_exit = sym crate::sched::task_exit,
+    task_exit = sym crate::sched::kernel_exit,
     task_guard_end = sym __kernel_task_guard_end,
     kernel_prv = const Privilege::Kernel as u64,
     );
@@ -248,7 +250,7 @@ unsafe extern "C" fn __task_run(
 ) {
     let args_parsed =
         unsafe { a_args.as_ref() }.expect("task args in kernel stack should never be null");
-    let trapframe = RiscV64TrapFrame::task_init_frame(
+    let mut trapframe = RiscV64TrapFrame::task_init_frame(
         entry as u64,
         running_stack_top,
         IrqFlags::new(irq_flags),
@@ -256,9 +258,13 @@ unsafe extern "C" fn __task_run(
         args_parsed,
         ra,
     );
+    if let Privilege::User = prv {
+        unsafe {
+            trapframe.set_syscall_ret_val(running_stack_top);
+        }
+    }
 
-    knoticeln!("{}({}) starting", current_task_id(), current_task_name());
-
+    knoticeln!("{}({}) starting", current_task_id(), current_task_cmdline());
     unsafe {
         match prv {
             Privilege::Kernel => __ktrap_return_to_task(&trapframe),

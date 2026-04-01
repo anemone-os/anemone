@@ -15,11 +15,17 @@ mod proc;
 // schedulers
 mod rr;
 
+mod api;
+pub use api::*;
+
 /// Default Scheduler
 pub type Scheduler = rr::RRScheduler;
 
 /// Exported API for process management.
-pub use proc::{add_to_ready, clone_current_task, current_task_id, current_task_name};
+pub use proc::{
+    add_to_ready, clone_current_task, current_task_cmdline, current_task_id,
+    fetch_clear_resched_flag, load_context, set_resched_flag, with_current_task,
+};
 
 /// Enter the scheduler loop. This function is called by bootstrap code to enter
 /// the scheduler.
@@ -35,24 +41,14 @@ pub fn run_tasks() -> ! {
     }
 }
 
-/// Manually triggers a scheduling
+/// Manually triggers a scheduling if scheduling is allowed
 ///
 /// **Make sure interrupts are disabled before calling this function, otherwise
 /// the behavior is undefined.**
 pub unsafe fn schedule() {
-    unsafe {
-        switch_out(false);
-    }
-}
-
-/// Called by the task guard when a task is exiting. This function will never
-/// return.
-///
-/// Call this function manually will directly exit the current task.
-pub fn task_exit() -> ! {
-    unsafe {
-        IntrArch::local_intr_disable();
-        switch_out(true);
-        unreachable!("should never return to an exited task");
+    if unsafe_with_core_local(|local| local.preempt_counter().allow()) {
+        unsafe { switch_out(false) };
+    } else {
+        set_resched_flag();
     }
 }

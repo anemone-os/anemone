@@ -1,6 +1,7 @@
 use super::paging::LA64PagingArch;
 use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 
+/// LoongArch64 kernel layout constants and derived virtual page numbers.
 pub struct LA64KernelLayout;
 
 impl KernelLayoutTrait<LA64PagingArch> for LA64KernelLayout {
@@ -19,4 +20,12 @@ impl KernelLayoutTrait<LA64PagingArch> for LA64KernelLayout {
 
     const DIRECT_MAPPING_VPN: VirtPageNum =
         VirtPageNum::new(0x9000_0000_0000_0000 >> LA64PagingArch::PAGE_SIZE_BITS);
+}
+
+impl LA64KernelLayout {
+    /// Temporary virtual address used for early I/O mapping.
+    pub const TEMPORARY_IO_VPN: VirtPageNum =
+        VirtPageNum::new(0x8000_0000_0000_0000 >> LA64PagingArch::PAGE_SIZE_BITS);
+    /// Temporary virtual address of the early I/O window.
+    pub const TEMPORARY_IO_ADDR: u64 = Self::TEMPORARY_IO_VPN.to_virt_addr().get();
 }

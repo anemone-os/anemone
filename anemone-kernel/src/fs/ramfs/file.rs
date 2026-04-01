@@ -18,7 +18,7 @@ impl RamfsFile {
 fn ramfs_read(file: &File, buf: &mut [u8]) -> Result<usize, FsError> {
     let inode = file.inode();
     let reg_data = ramfs_reg(inode)?;
-    let data = reg_data.data.read_irqsave();
+    let data = reg_data.data.read();
 
     let pos = file.pos();
     if pos >= data.len() {
@@ -35,7 +35,7 @@ fn ramfs_read(file: &File, buf: &mut [u8]) -> Result<usize, FsError> {
 fn ramfs_write(file: &File, buf: &[u8]) -> Result<usize, FsError> {
     let inode = file.inode();
     let reg_data = ramfs_reg(inode)?;
-    let mut data = reg_data.data.write_irqsave();
+    let mut data = reg_data.data.write();
 
     let pos = file.pos();
     if pos > data.len() {

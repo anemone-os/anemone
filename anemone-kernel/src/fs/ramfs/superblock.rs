@@ -23,12 +23,12 @@ impl RamfsSb {
     }
 
     pub(super) fn read_tx<R>(&self, f: impl FnOnce() -> R) -> R {
-        let _guard = self.tx_lock.read_irqsave();
+        let _guard = self.tx_lock.read();
         f()
     }
 
     pub(super) fn write_tx<R>(&self, f: impl FnOnce() -> R) -> R {
-        let _guard = self.tx_lock.write_irqsave();
+        let _guard = self.tx_lock.write();
         f()
     }
 }

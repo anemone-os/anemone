@@ -98,16 +98,17 @@ pub struct KUnit {
 }
 
 pub fn handle_percpu_ipi_test(test_fn: fn()) {
-    PERCPU_KUNIT_BARRIER.mark_ready();
-    PERCPU_KUNIT_BARRIER.wait_start();
-    test_fn();
-    PERCPU_KUNIT_BARRIER.mark_done();
+    with_intr_enabled(|_| {
+        PERCPU_KUNIT_BARRIER.mark_ready();
+        PERCPU_KUNIT_BARRIER.wait_start();
+        test_fn();
+        PERCPU_KUNIT_BARRIER.mark_done();
+    });
 }
 
 pub fn run_percpu_test(test_fn: fn()) {
     let _guard = PerCpuRunGuard::acquire();
-
-    PERCPU_KUNIT_BARRIER.reset();
+    let sync = PERCPU_KUNIT_BARRIER.reset();
 
     broadcast_ipi_async(IpiPayload::RunKUnitPerCpu { test_fn })
         .expect("failed to dispatch percpu kunit");

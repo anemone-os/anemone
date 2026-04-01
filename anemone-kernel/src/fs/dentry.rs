@@ -46,11 +46,11 @@ impl Dentry {
     ///
     /// For the root dentry of a mounted filesystem, this will be "/".
     pub fn name(&self) -> String {
-        self.inner.read_irqsave().name.clone()
+        self.inner.read().name.clone()
     }
 
     pub fn rename(&self, new_name: String) {
-        self.inner.write_irqsave().name = new_name;
+        self.inner.write().name = new_name;
     }
 
     pub fn inode(&self) -> &InodeRef {
@@ -65,7 +65,7 @@ impl Dentry {
 
     /// Try to insert a child dentry with the given name.
     pub fn insert_child(&self, name: String, dentry: &Arc<Dentry>) -> Result<(), FsError> {
-        if let Some(children) = self.inner.write_irqsave().children.as_mut() {
+        if let Some(children) = self.inner.write().children.as_mut() {
             if let Some(record) = children.get(&name) {
                 if record.upgrade().is_some() {
                     return Err(FsError::AlreadyExists);
@@ -82,7 +82,7 @@ impl Dentry {
 
     /// Remove a child dentry with the given name.
     pub fn remove_child(&self, name: &str) -> Result<(), FsError> {
-        if let Some(children) = self.inner.write_irqsave().children.as_mut() {
+        if let Some(children) = self.inner.write().children.as_mut() {
             if let Some(existing) = children.get(name).and_then(|weak| weak.upgrade()) {
                 children.remove(name);
                 Ok(())
@@ -98,7 +98,7 @@ impl Dentry {
 
     /// Look up a child dentry with the given name.
     pub fn lookup_child(&self, name: &str) -> Result<Arc<Dentry>, FsError> {
-        if let Some(children) = self.inner.write_irqsave().children.as_mut() {
+        if let Some(children) = self.inner.write().children.as_mut() {
             if let Some(record) = children.get(name) {
                 if let Some(child) = record.upgrade() {
                     Ok(child)

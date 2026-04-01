@@ -124,7 +124,10 @@ impl SysRemaps {
 }
 
 impl SysRemaps {
-    unsafe fn ioremap(&mut self, req: IoRange) -> Result<(VirtAddr, VirtPageRange), MmError> {
+    unsafe fn ioremap(
+        &mut self,
+        req: IoRange,
+    ) -> Result<(VirtAddr, VirtPageRange, IpiGuard), MmError> {
         if self.find_io_overlap(req).is_some() {
             return Err(MmError::AlreadyMapped);
         }
@@ -132,8 +135,7 @@ impl SysRemaps {
         let phys_range = req.to_page_range();
         let npages = phys_range.npages() as usize;
         let virt_range = self.alloc(npages).ok_or(MmError::OutOfMemory)?;
-
-        unsafe {
+        let guard = unsafe {
             kmap(Mapping {
                 vpn: virt_range.start(),
                 ppn: phys_range.start(),
@@ -145,8 +147,8 @@ impl SysRemaps {
                 self.free(virt_range.start(), virt_range.npages() as usize)
                     .expect("internal error: failed to free virt range after failed ioremap");
                 e
-            })?;
-        }
+            })?
+        };
 
         assert!(
             self.io_remapped
@@ -163,7 +165,7 @@ impl SysRemaps {
 
         let vaddr = virt_range.start().to_virt_addr() + req.start.page_offset() as u64;
 
-        Ok((vaddr, virt_range))
+        Ok((vaddr, virt_range, guard))
     }
 
     unsafe fn iounmap(&mut self, req: IoRange) -> Result<(), MmError> {
@@ -243,8 +245,8 @@ impl Drop for IoRemap {
 pub unsafe fn ioremap(start: PhysAddr, len: usize) -> Result<IoRemap, MmError> {
     unsafe {
         let req = IoRange::try_new(start, len)?;
-        let (virt, _) = SYS_REMAPS.lock_irqsave().ioremap(req)?;
-
+        let (virt, _, guard) = SYS_REMAPS.lock_irqsave().ioremap(req)?;
+        drop(guard); // send ipi
         Ok(IoRemap { virt, req })
     }
 }
@@ -296,7 +298,6 @@ fn stress_ioremap_all_cpus() {
 
     let base = PhysAddr::new(PHYS_RAM_START);
     let len = PagingArch::PAGE_SIZE_BYTES;
-
     kinfoln!(
         "kunit ioremap stress: cpu {} starting {} rounds",
         CpuArch::cur_cpu_id(),

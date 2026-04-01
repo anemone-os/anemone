@@ -4,7 +4,7 @@ members = [
     "anemone-abi",
     "anemone-kernel",
     "anemone-kernel/crates/*",
-    "anemone-apps/user-test",
+    "anemone-apps/*",
 ]
 exclude = ["scripts/xtask"]
 
@@ -49,3 +49,4 @@ lwext4_rust = { git = "https://github.com/anemone-os/lwext4_rust.git", rev = "ef
 syn = { version = "2.0", features = ["full"] }
 quote = "1.0"
 proc-macro2 = "1.0"
+goblin = { version = "0.10.5", default-features = false, features = ["elf64"] }

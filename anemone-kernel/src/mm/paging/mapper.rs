@@ -1,6 +1,6 @@
-use core::{cmp::min, marker::PhantomData, mem::ManuallyDrop, ptr::copy};
+use core::{cmp::min, fmt::Debug, marker::PhantomData, mem::ManuallyDrop, slice};
 
-use crate::prelude::*;
+use crate::{prelude::*, utils::data::DataSource};
 
 /// POD struct representing a mapping operation.
 #[derive(Debug, Clone, Copy)]
@@ -92,40 +92,39 @@ impl Mapper<'_> {
     ///   unauthorized code regions.
     /// * This function overwrites existing data.
     /// * No rollback is possible if an error occurs.
-    pub unsafe fn fill_data(
+    /// * This function does not validate that the index is within the valid
+    ///   index range of `source`.
+    pub unsafe fn fill_data<TErr>(
         &mut self,
         vaddr: VirtAddr,
-        source: &[u8],
+        source: &impl DataSource<TError = impl Into<TErr>>,
         length: u64,
-    ) -> Result<(), MmError> {
-        if source.len() < length as usize {
-            return Err(MmError::InvalidArgument);
-        }
+    ) -> Result<(), TErr>
+    where
+        TErr: Debug + From<MmError>,
+    {
         if length == 0 {
             return Ok(());
         }
         let vaddr = vaddr;
         let vaddr_end = VirtAddr::new(vaddr.get().wrapping_add(length));
         if vaddr_end < vaddr {
-            return Err(MmError::InvalidArgument);
+            return Err(TErr::from(MmError::InvalidArgument));
         }
         let vpn_st = vaddr.page_down();
         let vpn_end = vaddr_end.page_up();
-        kdebugln!(
-            "consider vpn st = {:#x}, vpn end = {:#x}",
-            vpn_st.get(),
-            vpn_end.get()
-        );
         let fp_offset = (vaddr - vpn_st.to_virt_addr()) as usize;
         let fp_datasz = PagingArch::PAGE_SIZE_BYTES - fp_offset;
         let fp_ppn = self.translate(vpn_st).ok_or(MmError::NotMapped)?.ppn;
         unsafe {
-            copy(
-                &source[0],
-                (fp_ppn.to_hhdm().to_virt_addr().get() as usize + fp_offset) as *const u8
-                    as *mut u8,
-                min(fp_datasz, length as usize),
-            );
+            source
+                .copy_to(0, unsafe {
+                    slice::from_raw_parts_mut(
+                        (fp_ppn.to_hhdm().to_virt_addr().get() as usize + fp_offset) as *mut u8,
+                        min(fp_datasz, length as usize),
+                    )
+                })
+                .map_err(|e| e.into())?;
         }
         let mut count = 0;
         for vpn in (vpn_st + 1).get()..(vpn_end - 1).get() {
@@ -135,11 +134,14 @@ impl Mapper<'_> {
                 .ppn;
             let addr_st = ppn.to_hhdm().to_virt_addr().get();
             unsafe {
-                copy(
-                    &source[fp_datasz + count * PagingArch::PAGE_SIZE_BYTES],
-                    addr_st as *const u8 as *mut u8,
-                    PagingArch::PAGE_SIZE_BYTES,
-                );
+                source
+                    .copy_to(fp_datasz + count * PagingArch::PAGE_SIZE_BYTES, unsafe {
+                        slice::from_raw_parts_mut(
+                            addr_st as *const u8 as *mut u8,
+                            PagingArch::PAGE_SIZE_BYTES,
+                        )
+                    })
+                    .map_err(|e| e.into())?;
             }
             count += 1;
         }
@@ -148,11 +150,14 @@ impl Mapper<'_> {
             let addr_st = ed_ppn.to_hhdm().to_virt_addr().get();
             let data_st = fp_datasz + count * PagingArch::PAGE_SIZE_BYTES;
             unsafe {
-                copy(
-                    &source[data_st],
-                    addr_st as *const u8 as *mut u8,
-                    length as usize - data_st,
-                );
+                source
+                    .copy_to(data_st, unsafe {
+                        slice::from_raw_parts_mut(
+                            addr_st as *const u8 as *mut u8,
+                            length as usize - data_st,
+                        )
+                    })
+                    .map_err(|e| e.into())?;
             }
         }
         Ok(())

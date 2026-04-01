@@ -3,10 +3,11 @@
 use anemone_abi::syscall::ANEMONE_SYSNO_MAX;
 
 use crate::{
-    prelude::{handler::SyscallRegs, *},
+    prelude::{dt::c_readonly_string, handler::SyscallRegs, *},
     syscall::handler::SyscallHandler,
 };
 
+pub mod dt;
 pub mod handler;
 
 const INVALID_SYSCALL: SyscallHandler = SyscallHandler {
@@ -80,6 +81,7 @@ pub fn register_syscall_handlers() {
 /// For syscall occurring in kernel space, arch-specific code should just panic
 /// immediately, and this function should never be called.
 pub fn handle_syscall(trapframe: &mut TrapFrame) {
+    let intr_guard = IntrGuard::new(true); // enable intr
     let sysno = unsafe { trapframe.syscall_no() };
 
     let handler = SYSCALL_TABLE
@@ -112,4 +114,12 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) {
         trapframe.set_syscall_ret_val(retval);
     }
     trapframe.advance_pc();
+    drop(intr_guard);
+}
+
+/// Temporary output syscall
+#[syscall(100)]
+fn sys_print(#[validate_with(c_readonly_string)] val: Box<str>) -> Result<u64, SysError> {
+    kprint!("{}", val);
+    Ok(0)
 }

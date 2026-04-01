@@ -2,8 +2,15 @@
 
 use core::arch::naked_asm;
 
-use la_insc::reg::csr::{
-    CR_CPUID, CR_CRMD, CR_DMW0, CR_DMW1, CR_PGDH, CR_PGDL, CR_PWCH, CR_PWCL, CR_TLBRENTRY,
+use la_insc::{
+    reg::{
+        csr::{
+            CR_CPUID, CR_CRMD, CR_DMW0, CR_DMW1, CR_DMW2, CR_PGDH, CR_PGDL, CR_PWCH, CR_PWCL,
+            CR_TLBRENTRY, dmw2,
+        },
+        dmw::Dmw,
+    },
+    utils::{mem::MemAccessType, privl::PrivilegeFlags},
 };
 use loongArch64::ipi::csr_mail_send;
 
@@ -12,7 +19,7 @@ use crate::{
         clear_bss,
         loongarch64::{
             exception::install_ktrap_handler,
-            mm::{BOOT_DMW0, BOOT_DMW1, BOOTSTRAP_PTABLE, PWCH, PWCL, refill::__tlb_rfill},
+            mm::{BOOT_DMW0_DM, BOOTSTRAP_PTABLE, PWCH, PWCL, refill::__tlb_rfill},
         },
     },
     device::discovery::open_firmware::{
@@ -25,22 +32,29 @@ use crate::{
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bss.stack0")]
+/// Per-CPU bootstrap stacks used before the regular per-CPU stack remap is in
+/// place.
 static mut STACK0: [RawKernelStack; MAX_CPUS] = [RawKernelStack::ZEROED; MAX_CPUS];
 
+/// Temporary I/O space base address used during early boot before the full
+/// memory manager is online.
+const TEMP_IO_SPACE: u64 = 0x8000_0000_0000_0000;
+
+/// Flattened device tree blob embedded by the build.
 static DTB_BYTES: &[u8] = include_bytes_aligned_as!(PhantomAligned8, "generated.dtb");
 
 /// # Note
-/// Because Loongarch64 is booted without SBI,
-///     so the entry point is hard_coded, and the entry point [__nun]
-///     will be seen as not-used by the compiler and ignored.
+/// LoongArch64 boots without SBI, so the entry point is fixed and [`__nun`]
+/// would otherwise be considered unused by the compiler.
 ///
-/// This static value is used to keep the entry point.
+/// This static keeps the entry point referenced.
 #[used]
 static __NUN_KEEPER: unsafe extern "C" fn() -> ! = __nun;
 
-/// Entry point of the kernel
+/// Kernel entry point.
 ///
-/// TODO: Wake up aps.
+/// The first CPU uses this path directly, while secondary CPUs reach it through
+/// [wake_up_aps].
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.bootstrap")]
@@ -53,6 +67,9 @@ pub unsafe extern "C" fn __nun() -> ! {
             
             li.d    $t0, {boot_dmw1}
             csrwr   $t0, {cr_dmw1}
+
+            li.d    $t0, {boot_dmw2}
+            csrwr   $t0, {cr_dmw2}
 
             li.w    $t0, 0xb8   // IE=0, PLV=0, DA=0, PG=1
             csrwr   $t0, {cr_crmd}
@@ -71,7 +88,7 @@ pub unsafe extern "C" fn __nun() -> ! {
             #sub.d       $t0, $t0, $t2
             csrwr   $t0, {cr_pgdl}
         ",
-        // Set up stack
+        // Set up stack and refill handler
         "
 
             li.d        $t2, {k_offset}
@@ -82,22 +99,39 @@ pub unsafe extern "C" fn __nun() -> ! {
             mul.d       $t0, $t0, $t1
             add.d       $sp, $sp, $t0
             or          $sp, $sp, $t2
-        ",
-        // Jump
-        "
+
+
             la.global   $t0, {tlb_rfill}
             #sub.d       $t0, $t0, $t2
             csrwr       $t0, {tlbr_entry}
+        ",
+        // Jump
+        "
+            // remove dmw1
+            li.d    $t0, 0
+            csrwr   $t0, {cr_dmw1}
 
             csrrd       $a0, {cr_cpuid} // arg0: hart_id
             la.global   $t0, {rusty_nun}
             or          $t0, $t0, $t2
             jirl        $zero,$t0,0
         ",
-        boot_dmw0 = const BOOT_DMW0.to_u64(),
-        boot_dmw1 = const BOOT_DMW1.to_u64(),
+        boot_dmw0 = const BOOT_DMW0_DM.to_u64(),
+        // temporary
+        boot_dmw1 = const Dmw::new(
+                PrivilegeFlags::PLV0,
+                MemAccessType::Cache,
+                Dmw::vseg_from_addr(0),
+            ).to_u64(),
+        // temporary IO space
+        boot_dmw2 = const Dmw::new(
+                PrivilegeFlags::PLV0,
+                MemAccessType::StrongNonCache,
+                Dmw::vseg_from_addr(TEMP_IO_SPACE),
+            ).to_u64(),
         cr_dmw0 = const CR_DMW0,
         cr_dmw1 = const CR_DMW1,
+        cr_dmw2 = const CR_DMW2,
 
         tlbr_entry = const CR_TLBRENTRY,
 
@@ -140,13 +174,21 @@ extern "C" fn rusty_nun(hart_id: usize) -> ! {
     }
 }
 
+/// Register the early debug console that is backed by the temporary I/O DMW.
 pub fn register_debugcon() {
     use crate::{
         device::console::{Console, ConsoleFlags, register_console},
         driver::Ns16550ARegisters,
     };
 
-    let con = unsafe { Ns16550ARegisters::from_raw(0x1fe0_01e0 as *const u8 as *mut u8, 0, 1) };
+    const DEBUG_CON_REG: u64 = 0x1fe0_01e0;
+    let con = unsafe {
+        Ns16550ARegisters::from_raw(
+            (TEMP_IO_SPACE + DEBUG_CON_REG) as *const u8 as *mut u8,
+            0,
+            1,
+        )
+    };
     pub struct DebugCon {
         con: SpinLock<Ns16550ARegisters>,
     }
@@ -156,6 +198,14 @@ pub fn register_debugcon() {
         fn output(&self, s: &str) {
             use core::fmt::Write;
             let _ = self.con.lock_irqsave().write_str(s);
+        }
+    }
+    impl Drop for DebugCon {
+        fn drop(&mut self) {
+            unsafe {
+                // remove temporary IO space
+                dmw2::csr_write(Dmw::from_u64(0));
+            }
         }
     }
     let debug_con = DebugCon {
@@ -223,6 +273,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
                 ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
                 IntrArch::DISABLED_IRQ_FLAGS,
                 TaskFlags::NONE,
+                None,
             )
             .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e)),
         ));
@@ -230,6 +281,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     }
 }
 
+/// Synchronization point that keeps all CPUs aligned during bootstrap.
 static BOOT_SYNC_COUNTER: CpuSync = CpuSync::new("boot");
 
 unsafe fn ap_setup(ap_id: usize) -> ! {
@@ -246,6 +298,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
                 ParameterList::new(&[ap_id as u64]),
                 IntrArch::DISABLED_IRQ_FLAGS,
                 TaskFlags::NONE,
+                None,
             )
             .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e)),
         ));
@@ -253,6 +306,8 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
     }
 }
 
+/// Send the bootstrap entry address to every secondary CPU and trigger its
+/// IPI.
 pub fn wake_up_aps(bsp_id: usize, ncpus: usize) {
     unsafe {
         let cur_cpu = bsp_id;
@@ -284,10 +339,10 @@ unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
     }
 }
 
-/// percpu guarded stack top addresses, filled by [`remap_boot_stacks`].
+/// Per-CPU guarded stack tops, filled by [remap_boot_stack].
 static GUARDED_STACK_TOPS: MonoOnce<[VirtAddr; MAX_CPUS]> = unsafe { MonoOnce::new() };
 
-/// Remap every CPU's boot stack ([`STACK0`]) into the remap region with a
+/// Remap every CPU's bootstrap stack ([`STACK0`]) into the remap region with a
 /// guard page at the bottom.
 ///
 /// # Safety
@@ -308,8 +363,7 @@ unsafe fn remap_boot_stack() {
 
         let vrange = unsafe { mm::remap::alloc_virt_range(total_vpages) }
             .expect("failed to allocate virtual range for boot stack guard page");
-        // The first page is the guard – we simply leave it unmapped. The underlying pte
-        // should be empty.
+        // The first page is the guard page, so it stays unmapped.
         let stack_vpn = vrange.start() + 1;
         unsafe {
             kmap(Mapping {

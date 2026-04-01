@@ -60,6 +60,9 @@ pub struct Constants {
     pub max_phys_ram_size: u64,
     pub kernel_la_base: u64,
     pub kernel_va_base: u64,
+    pub max_user_stack_size: u64,
+    pub init_user_stack_size: u64,
+    pub max_heap_size: u64,
     pub max_cpus: usize,
     pub frame_section_shift_mb: usize,
 }
@@ -165,6 +168,12 @@ pub const MAX_PHYS_RAM_SIZE: u64 = {:#x};
 pub const KERNEL_LA_BASE: u64 = {:#x};
 /// Kernel virtual address base
 pub const KERNEL_VA_BASE: u64 = {:#x};
+/// Maximum user stack size
+pub const MAX_USER_STACK_SIZE: u64 = {:#x};
+/// Initial user stack size
+pub const INIT_USER_STACK_SIZE: u64 = {:#x};
+/// Maximum heap size
+pub const MAX_HEAP_SIZE: u64 = {:#x};
 /// Maximum number of CPUs supported
 pub const MAX_CPUS: usize = {};
 /// Frame section size shift in megabytes
@@ -181,6 +190,9 @@ pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
             self.constants.max_phys_ram_size,
             self.constants.kernel_la_base,
             self.constants.kernel_va_base,
+            self.constants.max_user_stack_size,
+            self.constants.init_user_stack_size,
+            self.constants.max_heap_size,
             self.constants.max_cpus,
             self.constants.frame_section_shift_mb,
             rootfs_fstype,
