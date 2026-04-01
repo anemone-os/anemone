@@ -5,8 +5,7 @@ use crate::{
     workspace::*,
 };
 use anyhow::Ok;
-use clap::{Args, Command};
-use xshell::{Cmd, Shell};
+use clap::Args;
 
 #[derive(Args)]
 pub struct QemuArgs {

@@ -12,6 +12,11 @@
 // This feature must be enabled for zero-cost downcasting of trait objects to get the same
 // efficiency as C's void* and manual casts, which is crucial for the performance of the kernel.
 #![feature(downcast_unchecked)]
+<<<<<<< HEAD
+=======
+// This feature is required for fallible heap allocation. Yes, Rust's default global allocator is
+// infallible, which is unacceptable for kernel environments...
+>>>>>>> 1016c17 (dynamic allocation in ipi; app & rootfs build scripts)
 #![feature(allocator_api)]
 
 extern crate alloc;
@@ -105,7 +110,7 @@ fn mount_rootfs() {
         "block" => {
             let rootfs_path = ROOTFS_SOURCE_PATH
                 .expect("rootfs source path must be configured for block-backed rootfs");
-            let root_dev = device::block::get_block_dev_by_of_full_name_path(rootfs_path)
+            let root_dev = device::block::get_block_dev_by_name(rootfs_path)
                 .unwrap_or_else(|| panic!("rootfs block device not found: {}", rootfs_path));
             vfs_mount(
                 ROOTFS_FS_TYPE,

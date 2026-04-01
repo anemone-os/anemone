@@ -2,15 +2,18 @@
 name = "qemu-virt-rv64"
 abbrs = ["rv", "rv64", "riscv", "riscv64"]
 arch = "riscv64"
-target = "riscv64-unknown-anemone-elf"
 exec_env = "sbi"
 
 [constants]
+
+<<<<<<< HEAD
+max_user_stack_size = 0x800000      # 8MB
+=======
+>>>>>>> 1016c17 (dynamic allocation in ipi; app & rootfs build scripts)
 phys_ram_start = 0x80000000
 max_phys_ram_size = 0x80000000      # 2GB
 kernel_la_base = 0x80200000
 kernel_va_base = 0xffffffff80200000
-max_user_stack_size = 0x800000      # 8MB
 init_user_stack_size = 0x4000       # 16KB
 max_heap_size = 0x2000000000        # 128GB
 max_cpus = 16
@@ -35,20 +38,20 @@ args = [
     "-netdev",
     "user,id=net",
 
-    # "-drive",
-    # "file=rootfs-rv.img,format=raw,if=none,id=x0",
-    # "-device",
-    # "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
-    # "-no-reboot",
-    # "-drive",
-    # "file=disk.img,format=raw,if=none,id=x1",
-    # "-device",
-    # "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",
+    "-drive",
+    "file=rootfs-rv.img,format=raw,if=none,id=x0",
+    "-device",
+    "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
+    "-no-reboot",
+    "-drive",
+    "file=disk.img,format=raw,if=none,id=x1",
+    "-device",
+    "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",
 ]
 
 [rootfs]
 fstype = "ext4"
-source = { type = "block", path = "/soc/virtio_mmio@10002000" }
+source = { type = "block", path = "vdb" }
 
 [dtb]
 path = "arch/riscv64/generated.dtb"

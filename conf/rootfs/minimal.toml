@@ -1,0 +1,32 @@
+#! This manifest describes the minimal rootfs configuration for Anemone.
+
+[build]
+# Generated image name.
+name = "minimal"
+# Target architecture for the generated image. This determines how user-space binaries are built.
+arch = "riscv64"
+
+[fs]
+# Filesystem type to use.
+fstype = "ext4"
+# Base directory will be copied into the rootfs tree as a basis for the generated image.
+# This is optional, and can be omitted if the rootfs is generated from scratch.
+base = "etc/rootfs"
+
+# Init process configuration. This will be written into /.anemone/init.toml and used by kernel to launch the init process.
+[init]
+path = "/init"
+args = []
+
+# List of apps to be installed into the rootfs.
+# The specified apps should be defined in `anemone-apps` workspace.
+[[apps]]
+# This should match the name field in anemone-apps/<app>/app.toml. It identifies which app to install.
+name = "user-test"
+# Where artifacts of this app should be installed in rootfs.
+installed_dir = "/bin/user-test"
+
+# List of files to be injected into the rootfs. Each file will be copied from the host into the generated image at the specified path.
+[[files]]
+source = "etc/hello.txt"
+installed_path = "/hello.txt"

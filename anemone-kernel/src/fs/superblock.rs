@@ -144,7 +144,6 @@ impl SuperBlock {
                 return Ok(InodeRef::new(existing.clone()));
             }
             inode.set_indexed(true);
-            knoticeln!("superblock: caching inode {:?} loaded from disk", ino);
             inner.indexed.insert(ino, inode.clone());
         }
 
@@ -287,7 +286,6 @@ impl SuperBlock {
             }
             return Err(e);
         }
-        knoticeln!("evicted inode {:?} from superblock", ino);
         Ok(())
     }
 

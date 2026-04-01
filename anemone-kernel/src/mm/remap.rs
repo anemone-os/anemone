@@ -269,24 +269,28 @@ pub unsafe fn free_virt_range(start: VirtPageNum, npages: usize) -> Result<(), M
 }
 
 #[cfg(feature = "kunit")]
-fn kunit_ioremap_stress_worker(base: PhysAddr, len: usize, rounds: usize) {
-    for _ in 0..rounds {
-        loop {
-            match unsafe { ioremap(base, len) } {
-                Ok(remap) => {
-                    drop(remap);
-                    break;
-                },
-                Err(MmError::AlreadyMapped) => {
-                    core::hint::spin_loop();
-                },
-                Err(err) => {
-                    panic!(
-                        "unexpected ioremap stress failure on cpu {}: {:?}",
-                        CpuArch::cur_cpu_id(),
-                        err
-                    );
-                },
+mod kunits {
+    use super::*;
+
+    fn kunit_ioremap_stress_worker(base: PhysAddr, len: usize, rounds: usize) {
+        for _ in 0..rounds {
+            loop {
+                match unsafe { ioremap(base, len) } {
+                    Ok(remap) => {
+                        drop(remap);
+                        break;
+                    },
+                    Err(MmError::AlreadyMapped) => {
+                        core::hint::spin_loop();
+                    },
+                    Err(err) => {
+                        panic!(
+                            "unexpected ioremap stress failure on cpu {}: {:?}",
+                            CpuArch::cur_cpu_id(),
+                            err
+                        );
+                    },
+                }
             }
         }
     }

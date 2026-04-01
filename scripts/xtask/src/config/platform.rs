@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Debug, Serialize)]
+#[derive(Deserialize, Debug, Serialize, Clone)]
 pub enum Arch {
     #[serde(rename = "riscv64")]
     RiscV64,
@@ -18,6 +18,21 @@ impl Arch {
             Arch::LoongArch64 => "loongarch64",
         }
     }
+
+    pub fn target_triple(&self) -> TargetTriple {
+        match self {
+            Arch::RiscV64 => TargetTriple::RiscV64UnknownAnemoneElf,
+            Arch::LoongArch64 => TargetTriple::LoongArch64UnknownAnemoneElf,
+        }
+    }
+
+    pub fn try_from_str(s: &str) -> anyhow::Result<Self> {
+        match s {
+            "riscv64" => Ok(Arch::RiscV64),
+            "loongarch64" => Ok(Arch::LoongArch64),
+            _ => anyhow::bail!("Unsupported architecture: {}", s),
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -28,11 +43,9 @@ pub enum ExecEnv {
     Uefi,
 }
 
-#[derive(Deserialize, Debug, Serialize)]
+#[derive(Debug, Clone, Copy)]
 pub enum TargetTriple {
-    #[serde(rename = "riscv64-unknown-anemone-elf")]
     RiscV64UnknownAnemoneElf,
-    #[serde(rename = "loongarch64-unknown-anemone-elf")]
     LoongArch64UnknownAnemoneElf,
 }
 
@@ -50,7 +63,6 @@ pub struct Build {
     pub name: String,
     pub abbrs: Vec<String>,
     pub arch: Arch,
-    pub target: TargetTriple,
     pub exec_env: ExecEnv,
 }
 
@@ -182,7 +194,7 @@ pub const FRAME_SECTION_SHIFT_MB: usize = {};
 pub const ROOTFS_FS_TYPE: &str = {:?};
 /// Root filesystem source kind
 pub const ROOTFS_SOURCE_KIND: &str = {:?};
-/// Root filesystem source path in device tree full-name form
+/// Root filesystem source path
 pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
 
         "#,

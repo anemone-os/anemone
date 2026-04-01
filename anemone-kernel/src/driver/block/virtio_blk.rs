@@ -10,8 +10,8 @@ use virtio_drivers::{device::blk::VirtIOBlk, transport::SomeTransport};
 use crate::{
     device::{
         block::{
-            BlockDev, BlockDeviceRegistration, BlockDriver, BlockSize, register_block_device,
-            register_block_driver,
+            BlockDev, BlockDevClass, BlockDevRegistration, BlockDriver, BlockSize,
+            register_block_device, register_block_driver,
         },
         bus::virtio::VirtIODriver,
         devnum::GeneralMinorAllocator,
@@ -134,15 +134,17 @@ impl DriverOps for VirtIOBlkDriver {
 
         state.lock_irqsave().devnum = devnum;
 
-        // use transport's fwnode as block device's fwnode.
-        let transport_fwnode = vdev.transport_fwnode();
-
-        register_block_device(BlockDeviceRegistration {
+        let node_name = register_block_device(BlockDevRegistration {
             devnum,
-            name: ident_format!("{}", vdev.name()).unwrap(),
-            fwnode: Some(transport_fwnode),
+            class: BlockDevClass::Virtio,
             device: Arc::new(state.clone()),
         })?;
+
+        kinfoln!(
+            "virtio-blk device {} registered as {}",
+            vdev.name(),
+            node_name
+        );
 
         vdev.request_irq(&IRQ_HANDLER, Some(AnyOpaque::new(state.clone())))?;
 

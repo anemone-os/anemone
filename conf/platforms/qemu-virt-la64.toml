@@ -2,7 +2,6 @@
 name = "qemu-virt-la64"
 abbrs = ["la", "la64", "loongarch", "loongarch64"]
 arch = "loongarch64"
-target = "loongarch64-unknown-anemone-elf"
 exec_env = "sbi"
 
 [constants]

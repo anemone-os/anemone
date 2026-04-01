@@ -1,0 +1,20 @@
+[build]
+name = "minimal"
+arch = "riscv64"
+
+[fs]
+fstype = "ext4"
+base = "etc/rootfs"
+
+[init]
+path = "/init"
+args = []
+
+[[apps]]
+name = "user-test"
+installed_dir = "/bin/user-test"
+
+[[apps]]
+name = "init"
+installed_dir = "/sbin/init"
+

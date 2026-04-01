@@ -1,12 +1,9 @@
+#! Kernel workspace. anemone-apps & anemone-rs & anemone-rs excluded.
+
 [workspace]
 resolver = "2"
-members = [
-    "anemone-abi",
-    "anemone-kernel",
-    "anemone-kernel/crates/*",
-    "anemone-apps/*",
-]
-exclude = ["scripts/xtask"]
+members = ["anemone-abi", "anemone-kernel", "anemone-kernel/crates/*"]
+exclude = ["scripts/xtask", "anemone-apps/*", "anemone-rs/*", "anemone-libc/*"]
 
 [workspace.dependencies]
 sbi-rt = { version = "0.0.3" }

@@ -1,0 +1,263 @@
+use std::{
+    fs,
+    path::{Component, Path, PathBuf},
+};
+
+use anyhow::{Context, bail};
+use clap::Args;
+use serde::Serialize;
+
+use crate::{
+    config::{app::App as AppManifest, rootfs::Rootfs},
+    log_progress,
+    tasks::{
+        app::build::{BuildCtx, BuiltArtifactInfo, build_app},
+        utils::cmd_echo,
+    },
+};
+
+#[derive(Args)]
+pub struct MkfsArgs {
+    #[arg(short, long)]
+    #[arg(help = "Path to the rootfs manifest file")]
+    config: String,
+}
+
+pub fn run(args: MkfsArgs) -> anyhow::Result<()> {
+    let manifest_path = PathBuf::from(&args.config);
+    let content = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("Failed to read rootfs manifest from '{}'", args.config))?;
+    let rootfs = Rootfs::from_str(&content)?;
+    let manifest_dir = manifest_path
+        .parent()
+        .context("rootfs manifest path has no parent directory")?;
+
+    let output_dir = Path::new("build/rootfs").join(&rootfs.build.name);
+    let staging_dir = output_dir.join("root");
+    let image_path = output_dir.join("rootfs.img");
+
+    if output_dir.exists() {
+        fs::remove_dir_all(&output_dir).with_context(|| {
+            format!(
+                "failed to remove existing rootfs output directory '{}'",
+                output_dir.display()
+            )
+        })?;
+    }
+    fs::create_dir_all(&staging_dir)?;
+
+    log_progress!(
+        "ROOTFS",
+        &format!("Preparing rootfs '{}'", rootfs.build.name)
+    );
+    stage_base_tree(&rootfs, manifest_dir, &staging_dir)?;
+    stage_apps(&rootfs, &staging_dir)?;
+    stage_files(&rootfs, manifest_dir, &staging_dir)?;
+    write_init_config(&rootfs, &staging_dir)?;
+
+    log_progress!("MKFS", &format!("Generating {}", image_path.display()));
+    rootfs.fs.fstype.mkfs(&staging_dir, &image_path)?;
+
+    Ok(())
+}
+
+/// Copy base tree into staging directory.
+fn stage_base_tree(rootfs: &Rootfs, manifest_dir: &Path, staging_dir: &Path) -> anyhow::Result<()> {
+    let Some(base) = &rootfs.fs.base else {
+        return Ok(());
+    };
+
+    let base_dir = resolve_input_path(manifest_dir, base);
+    if !base_dir.exists() {
+        bail!(
+            "rootfs base directory '{}' does not exist",
+            base_dir.display()
+        );
+    }
+    if !base_dir.is_dir() {
+        bail!(
+            "rootfs base path '{}' is not a directory",
+            base_dir.display()
+        );
+    }
+
+    log_progress!(
+        "ROOTFS",
+        &format!("Copying base tree from '{}'", base_dir.display())
+    );
+    copy_tree_into(&base_dir, staging_dir)
+}
+
+fn stage_apps(rootfs: &Rootfs, staging_dir: &Path) -> anyhow::Result<()> {
+    let build_ctx = BuildCtx::new(rootfs.build.arch.clone())?;
+
+    for app in &rootfs.apps {
+        log_progress!("ROOTFS", &format!("Building app '{}'", app.name));
+        // TODO: add support for extra args later
+        let built = build_app(&app.name, &[], &build_ctx)?;
+        let source = select_rootfs_artifact(&app.name, &built)?;
+        let dest = resolve_install_path(staging_dir, &app.installed_path)?;
+
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(source, &dest).with_context(|| {
+            format!(
+                "failed to install app '{}' from '{}' to '{}'",
+                app.name,
+                source.display(),
+                dest.display()
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn stage_files(rootfs: &Rootfs, manifest_dir: &Path, staging_dir: &Path) -> anyhow::Result<()> {
+    for file in &rootfs.files {
+        let source = resolve_input_path(manifest_dir, &file.source);
+        if !source.exists() {
+            bail!("rootfs file source '{}' does not exist", source.display());
+        }
+        if !source.is_file() {
+            bail!(
+                "rootfs file source '{}' is not a regular file",
+                source.display()
+            );
+        }
+
+        let dest = resolve_install_path(staging_dir, &file.installed_path)?;
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(&source, &dest).with_context(|| {
+            format!(
+                "failed to inject file '{}' into '{}'",
+                source.display(),
+                dest.display()
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn write_init_config(rootfs: &Rootfs, staging_dir: &Path) -> anyhow::Result<()> {
+    let init_dir = staging_dir.join(".anemone");
+    fs::create_dir_all(&init_dir)?;
+    let init_path = init_dir.join("init.toml");
+    let content = toml::to_string(&InitFile { init: &rootfs.init })
+        .context("failed to serialize rootfs init config")?;
+    fs::write(&init_path, content)
+        .with_context(|| format!("failed to write init config to '{}'", init_path.display()))
+}
+
+fn select_rootfs_artifact<'a>(
+    app_name: &str,
+    built: &'a [BuiltArtifactInfo],
+) -> anyhow::Result<&'a Path> {
+    let manifest_path = Path::new("anemone-apps").join(app_name).join("app.toml");
+    let content = fs::read_to_string(&manifest_path).with_context(|| {
+        format!(
+            "failed to read app manifest for rootfs install at '{}'",
+            manifest_path.display()
+        )
+    })?;
+    let manifest = AppManifest::from_str(&content)?;
+
+    let default_indices: Vec<_> = manifest
+        .artifacts
+        .iter()
+        .enumerate()
+        .filter_map(|(index, artifact)| artifact.default.then_some(index))
+        .collect();
+
+    let selected_index = match default_indices.as_slice() {
+        [index] => *index,
+        [] if manifest.artifacts.len() == 1 => 0,
+        [] => bail!(
+            "app '{}' has multiple artifacts but no default rootfs artifact",
+            app_name
+        ),
+        _ => bail!("app '{}' has multiple default artifacts", app_name),
+    };
+
+    built
+        .get(selected_index)
+        .map(|artifact| artifact.output_path.as_path())
+        .with_context(|| {
+            format!(
+                "built artifact list for app '{}' does not include selected artifact index {}",
+                app_name, selected_index
+            )
+        })
+}
+
+fn resolve_input_path(manifest_dir: &Path, path: &str) -> PathBuf {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else if path.exists() {
+        path.to_path_buf()
+    } else {
+        manifest_dir.join(path)
+    }
+}
+
+fn resolve_install_path(staging_dir: &Path, install_path: &str) -> anyhow::Result<PathBuf> {
+    let install = Path::new(install_path);
+    if !install.is_absolute() {
+        bail!("rootfs install path '{}' must be absolute", install_path);
+    }
+
+    let mut dest = staging_dir.to_path_buf();
+    for component in install.components() {
+        match component {
+            Component::RootDir => {},
+            Component::Normal(part) => dest.push(part),
+            _ => bail!(
+                "rootfs install path '{}' contains unsupported components",
+                install_path
+            ),
+        }
+    }
+    Ok(dest)
+}
+
+fn copy_tree_into(source_dir: &Path, dest_dir: &Path) -> anyhow::Result<()> {
+    for entry in fs::read_dir(source_dir)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let dest_path = dest_dir.join(entry.file_name());
+        let metadata = entry.metadata()?;
+
+        if metadata.is_dir() {
+            fs::create_dir_all(&dest_path)?;
+            copy_tree_into(&source_path, &dest_path)?;
+        } else if metadata.is_file() {
+            if let Some(parent) = dest_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&source_path, &dest_path).with_context(|| {
+                format!(
+                    "failed to copy '{}' to '{}'",
+                    source_path.display(),
+                    dest_path.display()
+                )
+            })?;
+        } else {
+            bail!(
+                "unsupported base tree entry '{}': only files/directories are supported",
+                source_path.display()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct InitFile<'a> {
+    init: &'a crate::config::rootfs::Init,
+}
