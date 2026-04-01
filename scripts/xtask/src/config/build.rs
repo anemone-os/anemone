@@ -60,6 +60,7 @@ impl FsType {
                     let bytes = (bytes + 4095) & !4095;
                     bytes
                 };
+                let estimate_mb = (estimate_bytes + 1024 * 1024 - 1) / (1024 * 1024);
 
                 let status = Command::new("mke2fs")
                     .arg("-t")
@@ -67,7 +68,7 @@ impl FsType {
                     .arg("-d")
                     .arg(root_tree)
                     .arg(output)
-                    .arg(estimate_bytes.to_string())
+                    .arg(format!("{}M", estimate_mb))
                     .status()?;
                 if !status.success() {
                     anyhow::bail!("mke2fs failed with status: {}", status);
