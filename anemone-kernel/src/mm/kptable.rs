@@ -151,6 +151,19 @@ pub unsafe fn activate_kernel_mapping() {
     }
 }
 
+#[derive(Debug)]
+pub struct TlbShootdownGuard {
+    vaddr: Option<VirtAddr>,
+}
+
+impl Drop for TlbShootdownGuard {
+    fn drop(&mut self) {
+        if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { vaddr: self.vaddr }) {
+            kwarningln!("failed to send TLB shootdown IPI: {e:?}");
+        }
+    }
+}
+
 /// Do a mapping in the global kernel page table.
 ///
 /// This is always a non-overwrite mapping, thus the operation itself is

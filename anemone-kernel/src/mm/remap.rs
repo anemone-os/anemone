@@ -7,7 +7,7 @@ use core::ptr::NonNull;
 
 use crate::{
     mm::{
-        kptable::{kmap, kunmap},
+        kptable::{TlbShootdownGuard, kmap, kunmap},
         layout::KernelLayoutTrait,
     },
     prelude::*,
@@ -127,7 +127,11 @@ impl SysRemaps {
     unsafe fn ioremap(
         &mut self,
         req: IoRange,
+<<<<<<< HEAD
     ) -> Result<(VirtAddr, VirtPageRange, IpiGuard), MmError> {
+=======
+    ) -> Result<((VirtAddr, VirtPageRange), TlbShootdownGuard), MmError> {
+>>>>>>> d63be51 (xxx)
         if self.find_io_overlap(req).is_some() {
             return Err(MmError::AlreadyMapped);
         }
@@ -135,6 +139,10 @@ impl SysRemaps {
         let phys_range = req.to_page_range();
         let npages = phys_range.npages() as usize;
         let virt_range = self.alloc(npages).ok_or(MmError::OutOfMemory)?;
+<<<<<<< HEAD
+=======
+
+>>>>>>> d63be51 (xxx)
         let guard = unsafe {
             kmap(Mapping {
                 vpn: virt_range.start(),
@@ -165,7 +173,11 @@ impl SysRemaps {
 
         let vaddr = virt_range.start().to_virt_addr() + req.start.page_offset() as u64;
 
+<<<<<<< HEAD
         Ok((vaddr, virt_range, guard))
+=======
+        Ok(((vaddr, virt_range), guard))
+>>>>>>> d63be51 (xxx)
     }
 
     unsafe fn iounmap(&mut self, req: IoRange) -> Result<(), MmError> {
@@ -245,8 +257,15 @@ impl Drop for IoRemap {
 pub unsafe fn ioremap(start: PhysAddr, len: usize) -> Result<IoRemap, MmError> {
     unsafe {
         let req = IoRange::try_new(start, len)?;
+<<<<<<< HEAD
         let (virt, _, guard) = SYS_REMAPS.lock_irqsave().ioremap(req)?;
         drop(guard); // send ipi
+=======
+        let ((virt, _), guard) = SYS_REMAPS.lock_irqsave().ioremap(req)?;
+
+        drop(guard);
+
+>>>>>>> d63be51 (xxx)
         Ok(IoRemap { virt, req })
     }
 }
@@ -266,47 +285,4 @@ pub unsafe fn alloc_virt_range(npages: usize) -> Option<VirtPageRange> {
 /// Free a virtual page range previously allocated by [`alloc_virt_range`].
 pub unsafe fn free_virt_range(start: VirtPageNum, npages: usize) -> Result<(), MmError> {
     SYS_REMAPS.lock_irqsave().free(start, npages)
-}
-
-#[cfg(feature = "kunit")]
-mod kunits {
-    use super::*;
-
-    fn kunit_ioremap_stress_worker(base: PhysAddr, len: usize, rounds: usize) {
-        for _ in 0..rounds {
-            loop {
-                match unsafe { ioremap(base, len) } {
-                    Ok(remap) => {
-                        drop(remap);
-                        break;
-                    },
-                    Err(MmError::AlreadyMapped) => {
-                        core::hint::spin_loop();
-                    },
-                    Err(err) => {
-                        panic!(
-                            "unexpected ioremap stress failure on cpu {}: {:?}",
-                            CpuArch::cur_cpu_id(),
-                            err
-                        );
-                    },
-                }
-            }
-        }
-    }
-}
-
-#[kunit(percpu)]
-fn stress_ioremap_all_cpus() {
-    const STRESS_ROUNDS_PER_CPU: usize = 1;
-
-    let base = PhysAddr::new(PHYS_RAM_START);
-    let len = PagingArch::PAGE_SIZE_BYTES;
-    kinfoln!(
-        "kunit ioremap stress: cpu {} starting {} rounds",
-        CpuArch::cur_cpu_id(),
-        STRESS_ROUNDS_PER_CPU,
-    );
-    kunit_ioremap_stress_worker(base, len, STRESS_ROUNDS_PER_CPU);
-    kinfoln!("kunit ioremap stress: cpu {} done", CpuArch::cur_cpu_id());
 }

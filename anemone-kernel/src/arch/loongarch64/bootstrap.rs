@@ -1,6 +1,6 @@
 //! Bootstrap for Loongarch64 architecture.
 
-use core::arch::naked_asm;
+use core::{arch::naked_asm, mem::ManuallyDrop};
 
 use la_insc::{
     reg::{
@@ -366,7 +366,7 @@ unsafe fn remap_boot_stack() {
         // The first page is the guard page, so it stays unmapped.
         let stack_vpn = vrange.start() + 1;
         unsafe {
-            kmap(Mapping {
+            let _guard = kmap(Mapping {
                 vpn: stack_vpn,
                 ppn: cpu_stack_ppn,
                 flags: PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL,
@@ -374,6 +374,9 @@ unsafe fn remap_boot_stack() {
                 huge_pages: false,
             })
             .expect("failed to map boot stack with guard page");
+
+            // no need to send ipi right now cz aps haven't activate kernel mapping.
+            let _ = ManuallyDrop::new(_guard);
         }
 
         let stack_top = (stack_vpn + KSTACK_PAGES as u64).to_virt_addr();
