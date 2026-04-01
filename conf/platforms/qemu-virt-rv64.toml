@@ -6,10 +6,7 @@ exec_env = "sbi"
 
 [constants]
 
-<<<<<<< HEAD
 max_user_stack_size = 0x800000      # 8MB
-=======
->>>>>>> 1016c17 (dynamic allocation in ipi; app & rootfs build scripts)
 phys_ram_start = 0x80000000
 max_phys_ram_size = 0x80000000      # 2GB
 kernel_la_base = 0x80200000

@@ -1,0 +1,20 @@
+[package]
+name = "anemone-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anemone-abi = { path = "../anemone-abi" }
+anemone-rs-macros = { path = "macros" }
+spin = { version = "0.10.0", default-features = false, features = [
+    "use_ticket_mutex",
+] }
+talc = { version = "4.4.3" }
+
+[workspace]
+members = [".", "macros"]
+
+[workspace.dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }

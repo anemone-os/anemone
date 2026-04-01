@@ -8,11 +8,8 @@
 //! TODO: We should finaly implement another IPI mechanism that doesn't require
 //! dynamic allocation.
 
-<<<<<<< HEAD
 use core::hint::spin_loop;
 
-=======
->>>>>>> 1016c17 (dynamic allocation in ipi; app & rootfs build scripts)
 use alloc::{alloc::AllocError, collections::LinkedList};
 
 use crate::prelude::*;

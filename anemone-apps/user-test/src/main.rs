@@ -2,19 +2,14 @@
 #![no_main]
 #![warn(unused)]
 
-use user_lib::{
-    self as _,
-    alloc::{format, vec::Vec},
-    args, println,
-    proc::{execve, exit},
-};
+use anemone_rs::prelude::*;
 
-#[unsafe(no_mangle)]
-pub fn main() -> i32 {
+#[anemone_rs::main]
+pub fn main() -> Result<(), Errno> {
     let args: Vec<&str> = args().collect();
     if args.len() < 2 {
         println!("usage: user-test [running times...]");
-        return -1;
+        return Err(-1);
     }
     let first_arg = args[1];
     let running_times: u32 = first_arg.parse().unwrap_or_else(|e| {
@@ -37,5 +32,6 @@ pub fn main() -> i32 {
             running_times
         );
     }
-    return 0;
+
+    Ok(())
 }

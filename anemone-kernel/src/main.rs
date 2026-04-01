@@ -12,11 +12,8 @@
 // This feature must be enabled for zero-cost downcasting of trait objects to get the same
 // efficiency as C's void* and manual casts, which is crucial for the performance of the kernel.
 #![feature(downcast_unchecked)]
-<<<<<<< HEAD
-=======
 // This feature is required for fallible heap allocation. Yes, Rust's default global allocator is
 // infallible, which is unacceptable for kernel environments...
->>>>>>> 1016c17 (dynamic allocation in ipi; app & rootfs build scripts)
 #![feature(allocator_api)]
 
 extern crate alloc;
