@@ -143,7 +143,7 @@ impl Task {
     /// the init task, the idle task, a exited task or the kinit task.
     pub fn parent_tid(&self) -> Option<Tid> {
         self.related
-            .read()
+            .read_irqsave()
             .parent
             .as_ref()
             .and_then(|weak| weak.upgrade().map(|parent| parent.tid()))
@@ -172,21 +172,25 @@ impl Task {
 
     /// Get the task name.
     pub fn cmdline(&self) -> Box<str> {
-        self.info.read().cmdline.clone()
+        self.info.read_irqsave().cmdline.clone()
     }
 
     /// Get the task flags.
     pub fn flags(&self) -> TaskFlags {
-        self.info.read().flags
+        self.info.read_irqsave().flags
     }
 
     /// Get the user-space memory context of this task, if any.
     pub fn clone_uspace(&self) -> Option<Arc<UserSpace>> {
-        self.info.read().uspace.clone()
+        self.info.read_irqsave().uspace.clone()
     }
 
+    /// Set the task info.
+    /// # Safety
+    /// ***This operation will immediately drop the current page table, so make
+    /// sure you have activated a new one before calling this function***
     pub unsafe fn set_info(&self, info: TaskInfo) {
-        *self.info.write() = info;
+        *self.info.write_irqsave() = info;
     }
 
     pub fn kstack(&self) -> &KernelStack {
@@ -196,7 +200,7 @@ impl Task {
 
 impl Drop for Task {
     fn drop(&mut self) {
-        knoticeln!("{}({}) dropped", self.tid(), self.cmdline());
+        kdebugln!("{}({}) dropped", self.tid(), self.cmdline());
     }
 }
 

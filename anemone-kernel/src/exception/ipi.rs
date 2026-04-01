@@ -1,12 +1,16 @@
 //! Inter-processor interrupt handling.
 //!
-//! **Dynamic memory allocation in IPI sendings are prohibited.**
-//!
 //! Both synchronous and asynchronous IPIs are supported.
+//!
+//! Currently, dymanic allocation caused by allocating buffer for IPI messages
+//! may incur heap oom followed by frame allocation.
+//!
+//! TODO: We should finaly implement another IPI mechanism that doesn't require
+//! dynamic allocation.
 
-use core::ptr::NonNull;
+use core::hint::spin_loop;
 
-use intrusive_collections::UnsafeRef;
+use alloc::{alloc::AllocError, collections::LinkedList};
 
 use crate::prelude::*;
 
@@ -26,26 +30,35 @@ pub enum IpiPayload {
 struct IpiMsg {
     payload: IpiPayload,
     is_accomplished: AtomicBool,
-    link: LinkedListLink,
 }
 
 impl IpiMsg {
-    const fn new(payload: IpiPayload) -> IpiMsg {
+    fn new(payload: IpiPayload) -> IpiMsg {
         Self {
             payload,
             is_accomplished: AtomicBool::new(false),
-            link: LinkedListLink::new(),
         }
     }
 }
 
-intrusive_adapter!(
-    IpiMsgAdapter = UnsafeRef<IpiMsg>: IpiMsg { link => LinkedListLink }
-);
-
 #[percpu]
-static IPI_QUEUE: SpinLock<LinkedList<IpiMsgAdapter>> =
-    SpinLock::new(LinkedList::new(IpiMsgAdapter::NEW));
+static IPI_QUEUE: SpinLock<LinkedList<Arc<IpiMsg>>> = SpinLock::new(LinkedList::new());
+
+#[inline(always)]
+fn alloc_ipi_msg(payload: IpiPayload) -> Result<Arc<IpiMsg>, IpiError> {
+    Arc::try_new(IpiMsg::new(payload)).map_err(IpiError::Alloc)
+}
+
+#[inline(always)]
+fn enqueue_ipi(cpu_id: usize, msg: Arc<IpiMsg>) {
+    unsafe {
+        IPI_QUEUE.with_remote(cpu_id, move |queue| {
+            let mut queue = queue.lock_irqsave();
+            queue.push_back(msg);
+        })
+    }
+    IntrArch::send_ipi(cpu_id);
+}
 
 /// Send an IPI to the target CPU, synchronously waiting for the IPI to be
 /// handled before returning.
@@ -57,20 +70,13 @@ pub fn send_ipi(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
         return Err(IpiError::TargetOffline);
     }
 
-    let msg = IpiMsg::new(payload);
-    let msg_ptr = unsafe { UnsafeRef::from_raw(&msg) };
-    unsafe {
-        IPI_QUEUE.with_remote(cpu_id, |queue| {
-            let mut queue = queue.lock_irqsave();
-            queue.push_back(msg_ptr);
-        })
-    }
-    IntrArch::send_ipi(cpu_id);
+    let msg = alloc_ipi_msg(payload)?;
+    enqueue_ipi(cpu_id, Arc::clone(&msg));
     loop {
         if msg.is_accomplished.load(Ordering::Acquire) {
             break;
         }
-        core::hint::spin_loop();
+        spin_loop();
     }
 
     Ok(())
@@ -86,9 +92,18 @@ pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
             return Err(IpiError::TargetOffline);
         }
     }
+    let mut pending = LinkedList::new();
     for id in 0..ncpus {
         if id != cur_cpuid {
-            send_ipi(id, payload)?;
+            let msg = alloc_ipi_msg(payload)?;
+            pending.push_back(Arc::clone(&msg));
+            enqueue_ipi(id, msg);
+        }
+    }
+
+    for msg in pending {
+        while !msg.is_accomplished.load(Ordering::Acquire) {
+            spin_loop();
         }
     }
     Ok(())
@@ -97,51 +112,7 @@ pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
 #[derive(Debug)]
 pub enum IpiError {
     TargetOffline,
-    /// This error can only happen when sending an asynchronous IPI.
-    NoAvailableBuffer,
-}
-
-mod msg_buffers {
-    use core::mem::MaybeUninit;
-
-    use super::*;
-
-    #[percpu]
-    pub static MSG_BUFFERS: [IpiMsg; MAX_CPUS] = {
-        // `IpiMsg` should not implement `Copy`, so we have to do this manually.
-
-        let mut arr = MaybeUninit::<[IpiMsg; MAX_CPUS]>::uninit();
-        let mut i = 0;
-        while i < MAX_CPUS {
-            unsafe {
-                arr.as_mut_ptr().cast::<IpiMsg>().add(i).write(IpiMsg {
-                    // temporary payload, it will be overwritten before being sent
-                    payload: IpiPayload::StopExecution,
-                    is_accomplished: AtomicBool::new(true),
-                    link: LinkedListLink::new(),
-                });
-            }
-            i += 1;
-        }
-        unsafe { arr.assume_init() }
-    };
-}
-use msg_buffers::*;
-
-/// Find an available IPI message buffer for current core, and mark it as
-/// occupied.
-///
-/// The returned pointer points to a [None] value.
-fn alloc_avail_buf() -> Option<NonNull<IpiMsg>> {
-    MSG_BUFFERS.with_mut(|buffers| {
-        for buf in buffers.iter_mut() {
-            if buf.is_accomplished.load(Ordering::Acquire) {
-                buf.is_accomplished.store(false, Ordering::Release);
-                return Some(NonNull::from(buf));
-            }
-        }
-        None
-    })
+    Alloc(AllocError),
 }
 
 /// Send an IPI to the target CPU asynchronously.
@@ -154,78 +125,31 @@ pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError
         return Err(IpiError::TargetOffline);
     }
 
-    let mut buf_ptr = alloc_avail_buf().ok_or(IpiError::NoAvailableBuffer)?;
-    unsafe { buf_ptr.as_mut().payload = payload };
-    let buf_ptr = unsafe { UnsafeRef::from_raw(buf_ptr.as_ptr()) };
-
-    unsafe {
-        IPI_QUEUE.with_remote(cpu_id, |queue| {
-            let mut queue = queue.lock_irqsave();
-            queue.push_back(buf_ptr);
-        })
-    }
-
-    IntrArch::send_ipi(cpu_id);
+    enqueue_ipi(cpu_id, alloc_ipi_msg(payload)?);
     Ok(())
 }
 
 /// Broadcast an IPI to all other CPUs asynchronously.
-pub fn broadcast_ipi_async(payload: IpiPayload, spin: bool) -> Result<(), IpiError> {
-    // check whether empty buffers are enough
+pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
+    let cur_cpuid = CpuArch::cur_cpu_id().get();
     let ncpus = CpuArch::ncpus();
     for id in 0..ncpus {
-        if id != CpuArch::cur_cpu_id().get() {
-            if !target_online(id) {
-                return Err(IpiError::TargetOffline);
-            }
+        if id != cur_cpuid && !target_online(id) {
+            return Err(IpiError::TargetOffline);
         }
     }
 
-    MSG_BUFFERS.with_mut(|buffers| {
-        let mut navail_bufs = 0;
-        loop {
-            for (id, buf) in buffers[..ncpus].iter().enumerate() {
-                if id == CpuArch::cur_cpu_id().get() {
-                    continue;
-                }
-                if buf.is_accomplished.load(Ordering::Acquire) {
-                    navail_bufs += 1;
-                }
-            }
-            if navail_bufs < ncpus - 1 {
-                if spin {
-                    navail_bufs = 0;
-                } else {
-                    return Err(IpiError::NoAvailableBuffer);
-                }
-            } else {
-                break;
-            }
+    let mut pending = LinkedList::new();
+    for id in 0..ncpus {
+        if id != cur_cpuid {
+            pending.push_back((id, alloc_ipi_msg(payload)?));
         }
-        let mut sent_bufs = 0;
-        for (id, buf) in buffers[..ncpus].iter_mut().enumerate() {
-            if id == CpuArch::cur_cpu_id().get() {
-                continue;
-            }
-            if buf.is_accomplished.load(Ordering::Acquire) {
-                buf.is_accomplished.store(false, Ordering::Release);
-                buf.payload = payload;
-                let buf_ptr = unsafe { UnsafeRef::from_raw(buf) };
-                unsafe {
-                    IPI_QUEUE.with_remote(id, |queue| {
-                        let mut queue = queue.lock_irqsave();
-                        queue.push_back(buf_ptr);
-                    });
-                    IntrArch::send_ipi(id);
-                }
-                sent_bufs += 1;
-            }
-            if sent_bufs >= ncpus - 1 {
-                break;
-            }
-        }
-        Ok(())
-    })
+    }
+
+    for (cpu_id, msg) in pending {
+        enqueue_ipi(cpu_id, msg);
+    }
+    Ok(())
 }
 
 /// IPI handler.
@@ -234,15 +158,9 @@ pub fn handle_ipi() {
 
     IPI_QUEUE.with(|queue| {
         loop {
-            let Some(msg_ptr) = queue.lock_irqsave().pop_front() else {
+            let Some(msg) = queue.lock_irqsave().pop_front() else {
                 break;
             };
-            let msg = msg_ptr.as_ref();
-            /*kdebugln!(
-                "({}) handle ipi: payload={:?}",
-                CpuArch::cur_cpu_id(),
-                msg.payload
-            );*/
             match msg.payload {
                 TlbShootdown { vaddr } => {
                     if let Some(vaddr) = vaddr {
@@ -266,4 +184,22 @@ pub fn handle_ipi() {
             }
         }
     })
+}
+
+pub struct IpiGuard {
+    vaddr: Option<VirtAddr>,
+}
+
+impl IpiGuard {
+    pub fn new(vaddr: Option<VirtAddr>) -> Self {
+        Self { vaddr }
+    }
+}
+
+impl Drop for IpiGuard {
+    fn drop(&mut self) {
+        if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { vaddr: self.vaddr }) {
+            kwarningln!("failed to send TLB shootdown IPI in IpiGuard: {e:?}");
+        }
+    }
 }

@@ -3,7 +3,7 @@ use crate::prelude::*;
 /// An RAII guard that restores the previous IRQ flags when dropped.
 #[derive(Debug)]
 pub struct IntrGuard {
-    flags: IrqFlags,
+    prev: IrqFlags,
 }
 
 impl IntrGuard {
@@ -17,21 +17,28 @@ impl IntrGuard {
             unsafe { IntrArch::local_intr_disable() };
         }
 
-        Self { flags: prev_flags }
+        Self { prev: prev_flags }
     }
 }
 
 impl Drop for IntrGuard {
     fn drop(&mut self) {
         unsafe {
-            IntrArch::restore_local_intr(self.flags);
+            IntrArch::restore_local_intr(self.prev);
         }
     }
 }
 
-pub fn with_intr_disabled<F: FnOnce() -> R, R>(f: F) -> R {
+pub fn with_intr_disabled<F: FnOnce(bool) -> R, R>(f: F) -> R {
     let guard = IntrGuard::new(false);
-    let res = f();
+    let res = f(guard.prev == IntrArch::ENABLED_IRQ_FLAGS);
+    drop(guard);
+    res
+}
+
+pub fn with_intr_enabled<F: FnOnce(bool) -> R, R>(f: F) -> R {
+    let guard = IntrGuard::new(true);
+    let res = f(guard.prev == IntrArch::ENABLED_IRQ_FLAGS);
     drop(guard);
     res
 }

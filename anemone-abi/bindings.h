@@ -262,6 +262,14 @@
 #endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_EXECVE 221
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_EXECVE 221
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
 #define SYS_BRK 214
 #endif
 

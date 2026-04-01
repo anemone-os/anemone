@@ -212,7 +212,8 @@ pub unsafe fn switch_to(task: Arc<Task>) {
     let next_context = unsafe { next_task.get_task_context() };
     unsafe {
         switch_uspace(&clone_current_task(), &next_task);
-        exchange_running_task(next_task);
+        let prev = exchange_running_task(next_task);
+        drop(prev);
         SchedArch::switch(cur_context, next_context);
     }
 }

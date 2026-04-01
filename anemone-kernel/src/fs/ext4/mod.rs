@@ -103,17 +103,17 @@ impl Ext4Sb {
     }
 
     pub(super) fn read_tx<R>(&self, f: impl FnOnce() -> R) -> R {
-        let _guard = self.tx_lock.read_irqsave();
+        let _guard = self.tx_lock.read();
         f()
     }
 
     pub(super) fn write_tx<R>(&self, f: impl FnOnce() -> R) -> R {
-        let _guard = self.tx_lock.write_irqsave();
+        let _guard = self.tx_lock.write();
         f()
     }
 
     fn with_fs<R>(&self, f: impl FnOnce(&mut Ext4Fs) -> Result<R, FsError>) -> Result<R, FsError> {
-        let _guard = self.fs_lock.lock_irqsave();
+        let _guard = self.fs_lock.lock();
         let fs = unsafe { self.fs.get_mut() };
         f(fs)
     }

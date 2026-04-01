@@ -1,11 +1,10 @@
 //! ELF image loader utilities for constructing a [UserSpace].
 //!
-//! The main helper [load_image_from_elf] parses an ELF binary and builds a
-//! [UserTaskImage] that contains the created [UserSpace], the ELF entry
-//! point and the argv-like command vector.
-use elf::abi::{PF_W, PF_X, PT_LOAD};
+//! The main helper [load_image_from_file] parses an ELF binary and builds a
+//! [UserTaskImage] that contains the created [UserSpace] and the ELF entry
+//! point.
 use goblin::{
-    elf::program_header::PF_R,
+    elf::program_header::{PF_R, PF_W, PF_X, PT_LOAD},
     elf64::{
         header::{Header, SIZEOF_EHDR},
         program_header::ProgramHeader,
@@ -18,15 +17,18 @@ const MAX_UIMAGE_FILE_SZ: u64 = 16 * 1024 * 1024 * 1024; // 16GiB
 
 /// Result of loading an ELF into a new address space.
 ///
-/// - memsp: constructed [UserSpace] with segments mapped
-/// - entry: ELF entry point
-/// - command: argv-like strings
+/// - `memsp`: constructed [UserSpace] with segments mapped
+/// - `entry`: ELF entry point
 pub struct UserTaskImage {
+    /// Constructed [UserSpace] with loaded segments.
     pub memsp: UserSpace,
+    /// ELF entry point.
     pub entry: u64,
 }
 
+/// Load an ELF image from a file
 pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, SysError> {
+    
     let file = vfs_open(Path::new(path.as_ref()))?;
     let size = file.get_attr()?.size;
     if size > MAX_UIMAGE_FILE_SZ {
@@ -63,7 +65,7 @@ pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, Sys
     let mut segments = vec![];
     let mut heap_start = VirtAddr::new(0);
     for header in headers {
-        if header.p_type != PT_LOAD{
+        if header.p_type != PT_LOAD {
             continue;
         }
         let offset = header.p_offset;

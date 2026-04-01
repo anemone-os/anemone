@@ -1,9 +1,10 @@
 //! Memory management helpers for user address spaces.
 //!
-//! This module provides `UserSpace` which encapsulates a process' page
+//! This module provides [UserSpace], which encapsulates a process' page
 //! table, stack and heap area management, segment loading helpers, and
-//! small helpers such as `MemArea` and page-table guard types used by the
-//! rest of the kernel when accessing user page tables.
+//! small helpers such as [MemArea], [USpacePTableReadGuard], and
+//! [USpacePTableWriteGuard] used by the rest of the kernel when accessing
+//! user page tables.
 use core::{
     fmt::Debug,
     mem::swap,
@@ -51,19 +52,24 @@ pub struct UserSpace {
     /// Physical page number of the root page-table for quick access.
     ///
     /// This is a cached copy of the page-table root PPN. The actual page
-    /// table lives in [UserSpaceInner].table.
+    /// table lives in `inner.table`.
     table_ppn: PhysPageNum,
     inner: RwLock<UserSpaceInner>,
 }
 #[derive(Debug)]
 pub struct UserSpaceInner {
+    /// Underlying page table for this address space.
     table: PageTable,
+    /// User stack area managed by this address space.
     ustack: MemArea,
     /// Only used during task initialization, the initial stack pointer for the
     /// user stack.
     uinit_sp: VirtAddr,
+    /// User heap area tracked by `brk`.
     uheap: MemArea,
+    /// Current program break for this address space.
     ubrk: VirtAddr,
+    /// Frames backing loaded ELF segments.
     seg_frames: Vec<FrameHandle>,
 }
 impl UserSpace {
@@ -126,7 +132,7 @@ impl UserSpace {
         })
     }
 
-    /// Add a memory segment to the user space, and fill the segment with the
+    /// Add a memory segment to the user space and fill the segment with the
     /// given data.
     ///
     /// This function will automatically adjust the `ubrk` value and the
@@ -138,7 +144,8 @@ impl UserSpace {
     ///    exception is encountered during the page table mapping process.**
     ///  * This function does not validate address range conflicts with existing
     ///    mappings, potentially causing code/data overwrites.
-    ///  * **Call after the heap area is initialized will lead to panic.**.
+    ///  * **Calling this after the heap area is initialized will lead to
+    ///    panic.**
     pub unsafe fn add_segment<TErr: Debug + From<MmError>>(
         &self,
         vaddr: VirtAddr,
@@ -206,13 +213,12 @@ impl UserSpace {
         self.inner.read().ubrk
     }
 
+    /// Adjust the program break for this address space.
+    ///
+    /// This function grows or shrinks the heap tracked in `uheap` to make
+    /// `brk` the new program break. It returns an error if the requested
+    /// break is out of range or if allocation fails while growing.
     pub fn set_brk(&self, brk: VirtAddr) -> Result<(), MmError> {
-        /// Adjust the program break for this address space.
-        ///
-        /// This function grows or shrinks the heap tracked in
-        /// [UserSpaceInner].uheap to make `brk` the new program break. It
-        /// returns an error if the requested break is out-of-range or if
-        /// allocation fails while growing.
         let mut inner = self.inner.write();
         if brk < inner.uheap.vpn_range.start().to_virt_addr() {
             return Err(MmError::OutOfMemory); // see reference https://www.man7.org/linux/man-pages/man2/brk.2.html
@@ -256,8 +262,8 @@ impl UserSpace {
         Ok(())
     }
 
-    /// Push data onto the user init stack, returning pointer to the data on the
-    /// stack.
+    /// Push data onto the user init stack and return a pointer to the copied
+    /// data on the stack.
     ///
     /// Returns [MmError::ArgumentTooLarge] if the task init stack is not large
     /// enough to hold the data.
@@ -301,31 +307,32 @@ impl UserSpace {
         self.inner.write().uinit_sp = self.inner.read().ustack.vpn_range.end().to_virt_addr()
     }
 
+    /// Get the maximum user stack space for this address space.
+    /// 
+    /// It's a fixed range.
+    pub fn max_stack_space(&self) -> VirtPageRange {
+        self.inner.read().ustack.vpn_range
+    }
+
+    /// Return a read guard for inspecting this address space's page table.
+    /// The guard dereferences to a [PageTable].
     pub fn page_table(&self) -> USpacePTableReadGuard<'_> {
-        /// Return a read guard for inspecting this address space's page
-        /// table. The guard dereferences to a [PageTable].
         USpacePTableReadGuard::new(self)
     }
 
+    /// Return a write guard for mutating this address space's page table.
+    /// The guard allows safe mutation of the underlying [PageTable].
     pub fn page_table_mut(&self) -> USpacePTableWriteGuard<'_> {
-        /// Return a write guard for mutating this address space's page
-        /// table. The guard allows safe mutation of the underlying
-        /// [PageTable].
         USpacePTableWriteGuard::new(self)
     }
 
+    /// Make this [UserSpace] active on the CPU so address translation uses
+    /// its page table. This calls architecture-specific helpers to load the
+    /// root page-table.
     pub fn activate(&self) {
-        /// Make this [UserSpace] active on the CPU so address translation
-        /// uses its page table. This calls architecture-specific helpers
-        /// to load the root page-table.
         unsafe {
             PagingArch::activate_addr_space(&self.inner.read().table);
         }
-    }
-}
-impl Drop for UserSpace {
-    fn drop(&mut self) {
-        kdebugln!("memspace with root ppn {:?} dropped", self.table_ppn,);
     }
 }
 
@@ -337,6 +344,7 @@ impl PartialEq for UserSpace {
 
 impl Eq for UserSpace {}
 
+/// Growth direction for a memory area.
 #[derive(Debug)]
 pub enum AreaGrowthDirection {
     Higher,
@@ -353,6 +361,7 @@ pub struct MemArea {
 }
 
 impl MemArea {
+    /// An empty memory area with no mapped pages.
     pub const EMPTY: Self = Self {
         vpn_range: VirtPageRange::new(VirtPageNum::new(0), 0),
         frames: Vec::new(),
@@ -361,7 +370,7 @@ impl MemArea {
         flags: PteFlags::empty(),
     };
 
-    /// Create a new memory area
+    /// Create a new memory area.
     pub const fn new(
         init_vpn: VirtPageNum,
         max_pages: usize,
@@ -397,14 +406,20 @@ impl MemArea {
         Ok(memarea)
     }
 
+    /// Return the current number of mapped pages in this area.
     pub fn pages(&self) -> usize {
         self.vpn_range.len()
     }
 
+    /// Return the maximum number of pages this area can hold.
     pub fn max_pages(&self) -> usize {
         self.max_pages
     }
 
+    /// Grow this memory area by `pages` pages.
+    ///
+    /// If allocation fails, any pages mapped during this call are rolled
+    /// back before returning the error.
     pub fn try_grow(&mut self, page_table: &mut PageTable, pages: usize) -> Result<(), MmError> {
         let mut grown = self.pages();
         for _ in 0..pages {
@@ -501,6 +516,8 @@ pub struct USpacePTableReadGuard<'a> {
     guard: ReadNoPreemptGuard<'a, UserSpaceInner>,
 }
 
+/// Read guard for accessing the user-space page table.
+
 impl Deref for USpacePTableReadGuard<'_> {
     type Target = PageTable;
 
@@ -510,6 +527,7 @@ impl Deref for USpacePTableReadGuard<'_> {
 }
 
 impl<'a> USpacePTableReadGuard<'a> {
+    /// Create a new read guard for `uspace`.
     pub fn new(uspace: &'a UserSpace) -> Self {
         Self {
             guard: uspace.inner.read(),
@@ -517,6 +535,7 @@ impl<'a> USpacePTableReadGuard<'a> {
     }
 }
 
+/// Write guard for mutating the user-space page table.
 pub struct USpacePTableWriteGuard<'a> {
     guard: WriteNoPreemptGuard<'a, UserSpaceInner>,
 }
@@ -536,6 +555,7 @@ impl DerefMut for USpacePTableWriteGuard<'_> {
 }
 
 impl<'a> USpacePTableWriteGuard<'a> {
+    /// Create a new write guard for `uspace`.
     pub fn new(uspace: &'a UserSpace) -> Self {
         Self {
             guard: uspace.inner.write(),

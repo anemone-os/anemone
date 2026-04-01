@@ -1,8 +1,15 @@
 use core::{alloc::GlobalAlloc, cmp::max, ptr::NonNull};
 
-use anemone_abi::mm::brk;
+use anemone_abi::{
+    errno::Errno,
+    syscall::{SYS_BRK, syscall},
+};
 use spin::Mutex;
 use talc::{OomHandler, Span, Talc};
+
+pub fn brk(addr: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_BRK, addr, 0, 0, 0, 0, 0) }
+}
 
 #[global_allocator]
 static ALLOC: UserGlobalAlloc = UserGlobalAlloc;

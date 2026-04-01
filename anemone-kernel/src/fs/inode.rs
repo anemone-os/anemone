@@ -349,7 +349,7 @@ macro_rules! gen_set_xtime {
         paste::paste! {
             $(
                 pub(super) fn [<set_ $time>](&self, time: Duration) {
-                    self.meta.write_irqsave().$time = time;
+                    self.meta.write().$time = time;
                 }
             )*
         }
@@ -390,13 +390,13 @@ impl Inode {
     }
 
     pub(super) fn nlink(&self) -> u64 {
-        self.meta.read_irqsave().nlink
+        self.meta.read().nlink
     }
 
     /// This method can be used when we want to update multiple fields in `meta`
     /// at once, to avoid intermediate states that violate invariants.
     pub(super) fn meta_snapshot(&self) -> InodeMeta {
-        *self.meta.read_irqsave()
+        *self.meta.read()
     }
 
     pub(super) fn indexed(&self) -> bool {
@@ -408,21 +408,21 @@ impl Inode {
     }
 
     pub(super) fn inc_nlink(&self) {
-        self.meta.write_irqsave().nlink += 1;
+        self.meta.write().nlink += 1;
     }
 
     pub(super) fn set_nlink(&self, nlink: u64) {
-        self.meta.write_irqsave().nlink = nlink;
+        self.meta.write().nlink = nlink;
     }
 
     /// See `meta_snapshot` for the rationale of this method.
     pub(super) fn set_meta(&self, meta: InodeMeta) {
-        *self.meta.write_irqsave() = meta;
+        *self.meta.write() = meta;
     }
 
     #[track_caller]
     pub(super) fn dec_nlink(&self) {
-        let mut meta = self.meta.write_irqsave();
+        let mut meta = self.meta.write();
         debug_assert!(meta.nlink > 0, "nlink underflow on inode {:?}", self.ino);
         meta.nlink -= 1;
     }
@@ -445,18 +445,18 @@ impl Inode {
     }
 
     pub(super) fn set_size(&self, size: u64) {
-        self.meta.write_irqsave().size = size;
+        self.meta.write().size = size;
     }
 
     pub(super) fn update_size_max(&self, size: u64) {
-        let mut meta = self.meta.write_irqsave();
+        let mut meta = self.meta.write();
         meta.size = meta.size.max(size);
     }
 
     /// When more than one time field needs to be updated, it's better to update
     /// them in one shot to avoid intermediate states that violate invariants.
     pub(super) fn set_times(&self, atime: Duration, mtime: Duration, ctime: Duration) {
-        let mut meta = self.meta.write_irqsave();
+        let mut meta = self.meta.write();
         meta.atime = atime;
         meta.mtime = mtime;
         meta.ctime = ctime;
@@ -550,19 +550,19 @@ impl InodeRef {
     }
 
     pub fn size(&self) -> u64 {
-        self.inode().meta.read_irqsave().size
+        self.inode().meta.read().size
     }
 
     pub fn atime(&self) -> Duration {
-        self.inode().meta.read_irqsave().atime
+        self.inode().meta.read().atime
     }
 
     pub fn mtime(&self) -> Duration {
-        self.inode().meta.read_irqsave().mtime
+        self.inode().meta.read().mtime
     }
 
     pub fn ctime(&self) -> Duration {
-        self.inode().meta.read_irqsave().ctime
+        self.inode().meta.read().ctime
     }
 
     /// Get the superblock that this inode belongs to.

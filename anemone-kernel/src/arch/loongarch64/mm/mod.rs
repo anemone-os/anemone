@@ -60,7 +60,9 @@ pub const PWCH: Pwch = Pwch::new(
 );
 
 pub struct LevelConfig {
+    /// Base bit position for this page-table level.
     base: u8,
+    /// Width, in bits, of the index at this page-table level.
     width: u8,
 }
 
@@ -77,4 +79,5 @@ const LEVEL_CONFIGS: [LevelConfig; 5] = {
     res
 };
 
+/// Bootstrap page directory used while switching to the full kernel mappings.
 pub static BOOTSTRAP_PTABLE: LA64PageDirectory = create_bootstrap_ptable();

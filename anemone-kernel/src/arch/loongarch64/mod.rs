@@ -1,4 +1,4 @@
-//! Loongarch64 architecture support.
+//! LoongArch64 architecture support.
 
 pub(super) mod cpu;
 pub(super) mod exception;

@@ -127,7 +127,7 @@ core::arch::global_asm!(
     estat = const CR_ESTAT
 );
 
-/// This function will call architecture-agnostic trap handler.
+/// Kernel trap entry
 #[unsafe(no_mangle)]
 unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
@@ -184,7 +184,7 @@ unsafe extern "C" {
     pub unsafe fn __ktrap_return_to_task(trapframe: *const LA64TrapFrame) -> !;
 }
 
-/// Set the ktrap handler entry point
+/// Install the kernel trap handler entry point.
 pub fn install_ktrap_handler() {
     unsafe {
         crmd::set_ie(false);

@@ -9,6 +9,7 @@ use crate::{
     prelude::*,
 };
 
+/// Saved task context for LoongArch64.
 #[repr(C)]
 pub struct LA64TaskContext {
     /// Return Address
@@ -64,18 +65,21 @@ impl TaskContextArch for LA64TaskContext {
     }
 }
 
+/// LoongArch64 scheduler architecture hooks.
 pub struct LA64SchedArch;
 
 impl SchedArchTrait for LA64SchedArch {
     type TaskContext = LA64TaskContext;
 
     unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext) {
+        debug_assert!(IntrArch::current_irq_flags() == IntrArch::DISABLED_IRQ_FLAGS);
         unsafe {
             __switch(cur, next);
         }
     }
 }
 
+/// Save the current task context and restore the next one.
 #[unsafe(no_mangle)]
 #[unsafe(naked)]
 pub unsafe extern "C" fn __switch(cur: *mut TaskContext, next: *const TaskContext) {
@@ -115,7 +119,7 @@ pub unsafe extern "C" fn __switch(cur: *mut TaskContext, next: *const TaskContex
     )
 }
 
-/// Task guard for a user task, but the user task does not return.
+/// Task guard for a user task. The task body never returns directly.
 ///
 /// Parameters in `a0` - `a6` are not available for user tasks.
 /// User tasks only accept string-based parameters, which are passed in its
@@ -234,6 +238,7 @@ unsafe extern "C" fn __user_task_guard_end() -> ! {
     unreachable!("an user task should not have permission to return to kernel");
 }
 
+/// Build the initial trap frame and enter the task body.
 unsafe extern "C" fn __task_run(
     entry: *const (),        // arg0
     irq_flags: u64,          // arg1
@@ -245,7 +250,7 @@ unsafe extern "C" fn __task_run(
 ) {
     let args_parsed =
         unsafe { a_args.as_ref() }.expect("task args in kernel stack should never be null");
-    let trapframe = LA64TrapFrame::task_init_frame(
+    let mut trapframe = LA64TrapFrame::task_init_frame(
         entry as u64,
         running_stack_top,
         IrqFlags::new(irq_flags),

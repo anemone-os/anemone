@@ -35,6 +35,20 @@ pub enum FsError {
 
 impl AsErrno for FsError {
     fn as_errno(&self) -> Errno {
-        todo!("do not implement this for now.")
+        match self {
+            FsError::AlreadyExists => EEXIST,
+            FsError::NotFound => ENOENT,
+            FsError::NotDir => ENOTDIR,
+            FsError::IsDir => EISDIR,
+            FsError::NotReg => EINVAL,
+            FsError::NotSupported => EINVAL,
+            FsError::InvalidArgument => EINVAL,
+            FsError::Busy => EBUSY,
+            FsError::DirNotEmpty => ENOTEMPTY,
+            FsError::CrossDeviceLink => EXDEV,
+            FsError::NotMounted => EINVAL,
+            FsError::IsMountPoint => EINVAL,
+            FsError::NoMoreEntries => ENOENT,
+        }
     }
 }

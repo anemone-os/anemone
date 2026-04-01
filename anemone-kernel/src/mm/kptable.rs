@@ -159,17 +159,25 @@ pub unsafe fn activate_kernel_mapping() {
 /// However, this mapping occurs in the global kernel page table, which is
 /// shared by all processes, so it might cause many many potential issues if
 /// not used carefully. So we mark this function as unsafe.
-pub unsafe fn kmap(mapping: Mapping) -> Result<(), MmError> {
+///
+/// # Safety
+///
+/// **This function broadcasts a global synchronous IPI. If it is called while
+/// holding a lock, and the target CPU cores being broadcast are waiting for the
+/// lock with interrupts disabled, a *deadlock* will occur.**
+///
+/// We use [IpiGuard] to solve this problem. If the calling context holds a lock
+/// that might be waited on by cores with interrupts disabled, IpiGuard should
+/// only be released after the lock is released, thereby achieving the effect of
+/// delaying the sending of the IPI.
+pub unsafe fn kmap(mapping: Mapping) -> Result<IpiGuard, MmError> {
     unsafe {
         KERNEL_PTABLE.kmap(mapping)?;
         for i in 0..mapping.npages {
             PagingArch::tlb_shootdown((mapping.vpn + i as u64).to_virt_addr());
         }
     }
-    if let Err(e) = broadcast_ipi_async(IpiPayload::TlbShootdown { vaddr: None }, false) {
-        kwarningln!("failed to send TLB shootdown IPI after kmap: {e:?}");
-    }
-    Ok(())
+    Ok(IpiGuard::new(None))
 }
 
 /// Do an unmapping in the global kernel page table. See [kmap] for details and
@@ -184,9 +192,6 @@ pub unsafe fn kunmap(unmapping: Unmapping) {
         for i in 0..unmapping.range.npages() {
             PagingArch::tlb_shootdown((unmapping.range.start() + i as u64).to_virt_addr());
         }
-    }
-    if let Err(e) = broadcast_ipi_async(IpiPayload::TlbShootdown { vaddr: None }, false) {
-        kwarningln!("failed to send TLB shootdown IPI after kunmap: {e:?}");
     }
 }
 

@@ -21,6 +21,7 @@ impl TrapArchTrait for LA64TrapArch {
     type TrapFrame = LA64TrapFrame;
 }
 
+/// Raw general-purpose register snapshot used inside [`LA64TrapFrame`].
 #[derive(Debug)]
 #[repr(C)]
 struct Gpr {
@@ -48,7 +49,7 @@ impl Gpr {
         self.r(3)
     }
 
-    /// Return syscall/argument register aN.
+    /// Return syscall/argument register `aN`.
     fn a<const N: usize>(&self) -> u64 {
         const_assert!(N < 8, "LoongArch has only 8 argument registers (a0-a7)");
         self.r(4 + N)
@@ -67,6 +68,7 @@ pub struct LA64TrapFrame {
 }
 
 impl LA64TrapFrame {
+    /// Build a trap frame for a freshly created task.
     pub fn task_init_frame(
         entry: u64,
         stack_top: u64,

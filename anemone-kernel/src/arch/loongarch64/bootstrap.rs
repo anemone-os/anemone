@@ -30,26 +30,31 @@ use crate::{
     sync::counter::CpuSync,
 };
 
-const TEMP_IO_SPACE: u64 = 0x8000_0000_0000_0000;
-
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bss.stack0")]
+/// Per-CPU bootstrap stacks used before the regular per-CPU stack remap is in
+/// place.
 static mut STACK0: [RawKernelStack; MAX_CPUS] = [RawKernelStack::ZEROED; MAX_CPUS];
 
+/// Temporary I/O space base address used during early boot before the full
+/// memory manager is online.
+const TEMP_IO_SPACE: u64 = 0x8000_0000_0000_0000;
+
+/// Flattened device tree blob embedded by the build.
 static DTB_BYTES: &[u8] = include_bytes_aligned_as!(PhantomAligned8, "generated.dtb");
 
 /// # Note
-/// Because Loongarch64 is booted without SBI,
-///     so the entry point is hard_coded, and the entry point [__nun]
-///     will be seen as not-used by the compiler and ignored.
+/// LoongArch64 boots without SBI, so the entry point is fixed and [`__nun`]
+/// would otherwise be considered unused by the compiler.
 ///
-/// This static value is used to keep the entry point.
+/// This static keeps the entry point referenced.
 #[used]
 static __NUN_KEEPER: unsafe extern "C" fn() -> ! = __nun;
 
-/// Entry point of the kernel
+/// Kernel entry point.
 ///
-/// TODO: Wake up aps.
+/// The first CPU uses this path directly, while secondary CPUs reach it through
+/// [wake_up_aps].
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.bootstrap")]
@@ -169,6 +174,7 @@ extern "C" fn rusty_nun(hart_id: usize) -> ! {
     }
 }
 
+/// Register the early debug console that is backed by the temporary I/O DMW.
 pub fn register_debugcon() {
     use crate::{
         device::console::{Console, ConsoleFlags, register_console},
@@ -275,6 +281,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     }
 }
 
+/// Synchronization point that keeps all CPUs aligned during bootstrap.
 static BOOT_SYNC_COUNTER: CpuSync = CpuSync::new("boot");
 
 unsafe fn ap_setup(ap_id: usize) -> ! {
@@ -299,6 +306,8 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
     }
 }
 
+/// Send the bootstrap entry address to every secondary CPU and trigger its
+/// IPI.
 pub fn wake_up_aps(bsp_id: usize, ncpus: usize) {
     unsafe {
         let cur_cpu = bsp_id;
@@ -330,10 +339,10 @@ unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
     }
 }
 
-/// percpu guarded stack top addresses, filled by [`remap_boot_stacks`].
+/// Per-CPU guarded stack tops, filled by [remap_boot_stack].
 static GUARDED_STACK_TOPS: MonoOnce<[VirtAddr; MAX_CPUS]> = unsafe { MonoOnce::new() };
 
-/// Remap every CPU's boot stack ([`STACK0`]) into the remap region with a
+/// Remap every CPU's bootstrap stack ([`STACK0`]) into the remap region with a
 /// guard page at the bottom.
 ///
 /// # Safety
@@ -354,8 +363,7 @@ unsafe fn remap_boot_stack() {
 
         let vrange = unsafe { mm::remap::alloc_virt_range(total_vpages) }
             .expect("failed to allocate virtual range for boot stack guard page");
-        // The first page is the guard – we simply leave it unmapped. The underlying pte
-        // should be empty.
+        // The first page is the guard page, so it stays unmapped.
         let stack_vpn = vrange.start() + 1;
         unsafe {
             kmap(Mapping {

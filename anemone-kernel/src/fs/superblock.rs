@@ -127,7 +127,7 @@ impl SuperBlock {
     pub(super) fn iget(self: &Arc<Self>, ino: Ino) -> Result<InodeRef, FsError> {
         // fast path
         {
-            let inner = self.inner.read_irqsave();
+            let inner = self.inner.read();
             if let Some(inode) = inner.indexed.get(&ino) {
                 return Ok(InodeRef::new(inode.clone()));
             }
@@ -139,7 +139,7 @@ impl SuperBlock {
         // re-check and insert. another thread may have loaded concurrently;
         // if so, keep theirs and discard ours.
         {
-            let mut inner = self.inner.write_irqsave();
+            let mut inner = self.inner.write();
             if let Some(existing) = inner.indexed.get(&ino) {
                 return Ok(InodeRef::new(existing.clone()));
             }
@@ -165,7 +165,7 @@ impl SuperBlock {
     ///   the cache uniqueness invariant.
     /// - The reference count of the provided inode is not zero.
     pub(super) fn seed_inode(&self, inode: Arc<Inode>) -> InodeRef {
-        let mut inner = self.inner.write_irqsave();
+        let mut inner = self.inner.write();
         let ino = inode.ino();
 
         #[cfg(debug_assertions)]
@@ -197,7 +197,7 @@ impl SuperBlock {
     /// Use [SuperBlock::iget] for the load-on-miss variant.
     pub(super) fn try_iget(&self, ino: Ino) -> Option<InodeRef> {
         self.inner
-            .read_irqsave()
+            .read()
             .indexed
             .get(&ino)
             .cloned()
@@ -207,7 +207,7 @@ impl SuperBlock {
     /// Remove an inode from the inode-number index while keeping the object
     /// resident.
     pub(super) fn unindex_inode(&self, inode: &Arc<Inode>) {
-        let mut inner = self.inner.write_irqsave();
+        let mut inner = self.inner.write();
         let ino = inode.ino();
 
         if let Some(indexed) = inner.indexed.get(&ino) {
@@ -235,7 +235,7 @@ impl SuperBlock {
     /// to perform any necessary cleanup or writeback.
     pub(super) fn try_evict(&self, ino: Ino) -> Result<(), FsError> {
         let inode = {
-            let inner = self.inner.read_irqsave();
+            let inner = self.inner.read();
             inner.indexed.get(&ino).cloned().ok_or(FsError::NotFound)?
         };
 
@@ -252,7 +252,7 @@ impl SuperBlock {
 
         let ino = inode.ino();
         let removed = {
-            let mut inner = self.inner.write_irqsave();
+            let mut inner = self.inner.write();
 
             if let Some(indexed) = inner.indexed.get(&ino) {
                 if Arc::ptr_eq(indexed, inode) {
@@ -278,7 +278,7 @@ impl SuperBlock {
 
         let (inode, was_indexed) = removed.ok_or(FsError::NotFound)?;
         if let Err(e) = (self.ops.evict_inode)(self, inode.clone()) {
-            let mut inner = self.inner.write_irqsave();
+            let mut inner = self.inner.write();
             if was_indexed {
                 inode.set_indexed(true);
                 inner.indexed.insert(ino, inode);
@@ -294,7 +294,7 @@ impl SuperBlock {
     /// Check if any inodes in the resident cache have active references, except
     /// for the root inode(s) owned by the mount's root dentry.
     pub(super) fn has_alive_inode(&self) -> bool {
-        let inner = self.inner.read_irqsave();
+        let inner = self.inner.read();
         inner
             .indexed
             .values()
@@ -315,7 +315,7 @@ impl SuperBlock {
         debug_assert!(!self.has_alive_inode());
 
         let victims: Vec<Arc<Inode>> = {
-            let inner = self.inner.read_irqsave();
+            let inner = self.inner.read();
             inner
                 .indexed
                 .values()

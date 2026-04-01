@@ -184,14 +184,17 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
                 )
             },
             RiscV64Exception::InstructionPageFault => handle_kernel_page_fault(PageFaultInfo::new(
+                VirtAddr::new(trapframe.sepc),
                 VirtAddr::new(stval as u64),
                 PageFaultType::Execute,
             )),
             RiscV64Exception::LoadPageFault => handle_kernel_page_fault(PageFaultInfo::new(
+                VirtAddr::new(trapframe.sepc),
                 VirtAddr::new(stval as u64),
                 PageFaultType::Read,
             )),
             RiscV64Exception::StorePageFault => handle_kernel_page_fault(PageFaultInfo::new(
+                VirtAddr::new(trapframe.sepc),
                 VirtAddr::new(stval as u64),
                 PageFaultType::Write,
             )),

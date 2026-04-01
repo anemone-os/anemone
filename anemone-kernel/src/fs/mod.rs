@@ -80,7 +80,7 @@ mod vfs {
     ///
     /// On success, returns an `Arc` to the registered `FileSystem`.
     pub fn register_filesystem(fs: &'static FileSystemOps) -> Result<Arc<FileSystem>, FsError> {
-        let mut fs_list = VFS.fs_list.write_irqsave();
+        let mut fs_list = VFS.fs_list.write();
         for existing in fs_list.iter() {
             if existing.name() == fs.name {
                 return Err(FsError::AlreadyExists);
@@ -95,7 +95,7 @@ mod vfs {
 
     /// Retrieve a file system type by name.
     pub fn get_filesystem(name: &str) -> Option<Arc<FileSystem>> {
-        let fs_list = VFS.fs_list.read_irqsave();
+        let fs_list = VFS.fs_list.read();
         for fs in fs_list.iter() {
             if fs.name() == name {
                 return Some(fs.clone());
@@ -120,7 +120,7 @@ mod vfs {
             None => (None, None),
         };
 
-        if parent.is_none() && VFS.namespace.read_irqsave().root_path().is_some() {
+        if parent.is_none() && VFS.namespace.read().root_path().is_some() {
             // Mounting a new root when one already exists is not allowed.
             return Err(FsError::AlreadyExists);
         }
@@ -138,14 +138,14 @@ mod vfs {
             flags,
         ));
 
-        VFS.mounts.write_irqsave().push(mnt.clone());
+        VFS.mounts.write().push(mnt.clone());
 
         if let Some(parent) = parent {
             parent.add_child(&mnt);
         }
 
         {
-            let mut namespace = VFS.namespace.write_irqsave();
+            let mut namespace = VFS.namespace.write();
             if namespace.root_path().is_none() {
                 namespace.install_root(PathRef::new(mnt.clone(), mnt.root().clone()));
             }
@@ -175,7 +175,7 @@ mod vfs {
         let sb = mount.sb().clone();
         let sb_still_used = VFS
             .mounts
-            .read_irqsave()
+            .read()
             .iter()
             .any(|m| !Arc::ptr_eq(m, &mount) && Arc::ptr_eq(m.sb(), &sb));
 
@@ -201,7 +201,7 @@ mod vfs {
             .expect("mount should be a child of its parent");
 
         VFS.mounts
-            .write_irqsave()
+            .write()
             .retain(|m| !Arc::ptr_eq(m, &mount));
 
         knoticeln!("unmounted filesystem at {:?}", mount.mountpoint().unwrap());
@@ -217,13 +217,13 @@ mod vfs {
     /// happen after the initial filesystem has been mounted during boot.
     pub fn root_pathref() -> PathRef {
         VFS.namespace
-            .read_irqsave()
+            .read()
             .root_path()
             .expect("root mount must be established")
     }
 
     fn mounted_superblocks() -> Vec<Arc<SuperBlock>> {
-        let mounts = VFS.mounts.read_irqsave();
+        let mounts = VFS.mounts.read();
         let mut superblocks = Vec::new();
 
         for mount in mounts.iter() {

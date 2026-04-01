@@ -45,9 +45,10 @@ impl PreemptGuard {
 
 impl Drop for PreemptGuard {
     fn drop(&mut self) {
-        with_intr_disabled(|| {
+        with_intr_disabled(|prev_enabled| {
             if unsafe {
                 unsafe_with_core_local(|local| local.preempt_counter().decrease() == 0)
+                    && prev_enabled
                     && fetch_clear_resched_flag()
             } {
                 unsafe {

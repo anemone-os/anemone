@@ -1,8 +1,8 @@
 #![no_std]
 
-use core::{ffi::CStr, panic::PanicInfo};
+use core::{ffi::{CStr, c_char}, panic::PanicInfo};
 
-use anemone_abi::process::exit;
+use crate::proc::exit;
 
 pub extern crate alloc;
 
@@ -30,7 +30,7 @@ impl Iterator for ArgsIterator {
                 return None;
             }
             let ptr = *START_ARGS_PTR.add(1 + self.current) as *const u8;
-            let c_str = CStr::from_ptr(ptr);
+            let c_str = CStr::from_ptr(ptr as *const c_char);
             self.current += 1;
             Some(c_str.to_str().expect("failed to parse arguments"))
         }
@@ -53,6 +53,6 @@ pub extern "C" fn _start(stack_top: *const u64) {
 
 #[panic_handler]
 pub fn panic_handler(info: &PanicInfo) -> ! {
-    println!("User Panic: {:?}", info);
+    println!("user panic: {:?}", info);
     exit(-1);
 }

@@ -27,13 +27,9 @@ pub fn kernel_exit(exit_code: i32) -> ! {
     }
 }
 
-/// Called by the task guard when a task is exiting. This function will never
-/// return.
-///
-/// Call this function manually will directly exit the current task.
 pub fn kernel_yield() {
     unsafe {
-        with_intr_disabled(|| {
+        with_intr_disabled(|_| {
             schedule();
         });
     }

@@ -9,17 +9,14 @@ use crate::prelude::{
 
 #[syscall(SYS_EXECVE)]
 pub fn execve(
-    #[validate_with(c_readonly_string::<1024>)] path: Box<str>,
+    #[validate_with(c_readonly_string::<>)] path: Box<str>,
     #[validate_with(c_readonly_string_array)] argv: Vec<Box<str>>,
 ) -> Result<u64, SysError> {
     kernel_execve(&path, argv.as_slice())?;
     unreachable!();
 }
 //
-pub fn kernel_execve<'a>(
-    path: &impl AsRef<str>,
-    argv: &[impl AsRef<str>],
-) -> Result<(), SysError> {
+pub fn kernel_execve<'a>(path: &impl AsRef<str>, argv: &[impl AsRef<str>]) -> Result<(), SysError> {
     let uimage = load_image_from_file(&path)?;
     let mut commandline = String::from(path.as_ref());
     for arg in argv {
@@ -66,22 +63,21 @@ pub fn kernel_execve_from_image(
             return Err(e.into());
         },
     };
-    let mut ksp = VirtAddr::new(0);
-    with_current_task(|task| {
-        let info = TaskInfo {
-            cmdline: commandline.as_ref().into(),
-            flags: TaskFlags::NONE,
-            uspace: Some(memsp.clone()),
-        };
-        unsafe {
-            task.set_info(info);
-        }
-        ksp = task.kstack().stack_top();
-    });
     unsafe {
         IntrArch::local_intr_disable();
         memsp.activate();
-        drop(memsp);
+        let mut ksp = VirtAddr::new(0);
+        with_current_task(|task| {
+            let info = TaskInfo {
+                cmdline: commandline.as_ref().into(),
+                flags: TaskFlags::NONE,
+                uspace: Some(memsp),
+            };
+            unsafe {
+                task.set_info(info);
+            }
+            ksp = task.kstack().stack_top();
+        });
         load_context(TaskContext::from_user_fn(
             VirtAddr::new(elf_image.entry as u64),
             sp,

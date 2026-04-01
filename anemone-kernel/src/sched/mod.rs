@@ -46,7 +46,7 @@ pub fn run_tasks() -> ! {
 /// **Make sure interrupts are disabled before calling this function, otherwise
 /// the behavior is undefined.**
 pub unsafe fn schedule() {
-    if with_core_local(|local| local.preempt_counter().allow()) {
+    if unsafe_with_core_local(|local| local.preempt_counter().allow()) {
         unsafe { switch_out(false) };
     } else {
         set_resched_flag();

@@ -11,7 +11,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     unsafe {
         IntrArch::local_intr_disable();
     }
-    if let Err(e) = broadcast_ipi_async(IpiPayload::StopExecution, false) {
+    if let Err(e) = broadcast_ipi_async(IpiPayload::StopExecution) {
         kemergln!(
             "failed to broadcast stop execution IPI to other cores during panic: {:?}",
             e

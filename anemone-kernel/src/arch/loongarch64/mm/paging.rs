@@ -10,8 +10,10 @@ use la_insc::{
     utils::{mem::MemAccessType, privl::PrivilegeLevel},
 };
 
+/// LoongArch64 paging backend.
 pub struct LA64PagingArch;
 impl LA64PagingArch {
+    /// Return the currently active root page directory through `PGDL`.
     unsafe fn get_activated_root_dir() -> &'static LA64PageDirectory {
         let addr = PhysAddr::new(unsafe { pgdl::csr_read() }).to_hhdm();
         unsafe { &*addr.as_ptr::<LA64PageDirectory>() }
@@ -29,6 +31,7 @@ impl PagingArchTrait for LA64PagingArch {
 
     const PAGE_SIZE_BYTES: usize = 4096;
 
+    /// Activate the given page table by writing its root to `PGDL` and `PGDH`.
     unsafe fn activate_addr_space(pgtbl: &PageTable) {
         unsafe {
             let value = pgtbl.root_ppn().to_phys_addr().get();
@@ -38,6 +41,7 @@ impl PagingArchTrait for LA64PagingArch {
         Self::tlb_shootdown_all();
     }
 
+    /// Invalidate a single address translation from the TLB.
     fn tlb_shootdown(vaddr: VirtAddr) {
         unsafe {
             invtlb(InvtlbType::NonGlobalWithAsidAndVaddr {
@@ -47,17 +51,20 @@ impl PagingArchTrait for LA64PagingArch {
         }
     }
 
+    /// Invalidate all TLB entries.
     fn tlb_shootdown_all() {
         unsafe {
             invtlb(InvtlbType::All);
         }
     }
 
+    /// No additional direct-mapping setup is needed on LoongArch64.
     fn setup_direct_mapping_region(pgtable: &mut PageTable) {
         // do nothing
     }
 }
 
+/// Root page directory for LoongArch64 page tables.
 #[derive(Clone, Copy)]
 #[repr(align(4096))]
 #[repr(C)]
@@ -65,7 +72,7 @@ pub struct LA64PageDirectory {
     entries: [LA64PageTableEntry; LA64PagingArch::PTE_PER_PGDIR],
 }
 
-/// Create a bootstrap page table.
+/// Create the minimal bootstrap page directory.
 ///
 /// TODO: support different page size and more mapping types
 pub const fn create_bootstrap_ptable() -> LA64PageDirectory {

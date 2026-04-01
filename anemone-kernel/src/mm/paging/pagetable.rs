@@ -71,6 +71,5 @@ impl Drop for PageTable {
             });
         }
         let _frame = unsafe { OwnedFrameHandle::from_ppn(self.root) };
-        kdebugln!("page table with root ppn {:?} dropped", self.root);
     }
 }

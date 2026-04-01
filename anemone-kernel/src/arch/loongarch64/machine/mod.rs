@@ -8,13 +8,13 @@ use crate::{
 pub mod descs;
 
 pub trait MachineDesc: Sync {
-    /// Open firmware compatible string for this machine.
+    /// Open Firmware compatible strings for this machine.
     fn compatible(&self) -> &[&str];
 
-    /// Initialize the interrupt controller
+    /// Initialize the interrupt controller.
     unsafe fn early_init_intc(&self);
 
-    /// Initialize the timer
+    /// Initialize the timer.
     unsafe fn early_init_timer(&self);
 }
 
@@ -27,10 +27,13 @@ impl dyn MachineDesc {
     }
 }
 
+/// Machine descriptions compiled into the kernel.
 static MACHINES: &[&dyn MachineDesc] = &[&Qemu3A5000];
 
-/// Machine-specific initialization. This function should be called right after
-/// unflattening the device tree, and before any other initialization.
+/// Machine-specific initialization.
+///
+/// Call this right after unflattening the device tree and before any other
+/// platform-specific initialization.
 ///
 /// Internally, this function will find the machine description according to the
 /// compatible string in the device tree, and call the corresponding

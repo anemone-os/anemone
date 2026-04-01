@@ -107,6 +107,7 @@ impl<T> PerCpu<T> {
     {
         unsafe { f(self.get_mut(PERCPU_BASES[cpu_id])) }
     }
+
 }
 
 #[percpu(core_local)]
@@ -161,14 +162,14 @@ where
 pub struct CoreLocal {
     // cur_task
     cpu_id: usize,
-    online: bool,
+    online: AtomicBool,
     preempt_counter: PreemptCounter,
 }
 
 impl CoreLocal {
     pub const ZEROED: Self = Self {
         cpu_id: 0,
-        online: false,
+        online: AtomicBool::new(false),
         preempt_counter: PreemptCounter::ZEROED,
     };
 
@@ -181,11 +182,11 @@ impl CoreLocal {
     }
 
     pub fn online(&self) -> bool {
-        self.online
+        self.online.load(Ordering::SeqCst)
     }
 
-    pub fn login(&mut self) {
-        self.online = true;
+    fn login(&self) {
+        self.online.store(true, Ordering::SeqCst);
         core::sync::atomic::fence(Ordering::SeqCst);
     }
 }
@@ -255,15 +256,12 @@ pub unsafe fn bsp_init<A: FnOnce(usize) -> PhysPageNum>(bsp_id: usize, alloc_fol
             cur_vpn += (aligned_size / PagingArch::PAGE_SIZE_BYTES) as u64;
         }
     }
-
-    with_core_local_mut(|core_local| core_local.login());
 }
 
 pub unsafe fn ap_init(ap_id: usize) {
     unsafe {
         let base = PERCPU_BASES[ap_id];
         CpuArch::set_percpu_base(core::ptr::with_exposed_provenance_mut(base));
-        with_core_local_mut(|core_local| core_local.login());
     }
 }
 
@@ -276,4 +274,8 @@ pub fn target_online(cpu_id: usize) -> bool {
     } else {
         unsafe { with_core_local_remote(cpu_id, |core_local| core_local.online()) }
     }
+}
+
+pub fn percpu_login() {
+    with_core_local(|core_local| core_local.login());
 }
