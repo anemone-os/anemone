@@ -3,7 +3,7 @@
 [workspace]
 resolver = "2"
 members = ["anemone-abi", "anemone-kernel", "anemone-kernel/crates/*"]
-exclude = ["scripts/xtask", "anemone-apps/*", "anemone-rs/*", "anemone-libc/*"]
+exclude = ["scripts/xtask"]
 
 [workspace.dependencies]
 sbi-rt = { version = "0.0.3" }

@@ -27,6 +27,14 @@ build:
 conf *args:
     @just xtask conf {{ args }}
 
+[doc("app related commands. type `just app -h` for more details.")]
+app *args:
+    @just xtask app {{ args }}
+
+[doc("rootfs management. type `just rootfs -h` for more details.")]
+rootfs *args:
+    @just xtask rootfs {{ args }}
+
 [doc("generate the kconfig file from .defconfig")]
 defconfig:
     @just log "DEFCONFIG" "Copying .defconfig to kconfig"

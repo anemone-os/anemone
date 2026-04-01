@@ -26,6 +26,11 @@ name = "user-test"
 # Where artifacts of this app should be installed in rootfs.
 installed_dir = "/bin/user-test"
 
+[[apps]]
+name = "init"
+installed_dir = "/sbin/init"
+
+
 # List of files to be injected into the rootfs. Each file will be copied from the host into the generated image at the specified path.
 [[files]]
 source = "etc/hello.txt"
