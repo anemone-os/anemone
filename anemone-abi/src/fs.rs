@@ -164,6 +164,16 @@ pub mod linux {
             pub __unused: [u32; 2],
         }
     }
+
+    pub const STDIN_FILENO: usize = 0;
+    pub const STDOUT_FILENO: usize = 1;
+    pub const STDERR_FILENO: usize = 2;
+
+    pub const SEEK_SET: usize = 0;
+    pub const SEEK_CUR: usize = 1;
+    pub const SEEK_END: usize = 2;
+    pub const SEEK_DATA: usize = 3;
+    pub const SEEK_HOLE: usize = 4;
 }
 
 pub mod native {}

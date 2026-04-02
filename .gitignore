@@ -9,3 +9,4 @@ disk.img
 .DS_Store
 rootfs*.img
 .envrc.local
+sdcard*.img

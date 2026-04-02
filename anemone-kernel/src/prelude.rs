@@ -31,6 +31,8 @@ pub use alloc::{
 pub use core::{pin::Pin, sync::atomic::*, time::Duration};
 pub use kernel_macros::*;
 
+pub use anemone_abi::{errno::*, syscall::*};
+
 /// A radix trie mapping 64-bit keys to values of type `V`.
 ///
 /// It's not recommended to use other key types, such as [String] and

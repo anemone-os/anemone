@@ -1,7 +1,6 @@
 //! Error used throughout the filesystem subsystem.
 
 use crate::prelude::*;
-use anemone_abi::errno::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FsError {
@@ -31,6 +30,8 @@ pub enum FsError {
     IsMountPoint,
     /// No more entries to iterate (used by `iterate` file operation).
     NoMoreEntries,
+    /// Permission denied.
+    PermissionDenied,
 }
 
 impl AsErrno for FsError {
@@ -49,6 +50,7 @@ impl AsErrno for FsError {
             FsError::NotMounted => EINVAL,
             FsError::IsMountPoint => EINVAL,
             FsError::NoMoreEntries => ENOENT,
+            FsError::PermissionDenied => EPERM,
         }
     }
 }

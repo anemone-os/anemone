@@ -4,15 +4,19 @@ use core::{fmt::Debug, time::Duration};
 use crate::{prelude::*, utils::any_opaque::AnyOpaque};
 
 /// VTable an inode must implement to support file system operations.
+///
+/// Inodes have permission bits. But filesystem drivers are not expected to
+/// check them by themselves. Instead, VFS will check them before calling these
+/// operations.
 pub struct InodeOps {
     pub lookup: fn(dir: &InodeRef, name: &str) -> Result<InodeRef, FsError>,
 
-    pub create: fn(dir: &InodeRef, name: &str, ty: InodeType) -> Result<InodeRef, FsError>,
+    pub create: fn(dir: &InodeRef, name: &str, mode: InodeMode) -> Result<InodeRef, FsError>,
 
     pub link: fn(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), FsError>,
     pub unlink: fn(dir: &InodeRef, name: &str) -> Result<(), FsError>,
 
-    pub mkdir: fn(dir: &InodeRef, name: &str) -> Result<InodeRef, FsError>,
+    pub mkdir: fn(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError>,
     pub rmdir: fn(dir: &InodeRef, name: &str) -> Result<(), FsError>,
 
     /// Quoted from [Linux's VFS documentation](https://docs.kernel.org/filesystems/vfs.html):
@@ -136,6 +140,13 @@ bitflags! {
     }
 }
 
+impl InodePerm {
+    /// All regular rwx permission bits, excluding suid/sgid/sticky.
+    pub const fn all_rwx() -> Self {
+        Self::RWXU.union(Self::RWXG).union(Self::RWXO)
+    }
+}
+
 /// Device number for inodes' underlying device.
 ///
 /// For regular files and directories, this is `DeviceId::None`. For device
@@ -180,6 +191,13 @@ impl InodeMode {
         Self { ty, perm }
     }
 
+    pub const fn new_with_all_perm(ty: InodeType) -> Self {
+        Self {
+            ty,
+            perm: InodePerm::all_rwx(),
+        }
+    }
+
     pub const fn ty(self) -> InodeType {
         self.ty
     }
@@ -191,6 +209,17 @@ impl InodeMode {
     /// Convert to Linux's mode bits.
     pub const fn to_linux_mode(self) -> u32 {
         self.ty.to_linux_mode_bits() | self.perm.bits() as u32
+    }
+
+    pub const fn from_linux_mode(mode: u32) -> Option<Self> {
+        let ty = match mode & linux_mode::S_IFMT {
+            linux_mode::S_IFREG => InodeType::Regular,
+            linux_mode::S_IFDIR => InodeType::Dir,
+            linux_mode::S_IFCHR | linux_mode::S_IFBLK => InodeType::Dev,
+            _ => return None,
+        };
+        let perm = InodePerm::from_bits_truncate(mode as u16);
+        Some(Self { ty, perm })
     }
 }
 
@@ -239,13 +268,15 @@ impl InodeStat {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InodeMeta {
     /// Link count is inode-local metadata. Multi-object atomicity is provided
     /// by filesystem transaction locks, not by exposing an inode inner lock.
     pub nlink: u64,
     /// Size of file in bytes.
     pub size: u64,
+    /// Permission bits for this inode.
+    pub perm: InodePerm,
     /// Access time.
     pub atime: Duration,
     /// Modification time.
@@ -258,6 +289,7 @@ impl InodeMeta {
     pub const ZERO: Self = Self {
         nlink: 0,
         size: 0,
+        perm: InodePerm::empty(),
         atime: Duration::ZERO,
         mtime: Duration::ZERO,
         ctime: Duration::ZERO,
@@ -364,7 +396,8 @@ impl Inode {
     /// With that being said, the newly created inode is not fully initialized
     /// until the caller sets the correct metadata and link count, and links it
     /// to the superblock's ino index if necessary. **So backend filesystem
-    /// drivers are responsible for completing the initialization.**
+    /// drivers are responsible for completing the initialization of
+    /// [InodeMeta].**
     pub(super) fn new(
         ino: Ino,
         ty: InodeType,
@@ -442,6 +475,14 @@ impl Inode {
 
     pub(super) fn ty(&self) -> InodeType {
         self.ty
+    }
+
+    pub(super) fn perm(&self) -> InodePerm {
+        self.meta.read().perm
+    }
+
+    pub(super) fn set_perm(&self, perm: InodePerm) {
+        self.meta.write().perm = perm;
     }
 
     pub(super) fn set_size(&self, size: u64) {
@@ -545,6 +586,10 @@ impl InodeRef {
         self.inode().ty
     }
 
+    pub fn perm(&self) -> InodePerm {
+        self.inode().meta.read().perm
+    }
+
     pub fn nlink(&self) -> u64 {
         self.inode().nlink()
     }
@@ -578,8 +623,8 @@ impl InodeRef {
 // VTable operations re-exported here.
 impl InodeRef {
     /// Create a new dentry under this inode with the given name and type.
-    pub fn create(&self, name: &str, ty: InodeType) -> Result<InodeRef, FsError> {
-        (self.inode().ops.create)(self, name, ty)
+    pub fn create(&self, name: &str, mode: InodeMode) -> Result<InodeRef, FsError> {
+        (self.inode().ops.create)(self, name, mode)
     }
 
     /// Lookup a child dentry under this inode by name.
@@ -595,8 +640,8 @@ impl InodeRef {
         (self.inode().ops.unlink)(self, name)
     }
 
-    pub fn mkdir(&self, name: &str) -> Result<InodeRef, FsError> {
-        (self.inode().ops.mkdir)(self, name)
+    pub fn mkdir(&self, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
+        (self.inode().ops.mkdir)(self, name, perm)
     }
 
     pub fn rmdir(&self, name: &str) -> Result<(), FsError> {

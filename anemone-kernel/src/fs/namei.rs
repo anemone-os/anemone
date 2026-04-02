@@ -5,7 +5,7 @@ use typed_path::{Component, UnixComponent};
 
 /// Get or create a child dentry with the given name under the given parent
 /// dentry, and return an [Arc] to it.
-pub fn canonicalize_child(
+pub(super) fn canonicalize_child(
     parent: &Arc<Dentry>,
     name: &str,
     inode: InodeRef,

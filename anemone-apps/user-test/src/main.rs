@@ -2,10 +2,16 @@
 #![no_main]
 #![warn(unused)]
 
-use anemone_rs::prelude::*;
+use anemone_rs::{fs::getcwd, prelude::*};
 
 #[anemone_rs::main]
 pub fn main() -> Result<(), Errno> {
+    let cwd = getcwd()?;
+    println!("user-test: current working directory: {}", cwd);
+
+    // tmp test
+    execve("/getpid", &["/getpid"]).unwrap();
+
     let args: Vec<&str> = args().collect();
     if args.len() < 2 {
         println!("usage: user-test [running times...]");
