@@ -1,11 +1,11 @@
 //! Extremely simple DMA management. IOMMU is not supported.
 
-use core::ptr::NonNull;
-
-use crate::{
-    mm::remap::{IoRemap, ioremap},
-    prelude::*,
+use core::{
+    ptr::NonNull,
+    sync::atomic::{Ordering, fence},
 };
+
+use crate::prelude::*;
 
 /// An owned DMA region.
 ///
@@ -15,7 +15,6 @@ use crate::{
 #[derive(Debug)]
 pub struct DmaRegion {
     folio: OwnedFolio,
-    remap: IoRemap,
 }
 
 impl DmaRegion {
@@ -26,10 +25,33 @@ impl DmaRegion {
 
     /// Get the virtual address of the start of this DMA region.
     ///
-    /// The returned pointer is guaranteed to be page-aligned. And the whole
-    /// slice is uncached.
-    pub fn as_ptr(&self) -> NonNull<[u8]> {
-        self.remap.as_ptr()
+    /// The returned pointer is guaranteed to be page-aligned.
+    ///
+    /// At the moment DMA memory is accessed through the normal kernel direct
+    /// mapping rather than a dedicated uncached remap. This is acceptable for
+    /// the current virtio-on-QEMU setup, which behaves as a coherent DMA
+    /// device, but non-coherent platforms will need explicit cache maintenance
+    /// around device ownership transfers.
+    pub fn as_ptr(&mut self) -> NonNull<[u8]> {
+        unsafe { NonNull::new_unchecked(self.folio.as_bytes_mut()) }
+    }
+
+    /// Make CPU writes visible before handing the buffer to a device.
+    ///
+    /// Currently this is only a fence to ensure ordering of memory operations,
+    /// but on non-coherent platforms this may also need to include cache
+    /// flushes. We'll implement that later.
+    pub fn sync_for_device(&self) {
+        fence(Ordering::SeqCst);
+    }
+
+    /// Make device writes visible before the CPU reads the buffer.
+    ///
+    /// Currently this is only a fence to ensure ordering of memory operations,
+    /// but on non-coherent platforms this may also need to include cache
+    /// invalidations. We'll implement that later.
+    pub fn sync_for_cpu(&self) {
+        fence(Ordering::SeqCst);
     }
 }
 
@@ -48,12 +70,5 @@ pub fn dma_alloc(nbytes: usize) -> Result<DmaRegion, MmError> {
 
     let folio = alloc_frames_zeroed(npages).ok_or(MmError::OutOfMemory)?;
 
-    let remap = unsafe {
-        ioremap(
-            folio.range().start().to_phys_addr(),
-            (folio.range().npages() as usize) << PagingArch::PAGE_SIZE_BITS,
-        )?
-    };
-
-    Ok(DmaRegion { folio, remap })
+    Ok(DmaRegion { folio })
 }

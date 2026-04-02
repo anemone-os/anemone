@@ -277,7 +277,7 @@
 #define SYS_BRK 214
 #endif
 
-#define SYS_PRINT (SYS_ANEMONE_START + 0)
+#define SYS_DBG_PRINT (SYS_ANEMONE_START + 0)
 
 /**
  * Type representing errno values.

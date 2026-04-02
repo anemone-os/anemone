@@ -44,7 +44,6 @@ pub enum FsType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Init {
     pub path: String,
-    pub args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -3,7 +3,7 @@ use core::fmt::{Arguments, Write};
 use alloc::ffi::CString;
 use spin::Mutex;
 
-use crate::syscalls::sys_print;
+use crate::syscalls::sys_dbg_print;
 
 struct Console;
 
@@ -14,7 +14,7 @@ impl Write for Console {
         let len = c_string.as_bytes().len() as u64;
         // wait. an error occurred since we can't print to console, how can we call
         // `expect` to panic with a message? TODO: refine this later.
-        sys_print(ptr, len).expect("failed to print to user console");
+        sys_dbg_print(ptr, len).expect("failed to print to user console");
         Ok(())
     }
 }

@@ -13,10 +13,9 @@ fstype = "ext4"
 # This is optional, and can be omitted if the rootfs is generated from scratch.
 base = "etc/rootfs"
 
-# Init process configuration. This will be written into /.anemone/init.toml and used by kernel to launch the init process.
+# Init process configuration. This will be written into /.anemone/init and used by kernel to launch the init process.
 [init]
-path = "/init"
-args = []
+path = "/sbin/init"
 
 # List of apps to be installed into the rootfs.
 # The specified apps should be defined in `anemone-apps` workspace.

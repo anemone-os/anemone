@@ -3,7 +3,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 use clap::Args;
 use serde::Serialize;
 
@@ -11,7 +11,7 @@ use crate::{
     config::{app::App as AppManifest, rootfs::Rootfs},
     log_progress,
     tasks::{
-        app::build::{BuildCtx, BuiltArtifactInfo, build_app},
+        app::build::{build_app, BuildCtx, BuiltArtifactInfo},
         utils::cmd_echo,
     },
 };
@@ -159,12 +159,11 @@ impl<'a> RootfsCtx<'a> {
         log_progress!("ROOTFS", "Generating init config");
 
         // simply a copy. we can add more processing later if needed
-        let init_config = self.staging_dir.join(".anemone").join("init.toml");
+        let init_config = self.staging_dir.join(".anemone").join("init");
         if let Some(parent) = init_config.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let init_content = toml::to_string(&self.rootfs.init)?;
-        std::fs::write(init_config, init_content)?;
+        std::fs::write(&init_config, &self.rootfs.init.path)?;
 
         Ok(())
     }

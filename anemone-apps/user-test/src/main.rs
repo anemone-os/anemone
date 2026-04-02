@@ -11,6 +11,7 @@ pub fn main() -> Result<(), Errno> {
         println!("usage: user-test [running times...]");
         return Err(-1);
     }
+    let program = args[0];
     let first_arg = args[1];
     let running_times: u32 = first_arg.parse().unwrap_or_else(|e| {
         println!(
@@ -21,11 +22,7 @@ pub fn main() -> Result<(), Errno> {
     });
     println!("user-test: running times = {}", running_times);
     if running_times < 30 {
-        execve(
-            "/user-test",
-            &["/user-test", &format!("{}", running_times + 1)],
-        )
-        .unwrap();
+        execve(program, &[program, &format!("{}", running_times + 1)]).unwrap();
     } else {
         println!(
             "user-test: finished running {} times, exiting...",

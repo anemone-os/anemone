@@ -20,8 +20,8 @@ pub fn sys_brk(addr: u64) -> Result<u64, Errno> {
     unsafe { raw_syscall(SYS_BRK, addr, 0, 0, 0, 0, 0) }
 }
 
-pub fn sys_print(ptr: u64, len: u64) -> Result<(), Errno> {
-    unsafe { raw_syscall(SYS_PRINT, ptr, len, 0, 0, 0, 0).map(|_| ()) }
+pub fn sys_dbg_print(ptr: u64, len: u64) -> Result<(), Errno> {
+    unsafe { raw_syscall(SYS_DBG_PRINT, ptr, len, 0, 0, 0, 0).map(|_| ()) }
 }
 
 pub fn sys_execve(path_ptr: u64, argv_ptr: u64) -> Result<u64, Errno> {

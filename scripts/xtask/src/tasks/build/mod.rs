@@ -13,7 +13,7 @@ use clap::Args;
 use xshell::Shell;
 
 use crate::{
-    config::{KConfig, PlatformConfig, kconfig::Profile, platform::DtbType},
+    config::{kconfig::Profile, platform::DtbType, KConfig, PlatformConfig},
     log_progress,
     tasks::{app::build::build_app, qemu::gen_qemu_cmd, utils::cmd_echo},
     warn,
@@ -76,13 +76,13 @@ impl<'a> BuildContext<'a> {
         Ok(())
     }
     fn prebuild(&self) -> anyhow::Result<()> {
-        if std::fs::exists("build")? {
-            std::fs::remove_dir_all("build")?;
+        if std::fs::exists("target")? {
             warn!(
                 "WARN",
-                "Rebuilding with cargo cache. Some changes might not be reflected"
+                "Rebuilding with cargo cache. Some changes might not be reflected."
             );
         }
+
         Shell::new()?
             .cmd("mkdir")
             .arg("-p")

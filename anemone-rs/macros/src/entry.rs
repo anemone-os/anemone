@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    Attribute, Error, GenericArgument, ItemFn, PathArguments, ReturnType, Type, parse_macro_input,
-    parse_quote, spanned::Spanned,
+    parse_macro_input, parse_quote, spanned::Spanned, Attribute, Error, GenericArgument, ItemFn,
+    PathArguments, ReturnType, Type,
 };
 
 pub fn main_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -32,7 +32,7 @@ fn validate_main_signature(function: &ItemFn) -> Result<(), Error> {
     if !function.sig.inputs.is_empty() {
         return Err(Error::new(
             function.sig.inputs.span(),
-            "#[anemone_rs::main] requires `fn main() -> Result<(), Errno>` without arguments",
+            "#[anemone_rs::main] requires `(pub) fn main() -> Result<(), Errno>` without arguments",
         ));
     }
 
@@ -74,7 +74,7 @@ fn validate_main_signature(function: &ItemFn) -> Result<(), Error> {
     if !matches_main_return(&function.sig.output) {
         return Err(Error::new(
             function.sig.output.span(),
-            "#[anemone_rs::main] requires the signature `fn main() -> Result<(), Errno>`",
+            "#[anemone_rs::main] requires the signature `(pub) fn main() -> Result<(), Errno>`",
         ));
     }
 

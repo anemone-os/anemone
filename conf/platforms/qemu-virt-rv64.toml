@@ -5,14 +5,10 @@ arch = "riscv64"
 exec_env = "sbi"
 
 [constants]
-
-max_user_stack_size = 0x800000      # 8MB
 phys_ram_start = 0x80000000
 max_phys_ram_size = 0x80000000      # 2GB
 kernel_la_base = 0x80200000
 kernel_va_base = 0xffffffff80200000
-init_user_stack_size = 0x4000       # 16KB
-max_heap_size = 0x2000000000        # 128GB
 max_cpus = 16
 frame_section_shift_mb = 7
 
@@ -35,15 +31,15 @@ args = [
     "-netdev",
     "user,id=net",
 
-    # "-drive",
-    # "file=rootfs.img,format=raw,if=none,id=x0",
-    # "-device",
-    # "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
-    # "-no-reboot",
-    # "-drive",
-    # "file=disk.img,format=raw,if=none,id=x1",
-    # "-device",
-    # "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",
+    "-drive",
+    "file=rootfs.img,format=raw,if=none,id=x0",
+    "-device",
+    "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
+    "-no-reboot",
+    "-drive",
+    "file=disk.img,format=raw,if=none,id=x1",
+    "-device",
+    "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",
 ]
 
 [rootfs]

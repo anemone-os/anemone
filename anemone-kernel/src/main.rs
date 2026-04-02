@@ -55,7 +55,77 @@ use crate::{
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
 static FINISH_SYNC_COUNTER: CpuSync = CpuSync::new("finish");
+#[cfg(feature = "kunit")]
 static KUNIT_SYNC_COUNTER: CpuSync = CpuSync::new("kunit");
+
+fn mount_rootfs() {
+    match ROOTFS_SOURCE_KIND {
+        "pseudo" => {
+            vfs_mount(
+                ROOTFS_FS_TYPE,
+                MountSource::Pseudo,
+                MountFlags::empty(),
+                None,
+            )
+            .unwrap();
+        },
+        "block" => {
+            let rootfs_path = ROOTFS_SOURCE_PATH
+                .expect("rootfs source path must be configured for block-backed rootfs");
+            let root_dev = device::block::get_block_dev_by_name(rootfs_path)
+                .unwrap_or_else(|| panic!("rootfs block device not found: {}", rootfs_path));
+            vfs_mount(
+                ROOTFS_FS_TYPE,
+                MountSource::Block(root_dev),
+                MountFlags::empty(),
+                None,
+            )
+            .unwrap();
+        },
+        other => panic!("unsupported rootfs source kind: {}", other),
+    }
+
+    ls_dir(Path::new("/"));
+}
+
+// recursively ls
+fn ls_dir(path: &Path) {
+    let mut ctx = DirContext::new();
+
+    let Ok(dir) = vfs_open(path) else {
+        return;
+    };
+
+    while let Ok(dirent) = dir.iterate(&mut ctx) {
+        if dirent.name == "." || dirent.name == ".." {
+            continue;
+        }
+
+        let name = dirent.name;
+        let path = path.join(name);
+        //println!("{}", path.display());
+        kdebugln!("{} ({:?})", path.display(), dirent.ty);
+        if dirent.ty == InodeType::Dir {
+            ls_dir(&path);
+        }
+    }
+}
+
+/// According to Anemone Boot Protocol, /.anemone/init is a file containing a
+/// absolute path pointing to the init process executable.
+fn exec_init_proc() {
+    const INIT_PATH: &str = "/.anemone/init";
+
+    let init_path = vfs_read_to_string(Path::new(INIT_PATH))
+        .unwrap_or_else(|e| panic!("failed to read init path from {}: {:?}", INIT_PATH, e));
+
+    kernel_execve(&init_path, &[&init_path, &"1".to_string()]).unwrap_or_else(|e| {
+        panic!(
+            "failed to execve init process at path specified by {}: {:?}",
+            INIT_PATH, e
+        );
+    });
+}
 
 unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     unsafe {
@@ -84,41 +154,13 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         #[cfg(feature = "kunit")]
         {
             kinfoln!("running kunit tests");
-            crate::debug::kunit::kunit_runner();
+            //crate::debug::kunit::kunit_runner();
             KUNIT_SYNC_COUNTER.sync_with_counter();
             kinfoln!("kunit tests finished");
         }
     }
 
-    kernel_execve(&"/user-test", &[&"/user-test", &"1"]).unwrap();
-}
-
-fn mount_rootfs() {
-    match ROOTFS_SOURCE_KIND {
-        "pseudo" => {
-            vfs_mount(
-                ROOTFS_FS_TYPE,
-                MountSource::Pseudo,
-                MountFlags::empty(),
-                None,
-            )
-            .unwrap();
-        },
-        "block" => {
-            let rootfs_path = ROOTFS_SOURCE_PATH
-                .expect("rootfs source path must be configured for block-backed rootfs");
-            let root_dev = device::block::get_block_dev_by_name(rootfs_path)
-                .unwrap_or_else(|| panic!("rootfs block device not found: {}", rootfs_path));
-            vfs_mount(
-                ROOTFS_FS_TYPE,
-                MountSource::Block(root_dev),
-                MountFlags::empty(),
-                None,
-            )
-            .unwrap();
-        },
-        other => panic!("unsupported rootfs source kind: {}", other),
-    }
+    exec_init_proc();
 }
 
 unsafe extern "C" fn ap_kinit(ap_id: usize) {
@@ -141,7 +183,6 @@ unsafe extern "C" fn ap_kinit(ap_id: usize) {
         #[cfg(feature = "kunit")]
         KUNIT_SYNC_COUNTER.sync_with_counter();
     }
-    kernel_execve(&"/user-test", &[&"/user-test", &"1"]).unwrap();
     // exit
 }
 

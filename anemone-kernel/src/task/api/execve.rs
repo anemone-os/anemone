@@ -16,7 +16,7 @@ pub fn execve(
     unreachable!();
 }
 //
-pub fn kernel_execve<'a>(path: &impl AsRef<str>, argv: &[impl AsRef<str>]) -> Result<(), SysError> {
+pub fn kernel_execve(path: &impl AsRef<str>, argv: &[impl AsRef<str>]) -> Result<(), SysError> {
     let uimage = load_image_from_file(&path)?;
     let mut commandline = String::from(path.as_ref());
     for arg in argv {

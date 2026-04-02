@@ -3,7 +3,7 @@
 use anemone_abi::syscall::ANEMONE_SYSNO_MAX;
 
 use crate::{
-    prelude::{dt::c_readonly_string, handler::SyscallRegs, *},
+    prelude::{handler::SyscallRegs, *},
     syscall::handler::SyscallHandler,
 };
 
@@ -91,6 +91,13 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) {
         .copied()
         .unwrap_or(INVALID_SYSCALL);
 
+    // kdebugln!(
+    //     "handling syscall {} (#{}) for task {}",
+    //     handler.name,
+    //     sysno,
+    //     current_task_id()
+    // );
+
     let regs = SyscallRegs {
         sysno,
         args: unsafe {
@@ -115,11 +122,4 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) {
     }
     trapframe.advance_pc();
     drop(intr_guard);
-}
-
-/// Temporary output syscall
-#[syscall(100)]
-fn sys_print(#[validate_with(c_readonly_string)] val: Box<str>) -> Result<u64, SysError> {
-    kprint!("{}", val);
-    Ok(0)
 }

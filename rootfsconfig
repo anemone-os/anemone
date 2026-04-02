@@ -7,14 +7,13 @@ fstype = "ext4"
 base = "etc/rootfs"
 
 [init]
-path = "/init"
-args = []
+path = "/bin/user-test/user-test"
 
 [[apps]]
 name = "user-test"
 installed_dir = "/bin/user-test"
 
-[[apps]]
-name = "init"
-installed_dir = "/sbin/init"
+# [[apps]]
+# name = "init"
+# installed_dir = "/sbin/init"
 

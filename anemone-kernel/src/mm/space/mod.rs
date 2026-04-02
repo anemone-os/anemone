@@ -23,28 +23,33 @@ mod api;
 pub use api::*;
 pub mod image;
 
+// TODO: these contants should be in kb, not in pages.
+
 pub const MAX_USER_STACK_PAGES: u64 = const {
+    const MAX_USER_STACK_BYTES: u64 = 1 << USER_STACK_SHIFT_KB << 10;
     const_assert!(
-        MAX_USER_STACK_SIZE % PagingArch::PAGE_SIZE_BYTES as u64 == 0,
+        MAX_USER_STACK_BYTES % PagingArch::PAGE_SIZE_BYTES as u64 == 0,
         "user stack size must be a multiple of page size"
     );
-    MAX_USER_STACK_SIZE / PagingArch::PAGE_SIZE_BYTES as u64
+    MAX_USER_STACK_BYTES / PagingArch::PAGE_SIZE_BYTES as u64
 };
 
 pub const INIT_USER_STACK_PAGES: u64 = const {
+    const INIT_USER_STACK_BYTES: u64 = 1 << USER_INIT_STACK_SHIFT_KB << 10;
     const_assert!(
-        INIT_USER_STACK_SIZE % PagingArch::PAGE_SIZE_BYTES as u64 == 0,
+        INIT_USER_STACK_BYTES % PagingArch::PAGE_SIZE_BYTES as u64 == 0,
         "initial user stack size must be a multiple of page size"
     );
-    INIT_USER_STACK_SIZE / PagingArch::PAGE_SIZE_BYTES as u64
+    INIT_USER_STACK_BYTES / PagingArch::PAGE_SIZE_BYTES as u64
 };
 
 pub const MAX_HEAP_PAGES: u64 = const {
+    const MAX_HEAP_BYTES: u64 = 1 << USER_HEAP_SHIFT_MB << 20;
     const_assert!(
-        MAX_HEAP_SIZE % PagingArch::PAGE_SIZE_BYTES as u64 == 0,
+        MAX_HEAP_BYTES % PagingArch::PAGE_SIZE_BYTES as u64 == 0,
         "user heap size must be a multiple of page size"
     );
-    MAX_HEAP_SIZE / PagingArch::PAGE_SIZE_BYTES as u64
+    MAX_HEAP_BYTES / PagingArch::PAGE_SIZE_BYTES as u64
 };
 
 #[derive(Debug)]
