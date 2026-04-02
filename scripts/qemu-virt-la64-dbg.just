@@ -1,4 +1,4 @@
-# debugging on qemu for qemu-virt-rv64
+# debugging on qemu for qemu-virt-la64
 set shell := ["bash", "-uc"]
 set working-directory := "../"
 

@@ -200,9 +200,7 @@ mod vfs {
             .remove_child(&mount)
             .expect("mount should be a child of its parent");
 
-        VFS.mounts
-            .write()
-            .retain(|m| !Arc::ptr_eq(m, &mount));
+        VFS.mounts.write().retain(|m| !Arc::ptr_eq(m, &mount));
 
         knoticeln!("unmounted filesystem at {:?}", mount.mountpoint().unwrap());
 
@@ -267,118 +265,146 @@ mod vfs_ops {
         prelude::*,
     };
 
-    pub fn vfs_mount(
-        fs_name: &str,
-        source: MountSource,
-        flags: MountFlags,
-        mountpoint: Option<&Path>,
-    ) -> Result<Arc<Mount>, FsError> {
-        let mountpoint = match mountpoint {
-            Some(mp) => Some(resolve(mp)?),
-            None => None,
-        };
-        mount(fs_name, source, flags, mountpoint.as_ref())
-    }
+    mod primitives {
+        use super::*;
 
-    pub fn vfs_unmount(mountpoint: &Path) -> Result<(), FsError> {
-        let mountpoint = resolve(mountpoint)?;
-        // The path must point at the root of a mounted filesystem, not an
-        // arbitrary entry inside one.
-        let mount_root = mountpoint.mount().root();
-        if !Arc::ptr_eq(mountpoint.dentry(), &mount_root) {
-            return Err(FsError::NotMounted);
-        }
-        unmount(mountpoint.mount().clone())
-    }
-
-    pub fn vfs_lookup(path: &Path) -> Result<PathRef, FsError> {
-        resolve(path)
-    }
-
-    pub fn vfs_create(path: &Path, ty: InodeType) -> Result<PathRef, FsError> {
-        let (parent, name) = resolve_parent(path)?;
-
-        let inode = parent.inode().create(&name, ty)?;
-
-        let dentry = canonicalize_child(parent.dentry(), &name, inode)?;
-
-        Ok(PathRef::new(parent.mount().clone(), dentry))
-    }
-
-    pub fn vfs_open(path: &Path) -> Result<File, FsError> {
-        let pathref = resolve(path)?;
-        let inode = pathref.inode();
-        let OpenedFile { file_ops, prv } = inode.open()?;
-
-        Ok(File::new(pathref, file_ops, prv))
-    }
-
-    pub fn vfs_get_attr(path: &Path) -> Result<InodeStat, FsError> {
-        resolve(path)?.inode().get_attr()
-    }
-
-    pub fn vfs_mkdir(path: &Path) -> Result<PathRef, FsError> {
-        let (parent, name) = resolve_parent(path)?;
-
-        let inode = parent.inode().mkdir(&name)?;
-
-        let dentry = canonicalize_child(parent.dentry(), &name, inode)?;
-
-        Ok(PathRef::new(parent.mount().clone(), dentry))
-    }
-
-    pub fn vfs_link(old_path: &Path, new_path: &Path) -> Result<(), FsError> {
-        let target = resolve(old_path)?;
-        if target.inode().ty() == InodeType::Dir {
-            return Err(FsError::IsDir);
+        pub fn vfs_mount(
+            fs_name: &str,
+            source: MountSource,
+            flags: MountFlags,
+            mountpoint: Option<&Path>,
+        ) -> Result<Arc<Mount>, FsError> {
+            let mountpoint = match mountpoint {
+                Some(mp) => Some(resolve(mp)?),
+                None => None,
+            };
+            mount(fs_name, source, flags, mountpoint.as_ref())
         }
 
-        let (parent, name) = resolve_parent(new_path)?;
-        parent.inode().link(&name, target.inode())?;
+        pub fn vfs_unmount(mountpoint: &Path) -> Result<(), FsError> {
+            let mountpoint = resolve(mountpoint)?;
+            // The path must point at the root of a mounted filesystem, not an
+            // arbitrary entry inside one.
+            let mount_root = mountpoint.mount().root();
+            if !Arc::ptr_eq(mountpoint.dentry(), &mount_root) {
+                return Err(FsError::NotMounted);
+            }
+            unmount(mountpoint.mount().clone())
+        }
 
-        // insert the new dentry into parent.
-        let _dentry = canonicalize_child(parent.dentry(), &name, target.inode().clone())?;
+        pub fn vfs_lookup(path: &Path) -> Result<PathRef, FsError> {
+            resolve(path)
+        }
 
-        Ok(())
+        pub fn vfs_create(path: &Path, ty: InodeType) -> Result<PathRef, FsError> {
+            let (parent, name) = resolve_parent(path)?;
+
+            let inode = parent.inode().create(&name, ty)?;
+
+            let dentry = canonicalize_child(parent.dentry(), &name, inode)?;
+
+            Ok(PathRef::new(parent.mount().clone(), dentry))
+        }
+
+        pub fn vfs_open(path: &Path) -> Result<File, FsError> {
+            let pathref = resolve(path)?;
+            let inode = pathref.inode();
+            let OpenedFile { file_ops, prv } = inode.open()?;
+
+            Ok(File::new(pathref, file_ops, prv))
+        }
+
+        pub fn vfs_get_attr(path: &Path) -> Result<InodeStat, FsError> {
+            resolve(path)?.inode().get_attr()
+        }
+
+        pub fn vfs_mkdir(path: &Path) -> Result<PathRef, FsError> {
+            let (parent, name) = resolve_parent(path)?;
+
+            let inode = parent.inode().mkdir(&name)?;
+
+            let dentry = canonicalize_child(parent.dentry(), &name, inode)?;
+
+            Ok(PathRef::new(parent.mount().clone(), dentry))
+        }
+
+        pub fn vfs_link(old_path: &Path, new_path: &Path) -> Result<(), FsError> {
+            let target = resolve(old_path)?;
+            if target.inode().ty() == InodeType::Dir {
+                return Err(FsError::IsDir);
+            }
+
+            let (parent, name) = resolve_parent(new_path)?;
+            parent.inode().link(&name, target.inode())?;
+
+            // insert the new dentry into parent.
+            let _dentry = canonicalize_child(parent.dentry(), &name, target.inode().clone())?;
+
+            Ok(())
+        }
+
+        pub fn vfs_unlink(path: &Path) -> Result<(), FsError> {
+            let (parent, name) = resolve_parent(path)?;
+            parent.inode().unlink(&name)?;
+
+            // remove the dentry from the cache to prevent stale lookups. the child
+            // may never have been cached, which is not an error.
+            match parent.dentry().remove_child(&name) {
+                Ok(()) | Err(FsError::NotFound) => (),
+                Err(err) => return Err(err),
+            }
+
+            Ok(())
+        }
+
+        pub fn vfs_rmdir(path: &Path) -> Result<(), FsError> {
+            let target = resolve(path)?;
+            if target.inode().ty() != InodeType::Dir {
+                return Err(FsError::NotDir);
+            }
+
+            let (parent, name) = resolve_parent(path)?;
+
+            if !Arc::ptr_eq(target.mount(), parent.mount()) {
+                return Err(FsError::IsMountPoint);
+            }
+
+            parent.inode().rmdir(&name)?;
+
+            // remove the dentry from the cache to prevent stale lookups. the child
+            // may never have been cached, which is not an error.
+            match parent.dentry().remove_child(&name) {
+                Ok(()) | Err(FsError::NotFound) => (),
+                Err(err) => return Err(err),
+            }
+
+            Ok(())
+        }
     }
+    pub use primitives::*;
 
-    pub fn vfs_unlink(path: &Path) -> Result<(), FsError> {
-        let (parent, name) = resolve_parent(path)?;
-        parent.inode().unlink(&name)?;
+    mod higher_level {
+        use super::*;
 
-        // remove the dentry from the cache to prevent stale lookups. the child
-        // may never have been cached, which is not an error.
-        match parent.dentry().remove_child(&name) {
-            Ok(()) | Err(FsError::NotFound) => (),
-            Err(err) => return Err(err),
+        /// Pay attention that this might incur a huge heap allocation.
+        pub fn vfs_read_to_string(path: &Path) -> Result<String, FsError> {
+            let file = vfs_open(path)?;
+            let mut buf = Vec::new();
+            let mut handle = file;
+            handle.seek(0)?;
+            loop {
+                let mut chunk = [0u8; 128];
+                let n = handle.read(&mut chunk)?;
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+            }
+
+            String::from_utf8(buf).map_err(|_| FsError::InvalidArgument)
         }
-
-        Ok(())
     }
-
-    pub fn vfs_rmdir(path: &Path) -> Result<(), FsError> {
-        let target = resolve(path)?;
-        if target.inode().ty() != InodeType::Dir {
-            return Err(FsError::NotDir);
-        }
-
-        let (parent, name) = resolve_parent(path)?;
-
-        if !Arc::ptr_eq(target.mount(), parent.mount()) {
-            return Err(FsError::IsMountPoint);
-        }
-
-        parent.inode().rmdir(&name)?;
-
-        // remove the dentry from the cache to prevent stale lookups. the child
-        // may never have been cached, which is not an error.
-        match parent.dentry().remove_child(&name) {
-            Ok(()) | Err(FsError::NotFound) => (),
-            Err(err) => return Err(err),
-        }
-
-        Ok(())
-    }
+    pub use higher_level::*;
 }
 pub use vfs_ops::*;
 

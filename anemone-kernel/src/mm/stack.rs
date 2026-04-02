@@ -29,7 +29,7 @@ impl KernelStack {
         // should be empty.
         let stack_vpn = vpn_range.start() + 1;
         unsafe {
-            kmap(Mapping {
+            let _guard = kmap(Mapping {
                 vpn: stack_vpn,
                 ppn: frame_folio.range().start(),
                 flags: PteFlags::READ | PteFlags::WRITE,

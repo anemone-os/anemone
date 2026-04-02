@@ -1,12 +1,10 @@
 [package]
-name = "user-lib"
+name = "init"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 anemone-abi = { path = "../../anemone-abi" }
-spin = {workspace = true}
-talc = {workspace = true}
 
-[lib]
-crate-type = ["rlib"]
+[workspace]
+members = ["."]

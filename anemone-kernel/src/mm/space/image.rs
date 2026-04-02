@@ -118,6 +118,7 @@ pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, Sys
             rwx_flags,
         });
     }
+
     let mut usersp = UserSpace::new_user()?;
     for segment in &segments {
         unsafe {

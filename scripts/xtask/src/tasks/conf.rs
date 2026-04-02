@@ -1,9 +1,32 @@
 use std::{fs, str::FromStr};
 
 use anyhow::Ok;
-use clap::Args;
+use clap::{Args, Subcommand};
 
-use crate::{config::{KConfig, PlatformConfig}, log_progress, workspace::PLATFORM_CONFIGS_PATH};
+use crate::{config::PlatformConfig, log_progress, workspace::PLATFORM_CONFIGS_PATH};
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct Conf {
+    #[command(subcommand)]
+    command: ConfCommands,
+}
+
+#[derive(Subcommand)]
+pub enum ConfCommands {
+    #[command(about = "List all available build configurations and its abbrevations")]
+    #[command(visible_alias = "ls")]
+    List,
+    #[command(about = "Switch to a different build configuration")]
+    Switch(SwitchArgs),
+}
+
+pub fn run(args: Conf) -> anyhow::Result<()> {
+    match args.command {
+        ConfCommands::List => list(),
+        ConfCommands::Switch(args) => switch(args),
+    }
+}
 
 #[derive(Args)]
 pub struct SwitchArgs {
@@ -11,7 +34,7 @@ pub struct SwitchArgs {
     pub build_name: String,
 }
 
-pub fn switch(args: SwitchArgs) -> anyhow::Result<()> {
+fn switch(args: SwitchArgs) -> anyhow::Result<()> {
     log_progress!(
         "SWITCH",
         &format!("Searching build configuration '{}'", args.build_name)
@@ -57,7 +80,8 @@ pub fn switch(args: SwitchArgs) -> anyhow::Result<()> {
                 &format!("Switching to build configuration '{}'", args.build_name)
             );
             let platform_config_content = std::fs::read_to_string("kconfig")?;
-            // Use toml_edit to update only [build].platform while preserving comments/formatting.
+            // Use toml_edit to update only [build].platform while preserving
+            // comments/formatting.
             let mut doc = toml_edit::DocumentMut::from_str(&platform_config_content)?;
             doc["build"]["platform"] = toml_edit::value(name);
             std::fs::write("kconfig", doc.to_string())?;
@@ -70,7 +94,7 @@ pub fn switch(args: SwitchArgs) -> anyhow::Result<()> {
     }
 }
 
-pub fn list() -> anyhow::Result<()> {
+fn list() -> anyhow::Result<()> {
     for entry in fs::read_dir(PLATFORM_CONFIGS_PATH)? {
         let entry = entry?;
         let path = entry.path();

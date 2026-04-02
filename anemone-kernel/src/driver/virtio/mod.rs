@@ -29,7 +29,7 @@ unsafe impl virtio_drivers::Hal for VirtIOHalImpl {
         // buffers, so we ignore this parameter.
         _direction: virtio_drivers::BufferDirection,
     ) -> (virtio_drivers::PhysAddr, core::ptr::NonNull<u8>) {
-        let dma = dma_alloc(pages * virtio_drivers::PAGE_SIZE)
+        let mut dma = dma_alloc(pages * virtio_drivers::PAGE_SIZE)
             .expect("failed to allocate DMA region for virtio");
         let ppn = dma.ppn();
         let ptr = dma.as_ptr();
@@ -68,8 +68,10 @@ unsafe impl virtio_drivers::Hal for VirtIOHalImpl {
         buffer: core::ptr::NonNull<[u8]>,
         direction: virtio_drivers::BufferDirection,
     ) -> virtio_drivers::PhysAddr {
-        let bounce = dma_alloc(buffer.len())
-            .expect("failed to allocate and share virtio bounce buffer with host");
+        let mut bounce = dma_alloc(buffer.len()).expect(
+            "failed to allocate and share virtio bounce buffer with
+    host",
+        );
 
         let ppn = bounce.ppn();
         let ptr = bounce.as_ptr();
@@ -79,6 +81,8 @@ unsafe impl virtio_drivers::Hal for VirtIOHalImpl {
                 core::ptr::copy_nonoverlapping(src, ptr.as_ptr().cast(), buffer.len());
             }
         }
+
+        bounce.sync_for_device();
 
         assert!(
             VIRTIO_DMAS
@@ -99,10 +103,12 @@ unsafe impl virtio_drivers::Hal for VirtIOHalImpl {
         assert!(paddr.is_multiple_of(PagingArch::PAGE_SIZE_BYTES as u64));
         let ppn = PhysPageNum::new(paddr >> PagingArch::PAGE_SIZE_BITS);
 
-        let bounce = VIRTIO_DMAS
+        let mut bounce = VIRTIO_DMAS
             .lock_irqsave()
             .remove(&ppn)
             .expect("failed to find DMA region for unsharing in virtio");
+
+        bounce.sync_for_cpu();
 
         if !matches!(direction, virtio_drivers::BufferDirection::DriverToDevice) {
             let dst = buffer.cast::<u8>().as_ptr();

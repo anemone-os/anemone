@@ -107,7 +107,6 @@ impl<T> PerCpu<T> {
     {
         unsafe { f(self.get_mut(PERCPU_BASES[cpu_id])) }
     }
-
 }
 
 #[percpu(core_local)]

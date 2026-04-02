@@ -201,8 +201,11 @@ fn ext4_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>
 
     let backing = MountSource::Block(Arc::clone(&dev));
 
-    let mut ext4 =
-        Ext4Fs::new(Ext4Disk::new(dev), LwExt4FsConfig::default()).map_err(map_ext4_error)?;
+    let cfg = LwExt4FsConfig {
+        bcache_size: 8 << 10, // number of 4kb blocks. we use 32mb cache for now
+    };
+
+    let mut ext4 = Ext4Fs::new(Ext4Disk::new(dev), cfg).map_err(map_ext4_error)?;
 
     let mut root_attr = LwExt4FileAttr::default();
     ext4.get_attr(EXT4_ROOT_INO, &mut root_attr)

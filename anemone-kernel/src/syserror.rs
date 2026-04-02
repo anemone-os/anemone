@@ -24,7 +24,12 @@ pub enum KernelError {
 
 impl AsErrno for KernelError {
     fn as_errno(&self) -> anemone_abi::errno::Errno {
-        todo!()
+        use anemone_abi::errno::*;
+        match self {
+            KernelError::NoSys => ENOSYS,
+            KernelError::NotYetImplemented => ENOSYS,
+            KernelError::InvalidArgument => EINVAL,
+        }
     }
 }
 
@@ -67,5 +72,6 @@ impl AsErrno for SysError {
 ///
 /// All subsystems should implement `AsErrno` for their error types.
 pub trait AsErrno {
+    #[track_caller]
     fn as_errno(&self) -> anemone_abi::errno::Errno;
 }

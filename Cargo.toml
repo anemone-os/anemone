@@ -1,11 +1,8 @@
+#! Kernel workspace. anemone-apps & anemone-rs & anemone-rs excluded.
+
 [workspace]
 resolver = "2"
-members = [
-    "anemone-abi",
-    "anemone-kernel",
-    "anemone-kernel/crates/*",
-    "anemone-apps/*",
-]
+members = ["anemone-abi", "anemone-kernel", "anemone-kernel/crates/*"]
 exclude = ["scripts/xtask"]
 
 [workspace.dependencies]

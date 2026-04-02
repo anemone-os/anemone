@@ -1,5 +1,3 @@
-// currently just a placeholder.
-
 use alloc::sync::Arc;
 
 use crate::prelude::*;

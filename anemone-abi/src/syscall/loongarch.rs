@@ -1,7 +1,7 @@
 //! System call conventions and numbers.
 //! Architecture-specific.
 
-pub unsafe fn syscall_raw(
+unsafe fn syscall_raw(
     sysno: u64,
     arg0: u64,
     arg1: u64,

@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Debug, Serialize)]
+#[derive(Deserialize, Debug, Serialize, Clone)]
 pub enum Arch {
     #[serde(rename = "riscv64")]
     RiscV64,
@@ -18,6 +18,21 @@ impl Arch {
             Arch::LoongArch64 => "loongarch64",
         }
     }
+
+    pub fn target_triple(&self) -> TargetTriple {
+        match self {
+            Arch::RiscV64 => TargetTriple::RiscV64UnknownAnemoneElf,
+            Arch::LoongArch64 => TargetTriple::LoongArch64UnknownAnemoneElf,
+        }
+    }
+
+    pub fn try_from_str(s: &str) -> anyhow::Result<Self> {
+        match s {
+            "riscv64" => Ok(Arch::RiscV64),
+            "loongarch64" => Ok(Arch::LoongArch64),
+            _ => anyhow::bail!("Unsupported architecture: {}", s),
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -28,11 +43,9 @@ pub enum ExecEnv {
     Uefi,
 }
 
-#[derive(Deserialize, Debug, Serialize)]
+#[derive(Debug, Clone, Copy)]
 pub enum TargetTriple {
-    #[serde(rename = "riscv64-unknown-anemone-elf")]
     RiscV64UnknownAnemoneElf,
-    #[serde(rename = "loongarch64-unknown-anemone-elf")]
     LoongArch64UnknownAnemoneElf,
 }
 
@@ -50,7 +63,6 @@ pub struct Build {
     pub name: String,
     pub abbrs: Vec<String>,
     pub arch: Arch,
-    pub target: TargetTriple,
     pub exec_env: ExecEnv,
 }
 
@@ -60,9 +72,6 @@ pub struct Constants {
     pub max_phys_ram_size: u64,
     pub kernel_la_base: u64,
     pub kernel_va_base: u64,
-    pub max_user_stack_size: u64,
-    pub init_user_stack_size: u64,
-    pub max_heap_size: u64,
     pub max_cpus: usize,
     pub frame_section_shift_mb: usize,
 }
@@ -168,12 +177,6 @@ pub const MAX_PHYS_RAM_SIZE: u64 = {:#x};
 pub const KERNEL_LA_BASE: u64 = {:#x};
 /// Kernel virtual address base
 pub const KERNEL_VA_BASE: u64 = {:#x};
-/// Maximum user stack size
-pub const MAX_USER_STACK_SIZE: u64 = {:#x};
-/// Initial user stack size
-pub const INIT_USER_STACK_SIZE: u64 = {:#x};
-/// Maximum heap size
-pub const MAX_HEAP_SIZE: u64 = {:#x};
 /// Maximum number of CPUs supported
 pub const MAX_CPUS: usize = {};
 /// Frame section size shift in megabytes
@@ -182,7 +185,7 @@ pub const FRAME_SECTION_SHIFT_MB: usize = {};
 pub const ROOTFS_FS_TYPE: &str = {:?};
 /// Root filesystem source kind
 pub const ROOTFS_SOURCE_KIND: &str = {:?};
-/// Root filesystem source path in device tree full-name form
+/// Root filesystem source path
 pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
 
         "#,
@@ -190,9 +193,6 @@ pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
             self.constants.max_phys_ram_size,
             self.constants.kernel_la_base,
             self.constants.kernel_va_base,
-            self.constants.max_user_stack_size,
-            self.constants.init_user_stack_size,
-            self.constants.max_heap_size,
             self.constants.max_cpus,
             self.constants.frame_section_shift_mb,
             rootfs_fstype,

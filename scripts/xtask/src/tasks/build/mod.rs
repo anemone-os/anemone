@@ -13,9 +13,9 @@ use clap::Args;
 use xshell::Shell;
 
 use crate::{
-    config::{KConfig, PlatformConfig, kconfig::Profile, platform::DtbType},
+    config::{kconfig::Profile, platform::DtbType, KConfig, PlatformConfig},
     log_progress,
-    tasks::{qemu::gen_qemu_cmd, utils::cmd_echo},
+    tasks::{app::build::build_app, qemu::gen_qemu_cmd, utils::cmd_echo},
     warn,
     workspace::*,
 };
@@ -76,13 +76,13 @@ impl<'a> BuildContext<'a> {
         Ok(())
     }
     fn prebuild(&self) -> anyhow::Result<()> {
-        if std::fs::exists("build")? {
-            std::fs::remove_dir_all("build")?;
+        if std::fs::exists("target")? {
             warn!(
                 "WARN",
-                "Rebuilding with cargo cache. Some changes might not be reflected"
+                "Rebuilding with cargo cache. Some changes might not be reflected."
             );
         }
+
         Shell::new()?
             .cmd("mkdir")
             .arg("-p")
@@ -94,7 +94,6 @@ impl<'a> BuildContext<'a> {
             .arg("build/apps")
             .run_echo()?;
 
-        self.build_apps()?;
         self.gen_rust_defs()?;
         self.gen_kernel_lds()?;
 
@@ -127,9 +126,7 @@ impl<'a> BuildContext<'a> {
                             "ERROR",
                             "QEMU configuration is required to generate DTB from QEMU"
                         );
-                        return anyhow::bail!(
-                            "QEMU configuration is required to generate DTB from QEMU"
-                        );
+                        anyhow::bail!("QEMU configuration is required to generate DTB from QEMU")
                     }
                 },
                 DtbType::File => {
@@ -138,75 +135,6 @@ impl<'a> BuildContext<'a> {
             }
         }
 
-        Ok(())
-    }
-
-    fn build_apps(&self) -> anyhow::Result<()> {
-        let build_dir = Path::new("anemone-apps");
-        let apps_file = build_dir.join("app_list.txt");
-        if !fs::exists(&build_dir)? {
-            log_progress!("ERROR", "Directory 'anemone-apps' not found");
-            return anyhow::bail!("Directory 'anemone-apps' not found");
-        }
-        if !fs::exists(&apps_file)? {
-            log_progress!("ERROR", "File 'anemone-apps/app_list.txt' not found");
-            return anyhow::bail!("File 'anemone-apps/app_list.txt' not found");
-        }
-        let file = File::open(&apps_file)?;
-        let reader = BufReader::new(file);
-        let sh = Shell::new()?;
-        for line in reader.lines() {
-            let line = line?;
-            let name = line.trim();
-            if !name.is_empty() {
-                // build app
-                log_progress!("COMPILE", format!("Compiling app '{}'", name).as_str());
-                let dir = build_dir.join(name);
-
-                let mut build = sh
-                    .with_current_dir(dir)
-                    .cmd("cargo")
-                    .arg("build")
-                    .args(&[
-                        "-Z",
-                        "build-std=core,alloc",
-                        "-Z", // Refer to https://github.com/rust-lang/wg-cargo-std-aware/issues/53 for why this is needed
-                        "build-std-features=compiler-builtins-mem"
-                    ])
-                    .args(&["-Z", "json-target-spec"])
-                    .arg("--target")
-                    .arg(&format!(
-                        "../../conf/arch/{}/{}.json",
-                        self.platform.build.arch.as_str(),
-                        self.platform.build.target.as_str()
-                    ));
-
-                for arg in self.kconfig.build.profile.as_cargo_arg() {
-                    build = build.arg(arg);
-                }
-                
-                build.run_echo()?;
-
-                let built_kernel_path = format!("{}/{}", self.cargo_build_dir(), name);
-                std::fs::copy(built_kernel_path, format!("build/apps/{}.elf", name))?;
-
-                if self.kconfig.build.disasm {
-                    log_progress!(
-                        "DISASM",
-                        format!("Generating disassembly for app '{}'", name).as_ref()
-                    );
-
-                    let disasm = sh
-                        .cmd(&self.platform.build.target.objdump())
-                        .arg("-d")
-                        .arg("-S")
-                        .arg(format!("build/apps/{}.elf", name))
-                        .echo()
-                        .read()?;
-                    sh.write_file(format!("build/apps/{}.disasm", name), disasm)?;
-                }
-            }
-        }
         Ok(())
     }
 
@@ -270,7 +198,7 @@ impl<'a> BuildContext<'a> {
             .arg(&format!(
                 "../conf/arch/{}/{}.json",
                 self.platform.build.arch.as_str(),
-                self.platform.build.target.as_str()
+                self.platform.build.arch.target_triple().as_str()
             ))
             .env("RUSTFLAGS", rustflags);
         for arg in self.kconfig.build.profile.as_cargo_arg() {
@@ -290,7 +218,7 @@ impl<'a> BuildContext<'a> {
             log_progress!("DISASM", "Generating kernel disassembly");
 
             let disasm = sh
-                .cmd(&self.platform.build.target.objdump())
+                .cmd(&self.platform.build.arch.target_triple().objdump())
                 .arg("-d")
                 .arg("-S")
                 .arg("build/anemone.elf")
@@ -313,7 +241,7 @@ impl<'a> BuildContext<'a> {
     fn cargo_build_dir(&self) -> String {
         format!(
             "target/{}/{}",
-            self.platform.build.target.as_str(),
+            self.platform.build.arch.target_triple().as_str(),
             match self.kconfig.build.profile {
                 Profile::Dev => "debug", // dev builds go to debug/
                 Profile::Release => "release",

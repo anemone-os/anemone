@@ -45,6 +45,9 @@ pub struct Parameters {
     pub time_slice_ms: Option<u64>,
     pub system_hz: Option<u16>,
     pub backtrace_depth: Option<usize>,
+    pub user_stack_shift_kb: Option<u64>,
+    pub user_init_stack_shift_kb: Option<u64>,
+    pub user_heap_shift_mb: Option<u64>,
 }
 
 impl Parameters {
@@ -97,6 +100,12 @@ pub const TIME_SLICE_MS: u64 = {};
 pub const SYSTEM_HZ: u16 = {};
 /// Maximum depth of captured backtrace
 pub const BACKTRACE_DEPTH: usize = {};
+/// Max user stack size as a power of 2 in KB
+pub const USER_STACK_SHIFT_KB: u64 = {};
+/// Initial user stack size as a power of 2 in KB
+pub const USER_INIT_STACK_SHIFT_KB: u64 = {};
+/// Max user heap size as a power of 2 in MB
+pub const USER_HEAP_SHIFT_MB: u64 = {};
         "#,
             default_or!(bootstrap_heap_shift_kb),
             default_or!(log_buffer_shift_kb),
@@ -107,7 +116,10 @@ pub const BACKTRACE_DEPTH: usize = {};
             default_or!(max_processes),
             default_or!(time_slice_ms),
             default_or!(system_hz),
-            default_or!(backtrace_depth)
+            default_or!(backtrace_depth),
+            default_or!(user_stack_shift_kb),
+            default_or!(user_init_stack_shift_kb),
+            default_or!(user_heap_shift_mb)
         )
     }
 }
