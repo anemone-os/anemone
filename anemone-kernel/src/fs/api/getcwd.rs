@@ -1,9 +1,7 @@
-use core::ffi::c_char;
-
 use crate::prelude::{dt::UserWritePtr, *};
 
 #[syscall(SYS_GETCWD)]
-fn sys_getcwd(buf: UserWritePtr<c_char>, size: usize) -> Result<u64, SysError> {
+fn sys_getcwd(buf: UserWritePtr<u8>, size: usize) -> Result<u64, SysError> {
     with_current_task(|task| {
         let cwd = task.rel_cwd();
 
