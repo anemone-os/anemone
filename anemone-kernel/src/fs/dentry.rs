@@ -27,9 +27,9 @@ impl Dentry {
     ///
     /// If the inode represents a directory, `children` will be initialized as
     /// an empty map, otherwise [None].
-    pub fn new(name: String, parent: Option<&Arc<Dentry>>, inode: InodeRef) -> Self {
+    pub fn new(name: String, parent: Option<Arc<Dentry>>, inode: InodeRef) -> Self {
         Self {
-            parent: parent.map(Arc::clone),
+            parent,
             inner: RwLock::new(DentryInner {
                 name,
                 children: if inode.ty() == InodeType::Dir {

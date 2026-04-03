@@ -95,10 +95,7 @@ impl Mount {
     }
 
     pub fn has_children(&self) -> bool {
-        self.children
-            .lock()
-            .iter()
-            .any(|w| w.upgrade().is_some())
+        self.children.lock().iter().any(|w| w.upgrade().is_some())
     }
 
     pub fn remove_child(&self, child: &Arc<Mount>) -> Result<(), FsError> {

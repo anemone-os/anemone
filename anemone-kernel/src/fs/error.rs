@@ -32,6 +32,8 @@ pub enum FsError {
     NoMoreEntries,
     /// Permission denied.
     PermissionDenied,
+    /// File system run out its capacity.
+    NoSpace,
 }
 
 impl AsErrno for FsError {
@@ -51,6 +53,7 @@ impl AsErrno for FsError {
             FsError::IsMountPoint => EINVAL,
             FsError::NoMoreEntries => ENOENT,
             FsError::PermissionDenied => EPERM,
+            FsError::NoSpace => ENOSPC,
         }
     }
 }

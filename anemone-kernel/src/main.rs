@@ -46,7 +46,6 @@ use crate::{
         get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
         unflatten_device_tree,
     },
-    fs::vfs_mount,
     mm::layout::KernelLayoutTrait,
     prelude::*,
     sync::{counter::CpuSync, mono::MonoOnce},
@@ -61,26 +60,20 @@ static KUNIT_SYNC_COUNTER: CpuSync = CpuSync::new("kunit");
 fn mount_rootfs() {
     match ROOTFS_SOURCE_KIND {
         "pseudo" => {
-            vfs_mount(
-                ROOTFS_FS_TYPE,
-                MountSource::Pseudo,
-                MountFlags::empty(),
-                None,
-            )
-            .unwrap();
+            mount_root("ramfs", MountSource::Pseudo, MountFlags::empty())
+                .expect("root mount failed");
         },
         "block" => {
             let rootfs_path = ROOTFS_SOURCE_PATH
                 .expect("rootfs source path must be configured for block-backed rootfs");
             let root_dev = device::block::get_block_dev_by_name(rootfs_path)
                 .unwrap_or_else(|| panic!("rootfs block device not found: {}", rootfs_path));
-            vfs_mount(
+            mount_root(
                 ROOTFS_FS_TYPE,
                 MountSource::Block(root_dev),
                 MountFlags::empty(),
-                None,
             )
-            .unwrap();
+            .expect("root mount failed");
         },
         other => panic!("unsupported rootfs source kind: {}", other),
     }

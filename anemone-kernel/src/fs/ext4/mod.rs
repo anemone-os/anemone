@@ -250,6 +250,7 @@ fn ext4_sync_fs(sb: &SuperBlock) -> Result<(), FsError> {
 
 static EXT4_FS_OPS: FileSystemOps = FileSystemOps {
     name: "ext4",
+    flags: FileSystemFlags::empty(),
     mount: ext4_mount,
     sync_fs: ext4_sync_fs,
     kill_sb: ext4_kill_sb,

@@ -117,9 +117,9 @@ impl FilesState {
 
     pub fn new_with_stdio() -> Self {
         let mut state = Self::new();
-        state.open_fd(device::console::new_stdin_file(), OpenFlags::READ);
-        state.open_fd(device::console::new_stdout_file(), OpenFlags::WRITE);
-        state.open_fd(device::console::new_stderr_file(), OpenFlags::WRITE);
+        state.open_fd(device::console::open_console_stdin(), OpenFlags::READ);
+        state.open_fd(device::console::open_console_stdout(), OpenFlags::WRITE);
+        state.open_fd(device::console::open_console_stdout(), OpenFlags::WRITE);
         state
     }
 

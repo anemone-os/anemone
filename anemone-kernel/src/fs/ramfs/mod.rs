@@ -94,6 +94,7 @@ fn ramfs_sync_fs(_sb: &SuperBlock) -> Result<(), FsError> {
 
 static RAMFS_FS_OPS: FileSystemOps = FileSystemOps {
     name: "ramfs",
+    flags: FileSystemFlags::empty(),
     mount: ramfs_mount,
     sync_fs: ramfs_sync_fs,
     kill_sb: ramfs_kill_sb,

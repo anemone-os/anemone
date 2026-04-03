@@ -230,9 +230,9 @@ impl CoreIrqChip for SiFivePlic {
     }
 
     fn claim(&self) -> Option<HwIrq> {
-        let claimed = self
-            .regs()
-            .claim(SiFivePlic::s_ctx_for(CpuArch::cur_cpu_id().get())) as usize;
+        let claimed =
+            self.regs()
+                .claim(SiFivePlic::s_ctx_for(CpuArch::cur_cpu_id().get())) as usize;
         if claimed == 0 {
             return None;
         }

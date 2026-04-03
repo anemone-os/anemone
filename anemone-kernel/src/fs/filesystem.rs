@@ -2,9 +2,19 @@ use core::fmt::Debug;
 
 use crate::prelude::*;
 
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct FileSystemFlags: u32 {
+        /// This file system is used for kernel-internal purposes,
+        /// and should not be mountable by user processes.
+        const KERNEL_FS = 1 << 0;
+    }
+}
+
 /// VTable a file system type must implement to be mountable.
 pub struct FileSystemOps {
     pub name: &'static str,
+    pub flags: FileSystemFlags,
     pub mount: fn(MountSource, MountFlags) -> Result<Arc<SuperBlock>, FsError>,
 
     /// Synchronize filesystem state associated with the given superblock to its
@@ -97,6 +107,11 @@ impl FileSystem {
     /// Name of the file system, e.g. "btrfs", "xfs", "9p", etc.
     pub fn name(&self) -> &str {
         self.ops.name
+    }
+
+    /// Flags of the file system.
+    pub fn flags(&self) -> FileSystemFlags {
+        self.ops.flags
     }
 
     /// Mount a file system from the given source with the given flags.
