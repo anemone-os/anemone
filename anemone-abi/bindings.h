@@ -7,6 +7,22 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#define STDIN_FILENO 0
+
+#define STDOUT_FILENO 1
+
+#define STDERR_FILENO 2
+
+#define SEEK_SET 0
+
+#define SEEK_CUR 1
+
+#define SEEK_END 2
+
+#define SEEK_DATA 3
+
+#define SEEK_HOLE 4
+
 #define O_RDONLY 0
 
 #define O_WRONLY 1
@@ -190,19 +206,43 @@
 #define ANEMONE_SYSNO_MAX 1024
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
-#define SYS_READ 63
+#define SYS_GETCWD 17
 #endif
 
 #if defined(__ANEMONE_ARCH_LOONGARCH64__)
-#define SYS_READ 63
+#define SYS_GETCWD 17
 #endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
-#define SYS_WRITE 64
+#define SYS_DUP 23
 #endif
 
 #if defined(__ANEMONE_ARCH_LOONGARCH64__)
-#define SYS_WRITE 64
+#define SYS_DUP 23
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_DUP3 24
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_DUP3 24
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_CHDIR 49
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_CHDIR 49
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_CHROOT 51
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_CHROOT 51
 #endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
@@ -219,6 +259,22 @@
 
 #if defined(__ANEMONE_ARCH_LOONGARCH64__)
 #define SYS_CLOSE 57
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_READ 63
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_READ 63
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_WRITE 64
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_WRITE 64
 #endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)

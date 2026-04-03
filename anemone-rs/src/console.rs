@@ -1,31 +1,35 @@
 use core::fmt::{Arguments, Write};
 
-use alloc::ffi::CString;
 use spin::Mutex;
 
-use crate::syscalls::sys_dbg_print;
+use crate::fs::{write_all, STDERR_FILENO, STDOUT_FILENO};
 
-struct Console;
+struct Console {
+    fd: usize,
+}
 
 impl Write for Console {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        let c_string = CString::new(s).map_err(|_| core::fmt::Error)?;
-        let ptr = c_string.as_ptr() as u64;
-        let len = c_string.as_bytes().len() as u64;
-        // wait. an error occurred since we can't print to console, how can we call
-        // `expect` to panic with a message? TODO: refine this later.
-        sys_dbg_print(ptr, len).expect("failed to print to user console");
+        write_all(self.fd, s.as_bytes()).map_err(|_| core::fmt::Error)?;
         Ok(())
     }
 }
 
-static CONSOLE: Mutex<Console> = Mutex::new(Console);
+static STDOUT: Mutex<Console> = Mutex::new(Console { fd: STDOUT_FILENO });
+static STDERR: Mutex<Console> = Mutex::new(Console { fd: STDERR_FILENO });
 
 pub fn __print(args: Arguments) {
-    CONSOLE
+    STDOUT
         .lock()
         .write_fmt(args)
         .expect("failed to print to user console");
+}
+
+pub fn __eprint(args: Arguments) {
+    STDERR
+        .lock()
+        .write_fmt(args)
+        .expect("failed to print to user stderr");
 }
 
 #[macro_export]
@@ -42,5 +46,22 @@ macro_rules! println {
     };
     ($($arg:tt)*) => {
         $crate::console::__print(format_args!("{}\n", format_args!($($arg)*)))
+    };
+}
+
+#[macro_export]
+macro_rules! eprint {
+    ($($arg:tt)*) => {
+        $crate::console::__eprint(format_args!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! eprintln {
+    () => {
+        $crate::eprint!("\n")
+    };
+    ($($arg:tt)*) => {
+        $crate::console::__eprint(format_args!("{}\n", format_args!($($arg)*)))
     };
 }

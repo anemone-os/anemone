@@ -4,7 +4,11 @@ use crate::{
     mm::stack::KernelStack,
     prelude::*,
     sync::mono::MonoFlow,
-    task::tid::{Tid, TidHandle, alloc_tid},
+    task::{
+        files::FilesState,
+        task_fs::FsState,
+        tid::{Tid, TidHandle, alloc_tid},
+    },
 };
 
 /// All the information about a task
@@ -13,6 +17,9 @@ pub struct Task {
     tid: TidHandle,
     kstack: KernelStack,
     sched_info: MonoFlow<TaskInner>,
+
+    pub(super) fs_state: Arc<RwLock<FsState>>,
+    pub(super) files_state: Arc<RwLock<FilesState>>,
 
     pub info: RwLock<TaskInfo>,
     related: RwLock<TaskRelatedInfo>,
@@ -60,6 +67,11 @@ impl Task {
     /// function using the C calling convention.
     ///
     /// [TaskFlags::KERNEL] is added automatically.
+    ///
+    /// [FsState] is set to hanging by default, which is suitable for most
+    /// kernel threads. If a kernel thread needs to execute a user program which
+    /// requires filesystem access, make sure to set its [FsState] to a valid
+    /// one before calling `kernel_execve`.
     pub fn new_kernel(
         name: impl AsRef<str>,
         entry: *const (),
@@ -76,6 +88,10 @@ impl Task {
             status: RwLock::new(TaskStatus::Ready),
             tid: alloc_tid(),
             kstack: stack,
+
+            fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
+            files_state: Arc::new(RwLock::new(FilesState::new())),
+
             sched_info: unsafe {
                 MonoFlow::new(TaskInner {
                     task_context: TaskContext::from_kernel_fn(
@@ -111,7 +127,7 @@ impl Task {
         let kstack_top = ustack.stack_top();
         let parent = parent.and_then(|arc| Some(Arc::downgrade(arc)));
         kdebugln!("create user task with kernel stack at {:?}", ustack);
-        Ok(Self {
+        let task = Self {
             status: RwLock::new(TaskStatus::Ready),
             tid: alloc_tid(),
             kstack: ustack,
@@ -133,8 +149,14 @@ impl Task {
                 parent,
                 children: vec![],
             }),
+            // user tasks are all spawned after rootfs is mounted, so we can safely set their
+            // initial fs state to root
+            fs_state: Arc::new(RwLock::new(FsState::new_root())),
+            files_state: Arc::new(RwLock::new(FilesState::new_with_stdio())),
             exit_code: AtomicI32::new(0),
-        })
+        };
+
+        Ok(task)
     }
 
     /// Get the parent task ID, if the parent task exists.

@@ -50,7 +50,7 @@ use crate::{
     mm::layout::KernelLayoutTrait,
     prelude::*,
     sync::{counter::CpuSync, mono::MonoOnce},
-    task::execve::kernel_execve,
+    task::{execve::kernel_execve, task_fs::FsState},
 };
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
@@ -148,17 +148,22 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
 
         FINISH_SYNC_COUNTER.sync_with_counter();
         kinfoln!("bsp #{} kinit finished", bsp_id);
-
-        mount_rootfs();
-
-        #[cfg(feature = "kunit")]
-        {
-            kinfoln!("running kunit tests");
-            //crate::debug::kunit::kunit_runner();
-            KUNIT_SYNC_COUNTER.sync_with_counter();
-            kinfoln!("kunit tests finished");
-        }
     }
+    mount_rootfs();
+
+    #[cfg(feature = "kunit")]
+    {
+        kinfoln!("running kunit tests");
+        crate::debug::kunit::kunit_runner();
+        unsafe {
+            KUNIT_SYNC_COUNTER.sync_with_counter();
+        }
+        kinfoln!("kunit tests finished");
+    }
+
+    with_current_task(|kinit| {
+        kinit.set_fs_state(FsState::new_root());
+    });
 
     exec_init_proc();
 }

@@ -15,7 +15,7 @@ pub fn execve(
     kernel_execve(&path, argv.as_slice())?;
     unreachable!();
 }
-//
+
 pub fn kernel_execve(path: &impl AsRef<str>, argv: &[impl AsRef<str>]) -> Result<(), SysError> {
     let uimage = load_image_from_file(&path)?;
     let mut commandline = String::from(path.as_ref());
@@ -68,6 +68,14 @@ pub fn kernel_execve_from_image(
         memsp.activate();
         let mut ksp = VirtAddr::new(0);
         with_current_task(|task| {
+            if task.flags().contains(TaskFlags::KERNEL) {
+                task.ensure_stdio(
+                    device::console::new_stdin_file(),
+                    device::console::new_stdout_file(),
+                    device::console::new_stderr_file(),
+                );
+            }
+
             let info = TaskInfo {
                 cmdline: commandline.as_ref().into(),
                 flags: TaskFlags::NONE,

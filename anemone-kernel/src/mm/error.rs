@@ -1,7 +1,6 @@
 //! Error used throughout the memory management subsystem.
 
 use crate::prelude::*;
-use anemone_abi::errno::{self, *};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MmError {
@@ -27,12 +26,12 @@ pub enum MmError {
 impl AsErrno for MmError {
     fn as_errno(&self) -> Errno {
         match self {
-            MmError::OutOfMemory => errno::ENOMEM,
-            MmError::AlreadyMapped | MmError::NotMapped | MmError::SharedFrame => errno::EFAULT,
-            MmError::InvalidArgument => errno::EINVAL,
-            MmError::PermissionDenied => errno::EACCES,
-            MmError::ArgumentTooLarge => errno::E2BIG,
-            MmError::NotAligned => errno::EINVAL,
+            MmError::OutOfMemory => ENOMEM,
+            MmError::AlreadyMapped | MmError::NotMapped | MmError::SharedFrame => EFAULT,
+            MmError::InvalidArgument => EINVAL,
+            MmError::PermissionDenied => EACCES,
+            MmError::ArgumentTooLarge => E2BIG,
+            MmError::NotAligned => EINVAL,
         }
     }
 }

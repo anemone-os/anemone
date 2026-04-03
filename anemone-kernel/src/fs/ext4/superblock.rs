@@ -41,6 +41,7 @@ fn ext4_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, FsError
     ));
     inode.set_meta(InodeMeta {
         nlink: attr.nlink,
+        perm: InodePerm::from_bits_truncate(attr.mode as u16),
         size: attr.size,
         atime: attr.atime,
         mtime: attr.mtime,
@@ -76,6 +77,7 @@ fn ext4_sync_inode_inner(inode: &Arc<Inode>) -> Result<(), FsError> {
                 inode_ref.set_atime(&meta.atime);
                 inode_ref.set_mtime(&meta.mtime);
                 inode_ref.set_ctime(&meta.ctime);
+                inode_ref.set_mode(InodeMode::new(inode.ty(), meta.perm).to_linux_mode());
                 Ok(())
             })
             .map_err(map_ext4_error)?;

@@ -12,6 +12,8 @@ pub enum SysError {
     Kernel(KernelError),
 }
 
+/// Kernel-level errors, i.e. errors that are not specific to any subsystem, but
+/// can occur in any syscall handler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KernelError {
     /// The syscall number is invalid (i.e. no handler registered for it).
@@ -20,6 +22,12 @@ pub enum KernelError {
     NotYetImplemented,
     /// The syscall arguments are invalid.
     InvalidArgument,
+    /// The provided buffer is too small to hold the output.
+    BufferTooSmall,
+    /// Permission denied.
+    PermissionDenied,
+    /// The provided file descriptor is invalid.
+    BadFileDescriptor,
 }
 
 impl AsErrno for KernelError {
@@ -29,6 +37,9 @@ impl AsErrno for KernelError {
             KernelError::NoSys => ENOSYS,
             KernelError::NotYetImplemented => ENOSYS,
             KernelError::InvalidArgument => EINVAL,
+            KernelError::BufferTooSmall => ERANGE,
+            KernelError::PermissionDenied => EPERM,
+            KernelError::BadFileDescriptor => EBADF,
         }
     }
 }
