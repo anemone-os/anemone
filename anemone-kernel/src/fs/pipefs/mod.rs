@@ -1,1 +1,3 @@
-//! In current implementation this is not a real filesystem
+//! In current implementation this is not a real filesystem.
+//!
+//! T.B.D.

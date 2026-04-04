@@ -35,6 +35,7 @@ impl Deref for Ns16550AState {
 
 #[derive(Debug)]
 struct Ns16550AStateInner {
+    devnum: MonoOnce<CharDevNum>,
     base: PhysAddr,
     reg_shift: usize,
     reg_io_width: usize,
@@ -57,11 +58,15 @@ impl Console for Ns16550AState {
 }
 
 impl CharDev for Ns16550AState {
-    fn read(&self, buf: &mut [u8]) -> Result<usize, DevError> {
+    fn devnum(&self) -> CharDevNum {
+        *self.devnum.get()
+    }
+
+    fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
         unimplemented!()
     }
 
-    fn write(&self, buf: &[u8]) -> Result<usize, DevError> {
+    fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
         let regs = unsafe {
             Ns16550ARegisters::from_raw(
                 self.remap.as_ptr().as_ptr().cast(),
@@ -301,6 +306,12 @@ impl DriverOps for Ns16550ADriver {
 
         let state = Ns16550AState {
             rc: Arc::new(Ns16550AStateInner {
+                devnum: unsafe {
+                    MonoOnce::from_partial_initialized(CharDevNum::new(
+                        MajorNum::new(0),
+                        MinorNum::new(0),
+                    ))
+                },
                 base,
                 reg_shift,
                 reg_io_width,
@@ -332,11 +343,15 @@ impl DriverOps for Ns16550ADriver {
             minor
         };
 
+        state.devnum.init(|n| {
+            n.write(CharDevNum::new(*MAJOR.get(), minor));
+        });
+
         pdev.set_drv_state(AnyOpaque::new(state.clone()));
 
         register_char_device(
             CharDevNum::new(*MAJOR.get(), minor),
-            ident_format!("{}", pdev.name()).unwrap(),
+            format!("{}", pdev.name()),
             Arc::new(state.clone()),
         )?;
 

@@ -4,7 +4,7 @@ use core::fmt::Debug;
 
 use idalloc::{IdAllocator, IdentityBijection, OneShotAlloc};
 
-use crate::prelude::*;
+use crate::{prelude::*, utils::iter_ctx::IterCtx};
 
 /// Nothing too much. Just a simple wrapper to prevent invalid block sizes.
 ///
@@ -80,14 +80,14 @@ pub trait BlockDev: Send + Sync {
     /// - `block_idx` specifies the index of the block to read from.
     /// - `buf` is the buffer to read into, whose length is guaranteed to be a
     ///   multiple of [Self::block_size()].
-    fn read_blocks(&self, block_idx: usize, buf: &mut [u8]) -> Result<(), DevError>;
+    fn read_blocks(&self, block_idx: usize, buf: &mut [u8]) -> Result<(), FsError>;
 
     /// Perform a synchronous write operation to the device.
     ///
     /// - `block_idx` specifies the index of the block to write to.
     /// - `buf` is the buffer to write from, whose length is guaranteed to be a
     ///   multiple of [Self::block_size()].
-    fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), DevError>;
+    fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), FsError>;
 }
 
 impl Debug for dyn BlockDev {
@@ -99,6 +99,7 @@ impl Debug for dyn BlockDev {
     }
 }
 
+/// Class of block devices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BlockDevClass {
     Virtio,
@@ -156,6 +157,15 @@ impl Debug for BlockDevDesc {
     }
 }
 
+/// What you get when you enumerate block devices. Contains basic metadata about
+/// the device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockDevEntry {
+    pub devnum: BlockDevNum,
+    pub class: BlockDevClass,
+    pub name: String,
+}
+
 pub trait BlockDriver: Driver {
     fn major(&self) -> MajorNum;
 }
@@ -171,6 +181,7 @@ struct BlockDevRegistry {
     devices: HashMap<BlockDevNum, BlockDevDesc>,
     names: HashMap<String, BlockDevNum>,
     next_name_idx: HashMap<BlockDevClass, usize>,
+    ordered: Vec<BlockDevNum>,
 }
 
 impl BlockDevRegistry {
@@ -179,6 +190,7 @@ impl BlockDevRegistry {
             devices: HashMap::new(),
             names: HashMap::new(),
             next_name_idx: HashMap::new(),
+            ordered: Vec::new(),
         }
     }
 
@@ -258,6 +270,7 @@ pub fn register_block_device(registration: BlockDevRegistration) -> Result<Strin
 
     registry.names.insert(name.clone(), registration.devnum);
     registry.devices.insert(registration.devnum, desc);
+    registry.ordered.push(registration.devnum);
 
     kinfoln!(
         "block device registered: devnum={}, name={}, class={:?}",
@@ -300,10 +313,36 @@ pub fn get_block_dev_name(devnum: BlockDevNum) -> Option<String> {
         .map(|desc| desc.name.clone())
 }
 
-#[kunit]
-fn test_alpha_disk_name_encoding() {
-    assert_eq!(format_alpha_disk_name("vd", 0), "vda");
-    assert_eq!(format_alpha_disk_name("vd", 25), "vdz");
-    assert_eq!(format_alpha_disk_name("vd", 26), "vdaa");
-    assert_eq!(format_alpha_disk_name("sd", 27), "sdab");
+/// Enumerate block devices in registration order.
+///
+/// Caller should provide a [`IterCtx`] to keep track of the enumeration state.
+pub fn next_block_dev(ctx: &mut IterCtx) -> Option<BlockDevEntry> {
+    let registry = SUBSYS.registry.read_irqsave();
+    let devnum = *registry.ordered.get(ctx.cur_offset())?;
+    ctx.advance(1);
+
+    let desc = registry
+        .devices
+        .get(&devnum)
+        .expect("ordered block device index points to missing device");
+
+    Some(BlockDevEntry {
+        devnum,
+        class: desc.class,
+        name: desc.name.clone(),
+    })
+}
+
+mod ramdisk;
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    #[kunit]
+    fn test_alpha_disk_name_encoding() {
+        assert_eq!(format_alpha_disk_name("vd", 0), "vda");
+        assert_eq!(format_alpha_disk_name("vd", 25), "vdz");
+        assert_eq!(format_alpha_disk_name("vd", 26), "vdaa");
+        assert_eq!(format_alpha_disk_name("sd", 27), "sdab");
+    }
 }

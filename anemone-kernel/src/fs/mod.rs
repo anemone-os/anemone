@@ -25,7 +25,6 @@ pub mod api;
 
 pub use self::{
     anonymous::*,
-    api::*,
     dentry::Dentry,
     error::FsError,
     file::{DirContext, DirEntry, File, FileOps},

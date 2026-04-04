@@ -12,6 +12,13 @@ pub enum InitCallLevel {
     Fs = 0,
     /// Register generic device drivers.
     Driver = 1,
+    /// Physical devices are probed when devices are discovered. This state
+    /// happens right after that, and is for those virtual devices that should
+    /// be registered to various subsystems. (e.g. null, zero, random for char
+    /// subsystem, ramdisk for block subsystem, etc.)
+    ///
+    /// In that sense, this can be considered as virtual device probing.
+    Probe = 2,
 }
 
 #[derive(Debug)]
@@ -33,6 +40,10 @@ fn collect_initcalls(level: InitCallLevel) -> &'static [InitCall] {
         InitCallLevel::Driver => (
             __sinitcall_driver as *const () as usize,
             __einitcall_driver as *const () as usize,
+        ),
+        InitCallLevel::Probe => (
+            __sinitcall_probe as *const () as usize,
+            __einitcall_probe as *const () as usize,
         ),
     };
 

@@ -66,3 +66,23 @@ gen_basic_try_from_syscall_arg!(signed, i16);
 gen_basic_try_from_syscall_arg!(signed, i32);
 gen_basic_try_from_syscall_arg!(signed, i64);
 gen_basic_try_from_syscall_arg!(signed, isize);
+
+impl TryFromSyscallArg for bool {
+    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+        match raw {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(KernelError::InvalidArgument.into()),
+        }
+    }
+}
+
+impl TryFromSyscallArg for VirtAddr {
+    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+        if raw < KernelLayout::USPACE_TOP_ADDR {
+            Ok(VirtAddr::new(raw))
+        } else {
+            Err(KernelError::InvalidArgument.into())
+        }
+    }
+}

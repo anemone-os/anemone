@@ -40,11 +40,15 @@ pub mod syserror;
 pub mod task;
 pub mod time;
 pub mod utils;
+pub mod uts;
 
 use crate::{
-    device::discovery::open_firmware::{
-        get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
-        unflatten_device_tree,
+    device::discovery::{
+        open_firmware::{
+            get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
+            unflatten_device_tree,
+        },
+        probe_virtual_devices,
     },
     mm::layout::KernelLayoutTrait,
     prelude::*,
@@ -96,7 +100,6 @@ fn ls_dir(path: &Path) {
 
         let name = dirent.name;
         let path = path.join(name);
-        //println!("{}", path.display());
         kdebugln!("{} ({:?})", path.display(), dirent.ty);
         if dirent.ty == InodeType::Dir {
             ls_dir(&path);
@@ -130,6 +133,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         parse_bootargs();
         machine_init();
         of_platform_discovery();
+        probe_virtual_devices();
 
         IntrArch::init_local_irq();
         percpu_login();

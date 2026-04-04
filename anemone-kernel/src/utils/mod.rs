@@ -12,6 +12,7 @@ pub mod any_opaque;
 pub mod byte_writer;
 pub mod data;
 pub mod identity;
+pub mod iter_ctx;
 pub mod mmio;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
