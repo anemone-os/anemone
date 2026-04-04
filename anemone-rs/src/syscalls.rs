@@ -28,6 +28,10 @@ pub fn sys_execve(path_ptr: u64, argv_ptr: u64) -> Result<u64, Errno> {
     unsafe { raw_syscall(SYS_EXECVE, path_ptr, argv_ptr, 0, 0, 0, 0) }
 }
 
+pub fn sys_clone() -> Result<u64, Errno> {
+    unsafe { raw_syscall(SYS_CLONE, 0, 0, 0, 0, 0, 0) }
+}
+
 pub fn sys_exit(code: u64) -> ! {
     unsafe {
         raw_syscall(SYS_EXIT, code, 0, 0, 0, 0, 0).expect("failed to invoke exit syscall");

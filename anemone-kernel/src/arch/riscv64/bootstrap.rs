@@ -391,7 +391,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         wake_up_aps(bsp_id);
 
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
-        add_to_ready(Arc::new(
+        let bsp_kinit_task = Arc::new(
             Task::new_kernel(
                 "kinit-bsp",
                 bsp_kinit as *const (),
@@ -401,7 +401,9 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
                 None,
             )
             .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e)),
-        ));
+        );
+        register_root_task(bsp_kinit_task.clone());
+        add_to_ready(bsp_kinit_task);
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
     }
 }
@@ -441,7 +443,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
                 ParameterList::new(&[ap_id as u64]),
                 IntrArch::DISABLED_IRQ_FLAGS,
                 TaskFlags::NONE,
-                None,
+                Some(wait_for_root_task()),
             )
             .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e)),
         ));

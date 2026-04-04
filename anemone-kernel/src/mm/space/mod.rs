@@ -9,6 +9,7 @@ use core::{
     fmt::Debug,
     mem::swap,
     ops::{Deref, DerefMut},
+    ptr::copy,
 };
 
 use range_allocator::Rangable;
@@ -21,10 +22,15 @@ use crate::{
 
 mod api;
 pub use api::*;
+pub mod fault;
 pub mod image;
 
-// TODO: these contants should be in kb, not in pages.
+// TODO: these constants should be in KB, not in pages.
 
+/// Maximum number of pages that a user stack may occupy.
+///
+/// This value is expressed in pages and derived from the configuration
+/// constant [USER_STACK_SHIFT_KB]. Refer to [MAX_USER_STACK_PAGES].
 pub const MAX_USER_STACK_PAGES: u64 = const {
     const MAX_USER_STACK_BYTES: u64 = 1 << USER_STACK_SHIFT_KB << 10;
     const_assert!(
@@ -34,6 +40,9 @@ pub const MAX_USER_STACK_PAGES: u64 = const {
     MAX_USER_STACK_BYTES / PagingArch::PAGE_SIZE_BYTES as u64
 };
 
+/// Initial number of pages allocated for a newly created user stack.
+///
+/// Derived from [USER_INIT_STACK_SHIFT_KB]. See [INIT_USER_STACK_PAGES].
 pub const INIT_USER_STACK_PAGES: u64 = const {
     const INIT_USER_STACK_BYTES: u64 = 1 << USER_INIT_STACK_SHIFT_KB << 10;
     const_assert!(
@@ -43,6 +52,9 @@ pub const INIT_USER_STACK_PAGES: u64 = const {
     INIT_USER_STACK_BYTES / PagingArch::PAGE_SIZE_BYTES as u64
 };
 
+/// Maximum number of pages the user heap may grow to.
+///
+/// Derived from [USER_HEAP_SHIFT_MB]. See [MAX_HEAP_PAGES].
 pub const MAX_HEAP_PAGES: u64 = const {
     const MAX_HEAP_BYTES: u64 = 1 << USER_HEAP_SHIFT_MB << 20;
     const_assert!(
@@ -61,6 +73,7 @@ pub struct UserSpace {
     table_ppn: PhysPageNum,
     inner: RwLock<UserSpaceInner>,
 }
+
 #[derive(Debug)]
 pub struct UserSpaceInner {
     /// Underlying page table for this address space.
@@ -74,10 +87,142 @@ pub struct UserSpaceInner {
     uheap: MemArea,
     /// Current program break for this address space.
     ubrk: VirtAddr,
-    /// Frames backing loaded ELF segments.
-    seg_frames: Vec<FrameHandle>,
+    /// Segments
+    segs: Vec<Segment>,
 }
+
+#[derive(Debug)]
+pub struct Segment {
+    range: VirtPageRange,
+    perm: PteFlags,
+    frames: Box<[FrameHandle]>,
+}
+
+impl Segment {
+    /// Create a new [`Segment`] covering `range` with permission `perm` and
+    /// backing `frames`.
+    ///
+    /// **The `frames` field is expected to be in the same order as the virtual
+    /// pages in `range`.**
+    ///
+    /// The caller must ensure that `frames.len() == range.len()`.
+    pub fn new(range: VirtPageRange, perm: PteFlags, frames: Box<[FrameHandle]>) -> Self {
+        debug_assert!(range.len() == frames.len());
+        Self {
+            range,
+            perm,
+            frames: frames,
+        }
+    }
+
+    /// Perform copy-on-write for the page at virtual page number `vpn`.
+    ///
+    /// Returns an error if the segment is not writable or if allocation
+    /// fails. This method clones the underlying frame if it is currently
+    /// shared, leaving the original frame intact for other owners.
+    pub fn copy_on_write(&mut self, vpn: VirtPageNum) -> Result<(), MmError> {
+        if !self.perm.contains(PteFlags::WRITE) {
+            return Err(MmError::PermissionDenied);
+        }
+        let idx = (vpn - self.range.start()) as usize;
+        let frame = &self.frames[idx];
+        let meta = frame.meta();
+        // if the frame is shared, allocate a new frame and copy the data.
+
+        // If incrementing/decrementing the count occurs simultaneously with the
+        // instructions below, the maximum overhead is merely copying one more page of
+        // memory, and no unsafety will result.
+
+        // Shared pages are **read only**
+        if meta.is_shared() {
+            kdebugln!(
+                "copied shared page from {} to {} for vpn {}",
+                frame.ppn(),
+                frame.ppn(),
+                vpn
+            );
+            let mut new_frame = unsafe { alloc_frame().ok_or(MmError::OutOfMemory)? };
+            let dest: *mut u8 = new_frame.ppn().to_phys_addr().to_hhdm().as_ptr_mut();
+            let src: *const u8 = frame.ppn().to_phys_addr().to_hhdm().as_ptr();
+            unsafe {
+                copy(src, dest, PagingArch::PAGE_SIZE_BYTES);
+                self.frames[idx] = new_frame.into_frame_handle();
+            }
+        } else {
+            kdebugln!("({}) claimed shared page at {}", current_task_id(), vpn);
+            // do nothing
+        }
+        Ok(())
+    }
+
+    /// Map this segment to the given page table mapper with the permissions
+    /// specified in `perm`.
+    ///
+    /// # Safety
+    ///  * Rollback is not performed if an error occurs during the mapping
+    ///    process.
+    pub unsafe fn map_to(&self, mapper: &mut Mapper, perm: PteFlags) -> Result<(), MmError> {
+        for i in 0..self.range.len() {
+            let vpn = self.range.start() + i as u64;
+            if let Some(translated) = mapper.translate(vpn) {
+                // segments not aligned to pages
+                return Err(MmError::NotAligned);
+            } else {
+                unsafe {
+                    mapper.map_one(
+                        vpn,
+                        self.frames[i].ppn(),
+                        perm | PteFlags::USER | PteFlags::VALID,
+                        0,
+                        false,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Create a copy of this segment for use by a new address space.
+    ///
+    /// The returned [`Segment`] shares frames with the original. The
+    /// write permissions of both two [PageTable]s are cleared (copy-on-write
+    /// semantics).
+    pub unsafe fn create_copy(
+        &mut self,
+        cur_mapper: &mut Mapper,
+        new_mapper: &mut Mapper,
+    ) -> Result<Self, MmError> {
+        let new_perm;
+        if self.perm.contains(PteFlags::WRITE) {
+            new_perm = self.perm - PteFlags::WRITE;
+            unsafe {
+                cur_mapper.change_flags(
+                    self.range,
+                    |_, _| Some(new_perm | PteFlags::USER | PteFlags::VALID),
+                    TraverseOrder::PreOrder,
+                )
+            };
+        } else {
+            new_perm = self.perm;
+        }
+        let new = Self {
+            range: self.range,
+            perm: self.perm,
+            frames: self.frames.clone(),
+        };
+        unsafe {
+            new.map_to(new_mapper, new_perm | PteFlags::USER | PteFlags::VALID);
+        }
+        Ok(new)
+    }
+}
+
 impl UserSpace {
+    /// Create a new, empty [UserSpace] with a fresh page table and
+    /// uninitialized user areas (stack/heap are empty).
+    ///
+    /// See [Self::new_user] for creating a [UserSpace] prepopulated with kernel
+    /// mappings and an allocated initial stack.
     pub fn new_empty() -> Result<Self, MmError> {
         let table = PageTable::new()?;
         Ok(Self {
@@ -100,11 +245,16 @@ impl UserSpace {
                 )
                 .unwrap(),
                 ubrk: VirtPageNum::new(0).to_virt_addr(),
-                seg_frames: vec![],
+                segs: vec![],
             }),
         })
     }
 
+    /// Create a new [UserSpace] prepared for running a user process.
+    ///
+    /// This will copy kernel mappings into the new page table and preallocate
+    /// the user stack to [INIT_USER_STACK_PAGES]. The heap will be left for
+    /// initialization after the user image is loaded.
     pub fn new_user() -> Result<Self, MmError> {
         let mut table = PageTable::new()?;
         KERNEL_PTABLE.copy_to_ptable(&mut table);
@@ -132,7 +282,7 @@ impl UserSpace {
                 ustack: stack,
                 uheap: heap,
                 ubrk: VirtPageNum::new(0).to_virt_addr(),
-                seg_frames: vec![],
+                segs: vec![],
             }),
         })
     }
@@ -164,36 +314,23 @@ impl UserSpace {
         let vaddr_ed = vaddr + vsize as u64;
         let vpn_st = vaddr.page_down();
         let vpn_ed = vaddr_ed.page_up();
+        let len = vpn_ed - vpn_st;
         if vpn_ed > inner.uheap.vpn_range.start() {
             inner.uheap.vpn_range = VirtPageRange::new(vpn_ed, 0u64);
             inner.ubrk = vpn_ed.to_virt_addr();
         }
         let mut mapper = inner.table.mapper();
-        let mut frames = vec![];
-        for vpn in vpn_st.get()..vpn_ed.get() {
-            let vpn = VirtPageNum::new(vpn);
-            if let Some(translated) = mapper.translate(vpn) {
-                if translated.flags.extract_rwx() != rwx_flags {
-                    // segment with different flags is already mapped in this page
-                    return Err(TErr::from(MmError::AlreadyMapped));
-                }
-            } else {
-                unsafe {
-                    let frame = alloc_frame()
-                        .ok_or(MmError::OutOfMemory)?
-                        .into_frame_handle();
-                    mapper.map_one(
-                        vpn,
-                        frame.ppn(),
-                        rwx_flags | PteFlags::USER | PteFlags::VALID,
-                        0,
-                        false,
-                    )?;
-                    frames.push(frame);
-                }
-            }
-        }
+        let mut frames = (0..len)
+            .map(|_| {
+                alloc_frame()
+                    .and_then(|owned| unsafe { Some(owned.into_frame_handle()) })
+                    .ok_or(MmError::OutOfMemory)
+            })
+            .collect::<Result<Vec<_>, MmError>>()?
+            .into_boxed_slice();
+        let seg = Segment::new(VirtPageRange::new(vpn_st, len), rwx_flags, frames);
         unsafe {
+            seg.map_to(&mut mapper, rwx_flags)?;
             mapper.fill_data(vaddr, source, psize as u64)?;
         }
         if vsize > psize {
@@ -205,7 +342,7 @@ impl UserSpace {
                 )?;
             }
         }
-        inner.seg_frames.extend(frames);
+        inner.segs.push(seg);
         Ok(())
     }
 
@@ -336,6 +473,82 @@ impl UserSpace {
             PagingArch::activate_addr_space(&self.inner.read().table);
         }
     }
+    /// Create a copy of this [UserSpace] with copy-on-write semantics.
+    ///
+    /// # Notes
+    /// If the operation fails, pages that have already been converted to
+    /// read-only will not be rolled back, but will be restored during a later
+    /// page fault.
+    pub fn create_copy(&self) -> Result<Self, MmError> {
+        let mut inner_guard = self.inner.write();
+        let inner_mut = &mut *inner_guard;
+        // old fields
+        let uinit_sp = inner_mut.uinit_sp;
+        let ubrk = inner_mut.ubrk;
+        let ustack = &mut inner_mut.ustack;
+        let table = &mut inner_mut.table;
+        let mut mapper = table.mapper();
+        let uheap = &mut inner_mut.uheap;
+        let segs = &mut inner_mut.segs;
+        // new fields
+        let mut new_segs = vec![];
+        let mut new_table = PageTable::new()?;
+        KERNEL_PTABLE.copy_to_ptable(&mut new_table);
+        let mut new_mapper = new_table.mapper();
+        for seg in segs {
+            new_segs.push(unsafe { seg.create_copy(&mut mapper, &mut new_mapper)? });
+        }
+        let mut new_ustack = unsafe { ustack.create_copy(&mut mapper, &mut new_mapper)? };
+        let mut new_uheap = unsafe { uheap.create_copy(&mut mapper, &mut new_mapper)? };
+        let new_ppn = new_table.root_ppn();
+        // return the created value
+        let new_inner = UserSpaceInner {
+            table: new_table,
+            ustack: new_ustack,
+            uinit_sp: uinit_sp,
+            uheap: new_uheap,
+            ubrk: ubrk,
+            segs: new_segs,
+        };
+        let new = UserSpace {
+            table_ppn: new_ppn,
+            inner: RwLock::new(new_inner),
+        };
+        Ok(new)
+    }
+
+    pub fn copy_on_write(&self, vpn: VirtPageNum) -> Result<(), MmError> {
+        let mut inner = self.inner.write();
+        let mut handled = false;
+        for seg in &mut inner.segs {
+            if seg.range.contains(vpn) {
+                seg.copy_on_write(vpn)?;
+                handled = true;
+            }
+        }
+        if inner.ustack.vpn_range.contains(vpn) {
+            inner.ustack.copy_on_write(vpn)?;
+            handled = true;
+        }
+        if inner.uheap.vpn_range.contains(vpn) {
+            inner.uheap.copy_on_write(vpn)?;
+            handled = true;
+        }
+        if handled {
+            let mut mapper = inner.table.mapper();
+            match mapper.translate(vpn) {
+                Some(translated) => unsafe {
+                    mapper.change_flags_one(vpn, |flag| flag | PteFlags::WRITE, 0)?;
+                },
+                None => {
+                    return Err(MmError::NotMapped);
+                },
+            };
+            Ok(())
+        } else {
+            Err(MmError::NotMapped)
+        }
+    }
 }
 
 impl PartialEq for UserSpace {
@@ -347,7 +560,7 @@ impl PartialEq for UserSpace {
 impl Eq for UserSpace {}
 
 /// Growth direction for a memory area.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum AreaGrowthDirection {
     Higher,
     Lower,
@@ -356,17 +569,20 @@ pub enum AreaGrowthDirection {
 #[derive(Debug)]
 pub struct MemArea {
     vpn_range: VirtPageRange,
-    frames: Vec<FrameHandle>,
+    frames: VecDeque<FrameHandle>,
     max_pages: usize,
     growth: AreaGrowthDirection,
     flags: PteFlags,
 }
 
 impl MemArea {
-    /// An empty memory area with no mapped pages.
+    /// The empty memory area constant [EMPTY].
+    ///
+    /// This is a convenient zero-value used when swapping areas during
+    /// adjustments (e.g., in `set_brk`).
     pub const EMPTY: Self = Self {
         vpn_range: VirtPageRange::new(VirtPageNum::new(0), 0),
-        frames: Vec::new(),
+        frames: VecDeque::new(),
         max_pages: 0,
         growth: AreaGrowthDirection::Higher,
         flags: PteFlags::empty(),
@@ -381,7 +597,7 @@ impl MemArea {
     ) -> Result<Self, MmError> {
         let mut memarea = MemArea {
             vpn_range: VirtPageRange::new(init_vpn, 0),
-            frames: vec![],
+            frames: VecDeque::new(),
             max_pages: max_pages,
             growth: growth,
             flags,
@@ -485,7 +701,10 @@ impl MemArea {
                     VirtPageRange::new(self.vpn_range.start(), (self.vpn_range.len() + 1) as u64)
             },
         }
-        self.frames.push(frame);
+        match self.growth {
+            AreaGrowthDirection::Higher => self.frames.push_back(frame),
+            AreaGrowthDirection::Lower => self.frames.push_front(frame),
+        }
         Ok(())
     }
 
@@ -509,16 +728,96 @@ impl MemArea {
                     VirtPageRange::new(self.vpn_range.start(), (self.vpn_range.len() - 1) as u64)
             },
         }
-        self.frames.pop();
+        let _ = match self.growth {
+            AreaGrowthDirection::Higher => self.frames.pop_back(),
+            AreaGrowthDirection::Lower => self.frames.pop_front(),
+        };
         true
+    }
+    /// Create a copy of this memory area with copy-on-write semantics and map
+    /// the new area to `mapper_new`.
+    ///
+    /// # Safety
+    ///  * Rollback is not performed if an error occurs during the mapping
+    ///    process.
+    pub unsafe fn create_copy(
+        &mut self,
+        cur_mapper: &mut Mapper,
+        mapper_new: &mut Mapper,
+    ) -> Result<MemArea, MmError> {
+        let new_flags;
+        if self.flags.contains(PteFlags::WRITE) {
+            new_flags = self.flags - PteFlags::WRITE;
+            unsafe {
+                cur_mapper.change_flags(
+                    self.vpn_range,
+                    |_, _| Some(new_flags),
+                    TraverseOrder::PreOrder,
+                );
+            }
+        } else {
+            new_flags = self.flags;
+        }
+        let new = Self {
+            vpn_range: self.vpn_range,
+            frames: self.frames.clone(),
+            max_pages: self.max_pages,
+            growth: self.growth,
+            flags: self.flags,
+        };
+        let mut i = 0;
+        for frame in &new.frames {
+            unsafe {
+                mapper_new.map_one(
+                    new.vpn_range.start() + i as u64,
+                    frame.ppn(),
+                    new_flags,
+                    0,
+                    false,
+                )?;
+            }
+            i += 1;
+        }
+        Ok(new)
+    }
+
+    pub fn copy_on_write(&mut self, vpn: VirtPageNum) -> Result<(), MmError> {
+        let idx = (vpn - self.vpn_range.start()) as usize;
+        if idx >= self.frames.len() {
+            return Err(MmError::NotMapped);
+        }
+        let frame = &self.frames[idx];
+        let meta = frame.meta();
+        // if the frame is shared, allocate a new frame and copy the data.
+
+        // If incrementing/decrementing the count occurs simultaneously with the
+        // instructions below, the maximum overhead is merely copying one more page of
+        // memory, and no unsafety will result.
+
+        // Shared pages are **read only**
+        if meta.is_shared() {
+            let mut new_frame = unsafe { alloc_frame().ok_or(MmError::OutOfMemory)? };
+            let dest: *mut u8 = new_frame.ppn().to_phys_addr().to_hhdm().as_ptr_mut();
+            let src: *const u8 = frame.ppn().to_phys_addr().to_hhdm().as_ptr();
+            unsafe {
+                copy(src, dest, PagingArch::PAGE_SIZE_BYTES);
+                self.frames[idx] = new_frame.into_frame_handle();
+            }
+        } else {
+            kdebugln!("({}) claimed shared page at {}", current_task_id(), vpn);
+            // do nothing
+        }
+        Ok(())
     }
 }
 
+/// Read guard for accessing the user-space page table.
+///
+/// The guard dereferences to a [`PageTable`] allowing safe read-only access
+/// to the user page table while preventing preemption.
 pub struct USpacePTableReadGuard<'a> {
     guard: ReadNoPreemptGuard<'a, UserSpaceInner>,
 }
-
-/// Read guard for accessing the user-space page table.
 
 impl Deref for USpacePTableReadGuard<'_> {
     type Target = PageTable;

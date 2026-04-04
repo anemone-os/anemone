@@ -1,22 +1,10 @@
 #![no_std]
 #![no_main]
 
-pub fn main() {}
+use anemone_rs::process::execve;
 
-use core::panic::PanicInfo;
-
-use anemone_abi::syscall::syscall;
-
-#[unsafe(no_mangle)]
-pub fn _start() {
-    loop {}
-    unsafe {
-        syscall(114514, 0, 0, 0, 0, 0, 0);
-    }
-    loop {}
-}
-
-#[panic_handler]
-pub fn panic_handler(_info: &PanicInfo) -> ! {
-    loop {}
+#[anemone_rs::main]
+pub fn main() -> Result<(), anemone_abi::errno::Errno> {
+    execve("bin/user-test", &["bin/user-test", "1"]).expect("failed to execve user-test");
+    Ok(())
 }
