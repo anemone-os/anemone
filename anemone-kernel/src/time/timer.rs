@@ -1,5 +1,7 @@
 //! Timer events and related functionality.
 
+use core::fmt::Debug;
+
 use alloc::collections::binary_heap::BinaryHeap;
 
 use crate::prelude::*;
@@ -7,6 +9,14 @@ use crate::prelude::*;
 struct TimerEvent {
     expire_ticks: u64,
     callback: Box<dyn FnOnce() + Send + 'static>,
+}
+
+impl Debug for TimerEvent {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("TimerEvent")
+            .field("expire_ticks", &self.expire_ticks)
+            .finish()
+    }
 }
 
 impl PartialEq for TimerEvent {
