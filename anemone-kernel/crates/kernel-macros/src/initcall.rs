@@ -40,6 +40,7 @@ pub fn initcall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let level = match level_str {
         "fs" => quote!(crate::initcall::InitCallLevel::Fs),
         "driver" => quote!(crate::initcall::InitCallLevel::Driver),
+        "probe" => quote!(crate::initcall::InitCallLevel::Probe),
         _ => {
             return Error::new_spanned(
                 proc_macro2::TokenStream::from(attr),

@@ -1,3 +1,8 @@
+//! openat system call.
+//!
+//! Reference:
+//! - https://www.man7.org/linux/man-pages/man2/openat.2.html
+
 use anemone_abi::fs::linux::open::{O_APPEND, O_CREAT};
 
 use crate::{
@@ -5,35 +10,6 @@ use crate::{
     task::files::OpenFlags,
 };
 
-/// Reference: https://www.man7.org/linux/man-pages/man2/openat.2.html
-///
-/// "
-/// openat()
-///
-/// The openat() system call operates in exactly the same way as
-/// open(), except for the differences described here.
-///
-/// The dirfd argument is used in conjunction with the path argument
-/// as follows:
-/// - If the pathname given in path is absolute, then dirfd is ignored.
-/// - If the pathname given in path is relative and dirfd is the special value
-///   AT_FDCWD, then path is interpreted relative to the current working
-///   directory of the calling process (like open()).
-/// - If the pathname given in path is relative, then it is interpreted relative
-///   to the directory referred to by the file descriptor dirfd (rather than
-///   relative to the current working directory of the calling process, as is
-///   done by open() for a relative pathname).  In this case, dirfd must be a
-///   directory that was opened for reading (O_RDONLY) or using the O_PATH flag.
-/// - If the pathname given in path is relative, and dirfd is not a valid file
-///   descriptor, an error (EBADF) results.  (Specifying an invalid file
-///   descriptor number in dirfd can be used as a means to ensure that path is
-///   absolute.)
-/// "
-///
-/// Parameters:
-/// - `flags`: We only record access mode. Those nonpersistent flags (e.g.
-///   O_CREAT) will be handled here immediately.
-/// - `mode`: Only used when O_CREAT is set.
 #[syscall(SYS_OPENAT)]
 fn sys_openat(
     dirfd: isize,
@@ -89,7 +65,5 @@ fn sys_openat(
             let fd = task.open_fd(file, OpenFlags::from_linux_flags(flags));
             return Ok(fd as u64);
         }
-
-        Ok(0)
     })
 }

@@ -17,21 +17,41 @@ pub struct DirEntry {
     pub ty: InodeType,
 }
 
+/// `DirContext` maintains a cursor internally.
+///
+/// **Users should not make any assumptions about the cursor's value. Instead,
+/// the whole struct should be treated as an opaque handle.**
 #[derive(Debug)]
 pub struct DirContext {
     offset: usize,
 }
 
 impl DirContext {
+    /// Create a new `DirContext` for iterating a directory from the beginning.
     pub fn new() -> Self {
         Self { offset: 0 }
     }
 
-    pub fn offset(&self) -> usize {
+    /// Rebuild a `DirContext` from an opaque cursor previously produced by the
+    /// same filesystem.
+    ///
+    /// **Only the VFS layer should use this method.**
+    pub(super) fn from_offset(cursor: usize) -> Self {
+        Self { offset: cursor }
+    }
+
+    /// Get current offset.
+    ///
+    /// **Only filesystem drivers and VFS layer should use this method.**
+    pub(super) fn offset(&self) -> usize {
         self.offset
     }
 
-    pub fn advance(&mut self, n: usize) {
+    /// Advance the offset by `n`, whose meaning is defined by the filesystem
+    /// driver.
+    ///
+    /// **Only filesystem drivers should use this method.**
+    pub(super) fn advance(&mut self, n: usize) {
         self.offset += n;
     }
 }
@@ -58,8 +78,41 @@ impl File {
         &self.prv
     }
 
+    /// The offset is an opaque value that can only be interpreted by the
+    /// filesystem driver and vfs layer.
+    ///
+    /// For example, for regular files, it often represents the byte offset from
+    /// the beginning of the file, which is maintained by filesystem drivers and
+    /// vfs layer together.
+    ///
+    /// While for directories, it only represents the index of the next
+    /// directory entry to read, which is only maintained by vfs layer.
     pub(super) fn set_pos(&self, pos: usize) {
         self.pos.store(pos, Ordering::Relaxed);
+    }
+
+    /// Get a `DirContext` for iterating the directory represented by this file.
+    ///
+    /// Returns an error if this file does not represent a directory.
+    pub(super) fn dir_context(&self) -> Result<DirContext, FsError> {
+        if self.path.inode().ty() != InodeType::Dir {
+            return Err(FsError::NotDir);
+        }
+        Ok(DirContext::from_offset(self.pos()))
+    }
+
+    /// Commit the state of a `DirContext` after iterating a directory entry.
+    /// This should be called by the VFS layer after a successful `iterate`
+    /// call to update the file's cursor.
+    ///
+    /// Returns an error if this file does not represent a directory.
+    pub(super) fn commit_dir_context(&self, ctx: &DirContext) -> Result<(), FsError> {
+        if self.path.inode().ty() != InodeType::Dir {
+            return Err(FsError::NotDir);
+        }
+
+        self.set_pos(ctx.offset());
+        Ok(())
     }
 }
 

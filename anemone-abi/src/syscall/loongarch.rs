@@ -54,16 +54,29 @@ pub mod linux {
     pub const SYS_DUP: u64 = 23;
     pub const SYS_DUP3: u64 = 24;
 
+    pub const SYS_MKDIRAT: u64 = 34;
+    pub const SYS_UNLINKAT: u64 = 35;
+
+    pub const SYS_UMOUNT2: u64 = 39;
+    pub const SYS_MOUNT: u64 = 40;
+
     pub const SYS_CHDIR: u64 = 49;
     pub const SYS_CHROOT: u64 = 51;
 
     pub const SYS_OPENAT: u64 = 56;
     pub const SYS_CLOSE: u64 = 57;
+
+    pub const SYS_GETDENTS64: u64 = 61;
+
     pub const SYS_READ: u64 = 63;
     pub const SYS_WRITE: u64 = 64;
 
+    pub const SYS_FSTAT: u64 = 80;
+
     pub const SYS_EXIT: u64 = 93;
     pub const SYS_SCHED_YIELD: u64 = 124;
+
+    pub const SYS_UNAME: u64 = 160;
 
     pub const SYS_GETPID: u64 = 172;
     pub const SYS_GETPPID: u64 = 173;

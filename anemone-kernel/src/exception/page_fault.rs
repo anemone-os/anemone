@@ -22,7 +22,11 @@ pub struct PageFaultInfo {
 
 impl PageFaultInfo {
     pub fn new(fault_pc: VirtAddr, fault_addr: VirtAddr, ty: PageFaultType) -> Self {
-        Self { fault_pc, fault_addr, ty }
+        Self {
+            fault_pc,
+            fault_addr,
+            ty,
+        }
     }
 
     pub fn fault_pc(&self) -> VirtAddr {

@@ -26,6 +26,7 @@ pub mod char {
     pub mod minor {
         pub const NULL: usize = 3;
         pub const ZERO: usize = 5;
+        pub const FULL: usize = 7;
         pub const RANDOM: usize = 8;
         pub const URANDOM: usize = 9;
     }

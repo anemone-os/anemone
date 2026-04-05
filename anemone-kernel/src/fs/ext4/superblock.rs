@@ -39,7 +39,7 @@ fn ext4_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, FsError
         sb.clone(),
         AnyOpaque::new(Ext4Inode::new()),
     ));
-    inode.set_meta(InodeMeta {
+    inode.set_meta(&InodeMeta {
         nlink: attr.nlink,
         perm: InodePerm::from_bits_truncate(attr.mode as u16),
         size: attr.size,

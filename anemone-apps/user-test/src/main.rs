@@ -10,7 +10,7 @@ pub fn main() -> Result<(), Errno> {
     println!("user-test: current working directory: {}", cwd);
 
     // tmp test
-    execve("/getpid", &["/getpid"]).unwrap();
+    execve("/uname", &["/uname"]).unwrap();
 
     let args: Vec<&str> = args().collect();
     if args.len() < 2 {

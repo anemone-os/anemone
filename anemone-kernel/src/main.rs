@@ -40,13 +40,16 @@ pub mod syserror;
 pub mod task;
 pub mod time;
 pub mod utils;
+pub mod uts;
 
 use crate::{
-    device::discovery::open_firmware::{
-        get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
-        unflatten_device_tree,
+    device::discovery::{
+        open_firmware::{
+            get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
+            unflatten_device_tree,
+        },
+        probe_virtual_devices,
     },
-    fs::vfs_mount,
     mm::layout::KernelLayoutTrait,
     prelude::*,
     sync::{counter::CpuSync, mono::MonoOnce},
@@ -61,26 +64,20 @@ static KUNIT_SYNC_COUNTER: CpuSync = CpuSync::new("kunit");
 fn mount_rootfs() {
     match ROOTFS_SOURCE_KIND {
         "pseudo" => {
-            vfs_mount(
-                ROOTFS_FS_TYPE,
-                MountSource::Pseudo,
-                MountFlags::empty(),
-                None,
-            )
-            .unwrap();
+            mount_root("ramfs", MountSource::Pseudo, MountFlags::empty())
+                .expect("root mount failed");
         },
         "block" => {
             let rootfs_path = ROOTFS_SOURCE_PATH
                 .expect("rootfs source path must be configured for block-backed rootfs");
             let root_dev = device::block::get_block_dev_by_name(rootfs_path)
                 .unwrap_or_else(|| panic!("rootfs block device not found: {}", rootfs_path));
-            vfs_mount(
+            mount_root(
                 ROOTFS_FS_TYPE,
                 MountSource::Block(root_dev),
                 MountFlags::empty(),
-                None,
             )
-            .unwrap();
+            .expect("root mount failed");
         },
         other => panic!("unsupported rootfs source kind: {}", other),
     }
@@ -103,7 +100,6 @@ fn ls_dir(path: &Path) {
 
         let name = dirent.name;
         let path = path.join(name);
-        //println!("{}", path.display());
         kdebugln!("{} ({:?})", path.display(), dirent.ty);
         if dirent.ty == InodeType::Dir {
             ls_dir(&path);
@@ -137,6 +133,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         parse_bootargs();
         machine_init();
         of_platform_discovery();
+        probe_virtual_devices();
 
         IntrArch::init_local_irq();
         percpu_login();

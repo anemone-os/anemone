@@ -1,6 +1,5 @@
 //! CSR definitions and accessors
 
-
 use crate::reg::{
     asid::Asid,
     crmd::Crmd,
@@ -23,20 +22,17 @@ macro_rules! define_csr {
             /// Read the CSR value
             #[inline(always)]
             pub unsafe fn csr_read() -> u64 {
-                unsafe{
-                    csrrd::<$num>() as u64
-                }
+                unsafe { csrrd::<$num>() as u64 }
             }
 
             /// Write the CSR value
             #[inline(always)]
             pub unsafe fn csr_write(value: u64) {
-                unsafe{
+                unsafe {
                     csrwr::<$num>(value as i64);
                 }
             }
         }
-
     };
     (64, $name: ident, $num:expr, $type: ident) => {
         paste::paste! {
@@ -56,12 +52,11 @@ macro_rules! define_csr {
             /// Write the CSR value
             #[inline(always)]
             pub unsafe fn csr_write(value: super::$type) {
-                unsafe{
+                unsafe {
                     csrwr::<$num>(value.to_u64() as i64);
                 }
             }
         }
-
     };
     (32, $name: ident, $num:expr) => {
         paste::paste! {
@@ -81,12 +76,11 @@ macro_rules! define_csr {
             /// Write the CSR value
             #[inline(always)]
             pub unsafe fn csr_write(value: u32) {
-                unsafe{
+                unsafe {
                     csrwr::<$num>(value as i64);
                 }
             }
         }
-
     };
     (32, $name: ident, $num:expr, $type: ident) => {
         paste::paste! {
@@ -106,12 +100,11 @@ macro_rules! define_csr {
             /// Write the CSR value
             #[inline(always)]
             pub unsafe fn csr_write(value: super::$type) {
-                unsafe{
+                unsafe {
                     csrwr::<$num>(value.to_u32() as i64);
                 }
             }
         }
-
     };
 }
 
@@ -139,7 +132,6 @@ define_csr!(64, pgd, 0x1b);
 define_csr!(32, tid, 0x40);
 define_csr!(32, ticlr, 0x44);
 define_csr!(64, tcfg, 0x41, Tcfg);
-
 
 define_csr!(64, save0, 0x30);
 define_csr!(64, save1, 0x31);

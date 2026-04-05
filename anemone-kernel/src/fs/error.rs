@@ -32,6 +32,10 @@ pub enum FsError {
     NoMoreEntries,
     /// Permission denied.
     PermissionDenied,
+    /// File system run out its capacity.
+    NoSpace,
+    /// Device error occurred when accessing device files.
+    Dev(DevError),
 }
 
 impl AsErrno for FsError {
@@ -51,6 +55,8 @@ impl AsErrno for FsError {
             FsError::IsMountPoint => EINVAL,
             FsError::NoMoreEntries => ENOENT,
             FsError::PermissionDenied => EPERM,
+            FsError::NoSpace => ENOSPC,
+            FsError::Dev(dev_err) => dev_err.as_errno(),
         }
     }
 }

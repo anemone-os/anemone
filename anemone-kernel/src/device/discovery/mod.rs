@@ -9,6 +9,8 @@
 //! On x86_64, we can use ACPI, while on some embedded platforms such as ARM and
 //! RISC-V, Device Tree may be used.
 
+use crate::initcall::{InitCallLevel, run_initcalls};
+
 /// Currently this trait is unused.
 ///
 /// When we need to support more discovery mechanisms, we may abstract them
@@ -17,3 +19,12 @@ pub trait PlatformDiscovery {}
 
 pub mod fwnode;
 pub mod open_firmware;
+
+/// Probe those virtual devices. e.g. null, zero, ramdisk, etc.
+///
+/// This function should be called right after physical device discovery.
+pub unsafe fn probe_virtual_devices() {
+    unsafe {
+        run_initcalls(InitCallLevel::Probe);
+    }
+}

@@ -57,6 +57,10 @@ SECTIONS {
         *(.initcall.driver .initcall.driver.*)
         __einitcall_driver = .;
 
+        __sinitcall_probe = .;
+        *(.initcall.probe .initcall.probe.*)
+        __einitcall_probe = .;
+
         __edata = .;
     } > VIRT AT> RAM
 

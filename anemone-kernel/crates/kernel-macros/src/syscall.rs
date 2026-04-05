@@ -88,7 +88,8 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
                 Err(err) => return err.to_compile_error().into(),
             }
         }
-        arg.attrs.retain(|attr| !attr.path().is_ident("validate_with"));
+        arg.attrs
+            .retain(|attr| !attr.path().is_ident("validate_with"));
 
         arg_bindings.push(match validate_with {
             Some(validate_with) => quote! {

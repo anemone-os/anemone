@@ -1,4 +1,5 @@
 //! Syscall argument validation helpers for user-controlled data.
+
 use core::{
     ffi::{CStr, c_char},
     marker::PhantomData,
@@ -241,21 +242,26 @@ fn validate_user_array<T: Sized>(
     Ok(core::ptr::slice_from_raw_parts(arg as *const T, len))
 }
 
-pub fn user_readonly_ptr<T: Sized>(arg: u64) -> Result<*const T, SysError> {
-    Ok(UserPtr::<T, UserRead>::from_raw(arg)?.as_ptr())
-}
-
-pub fn user_writable_ptr<T: Sized>(arg: u64) -> Result<*mut T, SysError> {
-    Ok(UserPtr::<T, UserWrite>::from_raw(arg)?.as_mut_ptr())
-}
-
-/// Validate that the address in `arg` is inside user space and return it as a
-/// [VirtAddr].
-pub fn user_nullable_vaddr(arg: u64) -> Result<VirtAddr, SysError> {
+pub fn user_addr(arg: u64) -> Result<VirtAddr, SysError> {
     if arg < KernelLayout::USPACE_TOP_ADDR {
         Ok(VirtAddr::new(arg))
     } else {
-        Err(MmError::InvalidArgument.into())
+        Err(KernelError::InvalidArgument.into())
+    }
+}
+
+/// Lift a validator into an optional validator where a zero raw argument means
+/// the argument is absent.
+pub fn nullable<T, V>(validator: V) -> impl FnOnce(u64) -> Result<Option<T>, SysError>
+where
+    V: FnOnce(u64) -> Result<T, SysError>,
+{
+    move |arg| {
+        if arg == 0 {
+            Ok(None)
+        } else {
+            validator(arg).map(Some)
+        }
     }
 }
 
