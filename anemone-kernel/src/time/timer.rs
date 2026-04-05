@@ -65,14 +65,22 @@ pub fn on_timer_interrupt() {
         loop {
             let events = {
                 let mut queue = IRQ_EVENT_QUEUE.lock_irqsave();
-                let mut events = Vec::new();
+
+                // use a statically allocated vector to avoid dynamic memory allocation in the
+                // interrupt handler. 8 is actually randomly chosen, which does not make much
+                // sense.
+                let mut events = heapless::Vec::<TimerEvent, 8>::new();
                 while let Some(event) = queue.peek() {
+                    if events.is_full() {
+                        break;
+                    }
                     if event.expire_ticks <= ticks() {
-                        events.push(queue.pop().unwrap());
+                        events.push(queue.pop().unwrap()).unwrap();
                     } else {
                         break;
                     }
                 }
+
                 events
             };
             if events.is_empty() {

@@ -82,12 +82,12 @@ pub fn on_timer_interrupt() {
 
     let now_mono = LocalClockSource::curr_monotonic_time();
     let deadline = now_mono.wrapping_add(mono_per_tick());
-    LocalClockSource::program_next_timer(deadline);
+    LocalClockEvent::program_next_timer(deadline);
 }
 
 /// Call this to fire up the first timer interrupt on the current core.
 pub fn program_first_timer() {
     let now_mono = LocalClockSource::curr_monotonic_time();
     let deadline = now_mono.wrapping_add(mono_per_tick());
-    LocalClockSource::program_next_timer(deadline);
+    LocalClockEvent::program_next_timer(deadline);
 }
