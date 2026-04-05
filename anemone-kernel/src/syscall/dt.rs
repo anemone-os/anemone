@@ -96,6 +96,16 @@ impl<T: Sized, A: UserAccess> TryFromSyscallArg for UserPtr<T, A> {
     }
 }
 
+impl<T: Sized, A: UserAccess> TryFromSyscallArg for Option<UserPtr<T, A>> {
+    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+        if raw == 0 {
+            Ok(None)
+        } else {
+            UserPtr::from_raw(raw).map(Some)
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct UserSlice<T: Sized, A: UserAccess> {
     ptr: UserPtr<T, A>,

@@ -55,17 +55,11 @@ impl IntrArchTrait for RiscV64IntrArch {
     }
 
     unsafe fn init_local_irq() {
-        use crate::prelude::*;
-
         unsafe {
-            riscv::register::sstatus::set_sie();
             riscv::register::sie::set_ssoft();
             riscv::register::sie::set_stimer();
             riscv::register::sie::set_sext();
-
-            // this fires up system timer
-            sbi_rt::set_timer(TimeArch::current_ticks().wrapping_add(300_000_0) as u64)
-                .expect("failed to set timer for next timer interrupt");
+            riscv::register::sstatus::set_sie();
         }
     }
 }
@@ -80,12 +74,7 @@ pub unsafe fn handle_intr(reason: RiscV64Interrupt) {
             }
             handle_ipi();
         },
-        RiscV64Interrupt::SupervisorTimer => {
-            // TODO: use a proper value for the next timer interrupt.
-            sbi_rt::set_timer(riscv::register::time::read().wrapping_add(300_000_0) as u64)
-                .expect("failed to set timer for next timer interrupt");
-            handle_kernel_timer_interrupt();
-        },
+        RiscV64Interrupt::SupervisorTimer => handle_timer_interrupt(),
         RiscV64Interrupt::SupervisorExternal => handle_irq(),
     }
 }

@@ -135,8 +135,10 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         of_platform_discovery();
         probe_virtual_devices();
 
-        IntrArch::init_local_irq();
+        set_boot_mono(true);
+        program_first_timer();
         percpu_login();
+        IntrArch::init_local_irq();
 
         unsafe {
             device::console::on_system_boot();
@@ -146,6 +148,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         FINISH_SYNC_COUNTER.sync_with_counter();
         kinfoln!("bsp #{} kinit finished", bsp_id);
     }
+
     mount_rootfs();
 
     #[cfg(feature = "kunit")]
@@ -169,8 +172,11 @@ unsafe extern "C" fn ap_kinit(ap_id: usize) {
     unsafe {
         INIT_SYNC_COUNTER.sync_with_counter();
         kinfoln!("ap #{} kinit running on {}...", ap_id, current_task_id());
-        IntrArch::init_local_irq();
+
+        set_boot_mono(false);
+        program_first_timer();
         percpu_login();
+        IntrArch::init_local_irq();
 
         // collect previous IPIs sent by bsp before ap starts to run.
         // the main reason for this is to clear IPI buffers of bsp such that it can send

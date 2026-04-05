@@ -183,6 +183,24 @@
 
 #define ATTRIBUTE_DAX 2097152
 
+#define DT_UNKNOWN 0
+
+#define DT_FIFO 1
+
+#define DT_CHR 2
+
+#define DT_DIR 4
+
+#define DT_BLK 6
+
+#define DT_REG 8
+
+#define DT_LNK 10
+
+#define DT_SOCK 12
+
+#define DT_WHT 14
+
 /**
  * The Linux kernel actually does not define a maximum syscall number,
  * but it's obvious that syscall numbers won't exceed this value minus one, on
@@ -230,6 +248,38 @@
 #endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_MKDIRAT 34
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_MKDIRAT 34
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_UNLINKAT 35
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_UNLINKAT 35
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_UMOUNT2 39
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_UMOUNT2 39
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_MOUNT 40
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_MOUNT 40
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
 #define SYS_CHDIR 49
 #endif
 
@@ -262,6 +312,14 @@
 #endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_GETDENTS64 61
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_GETDENTS64 61
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
 #define SYS_READ 63
 #endif
 
@@ -278,6 +336,14 @@
 #endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_FSTAT 80
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_FSTAT 80
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
 #define SYS_EXIT 93
 #endif
 
@@ -291,6 +357,14 @@
 
 #if defined(__ANEMONE_ARCH_LOONGARCH64__)
 #define SYS_SCHED_YIELD 124
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_UNAME 160
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_UNAME 160
 #endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)

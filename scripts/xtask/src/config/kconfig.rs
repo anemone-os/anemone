@@ -42,7 +42,6 @@ pub struct Parameters {
     pub remap_shift_gb: Option<u64>,
     pub max_ident_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
-    pub time_slice_ms: Option<u64>,
     pub system_hz: Option<u16>,
     pub backtrace_depth: Option<usize>,
     pub user_stack_shift_kb: Option<u64>,
@@ -94,8 +93,6 @@ pub const MAX_IDENT_LEN_BYTES: usize = {};
 pub const MAX_FILE_NAME_LEN_BYTES: usize = MAX_IDENT_LEN_BYTES;
 /// Maximum number of processes
 pub const MAX_PROCESSES: u64 = {};
-/// Time slice duration in milliseconds
-pub const TIME_SLICE_MS: u64 = {};
 /// System timer frequency in hertz, i.e. number of timer interrupts per second
 pub const SYSTEM_HZ: u16 = {};
 /// Maximum depth of captured backtrace
@@ -114,7 +111,6 @@ pub const USER_HEAP_SHIFT_MB: u64 = {};
             default_or!(remap_shift_gb),
             default_or!(max_ident_len_bytes),
             default_or!(max_processes),
-            default_or!(time_slice_ms),
             default_or!(system_hz),
             default_or!(backtrace_depth),
             default_or!(user_stack_shift_kb),
