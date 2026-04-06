@@ -16,6 +16,7 @@ unsafe fn free_tid_raw(id: u32) {
 }
 
 #[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Tid(u32);
 
 pub const TID_IDLE: TidHandle = TidHandle(0);

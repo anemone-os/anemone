@@ -27,6 +27,7 @@ pub struct MonoFlow<T> {
     data: UnsafeCell<T>,
     #[cfg(debug_assertions)]
     borrowed: AtomicBool,
+    // mut_borrowed ?
 }
 
 unsafe impl<T> Sync for MonoFlow<T> {}
@@ -50,6 +51,7 @@ impl<T> MonoFlow<T> {
 
     /// Access the inner data.
     #[inline(always)]
+    #[track_caller]
     pub fn with<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&T) -> R,
@@ -73,6 +75,7 @@ impl<T> MonoFlow<T> {
 
     /// Mutably access the inner data.
     #[inline(always)]
+    #[track_caller]
     pub fn with_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut T) -> R,

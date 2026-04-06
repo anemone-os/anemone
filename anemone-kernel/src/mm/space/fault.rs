@@ -3,10 +3,11 @@ use crate::{device::CpuArchTrait, prelude::*, sched::clone_current_task};
 pub fn handle_user_page_fault(info: PageFaultInfo) {
     if let Err(e) = handle_user_page_fault_internal(info) {
         kerrln!(
-            "({}) user {} aborted with page fault at address {:?} with error code {:?}: {:?}",
+            "({}) user {} aborted with page fault at address {:?} with pc: {:?}, error type: {:?}, error code: {:?}",
             CpuArch::cur_cpu_id(),
             current_task_id(),
             info.fault_addr(),
+            info.fault_pc(),
             info.fault_type(),
             e
         );
@@ -22,11 +23,11 @@ pub fn handle_user_page_fault_internal(info: PageFaultInfo) -> Result<(), MmErro
     if info.fault_type() != PageFaultType::Write {
         return Err(MmError::PermissionDenied);
     }
-    uspace.copy_on_write(info.fault_addr().page_down())?;
-    kinfoln!(
+    uspace.write().copy_on_write(info.fault_addr())?;
+    /*kinfoln!(
         "copy on write for page fault at address {:?} in user {}",
         info.fault_addr(),
         task.tid()
-    );
+    );*/
     Ok(())
 }

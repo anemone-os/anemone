@@ -1,6 +1,7 @@
 //! Virtual file system and filesystem drivers.
 
 // vfs infrastructure
+mod anonymous;
 mod dentry;
 mod error;
 mod file;
@@ -17,7 +18,11 @@ mod devfs;
 mod ext4;
 mod ramfs;
 
+pub mod api;
+
 pub use self::{
+    anonymous::vfs_open_anonymous,
+    api::*,
     dentry::Dentry,
     error::FsError,
     file::{DirContext, DirEntry, File, FileOps},
@@ -27,6 +32,7 @@ pub use self::{
         InodeType, OpenedFile,
     },
     mount::{Mount, MountFlags, MountSource},
+    namei::{resolve, resolve_from},
     path::PathRef,
     superblock::SuperBlock,
 };
@@ -266,6 +272,8 @@ mod vfs_ops {
     };
 
     mod primitives {
+        use crate::fs::namei::resolve_parent_from;
+
         use super::*;
 
         pub fn vfs_mount(
@@ -296,10 +304,24 @@ mod vfs_ops {
             resolve(path)
         }
 
-        pub fn vfs_create(path: &Path, ty: InodeType) -> Result<PathRef, FsError> {
+        pub fn vfs_create(path: &Path, mode: InodeMode) -> Result<PathRef, FsError> {
             let (parent, name) = resolve_parent(path)?;
 
-            let inode = parent.inode().create(&name, ty)?;
+            let inode = parent.inode().create(&name, mode)?;
+
+            let dentry = canonicalize_child(parent.dentry(), &name, inode)?;
+
+            Ok(PathRef::new(parent.mount().clone(), dentry))
+        }
+
+        pub fn vfs_create_at(
+            dir: &PathRef,
+            rel_path: &Path,
+            mode: InodeMode,
+        ) -> Result<PathRef, FsError> {
+            let (parent, name) = resolve_parent_from(dir, rel_path)?;
+
+            let inode = parent.inode().create(&name, mode)?;
 
             let dentry = canonicalize_child(parent.dentry(), &name, inode)?;
 
@@ -314,14 +336,22 @@ mod vfs_ops {
             Ok(File::new(pathref, file_ops, prv))
         }
 
+        pub fn vfs_open_at(dir: &PathRef, rel_path: &Path) -> Result<File, FsError> {
+            let pathref = resolve_from(dir, rel_path)?;
+            let inode = pathref.inode();
+            let OpenedFile { file_ops, prv } = inode.open()?;
+
+            Ok(File::new(pathref, file_ops, prv))
+        }
+
         pub fn vfs_get_attr(path: &Path) -> Result<InodeStat, FsError> {
             resolve(path)?.inode().get_attr()
         }
 
-        pub fn vfs_mkdir(path: &Path) -> Result<PathRef, FsError> {
+        pub fn vfs_mkdir(path: &Path, perm: InodePerm) -> Result<PathRef, FsError> {
             let (parent, name) = resolve_parent(path)?;
 
-            let inode = parent.inode().mkdir(&name)?;
+            let inode = parent.inode().mkdir(&name, perm)?;
 
             let dentry = canonicalize_child(parent.dentry(), &name, inode)?;
 
@@ -440,14 +470,14 @@ mod kunits {
 
         assert_eq!(vfs_lookup(path).unwrap_err(), FsError::NotFound);
 
-        let created = vfs_create(path, InodeType::Regular).unwrap();
+        let created = vfs_create(path, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
         let looked_up = vfs_lookup(path).unwrap();
 
         assert_eq!(created.to_string(), "/kunit-vfs-file");
         assert_eq!(looked_up.to_string(), "/kunit-vfs-file");
         assert_eq!(created.inode(), looked_up.inode());
         assert_eq!(
-            vfs_create(path, InodeType::Regular).unwrap_err(),
+            vfs_create(path, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap_err(),
             FsError::AlreadyExists
         );
 
@@ -461,8 +491,8 @@ mod kunits {
         let file_path = Path::new("/kunit-vfs-dir/file");
         let link_path = Path::new("/kunit-vfs-link");
 
-        let dir = vfs_mkdir(dir_path).unwrap();
-        let file = vfs_create(file_path, InodeType::Regular).unwrap();
+        let dir = vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
+        let file = vfs_create(file_path, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
 
         assert_eq!(dir.to_string(), "/kunit-vfs-dir");
         assert_eq!(file.to_string(), "/kunit-vfs-dir/file");
@@ -490,7 +520,7 @@ mod kunits {
     #[kunit]
     fn test_vfs_file_read_write_semantics() {
         let path = Path::new("/kunit-vfs-rw");
-        let file = vfs_create(path, InodeType::Regular).unwrap();
+        let file = vfs_create(path, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
 
         let opened = vfs_open(path).unwrap();
         assert_eq!(opened.pos(), 0);
@@ -536,31 +566,37 @@ mod kunits {
         let child_dir_path = Path::new("/kunit-vfs-attr-dir/subdir");
         let file_path = Path::new("/kunit-vfs-attr-dir/file");
 
-        let dir = vfs_mkdir(dir_path).unwrap();
+        let dir = vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
         let dir_attr = vfs_get_attr(dir_path).unwrap();
 
         assert_eq!(dir_attr.ino, dir.inode().ino());
         assert_eq!(dir_attr.mode.ty(), InodeType::Dir);
-        assert_eq!(dir_attr.mode.to_linux_mode(), linux_mode::S_IFDIR | 0o755);
+        assert_eq!(
+            dir_attr.mode.to_linux_mode(),
+            linux_mode::S_IFDIR | InodePerm::all_rwx().bits() as u32
+        );
         assert_eq!(dir_attr.nlink, 2);
         assert_eq!(dir_attr.uid, 0);
         assert_eq!(dir_attr.gid, 0);
         // dir size is filesystem-specific.
         assert_eq!(dir_attr.rdev, DeviceId::None);
 
-        let file = vfs_create(file_path, InodeType::Regular).unwrap();
+        let file = vfs_create(file_path, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
         let file_attr = vfs_get_attr(file_path).unwrap();
 
         assert_eq!(file_attr.ino, file.inode().ino());
         assert_eq!(file_attr.mode.ty(), InodeType::Regular);
-        assert_eq!(file_attr.mode.to_linux_mode(), linux_mode::S_IFREG | 0o644);
+        assert_eq!(
+            file_attr.mode.to_linux_mode(),
+            linux_mode::S_IFREG | InodePerm::all_rwx().bits() as u32
+        );
         assert_eq!(file_attr.nlink, 1);
         assert_eq!(file_attr.uid, 0);
         assert_eq!(file_attr.gid, 0);
         assert_eq!(file_attr.size, 0);
         assert_eq!(file_attr.rdev, DeviceId::None);
 
-        vfs_mkdir(child_dir_path).unwrap();
+        vfs_mkdir(child_dir_path, InodePerm::all_rwx()).unwrap();
         assert_eq!(vfs_get_attr(dir_path).unwrap().nlink, 3);
 
         vfs_rmdir(child_dir_path).unwrap();
@@ -575,7 +611,8 @@ mod kunits {
         let file_path = Path::new("/kunit-vfs-attr-link-src");
         let link_path = Path::new("/kunit-vfs-attr-link-dst");
 
-        let created = vfs_create(file_path, InodeType::Regular).unwrap();
+        let created =
+            vfs_create(file_path, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
         assert_eq!(vfs_get_attr(file_path).unwrap().nlink, 1);
 
         vfs_link(file_path, link_path).unwrap();
@@ -600,7 +637,7 @@ mod kunits {
     fn test_vfs_get_attr_tracks_size_after_writes() {
         let path = Path::new("/kunit-vfs-attr-size");
 
-        vfs_create(path, InodeType::Regular).unwrap();
+        vfs_create(path, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
         let opened = vfs_open(path).unwrap();
 
         let initial = vfs_get_attr(path).unwrap();
@@ -620,7 +657,7 @@ mod kunits {
         assert_eq!(after_hole.size, 9);
         assert_eq!(after_hole.linux_blocks(), 1);
         assert_eq!(after_hole.mode.ty(), InodeType::Regular);
-        assert_eq!(after_hole.mode.to_linux_mode(), linux_mode::S_IFREG | 0o644);
+        assert_eq!(after_hole.mode, initial.mode);
 
         drop(opened);
         vfs_unlink(path).unwrap();
@@ -632,8 +669,8 @@ mod kunits {
         let lower = Path::new("/kunit-vfs-mnt/lower-file");
         let upper = Path::new("/kunit-vfs-mnt/upper-file");
 
-        vfs_mkdir(mountpoint).unwrap();
-        vfs_create(lower, InodeType::Regular).unwrap();
+        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_create(lower, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
         assert_eq!(
             vfs_lookup(lower).unwrap().to_string(),
             "/kunit-vfs-mnt/lower-file"
@@ -654,7 +691,7 @@ mod kunits {
         assert_eq!(vfs_lookup(lower).unwrap_err(), FsError::NotFound);
         assert_eq!(vfs_rmdir(mountpoint).unwrap_err(), FsError::IsMountPoint);
 
-        let file = vfs_create(upper, InodeType::Regular).unwrap();
+        let file = vfs_create(upper, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
         let reopened = vfs_open(upper).unwrap();
         assert_eq!(reopened.write(b"mounted").unwrap(), 7);
         reopened.seek(0).unwrap();
@@ -684,7 +721,7 @@ mod kunits {
         let mountpoint = Path::new("/kunit-vfs-busy");
         let live = Path::new("/kunit-vfs-busy/live");
 
-        vfs_mkdir(mountpoint).unwrap();
+        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
         vfs_mount(
             "ramfs",
             MountSource::Pseudo,
@@ -693,7 +730,7 @@ mod kunits {
         )
         .unwrap();
 
-        let live_ref = vfs_create(live, InodeType::Regular).unwrap();
+        let live_ref = vfs_create(live, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
         assert_eq!(vfs_unmount(mountpoint).unwrap_err(), FsError::Busy);
 
         drop(live_ref);
@@ -707,7 +744,7 @@ mod kunits {
         let mountpoint = Path::new("/kunit-vfs-parent-mnt");
         let nested = Path::new("/kunit-vfs-parent-mnt/nested");
 
-        vfs_mkdir(mountpoint).unwrap();
+        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
         vfs_mount(
             "ramfs",
             MountSource::Pseudo,
@@ -716,7 +753,7 @@ mod kunits {
         )
         .unwrap();
 
-        vfs_mkdir(nested).unwrap();
+        vfs_mkdir(nested, InodePerm::all_rwx()).unwrap();
         vfs_mount(
             "ramfs",
             MountSource::Pseudo,
@@ -740,8 +777,12 @@ mod kunits {
         let inner_dir = Path::new("/kunit-vfs-walk/sub");
         let inner_file = Path::new("/kunit-vfs-walk/sub/file");
 
-        vfs_mkdir(mountpoint).unwrap();
-        vfs_create(host_sibling, InodeType::Regular).unwrap();
+        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_create(
+            host_sibling,
+            InodeMode::new_with_all_perm(InodeType::Regular),
+        )
+        .unwrap();
         vfs_mount(
             "ramfs",
             MountSource::Pseudo,
@@ -757,8 +798,9 @@ mod kunits {
             "/kunit-vfs-walk"
         );
 
-        vfs_mkdir(inner_dir).unwrap();
-        let inner = vfs_create(inner_file, InodeType::Regular).unwrap();
+        vfs_mkdir(inner_dir, InodePerm::all_rwx()).unwrap();
+        let inner =
+            vfs_create(inner_file, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
 
         assert_eq!(
             vfs_lookup(Path::new("/kunit-vfs-walk/./sub/./file"))
@@ -799,8 +841,8 @@ mod kunits {
         let left_file = Path::new("/kunit-vfs-left-mnt/file");
         let right_file = Path::new("/kunit-vfs-right-mnt/file");
 
-        vfs_mkdir(left_mount).unwrap();
-        vfs_mkdir(right_mount).unwrap();
+        vfs_mkdir(left_mount, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(right_mount, InodePerm::all_rwx()).unwrap();
 
         vfs_mount(
             "ramfs",
@@ -817,10 +859,11 @@ mod kunits {
         )
         .unwrap();
 
-        let left = vfs_create(left_file, InodeType::Regular).unwrap();
+        let left = vfs_create(left_file, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
         assert_eq!(vfs_lookup(right_file).unwrap_err(), FsError::NotFound);
 
-        let right = vfs_create(right_file, InodeType::Regular).unwrap();
+        let right =
+            vfs_create(right_file, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
         assert_eq!(vfs_lookup(left_file).unwrap().inode(), left.inode());
         assert_eq!(vfs_lookup(right_file).unwrap().inode(), right.inode());
 
@@ -845,7 +888,7 @@ mod kunits {
         const NFILES: usize = 8;
 
         let mountpoint = Path::new("/kunit-vfs-cycle");
-        vfs_mkdir(mountpoint).unwrap();
+        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
 
         for round in 0..NROUNDS {
             vfs_mount(
@@ -860,7 +903,11 @@ mod kunits {
                 let path = format!("/kunit-vfs-cycle/file-{round}-{file_idx}");
                 let payload = format!("round-{round}-file-{file_idx}-payload");
 
-                vfs_create(Path::new(&path), InodeType::Regular).unwrap();
+                vfs_create(
+                    Path::new(&path),
+                    InodeMode::new_with_all_perm(InodeType::Regular),
+                )
+                .unwrap();
 
                 let opened = vfs_open(Path::new(&path)).unwrap();
                 assert_eq!(opened.write(payload.as_bytes()).unwrap(), payload.len());
@@ -889,7 +936,7 @@ mod kunits {
         const NFILES_PER_DIR: usize = 6;
 
         let mountpoint = Path::new("/kunit-vfs-churn");
-        vfs_mkdir(mountpoint).unwrap();
+        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
         vfs_mount(
             "ramfs",
             MountSource::Pseudo,
@@ -900,14 +947,18 @@ mod kunits {
 
         for dir_idx in 0..NDIRS {
             let dir = format!("/kunit-vfs-churn/dir-{dir_idx}");
-            vfs_mkdir(Path::new(&dir)).unwrap();
+            vfs_mkdir(Path::new(&dir), InodePerm::all_rwx()).unwrap();
 
             for file_idx in 0..NFILES_PER_DIR {
                 let file = format!("{dir}/file-{file_idx}");
                 let alias = format!("/kunit-vfs-churn/alias-{dir_idx}-{file_idx}");
                 let payload = format!("dir-{dir_idx}-file-{file_idx}-payload");
 
-                let created = vfs_create(Path::new(&file), InodeType::Regular).unwrap();
+                let created = vfs_create(
+                    Path::new(&file),
+                    InodeMode::new_with_all_perm(InodeType::Regular),
+                )
+                .unwrap();
                 let opened = vfs_open(Path::new(&file)).unwrap();
 
                 assert_eq!(opened.write(payload.as_bytes()).unwrap(), payload.len());
@@ -949,7 +1000,7 @@ mod kunits {
         let visible_file = Path::new("/kunit-vfs-direct-stack/visible");
         let hidden_file = Path::new("/kunit-vfs-direct-stack/hidden");
 
-        let host_mp = vfs_mkdir(mountpoint).unwrap();
+        let host_mp = vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
         let first = mount(
             "ramfs",
             MountSource::Pseudo,
@@ -968,12 +1019,16 @@ mod kunits {
         assert!(!Arc::ptr_eq(&first, &second));
         assert!(!Arc::ptr_eq(first.sb(), second.sb()));
 
-        vfs_create(visible_file, InodeType::Regular).unwrap();
+        vfs_create(
+            visible_file,
+            InodeMode::new_with_all_perm(InodeType::Regular),
+        )
+        .unwrap();
 
         let second_root = PathRef::new(second.clone(), second.root().clone());
         let hidden_inode = second_root
             .inode()
-            .create("hidden", InodeType::Regular)
+            .create("hidden", InodeMode::new_with_all_perm(InodeType::Regular))
             .unwrap();
         canonicalize_child(second_root.dentry(), "hidden", hidden_inode.clone()).unwrap();
 
@@ -1000,7 +1055,7 @@ mod kunits {
         const NLAYERS: usize = 6;
 
         let mountpoint = Path::new("/kunit-vfs-direct-stack-stress");
-        let host_mp = vfs_mkdir(mountpoint).unwrap();
+        let host_mp = vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
         let mut mounts = Vec::new();
 
         for layer in 0..NLAYERS {
@@ -1013,7 +1068,10 @@ mod kunits {
             .unwrap();
             let root = PathRef::new(mnt.clone(), mnt.root().clone());
             let name = format!("layer-{layer}");
-            let inode = root.inode().create(&name, InodeType::Regular).unwrap();
+            let inode = root
+                .inode()
+                .create(&name, InodeMode::new_with_all_perm(InodeType::Regular))
+                .unwrap();
             canonicalize_child(root.dentry(), &name, inode).unwrap();
             mounts.push(mnt);
         }

@@ -15,7 +15,7 @@ pub fn execve(
     kernel_execve(&path, argv.as_slice())?;
     unreachable!();
 }
-//
+
 pub fn kernel_execve(path: &impl AsRef<str>, argv: &[impl AsRef<str>]) -> Result<(), SysError> {
     let uimage = load_image_from_file(&path)?;
     let mut commandline = argv
@@ -33,41 +33,51 @@ pub fn kernel_execve_from_image(
     argv: impl IntoIterator<Item = impl AsRef<str>>,
 ) -> Result<(), SysError> {
     let memsp = Arc::new(elf_image.memsp);
+    let mut data = memsp.write();
     let insert_args_fn = || -> Result<VirtAddr, MmError> {
         let mut total_len: u64 = 0;
         // insert strings
         let mut pointers = vec![];
         for arg in argv.into_iter() {
-            unsafe { memsp.push_to_init_stack::<u8>(&0u64.to_ne_bytes())? };
-            let pointer = unsafe { memsp.push_to_init_stack::<u8>(arg.as_ref().as_bytes())? };
+            unsafe { data.push_to_init_stack::<u8>(&0u64.to_ne_bytes())? };
+            let pointer = unsafe { data.push_to_init_stack::<u8>(arg.as_ref().as_bytes())? };
             pointers.push(pointer);
             total_len += 1;
         }
         // insert pointers
-        unsafe { memsp.push_to_init_stack::<u64>(&0u64.to_ne_bytes())? };
+        unsafe { data.push_to_init_stack::<u64>(&0u64.to_ne_bytes())? };
         for pointer in pointers.iter().rev() {
-            unsafe { memsp.push_to_init_stack::<u64>(&pointer.get().to_ne_bytes())? };
+            unsafe { data.push_to_init_stack::<u64>(&pointer.get().to_ne_bytes())? };
         }
         // insert count
         unsafe {
             // 64-bytes aligned length
-            return Ok(memsp.push_to_init_stack::<u64>(&u64::to_ne_bytes(total_len))?);
+            return Ok(data.push_to_init_stack::<u64>(&u64::to_ne_bytes(total_len))?);
         }
     };
     let sp = match insert_args_fn() {
         Ok(arg) => arg,
         Err(e) => {
             unsafe {
-                memsp.clear_stack();
+                data.clear_stack();
             }
             return Err(e.into());
         },
     };
+    drop(data);
     unsafe {
         IntrArch::local_intr_disable();
         memsp.activate();
         let mut ksp = VirtAddr::new(0);
         with_current_task(|task| {
+            if task.flags().contains(TaskFlags::KERNEL) {
+                task.ensure_stdio(
+                    device::console::new_stdin_file(),
+                    device::console::new_stdout_file(),
+                    device::console::new_stderr_file(),
+                );
+            }
+
             let info = TaskExecInfo {
                 cmdline: commandline.as_ref().into(),
                 flags: TaskFlags::NONE,

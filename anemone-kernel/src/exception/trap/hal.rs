@@ -1,8 +1,10 @@
+use core::fmt::Debug;
+
 pub trait TrapArchTrait {
     type TrapFrame: TrapFrameArch;
 }
 
-pub trait TrapFrameArch {
+pub trait TrapFrameArch: Debug + Clone {
     const ZEROED: Self;
     /// Get the system call argument at the given index.
     ///

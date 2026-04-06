@@ -1,7 +1,6 @@
 //! Error used throughout the device driver subsystem.
 
 use crate::prelude::*;
-use anemone_abi::errno::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DevError {

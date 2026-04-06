@@ -6,7 +6,11 @@ use crate::{
     mm::stack::KernelStack,
     prelude::*,
     sync::mono::MonoFlow,
-    task::tid::{TID_IDLE, Tid, TidHandle, alloc_tid},
+    task::{
+        files::FilesState,
+        task_fs::FsState,
+        tid::{TID_IDLE, Tid, TidHandle, alloc_tid},
+    },
 };
 
 static TASK_ROOT: Once<Arc<Task>> = Once::new();
@@ -36,6 +40,11 @@ pub struct Task {
     tid: TidHandle,
     kstack: KernelStack,
     sched_info: MonoFlow<TaskSchedInfo>,
+
+    /// Only accessed by [fs] and [files]module.
+    pub(super) fs_state: Arc<RwLock<FsState>>,
+    /// Only accessed by [fs] and [files] module.
+    pub(super) files_state: Arc<RwLock<FilesState>>,
 
     // execution information
     exec_info: RwLock<TaskExecInfo>,
@@ -83,10 +92,15 @@ pub struct TaskExecInfo {
     pub uspace: Option<Arc<UserSpace>>,
 }
 
+#[repr(C)]
 pub struct TaskSchedInfo {
     /// Used for soft switching
     task_context: TaskContext,
+    /// Points to the TrapFrame saved on the kernel stack during the last user
+    /// trap entry.
+    utrap_frame: Option<*const TrapFrame>,
 }
+unsafe impl Send for TaskSchedInfo {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TaskStatus {
@@ -133,6 +147,13 @@ impl Task {
     /// the could be only one root task whose `parent` is [None]. Casually
     /// creating multiple root tasks will break the task hierarchy and cause
     /// undefined behavior.
+    ///
+    /// # Notes
+    ///
+    /// [FsState] is set to hanging by default, which is suitable for most
+    /// kernel threads. If a kernel thread needs to execute a user program which
+    /// requires filesystem access, make sure to set its [FsState] to a valid
+    /// one before calling `kernel_execve`.
     pub unsafe fn new_kernel(
         name: impl AsRef<str>,
         entry: *const (),
@@ -149,6 +170,10 @@ impl Task {
             status: RwLock::new(TaskStatus::Ready),
             tid: alloc_tid(),
             kstack: stack,
+
+            fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
+            files_state: Arc::new(RwLock::new(FilesState::new())),
+
             sched_info: unsafe {
                 MonoFlow::new(TaskSchedInfo {
                     task_context: TaskContext::from_kernel_fn(
@@ -157,6 +182,7 @@ impl Task {
                         irq_flags,
                         args,
                     ),
+                    utrap_frame: None,
                 })
             },
             exec_info: RwLock::new(TaskExecInfo {
@@ -182,7 +208,7 @@ impl Task {
         let kstack = KernelStack::new()?;
         let kstack_top = kstack.stack_top();
         kdebugln!("created user task with kernel stack at {:?}", kstack);
-        Ok(Self {
+        let task = Self {
             status: RwLock::new(TaskStatus::Ready),
             tid: alloc_tid(),
             kstack,
@@ -205,7 +231,8 @@ impl Task {
                 children: vec![],
             }),
             exit_code: AtomicIsize::new(0),
-        })
+        };
+        Ok(task)
     }*/
 
     /// Create a new idle task with tid [TID_IDLE] and the [TaskFlags::IDLE]
@@ -230,6 +257,7 @@ impl Task {
                         IntrArch::ENABLED_IRQ_FLAGS,
                         ParameterList::empty(),
                     ),
+                    utrap_frame: None,
                 })
             },
             exec_info: RwLock::new(TaskExecInfo {
@@ -241,6 +269,10 @@ impl Task {
                 parent: None,
                 children: vec![],
             }),
+
+            fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
+            files_state: Arc::new(RwLock::new(FilesState::new())),
+
             exit_code: AtomicIsize::new(0),
         })
     }
@@ -260,15 +292,62 @@ impl Task {
 
 impl Task {
     /// Get the task context used by the scheduler.
+    ///
+    /// # Safety
+    /// * **Make sure interrupts are disabled before calling this function,
+    /// otherwise undefined behavior or unexpected panics may occur.**
+    ///
+    /// * **This function may only be called within a single execution flow,
+    /// typically the task's own execution context.
+    /// Parallel access will lead to data races.**
     pub unsafe fn get_task_context(&self) -> *const TaskContext {
+        debug_assert!(IntrArch::current_irq_flags() == IntrArch::DISABLED_IRQ_FLAGS);
         self.sched_info
             .with(|inner| &inner.task_context as *const TaskContext)
     }
 
     /// Get a mutable pointer to the task context used by the scheduler.
+    ///
+    /// # Safety
+    /// * **Make sure interrupts are disabled before calling this function,
+    /// otherwise undefined behavior or unexpected panics may occur.**
+    ///
+    /// * **This function may only be called within a single execution flow,
+    /// typically the task's own execution context.
+    /// Parallel access will lead to data races.**
     pub unsafe fn get_task_context_mut(&self) -> *mut TaskContext {
+        debug_assert!(IntrArch::current_irq_flags() == IntrArch::DISABLED_IRQ_FLAGS);
         self.sched_info
             .with_mut(|inner| &mut inner.task_context as *mut TaskContext)
+    }
+
+    /// Set the user trap frame for this task, called by the trap handler.
+    ///
+    /// # Safety
+    /// * **Make sure interrupts are disabled before calling this function,
+    /// otherwise undefined behavior or unexpected panics may occur.**
+    ///
+    /// * **This function may only be called within a single execution flow,
+    /// typically the task's own execution context.
+    /// Parallel access will lead to data races.**
+    pub unsafe fn set_utrapframe(&self, trap_frame: *const TrapFrame) {
+        debug_assert!(IntrArch::current_irq_flags() == IntrArch::DISABLED_IRQ_FLAGS);
+        self.sched_info
+            .with_mut(|inner| inner.utrap_frame = Some(trap_frame));
+    }
+
+    /// Get the user trap frame for this task, if it exists.
+    ///
+    /// # Safety
+    /// * **Make sure interrupts are disabled before calling this function,
+    /// otherwise undefined behavior or unexpected panics may occur.**
+    ///
+    /// * **This function may only be called within a single execution flow,
+    /// typically the task's own execution context.
+    /// Parallel access will lead to data races.**
+    pub unsafe fn get_utrapframe(&self) -> Option<*const TrapFrame> {
+        debug_assert!(IntrArch::current_irq_flags() == IntrArch::DISABLED_IRQ_FLAGS);
+        self.sched_info.with(|inner| inner.utrap_frame)
     }
 }
 

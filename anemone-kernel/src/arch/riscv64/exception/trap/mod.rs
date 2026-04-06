@@ -15,7 +15,7 @@ impl TrapArchTrait for RiscV64TrapArch {
     type TrapFrame = RiscV64TrapFrame;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 struct Gpr {
     x: [u64; 32], // x0 as a placeholder for convenience
@@ -52,7 +52,7 @@ impl Gpr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct RiscV64TrapFrame {
     gpr: Gpr,

@@ -25,13 +25,7 @@ fn ext4_lookup_child(dir: &InodeRef, name: &str) -> Result<(Ino, InodeType), FsE
     })
 }
 
-fn ext4_create_child(dir: &InodeRef, name: &str, ty: InodeType) -> Result<InodeRef, FsError> {
-    let mode = match ty {
-        InodeType::Dir => 0o755,
-        InodeType::Regular => 0o644,
-        InodeType::Dev => return Err(FsError::NotSupported),
-    };
-
+fn ext4_create_child(dir: &InodeRef, name: &str, mode: InodeMode) -> Result<InodeRef, FsError> {
     let sb = dir.sb();
     let raw_ino = ext4_sb(&sb).write_tx(|| {
         ext4_sb(&sb).with_fs(|fs| {
@@ -41,13 +35,18 @@ fn ext4_create_child(dir: &InodeRef, name: &str, ty: InodeType) -> Result<InodeR
                 Err(err) => return Err(map_ext4_error(err)),
             }
 
-            fs.create(dir.ino().get() as u32, name, map_vfs_inode_type(ty)?, mode)
-                .map_err(map_ext4_error)
+            fs.create(
+                dir.ino().get() as u32,
+                name,
+                map_vfs_inode_type(mode.ty())?,
+                mode.perm().bits() as u32,
+            )
+            .map_err(map_ext4_error)
         })
     })?;
     let ino = ext4_ino(raw_ino).expect("internal error: lwext4 returned invalid inode number");
 
-    if ty == InodeType::Dir {
+    if mode.ty() == InodeType::Dir {
         dir.inode().inc_nlink();
     }
     Ok(sb.iget(ino)?)
@@ -68,7 +67,7 @@ fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, FsError> {
 
 fn ext4_mode_from_attr(node_type: LwExt4InodeType, raw_mode: u32) -> Result<InodeMode, FsError> {
     let ty = map_lwext4_inode_type(node_type)?;
-    let perm = InodePerm::from_bits_retain((raw_mode & 0o7777) as u16);
+    let perm = InodePerm::from_bits_truncate(raw_mode as u16);
     Ok(InodeMode::new(ty, perm))
 }
 
@@ -90,10 +89,13 @@ fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
         })
     })?;
 
+    // some metadata may haven't been synced to disk yet, so we need to look at the
+    // in-memory inode state first to get the most up-to-date metadata.
+
     Ok(InodeStat {
         fs_dev: ext4_fs_dev(&sb),
         ino: inode.ino(),
-        mode: ext4_mode_from_attr(attr.node_type, attr.mode)?,
+        mode: InodeMode::new(inode.ty(), inode.perm()),
         nlink: attr.nlink,
         uid: attr.uid,
         gid: attr.gid,
@@ -111,9 +113,9 @@ fn ext4_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, FsError> {
     dir.sb().iget(ino)
 }
 
-fn ext4_create(dir: &InodeRef, name: &str, ty: InodeType) -> Result<InodeRef, FsError> {
-    match ty {
-        InodeType::Regular | InodeType::Dir => ext4_create_child(dir, name, ty),
+fn ext4_create(dir: &InodeRef, name: &str, mode: InodeMode) -> Result<InodeRef, FsError> {
+    match mode.ty() {
+        InodeType::Regular | InodeType::Dir => ext4_create_child(dir, name, mode),
         InodeType::Dev => Err(FsError::NotSupported),
     }
 }
@@ -164,8 +166,8 @@ fn ext4_unlink(dir: &InodeRef, name: &str) -> Result<(), FsError> {
     Ok(())
 }
 
-fn ext4_mkdir(dir: &InodeRef, name: &str) -> Result<InodeRef, FsError> {
-    ext4_create_child(dir, name, InodeType::Dir)
+fn ext4_mkdir(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
+    ext4_create_child(dir, name, InodeMode::new(InodeType::Dir, perm))
 }
 
 fn ext4_rmdir(dir: &InodeRef, name: &str) -> Result<(), FsError> {
@@ -212,7 +214,7 @@ pub(super) static EXT4_REG_INODE_OPS: InodeOps = InodeOps {
     create: |_, _, _| Err(FsError::NotDir),
     link: |_, _, _| Err(FsError::NotDir),
     unlink: |_, _| Err(FsError::NotDir),
-    mkdir: |_, _| Err(FsError::NotDir),
+    mkdir: |_, _, _| Err(FsError::NotDir),
     rmdir: |_, _| Err(FsError::NotDir),
     open: ext4_open,
     get_attr: ext4_get_attr,
@@ -223,7 +225,7 @@ pub(super) static EXT4_DEV_INODE_OPS: InodeOps = InodeOps {
     create: |_, _, _| Err(FsError::NotDir),
     link: |_, _, _| Err(FsError::NotDir),
     unlink: |_, _| Err(FsError::NotDir),
-    mkdir: |_, _| Err(FsError::NotDir),
+    mkdir: |_, _, _| Err(FsError::NotDir),
     rmdir: |_, _| Err(FsError::NotDir),
     open: |_| Err(FsError::NotSupported),
     get_attr: ext4_get_attr,

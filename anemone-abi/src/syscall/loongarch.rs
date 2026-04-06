@@ -49,10 +49,18 @@ pub unsafe fn syscall(
 /// Linux syscalls. Therefore, we define Linux syscall numbers here for
 /// reference.
 pub mod linux {
-    pub const SYS_READ: u64 = 63;
-    pub const SYS_WRITE: u64 = 64;
+    pub const SYS_GETCWD: u64 = 17;
+
+    pub const SYS_DUP: u64 = 23;
+    pub const SYS_DUP3: u64 = 24;
+
+    pub const SYS_CHDIR: u64 = 49;
+    pub const SYS_CHROOT: u64 = 51;
+
     pub const SYS_OPENAT: u64 = 56;
     pub const SYS_CLOSE: u64 = 57;
+    pub const SYS_READ: u64 = 63;
+    pub const SYS_WRITE: u64 = 64;
 
     pub const SYS_EXIT: u64 = 93;
     pub const SYS_SCHED_YIELD: u64 = 124;

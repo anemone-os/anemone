@@ -2,9 +2,14 @@
 //!
 //! Here lies /dev/console.
 
-use crate::{debug::printk::KERNEL_LOG, prelude::*};
+use crate::{debug::printk::KERNEL_LOG, prelude::*, utils::any_opaque::AnyOpaque};
 
 use core::fmt::{Debug, Write};
+
+#[derive(Debug)]
+struct ConsoleFilePrv;
+
+impl crate::utils::any_opaque::Opaque for ConsoleFilePrv {}
 
 pub trait Console: Send + Sync {
     fn output(&self, s: &str);
@@ -118,20 +123,6 @@ pub fn output(msg: &str) {
         .iter()
         .filter(|desc| desc.enabled())
         .for_each(|desc| desc.ops.output(msg));
-
-    // let consoles = {
-    //     let consoles = SUBSYS.consoles.lock_irqsave();
-
-    //     consoles
-    //         .iter()
-    //         .filter(|desc| desc.enabled())
-    //         .map(|desc| desc.ops.clone())
-    //         .collect::<Vec<_>>()
-    // };
-
-    // for console in consoles {
-    //     console.output(msg);
-    // }
 }
 
 /// If there are any non-early consoles registered but none of them is enabled,
@@ -166,4 +157,63 @@ pub unsafe fn on_system_boot() {
     } else {
         kinfoln!("normal console(s) registered, early consoles have been unregistered");
     }
+}
+
+const CONSOLE_INODE_PERM: InodePerm = InodePerm::IRUSR
+    .union(InodePerm::IWUSR)
+    .union(InodePerm::IRGRP)
+    .union(InodePerm::IWGRP)
+    .union(InodePerm::IROTH)
+    .union(InodePerm::IWOTH);
+
+fn console_read(_file: &File, _buf: &mut [u8]) -> Result<usize, FsError> {
+    // currently no-op. always return EOF.
+    Ok(0)
+}
+
+fn console_write(_file: &File, buf: &[u8]) -> Result<usize, FsError> {
+    let s = core::str::from_utf8(buf).map_err(|_| FsError::InvalidArgument)?;
+    output(s);
+    Ok(buf.len())
+}
+
+pub static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {
+    read: console_read,
+    write: |_file, _buf| Err(FsError::NotSupported),
+    seek: |_file, _pos| Err(FsError::NotSupported),
+    iterate: |_file, _ctx| Err(FsError::NotSupported),
+};
+
+pub static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
+    read: |_file, _buf| Err(FsError::NotSupported),
+    write: console_write,
+    seek: |_file, _pos| Err(FsError::NotSupported),
+    iterate: |_file, _ctx| Err(FsError::NotSupported),
+};
+
+pub fn new_stdin_file() -> File {
+    vfs_open_anonymous(
+        ".anemone-stdin",
+        InodeMode::new(InodeType::Dev, CONSOLE_INODE_PERM),
+        &CONSOLE_STDIN_FILE_OPS,
+        AnyOpaque::new(ConsoleFilePrv),
+    )
+}
+
+pub fn new_stdout_file() -> File {
+    vfs_open_anonymous(
+        ".anemone-stdout",
+        InodeMode::new(InodeType::Dev, CONSOLE_INODE_PERM),
+        &CONSOLE_STDOUT_FILE_OPS,
+        AnyOpaque::new(ConsoleFilePrv),
+    )
+}
+
+pub fn new_stderr_file() -> File {
+    vfs_open_anonymous(
+        ".anemone-stderr",
+        InodeMode::new(InodeType::Dev, CONSOLE_INODE_PERM),
+        &CONSOLE_STDOUT_FILE_OPS,
+        AnyOpaque::new(ConsoleFilePrv),
+    )
 }

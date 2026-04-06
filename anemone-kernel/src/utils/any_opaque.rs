@@ -1,6 +1,7 @@
 use core::{any::Any, fmt::Debug};
 
 use alloc::boxed::Box;
+use kernel_macros::Opaque;
 
 /// `Opaque` trait is used to represent private data associated with various
 /// kernel objects. It allows for type-erased storage of private data, enabling
@@ -74,5 +75,15 @@ impl AnyOpaque {
 
     pub unsafe fn cast_unchecked_mut<T: Opaque>(&mut self) -> &mut T {
         unsafe { self.0.cast_unchecked_mut::<T>() }
+    }
+}
+
+/// You just need a placeholder, and don't want any actual data? Use this.
+#[derive(Debug, Opaque)]
+pub struct NilOpaque(());
+
+impl NilOpaque {
+    pub fn new() -> AnyOpaque {
+        AnyOpaque::new(NilOpaque(()))
     }
 }

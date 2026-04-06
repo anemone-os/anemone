@@ -12,11 +12,11 @@ pub fn sys_brk(#[validate_with(user_nullable_vaddr)] addr: VirtAddr) -> Result<u
     let task = clone_current_task();
     let memsp = task.clone_uspace().ok_or(MmError::NotMapped)?;
     if addr == VirtAddr::new(0) {
-        let brk = memsp.brk();
+        let brk = memsp.read().brk();
         debug_assert!(brk.get() < KernelLayout::USPACE_TOP_ADDR);
         Ok(brk.get())
     } else {
-        memsp.set_brk(addr)?;
+        memsp.write().set_brk(addr)?;
         Ok(0)
     }
 }

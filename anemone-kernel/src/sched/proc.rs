@@ -124,6 +124,10 @@ pub fn with_current_task<F: FnOnce(&Arc<Task>) -> R, R>(f: F) -> R {
 /// task**
 ///
 /// Use this function instead of `clone_current_task().get_task_context()`.
+///
+/// # Safety
+/// * **Make sure interrupts are disabled before calling this function,
+/// otherwise undefined behavior or unexpected panics may occur.**
 pub unsafe fn get_current_task_context() -> *const TaskContext {
     PROCESSOR
         .with(|f| {
@@ -137,6 +141,10 @@ pub unsafe fn get_current_task_context() -> *const TaskContext {
 /// task**
 ///
 /// Use this function instead of `clone_current_task().get_task_context_mut()`.
+///
+/// # Safety
+/// * **Make sure interrupts are disabled before calling this function,
+/// otherwise undefined behavior or unexpected panics may occur.**
 pub unsafe fn get_current_task_context_mut() -> *mut TaskContext {
     PROCESSOR
         .with(|f| {
@@ -147,6 +155,14 @@ pub unsafe fn get_current_task_context_mut() -> *mut TaskContext {
 }
 
 /// Get a scheduler context pointer of the current processor.
+///
+/// # Safety
+/// * **Make sure interrupts are disabled before calling this function,
+/// otherwise undefined behavior or unexpected panics may occur.**
+///
+/// * **This function may only be called within a single execution flow,
+/// typically the task's own execution context.
+/// Parallel access will lead to data races.**
 pub unsafe fn get_sched_context() -> *const TaskContext {
     PROCESSOR.with(|f| {
         f.inner
@@ -155,6 +171,14 @@ pub unsafe fn get_sched_context() -> *const TaskContext {
 }
 
 /// Get a mutable scheduler context pointer of the current processor.
+///
+/// # Safety
+/// * **Make sure interrupts are disabled before calling this function,
+/// otherwise undefined behavior or unexpected panics may occur.**
+///
+/// * **This function may only be called within a single execution flow,
+/// typically the task's own execution context.
+/// Parallel access will lead to data races.**
 pub unsafe fn get_sched_context_mut() -> *mut TaskContext {
     PROCESSOR.with(|f| {
         f.inner

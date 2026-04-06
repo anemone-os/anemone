@@ -58,10 +58,6 @@ impl File {
         &self.prv
     }
 
-    pub(super) fn inode(&self) -> &InodeRef {
-        self.path.inode()
-    }
-
     pub(super) fn set_pos(&self, pos: usize) {
         self.pos.store(pos, Ordering::Relaxed);
     }
@@ -75,6 +71,14 @@ impl File {
 
 // VTable operations re-exported here.
 impl File {
+    pub fn inode(&self) -> &InodeRef {
+        self.path.inode()
+    }
+
+    pub fn path(&self) -> &PathRef {
+        &self.path
+    }
+
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
         (self.ops.read)(self, buf)
     }

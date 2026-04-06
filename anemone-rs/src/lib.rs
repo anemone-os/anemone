@@ -7,6 +7,7 @@ pub use anemone_rs_macros::main;
 
 mod allocator;
 pub mod console;
+pub mod fs;
 pub mod process;
 pub mod runtime;
 pub mod syscalls;
@@ -14,8 +15,8 @@ pub mod syscalls;
 pub mod prelude {
     pub use crate::{
         Errno, alloc, args,
-        console::__print,
-        main, print, println,
+        console::{__eprint, __print},
+        eprint, eprintln, main, print, println,
         process::{execve, exit, sched_yield},
     };
 

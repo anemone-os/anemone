@@ -25,6 +25,7 @@ pub trait SchedArchTrait {
     /// Therefore, the operation of switching the MemSpace should be
     /// performed by the scheduling system.
     unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext);
+    unsafe fn return_to_cloned_task(frame: TrapFrame);
 }
 
 pub trait TaskContextArch {

@@ -122,8 +122,8 @@ fn ramfs_remove_locked(dir: &InodeRef, name: &str, is_dir: bool) -> Result<(), F
 }
 
 /// Create a new child inode inside a directory.
-fn ramfs_create(dir: &InodeRef, name: &str, ty: InodeType) -> Result<InodeRef, FsError> {
-    if !matches!(ty, InodeType::Dir | InodeType::Regular) {
+fn ramfs_create(dir: &InodeRef, name: &str, mode: InodeMode) -> Result<InodeRef, FsError> {
+    if !matches!(mode.ty(), InodeType::Dir | InodeType::Regular) {
         return Err(FsError::NotSupported);
     }
 
@@ -135,15 +135,15 @@ fn ramfs_create(dir: &InodeRef, name: &str, ty: InodeType) -> Result<InodeRef, F
         }
 
         let new_ino = ramfs_sb(&sb).alloc_ino();
-        let new_prv = match ty {
+        let new_prv = match mode.ty() {
             InodeType::Dir => AnyOpaque::new(RamfsDir::new()),
             InodeType::Regular => AnyOpaque::new(RamfsReg::new()),
             _ => unreachable!(),
         };
         let new_inode = Arc::new(Inode::new(
             new_ino,
-            ty,
-            match ty {
+            mode.ty(),
+            match mode.ty() {
                 InodeType::Dir => &RAMFS_DIR_INODE_OPS,
                 InodeType::Regular => &RAMFS_REG_INODE_OPS,
                 _ => unreachable!(),
@@ -152,7 +152,7 @@ fn ramfs_create(dir: &InodeRef, name: &str, ty: InodeType) -> Result<InodeRef, F
             new_prv,
         ));
         new_inode.inc_nlink();
-        if let InodeType::Dir = ty {
+        if let InodeType::Dir = mode.ty() {
             // "." & ".."
             let new_dir_data = new_inode.prv().cast::<RamfsDir>().unwrap();
             assert!(new_dir_data.insert(".".to_string(), new_ino).is_ok());
@@ -160,6 +160,8 @@ fn ramfs_create(dir: &InodeRef, name: &str, ty: InodeType) -> Result<InodeRef, F
             dir.inode().inc_nlink();
             new_inode.inc_nlink();
         }
+
+        new_inode.set_perm(mode.perm());
 
         let inode = sb.seed_inode(new_inode);
         assert!(dir_data.insert(name.to_string(), inode.ino()).is_ok());
@@ -217,8 +219,8 @@ fn ramfs_unlink(dir: &InodeRef, name: &str) -> Result<(), FsError> {
     ramfs_sb(&sb).write_tx(|| ramfs_remove_locked(dir, name, false))
 }
 
-fn ramfs_mkdir(dir: &InodeRef, name: &str) -> Result<InodeRef, FsError> {
-    ramfs_create(dir, name, InodeType::Dir)
+fn ramfs_mkdir(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
+    ramfs_create(dir, name, InodeMode::new(InodeType::Dir, perm))
 }
 
 fn ramfs_rmdir(dir: &InodeRef, name: &str) -> Result<(), FsError> {
@@ -245,7 +247,7 @@ fn ramfs_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
     Ok(InodeStat {
         fs_dev: DeviceId::None,
         ino: inode.ino(),
-        mode: InodeMode::new(inode.ty(), ramfs_default_perm(inode.ty())),
+        mode: InodeMode::new(inode.ty(), meta.perm),
         nlink: meta.nlink,
         uid: 0,
         gid: 0,
@@ -255,22 +257,6 @@ fn ramfs_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
         mtime: meta.mtime,
         ctime: meta.ctime,
     })
-}
-
-fn ramfs_default_perm(ty: InodeType) -> InodePerm {
-    match ty {
-        InodeType::Dir => {
-            InodePerm::RWXU
-                | InodePerm::IRGRP
-                | InodePerm::IXGRP
-                | InodePerm::IROTH
-                | InodePerm::IXOTH
-        },
-        InodeType::Regular => {
-            InodePerm::IRUSR | InodePerm::IWUSR | InodePerm::IRGRP | InodePerm::IROTH
-        },
-        InodeType::Dev => InodePerm::empty(),
-    }
 }
 
 pub(super) static RAMFS_DIR_INODE_OPS: InodeOps = InodeOps {
@@ -290,7 +276,7 @@ pub(super) static RAMFS_REG_INODE_OPS: InodeOps = InodeOps {
     open: ramfs_open,
     link: |_, _, _| Err(FsError::NotDir),
     unlink: |_, _| Err(FsError::NotDir),
-    mkdir: |_, _| Err(FsError::NotDir),
+    mkdir: |_, _, _| Err(FsError::NotDir),
     rmdir: |_, _| Err(FsError::NotDir),
     get_attr: ramfs_get_attr,
 };

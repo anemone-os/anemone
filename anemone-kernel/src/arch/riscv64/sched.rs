@@ -72,6 +72,15 @@ impl SchedArchTrait for RiscV64SchedArch {
             __switch(cur, next);
         }
     }
+
+    unsafe fn return_to_cloned_task(frame: TrapFrame) {
+        unsafe {
+            with_current_task(|t| {
+                sscratch::write(t.kstack().stack_top().get() as usize);
+            });
+            __utrap_return_to_task(&frame)
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
