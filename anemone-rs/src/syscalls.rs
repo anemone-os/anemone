@@ -28,8 +28,24 @@ pub fn sys_execve(path_ptr: u64, argv_ptr: u64) -> Result<u64, Errno> {
     unsafe { raw_syscall(SYS_EXECVE, path_ptr, argv_ptr, 0, 0, 0, 0) }
 }
 
-pub fn sys_clone(parent_tid_ptr: u64, child_tid_ptr: u64) -> Result<u64, Errno> {
-    unsafe { raw_syscall(SYS_CLONE, parent_tid_ptr, child_tid_ptr, 0, 0, 0, 0) }
+pub fn sys_clone(
+    flags: u64,
+    stack: u64,
+    parent_tid_ptr: u64,
+    tls: u64,
+    child_tid_ptr: u64,
+) -> Result<u64, Errno> {
+    unsafe {
+        raw_syscall(
+            SYS_CLONE,
+            flags,
+            stack,
+            parent_tid_ptr,
+            tls,
+            child_tid_ptr,
+            0,
+        )
+    }
 }
 
 pub fn sys_openat(dirfd: isize, path_ptr: u64, flags: u32, mode: u32) -> Result<usize, Errno> {

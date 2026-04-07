@@ -24,6 +24,9 @@ pub trait TrapFrameArch: Debug + Clone {
 
     fn advance_pc(&mut self);
 
+    fn set_sp(&mut self, sp: u64);
+    fn set_tls(&mut self, tls: u64);
+
     /// Set the return value of the system call.
     ///
     /// # Safety

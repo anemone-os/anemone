@@ -141,8 +141,6 @@ core::arch::global_asm!(
 /// This function will call architecture-agnostic trap handler.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
-    let a: Box<dyn FnOnce(usize, u64) -> u32>;
-    
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };

@@ -15,10 +15,8 @@ pub extern "C" fn idle() -> ! {
 
 #[percpu]
 static IDLE_TASK: Lazy<Arc<Task>> = Lazy::new(|| unsafe {
-    let res = Arc::new(
-        Task::new_idle(idle as *const ())
-            .unwrap_or_else(|e| panic!("failed to create idle tasks: {:?}", e)),
-    );
+    let res = Task::new_idle(idle as *const ())
+        .unwrap_or_else(|e| panic!("failed to create idle tasks: {:?}", e));
     res
 });
 

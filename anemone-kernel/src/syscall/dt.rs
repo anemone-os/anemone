@@ -32,7 +32,7 @@ impl UserAccess for UserWrite {
 #[derive(Debug, PartialEq, Eq)]
 pub struct UserPtr<T: Sized, A: UserAccess> {
     addr: u64,
-    _marker: PhantomData<(A, *const T)>,
+    _marker: PhantomData<(A, T)>,
 }
 
 pub type UserReadPtr<T> = UserPtr<T, UserRead>;
@@ -220,11 +220,6 @@ impl<T: Sized + Copy> UserWriteSlice<T> {
         )? as *const [u8] as *mut [u8];
         unsafe {
             let mut ptr_ref = &mut *ptr;
-            kdebugln!(
-                "copying {} bytes to {:#x}",
-                bytes.len(),
-                &ptr_ref[0] as *const u8 as u64
-            );
             ptr_ref[0..bytes.len()].copy_from_slice(bytes);
             ptr_ref[bytes.len()] = 0;
         }

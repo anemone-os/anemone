@@ -50,6 +50,7 @@ pub fn fetch_clear_resched_flag() -> bool {
 
 /// Add a task to the ready queue of the current processor.
 pub fn add_to_ready(task: Arc<Task>) {
+    task.set_status(TaskStatus::Ready);
     PROCESSOR.with(|f| f.sched.write_irqsave().add_to_ready(task))
 }
 
@@ -236,6 +237,7 @@ pub unsafe fn switch_to(task: Arc<Task>) {
     let next_context = unsafe { next_task.get_task_context() };
     unsafe {
         switch_uspace(&clone_current_task(), &next_task);
+        next_task.set_status(TaskStatus::Running);
         let prev = exchange_running_task(next_task);
         drop(prev);
         SchedArch::switch(cur_context, next_context);

@@ -562,6 +562,16 @@ impl UserSpace {
         self.read().activate();
     }
 }
+
+impl Drop for UserSpace {
+    fn drop(&mut self) {
+        kdebugln!(
+            "dropping user space with root page at ppn {}",
+            self.table_ppn
+        );
+    }
+}
+
 impl UserSpaceData {
     pub fn iter_areas<F, R>(&self, f: F) -> Option<R>
     where

@@ -1,15 +1,20 @@
-use core::fmt::{Debug, Display};
+use core::{
+    fmt::{Debug, Display},
+    mem::swap,
+    ops::{Deref, DerefMut},
+};
 
 use spin::Once;
 
 use crate::{
     mm::stack::KernelStack,
-    prelude::*,
+    prelude::{dt::UserWritePtr, *},
     sync::mono::MonoFlow,
     task::{
+        clone::CloneFlags,
         files::FilesState,
         task_fs::FsState,
-        tid::{TID_IDLE, Tid, TidHandle, alloc_tid},
+        tid::{TIDH_IDLE, Tid, TidHandle, alloc_tid},
     },
 };
 
@@ -40,6 +45,7 @@ pub struct Task {
     tid: TidHandle,
     kstack: KernelStack,
     sched_info: MonoFlow<TaskSchedInfo>,
+    create_flags: CloneFlags,
 
     /// Only accessed by [fs] and [files]module.
     pub(super) fs_state: Arc<RwLock<FsState>>,
@@ -48,13 +54,15 @@ pub struct Task {
 
     // execution information
     exec_info: RwLock<TaskExecInfo>,
-    exit_code: AtomicIsize,
+    exit_code: AtomicI8,
 
     // hierarchy information
     hierarchy: RwLock<TaskHierarchy>,
 
     // running status
     status: RwLock<TaskStatus>,
+
+    clear_child_tid: RwLock<Option<UserWritePtr<Tid>>>,
 }
 
 pub struct TaskHierarchy {
@@ -69,8 +77,21 @@ impl TaskHierarchy {
     pub fn parent(&self) -> Option<Weak<Task>> {
         self.parent.clone()
     }
-    pub fn add_child(&mut self, child: &Arc<Task>) {
-        self.children.push(child.clone());
+    pub fn add_child(&mut self, child: Arc<Task>) {
+        self.children.push(child);
+    }
+    pub fn remove_child(&mut self, child: &Arc<Task>) -> bool {
+        if let Some(index) = self.children.iter().position(|x| Arc::ptr_eq(x, child)) {
+            self.children.remove(index);
+            true
+        } else {
+            false
+        }
+    }
+    pub fn clear(&mut self) -> Vec<Arc<Task>> {
+        let mut temp = vec![];
+        swap(&mut temp, &mut self.children);
+        temp
     }
 }
 
@@ -106,7 +127,7 @@ unsafe impl Send for TaskSchedInfo {}
 pub enum TaskStatus {
     Running,
     Ready,
-    Blocked,
+    Zombie,
 }
 
 bitflags! {
@@ -143,10 +164,11 @@ impl Task {
     /// [TaskFlags::KERNEL] is added automatically.
     ///
     /// # Safety
-    /// This function is unsafe because, according to the task tree structure,
-    /// the could be only one root task whose `parent` is [None]. Casually
-    /// creating multiple root tasks will break the task hierarchy and cause
-    /// undefined behavior.
+    /// This function is unsafe because:
+    ///  * The parent task of the created task is set to [None] by default.
+    ///    However, according to the task tree structure, the could be only one
+    ///    root task whose `parent` is [None]. Casually creating multiple root
+    ///    tasks will break the task hierarchy and cause undefined behavior;
     ///
     /// # Notes
     ///
@@ -160,13 +182,12 @@ impl Task {
         args: ParameterList,
         irq_flags: IrqFlags,
         flags: TaskFlags,
-        parent: Option<&Arc<Task>>,
-    ) -> Result<Self, MmError> {
+        create_flags: CloneFlags,
+    ) -> Result<Arc<Self>, MmError> {
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
-        let parent = parent.and_then(|arc| Some(Arc::downgrade(arc)));
-        kdebugln!("created kernel task with kernel stack at {:?}", stack);
-        Ok(Self {
+        //kdebugln!("created kernel task with kernel stack at {:?}", stack);
+        let task = Self {
             status: RwLock::new(TaskStatus::Ready),
             tid: alloc_tid(),
             kstack: stack,
@@ -191,11 +212,15 @@ impl Task {
                 uspace: None,
             }),
             hierarchy: RwLock::new(TaskHierarchy {
-                parent,
+                parent: None,
                 children: vec![],
             }),
-            exit_code: AtomicIsize::new(0),
-        })
+            exit_code: AtomicI8::new(0),
+            create_flags,
+            clear_child_tid: RwLock::new(None),
+        };
+        let task = Arc::new(task);
+        Ok(task)
     }
     /*
     pub unsafe fn new_user(
@@ -241,13 +266,13 @@ impl Task {
     /// # Safety
     /// This function is unsafe because idle tasks are special tasks that should
     /// not be created casually.
-    pub unsafe fn new_idle(entry: *const ()) -> Result<Self, MmError> {
+    pub unsafe fn new_idle(entry: *const ()) -> Result<Arc<Self>, MmError> {
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
-        kdebugln!("created kernel task with kernel stack at {:?}", stack);
-        Ok(Self {
+        //kdebugln!("created kernel task with kernel stack at {:?}", stack);
+        Ok(Arc::new(Self {
             status: RwLock::new(TaskStatus::Ready),
-            tid: TID_IDLE,
+            tid: TIDH_IDLE,
             kstack: stack,
             sched_info: unsafe {
                 MonoFlow::new(TaskSchedInfo {
@@ -273,8 +298,10 @@ impl Task {
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: Arc::new(RwLock::new(FilesState::new())),
 
-            exit_code: AtomicIsize::new(0),
-        })
+            exit_code: AtomicI8::new(0),
+            create_flags: CloneFlags::empty(),
+            clear_child_tid: RwLock::new(None),
+        }))
     }
 
     /// Get the parent task ID, if the parent task exists.
@@ -283,7 +310,7 @@ impl Task {
     /// the init task, the idle task, a exited task or the kinit task.
     pub fn parent_tid(&self) -> Option<Tid> {
         self.hierarchy
-            .read_irqsave()
+            .read()
             .parent
             .as_ref()
             .and_then(|weak| weak.upgrade().map(|parent| parent.tid()))
@@ -376,11 +403,11 @@ impl Task {
         &self.kstack
     }
 
-    pub fn exit_code(&self) -> isize {
+    pub fn exit_code(&self) -> i8 {
         self.exit_code.load(Ordering::SeqCst)
     }
 
-    pub fn set_exit_code(&self, code: isize) {
+    pub fn set_exit_code(&self, code: i8) {
         self.exit_code.store(code, Ordering::SeqCst);
     }
 
@@ -390,6 +417,64 @@ impl Task {
     /// sure you have activated a new one before calling this function***
     pub unsafe fn set_exec_info(&self, info: TaskExecInfo) {
         *self.exec_info.write_irqsave() = info;
+    }
+
+    pub unsafe fn with_task_hierarchy<F: FnOnce(&TaskHierarchy) -> R, R>(&self, f: F) -> R {
+        let hierarchy = self.hierarchy.read();
+        f(hierarchy.deref())
+    }
+
+    pub unsafe fn with_task_hierarchy_mut<F: FnOnce(&mut TaskHierarchy) -> R, R>(&self, f: F) -> R {
+        let mut hierarchy = self.hierarchy.write();
+        f(hierarchy.deref_mut())
+    }
+
+    pub fn clone_flags(&self) -> CloneFlags {
+        self.create_flags
+    }
+
+    pub fn set_clear_child_tid(&self, tid_ptr: Option<UserWritePtr<Tid>>) {
+        *self.clear_child_tid.write() = tid_ptr;
+    }
+
+    pub fn get_clear_child_tid(&self) -> Option<UserWritePtr<Tid>> {
+        self.clear_child_tid.read().clone()
+    }
+
+    pub fn status(&self) -> TaskStatus {
+        self.status.read().clone()
+    }
+
+    pub fn set_status(&self, status: TaskStatus) {
+        *self.status.write() = status;
+    }
+}
+
+pub trait ArcTaskImpls {
+    unsafe fn add_as_child(&self, parent: &Arc<Task>);
+}
+impl ArcTaskImpls for Arc<Task> {
+    unsafe fn add_as_child(&self, parent: &Arc<Task>) {
+        unsafe {
+            if !parent.with_task_hierarchy_mut(|par_hier| {
+                if parent.status() == TaskStatus::Zombie {
+                    return false;
+                }
+                self.with_task_hierarchy_mut(|hier| {
+                    debug_assert!(hier.parent.is_none());
+                    hier.set_parent(&parent);
+                    par_hier.add_child(self.clone());
+                    true
+                })
+            }) {
+                root_task().with_task_hierarchy_mut(|root_hier| {
+                    self.with_task_hierarchy_mut(|hier| {
+                        hier.set_parent(&parent);
+                        root_hier.add_child(self.clone());
+                    })
+                })
+            }
+        }
     }
 }
 

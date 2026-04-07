@@ -19,7 +19,7 @@ unsafe fn free_tid_raw(id: u32) {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Tid(u32);
 
-pub const TID_IDLE: TidHandle = TidHandle(0);
+pub const TIDH_IDLE: TidHandle = TidHandle(0);
 
 impl Tid {
     #[inline(always)]

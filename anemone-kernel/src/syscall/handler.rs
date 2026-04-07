@@ -66,3 +66,13 @@ gen_basic_try_from_syscall_arg!(signed, i16);
 gen_basic_try_from_syscall_arg!(signed, i32);
 gen_basic_try_from_syscall_arg!(signed, i64);
 gen_basic_try_from_syscall_arg!(signed, isize);
+
+impl<T: TryFromSyscallArg> TryFromSyscallArg for Option<T> {
+    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+        Ok(if raw == 0 {
+            None
+        } else {
+            Some(T::try_from_syscall_arg(raw)?)
+        })
+    }
+}
