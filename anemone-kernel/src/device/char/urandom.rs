@@ -3,7 +3,10 @@
 //!
 //! "chosen by fair dice roll. guaranteed to be random." :P
 
-use crate::{device::char::CharDev, prelude::*};
+use crate::{
+    device::char::{CharDev, register_char_device},
+    prelude::*,
+};
 
 #[derive(Debug)]
 struct URandom;
@@ -25,5 +28,17 @@ impl CharDev for URandom {
 
     fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
         Ok(buf.len())
+    }
+}
+
+#[initcall(probe)]
+fn init() {
+    match register_char_device(URANDOM_DEVNUM, "urandom".to_string(), Arc::new(URandom)) {
+        Ok(()) => {
+            knoticeln!("urandom device registered");
+        },
+        Err(e) => {
+            knoticeln!("failed to register urandom device: {:?}", e);
+        },
     }
 }

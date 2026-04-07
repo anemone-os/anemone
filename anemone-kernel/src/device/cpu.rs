@@ -1,6 +1,9 @@
 use core::fmt::{Debug, Display};
 
 pub trait CpuArchTrait {
+    /// Returns the ID of the bootstrap processor.
+    fn bsp_cpu_id() -> CpuId;
+
     /// Returns the number of CPUs in the system.
     fn ncpus() -> usize;
     /// Returns the ID of the current CPU.
@@ -19,6 +22,7 @@ pub trait CpuArchTrait {
     fn percpu_base() -> usize;
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CpuId(usize);
 impl CpuId {
     #[inline(always)]

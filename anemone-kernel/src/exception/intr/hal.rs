@@ -42,6 +42,10 @@ pub trait IntrArchTrait: Sized {
 
     unsafe fn claim_ipi();
 
+    /// Enable local interrupts for current core.
+    ///
+    /// **First timer interrupt is not programmed here. It should be set up
+    /// separately.**
     unsafe fn init_local_irq();
 }
 

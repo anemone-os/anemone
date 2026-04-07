@@ -60,9 +60,8 @@ impl IntrArchTrait for LA64IntrArch {
 pub(super) unsafe fn handle_intr(reason: LA64Interrupt) {
     match reason {
         LA64Interrupt::Timer => {
-            //kdebugln!("received timer interrupt");
             TimeArch::claim_timer_interrupt();
-            TimeArch::set_next_trigger(300_000_0);
+            handle_timer_interrupt();
         },
         LA64Interrupt::Ipi => {
             // claiming after handling will result in missing IPI, leading to queue

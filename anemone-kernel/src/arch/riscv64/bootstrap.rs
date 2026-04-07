@@ -349,7 +349,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
     unsafe {
         // needed by percpu initialization.
         let ncpus = early_scan_cpu_count(fdt_va);
-        super::cpu::set_ncpus(ncpus);
+        super::cpu::init(ncpus, bsp_id);
 
         kinfoln!("anemone kernel booting on bsp #{}", bsp_id);
 
@@ -359,7 +359,6 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         } else {
             kwarningln!("failed to scan clock frequency from device tree.");
         };
-
         let mut scanner = EarlyMemoryScanner::new(fdt_va);
 
         // mark fdt as reserved memory so that it won't be allocated by frame allocator.

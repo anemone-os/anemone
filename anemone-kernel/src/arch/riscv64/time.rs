@@ -13,15 +13,22 @@ pub unsafe fn set_hw_clock_freq(freq_hz: u64) {
 }
 
 impl TimeArchTrait for RiscV64TimeArch {
-    fn current_ticks() -> u64 {
-        riscv::register::time::read() as u64
+    type LocalClockSource = Self;
+    type LocalClockEvent = Self;
+}
+
+impl LocalClockSourceArch for RiscV64TimeArch {
+    fn curr_monotonic_time() -> u64 {
+        riscv::register::time::read64()
     }
 
-    fn hw_freq_hz() -> Option<u64> {
-        unsafe { CLOCK_FREQUENCY_HZ }
+    fn monotonic_freq_hz() -> u64 {
+        unsafe { CLOCK_FREQUENCY_HZ.expect("clock frequency not set") }
     }
+}
 
-    fn set_next_trigger(ticks: u64) {
-        sbi_rt::set_timer(Self::current_ticks().wrapping_add(ticks)).expect("Sbi set_timer failed");
+impl LocalClockEventArch for RiscV64TimeArch {
+    fn program_next_timer(deadline: u64) {
+        sbi_rt::set_timer(deadline).expect("Sbi set_timer failed");
     }
 }

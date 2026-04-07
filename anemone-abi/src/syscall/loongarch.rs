@@ -74,9 +74,16 @@ pub mod linux {
     pub const SYS_FSTAT: u64 = 80;
 
     pub const SYS_EXIT: u64 = 93;
+
+    pub const SYS_NANOSLEEP: u64 = 101;
+
     pub const SYS_SCHED_YIELD: u64 = 124;
 
+    pub const SYS_TIMES: u64 = 153;
+
     pub const SYS_UNAME: u64 = 160;
+
+    pub const SYS_GETTIMEOFDAY: u64 = 169;
 
     pub const SYS_GETPID: u64 = 172;
     pub const SYS_GETPPID: u64 = 173;
