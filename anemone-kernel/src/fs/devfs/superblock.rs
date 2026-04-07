@@ -1,25 +1,24 @@
 use crate::{
-	fs::{inode::Inode, superblock::SuperBlockOps},
-	prelude::*,
+    fs::{devfs::DevfsNode, inode::Inode, superblock::SuperBlockOps},
+    prelude::*,
 };
 
-use super::{devfs_node_from_ino, inode::devfs_new_inode};
+use super::inode::devfs_new_inode;
 
 fn devfs_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, FsError> {
-	let node = devfs_node_from_ino(ino)?;
-	devfs_new_inode(sb.clone(), node)
+    devfs_new_inode(sb.clone(), DevfsNode::new(ino)?)
 }
 
 fn devfs_evict_inode(_sb: &SuperBlock, _inode: Arc<Inode>) -> Result<(), FsError> {
-	Ok(())
+    Ok(())
 }
 
 fn devfs_sync_inode(_inode: &InodeRef) -> Result<(), FsError> {
-	Ok(())
+    Ok(())
 }
 
 pub(super) static DEVFS_SB_OPS: SuperBlockOps = SuperBlockOps {
-	load_inode: devfs_load_inode,
-	evict_inode: devfs_evict_inode,
-	sync_inode: devfs_sync_inode,
+    load_inode: devfs_load_inode,
+    evict_inode: devfs_evict_inode,
+    sync_inode: devfs_sync_inode,
 };

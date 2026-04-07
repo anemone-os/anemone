@@ -11,12 +11,18 @@ use crate::{prelude::*, utils::any_opaque::AnyOpaque};
 pub struct InodeOps {
     pub lookup: fn(dir: &InodeRef, name: &str) -> Result<InodeRef, FsError>,
 
+    /// Currently this method should only care about regular files and
+    /// directories. this looks a bit disjoint considering that symlink creation
+    /// is not handled by this method.
+    ///
+    /// We'd better refactor this API in the future to make it more consistent
+    /// and intuitive.
     pub create: fn(dir: &InodeRef, name: &str, mode: InodeMode) -> Result<InodeRef, FsError>,
+    pub symlink: fn(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, FsError>,
 
     pub link: fn(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), FsError>,
     pub unlink: fn(dir: &InodeRef, name: &str) -> Result<(), FsError>,
 
-    pub mkdir: fn(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError>,
     pub rmdir: fn(dir: &InodeRef, name: &str) -> Result<(), FsError>,
 
     /// Quoted from [Linux's VFS documentation](https://docs.kernel.org/filesystems/vfs.html):
@@ -35,6 +41,9 @@ pub struct InodeOps {
     ///
     /// So we put this method here.
     pub open: fn(&InodeRef) -> Result<OpenedFile, FsError>,
+
+    /// If this is a symlink, return the target path.
+    pub read_link: fn(&InodeRef) -> Result<PathBuf, FsError>,
 
     /// Query inode metadata in a filesystem-neutral shape.
     pub get_attr: fn(&InodeRef) -> Result<InodeStat, FsError>,
@@ -85,7 +94,7 @@ pub enum InodeType {
     Regular,
     Dir,
     Dev,
-    // Symlink is not supported yet.
+    Symlink,
 }
 
 impl InodeType {
@@ -95,6 +104,7 @@ impl InodeType {
             Self::Regular => linux_mode::S_IFREG,
             Self::Dir => linux_mode::S_IFDIR,
             Self::Dev => linux_mode::S_IFCHR,
+            Self::Symlink => linux_mode::S_IFLNK,
         }
     }
 }
@@ -216,6 +226,7 @@ impl InodeMode {
             linux_mode::S_IFREG => InodeType::Regular,
             linux_mode::S_IFDIR => InodeType::Dir,
             linux_mode::S_IFCHR | linux_mode::S_IFBLK => InodeType::Dev,
+            linux_mode::S_IFLNK => InodeType::Symlink,
             _ => return None,
         };
         let perm = InodePerm::from_bits_truncate(mode as u16);
@@ -630,9 +641,12 @@ impl InodeRef {
 
 // VTable operations re-exported here.
 impl InodeRef {
-    /// Create a new dentry under this inode with the given name and type.
     pub fn create(&self, name: &str, mode: InodeMode) -> Result<InodeRef, FsError> {
         (self.inode().ops.create)(self, name, mode)
+    }
+
+    pub fn symlink(&self, name: &str, target: &Path) -> Result<InodeRef, FsError> {
+        (self.inode().ops.symlink)(self, name, target)
     }
 
     /// Lookup a child dentry under this inode by name.
@@ -648,10 +662,6 @@ impl InodeRef {
         (self.inode().ops.unlink)(self, name)
     }
 
-    pub fn mkdir(&self, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
-        (self.inode().ops.mkdir)(self, name, perm)
-    }
-
     pub fn rmdir(&self, name: &str) -> Result<(), FsError> {
         (self.inode().ops.rmdir)(self, name)
     }
@@ -661,6 +671,10 @@ impl InodeRef {
     /// [File] object finally.
     pub fn open(&self) -> Result<OpenedFile, FsError> {
         (self.inode().ops.open)(self)
+    }
+
+    pub fn read_link(&self) -> Result<PathBuf, FsError> {
+        (self.inode().ops.read_link)(self)
     }
 
     pub fn get_attr(&self) -> Result<InodeStat, FsError> {

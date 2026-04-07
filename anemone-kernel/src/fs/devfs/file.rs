@@ -1,13 +1,13 @@
 use crate::{
     device::{
-        block::{BlockDev, get_block_dev, next_block_dev},
+        block::{get_block_dev, next_block_dev, BlockDev},
         char::{get_char_dev, next_char_dev},
     },
     prelude::*,
     utils::iter_ctx::IterCtx,
 };
 
-use super::{DevfsNode, devfs_ino_for, devfs_root_ino};
+use super::{devfs_ino_for, devfs_root_ino, DevfsNode};
 
 #[derive(Debug, Clone, Copy, Opaque)]
 pub(super) struct DevfsFile {

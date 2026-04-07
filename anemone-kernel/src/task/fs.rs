@@ -99,9 +99,9 @@ impl Task {
         let fs_state = self.fs_state();
         let fs_state = fs_state.read();
         if path.is_absolute() {
-            resolve_from(fs_state.root(), path)
+            vfs_lookup_from(&fs_state.root(), path)
         } else {
-            resolve_from(fs_state.cwd(), path)
+            vfs_lookup_from(&fs_state.cwd(), path)
         }
     }
 

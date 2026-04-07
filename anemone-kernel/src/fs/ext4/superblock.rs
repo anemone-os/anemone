@@ -1,15 +1,17 @@
 use crate::{
     fs::{
         ext4::{
-            Ext4Inode, ext4_ino, ext4_sb,
-            inode::{EXT4_DEV_INODE_OPS, EXT4_DIR_INODE_OPS, EXT4_REG_INODE_OPS},
+            ext4_ino, ext4_sb,
+            inode::{
+                EXT4_DEV_INODE_OPS, EXT4_DIR_INODE_OPS, EXT4_REG_INODE_OPS, EXT4_SYMLINK_INODE_OPS,
+            },
             map_ext4_error, map_lwext4_inode_type,
         },
         inode::{Inode, InodeMeta},
         superblock::SuperBlockOps,
     },
     prelude::*,
-    utils::any_opaque::AnyOpaque,
+    utils::any_opaque::NilOpaque,
 };
 
 fn ext4_inode_ops(ty: InodeType) -> &'static InodeOps {
@@ -17,6 +19,7 @@ fn ext4_inode_ops(ty: InodeType) -> &'static InodeOps {
         InodeType::Dir => &EXT4_DIR_INODE_OPS,
         InodeType::Regular => &EXT4_REG_INODE_OPS,
         InodeType::Dev => &EXT4_DEV_INODE_OPS,
+        InodeType::Symlink => &EXT4_SYMLINK_INODE_OPS,
     }
 }
 
@@ -32,12 +35,13 @@ fn ext4_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, FsError
     })?;
 
     let ty = map_lwext4_inode_type(attr.node_type)?;
+
     let inode = Arc::new(Inode::new(
         ext4_ino(attr.ino)?,
         ty,
         ext4_inode_ops(ty),
         sb.clone(),
-        AnyOpaque::new(Ext4Inode::new()),
+        NilOpaque::new(),
     ));
     inode.set_meta(&InodeMeta {
         nlink: attr.nlink,

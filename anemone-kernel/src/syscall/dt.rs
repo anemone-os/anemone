@@ -260,20 +260,39 @@ pub fn user_addr(arg: u64) -> Result<VirtAddr, SysError> {
     }
 }
 
-/// Lift a validator into an optional validator where a zero raw argument means
-/// the argument is absent.
-pub fn nullable<T, V>(validator: V) -> impl FnOnce(u64) -> Result<Option<T>, SysError>
-where
-    V: FnOnce(u64) -> Result<T, SysError>,
-{
-    move |arg| {
-        if arg == 0 {
-            Ok(None)
-        } else {
-            validator(arg).map(Some)
+pub trait SyscallArgValidatorExt<T>: FnOnce(u64) -> Result<T, SysError> + Sized {
+    /// Overlay this validator with a mapper that transforms the validated value
+    /// into another type.
+    fn map<U, F>(self, mapper: F) -> impl FnOnce(u64) -> Result<U, SysError>
+    where
+        F: FnOnce(T) -> U,
+    {
+        move |arg| self(arg).map(mapper)
+    }
+
+    /// Overlay this validator with a mapper that transforms the validated value
+    /// into another type, where the mapping can also fail.
+    fn and_then<U, F>(self, mapper: F) -> impl FnOnce(u64) -> Result<U, SysError>
+    where
+        F: FnOnce(T) -> Result<U, SysError>,
+    {
+        move |arg| self(arg).and_then(mapper)
+    }
+
+    /// Lift this validator into an optional validator where a zero raw argument
+    /// means the argument is absent.
+    fn nullable(self) -> impl FnOnce(u64) -> Result<Option<T>, SysError> {
+        move |arg| {
+            if arg == 0 {
+                Ok(None)
+            } else {
+                self(arg).map(Some)
+            }
         }
     }
 }
+
+impl<T, V> SyscallArgValidatorExt<T> for V where V: FnOnce(u64) -> Result<T, SysError> {}
 
 /// Validate a user C array and create a copy of it.
 ///

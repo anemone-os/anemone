@@ -31,4 +31,4 @@ backtrace_depth = 16 # Maximum depth of captured backtrace
 user_stack_shift_kb = 13 # Max user stack size as a power of 2 in KB
 user_init_stack_shift_kb = 4 # Initial user stack size as a power of 2 in KB
 user_heap_shift_mb = 12 # Max user heap size as a power of 2 in MB
-
+symlink_resolve_limit = 16 # Maximum number of symbolic links to resolve in a single path resolution

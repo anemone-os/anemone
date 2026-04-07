@@ -6,10 +6,11 @@
 use crate::prelude::{dt::c_readonly_string, *};
 
 #[syscall(SYS_UMOUNT2)]
-fn sys_umount(
+fn sys_umount2(
     #[validate_with(c_readonly_string)] target: Box<str>,
-    flags: u64,
+    // currently unused.
+    _flags: u64,
 ) -> Result<u64, SysError> {
-    // todo
+    vfs_unmount(&Path::new(target.as_ref()))?;
     Ok(0)
 }

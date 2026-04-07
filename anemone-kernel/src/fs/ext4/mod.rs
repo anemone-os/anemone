@@ -123,17 +123,6 @@ impl Ext4Sb {
     }
 }
 
-#[derive(Opaque)]
-pub(super) struct Ext4Inode {
-    _data: (),
-}
-
-impl Ext4Inode {
-    pub(super) fn new() -> Self {
-        Self { _data: () }
-    }
-}
-
 #[inline(always)]
 pub(super) fn ext4_sb(sb: &SuperBlock) -> &Ext4Sb {
     sb.prv()
@@ -156,7 +145,10 @@ pub(super) fn map_ext4_error(err: LwExt4Error) -> FsError {
         x if x == EXDEV as i32 => FsError::CrossDeviceLink,
         x if x == EBUSY as i32 => FsError::Busy,
         x if x == EOPNOTSUPP as i32 => FsError::NotSupported,
-        _ => FsError::NotSupported,
+        _ => {
+            kerrln!("unexpected ext4 error: {:?}", err);
+            FsError::NotSupported
+        },
     }
 }
 
@@ -164,6 +156,7 @@ pub(super) fn map_lwext4_inode_type(ty: LwExt4InodeType) -> Result<InodeType, Fs
     match ty {
         LwExt4InodeType::Directory => Ok(InodeType::Dir),
         LwExt4InodeType::RegularFile => Ok(InodeType::Regular),
+        LwExt4InodeType::Symlink => Ok(InodeType::Symlink),
         LwExt4InodeType::CharacterDevice | LwExt4InodeType::BlockDevice => Ok(InodeType::Dev),
         _ => Err(FsError::NotSupported),
     }
@@ -174,6 +167,7 @@ pub(super) fn map_vfs_inode_type(ty: InodeType) -> Result<LwExt4InodeType, FsErr
         InodeType::Dir => Ok(LwExt4InodeType::Directory),
         InodeType::Regular => Ok(LwExt4InodeType::RegularFile),
         InodeType::Dev => Err(FsError::NotSupported),
+        InodeType::Symlink => Ok(LwExt4InodeType::Symlink),
     }
 }
 

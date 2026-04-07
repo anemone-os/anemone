@@ -1,3 +1,13 @@
+//! getcwd system call.
+//!
+//! Note that kernel-side getcwd returns written bytes on success, while
+//! user-side getcwd returns a pointer to the buffer on success, which is
+//! handled by libc. See kernel source code below for more details.
+//!
+//! Reference:
+//! - https://www.man7.org/linux/man-pages/man2/getcwd.2.html
+//! - https://elixir.bootlin.com/linux/v6.6.32/source/fs/d_path.c#L412
+
 use crate::prelude::{dt::UserWritePtr, *};
 
 #[syscall(SYS_GETCWD)]
