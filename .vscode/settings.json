@@ -1,35 +1,22 @@
 // rust analyzer is too dumb for large workspaces where different crates have different targets...
 // ugly workaround: manually specify the linked project and target for the current crate being worked on.
 {
-    //For kernel dev
-    //"rust-analyzer.cargo.features": [
-    //    "kunit",
-    //    "fs_ext4"
-    //],
-    //"rust-analyzer.linkedProjects": [
-    //    // kernel
-    //    "Cargo.toml",
-    //    // other crates
-    //    // "scripts/xtask/Cargo.toml",
-    //    //"anemone-rs/Cargo.toml",
-    //    //"anemone-apps/user-test/Cargo.toml",
-    //    // "anemone-kernel/crates/buddy-system/fuzz/Cargo.toml",
-    //],
+    "rust-analyzer.cargo.features": [
+        "kunit",
+        "fs_ext4"
+    ],
+    "rust-analyzer.linkedProjects": [
+        // kernel
+        "Cargo.toml",
+        // other crates
+        // "scripts/xtask/Cargo.toml",
+        // "anemone-rs/Cargo.toml",
+        // "anemone-apps/user-test/Cargo.toml",
+        // "anemone-kernel/crates/buddy-system/fuzz/Cargo.toml",
+    ],
     "rust-analyzer.cargo.target": "riscv64gc-unknown-none-elf",
     //"rust-analyzer.cargo.target": "loongarch64-unknown-none",
     "rust-analyzer.cargo.allTargets": false,
-    // For xtask dev under host std
-    // "rust-analyzer.linkedProjects": [
-    //     "scripts/xtask/Cargo.toml",
-    // ],
-    // For other crates & kernel dev
-     "rust-analyzer.linkedProjects": [
-         "anemone-abi/Cargo.toml",
-         "anemone-rs/Cargo.toml",
-         "anemone-apps/user-test/Cargo.toml",
-         "anemone-apps/init/Cargo.toml",
-         "anemone-kernel/crates/buddy-system/fuzz/Cargo.toml",
-     ],
     "files.associations": {
         "conf/.defconfig": "toml",
         "conf/kconfig": "toml"
