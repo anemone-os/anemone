@@ -19,7 +19,7 @@ pub mod fs {
         fs::getcwd(buf.as_mut_ptr() as u64, buf.len() as u64)
     }
 
-    pub fn openat(dirfd: usize, path: &Path, flags: u32, mode: u32) -> Result<usize, Errno> {
+    pub fn openat(dirfd: isize, path: &Path, flags: u32, mode: u32) -> Result<usize, Errno> {
         let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
         fs::openat(dirfd as isize, path.as_ptr() as u64, flags, mode)
     }

@@ -575,7 +575,6 @@ mod vfs_ops {
 
         /// Read the target of a symbolic link.
         pub fn vfs_read_link_at(dir: &PathRef, rel_path: &Path) -> Result<PathBuf, FsError> {
-            let rel_path = rel_path.into();
             let pathref = resolve_from(dir, rel_path, ResolveFlags::UNFOLLOW_LAST_SYMLINK)?;
             let inode = pathref.inode();
             if inode.ty() != InodeType::Symlink {

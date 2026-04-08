@@ -86,6 +86,12 @@ struct FileInner {
     fd: usize,
 }
 
+impl Drop for FileInner {
+    fn drop(&mut self) {
+        let _ = fs::close(self.fd);
+    }
+}
+
 impl File {
     pub const unsafe fn from_raw_fd(fd: usize) -> Self {
         Self {

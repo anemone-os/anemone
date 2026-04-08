@@ -86,8 +86,9 @@ impl<T: Sized + Clone, A: UserAccess> UserPtr<T, A> {
         drop(usp_data);
         Ok(res)
     }
+
     pub fn validate_with(&self, data: &UserSpaceData) -> Result<*const T, SysError> {
-        let ptr = validate_user_pointer(UserWrite::PTE_FLAGS, data, self.addr)? as *const T;
+        let ptr = validate_user_pointer(A::PTE_FLAGS, data, self.addr)?;
         Ok(ptr)
     }
 }
