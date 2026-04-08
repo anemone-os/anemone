@@ -38,6 +38,8 @@ pub mod fs {
 }
 
 pub mod process {
+    pub type Tid = u32;
+
     use alloc::ffi::CString;
     use bitflags::bitflags;
 
@@ -105,37 +107,74 @@ pub mod process {
     pub fn clone(
         flags: CloneFlags,
         stack_ptr: Option<*mut u8>,
-        parent_tid: &mut usize,
+        parent_tid: Option<&mut Tid>,
         tls_ptr: *mut u8,
-        child_tid: &mut usize,
-    ) -> Result<usize, Errno> {
+        child_tid: Option<&mut Tid>,
+    ) -> Result<Tid, Errno> {
         process::clone(
             flags.bits() as u64,
             stack_ptr.and_then(|s| Some(s as u64)).unwrap_or(0),
-            parent_tid as *mut usize as u64,
+            parent_tid
+                .and_then(|val| Some(val as *mut Tid as u64))
+                .unwrap_or(0),
             tls_ptr as u64,
-            child_tid as *mut usize as u64,
+            child_tid
+                .and_then(|val| Some(val as *mut Tid as u64))
+                .unwrap_or(0),
         )
-        .and_then(|x| Ok(x as usize))
+        .and_then(|x| Ok(x as Tid))
     }
 
     pub fn sched_yield() -> Result<(), Errno> {
         process::sched_yield()
     }
 
-    pub fn exit(xcode: i32) -> ! {
+    pub fn exit(xcode: i8) -> ! {
         process::exit(xcode as u64)
     }
 
-    pub fn getpid() -> Result<usize, Errno> {
-        process::getpid().and_then(|x| Ok(x as usize))
+    pub fn getpid() -> Result<Tid, Errno> {
+        process::getpid().and_then(|x| Ok(x as Tid))
     }
 
-    pub fn getppid() -> Result<usize, Errno> {
-        process::getppid().and_then(|x| Ok(x as usize))
+    pub fn getppid() -> Result<Tid, Errno> {
+        process::getppid().and_then(|x| Ok(x as Tid))
     }
 
-    pub fn wait4(pid: i64) -> Result<u32, Errno> {
-        process::wait4(pid as u64).and_then(|x| Ok(x as u32))
+    #[repr(transparent)]
+    #[derive(Debug)]
+    pub struct WStatusRaw(u16);
+
+    impl WStatusRaw {
+        pub fn read(&self) -> WStatus {
+            if self.0 & 0x00ff == 0 {
+                WStatus::Exited((self.0 >> 8) as i8)
+            } else if self.0 & 0x00ff == 0x7f {
+                WStatus::Stopped((self.0 >> 8) as i8)
+            } else if self.0 == 0xffff {
+                WStatus::Continued
+            } else {
+                WStatus::Signal((self.0 & 0xff) as i8)
+            }
+        }
+        pub const EMPTY: WStatusRaw = WStatusRaw(0);
+    }
+
+    #[derive(Debug)]
+    pub enum WStatus {
+        Exited(i8),
+        Signal(i8),  // not implemented
+        Stopped(i8), // not implemented
+        Continued,   // not implemented
+    }
+
+    pub fn wait4(pid: i64, wstatus: Option<&mut WStatusRaw>) -> Result<Tid, Errno> {
+        process::wait4(
+            pid as u64,
+            wstatus
+                .and_then(|r| Some(r as *mut WStatusRaw as u64))
+                .unwrap_or(0),
+        )
+        .and_then(|x| Ok(x as Tid))
     }
 }

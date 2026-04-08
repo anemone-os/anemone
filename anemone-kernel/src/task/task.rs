@@ -461,7 +461,7 @@ pub trait ArcTaskImpls {
 
     unsafe fn note_exited(&self);
 
-    unsafe fn waitpid(&self, target: WaitObject) -> Result<Tid, SysError>;
+    unsafe fn waitpid(&self, target: WaitObject) -> Result<Arc<Task>, SysError>;
 }
 impl ArcTaskImpls for Arc<Task> {
     unsafe fn add_as_child(&self, parent: &Arc<Task>) {
@@ -496,7 +496,7 @@ impl ArcTaskImpls for Arc<Task> {
     }
 
     /// This is the only way to remove a task from its children list
-    unsafe fn waitpid(&self, target: WaitObject) -> Result<Tid, SysError> {
+    unsafe fn waitpid(&self, target: WaitObject) -> Result<Arc<Task>, SysError> {
         unsafe {
             self.with_task_hierarchy(|hier| {
                 if hier
@@ -532,7 +532,7 @@ impl ArcTaskImpls for Arc<Task> {
                         debug_assert!(res);
                     });
                 }
-                return Ok(child.tid());
+                return Ok(child);
             }
         }
     }

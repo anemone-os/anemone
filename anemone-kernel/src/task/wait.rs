@@ -33,13 +33,13 @@ impl<T> WaitQueue<T> {
         if exclusive {
             if let Some(waiter) = self.queue.lock().pop_front() {
                 (waiter.handler)(data);
-                kdebugln!("wake up {}", waiter.waiter.tid());
+                //kdebugln!("wake up {}", waiter.waiter.tid());
                 add_to_ready(waiter.waiter);
             }
         } else {
             while let Some(waiter) = self.queue.lock().pop_front() {
                 (waiter.handler)(data);
-                kdebugln!("wake up {}", waiter.waiter.tid());
+                //kdebugln!("wake up {}", waiter.waiter.tid());
                 add_to_ready(waiter.waiter);
             }
         }
@@ -60,7 +60,7 @@ impl<T: Clone + Sync + Send + 'static> WaitQueue<T> {
         let mut locked = self.queue.lock();
         match condition() {
             Ok(()) => {
-                kdebugln!("{} sleep", task.tid());
+                //kdebugln!("{} sleep", task.tid());
                 locked.push_back(WaitInfo {
                     waiter: task,
                     handler: Box::new(move |data| {
@@ -69,7 +69,7 @@ impl<T: Clone + Sync + Send + 'static> WaitQueue<T> {
                 });
                 drop(locked);
                 sleep_as_waiting(interruptible);
-                kdebugln!("{} awaken", current_task_id());
+                //kdebugln!("{} awaken", current_task_id());
                 let boxed = unsafe { Box::from_raw(ptr) };
                 let res = (*boxed).unwrap();
                 Ok(res)

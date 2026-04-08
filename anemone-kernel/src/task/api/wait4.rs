@@ -2,7 +2,7 @@ use anemone_abi::syscall::SYS_WAIT4;
 use kernel_macros::syscall;
 
 use crate::{
-    prelude::{SysError, handler::TryFromSyscallArg},
+    prelude::{SysError, dt::UserWritePtr, handler::TryFromSyscallArg},
     sched::clone_current_task,
     task::{ArcTaskImpls, WaitObject, tid::Tid},
 };
@@ -22,10 +22,27 @@ impl TryFromSyscallArg for WaitObject {
     }
 }
 
-#[syscall(SYS_WAIT4)]
-pub fn sys_wait4(target: WaitObject) -> Result<u64, SysError> {
-    unsafe {
-        let tid = clone_current_task().waitpid(target)?;
-        Ok(tid.get() as u64)
+#[repr(C)]
+pub struct WStatus {
+    value: u16,
+}
+impl WStatus {
+    pub fn normal(exit_code: i8) -> Self {
+        WStatus {
+            value: (exit_code as u16) << 8,
+        }
     }
+    // todo:
+}
+
+#[syscall(SYS_WAIT4)]
+pub fn sys_wait4(
+    target: WaitObject,
+    wstatus: Option<UserWritePtr<WStatus>>,
+) -> Result<u64, SysError> {
+    let task = unsafe { clone_current_task().waitpid(target)? };
+    if let Some(wstatus) = wstatus {
+        wstatus.safe_write(WStatus::normal(task.exit_code()))?;
+    }
+    Ok(task.tid().get() as u64)
 }

@@ -43,7 +43,7 @@ pub fn kernel_exit(exit_code: i8) -> ! {
                         child_hierarchy.set_parent(root);
                         root_hierarchy.add_child(child.clone());
                     });
-                    kdebugln!("set the parent task of {} to {}", child.tid(), root.tid());
+                    //kdebugln!("set the parent task of {} to {}", child.tid(), root.tid());
                 }
             });
         });

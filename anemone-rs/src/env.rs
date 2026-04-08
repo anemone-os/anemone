@@ -38,7 +38,7 @@ pub extern "C" fn _start(stack_top: *const u64) -> ! {
 
     match unsafe { anemone_main() } {
         Ok(()) => exit(0),
-        Err(errno) => exit(errno),
+        Err(errno) => exit(errno as i8),
     }
 }
 
