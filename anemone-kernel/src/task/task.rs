@@ -538,7 +538,7 @@ pub trait ArcTaskImpls {
     unsafe fn note_exited(&self);
 
     /// Wait for a child selected by `target`, then reap and return it.
-    unsafe fn waitpid(&self, target: WaitObject) -> Result<Arc<Task>, SysError>;
+    unsafe fn waitpid(&self, target: WaitObject, sleep: bool) -> Result<Option<Arc<Task>>, SysError>;
 }
 impl ArcTaskImpls for Arc<Task> {
     unsafe fn add_as_child(&self, parent: &Arc<Task>) {
@@ -573,7 +573,11 @@ impl ArcTaskImpls for Arc<Task> {
     }
 
     /// This is the only way to remove a task from its children list
-    unsafe fn waitpid(&self, target: WaitObject) -> Result<Arc<Task>, SysError> {
+    unsafe fn waitpid(
+        &self,
+        target: WaitObject,
+        sleep: bool,
+    ) -> Result<Option<Arc<Task>>, SysError> {
         unsafe {
             self.with_task_hierarchy(|hier| {
                 if hier
@@ -595,13 +599,18 @@ impl ArcTaskImpls for Arc<Task> {
                     self.with_task_hierarchy_mut(|hier| {
                         for ch in &hier.children {
                             if target.match_task(ch) && ch.status() == TaskStatus::Zombie {
-                                return Err(ch.clone());
+                                return Err(Some(ch.clone()));
                             }
                         }
-                        Ok(())
+                        if !sleep { Err(None) } else { Ok(()) }
                     })
                 })
+                .and_then(|a| Ok(Some(a)))
                 .unwrap_or_else(|e| e);
+            let child = match child {
+                Some(child) => child,
+                None => return Ok(None),
+            };
             if target.match_task(&child) {
                 unsafe {
                     self.with_task_hierarchy_mut(|hier| {
@@ -609,7 +618,7 @@ impl ArcTaskImpls for Arc<Task> {
                         debug_assert!(res);
                     });
                 }
-                return Ok(child);
+                return Ok(Some(child));
             }
         }
     }

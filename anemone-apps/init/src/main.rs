@@ -5,7 +5,9 @@ use core::ptr::null_mut;
 
 use anemone_rs::{
     env::current_dir,
-    os::linux::process::{CloneFlags, WStatusRaw, clone, execve, getpid, wait4},
+    os::linux::process::{
+        CloneFlags, WStatusRaw, WaitOptions, clone, execve, getpid, sched_yield, wait4,
+    },
     prelude::*,
 };
 
@@ -31,13 +33,18 @@ pub fn main() -> Result<(), anemone_abi::errno::Errno> {
         println!("init: 'bin/user-test' started with pid {}", tid);
         loop {
             let mut wstatus = WStatusRaw::EMPTY;
-            match wait4(-1, Some(&mut wstatus)) {
-                Ok(tid) => println!("init: task #{} exited with code {:?}", tid, wstatus.read()),
+            match wait4(-1, Some(&mut wstatus), WaitOptions::empty()) {
+                Ok(Some(tid)) => {
+                    println!("init: task #{} exited with code {:?}", tid, wstatus.read())
+                },
+                Ok(None) => {
+                    panic!("init: wait4 returned None but no error, this should not happen");
+                },
                 Err(e) => {
-                    if e == ECHILD {
-                        continue;
-                    } else {
+                    if e != ECHILD {
                         panic!("init: cannot recycle child tasks: {}", e);
+                    } else {
+                        sched_yield().expect("init: failed to yield");
                     }
                 },
             }
