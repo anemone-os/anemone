@@ -3,7 +3,7 @@ use core::{alloc::GlobalAlloc, cmp::max, ptr::NonNull};
 use spin::Mutex;
 use talc::{OomHandler, Span, Talc};
 
-use crate::syscalls::sys_brk;
+use crate::sys::linux::process::brk;
 
 #[global_allocator]
 static ALLOCATOR: UserAllocator = UserAllocator;
@@ -17,7 +17,7 @@ static mut PROGRAM_BREAK: u64 = 0;
 
 pub(crate) fn init() {
     unsafe {
-        PROGRAM_BREAK = sys_brk(0).expect("user heap init failed");
+        PROGRAM_BREAK = brk(0).expect("user heap init failed");
     }
 }
 
@@ -52,7 +52,7 @@ impl OomHandler for UserOomHandler {
             let old_break = PROGRAM_BREAK;
             let new_break = PROGRAM_BREAK + grow_by;
             PROGRAM_BREAK =
-                sys_brk(new_break).unwrap_or_else(|err| panic!("failed to grow heap: {err:#x}"));
+                brk(new_break).unwrap_or_else(|err| panic!("failed to grow heap: {err:#x}"));
             talc.claim(Span::new(old_break as *mut u8, new_break as *mut u8))?;
         }
         Ok(())

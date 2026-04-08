@@ -5,7 +5,7 @@
 
 use core::{mem::size_of, ptr::NonNull};
 
-use anemone_abi::fs::linux::dirent::{DT_CHR, DT_DIR, DT_LNK, DT_REG};
+use anemone_abi::fs::linux::dirent::{DT_CHR, DT_DIR, DT_FIFO, DT_LNK, DT_REG};
 
 use crate::{
     prelude::{dt::UserWritePtr, *},
@@ -30,6 +30,7 @@ fn dirent64_dtype(ty: InodeType) -> u8 {
         InodeType::Dir => DT_DIR,
         InodeType::Dev => DT_CHR,
         InodeType::Symlink => DT_LNK,
+        InodeType::Fifo => DT_FIFO,
     }
 }
 

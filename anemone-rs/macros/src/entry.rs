@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    parse_macro_input, parse_quote, spanned::Spanned, Attribute, Error, GenericArgument, ItemFn,
-    PathArguments, ReturnType, Type,
+    Attribute, Error, GenericArgument, ItemFn, PathArguments, ReturnType, Type, parse_macro_input,
+    parse_quote, spanned::Spanned,
 };
 
 pub fn main_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -23,7 +23,7 @@ pub fn main_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     function
         .attrs
-        .push(parse_quote!(#[unsafe(export_name = "anemone_user_main")]));
+        .push(parse_quote!(#[unsafe(export_name = "anemone_main")]));
 
     quote!(#function).into()
 }

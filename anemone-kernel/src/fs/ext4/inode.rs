@@ -56,8 +56,9 @@ fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, FsError> {
     let file_ops = match inode.ty() {
         InodeType::Dir => &EXT4_DIR_FILE_OPS,
         InodeType::Regular => &EXT4_REG_FILE_OPS,
-        InodeType::Dev => return Err(FsError::NotSupported),
         InodeType::Symlink => &EXT4_SYMLINK_FILE_OPS,
+        InodeType::Fifo => unimplemented!("ext4 fifo file"),
+        InodeType::Dev => unimplemented!("ext4 dev file"),
     };
 
     Ok(OpenedFile {
@@ -119,8 +120,8 @@ fn ext4_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, FsError> {
 fn ext4_create(dir: &InodeRef, name: &str, mode: InodeMode) -> Result<InodeRef, FsError> {
     match mode.ty() {
         InodeType::Regular | InodeType::Dir => ext4_create_child(dir, name, mode),
-        InodeType::Dev => Err(FsError::NotSupported),
         InodeType::Symlink => Err(FsError::NotSupported),
+        InodeType::Dev | InodeType::Fifo => Err(FsError::NotSupported),
     }
 }
 

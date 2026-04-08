@@ -10,7 +10,7 @@
         "Cargo.toml",
         // other crates
         // "scripts/xtask/Cargo.toml",
-        //"anemone-rs/Cargo.toml",
+        // "anemone-rs/Cargo.toml",
         //"anemone-apps/user-test/Cargo.toml",
         // "anemone-kernel/crates/buddy-system/fuzz/Cargo.toml",
     ],

@@ -2,39 +2,14 @@
 #![no_main]
 #![warn(unused)]
 
-use anemone_rs::{fs::getcwd, prelude::*};
+use anemone_rs::prelude::*;
 
-#[anemone_rs::main]
+#[main]
 pub fn main() -> Result<(), Errno> {
-    let cwd = getcwd()?;
-    println!("user-test: current working directory: {}", cwd);
+    let cwd = anemone_rs::env::current_dir()?;
+    println!("user-test: current working directory: {}", cwd.display());
 
     // tmp test
-    execve("/uname", &["/uname"]).unwrap();
-
-    let args: Vec<&str> = args().collect();
-    if args.len() < 2 {
-        println!("usage: user-test [running times...]");
-        return Err(-1);
-    }
-    let program = args[0];
-    let first_arg = args[1];
-    let running_times: u32 = first_arg.parse().unwrap_or_else(|e| {
-        println!(
-            "failed to parse first argument as number: {}, error: {:?}",
-            first_arg, e
-        );
-        exit(-1);
-    });
-    println!("user-test: running times = {}", running_times);
-    if running_times < 30 {
-        execve(program, &[program, &format!("{}", running_times + 1)]).unwrap();
-    } else {
-        println!(
-            "user-test: finished running {} times, exiting...",
-            running_times
-        );
-    }
-
+    anemone_rs::os::linux::process::execve("/uname", &["/uname"]).unwrap();
     Ok(())
 }

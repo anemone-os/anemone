@@ -1,28 +1,25 @@
-use alloc::{ffi::CString, vec, vec::Vec};
-use anemone_abi::errno::{self, Errno};
+//! For working with processes.
+//!
+//! It's not recommended to call these thin wrappers around linux syscalls
+//! directly. Instead, prefer upper-level os-agnostic encapsulations.
 
-use crate::syscalls::{sys_execve, sys_exit, sys_sched_yield};
+use crate::prelude::*;
 
-pub fn execve(path: impl AsRef<str>, argv: &[impl AsRef<str>]) -> Result<u64, Errno> {
-    let mut argv_ptrs = vec![0; argv.len() + 1].into_boxed_slice();
-    let argv = argv
-        .iter()
-        .map(|arg| CString::new(arg.as_ref()).map_err(|_| errno::EINVAL))
-        .collect::<Result<Vec<CString>, Errno>>()?;
+use crate::os::linux::process as linux_process;
 
-    for (index, arg) in argv.iter().enumerate() {
-        argv_ptrs[index] = arg.as_ptr() as u64;
-    }
-    argv_ptrs[argv.len()] = 0;
-
-    let path = CString::new(path.as_ref()).map_err(|_| errno::EINVAL)?;
-    sys_execve(path.as_ptr() as u64, argv_ptrs.as_ptr() as u64)
+/// Exit current process.
+///
+/// Currently, this is just a thin wrapper around linux's `exit` syscall, but it
+/// may be extended in the future to support other platforms or additional
+/// cleanup logic.
+pub fn exit(xcode: i32) -> ! {
+    linux_process::exit(xcode)
 }
 
-pub fn exit(code: i32) -> ! {
-    sys_exit(code as u64)
+/// Yield the CPU to allow other threads to run.
+pub fn yield_now() -> Result<(), Errno> {
+    linux_process::sched_yield()
 }
 
-pub fn sched_yield() -> Result<(), Errno> {
-    sys_sched_yield()
-}
+#[derive(Debug)]
+pub struct Command {}

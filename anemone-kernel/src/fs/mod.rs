@@ -18,7 +18,7 @@ mod superblock;
 mod devfs;
 #[cfg(feature = "fs_ext4")]
 mod ext4;
-mod pipefs;
+mod pipe;
 mod ramfs;
 
 pub mod api;

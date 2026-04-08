@@ -95,6 +95,7 @@ pub enum InodeType {
     Dir,
     Dev,
     Symlink,
+    Fifo,
 }
 
 impl InodeType {
@@ -105,6 +106,7 @@ impl InodeType {
             Self::Dir => linux_mode::S_IFDIR,
             Self::Dev => linux_mode::S_IFCHR,
             Self::Symlink => linux_mode::S_IFLNK,
+            Self::Fifo => linux_mode::S_IFIFO,
         }
     }
 }
@@ -221,13 +223,18 @@ impl InodeMode {
         self.ty.to_linux_mode_bits() | self.perm.bits() as u32
     }
 
-    pub const fn from_linux_mode(mode: u32) -> Option<Self> {
+    pub fn from_linux_mode(mode: u32) -> Option<Self> {
         let ty = match mode & linux_mode::S_IFMT {
             linux_mode::S_IFREG => InodeType::Regular,
             linux_mode::S_IFDIR => InodeType::Dir,
             linux_mode::S_IFCHR | linux_mode::S_IFBLK => InodeType::Dev,
             linux_mode::S_IFLNK => InodeType::Symlink,
-            _ => return None,
+            linux_mode::S_IFIFO => InodeType::Fifo,
+            _ => {
+                // catch unknown file types early.
+                knoticeln!("unknown inode type in linux mode: {:o}", mode);
+                return None;
+            },
         };
         let perm = InodePerm::from_bits_truncate(mode as u16);
         Some(Self { ty, perm })

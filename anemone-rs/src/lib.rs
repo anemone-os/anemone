@@ -1,27 +1,23 @@
 #![doc = include_str!("../README.md")]
 #![no_std]
 
-pub use anemone_abi::errno::Errno;
 pub extern crate alloc;
-pub use anemone_rs_macros::main;
 
 mod allocator;
-pub mod console;
+mod sys;
+
+pub mod env;
 pub mod fs;
+pub mod io;
+pub mod os;
 pub mod process;
 pub mod runtime;
-pub mod syscalls;
 
-pub mod prelude {
-    pub use crate::{
-        Errno, alloc, args,
-        console::{__eprint, __print},
-        eprint, eprintln, main, print, println,
-        process::{execve, exit, sched_yield},
-    };
+// TODO: mod path.
 
-    pub use alloc::{format, string::String, vec, vec::Vec};
+pub mod prelude;
+
+unsafe extern "Rust" {
+    /// Entrypoint for main function.
+    fn anemone_main() -> Result<(), anemone_abi::errno::Errno>;
 }
-pub use prelude::*;
-
-pub use runtime::{Args, args};

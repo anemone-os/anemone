@@ -14,6 +14,7 @@ pub mod getdents64;
 pub mod mkdirat;
 pub mod mount;
 pub mod openat;
+pub mod pipe2;
 pub mod read;
 pub mod umount;
 pub mod unlinkat;

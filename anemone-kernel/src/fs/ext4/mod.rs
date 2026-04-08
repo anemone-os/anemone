@@ -152,12 +152,15 @@ pub(super) fn map_ext4_error(err: LwExt4Error) -> FsError {
     }
 }
 
+/// since both [LwExt4InodeType] and [TryFrom] are foreign to our codebase, we
+/// can only use this workaround to do the conversion.
 pub(super) fn map_lwext4_inode_type(ty: LwExt4InodeType) -> Result<InodeType, FsError> {
     match ty {
         LwExt4InodeType::Directory => Ok(InodeType::Dir),
         LwExt4InodeType::RegularFile => Ok(InodeType::Regular),
         LwExt4InodeType::Symlink => Ok(InodeType::Symlink),
         LwExt4InodeType::CharacterDevice | LwExt4InodeType::BlockDevice => Ok(InodeType::Dev),
+        LwExt4InodeType::Fifo => Ok(InodeType::Fifo),
         _ => Err(FsError::NotSupported),
     }
 }
@@ -168,6 +171,7 @@ pub(super) fn map_vfs_inode_type(ty: InodeType) -> Result<LwExt4InodeType, FsErr
         InodeType::Regular => Ok(LwExt4InodeType::RegularFile),
         InodeType::Dev => Err(FsError::NotSupported),
         InodeType::Symlink => Ok(LwExt4InodeType::Symlink),
+        InodeType::Fifo => Ok(LwExt4InodeType::Fifo),
     }
 }
 

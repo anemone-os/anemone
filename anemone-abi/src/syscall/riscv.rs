@@ -65,6 +65,7 @@ pub mod linux {
 
     pub const SYS_OPENAT: u64 = 56;
     pub const SYS_CLOSE: u64 = 57;
+    pub const SYS_PIPE2: u64 = 59;
 
     pub const SYS_GETDENTS64: u64 = 61;
 
