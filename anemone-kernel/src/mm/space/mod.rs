@@ -29,7 +29,9 @@ pub mod image;
 /// Maximum number of pages that a user stack may occupy.
 ///
 /// This value is expressed in pages and derived from the configuration
-/// constant [USER_STACK_SHIFT_KB]. Refer to [MAX_USER_STACK_PAGES].
+/// constant `USER_STACK_SHIFT_KB` (stack size configured in KiB). The
+/// calculation converts that size into a page count so the rest of the
+/// MM code can reason in pages.
 pub const MAX_USER_STACK_PAGES: u64 = const {
     const MAX_USER_STACK_BYTES: u64 = 1 << USER_STACK_SHIFT_KB << 10;
     const_assert!(
@@ -41,7 +43,8 @@ pub const MAX_USER_STACK_PAGES: u64 = const {
 
 /// Initial number of pages allocated for a newly created user stack.
 ///
-/// Derived from [USER_INIT_STACK_SHIFT_KB]. See [INIT_USER_STACK_PAGES].
+/// This value is expressed in pages and derived from
+/// [USER_INIT_STACK_SHIFT_KB] (configured in KiB).
 pub const INIT_USER_STACK_PAGES: u64 = const {
     const INIT_USER_STACK_BYTES: u64 = 1 << USER_INIT_STACK_SHIFT_KB << 10;
     const_assert!(
@@ -53,7 +56,8 @@ pub const INIT_USER_STACK_PAGES: u64 = const {
 
 /// Maximum number of pages the user heap may grow to.
 ///
-/// Derived from [USER_HEAP_SHIFT_MB]. See [MAX_HEAP_PAGES].
+/// This value is expressed in pages and derived from
+/// [USER_HEAP_SHIFT_MB] (configured in MiB).
 pub const MAX_HEAP_PAGES: u64 = const {
     const MAX_HEAP_BYTES: u64 = 1 << USER_HEAP_SHIFT_MB << 20;
     const_assert!(
@@ -68,8 +72,9 @@ pub struct UserSpace {
     /// Physical page number of the root page-table for quick access.
     ///
     /// This is a cached copy of the page-table root PPN. The actual page
-    /// table lives in `inner.table`.
+    /// table lives in `data.table`.
     table_ppn: PhysPageNum,
+    /// Interior state of this address space protected by an [RwLock].
     data: RwLock<UserSpaceData>,
 }
 
@@ -91,6 +96,11 @@ pub struct UserSpaceData {
 }
 
 pub trait CloneableMemArea: MemArea {
+    /// Extension of [MemArea] that supports cloning of the memory area
+    /// for use when creating a new address space.
+    ///
+    /// Implementors should ensure the returned area is a logical copy of
+    /// `self`. For copy-on-write semantics see [Self::create_copy()].
     unsafe fn clone(&mut self) -> Self;
     /// Create a copy of this segment for use by a new address space.
     ///
@@ -129,11 +139,16 @@ pub trait CloneableMemArea: MemArea {
 }
 
 pub trait MemArea: Debug {
+    /// Return the virtual page range covered by this memory area.
     fn range(&self) -> VirtPageRange;
+    /// Return the base permission flags of this memory area.
     fn perm(&self) -> PteFlags;
+    /// Return a mutable frame handle at `index` if it exists.
     fn frame_mut(&mut self, index: usize) -> Option<&mut FrameHandle>;
+    /// Return an immutable frame handle at `index` if it exists.
     fn frame(&self, index: usize) -> Option<&FrameHandle>;
 
+    /// Return the number of pages covered by this memory area.
     fn pages(&self) -> usize {
         self.range().len() as usize
     }
@@ -224,8 +239,11 @@ pub trait MemArea: Debug {
 
 #[derive(Debug)]
 pub struct Segment {
+    /// Virtual page range occupied by this segment.
     range: VirtPageRange,
+    /// Segment permission bits (without mandatory USER/VALID bits).
     perm: PteFlags,
+    /// Backing frames in the same order as pages in `range`.
     frames: Box<[FrameHandle]>,
 }
 
@@ -278,16 +296,23 @@ impl CloneableMemArea for Segment {
 /// Growth direction for a memory area.
 #[derive(Debug, Clone, Copy)]
 pub enum AreaGrowthDirection {
+    /// Grow toward higher virtual addresses.
     Higher,
+    /// Grow toward lower virtual addresses.
     Lower,
 }
 
 #[derive(Debug)]
 pub struct DynamicMemArea {
+    /// Current mapped virtual page range of this area.
     vpn_range: VirtPageRange,
+    /// Backing frames for each mapped page in `vpn_range`.
     frames: VecDeque<FrameHandle>,
+    /// Upper bound of total pages this area can hold.
     max_pages: usize,
+    /// Direction used when adding/removing pages.
     growth: AreaGrowthDirection,
+    /// Area permission bits (without mandatory USER/VALID bits).
     perm: PteFlags,
 }
 
@@ -304,7 +329,12 @@ impl DynamicMemArea {
         perm: PteFlags::empty(),
     };
 
-    /// Create a new memory area.
+    /// Create a new dynamic memory area.
+    ///
+    /// `init_vpn` is the initial edge page number of the area;
+    /// `max_pages` is the growth limit in pages;
+    /// `growth` controls whether the area expands upward or downward;
+    /// `perm` stores the base PTE permission bits.
     pub const fn new(
         init_vpn: VirtPageNum,
         max_pages: usize,
@@ -321,7 +351,9 @@ impl DynamicMemArea {
         Ok(memarea)
     }
 
-    /// Create a new memory area and preallocate the area with `prealloc` pages.
+    /// Create a new memory area and preallocate it with `prealloc` pages.
+    ///
+    /// `page_table` is updated as pages are allocated and mapped.
     pub fn prealloc(
         init_vpn: VirtPageNum,
         max_pages: usize,
@@ -542,14 +574,17 @@ impl UserSpace {
         })
     }
 
+    /// Acquire a read lock over [UserSpaceData].
     pub fn read(&self) -> ReadNoPreemptGuard<'_, UserSpaceData> {
         self.data.read()
     }
 
+    /// Acquire a write lock over [UserSpaceData].
     pub fn write(&self) -> WriteNoPreemptGuard<'_, UserSpaceData> {
         self.data.write()
     }
 
+    /// Create a copy of this [UserSpace] via copy-on-write.
     pub fn create_copy(&self) -> Result<Self, MmError> {
         let data = self.write().create_copy()?;
         Ok(UserSpace {
@@ -558,6 +593,7 @@ impl UserSpace {
         })
     }
 
+    /// Activate this address space on the current CPU.
     pub fn activate(&self) {
         self.read().activate();
     }
@@ -573,6 +609,9 @@ impl Drop for UserSpace {
 }
 
 impl UserSpaceData {
+    /// Iterate all memory areas immutably and stop early on [ControlFlow::Break].
+    ///
+    /// The iteration order is: `segs`, `ustack`, `uheap`.
     pub fn iter_areas<F, R>(&self, f: F) -> Option<R>
     where
         F: Fn(&dyn MemArea) -> ControlFlow<R>,
@@ -590,6 +629,9 @@ impl UserSpaceData {
         None
     }
 
+    /// Iterate all memory areas mutably and stop early on [ControlFlow::Break].
+    ///
+    /// The iteration order is: `segs`, `ustack`, `uheap`.
     pub fn iter_areas_mut<F, R>(&mut self, mut f: F) -> Option<R>
     where
         F: FnMut(&mut dyn MemArea) -> ControlFlow<R>,
@@ -665,7 +707,7 @@ impl UserSpaceData {
         Ok(())
     }
 
-    /// Get the program break
+    /// Get the current program break tracked in `ubrk`.
     pub fn brk(&self) -> VirtAddr {
         self.ubrk
     }
@@ -789,6 +831,7 @@ impl UserSpaceData {
             PagingArch::activate_addr_space(&self.table);
         }
     }
+
     /// Create a copy of this [UserSpace] with copy-on-write semantics.
     ///
     /// # Notes
@@ -827,6 +870,9 @@ impl UserSpaceData {
         Ok(new_inner)
     }
 
+    /// Resolve `vaddr` and perform copy-on-write on the owning memory area.
+    ///
+    /// On success, the corresponding PTE is remapped with write permission.
     pub fn copy_on_write(&mut self, vaddr: VirtAddr) -> Result<(), MmError> {
         let vpn = vaddr.page_down();
         let mut new_ppn = None;
@@ -858,6 +904,7 @@ impl UserSpaceData {
         }
     }
 
+    /// Check whether `vpn` grants all permissions requested by `rwx_flags`.
     pub fn check_permission(&self, vpn: VirtPageNum, rwx_flags: PteFlags) -> Result<(), MmError> {
         let perm = self.iter_areas(|area| {
             if area.range().contains(vpn) {
@@ -891,6 +938,7 @@ impl Eq for UserSpace {}
 /// The guard dereferences to a [`PageTable`] allowing safe read-only access
 /// to the user page table while preventing preemption.
 pub struct USpacePTableReadGuard<'a> {
+    /// Underlying read guard for [UserSpaceData].
     guard: ReadNoPreemptGuard<'a, UserSpaceData>,
 }
 
@@ -913,6 +961,7 @@ impl<'a> USpacePTableReadGuard<'a> {
 
 /// Write guard for mutating the user-space page table.
 pub struct USpacePTableWriteGuard<'a> {
+    /// Underlying write guard for [UserSpaceData].
     guard: WriteNoPreemptGuard<'a, UserSpaceData>,
 }
 

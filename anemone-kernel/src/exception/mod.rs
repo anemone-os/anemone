@@ -11,7 +11,8 @@ mod page_fault;
 pub use page_fault::{PageFaultInfo, PageFaultType, handle_kernel_page_fault};
 mod ipi;
 pub use ipi::{
-    IpiGuard, IpiPayload, broadcast_ipi, broadcast_ipi_async, handle_ipi, send_ipi, send_ipi_async,
+    IpiPayload, TlbShootdownGuard, broadcast_ipi, broadcast_ipi_async, handle_ipi, send_ipi,
+    send_ipi_async,
 };
 mod timer;
 pub use timer::handle_timer_interrupt;

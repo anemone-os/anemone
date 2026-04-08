@@ -29,5 +29,6 @@ pub fn handle_user_page_fault_internal(info: PageFaultInfo) -> Result<(), MmErro
         info.fault_addr(),
         task.tid()
     );*/
+    PagingArch::tlb_shootdown(info.fault_addr().page_down());
     Ok(())
 }
