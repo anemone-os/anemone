@@ -28,6 +28,7 @@ pub use devnum::{BlockDevNum, CharDevNum, MajorNum, MinorNum};
 pub mod block;
 pub mod char;
 pub mod console;
+pub(crate) mod net;
 
 /// Common data shared by all devices.
 ///

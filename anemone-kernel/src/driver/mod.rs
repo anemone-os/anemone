@@ -23,10 +23,11 @@ pub mod intc;
 
 mod block;
 mod clock_source;
+pub(crate) mod net;
 mod power;
 mod serial;
 pub use serial::ns16550a::Ns16550ARegisters;
-mod virtio;
+pub(crate) mod virtio;
 
 /// Common data shared by all drivers.
 #[derive(Debug)]
