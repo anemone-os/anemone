@@ -4,7 +4,7 @@ use crate::prelude::{dt::UserWritePtr, *};
 fn sys_getcwd(buf: UserWritePtr<u8>, size: usize) -> Result<u64, SysError> {
     let cwd = with_current_task(|task| task.rel_cwd());
     let cwd_bytes = cwd.as_bytes();
-    let mut slice = buf.slice(size);
+    let slice = buf.slice(size);
     slice.safe_write_bytes_str(cwd_bytes)?;
     Ok(buf.addr())
 }

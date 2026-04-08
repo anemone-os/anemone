@@ -449,8 +449,16 @@ impl Inode {
     }
 
     /// See `meta_snapshot` for the rationale of this method.
-    pub(super) fn set_meta(&self, meta: InodeMeta) {
-        *self.meta.write() = meta;
+    pub(super) fn set_meta(&self, meta: &InodeMeta) {
+        // avoid dereferencing here cz InodeMeta consumes too much stack space
+
+        let mut m = self.meta.write();
+        m.nlink = meta.nlink;
+        m.size = meta.size;
+        m.perm = meta.perm;
+        m.atime = meta.atime;
+        m.mtime = meta.mtime;
+        m.ctime = meta.ctime;
     }
 
     #[track_caller]

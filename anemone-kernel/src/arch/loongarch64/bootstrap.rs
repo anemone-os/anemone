@@ -231,7 +231,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     unsafe {
         // needed by percpu initialization.
         let ncpus = early_scan_cpu_count(fdt_va);
-        super::cpu::set_ncpus(ncpus);
+        super::cpu::init(ncpus, bsp_id);
         kinfoln!("anemone kernel booting on bsp #{}", bsp_id);
 
         wake_up_aps(bsp_id, ncpus);
@@ -263,6 +263,8 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
         mm::kptable::activate_kernel_mapping();
         kinfoln!("kernel mapping activated");
 
+        TimeArch::init_this_cpu();
+
         remap_boot_stack();
         BOOT_SYNC_COUNTER.sync_with_counter();
 
@@ -292,6 +294,8 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         install_ktrap_handler();
         mm::percpu::ap_init(ap_id);
         mm::kptable::activate_kernel_mapping();
+
+        TimeArch::init_this_cpu();
         let ap_kinit = Task::new_kernel(
             "ap-kinit",
             ap_kinit as *const (),

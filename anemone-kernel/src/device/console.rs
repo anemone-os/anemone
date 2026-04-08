@@ -2,14 +2,9 @@
 //!
 //! Here lies /dev/console.
 
-use crate::{debug::printk::KERNEL_LOG, prelude::*, utils::any_opaque::AnyOpaque};
+use crate::{debug::printk::KERNEL_LOG, prelude::*, utils::any_opaque::NilOpaque};
 
 use core::fmt::{Debug, Write};
-
-#[derive(Debug)]
-struct ConsoleFilePrv;
-
-impl crate::utils::any_opaque::Opaque for ConsoleFilePrv {}
 
 pub trait Console: Send + Sync {
     fn output(&self, s: &str);
@@ -159,13 +154,6 @@ pub unsafe fn on_system_boot() {
     }
 }
 
-const CONSOLE_INODE_PERM: InodePerm = InodePerm::IRUSR
-    .union(InodePerm::IWUSR)
-    .union(InodePerm::IRGRP)
-    .union(InodePerm::IWGRP)
-    .union(InodePerm::IROTH)
-    .union(InodePerm::IWOTH);
-
 fn console_read(_file: &File, _buf: &mut [u8]) -> Result<usize, FsError> {
     // currently no-op. always return EOF.
     Ok(0)
@@ -177,43 +165,82 @@ fn console_write(_file: &File, buf: &[u8]) -> Result<usize, FsError> {
     Ok(buf.len())
 }
 
-pub static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {
+fn console_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
+    Ok(InodeStat {
+        fs_dev: DeviceId::None,
+        ino: inode.ino(),
+        mode: InodeMode::new(InodeType::Dev, inode.perm()),
+        nlink: inode.nlink(),
+        uid: 0,
+        gid: 0,
+        rdev: DeviceId::None,
+        size: inode.size(),
+        atime: inode.atime(),
+        mtime: inode.mtime(),
+        ctime: inode.ctime(),
+    })
+}
+
+static CONSOLE_STDIN_INODE_OPS: InodeOps = InodeOps {
+    lookup: |_, _| Err(FsError::NotSupported),
+    create: |_, _, _| Err(FsError::NotSupported),
+    mkdir: |_, _, _| Err(FsError::NotSupported),
+    unlink: |_, _| Err(FsError::NotSupported),
+    rmdir: |_, _| Err(FsError::NotSupported),
+    link: |_, _, _| Err(FsError::NotSupported),
+    get_attr: console_get_attr,
+    open: |_| {
+        Ok(OpenedFile {
+            file_ops: &CONSOLE_STDIN_FILE_OPS,
+            prv: NilOpaque::new(),
+        })
+    },
+};
+
+static CONSOLE_STDOUT_INODE_OPS: InodeOps = InodeOps {
+    lookup: |_, _| Err(FsError::NotSupported),
+    create: |_, _, _| Err(FsError::NotSupported),
+    mkdir: |_, _, _| Err(FsError::NotSupported),
+    unlink: |_, _| Err(FsError::NotSupported),
+    rmdir: |_, _| Err(FsError::NotSupported),
+    link: |_, _, _| Err(FsError::NotSupported),
+    get_attr: console_get_attr,
+    open: |_| {
+        Ok(OpenedFile {
+            file_ops: &CONSOLE_STDOUT_FILE_OPS,
+            prv: NilOpaque::new(),
+        })
+    },
+};
+
+static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {
     read: console_read,
     write: |_file, _buf| Err(FsError::NotSupported),
     seek: |_file, _pos| Err(FsError::NotSupported),
     iterate: |_file, _ctx| Err(FsError::NotSupported),
 };
 
-pub static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
+static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
     read: |_file, _buf| Err(FsError::NotSupported),
     write: console_write,
     seek: |_file, _pos| Err(FsError::NotSupported),
     iterate: |_file, _ctx| Err(FsError::NotSupported),
 };
 
-pub fn new_stdin_file() -> File {
-    vfs_open_anonymous(
-        ".anemone-stdin",
-        InodeMode::new(InodeType::Dev, CONSOLE_INODE_PERM),
-        &CONSOLE_STDIN_FILE_OPS,
-        AnyOpaque::new(ConsoleFilePrv),
-    )
+static CONSOLE_STDIN_PATHREF: Lazy<PathRef> = Lazy::new(|| {
+    anony_new_inode(InodeType::Dev, &CONSOLE_STDIN_INODE_OPS, NilOpaque::new())
+        .expect("failed to create console stdin inode")
+});
+
+static CONSOLE_STDOUT_PATHREF: Lazy<PathRef> = Lazy::new(|| {
+    anony_new_inode(InodeType::Dev, &CONSOLE_STDOUT_INODE_OPS, NilOpaque::new())
+        .expect("failed to create console stdout inode")
+});
+
+pub fn open_console_stdin() -> File {
+    anony_open(&CONSOLE_STDIN_PATHREF).expect("failed to open console stdin")
 }
 
-pub fn new_stdout_file() -> File {
-    vfs_open_anonymous(
-        ".anemone-stdout",
-        InodeMode::new(InodeType::Dev, CONSOLE_INODE_PERM),
-        &CONSOLE_STDOUT_FILE_OPS,
-        AnyOpaque::new(ConsoleFilePrv),
-    )
-}
-
-pub fn new_stderr_file() -> File {
-    vfs_open_anonymous(
-        ".anemone-stderr",
-        InodeMode::new(InodeType::Dev, CONSOLE_INODE_PERM),
-        &CONSOLE_STDOUT_FILE_OPS,
-        AnyOpaque::new(ConsoleFilePrv),
-    )
+pub fn open_console_stdout() -> File {
+    anony_open(&CONSOLE_STDOUT_PATHREF).expect("failed to open console stdout")
 }

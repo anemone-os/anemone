@@ -1,8 +1,10 @@
 use crate::{
     arch::loongarch64::machine::MachineDesc,
-    device::discovery::open_firmware::{get_of_node, of_with_node_by_path}, driver::intc::loongson_platic::LA7A1000Platic, utils::identity::GeneralIdentity,
+    device::discovery::open_firmware::{get_of_node, of_with_node_by_path},
+    driver::intc::loongson_platic::LA7A1000Platic,
+    prelude::*,
+    utils::identity::GeneralIdentity,
 };
-use crate::prelude::*;
 
 /// QEMU virt machine description for the Loongson 3A5000-compatible board.
 #[derive(Debug)]
@@ -42,6 +44,6 @@ impl MachineDesc for Qemu3A5000 {
 
     /// Initialize the machine timer through the common time architecture hook.
     unsafe fn early_init_timer(&self) {
-        TimeArch::init();
+        // no-op; we may extend machine init to support percpu?
     }
 }

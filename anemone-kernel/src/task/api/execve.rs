@@ -12,10 +12,17 @@ pub fn execve(
     #[validate_with(c_readonly_string)] path: Box<str>,
     #[validate_with(c_readonly_string_array)] argv: Vec<Box<str>>,
 ) -> Result<u64, SysError> {
-    kernel_execve(&path, argv.as_slice())?;
+    let path = Path::new(path.as_ref());
+    let path = with_current_task(|task| task.make_global_path(&path));
+
+    kernel_execve(
+        &path.to_str().expect("we've already validated path to be a valid C string, whose encoding is a subset of UTF-8"), 
+        argv.as_slice()
+    )?;
     unreachable!();
 }
 
+/// `path` should be an absolute path to an executable file.
 pub fn kernel_execve(path: &impl AsRef<str>, argv: &[impl AsRef<str>]) -> Result<(), SysError> {
     let uimage = load_image_from_file(&path)?;
     let mut commandline = argv
@@ -72,9 +79,9 @@ pub fn kernel_execve_from_image(
         with_current_task(|task| {
             if task.flags().contains(TaskFlags::KERNEL) {
                 task.ensure_stdio(
-                    device::console::new_stdin_file(),
-                    device::console::new_stdout_file(),
-                    device::console::new_stderr_file(),
+                    device::console::open_console_stdin(),
+                    device::console::open_console_stdout(),
+                    device::console::open_console_stdout(),
                 );
             }
 

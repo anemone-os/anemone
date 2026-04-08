@@ -84,4 +84,9 @@ unsafe extern "C" {
     pub fn __sinitcall_driver();
     /// The end of the initcall section for driver initcalls.
     pub fn __einitcall_driver();
+
+    /// The start of the initcall section for probe initcalls.
+    pub fn __sinitcall_probe();
+    /// The end of the initcall section for probe initcalls.
+    pub fn __einitcall_probe();
 }

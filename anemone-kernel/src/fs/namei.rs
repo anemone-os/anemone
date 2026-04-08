@@ -10,7 +10,7 @@ pub(super) fn canonicalize_child(
     name: &str,
     inode: InodeRef,
 ) -> Result<Arc<Dentry>, FsError> {
-    let child = Arc::new(Dentry::new(name.to_string(), Some(parent), inode));
+    let child = Arc::new(Dentry::new(name.to_string(), Some(parent.clone()), inode));
 
     match parent.insert_child(name.to_string(), &child) {
         Ok(()) => Ok(child),

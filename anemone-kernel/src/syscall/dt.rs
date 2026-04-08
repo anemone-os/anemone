@@ -1,4 +1,5 @@
 //! Syscall argument validation helpers for user-controlled data.
+
 use core::{
     ffi::{CStr, c_char},
     marker::PhantomData,
@@ -66,6 +67,15 @@ impl<T: Sized, A: UserAccess> UserPtr<T, A> {
         self.addr
     }
 }
+
+impl<T: Sized + Copy, A: UserAccess> UserPtr<T, A> {
+    /// This does not guarantee the validity of the pointer, which will be
+    /// lazily checked when memory is accessed.
+    pub fn slice(self, len: usize) -> UserSlice<T, A> {
+        UserSlice { ptr: self, len }
+    }
+}
+
 impl<T: Sized + Clone, A: UserAccess> UserPtr<T, A> {
     pub fn safe_read(&self) -> Result<T, SysError> {
         let usp =
@@ -108,13 +118,18 @@ impl<T: Sized + Clone, A: UserAccess> TryFromSyscallArg for UserPtr<T, A> {
     }
 }
 
-impl<T: Sized + Copy, A: UserAccess> UserPtr<T, A> {
-    pub fn slice(&self, len: usize) -> UserSlice<T, A> {
-        UserSlice { ptr: *self, len }
+impl<T: Sized, A: UserAccess> TryFromSyscallArg for Option<UserPtr<T, A>> {
+    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+        if raw == 0 {
+            Ok(None)
+        } else {
+            UserPtr::from_raw(raw).map(Some)
+        }
     }
 }
 
-pub struct UserSlice<T, A: UserAccess> {
+#[derive(Debug, PartialEq, Eq)]
+pub struct UserSlice<T: Sized, A: UserAccess> {
     ptr: UserPtr<T, A>,
     len: usize,
 }
@@ -142,6 +157,7 @@ impl<T: Sized + Copy, A: UserAccess> UserSlice<T, A> {
         drop(usp_data);
         Ok(())
     }
+
     pub fn validate_with(&self, data: &UserSpaceData) -> Result<*const [T], SysError> {
         let ptr = validate_user_array(A::PTE_FLAGS, data, self.ptr.addr, self.len)? as *const [T]
             as *mut [T];
@@ -346,11 +362,26 @@ fn validate_user_array_for_write<T: Sized>(
 
 /// Validate that the address in `arg` is inside user space and return it as a
 /// [VirtAddr].
-pub fn user_nullable_vaddr(arg: u64) -> Result<VirtAddr, SysError> {
+pub fn user_addr(arg: u64) -> Result<VirtAddr, SysError> {
     if arg < KernelLayout::USPACE_TOP_ADDR {
         Ok(VirtAddr::new(arg))
     } else {
-        Err(MmError::InvalidArgument.into())
+        Err(KernelError::InvalidArgument.into())
+    }
+}
+
+/// Lift a validator into an optional validator where a zero raw argument means
+/// the argument is absent.
+pub fn nullable<T, V>(validator: V) -> impl FnOnce(u64) -> Result<Option<T>, SysError>
+where
+    V: FnOnce(u64) -> Result<T, SysError>,
+{
+    move |arg| {
+        if arg == 0 {
+            Ok(None)
+        } else {
+            validator(arg).map(Some)
+        }
     }
 }
 

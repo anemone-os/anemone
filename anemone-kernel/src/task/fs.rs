@@ -127,6 +127,12 @@ impl Task {
     }
 
     /// Make a path relative to this task's root and cwd in global namespace.
+    ///
+    /// If the input path is absolute, it will be resolved relative to this
+    /// task's root.
+    ///
+    /// If the input path is relative, it will be resolved relative to this
+    /// task's cwd.
     pub fn make_global_path(&self, path: &Path) -> PathBuf {
         let fs_state = self.fs_state();
         let fs_state = fs_state.read();

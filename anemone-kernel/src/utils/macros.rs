@@ -37,3 +37,12 @@ macro_rules! const_assert {
         }
     };
 }
+
+/// A helper macro to create a bitmask with the nth bit set. This is commonly
+/// used for defining flag constants in a clear and concise way.
+#[macro_export]
+macro_rules! bit {
+    ($n:expr) => {
+        1 << ($n)
+    };
+}

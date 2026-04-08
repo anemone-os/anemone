@@ -7,7 +7,7 @@ use core::ptr::null_mut;
 use anemone_rs::{
     fs::getcwd,
     prelude::*,
-    process::{CloneFlags, clone, getpid},
+    process::{clone, getpid, CloneFlags},
 };
 
 #[anemone_rs::main]

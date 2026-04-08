@@ -14,11 +14,9 @@ pub trait RebootHandler: Send {
     unsafe fn reboot(&self);
 }
 
-static POWER_OFF_HANDLER: Lazy<SpinLock<Vec<Box<dyn PowerOffHandler>>>> =
-    Lazy::new(|| SpinLock::new(Vec::new()));
+static POWER_OFF_HANDLER: SpinLock<Vec<Box<dyn PowerOffHandler>>> = SpinLock::new(Vec::new());
 
-static REBOOT_HANDLER: Lazy<SpinLock<Vec<Box<dyn RebootHandler>>>> =
-    Lazy::new(|| SpinLock::new(Vec::new()));
+static REBOOT_HANDLER: SpinLock<Vec<Box<dyn RebootHandler>>> = SpinLock::new(Vec::new());
 
 /// Register a power off handler to be called when the system is powered off.
 pub fn register_power_off_handler(handler: Box<dyn PowerOffHandler>) {

@@ -4,13 +4,20 @@ pub struct RiscV64CpuArch;
 
 static mut NCPUS: usize = 0;
 
-pub unsafe fn set_ncpus(ncpus: usize) {
+static mut BSP_CPU_ID: Option<CpuId> = None;
+
+pub unsafe fn init(ncpus: usize, bsp_cpu_id: usize) {
     unsafe {
         NCPUS = ncpus;
+        BSP_CPU_ID = Some(CpuId::new(bsp_cpu_id));
     }
 }
 
 impl CpuArchTrait for RiscV64CpuArch {
+    fn bsp_cpu_id() -> CpuId {
+        unsafe { BSP_CPU_ID.expect("BSP CPU ID not set") }
+    }
+
     fn ncpus() -> usize {
         let ncpus = unsafe { NCPUS };
         #[cfg(debug_assertions)]

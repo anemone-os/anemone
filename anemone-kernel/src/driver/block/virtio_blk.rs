@@ -62,23 +62,23 @@ impl BlockDev for VirtIOBlkState {
         self.lock_irqsave().blk.capacity() as usize
     }
 
-    fn read_blocks(&self, block_idx: usize, buf: &mut [u8]) -> Result<(), DevError> {
+    fn read_blocks(&self, block_idx: usize, buf: &mut [u8]) -> Result<(), FsError> {
         self.lock_irqsave()
             .blk
             .read_blocks(block_idx, buf)
             .map_err(|e| {
                 kerrln!("failed to read blocks from virtio block device: {e}");
-                DevError::IO
+                FsError::Dev(DevError::IO)
             })
     }
 
-    fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), DevError> {
+    fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), FsError> {
         self.lock_irqsave()
             .blk
             .write_blocks(block_idx, buf)
             .map_err(|e| {
                 kerrln!("failed to write blocks to virtio block device: {e}");
-                DevError::IO
+                FsError::Dev(DevError::IO)
             })
     }
 }

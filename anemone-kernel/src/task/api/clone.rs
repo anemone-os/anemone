@@ -135,9 +135,9 @@ pub fn kernel_clone(
     }
     new_task.set_fs_state(current_task.fs_state().read().clone());
     new_task.ensure_stdio(
-        device::console::new_stdin_file(),
-        device::console::new_stdout_file(),
-        device::console::new_stderr_file(),
+        device::console::open_console_stdin(),
+        device::console::open_console_stdout(),
+        device::console::open_console_stdout(),
     );
 
     let new_tid = new_task.tid();

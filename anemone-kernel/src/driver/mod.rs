@@ -24,6 +24,7 @@ pub mod intc;
 mod block;
 mod clock_source;
 mod power;
+mod rtc;
 mod serial;
 pub use serial::ns16550a::Ns16550ARegisters;
 mod virtio;
