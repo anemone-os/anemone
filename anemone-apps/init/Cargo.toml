@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anemone-abi = { path = "../../anemone-abi" }
+anemone-rs = { path = "../../anemone-rs" }
 
 [workspace]
 members = ["."]

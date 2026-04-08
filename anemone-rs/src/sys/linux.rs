@@ -65,6 +65,26 @@ pub mod process {
         unsafe { syscall(SYS_EXECVE, path_ptr, argv_ptr, 0, 0, 0, 0) }
     }
 
+    pub fn clone(
+        flags: u64,
+        stack_ptr: u64,
+        parent_tid_ptr: u64,
+        tls_ptr: u64,
+        child_tid_ptr: u64,
+    ) -> Result<u64, Errno> {
+        unsafe {
+            syscall(
+                SYS_CLONE,
+                flags,
+                stack_ptr,
+                parent_tid_ptr,
+                tls_ptr,
+                child_tid_ptr,
+                0,
+            )
+        }
+    }
+
     pub fn exit(code: u64) -> ! {
         unsafe {
             syscall(SYS_EXIT, code, 0, 0, 0, 0, 0).expect("failed to invoke exit syscall");
@@ -74,5 +94,13 @@ pub mod process {
 
     pub fn sched_yield() -> Result<(), Errno> {
         unsafe { syscall(SYS_SCHED_YIELD, 0, 0, 0, 0, 0, 0).map(|_| ()) }
+    }
+
+    pub fn getpid() -> Result<u64, Errno> {
+        unsafe { syscall(SYS_GETPID, 0, 0, 0, 0, 0, 0) }
+    }
+
+    pub fn getppid() -> Result<u64, Errno> {
+        unsafe { syscall(SYS_GETPPID, 0, 0, 0, 0, 0, 0) }
     }
 }

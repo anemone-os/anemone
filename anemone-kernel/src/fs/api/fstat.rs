@@ -14,9 +14,7 @@ fn sys_fstat(fd: usize, statbuf: UserWritePtr<Stat>) -> Result<u64, SysError> {
 
         let stat = fd.vfs_file().get_attr()?;
 
-        unsafe {
-            statbuf.as_mut_ptr().write_unaligned(stat.into());
-        }
+        statbuf.safe_write(stat.into())?;
 
         Ok(0)
     })

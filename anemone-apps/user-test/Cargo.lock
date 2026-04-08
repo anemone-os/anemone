@@ -21,6 +21,7 @@ version = "0.1.0"
 dependencies = [
  "anemone-abi",
  "anemone-rs-macros",
+ "bitflags",
  "hashbrown 0.16.1",
  "spin",
  "talc",

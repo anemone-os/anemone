@@ -3,7 +3,7 @@
 //! It's not recommended to call these thin wrappers around linux syscalls
 //! directly. Instead, prefer upper-level os-agnostic encapsulations.
 
-use crate::prelude::*;
+use anemone_abi::errno::Errno;
 
 use crate::os::linux::process as linux_process;
 
@@ -20,6 +20,3 @@ pub fn exit(xcode: i32) -> ! {
 pub fn yield_now() -> Result<(), Errno> {
     linux_process::sched_yield()
 }
-
-#[derive(Debug)]
-pub struct Command {}

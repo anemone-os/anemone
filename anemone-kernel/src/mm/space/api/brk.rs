@@ -18,10 +18,10 @@ pub fn sys_brk(
     let memsp = task.clone_uspace().ok_or(MmError::NotMapped)?;
 
     if let Some(addr) = addr {
-        memsp.set_brk(addr)?;
+        memsp.write().set_brk(addr)?;
         Ok(0)
     } else {
-        let brk = memsp.brk();
+        let brk = memsp.read().brk();
         debug_assert!(brk.get() < KernelLayout::USPACE_TOP_ADDR);
         Ok(brk.get())
     }

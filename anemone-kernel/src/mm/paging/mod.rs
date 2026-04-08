@@ -22,6 +22,6 @@
 mod hal;
 pub use hal::*;
 mod mapper;
-pub use mapper::{Mapper, Mapping, Translated, Unmapping};
+pub use mapper::{Mapper, Mapping, Translated, TraverseOrder, Unmapping};
 mod pagetable;
 pub use pagetable::PageTable;

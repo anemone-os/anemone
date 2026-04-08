@@ -3,6 +3,7 @@
 use core::{
     ffi::{CStr, c_char},
     marker::PhantomData,
+    ops::{Deref, DerefMut},
     slice, str,
 };
 
@@ -32,7 +33,7 @@ impl UserAccess for UserWrite {
 #[derive(Debug, PartialEq, Eq)]
 pub struct UserPtr<T: Sized, A: UserAccess> {
     addr: u64,
-    _marker: PhantomData<(A, *const T)>,
+    _marker: PhantomData<(A, T)>,
 }
 
 pub type UserReadPtr<T> = UserPtr<T, UserRead>;
@@ -48,49 +49,70 @@ impl<T: Sized, A: UserAccess> Clone for UserPtr<T, A> {
 
 impl<T: Sized, A: UserAccess> UserPtr<T, A> {
     pub fn from_raw(arg: u64) -> Result<Self, SysError> {
-        with_current_task(|t| {
-            let memsp = t
-                .clone_uspace()
-                .expect("user task should have a user space");
-            let mut table = memsp.page_table_mut();
-            validate_user_pointer::<T>(A::PTE_FLAGS, &mut *table, arg)?;
-            drop(table);
-            Ok(Self {
-                addr: arg,
-                _marker: PhantomData,
-            })
+        if arg % align_of::<T>() as u64 != 0 {
+            return Err(SysError::Mm(MmError::NotAligned));
+        }
+        if arg >= KernelLayout::USPACE_TOP_ADDR
+            || arg.wrapping_add(size_of::<T>() as u64) > KernelLayout::USPACE_TOP_ADDR
+        {
+            return Err(SysError::Mm(MmError::InvalidArgument));
+        }
+        Ok(Self {
+            addr: arg,
+            _marker: PhantomData,
         })
     }
 
     pub fn addr(self) -> u64 {
         self.addr
     }
+}
 
-    pub fn as_ptr(self) -> *const T {
-        self.addr as *const T
-    }
-
-    /// # Safety
-    ///
-    /// `task` must be the task that owns this pointer.
-    pub unsafe fn slice(self, len: usize, task: &Task) -> Result<UserSlice<T, A>, SysError> {
-        let memsp = task
-            .clone_uspace()
-            .expect("user task should have a user space");
-        let mut table = memsp.page_table_mut();
-        validate_user_array::<T>(A::PTE_FLAGS, &mut *table, self.addr, len)?;
-        drop(table);
-        Ok(UserSlice { ptr: self, len })
+impl<T: Sized + Copy, A: UserAccess> UserPtr<T, A> {
+    /// This does not guarantee the validity of the pointer, which will be
+    /// lazily checked when memory is accessed.
+    pub fn slice(self, len: usize) -> UserSlice<T, A> {
+        UserSlice { ptr: self, len }
     }
 }
 
-impl<T: Sized> UserPtr<T, UserWrite> {
-    pub fn as_mut_ptr(self) -> *mut T {
-        self.addr as *mut T
+impl<T: Sized + Clone, A: UserAccess> UserPtr<T, A> {
+    pub fn safe_read(&self) -> Result<T, SysError> {
+        let usp =
+            with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
+        let usp_data: ReadNoPreemptGuard<'_, UserSpaceData> = usp.read();
+        let ptr: *const T = validate_user_pointer(A::PTE_FLAGS, usp_data.deref(), self.addr)?;
+        let res = unsafe { (*ptr).clone() };
+        drop(usp_data);
+        Ok(res)
+    }
+    pub fn validate_with(&self, data: &UserSpaceData) -> Result<*const T, SysError> {
+        let ptr = validate_user_pointer(UserWrite::PTE_FLAGS, data, self.addr)? as *const T;
+        Ok(ptr)
     }
 }
 
-impl<T: Sized, A: UserAccess> TryFromSyscallArg for UserPtr<T, A> {
+impl<T: Sized> UserWritePtr<T> {
+    pub fn safe_write(&self, value: T) -> Result<(), SysError> {
+        let usp =
+            with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
+        let mut usp_data = usp.write();
+        let ptr =
+            validate_user_pointer_for_write(UserWrite::PTE_FLAGS, usp_data.deref_mut(), self.addr)?
+                as *const T as *mut T;
+        unsafe { *ptr = value };
+        drop(usp_data);
+        Ok(())
+    }
+
+    pub fn validate_with_mut(&self, data: &mut UserSpaceData) -> Result<*mut T, SysError> {
+        let ptr = validate_user_pointer_for_write(UserWrite::PTE_FLAGS, data, self.addr)?
+            as *const T as *mut T;
+        Ok(ptr)
+    }
+}
+
+impl<T: Sized + Clone, A: UserAccess> TryFromSyscallArg for UserPtr<T, A> {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
         Self::from_raw(raw)
     }
@@ -115,80 +137,110 @@ pub struct UserSlice<T: Sized, A: UserAccess> {
 pub type UserReadSlice<T> = UserSlice<T, UserRead>;
 pub type UserWriteSlice<T> = UserSlice<T, UserWrite>;
 
-impl<T: Sized, A: UserAccess> Copy for UserSlice<T, A> {}
-
-impl<T: Sized, A: UserAccess> Clone for UserSlice<T, A> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
 impl<T: Sized, A: UserAccess> UserSlice<T, A> {
-    pub fn from_raw_parts(ptr: *const T, len: usize) -> Result<Self, SysError> {
-        with_current_task(|t| {
-            let memsp = t
-                .clone_uspace()
-                .expect("user task should have a user space");
-            let mut table = memsp.page_table_mut();
-            validate_user_array::<T>(A::PTE_FLAGS, &mut *table, ptr as u64, len)?;
-            drop(table);
-            Ok(Self {
-                ptr: UserPtr {
-                    addr: ptr as u64,
-                    _marker: PhantomData,
-                },
-                len,
-            })
-        })
-    }
-
-    pub fn len(self) -> usize {
-        self.len
-    }
-
-    pub fn is_empty(self) -> bool {
-        self.len == 0
-    }
-
-    pub fn addr(self) -> u64 {
+    pub fn addr(&self) -> u64 {
         self.ptr.addr()
     }
-
-    pub fn as_ptr(self) -> *const T {
-        self.ptr.as_ptr()
+    pub fn len(&self) -> usize {
+        self.len
     }
-
-    pub fn as_slice_ptr(self) -> *const [T] {
-        core::ptr::slice_from_raw_parts(self.as_ptr(), self.len)
-    }
-
-    pub unsafe fn copy_to(&self, dest: &mut [T]) -> Result<(), SysError> {
-        if dest.len() < self.len {
-            return Err(SysError::Kernel(KernelError::BufferTooSmall));
-        }
-        unsafe {
-            core::ptr::copy_nonoverlapping(self.as_ptr(), dest.as_mut_ptr(), self.len);
-        }
+}
+impl<T: Sized + Copy, A: UserAccess> UserSlice<T, A> {
+    pub fn safe_read(&self, buf: &mut [T]) -> Result<(), SysError> {
+        debug_assert!(buf.len() >= self.len, "buffer too small for user slice");
+        let usp =
+            with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
+        let usp_data: ReadNoPreemptGuard<'_, UserSpaceData> = usp.read();
+        let ptr: *const [T] =
+            validate_user_array(A::PTE_FLAGS, usp_data.deref(), self.ptr.addr(), self.len)?;
+        buf[0..self.len].copy_from_slice(unsafe { &*ptr });
+        drop(usp_data);
         Ok(())
+    }
+
+    pub fn validate_with(&self, data: &UserSpaceData) -> Result<*const [T], SysError> {
+        let ptr = validate_user_array(A::PTE_FLAGS, data, self.ptr.addr, self.len)? as *const [T]
+            as *mut [T];
+        Ok(ptr)
     }
 }
 
-impl<T: Sized> UserSlice<T, UserWrite> {
-    pub fn as_mut_ptr(self) -> *mut T {
-        self.ptr.as_mut_ptr()
+impl<T: Sized + Copy> UserWriteSlice<T> {
+    pub fn safe_write(&self, buf: &[T]) -> Result<(), SysError> {
+        let usp =
+            with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
+        self.safe_write_with(buf, &usp)
     }
+    pub fn safe_write_with(&self, buf: &[T], usp: &UserSpace) -> Result<(), SysError> {
+        debug_assert!(buf.len() >= self.len, "buffer too small for user slice");
+        let mut usp_data = usp.write();
+        let ptr = validate_user_array_for_write(
+            UserWrite::PTE_FLAGS,
+            usp_data.deref_mut(),
+            self.ptr.addr,
+            self.len,
+        )?;
 
-    pub fn as_mut_slice_ptr(self) -> *mut [T] {
-        core::ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), self.len)
-    }
-
-    pub unsafe fn copy_from(&mut self, src: &[T]) -> Result<(), SysError> {
-        if src.len() > self.len {
-            return Err(SysError::Kernel(KernelError::BufferTooSmall));
-        }
         unsafe {
-            core::ptr::copy_nonoverlapping(src.as_ptr(), self.as_mut_ptr(), src.len());
+            (*ptr).copy_from_slice(&buf[0..self.len]);
         }
+        drop(usp_data);
+        Ok(())
+    }
+
+    pub fn validate_with_mut(&self, data: &mut UserSpaceData) -> Result<*mut [T], SysError> {
+        let ptr =
+            validate_user_array_for_write(UserWrite::PTE_FLAGS, data, self.ptr.addr, self.len)?;
+        Ok(ptr)
+    }
+
+    pub fn safe_write_str(&self, s: &str) -> Result<(), SysError> {
+        let bytes = s.as_bytes();
+        debug_assert!(
+            bytes.len() + 1 <= self.len,
+            "string too long for user slice: {} bytes, but slice length is {}",
+            bytes.len(),
+            self.len
+        );
+        let usp =
+            with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
+        let mut usp_data = usp.write();
+        let ptr = validate_user_array_for_write(
+            UserWrite::PTE_FLAGS,
+            usp_data.deref_mut(),
+            self.ptr.addr,
+            self.len,
+        )?;
+        unsafe {
+            let mut ptr_ref = &mut *ptr;
+            ptr_ref[0..bytes.len()].copy_from_slice(bytes);
+            ptr_ref[bytes.len()] = 0;
+        }
+        drop(usp_data);
+        Ok(())
+    }
+    pub fn safe_write_bytes_str(&self, bytes: &[u8]) -> Result<(), SysError> {
+        debug_assert!(
+            bytes.len() + 1 <= self.len,
+            "string too long for user slice: {} bytes, but slice length is {}",
+            bytes.len(),
+            self.len
+        );
+        let usp =
+            with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
+        let mut usp_data = usp.write();
+        let ptr = validate_user_array_for_write(
+            UserWrite::PTE_FLAGS,
+            usp_data.deref_mut(),
+            self.ptr.addr,
+            self.len,
+        )?;
+        unsafe {
+            let mut ptr_ref = &mut *ptr;
+            ptr_ref[0..bytes.len()].copy_from_slice(bytes);
+            ptr_ref[bytes.len()] = 0;
+        }
+        drop(usp_data);
         Ok(())
     }
 }
@@ -199,10 +251,11 @@ impl<T: Sized> UserSlice<T, UserWrite> {
 /// The user pointer in `arg` is validated against `rwx_flags` using `table`.
 fn validate_user_pointer<T: Sized>(
     rwx_flags: PteFlags,
-    table: &mut PageTable,
+    usp: &UserSpaceData,
     arg: u64,
 ) -> Result<*const T, SysError> {
     let flags = PteFlags::USER | rwx_flags;
+    // kdebugln!("validating user pointer {:#x}: {:?}", arg, flags);
     let va = VirtAddr::new(arg);
     let va_end = VirtAddr::new(arg.wrapping_add(size_of::<T>() as u64));
     if va_end < va {
@@ -210,27 +263,50 @@ fn validate_user_pointer<T: Sized>(
     }
     let vpn_va = va.page_down();
     let vpn_va_end = va_end.page_up();
-    for vpn in vpn_va.get()..vpn_va_end.get() {
-        let Some(va_t) = table.mapper().translate(VirtPageNum::new(vpn)) else {
-            return Err(MmError::NotMapped.into());
-        };
-        if !va_t.flags.contains(flags) {
-            return Err(MmError::PermissionDenied.into());
-        }
+    for vpn in VirtPageRange::new(vpn_va, vpn_va_end - vpn_va).iter() {
+        usp.check_permission(vpn, rwx_flags)?;
     }
     Ok(arg as *const T)
+}
+fn validate_user_pointer_for_write<T: Sized>(
+    rwx_flags: PteFlags,
+    usp: &mut UserSpaceData,
+    arg: u64,
+) -> Result<*mut T, SysError> {
+    let flags = PteFlags::USER | rwx_flags;
+    // kdebugln!("validating user pointer {:#x}: {:?}", arg, flags);
+    let va = VirtAddr::new(arg);
+    let va_end = VirtAddr::new(arg.wrapping_add(size_of::<T>() as u64));
+    if va_end < va {
+        return Err(MmError::InvalidArgument.into());
+    }
+    let vpn_va = va.page_down();
+    let vpn_va_end = va_end.page_up();
+    for vpn in VirtPageRange::new(vpn_va, vpn_va_end - vpn_va).iter() {
+        usp.check_permission(vpn, rwx_flags)?;
+    }
+    for vpn in VirtPageRange::new(vpn_va, vpn_va_end - vpn_va).iter() {
+        usp.copy_on_write(vpn.to_virt_addr())?;
+    }
+    Ok(arg as *mut T)
 }
 
 fn validate_user_array<T: Sized>(
     rwx_flags: PteFlags,
-    table: &mut PageTable,
+    usp: &UserSpaceData,
     arg: u64,
     len: usize,
 ) -> Result<*const [T], SysError> {
+    let flags = PteFlags::USER | rwx_flags;
+    /*kdebugln!(
+        "validating user array pointer {:#x} with length {}: {:?}",
+        arg,
+        len,
+        flags
+    );*/
     if arg % align_of::<T>() as u64 != 0 {
         return Err(MmError::NotAligned.into());
     }
-    let flags = PteFlags::USER | rwx_flags;
 
     let va = VirtAddr::new(arg);
     let va_end = VirtAddr::new(arg.wrapping_add((size_of::<T>() * len) as u64));
@@ -240,18 +316,52 @@ fn validate_user_array<T: Sized>(
 
     let vpn_va = va.page_down();
     let vpn_va_end = va_end.page_up();
-    for vpn in vpn_va.get()..vpn_va_end.get() {
-        let Some(va_t) = table.mapper().translate(VirtPageNum::new(vpn)) else {
-            return Err(MmError::NotMapped.into());
-        };
-        if !va_t.flags.contains(flags) {
-            return Err(MmError::PermissionDenied.into());
-        }
+    for vpn in VirtPageRange::new(vpn_va, vpn_va_end - vpn_va).iter() {
+        usp.check_permission(vpn, rwx_flags)?;
     }
 
     Ok(core::ptr::slice_from_raw_parts(arg as *const T, len))
 }
 
+fn validate_user_array_for_write<T: Sized>(
+    rwx_flags: PteFlags,
+    usp: &mut UserSpaceData,
+    arg: u64,
+    len: usize,
+) -> Result<*mut [T], SysError> {
+    let flags = PteFlags::USER | rwx_flags;
+    /*kdebugln!(
+        "validating user array pointer {:#x} with length {}: {:?}",
+        arg,
+        len,
+        flags
+    );*/
+    if arg % align_of::<T>() as u64 != 0 {
+        return Err(MmError::NotAligned.into());
+    }
+
+    let va = VirtAddr::new(arg);
+    let va_end = VirtAddr::new(arg.wrapping_add((size_of::<T>() * len) as u64));
+    if va_end < va {
+        return Err(MmError::InvalidArgument.into());
+    }
+
+    let vpn_va = va.page_down();
+    let vpn_va_end = va_end.page_up();
+    for vpn in VirtPageRange::new(vpn_va, vpn_va_end - vpn_va).iter() {
+        usp.check_permission(vpn, rwx_flags)?;
+    }
+    if rwx_flags.contains(PteFlags::WRITE) {
+        for vpn in VirtPageRange::new(vpn_va, vpn_va_end - vpn_va).iter() {
+            usp.copy_on_write(vpn.to_virt_addr())?;
+        }
+    }
+
+    Ok(core::ptr::slice_from_raw_parts_mut(arg as *mut T, len))
+}
+
+/// Validate that the address in `arg` is inside user space and return it as a
+/// [VirtAddr].
 pub fn user_addr(arg: u64) -> Result<VirtAddr, SysError> {
     if arg < KernelLayout::USPACE_TOP_ADDR {
         Ok(VirtAddr::new(arg))
@@ -307,13 +417,12 @@ pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq + Copy>(
         return Err(SysError::Mm(MmError::NotAligned));
     }
     with_current_task(|t| {
-        let memsp = t
+        let usp = t
             .clone_uspace()
             .expect("user task should have a user space");
-        let mut table = memsp.page_table_mut();
-
+        let usp_data: ReadNoPreemptGuard<'_, UserSpaceData> = usp.read();
         let st_pointer = arg as *const T;
-        validate_user_pointer::<T>(PteFlags::READ, &mut *table, arg)?;
+        validate_user_pointer::<T>(PteFlags::READ, usp_data.deref(), arg)?;
         let mut ed_pointer = st_pointer;
         let mut ed_vpn = VirtAddr::new(arg).page_down();
         let mut len = 0;
@@ -324,7 +433,11 @@ pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq + Copy>(
             }
             let ed_vpn_new = VirtAddr::new(next_ed_pointer).page_down();
             if ed_vpn_new != ed_vpn {
-                validate_user_pointer::<u8>(PteFlags::READ, &mut *table, next_ed_pointer as u64)?;
+                validate_user_pointer::<u8>(
+                    PteFlags::READ,
+                    usp_data.deref(),
+                    next_ed_pointer as u64,
+                )?;
                 ed_vpn = ed_vpn_new;
             }
             ed_pointer = next_ed_pointer as *const T;
@@ -337,7 +450,6 @@ pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq + Copy>(
             slice::from_raw_parts(st_pointer, len + if include_terminator { 1 } else { 0 })
         };
         let res: Box<[T]> = slice.into();
-        drop(table);
         Ok(res)
     })
 }

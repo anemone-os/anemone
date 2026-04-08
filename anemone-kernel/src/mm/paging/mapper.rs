@@ -460,7 +460,7 @@ impl Mapper<'_> {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum TraverseOrder {
+pub enum TraverseOrder {
     PreOrder,
     PostOrder,
 }
@@ -481,6 +481,27 @@ struct LeafCtx {
 }
 
 impl Mapper<'_> {
+    pub unsafe fn change_flags<F: FnMut(VirtPageNum, PteFlags) -> Option<PteFlags>>(
+        &mut self,
+        range: VirtPageRange,
+        mut op: F,
+        order: TraverseOrder,
+    ) {
+        unsafe {
+            self.traverse::<_, _, ()>(
+                range,
+                |_, _| ControlFlow::Continue,
+                |pte, ctx| {
+                    let res = &op(ctx.vpn, pte.flags());
+                    if let Some(new_flags) = res {
+                        pte.set_flags(*new_flags);
+                    }
+                    ControlFlow::Continue
+                },
+                order,
+            )
+        };
+    }
     /// Traverse the page table with the given branch and leaf operations.
     ///
     /// **Huge pages will be treated as leaf nodes, and will not be traversed
@@ -738,6 +759,77 @@ impl Mapper<'_> {
                         },
                         level,
                     );
+                }
+                pgdir = unsafe {
+                    pte.ppn()
+                        .to_phys_addr()
+                        .to_hhdm()
+                        .as_ptr_mut::<PgDir>()
+                        .as_mut()
+                        .expect("pgdir ppn should not be null")
+                };
+            }
+        }
+        Ok(())
+    }
+
+    /// Change the flags of a single page at level `level_at`.
+    pub fn change_flags_one<F: FnMut(PteFlags) -> PteFlags>(
+        &mut self,
+        vpn: VirtPageNum,
+        mut op: F,
+        level_at: usize,
+    ) -> Result<(), MmError> {
+        let levels = PagingArch::PAGE_LEVELS;
+
+        // Check level_at value
+        debug_assert!(
+            level_at < levels,
+            "Invalid `level_at` argument: greater than max level id {}: {}",
+            levels - 1,
+            level_at
+        );
+
+        let vpn_bits = PagingArch::PTE_PER_PGDIR.trailing_zeros() as usize;
+
+        /// Check alignment
+        #[cfg(debug_assertions)]
+        {
+            let level_offset = level_at * vpn_bits;
+            debug_assert!(
+                vpn.get() & ((1 << level_offset) - 1) == 0,
+                "Invalid `vpn` argument: not aligned to the specified level: level_at={}, vpn={:#x}",
+                level_at,
+                vpn.get()
+            );
+        }
+        let mut pgdir = unsafe {
+            self.root
+                .to_phys_addr()
+                .to_hhdm()
+                .as_ptr_mut::<PgDir>()
+                .as_mut()
+                .expect("root ppn should not be null")
+        };
+
+        for level in (0..levels).rev() {
+            let idx = (vpn.get() as usize >> (level * vpn_bits)) & (PagingArch::PTE_PER_PGDIR - 1);
+            let pte = &mut pgdir[idx];
+
+            if level == level_at {
+                // leaf reached
+                if pte.is_valid() {
+                    unsafe {
+                        pte.set_flags(op(pte.flags()));
+                    }
+                    break;
+                } else {
+                    return Err(MmError::NotMapped);
+                }
+            } else {
+                // branch
+                if !pte.is_branch() {
+                    return Err(MmError::AlreadyMapped);
                 }
                 pgdir = unsafe {
                     pte.ppn()

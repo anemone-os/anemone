@@ -14,6 +14,7 @@ mod bootstrap;
 mod machine;
 mod sched;
 mod utils;
+// mod trampoline;
 
 pub use backtrace::RiscV64BacktraceArch as BacktraceArch;
 pub use cpu::RiscV64CpuArch as CpuArch;

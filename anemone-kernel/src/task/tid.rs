@@ -1,30 +1,34 @@
 use core::{
     fmt::{Debug, Display},
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicU32, Ordering},
 };
 
 /// temporary id allocator
 /// todo: use [idalloc::IdAllocator] instead of this
-static ID_ALLOC: AtomicUsize = AtomicUsize::new(0);
+static ID_ALLOC: AtomicU32 = AtomicU32::new(1);
 
-unsafe fn alloc_tid_raw() -> usize {
+unsafe fn alloc_tid_raw() -> u32 {
     ID_ALLOC.fetch_add(1, Ordering::SeqCst)
 }
 
-unsafe fn free_tid_raw(id: usize) {
+unsafe fn free_tid_raw(id: u32) {
     // do nothing for now
 }
 
-pub struct Tid(usize);
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Tid(u32);
+
+pub const TIDH_IDLE: TidHandle = TidHandle(0);
 
 impl Tid {
     #[inline(always)]
-    pub fn new(id: usize) -> Self {
+    pub fn new(id: u32) -> Self {
         Self(id)
     }
 
     #[inline(always)]
-    pub fn get(&self) -> usize {
+    pub fn get(&self) -> u32 {
         self.0
     }
 }
@@ -41,7 +45,7 @@ impl Display for Tid {
     }
 }
 
-pub struct TidHandle(usize);
+pub struct TidHandle(u32);
 
 impl Debug for TidHandle {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -50,15 +54,17 @@ impl Debug for TidHandle {
 }
 
 impl TidHandle {
-    pub fn get(&self) -> usize {
+    pub fn get(&self) -> u32 {
         self.0
     }
 }
 
 impl Drop for TidHandle {
     fn drop(&mut self) {
-        unsafe {
-            free_tid_raw(self.0);
+        if self.0 != 0 {
+            unsafe {
+                free_tid_raw(self.0);
+            }
         }
     }
 }

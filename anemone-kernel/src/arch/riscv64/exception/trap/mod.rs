@@ -15,7 +15,7 @@ impl TrapArchTrait for RiscV64TrapArch {
     type TrapFrame = RiscV64TrapFrame;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 struct Gpr {
     x: [u64; 32], // x0 as a placeholder for convenience
@@ -52,7 +52,7 @@ impl Gpr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct RiscV64TrapFrame {
     gpr: Gpr,
@@ -124,6 +124,14 @@ impl TrapFrameArch for RiscV64TrapFrame {
         stval: 0,
         scause: 0,
     };
+
+    fn set_sp(&mut self, sp: u64) {
+        self.gpr.x[2] = sp; // sp
+    }
+
+    fn set_tls(&mut self, tls: u64) {
+        self.gpr.x[4] = tls;
+    }
 }
 
 /// Only supervisor-level exceptions are defined here.

@@ -22,7 +22,7 @@ impl TrapArchTrait for LA64TrapArch {
 }
 
 /// Raw general-purpose register snapshot used inside [`LA64TrapFrame`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 struct Gpr {
     r: [u64; 32],
@@ -57,7 +57,7 @@ impl Gpr {
 }
 
 /// Saved LoongArch64 trap context passed to the Rust trap handler.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct LA64TrapFrame {
     gpr: Gpr,
@@ -129,6 +129,14 @@ impl TrapFrameArch for LA64TrapFrame {
 
     unsafe fn set_syscall_ret_val(&mut self, retval: u64) {
         self.gpr.r[4] = retval; // a0
+    }
+
+    fn set_sp(&mut self, sp: u64) {
+        self.gpr.r[3] = sp; // sp
+    }
+
+    fn set_tls(&mut self, tls: u64) {
+        self.gpr.r[2] = tls;
     }
 }
 

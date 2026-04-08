@@ -13,6 +13,8 @@
 //! this library. But once again - portability is not our concern. If we want
 //! that, why we don't just use `std`?
 
+#![allow(unused)]
+
 // out native kernel. (●'◡'●)
 pub mod anemone;
 pub mod linux;

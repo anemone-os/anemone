@@ -12,6 +12,7 @@ spin = { version = "0.10.0", default-features = false, features = [
 talc = { version = "4.4.3" }
 typed-path = { version = "0.12.3", default-features = false }
 hashbrown = { version = "0.16.1" }
+bitflags = { version = "2.10.0" }
 
 [workspace]
 members = [".", "macros"]

@@ -9,7 +9,7 @@ use crate::{
         trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
     },
     device::CpuArchTrait,
-    prelude::*,
+    prelude::{fault::handle_user_page_fault, *},
     sched::{current_task_id, kernel_exit},
 };
 
@@ -152,6 +152,9 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
+    with_current_task(|t| unsafe {
+        t.set_utrapframe(trapframe);
+    });
     let estat = Estat::from_u64(trapframe.estat);
     let ecode = estat.ecode();
     if ecode == 0 {
@@ -164,6 +167,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         }
     } else {
         let esubcode = estat.esubcode();
+        let intr_guard = IntrGuard::new(true);
         let reason = match LA64Exception::try_from((ecode, esubcode)) {
             Ok(r) => r,
             Err(_) => {
@@ -183,55 +187,30 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
             LA64Exception::Syscall => {
                 handle_syscall(trapframe);
             },
-            LA64Exception::PageModified => {
-                kerrln!(
-                    "({}) user {} aborted: Page Modified exception at address: {:#x}, pc: {:#x}. \
-             this should never happen because the 'DIRTY' bit is always set with 'WRITE' bit.",
-                    CpuArch::cur_cpu_id(),
-                    current_task_id(),
-                    trapframe.badv,
-                    trapframe.era
-                );
-                kernel_exit(-1)
-                //TODO: Error code
+            LA64Exception::PageModified
+            | LA64Exception::PageNotReadable
+            | LA64Exception::PageNotExecutable
+            | LA64Exception::PagePrivilegeIllegal
+            | LA64Exception::PageInvalidFetch
+            | LA64Exception::PageInvalidLoad
+            | LA64Exception::PageInvalidStore => {
+                handle_user_page_fault(PageFaultInfo::new(
+                    VirtAddr::new(trapframe.era),
+                    VirtAddr::new(trapframe.badv as u64),
+                    match reason {
+                        LA64Exception::PageInvalidFetch | LA64Exception::PageNotExecutable => {
+                            PageFaultType::Execute
+                        },
+                        LA64Exception::PageInvalidLoad
+                        | LA64Exception::PageNotReadable
+                        | LA64Exception::PagePrivilegeIllegal => PageFaultType::Read,
+                        LA64Exception::PageModified | LA64Exception::PageInvalidStore => {
+                            PageFaultType::Write
+                        },
+                        _ => unreachable!(),
+                    },
+                ));
             },
-
-            LA64Exception::PageInvalidFetch => {
-                kerrln!(
-                    "({}) user {} aborted: Page Invalid exception at address: {:#x}, pc: {:#x}, caused by instruction access. Page fault handler is not implemented yet.",
-                    CpuArch::cur_cpu_id(),
-                    current_task_id(),
-                    trapframe.badv,
-                    trapframe.era
-                );
-                kernel_exit(-1)
-                //TODO: Error code
-            },
-
-            LA64Exception::PageInvalidLoad => {
-                kerrln!(
-                    "({}) user {} aborted: Page Invalid exception at address: {:#x}, pc: {:#x}, caused by load access. Page fault handler is not implemented yet.",
-                    CpuArch::cur_cpu_id(),
-                    current_task_id(),
-                    trapframe.badv,
-                    trapframe.era
-                );
-                kernel_exit(-1)
-                //TODO: Error code
-            },
-
-            LA64Exception::PageInvalidStore => {
-                kerrln!(
-                    "({}) user {} aborted: Page Invalid exception at address: {:#x}, pc: {:#x}, caused by store access. Page fault handler is not implemented yet.",
-                    CpuArch::cur_cpu_id(),
-                    current_task_id(),
-                    trapframe.badv,
-                    trapframe.era
-                );
-                kernel_exit(-1)
-                //TODO: Error code
-            },
-
             _ => {
                 kerrln!(
                     "({}) user {} aborted with unhandled exception: {:?}, pc: {:#x}, badv: {:#x}\n\ttask return value not implemented yet",
@@ -245,6 +224,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                 //TODO: Error code
             },
         }
+        drop(intr_guard);
     }
 }
 unsafe extern "C" {

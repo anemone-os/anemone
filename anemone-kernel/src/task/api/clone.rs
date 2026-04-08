@@ -1,0 +1,197 @@
+use anemone_abi::syscall::SYS_CLONE;
+
+use crate::{
+    prelude::{dt::UserWritePtr, handler::TryFromSyscallArg, *},
+    sched::clone_current_task,
+    task::tid::Tid,
+};
+
+bitflags! {
+    #[derive(Debug, Clone, Copy)]
+    pub struct CloneFlags: u32 {
+        /// Signal sent to parent when child process changes state (termination/stop)
+        /// Prevents zombie processes; default action is ignore
+        const SIGCHLD = (1 << 4) | (1 << 0);
+        /// Share the same memory space between parent and child processes
+        const CLONE_VM = 1 << 8;
+        /// Share filesystem info (root, cwd, umask) with the child
+        const CLONE_FS = 1 << 9;
+        /// Share the file descriptor table with the child
+        const CLONE_FILES = 1 << 10;
+        /// Share signal handlers with the child
+        const CLONE_SIGHAND = 1 << 11;
+        const CLONE_PIDFD = 1 << 12;
+        const CLONE_PTRACE = 1 << 13;
+        const CLONE_VFORK = 1 << 14;
+        /// [OK]
+        const CLONE_PARENT = 1 << 15;
+        const CLONE_THREAD = 1 << 16;
+        const CLONE_NEWNS = 1 << 17;
+        /// Share System V semaphore adjustment (semadj) values
+        const CLONE_SYSVSEM = 1 << 18;
+        /// [OK] ›Set the TLS (Thread Local Storage) descriptor
+        const CLONE_SETTLS = 1 << 19;
+        /// [OK] Store child thread ID in parent's memory (parent_tid)
+        const CLONE_PARENT_SETTID = 1 << 20;
+        /// [OK with TODO: futex]Clear child_tid in child's memory when the child exits
+        const CLONE_CHILD_CLEARTID = 1 << 21;
+        /// Legacy flag, ignored by clone()
+        const CLONE_DETACHED = 1 << 22;
+        /// Prevent tracer from forcing CLONE_PTRACE on the child
+        const CLONE_UNTRACED = 1 << 23;
+        /// [OK] Store child thread ID in child's memory (child_tid)
+        const CLONE_CHILD_SETTID = 1 << 24;
+        const CLONE_NEWCGROUP = 1 << 25;
+        const CLONE_NEWUTS = 1 << 26;
+        const CLONE_NEWIPC = 1 << 27;
+        const CLONE_NEWUSER = 1 << 28;
+        const CLONE_NEWPID = 1 << 29;
+        const CLONE_NEWNET = 1 << 30;
+        const CLONE_IO = 1 << 31;
+    }
+}
+
+impl TryFromSyscallArg for CloneFlags {
+    fn try_from_syscall_arg(value: u64) -> Result<Self, SysError> {
+        CloneFlags::from_bits(value as u32).ok_or(SysError::Kernel(KernelError::InvalidArgument))
+    }
+}
+
+#[syscall(SYS_CLONE)]
+pub fn sys_clone(
+    flags: CloneFlags,
+    new_sp: u64,
+    parent_tid: UserWritePtr<Tid>,
+    tls: u64,
+    child_tid: UserWritePtr<Tid>,
+) -> Result<u64, SysError> {
+    let trap_frame = with_intr_disabled(|_| unsafe {
+        with_current_task(|task| {
+            task.get_utrapframe()
+                .and_then(|ptr| Some((*ptr).clone()))
+                .expect("user trapframe missing when cloning to a new task")
+        })
+    });
+    kernel_clone(
+        flags,
+        trap_frame,
+        if new_sp != 0 { Some(new_sp) } else { None },
+        tls,
+        parent_tid,
+        child_tid,
+    )
+    .and_then(|tid| Ok(tid.get() as u64))
+}
+
+pub fn kernel_clone(
+    flags: CloneFlags,
+    trap_frame: TrapFrame,
+    new_sp: Option<u64>,
+    tls: u64,
+    parent_tid: UserWritePtr<Tid>,
+    child_tid: UserWritePtr<Tid>,
+) -> Result<Tid, SysError> {
+    let current_task = clone_current_task();
+    let cur_uspace = current_task
+        .clone_uspace()
+        .expect("could not clone a kernel task");
+    // vm
+    let new_uspace = if flags.contains(CloneFlags::CLONE_VM) {
+        cur_uspace.clone()
+    } else {
+        Arc::new(cur_uspace.create_copy()?)
+    };
+    let mut boxed_frame = Box::new(trap_frame);
+    boxed_frame.advance_pc();
+    unsafe {
+        boxed_frame.set_syscall_ret_val(0);
+    }
+    if let Some(sp) = new_sp {
+        kdebugln!("clone: set new stack pointer to {:#x}", sp);
+        boxed_frame.set_sp(sp);
+    }
+
+    if flags.contains(CloneFlags::CLONE_SETTLS) {
+        boxed_frame.set_tls(tls);
+    }
+
+    let frame_ptr = Box::leak(boxed_frame) as *mut TrapFrame as u64;
+    let new_task = unsafe {
+        Task::new_kernel(
+            "@kernel/clone",
+            enter_cloned_user_task as *const (),
+            ParameterList::new(&[frame_ptr, child_tid.addr()]),
+            IntrArch::ENABLED_IRQ_FLAGS,
+            TaskFlags::KERNEL,
+            flags,
+        )?
+    };
+    unsafe {
+        new_task.set_exec_info(TaskExecInfo {
+            cmdline: current_task.cmdline(),
+            flags: current_task.flags(),
+            uspace: Some(new_uspace),
+        });
+    }
+    new_task.set_fs_state(current_task.fs_state().read().clone());
+    new_task.ensure_stdio(
+        device::console::open_console_stdin(),
+        device::console::open_console_stdout(),
+        device::console::open_console_stdout(),
+    );
+
+    let new_tid = new_task.tid();
+
+    if flags.contains(CloneFlags::CLONE_PARENT_SETTID) {
+        parent_tid.safe_write(new_tid)?;
+    }
+
+    if flags.contains(CloneFlags::CLONE_CHILD_CLEARTID)
+        || flags.contains(CloneFlags::CLONE_CHILD_SETTID)
+    {
+        child_tid.validate_with_mut(
+            &mut new_task
+                .clone_uspace()
+                .expect("user task should have a user space")
+                .write(),
+        )?;
+    }
+
+    if flags.contains(CloneFlags::CLONE_CHILD_CLEARTID) {
+        new_task.set_clear_child_tid(Some(child_tid));
+    }
+
+    let parent = if flags.contains(CloneFlags::CLONE_PARENT) {
+        unsafe { current_task.with_task_hierarchy(|hier| hier.parent()) }
+            .ok_or(KernelError::InvalidArgument)?
+            .upgrade()
+            .unwrap_or_else(|| panic!("dangling task with parent dropped: {}", current_task.tid()))
+    } else {
+        current_task.clone()
+    };
+
+    unsafe { new_task.add_as_child(&parent) };
+    drop(parent);
+    drop(current_task);
+    add_to_ready(new_task);
+    Ok(new_tid)
+}
+
+extern "C" fn enter_cloned_user_task(trap_frame: *mut TrapFrame, child_tid: *mut Tid) {
+    let task = clone_current_task();
+    let mut frame = *unsafe { Box::from_raw(trap_frame) };
+
+    unsafe {
+        if task.clone_flags().contains(CloneFlags::CLONE_CHILD_SETTID) {
+            *child_tid = current_task_id();
+        }
+    }
+
+    drop(task);
+    unsafe {
+        IntrArch::local_intr_disable();
+        SchedArch::return_to_cloned_task(frame);
+    }
+    unreachable!("should never return from entering a cloned user task");
+    return;
+}

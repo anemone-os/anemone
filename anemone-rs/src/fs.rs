@@ -118,7 +118,8 @@ impl core::fmt::Write for &File {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let mut buf = s.as_bytes();
         while !buf.is_empty() {
-            let written = self.tx(|file| fs::write(file.fd, buf))
+            let written = self
+                .tx(|file| fs::write(file.fd, buf))
                 .map_err(|_| core::fmt::Error)?;
             if written == 0 {
                 return Err(core::fmt::Error);
