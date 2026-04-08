@@ -352,6 +352,14 @@
 #endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_NANOSLEEP 101
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_NANOSLEEP 101
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
 #define SYS_SCHED_YIELD 124
 #endif
 
@@ -360,11 +368,27 @@
 #endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_TIMES 153
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_TIMES 153
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
 #define SYS_UNAME 160
 #endif
 
 #if defined(__ANEMONE_ARCH_LOONGARCH64__)
 #define SYS_UNAME 160
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_GETTIMEOFDAY 169
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_GETTIMEOFDAY 169
 #endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
@@ -384,6 +408,14 @@
 #endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
+#define SYS_BRK 214
+#endif
+
+#if defined(__ANEMONE_ARCH_LOONGARCH64__)
+#define SYS_BRK 214
+#endif
+
+#if defined(__ANEMONE_ARCH_RISCV64__)
 #define SYS_CLONE 220
 #endif
 
@@ -400,11 +432,7 @@
 #endif
 
 #if defined(__ANEMONE_ARCH_RISCV64__)
-#define SYS_BRK 214
-#endif
-
-#if defined(__ANEMONE_ARCH_LOONGARCH64__)
-#define SYS_BRK 214
+#define SYS_WAIT 260
 #endif
 
 #define SYS_DBG_PRINT (SYS_ANEMONE_START + 0)

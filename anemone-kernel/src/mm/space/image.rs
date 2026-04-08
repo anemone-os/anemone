@@ -120,9 +120,10 @@ pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, Sys
     }
 
     let mut usersp = UserSpace::new_user()?;
+    let mut usp_data = usersp.write();
     for segment in &segments {
         unsafe {
-            usersp.add_segment::<SysError>(
+            usp_data.add_segment::<SysError>(
                 segment.vaddr,
                 segment.memsz as usize,
                 segment.filesz as usize,
@@ -131,6 +132,7 @@ pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, Sys
             )?;
         }
     }
+    drop(usp_data);
 
     kdebugln!(
         "ELF loaded: entry = {:#x}, heap_start = {:#x}",

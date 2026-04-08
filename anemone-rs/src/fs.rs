@@ -1,6 +1,6 @@
 use alloc::ffi::CString;
 use anemone_abi::{
-    errno::{EIO, EINVAL, Errno},
+    errno::{EINVAL, EIO, Errno},
     fs::linux::at::AT_FDCWD,
 };
 
@@ -14,8 +14,7 @@ use crate::{
 
 pub type RawFd = usize;
 
-pub use anemone_abi::fs::linux::open;
-pub use anemone_abi::fs::linux::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
+pub use anemone_abi::fs::linux::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO, open};
 
 pub fn openat(dirfd: isize, path: impl AsRef<str>, flags: u32, mode: u32) -> Result<RawFd, Errno> {
     let path = CString::new(path.as_ref()).map_err(|_| EINVAL)?;

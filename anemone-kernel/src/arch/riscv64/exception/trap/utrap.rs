@@ -5,7 +5,7 @@ use crate::{
         trap::{RiscV64Exception, RiscV64Interrupt},
     },
     device::CpuArchTrait,
-    prelude::*,
+    prelude::{fault::handle_user_page_fault, *},
     sched::{current_task_id, kernel_exit},
 };
 
@@ -144,7 +144,9 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
-
+    with_current_task(|t| unsafe {
+        t.set_utrapframe(trapframe);
+    });
     let scause = riscv::register::scause::read();
     let code = scause.code();
     if scause.is_interrupt() {
@@ -157,6 +159,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
         let stval = riscv::register::stval::read();
         let reason = RiscV64Exception::try_from(code)
             .unwrap_or_else(|_| panic!("unknown exception with code {}", code));
+        // restore interrupt
+        let intr_guard = IntrGuard::new(true);
         match reason {
             RiscV64Exception::UserEnvCall => {
                 handle_syscall(trapframe);
@@ -173,16 +177,16 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             RiscV64Exception::InstructionPageFault
             | RiscV64Exception::LoadPageFault
             | RiscV64Exception::StorePageFault => {
-                kerrln!(
-                    "({}) user {} aborted with page fault {:?} at {:#x}, pc = {:#x}, \n\tcopy-on-write not implemented yet\n\ttask return value not implemented yet",
-                    CpuArch::cur_cpu_id(),
-                    current_task_id(),
-                    reason,
-                    trapframe.stval,
-                    trapframe.sepc
-                );
-                kernel_exit(-1)
-                //TODO: Error code
+                handle_user_page_fault(PageFaultInfo::new(
+                    VirtAddr::new(trapframe.sepc),
+                    VirtAddr::new(stval as u64),
+                    match reason {
+                        RiscV64Exception::InstructionPageFault => PageFaultType::Execute,
+                        RiscV64Exception::LoadPageFault => PageFaultType::Read,
+                        RiscV64Exception::StorePageFault => PageFaultType::Write,
+                        _ => unreachable!(),
+                    },
+                ));
             },
             _ => {
                 kerrln!(
@@ -195,6 +199,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                 //TODO: Error code
             },
         }
+        drop(intr_guard);
     }
 }
 

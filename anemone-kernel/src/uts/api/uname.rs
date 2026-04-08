@@ -22,9 +22,7 @@ fn sys_uname(buf: UserWritePtr<OldUtsName>) -> Result<u64, SysError> {
     copy_from_partial(VERSION, &mut uname.version);
     copy_from_partial(MACHINE, &mut uname.machine);
 
-    unsafe {
-        buf.as_mut_ptr().write_unaligned(uname);
-    }
+    buf.safe_write(uname)?;
 
     Ok(0)
 }

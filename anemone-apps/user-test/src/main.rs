@@ -2,39 +2,29 @@
 #![no_main]
 #![warn(unused)]
 
-use anemone_rs::{fs::getcwd, prelude::*};
+use core::ptr::null_mut;
+
+use anemone_rs::{
+    fs::getcwd,
+    prelude::*,
+    process::{clone, getpid, CloneFlags},
+};
 
 #[anemone_rs::main]
 pub fn main() -> Result<(), Errno> {
     let cwd = getcwd()?;
     println!("user-test: current working directory: {}", cwd);
-
-    // tmp test
-    execve("/uname", &["/uname"]).unwrap();
-
-    let args: Vec<&str> = args().collect();
-    if args.len() < 2 {
-        println!("usage: user-test [running times...]");
-        return Err(-1);
+    let mut __parent_ptid = 0;
+    let mut __child_ptid = 0;
+    clone(
+        CloneFlags::CLONE_PARENT_SETTID | CloneFlags::CLONE_CHILD_SETTID,
+        None,
+        &mut __parent_ptid,
+        null_mut(),
+        &mut __child_ptid,
+    )?;
+    for i in 0..10 {
+        println!("Hello from user task #{}:{}!", getpid().unwrap(), i);
     }
-    let program = args[0];
-    let first_arg = args[1];
-    let running_times: u32 = first_arg.parse().unwrap_or_else(|e| {
-        println!(
-            "failed to parse first argument as number: {}, error: {:?}",
-            first_arg, e
-        );
-        exit(-1);
-    });
-    println!("user-test: running times = {}", running_times);
-    if running_times < 30 {
-        execve(program, &[program, &format!("{}", running_times + 1)]).unwrap();
-    } else {
-        println!(
-            "user-test: finished running {} times, exiting...",
-            running_times
-        );
-    }
-
     Ok(())
 }

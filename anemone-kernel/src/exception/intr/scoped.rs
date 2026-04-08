@@ -35,10 +35,3 @@ pub fn with_intr_disabled<F: FnOnce(bool) -> R, R>(f: F) -> R {
     drop(guard);
     res
 }
-
-pub fn with_intr_enabled<F: FnOnce(bool) -> R, R>(f: F) -> R {
-    let guard = IntrGuard::new(true);
-    let res = f(guard.prev == IntrArch::ENABLED_IRQ_FLAGS);
-    drop(guard);
-    res
-}

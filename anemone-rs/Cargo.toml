@@ -10,6 +10,7 @@ spin = { version = "0.10.0", default-features = false, features = [
     "use_ticket_mutex",
 ] }
 talc = { version = "4.4.3" }
+bitflags = { version = "2.10.0" }
 
 [workspace]
 members = [".", "macros"]

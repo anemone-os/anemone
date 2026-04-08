@@ -1,8 +1,10 @@
+use core::fmt::Debug;
+
 pub trait TrapArchTrait {
     type TrapFrame: TrapFrameArch;
 }
 
-pub trait TrapFrameArch {
+pub trait TrapFrameArch: Debug + Clone {
     const ZEROED: Self;
     /// Get the system call argument at the given index.
     ///
@@ -21,6 +23,9 @@ pub trait TrapFrameArch {
     unsafe fn syscall_no(&self) -> usize;
 
     fn advance_pc(&mut self);
+
+    fn set_sp(&mut self, sp: u64);
+    fn set_tls(&mut self, tls: u64);
 
     /// Set the return value of the system call.
     ///

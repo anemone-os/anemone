@@ -19,8 +19,15 @@ SECTIONS {
     
     .text : ALIGN(4K) {
         __skernel = .;
-        __stext = .;
+        __sbootstrap = .;
         *(.text.bootstrap)
+        __ebootstrap = .;
+        . = ALIGN(4K);
+        __strampoline = .;
+        *(.text.trampoline)
+        __etrampoline = .;
+        . = ALIGN(4K);
+        __stext = .;
         *(.text .text.*)
         __etext = .;
     } > VIRT AT> RAM

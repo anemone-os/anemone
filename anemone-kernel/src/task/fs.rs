@@ -12,7 +12,7 @@ use crate::prelude::*;
 //     // TODO: umask
 // }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FsState {
     Hanging,
     Ready { root: PathRef, cwd: PathRef },

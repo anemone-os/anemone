@@ -1,7 +1,5 @@
 //! Virtual file system and filesystem drivers.
 
-use alloc::{string::ToString, sync::Arc};
-
 // vfs infrastructure
 mod anonymous;
 mod dentry;

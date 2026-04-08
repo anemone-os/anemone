@@ -5,5 +5,6 @@ use crate::{prelude::*, sched::current_task_id};
 
 #[syscall(SYS_GETPID)]
 pub fn sys_getpid() -> Result<u64, SysError> {
-    Ok(current_task_id().get() as u64)
+    let res = Ok(current_task_id().get() as u64);
+    res
 }

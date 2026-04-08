@@ -28,6 +28,26 @@ pub fn sys_execve(path_ptr: u64, argv_ptr: u64) -> Result<u64, Errno> {
     unsafe { raw_syscall(SYS_EXECVE, path_ptr, argv_ptr, 0, 0, 0, 0) }
 }
 
+pub fn sys_clone(
+    flags: u64,
+    stack: u64,
+    parent_tid_ptr: u64,
+    tls: u64,
+    child_tid_ptr: u64,
+) -> Result<u64, Errno> {
+    unsafe {
+        raw_syscall(
+            SYS_CLONE,
+            flags,
+            stack,
+            parent_tid_ptr,
+            tls,
+            child_tid_ptr,
+            0,
+        )
+    }
+}
+
 pub fn sys_openat(dirfd: isize, path_ptr: u64, flags: u32, mode: u32) -> Result<usize, Errno> {
     unsafe {
         raw_syscall(
@@ -44,17 +64,11 @@ pub fn sys_openat(dirfd: isize, path_ptr: u64, flags: u32, mode: u32) -> Result<
 }
 
 pub fn sys_read(fd: usize, buf_ptr: u64, count: usize) -> Result<usize, Errno> {
-    unsafe {
-        raw_syscall(SYS_READ, fd as u64, buf_ptr, count as u64, 0, 0, 0)
-            .map(|n| n as usize)
-    }
+    unsafe { raw_syscall(SYS_READ, fd as u64, buf_ptr, count as u64, 0, 0, 0).map(|n| n as usize) }
 }
 
 pub fn sys_write(fd: usize, buf_ptr: u64, count: usize) -> Result<usize, Errno> {
-    unsafe {
-        raw_syscall(SYS_WRITE, fd as u64, buf_ptr, count as u64, 0, 0, 0)
-            .map(|n| n as usize)
-    }
+    unsafe { raw_syscall(SYS_WRITE, fd as u64, buf_ptr, count as u64, 0, 0, 0).map(|n| n as usize) }
 }
 
 pub fn sys_close(fd: usize) -> Result<(), Errno> {
@@ -67,16 +81,8 @@ pub fn sys_dup(fd: usize) -> Result<usize, Errno> {
 
 pub fn sys_dup3(oldfd: usize, newfd: usize, flags: u32) -> Result<usize, Errno> {
     unsafe {
-        raw_syscall(
-            SYS_DUP3,
-            oldfd as u64,
-            newfd as u64,
-            flags as u64,
-            0,
-            0,
-            0,
-        )
-        .map(|fd| fd as usize)
+        raw_syscall(SYS_DUP3, oldfd as u64, newfd as u64, flags as u64, 0, 0, 0)
+            .map(|fd| fd as usize)
     }
 }
 
@@ -85,6 +91,14 @@ pub fn sys_exit(code: u64) -> ! {
         raw_syscall(SYS_EXIT, code, 0, 0, 0, 0, 0).expect("failed to invoke exit syscall");
     }
     unreachable!("sys_exit should never return")
+}
+
+pub fn sys_getpid() -> Result<u32, Errno> {
+    unsafe { raw_syscall(SYS_GETPID, 0, 0, 0, 0, 0, 0).map(|pid| pid as u32) }
+}
+
+pub fn sys_getppid() -> Result<u32, Errno> {
+    unsafe { raw_syscall(SYS_GETPPID, 0, 0, 0, 0, 0, 0).map(|ppid| ppid as u32) }
 }
 
 pub fn sys_sched_yield() -> Result<(), Errno> {

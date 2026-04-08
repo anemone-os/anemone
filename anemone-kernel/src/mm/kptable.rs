@@ -67,7 +67,12 @@ impl KPTable {
                 }
             }};
         }
+        map_elf_segment!(bootstrap, PteFlags::READ | PteFlags::EXECUTE | PteFlags::GLOBAL);
         map_elf_segment!(text, PteFlags::READ | PteFlags::EXECUTE | PteFlags::GLOBAL);
+        map_elf_segment!(
+            trampoline,
+            PteFlags::READ | PteFlags::EXECUTE | PteFlags::GLOBAL | PteFlags::USER
+        );
         map_elf_segment!(rodata, PteFlags::READ | PteFlags::GLOBAL);
         map_elf_segment!(data, PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL);
         map_elf_segment!(bss, PteFlags::READ | PteFlags::WRITE | PteFlags::GLOBAL);

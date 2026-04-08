@@ -17,24 +17,20 @@ fn sys_gettimeofday(
     if let Some(mut tv) = tv {
         let uptime = uptime();
         // todo: unix epoch time instead of uptime
-        unsafe {
-            tv.as_mut_ptr().write(TimeVal {
-                tv_sec: uptime.as_secs() as i64,
-                tv_usec: (uptime.subsec_micros()) as i64,
-            });
-        }
+        tv.safe_write(TimeVal {
+            tv_sec: uptime.as_secs() as i64,
+            tv_usec: (uptime.subsec_micros()) as i64,
+        })?;
     }
 
     if let Some(mut tz) = tz {
-        unsafe {
-            // we don't support time zones, so just fill in dummy values
-            // plus, "  The use of the timezone structure is obsolete; the tz argument
-            // should normally be specified as NULL." says man 2. so it's fine.
-            tz.as_mut_ptr().write(TimeZone {
-                tz_minuteswest: 0,
-                tz_dsttime: 0,
-            });
-        }
+        // we don't support time zones, so just fill in dummy values
+        // plus, "  The use of the timezone structure is obsolete; the tz argument
+        // should normally be specified as NULL." says man 2. so it's fine.
+        tz.safe_write(TimeZone {
+            tz_minuteswest: 0,
+            tz_dsttime: 0,
+        })?;
     }
 
     Ok(0)

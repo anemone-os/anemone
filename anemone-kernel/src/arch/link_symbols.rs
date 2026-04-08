@@ -11,6 +11,12 @@ unsafe extern "C" {
     /// The end of the kernel's image in virtual memory.
     pub fn __ekernel();
 
+    /// The start of the kernel's bootstrap code in physical memory.
+    pub fn __sbootstrap();
+
+    /// The end of the kernel's bootstrap code in physical memory.
+    pub fn __ebootstrap();
+
     /// The start of the text segment (ELF format) of the kernel in virtual
     /// memory.
     pub fn __stext();
@@ -18,6 +24,12 @@ unsafe extern "C" {
     /// The end of the text segment (ELF format) of the kernel in virtual
     /// memory.
     pub fn __etext();
+
+    /// The start of the trampoline code in virtual memory.
+    pub fn __strampoline();
+
+    /// The end of the trampoline code in virtual memory.
+    pub fn __etrampoline();
 
     /// The start of the read-only data segment (ELF format) of the kernel in
     pub fn __srodata();
