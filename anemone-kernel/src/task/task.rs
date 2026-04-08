@@ -15,6 +15,7 @@ use crate::{
         files::FilesState,
         task_fs::FsState,
         tid::{TIDH_IDLE, Tid, TidHandle, alloc_tid},
+        wait::WaitQueue,
     },
 };
 
@@ -56,6 +57,8 @@ pub struct Task {
     exec_info: RwLock<TaskExecInfo>,
     exit_code: AtomicI8,
 
+    wait_childexit: WaitQueue<Arc<Task>>,
+
     // hierarchy information
     hierarchy: RwLock<TaskHierarchy>,
 
@@ -80,8 +83,8 @@ impl TaskHierarchy {
     pub fn add_child(&mut self, child: Arc<Task>) {
         self.children.push(child);
     }
-    pub fn remove_child(&mut self, child: &Arc<Task>) -> bool {
-        if let Some(index) = self.children.iter().position(|x| Arc::ptr_eq(x, child)) {
+    fn remove_child(&mut self, child: &Arc<Task>) -> bool {
+        if let Some(index) = self.children.iter().position(|x| x.eq(child)) {
             self.children.remove(index);
             true
         } else {
@@ -128,6 +131,7 @@ pub enum TaskStatus {
     Running,
     Ready,
     Zombie,
+    Waiting { interruptible: bool },
 }
 
 bitflags! {
@@ -218,6 +222,7 @@ impl Task {
             exit_code: AtomicI8::new(0),
             create_flags,
             clear_child_tid: RwLock::new(None),
+            wait_childexit: WaitQueue::new(),
         };
         let task = Arc::new(task);
         Ok(task)
@@ -301,6 +306,7 @@ impl Task {
             exit_code: AtomicI8::new(0),
             create_flags: CloneFlags::empty(),
             clear_child_tid: RwLock::new(None),
+            wait_childexit: WaitQueue::new(),
         }))
     }
 
@@ -452,6 +458,10 @@ impl Task {
 
 pub trait ArcTaskImpls {
     unsafe fn add_as_child(&self, parent: &Arc<Task>);
+
+    unsafe fn note_exited(&self);
+
+    unsafe fn waitpid(&self, target: WaitObject) -> Result<Tid, SysError>;
 }
 impl ArcTaskImpls for Arc<Task> {
     unsafe fn add_as_child(&self, parent: &Arc<Task>) {
@@ -476,10 +486,85 @@ impl ArcTaskImpls for Arc<Task> {
             }
         }
     }
+
+    unsafe fn note_exited(&self) {
+        let parent = unsafe { self.with_task_hierarchy(|hier| hier.parent()) }
+            .unwrap_or_else(|| panic!("cannot note exited for a root task: {}", self.tid()))
+            .upgrade()
+            .unwrap_or_else(|| panic!("dangling task with parrent dropped: {}", self.tid()));
+        parent.wait_childexit.wake(self, false);
+    }
+
+    /// This is the only way to remove a task from its children list
+    unsafe fn waitpid(&self, target: WaitObject) -> Result<Tid, SysError> {
+        unsafe {
+            self.with_task_hierarchy(|hier| {
+                if hier
+                    .children
+                    .iter()
+                    .position(|val| target.match_task(val))
+                    .is_none()
+                {
+                    Err(SysError::Task(TaskError::ChildrenNotFound))
+                } else {
+                    Ok(())
+                }
+            })?;
+        }
+        loop {
+            let child = self
+                .wait_childexit
+                .wait_if(true, || unsafe {
+                    self.with_task_hierarchy_mut(|hier| {
+                        for ch in &hier.children {
+                            if target.match_task(ch) && ch.status() == TaskStatus::Zombie {
+                                return Err(ch.clone());
+                            }
+                        }
+                        Ok(())
+                    })
+                })
+                .unwrap_or_else(|e| e);
+            if target.match_task(&child) {
+                unsafe {
+                    self.with_task_hierarchy_mut(|hier| {
+                        let res = hier.remove_child(&child);
+                        debug_assert!(res);
+                    });
+                }
+                return Ok(child.tid());
+            }
+        }
+    }
 }
 
 impl Drop for Task {
     fn drop(&mut self) {
         kdebugln!("{}({}) dropped", self.tid(), self.cmdline());
+    }
+}
+
+impl PartialEq for Task {
+    fn eq(&self, other: &Self) -> bool {
+        self.tid() == other.tid()
+    }
+}
+
+impl Eq for Task {}
+
+pub enum WaitObject {
+    Tgid(u32), // not implemented
+    Tid(Option<Tid>),
+}
+
+impl WaitObject {
+    pub fn match_task(&self, task: &Arc<Task>) -> bool {
+        match self {
+            Self::Tgid(_) => unimplemented!(),
+            Self::Tid(tid) => match tid.as_ref() {
+                Some(tid) => task.tid().eq(tid),
+                None => true,
+            },
+        }
     }
 }

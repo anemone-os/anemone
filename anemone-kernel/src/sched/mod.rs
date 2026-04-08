@@ -2,7 +2,7 @@ use crate::{
     prelude::*,
     sched::{
         idle::clone_current_idle_task,
-        proc::{fetch_new_task, set_running_task, switch_out, switch_to},
+        proc::{SwitchOutType, fetch_new_task, set_running_task, switch_out, switch_to},
     },
 };
 
@@ -45,10 +45,19 @@ pub fn run_tasks() -> ! {
 ///
 /// **Make sure interrupts are disabled before calling this function, otherwise
 /// the behavior is undefined.**
-pub unsafe fn schedule() {
+pub unsafe fn try_schedule() {
     if unsafe_with_core_local(|local| local.preempt_counter().allow()) {
-        unsafe { switch_out(false) };
+        unsafe { switch_out(SwitchOutType::Sched) };
     } else {
         set_resched_flag();
     }
+}
+
+pub fn sleep_as_waiting(interruptible: bool) {
+    debug_assert!(unsafe_with_core_local(|local| local
+        .preempt_counter()
+        .allow()));
+    with_intr_disabled(|_| {
+        unsafe { switch_out(SwitchOutType::Wait { interruptible }) };
+    });
 }

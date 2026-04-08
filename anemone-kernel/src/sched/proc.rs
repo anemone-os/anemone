@@ -187,20 +187,37 @@ pub unsafe fn get_sched_context_mut() -> *mut TaskContext {
     })
 }
 
+pub enum SwitchOutType {
+    Sched,
+    Exit,
+    Wait { interruptible: bool },
+}
+
 /// Switch out the current task and switch to the next task.
 ///
 /// If `exit` is true, the current task will not be added back to the ready
 /// queue and will be dropped instead. Then the [Task] struct of the current
 /// task will be deallocated if no external references to it exist.
 ///
+/// **This function does not set the task status.**
+///
 /// ***Make sure interrupts are disabled before calling this function***
-pub unsafe fn switch_out(exit: bool) {
+pub unsafe fn switch_out(switch_type: SwitchOutType) {
     let task = clone_current_task();
     let context = unsafe { task.get_task_context_mut() };
-    if !exit && !task.flags().contains(TaskFlags::IDLE) {
-        add_to_ready(task);
-    } else {
-        drop(task);
+    match switch_type {
+        SwitchOutType::Sched => {
+            if !task.flags().contains(TaskFlags::IDLE) {
+                add_to_ready(task)
+            }
+        },
+        SwitchOutType::Exit => {
+            drop(task);
+        },
+        SwitchOutType::Wait { interruptible } => {
+            task.set_status(TaskStatus::Waiting { interruptible });
+            drop(task);
+        },
     }
     let sched_context = unsafe { get_sched_context() };
     unsafe {

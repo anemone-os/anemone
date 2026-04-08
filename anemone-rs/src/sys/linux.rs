@@ -103,4 +103,8 @@ pub mod process {
     pub fn getppid() -> Result<u64, Errno> {
         unsafe { syscall(SYS_GETPPID, 0, 0, 0, 0, 0, 0) }
     }
+
+    pub fn wait4(pid: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_WAIT4, pid, 0, 0, 0, 0, 0) }
+    }
 }

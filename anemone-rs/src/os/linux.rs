@@ -134,4 +134,8 @@ pub mod process {
     pub fn getppid() -> Result<usize, Errno> {
         process::getppid().and_then(|x| Ok(x as usize))
     }
+
+    pub fn wait4(pid: i64) -> Result<u32, Errno> {
+        process::wait4(pid as u64).and_then(|x| Ok(x as u32))
+    }
 }

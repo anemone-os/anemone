@@ -20,3 +20,8 @@ pub fn exit(xcode: i32) -> ! {
 pub fn yield_now() -> Result<(), Errno> {
     linux_process::sched_yield()
 }
+
+/// Wait for a child process to exit or stop
+pub fn wait4(pid: i64) -> Result<u32, Errno> {
+    linux_process::wait4(pid)
+}

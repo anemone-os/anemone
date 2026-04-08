@@ -6,6 +6,6 @@ use crate::prelude::*;
 pub fn handle_timer_interrupt() {
     on_timer_interrupt();
     unsafe {
-        schedule();
+        try_schedule();
     }
 }
