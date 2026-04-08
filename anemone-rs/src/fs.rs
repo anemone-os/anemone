@@ -65,7 +65,7 @@ impl OpenOptions {
         }
 
         let fd = fs::openat(
-            AT_FDCWD as usize,
+            AT_FDCWD as isize,
             path,
             flags,
             S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,

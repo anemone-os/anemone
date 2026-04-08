@@ -21,7 +21,7 @@ pub mod fs {
 
     pub fn openat(dirfd: isize, path: &Path, flags: u32, mode: u32) -> Result<usize, Errno> {
         let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
-        fs::openat(dirfd as isize, path.as_ptr() as u64, flags, mode)
+        fs::openat(dirfd, path.as_ptr() as u64, flags, mode)
     }
 
     pub fn close(fd: usize) -> Result<(), Errno> {

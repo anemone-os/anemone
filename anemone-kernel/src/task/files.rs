@@ -7,7 +7,6 @@ use crate::prelude::*;
 
 #[derive(Debug)]
 pub struct FileDesc {
-    fd: usize,
     file: File,
     flags: OpenFlags,
 }
@@ -17,10 +16,6 @@ pub struct FileDesc {
 // TODO: we only checked permission of fd, but we haven't checked permission of
 // the file itself.
 impl FileDesc {
-    pub fn fd(&self) -> usize {
-        self.fd
-    }
-
     pub fn vfs_file(&self) -> &File {
         &self.file
     }
@@ -115,14 +110,6 @@ impl FilesState {
         }
     }
 
-    pub fn new_with_stdio() -> Self {
-        let mut state = Self::new();
-        state.open_fd(device::console::open_console_stdin(), OpenFlags::READ);
-        state.open_fd(device::console::open_console_stdout(), OpenFlags::WRITE);
-        state.open_fd(device::console::open_console_stdout(), OpenFlags::WRITE);
-        state
-    }
-
     pub fn open_fd(&mut self, file: File, flags: OpenFlags) -> usize {
         while self.fd_table.contains_key(&self.next_fd) {
             self.next_fd += 1;
@@ -130,8 +117,7 @@ impl FilesState {
         let fd = self.next_fd;
         self.next_fd += 1;
 
-        self.fd_table
-            .insert(fd, Arc::new(FileDesc { fd, file, flags }));
+        self.fd_table.insert(fd, Arc::new(FileDesc { file, flags }));
         fd
     }
 
@@ -188,21 +174,20 @@ impl FilesState {
         if self.fd_table.contains_key(&fd) {
             self.close_fd(fd);
         }
-        self.fd_table
-            .insert(fd, Arc::new(FileDesc { fd, file, flags }));
+        self.fd_table.insert(fd, Arc::new(FileDesc { file, flags }));
+    }
+
+    /// Currently the same as default `clone`.
+    pub fn create_copy(&self) -> Self {
+        let mut new = Self::new();
+        new.next_fd = self.next_fd;
+        new.recycled_fds = self.recycled_fds.clone();
+        new.fd_table = self.fd_table.clone();
+        new
     }
 }
 
 impl Task {
-    pub fn ensure_stdio(&self, stdin: File, stdout: File, stderr: File) {
-        let mut files_state = self.files_state.write();
-        unsafe {
-            files_state.open_fd_at(0, stdin, OpenFlags::READ);
-            files_state.open_fd_at(1, stdout, OpenFlags::WRITE);
-            files_state.open_fd_at(2, stderr, OpenFlags::WRITE);
-        }
-    }
-
     pub fn open_fd(&self, file: File, flags: OpenFlags) -> usize {
         let mut files_state = self.files_state.write();
         files_state.open_fd(file, flags)
@@ -211,6 +196,29 @@ impl Task {
     pub fn get_fd(&self, fd: usize) -> Option<Arc<FileDesc>> {
         let files_state = self.files_state.read();
         files_state.get_fd(fd)
+    }
+
+    pub fn files_state(&self) -> Arc<RwLock<FilesState>> {
+        self.files_state.clone()
+    }
+
+    /// Replace the contents of the current file-table state object.
+    ///
+    /// If this task is sharing the same file-table handle with other tasks,
+    /// they will observe the updated contents as well.
+    ///
+    /// Note the semantic difference between this function and
+    /// [`Self::replace_files_state_handle`].
+    pub fn set_files_state(&self, files_state: FilesState) {
+        *self.files_state.write() = files_state;
+    }
+
+    /// Replace the shared file-table state handle.
+    ///
+    /// This should only be used while the task is still uniquely owned, such
+    /// as during task construction or clone setup.
+    pub(super) fn replace_files_state_handle(&mut self, files_state: Arc<RwLock<FilesState>>) {
+        self.files_state = files_state;
     }
 
     pub fn close_fd(&self, fd: usize) -> Option<Arc<FileDesc>> {

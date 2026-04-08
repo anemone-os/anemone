@@ -77,14 +77,6 @@ pub fn kernel_execve_from_image(
         memsp.activate();
         let mut ksp = VirtAddr::new(0);
         with_current_task(|task| {
-            if task.flags().contains(TaskFlags::KERNEL) {
-                task.ensure_stdio(
-                    device::console::open_console_stdin(),
-                    device::console::open_console_stdout(),
-                    device::console::open_console_stdout(),
-                );
-            }
-
             let info = TaskExecInfo {
                 cmdline: commandline.as_ref().into(),
                 flags: TaskFlags::NONE,

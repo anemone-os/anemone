@@ -16,5 +16,5 @@ fn sys_getcwd(buf: UserWritePtr<u8>, size: usize) -> Result<u64, SysError> {
     let cwd_bytes = cwd.as_bytes();
     let slice = buf.slice(size);
     slice.safe_write_bytes_str(cwd_bytes)?;
-    Ok(buf.addr())
+    Ok(cwd_bytes.len() as u64 + 1)
 }
