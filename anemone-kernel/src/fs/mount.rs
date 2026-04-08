@@ -127,7 +127,7 @@ impl Mount {
                 && child
                     .mountpoint()
                     .as_ref()
-                    .is_some_and(|child_mp| Arc::ptr_eq(child_mp, mountpoint))
+                    .is_some_and(|child_mp| child_mp.inode() == mountpoint.inode())
             {
                 found = Some(child);
             }

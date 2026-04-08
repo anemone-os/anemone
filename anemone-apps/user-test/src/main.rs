@@ -5,15 +5,15 @@
 use core::ptr::null_mut;
 
 use anemone_rs::{
-    fs::getcwd,
+    env::current_dir,
+    os::linux::process::{CloneFlags, clone, getpid},
     prelude::*,
-    process::{clone, getpid, CloneFlags},
 };
 
-#[anemone_rs::main]
+#[main]
 pub fn main() -> Result<(), Errno> {
-    let cwd = getcwd()?;
-    println!("user-test: current working directory: {}", cwd);
+    let cwd = current_dir()?;
+    println!("user-test: current working directory: {}", cwd.display());
     let mut __parent_ptid = 0;
     let mut __child_ptid = 0;
     clone(

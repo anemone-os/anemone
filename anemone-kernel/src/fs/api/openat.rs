@@ -3,7 +3,7 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/openat.2.html
 
-use anemone_abi::fs::linux::open::{O_APPEND, O_CREAT};
+use anemone_abi::fs::linux::open::{O_APPEND, O_CREAT, O_DIRECTORY};
 
 use crate::{
     prelude::{dt::c_readonly_string, *},
@@ -30,6 +30,10 @@ fn sys_openat(
             }
             let file = vfs_open(&path)?;
 
+            if file.inode().ty() != InodeType::Dir && flags & O_DIRECTORY != 0 {
+                return Err(FsError::NotDir.into());
+            }
+
             if flags & O_APPEND != 0 {
                 file.seek(file.get_attr()?.size as usize)?;
             }
@@ -49,6 +53,7 @@ fn sys_openat(
                 }
                 dir_file.vfs_file().path().clone()
             };
+
             if flags & O_CREAT != 0 {
                 let mode =
                     InodeMode::from_linux_mode(mode | InodeType::Regular.to_linux_mode_bits())
@@ -57,6 +62,10 @@ fn sys_openat(
             }
 
             let file = vfs_open_at(&dir_path, &path)?;
+
+            if file.inode().ty() != InodeType::Dir && flags & O_DIRECTORY != 0 {
+                return Err(FsError::NotDir.into());
+            }
 
             if flags & O_APPEND != 0 {
                 file.seek(file.get_attr()?.size as usize)?;

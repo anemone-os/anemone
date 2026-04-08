@@ -16,7 +16,7 @@ mod superblock;
 mod devfs;
 #[cfg(feature = "fs_ext4")]
 mod ext4;
-mod pipefs;
+mod pipe;
 mod ramfs;
 
 pub mod api;
@@ -32,7 +32,7 @@ pub use self::{
         InodeType, OpenedFile,
     },
     mount::{Mount, MountFlags, MountSource},
-    namei::{resolve, resolve_from},
+    namei::{ResolveFlags, resolve, resolve_from},
     path::PathRef,
     superblock::SuperBlock,
 };
@@ -338,10 +338,50 @@ mod vfs {
 }
 pub use vfs::*;
 
+/// POD struct representing a path resolution request.
+#[derive(Debug, Clone, Copy)]
+pub struct PathResolution<'a> {
+    pub target: &'a crate::prelude::Path,
+    pub flags: ResolveFlags,
+}
+
+impl<'a, 'p, P> From<&'p P> for PathResolution<'a>
+where
+    P: AsRef<crate::prelude::Path> + 'p,
+    'p: 'a,
+{
+    fn from(path: &'p P) -> Self {
+        Self::normal(path.as_ref())
+    }
+}
+
+impl<'a> From<&'a crate::prelude::Path> for PathResolution<'a> {
+    fn from(path: &'a crate::prelude::Path) -> Self {
+        Self::normal(path)
+    }
+}
+
+impl<'a> PathResolution<'a> {
+    /// Create a `PathResolution` with the given path and default flags.
+    ///
+    /// `default` here means no flags are set, i.e. the resolution will follow
+    /// all symlinks.
+    pub fn normal(target: &'a crate::prelude::Path) -> Self {
+        Self {
+            target,
+            flags: ResolveFlags::empty(),
+        }
+    }
+
+    pub fn new(target: &'a crate::prelude::Path, flags: ResolveFlags) -> Self {
+        Self { target, flags }
+    }
+}
+
 mod vfs_ops {
     use crate::{
         fs::{
-            namei::{canonicalize_child, resolve, resolve_parent},
+            namei::{materialize_child_dentry, resolve, resolve_parent},
             unmount,
         },
         prelude::*,
@@ -353,18 +393,27 @@ mod vfs_ops {
 
         use super::*;
 
-        pub fn vfs_mount_at(
+        /// Mount a filesystem at the specified mountpoint.
+        pub fn vfs_mount_at<'a, R: Into<PathResolution<'a>>>(
             fs_name: &str,
             source: MountSource,
             flags: MountFlags,
-            mountpoint: &Path,
+            mountpoint: R,
         ) -> Result<Arc<Mount>, FsError> {
-            let mountpoint = resolve(mountpoint)?;
+            let mountpoint = mountpoint.into();
+            let mountpoint = resolve(mountpoint.target, mountpoint.flags)?;
+
+            if mountpoint.inode().ty() != InodeType::Dir {
+                return Err(FsError::NotDir);
+            }
+
             mount_at(fs_name, source, flags, &mountpoint)
         }
 
-        pub fn vfs_unmount(mountpoint: &Path) -> Result<(), FsError> {
-            let mountpoint = resolve(mountpoint)?;
+        /// Unmount a filesystem at the specified mountpoint.
+        pub fn vfs_unmount<'a, R: Into<PathResolution<'a>>>(mountpoint: R) -> Result<(), FsError> {
+            let mountpoint = mountpoint.into();
+            let mountpoint = resolve(mountpoint.target, mountpoint.flags)?;
             // The path must point at the root of a mounted filesystem, not an
             // arbitrary entry inside one.
             let mount_root = mountpoint.mount().root();
@@ -374,79 +423,139 @@ mod vfs_ops {
             unmount(mountpoint.mount().clone())
         }
 
-        pub fn vfs_lookup(path: &Path) -> Result<PathRef, FsError> {
-            resolve(path)
+        /// Look up a path and return a [`PathRef`] to the target.
+        ///
+        /// Internally, this is simply a thin wrapper around
+        /// [fs::namei::resolve].
+        pub fn vfs_lookup<'a, R: Into<PathResolution<'a>>>(path: R) -> Result<PathRef, FsError> {
+            let path = path.into();
+            resolve(path.target, path.flags)
         }
 
-        pub fn vfs_create(path: &Path, mode: InodeMode) -> Result<PathRef, FsError> {
-            vfs_create_at(&root_pathref(), path, mode)
-        }
-
-        pub fn vfs_create_at(
+        /// Look up a path relative to a directory and return a [`PathRef`] to
+        /// the target.
+        ///
+        /// Internally, this is simply a thin wrapper around
+        /// [fs::namei::resolve_from].
+        pub fn vfs_lookup_from<'a, R: Into<PathResolution<'a>>>(
             dir: &PathRef,
-            rel_path: &Path,
+            rel_path: R,
+        ) -> Result<PathRef, FsError> {
+            let rel_path = rel_path.into();
+            resolve_from(dir, rel_path.target, rel_path.flags)
+        }
+
+        pub fn vfs_create<'a, R: Into<PathResolution<'a>>>(
+            path: R,
             mode: InodeMode,
         ) -> Result<PathRef, FsError> {
-            let (parent, name) = resolve_parent_from(dir, rel_path)?;
+            vfs_create_at(&root_pathref(), path.into(), mode)
+        }
+
+        pub fn vfs_create_at<'a, R: Into<PathResolution<'a>>>(
+            dir: &PathRef,
+            rel_path: R,
+            mode: InodeMode,
+        ) -> Result<PathRef, FsError> {
+            let rel_path = rel_path.into();
+            let (parent, name) = resolve_parent_from(dir, rel_path.target, rel_path.flags)?;
 
             let inode = parent.inode().create(&name, mode)?;
 
-            let dentry = canonicalize_child(parent.dentry(), &name, inode)?;
+            let dentry = materialize_child_dentry(parent.dentry(), &name, inode)?;
 
             Ok(PathRef::new(parent.mount().clone(), dentry))
         }
 
-        pub fn vfs_open(path: &Path) -> Result<File, FsError> {
-            let pathref = resolve(path)?;
+        pub fn vfs_open<'a, R: Into<PathResolution<'a>>>(path: R) -> Result<File, FsError> {
+            vfs_open_at(&root_pathref(), path)
+        }
+
+        pub fn vfs_open_at<'a, R: Into<PathResolution<'a>>>(
+            dir: &PathRef,
+            rel_path: R,
+        ) -> Result<File, FsError> {
+            let rel_path = rel_path.into();
+            let pathref = resolve_from(dir, rel_path.target, rel_path.flags)?;
             let inode = pathref.inode();
             let OpenedFile { file_ops, prv } = inode.open()?;
 
             Ok(File::new(pathref, file_ops, prv))
         }
 
-        pub fn vfs_open_at(dir: &PathRef, rel_path: &Path) -> Result<File, FsError> {
-            let pathref = resolve_from(dir, rel_path)?;
-            let inode = pathref.inode();
-            let OpenedFile { file_ops, prv } = inode.open()?;
-
-            Ok(File::new(pathref, file_ops, prv))
+        pub fn vfs_get_attr<'a, R: Into<PathResolution<'a>>>(
+            path: R,
+        ) -> Result<InodeStat, FsError> {
+            let path = path.into();
+            resolve(path.target, path.flags)?.inode().get_attr()
         }
 
-        pub fn vfs_get_attr(path: &Path) -> Result<InodeStat, FsError> {
-            resolve(path)?.inode().get_attr()
-        }
+        pub fn vfs_mkdir<'a, R: Into<PathResolution<'a>>>(
+            path: R,
+            perm: InodePerm,
+        ) -> Result<PathRef, FsError> {
+            let path = path.into();
+            let (parent, name) = resolve_parent(path.target, path.flags)?;
 
-        pub fn vfs_mkdir(path: &Path, perm: InodePerm) -> Result<PathRef, FsError> {
-            let (parent, name) = resolve_parent(path)?;
+            let inode = parent
+                .inode()
+                .create(&name, InodeMode::new(InodeType::Dir, perm))?;
 
-            let inode = parent.inode().mkdir(&name, perm)?;
-
-            let dentry = canonicalize_child(parent.dentry(), &name, inode)?;
+            let dentry = materialize_child_dentry(parent.dentry(), &name, inode)?;
 
             Ok(PathRef::new(parent.mount().clone(), dentry))
         }
 
+        /// Hard link of symlinks is not allowed. So we use [Path] instead of
+        /// [PathResolution] for both, to avoid confusion.
         pub fn vfs_link(old_path: &Path, new_path: &Path) -> Result<(), FsError> {
-            let target = resolve(old_path)?;
+            let target = resolve(old_path, ResolveFlags::empty())?;
             if target.inode().ty() == InodeType::Dir {
                 return Err(FsError::IsDir);
             }
 
-            let (parent, name) = resolve_parent(new_path)?;
+            let (parent, name) = resolve_parent(new_path, ResolveFlags::empty())?;
             parent.inode().link(&name, target.inode())?;
-
-            // insert the new dentry into parent.
-            let _dentry = canonicalize_child(parent.dentry(), &name, target.inode().clone())?;
 
             Ok(())
         }
 
+        /// Create a symbolic link at `link_path` pointing to `target`.
+        pub fn vfs_symlink<'a, R: Into<PathResolution<'a>>>(
+            target: &Path,
+            link_path: R,
+        ) -> Result<PathRef, FsError> {
+            vfs_symlink_at(&root_pathref(), target, link_path)
+        }
+
+        pub fn vfs_symlink_at<'a, R: Into<PathResolution<'a>>>(
+            dir: &PathRef,
+            target: &Path,
+            rel_path: R,
+        ) -> Result<PathRef, FsError> {
+            let rel_path = rel_path.into();
+            if target.components().next().is_none() {
+                // empty symlink is not allowed.
+                return Err(FsError::InvalidArgument);
+            }
+
+            let (parent, name) = resolve_parent_from(dir, rel_path.target, rel_path.flags)?;
+            let inode = parent.inode().symlink(&name, target)?;
+            let dentry = materialize_child_dentry(parent.dentry(), &name, inode)?;
+
+            Ok(PathRef::new(parent.mount().clone(), dentry))
+        }
+
+        /// See [vfs_link] for the reason why we use [Path] instead of
+        /// [PathResolution] here.
         pub fn vfs_unlink(path: &Path) -> Result<(), FsError> {
             vfs_unlink_at(&root_pathref(), path)
         }
 
+        /// See [vfs_link] for the reason why we use [Path] instead of
+        /// [PathResolution] here.
         pub fn vfs_unlink_at(dir: &PathRef, rel_path: &Path) -> Result<(), FsError> {
-            let (parent, name) = resolve_parent_from(dir, rel_path)?;
+            let (parent, name) = resolve_parent_from(dir, rel_path, ResolveFlags::empty())?;
             parent.inode().unlink(&name)?;
 
             // remove the dentry from the cache to prevent stale lookups. the child
@@ -459,13 +568,37 @@ mod vfs_ops {
             Ok(())
         }
 
-        pub fn vfs_rmdir_at(dir: &PathRef, rel_path: &Path) -> Result<(), FsError> {
-            let target = resolve_from(dir, rel_path)?;
+        /// Read the target of a symbolic link.
+        pub fn vfs_read_link(path: &Path) -> Result<PathBuf, FsError> {
+            vfs_read_link_at(&root_pathref(), path)
+        }
+
+        /// Read the target of a symbolic link.
+        pub fn vfs_read_link_at(dir: &PathRef, rel_path: &Path) -> Result<PathBuf, FsError> {
+            let rel_path = rel_path.into();
+            let pathref = resolve_from(dir, rel_path, ResolveFlags::UNFOLLOW_LAST_SYMLINK)?;
+            let inode = pathref.inode();
+            if inode.ty() != InodeType::Symlink {
+                return Err(FsError::NotSymlink);
+            }
+            inode.read_link()
+        }
+
+        pub fn vfs_rmdir_at<'a, R: Into<PathResolution<'a>>>(
+            dir: &PathRef,
+            rel_path: R,
+        ) -> Result<(), FsError> {
+            let rel_path = rel_path.into();
+            let target = resolve_from(dir, rel_path.target, rel_path.flags)?;
             if target.inode().ty() != InodeType::Dir {
                 return Err(FsError::NotDir);
             }
 
-            let (parent, name) = resolve_parent_from(dir, rel_path)?;
+            let (parent, name) = resolve_parent_from(
+                dir,
+                rel_path.target,
+                rel_path.flags.remove_last_symlink_flags(),
+            )?;
 
             if !Arc::ptr_eq(target.mount(), parent.mount()) {
                 return Err(FsError::IsMountPoint);
@@ -483,7 +616,8 @@ mod vfs_ops {
             Ok(())
         }
 
-        pub fn vfs_rmdir(path: &Path) -> Result<(), FsError> {
+        pub fn vfs_rmdir<'a, R: Into<PathResolution<'a>>>(path: R) -> Result<(), FsError> {
+            let path = path.into();
             vfs_rmdir_at(&root_pathref(), path)
         }
     }
@@ -494,7 +628,10 @@ mod vfs_ops {
         use super::*;
 
         /// Pay attention that this might incur a huge heap allocation.
-        pub fn vfs_read_to_string(path: &Path) -> Result<String, FsError> {
+        pub fn vfs_read_to_string<'a, R: Into<PathResolution<'a>>>(
+            path: R,
+        ) -> Result<String, FsError> {
+            let path = path.into();
             let file = vfs_open(path)?;
             let mut buf = Vec::new();
             let mut handle = file;
@@ -528,22 +665,22 @@ mod kunits {
     use anemone_abi::fs::linux::mode as linux_mode;
 
     use super::*;
-    use crate::{fs::namei::canonicalize_child, prelude::*};
+    use crate::prelude::*;
 
     #[kunit]
     fn test_vfs_root_lookup() {
-        let root = vfs_lookup(Path::new("/")).unwrap();
+        let root = vfs_lookup(PathResolution::normal(&Path::new("/"))).unwrap();
 
         assert_eq!(root.to_string(), "/");
         assert_eq!(
-            vfs_lookup(Path::new("/kunit-vfs-missing")).unwrap_err(),
+            vfs_lookup(PathResolution::normal(&Path::new("/kunit-vfs-missing"))).unwrap_err(),
             FsError::NotFound
         );
     }
 
     #[kunit]
     fn test_vfs_create_lookup_and_cleanup() {
-        let path = Path::new("/kunit-vfs-file");
+        let path = PathResolution::normal(&Path::new("/kunit-vfs-file"));
 
         assert_eq!(vfs_lookup(path).unwrap_err(), FsError::NotFound);
 
@@ -558,7 +695,7 @@ mod kunits {
             FsError::AlreadyExists
         );
 
-        vfs_unlink(path).unwrap();
+        vfs_unlink(path.target).unwrap();
         assert_eq!(vfs_lookup(path).unwrap_err(), FsError::NotFound);
     }
 
@@ -592,6 +729,251 @@ mod kunits {
 
         vfs_rmdir(dir_path).unwrap();
         assert_eq!(vfs_lookup(dir_path).unwrap_err(), FsError::NotFound);
+    }
+
+    #[kunit]
+    fn test_vfs_symlink_relative_lookup_and_readlink() {
+        let dir_path = Path::new("/kunit-vfs-sym-dir");
+        let file_path = Path::new("/kunit-vfs-sym-dir/target");
+        let link_path = Path::new("/kunit-vfs-sym-dir/link");
+
+        vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
+        let target =
+            vfs_create(file_path, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
+        let link = vfs_symlink(Path::new("target"), link_path).unwrap();
+
+        assert_eq!(link.inode().ty(), InodeType::Symlink);
+        assert_eq!(vfs_read_link(link_path).unwrap(), PathBuf::from("target"));
+        assert_eq!(
+            vfs_get_attr(link_path).unwrap().mode.ty(),
+            InodeType::Regular
+        );
+        assert_eq!(
+            vfs_lookup(PathResolution::new(
+                link_path,
+                ResolveFlags::DENY_LAST_SYMLINK
+            ))
+            .unwrap_err(),
+            FsError::LinkEncountered
+        );
+        assert_eq!(
+            vfs_get_attr(PathResolution::new(
+                link_path,
+                ResolveFlags::UNFOLLOW_LAST_SYMLINK
+            ))
+            .unwrap()
+            .mode
+            .ty(),
+            InodeType::Symlink
+        );
+
+        let looked_up = vfs_lookup(link_path).unwrap();
+        assert_eq!(looked_up.inode(), target.inode());
+        assert_eq!(
+            vfs_lookup(PathResolution::new(
+                link_path,
+                ResolveFlags::UNFOLLOW_LAST_SYMLINK
+            ))
+            .unwrap()
+            .inode()
+            .ty(),
+            InodeType::Symlink
+        );
+        assert_eq!(
+            vfs_read_link(link_path).unwrap(),
+            vfs_lookup(PathResolution::new(
+                link_path,
+                ResolveFlags::UNFOLLOW_LAST_SYMLINK
+            ))
+            .unwrap()
+            .inode()
+            .read_link()
+            .unwrap()
+        );
+
+        vfs_unlink(link_path).unwrap();
+        vfs_unlink(file_path).unwrap();
+        vfs_rmdir(dir_path).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_symlink_absolute_and_intermediate_resolution() {
+        let dir_path = Path::new("/kunit-vfs-sym-abs-dir");
+        let file_path = Path::new("/kunit-vfs-sym-abs-dir/file");
+        let mid_link = Path::new("/kunit-vfs-sym-abs-mid");
+
+        vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
+        let target =
+            vfs_create(file_path, InodeMode::new_with_all_perm(InodeType::Regular)).unwrap();
+        vfs_symlink(Path::new("/kunit-vfs-sym-abs-dir"), mid_link).unwrap();
+
+        let resolved = vfs_lookup(Path::new("/kunit-vfs-sym-abs-mid/file")).unwrap();
+        assert_eq!(resolved.inode(), target.inode());
+
+        vfs_unlink(mid_link).unwrap();
+        vfs_unlink(file_path).unwrap();
+        vfs_rmdir(dir_path).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_symlink_relative_parent_traversal() {
+        let dir_path = Path::new("/kunit-vfs-sym-parent-dir");
+        let subdir_path = Path::new("/kunit-vfs-sym-parent-dir/subdir");
+        let target_path = Path::new("/kunit-vfs-sym-parent-dir/target");
+        let link_path = Path::new("/kunit-vfs-sym-parent-dir/subdir/up-link");
+
+        vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(subdir_path, InodePerm::all_rwx()).unwrap();
+        let target = vfs_create(
+            target_path,
+            InodeMode::new_with_all_perm(InodeType::Regular),
+        )
+        .unwrap();
+        vfs_symlink(Path::new("../target"), link_path).unwrap();
+
+        assert_eq!(
+            vfs_read_link(link_path).unwrap(),
+            PathBuf::from("../target")
+        );
+        assert_eq!(vfs_lookup(link_path).unwrap().inode(), target.inode());
+
+        vfs_unlink(link_path).unwrap();
+        vfs_unlink(target_path).unwrap();
+        vfs_rmdir(subdir_path).unwrap();
+        vfs_rmdir(dir_path).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_symlink_resolution_flags_propagate_to_parent_lookup() {
+        let dir_path = Path::new("/kunit-vfs-sym-flag-dir");
+        let dir_link = Path::new("/kunit-vfs-sym-flag-link");
+        let target_path = Path::new("/kunit-vfs-sym-flag-link/new-file");
+        let resolved_target = Path::new("/kunit-vfs-sym-flag-dir/new-file");
+
+        vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
+        vfs_symlink(Path::new("/kunit-vfs-sym-flag-dir"), dir_link).unwrap();
+
+        assert_eq!(
+            vfs_lookup(PathResolution::new(
+                dir_link,
+                ResolveFlags::DENY_LAST_SYMLINK
+            ))
+            .unwrap_err(),
+            FsError::LinkEncountered
+        );
+        assert_eq!(
+            vfs_lookup(PathResolution::new(
+                target_path,
+                ResolveFlags::DENY_SYMLINKS
+            ))
+            .unwrap_err(),
+            FsError::LinkEncountered
+        );
+        assert_eq!(
+            vfs_lookup(PathResolution::new(
+                dir_link,
+                ResolveFlags::UNFOLLOW_LAST_SYMLINK
+            ))
+            .unwrap()
+            .inode()
+            .ty(),
+            InodeType::Symlink
+        );
+        assert_eq!(
+            vfs_create(
+                PathResolution::new(target_path, ResolveFlags::DENY_LAST_SYMLINK),
+                InodeMode::new_with_all_perm(InodeType::Regular)
+            )
+            .unwrap_err(),
+            FsError::LinkEncountered
+        );
+        let created = vfs_create(
+            target_path,
+            InodeMode::new_with_all_perm(InodeType::Regular),
+        )
+        .unwrap();
+        assert_eq!(
+            vfs_lookup(resolved_target).unwrap().to_string(),
+            "/kunit-vfs-sym-flag-dir/new-file"
+        );
+        assert_eq!(
+            created.inode(),
+            vfs_lookup(resolved_target).unwrap().inode()
+        );
+
+        vfs_unlink(resolved_target).unwrap();
+        vfs_unlink(dir_link).unwrap();
+        vfs_rmdir(dir_path).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_symlink_absolute_target_crosses_mount_boundary() {
+        let mountpoint = Path::new("/kunit-vfs-sym-mount");
+        let host_target = Path::new("/kunit-vfs-sym-host-target");
+        let link_path = Path::new("/kunit-vfs-sym-mount/host-link");
+
+        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        let host = vfs_create(
+            host_target,
+            InodeMode::new_with_all_perm(InodeType::Regular),
+        )
+        .unwrap();
+
+        vfs_mount_at(
+            "ramfs",
+            MountSource::Pseudo,
+            MountFlags::empty(),
+            mountpoint,
+        )
+        .unwrap();
+        vfs_symlink(Path::new("/kunit-vfs-sym-host-target"), link_path).unwrap();
+
+        assert_eq!(
+            vfs_read_link(link_path).unwrap(),
+            PathBuf::from("/kunit-vfs-sym-host-target")
+        );
+        assert_eq!(vfs_lookup(link_path).unwrap().inode(), host.inode());
+
+        vfs_unlink(link_path).unwrap();
+        vfs_unmount(mountpoint).unwrap();
+        vfs_unlink(host_target).unwrap();
+        vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_symlink_loop_limit_and_rmdir_nofollow() {
+        let loop_a = Path::new("/kunit-vfs-loop-a");
+        let loop_b = Path::new("/kunit-vfs-loop-b");
+        let dir_path = Path::new("/kunit-vfs-sym-rmdir-dir");
+        let dir_link = Path::new("/kunit-vfs-sym-rmdir-link");
+
+        vfs_symlink(Path::new("kunit-vfs-loop-b"), loop_a).unwrap();
+        vfs_symlink(Path::new("kunit-vfs-loop-a"), loop_b).unwrap();
+
+        assert_eq!(vfs_lookup(loop_a).unwrap_err(), FsError::TooManyLinks);
+        assert_eq!(
+            vfs_lookup(PathResolution::new(loop_a, ResolveFlags::DENY_LAST_SYMLINK)).unwrap_err(),
+            FsError::LinkEncountered
+        );
+        assert_eq!(
+            vfs_lookup(PathResolution::new(
+                loop_a,
+                ResolveFlags::UNFOLLOW_LAST_SYMLINK
+            ))
+            .unwrap()
+            .inode()
+            .ty(),
+            InodeType::Symlink
+        );
+
+        vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
+        vfs_symlink(Path::new("/kunit-vfs-sym-rmdir-dir"), dir_link).unwrap();
+        assert_eq!(vfs_rmdir(dir_link).unwrap_err(), FsError::NotDir);
+
+        vfs_unlink(dir_link).unwrap();
+        vfs_rmdir(dir_path).unwrap();
+        vfs_unlink(loop_a).unwrap();
+        vfs_unlink(loop_b).unwrap();
     }
 
     #[kunit]
@@ -1089,7 +1471,6 @@ mod kunits {
             .inode()
             .create("hidden", InodeMode::new_with_all_perm(InodeType::Regular))
             .unwrap();
-        canonicalize_child(second_root.dentry(), "hidden", hidden_inode.clone()).unwrap();
 
         assert_eq!(
             vfs_lookup(visible_file).unwrap().to_string(),
@@ -1122,11 +1503,9 @@ mod kunits {
                 mount_at("ramfs", MountSource::Pseudo, MountFlags::empty(), &host_mp).unwrap();
             let root = PathRef::new(mnt.clone(), mnt.root().clone());
             let name = format!("layer-{layer}");
-            let inode = root
-                .inode()
+            root.inode()
                 .create(&name, InodeMode::new_with_all_perm(InodeType::Regular))
                 .unwrap();
-            canonicalize_child(root.dentry(), &name, inode).unwrap();
             mounts.push(mnt);
         }
 

@@ -4,8 +4,8 @@ use crate::{
     fs::{
         inode::Inode,
         ramfs::{
-            inode::{RAMFS_DIR_INODE_OPS, RamfsDir, RamfsReg},
-            superblock::{RAMFS_SB_OPS, RamfsSb},
+            inode::{RamfsDir, RamfsReg, RamfsSymlink, RAMFS_DIR_INODE_OPS},
+            superblock::{RamfsSb, RAMFS_SB_OPS},
         },
         register_filesystem,
     },
@@ -40,6 +40,15 @@ fn ramfs_reg(inode: &InodeRef) -> Result<&RamfsReg, FsError> {
         .prv()
         .cast::<RamfsReg>()
         .ok_or(FsError::NotReg)
+}
+
+#[inline(always)]
+fn ramfs_symlink(inode: &InodeRef) -> Result<&RamfsSymlink, FsError> {
+    inode
+        .inode()
+        .prv()
+        .cast::<RamfsSymlink>()
+        .ok_or(FsError::NotSymlink)
 }
 
 fn ramfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, FsError> {

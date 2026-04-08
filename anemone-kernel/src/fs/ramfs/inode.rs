@@ -1,9 +1,9 @@
 use crate::{
     fs::{
-        inode::{Inode, InodeMode, InodePerm},
+        inode::{Inode, InodeMode},
         ramfs::{
-            file::{RAMFS_DIR_FILE_OPS, RAMFS_REG_FILE_OPS, RamfsFile},
-            ramfs_dir, ramfs_sb,
+            file::{RamfsFile, RAMFS_DIR_FILE_OPS, RAMFS_REG_FILE_OPS, RAMFS_SYMLINK_FILE_OPS},
+            ramfs_dir, ramfs_sb, ramfs_symlink,
         },
     },
     prelude::*,
@@ -78,6 +78,24 @@ impl RamfsReg {
         Self {
             data: RwLock::new(Vec::new()),
         }
+    }
+}
+
+#[derive(Opaque)]
+pub(super) struct RamfsSymlink {
+    pub(super) target: RwLock<PathBuf>,
+}
+
+impl RamfsSymlink {
+    pub(super) fn new(target: PathBuf) -> Self {
+        Self {
+            target: RwLock::new(target),
+        }
+    }
+
+    pub(super) fn get_target(&self) -> PathBuf {
+        let guard = self.target.read();
+        guard.clone()
     }
 }
 
@@ -170,6 +188,37 @@ fn ramfs_create(dir: &InodeRef, name: &str, mode: InodeMode) -> Result<InodeRef,
     })
 }
 
+fn ramfs_symlink_create(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, FsError> {
+    let sb = dir.sb();
+    let target_text = target.to_string();
+    let target_path = PathBuf::from(target_text.as_str());
+    let target_len = target_text.len() as u64;
+
+    ramfs_sb(&sb).write_tx(|| {
+        let dir_data = ramfs_dir(dir)?;
+        if dir_data.contains(name) {
+            return Err(FsError::AlreadyExists);
+        }
+
+        let new_ino = ramfs_sb(&sb).alloc_ino();
+        let new_inode = Arc::new(Inode::new(
+            new_ino,
+            InodeType::Symlink,
+            &RAMFS_SYMLINK_INODE_OPS,
+            sb.clone(),
+            AnyOpaque::new(RamfsSymlink::new(target_path.clone())),
+        ));
+        new_inode.inc_nlink();
+        new_inode.set_perm(InodePerm::all_rwx());
+        new_inode.set_size(target_len);
+
+        let inode = sb.seed_inode(new_inode);
+        assert!(dir_data.insert(name.to_string(), inode.ino()).is_ok());
+
+        Ok(inode)
+    })
+}
+
 /// Look up a child inode by name inside a directory.
 fn ramfs_lookup(parent: &InodeRef, name: &str) -> Result<InodeRef, FsError> {
     let sb = parent.sb();
@@ -182,6 +231,7 @@ fn ramfs_open(inode: &InodeRef) -> Result<OpenedFile, FsError> {
         file_ops: match inode.ty() {
             InodeType::Dir => &RAMFS_DIR_FILE_OPS,
             InodeType::Regular => &RAMFS_REG_FILE_OPS,
+            InodeType::Symlink => &RAMFS_SYMLINK_FILE_OPS,
             _ => unreachable!(),
         },
         prv: AnyOpaque::new(RamfsFile::new()),
@@ -219,10 +269,6 @@ fn ramfs_unlink(dir: &InodeRef, name: &str) -> Result<(), FsError> {
     ramfs_sb(&sb).write_tx(|| ramfs_remove_locked(dir, name, false))
 }
 
-fn ramfs_mkdir(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
-    ramfs_create(dir, name, InodeMode::new(InodeType::Dir, perm))
-}
-
 fn ramfs_rmdir(dir: &InodeRef, name: &str) -> Result<(), FsError> {
     let sb = dir.sb();
     ramfs_sb(&sb).write_tx(|| {
@@ -239,6 +285,12 @@ fn ramfs_rmdir(dir: &InodeRef, name: &str) -> Result<(), FsError> {
 
         ramfs_remove_locked(dir, name, true)
     })
+}
+
+fn ramfs_read_link(inode: &InodeRef) -> Result<PathBuf, FsError> {
+    let symlink_data = ramfs_symlink(inode)?;
+
+    Ok(symlink_data.get_target())
 }
 
 fn ramfs_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
@@ -261,22 +313,36 @@ fn ramfs_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
 
 pub(super) static RAMFS_DIR_INODE_OPS: InodeOps = InodeOps {
     create: ramfs_create,
+    symlink: ramfs_symlink_create,
     lookup: ramfs_lookup,
     open: ramfs_open,
     link: ramfs_link,
     unlink: ramfs_unlink,
-    mkdir: ramfs_mkdir,
     rmdir: ramfs_rmdir,
+    read_link: |_| Err(FsError::NotSymlink),
     get_attr: ramfs_get_attr,
 };
 
 pub(super) static RAMFS_REG_INODE_OPS: InodeOps = InodeOps {
     create: |_, _, _| Err(FsError::NotDir),
+    symlink: |_, _, _| Err(FsError::NotDir),
     lookup: |_, _| Err(FsError::NotDir),
     open: ramfs_open,
     link: |_, _, _| Err(FsError::NotDir),
     unlink: |_, _| Err(FsError::NotDir),
-    mkdir: |_, _, _| Err(FsError::NotDir),
     rmdir: |_, _| Err(FsError::NotDir),
+    read_link: |_| Err(FsError::NotSymlink),
+    get_attr: ramfs_get_attr,
+};
+
+pub(super) static RAMFS_SYMLINK_INODE_OPS: InodeOps = InodeOps {
+    create: |_, _, _| Err(FsError::NotDir),
+    symlink: |_, _, _| Err(FsError::NotDir),
+    lookup: |_, _| Err(FsError::NotDir),
+    open: |_| Err(FsError::NotSupported),
+    link: |_, _, _| Err(FsError::NotDir),
+    unlink: |_, _| Err(FsError::NotDir),
+    rmdir: |_, _| Err(FsError::NotDir),
+    read_link: ramfs_read_link,
     get_attr: ramfs_get_attr,
 };

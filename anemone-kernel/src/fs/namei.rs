@@ -1,75 +1,108 @@
 //! Path resolution and name lookup.
 
 use crate::{fs::root_pathref, prelude::*};
-use typed_path::{Component, UnixComponent};
+use typed_path::UnixComponent;
 
-/// Get or create a child dentry with the given name under the given parent
-/// dentry, and return an [Arc] to it.
-pub(super) fn canonicalize_child(
+bitflags! {
+    /// Flags to control path resolution behavior.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct ResolveFlags: u32 {
+        /// If set, encountering a symlink during resolution results in an error.
+        const DENY_SYMLINKS = 1 << 0;
+        /// If set, encountering a symlink as the last component of the path
+        /// results in an error.
+        const DENY_LAST_SYMLINK = 1 << 1;
+        /// If set, the last component of the path is not followed if it is a symlink.
+        const UNFOLLOW_LAST_SYMLINK = 1 << 2;
+    }
+}
+
+impl ResolveFlags {
+    /// Remove those flags that control the behavior of the last path component.
+    pub fn remove_last_symlink_flags(self) -> Self {
+        self & !(Self::DENY_LAST_SYMLINK | Self::UNFOLLOW_LAST_SYMLINK)
+    }
+}
+
+/// Materialize a child dentry under `parent`.
+///
+/// This is the only entry point that should instantiate a visible namespace
+/// child dentry from an existing `(parent, name, inode)` triple. If a live
+/// dentry is already cached under the same parent/name, it is reused.
+///
+/// **This way, we ensure the uniqueness of dentries within a namespace.**
+pub(super) fn materialize_child_dentry(
     parent: &Arc<Dentry>,
     name: &str,
     inode: InodeRef,
 ) -> Result<Arc<Dentry>, FsError> {
-    let child = Arc::new(Dentry::new(name.to_string(), Some(parent.clone()), inode));
+    if let Ok(child) = parent.lookup_child(name) {
+        return Ok(child);
+    }
 
-    match parent.insert_child(name.to_string(), &child) {
-        Ok(()) => Ok(child),
+    let child_name = name.to_string();
+    let dentry = Arc::new(Dentry::new(child_name.clone(), Some(parent.clone()), inode));
+
+    match parent.insert_child(child_name, &dentry) {
+        Ok(()) => Ok(dentry),
         Err(FsError::AlreadyExists) => parent.lookup_child(name),
         Err(err) => Err(err),
     }
 }
 
+#[derive(Debug)]
+enum PendingComponent {
+    CurDir,
+    ParentDir,
+    Normal(String),
+}
+
 /// Resolve a path to a [PathRef], starting from the root of the namespace.
-pub fn resolve(path: &Path) -> Result<PathRef, FsError> {
+pub fn resolve(path: &Path, flags: ResolveFlags) -> Result<PathRef, FsError> {
     if path.components().next().is_none() {
         // empty path
         return Err(FsError::InvalidArgument);
     }
 
-    resolve_from(&root_pathref(), path)
+    resolve_from(&root_pathref(), path, flags)
 }
 
 /// Resolve a path to a [PathRef], starting from a given [PathRef].
 ///
-/// If `path` is absolute, `from` is ignored and resolution starts from the root
-/// of the namespace.
-pub fn resolve_from(from: &PathRef, path: &Path) -> Result<PathRef, FsError> {
-    let mut it = path.components();
+/// If `path` is absolute, `from` is ignored and resolution starts from the
+/// root of the namespace.
+pub fn resolve_from(from: &PathRef, path: &Path, flags: ResolveFlags) -> Result<PathRef, FsError> {
+    if path.components().next().is_none() {
+        // empty path
+        return Err(FsError::InvalidArgument);
+    }
 
-    let mut cur_path = if path.is_absolute() {
-        assert!(it.next().unwrap().is_root());
+    let pending = collect_components(path)?;
+    let cur_path = if path.is_absolute() {
         root_pathref()
     } else {
         from.clone()
     };
 
-    for component in it {
-        match component {
-            UnixComponent::RootDir => unreachable!(), // already handled above
-            UnixComponent::CurDir => continue,
-            UnixComponent::ParentDir => {
-                cur_path = walk_parent(&cur_path);
-                continue;
-            },
-            UnixComponent::Normal(raw) => {
-                let name = core::str::from_utf8(raw).map_err(|_| FsError::InvalidArgument)?;
-                cur_path = lookup_child(&cur_path, name)?;
-            },
-        }
-    }
-
-    Ok(cur_path)
+    resolve_components(cur_path, pending, flags)
 }
 
 /// Resolve the parent directory of a path, returning the parent [PathRef] and
 /// the final component as a string.
-pub fn resolve_parent(path: &Path) -> Result<(PathRef, String), FsError> {
+///
+/// This does not make any guarantee on the existence of the final component,
+/// and it is the caller's responsibility to check it if necessary.
+///
+/// **Note that [ResolveFlags::DENY_LAST_SYMLINK] and
+/// [ResolveFlags::UNFOLLOW_LAST_SYMLINK] take effect on parent component of the
+/// last path component.**
+pub fn resolve_parent(path: &Path, flags: ResolveFlags) -> Result<(PathRef, String), FsError> {
     if path.components().next().is_none() {
         // empty path
         return Err(FsError::InvalidArgument);
     }
 
-    resolve_parent_from(&root_pathref(), path)
+    resolve_parent_from(&root_pathref(), path, flags)
 }
 
 /// Resolve the parent directory of a path, starting from a given [PathRef], and
@@ -77,50 +110,151 @@ pub fn resolve_parent(path: &Path) -> Result<(PathRef, String), FsError> {
 ///
 /// If `path` is absolute, `from` is ignored and resolution starts from the root
 /// of the namespace.
-pub fn resolve_parent_from(from: &PathRef, path: &Path) -> Result<(PathRef, String), FsError> {
-    let mut it = path.components().peekable();
+///
+/// This does not make any guarantee on the existence of the final component,
+/// and it is the caller's responsibility to check it if necessary.
+///
+/// **Note that [ResolveFlags::DENY_LAST_SYMLINK] and
+/// [ResolveFlags::UNFOLLOW_LAST_SYMLINK] take effect on parent component of the
+/// last path component.**
+pub fn resolve_parent_from(
+    from: &PathRef,
+    path: &Path,
+    flags: ResolveFlags,
+) -> Result<(PathRef, String), FsError> {
+    let mut pending = collect_components(path)?;
+    let Some(last) = pending.pop_back() else {
+        return Err(FsError::InvalidArgument);
+    };
 
-    let mut cur_path = if path.is_absolute() {
-        assert!(it.next().unwrap().is_root());
+    let name = match last {
+        PendingComponent::Normal(name) => name,
+        PendingComponent::CurDir | PendingComponent::ParentDir => {
+            return Err(FsError::InvalidArgument);
+        },
+    };
+
+    let cur_path = if path.is_absolute() {
         root_pathref()
     } else {
         from.clone()
     };
 
-    while let Some(component) = it.next() {
-        let is_last = it.peek().is_none();
+    Ok((resolve_components(cur_path, pending, flags)?, name))
+}
 
+/// Helper function to collect components of a path into a queue for resolution.
+///
+/// This function seems a bit long to make it an inline? idk.
+fn collect_components(path: &Path) -> Result<VecDeque<PendingComponent>, FsError> {
+    let mut pending = VecDeque::new();
+    let mut it = path.components();
+
+    if path.is_absolute() {
+        assert!(matches!(it.next().unwrap(), UnixComponent::RootDir));
+    }
+
+    for component in it {
         match component {
-            UnixComponent::RootDir => unreachable!(), // already handled above
-            UnixComponent::CurDir => {
-                if is_last {
-                    return Err(FsError::InvalidArgument);
-                }
-                continue;
-            },
-            UnixComponent::ParentDir => {
-                if is_last {
-                    return Err(FsError::InvalidArgument);
-                }
-                cur_path = walk_parent(&cur_path);
-                continue;
-            },
+            UnixComponent::RootDir => unreachable!(/* handled explicitly above */),
+            UnixComponent::CurDir => pending.push_back(PendingComponent::CurDir),
+            UnixComponent::ParentDir => pending.push_back(PendingComponent::ParentDir),
             UnixComponent::Normal(raw) => {
                 let name = core::str::from_utf8(raw).map_err(|_| FsError::InvalidArgument)?;
-                if is_last {
-                    return Ok((cur_path, name.to_string()));
-                }
-                cur_path = lookup_child(&cur_path, name)?;
+                pending.push_back(PendingComponent::Normal(name.to_string()));
             },
         }
     }
 
-    Err(FsError::InvalidArgument)
+    Ok(pending)
+}
+
+/// Helper function to prepend components of a path to the pending queue during
+/// symlink resolution.
+#[inline]
+fn prepend_components(
+    pending: &mut VecDeque<PendingComponent>,
+    path: &Path,
+) -> Result<(), FsError> {
+    let mut prefix = collect_components(path)?;
+    while let Some(component) = prefix.pop_back() {
+        pending.push_front(component);
+    }
+    Ok(())
+}
+
+/// Our core path resolution function. Internally, this is just a simple state
+/// machine that processes components one by one.
+///
+/// We shouldn't use recursion here cz too many nested symlinks might cause
+/// stack overflow.
+fn resolve_components(
+    mut cur_path: PathRef,
+    mut pending: VecDeque<PendingComponent>,
+    flags: ResolveFlags,
+) -> Result<PathRef, FsError> {
+    let mut remaining_links = SYMLINK_RESOLVE_LIMIT;
+
+    while let Some(component) = pending.pop_front() {
+        let is_last = pending.is_empty();
+
+        match component {
+            PendingComponent::CurDir => continue,
+            PendingComponent::ParentDir => {
+                cur_path = walk_parent(&cur_path);
+            },
+            PendingComponent::Normal(name) => {
+                let child = lookup_child(&cur_path, &name)?;
+                let child_ty = child.inode().ty();
+
+                if child_ty != InodeType::Symlink {
+                    // for non-directory child, follow_mount is actually unnecessary, but it doesn't
+                    // hurt either and it simplifies code a bit.
+                    cur_path = follow_mount(child);
+                    continue;
+                }
+
+                if flags.contains(ResolveFlags::DENY_SYMLINKS) {
+                    return Err(FsError::LinkEncountered);
+                }
+
+                if is_last && flags.contains(ResolveFlags::DENY_LAST_SYMLINK) {
+                    return Err(FsError::LinkEncountered);
+                }
+
+                if is_last && flags.contains(ResolveFlags::UNFOLLOW_LAST_SYMLINK) {
+                    cur_path = follow_mount(child);
+                    continue;
+                }
+
+                if remaining_links == 0 {
+                    return Err(FsError::TooManyLinks);
+                }
+                remaining_links -= 1;
+
+                let target = child.inode().read_link()?;
+                // empty symlink. invalid.
+                // actually we should check this in upper layers (e.g. vfs_symlink). but some
+                // redundant checks won't hurt and it can prevent some weird edge cases.
+                if target.components().next().is_none() {
+                    return Err(FsError::InvalidArgument);
+                }
+
+                if target.is_absolute() {
+                    cur_path = root_pathref();
+                }
+
+                prepend_components(&mut pending, &target)?;
+            },
+        }
+    }
+
+    Ok(cur_path)
 }
 
 fn lookup_child(path: &PathRef, name: &str) -> Result<PathRef, FsError> {
     if let Ok(dentry) = path.dentry().lookup_child(name) {
-        return Ok(follow_mount(PathRef::new(path.mount().clone(), dentry)));
+        return Ok(PathRef::new(path.mount().clone(), dentry));
     }
 
     let dir = path.inode();
@@ -129,9 +263,9 @@ fn lookup_child(path: &PathRef, name: &str) -> Result<PathRef, FsError> {
     }
 
     let inode = dir.lookup(name)?;
-    let dentry = canonicalize_child(path.dentry(), name, inode)?;
+    let dentry = materialize_child_dentry(path.dentry(), name, inode)?;
 
-    Ok(follow_mount(PathRef::new(path.mount().clone(), dentry)))
+    Ok(PathRef::new(path.mount().clone(), dentry))
 }
 
 fn follow_mount(mut path: PathRef) -> PathRef {

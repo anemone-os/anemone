@@ -47,6 +47,7 @@ pub struct Parameters {
     pub user_stack_shift_kb: Option<u64>,
     pub user_init_stack_shift_kb: Option<u64>,
     pub user_heap_shift_mb: Option<u64>,
+    pub symlink_resolve_limit: Option<usize>,
 }
 
 impl Parameters {
@@ -103,6 +104,8 @@ pub const USER_STACK_SHIFT_KB: u64 = {};
 pub const USER_INIT_STACK_SHIFT_KB: u64 = {};
 /// Max user heap size as a power of 2 in MB
 pub const USER_HEAP_SHIFT_MB: u64 = {};
+/// Maximum number of symbolic links to resolve in a single path resolution
+pub const SYMLINK_RESOLVE_LIMIT: usize = {};
         "#,
             default_or!(bootstrap_heap_shift_kb),
             default_or!(log_buffer_shift_kb),
@@ -115,7 +118,8 @@ pub const USER_HEAP_SHIFT_MB: u64 = {};
             default_or!(backtrace_depth),
             default_or!(user_stack_shift_kb),
             default_or!(user_init_stack_shift_kb),
-            default_or!(user_heap_shift_mb)
+            default_or!(user_heap_shift_mb),
+            default_or!(symlink_resolve_limit)
         )
     }
 }

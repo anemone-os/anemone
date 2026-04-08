@@ -89,7 +89,7 @@ fn mount_rootfs() {
 fn ls_dir(path: &Path) {
     let mut ctx = DirContext::new();
 
-    let Ok(dir) = vfs_open(path) else {
+    let Ok(dir) = vfs_open(PathResolution::normal(path)) else {
         return;
     };
 
@@ -112,7 +112,7 @@ fn ls_dir(path: &Path) {
 fn exec_init_proc() {
     const INIT_PATH: &str = "/.anemone/init";
 
-    let init_path = vfs_read_to_string(Path::new(INIT_PATH))
+    let init_path = vfs_read_to_string(PathResolution::normal(&Path::new(INIT_PATH)))
         .unwrap_or_else(|e| panic!("failed to read init path from {}: {:?}", INIT_PATH, e));
 
     kernel_execve(&init_path, &[&init_path, &"1".to_string()]).unwrap_or_else(|e| {
