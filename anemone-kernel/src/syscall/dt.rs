@@ -501,3 +501,12 @@ pub fn nonzero(arg: u64) -> Result<u64, SysError> {
         Err(SysError::Kernel(KernelError::InvalidArgument))
     }
 }
+
+/// Validate that the argument is aligned to `ALIGN` bytes.
+pub fn aligned_to<const ALIGN: usize>(arg: u64) -> Result<u64, SysError> {
+    if arg % ALIGN as u64 == 0 {
+        Ok(arg)
+    } else {
+        Err(SysError::Kernel(KernelError::InvalidArgument))
+    }
+}

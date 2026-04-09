@@ -7,7 +7,7 @@ use anemone_abi::fs::linux::open::{O_APPEND, O_CREAT, O_DIRECTORY};
 
 use crate::{
     prelude::{dt::c_readonly_string, *},
-    task::files::OpenFlags,
+    task::files::{FdFlags, FileFlags},
 };
 
 #[syscall(SYS_OPENAT)]
@@ -38,7 +38,11 @@ fn sys_openat(
                 file.seek(file.get_attr()?.size as usize)?;
             }
 
-            let fd = task.open_fd(file, OpenFlags::from_linux_flags(flags));
+            let fd = task.open_fd(
+                file,
+                FileFlags::from_linux_open_flags(flags),
+                FdFlags::from_linux_open_flags(flags),
+            );
             return Ok(fd as u64);
         } else {
             let dir_path = if dirfd == anemone_abi::fs::linux::at::AT_FDCWD as isize {
@@ -47,7 +51,7 @@ fn sys_openat(
                 let dir_file = task
                     .get_fd(dirfd as usize)
                     .ok_or(KernelError::BadFileDescriptor)?;
-                if !dir_file.open_flags().contains(OpenFlags::READ) {
+                if !dir_file.file_flags().contains(FileFlags::READ) {
                     // or O_PATH, which hasn't been implemented yet.
                     return Err(KernelError::BadFileDescriptor.into());
                 }
@@ -71,7 +75,11 @@ fn sys_openat(
                 file.seek(file.get_attr()?.size as usize)?;
             }
 
-            let fd = task.open_fd(file, OpenFlags::from_linux_flags(flags));
+            let fd = task.open_fd(
+                file,
+                FileFlags::from_linux_open_flags(flags),
+                FdFlags::from_linux_open_flags(flags),
+            );
             return Ok(fd as u64);
         }
     })

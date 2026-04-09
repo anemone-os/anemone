@@ -77,6 +77,7 @@ pub fn kernel_execve_from_image(
         memsp.activate();
         let mut ksp = VirtAddr::new(0);
         with_current_task(|task| {
+            task.close_cloexec_fds();
             let info = TaskExecInfo {
                 cmdline: commandline.as_ref().into(),
                 flags: TaskFlags::NONE,

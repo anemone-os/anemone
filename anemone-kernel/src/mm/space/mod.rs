@@ -314,8 +314,8 @@ impl DynamicMemArea {
         let mut memarea = DynamicMemArea {
             vpn_range: VirtPageRange::new(init_vpn, 0),
             frames: VecDeque::new(),
-            max_pages: max_pages,
-            growth: growth,
+            max_pages,
+            growth,
             perm,
         };
         Ok(memarea)
@@ -849,6 +849,7 @@ impl UserSpaceData {
                     mapper.map_one(vpn, ppn, new_flags, 0, true)?;
                 },
                 None => {
+                    kcritln!("unexpected inconsistency: vpn within area range but not mapped");
                     return Err(MmError::NotMapped);
                 },
             };

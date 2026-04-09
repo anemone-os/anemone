@@ -6,9 +6,16 @@
 use crate::prelude::*;
 
 #[derive(Debug)]
-pub struct FileDesc {
+pub struct ProcFile {
+    /// Vfs file.
     file: File,
-    flags: OpenFlags,
+    flags: FileFlags,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileDesc {
+    pfile: Arc<ProcFile>,
+    flags: FdFlags,
 }
 
 // re-export FileOps here, with permission checked.
@@ -16,50 +23,60 @@ pub struct FileDesc {
 // TODO: we only checked permission of fd, but we haven't checked permission of
 // the file itself.
 impl FileDesc {
-    pub fn vfs_file(&self) -> &File {
-        &self.file
+    fn new(pfile: Arc<ProcFile>, flags: FdFlags) -> Self {
+        Self { pfile, flags }
     }
 
-    pub fn open_flags(&self) -> OpenFlags {
+    pub fn vfs_file(&self) -> &File {
+        &self.pfile.file
+    }
+
+    pub fn file_flags(&self) -> FileFlags {
+        self.pfile.flags
+    }
+
+    pub fn fd_flags(&self) -> FdFlags {
         self.flags
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
-        if !self.flags.contains(OpenFlags::READ) {
+        if !self.pfile.flags.contains(FileFlags::READ) {
             return Err(KernelError::PermissionDenied.into());
         }
-        self.file.read(buf).map_err(|e| e.into())
+        self.pfile.file.read(buf).map_err(|e| e.into())
     }
 
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
-        if !self.flags.contains(OpenFlags::WRITE) {
+        if !self.pfile.flags.contains(FileFlags::WRITE) {
             return Err(KernelError::PermissionDenied.into());
         }
 
         // currently we don't support atomic append, so we just seek to the end of file
         // before writing.
 
-        if self.flags.contains(OpenFlags::APPEND) {
-            self.file.seek(self.file.get_attr()?.size as usize)?;
+        if self.pfile.flags.contains(FileFlags::APPEND) {
+            self.pfile
+                .file
+                .seek(self.pfile.file.get_attr()?.size as usize)?;
         }
 
-        self.file.write(buf).map_err(|e| e.into())
+        self.pfile.file.write(buf).map_err(|e| e.into())
     }
 
     /// `whence` is Linux-specific. we handle that in syscall handler. it should
     /// not pollute our FileDesc API.
     pub fn seek(&self, offset: usize) -> Result<(), SysError> {
-        self.file.seek(offset).map_err(|e| e.into())
+        self.pfile.file.seek(offset).map_err(|e| e.into())
     }
 
     pub fn iterate(&self, ctx: &mut DirContext) -> Result<DirEntry, SysError> {
-        self.file.iterate(ctx).map_err(|e| e.into())
+        self.pfile.file.iterate(ctx).map_err(|e| e.into())
     }
 }
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct OpenFlags: u32 {
+    pub struct FileFlags: u32 {
         const READ = 0b0001;
         const WRITE = 0b0010;
         const APPEND = 0b0100;
@@ -68,28 +85,60 @@ bitflags! {
     }
 }
 
-impl OpenFlags {
-    pub fn from_linux_flags(flags: u32) -> Self {
-        let mut open_flags = OpenFlags::empty();
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct FdFlags: u32 {
+        /// If set, the file descriptor will be automatically closed when executing
+        /// a new program.
+        ///
+        /// Hmm... it seems that O_CLOEXEC is the only FdFlag?
+        const CLOSE_ON_EXEC = 0b0001;
+    }
+}
+
+impl FileFlags {
+    pub fn from_linux_open_flags(flags: u32) -> Self {
+        let mut open_flags = Self::empty();
         // 1. rw bits
         match flags & 0b11 {
             anemone_abi::fs::linux::open::O_RDONLY => {
-                open_flags |= OpenFlags::READ;
+                open_flags |= Self::READ;
             },
             anemone_abi::fs::linux::open::O_WRONLY => {
-                open_flags |= OpenFlags::WRITE;
+                open_flags |= Self::WRITE;
             },
             anemone_abi::fs::linux::open::O_RDWR => {
-                open_flags |= OpenFlags::READ | OpenFlags::WRITE;
+                open_flags |= Self::READ | Self::WRITE;
             },
             _ => {},
         }
         // 2. append bit
         if flags & anemone_abi::fs::linux::open::O_APPEND != 0 {
-            open_flags |= OpenFlags::APPEND;
+            open_flags |= Self::APPEND;
         }
 
         open_flags
+    }
+}
+
+impl FdFlags {
+    pub fn from_linux_open_flags(flags: u32) -> Self {
+        let mut fd_flags = Self::empty();
+        if flags & anemone_abi::fs::linux::open::O_CLOEXEC != 0 {
+            fd_flags |= Self::CLOSE_ON_EXEC;
+        }
+
+        fd_flags
+    }
+
+    /// dup3 only allows O_CLOEXEC
+    pub fn from_dup3_flags(flags: u32) -> Result<Self, SysError> {
+        let allowed = anemone_abi::fs::linux::open::O_CLOEXEC;
+        if flags & !allowed != 0 {
+            return Err(KernelError::InvalidArgument.into());
+        }
+
+        Ok(Self::from_linux_open_flags(flags))
     }
 }
 
@@ -102,6 +151,20 @@ pub struct FilesState {
 }
 
 impl FilesState {
+    fn alloc_fd(&mut self) -> usize {
+        if let Some(recycled_fd) = self.recycled_fds.iter().next().cloned() {
+            self.recycled_fds.remove(&recycled_fd);
+            recycled_fd
+        } else {
+            while self.fd_table.contains_key(&self.next_fd) {
+                self.next_fd += 1;
+            }
+            let fd = self.next_fd;
+            self.next_fd += 1;
+            fd
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             next_fd: 0,
@@ -110,14 +173,15 @@ impl FilesState {
         }
     }
 
-    pub fn open_fd(&mut self, file: File, flags: OpenFlags) -> usize {
-        while self.fd_table.contains_key(&self.next_fd) {
-            self.next_fd += 1;
-        }
-        let fd = self.next_fd;
-        self.next_fd += 1;
+    pub fn open_fd(&mut self, file: File, file_flags: FileFlags, fd_flags: FdFlags) -> usize {
+        let fd = self.alloc_fd();
+        let file = Arc::new(ProcFile {
+            file,
+            flags: file_flags,
+        });
 
-        self.fd_table.insert(fd, Arc::new(FileDesc { file, flags }));
+        self.fd_table
+            .insert(fd, Arc::new(FileDesc::new(file, fd_flags)));
         fd
     }
 
@@ -136,22 +200,18 @@ impl FilesState {
 
     pub fn dup(&mut self, old_fd: usize) -> Option<usize> {
         let fd = self.get_fd(old_fd)?;
-        let new_fd = if let Some(recycled_fd) = self.recycled_fds.iter().next().cloned() {
-            self.recycled_fds.remove(&recycled_fd);
-            recycled_fd
-        } else {
-            let fd = self.next_fd;
-            self.next_fd += 1;
-            fd
-        };
-        self.fd_table.insert(new_fd, fd);
+        let new_fd = self.alloc_fd();
+        self.fd_table.insert(
+            new_fd,
+            Arc::new(FileDesc::new(fd.pfile.clone(), FdFlags::empty())),
+        );
         Some(new_fd)
     }
 
     /// Linux's semantics of dup3 is a bit weird, currently we implement a
     /// reasonable subset of it. If in the future we get stuck with
     /// compatibility issues, we'll implement the rest of it.
-    pub fn dup3(&mut self, old_fd: usize, new_fd: usize, flags: OpenFlags) -> Result<(), SysError> {
+    pub fn dup3(&mut self, old_fd: usize, new_fd: usize, flags: FdFlags) -> Result<(), SysError> {
         if old_fd == new_fd {
             return Err(KernelError::InvalidArgument.into());
         }
@@ -162,7 +222,17 @@ impl FilesState {
             self.close_fd(new_fd);
         }
 
-        self.fd_table.insert(new_fd, fd);
+        // we need to remove new_fd from recycled_fds, because after dup3, new_fd is no
+        // longer available for allocation, though new_fd might not be in recycled_fds
+        // if new_fd is larger than any previously allocated fd.
+        self.recycled_fds.remove(&new_fd);
+
+        if new_fd >= self.next_fd {
+            self.next_fd = new_fd + 1;
+        }
+
+        self.fd_table
+            .insert(new_fd, Arc::new(FileDesc::new(fd.pfile.clone(), flags)));
 
         Ok(())
     }
@@ -170,27 +240,69 @@ impl FilesState {
     /// TODO: explain why this is unsafe.
     ///
     /// It's actually quite obvious.
-    unsafe fn open_fd_at(&mut self, fd: usize, file: File, flags: OpenFlags) {
+    unsafe fn open_fd_at(
+        &mut self,
+        fd: usize,
+        file: File,
+        file_flags: FileFlags,
+        fd_flags: FdFlags,
+    ) {
         if self.fd_table.contains_key(&fd) {
             self.close_fd(fd);
         }
-        self.fd_table.insert(fd, Arc::new(FileDesc { file, flags }));
+        self.recycled_fds.remove(&fd);
+        if fd >= self.next_fd {
+            self.next_fd = fd + 1;
+        }
+        self.fd_table.insert(
+            fd,
+            Arc::new(FileDesc::new(
+                Arc::new(ProcFile {
+                    file,
+                    flags: file_flags,
+                }),
+                fd_flags,
+            )),
+        );
     }
 
-    /// Currently the same as default `clone`.
     pub fn create_copy(&self) -> Self {
         let mut new = Self::new();
         new.next_fd = self.next_fd;
         new.recycled_fds = self.recycled_fds.clone();
-        new.fd_table = self.fd_table.clone();
+        new.fd_table = self
+            .fd_table
+            .iter()
+            // note that we can't clone fd_table directly, since fd flags is per-fd.
+            .map(|(fd, file_desc)| (*fd, Arc::new(file_desc.as_ref().clone())))
+            .collect();
         new
+    }
+
+    /// Call this function to close all file descriptors with O_CLOEXEC flag
+    /// when executing a new program.
+    pub fn close_on_exec(&mut self) {
+        let cloexec_fds = self
+            .fd_table
+            .iter()
+            .filter_map(|(fd, file_desc)| {
+                file_desc
+                    .fd_flags()
+                    .contains(FdFlags::CLOSE_ON_EXEC)
+                    .then_some(*fd)
+            })
+            .collect::<Vec<_>>();
+
+        for fd in cloexec_fds {
+            self.close_fd(fd);
+        }
     }
 }
 
 impl Task {
-    pub fn open_fd(&self, file: File, flags: OpenFlags) -> usize {
+    pub fn open_fd(&self, file: File, file_flags: FileFlags, fd_flags: FdFlags) -> usize {
         let mut files_state = self.files_state.write();
-        files_state.open_fd(file, flags)
+        files_state.open_fd(file, file_flags, fd_flags)
     }
 
     pub fn get_fd(&self, fd: usize) -> Option<Arc<FileDesc>> {
@@ -231,9 +343,13 @@ impl Task {
         files_state.dup(old_fd)
     }
 
-    pub fn dup3(&self, old_fd: usize, new_fd: usize, flags: OpenFlags) -> Result<usize, SysError> {
+    pub fn dup3(&self, old_fd: usize, new_fd: usize, flags: FdFlags) -> Result<usize, SysError> {
         let mut files_state = self.files_state.write();
         files_state.dup3(old_fd, new_fd, flags)?;
         Ok(new_fd)
+    }
+
+    pub fn close_cloexec_fds(&self) {
+        self.files_state.write().close_on_exec();
     }
 }

@@ -53,7 +53,11 @@ use crate::{
     mm::layout::KernelLayoutTrait,
     prelude::*,
     sync::{counter::CpuSync, mono::MonoOnce},
-    task::{execve::kernel_execve, files::OpenFlags, task_fs::FsState},
+    task::{
+        execve::kernel_execve,
+        files::{FdFlags, FileFlags},
+        task_fs::FsState,
+    },
 };
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
@@ -119,9 +123,9 @@ fn exec_init_proc() {
     {
         use device::console::{open_console_stdin, open_console_stdout};
         with_current_task(|kinit| {
-            kinit.open_fd(open_console_stdin(), OpenFlags::READ);
-            kinit.open_fd(open_console_stdout(), OpenFlags::WRITE);
-            kinit.open_fd(open_console_stdout(), OpenFlags::WRITE);
+            kinit.open_fd(open_console_stdin(), FileFlags::READ, FdFlags::empty());
+            kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
+            kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
         })
     }
 
