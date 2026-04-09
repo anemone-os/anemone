@@ -10,6 +10,7 @@ pub enum SysError {
     Dev(DevError),
     Fs(FsError),
     Kernel(KernelError),
+    Task(TaskError),
 }
 
 /// Kernel-level errors, i.e. errors that are not specific to any subsystem, but
@@ -75,6 +76,7 @@ impl AsErrno for SysError {
             SysError::Dev(dev_error) => dev_error.as_errno(),
             SysError::Fs(fs_error) => fs_error.as_errno(),
             SysError::Kernel(kernel_error) => kernel_error.as_errno(),
+            SysError::Task(task_error) => task_error.as_errno(),
         }
     }
 }

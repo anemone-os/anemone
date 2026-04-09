@@ -89,8 +89,8 @@ impl PagingArchTrait for Sv39PagingArch {
         }
     }
 
-    fn tlb_shootdown(vaddr: VirtAddr) {
-        riscv::asm::sfence_vma(0, vaddr.get() as usize);
+    fn tlb_shootdown(vpn: VirtPageNum) {
+        riscv::asm::sfence_vma(0, vpn.to_virt_addr().get() as usize);
     }
 
     fn tlb_shootdown_all() {

@@ -67,7 +67,10 @@ impl KPTable {
                 }
             }};
         }
-        map_elf_segment!(bootstrap, PteFlags::READ | PteFlags::EXECUTE | PteFlags::GLOBAL);
+        map_elf_segment!(
+            bootstrap,
+            PteFlags::READ | PteFlags::EXECUTE | PteFlags::GLOBAL
+        );
         map_elf_segment!(text, PteFlags::READ | PteFlags::EXECUTE | PteFlags::GLOBAL);
         map_elf_segment!(
             trampoline,
@@ -171,18 +174,18 @@ pub unsafe fn activate_kernel_mapping() {
 /// holding a lock, and the target CPU cores being broadcast are waiting for the
 /// lock with interrupts disabled, a *deadlock* will occur.**
 ///
-/// We use [IpiGuard] to solve this problem. If the calling context holds a lock
-/// that might be waited on by cores with interrupts disabled, IpiGuard should
+/// We use [TlbShootdownGuard] to solve this problem. If the calling context holds a lock
+/// that might be waited on by cores with interrupts disabled, [TlbShootdownGuard] should
 /// only be released after the lock is released, thereby achieving the effect of
 /// delaying the sending of the IPI.
-pub unsafe fn kmap(mapping: Mapping) -> Result<IpiGuard, MmError> {
+pub unsafe fn kmap(mapping: Mapping) -> Result<TlbShootdownGuard, MmError> {
     unsafe {
         KERNEL_PTABLE.kmap(mapping)?;
         for i in 0..mapping.npages {
-            PagingArch::tlb_shootdown((mapping.vpn + i as u64).to_virt_addr());
+            PagingArch::tlb_shootdown(mapping.vpn + i as u64);
         }
     }
-    Ok(IpiGuard::new(None))
+    Ok(TlbShootdownGuard::new(None))
 }
 
 /// Do an unmapping in the global kernel page table. See [kmap] for details and
@@ -195,7 +198,7 @@ pub unsafe fn kunmap(unmapping: Unmapping) {
     unsafe {
         KERNEL_PTABLE.kunmap(unmapping);
         for i in 0..unmapping.range.npages() {
-            PagingArch::tlb_shootdown((unmapping.range.start() + i as u64).to_virt_addr());
+            PagingArch::tlb_shootdown(unmapping.range.start() + i as u64);
         }
     }
 }

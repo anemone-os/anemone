@@ -1,6 +1,11 @@
 use anemone_abi::syscall::{SYS_EXIT, SYS_SCHED_YIELD};
 
-use crate::{arch::IntrArch, prelude::*, sched::proc::switch_out, task::tid::Tid};
+use crate::{
+    arch::IntrArch,
+    prelude::*,
+    sched::proc::{SwitchOutType, switch_out},
+    task::tid::Tid,
+};
 
 #[syscall(SYS_EXIT)]
 pub fn sys_exit(exit_code: i8) -> Result<u64, SysError> {
@@ -28,7 +33,7 @@ pub fn kernel_exit(exit_code: i8) -> ! {
             // todo: futex
         }
         let root = root_task();
-        if Arc::ptr_eq(root, &task) {
+        if root.eq(&task) {
             panic!("root task shall not exit: {}", task.tid());
         }
         root.with_task_hierarchy_mut(|root_hierarchy| {
@@ -38,7 +43,7 @@ pub fn kernel_exit(exit_code: i8) -> ! {
                         child_hierarchy.set_parent(root);
                         root_hierarchy.add_child(child.clone());
                     });
-                    kdebugln!("set the parent task of {} to {}", child.tid(), root.tid());
+                    //kdebugln!("set the parent task of {} to {}", child.tid(), root.tid());
                 }
             });
         });
@@ -51,15 +56,11 @@ pub fn kernel_exit(exit_code: i8) -> ! {
                     .unwrap_or_else(|| panic!("dangling task with parent dropped: {}", task.tid()))
             })
         };
-        parent.with_task_hierarchy_mut(|par_hier| {
-            let res = par_hier.remove_child(&task);
-            debug_assert!(res);
-        });
-
+        unsafe { task.note_exited() };
         drop(task);
         drop(parent);
         knoticeln!("{} exited with code {}", current_task_id(), exit_code);
-        switch_out(true);
+        switch_out(SwitchOutType::Exit);
         unreachable!("should never return to an exited task");
     }
 }
@@ -67,7 +68,7 @@ pub fn kernel_exit(exit_code: i8) -> ! {
 pub fn kernel_yield() {
     unsafe {
         with_intr_disabled(|_| {
-            schedule();
+            try_schedule();
         });
     }
 }

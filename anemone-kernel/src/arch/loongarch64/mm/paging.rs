@@ -42,11 +42,11 @@ impl PagingArchTrait for LA64PagingArch {
     }
 
     /// Invalidate a single address translation from the TLB.
-    fn tlb_shootdown(vaddr: VirtAddr) {
+    fn tlb_shootdown(vpn: VirtPageNum) {
         unsafe {
             invtlb(InvtlbType::NonGlobalWithAsidAndVaddr {
                 asid: 0,
-                vaddr: vaddr.get(),
+                vaddr: vpn.to_virt_addr().get(),
             });
         }
     }

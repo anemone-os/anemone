@@ -88,10 +88,13 @@ pub mod linux {
 
     pub const SYS_GETPID: u64 = 172;
     pub const SYS_GETPPID: u64 = 173;
+
+    pub const SYS_BRK: u64 = 214;
+    
     pub const SYS_CLONE: u64 = 220;
     pub const SYS_EXECVE: u64 = 221;
 
-    pub const SYS_BRK: u64 = 214;
+    pub const SYS_WAIT4: u64 = 260;
 }
 
 pub use linux::*;

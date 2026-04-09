@@ -12,7 +12,7 @@ use crate::os::linux::process as linux_process;
 /// Currently, this is just a thin wrapper around linux's `exit` syscall, but it
 /// may be extended in the future to support other platforms or additional
 /// cleanup logic.
-pub fn exit(xcode: i32) -> ! {
+pub fn exit(xcode: i8) -> ! {
     linux_process::exit(xcode)
 }
 

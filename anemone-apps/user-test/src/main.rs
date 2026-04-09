@@ -14,16 +14,8 @@ use anemone_rs::{
 pub fn main() -> Result<(), Errno> {
     let cwd = current_dir()?;
     println!("user-test: current working directory: {}", cwd.display());
-    let mut __parent_ptid = 0;
-    let mut __child_ptid = 0;
-    clone(
-        CloneFlags::CLONE_PARENT_SETTID | CloneFlags::CLONE_CHILD_SETTID,
-        None,
-        &mut __parent_ptid,
-        null_mut(),
-        &mut __child_ptid,
-    )?;
-    for i in 0..10 {
+    clone(CloneFlags::empty(), None, None, null_mut(), None)?;
+    for i in 0..20 {
         println!("Hello from user task #{}:{}!", getpid().unwrap(), i);
     }
     Ok(())
