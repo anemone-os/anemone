@@ -22,7 +22,12 @@ use crate::{
 mod api;
 pub use api::*;
 pub mod fault;
+pub mod heap;
 pub mod image;
+pub mod mmap;
+pub mod segment;
+pub mod stack;
+pub mod vma;
 
 // TODO: these constants should be in KB, not in pages.
 
