@@ -35,11 +35,11 @@ args = [
     # "file=sdcard-rv.img,format=raw,if=none,id=x0",
     # "-device",
     # "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
-    # "-no-reboot",
-    # "-drive",
-    # "file=build/rootfs/minimal/rootfs.img,format=raw,if=none,id=x1",
-    # "-device",
-    # "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",
+    "-no-reboot",
+    "-drive",
+    "file=build/rootfs/minimal/rootfs.img,format=raw,if=none,id=x1",
+    "-device",
+    "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",
 ]
 
 [rootfs]

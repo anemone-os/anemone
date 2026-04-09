@@ -27,12 +27,12 @@ impl TryFromSyscallArg for WaitObject {
 
 #[repr(C)]
 pub struct WStatus {
-    value: u16,
+    value: u32,
 }
 impl WStatus {
     pub fn normal(exit_code: i8) -> Self {
         WStatus {
-            value: (exit_code as u16) << 8,
+            value: (exit_code as u32) << 8,
         }
     }
     // todo:

@@ -144,18 +144,19 @@ pub mod process {
 
     #[repr(transparent)]
     #[derive(Debug)]
-    pub struct WStatusRaw(u16);
+    pub struct WStatusRaw(u32);
 
     impl WStatusRaw {
         pub fn read(&self) -> WStatus {
-            if self.0 & 0x00ff == 0 {
-                WStatus::Exited((self.0 >> 8) as i8)
-            } else if self.0 & 0x00ff == 0x7f {
-                WStatus::Stopped((self.0 >> 8) as i8)
-            } else if self.0 == 0xffff {
+            let value = self.0 & 0xffff;
+            if value & 0x00ff == 0 {
+                WStatus::Exited((value >> 8) as i8)
+            } else if value & 0x00ff == 0x7f {
+                WStatus::Stopped((value >> 8) as i8)
+            } else if value == 0xffff {
                 WStatus::Continued
             } else {
-                WStatus::Signal((self.0 & 0xff) as i8)
+                WStatus::Signal((value & 0xff) as i8)
             }
         }
         pub const EMPTY: WStatusRaw = WStatusRaw(0);

@@ -538,7 +538,11 @@ pub trait ArcTaskImpls {
     unsafe fn note_exited(&self);
 
     /// Wait for a child selected by `target`, then reap and return it.
-    unsafe fn waitpid(&self, target: WaitObject, sleep: bool) -> Result<Option<Arc<Task>>, SysError>;
+    unsafe fn waitpid(
+        &self,
+        target: WaitObject,
+        sleep: bool,
+    ) -> Result<Option<Arc<Task>>, SysError>;
 }
 impl ArcTaskImpls for Arc<Task> {
     unsafe fn add_as_child(&self, parent: &Arc<Task>) {
@@ -554,9 +558,10 @@ impl ArcTaskImpls for Arc<Task> {
                     true
                 })
             }) {
-                root_task().with_task_hierarchy_mut(|root_hier| {
+                let root = root_task();
+                root.with_task_hierarchy_mut(|root_hier| {
                     self.with_task_hierarchy_mut(|hier| {
-                        hier.set_parent(&parent);
+                        hier.set_parent(root);
                         root_hier.add_child(self.clone());
                     })
                 })

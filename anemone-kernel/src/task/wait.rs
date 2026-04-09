@@ -54,13 +54,17 @@ impl<T: Clone + Sync + Send + 'static> WaitQueue<T> {
         interruptible: bool,
         condition: impl FnOnce() -> Result<(), E>,
     ) -> Result<T, E> {
-        let res: &mut Option<T> = Box::leak(Box::new(None));
-        let ptr = res as *mut Option<T>;
         let task = clone_current_task();
         let mut locked = self.queue.lock();
         match condition() {
             Ok(()) => {
                 //kdebugln!("{} sleep", task.tid());
+                let res: &mut Option<T> = Box::leak(Box::new(None));
+                let ptr = res as *mut Option<T>;
+                
+                // set the task status before drop the lock, otherwise race conditions may
+                // happen.
+                task.set_status(TaskStatus::Waiting { interruptible });
                 locked.push_back(WaitInfo {
                     waiter: task,
                     handler: Box::new(move |data| {

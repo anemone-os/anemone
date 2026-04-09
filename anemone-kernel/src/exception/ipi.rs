@@ -199,7 +199,7 @@ impl TlbShootdownGuard {
 impl Drop for TlbShootdownGuard {
     fn drop(&mut self) {
         if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { vpn: self.vpn }) {
-            kwarningln!("failed to send TLB shootdown IPI in IpiGuard: {e:?}");
+            kwarningln!("failed to send TLB shootdown IPI in TlbShootdownGuard: {e:?}");
         }
     }
 }

@@ -212,7 +212,7 @@ pub enum SwitchOutType {
 /// Behavior is controlled by `switch_type`:
 /// - [SwitchOutType::Sched]: requeue current task unless it is an idle task.
 /// - [SwitchOutType::Exit]: drop current task without requeueing.
-/// - [SwitchOutType::Wait]: mark task waiting and do not requeue.
+/// - [SwitchOutType::Wait]: do not requeue.
 ///
 /// **This function does not set the task status.**
 ///
@@ -230,7 +230,6 @@ pub unsafe fn switch_out(switch_type: SwitchOutType) {
             drop(task);
         },
         SwitchOutType::Wait { interruptible } => {
-            task.set_status(TaskStatus::Waiting { interruptible });
             drop(task);
         },
     }

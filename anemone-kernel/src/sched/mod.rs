@@ -66,12 +66,13 @@ pub unsafe fn try_schedule() {
 /// The actual status transition is performed by [switch_out] with
 /// [SwitchOutType::Wait].
 ///
-/// This helper temporarily disables interrupts around the switch operation.
+/// **Make sure interrupts are disabled before calling this function, otherwise
+/// the behavior is undefined.**
 pub fn sleep_as_waiting(interruptible: bool) {
     debug_assert!(unsafe_with_core_local(|local| local
         .preempt_counter()
         .allow()));
     with_intr_disabled(|_| {
         unsafe { switch_out(SwitchOutType::Wait { interruptible }) };
-    });
+    })
 }
