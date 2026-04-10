@@ -347,14 +347,14 @@ impl UserSpaceData {
         }
 
         let new_brk_vpn = brk.page_up();
-        if heap_vma.range().end() > new_brk_vpn {
+        if self.heap.brk > brk {
             // shrink heap
-            let mut count = heap_vma.range().end() - new_brk_vpn;
+            let count = self.heap.brk.page_up() - new_brk_vpn;
             let mut mapper = self.table.mapper();
             unsafe {
                 mapper.try_unmap(Unmapping {
-                    range: VirtPageRange::new(heap_vma.range().end() - count as u64, count as u64),
-                }); // unmap the newly mapped pages
+                    range: VirtPageRange::new(new_brk_vpn, count),
+                });
             }
         } else if new_brk_vpn > heap_vma.range().end() {
             // nothing to do. page fault handler will map new pages when

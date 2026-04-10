@@ -22,6 +22,7 @@ fs_ext4 = true # Enable ext4 filesystem support
 bootstrap_heap_shift_kb = 10 # Size of bootstrap heap as a power of 2 in KB
 log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
 log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
+console_log_level = 6 # Maximum log level emitted to consoles: Emerg=0 ... Debug=7
 kstack_shift_kb = 6 # Kernel stack size as a power of 2 in KB
 remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
 max_ident_len_bytes = 256 # Maximum length of identity strings in bytes.

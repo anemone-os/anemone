@@ -7,5 +7,6 @@ use crate::prelude::{dt::UserWritePtr, *};
 
 #[syscall(SYS_PIPE2)]
 fn sys_pipe2(pipefd: UserWritePtr<[isize; 2]>, flags: u32) -> Result<u64, SysError> {
-    todo!()
+    // TODO
+    Err(KernelError::NotYetImplemented.into())
 }

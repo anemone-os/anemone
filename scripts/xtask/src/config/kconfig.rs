@@ -38,6 +38,7 @@ pub struct Parameters {
     pub bootstrap_heap_shift_kb: Option<u64>,
     pub log_buffer_shift_kb: Option<u64>,
     pub log_record_shift_bytes: Option<u64>,
+    pub console_log_level: Option<u8>,
     pub kstack_shift_kb: Option<u64>,
     pub remap_shift_gb: Option<u64>,
     pub max_ident_len_bytes: Option<usize>,
@@ -83,6 +84,11 @@ pub const LOG_BUFFER_SHIFT_KB: u64 = {};
 /// Log record size as a power of 2 in bytes
 /// Note that the actual log record size will be 2^LOG_RECORD_SHIFT_BYTES + some metadata overhead.
 pub const LOG_RECORD_SHIFT_BYTES: u64 = {};
+/// Maximum numeric log level that may be emitted to consoles.
+///
+/// Log levels follow the kernel ordering: Emerg=0 ... Debug=7.
+/// Messages with a numerically larger level stay in the kernel log buffer only.
+pub const CONSOLE_LOG_LEVEL: u8 = {};
 /// Kernel stack size as a power of 2 in KB
 pub const KSTACK_SHIFT_KB: u64 = {};
 /// Remap region size as a power of 2 in GB
@@ -110,6 +116,7 @@ pub const SYMLINK_RESOLVE_LIMIT: usize = {};
             default_or!(bootstrap_heap_shift_kb),
             default_or!(log_buffer_shift_kb),
             default_or!(log_record_shift_bytes),
+            default_or!(console_log_level),
             default_or!(kstack_shift_kb),
             default_or!(remap_shift_gb),
             default_or!(max_ident_len_bytes),

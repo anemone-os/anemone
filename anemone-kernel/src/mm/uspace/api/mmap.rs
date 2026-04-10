@@ -18,12 +18,14 @@ bitflags! {
     }
 }
 
-bitflags! {
-    struct ExclusiveMmapFlags: i32 {
-        const MAP_SHARED = mmap::MAP_SHARED;
-        const MAP_PRIVATE = mmap::MAP_PRIVATE;
-        const MAP_SHARED_VALIDATE = mmap::MAP_SHARED_VALIDATE;
-    }
+enum ExclusiveMmapFlags {
+    Shared,
+    Private,
+    SharedValidate,
+}
+
+impl ExclusiveMmapFlags {
+    const MASK: i32 = mmap::MAP_PRIVATE | mmap::MAP_SHARED | mmap::MAP_SHARED_VALIDATE;
 }
 
 bitflags! {
@@ -56,14 +58,16 @@ impl TryFromSyscallArg for MmapFlags {
         if (raw >> 32) != 0 {
             return Err(KernelError::InvalidArgument.into());
         }
-        let exclusive =
-            ExclusiveMmapFlags::from_bits(raw as i32).ok_or(KernelError::InvalidArgument)?;
 
-        if exclusive.bits().count_ones() != 1 {
-            return Err(KernelError::InvalidArgument.into());
-        }
+        let exclusive_bits = raw as usize & ExclusiveMmapFlags::MASK as usize;
+        let exclusive = match exclusive_bits as i32 {
+            mmap::MAP_SHARED => ExclusiveMmapFlags::Shared,
+            mmap::MAP_PRIVATE => ExclusiveMmapFlags::Private,
+            mmap::MAP_SHARED_VALIDATE => ExclusiveMmapFlags::SharedValidate,
+            _ => return Err(KernelError::InvalidArgument.into()),
+        };
 
-        let aux = AuxMmapFlags::from_bits(raw as i32).ok_or(KernelError::InvalidArgument)?;
+        let aux = AuxMmapFlags::from_bits_truncate(raw as i32);
 
         Ok(Self { exclusive, aux })
     }
