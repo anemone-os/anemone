@@ -3,7 +3,7 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/write.2.html
 
-use core::ops::Deref;
+use core::ops::DerefMut;
 
 use crate::prelude::{dt::UserReadPtr, *};
 
@@ -15,8 +15,8 @@ fn sys_write(fd: usize, buf: UserReadPtr<u8>, count: usize) -> Result<u64, SysEr
         let uspace = task
             .clone_uspace()
             .expect("user task should have a user space");
-        let mut usp = uspace.read();
-        let ptr = unsafe { slice.validate_with(usp.deref())? };
+        let mut usp = uspace.write();
+        let ptr = unsafe { slice.validate_with(usp.deref_mut())? };
         file.write(unsafe { &*ptr }).map(|n| n as u64)?;
         drop(usp);
         Ok(count as u64)

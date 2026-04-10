@@ -3,7 +3,7 @@
 use core::{
     ffi::{CStr, c_char},
     marker::PhantomData,
-    ops::{Deref, DerefMut},
+    ops::DerefMut,
     slice, str,
 };
 
@@ -80,14 +80,14 @@ impl<T: Sized + Clone, A: UserAccess> UserPtr<T, A> {
     pub fn safe_read(&self) -> Result<T, SysError> {
         let usp =
             with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
-        let usp_data: ReadNoPreemptGuard<'_, UserSpaceData> = usp.read();
-        let ptr: *const T = validate_user_pointer(A::PTE_FLAGS, usp_data.deref(), self.addr)?;
+        let mut usp_data = usp.write();
+        let ptr: *const T = validate_user_pointer(A::PTE_FLAGS, usp_data.deref_mut(), self.addr)?;
         let res = unsafe { (*ptr).clone() };
         drop(usp_data);
         Ok(res)
     }
 
-    pub fn validate_with(&self, data: &UserSpaceData) -> Result<*const T, SysError> {
+    pub fn validate_with(&self, data: &mut UserSpaceData) -> Result<*const T, SysError> {
         let ptr = validate_user_pointer(A::PTE_FLAGS, data, self.addr)?;
         Ok(ptr)
     }
@@ -106,7 +106,7 @@ impl<T: Sized> UserWritePtr<T> {
         Ok(())
     }
 
-    pub fn validate_with_mut(&self, data: &mut UserSpaceData) -> Result<*mut T, SysError> {
+    pub fn validate_mut_with(&self, data: &mut UserSpaceData) -> Result<*mut T, SysError> {
         let ptr = validate_user_pointer_for_write(UserWrite::PTE_FLAGS, data, self.addr)?
             as *const T as *mut T;
         Ok(ptr)
@@ -151,15 +151,19 @@ impl<T: Sized + Copy, A: UserAccess> UserSlice<T, A> {
         debug_assert!(buf.len() >= self.len, "buffer too small for user slice");
         let usp =
             with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
-        let usp_data: ReadNoPreemptGuard<'_, UserSpaceData> = usp.read();
-        let ptr: *const [T] =
-            validate_user_array(A::PTE_FLAGS, usp_data.deref(), self.ptr.addr(), self.len)?;
+        let mut usp_data = usp.write();
+        let ptr: *const [T] = validate_user_array(
+            A::PTE_FLAGS,
+            usp_data.deref_mut(),
+            self.ptr.addr(),
+            self.len,
+        )?;
         buf[0..self.len].copy_from_slice(unsafe { &*ptr });
         drop(usp_data);
         Ok(())
     }
 
-    pub fn validate_with(&self, data: &UserSpaceData) -> Result<*const [T], SysError> {
+    pub fn validate_with(&self, data: &mut UserSpaceData) -> Result<*const [T], SysError> {
         let ptr = validate_user_array(A::PTE_FLAGS, data, self.ptr.addr, self.len)? as *const [T]
             as *mut [T];
         Ok(ptr)
@@ -189,7 +193,7 @@ impl<T: Sized + Copy> UserWriteSlice<T> {
         Ok(())
     }
 
-    pub fn validate_with_mut(&self, data: &mut UserSpaceData) -> Result<*mut [T], SysError> {
+    pub fn validate_mut_with(&self, data: &mut UserSpaceData) -> Result<*mut [T], SysError> {
         let ptr =
             validate_user_array_for_write(UserWrite::PTE_FLAGS, data, self.ptr.addr, self.len)?;
         Ok(ptr)
@@ -252,11 +256,9 @@ impl<T: Sized + Copy> UserWriteSlice<T> {
 /// The user pointer in `arg` is validated against `rwx_flags` using `table`.
 fn validate_user_pointer<T: Sized>(
     rwx_flags: PteFlags,
-    usp: &UserSpaceData,
+    usp: &mut UserSpaceData,
     arg: u64,
 ) -> Result<*const T, SysError> {
-    let flags = PteFlags::USER | rwx_flags;
-    // kdebugln!("validating user pointer {:#x}: {:?}", arg, flags);
     let va = VirtAddr::new(arg);
     let va_end = VirtAddr::new(arg.wrapping_add(size_of::<T>() as u64));
     if va_end < va {
@@ -266,6 +268,9 @@ fn validate_user_pointer<T: Sized>(
     let vpn_va_end = va_end.page_up();
     for vpn in VirtPageRange::new(vpn_va, vpn_va_end - vpn_va).iter() {
         usp.check_permission(vpn, rwx_flags)?;
+    }
+    for vpn in VirtPageRange::new(vpn_va, vpn_va_end - vpn_va).iter() {
+        usp.inject_page_fault(vpn.to_virt_addr(), PageFaultType::Read)?;
     }
     Ok(arg as *const T)
 }
@@ -274,8 +279,6 @@ fn validate_user_pointer_for_write<T: Sized>(
     usp: &mut UserSpaceData,
     arg: u64,
 ) -> Result<*mut T, SysError> {
-    let flags = PteFlags::USER | rwx_flags;
-    // kdebugln!("validating user pointer {:#x}: {:?}", arg, flags);
     let va = VirtAddr::new(arg);
     let va_end = VirtAddr::new(arg.wrapping_add(size_of::<T>() as u64));
     if va_end < va {
@@ -287,24 +290,18 @@ fn validate_user_pointer_for_write<T: Sized>(
         usp.check_permission(vpn, rwx_flags)?;
     }
     for vpn in VirtPageRange::new(vpn_va, vpn_va_end - vpn_va).iter() {
-        usp.copy_on_write(vpn.to_virt_addr())?;
+        //usp.copy_on_write(vpn.to_virt_addr())?;
+        usp.inject_page_fault(vpn.to_virt_addr(), PageFaultType::Write)?;
     }
     Ok(arg as *mut T)
 }
 
 fn validate_user_array<T: Sized>(
     rwx_flags: PteFlags,
-    usp: &UserSpaceData,
+    usp: &mut UserSpaceData,
     arg: u64,
     len: usize,
 ) -> Result<*const [T], SysError> {
-    let flags = PteFlags::USER | rwx_flags;
-    /*kdebugln!(
-        "validating user array pointer {:#x} with length {}: {:?}",
-        arg,
-        len,
-        flags
-    );*/
     if arg % align_of::<T>() as u64 != 0 {
         return Err(MmError::NotAligned.into());
     }
@@ -319,6 +316,9 @@ fn validate_user_array<T: Sized>(
     let vpn_va_end = va_end.page_up();
     for vpn in VirtPageRange::new(vpn_va, vpn_va_end - vpn_va).iter() {
         usp.check_permission(vpn, rwx_flags)?;
+    }
+    for vpn in VirtPageRange::new(vpn_va, vpn_va_end - vpn_va).iter() {
+        usp.inject_page_fault(vpn.to_virt_addr(), PageFaultType::Read)?;
     }
 
     Ok(core::ptr::slice_from_raw_parts(arg as *const T, len))
@@ -354,7 +354,7 @@ fn validate_user_array_for_write<T: Sized>(
     }
     if rwx_flags.contains(PteFlags::WRITE) {
         for vpn in VirtPageRange::new(vpn_va, vpn_va_end - vpn_va).iter() {
-            usp.copy_on_write(vpn.to_virt_addr())?;
+            usp.inject_page_fault(vpn.to_virt_addr(), PageFaultType::Write)?;
         }
     }
 
@@ -421,9 +421,9 @@ pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq + Copy>(
         let usp = t
             .clone_uspace()
             .expect("user task should have a user space");
-        let usp_data: ReadNoPreemptGuard<'_, UserSpaceData> = usp.read();
+        let mut usp_data = usp.write();
         let st_pointer = arg as *const T;
-        validate_user_pointer::<T>(PteFlags::READ, usp_data.deref(), arg)?;
+        validate_user_pointer::<T>(PteFlags::READ, usp_data.deref_mut(), arg)?;
         let mut ed_pointer = st_pointer;
         let mut ed_vpn = VirtAddr::new(arg).page_down();
         let mut len = 0;
@@ -436,7 +436,7 @@ pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq + Copy>(
             if ed_vpn_new != ed_vpn {
                 validate_user_pointer::<u8>(
                     PteFlags::READ,
-                    usp_data.deref(),
+                    usp_data.deref_mut(),
                     next_ed_pointer as u64,
                 )?;
                 ed_vpn = ed_vpn_new;

@@ -99,7 +99,7 @@ pub fn kernel_clone(
     let new_uspace = if flags.contains(CloneFlags::CLONE_VM) {
         cur_uspace.clone()
     } else {
-        Arc::new(cur_uspace.create_copy()?)
+        Arc::new(cur_uspace.fork()?)
     };
     let mut boxed_frame = Box::new(trap_frame);
     boxed_frame.advance_pc();
@@ -159,7 +159,7 @@ pub fn kernel_clone(
     if flags.contains(CloneFlags::CLONE_CHILD_CLEARTID)
         || flags.contains(CloneFlags::CLONE_CHILD_SETTID)
     {
-        child_tid.validate_with_mut(
+        child_tid.validate_mut_with(
             &mut new_task
                 .clone_uspace()
                 .expect("user task should have a user space")

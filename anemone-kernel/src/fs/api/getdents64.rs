@@ -68,7 +68,7 @@ fn sys_getdents64(
 
         let buf_len = count as usize;
         let mut slice = dirp.slice(buf_len);
-        let buffer = NonNull::new(slice.validate_with_mut(&mut usp.write())?)
+        let buffer = NonNull::new(slice.validate_mut_with(&mut usp.write())?)
             .expect("user slice pointer should not be null");
         let mut writer = unsafe { ByteWriter::new(buffer) };
 

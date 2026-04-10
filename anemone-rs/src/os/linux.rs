@@ -43,6 +43,10 @@ pub mod process {
 
     use crate::{prelude::*, sys::linux::process};
 
+    pub fn brk(addr: usize) -> Result<usize, Errno> {
+        process::brk(addr as u64).map(|value| value as usize)
+    }
+
     pub fn execve(path: &str, argv: &[&str]) -> Result<u64, Errno> {
         let mut argv_ptrs = vec![0; argv.len() + 1].into_boxed_slice();
         let argv = argv

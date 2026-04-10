@@ -16,7 +16,7 @@ fn sys_read(fd: usize, buf: UserWritePtr<u8>, count: usize) -> Result<u64, SysEr
             .clone_uspace()
             .expect("user task should have a user space");
         let mut usp = uspace.write();
-        let ptr = unsafe { slice.validate_with_mut(usp.deref_mut())? };
+        let ptr = unsafe { slice.validate_mut_with(usp.deref_mut())? };
         let len = file.read(unsafe { &mut *ptr }).map(|n| n as u64)?;
         drop(usp);
         Ok(len)

@@ -20,14 +20,7 @@ pub fn handle_user_page_fault_internal(info: PageFaultInfo) -> Result<(), MmErro
     let uspace = task
         .clone_uspace()
         .expect("user task should have a user space");
-    if info.fault_type() != PageFaultType::Write {
-        return Err(MmError::PermissionDenied);
-    }
-    uspace.write().copy_on_write(info.fault_addr())?;
-    /*kinfoln!(
-        "copy on write for page fault at address {:?} in user {}",
-        info.fault_addr(),
-        task.tid()
-    );*/
+    uspace.write().handle_page_fault(&info)?;
+
     Ok(())
 }

@@ -5,7 +5,7 @@ use core::ptr::null_mut;
 
 use anemone_rs::{
     env::current_dir,
-    os::linux::process::{CloneFlags, clone, execve, getpid},
+    os::linux::process::{clone, execve, getpid, CloneFlags},
     prelude::*,
 };
 
@@ -14,6 +14,7 @@ pub fn main() -> Result<(), anemone_abi::errno::Errno> {
     let cwd = current_dir()?;
     let pid = getpid()?;
     println!("init: started:\n\tcwd:{}\n\tpid:{}", cwd.display(), pid);
+
     let mut tidp = 0;
     let mut tidc = 0;
     clone(
