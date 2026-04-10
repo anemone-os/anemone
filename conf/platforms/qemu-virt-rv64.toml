@@ -37,7 +37,7 @@ args = [
     "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
     "-no-reboot",
     "-drive",
-    "file=rootfs.img,format=raw,if=none,id=x1",
+    "file=build/rootfs/minimal/rootfs.img,format=raw,if=none,id=x1",
     "-device",
     "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",
 ]

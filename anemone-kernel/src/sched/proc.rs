@@ -10,20 +10,26 @@ use crate::{
 #[percpu]
 static PROCESSOR: ProcessorInfo = ProcessorInfo::EMPTY;
 
+/// Per-CPU scheduler state and currently running task metadata.
 pub struct ProcessorInfo {
     /// Scheduler is per-CPU
     sched: RwLock<Scheduler>,
+    /// Non-reentrant processor-local runtime state.
     inner: MonoFlow<ProcessorInner>,
+    /// Reschedule request flag set by timer/interrupt paths.
     need_resched: AtomicBool,
 }
 
+/// Mutable processor-local fields accessed by the scheduler core.
 pub struct ProcessorInner {
+    /// Currently running task on this CPU.
     running_task: Option<Arc<Task>>,
     /// The context used for scheduling
     sched_context: TaskContext,
 }
 
 impl ProcessorInfo {
+    /// Empty per-CPU processor state used for [PROCESSOR] initialization.
     pub const EMPTY: Self = Self {
         inner: unsafe {
             MonoFlow::new(ProcessorInner {
@@ -36,6 +42,7 @@ impl ProcessorInfo {
     };
 }
 
+/// Set the current CPU's reschedule flag.
 pub fn set_resched_flag() {
     unsafe {
         PROCESSOR.unsafe_with(|proc| {
@@ -44,6 +51,9 @@ pub fn set_resched_flag() {
     }
 }
 
+/// Fetch and clear the current CPU's reschedule flag.
+///
+/// Returns the previous value before clearing.
 pub fn fetch_clear_resched_flag() -> bool {
     unsafe { PROCESSOR.unsafe_with(|proc| proc.need_resched.fetch_and(false, Ordering::SeqCst)) }
 }
@@ -81,7 +91,7 @@ pub fn current_task_id() -> Tid {
 /// Get a copy of the current task name **without creating a copy of the current
 /// task**
 ///
-/// Use this function instead of `clone_current_task().tid()`.
+/// Use this function instead of `clone_current_task().cmdline()`.
 pub fn current_task_cmdline() -> Box<str> {
     PROCESSOR
         .with(|f| {
@@ -187,20 +197,41 @@ pub unsafe fn get_sched_context_mut() -> *mut TaskContext {
     })
 }
 
+/// Reason for switching out the current task.
+pub enum SwitchOutType {
+    /// Normal scheduler yield: requeue current task if it is runnable.
+    Sched,
+    /// Task is exiting and should not be requeued.
+    Exit,
+    /// Task enters waiting state with the given interruptibility.
+    Wait { interruptible: bool },
+}
+
 /// Switch out the current task and switch to the next task.
 ///
-/// If `exit` is true, the current task will not be added back to the ready
-/// queue and will be dropped instead. Then the [Task] struct of the current
-/// task will be deallocated if no external references to it exist.
+/// Behavior is controlled by `switch_type`:
+/// - [SwitchOutType::Sched]: requeue current task unless it is an idle task.
+/// - [SwitchOutType::Exit]: drop current task without requeueing.
+/// - [SwitchOutType::Wait]: do not requeue.
+///
+/// **This function does not set the task status.**
 ///
 /// ***Make sure interrupts are disabled before calling this function***
-pub unsafe fn switch_out(exit: bool) {
+pub unsafe fn switch_out(switch_type: SwitchOutType) {
     let task = clone_current_task();
     let context = unsafe { task.get_task_context_mut() };
-    if !exit && !task.flags().contains(TaskFlags::IDLE) {
-        add_to_ready(task);
-    } else {
-        drop(task);
+    match switch_type {
+        SwitchOutType::Sched => {
+            if !task.flags().contains(TaskFlags::IDLE) {
+                add_to_ready(task)
+            }
+        },
+        SwitchOutType::Exit => {
+            drop(task);
+        },
+        SwitchOutType::Wait { interruptible } => {
+            drop(task);
+        },
     }
     let sched_context = unsafe { get_sched_context() };
     unsafe {
@@ -208,6 +239,10 @@ pub unsafe fn switch_out(exit: bool) {
     }
 }
 
+/// Switch active user address space based on `next_task`.
+///
+/// If both tasks share the same user address space, no page-table switch is
+/// performed.
 unsafe fn switch_uspace(cur_task: &Arc<Task>, next_task: &Arc<Task>) {
     unsafe {
         let next_uspace = next_task.clone_uspace();
@@ -244,7 +279,7 @@ pub unsafe fn switch_to(task: Arc<Task>) {
     }
 }
 
-/// Switch to the given task.
+/// Load and jump to `new` context from the scheduler.
 ///
 /// **This function should only be used by the scheduler**
 ///
@@ -267,7 +302,7 @@ pub unsafe fn set_running_task(task: Arc<Task>) {
     PROCESSOR.with(|proc| proc.inner.with_mut(|inner| inner.running_task = Some(task)));
 }
 
-/// Get the current running task
+/// Replace current running task with `task` and return previous task.
 ///
 /// **This function should only be used by the scheduler**
 ///

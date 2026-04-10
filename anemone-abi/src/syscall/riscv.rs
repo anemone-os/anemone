@@ -96,7 +96,7 @@ pub mod linux {
     pub const SYS_EXECVE: u64 = 221;
     pub const SYS_MMAP: u64 = 222;
 
-    pub const SYS_WAIT: u64 = 260;
+    pub const SYS_WAIT4: u64 = 260;
 }
 
 pub use linux::*;

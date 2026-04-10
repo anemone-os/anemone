@@ -2,7 +2,7 @@ use crate::{
     prelude::*,
     sched::{
         idle::clone_current_idle_task,
-        proc::{fetch_new_task, set_running_task, switch_out, switch_to},
+        proc::{SwitchOutType, fetch_new_task, set_running_task, switch_out, switch_to},
     },
 };
 
@@ -18,7 +18,7 @@ mod rr;
 mod api;
 pub use api::*;
 
-/// Default Scheduler
+/// Default scheduler implementation type alias.
 pub type Scheduler = rr::RRScheduler;
 
 /// Exported API for process management.
@@ -27,8 +27,11 @@ pub use proc::{
     fetch_clear_resched_flag, load_context, set_resched_flag, with_current_task,
 };
 
-/// Enter the scheduler loop. This function is called by bootstrap code to enter
-/// the scheduler.
+/// Enter the scheduler loop.
+///
+/// This is called by bootstrap code. It initializes the current CPU's running
+/// task with the idle task, then repeatedly picks the next runnable task and
+/// switches to it.
 pub fn run_tasks() -> ! {
     kinfoln!("scheduler started");
     unsafe {
@@ -41,14 +44,35 @@ pub fn run_tasks() -> ! {
     }
 }
 
-/// Manually triggers a scheduling if scheduling is allowed
+/// Try to trigger scheduling for the current CPU.
+///
+/// If preemption is currently allowed, this function immediately switches out
+/// with [SwitchOutType::Sched]. Otherwise it sets the reschedule flag through
+/// [set_resched_flag] so scheduling can happen later at a safe point.
 ///
 /// **Make sure interrupts are disabled before calling this function, otherwise
 /// the behavior is undefined.**
-pub unsafe fn schedule() {
+pub unsafe fn try_schedule() {
     if unsafe_with_core_local(|local| local.preempt_counter().allow()) {
-        unsafe { switch_out(false) };
+        unsafe { switch_out(SwitchOutType::Sched) };
     } else {
         set_resched_flag();
     }
+}
+
+/// Put current task into waiting state and schedule out.
+///
+/// `interruptible` controls whether the waiting state may be interrupted.
+/// The actual status transition is performed by [switch_out] with
+/// [SwitchOutType::Wait].
+///
+/// **Make sure interrupts are disabled before calling this function, otherwise
+/// the behavior is undefined.**
+pub fn sleep_as_waiting(interruptible: bool) {
+    debug_assert!(unsafe_with_core_local(|local| local
+        .preempt_counter()
+        .allow()));
+    with_intr_disabled(|_| {
+        unsafe { switch_out(SwitchOutType::Wait { interruptible }) };
+    })
 }

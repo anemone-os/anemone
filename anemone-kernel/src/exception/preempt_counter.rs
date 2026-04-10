@@ -52,7 +52,7 @@ impl Drop for PreemptGuard {
                     && fetch_clear_resched_flag()
             } {
                 unsafe {
-                    schedule();
+                    try_schedule();
                 }
             }
         });

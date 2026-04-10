@@ -38,7 +38,10 @@ pub mod fs {
 }
 
 pub mod process {
+    pub type Tid = u32;
+
     use alloc::ffi::CString;
+    use anemone_abi::process::linux::{clone, wait};
     use bitflags::bitflags;
 
     use crate::{prelude::*, sys::linux::process};
@@ -67,75 +70,130 @@ pub mod process {
         pub struct CloneFlags: u32 {
             /// Signal sent to parent when child process changes state (termination/stop)
             /// Prevents zombie processes; default action is ignore
-            const SIGCHLD = (1 << 4) | (1 << 0);
+            const SIGCHLD = clone::SIGCHLD as u32;
             /// Share the same memory space between parent and child processes
-            const CLONE_VM = 1 << 8;
+            const CLONE_VM = clone::CLONE_VM as u32;
             /// Share filesystem info (root, cwd, umask) with the child
-            const CLONE_FS = 1 << 9;
+            const CLONE_FS = clone::CLONE_FS as u32;
             /// Share the file descriptor table with the child
-            const CLONE_FILES = 1 << 10;
+            const CLONE_FILES = clone::CLONE_FILES as u32;
             /// Share signal handlers with the child
-            const CLONE_SIGHAND = 1 << 11;
-            const CLONE_PIDFD = 1 << 12;
-            const CLONE_PTRACE = 1 << 13;
-            const CLONE_VFORK = 1 << 14;
+            const CLONE_SIGHAND = clone::CLONE_SIGHAND as u32;
+            const CLONE_PIDFD = clone::CLONE_PIDFD as u32;
+            const CLONE_PTRACE = clone::CLONE_PTRACE as u32;
+            const CLONE_VFORK = clone::CLONE_VFORK as u32;
             /// [OK]
-            const CLONE_PARENT = 1 << 15;
-            const CLONE_THREAD = 1 << 16;
-            const CLONE_NEWNS = 1 << 17;
+            const CLONE_PARENT = clone::CLONE_PARENT as u32;
+            const CLONE_THREAD = clone::CLONE_THREAD as u32;
+            const CLONE_NEWNS = clone::CLONE_NEWNS as u32;
             /// Share System V semaphore adjustment (semadj) values
-            const CLONE_SYSVSEM = 1 << 18;
+            const CLONE_SYSVSEM = clone::CLONE_SYSVSEM as u32;
             /// Set the TLS (Thread Local Storage) descriptor
-            const CLONE_SETTLS = 1 << 19;
+            const CLONE_SETTLS = clone::CLONE_SETTLS as u32;
             /// [OK] Store child thread ID in parent's memory (parent_tid)
-            const CLONE_PARENT_SETTID = 1 << 20;
+            const CLONE_PARENT_SETTID = clone::CLONE_PARENT_SETTID as u32;
             /// [OK with TODO: futex]Clear child_tid in child's memory when the child exits
-            const CLONE_CHILD_CLEARTID = 1 << 21;
+            const CLONE_CHILD_CLEARTID = clone::CLONE_CHILD_CLEARTID as u32;
             /// Legacy flag, ignored by clone()
-            const CLONE_DETACHED = 1 << 22;
+            const CLONE_DETACHED = clone::CLONE_DETACHED as u32;
             /// Prevent tracer from forcing CLONE_PTRACE on the child
-            const CLONE_UNTRACED = 1 << 23;
+            const CLONE_UNTRACED = clone::CLONE_UNTRACED as u32;
             /// [OK] Store child thread ID in child's memory (child_tid)
-            const CLONE_CHILD_SETTID = 1 << 24;
-            const CLONE_NEWCGROUP = 1 << 25;
-            const CLONE_NEWUTS = 1 << 26;
-            const CLONE_NEWIPC = 1 << 27;
-            const CLONE_NEWUSER = 1 << 28;
-            const CLONE_NEWPID = 1 << 29;
-            const CLONE_NEWNET = 1 << 30;
-            const CLONE_IO = 1 << 31;
+            const CLONE_CHILD_SETTID = clone::CLONE_CHILD_SETTID as u32;
+            const CLONE_NEWCGROUP = clone::CLONE_NEWCGROUP as u32;
+            const CLONE_NEWUTS = clone::CLONE_NEWUTS as u32;
+            const CLONE_NEWIPC = clone::CLONE_NEWIPC as u32;
+            const CLONE_NEWUSER = clone::CLONE_NEWUSER as u32;
+            const CLONE_NEWPID = clone::CLONE_NEWPID as u32;
+            const CLONE_NEWNET = clone::CLONE_NEWNET as u32;
+            const CLONE_IO = clone::CLONE_IO as u32;
         }
     }
     pub fn clone(
         flags: CloneFlags,
         stack_ptr: Option<*mut u8>,
-        parent_tid: &mut usize,
+        parent_tid: Option<&mut Tid>,
         tls_ptr: *mut u8,
-        child_tid: &mut usize,
-    ) -> Result<usize, Errno> {
+        child_tid: Option<&mut Tid>,
+    ) -> Result<Tid, Errno> {
         process::clone(
             flags.bits() as u64,
             stack_ptr.and_then(|s| Some(s as u64)).unwrap_or(0),
-            parent_tid as *mut usize as u64,
+            parent_tid
+                .and_then(|val| Some(val as *mut Tid as u64))
+                .unwrap_or(0),
             tls_ptr as u64,
-            child_tid as *mut usize as u64,
+            child_tid
+                .and_then(|val| Some(val as *mut Tid as u64))
+                .unwrap_or(0),
         )
-        .and_then(|x| Ok(x as usize))
+        .and_then(|x| Ok(x as Tid))
     }
 
     pub fn sched_yield() -> Result<(), Errno> {
         process::sched_yield()
     }
 
-    pub fn exit(xcode: i32) -> ! {
+    pub fn exit(xcode: i8) -> ! {
         process::exit(xcode as u64)
     }
 
-    pub fn getpid() -> Result<usize, Errno> {
-        process::getpid().and_then(|x| Ok(x as usize))
+    pub fn getpid() -> Result<Tid, Errno> {
+        process::getpid().and_then(|x| Ok(x as Tid))
     }
 
-    pub fn getppid() -> Result<usize, Errno> {
-        process::getppid().and_then(|x| Ok(x as usize))
+    pub fn getppid() -> Result<Tid, Errno> {
+        process::getppid().and_then(|x| Ok(x as Tid))
+    }
+
+    #[repr(transparent)]
+    #[derive(Debug)]
+    pub struct WStatusRaw(u32);
+
+    impl WStatusRaw {
+        pub fn read(&self) -> WStatus {
+            let value = self.0 & 0xffff;
+            if value & 0x00ff == 0 {
+                WStatus::Exited((value >> 8) as i8)
+            } else if value & 0x00ff == 0x7f {
+                WStatus::Stopped((value >> 8) as i8)
+            } else if value == 0xffff {
+                WStatus::Continued
+            } else {
+                WStatus::Signal((value & 0xff) as i8)
+            }
+        }
+        pub const EMPTY: WStatusRaw = WStatusRaw(0);
+    }
+
+    #[derive(Debug)]
+    pub enum WStatus {
+        Exited(i8),
+        Signal(i8),  // not implemented
+        Stopped(i8), // not implemented
+        Continued,   // not implemented
+    }
+
+    bitflags! {
+        pub struct WaitOptions: u32{
+            const WNOHANG = wait::WNOHANG as u32;
+            const WUNTRACED = wait::WUNTRACED as u32;
+            const WCONTINUED = wait::WCONTINUED as u32;
+        }
+    }
+
+    pub fn wait4(
+        pid: i64,
+        wstatus: Option<&mut WStatusRaw>,
+        options: WaitOptions,
+    ) -> Result<Option<Tid>, Errno> {
+        process::wait4(
+            pid as u64,
+            wstatus
+                .and_then(|r| Some(r as *mut WStatusRaw as u64))
+                .unwrap_or(0),
+            options.bits() as u64,
+        )
+        .and_then(|x| Ok(if x == 0 { None } else { Some(x as Tid) }))
     }
 }
