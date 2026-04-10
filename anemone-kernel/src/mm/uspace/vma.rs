@@ -117,7 +117,7 @@ impl VmArea {
         );*/
 
         self.map_page(mapper, vpn, fault_info.fault_type())?;
-        PagingArch::tlb_shootdown(fault_info.fault_addr());
+        PagingArch::tlb_shootdown(fault_info.fault_addr().page_down());
 
         Ok(())
     }
