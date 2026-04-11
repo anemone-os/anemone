@@ -95,6 +95,8 @@ pub mod linux {
     pub const SYS_CLONE: u64 = 220;
     pub const SYS_EXECVE: u64 = 221;
     pub const SYS_MMAP: u64 = 222;
+    pub const SYS_MPROTECT: u64 = 226;
+    pub const SYS_MADVISE: u64 = 233;
 
     pub const SYS_WAIT4: u64 = 260;
 }

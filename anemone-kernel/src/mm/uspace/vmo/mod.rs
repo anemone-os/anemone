@@ -10,6 +10,7 @@
 
 pub mod anon;
 pub mod fixed;
+pub mod inode;
 pub mod shadow;
 
 use core::fmt::Debug;
@@ -132,8 +133,7 @@ pub trait VmObject: Send + Sync {
 
             let mut page = [0u8; PagingArch::PAGE_SIZE_BYTES];
             self.read_frame(pidx, &mut page)?;
-            remaining[..copy_len]
-                .copy_from_slice(&page[page_offset..page_offset + copy_len]);
+            remaining[..copy_len].copy_from_slice(&page[page_offset..page_offset + copy_len]);
 
             remaining = &mut remaining[copy_len..];
             cur_offset = cur_offset

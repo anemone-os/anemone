@@ -19,6 +19,8 @@ pub enum MmError {
     ArgumentTooLarge,
     /// Permission denied, e.g. trying to write to a read-only page.
     PermissionDenied,
+    /// The requested range is not fully covered by existing mappings.
+    RangeNotMapped,
     /// The address is not properly aligned
     NotAligned,
 }
@@ -30,6 +32,7 @@ impl AsErrno for MmError {
             MmError::AlreadyMapped | MmError::NotMapped | MmError::SharedFrame => EFAULT,
             MmError::InvalidArgument => EINVAL,
             MmError::PermissionDenied => EACCES,
+            MmError::RangeNotMapped => ENOMEM,
             MmError::ArgumentTooLarge => E2BIG,
             MmError::NotAligned => EINVAL,
         }

@@ -3,6 +3,22 @@
 
 use crate::{prelude::*, utils::any_opaque::NilOpaque};
 
+fn pipe_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
+    Ok(InodeStat {
+        fs_dev: DeviceId::None,
+        ino: inode.ino(),
+        mode: inode.mode(),
+        nlink: inode.nlink(),
+        uid: 0,
+        gid: 0,
+        rdev: DeviceId::None,
+        size: 0,
+        atime: inode.atime(),
+        mtime: inode.mtime(),
+        ctime: inode.ctime(),
+    })
+}
+
 #[derive(Opaque)]
 struct Pipe {}
 
@@ -15,7 +31,7 @@ static PIPE_INODE_OPS: InodeOps = InodeOps {
     rmdir: |_, _| Err(FsError::NotDir),
     open: |_| unreachable!(/* pipes have their own open logic */),
     read_link: |_| Err(FsError::NotSymlink),
-    get_attr: |_| todo!(),
+    get_attr: pipe_get_attr,
 };
 
 #[derive(Opaque)]

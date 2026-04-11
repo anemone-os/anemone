@@ -2,7 +2,7 @@
 
 [workspace]
 resolver = "2"
-members = ["anemone-abi", "anemone-kernel", "anemone-kernel/crates/*"]
+members = ["anemone-abi", "anemone-apps/mmap-test", "anemone-kernel", "anemone-kernel/crates/*"]
 exclude = ["scripts/xtask"]
 
 [workspace.dependencies]
