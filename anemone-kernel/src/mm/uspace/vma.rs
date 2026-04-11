@@ -75,7 +75,9 @@ bitflags! {
     #[derive(Debug, Clone, Copy)]
     pub struct VmFlags: usize {
         /// For ordinary grow-down VMAs managed by generic VMA policy.
-        /// Stack reservation growth is handled separately by UserSpaceData.
+        /// Stack reservation growth is handled separately by [UserSpaceData].
+        ///
+        /// Currently not supported.
         const GROW_DOWN = 1 << 0;
     }
 }
@@ -84,12 +86,12 @@ bitflags! {
 /// type, and is used to mark some special VMAs that require special handling in
 /// some scenarios.
 ///
-/// **Invariant: A [UserSpace] has only 2 reservations: one for the stack and
-/// one for the heap.**
+/// **Invariant: A [UserSpace] has only 1 stack and 1 heap reservation.**
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VmReservation {
     Stack,
     Heap,
+    Guard,
 }
 
 /// Virtual memory area, within a [UserSpace].

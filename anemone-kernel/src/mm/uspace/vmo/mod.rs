@@ -9,6 +9,7 @@
 //! - https://fuchsia.dev/fuchsia-src/reference/kernel_objects/vm_object
 
 pub mod anon;
+pub mod empty;
 pub mod fixed;
 pub mod inode;
 pub mod shadow;

@@ -32,9 +32,7 @@ fn sys_mmap(
         return Err(KernelError::InvalidArgument.into());
     }
 
-    let hint = addr.map(|a| {
-        (a.page_down(), fixed)
-    });
+    let hint = addr.map(|a| (a.page_down(), fixed));
     let clobber = flags.aux.contains(AuxMmapFlags::MAP_FIXED);
     let npages = align_up_power_of_2!(length, PagingArch::PAGE_SIZE_BYTES) as usize
         >> PagingArch::PAGE_SIZE_BITS;

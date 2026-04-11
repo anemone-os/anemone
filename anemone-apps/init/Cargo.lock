@@ -252,7 +252,6 @@ dependencies = [
 name = "init"
 version = "0.1.0"
 dependencies = [
- "anemone-abi",
  "anemone-rs",
 ]
 

@@ -13,7 +13,7 @@ use crate::{
     mm::kptable::KERNEL_PTABLE,
     prelude::{
         vma::{ForkPolicy, Protection, VmFlags},
-        vmo::{VmObject, anon::AnonObject, fixed::FixedObject},
+        vmo::{VmObject, anon::AnonObject, empty::EmptyObject, fixed::FixedObject},
         *,
     },
     utils::data::DataSource,
@@ -130,7 +130,21 @@ impl UserSpace {
             stack_vmo,
         );
 
-        let sheap = VirtPageNum::new(0);
+        let guard_vmo = Arc::new(RwLock::new(EmptyObject));
+
+        let sguard = sstack - 1;
+        let stack_guard_vma = VmArea::new_reserved(
+            VirtPageRange::new(sguard, 1),
+            0,
+            Protection::empty(),
+            ForkPolicy::Shared,
+            VmFlags::empty(),
+            VmReservation::Guard,
+            guard_vmo.clone(),
+        );
+
+        // note vpn 0 is reserved.
+        let sheap = VirtPageNum::new(1);
         let heap_vmo = Arc::new(RwLock::new(AnonObject::new(MAX_HEAP_PAGES as usize)));
         let heap_vma = VmArea::new_reserved(
             VirtPageRange::new(sheap, MAX_HEAP_PAGES),
@@ -142,9 +156,27 @@ impl UserSpace {
             heap_vmo,
         );
 
+        let zero_guard_vma = VmArea::new_reserved(
+            VirtPageRange::new(VirtPageNum::new(0), 1),
+            0,
+            Protection::empty(),
+            ForkPolicy::Shared,
+            VmFlags::empty(),
+            VmReservation::Guard,
+            guard_vmo,
+        );
+
         let mut vmas = BTreeMap::new();
         assert!(vmas.insert(stack_vma.range().start(), stack_vma).is_none());
+        assert!(
+            vmas.insert(stack_guard_vma.range().start(), stack_guard_vma)
+                .is_none()
+        );
         assert!(vmas.insert(heap_vma.range().start(), heap_vma).is_none());
+        assert!(
+            vmas.insert(zero_guard_vma.range().start(), zero_guard_vma)
+                .is_none()
+        );
 
         let mut uspace = UserSpace {
             table_ppn: table.root_ppn(),
@@ -562,6 +594,7 @@ impl UserSpaceData {
                     Err(MmError::NotMapped)
                 }
             },
+            Some(VmReservation::Guard) => Err(MmError::NotMapped),
             None => {
                 if vma.prot().contains(rwx_flags.into()) {
                     Ok(())
@@ -644,6 +677,7 @@ impl UserSpaceData {
 
                 heap_vma.handle_page_fault(&mut mapper, fault_info)
             },
+            Some(VmReservation::Guard) => Err(MmError::NotMapped),
             None => {
                 let UserSpaceData {
                     ref mut table,

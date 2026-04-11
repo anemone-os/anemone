@@ -2,8 +2,8 @@
 
 [workspace]
 resolver = "2"
-members = ["anemone-abi", "anemone-apps/mmap-test", "anemone-kernel", "anemone-kernel/crates/*"]
-exclude = ["scripts/xtask"]
+members = ["anemone-kernel", "anemone-kernel/crates/*"]
+exclude = ["scripts/xtask", "anemone-apps", "anemone-rs", "anemone-abi"]
 
 [workspace.dependencies]
 sbi-rt = { version = "0.0.3" }
