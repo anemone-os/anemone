@@ -99,7 +99,7 @@ pub fn kernel_clone(
     let new_uspace = if flags.contains(CloneFlags::CLONE_VM) {
         cur_uspace.clone()
     } else {
-        Arc::new(cur_uspace.create_copy()?)
+        Arc::new(cur_uspace.fork()?)
     };
     let mut boxed_frame = Box::new(trap_frame);
     boxed_frame.advance_pc();
@@ -116,13 +116,13 @@ pub fn kernel_clone(
     }
 
     let frame_ptr = Box::leak(boxed_frame) as *mut TrapFrame as u64;
-    let new_task = unsafe {
+    let mut new_task = unsafe {
         Task::new_kernel(
             "@kernel/clone",
             enter_cloned_user_task as *const (),
             ParameterList::new(&[frame_ptr, child_tid.addr()]),
             IntrArch::ENABLED_IRQ_FLAGS,
-            TaskFlags::KERNEL,
+            TaskFlags::NONE,
             flags,
         )?
     };
@@ -133,12 +133,22 @@ pub fn kernel_clone(
             uspace: Some(new_uspace),
         });
     }
-    new_task.set_fs_state(current_task.fs_state().read().clone());
-    new_task.ensure_stdio(
-        device::console::open_console_stdin(),
-        device::console::open_console_stdout(),
-        device::console::open_console_stdout(),
-    );
+
+    if flags.contains(CloneFlags::CLONE_FS) {
+        Arc::get_mut(&mut new_task)
+            .expect("new task must be uniquely owned before scheduling")
+            .replace_fs_state_handle(current_task.fs_state());
+    } else {
+        new_task.set_fs_state(current_task.fs_state().read().create_copy());
+    }
+
+    if flags.contains(CloneFlags::CLONE_FILES) {
+        Arc::get_mut(&mut new_task)
+            .expect("new task must be uniquely owned before scheduling")
+            .replace_files_state_handle(current_task.files_state());
+    } else {
+        new_task.set_files_state(current_task.files_state().read().create_copy());
+    }
 
     let new_tid = new_task.tid();
 
@@ -149,7 +159,7 @@ pub fn kernel_clone(
     if flags.contains(CloneFlags::CLONE_CHILD_CLEARTID)
         || flags.contains(CloneFlags::CLONE_CHILD_SETTID)
     {
-        child_tid.validate_with_mut(
+        child_tid.validate_mut_with(
             &mut new_task
                 .clone_uspace()
                 .expect("user task should have a user space")

@@ -90,9 +90,11 @@ pub mod linux {
     pub const SYS_GETPPID: u64 = 173;
 
     pub const SYS_BRK: u64 = 214;
-    
+    pub const SYS_MUNMAP: u64 = 215;
+
     pub const SYS_CLONE: u64 = 220;
     pub const SYS_EXECVE: u64 = 221;
+    pub const SYS_MMAP: u64 = 222;
 
     pub const SYS_WAIT4: u64 = 260;
 }

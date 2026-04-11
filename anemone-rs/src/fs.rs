@@ -65,7 +65,7 @@ impl OpenOptions {
         }
 
         let fd = fs::openat(
-            AT_FDCWD as usize,
+            AT_FDCWD as isize,
             path,
             flags,
             S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
@@ -84,6 +84,12 @@ pub struct File {
 #[derive(Debug)]
 struct FileInner {
     fd: usize,
+}
+
+impl Drop for FileInner {
+    fn drop(&mut self) {
+        let _ = fs::close(self.fd);
+    }
 }
 
 impl File {

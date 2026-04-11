@@ -15,6 +15,6 @@
 
 #![allow(unused)]
 
-// out native kernel. (●'◡'●)
+// our native kernel. (●'◡'●)
 pub mod anemone;
 pub mod linux;

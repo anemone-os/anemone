@@ -5,7 +5,7 @@ pub use crate::{
     exception::{intr::*, trap::*, *},
     fs::*,
     kconfig_defs::*,
-    mm::{addr::*, error::*, frame::*, paging::*, percpu::*, space::*, zone::*},
+    mm::{addr::*, error::*, frame::*, paging::*, percpu::*, uspace::*, zone::*},
     platform_defs::*,
     power::*,
     sched::*,

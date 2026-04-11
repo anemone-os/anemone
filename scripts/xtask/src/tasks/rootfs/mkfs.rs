@@ -3,7 +3,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use clap::Args;
 use serde::Serialize;
 
@@ -11,7 +11,7 @@ use crate::{
     config::{app::App as AppManifest, rootfs::Rootfs},
     log_progress,
     tasks::{
-        app::build::{build_app, BuildCtx, BuiltArtifactInfo},
+        app::build::{BuildCtx, BuiltArtifactInfo, build_app},
         utils::cmd_echo,
     },
 };
@@ -119,7 +119,7 @@ impl<'a> RootfsCtx<'a> {
             }
             std::fs::create_dir_all(&installed_dir)?;
 
-            let artifacts = build_app(&app.name, &[], &build_ctx)?;
+            let artifacts = build_app(&app.name, &[], &build_ctx, false)?;
             for artifact in artifacts {
                 let dest = installed_dir.join(artifact.name().unwrap());
                 std::fs::copy(artifact.output_path, &dest)?;

@@ -53,7 +53,11 @@ use crate::{
     mm::layout::KernelLayoutTrait,
     prelude::*,
     sync::{counter::CpuSync, mono::MonoOnce},
-    task::{execve::kernel_execve, task_fs::FsState},
+    task::{
+        execve::kernel_execve,
+        files::{FdFlags, FileFlags},
+        task_fs::FsState,
+    },
 };
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
@@ -115,6 +119,23 @@ fn exec_init_proc() {
     let init_path = vfs_read_to_string(PathResolution::normal(&Path::new(INIT_PATH)))
         .unwrap_or_else(|e| panic!("failed to read init path from {}: {:?}", INIT_PATH, e));
 
+    // open initial stdio fds so that they can be inherited.
+    {
+        use device::console::{open_console_stdin, open_console_stdout};
+        with_current_task(|kinit| {
+            kinit.open_fd(open_console_stdin(), FileFlags::READ, FdFlags::empty());
+            kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
+            kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
+        })
+    }
+
+    // set up initial root and cwd for inheritance.
+    {
+        with_current_task(|kinit| {
+            kinit.set_fs_state(FsState::new_root());
+        });
+    }
+
     kernel_execve(&init_path, &[&init_path, &"1".to_string()]).unwrap_or_else(|e| {
         panic!(
             "failed to execve init process at path specified by {}: {:?}",
@@ -160,10 +181,6 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         }
         kinfoln!("kunit tests finished");
     }
-
-    with_current_task(|kinit| {
-        kinit.set_fs_state(FsState::new_root());
-    });
 
     exec_init_proc();
 }

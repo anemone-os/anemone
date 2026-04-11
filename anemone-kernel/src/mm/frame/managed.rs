@@ -48,6 +48,18 @@ impl FrameHandle {
     pub fn meta(&self) -> &'static Frame {
         unsafe { get_frame_raw(self.ppn) }
     }
+
+    /// Returns a byte slice that represents the contents of the physical frame.
+    ///
+    /// **The slice created by this function points to HHDM region.**
+    pub fn as_bytes(&self) -> &'_ [u8] {
+        unsafe {
+            core::slice::from_raw_parts(
+                self.ppn.to_phys_addr().to_hhdm().as_ptr(),
+                PagingArch::PAGE_SIZE_BYTES,
+            )
+        }
+    }
 }
 
 impl Clone for FrameHandle {
@@ -125,10 +137,6 @@ impl OwnedFrameHandle {
     /// Returns a byte slice that represents the contents of the physical frame.
     ///
     /// **The slice created by this function points to HHDM region.**
-    ///
-    /// This function is safe because the [OwnedFrameHandle] represents an
-    /// **owned** physical page, and thus we have the exclusive right to
-    /// access it.
     pub fn as_bytes(&self) -> &'_ [u8] {
         unsafe {
             core::slice::from_raw_parts(
@@ -225,6 +233,18 @@ impl Folio {
     pub fn try_into_owned(self) -> Result<OwnedFolio, (MmError, Folio)> {
         OwnedFolio::try_from(self)
     }
+
+    /// Returns a byte slice that represents the contents of the physical folio.
+    ///
+    /// **The slice created by this function points to HHDM region.**
+    pub fn as_bytes(&self) -> &'_ [u8] {
+        unsafe {
+            core::slice::from_raw_parts(
+                self.range.start().to_phys_addr().to_hhdm().as_ptr(),
+                (self.range.npages() as usize) * PagingArch::PAGE_SIZE_BYTES,
+            )
+        }
+    }
 }
 
 impl Clone for Folio {
@@ -316,9 +336,6 @@ impl OwnedFolio {
     /// Returns a byte slice that represents the contents of the physical folio.
     ///
     /// **The slice created by this function points to HHDM region.**
-    ///
-    /// This function is safe because the [OwnedFolio] represents an **owned**
-    /// physical page range, and thus we have the exclusive right to access it.
     pub fn as_bytes(&self) -> &'_ [u8] {
         unsafe {
             core::slice::from_raw_parts(
