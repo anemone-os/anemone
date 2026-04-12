@@ -145,8 +145,8 @@ unsafe impl Send for NetStack {}
 static NET_STACKS: SpinLock<Vec<NetStack>> = SpinLock::new(Vec::new());
 
 fn now_smoltcp() -> SmolInstant {
-    let ticks = TimeArch::current_ticks();
-    let freq = TimeArch::hw_freq_hz().unwrap_or(1_000_000);
+    let ticks = LocalClockSource::curr_monotonic_time();
+    let freq = LocalClockSource::monotonic_freq_hz();
     let micros = ticks as i64 * 1_000_000 / freq as i64;
     SmolInstant::from_micros(micros)
 }
@@ -204,7 +204,7 @@ fn build_stack(netdev: Arc<dyn NetDev>, name: &str) -> Result<NetStack, DevError
     let mac = netdev.mac().unwrap_or(LOOPBACK_MAC);
     let hw_addr = HardwareAddress::Ethernet(EthernetAddress(mac));
     let mut config = Config::new(hw_addr);
-    config.random_seed = TimeArch::current_ticks();
+    config.random_seed = LocalClockSource::curr_monotonic_time();
 
     let mut device = NetDeviceAdapter {
         netdev: netdev.clone(),
