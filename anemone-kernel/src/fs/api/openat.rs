@@ -30,9 +30,7 @@ fn sys_openat(
                 let ret = vfs_create(&path, mode);
                 match ret {
                     Ok(_) => (),
-                    Err(FsError::AlreadyExists) if flags & O_EXCL != 0 => {
-                        return Err(FsError::AlreadyExists.into());
-                    },
+                    Err(FsError::AlreadyExists) if flags & O_EXCL == 0 => (),
                     Err(e) => return Err(e.into()),
                 }
             }
@@ -74,9 +72,7 @@ fn sys_openat(
                 let ret = vfs_create_at(&dir_path, &path, mode);
                 match ret {
                     Ok(_) => (),
-                    Err(FsError::AlreadyExists) if flags & O_EXCL != 0 => {
-                        return Err(FsError::AlreadyExists.into());
-                    },
+                    Err(FsError::AlreadyExists) if flags & O_EXCL == 0 => (),
                     Err(e) => return Err(e.into()),
                 }
             }

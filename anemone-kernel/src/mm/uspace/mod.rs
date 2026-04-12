@@ -13,7 +13,7 @@ use crate::{
     mm::kptable::KERNEL_PTABLE,
     prelude::{
         vma::{ForkPolicy, Protection, VmFlags},
-        vmo::{VmObject, anon::AnonObject, empty::EmptyObject, fixed::FixedObject},
+        vmo::{anon::AnonObject, empty::EmptyObject, fixed::FixedObject, VmObject},
         *,
     },
     utils::data::DataSource,
@@ -168,15 +168,13 @@ impl UserSpace {
 
         let mut vmas = BTreeMap::new();
         assert!(vmas.insert(stack_vma.range().start(), stack_vma).is_none());
-        assert!(
-            vmas.insert(stack_guard_vma.range().start(), stack_guard_vma)
-                .is_none()
-        );
+        assert!(vmas
+            .insert(stack_guard_vma.range().start(), stack_guard_vma)
+            .is_none());
         assert!(vmas.insert(heap_vma.range().start(), heap_vma).is_none());
-        assert!(
-            vmas.insert(zero_guard_vma.range().start(), zero_guard_vma)
-                .is_none()
-        );
+        assert!(vmas
+            .insert(zero_guard_vma.range().start(), zero_guard_vma)
+            .is_none());
 
         let mut uspace = UserSpace {
             table_ppn: table.root_ppn(),
@@ -496,7 +494,8 @@ impl UserSpaceData {
 
     /// Move the init stack pointer to the top of the user stack.
     ///
-    /// This will not deallocate the old stack
+    /// This will not deallocate the old stack (i.e. replace the backing
+    /// [AnonObject])
     ///
     /// ## Safety
     /// **Invoke this function when the stack is in use may lead to undefined
