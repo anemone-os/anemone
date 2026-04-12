@@ -65,6 +65,7 @@ pub mod linux {
 
     pub const SYS_OPENAT: u64 = 56;
     pub const SYS_CLOSE: u64 = 57;
+    pub const SYS_PIPE2: u64 = 59;
 
     pub const SYS_GETDENTS64: u64 = 61;
 
@@ -74,16 +75,28 @@ pub mod linux {
     pub const SYS_FSTAT: u64 = 80;
 
     pub const SYS_EXIT: u64 = 93;
+
+    pub const SYS_NANOSLEEP: u64 = 101;
+
     pub const SYS_SCHED_YIELD: u64 = 124;
+
+    pub const SYS_TIMES: u64 = 153;
 
     pub const SYS_UNAME: u64 = 160;
 
+    pub const SYS_GETTIMEOFDAY: u64 = 169;
+
     pub const SYS_GETPID: u64 = 172;
     pub const SYS_GETPPID: u64 = 173;
-    pub const SYS_CLONE: u64 = 220;
-    pub const SYS_EXECVE: u64 = 221;
 
     pub const SYS_BRK: u64 = 214;
+    pub const SYS_MUNMAP: u64 = 215;
+
+    pub const SYS_CLONE: u64 = 220;
+    pub const SYS_EXECVE: u64 = 221;
+    pub const SYS_MMAP: u64 = 222;
+
+    pub const SYS_WAIT4: u64 = 260;
 }
 
 pub use linux::*;

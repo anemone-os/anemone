@@ -13,7 +13,7 @@ use clap::Args;
 use xshell::Shell;
 
 use crate::{
-    config::{kconfig::Profile, platform::DtbType, KConfig, PlatformConfig},
+    config::{KConfig, PlatformConfig, kconfig::Profile, platform::DtbType},
     log_progress,
     tasks::{app::build::build_app, qemu::gen_qemu_cmd, utils::cmd_echo},
     warn,

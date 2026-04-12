@@ -14,6 +14,8 @@ pub enum FsError {
     IsDir,
     /// The target is not a regular file.
     NotReg,
+    /// The target is not a symbolic link.
+    NotSymlink,
     /// The operation is not supported.
     NotSupported,
     /// Invalid argument.
@@ -34,6 +36,18 @@ pub enum FsError {
     PermissionDenied,
     /// File system run out its capacity.
     NoSpace,
+    /// Operation would block and nonblocking mode was requested.
+    Again,
+    /// Pipe write attempted after all readers were gone.
+    BrokenPipe,
+    /// Too many symbolic links were encountered in resolving a path.
+    TooManyLinks,
+    /// A symbolic link was encountered while doing a path resolution operation
+    /// that does not allow symbolic links.
+    LinkEncountered,
+    /// Invalid path (e.g. path contains invalid UTF-8 sequences, or path is not
+    /// valid for other reasons).
+    InvalidPath,
     /// Device error occurred when accessing device files.
     Dev(DevError),
 }
@@ -46,6 +60,7 @@ impl AsErrno for FsError {
             FsError::NotDir => ENOTDIR,
             FsError::IsDir => EISDIR,
             FsError::NotReg => EINVAL,
+            FsError::NotSymlink => EINVAL,
             FsError::NotSupported => EINVAL,
             FsError::InvalidArgument => EINVAL,
             FsError::Busy => EBUSY,
@@ -56,6 +71,13 @@ impl AsErrno for FsError {
             FsError::NoMoreEntries => ENOENT,
             FsError::PermissionDenied => EPERM,
             FsError::NoSpace => ENOSPC,
+            FsError::Again => EAGAIN,
+            FsError::BrokenPipe => EPIPE,
+            FsError::TooManyLinks => ELOOP,
+            // ELOOP here might be a bit inaccurate, but POSIX actually doesn't specify the error
+            // code for this case, so we choose a close enough one.
+            FsError::LinkEncountered => ELOOP,
+            FsError::InvalidPath => EINVAL,
             FsError::Dev(dev_err) => dev_err.as_errno(),
         }
     }

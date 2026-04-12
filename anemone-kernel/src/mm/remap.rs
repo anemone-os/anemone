@@ -127,7 +127,7 @@ impl SysRemaps {
     unsafe fn ioremap(
         &mut self,
         req: IoRange,
-    ) -> Result<(VirtAddr, VirtPageRange, IpiGuard), MmError> {
+    ) -> Result<(VirtAddr, VirtPageRange, TlbShootdownGuard), MmError> {
         if self.find_io_overlap(req).is_some() {
             return Err(MmError::AlreadyMapped);
         }

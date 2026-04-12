@@ -6,16 +6,22 @@ use crate::{
 /// Number of CPUs discovered during bootstrap.
 static mut NCPUS: usize = 0;
 
-/// Record the number of CPUs discovered from firmware.
-pub unsafe fn set_ncpus(ncpus: usize) {
+static mut BSP_CPU_ID: Option<CpuId> = None;
+
+pub unsafe fn init(ncpus: usize, bsp_cpu_id: usize) {
     unsafe {
         NCPUS = ncpus;
+        BSP_CPU_ID = Some(CpuId::new(bsp_cpu_id));
     }
 }
 
 /// LoongArch64 CPU-specific architecture hooks.
 pub struct La64CpuArch;
 impl CpuArchTrait for La64CpuArch {
+    fn bsp_cpu_id() -> CpuId {
+        unsafe { BSP_CPU_ID.expect("BSP CPU ID not set") }
+    }
+
     /// Return the number of CPUs discovered during bootstrap.
     fn ncpus() -> usize {
         unsafe { NCPUS }

@@ -33,7 +33,7 @@ mod klog {
                 let full_msg_str =
                     core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
 
-                if !noprint {
+                if !noprint && level.emits_to_console() {
                     device::console::output(full_msg_str);
                 }
 

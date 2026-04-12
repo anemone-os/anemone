@@ -54,7 +54,11 @@ use crate::{
     mm::layout::KernelLayoutTrait,
     prelude::*,
     sync::{counter::CpuSync, mono::MonoOnce},
-    task::{execve::kernel_execve, task_fs::FsState},
+    task::{
+        execve::kernel_execve,
+        files::{FdFlags, FileFlags},
+        task_fs::FsState,
+    },
 };
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
@@ -90,7 +94,7 @@ fn mount_rootfs() {
 fn ls_dir(path: &Path) {
     let mut ctx = DirContext::new();
 
-    let Ok(dir) = vfs_open(path) else {
+    let Ok(dir) = vfs_open(PathResolution::normal(path)) else {
         return;
     };
 
@@ -113,8 +117,25 @@ fn ls_dir(path: &Path) {
 fn exec_init_proc() {
     const INIT_PATH: &str = "/.anemone/init";
 
-    let init_path = vfs_read_to_string(Path::new(INIT_PATH))
+    let init_path = vfs_read_to_string(PathResolution::normal(&Path::new(INIT_PATH)))
         .unwrap_or_else(|e| panic!("failed to read init path from {}: {:?}", INIT_PATH, e));
+
+    // open initial stdio fds so that they can be inherited.
+    {
+        use device::console::{open_console_stdin, open_console_stdout};
+        with_current_task(|kinit| {
+            kinit.open_fd(open_console_stdin(), FileFlags::READ, FdFlags::empty());
+            kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
+            kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
+        })
+    }
+
+    // set up initial root and cwd for inheritance.
+    {
+        with_current_task(|kinit| {
+            kinit.set_fs_state(FsState::new_root());
+        });
+    }
 
     kernel_execve(&init_path, &[&init_path, &"1".to_string()]).unwrap_or_else(|e| {
         panic!(
@@ -136,8 +157,10 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         of_platform_discovery();
         probe_virtual_devices();
 
-        IntrArch::init_local_irq();
+        set_boot_mono(true);
+        program_first_timer();
         percpu_login();
+        IntrArch::init_local_irq();
 
         unsafe {
             device::console::on_system_boot();
@@ -147,6 +170,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         FINISH_SYNC_COUNTER.sync_with_counter();
         kinfoln!("bsp #{} kinit finished", bsp_id);
     }
+
     mount_rootfs();
 
     #[cfg(feature = "kunit")]
@@ -159,10 +183,6 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         kinfoln!("kunit tests finished");
     }
 
-    with_current_task(|kinit| {
-        kinit.set_fs_state(FsState::new_root());
-    });
-
     exec_init_proc();
 }
 
@@ -170,8 +190,11 @@ unsafe extern "C" fn ap_kinit(ap_id: usize) {
     unsafe {
         INIT_SYNC_COUNTER.sync_with_counter();
         kinfoln!("ap #{} kinit running on {}...", ap_id, current_task_id());
-        IntrArch::init_local_irq();
+
+        set_boot_mono(false);
+        program_first_timer();
         percpu_login();
+        IntrArch::init_local_irq();
 
         // collect previous IPIs sent by bsp before ap starts to run.
         // the main reason for this is to clear IPI buffers of bsp such that it can send

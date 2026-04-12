@@ -2,10 +2,7 @@
 
 use crate::{
     fs::{
-        anonymous::ANONY_FS,
-        filesystem::FileSystemFlags,
-        inode::Inode,
-        superblock::SuperBlockOps,
+        anonymous::ANONY_FS, filesystem::FileSystemFlags, inode::Inode, superblock::SuperBlockOps,
     },
     prelude::*,
     utils::any_opaque::NilOpaque,
@@ -86,11 +83,12 @@ fn anony_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
 static ANONY_DIR_INODE_OPS: InodeOps = InodeOps {
     lookup: |_, _| Err(FsError::NotSupported),
     create: |_, _, _| Err(FsError::NotSupported),
-    link: |_, _, _| unreachable!(),
+    symlink: |_, _, _| Err(FsError::NotSupported),
+    link: |_, _, _| Err(FsError::NotSupported),
     unlink: |_, _| Err(FsError::NotSupported),
-    mkdir: |_, _, _| Err(FsError::NotSupported),
     rmdir: |_, _| Err(FsError::NotSupported),
     open: |_| Err(FsError::NotSupported),
+    read_link: |_| Err(FsError::NotSymlink),
     get_attr: anony_get_attr,
 };
 

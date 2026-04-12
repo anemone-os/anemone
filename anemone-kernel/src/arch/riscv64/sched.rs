@@ -72,6 +72,15 @@ impl SchedArchTrait for RiscV64SchedArch {
             __switch(cur, next);
         }
     }
+
+    unsafe fn return_to_cloned_task(frame: TrapFrame) {
+        unsafe {
+            with_current_task(|t| {
+                sscratch::write(t.kstack().stack_top().get() as usize);
+            });
+            __utrap_return_to_task(&frame)
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -264,7 +273,7 @@ unsafe extern "C" fn __task_run(
         }
     }
 
-    knoticeln!("{}({}) starting", current_task_id(), current_task_cmdline());
+    //knoticeln!("{}({}) starting", current_task_id(), current_task_cmdline());
     unsafe {
         match prv {
             Privilege::Kernel => __ktrap_return_to_task(&trapframe),

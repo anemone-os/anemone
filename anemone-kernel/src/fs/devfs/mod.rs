@@ -4,17 +4,51 @@
 
 use crate::{
     device::{block::get_block_dev_by_name, char::get_char_dev_by_name},
+    fs::devfs::inode::DevfsInode,
     prelude::*,
     utils::any_opaque::NilOpaque,
 };
 
 use self::{inode::devfs_new_inode, superblock::DEVFS_SB_OPS};
 
+#[inline(always)]
+fn devfs_inode_data(inode: &InodeRef) -> &DevfsInode {
+    inode
+        .inode()
+        .prv()
+        .cast::<DevfsInode>()
+        .expect("devfs inode must carry DevfsInode private data")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Opaque)]
 pub(super) enum DevfsNode {
     Root,
     Char(CharDevNum),
     Block(BlockDevNum),
+}
+
+impl DevfsNode {
+    fn new(ino: Ino) -> Result<Self, FsError> {
+        if ino == devfs_root_ino() {
+            return Ok(DevfsNode::Root);
+        }
+
+        let raw = ino.get();
+        let tag = raw >> DEVFS_INO_TAG_SHIFT;
+        let dev_raw = raw & ((1u64 << DEVFS_INO_TAG_SHIFT) - 1);
+
+        match tag {
+            DEVFS_INO_CHAR_TAG => Ok(DevfsNode::Char(CharDevNum::new(
+                MajorNum::from(dev_raw >> devnum::MINOR_BITS),
+                MinorNum::from(dev_raw & ((1u64 << devnum::MINOR_BITS) - 1)),
+            ))),
+            DEVFS_INO_BLOCK_TAG => Ok(DevfsNode::Block(BlockDevNum::new(
+                MajorNum::from(dev_raw >> devnum::MINOR_BITS),
+                MinorNum::from(dev_raw & ((1u64 << devnum::MINOR_BITS) - 1)),
+            ))),
+            _ => Err(FsError::NotFound),
+        }
+    }
 }
 
 const DEVFS_INO_TAG_SHIFT: u64 = 48;
@@ -27,11 +61,11 @@ mod superblock;
 
 static DEVFS: MonoOnce<Arc<FileSystem>> = unsafe { MonoOnce::new() };
 
-pub(super) fn devfs_root_ino() -> Ino {
+fn devfs_root_ino() -> Ino {
     Ino::try_from(1u64).unwrap()
 }
 
-pub(super) fn devfs_ino_for(node: DevfsNode) -> Ino {
+fn devfs_ino_for(node: DevfsNode) -> Ino {
     let raw = match node {
         DevfsNode::Root => return devfs_root_ino(),
         DevfsNode::Char(devnum) => {
@@ -45,29 +79,7 @@ pub(super) fn devfs_ino_for(node: DevfsNode) -> Ino {
     Ino::try_from(raw).unwrap()
 }
 
-pub(super) fn devfs_node_from_ino(ino: Ino) -> Result<DevfsNode, FsError> {
-    if ino == devfs_root_ino() {
-        return Ok(DevfsNode::Root);
-    }
-
-    let raw = ino.get();
-    let tag = raw >> DEVFS_INO_TAG_SHIFT;
-    let dev_raw = raw & ((1u64 << DEVFS_INO_TAG_SHIFT) - 1);
-
-    match tag {
-        DEVFS_INO_CHAR_TAG => Ok(DevfsNode::Char(CharDevNum::new(
-            MajorNum::from(dev_raw >> devnum::MINOR_BITS),
-            MinorNum::from(dev_raw & ((1u64 << devnum::MINOR_BITS) - 1)),
-        ))),
-        DEVFS_INO_BLOCK_TAG => Ok(DevfsNode::Block(BlockDevNum::new(
-            MajorNum::from(dev_raw >> devnum::MINOR_BITS),
-            MinorNum::from(dev_raw & ((1u64 << devnum::MINOR_BITS) - 1)),
-        ))),
-        _ => Err(FsError::NotFound),
-    }
-}
-
-pub(super) fn devfs_lookup_name(name: &str) -> Result<DevfsNode, FsError> {
+fn devfs_lookup_name(name: &str) -> Result<DevfsNode, FsError> {
     if matches!(name, "." | "..") {
         return Ok(DevfsNode::Root);
     }

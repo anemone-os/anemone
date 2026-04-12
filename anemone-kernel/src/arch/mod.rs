@@ -33,3 +33,5 @@ pub type PgDir = <PagingArch as PagingArchTrait>::PgDir;
 pub type Pte = <<PagingArch as PagingArchTrait>::PgDir as PgDirArch>::Pte;
 pub type TrapFrame = <TrapArch as TrapArchTrait>::TrapFrame;
 pub type TaskContext = <SchedArch as SchedArchTrait>::TaskContext;
+pub type LocalClockSource = <TimeArch as TimeArchTrait>::LocalClockSource;
+pub type LocalClockEvent = <TimeArch as TimeArchTrait>::LocalClockEvent;

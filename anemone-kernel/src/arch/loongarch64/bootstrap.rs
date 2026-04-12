@@ -28,6 +28,7 @@ use crate::{
     mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
     sync::counter::CpuSync,
+    task::clone::CloneFlags,
 };
 
 #[unsafe(no_mangle)]
@@ -230,7 +231,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     unsafe {
         // needed by percpu initialization.
         let ncpus = early_scan_cpu_count(fdt_va);
-        super::cpu::set_ncpus(ncpus);
+        super::cpu::init(ncpus, bsp_id);
         kinfoln!("anemone kernel booting on bsp #{}", bsp_id);
 
         wake_up_aps(bsp_id, ncpus);
@@ -262,21 +263,23 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
         mm::kptable::activate_kernel_mapping();
         kinfoln!("kernel mapping activated");
 
+        TimeArch::init_this_cpu();
+
         remap_boot_stack();
         BOOT_SYNC_COUNTER.sync_with_counter();
 
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
-        add_to_ready(Arc::new(
-            Task::new_kernel(
-                "bsp-kinit",
-                bsp_kinit as *const (),
-                ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
-                IntrArch::DISABLED_IRQ_FLAGS,
-                TaskFlags::NONE,
-                None,
-            )
-            .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e)),
-        ));
+        let kinit_task = Task::new_kernel(
+            "bsp-kinit",
+            bsp_kinit as *const (),
+            ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
+            IntrArch::DISABLED_IRQ_FLAGS,
+            TaskFlags::NONE,
+            CloneFlags::empty(),
+        )
+        .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e));
+        register_root_task(kinit_task.clone());
+        add_to_ready(kinit_task);
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
     }
 }
@@ -291,17 +294,19 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         install_ktrap_handler();
         mm::percpu::ap_init(ap_id);
         mm::kptable::activate_kernel_mapping();
-        add_to_ready(Arc::new(
-            Task::new_kernel(
-                "ap-kinit",
-                ap_kinit as *const (),
-                ParameterList::new(&[ap_id as u64]),
-                IntrArch::DISABLED_IRQ_FLAGS,
-                TaskFlags::NONE,
-                None,
-            )
-            .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e)),
-        ));
+
+        TimeArch::init_this_cpu();
+        let ap_kinit = Task::new_kernel(
+            "ap-kinit",
+            ap_kinit as *const (),
+            ParameterList::new(&[ap_id as u64]),
+            IntrArch::DISABLED_IRQ_FLAGS,
+            TaskFlags::NONE,
+            CloneFlags::empty(),
+        )
+        .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e));
+        ap_kinit.add_as_child(wait_for_root_task());
+        add_to_ready(ap_kinit);
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64));
     }
 }

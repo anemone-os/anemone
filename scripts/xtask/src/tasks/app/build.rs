@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use anyhow::{Context, bail};
@@ -19,10 +20,18 @@ use crate::{
 
 #[derive(Args, Debug)]
 pub struct BuildArgs {
+    #[arg(help = "Name of the app to build")]
+    pub app: String,
+
     #[arg(long, help = "Target architecture for the app build")]
     pub arch: String,
 
-    pub app: String,
+    #[arg(
+        short,
+        long,
+        help = "Whether to disassemble the built artifact for debugging"
+    )]
+    pub disasm: bool,
 
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub args: Vec<String>,
@@ -58,7 +67,7 @@ impl BuildCtx {
 pub fn run(args: BuildArgs) -> anyhow::Result<()> {
     let context = BuildCtx::new(Arch::try_from_str(&args.arch)?)?;
 
-    build_app(&args.app, &args.args, &context)?;
+    build_app(&args.app, &args.args, &context, args.disasm)?;
     Ok(())
 }
 
@@ -66,6 +75,7 @@ pub fn build_app(
     name: &str,
     extra_args: &[String],
     context: &BuildCtx,
+    disasm: bool,
 ) -> anyhow::Result<Vec<BuiltArtifactInfo>> {
     let manifest_path = Path::new("anemone-apps").join(name).join("app.toml");
     let content = fs::read_to_string(&manifest_path).with_context(|| {
@@ -106,7 +116,11 @@ pub fn build_app(
 
     let mut built = Vec::with_capacity(app.artifacts.len());
     for artifact in &app.artifacts {
-        built.push(copy_artifact(&app, &workdir, artifact, &out_dir, context)?);
+        let built_artifact = copy_artifact(&app, &workdir, artifact, &out_dir, context)?;
+        if disasm {
+            generate_artifact_disasm(&built_artifact, context)?;
+        }
+        built.push(built_artifact);
     }
 
     Ok(built)
@@ -156,6 +170,69 @@ fn copy_artifact(
         source_path,
         output_path,
     })
+}
+
+fn generate_artifact_disasm(
+    artifact: &BuiltArtifactInfo,
+    context: &BuildCtx,
+) -> anyhow::Result<()> {
+    let artifact_name = artifact.name().unwrap_or_else(|| {
+        artifact
+            .output_path
+            .as_os_str()
+            .to_str()
+            .unwrap_or("<unknown>")
+    });
+    log_progress!(
+        "DISASM",
+        &format!(
+            "Generating source disassembly for app artifact '{}'",
+            artifact_name
+        )
+    );
+
+    let output = Command::new(context.target_triple().objdump())
+        .arg("-d")
+        .arg("-S")
+        .arg(&artifact.output_path)
+        .output()
+        .with_context(|| {
+            format!(
+                "failed to run objdump for app artifact '{}'",
+                artifact.output_path.display()
+            )
+        })?;
+
+    if !output.status.success() {
+        bail!(
+            "objdump for app artifact '{}' exited with status {}",
+            artifact.output_path.display(),
+            output.status
+        );
+    }
+
+    let disasm_path = artifact_disasm_path(&artifact.output_path)?;
+    fs::write(&disasm_path, output.stdout).with_context(|| {
+        format!(
+            "failed to write disassembly for app artifact '{}' to {}",
+            artifact.output_path.display(),
+            disasm_path.display()
+        )
+    })?;
+
+    Ok(())
+}
+
+fn artifact_disasm_path(artifact_path: &Path) -> anyhow::Result<PathBuf> {
+    let file_name = artifact_path.file_name().with_context(|| {
+        format!(
+            "artifact '{}' has no file name for disassembly output",
+            artifact_path.display()
+        )
+    })?;
+    let mut disasm_name = file_name.to_os_string();
+    disasm_name.push(".disasm");
+    Ok(artifact_path.with_file_name(disasm_name))
 }
 
 /// app.toml/artifact/path

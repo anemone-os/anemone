@@ -70,8 +70,22 @@ pub fn anony_new_inode(
     Ok(PathRef::new(root.mount().clone(), Arc::new(dentry)))
 }
 
+/// Internally this calls [InodeRef::open] to get file ops and private data.
+///
+/// For a more flexible version that takes an explicitly constructed
+/// [OpenedFile], see [anony_open_with].
 pub fn anony_open(path: &PathRef) -> Result<File, FsError> {
     let OpenedFile { file_ops, prv } = path.inode().open()?;
+
+    Ok(File::new(path.clone(), file_ops, prv))
+}
+
+/// Create a [File] from an explicitly constructed [OpenedFile]. This is useful
+/// for those cases where the file ops and private data are not directly derived
+/// from the inode, e.g. when creating a pipe file which may be either a read
+/// end or a write end, and thus has different file ops and private data.
+pub fn anony_open_with(path: &PathRef, state: OpenedFile) -> Result<File, FsError> {
+    let OpenedFile { file_ops, prv } = state;
 
     Ok(File::new(path.clone(), file_ops, prv))
 }

@@ -81,7 +81,6 @@ pub fn register_syscall_handlers() {
 /// For syscall occurring in kernel space, arch-specific code should just panic
 /// immediately, and this function should never be called.
 pub fn handle_syscall(trapframe: &mut TrapFrame) {
-    let intr_guard = IntrGuard::new(true); // enable intr
     let sysno = unsafe { trapframe.syscall_no() };
 
     let handler = SYSCALL_TABLE
@@ -121,5 +120,4 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) {
         trapframe.set_syscall_ret_val(retval);
     }
     trapframe.advance_pc();
-    drop(intr_guard);
 }

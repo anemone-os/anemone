@@ -126,7 +126,7 @@ impl<T> MonoOnce<T> {
         }
     }
 
-    /// Create a new [`MonoOnce`] with the inner data already initialized.
+    /// Create a new [`MonoOnce`] with the inner data set to the given value.
     ///
     /// This does not make any guarantee on the initialization of the inner
     /// data, and is only a convenience function for cases where the inner data

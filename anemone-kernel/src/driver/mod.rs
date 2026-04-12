@@ -25,6 +25,7 @@ mod block;
 mod clock_source;
 pub(crate) mod net;
 mod power;
+mod rtc;
 mod serial;
 pub use serial::ns16550a::Ns16550ARegisters;
 pub(crate) mod virtio;

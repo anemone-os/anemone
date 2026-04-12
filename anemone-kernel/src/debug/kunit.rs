@@ -98,12 +98,12 @@ pub struct KUnit {
 }
 
 pub fn handle_percpu_ipi_test(test_fn: fn()) {
-    with_intr_enabled(|_| {
-        PERCPU_KUNIT_BARRIER.mark_ready();
-        PERCPU_KUNIT_BARRIER.wait_start();
-        test_fn();
-        PERCPU_KUNIT_BARRIER.mark_done();
-    });
+    let guard = IntrGuard::new(true);
+    PERCPU_KUNIT_BARRIER.mark_ready();
+    PERCPU_KUNIT_BARRIER.wait_start();
+    test_fn();
+    PERCPU_KUNIT_BARRIER.mark_done();
+    drop(guard);
 }
 
 pub fn run_percpu_test(test_fn: fn()) {

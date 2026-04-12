@@ -80,11 +80,11 @@ pub trait PagingArchTrait: Sized {
     /// This function should always do a TLB shootdown.
     unsafe fn activate_addr_space(table: &PageTable);
 
-    /// Perform a TLB shootdown for the given virtual address in all virtual
+    /// Perform a TLB shootdown for the given virtual page num in all virtual
     /// address spaces on current core.
     ///
     /// TODO: extend this to support ASID/PCID-based shootdowns.
-    fn tlb_shootdown(vaddr: VirtAddr);
+    fn tlb_shootdown(vpn: VirtPageNum);
 
     /// Perform a TLB shootdown for the whole address space, in all virtual
     /// address spaces on current core.

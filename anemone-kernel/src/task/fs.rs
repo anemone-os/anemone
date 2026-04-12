@@ -5,14 +5,7 @@
 
 use crate::prelude::*;
 
-// #[derive(Debug)]
-// pub struct FsState {
-//     root: PathRef,
-//     cwd: PathRef,
-//     // TODO: umask
-// }
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FsState {
     Hanging,
     Ready { root: PathRef, cwd: PathRef },
@@ -66,6 +59,19 @@ impl FsState {
             Self::Ready { cwd: c, .. } => *c = cwd,
         }
     }
+
+    /// Currently this implementation is the same as default `clone`. But it's
+    /// still necessary to have a separate function to emphasize the semantic of
+    /// this operation.
+    pub fn create_copy(&self) -> Self {
+        match self {
+            Self::Hanging => Self::Hanging,
+            Self::Ready { root, cwd } => Self::Ready {
+                root: root.clone(),
+                cwd: cwd.clone(),
+            },
+        }
+    }
 }
 
 impl Task {
@@ -74,9 +80,23 @@ impl Task {
         self.fs_state.clone()
     }
 
-    /// Set a brand new filesystem state for this task.
+    /// Replace the contents of the current filesystem state object.
+    ///
+    /// If this task is sharing the same fs state handle with other tasks, they
+    /// will observe the updated contents as well.
+    ///
+    /// Note the semantic difference between this function and
+    /// [`Self::replace_fs_state_handle`].
     pub fn set_fs_state(&self, fs_state: FsState) {
         *self.fs_state.write() = fs_state;
+    }
+
+    /// Replace the shared filesystem state handle.
+    ///
+    /// This should only be used while the task is still uniquely owned, such
+    /// as during task construction or clone setup.
+    pub(super) fn replace_fs_state_handle(&mut self, fs_state: Arc<RwLock<FsState>>) {
+        self.fs_state = fs_state;
     }
 
     pub fn root(&self) -> PathRef {
@@ -99,9 +119,9 @@ impl Task {
         let fs_state = self.fs_state();
         let fs_state = fs_state.read();
         if path.is_absolute() {
-            resolve_from(fs_state.root(), path)
+            vfs_lookup_from(&fs_state.root(), path)
         } else {
-            resolve_from(fs_state.cwd(), path)
+            vfs_lookup_from(&fs_state.cwd(), path)
         }
     }
 

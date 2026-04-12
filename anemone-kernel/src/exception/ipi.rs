@@ -17,7 +17,7 @@ use crate::prelude::*;
 #[derive(Debug, Clone, Copy)]
 pub enum IpiPayload {
     TlbShootdown {
-        vaddr: Option<VirtAddr>,
+        vpn: Option<VirtPageNum>,
     },
     #[cfg(feature = "kunit")]
     RunKUnitPerCpu {
@@ -162,9 +162,9 @@ pub fn handle_ipi() {
                 break;
             };
             match msg.payload {
-                TlbShootdown { vaddr } => {
-                    if let Some(vaddr) = vaddr {
-                        PagingArch::tlb_shootdown(vaddr);
+                TlbShootdown { vpn } => {
+                    if let Some(vpn) = vpn {
+                        PagingArch::tlb_shootdown(vpn);
                     } else {
                         PagingArch::tlb_shootdown_all();
                     }
@@ -186,20 +186,20 @@ pub fn handle_ipi() {
     })
 }
 
-pub struct IpiGuard {
-    vaddr: Option<VirtAddr>,
+pub struct TlbShootdownGuard {
+    vpn: Option<VirtPageNum>,
 }
 
-impl IpiGuard {
-    pub fn new(vaddr: Option<VirtAddr>) -> Self {
-        Self { vaddr }
+impl TlbShootdownGuard {
+    pub fn new(vpn: Option<VirtPageNum>) -> Self {
+        Self { vpn }
     }
 }
 
-impl Drop for IpiGuard {
+impl Drop for TlbShootdownGuard {
     fn drop(&mut self) {
-        if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { vaddr: self.vaddr }) {
-            kwarningln!("failed to send TLB shootdown IPI in IpiGuard: {e:?}");
+        if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { vpn: self.vpn }) {
+            kwarningln!("failed to send TLB shootdown IPI in TlbShootdownGuard: {e:?}");
         }
     }
 }

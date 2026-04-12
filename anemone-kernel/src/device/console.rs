@@ -92,6 +92,10 @@ pub fn register_console(ops: Arc<dyn Console>, mut flags: ConsoleFlags) {
     if flags.contains(ConsoleFlags::REPLAY) {
         let it = KERNEL_LOG.iter_weak();
         for record in it {
+            if !record.level.emits_to_console() {
+                continue;
+            }
+
             let full_msg_str =
                 core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
             ops.output(full_msg_str);
@@ -184,11 +188,12 @@ fn console_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
 static CONSOLE_STDIN_INODE_OPS: InodeOps = InodeOps {
     lookup: |_, _| Err(FsError::NotSupported),
     create: |_, _, _| Err(FsError::NotSupported),
-    mkdir: |_, _, _| Err(FsError::NotSupported),
+    symlink: |_, _, _| Err(FsError::NotSupported),
     unlink: |_, _| Err(FsError::NotSupported),
     rmdir: |_, _| Err(FsError::NotSupported),
     link: |_, _, _| Err(FsError::NotSupported),
     get_attr: console_get_attr,
+    read_link: |_| Err(FsError::NotSymlink),
     open: |_| {
         Ok(OpenedFile {
             file_ops: &CONSOLE_STDIN_FILE_OPS,
@@ -200,11 +205,12 @@ static CONSOLE_STDIN_INODE_OPS: InodeOps = InodeOps {
 static CONSOLE_STDOUT_INODE_OPS: InodeOps = InodeOps {
     lookup: |_, _| Err(FsError::NotSupported),
     create: |_, _, _| Err(FsError::NotSupported),
-    mkdir: |_, _, _| Err(FsError::NotSupported),
+    symlink: |_, _, _| Err(FsError::NotSupported),
     unlink: |_, _| Err(FsError::NotSupported),
     rmdir: |_, _| Err(FsError::NotSupported),
     link: |_, _, _| Err(FsError::NotSupported),
     get_attr: console_get_attr,
+    read_link: |_| Err(FsError::NotSymlink),
     open: |_| {
         Ok(OpenedFile {
             file_ops: &CONSOLE_STDOUT_FILE_OPS,

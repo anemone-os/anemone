@@ -5,7 +5,7 @@
 
 use core::{mem::size_of, ptr::NonNull};
 
-use anemone_abi::fs::linux::dirent::{DT_CHR, DT_DIR, DT_REG};
+use anemone_abi::fs::linux::dirent::{DT_CHR, DT_DIR, DT_FIFO, DT_LNK, DT_REG};
 
 use crate::{
     prelude::{dt::UserWritePtr, *},
@@ -29,6 +29,8 @@ fn dirent64_dtype(ty: InodeType) -> u8 {
         InodeType::Regular => DT_REG,
         InodeType::Dir => DT_DIR,
         InodeType::Dev => DT_CHR,
+        InodeType::Symlink => DT_LNK,
+        InodeType::Fifo => DT_FIFO,
     }
 }
 
@@ -57,13 +59,17 @@ fn sys_getdents64(
     count: u32,
 ) -> Result<u64, SysError> {
     with_current_task(|task| {
+        let usp = task
+            .clone_uspace()
+            .expect("user task should have a user space");
+
         let fd = task.get_fd(fd).ok_or(KernelError::BadFileDescriptor)?;
         let file = fd.vfs_file();
 
         let buf_len = count as usize;
-        let mut slice = unsafe { dirp.slice(buf_len, task)? };
-        let buffer =
-            NonNull::new(slice.as_mut_slice_ptr()).expect("user slice pointer should not be null");
+        let mut slice = dirp.slice(buf_len);
+        let buffer = NonNull::new(slice.validate_mut_with(&mut usp.write())?)
+            .expect("user slice pointer should not be null");
         let mut writer = unsafe { ByteWriter::new(buffer) };
 
         let mut dir_ctx = file.dir_context()?;

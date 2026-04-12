@@ -9,9 +9,10 @@
         // kernel
         "Cargo.toml",
         // other crates
-        // "scripts/xtask/Cargo.toml",
-        //"anemone-rs/Cargo.toml",
-        //"anemone-apps/user-test/Cargo.toml",
+        //"scripts/xtask/Cargo.toml",
+        // "anemone-rs/Cargo.toml",
+        // "anemone-apps/user-test/Cargo.toml",
+        // "anemone-apps/init/Cargo.toml",
         // "anemone-kernel/crates/buddy-system/fuzz/Cargo.toml",
     ],
     "rust-analyzer.cargo.target": "riscv64gc-unknown-none-elf",

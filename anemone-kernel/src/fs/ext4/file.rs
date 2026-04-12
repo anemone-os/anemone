@@ -107,3 +107,10 @@ pub(super) static EXT4_DIR_FILE_OPS: FileOps = FileOps {
     seek: |_, _| Err(FsError::IsDir),
     iterate: ext4_iterate,
 };
+
+pub(super) static EXT4_SYMLINK_FILE_OPS: FileOps = FileOps {
+    read: |_, _| Err(FsError::NotSupported),
+    write: |_, _| Err(FsError::NotSupported),
+    seek: |_, _| Err(FsError::NotSupported),
+    iterate: |_, _| Err(FsError::NotDir),
+};
