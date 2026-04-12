@@ -136,7 +136,8 @@ fn devfs_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
 
 pub(super) static DEVFS_ROOT_INODE_OPS: InodeOps = InodeOps {
     lookup: devfs_lookup,
-    create: |_, _, _| Err(FsError::NotSupported),
+    touch: |_, _, _| Err(FsError::NotSupported),
+    mkdir: |_, _, _| Err(FsError::NotSupported),
     symlink: |_, _, _| Err(FsError::NotSupported),
     link: |_, _, _| Err(FsError::NotSupported),
     unlink: |_, _| Err(FsError::NotSupported),
@@ -148,7 +149,8 @@ pub(super) static DEVFS_ROOT_INODE_OPS: InodeOps = InodeOps {
 
 pub(super) static DEVFS_DEV_INODE_OPS: InodeOps = InodeOps {
     lookup: |_, _| Err(FsError::NotDir),
-    create: |_, _, _| Err(FsError::NotDir),
+    touch: |_, _, _| Err(FsError::NotDir),
+    mkdir: |_, _, _| Err(FsError::NotDir),
     symlink: |_, _, _| Err(FsError::NotDir),
     link: |_, _, _| Err(FsError::NotDir),
     unlink: |_, _| Err(FsError::NotDir),

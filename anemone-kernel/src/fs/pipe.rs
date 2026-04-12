@@ -24,7 +24,8 @@ struct Pipe {}
 
 static PIPE_INODE_OPS: InodeOps = InodeOps {
     lookup: |_, _| Err(FsError::NotDir),
-    create: |_, _, _| Err(FsError::NotDir),
+    touch: |_, _, _| Err(FsError::NotDir),
+    mkdir: |_, _, _| Err(FsError::NotDir),
     symlink: |_, _, _| Err(FsError::NotDir),
     link: |_, _, _| Err(FsError::NotDir),
     unlink: |_, _| Err(FsError::NotDir),

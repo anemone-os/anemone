@@ -82,7 +82,8 @@ fn anony_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
 
 static ANONY_DIR_INODE_OPS: InodeOps = InodeOps {
     lookup: |_, _| Err(FsError::NotSupported),
-    create: |_, _, _| Err(FsError::NotSupported),
+    touch: |_, _, _| Err(FsError::NotSupported),
+    mkdir: |_, _, _| Err(FsError::NotSupported),
     symlink: |_, _, _| Err(FsError::NotSupported),
     link: |_, _, _| Err(FsError::NotSupported),
     unlink: |_, _| Err(FsError::NotSupported),
