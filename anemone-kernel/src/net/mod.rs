@@ -1,35 +1,53 @@
 //! Minimal kernel network stack built on smoltcp.
 //!
 //! This module adapts smoltcp to the kernel environment, providing:
-//! - A `smoltcp::phy::Device` implementation backed by virtio-net
-//! - An `Interface` with static IPv4 configuration
+//! - A `smoltcp::phy::Device` implementation backed by [`crate::device::net::NetDev`]
+//! - Per-interface `Interface` with static IPv4 configuration
 //! - IRQ-driven polling for ARP and ICMP echo (ping) processing
 
-use alloc::vec::Vec;
+use alloc::{boxed::Box, string::String, vec, vec::Vec};
 
 use smoltcp::{
-    iface::{Config, Interface, SocketSet, SocketStorage},
-    phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken},
+    iface::{Config, Interface, PollResult, SocketHandle, SocketSet, SocketStorage},
+    phy::{ChecksumCapabilities, Device, DeviceCapabilities, RxToken, TxToken},
+    socket::raw,
     time::Instant as SmolInstant,
-    wire::{EthernetAddress, HardwareAddress, IpCidr, Ipv4Address, Ipv4Cidr},
+    wire::{
+        EthernetAddress, HardwareAddress, Icmpv4Packet, Icmpv4Repr, IpCidr, IpProtocol, IpVersion,
+        Ipv4Address, Ipv4Cidr, Ipv4Packet, Ipv4Repr,
+    },
 };
-use virtio_drivers::{device::net::VirtIONet, transport::SomeTransport};
 
-use crate::{driver::virtio::VirtIOHalImpl, prelude::*};
+use crate::{
+    device::{
+        error::DevError,
+        net::{get_netdev, NetDev, NetDevClass, NetDevRegistration, LoopbackNetDev, LOOPBACK_MAC},
+    },
+    prelude::*,
+};
 
-const QUEUE_SIZE: usize = crate::driver::net::virtio_net::QUEUE_SIZE;
-
-const DEFAULT_IP: Ipv4Address = Ipv4Address::new(10, 0, 2, 15);
+const DEFAULT_IP: Ipv4Address = Ipv4Address::new(192, 168, 100, 2);
 const DEFAULT_PREFIX_LEN: u8 = 24;
 
-type VirtIONetDev = VirtIONet<VirtIOHalImpl, SomeTransport<'static>, QUEUE_SIZE>;
+/// Slirp “host” address from the guest; must match QEMU `-netdev user,host=...`
+/// in `conf/platforms/qemu-virt-rv64.toml`.
+const QEMU_USER_HOST: Ipv4Address = Ipv4Address::new(192, 168, 100, 1);
+
+const LOOPBACK_IP: Ipv4Address = Ipv4Address::new(127, 0, 0, 1);
+const LOOPBACK_PREFIX_LEN: u8 = 8;
 
 // ---------------------------------------------------------------------------
 // smoltcp phy::Device adapter
 // ---------------------------------------------------------------------------
 
 struct NetDeviceAdapter {
-    inner: Arc<SpinLock<VirtIONetDev>>,
+    netdev: Arc<dyn NetDev>,
+}
+
+impl NetDeviceAdapter {
+    fn netdev(&self) -> Arc<dyn NetDev> {
+        self.netdev.clone()
+    }
 }
 
 struct NetRxToken {
@@ -37,7 +55,7 @@ struct NetRxToken {
 }
 
 struct NetTxToken {
-    inner: Arc<SpinLock<VirtIONetDev>>,
+    netdev: Arc<dyn NetDev>,
 }
 
 impl RxToken for NetRxToken {
@@ -54,12 +72,13 @@ impl TxToken for NetTxToken {
     where
         F: FnOnce(&mut [u8]) -> R,
     {
-        let mut dev = self.inner.lock_irqsave();
-        let mut tx_buf = dev.new_tx_buffer(len);
-        let result = f(tx_buf.packet_mut());
-        if let Err(e) = dev.send(tx_buf) {
-            kerrln!("net: tx failed: {e}");
-        }
+        let mut buf = vec![0u8; len];
+        let result = f(&mut buf);
+        self.netdev.with_phy_mut(&mut |phy| {
+            if phy.send_raw(&buf).is_err() {
+                kerrln!("net: tx failed on send_raw");
+            }
+        });
         result
     }
 }
@@ -72,60 +91,58 @@ impl Device for NetDeviceAdapter {
         &mut self,
         _timestamp: SmolInstant,
     ) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
-        let mut dev = self.inner.lock_irqsave();
-        if !dev.can_recv() {
-            return None;
-        }
-        let rx_buf = dev.receive().ok()?;
-        let data = rx_buf.packet().to_vec();
-        if dev.recycle_rx_buffer(rx_buf).is_err() {
-            kerrln!("net: failed to recycle rx buffer");
-            return None;
-        }
-        drop(dev);
-
+        let mut frame: Option<Vec<u8>> = None;
+        self.netdev.with_phy_mut(&mut |phy| {
+            frame = phy.try_recv_frame();
+        });
+        let data = frame?;
         Some((
             NetRxToken { data },
             NetTxToken {
-                inner: self.inner.clone(),
+                netdev: self.netdev.clone(),
             },
         ))
     }
 
     fn transmit(&mut self, _timestamp: SmolInstant) -> Option<Self::TxToken<'_>> {
-        let dev = self.inner.lock_irqsave();
-        if !dev.can_send() {
+        let mut can = false;
+        self.netdev.with_phy_mut(&mut |phy| {
+            can = phy.can_send();
+        });
+        if !can {
             return None;
         }
-        drop(dev);
         Some(NetTxToken {
-            inner: self.inner.clone(),
+            netdev: self.netdev.clone(),
         })
     }
 
     fn capabilities(&self) -> DeviceCapabilities {
         let mut caps = DeviceCapabilities::default();
-        caps.max_transmission_unit = 1514;
-        caps.medium = Medium::Ethernet;
+        self.netdev.with_phy_mut(&mut |phy| {
+            caps = phy.capabilities();
+        });
         caps
     }
 }
 
 // ---------------------------------------------------------------------------
-// Network stack singleton
+// Network stack: one smoltcp interface per attached netdev
 // ---------------------------------------------------------------------------
 
 struct NetStack {
+    name: String,
     device: NetDeviceAdapter,
     iface: Interface,
     sockets: SocketSet<'static>,
+    icmp_raw_handle: SocketHandle,
 }
 
 // Safety: NetStack fields are individually Send. The SocketSet uses 'static
 // storage. Access is serialized by the SpinLock.
 unsafe impl Send for NetStack {}
 
-static NET_STACK: SpinLock<Option<NetStack>> = SpinLock::new(None);
+static NET_STACKS: SpinLock<Vec<NetStack>> = SpinLock::new(Vec::new());
 
 fn now_smoltcp() -> SmolInstant {
     let ticks = TimeArch::current_ticks();
@@ -134,56 +151,225 @@ fn now_smoltcp() -> SmolInstant {
     SmolInstant::from_micros(micros)
 }
 
-/// Attach a VirtIO-net device to the network stack.
-///
-/// Called by the virtio-net driver after successful probe. Sets up the smoltcp
-/// Interface with a static IPv4 address and prepares the stack for IRQ-driven
-/// polling.
-pub fn attach_device(dev: Arc<SpinLock<VirtIONetDev>>, mac: [u8; 6]) {
-    let mut device = NetDeviceAdapter { inner: dev };
+const ICMP_SOCKETS: usize = 16;
+const ICMP_PKT_BUF_LEN: usize = 1536;
+const MAX_EGRESS_FLUSH_ROUNDS: usize = 4;
 
+fn make_raw_packet_buffer() -> raw::PacketBuffer<'static> {
+    let metadata: &'static mut [raw::PacketMetadata] =
+        Box::leak(vec![raw::PacketMetadata::EMPTY; ICMP_SOCKETS].into_boxed_slice());
+    let payload: &'static mut [u8] =
+        Box::leak(vec![0u8; ICMP_SOCKETS * ICMP_PKT_BUF_LEN].into_boxed_slice());
+    raw::PacketBuffer::new(metadata, payload)
+}
+
+fn build_icmpv4_echo_reply(frame: &[u8]) -> Option<Vec<u8>> {
+    let ipv4_pkt = Ipv4Packet::new_checked(frame).ok()?;
+    if ipv4_pkt.next_header() != IpProtocol::Icmp {
+        return None;
+    }
+    let ipv4_repr = Ipv4Repr::parse(&ipv4_pkt, &ChecksumCapabilities::ignored()).ok()?;
+    let icmp_pkt = Icmpv4Packet::new_checked(ipv4_pkt.payload()).ok()?;
+    let icmp_repr = Icmpv4Repr::parse(&icmp_pkt, &ChecksumCapabilities::ignored()).ok()?;
+
+    let (ident, seq_no, data) = match icmp_repr {
+        Icmpv4Repr::EchoRequest { ident, seq_no, data } => (ident, seq_no, data),
+        _ => return None,
+    };
+
+    let icmp_reply = Icmpv4Repr::EchoReply {
+        ident,
+        seq_no,
+        data,
+    };
+    let ip_reply = Ipv4Repr {
+        src_addr: ipv4_repr.dst_addr,
+        dst_addr: ipv4_repr.src_addr,
+        next_header: IpProtocol::Icmp,
+        payload_len: icmp_reply.buffer_len(),
+        hop_limit: 64,
+    };
+
+    let mut out = vec![0u8; ip_reply.buffer_len() + icmp_reply.buffer_len()];
+    {
+        let mut out_ip = Ipv4Packet::new_unchecked(&mut out);
+        ip_reply.emit(&mut out_ip, &ChecksumCapabilities::default());
+        let mut out_icmp = Icmpv4Packet::new_unchecked(out_ip.payload_mut());
+        icmp_reply.emit(&mut out_icmp, &ChecksumCapabilities::default());
+    }
+    Some(out)
+}
+
+fn build_stack(netdev: Arc<dyn NetDev>, name: &str) -> Result<NetStack, DevError> {
+    let mac = netdev.mac().unwrap_or(LOOPBACK_MAC);
     let hw_addr = HardwareAddress::Ethernet(EthernetAddress(mac));
     let mut config = Config::new(hw_addr);
     config.random_seed = TimeArch::current_ticks();
 
+    let mut device = NetDeviceAdapter {
+        netdev: netdev.clone(),
+    };
     let now = now_smoltcp();
     let mut iface = Interface::new(config, &mut device, now);
 
-    iface.update_ip_addrs(|addrs| {
-        addrs
-            .push(IpCidr::Ipv4(Ipv4Cidr::new(DEFAULT_IP, DEFAULT_PREFIX_LEN)))
-            .unwrap();
-    });
+    match netdev.class() {
+        NetDevClass::Ethernet => {
+            iface.update_ip_addrs(|addrs| {
+                addrs
+                    .push(IpCidr::Ipv4(Ipv4Cidr::new(DEFAULT_IP, DEFAULT_PREFIX_LEN)))
+                    .unwrap();
+            });
+            if let Err(e) = iface
+                .routes_mut()
+                .add_default_ipv4_route(QEMU_USER_HOST)
+            {
+                kerrln!("net: failed to add default ipv4 route: {}", e);
+            }
+        }
+        NetDevClass::Loopback => {
+            iface.update_ip_addrs(|addrs| {
+                addrs
+                    .push(IpCidr::Ipv4(Ipv4Cidr::new(LOOPBACK_IP, LOOPBACK_PREFIX_LEN)))
+                    .unwrap();
+            });
+        }
+    }
 
-    let sockets = SocketSet::new(Vec::<SocketStorage<'static>>::new());
+    let mut sockets = SocketSet::new(Vec::<SocketStorage<'static>>::new());
+    let icmp_raw_handle = sockets.add(raw::Socket::new(
+        Some(IpVersion::Ipv4),
+        Some(IpProtocol::Icmp),
+        make_raw_packet_buffer(),
+        make_raw_packet_buffer(),
+    ));
 
-    *NET_STACK.lock_irqsave() = Some(NetStack {
+    Ok(NetStack {
+        name: String::from(name),
         device,
         iface,
         sockets,
-    });
-
-    kinfoln!(
-        "net: stack attached, ip={}/{}",
-        DEFAULT_IP,
-        DEFAULT_PREFIX_LEN
-    );
+        icmp_raw_handle,
+    })
 }
 
-/// Drive the smoltcp state machine.
+/// Attach a registered netdev (by canonical name) to the smoltcp stack.
 ///
-/// Processes all pending ingress packets (ARP, IPv4/ICMP) and transmits any
-/// queued egress packets (ARP replies, ICMP echo replies).
+/// Call after [`crate::device::net::register_net_device`]. The `name` must match
+/// the return value from registration.
+pub fn attach_netdev_by_name(name: &str) -> Result<(), DevError> {
+    let netdev = get_netdev(name).ok_or(DevError::NoSuchDevice)?;
+
+    let mut stacks = NET_STACKS.lock_irqsave();
+    if stacks.iter().any(|s| s.name == name) {
+        return Err(DevError::DevAlreadyRegistered);
+    }
+
+    let stack = build_stack(netdev, name)?;
+    let class = stack.device.netdev().class();
+    stacks.push(stack);
+
+    match class {
+        NetDevClass::Ethernet => {
+            kinfoln!(
+                "net: stack attached on {} ip={}/{} gateway={}",
+                name,
+                DEFAULT_IP,
+                DEFAULT_PREFIX_LEN,
+                QEMU_USER_HOST,
+            );
+        }
+        NetDevClass::Loopback => {
+            kinfoln!(
+                "net: stack attached on {} ip={}/{}",
+                name,
+                LOOPBACK_IP,
+                LOOPBACK_PREFIX_LEN
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Drive the smoltcp state machine for every attached interface.
 ///
-/// Called from the virtio-net IRQ handler after acknowledging the device
-/// interrupt.
+/// Processes pending ingress and transmits queued egress. Typically called from
+/// a NIC IRQ handler after the device acknowledges the interrupt.
 pub fn poll_network() {
-    let mut guard = NET_STACK.lock_irqsave();
-    let Some(stack) = guard.as_mut() else {
+    let mut stacks = NET_STACKS.lock_irqsave();
+    if stacks.is_empty() {
         return;
-    };
-    let now = now_smoltcp();
-    stack
-        .iface
-        .poll(now, &mut stack.device, &mut stack.sockets);
+    }
+
+    let mut req = 0usize;
+    let mut rsp = 0usize;
+    let mut poll_changed = 0usize;
+    let mut flush_rounds = 0usize;
+
+    for stack in stacks.iter_mut() {
+        for round in 0..=MAX_EGRESS_FLUSH_ROUNDS {
+            let now = now_smoltcp();
+            if matches!(
+                stack
+                    .iface
+                    .poll(now, &mut stack.device, &mut stack.sockets),
+                PollResult::SocketStateChanged
+            ) {
+                poll_changed += 1;
+            }
+
+            let mut queued_this_round = 0usize;
+            {
+                let socket = stack
+                    .sockets
+                    .get_mut::<raw::Socket>(stack.icmp_raw_handle);
+                while socket.can_recv() {
+                    let frame = match socket.recv() {
+                        Ok(frame) => frame.to_vec(),
+                        Err(_) => break,
+                    };
+                    if let Some(reply) = build_icmpv4_echo_reply(&frame) {
+                        req += 1;
+                        if socket.send_slice(&reply).is_ok() {
+                            rsp += 1;
+                            queued_this_round += 1;
+                        } else {
+                            kerrln!("net: failed to enqueue icmp echo reply");
+                        }
+                    }
+                }
+            }
+
+            if queued_this_round == 0 {
+                break;
+            }
+            if round < MAX_EGRESS_FLUSH_ROUNDS {
+                flush_rounds += 1;
+            }
+        }
+    }
+
+    if req > 0 || poll_changed > 0 {
+        kinfoln!(
+            "net: handled {req} icmp echo request(s), queued {rsp} reply(ies), egress_flush_rounds={flush_rounds}, poll_changed={poll_changed}"
+        );
+    }
+}
+
+#[initcall(probe)]
+fn loopback_init() {
+    let dev = Arc::new(LoopbackNetDev::new());
+    match crate::device::net::register_net_device(NetDevRegistration {
+        class: NetDevClass::Loopback,
+        device: dev.clone(),
+    }) {
+        Ok(name) => {
+            if let Err(e) = attach_netdev_by_name(name.as_str()) {
+                kerrln!("net: failed to attach loopback: {:?}", e);
+            }
+        }
+        Err(e) => {
+            knoticeln!("net: loopback register failed: {:?}", e);
+        }
+    }
 }

@@ -1,11 +1,13 @@
 //! VirtIO network driver.
 
+use smoltcp::phy::{DeviceCapabilities, Medium};
 use virtio_drivers::{device::net::VirtIONet, transport::SomeTransport};
 
 use crate::{
     device::{
         bus::virtio::VirtIODriver,
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
+        net::{LinkState, NetDev, NetDevClass, NetDevRegistration, NetPhyIo, register_net_device},
     },
     driver::virtio::VirtIOHalImpl,
     prelude::*,
@@ -17,15 +19,90 @@ const NET_BUF_LEN: usize = 2048;
 
 pub type VirtIONetDev = VirtIONet<VirtIOHalImpl, SomeTransport<'static>, QUEUE_SIZE>;
 
+/// Wraps virtio-net hardware; exposed to the stack as [`NetDev`].
+struct VirtioNetDev {
+    inner: Arc<SpinLock<VirtIONetDev>>,
+}
+
+struct VirtioNetPhy<'a> {
+    dev: &'a mut VirtIONetDev,
+}
+
+impl NetPhyIo for VirtioNetPhy<'_> {
+    fn try_recv_frame(&mut self) -> Option<Vec<u8>> {
+        if !self.dev.can_recv() {
+            return None;
+        }
+        let rx_buf = self.dev.receive().ok()?;
+        let data = rx_buf.packet().to_vec();
+        if self.dev.recycle_rx_buffer(rx_buf).is_err() {
+            kerrln!("net: failed to recycle rx buffer");
+            return None;
+        }
+        Some(data)
+    }
+
+    fn can_send(&self) -> bool {
+        self.dev.can_send()
+    }
+
+    fn send_raw(&mut self, frame: &[u8]) -> Result<(), ()> {
+        let mut tx_buf = self.dev.new_tx_buffer(frame.len());
+        tx_buf.packet_mut().copy_from_slice(frame);
+        self.dev.send(tx_buf).map_err(|_| ())
+    }
+
+    fn capabilities(&self) -> DeviceCapabilities {
+        let mut caps = DeviceCapabilities::default();
+        caps.max_transmission_unit = 1514;
+        caps.medium = Medium::Ethernet;
+        caps
+    }
+
+    fn ack_interrupt(&mut self) {
+        self.dev.ack_interrupt();
+    }
+
+    fn disable_interrupts(&mut self) {
+        self.dev.disable_interrupts();
+    }
+}
+
+impl NetDev for VirtioNetDev {
+    fn class(&self) -> NetDevClass {
+        NetDevClass::Ethernet
+    }
+
+    fn mac(&self) -> Option<[u8; 6]> {
+        Some(self.inner.lock_irqsave().mac_address())
+    }
+
+    fn mtu(&self) -> usize {
+        1500
+    }
+
+    fn link_state(&self) -> LinkState {
+        LinkState::Up
+    }
+
+    fn with_phy_mut(&self, f: &mut dyn FnMut(&mut dyn NetPhyIo)) {
+        let mut guard = self.inner.lock_irqsave();
+        let mut phy = VirtioNetPhy {
+            dev: &mut *guard,
+        };
+        f(&mut phy);
+    }
+}
+
 #[derive(Opaque)]
 struct VirtIONetState {
-    net: Arc<SpinLock<VirtIONetDev>>,
+    netdev: Arc<VirtioNetDev>,
 }
 
 impl Clone for VirtIONetState {
     fn clone(&self) -> Self {
         Self {
-            net: self.net.clone(),
+            netdev: self.netdev.clone(),
         }
     }
 }
@@ -57,15 +134,22 @@ impl DriverOps for VirtIONetDriver {
             },
         )?;
 
-        let mac = net.mac_address();
-        let dev_name = device::net::register_net_device(mac, 1500);
+        let inner = Arc::new(SpinLock::new(net));
+        let netdev = Arc::new(VirtioNetDev {
+            inner: inner.clone(),
+        });
+
+        let dev_name = register_net_device(NetDevRegistration {
+            class: NetDevClass::Ethernet,
+            device: netdev.clone(),
+        })?;
 
         let state = VirtIONetState {
-            net: Arc::new(SpinLock::new(net)),
+            netdev: netdev.clone(),
         };
 
         vdev.request_irq(&IRQ_HANDLER, Some(AnyOpaque::new(state.clone())))?;
-        vdev.set_drv_state(AnyOpaque::new(state.clone()));
+        vdev.set_drv_state(AnyOpaque::new(state));
 
         kinfoln!(
             "virtio-net device {} registered as {}",
@@ -73,7 +157,7 @@ impl DriverOps for VirtIONetDriver {
             dev_name
         );
 
-        crate::net::attach_device(state.net.clone(), mac);
+        crate::net::attach_netdev_by_name(dev_name.as_str())?;
 
         Ok(())
     }
@@ -83,7 +167,9 @@ impl DriverOps for VirtIONetDriver {
             .drv_state()
             .cast::<VirtIONetState>()
             .expect("virtio-net device should have VirtIONetState as driver state");
-        state.net.lock_irqsave().disable_interrupts();
+        state
+            .netdev
+            .with_phy_mut(&mut |phy| phy.disable_interrupts());
     }
 
     fn as_virtio_driver(&self) -> Option<&dyn VirtIODriver> {
@@ -103,7 +189,9 @@ fn irq_handler(prv_data: &AnyOpaque) {
     let state = prv_data
         .cast::<VirtIONetState>()
         .expect("virtio-net irq: invalid private data");
-    state.net.lock_irqsave().ack_interrupt();
+    state
+        .netdev
+        .with_phy_mut(&mut |phy| phy.ack_interrupt());
     crate::net::poll_network();
 }
 

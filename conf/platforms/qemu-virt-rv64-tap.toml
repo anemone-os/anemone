@@ -1,0 +1,54 @@
+# qemu-virt-rv64 with TAP (optional): use when you need the *host* to reach the guest
+# at 192.168.100.2 (e.g. `ping 192.168.100.2` from Linux). Not needed for default dev.
+#
+# Prereq (Linux host, once per boot or via a script):
+#   sudo ip tuntap add dev anetap0 mode tap user "$USER"
+#   sudo ip link set anetap0 up
+#   sudo ip addr add 192.168.100.1/24 dev anetap0
+# Guest kernel expects eth0=192.168.100.2/24 and gateway 192.168.100.1 (see net/mod.rs).
+#
+# Run QEMU:
+#   just xtask qemu --platform qemu-virt-rv64-tap --image build/anemone.elf
+#
+# script=no,downscript=no: host manages TAP; QEMU does not run ifup/ifdown.
+
+[build]
+name = "qemu-virt-rv64-tap"
+abbrs = ["rv-tap", "rv64-tap", "riscv-tap", "riscv64-tap"]
+arch = "riscv64"
+exec_env = "sbi"
+
+[constants]
+phys_ram_start = 0x80000000
+max_phys_ram_size = 0x80000000
+kernel_la_base = 0x80200000
+kernel_va_base = 0xffffffff80200000
+max_cpus = 16
+frame_section_shift_mb = 7
+
+[qemu]
+qemu = "qemu-system-riscv64"
+machine = "virt"
+cpu = "rv64"
+smp = 4
+memory = "1G"
+bios = "default"
+args = [
+    "-nographic",
+    "-serial",
+    "mon:stdio",
+    "-rtc",
+    "base=utc",
+    "-device",
+    "virtio-net-device,netdev=net",
+    "-netdev",
+    "tap,id=net,ifname=anetap0,script=no,downscript=no",
+]
+
+[rootfs]
+fstype = "ext4"
+source = { type = "block", path = "vda" }
+
+[dtb]
+path = "arch/riscv64/generated.dtb"
+type = "qemu"
