@@ -4,7 +4,10 @@
 //! - https://www.man7.org/linux/man-pages/man2/mmap.2.html
 
 use crate::{
-    mm::uspace::{api::args::*, mmap::AnonymousMapping},
+    mm::uspace::{
+        api::args::*,
+        mmap::{AnonymousMapping, FileMapping},
+    },
     prelude::{
         vma::{Protection, VmFlags},
         *,
@@ -64,6 +67,40 @@ fn sys_mmap(
             .map(|addr| addr.get())
             .map_err(Into::into)
     } else {
-        Err(KernelError::NotYetImplemented.into())
+        let poffset = offset as usize >> PagingArch::PAGE_SIZE_BITS;
+        let file = with_current_task(|task| task.get_fd(fd).ok_or(KernelError::BadFileDescriptor))?;
+        let supported_prot = {
+            let mut prot = Protection::empty();
+            let file_flags = file.file_flags();
+            if file_flags.contains(FileFlags::READ) {
+                prot |= Protection::READ;
+            }
+            if file_flags.contains(FileFlags::WRITE) {
+                prot |= Protection::WRITE;
+            }
+            // TODO exec check
+            prot
+        };
+        if !supported_prot.contains(prot) {
+            return Err(MmError::PermissionDenied.into());
+        }
+
+        let inode = file.vfs_file().inode().clone();
+
+        let mapping = FileMapping {
+            hint,
+            clobber,
+            npages,
+            prot,
+            shared,
+            flags,
+            poffset,
+            inode,
+        };
+
+        usp.write()
+            .map_file(&mapping)
+            .map(|addr| addr.get())
+            .map_err(Into::into)
     }
 }

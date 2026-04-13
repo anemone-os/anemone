@@ -14,10 +14,7 @@ use lwext4_rust::{
 };
 
 use crate::{
-    device::block::BlockDev,
-    fs::{inode::Inode, register_filesystem},
-    prelude::*,
-    utils::any_opaque::AnyOpaque,
+    device::block::BlockDev, fs::register_filesystem, prelude::*, utils::any_opaque::AnyOpaque,
 };
 
 use self::superblock::EXT4_SB_OPS;
@@ -25,66 +22,72 @@ use self::superblock::EXT4_SB_OPS;
 /// As per ext4 specification, the root inode always has the ID 2.
 pub(super) const EXT4_ROOT_INO: u32 = 2;
 
-#[derive(Debug)]
-struct Ext4Hal;
+mod glue {
+    use super::*;
 
-impl LwExt4SystemHal for Ext4Hal {
-    fn now() -> Option<Duration> {
-        None
+    #[derive(Debug)]
+    pub struct Ext4Hal;
+
+    impl LwExt4SystemHal for Ext4Hal {
+        fn now() -> Option<Duration> {
+            None
+        }
     }
+
+    #[derive(Clone)]
+    pub struct Ext4Disk {
+        dev: Arc<dyn BlockDev>,
+    }
+
+    impl Ext4Disk {
+        pub fn new(dev: Arc<dyn BlockDev>) -> Self {
+            Self { dev }
+        }
+    }
+
+    impl LwExt4BlockDevice for Ext4Disk {
+        fn write_blocks(&mut self, block_id: u64, buf: &[u8]) -> lwext4_rust::Ext4Result<usize> {
+            self.dev
+                .write_blocks(block_id as usize, buf)
+                .map_err(|_| LwExt4Error::new(EIO as i32, "block write failed"))?;
+            Ok(buf.len() / lwext4_rust::EXT4_DEV_BSIZE)
+        }
+
+        fn read_blocks(&mut self, block_id: u64, buf: &mut [u8]) -> lwext4_rust::Ext4Result<usize> {
+            self.dev
+                .read_blocks(block_id as usize, buf)
+                .map_err(|_| LwExt4Error::new(EIO as i32, "block read failed"))?;
+            Ok(buf.len() / lwext4_rust::EXT4_DEV_BSIZE)
+        }
+
+        fn num_blocks(&self) -> lwext4_rust::Ext4Result<u64> {
+            Ok(self.dev.total_blocks() as u64)
+        }
+    }
+
+    pub type Ext4Fs = LwExt4Fs<Ext4Hal, Ext4Disk>;
+
+    /// `Ext4Fs` holds a pointer in itself which comes from C code, so it does
+    /// not implement `Send` or `Sync`. We, however, ensure that all
+    /// accesses to it are properly synchronized, (through `fs_lock` and
+    /// `tx_lock`) so we can safely wrap it in `Ext4FsCell` and implement
+    /// `Send` and `Sync` for the wrapper.
+    pub struct Ext4FsCell(UnsafeCell<Ext4Fs>);
+
+    impl Ext4FsCell {
+        pub fn new(fs: Ext4Fs) -> Self {
+            Self(UnsafeCell::new(fs))
+        }
+
+        pub unsafe fn get_mut(&self) -> &mut Ext4Fs {
+            unsafe { &mut *self.0.get() }
+        }
+    }
+
+    unsafe impl Send for Ext4FsCell {}
+    unsafe impl Sync for Ext4FsCell {}
 }
-
-#[derive(Clone)]
-struct Ext4Disk {
-    dev: Arc<dyn BlockDev>,
-}
-
-impl Ext4Disk {
-    fn new(dev: Arc<dyn BlockDev>) -> Self {
-        Self { dev }
-    }
-}
-
-impl LwExt4BlockDevice for Ext4Disk {
-    fn write_blocks(&mut self, block_id: u64, buf: &[u8]) -> lwext4_rust::Ext4Result<usize> {
-        self.dev
-            .write_blocks(block_id as usize, buf)
-            .map_err(|_| LwExt4Error::new(EIO as i32, "block write failed"))?;
-        Ok(buf.len() / lwext4_rust::EXT4_DEV_BSIZE)
-    }
-
-    fn read_blocks(&mut self, block_id: u64, buf: &mut [u8]) -> lwext4_rust::Ext4Result<usize> {
-        self.dev
-            .read_blocks(block_id as usize, buf)
-            .map_err(|_| LwExt4Error::new(EIO as i32, "block read failed"))?;
-        Ok(buf.len() / lwext4_rust::EXT4_DEV_BSIZE)
-    }
-
-    fn num_blocks(&self) -> lwext4_rust::Ext4Result<u64> {
-        Ok(self.dev.total_blocks() as u64)
-    }
-}
-
-type Ext4Fs = LwExt4Fs<Ext4Hal, Ext4Disk>;
-
-/// `Ext4Fs` holds a pointer in itself which comes from C code, so it does not
-/// implement `Send` or `Sync`. We, however, ensure that all accesses to it are
-/// properly synchronized, (through `fs_lock` and `tx_lock`) so we can safely
-/// wrap it in `Ext4FsCell` and implement `Send` and `Sync` for the wrapper.
-struct Ext4FsCell(UnsafeCell<Ext4Fs>);
-
-impl Ext4FsCell {
-    fn new(fs: Ext4Fs) -> Self {
-        Self(UnsafeCell::new(fs))
-    }
-
-    unsafe fn get_mut(&self) -> &mut Ext4Fs {
-        unsafe { &mut *self.0.get() }
-    }
-}
-
-unsafe impl Send for Ext4FsCell {}
-unsafe impl Sync for Ext4FsCell {}
+use glue::*;
 
 #[derive(Opaque)]
 pub(super) struct Ext4Sb {
@@ -112,7 +115,7 @@ impl Ext4Sb {
         f()
     }
 
-    fn with_fs<R>(&self, f: impl FnOnce(&mut Ext4Fs) -> Result<R, FsError>) -> Result<R, FsError> {
+    fn with_fs<R, E>(&self, f: impl FnOnce(&mut Ext4Fs) -> Result<R, E>) -> Result<R, E> {
         let _guard = self.fs_lock.lock();
         let fs = unsafe { self.fs.get_mut() };
         f(fs)
@@ -130,10 +133,21 @@ pub(super) fn ext4_sb(sb: &SuperBlock) -> &Ext4Sb {
         .expect("ext4 superblock must have Ext4Sb private data")
 }
 
+#[inline(always)]
+fn ext4_reg(inode: &InodeRef) -> Result<&file::Ext4Reg, FsError> {
+    inode
+        .inode()
+        .prv()
+        .cast::<file::Ext4Reg>()
+        .ok_or(FsError::NotReg)
+}
+
+#[inline(always)]
 pub(super) fn ext4_ino(ino: u32) -> Result<Ino, FsError> {
     Ino::try_from(ino as u64).map_err(|_| FsError::InvalidArgument)
 }
 
+#[inline(always)]
 pub(super) fn map_ext4_error(err: LwExt4Error) -> FsError {
     match err.code {
         x if x == EEXIST as i32 => FsError::AlreadyExists,
@@ -154,6 +168,7 @@ pub(super) fn map_ext4_error(err: LwExt4Error) -> FsError {
 
 /// since both [LwExt4InodeType] and [TryFrom] are foreign to our codebase, we
 /// can only use this workaround to do the conversion.
+#[inline(always)]
 pub(super) fn map_lwext4_inode_type(ty: LwExt4InodeType) -> Result<InodeType, FsError> {
     match ty {
         LwExt4InodeType::Directory => Ok(InodeType::Dir),
@@ -165,6 +180,7 @@ pub(super) fn map_lwext4_inode_type(ty: LwExt4InodeType) -> Result<InodeType, Fs
     }
 }
 
+#[inline(always)]
 pub(super) fn map_vfs_inode_type(ty: InodeType) -> Result<LwExt4InodeType, FsError> {
     match ty {
         InodeType::Dir => Ok(LwExt4InodeType::Directory),
@@ -173,10 +189,6 @@ pub(super) fn map_vfs_inode_type(ty: InodeType) -> Result<LwExt4InodeType, FsErr
         InodeType::Symlink => Ok(LwExt4InodeType::Symlink),
         InodeType::Fifo => Ok(LwExt4InodeType::Fifo),
     }
-}
-
-fn ext4_sync_cached_nlink(inode: &Arc<Inode>, target: u64) {
-    inode.set_nlink(target);
 }
 
 fn ext4_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, FsError> {

@@ -3,14 +3,14 @@ use lwext4_rust::InodeType as LwExt4InodeType;
 
 use crate::{
     fs::ext4::{
-        ext4_ino, ext4_sb, ext4_sync_cached_nlink, file::EXT4_SYMLINK_FILE_OPS, map_ext4_error,
-        map_lwext4_inode_type, map_vfs_inode_type,
+        ext4_ino, ext4_sb, file::EXT4_SYMLINK_FILE_OPS, map_ext4_error, map_lwext4_inode_type,
+        map_vfs_inode_type,
     },
     prelude::*,
-    utils::any_opaque::AnyOpaque,
+    utils::any_opaque::NilOpaque,
 };
 
-use super::file::{EXT4_DIR_FILE_OPS, EXT4_REG_FILE_OPS, Ext4File};
+use super::file::{EXT4_DIR_FILE_OPS, EXT4_REG_FILE_OPS};
 
 fn ext4_lookup_child(dir: &InodeRef, name: &str) -> Result<(Ino, InodeType), FsError> {
     let sb = dir.sb();
@@ -76,7 +76,7 @@ fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, FsError> {
 
     Ok(OpenedFile {
         file_ops,
-        prv: AnyOpaque::new(Ext4File::new()),
+        prv: NilOpaque::new(),
     })
 }
 
@@ -109,18 +109,20 @@ fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
     // some metadata may haven't been synced to disk yet, so we need to look at the
     // in-memory inode state first to get the most up-to-date metadata.
 
+    let meta = inode.inode().meta_snapshot();
+
     Ok(InodeStat {
         fs_dev: ext4_fs_dev(&sb),
         ino: inode.ino(),
         mode: InodeMode::new(inode.ty(), inode.perm()),
-        nlink: attr.nlink,
+        nlink: meta.nlink,
         uid: attr.uid,
         gid: attr.gid,
         rdev: DeviceId::None,
-        size: attr.size,
-        atime: attr.atime,
-        mtime: attr.mtime,
-        ctime: attr.ctime,
+        size: meta.size,
+        atime: meta.atime,
+        mtime: meta.mtime,
+        ctime: meta.ctime,
     })
 }
 
@@ -227,7 +229,7 @@ fn ext4_rmdir(dir: &InodeRef, name: &str) -> Result<(), FsError> {
     dir.inode().dec_nlink();
 
     if let Some(inode) = sb.try_iget(child_ino) {
-        ext4_sync_cached_nlink(inode.inode(), 0);
+        inode.inode().set_nlink(0);
         sb.unindex_inode(inode.inode());
         drop(inode);
     }

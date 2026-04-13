@@ -23,6 +23,8 @@ pub enum MmError {
     RangeNotMapped,
     /// The address is not properly aligned
     NotAligned,
+    /// The requested operation is not supported. E.g. mmap
+    NotSupported,
 }
 
 impl AsErrno for MmError {
@@ -34,7 +36,7 @@ impl AsErrno for MmError {
             MmError::PermissionDenied => EACCES,
             MmError::RangeNotMapped => ENOMEM,
             MmError::ArgumentTooLarge => E2BIG,
-            MmError::NotAligned => EINVAL,
+            MmError::NotAligned | MmError::NotSupported => EINVAL,
         }
     }
 }

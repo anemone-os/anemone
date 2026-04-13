@@ -23,16 +23,7 @@ impl FixedObject {
 }
 
 impl VmObject for FixedObject {
-    fn source_frame(&self, pidx: usize) -> Result<FrameSource, MmError> {
-        self.check_pidx(pidx)?;
-        Ok(FrameSource::Framed(self.pages[pidx].clone()))
-    }
-
-    fn resolve_frame(
-        &mut self,
-        pidx: usize,
-        _access: PageFaultType,
-    ) -> Result<ResolvedFrame, MmError> {
+    fn resolve_frame(&self, pidx: usize, _access: PageFaultType) -> Result<ResolvedFrame, MmError> {
         self.check_pidx(pidx)?;
         Ok(ResolvedFrame {
             frame: self.pages[pidx].clone(),

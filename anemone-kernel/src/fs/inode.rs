@@ -1,7 +1,10 @@
 use anemone_abi::fs::linux::{mode as linux_mode, stat::Stat as LinuxStat};
 use core::{fmt::Debug, time::Duration};
 
-use crate::{prelude::*, utils::any_opaque::AnyOpaque};
+use crate::{
+    prelude::{vmo::VmObject, *},
+    utils::any_opaque::AnyOpaque,
+};
 
 /// VTable an inode must implement to support file system operations.
 ///
@@ -370,7 +373,8 @@ pub(super) struct Inode {
     /// index. Unlinked-but-still-alive inodes are resident ghosts with this
     /// flag cleared.
     indexed: AtomicBool,
-
+    /// Logical memory mapping for this inode, if any.
+    mapping: Option<Arc<dyn VmObject>>,
     /// Cached metadata that can be updated by the inode's file operations
     /// without accesing underlying filesystem, thus speeding up common
     /// operations like `stat` and `write`.
@@ -435,6 +439,7 @@ impl Inode {
             prv,
             rc: AtomicUsize::new(0),
             indexed: AtomicBool::new(false),
+            mapping: None,
             meta: RwLock::new(meta),
         }
     }
@@ -500,6 +505,18 @@ impl Inode {
         } else {
             panic!("inode's superblock has been dropped");
         }
+    }
+
+    pub(super) fn mapping(&self) -> Option<Arc<dyn VmObject>> {
+        self.mapping.clone()
+    }
+
+    pub(super) fn mapping_ref(&self) -> Option<&Arc<dyn VmObject>> {
+        self.mapping.as_ref()
+    }
+
+    pub(super) fn set_mapping(&mut self, mapping: Option<Arc<dyn VmObject>>) {
+        self.mapping = mapping;
     }
 
     pub(super) fn ty(&self) -> InodeType {
@@ -625,6 +642,10 @@ impl InodeRef {
 
     pub fn nlink(&self) -> u64 {
         self.inode().nlink()
+    }
+
+    pub fn mapping(&self) -> Option<Arc<dyn VmObject>> {
+        self.inode().mapping()
     }
 
     pub fn size(&self) -> u64 {

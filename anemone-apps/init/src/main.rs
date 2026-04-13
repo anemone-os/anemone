@@ -27,7 +27,7 @@ pub fn main() -> Result<(), Errno> {
     .unwrap();
     if tid == 0 {
         println!("init: get into cloned task {}", tidc);
-        execve("bin/mmap-test", &["bin/mmap-test"]).expect("failed to execve mmap-test");
+        execve("bin/user-test", &["bin/user-test"]).expect("failed to execve mmap-test");
         unreachable!();
     } else {
         println!("init: 'bin/user-test' started with pid {}", tid);

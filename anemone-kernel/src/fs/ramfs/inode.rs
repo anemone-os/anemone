@@ -2,12 +2,15 @@ use crate::{
     fs::{
         inode::{Inode, InodeMode},
         ramfs::{
-            file::{RamfsFile, RAMFS_DIR_FILE_OPS, RAMFS_REG_FILE_OPS, RAMFS_SYMLINK_FILE_OPS},
+            file::{
+                RAMFS_DIR_FILE_OPS, RAMFS_REG_FILE_OPS, RAMFS_SYMLINK_FILE_OPS, RamfsRegMapping,
+                RamfsRegState,
+            },
             ramfs_dir, ramfs_sb, ramfs_symlink,
         },
     },
-    prelude::*,
-    utils::any_opaque::AnyOpaque,
+    prelude::{vmo::VmObject, *},
+    utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
 #[derive(Opaque)]
@@ -70,14 +73,18 @@ impl RamfsDir {
 
 #[derive(Opaque)]
 pub(super) struct RamfsReg {
-    pub(super) data: RwLock<Vec<u8>>,
+    state: Arc<RamfsRegState>,
 }
 
 impl RamfsReg {
     pub(super) fn new() -> Self {
         Self {
-            data: RwLock::new(Vec::new()),
+            state: Arc::new(RamfsRegState::new()),
         }
+    }
+
+    pub(super) fn state(&self) -> Arc<RamfsRegState> {
+        self.state.clone()
     }
 }
 
@@ -155,12 +162,16 @@ fn ramfs_create_child(
         }
 
         let new_ino = ramfs_sb(&sb).alloc_ino();
-        let new_prv = match ty {
-            InodeType::Dir => AnyOpaque::new(RamfsDir::new()),
-            InodeType::Regular => AnyOpaque::new(RamfsReg::new()),
+        let (new_prv, mapping): (AnyOpaque, Option<Arc<dyn VmObject>>) = match ty {
+            InodeType::Dir => (AnyOpaque::new(RamfsDir::new()), None),
+            InodeType::Regular => {
+                let reg = RamfsReg::new();
+                let mapping: Arc<dyn VmObject> = Arc::new(RamfsRegMapping::new(reg.state()));
+                (AnyOpaque::new(reg), Some(mapping))
+            },
             _ => unreachable!(),
         };
-        let new_inode = Arc::new(Inode::new(
+        let mut new_inode = Arc::new(Inode::new(
             new_ino,
             ty,
             match ty {
@@ -172,6 +183,9 @@ fn ramfs_create_child(
             new_prv,
         ));
         new_inode.inc_nlink();
+        Arc::get_mut(&mut new_inode)
+            .expect("new ramfs inode should be uniquely owned before seeding")
+            .set_mapping(mapping);
         if let InodeType::Dir = ty {
             // "." & ".."
             let new_dir_data = new_inode.prv().cast::<RamfsDir>().unwrap();
@@ -244,7 +258,7 @@ fn ramfs_open(inode: &InodeRef) -> Result<OpenedFile, FsError> {
             InodeType::Symlink => &RAMFS_SYMLINK_FILE_OPS,
             _ => unreachable!(),
         },
-        prv: AnyOpaque::new(RamfsFile::new()),
+        prv: NilOpaque::new(),
     };
     Ok(of)
 }

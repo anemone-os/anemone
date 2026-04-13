@@ -743,8 +743,7 @@ mod kunits {
         let link_path = Path::new("/kunit-vfs-sym-dir/link");
 
         vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
-        let target =
-            vfs_touch(file_path, InodePerm::all_rwx()).unwrap();
+        let target = vfs_touch(file_path, InodePerm::all_rwx()).unwrap();
         let link = vfs_symlink(Path::new("target"), link_path).unwrap();
 
         assert_eq!(link.inode().ty(), InodeType::Symlink);
@@ -808,8 +807,7 @@ mod kunits {
         let mid_link = Path::new("/kunit-vfs-sym-abs-mid");
 
         vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
-        let target =
-            vfs_touch(file_path, InodePerm::all_rwx()).unwrap();
+        let target = vfs_touch(file_path, InodePerm::all_rwx()).unwrap();
         vfs_symlink(Path::new("/kunit-vfs-sym-abs-dir"), mid_link).unwrap();
 
         let resolved = vfs_lookup(Path::new("/kunit-vfs-sym-abs-mid/file")).unwrap();
@@ -829,8 +827,7 @@ mod kunits {
 
         vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
         vfs_mkdir(subdir_path, InodePerm::all_rwx()).unwrap();
-        let target = vfs_touch(target_path, InodePerm::all_rwx())
-        .unwrap();
+        let target = vfs_touch(target_path, InodePerm::all_rwx()).unwrap();
         vfs_symlink(Path::new("../target"), link_path).unwrap();
 
         assert_eq!(
@@ -889,8 +886,7 @@ mod kunits {
             .unwrap_err(),
             FsError::LinkEncountered
         );
-        let created = vfs_touch(target_path, InodePerm::all_rwx())
-        .unwrap();
+        let created = vfs_touch(target_path, InodePerm::all_rwx()).unwrap();
         assert_eq!(
             vfs_lookup(resolved_target).unwrap().to_string(),
             "/kunit-vfs-sym-flag-dir/new-file"
@@ -912,8 +908,7 @@ mod kunits {
         let link_path = Path::new("/kunit-vfs-sym-mount/host-link");
 
         vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        let host = vfs_touch(host_target, InodePerm::all_rwx())
-        .unwrap();
+        let host = vfs_touch(host_target, InodePerm::all_rwx()).unwrap();
 
         vfs_mount_at(
             "ramfs",
@@ -1226,8 +1221,7 @@ mod kunits {
         let inner_file = Path::new("/kunit-vfs-walk/sub/file");
 
         vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        vfs_touch(host_sibling, InodePerm::all_rwx())
-        .unwrap();
+        vfs_touch(host_sibling, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1346,8 +1340,7 @@ mod kunits {
                 let path = format!("/kunit-vfs-cycle/file-{round}-{file_idx}");
                 let payload = format!("round-{round}-file-{file_idx}-payload");
 
-                vfs_touch(Path::new(&path), InodePerm::all_rwx())
-                .unwrap();
+                vfs_touch(Path::new(&path), InodePerm::all_rwx()).unwrap();
 
                 let opened = vfs_open(Path::new(&path)).unwrap();
                 assert_eq!(opened.write(payload.as_bytes()).unwrap(), payload.len());
@@ -1394,8 +1387,7 @@ mod kunits {
                 let alias = format!("/kunit-vfs-churn/alias-{dir_idx}-{file_idx}");
                 let payload = format!("dir-{dir_idx}-file-{file_idx}-payload");
 
-                let created = vfs_touch(Path::new(&file), InodePerm::all_rwx())
-                .unwrap();
+                let created = vfs_touch(Path::new(&file), InodePerm::all_rwx()).unwrap();
                 let opened = vfs_open(Path::new(&file)).unwrap();
 
                 assert_eq!(opened.write(payload.as_bytes()).unwrap(), payload.len());
@@ -1444,8 +1436,7 @@ mod kunits {
         assert!(!Arc::ptr_eq(&first, &second));
         assert!(!Arc::ptr_eq(first.sb(), second.sb()));
 
-        vfs_touch(visible_file, InodePerm::all_rwx())
-        .unwrap();
+        vfs_touch(visible_file, InodePerm::all_rwx()).unwrap();
 
         let second_root = PathRef::new(second.clone(), second.root().clone());
         let hidden_inode = second_root
@@ -1484,9 +1475,7 @@ mod kunits {
                 mount_at("ramfs", MountSource::Pseudo, MountFlags::empty(), &host_mp).unwrap();
             let root = PathRef::new(mnt.clone(), mnt.root().clone());
             let name = format!("layer-{layer}");
-            root.inode()
-                .touch(&name, InodePerm::all_rwx())
-                .unwrap();
+            root.inode().touch(&name, InodePerm::all_rwx()).unwrap();
             mounts.push(mnt);
         }
 

@@ -50,6 +50,9 @@ pub enum FsError {
     InvalidPath,
     /// Device error occurred when accessing device files.
     Dev(DevError),
+    /// Memory error. Usually occurs when a file operation needs to resolve a
+    /// page and the underlying VMO encounters a memory error.
+    Mm(MmError),
 }
 
 impl AsErrno for FsError {
@@ -79,6 +82,7 @@ impl AsErrno for FsError {
             FsError::LinkEncountered => ELOOP,
             FsError::InvalidPath => EINVAL,
             FsError::Dev(dev_err) => dev_err.as_errno(),
+            FsError::Mm(mm_err) => mm_err.as_errno(),
         }
     }
 }

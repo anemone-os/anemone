@@ -1,5 +1,5 @@
 use crate::prelude::{
-    vmo::{FrameSource, ResolvedFrame, VmObject},
+    vmo::{ResolvedFrame, VmObject},
     *,
 };
 
@@ -10,15 +10,7 @@ use crate::prelude::{
 pub struct EmptyObject;
 
 impl VmObject for EmptyObject {
-    fn source_frame(&self, pidx: usize) -> Result<FrameSource, MmError> {
-        Err(MmError::NotMapped)
-    }
-
-    fn resolve_frame(
-        &mut self,
-        pidx: usize,
-        access: PageFaultType,
-    ) -> Result<ResolvedFrame, MmError> {
+    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, MmError> {
         Err(MmError::NotMapped)
     }
 }

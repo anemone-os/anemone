@@ -1,14 +1,14 @@
 use crate::{
     device::{block::get_block_dev, char::get_char_dev},
     fs::{
-        devfs::{devfs_ino_for, devfs_inode_data, devfs_lookup_name, devfs_root_ino, DevfsNode},
+        devfs::{DevfsNode, devfs_ino_for, devfs_inode_data, devfs_lookup_name, devfs_root_ino},
         inode::Inode,
     },
     prelude::*,
     utils::any_opaque::AnyOpaque,
 };
 
-use super::file::{DevfsFile, DEVFS_BLOCK_FILE_OPS, DEVFS_CHAR_FILE_OPS, DEVFS_DIR_FILE_OPS};
+use super::file::{DEVFS_BLOCK_FILE_OPS, DEVFS_CHAR_FILE_OPS, DEVFS_DIR_FILE_OPS, DevfsFile};
 
 #[derive(Debug, Clone, Copy, Opaque)]
 pub(super) struct DevfsInode {

@@ -13,7 +13,7 @@ use crate::{
     mm::kptable::KERNEL_PTABLE,
     prelude::{
         vma::{ForkPolicy, Protection, VmFlags},
-        vmo::{anon::AnonObject, empty::EmptyObject, fixed::FixedObject, VmObject},
+        vmo::{VmObject, anon::AnonObject, empty::EmptyObject, fixed::FixedObject},
         *,
     },
     utils::data::DataSource,
@@ -117,7 +117,7 @@ impl UserSpace {
         KERNEL_PTABLE.copy_to_ptable(&mut table);
 
         let sstack = KernelLayout::USPACE_TOP_VPN - MAX_USER_STACK_PAGES;
-        let stack_vmo = Arc::new(RwLock::new(AnonObject::new(MAX_USER_STACK_PAGES as usize)));
+        let stack_vmo = Arc::new(AnonObject::new(MAX_USER_STACK_PAGES as usize));
         let stack_vma = VmArea::new_reserved(
             VirtPageRange::new(sstack, MAX_USER_STACK_PAGES),
             0,
@@ -130,7 +130,7 @@ impl UserSpace {
             stack_vmo,
         );
 
-        let guard_vmo = Arc::new(RwLock::new(EmptyObject));
+        let guard_vmo = Arc::new(EmptyObject);
 
         let sguard = sstack - 1;
         let stack_guard_vma = VmArea::new_reserved(
@@ -145,7 +145,7 @@ impl UserSpace {
 
         // note vpn 0 is reserved.
         let sheap = VirtPageNum::new(1);
-        let heap_vmo = Arc::new(RwLock::new(AnonObject::new(MAX_HEAP_PAGES as usize)));
+        let heap_vmo = Arc::new(AnonObject::new(MAX_HEAP_PAGES as usize));
         let heap_vma = VmArea::new_reserved(
             VirtPageRange::new(sheap, MAX_HEAP_PAGES),
             0,
@@ -156,25 +156,30 @@ impl UserSpace {
             heap_vmo,
         );
 
-        let zero_guard_vma = VmArea::new_reserved(
-            VirtPageRange::new(VirtPageNum::new(0), 1),
-            0,
-            Protection::empty(),
-            ForkPolicy::Shared,
-            VmFlags::empty(),
-            VmReservation::Guard,
-            guard_vmo,
-        );
+        // TODO: after we support dynamic elf loading, uncomment zero_guard_vma to
+        // reserve the zero page and catch null pointer dereference.
+
+        // let zero_guard_vma = VmArea::new_reserved(
+        //     VirtPageRange::new(VirtPageNum::new(0), 1),
+        //     0,
+        //     Protection::empty(),
+        //     ForkPolicy::Shared,
+        //     VmFlags::empty(),
+        //     VmReservation::Guard,
+        //     guard_vmo,
+        // );
 
         let mut vmas = BTreeMap::new();
         assert!(vmas.insert(stack_vma.range().start(), stack_vma).is_none());
-        assert!(vmas
-            .insert(stack_guard_vma.range().start(), stack_guard_vma)
-            .is_none());
+        assert!(
+            vmas.insert(stack_guard_vma.range().start(), stack_guard_vma)
+                .is_none()
+        );
         assert!(vmas.insert(heap_vma.range().start(), heap_vma).is_none());
-        assert!(vmas
-            .insert(zero_guard_vma.range().start(), zero_guard_vma)
-            .is_none());
+        // assert!(
+        //     vmas.insert(zero_guard_vma.range().start(), zero_guard_vma)
+        //         .is_none()
+        // );
 
         let mut uspace = UserSpace {
             table_ppn: table.root_ppn(),
@@ -405,7 +410,7 @@ impl UserSpaceData {
             Protection::from(rwx_flags),
             ForkPolicy::CopyOnWrite,
             VmFlags::empty(),
-            Arc::new(RwLock::new(seg_vmo)),
+            Arc::new(seg_vmo),
         );
         assert!(self.vmas.insert(seg_vma.range().start(), seg_vma).is_none());
 
@@ -484,10 +489,7 @@ impl UserSpaceData {
         let sp = VirtAddr::new(sp);
         let stack_base = self.stack_vma().range().start().to_virt_addr();
         let stack_offset = (sp - stack_base) as usize;
-        self.stack_vma()
-            .backing()
-            .write()
-            .write(stack_offset, data)?;
+        self.stack_vma().backing().write(stack_offset, data)?;
         self.stack.init_sp = sp;
         Ok(sp)
     }
