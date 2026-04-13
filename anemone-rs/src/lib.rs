@@ -16,6 +16,8 @@ pub mod runtime;
 // TODO: mod path.
 
 pub mod prelude;
+pub use anemone_abi;
+pub use anemone_rs_macros::main;
 
 unsafe extern "Rust" {
     /// Entrypoint for main function.

@@ -616,6 +616,10 @@ impl InodeRef {
         self.inode().meta.read().perm
     }
 
+    pub fn mode(&self) -> InodeMode {
+        InodeMode::new(self.ty(), self.perm())
+    }
+
     pub fn nlink(&self) -> u64 {
         self.inode().nlink()
     }

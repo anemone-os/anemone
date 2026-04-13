@@ -7,47 +7,107 @@ pub mod fs {
 
     pub fn chroot(path: &str) -> Result<(), Errno> {
         let path = CString::new(path).map_err(|_| EINVAL)?;
-        fs::chroot(path.as_ptr() as u64)
+        fs::chroot(path.as_ptr() as u64).map(|_| ())
     }
 
     pub fn chdir(path: &str) -> Result<(), Errno> {
         let path = CString::new(path).map_err(|_| EINVAL)?;
-        fs::chdir(path.as_ptr() as u64)
+        fs::chdir(path.as_ptr() as u64).map(|_| ())
     }
 
     pub fn getcwd(buf: &mut [u8]) -> Result<(), Errno> {
-        fs::getcwd(buf.as_mut_ptr() as u64, buf.len() as u64)
+        fs::getcwd(buf.as_mut_ptr() as u64, buf.len() as u64).map(|_| ())
     }
 
     pub fn openat(dirfd: isize, path: &Path, flags: u32, mode: u32) -> Result<usize, Errno> {
         let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
-        fs::openat(dirfd, path.as_ptr() as u64, flags, mode)
+        fs::openat(
+            dirfd as u64,
+            path.as_ptr() as u64,
+            flags as u64,
+            mode as u64,
+        )
+        .map(|fd| fd as usize)
     }
 
     pub fn close(fd: usize) -> Result<(), Errno> {
-        fs::close(fd)
+        fs::close(fd as u64).map(|_| ())
     }
 
     pub fn read(fd: usize, buf: &mut [u8]) -> Result<usize, Errno> {
-        fs::read(fd, buf.as_mut_ptr() as u64, buf.len())
+        fs::read(fd as u64, buf.as_mut_ptr() as u64, buf.len() as u64).map(|count| count as usize)
     }
 
     pub fn write(fd: usize, buf: &[u8]) -> Result<usize, Errno> {
-        fs::write(fd, buf.as_ptr() as u64, buf.len())
+        fs::write(fd as u64, buf.as_ptr() as u64, buf.len() as u64).map(|count| count as usize)
     }
 }
 
 pub mod process {
     pub type Tid = u32;
 
+    use core::ptr::NonNull;
+
     use alloc::ffi::CString;
-    use anemone_abi::process::linux::{clone, wait};
+    use anemone_abi::process::linux::{clone, mmap, wait};
     use bitflags::bitflags;
 
     use crate::{prelude::*, sys::linux::process};
 
     pub fn brk(addr: usize) -> Result<usize, Errno> {
         process::brk(addr as u64).map(|value| value as usize)
+    }
+
+    bitflags! {
+        #[derive(Debug, Clone, Copy)]
+        pub struct MmapProt: i32 {
+            const PROT_READ = mmap::PROT_READ;
+            const PROT_WRITE = mmap::PROT_WRITE;
+            const PROT_EXEC = mmap::PROT_EXEC;
+            const PROT_NONE = mmap::PROT_NONE;
+        }
+    }
+
+    bitflags! {
+        #[derive(Debug, Clone, Copy)]
+        pub struct MmapFlags: i32 {
+            const MAP_SHARED = mmap::MAP_SHARED;
+            const MAP_PRIVATE = mmap::MAP_PRIVATE;
+            const MAP_SHARED_VALIDATE = mmap::MAP_SHARED_VALIDATE;
+
+            const MAP_ANONYMOUS = mmap::MAP_ANONYMOUS;
+            const MAP_FIXED = mmap::MAP_FIXED;
+            const MAP_FIXED_NOREPLACE = mmap::MAP_FIXED_NOREPLACE;
+            const MAP_GROWSDOWN = mmap::MAP_GROWSDOWN;
+            const MAP_UNINITIALIZED = mmap::MAP_UNINITIALIZED;
+        }
+    }
+
+    pub fn mmap(
+        addr: u64,
+        length: usize,
+        prot: MmapProt,
+        flags: MmapFlags,
+        fd: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<NonNull<u8>, Errno> {
+        process::mmap(
+            addr,
+            length as u64,
+            prot.bits() as u64,
+            flags.bits() as u64,
+            fd.map_or(0, |f| f as u64),
+            offset.map_or(0, |o| o as u64),
+        )
+        .and_then(|ptr| Ok(NonNull::new(ptr as *mut u8).expect("mmap returned null pointer")))
+    }
+
+    pub fn munmap(addr: *mut u8, length: usize) -> Result<(), Errno> {
+        process::munmap(addr as u64, length as u64).map(|_| ())
+    }
+
+    pub fn mprotect(addr: *mut u8, length: usize, prot: MmapProt) -> Result<(), Errno> {
+        process::mprotect(addr as u64, length as u64, prot.bits() as u64).map(|_| ())
     }
 
     pub fn execve(path: &str, argv: &[&str]) -> Result<u64, Errno> {
@@ -109,6 +169,7 @@ pub mod process {
             const CLONE_IO = clone::CLONE_IO as u32;
         }
     }
+
     pub fn clone(
         flags: CloneFlags,
         stack_ptr: Option<*mut u8>,
@@ -131,11 +192,12 @@ pub mod process {
     }
 
     pub fn sched_yield() -> Result<(), Errno> {
-        process::sched_yield()
+        process::sched_yield().map(|_| ())
     }
 
     pub fn exit(xcode: i8) -> ! {
-        process::exit(xcode as u64)
+        process::exit(xcode as u64).expect("failed to invoke exit syscall");
+        unreachable!("exit should never return")
     }
 
     pub fn getpid() -> Result<Tid, Errno> {
@@ -175,7 +237,7 @@ pub mod process {
     }
 
     bitflags! {
-        pub struct WaitOptions: u32{
+        pub struct WaitOptions: u32 {
             const WNOHANG = wait::WNOHANG as u32;
             const WUNTRACED = wait::WUNTRACED as u32;
             const WCONTINUED = wait::WCONTINUED as u32;

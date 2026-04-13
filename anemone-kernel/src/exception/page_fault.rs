@@ -17,7 +17,7 @@ pub struct PageFaultInfo {
     // currently we do not support kernel swappable pages, so all page faults come from user
     // space.
 
-    //is_user: bool,
+    // is_user: bool,
 }
 
 impl PageFaultInfo {
@@ -29,6 +29,7 @@ impl PageFaultInfo {
         }
     }
 
+    /// Not used by page fault handler, but can be useful for debugging.
     pub fn fault_pc(&self) -> VirtAddr {
         self.fault_pc
     }
