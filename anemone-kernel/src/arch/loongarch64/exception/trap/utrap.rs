@@ -154,6 +154,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
     with_current_task(|t| unsafe {
         t.set_utrapframe(trapframe);
+        t.on_prv_change(Privilege::Kernel);
     });
     let estat = Estat::from_u64(trapframe.estat);
     let ecode = estat.ecode();
@@ -226,6 +227,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         }
         drop(intr_guard);
     }
+
+    with_current_task(|t| t.on_prv_change(Privilege::User));
 }
 unsafe extern "C" {
     unsafe fn __utrap_entry() -> !;

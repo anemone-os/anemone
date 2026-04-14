@@ -87,6 +87,7 @@ pub fn kernel_execve_from_image(
                 task.set_exec_info(info);
             }
             ksp = task.kstack().stack_top();
+            task.on_prv_change(Privilege::User);
         });
         load_context(TaskContext::from_user_fn(
             VirtAddr::new(elf_image.entry as u64),

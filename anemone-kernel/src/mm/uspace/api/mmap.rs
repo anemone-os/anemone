@@ -74,11 +74,22 @@ fn sys_mmap(
             let file_flags = file.file_flags();
             if file_flags.contains(FileFlags::READ) {
                 prot |= Protection::READ;
+                prot |= Protection::EXECUTE;
             }
-            if file_flags.contains(FileFlags::WRITE) {
-                prot |= Protection::WRITE;
+
+            if shared {
+                if file_flags.contains(FileFlags::WRITE) {
+                    prot |= Protection::WRITE;
+                }
+            } else {
+                // for private mapping, readable file can be mapped with write
+                // permission, because the changes will not be written back to
+                // the file.
+                if file_flags.contains(FileFlags::READ) {
+                    prot |= Protection::WRITE;
+                }
             }
-            // TODO exec check
+
             prot
         };
         if !supported_prot.contains(prot) {

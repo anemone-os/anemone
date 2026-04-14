@@ -391,6 +391,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         wake_up_aps(bsp_id);
 
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
+        set_boot_mono(true);
         let bsp_kinit_task = unsafe {
             Task::new_kernel(
                 "kinit-bsp",
@@ -435,6 +436,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         mm::percpu::ap_init(ap_id);
         mm::kptable::activate_kernel_mapping();
         kdebugln!("anemone kernel booting on ap #{}", ap_id);
+        set_boot_mono(false);
         let ap_kinit = Task::new_kernel(
             "kinit-ap",
             ap_kinit as *const (),

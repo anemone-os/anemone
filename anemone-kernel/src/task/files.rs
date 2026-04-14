@@ -274,7 +274,16 @@ impl FilesState {
             .fd_table
             .iter()
             // note that we can't clone fd_table directly, since fd flags is per-fd.
-            .map(|(fd, file_desc)| (*fd, Arc::new(file_desc.as_ref().clone())))
+            .map(|(fd, file_desc)| {
+                (
+                    *fd,
+                    Arc::new(
+                        // this clones file desc itself, not the arc, so that we can have different
+                        // fd flags for the new fd table.
+                        file_desc.as_ref().clone(),
+                    ),
+                )
+            })
             .collect();
         new
     }

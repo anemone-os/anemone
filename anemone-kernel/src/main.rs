@@ -156,7 +156,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         of_platform_discovery();
         probe_virtual_devices();
 
-        set_boot_mono(true);
+        // set_boot_mono(true);
         program_first_timer();
         percpu_login();
         IntrArch::init_local_irq();
@@ -174,12 +174,10 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
 
     #[cfg(feature = "kunit")]
     {
-        kinfoln!("running kunit tests");
-        crate::debug::kunit::kunit_runner();
+        //crate::debug::kunit::kunit_runner();
         unsafe {
             KUNIT_SYNC_COUNTER.sync_with_counter();
         }
-        kinfoln!("kunit tests finished");
     }
 
     exec_init_proc();
@@ -190,7 +188,7 @@ unsafe extern "C" fn ap_kinit(ap_id: usize) {
         INIT_SYNC_COUNTER.sync_with_counter();
         kinfoln!("ap #{} kinit running on {}...", ap_id, current_task_id());
 
-        set_boot_mono(false);
+        // set_boot_mono(false);
         program_first_timer();
         percpu_login();
         IntrArch::init_local_irq();

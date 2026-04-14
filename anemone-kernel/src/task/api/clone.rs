@@ -181,6 +181,14 @@ pub fn kernel_clone(
     };
 
     unsafe { new_task.add_as_child(&parent) };
+
+    kdebugln!(
+        "clone: created new task with tid {} (parent tid {}) with flags {:?}",
+        new_tid,
+        parent.tid(),
+        flags
+    );
+
     drop(parent);
     drop(current_task);
     add_to_ready(new_task);
@@ -196,6 +204,8 @@ extern "C" fn enter_cloned_user_task(trap_frame: *mut TrapFrame, child_tid: *mut
             *child_tid = current_task_id();
         }
     }
+
+    task.on_prv_change(Privilege::User);
 
     drop(task);
     unsafe {

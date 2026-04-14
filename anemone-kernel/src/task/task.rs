@@ -12,6 +12,7 @@ use crate::{
     sync::mono::MonoFlow,
     task::{
         clone::CloneFlags,
+        cpu_usage::CpuUsage,
         files::FilesState,
         task_fs::FsState,
         tid::{TIDH_IDLE, Tid, TidHandle, alloc_tid},
@@ -60,6 +61,9 @@ pub struct Task {
     pub(super) fs_state: Arc<RwLock<FsState>>,
     /// File descriptor table state.
     pub(super) files_state: Arc<RwLock<FilesState>>,
+
+    /// Cpu usage information.
+    pub(super) cpu_usage: RwLock<CpuUsage>,
 
     // execution information
     /// Executable context such as `cmdline`, `flags` and user address space.
@@ -240,6 +244,8 @@ impl Task {
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: Arc::new(RwLock::new(FilesState::new())),
 
+            cpu_usage: RwLock::new(CpuUsage::ZERO),
+
             sched_info: unsafe {
                 MonoFlow::new(TaskSchedInfo {
                     task_context: TaskContext::from_kernel_fn(
@@ -343,6 +349,8 @@ impl Task {
 
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: Arc::new(RwLock::new(FilesState::new())),
+
+            cpu_usage: RwLock::new(CpuUsage::ZERO),
 
             exit_code: AtomicI8::new(0),
             create_flags: CloneFlags::empty(),
@@ -625,6 +633,7 @@ impl ArcTaskImpls for Arc<Task> {
                         debug_assert!(res);
                     });
                 }
+                self.on_reap_child(&child);
                 return Ok(Some(child));
             }
         }

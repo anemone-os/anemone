@@ -1,3 +1,4 @@
+pub mod cpu_usage;
 pub mod files;
 pub mod sig;
 #[path = "fs.rs"]

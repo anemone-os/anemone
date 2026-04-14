@@ -14,6 +14,7 @@ pub mod data;
 pub mod identity;
 pub mod iter_ctx;
 pub mod mmio;
+pub mod ring_buffer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Todo;

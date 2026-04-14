@@ -133,10 +133,18 @@ impl File {
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+
         (self.ops.read)(self, buf)
     }
 
     pub fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+
         (self.ops.write)(self, buf)
     }
 

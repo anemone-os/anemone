@@ -9,6 +9,10 @@ use crate::prelude::{dt::UserWritePtr, *};
 
 #[syscall(SYS_READ)]
 fn sys_read(fd: usize, buf: UserWritePtr<u8>, count: usize) -> Result<u64, SysError> {
+    if count == 0 {
+        return Ok(0);
+    }
+
     let file = with_current_task(|task| task.get_fd(fd).ok_or(KernelError::BadFileDescriptor))?;
     let uspace = with_current_task(|task| {
         task.clone_uspace()
