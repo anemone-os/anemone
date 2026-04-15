@@ -175,7 +175,8 @@ pub(super) fn map_lwext4_inode_type(ty: LwExt4InodeType) -> Result<InodeType, Sy
         LwExt4InodeType::Directory => Ok(InodeType::Dir),
         LwExt4InodeType::RegularFile => Ok(InodeType::Regular),
         LwExt4InodeType::Symlink => Ok(InodeType::Symlink),
-        LwExt4InodeType::CharacterDevice | LwExt4InodeType::BlockDevice => Ok(InodeType::Dev),
+        LwExt4InodeType::CharacterDevice => Ok(InodeType::Char),
+        LwExt4InodeType::BlockDevice => Ok(InodeType::Block),
         LwExt4InodeType::Fifo => Ok(InodeType::Fifo),
         _ => Err(SysError::NotSupported),
     }
@@ -186,7 +187,7 @@ pub(super) fn map_vfs_inode_type(ty: InodeType) -> Result<LwExt4InodeType, SysEr
     match ty {
         InodeType::Dir => Ok(LwExt4InodeType::Directory),
         InodeType::Regular => Ok(LwExt4InodeType::RegularFile),
-        InodeType::Dev => Err(SysError::NotSupported),
+        InodeType::Block | InodeType::Char => Err(SysError::NotYetImplemented),
         InodeType::Symlink => Ok(LwExt4InodeType::Symlink),
         InodeType::Fifo => Ok(LwExt4InodeType::Fifo),
     }

@@ -70,7 +70,7 @@ fn dir_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, SysError> 
                 return Ok(DirEntry {
                     name: entry.name,
                     ino: devfs_ino_for(DevfsNode::Char(entry.devnum)),
-                    ty: InodeType::Dev,
+                    ty: InodeType::Char,
                 });
             }
 
@@ -88,7 +88,7 @@ fn dir_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, SysError> 
             Ok(DirEntry {
                 name: entry.name,
                 ino: devfs_ino_for(DevfsNode::Block(entry.devnum)),
-                ty: InodeType::Dev,
+                ty: InodeType::Block,
             })
         },
     }

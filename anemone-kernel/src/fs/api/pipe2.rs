@@ -3,20 +3,50 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/pipe2.2.html
 
-use anemone_abi::fs::linux::open::O_CLOEXEC;
+use anemone_abi::fs::linux::open::*;
 
 use crate::{
     fs::pipe::{OpenedPipe, create_anonymous_pipe},
-    prelude::{dt::UserWritePtr, *},
+    prelude::{dt::UserWritePtr, handler::TryFromSyscallArg, *},
 };
 
-#[syscall(SYS_PIPE2)]
-fn sys_pipe2(pipefd: UserWritePtr<[i32; 2]>, flags: u32) -> Result<u64, SysError> {
-    if flags & !O_CLOEXEC != 0 {
-        return Err(SysError::InvalidArgument);
+bitflags! {
+    #[derive(Debug)]
+    struct PipeFlags: u32 {
+        const O_CLOEXEC = O_CLOEXEC;
+        const O_DIRECT = O_DIRECT;
+        const O_NONBLOCK = O_NONBLOCK;
+        // O_NOTIFICATION_PIPE
     }
+}
 
-    let fd_flags = FdFlags::from_linux_open_flags(flags);
+impl TryFromSyscallArg for PipeFlags {
+    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+        if (raw >> 32) != 0 {
+            return Err(SysError::InvalidArgument);
+        }
+
+        let raw = raw as u32;
+
+        let flags = PipeFlags::from_bits(raw).ok_or(SysError::InvalidArgument)?;
+
+        if flags.intersects(PipeFlags::O_DIRECT | PipeFlags::O_NONBLOCK) {
+            return Err(SysError::NotYetImplemented);
+        }
+
+        Ok(flags)
+    }
+}
+
+#[syscall(SYS_PIPE2)]
+fn sys_pipe2(pipefd: UserWritePtr<[i32; 2]>, flags: PipeFlags) -> Result<u64, SysError> {
+    // O_DIRECT and O_NONBLOCK nyi.
+    let fd_flags = if flags.contains(PipeFlags::O_CLOEXEC) {
+        FdFlags::CLOSE_ON_EXEC
+    } else {
+        FdFlags::empty()
+    };
+
     let task = clone_current_task();
 
     let OpenedPipe { rx, tx } = create_anonymous_pipe()?;

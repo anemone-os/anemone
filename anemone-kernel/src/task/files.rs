@@ -166,16 +166,6 @@ impl FdFlags {
 
         fd_flags
     }
-
-    /// dup3 only allows O_CLOEXEC
-    pub fn from_dup3_flags(flags: u32) -> Result<Self, SysError> {
-        let allowed = anemone_abi::fs::linux::open::O_CLOEXEC;
-        if flags & !allowed != 0 {
-            return Err(SysError::InvalidArgument);
-        }
-
-        Ok(Self::from_linux_open_flags(flags))
-    }
 }
 
 #[derive(Debug)]

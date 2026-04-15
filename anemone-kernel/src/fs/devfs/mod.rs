@@ -258,7 +258,7 @@ mod kunits {
         let full = vfs_open(Path::new(full_path.as_str())).unwrap();
 
         let null_attr = vfs_get_attr(Path::new(null_path.as_str())).unwrap();
-        assert_eq!(null_attr.mode.ty(), InodeType::Dev);
+        assert_eq!(null_attr.mode.ty(), InodeType::Char);
         assert_eq!(
             null_attr.rdev,
             DeviceId::Char(CharDevNum::new(
@@ -292,7 +292,7 @@ mod kunits {
         let block = vfs_open(Path::new(block_path.as_str())).unwrap();
 
         let attr = vfs_get_attr(Path::new(block_path.as_str())).unwrap();
-        assert_eq!(attr.mode.ty(), InodeType::Dev);
+        assert_eq!(attr.mode.ty(), InodeType::Block);
         assert_eq!(
             attr.rdev,
             DeviceId::Block(BlockDevNum::new(

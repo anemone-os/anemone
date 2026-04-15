@@ -71,7 +71,7 @@ fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
         InodeType::Regular => &EXT4_REG_FILE_OPS,
         InodeType::Symlink => &EXT4_SYMLINK_FILE_OPS,
         InodeType::Fifo => unimplemented!("ext4 fifo file"),
-        InodeType::Dev => unimplemented!("ext4 dev file"),
+        InodeType::Char | InodeType::Block => unimplemented!("ext4 dev file"),
     };
 
     Ok(OpenedFile {

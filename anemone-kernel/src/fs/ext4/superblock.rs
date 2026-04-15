@@ -19,7 +19,7 @@ fn ext4_inode_ops(ty: InodeType) -> &'static InodeOps {
     match ty {
         InodeType::Dir => &EXT4_DIR_INODE_OPS,
         InodeType::Regular => &EXT4_REG_INODE_OPS,
-        InodeType::Dev => &EXT4_DEV_INODE_OPS,
+        InodeType::Block | InodeType::Char => &EXT4_DEV_INODE_OPS,
         InodeType::Symlink => &EXT4_SYMLINK_INODE_OPS,
         InodeType::Fifo => unimplemented!("ext4 fifo inode ops"),
     }

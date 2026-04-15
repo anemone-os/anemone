@@ -25,12 +25,16 @@ impl DevfsInode {
     }
 }
 
-pub(super) fn devfs_new_inode(sb: Arc<SuperBlock>, node: DevfsNode) -> Result<Arc<Inode>, SysError> {
+pub(super) fn devfs_new_inode(
+    sb: Arc<SuperBlock>,
+    node: DevfsNode,
+) -> Result<Arc<Inode>, SysError> {
     let inode = Arc::new(Inode::new(
         devfs_ino_for(node),
         match node {
             DevfsNode::Root => InodeType::Dir,
-            DevfsNode::Char(_) | DevfsNode::Block(_) => InodeType::Dev,
+            DevfsNode::Char(_) => InodeType::Char,
+            DevfsNode::Block(_) => InodeType::Block,
         },
         match node {
             DevfsNode::Root => &DEVFS_ROOT_INODE_OPS,
@@ -99,7 +103,7 @@ fn devfs_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
         DevfsNode::Char(devnum) => {
             get_char_dev(devnum).ok_or(SysError::NotFound)?;
             (
-                InodeMode::new(InodeType::Dev, meta.perm),
+                InodeMode::new(InodeType::Char, meta.perm),
                 1,
                 DeviceId::Char(devnum),
                 0,
@@ -108,7 +112,7 @@ fn devfs_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
         DevfsNode::Block(devnum) => {
             let dev = get_block_dev(devnum).ok_or(SysError::NotFound)?;
             (
-                InodeMode::new(InodeType::Dev, meta.perm),
+                InodeMode::new(InodeType::Block, meta.perm),
                 1,
                 DeviceId::Block(devnum),
                 (dev.block_size().bytes() * dev.total_blocks()) as u64,

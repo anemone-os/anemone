@@ -173,7 +173,7 @@ fn console_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     Ok(InodeStat {
         fs_dev: DeviceId::None,
         ino: inode.ino(),
-        mode: InodeMode::new(InodeType::Dev, inode.perm()),
+        mode: InodeMode::new(InodeType::Char, inode.perm()),
         nlink: inode.nlink(),
         uid: 0,
         gid: 0,
@@ -236,12 +236,12 @@ static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
 };
 
 static CONSOLE_STDIN_PATHREF: Lazy<PathRef> = Lazy::new(|| {
-    anony_new_inode(InodeType::Dev, &CONSOLE_STDIN_INODE_OPS, NilOpaque::new())
+    anony_new_inode(InodeType::Char, &CONSOLE_STDIN_INODE_OPS, NilOpaque::new())
         .expect("failed to create console stdin inode")
 });
 
 static CONSOLE_STDOUT_PATHREF: Lazy<PathRef> = Lazy::new(|| {
-    anony_new_inode(InodeType::Dev, &CONSOLE_STDOUT_INODE_OPS, NilOpaque::new())
+    anony_new_inode(InodeType::Char, &CONSOLE_STDOUT_INODE_OPS, NilOpaque::new())
         .expect("failed to create console stdout inode")
 });
 

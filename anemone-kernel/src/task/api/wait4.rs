@@ -13,12 +13,12 @@ impl TryFromSyscallArg for WaitObject {
         let raw = raw as i64;
         if raw < -1 {
             // unimplemented: wait for any child in the same process group
-            Err(SysError::InvalidArgument)
+            Err(SysError::NotYetImplemented)
         } else if raw == -1 {
             Ok(WaitObject::Tid(None))
         } else if raw == 0 {
             // unimplemented: wait for any child in the same process group
-            Err(SysError::InvalidArgument)
+            Err(SysError::NotYetImplemented)
         } else {
             Ok(WaitObject::Tid(Some(Tid::new(raw as u32))))
         }
