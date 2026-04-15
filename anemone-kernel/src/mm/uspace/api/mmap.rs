@@ -13,6 +13,7 @@ use crate::{
         *,
     },
     syscall::dt::*,
+    task::files::Fd,
 };
 
 #[syscall(SYS_MMAP)]
@@ -21,7 +22,7 @@ fn sys_mmap(
     #[validate_with(nonzero)] length: u64,
     prot: MmapProt,
     flags: MmapFlags,
-    fd: usize,
+    fd: Fd,
     #[validate_with(aligned_to::<{ PagingArch::PAGE_SIZE_BYTES }>)] offset: u64,
 ) -> Result<u64, SysError> {
     let usp = with_current_task(|task| task.clone_uspace().expect("user task should have uspace"));

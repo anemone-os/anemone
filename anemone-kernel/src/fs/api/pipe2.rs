@@ -21,16 +21,24 @@ fn sys_pipe2(pipefd: UserWritePtr<[i32; 2]>, flags: u32) -> Result<u64, SysError
 
     let OpenedPipe { rx, tx } = create_anonymous_pipe()?;
 
-    let rx = task.open_fd(rx, FileFlags::READ, fd_flags);
-    let tx = task.open_fd(tx, FileFlags::WRITE, fd_flags);
+    let rx = task
+        .open_fd(rx, FileFlags::READ, fd_flags)
+        .ok_or(KernelError::NoMoreFd)?;
+    let tx = task
+        .open_fd(tx, FileFlags::WRITE, fd_flags)
+        .ok_or(KernelError::NoMoreFd)?;
 
-    if let Err(e) = pipefd.safe_write([rx as i32, tx as i32]) {
+    if let Err(e) = pipefd.safe_write([rx.raw() as i32, tx.raw() as i32]) {
         task.close_fd(rx);
         task.close_fd(tx);
         return Err(e);
     }
 
-    kdebugln!("sys_pipe2: created pipe with rx fd {} and tx fd {}", rx, tx);
+    kdebugln!(
+        "sys_pipe2: created pipe with rx fd {} and tx fd {}",
+        rx.raw(),
+        tx.raw()
+    );
 
     Ok(0)
 }

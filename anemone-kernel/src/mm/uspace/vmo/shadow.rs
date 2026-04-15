@@ -32,6 +32,8 @@ impl VmObject for ShadowObject {
 
         match access {
             PageFaultType::Write => {
+                let mut overlay = self.overlay.write();
+
                 let ResolvedFrame { frame, writable: _ } =
                     self.parent.resolve_frame(pidx, PageFaultType::Read)?;
 
@@ -43,7 +45,7 @@ impl VmObject for ShadowObject {
                     frame: new_frame.clone(),
                     writable: true,
                 };
-                self.overlay.write().insert(pidx, new_frame);
+                overlay.insert(pidx, new_frame);
                 Ok(resolved)
             },
             PageFaultType::Read | PageFaultType::Execute => {

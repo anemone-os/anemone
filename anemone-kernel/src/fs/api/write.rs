@@ -5,10 +5,13 @@
 
 use core::ops::DerefMut;
 
-use crate::prelude::{dt::UserReadPtr, *};
+use crate::{
+    prelude::{dt::UserReadPtr, *},
+    task::files::Fd,
+};
 
 #[syscall(SYS_WRITE)]
-fn sys_write(fd: usize, buf: UserReadPtr<u8>, count: usize) -> Result<u64, SysError> {
+fn sys_write(fd: Fd, buf: UserReadPtr<u8>, count: usize) -> Result<u64, SysError> {
     if count == 0 {
         return Ok(0);
     }

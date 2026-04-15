@@ -9,6 +9,7 @@ use anemone_abi::fs::linux::dirent::{DT_CHR, DT_DIR, DT_FIFO, DT_LNK, DT_REG};
 
 use crate::{
     prelude::{dt::UserWritePtr, *},
+    task::files::Fd,
     utils::byte_writer::{ByteWriter, ByteWriterError},
 };
 
@@ -53,7 +54,7 @@ fn map_byte_writer_error(_: ByteWriterError) -> SysError {
 
 #[syscall(SYS_GETDENTS64)]
 fn sys_getdents64(
-    fd: usize,
+    fd: Fd,
     // the struct `linux_dirent64` is a variable-length one, so we use u8 here
     dirp: UserWritePtr<u8>,
     count: u32,

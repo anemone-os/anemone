@@ -29,6 +29,8 @@ pub enum KernelError {
     PermissionDenied,
     /// The provided file descriptor is invalid.
     BadFileDescriptor,
+    /// No more file descriptors available.
+    NoMoreFd,
 }
 
 impl AsErrno for KernelError {
@@ -41,6 +43,7 @@ impl AsErrno for KernelError {
             KernelError::BufferTooSmall => ERANGE,
             KernelError::PermissionDenied => EPERM,
             KernelError::BadFileDescriptor => EBADF,
+            KernelError::NoMoreFd => EMFILE,
         }
     }
 }

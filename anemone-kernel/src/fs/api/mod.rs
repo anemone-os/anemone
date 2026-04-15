@@ -19,3 +19,27 @@ pub mod read;
 pub mod umount;
 pub mod unlinkat;
 pub mod write;
+
+mod args {
+    use crate::{
+        prelude::{handler::TryFromSyscallArg, *},
+        task::files::Fd,
+    };
+
+    #[derive(Debug)]
+    pub enum AtFd {
+        Cwd,
+        Fd(Fd),
+    }
+
+    impl TryFromSyscallArg for AtFd {
+        fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+            // use i64 here.
+            if (raw as i64) == anemone_abi::fs::linux::at::AT_FDCWD as i64 {
+                Ok(Self::Cwd)
+            } else {
+                Ok(Self::Fd(Fd::try_from_syscall_arg(raw)?))
+            }
+        }
+    }
+}

@@ -27,11 +27,6 @@ impl AnonObject {
     }
 }
 
-// TODO: here exists a concurrency bug. if two threads write to the same page at
-// the same time, they may both allocate a new frame and one of the writes will
-// be lost.
-//
-// see ext4 regular file mapping for a solution.
 impl VmObject for AnonObject {
     fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, MmError> {
         self.check_pidx(pidx)?;
@@ -46,6 +41,9 @@ impl VmObject for AnonObject {
                 });
             }
         }
+
+        let mut pages = self.pages.write();
+
         match access {
             PageFaultType::Read | PageFaultType::Execute => Ok(shared_zero_frame()),
             PageFaultType::Write => {
@@ -59,7 +57,7 @@ impl VmObject for AnonObject {
                     writable: true,
                 };
 
-                self.pages.write().insert(pidx, frame);
+                pages.insert(pidx, frame);
                 Ok(resolved)
             },
         }

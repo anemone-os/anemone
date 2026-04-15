@@ -4,7 +4,6 @@ use crate::{
     fs::{
         inode::Inode,
         ramfs::{
-            file::RamfsRegMapping,
             inode::{RAMFS_DIR_INODE_OPS, RamfsDir, RamfsReg, RamfsSymlink},
             superblock::{RAMFS_SB_OPS, RamfsSb},
         },
@@ -50,12 +49,6 @@ fn ramfs_symlink(inode: &InodeRef) -> Result<&RamfsSymlink, FsError> {
         .prv()
         .cast::<RamfsSymlink>()
         .ok_or(FsError::NotSymlink)
-}
-
-#[inline(always)]
-fn ramfs_reg_mapping(inode: &InodeRef) -> Result<&RamfsRegMapping, FsError> {
-    ramfs_reg(inode)?;
-    todo!()
 }
 
 fn ramfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, FsError> {
