@@ -51,14 +51,14 @@ impl BlockDev for RamDisk {
         RAMDISK_NUM_SECTORS
     }
 
-    fn read_blocks(&self, block_idx: usize, buf: &mut [u8]) -> Result<(), FsError> {
+    fn read_blocks(&self, block_idx: usize, buf: &mut [u8]) -> Result<(), SysError> {
         let mut sectors = self.sectors.write();
 
         let nsectors = buf.len() / RAMDISK_SECTOR_SIZE;
         for i in 0..nsectors {
             let idx = block_idx + i;
             if idx >= RAMDISK_NUM_SECTORS {
-                return Err(FsError::Dev(DevError::IO));
+                return Err(SysError::IO);
             }
             // let sector = sectors.entry(idx).or_insert_with(|| {
             //     // lazily allocate the sector when it's first accessed.
@@ -77,14 +77,14 @@ impl BlockDev for RamDisk {
         Ok(())
     }
 
-    fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), FsError> {
+    fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), SysError> {
         let mut sectors = self.sectors.write();
 
         let nsectors = buf.len() / RAMDISK_SECTOR_SIZE;
         for i in 0..nsectors {
             let idx = block_idx + i;
             if idx >= RAMDISK_NUM_SECTORS {
-                return Err(FsError::Dev(DevError::IO));
+                return Err(SysError::IO);
             }
             let sector = sectors.entry(idx).or_insert_with(|| {
                 // lazily allocate the sector when it's first accessed.

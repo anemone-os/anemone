@@ -13,7 +13,7 @@ use crate::{
 #[syscall(SYS_PIPE2)]
 fn sys_pipe2(pipefd: UserWritePtr<[i32; 2]>, flags: u32) -> Result<u64, SysError> {
     if flags & !O_CLOEXEC != 0 {
-        return Err(KernelError::InvalidArgument.into());
+        return Err(SysError::InvalidArgument);
     }
 
     let fd_flags = FdFlags::from_linux_open_flags(flags);
@@ -23,10 +23,10 @@ fn sys_pipe2(pipefd: UserWritePtr<[i32; 2]>, flags: u32) -> Result<u64, SysError
 
     let rx = task
         .open_fd(rx, FileFlags::READ, fd_flags)
-        .ok_or(KernelError::NoMoreFd)?;
+        .ok_or(SysError::NoMoreFd)?;
     let tx = task
         .open_fd(tx, FileFlags::WRITE, fd_flags)
-        .ok_or(KernelError::NoMoreFd)?;
+        .ok_or(SysError::NoMoreFd)?;
 
     if let Err(e) = pipefd.safe_write([rx.raw() as i32, tx.raw() as i32]) {
         task.close_fd(rx);

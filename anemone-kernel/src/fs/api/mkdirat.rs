@@ -17,7 +17,7 @@ fn sys_mkdirat(
 ) -> Result<u64, SysError> {
     with_current_task(|task| {
         let path = Path::new(pathname.as_ref());
-        let perm = InodePerm::from_linux_bits(mode as u32).ok_or(KernelError::InvalidArgument)?;
+        let perm = InodePerm::from_linux_bits(mode as u32).ok_or(SysError::InvalidArgument)?;
         if path.is_absolute() {
             let path = task.make_global_path(&Path::new(pathname.as_ref()));
             vfs_mkdir(&path, perm)?;
@@ -25,10 +25,10 @@ fn sys_mkdirat(
             let dir_path = match dirfd {
                 AtFd::Cwd => task.cwd().clone(),
                 AtFd::Fd(fd) => {
-                    let dir_file = task.get_fd(fd).ok_or(KernelError::BadFileDescriptor)?;
+                    let dir_file = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
                     if !dir_file.file_flags().contains(FileFlags::READ) {
                         // or O_PATH, which hasn't been implemented yet.
-                        return Err(KernelError::BadFileDescriptor.into());
+                        return Err(SysError::BadFileDescriptor);
                     }
                     dir_file.vfs_file().path().clone()
                 },

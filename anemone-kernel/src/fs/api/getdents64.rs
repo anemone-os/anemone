@@ -44,12 +44,12 @@ fn dirent64_record_len(name_len: usize) -> Result<usize, SysError> {
     let unaligned = DIRENT64_HEADER_SIZE
         .checked_add(name_len)
         .and_then(|n| n.checked_add(1))
-        .ok_or(KernelError::InvalidArgument)?;
-    align_up(unaligned, DIRENT64_ALIGN).ok_or(KernelError::InvalidArgument.into())
+        .ok_or(SysError::InvalidArgument)?;
+    align_up(unaligned, DIRENT64_ALIGN).ok_or(SysError::InvalidArgument)
 }
 
 fn map_byte_writer_error(_: ByteWriterError) -> SysError {
-    KernelError::BufferTooSmall.into()
+    SysError::BufferTooSmall
 }
 
 #[syscall(SYS_GETDENTS64)]
@@ -64,7 +64,7 @@ fn sys_getdents64(
             .clone_uspace()
             .expect("user task should have a user space");
 
-        let fd = task.get_fd(fd).ok_or(KernelError::BadFileDescriptor)?;
+        let fd = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
 
         Ok::<_, SysError>((usp, fd))
     })?;
@@ -89,7 +89,7 @@ fn sys_getdents64(
     loop {
         let dirent = match file.iterate(&mut dir_ctx) {
             Ok(dirent) => dirent,
-            Err(FsError::NoMoreEntries) => break,
+            Err(SysError::NoMoreEntries) => break,
             Err(err) => return Err(err.into()),
         };
 
@@ -97,7 +97,7 @@ fn sys_getdents64(
         if reclen > buf_len - writer.current_offset() {
             if written == 0 {
                 // buffer to small to hold even a single record, return error
-                return Err(KernelError::InvalidArgument.into());
+                return Err(SysError::InvalidArgument);
             }
             break;
         }
@@ -107,7 +107,7 @@ fn sys_getdents64(
             // actually this field can be any value. user space programs are not expected to
             // interpret it.
             d_off: dir_ctx.offset() as i64,
-            d_reclen: u16::try_from(reclen).map_err(|_| KernelError::InvalidArgument)?,
+            d_reclen: u16::try_from(reclen).map_err(|_| SysError::InvalidArgument)?,
             d_type: dirent64_dtype(dirent.ty),
         };
 

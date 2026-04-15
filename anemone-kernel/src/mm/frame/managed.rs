@@ -18,11 +18,11 @@ pub struct OwnedFrameHandle {
 }
 
 impl TryFrom<FrameHandle> for OwnedFrameHandle {
-    type Error = (MmError, FrameHandle);
+    type Error = (SysError, FrameHandle);
 
     fn try_from(value: FrameHandle) -> Result<Self, Self::Error> {
         if unsafe { get_frame_raw(value.ppn) }.is_shared() {
-            Err((MmError::SharedFrame, value))
+            Err((SysError::SharedFrame, value))
         } else {
             Ok(Self { inner: value })
         }
@@ -40,7 +40,7 @@ impl FrameHandle {
     ///
     /// This will fail if the underlying frame is shared, since we cannot
     /// guarantee the ownership of a shared frame.
-    pub fn try_into_owned(self) -> Result<OwnedFrameHandle, (MmError, FrameHandle)> {
+    pub fn try_into_owned(self) -> Result<OwnedFrameHandle, (SysError, FrameHandle)> {
         OwnedFrameHandle::try_from(self)
     }
 
@@ -203,12 +203,12 @@ pub struct OwnedFolio {
 }
 
 impl TryFrom<Folio> for OwnedFolio {
-    type Error = (MmError, Folio);
+    type Error = (SysError, Folio);
 
     fn try_from(value: Folio) -> Result<Self, Self::Error> {
         for i in 0..value.range.npages() {
             if unsafe { get_frame_raw(value.range.start() + i) }.is_shared() {
-                return Err((MmError::SharedFrame, value));
+                return Err((SysError::SharedFrame, value));
             }
         }
         Ok(Self { inner: value })
@@ -230,7 +230,7 @@ impl Folio {
     ///
     /// This will fail if any of the underlying frames is shared, since we
     /// cannot guarantee the ownership of a shared frame.
-    pub fn try_into_owned(self) -> Result<OwnedFolio, (MmError, Folio)> {
+    pub fn try_into_owned(self) -> Result<OwnedFolio, (SysError, Folio)> {
         OwnedFolio::try_from(self)
     }
 

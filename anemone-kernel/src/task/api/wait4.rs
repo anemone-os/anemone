@@ -13,12 +13,12 @@ impl TryFromSyscallArg for WaitObject {
         let raw = raw as i64;
         if raw < -1 {
             // unimplemented: wait for any child in the same process group
-            Err(SysError::Kernel(KernelError::InvalidArgument))
+            Err(SysError::InvalidArgument)
         } else if raw == -1 {
             Ok(WaitObject::Tid(None))
         } else if raw == 0 {
             // unimplemented: wait for any child in the same process group
-            Err(SysError::Kernel(KernelError::InvalidArgument))
+            Err(SysError::InvalidArgument)
         } else {
             Ok(WaitObject::Tid(Some(Tid::new(raw as u32))))
         }
@@ -48,7 +48,7 @@ bitflags! {
 
 impl TryFromSyscallArg for WaitOptions {
     fn try_from_syscall_arg(value: u64) -> Result<Self, SysError> {
-        WaitOptions::from_bits(value as u32).ok_or(SysError::Kernel(KernelError::InvalidArgument))
+        WaitOptions::from_bits(value as u32).ok_or(SysError::InvalidArgument)
     }
 }
 
@@ -60,7 +60,7 @@ pub fn sys_wait4(
 ) -> Result<u64, SysError> {
     if waitoptions.contains(WaitOptions::WUNTRACED) || waitoptions.contains(WaitOptions::WCONTINUED)
     {
-        return Err(SysError::Kernel(KernelError::InvalidArgument));
+        return Err(SysError::InvalidArgument);
         // unsupported
     }
     let task = unsafe {

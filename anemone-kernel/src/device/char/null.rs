@@ -18,11 +18,11 @@ impl CharDev for Null {
         NULL_DEVNUM
     }
 
-    fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
+    fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
         Ok(0)
     }
 
-    fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
+    fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         Ok(buf.len())
     }
 }

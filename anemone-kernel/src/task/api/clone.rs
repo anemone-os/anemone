@@ -53,7 +53,7 @@ bitflags! {
 
 impl TryFromSyscallArg for CloneFlags {
     fn try_from_syscall_arg(value: u64) -> Result<Self, SysError> {
-        CloneFlags::from_bits(value as u32).ok_or(SysError::Kernel(KernelError::InvalidArgument))
+        CloneFlags::from_bits(value as u32).ok_or(SysError::InvalidArgument)
     }
 }
 
@@ -173,7 +173,7 @@ pub fn kernel_clone(
 
     let parent = if flags.contains(CloneFlags::CLONE_PARENT) {
         unsafe { current_task.with_task_hierarchy(|hier| hier.parent()) }
-            .ok_or(KernelError::InvalidArgument)?
+            .ok_or(SysError::InvalidArgument)?
             .upgrade()
             .unwrap_or_else(|| panic!("dangling task with parent dropped: {}", current_task.tid()))
     } else {

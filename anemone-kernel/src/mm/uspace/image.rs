@@ -31,7 +31,7 @@ pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, Sys
     let file = vfs_open(Path::new(path.as_ref()))?;
     let size = file.get_attr()?.size;
     if size > MAX_UIMAGE_FILE_SZ {
-        return Err(MmError::InvalidArgument.into());
+        return Err(SysError::InvalidArgument);
     }
     file.seek(0)?;
     // ELF header
@@ -44,13 +44,13 @@ pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, Sys
     let program_hds_esize = elf_header.e_phentsize as u64;
     let program_hd_num = elf_header.e_phnum as u64;
     if program_hds_esize != size_of::<ProgramHeader>() as u64 {
-        return Err(MmError::InvalidArgument.into());
+        return Err(SysError::InvalidArgument);
     }
     let mut ph_data_boxed = vec![
         0;
         program_hds_esize
             .checked_mul(program_hd_num)
-            .ok_or(MmError::InvalidArgument)? as usize
+            .ok_or(SysError::InvalidArgument)? as usize
     ]
     .into_boxed_slice();
     file.seek(program_hds_offset as usize)?;
@@ -80,7 +80,7 @@ pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, Sys
         let memsz = header.p_memsz;
         let vaddr_end = VirtAddr::new(vaddr.get().wrapping_add(memsz));
         if vaddr_end < vaddr || vaddr_end.get() > KernelLayout::KSPACE_ADDR {
-            return Err(MmError::InvalidArgument.into());
+            return Err(SysError::InvalidArgument);
         }
         if vaddr_end > heap_start {
             // update heap start
@@ -98,7 +98,7 @@ pub fn load_image_from_file(path: &impl AsRef<str>) -> Result<UserTaskImage, Sys
             rwx_flags |= PteFlags::EXECUTE;
         }
         if rwx_flags.is_empty() || !rwx_flags.is_supported_rwx_combination() {
-            return Err(MmError::InvalidArgument.into());
+            return Err(SysError::InvalidArgument);
         }
         if rwx_flags == PteFlags::WRITE | PteFlags::EXECUTE | PteFlags::READ {
             kwarningln!(

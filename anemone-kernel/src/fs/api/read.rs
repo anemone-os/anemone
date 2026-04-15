@@ -16,7 +16,7 @@ fn sys_read(fd: Fd, buf: UserWritePtr<u8>, count: usize) -> Result<u64, SysError
         return Ok(0);
     }
 
-    let file = with_current_task(|task| task.get_fd(fd).ok_or(KernelError::BadFileDescriptor))?;
+    let file = with_current_task(|task| task.get_fd(fd).ok_or(SysError::BadFileDescriptor))?;
     let uspace = with_current_task(|task| {
         task.clone_uspace()
             .expect("user task should have a user space")

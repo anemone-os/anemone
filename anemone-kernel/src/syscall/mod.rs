@@ -16,7 +16,7 @@ const INVALID_SYSCALL: SyscallHandler = SyscallHandler {
     name: "invalid",
     handler: {
         pub(super) fn invalid_syscall_handler(_regs: &SyscallRegs) -> Result<u64, SysError> {
-            Err(KernelError::NoSys.into())
+            Err(SysError::NoSys)
         }
         invalid_syscall_handler
     },

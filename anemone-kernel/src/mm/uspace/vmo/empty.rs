@@ -10,7 +10,7 @@ use crate::prelude::{
 pub struct EmptyObject;
 
 impl VmObject for EmptyObject {
-    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, MmError> {
-        Err(MmError::NotMapped)
+    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError> {
+        Err(SysError::NotMapped)
     }
 }

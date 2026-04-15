@@ -12,7 +12,7 @@ use crate::{
 
 use super::file::{EXT4_DIR_FILE_OPS, EXT4_REG_FILE_OPS};
 
-fn ext4_lookup_child(dir: &InodeRef, name: &str) -> Result<(Ino, InodeType), FsError> {
+fn ext4_lookup_child(dir: &InodeRef, name: &str) -> Result<(Ino, InodeType), SysError> {
     let sb = dir.sb();
     ext4_sb(&sb).with_fs(|fs| {
         let mut result = fs
@@ -30,12 +30,12 @@ fn ext4_create_child(
     name: &str,
     ty: InodeType,
     perm: InodePerm,
-) -> Result<InodeRef, FsError> {
+) -> Result<InodeRef, SysError> {
     let sb = dir.sb();
     let raw_ino = ext4_sb(&sb).write_tx(|| {
         ext4_sb(&sb).with_fs(|fs| {
             match fs.lookup(dir.ino().get() as u32, name) {
-                Ok(_) => return Err(FsError::AlreadyExists),
+                Ok(_) => return Err(SysError::AlreadyExists),
                 Err(err) if err.code == ENOENT as i32 => {},
                 Err(err) => return Err(map_ext4_error(err)),
             }
@@ -57,15 +57,15 @@ fn ext4_create_child(
     Ok(sb.iget(ino)?)
 }
 
-fn ext4_touch(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
+fn ext4_touch(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, SysError> {
     ext4_create_child(dir, name, InodeType::Regular, perm)
 }
 
-fn ext4_mkdir(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
+fn ext4_mkdir(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, SysError> {
     ext4_create_child(dir, name, InodeType::Dir, perm)
 }
 
-fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, FsError> {
+fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
     let file_ops = match inode.ty() {
         InodeType::Dir => &EXT4_DIR_FILE_OPS,
         InodeType::Regular => &EXT4_REG_FILE_OPS,
@@ -81,7 +81,7 @@ fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, FsError> {
 }
 
 #[inline]
-fn ext4_mode_from_attr(node_type: LwExt4InodeType, raw_mode: u32) -> Result<InodeMode, FsError> {
+fn ext4_mode_from_attr(node_type: LwExt4InodeType, raw_mode: u32) -> Result<InodeMode, SysError> {
     let ty = map_lwext4_inode_type(node_type)?;
     let perm = InodePerm::from_bits_truncate(raw_mode as u16);
     Ok(InodeMode::new(ty, perm))
@@ -95,7 +95,7 @@ fn ext4_fs_dev(sb: &SuperBlock) -> DeviceId {
     }
 }
 
-fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
+fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let sb = inode.sb();
     let attr = ext4_sb(&sb).read_tx(|| {
         ext4_sb(&sb).with_fs(|fs| {
@@ -126,18 +126,18 @@ fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
     })
 }
 
-fn ext4_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, FsError> {
+fn ext4_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
     let sb = dir.sb();
     let (ino, _ty) = ext4_sb(&sb).read_tx(|| ext4_lookup_child(dir, name))?;
     dir.sb().iget(ino)
 }
 
-fn ext4_symlink(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, FsError> {
+fn ext4_symlink(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, SysError> {
     let sb = dir.sb();
     let raw_ino = ext4_sb(&sb).write_tx(|| {
         ext4_sb(&sb).with_fs(|fs| {
             match fs.lookup(dir.ino().get() as u32, name) {
-                Ok(_) => return Err(FsError::AlreadyExists),
+                Ok(_) => return Err(SysError::AlreadyExists),
                 Err(err) if err.code == ENOENT as i32 => {},
                 Err(err) => return Err(map_ext4_error(err)),
             }
@@ -163,14 +163,14 @@ fn ext4_symlink(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, F
     sb.iget(ino)
 }
 
-fn ext4_link(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), FsError> {
+fn ext4_link(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), SysError> {
     if target.ty() == InodeType::Dir {
-        return Err(FsError::IsDir);
+        return Err(SysError::IsDir);
     }
 
     let sb = dir.sb();
     if !Arc::ptr_eq(&sb, &target.sb()) {
-        return Err(FsError::CrossDeviceLink);
+        return Err(SysError::CrossDeviceLink);
     }
 
     ext4_sb(&sb).write_tx(|| {
@@ -184,12 +184,12 @@ fn ext4_link(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), FsErro
     Ok(())
 }
 
-fn ext4_unlink(dir: &InodeRef, name: &str) -> Result<(), FsError> {
+fn ext4_unlink(dir: &InodeRef, name: &str) -> Result<(), SysError> {
     let sb = dir.sb();
     let child_ino = ext4_sb(&sb).write_tx(|| {
         let (ino, ty) = ext4_lookup_child(dir, name)?;
         if ty == InodeType::Dir {
-            return Err(FsError::IsDir);
+            return Err(SysError::IsDir);
         }
         ext4_sb(&sb).with_fs(|fs| {
             fs.unlink(dir.ino().get() as u32, name)
@@ -209,12 +209,12 @@ fn ext4_unlink(dir: &InodeRef, name: &str) -> Result<(), FsError> {
     Ok(())
 }
 
-fn ext4_rmdir(dir: &InodeRef, name: &str) -> Result<(), FsError> {
+fn ext4_rmdir(dir: &InodeRef, name: &str) -> Result<(), SysError> {
     let sb = dir.sb();
     let child_ino = ext4_sb(&sb).write_tx(|| {
         let (ino, ty) = ext4_lookup_child(dir, name)?;
         if ty != InodeType::Dir {
-            return Err(FsError::NotDir);
+            return Err(SysError::NotDir);
         }
         ext4_sb(&sb).with_fs(|fs| {
             // lwext4_rust already handles the case when the target to unlink is a
@@ -237,7 +237,7 @@ fn ext4_rmdir(dir: &InodeRef, name: &str) -> Result<(), FsError> {
     Ok(())
 }
 
-fn ext4_read_link(inode: &InodeRef) -> Result<PathBuf, FsError> {
+fn ext4_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {
     let sb = inode.sb();
 
     let bytes = ext4_get_attr(inode)?.size as usize;
@@ -251,7 +251,7 @@ fn ext4_read_link(inode: &InodeRef) -> Result<PathBuf, FsError> {
         })
     })?;
 
-    let s = core::str::from_utf8(&buf).map_err(|_| FsError::InvalidPath)?;
+    let s = core::str::from_utf8(&buf).map_err(|_| SysError::InvalidPath)?;
 
     Ok(PathBuf::from(s))
 }
@@ -265,45 +265,45 @@ pub(super) static EXT4_DIR_INODE_OPS: InodeOps = InodeOps {
     unlink: ext4_unlink,
     rmdir: ext4_rmdir,
     open: ext4_open,
-    read_link: |_| Err(FsError::NotSymlink),
+    read_link: |_| Err(SysError::NotSymlink),
     get_attr: ext4_get_attr,
 };
 
 pub(super) static EXT4_REG_INODE_OPS: InodeOps = InodeOps {
-    lookup: |_, _| Err(FsError::NotSupported),
-    touch: |_, _, _| Err(FsError::NotDir),
-    mkdir: |_, _, _| Err(FsError::NotDir),
-    symlink: |_, _, _| Err(FsError::NotDir),
-    link: |_, _, _| Err(FsError::NotDir),
-    unlink: |_, _| Err(FsError::NotDir),
-    rmdir: |_, _| Err(FsError::NotDir),
+    lookup: |_, _| Err(SysError::NotSupported),
+    touch: |_, _, _| Err(SysError::NotDir),
+    mkdir: |_, _, _| Err(SysError::NotDir),
+    symlink: |_, _, _| Err(SysError::NotDir),
+    link: |_, _, _| Err(SysError::NotDir),
+    unlink: |_, _| Err(SysError::NotDir),
+    rmdir: |_, _| Err(SysError::NotDir),
     open: ext4_open,
-    read_link: |_| Err(FsError::NotSymlink),
+    read_link: |_| Err(SysError::NotSymlink),
     get_attr: ext4_get_attr,
 };
 
 pub(super) static EXT4_DEV_INODE_OPS: InodeOps = InodeOps {
-    lookup: |_, _| Err(FsError::NotSupported),
-    touch: |_, _, _| Err(FsError::NotDir),
-    mkdir: |_, _, _| Err(FsError::NotDir),
-    symlink: |_, _, _| Err(FsError::NotDir),
-    link: |_, _, _| Err(FsError::NotDir),
-    unlink: |_, _| Err(FsError::NotDir),
-    rmdir: |_, _| Err(FsError::NotDir),
-    open: |_| Err(FsError::NotSupported),
-    read_link: |_| Err(FsError::NotSymlink),
+    lookup: |_, _| Err(SysError::NotSupported),
+    touch: |_, _, _| Err(SysError::NotDir),
+    mkdir: |_, _, _| Err(SysError::NotDir),
+    symlink: |_, _, _| Err(SysError::NotDir),
+    link: |_, _, _| Err(SysError::NotDir),
+    unlink: |_, _| Err(SysError::NotDir),
+    rmdir: |_, _| Err(SysError::NotDir),
+    open: |_| Err(SysError::NotSupported),
+    read_link: |_| Err(SysError::NotSymlink),
     get_attr: ext4_get_attr,
 };
 
 pub(super) static EXT4_SYMLINK_INODE_OPS: InodeOps = InodeOps {
-    lookup: |_, _| Err(FsError::NotSupported),
-    touch: |_, _, _| Err(FsError::NotDir),
-    mkdir: |_, _, _| Err(FsError::NotDir),
-    symlink: |_, _, _| Err(FsError::NotDir),
-    link: |_, _, _| Err(FsError::NotDir),
-    unlink: |_, _| Err(FsError::NotDir),
-    rmdir: |_, _| Err(FsError::NotDir),
-    open: |_| Err(FsError::NotSupported),
+    lookup: |_, _| Err(SysError::NotSupported),
+    touch: |_, _, _| Err(SysError::NotDir),
+    mkdir: |_, _, _| Err(SysError::NotDir),
+    symlink: |_, _, _| Err(SysError::NotDir),
+    link: |_, _, _| Err(SysError::NotDir),
+    unlink: |_, _| Err(SysError::NotDir),
+    rmdir: |_, _| Err(SysError::NotDir),
+    open: |_| Err(SysError::NotSupported),
     read_link: ext4_read_link,
     get_attr: ext4_get_attr,
 };

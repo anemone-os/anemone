@@ -33,7 +33,7 @@ fn sys_mmap(
         .intersects(AuxMmapFlags::MAP_FIXED | AuxMmapFlags::MAP_FIXED_NOREPLACE);
 
     if fixed && addr.is_some_and(|addr| addr.page_offset() != 0) {
-        return Err(KernelError::InvalidArgument.into());
+        return Err(SysError::InvalidArgument);
     }
 
     let hint = addr.map(|a| (a.page_down(), fixed));
@@ -49,7 +49,7 @@ fn sys_mmap(
 
     if is_anonymous {
         if offset != 0 {
-            return Err(KernelError::InvalidArgument.into());
+            return Err(SysError::InvalidArgument);
         }
         // fd should be -1, but it's not forced by POSIX. So we just ignore it if it's
         // not -1.
@@ -69,7 +69,7 @@ fn sys_mmap(
             .map_err(Into::into)
     } else {
         let poffset = offset as usize >> PagingArch::PAGE_SIZE_BITS;
-        let file = with_current_task(|task| task.get_fd(fd).ok_or(KernelError::BadFileDescriptor))?;
+        let file = with_current_task(|task| task.get_fd(fd).ok_or(SysError::BadFileDescriptor))?;
         let supported_prot = {
             let mut prot = Protection::empty();
             let file_flags = file.file_flags();
@@ -94,7 +94,7 @@ fn sys_mmap(
             prot
         };
         if !supported_prot.contains(prot) {
-            return Err(MmError::PermissionDenied.into());
+            return Err(SysError::PermissionDenied.into());
         }
 
         let inode = file.vfs_file().inode().clone();

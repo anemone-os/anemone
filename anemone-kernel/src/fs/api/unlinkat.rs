@@ -24,10 +24,10 @@ fn unlinkat(
             let dir_path = match dirfd {
                 AtFd::Cwd => task.cwd().clone(),
                 AtFd::Fd(fd) => {
-                    let dir_file = task.get_fd(fd).ok_or(KernelError::BadFileDescriptor)?;
+                    let dir_file = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
                     if !dir_file.file_flags().contains(FileFlags::READ) {
                         // or O_PATH, which hasn't been implemented yet.
-                        return Err(KernelError::BadFileDescriptor.into());
+                        return Err(SysError::BadFileDescriptor);
                     }
                     dir_file.vfs_file().path().clone()
                 },

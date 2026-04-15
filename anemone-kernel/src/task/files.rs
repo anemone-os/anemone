@@ -28,12 +28,12 @@ impl Fd {
 impl TryFromSyscallArg for Fd {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
         if (raw >> 32) != 0 {
-            Err(KernelError::InvalidArgument.into())
+            Err(SysError::InvalidArgument)
         } else if (raw as i32) < 0 {
-            Err(KernelError::InvalidArgument.into())
+            Err(SysError::InvalidArgument)
         } else {
             if (raw >> 32) as u32 >= i32::MAX as u32 {
-                Err(KernelError::InvalidArgument.into())
+                Err(SysError::InvalidArgument)
             } else {
                 Ok(Self(raw as u32))
             }
@@ -77,14 +77,14 @@ impl FileDesc {
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
         if !self.pfile.flags.contains(FileFlags::READ) {
-            return Err(KernelError::PermissionDenied.into());
+            return Err(SysError::PermissionDenied);
         }
         self.pfile.file.read(buf).map_err(|e| e.into())
     }
 
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         if !self.pfile.flags.contains(FileFlags::WRITE) {
-            return Err(KernelError::PermissionDenied.into());
+            return Err(SysError::PermissionDenied);
         }
 
         // currently we don't support atomic append, so we just seek to the end of file
@@ -171,7 +171,7 @@ impl FdFlags {
     pub fn from_dup3_flags(flags: u32) -> Result<Self, SysError> {
         let allowed = anemone_abi::fs::linux::open::O_CLOEXEC;
         if flags & !allowed != 0 {
-            return Err(KernelError::InvalidArgument.into());
+            return Err(SysError::InvalidArgument);
         }
 
         Ok(Self::from_linux_open_flags(flags))
@@ -250,10 +250,10 @@ impl FilesState {
     /// compatibility issues, we'll implement the rest of it.
     pub fn dup3(&mut self, old_fd: Fd, new_fd: Fd, flags: FdFlags) -> Result<(), SysError> {
         if old_fd == new_fd {
-            return Err(KernelError::InvalidArgument.into());
+            return Err(SysError::InvalidArgument);
         }
 
-        let fd = self.get_fd(old_fd).ok_or(KernelError::BadFileDescriptor)?;
+        let fd = self.get_fd(old_fd).ok_or(SysError::BadFileDescriptor)?;
 
         if self.fd_table.contains_key(&new_fd) {
             self.close_fd(new_fd);
@@ -271,7 +271,7 @@ impl FilesState {
                     if exist {
                         self.recycled_fds.insert(new_fd);
                     }
-                    return Err(KernelError::InvalidArgument.into());
+                    return Err(SysError::InvalidArgument);
                 },
             }
         }

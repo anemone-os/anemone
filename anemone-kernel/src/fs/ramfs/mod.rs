@@ -25,35 +25,35 @@ fn ramfs_sb(sb: &SuperBlock) -> &RamfsSb {
 }
 
 #[inline(always)]
-fn ramfs_dir(inode: &InodeRef) -> Result<&RamfsDir, FsError> {
+fn ramfs_dir(inode: &InodeRef) -> Result<&RamfsDir, SysError> {
     inode
         .inode()
         .prv()
         .cast::<RamfsDir>()
-        .ok_or(FsError::NotDir)
+        .ok_or(SysError::NotDir)
 }
 
 #[inline(always)]
-fn ramfs_reg(inode: &InodeRef) -> Result<&RamfsReg, FsError> {
+fn ramfs_reg(inode: &InodeRef) -> Result<&RamfsReg, SysError> {
     inode
         .inode()
         .prv()
         .cast::<RamfsReg>()
-        .ok_or(FsError::NotReg)
+        .ok_or(SysError::NotReg)
 }
 
 #[inline(always)]
-fn ramfs_symlink(inode: &InodeRef) -> Result<&RamfsSymlink, FsError> {
+fn ramfs_symlink(inode: &InodeRef) -> Result<&RamfsSymlink, SysError> {
     inode
         .inode()
         .prv()
         .cast::<RamfsSymlink>()
-        .ok_or(FsError::NotSymlink)
+        .ok_or(SysError::NotSymlink)
 }
 
-fn ramfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, FsError> {
+fn ramfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, SysError> {
     if !matches!(source, MountSource::Pseudo) {
-        return Err(FsError::InvalidArgument);
+        return Err(SysError::InvalidArgument);
     }
 
     let sb_prv = AnyOpaque::new(RamfsSb::new());
@@ -96,7 +96,7 @@ fn ramfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock
 
 fn ramfs_kill_sb(sb: Arc<SuperBlock>) {}
 
-fn ramfs_sync_fs(_sb: &SuperBlock) -> Result<(), FsError> {
+fn ramfs_sync_fs(_sb: &SuperBlock) -> Result<(), SysError> {
     // no-op, since ramfs is purely in-memory and has no backing store to sync to.
     Ok(())
 }

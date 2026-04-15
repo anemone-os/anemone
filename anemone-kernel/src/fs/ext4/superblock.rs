@@ -25,7 +25,7 @@ fn ext4_inode_ops(ty: InodeType) -> &'static InodeOps {
     }
 }
 
-fn ext4_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, FsError> {
+fn ext4_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, SysError> {
     let attr = ext4_sb(sb).read_tx(|| {
         ext4_sb(sb).with_fs(|fs| {
             let mut attr = lwext4_rust::FileAttr::default();
@@ -66,7 +66,7 @@ fn ext4_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, FsError
     Ok(Arc::new(inode))
 }
 
-fn ext4_sync_inode_inner(inode: &Arc<Inode>) -> Result<(), FsError> {
+fn ext4_sync_inode_inner(inode: &Arc<Inode>) -> Result<(), SysError> {
     // `indexed` cannot be used as a deletion test here: VFS clears it before
     // invoking `evict_inode`, so a still-live inode being evicted also arrives
     // here as unindexed. The real terminal state is `nlink == 0`: final
@@ -86,8 +86,7 @@ fn ext4_sync_inode_inner(inode: &Arc<Inode>) -> Result<(), FsError> {
             .prv()
             .cast::<Ext4Reg>()
             .expect("regular inode must have Ext4Reg as its private data")
-            .sync_all()
-            .map_err(FsError::Mm)?;
+            .sync_all()?;
     }
 
     ext4_sb(&sb).write_tx(|| {
@@ -109,11 +108,11 @@ fn ext4_sync_inode_inner(inode: &Arc<Inode>) -> Result<(), FsError> {
     })
 }
 
-fn ext4_evict_inode(_sb: &SuperBlock, inode: Arc<Inode>) -> Result<(), FsError> {
+fn ext4_evict_inode(_sb: &SuperBlock, inode: Arc<Inode>) -> Result<(), SysError> {
     ext4_sync_inode_inner(&inode)
 }
 
-fn ext4_sync_inode(inode: &InodeRef) -> Result<(), FsError> {
+fn ext4_sync_inode(inode: &InodeRef) -> Result<(), SysError> {
     ext4_sync_inode_inner(&inode.inode())
 }
 

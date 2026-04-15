@@ -6,7 +6,7 @@
 use crate::{
     device::block::get_block_dev,
     prelude::{
-        dt::{c_readonly_string, SyscallArgValidatorExt},
+        dt::{SyscallArgValidatorExt, c_readonly_string},
         *,
     },
 };
@@ -26,10 +26,10 @@ fn parse_mount_source(raw: Option<Box<str>>) -> Result<MountSource, SysError> {
 
             match dev.inode().get_attr()?.rdev {
                 DeviceId::Block(bdev) => {
-                    let bdev = get_block_dev(bdev).ok_or(FsError::NotFound)?;
+                    let bdev = get_block_dev(bdev).ok_or(SysError::NotFound)?;
                     Ok(MountSource::Block(bdev))
                 },
-                _ => Err(FsError::InvalidArgument.into()),
+                _ => Err(SysError::InvalidArgument.into()),
             }
         },
     }
@@ -49,9 +49,9 @@ fn sys_mount(
     // we don't support this argument. vfs now doesn't use it at all.
     _data: u64,
 ) -> Result<u64, SysError> {
-    let fs = get_filesystem(&fstype).ok_or(KernelError::InvalidArgument)?;
+    let fs = get_filesystem(&fstype).ok_or(SysError::InvalidArgument)?;
     if fs.flags().contains(FileSystemFlags::KERNEL_FS) {
-        return Err(KernelError::PermissionDenied.into());
+        return Err(SysError::PermissionDenied);
     }
     drop(fs);
 

@@ -10,6 +10,6 @@ fn sys_dup(oldfd: Fd) -> Result<u64, SysError> {
     with_current_task(|task| {
         task.dup(oldfd)
             .map(|newfd| newfd.raw() as u64)
-            .ok_or(KernelError::BadFileDescriptor.into())
+            .ok_or(SysError::BadFileDescriptor)
     })
 }

@@ -11,14 +11,14 @@ use crate::{fs::inode::Inode, prelude::*, utils::any_opaque::AnyOpaque};
 
 static ANONY_FS: MonoOnce<Arc<FileSystem>> = unsafe { MonoOnce::new() };
 
-fn alloc_anony_ino() -> Result<Ino, FsError> {
+fn alloc_anony_ino() -> Result<Ino, SysError> {
     static ANONY_INODE_COUNTER: AtomicU64 = AtomicU64::new(2);
 
     // classic CAS loop to avoid overflow (which is very unlikely tho)
     loop {
         let ino = ANONY_INODE_COUNTER.load(Ordering::Acquire);
         if ino == u64::MAX {
-            return Err(FsError::NoSpace);
+            return Err(SysError::NoSpace);
         }
         if ANONY_INODE_COUNTER
             .compare_exchange(ino, ino + 1, Ordering::AcqRel, Ordering::Acquire)
@@ -37,9 +37,9 @@ pub fn anony_new_inode(
     ty: InodeType,
     ops: &'static InodeOps,
     prv: AnyOpaque,
-) -> Result<PathRef, FsError> {
+) -> Result<PathRef, SysError> {
     if ty == InodeType::Dir {
-        return Err(FsError::InvalidArgument);
+        return Err(SysError::InvalidArgument);
     }
 
     let ino = alloc_anony_ino()?;
@@ -74,7 +74,7 @@ pub fn anony_new_inode(
 ///
 /// For a more flexible version that takes an explicitly constructed
 /// [OpenedFile], see [anony_open_with].
-pub fn anony_open(path: &PathRef) -> Result<File, FsError> {
+pub fn anony_open(path: &PathRef) -> Result<File, SysError> {
     let OpenedFile { file_ops, prv } = path.inode().open()?;
 
     Ok(File::new(path.clone(), file_ops, prv))
@@ -84,7 +84,7 @@ pub fn anony_open(path: &PathRef) -> Result<File, FsError> {
 /// for those cases where the file ops and private data are not directly derived
 /// from the inode, e.g. when creating a pipe file which may be either a read
 /// end or a write end, and thus has different file ops and private data.
-pub fn anony_open_with(path: &PathRef, state: OpenedFile) -> Result<File, FsError> {
+pub fn anony_open_with(path: &PathRef, state: OpenedFile) -> Result<File, SysError> {
     let OpenedFile { file_ops, prv } = state;
 
     Ok(File::new(path.clone(), file_ops, prv))

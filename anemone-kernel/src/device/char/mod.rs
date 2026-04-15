@@ -19,10 +19,10 @@ pub trait CharDev: Send + Sync {
 
     /// Read data from the device into the provided buffer. Returns the number
     /// of bytes read, or an error if the read operation fails.
-    fn read(&self, buf: &mut [u8]) -> Result<usize, FsError>;
+    fn read(&self, buf: &mut [u8]) -> Result<usize, SysError>;
     /// Write data from the provided buffer to the device. Returns the number
     /// of bytes written, or an error if the write operation fails.
-    fn write(&self, buf: &[u8]) -> Result<usize, FsError>;
+    fn write(&self, buf: &[u8]) -> Result<usize, SysError>;
 }
 
 impl dyn CharDev {
@@ -112,7 +112,7 @@ impl CharDevSubSys {
 static SUBSYS: Lazy<CharDevSubSys> = Lazy::new(|| CharDevSubSys::new());
 
 /// Register a character driver and return the allocated major number for it.
-pub fn register_char_driver(driver: Arc<dyn CharDriver>) -> Result<MajorNum, DevError> {
+pub fn register_char_driver(driver: Arc<dyn CharDriver>) -> Result<MajorNum, SysError> {
     let major = SUBSYS
         .major_alloc
         .lock_irqsave()
@@ -136,14 +136,14 @@ pub fn register_char_device(
     devnum: CharDevNum,
     name: String,
     device: Arc<dyn CharDev>,
-) -> Result<(), DevError> {
+) -> Result<(), SysError> {
     let mut registry = SUBSYS.registry.write_irqsave();
     if registry.devices.contains_key(&devnum) {
-        return Err(DevError::DevAlreadyRegistered);
+        return Err(SysError::DevAlreadyRegistered);
     }
 
     if registry.names.contains_key(name.as_str()) {
-        return Err(DevError::DevAlreadyRegistered);
+        return Err(SysError::DevAlreadyRegistered);
     }
 
     let desc = CharDevDesc { name, ops: device };

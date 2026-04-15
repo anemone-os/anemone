@@ -19,16 +19,16 @@ impl AnonObject {
         }
     }
 
-    fn check_pidx(&self, pidx: usize) -> Result<(), MmError> {
+    fn check_pidx(&self, pidx: usize) -> Result<(), SysError> {
         if pidx >= self.max_pages {
-            return Err(MmError::InvalidArgument);
+            return Err(SysError::InvalidArgument);
         }
         Ok(())
     }
 }
 
 impl VmObject for AnonObject {
-    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, MmError> {
+    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError> {
         self.check_pidx(pidx)?;
 
         {
@@ -49,7 +49,7 @@ impl VmObject for AnonObject {
             PageFaultType::Write => {
                 let frame = unsafe {
                     alloc_frame_zeroed()
-                        .ok_or(MmError::OutOfMemory)?
+                        .ok_or(SysError::OutOfMemory)?
                         .into_frame_handle()
                 };
                 let resolved = ResolvedFrame {

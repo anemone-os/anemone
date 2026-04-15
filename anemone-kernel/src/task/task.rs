@@ -232,7 +232,7 @@ impl Task {
         irq_flags: IrqFlags,
         flags: TaskFlags,
         create_flags: CloneFlags,
-    ) -> Result<Arc<Self>, MmError> {
+    ) -> Result<Arc<Self>, SysError> {
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
         //kdebugln!("created kernel task with kernel stack at {:?}", stack);
@@ -281,7 +281,7 @@ impl Task {
         ustack_top: VirtAddr,
         parent: &Arc<Task>,
         uspace: Arc<UserSpace>,
-    ) -> Result<Self, MmError> {
+    ) -> Result<Self, SysError> {
         let kstack = KernelStack::new()?;
         let kstack_top = kstack.stack_top();
         kdebugln!("created user task with kernel stack at {:?}", kstack);
@@ -318,7 +318,7 @@ impl Task {
     /// # Safety
     /// This function is unsafe because idle tasks are special tasks that should
     /// not be created casually.
-    pub unsafe fn new_idle(entry: *const ()) -> Result<Arc<Self>, MmError> {
+    pub unsafe fn new_idle(entry: *const ()) -> Result<Arc<Self>, SysError> {
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
         //kdebugln!("created kernel task with kernel stack at {:?}", stack);
@@ -601,7 +601,7 @@ impl ArcTaskImpls for Arc<Task> {
                     .position(|val| target.match_task(val))
                     .is_none()
                 {
-                    Err(SysError::Task(TaskError::ChildrenNotFound))
+                    Err(SysError::ChildrenNotFound)
                 } else {
                     Ok(())
                 }

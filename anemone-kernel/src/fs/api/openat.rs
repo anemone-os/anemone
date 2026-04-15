@@ -25,19 +25,19 @@ fn sys_openat(
             // dirfd ignored.
             if flags & O_CREAT != 0 {
                 let perm =
-                    InodePerm::from_linux_bits(mode as u32).ok_or(KernelError::InvalidArgument)?;
+                    InodePerm::from_linux_bits(mode as u32).ok_or(SysError::InvalidArgument)?;
 
                 let ret = vfs_touch(&path, perm);
                 match ret {
                     Ok(_) => (),
-                    Err(FsError::AlreadyExists) if flags & O_EXCL == 0 => (),
+                    Err(SysError::AlreadyExists) if flags & O_EXCL == 0 => (),
                     Err(e) => return Err(e.into()),
                 }
             }
             let file = vfs_open(&path)?;
 
             if file.inode().ty() != InodeType::Dir && flags & O_DIRECTORY != 0 {
-                return Err(FsError::NotDir.into());
+                return Err(SysError::NotDir.into());
             }
 
             if flags & O_APPEND != 0 {
@@ -50,16 +50,16 @@ fn sys_openat(
                     FileFlags::from_linux_open_flags(flags),
                     FdFlags::from_linux_open_flags(flags),
                 )
-                .ok_or(KernelError::NoMoreFd)?;
+                .ok_or(SysError::NoMoreFd)?;
             return Ok(fd.raw() as u64);
         } else {
             let dir_path = match dirfd {
                 AtFd::Cwd => task.cwd().clone(),
                 AtFd::Fd(fd) => {
-                    let dir_file = task.get_fd(fd).ok_or(KernelError::BadFileDescriptor)?;
+                    let dir_file = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
                     if !dir_file.file_flags().contains(FileFlags::READ) {
                         // or O_PATH, which hasn't been implemented yet.
-                        return Err(KernelError::BadFileDescriptor.into());
+                        return Err(SysError::BadFileDescriptor);
                     }
                     dir_file.vfs_file().path().clone()
                 },
@@ -67,12 +67,12 @@ fn sys_openat(
 
             if flags & O_CREAT != 0 {
                 let perm =
-                    InodePerm::from_linux_bits(mode as u32).ok_or(KernelError::InvalidArgument)?;
+                    InodePerm::from_linux_bits(mode as u32).ok_or(SysError::InvalidArgument)?;
 
                 let ret = vfs_touch_at(&dir_path, &path, perm);
                 match ret {
                     Ok(_) => (),
-                    Err(FsError::AlreadyExists) if flags & O_EXCL == 0 => (),
+                    Err(SysError::AlreadyExists) if flags & O_EXCL == 0 => (),
                     Err(e) => return Err(e.into()),
                 }
             }
@@ -80,7 +80,7 @@ fn sys_openat(
             let file = vfs_open_at(&dir_path, &path)?;
 
             if file.inode().ty() != InodeType::Dir && flags & O_DIRECTORY != 0 {
-                return Err(FsError::NotDir.into());
+                return Err(SysError::NotDir.into());
             }
 
             if flags & O_APPEND != 0 {
@@ -93,7 +93,7 @@ fn sys_openat(
                     FileFlags::from_linux_open_flags(flags),
                     FdFlags::from_linux_open_flags(flags),
                 )
-                .ok_or(KernelError::NoMoreFd)?;
+                .ok_or(SysError::NoMoreFd)?;
             return Ok(fd.raw() as u64);
         }
     })

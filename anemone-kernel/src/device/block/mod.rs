@@ -80,14 +80,14 @@ pub trait BlockDev: Send + Sync {
     /// - `block_idx` specifies the index of the block to read from.
     /// - `buf` is the buffer to read into, whose length is guaranteed to be a
     ///   multiple of [Self::block_size()].
-    fn read_blocks(&self, block_idx: usize, buf: &mut [u8]) -> Result<(), FsError>;
+    fn read_blocks(&self, block_idx: usize, buf: &mut [u8]) -> Result<(), SysError>;
 
     /// Perform a synchronous write operation to the device.
     ///
     /// - `block_idx` specifies the index of the block to write to.
     /// - `buf` is the buffer to write from, whose length is guaranteed to be a
     ///   multiple of [Self::block_size()].
-    fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), FsError>;
+    fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), SysError>;
 }
 
 impl Debug for dyn BlockDev {
@@ -228,7 +228,7 @@ impl BlockDevSubSys {
 static SUBSYS: Lazy<BlockDevSubSys> = Lazy::new(|| BlockDevSubSys::new());
 
 /// Register a block driver and return the allocated major number for it.
-pub fn register_block_driver(driver: Arc<dyn BlockDriver>) -> Result<MajorNum, DevError> {
+pub fn register_block_driver(driver: Arc<dyn BlockDriver>) -> Result<MajorNum, SysError> {
     let major = SUBSYS
         .major_alloc
         .lock_irqsave()
@@ -249,10 +249,10 @@ pub fn register_block_driver(driver: Arc<dyn BlockDriver>) -> Result<MajorNum, D
 
 /// Register a block device with metadata describing its provenance, and return
 /// the allocated device name for it.
-pub fn register_block_device(registration: BlockDevRegistration) -> Result<String, DevError> {
+pub fn register_block_device(registration: BlockDevRegistration) -> Result<String, SysError> {
     let mut registry = SUBSYS.registry.write_irqsave();
     if registry.devices.contains_key(&registration.devnum) {
-        return Err(DevError::DevAlreadyRegistered);
+        return Err(SysError::DevAlreadyRegistered);
     }
 
     let name = registry.alloc_name_for(registration.class);

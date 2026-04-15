@@ -41,7 +41,7 @@ pub fn kernel_execve_from_image(
 ) -> Result<(), SysError> {
     let memsp = Arc::new(elf_image.memsp);
     let mut data = memsp.write();
-    let insert_args_fn = || -> Result<VirtAddr, MmError> {
+    let insert_args_fn = || -> Result<VirtAddr, SysError> {
         let mut total_len: u64 = 0;
         // insert strings
         let mut pointers = vec![];

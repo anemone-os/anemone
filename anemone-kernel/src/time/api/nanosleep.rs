@@ -14,7 +14,7 @@ const TV_NSEC_MAX_INCLUSIVE: u64 = 999_999_999;
 
 fn validate_time_spec(ts: &TimeSpec) -> Result<(), SysError> {
     if ts.tv_nsec < 0 || ts.tv_sec < 0 {
-        return Err(KernelError::InvalidArgument.into());
+        return Err(SysError::InvalidArgument);
     }
     Ok(())
 }
@@ -29,7 +29,7 @@ fn sys_nanosleep(
 
     validate_time_spec(&duration)?;
     if duration.tv_nsec as u64 > TV_NSEC_MAX_INCLUSIVE {
-        return Err(KernelError::InvalidArgument.into());
+        return Err(SysError::InvalidArgument);
     }
 
     // we don't have a strong enough wait queue.

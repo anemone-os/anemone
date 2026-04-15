@@ -62,23 +62,23 @@ impl BlockDev for VirtIOBlkState {
         self.lock_irqsave().blk.capacity() as usize
     }
 
-    fn read_blocks(&self, block_idx: usize, buf: &mut [u8]) -> Result<(), FsError> {
+    fn read_blocks(&self, block_idx: usize, buf: &mut [u8]) -> Result<(), SysError> {
         self.lock_irqsave()
             .blk
             .read_blocks(block_idx, buf)
             .map_err(|e| {
                 kerrln!("failed to read blocks from virtio block device: {e}");
-                FsError::Dev(DevError::IO)
+                SysError::IO
             })
     }
 
-    fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), FsError> {
+    fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), SysError> {
         self.lock_irqsave()
             .blk
             .write_blocks(block_idx, buf)
             .map_err(|e| {
                 kerrln!("failed to write blocks to virtio block device: {e}");
-                FsError::Dev(DevError::IO)
+                SysError::IO
             })
     }
 }
@@ -94,7 +94,7 @@ struct VirtIOBlkDriver {
 impl KObjectOps for VirtIOBlkDriver {}
 
 impl DriverOps for VirtIOBlkDriver {
-    fn probe(&self, device: Arc<dyn Device>) -> Result<(), DevError> {
+    fn probe(&self, device: Arc<dyn Device>) -> Result<(), SysError> {
         let vdev = device
             .as_virtio_device()
             .expect("virtio driver should only be probed with virtio device");
@@ -105,7 +105,7 @@ impl DriverOps for VirtIOBlkDriver {
         )
         .map_err(|e| {
             kerrln!("failed to initialize virtio block device: {e}");
-            DevError::ProbeFailed
+            SysError::ProbeFailed
         })?;
 
         let state = VirtIOBlkState {
@@ -118,7 +118,7 @@ impl DriverOps for VirtIOBlkDriver {
         let minor = {
             let mut guard = BOOKKEEPER.lock_irqsave();
             let (minor_alloc, devices) = guard.deref_mut();
-            let minor = minor_alloc.alloc().ok_or(DevError::NoMinorAvailable)?;
+            let minor = minor_alloc.alloc().ok_or(SysError::NoMinorAvailable)?;
 
             let prev = devices.insert(minor, state.clone());
             debug_assert!(
