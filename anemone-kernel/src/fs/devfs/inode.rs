@@ -1,14 +1,14 @@
 use crate::{
     device::{block::get_block_dev, char::get_char_dev},
     fs::{
-        devfs::{devfs_ino_for, devfs_inode_data, devfs_lookup_name, devfs_root_ino, DevfsNode},
+        devfs::{DevfsNode, devfs_ino_for, devfs_inode_data, devfs_lookup_name, devfs_root_ino},
         inode::Inode,
     },
     prelude::*,
     utils::any_opaque::AnyOpaque,
 };
 
-use super::file::{DevfsFile, DEVFS_BLOCK_FILE_OPS, DEVFS_CHAR_FILE_OPS, DEVFS_DIR_FILE_OPS};
+use super::file::{DEVFS_BLOCK_FILE_OPS, DEVFS_CHAR_FILE_OPS, DEVFS_DIR_FILE_OPS, DevfsFile};
 
 #[derive(Debug, Clone, Copy, Opaque)]
 pub(super) struct DevfsInode {
@@ -136,7 +136,8 @@ fn devfs_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
 
 pub(super) static DEVFS_ROOT_INODE_OPS: InodeOps = InodeOps {
     lookup: devfs_lookup,
-    create: |_, _, _| Err(FsError::NotSupported),
+    touch: |_, _, _| Err(FsError::NotSupported),
+    mkdir: |_, _, _| Err(FsError::NotSupported),
     symlink: |_, _, _| Err(FsError::NotSupported),
     link: |_, _, _| Err(FsError::NotSupported),
     unlink: |_, _| Err(FsError::NotSupported),
@@ -148,7 +149,8 @@ pub(super) static DEVFS_ROOT_INODE_OPS: InodeOps = InodeOps {
 
 pub(super) static DEVFS_DEV_INODE_OPS: InodeOps = InodeOps {
     lookup: |_, _| Err(FsError::NotDir),
-    create: |_, _, _| Err(FsError::NotDir),
+    touch: |_, _, _| Err(FsError::NotDir),
+    mkdir: |_, _, _| Err(FsError::NotDir),
     symlink: |_, _, _| Err(FsError::NotDir),
     link: |_, _, _| Err(FsError::NotDir),
     unlink: |_, _| Err(FsError::NotDir),

@@ -9,7 +9,7 @@
 
 use crate::prelude::{
     vma::{ForkPolicy, Protection, VmArea, VmFlags},
-    vmo::anon::AnonObject,
+    vmo::{anon::AnonObject, shadow::ShadowObject},
     *,
 };
 
@@ -115,11 +115,13 @@ pub struct AnonymousMapping {
 #[derive(Debug)]
 pub struct FileMapping {
     pub hint: Option<(VirtPageNum, bool)>,
+    pub clobber: bool,
     pub npages: usize,
     pub prot: Protection,
     pub shared: bool,
     pub flags: VmFlags,
-    pub offset: usize,
+    /// Offset, in page.
+    pub poffset: usize,
     pub inode: InodeRef,
 }
 
@@ -152,7 +154,7 @@ impl UserSpaceData {
                 ForkPolicy::CopyOnWrite
             },
             mapping.flags,
-            Arc::new(RwLock::new(vmo)),
+            Arc::new(vmo),
         );
 
         if fixed && mapping.clobber {
@@ -172,7 +174,56 @@ impl UserSpaceData {
     }
 
     pub fn map_file(&mut self, mapping: &FileMapping) -> Result<VirtAddr, MmError> {
-        todo!()
+        let fixed = mapping.hint.is_some_and(|(_, fixed)| fixed);
+        let vpn = match mapping.hint {
+            Some((hint, true)) => hint,
+            Some((hint, false)) => self
+                .find_avail_range(mapping.npages, Some(hint))
+                .ok_or(MmError::OutOfMemory)?,
+            None => self
+                .find_avail_range(mapping.npages, None)
+                .ok_or(MmError::OutOfMemory)?,
+        };
+        let range = VirtPageRange::new(vpn, mapping.npages as u64);
+        self.validate_range(range)?;
+
+        if let Some(m) = mapping.inode.mapping() {
+            let vma = VmArea::new(
+                range,
+                mapping.poffset,
+                mapping.prot,
+                if mapping.shared {
+                    ForkPolicy::Shared
+                } else {
+                    ForkPolicy::CopyOnWrite
+                },
+                mapping.flags,
+                if mapping.shared {
+                    m
+                } else {
+                    Arc::new(ShadowObject::new(m))
+                },
+            );
+
+            if fixed && mapping.clobber {
+                self.replace_range(range, vma)?;
+            } else {
+                self.insert_vma(vma)?;
+            }
+
+            kdebugln!(
+                "mapped file-backed range {range:?} with prot={:?}, shared={}, flags={:?}, poffset={:#x} for inode {}",
+                mapping.prot,
+                mapping.shared,
+                mapping.flags,
+                mapping.poffset,
+                mapping.inode.ino().get()
+            );
+
+            Ok(vpn.to_virt_addr())
+        } else {
+            Err(MmError::NotSupported)
+        }
     }
 
     /// Unmap the given virtual page range.

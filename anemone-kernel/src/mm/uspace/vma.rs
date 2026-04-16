@@ -120,7 +120,7 @@ pub struct VmArea {
     /// System-managed reservation type.
     reservation: Option<VmReservation>,
     /// The underlying virtual memory object.
-    backing: Arc<RwLock<dyn VmObject>>,
+    backing: Arc<dyn VmObject>,
 }
 
 impl VmArea {
@@ -130,7 +130,7 @@ impl VmArea {
         prot: Protection,
         on_fork: ForkPolicy,
         flags: VmFlags,
-        backing: Arc<RwLock<dyn VmObject>>,
+        backing: Arc<dyn VmObject>,
     ) -> Self {
         Self::new_internal(range, poffset, prot, on_fork, flags, None, backing)
     }
@@ -142,7 +142,7 @@ impl VmArea {
         on_fork: ForkPolicy,
         flags: VmFlags,
         reservation: VmReservation,
-        backing: Arc<RwLock<dyn VmObject>>,
+        backing: Arc<dyn VmObject>,
     ) -> Self {
         Self::new_internal(
             range,
@@ -162,7 +162,7 @@ impl VmArea {
         on_fork: ForkPolicy,
         flags: VmFlags,
         reservation: Option<VmReservation>,
-        backing: Arc<RwLock<dyn VmObject>>,
+        backing: Arc<dyn VmObject>,
     ) -> Self {
         Self {
             range,
@@ -186,7 +186,7 @@ impl VmArea {
     }
 
     /// As title.
-    pub fn set_backing(&mut self, new: Arc<RwLock<dyn VmObject>>) {
+    pub fn set_backing(&mut self, new: Arc<dyn VmObject>) {
         self.backing = new;
     }
 
@@ -220,7 +220,7 @@ impl VmArea {
     }
 
     /// Get the underlying virtual memory object of this VMA.
-    pub fn backing(&self) -> &Arc<RwLock<dyn VmObject>> {
+    pub fn backing(&self) -> &Arc<dyn VmObject> {
         &self.backing
     }
 
@@ -244,7 +244,7 @@ impl VmArea {
         }
 
         let pidx = self.vmo_pidx(vpn);
-        let resolved = self.backing.write().resolve_frame(pidx, access)?;
+        let resolved = self.backing.resolve_frame(pidx, access)?;
         let mut flags: PteFlags = PteFlags::from(self.prot) | PteFlags::USER;
         if !resolved.writable {
             flags -= PteFlags::WRITE;
@@ -317,7 +317,7 @@ impl VmArea {
 
                 let pshadow = ShadowObject::new(original.clone());
                 let cshadow = ShadowObject::new(original.clone());
-                self.backing = Arc::new(RwLock::new(pshadow));
+                self.backing = Arc::new(pshadow);
                 Self {
                     range: self.range,
                     poffset: self.poffset,
@@ -325,7 +325,7 @@ impl VmArea {
                     on_fork: self.on_fork,
                     flags: self.flags,
                     reservation: self.reservation,
-                    backing: Arc::new(RwLock::new(cshadow)),
+                    backing: Arc::new(cshadow),
                 }
             },
         }

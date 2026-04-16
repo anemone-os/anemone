@@ -2,12 +2,15 @@ use crate::{
     fs::{
         inode::{Inode, InodeMode},
         ramfs::{
-            file::{RamfsFile, RAMFS_DIR_FILE_OPS, RAMFS_REG_FILE_OPS, RAMFS_SYMLINK_FILE_OPS},
+            file::{
+                RAMFS_DIR_FILE_OPS, RAMFS_REG_FILE_OPS, RAMFS_SYMLINK_FILE_OPS, RamfsRegMapping,
+                RamfsRegState,
+            },
             ramfs_dir, ramfs_sb, ramfs_symlink,
         },
     },
-    prelude::*,
-    utils::any_opaque::AnyOpaque,
+    prelude::{vmo::VmObject, *},
+    utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
 #[derive(Opaque)]
@@ -70,14 +73,18 @@ impl RamfsDir {
 
 #[derive(Opaque)]
 pub(super) struct RamfsReg {
-    pub(super) data: RwLock<Vec<u8>>,
+    state: Arc<RamfsRegState>,
 }
 
 impl RamfsReg {
     pub(super) fn new() -> Self {
         Self {
-            data: RwLock::new(Vec::new()),
+            state: Arc::new(RamfsRegState::new()),
         }
+    }
+
+    pub(super) fn state(&self) -> Arc<RamfsRegState> {
+        self.state.clone()
     }
 }
 
@@ -139,11 +146,13 @@ fn ramfs_remove_locked(dir: &InodeRef, name: &str, is_dir: bool) -> Result<(), F
     Ok(())
 }
 
-/// Create a new child inode inside a directory.
-fn ramfs_create(dir: &InodeRef, name: &str, mode: InodeMode) -> Result<InodeRef, FsError> {
-    if !matches!(mode.ty(), InodeType::Dir | InodeType::Regular) {
-        return Err(FsError::NotSupported);
-    }
+fn ramfs_create_child(
+    dir: &InodeRef,
+    name: &str,
+    ty: InodeType,
+    perm: InodePerm,
+) -> Result<InodeRef, FsError> {
+    debug_assert!(matches!(ty, InodeType::Dir | InodeType::Regular));
 
     let sb = dir.sb();
     ramfs_sb(&sb).write_tx(|| {
@@ -153,15 +162,19 @@ fn ramfs_create(dir: &InodeRef, name: &str, mode: InodeMode) -> Result<InodeRef,
         }
 
         let new_ino = ramfs_sb(&sb).alloc_ino();
-        let new_prv = match mode.ty() {
-            InodeType::Dir => AnyOpaque::new(RamfsDir::new()),
-            InodeType::Regular => AnyOpaque::new(RamfsReg::new()),
+        let (new_prv, mapping): (AnyOpaque, Option<Arc<dyn VmObject>>) = match ty {
+            InodeType::Dir => (AnyOpaque::new(RamfsDir::new()), None),
+            InodeType::Regular => {
+                let reg = RamfsReg::new();
+                let mapping: Arc<dyn VmObject> = Arc::new(RamfsRegMapping::new(reg.state()));
+                (AnyOpaque::new(reg), Some(mapping))
+            },
             _ => unreachable!(),
         };
-        let new_inode = Arc::new(Inode::new(
+        let mut new_inode = Arc::new(Inode::new(
             new_ino,
-            mode.ty(),
-            match mode.ty() {
+            ty,
+            match ty {
                 InodeType::Dir => &RAMFS_DIR_INODE_OPS,
                 InodeType::Regular => &RAMFS_REG_INODE_OPS,
                 _ => unreachable!(),
@@ -170,7 +183,10 @@ fn ramfs_create(dir: &InodeRef, name: &str, mode: InodeMode) -> Result<InodeRef,
             new_prv,
         ));
         new_inode.inc_nlink();
-        if let InodeType::Dir = mode.ty() {
+        Arc::get_mut(&mut new_inode)
+            .expect("new ramfs inode should be uniquely owned before seeding")
+            .set_mapping(mapping);
+        if let InodeType::Dir = ty {
             // "." & ".."
             let new_dir_data = new_inode.prv().cast::<RamfsDir>().unwrap();
             assert!(new_dir_data.insert(".".to_string(), new_ino).is_ok());
@@ -179,13 +195,21 @@ fn ramfs_create(dir: &InodeRef, name: &str, mode: InodeMode) -> Result<InodeRef,
             new_inode.inc_nlink();
         }
 
-        new_inode.set_perm(mode.perm());
+        new_inode.set_perm(perm);
 
         let inode = sb.seed_inode(new_inode);
         assert!(dir_data.insert(name.to_string(), inode.ino()).is_ok());
 
         Ok(inode)
     })
+}
+
+fn ramfs_touch(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
+    ramfs_create_child(dir, name, InodeType::Regular, perm)
+}
+
+fn ramfs_mkdir(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
+    ramfs_create_child(dir, name, InodeType::Dir, perm)
 }
 
 fn ramfs_symlink_create(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, FsError> {
@@ -234,7 +258,7 @@ fn ramfs_open(inode: &InodeRef) -> Result<OpenedFile, FsError> {
             InodeType::Symlink => &RAMFS_SYMLINK_FILE_OPS,
             _ => unreachable!(),
         },
-        prv: AnyOpaque::new(RamfsFile::new()),
+        prv: NilOpaque::new(),
     };
     Ok(of)
 }
@@ -312,7 +336,8 @@ fn ramfs_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
 }
 
 pub(super) static RAMFS_DIR_INODE_OPS: InodeOps = InodeOps {
-    create: ramfs_create,
+    touch: ramfs_touch,
+    mkdir: ramfs_mkdir,
     symlink: ramfs_symlink_create,
     lookup: ramfs_lookup,
     open: ramfs_open,
@@ -324,7 +349,8 @@ pub(super) static RAMFS_DIR_INODE_OPS: InodeOps = InodeOps {
 };
 
 pub(super) static RAMFS_REG_INODE_OPS: InodeOps = InodeOps {
-    create: |_, _, _| Err(FsError::NotDir),
+    touch: |_, _, _| Err(FsError::NotDir),
+    mkdir: |_, _, _| Err(FsError::NotDir),
     symlink: |_, _, _| Err(FsError::NotDir),
     lookup: |_, _| Err(FsError::NotDir),
     open: ramfs_open,
@@ -336,7 +362,8 @@ pub(super) static RAMFS_REG_INODE_OPS: InodeOps = InodeOps {
 };
 
 pub(super) static RAMFS_SYMLINK_INODE_OPS: InodeOps = InodeOps {
-    create: |_, _, _| Err(FsError::NotDir),
+    touch: |_, _, _| Err(FsError::NotDir),
+    mkdir: |_, _, _| Err(FsError::NotDir),
     symlink: |_, _, _| Err(FsError::NotDir),
     lookup: |_, _| Err(FsError::NotDir),
     open: |_| Err(FsError::NotSupported),

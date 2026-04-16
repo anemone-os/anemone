@@ -23,11 +23,10 @@ fn sys_openat(
             let path = task.make_global_path(&Path::new(pathname.as_ref()));
             // dirfd ignored.
             if flags & O_CREAT != 0 {
-                let mode =
-                    InodeMode::from_linux_mode(mode | InodeType::Regular.to_linux_mode_bits())
-                        .ok_or(KernelError::InvalidArgument)?;
+                let perm =
+                    InodePerm::from_linux_bits(mode as u32).ok_or(KernelError::InvalidArgument)?;
 
-                let ret = vfs_create(&path, mode);
+                let ret = vfs_touch(&path, perm);
                 match ret {
                     Ok(_) => (),
                     Err(FsError::AlreadyExists) if flags & O_EXCL == 0 => (),
@@ -65,11 +64,10 @@ fn sys_openat(
             };
 
             if flags & O_CREAT != 0 {
-                let mode =
-                    InodeMode::from_linux_mode(mode | InodeType::Regular.to_linux_mode_bits())
-                        .ok_or(KernelError::InvalidArgument)?;
+                let perm =
+                    InodePerm::from_linux_bits(mode as u32).ok_or(KernelError::InvalidArgument)?;
 
-                let ret = vfs_create_at(&dir_path, &path, mode);
+                let ret = vfs_touch_at(&dir_path, &path, perm);
                 match ret {
                     Ok(_) => (),
                     Err(FsError::AlreadyExists) if flags & O_EXCL == 0 => (),
