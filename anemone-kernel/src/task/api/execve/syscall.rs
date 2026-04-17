@@ -12,7 +12,6 @@ pub fn execve(
     #[validate_with(c_readonly_string_array)] envp: Vec<Box<str>>,
 ) -> Result<u64, SysError> {
     let path = Path::new(path.as_ref());
-    let path = with_current_task(|task| task.make_global_path(&path));
 
     kernel_execve(
         &path.to_str().expect("we've already validated path to be a valid C string, whose encoding is a subset of UTF-8"), 

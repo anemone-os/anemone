@@ -25,7 +25,7 @@ enum StackBlobKey {
 pub struct InitStackCtor<'a, T: AsRef<str>, U: AsRef<str>> {
     usp: &'a mut UserSpaceData,
     meta: &'a ElfMeta,
-    path: &'a str,
+    exec_fn: &'a str,
     argv: &'a [T],
     env: &'a [U],
     auxv: AuxV,
@@ -38,14 +38,14 @@ impl<'a, T: AsRef<str>, U: AsRef<str>> InitStackCtor<'a, T, U> {
     pub fn new(
         usp: &'a mut UserSpaceData,
         meta: &'a ElfMeta,
-        path: &'a str,
+        exec_fn: &'a str,
         argv: &'a [T],
         env: &'a [U],
     ) -> Self {
         Self {
             usp,
             meta,
-            path,
+            exec_fn,
             argv,
             env,
             auxv: AuxV::new_partial(),
@@ -127,7 +127,7 @@ impl<'a, T: AsRef<str>, U: AsRef<str>> InitStackCtor<'a, T, U> {
         unsafe {
             // 1. AT_EXECFN
             self.usp.push_to_init_stack::<u8>(&[0])?;
-            let execfn = self.usp.push_to_init_stack::<u8>(self.path.as_bytes())?;
+            let execfn = self.usp.push_to_init_stack::<u8>(self.exec_fn.as_bytes())?;
             self.record.insert(StackBlobKey::ExecFn, execfn);
 
             // 2. AT_RANDOM

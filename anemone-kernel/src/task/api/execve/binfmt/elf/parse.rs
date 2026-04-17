@@ -1,7 +1,7 @@
 //! Parse ELF binaries and load them into [UserSpace]
 
 use goblin::{
-    elf::header::{ELFCLASS64, ELFDATA2LSB, ELFMAG, ET_DYN, ET_EXEC},
+    elf::header::{EI_CLASS, EI_DATA, ELFCLASS64, ELFDATA2LSB, ET_DYN, ET_EXEC},
     elf64::{
         header::{Header, SIZEOF_EHDR},
         program_header::*,
@@ -43,14 +43,11 @@ pub struct ElfMeta {
 /// just some basic validation. passing this does not guarantee the ELF is
 /// well-formed or supported.
 fn validate_elf(hdr: &Header) -> Result<&Header, SysError> {
-    if hdr.e_ident[0..4] != *ELFMAG.as_slice() {
-        return Err(SysError::InvalidArgument);
-    }
-    if hdr.e_ident[4] != ELFCLASS64 {
+    if hdr.e_ident[EI_CLASS] != ELFCLASS64 {
         // only support 64-bit ELF
         return Err(SysError::InvalidArgument);
     }
-    if hdr.e_ident[5] != ELFDATA2LSB {
+    if hdr.e_ident[EI_DATA] != ELFDATA2LSB {
         // only support little-endian ELF
         return Err(SysError::InvalidArgument);
     }
@@ -75,7 +72,7 @@ fn validate_elf(hdr: &Header) -> Result<&Header, SysError> {
     Ok(hdr)
 }
 
-/// Load an ELF image from a file
+/// This function does not check magic bytes.
 pub fn load_image(file: &File, usp: &mut UserSpaceData) -> Result<ElfMeta, SysError> {
     let size = file.get_attr()?.size;
     if size > MAX_UIMAGE_FILE_SZ {
@@ -85,10 +82,6 @@ pub fn load_image(file: &File, usp: &mut UserSpaceData) -> Result<ElfMeta, SysEr
     let mut elf_hdr_bytes = [0; SIZEOF_EHDR];
     file.read(&mut elf_hdr_bytes)?;
     let elf_hdr = validate_elf(Header::from_bytes(&elf_hdr_bytes))?;
-
-    if elf_hdr.e_ident[0..4] != [0x7F, b'E', b'L', b'F'] {
-        return Err(SysError::InvalidArgument);
-    }
 
     let load_bias: u64 = if elf_hdr.e_type == ET_EXEC {
         0
@@ -104,6 +97,21 @@ pub fn load_image(file: &File, usp: &mut UserSpaceData) -> Result<ElfMeta, SysEr
     let phdr_entry_sz = elf_hdr.e_phentsize as usize;
     let phdr_entry_num = elf_hdr.e_phnum as usize;
 
+    if phdr_entry_sz != size_of::<ProgramHeader>() {
+        knoticeln!(
+            "unexpected ELF program header entry size: {}",
+            phdr_entry_sz
+        );
+        return Err(SysError::InvalidArgument);
+    }
+    if !phdrs_offset.is_multiple_of(phdr_entry_sz) {
+        knoticeln!(
+            "ELF program headers offset is not aligned: {:#x}",
+            phdrs_offset
+        );
+        return Err(SysError::InvalidArgument);
+    }
+
     let mut phdrs_vaddr = None;
 
     let mut phdrs = vec![
@@ -117,6 +125,7 @@ pub fn load_image(file: &File, usp: &mut UserSpaceData) -> Result<ElfMeta, SysEr
     file.seek(phdrs_offset)?;
     file.read(phdrs.as_mut())?;
 
+    // this is really unsafe... refine later.
     let phdrs = unsafe {
         core::slice::from_raw_parts(phdrs.as_ptr().cast::<ProgramHeader>(), phdr_entry_num)
     };
