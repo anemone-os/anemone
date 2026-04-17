@@ -127,7 +127,7 @@ pub mod process {
         process::mprotect(addr as u64, length as u64, prot.bits() as u64).map(|_| ())
     }
 
-    pub fn execve(path: &str, argv: &[&str]) -> Result<u64, Errno> {
+    pub fn execve(path: &str, argv: &[&str], envp: &[&str]) -> Result<u64, Errno> {
         let mut argv_ptrs = vec![0; argv.len() + 1].into_boxed_slice();
         let argv = argv
             .iter()
@@ -139,8 +139,23 @@ pub mod process {
         }
         argv_ptrs[argv.len()] = 0;
 
+        let mut envp_ptrs = vec![0; envp.len() + 1].into_boxed_slice();
+        let envp = envp
+            .iter()
+            .map(|env| CString::new(*env).map_err(|_| EINVAL))
+            .collect::<Result<Vec<CString>, Errno>>()?;
+
+        for (index, env) in envp.iter().enumerate() {
+            envp_ptrs[index] = env.as_ptr() as u64;
+        }
+        envp_ptrs[envp.len()] = 0;
+
         let path = CString::new(path).map_err(|_| EINVAL)?;
-        process::execve(path.as_ptr() as u64, argv_ptrs.as_ptr() as u64)
+        process::execve(
+            path.as_ptr() as u64,
+            argv_ptrs.as_ptr() as u64,
+            envp_ptrs.as_ptr() as u64,
+        )
     }
     bitflags! {
         #[derive(Debug, Clone, Copy)]

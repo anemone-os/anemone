@@ -4,9 +4,9 @@
 use core::ptr::null_mut;
 
 use anemone_rs::{
-    env::current_dir,
+    env::*,
     os::linux::process::{
-        clone, execve, getpid, sched_yield, wait4, CloneFlags, WStatusRaw, WaitOptions,
+        CloneFlags, WStatusRaw, WaitOptions, clone, execve, getpid, sched_yield, wait4,
     },
     prelude::*,
 };
@@ -16,6 +16,19 @@ pub fn main() -> Result<(), Errno> {
     let cwd = current_dir()?;
     let pid = getpid()?;
     println!("init: started:\n\tcwd:{}\n\tpid:{}", cwd.display(), pid);
+    let env = envs();
+    for (key, value) in env {
+        println!("init: env {}={}", key, value);
+    }
+
+    // auxv test
+    {
+        println!("page size: {:#x?}", page_sz());
+        println!("random bytes: {:#x?}", random_bytes());
+        println!("clock ticks per second: {:#x?}", clktck());
+        println!("exec filename: {:#x?}", exec_fn());
+    }
+
     let mut tidc = 0;
     let tid = clone(
         CloneFlags::CLONE_CHILD_SETTID,
@@ -27,7 +40,12 @@ pub fn main() -> Result<(), Errno> {
     .unwrap();
     if tid == 0 {
         println!("init: get into cloned task {}", tidc);
-        execve("bin/user-test", &["bin/user-test"]).expect("failed to execve mmap-test");
+        execve(
+            "bin/user-test",
+            &["bin/user-test"],
+            &["init=init", "say=hello"],
+        )
+        .expect("failed to execve user-test");
         unreachable!();
     } else {
         println!("init: 'bin/user-test' started with pid {}", tid);

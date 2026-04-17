@@ -1,6 +1,7 @@
 //! TODO: O_NOFOLLOW, AT_SYMLINK_NOFOLLOW, etc.
 //!
-//! TODO: typed linux mode and open flags. for now, raw u32 is used.
+//! TODO: typed linux mode and open flags. for now, raw u32 is used. these flags
+//! are a bit complex.
 //!
 //! This is not a high-priority task. We'll deal with that when we need these
 //! flags.

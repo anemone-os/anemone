@@ -124,6 +124,8 @@ pub enum SysError {
     IO,
     /// Children process is not found.
     ChildrenNotFound,
+    /// Binary format unrecognized.
+    BinFmtUnrecognized,
 }
 
 impl AsErrno for SysError {
@@ -179,6 +181,7 @@ impl AsErrno for SysError {
             | SysError::ProbeFailed => ENODEV,
             SysError::IO => EIO,
             SysError::ChildrenNotFound => ECHILD,
+            SysError::BinFmtUnrecognized => ENOEXEC,
         }
     }
 }

@@ -3,6 +3,9 @@
 //! This module provides [UserSpace], which encapsulates a process' page
 //! table, VMA registry, user stack and heap state, and helpers for loading
 //! user segments.
+//!
+//! TODO: Refactor the API: split stack/brk initializing logic into a seperate
+//! builder, rather than placing those initializing helpers in [UserSpaceData].
 
 use core::{
     fmt::Debug,
@@ -16,6 +19,7 @@ use crate::{
         vmo::{VmObject, anon::AnonObject, empty::EmptyObject, fixed::FixedObject},
         *,
     },
+    sync::r#final::Final,
     utils::data::DataSource,
 };
 use vma::{VmArea, VmReservation};
@@ -24,7 +28,6 @@ mod api;
 pub use api::*;
 
 pub mod fault;
-pub mod image;
 pub mod mmap;
 pub mod vma;
 pub mod vmo;
@@ -104,14 +107,41 @@ pub struct UserSpaceData {
     vmas: BTreeMap<VirtPageNum, VmArea>,
     stack: Stack,
     heap: Heap,
+
+    // note that following variable is not put in TaskExecInfo, since they are bound to the
+    // address space, not the process.
+    /// Environment variable region. [start, start + size). Strings, not
+    /// pointers.
+    ///
+    /// /proc/[id]/environ needs this.
+    env_range: Final<(VirtAddr, usize)>,
+    // auxv is a bit tricky. nyi.
+}
+
+impl UserSpace {
+    pub fn read(&self) -> ReadNoPreemptGuard<'_, UserSpaceData> {
+        self.data.read()
+    }
+
+    pub fn write(&self) -> WriteNoPreemptGuard<'_, UserSpaceData> {
+        self.data.write()
+    }
 }
 
 impl UserSpace {
     /// Create a new [UserSpace] prepared for running a user process.
     ///
     /// This will copy kernel mappings into the new page table and preallocate
-    /// the user stack to [INIT_USER_STACK_PAGES]. The heap will be left for
+    /// the user stack to [INIT_USER_STACK_PAGES]. // The heap will be left for
     /// initialization after the user image is loaded.
+    ///
+    /// Following information will be loaded during [kernel_execve]:
+    ///
+    /// - Heap range
+    /// - environment variable region
+    /// - auxiliary vector region
+    ///
+    /// This constructor will set them to dummy zeros.
     pub fn new_user() -> Result<Self, SysError> {
         let mut table = PageTable::new()?;
         KERNEL_PTABLE.copy_to_ptable(&mut table);
@@ -195,21 +225,16 @@ impl UserSpace {
                     svpn: sheap,
                     brk: sheap.to_virt_addr(),
                 },
+                env_range: Final::new_uninit(),
             }),
         };
 
         uspace.write().prefault_initial_stack()?;
         Ok(uspace)
     }
+}
 
-    pub fn read(&self) -> ReadNoPreemptGuard<'_, UserSpaceData> {
-        self.data.read()
-    }
-
-    pub fn write(&self) -> WriteNoPreemptGuard<'_, UserSpaceData> {
-        self.data.write()
-    }
-
+impl UserSpace {
     pub fn fork(&self) -> Result<Self, SysError> {
         let data = self.write().fork()?;
         Ok(UserSpace {
@@ -362,7 +387,7 @@ impl UserSpaceData {
         vsize: usize,
         psize: usize,
         source: &impl DataSource<TError = impl Into<TErr>>,
-        rwx_flags: PteFlags,
+        prot: Protection,
     ) -> Result<(), TErr> {
         let vaddr_ed = vaddr + vsize as u64;
         let vpn_st = vaddr.page_down();
@@ -407,7 +432,7 @@ impl UserSpaceData {
         let seg_vma = VmArea::new(
             VirtPageRange::new(vpn_st, len),
             0,
-            Protection::from(rwx_flags),
+            prot,
             ForkPolicy::CopyOnWrite,
             VmFlags::empty(),
             Arc::new(seg_vmo),
@@ -457,6 +482,9 @@ impl UserSpaceData {
     }
 
     /// Prepare the initial stack window used during exec image construction.
+    ///
+    /// This does not actually map any pages, but just sets the committed
+    /// bottom.
     fn prefault_initial_stack(&mut self) -> Result<(), SysError> {
         self.stack.committed_bottom = self.stack_vma().range().end() - INIT_USER_STACK_PAGES;
 
@@ -469,8 +497,17 @@ impl UserSpaceData {
     /// Returns [SysError::ArgumentTooLarge] if the task init stack is not large
     /// enough to hold the data.
     ///
+    /// Pushing data whose length is zero is allowed. This will not copy any
+    /// data to the stack, but will still move the stack pointer and return the
+    /// new stack pointer. **Useful for alignment purposes.** Besides, pushing
+    /// zero-length data and u8-alignment won't change stack pointer, which can
+    /// be used to query current sp.
+    ///
+    /// Honestly these rules is really weird, you should just call
+    /// [Self::current_init_sp] and [Self::align_down_init_sp] instead.
+    ///
     /// ## Safety
-    /// **Invoke this function when the stack is in use may lead to undefined
+    /// **Invoke this function when the stack is in use will lead to undefined
     /// behavior**
     pub unsafe fn push_to_init_stack<A: Sized>(
         &mut self,
@@ -487,12 +524,62 @@ impl UserSpaceData {
         }
 
         let sp = VirtAddr::new(sp);
+        if data.len() == 0 {
+            self.stack.init_sp = sp;
+            return Ok(sp);
+        }
+
         let stack_base = self.stack_vma().range().start().to_virt_addr();
         let stack_offset = (sp - stack_base) as usize;
         self.stack_vma().backing().write(stack_offset, data)?;
         self.stack.init_sp = sp;
         Ok(sp)
     }
+
+    /// Get current init sp.
+    ///
+    /// # Safety
+    /// Calling this function after the user space is fully initialized is
+    /// undefined behaviour.
+    pub unsafe fn current_init_sp(&self) -> VirtAddr {
+        self.stack.init_sp
+    }
+
+    /// Align down current init sp, returning new sp.
+    ///
+    /// # Safety
+    /// Calling this function after the user space is fully initialized is
+    /// undefined behaviour.
+    pub unsafe fn align_down_init_sp(&mut self, align_shift: usize) -> VirtAddr {
+        let new = align_down_power_of_2!(self.stack.init_sp.get(), 1 << align_shift);
+        self.stack.init_sp = VirtAddr::new(new as u64);
+
+        self.stack.init_sp
+    }
+
+    /// Mark the environment variable region for this address space.
+    ///
+    /// Used after all data is pushed to the initial stack.
+    ///
+    /// # Safety
+    ///
+    /// Calling this function multiple times or calling this function before
+    /// pushing all data to the initial stack will lead to undefined behavior.
+    pub unsafe fn mark_env_range(&mut self, start: VirtAddr, size: usize) {
+        self.env_range.init((start, size));
+    }
+
+    // Mark the auxiliary vector region for this address space.
+    //
+    // Used after all data is pushed to the initial stack.
+    //
+    // # Safety
+    //
+    // Calling this function multiple times or calling this function before
+    // pushing all data to the initial stack will lead to undefined behavior.
+    // pub unsafe fn mark_aux_range(&mut self, start: VirtAddr, size: usize) {
+    //     self.aux_range.init((start, size));
+    // }
 
     /// Move the init stack pointer to the top of the user stack.
     ///
@@ -559,6 +646,7 @@ impl UserSpaceData {
             vmas: new_vmas,
             stack: self.stack,
             heap: self.heap,
+            env_range: self.env_range,
         };
 
         Ok(new_inner)

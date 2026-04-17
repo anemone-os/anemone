@@ -5,7 +5,7 @@
 use core::ptr::null_mut;
 
 use anemone_rs::{
-    env::current_dir,
+    env::{current_dir, envs},
     os::linux::{
         fs::chdir,
         process::{CloneFlags, WStatusRaw, WaitOptions, clone, execve, wait4},
@@ -55,6 +55,9 @@ pub fn main() -> Result<(), Errno> {
     chdir("basic").unwrap();
     let cwd = current_dir()?;
     println!("user-test: current working directory: {}", cwd.display());
+    for (key, valud) in envs() {
+        println!("user-test: env {}={}", key, valud);
+    }
 
     for p in BASIC_TESTS {
         let mut tidc = 0;
@@ -68,7 +71,8 @@ pub fn main() -> Result<(), Errno> {
         .unwrap();
         if tid == 0 {
             println!("user-test: test point '{}'", p);
-            execve(&format!("{}", p), &[&format!("{}", p)]).expect("failed to execve test point");
+            execve(&format!("{}", p), &[&format!("{}", p)], &[])
+                .expect("failed to execve test point");
             unreachable!();
         } else {
             println!("user-test: test point '{}' started with pid {}", p, tid);
