@@ -28,7 +28,7 @@ pub(super) enum DevfsNode {
 }
 
 impl DevfsNode {
-    fn new(ino: Ino) -> Result<Self, FsError> {
+    fn new(ino: Ino) -> Result<Self, SysError> {
         if ino == devfs_root_ino() {
             return Ok(DevfsNode::Root);
         }
@@ -46,7 +46,7 @@ impl DevfsNode {
                 MajorNum::from(dev_raw >> devnum::MINOR_BITS),
                 MinorNum::from(dev_raw & ((1u64 << devnum::MINOR_BITS) - 1)),
             ))),
-            _ => Err(FsError::NotFound),
+            _ => Err(SysError::NotFound),
         }
     }
 }
@@ -79,7 +79,7 @@ fn devfs_ino_for(node: DevfsNode) -> Ino {
     Ino::try_from(raw).unwrap()
 }
 
-fn devfs_lookup_name(name: &str) -> Result<DevfsNode, FsError> {
+fn devfs_lookup_name(name: &str) -> Result<DevfsNode, SysError> {
     if matches!(name, "." | "..") {
         return Ok(DevfsNode::Root);
     }
@@ -95,13 +95,13 @@ fn devfs_lookup_name(name: &str) -> Result<DevfsNode, FsError> {
         },
         (Some(devnum), None) => Ok(DevfsNode::Char(devnum)),
         (None, Some(devnum)) => Ok(DevfsNode::Block(devnum)),
-        (None, None) => Err(FsError::NotFound),
+        (None, None) => Err(SysError::NotFound),
     }
 }
 
-fn devfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, FsError> {
+fn devfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, SysError> {
     if !matches!(source, MountSource::Pseudo) {
-        return Err(FsError::InvalidArgument);
+        return Err(SysError::InvalidArgument);
     }
 
     let fs = DEVFS.get().clone();
@@ -123,7 +123,7 @@ fn devfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock
     Ok(sb)
 }
 
-fn devfs_sync_fs(_sb: &SuperBlock) -> Result<(), FsError> {
+fn devfs_sync_fs(_sb: &SuperBlock) -> Result<(), SysError> {
     // no-op.
     Ok(())
 }
@@ -222,7 +222,7 @@ mod kunits {
 
         assert_eq!(
             vfs_lookup(Path::new("/kunit-devfs-mount/missing")).unwrap_err(),
-            FsError::NotFound
+            SysError::NotFound
         );
 
         drop(root_ref);
@@ -258,7 +258,7 @@ mod kunits {
         let full = vfs_open(Path::new(full_path.as_str())).unwrap();
 
         let null_attr = vfs_get_attr(Path::new(null_path.as_str())).unwrap();
-        assert_eq!(null_attr.mode.ty(), InodeType::Dev);
+        assert_eq!(null_attr.mode.ty(), InodeType::Char);
         assert_eq!(
             null_attr.rdev,
             DeviceId::Char(CharDevNum::new(
@@ -275,7 +275,7 @@ mod kunits {
         assert_eq!(zero.read(&mut zero_buf).unwrap(), 8);
         assert_eq!(zero_buf, [0u8; 8]);
 
-        assert_eq!(full.write(b"hello").unwrap_err(), FsError::NoSpace);
+        assert_eq!(full.write(b"hello").unwrap_err(), SysError::NoSpace);
 
         drop(null);
         drop(zero);
@@ -292,7 +292,7 @@ mod kunits {
         let block = vfs_open(Path::new(block_path.as_str())).unwrap();
 
         let attr = vfs_get_attr(Path::new(block_path.as_str())).unwrap();
-        assert_eq!(attr.mode.ty(), InodeType::Dev);
+        assert_eq!(attr.mode.ty(), InodeType::Block);
         assert_eq!(
             attr.rdev,
             DeviceId::Block(BlockDevNum::new(

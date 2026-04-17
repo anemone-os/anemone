@@ -22,7 +22,7 @@ impl ShadowObject {
 }
 
 impl VmObject for ShadowObject {
-    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, MmError> {
+    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError> {
         if let Some(frame) = self.overlay.read().get(&pidx) {
             return Ok(ResolvedFrame {
                 frame: frame.clone(),
@@ -32,10 +32,12 @@ impl VmObject for ShadowObject {
 
         match access {
             PageFaultType::Write => {
+                let mut overlay = self.overlay.write();
+
                 let ResolvedFrame { frame, writable: _ } =
                     self.parent.resolve_frame(pidx, PageFaultType::Read)?;
 
-                let mut new_frame = alloc_frame().ok_or(MmError::OutOfMemory)?;
+                let mut new_frame = alloc_frame().ok_or(SysError::OutOfMemory)?;
                 new_frame.as_bytes_mut().copy_from_slice(frame.as_bytes());
                 let new_frame = unsafe { new_frame.into_frame_handle() };
 
@@ -43,7 +45,7 @@ impl VmObject for ShadowObject {
                     frame: new_frame.clone(),
                     writable: true,
                 };
-                self.overlay.write().insert(pidx, new_frame);
+                overlay.insert(pidx, new_frame);
                 Ok(resolved)
             },
             PageFaultType::Read | PageFaultType::Execute => {

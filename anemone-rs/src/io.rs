@@ -2,7 +2,7 @@ use core::fmt::{Arguments, Write as _};
 
 use anemone_abi::fs::linux::{STDERR_FILENO, STDOUT_FILENO};
 
-use crate::{fs::File, prelude::*};
+use crate::{fs::File, os::linux::fs::Fd, prelude::*};
 
 pub trait Read {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Errno>;
@@ -40,8 +40,8 @@ pub trait Write {
     }
 }
 
-static STDOUT: File = unsafe { File::from_raw_fd(STDOUT_FILENO) };
-static STDERR: File = unsafe { File::from_raw_fd(STDERR_FILENO) };
+static STDOUT: File = unsafe { File::from_raw_fd(STDOUT_FILENO as Fd) };
+static STDERR: File = unsafe { File::from_raw_fd(STDERR_FILENO as Fd) };
 
 pub fn __print(args: Arguments) {
     let mut stdout = &STDOUT;

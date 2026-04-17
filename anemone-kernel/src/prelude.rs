@@ -1,11 +1,11 @@
 pub use crate::{
     arch::*,
-    device::{error::*, *},
+    device::*,
     driver::*,
     exception::{intr::*, trap::*, *},
     fs::*,
     kconfig_defs::*,
-    mm::{addr::*, error::*, frame::*, paging::*, percpu::*, uspace::*, zone::*},
+    mm::{addr::*, frame::*, paging::*, percpu::*, uspace::*, zone::*},
     platform_defs::*,
     power::*,
     sched::*,

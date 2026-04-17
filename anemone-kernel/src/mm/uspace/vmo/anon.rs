@@ -19,21 +19,16 @@ impl AnonObject {
         }
     }
 
-    fn check_pidx(&self, pidx: usize) -> Result<(), MmError> {
+    fn check_pidx(&self, pidx: usize) -> Result<(), SysError> {
         if pidx >= self.max_pages {
-            return Err(MmError::InvalidArgument);
+            return Err(SysError::InvalidArgument);
         }
         Ok(())
     }
 }
 
-// TODO: here exists a concurrency bug. if two threads write to the same page at
-// the same time, they may both allocate a new frame and one of the writes will
-// be lost.
-//
-// see ext4 regular file mapping for a solution.
 impl VmObject for AnonObject {
-    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, MmError> {
+    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError> {
         self.check_pidx(pidx)?;
 
         {
@@ -46,12 +41,15 @@ impl VmObject for AnonObject {
                 });
             }
         }
+
+        let mut pages = self.pages.write();
+
         match access {
             PageFaultType::Read | PageFaultType::Execute => Ok(shared_zero_frame()),
             PageFaultType::Write => {
                 let frame = unsafe {
                     alloc_frame_zeroed()
-                        .ok_or(MmError::OutOfMemory)?
+                        .ok_or(SysError::OutOfMemory)?
                         .into_frame_handle()
                 };
                 let resolved = ResolvedFrame {
@@ -59,7 +57,7 @@ impl VmObject for AnonObject {
                     writable: true,
                 };
 
-                self.pages.write().insert(pidx, frame);
+                pages.insert(pidx, frame);
                 Ok(resolved)
             },
         }

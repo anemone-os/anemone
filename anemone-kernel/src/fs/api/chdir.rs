@@ -6,7 +6,7 @@ fn sys_chdir(#[validate_with(c_readonly_string)] path: Box<str>) -> Result<u64, 
         let path = task.make_global_path(&Path::new(path.as_ref()));
         let path = vfs_lookup(&path)?;
         if path.inode().ty() != InodeType::Dir {
-            return Err(FsError::NotDir.into());
+            return Err(SysError::NotDir.into());
         }
         task.set_cwd(path);
         Ok(0)

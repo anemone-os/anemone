@@ -109,7 +109,7 @@ impl KPTable {
         kinfoln!("preallocated {} pgdirs for kernel space", allocated);
     }
 
-    unsafe fn kmap(&self, mapping: Mapping) -> Result<(), MmError> {
+    unsafe fn kmap(&self, mapping: Mapping) -> Result<(), SysError> {
         let mut kpgdir = self.ptable.write_irqsave();
         let mut mapper = kpgdir.mapper();
         mapper.map(mapping)
@@ -174,11 +174,11 @@ pub unsafe fn activate_kernel_mapping() {
 /// holding a lock, and the target CPU cores being broadcast are waiting for the
 /// lock with interrupts disabled, a *deadlock* will occur.**
 ///
-/// We use [TlbShootdownGuard] to solve this problem. If the calling context holds a lock
-/// that might be waited on by cores with interrupts disabled, [TlbShootdownGuard] should
-/// only be released after the lock is released, thereby achieving the effect of
-/// delaying the sending of the IPI.
-pub unsafe fn kmap(mapping: Mapping) -> Result<TlbShootdownGuard, MmError> {
+/// We use [TlbShootdownGuard] to solve this problem. If the calling context
+/// holds a lock that might be waited on by cores with interrupts disabled,
+/// [TlbShootdownGuard] should only be released after the lock is released,
+/// thereby achieving the effect of delaying the sending of the IPI.
+pub unsafe fn kmap(mapping: Mapping) -> Result<TlbShootdownGuard, SysError> {
     unsafe {
         KERNEL_PTABLE.kmap(mapping)?;
         for i in 0..mapping.npages {

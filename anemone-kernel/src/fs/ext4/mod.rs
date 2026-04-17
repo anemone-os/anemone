@@ -49,14 +49,14 @@ mod glue {
         fn write_blocks(&mut self, block_id: u64, buf: &[u8]) -> lwext4_rust::Ext4Result<usize> {
             self.dev
                 .write_blocks(block_id as usize, buf)
-                .map_err(|_| LwExt4Error::new(EIO as i32, "block write failed"))?;
+                .map_err(|err| LwExt4Error::new(err.as_errno(), "block write failed"))?;
             Ok(buf.len() / lwext4_rust::EXT4_DEV_BSIZE)
         }
 
         fn read_blocks(&mut self, block_id: u64, buf: &mut [u8]) -> lwext4_rust::Ext4Result<usize> {
             self.dev
                 .read_blocks(block_id as usize, buf)
-                .map_err(|_| LwExt4Error::new(EIO as i32, "block read failed"))?;
+                .map_err(|err| LwExt4Error::new(err.as_errno(), "block read failed"))?;
             Ok(buf.len() / lwext4_rust::EXT4_DEV_BSIZE)
         }
 
@@ -121,7 +121,7 @@ impl Ext4Sb {
         f(fs)
     }
 
-    fn flush(&self) -> Result<(), FsError> {
+    fn flush(&self) -> Result<(), SysError> {
         self.with_fs(|fs| fs.flush().map_err(map_ext4_error))
     }
 }
@@ -134,34 +134,35 @@ pub(super) fn ext4_sb(sb: &SuperBlock) -> &Ext4Sb {
 }
 
 #[inline(always)]
-fn ext4_reg(inode: &InodeRef) -> Result<&file::Ext4Reg, FsError> {
+fn ext4_reg(inode: &InodeRef) -> Result<&file::Ext4Reg, SysError> {
     inode
         .inode()
         .prv()
         .cast::<file::Ext4Reg>()
-        .ok_or(FsError::NotReg)
+        .ok_or(SysError::NotReg)
 }
 
 #[inline(always)]
-pub(super) fn ext4_ino(ino: u32) -> Result<Ino, FsError> {
-    Ino::try_from(ino as u64).map_err(|_| FsError::InvalidArgument)
+pub(super) fn ext4_ino(ino: u32) -> Result<Ino, SysError> {
+    Ino::try_from(ino as u64).map_err(|_| SysError::InvalidArgument)
 }
 
 #[inline(always)]
-pub(super) fn map_ext4_error(err: LwExt4Error) -> FsError {
+pub(super) fn map_ext4_error(err: LwExt4Error) -> SysError {
     match err.code {
-        x if x == EEXIST as i32 => FsError::AlreadyExists,
-        x if x == ENOENT as i32 => FsError::NotFound,
-        x if x == ENOTDIR as i32 => FsError::NotDir,
-        x if x == EISDIR as i32 => FsError::IsDir,
-        x if x == EINVAL as i32 => FsError::InvalidArgument,
-        x if x == ENOTEMPTY as i32 => FsError::DirNotEmpty,
-        x if x == EXDEV as i32 => FsError::CrossDeviceLink,
-        x if x == EBUSY as i32 => FsError::Busy,
-        x if x == EOPNOTSUPP as i32 => FsError::NotSupported,
+        x if x == EEXIST as i32 => SysError::AlreadyExists,
+        x if x == ENOENT as i32 => SysError::NotFound,
+        x if x == ENOTDIR as i32 => SysError::NotDir,
+        x if x == EISDIR as i32 => SysError::IsDir,
+        x if x == EINVAL as i32 => SysError::InvalidArgument,
+        x if x == EIO as i32 => SysError::IO,
+        x if x == ENOTEMPTY as i32 => SysError::DirNotEmpty,
+        x if x == EXDEV as i32 => SysError::CrossDeviceLink,
+        x if x == EBUSY as i32 => SysError::Busy,
+        x if x == EOPNOTSUPP as i32 => SysError::NotSupported,
         _ => {
             kerrln!("unexpected ext4 error: {:?}", err);
-            FsError::NotSupported
+            SysError::NotSupported
         },
     }
 }
@@ -169,35 +170,36 @@ pub(super) fn map_ext4_error(err: LwExt4Error) -> FsError {
 /// since both [LwExt4InodeType] and [TryFrom] are foreign to our codebase, we
 /// can only use this workaround to do the conversion.
 #[inline(always)]
-pub(super) fn map_lwext4_inode_type(ty: LwExt4InodeType) -> Result<InodeType, FsError> {
+pub(super) fn map_lwext4_inode_type(ty: LwExt4InodeType) -> Result<InodeType, SysError> {
     match ty {
         LwExt4InodeType::Directory => Ok(InodeType::Dir),
         LwExt4InodeType::RegularFile => Ok(InodeType::Regular),
         LwExt4InodeType::Symlink => Ok(InodeType::Symlink),
-        LwExt4InodeType::CharacterDevice | LwExt4InodeType::BlockDevice => Ok(InodeType::Dev),
+        LwExt4InodeType::CharacterDevice => Ok(InodeType::Char),
+        LwExt4InodeType::BlockDevice => Ok(InodeType::Block),
         LwExt4InodeType::Fifo => Ok(InodeType::Fifo),
-        _ => Err(FsError::NotSupported),
+        _ => Err(SysError::NotSupported),
     }
 }
 
 #[inline(always)]
-pub(super) fn map_vfs_inode_type(ty: InodeType) -> Result<LwExt4InodeType, FsError> {
+pub(super) fn map_vfs_inode_type(ty: InodeType) -> Result<LwExt4InodeType, SysError> {
     match ty {
         InodeType::Dir => Ok(LwExt4InodeType::Directory),
         InodeType::Regular => Ok(LwExt4InodeType::RegularFile),
-        InodeType::Dev => Err(FsError::NotSupported),
+        InodeType::Block | InodeType::Char => Err(SysError::NotYetImplemented),
         InodeType::Symlink => Ok(LwExt4InodeType::Symlink),
         InodeType::Fifo => Ok(LwExt4InodeType::Fifo),
     }
 }
 
-fn ext4_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, FsError> {
+fn ext4_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, SysError> {
     let MountSource::Block(dev) = source else {
-        return Err(FsError::InvalidArgument);
+        return Err(SysError::InvalidArgument);
     };
 
     if dev.block_size().bytes() != lwext4_rust::EXT4_DEV_BSIZE {
-        return Err(FsError::NotSupported);
+        return Err(SysError::NotSupported);
     }
 
     let devnum = dev.devnum();
@@ -221,7 +223,7 @@ fn ext4_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>
     ext4.get_attr(EXT4_ROOT_INO, &mut root_attr)
         .map_err(map_ext4_error)?;
     if !matches!(root_attr.node_type, LwExt4InodeType::Directory) {
-        return Err(FsError::InvalidArgument);
+        return Err(SysError::InvalidArgument);
     }
 
     let sb = Arc::new(SuperBlock::new(
@@ -251,7 +253,7 @@ fn ext4_kill_sb(sb: Arc<SuperBlock>) {
     }
 }
 
-fn ext4_sync_fs(sb: &SuperBlock) -> Result<(), FsError> {
+fn ext4_sync_fs(sb: &SuperBlock) -> Result<(), SysError> {
     // `lwext4` maintains a block cache and writes back dirty blocks lazily.
 
     knoticeln!("ext4: sync fs");

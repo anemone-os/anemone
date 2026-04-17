@@ -1,9 +1,9 @@
-use anemone_abi::fs::linux::{at::AT_FDCWD, mode::*, open::*};
+use anemone_abi::fs::linux::{mode::*, open::*};
 use spin::Mutex;
 
 use crate::{
     io::{Read, Write},
-    os::linux::fs,
+    os::linux::fs::{self, Fd},
     prelude::*,
 };
 
@@ -65,7 +65,7 @@ impl OpenOptions {
         }
 
         let fd = fs::openat(
-            AT_FDCWD as isize,
+            fs::AtFd::Cwd,
             path,
             flags,
             S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
@@ -83,7 +83,7 @@ pub struct File {
 
 #[derive(Debug)]
 struct FileInner {
-    fd: usize,
+    fd: Fd,
 }
 
 impl Drop for FileInner {
@@ -93,7 +93,7 @@ impl Drop for FileInner {
 }
 
 impl File {
-    pub const unsafe fn from_raw_fd(fd: usize) -> Self {
+    pub const unsafe fn from_raw_fd(fd: Fd) -> Self {
         Self {
             inner: Mutex::new(FileInner { fd }),
         }

@@ -12,18 +12,18 @@ use crate::{
 /// check them by themselves. Instead, VFS will check them before calling these
 /// operations.
 pub struct InodeOps {
-    pub lookup: fn(dir: &InodeRef, name: &str) -> Result<InodeRef, FsError>,
+    pub lookup: fn(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError>,
 
-    pub touch: fn(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError>,
+    pub touch: fn(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, SysError>,
 
-    pub mkdir: fn(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError>,
+    pub mkdir: fn(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, SysError>,
 
-    pub symlink: fn(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, FsError>,
+    pub symlink: fn(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, SysError>,
 
-    pub link: fn(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), FsError>,
-    pub unlink: fn(dir: &InodeRef, name: &str) -> Result<(), FsError>,
+    pub link: fn(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), SysError>,
+    pub unlink: fn(dir: &InodeRef, name: &str) -> Result<(), SysError>,
 
-    pub rmdir: fn(dir: &InodeRef, name: &str) -> Result<(), FsError>,
+    pub rmdir: fn(dir: &InodeRef, name: &str) -> Result<(), SysError>,
 
     /// Quoted from [Linux's VFS documentation](https://docs.kernel.org/filesystems/vfs.html):
     ///
@@ -40,13 +40,13 @@ pub struct InodeOps {
     /// "
     ///
     /// So we put this method here.
-    pub open: fn(&InodeRef) -> Result<OpenedFile, FsError>,
+    pub open: fn(&InodeRef) -> Result<OpenedFile, SysError>,
 
     /// If this is a symlink, return the target path.
-    pub read_link: fn(&InodeRef) -> Result<PathBuf, FsError>,
+    pub read_link: fn(&InodeRef) -> Result<PathBuf, SysError>,
 
     /// Query inode metadata in a filesystem-neutral shape.
-    pub get_attr: fn(&InodeRef) -> Result<InodeStat, FsError>,
+    pub get_attr: fn(&InodeRef) -> Result<InodeStat, SysError>,
 }
 
 pub struct OpenedFile {
@@ -93,7 +93,8 @@ impl TryFrom<u64> for Ino {
 pub enum InodeType {
     Regular,
     Dir,
-    Dev,
+    Char,
+    Block,
     Symlink,
     Fifo,
 }
@@ -104,7 +105,8 @@ impl InodeType {
         match self {
             Self::Regular => linux_mode::S_IFREG,
             Self::Dir => linux_mode::S_IFDIR,
-            Self::Dev => linux_mode::S_IFCHR,
+            Self::Char => linux_mode::S_IFCHR,
+            Self::Block => linux_mode::S_IFBLK,
             Self::Symlink => linux_mode::S_IFLNK,
             Self::Fifo => linux_mode::S_IFIFO,
         }
@@ -233,7 +235,8 @@ impl InodeMode {
         let ty = match mode & linux_mode::S_IFMT {
             linux_mode::S_IFREG => InodeType::Regular,
             linux_mode::S_IFDIR => InodeType::Dir,
-            linux_mode::S_IFCHR | linux_mode::S_IFBLK => InodeType::Dev,
+            linux_mode::S_IFCHR => InodeType::Char,
+            linux_mode::S_IFBLK => InodeType::Block,
             linux_mode::S_IFLNK => InodeType::Symlink,
             linux_mode::S_IFIFO => InodeType::Fifo,
             _ => {
@@ -676,47 +679,47 @@ impl InodeRef {
 
 // VTable operations re-exported here.
 impl InodeRef {
-    pub fn touch(&self, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
+    pub fn touch(&self, name: &str, perm: InodePerm) -> Result<InodeRef, SysError> {
         (self.inode().ops.touch)(self, name, perm)
     }
 
-    pub fn mkdir(&self, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
+    pub fn mkdir(&self, name: &str, perm: InodePerm) -> Result<InodeRef, SysError> {
         (self.inode().ops.mkdir)(self, name, perm)
     }
 
-    pub fn symlink(&self, name: &str, target: &Path) -> Result<InodeRef, FsError> {
+    pub fn symlink(&self, name: &str, target: &Path) -> Result<InodeRef, SysError> {
         (self.inode().ops.symlink)(self, name, target)
     }
 
     /// Lookup a child dentry under this inode by name.
-    pub fn lookup(&self, name: &str) -> Result<InodeRef, FsError> {
+    pub fn lookup(&self, name: &str) -> Result<InodeRef, SysError> {
         (self.inode().ops.lookup)(self, name)
     }
 
-    pub fn link(&self, name: &str, target: &InodeRef) -> Result<(), FsError> {
+    pub fn link(&self, name: &str, target: &InodeRef) -> Result<(), SysError> {
         (self.inode().ops.link)(self, name, target)
     }
 
-    pub fn unlink(&self, name: &str) -> Result<(), FsError> {
+    pub fn unlink(&self, name: &str) -> Result<(), SysError> {
         (self.inode().ops.unlink)(self, name)
     }
 
-    pub fn rmdir(&self, name: &str) -> Result<(), FsError> {
+    pub fn rmdir(&self, name: &str) -> Result<(), SysError> {
         (self.inode().ops.rmdir)(self, name)
     }
 
     /// Open this inode as a file and return an [OpenedFile] containing the file
     /// operations and private data, which will be used by VFS layer to create a
     /// [File] object finally.
-    pub fn open(&self) -> Result<OpenedFile, FsError> {
+    pub fn open(&self) -> Result<OpenedFile, SysError> {
         (self.inode().ops.open)(self)
     }
 
-    pub fn read_link(&self) -> Result<PathBuf, FsError> {
+    pub fn read_link(&self) -> Result<PathBuf, SysError> {
         (self.inode().ops.read_link)(self)
     }
 
-    pub fn get_attr(&self) -> Result<InodeStat, FsError> {
+    pub fn get_attr(&self) -> Result<InodeStat, SysError> {
         (self.inode().ops.get_attr)(self)
     }
 }

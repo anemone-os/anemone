@@ -20,7 +20,7 @@ fn elapsed_mono_since_boot(mono: u64) -> u64 {
     (mono - BOOT_MONO.with(|b| b.expect("BOOT_MONO not initialized"))) + BSP_BOOT_MONO.get()
 }
 
-fn mono_per_tick() -> u64 {
+pub(super) fn mono_per_tick() -> u64 {
     static mut MONO_PER_TICK: Option<u64> = None;
 
     unsafe {
@@ -32,6 +32,20 @@ fn mono_per_tick() -> u64 {
             m
         }
     }
+}
+
+pub fn duration_from_mono(mono: u64) -> Duration {
+    Duration::from_nanos_u128(
+        mono as u128 * NANOS_PER_SEC / LocalClockSource::monotonic_freq_hz() as u128,
+    )
+}
+
+pub fn duration_to_mono(dur: Duration) -> Option<u64> {
+    let mono = dur
+        .as_nanos()
+        .checked_mul(LocalClockSource::monotonic_freq_hz() as u128)?
+        / NANOS_PER_SEC;
+    u64::try_from(mono).ok()
 }
 
 /// Set the boot monotonic baseline.
@@ -46,17 +60,20 @@ pub fn set_boot_mono(is_bsp: bool) {
     }
 }
 
+/// Return the current monotonic time in the same units as the monotonic
+/// counter.
+pub fn monotonic_uptime() -> u64 {
+    elapsed_mono_since_boot(LocalClockSource::curr_monotonic_time())
+}
+
 /// Return the current monotonic uptime since the kernel established its boot
 /// baseline.
 ///
 /// Currently this is just a placeholder. It returns the elapsed monotonic time
 /// since boot, instead of wall-clock time. We should implement RTC-based uptime
 /// in the future.
-pub fn uptime() -> Duration {
-    let elapsed_mono = elapsed_mono_since_boot(LocalClockSource::curr_monotonic_time());
-    Duration::from_nanos_u128(
-        elapsed_mono as u128 * NANOS_PER_SEC / LocalClockSource::monotonic_freq_hz() as u128,
-    )
+pub fn uptime() -> Instant {
+    Instant::from_mono(monotonic_uptime())
 }
 
 /// Return the number of ticks since boot.

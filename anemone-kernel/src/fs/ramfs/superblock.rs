@@ -35,16 +35,16 @@ impl RamfsSb {
 
 // ramfs has no backing store, a cache miss simply means the inode doesn't
 // exist.
-fn ramfs_load_inode(_sb: &Arc<SuperBlock>, _ino: Ino) -> Result<Arc<Inode>, FsError> {
-    Err(FsError::NotFound)
+fn ramfs_load_inode(_sb: &Arc<SuperBlock>, _ino: Ino) -> Result<Arc<Inode>, SysError> {
+    Err(SysError::NotFound)
 }
 
-fn ramfs_evict_inode(sb: &SuperBlock, inode: Arc<Inode>) -> Result<(), FsError> {
+fn ramfs_evict_inode(sb: &SuperBlock, inode: Arc<Inode>) -> Result<(), SysError> {
     // the same as sync_inode.
     Ok(())
 }
 
-fn ramfs_sync_inode(inode: &InodeRef) -> Result<(), FsError> {
+fn ramfs_sync_inode(inode: &InodeRef) -> Result<(), SysError> {
     // ramfs has nothing to do here, since we don't have a backing store to write
     // back
     Ok(())

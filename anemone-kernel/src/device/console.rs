@@ -158,22 +158,22 @@ pub unsafe fn on_system_boot() {
     }
 }
 
-fn console_read(_file: &File, _buf: &mut [u8]) -> Result<usize, FsError> {
+fn console_read(_file: &File, _buf: &mut [u8]) -> Result<usize, SysError> {
     // currently no-op. always return EOF.
     Ok(0)
 }
 
-fn console_write(_file: &File, buf: &[u8]) -> Result<usize, FsError> {
-    let s = core::str::from_utf8(buf).map_err(|_| FsError::InvalidArgument)?;
+fn console_write(_file: &File, buf: &[u8]) -> Result<usize, SysError> {
+    let s = core::str::from_utf8(buf).map_err(|_| SysError::InvalidArgument)?;
     output(s);
     Ok(buf.len())
 }
 
-fn console_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
+fn console_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     Ok(InodeStat {
         fs_dev: DeviceId::None,
         ino: inode.ino(),
-        mode: InodeMode::new(InodeType::Dev, inode.perm()),
+        mode: InodeMode::new(InodeType::Char, inode.perm()),
         nlink: inode.nlink(),
         uid: 0,
         gid: 0,
@@ -186,15 +186,15 @@ fn console_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
 }
 
 static CONSOLE_STDIN_INODE_OPS: InodeOps = InodeOps {
-    lookup: |_, _| Err(FsError::NotSupported),
-    touch: |_, _, _| Err(FsError::NotSupported),
-    mkdir: |_, _, _| Err(FsError::NotSupported),
-    symlink: |_, _, _| Err(FsError::NotSupported),
-    unlink: |_, _| Err(FsError::NotSupported),
-    rmdir: |_, _| Err(FsError::NotSupported),
-    link: |_, _, _| Err(FsError::NotSupported),
+    lookup: |_, _| Err(SysError::NotSupported),
+    touch: |_, _, _| Err(SysError::NotSupported),
+    mkdir: |_, _, _| Err(SysError::NotSupported),
+    symlink: |_, _, _| Err(SysError::NotSupported),
+    unlink: |_, _| Err(SysError::NotSupported),
+    rmdir: |_, _| Err(SysError::NotSupported),
+    link: |_, _, _| Err(SysError::NotSupported),
     get_attr: console_get_attr,
-    read_link: |_| Err(FsError::NotSymlink),
+    read_link: |_| Err(SysError::NotSymlink),
     open: |_| {
         Ok(OpenedFile {
             file_ops: &CONSOLE_STDIN_FILE_OPS,
@@ -204,15 +204,15 @@ static CONSOLE_STDIN_INODE_OPS: InodeOps = InodeOps {
 };
 
 static CONSOLE_STDOUT_INODE_OPS: InodeOps = InodeOps {
-    lookup: |_, _| Err(FsError::NotSupported),
-    touch: |_, _, _| Err(FsError::NotSupported),
-    mkdir: |_, _, _| Err(FsError::NotSupported),
-    symlink: |_, _, _| Err(FsError::NotSupported),
-    unlink: |_, _| Err(FsError::NotSupported),
-    rmdir: |_, _| Err(FsError::NotSupported),
-    link: |_, _, _| Err(FsError::NotSupported),
+    lookup: |_, _| Err(SysError::NotSupported),
+    touch: |_, _, _| Err(SysError::NotSupported),
+    mkdir: |_, _, _| Err(SysError::NotSupported),
+    symlink: |_, _, _| Err(SysError::NotSupported),
+    unlink: |_, _| Err(SysError::NotSupported),
+    rmdir: |_, _| Err(SysError::NotSupported),
+    link: |_, _, _| Err(SysError::NotSupported),
     get_attr: console_get_attr,
-    read_link: |_| Err(FsError::NotSymlink),
+    read_link: |_| Err(SysError::NotSymlink),
     open: |_| {
         Ok(OpenedFile {
             file_ops: &CONSOLE_STDOUT_FILE_OPS,
@@ -223,25 +223,25 @@ static CONSOLE_STDOUT_INODE_OPS: InodeOps = InodeOps {
 
 static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {
     read: console_read,
-    write: |_file, _buf| Err(FsError::NotSupported),
-    seek: |_file, _pos| Err(FsError::NotSupported),
-    iterate: |_file, _ctx| Err(FsError::NotSupported),
+    write: |_file, _buf| Err(SysError::NotSupported),
+    seek: |_file, _pos| Err(SysError::NotSupported),
+    iterate: |_file, _ctx| Err(SysError::NotSupported),
 };
 
 static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
-    read: |_file, _buf| Err(FsError::NotSupported),
+    read: |_file, _buf| Err(SysError::NotSupported),
     write: console_write,
-    seek: |_file, _pos| Err(FsError::NotSupported),
-    iterate: |_file, _ctx| Err(FsError::NotSupported),
+    seek: |_file, _pos| Err(SysError::NotSupported),
+    iterate: |_file, _ctx| Err(SysError::NotSupported),
 };
 
 static CONSOLE_STDIN_PATHREF: Lazy<PathRef> = Lazy::new(|| {
-    anony_new_inode(InodeType::Dev, &CONSOLE_STDIN_INODE_OPS, NilOpaque::new())
+    anony_new_inode(InodeType::Char, &CONSOLE_STDIN_INODE_OPS, NilOpaque::new())
         .expect("failed to create console stdin inode")
 });
 
 static CONSOLE_STDOUT_PATHREF: Lazy<PathRef> = Lazy::new(|| {
-    anony_new_inode(InodeType::Dev, &CONSOLE_STDOUT_INODE_OPS, NilOpaque::new())
+    anony_new_inode(InodeType::Char, &CONSOLE_STDOUT_INODE_OPS, NilOpaque::new())
         .expect("failed to create console stdout inode")
 });
 

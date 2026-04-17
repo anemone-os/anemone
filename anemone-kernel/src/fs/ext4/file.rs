@@ -31,9 +31,9 @@ pub(super) struct Ext4RegMapping {
 }
 
 impl Ext4RegState {
-    fn page_start(pidx: usize) -> Result<usize, MmError> {
+    fn page_start(pidx: usize) -> Result<usize, SysError> {
         pidx.checked_mul(PagingArch::PAGE_SIZE_BYTES)
-            .ok_or(MmError::InvalidArgument)
+            .ok_or(SysError::InvalidArgument)
     }
 
     pub(super) fn size(&self) -> usize {
@@ -44,22 +44,22 @@ impl Ext4RegState {
         self.size.fetch_max(new, Ordering::AcqRel);
     }
 
-    fn visible_end(&self) -> Result<usize, MmError> {
+    fn visible_end(&self) -> Result<usize, SysError> {
         let size = self.size();
         size.checked_add(PagingArch::PAGE_SIZE_BYTES - 1)
             .map(|end| end & !(PagingArch::PAGE_SIZE_BYTES - 1))
-            .ok_or(MmError::InvalidArgument)
+            .ok_or(SysError::InvalidArgument)
     }
 
-    fn validate_mmap_range(&self, offset: usize, len: usize) -> Result<(), MmError> {
+    fn validate_mmap_range(&self, offset: usize, len: usize) -> Result<(), SysError> {
         if len == 0 {
             return Ok(());
         }
 
-        let end = offset.checked_add(len).ok_or(MmError::InvalidArgument)?;
+        let end = offset.checked_add(len).ok_or(SysError::InvalidArgument)?;
         let visible_end = self.visible_end()?;
         if offset >= visible_end || end > visible_end {
-            return Err(MmError::NotMapped);
+            return Err(SysError::NotMapped);
         }
 
         Ok(())
@@ -82,7 +82,7 @@ impl Ext4Reg {
         &self.state
     }
 
-    pub(super) fn sync_all(&self) -> Result<(), MmError> {
+    pub(super) fn sync_all(&self) -> Result<(), SysError> {
         Ext4RegMapping::new(self.state.clone()).sync_all()
     }
 }
@@ -92,11 +92,11 @@ impl Ext4RegMapping {
         Self { state }
     }
 
-    pub(super) fn sync_page(&self, pidx: usize) -> Result<(), MmError> {
+    pub(super) fn sync_page(&self, pidx: usize) -> Result<(), SysError> {
         let size = self.state.size();
         let offset = Ext4RegState::page_start(pidx)?;
         if offset >= size {
-            return Err(MmError::NotMapped);
+            return Err(SysError::NotMapped);
         }
 
         let mut pages = self.state.pages.write();
@@ -117,7 +117,7 @@ impl Ext4RegMapping {
                                 self.state.ino.get(),
                                 e
                             );
-                            MmError::InvalidArgument
+                            SysError::InvalidArgument
                         })
                     })
                 })?;
@@ -129,7 +129,7 @@ impl Ext4RegMapping {
         Ok(())
     }
 
-    pub(super) fn sync_all(&self) -> Result<(), MmError> {
+    pub(super) fn sync_all(&self) -> Result<(), SysError> {
         let dirty_pages = self
             .state
             .pages
@@ -147,7 +147,7 @@ impl Ext4RegMapping {
 }
 
 impl Ext4RegMapping {
-    fn alloc_page(&self, pidx: usize) -> Result<Ext4RegPage, MmError> {
+    fn alloc_page(&self, pidx: usize) -> Result<Ext4RegPage, SysError> {
         if let Some(page) = self.state.pages.read().get(&pidx) {
             return Ok(page.clone());
         }
@@ -155,7 +155,7 @@ impl Ext4RegMapping {
         let page = Ext4RegPage {
             frame: unsafe {
                 alloc_frame_zeroed()
-                    .ok_or(MmError::OutOfMemory)?
+                    .ok_or(SysError::OutOfMemory)?
                     .into_frame_handle()
             },
             dirty: false,
@@ -171,18 +171,18 @@ impl Ext4RegMapping {
 
     /// Try to load a page from the file. If the page is already in cache, it
     /// will be returned directly.
-    fn load_page(&self, pidx: usize) -> Result<Ext4RegPage, MmError> {
+    fn load_page(&self, pidx: usize) -> Result<Ext4RegPage, SysError> {
         let size = self.state.size();
         let offset = Ext4RegState::page_start(pidx)?;
         if offset >= size {
-            return Err(MmError::NotMapped);
+            return Err(SysError::NotMapped);
         }
 
         if let Some(page) = self.state.pages.read().get(&pidx) {
             return Ok(page.clone());
         }
 
-        let mut frame = alloc_frame_zeroed().ok_or(MmError::OutOfMemory)?;
+        let mut frame = alloc_frame_zeroed().ok_or(SysError::OutOfMemory)?;
         ext4_sb(&self.state.sb).read_tx(|| {
             ext4_sb(&self.state.sb).with_fs(|fs| {
                 fs.read_at(
@@ -190,19 +190,7 @@ impl Ext4RegMapping {
                     frame.as_bytes_mut(),
                     offset as u64,
                 )
-                .map_err(|e| {
-                    kwarningln!(
-                        "ext4: failed to read page {} of inode {}: {:?}",
-                        pidx,
-                        self.state.ino.get(),
-                        e
-                    );
-
-                    // this might indicate a design mistake in our error system.
-                    // maybe we should just use a single error type for the whole kernel.
-                    // we must refine this lator.
-                    MmError::InvalidArgument
-                })
+                .map_err(map_ext4_error)
             })
         })?;
 
@@ -220,7 +208,11 @@ impl Ext4RegMapping {
         Ok(page)
     }
 
-    fn page_for_write(&self, pidx: usize, preserve_existing: bool) -> Result<Ext4RegPage, MmError> {
+    fn page_for_write(
+        &self,
+        pidx: usize,
+        preserve_existing: bool,
+    ) -> Result<Ext4RegPage, SysError> {
         if preserve_existing {
             self.load_page(pidx)
         } else {
@@ -228,7 +220,7 @@ impl Ext4RegMapping {
         }
     }
 
-    fn copy_out(&self, offset: usize, buffer: &mut [u8]) -> Result<(), MmError> {
+    fn copy_out(&self, offset: usize, buffer: &mut [u8]) -> Result<(), SysError> {
         let mut remaining = buffer;
         let mut cur_offset = offset;
 
@@ -246,13 +238,13 @@ impl Ext4RegMapping {
             remaining = &mut remaining[copy_len..];
             cur_offset = cur_offset
                 .checked_add(copy_len)
-                .ok_or(MmError::InvalidArgument)?;
+                .ok_or(SysError::InvalidArgument)?;
         }
 
         Ok(())
     }
 
-    fn copy_in(&self, offset: usize, data: &[u8], allow_resize: bool) -> Result<usize, MmError> {
+    fn copy_in(&self, offset: usize, data: &[u8], allow_resize: bool) -> Result<usize, SysError> {
         if !allow_resize {
             self.state.validate_mmap_range(offset, data.len())?;
         }
@@ -290,17 +282,17 @@ impl Ext4RegMapping {
             remaining = &remaining[copy_len..];
             cur_offset = cur_offset
                 .checked_add(copy_len)
-                .ok_or(MmError::InvalidArgument)?;
+                .ok_or(SysError::InvalidArgument)?;
         }
 
         offset
             .checked_add(data.len())
-            .ok_or(MmError::InvalidArgument)
+            .ok_or(SysError::InvalidArgument)
     }
 }
 
 impl VmObject for Ext4RegMapping {
-    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, MmError> {
+    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError> {
         let page = self.load_page(pidx)?;
         if matches!(access, PageFaultType::Write) {
             self.state
@@ -317,24 +309,24 @@ impl VmObject for Ext4RegMapping {
         })
     }
 
-    fn read(&self, offset: usize, buffer: &mut [u8]) -> Result<(), MmError> {
+    fn read(&self, offset: usize, buffer: &mut [u8]) -> Result<(), SysError> {
         self.state.validate_mmap_range(offset, buffer.len())?;
         self.copy_out(offset, buffer)
     }
 
-    fn write(&self, offset: usize, data: &[u8]) -> Result<(), MmError> {
+    fn write(&self, offset: usize, data: &[u8]) -> Result<(), SysError> {
         self.copy_in(offset, data, false).map(|_| ())
     }
 }
 
-fn ext4_reg_state(inode: &InodeRef) -> Result<Arc<Ext4RegState>, FsError> {
+fn ext4_reg_state(inode: &InodeRef) -> Result<Arc<Ext4RegState>, SysError> {
     Ok(ext4_reg(inode)?.state().clone())
 }
 
-fn ext4_read(file: &File, buf: &mut [u8]) -> Result<usize, FsError> {
+fn ext4_read(file: &File, buf: &mut [u8]) -> Result<usize, SysError> {
     let inode = file.inode();
     if inode.ty() != InodeType::Regular {
-        return Err(FsError::NotReg);
+        return Err(SysError::NotReg);
     }
 
     let state = ext4_reg_state(inode)?;
@@ -346,21 +338,21 @@ fn ext4_read(file: &File, buf: &mut [u8]) -> Result<usize, FsError> {
     }
 
     let n = usize::min(buf.len(), size - pos);
-    mapping.read(pos, &mut buf[..n]).map_err(FsError::Mm)?;
+    mapping.read(pos, &mut buf[..n])?;
     file.set_pos(pos + n);
     Ok(n)
 }
 
-fn ext4_write(file: &File, buf: &[u8]) -> Result<usize, FsError> {
+fn ext4_write(file: &File, buf: &[u8]) -> Result<usize, SysError> {
     let inode = file.inode();
     if inode.ty() != InodeType::Regular {
-        return Err(FsError::NotReg);
+        return Err(SysError::NotReg);
     }
 
     let state = ext4_reg_state(inode)?;
     let mapping = Ext4RegMapping::new(state.clone());
     let pos = file.pos();
-    let new_pos = mapping.copy_in(pos, buf, true).map_err(FsError::Mm)?;
+    let new_pos = mapping.copy_in(pos, buf, true)?;
 
     state.update_size_max(new_pos);
     inode.inode().update_size_max(new_pos as u64);
@@ -368,15 +360,15 @@ fn ext4_write(file: &File, buf: &[u8]) -> Result<usize, FsError> {
     Ok(buf.len())
 }
 
-fn ext4_seek(file: &File, pos: usize) -> Result<(), FsError> {
+fn ext4_seek(file: &File, pos: usize) -> Result<(), SysError> {
     file.set_pos(pos);
     Ok(())
 }
 
-fn ext4_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, FsError> {
+fn ext4_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, SysError> {
     let inode = file.inode();
     if inode.ty() != InodeType::Dir {
-        return Err(FsError::NotDir);
+        return Err(SysError::NotDir);
     }
 
     let sb = inode.sb();
@@ -386,10 +378,10 @@ fn ext4_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, FsError> 
             let mut reader = fs
                 .read_dir(inode.ino().get() as u32, start)
                 .map_err(map_ext4_error)?;
-            let current = reader.current().ok_or(FsError::NoMoreEntries)?;
+            let current = reader.current().ok_or(SysError::NoMoreEntries)?;
             let cur_off = reader.offset();
             let name = str::from_utf8(current.name())
-                .map_err(|_| FsError::InvalidArgument)?
+                .map_err(|_| SysError::InvalidArgument)?
                 .to_string();
             let ino = ext4_ino(current.ino())?;
             let ty = map_lwext4_inode_type(current.inode_type())?;
@@ -413,19 +405,19 @@ pub(super) static EXT4_REG_FILE_OPS: FileOps = FileOps {
     read: ext4_read,
     write: ext4_write,
     seek: ext4_seek,
-    iterate: |_, _| Err(FsError::NotDir),
+    iterate: |_, _| Err(SysError::NotDir),
 };
 
 pub(super) static EXT4_DIR_FILE_OPS: FileOps = FileOps {
-    read: |_, _| Err(FsError::IsDir),
-    write: |_, _| Err(FsError::IsDir),
-    seek: |_, _| Err(FsError::IsDir),
+    read: |_, _| Err(SysError::IsDir),
+    write: |_, _| Err(SysError::IsDir),
+    seek: |_, _| Err(SysError::IsDir),
     iterate: ext4_iterate,
 };
 
 pub(super) static EXT4_SYMLINK_FILE_OPS: FileOps = FileOps {
-    read: |_, _| Err(FsError::NotSupported),
-    write: |_, _| Err(FsError::NotSupported),
-    seek: |_, _| Err(FsError::NotSupported),
-    iterate: |_, _| Err(FsError::NotDir),
+    read: |_, _| Err(SysError::NotSupported),
+    write: |_, _| Err(SysError::NotSupported),
+    seek: |_, _| Err(SysError::NotSupported),
+    iterate: |_, _| Err(SysError::NotDir),
 };
