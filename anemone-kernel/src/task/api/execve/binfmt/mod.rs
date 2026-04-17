@@ -85,7 +85,6 @@ pub enum ExecResult {
     /// Something like `new_argv` or `new_path` is not used here, since that
     /// will cause many unnecessary heap allocations(cloning strings).
     Redirected,
-    // TODO: Redirect
 }
 
 pub trait BinaryFmt: Sync {

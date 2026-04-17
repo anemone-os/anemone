@@ -11,7 +11,7 @@ use crate::{
 };
 
 pub mod auxv;
-pub mod init;
+pub mod init_stack;
 pub mod parse;
 
 #[derive(Debug)]
@@ -31,8 +31,8 @@ impl BinaryFmt for Elf {
 
         let meta = parse::load_image(&file, ctx.usp)?;
 
-        let sp =
-            init::InitStackCtor::new(ctx.usp, &meta, ctx.exec_fn, &ctx.argv, &ctx.envp).push()?;
+        let sp = init_stack::InitStackCtor::new(ctx.usp, &meta, ctx.exec_fn, &ctx.argv, &ctx.envp)
+            .push()?;
 
         Ok(ExecResult::Loaded(LoadedBinaryMeta {
             entry: meta.entry,
