@@ -27,6 +27,7 @@ mod power;
 mod rtc;
 mod serial;
 pub use serial::ns16550a::Ns16550ARegisters;
+mod pci;
 mod virtio;
 
 /// Common data shared by all drivers.
