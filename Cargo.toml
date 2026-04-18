@@ -53,4 +53,6 @@ smoltcp = { version = "0.13.0", default-features = false, features = [
     "proto-ipv4",
     "socket-raw",
     "socket-icmp",
+    "socket-udp",
+    "socket-tcp",
 ] }
