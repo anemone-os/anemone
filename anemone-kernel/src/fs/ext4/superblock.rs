@@ -2,6 +2,7 @@ use crate::{
     fs::{
         ext4::{
             ext4_ino, ext4_sb,
+            file::{Ext4Reg, Ext4RegMapping},
             inode::{
                 EXT4_DEV_INODE_OPS, EXT4_DIR_INODE_OPS, EXT4_REG_INODE_OPS, EXT4_SYMLINK_INODE_OPS,
             },
@@ -10,8 +11,8 @@ use crate::{
         inode::{Inode, InodeMeta},
         superblock::SuperBlockOps,
     },
-    prelude::*,
-    utils::any_opaque::NilOpaque,
+    prelude::{vmo::VmObject, *},
+    utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
 fn ext4_inode_ops(ty: InodeType) -> &'static InodeOps {
@@ -37,13 +38,21 @@ fn ext4_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, FsError
 
     let ty = map_lwext4_inode_type(attr.node_type)?;
 
-    let inode = Arc::new(Inode::new(
-        ext4_ino(attr.ino)?,
-        ty,
-        ext4_inode_ops(ty),
-        sb.clone(),
-        NilOpaque::new(),
-    ));
+    let (prv, mapping) = if ty == InodeType::Regular {
+        let prv = Ext4Reg::new(sb.clone(), ino, attr.size as usize);
+        let mapping = Ext4RegMapping::new(prv.state().clone());
+        (
+            AnyOpaque::new(prv),
+            Some(Arc::new(mapping) as Arc<dyn VmObject>),
+        )
+    } else {
+        (NilOpaque::new(), None)
+    };
+
+    let mut inode = Inode::new(ext4_ino(attr.ino)?, ty, ext4_inode_ops(ty), sb.clone(), prv);
+
+    inode.set_mapping(mapping);
+
     inode.set_meta(&InodeMeta {
         nlink: attr.nlink,
         perm: InodePerm::from_bits_truncate(attr.mode as u16),
@@ -54,7 +63,7 @@ fn ext4_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, FsError
     });
 
     knoticeln!("ext4: loaded inode {:?} into icache", ino);
-    Ok(inode)
+    Ok(Arc::new(inode))
 }
 
 fn ext4_sync_inode_inner(inode: &Arc<Inode>) -> Result<(), FsError> {
@@ -71,6 +80,15 @@ fn ext4_sync_inode_inner(inode: &Arc<Inode>) -> Result<(), FsError> {
     let sb = inode.sb();
     let ino = inode.ino();
     let meta = inode.meta_snapshot();
+
+    if inode.ty() == InodeType::Regular {
+        inode
+            .prv()
+            .cast::<Ext4Reg>()
+            .expect("regular inode must have Ext4Reg as its private data")
+            .sync_all()
+            .map_err(FsError::Mm)?;
+    }
 
     ext4_sb(&sb).write_tx(|| {
         ext4_sb(&sb).with_fs(|fs| {
@@ -91,8 +109,8 @@ fn ext4_sync_inode_inner(inode: &Arc<Inode>) -> Result<(), FsError> {
     })
 }
 
-fn ext4_evict_inode(_sb: &SuperBlock, _inode: Arc<Inode>) -> Result<(), FsError> {
-    ext4_sync_inode_inner(&_inode)
+fn ext4_evict_inode(_sb: &SuperBlock, inode: Arc<Inode>) -> Result<(), FsError> {
+    ext4_sync_inode_inner(&inode)
 }
 
 fn ext4_sync_inode(inode: &InodeRef) -> Result<(), FsError> {

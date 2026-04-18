@@ -2,37 +2,28 @@
 
 use crate::prelude::{vmo::*, *};
 
+/// **LOCK ORDERING:**
+///
+/// **`parent` -> `overlay`**
 #[derive(Debug)]
 pub struct ShadowObject {
-    parent: Arc<RwLock<dyn VmObject>>,
+    parent: Arc<dyn VmObject>,
     /// traditional word "override" in Rust is a reserved keyword...
-    overlay: BTreeMap<usize, FrameHandle>,
+    overlay: RwLock<BTreeMap<usize, FrameHandle>>,
 }
 
 impl ShadowObject {
-    pub fn new(parent: Arc<RwLock<dyn VmObject>>) -> Self {
+    pub fn new(parent: Arc<dyn VmObject>) -> Self {
         Self {
             parent,
-            overlay: BTreeMap::new(),
+            overlay: RwLock::new(BTreeMap::new()),
         }
     }
 }
 
 impl VmObject for ShadowObject {
-    fn source_frame(&self, pidx: usize) -> Result<FrameSource, MmError> {
-        if let Some(frame) = self.overlay.get(&pidx) {
-            Ok(FrameSource::Framed(frame.clone()))
-        } else {
-            self.parent.read().source_frame(pidx)
-        }
-    }
-
-    fn resolve_frame(
-        &mut self,
-        pidx: usize,
-        access: PageFaultType,
-    ) -> Result<ResolvedFrame, MmError> {
-        if let Some(frame) = self.overlay.get(&pidx) {
+    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, MmError> {
+        if let Some(frame) = self.overlay.read().get(&pidx) {
             return Ok(ResolvedFrame {
                 frame: frame.clone(),
                 writable: true,
@@ -41,17 +32,22 @@ impl VmObject for ShadowObject {
 
         match access {
             PageFaultType::Write => {
-                let src = self.parent.write().source_frame(pidx)?;
-                let frame = src.instantiate()?;
+                let ResolvedFrame { frame, writable: _ } =
+                    self.parent.resolve_frame(pidx, PageFaultType::Read)?;
+
+                let mut new_frame = alloc_frame().ok_or(MmError::OutOfMemory)?;
+                new_frame.as_bytes_mut().copy_from_slice(frame.as_bytes());
+                let new_frame = unsafe { new_frame.into_frame_handle() };
+
                 let resolved = ResolvedFrame {
-                    frame: frame.clone(),
+                    frame: new_frame.clone(),
                     writable: true,
                 };
-                self.overlay.insert(pidx, frame);
+                self.overlay.write().insert(pidx, new_frame);
                 Ok(resolved)
             },
             PageFaultType::Read | PageFaultType::Execute => {
-                let resolved = self.parent.write().resolve_frame(pidx, access)?;
+                let resolved = self.parent.resolve_frame(pidx, access)?;
                 Ok(ResolvedFrame {
                     frame: resolved.frame,
                     writable: false,

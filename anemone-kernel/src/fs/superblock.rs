@@ -248,6 +248,12 @@ impl SuperBlock {
         if inode.rc() > 0 {
             return Err(FsError::Busy);
         }
+        if inode
+            .mapping_ref()
+            .is_some_and(|mapping| Arc::strong_count(mapping) > 1)
+        {
+            return Err(FsError::Busy);
+        }
 
         let ino = inode.ino();
         let removed = {

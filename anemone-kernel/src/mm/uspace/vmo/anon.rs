@@ -7,14 +7,14 @@ use crate::prelude::{vmo::*, *};
 #[derive(Debug)]
 pub struct AnonObject {
     // TODO: use radix tree
-    pages: BTreeMap<usize, FrameHandle>,
+    pages: RwLock<BTreeMap<usize, FrameHandle>>,
     max_pages: usize,
 }
 
 impl AnonObject {
     pub fn new(max_pages: usize) -> Self {
         Self {
-            pages: BTreeMap::new(),
+            pages: RwLock::new(BTreeMap::new()),
             max_pages,
         }
     }
@@ -27,29 +27,25 @@ impl AnonObject {
     }
 }
 
+// TODO: here exists a concurrency bug. if two threads write to the same page at
+// the same time, they may both allocate a new frame and one of the writes will
+// be lost.
+//
+// see ext4 regular file mapping for a solution.
 impl VmObject for AnonObject {
-    fn source_frame(&self, pidx: usize) -> Result<FrameSource, MmError> {
-        self.check_pidx(pidx)?;
-        Ok(match self.pages.get(&pidx) {
-            Some(frame) => FrameSource::Framed(frame.clone()),
-            None => FrameSource::Zero,
-        })
-    }
-
-    fn resolve_frame(
-        &mut self,
-        pidx: usize,
-        access: PageFaultType,
-    ) -> Result<ResolvedFrame, MmError> {
+    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, MmError> {
         self.check_pidx(pidx)?;
 
-        if let Some(frame) = self.pages.get(&pidx) {
-            return Ok(ResolvedFrame {
-                frame: frame.clone(),
-                writable: true,
-            });
+        {
+            let pages = self.pages.read();
+
+            if let Some(frame) = pages.get(&pidx) {
+                return Ok(ResolvedFrame {
+                    frame: frame.clone(),
+                    writable: true,
+                });
+            }
         }
-
         match access {
             PageFaultType::Read | PageFaultType::Execute => Ok(shared_zero_frame()),
             PageFaultType::Write => {
@@ -62,7 +58,8 @@ impl VmObject for AnonObject {
                     frame: frame.clone(),
                     writable: true,
                 };
-                self.pages.insert(pidx, frame);
+
+                self.pages.write().insert(pidx, frame);
                 Ok(resolved)
             },
         }

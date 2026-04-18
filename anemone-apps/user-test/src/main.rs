@@ -8,7 +8,7 @@ use anemone_rs::{
     env::current_dir,
     os::linux::{
         fs::chdir,
-        process::{clone, execve, wait4, CloneFlags, WStatusRaw, WaitOptions},
+        process::{CloneFlags, WStatusRaw, WaitOptions, clone, execve, wait4},
     },
     prelude::*,
 };
@@ -50,7 +50,7 @@ static BASIC_TESTS: &[&str] = &[
     "yield",
 ];
 
-#[main]
+#[anemone_rs::main]
 pub fn main() -> Result<(), Errno> {
     chdir("basic").unwrap();
     let cwd = current_dir()?;

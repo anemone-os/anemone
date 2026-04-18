@@ -3,54 +3,40 @@ use anemone_abi::{errno::Errno, syscall::*};
 pub mod fs {
     use super::*;
 
-    pub fn openat(dirfd: isize, path_ptr: u64, flags: u32, mode: u32) -> Result<usize, Errno> {
-        unsafe {
-            syscall(
-                SYS_OPENAT,
-                dirfd as u64,
-                path_ptr,
-                flags as u64,
-                mode as u64,
-                0,
-                0,
-            )
-            .map(|fd| fd as usize)
-        }
+    pub fn openat(dirfd: u64, path_ptr: u64, flags: u64, mode: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_OPENAT, dirfd, path_ptr, flags, mode, 0, 0) }
     }
 
-    pub fn read(fd: usize, buf_ptr: u64, count: usize) -> Result<usize, Errno> {
-        unsafe { syscall(SYS_READ, fd as u64, buf_ptr, count as u64, 0, 0, 0).map(|n| n as usize) }
+    pub fn read(fd: u64, buf_ptr: u64, count: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_READ, fd, buf_ptr, count, 0, 0, 0) }
     }
 
-    pub fn write(fd: usize, buf_ptr: u64, count: usize) -> Result<usize, Errno> {
-        unsafe { syscall(SYS_WRITE, fd as u64, buf_ptr, count as u64, 0, 0, 0).map(|n| n as usize) }
+    pub fn write(fd: u64, buf_ptr: u64, count: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_WRITE, fd, buf_ptr, count, 0, 0, 0) }
     }
 
-    pub fn close(fd: usize) -> Result<(), Errno> {
-        unsafe { syscall(SYS_CLOSE, fd as u64, 0, 0, 0, 0, 0).map(|_| ()) }
+    pub fn close(fd: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_CLOSE, fd, 0, 0, 0, 0, 0) }
     }
 
-    pub fn dup(fd: usize) -> Result<usize, Errno> {
-        unsafe { syscall(SYS_DUP, fd as u64, 0, 0, 0, 0, 0).map(|fd| fd as usize) }
+    pub fn dup(fd: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_DUP, fd, 0, 0, 0, 0, 0) }
     }
 
-    pub fn dup3(oldfd: usize, newfd: usize, flags: u32) -> Result<usize, Errno> {
-        unsafe {
-            syscall(SYS_DUP3, oldfd as u64, newfd as u64, flags as u64, 0, 0, 0)
-                .map(|fd| fd as usize)
-        }
+    pub fn dup3(oldfd: u64, newfd: u64, flags: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_DUP3, oldfd, newfd, flags, 0, 0, 0) }
     }
 
-    pub fn getcwd(buf_ptr: u64, size: u64) -> Result<(), Errno> {
-        unsafe { syscall(SYS_GETCWD, buf_ptr, size, 0, 0, 0, 0).map(|_| ()) }
+    pub fn getcwd(buf_ptr: u64, size: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_GETCWD, buf_ptr, size, 0, 0, 0, 0) }
     }
 
-    pub fn chdir(path_ptr: u64) -> Result<(), Errno> {
-        unsafe { syscall(SYS_CHDIR, path_ptr, 0, 0, 0, 0, 0).map(|_| ()) }
+    pub fn chdir(path_ptr: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_CHDIR, path_ptr, 0, 0, 0, 0, 0) }
     }
 
-    pub fn chroot(path_ptr: u64) -> Result<(), Errno> {
-        unsafe { syscall(SYS_CHROOT, path_ptr, 0, 0, 0, 0, 0).map(|_| ()) }
+    pub fn chroot(path_ptr: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_CHROOT, path_ptr, 0, 0, 0, 0, 0) }
     }
 }
 
@@ -59,6 +45,25 @@ pub mod process {
 
     pub fn brk(addr: u64) -> Result<u64, Errno> {
         unsafe { syscall(SYS_BRK, addr, 0, 0, 0, 0, 0) }
+    }
+
+    pub fn mmap(
+        addr: u64,
+        length: u64,
+        prot: u64,
+        flags: u64,
+        fd: u64,
+        offset: u64,
+    ) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_MMAP, addr, length, prot, flags, fd, offset) }
+    }
+
+    pub fn munmap(addr: u64, length: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_MUNMAP, addr, length, 0, 0, 0, 0) }
+    }
+
+    pub fn mprotect(addr: u64, length: u64, prot: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_MPROTECT, addr, length, prot, 0, 0, 0) }
     }
 
     pub fn execve(path_ptr: u64, argv_ptr: u64) -> Result<u64, Errno> {
@@ -85,15 +90,12 @@ pub mod process {
         }
     }
 
-    pub fn exit(code: u64) -> ! {
-        unsafe {
-            syscall(SYS_EXIT, code, 0, 0, 0, 0, 0).expect("failed to invoke exit syscall");
-        }
-        unreachable!("sys_exit should never return")
+    pub fn exit(code: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_EXIT, code, 0, 0, 0, 0, 0) }
     }
 
-    pub fn sched_yield() -> Result<(), Errno> {
-        unsafe { syscall(SYS_SCHED_YIELD, 0, 0, 0, 0, 0, 0).map(|_| ()) }
+    pub fn sched_yield() -> Result<u64, Errno> {
+        unsafe { syscall(SYS_SCHED_YIELD, 0, 0, 0, 0, 0, 0) }
     }
 
     pub fn getpid() -> Result<u64, Errno> {

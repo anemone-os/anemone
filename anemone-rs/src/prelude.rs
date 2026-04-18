@@ -15,7 +15,6 @@ pub use alloc::{
 };
 
 pub use anemone_abi::errno::*;
-pub use anemone_rs_macros::main;
 
 pub type Path = typed_path::Path<typed_path::UnixEncoding>;
 pub type PathBuf = typed_path::PathBuf<typed_path::UnixEncoding>;

@@ -3,7 +3,7 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/openat.2.html
 
-use anemone_abi::fs::linux::open::{O_APPEND, O_CREAT, O_DIRECTORY};
+use anemone_abi::fs::linux::open::{O_APPEND, O_CREAT, O_DIRECTORY, O_EXCL};
 
 use crate::{
     prelude::{dt::c_readonly_string, *},
@@ -23,10 +23,15 @@ fn sys_openat(
             let path = task.make_global_path(&Path::new(pathname.as_ref()));
             // dirfd ignored.
             if flags & O_CREAT != 0 {
-                let mode =
-                    InodeMode::from_linux_mode(mode | InodeType::Regular.to_linux_mode_bits())
-                        .ok_or(KernelError::InvalidArgument)?;
-                let _ = vfs_create(&path, mode)?;
+                let perm =
+                    InodePerm::from_linux_bits(mode as u32).ok_or(KernelError::InvalidArgument)?;
+
+                let ret = vfs_touch(&path, perm);
+                match ret {
+                    Ok(_) => (),
+                    Err(FsError::AlreadyExists) if flags & O_EXCL == 0 => (),
+                    Err(e) => return Err(e.into()),
+                }
             }
             let file = vfs_open(&path)?;
 
@@ -59,10 +64,15 @@ fn sys_openat(
             };
 
             if flags & O_CREAT != 0 {
-                let mode =
-                    InodeMode::from_linux_mode(mode | InodeType::Regular.to_linux_mode_bits())
-                        .ok_or(KernelError::InvalidArgument)?;
-                let _ = vfs_create_at(&dir_path, &path, mode)?;
+                let perm =
+                    InodePerm::from_linux_bits(mode as u32).ok_or(KernelError::InvalidArgument)?;
+
+                let ret = vfs_touch_at(&dir_path, &path, perm);
+                match ret {
+                    Ok(_) => (),
+                    Err(FsError::AlreadyExists) if flags & O_EXCL == 0 => (),
+                    Err(e) => return Err(e.into()),
+                }
             }
 
             let file = vfs_open_at(&dir_path, &path)?;

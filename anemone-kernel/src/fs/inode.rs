@@ -1,7 +1,10 @@
 use anemone_abi::fs::linux::{mode as linux_mode, stat::Stat as LinuxStat};
 use core::{fmt::Debug, time::Duration};
 
-use crate::{prelude::*, utils::any_opaque::AnyOpaque};
+use crate::{
+    prelude::{vmo::VmObject, *},
+    utils::any_opaque::AnyOpaque,
+};
 
 /// VTable an inode must implement to support file system operations.
 ///
@@ -11,13 +14,10 @@ use crate::{prelude::*, utils::any_opaque::AnyOpaque};
 pub struct InodeOps {
     pub lookup: fn(dir: &InodeRef, name: &str) -> Result<InodeRef, FsError>,
 
-    /// Currently this method should only care about regular files and
-    /// directories. this looks a bit disjoint considering that symlink creation
-    /// is not handled by this method.
-    ///
-    /// We'd better refactor this API in the future to make it more consistent
-    /// and intuitive.
-    pub create: fn(dir: &InodeRef, name: &str, mode: InodeMode) -> Result<InodeRef, FsError>,
+    pub touch: fn(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError>,
+
+    pub mkdir: fn(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError>,
+
     pub symlink: fn(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, FsError>,
 
     pub link: fn(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), FsError>,
@@ -156,6 +156,12 @@ impl InodePerm {
     /// All regular rwx permission bits, excluding suid/sgid/sticky.
     pub const fn all_rwx() -> Self {
         Self::RWXU.union(Self::RWXG).union(Self::RWXO)
+    }
+
+    pub const fn from_linux_bits(bits: u32) -> Option<Self> {
+        // Since we just re-export linux's bits as our bits, conversion is fairly simple
+        // here.
+        Self::from_bits(bits as u16)
     }
 }
 
@@ -367,7 +373,8 @@ pub(super) struct Inode {
     /// index. Unlinked-but-still-alive inodes are resident ghosts with this
     /// flag cleared.
     indexed: AtomicBool,
-
+    /// Logical memory mapping for this inode, if any.
+    mapping: Option<Arc<dyn VmObject>>,
     /// Cached metadata that can be updated by the inode's file operations
     /// without accesing underlying filesystem, thus speeding up common
     /// operations like `stat` and `write`.
@@ -432,6 +439,7 @@ impl Inode {
             prv,
             rc: AtomicUsize::new(0),
             indexed: AtomicBool::new(false),
+            mapping: None,
             meta: RwLock::new(meta),
         }
     }
@@ -497,6 +505,18 @@ impl Inode {
         } else {
             panic!("inode's superblock has been dropped");
         }
+    }
+
+    pub(super) fn mapping(&self) -> Option<Arc<dyn VmObject>> {
+        self.mapping.clone()
+    }
+
+    pub(super) fn mapping_ref(&self) -> Option<&Arc<dyn VmObject>> {
+        self.mapping.as_ref()
+    }
+
+    pub(super) fn set_mapping(&mut self, mapping: Option<Arc<dyn VmObject>>) {
+        self.mapping = mapping;
     }
 
     pub(super) fn ty(&self) -> InodeType {
@@ -616,8 +636,16 @@ impl InodeRef {
         self.inode().meta.read().perm
     }
 
+    pub fn mode(&self) -> InodeMode {
+        InodeMode::new(self.ty(), self.perm())
+    }
+
     pub fn nlink(&self) -> u64 {
         self.inode().nlink()
+    }
+
+    pub fn mapping(&self) -> Option<Arc<dyn VmObject>> {
+        self.inode().mapping()
     }
 
     pub fn size(&self) -> u64 {
@@ -648,8 +676,12 @@ impl InodeRef {
 
 // VTable operations re-exported here.
 impl InodeRef {
-    pub fn create(&self, name: &str, mode: InodeMode) -> Result<InodeRef, FsError> {
-        (self.inode().ops.create)(self, name, mode)
+    pub fn touch(&self, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
+        (self.inode().ops.touch)(self, name, perm)
+    }
+
+    pub fn mkdir(&self, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
+        (self.inode().ops.mkdir)(self, name, perm)
     }
 
     pub fn symlink(&self, name: &str, target: &Path) -> Result<InodeRef, FsError> {

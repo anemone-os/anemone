@@ -5,5 +5,8 @@ edition = "2024"
 
 [dependencies]
 
+[workspace]
+members = ["."]
+
 [build-dependencies]
 cbindgen = "0.29.0"

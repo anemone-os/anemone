@@ -6,13 +6,13 @@ use core::ptr::null_mut;
 use anemone_rs::{
     env::current_dir,
     os::linux::process::{
-        CloneFlags, WStatusRaw, WaitOptions, clone, execve, getpid, sched_yield, wait4,
+        clone, execve, getpid, sched_yield, wait4, CloneFlags, WStatusRaw, WaitOptions,
     },
     prelude::*,
 };
 
-#[main]
-pub fn main() -> Result<(), anemone_abi::errno::Errno> {
+#[anemone_rs::main]
+pub fn main() -> Result<(), Errno> {
     let cwd = current_dir()?;
     let pid = getpid()?;
     println!("init: started:\n\tcwd:{}\n\tpid:{}", cwd.display(), pid);
@@ -27,7 +27,7 @@ pub fn main() -> Result<(), anemone_abi::errno::Errno> {
     .unwrap();
     if tid == 0 {
         println!("init: get into cloned task {}", tidc);
-        execve("bin/user-test", &["bin/user-test", "1"]).expect("failed to execve user-test");
+        execve("bin/user-test", &["bin/user-test"]).expect("failed to execve mmap-test");
         unreachable!();
     } else {
         println!("init: 'bin/user-test' started with pid {}", tid);

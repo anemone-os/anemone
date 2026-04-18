@@ -5,10 +5,13 @@
 //! advanced version of shadow object. We may want to switch to that in the
 //! future, but for now shadow object is good enough for our use cases.
 //!
+//! See [fs::addr_space] for inode page cache, which is a special kind of VMO.
+//!
 //! Reference:
 //! - https://fuchsia.dev/fuchsia-src/reference/kernel_objects/vm_object
 
 pub mod anon;
+pub mod empty;
 pub mod fixed;
 pub mod shadow;
 
@@ -16,13 +19,7 @@ use core::fmt::Debug;
 
 use crate::prelude::*;
 
-#[derive(Debug)]
-pub enum FrameSource {
-    Zero,
-    Framed(FrameHandle),
-}
-
-fn shared_zero_frame() -> ResolvedFrame {
+pub fn shared_zero_frame() -> ResolvedFrame {
     static ZERO_FRAME: Lazy<FrameHandle> = Lazy::new(|| unsafe {
         alloc_frame_zeroed()
             .expect("failed to allocate zero frame")
@@ -35,28 +32,6 @@ fn shared_zero_frame() -> ResolvedFrame {
     }
 }
 
-impl FrameSource {
-    /// Instantiate this frame source into a real frame.
-    ///
-    /// - For [FrameSource::Zero], this will allocate a fresh zeroed frame.
-    /// - For [FrameSource::Framed], this will allocate a new frame and copy the
-    ///   contents.
-    pub fn instantiate(self) -> Result<FrameHandle, MmError> {
-        match self {
-            FrameSource::Zero => Ok(unsafe {
-                alloc_frame_zeroed()
-                    .ok_or(MmError::OutOfMemory)?
-                    .into_frame_handle()
-            }),
-            FrameSource::Framed(frame) => {
-                let mut new = alloc_frame().ok_or(MmError::OutOfMemory)?;
-                new.as_bytes_mut().copy_from_slice(frame.as_bytes());
-                Ok(unsafe { new.into_frame_handle() })
-            },
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct ResolvedFrame {
     pub frame: FrameHandle,
@@ -64,43 +39,32 @@ pub struct ResolvedFrame {
     pub writable: bool,
 }
 
+/// Interior mutability should be used to implement some methods.
+///
+/// TODO: explain why such interior mutability is enforced by this trait, and
+/// why we don't just make those methods take `&mut self`.
 pub trait VmObject: Send + Sync {
-    /// Return the visible contents source for `pidx` without creating a local
-    /// copy in the current object.
-    ///
-    /// Called by [VmObject] themselves when they need to peek into the parent
-    /// object. More specifically, this is almost always used by
-    /// [shadow::ShadowObject].
-    fn source_frame(&self, pidx: usize) -> Result<FrameSource, MmError>;
-
     /// Resolve the frame at `pidx` for the given access type.
     ///
     /// `VmObject` are allowed to create a local copy of the frame in this
     /// method, which will be used for the current and future accesses to this
     /// page. This is how copy-on-write is implemented in
     /// [shadow::ShadowObject].
-    ///
-    /// Called by page fault handler.
-    fn resolve_frame(
-        &mut self,
-        pidx: usize,
-        access: PageFaultType,
-    ) -> Result<ResolvedFrame, MmError>;
+    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, MmError>;
 
     fn read_frame(
         &self,
         pidx: usize,
         buffer: &mut [u8; PagingArch::PAGE_SIZE_BYTES],
     ) -> Result<(), MmError> {
-        match self.source_frame(pidx)? {
-            FrameSource::Zero => buffer.fill(0),
-            FrameSource::Framed(frame) => buffer.copy_from_slice(frame.as_bytes()),
-        }
+        let ResolvedFrame { frame, .. } = self.resolve_frame(pidx, PageFaultType::Read)?;
+        buffer.copy_from_slice(frame.as_bytes());
+
         Ok(())
     }
 
     fn write_frame(
-        &mut self,
+        &self,
         pidx: usize,
         data: &[u8; PagingArch::PAGE_SIZE_BYTES],
     ) -> Result<(), MmError> {
@@ -132,8 +96,7 @@ pub trait VmObject: Send + Sync {
 
             let mut page = [0u8; PagingArch::PAGE_SIZE_BYTES];
             self.read_frame(pidx, &mut page)?;
-            remaining[..copy_len]
-                .copy_from_slice(&page[page_offset..page_offset + copy_len]);
+            remaining[..copy_len].copy_from_slice(&page[page_offset..page_offset + copy_len]);
 
             remaining = &mut remaining[copy_len..];
             cur_offset = cur_offset
@@ -144,7 +107,7 @@ pub trait VmObject: Send + Sync {
         Ok(())
     }
 
-    fn write(&mut self, offset: usize, data: &[u8]) -> Result<(), MmError> {
+    fn write(&self, offset: usize, data: &[u8]) -> Result<(), MmError> {
         let mut remaining = data;
         let mut cur_offset = offset;
 

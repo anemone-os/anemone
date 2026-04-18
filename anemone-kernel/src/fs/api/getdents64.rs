@@ -58,73 +58,79 @@ fn sys_getdents64(
     dirp: UserWritePtr<u8>,
     count: u32,
 ) -> Result<u64, SysError> {
-    with_current_task(|task| {
+    let (usp, fd) = with_current_task(|task| {
         let usp = task
             .clone_uspace()
             .expect("user task should have a user space");
 
         let fd = task.get_fd(fd).ok_or(KernelError::BadFileDescriptor)?;
-        let file = fd.vfs_file();
 
-        let buf_len = count as usize;
-        let mut slice = dirp.slice(buf_len);
-        let buffer = NonNull::new(slice.validate_mut_with(&mut usp.write())?)
-            .expect("user slice pointer should not be null");
-        let mut writer = unsafe { ByteWriter::new(buffer) };
+        Ok::<_, SysError>((usp, fd))
+    })?;
 
-        let mut dir_ctx = file.dir_context()?;
+    let file = fd.vfs_file();
 
-        // this variable is used to achieve atomicity of reading.
-        let mut committed_offset = dir_ctx.offset();
-        let mut written = 0usize;
+    let buf_len = count as usize;
+    let mut slice = dirp.slice(buf_len);
 
-        loop {
-            let dirent = match file.iterate(&mut dir_ctx) {
-                Ok(dirent) => dirent,
-                Err(FsError::NoMoreEntries) => break,
-                Err(err) => return Err(err.into()),
-            };
+    let mut guard = usp.write();
 
-            let reclen = dirent64_record_len(dirent.name.len())?;
-            if reclen > buf_len - writer.current_offset() {
-                if written == 0 {
-                    // buffer to small to hold even a single record, return error
-                    return Err(KernelError::InvalidArgument.into());
-                }
-                break;
+    let buffer = NonNull::new(slice.validate_mut_with(&mut guard)?)
+        .expect("user slice pointer should not be null");
+    let mut writer = unsafe { ByteWriter::new(buffer) };
+
+    let mut dir_ctx = file.dir_context()?;
+
+    // this variable is used to achieve atomicity of reading.
+    let mut committed_offset = dir_ctx.offset();
+    let mut written = 0usize;
+
+    loop {
+        let dirent = match file.iterate(&mut dir_ctx) {
+            Ok(dirent) => dirent,
+            Err(FsError::NoMoreEntries) => break,
+            Err(err) => return Err(err.into()),
+        };
+
+        let reclen = dirent64_record_len(dirent.name.len())?;
+        if reclen > buf_len - writer.current_offset() {
+            if written == 0 {
+                // buffer to small to hold even a single record, return error
+                return Err(KernelError::InvalidArgument.into());
             }
-
-            let header = LinuxDirent64Header {
-                d_ino: dirent.ino.get(),
-                // actually this field can be any value. user space programs are not expected to
-                // interpret it.
-                d_off: dir_ctx.offset() as i64,
-                d_reclen: u16::try_from(reclen).map_err(|_| KernelError::InvalidArgument)?,
-                d_type: dirent64_dtype(dirent.ty),
-            };
-
-            writer
-                .write_val_unaligned(&header)
-                .map_err(map_byte_writer_error)?;
-            writer
-                .write_null_terminated_str(&dirent.name)
-                .map_err(map_byte_writer_error)?;
-
-            let padding = reclen - DIRENT64_HEADER_SIZE - dirent.name.len() - 1;
-            if padding != 0 {
-                let zeros = [0u8; DIRENT64_ALIGN];
-                writer
-                    .write_bytes(&zeros[..padding])
-                    .map_err(map_byte_writer_error)?;
-            }
-
-            written += reclen;
-            committed_offset = dir_ctx.offset();
+            break;
         }
 
-        file.commit_dir_context(&DirContext::from_offset(committed_offset))
-            .expect("we've checked this is indeed a directory");
+        let header = LinuxDirent64Header {
+            d_ino: dirent.ino.get(),
+            // actually this field can be any value. user space programs are not expected to
+            // interpret it.
+            d_off: dir_ctx.offset() as i64,
+            d_reclen: u16::try_from(reclen).map_err(|_| KernelError::InvalidArgument)?,
+            d_type: dirent64_dtype(dirent.ty),
+        };
 
-        Ok(written as u64)
-    })
+        writer
+            .write_val_unaligned(&header)
+            .map_err(map_byte_writer_error)?;
+        writer
+            .write_null_terminated_str(&dirent.name)
+            .map_err(map_byte_writer_error)?;
+
+        let padding = reclen - DIRENT64_HEADER_SIZE - dirent.name.len() - 1;
+        if padding != 0 {
+            let zeros = [0u8; DIRENT64_ALIGN];
+            writer
+                .write_bytes(&zeros[..padding])
+                .map_err(map_byte_writer_error)?;
+        }
+
+        written += reclen;
+        committed_offset = dir_ctx.offset();
+    }
+
+    file.commit_dir_context(&DirContext::from_offset(committed_offset))
+        .expect("we've checked this is indeed a directory");
+
+    Ok(written as u64)
 }

@@ -16,11 +16,10 @@ fn sys_mkdirat(
 ) -> Result<u64, SysError> {
     with_current_task(|task| {
         let path = Path::new(pathname.as_ref());
+        let perm = InodePerm::from_linux_bits(mode as u32).ok_or(KernelError::InvalidArgument)?;
         if path.is_absolute() {
             let path = task.make_global_path(&Path::new(pathname.as_ref()));
-            let mode = InodeMode::from_linux_mode(mode | InodeType::Dir.to_linux_mode_bits())
-                .ok_or(KernelError::InvalidArgument)?;
-            vfs_create(&path, mode)?;
+            vfs_mkdir(&path, perm)?;
         } else {
             let dir_path = if dirfd == anemone_abi::fs::linux::at::AT_FDCWD as isize {
                 task.cwd().clone()
@@ -34,9 +33,7 @@ fn sys_mkdirat(
                 }
                 dir_file.vfs_file().path().clone()
             };
-            let mode = InodeMode::from_linux_mode(mode | InodeType::Dir.to_linux_mode_bits())
-                .ok_or(KernelError::InvalidArgument)?;
-            vfs_create_at(&dir_path, &path, mode)?;
+            vfs_mkdir_at(&dir_path, &path, perm)?;
         }
 
         Ok(0)

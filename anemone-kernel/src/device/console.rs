@@ -187,7 +187,8 @@ fn console_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
 
 static CONSOLE_STDIN_INODE_OPS: InodeOps = InodeOps {
     lookup: |_, _| Err(FsError::NotSupported),
-    create: |_, _, _| Err(FsError::NotSupported),
+    touch: |_, _, _| Err(FsError::NotSupported),
+    mkdir: |_, _, _| Err(FsError::NotSupported),
     symlink: |_, _, _| Err(FsError::NotSupported),
     unlink: |_, _| Err(FsError::NotSupported),
     rmdir: |_, _| Err(FsError::NotSupported),
@@ -204,7 +205,8 @@ static CONSOLE_STDIN_INODE_OPS: InodeOps = InodeOps {
 
 static CONSOLE_STDOUT_INODE_OPS: InodeOps = InodeOps {
     lookup: |_, _| Err(FsError::NotSupported),
-    create: |_, _, _| Err(FsError::NotSupported),
+    touch: |_, _, _| Err(FsError::NotSupported),
+    mkdir: |_, _, _| Err(FsError::NotSupported),
     symlink: |_, _, _| Err(FsError::NotSupported),
     unlink: |_, _| Err(FsError::NotSupported),
     rmdir: |_, _| Err(FsError::NotSupported),
