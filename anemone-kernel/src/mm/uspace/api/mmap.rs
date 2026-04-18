@@ -25,6 +25,16 @@ fn sys_mmap(
     fd: Fd,
     #[validate_with(aligned_to::<{ PagingArch::PAGE_SIZE_BYTES }>)] offset: u64,
 ) -> Result<u64, SysError> {
+    kdebugln!(
+        "mmap: addr={:?}, length={}, prot={:?}, flags={:?}, fd={:?}, offset={}",
+        addr,
+        length,
+        prot,
+        flags,
+        fd,
+        offset
+    );
+
     let usp = with_current_task(|task| task.clone_uspace().expect("user task should have uspace"));
 
     let is_anonymous = flags.aux.contains(AuxMmapFlags::MAP_ANONYMOUS);

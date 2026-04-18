@@ -5,6 +5,9 @@
 //!
 //! This is not a high-priority task. We'll deal with that when we need these
 //! flags.
+//!
+//! TODO: explain how arguments' type are defined and converted. For example,
+//! libc's writev specifies `iovlen` as an `int`, but we define it as `usize`.
 
 pub mod chdir;
 pub mod chroot;
@@ -22,6 +25,7 @@ pub mod read;
 pub mod umount;
 pub mod unlinkat;
 pub mod write;
+pub mod writev;
 
 /// those arguments used across multiple syscalls will be defined here.
 ///

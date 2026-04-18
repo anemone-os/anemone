@@ -1,4 +1,4 @@
-use anemone_abi::syscall::{SYS_EXIT, SYS_SCHED_YIELD};
+use anemone_abi::syscall::{SYS_EXIT, SYS_EXIT_GROUP, SYS_SCHED_YIELD};
 
 use crate::{
     arch::IntrArch,
@@ -8,12 +8,18 @@ use crate::{
 };
 
 #[syscall(SYS_EXIT)]
-pub fn sys_exit(exit_code: i8) -> Result<u64, SysError> {
+fn sys_exit(exit_code: i8) -> Result<u64, SysError> {
+    kernel_exit(exit_code)
+}
+
+/// Temporary workaround. now we don't have thread groups yet.
+#[syscall(SYS_EXIT_GROUP)]
+fn sys_exit_group(exit_code: i8) -> Result<u64, SysError> {
     kernel_exit(exit_code)
 }
 
 #[syscall(SYS_SCHED_YIELD)]
-pub fn sys_yield() -> Result<u64, SysError> {
+fn sys_yield() -> Result<u64, SysError> {
     kernel_yield();
     Ok(0)
 }
@@ -43,7 +49,8 @@ pub fn kernel_exit(exit_code: i8) -> ! {
                         child_hierarchy.set_parent(root);
                         root_hierarchy.add_child(child.clone());
                     });
-                    //kdebugln!("set the parent task of {} to {}", child.tid(), root.tid());
+                    //kdebugln!("set the parent task of {} to {}", child.tid(),
+                    // root.tid());
                 }
             });
         });

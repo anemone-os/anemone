@@ -71,10 +71,12 @@ pub mod linux {
 
     pub const SYS_READ: u64 = 63;
     pub const SYS_WRITE: u64 = 64;
+    pub const SYS_WRITEV: u64 = 66;
 
     pub const SYS_FSTAT: u64 = 80;
 
     pub const SYS_EXIT: u64 = 93;
+    pub const SYS_EXIT_GROUP: u64 = 94;
 
     pub const SYS_NANOSLEEP: u64 = 101;
 

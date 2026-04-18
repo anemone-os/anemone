@@ -15,6 +15,7 @@ mod args {
     use anemone_abi::process::linux::mmap;
 
     bitflags! {
+        #[derive(Debug)]
         pub struct MmapProt: i32 {
             const PROT_READ = mmap::PROT_READ;
             const PROT_WRITE = mmap::PROT_WRITE;
@@ -38,6 +39,7 @@ mod args {
         }
     }
 
+    #[derive(Debug)]
     pub enum ExclusiveMmapFlags {
         Shared,
         Private,
@@ -49,6 +51,7 @@ mod args {
     }
 
     bitflags! {
+        #[derive(Debug)]
         pub struct AuxMmapFlags: i32 {
             const MAP_FIXED = mmap::MAP_FIXED;
             const MAP_FIXED_NOREPLACE = mmap::MAP_FIXED_NOREPLACE;
@@ -82,6 +85,7 @@ mod args {
         }
     }
 
+    #[derive(Debug)]
     pub struct MmapFlags {
         pub exclusive: ExclusiveMmapFlags,
         pub aux: AuxMmapFlags,

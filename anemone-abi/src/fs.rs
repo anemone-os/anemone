@@ -2,6 +2,8 @@
 /// - https://elixir.bootlin.com/linux/v6.6.32/source/include/uapi/linux/stat.h
 /// - https://elixir.bootlin.com/linux/v6.6.32/source/include/uapi/asm-generic/fcntl.h
 pub mod linux {
+    use core::ffi::c_void;
+
     pub mod open {
         pub const O_RDONLY: u32 = 0x0000;
         pub const O_WRONLY: u32 = 0x0001;
@@ -186,6 +188,14 @@ pub mod linux {
         pub const DT_SOCK: u8 = 12;
         pub const DT_WHT: u8 = 14;
     }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[repr(C)]
+    pub struct IoVec {
+        pub iov_base: *mut c_void,
+        pub iov_len: u64,
+    }
+
     pub const STDIN_FILENO: usize = 0;
     pub const STDOUT_FILENO: usize = 1;
     pub const STDERR_FILENO: usize = 2;

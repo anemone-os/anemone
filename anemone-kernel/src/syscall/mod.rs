@@ -1,5 +1,3 @@
-// TODO
-
 use anemone_abi::syscall::ANEMONE_SYSNO_MAX;
 
 use crate::{
@@ -82,6 +80,14 @@ pub fn register_syscall_handlers() {
 /// immediately, and this function should never be called.
 pub fn handle_syscall(trapframe: &mut TrapFrame) {
     let sysno = unsafe { trapframe.syscall_no() };
+
+    if sysno >= ANEMONE_SYSNO_MAX as usize {
+        knoticeln!(
+            "unknown syscall number {} from task {}",
+            sysno,
+            current_task_id()
+        );
+    }
 
     let handler = SYSCALL_TABLE
         .get()

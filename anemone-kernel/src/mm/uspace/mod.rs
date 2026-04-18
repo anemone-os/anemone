@@ -7,20 +7,16 @@
 //! TODO: Refactor the API: split stack/brk initializing logic into a seperate
 //! builder, rather than placing those initializing helpers in [UserSpaceData].
 
-use core::{
-    fmt::Debug,
-    ops::{Deref, DerefMut},
-};
+use core::ops::{Deref, DerefMut};
 
 use crate::{
     mm::kptable::KERNEL_PTABLE,
     prelude::{
         vma::{ForkPolicy, Protection, VmFlags},
-        vmo::{VmObject, anon::AnonObject, empty::EmptyObject, fixed::FixedObject},
+        vmo::{anon::AnonObject, empty::EmptyObject},
         *,
     },
     sync::r#final::Final,
-    utils::data::DataSource,
 };
 use vma::{VmArea, VmReservation};
 
@@ -186,18 +182,15 @@ impl UserSpace {
             heap_vmo,
         );
 
-        // TODO: after we support dynamic elf loading, uncomment zero_guard_vma to
-        // reserve the zero page and catch null pointer dereference.
-
-        // let zero_guard_vma = VmArea::new_reserved(
-        //     VirtPageRange::new(VirtPageNum::new(0), 1),
-        //     0,
-        //     Protection::empty(),
-        //     ForkPolicy::Shared,
-        //     VmFlags::empty(),
-        //     VmReservation::Guard,
-        //     guard_vmo,
-        // );
+        let zero_guard_vma = VmArea::new_reserved(
+            VirtPageRange::new(VirtPageNum::new(0), 1),
+            0,
+            Protection::empty(),
+            ForkPolicy::Shared,
+            VmFlags::empty(),
+            VmReservation::Guard,
+            guard_vmo,
+        );
 
         let mut vmas = BTreeMap::new();
         assert!(vmas.insert(stack_vma.range().start(), stack_vma).is_none());
@@ -206,10 +199,10 @@ impl UserSpace {
                 .is_none()
         );
         assert!(vmas.insert(heap_vma.range().start(), heap_vma).is_none());
-        // assert!(
-        //     vmas.insert(zero_guard_vma.range().start(), zero_guard_vma)
-        //         .is_none()
-        // );
+        assert!(
+            vmas.insert(zero_guard_vma.range().start(), zero_guard_vma)
+                .is_none()
+        );
 
         let mut uspace = UserSpace {
             table_ppn: table.root_ppn(),
@@ -367,79 +360,40 @@ impl UserSpaceData {
         Self::find_vma_raw_mut(&mut self.vmas, vaddr)
     }
 
-    /// Add a memory segment to the user space and fill the segment with the
-    /// given data.
+    /// Register a newly prepared load segment VMA into this address space.
     ///
-    /// This function will automatically adjust the `ubrk` value and the
-    /// position of the heap area.
+    /// This function will automatically advance the heap reservation so it
+    /// stays above the loaded image.
     ///
     /// # Safety
-    /// This function is unsafe because:
-    ///  * **any already mapped page tables will not be rolled back if an
-    ///    exception is encountered during the page table mapping process.**
-    ///  * This function does not validate address range conflicts with existing
-    ///    mappings, potentially causing code/data overwrites.
-    ///  * **Calling this after the heap area is initialized will lead to
-    ///    panic.**
-    pub unsafe fn add_segment<TErr: Debug + From<SysError>>(
-        &mut self,
-        vaddr: VirtAddr,
-        vsize: usize,
-        psize: usize,
-        source: &impl DataSource<TError = impl Into<TErr>>,
-        prot: Protection,
-    ) -> Result<(), TErr> {
-        let vaddr_ed = vaddr + vsize as u64;
-        let vpn_st = vaddr.page_down();
-        let vpn_ed = vaddr_ed.page_up();
-        let len = vpn_ed - vpn_st;
+    ///
+    /// This function is expected to be called during a new binary is
+    /// [kernel_execve]d. Otherwise undefined behaviour will occur.
+    pub unsafe fn add_segment(&mut self, vma: VmArea) -> Result<(), SysError> {
+        let range = *vma.range();
+        let vaddr = range.start().to_virt_addr();
+        let vaddr_ed = range.end().to_virt_addr();
 
         if self.heap.brk != self.heap.svpn.to_virt_addr() {
             panic!("add_segment should be called before heap initialization.");
         }
 
-        if vpn_ed > self.heap.svpn {
-            self.move_heap_reservation(vpn_ed)?;
+        if range.end() > self.heap.svpn {
+            self.move_heap_reservation(range.end())?;
         }
 
-        let frames = (0..len)
-            .map(|_| {
-                alloc_frame_zeroed()
-                    .and_then(|owned| unsafe { Some(owned.into_frame_handle()) })
-                    .ok_or(SysError::OutOfMemory)
-            })
-            .collect::<Result<Vec<_>, SysError>>()?
-            .into_boxed_slice();
-
-        let mut seg_vmo = FixedObject::new(frames);
-        let seg_off = (vaddr - vpn_st.to_virt_addr()) as usize;
-
-        // TODO: vmo write should support DataSource-style src.
-
-        let mut written = 0usize;
-        let chunk_cap = psize.min(0x10000);
-        let mut chunk = vec![0u8; chunk_cap].into_boxed_slice();
-
-        while written < psize {
-            let chunk_len = (psize - written).min(chunk.len());
-            source
-                .copy_to(written, &mut chunk[..chunk_len])
-                .map_err(Into::into)?;
-            seg_vmo.write(seg_off + written, &chunk[..chunk_len])?;
-            written += chunk_len;
+        match self.insert_vma(vma) {
+            Ok(()) => Ok(()),
+            Err(SysError::AlreadyMapped) => {
+                knoticeln!(
+                    "overlapping segment at {:#x} - {:#x}",
+                    vaddr.get(),
+                    vaddr_ed.get()
+                );
+                Err(SysError::AlreadyMapped)
+            },
+            Err(err) => Err(err),
         }
-
-        let seg_vma = VmArea::new(
-            VirtPageRange::new(vpn_st, len),
-            0,
-            prot,
-            ForkPolicy::CopyOnWrite,
-            VmFlags::empty(),
-            Arc::new(seg_vmo),
-        );
-        assert!(self.vmas.insert(seg_vma.range().start(), seg_vma).is_none());
-
-        Ok(())
     }
 
     /// Get the program break

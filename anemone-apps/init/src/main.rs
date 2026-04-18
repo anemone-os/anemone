@@ -40,19 +40,10 @@ pub fn main() -> Result<(), Errno> {
     .unwrap();
     if tid == 0 {
         println!("init: get into cloned task {}", tidc);
-        // execve(
-        //     "bin/user-test",
-        //     &["bin/user-test"],
-        //     &["init=init", "say=hello"],
-        // )
         execve(
-            "/test_shebang.sh",
-            &["/test_shebang.sh"],
-            &[
-                "init=init",
-                "say=hello",
-                "test-shebang=/etc/base/test_shebang.sh",
-            ],
+            "bin/user-test",
+            &["bin/user-test"],
+            &["init=init", "say=hello"],
         )
         .expect("failed to execve user-test");
         unreachable!();

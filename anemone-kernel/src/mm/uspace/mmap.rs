@@ -226,6 +226,22 @@ impl UserSpaceData {
         }
     }
 
+    /// Try to insert the given [VmArea] into user space.
+    ///
+    /// Umm... Yep, in most cases you probably don't want to call this method
+    /// directly, however there are always some corner cases that cannot be
+    /// handled by higher-level APIs, e.g. `replace_range`, and you just want to
+    /// insert a new VMA (probably highly customized) without any fancy logic,
+    /// then this method is here for you.
+    pub fn insert_vma(&mut self, vma: VmArea) -> Result<(), SysError> {
+        if !self.is_range_avail(*vma.range()) {
+            return Err(SysError::AlreadyMapped);
+        }
+
+        assert!(self.vmas.insert(vma.range().start(), vma).is_none());
+        Ok(())
+    }
+
     /// Unmap the given virtual page range.
     ///
     /// TODO: explain the semantics of unmapping, especially when the range
@@ -338,16 +354,6 @@ impl UserSpaceData {
         }
 
         Err(SysError::RangeNotMapped)
-    }
-
-    /// Try to insert the given [VmArea] into user space.
-    fn insert_vma(&mut self, vma: VmArea) -> Result<(), SysError> {
-        if !self.is_range_avail(*vma.range()) {
-            return Err(SysError::AlreadyMapped);
-        }
-
-        assert!(self.vmas.insert(vma.range().start(), vma).is_none());
-        Ok(())
     }
 
     /// Find an available virtual page range of `npages` pages, with an optional

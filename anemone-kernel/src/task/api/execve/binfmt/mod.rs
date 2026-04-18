@@ -1,6 +1,6 @@
 use crate::{
     prelude::*,
-    task::execve::binfmt::{elf::ELF_BINFMT, shebang::SHEBANG_BINFMT},
+    task::execve::binfmt::{elf::ELF_FMT, shebang::SHEBANG_FMT},
 };
 
 #[derive(Debug)]
@@ -34,7 +34,7 @@ pub fn dispatch_execve(
 
     for _ in 0..MAX_BINFMT_REDIRECTS {
         for &fmt in BINARY_FMTS {
-            match fmt.load_binary(&mut ctx)? {
+            match (fmt.load_binary)(&mut ctx)? {
                 ExecResult::Loaded(meta) => {
                     return Ok(meta);
                 },
@@ -87,15 +87,19 @@ pub enum ExecResult {
     Redirected,
 }
 
-pub trait BinaryFmt: Sync {
+/// Yes. Impure vtable instead of trait, again. (context: file system) 😎
+pub struct BinaryFmt {
+    /// Name of this binary format, for debugging purposes only, currently.
+    pub name: &'static str,
+
     /// Try to load the binary described by [ctx].
     ///
     /// **If this method returns a [ExecResult::Loaded], user space is already
     /// prepared for execution.**
-    fn load_binary(&self, ctx: &mut ExecCtx) -> Result<ExecResult, SysError>;
+    pub load_binary: fn(&mut ExecCtx) -> Result<ExecResult, SysError>,
 }
 
-pub static BINARY_FMTS: &[&dyn BinaryFmt] = &[&ELF_BINFMT, &SHEBANG_BINFMT];
+pub static BINARY_FMTS: &[&BinaryFmt] = &[&ELF_FMT, &SHEBANG_FMT];
 
 pub mod elf;
 pub mod shebang;
