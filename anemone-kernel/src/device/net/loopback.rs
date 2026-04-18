@@ -1,18 +1,14 @@
 //! Software loopback network device (`lo`).
 //!
-//! Presents an Ethernet medium to smoltcp: TX frames are queued and surfaced on RX
-//! (`send_raw` → `try_recv_frame`), matching [`super::NetPhyIo`] (see workspace
-//! `anemone-kernel/docs/NETWORK_ROADMAP.md` §2.3).
+//! Presents an Ethernet-shaped L2 medium: TX frames are queued and surfaced on RX.
 
 use alloc::{collections::VecDeque, vec::Vec};
 
-use smoltcp::phy::{DeviceCapabilities, Medium};
-
-use super::{LinkState, NetDev, NetDevClass, NetPhyIo};
+use super::{LinkState, NetDev, NetDevClass, NetPhyIo, PhyCapabilities, PhyMedium};
 
 use crate::prelude::*;
 
-/// Fallback L2 address when [`LoopbackNetDev::mac`] is `None` (see [`super::NetDev`]).
+/// Dummy Ethernet MAC when `LoopbackNetDev::mac()` is `None`; not a real NIC address.
 pub const LOOPBACK_MAC: [u8; 6] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
 
 const QUEUE_CAP: usize = 32;
@@ -67,11 +63,11 @@ impl NetPhyIo for LoopbackPhy<'_> {
         Ok(())
     }
 
-    fn capabilities(&self) -> DeviceCapabilities {
-        let mut caps = DeviceCapabilities::default();
-        caps.max_transmission_unit = 1514;
-        caps.medium = Medium::Ethernet;
-        caps
+    fn capabilities(&self) -> PhyCapabilities {
+        PhyCapabilities {
+            max_transmission_unit: 1514,
+            medium: PhyMedium::Ethernet,
+        }
     }
 
     fn ack_interrupt(&mut self) {}

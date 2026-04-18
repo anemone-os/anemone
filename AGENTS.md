@@ -48,7 +48,7 @@
 - 初始化配置：`just defconfig`（复制 `conf/.defconfig` 到仓库根 `kconfig`）。
 - 构建：`just build`（等价 `just xtask build`）。
 - 运行 QEMU：`just xtask qemu --platform qemu-virt-rv64 --image build/anemone.elf`。  
-- **网络验收**：`-netdev user` 下**不要**用宿主机 `ping 192.168.100.2` 作为默认标准；串口日志、kunit、客户机内 ping 网关、或 TAP 平台见 [`anemone-kernel/docs/NETWORK_ROADMAP.md`](anemone-kernel/docs/NETWORK_ROADMAP.md) **§十**。可选 TAP 平台：`qemu-virt-rv64-tap`（需先在 Linux 宿主机创建 `anetap0` 并配置 `192.168.100.1/24`）。
+- **网络验收**：`-netdev user` 下**不要**用宿主机 `ping 192.168.100.2` 作为默认标准；可选 TAP 平台：`qemu-virt-rv64-tap`（需先在 Linux 宿主机创建 `anetap0` 并配置 `192.168.100.1/24`）。
 - 清理：`just clean`；彻底清理（含配置/生成文件）：`just mrproper`。
 - 调试参考：`scripts/qemu-virt-rv64-dbg.just`（`qemu-server` + `gdb-client`）。
 - `xtask` 命令结构（概要）：`conf`（`list/switch`）、`build`、`qemu`、`clean`、`mrproper`。

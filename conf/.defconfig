@@ -13,6 +13,8 @@ disasm = true # Whether to generate a disassembly file for kernel.
 [features]
 kunit = true # Enable KUnit testing
 fs_ext4 = true # Enable ext4 filesystem support
+# In-kernel UDP(7)/TCP(2323) echo for bring-up
+net-probe = true
 # virtio_gpu = true # Enable Virtio GPU support
 # smp = true # Enable Symmetric Multiprocessing support
 # intr_stack = true # Enable Interrupt Stack support

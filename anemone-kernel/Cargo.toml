@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 kunit = []
 fs_ext4 = []
+net-probe = []
 
 [dependencies]
 anemone-abi = { path = "../anemone-abi" }

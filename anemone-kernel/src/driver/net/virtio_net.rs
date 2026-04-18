@@ -1,13 +1,15 @@
 //! VirtIO network driver.
 
-use smoltcp::phy::{DeviceCapabilities, Medium};
 use virtio_drivers::{device::net::VirtIONet, transport::SomeTransport};
 
 use crate::{
     device::{
         bus::virtio::VirtIODriver,
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
-        net::{LinkState, NetDev, NetDevClass, NetDevRegistration, NetPhyIo, register_net_device},
+        net::{
+            LinkState, NetDev, NetDevClass, NetDevRegistration, NetPhyIo, PhyCapabilities, PhyMedium,
+            register_net_device,
+        },
     },
     driver::virtio::VirtIOHalImpl,
     prelude::*,
@@ -52,11 +54,11 @@ impl NetPhyIo for VirtioNetPhy<'_> {
         self.dev.send(tx_buf).map_err(|_| ())
     }
 
-    fn capabilities(&self) -> DeviceCapabilities {
-        let mut caps = DeviceCapabilities::default();
-        caps.max_transmission_unit = 1514;
-        caps.medium = Medium::Ethernet;
-        caps
+    fn capabilities(&self) -> PhyCapabilities {
+        PhyCapabilities {
+            max_transmission_unit: 1514,
+            medium: PhyMedium::Ethernet,
+        }
     }
 
     fn ack_interrupt(&mut self) {
@@ -97,12 +99,14 @@ impl NetDev for VirtioNetDev {
 #[derive(Opaque)]
 struct VirtIONetState {
     netdev: Arc<VirtioNetDev>,
+    iface_name: String,
 }
 
 impl Clone for VirtIONetState {
     fn clone(&self) -> Self {
         Self {
             netdev: self.netdev.clone(),
+            iface_name: self.iface_name.clone(),
         }
     }
 }
@@ -144,8 +148,11 @@ impl DriverOps for VirtIONetDriver {
             device: netdev.clone(),
         })?;
 
+        crate::net::attach_netdev_by_name(dev_name.as_str())?;
+
         let state = VirtIONetState {
             netdev: netdev.clone(),
+            iface_name: dev_name.clone(),
         };
 
         vdev.request_irq(&IRQ_HANDLER, Some(AnyOpaque::new(state.clone())))?;
@@ -156,8 +163,6 @@ impl DriverOps for VirtIONetDriver {
             vdev.name(),
             dev_name
         );
-
-        crate::net::attach_netdev_by_name(dev_name.as_str())?;
 
         Ok(())
     }
@@ -192,7 +197,7 @@ fn irq_handler(prv_data: &AnyOpaque) {
     state
         .netdev
         .with_phy_mut(&mut |phy| phy.ack_interrupt());
-    crate::net::poll_network();
+    crate::net::poll_network_for(state.iface_name.as_str());
 }
 
 #[initcall(driver)]

@@ -1,14 +1,12 @@
-//! Network device subsystem.
-//!
-//! Provides a unified abstraction for network devices (netdev), including
-//! registration, naming, and metadata queries (MAC, MTU, link state, stats).
-//! Pattern matches [`super::char`] / [`super::block`]: `Arc<dyn NetDev>` plus a
-//! registry with ordered enumeration.
+//！ Network device subsystem.
+//！
+//！ This module is a registry and abstraction for network interfaces (NICs); 
+//！ it does not implement the full TCP/IP stack.
+//！ The stack is attached separately in crate::net.
 
 use alloc::{string::String, vec::Vec};
 
 use hashbrown::HashMap;
-use smoltcp::phy::DeviceCapabilities;
 
 use crate::{
     device::error::DevError,
@@ -32,20 +30,33 @@ pub struct NetDevStats {
     pub tx_dropped: u64,
 }
 
-/// Class of network devices (drives automatic naming, like [`super::block::BlockDevClass`]).
+/// Class of network devices
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NetDevClass {
     Ethernet,
     Loopback,
 }
 
-/// PHY-level I/O used by the smoltcp bridge. Must stay object-safe.
+/// Link-layer medium reported by the device (stack-agnostic).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PhyMedium {
+    Ethernet,
+}
+
+/// Capabilities visible at the PHY / L2 boundary. Used by protocol stack adapters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PhyCapabilities {
+    pub max_transmission_unit: usize,
+    pub medium: PhyMedium,
+}
+
+/// PHY-level I/O. Must stay object-safe.
 pub trait NetPhyIo {
     /// Pull one complete L2 frame (e.g. Ethernet), if available.
     fn try_recv_frame(&mut self) -> Option<Vec<u8>>;
     fn can_send(&self) -> bool;
     fn send_raw(&mut self, frame: &[u8]) -> Result<(), ()>;
-    fn capabilities(&self) -> DeviceCapabilities;
+    fn capabilities(&self) -> PhyCapabilities;
     fn ack_interrupt(&mut self);
     fn disable_interrupts(&mut self);
 }
@@ -57,7 +68,7 @@ pub trait NetDev: Send + Sync {
     fn mtu(&self) -> usize;
     fn link_state(&self) -> LinkState;
 
-    /// Run `f` while holding the device's PHY lock. Used by the smoltcp adapter.
+    /// Run `f` while holding the device's PHY lock.
     fn with_phy_mut(&self, f: &mut dyn FnMut(&mut dyn NetPhyIo));
 }
 
