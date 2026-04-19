@@ -64,6 +64,8 @@ bitflags! {
         const REPLAY = 0b0010;
         /// Whether the console is enabled.
         const ENABLED = 0b0100;
+        /// Enable the console during [on_system_boot()]
+        const ENABLE_ON_BOOT = 0b1000;
     }
 }
 
@@ -143,12 +145,17 @@ pub unsafe fn on_system_boot() {
     {
         has_normal_con = true;
         consoles.retain(|desc| !desc.flags.contains(ConsoleFlags::EARLY));
-        if !consoles.iter().any(|desc| desc.enabled()) {
-            let desc = consoles.first_mut().unwrap();
-            desc.enable();
-        }
     }
 
+    consoles
+        .iter_mut()
+        .filter(|desc| desc.flags.contains(ConsoleFlags::ENABLE_ON_BOOT))
+        .for_each(|desc| desc.enable());
+    
+    if !consoles.iter().any(|desc| desc.enabled()) {
+        let desc = consoles.first_mut().unwrap();
+        desc.enable();
+    }
     drop(consoles);
 
     if !has_normal_con {

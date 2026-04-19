@@ -4,7 +4,7 @@ use core::{any::Any, fmt::Debug};
 
 use crate::{
     device::{
-        bus::{platform::PlatformDevice, virtio::VirtIODevice},
+        bus::{pcie::PcieDevice, platform::PlatformDevice, virtio::VirtIODevice},
         discovery::fwnode::FwNode,
         kobject::{KObjIdent, KObject, KObjectBase},
     },
@@ -106,6 +106,10 @@ impl dyn Device {
 
     pub fn as_virtio_device(&self) -> Option<&VirtIODevice> {
         (self as &dyn Any).downcast_ref::<VirtIODevice>()
+    }
+
+    pub fn as_pcie_device(&self) -> Option<&PcieDevice> {
+        (self as &dyn Any).downcast_ref::<PcieDevice>()
     }
 }
 
