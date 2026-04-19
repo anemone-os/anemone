@@ -10,7 +10,10 @@ use crate::prelude::{dt::UserWritePtr, *};
 #[syscall(SYS_FSTAT)]
 fn sys_fstat(fd: usize, statbuf: UserWritePtr<Stat>) -> Result<u64, SysError> {
     let fd = with_current_task(|task| task.get_fd(fd).ok_or(KernelError::BadFileDescriptor))?;
-    let stat = fd.vfs_file().get_attr()?;
+    let file = fd
+        .as_vfs_file()
+        .ok_or(KernelError::BadFileDescriptor)?;
+    let stat = file.get_attr()?;
     statbuf.safe_write(stat.into())?;
     Ok(0)
 }

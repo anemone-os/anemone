@@ -99,6 +99,19 @@ pub mod linux {
     pub const SYS_MADVISE: u64 = 233;
 
     pub const SYS_WAIT4: u64 = 260;
+// for net
+    pub const SYS_SOCKET: u64 = 198;
+    pub const SYS_SOCKETPAIR: u64 = 199;
+    pub const SYS_BIND: u64 = 200;
+    pub const SYS_LISTEN: u64 = 201;
+    pub const SYS_ACCEPT: u64 = 202;
+    pub const SYS_CONNECT: u64 = 203;
+    pub const SYS_SENDTO: u64 = 206;
+    pub const SYS_RECVFROM: u64 = 207;
+    pub const SYS_SETSOCKOPT: u64 = 208;
+    pub const SYS_GETSOCKOPT: u64 = 209;
+    pub const SYS_SHUTDOWN: u64 = 210;
+    pub const SYS_ACCEPT4: u64 = 242;
 }
 
 pub use linux::*;

@@ -7,10 +7,14 @@ mod config;
 mod icmp;
 #[cfg(feature = "kunit")]
 mod icmp_kunit;
+#[cfg(feature = "kunit")]
+mod user_socket_kunit;
 mod poll;
 #[cfg(feature = "net-probe")]
 mod probe;
 mod stack;
+pub mod user_socket;
+mod syscall;
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 #[cfg(feature = "net-probe")]
@@ -36,6 +40,7 @@ use config::{
 #[cfg(feature = "net-probe")]
 use config::ETH_PROBE_POLL_PERIOD;
 use poll::poll_one_stack;
+use smoltcp::iface::SocketHandle;
 use stack::{build_stack, NetStack};
 
 #[cfg(feature = "net-probe")]
@@ -57,6 +62,20 @@ impl NetStackTable {
 
 static NET_STACK_TABLE: Lazy<RwLock<NetStackTable>> =
     Lazy::new(|| RwLock::new(NetStackTable::new()));
+
+/// Remove a user socket from the smoltcp [`SocketSet`] when the last [`UserSocket`](user_socket::UserSocket) drops.
+pub(crate) fn remove_user_socket_handle(stack_name: &str, handle: SocketHandle) {
+    let stack_arc = {
+        let table = NET_STACK_TABLE.read_irqsave();
+        table.stacks.get(stack_name).cloned()
+    };
+    let Some(stack_arc) = stack_arc else {
+        return;
+    };
+    let mut stack = stack_arc.lock_irqsave();
+    stack.user_socket_entries.retain(|e| e.handle != handle);
+    let _ = stack.sockets.remove(handle);
+}
 
 /// Attach a registered netdev (by canonical name) to the smoltcp stack.
 ///

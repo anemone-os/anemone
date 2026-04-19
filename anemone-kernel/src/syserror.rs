@@ -1,3 +1,5 @@
+use anemone_abi::errno::Errno;
+
 use crate::prelude::*;
 
 /// System-wide error type, wrapping errors from all subsystems (e.g. memory
@@ -29,6 +31,8 @@ pub enum KernelError {
     PermissionDenied,
     /// The provided file descriptor is invalid.
     BadFileDescriptor,
+    /// POSIX errno mapped straight through for sockets and similar paths.
+    Errno(Errno),
 }
 
 impl AsErrno for KernelError {
@@ -41,6 +45,7 @@ impl AsErrno for KernelError {
             KernelError::BufferTooSmall => ERANGE,
             KernelError::PermissionDenied => EPERM,
             KernelError::BadFileDescriptor => EBADF,
+            KernelError::Errno(e) => *e,
         }
     }
 }

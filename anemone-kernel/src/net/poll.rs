@@ -9,6 +9,7 @@ use super::{
     config::{self, MAX_EGRESS_FLUSH_ROUNDS},
     icmp::poll_icmp_raw_socket,
     stack::NetStack,
+    user_socket,
 };
 #[cfg(feature = "net-probe")]
 use super::probe;
@@ -69,6 +70,8 @@ pub(crate) fn poll_one_stack(stack: &mut NetStack) -> PollMetrics {
             flush_rounds += 1;
         }
     }
+
+    user_socket::post_poll_wake(stack);
 
     PollMetrics {
         icmp_echo_rx,

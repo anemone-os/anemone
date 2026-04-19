@@ -75,6 +75,7 @@ pub(crate) fn build_stack(netdev: Arc<dyn NetDev>, name: &str) -> Result<NetStac
         device,
         iface,
         sockets,
+        user_socket_entries: Vec::new(),
         icmp_raw_handle,
         icmp_stats: IcmpEchoStats::default(),
         icmp_echo_limiter: IcmpEchoLimiter::default(),

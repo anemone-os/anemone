@@ -68,7 +68,9 @@ fn sys_getdents64(
         Ok::<_, SysError>((usp, fd))
     })?;
 
-    let file = fd.vfs_file();
+    let file = fd
+        .as_vfs_file()
+        .ok_or(KernelError::BadFileDescriptor)?;
 
     let buf_len = count as usize;
     let mut slice = dirp.slice(buf_len);

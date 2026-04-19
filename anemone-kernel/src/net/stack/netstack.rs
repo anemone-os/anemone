@@ -5,6 +5,7 @@ use alloc::{string::String, vec::Vec};
 use smoltcp::iface::{Interface, SocketHandle, SocketSet};
 
 use crate::net::icmp::{IcmpEchoLimiter, IcmpEchoStats};
+use crate::net::user_socket::UserSocketEntry;
 
 use super::adapter::NetDeviceAdapter;
 
@@ -13,6 +14,8 @@ pub(crate) struct NetStack {
     pub(crate) device: NetDeviceAdapter,
     pub(crate) iface: Interface,
     pub(crate) sockets: SocketSet<'static>,
+    /// User `socket()` FDs (dynamic handles). Fixed ICMP / net-probe handles are not listed here.
+    pub(crate) user_socket_entries: Vec<UserSocketEntry>,
     pub(crate) icmp_raw_handle: SocketHandle,
     pub(crate) icmp_stats: IcmpEchoStats,
     pub(crate) icmp_echo_limiter: IcmpEchoLimiter,

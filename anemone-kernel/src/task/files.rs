@@ -3,7 +3,7 @@
 //! Reference:
 //! - https://elixir.bootlin.com/linux/v6.6.32/source/include/linux/fdtable.h
 
-use crate::prelude::*;
+use crate::{net::user_socket::UserSocket, prelude::*};
 
 #[derive(Debug)]
 pub struct ProcFile {
@@ -13,9 +13,16 @@ pub struct ProcFile {
 }
 
 #[derive(Debug, Clone)]
-pub struct FileDesc {
-    pfile: Arc<ProcFile>,
-    flags: FdFlags,
+pub enum FileDesc {
+    Vfs {
+        pfile: Arc<ProcFile>,
+        flags: FdFlags,
+    },
+    Socket {
+        socket: UserSocket,
+        flags: FdFlags,
+        file_flags: FileFlags,
+    },
 }
 
 // re-export FileOps here, with permission checked.
@@ -23,54 +30,113 @@ pub struct FileDesc {
 // TODO: we only checked permission of fd, but we haven't checked permission of
 // the file itself.
 impl FileDesc {
-    fn new(pfile: Arc<ProcFile>, flags: FdFlags) -> Self {
-        Self { pfile, flags }
+    fn new_vfs(pfile: Arc<ProcFile>, flags: FdFlags) -> Self {
+        Self::Vfs { pfile, flags }
+    }
+
+    pub fn new_socket(socket: UserSocket, flags: FdFlags, file_flags: FileFlags) -> Self {
+        Self::Socket {
+            socket,
+            flags,
+            file_flags,
+        }
+    }
+
+    pub fn as_vfs_file(&self) -> Option<&File> {
+        match self {
+            FileDesc::Vfs { pfile, .. } => Some(&pfile.file),
+            FileDesc::Socket { .. } => None,
+        }
     }
 
     pub fn vfs_file(&self) -> &File {
-        &self.pfile.file
+        self.as_vfs_file()
+            .expect("socket fd used where a VFS file is required")
     }
 
     pub fn file_flags(&self) -> FileFlags {
-        self.pfile.flags
+        match self {
+            FileDesc::Vfs { pfile, .. } => pfile.flags,
+            FileDesc::Socket { file_flags, .. } => *file_flags,
+        }
     }
 
     pub fn fd_flags(&self) -> FdFlags {
-        self.flags
+        match self {
+            FileDesc::Vfs { flags, .. } | FileDesc::Socket { flags, .. } => *flags,
+        }
+    }
+
+    pub fn user_socket(&self) -> Option<&UserSocket> {
+        match self {
+            FileDesc::Socket { socket, .. } => Some(socket),
+            FileDesc::Vfs { .. } => None,
+        }
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
-        if !self.pfile.flags.contains(FileFlags::READ) {
-            return Err(KernelError::PermissionDenied.into());
+        match self {
+            FileDesc::Vfs { pfile, .. } => {
+                if !pfile.flags.contains(FileFlags::READ) {
+                    return Err(KernelError::PermissionDenied.into());
+                }
+                pfile.file.read(buf).map_err(|e| e.into())
+            }
+            FileDesc::Socket {
+                socket,
+                file_flags,
+                ..
+            } => {
+                if !file_flags.contains(FileFlags::READ) {
+                    return Err(KernelError::PermissionDenied.into());
+                }
+                crate::net::user_socket::user_socket_read(&socket.inner, buf, *file_flags)
+            }
         }
-        self.pfile.file.read(buf).map_err(|e| e.into())
     }
 
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
-        if !self.pfile.flags.contains(FileFlags::WRITE) {
-            return Err(KernelError::PermissionDenied.into());
+        match self {
+            FileDesc::Vfs { pfile, .. } => {
+                if !pfile.flags.contains(FileFlags::WRITE) {
+                    return Err(KernelError::PermissionDenied.into());
+                }
+
+                if pfile.flags.contains(FileFlags::APPEND) {
+                    pfile
+                        .file
+                        .seek(pfile.file.get_attr()?.size as usize)?;
+                }
+
+                pfile.file.write(buf).map_err(|e| e.into())
+            }
+            FileDesc::Socket {
+                socket,
+                file_flags,
+                ..
+            } => {
+                if !file_flags.contains(FileFlags::WRITE) {
+                    return Err(KernelError::PermissionDenied.into());
+                }
+                crate::net::user_socket::user_socket_write(&socket.inner, buf, *file_flags)
+            }
         }
-
-        // currently we don't support atomic append, so we just seek to the end of file
-        // before writing.
-
-        if self.pfile.flags.contains(FileFlags::APPEND) {
-            self.pfile
-                .file
-                .seek(self.pfile.file.get_attr()?.size as usize)?;
-        }
-
-        self.pfile.file.write(buf).map_err(|e| e.into())
     }
 
     /// `whence` is Linux-specific. we handle that in syscall handler. it should
     /// not pollute our FileDesc API.
     pub fn seek(&self, offset: usize) -> Result<(), SysError> {
-        self.pfile.file.seek(offset).map_err(|e| e.into())
+        match self {
+            FileDesc::Vfs { pfile, .. } => pfile.file.seek(offset).map_err(|e| e.into()),
+            FileDesc::Socket { .. } => Err(KernelError::Errno(anemone_abi::errno::ESPIPE).into()),
+        }
     }
 
     pub fn iterate(&self, ctx: &mut DirContext) -> Result<DirEntry, SysError> {
-        self.pfile.file.iterate(ctx).map_err(|e| e.into())
+        match self {
+            FileDesc::Vfs { pfile, .. } => pfile.file.iterate(ctx).map_err(|e| e.into()),
+            FileDesc::Socket { .. } => Err(KernelError::Errno(anemone_abi::errno::ENOTDIR).into()),
+        }
     }
 }
 
@@ -80,6 +146,8 @@ bitflags! {
         const READ = 0b0001;
         const WRITE = 0b0010;
         const APPEND = 0b0100;
+        /// `O_NONBLOCK` / `SOCK_NONBLOCK` (non-blocking socket I/O).
+        const NONBLOCK = 0b1000;
 
         // create, truncate are not persistant flags, they are only used when opening a file, so we don't need to store them in FileDesc.
     }
@@ -115,6 +183,9 @@ impl FileFlags {
         // 2. append bit
         if flags & anemone_abi::fs::linux::open::O_APPEND != 0 {
             open_flags |= Self::APPEND;
+        }
+        if flags & anemone_abi::fs::linux::open::O_NONBLOCK != 0 {
+            open_flags |= Self::NONBLOCK;
         }
 
         open_flags
@@ -181,7 +252,21 @@ impl FilesState {
         });
 
         self.fd_table
-            .insert(fd, Arc::new(FileDesc::new(file, fd_flags)));
+            .insert(fd, Arc::new(FileDesc::new_vfs(file, fd_flags)));
+        fd
+    }
+
+    pub fn open_socket_fd(
+        &mut self,
+        socket: UserSocket,
+        file_flags: FileFlags,
+        fd_flags: FdFlags,
+    ) -> usize {
+        let fd = self.alloc_fd();
+        self.fd_table.insert(
+            fd,
+            Arc::new(FileDesc::new_socket(socket, fd_flags, file_flags)),
+        );
         fd
     }
 
@@ -201,10 +286,15 @@ impl FilesState {
     pub fn dup(&mut self, old_fd: usize) -> Option<usize> {
         let fd = self.get_fd(old_fd)?;
         let new_fd = self.alloc_fd();
-        self.fd_table.insert(
-            new_fd,
-            Arc::new(FileDesc::new(fd.pfile.clone(), FdFlags::empty())),
-        );
+        let new_desc = match &*fd {
+            FileDesc::Vfs { pfile, .. } => FileDesc::new_vfs(pfile.clone(), FdFlags::empty()),
+            FileDesc::Socket {
+                socket,
+                file_flags,
+                ..
+            } => FileDesc::new_socket(socket.clone(), FdFlags::empty(), *file_flags),
+        };
+        self.fd_table.insert(new_fd, Arc::new(new_desc));
         Some(new_fd)
     }
 
@@ -231,8 +321,15 @@ impl FilesState {
             self.next_fd = new_fd + 1;
         }
 
-        self.fd_table
-            .insert(new_fd, Arc::new(FileDesc::new(fd.pfile.clone(), flags)));
+        let new_desc = match &*fd {
+            FileDesc::Vfs { pfile, .. } => FileDesc::new_vfs(pfile.clone(), flags),
+            FileDesc::Socket {
+                socket,
+                file_flags,
+                ..
+            } => FileDesc::new_socket(socket.clone(), flags, *file_flags),
+        };
+        self.fd_table.insert(new_fd, Arc::new(new_desc));
 
         Ok(())
     }
@@ -256,7 +353,7 @@ impl FilesState {
         }
         self.fd_table.insert(
             fd,
-            Arc::new(FileDesc::new(
+            Arc::new(FileDesc::new_vfs(
                 Arc::new(ProcFile {
                     file,
                     flags: file_flags,
@@ -303,6 +400,11 @@ impl Task {
     pub fn open_fd(&self, file: File, file_flags: FileFlags, fd_flags: FdFlags) -> usize {
         let mut files_state = self.files_state.write();
         files_state.open_fd(file, file_flags, fd_flags)
+    }
+
+    pub fn open_socket_fd(&self, socket: UserSocket, file_flags: FileFlags, fd_flags: FdFlags) -> usize {
+        let mut files_state = self.files_state.write();
+        files_state.open_socket_fd(socket, file_flags, fd_flags)
     }
 
     pub fn get_fd(&self, fd: usize) -> Option<Arc<FileDesc>> {
