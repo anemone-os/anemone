@@ -60,6 +60,8 @@ pub mod linux {
     pub const SYS_UMOUNT2: u64 = 39;
     pub const SYS_MOUNT: u64 = 40;
 
+    pub const SYS_FACCESSAT: u64 = 48;
+
     pub const SYS_CHDIR: u64 = 49;
     pub const SYS_CHROOT: u64 = 51;
 
@@ -73,6 +75,7 @@ pub mod linux {
     pub const SYS_WRITE: u64 = 64;
     pub const SYS_WRITEV: u64 = 66;
 
+    pub const SYS_NEWFSTATAT: u64 = 79;
     pub const SYS_FSTAT: u64 = 80;
 
     pub const SYS_EXIT: u64 = 93;
@@ -101,6 +104,8 @@ pub mod linux {
     pub const SYS_MADVISE: u64 = 233;
 
     pub const SYS_WAIT4: u64 = 260;
+
+    pub const SYS_FACCESSAT2: u64 = 439;
 }
 
 pub use linux::*;
