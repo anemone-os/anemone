@@ -70,6 +70,10 @@ impl IoRange {
         )
     }
 
+    fn len(&self) -> u64 {
+        self.len
+    }
+
     fn intersects(&self, other: &Self) -> bool {
         self.start.get() < other.end().get() && other.start.get() < self.end().get()
     }
@@ -224,6 +228,15 @@ impl IoRemap {
                 self.req.len as usize,
             ))
         }
+    }
+
+    /// The physical byte range of this remapping.
+    pub fn phys_base(&self) -> PhysAddr {
+        self.req.start
+    }
+
+    pub fn len(&self) -> usize {
+        self.req.len as usize
     }
 }
 

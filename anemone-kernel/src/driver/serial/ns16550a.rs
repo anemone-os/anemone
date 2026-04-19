@@ -357,7 +357,7 @@ impl DriverOps for Ns16550ADriver {
 
         let mut flags = ConsoleFlags::empty();
         if fwnode.is_stdout() {
-            flags |= ConsoleFlags::ENABLED;
+            flags |= ConsoleFlags::ENABLE_ON_BOOT;
             kinfoln!("{}: registered as stdout console", pdev.name());
         }
         register_console(Arc::new(state), flags);

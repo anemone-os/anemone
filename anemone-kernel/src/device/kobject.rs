@@ -55,7 +55,7 @@ pub trait KObject: KObjectData + KObjectOps {
 
     /// `Arc` is used here since we should ensure that the parent is indeed
     /// alive when we set it as the parent of a child.
-    fn set_parent(&mut self, parent: Option<Arc<dyn KObject>>) {
+    fn set_parent(&self, parent: Option<Arc<dyn KObject>>) {
         *self.base().parent.write_irqsave() = parent.as_ref().map(|p| Arc::downgrade(p));
     }
 }
