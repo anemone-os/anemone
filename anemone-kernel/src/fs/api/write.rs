@@ -5,11 +5,18 @@
 
 use core::ops::DerefMut;
 
-use crate::prelude::{dt::UserReadPtr, *};
+use crate::{
+    prelude::{dt::UserReadPtr, *},
+    task::files::Fd,
+};
 
 #[syscall(SYS_WRITE)]
-fn sys_write(fd: usize, buf: UserReadPtr<u8>, count: usize) -> Result<u64, SysError> {
-    let file = with_current_task(|task| task.get_fd(fd).ok_or(KernelError::BadFileDescriptor))?;
+fn sys_write(fd: Fd, buf: UserReadPtr<u8>, count: usize) -> Result<u64, SysError> {
+    if count == 0 {
+        return Ok(0);
+    }
+
+    let file = with_current_task(|task| task.get_fd(fd).ok_or(SysError::BadFileDescriptor))?;
     let uspace = with_current_task(|task| {
         task.clone_uspace()
             .expect("user task should have a user space")

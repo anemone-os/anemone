@@ -66,8 +66,8 @@ pub mod process {
         unsafe { syscall(SYS_MPROTECT, addr, length, prot, 0, 0, 0) }
     }
 
-    pub fn execve(path_ptr: u64, argv_ptr: u64) -> Result<u64, Errno> {
-        unsafe { syscall(SYS_EXECVE, path_ptr, argv_ptr, 0, 0, 0, 0) }
+    pub fn execve(path_ptr: u64, argv_ptr: u64, envp_ptr: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_EXECVE, path_ptr, argv_ptr, envp_ptr, 0, 0, 0) }
     }
 
     pub fn clone(

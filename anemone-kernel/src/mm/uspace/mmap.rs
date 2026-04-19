@@ -129,16 +129,16 @@ impl UserSpaceData {
     /// Map an anonymous memory region for the user space.
     ///
     /// Created [VmArea] will be backed by an [AnonObject].
-    pub fn map_anonymous(&mut self, mapping: &AnonymousMapping) -> Result<VirtAddr, MmError> {
+    pub fn map_anonymous(&mut self, mapping: &AnonymousMapping) -> Result<VirtAddr, SysError> {
         let fixed = mapping.hint.is_some_and(|(_, fixed)| fixed);
         let vpn = match mapping.hint {
             Some((hint, true)) => hint,
             Some((hint, false)) => self
                 .find_avail_range(mapping.npages, Some(hint))
-                .ok_or(MmError::OutOfMemory)?,
+                .ok_or(SysError::OutOfMemory)?,
             None => self
                 .find_avail_range(mapping.npages, None)
-                .ok_or(MmError::OutOfMemory)?,
+                .ok_or(SysError::OutOfMemory)?,
         };
         let range = VirtPageRange::new(vpn, mapping.npages as u64);
         self.validate_range(range)?;
@@ -173,16 +173,16 @@ impl UserSpaceData {
         Ok(vpn.to_virt_addr())
     }
 
-    pub fn map_file(&mut self, mapping: &FileMapping) -> Result<VirtAddr, MmError> {
+    pub fn map_file(&mut self, mapping: &FileMapping) -> Result<VirtAddr, SysError> {
         let fixed = mapping.hint.is_some_and(|(_, fixed)| fixed);
         let vpn = match mapping.hint {
             Some((hint, true)) => hint,
             Some((hint, false)) => self
                 .find_avail_range(mapping.npages, Some(hint))
-                .ok_or(MmError::OutOfMemory)?,
+                .ok_or(SysError::OutOfMemory)?,
             None => self
                 .find_avail_range(mapping.npages, None)
-                .ok_or(MmError::OutOfMemory)?,
+                .ok_or(SysError::OutOfMemory)?,
         };
         let range = VirtPageRange::new(vpn, mapping.npages as u64);
         self.validate_range(range)?;
@@ -222,7 +222,7 @@ impl UserSpaceData {
 
             Ok(vpn.to_virt_addr())
         } else {
-            Err(MmError::NotSupported)
+            Err(SysError::NotSupported)
         }
     }
 
@@ -230,7 +230,7 @@ impl UserSpaceData {
     ///
     /// TODO: explain the semantics of unmapping, especially when the range
     /// partially intersects with existing mappings.
-    pub fn unmap(&mut self, range: VirtPageRange) -> Result<(), MmError> {
+    pub fn unmap(&mut self, range: VirtPageRange) -> Result<(), SysError> {
         let tx = self.compose_unmap_range(range)?;
         unsafe {
             self.run_transaction(tx);
@@ -245,7 +245,11 @@ impl UserSpaceData {
     ///
     /// If any page in the target range falls into a hole, the whole operation
     /// fails without modifying any VMA or PTE state.
-    pub fn protect_range(&mut self, range: VirtPageRange, prot: Protection) -> Result<(), MmError> {
+    pub fn protect_range(
+        &mut self,
+        range: VirtPageRange,
+        prot: Protection,
+    ) -> Result<(), SysError> {
         let tx = self.compose_protect_range(range, prot)?;
         unsafe {
             self.run_transaction(tx);
@@ -266,9 +270,9 @@ impl UserSpaceData {
         &mut self,
         range: VirtPageRange,
         new: VmArea,
-    ) -> Result<(), MmError> {
+    ) -> Result<(), SysError> {
         if *new.range() != range {
-            return Err(MmError::InvalidArgument);
+            return Err(SysError::InvalidArgument);
         }
         if new.reservation().is_some() {
             panic!("replace_range must not install system-managed reservations");
@@ -304,7 +308,7 @@ impl UserSpaceData {
     fn find_intersection_starts_covering(
         &self,
         range: VirtPageRange,
-    ) -> Result<Vec<VirtPageNum>, MmError> {
+    ) -> Result<Vec<VirtPageNum>, SysError> {
         self.validate_range(range)?;
 
         let starts = self.find_intersection_starts(range);
@@ -317,7 +321,7 @@ impl UserSpaceData {
                 .expect("intersection key must resolve to a VMA");
 
             if vma.range().start() > covered_until {
-                return Err(MmError::RangeNotMapped);
+                return Err(SysError::RangeNotMapped);
             }
 
             let intersect_end = if vma.range().end() < range.end() {
@@ -333,13 +337,13 @@ impl UserSpaceData {
             }
         }
 
-        Err(MmError::RangeNotMapped)
+        Err(SysError::RangeNotMapped)
     }
 
     /// Try to insert the given [VmArea] into user space.
-    fn insert_vma(&mut self, vma: VmArea) -> Result<(), MmError> {
+    fn insert_vma(&mut self, vma: VmArea) -> Result<(), SysError> {
         if !self.is_range_avail(*vma.range()) {
-            return Err(MmError::AlreadyMapped);
+            return Err(SysError::AlreadyMapped);
         }
 
         assert!(self.vmas.insert(vma.range().start(), vma).is_none());
@@ -377,12 +381,12 @@ impl UserSpaceData {
         return None;
     }
 
-    fn validate_range(&self, range: VirtPageRange) -> Result<(), MmError> {
+    fn validate_range(&self, range: VirtPageRange) -> Result<(), SysError> {
         if range.npages() == 0
             || range.end() > KernelLayout::USPACE_TOP_VPN
             || range.start().get() == 0
         {
-            return Err(MmError::InvalidArgument);
+            return Err(SysError::InvalidArgument);
         }
         Ok(())
     }
@@ -411,7 +415,7 @@ impl UserSpaceData {
     ///
     /// The composed transaction is guaranteed to be valid until [UserSpaceData]
     /// is unlocked.
-    fn compose_unmap_range(&self, range: VirtPageRange) -> Result<VmTransaction, MmError> {
+    fn compose_unmap_range(&self, range: VirtPageRange) -> Result<VmTransaction, SysError> {
         self.validate_range(range)?;
 
         let mut tx = VmTransaction::new();
@@ -424,7 +428,7 @@ impl UserSpaceData {
 
             if vma.reservation().is_some() {
                 // stack or heap cannot be unmapped.
-                return Err(MmError::PermissionDenied);
+                return Err(SysError::PermissionDenied);
             }
 
             let cut_start = if vma.range().start() > range.start() {
@@ -459,7 +463,7 @@ impl UserSpaceData {
         &self,
         range: VirtPageRange,
         prot: Protection,
-    ) -> Result<VmTransaction, MmError> {
+    ) -> Result<VmTransaction, SysError> {
         let mut tx = VmTransaction::new();
 
         for start in self.find_intersection_starts_covering(range)? {
@@ -469,7 +473,7 @@ impl UserSpaceData {
                 .expect("intersection key must resolve to a VMA");
 
             if vma.reservation().is_some() {
-                return Err(MmError::PermissionDenied);
+                return Err(SysError::PermissionDenied);
             }
             if vma.prot() == prot {
                 continue;
@@ -738,15 +742,15 @@ mod kunits {
 
         assert_eq!(
             uspace.protect_range(VirtPageRange::new(base + 1, 4), Protection::READ),
-            Err(MmError::RangeNotMapped)
+            Err(SysError::RangeNotMapped)
         );
         // assert_eq!(
         //     uspace.protect_range(VirtPageRange::new(heap_start, 1),
-        // Protection::READ),     Err(MmError::PermissionDenied)
+        // Protection::READ),     Err(SysError::PermissionDenied)
         // );
         // assert_eq!(
         //     uspace.unmap(VirtPageRange::new(heap_start, 1)),
-        //     Err(MmError::PermissionDenied)
+        //     Err(SysError::PermissionDenied)
         // );
     }
 
@@ -768,7 +772,7 @@ mod kunits {
 
         assert_eq!(
             uspace.map_anonymous(&fixed_mapping(base + 2, 4, Protection::READ, false, false)),
-            Err(MmError::AlreadyMapped)
+            Err(SysError::AlreadyMapped)
         );
 
         uspace

@@ -64,7 +64,7 @@ static ANONY_SB_OPS: SuperBlockOps = SuperBlockOps {
     sync_inode: |_| Ok(()),
 };
 
-fn anony_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
+fn anony_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     Ok(InodeStat {
         fs_dev: DeviceId::None,
         ino: inode.ino(),
@@ -81,15 +81,15 @@ fn anony_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
 }
 
 static ANONY_DIR_INODE_OPS: InodeOps = InodeOps {
-    lookup: |_, _| Err(FsError::NotSupported),
-    touch: |_, _, _| Err(FsError::NotSupported),
-    mkdir: |_, _, _| Err(FsError::NotSupported),
-    symlink: |_, _, _| Err(FsError::NotSupported),
-    link: |_, _, _| Err(FsError::NotSupported),
-    unlink: |_, _| Err(FsError::NotSupported),
-    rmdir: |_, _| Err(FsError::NotSupported),
-    open: |_| Err(FsError::NotSupported),
-    read_link: |_| Err(FsError::NotSymlink),
+    lookup: |_, _| Err(SysError::NotSupported),
+    touch: |_, _, _| Err(SysError::NotSupported),
+    mkdir: |_, _, _| Err(SysError::NotSupported),
+    symlink: |_, _, _| Err(SysError::NotSupported),
+    link: |_, _, _| Err(SysError::NotSupported),
+    unlink: |_, _| Err(SysError::NotSupported),
+    rmdir: |_, _| Err(SysError::NotSupported),
+    open: |_| Err(SysError::NotSupported),
+    read_link: |_| Err(SysError::NotSymlink),
     get_attr: anony_get_attr,
 };
 

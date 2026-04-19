@@ -16,13 +16,13 @@ impl CharDev for Full {
         FULL_DEVNUM
     }
 
-    fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
+    fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
         buf.fill(0x00);
         Ok(buf.len())
     }
 
-    fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
-        Err(FsError::NoSpace)
+    fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
+        Err(SysError::NoSpace)
     }
 }
 

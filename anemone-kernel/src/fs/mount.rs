@@ -98,7 +98,7 @@ impl Mount {
         self.children.lock().iter().any(|w| w.upgrade().is_some())
     }
 
-    pub fn remove_child(&self, child: &Arc<Mount>) -> Result<(), FsError> {
+    pub fn remove_child(&self, child: &Arc<Mount>) -> Result<(), SysError> {
         let mut children = self.children.lock();
         let initial_len = children.len();
         children.retain(|weak_child| {
@@ -108,7 +108,7 @@ impl Mount {
             !Arc::ptr_eq(&strong_child, child)
         });
         if children.len() == initial_len {
-            Err(FsError::NotFound)
+            Err(SysError::NotFound)
         } else {
             Ok(())
         }

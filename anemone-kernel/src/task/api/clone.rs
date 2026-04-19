@@ -53,7 +53,7 @@ bitflags! {
 
 impl TryFromSyscallArg for CloneFlags {
     fn try_from_syscall_arg(value: u64) -> Result<Self, SysError> {
-        CloneFlags::from_bits(value as u32).ok_or(SysError::Kernel(KernelError::InvalidArgument))
+        CloneFlags::from_bits(value as u32).ok_or(SysError::InvalidArgument)
     }
 }
 
@@ -173,7 +173,7 @@ pub fn kernel_clone(
 
     let parent = if flags.contains(CloneFlags::CLONE_PARENT) {
         unsafe { current_task.with_task_hierarchy(|hier| hier.parent()) }
-            .ok_or(KernelError::InvalidArgument)?
+            .ok_or(SysError::InvalidArgument)?
             .upgrade()
             .unwrap_or_else(|| panic!("dangling task with parent dropped: {}", current_task.tid()))
     } else {
@@ -181,6 +181,14 @@ pub fn kernel_clone(
     };
 
     unsafe { new_task.add_as_child(&parent) };
+
+    kdebugln!(
+        "clone: created new task with tid {} (parent tid {}) with flags {:?}",
+        new_tid,
+        parent.tid(),
+        flags
+    );
+
     drop(parent);
     drop(current_task);
     add_to_ready(new_task);
@@ -196,6 +204,8 @@ extern "C" fn enter_cloned_user_task(trap_frame: *mut TrapFrame, child_tid: *mut
             *child_tid = current_task_id();
         }
     }
+
+    task.on_prv_change(Privilege::User);
 
     drop(task);
     unsafe {

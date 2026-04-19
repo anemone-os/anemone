@@ -317,23 +317,23 @@ pub fn request_irq(
     dev: &dyn Device,
     handler: &'static IrqHandler,
     prv_data: Option<AnyOpaque>,
-) -> Result<(), DevError> {
-    let fwnode = dev.fwnode().ok_or(DevError::MissingFwNode)?;
-    let ic = fwnode.interrupt_parent().ok_or(DevError::NoIrqDomain)?;
+) -> Result<(), SysError> {
+    let fwnode = dev.fwnode().ok_or(SysError::MissingFwNode)?;
+    let ic = fwnode.interrupt_parent().ok_or(SysError::NoIrqDomain)?;
     let domain = find_irq_domain_by_fwnode(ic.as_ref()).expect("ic exists but no domain found");
     let ops = domain.ops.read_irqsave();
-    let intr_info_raw = fwnode.interrupt_info().ok_or(DevError::NoInterruptInfo)?;
+    let intr_info_raw = fwnode.interrupt_info().ok_or(SysError::NoInterruptInfo)?;
     kdebugln!("request intr info");
     let InterruptInfo { hwirq, trigger } = ops
         .xlate(InterruptSpecifier {
             fwnode: fwnode.as_ref(),
             raw: intr_info_raw,
         })
-        .ok_or(DevError::InvalidInterruptInfo)?;
+        .ok_or(SysError::InvalidInterruptInfo)?;
     drop(ops);
 
     let virq = if let Some(_) = domain.hw2virt(hwirq) {
-        return Err(DevError::IrqAlreadyRequested);
+        return Err(SysError::IrqAlreadyRequested);
     } else {
         let virq = unsafe { alloc_virq() };
         domain.map(virq, hwirq);
@@ -395,8 +395,8 @@ pub fn handle_irq() {
 ///
 /// This function can be used by those chained interrupt controllers that need
 /// to handle interrupts from their own domain.
-pub fn handle_domain_irq(domain: &IrqDomain, hwirq: HwIrq) -> Result<(), DevError> {
-    let virq = domain.hw2virt(hwirq).ok_or(DevError::UnknownInterrupt)?;
+pub fn handle_domain_irq(domain: &IrqDomain, hwirq: HwIrq) -> Result<(), SysError> {
+    let virq = domain.hw2virt(hwirq).ok_or(SysError::UnknownInterrupt)?;
     // TODO: a read_irqsave should be enouth. we should find a way to avoid taking a
     // write lock here.
     let mut descs = IRQ_DESCS.write_irqsave();

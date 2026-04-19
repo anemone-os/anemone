@@ -15,7 +15,7 @@ pub fn sys_brk(
     #[validate_with(user_addr.nullable())] addr: Option<VirtAddr>,
 ) -> Result<u64, SysError> {
     let task = clone_current_task();
-    let memsp = task.clone_uspace().ok_or(MmError::NotMapped)?;
+    let memsp = task.clone_uspace().ok_or(SysError::NotMapped)?;
 
     if let Some(addr) = addr {
         memsp.write().set_brk(addr)?;

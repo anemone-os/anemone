@@ -219,6 +219,8 @@ pub enum SwitchOutType {
 /// ***Make sure interrupts are disabled before calling this function***
 pub unsafe fn switch_out(switch_type: SwitchOutType) {
     let task = clone_current_task();
+    task.on_switch_out();
+
     let context = unsafe { task.get_task_context_mut() };
     match switch_type {
         SwitchOutType::Sched => {
@@ -273,6 +275,7 @@ pub unsafe fn switch_to(task: Arc<Task>) {
     unsafe {
         switch_uspace(&clone_current_task(), &next_task);
         next_task.set_status(TaskStatus::Running);
+        next_task.on_switch_in();
         let prev = exchange_running_task(next_task);
         drop(prev);
         SchedArch::switch(cur_context, next_context);

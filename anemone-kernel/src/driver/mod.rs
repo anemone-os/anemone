@@ -68,7 +68,7 @@ pub trait DriverData: KObject {
 }
 
 pub trait DriverOps {
-    fn probe(&self, device: Arc<dyn Device>) -> Result<(), DevError>;
+    fn probe(&self, device: Arc<dyn Device>) -> Result<(), SysError>;
 
     /// Shutdown the device.
     ///

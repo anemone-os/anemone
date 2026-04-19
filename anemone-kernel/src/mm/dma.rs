@@ -60,15 +60,15 @@ impl DmaRegion {
 ///
 /// Internally, the requested size will be rounded up to a multiple of the page
 /// size. And the returned region will always be page-aligned as well.
-pub fn dma_alloc(nbytes: usize) -> Result<DmaRegion, MmError> {
+pub fn dma_alloc(nbytes: usize) -> Result<DmaRegion, SysError> {
     if nbytes == 0 {
-        return Err(MmError::InvalidArgument);
+        return Err(SysError::InvalidArgument);
     }
 
     let npages =
         align_up_power_of_2!(nbytes, PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES;
 
-    let folio = alloc_frames_zeroed(npages).ok_or(MmError::OutOfMemory)?;
+    let folio = alloc_frames_zeroed(npages).ok_or(SysError::OutOfMemory)?;
 
     Ok(DmaRegion { folio })
 }

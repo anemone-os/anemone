@@ -25,12 +25,16 @@ impl DevfsInode {
     }
 }
 
-pub(super) fn devfs_new_inode(sb: Arc<SuperBlock>, node: DevfsNode) -> Result<Arc<Inode>, FsError> {
+pub(super) fn devfs_new_inode(
+    sb: Arc<SuperBlock>,
+    node: DevfsNode,
+) -> Result<Arc<Inode>, SysError> {
     let inode = Arc::new(Inode::new(
         devfs_ino_for(node),
         match node {
             DevfsNode::Root => InodeType::Dir,
-            DevfsNode::Char(_) | DevfsNode::Block(_) => InodeType::Dev,
+            DevfsNode::Char(_) => InodeType::Char,
+            DevfsNode::Block(_) => InodeType::Block,
         },
         match node {
             DevfsNode::Root => &DEVFS_ROOT_INODE_OPS,
@@ -52,7 +56,7 @@ pub(super) fn devfs_new_inode(sb: Arc<SuperBlock>, node: DevfsNode) -> Result<Ar
             inode.set_size(0);
         },
         DevfsNode::Block(devnum) => {
-            let dev = get_block_dev(devnum).ok_or(FsError::NotFound)?;
+            let dev = get_block_dev(devnum).ok_or(SysError::NotFound)?;
             inode.set_nlink(1);
             inode.set_perm(InodePerm::all_rwx());
             inode.set_size((dev.block_size().bytes() * dev.total_blocks()) as u64);
@@ -62,17 +66,17 @@ pub(super) fn devfs_new_inode(sb: Arc<SuperBlock>, node: DevfsNode) -> Result<Ar
     Ok(inode)
 }
 
-fn devfs_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, FsError> {
+fn devfs_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
     match devfs_inode_data(dir).node() {
         DevfsNode::Root => {
             let node = devfs_lookup_name(name)?;
             dir.sb().iget(devfs_ino_for(node))
         },
-        _ => Err(FsError::NotDir),
+        _ => Err(SysError::NotDir),
     }
 }
 
-fn devfs_open(inode: &InodeRef) -> Result<OpenedFile, FsError> {
+fn devfs_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
     let node = devfs_inode_data(inode).node();
 
     Ok(OpenedFile {
@@ -85,7 +89,7 @@ fn devfs_open(inode: &InodeRef) -> Result<OpenedFile, FsError> {
     })
 }
 
-fn devfs_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
+fn devfs_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let node = devfs_inode_data(inode).node();
     let meta = inode.inode().meta_snapshot();
 
@@ -97,18 +101,18 @@ fn devfs_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
             0,
         ),
         DevfsNode::Char(devnum) => {
-            get_char_dev(devnum).ok_or(FsError::NotFound)?;
+            get_char_dev(devnum).ok_or(SysError::NotFound)?;
             (
-                InodeMode::new(InodeType::Dev, meta.perm),
+                InodeMode::new(InodeType::Char, meta.perm),
                 1,
                 DeviceId::Char(devnum),
                 0,
             )
         },
         DevfsNode::Block(devnum) => {
-            let dev = get_block_dev(devnum).ok_or(FsError::NotFound)?;
+            let dev = get_block_dev(devnum).ok_or(SysError::NotFound)?;
             (
-                InodeMode::new(InodeType::Dev, meta.perm),
+                InodeMode::new(InodeType::Block, meta.perm),
                 1,
                 DeviceId::Block(devnum),
                 (dev.block_size().bytes() * dev.total_blocks()) as u64,
@@ -136,26 +140,26 @@ fn devfs_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
 
 pub(super) static DEVFS_ROOT_INODE_OPS: InodeOps = InodeOps {
     lookup: devfs_lookup,
-    touch: |_, _, _| Err(FsError::NotSupported),
-    mkdir: |_, _, _| Err(FsError::NotSupported),
-    symlink: |_, _, _| Err(FsError::NotSupported),
-    link: |_, _, _| Err(FsError::NotSupported),
-    unlink: |_, _| Err(FsError::NotSupported),
-    rmdir: |_, _| Err(FsError::NotSupported),
+    touch: |_, _, _| Err(SysError::NotSupported),
+    mkdir: |_, _, _| Err(SysError::NotSupported),
+    symlink: |_, _, _| Err(SysError::NotSupported),
+    link: |_, _, _| Err(SysError::NotSupported),
+    unlink: |_, _| Err(SysError::NotSupported),
+    rmdir: |_, _| Err(SysError::NotSupported),
     open: devfs_open,
-    read_link: |_| Err(FsError::NotSymlink),
+    read_link: |_| Err(SysError::NotSymlink),
     get_attr: devfs_get_attr,
 };
 
 pub(super) static DEVFS_DEV_INODE_OPS: InodeOps = InodeOps {
-    lookup: |_, _| Err(FsError::NotDir),
-    touch: |_, _, _| Err(FsError::NotDir),
-    mkdir: |_, _, _| Err(FsError::NotDir),
-    symlink: |_, _, _| Err(FsError::NotDir),
-    link: |_, _, _| Err(FsError::NotDir),
-    unlink: |_, _| Err(FsError::NotDir),
-    rmdir: |_, _| Err(FsError::NotDir),
+    lookup: |_, _| Err(SysError::NotDir),
+    touch: |_, _, _| Err(SysError::NotDir),
+    mkdir: |_, _, _| Err(SysError::NotDir),
+    symlink: |_, _, _| Err(SysError::NotDir),
+    link: |_, _, _| Err(SysError::NotDir),
+    unlink: |_, _| Err(SysError::NotDir),
+    rmdir: |_, _| Err(SysError::NotDir),
     open: devfs_open,
-    read_link: |_| Err(FsError::NotSymlink),
+    read_link: |_| Err(SysError::NotSymlink),
     get_attr: devfs_get_attr,
 };

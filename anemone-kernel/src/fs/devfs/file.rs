@@ -1,13 +1,13 @@
 use crate::{
     device::{
-        block::{get_block_dev, next_block_dev, BlockDev},
+        block::{BlockDev, get_block_dev, next_block_dev},
         char::{get_char_dev, next_char_dev},
     },
     prelude::*,
     utils::iter_ctx::IterCtx,
 };
 
-use super::{devfs_ino_for, devfs_root_ino, DevfsNode};
+use super::{DevfsNode, devfs_ino_for, devfs_root_ino};
 
 #[derive(Debug, Clone, Copy, Opaque)]
 pub(super) struct DevfsFile {
@@ -39,9 +39,9 @@ fn count_char_devs() -> usize {
     count
 }
 
-fn dir_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, FsError> {
+fn dir_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, SysError> {
     if devfs_file(file).node() != DevfsNode::Root {
-        return Err(FsError::NotDir);
+        return Err(SysError::NotDir);
     }
 
     match ctx.offset() {
@@ -70,72 +70,72 @@ fn dir_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, FsError> {
                 return Ok(DirEntry {
                     name: entry.name,
                     ino: devfs_ino_for(DevfsNode::Char(entry.devnum)),
-                    ty: InodeType::Dev,
+                    ty: InodeType::Char,
                 });
             }
 
             let char_count = count_char_devs();
             let Some(block_offset) = logical.checked_sub(char_count) else {
-                return Err(FsError::NoMoreEntries);
+                return Err(SysError::NoMoreEntries);
             };
 
             let mut bctx = IterCtx::with_offset(block_offset);
             let Some(entry) = next_block_dev(&mut bctx) else {
-                return Err(FsError::NoMoreEntries);
+                return Err(SysError::NoMoreEntries);
             };
 
             ctx.advance(1);
             Ok(DirEntry {
                 name: entry.name,
                 ino: devfs_ino_for(DevfsNode::Block(entry.devnum)),
-                ty: InodeType::Dev,
+                ty: InodeType::Block,
             })
         },
     }
 }
 
-fn char_read(file: &File, buf: &mut [u8]) -> Result<usize, FsError> {
+fn char_read(file: &File, buf: &mut [u8]) -> Result<usize, SysError> {
     let DevfsNode::Char(devnum) = devfs_file(file).node() else {
-        return Err(FsError::InvalidArgument);
+        return Err(SysError::InvalidArgument);
     };
 
-    get_char_dev(devnum).ok_or(FsError::NotFound)?.read(buf)
+    get_char_dev(devnum).ok_or(SysError::NotFound)?.read(buf)
 }
 
-fn char_write(file: &File, buf: &[u8]) -> Result<usize, FsError> {
+fn char_write(file: &File, buf: &[u8]) -> Result<usize, SysError> {
     let DevfsNode::Char(devnum) = devfs_file(file).node() else {
-        return Err(FsError::InvalidArgument);
+        return Err(SysError::InvalidArgument);
     };
 
-    get_char_dev(devnum).ok_or(FsError::NotFound)?.write(buf)
+    get_char_dev(devnum).ok_or(SysError::NotFound)?.write(buf)
 }
 
-fn char_seek(_file: &File, _pos: usize) -> Result<(), FsError> {
-    Err(FsError::NotSupported)
+fn char_seek(_file: &File, _pos: usize) -> Result<(), SysError> {
+    Err(SysError::NotSupported)
 }
 
-fn block_dev_from_file(file: &File) -> Result<Arc<dyn BlockDev>, FsError> {
+fn block_dev_from_file(file: &File) -> Result<Arc<dyn BlockDev>, SysError> {
     let DevfsNode::Block(devnum) = devfs_file(file).node() else {
-        return Err(FsError::InvalidArgument);
+        return Err(SysError::InvalidArgument);
     };
 
-    get_block_dev(devnum).ok_or(FsError::NotFound)
+    get_block_dev(devnum).ok_or(SysError::NotFound)
 }
 
-fn block_seek(file: &File, pos: usize) -> Result<(), FsError> {
+fn block_seek(file: &File, pos: usize) -> Result<(), SysError> {
     let dev = block_dev_from_file(file)?;
     let block_size = dev.block_size().bytes();
     let total_bytes = dev.total_blocks() * block_size;
 
     if pos % block_size != 0 || pos > total_bytes {
-        return Err(FsError::InvalidArgument);
+        return Err(SysError::InvalidArgument);
     }
 
     file.set_pos(pos);
     Ok(())
 }
 
-fn block_read(file: &File, buf: &mut [u8]) -> Result<usize, FsError> {
+fn block_read(file: &File, buf: &mut [u8]) -> Result<usize, SysError> {
     if buf.is_empty() {
         return Ok(0);
     }
@@ -146,7 +146,7 @@ fn block_read(file: &File, buf: &mut [u8]) -> Result<usize, FsError> {
     let total_bytes = dev.total_blocks() * block_size;
 
     if pos % block_size != 0 || buf.len() % block_size != 0 {
-        return Err(FsError::InvalidArgument);
+        return Err(SysError::InvalidArgument);
     }
 
     if pos >= total_bytes {
@@ -159,7 +159,7 @@ fn block_read(file: &File, buf: &mut [u8]) -> Result<usize, FsError> {
     Ok(nbytes)
 }
 
-fn block_write(file: &File, buf: &[u8]) -> Result<usize, FsError> {
+fn block_write(file: &File, buf: &[u8]) -> Result<usize, SysError> {
     if buf.is_empty() {
         return Ok(0);
     }
@@ -170,14 +170,14 @@ fn block_write(file: &File, buf: &[u8]) -> Result<usize, FsError> {
     let total_bytes = dev.total_blocks() * block_size;
 
     if pos % block_size != 0 || buf.len() % block_size != 0 {
-        return Err(FsError::InvalidArgument);
+        return Err(SysError::InvalidArgument);
     }
 
     let Some(end_pos) = pos.checked_add(buf.len()) else {
-        return Err(FsError::InvalidArgument);
+        return Err(SysError::InvalidArgument);
     };
     if end_pos > total_bytes {
-        return Err(FsError::NoSpace);
+        return Err(SysError::NoSpace);
     }
 
     dev.write_blocks(pos / block_size, buf)?;
@@ -186,9 +186,9 @@ fn block_write(file: &File, buf: &[u8]) -> Result<usize, FsError> {
 }
 
 pub(super) static DEVFS_DIR_FILE_OPS: FileOps = FileOps {
-    read: |_, _| Err(FsError::IsDir),
-    write: |_, _| Err(FsError::IsDir),
-    seek: |_, _| Err(FsError::IsDir),
+    read: |_, _| Err(SysError::IsDir),
+    write: |_, _| Err(SysError::IsDir),
+    seek: |_, _| Err(SysError::IsDir),
     iterate: dir_iterate,
 };
 
@@ -196,12 +196,12 @@ pub(super) static DEVFS_CHAR_FILE_OPS: FileOps = FileOps {
     read: char_read,
     write: char_write,
     seek: char_seek,
-    iterate: |_, _| Err(FsError::NotDir),
+    iterate: |_, _| Err(SysError::NotDir),
 };
 
 pub(super) static DEVFS_BLOCK_FILE_OPS: FileOps = FileOps {
     read: block_read,
     write: block_write,
     seek: block_seek,
-    iterate: |_, _| Err(FsError::NotDir),
+    iterate: |_, _| Err(SysError::NotDir),
 };

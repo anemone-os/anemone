@@ -45,20 +45,20 @@ struct MmioTransportDriver {
 impl KObjectOps for MmioTransportDriver {}
 
 impl DriverOps for MmioTransportDriver {
-    fn probe(&self, device: Arc<dyn Device>) -> Result<(), DevError> {
+    fn probe(&self, device: Arc<dyn Device>) -> Result<(), SysError> {
         let pdev = device
             .as_platform_device()
             .expect("platform driver should only be probed with platform device");
 
         let of_node = pdev
             .fwnode()
-            .ok_or(DevError::MissingFwNode)?
+            .ok_or(SysError::MissingFwNode)?
             .as_of_node()
-            .ok_or(DevError::DriverIncompatible)?;
+            .ok_or(SysError::DriverIncompatible)?;
 
         if of_node.prop_read_present("iommus") {
             kwarningln!("iommu is not supported for now.");
-            return Err(DevError::DriverIncompatible);
+            return Err(SysError::DriverIncompatible);
         }
 
         let (base, len) = pdev
@@ -67,9 +67,9 @@ impl DriverOps for MmioTransportDriver {
             .find_map(|resource| match resource {
                 Resource::Mmio { base, len } => Some((*base, *len)),
             })
-            .ok_or(DevError::MissingResource)?;
+            .ok_or(SysError::MissingResource)?;
 
-        let remap = unsafe { ioremap(base, len) }.map_err(DevError::IoRemapFailed)?;
+        let remap = unsafe { ioremap(base, len) }?;
 
         let virtio_hdr = remap.as_ptr().cast::<VirtIOHeader>();
 
@@ -107,7 +107,7 @@ impl DriverOps for MmioTransportDriver {
                 },
                 Err(e) => {
                     kwarningln!("failed to initialize VirtIO MMIO transport: {e}");
-                    return Err(DevError::DriverIncompatible);
+                    return Err(SysError::DriverIncompatible);
                 },
             }
         }

@@ -13,4 +13,4 @@ pub mod stack;
 pub mod uspace;
 pub mod zone;
 
-pub mod error;
+//pub mod error;

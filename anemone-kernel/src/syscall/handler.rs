@@ -36,7 +36,7 @@ macro_rules! gen_basic_try_from_syscall_arg {
                 if raw <= <$ty>::MAX as u64 {
                     Ok(raw as $ty)
                 } else {
-                    Err(KernelError::InvalidArgument.into())
+                    Err(SysError::InvalidArgument)
                 }
             }
         }
@@ -48,7 +48,7 @@ macro_rules! gen_basic_try_from_syscall_arg {
                 if signed >= <$ty>::MIN as i64 && signed <= <$ty>::MAX as i64 {
                     Ok(signed as $ty)
                 } else {
-                    Err(KernelError::InvalidArgument.into())
+                    Err(SysError::InvalidArgument)
                 }
             }
         }
@@ -72,7 +72,7 @@ impl TryFromSyscallArg for bool {
         match raw {
             0 => Ok(false),
             1 => Ok(true),
-            _ => Err(KernelError::InvalidArgument.into()),
+            _ => Err(SysError::InvalidArgument),
         }
     }
 }
@@ -82,7 +82,7 @@ impl TryFromSyscallArg for VirtAddr {
         if raw < KernelLayout::USPACE_TOP_ADDR {
             Ok(VirtAddr::new(raw))
         } else {
-            Err(KernelError::InvalidArgument.into())
+            Err(SysError::InvalidArgument)
         }
     }
 }

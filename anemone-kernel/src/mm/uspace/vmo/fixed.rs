@@ -14,16 +14,16 @@ impl FixedObject {
         Self { pages }
     }
 
-    fn check_pidx(&self, pidx: usize) -> Result<(), MmError> {
+    fn check_pidx(&self, pidx: usize) -> Result<(), SysError> {
         if pidx >= self.pages.len() {
-            return Err(MmError::InvalidArgument);
+            return Err(SysError::InvalidArgument);
         }
         Ok(())
     }
 }
 
 impl VmObject for FixedObject {
-    fn resolve_frame(&self, pidx: usize, _access: PageFaultType) -> Result<ResolvedFrame, MmError> {
+    fn resolve_frame(&self, pidx: usize, _access: PageFaultType) -> Result<ResolvedFrame, SysError> {
         self.check_pidx(pidx)?;
         Ok(ResolvedFrame {
             frame: self.pages[pidx].clone(),
