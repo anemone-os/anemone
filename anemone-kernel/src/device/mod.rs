@@ -17,7 +17,6 @@ pub mod discovery;
 pub mod bus;
 mod cpu;
 pub use cpu::{CpuArchTrait, CpuId};
-pub mod error;
 pub mod kobject;
 pub mod resource;
 

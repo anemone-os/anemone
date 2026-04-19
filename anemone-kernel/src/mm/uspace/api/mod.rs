@@ -63,11 +63,11 @@ mod args {
     }
 
     impl TryInto<VmFlags> for AuxMmapFlags {
-        type Error = KernelError;
+        type Error = SysError;
 
         fn try_into(self) -> Result<VmFlags, Self::Error> {
             if self.contains(Self::MAP_FIXED | Self::MAP_FIXED_NOREPLACE) {
-                return Err(KernelError::InvalidArgument);
+                return Err(SysError::InvalidArgument);
             }
 
             // some of flags won't go into VmFlags, such as MAP_ANONYMOUS or MAP_FIXED. they
@@ -90,16 +90,16 @@ mod args {
     impl TryFromSyscallArg for MmapProt {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
             if (raw >> 32) != 0 {
-                return Err(KernelError::InvalidArgument.into());
+                return Err(SysError::InvalidArgument);
             }
-            Ok(Self::from_bits(raw as i32).ok_or(KernelError::InvalidArgument)?)
+            Ok(Self::from_bits(raw as i32).ok_or(SysError::InvalidArgument)?)
         }
     }
 
     impl TryFromSyscallArg for MmapFlags {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
             if (raw >> 32) != 0 {
-                return Err(KernelError::InvalidArgument.into());
+                return Err(SysError::InvalidArgument);
             }
 
             let exclusive_bits = raw as usize & ExclusiveMmapFlags::MASK as usize;
@@ -107,7 +107,7 @@ mod args {
                 mmap::MAP_SHARED => ExclusiveMmapFlags::Shared,
                 mmap::MAP_PRIVATE => ExclusiveMmapFlags::Private,
                 mmap::MAP_SHARED_VALIDATE => ExclusiveMmapFlags::SharedValidate,
-                _ => return Err(KernelError::InvalidArgument.into()),
+                _ => return Err(SysError::InvalidArgument),
             };
 
             let aux = AuxMmapFlags::from_bits(raw as i32 & !ExclusiveMmapFlags::MASK as i32)
@@ -116,7 +116,7 @@ mod args {
                         "unrecognized mmap flags: {:#x}",
                         raw as i32 & !ExclusiveMmapFlags::MASK as i32
                     );
-                    KernelError::InvalidArgument
+                    SysError::InvalidArgument
                 })?;
 
             Ok(Self { exclusive, aux })

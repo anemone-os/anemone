@@ -15,7 +15,7 @@ fn sys_gettimeofday(
     tz: Option<UserWritePtr<TimeZone>>,
 ) -> Result<u64, SysError> {
     if let Some(mut tv) = tv {
-        let uptime = uptime();
+        let uptime = uptime().to_duration();
         // todo: unix epoch time instead of uptime
         tv.safe_write(TimeVal {
             tv_sec: uptime.as_secs() as i64,

@@ -5,6 +5,23 @@ pub mod fs {
 
     pub use anemone_abi::fs::linux::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 
+    pub type Fd = u32;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum AtFd {
+        Cwd,
+        Fd(Fd),
+    }
+
+    impl AtFd {
+        pub const fn to_raw(self) -> i32 {
+            match self {
+                AtFd::Cwd => anemone_abi::fs::linux::at::AT_FDCWD,
+                AtFd::Fd(fd) => fd as i32,
+            }
+        }
+    }
+
     pub fn chroot(path: &str) -> Result<(), Errno> {
         let path = CString::new(path).map_err(|_| EINVAL)?;
         fs::chroot(path.as_ptr() as u64).map(|_| ())
@@ -19,26 +36,26 @@ pub mod fs {
         fs::getcwd(buf.as_mut_ptr() as u64, buf.len() as u64).map(|_| ())
     }
 
-    pub fn openat(dirfd: isize, path: &Path, flags: u32, mode: u32) -> Result<usize, Errno> {
+    pub fn openat(dirfd: AtFd, path: &Path, flags: u32, mode: u32) -> Result<Fd, Errno> {
         let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
         fs::openat(
-            dirfd as u64,
+            dirfd.to_raw() as u64,
             path.as_ptr() as u64,
             flags as u64,
             mode as u64,
         )
-        .map(|fd| fd as usize)
+        .map(|fd| fd as Fd)
     }
 
-    pub fn close(fd: usize) -> Result<(), Errno> {
+    pub fn close(fd: Fd) -> Result<(), Errno> {
         fs::close(fd as u64).map(|_| ())
     }
 
-    pub fn read(fd: usize, buf: &mut [u8]) -> Result<usize, Errno> {
+    pub fn read(fd: Fd, buf: &mut [u8]) -> Result<usize, Errno> {
         fs::read(fd as u64, buf.as_mut_ptr() as u64, buf.len() as u64).map(|count| count as usize)
     }
 
-    pub fn write(fd: usize, buf: &[u8]) -> Result<usize, Errno> {
+    pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
         fs::write(fd as u64, buf.as_ptr() as u64, buf.len() as u64).map(|count| count as usize)
     }
 }
@@ -110,7 +127,7 @@ pub mod process {
         process::mprotect(addr as u64, length as u64, prot.bits() as u64).map(|_| ())
     }
 
-    pub fn execve(path: &str, argv: &[&str]) -> Result<u64, Errno> {
+    pub fn execve(path: &str, argv: &[&str], envp: &[&str]) -> Result<u64, Errno> {
         let mut argv_ptrs = vec![0; argv.len() + 1].into_boxed_slice();
         let argv = argv
             .iter()
@@ -122,8 +139,23 @@ pub mod process {
         }
         argv_ptrs[argv.len()] = 0;
 
+        let mut envp_ptrs = vec![0; envp.len() + 1].into_boxed_slice();
+        let envp = envp
+            .iter()
+            .map(|env| CString::new(*env).map_err(|_| EINVAL))
+            .collect::<Result<Vec<CString>, Errno>>()?;
+
+        for (index, env) in envp.iter().enumerate() {
+            envp_ptrs[index] = env.as_ptr() as u64;
+        }
+        envp_ptrs[envp.len()] = 0;
+
         let path = CString::new(path).map_err(|_| EINVAL)?;
-        process::execve(path.as_ptr() as u64, argv_ptrs.as_ptr() as u64)
+        process::execve(
+            path.as_ptr() as u64,
+            argv_ptrs.as_ptr() as u64,
+            envp_ptrs.as_ptr() as u64,
+        )
     }
     bitflags! {
         #[derive(Debug, Clone, Copy)]

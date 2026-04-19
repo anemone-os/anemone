@@ -13,7 +13,7 @@ pub(super) struct SuperBlockOps {
     /// fresh [Inode] instance. The VFS layer inserts the returned inode into
     /// the superblock's resident cache, so subsequent accesses for the same
     /// inode number hit the cache instead of calling this again.
-    pub load_inode: fn(&Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, FsError>,
+    pub load_inode: fn(&Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, SysError>,
 
     /// Called when an inode is being evicted from the resident cache.
     ///
@@ -24,16 +24,16 @@ pub(super) struct SuperBlockOps {
     /// from [Drop]. The cache-map lock is **not** held when this runs, so it
     /// is safe to perform blocking I/O (e.g. writeback) here.
     ///
-    /// If an [FsError] is returned, the eviction is cancelled and the inode is
+    /// If an [SysError] is returned, the eviction is cancelled and the inode is
     /// re-inserted into the cache. The eviction will be retried later.
-    pub evict_inode: fn(&SuperBlock, Arc<Inode>) -> Result<(), FsError>,
+    pub evict_inode: fn(&SuperBlock, Arc<Inode>) -> Result<(), SysError>,
 
     /// Write back the inode to the backing store. This is used to synchronize
     /// metadata updates that may have been made to the inode while it was
     /// resident in the cache.
     ///
     /// **Note that this operation only writes back metadata, not file data.**
-    pub sync_inode: fn(&InodeRef) -> Result<(), FsError>,
+    pub sync_inode: fn(&InodeRef) -> Result<(), SysError>,
 }
 
 /// A superblock represents a mounted file system instance.
@@ -124,7 +124,7 @@ impl SuperBlock {
     /// This function **must not** be called while holding the superblock inner
     /// lock or any lock that the backend's `load_inode` may itself acquire.
     /// Doing so risks deadlock or re-entrant cache corruption.
-    pub(super) fn iget(self: &Arc<Self>, ino: Ino) -> Result<InodeRef, FsError> {
+    pub(super) fn iget(self: &Arc<Self>, ino: Ino) -> Result<InodeRef, SysError> {
         // fast path
         {
             let inner = self.inner.read();
@@ -232,10 +232,10 @@ impl SuperBlock {
     ///
     /// Internally, this calls the backend's `evict_inode` callback to allow it
     /// to perform any necessary cleanup or writeback.
-    pub(super) fn try_evict(&self, ino: Ino) -> Result<(), FsError> {
+    pub(super) fn try_evict(&self, ino: Ino) -> Result<(), SysError> {
         let inode = {
             let inner = self.inner.read();
-            inner.indexed.get(&ino).cloned().ok_or(FsError::NotFound)?
+            inner.indexed.get(&ino).cloned().ok_or(SysError::NotFound)?
         };
 
         self.try_evict_inode(&inode)
@@ -244,15 +244,15 @@ impl SuperBlock {
     /// Try to evict a specific inode. Note that [SuperBlock::try_evict] only
     /// works when the victim is indexed, but this method can evict both indexed
     /// and ghost inodes.
-    pub(super) fn try_evict_inode(&self, inode: &Arc<Inode>) -> Result<(), FsError> {
+    pub(super) fn try_evict_inode(&self, inode: &Arc<Inode>) -> Result<(), SysError> {
         if inode.rc() > 0 {
-            return Err(FsError::Busy);
+            return Err(SysError::Busy);
         }
         if inode
             .mapping_ref()
             .is_some_and(|mapping| Arc::strong_count(mapping) > 1)
         {
-            return Err(FsError::Busy);
+            return Err(SysError::Busy);
         }
 
         let ino = inode.ino();
@@ -281,7 +281,7 @@ impl SuperBlock {
             }
         };
 
-        let (inode, was_indexed) = removed.ok_or(FsError::NotFound)?;
+        let (inode, was_indexed) = removed.ok_or(SysError::NotFound)?;
         if let Err(e) = (self.ops.evict_inode)(self, inode.clone()) {
             let mut inner = self.inner.write();
             if was_indexed {
@@ -315,7 +315,7 @@ impl SuperBlock {
     ///
     /// **This operation will not evict the root inode, since it's pinned by the
     /// mount's root dentry, so it's always referenced and cannot be evicted.**
-    pub(super) fn try_evict_all(&self) -> Result<(), FsError> {
+    pub(super) fn try_evict_all(&self) -> Result<(), SysError> {
         debug_assert!(!self.has_alive_inode());
 
         let victims: Vec<Arc<Inode>> = {

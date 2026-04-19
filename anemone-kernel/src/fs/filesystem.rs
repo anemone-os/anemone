@@ -15,11 +15,11 @@ bitflags! {
 pub struct FileSystemOps {
     pub name: &'static str,
     pub flags: FileSystemFlags,
-    pub mount: fn(MountSource, MountFlags) -> Result<Arc<SuperBlock>, FsError>,
+    pub mount: fn(MountSource, MountFlags) -> Result<Arc<SuperBlock>, SysError>,
 
     /// Synchronize filesystem state associated with the given superblock to its
     /// backing store.
-    pub sync_fs: fn(&SuperBlock) -> Result<(), FsError>,
+    pub sync_fs: fn(&SuperBlock) -> Result<(), SysError>,
 
     pub kill_sb: fn(Arc<SuperBlock>),
 }
@@ -138,7 +138,7 @@ impl FileSystem {
         &self,
         source: MountSource,
         flags: MountFlags,
-    ) -> Result<Arc<SuperBlock>, FsError> {
+    ) -> Result<Arc<SuperBlock>, SysError> {
         (self.ops.mount)(source, flags)
     }
 
@@ -150,7 +150,7 @@ impl FileSystem {
 
     /// Synchronize filesystem state associated with a superblock to its
     /// backing store.
-    pub fn sync_fs(&self, sb: &SuperBlock) -> Result<(), FsError> {
+    pub fn sync_fs(&self, sb: &SuperBlock) -> Result<(), SysError> {
         (self.ops.sync_fs)(sb)
     }
 }

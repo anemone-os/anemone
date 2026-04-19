@@ -269,6 +269,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
         BOOT_SYNC_COUNTER.sync_with_counter();
 
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
+        set_boot_mono(true);
         let kinit_task = Task::new_kernel(
             "bsp-kinit",
             bsp_kinit as *const (),
@@ -296,6 +297,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         mm::kptable::activate_kernel_mapping();
 
         TimeArch::init_this_cpu();
+        set_boot_mono(false);
         let ap_kinit = Task::new_kernel(
             "ap-kinit",
             ap_kinit as *const (),

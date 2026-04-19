@@ -3,11 +3,11 @@ use crate::{prelude::*, utils::any_opaque::AnyOpaque};
 /// VTable a file must implement to support file operations.
 #[derive(Debug)]
 pub struct FileOps {
-    pub read: fn(&File, buf: &mut [u8]) -> Result<usize, FsError>,
-    pub write: fn(&File, buf: &[u8]) -> Result<usize, FsError>,
-    pub seek: fn(&File, pos: usize) -> Result<(), FsError>,
+    pub read: fn(&File, buf: &mut [u8]) -> Result<usize, SysError>,
+    pub write: fn(&File, buf: &[u8]) -> Result<usize, SysError>,
+    pub seek: fn(&File, pos: usize) -> Result<(), SysError>,
 
-    pub iterate: fn(&File, ctx: &mut DirContext) -> Result<DirEntry, FsError>,
+    pub iterate: fn(&File, ctx: &mut DirContext) -> Result<DirEntry, SysError>,
 }
 
 #[derive(Debug)]
@@ -94,9 +94,9 @@ impl File {
     /// Get a `DirContext` for iterating the directory represented by this file.
     ///
     /// Returns an error if this file does not represent a directory.
-    pub(super) fn dir_context(&self) -> Result<DirContext, FsError> {
+    pub(super) fn dir_context(&self) -> Result<DirContext, SysError> {
         if self.path.inode().ty() != InodeType::Dir {
-            return Err(FsError::NotDir);
+            return Err(SysError::NotDir);
         }
         Ok(DirContext::from_offset(self.pos()))
     }
@@ -106,9 +106,9 @@ impl File {
     /// call to update the file's cursor.
     ///
     /// Returns an error if this file does not represent a directory.
-    pub(super) fn commit_dir_context(&self, ctx: &DirContext) -> Result<(), FsError> {
+    pub(super) fn commit_dir_context(&self, ctx: &DirContext) -> Result<(), SysError> {
         if self.path.inode().ty() != InodeType::Dir {
-            return Err(FsError::NotDir);
+            return Err(SysError::NotDir);
         }
 
         self.set_pos(ctx.offset());
@@ -132,23 +132,31 @@ impl File {
         &self.path
     }
 
-    pub fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
+    pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+
         (self.ops.read)(self, buf)
     }
 
-    pub fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
+    pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+
         (self.ops.write)(self, buf)
     }
 
-    pub fn seek(&self, pos: usize) -> Result<(), FsError> {
+    pub fn seek(&self, pos: usize) -> Result<(), SysError> {
         (self.ops.seek)(self, pos)
     }
 
-    pub fn iterate(&self, ctx: &mut DirContext) -> Result<DirEntry, FsError> {
+    pub fn iterate(&self, ctx: &mut DirContext) -> Result<DirEntry, SysError> {
         (self.ops.iterate)(self, ctx)
     }
 
-    pub fn get_attr(&self) -> Result<InodeStat, FsError> {
+    pub fn get_attr(&self) -> Result<InodeStat, SysError> {
         self.inode().get_attr()
     }
 }

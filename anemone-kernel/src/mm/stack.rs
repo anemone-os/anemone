@@ -19,9 +19,9 @@ pub struct KernelStack {
 }
 
 impl KernelStack {
-    pub fn new() -> Result<Self, MmError> {
+    pub fn new() -> Result<Self, SysError> {
         const NPAGES: usize = 1 << (KSTACK_SHIFT_KB as usize + 10 - PagingArch::PAGE_SIZE_BITS);
-        let frame_folio = alloc_frames(NPAGES).ok_or(MmError::OutOfMemory)?;
+        let frame_folio = alloc_frames(NPAGES).ok_or(SysError::OutOfMemory)?;
 
         let vpn_range = unsafe { mm::remap::alloc_virt_range(NPAGES + 1) }
             .expect("failed to allocate virtual range for boot stack guard page");

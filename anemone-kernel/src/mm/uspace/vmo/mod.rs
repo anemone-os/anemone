@@ -50,13 +50,13 @@ pub trait VmObject: Send + Sync {
     /// method, which will be used for the current and future accesses to this
     /// page. This is how copy-on-write is implemented in
     /// [shadow::ShadowObject].
-    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, MmError>;
+    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError>;
 
     fn read_frame(
         &self,
         pidx: usize,
         buffer: &mut [u8; PagingArch::PAGE_SIZE_BYTES],
-    ) -> Result<(), MmError> {
+    ) -> Result<(), SysError> {
         let ResolvedFrame { frame, .. } = self.resolve_frame(pidx, PageFaultType::Read)?;
         buffer.copy_from_slice(frame.as_bytes());
 
@@ -67,10 +67,10 @@ pub trait VmObject: Send + Sync {
         &self,
         pidx: usize,
         data: &[u8; PagingArch::PAGE_SIZE_BYTES],
-    ) -> Result<(), MmError> {
+    ) -> Result<(), SysError> {
         let resolved = self.resolve_frame(pidx, PageFaultType::Write)?;
         if !resolved.writable {
-            return Err(MmError::PermissionDenied);
+            return Err(SysError::PermissionDenied);
         }
 
         let dst = unsafe {
@@ -84,7 +84,7 @@ pub trait VmObject: Send + Sync {
         Ok(())
     }
 
-    fn read(&self, offset: usize, buffer: &mut [u8]) -> Result<(), MmError> {
+    fn read(&self, offset: usize, buffer: &mut [u8]) -> Result<(), SysError> {
         let mut remaining = buffer;
         let mut cur_offset = offset;
         while !remaining.is_empty() {
@@ -101,13 +101,13 @@ pub trait VmObject: Send + Sync {
             remaining = &mut remaining[copy_len..];
             cur_offset = cur_offset
                 .checked_add(copy_len)
-                .ok_or(MmError::InvalidArgument)?;
+                .ok_or(SysError::InvalidArgument)?;
         }
 
         Ok(())
     }
 
-    fn write(&self, offset: usize, data: &[u8]) -> Result<(), MmError> {
+    fn write(&self, offset: usize, data: &[u8]) -> Result<(), SysError> {
         let mut remaining = data;
         let mut cur_offset = offset;
 
@@ -128,7 +128,7 @@ pub trait VmObject: Send + Sync {
             remaining = &remaining[copy_len..];
             cur_offset = cur_offset
                 .checked_add(copy_len)
-                .ok_or(MmError::InvalidArgument)?;
+                .ok_or(SysError::InvalidArgument)?;
         }
 
         Ok(())

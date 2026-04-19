@@ -28,27 +28,27 @@ impl RamfsRegState {
         self.size.fetch_max(new, Ordering::AcqRel);
     }
 
-    fn page_start(pidx: usize) -> Result<usize, MmError> {
+    fn page_start(pidx: usize) -> Result<usize, SysError> {
         pidx.checked_mul(PagingArch::PAGE_SIZE_BYTES)
-            .ok_or(MmError::InvalidArgument)
+            .ok_or(SysError::InvalidArgument)
     }
 
-    fn visible_end(&self) -> Result<usize, MmError> {
+    fn visible_end(&self) -> Result<usize, SysError> {
         let size = self.size();
         size.checked_add(PagingArch::PAGE_SIZE_BYTES - 1)
             .map(|end| end & !(PagingArch::PAGE_SIZE_BYTES - 1))
-            .ok_or(MmError::InvalidArgument)
+            .ok_or(SysError::InvalidArgument)
     }
 
-    fn validate_mmap_range(&self, offset: usize, len: usize) -> Result<(), MmError> {
+    fn validate_mmap_range(&self, offset: usize, len: usize) -> Result<(), SysError> {
         if len == 0 {
             return Ok(());
         }
 
-        let end = offset.checked_add(len).ok_or(MmError::InvalidArgument)?;
+        let end = offset.checked_add(len).ok_or(SysError::InvalidArgument)?;
         let visible_end = self.visible_end()?;
         if offset >= visible_end || end > visible_end {
-            return Err(MmError::NotMapped);
+            return Err(SysError::NotMapped);
         }
 
         Ok(())
@@ -56,7 +56,7 @@ impl RamfsRegState {
 
     /// a bit inefficient. if users read into a hole, this will also allocate a
     /// new page and fill it with zeros. we should optimize this.
-    fn ensure_page(&self, pidx: usize) -> Result<FrameHandle, MmError> {
+    fn ensure_page(&self, pidx: usize) -> Result<FrameHandle, SysError> {
         if let Some(frame) = self.pages.read().get(&pidx) {
             return Ok(frame.clone());
         }
@@ -70,7 +70,7 @@ impl RamfsRegState {
 
         let frame = unsafe {
             alloc_frame_zeroed()
-                .ok_or(MmError::OutOfMemory)?
+                .ok_or(SysError::OutOfMemory)?
                 .into_frame_handle()
         };
         pages.insert(pidx, frame.clone());
@@ -80,7 +80,7 @@ impl RamfsRegState {
     // TODO: explain why we don't just reuse the default implementations of
     // read/write in VmObject.
 
-    fn copy_into(&self, offset: usize, data: &[u8]) -> Result<(), MmError> {
+    fn copy_into(&self, offset: usize, data: &[u8]) -> Result<(), SysError> {
         let mut remaining = data;
         let mut cur_offset = offset;
 
@@ -103,13 +103,13 @@ impl RamfsRegState {
             remaining = &remaining[copy_len..];
             cur_offset = cur_offset
                 .checked_add(copy_len)
-                .ok_or(MmError::InvalidArgument)?;
+                .ok_or(SysError::InvalidArgument)?;
         }
 
         Ok(())
     }
 
-    fn copy_out(&self, offset: usize, buffer: &mut [u8]) -> Result<(), MmError> {
+    fn copy_out(&self, offset: usize, buffer: &mut [u8]) -> Result<(), SysError> {
         let mut remaining = buffer;
         let mut cur_offset = offset;
 
@@ -130,7 +130,7 @@ impl RamfsRegState {
             remaining = &mut remaining[copy_len..];
             cur_offset = cur_offset
                 .checked_add(copy_len)
-                .ok_or(MmError::InvalidArgument)?;
+                .ok_or(SysError::InvalidArgument)?;
         }
 
         Ok(())
@@ -149,9 +149,9 @@ impl RamfsRegMapping {
 }
 
 impl VmObject for RamfsRegMapping {
-    fn resolve_frame(&self, pidx: usize, _access: PageFaultType) -> Result<ResolvedFrame, MmError> {
+    fn resolve_frame(&self, pidx: usize, _access: PageFaultType) -> Result<ResolvedFrame, SysError> {
         if RamfsRegState::page_start(pidx)? >= self.state.size() {
-            return Err(MmError::NotMapped);
+            return Err(SysError::NotMapped);
         }
 
         Ok(ResolvedFrame {
@@ -160,22 +160,22 @@ impl VmObject for RamfsRegMapping {
         })
     }
 
-    fn read(&self, offset: usize, buffer: &mut [u8]) -> Result<(), MmError> {
+    fn read(&self, offset: usize, buffer: &mut [u8]) -> Result<(), SysError> {
         self.state.validate_mmap_range(offset, buffer.len())?;
         self.state.copy_out(offset, buffer)
     }
 
-    fn write(&self, offset: usize, data: &[u8]) -> Result<(), MmError> {
+    fn write(&self, offset: usize, data: &[u8]) -> Result<(), SysError> {
         self.state.validate_mmap_range(offset, data.len())?;
         self.state.copy_into(offset, data)
     }
 }
 
-fn ramfs_reg_state(inode: &InodeRef) -> Result<Arc<RamfsRegState>, FsError> {
+fn ramfs_reg_state(inode: &InodeRef) -> Result<Arc<RamfsRegState>, SysError> {
     Ok(ramfs_reg(inode)?.state())
 }
 
-fn ramfs_read(file: &File, buf: &mut [u8]) -> Result<usize, FsError> {
+fn ramfs_read(file: &File, buf: &mut [u8]) -> Result<usize, SysError> {
     let inode = file.inode();
     let state = ramfs_reg_state(inode)?;
 
@@ -187,40 +187,40 @@ fn ramfs_read(file: &File, buf: &mut [u8]) -> Result<usize, FsError> {
 
     let n = usize::min(buf.len(), size - pos);
 
-    state.copy_out(pos, &mut buf[..n]).map_err(FsError::Mm)?;
+    state.copy_out(pos, &mut buf[..n])?;
 
     file.set_pos(pos + n);
 
     Ok(n)
 }
 
-fn ramfs_write(file: &File, buf: &[u8]) -> Result<usize, FsError> {
+fn ramfs_write(file: &File, buf: &[u8]) -> Result<usize, SysError> {
     let inode = file.inode();
     let state = ramfs_reg_state(inode)?;
 
     let pos = file.pos();
-    let new_pos = pos.checked_add(buf.len()).ok_or(FsError::InvalidArgument)?;
+    let new_pos = pos.checked_add(buf.len()).ok_or(SysError::InvalidArgument)?;
 
-    state.copy_into(pos, buf).map_err(FsError::Mm)?;
+    state.copy_into(pos, buf)?;
     state.update_size_max(new_pos);
     inode.inode().update_size_max(new_pos as u64);
     file.set_pos(new_pos);
     Ok(buf.len())
 }
 
-fn ramfs_seek(file: &File, pos: usize) -> Result<(), FsError> {
+fn ramfs_seek(file: &File, pos: usize) -> Result<(), SysError> {
     // allow seeking beyond EOF; the gap will be zero-filled on the next write.
     file.set_pos(pos);
     Ok(())
 }
 
-fn ramfs_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, FsError> {
+fn ramfs_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, SysError> {
     let inode = file.inode();
     let dir_data = ramfs_dir(inode)?;
 
     let entry = dir_data.get_by_offset(ctx.offset());
     if entry.is_none() {
-        return Err(FsError::NoMoreEntries);
+        return Err(SysError::NoMoreEntries);
     }
     let (name, ino) = entry.unwrap();
 
@@ -239,19 +239,19 @@ pub(super) static RAMFS_REG_FILE_OPS: FileOps = FileOps {
     read: ramfs_read,
     write: ramfs_write,
     seek: ramfs_seek,
-    iterate: |_, _| Err(FsError::NotDir),
+    iterate: |_, _| Err(SysError::NotDir),
 };
 
 pub(super) static RAMFS_DIR_FILE_OPS: FileOps = FileOps {
-    read: |_, _| Err(FsError::IsDir),
-    write: |_, _| Err(FsError::IsDir),
-    seek: |_, _| Err(FsError::IsDir),
+    read: |_, _| Err(SysError::IsDir),
+    write: |_, _| Err(SysError::IsDir),
+    seek: |_, _| Err(SysError::IsDir),
     iterate: ramfs_iterate,
 };
 
 pub(super) static RAMFS_SYMLINK_FILE_OPS: FileOps = FileOps {
-    read: |_, _| Err(FsError::NotSupported),
-    write: |_, _| Err(FsError::NotSupported),
-    seek: |_, _| Err(FsError::NotSupported),
-    iterate: |_, _| Err(FsError::NotSupported),
+    read: |_, _| Err(SysError::NotSupported),
+    write: |_, _| Err(SysError::NotSupported),
+    seek: |_, _| Err(SysError::NotSupported),
+    iterate: |_, _| Err(SysError::NotSupported),
 };

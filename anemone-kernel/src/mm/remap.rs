@@ -49,15 +49,15 @@ struct IoRange {
 }
 
 impl IoRange {
-    fn try_new(start: PhysAddr, len: usize) -> Result<Self, MmError> {
+    fn try_new(start: PhysAddr, len: usize) -> Result<Self, SysError> {
         if len == 0 {
-            return Err(MmError::InvalidArgument);
+            return Err(SysError::InvalidArgument);
         }
         let len = len as u64;
         start
             .get()
             .checked_add(len)
-            .ok_or(MmError::InvalidArgument)?;
+            .ok_or(SysError::InvalidArgument)?;
         Ok(Self { start, len })
     }
 
@@ -99,11 +99,11 @@ impl SysRemaps {
         self.range_allocator.allocate(npages)
     }
 
-    fn free(&mut self, start: VirtPageNum, npages: usize) -> Result<(), MmError> {
+    fn free(&mut self, start: VirtPageNum, npages: usize) -> Result<(), SysError> {
         let range = VirtPageRange::new(start, npages as u64);
         self.range_allocator
             .free(range)
-            .map_err(|_| MmError::InvalidArgument)
+            .map_err(|_| SysError::InvalidArgument)
     }
 
     fn find_io_overlap(&self, req: IoRange) -> Option<IoRemapEntry> {
@@ -127,14 +127,14 @@ impl SysRemaps {
     unsafe fn ioremap(
         &mut self,
         req: IoRange,
-    ) -> Result<(VirtAddr, VirtPageRange, TlbShootdownGuard), MmError> {
+    ) -> Result<(VirtAddr, VirtPageRange, TlbShootdownGuard), SysError> {
         if self.find_io_overlap(req).is_some() {
-            return Err(MmError::AlreadyMapped);
+            return Err(SysError::AlreadyMapped);
         }
 
         let phys_range = req.to_page_range();
         let npages = phys_range.npages() as usize;
-        let virt_range = self.alloc(npages).ok_or(MmError::OutOfMemory)?;
+        let virt_range = self.alloc(npages).ok_or(SysError::OutOfMemory)?;
         let guard = unsafe {
             kmap(Mapping {
                 vpn: virt_range.start(),
@@ -168,11 +168,14 @@ impl SysRemaps {
         Ok((vaddr, virt_range, guard))
     }
 
-    unsafe fn iounmap(&mut self, req: IoRange) -> Result<(), MmError> {
-        let entry = self.io_remapped.get(&req.start).ok_or(MmError::NotMapped)?;
+    unsafe fn iounmap(&mut self, req: IoRange) -> Result<(), SysError> {
+        let entry = self
+            .io_remapped
+            .get(&req.start)
+            .ok_or(SysError::NotMapped)?;
 
         if entry.req != req {
-            return Err(MmError::InvalidArgument);
+            return Err(SysError::InvalidArgument);
         }
 
         // Invariant checked above. Remove should always succeed here.
@@ -242,7 +245,7 @@ impl Drop for IoRemap {
 ///
 /// Caller must ensure that the given physical byte range is a valid MMIO
 /// region, and that the caller has exclusive access to that region.
-pub unsafe fn ioremap(start: PhysAddr, len: usize) -> Result<IoRemap, MmError> {
+pub unsafe fn ioremap(start: PhysAddr, len: usize) -> Result<IoRemap, SysError> {
     unsafe {
         let req = IoRange::try_new(start, len)?;
         let (virt, _, guard) = SYS_REMAPS.lock_irqsave().ioremap(req)?;
@@ -264,6 +267,6 @@ pub unsafe fn alloc_virt_range(npages: usize) -> Option<VirtPageRange> {
 }
 
 /// Free a virtual page range previously allocated by [`alloc_virt_range`].
-pub unsafe fn free_virt_range(start: VirtPageNum, npages: usize) -> Result<(), MmError> {
+pub unsafe fn free_virt_range(start: VirtPageNum, npages: usize) -> Result<(), SysError> {
     SYS_REMAPS.lock_irqsave().free(start, npages)
 }

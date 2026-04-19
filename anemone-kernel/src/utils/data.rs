@@ -1,9 +1,6 @@
 use core::{fmt::Debug, marker::PhantomData};
 
-use crate::{
-    fs::{File, FsError},
-    prelude::MmError,
-};
+use crate::{fs::File, prelude::*};
 
 pub trait DataSource {
     type TError: Debug;
@@ -23,7 +20,7 @@ impl<'a> FileDataSource<'a> {
 }
 
 impl DataSource for FileDataSource<'_> {
-    type TError = FsError;
+    type TError = SysError;
 
     fn copy_to(&self, offset: usize, dest: &mut [u8]) -> Result<(), Self::TError> {
         let offset = self.base + offset;
@@ -45,11 +42,11 @@ impl<'a> SliceDataSource<'a> {
 }
 
 impl DataSource for SliceDataSource<'_> {
-    type TError = MmError;
+    type TError = SysError;
 
     fn copy_to(&self, offset: usize, dest: &mut [u8]) -> Result<(), Self::TError> {
         if offset + dest.len() > self.slice.len() {
-            return Err(MmError::InvalidArgument);
+            return Err(SysError::InvalidArgument);
         }
         dest.copy_from_slice(&self.slice[offset..offset + dest.len()]);
         Ok(())

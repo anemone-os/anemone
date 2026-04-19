@@ -115,7 +115,7 @@ impl Task {
         self.fs_state().write().set_cwd(cwd);
     }
 
-    pub fn lookup_path(&self, path: &Path) -> Result<PathRef, FsError> {
+    pub fn lookup_path(&self, path: &Path) -> Result<PathRef, SysError> {
         let fs_state = self.fs_state();
         let fs_state = fs_state.read();
         if path.is_absolute() {

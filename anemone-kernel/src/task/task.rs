@@ -12,6 +12,7 @@ use crate::{
     sync::mono::MonoFlow,
     task::{
         clone::CloneFlags,
+        cpu_usage::CpuUsage,
         files::FilesState,
         task_fs::FsState,
         tid::{TIDH_IDLE, Tid, TidHandle, alloc_tid},
@@ -60,6 +61,9 @@ pub struct Task {
     pub(super) fs_state: Arc<RwLock<FsState>>,
     /// File descriptor table state.
     pub(super) files_state: Arc<RwLock<FilesState>>,
+
+    /// Cpu usage information.
+    pub(super) cpu_usage: RwLock<CpuUsage>,
 
     // execution information
     /// Executable context such as `cmdline`, `flags` and user address space.
@@ -228,7 +232,7 @@ impl Task {
         irq_flags: IrqFlags,
         flags: TaskFlags,
         create_flags: CloneFlags,
-    ) -> Result<Arc<Self>, MmError> {
+    ) -> Result<Arc<Self>, SysError> {
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
         //kdebugln!("created kernel task with kernel stack at {:?}", stack);
@@ -239,6 +243,8 @@ impl Task {
 
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: Arc::new(RwLock::new(FilesState::new())),
+
+            cpu_usage: RwLock::new(CpuUsage::ZERO),
 
             sched_info: unsafe {
                 MonoFlow::new(TaskSchedInfo {
@@ -275,7 +281,7 @@ impl Task {
         ustack_top: VirtAddr,
         parent: &Arc<Task>,
         uspace: Arc<UserSpace>,
-    ) -> Result<Self, MmError> {
+    ) -> Result<Self, SysError> {
         let kstack = KernelStack::new()?;
         let kstack_top = kstack.stack_top();
         kdebugln!("created user task with kernel stack at {:?}", kstack);
@@ -312,7 +318,7 @@ impl Task {
     /// # Safety
     /// This function is unsafe because idle tasks are special tasks that should
     /// not be created casually.
-    pub unsafe fn new_idle(entry: *const ()) -> Result<Arc<Self>, MmError> {
+    pub unsafe fn new_idle(entry: *const ()) -> Result<Arc<Self>, SysError> {
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
         //kdebugln!("created kernel task with kernel stack at {:?}", stack);
@@ -343,6 +349,8 @@ impl Task {
 
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: Arc::new(RwLock::new(FilesState::new())),
+
+            cpu_usage: RwLock::new(CpuUsage::ZERO),
 
             exit_code: AtomicI8::new(0),
             create_flags: CloneFlags::empty(),
@@ -593,7 +601,7 @@ impl ArcTaskImpls for Arc<Task> {
                     .position(|val| target.match_task(val))
                     .is_none()
                 {
-                    Err(SysError::Task(TaskError::ChildrenNotFound))
+                    Err(SysError::ChildrenNotFound)
                 } else {
                     Ok(())
                 }
@@ -625,6 +633,7 @@ impl ArcTaskImpls for Arc<Task> {
                         debug_assert!(res);
                     });
                 }
+                self.on_reap_child(&child);
                 return Ok(Some(child));
             }
         }

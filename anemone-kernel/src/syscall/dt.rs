@@ -50,12 +50,12 @@ impl<T: Sized, A: UserAccess> Clone for UserPtr<T, A> {
 impl<T: Sized, A: UserAccess> UserPtr<T, A> {
     pub fn from_raw(arg: u64) -> Result<Self, SysError> {
         if arg % align_of::<T>() as u64 != 0 {
-            return Err(SysError::Mm(MmError::NotAligned));
+            return Err(SysError::NotAligned);
         }
         if arg >= KernelLayout::USPACE_TOP_ADDR
             || arg.wrapping_add(size_of::<T>() as u64) > KernelLayout::USPACE_TOP_ADDR
         {
-            return Err(SysError::Mm(MmError::InvalidArgument));
+            return Err(SysError::InvalidArgument);
         }
         Ok(Self {
             addr: arg,
@@ -262,7 +262,7 @@ fn validate_user_pointer<T: Sized>(
     let va = VirtAddr::new(arg);
     let va_end = VirtAddr::new(arg.wrapping_add(size_of::<T>() as u64));
     if va_end < va {
-        return Err(MmError::InvalidArgument.into());
+        return Err(SysError::InvalidArgument.into());
     }
     let vpn_va = va.page_down();
     let vpn_va_end = va_end.page_up();
@@ -282,7 +282,7 @@ fn validate_user_pointer_for_write<T: Sized>(
     let va = VirtAddr::new(arg);
     let va_end = VirtAddr::new(arg.wrapping_add(size_of::<T>() as u64));
     if va_end < va {
-        return Err(MmError::InvalidArgument.into());
+        return Err(SysError::InvalidArgument.into());
     }
     let vpn_va = va.page_down();
     let vpn_va_end = va_end.page_up();
@@ -303,13 +303,13 @@ fn validate_user_array<T: Sized>(
     len: usize,
 ) -> Result<*const [T], SysError> {
     if arg % align_of::<T>() as u64 != 0 {
-        return Err(MmError::NotAligned.into());
+        return Err(SysError::NotAligned.into());
     }
 
     let va = VirtAddr::new(arg);
     let va_end = VirtAddr::new(arg.wrapping_add((size_of::<T>() * len) as u64));
     if va_end < va {
-        return Err(MmError::InvalidArgument.into());
+        return Err(SysError::InvalidArgument.into());
     }
 
     let vpn_va = va.page_down();
@@ -338,13 +338,13 @@ fn validate_user_array_for_write<T: Sized>(
         flags
     );*/
     if arg % align_of::<T>() as u64 != 0 {
-        return Err(MmError::NotAligned.into());
+        return Err(SysError::NotAligned.into());
     }
 
     let va = VirtAddr::new(arg);
     let va_end = VirtAddr::new(arg.wrapping_add((size_of::<T>() * len) as u64));
     if va_end < va {
-        return Err(MmError::InvalidArgument.into());
+        return Err(SysError::InvalidArgument.into());
     }
 
     let vpn_va = va.page_down();
@@ -367,7 +367,7 @@ pub fn user_addr(arg: u64) -> Result<VirtAddr, SysError> {
     if arg < KernelLayout::USPACE_TOP_ADDR {
         Ok(VirtAddr::new(arg))
     } else {
-        Err(KernelError::InvalidArgument.into())
+        Err(SysError::InvalidArgument)
     }
 }
 
@@ -415,7 +415,7 @@ pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq + Copy>(
     arg: u64,
 ) -> Result<Box<[T]>, SysError> {
     if arg % align_of::<T>() as u64 != 0 {
-        return Err(SysError::Mm(MmError::NotAligned));
+        return Err(SysError::NotAligned);
     }
     with_current_task(|t| {
         let usp = t
@@ -430,7 +430,7 @@ pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq + Copy>(
         while !unsafe { &*ed_pointer }.eq(&terminator) {
             let next_ed_pointer = (ed_pointer as u64).wrapping_add(size_of::<T>() as u64);
             if next_ed_pointer <= arg {
-                return Err(MmError::InvalidArgument.into());
+                return Err(SysError::InvalidArgument.into());
             }
             let ed_vpn_new = VirtAddr::new(next_ed_pointer).page_down();
             if ed_vpn_new != ed_vpn {
@@ -444,7 +444,7 @@ pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq + Copy>(
             ed_pointer = next_ed_pointer as *const T;
             len += 1;
             if len > MAX_LEN {
-                return Err(SysError::Kernel(KernelError::InvalidArgument));
+                return Err(SysError::InvalidArgument);
             }
         }
         let slice = unsafe {
@@ -462,9 +462,7 @@ pub fn c_readonly_string(arg: u64) -> Result<Box<str>, SysError> {
     unsafe {
         let ptr = unsafe { &*c_readonly_array_ptr::<MAX_USER_STRING_LEN, _>(0u8, true, arg)? };
         let str = CStr::from_ptr(&ptr[0] as *const u8 as *const c_char);
-        let str = str
-            .to_str()
-            .map_err(|_| SysError::Mm(MmError::InvalidArgument))?;
+        let str = str.to_str().map_err(|_| SysError::InvalidArgument)?;
         Ok(Box::from(str))
     }
 }
@@ -488,7 +486,7 @@ pub fn greater_than_zero(arg: u64) -> Result<u64, SysError> {
     if arg > 0 {
         Ok(arg as u64)
     } else {
-        Err(SysError::Kernel(KernelError::InvalidArgument))
+        Err(SysError::InvalidArgument)
     }
 }
 
@@ -498,7 +496,7 @@ pub fn nonzero(arg: u64) -> Result<u64, SysError> {
     if arg != 0 {
         Ok(arg)
     } else {
-        Err(SysError::Kernel(KernelError::InvalidArgument))
+        Err(SysError::InvalidArgument)
     }
 }
 
@@ -507,6 +505,6 @@ pub fn aligned_to<const ALIGN: usize>(arg: u64) -> Result<u64, SysError> {
     if arg % ALIGN as u64 == 0 {
         Ok(arg)
     } else {
-        Err(SysError::Kernel(KernelError::InvalidArgument))
+        Err(SysError::InvalidArgument)
     }
 }
