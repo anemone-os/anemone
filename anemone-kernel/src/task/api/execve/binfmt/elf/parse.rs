@@ -1,6 +1,6 @@
 //! Parse ELF binaries and load them into [UserSpace]
 
-use core::ffi::CStr;
+use core::{ffi::CStr, mem::MaybeUninit};
 
 use goblin::{
     elf::header::{EI_CLASS, EI_DATA, ELFCLASS64, ELFDATA2LSB, ET_DYN, ET_EXEC},
@@ -371,10 +371,8 @@ use seg_chunk::*;
 /// During this process, rolling back will not be performed if any error is
 /// encountered, thus leaving the [UserSpace] in a possibly inconsistent state.
 pub unsafe fn load_image(file: &File, usp: &mut UserSpaceData) -> Result<ElfMeta, SysError> {
-    let size = file.get_attr()?.size;
-
     let mut elf_hdr_bytes = [0; SIZEOF_EHDR];
-    file.read(&mut elf_hdr_bytes)?;
+    file.read_exact(&mut elf_hdr_bytes)?;
     let elf_hdr = validate_elf(Header::from_bytes(&elf_hdr_bytes))?;
 
     let load_bias: u64 = if elf_hdr.e_type == ET_EXEC {
@@ -406,34 +404,30 @@ pub unsafe fn load_image(file: &File, usp: &mut UserSpaceData) -> Result<ElfMeta
         return Err(SysError::InvalidArgument);
     }
 
-    let mut phdrs = vec![
-        0u8;
-        phdr_entry_sz
-            .checked_mul(phdr_entry_num)
-            .ok_or(SysError::InvalidArgument)?
-    ]
-    .into_boxed_slice();
+    let phdrs = {
+        let mut phdrs =
+            vec![MaybeUninit::<ProgramHeader>::uninit(); phdr_entry_num].into_boxed_slice();
 
-    file.seek(phdrs_offset)?;
-    let n = file.read(phdrs.as_mut())?;
-    if n < phdr_entry_sz * phdr_entry_num {
-        knoticeln!(
-            "could not read all ELF program headers: expected {} bytes, got {} bytes",
-            phdr_entry_sz * phdr_entry_num,
-            n
-        );
-        return Err(SysError::InvalidArgument);
-    }
+        {
+            let mut raw_bytes = unsafe {
+                core::slice::from_raw_parts_mut(
+                    phdrs.as_mut_ptr().cast::<u8>(),
+                    phdr_entry_sz * phdr_entry_num,
+                )
+            };
 
-    // this is really unsafe... refine later.
-    let phdrs = unsafe {
-        core::slice::from_raw_parts(phdrs.as_ptr().cast::<ProgramHeader>(), phdr_entry_num)
+            file.seek(phdrs_offset)?;
+            file.read_exact(raw_bytes)?;
+        }
+
+        let ptr = Box::into_raw(phdrs) as *mut [ProgramHeader];
+        unsafe { Box::from_raw(ptr) }
     };
 
     let mut dyn_interp = None;
     let mut interp_bias = load_bias;
     let mut segments = vec![];
-    for phdr in phdrs {
+    for phdr in &phdrs {
         // biased virtual address.
         let vaddr = VirtAddr::new(phdr.p_vaddr + load_bias);
 
@@ -445,7 +439,7 @@ pub unsafe fn load_image(file: &File, usp: &mut UserSpaceData) -> Result<ElfMeta
 
             let mut buf = vec![0u8; phdr.p_filesz as usize];
             file.seek(phdr.p_offset as usize)?;
-            file.read(buf.as_mut())?;
+            file.read_exact(buf.as_mut())?;
             let cstr = CStr::from_bytes_until_nul(&buf).map_err(|_| SysError::InvalidArgument)?;
             let interp = cstr
                 .to_str()
@@ -493,7 +487,7 @@ pub unsafe fn load_image(file: &File, usp: &mut UserSpaceData) -> Result<ElfMeta
         segments.push(seg);
     }
 
-    let Some(phdrs_addr) = find_phdrs_vaddr(elf_hdr, phdrs) else {
+    let Some(phdrs_addr) = find_phdrs_vaddr(elf_hdr, phdrs.as_ref()) else {
         return Err(SysError::InvalidArgument);
     };
     // apply bias.
@@ -551,10 +545,8 @@ fn load_interpreter(
     usp: &mut UserSpaceData,
     load_bias: u64,
 ) -> Result<InterpreterMeta, SysError> {
-    let size = file.get_attr()?.size;
-
     let mut elf_hdr_bytes = [0; SIZEOF_EHDR];
-    file.read(&mut elf_hdr_bytes)?;
+    file.read_exact(&mut elf_hdr_bytes)?;
     let elf_hdr = validate_elf(Header::from_bytes(&elf_hdr_bytes))?;
 
     let load_bias: u64 = if elf_hdr.e_type == ET_EXEC {
@@ -586,24 +578,28 @@ fn load_interpreter(
         return Err(SysError::InvalidArgument);
     }
 
-    let mut phdrs = vec![
-        0u8;
-        phdr_entry_sz
-            .checked_mul(phdr_entry_num)
-            .ok_or(SysError::InvalidArgument)?
-    ]
-    .into_boxed_slice();
+    let phdrs = {
+        let mut phdrs =
+            vec![MaybeUninit::<ProgramHeader>::uninit(); phdr_entry_num].into_boxed_slice();
 
-    file.seek(phdrs_offset)?;
-    file.read(phdrs.as_mut())?;
+        {
+            let mut raw_bytes = unsafe {
+                core::slice::from_raw_parts_mut(
+                    phdrs.as_mut_ptr().cast::<u8>(),
+                    phdr_entry_sz * phdr_entry_num,
+                )
+            };
 
-    // this is really unsafe... refine later.
-    let phdrs = unsafe {
-        core::slice::from_raw_parts(phdrs.as_ptr().cast::<ProgramHeader>(), phdr_entry_num)
+            file.seek(phdrs_offset)?;
+            file.read_exact(raw_bytes)?;
+        }
+
+        let ptr = Box::into_raw(phdrs) as *mut [ProgramHeader];
+        unsafe { Box::from_raw(ptr) }
     };
 
     let mut segments = vec![];
-    for phdr in phdrs {
+    for phdr in &phdrs {
         let vaddr = VirtAddr::new(phdr.p_vaddr + load_bias);
 
         if phdr.p_type == PT_INTERP {
@@ -640,7 +636,7 @@ fn load_interpreter(
         segments.push(seg);
     }
 
-    let Some(_phdrs_addr) = find_phdrs_vaddr(elf_hdr, phdrs) else {
+    let Some(_phdrs_addr) = find_phdrs_vaddr(elf_hdr, &phdrs) else {
         return Err(SysError::InvalidArgument);
     };
 

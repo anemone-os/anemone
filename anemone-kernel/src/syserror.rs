@@ -122,6 +122,8 @@ pub enum SysError {
     ProbeFailed,
     /// Indicates an I/O error occurred.
     IO,
+    /// Unexpected end of file.
+    UnexpectedEof,
     /// Children process is not found.
     ChildrenNotFound,
     /// Binary format unrecognized.
@@ -180,6 +182,7 @@ impl AsErrno for SysError {
             | SysError::UnknownInterrupt
             | SysError::ProbeFailed => ENODEV,
             SysError::IO => EIO,
+            SysError::UnexpectedEof => ENODATA,
             SysError::ChildrenNotFound => ECHILD,
             SysError::BinFmtUnrecognized => ENOEXEC,
         }
