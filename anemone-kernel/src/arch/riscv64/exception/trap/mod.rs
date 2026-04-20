@@ -60,9 +60,17 @@ pub struct RiscV64TrapFrame {
     sepc: u64,
     stval: u64,
     scause: u64,
+    ktp: u64,
 }
 
 impl RiscV64TrapFrame {
+    /// Construct a trap frame for a new task.
+    ///
+    /// **Note `ktp` of the created trap frame is initialized with the current
+    /// value of `tp`, i.e. current core's percpu base. Fresh user tasks keep
+    /// `x4/tp` for user TLS state and stash the kernel percpu base in `ktp` for
+    /// later user trap entry. So the trap frame should not be sent across
+    /// cores. Instead, it's always expected to be consumed on the same core.**
     pub fn task_init_frame(
         entry: u64,
         stack_top: u64,
@@ -71,16 +79,21 @@ impl RiscV64TrapFrame {
         args: &[u64; 7],
         ra: u64,
     ) -> Self {
+        let mut current_tp = 0;
+        unsafe {
+            asm!("mv {}, tp", out(reg) current_tp);
+        }
+
         Self {
             gpr: Gpr {
                 x: {
                     let mut x = [0; 32];
                     x[10..17].copy_from_slice(args);
+                    if matches!(prv, Privilege::Kernel) {
+                        x[4] = current_tp;
+                    }
                     x[2] = stack_top;
                     x[1] = ra as u64;
-                    unsafe {
-                        asm!("sd tp, ({0})", in(reg) &x[4]); //tp
-                    }
                     x
                 },
             },
@@ -93,6 +106,7 @@ impl RiscV64TrapFrame {
             sepc: entry,
             stval: 0,
             scause: 0,
+            ktp: current_tp,
         }
     }
 }
@@ -123,6 +137,7 @@ impl TrapFrameArch for RiscV64TrapFrame {
         sepc: 0,
         stval: 0,
         scause: 0,
+        ktp: 0,
     };
 
     fn set_sp(&mut self, sp: u64) {
