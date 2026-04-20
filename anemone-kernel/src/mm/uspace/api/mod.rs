@@ -126,4 +126,13 @@ mod args {
             Ok(Self { exclusive, aux })
         }
     }
+
+    pub fn mmap_fd(raw: u64) -> Result<i32, SysError> {
+        let raw = raw as i64;
+        if raw < i32::MIN as i64 || raw > i32::MAX as i64 {
+            return Err(SysError::InvalidArgument);
+        }
+
+        Ok(raw as i32)
+    }
 }

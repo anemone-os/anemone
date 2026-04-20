@@ -36,7 +36,14 @@ pub fn kernel_exit(exit_code: i8) -> ! {
         task.set_exit_code(exit_code);
         task.set_status(TaskStatus::Zombie);
         if let Some(addr) = task.get_clear_child_tid() {
-            addr.safe_write(Tid::new(0)).unwrap_or(());
+            if let Err(err) = addr.safe_write(Tid::new(0)) {
+                knoticeln!(
+                    "failed to clear child tid for task {}: {:?} at address {:#x}",
+                    task.tid(),
+                    err,
+                    addr.addr()
+                );
+            }
             // todo: futex
         }
         let root = root_task();

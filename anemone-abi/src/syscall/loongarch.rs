@@ -80,6 +80,8 @@ pub mod linux {
 
     pub const SYS_EXIT: u64 = 93;
     pub const SYS_EXIT_GROUP: u64 = 94;
+    pub const SYS_SET_TID_ADDRESS: u64 = 96;
+    pub const SYS_SET_ROBUST_LIST: u64 = 99;
 
     pub const SYS_NANOSLEEP: u64 = 101;
 
