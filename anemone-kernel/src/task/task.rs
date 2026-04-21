@@ -44,7 +44,7 @@ pub fn wait_for_root_task() -> &'static Arc<Task> {
     TASK_ROOT.wait()
 }
 
-/// All the information about a task
+/// What we call Task Control Block in kernel terminology.
 #[repr(C)]
 pub struct Task {
     // static information
