@@ -15,10 +15,28 @@ frame_section_shift_mb = 7
 [qemu]
 qemu = "qemu-system-loongarch64"
 machine = "virt"
-# cpu = default
 smp = 4
 memory = "4G"
-args = ["-nographic", "-serial", "mon:stdio"]
+# cpu = default
+args = [
+    "-nographic",
+    "-serial",
+    "mon:stdio",
+
+    # "-no-reboot",
+    # "-drive",
+    # "file=build/rootfs/minimal/rootfs.img,format=raw,if=none,id=x1",
+    # "-device",
+    # "virtio-blk-pci,drive=x1",
+# 
+    # "-device",
+    # "pcie-root-port,id=pcie.1,bus=pcie.0",
+    # 
+    # "-drive",
+    # "file=sdcard-la.img,format=raw,if=none,id=x0",
+    # "-device",
+    # "virtio-blk-pci,drive=x0,bus=pcie.1",
+]
 
 
 [dtb]

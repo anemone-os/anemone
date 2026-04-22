@@ -3,7 +3,7 @@
 // vfs infrastructure
 mod anonymous;
 mod dentry;
-mod error;
+// mod error;
 mod file;
 mod filesystem;
 mod inode;
@@ -24,7 +24,6 @@ pub mod api;
 pub use self::{
     anonymous::*,
     dentry::Dentry,
-    error::FsError,
     file::{DirContext, DirEntry, File, FileOps},
     filesystem::{FileSystem, FileSystemFlags, FileSystemOps},
     inode::{
@@ -66,7 +65,7 @@ mod namespace {
             source: MountSource,
             flags: MountFlags,
             mountpoint: Option<&PathRef>,
-        ) -> Result<Arc<Mount>, FsError> {
+        ) -> Result<Arc<Mount>, SysError> {
             let (parent, mp_dentry) = match mountpoint {
                 Some(pr) => (Some(pr.mount().clone()), Some(pr.dentry().clone())),
                 None => (None, None),
@@ -74,7 +73,7 @@ mod namespace {
 
             if parent.is_none() && self.root_path.is_some() {
                 // Mounting a new root when one already exists is not allowed.
-                return Err(FsError::AlreadyExists);
+                return Err(SysError::AlreadyExists);
             }
 
             let sb = fs.mount(source, flags)?;
@@ -117,7 +116,7 @@ mod namespace {
             fs: Arc<FileSystem>,
             source: MountSource,
             flags: MountFlags,
-        ) -> Result<Arc<Mount>, FsError> {
+        ) -> Result<Arc<Mount>, SysError> {
             self.mount(fs, source, flags, None)
         }
 
@@ -127,22 +126,22 @@ mod namespace {
             source: MountSource,
             flags: MountFlags,
             mountpoint: &PathRef,
-        ) -> Result<Arc<Mount>, FsError> {
+        ) -> Result<Arc<Mount>, SysError> {
             self.mount(fs, source, flags, Some(mountpoint))
         }
 
         /// Unmount a filesystem from this namespace.
         ///
         /// Unmounting root filesystem will fail.
-        pub(super) fn unmount(&mut self, mount: &Arc<Mount>) -> Result<(), FsError> {
+        pub(super) fn unmount(&mut self, mount: &Arc<Mount>) -> Result<(), SysError> {
             // cannot unmount root
             let Some(parent) = mount.parent() else {
-                return Err(FsError::InvalidArgument);
+                return Err(SysError::InvalidArgument);
             };
 
             if mount.has_children() {
                 knoticeln!("cannot unmount filesystem: superblock still has alive inodes");
-                return Err(FsError::Busy);
+                return Err(SysError::Busy);
             }
 
             let sb = mount.sb().clone();
@@ -154,7 +153,7 @@ mod namespace {
             if !sb_still_used {
                 if sb.has_alive_inode() {
                     knoticeln!("cannot unmount filesystem: superblock still has alive inodes");
-                    return Err(FsError::Busy);
+                    return Err(SysError::Busy);
                 }
             }
 
@@ -214,11 +213,11 @@ mod vfs {
     /// Register a file system type.
     ///
     /// On success, returns an `Arc` to the registered `FileSystem`.
-    pub fn register_filesystem(fs: &'static FileSystemOps) -> Result<Arc<FileSystem>, FsError> {
+    pub fn register_filesystem(fs: &'static FileSystemOps) -> Result<Arc<FileSystem>, SysError> {
         let mut fs_list = VFS.fs_list.write();
         for existing in fs_list.iter() {
             if existing.name() == fs.name {
-                return Err(FsError::AlreadyExists);
+                return Err(SysError::AlreadyExists);
             }
         }
         kinfoln!("registered filesystem: {}", fs.name);
@@ -247,8 +246,8 @@ mod vfs {
         source: MountSource,
         flags: MountFlags,
         mountpoint: &PathRef,
-    ) -> Result<Arc<Mount>, FsError> {
-        let fs = get_filesystem(fs_name).ok_or(FsError::NotFound)?;
+    ) -> Result<Arc<Mount>, SysError> {
+        let fs = get_filesystem(fs_name).ok_or(SysError::NotFound)?;
 
         VFS.visible.write().mount_at(fs, source, flags, mountpoint)
     }
@@ -258,21 +257,21 @@ mod vfs {
         fs_name: &str,
         source: MountSource,
         flags: MountFlags,
-    ) -> Result<Arc<Mount>, FsError> {
-        let fs = get_filesystem(fs_name).ok_or(FsError::NotFound)?;
+    ) -> Result<Arc<Mount>, SysError> {
+        let fs = get_filesystem(fs_name).ok_or(SysError::NotFound)?;
 
         VFS.visible.write().mount_root(fs, source, flags)
     }
 
     /// **Called by anonymous filesystem driver. DO NOT TOUCH THIS.**
-    pub fn mount_anonymous_root(anony_fs: Arc<FileSystem>) -> Result<Arc<Mount>, FsError> {
+    pub fn mount_anonymous_root(anony_fs: Arc<FileSystem>) -> Result<Arc<Mount>, SysError> {
         VFS.anonymous
             .write()
             .mount_root(anony_fs, MountSource::Pseudo, MountFlags::empty())
     }
 
     /// Unmount a filesystem from visible namespace.
-    pub fn unmount(mount: Arc<Mount>) -> Result<(), FsError> {
+    pub fn unmount(mount: Arc<Mount>) -> Result<(), SysError> {
         VFS.visible.write().unmount(&mount)
     }
 
@@ -399,26 +398,26 @@ mod vfs_ops {
             source: MountSource,
             flags: MountFlags,
             mountpoint: R,
-        ) -> Result<Arc<Mount>, FsError> {
+        ) -> Result<Arc<Mount>, SysError> {
             let mountpoint = mountpoint.into();
             let mountpoint = resolve(mountpoint.target, mountpoint.flags)?;
 
             if mountpoint.inode().ty() != InodeType::Dir {
-                return Err(FsError::NotDir);
+                return Err(SysError::NotDir);
             }
 
             mount_at(fs_name, source, flags, &mountpoint)
         }
 
         /// Unmount a filesystem at the specified mountpoint.
-        pub fn vfs_unmount<'a, R: Into<PathResolution<'a>>>(mountpoint: R) -> Result<(), FsError> {
+        pub fn vfs_unmount<'a, R: Into<PathResolution<'a>>>(mountpoint: R) -> Result<(), SysError> {
             let mountpoint = mountpoint.into();
             let mountpoint = resolve(mountpoint.target, mountpoint.flags)?;
             // The path must point at the root of a mounted filesystem, not an
             // arbitrary entry inside one.
             let mount_root = mountpoint.mount().root();
             if !Arc::ptr_eq(mountpoint.dentry(), &mount_root) {
-                return Err(FsError::NotMounted);
+                return Err(SysError::NotMounted);
             }
             unmount(mountpoint.mount().clone())
         }
@@ -427,7 +426,7 @@ mod vfs_ops {
         ///
         /// Internally, this is simply a thin wrapper around
         /// [fs::namei::resolve].
-        pub fn vfs_lookup<'a, R: Into<PathResolution<'a>>>(path: R) -> Result<PathRef, FsError> {
+        pub fn vfs_lookup<'a, R: Into<PathResolution<'a>>>(path: R) -> Result<PathRef, SysError> {
             let path = path.into();
             resolve(path.target, path.flags)
         }
@@ -440,7 +439,7 @@ mod vfs_ops {
         pub fn vfs_lookup_from<'a, R: Into<PathResolution<'a>>>(
             dir: &PathRef,
             rel_path: R,
-        ) -> Result<PathRef, FsError> {
+        ) -> Result<PathRef, SysError> {
             let rel_path = rel_path.into();
             resolve_from(dir, rel_path.target, rel_path.flags)
         }
@@ -448,7 +447,7 @@ mod vfs_ops {
         pub fn vfs_touch<'a, R: Into<PathResolution<'a>>>(
             path: R,
             perm: InodePerm,
-        ) -> Result<PathRef, FsError> {
+        ) -> Result<PathRef, SysError> {
             vfs_touch_at(&root_pathref(), path.into(), perm)
         }
 
@@ -456,7 +455,7 @@ mod vfs_ops {
             dir: &PathRef,
             rel_path: R,
             perm: InodePerm,
-        ) -> Result<PathRef, FsError> {
+        ) -> Result<PathRef, SysError> {
             let rel_path = rel_path.into();
             let (parent, name) = resolve_parent_from(dir, rel_path.target, rel_path.flags)?;
 
@@ -467,14 +466,14 @@ mod vfs_ops {
             Ok(PathRef::new(parent.mount().clone(), dentry))
         }
 
-        pub fn vfs_open<'a, R: Into<PathResolution<'a>>>(path: R) -> Result<File, FsError> {
+        pub fn vfs_open<'a, R: Into<PathResolution<'a>>>(path: R) -> Result<File, SysError> {
             vfs_open_at(&root_pathref(), path)
         }
 
         pub fn vfs_open_at<'a, R: Into<PathResolution<'a>>>(
             dir: &PathRef,
             rel_path: R,
-        ) -> Result<File, FsError> {
+        ) -> Result<File, SysError> {
             let rel_path = rel_path.into();
             let pathref = resolve_from(dir, rel_path.target, rel_path.flags)?;
             let inode = pathref.inode();
@@ -485,7 +484,7 @@ mod vfs_ops {
 
         pub fn vfs_get_attr<'a, R: Into<PathResolution<'a>>>(
             path: R,
-        ) -> Result<InodeStat, FsError> {
+        ) -> Result<InodeStat, SysError> {
             let path = path.into();
             resolve(path.target, path.flags)?.inode().get_attr()
         }
@@ -493,7 +492,7 @@ mod vfs_ops {
         pub fn vfs_mkdir<'a, R: Into<PathResolution<'a>>>(
             path: R,
             perm: InodePerm,
-        ) -> Result<PathRef, FsError> {
+        ) -> Result<PathRef, SysError> {
             vfs_mkdir_at(&root_pathref(), path.into(), perm)
         }
 
@@ -501,7 +500,7 @@ mod vfs_ops {
             dir: &PathRef,
             rel_path: R,
             perm: InodePerm,
-        ) -> Result<PathRef, FsError> {
+        ) -> Result<PathRef, SysError> {
             let rel_path = rel_path.into();
             let (parent, name) = resolve_parent_from(dir, rel_path.target, rel_path.flags)?;
 
@@ -514,10 +513,10 @@ mod vfs_ops {
 
         /// Hard link of symlinks is not allowed. So we use [Path] instead of
         /// [PathResolution] for both, to avoid confusion.
-        pub fn vfs_link(old_path: &Path, new_path: &Path) -> Result<(), FsError> {
+        pub fn vfs_link(old_path: &Path, new_path: &Path) -> Result<(), SysError> {
             let target = resolve(old_path, ResolveFlags::empty())?;
             if target.inode().ty() == InodeType::Dir {
-                return Err(FsError::IsDir);
+                return Err(SysError::IsDir);
             }
 
             let (parent, name) = resolve_parent(new_path, ResolveFlags::empty())?;
@@ -530,7 +529,7 @@ mod vfs_ops {
         pub fn vfs_symlink<'a, R: Into<PathResolution<'a>>>(
             target: &Path,
             link_path: R,
-        ) -> Result<PathRef, FsError> {
+        ) -> Result<PathRef, SysError> {
             vfs_symlink_at(&root_pathref(), target, link_path)
         }
 
@@ -538,11 +537,11 @@ mod vfs_ops {
             dir: &PathRef,
             target: &Path,
             rel_path: R,
-        ) -> Result<PathRef, FsError> {
+        ) -> Result<PathRef, SysError> {
             let rel_path = rel_path.into();
             if target.components().next().is_none() {
                 // empty symlink is not allowed.
-                return Err(FsError::InvalidArgument);
+                return Err(SysError::InvalidArgument);
             }
 
             let (parent, name) = resolve_parent_from(dir, rel_path.target, rel_path.flags)?;
@@ -554,20 +553,20 @@ mod vfs_ops {
 
         /// See [vfs_link] for the reason why we use [Path] instead of
         /// [PathResolution] here.
-        pub fn vfs_unlink(path: &Path) -> Result<(), FsError> {
+        pub fn vfs_unlink(path: &Path) -> Result<(), SysError> {
             vfs_unlink_at(&root_pathref(), path)
         }
 
         /// See [vfs_link] for the reason why we use [Path] instead of
         /// [PathResolution] here.
-        pub fn vfs_unlink_at(dir: &PathRef, rel_path: &Path) -> Result<(), FsError> {
+        pub fn vfs_unlink_at(dir: &PathRef, rel_path: &Path) -> Result<(), SysError> {
             let (parent, name) = resolve_parent_from(dir, rel_path, ResolveFlags::empty())?;
             parent.inode().unlink(&name)?;
 
             // remove the dentry from the cache to prevent stale lookups. the child
             // may never have been cached, which is not an error.
             match parent.dentry().remove_child(&name) {
-                Ok(()) | Err(FsError::NotFound) => (),
+                Ok(()) | Err(SysError::NotFound) => (),
                 Err(err) => return Err(err),
             }
 
@@ -575,16 +574,16 @@ mod vfs_ops {
         }
 
         /// Read the target of a symbolic link.
-        pub fn vfs_read_link(path: &Path) -> Result<PathBuf, FsError> {
+        pub fn vfs_read_link(path: &Path) -> Result<PathBuf, SysError> {
             vfs_read_link_at(&root_pathref(), path)
         }
 
         /// Read the target of a symbolic link.
-        pub fn vfs_read_link_at(dir: &PathRef, rel_path: &Path) -> Result<PathBuf, FsError> {
+        pub fn vfs_read_link_at(dir: &PathRef, rel_path: &Path) -> Result<PathBuf, SysError> {
             let pathref = resolve_from(dir, rel_path, ResolveFlags::UNFOLLOW_LAST_SYMLINK)?;
             let inode = pathref.inode();
             if inode.ty() != InodeType::Symlink {
-                return Err(FsError::NotSymlink);
+                return Err(SysError::NotSymlink);
             }
             inode.read_link()
         }
@@ -592,11 +591,11 @@ mod vfs_ops {
         pub fn vfs_rmdir_at<'a, R: Into<PathResolution<'a>>>(
             dir: &PathRef,
             rel_path: R,
-        ) -> Result<(), FsError> {
+        ) -> Result<(), SysError> {
             let rel_path = rel_path.into();
             let target = resolve_from(dir, rel_path.target, rel_path.flags)?;
             if target.inode().ty() != InodeType::Dir {
-                return Err(FsError::NotDir);
+                return Err(SysError::NotDir);
             }
 
             let (parent, name) = resolve_parent_from(
@@ -606,7 +605,7 @@ mod vfs_ops {
             )?;
 
             if !Arc::ptr_eq(target.mount(), parent.mount()) {
-                return Err(FsError::IsMountPoint);
+                return Err(SysError::IsMountPoint);
             }
 
             parent.inode().rmdir(&name)?;
@@ -614,14 +613,14 @@ mod vfs_ops {
             // remove the dentry from the cache to prevent stale lookups. the child
             // may never have been cached, which is not an error.
             match parent.dentry().remove_child(&name) {
-                Ok(()) | Err(FsError::NotFound) => (),
+                Ok(()) | Err(SysError::NotFound) => (),
                 Err(err) => return Err(err),
             }
 
             Ok(())
         }
 
-        pub fn vfs_rmdir<'a, R: Into<PathResolution<'a>>>(path: R) -> Result<(), FsError> {
+        pub fn vfs_rmdir<'a, R: Into<PathResolution<'a>>>(path: R) -> Result<(), SysError> {
             let path = path.into();
             vfs_rmdir_at(&root_pathref(), path)
         }
@@ -635,7 +634,7 @@ mod vfs_ops {
         /// Pay attention that this might incur a huge heap allocation.
         pub fn vfs_read_to_string<'a, R: Into<PathResolution<'a>>>(
             path: R,
-        ) -> Result<String, FsError> {
+        ) -> Result<String, SysError> {
             let path = path.into();
             let file = vfs_open(path)?;
             let mut buf = Vec::new();
@@ -650,7 +649,7 @@ mod vfs_ops {
                 buf.extend_from_slice(&chunk[..n]);
             }
 
-            String::from_utf8(buf).map_err(|_| FsError::InvalidArgument)
+            String::from_utf8(buf).map_err(|_| SysError::InvalidArgument)
         }
     }
     pub use higher_level::*;
@@ -679,7 +678,7 @@ mod kunits {
         assert_eq!(root.to_string(), "/");
         assert_eq!(
             vfs_lookup(PathResolution::normal(&Path::new("/kunit-vfs-missing"))).unwrap_err(),
-            FsError::NotFound
+            SysError::NotFound
         );
     }
 
@@ -687,7 +686,7 @@ mod kunits {
     fn test_vfs_create_lookup_and_cleanup() {
         let path = PathResolution::normal(&Path::new("/kunit-vfs-file"));
 
-        assert_eq!(vfs_lookup(path).unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs_lookup(path).unwrap_err(), SysError::NotFound);
 
         let created = vfs_touch(path, InodePerm::all_rwx()).unwrap();
         let looked_up = vfs_lookup(path).unwrap();
@@ -697,11 +696,11 @@ mod kunits {
         assert_eq!(created.inode(), looked_up.inode());
         assert_eq!(
             vfs_touch(path, InodePerm::all_rwx()).unwrap_err(),
-            FsError::AlreadyExists
+            SysError::AlreadyExists
         );
 
         vfs_unlink(path.target).unwrap();
-        assert_eq!(vfs_lookup(path).unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs_lookup(path).unwrap_err(), SysError::NotFound);
     }
 
     #[kunit]
@@ -715,7 +714,7 @@ mod kunits {
 
         assert_eq!(dir.to_string(), "/kunit-vfs-dir");
         assert_eq!(file.to_string(), "/kunit-vfs-dir/file");
-        assert_eq!(vfs_rmdir(dir_path).unwrap_err(), FsError::DirNotEmpty);
+        assert_eq!(vfs_rmdir(dir_path).unwrap_err(), SysError::DirNotEmpty);
 
         vfs_link(file_path, link_path).unwrap();
         let linked = vfs_lookup(link_path).unwrap();
@@ -724,16 +723,16 @@ mod kunits {
         assert_eq!(linked.inode(), file.inode());
         assert_eq!(
             vfs_link(dir_path, Path::new("/kunit-vfs-dir-link")).unwrap_err(),
-            FsError::IsDir
+            SysError::IsDir
         );
 
         vfs_unlink(link_path).unwrap();
         vfs_unlink(file_path).unwrap();
-        assert_eq!(vfs_lookup(link_path).unwrap_err(), FsError::NotFound);
-        assert_eq!(vfs_lookup(file_path).unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs_lookup(link_path).unwrap_err(), SysError::NotFound);
+        assert_eq!(vfs_lookup(file_path).unwrap_err(), SysError::NotFound);
 
         vfs_rmdir(dir_path).unwrap();
-        assert_eq!(vfs_lookup(dir_path).unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs_lookup(dir_path).unwrap_err(), SysError::NotFound);
     }
 
     #[kunit]
@@ -758,7 +757,7 @@ mod kunits {
                 ResolveFlags::DENY_LAST_SYMLINK
             ))
             .unwrap_err(),
-            FsError::LinkEncountered
+            SysError::LinkEncountered
         );
         assert_eq!(
             vfs_get_attr(PathResolution::new(
@@ -858,7 +857,7 @@ mod kunits {
                 ResolveFlags::DENY_LAST_SYMLINK
             ))
             .unwrap_err(),
-            FsError::LinkEncountered
+            SysError::LinkEncountered
         );
         assert_eq!(
             vfs_lookup(PathResolution::new(
@@ -866,7 +865,7 @@ mod kunits {
                 ResolveFlags::DENY_SYMLINKS
             ))
             .unwrap_err(),
-            FsError::LinkEncountered
+            SysError::LinkEncountered
         );
         assert_eq!(
             vfs_lookup(PathResolution::new(
@@ -884,7 +883,7 @@ mod kunits {
                 InodePerm::all_rwx()
             )
             .unwrap_err(),
-            FsError::LinkEncountered
+            SysError::LinkEncountered
         );
         let created = vfs_touch(target_path, InodePerm::all_rwx()).unwrap();
         assert_eq!(
@@ -941,10 +940,10 @@ mod kunits {
         vfs_symlink(Path::new("kunit-vfs-loop-b"), loop_a).unwrap();
         vfs_symlink(Path::new("kunit-vfs-loop-a"), loop_b).unwrap();
 
-        assert_eq!(vfs_lookup(loop_a).unwrap_err(), FsError::TooManyLinks);
+        assert_eq!(vfs_lookup(loop_a).unwrap_err(), SysError::TooManyLinks);
         assert_eq!(
             vfs_lookup(PathResolution::new(loop_a, ResolveFlags::DENY_LAST_SYMLINK)).unwrap_err(),
-            FsError::LinkEncountered
+            SysError::LinkEncountered
         );
         assert_eq!(
             vfs_lookup(PathResolution::new(
@@ -959,7 +958,7 @@ mod kunits {
 
         vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
         vfs_symlink(Path::new("/kunit-vfs-sym-rmdir-dir"), dir_link).unwrap();
-        assert_eq!(vfs_rmdir(dir_link).unwrap_err(), FsError::NotDir);
+        assert_eq!(vfs_rmdir(dir_link).unwrap_err(), SysError::NotDir);
 
         vfs_unlink(dir_link).unwrap();
         vfs_rmdir(dir_path).unwrap();
@@ -1007,7 +1006,7 @@ mod kunits {
 
         assert_eq!(file.inode().ty(), InodeType::Regular);
         vfs_unlink(path).unwrap();
-        assert_eq!(vfs_lookup(path).unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs_lookup(path).unwrap_err(), SysError::NotFound);
     }
 
     #[kunit]
@@ -1137,8 +1136,8 @@ mod kunits {
             vfs_lookup(mountpoint).unwrap().to_string(),
             "/kunit-vfs-mnt"
         );
-        assert_eq!(vfs_lookup(lower).unwrap_err(), FsError::NotFound);
-        assert_eq!(vfs_rmdir(mountpoint).unwrap_err(), FsError::IsMountPoint);
+        assert_eq!(vfs_lookup(lower).unwrap_err(), SysError::NotFound);
+        assert_eq!(vfs_rmdir(mountpoint).unwrap_err(), SysError::IsMountPoint);
 
         let file = vfs_touch(upper, InodePerm::all_rwx()).unwrap();
         let reopened = vfs_open(upper).unwrap();
@@ -1148,7 +1147,7 @@ mod kunits {
         let mut buf = [0u8; 7];
         assert_eq!(reopened.read(&mut buf).unwrap(), 7);
         assert_eq!(&buf, b"mounted");
-        assert_eq!(vfs_unmount(upper).unwrap_err(), FsError::NotMounted);
+        assert_eq!(vfs_unmount(upper).unwrap_err(), SysError::NotMounted);
 
         drop(reopened);
         drop(file);
@@ -1159,7 +1158,7 @@ mod kunits {
             vfs_lookup(lower).unwrap().to_string(),
             "/kunit-vfs-mnt/lower-file"
         );
-        assert_eq!(vfs_lookup(upper).unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs_lookup(upper).unwrap_err(), SysError::NotFound);
 
         vfs_unlink(lower).unwrap();
         vfs_rmdir(mountpoint).unwrap();
@@ -1180,7 +1179,7 @@ mod kunits {
         .unwrap();
 
         let live_ref = vfs_touch(live, InodePerm::all_rwx()).unwrap();
-        assert_eq!(vfs_unmount(mountpoint).unwrap_err(), FsError::Busy);
+        assert_eq!(vfs_unmount(mountpoint).unwrap_err(), SysError::Busy);
 
         drop(live_ref);
 
@@ -1205,7 +1204,7 @@ mod kunits {
         vfs_mkdir(nested, InodePerm::all_rwx()).unwrap();
         vfs_mount_at("ramfs", MountSource::Pseudo, MountFlags::empty(), nested).unwrap();
 
-        assert_eq!(vfs_unmount(mountpoint).unwrap_err(), FsError::Busy);
+        assert_eq!(vfs_unmount(mountpoint).unwrap_err(), SysError::Busy);
 
         vfs_unmount(nested).unwrap();
         vfs_rmdir(nested).unwrap();
@@ -1298,7 +1297,7 @@ mod kunits {
         .unwrap();
 
         let left = vfs_touch(left_file, InodePerm::all_rwx()).unwrap();
-        assert_eq!(vfs_lookup(right_file).unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs_lookup(right_file).unwrap_err(), SysError::NotFound);
 
         let right = vfs_touch(right_file, InodePerm::all_rwx()).unwrap();
         assert_eq!(vfs_lookup(left_file).unwrap().inode(), left.inode());
@@ -1308,7 +1307,7 @@ mod kunits {
         drop(right);
 
         vfs_unmount(left_mount).unwrap();
-        assert_eq!(vfs_lookup(left_file).unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs_lookup(left_file).unwrap_err(), SysError::NotFound);
         assert_eq!(
             vfs_lookup(right_file).unwrap().to_string(),
             "/kunit-vfs-right-mnt/file"
@@ -1356,7 +1355,7 @@ mod kunits {
             let vanished = format!("/kunit-vfs-cycle/file-{round}-0");
             assert_eq!(
                 vfs_lookup(Path::new(&vanished)).unwrap_err(),
-                FsError::NotFound
+                SysError::NotFound
             );
         }
 
@@ -1448,11 +1447,11 @@ mod kunits {
             vfs_lookup(visible_file).unwrap().to_string(),
             "/kunit-vfs-direct-stack/visible"
         );
-        assert_eq!(vfs_lookup(hidden_file).unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs_lookup(hidden_file).unwrap_err(), SysError::NotFound);
 
         unmount(first).unwrap();
 
-        assert_eq!(vfs_lookup(visible_file).unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs_lookup(visible_file).unwrap_err(), SysError::NotFound);
         assert_eq!(vfs_lookup(hidden_file).unwrap().inode(), &hidden_inode);
 
         drop(hidden_inode);
@@ -1484,7 +1483,10 @@ mod kunits {
             if layer == 0 {
                 assert_eq!(vfs_lookup(Path::new(&path)).unwrap().to_string(), path);
             } else {
-                assert_eq!(vfs_lookup(Path::new(&path)).unwrap_err(), FsError::NotFound);
+                assert_eq!(
+                    vfs_lookup(Path::new(&path)).unwrap_err(),
+                    SysError::NotFound
+                );
             }
         }
 
@@ -1496,7 +1498,7 @@ mod kunits {
                 let next_name = format!("/kunit-vfs-direct-stack-stress/layer-{}", layer + 1);
                 assert_eq!(
                     vfs_lookup(Path::new(&current_name)).unwrap_err(),
-                    FsError::NotFound
+                    SysError::NotFound
                 );
                 assert_eq!(
                     vfs_lookup(Path::new(&next_name)).unwrap().to_string(),
@@ -1505,7 +1507,7 @@ mod kunits {
             } else {
                 assert_eq!(
                     vfs_lookup(Path::new(&current_name)).unwrap_err(),
-                    FsError::NotFound
+                    SysError::NotFound
                 );
             }
         }

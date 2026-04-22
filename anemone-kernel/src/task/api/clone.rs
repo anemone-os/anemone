@@ -53,7 +53,7 @@ bitflags! {
 
 impl TryFromSyscallArg for CloneFlags {
     fn try_from_syscall_arg(value: u64) -> Result<Self, SysError> {
-        CloneFlags::from_bits(value as u32).ok_or(SysError::Kernel(KernelError::InvalidArgument))
+        CloneFlags::from_bits(value as u32).ok_or(SysError::InvalidArgument)
     }
 }
 
@@ -173,7 +173,7 @@ pub fn kernel_clone(
 
     let parent = if flags.contains(CloneFlags::CLONE_PARENT) {
         unsafe { current_task.with_task_hierarchy(|hier| hier.parent()) }
-            .ok_or(KernelError::InvalidArgument)?
+            .ok_or(SysError::InvalidArgument)?
             .upgrade()
             .unwrap_or_else(|| panic!("dangling task with parent dropped: {}", current_task.tid()))
     } else {
@@ -181,6 +181,14 @@ pub fn kernel_clone(
     };
 
     unsafe { new_task.add_as_child(&parent) };
+
+    kdebugln!(
+        "clone: created new task with tid {} (parent tid {}) with flags {:?}",
+        new_tid,
+        parent.tid(),
+        flags
+    );
+
     drop(parent);
     drop(current_task);
     add_to_ready(new_task);
@@ -195,11 +203,18 @@ extern "C" fn enter_cloned_user_task(trap_frame: *mut TrapFrame, child_tid: *mut
         if task.clone_flags().contains(CloneFlags::CLONE_CHILD_SETTID) {
             *child_tid = current_task_id();
         }
+
+        // we must disable interrupts before calling `on_prv_change`, otherwise we could
+        // leave a window where the task is accounted as returning to user while the CPU
+        // can still take a kernel-mode timer trap, which, in turn, will cause a panic
+        // due to inconsistent task state.
+        IntrArch::local_intr_disable();
     }
+
+    task.on_prv_change(Privilege::User);
 
     drop(task);
     unsafe {
-        IntrArch::local_intr_disable();
         SchedArch::return_to_cloned_task(frame);
     }
     unreachable!("should never return from entering a cloned user task");

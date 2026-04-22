@@ -1,3 +1,4 @@
+pub mod pcie;
 pub mod platform;
 pub mod virtio;
 
@@ -31,7 +32,7 @@ pub trait BusType: KObject {
     fn base(&self) -> &BusTypeBase;
     fn matches(&self, device: &dyn Device, driver: &dyn Driver) -> bool;
 
-    fn register_device(&mut self, device: Arc<dyn Device>) {
+    fn register_device(&self, device: Arc<dyn Device>) {
         for driver in BusType::base(self).drivers.read_irqsave().iter() {
             if self.matches(device.as_ref(), driver.as_ref()) {
                 // TODO: probe defer
@@ -58,7 +59,7 @@ pub trait BusType: KObject {
             .add_kobject(device);
     }
 
-    fn register_driver(&mut self, driver: Arc<dyn Driver>) {
+    fn register_driver(&self, driver: Arc<dyn Driver>) {
         for device in BusType::base(self).devices.read_irqsave().iter() {
             if device.driver().is_some() {
                 continue;

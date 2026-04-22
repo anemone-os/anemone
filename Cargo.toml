@@ -7,7 +7,6 @@ exclude = ["scripts/xtask", "anemone-apps", "anemone-rs", "anemone-abi"]
 
 [workspace.dependencies]
 sbi-rt = { version = "0.0.3" }
-elf = { version = "0.8.0", default-features = false, features = ["to_str"] }
 yansi = { version = "1.0.1", default-features = false }
 riscv = { version = "0.16.0" }
 bitflags = { version = "2.10.0" }
@@ -46,13 +45,10 @@ lwext4_rust = { git = "https://github.com/anemone-os/lwext4_rust.git", rev = "ef
 syn = { version = "2.0", features = ["full"] }
 quote = "1.0"
 proc-macro2 = "1.0"
-goblin = { version = "0.10.5", default-features = false, features = ["elf64"] }
-smoltcp = { version = "0.13.0", default-features = false, features = [
-    "alloc",
-    "medium-ethernet",
-    "proto-ipv4",
-    "socket-raw",
-    "socket-icmp",
-    "socket-udp",
-    "socket-tcp",
+goblin = { version = "0.10.5", default-features = false, features = [
+    # See https://github.com/m4b/goblin/blob/master/src/elf/mod.rs for why elf32 and endian_fd are needed.
+    # "elf32",
+    "elf64",
+    # "endian_fd",
+    # "alloc",
 ] }

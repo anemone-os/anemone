@@ -38,10 +38,10 @@ impl RamfsDir {
         children.0.get(name).copied()
     }
 
-    pub(super) fn insert(&self, name: String, ino: Ino) -> Result<(), FsError> {
+    pub(super) fn insert(&self, name: String, ino: Ino) -> Result<(), SysError> {
         let mut children = self.children.write();
         if children.0.contains_key(&name) {
-            return Err(FsError::AlreadyExists);
+            return Err(SysError::AlreadyExists);
         }
         children.0.insert(name.clone(), ino);
         children.1.push(name);
@@ -106,12 +106,12 @@ impl RamfsSymlink {
     }
 }
 
-fn ramfs_lookup_ino_locked(parent: &InodeRef, name: &str) -> Result<Ino, FsError> {
+fn ramfs_lookup_ino_locked(parent: &InodeRef, name: &str) -> Result<Ino, SysError> {
     let dir_data = ramfs_dir(parent)?;
-    dir_data.get_by_name(name).ok_or(FsError::NotFound)
+    dir_data.get_by_name(name).ok_or(SysError::NotFound)
 }
 
-fn ramfs_lookup_locked(parent: &InodeRef, name: &str) -> Result<InodeRef, FsError> {
+fn ramfs_lookup_locked(parent: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
     let ino = ramfs_lookup_ino_locked(parent, name)?;
     Ok(parent
         .sb()
@@ -119,19 +119,19 @@ fn ramfs_lookup_locked(parent: &InodeRef, name: &str) -> Result<InodeRef, FsErro
         .expect("ino exists but failed to load"))
 }
 
-fn ramfs_remove_locked(dir: &InodeRef, name: &str, is_dir: bool) -> Result<(), FsError> {
+fn ramfs_remove_locked(dir: &InodeRef, name: &str, is_dir: bool) -> Result<(), SysError> {
     let dir_data = ramfs_dir(dir)?;
 
     let sb = dir.sb();
-    let ino = dir_data.remove(name).ok_or(FsError::NotFound)?;
+    let ino = dir_data.remove(name).ok_or(SysError::NotFound)?;
     let inode = sb.iget(ino).expect("ino exists but failed to load");
 
     if is_dir && inode.ty() != InodeType::Dir {
         assert!(dir_data.insert(name.to_string(), ino).is_ok());
-        return Err(FsError::NotDir);
+        return Err(SysError::NotDir);
     } else if !is_dir && inode.ty() == InodeType::Dir {
         assert!(dir_data.insert(name.to_string(), ino).is_ok());
-        return Err(FsError::IsDir);
+        return Err(SysError::IsDir);
     }
 
     inode.inode().dec_nlink();
@@ -151,14 +151,14 @@ fn ramfs_create_child(
     name: &str,
     ty: InodeType,
     perm: InodePerm,
-) -> Result<InodeRef, FsError> {
+) -> Result<InodeRef, SysError> {
     debug_assert!(matches!(ty, InodeType::Dir | InodeType::Regular));
 
     let sb = dir.sb();
     ramfs_sb(&sb).write_tx(|| {
         let dir_data = ramfs_dir(dir)?;
         if dir_data.contains(name) {
-            return Err(FsError::AlreadyExists);
+            return Err(SysError::AlreadyExists);
         }
 
         let new_ino = ramfs_sb(&sb).alloc_ino();
@@ -204,15 +204,15 @@ fn ramfs_create_child(
     })
 }
 
-fn ramfs_touch(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
+fn ramfs_touch(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, SysError> {
     ramfs_create_child(dir, name, InodeType::Regular, perm)
 }
 
-fn ramfs_mkdir(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, FsError> {
+fn ramfs_mkdir(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, SysError> {
     ramfs_create_child(dir, name, InodeType::Dir, perm)
 }
 
-fn ramfs_symlink_create(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, FsError> {
+fn ramfs_symlink_create(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, SysError> {
     let sb = dir.sb();
     let target_text = target.to_string();
     let target_path = PathBuf::from(target_text.as_str());
@@ -221,7 +221,7 @@ fn ramfs_symlink_create(dir: &InodeRef, name: &str, target: &Path) -> Result<Ino
     ramfs_sb(&sb).write_tx(|| {
         let dir_data = ramfs_dir(dir)?;
         if dir_data.contains(name) {
-            return Err(FsError::AlreadyExists);
+            return Err(SysError::AlreadyExists);
         }
 
         let new_ino = ramfs_sb(&sb).alloc_ino();
@@ -244,13 +244,13 @@ fn ramfs_symlink_create(dir: &InodeRef, name: &str, target: &Path) -> Result<Ino
 }
 
 /// Look up a child inode by name inside a directory.
-fn ramfs_lookup(parent: &InodeRef, name: &str) -> Result<InodeRef, FsError> {
+fn ramfs_lookup(parent: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
     let sb = parent.sb();
     ramfs_sb(&sb).read_tx(|| ramfs_lookup_locked(parent, name))
 }
 
 /// Open is not yet implemented for ramfs.
-fn ramfs_open(inode: &InodeRef) -> Result<OpenedFile, FsError> {
+fn ramfs_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
     let of = OpenedFile {
         file_ops: match inode.ty() {
             InodeType::Dir => &RAMFS_DIR_FILE_OPS,
@@ -263,22 +263,22 @@ fn ramfs_open(inode: &InodeRef) -> Result<OpenedFile, FsError> {
     Ok(of)
 }
 
-fn ramfs_link(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), FsError> {
+fn ramfs_link(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), SysError> {
     if let InodeType::Dir = target.ty() {
-        return Err(FsError::IsDir);
+        return Err(SysError::IsDir);
     }
 
     let sb = dir.sb();
 
     if !Arc::ptr_eq(&sb, &target.sb()) {
-        return Err(FsError::CrossDeviceLink);
+        return Err(SysError::CrossDeviceLink);
     }
 
     ramfs_sb(&sb).write_tx(|| {
         let dir_data = ramfs_dir(dir)?;
 
         if dir_data.contains(name) {
-            return Err(FsError::AlreadyExists);
+            return Err(SysError::AlreadyExists);
         }
 
         assert!(dir_data.insert(name.to_string(), target.ino()).is_ok());
@@ -288,36 +288,36 @@ fn ramfs_link(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), FsErr
     })
 }
 
-fn ramfs_unlink(dir: &InodeRef, name: &str) -> Result<(), FsError> {
+fn ramfs_unlink(dir: &InodeRef, name: &str) -> Result<(), SysError> {
     let sb = dir.sb();
     ramfs_sb(&sb).write_tx(|| ramfs_remove_locked(dir, name, false))
 }
 
-fn ramfs_rmdir(dir: &InodeRef, name: &str) -> Result<(), FsError> {
+fn ramfs_rmdir(dir: &InodeRef, name: &str) -> Result<(), SysError> {
     let sb = dir.sb();
     ramfs_sb(&sb).write_tx(|| {
         let child = ramfs_lookup_locked(dir, name)?;
 
         if child.ty() != InodeType::Dir {
-            return Err(FsError::NotDir);
+            return Err(SysError::NotDir);
         }
 
         let child_data = ramfs_dir(&child)?;
         if !child_data.is_empty() {
-            return Err(FsError::DirNotEmpty);
+            return Err(SysError::DirNotEmpty);
         }
 
         ramfs_remove_locked(dir, name, true)
     })
 }
 
-fn ramfs_read_link(inode: &InodeRef) -> Result<PathBuf, FsError> {
+fn ramfs_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {
     let symlink_data = ramfs_symlink(inode)?;
 
     Ok(symlink_data.get_target())
 }
 
-fn ramfs_get_attr(inode: &InodeRef) -> Result<InodeStat, FsError> {
+fn ramfs_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let meta = inode.inode().meta_snapshot();
 
     Ok(InodeStat {
@@ -344,32 +344,32 @@ pub(super) static RAMFS_DIR_INODE_OPS: InodeOps = InodeOps {
     link: ramfs_link,
     unlink: ramfs_unlink,
     rmdir: ramfs_rmdir,
-    read_link: |_| Err(FsError::NotSymlink),
+    read_link: |_| Err(SysError::NotSymlink),
     get_attr: ramfs_get_attr,
 };
 
 pub(super) static RAMFS_REG_INODE_OPS: InodeOps = InodeOps {
-    touch: |_, _, _| Err(FsError::NotDir),
-    mkdir: |_, _, _| Err(FsError::NotDir),
-    symlink: |_, _, _| Err(FsError::NotDir),
-    lookup: |_, _| Err(FsError::NotDir),
+    touch: |_, _, _| Err(SysError::NotDir),
+    mkdir: |_, _, _| Err(SysError::NotDir),
+    symlink: |_, _, _| Err(SysError::NotDir),
+    lookup: |_, _| Err(SysError::NotDir),
     open: ramfs_open,
-    link: |_, _, _| Err(FsError::NotDir),
-    unlink: |_, _| Err(FsError::NotDir),
-    rmdir: |_, _| Err(FsError::NotDir),
-    read_link: |_| Err(FsError::NotSymlink),
+    link: |_, _, _| Err(SysError::NotDir),
+    unlink: |_, _| Err(SysError::NotDir),
+    rmdir: |_, _| Err(SysError::NotDir),
+    read_link: |_| Err(SysError::NotSymlink),
     get_attr: ramfs_get_attr,
 };
 
 pub(super) static RAMFS_SYMLINK_INODE_OPS: InodeOps = InodeOps {
-    touch: |_, _, _| Err(FsError::NotDir),
-    mkdir: |_, _, _| Err(FsError::NotDir),
-    symlink: |_, _, _| Err(FsError::NotDir),
-    lookup: |_, _| Err(FsError::NotDir),
-    open: |_| Err(FsError::NotSupported),
-    link: |_, _, _| Err(FsError::NotDir),
-    unlink: |_, _| Err(FsError::NotDir),
-    rmdir: |_, _| Err(FsError::NotDir),
+    touch: |_, _, _| Err(SysError::NotDir),
+    mkdir: |_, _, _| Err(SysError::NotDir),
+    symlink: |_, _, _| Err(SysError::NotDir),
+    lookup: |_, _| Err(SysError::NotDir),
+    open: |_| Err(SysError::NotSupported),
+    link: |_, _, _| Err(SysError::NotDir),
+    unlink: |_, _| Err(SysError::NotDir),
+    rmdir: |_, _| Err(SysError::NotDir),
     read_link: ramfs_read_link,
     get_attr: ramfs_get_attr,
 };

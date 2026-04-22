@@ -10,7 +10,7 @@ use core::fmt::Debug;
 
 use crate::{
     device::{
-        bus::{platform::PlatformDriver, virtio::VirtIODriver},
+        bus::{pcie::PcieDriver, platform::PlatformDriver, virtio::VirtIODriver},
         kobject::KObject,
     },
     initcall::{InitCallLevel, run_initcalls},
@@ -23,12 +23,12 @@ pub mod intc;
 
 mod block;
 mod clock_source;
-pub(crate) mod net;
 mod power;
 mod rtc;
 mod serial;
 pub use serial::ns16550a::Ns16550ARegisters;
-pub(crate) mod virtio;
+mod pcie_drivers;
+mod virtio;
 
 /// Common data shared by all drivers.
 #[derive(Debug)]
@@ -68,7 +68,7 @@ pub trait DriverData: KObject {
 }
 
 pub trait DriverOps {
-    fn probe(&self, device: Arc<dyn Device>) -> Result<(), DevError>;
+    fn probe(&self, device: Arc<dyn Device>) -> Result<(), SysError>;
 
     /// Shutdown the device.
     ///
@@ -87,6 +87,10 @@ pub trait DriverOps {
     }
 
     fn as_virtio_driver(&self) -> Option<&dyn VirtIODriver> {
+        None
+    }
+
+    fn as_pcie_driver(&self) -> Option<&dyn PcieDriver> {
         None
     }
 }

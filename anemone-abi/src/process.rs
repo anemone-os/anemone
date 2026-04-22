@@ -1,4 +1,65 @@
 pub mod linux {
+    pub mod aux_vec {
+        /// End of vector
+        pub const AT_NULL: u64 = 0;
+        /// Entry should be ignored
+        pub const AT_IGNORE: u64 = 1;
+        /// File descriptor of program
+        pub const AT_EXECFD: u64 = 2;
+        /// Program headers for program
+        pub const AT_PHDR: u64 = 3;
+        /// Size of program headers
+        pub const AT_PHENT: u64 = 4;
+        /// Number of program headers
+        pub const AT_PHNUM: u64 = 5;
+        /// System page size
+        pub const AT_PAGESZ: u64 = 6;
+        /// Base address of interpreter
+        pub const AT_BASE: u64 = 7;
+        /// Flags
+        pub const AT_FLAGS: u64 = 8;
+        /// Entry point of program
+        pub const AT_ENTRY: u64 = 9;
+        /// Program is not ELF
+        pub const AT_NOTELF: u64 = 10;
+        /// Real uid
+        pub const AT_UID: u64 = 11;
+        /// Effective uid
+        pub const AT_EUID: u64 = 12;
+        /// Real gid
+        pub const AT_GID: u64 = 13;
+        /// Effective gid
+        pub const AT_EGID: u64 = 14;
+        /// String identifying CPU for optimizations
+        pub const AT_PLATFORM: u64 = 15;
+        /// Arch dependent hints at CPU capabilities
+        pub const AT_HWCAP: u64 = 16;
+        /// Frequency at which times() increments
+        pub const AT_CLKTCK: u64 = 17;
+        /// Secure mode boolean
+        pub const AT_SECURE: u64 = 23;
+        /// String identitying real platform, may differ from AT_PLATFORM
+        pub const AT_BASE_PLATFORM: u64 = 24;
+        /// Address of 16 random bytes
+        pub const AT_RANDOM: u64 = 25;
+        /// Extension of AT_HWCAP
+        pub const AT_HWCAP2: u64 = 26;
+
+        pub const AT_RSEQ_FEATURE_SIZE: u64 = 27;
+        pub const AT_RSEQ_ALIGN: u64 = 28;
+
+        /// Filename of program
+        pub const AT_EXECFN: u64 = 31;
+        /// Minimal stack size for signal delivery
+        pub const AT_MINSIGSTKSZ: u64 = 51;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct AuxvEntry {
+            pub ty: u64,
+            pub val: u64,
+        }
+    }
+
     pub mod clone {
         #![allow(unused)]
         /// Signal sent to parent when child process changes state

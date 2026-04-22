@@ -64,11 +64,11 @@ impl Dentry {
     }
 
     /// Try to insert a child dentry with the given name.
-    pub fn insert_child(&self, name: String, dentry: &Arc<Dentry>) -> Result<(), FsError> {
+    pub fn insert_child(&self, name: String, dentry: &Arc<Dentry>) -> Result<(), SysError> {
         if let Some(children) = self.inner.write().children.as_mut() {
             if let Some(record) = children.get(&name) {
                 if record.upgrade().is_some() {
-                    return Err(FsError::AlreadyExists);
+                    return Err(SysError::AlreadyExists);
                 } else {
                     children.remove(&name);
                 }
@@ -76,12 +76,12 @@ impl Dentry {
             children.insert(name, Arc::downgrade(dentry));
             Ok(())
         } else {
-            Err(FsError::NotDir)
+            Err(SysError::NotDir)
         }
     }
 
     /// Remove a child dentry with the given name.
-    pub fn remove_child(&self, name: &str) -> Result<(), FsError> {
+    pub fn remove_child(&self, name: &str) -> Result<(), SysError> {
         if let Some(children) = self.inner.write().children.as_mut() {
             if let Some(existing) = children.get(name).and_then(|weak| weak.upgrade()) {
                 children.remove(name);
@@ -89,28 +89,28 @@ impl Dentry {
             } else {
                 // though the weak reference exists, it's not counted as a child if it can't be
                 // upgraded.
-                Err(FsError::NotFound)
+                Err(SysError::NotFound)
             }
         } else {
-            Err(FsError::NotDir)
+            Err(SysError::NotDir)
         }
     }
 
     /// Look up a child dentry with the given name.
-    pub fn lookup_child(&self, name: &str) -> Result<Arc<Dentry>, FsError> {
+    pub fn lookup_child(&self, name: &str) -> Result<Arc<Dentry>, SysError> {
         if let Some(children) = self.inner.write().children.as_mut() {
             if let Some(record) = children.get(name) {
                 if let Some(child) = record.upgrade() {
                     Ok(child)
                 } else {
                     children.remove(name);
-                    Err(FsError::NotFound)
+                    Err(SysError::NotFound)
                 }
             } else {
-                Err(FsError::NotFound)
+                Err(SysError::NotFound)
             }
         } else {
-            Err(FsError::NotDir)
+            Err(SysError::NotDir)
         }
     }
 }

@@ -124,7 +124,7 @@ pub struct VmArea {
 }
 
 impl VmArea {
-    pub(super) fn new(
+    pub fn new(
         range: VirtPageRange,
         poffset: usize,
         prot: Protection,
@@ -236,11 +236,11 @@ impl VmArea {
         mapper: &mut Mapper,
         vpn: VirtPageNum,
         access: PageFaultType,
-    ) -> Result<(), MmError> {
+    ) -> Result<(), SysError> {
         debug_assert!(self.range.contains(vpn));
 
         if !self.prot.contains(access.into()) {
-            return Err(MmError::PermissionDenied);
+            return Err(SysError::PermissionDenied);
         }
 
         let pidx = self.vmo_pidx(vpn);
@@ -260,7 +260,7 @@ impl VmArea {
         &mut self,
         mapper: &mut Mapper,
         fault_info: &PageFaultInfo,
-    ) -> Result<(), MmError> {
+    ) -> Result<(), SysError> {
         let vpn = fault_info.fault_addr().page_down();
         debug_assert!(self.range.contains(vpn));
 
@@ -334,9 +334,9 @@ impl VmArea {
 
 impl VmArea {
     /// Most primitive and most powerful way to tailor a VMA.
-    pub(super) fn split(self, at: VirtPageNum) -> Result<(Option<Self>, Option<Self>), MmError> {
+    pub(super) fn split(self, at: VirtPageNum) -> Result<(Option<Self>, Option<Self>), SysError> {
         if at < self.range.start() || at > self.range.end() {
-            return Err(MmError::InvalidArgument);
+            return Err(SysError::InvalidArgument);
         }
 
         let left = if at > self.range.start() {
@@ -375,9 +375,9 @@ impl VmArea {
     /// Trim the first `npages` pages of this VMA.
     ///
     /// Trying to trim the whole region is considered invalid.
-    pub(super) fn trim_start(&mut self, npages: usize) -> Result<(), MmError> {
+    pub(super) fn trim_start(&mut self, npages: usize) -> Result<(), SysError> {
         if npages as u64 >= self.range.npages() {
-            return Err(MmError::InvalidArgument);
+            return Err(SysError::InvalidArgument);
         }
 
         self.range = VirtPageRange::new(
@@ -392,9 +392,9 @@ impl VmArea {
     /// Trim the last `npages` pages of this VMA.
     ///
     /// Trying to trim the whole region is considered invalid.
-    pub(super) fn trim_end(&mut self, npages: usize) -> Result<(), MmError> {
+    pub(super) fn trim_end(&mut self, npages: usize) -> Result<(), SysError> {
         if npages as u64 >= self.range.npages() {
-            return Err(MmError::InvalidArgument);
+            return Err(SysError::InvalidArgument);
         }
 
         self.range = VirtPageRange::new(self.range.start(), self.range.npages() - npages as u64);

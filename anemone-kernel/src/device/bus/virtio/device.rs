@@ -90,7 +90,7 @@ impl VirtIODevice {
         &self,
         handler: &'static IrqHandler,
         prv_data: Option<AnyOpaque>,
-    ) -> Result<(), DevError> {
+    ) -> Result<(), SysError> {
         let kobj = self
             .parent()
             .expect("virtio device should have parent transport device")

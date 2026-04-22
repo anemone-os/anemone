@@ -5,15 +5,15 @@ use crate::{
 
 use super::inode::devfs_new_inode;
 
-fn devfs_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, FsError> {
+fn devfs_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, SysError> {
     devfs_new_inode(sb.clone(), DevfsNode::new(ino)?)
 }
 
-fn devfs_evict_inode(_sb: &SuperBlock, _inode: Arc<Inode>) -> Result<(), FsError> {
+fn devfs_evict_inode(_sb: &SuperBlock, _inode: Arc<Inode>) -> Result<(), SysError> {
     Ok(())
 }
 
-fn devfs_sync_inode(_inode: &InodeRef) -> Result<(), FsError> {
+fn devfs_sync_inode(_inode: &InodeRef) -> Result<(), SysError> {
     Ok(())
 }
 

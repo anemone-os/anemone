@@ -101,7 +101,7 @@ impl Mapper<'_> {
         length: u64,
     ) -> Result<(), TErr>
     where
-        TErr: Debug + From<MmError>,
+        TErr: Debug + From<SysError>,
     {
         if length == 0 {
             return Ok(());
@@ -109,13 +109,13 @@ impl Mapper<'_> {
         let vaddr = vaddr;
         let vaddr_end = VirtAddr::new(vaddr.get().wrapping_add(length));
         if vaddr_end < vaddr {
-            return Err(TErr::from(MmError::InvalidArgument));
+            return Err(TErr::from(SysError::InvalidArgument));
         }
         let vpn_st = vaddr.page_down();
         let vpn_end = vaddr_end.page_up();
         let fp_offset = (vaddr - vpn_st.to_virt_addr()) as usize;
         let fp_datasz = PagingArch::PAGE_SIZE_BYTES - fp_offset;
-        let fp_ppn = self.translate(vpn_st).ok_or(MmError::NotMapped)?.ppn;
+        let fp_ppn = self.translate(vpn_st).ok_or(SysError::NotMapped)?.ppn;
         unsafe {
             source
                 .copy_to(0, unsafe {
@@ -130,7 +130,7 @@ impl Mapper<'_> {
         for vpn in (vpn_st + 1).get()..(vpn_end - 1).get() {
             let ppn = self
                 .translate(VirtPageNum::new(vpn))
-                .ok_or(MmError::NotMapped)?
+                .ok_or(SysError::NotMapped)?
                 .ppn;
             let addr_st = ppn.to_hhdm().to_virt_addr().get();
             unsafe {
@@ -146,7 +146,7 @@ impl Mapper<'_> {
             count += 1;
         }
         if vpn_end != vpn_st + 1 {
-            let ed_ppn = self.translate(vpn_end - 1).ok_or(MmError::NotMapped)?.ppn;
+            let ed_ppn = self.translate(vpn_end - 1).ok_or(SysError::NotMapped)?.ppn;
             let addr_st = ed_ppn.to_hhdm().to_virt_addr().get();
             let data_st = fp_datasz + count * PagingArch::PAGE_SIZE_BYTES;
             unsafe {
@@ -169,7 +169,7 @@ impl Mapper<'_> {
     ///
     /// Only global pages can be huge pages, otherwise a panic will be
     /// triggered.
-    pub fn map(&mut self, mapping: Mapping) -> Result<(), MmError> {
+    pub fn map(&mut self, mapping: Mapping) -> Result<(), SysError> {
         if mapping.huge_pages && !mapping.flags.contains(PteFlags::GLOBAL) {
             panic!("internal error: huge page mapping must be global");
         }
@@ -190,7 +190,7 @@ impl Mapper<'_> {
                 }
             }
 
-            fn do_map(&mut self) -> Result<(), MmError> {
+            fn do_map(&mut self) -> Result<(), SysError> {
                 let Mapping {
                     vpn,
                     ppn,
@@ -274,7 +274,7 @@ impl Mapper<'_> {
     ///
     /// * Only global pages can be huge pages, otherwise a panic will be
     ///   triggered.
-    pub unsafe fn map_overwrite(&mut self, mapping: Mapping) -> Result<(), MmError> {
+    pub unsafe fn map_overwrite(&mut self, mapping: Mapping) -> Result<(), SysError> {
         if mapping.huge_pages && !mapping.flags.contains(PteFlags::GLOBAL) {
             panic!("internal error: huge page mapping must be global");
         }
@@ -677,9 +677,9 @@ impl Mapper<'_> {
     ///
     /// # Returns
     ///     * `Ok(())` if the mapping is successful.
-    ///     * `Err(MmError::AlreadyMapped)` if the target page is already mapped
+    ///     * `Err(SysError::AlreadyMapped)` if the target page is already mapped
     ///       and `overwrite` is false.
-    ///     * `Err(MmError::OutOfMemory)` if the mapping requires allocation of
+    ///     * `Err(SysError::OutOfMemory)` if the mapping requires allocation of
     ///       new page tables and the allocation fails.
     pub unsafe fn map_one(
         &mut self,
@@ -688,9 +688,9 @@ impl Mapper<'_> {
         flags: PteFlags,
         level_at: usize,
         overwrite: bool,
-    ) -> Result<(), MmError> {
+    ) -> Result<(), SysError> {
         if !flags.is_supported_rwx_combination() {
-            return Err(MmError::InvalidArgument);
+            return Err(SysError::InvalidArgument);
         }
         let levels = PagingArch::PAGE_LEVELS;
 
@@ -731,7 +731,7 @@ impl Mapper<'_> {
             if level == level_at {
                 // leaf reached
                 if pte.is_valid() && !overwrite {
-                    return Err(MmError::AlreadyMapped);
+                    return Err(SysError::AlreadyMapped);
                 }
                 *pte = Pte::new(ppn, flags | PteFlags::VALID, level);
                 break;
@@ -740,7 +740,7 @@ impl Mapper<'_> {
                 if !pte.is_branch() {
                     if pte.is_leaf() && !overwrite {
                         // huge page exists.
-                        return Err(MmError::AlreadyMapped);
+                        return Err(SysError::AlreadyMapped);
                     }
 
                     // allocate a new pgdir
@@ -748,7 +748,7 @@ impl Mapper<'_> {
                     // no need to undo all previous frame allocations if this fails,
                     // as once OutOfMemory is returned, the callerwill kill the process and thus
                     // all allocated frames will be deallocated automatically.
-                    let new_pgdir_ppn = alloc_frame_zeroed().ok_or(MmError::OutOfMemory)?.leak();
+                    let new_pgdir_ppn = alloc_frame_zeroed().ok_or(SysError::OutOfMemory)?.leak();
 
                     *pte = Pte::new(
                         new_pgdir_ppn,
@@ -779,7 +779,7 @@ impl Mapper<'_> {
         vpn: VirtPageNum,
         mut op: F,
         level_at: usize,
-    ) -> Result<(), MmError> {
+    ) -> Result<(), SysError> {
         let levels = PagingArch::PAGE_LEVELS;
 
         // Check level_at value
@@ -824,12 +824,12 @@ impl Mapper<'_> {
                     }
                     break;
                 } else {
-                    return Err(MmError::NotMapped);
+                    return Err(SysError::NotMapped);
                 }
             } else {
                 // branch
                 if !pte.is_branch() {
-                    return Err(MmError::AlreadyMapped);
+                    return Err(SysError::AlreadyMapped);
                 }
                 pgdir = unsafe {
                     pte.ppn()

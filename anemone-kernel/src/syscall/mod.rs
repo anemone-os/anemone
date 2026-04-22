@@ -1,5 +1,3 @@
-// TODO
-
 use anemone_abi::syscall::ANEMONE_SYSNO_MAX;
 
 use crate::{
@@ -14,12 +12,7 @@ const INVALID_SYSCALL: SyscallHandler = SyscallHandler {
     sysno: 0,
     nargs: 0,
     name: "invalid",
-    handler: {
-        pub(super) fn invalid_syscall_handler(_regs: &SyscallRegs) -> Result<u64, SysError> {
-            Err(KernelError::NoSys.into())
-        }
-        invalid_syscall_handler
-    },
+    handler: |_| Err(SysError::NoSys),
 };
 
 /// Syscall handler table. Singleton instance.
@@ -90,12 +83,13 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) {
         .copied()
         .unwrap_or(INVALID_SYSCALL);
 
-    // kdebugln!(
-    //     "handling syscall {} (#{}) for task {}",
-    //     handler.name,
-    //     sysno,
-    //     current_task_id()
-    // );
+    if sysno < ANEMONE_SYSNO_MAX as usize && handler.sysno == 0 {
+        knoticeln!(
+            "unknown syscall number {} from task {}",
+            sysno,
+            current_task_id()
+        );
+    }
 
     let regs = SyscallRegs {
         sysno,

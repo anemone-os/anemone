@@ -65,6 +65,7 @@ pub struct LA64TrapFrame {
     era: u64,
     badv: u64,
     estat: u64,
+    ktp: u64,
 }
 
 impl LA64TrapFrame {
@@ -77,6 +78,11 @@ impl LA64TrapFrame {
         args: &[u64; 7],
         ra: u64,
     ) -> Self {
+        let mut current_tp = 0;
+        unsafe {
+            asm!("move {}, $tp", out(reg) current_tp);
+        }
+
         Self {
             gpr: Gpr {
                 r: {
@@ -84,8 +90,8 @@ impl LA64TrapFrame {
                     r[4..11].copy_from_slice(args);
                     r[3] = stack_top;
                     r[1] = ra as u64;
-                    unsafe {
-                        asm!("st.d $tp, {0}, 0", in(reg) &r[2]); //tp
+                    if matches!(prv, Privilege::Kernel) {
+                        r[2] = current_tp;
                     }
                     r
                 },
@@ -99,6 +105,7 @@ impl LA64TrapFrame {
             era: entry,
             badv: 0,
             estat: 0,
+            ktp: current_tp,
         }
     }
 }
@@ -110,6 +117,7 @@ impl TrapFrameArch for LA64TrapFrame {
         era: 0,
         badv: 0,
         estat: 0,
+        ktp: 0,
     };
 
     /// Read syscall argument IDX from the trap frame.

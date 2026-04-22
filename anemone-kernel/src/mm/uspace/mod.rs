@@ -3,20 +3,20 @@
 //! This module provides [UserSpace], which encapsulates a process' page
 //! table, VMA registry, user stack and heap state, and helpers for loading
 //! user segments.
+//!
+//! TODO: Refactor the API: split stack/brk initializing logic into a seperate
+//! builder, rather than placing those initializing helpers in [UserSpaceData].
 
-use core::{
-    fmt::Debug,
-    ops::{Deref, DerefMut},
-};
+use core::ops::{Deref, DerefMut};
 
 use crate::{
     mm::kptable::KERNEL_PTABLE,
     prelude::{
         vma::{ForkPolicy, Protection, VmFlags},
-        vmo::{VmObject, anon::AnonObject, empty::EmptyObject, fixed::FixedObject},
+        vmo::{anon::AnonObject, empty::EmptyObject},
         *,
     },
-    utils::data::DataSource,
+    sync::r#final::Final,
 };
 use vma::{VmArea, VmReservation};
 
@@ -24,7 +24,6 @@ mod api;
 pub use api::*;
 
 pub mod fault;
-pub mod image;
 pub mod mmap;
 pub mod vma;
 pub mod vmo;
@@ -104,15 +103,42 @@ pub struct UserSpaceData {
     vmas: BTreeMap<VirtPageNum, VmArea>,
     stack: Stack,
     heap: Heap,
+
+    // note that following variable is not put in TaskExecInfo, since they are bound to the
+    // address space, not the process.
+    /// Environment variable region. [start, start + size). Strings, not
+    /// pointers.
+    ///
+    /// /proc/[id]/environ needs this.
+    env_range: Final<(VirtAddr, usize)>,
+    // auxv is a bit tricky. nyi.
+}
+
+impl UserSpace {
+    pub fn read(&self) -> ReadNoPreemptGuard<'_, UserSpaceData> {
+        self.data.read()
+    }
+
+    pub fn write(&self) -> WriteNoPreemptGuard<'_, UserSpaceData> {
+        self.data.write()
+    }
 }
 
 impl UserSpace {
     /// Create a new [UserSpace] prepared for running a user process.
     ///
     /// This will copy kernel mappings into the new page table and preallocate
-    /// the user stack to [INIT_USER_STACK_PAGES]. The heap will be left for
+    /// the user stack to [INIT_USER_STACK_PAGES]. // The heap will be left for
     /// initialization after the user image is loaded.
-    pub fn new_user() -> Result<Self, MmError> {
+    ///
+    /// Following information will be loaded during [kernel_execve]:
+    ///
+    /// - Heap range
+    /// - environment variable region
+    /// - auxiliary vector region
+    ///
+    /// This constructor will set them to dummy zeros.
+    pub fn new_user() -> Result<Self, SysError> {
         let mut table = PageTable::new()?;
         KERNEL_PTABLE.copy_to_ptable(&mut table);
 
@@ -156,18 +182,15 @@ impl UserSpace {
             heap_vmo,
         );
 
-        // TODO: after we support dynamic elf loading, uncomment zero_guard_vma to
-        // reserve the zero page and catch null pointer dereference.
-
-        // let zero_guard_vma = VmArea::new_reserved(
-        //     VirtPageRange::new(VirtPageNum::new(0), 1),
-        //     0,
-        //     Protection::empty(),
-        //     ForkPolicy::Shared,
-        //     VmFlags::empty(),
-        //     VmReservation::Guard,
-        //     guard_vmo,
-        // );
+        let zero_guard_vma = VmArea::new_reserved(
+            VirtPageRange::new(VirtPageNum::new(0), 1),
+            0,
+            Protection::empty(),
+            ForkPolicy::Shared,
+            VmFlags::empty(),
+            VmReservation::Guard,
+            guard_vmo,
+        );
 
         let mut vmas = BTreeMap::new();
         assert!(vmas.insert(stack_vma.range().start(), stack_vma).is_none());
@@ -176,10 +199,10 @@ impl UserSpace {
                 .is_none()
         );
         assert!(vmas.insert(heap_vma.range().start(), heap_vma).is_none());
-        // assert!(
-        //     vmas.insert(zero_guard_vma.range().start(), zero_guard_vma)
-        //         .is_none()
-        // );
+        assert!(
+            vmas.insert(zero_guard_vma.range().start(), zero_guard_vma)
+                .is_none()
+        );
 
         let mut uspace = UserSpace {
             table_ppn: table.root_ppn(),
@@ -195,22 +218,17 @@ impl UserSpace {
                     svpn: sheap,
                     brk: sheap.to_virt_addr(),
                 },
+                env_range: Final::new_uninit(),
             }),
         };
 
         uspace.write().prefault_initial_stack()?;
         Ok(uspace)
     }
+}
 
-    pub fn read(&self) -> ReadNoPreemptGuard<'_, UserSpaceData> {
-        self.data.read()
-    }
-
-    pub fn write(&self) -> WriteNoPreemptGuard<'_, UserSpaceData> {
-        self.data.write()
-    }
-
-    pub fn fork(&self) -> Result<Self, MmError> {
+impl UserSpace {
+    pub fn fork(&self) -> Result<Self, SysError> {
         let data = self.write().fork()?;
         Ok(UserSpace {
             table_ppn: data.table.root_ppn(),
@@ -258,7 +276,7 @@ impl UserSpaceData {
     }
 
     /// Used when loading an executable image.
-    fn move_heap_reservation(&mut self, new_start: VirtPageNum) -> Result<(), MmError> {
+    fn move_heap_reservation(&mut self, new_start: VirtPageNum) -> Result<(), SysError> {
         if new_start == self.heap.svpn {
             return Ok(());
         }
@@ -276,7 +294,7 @@ impl UserSpaceData {
             .any(|vma| vma.range().intersects(&new_range))
         {
             assert!(self.vmas.insert(old_start, heap_vma).is_none());
-            return Err(MmError::OutOfMemory);
+            return Err(SysError::OutOfMemory);
         }
 
         heap_vma.set_range(new_range);
@@ -342,79 +360,40 @@ impl UserSpaceData {
         Self::find_vma_raw_mut(&mut self.vmas, vaddr)
     }
 
-    /// Add a memory segment to the user space and fill the segment with the
-    /// given data.
+    /// Register a newly prepared load segment VMA into this address space.
     ///
-    /// This function will automatically adjust the `ubrk` value and the
-    /// position of the heap area.
+    /// This function will automatically advance the heap reservation so it
+    /// stays above the loaded image.
     ///
     /// # Safety
-    /// This function is unsafe because:
-    ///  * **any already mapped page tables will not be rolled back if an
-    ///    exception is encountered during the page table mapping process.**
-    ///  * This function does not validate address range conflicts with existing
-    ///    mappings, potentially causing code/data overwrites.
-    ///  * **Calling this after the heap area is initialized will lead to
-    ///    panic.**
-    pub unsafe fn add_segment<TErr: Debug + From<MmError>>(
-        &mut self,
-        vaddr: VirtAddr,
-        vsize: usize,
-        psize: usize,
-        source: &impl DataSource<TError = impl Into<TErr>>,
-        rwx_flags: PteFlags,
-    ) -> Result<(), TErr> {
-        let vaddr_ed = vaddr + vsize as u64;
-        let vpn_st = vaddr.page_down();
-        let vpn_ed = vaddr_ed.page_up();
-        let len = vpn_ed - vpn_st;
+    ///
+    /// This function is expected to be called during a new binary is
+    /// [kernel_execve]d. Otherwise undefined behaviour will occur.
+    pub unsafe fn add_segment(&mut self, vma: VmArea) -> Result<(), SysError> {
+        let range = *vma.range();
+        let vaddr = range.start().to_virt_addr();
+        let vaddr_ed = range.end().to_virt_addr();
 
         if self.heap.brk != self.heap.svpn.to_virt_addr() {
             panic!("add_segment should be called before heap initialization.");
         }
 
-        if vpn_ed > self.heap.svpn {
-            self.move_heap_reservation(vpn_ed)?;
+        if range.end() > self.heap.svpn {
+            self.move_heap_reservation(range.end())?;
         }
 
-        let frames = (0..len)
-            .map(|_| {
-                alloc_frame_zeroed()
-                    .and_then(|owned| unsafe { Some(owned.into_frame_handle()) })
-                    .ok_or(MmError::OutOfMemory)
-            })
-            .collect::<Result<Vec<_>, MmError>>()?
-            .into_boxed_slice();
-
-        let mut seg_vmo = FixedObject::new(frames);
-        let seg_off = (vaddr - vpn_st.to_virt_addr()) as usize;
-
-        // TODO: vmo write should support DataSource-style src.
-
-        let mut written = 0usize;
-        let chunk_cap = psize.min(0x10000);
-        let mut chunk = vec![0u8; chunk_cap].into_boxed_slice();
-
-        while written < psize {
-            let chunk_len = (psize - written).min(chunk.len());
-            source
-                .copy_to(written, &mut chunk[..chunk_len])
-                .map_err(Into::into)?;
-            seg_vmo.write(seg_off + written, &chunk[..chunk_len])?;
-            written += chunk_len;
+        match self.insert_vma(vma) {
+            Ok(()) => Ok(()),
+            Err(SysError::AlreadyMapped) => {
+                knoticeln!(
+                    "overlapping segment at {:#x} - {:#x}",
+                    vaddr.get(),
+                    vaddr_ed.get()
+                );
+                Err(SysError::AlreadyMapped)
+            },
+            Err(err) => Err(err),
         }
-
-        let seg_vma = VmArea::new(
-            VirtPageRange::new(vpn_st, len),
-            0,
-            Protection::from(rwx_flags),
-            ForkPolicy::CopyOnWrite,
-            VmFlags::empty(),
-            Arc::new(seg_vmo),
-        );
-        assert!(self.vmas.insert(seg_vma.range().start(), seg_vma).is_none());
-
-        Ok(())
     }
 
     /// Get the program break
@@ -427,14 +406,14 @@ impl UserSpaceData {
     /// This function grows or shrinks the heap tracked in `uheap` to make
     /// `brk` the new program break. It returns an error if the requested
     /// break is out of range or if allocation fails while growing.
-    pub fn set_brk(&mut self, brk: VirtAddr) -> Result<(), MmError> {
+    pub fn set_brk(&mut self, brk: VirtAddr) -> Result<(), SysError> {
         let heap_range = *self.heap_vma().range();
 
         if brk < heap_range.start().to_virt_addr() {
-            return Err(MmError::OutOfMemory); // see reference https://www.man7.org/linux/man-pages/man2/brk.2.html
+            return Err(SysError::OutOfMemory); // see reference https://www.man7.org/linux/man-pages/man2/brk.2.html
         }
         if brk > heap_range.end().to_virt_addr() {
-            return Err(MmError::OutOfMemory);
+            return Err(SysError::OutOfMemory);
         }
 
         let new_brk_vpn = brk.page_up();
@@ -457,7 +436,10 @@ impl UserSpaceData {
     }
 
     /// Prepare the initial stack window used during exec image construction.
-    fn prefault_initial_stack(&mut self) -> Result<(), MmError> {
+    ///
+    /// This does not actually map any pages, but just sets the committed
+    /// bottom.
+    fn prefault_initial_stack(&mut self) -> Result<(), SysError> {
         self.stack.committed_bottom = self.stack_vma().range().end() - INIT_USER_STACK_PAGES;
 
         Ok(())
@@ -466,16 +448,25 @@ impl UserSpaceData {
     /// Push data onto the user init stack and return a pointer to the copied
     /// data on the stack.
     ///
-    /// Returns [MmError::ArgumentTooLarge] if the task init stack is not large
+    /// Returns [SysError::ArgumentTooLarge] if the task init stack is not large
     /// enough to hold the data.
     ///
+    /// Pushing data whose length is zero is allowed. This will not copy any
+    /// data to the stack, but will still move the stack pointer and return the
+    /// new stack pointer. **Useful for alignment purposes.** Besides, pushing
+    /// zero-length data and u8-alignment won't change stack pointer, which can
+    /// be used to query current sp.
+    ///
+    /// Honestly these rules is really weird, you should just call
+    /// [Self::current_init_sp] and [Self::align_down_init_sp] instead.
+    ///
     /// ## Safety
-    /// **Invoke this function when the stack is in use may lead to undefined
+    /// **Invoke this function when the stack is in use will lead to undefined
     /// behavior**
     pub unsafe fn push_to_init_stack<A: Sized>(
         &mut self,
         data: &[u8],
-    ) -> Result<VirtAddr, MmError> {
+    ) -> Result<VirtAddr, SysError> {
         let align = align_of::<A>() as u64;
         let mut sp = self.stack.init_sp.get() - data.len() as u64;
         sp = align_down!(sp, align) as u64;
@@ -483,16 +474,66 @@ impl UserSpaceData {
         if KernelLayout::USPACE_TOP_ADDR - sp
             > (INIT_USER_STACK_PAGES << PagingArch::PAGE_SIZE_BITS)
         {
-            return Err(MmError::ArgumentTooLarge);
+            return Err(SysError::ArgumentTooLarge);
         }
 
         let sp = VirtAddr::new(sp);
+        if data.len() == 0 {
+            self.stack.init_sp = sp;
+            return Ok(sp);
+        }
+
         let stack_base = self.stack_vma().range().start().to_virt_addr();
         let stack_offset = (sp - stack_base) as usize;
         self.stack_vma().backing().write(stack_offset, data)?;
         self.stack.init_sp = sp;
         Ok(sp)
     }
+
+    /// Get current init sp.
+    ///
+    /// # Safety
+    /// Calling this function after the user space is fully initialized is
+    /// undefined behaviour.
+    pub unsafe fn current_init_sp(&self) -> VirtAddr {
+        self.stack.init_sp
+    }
+
+    /// Align down current init sp, returning new sp.
+    ///
+    /// # Safety
+    /// Calling this function after the user space is fully initialized is
+    /// undefined behaviour.
+    pub unsafe fn align_down_init_sp(&mut self, align_shift: usize) -> VirtAddr {
+        let new = align_down_power_of_2!(self.stack.init_sp.get(), 1 << align_shift);
+        self.stack.init_sp = VirtAddr::new(new as u64);
+
+        self.stack.init_sp
+    }
+
+    /// Mark the environment variable region for this address space.
+    ///
+    /// Used after all data is pushed to the initial stack.
+    ///
+    /// # Safety
+    ///
+    /// Calling this function multiple times or calling this function before
+    /// pushing all data to the initial stack will lead to undefined behavior.
+    pub unsafe fn mark_env_range(&mut self, start: VirtAddr, size: usize) {
+        self.env_range.init((start, size));
+    }
+
+    // Mark the auxiliary vector region for this address space.
+    //
+    // Used after all data is pushed to the initial stack.
+    //
+    // # Safety
+    //
+    // Calling this function multiple times or calling this function before
+    // pushing all data to the initial stack will lead to undefined behavior.
+    // pub unsafe fn mark_aux_range(&mut self, start: VirtAddr, size: usize) {
+    //     self.aux_range.init((start, size));
+    // }
 
     /// Move the init stack pointer to the top of the user stack.
     ///
@@ -542,7 +583,7 @@ impl UserSpaceData {
     // /// page fault.
 
     /// Fork a new [UserSpace] from this one with copy-on-write semantics.
-    pub fn fork(&mut self) -> Result<Self, MmError> {
+    pub fn fork(&mut self) -> Result<Self, SysError> {
         // well... there is no need to map pages here. page fault handler will handle
         // everything lazily...
         let mut new_table = PageTable::new()?;
@@ -559,48 +600,49 @@ impl UserSpaceData {
             vmas: new_vmas,
             stack: self.stack,
             heap: self.heap,
+            env_range: self.env_range,
         };
 
         Ok(new_inner)
     }
 
     /// Check if the given virtual page has the requested permissions.
-    pub fn check_permission(&self, vpn: VirtPageNum, rwx_flags: PteFlags) -> Result<(), MmError> {
+    pub fn check_permission(&self, vpn: VirtPageNum, rwx_flags: PteFlags) -> Result<(), SysError> {
         // stack and heap must be handled specially since they have special semantics.
 
         let vma = self
             .find_vma(vpn.to_virt_addr())
-            .ok_or(MmError::NotMapped)?;
+            .ok_or(SysError::NotMapped)?;
 
         match vma.reservation() {
             Some(VmReservation::Stack) => {
                 if rwx_flags.contains(PteFlags::EXECUTE) {
-                    return Err(MmError::PermissionDenied);
+                    return Err(SysError::PermissionDenied);
                 }
 
                 if self.stack_accessible(vpn.to_virt_addr()) {
                     Ok(())
                 } else {
-                    Err(MmError::NotMapped)
+                    Err(SysError::NotMapped)
                 }
             },
             Some(VmReservation::Heap) => {
                 if rwx_flags.contains(PteFlags::EXECUTE) {
-                    return Err(MmError::PermissionDenied);
+                    return Err(SysError::PermissionDenied);
                 }
 
                 if self.heap_accessible(vpn.to_virt_addr()) {
                     Ok(())
                 } else {
-                    Err(MmError::NotMapped)
+                    Err(SysError::NotMapped)
                 }
             },
-            Some(VmReservation::Guard) => Err(MmError::NotMapped),
+            Some(VmReservation::Guard) => Err(SysError::NotMapped),
             None => {
                 if vma.prot().contains(rwx_flags.into()) {
                     Ok(())
                 } else {
-                    Err(MmError::PermissionDenied)
+                    Err(SysError::PermissionDenied)
                 }
             },
         }
@@ -622,20 +664,20 @@ impl UserSpaceData {
 }
 
 impl UserSpaceData {
-    pub fn handle_page_fault(&mut self, fault_info: &PageFaultInfo) -> Result<(), MmError> {
+    pub fn handle_page_fault(&mut self, fault_info: &PageFaultInfo) -> Result<(), SysError> {
         // again, stack and heap must be handled specially since they have special
         // semantics.
 
         let fault_addr = fault_info.fault_addr();
         let reservation = self
             .find_vma(fault_addr)
-            .ok_or(MmError::NotMapped)?
+            .ok_or(SysError::NotMapped)?
             .reservation();
 
         match reservation {
             Some(VmReservation::Stack) => {
                 if !self.stack_accessible(fault_addr) {
-                    return Err(MmError::NotMapped);
+                    return Err(SysError::NotMapped);
                 }
 
                 let UserSpaceData {
@@ -662,7 +704,7 @@ impl UserSpaceData {
             },
             Some(VmReservation::Heap) => {
                 if !self.heap_accessible(fault_addr) {
-                    return Err(MmError::NotMapped);
+                    return Err(SysError::NotMapped);
                 }
 
                 let UserSpaceData {
@@ -678,7 +720,7 @@ impl UserSpaceData {
 
                 heap_vma.handle_page_fault(&mut mapper, fault_info)
             },
-            Some(VmReservation::Guard) => Err(MmError::NotMapped),
+            Some(VmReservation::Guard) => Err(SysError::NotMapped),
             None => {
                 let UserSpaceData {
                     ref mut table,
@@ -687,7 +729,7 @@ impl UserSpaceData {
                 } = *self;
                 let mut mapper = table.mapper();
                 let other_vma =
-                    Self::find_vma_raw_mut(vmas, fault_addr).ok_or(MmError::NotMapped)?;
+                    Self::find_vma_raw_mut(vmas, fault_addr).ok_or(SysError::NotMapped)?;
 
                 other_vma.handle_page_fault(&mut mapper, fault_info)
             },
@@ -706,7 +748,7 @@ impl UserSpaceData {
         &mut self,
         fault_addr: VirtAddr,
         fault_type: PageFaultType,
-    ) -> Result<(), MmError> {
+    ) -> Result<(), SysError> {
         let fault_info = PageFaultInfo::new(VirtAddr::new(0), fault_addr, fault_type);
         self.handle_page_fault(&fault_info)
     }

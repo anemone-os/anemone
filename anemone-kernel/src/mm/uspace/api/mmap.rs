@@ -13,6 +13,7 @@ use crate::{
         *,
     },
     syscall::dt::*,
+    task::files::Fd,
 };
 
 #[syscall(SYS_MMAP)]
@@ -21,9 +22,19 @@ fn sys_mmap(
     #[validate_with(nonzero)] length: u64,
     prot: MmapProt,
     flags: MmapFlags,
-    fd: usize,
+    #[validate_with(mmap_fd)] raw_fd: i32,
     #[validate_with(aligned_to::<{ PagingArch::PAGE_SIZE_BYTES }>)] offset: u64,
 ) -> Result<u64, SysError> {
+    kdebugln!(
+        "mmap: addr={:?}, length={}, prot={:?}, flags={:?}, fd={:?}, offset={}",
+        addr,
+        length,
+        prot,
+        flags,
+        raw_fd,
+        offset
+    );
+
     let usp = with_current_task(|task| task.clone_uspace().expect("user task should have uspace"));
 
     let is_anonymous = flags.aux.contains(AuxMmapFlags::MAP_ANONYMOUS);
@@ -32,7 +43,7 @@ fn sys_mmap(
         .intersects(AuxMmapFlags::MAP_FIXED | AuxMmapFlags::MAP_FIXED_NOREPLACE);
 
     if fixed && addr.is_some_and(|addr| addr.page_offset() != 0) {
-        return Err(KernelError::InvalidArgument.into());
+        return Err(SysError::InvalidArgument);
     }
 
     let hint = addr.map(|a| (a.page_down(), fixed));
@@ -48,7 +59,7 @@ fn sys_mmap(
 
     if is_anonymous {
         if offset != 0 {
-            return Err(KernelError::InvalidArgument.into());
+            return Err(SysError::InvalidArgument);
         }
         // fd should be -1, but it's not forced by POSIX. So we just ignore it if it's
         // not -1.
@@ -67,22 +78,38 @@ fn sys_mmap(
             .map(|addr| addr.get())
             .map_err(Into::into)
     } else {
+        if raw_fd < 0 {
+            return Err(SysError::BadFileDescriptor);
+        }
+
         let poffset = offset as usize >> PagingArch::PAGE_SIZE_BITS;
-        let file = with_current_task(|task| task.get_fd(fd).ok_or(KernelError::BadFileDescriptor))?;
+        let fd = Fd::new(raw_fd as u32).ok_or(SysError::BadFileDescriptor)?;
+        let file = with_current_task(|task| task.get_fd(fd).ok_or(SysError::BadFileDescriptor))?;
         let supported_prot = {
             let mut prot = Protection::empty();
             let file_flags = file.file_flags();
             if file_flags.contains(FileFlags::READ) {
                 prot |= Protection::READ;
+                prot |= Protection::EXECUTE;
             }
-            if file_flags.contains(FileFlags::WRITE) {
-                prot |= Protection::WRITE;
+
+            if shared {
+                if file_flags.contains(FileFlags::WRITE) {
+                    prot |= Protection::WRITE;
+                }
+            } else {
+                // for private mapping, readable file can be mapped with write
+                // permission, because the changes will not be written back to
+                // the file.
+                if file_flags.contains(FileFlags::READ) {
+                    prot |= Protection::WRITE;
+                }
             }
-            // TODO exec check
+
             prot
         };
         if !supported_prot.contains(prot) {
-            return Err(MmError::PermissionDenied.into());
+            return Err(SysError::PermissionDenied.into());
         }
 
         let inode = file.vfs_file().inode().clone();

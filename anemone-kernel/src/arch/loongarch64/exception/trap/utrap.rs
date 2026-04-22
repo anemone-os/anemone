@@ -27,6 +27,10 @@ core::arch::global_asm!(
     "   st.d $r0, $sp, 0",
     "   st.d $r1, $sp, 8",
     "   st.d $r2, $sp, 16",
+
+    // restore kernel percpu tp before entering Rust/percpu paths.
+    "   ld.d $r2, $sp, {trapframe_ktp_offset}",
+
     // skip sp
     "   st.d $r4, $sp, 32",
     "   st.d $r5, $sp, 40",
@@ -93,6 +97,12 @@ core::arch::global_asm!(
 
     "   ld.d $r0, $a0, 0",
     "   ld.d $r1, $a0, 8",
+
+    // keep kernel tp live until the fixed user trap slot records it.
+    "   csrrd $t0, {save0}",
+    "   addi.d $t0, $t0, -{trapframe_bytes}",
+    "   st.d $r2, $t0, {trapframe_ktp_offset}",
+
     "   ld.d $r2, $a0, 16",
     "   ld.d $r3, $a0, 24",
     // skip a0
@@ -136,6 +146,7 @@ core::arch::global_asm!(
     // all done.
     "   ertn",
     trapframe_bytes = const size_of::<LA64TrapFrame>(),
+    trapframe_ktp_offset = const core::mem::offset_of!(LA64TrapFrame, ktp),
     rust_utrap_entry = sym rust_utrap_entry,
     prmd = const CR_PRMD,
     era = const CR_ERA,
@@ -154,6 +165,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
     with_current_task(|t| unsafe {
         t.set_utrapframe(trapframe);
+        t.on_prv_change(Privilege::Kernel);
     });
     let estat = Estat::from_u64(trapframe.estat);
     let ecode = estat.ecode();
@@ -226,6 +238,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         }
         drop(intr_guard);
     }
+
+    with_current_task(|t| t.on_prv_change(Privilege::User));
 }
 unsafe extern "C" {
     unsafe fn __utrap_entry() -> !;

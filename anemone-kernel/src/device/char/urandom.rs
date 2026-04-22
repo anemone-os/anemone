@@ -21,12 +21,12 @@ impl CharDev for URandom {
         URANDOM_DEVNUM
     }
 
-    fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
+    fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
         buf.fill(4);
         Ok(buf.len())
     }
 
-    fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
+    fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         Ok(buf.len())
     }
 }

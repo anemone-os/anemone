@@ -6,94 +6,83 @@
 use anemone_abi::fs::linux::open::{O_APPEND, O_CREAT, O_DIRECTORY, O_EXCL};
 
 use crate::{
+    fs::api::args::AtFd,
     prelude::{dt::c_readonly_string, *},
     task::files::{FdFlags, FileFlags},
 };
 
 #[syscall(SYS_OPENAT)]
 fn sys_openat(
-    dirfd: isize,
+    dirfd: AtFd,
     #[validate_with(c_readonly_string)] pathname: Box<str>,
     flags: u32,
     mode: u32,
 ) -> Result<u64, SysError> {
-    with_current_task(|task| {
-        let path = Path::new(pathname.as_ref());
-        if path.is_absolute() {
-            let path = task.make_global_path(&Path::new(pathname.as_ref()));
-            // dirfd ignored.
-            if flags & O_CREAT != 0 {
-                let perm =
-                    InodePerm::from_linux_bits(mode as u32).ok_or(KernelError::InvalidArgument)?;
+    let path = Path::new(pathname.as_ref());
+    if path.is_absolute() {
+        let path = with_current_task(|task| task.make_global_path(&Path::new(pathname.as_ref())));
+        // dirfd ignored.
+        if flags & O_CREAT != 0 {
+            let perm = InodePerm::from_linux_bits(mode as u32).ok_or(SysError::InvalidArgument)?;
 
-                let ret = vfs_touch(&path, perm);
-                match ret {
-                    Ok(_) => (),
-                    Err(FsError::AlreadyExists) if flags & O_EXCL == 0 => (),
-                    Err(e) => return Err(e.into()),
-                }
+            let ret = vfs_touch(&path, perm);
+            match ret {
+                Ok(_) => (),
+                Err(SysError::AlreadyExists) if flags & O_EXCL == 0 => (),
+                Err(e) => return Err(e.into()),
             }
-            let file = vfs_open(&path)?;
-
-            if file.inode().ty() != InodeType::Dir && flags & O_DIRECTORY != 0 {
-                return Err(FsError::NotDir.into());
-            }
-
-            if flags & O_APPEND != 0 {
-                file.seek(file.get_attr()?.size as usize)?;
-            }
-
-            let fd = task.open_fd(
-                file,
-                FileFlags::from_linux_open_flags(flags),
-                FdFlags::from_linux_open_flags(flags),
-            );
-            return Ok(fd as u64);
-        } else {
-            let dir_path = if dirfd == anemone_abi::fs::linux::at::AT_FDCWD as isize {
-                task.cwd().clone()
-            } else {
-                let dir_file = task
-                    .get_fd(dirfd as usize)
-                    .ok_or(KernelError::BadFileDescriptor)?;
-                let dir_vfs = dir_file
-                    .as_vfs_file()
-                    .ok_or(KernelError::BadFileDescriptor)?;
-                if !dir_file.file_flags().contains(FileFlags::READ) {
-                    // or O_PATH, which hasn't been implemented yet.
-                    return Err(KernelError::BadFileDescriptor.into());
-                }
-                dir_vfs.path().clone()
-            };
-
-            if flags & O_CREAT != 0 {
-                let perm =
-                    InodePerm::from_linux_bits(mode as u32).ok_or(KernelError::InvalidArgument)?;
-
-                let ret = vfs_touch_at(&dir_path, &path, perm);
-                match ret {
-                    Ok(_) => (),
-                    Err(FsError::AlreadyExists) if flags & O_EXCL == 0 => (),
-                    Err(e) => return Err(e.into()),
-                }
-            }
-
-            let file = vfs_open_at(&dir_path, &path)?;
-
-            if file.inode().ty() != InodeType::Dir && flags & O_DIRECTORY != 0 {
-                return Err(FsError::NotDir.into());
-            }
-
-            if flags & O_APPEND != 0 {
-                file.seek(file.get_attr()?.size as usize)?;
-            }
-
-            let fd = task.open_fd(
-                file,
-                FileFlags::from_linux_open_flags(flags),
-                FdFlags::from_linux_open_flags(flags),
-            );
-            return Ok(fd as u64);
         }
-    })
+        let file = vfs_open(&path)?;
+
+        if file.inode().ty() != InodeType::Dir && flags & O_DIRECTORY != 0 {
+            return Err(SysError::NotDir.into());
+        }
+
+        if flags & O_APPEND != 0 {
+            file.seek(file.get_attr()?.size as usize)?;
+        }
+
+        let fd = with_current_task(|task| {
+            task.open_fd(
+                file,
+                FileFlags::from_linux_open_flags(flags),
+                FdFlags::from_linux_open_flags(flags),
+            )
+        })
+        .ok_or(SysError::NoMoreFd)?;
+        return Ok(fd.raw() as u64);
+    } else {
+        let dir_path = dirfd.to_pathref(true)?;
+
+        if flags & O_CREAT != 0 {
+            let perm = InodePerm::from_linux_bits(mode as u32).ok_or(SysError::InvalidArgument)?;
+
+            let ret = vfs_touch_at(&dir_path, &path, perm);
+            match ret {
+                Ok(_) => (),
+                Err(SysError::AlreadyExists) if flags & O_EXCL == 0 => (),
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        let file = vfs_open_at(&dir_path, &path)?;
+
+        if file.inode().ty() != InodeType::Dir && flags & O_DIRECTORY != 0 {
+            return Err(SysError::NotDir.into());
+        }
+
+        if flags & O_APPEND != 0 {
+            file.seek(file.get_attr()?.size as usize)?;
+        }
+
+        let fd = with_current_task(|task| {
+            task.open_fd(
+                file,
+                FileFlags::from_linux_open_flags(flags),
+                FdFlags::from_linux_open_flags(flags),
+            )
+        })
+        .ok_or(SysError::NoMoreFd)?;
+        return Ok(fd.raw() as u64);
+    }
 }

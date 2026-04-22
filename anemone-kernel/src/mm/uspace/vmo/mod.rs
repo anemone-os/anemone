@@ -17,7 +17,7 @@ pub mod shadow;
 
 use core::fmt::Debug;
 
-use crate::prelude::*;
+use crate::{prelude::*, utils::data::DataSource};
 
 pub fn shared_zero_frame() -> ResolvedFrame {
     static ZERO_FRAME: Lazy<FrameHandle> = Lazy::new(|| unsafe {
@@ -50,13 +50,13 @@ pub trait VmObject: Send + Sync {
     /// method, which will be used for the current and future accesses to this
     /// page. This is how copy-on-write is implemented in
     /// [shadow::ShadowObject].
-    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, MmError>;
+    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError>;
 
     fn read_frame(
         &self,
         pidx: usize,
         buffer: &mut [u8; PagingArch::PAGE_SIZE_BYTES],
-    ) -> Result<(), MmError> {
+    ) -> Result<(), SysError> {
         let ResolvedFrame { frame, .. } = self.resolve_frame(pidx, PageFaultType::Read)?;
         buffer.copy_from_slice(frame.as_bytes());
 
@@ -67,10 +67,10 @@ pub trait VmObject: Send + Sync {
         &self,
         pidx: usize,
         data: &[u8; PagingArch::PAGE_SIZE_BYTES],
-    ) -> Result<(), MmError> {
+    ) -> Result<(), SysError> {
         let resolved = self.resolve_frame(pidx, PageFaultType::Write)?;
         if !resolved.writable {
-            return Err(MmError::PermissionDenied);
+            return Err(SysError::PermissionDenied);
         }
 
         let dst = unsafe {
@@ -84,7 +84,7 @@ pub trait VmObject: Send + Sync {
         Ok(())
     }
 
-    fn read(&self, offset: usize, buffer: &mut [u8]) -> Result<(), MmError> {
+    fn read(&self, offset: usize, buffer: &mut [u8]) -> Result<(), SysError> {
         let mut remaining = buffer;
         let mut cur_offset = offset;
         while !remaining.is_empty() {
@@ -101,13 +101,13 @@ pub trait VmObject: Send + Sync {
             remaining = &mut remaining[copy_len..];
             cur_offset = cur_offset
                 .checked_add(copy_len)
-                .ok_or(MmError::InvalidArgument)?;
+                .ok_or(SysError::InvalidArgument)?;
         }
 
         Ok(())
     }
 
-    fn write(&self, offset: usize, data: &[u8]) -> Result<(), MmError> {
+    fn write(&self, offset: usize, data: &[u8]) -> Result<(), SysError> {
         let mut remaining = data;
         let mut cur_offset = offset;
 
@@ -128,9 +128,38 @@ pub trait VmObject: Send + Sync {
             remaining = &remaining[copy_len..];
             cur_offset = cur_offset
                 .checked_add(copy_len)
-                .ok_or(MmError::InvalidArgument)?;
+                .ok_or(SysError::InvalidArgument)?;
         }
 
+        Ok(())
+    }
+}
+
+impl dyn VmObject {
+    /// Copy data from the given [DataSource] to this [VmObject] at the given
+    /// offset.
+    pub fn write_from_data_source<S: DataSource<TError = impl Into<SysError>>>(
+        &self,
+        offset: usize,
+        source: &S,
+        len: usize,
+    ) -> Result<(), SysError> {
+        const BUF_SIZE: usize = PagingArch::PAGE_SIZE_BYTES;
+
+        let mut buffer = vec![0u8; BUF_SIZE];
+        let mut remaining = len;
+        let mut cur_vmo_offset = offset;
+        let mut cur_src_offset = 0;
+        while remaining > 0 {
+            let copy_len = remaining.min(BUF_SIZE);
+            source
+                .copy_to(cur_src_offset, &mut buffer[..copy_len])
+                .map_err(Into::into)?;
+            self.write(cur_vmo_offset, &buffer[..copy_len])?;
+            remaining -= copy_len;
+            cur_vmo_offset += copy_len;
+            cur_src_offset += copy_len;
+        }
         Ok(())
     }
 }

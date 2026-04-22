@@ -74,7 +74,7 @@ struct GoldfishDriver {
 impl KObjectOps for GoldfishDriver {}
 
 impl DriverOps for GoldfishDriver {
-    fn probe(&self, device: Arc<dyn Device>) -> Result<(), DevError> {
+    fn probe(&self, device: Arc<dyn Device>) -> Result<(), SysError> {
         let pdev = device
             .as_platform_device()
             .expect("platform driver should only be probed with platform device");
@@ -85,9 +85,9 @@ impl DriverOps for GoldfishDriver {
             .find_map(|resource| match resource {
                 Resource::Mmio { base, len } => Some((*base, *len)),
             })
-            .ok_or(DevError::MissingResource)?;
+            .ok_or(SysError::MissingResource)?;
 
-        let remap = unsafe { ioremap(base, len) }.map_err(DevError::IoRemapFailed)?;
+        let remap = unsafe { ioremap(base, len) }?;
 
         let state = GoldfishState { base, remap };
 

@@ -62,11 +62,11 @@ impl CharDev for Ns16550AState {
         *self.devnum.get()
     }
 
-    fn read(&self, buf: &mut [u8]) -> Result<usize, FsError> {
+    fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
         unimplemented!()
     }
 
-    fn write(&self, buf: &[u8]) -> Result<usize, FsError> {
+    fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         let regs = unsafe {
             Ns16550ARegisters::from_raw(
                 self.remap.as_ptr().as_ptr().cast(),
@@ -255,15 +255,15 @@ struct Ns16550ADriver {
 impl KObjectOps for Ns16550ADriver {}
 
 impl DriverOps for Ns16550ADriver {
-    fn probe(&self, device: Arc<dyn Device>) -> Result<(), DevError> {
+    fn probe(&self, device: Arc<dyn Device>) -> Result<(), SysError> {
         let pdev = device
             .as_platform_device()
             .expect("platform driver should only be probed with platform device");
 
-        let fwnode = pdev.fwnode().ok_or(DevError::MissingFwNode)?;
+        let fwnode = pdev.fwnode().ok_or(SysError::MissingFwNode)?;
         let uartclk = fwnode
             .prop_read_u32("clock-frequency")
-            .ok_or(DevError::FwNodeLookupFailed)?;
+            .ok_or(SysError::FwNodeLookupFailed)?;
 
         let reg_shift = fwnode.prop_read_u32("reg-shift").unwrap_or(0) as usize;
         let reg_io_width = fwnode.prop_read_u32("reg-io-width").unwrap_or(1) as usize;
@@ -273,20 +273,20 @@ impl DriverOps for Ns16550ADriver {
                 pdev.name(),
                 reg_io_width
             );
-            return Err(DevError::FwNodeLookupFailed);
+            return Err(SysError::FwNodeLookupFailed);
         }
 
         let baud: u32 = 115200;
         let denom = baud.saturating_mul(16);
         if denom == 0 {
-            return Err(DevError::FwNodeLookupFailed);
+            return Err(SysError::FwNodeLookupFailed);
         }
         let mut divisor = ((uartclk as u64 + (denom as u64 / 2)) / denom as u64) as u32;
         if divisor == 0 {
             divisor = 1;
         }
         if divisor > u16::MAX as u32 {
-            return Err(DevError::FwNodeLookupFailed);
+            return Err(SysError::FwNodeLookupFailed);
         }
 
         let (base, len) = pdev
@@ -295,9 +295,9 @@ impl DriverOps for Ns16550ADriver {
             .find_map(|resource| match resource {
                 Resource::Mmio { base, len } => Some((*base, *len)),
             })
-            .ok_or(DevError::MissingResource)?;
+            .ok_or(SysError::MissingResource)?;
 
-        let remap = unsafe { ioremap(base, len) }.map_err(DevError::IoRemapFailed)?;
+        let remap = unsafe { ioremap(base, len) }?;
         let regs = unsafe {
             Ns16550ARegisters::from_raw(remap.as_ptr().as_ptr().cast(), reg_shift, reg_io_width)
         };
@@ -332,7 +332,7 @@ impl DriverOps for Ns16550ADriver {
         let minor = {
             let mut guard = BOOKKEEPER.lock_irqsave();
             let (minor_alloc, devices) = guard.deref_mut();
-            let minor = minor_alloc.alloc().ok_or(DevError::NoMinorAvailable)?;
+            let minor = minor_alloc.alloc().ok_or(SysError::NoMinorAvailable)?;
 
             let prev = devices.insert(minor, state.clone());
             debug_assert!(
@@ -357,7 +357,7 @@ impl DriverOps for Ns16550ADriver {
 
         let mut flags = ConsoleFlags::empty();
         if fwnode.is_stdout() {
-            flags |= ConsoleFlags::ENABLED;
+            flags |= ConsoleFlags::ENABLE_ON_BOOT;
             kinfoln!("{}: registered as stdout console", pdev.name());
         }
         register_console(Arc::new(state), flags);
