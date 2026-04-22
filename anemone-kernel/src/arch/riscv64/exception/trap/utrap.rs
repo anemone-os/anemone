@@ -3,9 +3,8 @@ use crate::{
         intr::handle_intr,
         trap::{RiscV64Exception, RiscV64Interrupt, RiscV64TrapFrame},
     },
-    device::CpuArchTrait,
     prelude::{fault::handle_user_page_fault, *},
-    sched::{current_task_id, kernel_exit},
+    sched::{current_task_id, exit::kernel_exit},
 };
 
 // kernel trap entry point. since kernel doesn't use floating point, we don't
@@ -186,7 +185,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             RiscV64Exception::Breakpoint => {
                 kerrln!(
                     "({}) user {} aborted with breakpoint\n\tbreakpoint not implemented yet",
-                    CpuArch::cur_cpu_id(),
+                    cur_cpu_id(),
                     current_task_id(),
                 );
                 kernel_exit(-1)
@@ -209,7 +208,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             _ => {
                 kerrln!(
                     "({}) user {} aborted with error {:?}\n\ttask return value not implemented yet",
-                    CpuArch::cur_cpu_id(),
+                    cur_cpu_id(),
                     current_task_id(),
                     reason
                 );

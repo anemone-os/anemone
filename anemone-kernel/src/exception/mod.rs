@@ -5,8 +5,6 @@
 //! - bottom halves (e.g. deferred work that needs to be done after an interrupt
 //!   is handled)
 
-mod preempt_counter;
-pub use preempt_counter::{PreemptCounter, PreemptGuard};
 mod page_fault;
 pub use page_fault::{PageFaultInfo, PageFaultType, handle_kernel_page_fault};
 mod ipi;

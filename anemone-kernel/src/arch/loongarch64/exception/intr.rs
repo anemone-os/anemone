@@ -51,7 +51,7 @@ impl IntrArchTrait for LA64IntrArch {
             ecfg::csr_write(Ecfg::new(IntrFlags::all(), 0));
             iocsr_write_w(0x1004, u32::MAX);
             crmd::set_ie(true);
-            knoticeln!("({})local irq initialized", CpuArch::cur_cpu_id());
+            knoticeln!("({})local irq initialized", cur_cpu_id());
         }
     }
 }

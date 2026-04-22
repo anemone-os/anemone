@@ -6,18 +6,17 @@ use crate::{
     sync::mono::MonoFlow, task::tid::Tid,
 };
 
-/// Per-CPU processor information
 #[percpu]
-static PROCESSOR: ProcessorInfo = ProcessorInfo::EMPTY;
+static PROCESSOR: Processor = Processor::EMPTY;
 
 /// Per-CPU scheduler state and currently running task metadata.
-pub struct ProcessorInfo {
-    /// Scheduler is per-CPU
+pub struct Processor {
+    /// Scheduler is per-CPU.
+    ///
+    /// [RwLock] cz we may support cross-CPU task migration in the future.
     sched: RwLock<Scheduler>,
     /// Non-reentrant processor-local runtime state.
     inner: MonoFlow<ProcessorInner>,
-    /// Reschedule request flag set by timer/interrupt paths.
-    need_resched: AtomicBool,
 }
 
 /// Mutable processor-local fields accessed by the scheduler core.
@@ -28,7 +27,7 @@ pub struct ProcessorInner {
     sched_context: TaskContext,
 }
 
-impl ProcessorInfo {
+impl Processor {
     /// Empty per-CPU processor state used for [PROCESSOR] initialization.
     pub const EMPTY: Self = Self {
         inner: unsafe {
@@ -38,24 +37,7 @@ impl ProcessorInfo {
             })
         },
         sched: RwLock::new(Scheduler::EMPTY),
-        need_resched: AtomicBool::new(false),
     };
-}
-
-/// Set the current CPU's reschedule flag.
-pub fn set_resched_flag() {
-    unsafe {
-        PROCESSOR.unsafe_with(|proc| {
-            proc.need_resched.store(true, Ordering::SeqCst);
-        })
-    }
-}
-
-/// Fetch and clear the current CPU's reschedule flag.
-///
-/// Returns the previous value before clearing.
-pub fn fetch_clear_resched_flag() -> bool {
-    unsafe { PROCESSOR.unsafe_with(|proc| proc.need_resched.fetch_and(false, Ordering::SeqCst)) }
 }
 
 /// Add a task to the ready queue of the current processor.

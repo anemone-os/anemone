@@ -320,7 +320,7 @@ unsafe fn remap_boot_stack() {
 
 #[inline(always)]
 unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
-    let cpu_id = CpuArch::cur_cpu_id().get();
+    let cpu_id = cur_cpu_id().get();
     let new_stack_top = GUARDED_STACK_TOPS.get()[cpu_id];
 
     unsafe {
@@ -350,7 +350,6 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
     unsafe {
         // needed by percpu initialization.
         let ncpus = early_scan_cpu_count(fdt_va);
-        super::cpu::init(ncpus, bsp_id);
 
         kinfoln!("anemone kernel booting on bsp #{}", bsp_id);
 
@@ -368,7 +367,9 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         let fdt_ppn = PhysPageNum::new(fdt_pa.get() >> PagingArch::PAGE_SIZE_BITS);
         scanner.mark_as_reserved(fdt_ppn, fdt_npages as u64, RsvMemFlags::FDT);
 
-        mm::percpu::bsp_init(bsp_id, |npages| scanner.early_alloc_folio(npages as u64));
+        percpu::bsp_init(bsp_id, ncpus, |npages| {
+            scanner.early_alloc_folio(npages as u64)
+        });
         kinfoln!("percpu data initialized");
 
         scanner.commit_to_pmm();
@@ -411,7 +412,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
 
 unsafe fn wake_up_aps(bsp_id: usize) {
     unsafe {
-        for ap_id in 0..CpuArch::ncpus() {
+        for ap_id in 0..ncpus() {
             if ap_id == bsp_id {
                 continue;
             }
@@ -433,7 +434,7 @@ unsafe fn wake_up_aps(bsp_id: usize) {
 unsafe fn ap_setup(ap_id: usize) -> ! {
     unsafe {
         install_ktrap_handler();
-        mm::percpu::ap_init(ap_id);
+        percpu::ap_init(ap_id);
         mm::kptable::activate_kernel_mapping();
         kdebugln!("anemone kernel booting on ap #{}", ap_id);
         set_boot_mono(false);

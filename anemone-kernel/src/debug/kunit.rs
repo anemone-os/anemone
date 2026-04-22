@@ -23,7 +23,7 @@ impl PerCpuKUnitBarrier {
     }
 
     fn reset(&self) {
-        self.participants.store(CpuArch::ncpus(), Ordering::Release);
+        self.participants.store(ncpus(), Ordering::Release);
         self.ready.store(0, Ordering::Release);
         self.done.store(0, Ordering::Release);
         self.start.store(false, Ordering::Release);

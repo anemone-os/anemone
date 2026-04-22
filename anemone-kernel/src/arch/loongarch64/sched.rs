@@ -233,7 +233,7 @@ pub unsafe extern "C" fn kernel_task_guard() -> ! {
         call {task_guard_end}
     ",
     task_run = sym __task_run,
-    task_exit = sym crate::kernel_exit,
+    task_exit = sym crate::sched::exit::kernel_exit,
     task_guard_end = sym __kernel_task_guard_end,
     kernel_prv = const Privilege::Kernel as u64,
     );

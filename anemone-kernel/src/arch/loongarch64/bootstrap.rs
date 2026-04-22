@@ -231,10 +231,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     unsafe {
         // needed by percpu initialization.
         let ncpus = early_scan_cpu_count(fdt_va);
-        super::cpu::init(ncpus, bsp_id);
         kinfoln!("anemone kernel booting on bsp #{}", bsp_id);
-
-        wake_up_aps(bsp_id, ncpus);
 
         // needed by timer initialization.
         if let Some(freq_hz) = early_scan_clock_freq(fdt_va) {
@@ -245,8 +242,12 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
 
         let mut scanner = EarlyMemoryScanner::new(fdt_va);
 
-        mm::percpu::bsp_init(bsp_id, |npages| scanner.early_alloc_folio(npages as u64));
+        percpu::bsp_init(bsp_id, ncpus, |npages| {
+            scanner.early_alloc_folio(npages as u64)
+        });
         kinfoln!("percpu data initialized");
+
+        wake_up_aps(bsp_id, ncpus);
 
         scanner.commit_to_pmm();
         mm::frame::memmap_init(|npages| {
@@ -293,7 +294,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         BOOT_SYNC_COUNTER.sync_with_counter();
         kdebugln!("anemone kernel booting on ap #{}", ap_id);
         install_ktrap_handler();
-        mm::percpu::ap_init(ap_id);
+        percpu::ap_init(ap_id);
         mm::kptable::activate_kernel_mapping();
 
         TimeArch::init_this_cpu();
@@ -333,7 +334,7 @@ pub fn wake_up_aps(bsp_id: usize, ncpus: usize) {
 
 #[inline(always)]
 unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
-    let cpu_id = CpuArch::cur_cpu_id().get();
+    let cpu_id = cur_cpu_id().get();
     let new_stack_top = GUARDED_STACK_TOPS.get()[cpu_id];
     unsafe {
         core::arch::asm!(

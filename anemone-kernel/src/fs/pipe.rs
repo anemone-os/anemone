@@ -8,6 +8,7 @@
 
 use crate::{
     prelude::*,
+    sched::sched_yield::kernel_yield,
     utils::{
         any_opaque::{AnyOpaque, NilOpaque},
         ring_buffer::RingBuffer,

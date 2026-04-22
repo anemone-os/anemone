@@ -7,7 +7,10 @@
 
 use anemone_abi::time::linux::TimeSpec;
 
-use crate::prelude::{dt::UserReadPtr, *};
+use crate::{
+    prelude::{dt::UserReadPtr, *},
+    sched::sched_yield::kernel_yield,
+};
 
 // see man 2 nanosleep for this.
 const TV_NSEC_MAX_INCLUSIVE: u64 = 999_999_999;

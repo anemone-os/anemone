@@ -8,9 +8,8 @@ use crate::{
         intr::handle_intr,
         trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
     },
-    device::CpuArchTrait,
     prelude::{fault::handle_user_page_fault, *},
-    sched::{current_task_id, kernel_exit},
+    sched::{current_task_id, exit::kernel_exit},
 };
 
 // User trap entry point. The kernel does not save or restore floating-point
@@ -185,7 +184,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
             Err(_) => {
                 kerrln!(
                     "({}) user {} aborted with unknown trap with code {}:{}",
-                    CpuArch::cur_cpu_id(),
+                    cur_cpu_id(),
                     current_task_id(),
                     ecode,
                     esubcode
@@ -226,7 +225,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
             _ => {
                 kerrln!(
                     "({}) user {} aborted with unhandled exception: {:?}, pc: {:#x}, badv: {:#x}\n\ttask return value not implemented yet",
-                    CpuArch::cur_cpu_id(),
+                    cur_cpu_id(),
                     current_task_id(),
                     reason,
                     trapframe.era,

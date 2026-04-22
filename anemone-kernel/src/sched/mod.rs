@@ -21,10 +21,9 @@ pub use api::*;
 /// Default scheduler implementation type alias.
 pub type Scheduler = rr::RRScheduler;
 
-/// Exported API for process management.
 pub use proc::{
-    add_to_ready, clone_current_task, current_task_cmdline, current_task_id,
-    fetch_clear_resched_flag, load_context, set_resched_flag, with_current_task,
+    add_to_ready, clone_current_task, current_task_cmdline, current_task_id, load_context,
+    with_current_task,
 };
 
 /// Enter the scheduler loop.
@@ -53,7 +52,7 @@ pub fn run_tasks() -> ! {
 /// **Make sure interrupts are disabled before calling this function, otherwise
 /// the behavior is undefined.**
 pub unsafe fn try_schedule() {
-    if unsafe_with_core_local(|local| local.preempt_counter().allow()) {
+    if allow_preempt() {
         unsafe { switch_out(SwitchOutType::Sched) };
     } else {
         set_resched_flag();
@@ -69,9 +68,7 @@ pub unsafe fn try_schedule() {
 /// **Make sure interrupts are disabled before calling this function, otherwise
 /// the behavior is undefined.**
 pub fn sleep_as_waiting(interruptible: bool) {
-    debug_assert!(unsafe_with_core_local(|local| local
-        .preempt_counter()
-        .allow()));
+    debug_assert!(allow_preempt());
     with_intr_disabled(|_| {
         unsafe { switch_out(SwitchOutType::Wait { interruptible }) };
     })

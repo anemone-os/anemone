@@ -5,7 +5,11 @@ pub use crate::{
     exception::{intr::*, trap::*, *},
     fs::*,
     kconfig_defs::*,
-    mm::{addr::*, frame::*, paging::*, percpu::*, uspace::*, zone::*},
+    mm::{addr::*, frame::*, paging::*, uspace::*, zone::*},
+    percpu::{
+        PerCpu, PreemptGuard, allow_preempt, bsp_cpu_id, cur_cpu_id, fetch_clear_resched_flag,
+        ncpus, set_resched_flag, target_online,
+    },
     platform_defs::*,
     power::*,
     sched::*,

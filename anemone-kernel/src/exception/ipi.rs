@@ -63,7 +63,7 @@ fn enqueue_ipi(cpu_id: usize, msg: Arc<IpiMsg>) {
 /// Send an IPI to the target CPU, synchronously waiting for the IPI to be
 /// handled before returning.
 pub fn send_ipi(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
-    if cpu_id == CpuArch::cur_cpu_id().get() {
+    if cpu_id == cur_cpu_id().get() {
         panic!("cannot send ipi to self");
     }
     if !target_online(cpu_id) {
@@ -85,8 +85,8 @@ pub fn send_ipi(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
 /// Broadcast an IPI to all other CPUs, synchronously waiting for all of them to
 /// handle the IPI before returning.
 pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
-    let cur_cpuid = CpuArch::cur_cpu_id().get();
-    let ncpus = CpuArch::ncpus();
+    let cur_cpuid = cur_cpu_id().get();
+    let ncpus = ncpus();
     for id in 0..ncpus {
         if !target_online(id) {
             return Err(IpiError::TargetOffline);
@@ -117,7 +117,7 @@ pub enum IpiError {
 
 /// Send an IPI to the target CPU asynchronously.
 pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
-    if cpu_id == CpuArch::cur_cpu_id().get() {
+    if cpu_id == cur_cpu_id().get() {
         panic!("cannot send ipi to self");
     }
 
@@ -131,8 +131,8 @@ pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError
 
 /// Broadcast an IPI to all other CPUs asynchronously.
 pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
-    let cur_cpuid = CpuArch::cur_cpu_id().get();
-    let ncpus = CpuArch::ncpus();
+    let cur_cpuid = cur_cpu_id().get();
+    let ncpus = ncpus();
     for id in 0..ncpus {
         if id != cur_cpuid && !target_online(id) {
             return Err(IpiError::TargetOffline);

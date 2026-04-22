@@ -7,7 +7,6 @@ pub mod kmalloc;
 pub mod kptable;
 pub mod layout;
 pub mod paging;
-pub mod percpu;
 pub mod remap;
 pub mod stack;
 pub mod uspace;

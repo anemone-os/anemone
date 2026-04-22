@@ -93,7 +93,7 @@ pub fn duration_to_ticks(dur: Duration) -> u64 {
 /// actual timer interrupt handler. This function performs timekeeping related
 /// work for the current tick and then re-arms the next periodic interrupt.
 pub fn on_timer_interrupt() {
-    if CpuArch::cur_cpu_id() == CpuArch::bsp_cpu_id() {
+    if cur_cpu_id() == bsp_cpu_id() {
         TICKS.fetch_add(1, Ordering::AcqRel);
     }
 

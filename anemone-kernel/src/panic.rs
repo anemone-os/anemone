@@ -2,7 +2,8 @@
 
 use crate::{debug::backtrace::CapturedBacktrace, prelude::*};
 
-pub static PANIC_OCCURRED: AtomicBool = AtomicBool::new(false);
+/// TODO: double panic.
+static PANIC_OCCURRED: AtomicBool = AtomicBool::new(false);
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -17,7 +18,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
             e
         );
     }
-    kemergln!("Kernel panic at {} :\n{}", CpuArch::cur_cpu_id(), info);
+    kemergln!("Kernel panic at {} :\n{}", cur_cpu_id(), info);
     let backtrace = CapturedBacktrace::capture();
     kemergln!("Backtrace:\n{}", backtrace);
 

@@ -1,10 +1,13 @@
-use crate::{device::CpuArchTrait, prelude::*, sched::clone_current_task};
+use crate::{
+    prelude::*,
+    sched::{clone_current_task, exit::kernel_exit},
+};
 
 pub fn handle_user_page_fault(info: PageFaultInfo) {
     if let Err(e) = handle_user_page_fault_internal(info) {
         kerrln!(
             "({}) user {} aborted with page fault at address {:?} with pc: {:?}, error type: {:?}, error code: {:?}",
-            CpuArch::cur_cpu_id(),
+            cur_cpu_id(),
             current_task_id(),
             info.fault_addr(),
             info.fault_pc(),
