@@ -409,7 +409,7 @@ pub unsafe fn load_image(file: &File, usp: &mut UserSpaceData) -> Result<ElfMeta
             vec![MaybeUninit::<ProgramHeader>::uninit(); phdr_entry_num].into_boxed_slice();
 
         {
-            let mut raw_bytes = unsafe {
+            let raw_bytes = unsafe {
                 core::slice::from_raw_parts_mut(
                     phdrs.as_mut_ptr().cast::<u8>(),
                     phdr_entry_sz * phdr_entry_num,
@@ -583,7 +583,7 @@ fn load_interpreter(
             vec![MaybeUninit::<ProgramHeader>::uninit(); phdr_entry_num].into_boxed_slice();
 
         {
-            let mut raw_bytes = unsafe {
+            let raw_bytes = unsafe {
                 core::slice::from_raw_parts_mut(
                     phdrs.as_mut_ptr().cast::<u8>(),
                     phdr_entry_sz * phdr_entry_num,

@@ -217,7 +217,7 @@ impl<T: Sized + Copy> UserWriteSlice<T> {
             self.len,
         )?;
         unsafe {
-            let mut ptr_ref = &mut *ptr;
+            let ptr_ref = &mut *ptr;
             ptr_ref[0..bytes.len()].copy_from_slice(bytes);
             ptr_ref[bytes.len()] = 0;
         }
@@ -241,7 +241,7 @@ impl<T: Sized + Copy> UserWriteSlice<T> {
             self.len,
         )?;
         unsafe {
-            let mut ptr_ref = &mut *ptr;
+            let ptr_ref = &mut *ptr;
             ptr_ref[0..bytes.len()].copy_from_slice(bytes);
             ptr_ref[bytes.len()] = 0;
         }
@@ -330,7 +330,6 @@ fn validate_user_array_for_write<T: Sized>(
     arg: u64,
     len: usize,
 ) -> Result<*mut [T], SysError> {
-    let flags = PteFlags::USER | rwx_flags;
     /*kdebugln!(
         "validating user array pointer {:#x} with length {}: {:?}",
         arg,
@@ -460,7 +459,7 @@ pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq + Copy>(
 /// `MAX_LEN` limits the scan for the terminating byte.
 pub fn c_readonly_string(arg: u64) -> Result<Box<str>, SysError> {
     unsafe {
-        let ptr = unsafe { &*c_readonly_array_ptr::<MAX_USER_STRING_LEN, _>(0u8, true, arg)? };
+        let ptr = &*c_readonly_array_ptr::<MAX_USER_STRING_LEN, _>(0u8, true, arg)?;
         let str = CStr::from_ptr(&ptr[0] as *const u8 as *const c_char);
         let str = str.to_str().map_err(|_| SysError::InvalidArgument)?;
         Ok(Box::from(str))
@@ -470,7 +469,7 @@ pub fn c_readonly_string(arg: u64) -> Result<Box<str>, SysError> {
 /// Validate a user pointer to an array of C strings and return copied
 /// strings.
 pub fn c_readonly_string_array(arg: u64) -> Result<Vec<Box<str>>, SysError> {
-    let array = unsafe { &*c_readonly_array_ptr::<MAX_USER_ARRAY_LEN, _>(0u64, false, arg)? };
+    let array = &*c_readonly_array_ptr::<MAX_USER_ARRAY_LEN, _>(0u64, false, arg)?;
     let mut res = vec![];
     for ptr in array {
         let str = c_readonly_string(*ptr)?;

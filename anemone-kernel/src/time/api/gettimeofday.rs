@@ -14,7 +14,7 @@ fn sys_gettimeofday(
     tv: Option<UserWritePtr<TimeVal>>,
     tz: Option<UserWritePtr<TimeZone>>,
 ) -> Result<u64, SysError> {
-    if let Some(mut tv) = tv {
+    if let Some(tv) = tv {
         let uptime = uptime().to_duration();
         // todo: unix epoch time instead of uptime
         tv.safe_write(TimeVal {
@@ -23,7 +23,7 @@ fn sys_gettimeofday(
         })?;
     }
 
-    if let Some(mut tz) = tz {
+    if let Some(tz) = tz {
         // we don't support time zones, so just fill in dummy values
         // plus, "  The use of the timezone structure is obsolete; the tz argument
         // should normally be specified as NULL." says man 2. so it's fine.

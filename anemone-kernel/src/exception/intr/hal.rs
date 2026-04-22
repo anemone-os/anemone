@@ -47,6 +47,14 @@ pub trait IntrArchTrait: Sized {
     /// **First timer interrupt is not programmed here. It should be set up
     /// separately.**
     unsafe fn init_local_irq();
+
+    fn local_intr_enabled() -> bool {
+        Self::current_irq_flags() == Self::ENABLED_IRQ_FLAGS
+    }
+
+    fn local_intr_disabled() -> bool {
+        Self::current_irq_flags() == Self::DISABLED_IRQ_FLAGS
+    }
 }
 
 /// Interrupt flags for the current CPU. The exact representation is

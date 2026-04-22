@@ -1,3 +1,5 @@
+//! Per processor scheduler state.
+
 use alloc::sync::Arc;
 use kernel_macros::percpu;
 
@@ -22,6 +24,8 @@ pub struct Processor {
 /// Mutable processor-local fields accessed by the scheduler core.
 pub struct ProcessorInner {
     /// Currently running task on this CPU.
+    ///
+    /// TODO: this field should not be wrapped in [MonoFlow].
     running_task: Option<Arc<Task>>,
     /// The context used for scheduling
     sched_context: TaskContext,

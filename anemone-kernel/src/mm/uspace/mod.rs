@@ -204,7 +204,7 @@ impl UserSpace {
                 .is_none()
         );
 
-        let mut uspace = UserSpace {
+        let uspace = UserSpace {
             table_ppn: table.root_ppn(),
             data: RwLock::new(UserSpaceData {
                 table,

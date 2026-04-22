@@ -70,10 +70,6 @@ impl IoRange {
         )
     }
 
-    fn len(&self) -> u64 {
-        self.len
-    }
-
     fn intersects(&self, other: &Self) -> bool {
         self.start.get() < other.end().get() && other.start.get() < self.end().get()
     }

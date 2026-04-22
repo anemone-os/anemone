@@ -52,15 +52,13 @@ pub fn kernel_exit(exit_code: i8) -> ! {
             });
         });
 
-        let parent = unsafe {
-            task.with_task_hierarchy(|hier| {
-                hier.parent()
-                    .unwrap_or_else(|| panic!("root task shall not exit: {}", task.tid()))
-                    .upgrade()
-                    .unwrap_or_else(|| panic!("dangling task with parent dropped: {}", task.tid()))
-            })
-        };
-        unsafe { task.note_exited() };
+        let parent = task.with_task_hierarchy(|hier| {
+            hier.parent()
+                .unwrap_or_else(|| panic!("root task shall not exit: {}", task.tid()))
+                .upgrade()
+                .unwrap_or_else(|| panic!("dangling task with parent dropped: {}", task.tid()))
+        });
+        task.note_exited();
         drop(task);
         drop(parent);
         knoticeln!("{} exited with code {}", current_task_id(), exit_code);

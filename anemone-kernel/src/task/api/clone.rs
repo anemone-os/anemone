@@ -197,7 +197,7 @@ pub fn kernel_clone(
 
 extern "C" fn enter_cloned_user_task(trap_frame: *mut TrapFrame, child_tid: *mut Tid) {
     let task = clone_current_task();
-    let mut frame = *unsafe { Box::from_raw(trap_frame) };
+    let frame = *unsafe { Box::from_raw(trap_frame) };
 
     unsafe {
         if task.clone_flags().contains(CloneFlags::CLONE_CHILD_SETTID) {
@@ -218,5 +218,4 @@ extern "C" fn enter_cloned_user_task(trap_frame: *mut TrapFrame, child_tid: *mut
         SchedArch::return_to_cloned_task(frame);
     }
     unreachable!("should never return from entering a cloned user task");
-    return;
 }

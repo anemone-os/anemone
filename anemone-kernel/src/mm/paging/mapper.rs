@@ -116,16 +116,14 @@ impl Mapper<'_> {
         let fp_offset = (vaddr - vpn_st.to_virt_addr()) as usize;
         let fp_datasz = PagingArch::PAGE_SIZE_BYTES - fp_offset;
         let fp_ppn = self.translate(vpn_st).ok_or(SysError::NotMapped)?.ppn;
-        unsafe {
-            source
-                .copy_to(0, unsafe {
-                    slice::from_raw_parts_mut(
-                        (fp_ppn.to_hhdm().to_virt_addr().get() as usize + fp_offset) as *mut u8,
-                        min(fp_datasz, length as usize),
-                    )
-                })
-                .map_err(|e| e.into())?;
-        }
+        source
+            .copy_to(0, unsafe {
+                slice::from_raw_parts_mut(
+                    (fp_ppn.to_hhdm().to_virt_addr().get() as usize + fp_offset) as *mut u8,
+                    min(fp_datasz, length as usize),
+                )
+            })
+            .map_err(|e| e.into())?;
         let mut count = 0;
         for vpn in (vpn_st + 1).get()..(vpn_end - 1).get() {
             let ppn = self
@@ -133,16 +131,14 @@ impl Mapper<'_> {
                 .ok_or(SysError::NotMapped)?
                 .ppn;
             let addr_st = ppn.to_hhdm().to_virt_addr().get();
-            unsafe {
-                source
-                    .copy_to(fp_datasz + count * PagingArch::PAGE_SIZE_BYTES, unsafe {
-                        slice::from_raw_parts_mut(
-                            addr_st as *const u8 as *mut u8,
-                            PagingArch::PAGE_SIZE_BYTES,
-                        )
-                    })
-                    .map_err(|e| e.into())?;
-            }
+            source
+                .copy_to(fp_datasz + count * PagingArch::PAGE_SIZE_BYTES, unsafe {
+                    slice::from_raw_parts_mut(
+                        addr_st as *const u8 as *mut u8,
+                        PagingArch::PAGE_SIZE_BYTES,
+                    )
+                })
+                .map_err(|e| e.into())?;
             count += 1;
         }
         if vpn_end != vpn_st + 1 {
@@ -677,8 +673,8 @@ impl Mapper<'_> {
     ///
     /// # Returns
     ///     * `Ok(())` if the mapping is successful.
-    ///     * `Err(SysError::AlreadyMapped)` if the target page is already mapped
-    ///       and `overwrite` is false.
+    ///     * `Err(SysError::AlreadyMapped)` if the target page is already
+    ///       mapped and `overwrite` is false.
     ///     * `Err(SysError::OutOfMemory)` if the mapping requires allocation of
     ///       new page tables and the allocation fails.
     pub unsafe fn map_one(
@@ -704,7 +700,7 @@ impl Mapper<'_> {
 
         let vpn_bits = PagingArch::PTE_PER_PGDIR.trailing_zeros() as usize;
 
-        /// Check alignment
+        // Check alignment
         #[cfg(debug_assertions)]
         {
             let level_offset = level_at * vpn_bits;
@@ -792,7 +788,7 @@ impl Mapper<'_> {
 
         let vpn_bits = PagingArch::PTE_PER_PGDIR.trailing_zeros() as usize;
 
-        /// Check alignment
+        // Check alignment
         #[cfg(debug_assertions)]
         {
             let level_offset = level_at * vpn_bits;

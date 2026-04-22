@@ -73,7 +73,7 @@ fn sys_getdents64(
     let file = fd.vfs_file();
 
     let buf_len = count as usize;
-    let mut slice = dirp.slice(buf_len);
+    let slice = dirp.slice(buf_len);
 
     let mut guard = usp.write();
 

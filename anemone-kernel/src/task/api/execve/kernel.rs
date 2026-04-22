@@ -32,9 +32,7 @@ pub fn kernel_execve(
                         flags: TaskFlags::NONE,
                         uspace: Some(usp),
                     };
-                    unsafe {
-                        task.set_exec_info(info);
-                    }
+                    task.set_exec_info(info);
                     ksp = task.kstack().stack_top();
                     task.on_prv_change(Privilege::User);
                 });
@@ -49,6 +47,4 @@ pub fn kernel_execve(
             return Err(e);
         },
     }
-
-    unreachable!();
 }

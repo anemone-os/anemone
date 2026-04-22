@@ -272,37 +272,6 @@ impl FilesState {
         Ok(())
     }
 
-    /// TODO: explain why this is unsafe.
-    ///
-    /// It's actually quite obvious.
-    unsafe fn open_fd_at(&mut self, fd: Fd, file: File, file_flags: FileFlags, fd_flags: FdFlags) {
-        if self.fd_table.contains_key(&fd) {
-            self.close_fd(fd);
-        }
-        let exist = self.recycled_fds.remove(&fd);
-        if fd >= self.next_fd {
-            match Fd::new(fd.raw() + 1) {
-                Some(next_fd) => self.next_fd = next_fd,
-                None => {
-                    if exist {
-                        self.recycled_fds.insert(fd);
-                    }
-                    panic!("fd is too large");
-                },
-            }
-        }
-        self.fd_table.insert(
-            fd,
-            Arc::new(FileDesc::new(
-                Arc::new(ProcFile {
-                    file,
-                    flags: file_flags,
-                }),
-                fd_flags,
-            )),
-        );
-    }
-
     pub fn create_copy(&self) -> Self {
         let mut new = Self::new();
         new.next_fd = self.next_fd;

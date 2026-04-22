@@ -42,7 +42,7 @@ pub fn register_syscall_handlers() {
             core::slice::from_raw_parts(start as *const SyscallHandler, handler_count)
         };
 
-        let mut handler_ptr = s.as_mut_ptr().cast::<SyscallHandler>();
+        let handler_ptr = s.as_mut_ptr().cast::<SyscallHandler>();
 
         for handler in handlers {
             unsafe {

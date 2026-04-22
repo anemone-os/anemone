@@ -287,9 +287,7 @@ mod preempt_counter {
                     }) && prev_enabled
                         && fetch_clear_resched_flag()
                     {
-                        unsafe {
-                            try_schedule();
-                        }
+                        try_schedule();
                     }
                 })
             }
@@ -391,13 +389,13 @@ mod init_routines {
 
                 PERCPU_BASES[cpu_id] = cur_vpn.to_virt_addr().get() as usize;
 
-                let mut core_local = {
+                let core_local = {
                     let core_local_ptr = {
                         let ptr = percpu_slice.as_mut_ptr().cast::<CoreLocal>();
                         assert!((ptr as usize).is_multiple_of(align_of::<CoreLocal>()));
                         ptr
                     };
-                    unsafe { &mut *core_local_ptr }
+                    &mut *core_local_ptr
                 };
 
                 if cpu_id == bsp_id {
