@@ -9,14 +9,18 @@ use crate::{
 mod bus;
 mod device;
 mod driver;
+pub mod remap;
 
 pub use bus::PcieBusType;
 pub use device::*;
 pub use driver::PcieDriver;
 
+mod addr;
 pub mod ecam;
+pub use addr::*;
 
-/// [PCI2PCI_BRIDGE_CLASSCODE] is the class code used to match PCI-to-PCI bridge devices.
+/// [PCI2PCI_BRIDGE_CLASSCODE] is the class code used to match PCI-to-PCI bridge
+/// devices.
 pub const PCI2PCI_BRIDGE_CLASSCODE: ClassCode = ClassCode {
     base: 0x06,
     sub: 0x04,
@@ -50,7 +54,8 @@ pub fn register_driver(driver: Arc<dyn PcieDriver>) {
     PCIE_BUS_TYPE.register_driver(driver);
 }
 
-/// [ls_pcie_bus] is a KUnit helper that prints all registered PCIe devices and drivers.
+/// [ls_pcie_bus] is a KUnit helper that prints all registered PCIe devices and
+/// drivers.
 #[kunit]
 fn ls_pcie_bus() {
     kprintln!();

@@ -182,6 +182,10 @@ impl<'a, E: PropEncoding> PropEncodedArray<'a, E> {
         Self { bytes, enc }
     }
 
+    pub fn raw(&self) -> &[u8] {
+        self.bytes
+    }
+
     pub fn iter(&self) -> PropEncodedArrayIter<'_, 'a, E> {
         PropEncodedArrayIter {
             array: self,

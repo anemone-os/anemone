@@ -8,8 +8,12 @@
 //! - https://cs.android.com/android/platform/superproject/+/android-latest-release:packages/modules/Virtualization/libs/libvmbase/src/virtio/hal.rs
 
 pub mod mmio;
+pub mod pcie;
+
+use core::ptr::NonNull;
 
 use crate::{
+    device::bus::pcie::remap::query_virt_addr,
     mm::dma::{DmaRegion, dma_alloc},
     prelude::*,
 };
@@ -58,10 +62,21 @@ unsafe impl virtio_drivers::Hal for VirtIOHalImpl {
     }
 
     unsafe fn mmio_phys_to_virt(
-        _paddr: virtio_drivers::PhysAddr,
-        _size: usize,
+        paddr: virtio_drivers::PhysAddr,
+        size: usize,
     ) -> core::ptr::NonNull<u8> {
-        unimplemented!("pci transport is not used yet");
+        unsafe {
+            NonNull::new_unchecked(
+                query_virt_addr(PhysAddr::new(paddr), size as u64)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "failed to find ioremap region for PhysAddr({:#x}) with {} bytes",
+                            paddr, size
+                        );
+                    })
+                    .get() as *mut u8,
+            )
+        }
     }
 
     unsafe fn share(

@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 
 use kernel_macros::{Device, KObject};
+use range_allocator::{IncreasingRangeAllocator, Rangable};
 
 use crate::{
     device::{
@@ -8,8 +9,11 @@ use crate::{
         bus::{
             BusType,
             pcie::{
-                HOST_BRIDGE_CLASSCODE, PCIE_BUS_TYPE,
-                ecam::{BusNum, ClassCode, DevNum, EcamConf, FuncNum, PcieDeviceConf},
+                HOST_BRIDGE_CLASSCODE, PCIE_BUS_TYPE, PciAddr, PciAddrFlags, PciSpaceType,
+                bus::preinit_pci_dev,
+                ecam::{
+                    BAR, BusNum, ClassCode, DevNum, EcamConf, FuncNum, MemBARType, PcieDeviceConf,
+                },
             },
         },
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
@@ -41,10 +45,164 @@ pub struct PcieDomain {
     ecam: EcamConf,
     /// `bus_num_alloc` tracks the latest allocated bus number in this domain.
     bus_num_alloc: AtomicU8,
+    io_area: Option<AvailPciMemArea>,
+    prefetchable_mem: Option<AvailPciMemArea>,
+    unprefetchable_mem: Option<AvailPciMemArea>,
+}
+
+const MIN_PHYS_MEMAREA_SIZE: usize = 64; // 64 bytes
+const PHYS_MEMAREA_ORDER: usize = 14; // 2^14 * 64 bytes = 1 MB
+
+#[derive(Debug)]
+pub struct AvailPciMemArea {
+    pci_addr: PciAddr,
+    mem_addr: PhysAddr,
+    size: u64,
+    alloc: RwLock<IncreasingRangeAllocator<PciAddrRange>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct PciAddrRange {
+    start: u64,
+    end: u64,
+}
+
+impl Rangable for PciAddrRange {
+    fn start(&self) -> usize {
+        self.start as usize
+    }
+
+    fn len(&self) -> usize {
+        (self.end - self.start) as usize
+    }
+
+    fn from_parts(start: usize, length: usize) -> Self {
+        Self {
+            start: start as u64,
+            end: (start + length) as u64,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct PciMemArea {
+    pci_addr: PciAddr,
+    phys_addr: PhysAddr,
+    size: u64,
+}
+
+impl PciMemArea {
+    pub fn pci_addr(&self) -> PciAddr {
+        self.pci_addr
+    }
+
+    pub fn phys_addr(&self) -> PhysAddr {
+        self.phys_addr
+    }
+
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+}
+
+impl AvailPciMemArea {
+    pub fn new(pci_addr: PciAddr, mem_addr: PhysAddr, size: u64) -> Self {
+        let mut alloc = IncreasingRangeAllocator::<PciAddrRange>::new(PciAddrRange {
+            start: pci_addr.address(),
+            end: pci_addr.address() + size,
+        });
+        Self {
+            pci_addr,
+            mem_addr,
+            size,
+            alloc: RwLock::new(alloc),
+        }
+    }
+
+    pub unsafe fn free(&self, area: PciMemArea) {
+        let mut alloc = self.alloc.write();
+        alloc.free(PciAddrRange {
+            start: area.pci_addr.address(),
+            end: area.pci_addr.address() + area.size,
+        });
+    }
+
+    pub fn alloc(&self, size: u64) -> Option<PciMemArea> {
+        let mut alloc = self.alloc.write();
+        if let Some(range) = alloc.allocate_aligned(size as usize, size as usize) {
+            let offset = range.start - self.pci_addr.address();
+            Some(PciMemArea {
+                pci_addr: self.pci_addr + offset,
+                phys_addr: self.mem_addr + offset,
+                size,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn compatible(&self, bar: BAR) -> bool {
+        if self.pci_addr.flags().contains(PciAddrFlags::NotRelocatable) {
+            return false;
+        }
+        if let PciSpaceType::Config = self.pci_addr.space_type() {
+            return false;
+        }
+        match bar {
+            BAR::IO { .. } => {
+                if let PciSpaceType::IO = self.pci_addr.space_type() {
+                    true
+                } else {
+                    false
+                }
+            },
+            BAR::Memory {
+                mtype,
+                prefetchable,
+                ..
+            } => {
+                if let PciSpaceType::IO = self.pci_addr.space_type() {
+                    return false;
+                }
+                if !prefetchable && self.pci_addr.flags().contains(PciAddrFlags::Prefetchable) {
+                    return false;
+                }
+                if matches!(mtype, MemBARType::W32)
+                    && self.pci_addr.space_type() == PciSpaceType::Mem64
+                {
+                    return false;
+                }
+                true
+            },
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct PciMemAreaSnapshot {
+    pub io_area: Option<u64>,
+    pub prefetchable_mem: Option<u64>,
+    pub unprefetchable_mem: Option<u64>,
+}
+
+impl Debug for PciMemAreaSnapshot {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PciMemAreaSnapshot")
+            .field("io_area", &format_args!("{:#x}", self.io_area.unwrap_or(0)))
+            .field(
+                "prefetchable_mem",
+                &format_args!("{:#x}", self.prefetchable_mem.unwrap_or(0)),
+            )
+            .field(
+                "unprefetchable_mem",
+                &format_args!("{:#x}", self.unprefetchable_mem.unwrap_or(0)),
+            )
+            .finish()
+    }
 }
 
 impl PcieDomain {
-    /// [new] creates a PCIe domain from a domain id and ECAM configuration.
+    /// Create a PCIe domain from a domain id and ECAM configuration.
     ///
     /// `domain` is the unique domain identifier.
     /// `ecam` provides config-space addressing information.
@@ -53,20 +211,108 @@ impl PcieDomain {
             domain,
             bus_num_alloc: AtomicU8::new(ecam.root_bus_num().into()),
             ecam,
+            io_area: None,
+            prefetchable_mem: None,
+            unprefetchable_mem: None,
         }
     }
 
-    /// [domain_id] returns the domain identifier.
+    /// Add a memory range to the domain's resource apertures.
+    ///
+    /// Ignore config-space apertures. Return `AlreadyMapped` if an aperture
+    /// of the same type is already registered.
+    pub fn add_mem_range(&mut self, mem_range: AvailPciMemArea) -> Result<(), SysError> {
+        if let PciSpaceType::Config = mem_range.pci_addr.space_type() {
+            return Ok(());
+        } else if let PciSpaceType::IO = mem_range.pci_addr.space_type() {
+            match &self.io_area {
+                Some(_) => return Err(SysError::AlreadyMapped),
+                None => self.io_area = Some(mem_range),
+            }
+        } else if mem_range
+            .pci_addr
+            .flags()
+            .contains(PciAddrFlags::Prefetchable)
+        {
+            match &self.prefetchable_mem {
+                Some(_) => return Err(SysError::AlreadyMapped),
+                None => self.prefetchable_mem = Some(mem_range),
+            }
+        } else {
+            match &self.unprefetchable_mem {
+                Some(_) => return Err(SysError::AlreadyMapped),
+                None => self.unprefetchable_mem = Some(mem_range),
+            }
+        }
+        Ok(())
+    }
+
+    /// Allocate a memory region for the specified BAR from compatible
+    /// apertures.
+    ///
+    /// Return the aperture and allocated area on success.
+    pub fn alloc_mem_for_bar(&self, bar: BAR, size: u64) -> Option<(&AvailPciMemArea, PciMemArea)> {
+        let mem_ranges_iter: &mut dyn Iterator<Item = &AvailPciMemArea> = match bar {
+            BAR::Memory {
+                prefetchable: false,
+                ..
+            } => &mut self.unprefetchable_mem.iter(),
+            BAR::Memory {
+                prefetchable: true, ..
+            } => &mut self
+                .unprefetchable_mem
+                .iter()
+                .chain(self.prefetchable_mem.iter()),
+            BAR::IO { .. } => &mut self.io_area.iter(),
+        };
+        while let Some(next) = mem_ranges_iter.next() {
+            if next.compatible(bar) {
+                if let Some(addr) = next.alloc(size) {
+                    return Some((next, addr));
+                }
+            }
+        }
+        None
+    }
+
+    /// Snapshot the current allocated addresses in each aperture, aligned up to
+    /// `align`.
+    pub fn snapshot_mem_areas(&self, align: PciMemAreaSnapshot) -> Option<PciMemAreaSnapshot> {
+        Some(PciMemAreaSnapshot {
+            io_area: self.io_area.as_ref().and_then(|area| {
+                area.alloc
+                    .write()
+                    .align_current_to(align.io_area.unwrap_or(1) as usize)
+                    .and_then(|x| Some(x as u64))
+            }),
+            prefetchable_mem: self.prefetchable_mem.as_ref().and_then(|area| {
+                area.alloc
+                    .write()
+                    .align_current_to(align.prefetchable_mem.unwrap_or(1) as usize)
+                    .and_then(|x| Some(x as u64))
+            }),
+            unprefetchable_mem: self.unprefetchable_mem.as_ref().and_then(|area| {
+                area.alloc
+                    .write()
+                    .align_current_to(align.unprefetchable_mem.unwrap_or(1) as usize)
+                    .and_then(|x| Some(x as u64))
+            }),
+        })
+    }
+
+    /// Return the domain identifier.
     pub fn domain_id(&self) -> usize {
         self.domain
     }
 
-    /// [ecam] returns the ECAM configuration bound to this domain.
+    /// Return the ECAM configuration bound to this domain.
     pub fn ecam(&self) -> &EcamConf {
         &self.ecam
     }
 
-    /// [alloc_bus_num] allocates the next available bus number in this domain.
+    /// Allocate the next available bus number in this domain.
+    ///
+    /// Return a `SysError` when the next bus number would overflow.
     pub fn alloc_bus_num(&self) -> Result<BusNum, SysError> {
         let bus_num_u8 = self.bus_num_alloc.load(Ordering::SeqCst);
         let next = bus_num_u8.checked_add(1).ok_or_else(|| {
@@ -86,7 +332,7 @@ impl PcieDomain {
         Ok(new_bus_num)
     }
 
-    /// [bus_num] returns the current allocated bus number marker.
+    /// Return the current allocated bus number marker.
     pub fn bus_num(&self) -> BusNum {
         BusNum::try_from(self.bus_num_alloc.load(Ordering::SeqCst)).unwrap()
     }
@@ -126,7 +372,7 @@ impl KObjectOps for PcieDevice {}
 impl DeviceOps for PcieDevice {}
 
 impl PcieDevice {
-    /// [dev_conf] returns the PCIe configuration accessor when available.
+    /// Return the PCIe configuration accessor when available.
     pub fn dev_conf(&self) -> Option<&PcieDeviceConf> {
         match &self.info {
             PcieDeviceInfo::Endpoint { conf, .. } => Some(conf),
@@ -135,17 +381,17 @@ impl PcieDevice {
         }
     }
 
-    /// [domain] returns the PCIe domain this device belongs to.
+    /// Return the PCIe domain this device belongs to.
     pub fn domain(&self) -> &Arc<PcieDomain> {
         &self.domain
     }
 
-    /// [dev_info] returns detailed PCIe topology metadata for this device.
+    /// Return detailed PCIe topology metadata for this device.
     pub fn dev_info(&self) -> &PcieDeviceInfo {
         &self.info
     }
 
-    /// [bus_num] returns the bus number for bus/endpoint devices.
+    /// Return the bus number for bus/endpoint devices.
     pub fn bus_num(&self) -> Option<BusNum> {
         match self.info {
             PcieDeviceInfo::HostBridge { .. } => None,
@@ -154,7 +400,7 @@ impl PcieDevice {
         }
     }
 
-    /// [dev_num] returns the device number for bus/endpoint devices.
+    /// Return the device number for bus/endpoint devices.
     pub fn dev_num(&self) -> Option<DevNum> {
         match self.info {
             PcieDeviceInfo::HostBridge { .. } => None,
@@ -163,7 +409,7 @@ impl PcieDevice {
         }
     }
 
-    /// [class_code] reads the class code used for driver matching.
+    /// Read the class code used for driver matching.
     pub fn class_code(&self) -> ClassCode {
         match &self.info {
             PcieDeviceInfo::HostBridge { .. } => HOST_BRIDGE_CLASSCODE, // Host bridge class code
@@ -172,7 +418,21 @@ impl PcieDevice {
         }
     }
 
-    /// [new_endpoint] creates a PCIe endpoint device object.
+    pub fn vendor_device_id(&self) -> Option<(u16, u16)> {
+        match &self.info {
+            PcieDeviceInfo::HostBridge { .. } => None,
+            PcieDeviceInfo::Bus { conf, .. } => {
+                let func = conf.get_function(FuncNum::MIN);
+                Some((func.vendor_id(), func.device_id()))
+            },
+            PcieDeviceInfo::Endpoint { conf, .. } => {
+                let func = conf.get_function(FuncNum::MIN);
+                Some((func.vendor_id(), func.device_id()))
+            },
+        }
+    }
+
+    /// Create a PCIe endpoint device object.
     ///
     /// `name` is the device kobject name.
     /// `domain` is the owning PCIe domain.
@@ -196,7 +456,7 @@ impl PcieDevice {
         }
     }
 
-    /// [new_bus] creates a PCIe bus-device object for a bridge function.
+    /// Create a PCIe bus-device object for a bridge function.
     ///
     /// `name` is the device kobject name.
     /// `domain` is the owning PCIe domain.
@@ -223,7 +483,7 @@ impl PcieDevice {
         }
     }
 
-    /// [new_host_bridge] creates a PCIe host-bridge device object.
+    /// Create a PCIe host-bridge device object.
     ///
     /// `name` is the device kobject name.
     /// `domain` is the owning PCIe domain.
@@ -237,33 +497,72 @@ impl PcieDevice {
         }
     }
 
-    /// [register_and_add_device] links a child device and probes matching PCIe drivers.
+    /// Register and add a child device and probe matching PCIe drivers.
     ///
     /// `device` is the child PCIe device to add under `self`.
-    pub fn register_and_add_device(&self, device: Arc<PcieDevice>) {
+    pub fn register_and_preinit_device(&self, device: Arc<PcieDevice>) {
         if let PcieDeviceInfo::Endpoint { .. } = &self.info {
             panic!("cannot register device to an endpoint");
         }
         self.add_child(device.clone());
+
         for driver in PCIE_BUS_TYPE.base().drivers.read().iter() {
             if PCIE_BUS_TYPE.matches(device.as_ref(), driver.as_ref()) {
                 // TODO: probe defer
-                match driver.probe(device.clone()) {
+                if let Err(e) = preinit_pci_dev(device.as_ref()) {
+                    kerrln!(
+                        "preinit failed for device {} when probed by driver {}: {:?}",
+                        device.name(),
+                        driver.name(),
+                        e
+                    );
+                }
+
+                let pcie_driver = driver
+                    .as_pcie_driver()
+                    .expect("only pcie drivers should be registered to pcie bus");
+
+                if let Err(e) = pcie_driver.postinit(device.clone()) {
+                    kerrln!(
+                        "postinit failed for device {} when probed by driver {}: {:?}",
+                        device.name(),
+                        driver.name(),
+                        e
+                    );
+                    return;
+                }
+
+                device.set_driver(Some(driver.clone()));
+
+                break;
+            }
+        }
+    }
+
+    pub fn probe_all_devices(&self) {
+        //kinfoln!("probing all devices under pcie device {}", self.name());
+        (self as &dyn Device).for_each_child(|child| {
+            if let Some(driver) = child.driver() {
+                /*kinfoln!(
+                    "probing device {} with driver {}",
+                    child.name(),
+                    driver.name()
+                );*/
+                match driver.probe(child.clone()) {
                     Ok(()) => {
-                        device.set_driver(Some(driver.clone()));
-                        driver.attach_device(device.clone());
+                        driver.attach_device(child.clone());
                     },
                     Err(e) => {
+                        child.set_driver(None);
                         kerrln!(
                             "failed to probe device {} with driver {}: {:?}",
-                            device.name(),
+                            child.name(),
                             driver.name(),
                             e
                         );
                     },
                 }
-                break;
-            }
-        }
+            } 
+        });
     }
 }
