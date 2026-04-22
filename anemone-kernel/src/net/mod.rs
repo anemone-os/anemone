@@ -4,7 +4,9 @@
 //! Architecture and multi-interface behavior: see `anemone-kernel/docs/NETWORK.md`.
 
 mod config;
+pub mod error;
 mod icmp;
+pub mod sockfs;
 #[cfg(feature = "kunit")]
 mod icmp_kunit;
 #[cfg(feature = "kunit")]
@@ -14,7 +16,7 @@ mod poll;
 mod probe;
 mod stack;
 pub mod user_socket;
-mod syscall;
+mod api;
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 #[cfg(feature = "net-probe")]
@@ -31,7 +33,9 @@ use crate::{
     time::timer::schedule_irq_timer_event,
 };
 
+pub use error::NetError;
 pub use icmp::IcmpEchoStats;
+pub use sockfs::{create_socket_file, get_socket_shared};
 
 use config::{
     DEFAULT_IP, DEFAULT_PREFIX_LEN, LOOPBACK_IP, LOOPBACK_PREFIX_LEN, LOOPBACK_POLL_PERIOD,
@@ -63,7 +67,7 @@ impl NetStackTable {
 static NET_STACK_TABLE: Lazy<RwLock<NetStackTable>> =
     Lazy::new(|| RwLock::new(NetStackTable::new()));
 
-/// Remove a user socket from the smoltcp [`SocketSet`] when the last [`UserSocket`](user_socket::UserSocket) drops.
+/// Remove a user socket from the smoltcp [`SocketSet`] when the last [`UserSocketShared`](user_socket::UserSocketShared) drops.
 pub(crate) fn remove_user_socket_handle(stack_name: &str, handle: SocketHandle) {
     let stack_arc = {
         let table = NET_STACK_TABLE.read_irqsave();

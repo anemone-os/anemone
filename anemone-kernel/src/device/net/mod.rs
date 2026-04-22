@@ -1,8 +1,8 @@
-//！ Network device subsystem.
-//！
-//！ This module is a registry and abstraction for network interfaces (NICs); 
-//！ it does not implement the full TCP/IP stack.
-//！ The stack is attached separately in crate::net.
+//! Network device subsystem.
+//!
+//! This module is a registry and abstraction for network interfaces (NICs);
+//! it does not implement the full TCP/IP stack.
+//! The TCP/IP stack is attached separately in `crate::net`.
 
 use alloc::{string::String, vec::Vec};
 

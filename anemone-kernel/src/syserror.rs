@@ -1,11 +1,12 @@
-use anemone_abi::errno::Errno;
-
-use crate::prelude::*;
+use crate::{net::NetError, prelude::*};
 
 /// System-wide error type, wrapping errors from all subsystems (e.g. memory
 /// management, device drivers, etc.).
 ///
-/// TODO
+/// Each subsystem defines its own `XxxError` type and implements [`AsErrno`]
+/// on it. `SysError` is the common envelope used by syscall handlers to
+/// propagate errors up to the ABI boundary, where [`AsErrno::as_errno`]
+/// converts them to POSIX errno values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SysError {
     Mm(MmError),
@@ -13,6 +14,7 @@ pub enum SysError {
     Fs(FsError),
     Kernel(KernelError),
     Task(TaskError),
+    Net(NetError),
 }
 
 /// Kernel-level errors, i.e. errors that are not specific to any subsystem, but
@@ -31,8 +33,10 @@ pub enum KernelError {
     PermissionDenied,
     /// The provided file descriptor is invalid.
     BadFileDescriptor,
-    /// POSIX errno mapped straight through for sockets and similar paths.
-    Errno(Errno),
+    /// The file descriptor does not support seeking (e.g. socket or pipe).
+    NotSeekable,
+    /// The file descriptor does not refer to a directory.
+    NotDirectory,
 }
 
 impl AsErrno for KernelError {
@@ -45,7 +49,8 @@ impl AsErrno for KernelError {
             KernelError::BufferTooSmall => ERANGE,
             KernelError::PermissionDenied => EPERM,
             KernelError::BadFileDescriptor => EBADF,
-            KernelError::Errno(e) => *e,
+            KernelError::NotSeekable => ESPIPE,
+            KernelError::NotDirectory => ENOTDIR,
         }
     }
 }
@@ -74,6 +79,12 @@ impl From<KernelError> for SysError {
     }
 }
 
+impl From<NetError> for SysError {
+    fn from(net_error: NetError) -> Self {
+        Self::Net(net_error)
+    }
+}
+
 impl AsErrno for SysError {
     fn as_errno(&self) -> anemone_abi::errno::Errno {
         match self {
@@ -82,6 +93,7 @@ impl AsErrno for SysError {
             SysError::Fs(fs_error) => fs_error.as_errno(),
             SysError::Kernel(kernel_error) => kernel_error.as_errno(),
             SysError::Task(task_error) => task_error.as_errno(),
+            SysError::Net(net_error) => net_error.as_errno(),
         }
     }
 }

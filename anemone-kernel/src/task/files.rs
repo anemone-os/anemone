@@ -3,7 +3,43 @@
 //! Reference:
 //! - https://elixir.bootlin.com/linux/v6.6.32/source/include/linux/fdtable.h
 
-use crate::{net::user_socket::UserSocket, prelude::*};
+use crate::prelude::{handler::TryFromSyscallArg, *};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Fd(u32);
+
+impl Fd {
+    /// Create a new Fd from a raw u32 value.
+    ///
+    /// Returns None if the value is too large to be a valid fd number.
+    pub const fn new(fd: u32) -> Option<Self> {
+        if fd >= i32::MAX as u32 {
+            None
+        } else {
+            Some(Self(fd))
+        }
+    }
+
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+impl TryFromSyscallArg for Fd {
+    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+        if (raw >> 32) != 0 {
+            Err(SysError::InvalidArgument)
+        } else if (raw as i32) < 0 {
+            Err(SysError::InvalidArgument)
+        } else {
+            if (raw >> 32) as u32 >= i32::MAX as u32 {
+                Err(SysError::InvalidArgument)
+            } else {
+                Ok(Self(raw as u32))
+            }
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct ProcFile {
@@ -13,16 +49,9 @@ pub struct ProcFile {
 }
 
 #[derive(Debug, Clone)]
-pub enum FileDesc {
-    Vfs {
-        pfile: Arc<ProcFile>,
-        flags: FdFlags,
-    },
-    Socket {
-        socket: UserSocket,
-        flags: FdFlags,
-        file_flags: FileFlags,
-    },
+pub struct FileDesc {
+    pfile: Arc<ProcFile>,
+    flags: FdFlags,
 }
 
 // re-export FileOps here, with permission checked.
@@ -30,113 +59,54 @@ pub enum FileDesc {
 // TODO: we only checked permission of fd, but we haven't checked permission of
 // the file itself.
 impl FileDesc {
-    fn new_vfs(pfile: Arc<ProcFile>, flags: FdFlags) -> Self {
-        Self::Vfs { pfile, flags }
-    }
-
-    pub fn new_socket(socket: UserSocket, flags: FdFlags, file_flags: FileFlags) -> Self {
-        Self::Socket {
-            socket,
-            flags,
-            file_flags,
-        }
-    }
-
-    pub fn as_vfs_file(&self) -> Option<&File> {
-        match self {
-            FileDesc::Vfs { pfile, .. } => Some(&pfile.file),
-            FileDesc::Socket { .. } => None,
-        }
+    fn new(pfile: Arc<ProcFile>, flags: FdFlags) -> Self {
+        Self { pfile, flags }
     }
 
     pub fn vfs_file(&self) -> &File {
-        self.as_vfs_file()
-            .expect("socket fd used where a VFS file is required")
+        &self.pfile.file
     }
 
     pub fn file_flags(&self) -> FileFlags {
-        match self {
-            FileDesc::Vfs { pfile, .. } => pfile.flags,
-            FileDesc::Socket { file_flags, .. } => *file_flags,
-        }
+        self.pfile.flags
     }
 
     pub fn fd_flags(&self) -> FdFlags {
-        match self {
-            FileDesc::Vfs { flags, .. } | FileDesc::Socket { flags, .. } => *flags,
-        }
-    }
-
-    pub fn user_socket(&self) -> Option<&UserSocket> {
-        match self {
-            FileDesc::Socket { socket, .. } => Some(socket),
-            FileDesc::Vfs { .. } => None,
-        }
+        self.flags
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
-        match self {
-            FileDesc::Vfs { pfile, .. } => {
-                if !pfile.flags.contains(FileFlags::READ) {
-                    return Err(KernelError::PermissionDenied.into());
-                }
-                pfile.file.read(buf).map_err(|e| e.into())
-            }
-            FileDesc::Socket {
-                socket,
-                file_flags,
-                ..
-            } => {
-                if !file_flags.contains(FileFlags::READ) {
-                    return Err(KernelError::PermissionDenied.into());
-                }
-                crate::net::user_socket::user_socket_read(&socket.inner, buf, *file_flags)
-            }
+        if !self.pfile.flags.contains(FileFlags::READ) {
+            return Err(SysError::PermissionDenied);
         }
+        self.pfile.file.read(buf).map_err(|e| e.into())
     }
 
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
-        match self {
-            FileDesc::Vfs { pfile, .. } => {
-                if !pfile.flags.contains(FileFlags::WRITE) {
-                    return Err(KernelError::PermissionDenied.into());
-                }
-
-                if pfile.flags.contains(FileFlags::APPEND) {
-                    pfile
-                        .file
-                        .seek(pfile.file.get_attr()?.size as usize)?;
-                }
-
-                pfile.file.write(buf).map_err(|e| e.into())
-            }
-            FileDesc::Socket {
-                socket,
-                file_flags,
-                ..
-            } => {
-                if !file_flags.contains(FileFlags::WRITE) {
-                    return Err(KernelError::PermissionDenied.into());
-                }
-                crate::net::user_socket::user_socket_write(&socket.inner, buf, *file_flags)
-            }
+        if !self.pfile.flags.contains(FileFlags::WRITE) {
+            return Err(SysError::PermissionDenied);
         }
+
+        // currently we don't support atomic append, so we just seek to the end of file
+        // before writing.
+
+        if self.pfile.flags.contains(FileFlags::APPEND) {
+            self.pfile
+                .file
+                .seek(self.pfile.file.get_attr()?.size as usize)?;
+        }
+
+        self.pfile.file.write(buf).map_err(|e| e.into())
     }
 
     /// `whence` is Linux-specific. we handle that in syscall handler. it should
     /// not pollute our FileDesc API.
     pub fn seek(&self, offset: usize) -> Result<(), SysError> {
-        match self {
-            FileDesc::Vfs { pfile, .. } => pfile.file.seek(offset).map_err(|e| e.into()),
-            FileDesc::Socket { .. } => Err(KernelError::Errno(anemone_abi::errno::ESPIPE).into()),
-        }
+        self.pfile.file.seek(offset).map_err(|e| e.into())
     }
 
     pub fn iterate(&self, ctx: &mut DirContext) -> Result<DirEntry, SysError> {
-        match self {
-            FileDesc::Vfs { pfile, .. } => pfile.file.iterate(ctx).map_err(|e| e.into()),
-            FileDesc::Socket { .. } => Err(KernelError::Errno(anemone_abi::errno::ENOTDIR).into()),
-        }
+        self.pfile.file.iterate(ctx).map_err(|e| e.into())
     }
 }
 
@@ -146,8 +116,6 @@ bitflags! {
         const READ = 0b0001;
         const WRITE = 0b0010;
         const APPEND = 0b0100;
-        /// `O_NONBLOCK` / `SOCK_NONBLOCK` (non-blocking socket I/O).
-        const NONBLOCK = 0b1000;
 
         // create, truncate are not persistant flags, they are only used when opening a file, so we don't need to store them in FileDesc.
     }
@@ -184,9 +152,6 @@ impl FileFlags {
         if flags & anemone_abi::fs::linux::open::O_APPEND != 0 {
             open_flags |= Self::APPEND;
         }
-        if flags & anemone_abi::fs::linux::open::O_NONBLOCK != 0 {
-            open_flags |= Self::NONBLOCK;
-        }
 
         open_flags
     }
@@ -201,80 +166,57 @@ impl FdFlags {
 
         fd_flags
     }
-
-    /// dup3 only allows O_CLOEXEC
-    pub fn from_dup3_flags(flags: u32) -> Result<Self, SysError> {
-        let allowed = anemone_abi::fs::linux::open::O_CLOEXEC;
-        if flags & !allowed != 0 {
-            return Err(KernelError::InvalidArgument.into());
-        }
-
-        Ok(Self::from_linux_open_flags(flags))
-    }
 }
 
 #[derive(Debug)]
 pub struct FilesState {
     // TODO: max_fd
-    next_fd: usize,
-    recycled_fds: BTreeSet<usize>,
-    fd_table: HashMap<usize, Arc<FileDesc>>,
+    next_fd: Fd,
+    recycled_fds: BTreeSet<Fd>,
+    fd_table: HashMap<Fd, Arc<FileDesc>>,
 }
 
 impl FilesState {
-    fn alloc_fd(&mut self) -> usize {
+    fn alloc_fd(&mut self) -> Option<Fd> {
         if let Some(recycled_fd) = self.recycled_fds.iter().next().cloned() {
             self.recycled_fds.remove(&recycled_fd);
-            recycled_fd
+            Some(recycled_fd)
         } else {
             while self.fd_table.contains_key(&self.next_fd) {
-                self.next_fd += 1;
+                let next_fd = Fd::new(self.next_fd.raw() + 1)?;
+                self.next_fd = next_fd;
             }
             let fd = self.next_fd;
-            self.next_fd += 1;
-            fd
+            self.next_fd = Fd::new(self.next_fd.raw() + 1)?;
+            Some(fd)
         }
     }
 
     pub fn new() -> Self {
         Self {
-            next_fd: 0,
+            next_fd: Fd(0),
             recycled_fds: BTreeSet::new(),
             fd_table: HashMap::new(),
         }
     }
 
-    pub fn open_fd(&mut self, file: File, file_flags: FileFlags, fd_flags: FdFlags) -> usize {
-        let fd = self.alloc_fd();
+    pub fn open_fd(&mut self, file: File, file_flags: FileFlags, fd_flags: FdFlags) -> Option<Fd> {
+        let fd = self.alloc_fd()?;
         let file = Arc::new(ProcFile {
             file,
             flags: file_flags,
         });
 
         self.fd_table
-            .insert(fd, Arc::new(FileDesc::new_vfs(file, fd_flags)));
-        fd
+            .insert(fd, Arc::new(FileDesc::new(file, fd_flags)));
+        Some(fd)
     }
 
-    pub fn open_socket_fd(
-        &mut self,
-        socket: UserSocket,
-        file_flags: FileFlags,
-        fd_flags: FdFlags,
-    ) -> usize {
-        let fd = self.alloc_fd();
-        self.fd_table.insert(
-            fd,
-            Arc::new(FileDesc::new_socket(socket, fd_flags, file_flags)),
-        );
-        fd
-    }
-
-    pub fn get_fd(&self, fd: usize) -> Option<Arc<FileDesc>> {
+    pub fn get_fd(&self, fd: Fd) -> Option<Arc<FileDesc>> {
         self.fd_table.get(&fd).cloned()
     }
 
-    pub fn close_fd(&mut self, fd: usize) -> Option<Arc<FileDesc>> {
+    pub fn close_fd(&mut self, fd: Fd) -> Option<Arc<FileDesc>> {
         if let Some(file_desc) = self.fd_table.remove(&fd) {
             self.recycled_fds.insert(fd);
             Some(file_desc)
@@ -283,30 +225,25 @@ impl FilesState {
         }
     }
 
-    pub fn dup(&mut self, old_fd: usize) -> Option<usize> {
+    pub fn dup(&mut self, old_fd: Fd) -> Option<Fd> {
         let fd = self.get_fd(old_fd)?;
-        let new_fd = self.alloc_fd();
-        let new_desc = match &*fd {
-            FileDesc::Vfs { pfile, .. } => FileDesc::new_vfs(pfile.clone(), FdFlags::empty()),
-            FileDesc::Socket {
-                socket,
-                file_flags,
-                ..
-            } => FileDesc::new_socket(socket.clone(), FdFlags::empty(), *file_flags),
-        };
-        self.fd_table.insert(new_fd, Arc::new(new_desc));
+        let new_fd = self.alloc_fd()?;
+        self.fd_table.insert(
+            new_fd,
+            Arc::new(FileDesc::new(fd.pfile.clone(), FdFlags::empty())),
+        );
         Some(new_fd)
     }
 
     /// Linux's semantics of dup3 is a bit weird, currently we implement a
     /// reasonable subset of it. If in the future we get stuck with
     /// compatibility issues, we'll implement the rest of it.
-    pub fn dup3(&mut self, old_fd: usize, new_fd: usize, flags: FdFlags) -> Result<(), SysError> {
+    pub fn dup3(&mut self, old_fd: Fd, new_fd: Fd, flags: FdFlags) -> Result<(), SysError> {
         if old_fd == new_fd {
-            return Err(KernelError::InvalidArgument.into());
+            return Err(SysError::InvalidArgument);
         }
 
-        let fd = self.get_fd(old_fd).ok_or(KernelError::BadFileDescriptor)?;
+        let fd = self.get_fd(old_fd).ok_or(SysError::BadFileDescriptor)?;
 
         if self.fd_table.contains_key(&new_fd) {
             self.close_fd(new_fd);
@@ -315,21 +252,22 @@ impl FilesState {
         // we need to remove new_fd from recycled_fds, because after dup3, new_fd is no
         // longer available for allocation, though new_fd might not be in recycled_fds
         // if new_fd is larger than any previously allocated fd.
-        self.recycled_fds.remove(&new_fd);
+        let exist = self.recycled_fds.remove(&new_fd);
 
         if new_fd >= self.next_fd {
-            self.next_fd = new_fd + 1;
+            match Fd::new(new_fd.raw() + 1) {
+                Some(next_fd) => self.next_fd = next_fd,
+                None => {
+                    if exist {
+                        self.recycled_fds.insert(new_fd);
+                    }
+                    return Err(SysError::InvalidArgument);
+                },
+            }
         }
 
-        let new_desc = match &*fd {
-            FileDesc::Vfs { pfile, .. } => FileDesc::new_vfs(pfile.clone(), flags),
-            FileDesc::Socket {
-                socket,
-                file_flags,
-                ..
-            } => FileDesc::new_socket(socket.clone(), flags, *file_flags),
-        };
-        self.fd_table.insert(new_fd, Arc::new(new_desc));
+        self.fd_table
+            .insert(new_fd, Arc::new(FileDesc::new(fd.pfile.clone(), flags)));
 
         Ok(())
     }
@@ -337,23 +275,25 @@ impl FilesState {
     /// TODO: explain why this is unsafe.
     ///
     /// It's actually quite obvious.
-    unsafe fn open_fd_at(
-        &mut self,
-        fd: usize,
-        file: File,
-        file_flags: FileFlags,
-        fd_flags: FdFlags,
-    ) {
+    unsafe fn open_fd_at(&mut self, fd: Fd, file: File, file_flags: FileFlags, fd_flags: FdFlags) {
         if self.fd_table.contains_key(&fd) {
             self.close_fd(fd);
         }
-        self.recycled_fds.remove(&fd);
+        let exist = self.recycled_fds.remove(&fd);
         if fd >= self.next_fd {
-            self.next_fd = fd + 1;
+            match Fd::new(fd.raw() + 1) {
+                Some(next_fd) => self.next_fd = next_fd,
+                None => {
+                    if exist {
+                        self.recycled_fds.insert(fd);
+                    }
+                    panic!("fd is too large");
+                },
+            }
         }
         self.fd_table.insert(
             fd,
-            Arc::new(FileDesc::new_vfs(
+            Arc::new(FileDesc::new(
                 Arc::new(ProcFile {
                     file,
                     flags: file_flags,
@@ -371,7 +311,16 @@ impl FilesState {
             .fd_table
             .iter()
             // note that we can't clone fd_table directly, since fd flags is per-fd.
-            .map(|(fd, file_desc)| (*fd, Arc::new(file_desc.as_ref().clone())))
+            .map(|(fd, file_desc)| {
+                (
+                    *fd,
+                    Arc::new(
+                        // this clones file desc itself, not the arc, so that we can have different
+                        // fd flags for the new fd table.
+                        file_desc.as_ref().clone(),
+                    ),
+                )
+            })
             .collect();
         new
     }
@@ -397,17 +346,12 @@ impl FilesState {
 }
 
 impl Task {
-    pub fn open_fd(&self, file: File, file_flags: FileFlags, fd_flags: FdFlags) -> usize {
+    pub fn open_fd(&self, file: File, file_flags: FileFlags, fd_flags: FdFlags) -> Option<Fd> {
         let mut files_state = self.files_state.write();
         files_state.open_fd(file, file_flags, fd_flags)
     }
 
-    pub fn open_socket_fd(&self, socket: UserSocket, file_flags: FileFlags, fd_flags: FdFlags) -> usize {
-        let mut files_state = self.files_state.write();
-        files_state.open_socket_fd(socket, file_flags, fd_flags)
-    }
-
-    pub fn get_fd(&self, fd: usize) -> Option<Arc<FileDesc>> {
+    pub fn get_fd(&self, fd: Fd) -> Option<Arc<FileDesc>> {
         let files_state = self.files_state.read();
         files_state.get_fd(fd)
     }
@@ -435,17 +379,17 @@ impl Task {
         self.files_state = files_state;
     }
 
-    pub fn close_fd(&self, fd: usize) -> Option<Arc<FileDesc>> {
+    pub fn close_fd(&self, fd: Fd) -> Option<Arc<FileDesc>> {
         let mut files_state = self.files_state.write();
         files_state.close_fd(fd)
     }
 
-    pub fn dup(&self, old_fd: usize) -> Option<usize> {
+    pub fn dup(&self, old_fd: Fd) -> Option<Fd> {
         let mut files_state = self.files_state.write();
         files_state.dup(old_fd)
     }
 
-    pub fn dup3(&self, old_fd: usize, new_fd: usize, flags: FdFlags) -> Result<usize, SysError> {
+    pub fn dup3(&self, old_fd: Fd, new_fd: Fd, flags: FdFlags) -> Result<Fd, SysError> {
         let mut files_state = self.files_state.write();
         files_state.dup3(old_fd, new_fd, flags)?;
         Ok(new_fd)

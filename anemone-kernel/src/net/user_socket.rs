@@ -1,7 +1,7 @@
 //! User-visible sockets (`socket`, UDP/TCP) backed by smoltcp on a [`NetStack`](super::stack::NetStack).
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
-use core::{fmt, sync::atomic::{AtomicU16, Ordering}};
+use core::sync::atomic::{AtomicU16, Ordering};
 
 use smoltcp::{
     iface::SocketHandle,
@@ -9,8 +9,11 @@ use smoltcp::{
     wire::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address},
 };
 
+use anemone_abi::net::{af, ipproto, msg, sock};
+
 use crate::{
     device::net::{get_netdev, NetDevClass},
+    net::error::NetError,
     prelude::*,
     sched::{add_to_ready, clone_current_task, sleep_as_waiting},
     syscall::dt::{UserReadPtr, UserWritePtr},
@@ -132,40 +135,21 @@ impl Drop for UserSocketShared {
     }
 }
 
-#[derive(Clone)]
-pub struct UserSocket {
-    pub(crate) inner: Arc<UserSocketShared>,
-}
-
-impl fmt::Debug for UserSocket {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("UserSocket")
-            .field("stack_name", &self.inner.stack_name)
-            .field("handle", &self.inner.handle)
-            .field("kind", &self.inner.kind)
-            .finish()
-    }
-}
-
-impl UserSocket {
-    pub(crate) fn register_on_stack(stack: &mut NetStack, inner: &Arc<UserSocketShared>) {
-        stack.user_socket_entries.push(UserSocketEntry {
-            handle: inner.handle,
-            kind: inner.kind,
-            shared: Arc::downgrade(inner),
-        });
-    }
+pub(crate) fn register_on_stack(stack: &mut NetStack, inner: &Arc<UserSocketShared>) {
+    stack.user_socket_entries.push(UserSocketEntry {
+        handle: inner.handle,
+        kind: inner.kind,
+        shared: Arc::downgrade(inner),
+    });
 }
 
 pub(crate) fn parse_sockaddr_in(buf: &[u8]) -> Result<(Ipv4Address, u16), SysError> {
-    use anemone_abi::errno::*;
-    use anemone_abi::net::af;
     if buf.len() < 8 {
-        return Err(KernelError::Errno(EINVAL).into());
+        return Err(NetError::InvalidArgument.into());
     }
     let family = u16::from_ne_bytes([buf[0], buf[1]]);
     if family != af::AF_INET as u16 {
-        return Err(KernelError::Errno(EAFNOSUPPORT).into());
+        return Err(NetError::AddressFamilyNotSupported.into());
     }
     let port = u16::from_be_bytes([buf[2], buf[3]]);
     let addr = Ipv4Address::new(buf[4], buf[5], buf[6], buf[7]);
@@ -177,9 +161,8 @@ fn ip_endpoint_v4(addr: Ipv4Address, port: u16) -> IpEndpoint {
 }
 
 fn emit_sockaddr_in(out: &mut [u8], addr: Ipv4Address, port: u16) -> Result<usize, SysError> {
-    use anemone_abi::net::af;
     if out.len() < 16 {
-        return Err(KernelError::InvalidArgument.into());
+        return Err(NetError::InvalidArgument.into());
     }
     out[0..2].copy_from_slice(&(af::AF_INET as u16).to_ne_bytes());
     out[2..4].copy_from_slice(&port.to_be_bytes());
@@ -233,14 +216,13 @@ pub(crate) fn post_poll_wake(stack: &mut NetStack) {
 }
 
 pub(crate) fn default_ethernet_stack_name() -> Result<String, SysError> {
-    use anemone_abi::errno::*;
     let table = super::NET_STACK_TABLE.read_irqsave();
     for name in &table.ordered {
         if get_netdev(name.as_str()).map(|d| d.class()) == Some(NetDevClass::Ethernet) {
             return Ok(name.clone());
         }
     }
-    Err(KernelError::Errno(ENETDOWN).into())
+    Err(NetError::NetworkDown.into())
 }
 
 pub(crate) fn with_default_eth_stack_mut<R>(
@@ -253,7 +235,7 @@ pub(crate) fn with_default_eth_stack_mut<R>(
             .stacks
             .get(&name)
             .cloned()
-            .ok_or_else(|| SysError::from(KernelError::Errno(anemone_abi::errno::ENETDOWN)))?
+            .ok_or_else(|| SysError::from(NetError::NetworkDown))?
     };
     let mut stack = arc.lock_irqsave();
     f(&mut stack)
@@ -280,10 +262,8 @@ pub(crate) fn sys_socket_impl(
     kind: i32,
     protocol: i32,
 ) -> Result<Arc<UserSocketShared>, SysError> {
-    use anemone_abi::errno::*;
-    use anemone_abi::net::{af, ipproto, sock};
     if domain != af::AF_INET as i32 {
-        return Err(KernelError::Errno(EAFNOSUPPORT).into());
+        return Err(NetError::AddressFamilyNotSupported.into());
     }
     let mut ty = kind as u32;
     ty &= !(sock::SOCK_NONBLOCK | sock::SOCK_CLOEXEC);
@@ -294,13 +274,13 @@ pub(crate) fn sys_socket_impl(
             .stacks
             .get(&stack_name)
             .cloned()
-            .ok_or_else(|| SysError::from(KernelError::Errno(ENODEV)))?
+            .ok_or(NetError::NetworkDown)?
     };
     let mut stack = arc.lock_irqsave();
     match ty {
         sock::SOCK_DGRAM => {
             if protocol != 0 && protocol != ipproto::UDP {
-                return Err(KernelError::Errno(EPROTONOSUPPORT).into());
+                return Err(NetError::ProtocolNotSupported.into());
             }
             let h = stack.sockets.add(udp::Socket::new(
                 make_udp_packet_buffers(),
@@ -311,19 +291,19 @@ pub(crate) fn sys_socket_impl(
                 let _ = s.bind(alloc_ephemeral_port());
             }
             let inner = Arc::new(UserSocketShared::new(stack_name, h, UserSocketKind::Udp));
-            UserSocket::register_on_stack(&mut stack, &inner);
+            register_on_stack(&mut stack, &inner);
             Ok(inner)
         }
         sock::SOCK_STREAM => {
             if protocol != 0 && protocol != ipproto::TCP {
-                return Err(KernelError::Errno(EPROTONOSUPPORT).into());
+                return Err(NetError::ProtocolNotSupported.into());
             }
             let h = stack.sockets.add(make_tcp_socket());
             let inner = Arc::new(UserSocketShared::new(stack_name, h, UserSocketKind::Tcp));
-            UserSocket::register_on_stack(&mut stack, &inner);
+            register_on_stack(&mut stack, &inner);
             Ok(inner)
         }
-        _ => Err(KernelError::Errno(ESOCKTNOSUPPORT).into()),
+        _ => Err(NetError::SocketTypeNotSupported.into()),
     }
 }
 
@@ -332,23 +312,22 @@ pub(crate) fn sys_bind_impl(
     addr: UserReadPtr<u8>,
     addrlen: u32,
 ) -> Result<u64, SysError> {
-    use anemone_abi::errno::*;
     if shared.kind == UserSocketKind::Tcp {
-        return Err(KernelError::Errno(EOPNOTSUPP).into());
+        return Err(NetError::OperationNotSupported.into());
     }
     let mut buf = vec![0u8; addrlen as usize];
     addr.slice(addrlen as usize).safe_read(&mut buf)?;
     let (ipv4, port) = parse_sockaddr_in(&buf)?;
     if port == 0 {
-        return Err(KernelError::Errno(EINVAL).into());
+        return Err(NetError::InvalidArgument.into());
     }
     with_default_eth_stack_mut(|stack| {
         if stack.name != shared.stack_name {
-            return Err(KernelError::Errno(ENODEV).into());
+            return Err(NetError::NetworkDown.into());
         }
         let s = stack.sockets.get_mut::<udp::Socket>(shared.handle);
         s.bind(IpListenEndpoint::from(IpEndpoint::new(IpAddress::Ipv4(ipv4), port)))
-            .map_err(|_| SysError::from(KernelError::Errno(EADDRINUSE)))?;
+            .map_err(|_| SysError::from(NetError::AddressInUse))?;
         super::poll::poll_one_stack(stack);
         Ok(0u64)
     })
@@ -359,9 +338,8 @@ pub(crate) fn sys_connect_impl(
     addr: UserReadPtr<u8>,
     addrlen: u32,
 ) -> Result<u64, SysError> {
-    use anemone_abi::errno::*;
     if shared.kind != UserSocketKind::Tcp {
-        return Err(KernelError::Errno(EOPNOTSUPP).into());
+        return Err(NetError::OperationNotSupported.into());
     }
     let mut buf = vec![0u8; addrlen as usize];
     addr.slice(addrlen as usize).safe_read(&mut buf)?;
@@ -376,7 +354,7 @@ pub(crate) fn sys_connect_impl(
             .stacks
             .get(&stack_name)
             .cloned()
-            .ok_or_else(|| SysError::from(KernelError::Errno(ENODEV)))?;
+            .ok_or(NetError::NetworkDown)?;
         let mut stack = arc.lock_irqsave();
         {
             // One `&mut NetStack` so `iface` / `sockets` are disjoint field borrows.
@@ -388,7 +366,7 @@ pub(crate) fn sys_connect_impl(
             let cx = iface.context();
             let s = sockets.get_mut::<tcp::Socket>(h);
             s.connect(cx, remote, local_port)
-                .map_err(|_| SysError::from(KernelError::Errno(EINVAL)))?;
+                .map_err(|_| SysError::from(NetError::InvalidArgument))?;
         }
         super::poll::poll_one_stack(&mut stack);
     }
@@ -396,7 +374,7 @@ pub(crate) fn sys_connect_impl(
         let progress = {
             let table = super::NET_STACK_TABLE.read_irqsave();
             let Some(arc) = table.stacks.get(&stack_name).cloned() else {
-                return Err(KernelError::Errno(ENODEV).into());
+                return Err(NetError::NetworkDown.into());
             };
             let mut stack = arc.lock_irqsave();
             super::poll::poll_one_stack(&mut stack);
@@ -412,7 +390,7 @@ pub(crate) fn sys_connect_impl(
             break;
         }
         if progress == -1 {
-            return Err(KernelError::Errno(ECONNREFUSED).into());
+            return Err(NetError::ConnectionRefused.into());
         }
         let task = clone_current_task();
         shared.push_connect_waiter(task.clone());
@@ -420,7 +398,7 @@ pub(crate) fn sys_connect_impl(
         let quick = {
             let table = super::NET_STACK_TABLE.read_irqsave();
             let Some(arc) = table.stacks.get(&stack_name).cloned() else {
-                return Err(KernelError::Errno(ENODEV).into());
+                return Err(NetError::NetworkDown.into());
             };
             let mut stack = arc.lock_irqsave();
             super::poll::poll_one_stack(&mut stack);
@@ -437,7 +415,7 @@ pub(crate) fn sys_connect_impl(
             break;
         }
         if quick == -1 {
-            return Err(KernelError::Errno(ECONNREFUSED).into());
+            return Err(NetError::ConnectionRefused.into());
         }
         sleep_as_waiting(true);
     }
@@ -446,13 +424,13 @@ pub(crate) fn sys_connect_impl(
         .stacks
         .get(&stack_name)
         .cloned()
-        .ok_or_else(|| SysError::from(KernelError::Errno(ENODEV)))?;
+        .ok_or(NetError::NetworkDown)?;
     let mut stack = arc.lock_irqsave();
     let s = stack.sockets.get_mut::<tcp::Socket>(h);
     use smoltcp::socket::tcp::State;
     match s.state() {
         State::Established => Ok(0),
-        _ => Err(KernelError::Errno(ECONNREFUSED).into()),
+        _ => Err(NetError::ConnectionRefused.into()),
     }
 }
 
@@ -465,8 +443,6 @@ pub(crate) fn sys_sendto_impl(
     addrlen: u32,
     file_flags: FileFlags,
 ) -> Result<u64, SysError> {
-    use anemone_abi::errno::*;
-    use anemone_abi::net::msg;
     let nb = file_flags.contains(FileFlags::NONBLOCK) || (flags & msg::MSG_DONTWAIT) != 0;
     if len == 0 {
         return Ok(0);
@@ -478,13 +454,13 @@ pub(crate) fn sys_sendto_impl(
     loop {
         let r: Result<usize, SysError> = with_default_eth_stack_mut(|stack| {
             if stack.name != stack_name {
-                return Err(KernelError::Errno(ENODEV).into());
+                return Err(NetError::NetworkDown.into());
             }
             super::poll::poll_one_stack(stack);
             match shared.kind {
                 UserSocketKind::Udp => {
                     if addrlen == 0 {
-                        return Err(KernelError::Errno(EDESTADDRREQ).into());
+                        return Err(NetError::DestinationAddressRequired.into());
                     }
                     let mut abuf = vec![0u8; addrlen as usize];
                     dest_addr
@@ -497,25 +473,25 @@ pub(crate) fn sys_sendto_impl(
                         return Ok(0);
                     }
                     if nb && !s.can_send() {
-                        return Err(KernelError::Errno(EAGAIN).into());
+                        return Err(NetError::WouldBlock.into());
                     }
                     s.send_slice(&kbuf, dest)
                         .map(|_| kbuf.len())
-                        .map_err(|_| SysError::from(KernelError::Errno(EMSGSIZE)))
+                        .map_err(|_| SysError::from(NetError::MessageTooLong))
                 }
                 UserSocketKind::Tcp => {
                     let s = stack.sockets.get_mut::<tcp::Socket>(h);
                     if !s.may_send() {
-                        return Err(KernelError::Errno(ENOTCONN).into());
+                        return Err(NetError::NotConnected.into());
                     }
                     if !nb && !s.can_send() {
                         return Ok(0);
                     }
                     if nb && !s.can_send() {
-                        return Err(KernelError::Errno(EAGAIN).into());
+                        return Err(NetError::WouldBlock.into());
                     }
                     s.send_slice(&kbuf)
-                        .map_err(|_| KernelError::Errno(EPIPE).into())
+                        .map_err(|_| NetError::BrokenPipe.into())
                 }
             }
         });
@@ -558,8 +534,6 @@ pub(crate) fn sys_recvfrom_impl(
     max_addr_len: u32,
     file_flags: FileFlags,
 ) -> Result<u64, SysError> {
-    use anemone_abi::errno::*;
-    use anemone_abi::net::msg;
     let nb = file_flags.contains(FileFlags::NONBLOCK) || (flags & msg::MSG_DONTWAIT) != 0;
     if len == 0 {
         return Ok(0);
@@ -570,7 +544,7 @@ pub(crate) fn sys_recvfrom_impl(
         let mut scratch = vec![0u8; len];
         let (n, meta_opt) = with_default_eth_stack_mut(|stack| {
             if stack.name != stack_name {
-                return Err(KernelError::Errno(ENODEV).into());
+                return Err(NetError::NetworkDown.into());
             }
             super::poll::poll_one_stack(stack);
             match shared.kind {
@@ -626,7 +600,7 @@ pub(crate) fn sys_recvfrom_impl(
             }
         }
         if nb {
-            return Err(KernelError::Errno(EAGAIN).into());
+            return Err(NetError::WouldBlock.into());
         }
         let task = clone_current_task();
         shared.push_recv_waiter(task.clone());
@@ -651,7 +625,6 @@ pub(crate) fn user_socket_read(
     buf: &mut [u8],
     file_flags: FileFlags,
 ) -> Result<usize, SysError> {
-    use anemone_abi::errno::*;
     if buf.is_empty() {
         return Ok(0);
     }
@@ -660,7 +633,7 @@ pub(crate) fn user_socket_read(
     loop {
         let (n, eof) = with_default_eth_stack_mut(|stack| {
             if stack.name != stack_name {
-                return Err(KernelError::Errno(ENODEV).into());
+                return Err(NetError::NetworkDown.into());
             }
             super::poll::poll_one_stack(stack);
             match shared.kind {
@@ -695,7 +668,7 @@ pub(crate) fn user_socket_read(
             return Ok(n);
         }
         if file_flags.contains(FileFlags::NONBLOCK) {
-            return Err(KernelError::Errno(EAGAIN).into());
+            return Err(NetError::WouldBlock.into());
         }
         let task = clone_current_task();
         shared.push_recv_waiter(task.clone());
@@ -720,33 +693,32 @@ pub(crate) fn user_socket_write(
     buf: &[u8],
     file_flags: FileFlags,
 ) -> Result<usize, SysError> {
-    use anemone_abi::errno::*;
     if buf.is_empty() {
         return Ok(0);
     }
     if shared.kind != UserSocketKind::Tcp {
-        return Err(KernelError::Errno(EOPNOTSUPP).into());
+        return Err(NetError::OperationNotSupported.into());
     }
     let stack_name = shared.stack_name.clone();
     let h = shared.handle;
     loop {
         let r: Result<usize, SysError> = with_default_eth_stack_mut(|stack| {
             if stack.name != stack_name {
-                return Err(KernelError::Errno(ENODEV).into());
+                return Err(NetError::NetworkDown.into());
             }
             super::poll::poll_one_stack(stack);
             let s = stack.sockets.get_mut::<tcp::Socket>(h);
             if !s.may_send() {
-                return Err(KernelError::Errno(ENOTCONN).into());
+                return Err(NetError::NotConnected.into());
             }
             if !file_flags.contains(FileFlags::NONBLOCK) && !s.can_send() {
                 return Ok(0);
             }
             if file_flags.contains(FileFlags::NONBLOCK) && !s.can_send() {
-                return Err(KernelError::Errno(EAGAIN).into());
+                return Err(NetError::WouldBlock.into());
             }
             s.send_slice(buf)
-                .map_err(|_| KernelError::Errno(EPIPE).into())
+                .map_err(|_| NetError::BrokenPipe.into())
         });
         match r {
             Ok(0) if !file_flags.contains(FileFlags::NONBLOCK) => {
