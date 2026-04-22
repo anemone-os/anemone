@@ -8,7 +8,6 @@ use anemone_abi::fs::linux::at::AT_REMOVEDIR;
 use crate::{
     fs::api::args::AtFd,
     prelude::{dt::c_readonly_string, handler::TryFromSyscallArg, *},
-    task::files::FileFlags,
 };
 
 struct UnlinkAtFlags {
@@ -38,31 +37,19 @@ fn unlinkat(
     #[validate_with(c_readonly_string)] pathname: Box<str>,
     flags: UnlinkAtFlags,
 ) -> Result<u64, SysError> {
-    with_current_task(|task| {
-        let path = Path::new(pathname.as_ref());
-        if path.is_absolute() {
-            let path = task.make_global_path(&Path::new(pathname.as_ref()));
-            vfs_unlink(&path)?;
+    let path = Path::new(pathname.as_ref());
+    if path.is_absolute() {
+        let path = with_current_task(|task| task.make_global_path(&Path::new(pathname.as_ref())));
+        vfs_unlink(&path)?;
+    } else {
+        let dir_path = dirfd.to_pathref(true)?;
+
+        if flags.remove_dir {
+            vfs_rmdir_at(&dir_path, &path)?;
         } else {
-            let dir_path = match dirfd {
-                AtFd::Cwd => task.cwd().clone(),
-                AtFd::Fd(fd) => {
-                    let dir_file = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
-                    if !dir_file.file_flags().contains(FileFlags::READ) {
-                        // or O_PATH, which hasn't been implemented yet.
-                        return Err(SysError::BadFileDescriptor);
-                    }
-                    dir_file.vfs_file().path().clone()
-                },
-            };
-
-            if flags.remove_dir {
-                vfs_rmdir_at(&dir_path, &path)?;
-            } else {
-                vfs_unlink_at(&dir_path, &path)?;
-            }
+            vfs_unlink_at(&dir_path, &path)?;
         }
+    }
 
-        Ok(0)
-    })
+    Ok(0)
 }

@@ -44,6 +44,15 @@ impl VmObject for AnonObject {
 
         let mut pages = self.pages.write();
 
+        if let Some(frame) = pages.get(&pidx) {
+            // Another thread might have resolved this page while we were waiting for the
+            // write lock.
+            return Ok(ResolvedFrame {
+                frame: frame.clone(),
+                writable: true,
+            });
+        }
+
         match access {
             PageFaultType::Read | PageFaultType::Execute => Ok(shared_zero_frame()),
             PageFaultType::Write => {

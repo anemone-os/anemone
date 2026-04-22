@@ -1,7 +1,11 @@
 /// References:
 /// - https://elixir.bootlin.com/linux/v6.6.32/source/include/uapi/linux/stat.h
 /// - https://elixir.bootlin.com/linux/v6.6.32/source/include/uapi/asm-generic/fcntl.h
+///
+/// TODO: tidy up organization.
 pub mod linux {
+    use core::ffi::c_void;
+
     pub mod open {
         pub const O_RDONLY: u32 = 0x0000;
         pub const O_WRONLY: u32 = 0x0001;
@@ -60,6 +64,7 @@ pub mod linux {
 
         pub const AT_SYMLINK_NOFOLLOW: u32 = 0x0100;
         pub const AT_REMOVEDIR: u32 = 0x0200;
+        pub const AT_EACCESS: u32 = 0x200;
         pub const AT_SYMLINK_FOLLOW: u32 = 0x0400;
         pub const AT_NO_AUTOMOUNT: u32 = 0x0800;
         pub const AT_EMPTY_PATH: u32 = 0x1000;
@@ -186,15 +191,32 @@ pub mod linux {
         pub const DT_SOCK: u8 = 12;
         pub const DT_WHT: u8 = 14;
     }
+
+    pub mod access {
+        pub const F_OK: u32 = 0;
+        pub const R_OK: u32 = 4;
+        pub const W_OK: u32 = 2;
+        pub const X_OK: u32 = 1;
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[repr(C)]
+    pub struct IoVec {
+        pub iov_base: *mut c_void,
+        pub iov_len: u64,
+    }
+
     pub const STDIN_FILENO: usize = 0;
     pub const STDOUT_FILENO: usize = 1;
     pub const STDERR_FILENO: usize = 2;
 
-    pub const SEEK_SET: usize = 0;
-    pub const SEEK_CUR: usize = 1;
-    pub const SEEK_END: usize = 2;
-    pub const SEEK_DATA: usize = 3;
-    pub const SEEK_HOLE: usize = 4;
+    pub mod seek {
+        pub const SEEK_SET: usize = 0;
+        pub const SEEK_CUR: usize = 1;
+        pub const SEEK_END: usize = 2;
+        pub const SEEK_DATA: usize = 3;
+        pub const SEEK_HOLE: usize = 4;
+    }
 }
 
 pub mod native {}

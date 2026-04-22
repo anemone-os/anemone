@@ -17,7 +17,7 @@ pub mod shadow;
 
 use core::fmt::Debug;
 
-use crate::prelude::*;
+use crate::{prelude::*, utils::data::DataSource};
 
 pub fn shared_zero_frame() -> ResolvedFrame {
     static ZERO_FRAME: Lazy<FrameHandle> = Lazy::new(|| unsafe {
@@ -131,6 +131,35 @@ pub trait VmObject: Send + Sync {
                 .ok_or(SysError::InvalidArgument)?;
         }
 
+        Ok(())
+    }
+}
+
+impl dyn VmObject {
+    /// Copy data from the given [DataSource] to this [VmObject] at the given
+    /// offset.
+    pub fn write_from_data_source<S: DataSource<TError = impl Into<SysError>>>(
+        &self,
+        offset: usize,
+        source: &S,
+        len: usize,
+    ) -> Result<(), SysError> {
+        const BUF_SIZE: usize = PagingArch::PAGE_SIZE_BYTES;
+
+        let mut buffer = vec![0u8; BUF_SIZE];
+        let mut remaining = len;
+        let mut cur_vmo_offset = offset;
+        let mut cur_src_offset = 0;
+        while remaining > 0 {
+            let copy_len = remaining.min(BUF_SIZE);
+            source
+                .copy_to(cur_src_offset, &mut buffer[..copy_len])
+                .map_err(Into::into)?;
+            self.write(cur_vmo_offset, &buffer[..copy_len])?;
+            remaining -= copy_len;
+            cur_vmo_offset += copy_len;
+            cur_src_offset += copy_len;
+        }
         Ok(())
     }
 }

@@ -6,7 +6,6 @@
 use crate::{
     fs::api::args::AtFd,
     prelude::{dt::c_readonly_string, *},
-    task::files::FileFlags,
 };
 
 #[syscall(SYS_MKDIRAT)]
@@ -15,28 +14,16 @@ fn sys_mkdirat(
     #[validate_with(c_readonly_string)] pathname: Box<str>,
     mode: u32,
 ) -> Result<u64, SysError> {
-    with_current_task(|task| {
-        let path = Path::new(pathname.as_ref());
-        let perm = InodePerm::from_linux_bits(mode as u32).ok_or(SysError::InvalidArgument)?;
-        if path.is_absolute() {
-            let path = task.make_global_path(&Path::new(pathname.as_ref()));
-            vfs_mkdir(&path, perm)?;
-        } else {
-            let dir_path = match dirfd {
-                AtFd::Cwd => task.cwd().clone(),
-                AtFd::Fd(fd) => {
-                    let dir_file = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
-                    if !dir_file.file_flags().contains(FileFlags::READ) {
-                        // or O_PATH, which hasn't been implemented yet.
-                        return Err(SysError::BadFileDescriptor);
-                    }
-                    dir_file.vfs_file().path().clone()
-                },
-            };
+    let path = Path::new(pathname.as_ref());
+    let perm = InodePerm::from_linux_bits(mode as u32).ok_or(SysError::InvalidArgument)?;
 
-            vfs_mkdir_at(&dir_path, &path, perm)?;
-        }
+    if path.is_absolute() {
+        let path = with_current_task(|task| task.make_global_path(&path));
+        vfs_mkdir(&path, perm)?;
+    } else {
+        let dir_path = dirfd.to_pathref(true)?;
+        vfs_mkdir_at(&dir_path, &path, perm)?;
+    }
 
-        Ok(0)
-    })
+    Ok(0)
 }

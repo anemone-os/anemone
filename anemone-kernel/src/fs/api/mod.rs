@@ -5,13 +5,16 @@
 //!
 //! This is not a high-priority task. We'll deal with that when we need these
 //! flags.
+//!
+//! TODO: explain how arguments' type are defined and converted. For example,
+//! libc's writev specifies `iovlen` as an `int`, but we define it as `usize`.
 
+pub mod access;
 pub mod chdir;
 pub mod chroot;
 pub mod close;
 pub mod dup;
 pub mod dup3;
-pub mod fstat;
 pub mod getcwd;
 pub mod getdents64;
 pub mod mkdirat;
@@ -19,9 +22,11 @@ pub mod mount;
 pub mod openat;
 pub mod pipe2;
 pub mod read;
+pub mod stat;
 pub mod umount;
 pub mod unlinkat;
 pub mod write;
+pub mod writev;
 
 /// those arguments used across multiple syscalls will be defined here.
 ///
@@ -47,6 +52,30 @@ mod args {
             } else {
                 Ok(Self::Fd(Fd::try_from_syscall_arg(raw)?))
             }
+        }
+    }
+
+    impl AtFd {
+        /// `check_is_dir` is a bit strange, but it's indeed needed by some
+        /// syscalls which can be called with "AT_EMPTY_PATH" flag...
+        pub fn to_pathref(&self, check_is_dir: bool) -> Result<PathRef, SysError> {
+            with_current_task(|task| {
+                match self {
+                    AtFd::Cwd => Ok(task.cwd().clone()),
+                    AtFd::Fd(fd) => {
+                        let file = task.get_fd(*fd).ok_or(SysError::BadFileDescriptor)?;
+                        if !file.file_flags().contains(FileFlags::READ) {
+                            // or O_PATH, which hasn't been implemented yet.
+                            return Err(SysError::BadFileDescriptor);
+                        }
+                        if check_is_dir && file.vfs_file().inode().ty() != InodeType::Dir {
+                            return Err(SysError::NotDir);
+                        }
+
+                        Ok(file.vfs_file().path().clone())
+                    },
+                }
+            })
         }
     }
 

@@ -14,35 +14,32 @@ const SHEBANG_MAGIC: &[u8] = b"#!";
 #[derive(Debug)]
 pub struct Shebang;
 
-impl BinaryFmt for Shebang {
-    fn load_binary(&self, ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
-        let file = vfs_open(&ctx.path)?;
+fn load_binary(ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
+    let file = vfs_open(&ctx.path)?;
 
-        let mut buf = [0u8; SHEBANG_MAX_LEN];
-        let n = file.read(&mut buf)?;
-        let ShebangArgs { interp, interp_arg } = match ShebangArgs::parse(&buf[..n]) {
-            Some(args) => args,
-            // note that Err is not used here, since this is not a system error.
-            None => return Ok(ExecResult::NotRecognized),
-        };
+    let mut buf = [0u8; SHEBANG_MAX_LEN];
+    let n = file.read(&mut buf)?;
+    let ShebangArgs { interp, interp_arg } = match ShebangArgs::parse(&buf[..n]) {
+        Some(args) => args,
+        // note that Err is not used here, since this is not a system error.
+        None => return Ok(ExecResult::NotRecognized),
+    };
 
-        let interp =
-            with_current_task(|task| task.make_global_path(Path::new(&interp))).to_string();
-        ctx.path = interp.clone();
-        let mut new_argv = vec![interp];
-        if let Some(arg) = interp_arg {
-            new_argv.push(arg);
-        }
-        // TODO: exec_fn or path? im a bit confused...
-        new_argv.push(ctx.exec_fn.to_string());
-        let old_argv = core::mem::take(&mut ctx.argv);
-        if old_argv.len() > 1 {
-            new_argv.extend(old_argv.into_iter().skip(1));
-        }
-        ctx.argv = new_argv;
-
-        Ok(ExecResult::Redirected)
+    let interp = with_current_task(|task| task.make_global_path(Path::new(&interp))).to_string();
+    ctx.path = interp.clone();
+    let mut new_argv = vec![interp];
+    if let Some(arg) = interp_arg {
+        new_argv.push(arg);
     }
+    // TODO: exec_fn or path? im a bit confused...
+    new_argv.push(ctx.exec_fn.to_string());
+    let old_argv = core::mem::take(&mut ctx.argv);
+    if old_argv.len() > 1 {
+        new_argv.extend(old_argv.into_iter().skip(1));
+    }
+    ctx.argv = new_argv;
+
+    Ok(ExecResult::Redirected)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -111,7 +108,10 @@ impl ShebangArgs {
     }
 }
 
-pub static SHEBANG_BINFMT: Shebang = Shebang;
+pub static SHEBANG_FMT: BinaryFmt = BinaryFmt {
+    name: "shebang",
+    load_binary,
+};
 
 #[cfg(feature = "kunit")]
 mod kunits {

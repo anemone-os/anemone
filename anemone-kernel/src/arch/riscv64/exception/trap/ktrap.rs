@@ -8,6 +8,8 @@ use crate::{
 
 // kernel trap entry point. since kernel doesn't use floating point, we don't
 // need to save/restore floating point registers here.
+//
+// TODO: cross-core scheduling. state should be consistent. (e.g. tp)
 core::arch::global_asm!(
     "   .section .text",
     "   .global __ktrap_entry",
@@ -80,7 +82,9 @@ core::arch::global_asm!(
     "   ld x2, 16(a0)",
     "   ld x3, 24(a0)",
     "   ld x4, 32(a0)",
+
     // skip t0 which is used for temporary storage later
+
     "   ld x6, 48(a0)",
     "   ld x7, 56(a0)",
     "   ld x8, 64(a0)",

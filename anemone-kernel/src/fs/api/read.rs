@@ -23,8 +23,7 @@ fn sys_read(fd: Fd, buf: UserWritePtr<u8>, count: usize) -> Result<u64, SysError
     });
     let slice = buf.slice(count);
 
-    let mut kbuf = Vec::with_capacity(count);
-    kbuf.resize(count, 0);
+    let mut kbuf = vec![0u8; count];
 
     let len = file.read(&mut kbuf[..count]).map(|n| n as u64)?;
 

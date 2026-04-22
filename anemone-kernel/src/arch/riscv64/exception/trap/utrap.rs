@@ -1,8 +1,7 @@
 use crate::{
     arch::riscv64::exception::{
-        RiscV64TrapFrame,
         intr::handle_intr,
-        trap::{RiscV64Exception, RiscV64Interrupt},
+        trap::{RiscV64Exception, RiscV64Interrupt, RiscV64TrapFrame},
     },
     device::CpuArchTrait,
     prelude::{fault::handle_user_page_fault, *},
@@ -30,6 +29,10 @@ core::arch::global_asm!(
     // skip sp
     "   sd x3, 24(sp)",
     "   sd x4, 32(sp)",
+
+    // ok, now we can load back tp, which is percpu base address.
+    "   ld x4, {trapframe_ktp_offset}(sp)",
+
     "   sd x5, 40(sp)",
     "   sd x6, 48(sp)",
     "   sd x7, 56(sp)",
@@ -73,6 +76,7 @@ core::arch::global_asm!(
     // should be used, instead of continuing execution on the current stack.
 
     "   la t0, __ktrap_entry",
+    "   or t0, t0, {stvec_mode}",
     "   csrw stvec, t0",
 
     "   mv t0, zero",
@@ -88,13 +92,24 @@ core::arch::global_asm!(
     "__utrap_return_to_task:",
 
     "   la t0, __utrap_entry",
+    "   or t0, t0, {stvec_mode}",
     "   csrw stvec, t0",
 
     "   ld x0, 0(a0)",
     "   ld x1, 8(a0)",
     "   ld x2, 16(a0)",
     "   ld x3, 24(a0)",
+
+    // store back ktp for the active trapframe and the fixed slot pointed to by
+    // sscratch. The latter is what the next __utrap_entry will actually reuse.
+    "   csrr t0, sscratch",
+    "   addi t0, t0, -{trapframe_bytes}",
+    "   sd x4, {trapframe_ktp_offset}(t0)",
+    // no need to store ktp into the trapframe passed by called.
+    //"   sd x4, {trapframe_ktp_offset}(a0)",
+
     "   ld x4, 32(a0)",
+
     // skip t0 which is used for temporary storage later
     "   ld x6, 48(a0)",
     "   ld x7, 56(a0)",
@@ -135,10 +150,12 @@ core::arch::global_asm!(
     // all done.
     "   sret",
     trapframe_bytes = const size_of::<RiscV64TrapFrame>(),
+    trapframe_ktp_offset = const core::mem::offset_of!(RiscV64TrapFrame, ktp),
     rust_utrap_entry = sym rust_utrap_entry,
+    stvec_mode = const riscv::register::stvec::TrapMode::Direct as usize,
+
 );
 
-/// This function will call architecture-agnostic trap handler.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
