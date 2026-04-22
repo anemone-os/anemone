@@ -70,6 +70,10 @@ impl IrqDomain {
     fn virt2hw(&self, virq: VirtIrq) -> Option<HwIrq> {
         self.map.read_irqsave().get_by_left(&virq).cloned()
     }
+
+    pub fn xlate(&self, spec: InterruptSpecifier<'_>) -> Option<InterruptInfo> {
+        self.ops.read_irqsave().xlate(spec)
+    }
 }
 
 #[derive(Debug)]

@@ -235,8 +235,12 @@ impl IoRemap {
         self.req.start
     }
 
-    pub fn len(&self) -> usize {
-        self.req.len as usize
+    pub fn virt_base(&self) -> VirtAddr {
+        self.virt
+    }
+
+    pub fn size(&self) -> u64 {
+        self.req.len
     }
 }
 
