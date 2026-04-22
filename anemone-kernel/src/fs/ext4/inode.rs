@@ -72,6 +72,7 @@ fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
         InodeType::Symlink => &EXT4_SYMLINK_FILE_OPS,
         InodeType::Fifo => unimplemented!("ext4 fifo file"),
         InodeType::Char | InodeType::Block => unimplemented!("ext4 dev file"),
+        InodeType::Socket => unreachable!("ext4 socket inode"),
     };
 
     Ok(OpenedFile {
@@ -102,7 +103,7 @@ fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
             let mut attr = lwext4_rust::FileAttr::default();
             fs.get_attr(inode.ino().get() as u32, &mut attr)
                 .map_err(map_ext4_error)?;
-            Ok(attr)
+            Ok::<_, SysError>(attr)
         })
     })?;
 

@@ -393,7 +393,7 @@ fn ext4_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, SysError>
             } else {
                 1
             };
-            Ok((advance, name, ino, ty))
+            Ok::<_, SysError>((advance, name, ino, ty))
         })
     })?;
     ctx.advance(advance);

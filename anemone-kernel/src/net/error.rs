@@ -56,3 +56,23 @@ impl AsErrno for NetError {
         }
     }
 }
+
+impl From<NetError> for SysError {
+    fn from(e: NetError) -> SysError {
+        match e {
+            NetError::AddressFamilyNotSupported  => SysError::NotSupported,
+            NetError::ProtocolNotSupported       => SysError::NotSupported,
+            NetError::SocketTypeNotSupported     => SysError::NotSupported,
+            NetError::OperationNotSupported      => SysError::NotSupported,
+            NetError::AddressInUse               => SysError::AlreadyExists,
+            NetError::DestinationAddressRequired => SysError::InvalidArgument,
+            NetError::MessageTooLong             => SysError::InvalidArgument,
+            NetError::WouldBlock                 => SysError::Again,
+            NetError::NotConnected               => SysError::InvalidArgument,
+            NetError::ConnectionRefused          => SysError::IO,
+            NetError::BrokenPipe                 => SysError::BrokenPipe,
+            NetError::NetworkDown                => SysError::IO,
+            NetError::InvalidArgument            => SysError::InvalidArgument,
+        }
+    }
+}

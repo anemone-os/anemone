@@ -9,7 +9,6 @@ use alloc::{string::String, vec::Vec};
 use hashbrown::HashMap;
 
 use crate::{
-    device::error::DevError,
     prelude::*,
     utils::iter_ctx::IterCtx,
 };
@@ -121,7 +120,7 @@ impl NetDevRegistry {
         }
     }
 
-    fn alloc_name(&mut self, class: NetDevClass) -> Result<String, DevError> {
+    fn alloc_name(&mut self, class: NetDevClass) -> Result<String, SysError> {
         match class {
             NetDevClass::Ethernet => {
                 let name = format!("eth{}", self.next_eth_index);
@@ -130,7 +129,7 @@ impl NetDevRegistry {
             }
             NetDevClass::Loopback => {
                 if self.loopback_taken {
-                    return Err(DevError::DevAlreadyRegistered);
+                    return Err(SysError::AlreadyExists);
                 }
                 self.loopback_taken = true;
                 Ok(String::from("lo"))
@@ -154,13 +153,13 @@ impl NetDevSubSys {
 static SUBSYS: Lazy<NetDevSubSys> = Lazy::new(|| NetDevSubSys::new());
 
 /// Register a network device; returns the assigned canonical name (`ethN` or `lo`).
-pub fn register_net_device(registration: NetDevRegistration) -> Result<String, DevError> {
+pub fn register_net_device(registration: NetDevRegistration) -> Result<String, SysError> {
     let NetDevRegistration { class, device } = registration;
     let mut reg = SUBSYS.registry.write_irqsave();
     let name = reg.alloc_name(class)?;
 
     if reg.devices.contains_key(&name) {
-        return Err(DevError::DevAlreadyRegistered);
+        return Err(SysError::AlreadyExists);
     }
 
     let mtu = device.mtu();

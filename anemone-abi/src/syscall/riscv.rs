@@ -96,6 +96,18 @@ pub mod linux {
     pub const SYS_GETPID: u64 = 172;
     pub const SYS_GETPPID: u64 = 173;
 
+    pub const SYS_SOCKET: u64 = 198;
+    pub const SYS_SOCKETPAIR: u64 = 199;
+    pub const SYS_BIND: u64 = 200;
+    pub const SYS_LISTEN: u64 = 201;
+    pub const SYS_ACCEPT: u64 = 202;
+    pub const SYS_CONNECT: u64 = 203;
+    pub const SYS_SENDTO: u64 = 206;
+    pub const SYS_RECVFROM: u64 = 207;
+    pub const SYS_SETSOCKOPT: u64 = 208;
+    pub const SYS_GETSOCKOPT: u64 = 209;
+    pub const SYS_SHUTDOWN: u64 = 210;
+
     pub const SYS_BRK: u64 = 214;
     pub const SYS_MUNMAP: u64 = 215;
 
@@ -104,6 +116,8 @@ pub mod linux {
     pub const SYS_MMAP: u64 = 222;
     pub const SYS_MPROTECT: u64 = 226;
     pub const SYS_MADVISE: u64 = 233;
+
+    pub const SYS_ACCEPT4: u64 = 242;
 
     pub const SYS_WAIT4: u64 = 260;
 

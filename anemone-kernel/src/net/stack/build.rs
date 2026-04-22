@@ -8,10 +8,7 @@ use smoltcp::{
 };
 
 use crate::{
-    device::{
-        error::DevError,
-        net::{NetDev, NetDevClass, LOOPBACK_MAC},
-    },
+    device::net::{NetDev, NetDevClass, LOOPBACK_MAC},
     prelude::*,
     LocalClockSource,
 };
@@ -24,12 +21,11 @@ use super::super::{
 };
 #[cfg(feature = "net-probe")]
 use super::super::probe;
-use super::{
-    adapter::NetDeviceAdapter,
-    netstack::{NetStack, ProbeTcpState, ProbeUdpState},
-};
+use super::{adapter::NetDeviceAdapter, netstack::NetStack};
+#[cfg(feature = "net-probe")]
+use super::netstack::{ProbeTcpState, ProbeUdpState};
 
-pub(crate) fn build_stack(netdev: Arc<dyn NetDev>, name: &str) -> Result<NetStack, DevError> {
+pub(crate) fn build_stack(netdev: Arc<dyn NetDev>, name: &str) -> Result<NetStack, SysError> {
     let mac = netdev.mac().unwrap_or(LOOPBACK_MAC);
     let hw_addr = HardwareAddress::Ethernet(EthernetAddress(mac));
     let mut config = Config::new(hw_addr);

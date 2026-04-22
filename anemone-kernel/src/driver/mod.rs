@@ -22,6 +22,7 @@ use crate::{
 pub mod intc;
 
 mod block;
+mod net;
 mod clock_source;
 mod power;
 mod rtc;

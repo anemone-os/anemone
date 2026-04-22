@@ -22,6 +22,7 @@ fn ext4_inode_ops(ty: InodeType) -> &'static InodeOps {
         InodeType::Block | InodeType::Char => &EXT4_DEV_INODE_OPS,
         InodeType::Symlink => &EXT4_SYMLINK_INODE_OPS,
         InodeType::Fifo => unimplemented!("ext4 fifo inode ops"),
+        InodeType::Socket => unreachable!("ext4 socket inode"),
     }
 }
 
@@ -32,7 +33,7 @@ fn ext4_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, SysErro
             fs.get_attr(ino.get() as u32, &mut attr)
                 .map_err(map_ext4_error)?;
 
-            Ok(attr)
+            Ok::<_, SysError>(attr)
         })
     })?;
 

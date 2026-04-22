@@ -190,6 +190,7 @@ pub(super) fn map_vfs_inode_type(ty: InodeType) -> Result<LwExt4InodeType, SysEr
         InodeType::Block | InodeType::Char => Err(SysError::NotYetImplemented),
         InodeType::Symlink => Ok(LwExt4InodeType::Symlink),
         InodeType::Fifo => Ok(LwExt4InodeType::Fifo),
+        InodeType::Socket => Err(SysError::NotSupported),
     }
 }
 

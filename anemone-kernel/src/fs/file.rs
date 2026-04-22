@@ -74,7 +74,7 @@ impl File {
         }
     }
 
-    pub(super) fn prv(&self) -> &AnyOpaque {
+    pub(crate) fn prv(&self) -> &AnyOpaque {
         &self.prv
     }
 

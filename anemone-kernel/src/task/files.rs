@@ -116,6 +116,9 @@ bitflags! {
         const READ = 0b0001;
         const WRITE = 0b0010;
         const APPEND = 0b0100;
+        /// Non-blocking I/O mode. Reads and writes return immediately with
+        /// [`SysError::Again`] instead of blocking when no data is available.
+        const NONBLOCK = 0b1000;
 
         // create, truncate are not persistant flags, they are only used when opening a file, so we don't need to store them in FileDesc.
     }
@@ -151,6 +154,10 @@ impl FileFlags {
         // 2. append bit
         if flags & anemone_abi::fs::linux::open::O_APPEND != 0 {
             open_flags |= Self::APPEND;
+        }
+        // 3. nonblock bit
+        if flags & anemone_abi::fs::linux::open::O_NONBLOCK != 0 {
+            open_flags |= Self::NONBLOCK;
         }
 
         open_flags

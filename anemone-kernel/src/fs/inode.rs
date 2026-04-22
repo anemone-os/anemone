@@ -97,6 +97,7 @@ pub enum InodeType {
     Block,
     Symlink,
     Fifo,
+    Socket,
 }
 
 impl InodeType {
@@ -109,6 +110,7 @@ impl InodeType {
             Self::Block => linux_mode::S_IFBLK,
             Self::Symlink => linux_mode::S_IFLNK,
             Self::Fifo => linux_mode::S_IFIFO,
+            Self::Socket => linux_mode::S_IFSOCK,
         }
     }
 }
@@ -239,6 +241,7 @@ impl InodeMode {
             linux_mode::S_IFBLK => InodeType::Block,
             linux_mode::S_IFLNK => InodeType::Symlink,
             linux_mode::S_IFIFO => InodeType::Fifo,
+            linux_mode::S_IFSOCK => InodeType::Socket,
             _ => {
                 // catch unknown file types early.
                 knoticeln!("unknown inode type in linux mode: {:o}", mode);

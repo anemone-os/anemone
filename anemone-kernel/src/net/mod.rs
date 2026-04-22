@@ -23,12 +23,7 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{
-    device::{
-        error::DevError,
-        net::{
-            get_netdev, NetDevClass, NetDevRegistration, LoopbackNetDev,
-        },
-    },
+    device::net::{get_netdev, NetDevClass, NetDevRegistration, LoopbackNetDev},
     prelude::*,
     time::timer::schedule_irq_timer_event,
 };
@@ -85,12 +80,12 @@ pub(crate) fn remove_user_socket_handle(stack_name: &str, handle: SocketHandle) 
 ///
 /// Call after [`crate::device::net::register_net_device`]. The `name` must match
 /// the return value from registration.
-pub fn attach_netdev_by_name(name: &str) -> Result<(), DevError> {
-    let netdev = get_netdev(name).ok_or(DevError::NoSuchDevice)?;
+pub fn attach_netdev_by_name(name: &str) -> Result<(), SysError> {
+    let netdev = get_netdev(name).ok_or(SysError::NotFound)?;
 
     let mut table = NET_STACK_TABLE.write_irqsave();
     if table.stacks.contains_key(name) {
-        return Err(DevError::DevAlreadyRegistered);
+        return Err(SysError::AlreadyExists);
     }
 
     let stack = build_stack(netdev, name)?;

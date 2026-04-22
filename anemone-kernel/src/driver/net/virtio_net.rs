@@ -122,7 +122,7 @@ struct VirtIONetDriver {
 impl KObjectOps for VirtIONetDriver {}
 
 impl DriverOps for VirtIONetDriver {
-    fn probe(&self, device: Arc<dyn Device>) -> Result<(), DevError> {
+    fn probe(&self, device: Arc<dyn Device>) -> Result<(), SysError> {
         let vdev = device
             .as_virtio_device()
             .expect("virtio driver should only be probed with virtio device");
@@ -134,7 +134,7 @@ impl DriverOps for VirtIONetDriver {
         let net = VirtIONet::<VirtIOHalImpl, _, QUEUE_SIZE>::new(transport, NET_BUF_LEN).map_err(
             |e| {
                 kerrln!("failed to initialize virtio-net device: {e}");
-                DevError::ProbeFailed
+                SysError::ProbeFailed
             },
         )?;
 
