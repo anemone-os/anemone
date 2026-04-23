@@ -65,7 +65,7 @@ pub mod linux {
         /// Signal sent to parent when child process changes state
         /// (termination/stop) Prevents zombie processes; default action
         /// is ignore
-        pub const SIGCHLD: u64 = (1 << 4) | (1 << 0);
+        pub const CLONE_SIGCHLD: u64 = (1 << 4) | (1 << 0);
         /// Share the same memory space between parent and child processes
         pub const CLONE_VM: u64 = 1 << 8;
         /// Share filesystem info (root, cwd, umask) with the child
@@ -96,13 +96,32 @@ pub mod linux {
         pub const CLONE_UNTRACED: u64 = 1 << 23;
         /// [OK] Store child thread ID in child's memory (child_tid)
         pub const CLONE_CHILD_SETTID: u64 = 1 << 24;
+
+        // namespace-related flags, not supported yet
         pub const CLONE_NEWCGROUP: u64 = 1 << 25;
         pub const CLONE_NEWUTS: u64 = 1 << 26;
         pub const CLONE_NEWIPC: u64 = 1 << 27;
         pub const CLONE_NEWUSER: u64 = 1 << 28;
         pub const CLONE_NEWPID: u64 = 1 << 29;
         pub const CLONE_NEWNET: u64 = 1 << 30;
+
         pub const CLONE_IO: u64 = 1 << 31;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct CloneArgs {
+            pub flags: u64,
+            pub pidfd: u64,
+            pub child_tid: u64,
+            pub parent_tid: u64,
+            pub exit_signal: u64,
+            pub stack: u64,
+            pub stack_size: u64,
+            pub tls: u64,
+            pub set_tid: u64,
+            pub set_tid_size: u64,
+            pub cgroup: u64,
+        }
     }
 
     pub mod wait {

@@ -6,7 +6,7 @@
 use crate::{
     prelude::*,
     sched::proc::{SwitchOutType, switch_out},
-    task::tid::Tid,
+    task::{boot::root_task, tid::Tid},
 };
 
 #[syscall(SYS_EXIT)]

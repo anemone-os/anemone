@@ -1,6 +1,6 @@
 use la_insc::utils::privl::PrivilegeLevel;
 
-use crate::task::Privilege;
+use crate::sched::Privilege;
 
 impl From<Privilege> for PrivilegeLevel {
     fn from(value: Privilege) -> Self {

@@ -280,7 +280,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
             CloneFlags::empty(),
         )
         .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e));
-        register_root_task(kinit_task.clone());
+        task::boot::register_root_task(kinit_task.clone());
         add_to_ready(kinit_task);
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
     }
@@ -308,7 +308,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
             CloneFlags::empty(),
         )
         .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e));
-        ap_kinit.add_as_child(wait_for_root_task());
+        ap_kinit.add_as_child(task::boot::wait_for_root_task());
         add_to_ready(ap_kinit);
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64));
     }

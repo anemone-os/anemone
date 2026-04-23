@@ -26,7 +26,7 @@ console_log_level = 6 # Maximum log level emitted to consoles: Emerg=0 ... Debug
 kstack_shift_kb = 6 # Kernel stack size as a power of 2 in KB
 remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
 max_ident_len_bytes = 256 # Maximum length of identity strings in bytes.
-max_processes = 128 # Maximum number of processes
+max_processes = 32768 # Maximum number of processes
 system_hz = 100 # System timer frequency in hertz, i.e. number of timer interrupts per second
 backtrace_depth = 16 # Maximum depth of captured backtrace
 user_stack_shift_kb = 13 # Max user stack size as a power of 2 in KB

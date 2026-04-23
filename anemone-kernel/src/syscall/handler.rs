@@ -76,13 +76,3 @@ impl TryFromSyscallArg for bool {
         }
     }
 }
-
-impl TryFromSyscallArg for VirtAddr {
-    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-        if raw < KernelLayout::USPACE_TOP_ADDR {
-            Ok(VirtAddr::new(raw))
-        } else {
-            Err(SysError::InvalidArgument)
-        }
-    }
-}

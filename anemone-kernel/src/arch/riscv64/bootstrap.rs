@@ -393,7 +393,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
 
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
         set_boot_mono(true);
-        let bsp_kinit_task = unsafe {
+        let (bsp_kinit, guard) = unsafe {
             Task::new_kernel(
                 "kinit-bsp",
                 bsp_kinit as *const (),
@@ -404,8 +404,10 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
             )
         }
         .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e));
-        register_root_task(bsp_kinit_task.clone());
-        add_to_ready(bsp_kinit_task);
+        let bsp_kinit = Arc::new(bsp_kinit);
+        task::boot::register_root_task(bsp_kinit.clone());
+        guard.register(bsp_kinit.clone());
+        add_to_ready(bsp_kinit);
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
     }
 }
@@ -438,7 +440,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         mm::kptable::activate_kernel_mapping();
         kdebugln!("anemone kernel booting on ap #{}", ap_id);
         set_boot_mono(false);
-        let ap_kinit = Task::new_kernel(
+        let (ap_kinit, guard) = Task::new_kernel(
             "kinit-ap",
             ap_kinit as *const (),
             ParameterList::new(&[ap_id as u64]),
@@ -447,7 +449,9 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
             CloneFlags::empty(),
         )
         .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e));
-        ap_kinit.add_as_child(wait_for_root_task());
+        let ap_kinit = Arc::new(ap_kinit);
+        ap_kinit.add_as_child(task::boot::wait_for_root_task());
+        guard.register(ap_kinit.clone());
         add_to_ready(ap_kinit);
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
     }

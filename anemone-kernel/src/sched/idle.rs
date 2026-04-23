@@ -1,3 +1,5 @@
+// TODO: idle should be a scheduler.
+
 use core::hint::spin_loop;
 
 use alloc::sync::Arc;
@@ -15,9 +17,14 @@ pub extern "C" fn idle() -> ! {
 
 #[percpu]
 static IDLE_TASK: Lazy<Arc<Task>> = Lazy::new(|| unsafe {
-    let res = Task::new_idle(idle as *const ())
+    let (task, guard) = Task::new_idle(idle as *const ())
         .unwrap_or_else(|e| panic!("failed to create idle tasks: {:?}", e));
-    res
+    // SAFETY:
+    // idle task should not be registered to global task registry.
+    unsafe {
+        guard.forget();
+    }
+    Arc::new(task)
 });
 
 /// Get a clone of the idle task of the current processor.

@@ -22,7 +22,7 @@ pub fn kernel_execve(
                 let mut ksp = VirtAddr::new(0);
                 with_current_task(|task| {
                     task.close_cloexec_fds();
-                    let info = TaskExecInfo {
+                    let ctx = TaskExecCtx {
                         cmdline: argv
                             .iter()
                             .map(|s| s.as_ref())
@@ -32,7 +32,7 @@ pub fn kernel_execve(
                         flags: TaskFlags::NONE,
                         uspace: Some(usp),
                     };
-                    task.set_exec_info(info);
+                    task.switch_exec_ctx(ctx);
                     ksp = task.kstack().stack_top();
                     task.on_prv_change(Privilege::User);
                 });

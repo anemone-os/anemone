@@ -1,6 +1,6 @@
 use riscv::register::sstatus::SPP;
 
-use crate::task::Privilege;
+use crate::sched::Privilege;
 
 impl From<Privilege> for SPP {
     fn from(value: Privilege) -> Self {

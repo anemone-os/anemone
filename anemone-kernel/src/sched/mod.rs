@@ -1,3 +1,5 @@
+// TODO: scheduler list.
+
 use crate::{
     prelude::*,
     sched::{
@@ -25,6 +27,17 @@ pub use proc::{
     add_to_ready, clone_current_task, current_task_cmdline, current_task_id, load_context,
     with_current_task,
 };
+
+/// Privilege Level of a control flow.
+///
+/// This type is used as arguments for some "extern 'C'" functions, so it should
+/// marked as `repr(C)` to ensure the layout is compatible with C code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(C)]
+pub enum Privilege {
+    Kernel = 0,
+    User = 1,
+}
 
 /// Enter the scheduler loop.
 ///

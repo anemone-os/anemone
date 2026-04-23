@@ -400,11 +400,6 @@ mod init_routines {
 
                 if cpu_id == bsp_id {
                     CpuArch::set_percpu_base(cur_vpn.to_virt_addr().as_ptr_mut());
-                    //with_core_local_mut(|core_local| core_local.cpu_id =
-                    // cpu_id);
-                } else {
-                    //with_core_local_remote_mut(cpu_id, |core_local|
-                    // core_local.cpu_id = cpu_id);
                 }
                 core_local.cpu_id = cpu_id;
 

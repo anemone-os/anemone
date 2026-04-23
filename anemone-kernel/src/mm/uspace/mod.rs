@@ -575,13 +575,6 @@ impl UserSpaceData {
         }
     }
 
-    // /// Create a copy of this [UserSpace] with copy-on-write semantics.
-    // ///
-    // /// # Notes
-    // /// If the operation fails, pages that have already been converted to
-    // /// read-only will not be rolled back, but will be restored during a later
-    // /// page fault.
-
     /// Fork a new [UserSpace] from this one with copy-on-write semantics.
     pub fn fork(&mut self) -> Result<Self, SysError> {
         // well... there is no need to map pages here. page fault handler will handle

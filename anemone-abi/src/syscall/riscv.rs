@@ -107,6 +107,8 @@ pub mod linux {
 
     pub const SYS_WAIT4: u64 = 260;
 
+    pub const SYS_CLONE3: u64 = 435;
+
     pub const SYS_FACCESSAT2: u64 = 439;
 }
 
