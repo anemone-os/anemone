@@ -55,14 +55,18 @@ unsafe impl Linked for RemapNode {
 static REMAP_HASHMAP: Lazy<RwLock<WAVLTree<RemapNode>>> =
     Lazy::new(|| RwLock::new(WAVLTree::new()));
 
-/// [add_remap_region] adds a remapped IO region to the global remap tree,
-/// ensuring no overlapping regions.
+/// Add a remapped I/O region to the global remap tree, ensuring no overlapping
+/// regions.
 pub fn add_remap_region(req: IoRemap) -> Result<(), SysError> {
     let mut remap_tree = REMAP_HASHMAP.write();
     remap_tree.insert(Box::pin(RemapNode::new(req)));
     Ok(())
 }
 
+/// Translate `phys_addr` + `size` into a virtual address if it lies inside a
+/// remapped region.
+///
+/// Return `Some(virt_addr)` when the queried range fits within a mapped region.
 pub fn query_virt_addr(phys_addr: PhysAddr, size: u64) -> Option<VirtAddr> {
     let remap_tree = REMAP_HASHMAP.read();
     let mut cur = remap_tree.upper_bound(Bound::Included(&phys_addr));

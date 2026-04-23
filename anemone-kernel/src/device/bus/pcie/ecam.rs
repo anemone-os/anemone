@@ -60,11 +60,11 @@ bitflags! {
     /// PCI Status Register Flags
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct PciStatus: u16 {
-        /// Bit 15: Detected Parity Error
+        /// Indicates a detected parity error.
         const PARITY_ERR        = 1 << 15;
-        /// Bit 14: Signaled System Error
+        /// Indicates a signaled system error.
         const SYS_ERR           = 1 << 14;
-        /// Bit 13: Received Master Abort
+        /// Indicates a received master abort.
         const MASTER_ABORT      = 1 << 13;
         /// Bit 12: Received Target Abort
         const TARGET_ABORT_RCVD = 1 << 12;
@@ -103,12 +103,12 @@ pub enum PciHeaderLayout {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct PciHeaderType(u8);
 impl PciHeaderType {
-    /// [is_multifunc] returns whether the multifunction bit is set.
+    /// Returns whether the multifunction bit is set.
     pub fn is_multifunc(&self) -> bool {
         self.0 >> 7 != 0
     }
 
-    /// [layout] decodes header layout from the header type register.
+    /// Decode header layout from the header-type register.
     pub fn layout(&self) -> Result<PciHeaderLayout, SysError> {
         Ok(match ((self.0 << 1) >> 1) {
             0 => PciHeaderLayout::Type0,
@@ -118,7 +118,7 @@ impl PciHeaderType {
     }
 }
 impl Debug for PciHeaderType {
-    /// [fmt] formats header type details for debugging output.
+    /// Formats header type details for debugging output.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("PciHeaderType")
             .field("layout", &self.layout())
@@ -138,7 +138,7 @@ pub struct ClassCode {
 }
 
 impl From<u32> for ClassCode {
-    /// [from] converts packed class-code bits into the typed structure.
+    /// Convert packed class-code bits into the typed structure.
     ///
     /// `value` is a 24-bit packed class code in the form base:sub:prog_if.
     fn from(value: u32) -> Self {
@@ -160,7 +160,7 @@ pub struct GeneralFuncConf {
 macro_rules! define_field {
     ($type: ident,$name: ident,$offset:expr) => {
         paste::paste! {
-            // [generated-field-reader] reads a fixed-offset config-space field.
+            // generated field reader: read a fixed-offset config-space field.
             pub fn $name(&self) -> $type {
                 self.[<read_ $type>]($offset)
             }
@@ -170,7 +170,7 @@ macro_rules! define_field {
 macro_rules! impl_reader {
     ($type: ident) => {
         paste::paste! {
-            // [generated-reader] reads a scalar value from config space at `offset`.
+            // generated reader: read a scalar value from config space at `offset`.
             pub fn [<read_ $type>](&self, offset: u64) -> $type {
                 unsafe {
                     let mut reg = UniqueMmioPointer::<ReadOnly<$type>>::new(
@@ -185,7 +185,7 @@ macro_rules! impl_reader {
 macro_rules! impl_writer {
     ($type: ident) => {
         paste::paste! {
-            // [generated-writer] writes a scalar value to config space at `offset`.
+            // generated writer: write a scalar value to config space at `offset`.
             pub unsafe fn [<write_ $type>](&self, offset: u64, value: $type) {
                 unsafe {
                     let mut reg = UniqueMmioPointer::<WriteOnly<$type>>::new(
@@ -199,8 +199,7 @@ macro_rules! impl_writer {
 }
 
 impl GeneralFuncConf {
-    /// [new] creates a general function config accessor from a mapped base
-    /// pointer.
+    /// Create a general function config accessor from a mapped base pointer.
     ///
     /// `base_addr` points to the beginning of a function configuration space.
     pub unsafe fn new(base_addr: *const u8) -> Self {
@@ -220,7 +219,7 @@ impl GeneralFuncConf {
     define_field!(u16, vendor_id, 0x0);
     define_field!(u16, device_id, 0x02);
 
-    /// [command] reads the command register flags.
+    /// Read command register flags.
     pub fn command(&self) -> PciCommands {
         PciCommands::from_bits_truncate(self.read_u16(0x04))
     }
@@ -231,14 +230,14 @@ impl GeneralFuncConf {
         }
     }
 
-    /// [status] reads the status register flags.
+    /// Read status register flags.
     pub fn status(&self) -> PciStatus {
         PciStatus::from_bits_truncate(self.read_u16(0x06))
     }
 
     define_field!(u8, revision_id, 0x08);
 
-    /// [class_code] reads and decodes the class code triplet.
+    /// Read and decode the class-code triplet.
     pub fn class_code(&self) -> ClassCode {
         let cls_code = ((self.read_u16(0x0a) as u32) << 8) + (self.read_u8(0x09) as u32);
         ClassCode::from(cls_code)
@@ -247,7 +246,7 @@ impl GeneralFuncConf {
     define_field!(u8, cache_line_sz, 0x0c);
     define_field!(u8, latency_timer, 0x0d);
 
-    /// [header_type] reads and wraps the raw header type register.
+    /// Read and wrap the raw header-type register.
     pub fn header_type(&self) -> PciHeaderType {
         PciHeaderType(self.read_u8(0x0e))
     }
@@ -264,12 +263,12 @@ impl GeneralFuncConf {
         }
     }
 
-    /// [exists] checks whether this function exists by validating vendor id.
+    /// Check whether this function exists by validating vendor id.
     pub fn exists(&self) -> bool {
         self.vendor_id() != 0xffff
     }
 
-    /// [as_type0] returns a Type-0 view when this function uses Type-0 layout.
+    /// Return a Type-0 view when this function uses Type-0 layout.
     pub fn as_type0(&self) -> Option<Type0FuncConf> {
         match self.header_type().layout() {
             Ok(PciHeaderLayout::Type0) => Some(Type0FuncConf {
@@ -279,7 +278,7 @@ impl GeneralFuncConf {
         }
     }
 
-    /// [as_type1] returns a Type-1 view when this function uses Type-1 layout.
+    /// Return a Type-1 view when this function uses Type-1 layout.
     pub fn as_type1(&self) -> Option<Type1FuncConf> {
         match self.header_type().layout() {
             Ok(PciHeaderLayout::Type1) => Some(Type1FuncConf {
@@ -311,6 +310,9 @@ impl GeneralFuncConf {
             PciHeaderLayout::Type1 => Ok(2),
         }
     }
+
+    define_field!(u8, intr_line, 0x3c);
+    define_field!(u8, intr_pin, 0x3d);
 }
 
 #[derive(Debug, Clone)]
@@ -395,7 +397,7 @@ impl BAR {
         }
     }
 
-    /// [try_from] decodes a raw BAR register value into a typed BAR descriptor.
+    /// Decode a raw BAR register value into a typed BAR descriptor.
     ///
     /// `value` is the raw 32-bit BAR register value.
     fn try_from_u32<F: FnOnce() -> Result<u32, SysError>>(
@@ -465,7 +467,7 @@ pub struct Type0FuncConf {
 }
 
 impl Type0FuncConf {
-    /// [general] returns the generic accessor view for this function.
+    /// Return the generic accessor view for this function.
     pub fn general(&self) -> GeneralFuncConf {
         GeneralFuncConf {
             base_addr: self.base_addr,
@@ -529,7 +531,7 @@ pub struct Type1FuncConf {
 }
 
 impl Type1FuncConf {
-    /// [general] returns the generic accessor view for this function.
+    /// Return the generic accessor view for this function.
     pub fn general(&self) -> GeneralFuncConf {
         GeneralFuncConf {
             base_addr: self.base_addr,
@@ -596,9 +598,9 @@ impl Type1FuncConf {
         BusNum(self.read_u8(0x19))
     }
 
-    /// [set_secondary_bus_num] writes the secondary bus number of this bridge.
+    /// Write the secondary bus number of this bridge.
     ///
-    /// `bus_num` is the bus number assigned to the bridge's downstream bus.
+    /// `bus_num` Bus number assigned to the bridge's downstream bus.
     pub unsafe fn set_secondary_bus_num(&self, bus_num: BusNum) {
         unsafe {
             self.write_u8(0x19, bus_num.into());
@@ -609,10 +611,9 @@ impl Type1FuncConf {
         BusNum(self.read_u8(0x1a))
     }
 
-    /// [set_subordinate_bus_num] writes the subordinate bus number limit of
-    /// this bridge.
+    /// Write the subordinate bus number limit of this bridge.
     ///
-    /// `bus_num` is the maximum bus number reachable behind this bridge.
+    /// `bus_num` Maximum bus number reachable behind this bridge.
     pub unsafe fn set_subordinate_bus_num(&self, bus_num: BusNum) {
         unsafe {
             self.write_u8(0x1a, bus_num.into());
@@ -721,12 +722,12 @@ pub struct PcieDeviceConf {
 }
 
 impl PcieDeviceConf {
-    /// [new] creates a device-level config accessor from bus/device coordinates
-    /// and base pointer.
+    /// Create a device-level config accessor from bus/device coordinates and
+    /// base pointer.
     ///
-    /// `bus` is the bus number.
-    /// `dev` is the device number.
-    /// `base_addr` points to this device's ECAM configuration area.
+    /// `bus` Bus number.
+    /// `dev` Device number.
+    /// `base_addr` Pointer to this device's ECAM configuration area.
     pub unsafe fn new(bus: BusNum, dev: DevNum, base_addr: *const u8) -> Self {
         PcieDeviceConf {
             bus,
@@ -735,10 +736,9 @@ impl PcieDeviceConf {
         }
     }
 
-    /// [get_function] returns a generic accessor for a specific function
-    /// number.
+    /// Return a generic accessor for a specific function number.
     ///
-    /// `func` is the function number within this device.
+    /// `func` Function number within this device.
     pub fn get_function(&self, func: FuncNum) -> GeneralFuncConf {
         let func: u8 = func.into();
         let base_addr = self.base_addr + ((func as u64) << 12);
@@ -776,11 +776,10 @@ pub struct PcieBusConf {
 }
 
 impl PcieBusConf {
-    /// [new] creates a bus-level config accessor from bus number and base
-    /// pointer.
+    /// Create a bus-level config accessor from bus number and base pointer.
     ///
-    /// `num` is the bus number.
-    /// `base_addr` points to the bus ECAM base.
+    /// `num` Bus number.
+    /// `base_addr` Pointer to the bus ECAM base.
     pub unsafe fn new(num: BusNum, base_addr: *const u8) -> Self {
         PcieBusConf {
             num,
@@ -788,14 +787,14 @@ impl PcieBusConf {
         }
     }
 
-    /// [num] returns the bus number.
+    /// Return the bus number.
     pub fn num(&self) -> BusNum {
         self.num
     }
 
-    /// [get_device] returns a device-level config accessor on this bus.
+    /// Return a device-level config accessor on this bus.
     ///
-    /// `dev` is the device number on this bus.
+    /// `dev` Device number on this bus.
     pub fn get_device(&self, dev: DevNum) -> PcieDeviceConf {
         let dev: u8 = dev.into();
         PcieDeviceConf {
@@ -817,12 +816,12 @@ pub struct EcamConf {
 }
 
 impl EcamConf {
-    /// [new] builds an ECAM configuration accessor from an I/O remap and
-    /// bus-range limits.
+    /// Build an ECAM configuration accessor from an `IoRemap` and bus-range
+    /// limits.
     ///
-    /// `remap` is the mapped ECAM MMIO window.
-    /// `start_bus` is the first bus number covered by the mapping.
-    /// `max_bus` is the last bus number covered by the mapping.
+    /// `remap` Mapped ECAM MMIO window.
+    /// `start_bus` First bus number covered by the mapping.
+    /// `max_bus` Last bus number covered by the mapping.
     pub unsafe fn new(
         remap: &IoRemap,
         start_bus: BusNum,
@@ -849,9 +848,9 @@ impl EcamConf {
         })
     }
 
-    /// [get_bus] returns a bus-level config accessor.
+    /// Return a bus-level config accessor.
     ///
-    /// `bus` is the target bus number.
+    /// `bus` Target bus number.
     pub fn get_bus(&self, bus: BusNum) -> PcieBusConf {
         let bus_u8: u8 = bus.into();
         PcieBusConf {
@@ -860,17 +859,17 @@ impl EcamConf {
         }
     }
 
-    /// [root_bus] returns the root bus accessor.
+    /// Return the root-bus accessor.
     pub fn root_bus(&self) -> PcieBusConf {
         self.get_bus(self.root_bus)
     }
 
-    /// [root_bus_num] returns the configured root bus number.
+    /// Return the configured root bus number.
     pub fn root_bus_num(&self) -> BusNum {
         self.root_bus
     }
 
-    /// [max_bus_num] returns the configured maximum bus number.
+    /// Return the configured maximum bus number.
     pub fn max_bus_num(&self) -> BusNum {
         self.max_bus
     }

@@ -4,7 +4,7 @@ use crate::{
     device::{
         bus::{
             pcie::{
-                self, AvailPciMemArea, PciAddr, PciAddrFlags, PcieDevice, PcieDomain,
+                self, AvailPciMemArea, OfPciAddr, PciAddrFlags, PcieDevice, PcieDomain,
                 ecam::{BusNum, EcamConf},
             },
             platform::{self, PlatformDriver},
@@ -120,7 +120,7 @@ impl DriverOps for PcieEcamDriver {
             let size = (0..size_cells)
                 .map(|j| u32::from_be_bytes(size[(j as usize * 4)..][..4].try_into().unwrap()))
                 .fold(0u64, |acc, x| (acc << 32) | x as u64);
-            let pcie_addr = PciAddr::from_be_bytes(pcie_addr.try_into().unwrap());
+            let pcie_addr = OfPciAddr::from_be_bytes(pcie_addr.try_into().unwrap());
             if !pcie_addr.flags().contains(PciAddrFlags::NotRelocatable) {
                 /*knoticeln!(
                     "Available PCIe ECAM resource window: pcie_addr={:?}, mem_addr={:#x}, size={:#x}",

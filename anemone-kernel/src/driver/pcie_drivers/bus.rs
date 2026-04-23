@@ -4,7 +4,7 @@ use crate::{
     device::{
         bus::pcie::{
             self, HOST_BRIDGE_CLASSCODE, PCI2PCI_BRIDGE_CLASSCODE, PciMemAreaSnapshot, PcieDevice,
-            PcieDeviceInfo, PcieDriver,
+            PcieDeviceType, PcieDriver,
             ecam::{
                 BusNum, ClassCode, DevNum, FuncNum, PciCommands, PciHeaderLayout, Type1FuncConf,
             },
@@ -83,10 +83,10 @@ impl PcieDriver for BridgeDriver {
         let pdev = Arc::downcast::<PcieDevice>(device)
             .expect("pcie driver should only be initialized with pcie device");
         match pdev.dev_info() {
-            PcieDeviceInfo::HostBridge { id } => {
+            PcieDeviceType::HostBridge { id } => {
                 enum_pcie_bus(&pdev, id);
             },
-            PcieDeviceInfo::Bus { conf, id, bus, dev } => {
+            PcieDeviceType::Bus { conf, id, bus, dev } => {
                 enum_pcie_bus(&pdev, id);
             },
             _ => {
@@ -153,7 +153,7 @@ fn enum_pcie_bus(parent_dev: &Arc<PcieDevice>, bus_id: &BusNum) {
                     let device = PcieDevice::new_endpoint(
                         KObjIdent::try_from_fmt(format_args!(
                             "{:04x}:{:02x}:{:02x}",
-                            domain.domain_id(),
+                            domain.id(),
                             bus_num_u8,
                             dev,
                         ))
@@ -187,8 +187,8 @@ fn enum_pcie_bus(parent_dev: &Arc<PcieDevice>, bus_id: &BusNum) {
 
 const MEM_AREA_ALIGN: PciMemAreaSnapshot = PciMemAreaSnapshot {
     io_area: Some(4096),
-    prefetchable_mem: Some(0x100000),   // 1 MiB
-    unprefetchable_mem: Some(0x100000), // 1 MiB
+    mem_area_pref: Some(0x100000),   // 1 MiB
+    mem_area_unpref: Some(0x100000), // 1 MiB
 };
 
 /// [init_pcie_bus] configures a downstream PCIe bridge and creates a child bus
@@ -213,12 +213,12 @@ fn init_pcie_bus(
         conf.set_secondary_bus_num(new_bus);
         conf.set_subordinate_bus_num(BusNum::MAX);
     }
-    let snapshot_before = domain.snapshot_mem_areas(MEM_AREA_ALIGN);
+    let snapshot_before = domain.snapshot(MEM_AREA_ALIGN);
     conf.general().write_command(PciCommands::empty());
     let device = PcieDevice::new_bus(
         KObjIdent::try_from_fmt(format_args!(
             "{:04x}:{:02x}:{:02x}",
-            parent_dev.domain().domain_id(),
+            parent_dev.domain().id(),
             bus_num_u8,
             dev_num_u8
         ))
@@ -232,8 +232,8 @@ fn init_pcie_bus(
     device.set_parent(Some(parent_dev.clone()));
     parent_dev.register_and_preinit_device(device);
     unsafe {
-        conf.set_subordinate_bus_num(domain.bus_num());
-        if let Some(snapshot) = domain.snapshot_mem_areas(MEM_AREA_ALIGN)
+        conf.set_subordinate_bus_num(domain.current_max_bus_num());
+        if let Some(snapshot) = domain.snapshot(MEM_AREA_ALIGN)
             && let Some(before) = snapshot_before
         {
             /*kinfoln!(
@@ -247,21 +247,21 @@ fn init_pcie_bus(
                 conf.set_io_limit(snapshot.io_area.and_then(|x| Some(x - 1)).unwrap_or(0) as u32);
             }
 
-            if snapshot.unprefetchable_mem > before.unprefetchable_mem {
-                conf.set_mem_base(before.unprefetchable_mem.unwrap_or(0) as u32);
+            if snapshot.mem_area_unpref > before.mem_area_unpref {
+                conf.set_mem_base(before.mem_area_unpref.unwrap_or(0) as u32);
                 conf.set_mem_limit(
                     snapshot
-                        .unprefetchable_mem
+                        .mem_area_unpref
                         .and_then(|x| Some(x - 1))
                         .unwrap_or(0) as u32,
                 );
             }
 
-            if snapshot.prefetchable_mem > before.prefetchable_mem {
-                conf.set_prefetchable_mem_base(before.prefetchable_mem.unwrap_or(0) as u64);
+            if snapshot.mem_area_pref > before.mem_area_pref {
+                conf.set_prefetchable_mem_base(before.mem_area_pref.unwrap_or(0) as u64);
                 conf.set_prefetchable_mem_limit(
                     snapshot
-                        .prefetchable_mem
+                        .mem_area_pref
                         .and_then(|x| Some(x - 1))
                         .unwrap_or(0) as u64,
                 );

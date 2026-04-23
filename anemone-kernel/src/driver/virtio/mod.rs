@@ -74,12 +74,6 @@ unsafe impl virtio_drivers::Hal for VirtIOHalImpl {
                             paddr, size
                         );
                     });
-                kinfoln!(
-                    "pcie hal: translated {:#x} with size {:#x} to {:?}",
-                    paddr,
-                    size,
-                    vaddr
-                );
                 vaddr.get() as *mut u8
             })
         }

@@ -20,6 +20,7 @@ use crate::{
 };
 
 #[derive(Debug, KObject)]
+/// Represent the PCIe bus type and its base objects.
 pub struct PcieBusType {
     #[kobject]
     kobj_base: KObjectBase,
@@ -37,10 +38,12 @@ impl PcieBusType {
 
 impl KObjectOps for PcieBusType {}
 
+/// Enumerate BARs exposed by `func` on `dev` and return their indices and
+/// descriptors.
 fn list_bars(dev: &PcieDevice, func: &GeneralFuncConf) -> Result<Vec<(usize, BAR)>, SysError> {
     let layout = func.header_type().layout().map_err(|e| {
         kwarningln!(
-            "preinit failed: error reading header type for device {}: {:?}",
+            "PCIe device preinit failed: error reading header type for device {}: {:?}",
             dev.name(),
             e
         );
@@ -48,7 +51,7 @@ fn list_bars(dev: &PcieDevice, func: &GeneralFuncConf) -> Result<Vec<(usize, BAR
     })?;
     let bar_count = func.bar_count().map_err(|e| {
         kwarningln!(
-            "preinit failed while reading BAR count for device {}: {:?}",
+            "PCIe device preinit failed: error reading BAR count for device {}: {:?}",
             dev.name(),
             e
         );
@@ -59,7 +62,7 @@ fn list_bars(dev: &PcieDevice, func: &GeneralFuncConf) -> Result<Vec<(usize, BAR
     while bar_idx < bar_count {
         let bar = func.read_bar(bar_idx).map_err(|e| {
             kwarningln!(
-                "preinit failed: error reading BAR #{} for device {}: {:?}",
+                "PCIe device preinit failed: error reading BAR #{} for device {}: {:?}",
                 bar_idx,
                 dev.name(),
                 e
@@ -83,6 +86,11 @@ fn list_bars(dev: &PcieDevice, func: &GeneralFuncConf) -> Result<Vec<(usize, BAR
     Ok(res)
 }
 
+/// Allocate a compatible memory area for `bar` of `size` from `domain` and map
+/// it.
+///
+/// Return the matched aperture, allocated `PciMemArea`, and the `IoRemap` on
+/// success.
 fn alloc_mem_for_bar(
     domain: &PcieDomain,
     bar: BAR,
@@ -103,11 +111,9 @@ fn alloc_mem_for_bar(
     Ok((areas, area, remap))
 }
 
-fn preinit_pci_func(
-    dev: &PcieDevice,
-    id: &FuncNum,
-    func: &GeneralFuncConf,
-) -> Result<(), SysError> {
+/// Pre-initialize a function: disable legacy command bits, size-probe BARs,
+/// allocate and map their regions.
+fn preinit_func(dev: &PcieDevice, id: &FuncNum, func: &GeneralFuncConf) -> Result<(), SysError> {
     let mut command_val = func.command();
     command_val.remove(PciCommands::MEM_SPACE | PciCommands::IO_SPACE);
     func.write_command(command_val);
@@ -118,7 +124,7 @@ fn preinit_pci_func(
         filled.set_base_addr(u64::MAX);
         func.write_bar(*bar_idx, filled).map_err(|e| {
             kwarningln!(
-                "preinit failed: error writing all-1s to BAR #{} for device {}: {:?}",
+                "PCIe device preinit failed: error writing all-1s to BAR #{} for device {}: {:?}",
                 bar_idx,
                 dev.name(),
                 e
@@ -127,7 +133,7 @@ fn preinit_pci_func(
         })?;
         *bar = func.read_bar(*bar_idx).map_err(|e| {
             kwarningln!(
-                "preinit failed: error reading back BAR #{} for device {}: {:?}",
+                "PCIe device preinit failed: error reading back BAR #{} for device {}: {:?}",
                 bar_idx,
                 dev.name(),
                 e
@@ -135,6 +141,18 @@ fn preinit_pci_func(
             e
         })?;
     }
+    kalertln!(
+        "INTR PIN of device {} function {:?} is {}",
+        dev.name(),
+        id,
+        func.intr_pin()
+    );
+    kalertln!(
+        "INTR LINE of device {} function {:?} is {}",
+        dev.name(),
+        id,
+        func.intr_line()
+    );
     let domain = dev.domain();
     let mut mem_areas: Vec<(
         usize,
@@ -155,7 +173,7 @@ fn preinit_pci_func(
         match alloc_mem_for_bar(domain, bar, size) {
             Err(e) => {
                 kerrln!(
-                    "preinit failed: failed to allocate memory for device {} BAR #{}({:?} bytes requested): {:?}",
+                    "PCIe device preinit failed: failed to allocate memory for device {} BAR #{}({:?} bytes requested): {:?}",
                     dev.name(),
                     bar_idx,
                     size,
@@ -190,15 +208,17 @@ fn preinit_pci_func(
     Ok(())
 }
 
-pub fn preinit_pci_dev(dev: &PcieDevice) -> Result<(), SysError> {
+/// Pre-initialize PCIe device by iterating its functions and calling
+/// `preinit_func`.
+pub fn preinit_pcie_dev(dev: &PcieDevice) -> Result<(), SysError> {
     let mut bar_idx = 0;
     let Some(dev_conf) = dev.dev_conf() else {
         return Ok(());
     };
     dev_conf.functions::<_, SysError>(|id, func| {
-        preinit_pci_func(dev, &id, &func).map_err(|e| {
+        preinit_func(dev, &id, &func).map_err(|e| {
             kerrln!(
-                "preinit failed for device {} function {:?}: {:?}",
+                "preinit failed for PCIe device {}, function {:?}: {:?}",
                 dev.name(),
                 id,
                 e
@@ -245,7 +265,7 @@ impl BusType for PcieBusType {
                     device.name(),
                     driver.name()
                 );
-                if let Err(e) = preinit_pci_dev(
+                if let Err(e) = preinit_pcie_dev(
                     device
                         .as_pcie_device()
                         .expect("pcie driver should only be probed with pcie device"),
