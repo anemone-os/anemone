@@ -1,5 +1,5 @@
 use virtio_drivers::transport::{
-    Transport,
+    SomeTransport, Transport,
     pci::{
         PciTransport,
         bus::{ConfigurationAccess, DeviceFunction, PciRoot},
@@ -8,9 +8,12 @@ use virtio_drivers::transport::{
 
 use crate::{
     device::{
-        bus::pcie::{
-            self, PcieDeviceInfo, PcieDriver,
-            ecam::{BusNum, DevNum, EcamConf, FuncNum, PciCommands},
+        bus::{
+            pcie::{
+                self, PcieDeviceInfo, PcieDriver,
+                ecam::{BusNum, DevNum, EcamConf, FuncNum, PciCommands},
+            },
+            virtio::VirtIODevice,
         },
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
     },
@@ -110,19 +113,29 @@ impl DriverOps for PcieTransportDriver {
                 function: FuncNum::MIN.into(),
             },
         ) {
-            Ok(transport) => {
-                let type_ = transport.device_type();
-                let status = transport.get_status();
-                knoticeln!(
-                    "device {} type: {:?} virtio PCIe transport device status: {:?}",
-                    pdev.name(),
-                    type_,
-                    status
+            Ok(mut transport) => {
+                // create virtio device and attach it to virtio bus
+                let kobj_base = KObjectBase::new(ident_format!("{}", pdev.name()).unwrap());
+                let dev_base = DeviceBase::new(None);
+                let mut vdev = VirtIODevice::new(
+                    kobj_base,
+                    dev_base,
+                    transport.device_type() as usize,
+                    VENDOR_ID as usize,
+                    SomeTransport::Pci(transport),
                 );
+
+                vdev.set_parent(Some(device.clone()));
+
+                let vdev = Arc::new(vdev);
+                device.add_child(vdev.clone());
+
+                kinfoln!("{}: probed", pdev.name());
+                bus::virtio::register_device(vdev);
                 return Ok(());
             },
             Err(e) => {
-                kwarningln!("failed to initialize VirtIO MMIO transport: {e}");
+                kwarningln!("failed to initialize VirtIO PCI transport: {e}");
                 return Err(SysError::DriverIncompatible);
             },
         }
@@ -160,21 +173,23 @@ impl PcieDriver for PcieTransportDriver {
     }
 }
 
-// Virtio transitional PCI device IDs (vendor = 0x1AF4)
-pub const VIRTIO_TRANSITIONAL_NETWORK_CARD: (u16, u16) = (0x1AF4, 0x1000);
-pub const VIRTIO_TRANSITIONAL_BLOCK_DEVICE: (u16, u16) = (0x1AF4, 0x1001);
-pub const VIRTIO_TRANSITIONAL_MEMORY_BALLOON: (u16, u16) = (0x1AF4, 0x1002);
-pub const VIRTIO_TRANSITIONAL_CONSOLE: (u16, u16) = (0x1AF4, 0x1003);
-pub const VIRTIO_TRANSITIONAL_SCSI_HOST: (u16, u16) = (0x1AF4, 0x1004);
-pub const VIRTIO_TRANSITIONAL_ENTROPY_SOURCE: (u16, u16) = (0x1AF4, 0x1005);
-pub const VIRTIO_TRANSITIONAL_9P_TRANSPORT: (u16, u16) = (0x1AF4, 0x1009);
-pub const VIRTIO_MODERN_NETWORK_CARD: (u16, u16) = (0x1AF4, 0x1040);
-pub const VIRTIO_MODERN_BLOCK_DEVICE: (u16, u16) = (0x1AF4, 0x1041);
-pub const VIRTIO_MODERN_MEMORY_BALLOON: (u16, u16) = (0x1AF4, 0x1042);
-pub const VIRTIO_MODERN_CONSOLE: (u16, u16) = (0x1AF4, 0x1043);
-pub const VIRTIO_MODERN_SCSI_HOST: (u16, u16) = (0x1AF4, 0x1044);
-pub const VIRTIO_MODERN_ENTROPY_SOURCE: (u16, u16) = (0x1AF4, 0x1045);
-pub const VIRTIO_MODERN_9P_TRANSPORT: (u16, u16) = (0x1AF4, 0x1049);
+pub const VENDOR_ID: u16 = 0x1AF4;
+
+// Virtio transitional PCI device IDs (vendor = VENDOR_ID)
+pub const VIRTIO_TRANSITIONAL_NETWORK_CARD: (u16, u16) = (VENDOR_ID, 0x1000);
+pub const VIRTIO_TRANSITIONAL_BLOCK_DEVICE: (u16, u16) = (VENDOR_ID, 0x1001);
+pub const VIRTIO_TRANSITIONAL_MEMORY_BALLOON: (u16, u16) = (VENDOR_ID, 0x1002);
+pub const VIRTIO_TRANSITIONAL_CONSOLE: (u16, u16) = (VENDOR_ID, 0x1003);
+pub const VIRTIO_TRANSITIONAL_SCSI_HOST: (u16, u16) = (VENDOR_ID, 0x1004);
+pub const VIRTIO_TRANSITIONAL_ENTROPY_SOURCE: (u16, u16) = (VENDOR_ID, 0x1005);
+pub const VIRTIO_TRANSITIONAL_9P_TRANSPORT: (u16, u16) = (VENDOR_ID, 0x1009);
+pub const VIRTIO_MODERN_NETWORK_CARD: (u16, u16) = (VENDOR_ID, 0x1040);
+pub const VIRTIO_MODERN_BLOCK_DEVICE: (u16, u16) = (VENDOR_ID, 0x1041);
+pub const VIRTIO_MODERN_MEMORY_BALLOON: (u16, u16) = (VENDOR_ID, 0x1042);
+pub const VIRTIO_MODERN_CONSOLE: (u16, u16) = (VENDOR_ID, 0x1043);
+pub const VIRTIO_MODERN_SCSI_HOST: (u16, u16) = (VENDOR_ID, 0x1044);
+pub const VIRTIO_MODERN_ENTROPY_SOURCE: (u16, u16) = (VENDOR_ID, 0x1045);
+pub const VIRTIO_MODERN_9P_TRANSPORT: (u16, u16) = (VENDOR_ID, 0x1049);
 
 #[initcall(driver)]
 fn init() {

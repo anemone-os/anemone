@@ -76,8 +76,9 @@ pub fn query_virt_addr(phys_addr: PhysAddr, size: u64) -> Option<VirtAddr> {
     let remap = &remap_node.value;
     let vbase = remap.virt_base();
     let pbase = remap.phys_base();
-    let offset = phys_addr + size - pbase;
-    if offset > remap.size() {
+    let offset_with_sz = phys_addr + size - pbase;
+    let offset = phys_addr - pbase;
+    if offset_with_sz > remap.size() {
         None
     } else {
         Some(vbase + offset)

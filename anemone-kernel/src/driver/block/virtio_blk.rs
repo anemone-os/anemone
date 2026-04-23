@@ -98,7 +98,6 @@ impl DriverOps for VirtIOBlkDriver {
         let vdev = device
             .as_virtio_device()
             .expect("virtio driver should only be probed with virtio device");
-
         let drv = VirtIOBlk::<VirtIOHalImpl, _>::new(
             vdev.take_transport()
                 .expect("virtio device should have transport"),

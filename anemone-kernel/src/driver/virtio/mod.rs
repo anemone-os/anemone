@@ -66,16 +66,22 @@ unsafe impl virtio_drivers::Hal for VirtIOHalImpl {
         size: usize,
     ) -> core::ptr::NonNull<u8> {
         unsafe {
-            NonNull::new_unchecked(
-                query_virt_addr(PhysAddr::new(paddr), size as u64)
-                    .unwrap_or_else(|| {
+            NonNull::new_unchecked({
+                let vaddr =
+                    query_virt_addr(PhysAddr::new(paddr), size as u64).unwrap_or_else(|| {
                         panic!(
                             "failed to find ioremap region for PhysAddr({:#x}) with {} bytes",
                             paddr, size
                         );
-                    })
-                    .get() as *mut u8,
-            )
+                    });
+                kinfoln!(
+                    "pcie hal: translated {:#x} with size {:#x} to {:?}",
+                    paddr,
+                    size,
+                    vaddr
+                );
+                vaddr.get() as *mut u8
+            })
         }
     }
 
