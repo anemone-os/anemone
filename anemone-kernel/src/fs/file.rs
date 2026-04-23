@@ -140,12 +140,34 @@ impl File {
         (self.ops.read)(self, buf)
     }
 
+    pub fn read_exact(&self, mut buf: &mut [u8]) -> Result<(), SysError> {
+        while !buf.is_empty() {
+            let n = self.read(buf)?;
+            if n == 0 {
+                return Err(SysError::UnexpectedEof);
+            }
+            buf = &mut buf[n..];
+        }
+        Ok(())
+    }
+
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
 
         (self.ops.write)(self, buf)
+    }
+
+    pub fn write_all(&self, mut buf: &[u8]) -> Result<(), SysError> {
+        while !buf.is_empty() {
+            let n = self.write(buf)?;
+            if n == 0 {
+                return Err(SysError::IO);
+            }
+            buf = &buf[n..];
+        }
+        Ok(())
     }
 
     pub fn seek(&self, pos: usize) -> Result<(), SysError> {

@@ -23,8 +23,7 @@ fn sys_write(fd: Fd, buf: UserReadPtr<u8>, count: usize) -> Result<u64, SysError
     });
     let slice = buf.slice(count);
 
-    let mut kbuf = Vec::with_capacity(count);
-    kbuf.resize(count, 0);
+    let mut kbuf = vec![0u8; count];
 
     let mut usp = uspace.write();
     let ptr = unsafe { slice.validate_with(usp.deref_mut())? };

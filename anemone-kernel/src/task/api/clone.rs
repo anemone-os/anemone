@@ -203,13 +203,18 @@ extern "C" fn enter_cloned_user_task(trap_frame: *mut TrapFrame, child_tid: *mut
         if task.clone_flags().contains(CloneFlags::CLONE_CHILD_SETTID) {
             *child_tid = current_task_id();
         }
+
+        // we must disable interrupts before calling `on_prv_change`, otherwise we could
+        // leave a window where the task is accounted as returning to user while the CPU
+        // can still take a kernel-mode timer trap, which, in turn, will cause a panic
+        // due to inconsistent task state.
+        IntrArch::local_intr_disable();
     }
 
     task.on_prv_change(Privilege::User);
 
     drop(task);
     unsafe {
-        IntrArch::local_intr_disable();
         SchedArch::return_to_cloned_task(frame);
     }
     unreachable!("should never return from entering a cloned user task");

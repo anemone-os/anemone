@@ -124,7 +124,7 @@ pub struct VmArea {
 }
 
 impl VmArea {
-    pub(super) fn new(
+    pub fn new(
         range: VirtPageRange,
         poffset: usize,
         prot: Protection,

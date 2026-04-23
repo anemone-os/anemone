@@ -11,3 +11,4 @@ rootfs*.img
 .envrc.local
 sdcard*.img
 *.bak
+.venv

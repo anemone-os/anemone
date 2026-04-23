@@ -22,9 +22,19 @@ fn sys_mmap(
     #[validate_with(nonzero)] length: u64,
     prot: MmapProt,
     flags: MmapFlags,
-    fd: Fd,
+    #[validate_with(mmap_fd)] raw_fd: i32,
     #[validate_with(aligned_to::<{ PagingArch::PAGE_SIZE_BYTES }>)] offset: u64,
 ) -> Result<u64, SysError> {
+    kdebugln!(
+        "mmap: addr={:?}, length={}, prot={:?}, flags={:?}, fd={:?}, offset={}",
+        addr,
+        length,
+        prot,
+        flags,
+        raw_fd,
+        offset
+    );
+
     let usp = with_current_task(|task| task.clone_uspace().expect("user task should have uspace"));
 
     let is_anonymous = flags.aux.contains(AuxMmapFlags::MAP_ANONYMOUS);
@@ -68,7 +78,12 @@ fn sys_mmap(
             .map(|addr| addr.get())
             .map_err(Into::into)
     } else {
+        if raw_fd < 0 {
+            return Err(SysError::BadFileDescriptor);
+        }
+
         let poffset = offset as usize >> PagingArch::PAGE_SIZE_BITS;
+        let fd = Fd::new(raw_fd as u32).ok_or(SysError::BadFileDescriptor)?;
         let file = with_current_task(|task| task.get_fd(fd).ok_or(SysError::BadFileDescriptor))?;
         let supported_prot = {
             let mut prot = Protection::empty();

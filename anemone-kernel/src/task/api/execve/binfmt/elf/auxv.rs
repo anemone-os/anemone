@@ -109,6 +109,8 @@ impl AuxV {
     /// - [AT_BASE_PLATFORM] describing the "real" architecture if the current
     ///   one is a sub-arch (e.g. "riscv64"). Currently Anemone doesn't support
     ///   virtualization, so this entry is always the same as [AT_PLATFORM].
+    /// - [AT_BASE] describing the load bias of the ELF interpreter, if one is
+    ///   present.
     pub fn new_partial() -> Self {
         let entries = vec![
             AuxEntry::Null,

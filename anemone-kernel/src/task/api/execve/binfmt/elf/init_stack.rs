@@ -163,6 +163,10 @@ impl<'a, T: AsRef<str>, U: AsRef<str>> InitStackCtor<'a, T, U> {
         self.auxv.push(AuxEntry::PhEnt(self.meta.phdr_entry_sz));
         self.auxv.push(AuxEntry::PhNum(self.meta.phdr_entry_num));
         self.auxv.push(AuxEntry::Entry(self.meta.entry));
+
+        if let Some(interp) = &self.meta.interp {
+            self.auxv.push(AuxEntry::Base(interp.base));
+        }
     }
 
     // this pushes those key-value pairs.
