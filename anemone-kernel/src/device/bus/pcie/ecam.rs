@@ -11,7 +11,7 @@ use crate::{mm::remap::IoRemap, prelude::*};
 macro_rules! impl_num {
     ($name: ident,$type: ident, $min: expr, $max: expr) => {
         #[repr(transparent)]
-        #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+        #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
         pub struct $name($type);
 
         impl $name {
@@ -313,6 +313,12 @@ impl GeneralFuncConf {
 
     define_field!(u8, intr_line, 0x3c);
     define_field!(u8, intr_pin, 0x3d);
+
+    pub unsafe fn write_intr_line(&self, intr_line: u8) {
+        unsafe {
+            self.write_u8(0x3c, intr_line);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -751,17 +757,17 @@ impl PcieDeviceConf {
 
     pub fn functions<F: Fn(FuncNum, GeneralFuncConf) -> Result<(), E>, E>(
         &self,
-        filter: F,
+        f: F,
     ) -> Result<(), E> {
         if self.get_function(FuncNum::MIN).header_type().is_multifunc() {
             for (index, func) in (FuncNum::MIN.0..=FuncNum::MAX.0)
                 .map(|func_num| (func_num, self.get_function(FuncNum(func_num))))
                 .filter(|(_, func_conf)| func_conf.exists())
             {
-                filter(FuncNum(index), func)?;
+                f(FuncNum(index), func)?;
             }
         } else {
-            filter(FuncNum::MIN, self.get_function(FuncNum::MIN))?;
+            f(FuncNum::MIN, self.get_function(FuncNum::MIN))?;
         }
         Ok(())
     }

@@ -141,7 +141,7 @@ fn preinit_func(dev: &PcieDevice, id: &FuncNum, func: &GeneralFuncConf) -> Resul
             e
         })?;
     }
-    kalertln!(
+    /*kalertln!(
         "INTR PIN of device {} function {:?} is {}",
         dev.name(),
         id,
@@ -152,7 +152,7 @@ fn preinit_func(dev: &PcieDevice, id: &FuncNum, func: &GeneralFuncConf) -> Resul
         dev.name(),
         id,
         func.intr_line()
-    );
+    );*/
     let domain = dev.domain();
     let mut mem_areas: Vec<(
         usize,
@@ -205,6 +205,7 @@ fn preinit_func(dev: &PcieDevice, id: &FuncNum, func: &GeneralFuncConf) -> Resul
         func.write_bar(bar_idx, bar);
         add_remap_region(remap);
     }
+
     Ok(())
 }
 

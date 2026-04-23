@@ -91,18 +91,14 @@ impl IrqChip for LA7A1000Platic {
     }
 
     fn xlate(&self, spec: InterruptSpecifier<'_>) -> Option<InterruptInfo> {
-        if spec.fwnode.as_of_node().is_some() {
-            if spec.raw.len() != 8 {
-                kwarningln!(
-                    "7a1000la-platic: invalid interrupt specifier length: {}",
-                    spec.raw.len()
-                );
-                return None;
-            }
-            Some(InterruptInfo::parse_2_cell_specifier(spec)?)
-        } else {
-            None
+        if spec.raw.len() != 8 {
+            kwarningln!(
+                "7a1000la-platic: invalid interrupt specifier length: {}",
+                spec.raw.len()
+            );
+            return None;
         }
+        Some(InterruptInfo::parse_2_cell_specifier(spec)?)
     }
 }
 

@@ -38,6 +38,10 @@ args = [
     "virtio-blk-pci-transitional,drive=x1,bus=pcie.1",
 ]
 
+[rootfs]
+fstype = "ext4"
+source = { type = "block", path = "vda" }
+
 
 [dtb]
 path = "arch/loongarch64/generated.dtb"

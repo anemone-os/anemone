@@ -44,7 +44,7 @@ use crate::device::bus::pcie::ecam::{BusNum, DevNum, FuncNum};
 /// Represent a 96-bit PCI address as used by Open Firmware.
 ///
 /// Store the address as three 32-bit words in little-endian order.
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OfPciAddr([u32; 3]);
 
 impl Add<u64> for OfPciAddr {

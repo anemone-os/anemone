@@ -130,32 +130,28 @@ impl IrqChip for SiFivePlic {
     }
 
     fn xlate(&self, spec: InterruptSpecifier<'_>) -> Option<InterruptInfo> {
-        if spec.fwnode.as_of_node().is_some() {
-            // #interrupt-cells = 1, which is the hardware IRQ number.
-            if spec.raw.len() != 4 {
-                kwarningln!(
-                    "sifive-plic: invalid interrupt specifier length: {}",
-                    spec.raw.len()
-                );
-                return None;
-            }
-            let hwirq = HwIrq::new(u32::from_be_bytes(spec.raw.try_into().ok()?) as usize);
-            if !self.valid_hwirq(hwirq.get()) {
-                kwarningln!("sifive-plic: invalid hwirq {}", hwirq.get());
-                return None;
-            }
-
-            Some(InterruptInfo {
-                hwirq,
-                // refer to PLIC's gateway mechanism, which ensures that kernel always perceives an
-                // effect equivalent to level-triggered interrupts.
-                //
-                // ...?🤔
-                trigger: IrqTriggerType::Level,
-            })
-        } else {
-            None
+        // #interrupt-cells = 1, which is the hardware IRQ number.
+        if spec.raw.len() != 4 {
+            kwarningln!(
+                "sifive-plic: invalid interrupt specifier length: {}",
+                spec.raw.len()
+            );
+            return None;
         }
+        let hwirq = HwIrq::new(u32::from_be_bytes(spec.raw.try_into().ok()?) as usize);
+        if !self.valid_hwirq(hwirq.get()) {
+            kwarningln!("sifive-plic: invalid hwirq {}", hwirq.get());
+            return None;
+        }
+
+        Some(InterruptInfo {
+            hwirq,
+            // refer to PLIC's gateway mechanism, which ensures that kernel always perceives an
+            // effect equivalent to level-triggered interrupts.
+            //
+            // ...?🤔
+            trigger: IrqTriggerType::Level,
+        })
     }
 
     fn as_core_irq_chip(&self) -> Option<&dyn CoreIrqChip> {

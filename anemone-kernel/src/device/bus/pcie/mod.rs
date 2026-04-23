@@ -15,11 +15,13 @@ use crate::{
 mod bus;
 mod device;
 mod driver;
+mod fwnode;
 pub mod remap;
 
 pub use bus::PcieBusType;
 pub use device::*;
 pub use driver::PcieDriver;
+pub use fwnode::*;
 
 mod addr;
 pub mod ecam;

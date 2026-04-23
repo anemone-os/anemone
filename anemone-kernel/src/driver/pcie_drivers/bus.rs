@@ -4,7 +4,7 @@ use crate::{
     device::{
         bus::pcie::{
             self, HOST_BRIDGE_CLASSCODE, PCI2PCI_BRIDGE_CLASSCODE, PciMemAreaSnapshot, PcieDevice,
-            PcieDeviceType, PcieDriver,
+            PcieDeviceType, PcieDriver, PcieIntrKey,
             ecam::{
                 BusNum, ClassCode, DevNum, FuncNum, PciCommands, PciHeaderLayout, Type1FuncConf,
             },
@@ -138,7 +138,8 @@ fn enum_pcie_bus(parent_dev: &Arc<PcieDevice>, bus_id: &BusNum) {
                 fregs.header_type(),
                 fregs.bist()
             );*/
-            match fregs.header_type().layout() {
+            let header = fregs.header_type();
+            match header.layout() {
                 Err(e) => {
                     kwarningln!(
                         "unsupported header layout of device #{} at pcie root bus: {:?}",
@@ -147,9 +148,25 @@ fn enum_pcie_bus(parent_dev: &Arc<PcieDevice>, bus_id: &BusNum) {
                     );
                 },
                 Ok(PciHeaderLayout::Type0) => {
+                    if header.is_multifunc() {
+                        kwarningln!(
+                            "multifunction device #{} at pcie root bus is not supported, skipping",
+                            dev
+                        );
+                        continue;
+                    }
                     let bus_num = bus.num();
                     let bus_num_u8: u8 = bus_num.into();
                     let domain = parent_dev.domain();
+                    let intr_pin = fregs.intr_pin();
+                    let intr_info = domain
+                        .find_intr_info(PcieIntrKey {
+                            bus: bus_num,
+                            dev: DevNum::try_from(dev).unwrap(),
+                            func: FuncNum::MIN,
+                            intr_pin,
+                        })
+                        .cloned();
                     let device = PcieDevice::new_endpoint(
                         KObjIdent::try_from_fmt(format_args!(
                             "{:04x}:{:02x}:{:02x}",
@@ -161,6 +178,7 @@ fn enum_pcie_bus(parent_dev: &Arc<PcieDevice>, bus_id: &BusNum) {
                         domain.clone(),
                         bus_num,
                         DevNum::try_from(dev).unwrap(),
+                        intr_info,
                     );
                     device.set_parent(Some(parent_dev.clone()));
                     let device = Arc::new(device);

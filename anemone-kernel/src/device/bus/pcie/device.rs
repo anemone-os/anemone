@@ -10,12 +10,14 @@ use crate::{
             BusType,
             pcie::{
                 HOST_BRIDGE_CLASSCODE, OfPciAddr, PCIE_BUS_TYPE, PciAddrFlags, PciSpaceType,
+                PcieFwNode,
                 bus::preinit_pcie_dev,
                 ecam::{
                     BAR, BusNum, ClassCode, DevNum, EcamConf, FuncNum, MemBARType, PcieDeviceConf,
                 },
             },
         },
+        discovery::fwnode::FwNode,
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
     },
     prelude::*,
@@ -36,6 +38,20 @@ pub struct PcieDevice {
     typed_info: PcieDeviceType,
 }
 
+#[derive(Debug, Clone)]
+pub struct PcieIntrInfo {
+    pub parent: Arc<dyn FwNode>,
+    pub parent_intr_spec: Box<[u8]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PcieIntrKey {
+    pub bus: BusNum,
+    pub dev: DevNum,
+    pub func: FuncNum,
+    pub intr_pin: u8,
+}
+
 #[derive(Debug)]
 pub struct PcieDomain {
     ///  Unique PCIe domain identifier.
@@ -47,6 +63,7 @@ pub struct PcieDomain {
     io_area: Option<AvailPciMemArea>,
     mem_area_pref: Option<AvailPciMemArea>,
     mem_area_unpref: Option<AvailPciMemArea>,
+    intr_map: BTreeMap<PcieIntrKey, PcieIntrInfo>,
 }
 
 impl PcieDomain {
@@ -62,6 +79,7 @@ impl PcieDomain {
             io_area: None,
             mem_area_pref: None,
             mem_area_unpref: None,
+            intr_map: BTreeMap::new(),
         }
     }
 
@@ -93,6 +111,16 @@ impl PcieDomain {
             }
         }
         Ok(())
+    }
+
+    /// Add an interrupt mapping for this domain.
+    pub fn add_intr_map(&mut self, key: PcieIntrKey, intr_info: PcieIntrInfo) {
+        self.intr_map.insert(key, intr_info);
+    }
+
+    /// Find interrupt mapping information for the given key
+    pub fn find_intr_info(&self, key: PcieIntrKey) -> Option<&PcieIntrInfo> {
+        self.intr_map.get(&key)
     }
 
     /// Allocate a memory region for the specified `BAR` from compatible
@@ -444,10 +472,11 @@ impl PcieDevice {
         domain: Arc<PcieDomain>,
         bus: BusNum,
         dev: DevNum,
+        intr_info: Option<PcieIntrInfo>,
     ) -> Self {
         Self {
             kobj_base: KObjectBase::new(name),
-            dev_base: DeviceBase::new(None),
+            dev_base: DeviceBase::new(Some(Arc::new(PcieFwNode::new(intr_info)))),
             typed_info: PcieDeviceType::Endpoint {
                 bus,
                 dev,
@@ -473,7 +502,7 @@ impl PcieDevice {
     ) -> Self {
         Self {
             kobj_base: KObjectBase::new(name),
-            dev_base: DeviceBase::new(None),
+            dev_base: DeviceBase::new(Some(Arc::new(PcieFwNode::new(None)))),
             typed_info: PcieDeviceType::Bus {
                 id,
                 bus,
@@ -492,7 +521,7 @@ impl PcieDevice {
     pub fn new_host_bridge(name: KObjIdent, domain: Arc<PcieDomain>, id: BusNum) -> Self {
         Self {
             kobj_base: KObjectBase::new(name),
-            dev_base: DeviceBase::new(None),
+            dev_base: DeviceBase::new(Some(Arc::new(PcieFwNode::new(None)))),
             domain,
             typed_info: PcieDeviceType::HostBridge { id: id },
         }

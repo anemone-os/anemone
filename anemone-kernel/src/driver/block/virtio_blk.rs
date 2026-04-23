@@ -133,6 +133,8 @@ impl DriverOps for VirtIOBlkDriver {
 
         state.lock_irqsave().devnum = devnum;
 
+        vdev.request_irq(&IRQ_HANDLER, Some(AnyOpaque::new(state.clone())))?;
+
         let node_name = register_block_device(BlockDevRegistration {
             devnum,
             class: BlockDevClass::Virtio,
@@ -144,8 +146,6 @@ impl DriverOps for VirtIOBlkDriver {
             vdev.name(),
             node_name
         );
-
-        vdev.request_irq(&IRQ_HANDLER, Some(AnyOpaque::new(state.clone())))?;
 
         vdev.set_drv_state(AnyOpaque::new(state));
 
