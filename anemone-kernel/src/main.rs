@@ -151,6 +151,11 @@ fn exec_init_proc() {
     });
 }
 
+/// **System Invariant**
+///
+/// - When bootstrap processor reaches [bsp_kinit], interrupts are disabled in
+///   terms of effect. (e.g. on RiscV, sstatus::sie can be set, but sie::ssoft,
+///   sie::stimer and sie::sext interrupts should be disabled.)
 unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     unsafe {
         kinfoln!("bsp #{} kinit running on {}...", bsp_id, current_task_id());
@@ -187,6 +192,11 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     exec_init_proc();
 }
 
+/// **System Invariant**
+///
+/// - When application processors reach [ap_kinit], interrupts are disabled in
+///   terms of effect. (e.g. on RiscV, sstatus::sie can be set, but sie::ssoft,
+///   sie::stimer and sie::sext interrupts should be disabled.)
 unsafe extern "C" fn ap_kinit(ap_id: usize) {
     unsafe {
         INIT_SYNC_COUNTER.sync_with_counter();

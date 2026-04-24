@@ -10,6 +10,7 @@ use crate::prelude::*;
 
 /// The idle task that runs when there are no other runnable tasks.
 pub extern "C" fn idle() -> ! {
+    debug_assert!(IntrArch::local_intr_enabled());
     loop {
         spin_loop();
     }

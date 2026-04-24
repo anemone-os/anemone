@@ -4,8 +4,7 @@ use kernel_macros::syscall;
 
 use crate::{
     prelude::{dt::UserWritePtr, handler::TryFromSyscallArg, *},
-    sched::clone_current_task,
-    task::{ArcTaskImpls, WaitObject, tid::Tid},
+    task::tid::Tid,
 };
 
 impl TryFromSyscallArg for WaitObject {
@@ -39,6 +38,7 @@ impl WStatus {
 }
 
 bitflags! {
+    #[derive(Debug)]
     pub struct WaitOptions: u32{
         const WNOHANG = wait::WNOHANG as u32;
         const WUNTRACED = wait::WUNTRACED as u32;
@@ -48,7 +48,14 @@ bitflags! {
 
 impl TryFromSyscallArg for WaitOptions {
     fn try_from_syscall_arg(value: u64) -> Result<Self, SysError> {
-        WaitOptions::from_bits(value as u32).ok_or(SysError::InvalidArgument)
+        let options = WaitOptions::from_bits(value as u32).ok_or(SysError::InvalidArgument)?;
+
+        if options.contains(WaitOptions::WUNTRACED) || options.contains(WaitOptions::WCONTINUED) {
+            knoticeln!("NYI wait options: {options:?}");
+            return Err(SysError::NotYetImplemented);
+        }
+
+        Ok(options)
     }
 }
 
@@ -57,7 +64,12 @@ pub fn sys_wait4(
     target: WaitObject,
     wstatus: Option<UserWritePtr<WStatus>>,
     waitoptions: WaitOptions,
+    // todo.
+    _rusage: u64,
 ) -> Result<u64, SysError> {
+    //knoticeln!("[NYI] wait4: target={target:?}, options={waitoptions:?}");
+    //Ok(42)
+
     if waitoptions.contains(WaitOptions::WUNTRACED) || waitoptions.contains(WaitOptions::WCONTINUED)
     {
         return Err(SysError::InvalidArgument);

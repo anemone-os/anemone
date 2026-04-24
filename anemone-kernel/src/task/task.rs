@@ -139,6 +139,8 @@ impl Display for Task {
     }
 }
 
+// region: spawn
+
 impl Task {
     /// Create a new kernel task with a kernel stack and kernel entry context.
     ///
@@ -166,7 +168,6 @@ impl Task {
         name: &str,
         entry: *const (),
         args: ParameterList,
-        irq_flags: IrqFlags,
         flags: TaskFlags,
         create_flags: CloneFlags,
     ) -> Result<(Task, RegisterGuard), SysError> {
@@ -187,7 +188,6 @@ impl Task {
                     task_context: TaskContext::from_kernel_fn(
                         VirtAddr::new(entry as u64),
                         stack_top,
-                        irq_flags,
                         args,
                     ),
                     utrap_frame: None,
@@ -229,7 +229,6 @@ impl Task {
                         task_context: TaskContext::from_kernel_fn(
                             VirtAddr::new(entry as u64),
                             stack_top,
-                            IntrArch::ENABLED_IRQ_FLAGS,
                             ParameterList::empty(),
                         ),
                         utrap_frame: None,
@@ -258,19 +257,11 @@ impl Task {
             RegisterGuard,
         ))
     }
-
-    /// Get the parent task ID, if the parent task exists.
-    ///
-    /// This function will return [None] only if this task has no parent, e.g.
-    /// the init task, the idle task, a exited task or the kinit task.
-    pub fn parent_tid(&self) -> Option<Tid> {
-        self.hierarchy
-            .read()
-            .parent
-            .as_ref()
-            .and_then(|weak| weak.upgrade().map(|parent| parent.tid()))
-    }
 }
+
+// endregion: spawn
+
+// region: scheduling context
 
 impl Task {
     /// Get the task context used by the scheduler.
@@ -333,10 +324,26 @@ impl Task {
     }
 }
 
+// endregion: scheduling context
+
+// region: common field accessors
+
 impl Task {
     /// Get the task ID.
     pub fn tid(&self) -> Tid {
         Tid::new(self.tid.get())
+    }
+
+    /// Get the parent task ID, if the parent task exists.
+    ///
+    /// This function will return [None] only if this task has no parent, e.g.
+    /// the init task, the idle task, a exited task or the kinit task.
+    pub fn parent_tid(&self) -> Option<Tid> {
+        self.hierarchy
+            .read()
+            .parent
+            .as_ref()
+            .and_then(|weak| weak.upgrade().map(|parent| parent.tid()))
     }
 
     /// Get the task name.
@@ -379,6 +386,37 @@ impl Task {
         *self.exec_ctx.write_irqsave() = ctx;
     }
 
+    /// Get the clone flags used when creating this task.
+    pub fn clone_flags(&self) -> CloneFlags {
+        self.create_flags
+    }
+
+    /// Set `tid_ptr` as the clear-child-tid target pointer.
+    pub fn set_clear_child_tid(&self, tid_ptr: Option<UserWritePtr<Tid>>) {
+        *self.clear_child_tid.write() = tid_ptr;
+    }
+
+    /// Get the current clear-child-tid target pointer.
+    pub fn get_clear_child_tid(&self) -> Option<UserWritePtr<Tid>> {
+        self.clear_child_tid.read().clone()
+    }
+
+    /// Get the current task status.
+    pub fn status(&self) -> TaskStatus {
+        self.status.read().clone()
+    }
+
+    /// Update task status to `status`.
+    pub fn set_status(&self, status: TaskStatus) {
+        *self.status.write() = status;
+    }
+}
+
+// endregion: common field accessors
+
+// region: task hierarchy
+
+impl Task {
     /// Run `f` with an immutable reference to this task's hierarchy links.
     ///
     /// # Locking Rules
@@ -414,32 +452,9 @@ impl Task {
         let mut hierarchy = self.hierarchy.write();
         f(hierarchy.deref_mut())
     }
-
-    /// Get the clone flags used when creating this task.
-    pub fn clone_flags(&self) -> CloneFlags {
-        self.create_flags
-    }
-
-    /// Set `tid_ptr` as the clear-child-tid target pointer.
-    pub fn set_clear_child_tid(&self, tid_ptr: Option<UserWritePtr<Tid>>) {
-        *self.clear_child_tid.write() = tid_ptr;
-    }
-
-    /// Get the current clear-child-tid target pointer.
-    pub fn get_clear_child_tid(&self) -> Option<UserWritePtr<Tid>> {
-        self.clear_child_tid.read().clone()
-    }
-
-    /// Get the current task status.
-    pub fn status(&self) -> TaskStatus {
-        self.status.read().clone()
-    }
-
-    /// Update task status to `status`.
-    pub fn set_status(&self, status: TaskStatus) {
-        *self.status.write() = status;
-    }
 }
+
+// endregion: task hierarchy
 
 /// Extra task-tree and wait helpers implemented on [Arc<Task>].
 pub trait ArcTaskImpls {
@@ -456,6 +471,7 @@ pub trait ArcTaskImpls {
         sleep: bool,
     ) -> Result<Option<Arc<Task>>, SysError>;
 }
+
 impl ArcTaskImpls for Arc<Task> {
     unsafe fn add_as_child(&self, parent: &Arc<Task>) {
         unsafe {
@@ -564,6 +580,7 @@ impl PartialEq for Task {
 
 impl Eq for Task {}
 
+#[derive(Debug)]
 pub enum WaitObject {
     /// Wait for a thread group id (not implemented yet).
     Tgid(u32), // not implemented

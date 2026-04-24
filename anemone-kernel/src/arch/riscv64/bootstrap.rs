@@ -398,7 +398,6 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
                 "kinit-bsp",
                 bsp_kinit as *const (),
                 ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
-                IntrArch::DISABLED_IRQ_FLAGS,
                 TaskFlags::NONE,
                 CloneFlags::empty(),
             )
@@ -444,7 +443,6 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
             "kinit-ap",
             ap_kinit as *const (),
             ParameterList::new(&[ap_id as u64]),
-            IntrArch::DISABLED_IRQ_FLAGS,
             TaskFlags::NONE,
             CloneFlags::empty(),
         )

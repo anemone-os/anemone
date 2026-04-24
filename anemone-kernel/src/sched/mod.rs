@@ -1,4 +1,4 @@
-// TODO: scheduler list.
+// TODO: scheduler list. current design does not support multiple schedulers.
 
 use crate::{
     prelude::*,

@@ -59,6 +59,11 @@ core::arch::global_asm!(
     "   st.d $r29, $sp, 232",
     "   st.d $r30, $sp, 240",
     "   st.d $r31, $sp, 248",
+    // preserve the kernel trap-stack top that the next return path must write
+    // back into sscratch before re-entering user mode.
+    "   addi.d $t0, $sp, {trapframe_bytes}",
+    "   st.d $t0, $sp, {trapframe_scratch_offset}",
+
     // now we have registers to play with. we can calculate previous $sp
     "   csrrd $t0, {save1}",
     "   st.d $t0, $sp, 24",
@@ -73,7 +78,6 @@ core::arch::global_asm!(
     "   st.d $t0, $sp, 280",
     // TODO: if this is a device interrupt (timer or external), an interrupt stack
     // should be used, instead of continuing execution on the current stack.
-
     "   la $t0, __ktrap_entry",
     "   csrwr $t0, {eentry}",
 
@@ -92,6 +96,10 @@ core::arch::global_asm!(
 
     "   la $t0, __utrap_entry",
     "   csrwr $t0, {eentry}",
+
+    // load back save0
+    "   ld.d $t0, $a0, {trapframe_scratch_offset}",
+    "   csrwr $t0, {save0}",
 
 
     "   ld.d $r0, $a0, 0",
@@ -146,6 +154,7 @@ core::arch::global_asm!(
     "   ertn",
     trapframe_bytes = const size_of::<LA64TrapFrame>(),
     trapframe_ktp_offset = const core::mem::offset_of!(LA64TrapFrame, ktp),
+    trapframe_scratch_offset = const core::mem::offset_of!(LA64TrapFrame, save0),
     rust_utrap_entry = sym rust_utrap_entry,
     prmd = const CR_PRMD,
     era = const CR_ERA,

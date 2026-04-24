@@ -258,6 +258,7 @@ pub unsafe fn switch_to(task: Arc<Task>) {
     let cur_context = unsafe { get_sched_context_mut() };
     let next_task = task;
     let next_context = unsafe { next_task.get_task_context() };
+
     unsafe {
         switch_uspace(&clone_current_task(), &next_task);
         next_task.set_status(TaskStatus::Running);

@@ -271,16 +271,17 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
 
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
         set_boot_mono(true);
-        let kinit_task = Task::new_kernel(
+        let (kinit_task, guard) = Task::new_kernel(
             "bsp-kinit",
             bsp_kinit as *const (),
             ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
-            IntrArch::DISABLED_IRQ_FLAGS,
             TaskFlags::NONE,
             CloneFlags::empty(),
         )
         .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e));
+        let kinit_task = Arc::new(kinit_task);
         task::boot::register_root_task(kinit_task.clone());
+        guard.register(kinit_task.clone());
         add_to_ready(kinit_task);
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
     }
@@ -299,16 +300,17 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
 
         TimeArch::init_this_cpu();
         set_boot_mono(false);
-        let ap_kinit = Task::new_kernel(
+        let (ap_kinit, guard) = Task::new_kernel(
             "ap-kinit",
             ap_kinit as *const (),
             ParameterList::new(&[ap_id as u64]),
-            IntrArch::DISABLED_IRQ_FLAGS,
             TaskFlags::NONE,
             CloneFlags::empty(),
         )
         .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e));
+        let ap_kinit = Arc::new(ap_kinit);
         ap_kinit.add_as_child(task::boot::wait_for_root_task());
+        guard.register(ap_kinit.clone());
         add_to_ready(ap_kinit);
         switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64));
     }

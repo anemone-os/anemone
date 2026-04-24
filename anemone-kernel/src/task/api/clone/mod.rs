@@ -99,6 +99,7 @@ impl TryFromSyscallArg for CloneFlags {
         let flags = CloneFlags::from_bits(value).ok_or(SysError::InvalidArgument)?;
         if !SUPPORTED_FLAGS.contains(flags) {
             knoticeln!("nyi clone flags: {:#x}", value);
+            return Err(SysError::NotYetImplemented);
         }
 
         Ok(flags)
@@ -165,17 +166,21 @@ pub fn kernel_clone(
         boxed_frame.set_tls(tls.get());
     }
 
-    let frame_ptr = Box::leak(boxed_frame) as *mut TrapFrame as u64;
+    let frame_ptr = Box::leak(boxed_frame) as *mut TrapFrame;
     let (mut new_task, guard) = unsafe {
         Task::new_kernel(
             "@kernel/clone",
             enter_cloned_user_task as *const (),
-            ParameterList::new(&[frame_ptr, child_tid.addr()]),
-            IntrArch::ENABLED_IRQ_FLAGS,
+            ParameterList::new(&[frame_ptr as u64, child_tid.addr()]),
             TaskFlags::NONE,
             flags,
         )?
     };
+    unsafe {
+        // The cloned user trapframe is copied from the parent, so its scratch
+        // register still points at the parent's trap stack until we rebind it.
+        (*frame_ptr).set_scratch(new_task.kstack().stack_top().get());
+    }
     unsafe {
         new_task.switch_exec_ctx(TaskExecCtx {
             cmdline: current_task.cmdline(),
@@ -245,6 +250,8 @@ pub fn kernel_clone(
 }
 
 extern "C" fn enter_cloned_user_task(trap_frame: *mut TrapFrame, child_tid: *mut Tid) {
+    assert!(IntrArch::local_intr_enabled());
+
     let task = clone_current_task();
     let frame = *unsafe { Box::from_raw(trap_frame) };
 
@@ -253,9 +260,10 @@ extern "C" fn enter_cloned_user_task(trap_frame: *mut TrapFrame, child_tid: *mut
             *child_tid = current_task_id();
         }
 
-        // we must disable interrupts before calling `on_prv_change`, otherwise we could
-        // leave a window where the task is accounted as returning to user while the CPU
-        // can still take a kernel-mode timer trap, which, in turn, will cause a panic
+        // we must disable interrupts before calling `on_prv_change`, otherwise
+        // we could leave a window where the task is accounted as
+        // returning to user while the CPU can still take a kernel-mode
+        // timer trap, which, in turn, will cause a panic
         // due to inconsistent task state.
         IntrArch::local_intr_disable();
     }
@@ -263,8 +271,11 @@ extern "C" fn enter_cloned_user_task(trap_frame: *mut TrapFrame, child_tid: *mut
     task.on_prv_change(Privilege::User);
 
     drop(task);
+
+    kdebugln!("entering cloned user task with tid {}", current_task_id());
     unsafe {
-        SchedArch::return_to_cloned_task(frame);
+        // SchedArch::return_to_cloned_task(frame);
+        TrapArch::load_utrapframe(frame);
     }
     unreachable!("should never return from entering a cloned user task");
 }

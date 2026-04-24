@@ -59,6 +59,10 @@ core::arch::global_asm!(
     "   sd x29, 232(sp)",
     "   sd x30, 240(sp)",
     "   sd x31, 248(sp)",
+    // preserve the kernel trap-stack top that the next return path must write
+    // back into sscratch before re-entering user mode.
+    "   addi t0, sp, {trapframe_bytes}",
+    "   sd t0, {trapframe_scratch_offset}(sp)",
     // now we have registers to play with. save sp from sscratch
     "   csrr t0, sscratch",
     "   sd t0, 16(sp)",
@@ -93,6 +97,10 @@ core::arch::global_asm!(
     "   la t0, __utrap_entry",
     "   or t0, t0, {stvec_mode}",
     "   csrw stvec, t0",
+
+    // load back sscratch.
+    "   ld t0, {trapframe_scratch_offset}(a0)",
+    "   csrw sscratch, t0",
 
     "   ld x0, 0(a0)",
     "   ld x1, 8(a0)",
@@ -150,6 +158,7 @@ core::arch::global_asm!(
     "   sret",
     trapframe_bytes = const size_of::<RiscV64TrapFrame>(),
     trapframe_ktp_offset = const core::mem::offset_of!(RiscV64TrapFrame, ktp),
+    trapframe_scratch_offset = const core::mem::offset_of!(RiscV64TrapFrame, sscratch),
     rust_utrap_entry = sym rust_utrap_entry,
     stvec_mode = const riscv::register::stvec::TrapMode::Direct as usize,
 

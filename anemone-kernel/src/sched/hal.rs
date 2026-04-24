@@ -2,7 +2,6 @@ use alloc::sync::Arc;
 
 use crate::prelude::*;
 
-/// The scheduler trait
 pub trait SchedTrait {
     const EMPTY: Self;
     /// Add a task to the ready queue of the current processor.
@@ -11,8 +10,7 @@ pub trait SchedTrait {
     fn fetch_next(&mut self) -> Option<Arc<Task>>;
 }
 
-/// The architecture-specific scheduler trait. This is used for context
-/// switching.
+/// Task context switching.
 pub trait SchedArchTrait {
     /// Task Context type
     type TaskContext: TaskContextArch;
@@ -24,18 +22,14 @@ pub trait SchedArchTrait {
     /// [Task].     It may point to the context of the scheduling loop.
     /// Therefore, the operation of switching the MemSpace should be
     /// performed by the scheduling system.
+    ///
+    /// **Must be called with interrupts disabled.**
     unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext);
-    unsafe fn return_to_cloned_task(frame: TrapFrame);
 }
 
 pub trait TaskContextArch {
     const ZEROED: Self;
-    fn from_kernel_fn(
-        entry: VirtAddr,
-        stack_top: VirtAddr,
-        irq_flags: IrqFlags,
-        args: ParameterList,
-    ) -> Self;
+    fn from_kernel_fn(entry: VirtAddr, stack_top: VirtAddr, args: ParameterList) -> Self;
     fn from_user_fn(entry: VirtAddr, ustack_top: VirtAddr, kstack_top: VirtAddr) -> Self;
     fn pc(&self) -> u64;
     fn sp(&self) -> u64;
