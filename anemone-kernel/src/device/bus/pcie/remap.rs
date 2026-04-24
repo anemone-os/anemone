@@ -55,8 +55,8 @@ unsafe impl Linked for RemapNode {
 static REMAP_HASHMAP: Lazy<RwLock<WAVLTree<RemapNode>>> =
     Lazy::new(|| RwLock::new(WAVLTree::new()));
 
-/// Add a remapped I/O region to the global remap tree, ensuring no overlapping
-/// regions.
+/// Add a remapped I/O region to the global remap tree
+/// This function will not do overlap checks.
 pub fn add_remap_region(req: IoRemap) -> Result<(), SysError> {
     let mut remap_tree = REMAP_HASHMAP.write();
     remap_tree.insert(Box::pin(RemapNode::new(req)));

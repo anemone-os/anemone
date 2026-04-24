@@ -1,4 +1,7 @@
-use core::u64;
+use core::{
+    mem::{self},
+    u64,
+};
 
 use kernel_macros::KObject;
 
@@ -9,7 +12,7 @@ use crate::{
             BusType, BusTypeBase,
             pcie::{
                 AvailPciMemArea, PciMemArea, PcieDevice, PcieDomain,
-                ecam::{BAR, FuncNum, GeneralFuncConf, MemBARType, PciCommands},
+                ecam::{FuncConf, PciBar, PciCommands, PciMemBarType},
                 remap::add_remap_region,
             },
         },
@@ -40,15 +43,7 @@ impl KObjectOps for PcieBusType {}
 
 /// Enumerate BARs exposed by `func` on `dev` and return their indices and
 /// descriptors.
-fn list_bars(dev: &PcieDevice, func: &GeneralFuncConf) -> Result<Vec<(usize, BAR)>, SysError> {
-    let layout = func.header_type().layout().map_err(|e| {
-        kwarningln!(
-            "PCIe device preinit failed: error reading header type for device {}: {:?}",
-            dev.name(),
-            e
-        );
-        e
-    })?;
+fn list_bars(dev: &PcieDevice, func: &FuncConf) -> Result<Vec<(usize, PciBar)>, SysError> {
     let bar_count = func.bar_count().map_err(|e| {
         kwarningln!(
             "PCIe device preinit failed: error reading BAR count for device {}: {:?}",
@@ -70,8 +65,8 @@ fn list_bars(dev: &PcieDevice, func: &GeneralFuncConf) -> Result<Vec<(usize, BAR
             e
         })?;
         match bar {
-            BAR::Memory {
-                mtype: MemBARType::W64,
+            PciBar::Memory {
+                mtype: PciMemBarType::W64,
                 ..
             } => {
                 res.push((bar_idx, bar));
@@ -93,10 +88,11 @@ fn list_bars(dev: &PcieDevice, func: &GeneralFuncConf) -> Result<Vec<(usize, BAR
 /// success.
 fn alloc_mem_for_bar(
     domain: &PcieDomain,
-    bar: BAR,
+    bar: PciBar,
     size: u64,
 ) -> Result<(&AvailPciMemArea, PciMemArea, IoRemap), SysError> {
     let (areas, area) = domain
+        .resources()
         .alloc_mem_for_bar(bar, size)
         .ok_or(SysError::ResourceExhausted)?;
     let remap = match unsafe { ioremap(area.phys_addr(), area.size() as usize) } {
@@ -111,18 +107,66 @@ fn alloc_mem_for_bar(
     Ok((areas, area, remap))
 }
 
-/// Pre-initialize a function: disable legacy command bits, size-probe BARs,
-/// allocate and map their regions.
-fn preinit_func(dev: &PcieDevice, id: &FuncNum, func: &GeneralFuncConf) -> Result<(), SysError> {
-    let mut command_val = func.command();
-    command_val.remove(PciCommands::MEM_SPACE | PciCommands::IO_SPACE);
-    func.write_command(command_val);
+/// Pre-initialize a device on the PCIe bus by enumerating and claiming its
+/// BARs.
+pub fn preinit_device(dev: &PcieDevice) -> Result<(), SysError> {
+    let Some(func_conf) = dev.func_conf() else {
+        // host bridge
+        return Ok(());
+    };
 
-    let mut bars = list_bars(dev, func)?;
-    for (bar_idx, bar) in bars.iter_mut() {
-        let mut filled = bar.clone();
+    // clear commands
+    func_conf.write_command(PciCommands::empty());
+
+    pub struct ManagedArea<'a> {
+        avail_areas: &'a AvailPciMemArea,
+        func_conf: &'a FuncConf,
+        bar_idx: usize,
+        bar: PciBar,
+        pci_area: PciMemArea,
+        remap: Option<IoRemap>,
+    }
+
+    impl<'a> ManagedArea<'a> {
+        pub fn new(
+            avail_areas: &'a AvailPciMemArea,
+            pci_area: PciMemArea,
+            func_conf: &'a FuncConf,
+            bar_idx: usize,
+            bar: PciBar,
+            remap: IoRemap,
+        ) -> Result<Self, SysError> {
+            Ok(Self {
+                avail_areas,
+                pci_area,
+                func_conf,
+                bar_idx,
+                bar,
+                remap: Some(remap),
+            })
+        }
+
+        pub fn add_remap_and_forget(mut self) {
+            let mut remap = None;
+            mem::swap(&mut self.remap, &mut remap);
+            add_remap_region(remap.unwrap());
+            mem::forget(self);
+        }
+    }
+
+    impl Drop for ManagedArea<'_> {
+        fn drop(&mut self) {
+            unsafe {
+                self.avail_areas.free(self.pci_area.clone());
+            }
+        }
+    }
+
+    let mut bars = list_bars(dev, func_conf)?;
+    for (bar_idx, bar_value) in bars.iter_mut() {
+        let mut filled = bar_value.clone();
         filled.set_base_addr(u64::MAX);
-        func.write_bar(*bar_idx, filled).map_err(|e| {
+        func_conf.write_bar(*bar_idx, filled).map_err(|e| {
             kwarningln!(
                 "PCIe device preinit failed: error writing all-1s to BAR #{} for device {}: {:?}",
                 bar_idx,
@@ -131,7 +175,7 @@ fn preinit_func(dev: &PcieDevice, id: &FuncNum, func: &GeneralFuncConf) -> Resul
             );
             e
         })?;
-        *bar = func.read_bar(*bar_idx).map_err(|e| {
+        *bar_value = func_conf.read_bar(*bar_idx).map_err(|e| {
             kwarningln!(
                 "PCIe device preinit failed: error reading back BAR #{} for device {}: {:?}",
                 bar_idx,
@@ -141,32 +185,15 @@ fn preinit_func(dev: &PcieDevice, id: &FuncNum, func: &GeneralFuncConf) -> Resul
             e
         })?;
     }
-    /*kalertln!(
-        "INTR PIN of device {} function {:?} is {}",
-        dev.name(),
-        id,
-        func.intr_pin()
-    );
-    kalertln!(
-        "INTR LINE of device {} function {:?} is {}",
-        dev.name(),
-        id,
-        func.intr_line()
-    );*/
     let domain = dev.domain();
-    let mut mem_areas: Vec<(
-        usize,
-        BAR,
-        &super::AvailPciMemArea,
-        super::PciMemArea,
-        IoRemap,
-    )> = vec![];
+    let mut mem_areas: Vec<ManagedArea> = vec![];
     for (bar_idx, bar) in bars {
         let size = match bar {
-            BAR::Memory { base_addr: 0, .. } | BAR::IO { base_addr: 0, .. } => {
+            PciBar::Memory { base_addr: 0, .. } | PciBar::IO { base_addr: 0, .. } => {
                 continue;
             },
-            BAR::Memory { base_addr, .. } | BAR::IO { base_addr } => {
+            PciBar::Memory { base_addr, .. } | PciBar::IO { base_addr } => {
+                // upper bits are ignored
                 ((!(base_addr as u32)) + 1) as u64
             },
         };
@@ -179,12 +206,6 @@ fn preinit_func(dev: &PcieDevice, id: &FuncNum, func: &GeneralFuncConf) -> Resul
                     size,
                     e
                 );
-                for (_, _, areas, area, remap) in mem_areas.into_iter() {
-                    unsafe {
-                        areas.free(area);
-                    }
-                    drop(remap);
-                }
                 return Err(e);
             },
             Ok((areas, area, remap)) => {
@@ -196,38 +217,27 @@ fn preinit_func(dev: &PcieDevice, id: &FuncNum, func: &GeneralFuncConf) -> Resul
                     area.pci_addr(),
                     area.phys_addr()
                 );*/
-                mem_areas.push((bar_idx, bar, areas, area, remap));
+                mem_areas.push(ManagedArea::new(
+                    areas, area, func_conf, bar_idx, bar, remap,
+                )?);
             },
         }
     }
-    for (bar_idx, mut bar, areas, area, remap) in mem_areas.into_iter() {
-        bar.set_base_addr(area.pci_addr().address());
-        func.write_bar(bar_idx, bar);
-        add_remap_region(remap);
-    }
-
-    Ok(())
-}
-
-/// Pre-initialize PCIe device by iterating its functions and calling
-/// `preinit_func`.
-pub fn preinit_pcie_dev(dev: &PcieDevice) -> Result<(), SysError> {
-    let mut bar_idx = 0;
-    let Some(dev_conf) = dev.dev_conf() else {
-        return Ok(());
-    };
-    dev_conf.functions::<_, SysError>(|id, func| {
-        preinit_func(dev, &id, &func).map_err(|e| {
+    for area in mem_areas.iter_mut() {
+        area.bar.set_base_addr(area.pci_area.pci_addr().address());
+        func_conf.write_bar(area.bar_idx, area.bar).map_err(|e| {
             kerrln!(
-                "preinit failed for PCIe device {}, function {:?}: {:?}",
+                "PCIe device preinit failed: error writing BAR #{} for device {}: {:?}",
+                area.bar_idx,
                 dev.name(),
-                id,
                 e
             );
             e
         })?;
-        Ok(())
-    });
+    }
+    for area in mem_areas.into_iter() {
+        area.add_remap_and_forget();
+    }
     Ok(())
 }
 
@@ -266,7 +276,7 @@ impl BusType for PcieBusType {
                     device.name(),
                     driver.name()
                 );
-                if let Err(e) = preinit_pcie_dev(
+                if let Err(e) = preinit_device(
                     device
                         .as_pcie_device()
                         .expect("pcie driver should only be probed with pcie device"),

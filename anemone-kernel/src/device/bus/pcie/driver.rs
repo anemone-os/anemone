@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 
 use crate::{
-    device::{Device, bus::pcie::ecam::ClassCode},
+    device::{Device, bus::pcie::ecam::PciClassCode},
     driver::Driver,
     prelude::SysError,
 };
@@ -12,7 +12,7 @@ pub trait PcieDriver: Driver {
     ///
     /// When both class-code and vendor-device tables are non-empty, match
     /// vendor-device entries first.
-    fn class_code_table(&self) -> &[ClassCode];
+    fn class_code_table(&self) -> &[PciClassCode];
 
     /// Return all supported `(vendor id, device id)` pairs for this PCIe
     /// driver.
