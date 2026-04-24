@@ -1,12 +1,12 @@
-///! This module implements the PCIe bus.
-///
-/// # Naming
-/// * Structures dedicated to the PCIe bus use **PCIe** as its prefix;
-/// * Structures derived from and backward-compatible with legacy PCI use
-///   **PCI** as its prefix;
+//! This module implements the PCIe bus.
+//!
+//! # Naming
+//! * Structures dedicated to the PCIe bus use **PCIe** as its prefix;
+//! * Structures derived from and backward-compatible with legacy PCI use
+//!   **PCI** as its prefix;
 use crate::{
     device::{
-        bus::{BusType, pcie::ecam::ClassCode},
+        bus::{BusType, pcie::ecam::PciClassCode},
         kobject::{KObjIdent, KObject},
     },
     prelude::*,
@@ -16,19 +16,21 @@ mod bus;
 mod device;
 mod driver;
 mod fwnode;
+mod domain;
 pub mod remap;
 
 pub use bus::PcieBusType;
 pub use device::*;
 pub use driver::PcieDriver;
 pub use fwnode::*;
+pub use domain::*;
 
 mod addr;
 pub mod ecam;
 pub use addr::*;
 
 /// Class code for PCI-to-PCI bridges, which introduces a new PCIe bus.
-pub const PCI2PCI_BRIDGE_CLASSCODE: ClassCode = ClassCode {
+pub const PCI2PCI_BRIDGE_CLASSCODE: PciClassCode = PciClassCode {
     base: 0x06,
     sub: 0x04,
     prog_if: 0x00,
@@ -36,7 +38,7 @@ pub const PCI2PCI_BRIDGE_CLASSCODE: ClassCode = ClassCode {
 
 /// Class code for host bridge devices, which are the root of the PCIe
 /// hierarchy.
-pub const HOST_BRIDGE_CLASSCODE: ClassCode = ClassCode {
+pub const HOST_BRIDGE_CLASSCODE: PciClassCode = PciClassCode {
     base: 0x06,
     sub: 0x04,
     prog_if: 0x00,
@@ -44,7 +46,7 @@ pub const HOST_BRIDGE_CLASSCODE: ClassCode = ClassCode {
 
 /// Global PCIe bus instance under /sys/bus/pcie.
 static PCIE_BUS_TYPE: Lazy<PcieBusType> =
-    Lazy::new(|| PcieBusType::new(KObjIdent::try_from("platform").unwrap()));
+    Lazy::new(|| PcieBusType::new(KObjIdent::try_from("pcie").unwrap()));
 
 /// Register a PCIe device on the PCIe bus.
 ///

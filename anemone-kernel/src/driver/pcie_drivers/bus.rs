@@ -3,11 +3,9 @@ use core::ops::RangeInclusive;
 use crate::{
     device::{
         bus::pcie::{
-            self, HOST_BRIDGE_CLASSCODE, PCI2PCI_BRIDGE_CLASSCODE, PciMemAreaSnapshot, PcieDevice,
-            PcieDeviceType, PcieDriver, PcieIntrKey,
-            ecam::{
-                BusNum, ClassCode, DevNum, FuncNum, PciCommands, PciHeaderLayout, Type1FuncConf,
-            },
+            self, HOST_BRIDGE_CLASSCODE, PCI2PCI_BRIDGE_CLASSCODE, PciFuncAddr, PcieDevice,
+            PcieDeviceType, PcieDriver, PcieIntrKey, PcieMemAreaSnapshot,
+            ecam::{BusNum, DevNum, PciClassCode, PciCommands, PciHeaderLayout, Type1FuncConf},
         },
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
     },
@@ -71,7 +69,7 @@ impl DriverOps for BridgeDriver {
 }
 
 impl PcieDriver for BridgeDriver {
-    fn class_code_table(&self) -> &'static [ClassCode] {
+    fn class_code_table(&self) -> &'static [PciClassCode] {
         &[PCI2PCI_BRIDGE_CLASSCODE, HOST_BRIDGE_CLASSCODE] // PCI-to-PCI bridge and host bridge
     }
 
@@ -86,7 +84,7 @@ impl PcieDriver for BridgeDriver {
             PcieDeviceType::HostBridge { id } => {
                 enum_pcie_bus(&pdev, id);
             },
-            PcieDeviceType::Bus { conf, id, bus, dev } => {
+            PcieDeviceType::Bus { conf, id, .. } => {
                 enum_pcie_bus(&pdev, id);
             },
             _ => {
@@ -119,91 +117,74 @@ fn enum_pcie_bus(parent_dev: &Arc<PcieDevice>, bus_id: &BusNum) {
     let bus = ecam.get_bus(*bus_id);
     kinfoln!("enumerating pcie devices on {:?}", bus.num());
     for dev in RangeInclusive::<u8>::new(DevNum::MIN.into(), DevNum::MAX.into()) {
-        let dregs = bus.get_device(DevNum::try_from(dev).unwrap());
-        let fregs = dregs.get_function(FuncNum::MIN);
-        if fregs.exists() {
-            /*kinfoln!(
-                "Bus #{:?}, Device #{}, Function #{}, Vendor #{:#x}, Type #{:#x}: Status {:?}, Command {:?}, Revision Id {:#x}, Class Code {:?}, Cache Line Size {:#x}, Latency Timer {:#x}, Header Type {:?}, BIST {:#x}",
-                bus.num(),
-                dev,
-                0,
-                fregs.vendor_id(),
-                fregs.device_id(),
-                fregs.status(),
-                fregs.command(),
-                fregs.revision_id(),
-                fregs.class_code(),
-                fregs.cache_line_sz(),
-                fregs.latency_timer(),
-                fregs.header_type(),
-                fregs.bist()
-            );*/
-            let header = fregs.header_type();
-            match header.layout() {
-                Err(e) => {
-                    kwarningln!(
-                        "unsupported header layout of device #{} at pcie root bus: {:?}",
-                        dev,
-                        e
-                    );
-                },
-                Ok(PciHeaderLayout::Type0) => {
-                    if header.is_multifunc() {
+        let dev_conf = bus.get_device(DevNum::try_from(dev).unwrap());
+        dev_conf
+            .iter_functions(|func_num, fconf| -> Result<(), SysError> {
+                let func_num_u8: u8 = func_num.into();
+                let bus_num = bus.num();
+                let bus_num_u8: u8 = bus_num.into();
+                let func_addr = PciFuncAddr {
+                    bus: bus_num,
+                    dev: DevNum::try_from(dev).unwrap(),
+                    func: func_num,
+                };
+                let header = fconf.header_type();
+                match header.layout() {
+                    Err(e) => {
                         kwarningln!(
-                            "multifunction device #{} at pcie root bus is not supported, skipping",
-                            dev
+                            "unsupported header layout of device {:?} : {:?}",
+                            func_addr,
+                            e
                         );
-                        continue;
-                    }
-                    let bus_num = bus.num();
-                    let bus_num_u8: u8 = bus_num.into();
-                    let domain = parent_dev.domain();
-                    let intr_pin = fregs.intr_pin();
-                    let intr_info = domain
-                        .find_intr_info(PcieIntrKey {
-                            bus: bus_num,
-                            dev: DevNum::try_from(dev).unwrap(),
-                            func: FuncNum::MIN,
-                            intr_pin,
-                        })
-                        .cloned();
-                    let device = PcieDevice::new_endpoint(
-                        KObjIdent::try_from_fmt(format_args!(
-                            "{:04x}:{:02x}:{:02x}",
-                            domain.id(),
-                            bus_num_u8,
-                            dev,
-                        ))
-                        .unwrap(),
-                        domain.clone(),
-                        bus_num,
-                        DevNum::try_from(dev).unwrap(),
-                        intr_info,
-                    );
-                    device.set_parent(Some(parent_dev.clone()));
-                    let device = Arc::new(device);
-                    parent_dev.register_and_preinit_device(device);
-                },
-                Ok(PciHeaderLayout::Type1) => {
-                    if let Err(e) = init_pcie_bus(
-                        parent_dev,
-                        bus.num(),
-                        DevNum::try_from(dev).unwrap(),
-                        fregs.as_type1().unwrap(),
-                    ) {
-                        kwarningln!(
-                            "failed to init pcie bus at bus #{:?}, device #{}",
-                            bus.num(),
-                            dev
+                        Ok(())
+                    },
+                    Ok(PciHeaderLayout::Type0) => {
+                        let domain = parent_dev.domain();
+                        let intr_pin = fconf.intr_pin();
+                        let intr_info = domain
+                            .resources()
+                            .find_intr_info(PcieIntrKey {
+                                func_addr,
+                                intr_pin,
+                            })
+                            .cloned();
+                        let device = PcieDevice::new_endpoint(
+                            KObjIdent::try_from_fmt(format_args!(
+                                "{:04x}:{:02x}:{:02x}.{}",
+                                domain.id(),
+                                bus_num_u8,
+                                dev,
+                                func_num_u8
+                            ))
+                            .unwrap(),
+                            domain.clone(),
+                            func_addr,
+                            intr_info,
                         );
-                    }
-                },
-            }
-        }
+                        device.set_parent(Some(parent_dev.clone()));
+                        let device = Arc::new(device);
+                        parent_dev.register_and_preinit_device(device);
+                        Ok(())
+                    },
+                    Ok(PciHeaderLayout::Type1) => {
+                        if let Err(e) =
+                            init_pcie_bus(parent_dev, func_addr, fconf.as_type1().unwrap())
+                        {
+                            kerrln!(
+                                "PCIe bus driver: failed to init pcie bus at {:?}: {:?}",
+                                func_addr,
+                                e
+                            );
+                        }
+                        Ok(())
+                    },
+                }
+            })
+            .expect("PCIe function iteration should ever return errors");
     }
 }
 
-const MEM_AREA_ALIGN: PciMemAreaSnapshot = PciMemAreaSnapshot {
+const MEM_AREA_ALIGN: PcieMemAreaSnapshot = PcieMemAreaSnapshot {
     io_area: Some(4096),
     mem_area_pref: Some(0x100000),   // 1 MiB
     mem_area_unpref: Some(0x100000), // 1 MiB
@@ -217,49 +198,57 @@ const MEM_AREA_ALIGN: PciMemAreaSnapshot = PciMemAreaSnapshot {
 /// `conf` is the Type-1 configuration accessor used to program bus numbers.
 fn init_pcie_bus(
     parent_dev: &Arc<PcieDevice>,
-    bus_num: BusNum,
-    dev_num: DevNum,
+    addr: PciFuncAddr,
     conf: Type1FuncConf,
 ) -> Result<(), SysError> {
     let domain = parent_dev.domain();
-    let bus_num_u8: u8 = bus_num.into();
-    let new_bus = domain.alloc_bus_num()?;
+    let PciFuncAddr { bus, dev, func } = addr;
+
+    let bus_num_u8: u8 = bus.into();
+
+    let new_bus = domain.resources().alloc_bus_num()?;
     let new_bus_u8: u8 = new_bus.into();
-    let dev_num_u8: u8 = dev_num.into();
+
+    let dev_num_u8: u8 = dev.into();
+
+    let func_num_u8: u8 = func.into();
+
+    let resources = domain.resources();
+
     unsafe {
-        conf.set_primary_bus_num(bus_num);
+        conf.set_primary_bus_num(bus);
         conf.set_secondary_bus_num(new_bus);
         conf.set_subordinate_bus_num(BusNum::MAX);
     }
-    let snapshot_before = domain.snapshot(MEM_AREA_ALIGN);
+
+    let snapshot_before_init = resources.snapshot_mems(MEM_AREA_ALIGN);
+
     conf.general().write_command(PciCommands::empty());
+
     let device = PcieDevice::new_bus(
         KObjIdent::try_from_fmt(format_args!(
-            "{:04x}:{:02x}:{:02x}",
+            "{:04x}:{:02x}:{:02x}.{}",
             parent_dev.domain().id(),
             bus_num_u8,
-            dev_num_u8
+            dev_num_u8,
+            func_num_u8
         ))
         .unwrap(),
         parent_dev.domain().clone(),
-        bus_num,
-        dev_num,
+        addr,
         new_bus,
     );
+
     let device = Arc::new(device);
     device.set_parent(Some(parent_dev.clone()));
     parent_dev.register_and_preinit_device(device);
+
     unsafe {
-        conf.set_subordinate_bus_num(domain.current_max_bus_num());
-        if let Some(snapshot) = domain.snapshot(MEM_AREA_ALIGN)
-            && let Some(before) = snapshot_before
+        conf.set_subordinate_bus_num(resources.current_bus_num());
+
+        if let Some(snapshot) = resources.snapshot_mems(MEM_AREA_ALIGN)
+            && let Some(before) = snapshot_before_init
         {
-            /*kinfoln!(
-                "snapshot of memory areas after initializing bus #{:?} at device #{:?}: {:?}",
-                bus_num,
-                dev_num,
-                snapshot
-            );*/
             if snapshot.io_area > before.io_area {
                 conf.set_io_base(before.io_area.unwrap_or(0) as u32);
                 conf.set_io_limit(snapshot.io_area.and_then(|x| Some(x - 1)).unwrap_or(0) as u32);

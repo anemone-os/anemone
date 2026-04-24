@@ -185,7 +185,7 @@ mod tests {
         let mut allocator = IncreasingRangeAllocator::new(range(3, 21));
         assert_eq!(allocator.allocate(1), Some(range(3, 1)));
 
-        assert_eq!(allocator.align_current_to(8), Some(24));
+        assert_eq!(allocator.align_current_to(8), Some(8));
         assert_eq!(allocator.allocate(8), Some(range(8, 8)));
     }
 

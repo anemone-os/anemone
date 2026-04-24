@@ -4,7 +4,8 @@ use crate::{
     device::{
         bus::{
             pcie::{
-                self, AvailPciMemArea, OfPciAddr, PciAddrFlags, PcieDevice, PcieDomain, PcieIntrInfo, PcieIntrKey, ecam::{BusNum, EcamConf}
+                self, AvailPciMemArea, OfPciAddr, PciAddrFlags, PcieDevice, PcieDomain, 
+                PcieIntrInfo, PcieIntrKey, ecam::{BusNum, EcamConf}
             },
             platform::{self, PlatformDriver},
         },
@@ -72,8 +73,8 @@ impl DriverOps for PcieEcamDriver {
                 .unwrap();
 
         let remap = unsafe { ioremap(base, len) }?;
-        let regs = unsafe { EcamConf::new(&remap, root_bus_num, max_bus_num)? };
-        let mut domain = PcieDomain::new(domain_id, regs);
+        let ecam = unsafe { EcamConf::new(&remap, root_bus_num, max_bus_num)? };
+        let mut domain = PcieDomain::new(ecam, root_bus_num, max_bus_num);
 
         // ranges
 
@@ -127,7 +128,7 @@ impl DriverOps for PcieEcamDriver {
                     mem_addr,
                     size
                 );*/
-                domain.add_mem_range(AvailPciMemArea::new(
+                domain.resources_mut().add_mem_range(AvailPciMemArea::new(
                     pcie_addr,
                     PhysAddr::new(mem_addr),
                     size,
@@ -169,16 +170,40 @@ impl DriverOps for PcieEcamDriver {
         })?;
 
         let intr_mask = of_node.prop_read_raw("interrupt-map-mask");
+        
+        if let Some(intr_mask) = intr_mask {
+            if intr_mask.len() != (3 + intr_cells) * 4{
+                kerrln!(
+                    "error probing PCIe ECAM device {}: invalid 'interrupt-map-mask' length {}.",
+                    pdev.name(),
+                    intr_mask.len()
+                );
+                return Err(SysError::InvalidArgument);
+            }
+            let addr = OfPciAddr::from_be_bytes(intr_mask[0..12].try_into().unwrap());
+            let specifier_raw = &intr_mask[12..];
+            let mut specifier = 0;
+            for i in 0..intr_cells {
+                specifier <<= 32;
+                specifier |= u32::from_be_bytes(specifier_raw[(i as usize * 4)..][..4].try_into().unwrap()) as u64;
+            }
+            domain.resources_mut().set_intr_key_mask(PcieIntrKey { func_addr: addr.func_addr(), intr_pin: specifier as u8 });
+        }
+
         let intr_map_item_width_half = ((3 /* addr_cells, child unit address */
          + intr_cells /* child interrupt specifier */
          + 1/* intr_parent */)
             * 4) as usize;
         let mut index = 0;
         while index + intr_map_item_width_half <= intr_map.len() {
+
             let lower_half = &intr_map[index..][..intr_map_item_width_half];
+
             let child_addr = &lower_half[0..12];
             let child_addr = OfPciAddr::from_be_bytes(child_addr.try_into().unwrap());
+            
             let child_intr_spec_raw = &lower_half[12..][..intr_cells * 4];
+
             let mut child_intr_spec = 0;
             for i in 0..intr_cells {
                 child_intr_spec <<= 32;
@@ -188,6 +213,7 @@ impl DriverOps for PcieEcamDriver {
                         .unwrap(),
                 ) as u64;
             }
+
             let intr_parent_handle =
                 u32::from_be_bytes(lower_half[12 + intr_cells * 4..].try_into().unwrap());
             let parent_node = of_with_node_by_phandle(intr_parent_handle, |node| node.handle())
@@ -202,6 +228,7 @@ impl DriverOps for PcieEcamDriver {
                     SysError::FwNodeLookupFailed
                 }
             )?;
+
             let (addr_cells_par, intr_cells_par) = 
             (
                 parent_node.node().address_cells_or_none().unwrap_or(0) as usize
@@ -228,7 +255,9 @@ impl DriverOps for PcieEcamDriver {
                 );
                 return Err(SysError::InvalidArgument);
             }
+
             let parent_addr = &upper_half[0..addr_cells_par * 4];
+
             let parent_intr_spec = &upper_half[addr_cells_par * 4..][..intr_cells_par * 4];
             /*kinfoln!(
                 "PCIe ECAM interrupt map entry: child_addr={:?}, child_intr_spec={:#x}, parent_node={}, parent_addr={:?}, parent_intr_spec={:#x}",
@@ -238,10 +267,7 @@ impl DriverOps for PcieEcamDriver {
                 parent_addr,
                 parent_intr_spec.iter().fold(0u64, |acc, x| (acc << 8) | (*x as u64))
             );*/
-            domain.add_intr_map(PcieIntrKey{
-                bus: child_addr.bus(),
-                dev: child_addr.dev(),
-                func: child_addr.func(),
+            domain.resources_mut().add_intr_map(PcieIntrKey{func_addr:child_addr.func_addr(),
                 intr_pin: child_intr_spec as u8
             }, PcieIntrInfo{
                 parent: parent_node,

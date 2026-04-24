@@ -1,3 +1,5 @@
+use core::any::Any;
+
 use crate::device::{bus::pcie::PcieIntrInfo, discovery::fwnode::FwNode};
 
 pub struct PcieFwNode {
@@ -12,7 +14,10 @@ impl PcieFwNode {
 
 impl FwNode for PcieFwNode {
     fn equals(&self, other: &dyn FwNode) -> bool {
-        false
+        (other as &dyn Any)
+            .downcast_ref::<PcieFwNode>()
+            .map(|o| self.intr == o.intr)
+            .unwrap_or(false)
     }
 
     fn prop_read_u32(&self, prop_name: &str) -> Option<u32> {

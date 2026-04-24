@@ -23,24 +23,25 @@ args = [
     "-serial",
     "mon:stdio",
 
-    # "-no-reboot",
-    # "-drive",
-    # "file=build/rootfs/minimal/rootfs.img,format=raw,if=none,id=x0",
-    # "-device",
-    # "virtio-blk-pci-transitional,drive=x0",
-    # 
-    # "-device",
-    # "pcie-root-port,id=pcie.1,bus=pcie.0",
-    # 
-    # "-drive",
-    # "file=sdcard-la.img,format=raw,if=none,id=x1",
-    # "-device",
-    # "virtio-blk-pci-transitional,drive=x1,bus=pcie.1",
+    "-no-reboot",
+    "-drive",
+    "file=sdcard-la.img,format=raw,if=none,id=x0",
+    "-device",
+    "virtio-blk-pci-transitional,drive=x0",
+    
+    "-device",
+    "pcie-root-port,id=pcie.1,bus=pcie.0",
+    
+    "-drive",
+    "file=build/rootfs/minimal/rootfs.img,format=raw,if=none,id=x1",
+    "-device",
+    "virtio-blk-pci-transitional,drive=x1,bus=pcie.1",
+    
 ]
 
 [rootfs]
 fstype = "ext4"
-source = { type = "block", path = "vda" }
+source = { type = "block", path = "vdb" }
 
 
 [dtb]

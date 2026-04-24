@@ -1,4 +1,4 @@
-use core::{fmt::Debug, ptr::NonNull};
+use core::{fmt::Debug, ops::BitAnd, ptr::NonNull};
 
 use bitflags::bitflags;
 use safe_mmio::{
@@ -32,6 +32,14 @@ macro_rules! impl_num {
         impl Into<$type> for $name {
             fn into(self) -> $type {
                 self.0
+            }
+        }
+
+        impl BitAnd for $name {
+            type Output = Self;
+
+            fn bitand(self, rhs: Self) -> Self::Output {
+                Self(self.0 & rhs.0)
             }
         }
     };
@@ -128,7 +136,7 @@ impl Debug for PciHeaderType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ClassCode {
+pub struct PciClassCode {
     /// `base` is the base class byte.
     pub base: u8,
     /// `sub` is the subclass byte.
@@ -137,12 +145,12 @@ pub struct ClassCode {
     pub prog_if: u8,
 }
 
-impl From<u32> for ClassCode {
+impl From<u32> for PciClassCode {
     /// Convert packed class-code bits into the typed structure.
     ///
     /// `value` is a 24-bit packed class code in the form base:sub:prog_if.
     fn from(value: u32) -> Self {
-        ClassCode {
+        PciClassCode {
             base: (value >> 16) as u8,
             sub: (value >> 8) as u8,
             prog_if: value as u8,
@@ -151,7 +159,7 @@ impl From<u32> for ClassCode {
 }
 
 #[derive(Debug)]
-pub struct GeneralFuncConf {
+pub struct FuncConf {
     /// `base_addr` is the virtual ECAM base of this function's configuration
     /// space.
     base_addr: u64,
@@ -198,12 +206,12 @@ macro_rules! impl_writer {
     };
 }
 
-impl GeneralFuncConf {
+impl FuncConf {
     /// Create a general function config accessor from a mapped base pointer.
     ///
     /// `base_addr` points to the beginning of a function configuration space.
     pub unsafe fn new(base_addr: *const u8) -> Self {
-        GeneralFuncConf {
+        FuncConf {
             base_addr: base_addr as u64,
         }
     }
@@ -238,9 +246,9 @@ impl GeneralFuncConf {
     define_field!(u8, revision_id, 0x08);
 
     /// Read and decode the class-code triplet.
-    pub fn class_code(&self) -> ClassCode {
+    pub fn class_code(&self) -> PciClassCode {
         let cls_code = ((self.read_u16(0x0a) as u32) << 8) + (self.read_u8(0x09) as u32);
-        ClassCode::from(cls_code)
+        PciClassCode::from(cls_code)
     }
 
     define_field!(u8, cache_line_sz, 0x0c);
@@ -288,7 +296,7 @@ impl GeneralFuncConf {
         }
     }
 
-    pub fn write_bar(&self, index: usize, value: BAR) -> Result<(), SysError> {
+    pub fn write_bar(&self, index: usize, value: PciBar) -> Result<(), SysError> {
         match self.header_type().layout() {
             Ok(PciHeaderLayout::Type0) => self.as_type0().unwrap().write_bar(index, value),
             Ok(PciHeaderLayout::Type1) => self.as_type1().unwrap().write_bar(index, value),
@@ -296,7 +304,7 @@ impl GeneralFuncConf {
         }
     }
 
-    pub fn read_bar(&self, index: usize) -> Result<BAR, SysError> {
+    pub fn read_bar(&self, index: usize) -> Result<PciBar, SysError> {
         match self.header_type().layout() {
             Ok(PciHeaderLayout::Type0) => self.as_type0().unwrap().bar(index),
             Ok(PciHeaderLayout::Type1) => self.as_type1().unwrap().bar(index),
@@ -323,13 +331,13 @@ impl GeneralFuncConf {
 
 #[derive(Debug, Clone)]
 pub struct PciCapability<'a> {
-    conf: &'a GeneralFuncConf,
+    conf: &'a FuncConf,
     offset: u8,
     base_addr: u64,
 }
 
 impl<'a> PciCapability<'a> {
-    pub fn new(conf: &'a GeneralFuncConf, offset: u8) -> Self {
+    pub fn new(conf: &'a FuncConf, offset: u8) -> Self {
         PciCapability::<'a> {
             conf,
             offset,
@@ -373,13 +381,13 @@ impl<'a> Iterator for PciCapabilitiesIter<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BAR {
+pub enum PciBar {
     /// Memory BAR descriptor.
     Memory {
         /// `base_addr` is the decoded memory base address.
         base_addr: u64,
         /// `mtype` is the BAR memory width/type.
-        mtype: MemBARType,
+        mtype: PciMemBarType,
         /// `prefetchable` indicates whether prefetch is allowed.
         prefetchable: bool,
     },
@@ -390,16 +398,16 @@ pub enum BAR {
     },
 }
 
-impl BAR {
+impl PciBar {
     pub fn base_addr(&self) -> u64 {
         match self {
-            BAR::Memory { base_addr, .. } | BAR::IO { base_addr } => *base_addr,
+            PciBar::Memory { base_addr, .. } | PciBar::IO { base_addr } => *base_addr,
         }
     }
 
     pub fn set_base_addr(&mut self, new_addr: u64) {
         match self {
-            BAR::Memory { base_addr, .. } | BAR::IO { base_addr } => *base_addr = new_addr,
+            PciBar::Memory { base_addr, .. } | PciBar::IO { base_addr } => *base_addr = new_addr,
         }
     }
 
@@ -413,16 +421,16 @@ impl BAR {
         if value & 1 == 0 {
             // memory
             let mtype = match value & 0b110 {
-                0b000 => MemBARType::W32,
-                0b100 => MemBARType::W64,
+                0b000 => PciMemBarType::W32,
+                0b100 => PciMemBarType::W64,
                 _ => return Err(SysError::NotSupported),
             };
-            Ok(BAR::Memory {
+            Ok(PciBar::Memory {
                 mtype,
                 prefetchable: value & 0b1000 != 0,
                 base_addr: match mtype {
-                    MemBARType::W32 => (value & !0b1111) as u64,
-                    MemBARType::W64 => {
+                    PciMemBarType::W32 => (value & !0b1111) as u64,
+                    PciMemBarType::W64 => {
                         let upper = next_reader()?;
                         ((upper as u64) << 32) | ((value & !0b1111) as u64)
                     },
@@ -430,7 +438,7 @@ impl BAR {
             })
         } else {
             // I/O
-            Ok(BAR::IO {
+            Ok(PciBar::IO {
                 base_addr: (value as u64) & !0b11,
             })
         }
@@ -438,28 +446,28 @@ impl BAR {
 
     fn write_to_u32<F: FnOnce(u32) -> Result<(), SysError>>(self, next_writer: F) -> u32 {
         match self {
-            BAR::Memory {
+            PciBar::Memory {
                 mtype,
                 prefetchable,
                 base_addr,
             } => {
                 let type_bits = match mtype {
-                    MemBARType::W32 => 0b000,
-                    MemBARType::W64 => 0b100,
+                    PciMemBarType::W32 => 0b000,
+                    PciMemBarType::W64 => 0b100,
                 };
                 let prefetch_bit = if prefetchable { 0b1000 } else { 0 };
-                if let MemBARType::W64 = mtype {
+                if let PciMemBarType::W64 = mtype {
                     next_writer((base_addr >> 32) as u32).unwrap();
                 }
                 base_addr as u32 | type_bits | prefetch_bit
             },
-            BAR::IO { base_addr } => ((base_addr as u32) & !0b11) | 1,
+            PciBar::IO { base_addr } => ((base_addr as u32) & !0b11) | 1,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MemBARType {
+pub enum PciMemBarType {
     /// 32-bit memory BAR.
     W32,
     /// 64-bit memory BAR.
@@ -474,8 +482,8 @@ pub struct Type0FuncConf {
 
 impl Type0FuncConf {
     /// Return the generic accessor view for this function.
-    pub fn general(&self) -> GeneralFuncConf {
-        GeneralFuncConf {
+    pub fn general(&self) -> FuncConf {
+        FuncConf {
             base_addr: self.base_addr,
         }
     }
@@ -487,11 +495,11 @@ impl Type0FuncConf {
     impl_writer!(u16);
     impl_writer!(u32);
 
-    pub fn bar(&self, index: usize) -> Result<BAR, SysError> {
+    pub fn bar(&self, index: usize) -> Result<PciBar, SysError> {
         if index >= 6 {
             return Err(SysError::InvalidArgument);
         }
-        BAR::try_from_u32(self.read_u32(0x10 + (index as u64) * 4), || {
+        PciBar::try_from_u32(self.read_u32(0x10 + (index as u64) * 4), || {
             if index >= 5 {
                 kwarningln!(
                     "Error reading BAR{}: 64-bit BAR's upper half is out of range.",
@@ -505,7 +513,7 @@ impl Type0FuncConf {
         })
     }
 
-    pub fn write_bar(&self, index: usize, value: BAR) -> Result<(), SysError> {
+    pub fn write_bar(&self, index: usize, value: PciBar) -> Result<(), SysError> {
         if index >= 6 {
             return Err(SysError::InvalidArgument);
         }
@@ -538,8 +546,8 @@ pub struct Type1FuncConf {
 
 impl Type1FuncConf {
     /// Return the generic accessor view for this function.
-    pub fn general(&self) -> GeneralFuncConf {
-        GeneralFuncConf {
+    pub fn general(&self) -> FuncConf {
+        FuncConf {
             base_addr: self.base_addr,
         }
     }
@@ -550,11 +558,11 @@ impl Type1FuncConf {
     impl_writer!(u16);
     impl_writer!(u32);
 
-    pub fn bar(&self, index: usize) -> Result<BAR, SysError> {
+    pub fn bar(&self, index: usize) -> Result<PciBar, SysError> {
         if index >= 2 {
             return Err(SysError::InvalidArgument);
         }
-        BAR::try_from_u32(self.read_u32(0x10 + (index as u64) * 4), || {
+        PciBar::try_from_u32(self.read_u32(0x10 + (index as u64) * 4), || {
             if index >= 1 {
                 kwarningln!(
                     "Error reading BAR{}: 64-bit BAR's upper half is out of range.",
@@ -566,7 +574,7 @@ impl Type1FuncConf {
             }
         })
     }
-    pub fn write_bar(&self, index: usize, value: BAR) -> Result<(), SysError> {
+    pub fn write_bar(&self, index: usize, value: PciBar) -> Result<(), SysError> {
         if index >= 2 {
             return Err(SysError::InvalidArgument);
         }
@@ -745,17 +753,17 @@ impl PcieDeviceConf {
     /// Return a generic accessor for a specific function number.
     ///
     /// `func` Function number within this device.
-    pub fn get_function(&self, func: FuncNum) -> GeneralFuncConf {
+    pub fn get_function(&self, func: FuncNum) -> FuncConf {
         let func: u8 = func.into();
         let base_addr = self.base_addr + ((func as u64) << 12);
-        unsafe { GeneralFuncConf::new(base_addr as *const u8) }
+        unsafe { FuncConf::new(base_addr as *const u8) }
     }
 
     pub fn exists(&self) -> bool {
         self.get_function(FuncNum::MIN).exists()
     }
 
-    pub fn functions<F: Fn(FuncNum, GeneralFuncConf) -> Result<(), E>, E>(
+    pub fn iter_functions<F: Fn(FuncNum, FuncConf) -> Result<(), E>, E>(
         &self,
         f: F,
     ) -> Result<(), E> {
@@ -767,7 +775,10 @@ impl PcieDeviceConf {
                 f(FuncNum(index), func)?;
             }
         } else {
-            f(FuncNum::MIN, self.get_function(FuncNum::MIN))?;
+            let f0 = self.get_function(FuncNum::MIN);
+            if f0.exists() {
+                f(FuncNum::MIN, f0)?;
+            }
         }
         Ok(())
     }

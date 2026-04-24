@@ -1,8 +1,43 @@
-use core::{fmt::Debug, ops::Add};
+use core::{
+    fmt::Debug,
+    ops::{Add, BitAnd},
+};
 
 use bitflags::bitflags;
 
 use crate::device::bus::pcie::ecam::{BusNum, DevNum, FuncNum};
+
+/// Represent a PCI function address as a tuple of bus, device, and function
+/// numbers.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PciFuncAddr {
+    pub bus: BusNum,
+    pub dev: DevNum,
+    pub func: FuncNum,
+}
+
+impl Debug for PciFuncAddr {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("PciFuncAddr")
+            .field(&format_args!(
+                "{:?}, {:?}, {:?}",
+                self.bus, self.dev, self.func
+            ))
+            .finish()
+    }
+}
+
+impl BitAnd for PciFuncAddr {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self {
+            bus: self.bus & rhs.bus,
+            dev: self.dev & rhs.dev,
+            func: self.func & rhs.func,
+        }
+    }
+}
 
 /// Open Firmware Standard 96-bit PCI Address
 /// ```
@@ -113,6 +148,14 @@ impl OfPciAddr {
         PciSpaceType::from(((self.0[2] >> 24) & 0b11) as u8)
     }
 
+    pub fn func_addr(&self) -> PciFuncAddr {
+        PciFuncAddr {
+            bus: self.bus(),
+            dev: self.dev(),
+            func: self.func(),
+        }
+    }
+
     /// Return PCI bus number.
     pub fn bus(&self) -> BusNum {
         BusNum::try_from((self.0[2] >> 16) as u8).unwrap()
@@ -157,9 +200,7 @@ impl OfPciAddr {
     pub fn new(
         space_type: PciSpaceType,
         flags: PciAddrFlags,
-        bus: BusNum,
-        dev: DevNum,
-        func: FuncNum,
+        func: PciFuncAddr,
         register_offset: u8,
         addr: u64,
     ) -> Self {
@@ -169,7 +210,7 @@ impl OfPciAddr {
         res[1] = (addr >> 32) as u32;
         res[2] = ((space_type_u8 as u32) << 24)
             | ((flags.bits() as u32) << 29)
-            | Self::combined_num(bus, dev, func, register_offset);
+            | Self::combined_num(func.bus, func.dev, func.func, register_offset);
         Self(res)
     }
 

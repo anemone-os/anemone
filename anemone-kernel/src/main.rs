@@ -85,7 +85,6 @@ fn mount_rootfs() {
         },
         other => panic!("unsupported rootfs source kind: {}", other),
     }
-
     ls_dir(Path::new("/"));
 }
 
@@ -104,7 +103,7 @@ fn ls_dir(path: &Path) {
 
         let name = dirent.name;
         let path = path.join(name);
-        kdebugln!("{} ({:?})", path.display(), dirent.ty);
+        knoticeln!("{} ({:?})", path.display(), dirent.ty);
         if dirent.ty == InodeType::Dir {
             ls_dir(&path);
         }
