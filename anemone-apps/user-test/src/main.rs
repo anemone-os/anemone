@@ -8,7 +8,7 @@ use anemone_rs::{
     env::{current_dir, envs},
     os::linux::{
         fs::chdir,
-        process::{CloneFlags, WStatusRaw, WaitOptions, clone, execve, wait4},
+        process::{CloneFlags, WStatus, WStatusRaw, WaitOptions, clone, execve, wait4},
     },
     prelude::*,
 };
@@ -59,6 +59,8 @@ pub fn main() -> Result<(), Errno> {
         println!("user-test: env {}={}", key, valud);
     }
 
+    let mut failed: Vec<Box<str>> = Vec::new();
+
     for p in BASIC_TESTS {
         let mut tidc = 0;
         let tid = clone(
@@ -80,11 +82,12 @@ pub fn main() -> Result<(), Errno> {
             let mut wstatus = WStatusRaw::EMPTY;
             match wait4(tid as i64, Some(&mut wstatus), WaitOptions::empty()) {
                 Ok(Some(_)) => {
-                    println!(
-                        "user-test: test point '{}' exited with code {:?}",
-                        p,
-                        wstatus.read()
-                    )
+                    let code = wstatus.read();
+                    println!("user-test: test point '{}' exited with code {:?}", p, code);
+                    if let WStatus::Exited(0) = code {
+                    } else {
+                        failed.push(Box::from(*p));
+                    }
                 },
                 Ok(None) => {
                     panic!("user-test: wait4 returned None but no error, this should not happen");
@@ -97,6 +100,13 @@ pub fn main() -> Result<(), Errno> {
     }
 
     eprintln!("user-test: all test points finished!");
+    if failed.len() > 0 {
+        eprint!("{} test pointes failed: ", failed.len());
+        for f in failed {
+            eprint!("{},", f);
+        }
+        eprintln!("");
+    }
 
     // clone(CloneFlags::empty(), None, None, null_mut(), None)?;
     // for i in 0..20 {

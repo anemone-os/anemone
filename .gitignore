@@ -12,3 +12,5 @@ rootfs*.img
 sdcard*.img
 *.bak
 .venv
+rootfs-rv*
+rootfs-la*

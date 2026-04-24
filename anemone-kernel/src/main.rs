@@ -103,7 +103,7 @@ fn ls_dir(path: &Path) {
 
         let name = dirent.name;
         let path = path.join(name);
-        knoticeln!("{} ({:?})", path.display(), dirent.ty);
+        kdebugln!("{} ({:?})", path.display(), dirent.ty);
         if dirent.ty == InodeType::Dir {
             ls_dir(&path);
         }
