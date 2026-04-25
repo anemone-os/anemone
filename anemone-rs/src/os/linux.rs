@@ -162,7 +162,7 @@ pub mod process {
         pub struct CloneFlags: u32 {
             /// Signal sent to parent when child process changes state (termination/stop)
             /// Prevents zombie processes; default action is ignore
-            const SIGCHLD = clone::SIGCHLD as u32;
+            const SIGCHLD = clone::CLONE_SIGCHLD as u32;
             /// Share the same memory space between parent and child processes
             const CLONE_VM = clone::CLONE_VM as u32;
             /// Share filesystem info (root, cwd, umask) with the child

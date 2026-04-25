@@ -88,7 +88,7 @@ fn mount_rootfs() {
         other => panic!("unsupported rootfs source kind: {}", other),
     }
 
-    ls_dir(Path::new("/"));
+    // ls_dir(Path::new("/"));
 }
 
 // recursively ls
@@ -183,7 +183,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
 
     #[cfg(feature = "kunit")]
     {
-        // crate::debug::kunit::kunit_runner();
+        crate::debug::kunit::kunit_runner();
         unsafe {
             KUNIT_SYNC_COUNTER.sync_with_counter();
         }

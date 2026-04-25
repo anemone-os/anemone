@@ -10,10 +10,7 @@ use serde::Serialize;
 use crate::{
     config::{app::App as AppManifest, rootfs::Rootfs},
     log_progress,
-    tasks::{
-        app::build::{build_app, BuildCtx, BuiltArtifactInfo},
-        utils::cmd_echo,
-    },
+    tasks::app::build::{build_app, BuildCtx, BuiltArtifactInfo},
 };
 
 #[derive(Args)]
@@ -21,6 +18,10 @@ pub struct MkfsArgs {
     #[arg(short, long)]
     #[arg(help = "Path to the rootfs manifest file")]
     config: String,
+
+    #[arg(long)]
+    #[arg(help = "Run the host-side image builder through sudo when libguestfs needs elevated privileges")]
+    sudo: bool,
 }
 
 pub fn run(args: MkfsArgs) -> anyhow::Result<()> {
@@ -45,7 +46,13 @@ pub fn run(args: MkfsArgs) -> anyhow::Result<()> {
     RootfsCtx::new(&rootfs, &staging_dir).mkfs()?;
 
     log_progress!("MKFS", &format!("Generating {}", image_path.display()));
-    rootfs.fs.fstype.mkfs(&staging_dir, &image_path)?;
+    if args.sudo {
+        log_progress!(
+            "MKFS",
+            "Using sudo for host-side image materialization; you may be prompted for your password"
+        );
+    }
+    rootfs.fs.fstype.mkfs(&staging_dir, &image_path, args.sudo)?;
 
     Ok(())
 }
@@ -79,9 +86,12 @@ impl<'a> RootfsCtx<'a> {
             return Ok(());
         };
 
-        fn state_base_dir(staging_dir: &Path, dir: &Path) -> anyhow::Result<()> {
+        fn state_base_dir(staging_dir: &Path, dir: &Path, is_root: bool) -> anyhow::Result<()> {
             for entry in std::fs::read_dir(dir)? {
                 let entry = entry?;
+                if is_root && entry.file_name() == "lost+found" {
+                    continue;
+                }
                 let path = entry.path();
                 let relative_path = path.strip_prefix(dir)?;
                 let dest_path = staging_dir.join(relative_path);
@@ -91,14 +101,14 @@ impl<'a> RootfsCtx<'a> {
                     }
                     std::fs::copy(&path, &dest_path)?;
                 } else if entry.metadata()?.is_dir() {
-                    state_base_dir(&dest_path, &path)?;
+                    state_base_dir(&dest_path, &path, false)?;
                 }
             }
             Ok(())
         }
 
         log_progress!("ROOTFS", &format!("Copying base tree from '{}'", base));
-        state_base_dir(&self.staging_dir, Path::new(base))
+        state_base_dir(&self.staging_dir, Path::new(base), true)
     }
 
     fn stage_apps(&self) -> anyhow::Result<()> {

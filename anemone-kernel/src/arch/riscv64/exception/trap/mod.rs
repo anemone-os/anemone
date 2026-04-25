@@ -7,10 +7,7 @@ pub use ktrap::*;
 mod utrap;
 pub use utrap::*;
 
-use riscv::register::{
-    sscratch,
-    sstatus::{self, SPP},
-};
+use riscv::register::sstatus::{self, SPP};
 
 pub struct RiscV64TrapArch;
 

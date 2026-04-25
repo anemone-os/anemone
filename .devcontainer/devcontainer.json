@@ -1,9 +1,13 @@
+// TODO: kvm in docker.
 {
     "name": "anemone-dev",
     "build": {
         "context": "..",
         "dockerfile": "../Dockerfile",
-        "options": ["--platform=linux/amd64"],
+        "options": [
+            "--platform=linux/amd64",
+            "--network=host"
+        ],
         "target": "fin_dev",
         "args": {
             "QEMU_VERSION": "10.2.1",
@@ -30,6 +34,9 @@
         }
     },
     "mounts": [
-        "source=cargo-cache,target=/usr/local/cargo/registry,type=volume",
+        "source=cargo-cache,target=/usr/local/cargo/registry,type=volume"
+    ],
+    "runArgs": [
+        "--network=host"
     ]
 }

@@ -11,10 +11,10 @@ use crate::{
 mod hal;
 pub use hal::*;
 
-mod idle;
+mod class;
 mod proc;
-
 // schedulers
+mod idle;
 mod rr;
 
 mod api;
