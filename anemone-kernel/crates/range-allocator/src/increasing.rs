@@ -22,12 +22,17 @@ impl<R: Rangable> IncreasingRangeAllocator<R> {
         }
     }
 
+    pub fn free_size(&self) -> usize {
+        self.end - self.cursor
+    }
+
     pub fn allocate(&mut self, length: usize) -> Option<R> {
         self.allocate_aligned(length, 1)
     }
 
     pub fn allocate_aligned(&mut self, length: usize, align: usize) -> Option<R> {
-        if length == 0 || align == 0 {
+        debug_assert!(align != 0, "alignment must be non-zero");
+        if length == 0 {
             return None;
         }
 
@@ -65,10 +70,7 @@ impl<R: Rangable> IncreasingRangeAllocator<R> {
     }
 
     pub fn align_current_to(&mut self, align: usize) -> Option<usize> {
-        if align == 0 {
-            return None;
-        }
-
+        debug_assert!(align != 0, "alignment must be non-zero");
         let aligned = Self::align_up(self.cursor, align)?;
         if aligned > self.end {
             return None;

@@ -54,7 +54,8 @@ impl<R: Rangable> RangeAllocator<R> {
     }
 
     pub fn allocate_aligned(&mut self, length: usize, align: usize) -> Option<R> {
-        if length == 0 || align == 0 {
+        debug_assert!(align != 0, "alignment must be non-zero");
+        if length == 0 {
             return None;
         }
 

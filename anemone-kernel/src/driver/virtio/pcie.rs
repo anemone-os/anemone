@@ -10,7 +10,7 @@ use crate::{
     device::{
         bus::{
             pcie::{
-                self, PciFuncAddr, PcieDeviceType, PcieDriver,
+                self, PciFunctionIdentifier, PcieDeviceType, PcieDriver,
                 ecam::{BusNum, DevNum, EcamConf, FuncNum, PciCommands},
             },
             virtio::VirtIODevice,
@@ -85,10 +85,15 @@ impl DriverOps for PcieTransportDriver {
         let pdev = device
             .as_pcie_device()
             .ok_or(SysError::DriverIncompatible)?;
-        let PcieDeviceType::Endpoint { conf, addr } = pdev.dev_info() else {
+        let PcieDeviceType::Endpoint {
+            conf,
+            addr,
+            sub_bus: None,
+        } = pdev.dev_info()
+        else {
             return Err(SysError::DriverIncompatible);
         };
-        let PciFuncAddr { bus, dev, func } = addr;
+        let PciFunctionIdentifier { bus, dev, func } = addr;
         conf.write_command(
             PciCommands::MEM_SPACE | PciCommands::IO_SPACE | PciCommands::BUS_MASTER,
         );

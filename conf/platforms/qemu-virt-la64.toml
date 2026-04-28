@@ -41,7 +41,7 @@ args = [
 
 [rootfs]
 fstype = "ext4"
-source = { type = "block", path = "vd" }
+source = { type = "block", path = "vdb" }
 
 
 [dtb]

@@ -1,11 +1,18 @@
+//! Generic PCIe host bridge driver for ECAM-compatible controllers.
+//!
+//! Probes platform devices matching `"pci-host-ecam-generic"`. Reads the
+//! `bus-range`, `ranges`, and `interrupt-map` properties from the Open Firmware
+//! node to configure a [`PcieDomain`], then registers the root bus device.
+
 use kernel_macros::{Driver, KObject};
 
 use crate::{
     device::{
         bus::{
             pcie::{
-                self, AvailPciMemArea, OfPciAddr, PciAddrFlags, PcieDevice, PcieDomain, 
-                PcieIntrInfo, PcieIntrKey, ecam::{BusNum, EcamConf}
+                self, OfPciAddr, OfPciAddrFlags, PcieDevice,
+                domain::{PcieDomain, PcieIntrInfo, PcieIntrKey},
+                ecam::{BusNum, EcamConf},
             },
             platform::{self, PlatformDriver},
         },
@@ -18,9 +25,10 @@ use crate::{
     prelude::*,
 };
 
-/// [DOMAINS] is a global allocator for unique PCIe domain identifiers.
+/// Global allocator for unique PCIe domain identifiers.
 static DOMAINS: AtomicUsize = AtomicUsize::new(0);
 
+/// Driver for generic ECAM-compatible PCIe host controllers.
 #[derive(Debug, KObject, Driver)]
 struct PcieEcamDriver {
     #[kobject]
@@ -32,6 +40,11 @@ struct PcieEcamDriver {
 impl KObjectOps for PcieEcamDriver {}
 
 impl DriverOps for PcieEcamDriver {
+    /// Probe a platform device as a PCIe ECAM host bridge.
+    ///
+    /// Parses the OF node's `bus-range`, `ranges` (address space windows), and
+    /// `interrupt-map` (IRQ routing) to build a [`PcieDomain`]. Registers the
+    /// root bus device.
     fn probe(&self, device: Arc<dyn Device>) -> Result<(), SysError> {
         let pdev = device
             .as_platform_device()
@@ -76,8 +89,8 @@ impl DriverOps for PcieEcamDriver {
         let ecam = unsafe { EcamConf::new(&remap, root_bus_num, max_bus_num)? };
         let mut domain = PcieDomain::new(ecam, root_bus_num, max_bus_num);
 
-        // ranges
-
+        // Parse "ranges" property: translate PCIe address space windows to
+        // physical memory ranges and register them with the domain.
         let cells = of_node.node().cells();
         if cells.addr_cells != 3 {
             kerrln!(
@@ -121,18 +134,18 @@ impl DriverOps for PcieEcamDriver {
                 .map(|j| u32::from_be_bytes(size[(j as usize * 4)..][..4].try_into().unwrap()))
                 .fold(0u64, |acc, x| (acc << 32) | x as u64);
             let pcie_addr = OfPciAddr::from_be_bytes(pcie_addr.try_into().unwrap());
-            if !pcie_addr.flags().contains(PciAddrFlags::NotRelocatable) {
-                /*knoticeln!(
+            if !pcie_addr.flags().contains(OfPciAddrFlags::NotRelocatable) {
+                knoticeln!(
                     "Available PCIe ECAM resource window: pcie_addr={:?}, mem_addr={:#x}, size={:#x}",
                     pcie_addr,
                     mem_addr,
                     size
-                );*/
-                domain.resources_mut().add_mem_range(AvailPciMemArea::new(
+                );
+                domain.resources_mut().add_mem_range(
                     pcie_addr,
                     PhysAddr::new(mem_addr),
                     size,
-                )).map_err(|e|{
+                ).map_err(|e|{
                     kerrln!(
                         "error probing PCIe ECAM device {}: invalid memory range in 'ranges' property: {:?}",
                         pdev.name(),
@@ -143,7 +156,8 @@ impl DriverOps for PcieEcamDriver {
             }
         }
 
-        // interrupts
+        // Parse "interrupt-map" property: translate PCIe INTx pins to platform
+        // interrupt specifiers and register them with the domain.
         let intr_cells = of_node.node().interrupt_cells().ok_or_else(|| {
             kerrln!(
                 "error probing PCIe ECAM device {}: '#interrupt-cells' not specified.",
@@ -190,10 +204,9 @@ impl DriverOps for PcieEcamDriver {
             domain.resources_mut().set_intr_key_mask(PcieIntrKey { func_addr: addr.func_addr(), intr_pin: specifier as u8 });
         }
 
-        let intr_map_item_width_half = ((3 /* addr_cells, child unit address */
-         + intr_cells /* child interrupt specifier */
-         + 1/* intr_parent */)
-            * 4) as usize;
+        // Lower half of an interrupt-map entry: 3 cells child address +
+        // intr_cells child specifier + 1 cell interrupt parent phandle.
+        let intr_map_item_width_half = ((3 + intr_cells + 1) * 4) as usize;
         let mut index = 0;
         while index + intr_map_item_width_half <= intr_map.len() {
 
@@ -229,12 +242,11 @@ impl DriverOps for PcieEcamDriver {
                 }
             )?;
 
-            let (addr_cells_par, intr_cells_par) = 
+            // QEMU's interrupt controller sets #address-cells=0, which
+            // deviates from the DTB spec; use 0 as the fallback.
+            let (addr_cells_par, intr_cells_par) =
             (
-                parent_node.node().address_cells_or_none().unwrap_or(0) as usize
-                /*  note: The interrupt-controller provided by QEMU does not comply with the DTB specification; 
-                it explicitly sets #address-cells to 0, hence special handling is required.*/
-                ,
+                parent_node.node().address_cells_or_none().unwrap_or(0) as usize,
                 parent_node.node().interrupt_cells().ok_or_else(||{
                     kerrln!(
                         "error probing PCIe ECAM device {}: '#interrupt-cells' not specified for interrupt parent {:#x}.",
@@ -259,14 +271,6 @@ impl DriverOps for PcieEcamDriver {
             let parent_addr = &upper_half[0..addr_cells_par * 4];
 
             let parent_intr_spec = &upper_half[addr_cells_par * 4..][..intr_cells_par * 4];
-            /*kinfoln!(
-                "PCIe ECAM interrupt map entry: child_addr={:?}, child_intr_spec={:#x}, parent_node={}, parent_addr={:?}, parent_intr_spec={:#x}",
-                child_addr,
-                child_intr_spec,
-                intr_parent_handle,
-                parent_addr,
-                parent_intr_spec.iter().fold(0u64, |acc, x| (acc << 8) | (*x as u64))
-            );*/
             domain.resources_mut().add_intr_map(PcieIntrKey{func_addr:child_addr.func_addr(),
                 intr_pin: child_intr_spec as u8
             }, PcieIntrInfo{
@@ -277,7 +281,7 @@ impl DriverOps for PcieEcamDriver {
         }
 
         let domain = Arc::new(domain);
-        let device = PcieDevice::new_host_bridge(ident, domain, root_bus_num);
+        let device = PcieDevice::new_bus(ident, domain, root_bus_num);
         let device = Arc::new(device);
         pcie::register_device(device.clone());
         device.set_parent(Some(ROOT.clone()));
@@ -289,17 +293,17 @@ impl DriverOps for PcieEcamDriver {
         Some(self)
     }
 
-    fn shutdown(&self, device: &dyn Device) {}
+    fn shutdown(&self, _device: &dyn Device) {}
 }
 
 impl PlatformDriver for PcieEcamDriver {
-    /// [match_table] declares Open Firmware compatible strings handled by this
-    /// driver.
+    /// OF compatible strings matched by this driver.
     fn match_table(&self) -> &[&str] {
         &["pci-host-ecam-generic"]
     }
 }
 
+/// Create and register the [`PcieEcamDriver`] singleton.
 #[initcall(driver)]
 fn init() {
     let kobj_base = KObjectBase::new(KObjIdent::try_from("pci-host-ecam-generic").unwrap());
