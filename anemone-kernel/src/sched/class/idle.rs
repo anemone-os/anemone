@@ -1,11 +1,14 @@
 //! Idle scheduler class. The last-resort scheduler that runs when there are no
 //! other runnable tasks.
 
-use crate::{prelude::*, sched::class::SchedClass};
+use crate::{
+    prelude::*,
+    sched::class::{OnTickAction, SchedClassPrv, Scheduler},
+};
 
 pub struct Idle;
 
-impl SchedClass for Idle {
+impl Scheduler for Idle {
     fn enqueue(&mut self, task: Arc<Task>) {
         panic!("idle scheduler should not be enqueued with any task");
     }
@@ -18,15 +21,12 @@ impl SchedClass for Idle {
         Some(IDLE_TASK.with(|task| (**task).clone()))
     }
 
-    fn on_tick(&mut self) {
-        // nothing to do for idle scheduler on each tick
-    }
-
-    fn empty() -> Self
-    where
-        Self: Sized,
-    {
-        Idle
+    fn on_tick(&mut self, cur_task: &Arc<Task>) -> Option<OnTickAction> {
+        debug_assert!(matches!(
+            cur_task.sched_entity().class,
+            SchedClassPrv::Idle(())
+        ));
+        Some(OnTickAction::Resched)
     }
 }
 
@@ -43,7 +43,7 @@ mod idle_task {
 
     #[percpu]
     pub static IDLE_TASK: Lazy<Arc<Task>> = Lazy::new(|| unsafe {
-        let (task, guard) = Task::new_idle(idle_loop as *const ())
+        let (mut task, guard) = Task::new_idle(idle_loop as *const ())
             .unwrap_or_else(|e| panic!("failed to create idle tasks: {:?}", e));
         // SAFETY:
         // idle task should not be registered to global task registry.
@@ -54,3 +54,8 @@ mod idle_task {
     });
 }
 use idle_task::*;
+
+/// Get a clone of local processor's idle task.
+pub fn clone_local_idle_task() -> Arc<Task> {
+    IDLE_TASK.with(|task| (**task).clone())
+}

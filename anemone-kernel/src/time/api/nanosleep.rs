@@ -7,10 +7,7 @@
 
 use anemone_abi::time::linux::TimeSpec;
 
-use crate::{
-    prelude::{dt::UserReadPtr, *},
-    sched::sched_yield::kernel_yield,
-};
+use crate::prelude::{dt::UserReadPtr, *};
 
 // see man 2 nanosleep for this.
 const TV_NSEC_MAX_INCLUSIVE: u64 = 999_999_999;
@@ -50,7 +47,7 @@ fn sys_nanosleep(
         if cur >= now + duration2wait {
             break;
         }
-        kernel_yield();
+        yield_now();
     }
 
     Ok(0)

@@ -2,6 +2,13 @@
 
 use crate::prelude::*;
 
+/// Privilege Level of a control flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Privilege {
+    Kernel = 0,
+    User = 1,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct RunningFlow {
     prv: Privilege,

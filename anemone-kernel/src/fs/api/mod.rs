@@ -59,23 +59,23 @@ mod args {
         /// `check_is_dir` is a bit strange, but it's indeed needed by some
         /// syscalls which can be called with "AT_EMPTY_PATH" flag...
         pub fn to_pathref(&self, check_is_dir: bool) -> Result<PathRef, SysError> {
-            with_current_task(|task| {
-                match self {
-                    AtFd::Cwd => Ok(task.cwd().clone()),
-                    AtFd::Fd(fd) => {
-                        let file = task.get_fd(*fd).ok_or(SysError::BadFileDescriptor)?;
-                        if !file.file_flags().contains(FileFlags::READ) {
-                            // or O_PATH, which hasn't been implemented yet.
-                            return Err(SysError::BadFileDescriptor);
-                        }
-                        if check_is_dir && file.vfs_file().inode().ty() != InodeType::Dir {
-                            return Err(SysError::NotDir);
-                        }
+            let task = get_current_task();
 
-                        Ok(file.vfs_file().path().clone())
-                    },
-                }
-            })
+            match self {
+                AtFd::Cwd => Ok(task.cwd().clone()),
+                AtFd::Fd(fd) => {
+                    let file = task.get_fd(*fd).ok_or(SysError::BadFileDescriptor)?;
+                    if !file.file_flags().contains(FileFlags::READ) {
+                        // or O_PATH, which hasn't been implemented yet.
+                        return Err(SysError::BadFileDescriptor);
+                    }
+                    if check_is_dir && file.vfs_file().inode().ty() != InodeType::Dir {
+                        return Err(SysError::NotDir);
+                    }
+
+                    Ok(file.vfs_file().path().clone())
+                },
+            }
         }
     }
 

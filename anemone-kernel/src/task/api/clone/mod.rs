@@ -15,8 +15,7 @@ use crate::{
         handler::TryFromSyscallArg,
         *,
     },
-    sched::clone_current_task,
-    task::tid::Tid,
+    task::{cpu_usage::Privilege, tid::Tid},
 };
 
 // we don't wrap this type inside an `arg` module like other syscalls, since
@@ -135,10 +134,8 @@ pub fn kernel_clone(
     parent_tid: UserWritePtr<Tid>,
     child_tid: UserWritePtr<Tid>,
 ) -> Result<Tid, SysError> {
-    let current_task = clone_current_task();
-    let cur_uspace = current_task
-        .clone_uspace()
-        .expect("could not clone a kernel task");
+    let current_task = get_current_task();
+    let cur_uspace = current_task.clone_uspace();
 
     let new_uspace = if flags.contains(CloneFlags::VM) {
         cur_uspace.clone()
@@ -171,9 +168,9 @@ pub fn kernel_clone(
         Task::new_kernel(
             "@kernel/clone",
             enter_cloned_user_task as *const (),
-            ParameterList::new(&[frame_ptr as u64, child_tid.addr()]),
+            ParameterList::new(&[frame_ptr as u64, child_tid.addr(), flags.bits() as u64]),
+            current_task.sched_entity(),
             TaskFlags::NONE,
-            flags,
         )?
     };
     unsafe {
@@ -182,11 +179,7 @@ pub fn kernel_clone(
         (*frame_ptr).set_scratch(new_task.kstack().stack_top().get());
     }
     unsafe {
-        new_task.switch_exec_ctx(TaskExecCtx {
-            cmdline: current_task.cmdline(),
-            flags: current_task.flags(),
-            uspace: Some(new_uspace),
-        });
+        new_task.switch_exec_ctx(current_task.name(), new_uspace, current_task.flags());
     }
 
     if flags.contains(CloneFlags::FS) {
@@ -208,12 +201,7 @@ pub fn kernel_clone(
     }
 
     if flags.contains(CloneFlags::CHILD_CLEARTID) || flags.contains(CloneFlags::CHILD_SETTID) {
-        child_tid.validate_mut_with(
-            &mut new_task
-                .clone_uspace()
-                .expect("user task should have a user space")
-                .write(),
-        )?;
+        child_tid.validate_mut_with(&mut new_task.clone_uspace().write())?;
     }
 
     if flags.contains(CloneFlags::CHILD_CLEARTID) {
@@ -245,18 +233,25 @@ pub fn kernel_clone(
 
     drop(parent);
     drop(current_task);
-    add_to_ready(new_task);
+    task_enqueue(new_task);
     Ok(new_tid)
 }
 
-extern "C" fn enter_cloned_user_task(trap_frame: *mut TrapFrame, child_tid: *mut Tid) {
+extern "C" fn enter_cloned_user_task(
+    trap_frame: *mut TrapFrame,
+    child_tid: *mut Tid,
+    clone_flags: u64,
+) {
     assert!(IntrArch::local_intr_enabled());
 
-    let task = clone_current_task();
+    let clone_flags = CloneFlags::from_bits(clone_flags as u32)
+        .expect("invalid clone flags passed to enter_cloned_user_task");
+
+    let task = get_current_task();
     let frame = *unsafe { Box::from_raw(trap_frame) };
 
     unsafe {
-        if task.clone_flags().contains(CloneFlags::CHILD_SETTID) {
+        if clone_flags.contains(CloneFlags::CHILD_SETTID) {
             *child_tid = current_task_id();
         }
 

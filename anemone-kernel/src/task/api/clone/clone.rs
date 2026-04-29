@@ -17,13 +17,7 @@ pub fn sys_clone(
     #[validate_with(user_addr)] tls: VirtAddr,
     child_tid: UserWritePtr<Tid>,
 ) -> Result<u64, SysError> {
-    let trap_frame = with_intr_disabled(|_| unsafe {
-        with_current_task(|task| {
-            task.get_utrapframe()
-                .and_then(|ptr| Some((*ptr).clone()))
-                .expect("user trapframe missing when cloning to a new task")
-        })
-    });
-    kernel_clone(flags, trap_frame, new_sp, tls, parent_tid, child_tid)
+    let trapframe = get_current_task().utrapframe();
+    kernel_clone(flags, trapframe, new_sp, tls, parent_tid, child_tid)
         .and_then(|tid| Ok(tid.get() as u64))
 }

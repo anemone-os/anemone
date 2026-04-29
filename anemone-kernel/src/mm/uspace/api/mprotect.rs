@@ -18,7 +18,7 @@ fn sys_mprotect(
     #[validate_with(nonzero)] len: u64,
     prot: MmapProt,
 ) -> Result<u64, SysError> {
-    let usp = with_current_task(|task| task.clone_uspace().expect("user task should have uspace"));
+    let usp = get_current_task().clone_uspace();
 
     let prot: Protection = prot.into();
     let svpn = addr.page_down();

@@ -1,39 +1,92 @@
+// infras
+mod task;
+pub use task::*;
+mod topology;
+pub use topology::*;
+
+pub mod tid;
+
+// integration with other subsystems
 pub mod cpu_usage;
 pub mod files;
 pub mod sig;
 #[path = "fs.rs"]
 pub mod task_fs;
-pub mod tid;
-pub mod wait;
+#[path = "sched.rs"]
+pub mod task_sched;
 
 mod api;
 pub use api::*;
-mod task;
-pub use task::*;
+
+use core::ptr::NonNull;
 
 use crate::{
     mm::stack::KernelStack,
     prelude::{dt::UserWritePtr, *},
+    sched::class::SchedEntity,
     sync::mono::MonoFlow,
     task::{
-        clone::CloneFlags,
         cpu_usage::CpuUsage,
         files::FilesState,
         tid::{Tid, TidHandle},
-        wait::WaitQueue,
     },
 };
 
 /// What we call Task Control Block in kernel terminology.
+///
+/// **LOCK ORDERING**
+///
+/// **`uspace`->`flags`->`name`**
+///
+/// TODO: full lock ordering chain.
 pub struct Task {
     /// Task identifier handle.
     tid: TidHandle,
     /// Kernel stack owned by this task.
     kstack: KernelStack,
-    /// Scheduler-owned context and trap-frame pointer.
-    sched_ctx: MonoFlow<TaskSchedCtx>,
-    /// Clone behavior flags captured when this task was created.
-    create_flags: CloneFlags,
+
+    /// Name of this task.
+    ///
+    /// For kernel threads, it is formated in "@kernel/xxx" style, where "xxx"
+    /// is the name passed when creating the task.
+    ///
+    /// For user processes, it is formated in "@user/xxx" style, where "xxx" is
+    /// the executable name passed to [kernel_execve].
+    ///
+    /// Full user command line is not stored in kernel. instead, kernel only
+    /// stores the address range of the user command line on user's stack.
+    ///
+    /// So this field is almost purely for debugging and logging purpose.
+    name: RwLock<Box<str>>,
+
+    /// Task attribute flags.
+    ///
+    /// Memory of TCB is quite precious, so single bool field should not be used
+    /// for each flag. Instead, use this bitfield to store all flags.
+    flags: RwLock<TaskFlags>,
+
+    /// User address space, or [None] for pure kernel tasks.
+    ///
+    /// Multiple tasks may share the same user address space.
+    uspace: RwLock<Option<Arc<UserSpace>>>,
+
+    /// Which cpu this task is scheduled to run on.
+    cpuid: CpuId,
+
+    /// Scheduling context. Used for context switching.
+    sched_ctx: MonoFlow<TaskContext>,
+    /// Scheduling entity. Used for scheduling.
+    sched_entity: SpinLock<SchedEntity>,
+
+    /// User trapframe pointer. Set to:
+    /// - [Some] when this task traps into kernel,
+    /// - [None] when this task finishes handling the trap and is ready to
+    ///   return to user space,
+    /// - [None] if this task is a pure kernel thread, and
+    /// - [None] if this is a newly created task that has not run yet (i.e. it
+    ///   has not trapped into kernel yet).
+    utrapframe: MonoFlow<Option<NonNull<TrapFrame>>>,
+
     /// Filesystem state shared by task-related FS operations.
     fs_state: Arc<RwLock<FsState>>,
     /// File descriptor table state.
@@ -41,190 +94,81 @@ pub struct Task {
     /// Cpu usage information.
     cpu_usage: RwLock<CpuUsage>,
 
-    // execution information
-    /// Executable context such as `cmdline`, `flags` and user address space.
-    exec_ctx: RwLock<TaskExecCtx>,
     /// Exit status code written when the task terminates.
     exit_code: AtomicI8,
 
-    /// Wait queue used by parent tasks waiting for child exits.
-    wait_childexit: WaitQueue<Arc<Task>>,
+    /// for parent to listen to child exit event.
+    child_exited: Event,
 
-    // hierarchy information
-    /// Parent/children links in the task hierarchy.
-    hierarchy: RwLock<TaskHierarchy>,
-
-    // running status
-    /// Runtime status visible to scheduler and wait paths.
+    /// See [TaskStatus] for a precise definition.
     status: RwLock<TaskStatus>,
 
     /// Optional user pointer updated during child clear-tid handling.
     clear_child_tid: RwLock<Option<UserWritePtr<Tid>>>,
 }
 
-/// Boot routines and root task.
-pub mod boot {
+/// Parent/children links maintained for each task.
+///
+/// These information are grouped together with a hope to prevent races as much
+/// as possible.
+pub struct TaskHierarchy {
+    /// Weak reference to parent task, or [None] for root-like tasks.
+    parent: Option<Weak<Task>>,
+    /// Strong references to all direct children.
+    children: Vec<Arc<Task>>,
+}
 
-    use spin::Once;
-
-    use super::*;
-    /// Global root task holder.
+/// **[TaskStatus] is not the objective truth of a task's state. Instead, it's
+/// the intended state of the task.**
+///
+/// Most of the time, the actual state of a task is consistent with its
+/// [TaskStatus], but there are various windows where they are inconsistent. And
+/// that's not a mistake. **It's expected behavior.** It's precisely the
+/// foundation upon which we build various synchronization primitives.
+///
+/// This is, in fact, so-called ***lock-free programming***.
+///
+/// TODO: explain more specifically. maybe we should write a dedicated chapter
+/// about this topic in the book.
+///
+/// TODO: atomic enum is better.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskStatus {
+    /// Task can be scheduled to run.
+    Runnable,
+    /// Task can be reapped by its parent, but cannot run anymore.
+    Zombie,
+    /// Task can be waken up.
     ///
-    /// It is initialized once through [register_root_task] and then used by
-    /// hierarchy operations as the fallback ancestor.
-    static TASK_ROOT: Once<Arc<Task>> = Once::new();
+    /// TODO: interruptible when we support signals.
+    Waiting,
+}
 
-    /// Register the root task, which is the ancestor of all tasks in the
-    /// system.
-    ///
-    /// **This function should only be called once during the kernel
-    /// initialization, otherwise it will do nothing.**
-    pub fn register_root_task(task: Arc<Task>) {
-        TASK_ROOT.call_once(|| task);
-    }
-
-    /// Get the root task. Panic if the root task is not registered yet.
-    pub fn root_task() -> &'static Arc<Task> {
-        TASK_ROOT.get().expect("root task is not registered")
-    }
-
-    /// Wait for the root task to be registered and return it.
-    pub fn wait_for_root_task() -> &'static Arc<Task> {
-        TASK_ROOT.wait()
+impl TaskStatus {
+    pub fn is_sleeping(&self) -> bool {
+        matches!(self, TaskStatus::Waiting)
     }
 }
 
-mod registry {
-    use core::{mem::ManuallyDrop, ops::Deref};
-
-    use super::*;
-
-    /// Global task registry. Singleton instance.
-    ///
-    /// One primary objective of this registry is to transfer all
-    /// task-destroying logic to a explicit and controllable point. If we simply
-    /// leave that in [Drop], then XXX (dead lock and performance fluctuations).
-    #[derive(Debug)]
-    struct TaskRegistry {
-        /// [Vec] + [HashMap] would be better, but we don't have intrusive list,
-        /// so removing tasks from [Vec] will be quite expensive.
-        ///
-        /// That's why [BTreeMap] is used here, which provides both efficient
-        /// lookup (but still slower than [HashMap], generally) and ordered
-        /// iteration.
-        map: BTreeMap<Tid, Arc<Task>>,
-    }
-
-    impl TaskRegistry {
-        fn new() -> Self {
-            Self {
-                map: BTreeMap::new(),
-            }
-        }
-    }
-
-    static REGISTRY: Lazy<RwLock<TaskRegistry>> = Lazy::new(|| RwLock::new(TaskRegistry::new()));
-
-    /// When creating a new task, this guard will be returned as well.
-    ///
-    /// You must call either `register` or `forget` on the guard, otherwise a
-    /// panic will occur when the guard is dropped.
-    #[derive(Debug)]
-    pub struct RegisterGuard;
-
-    impl RegisterGuard {
-        pub fn register(self, task: Arc<Task>) {
-            register_task(task);
-            let _ = ManuallyDrop::new(self);
-        }
-
-        /// Creating a task but not registering it to global registry? You'd
-        /// better consider carefully...
-        ///
-        /// One example: idle tasks indeed need this method, because they are
-        /// not registered to the global registry at all.
-        pub unsafe fn forget(self) {
-            let _ = ManuallyDrop::new(self);
-        }
-    }
-
-    impl Drop for RegisterGuard {
-        fn drop(&mut self) {
-            panic!("a task was dropped without being explicitly registered or forgotten");
-        }
-    }
-
-    /// Register a task into the global registry.
-    ///
-    /// **This operation must be done if a new task is ready to 'enter' the
-    /// system. I.e. all fields/resources are properly initialized.**
-    ///
-    /// # Panics
-    ///
-    /// Panics if there is already a task with the same TID in the registry.
-    pub fn register_task(task: Arc<Task>) {
-        kdebugln!("registering task {} into registry", task.tid());
-        let mut registry = REGISTRY.write_irqsave();
-        if let Some(old) = registry.map.insert(task.tid(), task.clone()) {
-            panic!(
-                "task registry: duplicate TID {} (old: {:?}, new: {:?})",
-                task.tid(),
-                old,
-                Some(task)
-            );
-        }
-    }
-
-    /// What [unregister_task] returns. It still holds the task, but you cannot
-    /// transform it back to a normal [Task] and re-register it.
-    ///
-    /// [DerefMut] is intentionally not implemented.
-    #[derive(Debug)]
-    pub struct UnregisteredTask {
-        task: Task,
-    }
-
-    impl Deref for UnregisteredTask {
-        type Target = Task;
-
-        fn deref(&self) -> &Self::Target {
-            &self.task
-        }
-    }
-
-    /// Unregister a task from the global registry. Returns the unregistered
-    /// task if it exists, or `None` if there is no such task.
-    ///
-    /// This function is not marked as `unsafe`, but it's actually quite unsafe.
-    ///
-    /// TODO: add doc.
-    pub fn unregister_task(tid: &Tid) -> Option<UnregisteredTask> {
-        let mut registry = REGISTRY.write_irqsave();
-        let task = registry.map.remove(tid)?;
-        if Arc::strong_count(&task) > 1 {
-            panic!(
-                "task registry: unregistering task {} with strong count {}. task is still alive somewhere else.",
-                tid,
-                Arc::strong_count(&task)
-            );
-        }
-        Arc::try_unwrap(task)
-            .ok()
-            .map(|task| UnregisteredTask { task })
-    }
-
-    /// Get a task by its [Tid].
-    pub fn get_task(tid: &Tid) -> Option<Arc<Task>> {
-        let registry = REGISTRY.read_irqsave();
-        registry.map.get(tid).cloned()
-    }
-
-    /// Iterate over all tasks in the registry.
-    pub fn for_each_task<F: FnMut(&Arc<Task>)>(mut f: F) {
-        let registry = REGISTRY.read_irqsave();
-        for task in registry.map.values() {
-            f(task);
-        }
+bitflags! {
+    /// TODO: Remove current flags.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct TaskFlags: u8{
+        /// No special flags.
+        const NONE = 0;
+        /// Marks a kernel task.
+        const KERNEL = 1 << 0;
+        /// Marks an idle task.
+        const IDLE = 1 << 1;
     }
 }
-pub use registry::*;
+
+impl TaskFlags {
+    pub const fn is_kernel(&self) -> bool {
+        self.contains(TaskFlags::KERNEL)
+    }
+
+    pub const fn is_idle(&self) -> bool {
+        self.contains(TaskFlags::IDLE)
+    }
+}

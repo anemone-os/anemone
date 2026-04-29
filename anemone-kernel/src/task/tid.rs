@@ -31,6 +31,14 @@ pub struct Tid(u32);
 
 impl Tid {
     pub const IDLE: Self = Self(0);
+    pub const INVALID: Self = {
+        const_assert!(
+            MAX_PROCESSES < u32::MAX as u64,
+            "wrong kconfig: MAX_PROCESSES is too large"
+        );
+        Self(u32::MAX)
+    };
+    pub const INIT: Self = Self(1);
 
     #[inline(always)]
     pub fn new(id: u32) -> Self {
@@ -65,6 +73,13 @@ impl Debug for TidHandle {
 
 impl TidHandle {
     pub const IDLE: Self = Self(0);
+    pub const INVALID: Self = {
+        const_assert!(
+            MAX_PROCESSES < u32::MAX as u64,
+            "wrong kconfig: MAX_PROCESSES is too large"
+        );
+        Self(u32::MAX)
+    };
 
     pub fn get(&self) -> u32 {
         self.0
@@ -75,6 +90,8 @@ impl Drop for TidHandle {
     fn drop(&mut self) {
         if self.0 != 0 {
             ID_ALLOC.lock_irqsave().dealloc(Tid(self.0));
+        } else {
+            panic!("dropping idle task's TidHandle");
         }
     }
 }

@@ -40,8 +40,7 @@ fn sys_dup3(oldfd: Fd, newfd: Fd, flags: Dup3FdFlags) -> Result<u64, SysError> {
         FdFlags::empty()
     };
 
-    with_current_task(|task| {
-        task.dup3(oldfd, newfd, fd_flags)
-            .map(|newfd| newfd.raw() as u64)
-    })
+    let task = get_current_task();
+    task.dup3(oldfd, newfd, fd_flags)
+        .map(|newfd| newfd.raw() as u64)
 }

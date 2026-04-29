@@ -19,8 +19,10 @@ fn sys_openat(
     mode: u32,
 ) -> Result<u64, SysError> {
     let path = Path::new(pathname.as_ref());
+    let task = get_current_task();
+
     if path.is_absolute() {
-        let path = with_current_task(|task| task.make_global_path(&Path::new(pathname.as_ref())));
+        let path = task.make_global_path(&Path::new(pathname.as_ref()));
         // dirfd ignored.
         if flags & O_CREAT != 0 {
             let perm = InodePerm::from_linux_bits(mode as u32).ok_or(SysError::InvalidArgument)?;
@@ -42,14 +44,13 @@ fn sys_openat(
             file.seek(file.get_attr()?.size as usize)?;
         }
 
-        let fd = with_current_task(|task| {
-            task.open_fd(
+        let fd = task
+            .open_fd(
                 file,
                 FileFlags::from_linux_open_flags(flags),
                 FdFlags::from_linux_open_flags(flags),
             )
-        })
-        .ok_or(SysError::NoMoreFd)?;
+            .ok_or(SysError::NoMoreFd)?;
         return Ok(fd.raw() as u64);
     } else {
         let dir_path = dirfd.to_pathref(true)?;
@@ -75,14 +76,13 @@ fn sys_openat(
             file.seek(file.get_attr()?.size as usize)?;
         }
 
-        let fd = with_current_task(|task| {
-            task.open_fd(
+        let fd = task
+            .open_fd(
                 file,
                 FileFlags::from_linux_open_flags(flags),
                 FdFlags::from_linux_open_flags(flags),
             )
-        })
-        .ok_or(SysError::NoMoreFd)?;
+            .ok_or(SysError::NoMoreFd)?;
         return Ok(fd.raw() as u64);
     }
 }

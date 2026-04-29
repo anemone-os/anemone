@@ -1,127 +1,21 @@
 use core::{
     fmt::{Debug, Display},
-    mem::swap,
-    ops::{Deref, DerefMut},
+    ptr::NonNull,
 };
 
 use crate::{
     mm::stack::KernelStack,
     prelude::{dt::UserWritePtr, *},
+    sched::class::{SchedClassPrv, SchedEntity},
     sync::mono::MonoFlow,
     task::{
-        boot::root_task,
-        clone::CloneFlags,
         cpu_usage::CpuUsage,
         files::FilesState,
         task_fs::FsState,
         tid::{Tid, TidHandle, alloc_tid},
-        wait::WaitQueue,
+        topology::RegisterGuard,
     },
 };
-
-/// Parent/children links maintained for each task.
-///
-/// These information are grouped together with a hope to prevent races as much
-/// as possible.
-pub struct TaskHierarchy {
-    /// Weak reference to parent task, or [None] for root-like tasks.
-    parent: Option<Weak<Task>>,
-    /// Strong references to all direct children.
-    children: Vec<Arc<Task>>,
-}
-
-impl TaskHierarchy {
-    /// Set `parent` as the parent of this task node.
-    pub fn set_parent(&mut self, parent: &Arc<Task>) {
-        self.parent = Some(Arc::downgrade(parent));
-    }
-
-    /// Get the current parent weak reference.
-    pub fn parent(&self) -> Option<Weak<Task>> {
-        self.parent.clone()
-    }
-
-    /// Add `child` into the direct children list.
-    pub fn add_child(&mut self, child: Arc<Task>) {
-        self.children.push(child);
-    }
-
-    /// Remove `child` from the direct children list.
-    ///
-    /// Returns `true` if `child` existed and was removed.
-    fn remove_child(&mut self, child: &Arc<Task>) -> bool {
-        if let Some(index) = self.children.iter().position(|x| x.eq(child)) {
-            self.children.remove(index);
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Remove and return all direct children.
-    pub fn clear(&mut self) -> Vec<Arc<Task>> {
-        let mut temp = vec![];
-        swap(&mut temp, &mut self.children);
-        temp
-    }
-}
-
-#[cfg(debug_assertions)]
-impl Drop for TaskHierarchy {
-    fn drop(&mut self) {
-        if self.children.len() > 0 {
-            panic!(
-                "task dropped while there are still {} children",
-                self.children.len()
-            );
-        }
-    }
-}
-
-/// Execution context of a task.
-pub struct TaskExecCtx {
-    /// Command line shown for this task.
-    pub cmdline: Box<str>,
-    /// Task attribute flags.
-    pub flags: TaskFlags,
-    /// User address space, or [None] for pure kernel tasks.
-    pub uspace: Option<Arc<UserSpace>>,
-}
-
-/// Scheduling-related context of a task.
-#[repr(C)]
-pub struct TaskSchedCtx {
-    /// Used for soft switching
-    task_context: TaskContext,
-    /// Points to the TrapFrame saved on the kernel stack during the last user
-    /// trap entry.
-    utrap_frame: Option<*const TrapFrame>,
-}
-unsafe impl Send for TaskSchedCtx {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TaskStatus {
-    /// Task is currently running on a CPU.
-    Running,
-    /// Task is runnable and waiting to be scheduled.
-    Ready,
-    /// Task has exited and is waiting to be reaped.
-    Zombie,
-    /// Task is blocked in a wait state.
-    Waiting { interruptible: bool },
-}
-
-bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub struct TaskFlags: u8{
-        /// No special flags.
-        const NONE = 0;
-        /// Marks a kernel task.
-        const KERNEL = 1 << 0;
-        /// Marks an idle task.
-        const IDLE = 1 << 1;
-    }
-}
 
 impl Debug for Task {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -164,48 +58,42 @@ impl Task {
     /// kernel threads. If a kernel thread needs to execute a user program which
     /// requires filesystem access, make sure to set its [FsState] to a valid
     /// one before calling `kernel_execve`.
+    ///
+    /// The created task will run on certain cpu decided by the scheduler. Sed
+    /// [pick_next_cpu] for details.
     pub unsafe fn new_kernel(
         name: &str,
         entry: *const (),
         args: ParameterList,
+        sched: SchedEntity,
         flags: TaskFlags,
-        create_flags: CloneFlags,
     ) -> Result<(Task, RegisterGuard), SysError> {
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
         let task = Self {
-            status: RwLock::new(TaskStatus::Ready),
             tid: alloc_tid().ok_or(SysError::OutOfMemory)?,
             kstack: stack,
-
+            name: RwLock::new((String::from("@kernel/") + name).into_boxed_str()),
+            flags: RwLock::new(flags | TaskFlags::KERNEL),
+            uspace: RwLock::new(None),
+            cpuid: pick_next_cpu(),
+            sched_ctx: unsafe {
+                MonoFlow::new(TaskContext::from_kernel_fn(
+                    VirtAddr::new(entry as u64),
+                    stack_top,
+                    args,
+                ))
+            },
+            sched_entity: SpinLock::new(sched),
+            utrapframe: unsafe { MonoFlow::new(None) },
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: Arc::new(RwLock::new(FilesState::new())),
-
             cpu_usage: RwLock::new(CpuUsage::ZERO),
-
-            sched_ctx: unsafe {
-                MonoFlow::new(TaskSchedCtx {
-                    task_context: TaskContext::from_kernel_fn(
-                        VirtAddr::new(entry as u64),
-                        stack_top,
-                        args,
-                    ),
-                    utrap_frame: None,
-                })
-            },
-            exec_ctx: RwLock::new(TaskExecCtx {
-                cmdline: (String::from("@kernel/") + name).into_boxed_str(),
-                flags: flags | TaskFlags::KERNEL,
-                uspace: None,
-            }),
-            hierarchy: RwLock::new(TaskHierarchy {
-                parent: None,
-                children: vec![],
-            }),
             exit_code: AtomicI8::new(0),
-            create_flags,
+            child_exited: Event::new(),
+
+            status: RwLock::new(TaskStatus::Runnable),
             clear_child_tid: RwLock::new(None),
-            wait_childexit: WaitQueue::new(),
         };
         Ok((task, RegisterGuard))
     }
@@ -221,38 +109,29 @@ impl Task {
         let stack_top = stack.stack_top();
         Ok((
             Task {
-                status: RwLock::new(TaskStatus::Ready),
                 tid: TidHandle::IDLE,
                 kstack: stack,
+                name: RwLock::new(Box::from("@idle")),
+                flags: RwLock::new(TaskFlags::IDLE | TaskFlags::KERNEL),
+                uspace: RwLock::new(None),
+                cpuid: cur_cpu_id(),
                 sched_ctx: unsafe {
-                    MonoFlow::new(TaskSchedCtx {
-                        task_context: TaskContext::from_kernel_fn(
-                            VirtAddr::new(entry as u64),
-                            stack_top,
-                            ParameterList::empty(),
-                        ),
-                        utrap_frame: None,
-                    })
+                    MonoFlow::new(TaskContext::from_kernel_fn(
+                        VirtAddr::new(entry as u64),
+                        stack_top,
+                        ParameterList::empty(),
+                    ))
                 },
-                exec_ctx: RwLock::new(TaskExecCtx {
-                    cmdline: Box::from("@idle"),
-                    flags: TaskFlags::IDLE | TaskFlags::KERNEL,
-                    uspace: None,
-                }),
-                hierarchy: RwLock::new(TaskHierarchy {
-                    parent: None,
-                    children: vec![],
-                }),
-
+                sched_entity: SpinLock::new(SchedEntity::new(SchedClassPrv::Idle(()))),
+                utrapframe: unsafe { MonoFlow::new(None) },
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
                 files_state: Arc::new(RwLock::new(FilesState::new())),
-
                 cpu_usage: RwLock::new(CpuUsage::ZERO),
-
                 exit_code: AtomicI8::new(0),
-                create_flags: CloneFlags::empty(),
+                child_exited: Event::new(),
+
+                status: RwLock::new(TaskStatus::Runnable),
                 clear_child_tid: RwLock::new(None),
-                wait_childexit: WaitQueue::new(),
             },
             RegisterGuard,
         ))
@@ -261,70 +140,70 @@ impl Task {
 
 // endregion: spawn
 
-// region: scheduling context
+// region: context accessors
 
 impl Task {
-    /// Get the task context used by the scheduler.
+    /// Get a pointer to this task's scheduling context.
     ///
     /// # Safety
-    /// * **Make sure interrupts are disabled before calling this function,
-    /// otherwise undefined behavior or unexpected panics may occur.**
     ///
-    /// * **This function may only be called within a single execution flow,
-    /// typically the task's own execution context.
-    /// Parallel access will lead to data races.**
-    pub unsafe fn get_task_context(&self) -> *const TaskContext {
+    /// **Only scheduler's code can call this function.**
+    ///
+    /// **Preemption and interrupts must be disabled during the window when the
+    /// returned pointer might be accessed.**
+    #[track_caller]
+    pub unsafe fn get_sched_ctx(&self) -> *const TaskContext {
         debug_assert!(IntrArch::local_intr_disabled());
-        self.sched_ctx
-            .with(|inner| &inner.task_context as *const TaskContext)
+        self.sched_ctx.with(|inner| inner as *const TaskContext)
     }
 
-    /// Get a mutable pointer to the task context used by the scheduler.
+    /// Get a mutable pointer to this task's scheduling context.
     ///
     /// # Safety
-    /// * **Make sure interrupts are disabled before calling this function,
-    /// otherwise undefined behavior or unexpected panics may occur.**
     ///
-    /// * **This function may only be called within a single execution flow,
-    /// typically the task's own execution context.
-    /// Parallel access will lead to data races.**
-    pub unsafe fn get_task_context_mut(&self) -> *mut TaskContext {
+    /// **Only scheduler's code can call this function.**
+    ///
+    /// **Preemption and interrupts must be disabled during the window when the
+    /// returned pointer might be accessed.**
+    #[track_caller]
+    pub unsafe fn get_sched_ctx_mut(&self) -> *mut TaskContext {
         debug_assert!(IntrArch::local_intr_disabled());
-        self.sched_ctx
-            .with_mut(|inner| &mut inner.task_context as *mut TaskContext)
+        self.sched_ctx.with_mut(|inner| inner as *mut TaskContext)
     }
 
-    /// Set the user trap frame for this task, called by the trap handler.
+    /// Set user trapframe pointer. Called by user trap handler when a task
+    /// traps into kernel.
     ///
     /// # Safety
-    /// * **Make sure interrupts are disabled before calling this function,
-    /// otherwise undefined behavior or unexpected panics may occur.**
     ///
-    /// * **This function may only be called within a single execution flow,
-    /// typically the task's own execution context.
-    /// Parallel access will lead to data races.**
-    pub unsafe fn set_utrapframe(&self, trap_frame: *const TrapFrame) {
-        debug_assert!(IntrArch::local_intr_disabled());
-        self.sched_ctx
-            .with_mut(|inner| inner.utrap_frame = Some(trap_frame));
+    /// **Only user trap handler's code can call this function.**
+    #[track_caller]
+    pub unsafe fn set_utrapframe(&self, trapframe: *mut TrapFrame) {
+        self.utrapframe.with_mut(|inner| {
+            *inner = Some(NonNull::new(trapframe).expect("trapframe pointer cannot be null"))
+        });
     }
 
-    /// Get the user trap frame for this task, if it exists.
+    /// Get a copy of the user trapframe.
     ///
-    /// # Safety
-    /// * **Make sure interrupts are disabled before calling this function,
-    /// otherwise undefined behavior or unexpected panics may occur.**
+    /// TODO: explain **Why no accessors are provided**.
     ///
-    /// * **This function may only be called within a single execution flow,
-    /// typically the task's own execution context.
-    /// Parallel access will lead to data races.**
-    pub unsafe fn get_utrapframe(&self) -> Option<*const TrapFrame> {
-        debug_assert!(IntrArch::local_intr_disabled());
-        self.sched_ctx.with(|inner| inner.utrap_frame)
+    /// # Panics
+    #[track_caller]
+    pub fn utrapframe(&self) -> TrapFrame {
+        unsafe {
+            self.utrapframe.with(|inner| {
+                inner
+                    .as_ref()
+                    .expect("trapframe pointer is not set")
+                    .as_ref()
+                    .clone()
+            })
+        }
     }
 }
 
-// endregion: scheduling context
+// endregion: context accessors
 
 // region: common field accessors
 
@@ -334,31 +213,36 @@ impl Task {
         Tid::new(self.tid.get())
     }
 
-    /// Get the parent task ID, if the parent task exists.
-    ///
-    /// This function will return [None] only if this task has no parent, e.g.
-    /// the init task, the idle task, a exited task or the kinit task.
-    pub fn parent_tid(&self) -> Option<Tid> {
-        self.hierarchy
-            .read()
-            .parent
-            .as_ref()
-            .and_then(|weak| weak.upgrade().map(|parent| parent.tid()))
-    }
-
-    /// Get the task name.
-    pub fn cmdline(&self) -> Box<str> {
-        self.exec_ctx.read_irqsave().cmdline.clone()
+    /// Get the task name. This introduces a heap allocation. Pay attention.
+    pub fn name(&self) -> Box<str> {
+        self.name.read().clone()
     }
 
     /// Get the task flags.
     pub fn flags(&self) -> TaskFlags {
-        self.exec_ctx.read_irqsave().flags
+        self.flags.read().clone()
     }
 
-    /// Get the user-space memory context of this task, if any.
-    pub fn clone_uspace(&self) -> Option<Arc<UserSpace>> {
-        self.exec_ctx.read_irqsave().uspace.clone()
+    /// Get the user-space memory context of this task.
+    ///
+    /// # Panics
+    ///
+    /// For a pure kernel task, this function will panic immediately **since
+    /// caller misused it**. If you call this function, then you should have
+    /// already ensured that this task is indeed a user task (e.g. by calling
+    /// [TaskFlags::is_kernel] to check). **If you want a convenient helper,
+    /// call [Self::try_clone_uspace] instead.**
+    pub fn clone_uspace(&self) -> Arc<UserSpace> {
+        self.uspace
+            .read()
+            .as_ref()
+            .expect("cannot access user space of a pure kernel task")
+            .clone()
+    }
+
+    /// See [Self::clone_uspace] for details.
+    pub fn try_clone_uspace(&self) -> Option<Arc<UserSpace>> {
+        self.uspace.read().as_ref().map(|uspace| uspace.clone())
     }
 
     /// Get this task's kernel stack.
@@ -376,19 +260,24 @@ impl Task {
         self.exit_code.store(code, Ordering::SeqCst);
     }
 
-    /// Switch the executable context of this task to `ctx`.
+    /// Switch the execution context of this task to `ctx`.
+    ///
+    /// Note that this method always expects `uspace` to be [Some]. This is
+    /// intentional. Kernel threads should never comes from a [kernel_execve]
+    /// call or something similar.
     ///
     /// # Safety
     ///
     /// It's quite obvious. Almost always this function should only be called
     /// when doing an [kernel_execve] or something similar.
-    pub unsafe fn switch_exec_ctx(&self, ctx: TaskExecCtx) {
-        *self.exec_ctx.write_irqsave() = ctx;
-    }
-
-    /// Get the clone flags used when creating this task.
-    pub fn clone_flags(&self) -> CloneFlags {
-        self.create_flags
+    pub unsafe fn switch_exec_ctx(&self, name: Box<str>, uspace: Arc<UserSpace>, flags: TaskFlags) {
+        // NOTE THE LOCK ORDERING
+        let mut uspace_ptr = self.uspace.write();
+        let mut flags_ptr = self.flags.write();
+        let mut name_ptr = self.name.write();
+        *uspace_ptr = Some(uspace);
+        *flags_ptr = flags;
+        *name_ptr = name;
     }
 
     /// Set `tid_ptr` as the clear-child-tid target pointer.
@@ -400,167 +289,13 @@ impl Task {
     pub fn get_clear_child_tid(&self) -> Option<UserWritePtr<Tid>> {
         self.clear_child_tid.read().clone()
     }
-
-    /// Get the current task status.
-    pub fn status(&self) -> TaskStatus {
-        self.status.read().clone()
-    }
-
-    /// Update task status to `status`.
-    pub fn set_status(&self, status: TaskStatus) {
-        *self.status.write() = status;
-    }
 }
 
 // endregion: common field accessors
 
-// region: task hierarchy
-
-impl Task {
-    /// Run `f` with an immutable reference to this task's hierarchy links.
-    ///
-    /// # Locking Rules
-    /// When nesting hierarchy-lock acquisition across multiple tasks, callers
-    /// must follow parent-to-child (or the same consistent ancestor chain)
-    /// order. Acquiring hierarchy locks out of hierarchy order can deadlock.
-    ///
-    /// Nested acquisition of multiple tasks that are not on one parent-child
-    /// chain is forbidden, because it may cause unexpected deadlocks.
-    ///
-    /// # Safety
-    /// Caller must ensure no conflicting mutable hierarchy access happens
-    /// concurrently.
-    pub unsafe fn with_task_hierarchy<F: FnOnce(&TaskHierarchy) -> R, R>(&self, f: F) -> R {
-        let hierarchy = self.hierarchy.read();
-        f(hierarchy.deref())
-    }
-
-    /// Run `f` with a mutable reference to this task's hierarchy links.
-    ///
-    /// # Locking Rules
-    /// When nesting hierarchy-lock acquisition across multiple tasks, callers
-    /// must follow parent-to-child (or the same consistent ancestor chain)
-    /// order. Acquiring hierarchy locks out of hierarchy order can deadlock.
-    ///
-    /// Nested acquisition of multiple tasks that are not on one parent-child
-    /// chain is forbidden, because it may cause unexpected deadlocks.
-    ///
-    /// # Safety
-    /// Caller must ensure the hierarchy mutation is synchronized with all other
-    /// hierarchy readers/writers.
-    pub unsafe fn with_task_hierarchy_mut<F: FnOnce(&mut TaskHierarchy) -> R, R>(&self, f: F) -> R {
-        let mut hierarchy = self.hierarchy.write();
-        f(hierarchy.deref_mut())
-    }
-}
-
-// endregion: task hierarchy
-
-/// Extra task-tree and wait helpers implemented on [Arc<Task>].
-pub trait ArcTaskImpls {
-    /// Attach this task as a child of `parent`.
-    unsafe fn add_as_child(&self, parent: &Arc<Task>);
-
-    /// Notify parent waiters that this task has exited.
-    unsafe fn note_exited(&self);
-
-    /// Wait for a child selected by `target`, then reap and return it.
-    unsafe fn waitpid(
-        &self,
-        target: WaitObject,
-        sleep: bool,
-    ) -> Result<Option<Arc<Task>>, SysError>;
-}
-
-impl ArcTaskImpls for Arc<Task> {
-    unsafe fn add_as_child(&self, parent: &Arc<Task>) {
-        unsafe {
-            if !parent.with_task_hierarchy_mut(|par_hier| {
-                if parent.status() == TaskStatus::Zombie {
-                    return false;
-                }
-                self.with_task_hierarchy_mut(|hier| {
-                    debug_assert!(hier.parent.is_none());
-                    hier.set_parent(&parent);
-                    par_hier.add_child(self.clone());
-                    true
-                })
-            }) {
-                let root = root_task();
-                root.with_task_hierarchy_mut(|root_hier| {
-                    self.with_task_hierarchy_mut(|hier| {
-                        hier.set_parent(root);
-                        root_hier.add_child(self.clone());
-                    })
-                })
-            }
-        }
-    }
-
-    unsafe fn note_exited(&self) {
-        let parent = unsafe { self.with_task_hierarchy(|hier| hier.parent()) }
-            .unwrap_or_else(|| panic!("cannot note exited for a root task: {}", self.tid()))
-            .upgrade()
-            .unwrap_or_else(|| panic!("dangling task with parrent dropped: {}", self.tid()));
-        parent.wait_childexit.wake(self, false);
-    }
-
-    /// This is the only way to remove a task from its children list
-    unsafe fn waitpid(
-        &self,
-        target: WaitObject,
-        sleep: bool,
-    ) -> Result<Option<Arc<Task>>, SysError> {
-        unsafe {
-            self.with_task_hierarchy(|hier| {
-                if hier
-                    .children
-                    .iter()
-                    .position(|val| target.match_task(val))
-                    .is_none()
-                {
-                    Err(SysError::ChildrenNotFound)
-                } else {
-                    Ok(())
-                }
-            })?;
-        }
-        loop {
-            let child = self
-                .wait_childexit
-                .wait_if(true, || unsafe {
-                    self.with_task_hierarchy_mut(|hier| {
-                        for ch in &hier.children {
-                            if target.match_task(ch) && ch.status() == TaskStatus::Zombie {
-                                return Err(Some(ch.clone()));
-                            }
-                        }
-                        if !sleep { Err(None) } else { Ok(()) }
-                    })
-                })
-                .and_then(|a| Ok(Some(a)))
-                .unwrap_or_else(|e| e);
-            let child = match child {
-                Some(child) => child,
-                None => return Ok(None),
-            };
-            if target.match_task(&child) {
-                unsafe {
-                    self.with_task_hierarchy_mut(|hier| {
-                        let res = hier.remove_child(&child);
-                        debug_assert!(res);
-                    });
-                }
-                self.on_reap_child(&child);
-                return Ok(Some(child));
-            }
-        }
-    }
-}
-
 impl Drop for Task {
     fn drop(&mut self) {
-        kdebugln!("{}({}) dropped", self.tid(), self.cmdline());
+        kdebugln!("{}({}) dropped", self.tid(), self.name());
     }
 }
 

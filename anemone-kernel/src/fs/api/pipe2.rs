@@ -47,7 +47,7 @@ fn sys_pipe2(pipefd: UserWritePtr<[i32; 2]>, flags: PipeFlags) -> Result<u64, Sy
         FdFlags::empty()
     };
 
-    let task = clone_current_task();
+    let task = get_current_task();
 
     let OpenedPipe { rx, tx } = create_anonymous_pipe()?;
 

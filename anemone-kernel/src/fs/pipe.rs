@@ -8,7 +8,6 @@
 
 use crate::{
     prelude::*,
-    sched::sched_yield::kernel_yield,
     utils::{
         any_opaque::{AnyOpaque, NilOpaque},
         ring_buffer::RingBuffer,
@@ -118,7 +117,7 @@ fn pipe_rx_read(file: &File, buf: &mut [u8]) -> Result<usize, SysError> {
 
             while pipe.buf.is_empty() && pipe.tx_cnt > 0 {
                 drop(pipe);
-                kernel_yield();
+                yield_now();
                 pipe = rx.pipe.lock();
             }
 
@@ -156,7 +155,7 @@ fn pipe_tx_write(file: &File, buf: &[u8]) -> Result<usize, SysError> {
 
             while pipe.buf.available() <= buf.len() && pipe.rx_cnt > 0 {
                 drop(pipe);
-                kernel_yield();
+                yield_now();
                 pipe = tx.pipe.lock();
             }
 

@@ -137,10 +137,26 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
     let scause = riscv::register::scause::read();
     let code = scause.code();
     if scause.is_interrupt() {
+        percpu::on_entering_hwirq();
+
         let reason = RiscV64Interrupt::try_from(code)
             .unwrap_or_else(|_| panic!("unknown interrupt with code {}", code));
         unsafe {
             handle_intr(reason);
+        }
+
+        percpu::on_leaving_hwirq();
+
+        {
+            // from this code block, the logical execution flow is considered
+            // leaving the hardware interrupt environment.
+
+            // note the short-circuit behavior of && operator.
+            if allow_preempt() && fetch_clear_need_resched() {
+                unsafe {
+                    schedule();
+                }
+            }
         }
     } else {
         let stval = riscv::register::stval::read();

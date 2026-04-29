@@ -1,14 +1,4 @@
-use alloc::sync::Arc;
-
 use crate::prelude::*;
-
-pub trait SchedTrait {
-    const EMPTY: Self;
-    /// Add a task to the ready queue of the current processor.
-    fn add_to_ready(&mut self, task: Arc<Task>);
-    /// Fetch new task. This will remove the task from the ready queue.
-    fn fetch_next(&mut self) -> Option<Arc<Task>>;
-}
 
 /// Task context switching.
 pub trait SchedArchTrait {

@@ -67,7 +67,7 @@ impl<T: ?Sized> RwLock<T> {
     #[track_caller]
     pub fn read_irqsave(&self) -> ReadIrqSaveGuard<'_, T> {
         loop {
-            let _intr_guard = IntrGuard::new(false);
+            let _intr_guard = IntrGuard::new();
             if let Some(guard) = self.lock.try_read() {
                 break ReadIrqSaveGuard {
                     guard: Some(guard),
@@ -82,7 +82,7 @@ impl<T: ?Sized> RwLock<T> {
     #[track_caller]
     pub fn write_irqsave(&self) -> WriteIrqSaveGuard<'_, T> {
         loop {
-            let _intr_guard = IntrGuard::new(false);
+            let _intr_guard = IntrGuard::new();
             if let Some(guard) = self.lock.try_write() {
                 break WriteIrqSaveGuard {
                     guard: Some(guard),

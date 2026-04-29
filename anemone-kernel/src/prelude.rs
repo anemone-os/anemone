@@ -6,10 +6,7 @@ pub use crate::{
     fs::*,
     kconfig_defs::*,
     mm::{addr::*, frame::*, paging::*, uspace::*, zone::*},
-    percpu::{
-        PerCpu, PreemptGuard, allow_preempt, bsp_cpu_id, cur_cpu_id, fetch_clear_resched_flag,
-        ncpus, set_resched_flag, target_online,
-    },
+    percpu::{PerCpu, PreemptGuard, allow_preempt, bsp_cpu_id, cur_cpu_id, ncpus, target_online},
     platform_defs::*,
     power::*,
     sched::*,

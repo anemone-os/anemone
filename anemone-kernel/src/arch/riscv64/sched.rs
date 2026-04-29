@@ -3,7 +3,8 @@ use core::arch::naked_asm;
 use crate::{
     arch::riscv64::exception::{__ktrap_return_to_task, __utrap_return_to_task, RiscV64TrapFrame},
     prelude::*,
-    sched::{ParameterList, SchedArchTrait, TaskContextArch, exit::kernel_exit},
+    sched::{ParameterList, SchedArchTrait, TaskContextArch},
+    task::exit::kernel_exit,
 };
 
 #[repr(C)]
@@ -138,6 +139,11 @@ unsafe extern "C" fn user_task_entry_secondary(
     ustack_top: u64,
     kstack_top: u64,
 ) -> ! {
+    assert!(
+        IntrArch::local_intr_disabled(),
+        "we came from scheduler, so interrupts should be disabled"
+    );
+
     kdebugln!(
         "user task entry: entry={:#x}, ustack_top={:#x}, kstack_top={:#x}",
         entry as u64,
@@ -152,6 +158,7 @@ unsafe extern "C" fn user_task_entry_secondary(
 
     // libc expects the initial user stack pointer in a0.
     trapframe.set_arg::<0>(ustack_top);
+    // interrupts will be enabled in the end of trap returning.
     unsafe { __utrap_return_to_task(&trapframe) }
 }
 
@@ -202,6 +209,11 @@ unsafe extern "C" fn kernel_task_entry_secondary(
     fn zero_exit() -> ! {
         kernel_exit(0)
     }
+
+    assert!(
+        IntrArch::local_intr_disabled(),
+        "we came from scheduler, so interrupts should be disabled"
+    );
 
     let args_parsed =
         unsafe { a_args.as_ref() }.expect("task args in kernel stack should never be null");

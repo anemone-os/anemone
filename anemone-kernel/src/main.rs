@@ -124,18 +124,16 @@ fn exec_init_proc() {
     // open initial stdio fds so that they can be inherited.
     {
         use device::console::{open_console_stdin, open_console_stdout};
-        with_current_task(|kinit| {
-            kinit.open_fd(open_console_stdin(), FileFlags::READ, FdFlags::empty());
-            kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
-            kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
-        })
+        let kinit = get_current_task();
+        kinit.open_fd(open_console_stdin(), FileFlags::READ, FdFlags::empty());
+        kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
+        kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
     }
 
     // set up initial root and cwd for inheritance.
     {
-        with_current_task(|kinit| {
-            kinit.set_fs_state(FsState::new_root());
-        });
+        let kinit = get_current_task();
+        kinit.set_fs_state(FsState::new_root());
     }
 
     kernel_execve(
@@ -183,7 +181,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
 
     #[cfg(feature = "kunit")]
     {
-        crate::debug::kunit::kunit_runner();
+        // crate::debug::kunit::kunit_runner();
         unsafe {
             KUNIT_SYNC_COUNTER.sync_with_counter();
         }

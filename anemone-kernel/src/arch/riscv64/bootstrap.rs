@@ -19,7 +19,8 @@ use crate::{
     },
     mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
-    task::clone::CloneFlags,
+    sched::class::{SchedClassPrv, SchedEntity},
+    task::tid::Tid,
 };
 
 #[unsafe(no_mangle)]
@@ -335,6 +336,8 @@ unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
     }
 }
 
+static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("registering init task");
+
 unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
     unsafe {
         clear_bss();
@@ -398,16 +401,17 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
                 "kinit-bsp",
                 bsp_kinit as *const (),
                 ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
+                SchedEntity::new(SchedClassPrv::RoundRobin(())),
                 TaskFlags::NONE,
-                CloneFlags::empty(),
             )
         }
         .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e));
-        let bsp_kinit = Arc::new(bsp_kinit);
-        task::boot::register_root_task(bsp_kinit.clone());
-        guard.register(bsp_kinit.clone());
-        add_to_ready(bsp_kinit);
-        switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
+
+        let bsp_kinit = RegisterGuard::register_root(guard, bsp_kinit);
+        INIT_SYNC_COUNTER.sync_with_counter();
+
+        local_enqueue(bsp_kinit);
+        switch_to_guarded(VirtAddr::new(scheduler as *const () as u64))
     }
 }
 
@@ -439,18 +443,20 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         mm::kptable::activate_kernel_mapping();
         kdebugln!("anemone kernel booting on ap #{}", ap_id);
         set_boot_mono(false);
+
+        INIT_SYNC_COUNTER.sync_with_counter();
+        // now init task has been registered.
         let (ap_kinit, guard) = Task::new_kernel(
             "kinit-ap",
             ap_kinit as *const (),
             ParameterList::new(&[ap_id as u64]),
+            SchedEntity::new(SchedClassPrv::RoundRobin(())),
             TaskFlags::NONE,
-            CloneFlags::empty(),
         )
         .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e));
-        let ap_kinit = Arc::new(ap_kinit);
-        ap_kinit.add_as_child(task::boot::wait_for_root_task());
-        guard.register(ap_kinit.clone());
-        add_to_ready(ap_kinit);
-        switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
+        let ap_kinit = guard.register(ap_kinit, TaskBinding { parent: Tid::INIT });
+
+        local_enqueue(ap_kinit);
+        switch_to_guarded(VirtAddr::new(scheduler as *const () as u64))
     }
 }

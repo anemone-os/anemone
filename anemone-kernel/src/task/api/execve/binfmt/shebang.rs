@@ -25,7 +25,9 @@ fn load_binary(ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
         None => return Ok(ExecResult::NotRecognized),
     };
 
-    let interp = with_current_task(|task| task.make_global_path(Path::new(&interp))).to_string();
+    let interp = get_current_task()
+        .make_global_path(Path::new(&interp))
+        .to_string();
     ctx.path = interp.clone();
     let mut new_argv = vec![interp];
     if let Some(arg) = interp_arg {

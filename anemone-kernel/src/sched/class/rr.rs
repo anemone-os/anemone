@@ -2,16 +2,26 @@
 //!
 //! TODO: O(1) dequeue is not implemented yet.
 
-use crate::{prelude::*, sched::class::SchedClass};
+use crate::{
+    prelude::*,
+    sched::class::{OnTickAction, SchedClassPrv, Scheduler},
+};
 
 pub struct RoundRobin {
     // the core queue.
     ready_queue: VecDeque<Arc<Task>>,
-    // auxiliary map for O(1) dequeue.
-    // map: HashMap<Tid, usize>,
+    // TODO: auxiliary map for O(1) dequeue.
 }
 
-impl SchedClass for RoundRobin {
+impl RoundRobin {
+    pub const fn new() -> Self {
+        Self {
+            ready_queue: VecDeque::new(),
+        }
+    }
+}
+
+impl Scheduler for RoundRobin {
     fn enqueue(&mut self, task: Arc<Task>) {
         debug_assert!(
             self.ready_queue.iter().all(|t| !Arc::ptr_eq(t, &task)),
@@ -33,17 +43,12 @@ impl SchedClass for RoundRobin {
         self.ready_queue.pop_front()
     }
 
-    fn on_tick(&mut self) {
-        // currently our round-robin scheduler does not support time-slicing, so
-        // nothing to do here.
-    }
-
-    fn empty() -> Self
-    where
-        Self: Sized,
-    {
-        Self {
-            ready_queue: VecDeque::new(),
-        }
+    fn on_tick(&mut self, cur_task: &Arc<Task>) -> Option<OnTickAction> {
+        // currently our round-robin scheduler does not support time-slicing.
+        debug_assert!(matches!(
+            cur_task.sched_entity().class,
+            SchedClassPrv::RoundRobin(())
+        ));
+        Some(OnTickAction::Resched)
     }
 }

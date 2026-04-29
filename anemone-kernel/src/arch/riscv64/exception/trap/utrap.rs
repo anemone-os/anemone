@@ -4,7 +4,8 @@ use crate::{
         trap::{RiscV64Exception, RiscV64Interrupt, RiscV64TrapFrame},
     },
     prelude::{fault::handle_user_page_fault, *},
-    sched::{current_task_id, exit::kernel_exit},
+    sched::current_task_id,
+    task::{cpu_usage::Privilege, exit::kernel_exit},
 };
 
 // kernel trap entry point. since kernel doesn't use floating point, we don't
@@ -166,27 +167,54 @@ core::arch::global_asm!(
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
+    debug_assert!(IntrArch::local_intr_disabled());
+
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
-    with_current_task(|t| unsafe {
-        t.set_utrapframe(trapframe);
-        t.on_prv_change(Privilege::Kernel);
-    });
+    {
+        let task = get_current_task();
+        unsafe {
+            task.set_utrapframe(trapframe);
+        }
+        task.on_prv_change(Privilege::Kernel);
+    }
+
     let scause = riscv::register::scause::read();
     let code = scause.code();
+
     if scause.is_interrupt() {
+        percpu::on_entering_hwirq();
+
         let reason = RiscV64Interrupt::try_from(code)
             .unwrap_or_else(|_| panic!("unknown interrupt with code {}", code));
         unsafe {
             handle_intr(reason);
         }
+        percpu::on_leaving_hwirq();
+
+        {
+            // from this code block, the logical execution flow is considered
+            // leaving the hardware interrupt environment.
+
+            debug_assert!(allow_preempt(), "for utraps, this must hold");
+            if fetch_clear_need_resched() {
+                unsafe {
+                    schedule();
+                }
+            }
+        }
     } else {
+        // execption. we can safely turn on interrupts.
+
+        unsafe {
+            IntrArch::local_intr_enable();
+        }
+
         let stval = riscv::register::stval::read();
         let reason = RiscV64Exception::try_from(code)
             .unwrap_or_else(|_| panic!("unknown exception with code {}", code));
-        // restore interrupt
-        let intr_guard = IntrGuard::new(true);
+
         match reason {
             RiscV64Exception::UserEnvCall => {
                 handle_syscall(trapframe);
@@ -225,10 +253,13 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                 //TODO: Error code
             },
         }
-        drop(intr_guard);
+
+        unsafe {
+            IntrArch::local_intr_disable();
+        }
     }
 
-    with_current_task(|t| t.on_prv_change(Privilege::User));
+    get_current_task().on_prv_change(Privilege::User);
 }
 
 unsafe extern "C" {

@@ -32,6 +32,8 @@ pub struct MonoFlow<T> {
 
 unsafe impl<T> Sync for MonoFlow<T> {}
 
+unsafe impl<T> Send for MonoFlow<T> {}
+
 impl<T> MonoFlow<T> {
     /// Create a new [`MonoFlow`] wrapping the given data.
     ///

@@ -76,7 +76,7 @@ pub fn sys_wait4(
         // unsupported
     }
     let task = unsafe {
-        clone_current_task().waitpid(
+        get_current_task().waitpid(
             target,
             if waitoptions.contains(WaitOptions::WNOHANG) {
                 false

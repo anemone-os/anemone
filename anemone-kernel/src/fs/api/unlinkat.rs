@@ -39,7 +39,7 @@ fn unlinkat(
 ) -> Result<u64, SysError> {
     let path = Path::new(pathname.as_ref());
     if path.is_absolute() {
-        let path = with_current_task(|task| task.make_global_path(&Path::new(pathname.as_ref())));
+        let path = get_current_task().make_global_path(&Path::new(pathname.as_ref()));
         vfs_unlink(&path)?;
     } else {
         let dir_path = dirfd.to_pathref(true)?;

@@ -78,8 +78,7 @@ impl<T: Sized + Copy, A: UserAccess> UserPtr<T, A> {
 
 impl<T: Sized + Clone, A: UserAccess> UserPtr<T, A> {
     pub fn safe_read(&self) -> Result<T, SysError> {
-        let usp =
-            with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
+        let usp = get_current_task().clone_uspace();
         let mut usp_data = usp.write();
         let ptr: *const T = validate_user_pointer(A::PTE_FLAGS, usp_data.deref_mut(), self.addr)?;
         let res = unsafe { (*ptr).clone() };
@@ -95,8 +94,7 @@ impl<T: Sized + Clone, A: UserAccess> UserPtr<T, A> {
 
 impl<T: Sized> UserWritePtr<T> {
     pub fn safe_write(&self, value: T) -> Result<(), SysError> {
-        let usp =
-            with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
+        let usp = get_current_task().clone_uspace();
         let mut usp_data = usp.write();
         let ptr =
             validate_user_pointer_for_write(UserWrite::PTE_FLAGS, usp_data.deref_mut(), self.addr)?
@@ -149,8 +147,7 @@ impl<T: Sized, A: UserAccess> UserSlice<T, A> {
 impl<T: Sized + Copy, A: UserAccess> UserSlice<T, A> {
     pub fn safe_read(&self, buf: &mut [T]) -> Result<(), SysError> {
         debug_assert!(buf.len() >= self.len, "buffer too small for user slice");
-        let usp =
-            with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
+        let usp = get_current_task().clone_uspace();
         let mut usp_data = usp.write();
         let ptr: *const [T] = validate_user_array(
             A::PTE_FLAGS,
@@ -172,8 +169,7 @@ impl<T: Sized + Copy, A: UserAccess> UserSlice<T, A> {
 
 impl<T: Sized + Copy> UserWriteSlice<T> {
     pub fn safe_write(&self, buf: &[T]) -> Result<(), SysError> {
-        let usp =
-            with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
+        let usp = get_current_task().clone_uspace();
         self.safe_write_with(buf, &usp)
     }
     pub fn safe_write_with(&self, buf: &[T], usp: &UserSpace) -> Result<(), SysError> {
@@ -207,8 +203,7 @@ impl<T: Sized + Copy> UserWriteSlice<T> {
             bytes.len(),
             self.len
         );
-        let usp =
-            with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
+        let usp = get_current_task().clone_uspace();
         let mut usp_data = usp.write();
         let ptr = validate_user_array_for_write(
             UserWrite::PTE_FLAGS,
@@ -231,8 +226,7 @@ impl<T: Sized + Copy> UserWriteSlice<T> {
             bytes.len(),
             self.len
         );
-        let usp =
-            with_current_task(|t| t.clone_uspace()).expect("user task should have a user space");
+        let usp = get_current_task().clone_uspace();
         let mut usp_data = usp.write();
         let ptr = validate_user_array_for_write(
             UserWrite::PTE_FLAGS,
@@ -416,42 +410,40 @@ pub fn c_readonly_array_ptr<const MAX_LEN: usize, T: Eq + Copy>(
     if arg % align_of::<T>() as u64 != 0 {
         return Err(SysError::NotAligned);
     }
-    with_current_task(|t| {
-        let usp = t
-            .clone_uspace()
-            .expect("user task should have a user space");
-        let mut usp_data = usp.write();
-        let st_pointer = arg as *const T;
-        validate_user_pointer::<T>(PteFlags::READ, usp_data.deref_mut(), arg)?;
-        let mut ed_pointer = st_pointer;
-        let mut ed_vpn = VirtAddr::new(arg).page_down();
-        let mut len = 0;
-        while !unsafe { &*ed_pointer }.eq(&terminator) {
-            let next_ed_pointer = (ed_pointer as u64).wrapping_add(size_of::<T>() as u64);
-            if next_ed_pointer <= arg {
-                return Err(SysError::InvalidArgument.into());
-            }
-            let ed_vpn_new = VirtAddr::new(next_ed_pointer).page_down();
-            if ed_vpn_new != ed_vpn {
-                validate_user_pointer::<u8>(
-                    PteFlags::READ,
-                    usp_data.deref_mut(),
-                    next_ed_pointer as u64,
-                )?;
-                ed_vpn = ed_vpn_new;
-            }
-            ed_pointer = next_ed_pointer as *const T;
-            len += 1;
-            if len > MAX_LEN {
-                return Err(SysError::InvalidArgument);
-            }
+
+    let t = get_current_task();
+
+    let usp = t.clone_uspace();
+    let mut usp_data = usp.write();
+    let st_pointer = arg as *const T;
+    validate_user_pointer::<T>(PteFlags::READ, usp_data.deref_mut(), arg)?;
+    let mut ed_pointer = st_pointer;
+    let mut ed_vpn = VirtAddr::new(arg).page_down();
+    let mut len = 0;
+    while !unsafe { &*ed_pointer }.eq(&terminator) {
+        let next_ed_pointer = (ed_pointer as u64).wrapping_add(size_of::<T>() as u64);
+        if next_ed_pointer <= arg {
+            return Err(SysError::InvalidArgument.into());
         }
-        let slice = unsafe {
-            slice::from_raw_parts(st_pointer, len + if include_terminator { 1 } else { 0 })
-        };
-        let res: Box<[T]> = slice.into();
-        Ok(res)
-    })
+        let ed_vpn_new = VirtAddr::new(next_ed_pointer).page_down();
+        if ed_vpn_new != ed_vpn {
+            validate_user_pointer::<u8>(
+                PteFlags::READ,
+                usp_data.deref_mut(),
+                next_ed_pointer as u64,
+            )?;
+            ed_vpn = ed_vpn_new;
+        }
+        ed_pointer = next_ed_pointer as *const T;
+        len += 1;
+        if len > MAX_LEN {
+            return Err(SysError::InvalidArgument);
+        }
+    }
+    let slice =
+        unsafe { slice::from_raw_parts(st_pointer, len + if include_terminator { 1 } else { 0 }) };
+    let res: Box<[T]> = slice.into();
+    Ok(res)
 }
 
 /// Validate a user C string pointer and return a copied string slice.

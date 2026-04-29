@@ -18,7 +18,7 @@ fn sys_mkdirat(
     let perm = InodePerm::from_linux_bits(mode as u32).ok_or(SysError::InvalidArgument)?;
 
     if path.is_absolute() {
-        let path = with_current_task(|task| task.make_global_path(&path));
+        let path = get_current_task().make_global_path(&path);
         vfs_mkdir(&path, perm)?;
     } else {
         let dir_path = dirfd.to_pathref(true)?;

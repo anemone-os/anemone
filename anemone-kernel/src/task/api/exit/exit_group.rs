@@ -1,8 +1,3 @@
-//! exit_group system call.
-//!
-//! Reference:
-//! - https://www.man7.org/linux/man-pages/man2/exit_group.2.html
-
 use crate::prelude::*;
 
 /// Temporary workaround. now we don't have thread groups yet.

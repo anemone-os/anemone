@@ -1,11 +1,19 @@
 /// Per Cpu data management.
 use crate::prelude::*;
-use core::cell::UnsafeCell;
+use core::cell::{Cell, UnsafeCell};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Borrow {
+    Immutable(usize),
+    Mutable,
+}
+
+/// The represent "C" here is used for a stable layout.
 #[derive(Debug)]
-#[repr(transparent)]
+#[repr(C)]
 pub struct PerCpu<T> {
     inner: UnsafeCell<T>,
+    borrow: Cell<Borrow>,
 }
 
 unsafe impl<T> Sync for PerCpu<T> {}
@@ -14,6 +22,7 @@ impl<T> PerCpu<T> {
     pub const fn new(value: T) -> Self {
         Self {
             inner: UnsafeCell::new(value),
+            borrow: Cell::new(Borrow::Immutable(0)),
         }
     }
 }
@@ -55,8 +64,24 @@ impl<T> PerCpu<T> {
     {
         unsafe {
             let _preem_guard = PreemptGuard::new();
+
+            self.borrow.set(match self.borrow.get() {
+                Borrow::Immutable(n) => Borrow::Immutable(n + 1),
+                Borrow::Mutable => {
+                    panic!("try to immutably borrow a already mutably borrowed percpu variable")
+                },
+            });
+
             let res = f(self.get(CpuArch::percpu_base()));
-            drop(_preem_guard);
+
+            self.borrow.set(match self.borrow.get() {
+                Borrow::Immutable(n) => {
+                    assert!(n > 0, "internal error: invalid borrow state");
+                    Borrow::Immutable(n - 1)
+                },
+                Borrow::Mutable => unreachable!(),
+            });
+
             res
         }
     }
@@ -71,26 +96,28 @@ impl<T> PerCpu<T> {
     {
         unsafe {
             let _preem_guard = PreemptGuard::new();
+
+            self.borrow.set(match self.borrow.get() {
+                Borrow::Immutable(0) => Borrow::Mutable,
+                _ => panic!("try to mutably borrow a already borrowed percpu variable"),
+            });
+
             let res = f(self.get_mut(CpuArch::percpu_base()));
-            drop(_preem_guard);
+
+            self.borrow.set(Borrow::Immutable(0));
+
             res
         }
     }
 
+    /// No `with_remote_mut` is provided. We expect all percpu variables that
+    /// should be remotely accessed to be protected by a lock.
     pub unsafe fn with_remote<F, R>(&self, cpu_id: usize, f: F) -> R
     where
         F: FnOnce(&T) -> R,
     {
         assert_ne!(cpu_id, cur_cpu_id().get());
         unsafe { f(self.get(PERCPU_BASES[cpu_id])) }
-    }
-
-    pub unsafe fn with_remote_mut<F, R>(&self, cpu_id: usize, f: F) -> R
-    where
-        F: FnOnce(&mut T) -> R,
-    {
-        assert_ne!(cpu_id, cur_cpu_id().get());
-        unsafe { f(self.get_mut(PERCPU_BASES[cpu_id])) }
     }
 }
 
@@ -145,8 +172,8 @@ pub struct CoreLocal {
     online: AtomicBool,
     /// Tracking this cpu's preemption state. See [PreemptCounter].
     preempt_counter: PreemptCounter,
-    /// Reschedule request flag set by timer/interrupt paths.
-    need_resched: AtomicBool,
+    /// Whether this cpu is currently handling an hwirq.
+    in_hwirq: bool,
 }
 
 impl CoreLocal {
@@ -154,16 +181,8 @@ impl CoreLocal {
         cpu_id: 0,
         online: AtomicBool::new(false),
         preempt_counter: PreemptCounter::ZEROED,
-        need_resched: AtomicBool::new(false),
+        in_hwirq: false,
     };
-
-    fn cpu_id(&self) -> usize {
-        self.cpu_id
-    }
-
-    fn preempt_counter(&self) -> &PreemptCounter {
-        &self.preempt_counter
-    }
 
     pub fn online(&self) -> bool {
         self.online.load(Ordering::SeqCst)
@@ -175,40 +194,30 @@ impl CoreLocal {
     }
 }
 
-/// See [CoreLocal] for details on the safety requirements of this function.
-///
-/// This function disables interrupts automatically.
-unsafe fn with_core_local_mut<F, R>(f: F) -> R
-where
-    F: FnOnce(&mut CoreLocal) -> R,
-{
-    let _intr_guard = IntrGuard::new(false);
-    // what if preemption occurs here? well, it's possible when user passed in a bad
-    // closure. but all users of this function is within this module, so we can just
-    // make sure all of them are good.
-    unsafe {
-        let percpu_base = CpuArch::percpu_base();
-        let core_local = CORE_LOCAL.get_mut(percpu_base);
-        f(core_local)
+/// Bedrock accessors. Interrupts and preemption are not disabled. Caller should
+/// maintain the invariant.
+mod primitives {
+    use super::*;
+    pub unsafe fn get_core_local<'a>() -> &'a CoreLocal {
+        let base = CpuArch::percpu_base();
+        unsafe { CORE_LOCAL.get(base) }
+    }
+
+    pub unsafe fn get_core_local_mut<'a>() -> &'a mut CoreLocal {
+        let base = CpuArch::percpu_base();
+        unsafe { CORE_LOCAL.get_mut(base) }
+    }
+
+    /// caller must ensure preemption/interrupts are disabled before and during
+    /// the execution of this function, otherwise the passed-in `cpu_id` might
+    /// accidentally become current cpu id due to a cross-cpu migration, which
+    /// will cause an immediate panic.
+    pub unsafe fn get_core_local_remote<'a>(cpu_id: usize) -> &'a CoreLocal {
+        assert_ne!(cpu_id, cur_cpu_id().get());
+        unsafe { CORE_LOCAL.get(PERCPU_BASES[cpu_id]) }
     }
 }
-
-/// What [with_core_local_mut] requires also applies here, plus:
-/// - caller must ensure preemption/interrupts are disabled before and during
-///   the execution of this function, otherwise the passed-in `cpu_id` might
-///   accidentally become current cpu id due to a cross-cpu migration, which
-///   will cause an immediate panic.
-unsafe fn with_core_local_remote<F, R>(cpu_id: usize, f: F) -> R
-where
-    F: FnOnce(&CoreLocal) -> R,
-{
-    let _intr_guard = IntrGuard::new(false);
-    unsafe {
-        let core_local = CORE_LOCAL.get_mut(PERCPU_BASES[cpu_id]);
-        f(core_local)
-    }
-}
-
+use primitives::*;
 // out of this module you should never call the above two functions directly,
 // instead, use the following accessors which have more relaxed safety
 // requirements.
@@ -216,8 +225,11 @@ mod core_local_accessors {
     use super::*;
 
     /// Get the current CPU's ID.
+    ///
+    /// We don't support cross-core scheduling, so the returned [CpuId] is
+    /// stable.
     pub fn cur_cpu_id() -> CpuId {
-        unsafe { CpuId::new(with_core_local_mut(|core_local| core_local.cpu_id())) }
+        unsafe { with_intr_disabled(|| CpuId::new(get_core_local().cpu_id)) }
     }
 
     /// Check if the target CPU is online.
@@ -227,40 +239,65 @@ mod core_local_accessors {
         if cpu_id == cur_cpu_id().get() {
             true
         } else {
-            unsafe { with_core_local_remote(cpu_id, |core_local| core_local.online()) }
+            unsafe { with_intr_disabled(|| get_core_local_remote(cpu_id).online()) }
+        }
+    }
+
+    /// Whether the current CPU is currently handling an hwirq.
+    pub fn in_hwirq() -> bool {
+        unsafe { with_intr_disabled(|| get_core_local().in_hwirq) }
+    }
+
+    /// Called when entering hwirq handling code path.
+    pub fn on_entering_hwirq() {
+        assert!(!in_hwirq());
+        assert!(IntrArch::local_intr_disabled());
+        unsafe {
+            get_core_local_mut().in_hwirq = true;
+        }
+    }
+
+    /// Called when leaving hwirq handling code path.
+    pub fn on_leaving_hwirq() {
+        assert!(in_hwirq());
+        assert!(IntrArch::local_intr_disabled());
+        unsafe {
+            get_core_local_mut().in_hwirq = false;
         }
     }
 }
 pub use core_local_accessors::*;
 
-/// Preempt counter is deeply coupled with percpu management, so we put it in
-/// this module.
+macro_rules! gen_counter_impl {
+    ($name:ident) => {
+        paste::paste! {
+            #[derive(Debug)]
+            #[repr(transparent)]
+            pub struct [<$name Counter>](usize);
+
+            impl [<$name Counter>] {
+                pub const ZEROED: Self = Self(0);
+                pub unsafe fn increase(&mut self) -> usize {
+                    self.0 += 1;
+                    self.0
+                }
+
+                pub unsafe fn decrease(&mut self) -> usize {
+                    let Some(val) = self.0.checked_sub(1) else {
+                        panic!("try to decrease a already cleared {} counter", stringify!($name));
+                    };
+                    self.0 = val;
+                    val
+                }
+            }
+        }
+    };
+}
+
 mod preempt_counter {
     use super::*;
 
-    /// Preempt counter for tracking preemption state in the kernel.
-    #[derive(Debug)]
-    #[repr(transparent)]
-    pub struct PreemptCounter(AtomicUsize);
-
-    impl PreemptCounter {
-        pub const ZEROED: PreemptCounter = PreemptCounter(AtomicUsize::new(0));
-        unsafe fn increase(&self) -> usize {
-            self.0.fetch_add(1, Ordering::SeqCst) + 1
-        }
-
-        unsafe fn decrease(&self) -> usize {
-            let val = self.0.fetch_sub(1, Ordering::SeqCst).wrapping_sub(1);
-            if val == usize::MAX {
-                panic!("try to decrease a already cleared preempt counter");
-            }
-            val
-        }
-
-        fn allow(&self) -> bool {
-            self.0.load(Ordering::SeqCst) == 0
-        }
-    }
+    gen_counter_impl!(Preempt);
 
     #[derive(Debug)]
     pub struct PreemptGuard;
@@ -268,8 +305,8 @@ mod preempt_counter {
     impl PreemptGuard {
         pub fn new() -> Self {
             unsafe {
-                with_core_local_mut(|core_local| {
-                    core_local.preempt_counter().increase();
+                with_intr_disabled(|| {
+                    get_core_local_mut().preempt_counter.increase();
                     Self
                 })
             }
@@ -278,49 +315,26 @@ mod preempt_counter {
 
     impl Drop for PreemptGuard {
         fn drop(&mut self) {
-            // TODO: why prev_enabled is needed here? and why fetch is used instead of
-            // peeking first and clearing later if needed?
             unsafe {
-                with_intr_disabled(|prev_enabled| {
-                    if with_core_local_mut(|core_local| {
-                        core_local.preempt_counter().decrease() == 0
-                    }) && prev_enabled
-                        && fetch_clear_resched_flag()
-                    {
-                        try_schedule();
-                    }
+                with_intr_disabled(|| {
+                    get_core_local_mut().preempt_counter.decrease();
+
+                    // TODO: reschedule immediately if:
+                    // TODO again - too complex... XP
                 })
             }
         }
     }
 
     /// Check if preemption is allowed on current cpu now.
+    ///
+    /// **Currerently, only trap handlers should call this function.**
     pub fn allow_preempt() -> bool {
-        unsafe { with_core_local_mut(|core_local| core_local.preempt_counter().allow()) }
-    }
-
-    /// Fetch and clear the reschedule request flag for current cpu.
-    pub fn fetch_clear_resched_flag() -> bool {
-        unsafe {
-            with_core_local_mut(|core_local| {
-                core_local.need_resched.fetch_and(false, Ordering::SeqCst)
-            })
-        }
-    }
-
-    /// Set the reschedule request flag for current cpu.
-    pub fn set_resched_flag() {
-        unsafe {
-            with_core_local_mut(|core_local| {
-                core_local.need_resched.store(true, Ordering::SeqCst);
-            })
-        }
+        unsafe { with_intr_disabled(|| get_core_local().preempt_counter.0 == 0) }
     }
 }
 use preempt_counter::PreemptCounter;
-pub use preempt_counter::{
-    PreemptGuard, allow_preempt, fetch_clear_resched_flag, set_resched_flag,
-};
+pub use preempt_counter::{PreemptGuard, allow_preempt};
 
 /// This array is used for storing percpu base addresses for all CPUs.
 ///
@@ -418,7 +432,7 @@ mod init_routines {
     /// Set the current CPU as online.
     pub fn percpu_login() {
         unsafe {
-            with_core_local_mut(|core_local| core_local.login());
+            with_intr_disabled(|| get_core_local_mut().login());
         }
     }
 }

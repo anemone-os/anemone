@@ -1,10 +1,10 @@
 use anemone_abi::syscall::SYS_GETPPID;
 use kernel_macros::syscall;
 
-use crate::{prelude::*, sched::with_current_task, task::tid::Tid};
+use crate::{prelude::*, task::tid::Tid};
 
 pub fn kernel_getppid() -> Option<Tid> {
-    let parent = with_current_task(|task| task.parent_tid());
+    let parent = get_current_task().parent_tid();
     parent
 }
 

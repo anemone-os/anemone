@@ -10,6 +10,7 @@ pub mod writer;
 pub mod as_container;
 pub mod any_opaque;
 pub mod byte_writer;
+pub mod cacheline;
 pub mod data;
 pub mod identity;
 pub mod iter_ctx;
