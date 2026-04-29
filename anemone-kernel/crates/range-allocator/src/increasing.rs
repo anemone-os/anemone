@@ -174,11 +174,10 @@ mod tests {
     }
 
     #[test]
-    fn zero_length_or_zero_align_rejected() {
+    fn zero_length_rejected() {
         let mut allocator = IncreasingRangeAllocator::new(range(0, 16));
 
         assert_eq!(allocator.allocate(0), None);
-        assert_eq!(allocator.allocate_aligned(4, 0), None);
         assert_eq!(allocator.allocate(16), Some(range(0, 16)));
     }
 

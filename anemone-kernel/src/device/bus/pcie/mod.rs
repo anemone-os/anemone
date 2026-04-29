@@ -33,7 +33,7 @@ pub const CLASSCODE_BRIDGE: PciClassCode = PciClassCode {
     prog_if: 0x00,
 };
 
-/// Host bridge class code (base 0x06, sub 0x04).
+/// Host bridge class code (base 0x06, sub 0x00).
 pub const CLASSCODE_HOST_BRIDGE: PciClassCode = PciClassCode {
     base: 0x06,
     sub: 0x00,

@@ -78,7 +78,9 @@ pub fn query_virt_addr(phys_addr: PhysAddr, size: u64) -> Option<VirtAddr> {
     let remap = &remap_node.value;
     match remap.upgrade() {
         None => {
-            let _ = REMAP_HASHMAP.write().remove(&remap_node.key);
+            let key = remap_node.key;
+            drop(remap_tree);
+            let _ = REMAP_HASHMAP.write().remove(&key);
             None
         },
         Some(remap) => {

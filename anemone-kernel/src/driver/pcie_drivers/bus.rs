@@ -280,8 +280,9 @@ impl PcieDriver for BridgeDriver {
                 // Program I/O base/limit if an I/O aperture was available.
                 if let Some(io_base) = sn_io {
                     unsafe {
-                        let io_limit = sn_io_after.unwrap();
+                        let mut io_limit = sn_io_after.unwrap();
                         if io_limit > io_base {
+                            io_limit -= 1;
                             conf.set_io_base(io_base.try_into().map_err(|_e| {
                                 kerrln!("failed to set I/O base for device {} when probed by driver {}: aligned I/O base address {:#x} exceeds the max value {:#x}",
                                     bus_pdev.name(),
@@ -307,8 +308,9 @@ impl PcieDriver for BridgeDriver {
                 // Program prefetchable memory base/limit.
                 if let Some(mem_base) = sn_mem_pf {
                     unsafe {
-                        let mem_limit = sn_mem_pf_after.unwrap();
+                        let mut mem_limit = sn_mem_pf_after.unwrap();
                         if mem_limit > mem_base {
+                            mem_limit -= 1;
                             conf.set_prefetchable_mem_base(mem_base);
                             conf.set_prefetchable_mem_limit(mem_limit);
                         }
@@ -318,8 +320,9 @@ impl PcieDriver for BridgeDriver {
                 // Program non-prefetchable memory base/limit.
                 if let Some(mem_base) = sn_mem_un {
                     unsafe {
-                        let mem_limit = sn_mem_un_after.unwrap();
+                        let mut mem_limit = sn_mem_un_after.unwrap();
                         if mem_limit > mem_base {
+                            mem_limit -= 1;
                             conf.set_mem_base(mem_base.try_into().map_err(|_e| {
                                 kerrln!("failed to set not-prefetchable memory base for device {} when probed by driver {}: aligned memory base address {:#x} exceeds the max value {:#x}",
                                     bus_pdev.name(),

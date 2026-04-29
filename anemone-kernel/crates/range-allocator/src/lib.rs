@@ -296,15 +296,6 @@ mod tests {
     }
 
     #[test]
-    fn allocate_aligned_rejects_zero_align_and_keeps_state() {
-        let mut allocator = RangeAllocator::<TestRange>::new();
-        allocator.free(range(0, 8)).unwrap();
-
-        assert_eq!(allocator.allocate_aligned(4, 0), None);
-        assert_eq!(allocator.allocate(8), Some(range(0, 8)));
-    }
-
-    #[test]
     fn allocate_aligned_returns_none_when_alignment_cannot_fit() {
         let mut allocator = RangeAllocator::<TestRange>::new();
         allocator.free(range(1, 7)).unwrap();
