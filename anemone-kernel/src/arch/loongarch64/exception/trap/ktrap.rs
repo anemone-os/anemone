@@ -137,7 +137,11 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
     let ecode = estat.ecode();
     if ecode == 0 {
         // interrupt
-        let intr_flags = estat.is();
+        let intr_flags = estat
+            .is()
+            .iter()
+            .next()
+            .expect("received interrupt with no pending source");
         let reason = LA64Interrupt::try_from(intr_flags)
             .unwrap_or_else(|_| panic!("unknown interrupt with flag {:?}", intr_flags));
         unsafe {
