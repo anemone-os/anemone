@@ -166,7 +166,17 @@ pub unsafe fn shutdown() {
 #[kunit]
 fn ls_devices() {
     fn ls_devices_inner(device: &dyn Device, prefix: &str) {
-        kprintln!("{}{}", prefix, device.name());
+        kprintln!("{}{} : {} device", prefix, device.name(), {
+            if device.as_platform_device().is_some() {
+                "platform"
+            } else if device.as_virtio_device().is_some() {
+                "virtio"
+            } else if device.as_pcie_device().is_some() {
+                "pcie"
+            } else {
+                "other"
+            }
+        });
         let new_prefix = format!("{}{}/", prefix, device.name());
         if let Some(pdev) = (device as &dyn Any).downcast_ref::<PlatformDevice>() {
             kprintln!("\tresources: {:x?}", pdev.resources());

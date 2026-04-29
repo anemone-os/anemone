@@ -1,5 +1,8 @@
+//! PCI/PCIe address types: function identifiers and the Open Firmware 96-bit
+//! PCI address.
+
 use core::{
-    fmt::Debug,
+    fmt::{Debug, Display},
     ops::{Add, BitAnd},
 };
 
@@ -7,27 +10,33 @@ use bitflags::bitflags;
 
 use crate::device::bus::pcie::ecam::{BusNum, DevNum, FuncNum};
 
-/// Represent a PCI function address as a tuple of bus, device, and function
-/// numbers.
+/// (bus, device, function) triplet identifying a PCI/PCIe function within a
+/// domain.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct PciFuncAddr {
+pub struct PciFunctionIdentifier {
     pub bus: BusNum,
     pub dev: DevNum,
     pub func: FuncNum,
 }
 
-impl Debug for PciFuncAddr {
+impl Debug for PciFunctionIdentifier {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("PciFuncAddr")
+        f.debug_tuple("PciFunctionIdentifier")
             .field(&format_args!(
-                "{:?}, {:?}, {:?}",
+                "Pci({:?}:{:?}.{:?})",
                 self.bus, self.dev, self.func
             ))
             .finish()
     }
 }
 
-impl BitAnd for PciFuncAddr {
+impl Display for PciFunctionIdentifier {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}:{}.{}", self.bus, self.dev, self.func)
+    }
+}
+
+impl BitAnd for PciFunctionIdentifier {
     type Output = Self;
 
     fn bitand(self, rhs: Self) -> Self::Output {
@@ -39,46 +48,15 @@ impl BitAnd for PciFuncAddr {
     }
 }
 
-/// Open Firmware Standard 96-bit PCI Address
-/// ```
-/// 95                    64 63                   32 31                     0
-/// +-----------------------+-----------------------+-----------------------+
-/// |  Physical High (hi)   |  Physical Mid (mid)   |  Physical Low  (lo)   |
-/// +-----------------------+-----------------------+-----------------------+
-/// ```
+/// Open Firmware Standard 96-bit PCI address, stored as three LE 32-bit words.
 ///
+/// Bit layout of word 2 (bits 95–64):
+/// ```text
+/// 95  94  93  92  91–89  88–87    86–79      78–74    73–71    70–64
+///  n   p   t   0   000    ss      Bus(8)    Dev(5)   Func(3)  Reg(7)
 /// ```
-/// 95  94  93  92    89   87        80 79    75 74  72 71                  64
-/// +---+---+---+-----+----+-----------+--------+------+---------------------+
-/// | n | p | t |  0  | ss |    Bus    | Device | Func |     Register        |
-/// +---+---+---+-----+----+-----------+--------+------+---------------------+
-/// ```
-///
-/// ```
-/// 63                                        32 31                                         0
-/// +-------------------------------------------+-------------------------------------------+
-/// |            32-bit Address High            |            32-bit Address Low             |
-/// +-------------------------------------------+-------------------------------------------+
-/// ```
-///
-/// Field Definitions:
-/// * n    - Not-Relocatable
-/// * p    - Prefetchable
-/// * t    - if the address is aliased (for non-relocatable I/O), below 1 MB
-///   (for Memory), or below 64 KB (for relocatable I/O).
-/// * ss   - 2-bit address space code
-///     * 00 - Configuration Space
-///     * 01 - I/O Space
-///     * 10 - 32-bit Memory Space
-///     * 11 - 64-bit Memory Space
-/// * Bus  - 8-bit PCI bus number
-/// * Device - 5-bit PCI device number
-/// * Func - 3-bit PCI function number
-/// * Register - 8-bit register offset
-///
-/// Represent a 96-bit PCI address as used by Open Firmware.
-///
-/// Store the address as three 32-bit words in little-endian order.
+/// - **n**: non-relocatable, **p**: prefetchable, **t**: aliased address flag
+/// - **ss**: address space code — `00` Config, `01` I/O, `10` Mem32, `11` Mem64
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OfPciAddr([u32; 3]);
 
@@ -97,14 +75,15 @@ impl Add<u64> for OfPciAddr {
 bitflags! {
     /// Flags in the 96-bit PCI address as defined in Open Firmware Specification.
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-    pub struct PciAddrFlags: u8 {
+    pub struct OfPciAddrFlags: u8 {
         const NotRelocatable = 1 << 2;
         const Prefetchable = 1 << 1;
-        /// If the address is aliased (for non-relocatable I/O), below 1 MB (for Memory), or below 64 KB (for relocatable I/O).
+        /// Aliased address, or address below 1 MB (Memory) / 64 KB (I/O).
         const Special = 1 << 0;
     }
 }
 
+/// PCI address space type: Config, I/O, 32-bit or 64-bit Memory.
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PciSpaceType {
@@ -138,54 +117,46 @@ impl Into<u8> for PciSpaceType {
 }
 
 impl OfPciAddr {
-    /// Return flags encoded in the 96-bit PCI address.
-    pub fn flags(&self) -> PciAddrFlags {
-        PciAddrFlags::from_bits_truncate((self.0[2] >> 29) as u8)
+    pub fn flags(&self) -> OfPciAddrFlags {
+        OfPciAddrFlags::from_bits_truncate((self.0[2] >> 29) as u8)
     }
 
-    /// Return PCI address space type.
+    /// Address space type.
     pub fn space_type(&self) -> PciSpaceType {
         PciSpaceType::from(((self.0[2] >> 24) & 0b11) as u8)
     }
 
-    pub fn func_addr(&self) -> PciFuncAddr {
-        PciFuncAddr {
+    pub fn func_addr(&self) -> PciFunctionIdentifier {
+        PciFunctionIdentifier {
             bus: self.bus(),
             dev: self.dev(),
             func: self.func(),
         }
     }
 
-    /// Return PCI bus number.
     pub fn bus(&self) -> BusNum {
         BusNum::try_from((self.0[2] >> 16) as u8).unwrap()
     }
 
-    /// Return PCI device number.
     pub fn dev(&self) -> DevNum {
         DevNum::try_from(((self.0[2] >> 8) as u8) >> 3).unwrap()
     }
 
-    /// Return PCI function number.
     pub fn func(&self) -> FuncNum {
         FuncNum::try_from(((self.0[2] >> 8) as u8) & 0b111).unwrap()
     }
 
-    /// Return register offset within PCI configuration space.
-    ///
-    /// Only meaningful for configuration-space accesses.
+    /// Register offset within config space.
     pub fn register_offset(&self) -> u8 {
         (self.0[2] & 0xff) as u8
     }
 
-    /// Return 64-bit physical address.
-    ///
-    /// Set upper 32 bits to zero for 32-bit addresses.
+    /// 64-bit physical address.
     pub fn address(&self) -> u64 {
         ((self.0[1] as u64) << 32) | (self.0[0] as u64)
     }
 
-    /// Combine `bus`, `dev`, `func`, and `register_offset` into a 32-bit field.
+    /// Pack `bus`, `dev`, `func`, and `register_offset` into a 32-bit word.
     fn combined_num(bus: BusNum, dev: DevNum, func: FuncNum, register_offset: u8) -> u32 {
         let bus_u8: u8 = bus.into();
         let dev_u8: u8 = dev.into();
@@ -196,11 +167,11 @@ impl OfPciAddr {
             | (register_offset as u32)
     }
 
-    /// Create a new `OfPciAddr` from constituent fields.
+    /// Construct an `OfPciAddr` from its constituent fields.
     pub fn new(
         space_type: PciSpaceType,
-        flags: PciAddrFlags,
-        func: PciFuncAddr,
+        flags: OfPciAddrFlags,
+        func: PciFunctionIdentifier,
         register_offset: u8,
         addr: u64,
     ) -> Self {
@@ -233,7 +204,7 @@ impl OfPciAddr {
 
 impl Debug for OfPciAddr {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("PciAddr")
+        f.debug_struct("OfPciAddr")
             .field("space_type", &self.space_type())
             .field("flags", &self.flags())
             .field("bus", &self.bus())

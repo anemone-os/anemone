@@ -54,7 +54,8 @@ impl<R: Rangable> RangeAllocator<R> {
     }
 
     pub fn allocate_aligned(&mut self, length: usize, align: usize) -> Option<R> {
-        if length == 0 || align == 0 {
+        debug_assert!(align != 0, "alignment must be non-zero");
+        if length == 0 {
             return None;
         }
 
@@ -292,15 +293,6 @@ mod tests {
         assert_eq!(allocator.allocate(5), Some(range(3, 5)));
         assert_eq!(allocator.allocate(7), Some(range(16, 7)));
         assert_eq!(allocator.allocate(1), None);
-    }
-
-    #[test]
-    fn allocate_aligned_rejects_zero_align_and_keeps_state() {
-        let mut allocator = RangeAllocator::<TestRange>::new();
-        allocator.free(range(0, 8)).unwrap();
-
-        assert_eq!(allocator.allocate_aligned(4, 0), None);
-        assert_eq!(allocator.allocate(8), Some(range(0, 8)));
     }
 
     #[test]

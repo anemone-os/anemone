@@ -1,12 +1,18 @@
+//! Firmware-node wrapper for PCIe devices. Carries interrupt mapping info
+//! from the device tree into the device model.
+
 use core::any::Any;
 
-use crate::device::{bus::pcie::PcieIntrInfo, discovery::fwnode::FwNode};
+use crate::device::{bus::pcie::domain::PcieIntrInfo, discovery::fwnode::FwNode};
 
+/// Firmware node for a PCIe device, carrying optional interrupt routing info.
+#[derive(Debug)]
 pub struct PcieFwNode {
     intr: Option<PcieIntrInfo>,
 }
 
 impl PcieFwNode {
+    /// Create a firmware node with optional interrupt info.
     pub fn new(intr: Option<PcieIntrInfo>) -> Self {
         Self { intr }
     }
