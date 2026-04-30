@@ -51,12 +51,17 @@ pub unsafe fn scheduler() -> ! {
     // - current task is the task that right switched out.
     // - scheduler are still in previous task's memory mapping.
     loop {
-        let prev = get_current_task();
-        let next = local_pick_next();
-        unsafe {
-            switch_mapping(&prev, &next);
-            switch_to(next);
+        {
+            let prev = get_current_task();
+            let next = local_pick_next();
+            unsafe {
+                switch_mapping(&prev, &next);
+                switch_to(next);
+            }
         }
+
+        // free resources.
+        dispose_deferred_tasks();
     }
 }
 
@@ -87,6 +92,8 @@ mod kore {
             TaskStatus::Runnable => {
                 if !curr.flags().is_idle() {
                     local_requeue_current(curr);
+                } else {
+                    drop(curr);
                 }
             },
             TaskStatus::Waiting => {
@@ -94,12 +101,14 @@ mod kore {
                     "task {} is waiting, not enqueuing it to run queue",
                     current_task_id(),
                 );
+                drop(curr);
             },
             TaskStatus::Zombie => {
                 knoticeln!(
                     "task {} is zombie, not enqueuing it to run queue",
                     current_task_id(),
                 );
+                drop(curr);
             },
         }
 

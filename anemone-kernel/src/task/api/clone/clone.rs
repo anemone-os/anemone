@@ -9,7 +9,7 @@ use crate::{
     },
 };
 
-fn sys_clone_tracer(flags: u64, new_sp: u64, parent_tid: u64, tls: u64, child_tid: u64) {
+#[syscall(SYS_CLONE, preparse = |flags, new_sp, parent_tid, tls, child_tid| {
     kdebugln!(
         "sys_clone called with flags={:#x}, new_sp={:#x}, parent_tid={:#x}, tls={:#x}, child_tid={:#x}",
         flags,
@@ -18,9 +18,7 @@ fn sys_clone_tracer(flags: u64, new_sp: u64, parent_tid: u64, tls: u64, child_ti
         tls,
         child_tid
     );
-}
-
-#[syscall(SYS_CLONE, preparse = sys_clone_tracer)]
+})]
 pub fn sys_clone(
     flags: CloneFlags,
     new_sp: CloneStack,

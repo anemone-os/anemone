@@ -199,9 +199,12 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
 
             debug_assert!(allow_preempt(), "for utraps, this must hold");
             if fetch_clear_need_resched() {
+                // if we need reschedule, we can't waste time on disposing deferred tasks.
                 unsafe {
                     schedule();
                 }
+            } else {
+                dispose_deferred_tasks();
             }
         }
     } else {

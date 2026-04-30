@@ -140,6 +140,8 @@ fn sys_wait4(
 ) -> Result<u64, SysError> {
     let task = get_current_task();
 
+    // TODO: optimize this. we did a double scan, which is not necessary.
+
     loop {
         let mut scanner = Wait4Scanner::new(target);
         // scanning does not need topology consistency. it's just a best effort to find
@@ -163,6 +165,10 @@ fn sys_wait4(
             }
 
             task.on_reap_child(&child);
+
+            // put the reaped child into deferred queue, so that it can be safely dropped
+            // later.
+            child.defer_to_dispose();
 
             return Ok(tid.get() as u64);
         }

@@ -384,8 +384,9 @@ impl Task {
     /// The task may still be temporarily referenced by scheduler-local state
     /// on its owner CPU until the switch boundary fully completes.
     ///
-    /// TODO: deferred queue.
-    pub fn reap_child(&self, child: Tid) -> Arc<Task> {
+    /// This function returns a [ReapedTask]. See [ReapedTask::defer_to_dispose]
+    /// for more details.
+    pub fn reap_child(&self, child: Tid) -> ReapedTask {
         let mut topology = TOPOLOGY.inner.write_irqsave();
 
         let parent_tid = self.tid();
@@ -412,8 +413,109 @@ impl Task {
             child_node.parent
         );
 
-        child_node.task
+        ReapedTask::new(child_node.task)
     }
 }
 
 // endregion: topology operations
+
+// region: deferred tasklist
+
+mod deferred {
+    use core::ops::Deref;
+
+    use super::*;
+
+    /// lock_irqsave should always be used since this may be accessed in trap
+    /// handlers.
+    static TASKS_TO_DISPOSE: SpinLock<VecDeque<Arc<Task>>> = SpinLock::new(VecDeque::new());
+
+    #[derive(Debug)]
+    pub struct ReapedTask {
+        task: Option<Arc<Task>>,
+    }
+
+    impl ReapedTask {
+        pub(super) fn new(task: Arc<Task>) -> Self {
+            Self { task: Some(task) }
+        }
+
+        /// We don't just let the [Arc] to be dropped naturally when its strong
+        /// reference count reaches zero, because we want to control when the
+        /// actual destruction happens. Otherwise, the destruction may happen at
+        /// unexpected points, which may cause deadlocks or performance
+        /// fluctuations. **More importantly, the observability of the system
+        /// will be lost.**
+        ///
+        /// This function put the task into a global deferred queue, and the
+        /// actual disposal will be done when [dispose_deferred_tasks] is
+        /// called, at some well-defined points in kernel.
+        pub fn defer_to_dispose(mut self) {
+            TASKS_TO_DISPOSE
+                .lock_irqsave()
+                .push_back(self.task.take().unwrap());
+            let _ = ManuallyDrop::new(self);
+        }
+
+        // is there any necessity to provide a method to cancel the defer? i think not.
+    }
+
+    impl Drop for ReapedTask {
+        fn drop(&mut self) {
+            panic!("a reaped task was dropped without being explicitly deferred");
+        }
+    }
+
+    impl Deref for ReapedTask {
+        type Target = Arc<Task>;
+
+        fn deref(&self) -> &Self::Target {
+            self.task
+                .as_ref()
+                .expect("reaped task should never be null")
+        }
+    }
+
+    /// Explicitly dispose those tasks without any other strong reference.
+    ///
+    /// Only certain points in the code are allowed to call this function. e.g.
+    /// the end of the scheduler loop, return point of hwirq handlers, etc.
+    ///
+    /// TODO: if there are some tasks that have been deferred for a long time
+    /// but still cannot be disposed, report them in some way, because that may
+    /// indicate some bugs.
+    pub fn dispose_deferred_tasks() {
+        // TODO: make these a kconfig item
+        const DISPOSE_BATCH_LIMIT: usize = 16;
+        const SCAN_BATCH_LIMIT: usize = 64;
+
+        let mut can_be_disposed = vec![];
+        {
+            let mut tasks = TASKS_TO_DISPOSE.lock_irqsave();
+
+            let scan_budget = tasks.len().min(SCAN_BATCH_LIMIT);
+
+            for _ in 0..scan_budget {
+                let Some(task) = tasks.pop_front() else {
+                    break;
+                };
+
+                if Arc::strong_count(&task) == 1 {
+                    can_be_disposed.push(task);
+                    if can_be_disposed.len() >= DISPOSE_BATCH_LIMIT {
+                        break;
+                    }
+                } else {
+                    // still alive somewhere else, defer to next round.
+                    tasks.push_back(task);
+                }
+            }
+        }
+        while let Some(task) = can_be_disposed.pop() {
+            kdebugln!("disposing task {} with tid {}", task.name(), task.tid());
+        }
+    }
+}
+pub use deferred::*;
+
+// endregion: deferred tasklist
