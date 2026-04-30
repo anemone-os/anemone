@@ -1,4 +1,6 @@
-//! Typed no-irq lock.
+//! TODO: Typed no-irq lock.
+//!
+//! TODO: Interrupt-safe lazy.
 
 pub mod counter;
 pub mod r#final;
