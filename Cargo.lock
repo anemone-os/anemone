@@ -55,6 +55,7 @@ dependencies = [
  "talc",
  "typed-path",
  "virtio-drivers",
+ "wavltree",
  "yansi",
 ]
 
@@ -1045,6 +1046,12 @@ dependencies = [
  "indexmap",
  "semver",
 ]
+
+[[package]]
+name = "wavltree"
+version = "0.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ace10234ac0a20f8ba22b3605fbc73fb184eef5faaf5bb690313b28a6df13e6"
 
 [[package]]
 name = "windows-link"

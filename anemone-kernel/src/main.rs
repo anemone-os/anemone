@@ -87,8 +87,7 @@ fn mount_rootfs() {
         },
         other => panic!("unsupported rootfs source kind: {}", other),
     }
-
-    // ls_dir(Path::new("/"));
+    ls_dir(Path::new("/"));
 }
 
 // recursively ls

@@ -4,7 +4,7 @@ use virtio_drivers::transport::SomeTransport;
 
 use crate::{
     device::{
-        bus::platform::PlatformDevice,
+        bus::{pcie::PcieDevice, platform::PlatformDevice},
         discovery::fwnode::FwNode,
         kobject::{KObject, KObjectBase, KObjectOps},
     },
@@ -96,9 +96,14 @@ impl VirtIODevice {
             .expect("virtio device should have parent transport device")
             .upgrade()
             .expect("parent device should be alive");
-        let transport_dev = (kobj.as_ref() as &dyn Any)
-            .downcast_ref::<PlatformDevice>()
-            .expect("transport device should be a platform device");
+        
+        let transport_dev: &dyn Device =
+            match (kobj.as_ref() as &dyn Any).downcast_ref::<PlatformDevice>() {
+                Some(dev) => dev,
+                None => (kobj.as_ref() as &dyn Any)
+                    .downcast_ref::<PcieDevice>()
+                    .expect("transport device should be a platform device or a PCIe device"),
+            };
 
         request_irq(transport_dev, handler, prv_data)
     }

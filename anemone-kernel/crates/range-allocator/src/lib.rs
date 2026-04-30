@@ -2,15 +2,32 @@
 
 extern crate alloc;
 
-use core::hash::Hash;
+use core::{hash::Hash, ops::Range};
 
 use alloc::collections::BTreeMap;
 use hashbrown::HashSet;
 
-pub trait Rangable: Hash + Copy + Eq {
+mod increasing;
+pub use increasing::IncreasingRangeAllocator;
+
+pub trait Rangable: Hash + Clone + Eq {
     fn start(&self) -> usize;
     fn len(&self) -> usize;
     fn from_parts(start: usize, length: usize) -> Self;
+}
+
+impl Rangable for Range<u64> {
+    fn start(&self) -> usize {
+        self.start as usize
+    }
+
+    fn len(&self) -> usize {
+        (self.end - self.start) as usize
+    }
+
+    fn from_parts(start: usize, length: usize) -> Self {
+        (start as u64)..(start as u64 + length as u64)
+    }
 }
 
 #[derive(Debug)]
@@ -33,36 +50,92 @@ impl<R: Rangable> RangeAllocator<R> {
     }
 
     pub fn allocate(&mut self, length: usize) -> Option<R> {
+        self.allocate_aligned(length, 1)
+    }
+
+    pub fn allocate_aligned(&mut self, length: usize, align: usize) -> Option<R> {
+        debug_assert!(align != 0, "alignment must be non-zero");
         if length == 0 {
             return None;
         }
 
-        let (&found_len, ranges) = self.free_by_length.range_mut(length..).next()?;
-        let range = ranges
-            .iter()
-            .next()
-            .expect("Internal error: set of length exist but is empty")
-            .clone();
-        ranges.remove(&range);
-        if ranges.is_empty() {
-            self.free_by_length.remove(&found_len);
+        let mut selected: Option<(R, usize, usize, usize)> = None;
+
+        for (_, ranges) in self.free_by_length.range(length..) {
+            if let Some((range, alloc_start, alloc_end, range_end)) =
+                ranges.iter().find_map(|range| {
+                    let (alloc_start, alloc_end, range_end) =
+                        Self::try_alloc_in_range(range, length, align)?;
+                    Some((range.clone(), alloc_start, alloc_end, range_end))
+                })
+            {
+                selected = Some((range, alloc_start, alloc_end, range_end));
+                break;
+            }
         }
 
+        let (range, alloc_start, alloc_end, range_end) = selected?;
+        let range_start = range.start();
+
+        self.remove_free_range(&range);
+
+        if alloc_start > range_start {
+            self.insert_free_range(R::from_parts(range_start, alloc_start - range_start));
+        }
+
+        if alloc_end < range_end {
+            self.insert_free_range(R::from_parts(alloc_end, range_end - alloc_end));
+        }
+
+        Some(R::from_parts(alloc_start, length))
+    }
+
+    fn align_up(value: usize, align: usize) -> Option<usize> {
+        if align == 0 {
+            return None;
+        }
+
+        let rem = value % align;
+        if rem == 0 {
+            Some(value)
+        } else {
+            value.checked_add(align - rem)
+        }
+    }
+
+    fn try_alloc_in_range(range: &R, length: usize, align: usize) -> Option<(usize, usize, usize)> {
+        let range_start = range.start();
+        let range_end = range_start.checked_add(range.len())?;
+        let alloc_start = Self::align_up(range_start, align)?;
+        let alloc_end = alloc_start.checked_add(length)?;
+
+        if alloc_end > range_end {
+            return None;
+        }
+
+        Some((alloc_start, alloc_end, range_end))
+    }
+
+    fn insert_free_range(&mut self, range: R) {
+        self.free_by_start.insert(range.start(), range.clone());
+        self.free_by_length
+            .entry(range.len())
+            .or_default()
+            .insert(range);
+    }
+
+    fn remove_free_range(&mut self, range: &R) {
         self.free_by_start
             .remove(&range.start())
             .expect("Internal error: free_by_length and free_by_start are out of sync");
 
-        if found_len > length {
-            let allocated = R::from_parts(range.start(), length);
-            let rem = R::from_parts(allocated.start() + length, found_len - length);
-            self.free_by_start.insert(rem.start(), rem);
-            self.free_by_length
-                .entry(rem.len())
-                .or_default()
-                .insert(rem);
-            Some(allocated)
-        } else {
-            Some(range)
+        let set = self
+            .free_by_length
+            .get_mut(&range.len())
+            .expect("Internal error: free_by_length and free_by_start are out of sync");
+        set.remove(range);
+        if set.is_empty() {
+            self.free_by_length.remove(&range.len());
         }
     }
 
@@ -79,8 +152,12 @@ impl<R: Rangable> RangeAllocator<R> {
             .free_by_start
             .range(..start)
             .next_back()
-            .map(|(_, r)| *r);
-        let next = self.free_by_start.range(start..).next().map(|(_, r)| *r);
+            .map(|(_, r)| r.clone());
+        let next = self
+            .free_by_start
+            .range(start..)
+            .next()
+            .map(|(_, r)| r.clone());
 
         if let Some(r) = prev {
             let r_end = r.start() + r.len();
@@ -88,16 +165,8 @@ impl<R: Rangable> RangeAllocator<R> {
                 return Err(RangeAllocError::FreeingExistingRange);
             } else if r_end == start {
                 start = r.start();
-                len = len + r.len();
-                self.free_by_start.remove(&r.start());
-                let set = self
-                    .free_by_length
-                    .get_mut(&r.len())
-                    .expect("Internal error: free_by_length and free_by_start are out of sync");
-                set.remove(&r);
-                if set.is_empty() {
-                    self.free_by_length.remove(&r.len());
-                }
+                len += r.len();
+                self.remove_free_range(&r);
             }
         }
 
@@ -105,25 +174,12 @@ impl<R: Rangable> RangeAllocator<R> {
             if r.start() < end {
                 return Err(RangeAllocError::FreeingExistingRange);
             } else if r.start() == end {
-                len = len + r.len();
-                self.free_by_start.remove(&r.start());
-                let set = self
-                    .free_by_length
-                    .get_mut(&r.len())
-                    .expect("Internal error: free_by_length and free_by_start are out of sync");
-                set.remove(&r);
-                if set.is_empty() {
-                    self.free_by_length.remove(&r.len());
-                }
+                len += r.len();
+                self.remove_free_range(&r);
             }
         }
 
-        let final_range = R::from_parts(start, len);
-        self.free_by_start.insert(start, final_range);
-        self.free_by_length
-            .entry(len)
-            .or_default()
-            .insert(final_range);
+        self.insert_free_range(R::from_parts(start, len));
         Ok(())
     }
 }
@@ -226,5 +282,25 @@ mod tests {
 
         assert_eq!(allocator.allocate(3), Some(range(5, 3)));
         assert_eq!(allocator.allocate(1), None);
+    }
+
+    #[test]
+    fn allocate_aligned_splits_prefix_and_suffix() {
+        let mut allocator = RangeAllocator::<TestRange>::new();
+        allocator.free(range(3, 20)).unwrap();
+
+        assert_eq!(allocator.allocate_aligned(8, 8), Some(range(8, 8)));
+        assert_eq!(allocator.allocate(5), Some(range(3, 5)));
+        assert_eq!(allocator.allocate(7), Some(range(16, 7)));
+        assert_eq!(allocator.allocate(1), None);
+    }
+
+    #[test]
+    fn allocate_aligned_returns_none_when_alignment_cannot_fit() {
+        let mut allocator = RangeAllocator::<TestRange>::new();
+        allocator.free(range(1, 7)).unwrap();
+
+        assert_eq!(allocator.allocate_aligned(4, 8), None);
+        assert_eq!(allocator.allocate(7), Some(range(1, 7)));
     }
 }

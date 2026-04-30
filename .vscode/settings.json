@@ -2,8 +2,8 @@
 // ugly workaround: manually specify the linked project and target for the current crate being worked on.
 {
     "rust-analyzer.cargo.features": [
-        "kunit",
-        "fs_ext4"
+        // "kunit",
+        // "fs_ext4"
     ],
     "rust-analyzer.linkedProjects": [
         // kernel
@@ -11,7 +11,7 @@
         // other crates
         // "scripts/xtask/Cargo.toml",
         // "anemone-rs/Cargo.toml",
-        // "anemone-apps/user-test/Cargo.toml",
+        "anemone-apps/user-test/Cargo.toml",
         // "anemone-apps/init/Cargo.toml",
         // "anemone-apps/mmap-test/Cargo.toml",
         // "anemone-apps/args/Cargo.toml",

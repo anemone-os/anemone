@@ -182,6 +182,10 @@ impl<'a, E: PropEncoding> PropEncodedArray<'a, E> {
         Self { bytes, enc }
     }
 
+    pub fn raw(&self) -> &[u8] {
+        self.bytes
+    }
+
     pub fn iter(&self) -> PropEncodedArrayIter<'_, 'a, E> {
         PropEncodedArrayIter {
             array: self,
@@ -369,6 +373,38 @@ impl DeviceNode {
             }
         }
         cells
+    }
+
+    /// Get the #address-cells values in this node, return [None] if it is not
+    /// specified.
+    pub fn address_cells_or_none(&self) -> Option<u32> {
+        for prop in self.properties() {
+            match prop.name() {
+                "#address-cells" => {
+                    if let Some(addr_cells) = prop.value_as_u32() {
+                        return Some(addr_cells);
+                    }
+                },
+                _ => {},
+            }
+        }
+        None
+    }
+
+    /// Get the #size-cells values in this node, return [None] if it is not
+    /// specified.
+    pub fn size_cells_or_none(&self) -> Option<u32> {
+        for prop in self.properties() {
+            match prop.name() {
+                "#size-cells" => {
+                    if let Some(size_cells) = prop.value_as_u32() {
+                        return Some(size_cells);
+                    }
+                },
+                _ => {},
+            }
+        }
+        None
     }
 
     /// Get the #size-cells and #address-cells values in parent node.
