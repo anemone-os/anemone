@@ -189,7 +189,12 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         // interrupt
         percpu::on_entering_hwirq();
 
-        let intr_flags = estat.is();
+        let intr_flags = estat
+            .is()
+            .iter()
+            .next()
+            .expect("received interrupt with no pending source");
+
         let reason = LA64Interrupt::try_from(intr_flags)
             .unwrap_or_else(|_| panic!("unknown interrupt with flag {:?}", intr_flags));
         unsafe {
