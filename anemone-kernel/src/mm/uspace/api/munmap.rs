@@ -21,5 +21,5 @@ fn sys_munmap(
         align_up_power_of_2!(length, PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES;
     let range = VirtPageRange::new(svpn, npages as u64);
 
-    usp.write().unmap(range).map(|()| 0).map_err(Into::into)
+    usp.unmap(range).map(|()| 0).map_err(Into::into)
 }

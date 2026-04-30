@@ -6,7 +6,7 @@
 use crate::prelude::{dt::user_addr, *};
 
 #[syscall(SYS_MADVISE)]
-fn madvise(
+fn sys_madvise(
     #[validate_with(user_addr)] _addr: VirtAddr,
     _size: u64,
     _advice: i32,

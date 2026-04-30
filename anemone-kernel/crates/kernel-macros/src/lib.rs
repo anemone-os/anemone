@@ -45,6 +45,22 @@ pub fn initcall(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// }
 /// ```
 ///
+/// A pre-parse hook can be attached to inspect the raw syscall register values
+/// before any argument conversion happens:
+/// ```
+/// #[syscall(anemone_abi::syscall::SYS_FOO, preparse = trace_sys_foo)]
+/// fn sys_foo(arg1: usize, arg2: u32) -> Result<u64, SysError> {
+///     // ...
+/// }
+///
+/// fn trace_sys_foo(arg1: u64, arg2: u64) {
+///     // e.g. log raw values before validation/conversion
+/// }
+/// ```
+/// The pre-parse callable receives the raw `u64` arguments matching the
+/// syscall's declared arity, is invoked before any `#[validate_with(...)]`
+/// hooks or `TryFromSyscallArg` conversions, and its return value is ignored.
+///
 /// Custom validation can be added to syscall arguments by annotating them with
 /// `#[validate_with(...)]`:
 /// ```

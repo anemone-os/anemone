@@ -61,6 +61,7 @@ impl CpuUsage {
     ///
     /// Panics if there is no running flow, which indicates a bug in caller
     /// code.
+    #[track_caller]
     fn settle(&mut self) -> u64 {
         let now = monotonic_uptime();
 

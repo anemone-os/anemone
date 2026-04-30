@@ -195,6 +195,9 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
 /// - When application processors reach [ap_kinit], interrupts are disabled in
 ///   terms of effect. (e.g. on RiscV, sstatus::sie can be set, but sie::ssoft,
 ///   sie::stimer and sie::sext interrupts should be disabled.)
+///
+/// TODO: do we really need a separate kinit function for APs? maybe a single
+/// bsp_kinit is enough.
 unsafe extern "C" fn ap_kinit(ap_id: usize) {
     unsafe {
         INIT_SYNC_COUNTER.sync_with_counter();

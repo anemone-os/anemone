@@ -11,6 +11,9 @@ use crate::{
     sched::class::{OnTickAction, RunQueue},
 };
 
+/// This struct must be accessed with interrupts disabled. it's a bit overkill,
+/// but it's the simplest way to guarantee that there won't be any race
+/// conditions.
 struct Processor {
     /// [None] only when the system is not fully initialized. After
     /// initialization, this field is always [Some].
@@ -23,10 +26,8 @@ struct Processor {
     need_resched: bool,
 }
 
-/// The `pub(super)` here looks a bit ugly. maybe we should just move this to
-/// mod.rs.
 #[percpu]
-pub(super) static PROCESSOR: Processor = Processor {
+static PROCESSOR: Processor = Processor {
     running_task: None,
     runq: RunQueue::new(),
     sched_ctx: TaskContext::ZEROED,
@@ -37,26 +38,26 @@ pub(super) static PROCESSOR: Processor = Processor {
 ///
 /// **You should never convert this raw pointer back to a reference.**
 ///
-/// This function can be called with interrupts enabled, since scheduler context
-/// on a cpu is fixed and doesn't change after initialization.
+/// This function automatically disables interrupts.
 pub unsafe fn get_local_sched_ctx() -> *const TaskContext {
-    PROCESSOR.with(|proc| &proc.sched_ctx as *const _)
+    with_intr_disabled(|| PROCESSOR.with(|proc| &proc.sched_ctx as *const _))
 }
 
 /// Get the mutable scheduler context of this processor.
 ///
 /// **You should never convert this raw pointer back to a reference.**
 ///
-/// This function should be called with interrupts enabled, since
-/// scheduler context on a cpu is fixed and doesn't change after initialization.
-/// However if you want to do a context switch (which is always the case),
-/// interrupts should be disabled.
+/// This function automatically disables interrupts.
 pub unsafe fn get_local_sched_ctx_mut() -> *mut TaskContext {
-    PROCESSOR.with_mut(|proc| &mut proc.sched_ctx as *mut _)
+    with_intr_disabled(|| PROCESSOR.with_mut(|proc| &mut proc.sched_ctx as *mut _))
 }
 
 /// Set the current running task of this processor.
+///
+/// **This function can only be called by [scheduler], which should ensure that
+/// interrupts are disabled.**
 pub fn set_current_task(option: Option<Arc<Task>>) {
+    debug_assert!(IntrArch::local_intr_disabled());
     PROCESSOR.with_mut(|proc| {
         proc.running_task = option;
     });
@@ -74,12 +75,16 @@ pub fn set_current_task(option: Option<Arc<Task>>) {
 /// Actually cloning an [Arc] is quite a cheap operation, and this function has
 /// the effect of "pinning" the current task to current context, which is good.
 ///
+/// This function automatically disables interrupts.
+///
 /// # Panics
 ///
 /// This function will panic if there is no running task, which should never
 /// happen in a properly working system.
 pub fn get_current_task() -> Arc<Task> {
-    PROCESSOR.with(|proc| proc.running_task.as_ref().expect("no running task").clone())
+    with_intr_disabled(|| {
+        PROCESSOR.with(|proc| proc.running_task.as_ref().expect("no running task").clone())
+    })
 }
 
 /// Mark the current running task of this processor as needing a reschedule.
@@ -122,6 +127,7 @@ pub fn fetch_clear_need_resched() -> bool {
 /// This function will panic if the task is not in [TaskStatus::Runnable]
 /// status.
 pub fn local_enqueue(task: Arc<Task>) {
+    assert!(task.cpuid() == cur_cpu_id());
     assert!(task.status() == TaskStatus::Runnable);
 
     with_intr_disabled(|| {
@@ -165,7 +171,8 @@ pub fn local_enqueue(task: Arc<Task>) {
 ///
 /// This function will panic if the task is not in [TaskStatus::Runnable]
 /// status.
-pub(super) fn local_requeue_current(task: Arc<Task>) {
+pub fn local_requeue_current(task: Arc<Task>) {
+    assert!(task.cpuid() == cur_cpu_id());
     assert!(task.status() == TaskStatus::Runnable);
 
     with_intr_disabled(|| {
@@ -221,6 +228,8 @@ pub fn local_sched_tick() {
 
 /// Pick the next cpu to schedule a new task on. This is used when creating a
 /// new task.
+///
+/// TODO: better strategy for load balancing.
 pub fn pick_next_cpu() -> CpuId {
     // currently a simple round-robin strategy is used.
     static NEXT_CPU: AtomicUsize = AtomicUsize::new(0);
@@ -249,5 +258,30 @@ pub fn task_enqueue(task: Arc<Task>) {
         local_enqueue(task);
     } else {
         remote_enqueue(task);
+    }
+}
+
+pub mod init_routines {
+    use super::*;
+
+    /// First task to be scheduled on each cpu must be treated specially, since
+    /// there is no running task on the cpu at that time. But [local_enqueue]
+    /// assumes that there is always a running task.
+    ///
+    /// This function should be called by bootstrap code path to spawn
+    /// [bsp_kinit]/[ap_kinit] tasks.
+    pub fn local_enqueue_first(task: Arc<Task>) {
+        assert!(task.cpuid() == cur_cpu_id());
+        assert!(task.status() == TaskStatus::Runnable);
+
+        with_intr_disabled(|| {
+            PROCESSOR.with_mut(|proc| {
+                debug_assert!(
+                    !task.with_sched_entity_mut(|se| se.on_runq()),
+                    "current running task should not already be on run queue"
+                );
+                proc.runq.enqueue(task);
+            });
+        });
     }
 }

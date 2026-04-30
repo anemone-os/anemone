@@ -73,8 +73,7 @@ fn sys_mmap(
             flags,
         };
 
-        usp.write()
-            .map_anonymous(&mapping)
+        usp.map_anonymous(&mapping)
             .map(|addr| addr.get())
             .map_err(Into::into)
     } else {
@@ -127,8 +126,7 @@ fn sys_mmap(
             inode,
         };
 
-        usp.write()
-            .map_file(&mapping)
+        usp.map_file(&mapping)
             .map(|addr| addr.get())
             .map_err(Into::into)
     }

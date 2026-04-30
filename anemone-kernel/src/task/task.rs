@@ -59,14 +59,16 @@ impl Task {
     /// requires filesystem access, make sure to set its [FsState] to a valid
     /// one before calling `kernel_execve`.
     ///
-    /// The created task will run on certain cpu decided by the scheduler. Sed
-    /// [pick_next_cpu] for details.
+    /// The created task will run on certain cpu decided by the scheduler. See
+    /// [pick_next_cpu] for details. If ‵cpu` is specified, the created task
+    /// will be pinned to that cpu. For general cases, this should not be used.
     pub unsafe fn new_kernel(
         name: &str,
         entry: *const (),
         args: ParameterList,
         sched: SchedEntity,
         flags: TaskFlags,
+        cpu: Option<CpuId>,
     ) -> Result<(Task, RegisterGuard), SysError> {
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
@@ -76,7 +78,11 @@ impl Task {
             name: RwLock::new((String::from("@kernel/") + name).into_boxed_str()),
             flags: RwLock::new(flags | TaskFlags::KERNEL),
             uspace: RwLock::new(None),
-            cpuid: pick_next_cpu(),
+            cpuid: if let Some(cpu) = cpu {
+                cpu
+            } else {
+                pick_next_cpu()
+            },
             sched_ctx: unsafe {
                 MonoFlow::new(TaskContext::from_kernel_fn(
                     VirtAddr::new(entry as u64),
@@ -314,24 +320,3 @@ impl PartialEq for Task {
 }
 
 impl Eq for Task {}
-
-#[derive(Debug)]
-pub enum WaitObject {
-    /// Wait for a thread group id (not implemented yet).
-    Tgid(u32), // not implemented
-    /// Wait for a specific task id, or any child when `None`.
-    Tid(Option<Tid>),
-}
-
-impl WaitObject {
-    /// Check whether `task` matches this wait target.
-    pub fn match_task(&self, task: &Arc<Task>) -> bool {
-        match self {
-            Self::Tgid(_) => unimplemented!(),
-            Self::Tid(tid) => match tid.as_ref() {
-                Some(tid) => task.tid().eq(tid),
-                None => true,
-            },
-        }
-    }
-}

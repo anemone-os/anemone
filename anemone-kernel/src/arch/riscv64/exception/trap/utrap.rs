@@ -206,12 +206,15 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
         }
     } else {
         // execption. we can safely turn on interrupts.
-
         unsafe {
             IntrArch::local_intr_enable();
         }
 
-        let stval = riscv::register::stval::read();
+        // NOTE: don't read from registers! if an interrupt happens after turning on
+        // interrupts, but before reading stval, the stval value will be wrong. same
+        // for scause. instead, we should read those from the trapframe, which is
+        // guaranteed to be consistent with this trap.
+        let stval = trapframe.stval;
         let reason = RiscV64Exception::try_from(code)
             .unwrap_or_else(|_| panic!("unknown exception with code {}", code));
 
@@ -233,7 +236,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             | RiscV64Exception::StorePageFault => {
                 handle_user_page_fault(PageFaultInfo::new(
                     VirtAddr::new(trapframe.sepc),
-                    VirtAddr::new(stval as u64),
+                    VirtAddr::new(stval),
                     match reason {
                         RiscV64Exception::InstructionPageFault => PageFaultType::Execute,
                         RiscV64Exception::LoadPageFault => PageFaultType::Read,

@@ -6,7 +6,10 @@
 use anemone_abi::fs::linux::open::O_CLOEXEC;
 
 use crate::{
-    prelude::{handler::TryFromSyscallArg, *},
+    prelude::{
+        handler::{TryFromSyscallArg, syscall_arg_flag32},
+        *,
+    },
     task::files::{Fd, FdFlags},
 };
 
@@ -16,11 +19,7 @@ struct Dup3FdFlags {
 
 impl TryFromSyscallArg for Dup3FdFlags {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-        if (raw >> 32) != 0 {
-            return Err(SysError::InvalidArgument);
-        }
-
-        let raw = raw as u32;
+        let raw = syscall_arg_flag32(raw)?;
 
         if raw & !O_CLOEXEC != 0 {
             return Err(SysError::InvalidArgument);

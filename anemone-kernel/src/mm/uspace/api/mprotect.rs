@@ -26,8 +26,7 @@ fn sys_mprotect(
         align_up_power_of_2!(len, PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES;
     let range = VirtPageRange::new(svpn, npages as u64);
 
-    usp.write()
-        .protect_range(range, prot)
+    usp.protect_range(range, prot)
         .map(|()| 0)
         .map_err(Into::into)
 }

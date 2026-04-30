@@ -18,7 +18,7 @@ pub fn handle_user_page_fault(info: PageFaultInfo) {
 pub fn handle_user_page_fault_internal(info: PageFaultInfo) -> Result<(), SysError> {
     let task = get_current_task();
     let uspace = task.clone_uspace();
-    uspace.write().handle_page_fault(&info)?;
+    uspace.handle_page_fault(&info)?;
 
     Ok(())
 }

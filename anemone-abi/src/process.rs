@@ -125,13 +125,12 @@ pub mod linux {
     }
 
     pub mod wait {
-        #![allow(unused)]
-        /// [OK]
-        pub const WNOHANG: u64 = 1;
-        pub const WUNTRACED: u64 = 2;
-        pub const WSTOPPED: u64 = 2;
-        pub const WEXITED: u64 = 4;
-        pub const WCONTINUED: u64 = 8;
+        pub const WNOHANG: i32 = 1;
+        pub const WUNTRACED: i32 = 2;
+        pub const WSTOPPED: i32 = 2;
+        pub const WEXITED: i32 = 4;
+        pub const WCONTINUED: i32 = 8;
+        pub const WNOWAIT: i32 = 0x1000000;
     }
 
     pub mod mmap {

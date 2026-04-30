@@ -12,7 +12,7 @@ use anemone_abi::process::linux::clone;
 use crate::{
     prelude::{
         dt::{UserWritePtr, user_addr},
-        handler::TryFromSyscallArg,
+        handler::{TryFromSyscallArg, syscall_arg_flag32},
         *,
     },
     task::{cpu_usage::Privilege, tid::Tid},
@@ -69,7 +69,7 @@ bitflags! {
 }
 
 impl TryFromSyscallArg for CloneFlags {
-    fn try_from_syscall_arg(value: u64) -> Result<Self, SysError> {
+    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
         // macro hack! a simple recursive macro~
         macro_rules! union {
             ($head:ident, $($tail:tt)+) => {
@@ -80,6 +80,7 @@ impl TryFromSyscallArg for CloneFlags {
             };
         }
         const SUPPORTED_FLAGS: CloneFlags = union!(
+            SIGCHLD, // fake
             VM,
             FS,
             FILES,
@@ -90,11 +91,7 @@ impl TryFromSyscallArg for CloneFlags {
             CHILD_SETTID
         );
 
-        if (value >> 32) != 0 {
-            return Err(SysError::InvalidArgument);
-        }
-
-        let value = value as u32;
+        let value = syscall_arg_flag32(raw)?;
         let flags = CloneFlags::from_bits(value).ok_or(SysError::InvalidArgument)?;
         if !SUPPORTED_FLAGS.contains(flags) {
             knoticeln!("nyi clone flags: {:#x}", value);
@@ -131,8 +128,8 @@ pub fn kernel_clone(
     trap_frame: TrapFrame,
     new_sp: CloneStack,
     tls: VirtAddr,
-    parent_tid: UserWritePtr<Tid>,
-    child_tid: UserWritePtr<Tid>,
+    parent_tid: Option<UserWritePtr<Tid>>,
+    child_tid: Option<UserWritePtr<Tid>>,
 ) -> Result<Tid, SysError> {
     let current_task = get_current_task();
     let cur_uspace = current_task.clone_uspace();
@@ -168,9 +165,14 @@ pub fn kernel_clone(
         Task::new_kernel(
             "@kernel/clone",
             enter_cloned_user_task as *const (),
-            ParameterList::new(&[frame_ptr as u64, child_tid.addr(), flags.bits() as u64]),
+            ParameterList::new(&[
+                frame_ptr as u64,
+                child_tid.map_or(0, |ptr| ptr.addr()),
+                flags.bits() as u64,
+            ]),
             current_task.sched_entity(),
             TaskFlags::NONE,
+            None,
         )?
     };
     unsafe {
@@ -197,42 +199,53 @@ pub fn kernel_clone(
     let new_tid = new_task.tid();
 
     if flags.contains(CloneFlags::PARENT_SETTID) {
-        parent_tid.safe_write(new_tid)?;
+        if let Some(parent_tid) = parent_tid {
+            parent_tid.safe_write(new_tid)?;
+        } else {
+            // this is valid. it's user's responsibility to provide a valid pointer if they
+            // set the flag.
+            kdebugln!(
+                "clone: PARENT_SETTID flag is set, but parent_tid pointer is null. ignoring..."
+            );
+        }
     }
 
-    if flags.contains(CloneFlags::CHILD_CLEARTID) || flags.contains(CloneFlags::CHILD_SETTID) {
-        child_tid.validate_mut_with(&mut new_task.clone_uspace().write())?;
+    // this is not for argument validation, but rather to ensure the page containing
+    // `child_tid` will be mapped.
+    // once we implement exception-table based user-space memory access, we can
+    // remove this eager validation.
+    if flags.intersects(CloneFlags::CHILD_CLEARTID | CloneFlags::CHILD_SETTID) {
+        if let Some(child_tid) = child_tid {
+            child_tid.validate_mut_with(&mut new_task.clone_uspace().write())?;
+        } else {
+            kdebugln!(
+                "clone: CHILD_CLEARTID or CHILD_SETTID flag is set, but child_tid pointer is null. ignoring..."
+            );
+        }
     }
 
     if flags.contains(CloneFlags::CHILD_CLEARTID) {
-        new_task.set_clear_child_tid(Some(child_tid));
+        new_task.set_clear_child_tid(child_tid);
     }
 
-    let parent = if flags.contains(CloneFlags::PARENT) {
-        unsafe { current_task.with_task_hierarchy(|hier| hier.parent()) }
-            .ok_or(SysError::InvalidArgument)?
-            .upgrade()
-            .unwrap_or_else(|| panic!("dangling task with parent dropped: {}", current_task.tid()))
+    let parent_tid = if flags.contains(CloneFlags::PARENT) {
+        current_task
+            .parent_tid()
+            .expect("init task won't call clone, so there must be a parent")
     } else {
-        current_task.clone()
+        current_task.tid()
     };
 
-    let new_task = Arc::new(new_task);
-
-    unsafe { new_task.add_as_child(&parent) };
-
     // ok. all state are initialized to consistent values. now we can register it.
-    guard.register(new_task.clone());
+    let new_task = guard.register(new_task, TaskBinding { parent: parent_tid });
 
     kdebugln!(
         "clone: created new task with tid {} (parent tid {}) with flags {:?}",
         new_tid,
-        parent.tid(),
+        parent_tid,
         flags
     );
 
-    drop(parent);
-    drop(current_task);
     task_enqueue(new_task);
     Ok(new_tid)
 }
@@ -252,7 +265,13 @@ extern "C" fn enter_cloned_user_task(
 
     unsafe {
         if clone_flags.contains(CloneFlags::CHILD_SETTID) {
-            *child_tid = current_task_id();
+            if !child_tid.is_null() {
+                child_tid.write(current_task_id());
+            } else {
+                kdebugln!(
+                    "enter_cloned_user_task: CHILD_SETTID flag is set, but child_tid pointer is null. ignoring..."
+                );
+            }
         }
 
         // we must disable interrupts before calling `on_prv_change`, otherwise

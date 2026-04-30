@@ -76,11 +76,7 @@ impl Event {
         }
 
         for listener in to_wakeup {
-            knoticeln!(
-                "waking up listener {:?} for task {}",
-                listener,
-                listener.task.tid(),
-            );
+            knoticeln!("waking up listener {:?}", listener);
             if let Err(e) = try_to_wake_up(&listener.task, &[TaskStatus::Waiting]) {
                 knoticeln!(
                     "failed to wake up listener {:?} for task {}, error: {:?}, maybe it has been woken up by other event?",
@@ -100,9 +96,13 @@ impl Event {
         let task = get_current_task();
         let listener = Listener { task: task.clone() };
 
+        let mut guard = PreemptGuard::new();
+
         loop {
             // ugly and costly... we should use intrusive linked list later.
             self.prepare_listener(&task, exclusive);
+
+            // if a preemption occurs here, then the listener will never be woken up!
 
             if prediction() {
                 break;
@@ -111,9 +111,11 @@ impl Event {
             // TODO: signal checking
 
             unsafe {
+                drop(guard);
                 with_intr_disabled(|| {
                     schedule();
                 });
+                guard = PreemptGuard::new();
             }
         }
 

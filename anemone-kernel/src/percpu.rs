@@ -12,8 +12,61 @@ enum Borrow {
 #[derive(Debug)]
 #[repr(C)]
 pub struct PerCpu<T> {
+    stub: PerCpuInstance<T>,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct PerCpuInstance<T> {
     inner: UnsafeCell<T>,
     borrow: Cell<Borrow>,
+}
+
+impl<T> PerCpuInstance<T> {
+    /// Remember to follow Rust's aliasing rules.
+    unsafe fn inner(&self) -> &T {
+        unsafe { &*self.inner.get() }
+    }
+
+    /// Remember to follow Rust's aliasing rules.
+    unsafe fn inner_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.inner.get() }
+    }
+
+    fn borrow(&self) {
+        match self.borrow.get() {
+            Borrow::Immutable(n) => self.borrow.set(Borrow::Immutable(n + 1)),
+            Borrow::Mutable => {
+                panic!("try to immutably borrow a already mutably borrowed percpu variable")
+            },
+        }
+    }
+
+    fn unborrow(&self) {
+        match self.borrow.get() {
+            Borrow::Immutable(n) => {
+                assert!(n > 0, "internal error: invalid borrow state");
+                self.borrow.set(Borrow::Immutable(n - 1))
+            },
+            Borrow::Mutable => unreachable!(),
+        }
+    }
+
+    fn borrow_mut(&self) {
+        match self.borrow.get() {
+            Borrow::Immutable(0) => self.borrow.set(Borrow::Mutable),
+            _ => panic!("try to mutably borrow a already borrowed percpu variable"),
+        }
+    }
+
+    fn unborrow_mut(&self) {
+        match self.borrow.get() {
+            Borrow::Immutable(_) => {
+                panic!("try to unborrow_mut a not mutably borrowed percpu variable")
+            },
+            Borrow::Mutable => self.borrow.set(Borrow::Immutable(0)),
+        }
+    }
 }
 
 unsafe impl<T> Sync for PerCpu<T> {}
@@ -21,14 +74,16 @@ unsafe impl<T> Sync for PerCpu<T> {}
 impl<T> PerCpu<T> {
     pub const fn new(value: T) -> Self {
         Self {
-            inner: UnsafeCell::new(value),
-            borrow: Cell::new(Borrow::Immutable(0)),
+            stub: PerCpuInstance {
+                inner: UnsafeCell::new(value),
+                borrow: Cell::new(Borrow::Immutable(0)),
+            },
         }
     }
 }
 
 impl<T> PerCpu<T> {
-    unsafe fn get(&self, percpu_base: usize) -> &T {
+    unsafe fn get(&self, percpu_base: usize) -> &PerCpuInstance<T> {
         unsafe {
             use crate::arch::link_symbols::__spercpu;
 
@@ -41,7 +96,7 @@ impl<T> PerCpu<T> {
         }
     }
 
-    unsafe fn get_mut(&self, percpu_base: usize) -> &mut T {
+    unsafe fn get_mut(&self, percpu_base: usize) -> &mut PerCpuInstance<T> {
         unsafe {
             use crate::arch::link_symbols::__spercpu;
 
@@ -58,6 +113,7 @@ impl<T> PerCpu<T> {
     /// per-CPU base address.
     ///
     /// This function disables preemption during its execution.
+    #[track_caller]
     pub fn with<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&T) -> R,
@@ -65,22 +121,13 @@ impl<T> PerCpu<T> {
         unsafe {
             let _preem_guard = PreemptGuard::new();
 
-            self.borrow.set(match self.borrow.get() {
-                Borrow::Immutable(n) => Borrow::Immutable(n + 1),
-                Borrow::Mutable => {
-                    panic!("try to immutably borrow a already mutably borrowed percpu variable")
-                },
-            });
+            let instance = self.get(CpuArch::percpu_base());
 
-            let res = f(self.get(CpuArch::percpu_base()));
+            instance.borrow();
 
-            self.borrow.set(match self.borrow.get() {
-                Borrow::Immutable(n) => {
-                    assert!(n > 0, "internal error: invalid borrow state");
-                    Borrow::Immutable(n - 1)
-                },
-                Borrow::Mutable => unreachable!(),
-            });
+            let res = f(instance.inner());
+
+            instance.unborrow();
 
             res
         }
@@ -90,6 +137,7 @@ impl<T> PerCpu<T> {
     /// current per-CPU base address.
     ///
     /// This function disables preemption during its execution.
+    #[track_caller]
     pub fn with_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut T) -> R,
@@ -97,14 +145,13 @@ impl<T> PerCpu<T> {
         unsafe {
             let _preem_guard = PreemptGuard::new();
 
-            self.borrow.set(match self.borrow.get() {
-                Borrow::Immutable(0) => Borrow::Mutable,
-                _ => panic!("try to mutably borrow a already borrowed percpu variable"),
-            });
+            let instance = self.get_mut(CpuArch::percpu_base());
 
-            let res = f(self.get_mut(CpuArch::percpu_base()));
+            instance.borrow_mut();
 
-            self.borrow.set(Borrow::Immutable(0));
+            let res = f(instance.inner_mut());
+
+            instance.unborrow_mut();
 
             res
         }
@@ -112,12 +159,20 @@ impl<T> PerCpu<T> {
 
     /// No `with_remote_mut` is provided. We expect all percpu variables that
     /// should be remotely accessed to be protected by a lock.
+    ///
+    /// Internal borrow bookkeeping is unsed, so caller should maintain the
+    /// invariant by yourself.
+    ///
+    /// This function disables preemption during its execution, so cpu_id is
+    /// stable.
     pub unsafe fn with_remote<F, R>(&self, cpu_id: usize, f: F) -> R
     where
         F: FnOnce(&T) -> R,
     {
+        let _preemt_guard = PreemptGuard::new();
         assert_ne!(cpu_id, cur_cpu_id().get());
-        unsafe { f(self.get(PERCPU_BASES[cpu_id])) }
+
+        unsafe { f(self.get(PERCPU_BASES[cpu_id]).inner()) }
     }
 }
 
@@ -198,23 +253,38 @@ impl CoreLocal {
 /// maintain the invariant.
 mod primitives {
     use super::*;
-    pub unsafe fn get_core_local<'a>() -> &'a CoreLocal {
+    pub unsafe fn with_core_local<F: FnOnce(&CoreLocal) -> R, R>(f: F) -> R {
         let base = CpuArch::percpu_base();
-        unsafe { CORE_LOCAL.get(base) }
+        unsafe {
+            let instance = CORE_LOCAL.get(base);
+            instance.borrow();
+            let res = f(instance.inner());
+            instance.unborrow();
+            res
+        }
     }
 
-    pub unsafe fn get_core_local_mut<'a>() -> &'a mut CoreLocal {
+    pub unsafe fn with_core_local_mut<F: FnOnce(&mut CoreLocal) -> R, R>(f: F) -> R {
         let base = CpuArch::percpu_base();
-        unsafe { CORE_LOCAL.get_mut(base) }
+        unsafe {
+            let instance = CORE_LOCAL.get_mut(base);
+            instance.borrow_mut();
+            let res = f(instance.inner_mut());
+            instance.unborrow_mut();
+            res
+        }
     }
 
     /// caller must ensure preemption/interrupts are disabled before and during
     /// the execution of this function, otherwise the passed-in `cpu_id` might
     /// accidentally become current cpu id due to a cross-cpu migration, which
     /// will cause an immediate panic.
-    pub unsafe fn get_core_local_remote<'a>(cpu_id: usize) -> &'a CoreLocal {
+    pub unsafe fn with_core_local_remote<F: FnOnce(&CoreLocal) -> R, R>(cpu_id: usize, f: F) -> R {
         assert_ne!(cpu_id, cur_cpu_id().get());
-        unsafe { CORE_LOCAL.get(PERCPU_BASES[cpu_id]) }
+        unsafe {
+            let instance = CORE_LOCAL.get(PERCPU_BASES[cpu_id]);
+            f(instance.inner())
+        }
     }
 }
 use primitives::*;
@@ -229,7 +299,7 @@ mod core_local_accessors {
     /// We don't support cross-core scheduling, so the returned [CpuId] is
     /// stable.
     pub fn cur_cpu_id() -> CpuId {
-        unsafe { with_intr_disabled(|| CpuId::new(get_core_local().cpu_id)) }
+        unsafe { with_intr_disabled(|| with_core_local(|c| CpuId::new(c.cpu_id))) }
     }
 
     /// Check if the target CPU is online.
@@ -239,13 +309,13 @@ mod core_local_accessors {
         if cpu_id == cur_cpu_id().get() {
             true
         } else {
-            unsafe { with_intr_disabled(|| get_core_local_remote(cpu_id).online()) }
+            unsafe { with_intr_disabled(|| with_core_local_remote(cpu_id, |c| c.online())) }
         }
     }
 
     /// Whether the current CPU is currently handling an hwirq.
     pub fn in_hwirq() -> bool {
-        unsafe { with_intr_disabled(|| get_core_local().in_hwirq) }
+        unsafe { with_intr_disabled(|| with_core_local(|c| c.in_hwirq)) }
     }
 
     /// Called when entering hwirq handling code path.
@@ -253,7 +323,7 @@ mod core_local_accessors {
         assert!(!in_hwirq());
         assert!(IntrArch::local_intr_disabled());
         unsafe {
-            get_core_local_mut().in_hwirq = true;
+            with_core_local_mut(|c| c.in_hwirq = true);
         }
     }
 
@@ -262,7 +332,7 @@ mod core_local_accessors {
         assert!(in_hwirq());
         assert!(IntrArch::local_intr_disabled());
         unsafe {
-            get_core_local_mut().in_hwirq = false;
+            with_core_local_mut(|c| c.in_hwirq = false);
         }
     }
 }
@@ -306,7 +376,7 @@ mod preempt_counter {
         pub fn new() -> Self {
             unsafe {
                 with_intr_disabled(|| {
-                    get_core_local_mut().preempt_counter.increase();
+                    with_core_local_mut(|c| c.preempt_counter.increase());
                     Self
                 })
             }
@@ -317,8 +387,7 @@ mod preempt_counter {
         fn drop(&mut self) {
             unsafe {
                 with_intr_disabled(|| {
-                    get_core_local_mut().preempt_counter.decrease();
-
+                    with_core_local_mut(|c| c.preempt_counter.decrease());
                     // TODO: reschedule immediately if:
                     // TODO again - too complex... XP
                 })
@@ -330,7 +399,7 @@ mod preempt_counter {
     ///
     /// **Currerently, only trap handlers should call this function.**
     pub fn allow_preempt() -> bool {
-        unsafe { with_intr_disabled(|| get_core_local().preempt_counter.0 == 0) }
+        unsafe { with_intr_disabled(|| with_core_local(|c| c.preempt_counter.0 == 0)) }
     }
 }
 use preempt_counter::PreemptCounter;
@@ -340,6 +409,19 @@ pub use preempt_counter::{PreemptGuard, allow_preempt};
 ///
 /// When we want to access a not local percpu variable, we'll use this.
 static mut PERCPU_BASES: [usize; MAX_CPUS] = [0; MAX_CPUS];
+
+/// Most of the time you should not call this function. This is only used for
+/// constructing a trapframe on a remote CPU.
+pub fn percpu_base(cpu_id: usize) -> usize {
+    assert!(cpu_id < ncpus());
+    let base = unsafe { PERCPU_BASES[cpu_id] };
+    assert_ne!(
+        base, 0,
+        "percpu base for cpu {} is not initialized yet",
+        cpu_id
+    );
+    base
+}
 
 mod init_routines {
     use super::*;
@@ -432,7 +514,7 @@ mod init_routines {
     /// Set the current CPU as online.
     pub fn percpu_login() {
         unsafe {
-            with_intr_disabled(|| get_core_local_mut().login());
+            with_intr_disabled(|| with_core_local_mut(|c| c.login()));
         }
     }
 }

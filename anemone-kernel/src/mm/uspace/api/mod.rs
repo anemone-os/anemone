@@ -8,7 +8,7 @@ pub mod madvise;
 mod args {
 
     use crate::prelude::{
-        handler::TryFromSyscallArg,
+        handler::{TryFromSyscallArg, syscall_arg_flag32},
         vma::{Protection, VmFlags},
         *,
     };
@@ -93,18 +93,14 @@ mod args {
 
     impl TryFromSyscallArg for MmapProt {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-            if (raw >> 32) != 0 {
-                return Err(SysError::InvalidArgument);
-            }
-            Ok(Self::from_bits(raw as i32).ok_or(SysError::InvalidArgument)?)
+            let raw = syscall_arg_flag32(raw)? as i32;
+            Ok(Self::from_bits(raw).ok_or(SysError::InvalidArgument)?)
         }
     }
 
     impl TryFromSyscallArg for MmapFlags {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-            if (raw >> 32) != 0 {
-                return Err(SysError::InvalidArgument);
-            }
+            let raw = syscall_arg_flag32(raw)? as i32;
 
             let exclusive_bits = raw as usize & ExclusiveMmapFlags::MASK as usize;
             let exclusive = match exclusive_bits as i32 {
@@ -128,11 +124,6 @@ mod args {
     }
 
     pub fn mmap_fd(raw: u64) -> Result<i32, SysError> {
-        let raw = raw as i64;
-        if raw < i32::MIN as i64 || raw > i32::MAX as i64 {
-            return Err(SysError::InvalidArgument);
-        }
-
-        Ok(raw as i32)
+        i32::try_from_syscall_arg(raw)
     }
 }

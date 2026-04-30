@@ -11,7 +11,7 @@ use crate::{fs::api::args::AtFd, prelude::*};
 mod args {
     use anemone_abi::fs::linux::{access::*, at::*};
 
-    use crate::prelude::handler::TryFromSyscallArg;
+    use crate::prelude::handler::{TryFromSyscallArg, syscall_arg_flag32};
 
     use super::*;
 
@@ -26,11 +26,7 @@ mod args {
 
     impl TryFromSyscallArg for AccessFlag {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-            if (raw >> 32) != 0 {
-                return Err(SysError::InvalidArgument);
-            }
-
-            let raw = raw as u32;
+            let raw = syscall_arg_flag32(raw)?;
             Self::from_bits(raw).ok_or(SysError::InvalidArgument)
         }
     }
@@ -47,11 +43,7 @@ mod args {
 
     impl TryFromSyscallArg for AccessMode {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-            if (raw >> 32) != 0 {
-                return Err(SysError::InvalidArgument);
-            }
-
-            let raw = raw as u32;
+            let raw = syscall_arg_flag32(raw)?;
             Self::from_bits(raw).ok_or(SysError::InvalidArgument)
         }
     }

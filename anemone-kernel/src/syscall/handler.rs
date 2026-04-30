@@ -29,6 +29,32 @@ pub trait TryFromSyscallArg: Sized {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError>;
 }
 
+/// Accept a syscall register as a transported 32-bit bit pattern.
+///
+/// At the syscall boundary, Linux-compatible 32-bit flags and modes may reach
+/// us either zero-extended or sign-extended depending on the user-visible type
+/// used by the caller. Treat the low 32 bits as authoritative, but reject any
+/// non-canonical encoding that does not match either extension form.
+///
+/// This is for those flags and modes that might be defined as either signed or
+/// unsigned types in user-space, and we want to handle them in a unified way in
+/// kernel.
+///
+/// For those types with a well-defined signedness, just use `TryFromSyscallArg`
+/// implementation on those basic types (e.g. `u32`, `i32`) instead of this
+/// function.
+pub fn syscall_arg_flag32(raw: u64) -> Result<u32, SysError> {
+    let bits = raw as u32;
+    let zero_extended = bits as u64;
+    let sign_extended = (bits as i32 as i64) as u64;
+
+    if raw == zero_extended || raw == sign_extended {
+        Ok(bits)
+    } else {
+        Err(SysError::InvalidArgument)
+    }
+}
+
 macro_rules! gen_basic_try_from_syscall_arg {
     (unsigned, $ty:ty) => {
         impl TryFromSyscallArg for $ty {

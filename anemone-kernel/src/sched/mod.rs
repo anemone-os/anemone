@@ -17,8 +17,8 @@ pub use api::*;
 
 mod processor;
 pub use processor::{
-    fetch_clear_need_resched, get_current_task, local_enqueue, local_sched_tick, mark_need_resched,
-    pick_next_cpu, remote_enqueue, task_enqueue,
+    fetch_clear_need_resched, get_current_task, init_routines, local_enqueue, local_sched_tick,
+    mark_need_resched, pick_next_cpu, remote_enqueue, task_enqueue,
 };
 mod switch;
 pub use switch::load_context;
@@ -152,6 +152,10 @@ mod kore {
             }
         })?;
 
+        kdebugln!(
+            "task {} is woken up, enqueueing it to run queue",
+            task.tid()
+        );
         // 2. enqueue the task to run queue.
         task_enqueue(task.clone());
 

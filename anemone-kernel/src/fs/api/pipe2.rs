@@ -7,7 +7,11 @@ use anemone_abi::fs::linux::open::*;
 
 use crate::{
     fs::pipe::{OpenedPipe, create_anonymous_pipe},
-    prelude::{dt::UserWritePtr, handler::TryFromSyscallArg, *},
+    prelude::{
+        dt::UserWritePtr,
+        handler::{TryFromSyscallArg, syscall_arg_flag32},
+        *,
+    },
 };
 
 bitflags! {
@@ -22,11 +26,7 @@ bitflags! {
 
 impl TryFromSyscallArg for PipeFlags {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-        if (raw >> 32) != 0 {
-            return Err(SysError::InvalidArgument);
-        }
-
-        let raw = raw as u32;
+        let raw = syscall_arg_flag32(raw)?;
 
         let flags = PipeFlags::from_bits(raw).ok_or(SysError::InvalidArgument)?;
 

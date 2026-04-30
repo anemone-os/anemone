@@ -27,17 +27,9 @@ impl Fd {
 
 impl TryFromSyscallArg for Fd {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-        if (raw >> 32) != 0 {
-            Err(SysError::InvalidArgument)
-        } else if (raw as i32) < 0 {
-            Err(SysError::InvalidArgument)
-        } else {
-            if (raw >> 32) as u32 >= i32::MAX as u32 {
-                Err(SysError::InvalidArgument)
-            } else {
-                Ok(Self(raw as u32))
-            }
-        }
+        // let raw = syscall_arg_flag32(raw)?;
+        let raw = i32::try_from_syscall_arg(raw)? as u32;
+        Fd::new(raw).ok_or(SysError::InvalidArgument)
     }
 }
 

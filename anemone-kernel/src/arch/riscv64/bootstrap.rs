@@ -403,6 +403,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
                 ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
                 SchedEntity::new(SchedClassPrv::RoundRobin(())),
                 TaskFlags::NONE,
+                Some(cur_cpu_id()),
             )
         }
         .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e));
@@ -410,7 +411,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
         let bsp_kinit = RegisterGuard::register_root(guard, bsp_kinit);
         INIT_SYNC_COUNTER.sync_with_counter();
 
-        local_enqueue(bsp_kinit);
+        sched::init_routines::local_enqueue_first(bsp_kinit);
         switch_to_guarded(VirtAddr::new(scheduler as *const () as u64))
     }
 }
@@ -452,11 +453,12 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
             ParameterList::new(&[ap_id as u64]),
             SchedEntity::new(SchedClassPrv::RoundRobin(())),
             TaskFlags::NONE,
+            Some(cur_cpu_id()),
         )
         .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e));
         let ap_kinit = guard.register(ap_kinit, TaskBinding { parent: Tid::INIT });
 
-        local_enqueue(ap_kinit);
+        sched::init_routines::local_enqueue_first(ap_kinit);
         switch_to_guarded(VirtAddr::new(scheduler as *const () as u64))
     }
 }

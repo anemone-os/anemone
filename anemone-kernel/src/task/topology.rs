@@ -1,5 +1,8 @@
 //! Topology of tasks. Parent-child relationships, thread groups, process
 //! groups, session, and so on.
+//!
+//! TODO: write a chapter in book to state the difference between **Consistence
+//! of Memory Object** and **Consistence of Topology**.
 
 use crate::prelude::*;
 
@@ -139,29 +142,34 @@ fn publish_task(task: Task, binding: TaskBinding) -> Arc<Task> {
         "task topology: duplicate child TID {} when publishing task",
         tid
     );
-    topology.tasks.insert(tid, node);
+    assert!(
+        topology.tasks.insert(tid, node).is_none(),
+        "task topology: duplicate TID {} when publishing task",
+        tid
+    );
 
     task
 }
 
-/// Unpublish a task from global-visible topology.
-///
-/// This functions required that the strong reference count of the task is 1,
-/// the one held by the topology itself. Otherwise we panic. Error-tolerant
-/// unpublishing may hide bugs and lead to inconsistent topology, so we want to
-/// be strict about this.
-///
-/// TODO: we should differentiate between remove and reap?
-pub unsafe fn remove_task(tid: &Tid) -> Task {
-    let mut topology = TOPOLOGY.inner.write_irqsave();
-
-    let node = topology
-        .tasks
-        .remove(tid)
-        .unwrap_or_else(|| panic!("task topology: task not found when removing task: {}", tid));
-
-    todo!()
-}
+// /// Unpublish a task from global-visible topology.
+// ///
+// /// This functions required that the strong reference count of the task is 1,
+// /// the one held by the topology itself. Otherwise we panic. Error-tolerant
+// /// unpublishing may hide bugs and lead to inconsistent topology, so we want
+// to /// be strict about this.
+// ///
+// /// TODO: we should differentiate between remove and reap?
+// pub unsafe fn remove_task(tid: &Tid) -> Task {
+//     let mut topology = TOPOLOGY.inner.write_irqsave();
+//
+//     let node = topology
+//         .tasks
+//         .remove(tid)
+//         .unwrap_or_else(|| panic!("task topology: task not found when
+// removing task: {}", tid));
+//
+//     todo!()
+// }
 
 /// Get a task by its [Tid].
 pub fn get_task(tid: &Tid) -> Option<Arc<Task>> {
@@ -169,6 +177,9 @@ pub fn get_task(tid: &Tid) -> Option<Arc<Task>> {
     topology.tasks.get(tid).map(|node| node.task.clone())
 }
 
+/// Get the init task, the ancestor of all other tasks.
+///
+/// TODO: cache to avoid lookup.
 pub fn get_init_task() -> Arc<Task> {
     get_task(&Tid::INIT).expect("task topology: init task not found")
 }
@@ -186,6 +197,11 @@ pub fn for_each_task<F: FnMut(&Arc<Task>)>(mut f: F) {
 // region: topology operations
 
 impl Task {
+    /// Whether this task is the init task, the ancestor of all other tasks.
+    pub fn is_init(&self) -> bool {
+        self.tid() == Tid::INIT
+    }
+
     /// For init or idle tasks, this will return [None].
     ///
     /// Otherwise unwrapping this is always safe.
@@ -199,7 +215,72 @@ impl Task {
             .parent
     }
 
+    /// Run a closure with the parent task of this task.
+    ///
+    /// Internally this function locks the topology, so we can make sure that
+    /// the parent task will stay stable during the execution of the closure,
+    /// which is what we want.
+    ///
+    /// This method provides **Topology Consistency** at the cost of locking the
+    /// topology for a longer time. Caution should be taken to avoid deadlocks.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this task is root or idle, which should not happen.
+    pub fn with_parent_task<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&Arc<Task>) -> R,
+    {
+        let mut topology = TOPOLOGY.inner.write_irqsave();
+
+        let parent_tid = topology
+            .tasks
+            .get(&self.tid())
+            .expect("task topology: task not found")
+            .parent
+            .expect("task topology: parent task not found");
+
+        let parent = topology
+            .tasks
+            .get(&parent_tid)
+            .expect("task topology: parent task not found")
+            .task
+            .clone();
+
+        f(&parent)
+    }
+
+    /// Get the parent task of this task.
+    ///
+    /// Only **Object Consistency** is guaranteed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this task is root or idle, which should not happen.
+    pub fn get_parent_task(&self) -> Arc<Task> {
+        let topology = TOPOLOGY.inner.read_irqsave();
+
+        let parent_tid = topology
+            .tasks
+            .get(&self.tid())
+            .expect("task topology: task not found")
+            .parent
+            .expect("task topology: parent task not found");
+
+        let parent = topology
+            .tasks
+            .get(&parent_tid)
+            .expect("task topology: parent task not found")
+            .task
+            .clone();
+
+        parent
+    }
+
     /// Iterate over the children of this task.
+    ///
+    /// This method provides **Topology Consistency** at the cost of locking the
+    /// topology for a longer time. Caution should be taken to avoid deadlocks.
     pub fn for_each_child<F: FnMut(&Arc<Task>)>(&self, mut f: F) {
         let topology = TOPOLOGY.inner.read_irqsave();
         let node = topology
@@ -215,9 +296,123 @@ impl Task {
         }
     }
 
-    /// Whether this task is the init task, the ancestor of all other tasks.
-    pub fn is_init(&self) -> bool {
-        self.tid() == Tid::INIT
+    /// Find first child (order unspecified) of this task that satisfies the
+    /// given prediction. Returns [None] if no such child is found.
+    ///
+    /// Only **Object Consistency** is guaranteed.
+    pub fn find_child<P: FnMut(&Arc<Task>) -> bool>(&self, mut prediction: P) -> Option<Arc<Task>> {
+        let children = {
+            let topology = TOPOLOGY.inner.read_irqsave();
+            let node = topology
+                .tasks
+                .get(&self.tid())
+                .expect("task topology: task not found");
+            node.children
+                .iter()
+                .map(|tid| {
+                    topology
+                        .tasks
+                        .get(tid)
+                        .expect("task topology: child task not found")
+                        .task
+                        .clone()
+                })
+                .collect::<Vec<_>>()
+        };
+
+        for child in children {
+            if prediction(&child) {
+                return Some(child);
+            }
+        }
+        None
+    }
+
+    /// Reparent all children of this task to init. This is called when a task
+    /// is exiting.
+    ///
+    /// **Topology Consistency** is guaranteed natually due to the objective of
+    /// this method.
+    pub fn reparent_orphan_children(&self) {
+        // we may need get_many_mut... but it's still a nightly feature.
+        let mut topology = TOPOLOGY.inner.write_irqsave();
+
+        let mut child_tids = vec![];
+
+        let node = topology
+            .tasks
+            .get_mut(&self.tid())
+            .expect("task topology: task not found");
+        while let Some(child_tid) = node.children.pop_last() {
+            knoticeln!(
+                "reparenting orphan child task {} of parent task {}",
+                child_tid,
+                self.tid()
+            );
+            child_tids.push(child_tid);
+        }
+
+        for child_tid in &child_tids {
+            let child_node = topology
+                .tasks
+                .get_mut(child_tid)
+                .expect("task topology: child task not found when reparenting orphan children");
+            child_node.parent = Some(Tid::INIT);
+        }
+
+        let init_node = topology
+            .tasks
+            .get_mut(&Tid::INIT)
+            .expect("task topology: init task not found");
+
+        for child_tid in child_tids {
+            assert!(
+                init_node.children.insert(child_tid),
+                "task topology: duplicate child TID {} when reparenting orphan children",
+                child_tid
+            );
+        }
+    }
+
+    /// Contrast to [publish_task], this is the end of the life cycle of a task
+    /// in visible topology.
+    ///
+    /// **Caller must guarantee that after this operation, the reaped task won't
+    /// be exposed to outside observers anymore.**
+    ///
+    /// Note that reaping only removes the task from global-visible topology.
+    /// The task may still be temporarily referenced by scheduler-local state
+    /// on its owner CPU until the switch boundary fully completes.
+    ///
+    /// TODO: deferred queue.
+    pub fn reap_child(&self, child: Tid) -> Arc<Task> {
+        let mut topology = TOPOLOGY.inner.write_irqsave();
+
+        let parent_tid = self.tid();
+
+        let parent_node = topology
+            .tasks
+            .get_mut(&parent_tid)
+            .expect("task topology: parent task not found when unlinking child");
+        assert!(
+            parent_node.children.remove(&child),
+            "task topology: failed to unlink child {} from parent {}",
+            child,
+            parent_tid
+        );
+
+        let child_node = topology
+            .tasks
+            .remove(&child)
+            .expect("task topology: child task disappeared while reaping");
+        assert!(
+            child_node.parent == Some(parent_tid),
+            "task topology: child {} has unexpected parent {:?} when reaping",
+            child,
+            child_node.parent
+        );
+
+        child_node.task
     }
 }
 

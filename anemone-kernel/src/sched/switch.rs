@@ -18,9 +18,13 @@ use crate::{
 /// function.**
 pub unsafe fn switch_out() {
     debug_assert!(cur_cpu_id() == get_current_task().cpuid());
+    debug_assert!(IntrArch::local_intr_disabled());
     unsafe {
-        let cur_ctx = get_current_task().get_sched_ctx_mut();
+        let curr_task = get_current_task();
+        let cur_ctx = curr_task.get_sched_ctx_mut();
         let sched_ctx = get_local_sched_ctx();
+        curr_task.on_switch_out();
+        drop(curr_task);
         SchedArch::switch(cur_ctx, sched_ctx);
     }
 }
@@ -35,9 +39,11 @@ pub unsafe fn switch_out() {
 /// function.**
 pub unsafe fn switch_to(task: Arc<Task>) {
     debug_assert!(cur_cpu_id() == task.cpuid());
+    debug_assert!(IntrArch::local_intr_disabled());
     unsafe {
         let sched_ctx = get_local_sched_ctx_mut();
         let next_ctx = task.get_sched_ctx();
+        task.on_switch_in();
         set_current_task(Some(task));
         SchedArch::switch(sched_ctx, next_ctx);
     }
