@@ -27,8 +27,9 @@ use crate::{
     },
     mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
+    sched::class::{SchedClassPrv, SchedEntity},
     sync::counter::CpuSync,
-    task::clone::CloneFlags,
+    task::tid::Tid,
 };
 
 #[unsafe(no_mangle)]
@@ -218,6 +219,8 @@ pub fn register_debugcon() {
     );
 }
 
+static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("registering init task");
+
 unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     unsafe {
         clear_bss();
@@ -271,19 +274,21 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
 
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
         set_boot_mono(true);
-        let (kinit_task, guard) = Task::new_kernel(
+        let (bsp_kinit, guard) = Task::new_kernel(
             "bsp-kinit",
             bsp_kinit as *const (),
             ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
+            SchedEntity::new(SchedClassPrv::RoundRobin(())),
             TaskFlags::NONE,
-            CloneFlags::empty(),
+            Some(cur_cpu_id()),
         )
         .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e));
-        let kinit_task = Arc::new(kinit_task);
-        task::boot::register_root_task(kinit_task.clone());
-        guard.register(kinit_task.clone());
-        add_to_ready(kinit_task);
-        switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
+
+        let bsp_kinit = RegisterGuard::register_root(guard, bsp_kinit);
+        INIT_SYNC_COUNTER.sync_with_counter();
+
+        sched::init_routines::local_enqueue_first(bsp_kinit);
+        switch_to_guarded(VirtAddr::new(scheduler as *const () as u64))
     }
 }
 
@@ -300,19 +305,21 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
 
         TimeArch::init_this_cpu();
         set_boot_mono(false);
+        INIT_SYNC_COUNTER.sync_with_counter();
         let (ap_kinit, guard) = Task::new_kernel(
             "ap-kinit",
             ap_kinit as *const (),
             ParameterList::new(&[ap_id as u64]),
+            SchedEntity::new(SchedClassPrv::RoundRobin(())),
             TaskFlags::NONE,
-            CloneFlags::empty(),
+            Some(cur_cpu_id()),
         )
         .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e));
-        let ap_kinit = Arc::new(ap_kinit);
-        ap_kinit.add_as_child(task::boot::wait_for_root_task());
-        guard.register(ap_kinit.clone());
-        add_to_ready(ap_kinit);
-        switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64));
+
+        let ap_kinit = guard.register(ap_kinit, TaskBinding { parent: Tid::INIT });
+
+        sched::init_routines::local_enqueue_first(ap_kinit);
+        switch_to_guarded(VirtAddr::new(scheduler as *const () as u64));
     }
 }
 

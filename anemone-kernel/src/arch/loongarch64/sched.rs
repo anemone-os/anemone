@@ -5,7 +5,8 @@ use crate::{
         __ktrap_return_to_task, __utrap_return_to_task, LA64TrapFrame,
     },
     prelude::*,
-    sched::{ParameterList, SchedArchTrait, TaskContextArch, exit::kernel_exit},
+    sched::{ParameterList, SchedArchTrait, TaskContextArch},
+    task::exit::kernel_exit,
 };
 
 /// Saved task context for LoongArch64.
@@ -140,6 +141,18 @@ unsafe extern "C" fn user_task_entry_secondary(
     ustack_top: u64,
     kstack_top: u64,
 ) -> ! {
+    assert!(
+        IntrArch::local_intr_disabled(),
+        "we came from scheduler, so interrupts should be disabled"
+    );
+
+    kdebugln!(
+        "user task entry: entry={:#x}, ustack_top={:#x}, kstack_top={:#x}",
+        entry as u64,
+        ustack_top,
+        kstack_top
+    );
+
     let mut trapframe = LA64TrapFrame::user_init_frame(
         VirtAddr::new(entry as u64),
         VirtAddr::new(ustack_top),
@@ -198,6 +211,11 @@ unsafe extern "C" fn kernel_task_entry_secondary(
     fn zero_exit() -> ! {
         kernel_exit(0)
     }
+
+    assert!(
+        IntrArch::local_intr_disabled(),
+        "we came from scheduler, so interrupts should be disabled"
+    );
 
     let args_parsed =
         unsafe { a_args.as_ref() }.expect("task args in kernel stack should never be null");
