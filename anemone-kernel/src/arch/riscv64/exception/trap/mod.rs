@@ -13,6 +13,10 @@ pub struct RiscV64TrapArch;
 
 impl TrapArchTrait for RiscV64TrapArch {
     type TrapFrame = RiscV64TrapFrame;
+
+    unsafe fn load_utrapframe(trapframe: Self::TrapFrame) -> ! {
+        unsafe { __utrap_return_to_task(&trapframe as *const _) }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -60,53 +64,92 @@ pub struct RiscV64TrapFrame {
     sepc: u64,
     stval: u64,
     scause: u64,
+    /// Stores kstack top. Meaningless for kernel threads.
+    ///
+    /// Stays the same during the whole lifetime of a task, except in utrap
+    /// handler, where there is a short window that sscrach is exchanged with
+    /// user's stack pointer.
+    sscratch: u64,
+    /// Stores the value of kernel's tp.
+    ///
+    /// TODO: add doc.
+    ///
+    /// Current implementation relies on the fact that we don't support
+    /// cross-cpu scheduling.
     ktp: u64,
 }
 
 impl RiscV64TrapFrame {
-    /// Construct a trap frame for a new task.
+    /// Create a new trap frame for a newly-created kernel thread.
     ///
-    /// **Note `ktp` of the created trap frame is initialized with the current
-    /// value of `tp`, i.e. current core's percpu base. Fresh user tasks keep
-    /// `x4/tp` for user TLS state and stash the kernel percpu base in `ktp` for
-    /// later user trap entry. So the trap frame should not be sent across
-    /// cores. Instead, it's always expected to be consumed on the same core.**
-    pub fn task_init_frame(
-        entry: u64,
-        stack_top: u64,
-        irq_flags: IrqFlags,
-        prv: Privilege,
+    /// Interrupts will be enabled when the kernel thread starts running.
+    pub fn kernel_init_frame(
+        entry: VirtAddr,
+        stack_top: VirtAddr,
         args: &[u64; 7],
-        ra: u64,
+        return_to: *const (),
     ) -> Self {
-        let mut current_tp = 0;
+        let cur_tp: u64;
         unsafe {
-            asm!("mv {}, tp", out(reg) current_tp);
+            asm!("mv {}, tp", out(reg) cur_tp);
         }
 
         Self {
             gpr: Gpr {
                 x: {
                     let mut x = [0; 32];
+                    x[1] = return_to as u64; // ra
                     x[10..17].copy_from_slice(args);
-                    if matches!(prv, Privilege::Kernel) {
-                        x[4] = current_tp;
-                    }
-                    x[2] = stack_top;
-                    x[1] = ra as u64;
+                    x[4] = cur_tp;
+                    x[2] = stack_top.get();
                     x
                 },
             },
             sstatus: {
                 let mut sstatus = sstatus::read();
-                sstatus.set_spie(irq_flags == IntrArch::ENABLED_IRQ_FLAGS);
-                sstatus.set_spp(SPP::from(prv));
+                sstatus.set_spie(true);
+                sstatus.set_spp(SPP::Supervisor);
                 sstatus.bits() as u64
             },
-            sepc: entry,
+            sepc: entry.get(),
             stval: 0,
             scause: 0,
-            ktp: current_tp,
+            // the same as below.
+            sscratch: 0x39393939,
+            // kthread should not use this when doing traps.
+            // initialize this with a canary value to catch bugs that accidentally use this field.
+            ktp: 0x39393939,
+        }
+    }
+
+    /// Create a new trap frame for a newly-created user task.
+    ///
+    /// TODO: docs for ktp.
+    pub fn user_init_frame(entry: VirtAddr, ustack_top: VirtAddr, kstack_top: VirtAddr) -> Self {
+        let cur_tp: u64;
+        unsafe {
+            asm!("mv {}, tp", out(reg) cur_tp);
+        }
+
+        Self {
+            gpr: Gpr {
+                x: {
+                    let mut x = [0; 32];
+                    x[2] = ustack_top.get();
+                    x
+                },
+            },
+            sstatus: {
+                let mut sstatus = sstatus::read();
+                sstatus.set_spie(true);
+                sstatus.set_spp(SPP::User);
+                sstatus.bits() as u64
+            },
+            sepc: entry.get(),
+            stval: 0,
+            scause: 0,
+            sscratch: kstack_top.get(),
+            ktp: cur_tp,
         }
     }
 }
@@ -137,6 +180,7 @@ impl TrapFrameArch for RiscV64TrapFrame {
         sepc: 0,
         stval: 0,
         scause: 0,
+        sscratch: 0,
         ktp: 0,
     };
 
@@ -146,6 +190,15 @@ impl TrapFrameArch for RiscV64TrapFrame {
 
     fn set_tls(&mut self, tls: u64) {
         self.gpr.x[4] = tls;
+    }
+
+    fn set_scratch(&mut self, scratch: u64) {
+        self.sscratch = scratch;
+    }
+
+    fn set_arg<const IDX: usize>(&mut self, arg: u64) {
+        const_assert!(IDX < 7);
+        self.gpr.x[10 + IDX] = arg;
     }
 }
 

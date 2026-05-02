@@ -54,7 +54,7 @@ pub fn percpu_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[unsafe(link_section = #section)]
         #[used]
         #(#attrs)*
-        #vis static #name: crate::mm::percpu::PerCpu<#ty> = crate::mm::percpu::PerCpu::new(#init);
+        #vis static #name: crate::percpu::PerCpu<#ty> = crate::percpu::PerCpu::new(#init);
     };
 
     TokenStream::from(new_item)

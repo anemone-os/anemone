@@ -18,7 +18,7 @@ fn sys_mprotect(
     #[validate_with(nonzero)] len: u64,
     prot: MmapProt,
 ) -> Result<u64, SysError> {
-    let usp = with_current_task(|task| task.clone_uspace().expect("user task should have uspace"));
+    let usp = get_current_task().clone_uspace();
 
     let prot: Protection = prot.into();
     let svpn = addr.page_down();
@@ -26,8 +26,7 @@ fn sys_mprotect(
         align_up_power_of_2!(len, PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES;
     let range = VirtPageRange::new(svpn, npages as u64);
 
-    usp.write()
-        .protect_range(range, prot)
+    usp.protect_range(range, prot)
         .map(|()| 0)
         .map_err(Into::into)
 }

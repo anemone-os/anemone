@@ -65,7 +65,7 @@ impl<T: ?Sized> SpinLock<T> {
     #[track_caller]
     pub fn lock_irqsave(&self) -> IrqSaveGuard<'_, T> {
         loop {
-            let _intr_guard = IntrGuard::new(false);
+            let _intr_guard = IntrGuard::new();
             if let Some(guard) = self.lock.try_lock() {
                 break IrqSaveGuard {
                     guard: Some(guard),
@@ -79,7 +79,7 @@ impl<T: ?Sized> SpinLock<T> {
 
     #[track_caller]
     pub fn try_lock_irqsave(&self) -> Option<IrqSaveGuard<'_, T>> {
-        let _intr_guard = IntrGuard::new(false);
+        let _intr_guard = IntrGuard::new();
         let guard = self.lock.try_lock()?;
         Some(IrqSaveGuard {
             guard: Some(guard),

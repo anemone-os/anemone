@@ -12,12 +12,15 @@ use core::hint::spin_loop;
 
 use alloc::{alloc::AllocError, collections::LinkedList};
 
-use crate::prelude::*;
+use crate::{prelude::*, task::tid::Tid};
 
 #[derive(Debug, Clone, Copy)]
 pub enum IpiPayload {
     TlbShootdown {
         vpn: Option<VirtPageNum>,
+    },
+    WakeUpTask {
+        tid: Tid,
     },
     #[cfg(feature = "kunit")]
     RunKUnitPerCpu {
@@ -41,6 +44,9 @@ impl IpiMsg {
     }
 }
 
+/// This queue's lock will be acquired in hwirq context(ipi handler), so we must
+/// use `lock_irqsave` all the time instead of `lock`, otherwise deadlock can
+/// occur.
 #[percpu]
 static IPI_QUEUE: SpinLock<LinkedList<Arc<IpiMsg>>> = SpinLock::new(LinkedList::new());
 
@@ -63,7 +69,7 @@ fn enqueue_ipi(cpu_id: usize, msg: Arc<IpiMsg>) {
 /// Send an IPI to the target CPU, synchronously waiting for the IPI to be
 /// handled before returning.
 pub fn send_ipi(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
-    if cpu_id == CpuArch::cur_cpu_id().get() {
+    if cpu_id == cur_cpu_id().get() {
         panic!("cannot send ipi to self");
     }
     if !target_online(cpu_id) {
@@ -85,8 +91,8 @@ pub fn send_ipi(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
 /// Broadcast an IPI to all other CPUs, synchronously waiting for all of them to
 /// handle the IPI before returning.
 pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
-    let cur_cpuid = CpuArch::cur_cpu_id().get();
-    let ncpus = CpuArch::ncpus();
+    let cur_cpuid = cur_cpu_id().get();
+    let ncpus = ncpus();
     for id in 0..ncpus {
         if !target_online(id) {
             return Err(IpiError::TargetOffline);
@@ -117,7 +123,7 @@ pub enum IpiError {
 
 /// Send an IPI to the target CPU asynchronously.
 pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
-    if cpu_id == CpuArch::cur_cpu_id().get() {
+    if cpu_id == cur_cpu_id().get() {
         panic!("cannot send ipi to self");
     }
 
@@ -131,8 +137,8 @@ pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError
 
 /// Broadcast an IPI to all other CPUs asynchronously.
 pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
-    let cur_cpuid = CpuArch::cur_cpu_id().get();
-    let ncpus = CpuArch::ncpus();
+    let cur_cpuid = cur_cpu_id().get();
+    let ncpus = ncpus();
     for id in 0..ncpus {
         if id != cur_cpuid && !target_online(id) {
             return Err(IpiError::TargetOffline);
@@ -173,6 +179,15 @@ pub fn handle_ipi() {
                 #[cfg(feature = "kunit")]
                 RunKUnitPerCpu { test_fn } => {
                     crate::debug::kunit::handle_percpu_ipi_test(test_fn);
+                    msg.is_accomplished.store(true, Ordering::Release);
+                },
+                WakeUpTask { tid } => {
+                    let task = get_task(&tid).expect("internal error: no such task to wake up");
+
+                    // SAFETY: all accesses to local runqueue already disabled interrupts, so we are
+                    // safe to do this in hwirq context.
+                    local_enqueue(task);
+                    mark_need_resched();
                     msg.is_accomplished.store(true, Ordering::Release);
                 },
                 StopExecution => {

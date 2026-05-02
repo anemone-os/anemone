@@ -55,7 +55,7 @@ where
     B: Bijection<X = u64>,
 {
     /// Create a new allocator using the given strategy.
-    pub fn new(strategy: S) -> Self {
+    pub const fn new(strategy: S) -> Self {
         Self {
             strategy,
             _marker: PhantomData,

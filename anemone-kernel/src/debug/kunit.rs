@@ -23,7 +23,7 @@ impl PerCpuKUnitBarrier {
     }
 
     fn reset(&self) {
-        self.participants.store(CpuArch::ncpus(), Ordering::Release);
+        self.participants.store(ncpus(), Ordering::Release);
         self.ready.store(0, Ordering::Release);
         self.done.store(0, Ordering::Release);
         self.start.store(false, Ordering::Release);
@@ -98,12 +98,18 @@ pub struct KUnit {
 }
 
 pub fn handle_percpu_ipi_test(test_fn: fn()) {
-    let guard = IntrGuard::new(true);
+    unsafe {
+        IntrArch::local_intr_enable();
+    }
+
     PERCPU_KUNIT_BARRIER.mark_ready();
     PERCPU_KUNIT_BARRIER.wait_start();
     test_fn();
     PERCPU_KUNIT_BARRIER.mark_done();
-    drop(guard);
+
+    unsafe {
+        IntrArch::local_intr_disable();
+    }
 }
 
 pub fn run_percpu_test(test_fn: fn()) {

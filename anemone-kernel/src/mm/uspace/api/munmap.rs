@@ -14,12 +14,12 @@ fn sys_munmap(
     addr: VirtAddr,
     #[validate_with(nonzero)] length: u64,
 ) -> Result<u64, SysError> {
-    let usp = with_current_task(|task| task.clone_uspace().expect("user task should have uspace"));
+    let usp = get_current_task().clone_uspace();
 
     let svpn = addr.page_down();
     let npages =
         align_up_power_of_2!(length, PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES;
     let range = VirtPageRange::new(svpn, npages as u64);
 
-    usp.write().unmap(range).map(|()| 0).map_err(Into::into)
+    usp.unmap(range).map(|()| 0).map_err(Into::into)
 }

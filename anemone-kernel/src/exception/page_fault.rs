@@ -50,7 +50,7 @@ impl PageFaultInfo {
 pub fn handle_kernel_page_fault(info: PageFaultInfo) {
     panic!(
         "({}) page fault in kernel: pc={:?}, addr={:?}, type={:?}",
-        CpuArch::cur_cpu_id(),
+        cur_cpu_id(),
         info.fault_pc(),
         info.fault_addr(),
         info.fault_type()

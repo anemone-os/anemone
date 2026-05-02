@@ -29,7 +29,7 @@ impl TimeArchTrait for LA64TimeArch {
 
 impl LocalClockSourceArch for LA64TimeArch {
     fn curr_monotonic_time() -> u64 {
-        rdtime(CpuArch::cur_cpu_id().get())
+        rdtime(cur_cpu_id().get())
     }
 
     fn monotonic_freq_hz() -> u64 {
@@ -57,7 +57,7 @@ impl LA64TimeArch {
     /// This does not program the first timer interrupt.
     pub fn init_this_cpu() {
         unsafe {
-            tid::csr_write(CpuArch::cur_cpu_id().get() as u32);
+            tid::csr_write(cur_cpu_id().get() as u32);
         }
 
         unsafe {

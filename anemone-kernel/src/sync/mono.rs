@@ -31,6 +31,11 @@ pub struct MonoFlow<T> {
 }
 
 unsafe impl<T> Sync for MonoFlow<T> {}
+// TODO: consider again. Currently this impl only serves to allow the utrapframe
+// pointer to be stored in tcb, which is safe. but for such a narrow use case,
+// maybe we shouldn't make MonoFlow itself Send as well, but handle that case
+// separately.
+unsafe impl<T> Send for MonoFlow<T> {}
 
 impl<T> MonoFlow<T> {
     /// Create a new [`MonoFlow`] wrapping the given data.

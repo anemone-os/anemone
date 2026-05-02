@@ -202,7 +202,7 @@ impl CoreIrqChip for SiFivePlic {
 
                 let regs = plic.regs();
 
-                for i in 0..CpuArch::ncpus() {
+                for i in 0..ncpus() {
                     let ctx = SiFivePlic::s_ctx_for(i);
 
                     // keep all sources masked by default, individual lines are unmasked by
@@ -226,9 +226,7 @@ impl CoreIrqChip for SiFivePlic {
     }
 
     fn claim(&self) -> Option<HwIrq> {
-        let claimed =
-            self.regs()
-                .claim(SiFivePlic::s_ctx_for(CpuArch::cur_cpu_id().get())) as usize;
+        let claimed = self.regs().claim(SiFivePlic::s_ctx_for(cur_cpu_id().get())) as usize;
         if claimed == 0 {
             return None;
         }
@@ -260,6 +258,6 @@ impl SiFivePlic {
     }
 
     fn current_s_context(&self) -> usize {
-        Self::s_ctx_for(CpuArch::cur_cpu_id().get())
+        Self::s_ctx_for(cur_cpu_id().get())
     }
 }

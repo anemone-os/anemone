@@ -8,9 +8,9 @@ use crate::{
         intr::handle_intr,
         trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
     },
-    device::CpuArchTrait,
     prelude::{fault::handle_user_page_fault, *},
-    sched::{current_task_id, kernel_exit},
+    sched::current_task_id,
+    task::{cpu_usage::Privilege, exit::kernel_exit},
 };
 
 // User trap entry point. The kernel does not save or restore floating-point
@@ -60,6 +60,11 @@ core::arch::global_asm!(
     "   st.d $r29, $sp, 232",
     "   st.d $r30, $sp, 240",
     "   st.d $r31, $sp, 248",
+    // preserve the kernel trap-stack top that the next return path must write
+    // back into sscratch before re-entering user mode.
+    "   addi.d $t0, $sp, {trapframe_bytes}",
+    "   st.d $t0, $sp, {trapframe_scratch_offset}",
+
     // now we have registers to play with. we can calculate previous $sp
     "   csrrd $t0, {save1}",
     "   st.d $t0, $sp, 24",
@@ -74,7 +79,6 @@ core::arch::global_asm!(
     "   st.d $t0, $sp, 280",
     // TODO: if this is a device interrupt (timer or external), an interrupt stack
     // should be used, instead of continuing execution on the current stack.
-
     "   la $t0, __ktrap_entry",
     "   csrwr $t0, {eentry}",
 
@@ -93,6 +97,10 @@ core::arch::global_asm!(
 
     "   la $t0, __utrap_entry",
     "   csrwr $t0, {eentry}",
+
+    // load back save0
+    "   ld.d $t0, $a0, {trapframe_scratch_offset}",
+    "   csrwr $t0, {save0}",
 
 
     "   ld.d $r0, $a0, 0",
@@ -147,6 +155,7 @@ core::arch::global_asm!(
     "   ertn",
     trapframe_bytes = const size_of::<LA64TrapFrame>(),
     trapframe_ktp_offset = const core::mem::offset_of!(LA64TrapFrame, ktp),
+    trapframe_scratch_offset = const core::mem::offset_of!(LA64TrapFrame, save0),
     rust_utrap_entry = sym rust_utrap_entry,
     prmd = const CR_PRMD,
     era = const CR_ERA,
@@ -160,32 +169,63 @@ core::arch::global_asm!(
 /// User trap entry used by the assembly stub.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
+    debug_assert!(IntrArch::local_intr_disabled());
+
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
-    with_current_task(|t| unsafe {
-        t.set_utrapframe(trapframe);
-        t.on_prv_change(Privilege::Kernel);
-    });
+    {
+        let task = get_current_task();
+        unsafe {
+            task.set_utrapframe(trapframe);
+        }
+        task.on_prv_change(Privilege::Kernel);
+    }
+
     let estat = Estat::from_u64(trapframe.estat);
     let ecode = estat.ecode();
+
     if ecode == 0 {
         // interrupt
-        let intr_flags = estat.is();
+        percpu::on_entering_hwirq();
+
+        let intr_flags = estat
+            .is()
+            .iter()
+            .next()
+            .expect("received interrupt with no pending source");
+
         let reason = LA64Interrupt::try_from(intr_flags)
             .unwrap_or_else(|_| panic!("unknown interrupt with flag {:?}", intr_flags));
         unsafe {
             handle_intr(reason);
         }
+
+        percpu::on_leaving_hwirq();
+
+        {
+            // from this code block, the logical execution flow is considered
+            // leaving the hardware interrupt environment.
+
+            debug_assert!(allow_preempt(), "for utraps, this must hold");
+            if fetch_clear_need_resched() {
+                unsafe {
+                    schedule();
+                }
+            }
+        }
     } else {
+        unsafe {
+            IntrArch::local_intr_enable();
+        }
+
         let esubcode = estat.esubcode();
-        let intr_guard = IntrGuard::new(true);
         let reason = match LA64Exception::try_from((ecode, esubcode)) {
             Ok(r) => r,
             Err(_) => {
                 kerrln!(
                     "({}) user {} aborted with unknown trap with code {}:{}",
-                    CpuArch::cur_cpu_id(),
+                    cur_cpu_id(),
                     current_task_id(),
                     ecode,
                     esubcode
@@ -226,7 +266,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
             _ => {
                 kerrln!(
                     "({}) user {} aborted with unhandled exception: {:?}, pc: {:#x}, badv: {:#x}\n\ttask return value not implemented yet",
-                    CpuArch::cur_cpu_id(),
+                    cur_cpu_id(),
                     current_task_id(),
                     reason,
                     trapframe.era,
@@ -236,10 +276,12 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                 //TODO: Error code
             },
         }
-        drop(intr_guard);
+        unsafe {
+            IntrArch::local_intr_disable();
+        }
     }
 
-    with_current_task(|t| t.on_prv_change(Privilege::User));
+    get_current_task().on_prv_change(Privilege::User);
 }
 unsafe extern "C" {
     unsafe fn __utrap_entry() -> !;

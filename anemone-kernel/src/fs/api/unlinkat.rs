@@ -7,7 +7,11 @@ use anemone_abi::fs::linux::at::AT_REMOVEDIR;
 
 use crate::{
     fs::api::args::AtFd,
-    prelude::{dt::c_readonly_string, handler::TryFromSyscallArg, *},
+    prelude::{
+        dt::c_readonly_string,
+        handler::{TryFromSyscallArg, syscall_arg_flag32},
+        *,
+    },
 };
 
 struct UnlinkAtFlags {
@@ -16,11 +20,7 @@ struct UnlinkAtFlags {
 
 impl TryFromSyscallArg for UnlinkAtFlags {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-        if (raw >> 32) != 0 {
-            return Err(SysError::InvalidArgument);
-        }
-
-        let raw = raw as u32;
+        let raw = syscall_arg_flag32(raw)?;
 
         if raw & !AT_REMOVEDIR != 0 {
             return Err(SysError::InvalidArgument);
@@ -39,7 +39,7 @@ fn unlinkat(
 ) -> Result<u64, SysError> {
     let path = Path::new(pathname.as_ref());
     if path.is_absolute() {
-        let path = with_current_task(|task| task.make_global_path(&Path::new(pathname.as_ref())));
+        let path = get_current_task().make_global_path(&Path::new(pathname.as_ref()));
         vfs_unlink(&path)?;
     } else {
         let dir_path = dirfd.to_pathref(true)?;

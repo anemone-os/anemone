@@ -18,7 +18,7 @@ impl CpuSync {
     /// this point.
     #[inline(never)]
     pub unsafe fn sync_with_counter(&self) {
-        let ncpus = CpuArch::ncpus();
+        let ncpus = ncpus();
         if self.inner.fetch_add(1, Ordering::SeqCst) + 1 == ncpus {
             knoticeln!("Counter '{}' synchronized", self.name);
         }

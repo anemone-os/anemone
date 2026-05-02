@@ -1,27 +1,45 @@
-use core::{
-    fmt::{Debug, Display},
-    sync::atomic::{AtomicU32, Ordering},
-};
+//! Task ID management.
 
-/// temporary id allocator
-/// todo: use [idalloc::IdAllocator] instead of this
-static ID_ALLOC: AtomicU32 = AtomicU32::new(1);
+use core::fmt::{Debug, Display};
 
-unsafe fn alloc_tid_raw() -> u32 {
-    ID_ALLOC.fetch_add(1, Ordering::SeqCst)
+use idalloc::{Bijection, BitmapAlloc, IdAllocator};
+
+use crate::prelude::*;
+
+struct TidBijection;
+
+impl Bijection for TidBijection {
+    type X = u64;
+    type Y = Tid;
+
+    fn forward(x: Self::X) -> Self::Y {
+        debug_assert!(x <= u32::MAX as u64);
+        Tid(x as u32)
+    }
+
+    fn backward(y: Self::Y) -> Self::X {
+        y.0 as u64
+    }
 }
 
-unsafe fn free_tid_raw(id: u32) {
-    // do nothing for now
-}
+static ID_ALLOC: Lazy<SpinLock<IdAllocator<BitmapAlloc, TidBijection>>> =
+    Lazy::new(|| SpinLock::new(IdAllocator::new(BitmapAlloc::new(1, MAX_PROCESSES))));
 
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Tid(u32);
 
-pub const TIDH_IDLE: TidHandle = TidHandle(0);
-
 impl Tid {
+    pub const IDLE: Self = Self(0);
+    pub const INVALID: Self = {
+        const_assert!(
+            MAX_PROCESSES < u32::MAX as u64,
+            "wrong kconfig: MAX_PROCESSES is too large"
+        );
+        Self(u32::MAX)
+    };
+    pub const INIT: Self = Self(1);
+
     #[inline(always)]
     pub fn new(id: u32) -> Self {
         Self(id)
@@ -54,6 +72,15 @@ impl Debug for TidHandle {
 }
 
 impl TidHandle {
+    pub const IDLE: Self = Self(0);
+    pub const INVALID: Self = {
+        const_assert!(
+            MAX_PROCESSES < u32::MAX as u64,
+            "wrong kconfig: MAX_PROCESSES is too large"
+        );
+        Self(u32::MAX)
+    };
+
     pub fn get(&self) -> u32 {
         self.0
     }
@@ -62,14 +89,15 @@ impl TidHandle {
 impl Drop for TidHandle {
     fn drop(&mut self) {
         if self.0 != 0 {
-            unsafe {
-                free_tid_raw(self.0);
-            }
+            ID_ALLOC.lock_irqsave().dealloc(Tid(self.0));
+        } else {
+            panic!("dropping idle task's TidHandle");
         }
     }
 }
 
-pub fn alloc_tid() -> TidHandle {
-    let id = unsafe { alloc_tid_raw() };
-    TidHandle(id)
+/// Allocate a new [TidHandle]. Returns `None` if the maximum number of
+/// processes has been reached. (which is [`MAX_PROCESSES`])
+pub fn alloc_tid() -> Option<TidHandle> {
+    ID_ALLOC.lock().alloc().map(|tid| TidHandle(tid.get()))
 }

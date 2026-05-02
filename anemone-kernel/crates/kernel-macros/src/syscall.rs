@@ -1,9 +1,57 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Error, Expr, FnArg, ItemFn, Pat};
+use syn::{
+    Error, Expr, FnArg, Ident, ItemFn, Pat, Token,
+    parse::{Parse, ParseStream},
+};
+
+struct SyscallAttr {
+    sysno: Expr,
+    preparse: Option<Expr>,
+}
+
+impl Parse for SyscallAttr {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let sysno = input.parse()?;
+        let mut preparse = None;
+
+        while !input.is_empty() {
+            input.parse::<Token![,]>()?;
+            if input.is_empty() {
+                break;
+            }
+
+            let key: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+
+            match key.to_string().as_str() {
+                "preparse" => {
+                    if preparse.is_some() {
+                        return Err(Error::new_spanned(
+                            key,
+                            "duplicate `preparse` syscall attribute",
+                        ));
+                    }
+                    preparse = Some(input.parse()?);
+                },
+                _ => {
+                    return Err(Error::new_spanned(
+                        key,
+                        "unsupported syscall attribute; expected `preparse = ...`",
+                    ));
+                },
+            }
+        }
+
+        Ok(Self { sysno, preparse })
+    }
+}
 
 pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let sysno_expr = syn::parse_macro_input!(attr as Expr);
+    let SyscallAttr {
+        sysno: sysno_expr,
+        preparse,
+    } = syn::parse_macro_input!(attr as SyscallAttr);
 
     let mut input = syn::parse_macro_input!(item as ItemFn);
 
@@ -106,6 +154,21 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     let nargs = arg_names.len();
+    let raw_arg_exprs: Vec<_> = (0..nargs)
+        .map(|index| {
+            let arg_index = syn::Index::from(index);
+            quote! { regs.args[#arg_index] }
+        })
+        .collect();
+    let preparse_call = match preparse {
+        Some(preparse) => quote! {
+            {
+                let __preparse = (#preparse);
+                let _ = __preparse(#(#raw_arg_exprs),*);
+            }
+        },
+        None => quote! {},
+    };
 
     let expanded = quote! {
         #input
@@ -113,6 +176,7 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         fn #wrapper_name(
             regs: &crate::syscall::handler::SyscallRegs,
         ) -> core::result::Result<u64, crate::syserror::SysError> {
+            #preparse_call
             #(#arg_bindings)*
 
             #name(#(#arg_names),*)

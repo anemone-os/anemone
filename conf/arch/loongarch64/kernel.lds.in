@@ -10,9 +10,9 @@ KERNEL_LA_BASE = {{KERNEL_LA_BASE}};
 KERNEL_VA_BASE = {{KERNEL_VA_BASE}};
 
 MEMORY {
-    # kernel image is quite small, 50M should be rather enough for now
-    RAM (wxa) : ORIGIN = KERNEL_LA_BASE, LENGTH = 50M
-    VIRT (wxa) : ORIGIN = KERNEL_VA_BASE, LENGTH = 50M
+    # kernel image is quite small, 100M should be rather enough for now
+    RAM (wxa) : ORIGIN = KERNEL_LA_BASE, LENGTH = 100M
+    VIRT (wxa) : ORIGIN = KERNEL_VA_BASE, LENGTH = 100M
 }
 
 SECTIONS {

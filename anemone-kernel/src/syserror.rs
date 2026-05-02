@@ -124,8 +124,8 @@ pub enum SysError {
     IO,
     /// Unexpected end of file.
     UnexpectedEof,
-    /// Children process is not found.
-    ChildrenNotFound,
+    /// Child process is not found.
+    ChildNotFound,
     /// Binary format unrecognized.
     BinFmtUnrecognized,
 }
@@ -183,7 +183,7 @@ impl AsErrno for SysError {
             | SysError::ProbeFailed => ENODEV,
             SysError::IO => EIO,
             SysError::UnexpectedEof => ENODATA,
-            SysError::ChildrenNotFound => ECHILD,
+            SysError::ChildNotFound => ECHILD,
             SysError::BinFmtUnrecognized => ENOEXEC,
         }
     }

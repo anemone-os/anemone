@@ -85,6 +85,8 @@ struct Heap {
     brk: VirtAddr,
 }
 
+/// Since [UserSpace] can be shared on multiple cores, so tlb shootdown must be
+/// performed when doing edition.
 #[derive(Debug)]
 pub struct UserSpace {
     /// Physical page number of the root page-table for quick access.
@@ -106,6 +108,7 @@ pub struct UserSpaceData {
 
     // note that following variable is not put in TaskExecInfo, since they are bound to the
     // address space, not the process.
+    // TODO: argv
     /// Environment variable region. [start, start + size). Strings, not
     /// pointers.
     ///
@@ -121,6 +124,25 @@ impl UserSpace {
 
     pub fn write(&self) -> WriteNoPreemptGuard<'_, UserSpaceData> {
         self.data.write()
+    }
+
+    fn shootdown_tlb(vpn: Option<VirtPageNum>) {
+        if let Some(vpn) = vpn {
+            PagingArch::tlb_shootdown(vpn);
+        } else {
+            PagingArch::tlb_shootdown_all();
+        }
+
+        let current_cpu = cur_cpu_id().get();
+        for cpu_id in 0..ncpus() {
+            if cpu_id == current_cpu || !target_online(cpu_id) {
+                continue;
+            }
+
+            if let Err(e) = send_ipi(cpu_id, IpiPayload::TlbShootdown { vpn }) {
+                kwarningln!("failed to send user TLB shootdown IPI to core #{cpu_id}: {e:?}");
+            }
+        }
     }
 }
 
@@ -204,7 +226,7 @@ impl UserSpace {
                 .is_none()
         );
 
-        let mut uspace = UserSpace {
+        let uspace = UserSpace {
             table_ppn: table.root_ppn(),
             data: RwLock::new(UserSpaceData {
                 table,
@@ -225,19 +247,89 @@ impl UserSpace {
         uspace.write().prefault_initial_stack()?;
         Ok(uspace)
     }
+
+    pub fn activate(&self) {
+        self.read().activate();
+    }
 }
 
+// these methods are encapsulated. you should not call on UserSpaceData
+// directly. TODO: explain why. (hint: user space lock and tlb shootdown ipi may
+// cause deadlock.)
+// tbh this is a bit ugly. too much boilerplate code. we should refactor later.
+//
+// TODO: add doc.
 impl UserSpace {
     pub fn fork(&self) -> Result<Self, SysError> {
-        let data = self.write().fork()?;
+        let data = {
+            let mut guard = self.write();
+            guard.fork()?
+        };
+        Self::shootdown_tlb(None);
+
         Ok(UserSpace {
             table_ppn: data.table.root_ppn(),
             data: RwLock::new(data),
         })
     }
 
-    pub fn activate(&self) {
-        self.read().activate();
+    pub fn map_anonymous(&self, mapping: &mmap::AnonymousMapping) -> Result<VirtAddr, SysError> {
+        let addr = {
+            let mut guard = self.write();
+            guard.map_anonymous(mapping)?
+        };
+        Self::shootdown_tlb(None);
+        Ok(addr)
+    }
+
+    pub fn map_file(&self, mapping: &mmap::FileMapping) -> Result<VirtAddr, SysError> {
+        let addr = {
+            let mut guard = self.write();
+            guard.map_file(mapping)?
+        };
+        Self::shootdown_tlb(None);
+        Ok(addr)
+    }
+
+    pub fn unmap(&self, range: VirtPageRange) -> Result<(), SysError> {
+        {
+            let mut guard = self.write();
+            guard.unmap(range)?;
+        }
+        Self::shootdown_tlb(None);
+        Ok(())
+    }
+
+    pub fn protect_range(&self, range: VirtPageRange, prot: Protection) -> Result<(), SysError> {
+        {
+            let mut guard = self.write();
+            guard.protect_range(range, prot)?;
+        }
+        Self::shootdown_tlb(None);
+        Ok(())
+    }
+
+    pub fn set_brk(&self, requested_brk: VirtAddr) -> Result<VirtAddr, SysError> {
+        let new_brk = {
+            let mut guard = self.write();
+            let old_brk = guard.brk();
+            guard.set_brk(requested_brk)?;
+            guard.brk()
+        };
+
+        Self::shootdown_tlb(None);
+
+        Ok(new_brk)
+    }
+
+    pub fn handle_page_fault(&self, fault_info: &PageFaultInfo) -> Result<(), SysError> {
+        let fault_vpn = fault_info.fault_addr().page_down();
+        {
+            let mut guard = self.write();
+            guard.handle_page_fault(fault_info)?;
+        }
+        Self::shootdown_tlb(Some(fault_vpn));
+        Ok(())
     }
 }
 
@@ -575,13 +667,6 @@ impl UserSpaceData {
         }
     }
 
-    // /// Create a copy of this [UserSpace] with copy-on-write semantics.
-    // ///
-    // /// # Notes
-    // /// If the operation fails, pages that have already been converted to
-    // /// read-only will not be rolled back, but will be restored during a later
-    // /// page fault.
-
     /// Fork a new [UserSpace] from this one with copy-on-write semantics.
     pub fn fork(&mut self) -> Result<Self, SysError> {
         // well... there is no need to map pages here. page fault handler will handle
@@ -749,7 +834,7 @@ impl UserSpaceData {
         fault_addr: VirtAddr,
         fault_type: PageFaultType,
     ) -> Result<(), SysError> {
-        let fault_info = PageFaultInfo::new(VirtAddr::new(0), fault_addr, fault_type);
+        let fault_info = PageFaultInfo::new(VirtAddr::new(42), fault_addr, fault_type);
         self.handle_page_fault(&fault_info)
     }
 }
@@ -778,15 +863,6 @@ impl Deref for USpacePTableReadGuard<'_> {
     }
 }
 
-impl<'a> USpacePTableReadGuard<'a> {
-    /// Create a new read guard for `uspace`.
-    pub fn new(uspace: &'a UserSpace) -> Self {
-        Self {
-            guard: uspace.data.read(),
-        }
-    }
-}
-
 /// Write guard for mutating the user-space page table.
 pub struct USpacePTableWriteGuard<'a> {
     guard: WriteNoPreemptGuard<'a, UserSpaceData>,
@@ -803,13 +879,5 @@ impl Deref for USpacePTableWriteGuard<'_> {
 impl DerefMut for USpacePTableWriteGuard<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.guard.table
-    }
-}
-
-impl<'a> USpacePTableWriteGuard<'a> {
-    pub fn new(uspace: &'a UserSpace) -> Self {
-        Self {
-            guard: uspace.data.write(),
-        }
     }
 }

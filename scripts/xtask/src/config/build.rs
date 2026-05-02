@@ -2,6 +2,7 @@ use std::{path::Path, process::Command};
 
 /// Toolchains and other build-related configuration.
 use crate::config::{platform::*, rootfs::FsType};
+use crate::tasks::utils::cmd_echo;
 
 impl TargetTriple {
     pub fn objdump(&self) -> &'static str {
@@ -28,56 +29,64 @@ impl TargetTriple {
 }
 
 impl FsType {
-    fn estimate_tree_size(&self, root_tree: &Path) -> anyhow::Result<usize> {
-        fn walk_dir(dir: &Path) -> anyhow::Result<usize> {
-            let mut total_size = 0;
-            for entry in std::fs::read_dir(dir)? {
-                let entry = entry?;
-                let metadata = entry.metadata()?;
-                if metadata.is_file() {
-                    total_size += metadata.len() as usize;
-                } else if metadata.is_dir() {
-                    total_size += walk_dir(&entry.path())?;
-                }
-            }
-            Ok(total_size)
-        }
-        walk_dir(root_tree)
-    }
-
-    pub fn mkfs(&self, root_tree: &Path, output: &Path) -> anyhow::Result<()> {
+    pub fn mkfs(&self, root_tree: &Path, output: &Path, use_sudo: bool) -> anyhow::Result<()> {
         match self {
             FsType::Ext4 => {
-                // mke2fs -t ext4 -d root_tree output estimate_size
-
-                let estimate_bytes = {
-                    let bytes = self.estimate_tree_size(root_tree)?;
-                    // add 20% overhead for ext4 metadata, which should be enough
-                    let bytes = bytes + bytes / 5;
-                    // add 20MB minimum to avoid mke2fs complaining about small filesystems
-                    let bytes = bytes + 20 * 1024 * 1024;
-                    // round up to nearest 4K
-                    let bytes = (bytes + 4095) & !4095;
-                    bytes
+                let mut command = if use_sudo && !is_effective_root() {
+                    let mut command = Command::new("sudo");
+                    command.arg(
+                        "--preserve-env=LIBGUESTFS_BACKEND,LIBGUESTFS_TRACE,SUPERMIN_KERNEL,SUPERMIN_MODULES",
+                    );
+                    command.arg("virt-make-fs");
+                    command
+                } else {
+                    Command::new("virt-make-fs")
                 };
-                let estimate_mb = (estimate_bytes + 1024 * 1024 - 1) / (1024 * 1024);
 
-                let status = Command::new("mke2fs")
-                    .arg("-t")
-                    .arg("ext4")
-                    .arg("-d")
+                command
+                    .arg("--type=ext4")
+                    .arg("--format=raw")
                     .arg(root_tree)
-                    .arg(output)
-                    .arg(format!("{}M", estimate_mb))
-                    .status()?;
+                    .arg(output);
+
+                cmd_echo(&command);
+                let status = command.status()?;
                 if !status.success() {
-                    anyhow::bail!("mke2fs failed with status: {}", status);
+                    anyhow::bail!(
+                        "virt-make-fs failed with status: {}. If supermin cannot read /boot, rerun with --sudo or set SUPERMIN_KERNEL and SUPERMIN_MODULES to readable paths.",
+                        status
+                    );
+                }
+
+                // for qemu to run with the generated image without permission issues, we need
+                // to make sure the image can be read/write by non-root users.
+                //
+                // TODO: the owner of the image is still root, which is a bit ugly. refine this
+                // later.
+                if use_sudo && !is_effective_root() {
+                    let mut command = Command::new("sudo");
+                    command.arg("chmod").arg("a+rw").arg(output);
+                    cmd_echo(&command);
+                    let status = command.status()?;
+                    if !status.success() {
+                        anyhow::bail!("chmod failed with status: {}", status);
+                    }
                 }
 
                 Ok(())
             },
         }
     }
+}
+
+fn is_effective_root() -> bool {
+    Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim() == "0")
+        .unwrap_or(false)
 }
 
 // TODO

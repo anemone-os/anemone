@@ -48,8 +48,11 @@ RUN apt update && apt install -y \
     curl \
     cmake \
     libclang-dev \
+    libguestfs-tools \
+    linux-image-kvm \
     libglib2.0-0 \
-    libslirp0
+    libslirp0 \
+    sudo
 COPY --from=build_lwext4_toolchains /opt/toolchains /opt/toolchains
 ENV LWEXT4_TOOLCHAIN_RISCV64=/opt/toolchains/riscv64-linux-musl-cross \
     LWEXT4_TOOLCHAIN_LOONGARCH64=/opt/toolchains/loongarch64-linux-musl-cross 
@@ -77,8 +80,11 @@ RUN apt update && apt install -y \
     curl \
     cmake \
     libclang-dev \
+    libguestfs-tools \
+    linux-image-kvm \
     libglib2.0-0 \
-    libslirp0
+    libslirp0 \
+    sudo
 
 COPY --from=build_lwext4_toolchains /opt/toolchains /opt/toolchains
 ENV LWEXT4_TOOLCHAIN_RISCV64=/opt/toolchains/riscv64-linux-musl-cross \

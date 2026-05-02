@@ -16,11 +16,14 @@ fn sys_read(fd: Fd, buf: UserWritePtr<u8>, count: usize) -> Result<u64, SysError
         return Ok(0);
     }
 
-    let file = with_current_task(|task| task.get_fd(fd).ok_or(SysError::BadFileDescriptor))?;
-    let uspace = with_current_task(|task| {
-        task.clone_uspace()
-            .expect("user task should have a user space")
-    });
+    let (file, uspace) = {
+        let task = get_current_task();
+        let file = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
+        let uspace = task.clone_uspace();
+
+        (file, uspace)
+    };
+
     let slice = buf.slice(count);
 
     let mut kbuf = vec![0u8; count];

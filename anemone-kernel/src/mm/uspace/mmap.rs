@@ -734,7 +734,6 @@ mod kunits {
         let uspace = UserSpace::new_user().expect("user space setup should succeed");
         let mut uspace = uspace.write();
         let base = uspace.stack_vma().range().start() - 64;
-        let heap_start = uspace.heap_vma().range().start();
 
         uspace
             .map_anonymous(&fixed_mapping(

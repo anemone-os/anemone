@@ -137,6 +137,8 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
     let ecode = estat.ecode();
     if ecode == 0 {
         // interrupt
+        percpu::on_entering_hwirq();
+
         let intr_flags = estat
             .is()
             .iter()
@@ -146,6 +148,20 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
             .unwrap_or_else(|_| panic!("unknown interrupt with flag {:?}", intr_flags));
         unsafe {
             handle_intr(reason);
+        }
+
+        percpu::on_leaving_hwirq();
+
+        {
+            // from this code block, the logical execution flow is considered
+            // leaving the hardware interrupt environment.
+
+            // note the short-circuit behavior of && operator.
+            if allow_preempt() && fetch_clear_need_resched() {
+                unsafe {
+                    schedule();
+                }
+            }
         }
     } else {
         let esubcode = estat.esubcode();

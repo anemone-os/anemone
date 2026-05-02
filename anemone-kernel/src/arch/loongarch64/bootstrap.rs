@@ -27,8 +27,9 @@ use crate::{
     },
     mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
+    sched::class::{SchedClassPrv, SchedEntity},
     sync::counter::CpuSync,
-    task::clone::CloneFlags,
+    task::tid::Tid,
 };
 
 #[unsafe(no_mangle)]
@@ -218,6 +219,8 @@ pub fn register_debugcon() {
     );
 }
 
+static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("registering init task");
+
 unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     unsafe {
         clear_bss();
@@ -231,10 +234,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
     unsafe {
         // needed by percpu initialization.
         let ncpus = early_scan_cpu_count(fdt_va);
-        super::cpu::init(ncpus, bsp_id);
         kinfoln!("anemone kernel booting on bsp #{}", bsp_id);
-
-        wake_up_aps(bsp_id, ncpus);
 
         // needed by timer initialization.
         if let Some(freq_hz) = early_scan_clock_freq(fdt_va) {
@@ -245,8 +245,12 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
 
         let mut scanner = EarlyMemoryScanner::new(fdt_va);
 
-        mm::percpu::bsp_init(bsp_id, |npages| scanner.early_alloc_folio(npages as u64));
+        percpu::bsp_init(bsp_id, ncpus, |npages| {
+            scanner.early_alloc_folio(npages as u64)
+        });
         kinfoln!("percpu data initialized");
+
+        wake_up_aps(bsp_id, ncpus);
 
         scanner.commit_to_pmm();
         mm::frame::memmap_init(|npages| {
@@ -270,18 +274,21 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
 
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
         set_boot_mono(true);
-        let kinit_task = Task::new_kernel(
+        let (bsp_kinit, guard) = Task::new_kernel(
             "bsp-kinit",
             bsp_kinit as *const (),
             ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
-            IntrArch::DISABLED_IRQ_FLAGS,
+            SchedEntity::new(SchedClassPrv::RoundRobin(())),
             TaskFlags::NONE,
-            CloneFlags::empty(),
+            Some(cur_cpu_id()),
         )
         .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e));
-        register_root_task(kinit_task.clone());
-        add_to_ready(kinit_task);
-        switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64))
+
+        let bsp_kinit = RegisterGuard::register_root(guard, bsp_kinit);
+        INIT_SYNC_COUNTER.sync_with_counter();
+
+        sched::init_routines::local_enqueue_first(bsp_kinit);
+        switch_to_guarded(VirtAddr::new(scheduler as *const () as u64))
     }
 }
 
@@ -293,23 +300,26 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         BOOT_SYNC_COUNTER.sync_with_counter();
         kdebugln!("anemone kernel booting on ap #{}", ap_id);
         install_ktrap_handler();
-        mm::percpu::ap_init(ap_id);
+        percpu::ap_init(ap_id);
         mm::kptable::activate_kernel_mapping();
 
         TimeArch::init_this_cpu();
         set_boot_mono(false);
-        let ap_kinit = Task::new_kernel(
+        INIT_SYNC_COUNTER.sync_with_counter();
+        let (ap_kinit, guard) = Task::new_kernel(
             "ap-kinit",
             ap_kinit as *const (),
             ParameterList::new(&[ap_id as u64]),
-            IntrArch::DISABLED_IRQ_FLAGS,
+            SchedEntity::new(SchedClassPrv::RoundRobin(())),
             TaskFlags::NONE,
-            CloneFlags::empty(),
+            Some(cur_cpu_id()),
         )
         .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e));
-        ap_kinit.add_as_child(wait_for_root_task());
-        add_to_ready(ap_kinit);
-        switch_to_guarded(VirtAddr::new(run_tasks as *const () as u64));
+
+        let ap_kinit = guard.register(ap_kinit, TaskBinding { parent: Tid::INIT });
+
+        sched::init_routines::local_enqueue_first(ap_kinit);
+        switch_to_guarded(VirtAddr::new(scheduler as *const () as u64));
     }
 }
 
@@ -333,7 +343,7 @@ pub fn wake_up_aps(bsp_id: usize, ncpus: usize) {
 
 #[inline(always)]
 unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
-    let cpu_id = CpuArch::cur_cpu_id().get();
+    let cpu_id = cur_cpu_id().get();
     let new_stack_top = GUARDED_STACK_TOPS.get()[cpu_id];
     unsafe {
         core::arch::asm!(

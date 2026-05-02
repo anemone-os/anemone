@@ -1,4 +1,7 @@
-use crate::{prelude::*, task::execve::binfmt::dispatch_execve};
+use crate::{
+    prelude::*,
+    task::{cpu_usage::Privilege, execve::binfmt::dispatch_execve},
+};
 
 /// **This function must be run in a process context.**
 ///
@@ -20,24 +23,23 @@ pub fn kernel_execve(
                 IntrArch::local_intr_disable();
                 usp.activate();
                 let mut ksp = VirtAddr::new(0);
-                with_current_task(|task| {
-                    task.close_cloexec_fds();
-                    let info = TaskExecInfo {
-                        cmdline: argv
-                            .iter()
-                            .map(|s| s.as_ref())
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                            .into(),
-                        flags: TaskFlags::NONE,
-                        uspace: Some(usp),
-                    };
-                    unsafe {
-                        task.set_exec_info(info);
-                    }
-                    ksp = task.kstack().stack_top();
-                    task.on_prv_change(Privilege::User);
-                });
+
+                let task = get_current_task();
+
+                task.close_cloexec_fds();
+
+                // this must be a user task.
+                let exec_fn = path.as_ref().split('/').last().unwrap_or(path.as_ref());
+                let name = (String::from("@user/") + exec_fn).into_boxed_str();
+                let flags = TaskFlags::NONE;
+                task.switch_exec_ctx(name, usp, flags);
+
+                ksp = task.kstack().stack_top();
+                task.on_prv_change(Privilege::User);
+
+                // DROP
+                drop(task);
+
                 load_context(TaskContext::from_user_fn(meta.entry, meta.sp, ksp));
             }
         },
@@ -49,6 +51,4 @@ pub fn kernel_execve(
             return Err(e);
         },
     }
-
-    unreachable!();
 }

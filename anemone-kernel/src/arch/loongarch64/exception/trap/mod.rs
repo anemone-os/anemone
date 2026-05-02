@@ -19,6 +19,10 @@ pub struct LA64TrapArch;
 
 impl TrapArchTrait for LA64TrapArch {
     type TrapFrame = LA64TrapFrame;
+
+    unsafe fn load_utrapframe(trapframe: Self::TrapFrame) -> ! {
+        unsafe { __utrap_return_to_task(&trapframe as *const _) }
+    }
 }
 
 /// Raw general-purpose register snapshot used inside [`LA64TrapFrame`].
@@ -65,18 +69,17 @@ pub struct LA64TrapFrame {
     era: u64,
     badv: u64,
     estat: u64,
+    /// Stores kstack top. Meaningless for kernel threads.
+    save0: u64,
     ktp: u64,
 }
 
 impl LA64TrapFrame {
-    /// Build a trap frame for a freshly created task.
-    pub fn task_init_frame(
-        entry: u64,
-        stack_top: u64,
-        irq_flags: IrqFlags,
-        prv: Privilege,
+    pub fn kernel_init_frame(
+        entry: VirtAddr,
+        stack_top: VirtAddr,
         args: &[u64; 7],
-        ra: u64,
+        return_to: *const (),
     ) -> Self {
         let mut current_tp = 0;
         unsafe {
@@ -88,23 +91,53 @@ impl LA64TrapFrame {
                 r: {
                     let mut r = [0; 32];
                     r[4..11].copy_from_slice(args);
-                    r[3] = stack_top;
-                    r[1] = ra as u64;
-                    if matches!(prv, Privilege::Kernel) {
-                        r[2] = current_tp;
-                    }
+                    r[3] = stack_top.get();
+                    r[1] = return_to as u64;
+                    r[2] = current_tp;
                     r
                 },
             },
             prmd: {
                 let mut prmd = unsafe { crmd::csr_read() };
-                prmd.set_ie(irq_flags == IntrArch::ENABLED_IRQ_FLAGS);
-                prmd.set_plv(PrivilegeLevel::from(prv));
+                prmd.set_ie(true);
+                prmd.set_plv(PrivilegeLevel::PLV0);
                 prmd.to_u64()
             },
-            era: entry,
+            era: entry.get(),
             badv: 0,
             estat: 0,
+            // the same as below.
+            save0: 0x39393939,
+            // kthread should not use this when doing traps.
+            // initialize this with a canary value to catch bugs that accidentally use this field.
+            ktp: 0x39393939,
+        }
+    }
+
+    pub fn user_init_frame(entry: VirtAddr, ustack_top: VirtAddr, kstack_top: VirtAddr) -> Self {
+        let mut current_tp = 0;
+        unsafe {
+            asm!("move {}, $tp", out(reg) current_tp);
+        }
+
+        Self {
+            gpr: Gpr {
+                r: {
+                    let mut r = [0; 32];
+                    r[3] = ustack_top.get();
+                    r
+                },
+            },
+            prmd: {
+                let mut prmd = unsafe { crmd::csr_read() };
+                prmd.set_ie(true);
+                prmd.set_plv(PrivilegeLevel::PLV3);
+                prmd.to_u64()
+            },
+            era: entry.get(),
+            badv: 0,
+            estat: 0,
+            save0: kstack_top.get(),
             ktp: current_tp,
         }
     }
@@ -117,6 +150,7 @@ impl TrapFrameArch for LA64TrapFrame {
         era: 0,
         badv: 0,
         estat: 0,
+        save0: 0,
         ktp: 0,
     };
 
@@ -145,6 +179,15 @@ impl TrapFrameArch for LA64TrapFrame {
 
     fn set_tls(&mut self, tls: u64) {
         self.gpr.r[2] = tls;
+    }
+
+    fn set_scratch(&mut self, scratch: u64) {
+        self.save0 = scratch;
+    }
+
+    fn set_arg<const IDX: usize>(&mut self, arg: u64) {
+        const_assert!(IDX < 7);
+        self.gpr.r[4 + IDX] = arg;
     }
 }
 

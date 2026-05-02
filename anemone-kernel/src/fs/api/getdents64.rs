@@ -60,20 +60,18 @@ fn sys_getdents64(
     dirp: UserWritePtr<u8>,
     count: u32,
 ) -> Result<u64, SysError> {
-    let (usp, fd) = with_current_task(|task| {
-        let usp = task
-            .clone_uspace()
-            .expect("user task should have a user space");
+    let (usp, fd) = {
+        let task = get_current_task();
+        let usp = task.clone_uspace();
 
         let fd = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
 
-        Ok::<_, SysError>((usp, fd))
-    })?;
-
+        (usp, fd)
+    };
     let file = fd.vfs_file();
 
     let buf_len = count as usize;
-    let mut slice = dirp.slice(buf_len);
+    let slice = dirp.slice(buf_len);
 
     let mut guard = usp.write();
 

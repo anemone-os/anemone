@@ -32,6 +32,7 @@ pub mod fs;
 pub mod initcall;
 pub mod mm;
 pub mod panic;
+pub mod percpu;
 pub mod power;
 pub mod sched;
 pub mod sync;
@@ -51,6 +52,7 @@ use crate::{
         probe_virtual_devices,
     },
     mm::layout::KernelLayoutTrait,
+    percpu::percpu_login,
     prelude::*,
     sync::{counter::CpuSync, mono::MonoOnce},
     task::{
@@ -121,18 +123,16 @@ fn exec_init_proc() {
     // open initial stdio fds so that they can be inherited.
     {
         use device::console::{open_console_stdin, open_console_stdout};
-        with_current_task(|kinit| {
-            kinit.open_fd(open_console_stdin(), FileFlags::READ, FdFlags::empty());
-            kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
-            kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
-        })
+        let kinit = get_current_task();
+        kinit.open_fd(open_console_stdin(), FileFlags::READ, FdFlags::empty());
+        kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
+        kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
     }
 
     // set up initial root and cwd for inheritance.
     {
-        with_current_task(|kinit| {
-            kinit.set_fs_state(FsState::new_root());
-        });
+        let kinit = get_current_task();
+        kinit.set_fs_state(FsState::new_root());
     }
 
     kernel_execve(
@@ -148,6 +148,11 @@ fn exec_init_proc() {
     });
 }
 
+/// **System Invariant**
+///
+/// - When bootstrap processor reaches [bsp_kinit], interrupts are disabled in
+///   terms of effect. (e.g. on RiscV, sstatus::sie can be set, but sie::ssoft,
+///   sie::stimer and sie::sext interrupts should be disabled.)
 unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     unsafe {
         kinfoln!("bsp #{} kinit running on {}...", bsp_id, current_task_id());
@@ -184,6 +189,14 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     exec_init_proc();
 }
 
+/// **System Invariant**
+///
+/// - When application processors reach [ap_kinit], interrupts are disabled in
+///   terms of effect. (e.g. on RiscV, sstatus::sie can be set, but sie::ssoft,
+///   sie::stimer and sie::sext interrupts should be disabled.)
+///
+/// TODO: do we really need a separate kinit function for APs? maybe a single
+/// bsp_kinit is enough.
 unsafe extern "C" fn ap_kinit(ap_id: usize) {
     unsafe {
         INIT_SYNC_COUNTER.sync_with_counter();

@@ -47,7 +47,7 @@ fn sys_nanosleep(
         if cur >= now + duration2wait {
             break;
         }
-        kernel_yield();
+        yield_now();
     }
 
     Ok(0)

@@ -1,12 +1,12 @@
 use core::arch::naked_asm;
 
-use la_insc::reg::csr::save0;
-
 use crate::{
     arch::loongarch64::exception::trap::{
         __ktrap_return_to_task, __utrap_return_to_task, LA64TrapFrame,
     },
     prelude::*,
+    sched::{ParameterList, SchedArchTrait, TaskContextArch},
+    task::exit::kernel_exit,
 };
 
 /// Saved task context for LoongArch64.
@@ -40,25 +40,19 @@ impl TaskContextArch for LA64TaskContext {
         s[1] = ustack_top.get();
         s[0] = entry.get();
         Self {
-            ra: user_task_enter as *const () as u64,
+            ra: user_task_entry_primary as *const () as u64,
             sp: kstack_top.get(),
             s,
         }
     }
 
-    fn from_kernel_fn(
-        entry: VirtAddr,
-        stack_top: VirtAddr,
-        irq_flags: IrqFlags,
-        args: ParameterList,
-    ) -> Self {
+    fn from_kernel_fn(entry: VirtAddr, stack_top: VirtAddr, args: ParameterList) -> Self {
         let mut s = [0; 10];
         let args = args.as_array();
         s[3..args.len() + 3].copy_from_slice(args);
-        s[1] = irq_flags.raw();
         s[0] = entry.get();
         Self {
-            ra: kernel_task_guard as *const () as u64,
+            ra: kernel_task_entry_primary as *const () as u64,
             sp: stack_top.get(),
             s,
         }
@@ -75,15 +69,6 @@ impl SchedArchTrait for LA64SchedArch {
         debug_assert!(IntrArch::current_irq_flags() == IntrArch::DISABLED_IRQ_FLAGS);
         unsafe {
             __switch(cur, next);
-        }
-    }
-
-    unsafe fn return_to_cloned_task(frame: TrapFrame) {
-        unsafe {
-            with_current_task(|t| {
-                save0::csr_write(t.kstack().stack_top().get());
-            });
-            __utrap_return_to_task(&frame)
         }
     }
 }
@@ -128,60 +113,58 @@ pub unsafe extern "C" fn __switch(cur: *mut TaskContext, next: *const TaskContex
     )
 }
 
-/// Task guard for a user task. The task body never returns directly.
-///
-/// Parameters in `a0` - `a6` are not available for user tasks.
-/// User tasks only accept string-based parameters, which are passed in its
-/// stack, and set up before entering the task.
+/// Entry point of a user task, stage alpha.
 ///
 /// ## Arguments
 ///
 /// * `s0` - entry point of the task.
-/// * `s1` - stack top of the task.
+/// * `s1` - ustack top of the task.
 #[unsafe(naked)]
-pub unsafe extern "C" fn user_task_enter() -> ! {
-    naked_asm!("
+pub unsafe extern "C" fn user_task_entry_primary() {
+    naked_asm!(
         // arg0: entry
-        move $a0, $s0
-
-        // arg1: irq_flags
-        li.d $a1, {irq_open}
-
-        addi.d $sp, $sp, -64
-
-        // arg2: task arguments (zero-initialized)
-        st.d $zero, $sp, 0
-        st.d $zero, $sp, 8
-        st.d $zero, $sp, 16
-        st.d $zero, $sp, 24
-        st.d $zero, $sp, 32
-        st.d $zero, $sp, 40
-        st.d $zero, $sp, 48
-        move $a2, $sp
-
-        // arg3: trap stack top
-        move $a3, $sp
-
-        // arg4: running stack top
-        move $a4, $s1
-
-        // arg5: Privilege
-        li.d $a5, {user_prv}
-
-        // arg6: return address when the task exits, which is the end of the guard function.
-        la $a6, __uret_point
-        call {task_run}
-        __uret_point:
-        call {task_guard_end}
-    ",
-    irq_open = const IntrArch::ENABLED_IRQ_FLAGS.raw(),
-    task_run = sym __task_run,
-    task_guard_end = sym __user_task_guard_end,
-    user_prv = const Privilege::User as u64,
+        "move $a0, $s0",
+        // arg1: user stack top
+        "move $a1, $s1",
+        // arg2: kernel stack top
+        "move $a2, $sp",
+        "call {stage_beta}",
+        "call {task_guard_end}",
+        stage_beta = sym user_task_entry_secondary,
+        task_guard_end = sym __task_guard_end,
     );
 }
 
-/// Task guard for a kernel task.
+/// Entry point for a user task, stage beta.
+unsafe extern "C" fn user_task_entry_secondary(
+    entry: *const (),
+    ustack_top: u64,
+    kstack_top: u64,
+) -> ! {
+    assert!(
+        IntrArch::local_intr_disabled(),
+        "we came from scheduler, so interrupts should be disabled"
+    );
+
+    kdebugln!(
+        "user task entry: entry={:#x}, ustack_top={:#x}, kstack_top={:#x}",
+        entry as u64,
+        ustack_top,
+        kstack_top
+    );
+
+    let mut trapframe = LA64TrapFrame::user_init_frame(
+        VirtAddr::new(entry as u64),
+        VirtAddr::new(ustack_top),
+        VirtAddr::new(kstack_top),
+    );
+
+    // libc expects the initial uesr stack pointer in a0.
+    trapframe.set_arg::<0>(ustack_top);
+    unsafe { __utrap_return_to_task(&trapframe) }
+}
+
+/// Entry point of a kernel task, stage alpha.
 ///
 /// **What is special is that since we enter a task by switching the
 /// [TaskContext], the callee-saved registers `s0` to `s9` are used for
@@ -190,98 +173,64 @@ pub unsafe extern "C" fn user_task_enter() -> ! {
 /// ## Arguments
 ///
 /// * `s0` - entry point of the task.
-/// * `s1` - [IrqFlags] to be set when entering the task.
-/// * `s2` - ignored
+/// * `s1`&`s2` - ignored
 /// * `s3`-`s9` - up to 7 arguments passed to the task
 #[unsafe(naked)]
-pub unsafe extern "C" fn kernel_task_guard() -> ! {
-    naked_asm!("
-
+pub unsafe extern "C" fn kernel_task_entry_primary() -> ! {
+    naked_asm!(
         // arg0: entry
-        move $a0, $s0
+        "move $a0, $s0",
 
-        // arg1: irq_flags
-        move $a1, $s1
+        // arg1: kernel stack top
+        "move $a1, $sp",
 
-        addi.d $sp, $sp, -64
+        // prepare stack for arg list. (arg2)
+        "addi.d $sp, $sp, -64",
+        "st.d $s3, $sp, 0",
+        "st.d $s4, $sp, 8",
+        "st.d $s5, $sp, 16",
+        "st.d $s6, $sp, 24",
+        "st.d $s7, $sp, 32",
+        "st.d $s8, $sp, 40",
+        "st.d $s9, $sp, 48",
+        "move $a2, $sp",
 
-        // arg2: task arguments (saved on stack)
-        st.d $s3, $sp, 0
-        st.d $s4, $sp, 8
-        st.d $s5, $sp, 16
-        st.d $s6, $sp, 24
-        st.d $s7, $sp, 32
-        st.d $s8, $sp, 40
-        st.d $s9, $sp, 48
-        move $a2, $sp
-
-        // arg3: trap stack top (for user tasks)
-        li.d $a3, 0
-
-        // arg4: running stack top
-        move $a4, $sp
-
-        // arg5: Privilege
-        li.d $a5, {kernel_prv}
-
-        // arg6: return address when the task exits, which is the end of the guard function.
-        la $a6, __kret_point
-        call {task_run}
-        __kret_point:
-        li.d $a0, 0
-        call {task_exit}
-        call {task_guard_end}
-    ",
-    task_run = sym __task_run,
-    task_exit = sym crate::kernel_exit,
-    task_guard_end = sym __kernel_task_guard_end,
-    kernel_prv = const Privilege::Kernel as u64,
+        "call {stage_beta}",
+        "call {task_guard_end}",
+        stage_beta = sym kernel_task_entry_secondary,
+        task_guard_end = sym __task_guard_end,
     );
 }
 
-unsafe extern "C" fn __kernel_task_guard_end() -> ! {
-    unreachable!("an exited kernel task should never return");
-}
-
-unsafe extern "C" fn __user_task_guard_end() -> ! {
-    unreachable!("an user task should not have permission to return to kernel");
-}
-
-/// Build the initial trap frame and enter the task body.
-unsafe extern "C" fn __task_run(
+/// Entry point for a kernel task, stage beta.
+unsafe extern "C" fn kernel_task_entry_secondary(
     entry: *const (),        // arg0
-    irq_flags: u64,          // arg1
+    kstack_top: u64,         // arg1
     a_args: *const [u64; 7], // arg2
-    trap_stack_top: u64,     // arg3
-    running_stack_top: u64,  // arg4
-    prv: Privilege,          // arg5
-    ra: u64,                 // arg6
-) {
+) -> ! {
+    fn zero_exit() -> ! {
+        kernel_exit(0)
+    }
+
+    assert!(
+        IntrArch::local_intr_disabled(),
+        "we came from scheduler, so interrupts should be disabled"
+    );
+
     let args_parsed =
         unsafe { a_args.as_ref() }.expect("task args in kernel stack should never be null");
-    let mut trapframe = LA64TrapFrame::task_init_frame(
-        entry as u64,
-        running_stack_top,
-        IrqFlags::new(irq_flags),
-        prv,
+    let mut trapframe = LA64TrapFrame::kernel_init_frame(
+        VirtAddr::new(entry as u64),
+        VirtAddr::new(kstack_top),
         args_parsed,
-        ra,
+        zero_exit as *const (),
     );
-    if let Privilege::User = prv {
-        unsafe {
-            trapframe.set_syscall_ret_val(running_stack_top);
-        }
-    }
-
-    //knoticeln!("{}({}) starting", current_task_id(), current_task_cmdline());
 
     unsafe {
-        match prv {
-            Privilege::Kernel => __ktrap_return_to_task(&trapframe),
-            Privilege::User => {
-                save0::csr_write(trap_stack_top);
-                __utrap_return_to_task(&trapframe)
-            },
-        }
+        __ktrap_return_to_task(&trapframe);
     }
+}
+
+unsafe extern "C" fn __task_guard_end() -> ! {
+    unreachable!("an exited task should never return");
 }

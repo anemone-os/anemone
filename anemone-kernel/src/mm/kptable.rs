@@ -93,7 +93,6 @@ impl KPTable {
     fn prealloc_rest_pgdirs(&self) {
         let mut kptable = self.ptable.write_irqsave();
         let pdir = unsafe { kptable.root_pgdir_mut() };
-        let mut allocated = 0;
         for index in KernelLayout::KSPACE_START_INDEX..PagingArch::PTE_PER_PGDIR {
             if pdir[index].is_empty() {
                 let ppn = alloc_frame_zeroed()
@@ -106,7 +105,6 @@ impl KPTable {
                 );
             }
         }
-        kinfoln!("preallocated {} pgdirs for kernel space", allocated);
     }
 
     unsafe fn kmap(&self, mapping: Mapping) -> Result<(), SysError> {

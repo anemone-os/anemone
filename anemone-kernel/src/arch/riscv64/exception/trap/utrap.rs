@@ -3,9 +3,9 @@ use crate::{
         intr::handle_intr,
         trap::{RiscV64Exception, RiscV64Interrupt, RiscV64TrapFrame},
     },
-    device::CpuArchTrait,
     prelude::{fault::handle_user_page_fault, *},
-    sched::{current_task_id, kernel_exit},
+    sched::current_task_id,
+    task::{cpu_usage::Privilege, exit::kernel_exit},
 };
 
 // kernel trap entry point. since kernel doesn't use floating point, we don't
@@ -60,6 +60,10 @@ core::arch::global_asm!(
     "   sd x29, 232(sp)",
     "   sd x30, 240(sp)",
     "   sd x31, 248(sp)",
+    // preserve the kernel trap-stack top that the next return path must write
+    // back into sscratch before re-entering user mode.
+    "   addi t0, sp, {trapframe_bytes}",
+    "   sd t0, {trapframe_scratch_offset}(sp)",
     // now we have registers to play with. save sp from sscratch
     "   csrr t0, sscratch",
     "   sd t0, 16(sp)",
@@ -94,6 +98,10 @@ core::arch::global_asm!(
     "   la t0, __utrap_entry",
     "   or t0, t0, {stvec_mode}",
     "   csrw stvec, t0",
+
+    // load back sscratch.
+    "   ld t0, {trapframe_scratch_offset}(a0)",
+    "   csrw sscratch, t0",
 
     "   ld x0, 0(a0)",
     "   ld x1, 8(a0)",
@@ -151,6 +159,7 @@ core::arch::global_asm!(
     "   sret",
     trapframe_bytes = const size_of::<RiscV64TrapFrame>(),
     trapframe_ktp_offset = const core::mem::offset_of!(RiscV64TrapFrame, ktp),
+    trapframe_scratch_offset = const core::mem::offset_of!(RiscV64TrapFrame, sscratch),
     rust_utrap_entry = sym rust_utrap_entry,
     stvec_mode = const riscv::register::stvec::TrapMode::Direct as usize,
 
@@ -158,27 +167,57 @@ core::arch::global_asm!(
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
+    debug_assert!(IntrArch::local_intr_disabled());
+
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
-    with_current_task(|t| unsafe {
-        t.set_utrapframe(trapframe);
-        t.on_prv_change(Privilege::Kernel);
-    });
+    {
+        let task = get_current_task();
+        unsafe {
+            task.set_utrapframe(trapframe);
+        }
+        task.on_prv_change(Privilege::Kernel);
+    }
+
     let scause = riscv::register::scause::read();
     let code = scause.code();
+
     if scause.is_interrupt() {
+        percpu::on_entering_hwirq();
+
         let reason = RiscV64Interrupt::try_from(code)
             .unwrap_or_else(|_| panic!("unknown interrupt with code {}", code));
         unsafe {
             handle_intr(reason);
         }
+        percpu::on_leaving_hwirq();
+
+        {
+            // from this code block, the logical execution flow is considered
+            // leaving the hardware interrupt environment.
+
+            debug_assert!(allow_preempt(), "for utraps, this must hold");
+            if fetch_clear_need_resched() {
+                unsafe {
+                    schedule();
+                }
+            }
+        }
     } else {
-        let stval = riscv::register::stval::read();
+        // execption. we can safely turn on interrupts.
+        unsafe {
+            IntrArch::local_intr_enable();
+        }
+
+        // NOTE: don't read from registers! if an interrupt happens after turning on
+        // interrupts, but before reading stval, the stval value will be wrong. same
+        // for scause. instead, we should read those from the trapframe, which is
+        // guaranteed to be consistent with this trap.
+        let stval = trapframe.stval;
         let reason = RiscV64Exception::try_from(code)
             .unwrap_or_else(|_| panic!("unknown exception with code {}", code));
-        // restore interrupt
-        let intr_guard = IntrGuard::new(true);
+
         match reason {
             RiscV64Exception::UserEnvCall => {
                 handle_syscall(trapframe);
@@ -186,7 +225,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             RiscV64Exception::Breakpoint => {
                 kerrln!(
                     "({}) user {} aborted with breakpoint\n\tbreakpoint not implemented yet",
-                    CpuArch::cur_cpu_id(),
+                    cur_cpu_id(),
                     current_task_id(),
                 );
                 kernel_exit(-1)
@@ -197,7 +236,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             | RiscV64Exception::StorePageFault => {
                 handle_user_page_fault(PageFaultInfo::new(
                     VirtAddr::new(trapframe.sepc),
-                    VirtAddr::new(stval as u64),
+                    VirtAddr::new(stval),
                     match reason {
                         RiscV64Exception::InstructionPageFault => PageFaultType::Execute,
                         RiscV64Exception::LoadPageFault => PageFaultType::Read,
@@ -209,7 +248,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             _ => {
                 kerrln!(
                     "({}) user {} aborted with error {:?}\n\ttask return value not implemented yet",
-                    CpuArch::cur_cpu_id(),
+                    cur_cpu_id(),
                     current_task_id(),
                     reason
                 );
@@ -217,10 +256,13 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                 //TODO: Error code
             },
         }
-        drop(intr_guard);
+
+        unsafe {
+            IntrArch::local_intr_disable();
+        }
     }
 
-    with_current_task(|t| t.on_prv_change(Privilege::User));
+    get_current_task().on_prv_change(Privilege::User);
 }
 
 unsafe extern "C" {

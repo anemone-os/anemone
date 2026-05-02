@@ -11,6 +11,6 @@ use crate::{
 #[syscall(SYS_SET_TID_ADDRESS)]
 fn sys_set_tid_address(tidptr: Option<UserWritePtr<Tid>>) -> Result<u64, SysError> {
     kdebugln!("set_tid_address: tidptr={:#x?}", tidptr.map(|p| p.addr()));
-    with_current_task(|task| task.set_clear_child_tid(tidptr));
+    get_current_task().set_clear_child_tid(tidptr);
     Ok(current_task_id().get() as u64)
 }

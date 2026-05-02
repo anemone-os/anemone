@@ -1,14 +1,6 @@
 use core::fmt::{Debug, Display};
 
 pub trait CpuArchTrait {
-    /// Returns the ID of the bootstrap processor.
-    fn bsp_cpu_id() -> CpuId;
-
-    /// Returns the number of CPUs in the system.
-    fn ncpus() -> usize;
-    /// Returns the ID of the current CPU.
-    fn cur_cpu_id() -> CpuId;
-
     /// Sets the base address of the per-CPU area for the current CPU.
     ///
     /// Typically, this function will write the given address to the thread

@@ -8,14 +8,10 @@ pub struct IntrGuard {
 
 impl IntrGuard {
     /// Create a new IntrGuard by disabling local interrupts.
-    pub fn new(enable: bool) -> Self {
+    pub fn new() -> Self {
         let prev_flags = IntrArch::current_irq_flags();
 
-        if enable {
-            unsafe { IntrArch::local_intr_enable() };
-        } else {
-            unsafe { IntrArch::local_intr_disable() };
-        }
+        unsafe { IntrArch::local_intr_disable() };
 
         Self { prev: prev_flags }
     }
@@ -29,9 +25,11 @@ impl Drop for IntrGuard {
     }
 }
 
-pub fn with_intr_disabled<F: FnOnce(bool) -> R, R>(f: F) -> R {
-    let guard = IntrGuard::new(false);
-    let res = f(guard.prev == IntrArch::ENABLED_IRQ_FLAGS);
+/// Run a closure with local interrupts disabled, restoring the previous state
+/// afterwards.
+pub fn with_intr_disabled<F: FnOnce() -> R, R>(f: F) -> R {
+    let guard = IntrGuard::new();
+    let res = f();
     drop(guard);
     res
 }

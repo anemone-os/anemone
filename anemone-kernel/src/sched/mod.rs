@@ -1,78 +1,192 @@
+//! Code in this module enormously relies on the fact that we don't support
+//! cross-core scheduling yet.
+
 use crate::{
     prelude::*,
     sched::{
-        idle::clone_current_idle_task,
-        proc::{SwitchOutType, fetch_new_task, set_running_task, switch_out, switch_to},
+        class::idle::clone_local_idle_task,
+        processor::{local_pick_next, local_requeue_current, set_current_task},
+        switch::{switch_mapping, switch_out, switch_to},
     },
 };
 
 mod hal;
 pub use hal::*;
-
-mod idle;
-mod proc;
-
-// schedulers
-mod rr;
-
 mod api;
 pub use api::*;
 
-/// Default scheduler implementation type alias.
-pub type Scheduler = rr::RRScheduler;
-
-/// Exported API for process management.
-pub use proc::{
-    add_to_ready, clone_current_task, current_task_cmdline, current_task_id,
-    fetch_clear_resched_flag, load_context, set_resched_flag, with_current_task,
+mod processor;
+pub use processor::{
+    fetch_clear_need_resched, get_current_task, init_routines, local_enqueue, local_sched_tick,
+    mark_need_resched, pick_next_cpu, remote_enqueue, task_enqueue,
 };
+mod switch;
+pub use switch::load_context;
 
-/// Enter the scheduler loop.
+mod event;
+pub use event::Event;
+
+pub mod class;
+
+/// Core scheduler loop. Called by bootstrap code.
 ///
-/// This is called by bootstrap code. It initializes the current CPU's running
-/// task with the idle task, then repeatedly picks the next runnable task and
-/// switches to it.
-pub fn run_tasks() -> ! {
-    kinfoln!("scheduler started");
+/// Interrupts are disabled all the time in this function.
+///
+/// **In upper half of scheduler loop, local current task is still the task
+/// previously switched out.**
+pub unsafe fn scheduler() -> ! {
+    // on entering this function from bootstrap code, some invariants of the loop
+    // are not satisfied yet.
+    debug_assert!(IntrArch::local_intr_disabled());
     unsafe {
-        // init task
-        set_running_task(clone_current_idle_task());
-        loop {
-            // switch to next
-            switch_to(fetch_new_task());
+        // this satisfies the first invariant.
+        set_current_task(Some(clone_local_idle_task()));
+        // the second invariant is not satisfied, but its fine. since we're now
+        // in kernel's mapping.
+    }
+
+    knoticeln!("scheduler started");
+
+    // System Invariants on entering this loop:
+    // - current task is the task that right switched out.
+    // - scheduler are still in previous task's memory mapping.
+    loop {
+        let prev = get_current_task();
+        let next = local_pick_next();
+        unsafe {
+            switch_mapping(&prev, &next);
+            switch_to(next);
         }
     }
 }
 
-/// Try to trigger scheduling for the current CPU.
-///
-/// If preemption is currently allowed, this function immediately switches out
-/// with [SwitchOutType::Sched]. Otherwise it sets the reschedule flag through
-/// [set_resched_flag] so scheduling can happen later at a safe point.
-///
-/// **Make sure interrupts are disabled before calling this function, otherwise
-/// the behavior is undefined.**
-pub unsafe fn try_schedule() {
-    if unsafe_with_core_local(|local| local.preempt_counter().allow()) {
-        unsafe { switch_out(SwitchOutType::Sched) };
-    } else {
-        set_resched_flag();
+/// Only 2 functions are considered "core" functions of scheduler,
+/// - [schedule] : xxx
+/// - [try_to_wake_up] : xxx
+/// along with state transition of task.
+mod kore {
+    use crate::sched::processor::task_enqueue;
+
+    use super::*;
+
+    /// Schedule the next task to run.
+    ///
+    /// Basically, you should never call this function in application code. this
+    /// is for those who building synchronization primitives or something
+    /// low-level like that. Instead, higher-level encapsulations like
+    /// [sched_yield::kernel_yield] should be used in most cases.
+    ///
+    /// **Interrupts must be disabled when calling this function.**
+    pub unsafe fn schedule() {
+        debug_assert!(IntrArch::local_intr_disabled());
+        let curr = get_current_task();
+
+        let status = curr.status();
+
+        match status {
+            TaskStatus::Runnable => {
+                if !curr.flags().is_idle() {
+                    local_requeue_current(curr);
+                }
+            },
+            TaskStatus::Waiting => {
+                knoticeln!(
+                    "task {} is waiting, not enqueuing it to run queue",
+                    current_task_id(),
+                );
+            },
+            TaskStatus::Zombie => {
+                knoticeln!(
+                    "task {} is zombie, not enqueuing it to run queue",
+                    current_task_id(),
+                );
+            },
+        }
+
+        unsafe {
+            switch_out();
+        }
+    }
+
+    #[derive(Debug)]
+    pub enum WakeUpError {
+        TaskAlreadyRunnable,
+        /// The status won't be [TaskStatus::Runnable].
+        UnexpectedStatus(TaskStatus),
+    }
+
+    /// Try to wake up a task.
+    ///
+    /// What linux folks often called "ttwp".
+    ///
+    /// TODO: docs.
+    pub fn try_to_wake_up(
+        task: &Arc<Task>,
+        expected_status: &[TaskStatus],
+    ) -> Result<(), WakeUpError> {
+        assert!(
+            expected_status.iter().all(|s| s.is_sleeping()),
+            "expected_status must be a sleeping status"
+        );
+
+        // 1. grab the right to wake up the task.
+        task.update_status_with(|status| {
+            if !expected_status.contains(&status) {
+                knoticeln!(
+                    "trying to wake up task {}, but its status is {:?}, which is not in expected_status {:?}",
+                    task.tid(),
+                    status,
+                    expected_status,
+                );
+                let err = if let TaskStatus::Runnable = status {
+                    WakeUpError::TaskAlreadyRunnable
+                } else {
+                    WakeUpError::UnexpectedStatus(status)
+                };
+                return (status, Err(err));
+            }
+
+            match status {
+                TaskStatus::Runnable | TaskStatus::Zombie => unreachable!(/* handled above */),
+                TaskStatus::Waiting => (TaskStatus::Runnable, Ok(())),
+            }
+        })?;
+
+        kdebugln!(
+            "task {} is woken up, enqueueing it to run queue",
+            task.tid()
+        );
+        // 2. enqueue the task to run queue.
+        task_enqueue(task.clone());
+
+        Ok(())
     }
 }
+pub use kore::*;
 
-/// Put current task into waiting state and schedule out.
-///
-/// `interruptible` controls whether the waiting state may be interrupted.
-/// The actual status transition is performed by [switch_out] with
-/// [SwitchOutType::Wait].
-///
-/// **Make sure interrupts are disabled before calling this function, otherwise
-/// the behavior is undefined.**
-pub fn sleep_as_waiting(interruptible: bool) {
-    debug_assert!(unsafe_with_core_local(|local| local
-        .preempt_counter()
-        .allow()));
-    with_intr_disabled(|_| {
-        unsafe { switch_out(SwitchOutType::Wait { interruptible }) };
-    })
+/// Upper-level APIs built upon [kore] functions.
+mod higher_level {
+    use super::*;
+
+    /// Yield the current running task to let other tasks run.
+    pub fn yield_now() {
+        assert!(get_current_task().status() == TaskStatus::Runnable);
+        with_intr_disabled(|| unsafe {
+            schedule();
+        });
+    }
 }
+pub use higher_level::*;
+
+mod helpers {
+    use crate::task::tid::Tid;
+
+    use super::*;
+
+    /// Get [Tid] of current task.
+    pub fn current_task_id() -> Tid {
+        //with_current_task(|task| task.tid())
+        get_current_task().tid()
+    }
+}
+pub use helpers::*;

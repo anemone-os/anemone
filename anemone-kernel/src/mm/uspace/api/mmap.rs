@@ -35,7 +35,7 @@ fn sys_mmap(
         offset
     );
 
-    let usp = with_current_task(|task| task.clone_uspace().expect("user task should have uspace"));
+    let usp = get_current_task().clone_uspace();
 
     let is_anonymous = flags.aux.contains(AuxMmapFlags::MAP_ANONYMOUS);
     let fixed = flags
@@ -73,8 +73,7 @@ fn sys_mmap(
             flags,
         };
 
-        usp.write()
-            .map_anonymous(&mapping)
+        usp.map_anonymous(&mapping)
             .map(|addr| addr.get())
             .map_err(Into::into)
     } else {
@@ -84,7 +83,9 @@ fn sys_mmap(
 
         let poffset = offset as usize >> PagingArch::PAGE_SIZE_BITS;
         let fd = Fd::new(raw_fd as u32).ok_or(SysError::BadFileDescriptor)?;
-        let file = with_current_task(|task| task.get_fd(fd).ok_or(SysError::BadFileDescriptor))?;
+        let file = get_current_task()
+            .get_fd(fd)
+            .ok_or(SysError::BadFileDescriptor)?;
         let supported_prot = {
             let mut prot = Protection::empty();
             let file_flags = file.file_flags();
@@ -125,8 +126,7 @@ fn sys_mmap(
             inode,
         };
 
-        usp.write()
-            .map_file(&mapping)
+        usp.map_file(&mapping)
             .map(|addr| addr.get())
             .map_err(Into::into)
     }

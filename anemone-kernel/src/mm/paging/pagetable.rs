@@ -62,7 +62,6 @@ impl PageTable {
 
 impl Drop for PageTable {
     fn drop(&mut self) {
-        let root_ppn = self.root_ppn();
         let mut mapper = self.mapper();
         // unmap all userspace pages
         unsafe {

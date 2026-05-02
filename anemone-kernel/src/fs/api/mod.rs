@@ -34,7 +34,10 @@ pub mod writev;
 /// corresponding module.
 mod args {
     use crate::{
-        prelude::{handler::TryFromSyscallArg, *},
+        prelude::{
+            handler::{TryFromSyscallArg, syscall_arg_flag32},
+            *,
+        },
         task::files::Fd,
     };
 
@@ -46,11 +49,12 @@ mod args {
 
     impl TryFromSyscallArg for AtFd {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-            // use i64 here.
-            if (raw as i64) == anemone_abi::fs::linux::at::AT_FDCWD as i64 {
+            let raw = i32::try_from_syscall_arg(raw)?;
+
+            if raw == anemone_abi::fs::linux::at::AT_FDCWD {
                 Ok(Self::Cwd)
             } else {
-                Ok(Self::Fd(Fd::try_from_syscall_arg(raw)?))
+                Ok(Self::Fd(Fd::try_from_syscall_arg(raw as u64)?))
             }
         }
     }
@@ -59,23 +63,23 @@ mod args {
         /// `check_is_dir` is a bit strange, but it's indeed needed by some
         /// syscalls which can be called with "AT_EMPTY_PATH" flag...
         pub fn to_pathref(&self, check_is_dir: bool) -> Result<PathRef, SysError> {
-            with_current_task(|task| {
-                match self {
-                    AtFd::Cwd => Ok(task.cwd().clone()),
-                    AtFd::Fd(fd) => {
-                        let file = task.get_fd(*fd).ok_or(SysError::BadFileDescriptor)?;
-                        if !file.file_flags().contains(FileFlags::READ) {
-                            // or O_PATH, which hasn't been implemented yet.
-                            return Err(SysError::BadFileDescriptor);
-                        }
-                        if check_is_dir && file.vfs_file().inode().ty() != InodeType::Dir {
-                            return Err(SysError::NotDir);
-                        }
+            let task = get_current_task();
 
-                        Ok(file.vfs_file().path().clone())
-                    },
-                }
-            })
+            match self {
+                AtFd::Cwd => Ok(task.cwd().clone()),
+                AtFd::Fd(fd) => {
+                    let file = task.get_fd(*fd).ok_or(SysError::BadFileDescriptor)?;
+                    if !file.file_flags().contains(FileFlags::READ) {
+                        // or O_PATH, which hasn't been implemented yet.
+                        return Err(SysError::BadFileDescriptor);
+                    }
+                    if check_is_dir && file.vfs_file().inode().ty() != InodeType::Dir {
+                        return Err(SysError::NotDir);
+                    }
+
+                    Ok(file.vfs_file().path().clone())
+                },
+            }
         }
     }
 
@@ -142,11 +146,7 @@ mod args {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
             use anemone_abi::fs::linux::mode::*;
 
-            if (raw >> 32) != 0 {
-                return Err(SysError::InvalidArgument);
-            }
-
-            let raw = raw as u32;
+            let raw = syscall_arg_flag32(raw)?;
             let r#type = match raw & Self::S_IFMT {
                 S_IFSOCK => LinuxInodeType::Socket,
                 S_IFLNK => LinuxInodeType::Symlink,
