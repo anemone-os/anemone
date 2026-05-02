@@ -125,6 +125,12 @@ impl<T: ?Sized> RwLock<T> {
     }
 }
 
+impl<T> RwLock<T> {
+    pub fn into_inner(self) -> T {
+        self.lock.into_inner()
+    }
+}
+
 impl<T: ?Sized> Deref for ReadIrqSaveGuard<'_, T> {
     type Target = T;
 

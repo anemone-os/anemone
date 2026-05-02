@@ -16,7 +16,7 @@ fn mono_to_clock_ticks(mono: u64) -> i64 {
 
 #[syscall(SYS_TIMES)]
 fn sys_times(tms: Option<UserWritePtr<Tms>>) -> Result<u64, SysError> {
-    let usage = get_current_task().cpu_usage_snapshot();
+    let usage = get_current_task().get_thread_group().cpu_usage_snapshot();
 
     if let Some(tms) = tms {
         tms.safe_write(Tms {

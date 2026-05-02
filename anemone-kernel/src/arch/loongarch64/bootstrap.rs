@@ -29,7 +29,6 @@ use crate::{
     prelude::*,
     sched::class::{SchedClassPrv, SchedEntity},
     sync::counter::CpuSync,
-    task::tid::Tid,
 };
 
 #[unsafe(no_mangle)]
@@ -278,13 +277,15 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
             "bsp-kinit",
             bsp_kinit as *const (),
             ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
+            None,
+            Some(Tid::INIT),
             SchedEntity::new(SchedClassPrv::RoundRobin(())),
             TaskFlags::NONE,
             Some(cur_cpu_id()),
         )
         .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e));
 
-        let bsp_kinit = RegisterGuard::register_root(guard, bsp_kinit);
+        let bsp_kinit = PublishGuard::register_root(guard, bsp_kinit);
         INIT_SYNC_COUNTER.sync_with_counter();
 
         sched::init_routines::local_enqueue_first(bsp_kinit);
@@ -310,13 +311,16 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
             "ap-kinit",
             ap_kinit as *const (),
             ParameterList::new(&[ap_id as u64]),
+            None,
+            Some(Tid::INIT),
             SchedEntity::new(SchedClassPrv::RoundRobin(())),
             TaskFlags::NONE,
             Some(cur_cpu_id()),
         )
         .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e));
 
-        let ap_kinit = guard.register(ap_kinit, TaskBinding { parent: Tid::INIT });
+        let ap_kinit = guard.publish(ap_kinit, TaskBinding::Member)
+        .expect("failed to publish ap kinit task. this indicates a critical bug in task topology management, please investigate.");
 
         sched::init_routines::local_enqueue_first(ap_kinit);
         switch_to_guarded(VirtAddr::new(scheduler as *const () as u64));

@@ -128,6 +128,10 @@ mod kore {
     ///
     /// What linux folks often called "ttwp".
     ///
+    /// Panics if expected_status contains any non-sleeping status. If you just
+    /// want to wake up a task regardless of its current status, call [notify]
+    /// instead.
+    ///
     /// TODO: docs.
     pub fn try_to_wake_up(
         task: &Arc<Task>,
@@ -165,10 +169,30 @@ mod kore {
             "task {} is woken up, enqueueing it to run queue",
             task.tid()
         );
+
         // 2. enqueue the task to run queue.
         task_enqueue(task.clone());
 
         Ok(())
+    }
+
+    /// Whatever task's status is, try to wake it up. If the task is already
+    /// runnable, this function does nothing.
+    ///
+    /// Mainly used by signals.
+    pub fn notify(task: &Arc<Task>) {
+        let need_enqueue = task.update_status_with(|prev| match prev {
+            TaskStatus::Runnable => (prev, false),
+            TaskStatus::Waiting => (TaskStatus::Runnable, true),
+            TaskStatus::Zombie => (prev, false),
+        });
+        if need_enqueue {
+            kdebugln!(
+                "task {} is woken up by notify, enqueueing it to run queue",
+                task.tid()
+            );
+            task_enqueue(task.clone());
+        }
     }
 }
 pub use kore::*;
@@ -188,7 +212,6 @@ mod higher_level {
 pub use higher_level::*;
 
 mod helpers {
-    use crate::task::tid::Tid;
 
     use super::*;
 

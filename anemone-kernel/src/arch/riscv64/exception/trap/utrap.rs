@@ -5,7 +5,10 @@ use crate::{
     },
     prelude::{fault::handle_user_page_fault, *},
     sched::current_task_id,
-    task::{cpu_usage::Privilege, exit::kernel_exit},
+    task::{
+        cpu_usage::Privilege,
+        exit::{kernel_exit, kernel_exit_group},
+    },
 };
 
 // kernel trap entry point. since kernel doesn't use floating point, we don't
@@ -197,6 +200,11 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             // from this code block, the logical execution flow is considered
             // leaving the hardware interrupt environment.
 
+            if get_current_task().killed() {
+                // TODO: exit code.
+                kernel_exit(ExitCode::Exited(-1))
+            }
+
             debug_assert!(allow_preempt(), "for utraps, this must hold");
             if fetch_clear_need_resched() {
                 // if we need reschedule, we can't waste time on disposing deferred tasks.
@@ -231,8 +239,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                     cur_cpu_id(),
                     current_task_id(),
                 );
-                kernel_exit(-1)
                 //TODO: Error code
+                kernel_exit_group(ExitCode::Exited(-1))
             },
             RiscV64Exception::InstructionPageFault
             | RiscV64Exception::LoadPageFault
@@ -255,7 +263,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                     current_task_id(),
                     reason
                 );
-                kernel_exit(-1)
+                kernel_exit_group(ExitCode::Exited(-1))
                 //TODO: Error code
             },
         }

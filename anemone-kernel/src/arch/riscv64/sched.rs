@@ -207,7 +207,7 @@ unsafe extern "C" fn kernel_task_entry_secondary(
     a_args: *const [u64; 7], // arg2
 ) -> ! {
     fn zero_exit() -> ! {
-        kernel_exit(0)
+        kernel_exit(ExitCode::Exited(0))
     }
 
     assert!(

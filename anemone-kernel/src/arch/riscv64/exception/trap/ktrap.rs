@@ -4,6 +4,7 @@ use crate::{
         trap::{RiscV64Exception, RiscV64Interrupt, RiscV64TrapFrame},
     },
     prelude::*,
+    task::exit::kernel_exit,
 };
 
 // kernel trap entry point. since kernel doesn't use floating point, we don't
@@ -150,6 +151,10 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
         {
             // from this code block, the logical execution flow is considered
             // leaving the hardware interrupt environment.
+            if get_current_task().killed() {
+                // TODO: exit code.
+                kernel_exit(ExitCode::Exited(-1));
+            }
 
             // note the short-circuit behavior of && operator.
             if allow_preempt() && fetch_clear_need_resched() {

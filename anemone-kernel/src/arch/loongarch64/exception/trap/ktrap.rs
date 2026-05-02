@@ -10,6 +10,7 @@ use crate::{
         trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
     },
     prelude::*,
+    task::exit::kernel_exit,
 };
 
 core::arch::global_asm!(
@@ -155,6 +156,9 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
         {
             // from this code block, the logical execution flow is considered
             // leaving the hardware interrupt environment.
+            if get_current_task().killed() {
+                kernel_exit(ExitCode::Exited(-1));
+            }
 
             // note the short-circuit behavior of && operator.
             if allow_preempt() && fetch_clear_need_resched() {

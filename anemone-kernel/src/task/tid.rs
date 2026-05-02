@@ -81,6 +81,10 @@ impl TidHandle {
         Self(u32::MAX)
     };
 
+    pub fn get_typed(&self) -> Tid {
+        Tid(self.0)
+    }
+
     pub fn get(&self) -> u32 {
         self.0
     }

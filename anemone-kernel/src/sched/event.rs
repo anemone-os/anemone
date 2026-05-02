@@ -89,6 +89,8 @@ impl Event {
     }
 
     /// Blocking listen.
+    ///
+    /// **Ensure no lock or guard is held when calling this method.**
     pub fn listen<P>(&self, exclusive: bool, prediction: P)
     where
         P: Fn() -> bool,
@@ -109,6 +111,13 @@ impl Event {
             }
 
             // TODO: signal checking
+            if task.killed() {
+                knoticeln!(
+                    "listener task {} is killed while waiting, stop waiting",
+                    task.tid()
+                );
+                break;
+            }
 
             unsafe {
                 drop(guard);

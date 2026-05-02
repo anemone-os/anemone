@@ -7,55 +7,143 @@ use crate::{prelude::*, task::tid::Tid};
 pub mod exit;
 pub mod exit_group;
 
-/// Called by the task guard when a task is exiting. This function will never
-/// return.
-///
-/// Call this function manually will directly exit the current task.
+/// Exit current task.
 ///
 /// TODO: distinguish kernel thread and user process.
-pub fn kernel_exit(exit_code: i8) -> ! {
-    let task = get_current_task();
-    if task.tid() == Tid::INIT {
-        panic!("init task shall not exit");
-    }
-
-    if let Some(addr) = task.get_clear_child_tid() {
-        if let Err(err) = addr.safe_write(Tid::new(0)) {
-            knoticeln!(
-                "failed to clear child tid for task {}: {:?} at address {:#x}",
-                task.tid(),
-                err,
-                addr.addr()
-            );
+pub fn kernel_exit(code: ExitCode) -> ! {
+    {
+        let task = get_current_task();
+        if task.tid() == Tid::INIT {
+            panic!("init task shall not exit");
         }
+
+        if let Some(addr) = task.get_clear_child_tid() {
+            if let Err(err) = addr.safe_write(Tid::new(0)) {
+                knoticeln!(
+                    "failed to clear child tid for task {}: {:?} at address {:#x}",
+                    task.tid(),
+                    err,
+                    addr.addr()
+                );
+            }
+        }
+
+        let tg = task.get_thread_group();
+
+        defer_to_dispose(task.clone());
+
+        task.set_exit_code(code);
+
+        // TODO: this is not very accurate. but good enough for now.
+        tg.accumulate_member_usage(&task);
+
+        let is_last = task.detach_from_topology();
+
+        // if we are the last thread in this thread group, we should do the cleanup
+        // work.
+
+        // a longer critical section must be held here to avoid races. TODO: explain
+        // why.
+        if is_last {
+            let mut tg_inner = tg.inner.write_irqsave();
+
+            let xcode = match tg_inner.status.life_cycle {
+                ThreadGroupLifeCycle::Alive => {
+                    // no one called exit_group before. all threads call exit... use our exit code.
+                    code
+                },
+                ThreadGroupLifeCycle::Exiting(existing_code) => {
+                    // someone already called exit_group before. use their exit code.
+                    existing_code
+                },
+                ThreadGroupLifeCycle::Exited(existing_code) => {
+                    panic!("thread group already exited with code {:?}", existing_code);
+                },
+            };
+
+            // 1. reparent orphan children.
+            // following operations are a bit tricky, but it's safe.
+            //
+            // TODO: but i think we'd better switch to a more reasonable and less
+            // error-prone design later.
+            drop(tg_inner);
+            tg.reparent_orphan_children();
+            tg_inner = tg.inner.write_irqsave();
+
+            // 2. set status to Exited, so that wait4 can reap this thread group.
+            tg_inner.status.life_cycle = ThreadGroupLifeCycle::Exited(xcode);
+
+            drop(tg_inner);
+            // 3. publish child_exited event.
+            tg.get_parent().child_exited.publish(1);
+
+            // 4. orphan children reparented to init may contain zombie thread groups. let's
+            //    publish that to init as well.
+            // this hardcoding is a bit ugly. when we support subreapers, we should publish
+            // this to the actual reaper.
+            get_init_task().get_thread_group().child_exited.publish(1);
+        }
+
+        // ORDER MATTERS.
+        // Setting status to Zombie must be the last thing before we drop
+        // the task. Otherwise if a preemption occurs after setting status to Zombie but
+        // before we, e.g., detach from thread group, we'll end up with a zombie task
+        // that still appears in the thread group.
+        task.update_status_with(|_prev| (TaskStatus::Zombie, ()));
     }
-
-    // NOTE THE ORDER:
-    // before set zombie, we free most resources.
-    // after set zombie, we unbind task relationships.
-
-    // this guard must be held. consider the following scenario:
-    // 1. task A just updated its status to zombie, but has not yet notified its
-    //    parent.
-    // 2. task A got preempted! and since it's a already a zombie, it won't be
-    //    scheduled again, thus it won't be able to notify its parent.
-    // 3. if parent task B is waiting for A, it will wait forever.
-    let guard = PreemptGuard::new();
-
-    task.set_exit_code(exit_code);
-
-    task.reparent_orphan_children();
-
-    task.update_status_with(|_prev| (TaskStatus::Zombie, ()));
-
-    task.get_parent_task().child_exited.publish(1);
-
-    drop(task);
-    drop(guard);
 
     with_intr_disabled(|| unsafe {
         schedule();
     });
 
     unreachable!("exited task should never be scheduled again");
+}
+
+/// Exit current thread group.
+///
+/// NOTE: thread who called this function might not be the one who actually
+/// performs the exit.
+///
+/// TODO: we should reserve [TidHandle] of leader thread until the thread group
+/// is reaped.
+pub fn kernel_exit_group(code: ExitCode) -> ! {
+    {
+        let mut task = get_current_task();
+        if task.tid() == Tid::INIT {
+            panic!("init task shall not exit");
+        }
+        let mut tg = task.get_thread_group();
+        let is_exiting = tg.update_life_cycle_with(|prev| match prev {
+            ThreadGroupLifeCycle::Alive => (ThreadGroupLifeCycle::Exiting(code), false),
+            ThreadGroupLifeCycle::Exiting(existing_code) => {
+                (ThreadGroupLifeCycle::Exiting(*existing_code), true)
+            },
+            ThreadGroupLifeCycle::Exited(code) => {
+                panic!("thread group already exited with code {:?}", code);
+            },
+        });
+
+        if is_exiting {
+            // someone already started exiting this thread group. we can just exit this
+            // thread.
+            drop(tg);
+            drop(task);
+
+            kernel_exit(code)
+        }
+
+        // we are the first thread calling exit_group.
+
+        // TODO: when signal is implemented, we should send SIGKILL to all other
+        // threads in this thread group.
+        tg.for_each_member(|member| {
+            if member.tid() != task.tid() {
+                member.set_killed();
+            }
+        });
+
+        // no need to wait anymore. the last thread that exits will do the
+        // cleanup work.
+    }
+    kernel_exit(code)
 }

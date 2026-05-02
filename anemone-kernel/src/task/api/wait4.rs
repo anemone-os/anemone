@@ -23,7 +23,7 @@ enum WaitFor {
     AnyChildWithPgid(Todo),
     AnyChild,
     AnyChildWithCurrentPgid,
-    ChildWithTid(Tid),
+    ChildWithTgid(Tid),
 }
 
 bitflags! {
@@ -42,16 +42,44 @@ bitflags! {
 /// can't figure out what features we should support.
 #[derive(Debug)]
 enum WStatus {
-    Exited { exit_code: i8 },
-    // TODO: signal terminated, stopped, etc. their bit representations are all different.
+    Exited {
+        exit_code: i8,
+    },
+    /// TODO
+    Signaled {
+        signal: u8,
+        core_dumped: bool,
+    },
+    // TODO: stopped, continued, etc. their bit representations are all different.
 }
 
 impl WStatus {
     fn serialize_to(self, kbuf: &mut i32) {
         match self {
-            // [00000000|exit_code]
+            // [exit_code|00000000]
             Self::Exited { exit_code } => {
                 *kbuf = (exit_code as i32) << 8;
+            },
+            Self::Signaled {
+                signal,
+                core_dumped,
+            } => {
+                *kbuf = signal as i32;
+                if core_dumped {
+                    *kbuf |= 0x80;
+                }
+            },
+        }
+    }
+}
+
+impl From<ExitCode> for WStatus {
+    fn from(value: ExitCode) -> Self {
+        match value {
+            ExitCode::Exited(exit_code) => Self::Exited { exit_code },
+            ExitCode::Signaled(signal) => Self::Signaled {
+                signal,
+                core_dumped: false, // TODO
             },
         }
     }
@@ -70,7 +98,7 @@ impl TryFromSyscallArg for WaitFor {
                 knoticeln!("wait4: nyi wait for child with current pgid");
                 Err(SysError::NotYetImplemented)
             },
-            _ => Ok(Self::ChildWithTid(Tid::new(raw as u32))),
+            _ => Ok(Self::ChildWithTgid(Tid::new(raw as u32))),
         }
     }
 }
@@ -107,15 +135,10 @@ impl Wait4Scanner {
         self.matched_any
     }
 
-    fn scan_one(&mut self, task: &Arc<Task>) -> bool {
-        // this should not happen. we should remove ap_kinit to unify all cases.
-        if task.flags().is_kernel() {
-            return false;
-        }
-
+    fn scan_one(&mut self, tg: &Arc<ThreadGroup>) -> bool {
         let matched = match self.wait4 {
             WaitFor::AnyChild => true,
-            WaitFor::ChildWithTid(tid) => task.tid() == tid,
+            WaitFor::ChildWithTgid(tgid) => tg.tgid() == tgid,
             WaitFor::AnyChildWithPgid(_) | WaitFor::AnyChildWithCurrentPgid => {
                 unreachable!("wait4: unsupported target reached scanner")
             },
@@ -126,7 +149,7 @@ impl Wait4Scanner {
         }
 
         self.matched_any = true;
-        matches!(task.status(), TaskStatus::Zombie)
+        matches!(tg.status().life_cycle(), ThreadGroupLifeCycle::Exited(_))
     }
 }
 
@@ -139,6 +162,7 @@ fn sys_wait4(
     _rusage: u64,
 ) -> Result<u64, SysError> {
     let task = get_current_task();
+    let tg = task.get_thread_group();
 
     // TODO: optimize this. we did a double scan, which is not necessary.
 
@@ -147,44 +171,58 @@ fn sys_wait4(
         // scanning does not need topology consistency. it's just a best effort to find
         // a child that satisfies the wait condition. if such child is found,
         // then we can lock topology and do the heavy lifting.
-        if let Some(child) = task.find_child(|child| scanner.scan_one(child)) {
+        if let Some(child) = tg.find_child(|child| scanner.scan_one(child)) {
             kdebugln!(
                 "wait4: found a child {} that satisfies the wait condition",
-                child.tid()
+                child.tgid(),
             );
-            let tid = child.tid();
+            let tgid = child.tgid();
             drop(child);
 
-            let child = task.reap_child(tid);
-            let xcode = child.exit_code();
-            let wstatus = WStatus::Exited { exit_code: xcode };
-            let mut kbuf: i32 = 0;
-            wstatus.serialize_to(&mut kbuf);
-            if let Some(wstatus_ptr) = wstatus_ptr {
-                wstatus_ptr.safe_write(kbuf)?;
+            // if multiple threads are waiting for the same child, only one of them can reap
+            // it, and the others will fail to find the child in topology. this is fine,
+            // since they will just loop and wait again.
+            if let Some(child) = tg.try_reap_child(tgid) {
+                let xcode = child
+                    .exit_code()
+                    .expect("wait4: reaped child has no exit code");
+                let wstatus = WStatus::from(xcode);
+                let mut kbuf: i32 = 0;
+                wstatus.serialize_to(&mut kbuf);
+                if let Some(wstatus_ptr) = wstatus_ptr {
+                    wstatus_ptr.safe_write(kbuf)?;
+                }
+
+                tg.on_reap(&child);
+
+                return Ok(tgid.get() as u64);
             }
-
-            task.on_reap_child(&child);
-
-            // put the reaped child into deferred queue, so that it can be safely dropped
-            // later.
-            child.defer_to_dispose();
-
-            return Ok(tid.get() as u64);
         }
         if !scanner.matched_any() {
             return Err(SysError::ChildNotFound);
         }
         if waitoptions.contains(WaitOptions::NOHANG) {
+            if tg.ntasks() == 0 {
+                // this may happen, even though above exists a check for matched_any.
+                // consider following scenario:
+                // - thread A and B are waiting for the only child C.
+                // - C exits, A and B are both woken up.
+                // - A gets the lock first, reaps C successfully and returns.
+                // - B gets the lock later, fails to find C. now there are no children, but B
+                //   did match C. -ECHILD should be returned in this case, since 0 is for "no
+                //   child reaped but there are still matching children".
+                return Err(SysError::ChildNotFound);
+            }
+
             // this is a bit weird, but it's what Linux does.
             return Ok(0);
         }
 
-        task.child_exited.listen(false, || {
+        tg.child_exited.listen(false, || {
             let mut scanner = Wait4Scanner::new(target);
             // note the latter condition.
-            let res = task.find_child(|child| scanner.scan_one(child)).is_some()
-                || !scanner.matched_any();
+            let res =
+                tg.find_child(|child| scanner.scan_one(child)).is_some() || !scanner.matched_any();
 
             kdebugln!(
                 "wait4: check wait condition: res={}, matched_any={}",
@@ -194,6 +232,16 @@ fn sys_wait4(
 
             res
         });
+
+        if task.killed() {
+            knoticeln!(
+                "wait4: task {} is killed while waiting, stop waiting",
+                task.tid()
+            );
+            // this error code actually won't be returned to user program, since the task
+            // will call kernel_exit before returning to user space.
+            return Err(SysError::Interrupted);
+        }
 
         kdebugln!("wait4: woken up, rechecking wait condition");
     }

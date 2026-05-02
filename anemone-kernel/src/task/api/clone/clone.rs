@@ -30,9 +30,9 @@ pub fn sys_clone(
         "sys_clone called with flags={:#x}, new_sp={:?}, parent_tid={:?}, tls={:?}, child_tid={:?}",
         flags,
         new_sp,
-        parent_tid,
+        parent_tid.map(|ptr| ptr.addr()),
         tls,
-        child_tid
+        child_tid.map(|ptr| ptr.addr())
     );
     let trapframe = get_current_task().utrapframe();
     kernel_clone(flags, trapframe, new_sp, tls, parent_tid, child_tid)
