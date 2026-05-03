@@ -153,6 +153,11 @@ impl ThreadGroup {
             .collect()
     }
 
+    /// Get the number of children thread groups of this thread group.
+    pub fn nchildren(&self) -> usize {
+        self.inner.read_irqsave().children_tgids.len()
+    }
+
     /// Find a child thread group of the thread group of this task by its TGID.
     ///
     /// ## Locks
@@ -228,9 +233,25 @@ impl ThreadGroup {
     ///
     /// Returns [None] if child thread group with the given TGID is not found,
     /// which may happen if multiple threads tries to reap the same child thread
-    /// group at the same time.
+    /// group at the same time. Or if the child thread group is not actually a
+    /// child of this thread group, which may happen if the child thread group
+    /// is reparented to init at some point.
+    ///
+    /// TODO: maybe we should make this method return a
+    /// Result<Option<Arc<ThreadGroup>>, SomeError> to distinguish those two
+    /// cases?
     pub fn try_reap_child(&self, child_tgid: Tid) -> Option<Arc<ThreadGroup>> {
         let mut topology = TOPOLOGY.inner.write_irqsave();
+
+        // make sure this is indeed a child thread group of us.
+        if !self
+            .inner
+            .read_irqsave()
+            .children_tgids
+            .contains(&child_tgid)
+        {
+            return None;
+        }
 
         let child_tg = topology.thread_groups.remove(&child_tgid)?;
 

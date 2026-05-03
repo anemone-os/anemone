@@ -202,7 +202,7 @@ fn sys_wait4(
             return Err(SysError::ChildNotFound);
         }
         if waitoptions.contains(WaitOptions::NOHANG) {
-            if tg.ntasks() == 0 {
+            if tg.nchildren() == 0 {
                 // this may happen, even though above exists a check for matched_any.
                 // consider following scenario:
                 // - thread A and B are waiting for the only child C.

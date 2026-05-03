@@ -286,15 +286,6 @@ impl Task {
     ///
     /// [TaskFlags::KERNEL] is added automatically.
     ///
-    /// # Safety
-    ///
-    /// This function is unsafe because:
-    ///  * The parent task of the created task is set to [None] by default.
-    ///    However, according to the task tree structure, there could be only
-    ///    one root task whose `parent` is [None]. Casually creating multiple
-    ///    root tasks will break the task hierarchy and cause undefined
-    ///    behavior.
-    ///
     /// # Notes
     ///
     /// [FsState] is set to hanging by default, which is suitable for most
