@@ -15,7 +15,10 @@ pub mod init_stack;
 pub mod parse;
 
 fn load_binary(ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
-    let file = vfs_open(&ctx.path)?;
+    let file = vfs_open(&ctx.path).map_err(|e| {
+        kwarningln!("elf: failed to open file '{}': {:?}", ctx.path, e);
+        e
+    })?;
 
     let mut elf_hdr_bytes = [0; SIZEOF_EHDR];
     file.read(&mut elf_hdr_bytes)?;

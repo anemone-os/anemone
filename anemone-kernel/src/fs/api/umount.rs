@@ -13,6 +13,7 @@ fn sys_umount2(
     // currently unused.
     _flags: u64,
 ) -> Result<u64, SysError> {
-    vfs_unmount(&Path::new(target.as_ref()))?;
+    let target = get_current_task().make_global_path(&Path::new(target.as_ref()));
+    vfs_unmount(&target)?;
     Ok(0)
 }

@@ -40,7 +40,11 @@ fn unlinkat(
     let path = Path::new(pathname.as_ref());
     if path.is_absolute() {
         let path = get_current_task().make_global_path(&Path::new(pathname.as_ref()));
-        vfs_unlink(&path)?;
+        if flags.remove_dir {
+            vfs_rmdir(&path)?;
+        } else {
+            vfs_unlink(&path)?;
+        }
     } else {
         let dir_path = dirfd.to_pathref(true)?;
 

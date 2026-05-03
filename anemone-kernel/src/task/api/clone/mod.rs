@@ -11,19 +11,14 @@ use anemone_abi::process::linux::clone;
 
 use crate::{
     prelude::{
-        handler::{TryFromSyscallArg, syscall_arg_flag32},
-        user_access::{UserWritePtr, user_addr},
+        handler::{syscall_arg_flag32, TryFromSyscallArg},
+        user_access::{user_addr, UserWritePtr},
         *,
     },
     task::{cpu_usage::Privilege, tid::Tid},
 };
 
-// we don't wrap this type inside an `arg` module like other syscalls, since
-// these flags are not only used in syscall handlers, but used throughout the
-// task management system.
 bitflags! {
-    /// Yes... it's really tough to implement a Linux-agnostic compatibility layer that supports clone's semantics,
-    /// so we have no choice but to allow this bitflag to permeate our kernel codebase...sad.
     #[derive(Debug, Clone, Copy)]
     pub struct CloneFlags: u32 {
         /// Signal sent to parent when child process changes state (termination/stop)

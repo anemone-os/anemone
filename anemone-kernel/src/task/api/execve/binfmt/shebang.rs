@@ -15,7 +15,10 @@ const SHEBANG_MAGIC: &[u8] = b"#!";
 pub struct Shebang;
 
 fn load_binary(ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
-    let file = vfs_open(&ctx.path)?;
+    let file = vfs_open(&ctx.path).map_err(|e| {
+        knoticeln!("shebang: failed to open file '{}': {:?}", ctx.path, e);
+        e
+    })?;
 
     let mut buf = [0u8; SHEBANG_MAX_LEN];
     let n = file.read(&mut buf)?;

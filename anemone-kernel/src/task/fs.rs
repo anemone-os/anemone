@@ -95,40 +95,45 @@ impl Task {
     ///
     /// This should only be used while the task is still uniquely owned, such
     /// as during task construction or clone setup.
-    pub(super) fn replace_fs_state_handle(&mut self, fs_state: Arc<RwLock<FsState>>) {
+    pub fn replace_fs_state_handle(&mut self, fs_state: Arc<RwLock<FsState>>) {
         self.fs_state = fs_state;
     }
 
     pub fn root(&self) -> PathRef {
-        self.fs_state().read().root().clone()
+        self.fs_state.read().root().clone()
     }
 
     pub fn cwd(&self) -> PathRef {
-        self.fs_state().read().cwd().clone()
+        self.fs_state.read().cwd().clone()
     }
 
     pub fn set_root(&self, root: PathRef) {
-        self.fs_state().write().set_root(root);
+        self.fs_state.write().set_root(root);
     }
 
     pub fn set_cwd(&self, cwd: PathRef) {
-        self.fs_state().write().set_cwd(cwd);
+        self.fs_state.write().set_cwd(cwd);
     }
 
-    pub fn lookup_path(&self, path: &Path) -> Result<PathRef, SysError> {
-        let fs_state = self.fs_state();
-        let fs_state = fs_state.read();
+    /// Lookup a path in this task's filesystem context.
+    pub fn lookup_path(&self, path: &Path, flags: ResolveFlags) -> Result<PathRef, SysError> {
+        let fs_state = self.fs_state.read();
         if path.is_absolute() {
-            vfs_lookup_from(&fs_state.root(), path)
+            let rel_path = path.strip_prefix("/").unwrap();
+            debug_assert!(!rel_path.is_absolute());
+            if rel_path.as_bytes().is_empty() {
+                Ok(fs_state.root().clone())
+            } else {
+                vfs_lookup_from(fs_state.root(), PathResolution::new(rel_path, flags))
+            }
         } else {
-            vfs_lookup_from(&fs_state.cwd(), path)
+            vfs_lookup_from(fs_state.cwd(), PathResolution::new(path, flags))
         }
     }
 
     /// Get the current working directory of this task, relative to its root.
     pub fn rel_cwd(&self) -> PathBuf {
-        let fs_state = self.fs_state();
-        let fs_state = fs_state.read();
+        let fs_state = self.fs_state.read();
         let cwd_str = fs_state.cwd().to_pathbuf();
         let root_str = fs_state.root().to_pathbuf();
 

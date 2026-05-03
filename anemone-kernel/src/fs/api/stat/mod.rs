@@ -59,19 +59,18 @@ pub fn kernel_fstatat(
         }
         dirfd.to_pathref(false)?
     } else {
-        let dir_path = dirfd.to_pathref(true)?;
-
-        vfs_lookup_from(
-            &dir_path,
-            PathResolution::new(
-                Path::new(path),
-                if flags.contains(StatAtFlag::SYMLINK_NOFOLLOW) {
-                    ResolveFlags::UNFOLLOW_LAST_SYMLINK
-                } else {
-                    ResolveFlags::empty()
-                },
-            ),
-        )?
+        let path = Path::new(path);
+        let resolve_flags = if flags.contains(StatAtFlag::SYMLINK_NOFOLLOW) {
+            ResolveFlags::UNFOLLOW_LAST_SYMLINK
+        } else {
+            ResolveFlags::empty()
+        };
+        if path.is_absolute() {
+            get_current_task().lookup_path(&path, resolve_flags)?
+        } else {
+            let dir_path = dirfd.to_pathref(true)?;
+            vfs_lookup_from(&dir_path, PathResolution::new(path, resolve_flags))?
+        }
     };
 
     let stat = pathref.inode().get_attr()?.to_linux_stat();

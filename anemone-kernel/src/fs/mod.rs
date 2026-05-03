@@ -17,6 +17,7 @@ mod devfs;
 #[cfg(feature = "fs_ext4")]
 mod ext4;
 mod pipe;
+mod proc;
 mod ramfs;
 
 pub mod api;

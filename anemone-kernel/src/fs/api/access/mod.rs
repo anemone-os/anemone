@@ -27,7 +27,12 @@ mod args {
     impl TryFromSyscallArg for AccessFlag {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
             let raw = syscall_arg_flag32(raw)?;
-            Self::from_bits(raw).ok_or(SysError::InvalidArgument)
+            let flags = Self::from_bits(raw).ok_or(SysError::InvalidArgument)?;
+            if flags.contains(Self::EACCESS) {
+                knoticeln!("[NYI] AT_EACCESS flag is not supported yet");
+                return Err(SysError::NotYetImplemented);
+            }
+            Ok(flags)
         }
     }
 
@@ -71,19 +76,18 @@ pub fn kernel_faccess(
         }
         dirfd.to_pathref(false)?
     } else {
-        let dir_path = dirfd.to_pathref(true)?;
-
-        vfs_lookup_from(
-            &dir_path,
-            PathResolution::new(
-                Path::new(pathname),
-                if flags.contains(AccessFlag::SYMLINK_NOFOLLOW) {
-                    ResolveFlags::UNFOLLOW_LAST_SYMLINK
-                } else {
-                    ResolveFlags::empty()
-                },
-            ),
-        )?
+        let path = Path::new(pathname);
+        let resolve_flags = if flags.contains(AccessFlag::SYMLINK_NOFOLLOW) {
+            ResolveFlags::UNFOLLOW_LAST_SYMLINK
+        } else {
+            ResolveFlags::empty()
+        };
+        if path.is_absolute() {
+            get_current_task().lookup_path(&path, resolve_flags)?
+        } else {
+            let dir_path = dirfd.to_pathref(true)?;
+            vfs_lookup_from(&dir_path, PathResolution::new(path, resolve_flags))?
+        }
     };
 
     let perm = pathref.inode().perm();

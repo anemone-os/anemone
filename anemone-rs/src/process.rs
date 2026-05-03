@@ -1,15 +1,22 @@
 //! For working with processes.
+//!
+//! Currently we don't provide encapsulation for threads. Only single-threaded
+//! processes are supported.
 
 use anemone_abi::errno::Errno;
 
 use crate::os::linux::process as linux_process;
 
+/// Get current process ID.
+pub fn process_id() -> usize {
+    linux_process::getpid()
+        .map(|x| x as usize)
+        .expect("failed to invoke getpid syscall")
+}
+
 /// Exit current process.
-///
-/// Currently, this is just a thin wrapper around linux's `exit` syscall, but it
-/// may be extended in the future to support additional cleanup logic.
 pub fn exit(xcode: i8) -> ! {
-    linux_process::exit(xcode)
+    linux_process::exit_group(xcode)
 }
 
 /// Yield the CPU to allow other threads to run.

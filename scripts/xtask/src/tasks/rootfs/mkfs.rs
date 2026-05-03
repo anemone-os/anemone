@@ -20,7 +20,9 @@ pub struct MkfsArgs {
     config: String,
 
     #[arg(long)]
-    #[arg(help = "Run the host-side image builder through sudo when libguestfs needs elevated privileges")]
+    #[arg(
+        help = "Run the host-side image builder through sudo when libguestfs needs elevated privileges"
+    )]
     sudo: bool,
 }
 
@@ -52,7 +54,10 @@ pub fn run(args: MkfsArgs) -> anyhow::Result<()> {
             "Using sudo for host-side image materialization; you may be prompted for your password"
         );
     }
-    rootfs.fs.fstype.mkfs(&staging_dir, &image_path, args.sudo)?;
+    rootfs
+        .fs
+        .fstype
+        .mkfs(&staging_dir, &image_path, args.sudo)?;
 
     Ok(())
 }
@@ -87,6 +92,10 @@ impl<'a> RootfsCtx<'a> {
         };
 
         fn state_base_dir(staging_dir: &Path, dir: &Path, is_root: bool) -> anyhow::Result<()> {
+            if !staging_dir.exists() {
+                fs::create_dir_all(staging_dir)?;
+            }
+
             for entry in std::fs::read_dir(dir)? {
                 let entry = entry?;
                 if is_root && entry.file_name() == "lost+found" {

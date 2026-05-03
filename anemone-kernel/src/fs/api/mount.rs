@@ -24,7 +24,7 @@ fn parse_mount_source(raw: Option<Box<str>>) -> Result<MountSource, SysError> {
         None => Ok(MountSource::Pseudo),
         Some(s) => {
             // we treat this as a path.
-            let dev = vfs_open(&Path::new(s))?;
+            let dev = get_current_task().lookup_path(&Path::new(s), ResolveFlags::empty())?;
 
             match dev.inode().get_attr()?.rdev {
                 DeviceId::Block(bdev) => {
@@ -57,12 +57,9 @@ fn sys_mount(
     }
     drop(fs);
 
-    vfs_mount_at(
-        &fstype,
-        source,
-        MountFlags::empty(),
-        &Path::new(target.as_ref()),
-    )?;
+    let target = get_current_task().make_global_path(&Path::new(target.as_ref()));
+
+    vfs_mount_at(&fstype, source, MountFlags::empty(), &target)?;
 
     Ok(0)
 }
