@@ -1,4 +1,4 @@
-use crate::{prelude::*, task::exit::kernel_exit};
+use crate::{prelude::*, task::exit::kernel_exit_group};
 
 pub fn handle_user_page_fault(info: PageFaultInfo) {
     if let Err(e) = handle_user_page_fault_internal(info) {
@@ -11,7 +11,7 @@ pub fn handle_user_page_fault(info: PageFaultInfo) {
             info.fault_type(),
             e
         );
-        kernel_exit(-1);
+        kernel_exit_group(ExitCode::Exited(-1));
     }
 }
 

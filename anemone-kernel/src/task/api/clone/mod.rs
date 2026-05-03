@@ -65,6 +65,8 @@ bitflags! {
         const NEWPID = clone::CLONE_NEWPID as u32;
         const NEWNET = clone::CLONE_NEWNET as u32;
         const IO = clone::CLONE_IO as u32;
+        const CLEAR_SIGHAND = clone::CLONE_CLEAR_SIGHAND as u32;
+        const INTO_CGROUP = clone::CLONE_INTO_CGROUP as u32;
     }
 }
 
@@ -81,6 +83,8 @@ impl TryFromSyscallArg for CloneFlags {
         }
         const SUPPORTED_FLAGS: CloneFlags = union!(
             SIGCHLD, // fake
+            SIGHAND, // fake
+            THREAD,
             VM,
             FS,
             FILES,
@@ -98,7 +102,37 @@ impl TryFromSyscallArg for CloneFlags {
             return Err(SysError::NotYetImplemented);
         }
 
+        flags.validate()?;
+
         Ok(flags)
+    }
+}
+
+impl CloneFlags {
+    /// Some flags must be used along with other flags, while some flags are
+    /// mutually exclusive.
+    fn validate(&self) -> Result<(), SysError> {
+        // must be used together
+        if self.contains(CloneFlags::SIGHAND) && !self.contains(CloneFlags::VM) {
+            knoticeln!("clone: CLONE_SIGHAND flag must be used together with CLONE_VM flag");
+            return Err(SysError::InvalidArgument);
+        }
+
+        if self.contains(CloneFlags::THREAD) && !self.contains(CloneFlags::SIGHAND) {
+            // thus VM as well, since SIGHAND requires VM. but it's already checked above.
+            knoticeln!("clone: CLONE_THREAD flag must be used together with CLONE_SIGHAND flag");
+            return Err(SysError::InvalidArgument);
+        }
+
+        // must not be used together
+        if self.contains(CloneFlags::CLEAR_SIGHAND) && self.contains(CloneFlags::SIGHAND) {
+            knoticeln!(
+                "clone: CLONE_CLEAR_SIGHAND and CLONE_SIGHAND flags cannot be used together"
+            );
+            return Err(SysError::InvalidArgument);
+        }
+
+        Ok(())
     }
 }
 
@@ -123,6 +157,8 @@ impl TryFromSyscallArg for CloneStack {
     }
 }
 
+/// TODO: rolling back is toooooooo tedious and complex! this function is really
+/// a mess now... we should refactor it into smaller pieces.
 pub fn kernel_clone(
     flags: CloneFlags,
     trap_frame: TrapFrame,
@@ -131,6 +167,8 @@ pub fn kernel_clone(
     parent_tid: Option<UserWritePtr<Tid>>,
     child_tid: Option<UserWritePtr<Tid>>,
 ) -> Result<Tid, SysError> {
+    flags.validate()?;
+
     let current_task = get_current_task();
     let cur_uspace = current_task.clone_uspace();
 
@@ -170,10 +208,22 @@ pub fn kernel_clone(
                 child_tid.map_or(0, |ptr| ptr.addr()),
                 flags.bits() as u64,
             ]),
+            Some(current_task.tid()),
+            if flags.contains(CloneFlags::THREAD) {
+                // same thread group
+                Some(current_task.tgid())
+            } else {
+                // new thread group
+                None
+            },
             current_task.sched_entity(),
             TaskFlags::NONE,
             None,
-        )?
+        )
+        .map_err(|e| {
+            let _ = unsafe { Box::from_raw(frame_ptr) };
+            e
+        })?
     };
     unsafe {
         // The cloned user trapframe is copied from the parent, so its scratch
@@ -187,28 +237,20 @@ pub fn kernel_clone(
     if flags.contains(CloneFlags::FS) {
         new_task.replace_fs_state_handle(current_task.fs_state());
     } else {
-        new_task.set_fs_state(current_task.fs_state().read().create_copy());
+        new_task.set_fs_state(current_task.fs_state().read().fork());
     }
 
     if flags.contains(CloneFlags::FILES) {
         new_task.replace_files_state_handle(current_task.files_state());
     } else {
-        new_task.set_files_state(current_task.files_state().read().create_copy());
+        new_task.set_files_state(current_task.files_state().read().fork());
+    }
+
+    if flags.contains(CloneFlags::SIGHAND) {
+        knoticeln!("[nyi] sighand clone flag is set. ignoring...");
     }
 
     let new_tid = new_task.tid();
-
-    if flags.contains(CloneFlags::PARENT_SETTID) {
-        if let Some(parent_tid) = parent_tid {
-            parent_tid.safe_write(new_tid)?;
-        } else {
-            // this is valid. it's user's responsibility to provide a valid pointer if they
-            // set the flag.
-            kdebugln!(
-                "clone: PARENT_SETTID flag is set, but parent_tid pointer is null. ignoring..."
-            );
-        }
-    }
 
     // this is not for argument validation, but rather to ensure the page containing
     // `child_tid` will be mapped.
@@ -216,7 +258,17 @@ pub fn kernel_clone(
     // remove this eager validation.
     if flags.intersects(CloneFlags::CHILD_CLEARTID | CloneFlags::CHILD_SETTID) {
         if let Some(child_tid) = child_tid {
-            child_tid.validate_mut_with(&mut new_task.clone_uspace().write())?;
+            match child_tid.validate_mut_with(&mut new_task.clone_uspace().write()) {
+                Ok(_ptr) => {},
+                Err(e) => {
+                    let _ = unsafe { Box::from_raw(frame_ptr) };
+                    unsafe { guard.forget() };
+                    defer_to_dispose(Arc::new(new_task));
+                    return Err(e);
+                },
+            }
+            // no map_err here, which will capture the guard into the closure,
+            // thus following code can't access guard anymore.
         } else {
             kdebugln!(
                 "clone: CHILD_CLEARTID or CHILD_SETTID flag is set, but child_tid pointer is null. ignoring..."
@@ -228,25 +280,76 @@ pub fn kernel_clone(
         new_task.set_clear_child_tid(child_tid);
     }
 
-    let parent_tid = if flags.contains(CloneFlags::PARENT) {
-        current_task
-            .parent_tid()
-            .expect("init task won't call clone, so there must be a parent")
+    // ok. all state are initialized to consistent values. now we can register it.
+    let binding = if flags.contains(CloneFlags::THREAD) {
+        // same thread group
+        kdebugln!(
+            "clone: creating a new thread in the same thread group {}",
+            current_task.tgid()
+        );
+        TaskBinding::Member
     } else {
-        current_task.tid()
+        // new thread group
+
+        let parent_tgid = if flags.contains(CloneFlags::PARENT) {
+            if let Some(tgid) = current_task.get_thread_group().parent_tgid() {
+                tgid
+            } else {
+                kcritln!("clone: CLONE_PARENT flag set, called by init task. this is invalid...");
+                let _ = unsafe { Box::from_raw(frame_ptr) };
+                unsafe { guard.forget() };
+                return Err(SysError::InvalidArgument);
+            }
+        } else {
+            current_task.tgid()
+        };
+
+        kdebugln!(
+            "clone: creating a new thread group with parent tgid {}",
+            parent_tgid
+        );
+
+        TaskBinding::Leader { parent_tgid }
     };
 
-    // ok. all state are initialized to consistent values. now we can register it.
-    let new_task = guard.register(new_task, TaskBinding { parent: parent_tid });
+    if flags.contains(CloneFlags::PARENT_SETTID) {
+        if let Some(parent_tid) = parent_tid {
+            // again, map_err cannot be used here.
+            if let Err(e) = parent_tid.safe_write(new_tid) {
+                let _ = unsafe { Box::from_raw(frame_ptr) };
+                unsafe { guard.forget() };
+                defer_to_dispose(Arc::new(new_task));
+                return Err(e);
+            }
+        } else {
+            // this is valid. it's user's responsibility to provide a valid pointer if they
+            // set the flag.
+            kdebugln!(
+                "clone: PARENT_SETTID flag is set, but parent_tid pointer is null. ignoring..."
+            );
+        }
+    }
 
-    kdebugln!(
-        "clone: created new task with tid {} (parent tid {}) with flags {:?}",
-        new_tid,
-        parent_tid,
-        flags
-    );
+    match guard.publish(new_task, binding) {
+        Ok(published) => task_enqueue(published),
+        Err((new_task, e)) => {
+            knoticeln!("failed to publish cloned task: {:?}", e);
 
-    task_enqueue(new_task);
+            // distroy this task immediately is a bit heavy. send it to defer queue.
+            defer_to_dispose(Arc::new(new_task));
+
+            // some resoureces cannot be rolled back. but we'll try our best.
+            let _ = unsafe { Box::from_raw(frame_ptr) };
+
+            // // now we don't support many resource rolling back. but we also don't want to
+            // // silently ignore them. if this panic occurs, it means it's time to
+            // implement // rolling back for those resources. for now we just
+            // leave the problem here. panic!("failed to publish cloned task:
+            // {:?}", e);
+            return Err(e);
+        },
+    }
+
     Ok(new_tid)
 }
 

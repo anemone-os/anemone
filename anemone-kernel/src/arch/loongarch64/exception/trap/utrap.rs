@@ -10,7 +10,10 @@ use crate::{
     },
     prelude::{fault::handle_user_page_fault, *},
     sched::current_task_id,
-    task::{cpu_usage::Privilege, exit::kernel_exit},
+    task::{
+        cpu_usage::Privilege,
+        exit::{kernel_exit, kernel_exit_group},
+    },
 };
 
 // User trap entry point. The kernel does not save or restore floating-point
@@ -206,12 +209,18 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         {
             // from this code block, the logical execution flow is considered
             // leaving the hardware interrupt environment.
+            if get_current_task().killed() {
+                kernel_exit(ExitCode::Exited(-1));
+            }
 
             debug_assert!(allow_preempt(), "for utraps, this must hold");
             if fetch_clear_need_resched() {
+                // if we need reschedule, we can't waste time on disposing deferred tasks.
                 unsafe {
                     schedule();
                 }
+            } else {
+                dispose_deferred_tasks();
             }
         }
     } else {
@@ -230,7 +239,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     ecode,
                     esubcode
                 );
-                kernel_exit(-1)
+                kernel_exit_group(ExitCode::Exited(-1));
                 //TODO: Error code;
             },
         };
@@ -272,7 +281,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     trapframe.era,
                     trapframe.badv
                 );
-                kernel_exit(-1)
+                kernel_exit_group(ExitCode::Exited(-1));
                 //TODO: Error code
             },
         }

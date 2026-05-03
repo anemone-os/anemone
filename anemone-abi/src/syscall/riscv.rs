@@ -95,6 +95,7 @@ pub mod linux {
 
     pub const SYS_GETPID: u64 = 172;
     pub const SYS_GETPPID: u64 = 173;
+    pub const SYS_GETTID: u64 = 178;
 
     pub const SYS_BRK: u64 = 214;
     pub const SYS_MUNMAP: u64 = 215;

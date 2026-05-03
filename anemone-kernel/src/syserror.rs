@@ -128,6 +128,8 @@ pub enum SysError {
     ChildNotFound,
     /// Binary format unrecognized.
     BinFmtUnrecognized,
+    /// The operation is interrupted by a signal.
+    Interrupted,
 }
 
 impl AsErrno for SysError {
@@ -185,6 +187,7 @@ impl AsErrno for SysError {
             SysError::UnexpectedEof => ENODATA,
             SysError::ChildNotFound => ECHILD,
             SysError::BinFmtUnrecognized => ENOEXEC,
+            SysError::Interrupted => EINTR,
         }
     }
 }

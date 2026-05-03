@@ -12,7 +12,7 @@ use core::hint::spin_loop;
 
 use alloc::{alloc::AllocError, collections::LinkedList};
 
-use crate::{prelude::*, task::tid::Tid};
+use crate::prelude::*;
 
 #[derive(Debug, Clone, Copy)]
 pub enum IpiPayload {
