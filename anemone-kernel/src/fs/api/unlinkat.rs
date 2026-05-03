@@ -8,8 +8,8 @@ use anemone_abi::fs::linux::at::AT_REMOVEDIR;
 use crate::{
     fs::api::args::AtFd,
     prelude::{
-        dt::c_readonly_string,
         handler::{TryFromSyscallArg, syscall_arg_flag32},
+        user_access::c_readonly_string,
         *,
     },
 };
@@ -34,7 +34,7 @@ impl TryFromSyscallArg for UnlinkAtFlags {
 #[syscall(SYS_UNLINKAT)]
 fn unlinkat(
     dirfd: AtFd,
-    #[validate_with(c_readonly_string)] pathname: Box<str>,
+    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
     flags: UnlinkAtFlags,
 ) -> Result<u64, SysError> {
     let path = Path::new(pathname.as_ref());

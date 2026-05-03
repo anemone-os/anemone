@@ -8,7 +8,7 @@
 use crate::{
     device::block::get_block_dev,
     prelude::{
-        dt::{SyscallArgValidatorExt, c_readonly_string},
+        user_access::{SyscallArgValidatorExt, c_readonly_string},
         *,
     },
 };
@@ -40,12 +40,12 @@ fn parse_mount_source(raw: Option<Box<str>>) -> Result<MountSource, SysError> {
 #[syscall(SYS_MOUNT)]
 fn sys_mount(
     #[validate_with(
-        c_readonly_string
+        c_readonly_string::<MAX_PATH_LEN_BYTES>
             .nullable()
             .and_then(parse_mount_source))]
     source: MountSource,
-    #[validate_with(c_readonly_string)] target: Box<str>,
-    #[validate_with(c_readonly_string)] fstype: Box<str>,
+    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] target: Box<str>,
+    #[validate_with(c_readonly_string::<MAX_FILE_NAME_LEN_BYTES>)] fstype: Box<str>,
     // currently used. but we will support some important flags in the future, e.g. MS_BIND.
     _mountflags: u64,
     // we don't support this argument. vfs now doesn't use it at all.

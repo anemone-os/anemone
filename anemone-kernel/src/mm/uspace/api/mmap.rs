@@ -12,7 +12,7 @@ use crate::{
         vma::{Protection, VmFlags},
         *,
     },
-    syscall::dt::*,
+    syscall::user_access::*,
     task::files::Fd,
 };
 

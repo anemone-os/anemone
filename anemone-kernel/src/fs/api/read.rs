@@ -3,15 +3,20 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/read.2.html
 
-use core::ops::DerefMut;
-
 use crate::{
-    prelude::{dt::UserWritePtr, *},
+    prelude::{
+        user_access::{UserWriteSlice, user_addr},
+        *,
+    },
     task::files::Fd,
 };
 
 #[syscall(SYS_READ)]
-fn sys_read(fd: Fd, buf: UserWritePtr<u8>, count: usize) -> Result<u64, SysError> {
+fn sys_read(
+    fd: Fd,
+    #[validate_with(user_addr)] buf: VirtAddr,
+    count: usize,
+) -> Result<u64, SysError> {
     if count == 0 {
         return Ok(0);
     }
@@ -24,18 +29,12 @@ fn sys_read(fd: Fd, buf: UserWritePtr<u8>, count: usize) -> Result<u64, SysError
         (file, uspace)
     };
 
-    let slice = buf.slice(count);
-
     let mut kbuf = vec![0u8; count];
-
     let len = file.read(&mut kbuf[..count]).map(|n| n as u64)?;
 
-    let mut usp = uspace.write();
-    let ptr = unsafe { slice.validate_mut_with(usp.deref_mut())? };
-    unsafe {
-        ptr.cast::<u8>()
-            .copy_from_nonoverlapping(kbuf.as_ptr(), len as usize);
-    }
+    let mut guard = uspace.write();
+    let mut slice = UserWriteSlice::try_new(buf, count, &mut guard)?;
+    slice.copy_from_slice(&kbuf[..len as usize]);
 
     Ok(len)
 }

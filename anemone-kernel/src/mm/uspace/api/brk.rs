@@ -7,7 +7,7 @@ use anemone_abi::syscall::SYS_BRK;
 use kernel_macros::syscall;
 
 use crate::{
-    prelude::{dt::user_addr, *},
+    prelude::{user_access::user_addr, *},
     sched::get_current_task,
 };
 

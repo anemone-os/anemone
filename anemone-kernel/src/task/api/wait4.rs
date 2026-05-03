@@ -11,8 +11,8 @@ use kernel_macros::syscall;
 
 use crate::{
     prelude::{
-        dt::UserWritePtr,
         handler::{TryFromSyscallArg, syscall_arg_flag32},
+        user_access::{SyscallArgValidatorExt, UserWritePtr, user_addr},
         *,
     },
     task::tid::Tid,
@@ -156,7 +156,7 @@ impl Wait4Scanner {
 #[syscall(SYS_WAIT4)]
 fn sys_wait4(
     target: WaitFor,
-    wstatus_ptr: Option<UserWritePtr<i32>>,
+    #[validate_with(user_addr.nullable())] wstatus_ptr: Option<VirtAddr>,
     waitoptions: WaitOptions,
     // todo.
     _rusage: u64,
@@ -190,7 +190,19 @@ fn sys_wait4(
                 let mut kbuf: i32 = 0;
                 wstatus.serialize_to(&mut kbuf);
                 if let Some(wstatus_ptr) = wstatus_ptr {
-                    wstatus_ptr.safe_write(kbuf)?;
+                    let usp = task.clone_uspace();
+                    let mut guard = usp.write();
+                    match UserWritePtr::<i32>::try_new(wstatus_ptr, &mut guard) {
+                        Ok(mut uptr) => uptr.write(kbuf),
+                        Err(e) => {
+                            knoticeln!(
+                                "wait4: failed to write wstatus for reaped child {}: {:?} at address {:#x}",
+                                tgid,
+                                e,
+                                wstatus_ptr.get()
+                            );
+                        },
+                    }
                 }
 
                 tg.on_reap(&child);

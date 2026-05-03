@@ -42,6 +42,7 @@ pub struct Parameters {
     pub kstack_shift_kb: Option<u64>,
     pub remap_shift_gb: Option<u64>,
     pub max_ident_len_bytes: Option<usize>,
+    pub max_path_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
     pub system_hz: Option<u16>,
     pub backtrace_depth: Option<usize>,
@@ -98,6 +99,8 @@ pub const MAX_IDENT_LEN_BYTES: usize = {};
 /// Maximum length of file names in bytes. This is always equal to MAX_IDENT_LEN_BYTES,
 /// since file names are commonly used as identity strings in kernel objects.
 pub const MAX_FILE_NAME_LEN_BYTES: usize = MAX_IDENT_LEN_BYTES;
+/// Maximum length of file paths in bytes
+pub const MAX_PATH_LEN_BYTES: usize = {};
 /// Maximum number of processes
 pub const MAX_PROCESSES: u64 = {};
 /// System timer frequency in hertz, i.e. number of timer interrupts per second
@@ -120,6 +123,7 @@ pub const SYMLINK_RESOLVE_LIMIT: usize = {};
             default_or!(kstack_shift_kb),
             default_or!(remap_shift_gb),
             default_or!(max_ident_len_bytes),
+            default_or!(max_path_len_bytes),
             default_or!(max_processes),
             default_or!(system_hz),
             default_or!(backtrace_depth),

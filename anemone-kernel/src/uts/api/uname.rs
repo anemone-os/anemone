@@ -5,7 +5,10 @@
 
 use anemone_abi::uts::linux::OldUtsName;
 
-use crate::prelude::{dt::UserWritePtr, *};
+use crate::prelude::{
+    user_access::{UserWritePtr, user_addr},
+    *,
+};
 
 fn copy_from_partial(src: &[u8], dst: &mut [u8]) {
     let len = src.len().min(dst.len());
@@ -13,7 +16,7 @@ fn copy_from_partial(src: &[u8], dst: &mut [u8]) {
 }
 
 #[syscall(SYS_UNAME)]
-fn sys_uname(buf: UserWritePtr<OldUtsName>) -> Result<u64, SysError> {
+fn sys_uname(#[validate_with(user_addr)] buf: VirtAddr) -> Result<u64, SysError> {
     let mut uname = OldUtsName::ZEROED;
 
     copy_from_partial(SYSNAME, &mut uname.sysname);
@@ -22,7 +25,11 @@ fn sys_uname(buf: UserWritePtr<OldUtsName>) -> Result<u64, SysError> {
     copy_from_partial(VERSION, &mut uname.version);
     copy_from_partial(MACHINE, &mut uname.machine);
 
-    buf.safe_write(uname)?;
+    let usp = get_current_task().clone_uspace();
+    let mut guard = usp.write();
+
+    let mut buf = UserWritePtr::<OldUtsName>::try_new(buf, &mut guard)?;
+    buf.write(uname);
 
     Ok(0)
 }

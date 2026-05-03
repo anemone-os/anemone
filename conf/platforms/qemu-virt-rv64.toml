@@ -31,25 +31,25 @@ args = [
     "-netdev",
     "user,id=net",
 
-    # "-drive",
-    # "file=sdcard-rv.img,format=raw,if=none,id=x0",
-    # "-device",
-    # "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
-    # "-no-reboot",
-    # "-drive",
-    # "file=build/rootfs/minimal-rv/rootfs.img,format=raw,if=none,id=x1",
-    # "-device",
-    # "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",
+    "-drive",
+    "file=sdcard-rv.img,format=raw,if=none,id=x0",
+    "-device",
+    "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
+    "-no-reboot",
+    "-drive",
+    "file=build/rootfs/minimal-rv/rootfs.img,format=raw,if=none,id=x1",
+    "-device",
+    "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",
 
     # pci
     # "-drive",
-    # "file=build/rootfs/minimal/rootfs.img,format=raw,if=none,id=x2",
+    # "file=build/rootfs/minimal-rv/rootfs.img,format=raw,if=none,id=x2",
     # "-device",
     # "virtio-blk-pci-transitional,drive=x2",
-    # 
+
     # "-device",
     # "pcie-root-port,id=pcie.1,bus=pcie.0",
-    # 
+
     # "-drive",
     # "file=sdcard-rv.img,format=raw,if=none,id=x0",
     # "-device",

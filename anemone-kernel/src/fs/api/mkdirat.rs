@@ -5,13 +5,13 @@
 
 use crate::{
     fs::api::args::AtFd,
-    prelude::{dt::c_readonly_string, *},
+    prelude::{user_access::c_readonly_string, *},
 };
 
 #[syscall(SYS_MKDIRAT)]
 fn sys_mkdirat(
     dirfd: AtFd,
-    #[validate_with(c_readonly_string)] pathname: Box<str>,
+    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
     mode: u32,
 ) -> Result<u64, SysError> {
     let path = Path::new(pathname.as_ref());

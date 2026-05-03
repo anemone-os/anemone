@@ -2,7 +2,10 @@
 //!
 //! - https://www.man7.org/linux/man-pages/man2/exit.2.html
 
-use crate::{prelude::*, task::tid::Tid};
+use crate::{
+    prelude::{user_access::UserWritePtr, *},
+    task::tid::Tid,
+};
 
 pub mod exit;
 pub mod exit_group;
@@ -18,14 +21,20 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         }
 
         if let Some(addr) = task.get_clear_child_tid() {
-            if let Err(err) = addr.safe_write(Tid::new(0)) {
-                knoticeln!(
-                    "failed to clear child tid for task {}: {:?} at address {:#x}",
-                    task.tid(),
-                    err,
-                    addr.addr()
-                );
+            let usp = task.clone_uspace();
+            let mut guard = usp.write();
+            match UserWritePtr::<Tid>::try_new(addr, &mut guard) {
+                Ok(mut uptr) => uptr.write(Tid::new(0)),
+                Err(e) => {
+                    knoticeln!(
+                        "failed to clear child tid for task {}: {:?} at address {:#x}",
+                        task.tid(),
+                        e,
+                        addr.get()
+                    );
+                },
             }
+            // todo: futex.
         }
 
         let tg = task.get_thread_group();

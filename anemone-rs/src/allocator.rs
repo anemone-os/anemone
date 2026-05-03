@@ -6,9 +6,9 @@ use talc::{OomHandler, Span, Talc};
 use crate::sys::linux::process::brk;
 
 #[global_allocator]
-static ALLOCATOR: UserAllocator = UserAllocator;
+static ALLOCATOR: GlobalAllocator = GlobalAllocator;
 
-static TALC: Mutex<Talc<UserOomHandler>> = Mutex::new(Talc::new(UserOomHandler));
+static TALC: Mutex<Talc<GlobalOomHandler>> = Mutex::new(Talc::new(GlobalOomHandler));
 
 const MIB: u64 = 1024 * 1024;
 const HEAP_GROW_MIN_STEP: u64 = 4 * MIB;
@@ -21,9 +21,9 @@ pub(crate) fn init() {
     }
 }
 
-struct UserAllocator;
+struct GlobalAllocator;
 
-unsafe impl GlobalAlloc for UserAllocator {
+unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         unsafe {
             TALC.lock()
@@ -43,9 +43,9 @@ unsafe impl GlobalAlloc for UserAllocator {
     }
 }
 
-struct UserOomHandler;
+struct GlobalOomHandler;
 
-impl OomHandler for UserOomHandler {
+impl OomHandler for GlobalOomHandler {
     fn handle_oom(talc: &mut Talc<Self>, layout: core::alloc::Layout) -> Result<(), ()> {
         let grow_by = max(layout.size() as u64, HEAP_GROW_MIN_STEP);
         unsafe {

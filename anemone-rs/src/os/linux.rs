@@ -276,6 +276,7 @@ pub mod process {
         }
     }
 
+    /// rusage is not yet implemented.
     pub fn wait4(
         pid: i64,
         wstatus: Option<&mut WStatusRaw>,
@@ -287,6 +288,7 @@ pub mod process {
                 .and_then(|r| Some(r as *mut WStatusRaw as u64))
                 .unwrap_or(0),
             options.bits() as u64,
+            0,
         )
         .and_then(|x| Ok(if x == 0 { None } else { Some(x as Tid) }))
     }

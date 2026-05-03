@@ -692,7 +692,7 @@ impl UserSpaceData {
     }
 
     /// Check if the given virtual page has the requested permissions.
-    pub fn check_permission(&self, vpn: VirtPageNum, rwx_flags: PteFlags) -> Result<(), SysError> {
+    pub fn check_permission(&self, vpn: VirtPageNum, prot: Protection) -> Result<(), SysError> {
         // stack and heap must be handled specially since they have special semantics.
 
         let vma = self
@@ -701,10 +701,9 @@ impl UserSpaceData {
 
         match vma.reservation() {
             Some(VmReservation::Stack) => {
-                if rwx_flags.contains(PteFlags::EXECUTE) {
+                if prot.contains(Protection::EXECUTE) {
                     return Err(SysError::PermissionDenied);
                 }
-
                 if self.stack_accessible(vpn.to_virt_addr()) {
                     Ok(())
                 } else {
@@ -712,7 +711,7 @@ impl UserSpaceData {
                 }
             },
             Some(VmReservation::Heap) => {
-                if rwx_flags.contains(PteFlags::EXECUTE) {
+                if prot.contains(Protection::EXECUTE) {
                     return Err(SysError::PermissionDenied);
                 }
 
@@ -724,7 +723,7 @@ impl UserSpaceData {
             },
             Some(VmReservation::Guard) => Err(SysError::NotMapped),
             None => {
-                if vma.prot().contains(rwx_flags.into()) {
+                if vma.prot().contains(prot) {
                     Ok(())
                 } else {
                     Err(SysError::PermissionDenied)

@@ -7,14 +7,14 @@ use anemone_abi::fs::linux::open::{O_APPEND, O_CREAT, O_DIRECTORY, O_EXCL};
 
 use crate::{
     fs::api::args::AtFd,
-    prelude::{dt::c_readonly_string, *},
+    prelude::{user_access::c_readonly_string, *},
     task::files::{FdFlags, FileFlags},
 };
 
 #[syscall(SYS_OPENAT)]
 fn sys_openat(
     dirfd: AtFd,
-    #[validate_with(c_readonly_string)] pathname: Box<str>,
+    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
     flags: u32,
     mode: u32,
 ) -> Result<u64, SysError> {
