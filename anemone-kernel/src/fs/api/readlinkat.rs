@@ -64,5 +64,5 @@ fn sys_readlinkat(
     // silently truncate. this is what Linux does.
     buf.write_bytes_with_null_terminator(&content[..to_write]);
 
-    Ok(to_write as u64 + 1)
+    Ok(to_write as u64)
 }

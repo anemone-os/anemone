@@ -261,6 +261,7 @@ fn resolve_components(
                     kdebugln!("prevent escaping logical root via '..'");
                     continue;
                 }
+                cur_path = walk_parent(&cur_path);
             },
             PendingComponent::Normal(name) => {
                 let child = lookup_child(&cur_path, &name)?;
