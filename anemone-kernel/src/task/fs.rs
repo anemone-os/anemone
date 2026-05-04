@@ -63,7 +63,7 @@ impl FsState {
     /// Currently this implementation is the same as default `clone`. But it's
     /// still necessary to have a separate function to emphasize the semantic of
     /// this operation.
-    pub fn create_copy(&self) -> Self {
+    pub fn fork(&self) -> Self {
         match self {
             Self::Hanging => Self::Hanging,
             Self::Ready { root, cwd } => Self::Ready {

@@ -17,13 +17,19 @@ struct RunningFlow {
 
 /// use raw monotonic time to avoid precision loss.
 #[derive(Debug, Clone, Copy)]
-pub struct CpuUsage {
+pub struct TaskCpuUsage {
+    user: u64,
+    kernel: u64,
+    running_flow: Option<RunningFlow>,
+}
+
+/// Thread-group level cpu usage.
+#[derive(Debug, Clone, Copy)]
+pub struct ThreadGroupCpuUsage {
     self_user: u64,
     self_kernel: u64,
     reaped_user: u64,
     reaped_kernel: u64,
-
-    running_flow: Option<RunningFlow>,
 }
 
 macro_rules! gen_cpu_usage_getter {
@@ -41,19 +47,17 @@ macro_rules! gen_cpu_usage_getter {
     };
 }
 
-impl CpuUsage {
+impl TaskCpuUsage {
     pub const ZERO: Self = Self {
-        self_user: 0,
-        self_kernel: 0,
-        reaped_user: 0,
-        reaped_kernel: 0,
+        user: 0,
+        kernel: 0,
         running_flow: None,
     };
 
-    gen_cpu_usage_getter!(self_user, self_kernel, reaped_user, reaped_kernel,);
+    gen_cpu_usage_getter!(user, kernel,);
 }
 
-impl CpuUsage {
+impl TaskCpuUsage {
     /// Settle current running flow, i.e. add the elapsed time since last switch
     /// to the corresponding self cpu usage.
     ///
@@ -71,8 +75,8 @@ impl CpuUsage {
 
         let delta = now - running_flow.running_since;
         match running_flow.prv {
-            Privilege::User => self.self_user += delta,
-            Privilege::Kernel => self.self_kernel += delta,
+            Privilege::User => self.user += delta,
+            Privilege::Kernel => self.kernel += delta,
         }
         running_flow.running_since = now;
 
@@ -117,17 +121,10 @@ impl CpuUsage {
         }
         running_flow.prv = to;
     }
-
-    /// Called when a child task is reaped. The `other` cpu usage is added to
-    /// this task's reaped cpu usage.
-    fn on_reap(&mut self, other: &CpuUsage) {
-        self.reaped_user += other.self_user + other.reaped_user;
-        self.reaped_kernel += other.self_kernel + other.reaped_kernel;
-    }
 }
 
 impl Task {
-    pub fn cpu_usage_snapshot(&self) -> CpuUsage {
+    pub fn cpu_usage_snapshot(&self) -> TaskCpuUsage {
         let cpu_usage = self.cpu_usage.read_irqsave();
         let mut snapshot = *cpu_usage;
         if snapshot.running_flow.is_some() {
@@ -148,9 +145,61 @@ impl Task {
     pub fn on_prv_change(&self, to: Privilege) {
         self.cpu_usage.write_irqsave().on_prv_change(to);
     }
+}
 
-    pub fn on_reap_child(&self, child: &Task) {
+impl ThreadGroupCpuUsage {
+    pub const ZERO: Self = Self {
+        self_user: 0,
+        self_kernel: 0,
+        reaped_user: 0,
+        reaped_kernel: 0,
+    };
+
+    gen_cpu_usage_getter!(self_user, self_kernel, reaped_user, reaped_kernel,);
+
+    /// Called when a child thread group is reaped, to add the cpu usage of the
+    /// child to self reaped cpu usage.
+    fn on_reap(&mut self, child: &ThreadGroupCpuUsage) {
+        self.reaped_user += child.self_user + child.reaped_user;
+        self.reaped_kernel += child.self_kernel + child.reaped_kernel;
+    }
+
+    fn accumulate_member_usage(&mut self, member: &TaskCpuUsage) {
+        self.self_user += member.user;
+        self.self_kernel += member.kernel;
+    }
+}
+
+impl ThreadGroup {
+    pub fn cpu_usage_snapshot(&self) -> ThreadGroupCpuUsage {
+        let mut snapshot = self.inner.read_irqsave().cpu_usage;
+
+        self.for_each_member(|member| {
+            let member_cpu_usage = member.cpu_usage_snapshot();
+            snapshot.accumulate_member_usage(&member_cpu_usage);
+        });
+
+        snapshot
+    }
+
+    pub fn on_reap(&self, child: &ThreadGroup) {
         let child_cpu_usage = child.cpu_usage_snapshot();
-        self.cpu_usage.write_irqsave().on_reap(&child_cpu_usage);
+        // self.cpu_usage.write_irqsave().on_reap(&child_cpu_usage);
+        self.inner
+            .write_irqsave()
+            .cpu_usage
+            .on_reap(&child_cpu_usage);
+    }
+
+    /// Accumulate the cpu usage of a member task to thread group cpu usage.
+    ///
+    /// Called when a member task is detached from this thread group.
+    ///
+    /// Panics if the given task is not a member of this thread group.
+    pub fn accumulate_member_usage(&self, member: &Task) {
+        let member_cpu_usage = member.cpu_usage_snapshot();
+        let mut inner = self.inner.write_irqsave();
+        assert!(inner.members.contains(&member.tid()));
+        inner.cpu_usage.accumulate_member_usage(&member_cpu_usage);
     }
 }

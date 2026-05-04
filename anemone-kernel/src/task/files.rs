@@ -264,7 +264,7 @@ impl FilesState {
         Ok(())
     }
 
-    pub fn create_copy(&self) -> Self {
+    pub fn fork(&self) -> Self {
         let mut new = Self::new();
         new.next_fd = self.next_fd;
         new.recycled_fds = self.recycled_fds.clone();

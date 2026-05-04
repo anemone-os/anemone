@@ -88,6 +88,12 @@ impl<T: ?Sized> SpinLock<T> {
     }
 }
 
+impl<T> SpinLock<T> {
+    pub fn into_inner(self) -> T {
+        self.lock.into_inner()
+    }
+}
+
 impl<T: ?Sized> Deref for NoPreemptGuard<'_, T> {
     type Target = T;
 

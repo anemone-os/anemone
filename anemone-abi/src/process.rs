@@ -107,6 +107,10 @@ pub mod linux {
 
         pub const CLONE_IO: u64 = 1 << 31;
 
+        pub const CLONE_CLEAR_SIGHAND: u64 = 1 << 32;
+
+        pub const CLONE_INTO_CGROUP: u64 = 1 << 33;
+
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         #[repr(C)]
         pub struct CloneArgs {

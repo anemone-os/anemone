@@ -3,7 +3,7 @@ build
 **/rustc-ice-*
 **/.gdb_history
 kconfig
-rootfsconfig
+rootfsconfig*
 etc
 disk.img
 .DS_Store
