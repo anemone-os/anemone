@@ -74,21 +74,8 @@ pub fn main() -> Result<(), Errno> {
         },
         None => {
             // child
-            println!("init: in child process, tid: {}", tidc);
-
-            //mount(Some(Path::new("/dev")), target, fstype)
-            mount(None, Path::new("/dev"), "devfs").expect("init: failed to mount devfs on /dev");
-            mount(Some(Path::new("/dev/vdb")), Path::new("/mnt"), "ext4")
-                .expect("init: failed to mount /dev/vdb on /mnt");
-
-            chdir("/mnt").expect("init: failed to change directory to /mnt");
-            chroot("/mnt").expect("init: failed to chroot to /mnt");
-
-            // all done.
-
-            chdir("/glibc/basic").expect("init: failed to change directory to /glibc/basic");
-            execve("./run-all.sh", &[], &["PATH=/glibc/lib"]).expect("init: failed to execve");
-
+            execve("/bin/user-test", &["user-test"], &[])
+                .expect("init: failed to execve user-test");
             unreachable!();
         },
     }

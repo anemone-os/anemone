@@ -1,5 +1,6 @@
 pub mod fs {
     use alloc::ffi::CString;
+    use anemone_abi::fs::linux::stat::Stat;
 
     use crate::{prelude::*, sys::linux::fs};
 
@@ -45,6 +46,24 @@ pub mod fs {
             mode as u64,
         )
         .map(|fd| fd as Fd)
+    }
+
+    /// flags are currently not supported.
+    pub fn fstatat(dirfd: AtFd, path: &Path) -> Result<Stat, Errno> {
+        let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+        let mut statbuf = Stat::default();
+        fs::newfstatat(
+            dirfd.to_raw() as u64,
+            path.as_ptr() as u64,
+            &mut statbuf as *mut Stat as u64,
+            0,
+        )
+        .map(|_| statbuf)
+    }
+
+    pub fn mkdirat(dirfd: AtFd, path: &Path, mode: u32) -> Result<(), Errno> {
+        let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+        fs::mkdirat(dirfd.to_raw() as u64, path.as_ptr() as u64, mode as u64).map(|_| ())
     }
 
     pub fn close(fd: Fd) -> Result<(), Errno> {

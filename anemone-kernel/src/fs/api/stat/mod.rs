@@ -69,7 +69,7 @@ pub fn kernel_fstatat(
             get_current_task().lookup_path(&path, resolve_flags)?
         } else {
             let dir_path = dirfd.to_pathref(true)?;
-            vfs_lookup_from(&dir_path, PathResolution::new(path, resolve_flags))?
+            get_current_task().lookup_path_from(&dir_path, &path, resolve_flags)?
         }
     };
 

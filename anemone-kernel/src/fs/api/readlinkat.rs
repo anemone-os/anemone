@@ -40,13 +40,19 @@ fn sys_readlinkat(
         return Err(SysError::NotYetImplemented);
     }
 
-    let content = if path.is_absolute() {
-        let path = get_current_task().make_global_path(path);
-        vfs_read_link(&path)?
+    let task = get_current_task();
+    let pathref = if path.is_absolute() {
+        task.lookup_path(path, ResolveFlags::UNFOLLOW_LAST_SYMLINK)?
     } else {
         let dir_path = dirfd.to_pathref(true)?;
-        vfs_read_link_at(&dir_path, &path)?
+        task.lookup_path_from(&dir_path, &path, ResolveFlags::UNFOLLOW_LAST_SYMLINK)?
     };
+
+    let inode = pathref.inode();
+    if inode.ty() != InodeType::Symlink {
+        return Err(SysError::NotSymlink);
+    }
+    let content = inode.read_link()?;
 
     kdebugln!("readlinkat: content={}", content.display());
 
@@ -56,7 +62,7 @@ fn sys_readlinkat(
     let content = content.as_bytes();
     let to_write = content.len().min(bufsize);
     // silently truncate. this is what Linux does.
-    buf.copy_from_slice(&content[..to_write]);
+    buf.write_bytes_with_null_terminator(&content[..to_write]);
 
-    Ok(0)
+    Ok(to_write as u64 + 1)
 }

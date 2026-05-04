@@ -2,115 +2,106 @@
 #![no_main]
 #![warn(unused)]
 
-use core::ptr::null_mut;
-
 use anemone_rs::{
-    env::{current_dir, envs},
     os::linux::{
-        fs::chdir,
-        process::{CloneFlags, WStatus, WStatusRaw, WaitOptions, clone, execve, wait4},
+        fs::{chdir, chroot, fstatat, mkdirat, mount, AtFd},
+        process::{execve, fork, wait4, WStatusRaw, WaitFor, WaitOptions},
     },
     prelude::*,
 };
+fn run_cmd(cmd: &str) {
+    match fork().expect("user-test: failed to fork") {
+        Some(tid) => {
+            // parent. wait for child to exit.
+            let mut wstatus = WStatusRaw::EMPTY;
+            match wait4(
+                WaitFor::ChildWithTgid(tid),
+                Some(&mut wstatus),
+                WaitOptions::empty(),
+            )
+            .expect("user-test: failed to wait4")
+            {
+                Some(tid) => {
+                    println!(
+                        "user-test: child task #{} exited with code {:?}",
+                        tid,
+                        wstatus.read()
+                    )
+                },
+                None => {
+                    panic!("user-test: wait4 returned None unexpectedly");
+                },
+            }
+        },
+        None => {
+            execve(
+                "/glibc/busybox",
+                &["busybox", "sh", "-c", cmd],
+                &["PATH=/:/bin:/lib", "LD_LIBRARY_PATH=/lib"],
+            )
+            .expect("user-test: failed to execve");
+        },
+    }
+}
 
-//static TEST_POINTS: &[&str] = &["wait", "waitpid", "uname"];
+fn init_environment() {
+    mount(None, Path::new("/dev"), "devfs").expect("user-test: failed to mount devfs on /dev");
+    mount(Some(Path::new("/dev/vdb")), Path::new("/mnt"), "ext4")
+        .expect("user-test: failed to mount /dev/vdb on /mnt with ext4");
 
-static BASIC_TESTS: &[&str] = &[
-    "brk",
-    "chdir",
-    "clone",
-    "close",
-    "dup",
-    "dup2",
-    "execve",
-    "exit",
-    "fork",
-    "fstat",
-    "getcwd",
-    "getdents",
-    "getpid",
-    "getppid",
-    "gettimeofday",
-    "mkdir_",
-    "mmap",
-    "mount",
-    "munmap",
-    "open",
-    "openat",
-    "pipe",
-    "read",
-    "sleep",
-    "times",
-    "umount",
-    "uname",
-    "unlink",
-    "wait",
-    "waitpid",
-    "write",
-    "yield",
-];
+    chroot("/mnt").expect("user-test: failed to chroot to /mnt");
+    chdir("/").expect("user-test: failed to change directory to / after chroot");
+
+    // now we should mount devfs again, for this new root.
+    let stat = fstatat(AtFd::Cwd, Path::new("dev"));
+    if stat.is_err() {
+        mkdirat(AtFd::Cwd, Path::new("dev"), 0o755)
+            .expect("user-test: failed to create /dev directory");
+    }
+    mount(None, Path::new("/dev"), "devfs").expect("user-test: failed to mount devfs on /dev");
+
+    let stat = fstatat(AtFd::Cwd, Path::new("tmp"));
+    if stat.is_err() {
+        mkdirat(AtFd::Cwd, Path::new("tmp"), 0o755)
+            .expect("user-test: failed to create /tmp directory");
+    }
+    mount(None, Path::new("/tmp"), "ramfs").expect("user-test: failed to mount ramfs on /tmp");
+
+    // TODO: procfs, sysfs, etc.
+
+    // install busybox
+    let stat = fstatat(AtFd::Cwd, Path::new("/bin"));
+    if stat.is_err() {
+        mkdirat(AtFd::Cwd, Path::new("/bin"), 0o755)
+            .expect("user-test: failed to create /bin directory");
+
+        run_cmd("/glibc/busybox --install -s /bin");
+    }
+
+    // cp lib to /
+    let stat = fstatat(AtFd::Cwd, Path::new("/lib"));
+    if stat.is_err() {
+        mkdirat(AtFd::Cwd, Path::new("/lib"), 0o755)
+            .expect("user-test: failed to create /lib directory");
+
+        run_cmd("/bin/cp -r /glibc/lib /");
+    }
+
+    // done.
+}
 
 #[anemone_rs::main]
 pub fn main() -> Result<(), Errno> {
-    chdir("basic").unwrap();
-    let cwd = current_dir()?;
-    println!("user-test: current working directory: {}", cwd.display());
-    for (key, valud) in envs() {
-        println!("user-test: env {}={}", key, valud);
-    }
+    init_environment();
 
-    let mut failed: Vec<Box<str>> = Vec::new();
+    println!("user-test: environment initialized.");
 
-    for p in BASIC_TESTS {
-        let mut tidc = 0;
-        let tid = clone(
-            CloneFlags::CLONE_CHILD_SETTID,
-            None,
-            None,
-            null_mut(),
-            Some(&mut tidc),
-        )
-        .unwrap();
-        if tid == 0 {
-            println!("user-test: test point '{}'", p);
-            execve(&format!("{}", p), &[&format!("{}", p)], &[])
-                .expect("failed to execve test point");
-            unreachable!();
-        } else {
-            println!("user-test: test point '{}' started with pid {}", p, tid);
+    // 1. basic tests
+    println!("user-test: running basic tests...");
+    chdir("/glibc/basic").expect("user-test: failed to change directory to /glibc/basic");
+    run_cmd("./run-all.sh");
+    chdir("..").expect("user-test: failed to change directory to /glibc after basic tests");
+    println!("user-test: basic tests passed.");
 
-            let mut wstatus = WStatusRaw::EMPTY;
-            match wait4(tid as i64, Some(&mut wstatus), WaitOptions::empty()) {
-                Ok(Some(_)) => {
-                    let code = wstatus.read();
-                    println!("user-test: test point '{}' exited with code {:?}", p, code);
-                    if let WStatus::Exited(0) = code {
-                    } else {
-                        failed.push(Box::from(*p));
-                    }
-                },
-                Ok(None) => {
-                    panic!("user-test: wait4 returned None but no error, this should not happen");
-                },
-                Err(e) => {
-                    eprintln!("user-test: failed to wait for test point '{}': {}", p, e);
-                },
-            }
-        }
-    }
-
-    eprintln!("user-test: all test points finished!");
-    if failed.len() > 0 {
-        eprint!("{} test pointes failed: ", failed.len());
-        for f in failed {
-            eprint!("{},", f);
-        }
-        eprintln!("");
-    }
-
-    // clone(CloneFlags::empty(), None, None, null_mut(), None)?;
-    // for i in 0..20 {
-    //     println!("Hello from user task #{}:{}!", getpid().unwrap(), i);
-    // }
-    Ok(())
+    loop {}
 }

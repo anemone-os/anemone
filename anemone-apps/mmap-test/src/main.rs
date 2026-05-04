@@ -9,8 +9,8 @@ use core::{
 
 use anemone_rs::{
     os::linux::process::{
-        self, CloneFlags, MmapFlags, MmapProt, WStatus, WStatusRaw, WaitOptions, clone, getpid,
-        mmap, mprotect, munmap, wait4,
+        self, CloneFlags, MmapFlags, MmapProt, WStatus, WStatusRaw, WaitFor, WaitOptions, clone,
+        getpid, mmap, mprotect, munmap, wait4,
     },
     prelude::*,
 };
@@ -93,17 +93,22 @@ fn expect_errno<T>(result: Result<T, Errno>, expected: Errno, what: &str) {
 fn fork_like() -> Result<u32, Errno> {
     let mut child_tid = 0;
     clone(
-        CloneFlags::CLONE_CHILD_SETTID,
+        CloneFlags::CHILD_SETTID,
         None,
         None,
         null_mut(),
         Some(&mut child_tid),
     )
+    .map(|_| child_tid as u32)
 }
 
 fn wait_child_exit_ok(pid: u32, name: &str) -> Result<(), Errno> {
     let mut wstatus = WStatusRaw::EMPTY;
-    match wait4(pid as i64, Some(&mut wstatus), WaitOptions::empty())? {
+    match wait4(
+        WaitFor::ChildWithTgid(pid),
+        Some(&mut wstatus),
+        WaitOptions::empty(),
+    )? {
         Some(waited) => {
             assert_eq!(waited, pid, "{name}: waited pid mismatch");
             match wstatus.read() {

@@ -32,7 +32,10 @@ pub use self::{
         InodeType, OpenedFile,
     },
     mount::{Mount, MountFlags, MountSource},
-    namei::{ResolveFlags, resolve, resolve_from},
+    namei::{
+        ResolveFlags, resolve, resolve_from, resolve_from_with_root, resolve_parent,
+        resolve_parent_from, resolve_parent_from_with_root,
+    },
     path::PathRef,
     superblock::SuperBlock,
 };
@@ -378,6 +381,10 @@ impl<'a> PathResolution<'a> {
     }
 }
 
+/// These operations target the global filesystem state.
+///
+/// Comsumers are always kernel threads. User threads use [Task::lookup_path]
+/// and so on to access the filesystem.
 mod vfs_ops {
     use crate::{
         fs::{
@@ -387,7 +394,6 @@ mod vfs_ops {
         prelude::*,
     };
 
-    /// These operations target the visible namespace.
     mod primitives {
         use crate::fs::namei::resolve_parent_from;
 
@@ -670,7 +676,7 @@ mod kunits {
     use anemone_abi::fs::linux::mode as linux_mode;
 
     use super::*;
-    use crate::prelude::*;
+    use crate::{fs::namei::resolve_from_with_root, prelude::*};
 
     #[kunit]
     fn test_vfs_root_lookup() {
@@ -929,6 +935,66 @@ mod kunits {
         vfs_unmount(mountpoint).unwrap();
         vfs_unlink(host_target).unwrap();
         vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_resolve_from_root_uses_logical_root_for_absolute_symlinks() {
+        let root_dir = Path::new("/kunit-vfs-chroot-root");
+        let bin_dir = Path::new("/kunit-vfs-chroot-root/bin");
+        let glibc_dir = Path::new("/kunit-vfs-chroot-root/glibc");
+        let busybox_path = Path::new("/kunit-vfs-chroot-root/glibc/busybox");
+        let sh_path = Path::new("/kunit-vfs-chroot-root/bin/sh");
+
+        vfs_mkdir(root_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(bin_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(glibc_dir, InodePerm::all_rwx()).unwrap();
+        let busybox = vfs_touch(busybox_path, InodePerm::all_rwx()).unwrap();
+        vfs_symlink(Path::new("/glibc/busybox"), sh_path).unwrap();
+
+        let logical_root = vfs_lookup(root_dir).unwrap();
+        let resolved = resolve_from_with_root(
+            &logical_root,
+            &logical_root,
+            Path::new("/bin/sh"),
+            ResolveFlags::empty(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved.inode(), busybox.inode());
+
+        vfs_unlink(sh_path).unwrap();
+        vfs_unlink(busybox_path).unwrap();
+        vfs_rmdir(glibc_dir).unwrap();
+        vfs_rmdir(bin_dir).unwrap();
+        vfs_rmdir(root_dir).unwrap();
+    }
+
+    #[kunit]
+    fn test_resolve_from_root_clamps_parent_traversal_at_logical_root() {
+        let root_dir = Path::new("/kunit-vfs-chroot-parent-root");
+        let inner_target =
+            Path::new("/kunit-vfs-chroot-parent-root/kunit-vfs-chroot-parent-target");
+        let outer_target = Path::new("/kunit-vfs-chroot-parent-target");
+
+        vfs_mkdir(root_dir, InodePerm::all_rwx()).unwrap();
+        let inner = vfs_touch(inner_target, InodePerm::all_rwx()).unwrap();
+        let outer = vfs_touch(outer_target, InodePerm::all_rwx()).unwrap();
+
+        let logical_root = vfs_lookup(root_dir).unwrap();
+        let resolved = resolve_from_with_root(
+            &logical_root,
+            &logical_root,
+            Path::new("../kunit-vfs-chroot-parent-target"),
+            ResolveFlags::empty(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved.inode(), inner.inode());
+        assert_ne!(resolved.inode(), outer.inode());
+
+        vfs_unlink(inner_target).unwrap();
+        vfs_unlink(outer_target).unwrap();
+        vfs_rmdir(root_dir).unwrap();
     }
 
     #[kunit]

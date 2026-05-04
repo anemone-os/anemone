@@ -12,10 +12,10 @@ pub enum FsState {
 }
 
 impl FsState {
-    /// Create a hanging FsState, which is used for kernel threads that do not
+    /// Create a hanging [FsState], which is used for kernel threads that do not
     /// have a filesystem context.
     ///
-    /// All operations on a hanging FsState will panic, so it should only be
+    /// All operations on a hanging [FsState] will panic, so it should only be
     /// used for kernel threads that do not perform any filesystem operations.
     pub fn new_hanging() -> Self {
         Self::Hanging
@@ -118,17 +118,45 @@ impl Task {
     /// Lookup a path in this task's filesystem context.
     pub fn lookup_path(&self, path: &Path, flags: ResolveFlags) -> Result<PathRef, SysError> {
         let fs_state = self.fs_state.read();
-        if path.is_absolute() {
-            let rel_path = path.strip_prefix("/").unwrap();
-            debug_assert!(!rel_path.is_absolute());
-            if rel_path.as_bytes().is_empty() {
-                Ok(fs_state.root().clone())
-            } else {
-                vfs_lookup_from(fs_state.root(), PathResolution::new(rel_path, flags))
-            }
-        } else {
-            vfs_lookup_from(fs_state.cwd(), PathResolution::new(path, flags))
-        }
+        resolve_from_with_root(fs_state.root(), fs_state.cwd(), path, flags)
+    }
+
+    /// Lookup a path in this task's filesystem context, relative to an
+    /// explicitly provided starting directory.
+    pub fn lookup_path_from(
+        &self,
+        from: &PathRef,
+        path: &Path,
+        flags: ResolveFlags,
+    ) -> Result<PathRef, SysError> {
+        let fs_state = self.fs_state.read();
+        resolve_from_with_root(fs_state.root(), from, path, flags)
+    }
+
+    /// Lookup the parent directory of a path in this task's filesystem context,
+    /// and return the parent directory and the final component separately.
+    ///
+    /// flags will be applied to parent directory lookup, but not the final
+    /// component, since final component may not exist and we're to create it.
+    pub fn lookup_parent_path(
+        &self,
+        path: &Path,
+        flags: ResolveFlags,
+    ) -> Result<(PathRef, String), SysError> {
+        let fs_state = self.fs_state.read();
+        resolve_parent_from_with_root(fs_state.root(), fs_state.cwd(), path, flags)
+    }
+
+    /// Lookup the parent directory of a path in this task's filesystem context,
+    /// relative to an explicitly provided starting directory.
+    pub fn lookup_parent_path_from(
+        &self,
+        from: &PathRef,
+        path: &Path,
+        flags: ResolveFlags,
+    ) -> Result<(PathRef, String), SysError> {
+        let fs_state = self.fs_state.read();
+        resolve_parent_from_with_root(fs_state.root(), from, path, flags)
     }
 
     /// Get the current working directory of this task, relative to its root.

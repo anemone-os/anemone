@@ -78,4 +78,29 @@ impl PathRef {
         components.reverse();
         PathBuf::from_iter(components)
     }
+
+    /// TODO: should we implement [Eq] trait for [PathRef]?
+    ///
+    /// If our dentry model is working correctly, this should be sufficient...?
+    pub fn location_eq(&self, other: &PathRef) -> bool {
+        // Arc::ptr_eq(self.mount(), other.mount()) && Arc::ptr_eq(self.dentry(),
+        // other.dentry())
+        let eq = Arc::ptr_eq(&self.dentry, &other.dentry);
+        if !eq {
+            return false;
+        }
+        // this should hold if the dentry is the same, but let's be safe and check it
+        // anyway.
+        debug_assert!(Arc::ptr_eq(&self.mount, &other.mount));
+        true
+    }
+}
+
+impl PathRef {
+    pub fn open(&self) -> Result<File, SysError> {
+        let inode = self.inode();
+        let OpenedFile { file_ops, prv } = inode.open()?;
+
+        Ok(File::new(self.clone(), file_ops, prv))
+    }
 }

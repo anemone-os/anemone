@@ -165,6 +165,11 @@ impl InodePerm {
         // here.
         Self::from_bits(bits as u16)
     }
+
+    /// This will truncate those invalid bits or unsupported bits.
+    pub const fn from_linux_bits_truncate(bits: u32) -> Self {
+        Self::from_bits_truncate(bits as u16)
+    }
 }
 
 /// Device number for inodes' underlying device.

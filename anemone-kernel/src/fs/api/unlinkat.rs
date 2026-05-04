@@ -38,21 +38,20 @@ fn unlinkat(
     flags: UnlinkAtFlags,
 ) -> Result<u64, SysError> {
     let path = Path::new(pathname.as_ref());
-    if path.is_absolute() {
-        let path = get_current_task().make_global_path(&Path::new(pathname.as_ref()));
-        if flags.remove_dir {
-            vfs_rmdir(&path)?;
-        } else {
-            vfs_unlink(&path)?;
-        }
+    let task = get_current_task();
+
+    let (parent, name) = if path.is_absolute() {
+        task.lookup_parent_path(&path, ResolveFlags::empty())?
     } else {
         let dir_path = dirfd.to_pathref(true)?;
+        task.lookup_parent_path_from(&dir_path, &path, ResolveFlags::empty())?
+    };
 
-        if flags.remove_dir {
-            vfs_rmdir_at(&dir_path, &path)?;
-        } else {
-            vfs_unlink_at(&dir_path, &path)?;
-        }
+    let leaf = Path::new(name.as_str());
+    if flags.remove_dir {
+        vfs_rmdir_at(&parent, leaf)?;
+    } else {
+        vfs_unlink_at(&parent, leaf)?;
     }
 
     Ok(0)
