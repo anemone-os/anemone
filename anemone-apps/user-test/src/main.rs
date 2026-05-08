@@ -4,8 +4,8 @@
 
 use anemone_rs::{
     os::linux::{
-        fs::{AtFd, chdir, chroot, fstatat, mkdirat, mount},
-        process::{WStatusRaw, WaitFor, WaitOptions, execve, fork, wait4},
+        fs::{chdir, chroot, fstatat, mkdirat, mount, AtFd},
+        process::{execve, fork, wait4, WStatusRaw, WaitFor, WaitOptions},
     },
     prelude::*,
 };
@@ -156,8 +156,6 @@ fn run_comp_tests() {
 
 #[anemone_rs::main]
 pub fn main() -> Result<(), Errno> {
-    println!("user-test: environment initialized.");
-
     run_local_tests();
 
     // run_comp_tests();

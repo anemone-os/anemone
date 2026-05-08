@@ -92,9 +92,9 @@ pub fn kernel_exit(code: ExitCode) -> ! {
 
             let cpu_usage = tg.cpu_usage_snapshot();
 
-            if let Some(termiate_signal) = tg.terminate_signal() {
+            if let Some(terminate_signal) = tg.terminate_signal() {
                 tg.get_parent().recv_signal(Signal::new(
-                    termiate_signal,
+                    terminate_signal,
                     SiCode::Kernel,
                     SigInfoFields::Chld(SigChld {
                         pid: tg.tgid(),

@@ -101,7 +101,7 @@ impl TryFromSyscallArg for SigNo {
 }
 
 /// A sent/sending signal.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Signal {
     /// Signal number.
     no: SigNo,
@@ -192,7 +192,8 @@ impl PendingSignals {
             self.realtime[rt_idx].push_back(signal);
         } else {
             debug_assert!(signal.no.is_unreliable());
-            self.unreliable[signal.no.as_usize()] = Some(signal);
+            let no = signal.no.as_usize();
+            self.unreliable[no] = Some(signal);
         }
     }
 
@@ -237,10 +238,10 @@ impl PendingSignals {
     /// TODO: fetch_any_with() for custom order.
     pub fn fetch_any(&mut self, mask: &SigSet) -> Option<Signal> {
         // fatal signals first.
-        if let Some(kill) = self.unreliable[SigNo::SIGKILL.as_usize()] {
+        if let Some(kill) = self.unreliable[SigNo::SIGKILL.as_usize()].take() {
             return Some(kill);
         }
-        if let Some(stop) = self.unreliable[SigNo::SIGSTOP.as_usize()] {
+        if let Some(stop) = self.unreliable[SigNo::SIGSTOP.as_usize()].take() {
             return Some(stop);
         }
 
@@ -262,7 +263,7 @@ impl PendingSignals {
             if mask.get(no) {
                 continue;
             }
-            if let Some(signal) = self.unreliable[no.as_usize()] {
+            if let Some(signal) = self.unreliable[no.as_usize()].take() {
                 self.unreliable[no.as_usize()] = None;
                 return Some(signal);
             }
@@ -329,26 +330,23 @@ impl Task {
     /// If the disposition of the signal satisfies [SignalAction::is_ignored],
     /// the signal won't be delivered, even if it is unmasked.
     pub fn recv_signal(self: &Arc<Self>, signal: Signal) {
-        let disp = self.sig_disposition.read().get_disposition(signal.no);
+        let no = signal.no;
+
+        let disp = self.sig_disposition.read().get_disposition(no);
         if disp.action.is_ignored() {
-            kdebugln!(
-                "signal {:?} is ignored by the task, not notifying",
-                signal.no
-            );
+            kdebugln!("signal {:?} is ignored by the task, not notifying", no);
             return;
         }
 
         self.sig_pending.lock().push_signal(signal);
 
-        if self.sig_mask.lock().get(signal.no)
-            && !matches!(signal.no, SigNo::SIGKILL | SigNo::SIGSTOP)
-        {
+        if self.sig_mask.lock().get(no) && !matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
             // signal masked. nothing to do now, just wait for the task to
             // unmask it.
         } else {
             notify(
                 self,
-                if matches!(signal.no, SigNo::SIGKILL | SigNo::SIGSTOP) {
+                if matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
                     true
                 } else {
                     false
@@ -393,6 +391,7 @@ impl ThreadGroup {
     /// Internally, this pushes the signal to shared pending signals, marks
     /// all member threads as having pending signals, and notify them.
     pub fn recv_signal(&self, signal: Signal) {
+        let no = signal.no;
         {
             let mut inner = self.inner.write();
             inner.sig_pending.lock().push_signal(signal);
@@ -400,7 +399,7 @@ impl ThreadGroup {
         self.for_each_member(|member| {
             notify(
                 member,
-                if matches!(signal.no, SigNo::SIGKILL | SigNo::SIGSTOP) {
+                if matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
                     true
                 } else {
                     false
@@ -435,15 +434,16 @@ pub fn handle_signals(trapframe: &mut TrapFrame) {
 fn perform_signal_action(signal: Signal, trapframe: &mut TrapFrame) -> bool {
     let mut is_user = false;
 
+    let no = signal.no;
     let task = get_current_task();
     let KSigAction {
         action,
         flags,
         mask,
-    } = task.sig_disposition.read().get_disposition(signal.no);
+    } = task.sig_disposition.read().get_disposition(no);
 
     match action {
-        SignalAction::Default(default) => default(signal.no),
+        SignalAction::Default(default) => default(no),
         SignalAction::Ignore => {
             // do nothing.
         },
@@ -457,7 +457,7 @@ fn perform_signal_action(signal: Signal, trapframe: &mut TrapFrame) -> bool {
                 let prev_mask = *sig_mask;
                 sig_mask.union_with(&mask);
                 if !flags.contains(SaFlags::NODEFER) {
-                    sig_mask.set(signal.no);
+                    sig_mask.set(no);
                 }
                 prev_mask
             };
@@ -534,7 +534,7 @@ fn perform_signal_action(signal: Signal, trapframe: &mut TrapFrame) -> bool {
             // we're done. finally prepare the trapframe.
             SignalArch::prepare_trapframe_for_signal_handler(
                 trapframe,
-                signal.no,
+                no,
                 handler_addr,
                 sigframe_base,
             );
@@ -544,7 +544,7 @@ fn perform_signal_action(signal: Signal, trapframe: &mut TrapFrame) -> bool {
     }
 
     if flags.contains(SaFlags::ONESHOT) {
-        task.sig_disposition.write().set_to_default(signal.no);
+        task.sig_disposition.write().set_to_default(no);
     }
 
     is_user

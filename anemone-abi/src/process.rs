@@ -313,8 +313,8 @@ pub mod linux {
             }
 
             impl SigVal {
-                pub const fn as_u64(self) -> u64 {
-                    unsafe { self.sival_int as u64 }
+                pub fn as_u64(self) -> u64 {
+                    unsafe { self.sival_ptr as u64 }
                 }
             }
 
