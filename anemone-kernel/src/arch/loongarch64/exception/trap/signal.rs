@@ -78,7 +78,7 @@ static __TRAMPOLINE_KEEPER: unsafe extern "C" fn() -> ! = __sys_rt_sigreturn;
 #[unsafe(link_section = ".text.trampoline")]
 unsafe extern "C" fn __sys_rt_sigreturn() -> ! {
     naked_asm!(
-        "lw.d $a7, {sysno}",
+        "li.d $a7, {sysno}",
         "syscall 0",
         sysno = const SYS_RT_SIGRETURN,
     )
