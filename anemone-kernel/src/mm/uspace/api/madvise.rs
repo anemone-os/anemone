@@ -3,7 +3,7 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/madvise.2.html
 
-use crate::prelude::{dt::user_addr, *};
+use crate::prelude::{user_access::user_addr, *};
 
 #[syscall(SYS_MADVISE)]
 fn sys_madvise(

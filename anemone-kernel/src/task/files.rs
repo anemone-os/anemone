@@ -40,10 +40,20 @@ pub struct ProcFile {
     flags: FileFlags,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FileDesc {
     pfile: Arc<ProcFile>,
-    flags: FdFlags,
+    // atomic integer may be better.
+    flags: SpinLock<FdFlags>,
+}
+
+impl Clone for FileDesc {
+    fn clone(&self) -> Self {
+        Self {
+            pfile: self.pfile.clone(),
+            flags: SpinLock::new(self.flags.lock().clone()),
+        }
+    }
 }
 
 // re-export FileOps here, with permission checked.
@@ -52,7 +62,10 @@ pub struct FileDesc {
 // the file itself.
 impl FileDesc {
     fn new(pfile: Arc<ProcFile>, flags: FdFlags) -> Self {
-        Self { pfile, flags }
+        Self {
+            pfile,
+            flags: SpinLock::new(flags),
+        }
     }
 
     pub fn vfs_file(&self) -> &File {
@@ -64,7 +77,11 @@ impl FileDesc {
     }
 
     pub fn fd_flags(&self) -> FdFlags {
-        self.flags
+        *self.flags.lock()
+    }
+
+    pub fn set_fd_flags(&self, flags: FdFlags) {
+        *self.flags.lock() = flags;
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
@@ -227,6 +244,32 @@ impl FilesState {
         Some(new_fd)
     }
 
+    /// Mainly for F_DUPFD and F_DUPFD_CLOEXEC, which require us to dup to a fd
+    /// number greater than or equal to a specified value.
+    pub fn dup_ge_than(&mut self, old_fd: Fd, min_new_fd: Fd, close_on_exec: bool) -> Option<Fd> {
+        let fd = self.get_fd(old_fd)?;
+
+        // we need to find the first available fd number which is greater than or equal
+        // to min_new_fd.
+        let mut new_fd = min_new_fd;
+        while self.fd_table.contains_key(&new_fd) {
+            new_fd = Fd::new(new_fd.raw() + 1)?;
+        }
+        self.fd_table.insert(
+            new_fd,
+            Arc::new(FileDesc::new(
+                fd.pfile.clone(),
+                if close_on_exec {
+                    FdFlags::CLOSE_ON_EXEC
+                } else {
+                    FdFlags::empty()
+                },
+            )),
+        );
+
+        Some(new_fd)
+    }
+
     /// Linux's semantics of dup3 is a bit weird, currently we implement a
     /// reasonable subset of it. If in the future we get stuck with
     /// compatibility issues, we'll implement the rest of it.
@@ -336,7 +379,7 @@ impl Task {
     ///
     /// This should only be used while the task is still uniquely owned, such
     /// as during task construction or clone setup.
-    pub(super) fn replace_files_state_handle(&mut self, files_state: Arc<RwLock<FilesState>>) {
+    pub fn replace_files_state_handle(&mut self, files_state: Arc<RwLock<FilesState>>) {
         self.files_state = files_state;
     }
 
@@ -348,6 +391,11 @@ impl Task {
     pub fn dup(&self, old_fd: Fd) -> Option<Fd> {
         let mut files_state = self.files_state.write();
         files_state.dup(old_fd)
+    }
+
+    pub fn dup_ge_than(&self, old_fd: Fd, min_new_fd: Fd, close_on_exec: bool) -> Option<Fd> {
+        let mut files_state = self.files_state.write();
+        files_state.dup_ge_than(old_fd, min_new_fd, close_on_exec)
     }
 
     pub fn dup3(&self, old_fd: Fd, new_fd: Fd, flags: FdFlags) -> Result<Fd, SysError> {

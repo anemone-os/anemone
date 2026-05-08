@@ -54,8 +54,11 @@ pub mod linux {
     pub const SYS_DUP: u64 = 23;
     pub const SYS_DUP3: u64 = 24;
 
+    pub const SYS_FCNTL: u64 = 25;
+
     pub const SYS_MKDIRAT: u64 = 34;
     pub const SYS_UNLINKAT: u64 = 35;
+    pub const SYS_SYMLINKAT: u64 = 36;
 
     pub const SYS_UMOUNT2: u64 = 39;
     pub const SYS_MOUNT: u64 = 40;
@@ -75,6 +78,7 @@ pub mod linux {
     pub const SYS_WRITE: u64 = 64;
     pub const SYS_WRITEV: u64 = 66;
 
+    pub const SYS_READLINKAT: u64 = 78;
     pub const SYS_NEWFSTATAT: u64 = 79;
     pub const SYS_FSTAT: u64 = 80;
 
@@ -87,6 +91,9 @@ pub mod linux {
 
     pub const SYS_SCHED_YIELD: u64 = 124;
 
+    pub const SYS_SETGID: u64 = 144;
+    pub const SYS_SETUID: u64 = 146;
+
     pub const SYS_TIMES: u64 = 153;
 
     pub const SYS_UNAME: u64 = 160;
@@ -95,6 +102,8 @@ pub mod linux {
 
     pub const SYS_GETPID: u64 = 172;
     pub const SYS_GETPPID: u64 = 173;
+    pub const SYS_GETUID: u64 = 174;
+    pub const SYS_GETGID: u64 = 176;
     pub const SYS_GETTID: u64 = 178;
 
     pub const SYS_BRK: u64 = 214;
@@ -107,6 +116,8 @@ pub mod linux {
     pub const SYS_MADVISE: u64 = 233;
 
     pub const SYS_WAIT4: u64 = 260;
+
+    pub const SYS_GETRANDOM: u64 = 278;
 
     pub const SYS_CLONE3: u64 = 435;
 

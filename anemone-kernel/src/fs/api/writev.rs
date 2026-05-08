@@ -3,19 +3,32 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/writev.2.html
 
-use core::{ops::DerefMut, ptr::null_mut};
+use core::ptr::null_mut;
 
 use anemone_abi::fs::linux::IoVec;
 
 use crate::{
-    prelude::{dt::UserReadPtr, *},
+    prelude::{
+        user_access::{UserReadSlice, user_addr},
+        *,
+    },
     task::files::Fd,
 };
 
+// TODO: make this a kconfig item.
+const MAX_IOVEC_CNT: usize = 1024;
+
 #[syscall(SYS_WRITEV)]
-fn sys_writev(fd: Fd, iov: UserReadPtr<IoVec>, iovcnt: usize) -> Result<u64, SysError> {
+fn sys_writev(
+    fd: Fd,
+    #[validate_with(user_addr)] iov: VirtAddr,
+    iovcnt: usize,
+) -> Result<u64, SysError> {
     if iovcnt == 0 {
         return Ok(0);
+    }
+    if iovcnt > MAX_IOVEC_CNT {
+        return Err(SysError::InvalidArgument);
     }
 
     let (file, uspace) = {
@@ -33,7 +46,11 @@ fn sys_writev(fd: Fd, iov: UserReadPtr<IoVec>, iovcnt: usize) -> Result<u64, Sys
         };
         iovcnt
     ];
-    iov.slice(iovcnt).safe_read(&mut iovecs)?;
+    {
+        let mut guard = uspace.write();
+        let ptr_slice = UserReadSlice::try_new(iov, iovcnt, &mut guard)?;
+        ptr_slice.copy_to_slice(&mut iovecs);
+    }
 
     let mut total = 0u64;
 
@@ -66,19 +83,13 @@ fn sys_writev(fd: Fd, iov: UserReadPtr<IoVec>, iovcnt: usize) -> Result<u64, Sys
 }
 
 fn copy_iovec_to_kernel(uspace: &UserSpace, iovec: IoVec) -> Result<Vec<u8>, SysError> {
-    let base = UserReadPtr::<u8>::from_raw(iovec.iov_base as u64)?;
-    let slice = base.slice(iovec.iov_len as usize);
+    let base_addr = user_addr(iovec.iov_base as u64)?;
+
+    let mut guard = uspace.write();
+    let slice = UserReadSlice::try_new(base_addr, iovec.iov_len as usize, &mut guard)?;
 
     let mut kbuf = vec![0u8; iovec.iov_len as usize];
-    let mut usp = uspace.write();
-    let ptr = unsafe { slice.validate_with(usp.deref_mut())? };
-
-    unsafe {
-        kbuf[..iovec.iov_len as usize].copy_from_slice(core::slice::from_raw_parts(
-            ptr.cast::<u8>(),
-            iovec.iov_len as usize,
-        ));
-    }
+    slice.copy_to_slice(&mut kbuf);
 
     Ok(kbuf)
 }

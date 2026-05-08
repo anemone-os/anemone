@@ -11,19 +11,14 @@ use anemone_abi::process::linux::clone;
 
 use crate::{
     prelude::{
-        dt::{UserWritePtr, user_addr},
-        handler::{TryFromSyscallArg, syscall_arg_flag32},
+        handler::{syscall_arg_flag32, TryFromSyscallArg},
+        user_access::{user_addr, UserWritePtr},
         *,
     },
     task::{cpu_usage::Privilege, tid::Tid},
 };
 
-// we don't wrap this type inside an `arg` module like other syscalls, since
-// these flags are not only used in syscall handlers, but used throughout the
-// task management system.
 bitflags! {
-    /// Yes... it's really tough to implement a Linux-agnostic compatibility layer that supports clone's semantics,
-    /// so we have no choice but to allow this bitflag to permeate our kernel codebase...sad.
     #[derive(Debug, Clone, Copy)]
     pub struct CloneFlags: u32 {
         /// Signal sent to parent when child process changes state (termination/stop)
@@ -164,8 +159,8 @@ pub fn kernel_clone(
     trap_frame: TrapFrame,
     new_sp: CloneStack,
     tls: VirtAddr,
-    parent_tid: Option<UserWritePtr<Tid>>,
-    child_tid: Option<UserWritePtr<Tid>>,
+    parent_tid: Option<VirtAddr>,
+    child_tid: Option<VirtAddr>,
 ) -> Result<Tid, SysError> {
     flags.validate()?;
 
@@ -205,7 +200,7 @@ pub fn kernel_clone(
             enter_cloned_user_task as *const (),
             ParameterList::new(&[
                 frame_ptr as u64,
-                child_tid.map_or(0, |ptr| ptr.addr()),
+                child_tid.map_or(0, |ptr| ptr.get()),
                 flags.bits() as u64,
             ]),
             Some(current_task.tid()),
@@ -258,8 +253,10 @@ pub fn kernel_clone(
     // remove this eager validation.
     if flags.intersects(CloneFlags::CHILD_CLEARTID | CloneFlags::CHILD_SETTID) {
         if let Some(child_tid) = child_tid {
-            match child_tid.validate_mut_with(&mut new_task.clone_uspace().write()) {
-                Ok(_ptr) => {},
+            let new_uspace = new_task.clone_uspace();
+            let mut usp_guard = new_uspace.write();
+            match UserWritePtr::<Tid>::try_new(child_tid, &mut usp_guard) {
+                Ok(mut uptr) => {},
                 Err(e) => {
                     let _ = unsafe { Box::from_raw(frame_ptr) };
                     unsafe { guard.forget() };
@@ -267,6 +264,7 @@ pub fn kernel_clone(
                     return Err(e);
                 },
             }
+
             // no map_err here, which will capture the guard into the closure,
             // thus following code can't access guard anymore.
         } else {
@@ -315,11 +313,15 @@ pub fn kernel_clone(
     if flags.contains(CloneFlags::PARENT_SETTID) {
         if let Some(parent_tid) = parent_tid {
             // again, map_err cannot be used here.
-            if let Err(e) = parent_tid.safe_write(new_tid) {
-                let _ = unsafe { Box::from_raw(frame_ptr) };
-                unsafe { guard.forget() };
-                defer_to_dispose(Arc::new(new_task));
-                return Err(e);
+            let mut usp_guard = cur_uspace.write();
+            match UserWritePtr::<Tid>::try_new(parent_tid, &mut usp_guard) {
+                Ok(mut uptr) => uptr.write(new_tid),
+                Err(e) => {
+                    let _ = unsafe { Box::from_raw(frame_ptr) };
+                    unsafe { guard.forget() };
+                    defer_to_dispose(Arc::new(new_task));
+                    return Err(e);
+                },
             }
         } else {
             // this is valid. it's user's responsibility to provide a valid pointer if they
@@ -341,11 +343,6 @@ pub fn kernel_clone(
             // some resoureces cannot be rolled back. but we'll try our best.
             let _ = unsafe { Box::from_raw(frame_ptr) };
 
-            // // now we don't support many resource rolling back. but we also don't want to
-            // // silently ignore them. if this panic occurs, it means it's time to
-            // implement // rolling back for those resources. for now we just
-            // leave the problem here. panic!("failed to publish cloned task:
-            // {:?}", e);
             return Err(e);
         },
     }

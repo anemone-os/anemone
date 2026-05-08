@@ -7,7 +7,10 @@
 
 use anemone_abi::time::linux::TimeSpec;
 
-use crate::prelude::{dt::UserReadPtr, *};
+use crate::prelude::{
+    user_access::{SyscallArgValidatorExt, UserReadPtr, user_addr},
+    *,
+};
 
 // see man 2 nanosleep for this.
 const TV_NSEC_MAX_INCLUSIVE: u64 = 999_999_999;
@@ -21,11 +24,14 @@ fn validate_time_spec(ts: &TimeSpec) -> Result<(), SysError> {
 
 #[syscall(SYS_NANOSLEEP)]
 fn sys_nanosleep(
-    duration: UserReadPtr<TimeSpec>,
+    #[validate_with(user_addr)] duration: VirtAddr,
     // currently unused, since we haven't implemented signal handling yet.
-    _rem: Option<UserReadPtr<TimeSpec>>,
+    #[validate_with(user_addr.nullable())] _rem: Option<VirtAddr>,
+    // _rem: Option<UserReadPtr<TimeSpec>>,
 ) -> Result<u64, SysError> {
-    let duration = duration.safe_read()?;
+    let usp = get_current_task().clone_uspace();
+    let mut guard = usp.write();
+    let duration = UserReadPtr::<TimeSpec>::try_new(duration, &mut guard)?.read();
 
     validate_time_spec(&duration)?;
     if duration.tv_nsec as u64 > TV_NSEC_MAX_INCLUSIVE {

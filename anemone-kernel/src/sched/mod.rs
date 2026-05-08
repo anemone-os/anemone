@@ -177,7 +177,7 @@ mod kore {
     }
 
     /// Whatever task's status is, try to wake it up. If the task is already
-    /// runnable, this function does nothing.
+    /// runnable, then no-op.
     ///
     /// Mainly used by signals.
     pub fn notify(task: &Arc<Task>) {

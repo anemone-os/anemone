@@ -7,6 +7,31 @@ pub mod fs {
         unsafe { syscall(SYS_OPENAT, dirfd, path_ptr, flags, mode, 0, 0) }
     }
 
+    pub fn getdents64(fd: u64, dirp_ptr: u64, count: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_GETDENTS64, fd, dirp_ptr, count, 0, 0, 0) }
+    }
+
+    pub fn newfstatat(
+        dirfd: u64,
+        path_ptr: u64,
+        statbuf_ptr: u64,
+        flags: u64,
+    ) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_NEWFSTATAT, dirfd, path_ptr, statbuf_ptr, flags, 0, 0) }
+    }
+
+    pub fn fstat(fd: u64, statbuf_ptr: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_FSTAT, fd, statbuf_ptr, 0, 0, 0, 0) }
+    }
+
+    pub fn mkdirat(dirfd: u64, path_ptr: u64, mode: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_MKDIRAT, dirfd, path_ptr, mode, 0, 0, 0) }
+    }
+
+    pub fn unlinkat(dirfd: u64, path_ptr: u64, flags: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_UNLINKAT, dirfd, path_ptr, flags, 0, 0, 0) }
+    }
+
     pub fn read(fd: u64, buf_ptr: u64, count: u64) -> Result<u64, Errno> {
         unsafe { syscall(SYS_READ, fd, buf_ptr, count, 0, 0, 0) }
     }
@@ -37,6 +62,20 @@ pub mod fs {
 
     pub fn chroot(path_ptr: u64) -> Result<u64, Errno> {
         unsafe { syscall(SYS_CHROOT, path_ptr, 0, 0, 0, 0, 0) }
+    }
+
+    pub fn mount(
+        source: u64,
+        target: u64,
+        fstype: u64,
+        flags: u64,
+        data: u64,
+    ) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_MOUNT, source, target, fstype, flags, data, 0) }
+    }
+
+    pub fn umount(target: u64, flags: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_UMOUNT2, target, flags, 0, 0, 0, 0) }
     }
 }
 
@@ -94,8 +133,16 @@ pub mod process {
         unsafe { syscall(SYS_EXIT, code, 0, 0, 0, 0, 0) }
     }
 
+    pub fn exit_group(code: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_EXIT_GROUP, code, 0, 0, 0, 0, 0) }
+    }
+
     pub fn sched_yield() -> Result<u64, Errno> {
         unsafe { syscall(SYS_SCHED_YIELD, 0, 0, 0, 0, 0, 0) }
+    }
+
+    pub fn gettid() -> Result<u64, Errno> {
+        unsafe { syscall(SYS_GETTID, 0, 0, 0, 0, 0, 0) }
     }
 
     pub fn getpid() -> Result<u64, Errno> {
@@ -106,7 +153,7 @@ pub mod process {
         unsafe { syscall(SYS_GETPPID, 0, 0, 0, 0, 0, 0) }
     }
 
-    pub fn wait4(pid: u64, wstatus_ptr: u64, options: u64) -> Result<u64, Errno> {
-        unsafe { syscall(SYS_WAIT4, pid, wstatus_ptr, options, 0, 0, 0) }
+    pub fn wait4(pid: u64, wstatus_ptr: u64, options: u64, rusage_ptr: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_WAIT4, pid, wstatus_ptr, options, rusage_ptr, 0, 0) }
     }
 }

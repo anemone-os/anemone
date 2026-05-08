@@ -5,8 +5,9 @@ use crate::{
     syscall::handler::SyscallHandler,
 };
 
-pub mod dt;
+// pub mod dt;
 pub mod handler;
+pub mod user_access;
 
 const INVALID_SYSCALL: SyscallHandler = SyscallHandler {
     sysno: 0,

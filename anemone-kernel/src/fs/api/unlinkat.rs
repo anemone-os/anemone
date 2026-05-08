@@ -8,8 +8,8 @@ use anemone_abi::fs::linux::at::AT_REMOVEDIR;
 use crate::{
     fs::api::args::AtFd,
     prelude::{
-        dt::c_readonly_string,
         handler::{TryFromSyscallArg, syscall_arg_flag32},
+        user_access::c_readonly_string,
         *,
     },
 };
@@ -34,21 +34,24 @@ impl TryFromSyscallArg for UnlinkAtFlags {
 #[syscall(SYS_UNLINKAT)]
 fn unlinkat(
     dirfd: AtFd,
-    #[validate_with(c_readonly_string)] pathname: Box<str>,
+    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
     flags: UnlinkAtFlags,
 ) -> Result<u64, SysError> {
     let path = Path::new(pathname.as_ref());
-    if path.is_absolute() {
-        let path = get_current_task().make_global_path(&Path::new(pathname.as_ref()));
-        vfs_unlink(&path)?;
+    let task = get_current_task();
+
+    let (parent, name) = if path.is_absolute() {
+        task.lookup_parent_path(&path, ResolveFlags::empty())?
     } else {
         let dir_path = dirfd.to_pathref(true)?;
+        task.lookup_parent_path_from(&dir_path, &path, ResolveFlags::empty())?
+    };
 
-        if flags.remove_dir {
-            vfs_rmdir_at(&dir_path, &path)?;
-        } else {
-            vfs_unlink_at(&dir_path, &path)?;
-        }
+    let leaf = Path::new(name.as_str());
+    if flags.remove_dir {
+        vfs_rmdir_at(&parent, leaf)?;
+    } else {
+        vfs_unlink_at(&parent, leaf)?;
     }
 
     Ok(0)

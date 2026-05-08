@@ -1,5 +1,6 @@
 pub mod fs {
     use alloc::ffi::CString;
+    use anemone_abi::fs::linux::stat::Stat;
 
     use crate::{prelude::*, sys::linux::fs};
 
@@ -47,6 +48,24 @@ pub mod fs {
         .map(|fd| fd as Fd)
     }
 
+    /// flags are currently not supported.
+    pub fn fstatat(dirfd: AtFd, path: &Path) -> Result<Stat, Errno> {
+        let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+        let mut statbuf = Stat::default();
+        fs::newfstatat(
+            dirfd.to_raw() as u64,
+            path.as_ptr() as u64,
+            &mut statbuf as *mut Stat as u64,
+            0,
+        )
+        .map(|_| statbuf)
+    }
+
+    pub fn mkdirat(dirfd: AtFd, path: &Path, mode: u32) -> Result<(), Errno> {
+        let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+        fs::mkdirat(dirfd.to_raw() as u64, path.as_ptr() as u64, mode as u64).map(|_| ())
+    }
+
     pub fn close(fd: Fd) -> Result<(), Errno> {
         fs::close(fd as u64).map(|_| ())
     }
@@ -57,6 +76,31 @@ pub mod fs {
 
     pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
         fs::write(fd as u64, buf.as_ptr() as u64, buf.len() as u64).map(|count| count as usize)
+    }
+
+    /// flags and data are currently not supported.
+    pub fn mount(source: Option<&Path>, target: &Path, fstype: &str) -> Result<(), Errno> {
+        let source_cstr = source
+            .map(|s| CString::new(s.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL))
+            .transpose()?;
+
+        let target_cstr = CString::new(target.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+        let fstype_cstr = CString::new(fstype).map_err(|_| EINVAL)?;
+
+        fs::mount(
+            source_cstr.as_ref().map(|s| s.as_ptr() as u64).unwrap_or(0),
+            target_cstr.as_ptr() as u64,
+            fstype_cstr.as_ptr() as u64,
+            0,
+            0,
+        )
+        .map(|_| ())
+    }
+
+    /// flags are currently not supported.
+    pub fn umount(target: &Path) -> Result<(), Errno> {
+        let target_cstr = CString::new(target.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+        fs::umount(target_cstr.as_ptr() as u64, 0).map(|_| ())
     }
 }
 
@@ -157,6 +201,7 @@ pub mod process {
             envp_ptrs.as_ptr() as u64,
         )
     }
+
     bitflags! {
         #[derive(Debug, Clone, Copy)]
         pub struct CloneFlags: u32 {
@@ -164,42 +209,51 @@ pub mod process {
             /// Prevents zombie processes; default action is ignore
             const SIGCHLD = clone::CLONE_SIGCHLD as u32;
             /// Share the same memory space between parent and child processes
-            const CLONE_VM = clone::CLONE_VM as u32;
+            const VM = clone::CLONE_VM as u32;
             /// Share filesystem info (root, cwd, umask) with the child
-            const CLONE_FS = clone::CLONE_FS as u32;
+            const FS = clone::CLONE_FS as u32;
             /// Share the file descriptor table with the child
-            const CLONE_FILES = clone::CLONE_FILES as u32;
+            const FILES = clone::CLONE_FILES as u32;
             /// Share signal handlers with the child
-            const CLONE_SIGHAND = clone::CLONE_SIGHAND as u32;
-            const CLONE_PIDFD = clone::CLONE_PIDFD as u32;
-            const CLONE_PTRACE = clone::CLONE_PTRACE as u32;
-            const CLONE_VFORK = clone::CLONE_VFORK as u32;
+            const SIGHAND = clone::CLONE_SIGHAND as u32;
+            const PIDFD = clone::CLONE_PIDFD as u32;
+            const PTRACE = clone::CLONE_PTRACE as u32;
+            const VFORK = clone::CLONE_VFORK as u32;
             /// [OK]
-            const CLONE_PARENT = clone::CLONE_PARENT as u32;
-            const CLONE_THREAD = clone::CLONE_THREAD as u32;
-            const CLONE_NEWNS = clone::CLONE_NEWNS as u32;
+            const PARENT = clone::CLONE_PARENT as u32;
+            const THREAD = clone::CLONE_THREAD as u32;
+            const NEWNS = clone::CLONE_NEWNS as u32;
             /// Share System V semaphore adjustment (semadj) values
-            const CLONE_SYSVSEM = clone::CLONE_SYSVSEM as u32;
+            const SYSVSEM = clone::CLONE_SYSVSEM as u32;
             /// Set the TLS (Thread Local Storage) descriptor
-            const CLONE_SETTLS = clone::CLONE_SETTLS as u32;
+            const SETTLS = clone::CLONE_SETTLS as u32;
             /// [OK] Store child thread ID in parent's memory (parent_tid)
-            const CLONE_PARENT_SETTID = clone::CLONE_PARENT_SETTID as u32;
+            const PARENT_SETTID = clone::CLONE_PARENT_SETTID as u32;
             /// [OK with TODO: futex]Clear child_tid in child's memory when the child exits
-            const CLONE_CHILD_CLEARTID = clone::CLONE_CHILD_CLEARTID as u32;
+            const CHILD_CLEARTID = clone::CLONE_CHILD_CLEARTID as u32;
             /// Legacy flag, ignored by clone()
-            const CLONE_DETACHED = clone::CLONE_DETACHED as u32;
+            const DETACHED = clone::CLONE_DETACHED as u32;
             /// Prevent tracer from forcing CLONE_PTRACE on the child
-            const CLONE_UNTRACED = clone::CLONE_UNTRACED as u32;
+            const UNTRACED = clone::CLONE_UNTRACED as u32;
             /// [OK] Store child thread ID in child's memory (child_tid)
-            const CLONE_CHILD_SETTID = clone::CLONE_CHILD_SETTID as u32;
-            const CLONE_NEWCGROUP = clone::CLONE_NEWCGROUP as u32;
-            const CLONE_NEWUTS = clone::CLONE_NEWUTS as u32;
-            const CLONE_NEWIPC = clone::CLONE_NEWIPC as u32;
-            const CLONE_NEWUSER = clone::CLONE_NEWUSER as u32;
-            const CLONE_NEWPID = clone::CLONE_NEWPID as u32;
-            const CLONE_NEWNET = clone::CLONE_NEWNET as u32;
-            const CLONE_IO = clone::CLONE_IO as u32;
+            const CHILD_SETTID = clone::CLONE_CHILD_SETTID as u32;
+            const NEWCGROUP = clone::CLONE_NEWCGROUP as u32;
+            const NEWUTS = clone::CLONE_NEWUTS as u32;
+            const NEWIPC = clone::CLONE_NEWIPC as u32;
+            const NEWUSER = clone::CLONE_NEWUSER as u32;
+            const NEWPID = clone::CLONE_NEWPID as u32;
+            const NEWNET = clone::CLONE_NEWNET as u32;
+            const IO = clone::CLONE_IO as u32;
+            const CLEAR_SIGHAND = clone::CLONE_CLEAR_SIGHAND as u32;
+            const INTO_CGROUP = clone::CLONE_INTO_CGROUP as u32;
         }
+    }
+
+    // encapsulation around clone syscall.
+    pub fn fork() -> Result<Option<Tid>, Errno> {
+        let ret =
+            process::clone(CloneFlags::SIGCHLD.bits() as u64, 0, 0, 0, 0).map(|x| x as Tid)?;
+        Ok(if ret == 0 { None } else { Some(ret) })
     }
 
     pub fn clone(
@@ -208,8 +262,8 @@ pub mod process {
         parent_tid: Option<&mut Tid>,
         tls_ptr: *mut u8,
         child_tid: Option<&mut Tid>,
-    ) -> Result<Tid, Errno> {
-        process::clone(
+    ) -> Result<Option<Tid>, Errno> {
+        let ret = process::clone(
             flags.bits() as u64,
             stack_ptr.and_then(|s| Some(s as u64)).unwrap_or(0),
             parent_tid
@@ -220,7 +274,8 @@ pub mod process {
                 .and_then(|val| Some(val as *mut Tid as u64))
                 .unwrap_or(0),
         )
-        .and_then(|x| Ok(x as Tid))
+        .map(|x| x as Tid)?;
+        Ok(if ret == 0 { None } else { Some(ret) })
     }
 
     pub fn sched_yield() -> Result<(), Errno> {
@@ -230,6 +285,15 @@ pub mod process {
     pub fn exit(xcode: i8) -> ! {
         process::exit(xcode as u64).expect("failed to invoke exit syscall");
         unreachable!("exit should never return")
+    }
+
+    pub fn exit_group(xcode: i8) -> ! {
+        process::exit_group(xcode as u64).expect("failed to invoke exit_group syscall");
+        unreachable!("exit_group should never return")
+    }
+
+    pub fn gettid() -> Result<Tid, Errno> {
+        process::gettid().and_then(|x| Ok(x as Tid))
     }
 
     pub fn getpid() -> Result<Tid, Errno> {
@@ -270,23 +334,40 @@ pub mod process {
 
     bitflags! {
         pub struct WaitOptions: u32 {
-            const WNOHANG = wait::WNOHANG as u32;
-            const WUNTRACED = wait::WUNTRACED as u32;
-            const WCONTINUED = wait::WCONTINUED as u32;
+            const NOHANG = wait::WNOHANG as u32;
+            const UNTRACED = wait::WUNTRACED as u32;
+            const CONTINUED = wait::WCONTINUED as u32;
         }
     }
 
+    #[derive(Debug, Clone, Copy)]
+    pub enum WaitFor {
+        AnyChild,
+        ChildWithTgid(Tid),
+    }
+
+    impl WaitFor {
+        pub fn to_raw(&self) -> i32 {
+            match self {
+                WaitFor::AnyChild => -1,
+                WaitFor::ChildWithTgid(tgid) => *tgid as i32,
+            }
+        }
+    }
+
+    /// rusage is not yet implemented.
     pub fn wait4(
-        pid: i64,
+        target: WaitFor,
         wstatus: Option<&mut WStatusRaw>,
         options: WaitOptions,
     ) -> Result<Option<Tid>, Errno> {
         process::wait4(
-            pid as u64,
+            target.to_raw() as u64,
             wstatus
                 .and_then(|r| Some(r as *mut WStatusRaw as u64))
                 .unwrap_or(0),
             options.bits() as u64,
+            0,
         )
         .and_then(|x| Ok(if x == 0 { None } else { Some(x as Tid) }))
     }

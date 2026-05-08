@@ -27,7 +27,7 @@ use core::{
 
 use crate::{
     mm::stack::KernelStack,
-    prelude::{dt::UserWritePtr, *},
+    prelude::*,
     sched::class::{SchedClassPrv, SchedEntity},
     sync::mono::MonoFlow,
     task::{
@@ -125,7 +125,9 @@ pub struct Task {
     status: RwLock<TaskStatus>,
 
     /// Optional user pointer updated during child clear-tid handling.
-    clear_child_tid: RwLock<Option<UserWritePtr<Tid>>>,
+    ///
+    /// This pointer is not guaranteed to be valid. It's user's responsibility.
+    clear_child_tid: SpinLock<Option<VirtAddr>>,
 
     /// TODO: when we have signals, remove this field.
     killed: AtomicBool,
@@ -346,7 +348,7 @@ impl Task {
             cpu_usage: RwLock::new(TaskCpuUsage::ZERO),
             exit_code: SpinLock::new(None),
             status: RwLock::new(TaskStatus::Runnable),
-            clear_child_tid: RwLock::new(None),
+            clear_child_tid: SpinLock::new(None),
 
             killed: AtomicBool::new(false),
         };
@@ -386,7 +388,7 @@ impl Task {
                 cpu_usage: RwLock::new(TaskCpuUsage::ZERO),
                 exit_code: SpinLock::new(None),
                 status: RwLock::new(TaskStatus::Runnable),
-                clear_child_tid: RwLock::new(None),
+                clear_child_tid: SpinLock::new(None),
 
                 killed: AtomicBool::new(false),
             },
@@ -561,13 +563,13 @@ impl Task {
     }
 
     /// Set `tid_ptr` as the clear-child-tid target pointer.
-    pub fn set_clear_child_tid(&self, tid_ptr: Option<UserWritePtr<Tid>>) {
-        *self.clear_child_tid.write() = tid_ptr;
+    pub fn set_clear_child_tid(&self, tid_ptr: Option<VirtAddr>) {
+        *self.clear_child_tid.lock() = tid_ptr;
     }
 
     /// Get the current clear-child-tid target pointer.
-    pub fn get_clear_child_tid(&self) -> Option<UserWritePtr<Tid>> {
-        self.clear_child_tid.read().clone()
+    pub fn get_clear_child_tid(&self) -> Option<VirtAddr> {
+        self.clear_child_tid.lock().clone()
     }
 
     /// Whether this task is killed.

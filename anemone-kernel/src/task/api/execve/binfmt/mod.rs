@@ -22,12 +22,12 @@ pub fn dispatch_execve(
     argv: &[impl AsRef<str>],
     envp: &[impl AsRef<str>],
 ) -> Result<LoadedBinaryMeta, SysError> {
-    let global_path = get_current_task().make_global_path(Path::new(path));
+    let resolved = get_current_task().lookup_path(Path::new(path), ResolveFlags::empty())?;
 
     let mut ctx = ExecCtx {
         usp,
         exec_fn: path,
-        path: global_path.to_string(),
+        path: resolved.to_string(),
         argv: argv.iter().map(|s| s.as_ref().to_string()).collect(),
         envp: envp.iter().map(|s| s.as_ref().to_string()).collect(),
     };

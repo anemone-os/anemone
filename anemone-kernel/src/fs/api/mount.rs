@@ -8,7 +8,7 @@
 use crate::{
     device::block::get_block_dev,
     prelude::{
-        dt::{SyscallArgValidatorExt, c_readonly_string},
+        user_access::{SyscallArgValidatorExt, c_readonly_string},
         *,
     },
 };
@@ -24,7 +24,7 @@ fn parse_mount_source(raw: Option<Box<str>>) -> Result<MountSource, SysError> {
         None => Ok(MountSource::Pseudo),
         Some(s) => {
             // we treat this as a path.
-            let dev = vfs_open(&Path::new(s))?;
+            let dev = get_current_task().lookup_path(&Path::new(s), ResolveFlags::empty())?;
 
             match dev.inode().get_attr()?.rdev {
                 DeviceId::Block(bdev) => {
@@ -40,12 +40,12 @@ fn parse_mount_source(raw: Option<Box<str>>) -> Result<MountSource, SysError> {
 #[syscall(SYS_MOUNT)]
 fn sys_mount(
     #[validate_with(
-        c_readonly_string
+        c_readonly_string::<MAX_PATH_LEN_BYTES>
             .nullable()
             .and_then(parse_mount_source))]
     source: MountSource,
-    #[validate_with(c_readonly_string)] target: Box<str>,
-    #[validate_with(c_readonly_string)] fstype: Box<str>,
+    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] target: Box<str>,
+    #[validate_with(c_readonly_string::<MAX_FILE_NAME_LEN_BYTES>)] fstype: Box<str>,
     // currently used. but we will support some important flags in the future, e.g. MS_BIND.
     _mountflags: u64,
     // we don't support this argument. vfs now doesn't use it at all.
@@ -57,12 +57,9 @@ fn sys_mount(
     }
     drop(fs);
 
-    vfs_mount_at(
-        &fstype,
-        source,
-        MountFlags::empty(),
-        &Path::new(target.as_ref()),
-    )?;
+    let target = get_current_task().lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
+
+    mount_at(&fstype, source, MountFlags::empty(), &target)?;
 
     Ok(0)
 }

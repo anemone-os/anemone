@@ -4,26 +4,28 @@
 //! - https://www.man7.org/linux/man-pages/man2/mkdirat.2.html
 
 use crate::{
-    fs::api::args::AtFd,
-    prelude::{dt::c_readonly_string, *},
+    fs::api::args::{AtFd, LinuxInodePerm},
+    prelude::{user_access::c_readonly_string, *},
 };
 
 #[syscall(SYS_MKDIRAT)]
 fn sys_mkdirat(
     dirfd: AtFd,
-    #[validate_with(c_readonly_string)] pathname: Box<str>,
-    mode: u32,
+    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
+    mode: LinuxInodePerm,
 ) -> Result<u64, SysError> {
     let path = Path::new(pathname.as_ref());
-    let perm = InodePerm::from_linux_bits(mode as u32).ok_or(SysError::InvalidArgument)?;
+    let perm = InodePerm::try_from(mode)?;
+    let task = get_current_task();
 
-    if path.is_absolute() {
-        let path = get_current_task().make_global_path(&path);
-        vfs_mkdir(&path, perm)?;
+    let (parent, name) = if path.is_absolute() {
+        task.lookup_parent_path(&path, ResolveFlags::empty())?
     } else {
         let dir_path = dirfd.to_pathref(true)?;
-        vfs_mkdir_at(&dir_path, &path, perm)?;
-    }
+        task.lookup_parent_path_from(&dir_path, &path, ResolveFlags::empty())?
+    };
+
+    vfs_mkdir_at(&parent, Path::new(name.as_str()), perm)?;
 
     Ok(0)
 }

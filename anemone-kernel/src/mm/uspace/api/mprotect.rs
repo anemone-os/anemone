@@ -4,7 +4,7 @@
 //! - https://www.man7.org/linux/man-pages/man2/mprotect.2.html
 
 use crate::prelude::{
-    dt::{SyscallArgValidatorExt, aligned_to, nonzero, user_addr},
+    user_access::{SyscallArgValidatorExt, aligned_to, nonzero, user_addr},
     vma::Protection,
     *,
 };

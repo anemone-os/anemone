@@ -1,5 +1,6 @@
 // TODO: better clone.
 pub mod clone;
+pub mod credentials;
 pub mod execve;
 pub mod exit;
 pub mod futex;

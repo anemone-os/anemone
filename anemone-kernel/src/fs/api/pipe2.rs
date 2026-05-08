@@ -8,8 +8,8 @@ use anemone_abi::fs::linux::open::*;
 use crate::{
     fs::pipe::{OpenedPipe, create_anonymous_pipe},
     prelude::{
-        dt::UserWritePtr,
         handler::{TryFromSyscallArg, syscall_arg_flag32},
+        user_access::{UserWriteSlice, user_addr},
         *,
     },
 };
@@ -39,7 +39,10 @@ impl TryFromSyscallArg for PipeFlags {
 }
 
 #[syscall(SYS_PIPE2)]
-fn sys_pipe2(pipefd: UserWritePtr<[i32; 2]>, flags: PipeFlags) -> Result<u64, SysError> {
+fn sys_pipe2(
+    #[validate_with(user_addr)] pipefd: VirtAddr,
+    flags: PipeFlags,
+) -> Result<u64, SysError> {
     // O_DIRECT and O_NONBLOCK nyi.
     let fd_flags = if flags.contains(PipeFlags::O_CLOEXEC) {
         FdFlags::CLOSE_ON_EXEC
@@ -56,13 +59,20 @@ fn sys_pipe2(pipefd: UserWritePtr<[i32; 2]>, flags: PipeFlags) -> Result<u64, Sy
         .ok_or(SysError::NoMoreFd)?;
     let tx = task
         .open_fd(tx, FileFlags::WRITE, fd_flags)
-        .ok_or(SysError::NoMoreFd)?;
+        .ok_or(SysError::NoMoreFd)
+        .map_err(|e| {
+            task.close_fd(rx);
+            e
+        })?;
 
-    if let Err(e) = pipefd.safe_write([rx.raw() as i32, tx.raw() as i32]) {
+    let usp = task.clone_uspace();
+    let mut guard = usp.write();
+    let mut pipefd = UserWriteSlice::<i32>::try_new(pipefd, 2, &mut guard).map_err(|_| {
         task.close_fd(rx);
         task.close_fd(tx);
-        return Err(e);
-    }
+        SysError::InvalidArgument
+    })?;
+    pipefd.copy_from_slice(&[rx.raw() as i32, tx.raw() as i32]);
 
     kdebugln!(
         "sys_pipe2: created pipe with rx fd {} and tx fd {}",

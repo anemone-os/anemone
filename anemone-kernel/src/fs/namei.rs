@@ -58,20 +58,46 @@ enum PendingComponent {
 }
 
 /// Resolve a path to a [PathRef], starting from the root of the namespace.
+///
+/// Starts from global root, regardless of the current task's root or cwd.
+///
+/// See [resolve_from_with_root] for more details.
 pub fn resolve(path: &Path, flags: ResolveFlags) -> Result<PathRef, SysError> {
     if path.components().next().is_none() {
         // empty path
         return Err(SysError::InvalidArgument);
     }
 
-    resolve_from(&root_pathref(), path, flags)
+    let root = root_pathref();
+    resolve_from_with_root(&root, &root, path, flags)
 }
 
 /// Resolve a path to a [PathRef], starting from a given [PathRef].
 ///
 /// If `path` is absolute, `from` is ignored and resolution starts from the
 /// root of the namespace.
+///
+/// Starts from global root, regardless of the current task's root or cwd.
+///
+/// See [resolve_from_with_root] for more details.
 pub fn resolve_from(from: &PathRef, path: &Path, flags: ResolveFlags) -> Result<PathRef, SysError> {
+    let root = root_pathref();
+    resolve_from_with_root(&root, from, path, flags)
+}
+
+/// Resolve a path to a [PathRef] with an explicit logical root.
+///
+/// If `path` is absolute, `from` is ignored and resolution starts from the
+/// provided `root`.
+///
+/// Absolute input paths, and absolute symlink targets encountered during
+/// resolution, are both interpreted relative to `root`.
+pub fn resolve_from_with_root(
+    root: &PathRef,
+    from: &PathRef,
+    path: &Path,
+    flags: ResolveFlags,
+) -> Result<PathRef, SysError> {
     if path.components().next().is_none() {
         // empty path
         return Err(SysError::InvalidArgument);
@@ -79,12 +105,12 @@ pub fn resolve_from(from: &PathRef, path: &Path, flags: ResolveFlags) -> Result<
 
     let pending = collect_components(path)?;
     let cur_path = if path.is_absolute() {
-        root_pathref()
+        root.clone()
     } else {
         from.clone()
     };
 
-    resolve_components(cur_path, pending, flags)
+    resolve_components(root.clone(), cur_path, pending, flags)
 }
 
 /// Resolve the parent directory of a path, returning the parent [PathRef] and
@@ -93,16 +119,17 @@ pub fn resolve_from(from: &PathRef, path: &Path, flags: ResolveFlags) -> Result<
 /// This does not make any guarantee on the existence of the final component,
 /// and it is the caller's responsibility to check it if necessary.
 ///
-/// **Note that [ResolveFlags::DENY_LAST_SYMLINK] and
-/// [ResolveFlags::UNFOLLOW_LAST_SYMLINK] take effect on parent component of the
-/// last path component.**
+/// Starts from global root, regardless of the current task's root or cwd.
+///
+/// See [resolve_parent_from_with_root] for more details.
 pub fn resolve_parent(path: &Path, flags: ResolveFlags) -> Result<(PathRef, String), SysError> {
     if path.components().next().is_none() {
         // empty path
         return Err(SysError::InvalidArgument);
     }
 
-    resolve_parent_from(&root_pathref(), path, flags)
+    let root = root_pathref();
+    resolve_parent_from_with_root(&root, &root, path, flags)
 }
 
 /// Resolve the parent directory of a path, starting from a given [PathRef], and
@@ -114,10 +141,34 @@ pub fn resolve_parent(path: &Path, flags: ResolveFlags) -> Result<(PathRef, Stri
 /// This does not make any guarantee on the existence of the final component,
 /// and it is the caller's responsibility to check it if necessary.
 ///
-/// **Note that [ResolveFlags::DENY_LAST_SYMLINK] and
-/// [ResolveFlags::UNFOLLOW_LAST_SYMLINK] take effect on parent component of the
-/// last path component.**
+/// Starts from global root, regardless of the current task's root or cwd.
+///
+/// See [resolve_parent_from_with_root] for more details.
 pub fn resolve_parent_from(
+    from: &PathRef,
+    path: &Path,
+    flags: ResolveFlags,
+) -> Result<(PathRef, String), SysError> {
+    let root = root_pathref();
+    resolve_parent_from_with_root(&root, from, path, flags)
+}
+
+/// Resolve the parent directory of a path, starting from a given [PathRef], and
+/// returning the parent [PathRef] and the final component as a string.
+///
+/// If `path` is absolute, `from` is ignored and resolution starts from the
+/// provided `root`.
+///
+/// This does not make any guarantee on the existence of the final component,
+/// and it is the caller's responsibility to check it if necessary.
+///
+/// **Flags apply to the resolution of the parent directory. Last component
+/// won't be resolved.**
+///
+/// Absolute input paths, and absolute symlink targets encountered during
+/// resolution, are both interpreted relative to `root`.
+pub fn resolve_parent_from_with_root(
+    root: &PathRef,
     from: &PathRef,
     path: &Path,
     flags: ResolveFlags,
@@ -135,12 +186,15 @@ pub fn resolve_parent_from(
     };
 
     let cur_path = if path.is_absolute() {
-        root_pathref()
+        root.clone()
     } else {
         from.clone()
     };
 
-    Ok((resolve_components(cur_path, pending, flags)?, name))
+    Ok((
+        resolve_components(root.clone(), cur_path, pending, flags)?,
+        name,
+    ))
 }
 
 /// Helper function to collect components of a path into a queue for resolution.
@@ -189,6 +243,7 @@ fn prepend_components(
 /// We shouldn't use recursion here cz too many nested symlinks might cause
 /// stack overflow.
 fn resolve_components(
+    logical_root: PathRef,
     mut cur_path: PathRef,
     mut pending: VecDeque<PendingComponent>,
     flags: ResolveFlags,
@@ -201,6 +256,11 @@ fn resolve_components(
         match component {
             PendingComponent::CurDir => continue,
             PendingComponent::ParentDir => {
+                // prevent escaping logical root via '..' components
+                if cur_path.location_eq(&logical_root) {
+                    kdebugln!("prevent escaping logical root via '..'");
+                    continue;
+                }
                 cur_path = walk_parent(&cur_path);
             },
             PendingComponent::Normal(name) => {
@@ -241,7 +301,7 @@ fn resolve_components(
                 }
 
                 if target.is_absolute() {
-                    cur_path = root_pathref();
+                    cur_path = logical_root.clone();
                 }
 
                 prepend_components(&mut pending, &target)?;

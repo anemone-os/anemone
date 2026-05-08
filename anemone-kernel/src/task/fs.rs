@@ -12,10 +12,10 @@ pub enum FsState {
 }
 
 impl FsState {
-    /// Create a hanging FsState, which is used for kernel threads that do not
+    /// Create a hanging [FsState], which is used for kernel threads that do not
     /// have a filesystem context.
     ///
-    /// All operations on a hanging FsState will panic, so it should only be
+    /// All operations on a hanging [FsState] will panic, so it should only be
     /// used for kernel threads that do not perform any filesystem operations.
     pub fn new_hanging() -> Self {
         Self::Hanging
@@ -95,40 +95,73 @@ impl Task {
     ///
     /// This should only be used while the task is still uniquely owned, such
     /// as during task construction or clone setup.
-    pub(super) fn replace_fs_state_handle(&mut self, fs_state: Arc<RwLock<FsState>>) {
+    pub fn replace_fs_state_handle(&mut self, fs_state: Arc<RwLock<FsState>>) {
         self.fs_state = fs_state;
     }
 
     pub fn root(&self) -> PathRef {
-        self.fs_state().read().root().clone()
+        self.fs_state.read().root().clone()
     }
 
     pub fn cwd(&self) -> PathRef {
-        self.fs_state().read().cwd().clone()
+        self.fs_state.read().cwd().clone()
     }
 
     pub fn set_root(&self, root: PathRef) {
-        self.fs_state().write().set_root(root);
+        self.fs_state.write().set_root(root);
     }
 
     pub fn set_cwd(&self, cwd: PathRef) {
-        self.fs_state().write().set_cwd(cwd);
+        self.fs_state.write().set_cwd(cwd);
     }
 
-    pub fn lookup_path(&self, path: &Path) -> Result<PathRef, SysError> {
-        let fs_state = self.fs_state();
-        let fs_state = fs_state.read();
-        if path.is_absolute() {
-            vfs_lookup_from(&fs_state.root(), path)
-        } else {
-            vfs_lookup_from(&fs_state.cwd(), path)
-        }
+    /// Lookup a path in this task's filesystem context.
+    pub fn lookup_path(&self, path: &Path, flags: ResolveFlags) -> Result<PathRef, SysError> {
+        let fs_state = self.fs_state.read();
+        resolve_from_with_root(fs_state.root(), fs_state.cwd(), path, flags)
+    }
+
+    /// Lookup a path in this task's filesystem context, relative to an
+    /// explicitly provided starting directory.
+    pub fn lookup_path_from(
+        &self,
+        from: &PathRef,
+        path: &Path,
+        flags: ResolveFlags,
+    ) -> Result<PathRef, SysError> {
+        let fs_state = self.fs_state.read();
+        resolve_from_with_root(fs_state.root(), from, path, flags)
+    }
+
+    /// Lookup the parent directory of a path in this task's filesystem context,
+    /// and return the parent directory and the final component separately.
+    ///
+    /// flags will be applied to parent directory lookup, but not the final
+    /// component, since final component may not exist and we're to create it.
+    pub fn lookup_parent_path(
+        &self,
+        path: &Path,
+        flags: ResolveFlags,
+    ) -> Result<(PathRef, String), SysError> {
+        let fs_state = self.fs_state.read();
+        resolve_parent_from_with_root(fs_state.root(), fs_state.cwd(), path, flags)
+    }
+
+    /// Lookup the parent directory of a path in this task's filesystem context,
+    /// relative to an explicitly provided starting directory.
+    pub fn lookup_parent_path_from(
+        &self,
+        from: &PathRef,
+        path: &Path,
+        flags: ResolveFlags,
+    ) -> Result<(PathRef, String), SysError> {
+        let fs_state = self.fs_state.read();
+        resolve_parent_from_with_root(fs_state.root(), from, path, flags)
     }
 
     /// Get the current working directory of this task, relative to its root.
     pub fn rel_cwd(&self) -> PathBuf {
-        let fs_state = self.fs_state();
-        let fs_state = fs_state.read();
+        let fs_state = self.fs_state.read();
         let cwd_str = fs_state.cwd().to_pathbuf();
         let root_str = fs_state.root().to_pathbuf();
 

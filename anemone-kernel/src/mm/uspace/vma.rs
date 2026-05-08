@@ -264,12 +264,6 @@ impl VmArea {
         let vpn = fault_info.fault_addr().page_down();
         debug_assert!(self.range.contains(vpn));
 
-        /*knoticeln!(
-            "handle page fault in VMA: addr={}, access={:?}",
-            fault_info.fault_addr(),
-            fault_info.fault_type()
-        );*/
-
         self.map_page(mapper, vpn, fault_info.fault_type())?;
         PagingArch::tlb_shootdown(fault_info.fault_addr().page_down());
 
