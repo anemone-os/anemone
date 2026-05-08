@@ -12,6 +12,9 @@
 //! In fact, using those linux-compatible APIs would be pretty enough to develop
 //! this library. But once again - portability is not our concern. If we want
 //! that, why we don't just use `std`?
+//!
+//! TODO: a huge bug may exist. keywords: aliasing rules, llvm optimization,
+//! mutable reference and pointer. Fix this later.
 
 #![allow(unused)]
 

@@ -13,6 +13,8 @@ mod ktrap;
 pub use ktrap::*;
 mod utrap;
 pub use utrap::*;
+mod signal;
+pub use signal::*;
 
 /// LoongArch64 trap architecture implementation.
 pub struct LA64TrapArch;
@@ -26,7 +28,7 @@ impl TrapArchTrait for LA64TrapArch {
 }
 
 /// Raw general-purpose register snapshot used inside [`LA64TrapFrame`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 struct Gpr {
     r: [u64; 32],
@@ -61,7 +63,7 @@ impl Gpr {
 }
 
 /// Saved LoongArch64 trap context passed to the Rust trap handler.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct LA64TrapFrame {
     gpr: Gpr,
@@ -154,7 +156,6 @@ impl TrapFrameArch for LA64TrapFrame {
         ktp: 0,
     };
 
-    /// Read syscall argument IDX from the trap frame.
     unsafe fn syscall_args<const IDX: usize>(&self) -> u64 {
         const_assert!(IDX < 7);
         self.gpr.a::<IDX>()
@@ -164,13 +165,20 @@ impl TrapFrameArch for LA64TrapFrame {
         self.gpr.a::<7>() as usize
     }
 
-    /// Advance exception return address to the next instruction.
-    fn advance_pc(&mut self) {
+    fn advance_syscall_pc(&mut self) {
         self.era += 4;
+    }
+
+    fn get_pc(&self) -> u64 {
+        self.era
     }
 
     unsafe fn set_syscall_ret_val(&mut self, retval: u64) {
         self.gpr.r[4] = retval; // a0
+    }
+
+    unsafe fn get_syscall_ret_val(&self) -> u64 {
+        self.gpr.r[4] // a0    
     }
 
     fn get_sp(&self) -> u64 {

@@ -11,7 +11,7 @@ use anemone_abi::process::linux::clone;
 
 use crate::{
     prelude::{
-        handler::{TryFromSyscallArg, syscall_arg_flag32},
+        handler::TryFromSyscallArg,
         user_access::{UserWritePtr, user_addr},
         *,
     },
@@ -20,45 +20,45 @@ use crate::{
 
 bitflags! {
     #[derive(Debug, Clone, Copy)]
-    pub struct CloneFlags: u32 {
+    pub struct CloneFlags: u64 {
         /// Share the same memory space between parent and child processes
-        const VM = clone::CLONE_VM as u32;
+        const VM = clone::CLONE_VM ;
         /// Share filesystem info (root, cwd, umask) with the child
-        const FS = clone::CLONE_FS as u32;
+        const FS = clone::CLONE_FS ;
         /// Share the file descriptor table with the child
-        const FILES = clone::CLONE_FILES as u32;
+        const FILES = clone::CLONE_FILES ;
         /// Share signal handlers with the child
-        const SIGHAND = clone::CLONE_SIGHAND as u32;
-        const PIDFD = clone::CLONE_PIDFD as u32;
-        const PTRACE = clone::CLONE_PTRACE as u32;
-        const VFORK = clone::CLONE_VFORK as u32;
+        const SIGHAND = clone::CLONE_SIGHAND ;
+        const PIDFD = clone::CLONE_PIDFD ;
+        const PTRACE = clone::CLONE_PTRACE ;
+        const VFORK = clone::CLONE_VFORK ;
         /// [OK]
-        const PARENT = clone::CLONE_PARENT as u32;
-        const THREAD = clone::CLONE_THREAD as u32;
-        const NEWNS = clone::CLONE_NEWNS as u32;
+        const PARENT = clone::CLONE_PARENT ;
+        const THREAD = clone::CLONE_THREAD ;
+        const NEWNS = clone::CLONE_NEWNS ;
         /// Share System V semaphore adjustment (semadj) values
-        const SYSVSEM = clone::CLONE_SYSVSEM as u32;
+        const SYSVSEM = clone::CLONE_SYSVSEM ;
         /// Set the TLS (Thread Local Storage) descriptor
-        const SETTLS = clone::CLONE_SETTLS as u32;
+        const SETTLS = clone::CLONE_SETTLS ;
         /// [OK] Store child thread ID in parent's memory (parent_tid)
-        const PARENT_SETTID = clone::CLONE_PARENT_SETTID as u32;
+        const PARENT_SETTID = clone::CLONE_PARENT_SETTID ;
         /// [OK with TODO: futex]Clear child_tid in child's memory when the child exits
-        const CHILD_CLEARTID = clone::CLONE_CHILD_CLEARTID as u32;
+        const CHILD_CLEARTID = clone::CLONE_CHILD_CLEARTID ;
         /// Legacy flag, ignored by clone()
-        const DETACHED = clone::CLONE_DETACHED as u32;
+        const DETACHED = clone::CLONE_DETACHED ;
         /// Prevent tracer from forcing CLONE_PTRACE on the child
-        const UNTRACED = clone::CLONE_UNTRACED as u32;
+        const UNTRACED = clone::CLONE_UNTRACED ;
         /// [OK] Store child thread ID in child's memory (child_tid)
-        const CHILD_SETTID = clone::CLONE_CHILD_SETTID as u32;
-        const NEWCGROUP = clone::CLONE_NEWCGROUP as u32;
-        const NEWUTS = clone::CLONE_NEWUTS as u32;
-        const NEWIPC = clone::CLONE_NEWIPC as u32;
-        const NEWUSER = clone::CLONE_NEWUSER as u32;
-        const NEWPID = clone::CLONE_NEWPID as u32;
-        const NEWNET = clone::CLONE_NEWNET as u32;
-        const IO = clone::CLONE_IO as u32;
-        const CLEAR_SIGHAND = clone::CLONE_CLEAR_SIGHAND as u32;
-        const INTO_CGROUP = clone::CLONE_INTO_CGROUP as u32;
+        const CHILD_SETTID = clone::CLONE_CHILD_SETTID ;
+        const NEWCGROUP = clone::CLONE_NEWCGROUP ;
+        const NEWUTS = clone::CLONE_NEWUTS ;
+        const NEWIPC = clone::CLONE_NEWIPC ;
+        const NEWUSER = clone::CLONE_NEWUSER ;
+        const NEWPID = clone::CLONE_NEWPID ;
+        const NEWNET = clone::CLONE_NEWNET ;
+        const IO = clone::CLONE_IO;
+        const CLEAR_SIGHAND = clone::CLONE_CLEAR_SIGHAND;
+        const INTO_CGROUP = clone::CLONE_INTO_CGROUP;
     }
 }
 
@@ -135,11 +135,10 @@ impl TryFromSyscallArg for CloneFlagsWithSignal {
             CHILD_SETTID
         );
 
-        let value = syscall_arg_flag32(raw)?;
-        let (raw_flags, raw_signo) = ((value >> 8) << 8, value & 0xff);
+        let (raw_flags, raw_signo) = ((raw >> 8) << 8, raw & 0xff);
         let flags = CloneFlags::from_bits(raw_flags).ok_or(SysError::InvalidArgument)?;
         if !SUPPORTED_FLAGS.contains(flags) {
-            knoticeln!("nyi clone flags: {:#x}", value);
+            knoticeln!("nyi clone flags: {:?}", flags);
             return Err(SysError::NotYetImplemented);
         }
         flags.validate()?;
@@ -147,7 +146,7 @@ impl TryFromSyscallArg for CloneFlagsWithSignal {
         let signo = if raw_signo == 0 {
             None
         } else {
-            Some(SigNo::try_from_syscall_arg(raw_signo as u64)?)
+            Some(SigNo::try_from_syscall_arg(raw_signo)?)
         };
 
         Ok(Self {
@@ -219,7 +218,7 @@ pub fn kernel_clone(
             ParameterList::new(&[
                 frame_ptr as u64,
                 child_tid.map_or(0, |ptr| ptr.get()),
-                flags.bits() as u64,
+                flags.bits(),
             ]),
             Some(current_task.tid()),
             if flags.contains(CloneFlags::THREAD) {
@@ -442,7 +441,7 @@ extern "C" fn enter_cloned_user_task(
 ) {
     assert!(IntrArch::local_intr_enabled());
 
-    let clone_flags = CloneFlags::from_bits(clone_flags as u32)
+    let clone_flags = CloneFlags::from_bits(clone_flags)
         .expect("invalid clone flags passed to enter_cloned_user_task");
 
     let task = get_current_task();

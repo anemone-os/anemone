@@ -1,0 +1,9 @@
+name = "signal-test"
+
+[build]
+workdir = "."
+driver = "cargo"
+args = ["build"]
+
+[[artifacts]]
+path = "target/${TARGET_TRIPLE}/debug/signal-test"

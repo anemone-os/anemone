@@ -12,7 +12,9 @@ pub(super) mod time;
 
 pub use backtrace::LA64BacktraceArch as BacktraceArch;
 pub use cpu::La64CpuArch as CpuArch;
-pub use exception::{LA64IntrArch as IntrArch, LA64TrapArch as TrapArch};
+pub use exception::{
+    LA64IntrArch as IntrArch, LA64SignalArch as SignalArch, LA64TrapArch as TrapArch,
+};
 pub use machine::machine_init;
 pub use mm::{LA64KernelLayout as KernelLayout, LA64PagingArch as PagingArch};
 pub use sched::LA64SchedArch as SchedArch;

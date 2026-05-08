@@ -40,8 +40,6 @@ impl SignalArchTrait for RiscV64SignalArch {
             .gprs
             .copy_from_slice(&trapframe.gpr.x);
 
-        // if altstack is provided...
-
         // done.
     }
 
@@ -85,7 +83,7 @@ static __TRAMPOLINE_KEEPER: unsafe extern "C" fn() -> ! = __sys_rt_sigreturn;
 
 #[unsafe(naked)]
 #[unsafe(link_section = ".text.trampoline")]
-pub unsafe extern "C" fn __sys_rt_sigreturn() -> ! {
+unsafe extern "C" fn __sys_rt_sigreturn() -> ! {
     naked_asm!(
         "li a7, {sysno}",
         "ecall",

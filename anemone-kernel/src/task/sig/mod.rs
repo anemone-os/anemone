@@ -473,10 +473,10 @@ fn perform_signal_action(signal: Signal, trapframe: &mut TrapFrame) -> bool {
                 if let Some(altstack) = altstack {
                     let mut ss = altstack.to_linux_sigstack();
                     if flags.contains(SaFlags::ONSTACK) {
-                        ss.ss_flags |= linux_signal::SS_ONSTACK;
                         if altstack.contains_addr(VirtAddr::new(curr_sp)) {
                             // we're already on altstack. this is a reentrancy. continue to use this
                             // altstack.
+                            ss.ss_flags |= linux_signal::SS_ONSTACK;
                             (ss, curr_sp)
                         } else {
                             // first time to use altstack.
@@ -484,10 +484,7 @@ fn perform_signal_action(signal: Signal, trapframe: &mut TrapFrame) -> bool {
                         }
                     } else {
                         // SA_ONSTACK is not set but altstack is configured.
-                        (
-                            ss,
-                            curr_sp,
-                        )
+                        (ss, curr_sp)
                     }
                 } else {
                     // altstack not configured. just use current stack.

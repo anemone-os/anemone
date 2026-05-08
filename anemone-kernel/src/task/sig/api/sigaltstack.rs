@@ -1,7 +1,10 @@
 use crate::{
     prelude::*,
     syscall::user_access::{SyscallArgValidatorExt, UserReadPtr, UserWritePtr, user_addr},
-    task::sig::altstack::{SigAltStack, SigAltStackFlags},
+    task::sig::{
+        SignalArchTrait,
+        altstack::{SigAltStack, SigAltStackFlags},
+    },
 };
 
 use anemone_abi::process::linux::signal::{self as linux_signal, SS_DISABLE, SS_ONSTACK};
@@ -85,7 +88,16 @@ fn sys_sigaltstack(
                     return Err(SysError::PermissionDenied);
                 }
             }
-            // TODO: ENOMEM if stack size less than MINSIGSTKSZ.
+            if ss_size < SignalArch::MINSIGSTKSZ {
+                knoticeln!(
+                    "sys_sigaltstack: altstack size {} is too small, must be at least {}",
+                    ss_size,
+                    SignalArch::MINSIGSTKSZ,
+                );
+                // POSIX specifies we should return ENOMEM here, which is a bit weird. but let's
+                // just follow the spec.
+                return Err(SysError::OutOfMemory);
+            }
 
             let stack_base = user_addr(ss_sp as u64)?;
             let _end = user_addr(ss_sp as u64 + ss_size as u64)?;

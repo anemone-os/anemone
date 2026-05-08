@@ -10,7 +10,6 @@ use crate::{
         trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
     },
     prelude::*,
-    task::exit::kernel_exit,
 };
 
 core::arch::global_asm!(

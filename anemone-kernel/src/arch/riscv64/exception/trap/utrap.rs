@@ -5,7 +5,14 @@ use crate::{
     },
     prelude::{fault::handle_user_page_fault, *},
     sched::current_task_id,
-    task::{cpu_usage::Privilege, exit::kernel_exit_group, sig::handle_signals},
+    task::{
+        cpu_usage::Privilege,
+        sig::{
+            handle_signals,
+            info::{SiCode, SigFault, SigInfoFields},
+            SigNo, Signal,
+        },
+    },
 };
 
 // kernel trap entry point. since kernel doesn't use floating point, we don't
@@ -231,8 +238,14 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                     cur_cpu_id(),
                     current_task_id(),
                 );
-                //TODO: Error code
-                kernel_exit_group(ExitCode::Exited(-1))
+                // TODO: this should be SIGTRAP. but we haven't implemented breakpoint yet.
+                get_current_task().recv_signal(Signal::new(
+                    SigNo::SIGILL,
+                    SiCode::Kernel,
+                    SigInfoFields::Ill(SigFault {
+                        addr: VirtAddr::new(trapframe.sepc),
+                    }),
+                ));
             },
             RiscV64Exception::InstructionPageFault
             | RiscV64Exception::LoadPageFault
@@ -250,13 +263,18 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             },
             _ => {
                 kerrln!(
-                    "({}) user {} aborted with error {:?}\n\ttask return value not implemented yet",
+                    "({}) user {} aborted with error {:?}\n\t not implemented yet",
                     cur_cpu_id(),
                     current_task_id(),
                     reason
                 );
-                kernel_exit_group(ExitCode::Exited(-1))
-                //TODO: Error code
+                get_current_task().recv_signal(Signal::new(
+                    SigNo::SIGILL,
+                    SiCode::Kernel,
+                    SigInfoFields::Ill(SigFault {
+                        addr: VirtAddr::new(trapframe.sepc),
+                    }),
+                ));
             },
         }
 

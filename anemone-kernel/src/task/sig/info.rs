@@ -59,6 +59,7 @@ pub enum SigInfoFields {
     Chld(SigChld),
     Fault(SigFault),
     TKill(SigKill),
+    Ill(SigFault),
     // TODO: SigPoll, SigTimer, SigSys.
 }
 
@@ -143,7 +144,7 @@ impl SigInfoFields {
                     stime: *stime,
                 }
             },
-            Self::Fault(SigFault { addr }) => {
+            Self::Fault(SigFault { addr }) | Self::Ill(SigFault { addr }) => {
                 dst.fault = Fault {
                     addr: addr.get() as usize as _, // TODO
                 }
@@ -158,6 +159,7 @@ impl SigInfoFields {
             (Self::Rt(_), SiCode::Queue) => true,
             (Self::Chld(_), SiCode::Kernel) => true,
             (Self::Fault(_), SiCode::Kernel) => true,
+            (Self::Ill(_), SiCode::Kernel) => true,
             (Self::TKill(_), SiCode::TKill) => true,
             _ => {
                 kdebugln!(

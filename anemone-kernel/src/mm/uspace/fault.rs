@@ -1,4 +1,10 @@
-use crate::{prelude::*, task::exit::kernel_exit_group};
+use crate::{
+    prelude::*,
+    task::sig::{
+        SigNo, Signal,
+        info::{SiCode, SigFault, SigInfoFields},
+    },
+};
 
 pub fn handle_user_page_fault(info: PageFaultInfo) {
     if let Err(e) = handle_user_page_fault_internal(info) {
@@ -11,7 +17,15 @@ pub fn handle_user_page_fault(info: PageFaultInfo) {
             info.fault_type(),
             e
         );
-        kernel_exit_group(ExitCode::Exited(-1));
+        get_current_task()
+            .get_thread_group()
+            .recv_signal(Signal::new(
+                SigNo::SIGSEGV,
+                SiCode::Kernel,
+                SigInfoFields::Fault(SigFault {
+                    addr: info.fault_addr(),
+                }),
+            ));
     }
 }
 
