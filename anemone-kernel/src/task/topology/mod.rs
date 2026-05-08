@@ -62,7 +62,14 @@ static TOPOLOGY: TaskTopology = TaskTopology {
 /// and thus has no parent. other tasks must have a parent.
 #[derive(Debug)]
 pub enum TaskBinding {
-    Leader { parent_tgid: Tid },
+    Leader {
+        parent_tgid: Tid,
+        /// To put this field here is a bit weird, but [publish_task] is where a
+        /// [ThreadGroup] is constructed.
+        ///
+        /// We do need refactor this later.
+        terminate_signal: Option<SigNo>,
+    },
     Member,
 }
 
@@ -124,12 +131,14 @@ impl PublishGuard {
         let tg = ThreadGroup {
             tgid: handle,
             child_exited: Event::new(),
+            terminate_signal: None,
             inner: RwLock::new(ThreadGroupInner {
                 status: ThreadGroupStatus::new_alive(),
                 members: BTreeSet::from([Tid::INIT]),
                 parent_tgid: None,
                 children_tgids: BTreeSet::new(),
                 cpu_usage: ThreadGroupCpuUsage::ZERO,
+                sig_pending: SpinLock::new(PendingSignals::new()),
             }),
         };
 
@@ -154,7 +163,10 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
     let tgid = task.tgid();
     let mut topology = TOPOLOGY.inner.write_irqsave();
     match binding {
-        TaskBinding::Leader { parent_tgid } => {
+        TaskBinding::Leader {
+            parent_tgid,
+            terminate_signal,
+        } => {
             let tidref = task.tid.into_inner();
             let handle = match tidref {
                 TidRef::Owned(h) => h,
@@ -172,6 +184,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                 parent_tgid: Some(parent_tgid),
                 children_tgids: BTreeSet::new(),
                 cpu_usage: ThreadGroupCpuUsage::ZERO,
+                sig_pending: SpinLock::new(PendingSignals::new()),
             };
 
             inner.parent_tgid = Some(parent_tgid);
@@ -202,6 +215,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                         Arc::new(ThreadGroup {
                             tgid: handle,
                             child_exited: Event::new(),
+                            terminate_signal,
                             inner: RwLock::new(inner),
                         })
                     )
@@ -276,3 +290,24 @@ pub fn for_each_task<F: FnMut(&Arc<Task>)>(mut f: F) {
         f(&node.task);
     }
 }
+
+/// Get a thread group by its TGID.
+///
+/// # Locks
+///
+/// [TOPOLOGY]
+pub fn get_thread_group(tgid: &Tid) -> Option<Arc<ThreadGroup>> {
+    let topology = TOPOLOGY.inner.read_irqsave();
+    topology.thread_groups.get(tgid).cloned()
+}
+
+// impl Task {
+//     /// When you want to lock multiple tasks, a consistent lock ordering must
+// be     /// followed to avoid deadlocks.
+//     ///
+//     /// We adopt a simple lock ordering strategy based on TID: when locking
+//     /// multiple tasks, always lock the task with smaller TID first.
+//     pub fn lock_ordering<'a>(x: &'a Task, y: &'a Task) -> (&'a Task, &'a
+// Task) {         if x.tid() < y.tid() { (x, y) } else { (y, x) }
+//     }
+// }

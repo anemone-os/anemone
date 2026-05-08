@@ -91,6 +91,15 @@ pub mod linux {
 
     pub const SYS_SCHED_YIELD: u64 = 124;
 
+    pub const SYS_TGKILL: u64 = 131;
+    pub const SYS_SIGALTSTACK: u64 = 132;
+    pub const SYS_RT_SIGACTION: u64 = 134;
+    pub const SYS_RT_SIGPROCMASK: u64 = 135;
+    pub const SYS_RT_SIGPENDING: u64 = 136;
+    pub const SYS_RT_SIGTIMEDWAIT: u64 = 137;
+    pub const SYS_RT_SIGQUEUEINFO: u64 = 138;
+    pub const SYS_RT_SIGRETURN: u64 = 139;
+
     pub const SYS_SETGID: u64 = 144;
     pub const SYS_SETUID: u64 = 146;
 

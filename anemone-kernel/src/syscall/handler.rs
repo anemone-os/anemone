@@ -9,7 +9,7 @@ pub struct SyscallRegs {
     pub args: [u64; 6],
 }
 
-pub type RawSyscallFn = fn(&SyscallRegs) -> Result<u64, SysError>;
+pub type RawSyscallFn = fn(&SyscallRegs, &mut TrapFrame) -> Result<u64, SysError>;
 
 /// Syscall handler descriptor, collected into [super::SyscallTable].
 #[derive(Debug, Clone, Copy)]

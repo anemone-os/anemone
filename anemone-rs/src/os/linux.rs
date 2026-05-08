@@ -110,7 +110,7 @@ pub mod process {
     use core::ptr::NonNull;
 
     use alloc::ffi::CString;
-    use anemone_abi::process::linux::{clone, mmap, wait};
+    use anemone_abi::process::linux::{clone, mmap, signal::SIGCHLD, wait};
     use bitflags::bitflags;
 
     use crate::{prelude::*, sys::linux::process};
@@ -205,9 +205,6 @@ pub mod process {
     bitflags! {
         #[derive(Debug, Clone, Copy)]
         pub struct CloneFlags: u32 {
-            /// Signal sent to parent when child process changes state (termination/stop)
-            /// Prevents zombie processes; default action is ignore
-            const SIGCHLD = clone::CLONE_SIGCHLD as u32;
             /// Share the same memory space between parent and child processes
             const VM = clone::CLONE_VM as u32;
             /// Share filesystem info (root, cwd, umask) with the child
@@ -251,20 +248,20 @@ pub mod process {
 
     // encapsulation around clone syscall.
     pub fn fork() -> Result<Option<Tid>, Errno> {
-        let ret =
-            process::clone(CloneFlags::SIGCHLD.bits() as u64, 0, 0, 0, 0).map(|x| x as Tid)?;
+        let ret = process::clone(SIGCHLD as u64, 0, 0, 0, 0).map(|x| x as Tid)?;
         Ok(if ret == 0 { None } else { Some(ret) })
     }
 
     pub fn clone(
         flags: CloneFlags,
+        terminate_signal: Option<u32>,
         stack_ptr: Option<*mut u8>,
         parent_tid: Option<&mut Tid>,
         tls_ptr: *mut u8,
         child_tid: Option<&mut Tid>,
     ) -> Result<Option<Tid>, Errno> {
         let ret = process::clone(
-            flags.bits() as u64,
+            flags.bits() as u64 | terminate_signal.map_or(0, |s| s as u64),
             stack_ptr.and_then(|s| Some(s as u64)).unwrap_or(0),
             parent_tid
                 .and_then(|val| Some(val as *mut Tid as u64))

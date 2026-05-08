@@ -173,6 +173,10 @@ impl TrapFrameArch for LA64TrapFrame {
         self.gpr.r[4] = retval; // a0
     }
 
+    fn get_sp(&self) -> u64 {
+        self.gpr.sp()
+    }
+
     fn set_sp(&mut self, sp: u64) {
         self.gpr.r[3] = sp; // sp
     }

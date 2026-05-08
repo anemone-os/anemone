@@ -96,10 +96,11 @@ mod kore {
                     drop(curr);
                 }
             },
-            TaskStatus::Waiting => {
+            TaskStatus::Waiting { interruptible } => {
                 knoticeln!(
-                    "task {} is waiting, not enqueuing it to run queue",
+                    "task {} is waiting (interruptible: {}), not enqueuing it to run queue",
                     current_task_id(),
+                    interruptible,
                 );
                 drop(curr);
             },
@@ -128,15 +129,19 @@ mod kore {
     ///
     /// What linux folks often called "ttwp".
     ///
-    /// Panics if expected_status contains any non-sleeping status. If you just
-    /// want to wake up a task regardless of its current status, call [notify]
-    /// instead.
+    /// Panics if expected_status contains any non-sleeping status or is empty.
+    /// If you just want to wake up a task regardless of its current status,
+    /// call [notify] instead.
     ///
     /// TODO: docs.
     pub fn try_to_wake_up(
         task: &Arc<Task>,
         expected_status: &[TaskStatus],
     ) -> Result<(), WakeUpError> {
+        assert!(
+            !expected_status.is_empty(),
+            "expected_status cannot be empty"
+        );
         assert!(
             expected_status.iter().all(|s| s.is_sleeping()),
             "expected_status must be a sleeping status"
@@ -161,7 +166,7 @@ mod kore {
 
             match status {
                 TaskStatus::Runnable | TaskStatus::Zombie => unreachable!(/* handled above */),
-                TaskStatus::Waiting => (TaskStatus::Runnable, Ok(())),
+                TaskStatus::Waiting { .. } => (TaskStatus::Runnable, Ok(())),
             }
         })?;
 
@@ -176,14 +181,31 @@ mod kore {
         Ok(())
     }
 
-    /// Whatever task's status is, try to wake it up. If the task is already
-    /// runnable, then no-op.
+    /// Whatever task's status is, try to wake it up.
+    ///
+    /// If task's status is [TaskStatus::Runnable], [TaskStatus::Zombie], the
+    /// no-op.
+    ///
+    /// If `uninterruptible` is true, even if the task is in uninterruptible
+    /// sleep, it will be woken up. This is useful when we want to do a forceful
+    /// wake up, e.g., when a thread group is exiting.
     ///
     /// Mainly used by signals.
-    pub fn notify(task: &Arc<Task>) {
+    pub fn notify(task: &Arc<Task>, uninterruptible: bool) {
         let need_enqueue = task.update_status_with(|prev| match prev {
             TaskStatus::Runnable => (prev, false),
-            TaskStatus::Waiting => (TaskStatus::Runnable, true),
+            TaskStatus::Waiting {
+                interruptible: true,
+            } => (TaskStatus::Runnable, true),
+            TaskStatus::Waiting {
+                interruptible: false,
+            } => {
+                if uninterruptible {
+                    (TaskStatus::Runnable, true)
+                } else {
+                    (prev, false)
+                }
+            },
             TaskStatus::Zombie => (prev, false),
         });
         if need_enqueue {

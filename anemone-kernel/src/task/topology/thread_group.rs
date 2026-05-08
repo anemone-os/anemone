@@ -2,7 +2,13 @@
 
 use crate::{
     prelude::*,
-    task::topology::{TOPOLOGY, TaskNode, ThreadGroup},
+    task::{
+        sig::{
+            SigNo, Signal,
+            info::{SiCode, SigInfoFields, SigKill},
+        },
+        topology::{TOPOLOGY, TaskNode, ThreadGroup},
+    },
 };
 
 impl ThreadGroup {
@@ -122,6 +128,12 @@ impl ThreadGroup {
                 .collect::<Vec<_>>()
         };
         children.into_iter().find(prediction)
+    }
+
+    /// Get the [SigNo] that should be sent to parent thread group when this
+    /// thread group exits.
+    pub fn terminate_signal(&self) -> Option<SigNo> {
+        self.terminate_signal
     }
 }
 
@@ -246,7 +258,14 @@ impl Task {
                         .get(member_tid)
                         .expect("task topology: task not found")
                         .task;
-                    member.set_killed();
+                    member.recv_signal(Signal::new(
+                        SigNo::SIGKILL,
+                        SiCode::Kernel,
+                        SigInfoFields::Kill(SigKill {
+                            pid: tg.tgid(),
+                            uid: 0, // only root user
+                        }),
+                    ));
                 }
             }
 

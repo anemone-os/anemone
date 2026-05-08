@@ -135,6 +135,8 @@ fn exec_init_proc() {
         kinit.set_fs_state(FsState::new_root());
     }
 
+    // TODO: signals.
+
     kernel_execve(
         &init_path,
         &[&init_path, &"1".to_string()],

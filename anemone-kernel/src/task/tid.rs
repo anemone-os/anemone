@@ -4,7 +4,7 @@ use core::fmt::{Debug, Display};
 
 use idalloc::{Bijection, BitmapAlloc, IdAllocator};
 
-use crate::prelude::*;
+use crate::{prelude::*, syscall::handler::TryFromSyscallArg};
 
 struct TidBijection;
 
@@ -60,6 +60,13 @@ impl Debug for Tid {
 impl Display for Tid {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!("task #{}", self.0))
+    }
+}
+
+impl TryFromSyscallArg for Tid {
+    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+        let raw = u32::try_from_syscall_arg(raw)?;
+        Ok(Self(raw))
     }
 }
 

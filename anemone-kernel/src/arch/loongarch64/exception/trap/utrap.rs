@@ -13,6 +13,7 @@ use crate::{
     task::{
         cpu_usage::Privilege,
         exit::{kernel_exit, kernel_exit_group},
+        sig::handle_signals,
     },
 };
 
@@ -209,9 +210,6 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         {
             // from this code block, the logical execution flow is considered
             // leaving the hardware interrupt environment.
-            if get_current_task().killed() {
-                kernel_exit(ExitCode::Exited(-1));
-            }
 
             debug_assert!(allow_preempt(), "for utraps, this must hold");
             if fetch_clear_need_resched() {
@@ -289,6 +287,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
             IntrArch::local_intr_disable();
         }
     }
+
+    handle_signals(trapframe);
 
     get_current_task().on_prv_change(Privilege::User);
 }

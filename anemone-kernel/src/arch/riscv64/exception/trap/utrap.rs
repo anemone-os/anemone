@@ -5,10 +5,7 @@ use crate::{
     },
     prelude::{fault::handle_user_page_fault, *},
     sched::current_task_id,
-    task::{
-        cpu_usage::Privilege,
-        exit::{kernel_exit, kernel_exit_group},
-    },
+    task::{cpu_usage::Privilege, exit::kernel_exit_group, sig::handle_signals},
 };
 
 // kernel trap entry point. since kernel doesn't use floating point, we don't
@@ -200,11 +197,6 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             // from this code block, the logical execution flow is considered
             // leaving the hardware interrupt environment.
 
-            if get_current_task().killed() {
-                // TODO: exit code.
-                kernel_exit(ExitCode::Exited(-1))
-            }
-
             debug_assert!(allow_preempt(), "for utraps, this must hold");
             if fetch_clear_need_resched() {
                 // if we need reschedule, we can't waste time on disposing deferred tasks.
@@ -272,6 +264,9 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             IntrArch::local_intr_disable();
         }
     }
+
+    // TODO: restart syscalls if needed.
+    handle_signals(trapframe);
 
     get_current_task().on_prv_change(Privilege::User);
 }

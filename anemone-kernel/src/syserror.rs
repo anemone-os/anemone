@@ -130,10 +130,12 @@ pub enum SysError {
     BinFmtUnrecognized,
     /// The operation is interrupted by a signal.
     Interrupted,
+    /// Target thread group doesn't exist.
+    NoSuchProcess,
 }
 
-impl AsErrno for SysError {
-    fn as_errno(&self) -> anemone_abi::errno::Errno {
+impl SysError {
+    pub const fn as_errno(&self) -> anemone_abi::errno::Errno {
         use anemone_abi::errno::*;
 
         match self {
@@ -188,14 +190,11 @@ impl AsErrno for SysError {
             SysError::ChildNotFound => ECHILD,
             SysError::BinFmtUnrecognized => ENOEXEC,
             SysError::Interrupted => EINTR,
+            SysError::NoSuchProcess => ESRCH,
         }
     }
-}
 
-/// Convert a `SysError` to an `Errno` that can be returned to user space.
-///
-/// All subsystems should implement `AsErrno` for their error types.
-pub trait AsErrno {
-    #[track_caller]
-    fn as_errno(&self) -> anemone_abi::errno::Errno;
+    pub const fn is_kernel_internal(&self) -> bool {
+        todo!()
+    }
 }

@@ -4,8 +4,7 @@ mod intr;
 pub use intr::RiscV64IntrArch;
 pub use trap::RiscV64TrapArch;
 mod trap;
-pub use trap::install_ktrap_handler;
-pub use trap::RiscV64TrapFrame;
-pub use trap::__ktrap_return_to_task;
-pub use trap::__utrap_return_to_task;
-
+pub use trap::{
+    __ktrap_return_to_task, __utrap_return_to_task, RiscV64SignalArch, RiscV64TrapFrame,
+    install_ktrap_handler,
+};

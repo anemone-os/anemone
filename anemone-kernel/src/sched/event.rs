@@ -46,14 +46,10 @@ impl Event {
         }
     }
 
-    // TODO: interruptible wait and publish when we support signals.
-
     /// This method is intenionally designed not to return any error. I.e. it's
     /// a ***fire-and-forget*** operation. Caller is both not expected and
     /// unable to handle any error.
-    ///
-    /// TODO: explain the reason.
-    pub fn publish(&self, n_exclusive: usize) {
+    pub fn publish(&self, n_exclusive: usize, wakeup_uninterruptible: bool) {
         let mut to_wakeup = vec![];
 
         {
@@ -77,7 +73,23 @@ impl Event {
 
         for listener in to_wakeup {
             knoticeln!("waking up listener {:?}", listener);
-            if let Err(e) = try_to_wake_up(&listener.task, &[TaskStatus::Waiting]) {
+            if let Err(e) = try_to_wake_up(
+                &listener.task,
+                if wakeup_uninterruptible {
+                    &[
+                        TaskStatus::Waiting {
+                            interruptible: false,
+                        },
+                        TaskStatus::Waiting {
+                            interruptible: true,
+                        },
+                    ]
+                } else {
+                    &[TaskStatus::Waiting {
+                        interruptible: true,
+                    }]
+                },
+            ) {
                 knoticeln!(
                     "failed to wake up listener {:?} for task {}, error: {:?}, maybe it has been woken up by other event?",
                     listener,
@@ -88,10 +100,60 @@ impl Event {
         }
     }
 
-    /// Blocking listen.
+    /// Blocking listen. Interruptible by signals.
+    ///
+    /// Return true if the listener wakes up because the prediction is
+    /// satisfied, false if the listener wakes up because of a signal.
     ///
     /// **Ensure no lock or guard is held when calling this method.**
-    pub fn listen<P>(&self, exclusive: bool, prediction: P)
+    pub fn listen<P>(&self, exclusive: bool, prediction: P) -> bool
+    where
+        P: Fn() -> bool,
+    {
+        let task = get_current_task();
+        let listener = Listener { task: task.clone() };
+        let ret;
+
+        let mut guard = PreemptGuard::new();
+
+        loop {
+            // ugly and costly... we should use intrusive linked list later.
+            self.prepare_listener(&task, exclusive, true);
+
+            // if a preemption occurs here, then the listener will never be woken up!
+
+            if prediction() {
+                ret = true;
+                break;
+            }
+
+            if task.has_pending_signal() {
+                kdebugln!(
+                    "task {} has pending signal, breaking the wait loop",
+                    task.tid()
+                );
+                ret = false;
+                break;
+            }
+
+            unsafe {
+                drop(guard);
+                with_intr_disabled(|| {
+                    schedule();
+                });
+                guard = PreemptGuard::new();
+            }
+        }
+
+        self.clean_listener(&listener, exclusive);
+
+        ret
+    }
+
+    /// Block listening. Won't be woken up by signals.
+    ///
+    /// **Ensure no lock or guard is held when calling this method.**
+    pub fn listen_uninterruptible<P>(&self, exclusive: bool, prediction: P)
     where
         P: Fn() -> bool,
     {
@@ -102,7 +164,7 @@ impl Event {
 
         loop {
             // ugly and costly... we should use intrusive linked list later.
-            self.prepare_listener(&task, exclusive);
+            self.prepare_listener(&task, exclusive, false);
 
             // if a preemption occurs here, then the listener will never be woken up!
 
@@ -110,14 +172,7 @@ impl Event {
                 break;
             }
 
-            // TODO: signal checking
-            if task.killed() {
-                knoticeln!(
-                    "listener task {} is killed while waiting, stop waiting",
-                    task.tid()
-                );
-                break;
-            }
+            // do not check pending signals here, since this is uninterruptible wait.
 
             unsafe {
                 drop(guard);
@@ -133,7 +188,7 @@ impl Event {
 }
 
 impl Event {
-    fn prepare_listener(&self, listener: &Arc<Task>, exclusive: bool) {
+    fn prepare_listener(&self, listener: &Arc<Task>, exclusive: bool, interruptible: bool) {
         let mut inner = self.inner.lock_irqsave();
         listener.update_status_with(|_prev| {
             let listener = Listener {
@@ -146,7 +201,7 @@ impl Event {
                         "task {} is already listening to this event exclusively, won't add it again",
                         listener.task.tid()
                     );
-                    return (TaskStatus::Waiting, ());
+                    return (TaskStatus::Waiting { interruptible }, ());
                 }
                 inner.exclusive.push_back(listener);
             } else {
@@ -155,12 +210,12 @@ impl Event {
                         "task {} is already listening to this event non-exclusively, won't add it again",
                         listener.task.tid()
                     );
-                    return (TaskStatus::Waiting, ());
+                    return (TaskStatus::Waiting { interruptible }, ());
                 }
                 inner.non_exclusive.push_back(listener);
             }
 
-            (TaskStatus::Waiting, ())
+            (TaskStatus::Waiting { interruptible }, ())
         })
     }
 

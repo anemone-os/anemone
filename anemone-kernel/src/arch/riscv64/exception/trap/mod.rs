@@ -6,6 +6,8 @@ mod ktrap;
 pub use ktrap::*;
 mod utrap;
 pub use utrap::*;
+mod signal;
+pub use signal::*;
 
 use riscv::register::sstatus::{self, SPP};
 
@@ -19,7 +21,7 @@ impl TrapArchTrait for RiscV64TrapArch {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 struct Gpr {
     x: [u64; 32], // x0 as a placeholder for convenience
@@ -56,7 +58,7 @@ impl Gpr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct RiscV64TrapFrame {
     gpr: Gpr,
@@ -164,7 +166,11 @@ impl TrapFrameArch for RiscV64TrapFrame {
         self.gpr.a::<7>() as usize
     }
 
-    fn advance_pc(&mut self) {
+    fn get_pc(&self) -> u64 {
+        self.sepc
+    }
+
+    fn advance_syscall_pc(&mut self) {
         // `ecall` instruction is always 4 bytes long even though Compressed
         // extension is enabled.
         self.sepc += 4;
@@ -172,6 +178,10 @@ impl TrapFrameArch for RiscV64TrapFrame {
 
     unsafe fn set_syscall_ret_val(&mut self, retval: u64) {
         self.gpr.x[10] = retval; // a0
+    }
+
+    unsafe fn get_syscall_ret_val(&self) -> u64 {
+        self.gpr.x[10] // a0
     }
 
     const ZEROED: Self = Self {
@@ -183,6 +193,10 @@ impl TrapFrameArch for RiscV64TrapFrame {
         sscratch: 0,
         ktp: 0,
     };
+
+    fn get_sp(&self) -> u64 {
+        self.gpr.sp()
+    }
 
     fn set_sp(&mut self, sp: u64) {
         self.gpr.x[2] = sp; // sp

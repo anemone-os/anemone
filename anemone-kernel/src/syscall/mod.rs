@@ -13,7 +13,7 @@ const INVALID_SYSCALL: SyscallHandler = SyscallHandler {
     sysno: 0,
     nargs: 0,
     name: "invalid",
-    handler: |_| Err(SysError::NoSys),
+    handler: |_, _| Err(SysError::NoSys),
 };
 
 /// Syscall handler table. Singleton instance.
@@ -106,7 +106,9 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) {
         },
     };
 
-    let retval = match (handler.handler)(&regs) {
+    trapframe.advance_syscall_pc();
+
+    let retval = match (handler.handler)(&regs, trapframe) {
         Ok(retval) => retval,
         Err(err) => (-(i64::from(err.as_errno()))) as u64,
     };
@@ -114,5 +116,4 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) {
     unsafe {
         trapframe.set_syscall_ret_val(retval);
     }
-    trapframe.advance_pc();
 }

@@ -3,6 +3,7 @@ use quote::{format_ident, quote};
 use syn::{
     Error, Expr, FnArg, Ident, ItemFn, Pat, Token,
     parse::{Parse, ParseStream},
+    parse_quote,
 };
 
 struct SyscallAttr {
@@ -89,6 +90,7 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let name = &input.sig.ident;
     let wrapper_name = format_ident!("__sys_wrap_{}", name);
     let static_name = format_ident!("__SYSCALL_{}", name.to_string().to_uppercase());
+    let hidden_trapframe_arg = format_ident!("__trapframe__");
 
     let mut arg_bindings = Vec::new();
     let mut arg_names = Vec::new();
@@ -154,6 +156,11 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     let nargs = arg_names.len();
+    input
+        .sig
+        .inputs
+        .push(parse_quote!(#hidden_trapframe_arg: &mut crate::arch::TrapFrame));
+
     let raw_arg_exprs: Vec<_> = (0..nargs)
         .map(|index| {
             let arg_index = syn::Index::from(index);
@@ -175,11 +182,12 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         fn #wrapper_name(
             regs: &crate::syscall::handler::SyscallRegs,
+            trapframe: &mut crate::arch::TrapFrame,
         ) -> core::result::Result<u64, crate::syserror::SysError> {
             #preparse_call
             #(#arg_bindings)*
 
-            #name(#(#arg_names),*)
+            #name(#(#arg_names,)* trapframe)
                 .map_err(core::convert::Into::into)
         }
 
