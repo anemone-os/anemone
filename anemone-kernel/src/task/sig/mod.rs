@@ -431,13 +431,9 @@ pub fn handle_signals(
     }
 }
 
-/// Return `true` if:
-/// - the signal handler is a user-defined handler, and we just prepare the
-///   signal frame, and get into the signal handler in common trap-return path.
-/// - the signal handler prepares the trapframe to restart the interrupted
-///   syscall.
-///
-/// Either way, the signal handling loop should break.
+/// Return `true` if the signal handler is a user-defined handler and we just
+/// prepare the signal frame, then get into the handler in the common
+/// trap-return path.
 fn perform_signal_action(
     signal: Signal,
     trapframe: &mut TrapFrame,
@@ -456,17 +452,6 @@ fn perform_signal_action(
     match action {
         SignalAction::Default(default) => {
             default(no);
-
-            if flags.contains(SaFlags::RESTART) {
-                if let Some((restart, syscall_ctx)) = restart_syscall.take() {
-                    match restart {
-                        RestartSyscall::Idempotent => {
-                            TrapArch::restore_syscall_ctx(trapframe, &syscall_ctx);
-                        },
-                    }
-                }
-                break_loop = true;
-            }
         },
         SignalAction::Ignore => {
             // do nothing.
@@ -531,6 +516,8 @@ fn perform_signal_action(
                 if let Some((restart, syscall_ctx)) = restart_syscall.take() {
                     match restart {
                         RestartSyscall::Idempotent => {
+                            kdebugln!("restarting syscall: sysno = {}", syscall_ctx.syscall_no());
+
                             TrapArch::restore_syscall_ctx(trapframe, &syscall_ctx);
                             // arguments are still in registers, and will be
                             // encoded into ucontext.
