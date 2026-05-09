@@ -12,7 +12,11 @@ use crate::{
     sched::current_task_id,
     task::{
         cpu_usage::Privilege,
-        exit::{kernel_exit, kernel_exit_group},
+        sig::{
+            handle_signals,
+            info::{SiCode, SigFault, SigInfoFields},
+            SigNo, Signal,
+        },
     },
 };
 
@@ -209,9 +213,6 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         {
             // from this code block, the logical execution flow is considered
             // leaving the hardware interrupt environment.
-            if get_current_task().killed() {
-                kernel_exit(ExitCode::Exited(-1));
-            }
 
             debug_assert!(allow_preempt(), "for utraps, this must hold");
             if fetch_clear_need_resched() {
@@ -230,7 +231,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
 
         let esubcode = estat.esubcode();
         let reason = match LA64Exception::try_from((ecode, esubcode)) {
-            Ok(r) => r,
+            Ok(r) => Some(r),
             Err(_) => {
                 kerrln!(
                     "({}) user {} aborted with unknown trap with code {}:{}",
@@ -239,56 +240,71 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     ecode,
                     esubcode
                 );
-                kernel_exit_group(ExitCode::Exited(-1));
-                //TODO: Error code;
+                get_current_task().recv_signal(Signal::new(
+                    SigNo::SIGILL,
+                    SiCode::Kernel,
+                    SigInfoFields::Ill(SigFault {
+                        addr: VirtAddr::new(trapframe.era),
+                    }),
+                ));
+                None
             },
         };
 
-        match reason {
-            LA64Exception::Syscall => {
-                handle_syscall(trapframe);
-            },
-            LA64Exception::PageModified
-            | LA64Exception::PageNotReadable
-            | LA64Exception::PageNotExecutable
-            | LA64Exception::PagePrivilegeIllegal
-            | LA64Exception::PageInvalidFetch
-            | LA64Exception::PageInvalidLoad
-            | LA64Exception::PageInvalidStore => {
-                handle_user_page_fault(PageFaultInfo::new(
-                    VirtAddr::new(trapframe.era),
-                    VirtAddr::new(trapframe.badv as u64),
-                    match reason {
-                        LA64Exception::PageInvalidFetch | LA64Exception::PageNotExecutable => {
-                            PageFaultType::Execute
+        if let Some(reason) = reason {
+            match reason {
+                LA64Exception::Syscall => {
+                    handle_syscall(trapframe);
+                },
+                LA64Exception::PageModified
+                | LA64Exception::PageNotReadable
+                | LA64Exception::PageNotExecutable
+                | LA64Exception::PagePrivilegeIllegal
+                | LA64Exception::PageInvalidFetch
+                | LA64Exception::PageInvalidLoad
+                | LA64Exception::PageInvalidStore => {
+                    handle_user_page_fault(PageFaultInfo::new(
+                        VirtAddr::new(trapframe.era),
+                        VirtAddr::new(trapframe.badv as u64),
+                        match reason {
+                            LA64Exception::PageInvalidFetch | LA64Exception::PageNotExecutable => {
+                                PageFaultType::Execute
+                            },
+                            LA64Exception::PageInvalidLoad
+                            | LA64Exception::PageNotReadable
+                            | LA64Exception::PagePrivilegeIllegal => PageFaultType::Read,
+                            LA64Exception::PageModified | LA64Exception::PageInvalidStore => {
+                                PageFaultType::Write
+                            },
+                            _ => unreachable!(),
                         },
-                        LA64Exception::PageInvalidLoad
-                        | LA64Exception::PageNotReadable
-                        | LA64Exception::PagePrivilegeIllegal => PageFaultType::Read,
-                        LA64Exception::PageModified | LA64Exception::PageInvalidStore => {
-                            PageFaultType::Write
-                        },
-                        _ => unreachable!(),
-                    },
-                ));
-            },
-            _ => {
-                kerrln!(
-                    "({}) user {} aborted with unhandled exception: {:?}, pc: {:#x}, badv: {:#x}\n\ttask return value not implemented yet",
-                    cur_cpu_id(),
-                    current_task_id(),
-                    reason,
-                    trapframe.era,
-                    trapframe.badv
-                );
-                kernel_exit_group(ExitCode::Exited(-1));
-                //TODO: Error code
-            },
+                    ));
+                },
+                _ => {
+                    kerrln!(
+                        "({}) user {} aborted with unhandled exception: {:?}, pc: {:#x}, badv: {:#x}\n\ttask return value not implemented yet",
+                        cur_cpu_id(),
+                        current_task_id(),
+                        reason,
+                        trapframe.era,
+                        trapframe.badv
+                    );
+                    get_current_task().recv_signal(Signal::new(
+                        SigNo::SIGILL,
+                        SiCode::Kernel,
+                        SigInfoFields::Ill(SigFault {
+                            addr: VirtAddr::new(trapframe.era),
+                        }),
+                    ));
+                },
+            }
         }
         unsafe {
             IntrArch::local_intr_disable();
         }
     }
+
+    handle_signals(trapframe);
 
     get_current_task().on_prv_change(Privilege::User);
 }

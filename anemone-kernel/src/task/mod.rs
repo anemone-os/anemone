@@ -33,6 +33,10 @@ use crate::{
     task::{
         cpu_usage::{TaskCpuUsage, ThreadGroupCpuUsage},
         files::FilesState,
+        sig::{
+            PendingSignals, SigNo, altstack::SigAltStack, disposition::SignalDisposition,
+            set::SigSet,
+        },
     },
 };
 
@@ -52,7 +56,8 @@ pub enum TidRef {
 ///
 /// **LOCK ORDERING**
 ///
-/// **`uspace`->`flags`->`name`**
+/// - **`uspace`->`flags`->`name`**
+/// - **`sig_pending`->`sig_mask`->`sig_disposition`**
 ///
 /// TODO: full lock ordering chain.
 pub struct Task {
@@ -118,6 +123,15 @@ pub struct Task {
     /// Cpu usage information.
     cpu_usage: RwLock<TaskCpuUsage>,
 
+    /// Signal disposition table.
+    sig_disposition: Arc<RwLock<SignalDisposition>>,
+    /// Determines which signals are blocked.
+    sig_mask: SpinLock<SigSet>,
+    /// Current pending signals. Local to each task.
+    sig_pending: SpinLock<PendingSignals>,
+    /// Alternative signal stack. Local to each task.
+    sig_altstack: SpinLock<Option<SigAltStack>>,
+
     /// Exit code of this task. Meaningful only when this task is a zombie.
     exit_code: SpinLock<Option<ExitCode>>,
 
@@ -128,9 +142,6 @@ pub struct Task {
     ///
     /// This pointer is not guaranteed to be valid. It's user's responsibility.
     clear_child_tid: SpinLock<Option<VirtAddr>>,
-
-    /// TODO: when we have signals, remove this field.
-    killed: AtomicBool,
 }
 
 /// **[TaskStatus] is not the objective truth of a task's state. Instead, it's
@@ -154,20 +165,12 @@ pub enum TaskStatus {
     /// Task can be reapped by its parent, but cannot run anymore.
     Zombie,
     /// Task can be waken up.
-    ///
-    /// TODO: interruptible when we support signals.
-    Waiting,
+    Waiting { interruptible: bool },
 }
 
 impl TaskStatus {
-    pub const ALL_STATUSES: &[TaskStatus; 3] = &[
-        TaskStatus::Runnable,
-        TaskStatus::Zombie,
-        TaskStatus::Waiting,
-    ];
-
     pub fn is_sleeping(&self) -> bool {
-        matches!(self, TaskStatus::Waiting)
+        matches!(self, TaskStatus::Waiting { .. })
     }
 }
 
@@ -175,12 +178,11 @@ bitflags! {
     /// TODO: Remove current flags.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct TaskFlags: u8{
-        /// No special flags.
-        const NONE = 0;
         /// Marks a kernel task.
         const KERNEL = 1 << 0;
         /// Marks an idle task.
         const IDLE = 1 << 1;
+
     }
 }
 
@@ -199,7 +201,7 @@ pub enum ExitCode {
     /// Normally exited with the given exit code.
     Exited(i8),
     /// Killed by a signal with the given signal number.
-    Signaled(u8),
+    Signaled(SigNo),
 }
 
 /// **LOCK ORDERING**
@@ -211,6 +213,8 @@ pub struct ThreadGroup {
     tgid: TidHandle,
     /// Event that will be published when a child thread group exits.
     child_exited: Event,
+    /// Signal to send to parent when this thread group exits.
+    terminate_signal: Option<SigNo>,
     /// Mutable state.
     inner: RwLock<ThreadGroupInner>,
 }
@@ -274,6 +278,8 @@ struct ThreadGroupInner {
     children_tgids: BTreeSet<Tid>,
     /// CPU usage of this thread group.
     cpu_usage: ThreadGroupCpuUsage,
+    /// Pending signals for this thread group. Shared by all member threads.
+    sig_pending: SpinLock<PendingSignals>,
 }
 
 // endregion: definitions
@@ -307,6 +313,13 @@ impl Task {
     /// first. But when latering creating a new [ThreadGroup], the owned handle
     /// of leader thread will be converted to [TidRef::Leader], and the
     /// [TidHandle] will be put into [ThreadGroup].
+    ///
+    /// Signal-related structs are both initialized to an 'empty' state, which
+    /// means no pending signals, no blocked signals and all signals have
+    /// default handlers.
+    ///
+    /// Signal to send to parent when this task exits is set to [None] by
+    /// default, which means no signal will be sent.
     pub unsafe fn new_kernel(
         name: &str,
         entry: *const (),
@@ -346,11 +359,15 @@ impl Task {
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: Arc::new(RwLock::new(FilesState::new())),
             cpu_usage: RwLock::new(TaskCpuUsage::ZERO),
+
+            sig_disposition: Arc::new(RwLock::new(SignalDisposition::new())),
+            sig_mask: SpinLock::new(SigSet::new()),
+            sig_pending: SpinLock::new(PendingSignals::new()),
+            sig_altstack: SpinLock::new(None),
+
             exit_code: SpinLock::new(None),
             status: RwLock::new(TaskStatus::Runnable),
             clear_child_tid: SpinLock::new(None),
-
-            killed: AtomicBool::new(false),
         };
         Ok((task, PublishGuard))
     }
@@ -386,11 +403,15 @@ impl Task {
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
                 files_state: Arc::new(RwLock::new(FilesState::new())),
                 cpu_usage: RwLock::new(TaskCpuUsage::ZERO),
+
+                sig_disposition: Arc::new(RwLock::new(SignalDisposition::new())),
+                sig_mask: SpinLock::new(SigSet::new()),
+                sig_pending: SpinLock::new(PendingSignals::new()),
+                sig_altstack: SpinLock::new(None),
+
                 exit_code: SpinLock::new(None),
                 status: RwLock::new(TaskStatus::Runnable),
                 clear_child_tid: SpinLock::new(None),
-
-                killed: AtomicBool::new(false),
             },
             PublishGuard,
         ))
@@ -446,8 +467,6 @@ impl Task {
     /// Get a copy of the user trapframe.
     ///
     /// TODO: explain **Why no accessors are provided**.
-    ///
-    /// # Panics
     #[track_caller]
     pub fn utrapframe(&self) -> TrapFrame {
         unsafe {
@@ -457,6 +476,24 @@ impl Task {
                     .expect("trapframe pointer is not set")
                     .as_ref()
                     .clone()
+            })
+        }
+    }
+
+    /// Get a pointer to the user trapframe.
+    ///
+    /// **Only pointer access is provided.** For temporarily easy use, you can
+    /// transform the pointer into a reference. But be careful to follow Rust's
+    /// aliasing rules.
+    #[track_caller]
+    pub unsafe fn utrapframe_ptr(&self) -> NonNull<TrapFrame> {
+        unsafe {
+            self.utrapframe.with(|inner| {
+                inner
+                    .as_ref()
+                    .expect("trapframe pointer is not set")
+                    .as_ref()
+                    .into()
             })
         }
     }
@@ -492,6 +529,10 @@ impl Task {
     }
 
     /// Get the task flags.
+    ///
+    /// We don't provide wrapers for each flag (something like `is_kernel`) on
+    /// [Task]. Caller should always have the awareness that flag reading will
+    /// involve a lock operation, which is actually a bit dangerous.
     pub fn flags(&self) -> TaskFlags {
         self.flags.read().clone()
     }
@@ -570,20 +611,6 @@ impl Task {
     /// Get the current clear-child-tid target pointer.
     pub fn get_clear_child_tid(&self) -> Option<VirtAddr> {
         self.clear_child_tid.lock().clone()
-    }
-
-    /// Whether this task is killed.
-    pub fn killed(&self) -> bool {
-        self.killed.load(Ordering::Acquire)
-    }
-
-    /// Kill this task. This is a one-way operation.
-    ///
-    /// This will try to wake up this task if it's sleeping.
-    pub fn set_killed(self: &Arc<Self>) {
-        self.killed.store(true, Ordering::Release);
-
-        notify(self);
     }
 }
 

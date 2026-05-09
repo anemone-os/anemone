@@ -16,7 +16,9 @@ mod sched;
 
 pub use backtrace::RiscV64BacktraceArch as BacktraceArch;
 pub use cpu::RiscV64CpuArch as CpuArch;
-pub use exception::{RiscV64IntrArch as IntrArch, RiscV64TrapArch as TrapArch};
+pub use exception::{
+    RiscV64IntrArch as IntrArch, RiscV64SignalArch as SignalArch, RiscV64TrapArch as TrapArch,
+};
 pub use machine::machine_init;
 pub use mm::{KernelLayout, RiscV64PagingArch as PagingArch};
 pub use sched::RiscV64SchedArch as SchedArch;

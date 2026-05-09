@@ -84,6 +84,12 @@ pub fn initcall(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The callable must accept a single `u64` syscall argument and return
 /// `Result<ValidatedArgType, SysError>`, where `ValidatedArgType` is the type
 /// of the annotated parameter.
+///
+/// Inside a syscall function body, a hidden local binding named `__trapframe__`
+/// is also available. It has type `&mut crate::arch::TrapFrame` and refers to
+/// the active user trapframe for the current syscall. This is intended for the
+/// small set of syscalls that must directly rewrite return state, such as
+/// `rt_sigreturn` or future syscall restart paths.
 #[proc_macro_attribute]
 pub fn syscall(attr: TokenStream, item: TokenStream) -> TokenStream {
     syscall::syscall_impl(attr, item)

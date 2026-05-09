@@ -403,7 +403,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
                 None,
                 Some(Tid::INIT),
                 SchedEntity::new(SchedClassPrv::RoundRobin(())),
-                TaskFlags::NONE,
+                TaskFlags::empty(),
                 Some(cur_cpu_id()),
             )
         }
@@ -455,7 +455,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
             None,
             Some(Tid::INIT),
             SchedEntity::new(SchedClassPrv::RoundRobin(())),
-            TaskFlags::NONE,
+            TaskFlags::empty(),
             Some(cur_cpu_id()),
         )
         .unwrap_or_else(|e| panic!("failed to create ap kinit task: {:?}", e));

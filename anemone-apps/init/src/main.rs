@@ -4,12 +4,10 @@
 use core::ptr::null_mut;
 
 use anemone_rs::{
+    abi::process::linux::signal::SIGCHLD,
     env::*,
-    os::linux::{
-        fs::{chdir, chroot, mount},
-        process::{
-            clone, execve, sched_yield, wait4, CloneFlags, WStatusRaw, WaitFor, WaitOptions,
-        },
+    os::linux::process::{
+        CloneFlags, WStatusRaw, WaitFor, WaitOptions, clone, execve, sched_yield, wait4,
     },
     prelude::*,
     process::process_id,
@@ -37,7 +35,8 @@ pub fn main() -> Result<(), Errno> {
 
     let mut tidc = 0;
     match clone(
-        CloneFlags::CHILD_SETTID | CloneFlags::SIGCHLD,
+        CloneFlags::CHILD_SETTID,
+        Some(SIGCHLD),
         None,
         None,
         null_mut(),

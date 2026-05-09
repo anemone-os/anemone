@@ -64,6 +64,16 @@ impl KPTable {
                             huge_pages: true,
                         }).expect(concat!("failed to map kernel ", stringify!($name), " segment"));
                     }
+
+                    kdebugln!(
+                        "mapped kernel {} segment: [{:#x}, {:#x}) -> [{:#x}, {:#x}), flags={:?}",
+                        stringify!($name),
+                        vstart,
+                        vend,
+                        pstart,
+                        pstart + (vend - vstart),
+                        $flags
+                    );
                 }
             }};
         }

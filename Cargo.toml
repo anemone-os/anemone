@@ -39,7 +39,7 @@ virtio-drivers = { version = "0.13.0", default-features = false, features = [
     "alloc",
 ] }
 typed-path = { version = "0.12.3", default-features = false }
-lwext4_rust = { git = "https://github.com/anemone-os/lwext4_rust.git", rev = "ef99757", default-features = false, features = [
+lwext4_rust = { git = "https://github.com/anemone-os/lwext4_rust.git", rev = "502b48b", default-features = false, features = [
     "print",
 ] }
 goblin = { version = "0.10.5", default-features = false, features = [

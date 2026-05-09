@@ -17,7 +17,7 @@ pub mod runtime;
 
 pub mod prelude;
 pub use anemone_abi as abi;
-pub use anemone_rs_macros::main;
+pub use anemone_rs_macros::{main, signal_handler};
 
 unsafe extern "Rust" {
     /// Entrypoint for main function.

@@ -6,7 +6,7 @@ pub trait TrapArchTrait {
     unsafe fn load_utrapframe(trapframe: Self::TrapFrame) -> !;
 }
 
-pub trait TrapFrameArch: Debug + Clone {
+pub trait TrapFrameArch: Debug + Clone + Copy {
     const ZEROED: Self;
     /// Get the system call argument at the given index.
     ///
@@ -24,10 +24,15 @@ pub trait TrapFrameArch: Debug + Clone {
     /// undefined otherwise.
     unsafe fn syscall_no(&self) -> usize;
 
-    /// Advance the program counter to the next instruction.
-    ///
-    /// Usually used by system call handling.
-    fn advance_pc(&mut self);
+    /// Get the program counter from the trap frame.
+    fn get_pc(&self) -> u64;
+
+    /// Advance the program counter from the current system call instruction to
+    /// the next instruction.
+    fn advance_syscall_pc(&mut self);
+
+    /// Get the stack pointer from the trap frame.
+    fn get_sp(&self) -> u64;
 
     /// Set the stack pointer in the trap frame.
     fn set_sp(&mut self, sp: u64);
@@ -51,4 +56,12 @@ pub trait TrapFrameArch: Debug + Clone {
     /// This is only meaningful in a syscall context, and the behavior is
     /// undefined otherwise.
     unsafe fn set_syscall_ret_val(&mut self, retval: u64);
+
+    /// Get the return value of the system call.
+    ///
+    /// # Safety
+    ///
+    /// This is only meaningful in a syscall context, and the behavior is
+    /// undefined otherwise.
+    unsafe fn get_syscall_ret_val(&self) -> u64;
 }

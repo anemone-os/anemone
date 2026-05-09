@@ -7,7 +7,11 @@ use crate::{
     sched::current_task_id,
     task::{
         cpu_usage::Privilege,
-        exit::{kernel_exit, kernel_exit_group},
+        sig::{
+            handle_signals,
+            info::{SiCode, SigFault, SigInfoFields},
+            SigNo, Signal,
+        },
     },
 };
 
@@ -200,11 +204,6 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             // from this code block, the logical execution flow is considered
             // leaving the hardware interrupt environment.
 
-            if get_current_task().killed() {
-                // TODO: exit code.
-                kernel_exit(ExitCode::Exited(-1))
-            }
-
             debug_assert!(allow_preempt(), "for utraps, this must hold");
             if fetch_clear_need_resched() {
                 // if we need reschedule, we can't waste time on disposing deferred tasks.
@@ -239,8 +238,14 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                     cur_cpu_id(),
                     current_task_id(),
                 );
-                //TODO: Error code
-                kernel_exit_group(ExitCode::Exited(-1))
+                // TODO: this should be SIGTRAP. but we haven't implemented breakpoint yet.
+                get_current_task().recv_signal(Signal::new(
+                    SigNo::SIGILL,
+                    SiCode::Kernel,
+                    SigInfoFields::Ill(SigFault {
+                        addr: VirtAddr::new(trapframe.sepc),
+                    }),
+                ));
             },
             RiscV64Exception::InstructionPageFault
             | RiscV64Exception::LoadPageFault
@@ -258,13 +263,18 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             },
             _ => {
                 kerrln!(
-                    "({}) user {} aborted with error {:?}\n\ttask return value not implemented yet",
+                    "({}) user {} aborted with error {:?}\n\t not implemented yet",
                     cur_cpu_id(),
                     current_task_id(),
                     reason
                 );
-                kernel_exit_group(ExitCode::Exited(-1))
-                //TODO: Error code
+                get_current_task().recv_signal(Signal::new(
+                    SigNo::SIGILL,
+                    SiCode::Kernel,
+                    SigInfoFields::Ill(SigFault {
+                        addr: VirtAddr::new(trapframe.sepc),
+                    }),
+                ));
             },
         }
 
@@ -272,6 +282,9 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             IntrArch::local_intr_disable();
         }
     }
+
+    // TODO: restart syscalls if needed.
+    handle_signals(trapframe);
 
     get_current_task().on_prv_change(Privilege::User);
 }

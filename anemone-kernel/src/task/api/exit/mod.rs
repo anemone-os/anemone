@@ -4,7 +4,13 @@
 
 use crate::{
     prelude::{user_access::UserWritePtr, *},
-    task::tid::Tid,
+    task::{
+        sig::{
+            SigNo, Signal,
+            info::{SiCode, SigChld, SigInfoFields, SigKill},
+        },
+        tid::Tid,
+    },
 };
 
 pub mod exit;
@@ -83,14 +89,40 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             tg_inner.status.life_cycle = ThreadGroupLifeCycle::Exited(xcode);
 
             drop(tg_inner);
+
+            let cpu_usage = tg.cpu_usage_snapshot();
+
+            if let Some(terminate_signal) = tg.terminate_signal() {
+                tg.get_parent().recv_signal(Signal::new(
+                    terminate_signal,
+                    SiCode::Kernel,
+                    SigInfoFields::Chld(SigChld {
+                        pid: tg.tgid(),
+                        uid: 0, // only root user.
+                        // TODO: this is false. we should look at si_code first.
+                        status: match xcode {
+                            ExitCode::Exited(xcode) => xcode as i32,
+                            ExitCode::Signaled(signo) => signo.as_usize() as i32,
+                        },
+                        utime: duration_to_ticks(cpu_usage.self_user() + cpu_usage.reaped_user()),
+                        stime: duration_to_ticks(
+                            cpu_usage.self_kernel() + cpu_usage.reaped_kernel(),
+                        ),
+                    }),
+                ));
+            }
+
             // 3. publish child_exited event.
-            tg.get_parent().child_exited.publish(1);
+            tg.get_parent().child_exited.publish(1, false);
 
             // 4. orphan children reparented to init may contain zombie thread groups. let's
             //    publish that to init as well.
             // this hardcoding is a bit ugly. when we support subreapers, we should publish
             // this to the actual reaper.
-            get_init_task().get_thread_group().child_exited.publish(1);
+            get_init_task()
+                .get_thread_group()
+                .child_exited
+                .publish(1, false);
         }
 
         // ORDER MATTERS.
@@ -147,7 +179,14 @@ pub fn kernel_exit_group(code: ExitCode) -> ! {
         // threads in this thread group.
         tg.for_each_member(|member| {
             if member.tid() != task.tid() {
-                member.set_killed();
+                member.recv_signal(Signal::new(
+                    SigNo::SIGKILL,
+                    SiCode::Kernel,
+                    SigInfoFields::Kill(SigKill {
+                        pid: task.tgid(),
+                        uid: 0, // only root user.
+                    }),
+                ))
             }
         });
 

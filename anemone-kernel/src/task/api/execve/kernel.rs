@@ -23,7 +23,6 @@ pub fn kernel_execve(
             drop(usp_data);
             let usp = Arc::new(usp);
             unsafe {
-                IntrArch::local_intr_disable();
                 let mut ksp = VirtAddr::new(0);
 
                 let task = get_current_task();
@@ -33,10 +32,16 @@ pub fn kernel_execve(
                 // these resoureces must be cleaned after dethreading.
                 task.close_cloexec_fds();
 
+                task.sig_disposition.write().clear_custom_actions();
+                task.sig_altstack.lock().take();
+                // mask, pending stay unchanged.
+
                 // this must be a user task.
                 let exec_fn = path.as_ref().split('/').last().unwrap_or(path.as_ref());
                 let name = (String::from("@user/") + exec_fn).into_boxed_str();
-                let flags = TaskFlags::NONE;
+                let flags = TaskFlags::empty();
+
+                IntrArch::local_intr_disable();
 
                 // this operation must be placed after dethreading.
                 // dethreading possibly triggers yield, which will change mapping to old

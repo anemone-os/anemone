@@ -54,7 +54,7 @@ enum WStatus {
 }
 
 impl WStatus {
-    fn serialize_to(self, kbuf: &mut i32) {
+    fn serialize_to_posix(self, kbuf: &mut i32) {
         match self {
             // [exit_code|00000000]
             Self::Exited { exit_code } => {
@@ -78,7 +78,7 @@ impl From<ExitCode> for WStatus {
         match value {
             ExitCode::Exited(exit_code) => Self::Exited { exit_code },
             ExitCode::Signaled(signal) => Self::Signaled {
-                signal,
+                signal: signal.as_usize() as u8,
                 core_dumped: false, // TODO
             },
         }
@@ -188,7 +188,7 @@ fn sys_wait4(
                     .expect("wait4: reaped child has no exit code");
                 let wstatus = WStatus::from(xcode);
                 let mut kbuf: i32 = 0;
-                wstatus.serialize_to(&mut kbuf);
+                wstatus.serialize_to_posix(&mut kbuf);
                 if let Some(wstatus_ptr) = wstatus_ptr {
                     let usp = task.clone_uspace();
                     let mut guard = usp.write();
@@ -230,7 +230,7 @@ fn sys_wait4(
             return Ok(0);
         }
 
-        tg.child_exited.listen(false, || {
+        let interrupted = !tg.child_exited.listen(false, || {
             let mut scanner = Wait4Scanner::new(target);
             // note the latter condition.
             let res =
@@ -245,13 +245,9 @@ fn sys_wait4(
             res
         });
 
-        if task.killed() {
-            knoticeln!(
-                "wait4: task {} is killed while waiting, stop waiting",
-                task.tid()
-            );
-            // this error code actually won't be returned to user program, since the task
-            // will call kernel_exit before returning to user space.
+        if interrupted {
+            knoticeln!("wait4: wait interrupted by signal");
+            // TODO: SA_RESTART.
             return Err(SysError::Interrupted);
         }
 

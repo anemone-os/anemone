@@ -11,95 +11,54 @@ use anemone_abi::process::linux::clone;
 
 use crate::{
     prelude::{
-        handler::{syscall_arg_flag32, TryFromSyscallArg},
-        user_access::{user_addr, UserWritePtr},
+        handler::TryFromSyscallArg,
+        user_access::{UserWritePtr, user_addr},
         *,
     },
-    task::{cpu_usage::Privilege, tid::Tid},
+    task::{cpu_usage::Privilege, sig::SigNo, tid::Tid},
 };
 
 bitflags! {
     #[derive(Debug, Clone, Copy)]
-    pub struct CloneFlags: u32 {
-        /// Signal sent to parent when child process changes state (termination/stop)
-        /// Prevents zombie processes; default action is ignore
-        const SIGCHLD = clone::CLONE_SIGCHLD as u32;
+    pub struct CloneFlags: u64 {
         /// Share the same memory space between parent and child processes
-        const VM = clone::CLONE_VM as u32;
+        const VM = clone::CLONE_VM ;
         /// Share filesystem info (root, cwd, umask) with the child
-        const FS = clone::CLONE_FS as u32;
+        const FS = clone::CLONE_FS ;
         /// Share the file descriptor table with the child
-        const FILES = clone::CLONE_FILES as u32;
+        const FILES = clone::CLONE_FILES ;
         /// Share signal handlers with the child
-        const SIGHAND = clone::CLONE_SIGHAND as u32;
-        const PIDFD = clone::CLONE_PIDFD as u32;
-        const PTRACE = clone::CLONE_PTRACE as u32;
-        const VFORK = clone::CLONE_VFORK as u32;
+        const SIGHAND = clone::CLONE_SIGHAND ;
+        const PIDFD = clone::CLONE_PIDFD ;
+        const PTRACE = clone::CLONE_PTRACE ;
+        const VFORK = clone::CLONE_VFORK ;
         /// [OK]
-        const PARENT = clone::CLONE_PARENT as u32;
-        const THREAD = clone::CLONE_THREAD as u32;
-        const NEWNS = clone::CLONE_NEWNS as u32;
+        const PARENT = clone::CLONE_PARENT ;
+        const THREAD = clone::CLONE_THREAD ;
+        const NEWNS = clone::CLONE_NEWNS ;
         /// Share System V semaphore adjustment (semadj) values
-        const SYSVSEM = clone::CLONE_SYSVSEM as u32;
+        const SYSVSEM = clone::CLONE_SYSVSEM ;
         /// Set the TLS (Thread Local Storage) descriptor
-        const SETTLS = clone::CLONE_SETTLS as u32;
+        const SETTLS = clone::CLONE_SETTLS ;
         /// [OK] Store child thread ID in parent's memory (parent_tid)
-        const PARENT_SETTID = clone::CLONE_PARENT_SETTID as u32;
+        const PARENT_SETTID = clone::CLONE_PARENT_SETTID ;
         /// [OK with TODO: futex]Clear child_tid in child's memory when the child exits
-        const CHILD_CLEARTID = clone::CLONE_CHILD_CLEARTID as u32;
+        const CHILD_CLEARTID = clone::CLONE_CHILD_CLEARTID ;
         /// Legacy flag, ignored by clone()
-        const DETACHED = clone::CLONE_DETACHED as u32;
+        const DETACHED = clone::CLONE_DETACHED ;
         /// Prevent tracer from forcing CLONE_PTRACE on the child
-        const UNTRACED = clone::CLONE_UNTRACED as u32;
+        const UNTRACED = clone::CLONE_UNTRACED ;
         /// [OK] Store child thread ID in child's memory (child_tid)
-        const CHILD_SETTID = clone::CLONE_CHILD_SETTID as u32;
-        const NEWCGROUP = clone::CLONE_NEWCGROUP as u32;
-        const NEWUTS = clone::CLONE_NEWUTS as u32;
-        const NEWIPC = clone::CLONE_NEWIPC as u32;
-        const NEWUSER = clone::CLONE_NEWUSER as u32;
-        const NEWPID = clone::CLONE_NEWPID as u32;
-        const NEWNET = clone::CLONE_NEWNET as u32;
-        const IO = clone::CLONE_IO as u32;
-        const CLEAR_SIGHAND = clone::CLONE_CLEAR_SIGHAND as u32;
-        const INTO_CGROUP = clone::CLONE_INTO_CGROUP as u32;
-    }
-}
-
-impl TryFromSyscallArg for CloneFlags {
-    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-        // macro hack! a simple recursive macro~
-        macro_rules! union {
-            ($head:ident, $($tail:tt)+) => {
-                CloneFlags::$head.union(union!($($tail)+))
-            };
-            ($single:ident $(,)?) => {
-                CloneFlags::$single
-            };
-        }
-        const SUPPORTED_FLAGS: CloneFlags = union!(
-            SIGCHLD, // fake
-            SIGHAND, // fake
-            THREAD,
-            VM,
-            FS,
-            FILES,
-            PARENT,
-            SETTLS,
-            PARENT_SETTID,
-            CHILD_CLEARTID,
-            CHILD_SETTID
-        );
-
-        let value = syscall_arg_flag32(raw)?;
-        let flags = CloneFlags::from_bits(value).ok_or(SysError::InvalidArgument)?;
-        if !SUPPORTED_FLAGS.contains(flags) {
-            knoticeln!("nyi clone flags: {:#x}", value);
-            return Err(SysError::NotYetImplemented);
-        }
-
-        flags.validate()?;
-
-        Ok(flags)
+        const CHILD_SETTID = clone::CLONE_CHILD_SETTID ;
+        const NEWCGROUP = clone::CLONE_NEWCGROUP ;
+        const NEWUTS = clone::CLONE_NEWUTS ;
+        const NEWIPC = clone::CLONE_NEWIPC ;
+        const NEWUSER = clone::CLONE_NEWUSER ;
+        const NEWPID = clone::CLONE_NEWPID ;
+        const NEWNET = clone::CLONE_NEWNET ;
+        const IO = clone::CLONE_IO;
+        const CLEAR_SIGHAND = clone::CLONE_CLEAR_SIGHAND;
+        const INTO_CGROUP = clone::CLONE_INTO_CGROUP;
     }
 }
 
@@ -131,6 +90,72 @@ impl CloneFlags {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct CloneFlagsWithSignal {
+    flags: CloneFlags,
+    signal: Option<SigNo>,
+}
+
+impl CloneFlagsWithSignal {
+    pub fn new(flags: CloneFlags, signal: Option<SigNo>) -> Self {
+        Self { flags, signal }
+    }
+
+    pub fn flags(&self) -> CloneFlags {
+        self.flags
+    }
+
+    pub fn signal(&self) -> Option<SigNo> {
+        self.signal
+    }
+}
+
+impl TryFromSyscallArg for CloneFlagsWithSignal {
+    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+        // macro hack! a simple recursive macro~
+        macro_rules! union {
+            ($head:ident, $($tail:tt)+) => {
+                CloneFlags::$head.union(union!($($tail)+))
+            };
+            ($single:ident $(,)?) => {
+                CloneFlags::$single
+            };
+        }
+        const SUPPORTED_FLAGS: CloneFlags = union!(
+            SIGHAND,
+            CLEAR_SIGHAND,
+            THREAD,
+            VM,
+            FS,
+            FILES,
+            PARENT,
+            SETTLS,
+            PARENT_SETTID,
+            CHILD_CLEARTID,
+            CHILD_SETTID
+        );
+
+        let (raw_flags, raw_signo) = ((raw >> 8) << 8, raw & 0xff);
+        let flags = CloneFlags::from_bits(raw_flags).ok_or(SysError::InvalidArgument)?;
+        if !SUPPORTED_FLAGS.contains(flags) {
+            knoticeln!("nyi clone flags: {:?}", flags);
+            return Err(SysError::NotYetImplemented);
+        }
+        flags.validate()?;
+
+        let signo = if raw_signo == 0 {
+            None
+        } else {
+            Some(SigNo::try_from_syscall_arg(raw_signo)?)
+        };
+
+        Ok(Self {
+            flags,
+            signal: signo,
+        })
+    }
+}
+
 #[derive(Debug)]
 pub enum CloneStack {
     /// Use the new stack pointer specified by `new_sp` argument.
@@ -155,27 +180,19 @@ impl TryFromSyscallArg for CloneStack {
 /// TODO: rolling back is toooooooo tedious and complex! this function is really
 /// a mess now... we should refactor it into smaller pieces.
 pub fn kernel_clone(
-    flags: CloneFlags,
+    flags: CloneFlagsWithSignal,
     trap_frame: TrapFrame,
     new_sp: CloneStack,
     tls: VirtAddr,
     parent_tid: Option<VirtAddr>,
     child_tid: Option<VirtAddr>,
 ) -> Result<Tid, SysError> {
-    flags.validate()?;
+    let (flags, terminate_signal) = (flags.flags(), flags.signal());
 
     let current_task = get_current_task();
     let cur_uspace = current_task.clone_uspace();
 
-    let new_uspace = if flags.contains(CloneFlags::VM) {
-        cur_uspace.clone()
-    } else {
-        Arc::new(cur_uspace.fork()?)
-    };
-
     let mut boxed_frame = Box::new(trap_frame);
-    // syscall instruction.
-    boxed_frame.advance_pc();
     unsafe {
         boxed_frame.set_syscall_ret_val(0);
     }
@@ -201,7 +218,7 @@ pub fn kernel_clone(
             ParameterList::new(&[
                 frame_ptr as u64,
                 child_tid.map_or(0, |ptr| ptr.get()),
-                flags.bits() as u64,
+                flags.bits(),
             ]),
             Some(current_task.tid()),
             if flags.contains(CloneFlags::THREAD) {
@@ -212,7 +229,7 @@ pub fn kernel_clone(
                 None
             },
             current_task.sched_entity(),
-            TaskFlags::NONE,
+            TaskFlags::empty(),
             None,
         )
         .map_err(|e| {
@@ -225,6 +242,21 @@ pub fn kernel_clone(
         // register still points at the parent's trap stack until we rebind it.
         (*frame_ptr).set_scratch(new_task.kstack().stack_top().get());
     }
+
+    let new_uspace = if flags.contains(CloneFlags::VM) {
+        if flags.contains(CloneFlags::VFORK) {
+            // sigaltstack can be reused
+            new_task.sig_altstack = SpinLock::new(current_task.sig_altstack.lock().clone());
+        }
+
+        cur_uspace.clone()
+    } else {
+        // new task's sigaltstack should be the same as parent's since VM is not set.
+        new_task.sig_altstack = SpinLock::new(current_task.sig_altstack.lock().clone());
+
+        Arc::new(cur_uspace.fork()?)
+    };
+
     unsafe {
         new_task.switch_exec_ctx(current_task.name(), new_uspace, current_task.flags());
     }
@@ -241,8 +273,47 @@ pub fn kernel_clone(
         new_task.set_files_state(current_task.files_state().read().fork());
     }
 
+    // mask is always inherited.
+    {
+        let (parent_mask, mut child_mask) = {
+            // note the lock ordering!
+            if current_task.tid() < new_task.tid() {
+                let parent_mask = current_task.sig_mask.lock();
+                let child_mask = new_task.sig_mask.lock();
+                (parent_mask, child_mask)
+            } else {
+                let child_mask = new_task.sig_mask.lock();
+                let parent_mask = current_task.sig_mask.lock();
+                (parent_mask, child_mask)
+            }
+        };
+        *child_mask = *parent_mask;
+    }
+
     if flags.contains(CloneFlags::SIGHAND) {
-        knoticeln!("[nyi] sighand clone flag is set. ignoring...");
+        // share
+        new_task.sig_disposition = current_task.sig_disposition.clone();
+    } else {
+        // copy
+        let (parent_disp, mut child_disp) = {
+            // lock ordering, again.
+            if current_task.tid() < new_task.tid() {
+                let parent_disp = current_task.sig_disposition.read();
+                let child_disp = new_task.sig_disposition.write();
+                (parent_disp, child_disp)
+            } else {
+                let child_disp = new_task.sig_disposition.write();
+                let parent_disp = current_task.sig_disposition.read();
+                (parent_disp, child_disp)
+            }
+        };
+        *child_disp = parent_disp.clone();
+    }
+
+    if flags.contains(CloneFlags::CLEAR_SIGHAND) {
+        // this must be a new thread group, since CLONE_SIGHAND and CLONE_CLEAR_SIGHAND
+        // cannot be used together.
+        new_task.sig_disposition.write().clear_custom_actions();
     }
 
     let new_tid = new_task.tid();
@@ -307,7 +378,20 @@ pub fn kernel_clone(
             parent_tgid
         );
 
-        TaskBinding::Leader { parent_tgid }
+        TaskBinding::Leader {
+            parent_tgid,
+            terminate_signal: {
+                terminate_signal.map(|sig| {
+                    if sig != SigNo::SIGCHLD {
+                        knoticeln!(
+                            "clone: non-standard signal {:?} specified to be sent on termination.",
+                            sig
+                        );
+                    }
+                });
+                terminate_signal
+            },
+        }
     };
 
     if flags.contains(CloneFlags::PARENT_SETTID) {
@@ -357,7 +441,7 @@ extern "C" fn enter_cloned_user_task(
 ) {
     assert!(IntrArch::local_intr_enabled());
 
-    let clone_flags = CloneFlags::from_bits(clone_flags as u32)
+    let clone_flags = CloneFlags::from_bits(clone_flags)
         .expect("invalid clone flags passed to enter_cloned_user_task");
 
     let task = get_current_task();
