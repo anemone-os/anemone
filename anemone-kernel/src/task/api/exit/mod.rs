@@ -149,11 +149,11 @@ pub fn kernel_exit(code: ExitCode) -> ! {
 /// is reaped.
 pub fn kernel_exit_group(code: ExitCode) -> ! {
     {
-        let mut task = get_current_task();
+        let task = get_current_task();
         if task.tid() == Tid::INIT {
             panic!("init task shall not exit");
         }
-        let mut tg = task.get_thread_group();
+        let tg = task.get_thread_group();
         let is_exiting = tg.update_life_cycle_with(|prev| match prev {
             ThreadGroupLifeCycle::Alive => (ThreadGroupLifeCycle::Exiting(code), false),
             ThreadGroupLifeCycle::Exiting(existing_code) => {

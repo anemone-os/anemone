@@ -93,7 +93,7 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
         *task.sig_mask.lock() = sigmask;
     }
 
-    let ret = unsafe { __trapframe__.syscall_retval() };
+    let ret = __trapframe__.syscall_retval();
 
     kdebugln!(
         "sys_rt_sigreturn: successfully return to user space for task {}",

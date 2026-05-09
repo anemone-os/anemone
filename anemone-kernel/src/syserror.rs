@@ -132,7 +132,7 @@ pub enum SysError {
     Interrupted,
     /// Target thread group doesn't exist.
     NoSuchProcess,
-    /// The syscall should be restarted after interrupetion.
+    /// The syscall should be restarted after interruption.
     RestartSyscall(RestartSyscall),
 }
 
@@ -142,7 +142,7 @@ pub enum RestartSyscall {
     /// The interrupted syscall is idempotent, and has no side effect, so
     /// arguments can be safely re-applied.
     ///
-    /// Examples: read, write, etc.
+    /// Examples: wait4.
     Idempotent,
     // TODO: nanosleep needs some bookkeeping in kernel to record the remaining sleep time.
 }

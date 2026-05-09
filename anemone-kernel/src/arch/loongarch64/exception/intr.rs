@@ -33,16 +33,12 @@ impl IntrArchTrait for LA64IntrArch {
 
     /// Send an inter-processor interrupt to the target CPU.
     fn send_ipi(cpu_id: usize) {
-        unsafe {
-            send_ipi_single(cpu_id, 1);
-        }
+        send_ipi_single(cpu_id, 1);
     }
 
     /// Claim a pending IPI by clearing the platform IOCSR state.
     unsafe fn claim_ipi() {
-        unsafe {
-            iocsr_write_w(0x100c, u32::MAX);
-        }
+        iocsr_write_w(0x100c, u32::MAX);
     }
 
     /// Enable local interrupts and unmask platform interrupt sources.

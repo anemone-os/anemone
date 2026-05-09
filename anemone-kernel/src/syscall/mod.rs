@@ -74,7 +74,7 @@ pub fn register_syscall_handlers() {
 /// For syscall occurring in kernel space, arch-specific code should just panic
 /// immediately, and this function should never be called.
 pub fn handle_syscall(trapframe: &mut TrapFrame) -> Option<RestartSyscall> {
-    let sysno = unsafe { trapframe.syscall_no() };
+    let sysno = trapframe.syscall_no();
 
     let handler = SYSCALL_TABLE
         .get()
@@ -93,16 +93,14 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) -> Option<RestartSyscall> {
 
     let regs = SyscallRegs {
         sysno,
-        args: unsafe {
-            [
-                trapframe.syscall_arg::<0>(),
-                trapframe.syscall_arg::<1>(),
-                trapframe.syscall_arg::<2>(),
-                trapframe.syscall_arg::<3>(),
-                trapframe.syscall_arg::<4>(),
-                trapframe.syscall_arg::<5>(),
-            ]
-        },
+        args: [
+            trapframe.syscall_arg::<0>(),
+            trapframe.syscall_arg::<1>(),
+            trapframe.syscall_arg::<2>(),
+            trapframe.syscall_arg::<3>(),
+            trapframe.syscall_arg::<4>(),
+            trapframe.syscall_arg::<5>(),
+        ],
     };
 
     trapframe.advance_syscall_pc();
@@ -120,9 +118,7 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) -> Option<RestartSyscall> {
         },
     };
 
-    unsafe {
-        trapframe.set_syscall_retval(retval);
-    }
+    trapframe.set_syscall_retval(retval);
 
     restart
 }

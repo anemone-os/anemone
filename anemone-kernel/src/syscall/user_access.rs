@@ -65,19 +65,6 @@ mod ptrs {
     pub type UserReadSlice<'a, T> = UserReadPtr<'a, [T]>;
     pub type UserWriteSlice<'a, T> = UserWritePtr<'a, [T]>;
 
-    fn validate_aligned_addr<T>(addr: VirtAddr) -> Result<VirtAddr, SysError> {
-        let addr = user_addr(addr.get())?;
-        if addr.get() % align_of::<T>() as u64 != 0 {
-            return Err(SysError::NotAligned);
-        }
-        Ok(addr)
-    }
-
-    fn slice_byte_len<T>(len: usize) -> Result<usize, SysError> {
-        len.checked_mul(size_of::<T>())
-            .ok_or(SysError::InvalidArgument)
-    }
-
     impl<'a, T: Copy> UserReadPtr<'a, T> {
         pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpaceData) -> Result<Self, SysError> {
             let addr = user_addr(addr.get())?;

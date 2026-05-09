@@ -393,7 +393,7 @@ impl ThreadGroup {
     pub fn recv_signal(&self, signal: Signal) {
         let no = signal.no;
         {
-            let mut inner = self.inner.write();
+            let inner = self.inner.write();
             inner.sig_pending.lock().push_signal(signal);
         }
         self.for_each_member(|member| {

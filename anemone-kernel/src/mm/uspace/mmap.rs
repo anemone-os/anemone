@@ -199,9 +199,9 @@ impl UserSpaceData {
                 },
                 mapping.flags,
                 if mapping.shared {
-                    m
+                    m.clone()
                 } else {
-                    Arc::new(ShadowObject::new(m))
+                    Arc::new(ShadowObject::new(m.clone()))
                 },
             );
 

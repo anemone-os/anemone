@@ -20,10 +20,6 @@ pub struct ReapedTask {
 }
 
 impl ReapedTask {
-    pub(super) fn new(task: Arc<Task>) -> Self {
-        Self { task: Some(task) }
-    }
-
     /// We don't just let the [Arc] to be dropped naturally when its strong
     /// reference count reaches zero, because we want to control when the
     /// actual destruction happens. Otherwise, the destruction may happen at

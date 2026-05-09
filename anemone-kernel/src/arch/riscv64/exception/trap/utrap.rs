@@ -186,7 +186,6 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
         task.on_prv_change(Privilege::Kernel);
     }
 
-    // let mut restart_syscall = None;
     let (mut restart_syscall, syscall_ctx) = (None, TrapArch::syscall_ctx_snapshot(trapframe));
 
     let scause = riscv::register::scause::read();

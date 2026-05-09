@@ -23,8 +23,6 @@ pub fn kernel_execve(
             drop(usp_data);
             let usp = Arc::new(usp);
             unsafe {
-                let mut ksp = VirtAddr::new(0);
-
                 let task = get_current_task();
 
                 task.dethread();
@@ -49,7 +47,7 @@ pub fn kernel_execve(
                 usp.activate();
                 task.switch_exec_ctx(name, usp, flags);
 
-                ksp = task.kstack().stack_top();
+                let ksp = task.kstack().stack_top();
                 task.on_prv_change(Privilege::User);
 
                 // DROP

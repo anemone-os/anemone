@@ -36,11 +36,11 @@ impl Instant {
         duration_from_mono(self.mono)
     }
 
-    pub(crate) const fn from_mono(mono: u64) -> Self {
+    pub const fn from_mono(mono: u64) -> Self {
         Self { mono }
     }
 
-    pub(crate) const fn mono(&self) -> u64 {
+    pub const fn mono(&self) -> u64 {
         self.mono
     }
 

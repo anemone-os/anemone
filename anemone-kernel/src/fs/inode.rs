@@ -159,17 +159,6 @@ impl InodePerm {
     pub const fn all_rwx() -> Self {
         Self::RWXU.union(Self::RWXG).union(Self::RWXO)
     }
-
-    pub const fn from_linux_bits(bits: u32) -> Option<Self> {
-        // Since we just re-export linux's bits as our bits, conversion is fairly simple
-        // here.
-        Self::from_bits(bits as u16)
-    }
-
-    /// This will truncate those invalid bits or unsupported bits.
-    pub const fn from_linux_bits_truncate(bits: u32) -> Self {
-        Self::from_bits_truncate(bits as u16)
-    }
 }
 
 /// Device number for inodes' underlying device.
@@ -216,13 +205,6 @@ impl InodeMode {
         Self { ty, perm }
     }
 
-    pub const fn new_with_all_perm(ty: InodeType) -> Self {
-        Self {
-            ty,
-            perm: InodePerm::all_rwx(),
-        }
-    }
-
     pub const fn ty(self) -> InodeType {
         self.ty
     }
@@ -235,24 +217,6 @@ impl InodeMode {
     pub const fn to_linux_mode(self) -> u32 {
         self.ty.to_linux_mode_bits() | self.perm.bits() as u32
     }
-
-    pub fn from_linux_mode(mode: u32) -> Option<Self> {
-        let ty = match mode & linux_mode::S_IFMT {
-            linux_mode::S_IFREG => InodeType::Regular,
-            linux_mode::S_IFDIR => InodeType::Dir,
-            linux_mode::S_IFCHR => InodeType::Char,
-            linux_mode::S_IFBLK => InodeType::Block,
-            linux_mode::S_IFLNK => InodeType::Symlink,
-            linux_mode::S_IFIFO => InodeType::Fifo,
-            _ => {
-                // catch unknown file types early.
-                knoticeln!("unknown inode type in linux mode: {:o}", mode);
-                return None;
-            },
-        };
-        let perm = InodePerm::from_bits_truncate(mode as u16);
-        Some(Self { ty, perm })
-    }
 }
 
 /// Metadata of an inode, in a filesystem-neutral shape.
@@ -261,6 +225,10 @@ impl InodeMode {
 ///
 /// TODO: some fields are set to dummy values for now, since we haven't
 /// implemented all needed features.
+///
+/// TODO: currently we use [Duration] to represent time fields, which is not
+/// very accurate. We should consider using something that might be called
+/// `TimeStamp`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InodeStat {
     /// Device ID of the filesystem this inode belongs to.
@@ -352,12 +320,6 @@ impl InodeStat {
             st_ctime_nsec: self.ctime.subsec_nanos() as u64,
             __unused: [0; 2],
         }
-    }
-}
-
-impl From<InodeStat> for LinuxStat {
-    fn from(value: InodeStat) -> Self {
-        value.to_linux_stat()
     }
 }
 
@@ -515,11 +477,7 @@ impl Inode {
         }
     }
 
-    pub(super) fn mapping(&self) -> Option<Arc<dyn VmObject>> {
-        self.mapping.clone()
-    }
-
-    pub(super) fn mapping_ref(&self) -> Option<&Arc<dyn VmObject>> {
+    pub(super) fn mapping(&self) -> Option<&Arc<dyn VmObject>> {
         self.mapping.as_ref()
     }
 
@@ -652,7 +610,7 @@ impl InodeRef {
         self.inode().nlink()
     }
 
-    pub fn mapping(&self) -> Option<Arc<dyn VmObject>> {
+    pub fn mapping(&self) -> Option<&Arc<dyn VmObject>> {
         self.inode().mapping()
     }
 

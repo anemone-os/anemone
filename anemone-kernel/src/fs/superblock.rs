@@ -249,7 +249,7 @@ impl SuperBlock {
             return Err(SysError::Busy);
         }
         if inode
-            .mapping_ref()
+            .mapping()
             .is_some_and(|mapping| Arc::strong_count(mapping) > 1)
         {
             return Err(SysError::Busy);
