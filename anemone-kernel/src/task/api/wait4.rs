@@ -247,8 +247,8 @@ fn sys_wait4(
 
         if interrupted {
             knoticeln!("wait4: wait interrupted by signal");
-            // TODO: SA_RESTART.
-            return Err(SysError::Interrupted);
+            // wait4 is an idempotent operation.
+            return Err(SysError::RestartSyscall(RestartSyscall::Idempotent));
         }
 
         kdebugln!("wait4: woken up, rechecking wait condition");

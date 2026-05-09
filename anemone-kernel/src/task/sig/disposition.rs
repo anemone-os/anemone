@@ -61,6 +61,7 @@ bitflags! {
         const ONESHOT = SA_ONESHOT as u64;
         const NODEFER = SA_NODEFER as u64;
         const ONSTACK = SA_ONSTACK as u64;
+        const RESTART = SA_RESTART as u64;
         // TODO
     }
 }

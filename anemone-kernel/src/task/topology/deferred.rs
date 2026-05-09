@@ -103,32 +103,3 @@ pub fn dispose_deferred_tasks() {
         kdebugln!("disposing task {} with tid {}", task.name(), task.tid());
     }
 }
-
-// #[derive(Debug)]
-// pub struct ReapedThreadGroup {
-//     thread_group: Arc<ThreadGroup>,
-// }
-//
-// impl ReapedThreadGroup {
-//     pub fn new(thread_group: Arc<ThreadGroup>) -> Self {
-//         Self { thread_group }
-//     }
-//
-//     pub fn exit_code(&self) -> ExitCode {
-//         match self.thread_group.status() {
-//             ThreadGroupStatus::Exited(code) => code,
-//             _ => panic!(
-//                 "task topology: reaped thread group {} is not exited yet when
-// getting exit code",                 self.thread_group.tgid()
-//             ),
-//         }
-//     }
-// }
-
-// impl Deref for ReapedThreadGroup {
-//     type Target = ThreadGroup;
-//
-//     fn deref(&self) -> &Self::Target {
-//         &self.thread_group
-//     }
-// }

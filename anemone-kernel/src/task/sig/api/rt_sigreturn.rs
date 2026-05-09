@@ -20,7 +20,7 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
     let usp = task.clone_uspace();
 
     // 1. read back sigframe from user stack.
-    let sigframe_base = VirtAddr::new(__trapframe__.get_sp());
+    let sigframe_base = VirtAddr::new(__trapframe__.sp());
     let sigframe = {
         let mut guard = usp.write();
         match UserReadPtr::<RtSigFrame>::try_new(sigframe_base, &mut guard) {
@@ -93,7 +93,7 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
         *task.sig_mask.lock() = sigmask;
     }
 
-    let ret = unsafe { __trapframe__.get_syscall_ret_val() };
+    let ret = unsafe { __trapframe__.syscall_retval() };
 
     kdebugln!(
         "sys_rt_sigreturn: successfully return to user space for task {}",

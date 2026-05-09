@@ -15,9 +15,26 @@ pub struct RiscV64TrapArch;
 
 impl TrapArchTrait for RiscV64TrapArch {
     type TrapFrame = RiscV64TrapFrame;
+    type SyscallCtx = RiscV64SyscallCtx;
 
     unsafe fn load_utrapframe(trapframe: Self::TrapFrame) -> ! {
         unsafe { __utrap_return_to_task(&trapframe as *const _) }
+    }
+
+    fn syscall_ctx_snapshot(trapframe: &Self::TrapFrame) -> Self::SyscallCtx {
+        Self::SyscallCtx {
+            sysno: trapframe.syscall_no(),
+            a: trapframe.gpr.x[10..17].try_into().unwrap(),
+            sepc: trapframe.sepc,
+        }
+    }
+
+    fn restore_syscall_ctx(trapframe: &mut Self::TrapFrame, syscall_ctx: &Self::SyscallCtx) {
+        trapframe.set_syscall_no(syscall_ctx.sysno);
+        for i in 0..7 {
+            trapframe.gpr.x[10 + i] = syscall_ctx.a[i];
+        }
+        trapframe.sepc = syscall_ctx.sepc;
     }
 }
 
@@ -157,33 +174,6 @@ impl RiscV64TrapFrame {
 }
 
 impl TrapFrameArch for RiscV64TrapFrame {
-    unsafe fn syscall_args<const IDX: usize>(&self) -> u64 {
-        const_assert!(IDX < 7);
-        self.gpr.a::<IDX>()
-    }
-
-    unsafe fn syscall_no(&self) -> usize {
-        self.gpr.a::<7>() as usize
-    }
-
-    fn get_pc(&self) -> u64 {
-        self.sepc
-    }
-
-    fn advance_syscall_pc(&mut self) {
-        // `ecall` instruction is always 4 bytes long even though Compressed
-        // extension is enabled.
-        self.sepc += 4;
-    }
-
-    unsafe fn set_syscall_ret_val(&mut self, retval: u64) {
-        self.gpr.x[10] = retval; // a0
-    }
-
-    unsafe fn get_syscall_ret_val(&self) -> u64 {
-        self.gpr.x[10] // a0
-    }
-
     const ZEROED: Self = Self {
         gpr: Gpr { x: [0; 32] },
         sstatus: 0,
@@ -194,7 +184,7 @@ impl TrapFrameArch for RiscV64TrapFrame {
         ktp: 0,
     };
 
-    fn get_sp(&self) -> u64 {
+    fn sp(&self) -> u64 {
         self.gpr.sp()
     }
 
@@ -213,6 +203,82 @@ impl TrapFrameArch for RiscV64TrapFrame {
     fn set_arg<const IDX: usize>(&mut self, arg: u64) {
         const_assert!(IDX < 7);
         self.gpr.x[10 + IDX] = arg;
+    }
+}
+
+impl SyscallCtxArch for RiscV64TrapFrame {
+    fn advance_syscall_pc(&mut self) {
+        self.sepc += 4;
+    }
+
+    fn syscall_arg<const IDX: usize>(&self) -> u64 {
+        self.gpr.a::<IDX>()
+    }
+
+    fn set_syscall_arg<const IDX: usize>(&mut self, arg: u64) {
+        const_assert!(IDX < 7);
+        self.gpr.x[10 + IDX] = arg;
+    }
+
+    fn syscall_no(&self) -> usize {
+        self.gpr.a::<7>() as usize
+    }
+
+    fn set_syscall_no(&mut self, sysno: usize) {
+        self.gpr.x[17] = sysno as u64;
+    }
+
+    fn syscall_pc(&self) -> u64 {
+        self.sepc
+    }
+
+    fn syscall_retval(&self) -> u64 {
+        self.gpr.a::<0>()
+    }
+
+    fn set_syscall_retval(&mut self, retval: u64) {
+        self.gpr.x[10] = retval;
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RiscV64SyscallCtx {
+    sysno: usize,
+    a: [u64; 7],
+    sepc: u64,
+}
+
+impl SyscallCtxArch for RiscV64SyscallCtx {
+    fn syscall_arg<const IDX: usize>(&self) -> u64 {
+        self.a[IDX]
+    }
+
+    fn set_syscall_arg<const IDX: usize>(&mut self, arg: u64) {
+        self.a[IDX] = arg;
+    }
+
+    fn syscall_no(&self) -> usize {
+        self.sysno
+    }
+
+    fn set_syscall_no(&mut self, sysno: usize) {
+        self.sysno = sysno;
+    }
+
+    fn syscall_pc(&self) -> u64 {
+        self.sepc
+    }
+
+    fn advance_syscall_pc(&mut self) {
+        self.sepc += 4;
+    }
+
+    fn syscall_retval(&self) -> u64 {
+        self.a[0]
+    }
+
+    fn set_syscall_retval(&mut self, retval: u64) {
+        self.a[0] = retval;
     }
 }
 

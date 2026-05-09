@@ -194,7 +194,7 @@ pub fn kernel_clone(
 
     let mut boxed_frame = Box::new(trap_frame);
     unsafe {
-        boxed_frame.set_syscall_ret_val(0);
+        boxed_frame.set_syscall_retval(0);
     }
 
     match new_sp {

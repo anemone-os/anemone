@@ -8,9 +8,8 @@ use crate::{
     task::{
         cpu_usage::Privilege,
         sig::{
-            handle_signals,
+            SigNo, Signal, handle_signals,
             info::{SiCode, SigFault, SigInfoFields},
-            SigNo, Signal,
         },
     },
 };
@@ -187,6 +186,9 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
         task.on_prv_change(Privilege::Kernel);
     }
 
+    // let mut restart_syscall = None;
+    let (mut restart_syscall, syscall_ctx) = (None, TrapArch::syscall_ctx_snapshot(trapframe));
+
     let scause = riscv::register::scause::read();
     let code = scause.code();
 
@@ -230,7 +232,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
 
         match reason {
             RiscV64Exception::UserEnvCall => {
-                handle_syscall(trapframe);
+                restart_syscall = handle_syscall(trapframe);
             },
             RiscV64Exception::Breakpoint => {
                 kerrln!(
@@ -283,8 +285,10 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
         }
     }
 
-    // TODO: restart syscalls if needed.
-    handle_signals(trapframe);
+    handle_signals(
+        trapframe,
+        restart_syscall.map(|restart| (restart, syscall_ctx)),
+    );
 
     get_current_task().on_prv_change(Privilege::User);
 }

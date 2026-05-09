@@ -13,9 +13,8 @@ use crate::{
     task::{
         cpu_usage::Privilege,
         sig::{
-            handle_signals,
+            SigNo, Signal, handle_signals,
             info::{SiCode, SigFault, SigInfoFields},
-            SigNo, Signal,
         },
     },
 };
@@ -189,6 +188,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         task.on_prv_change(Privilege::Kernel);
     }
 
+    let (mut restart_syscall, syscall_ctx) = (None, TrapArch::syscall_ctx_snapshot(trapframe));
+
     let estat = Estat::from_u64(trapframe.estat);
     let ecode = estat.ecode();
 
@@ -254,7 +255,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         if let Some(reason) = reason {
             match reason {
                 LA64Exception::Syscall => {
-                    handle_syscall(trapframe);
+                    restart_syscall = handle_syscall(trapframe);
                 },
                 LA64Exception::PageModified
                 | LA64Exception::PageNotReadable
@@ -304,7 +305,10 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         }
     }
 
-    handle_signals(trapframe);
+    handle_signals(
+        trapframe,
+        restart_syscall.map(|restart| (restart, syscall_ctx)),
+    );
 
     get_current_task().on_prv_change(Privilege::User);
 }
