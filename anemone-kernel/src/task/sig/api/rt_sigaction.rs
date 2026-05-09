@@ -45,7 +45,7 @@ fn sys_rt_sigaction(
             mask,
         } = task.sig_disposition.read().get_disposition(sig);
 
-        let mut kbuf = linux_signal::SigAction {
+        let kbuf = linux_signal::SigAction {
             sighandler: match action {
                 SignalAction::Default(_) => linux_signal::SIG_DFL as *const (),
                 SignalAction::Ignore => linux_signal::SIG_IGN as *const (),

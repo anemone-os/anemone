@@ -64,7 +64,7 @@ impl ThreadGroup {
     where
         F: FnOnce(&Arc<ThreadGroup>) -> R,
     {
-        let mut topology = TOPOLOGY.inner.write_irqsave();
+        let topology = TOPOLOGY.inner.write_irqsave();
 
         let parent_tgid = self
             .inner
@@ -188,7 +188,7 @@ impl ThreadGroup {
     /// this method.
     pub fn reparent_orphan_children(&self) {
         // we may need get_many_mut... but it's still a nightly feature.
-        let mut topology = TOPOLOGY.inner.read_irqsave();
+        let topology = TOPOLOGY.inner.read_irqsave();
         let mut child_tgids = vec![];
         while let Some(child_tgid) = self.inner.write_irqsave().children_tgids.pop_last() {
             knoticeln!(

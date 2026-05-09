@@ -12,10 +12,9 @@ use anemone_rs::{
         ucontext::UContext,
     },
     os::linux::process::{
-        self, CloneFlags, MmapFlags, MmapProt, WStatus, WStatusRaw, WaitFor, WaitOptions, getpid,
-        gettid, mmap, sched_yield,
+        self, getpid, gettid, mmap, sched_yield,
         signal::{self, SigNo, SigProcMaskHow},
-        wait4,
+        wait4, CloneFlags, MmapFlags, MmapProt, WStatus, WStatusRaw, WaitFor, WaitOptions,
     },
     prelude::*,
 };
@@ -27,6 +26,7 @@ const SELF_SIGNAL_STRESS_ROUNDS: usize = 64;
 const THREAD_SIGNAL_STRESS_ROUNDS: usize = 64;
 const RT_QUEUE_STRESS_COUNT: usize = 32;
 const RT_QUEUE_SIGVAL_BASE: usize = 0x5000;
+const RESTART_WAIT_SETTLE_YIELDS: usize = 64;
 
 static SIMPLE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static SIGINFO_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -86,6 +86,23 @@ impl RtQueueSharedState {
             overflow_count: AtomicUsize::new(0),
             child_done: AtomicUsize::new(0),
             observed_sigvals: [const { AtomicUsize::new(0) }; RT_QUEUE_STRESS_COUNT],
+        }
+    }
+}
+
+#[repr(C)]
+struct RestartWaitSharedState {
+    child_ready: AtomicUsize,
+    parent_waiting: AtomicUsize,
+    signal_sent: AtomicUsize,
+}
+
+impl RestartWaitSharedState {
+    const fn new() -> Self {
+        Self {
+            child_ready: AtomicUsize::new(0),
+            parent_waiting: AtomicUsize::new(0),
+            signal_sent: AtomicUsize::new(0),
         }
     }
 }
@@ -274,7 +291,7 @@ fn queue_siginfo(sig: SigNo, sigval: usize) -> linux_signal::SigInfoWrapper {
                     pid: 0,
                     uid: 0,
                     sigval: linux_signal::sifields::SigVal {
-                        sival_int: sigval as i32,
+                        sival_ptr: sigval as *mut _,
                     },
                 },
             },
@@ -305,6 +322,62 @@ fn run_self_signal_stress_test(main_tid: u32) -> Result<(), Errno> {
     Ok(())
 }
 
+fn run_restart_wait4_test(main_tid: u32) -> Result<(), Errno> {
+    println!("signal-test: wait4 restart");
+
+    let shared_mapping = mmap(
+        0,
+        size_of::<RestartWaitSharedState>(),
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+        MmapFlags::MAP_SHARED | MmapFlags::MAP_ANONYMOUS,
+        None,
+        None,
+    )?;
+    let shared_ptr = shared_mapping.as_ptr().cast::<RestartWaitSharedState>();
+    unsafe {
+        shared_ptr.write(RestartWaitSharedState::new());
+    }
+    let shared = unsafe { &*shared_ptr };
+
+    let expected_count = SIMPLE_COUNT.load(Ordering::SeqCst) + 1;
+    let child_pid = match process::fork()? {
+        Some(pid) => pid,
+        None => {
+            shared.child_ready.store(1, Ordering::SeqCst);
+            wait_for_atomic(&shared.parent_waiting, 1, "restart wait4 parent wait entry")?;
+
+            // Give the parent a chance to block in wait4 before interrupting it.
+            for _ in 0..RESTART_WAIT_SETTLE_YIELDS {
+                sched_yield()?;
+            }
+
+            signal::tgkill(main_tid, main_tid, SigNo::SIGUSR1)?;
+            shared.signal_sent.store(1, Ordering::SeqCst);
+
+            for _ in 0..RESTART_WAIT_SETTLE_YIELDS {
+                sched_yield()?;
+            }
+
+            process::exit(0);
+        },
+    };
+
+    wait_for_atomic(&shared.child_ready, 1, "restart wait4 child ready")?;
+    shared.parent_waiting.store(1, Ordering::SeqCst);
+    wait_child_exit_ok_no_eintr(child_pid, "restart wait4")?;
+    wait_for_atomic(&shared.signal_sent, 1, "restart wait4 signal sent")?;
+    wait_until(
+        || {
+            SIMPLE_COUNT.load(Ordering::SeqCst) == expected_count
+                && LAST_SIMPLE_HANDLER_TID.load(Ordering::SeqCst) == main_tid as usize
+        },
+        "restart wait4 signal delivery",
+    )?;
+
+    process::munmap(shared_mapping.as_ptr(), size_of::<RestartWaitSharedState>())?;
+    Ok(())
+}
+
 fn wait_child_exit_ok(pid: u32, name: &str) -> Result<(), Errno> {
     loop {
         let mut wstatus = WStatusRaw::EMPTY;
@@ -326,6 +399,27 @@ fn wait_child_exit_ok(pid: u32, name: &str) -> Result<(), Errno> {
             Err(EINTR) => continue,
             Err(errno) => return Err(errno),
         }
+    }
+}
+
+fn wait_child_exit_ok_no_eintr(pid: u32, name: &str) -> Result<(), Errno> {
+    let mut wstatus = WStatusRaw::EMPTY;
+    match wait4(
+        WaitFor::ChildWithTgid(pid),
+        Some(&mut wstatus),
+        WaitOptions::empty(),
+    ) {
+        Ok(Some(waited)) => {
+            assert_eq!(waited, pid, "signal-test: {name} waited pid mismatch");
+            match wstatus.read() {
+                WStatus::Exited(0) => Ok(()),
+                other => panic!("signal-test: {name} child exited unexpectedly: {other:?}"),
+            }
+        },
+        Ok(None) => {
+            panic!("signal-test: {name} wait4 returned None without WNOHANG");
+        },
+        Err(errno) => Err(errno),
     }
 }
 
@@ -537,16 +631,20 @@ fn main() -> Result<(), Errno> {
 
     println!("signal-test: installing handlers...");
 
-    install_handler(SigNo::SIGUSR1, simple_handler as *const (), 0)?;
+    install_handler(
+        SigNo::SIGUSR1,
+        simple_handler as *const (),
+        linux_signal::SA_RESTART,
+    )?;
     install_handler(
         SigNo::SIGUSR2,
         siginfo_handler as *const (),
-        linux_signal::SA_SIGINFO,
+        linux_signal::SA_SIGINFO | linux_signal::SA_RESTART,
     )?;
     install_handler(
         rt_queue_sig(),
         rt_queue_handler as *const (),
-        linux_signal::SA_SIGINFO,
+        linux_signal::SA_SIGINFO | linux_signal::SA_RESTART,
     )?;
 
     println!("signal-test: raising SIGUSR1");
@@ -577,6 +675,7 @@ fn main() -> Result<(), Errno> {
     assert_eq!(SIMPLE_COUNT.load(Ordering::SeqCst), 2);
 
     run_self_signal_stress_test(main_tid)?;
+    run_restart_wait4_test(main_tid)?;
     run_cross_thread_tgkill_test(main_tgid)?;
     run_cross_process_sigqueueinfo_test()?;
     run_realtime_sigqueue_stress_test()?;

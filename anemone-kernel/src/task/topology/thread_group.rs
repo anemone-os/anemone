@@ -103,10 +103,7 @@ impl ThreadGroup {
     /// the given predicate.
     ///
     /// Only **Object Consistency** is guaranteed.
-    pub fn find_member<P: FnMut(&Arc<Task>) -> bool>(
-        &self,
-        mut prediction: P,
-    ) -> Option<Arc<Task>> {
+    pub fn find_member<P: FnMut(&Arc<Task>) -> bool>(&self, prediction: P) -> Option<Arc<Task>> {
         let children = {
             let topology = TOPOLOGY.inner.read_irqsave();
             let tg = topology

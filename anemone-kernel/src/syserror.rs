@@ -132,6 +132,19 @@ pub enum SysError {
     Interrupted,
     /// Target thread group doesn't exist.
     NoSuchProcess,
+    /// The syscall should be restarted after interruption.
+    RestartSyscall(RestartSyscall),
+}
+
+/// Indicates how to restart a syscall after interruption by a signal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestartSyscall {
+    /// The interrupted syscall is idempotent, and has no side effect, so
+    /// arguments can be safely re-applied.
+    ///
+    /// Examples: wait4.
+    Idempotent,
+    // TODO: nanosleep needs some bookkeeping in kernel to record the remaining sleep time.
 }
 
 impl SysError {
@@ -191,10 +204,14 @@ impl SysError {
             SysError::BinFmtUnrecognized => ENOEXEC,
             SysError::Interrupted => EINTR,
             SysError::NoSuchProcess => ESRCH,
+            SysError::RestartSyscall(_) => EINTR,
         }
     }
 
     pub const fn is_kernel_internal(&self) -> bool {
-        todo!()
+        match self {
+            SysError::RestartSyscall(_) => true,
+            _ => false,
+        }
     }
 }

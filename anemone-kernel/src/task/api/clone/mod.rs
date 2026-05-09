@@ -193,9 +193,7 @@ pub fn kernel_clone(
     let cur_uspace = current_task.clone_uspace();
 
     let mut boxed_frame = Box::new(trap_frame);
-    unsafe {
-        boxed_frame.set_syscall_ret_val(0);
-    }
+    boxed_frame.set_syscall_retval(0);
 
     match new_sp {
         CloneStack::New(sp) => {
@@ -233,7 +231,7 @@ pub fn kernel_clone(
             None,
         )
         .map_err(|e| {
-            let _ = unsafe { Box::from_raw(frame_ptr) };
+            let _ = Box::from_raw(frame_ptr);
             e
         })?
     };
@@ -327,7 +325,7 @@ pub fn kernel_clone(
             let new_uspace = new_task.clone_uspace();
             let mut usp_guard = new_uspace.write();
             match UserWritePtr::<Tid>::try_new(child_tid, &mut usp_guard) {
-                Ok(mut uptr) => {},
+                Ok(uptr) => {},
                 Err(e) => {
                     let _ = unsafe { Box::from_raw(frame_ptr) };
                     unsafe { guard.forget() };
@@ -472,7 +470,6 @@ extern "C" fn enter_cloned_user_task(
 
     kdebugln!("entering cloned user task with tid {}", current_task_id());
     unsafe {
-        // SchedArch::return_to_cloned_task(frame);
         TrapArch::load_utrapframe(frame);
     }
     unreachable!("should never return from entering a cloned user task");

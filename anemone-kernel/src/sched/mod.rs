@@ -38,12 +38,11 @@ pub unsafe fn scheduler() -> ! {
     // on entering this function from bootstrap code, some invariants of the loop
     // are not satisfied yet.
     debug_assert!(IntrArch::local_intr_disabled());
-    unsafe {
-        // this satisfies the first invariant.
-        set_current_task(Some(clone_local_idle_task()));
-        // the second invariant is not satisfied, but its fine. since we're now
-        // in kernel's mapping.
-    }
+
+    // this satisfies the first invariant.
+    set_current_task(Some(clone_local_idle_task()));
+    // the second invariant is not satisfied, but its fine. since we're now
+    // in kernel's mapping.
 
     knoticeln!("scheduler started");
 

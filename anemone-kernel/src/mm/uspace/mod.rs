@@ -27,6 +27,7 @@ pub mod fault;
 pub mod mmap;
 pub mod vma;
 pub mod vmo;
+// TODO: vdso
 
 // TODO: these constants should be in KB, not in pages.
 
@@ -216,13 +217,15 @@ impl UserSpace {
 
         let mut vmas = BTreeMap::new();
         assert!(vmas.insert(stack_vma.range().start(), stack_vma).is_none());
-        assert!(vmas
-            .insert(stack_guard_vma.range().start(), stack_guard_vma)
-            .is_none());
+        assert!(
+            vmas.insert(stack_guard_vma.range().start(), stack_guard_vma)
+                .is_none()
+        );
         assert!(vmas.insert(heap_vma.range().start(), heap_vma).is_none());
-        assert!(vmas
-            .insert(zero_guard_vma.range().start(), zero_guard_vma)
-            .is_none());
+        assert!(
+            vmas.insert(zero_guard_vma.range().start(), zero_guard_vma)
+                .is_none()
+        );
 
         let uspace = UserSpace {
             table_ppn: table.root_ppn(),

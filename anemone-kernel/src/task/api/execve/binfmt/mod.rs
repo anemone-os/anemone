@@ -22,7 +22,12 @@ pub fn dispatch_execve(
     argv: &[impl AsRef<str>],
     envp: &[impl AsRef<str>],
 ) -> Result<LoadedBinaryMeta, SysError> {
-    let resolved = get_current_task().lookup_path(Path::new(path), ResolveFlags::empty())?;
+    let resolved = get_current_task()
+        .lookup_path(Path::new(path), ResolveFlags::empty())
+        .map_err(|e| {
+            knoticeln!("execve: failed to resolve path '{}': {:?}", path, e);
+            e
+        })?;
 
     let mut ctx = ExecCtx {
         usp,

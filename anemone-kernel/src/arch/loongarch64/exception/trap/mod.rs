@@ -21,9 +21,26 @@ pub struct LA64TrapArch;
 
 impl TrapArchTrait for LA64TrapArch {
     type TrapFrame = LA64TrapFrame;
+    type SyscallCtx = LA64SyscallCtx;
 
     unsafe fn load_utrapframe(trapframe: Self::TrapFrame) -> ! {
         unsafe { __utrap_return_to_task(&trapframe as *const _) }
+    }
+
+    fn syscall_ctx_snapshot(trapframe: &Self::TrapFrame) -> Self::SyscallCtx {
+        Self::SyscallCtx {
+            sysno: trapframe.syscall_no(),
+            a: trapframe.gpr.r[4..11].try_into().unwrap(),
+            era: trapframe.era,
+        }
+    }
+
+    fn restore_syscall_ctx(trapframe: &mut Self::TrapFrame, syscall_ctx: &Self::SyscallCtx) {
+        trapframe.set_syscall_no(syscall_ctx.sysno);
+        for i in 0..7 {
+            trapframe.gpr.r[4 + i] = syscall_ctx.a[i];
+        }
+        trapframe.era = syscall_ctx.era;
     }
 }
 
@@ -156,32 +173,7 @@ impl TrapFrameArch for LA64TrapFrame {
         ktp: 0,
     };
 
-    unsafe fn syscall_args<const IDX: usize>(&self) -> u64 {
-        const_assert!(IDX < 7);
-        self.gpr.a::<IDX>()
-    }
-
-    unsafe fn syscall_no(&self) -> usize {
-        self.gpr.a::<7>() as usize
-    }
-
-    fn advance_syscall_pc(&mut self) {
-        self.era += 4;
-    }
-
-    fn get_pc(&self) -> u64 {
-        self.era
-    }
-
-    unsafe fn set_syscall_ret_val(&mut self, retval: u64) {
-        self.gpr.r[4] = retval; // a0
-    }
-
-    unsafe fn get_syscall_ret_val(&self) -> u64 {
-        self.gpr.r[4] // a0    
-    }
-
-    fn get_sp(&self) -> u64 {
+    fn sp(&self) -> u64 {
         self.gpr.sp()
     }
 
@@ -200,6 +192,82 @@ impl TrapFrameArch for LA64TrapFrame {
     fn set_arg<const IDX: usize>(&mut self, arg: u64) {
         const_assert!(IDX < 7);
         self.gpr.r[4 + IDX] = arg;
+    }
+}
+
+impl SyscallCtxArch for LA64TrapFrame {
+    fn syscall_arg<const IDX: usize>(&self) -> u64 {
+        self.gpr.a::<IDX>()
+    }
+
+    fn set_syscall_arg<const IDX: usize>(&mut self, arg: u64) {
+        const_assert!(IDX < 7);
+        self.gpr.r[4 + IDX] = arg;
+    }
+
+    fn syscall_no(&self) -> usize {
+        self.gpr.a::<7>() as usize
+    }
+
+    fn set_syscall_no(&mut self, sysno: usize) {
+        self.gpr.r[11] = sysno as u64;
+    }
+
+    fn syscall_pc(&self) -> u64 {
+        self.era
+    }
+
+    fn advance_syscall_pc(&mut self) {
+        self.era += 4;
+    }
+
+    fn syscall_retval(&self) -> u64 {
+        self.gpr.a::<0>()
+    }
+
+    fn set_syscall_retval(&mut self, retval: u64) {
+        self.gpr.r[4] = retval; // a0
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LA64SyscallCtx {
+    sysno: usize,
+    a: [u64; 7],
+    era: u64,
+}
+
+impl SyscallCtxArch for LA64SyscallCtx {
+    fn syscall_arg<const IDX: usize>(&self) -> u64 {
+        self.a[IDX]
+    }
+
+    fn set_syscall_arg<const IDX: usize>(&mut self, arg: u64) {
+        self.a[IDX] = arg;
+    }
+
+    fn syscall_no(&self) -> usize {
+        self.sysno
+    }
+
+    fn set_syscall_no(&mut self, sysno: usize) {
+        self.sysno = sysno;
+    }
+
+    fn syscall_pc(&self) -> u64 {
+        self.era
+    }
+
+    fn advance_syscall_pc(&mut self) {
+        self.era += 4;
+    }
+
+    fn syscall_retval(&self) -> u64 {
+        self.a[0]
+    }
+
+    fn set_syscall_retval(&mut self, retval: u64) {
+        self.a[0] = retval;
     }
 }
 

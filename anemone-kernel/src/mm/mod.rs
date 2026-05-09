@@ -11,5 +11,3 @@ pub mod remap;
 pub mod stack;
 pub mod uspace;
 pub mod zone;
-
-//pub mod error;

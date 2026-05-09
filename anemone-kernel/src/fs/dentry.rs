@@ -10,7 +10,7 @@ pub struct Dentry {
 
 struct DentryInner {
     name: String,
-    // For directories this is [Some], otherwise [None].
+    /// For directories this is [Some], otherwise [None].
     children: Option<HashMap<String, Weak<Dentry>>>,
 }
 
@@ -49,10 +49,7 @@ impl Dentry {
         self.inner.read().name.clone()
     }
 
-    pub fn rename(&self, new_name: String) {
-        self.inner.write().name = new_name;
-    }
-
+    /// Get the inode of this dentry.
     pub fn inode(&self) -> &InodeRef {
         &self.inode
     }
@@ -89,6 +86,7 @@ impl Dentry {
             } else {
                 // though the weak reference exists, it's not counted as a child if it can't be
                 // upgraded.
+                // TODO: remove the stale weak reference.
                 Err(SysError::NotFound)
             }
         } else {

@@ -393,7 +393,7 @@ impl ThreadGroup {
     pub fn recv_signal(&self, signal: Signal) {
         let no = signal.no;
         {
-            let mut inner = self.inner.write();
+            let inner = self.inner.write();
             inner.sig_pending.lock().push_signal(signal);
         }
         self.for_each_member(|member| {
@@ -413,13 +413,16 @@ impl ThreadGroup {
 ///
 /// Internally a loop for handling pending signals.
 ///
-/// Since we support kernel preemption, so it seems no need to limit how many
+/// Since we support kernel preemption, it seems no need to limit how many
 /// signals we handle in one go? idk.
-pub fn handle_signals(trapframe: &mut TrapFrame) {
+pub fn handle_signals(
+    trapframe: &mut TrapFrame,
+    mut restart_syscall: Option<(RestartSyscall, SyscallCtx)>,
+) {
     let task = get_current_task();
     loop {
         if let Some(signal) = task.fetch_signal() {
-            if perform_signal_action(signal, trapframe) {
+            if perform_signal_action(signal, trapframe, &mut restart_syscall) {
                 break;
             }
         } else {
@@ -428,11 +431,15 @@ pub fn handle_signals(trapframe: &mut TrapFrame) {
     }
 }
 
-/// Return `true` if this is a user-defined signal handler, where we just
-/// prepare the signal frame, and get into the signal handler in common
+/// Return `true` if the signal handler is a user-defined handler and we just
+/// prepare the signal frame, then get into the handler in the common
 /// trap-return path.
-fn perform_signal_action(signal: Signal, trapframe: &mut TrapFrame) -> bool {
-    let mut is_user = false;
+fn perform_signal_action(
+    signal: Signal,
+    trapframe: &mut TrapFrame,
+    restart_syscall: &mut Option<(RestartSyscall, SyscallCtx)>,
+) -> bool {
+    let mut break_loop = false;
 
     let no = signal.no;
     let task = get_current_task();
@@ -443,7 +450,9 @@ fn perform_signal_action(signal: Signal, trapframe: &mut TrapFrame) -> bool {
     } = task.sig_disposition.read().get_disposition(no);
 
     match action {
-        SignalAction::Default(default) => default(no),
+        SignalAction::Default(default) => {
+            default(no);
+        },
         SignalAction::Ignore => {
             // do nothing.
         },
@@ -468,7 +477,7 @@ fn perform_signal_action(signal: Signal, trapframe: &mut TrapFrame) -> bool {
             //   sigframe onto currently-using stack.
 
             let (altstack, init_sp) = {
-                let curr_sp = trapframe.get_sp();
+                let curr_sp = trapframe.sp();
                 let altstack = *task.sig_altstack.lock();
                 if let Some(altstack) = altstack {
                     let mut ss = altstack.to_linux_sigstack();
@@ -500,6 +509,28 @@ fn perform_signal_action(signal: Signal, trapframe: &mut TrapFrame) -> bool {
             };
 
             let mut ucontext = UContext::ZEROED;
+
+            if flags.contains(SaFlags::RESTART) {
+                // note the take. this ensures only the first signal handler with SA_RESTART can
+                // restart the syscall.
+                if let Some((restart, syscall_ctx)) = restart_syscall.take() {
+                    match restart {
+                        RestartSyscall::Idempotent => {
+                            kdebugln!("restarting syscall: sysno = {}", syscall_ctx.syscall_no());
+
+                            TrapArch::restore_syscall_ctx(trapframe, &syscall_ctx);
+                            // arguments are still in registers, and will be
+                            // encoded into ucontext.
+                        },
+                    }
+                }
+
+                // this must be done before encoding ucontext.
+
+                // no need to set break_loop, since all user-defined handlers
+                // will set that anyway.
+            }
+
             SignalArch::encode_ucontext(&mut ucontext, trapframe, prev_mask, altstack);
 
             // construct signal frame on user stack.
@@ -539,7 +570,7 @@ fn perform_signal_action(signal: Signal, trapframe: &mut TrapFrame) -> bool {
                 sigframe_base,
             );
 
-            is_user = true;
+            break_loop = true;
         },
     }
 
@@ -547,5 +578,5 @@ fn perform_signal_action(signal: Signal, trapframe: &mut TrapFrame) -> bool {
         task.sig_disposition.write().set_to_default(no);
     }
 
-    is_user
+    break_loop
 }

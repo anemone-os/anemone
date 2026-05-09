@@ -5,7 +5,6 @@ use crate::{
     syscall::handler::SyscallHandler,
 };
 
-// pub mod dt;
 pub mod handler;
 pub mod user_access;
 
@@ -74,8 +73,8 @@ pub fn register_syscall_handlers() {
 ///
 /// For syscall occurring in kernel space, arch-specific code should just panic
 /// immediately, and this function should never be called.
-pub fn handle_syscall(trapframe: &mut TrapFrame) {
-    let sysno = unsafe { trapframe.syscall_no() };
+pub fn handle_syscall(trapframe: &mut TrapFrame) -> Option<RestartSyscall> {
+    let sysno = trapframe.syscall_no();
 
     let handler = SYSCALL_TABLE
         .get()
@@ -94,26 +93,32 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) {
 
     let regs = SyscallRegs {
         sysno,
-        args: unsafe {
-            [
-                trapframe.syscall_args::<0>(),
-                trapframe.syscall_args::<1>(),
-                trapframe.syscall_args::<2>(),
-                trapframe.syscall_args::<3>(),
-                trapframe.syscall_args::<4>(),
-                trapframe.syscall_args::<5>(),
-            ]
-        },
+        args: [
+            trapframe.syscall_arg::<0>(),
+            trapframe.syscall_arg::<1>(),
+            trapframe.syscall_arg::<2>(),
+            trapframe.syscall_arg::<3>(),
+            trapframe.syscall_arg::<4>(),
+            trapframe.syscall_arg::<5>(),
+        ],
     };
 
     trapframe.advance_syscall_pc();
 
-    let retval = match (handler.handler)(&regs, trapframe) {
-        Ok(retval) => retval,
-        Err(err) => (-(i64::from(err.as_errno()))) as u64,
+    let (retval, restart) = match (handler.handler)(&regs, trapframe) {
+        Ok(retval) => (retval, None),
+        Err(err) => {
+            let retval = -(i64::from(err.as_errno())) as u64;
+            let restart = if let SysError::RestartSyscall(restart) = err {
+                Some(restart)
+            } else {
+                None
+            };
+            (retval, restart)
+        },
     };
 
-    unsafe {
-        trapframe.set_syscall_ret_val(retval);
-    }
+    trapframe.set_syscall_retval(retval);
+
+    restart
 }

@@ -20,10 +20,6 @@ pub struct ReapedTask {
 }
 
 impl ReapedTask {
-    pub(super) fn new(task: Arc<Task>) -> Self {
-        Self { task: Some(task) }
-    }
-
     /// We don't just let the [Arc] to be dropped naturally when its strong
     /// reference count reaches zero, because we want to control when the
     /// actual destruction happens. Otherwise, the destruction may happen at
@@ -103,32 +99,3 @@ pub fn dispose_deferred_tasks() {
         kdebugln!("disposing task {} with tid {}", task.name(), task.tid());
     }
 }
-
-// #[derive(Debug)]
-// pub struct ReapedThreadGroup {
-//     thread_group: Arc<ThreadGroup>,
-// }
-//
-// impl ReapedThreadGroup {
-//     pub fn new(thread_group: Arc<ThreadGroup>) -> Self {
-//         Self { thread_group }
-//     }
-//
-//     pub fn exit_code(&self) -> ExitCode {
-//         match self.thread_group.status() {
-//             ThreadGroupStatus::Exited(code) => code,
-//             _ => panic!(
-//                 "task topology: reaped thread group {} is not exited yet when
-// getting exit code",                 self.thread_group.tgid()
-//             ),
-//         }
-//     }
-// }
-
-// impl Deref for ReapedThreadGroup {
-//     type Target = ThreadGroup;
-//
-//     fn deref(&self) -> &Self::Target {
-//         &self.thread_group
-//     }
-// }

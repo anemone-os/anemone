@@ -30,7 +30,7 @@ fn sys_gettimeofday(
         });
     }
 
-    if let Some(tz) = tz {
+    if let Some(_tz) = tz {
         // we don't support time zones. btw, the use of the timezone structure
         // is obsolete; the tz argument should normally be specified as
         // NULL." says man 2. so it's fine.
