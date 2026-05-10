@@ -108,7 +108,7 @@ fn ext4_sync_inode_inner(inode: &Arc<Inode>) -> Result<(), SysError> {
     })
 }
 
-fn ext4_evict_inode(_sb: &SuperBlock, inode: Arc<Inode>) -> Result<(), SysError> {
+fn ext4_evict_inode(inode: Arc<Inode>) -> Result<(), SysError> {
     ext4_sync_inode_inner(&inode)
 }
 

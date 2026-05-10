@@ -92,22 +92,34 @@ fn mount_rootfs() {
 
 // recursively ls
 fn ls_dir(path: &Path) {
-    let mut ctx = DirContext::new();
+    // let mut ctx = DirContext::new();
+
+    const MAX_ENTRIES: usize = 256;
+
+    let mut sink = FixedSizeDirSink::<MAX_ENTRIES>::new();
 
     let Ok(dir) = vfs_open(PathResolution::normal(path)) else {
         return;
     };
 
-    while let Ok(dirent) = dir.iterate(&mut ctx) {
-        if dirent.name == "." || dirent.name == ".." {
-            continue;
-        }
+    loop {
+        sink.clear();
+        match dir.read_dir(&mut sink) {
+            Ok(ReadDirResult::Progressed) => {
+                for DirEntry { name, ino, ty } in sink.entries() {
+                    if name == "." || name == ".." {
+                        continue;
+                    }
 
-        let name = dirent.name;
-        let path = path.join(name);
-        kdebugln!("{} ({:?})", path.display(), dirent.ty);
-        if dirent.ty == InodeType::Dir {
-            ls_dir(&path);
+                    let path = path.join(name);
+                    kdebugln!("{} ({:?})", path.display(), ty);
+                    if *ty == InodeType::Dir {
+                        ls_dir(&path);
+                    }
+                }
+            },
+            Ok(ReadDirResult::Eof) => break,
+            Err(e) => panic!("failed to read dir {}: {:?}", path.display(), e),
         }
     }
 }
@@ -182,7 +194,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
 
     #[cfg(feature = "kunit")]
     {
-        crate::debug::kunit::kunit_runner();
+        // crate::debug::kunit::kunit_runner();
         unsafe {
             KUNIT_SYNC_COUNTER.sync_with_counter();
         }

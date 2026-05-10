@@ -323,7 +323,7 @@ fn ext4_reg_state(inode: &InodeRef) -> Result<Arc<Ext4RegState>, SysError> {
     Ok(ext4_reg(inode)?.state().clone())
 }
 
-fn ext4_read(file: &File, buf: &mut [u8]) -> Result<usize, SysError> {
+fn ext4_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
     let inode = file.inode();
     if inode.ty() != InodeType::Regular {
         return Err(SysError::NotReg);
@@ -331,19 +331,18 @@ fn ext4_read(file: &File, buf: &mut [u8]) -> Result<usize, SysError> {
 
     let state = ext4_reg_state(inode)?;
     let mapping = Ext4RegMapping::new(state.clone());
-    let pos = file.pos();
     let size = state.size();
-    if pos >= size {
+    if *pos >= size {
         return Ok(0);
     }
 
-    let n = usize::min(buf.len(), size - pos);
-    mapping.read(pos, &mut buf[..n])?;
-    file.set_pos(pos + n);
+    let n = usize::min(buf.len(), size - *pos);
+    mapping.read(*pos, &mut buf[..n])?;
+    *pos += n;
     Ok(n)
 }
 
-fn ext4_write(file: &File, buf: &[u8]) -> Result<usize, SysError> {
+fn ext4_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
     let inode = file.inode();
     if inode.ty() != InodeType::Regular {
         return Err(SysError::NotReg);
@@ -351,73 +350,82 @@ fn ext4_write(file: &File, buf: &[u8]) -> Result<usize, SysError> {
 
     let state = ext4_reg_state(inode)?;
     let mapping = Ext4RegMapping::new(state.clone());
-    let pos = file.pos();
-    let new_pos = mapping.copy_in(pos, buf, true)?;
+    let new_pos = mapping.copy_in(*pos, buf, true)?;
 
     state.update_size_max(new_pos);
     inode.inode().update_size_max(new_pos as u64);
-    file.set_pos(new_pos);
+    *pos = new_pos;
     Ok(buf.len())
 }
 
-fn ext4_seek(file: &File, pos: usize) -> Result<(), SysError> {
-    file.set_pos(pos);
+fn ext4_validate_seek(file: &File, pos: usize) -> Result<(), SysError> {
     Ok(())
 }
 
-fn ext4_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, SysError> {
+fn ext4_read_dir(
+    file: &File,
+    offset: &mut usize,
+    sink: &mut dyn DirSink,
+) -> Result<ReadDirResult, SysError> {
     let inode = file.inode();
     if inode.ty() != InodeType::Dir {
         return Err(SysError::NotDir);
     }
 
     let sb = inode.sb();
-    let start = ctx.offset() as u64;
-    let (advance, name, ino, ty) = ext4_sb(&sb).read_tx(|| {
+    let mut pushed_any = false;
+
+    ext4_sb(&sb).read_tx(|| {
         ext4_sb(&sb).with_fs(|fs| {
             let mut reader = fs
-                .read_dir(inode.ino().get() as u32, start)
+                .read_dir(inode.ino().get() as u32, *offset as u64)
                 .map_err(map_ext4_error)?;
-            let current = reader.current().ok_or(SysError::NoMoreEntries)?;
-            let cur_off = reader.offset();
-            let name = str::from_utf8(current.name())
-                .map_err(|_| SysError::InvalidArgument)?
-                .to_string();
-            let ino = ext4_ino(current.ino())?;
-            let ty = map_lwext4_inode_type(current.inode_type())?;
-            reader.step().map_err(map_ext4_error)?;
-            let next_off = reader.offset();
-            // todo?
-            let advance = if next_off > cur_off {
-                (next_off - cur_off) as usize
-            } else {
-                1
-            };
-            Ok((advance, name, ino, ty))
-        })
-    })?;
-    ctx.advance(advance);
+            loop {
+                let Some(current) = reader.current() else {
+                    return if pushed_any {
+                        Ok(ReadDirResult::Progressed)
+                    } else {
+                        Ok(ReadDirResult::Eof)
+                    };
+                };
+                let name = str::from_utf8(current.name())
+                    .map_err(|_| SysError::InvalidArgument)?
+                    .to_string();
+                let ino = ext4_ino(current.ino())?;
+                let ty = map_lwext4_inode_type(current.inode_type())?;
 
-    Ok(DirEntry { name, ino, ty })
+                match sink.push(DirEntry { name, ino, ty })? {
+                    SinkResult::Accepted => {
+                        pushed_any = true;
+                        reader.step().map_err(map_ext4_error)?;
+                        *offset = reader.offset() as usize;
+                    },
+                    SinkResult::Stop => {
+                        break Ok(ReadDirResult::Progressed);
+                    },
+                }
+            }
+        })
+    })
 }
 
 pub(super) static EXT4_REG_FILE_OPS: FileOps = FileOps {
     read: ext4_read,
     write: ext4_write,
-    seek: ext4_seek,
-    iterate: |_, _| Err(SysError::NotDir),
+    validate_seek: ext4_validate_seek,
+    read_dir: |_, _, _| Err(SysError::NotDir),
 };
 
 pub(super) static EXT4_DIR_FILE_OPS: FileOps = FileOps {
-    read: |_, _| Err(SysError::IsDir),
-    write: |_, _| Err(SysError::IsDir),
-    seek: |_, _| Err(SysError::IsDir),
-    iterate: ext4_iterate,
+    read: |_, _, _| Err(SysError::IsDir),
+    write: |_, _, _| Err(SysError::IsDir),
+    validate_seek: |_, _| Err(SysError::IsDir),
+    read_dir: ext4_read_dir,
 };
 
 pub(super) static EXT4_SYMLINK_FILE_OPS: FileOps = FileOps {
-    read: |_, _| Err(SysError::NotSupported),
-    write: |_, _| Err(SysError::NotSupported),
-    seek: |_, _| Err(SysError::NotSupported),
-    iterate: |_, _| Err(SysError::NotDir),
+    read: |_, _, _| Err(SysError::NotSupported),
+    write: |_, _, _| Err(SysError::NotSupported),
+    validate_seek: |_, _| Err(SysError::NotSupported),
+    read_dir: |_, _, _| Err(SysError::NotDir),
 };

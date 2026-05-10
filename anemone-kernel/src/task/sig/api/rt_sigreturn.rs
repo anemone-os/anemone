@@ -25,7 +25,7 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
         let mut guard = usp.write();
         match UserReadPtr::<RtSigFrame>::try_new(sigframe_base, &mut guard) {
             Err(e) => {
-                // offending address. just kill the process
+                // offending address. just kill the process.
                 knoticeln!(
                     "sys_rt_sigreturn: failed to read rtsigframe from task {}'s user stack at address {:#x}: {:?}",
                     task.tid(),

@@ -2,6 +2,9 @@ use core::fmt::Debug;
 
 use crate::prelude::*;
 
+/// A [Dentry] determines the location of a file in a mounted filesystem.
+///
+/// See [PathRef] for absolute location in the entire namespace.
 pub struct Dentry {
     parent: Option<Arc<Dentry>>,
     inode: InodeRef,

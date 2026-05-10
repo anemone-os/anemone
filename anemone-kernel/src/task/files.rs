@@ -96,16 +96,11 @@ impl FileDesc {
             return Err(SysError::PermissionDenied);
         }
 
-        // currently we don't support atomic append, so we just seek to the end of file
-        // before writing.
-
         if self.pfile.flags.contains(FileFlags::APPEND) {
-            self.pfile
-                .file
-                .seek(self.pfile.file.get_attr()?.size as usize)?;
+            self.pfile.file.append(buf).map_err(|e| e.into())
+        } else {
+            self.pfile.file.write(buf).map_err(|e| e.into())
         }
-
-        self.pfile.file.write(buf).map_err(|e| e.into())
     }
 
     /// `whence` is Linux-specific. we handle that in syscall handler. it should
@@ -114,8 +109,8 @@ impl FileDesc {
         self.pfile.file.seek(offset).map_err(|e| e.into())
     }
 
-    pub fn iterate(&self, ctx: &mut DirContext) -> Result<DirEntry, SysError> {
-        self.pfile.file.iterate(ctx).map_err(|e| e.into())
+    pub fn read_dir(&self, sink: &mut dyn DirSink) -> Result<ReadDirResult, SysError> {
+        self.pfile.file.read_dir(sink).map_err(|e| e.into())
     }
 }
 

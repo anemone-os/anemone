@@ -149,7 +149,11 @@ impl RamfsRegMapping {
 }
 
 impl VmObject for RamfsRegMapping {
-    fn resolve_frame(&self, pidx: usize, _access: PageFaultType) -> Result<ResolvedFrame, SysError> {
+    fn resolve_frame(
+        &self,
+        pidx: usize,
+        _access: PageFaultType,
+    ) -> Result<ResolvedFrame, SysError> {
         if RamfsRegState::page_start(pidx)? >= self.state.size() {
             return Err(SysError::NotMapped);
         }
@@ -175,83 +179,92 @@ fn ramfs_reg_state(inode: &InodeRef) -> Result<Arc<RamfsRegState>, SysError> {
     Ok(ramfs_reg(inode)?.state())
 }
 
-fn ramfs_read(file: &File, buf: &mut [u8]) -> Result<usize, SysError> {
+fn ramfs_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
     let inode = file.inode();
     let state = ramfs_reg_state(inode)?;
 
-    let pos = file.pos();
     let size = state.size();
-    if pos >= size {
+    if *pos >= size {
         return Ok(0); // EOF
     }
 
-    let n = usize::min(buf.len(), size - pos);
+    let n = usize::min(buf.len(), size - *pos);
 
-    state.copy_out(pos, &mut buf[..n])?;
+    state.copy_out(*pos, &mut buf[..n])?;
 
-    file.set_pos(pos + n);
+    *pos += n;
 
     Ok(n)
 }
 
-fn ramfs_write(file: &File, buf: &[u8]) -> Result<usize, SysError> {
+fn ramfs_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
     let inode = file.inode();
     let state = ramfs_reg_state(inode)?;
 
-    let pos = file.pos();
-    let new_pos = pos.checked_add(buf.len()).ok_or(SysError::InvalidArgument)?;
+    let cur_pos = *pos;
+    let new_pos = pos
+        .checked_add(buf.len())
+        .ok_or(SysError::InvalidArgument)?;
 
-    state.copy_into(pos, buf)?;
+    state.copy_into(*pos, buf)?;
     state.update_size_max(new_pos);
     inode.inode().update_size_max(new_pos as u64);
-    file.set_pos(new_pos);
+    *pos = new_pos;
     Ok(buf.len())
 }
 
-fn ramfs_seek(file: &File, pos: usize) -> Result<(), SysError> {
+fn ramfs_validate_seek(file: &File, pos: usize) -> Result<(), SysError> {
     // allow seeking beyond EOF; the gap will be zero-filled on the next write.
-    file.set_pos(pos);
     Ok(())
 }
 
-fn ramfs_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, SysError> {
+fn ramfs_read_dir(
+    file: &File,
+    offset: &mut usize,
+    sink: &mut dyn DirSink,
+) -> Result<ReadDirResult, SysError> {
     let inode = file.inode();
     let dir_data = ramfs_dir(inode)?;
+    let mut pushed_any = false;
 
-    let entry = dir_data.get_by_offset(ctx.offset());
-    if entry.is_none() {
-        return Err(SysError::NoMoreEntries);
+    loop {
+        let entry = dir_data.get_by_offset(*offset);
+        if let Some((name, ino)) = entry {
+            let ty = inode.sb().iget(ino)?.ty();
+            match sink.push(DirEntry { name, ino, ty })? {
+                SinkResult::Accepted => {
+                    pushed_any = true;
+                    *offset += 1;
+                },
+                SinkResult::Stop => {
+                    break Ok(ReadDirResult::Progressed);
+                },
+            }
+        } else if pushed_any {
+            return Ok(ReadDirResult::Progressed);
+        } else {
+            return Ok(ReadDirResult::Eof);
+        }
     }
-    let (name, ino) = entry.unwrap();
-
-    ctx.advance(1);
-
-    let inode = inode.sb().iget(ino).expect("ino exists but failed to load");
-
-    Ok(DirEntry {
-        name,
-        ino,
-        ty: inode.ty(),
-    })
 }
 
 pub(super) static RAMFS_REG_FILE_OPS: FileOps = FileOps {
     read: ramfs_read,
     write: ramfs_write,
-    seek: ramfs_seek,
-    iterate: |_, _| Err(SysError::NotDir),
+    validate_seek: ramfs_validate_seek,
+    read_dir: |_, _, _| Err(SysError::NotDir),
 };
 
 pub(super) static RAMFS_DIR_FILE_OPS: FileOps = FileOps {
-    read: |_, _| Err(SysError::IsDir),
-    write: |_, _| Err(SysError::IsDir),
-    seek: |_, _| Err(SysError::IsDir),
-    iterate: ramfs_iterate,
+    read: |_, _, _| Err(SysError::IsDir),
+    write: |_, _, _| Err(SysError::IsDir),
+    validate_seek: |_, _| Err(SysError::IsDir),
+    read_dir: ramfs_read_dir,
 };
 
 pub(super) static RAMFS_SYMLINK_FILE_OPS: FileOps = FileOps {
-    read: |_, _| Err(SysError::NotSupported),
-    write: |_, _| Err(SysError::NotSupported),
-    seek: |_, _| Err(SysError::NotSupported),
-    iterate: |_, _| Err(SysError::NotSupported),
+    read: |_, _, _| Err(SysError::NotSupported),
+    write: |_, _, _| Err(SysError::NotSupported),
+    validate_seek: |_, _| Err(SysError::NotSupported),
+    read_dir: |_, _, _| Err(SysError::NotDir),
 };

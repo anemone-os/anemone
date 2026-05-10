@@ -9,7 +9,7 @@ fn devfs_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, SysErr
     devfs_new_inode(sb.clone(), DevfsNode::new(ino)?)
 }
 
-fn devfs_evict_inode(_sb: &SuperBlock, _inode: Arc<Inode>) -> Result<(), SysError> {
+fn devfs_evict_inode(_inode: Arc<Inode>) -> Result<(), SysError> {
     Ok(())
 }
 

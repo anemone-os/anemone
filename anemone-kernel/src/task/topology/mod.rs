@@ -301,6 +301,27 @@ pub fn get_thread_group(tgid: &Tid) -> Option<Arc<ThreadGroup>> {
     topology.thread_groups.get(tgid).cloned()
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TopologyStat {
+    pub ntasks: usize,
+    pub nthread_groups: usize,
+    // TODO: more statistics.
+}
+
+/// Get the topology statistics.
+///
+/// ## Locks
+///
+/// [TOPOLOGY]
+pub fn topology_stat() -> TopologyStat {
+    let topology = TOPOLOGY.inner.read_irqsave();
+
+    TopologyStat {
+        ntasks: topology.tasks.len(),
+        nthread_groups: topology.thread_groups.len(),
+    }
+}
+
 // impl Task {
 //     /// When you want to lock multiple tasks, a consistent lock ordering must
 // be     /// followed to avoid deadlocks.

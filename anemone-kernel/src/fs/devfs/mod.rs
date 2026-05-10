@@ -1,6 +1,8 @@
 //! Abstract devices into inodes.
 //!
 //! Neither devfs nor devtmpfs. We chose a middle ground.
+//!
+//! TODO: refactor. current design and implementation is a huge mess...
 
 use crate::{
     device::{block::get_block_dev_by_name, char::get_char_dev_by_name},
@@ -160,13 +162,39 @@ fn init() {
 mod kunits {
     use super::*;
 
+    const DEVFS_TEST_SINK_CAPACITY: usize = 64;
+
+    fn devfs_read_dir_entries(root: &File) -> Vec<DirEntry> {
+        let mut sink = FixedSizeDirSink::<DEVFS_TEST_SINK_CAPACITY>::new();
+        let mut entries = Vec::new();
+
+        loop {
+            sink.clear();
+            match root.read_dir(&mut sink) {
+                Ok(ReadDirResult::Progressed) => entries.extend_from_slice(sink.entries()),
+                Ok(ReadDirResult::Eof) => break,
+                Err(err) => panic!("failed to read devfs dir: {:?}", err),
+            }
+        }
+
+        for entry in &entries {
+            kdebugln!(
+                "devfs dir entry: name={}, ino={}, ty={:?}",
+                entry.name,
+                entry.ino.get(),
+                entry.ty
+            );
+        }
+
+        entries
+    }
+
     #[kunit]
     fn ls_dev() {
         let mountpoint = mount_devfs("ls");
 
-        let mut ctx = DirContext::new();
         let root = vfs_open(Path::new(mountpoint.as_str())).unwrap();
-        while let Ok(dirent) = root.iterate(&mut ctx) {
+        for dirent in devfs_read_dir_entries(&root) {
             kprintln!("{} {} {:?}", dirent.name, dirent.ino.get(), dirent.ty);
         }
 
@@ -198,14 +226,10 @@ mod kunits {
 
     fn devfs_entries(mountpoint: &str) -> Vec<String> {
         let root = vfs_open(Path::new(mountpoint)).unwrap();
-        let mut ctx = DirContext::new();
-        let mut entries = Vec::new();
-
-        while let Ok(entry) = root.iterate(&mut ctx) {
-            entries.push(entry.name);
-        }
-
-        entries
+        devfs_read_dir_entries(&root)
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect()
     }
 
     #[kunit]

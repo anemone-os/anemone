@@ -100,7 +100,7 @@ impl Drop for PipeTx {
     }
 }
 
-fn pipe_rx_read(file: &File, buf: &mut [u8]) -> Result<usize, SysError> {
+fn pipe_rx_read(file: &File, _pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
     let rx = file
         .prv()
         .cast::<PipeRx>()
@@ -137,7 +137,7 @@ fn pipe_rx_read(file: &File, buf: &mut [u8]) -> Result<usize, SysError> {
     }
 }
 
-fn pipe_tx_write(file: &File, buf: &[u8]) -> Result<usize, SysError> {
+fn pipe_tx_write(file: &File, _pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
     let tx = file
         .prv()
         .cast::<PipeTx>()
@@ -182,16 +182,16 @@ fn pipe_tx_write(file: &File, buf: &[u8]) -> Result<usize, SysError> {
 
 static PIPE_RX_FILE_OPS: FileOps = FileOps {
     read: pipe_rx_read,
-    write: |_, _| Err(SysError::NotSupported),
-    seek: |_, _| Err(SysError::NotSupported),
-    iterate: |_, _| Err(SysError::NotDir),
+    write: |_, _, _| Err(SysError::NotSupported),
+    validate_seek: |_, _| Err(SysError::NotSupported),
+    read_dir: |_, _, _| Err(SysError::NotDir),
 };
 
 static PIPE_TX_FILE_OPS: FileOps = FileOps {
-    read: |_, _| Err(SysError::NotSupported),
+    read: |_, _, _| Err(SysError::NotSupported),
     write: pipe_tx_write,
-    seek: |_, _| Err(SysError::NotSupported),
-    iterate: |_, _| Err(SysError::NotDir),
+    validate_seek: |_, _| Err(SysError::NotSupported),
+    read_dir: |_, _, _| Err(SysError::NotDir),
 };
 
 pub struct OpenedPipe {

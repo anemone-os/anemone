@@ -10,7 +10,7 @@ pub use crate::{
     platform_defs::*,
     power::*,
     sched::*,
-    sync::{rwlock::*, spinlock::*, *},
+    sync::{mutex::*, rwlock::*, spinlock::*, *},
     syscall::*,
     syserror::*,
     task::*,

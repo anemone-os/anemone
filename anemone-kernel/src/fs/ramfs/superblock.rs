@@ -39,12 +39,12 @@ fn ramfs_load_inode(_sb: &Arc<SuperBlock>, _ino: Ino) -> Result<Arc<Inode>, SysE
     Err(SysError::NotFound)
 }
 
-fn ramfs_evict_inode(sb: &SuperBlock, inode: Arc<Inode>) -> Result<(), SysError> {
+fn ramfs_evict_inode(_inode: Arc<Inode>) -> Result<(), SysError> {
     // the same as sync_inode.
     Ok(())
 }
 
-fn ramfs_sync_inode(inode: &InodeRef) -> Result<(), SysError> {
+fn ramfs_sync_inode(_inode: &InodeRef) -> Result<(), SysError> {
     // ramfs has nothing to do here, since we don't have a backing store to write
     // back
     Ok(())

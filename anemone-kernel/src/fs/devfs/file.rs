@@ -9,6 +9,11 @@ use crate::{
 
 use super::{DevfsNode, devfs_ino_for, devfs_root_ino};
 
+const DEVFS_DOT_CURSOR: usize = 0;
+const DEVFS_DOTDOT_CURSOR: usize = 1;
+const DEVFS_CHAR_CURSOR_BASE: usize = 2;
+const DEVFS_BLOCK_CURSOR_BASE: usize = 1usize << (usize::BITS as usize - 1);
+
 #[derive(Debug, Clone, Copy, Opaque)]
 pub(super) struct DevfsFile {
     node: DevfsNode,
@@ -30,71 +35,95 @@ fn devfs_file(file: &File) -> &DevfsFile {
         .expect("devfs file must carry DevfsFile private data")
 }
 
-fn count_char_devs() -> usize {
-    let mut count = 0;
-    let mut ctx = IterCtx::new();
-    while next_char_dev(&mut ctx).is_some() {
-        count += 1;
-    }
-    count
+fn push_root_entry(
+    sink: &mut dyn DirSink,
+    name: &str,
+    ino: Ino,
+    ty: InodeType,
+) -> Result<SinkResult, SysError> {
+    sink.push(DirEntry {
+        name: name.to_string(),
+        ino,
+        ty,
+    })
 }
 
-fn dir_iterate(file: &File, ctx: &mut DirContext) -> Result<DirEntry, SysError> {
+fn dir_read_dir(
+    file: &File,
+    pos: &mut usize,
+    sink: &mut dyn DirSink,
+) -> Result<ReadDirResult, SysError> {
     if devfs_file(file).node() != DevfsNode::Root {
         return Err(SysError::NotDir);
     }
 
-    match ctx.offset() {
-        0 => {
-            ctx.advance(1);
-            Ok(DirEntry {
-                name: ".".to_string(),
-                ino: devfs_root_ino(),
-                ty: InodeType::Dir,
-            })
-        },
-        1 => {
-            ctx.advance(1);
-            Ok(DirEntry {
-                name: "..".to_string(),
-                ino: devfs_root_ino(),
-                ty: InodeType::Dir,
-            })
-        },
-        _ => {
-            let logical = ctx.offset() - 2;
+    let mut pushed_any = false;
 
-            let mut cctx = IterCtx::with_offset(logical);
-            if let Some(entry) = next_char_dev(&mut cctx) {
-                ctx.advance(1);
-                return Ok(DirEntry {
+    loop {
+        match *pos {
+            DEVFS_DOT_CURSOR => {
+                match push_root_entry(sink, ".", devfs_root_ino(), InodeType::Dir)? {
+                    SinkResult::Accepted => {
+                        pushed_any = true;
+                        *pos = DEVFS_DOTDOT_CURSOR;
+                    },
+                    SinkResult::Stop => return Ok(ReadDirResult::Progressed),
+                }
+            },
+            DEVFS_DOTDOT_CURSOR => {
+                match push_root_entry(sink, "..", devfs_root_ino(), InodeType::Dir)? {
+                    SinkResult::Accepted => {
+                        pushed_any = true;
+                        *pos = DEVFS_CHAR_CURSOR_BASE;
+                    },
+                    SinkResult::Stop => return Ok(ReadDirResult::Progressed),
+                }
+            },
+            block_pos if block_pos >= DEVFS_BLOCK_CURSOR_BASE => {
+                let mut ctx = IterCtx::with_offset(block_pos - DEVFS_BLOCK_CURSOR_BASE);
+                let Some(entry) = next_block_dev(&mut ctx) else {
+                    return if pushed_any {
+                        Ok(ReadDirResult::Progressed)
+                    } else {
+                        Ok(ReadDirResult::Eof)
+                    };
+                };
+
+                match sink.push(DirEntry {
                     name: entry.name,
-                    ino: devfs_ino_for(DevfsNode::Char(entry.devnum)),
-                    ty: InodeType::Char,
-                });
-            }
-
-            let char_count = count_char_devs();
-            let Some(block_offset) = logical.checked_sub(char_count) else {
-                return Err(SysError::NoMoreEntries);
-            };
-
-            let mut bctx = IterCtx::with_offset(block_offset);
-            let Some(entry) = next_block_dev(&mut bctx) else {
-                return Err(SysError::NoMoreEntries);
-            };
-
-            ctx.advance(1);
-            Ok(DirEntry {
-                name: entry.name,
-                ino: devfs_ino_for(DevfsNode::Block(entry.devnum)),
-                ty: InodeType::Block,
-            })
-        },
+                    ino: devfs_ino_for(DevfsNode::Block(entry.devnum)),
+                    ty: InodeType::Block,
+                })? {
+                    SinkResult::Accepted => {
+                        pushed_any = true;
+                        *pos = DEVFS_BLOCK_CURSOR_BASE + ctx.cur_offset();
+                    },
+                    SinkResult::Stop => return Ok(ReadDirResult::Progressed),
+                }
+            },
+            _ => {
+                let mut ctx = IterCtx::with_offset(*pos - DEVFS_CHAR_CURSOR_BASE);
+                if let Some(entry) = next_char_dev(&mut ctx) {
+                    match sink.push(DirEntry {
+                        name: entry.name,
+                        ino: devfs_ino_for(DevfsNode::Char(entry.devnum)),
+                        ty: InodeType::Char,
+                    })? {
+                        SinkResult::Accepted => {
+                            pushed_any = true;
+                            *pos = DEVFS_CHAR_CURSOR_BASE + ctx.cur_offset();
+                        },
+                        SinkResult::Stop => return Ok(ReadDirResult::Progressed),
+                    }
+                } else {
+                    *pos = DEVFS_BLOCK_CURSOR_BASE;
+                }
+            },
+        }
     }
 }
 
-fn char_read(file: &File, buf: &mut [u8]) -> Result<usize, SysError> {
+fn char_read(file: &File, _pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
     let DevfsNode::Char(devnum) = devfs_file(file).node() else {
         return Err(SysError::InvalidArgument);
     };
@@ -102,16 +131,12 @@ fn char_read(file: &File, buf: &mut [u8]) -> Result<usize, SysError> {
     get_char_dev(devnum).ok_or(SysError::NotFound)?.read(buf)
 }
 
-fn char_write(file: &File, buf: &[u8]) -> Result<usize, SysError> {
+fn char_write(file: &File, _pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
     let DevfsNode::Char(devnum) = devfs_file(file).node() else {
         return Err(SysError::InvalidArgument);
     };
 
     get_char_dev(devnum).ok_or(SysError::NotFound)?.write(buf)
-}
-
-fn char_seek(_file: &File, _pos: usize) -> Result<(), SysError> {
-    Err(SysError::NotSupported)
 }
 
 fn block_dev_from_file(file: &File) -> Result<Arc<dyn BlockDev>, SysError> {
@@ -122,7 +147,7 @@ fn block_dev_from_file(file: &File) -> Result<Arc<dyn BlockDev>, SysError> {
     get_block_dev(devnum).ok_or(SysError::NotFound)
 }
 
-fn block_seek(file: &File, pos: usize) -> Result<(), SysError> {
+fn block_validate_seek(file: &File, pos: usize) -> Result<(), SysError> {
     let dev = block_dev_from_file(file)?;
     let block_size = dev.block_size().bytes();
     let total_bytes = dev.total_blocks() * block_size;
@@ -131,45 +156,46 @@ fn block_seek(file: &File, pos: usize) -> Result<(), SysError> {
         return Err(SysError::InvalidArgument);
     }
 
-    file.set_pos(pos);
     Ok(())
 }
 
-fn block_read(file: &File, buf: &mut [u8]) -> Result<usize, SysError> {
+fn block_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
     if buf.is_empty() {
         return Ok(0);
     }
 
+    let old_pos = *pos;
+
     let dev = block_dev_from_file(file)?;
     let block_size = dev.block_size().bytes();
-    let pos = file.pos();
     let total_bytes = dev.total_blocks() * block_size;
 
-    if pos % block_size != 0 || buf.len() % block_size != 0 {
+    if old_pos % block_size != 0 || buf.len() % block_size != 0 {
         return Err(SysError::InvalidArgument);
     }
 
-    if pos >= total_bytes {
+    if old_pos >= total_bytes {
         return Ok(0);
     }
 
-    let nbytes = usize::min(buf.len(), total_bytes - pos);
-    dev.read_blocks(pos / block_size, &mut buf[..nbytes])?;
-    file.set_pos(pos + nbytes);
+    let nbytes = usize::min(buf.len(), total_bytes - old_pos);
+    dev.read_blocks(old_pos / block_size, &mut buf[..nbytes])?;
+    *pos = old_pos + nbytes;
     Ok(nbytes)
 }
 
-fn block_write(file: &File, buf: &[u8]) -> Result<usize, SysError> {
+fn block_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
     if buf.is_empty() {
         return Ok(0);
     }
 
+    let old_pos = *pos;
+
     let dev = block_dev_from_file(file)?;
     let block_size = dev.block_size().bytes();
-    let pos = file.pos();
     let total_bytes = dev.total_blocks() * block_size;
 
-    if pos % block_size != 0 || buf.len() % block_size != 0 {
+    if old_pos % block_size != 0 || buf.len() % block_size != 0 {
         return Err(SysError::InvalidArgument);
     }
 
@@ -180,28 +206,28 @@ fn block_write(file: &File, buf: &[u8]) -> Result<usize, SysError> {
         return Err(SysError::NoSpace);
     }
 
-    dev.write_blocks(pos / block_size, buf)?;
-    file.set_pos(end_pos);
+    dev.write_blocks(old_pos / block_size, buf)?;
+    *pos = end_pos;
     Ok(buf.len())
 }
 
 pub(super) static DEVFS_DIR_FILE_OPS: FileOps = FileOps {
-    read: |_, _| Err(SysError::IsDir),
-    write: |_, _| Err(SysError::IsDir),
-    seek: |_, _| Err(SysError::IsDir),
-    iterate: dir_iterate,
+    read: |_, _, _| Err(SysError::IsDir),
+    write: |_, _, _| Err(SysError::IsDir),
+    validate_seek: |_, _| Err(SysError::IsDir),
+    read_dir: dir_read_dir,
 };
 
 pub(super) static DEVFS_CHAR_FILE_OPS: FileOps = FileOps {
     read: char_read,
     write: char_write,
-    seek: char_seek,
-    iterate: |_, _| Err(SysError::NotDir),
+    validate_seek: |_, _| Err(SysError::NotSupported),
+    read_dir: |_, _, _| Err(SysError::NotDir),
 };
 
 pub(super) static DEVFS_BLOCK_FILE_OPS: FileOps = FileOps {
     read: block_read,
     write: block_write,
-    seek: block_seek,
-    iterate: |_, _| Err(SysError::NotDir),
+    validate_seek: block_validate_seek,
+    read_dir: |_, _, _| Err(SysError::NotDir),
 };

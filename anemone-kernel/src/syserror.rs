@@ -66,8 +66,6 @@ pub enum SysError {
     NotMounted,
     /// Path is a mountpoint.
     IsMountPoint,
-    /// No more entries to iterate (used by `iterate` file operation).
-    NoMoreEntries,
     /// File system run out its capacity.
     NoSpace,
     /// Operation would block and nonblocking mode was requested.
@@ -174,7 +172,7 @@ impl SysError {
             | SysError::ExistingDevice
             | SysError::ExistingDriver
             | SysError::DevAlreadyRegistered => EEXIST,
-            SysError::NotFound | SysError::NoMoreEntries => ENOENT,
+            SysError::NotFound => ENOENT,
             SysError::NotDir => ENOTDIR,
             SysError::IsDir => EISDIR,
             SysError::Busy | SysError::IrqAlreadyRequested => EBUSY,
