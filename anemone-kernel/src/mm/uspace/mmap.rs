@@ -643,8 +643,7 @@ mod kunits {
 
     #[kunit]
     fn unmap_middle_of_anonymous_vma_punches_hole() {
-        let uspace = UserSpace::new_user().expect("user space setup should succeed");
-        let mut uspace = uspace.write();
+        let mut uspace = UserSpaceData::new().expect("user space setup should succeed");
         let base = uspace.stack_vma().range().start() - 32;
 
         uspace
@@ -678,8 +677,7 @@ mod kunits {
 
     #[kunit]
     fn protect_range_splits_vma_and_invalidates_present_ptes() {
-        let uspace = UserSpace::new_user().expect("user space setup should succeed");
-        let mut uspace = uspace.write();
+        let mut uspace = UserSpaceData::new().expect("user space setup should succeed");
         let base = uspace.stack_vma().range().start() - 48;
 
         uspace
@@ -731,8 +729,7 @@ mod kunits {
 
     #[kunit]
     fn protect_range_rejects_holes_and_reservations() {
-        let uspace = UserSpace::new_user().expect("user space setup should succeed");
-        let mut uspace = uspace.write();
+        let mut uspace = UserSpaceData::new().expect("user space setup should succeed");
         let base = uspace.stack_vma().range().start() - 64;
 
         uspace
@@ -761,8 +758,7 @@ mod kunits {
 
     #[kunit]
     fn fixed_replace_and_noreplace_follow_unified_editing() {
-        let uspace = UserSpace::new_user().expect("user space setup should succeed");
-        let mut uspace = uspace.write();
+        let mut uspace = UserSpaceData::new().expect("user space setup should succeed");
         let base = uspace.stack_vma().range().start() - 80;
 
         uspace
@@ -802,8 +798,7 @@ mod kunits {
 
     #[kunit]
     fn anonymous_fork_keeps_shared_backing_and_cow_private() {
-        let uspace = UserSpace::new_user().expect("user space setup should succeed");
-        let mut parent = uspace.write();
+        let mut parent = UserSpaceData::new().expect("user space setup should succeed");
         let shared_base = parent.stack_vma().range().start() - 96;
         let private_base = parent.stack_vma().range().start() - 112;
 

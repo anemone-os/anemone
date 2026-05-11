@@ -18,12 +18,10 @@ pub fn kernel_execve(
 ) -> Result<(), SysError> {
     let task = get_current_task();
 
-    let usp = UserSpace::new_user()?;
-    let mut usp_data = usp.write();
-    match dispatch_execve(&mut usp_data, path.as_ref(), argv, envp) {
+    let mut usp = UserSpaceData::new()?;
+    match dispatch_execve(&mut usp, path.as_ref(), argv, envp) {
         Ok(meta) => {
-            drop(usp_data);
-            let usp = Arc::new(usp);
+            let usp = Arc::new(UserSpace::new(usp));
             unsafe {
                 task.dethread();
 

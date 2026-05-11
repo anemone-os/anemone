@@ -91,6 +91,7 @@ impl FileDesc {
         self.pfile.file.read(buf).map_err(|e| e.into())
     }
 
+    #[track_caller]
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         if !self.pfile.flags.contains(FileFlags::WRITE) {
             return Err(SysError::PermissionDenied);

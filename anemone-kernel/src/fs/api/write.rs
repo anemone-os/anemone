@@ -31,10 +31,12 @@ fn sys_write(
 
     let mut kbuf = vec![0u8; count];
 
-    let mut guard = uspace.write();
+    {
+        let mut guard = uspace.write();
 
-    let slice = UserReadSlice::try_new(buf, count, &mut guard)?;
-    slice.copy_to_slice(&mut kbuf);
+        let slice = UserReadSlice::try_new(buf, count, &mut guard)?;
+        slice.copy_to_slice(&mut kbuf);
+    }
 
     let len = file.write(&kbuf[..count]).map(|n| n as u64)?;
 

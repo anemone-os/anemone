@@ -154,6 +154,7 @@ impl File {
         Ok(())
     }
 
+    #[track_caller]
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
