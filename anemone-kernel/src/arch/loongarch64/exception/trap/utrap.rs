@@ -225,7 +225,13 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                 dispose_deferred_tasks();
             }
         }
+
+        // alright, we can safely turn on interrupts now.
+        unsafe {
+            IntrArch::local_intr_enable();
+        }
     } else {
+        // for exceptions, we can turn on interrupts immediately.
         unsafe {
             IntrArch::local_intr_enable();
         }
@@ -300,15 +306,17 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                 },
             }
         }
-        unsafe {
-            IntrArch::local_intr_disable();
-        }
     }
 
+    debug_assert!(IntrArch::local_intr_enabled());
     handle_signals(
         trapframe,
         restart_syscall.map(|restart| (restart, syscall_ctx)),
     );
+    unsafe {
+        IntrArch::local_intr_disable();
+        // cpu usage tracking relies on interrupt being disabled.
+    }
 
     get_current_task().on_prv_change(Privilege::User);
 }

@@ -545,8 +545,8 @@ fn perform_signal_action(
                 16
             ) as u64);
             {
-                let usp = task.clone_uspace();
-                let mut guard = usp.write();
+                let usp = task.clone_uspace_handle();
+                let mut guard = usp.lock();
                 match UserWritePtr::<RtSigFrame>::try_new(sigframe_base, &mut guard) {
                     Err(e) => {
                         knoticeln!(

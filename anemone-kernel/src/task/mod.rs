@@ -95,9 +95,7 @@ pub struct Task {
     flags: RwLock<TaskFlags>,
 
     /// User address space, or [None] for pure kernel tasks.
-    ///
-    /// Multiple tasks may share the same user address space.
-    uspace: RwLock<Option<Arc<UserSpace>>>,
+    usp: RwLock<Option<Arc<UserSpaceHandle>>>,
 
     /// Which cpu this task is scheduled to run on.
     cpuid: CpuId,
@@ -341,7 +339,7 @@ impl Task {
             kstack: stack,
             name: RwLock::new((String::from("@kernel/") + name).into_boxed_str()),
             flags: RwLock::new(flags | TaskFlags::KERNEL),
-            uspace: RwLock::new(None),
+            usp: RwLock::new(None),
             cpuid: if let Some(cpu) = cpu {
                 cpu
             } else {
@@ -389,7 +387,7 @@ impl Task {
                 kstack: stack,
                 name: RwLock::new(Box::from("@idle")),
                 flags: RwLock::new(TaskFlags::IDLE | TaskFlags::KERNEL),
-                uspace: RwLock::new(None),
+                usp: RwLock::new(None),
                 cpuid: cur_cpu_id(),
                 sched_ctx: unsafe {
                     MonoFlow::new(TaskContext::from_kernel_fn(
@@ -546,17 +544,17 @@ impl Task {
     /// already ensured that this task is indeed a user task (e.g. by calling
     /// [TaskFlags::is_kernel] to check). **If you want a convenient helper,
     /// call [Self::try_clone_uspace] instead.**
-    pub fn clone_uspace(&self) -> Arc<UserSpace> {
-        self.uspace
+    pub fn clone_uspace_handle(&self) -> Arc<UserSpaceHandle> {
+        self.usp
             .read()
             .as_ref()
             .expect("cannot access user space of a pure kernel task")
             .clone()
     }
 
-    /// See [Self::clone_uspace] for details.
-    pub fn try_clone_uspace(&self) -> Option<Arc<UserSpace>> {
-        self.uspace.read().as_ref().map(|uspace| uspace.clone())
+    /// See [Self::clone_uspace_handle] for details.
+    pub fn try_clone_uspace_handle(&self) -> Option<Arc<UserSpaceHandle>> {
+        self.usp.read().as_ref().map(|usp| usp.clone())
     }
 
     /// Get this task's kernel stack.
@@ -593,12 +591,17 @@ impl Task {
     ///
     /// It's quite obvious. Almost always this function should only be called
     /// when doing an [kernel_execve] or something similar.
-    pub unsafe fn switch_exec_ctx(&self, name: Box<str>, uspace: Arc<UserSpace>, flags: TaskFlags) {
+    pub unsafe fn switch_exec_ctx(
+        &self,
+        name: Box<str>,
+        uspace: Arc<UserSpaceHandle>,
+        flags: TaskFlags,
+    ) {
         // NOTE THE LOCK ORDERING
-        let mut uspace_ptr = self.uspace.write();
+        let mut usp_ptr = self.usp.write();
         let mut flags_ptr = self.flags.write();
         let mut name_ptr = self.name.write();
-        *uspace_ptr = Some(uspace);
+        *usp_ptr = Some(uspace);
         *flags_ptr = flags;
         *name_ptr = name;
     }

@@ -18,8 +18,8 @@ fn sys_fstat(fd: Fd, #[validate_with(user_addr)] statbuf: VirtAddr) -> Result<u6
 
     kernel_fstatat(AtFd::Fd(fd), "", &mut kbuf, StatAtFlag::EMPTY_PATH)?;
 
-    let usp = get_current_task().clone_uspace();
-    let mut guard = usp.write();
+    let usp = get_current_task().clone_uspace_handle();
+    let mut guard = usp.lock();
 
     let mut statbuf = UserWritePtr::<Stat>::try_new(statbuf, &mut guard)?;
     statbuf.write(kbuf);

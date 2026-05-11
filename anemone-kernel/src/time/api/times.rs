@@ -24,8 +24,8 @@ fn sys_times(
     let usage = get_current_task().get_thread_group().cpu_usage_snapshot();
 
     if let Some(tms) = tms {
-        let usp = get_current_task().clone_uspace();
-        let mut guard = usp.write();
+        let usp = get_current_task().clone_uspace_handle();
+        let mut guard = usp.lock();
         let mut tms = UserWritePtr::<Tms>::try_new(tms, &mut guard)?;
 
         tms.write(Tms {

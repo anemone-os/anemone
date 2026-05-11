@@ -125,7 +125,7 @@ fn sys_getdents64(
 ) -> Result<u64, SysError> {
     let (usp, fd) = {
         let task = get_current_task();
-        let usp = task.clone_uspace();
+        let usp = task.clone_uspace_handle();
 
         let fd = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
 
@@ -135,7 +135,7 @@ fn sys_getdents64(
 
     let buf_len = count as usize;
 
-    let mut guard = usp.write();
+    let mut guard = usp.lock();
     let mut slice = UserWriteSlice::<u8>::try_new(dirp, buf_len, &mut guard)?;
     let written = unsafe {
         slice.with_readable_ptr(|ptr| {

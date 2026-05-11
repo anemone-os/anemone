@@ -35,7 +35,7 @@ fn sys_mmap(
         offset
     );
 
-    let usp = get_current_task().clone_uspace();
+    let usp = get_current_task().clone_uspace_handle();
 
     let is_anonymous = flags.aux.contains(AuxMmapFlags::MAP_ANONYMOUS);
     let fixed = flags
@@ -73,9 +73,8 @@ fn sys_mmap(
             flags,
         };
 
-        usp.map_anonymous(&mapping)
-            .map(|addr| addr.get())
-            .map_err(Into::into)
+        let (addr, _guard) = usp.map_anonymous(&mapping)?;
+        Ok(addr.get())
     } else {
         if raw_fd < 0 {
             return Err(SysError::BadFileDescriptor);
@@ -126,8 +125,8 @@ fn sys_mmap(
             inode,
         };
 
-        usp.map_file(&mapping)
-            .map(|addr| addr.get())
-            .map_err(Into::into)
+        let (addr, _guard) = usp.map_file(&mapping)?;
+
+        Ok(addr.get())
     }
 }

@@ -34,7 +34,7 @@ fn sys_writev(
     let (file, uspace) = {
         let task = get_current_task();
         let file = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
-        let uspace = task.clone_uspace();
+        let uspace = task.clone_uspace_handle();
 
         (file, uspace)
     };
@@ -47,7 +47,7 @@ fn sys_writev(
         iovcnt
     ];
     {
-        let mut guard = uspace.write();
+        let mut guard = uspace.lock();
         let ptr_slice = UserReadSlice::try_new(iov, iovcnt, &mut guard)?;
         ptr_slice.copy_to_slice(&mut iovecs);
     }
@@ -82,10 +82,10 @@ fn sys_writev(
     Ok(total)
 }
 
-fn copy_iovec_to_kernel(uspace: &UserSpace, iovec: IoVec) -> Result<Vec<u8>, SysError> {
+fn copy_iovec_to_kernel(uspace: &UserSpaceHandle, iovec: IoVec) -> Result<Vec<u8>, SysError> {
     let base_addr = user_addr(iovec.iov_base as u64)?;
 
-    let mut guard = uspace.write();
+    let mut guard = uspace.lock();
     let slice = UserReadSlice::try_new(base_addr, iovec.iov_len as usize, &mut guard)?;
 
     let mut kbuf = vec![0u8; iovec.iov_len as usize];

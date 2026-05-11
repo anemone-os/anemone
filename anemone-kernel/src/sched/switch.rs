@@ -54,8 +54,8 @@ pub unsafe fn switch_to(task: Arc<Task>) {
 /// Safety is obvious.
 pub unsafe fn switch_mapping(prev: &Task, next: &Task) {
     unsafe {
-        let prev_mapping = prev.try_clone_uspace();
-        let next_mapping = next.try_clone_uspace();
+        let prev_mapping = prev.try_clone_uspace_handle();
+        let next_mapping = next.try_clone_uspace_handle();
         match (prev_mapping, next_mapping) {
             (Some(prev_mapping), Some(next_mapping)) => {
                 if prev_mapping.as_ref().eq(&next_mapping) {

@@ -125,11 +125,14 @@ pub struct FileMapping {
     pub inode: InodeRef,
 }
 
-impl UserSpaceData {
+impl UserSpace {
     /// Map an anonymous memory region for the user space.
     ///
     /// Created [VmArea] will be backed by an [AnonObject].
-    pub fn map_anonymous(&mut self, mapping: &AnonymousMapping) -> Result<VirtAddr, SysError> {
+    pub fn map_anonymous(
+        &mut self,
+        mapping: &AnonymousMapping,
+    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
         let fixed = mapping.hint.is_some_and(|(_, fixed)| fixed);
         let vpn = match mapping.hint {
             Some((hint, true)) => hint,
@@ -157,11 +160,13 @@ impl UserSpaceData {
             Arc::new(vmo),
         );
 
-        if fixed && mapping.clobber {
-            self.replace_range(range, vma)?;
+        let guard = if fixed && mapping.clobber {
+            let guard = self.replace_range(range, vma)?;
+            Some(guard)
         } else {
             self.insert_vma(vma)?;
-        }
+            None
+        };
 
         kdebugln!(
             "mapped anonymous range {range:?} with prot={:?}, shared={}, flags={:?}",
@@ -170,10 +175,13 @@ impl UserSpaceData {
             mapping.flags
         );
 
-        Ok(vpn.to_virt_addr())
+        Ok((vpn.to_virt_addr(), guard))
     }
 
-    pub fn map_file(&mut self, mapping: &FileMapping) -> Result<VirtAddr, SysError> {
+    pub fn map_file(
+        &mut self,
+        mapping: &FileMapping,
+    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
         let fixed = mapping.hint.is_some_and(|(_, fixed)| fixed);
         let vpn = match mapping.hint {
             Some((hint, true)) => hint,
@@ -205,11 +213,12 @@ impl UserSpaceData {
                 },
             );
 
-            if fixed && mapping.clobber {
-                self.replace_range(range, vma)?;
+            let guard = if fixed && mapping.clobber {
+                Some(self.replace_range(range, vma)?)
             } else {
                 self.insert_vma(vma)?;
-            }
+                None
+            };
 
             kdebugln!(
                 "mapped file-backed range {range:?} with prot={:?}, shared={}, flags={:?}, poffset={:#x} for inode {}",
@@ -220,7 +229,7 @@ impl UserSpaceData {
                 mapping.inode.ino().get()
             );
 
-            Ok(vpn.to_virt_addr())
+            Ok((vpn.to_virt_addr(), guard))
         } else {
             Err(SysError::NotSupported)
         }
@@ -246,15 +255,13 @@ impl UserSpaceData {
     ///
     /// TODO: explain the semantics of unmapping, especially when the range
     /// partially intersects with existing mappings.
-    pub fn unmap(&mut self, range: VirtPageRange) -> Result<(), SysError> {
+    pub fn unmap(&mut self, range: VirtPageRange) -> Result<RemoteUspFenceGuard, SysError> {
         let tx = self.compose_unmap_range(range)?;
-        unsafe {
-            self.run_transaction(tx);
-        }
+        let guard = unsafe { self.run_transaction(tx) };
 
         kdebugln!("unmapped region {:#x?}", range);
 
-        Ok(())
+        Ok(guard)
     }
 
     /// Change protection on a fully-mapped range.
@@ -265,19 +272,57 @@ impl UserSpaceData {
         &mut self,
         range: VirtPageRange,
         prot: Protection,
-    ) -> Result<(), SysError> {
+    ) -> Result<RemoteUspFenceGuard, SysError> {
         let tx = self.compose_protect_range(range, prot)?;
-        unsafe {
-            self.run_transaction(tx);
-        }
+        let guard = unsafe { self.run_transaction(tx) };
         kdebugln!("changed protection on range {:#x?} to {:?}", range, prot);
-        Ok(())
+        Ok(guard)
+    }
+}
+
+impl UserSpaceHandle {
+    pub fn map_anonymous(
+        &self,
+        mapping: &AnonymousMapping,
+    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
+        let mut usp = self.usp.lock();
+        let res = usp.map_anonymous(mapping);
+        drop(usp);
+        res
+    }
+
+    pub fn map_file(
+        &self,
+        mapping: &FileMapping,
+    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
+        let mut usp = self.usp.lock();
+        let res = usp.map_file(mapping);
+        drop(usp);
+        res
+    }
+
+    pub fn unmap(&self, range: VirtPageRange) -> Result<RemoteUspFenceGuard, SysError> {
+        let mut usp = self.usp.lock();
+        let res = usp.unmap(range);
+        drop(usp);
+        res
+    }
+
+    pub fn protect_range(
+        &self,
+        range: VirtPageRange,
+        prot: Protection,
+    ) -> Result<RemoteUspFenceGuard, SysError> {
+        let mut usp = self.usp.lock();
+        let res = usp.protect_range(range, prot);
+        drop(usp);
+        res
     }
 }
 
 // these methods seems inappropriate to be public, but other modules may need
 // them?
-impl UserSpaceData {
+impl UserSpace {
     /// Replace the given virtual page range with the new [VmArea].
     ///
     /// If there are existing mappings in the given range, they will be unmapped
@@ -286,7 +331,7 @@ impl UserSpaceData {
         &mut self,
         range: VirtPageRange,
         new: VmArea,
-    ) -> Result<(), SysError> {
+    ) -> Result<RemoteUspFenceGuard, SysError> {
         if *new.range() != range {
             return Err(SysError::InvalidArgument);
         }
@@ -296,16 +341,14 @@ impl UserSpaceData {
 
         let mut tx = self.compose_unmap_range(range)?;
         tx.ops.push(VmOperation::Insert { vma: new });
-        unsafe {
-            self.run_transaction(tx);
-        }
+        let guard = unsafe { self.run_transaction(tx) };
 
-        Ok(())
+        Ok(guard)
     }
 }
 
 // here lies helper methods for vm editing.
-impl UserSpaceData {
+impl UserSpace {
     /// Collect start VPNs of those [VmArea]s whose ranges intersect with the
     /// given range.
     ///
@@ -409,17 +452,17 @@ impl UserSpaceData {
 
 // Our vm editing enging.
 //
-// These operations are executed while holding the lock on [UserSpaceData], so
+// These operations are executed while holding the lock on [UserSpace], so
 // the consistency is guaranteed.
 //
 // Basically, if a operation results in a new VMA, it should be inserted back
 // immediately. No additional `Insert` operation. However, `Unmap` operations
 // are deferred until the end, to make sure all the VMA edits are done before
 // any unmapping happens.
-impl UserSpaceData {
+impl UserSpace {
     /// Compose a transaction to unmap the given range.
     ///
-    /// The composed transaction is guaranteed to be valid until [UserSpaceData]
+    /// The composed transaction is guaranteed to be valid until [UserSpace]
     /// is unlocked.
     fn compose_unmap_range(&self, range: VirtPageRange) -> Result<VmTransaction, SysError> {
         self.validate_range(range)?;
@@ -530,7 +573,7 @@ impl UserSpaceData {
     /// In almost all cases, you should not call this method directly, but use
     /// higher-level APIs like `replace_range` instead, which guarantees the
     /// validity of the composed transaction.
-    pub(super) unsafe fn run_transaction(&mut self, tx: VmTransaction) {
+    pub(super) unsafe fn run_transaction(&mut self, tx: VmTransaction) -> RemoteUspFenceGuard {
         let mut unmaps = Vec::new();
 
         for op in tx.ops {
@@ -608,6 +651,8 @@ impl UserSpaceData {
 
             PagingArch::tlb_shootdown_all();
         }
+
+        RemoteUspFenceGuard { vpn: None }
     }
 }
 
@@ -632,7 +677,7 @@ mod kunits {
         }
     }
 
-    fn anon_vmas(uspace: &UserSpaceData) -> Vec<(VirtPageRange, Protection)> {
+    fn anon_vmas(uspace: &UserSpace) -> Vec<(VirtPageRange, Protection)> {
         uspace
             .vmas
             .values()
@@ -643,7 +688,7 @@ mod kunits {
 
     #[kunit]
     fn unmap_middle_of_anonymous_vma_punches_hole() {
-        let mut uspace = UserSpaceData::new().expect("user space setup should succeed");
+        let mut uspace = UserSpace::new().expect("user space setup should succeed");
         let base = uspace.stack_vma().range().start() - 32;
 
         uspace
@@ -677,7 +722,7 @@ mod kunits {
 
     #[kunit]
     fn protect_range_splits_vma_and_invalidates_present_ptes() {
-        let mut uspace = UserSpaceData::new().expect("user space setup should succeed");
+        let mut uspace = UserSpace::new().expect("user space setup should succeed");
         let base = uspace.stack_vma().range().start() - 48;
 
         uspace
@@ -729,7 +774,7 @@ mod kunits {
 
     #[kunit]
     fn protect_range_rejects_holes_and_reservations() {
-        let mut uspace = UserSpaceData::new().expect("user space setup should succeed");
+        let mut uspace = UserSpace::new().expect("user space setup should succeed");
         let base = uspace.stack_vma().range().start() - 64;
 
         uspace
@@ -758,7 +803,7 @@ mod kunits {
 
     #[kunit]
     fn fixed_replace_and_noreplace_follow_unified_editing() {
-        let mut uspace = UserSpaceData::new().expect("user space setup should succeed");
+        let mut uspace = UserSpace::new().expect("user space setup should succeed");
         let base = uspace.stack_vma().range().start() - 80;
 
         uspace
@@ -798,7 +843,7 @@ mod kunits {
 
     #[kunit]
     fn anonymous_fork_keeps_shared_backing_and_cow_private() {
-        let mut parent = UserSpaceData::new().expect("user space setup should succeed");
+        let mut parent = UserSpace::new().expect("user space setup should succeed");
         let shared_base = parent.stack_vma().range().start() - 96;
         let private_base = parent.stack_vma().range().start() - 112;
 
@@ -821,7 +866,7 @@ mod kunits {
             ))
             .expect("private anonymous mapping should succeed");
 
-        let child = parent.fork().expect("fork should succeed");
+        let child = parent.fork().expect("fork should succeed").0;
 
         let parent_shared = parent
             .find_vma(shared_base.to_virt_addr())

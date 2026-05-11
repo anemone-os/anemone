@@ -22,7 +22,7 @@ fn sys_sigaltstack(
     kdebugln!("sys_sigaltstack: uss={:?}, uoss={:?}", uss, uoss);
 
     let task = get_current_task();
-    let usp = task.clone_uspace();
+    let usp = task.clone_uspace_handle();
 
     if let Some(uoss) = uoss {
         let altstack = *task.sig_altstack.lock();
@@ -45,7 +45,7 @@ fn sys_sigaltstack(
             }
         };
 
-        let mut guard = usp.write();
+        let mut guard = usp.lock();
         UserWritePtr::<linux_signal::SigStack>::try_new(uoss, &mut guard)?.write(ss);
     }
 
@@ -55,7 +55,7 @@ fn sys_sigaltstack(
             ss_flags,
             ss_size,
         } = {
-            let mut guard = usp.write();
+            let mut guard = usp.lock();
             UserReadPtr::<linux_signal::SigStack>::try_new(uss, &mut guard)?.read()
         };
 

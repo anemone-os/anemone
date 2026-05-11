@@ -27,8 +27,8 @@ fn sys_rt_sigqueueinfo(
     let mut kbuf = linux_signal::SigInfoWrapper::default();
 
     {
-        let usp = task.clone_uspace();
-        let mut guard = usp.write();
+        let usp = task.clone_uspace_handle();
+        let mut guard = usp.lock();
         let uinfo = UserReadPtr::<linux_signal::SigInfoWrapper>::try_new(uinfo, &mut guard)?;
         kbuf = uinfo.read();
     }

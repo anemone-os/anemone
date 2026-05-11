@@ -27,8 +27,8 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         }
 
         if let Some(addr) = task.get_clear_child_tid() {
-            let usp = task.clone_uspace();
-            let mut guard = usp.write();
+            let usp = task.clone_uspace_handle();
+            let mut guard = usp.lock();
             match UserWritePtr::<Tid>::try_new(addr, &mut guard) {
                 Ok(mut uptr) => uptr.write(Tid::new(0)),
                 Err(e) => {

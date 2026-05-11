@@ -17,12 +17,12 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
     kdebugln!("sys_rt_sigreturn: called");
 
     let task = get_current_task();
-    let usp = task.clone_uspace();
+    let usp = task.clone_uspace_handle();
 
     // 1. read back sigframe from user stack.
     let sigframe_base = VirtAddr::new(__trapframe__.sp());
     let sigframe = {
-        let mut guard = usp.write();
+        let mut guard = usp.lock();
         match UserReadPtr::<RtSigFrame>::try_new(sigframe_base, &mut guard) {
             Err(e) => {
                 // offending address. just kill the process.

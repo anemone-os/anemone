@@ -17,8 +17,8 @@ fn sys_gettimeofday(
     #[validate_with(user_addr.nullable())] tv: Option<VirtAddr>,
     #[validate_with(user_addr.nullable())] tz: Option<VirtAddr>,
 ) -> Result<u64, SysError> {
-    let uspace = get_current_task().clone_uspace();
-    let mut guard = uspace.write();
+    let uspace = get_current_task().clone_uspace_handle();
+    let mut guard = uspace.lock();
 
     if let Some(tv) = tv {
         // todo: unix epoch time instead of uptime

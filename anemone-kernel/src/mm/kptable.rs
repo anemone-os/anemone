@@ -17,15 +17,17 @@ pub static KERNEL_PTABLE: Lazy<KPTable> = Lazy::new(|| KPTable::new());
 /// kernel's root page directory.
 #[derive(Debug)]
 pub struct KPTable {
+    root_ppn: PhysPageNum,
     ptable: RwLock<PageTable>,
 }
 
 impl KPTable {
     pub fn new() -> Self {
+        let ptable = PageTable::new().expect("failed to allocate frame for root page directory");
+
         Self {
-            ptable: RwLock::new(
-                PageTable::new().expect("failed to allocate frame for root page directory"),
-            ),
+            root_ppn: ptable.root_ppn(),
+            ptable: RwLock::new(ptable),
         }
     }
 
@@ -162,8 +164,7 @@ pub fn init_kernel_mapping() {
 /// Switch to kernel mapping.
 pub unsafe fn activate_kernel_mapping() {
     unsafe {
-        let memsp = &KERNEL_PTABLE.ptable.read_irqsave();
-        PagingArch::activate_addr_space(memsp);
+        PagingArch::activate_addr_space(KERNEL_PTABLE.root_ppn);
     }
 }
 

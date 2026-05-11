@@ -24,7 +24,7 @@ fn sys_write(
     let (file, uspace) = {
         let task = get_current_task();
         let file = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
-        let uspace = task.clone_uspace();
+        let uspace = task.clone_uspace_handle();
 
         (file, uspace)
     };
@@ -32,7 +32,7 @@ fn sys_write(
     let mut kbuf = vec![0u8; count];
 
     {
-        let mut guard = uspace.write();
+        let mut guard = uspace.lock();
 
         let slice = UserReadSlice::try_new(buf, count, &mut guard)?;
         slice.copy_to_slice(&mut kbuf);

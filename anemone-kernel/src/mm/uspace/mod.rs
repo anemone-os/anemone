@@ -5,12 +5,10 @@
 //! user segments.
 //!
 //! TODO: Refactor the API: split stack/brk initializing logic into a seperate
-//! builder, rather than placing those initializing helpers in [UserSpaceData].
+//! builder, rather than placing those initializing helpers in [UserSpace].
 //!
-//! TODO: Refactor representation. [UserSpaceData] should be [UserSpace], and
+//! TODO: Refactor representation. [UserSpace] should be [UserSpace], and
 //! [UserSpace] should might be something like `GuardedUserSpace`.
-
-use core::ops::{Deref, DerefMut};
 
 use crate::{
     mm::kptable::KERNEL_PTABLE,
@@ -71,6 +69,33 @@ pub const MAX_HEAP_PAGES: u64 = const {
     MAX_HEAP_BYTES / PagingArch::PAGE_SIZE_BYTES as u64
 };
 
+#[derive(Debug)]
+pub struct UserSpaceHandle {
+    /// Root page number of the page table for this user space.
+    table_ppn: PhysPageNum,
+    usp: Mutex<UserSpace>,
+}
+
+#[derive(Debug)]
+pub struct UserSpace {
+    /// Underlying hardware page table.
+    table: PageTable,
+    /// User virtual memory areas, including stack and heap.
+    vmas: BTreeMap<VirtPageNum, VmArea>,
+    stack: Stack,
+    heap: Heap,
+
+    // note that following variable is not put in TaskExecInfo, since they are bound to the
+    // address space, not the process.
+    // TODO: argv
+    /// Environment variable region. [start, start + size). Strings, not
+    /// pointers.
+    ///
+    /// /proc/[id]/environ needs this.
+    env_range: Final<(VirtAddr, usize)>,
+    // auxv is a bit tricky. nyi.
+}
+
 /// Plain data tracking user stack's state.
 #[derive(Debug, Clone, Copy)]
 struct Stack {
@@ -89,161 +114,76 @@ struct Heap {
     brk: VirtAddr,
 }
 
-/// Since [UserSpace] can be shared on multiple cores, so tlb shootdown must be
-/// performed when doing edition.
-#[derive(Debug)]
-pub struct UserSpace {
-    /// Physical page number of the root page-table for quick access.
-    ///
-    /// This is a cached copy of the page-table root PPN. The actual page
-    /// table lives in `inner.table`.
-    table_ppn: PhysPageNum,
-    data: RwLock<UserSpaceData>,
-}
-
-#[derive(Debug)]
-pub struct UserSpaceData {
-    /// Underlying page table for this address space.
-    table: PageTable,
-    /// User virtual memory areas, including stack and heap.
-    vmas: BTreeMap<VirtPageNum, VmArea>,
-    stack: Stack,
-    heap: Heap,
-
-    // note that following variable is not put in TaskExecInfo, since they are bound to the
-    // address space, not the process.
-    // TODO: argv
-    /// Environment variable region. [start, start + size). Strings, not
-    /// pointers.
-    ///
-    /// /proc/[id]/environ needs this.
-    env_range: Final<(VirtAddr, usize)>,
-    // auxv is a bit tricky. nyi.
-}
-
-impl UserSpace {
-    pub fn read(&self) -> ReadNoPreemptGuard<'_, UserSpaceData> {
-        self.data.read()
-    }
-
-    pub fn write(&self) -> WriteNoPreemptGuard<'_, UserSpaceData> {
-        self.data.write()
-    }
-
-    fn shootdown_tlb(vpn: Option<VirtPageNum>) {
-        if let Some(vpn) = vpn {
-            PagingArch::tlb_shootdown(vpn);
-        } else {
-            PagingArch::tlb_shootdown_all();
-        }
-
-        let current_cpu = cur_cpu_id().get();
-        for cpu_id in 0..ncpus() {
-            if cpu_id == current_cpu || !target_online(cpu_id) {
-                continue;
-            }
-
-            if let Err(e) = send_ipi(cpu_id, IpiPayload::TlbShootdown { vpn }) {
-                kwarningln!("failed to send user TLB shootdown IPI to core #{cpu_id}: {e:?}");
-            }
-        }
-    }
-}
-
-impl UserSpace {
-    pub fn new(data: UserSpaceData) -> Self {
-        UserSpace {
-            table_ppn: data.table.root_ppn(),
-            data: RwLock::new(data),
+impl UserSpaceHandle {
+    pub fn new(usp: UserSpace) -> Self {
+        let table_ppn = usp.table.root_ppn();
+        Self {
+            table_ppn,
+            usp: Mutex::new(usp),
         }
     }
 
     pub fn activate(&self) {
-        self.read().activate();
+        unsafe {
+            PagingArch::activate_addr_space(self.table_ppn);
+        }
+    }
+
+    pub fn root_ppn(&self) -> PhysPageNum {
+        self.table_ppn
+    }
+
+    /// Invoke a closure with mutable access to the inner [UserSpace].
+    pub fn with_usp<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut UserSpace) -> R,
+    {
+        let mut usp = self.usp.lock();
+        f(&mut usp)
+    }
+
+    /// TODO: remove this. it's really unsafe.
+    pub fn lock(&self) -> MutexGuard<'_, UserSpace> {
+        self.usp.lock()
     }
 }
 
-// these methods are encapsulated. you should not call on UserSpaceData
-// directly. TODO: explain why. (hint: user space lock and tlb shootdown ipi may
-// cause deadlock.)
-// tbh this is a bit ugly. too much boilerplate code. we should refactor later.
-//
-// TODO: add doc.
-impl UserSpace {
-    pub fn fork(&self) -> Result<Self, SysError> {
-        let data = {
-            let mut guard = self.write();
-            guard.fork()?
-        };
-        Self::shootdown_tlb(None);
-
-        Ok(UserSpace {
-            table_ppn: data.table.root_ppn(),
-            data: RwLock::new(data),
-        })
+// encapsulations to ensure remote fencing is done after mutex released.
+impl UserSpaceHandle {
+    pub fn set_brk(&self, brk: VirtAddr) -> Result<Option<RemoteUspFenceGuard>, SysError> {
+        let mut usp = self.usp.lock();
+        let res = usp.set_brk(brk);
+        drop(usp);
+        res
     }
 
-    pub fn map_anonymous(&self, mapping: &mmap::AnonymousMapping) -> Result<VirtAddr, SysError> {
-        let addr = {
-            let mut guard = self.write();
-            guard.map_anonymous(mapping)?
-        };
-        Self::shootdown_tlb(None);
-        Ok(addr)
+    pub fn fork(&self) -> Result<(UserSpaceHandle, RemoteUspFenceGuard), SysError> {
+        let mut usp = self.usp.lock();
+        let (new_usp, guard) = usp.fork()?;
+        drop(usp);
+        Ok((UserSpaceHandle::new(new_usp), guard))
     }
 
-    pub fn map_file(&self, mapping: &mmap::FileMapping) -> Result<VirtAddr, SysError> {
-        let addr = {
-            let mut guard = self.write();
-            guard.map_file(mapping)?
-        };
-        Self::shootdown_tlb(None);
-        Ok(addr)
+    pub fn handle_page_fault(&self, info: &PageFaultInfo) -> Result<RemoteUspFenceGuard, SysError> {
+        let mut usp = self.usp.lock();
+        let res = usp.handle_page_fault(info);
+        drop(usp);
+        res
     }
 
-    pub fn unmap(&self, range: VirtPageRange) -> Result<(), SysError> {
-        {
-            let mut guard = self.write();
-            guard.unmap(range)?;
-        }
-        Self::shootdown_tlb(None);
-        Ok(())
-    }
-
-    pub fn protect_range(&self, range: VirtPageRange, prot: Protection) -> Result<(), SysError> {
-        {
-            let mut guard = self.write();
-            guard.protect_range(range, prot)?;
-        }
-        Self::shootdown_tlb(None);
-        Ok(())
-    }
-
-    pub fn set_brk(&self, requested_brk: VirtAddr) -> Result<VirtAddr, SysError> {
-        let new_brk = {
-            let mut guard = self.write();
-            let old_brk = guard.brk();
-            guard.set_brk(requested_brk)?;
-            guard.brk()
-        };
-
-        Self::shootdown_tlb(None);
-
-        Ok(new_brk)
-    }
-
-    pub fn handle_page_fault(&self, fault_info: &PageFaultInfo) -> Result<(), SysError> {
-        let fault_vpn = fault_info.fault_addr().page_down();
-        {
-            let mut guard = self.write();
-            guard.handle_page_fault(fault_info)?;
-        }
-        Self::shootdown_tlb(Some(fault_vpn));
-        Ok(())
+    pub fn inject_page_fault(
+        &self,
+        fault_addr: VirtAddr,
+        fault_type: PageFaultType,
+    ) -> Result<RemoteUspFenceGuard, SysError> {
+        let mut usp = self.usp.lock();
+        let res = usp.inject_page_fault(fault_addr, fault_type);
+        drop(usp);
+        res
     }
 }
 
-impl Drop for UserSpace {
+impl Drop for UserSpaceHandle {
     fn drop(&mut self) {
         kdebugln!(
             "dropping user space with root page at ppn {}",
@@ -252,9 +192,17 @@ impl Drop for UserSpace {
     }
 }
 
-impl UserSpaceData {
-    /// Create a new [UserSpaceData] prepared for running a user process, which
-    /// should then be wrapped by [UserSpace::new].
+impl PartialEq for UserSpaceHandle {
+    fn eq(&self, other: &Self) -> bool {
+        self.table_ppn == other.table_ppn
+    }
+}
+
+impl Eq for UserSpaceHandle {}
+
+impl UserSpace {
+    /// Create a new [UserSpace] prepared for running a user process, which
+    /// should then be wrapped by [UserSpaceHandle::new].
     ///
     /// This will copy kernel mappings into the new page table and preallocate
     /// the user stack to [INIT_USER_STACK_PAGES].
@@ -278,7 +226,7 @@ impl UserSpaceData {
             Protection::READ | Protection::WRITE,
             ForkPolicy::CopyOnWrite,
             // note that stack vma is not marked with [VmFlags::GROW_DOWN]. it's managed
-            // separately and explicitly in [UserSpaceData::handle_page_fault].
+            // separately and explicitly in [UserSpace::handle_page_fault].
             VmFlags::empty(),
             VmReservation::Stack,
             stack_vmo,
@@ -332,7 +280,7 @@ impl UserSpaceData {
                 .is_none()
         );
 
-        let mut res = UserSpaceData {
+        let mut res = Self {
             table,
             vmas,
             stack: Stack {
@@ -347,13 +295,14 @@ impl UserSpaceData {
             env_range: Final::new_uninit(),
         };
 
-        res.prefault_initial_stack().unwrap();
+        // set up initial stack
+        res.stack.committed_bottom = res.stack_vma().range().end() - INIT_USER_STACK_PAGES;
 
         Ok(res)
     }
 }
 
-impl UserSpaceData {
+impl UserSpace {
     fn stack_vma(&self) -> &VmArea {
         self.vmas
             .get(&self.stack.svpn)
@@ -425,9 +374,7 @@ impl UserSpaceData {
     fn heap_accessible(&self, vaddr: VirtAddr) -> bool {
         self.heap_vma().range().contains(vaddr.page_down()) && vaddr < self.heap.brk
     }
-}
 
-impl UserSpaceData {
     fn find_vma_raw(map: &BTreeMap<VirtPageNum, VmArea>, vaddr: VirtAddr) -> Option<&VmArea> {
         map.range(..=vaddr.page_down())
             .next_back()
@@ -462,7 +409,9 @@ impl UserSpaceData {
     fn find_vma_mut(&mut self, vaddr: VirtAddr) -> Option<&mut VmArea> {
         Self::find_vma_raw_mut(&mut self.vmas, vaddr)
     }
+}
 
+impl UserSpace {
     /// Register a newly prepared load segment VMA into this address space.
     ///
     /// This function will automatically advance the heap reservation so it
@@ -509,7 +458,7 @@ impl UserSpaceData {
     /// This function grows or shrinks the heap tracked in `uheap` to make
     /// `brk` the new program break. It returns an error if the requested
     /// break is out of range or if allocation fails while growing.
-    pub fn set_brk(&mut self, brk: VirtAddr) -> Result<(), SysError> {
+    pub fn set_brk(&mut self, brk: VirtAddr) -> Result<Option<RemoteUspFenceGuard>, SysError> {
         let heap_range = *self.heap_vma().range();
 
         if brk < heap_range.start().to_virt_addr() {
@@ -520,7 +469,7 @@ impl UserSpaceData {
         }
 
         let new_brk_vpn = brk.page_up();
-        if self.heap.brk > brk {
+        let guard = if self.heap.brk > brk {
             // shrink heap
             let count = self.heap.brk.page_up() - new_brk_vpn;
             let mut mapper = self.table.mapper();
@@ -529,23 +478,25 @@ impl UserSpaceData {
                     range: VirtPageRange::new(new_brk_vpn, count),
                 });
             }
+
+            // shootdown local tlb
+            let range = VirtPageRange::new(new_brk_vpn, count);
+            for vpn in range.iter() {
+                PagingArch::tlb_shootdown(vpn);
+            }
+            Some(RemoteUspFenceGuard { vpn: Some(range) })
         } else if new_brk_vpn > heap_range.end() {
             // nothing to do. page fault handler will map new pages when
             // accessed.
-        }
+            None
+        } else {
+            // ?
+            None
+        };
         self.heap.brk = brk;
         kinfoln!("brk of {} set to {}", current_task_id(), brk);
-        Ok(())
-    }
 
-    /// Prepare the initial stack window used during exec image construction.
-    ///
-    /// This does not actually map any pages, but just sets the committed
-    /// bottom.
-    fn prefault_initial_stack(&mut self) -> Result<(), SysError> {
-        self.stack.committed_bottom = self.stack_vma().range().end() - INIT_USER_STACK_PAGES;
-
-        Ok(())
+        Ok(guard)
     }
 
     /// Push data onto the user init stack and return a pointer to the copied
@@ -669,17 +620,8 @@ impl UserSpaceData {
         &mut self.table
     }
 
-    /// Make this [UserSpace] active on the CPU so address translation uses
-    /// its page table. This calls architecture-specific helpers to load the
-    /// root page-table.
-    pub fn activate(&self) {
-        unsafe {
-            PagingArch::activate_addr_space(&self.table);
-        }
-    }
-
     /// Fork a new [UserSpace] from this one with copy-on-write semantics.
-    pub fn fork(&mut self) -> Result<Self, SysError> {
+    pub fn fork(&mut self) -> Result<(Self, RemoteUspFenceGuard), SysError> {
         // well... there is no need to map pages here. page fault handler will handle
         // everything lazily...
         let mut new_table = PageTable::new()?;
@@ -691,7 +633,7 @@ impl UserSpaceData {
             new_vmas.insert(*start, vma.fork(&mut mapper));
         }
 
-        let new_inner = UserSpaceData {
+        let new_inner = UserSpace {
             table: new_table,
             vmas: new_vmas,
             stack: self.stack,
@@ -699,7 +641,10 @@ impl UserSpaceData {
             env_range: self.env_range,
         };
 
-        Ok(new_inner)
+        // local tlb shootdown
+        PagingArch::tlb_shootdown_all();
+
+        Ok((new_inner, RemoteUspFenceGuard { vpn: None }))
     }
 
     /// Check if the given virtual page has the requested permissions.
@@ -758,8 +703,11 @@ impl UserSpaceData {
     }
 }
 
-impl UserSpaceData {
-    pub fn handle_page_fault(&mut self, fault_info: &PageFaultInfo) -> Result<(), SysError> {
+impl UserSpace {
+    pub fn handle_page_fault(
+        &mut self,
+        fault_info: &PageFaultInfo,
+    ) -> Result<RemoteUspFenceGuard, SysError> {
         // again, stack and heap must be handled specially since they have special
         // semantics.
 
@@ -775,7 +723,7 @@ impl UserSpaceData {
                     return Err(SysError::NotMapped);
                 }
 
-                let UserSpaceData {
+                let Self {
                     ref mut table,
                     ref mut vmas,
                     ref mut stack,
@@ -790,19 +738,13 @@ impl UserSpaceData {
                 if fault_addr.page_down() < stack.committed_bottom {
                     stack.committed_bottom = fault_addr.page_down();
                 }
-                /*knoticeln!(
-                    "stack accessed at {}, committed bottom now at {:#x}",
-                    fault_addr,
-                    stack.committed_bottom.get()
-                );*/
-                Ok(())
             },
             Some(VmReservation::Heap) => {
                 if !self.heap_accessible(fault_addr) {
                     return Err(SysError::NotMapped);
                 }
 
-                let UserSpaceData {
+                let Self {
                     ref mut table,
                     ref mut vmas,
                     ref mut heap,
@@ -813,11 +755,11 @@ impl UserSpaceData {
                     .get_mut(&heap.svpn)
                     .expect("heap reservation must stay registered");
 
-                heap_vma.handle_page_fault(&mut mapper, fault_info)
+                heap_vma.handle_page_fault(&mut mapper, fault_info)?;
             },
-            Some(VmReservation::Guard) => Err(SysError::NotMapped),
+            Some(VmReservation::Guard) => return Err(SysError::NotMapped),
             None => {
-                let UserSpaceData {
+                let Self {
                     ref mut table,
                     ref mut vmas,
                     ..
@@ -826,9 +768,13 @@ impl UserSpaceData {
                 let other_vma =
                     Self::find_vma_raw_mut(vmas, fault_addr).ok_or(SysError::NotMapped)?;
 
-                other_vma.handle_page_fault(&mut mapper, fault_info)
+                other_vma.handle_page_fault(&mut mapper, fault_info)?;
             },
         }
+
+        Ok(RemoteUspFenceGuard {
+            vpn: Some(VirtPageRange::new(fault_addr.page_down(), 1)),
+        })
     }
 
     /// Explicitly inject a page fault on the given address with the given
@@ -843,51 +789,31 @@ impl UserSpaceData {
         &mut self,
         fault_addr: VirtAddr,
         fault_type: PageFaultType,
-    ) -> Result<(), SysError> {
+    ) -> Result<RemoteUspFenceGuard, SysError> {
         let fault_info = PageFaultInfo::new(VirtAddr::new(42), fault_addr, fault_type);
         self.handle_page_fault(&fault_info)
     }
 }
 
-impl PartialEq for UserSpace {
-    fn eq(&self, other: &Self) -> bool {
-        self.table_ppn == other.table_ppn
-    }
+/// Mainly for preventing sending synchronous IPI while holding the user space
+/// mutex, which may cause deadlock.
+#[derive(Debug, PartialEq, Eq)]
+pub struct RemoteUspFenceGuard {
+    vpn: Option<VirtPageRange>,
 }
 
-impl Eq for UserSpace {}
-
-/// Read guard for accessing the user-space page table.
-///
-/// The guard dereferences to a [`PageTable`] allowing safe read-only access
-/// to the user page table while preventing preemption.
-pub struct USpacePTableReadGuard<'a> {
-    guard: ReadNoPreemptGuard<'a, UserSpaceData>,
-}
-
-impl Deref for USpacePTableReadGuard<'_> {
-    type Target = PageTable;
-
-    fn deref(&self) -> &Self::Target {
-        &self.guard.table
-    }
-}
-
-/// Write guard for mutating the user-space page table.
-pub struct USpacePTableWriteGuard<'a> {
-    guard: WriteNoPreemptGuard<'a, UserSpaceData>,
-}
-
-impl Deref for USpacePTableWriteGuard<'_> {
-    type Target = PageTable;
-
-    fn deref(&self) -> &Self::Target {
-        &self.guard.table
-    }
-}
-
-impl DerefMut for USpacePTableWriteGuard<'_> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.guard.table
+impl Drop for RemoteUspFenceGuard {
+    fn drop(&mut self) {
+        if let Some(vpns) = &self.vpn {
+            for vpn in vpns.iter() {
+                if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { vpn: Some(vpn) }) {
+                    kalertln!("failed to broadcast user TLB shootdown IPI: {e:?}");
+                }
+            }
+        } else {
+            if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { vpn: None }) {
+                kalertln!("failed to broadcast user TLB shootdown IPI: {e:?}");
+            }
+        }
     }
 }
