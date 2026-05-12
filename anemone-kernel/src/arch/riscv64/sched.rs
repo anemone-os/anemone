@@ -156,8 +156,9 @@ unsafe extern "C" fn user_task_entry_secondary(
         VirtAddr::new(kstack_top),
     );
 
-    // libc expects the initial user stack pointer in a0.
-    trapframe.set_arg::<0>(ustack_top);
+    // Linux/glibc user entry reads argc/argv from sp. a0 is reserved for
+    // rtld_fini and must stay zero for fresh execve entries.
+
     // interrupts will be enabled in the end of trap returning.
     unsafe { __utrap_return_to_task(&trapframe) }
 }

@@ -179,6 +179,38 @@ impl Task {
         }
     }
 
+    /// Turn a absolute path in global namespace into a absolute path relative
+    /// to this task's root.
+    ///
+    /// If [None] is returned, it means the path is not under this task's root,
+    /// and thus cannot be made relative.
+    ///
+    /// Panics if the input path is not absolute.
+    pub fn rel_abs_path(&self, path: &Path) -> Option<PathBuf> {
+        if path.is_relative() {
+            panic!(
+                "rel_abs_path: expected absolute path, got relative path '{}'",
+                path.display()
+            );
+        }
+
+        let fs_state = self.fs_state.read();
+        let root = fs_state.root().to_pathbuf();
+        let path = path.to_path_buf();
+
+        if let Ok(rel) = path.strip_prefix(&root) {
+            // a '/' must be added back whether or not rel is empty.
+            Some(PathBuf::from("/").join(rel))
+        } else {
+            kdebugln!(
+                "failed to make path '{}' relative to root '{}'",
+                root.display(),
+                path.display()
+            );
+            None
+        }
+    }
+
     /// Make a path relative to this task's root and cwd in global namespace.
     ///
     /// If the input path is absolute, it will be resolved relative to this

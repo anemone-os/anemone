@@ -59,6 +59,8 @@ impl Debug for SuperBlock {
 }
 
 pub struct SuperBlockInner {
+    /// Reverse weak references to [Mount]s. Just for convenience.
+    mounts: Vec<Weak<Mount>>,
     /// Indexed inodes that are still discoverable by inode number.
     indexed: HashMap<Ino, Arc<Inode>>,
     /// Resident but unindexed inodes. These correspond to deleted/unhashed
@@ -82,6 +84,7 @@ impl SuperBlock {
             root_ino,
             backing,
             inner: RwLock::new(SuperBlockInner {
+                mounts: Vec::new(),
                 indexed: HashMap::new(),
                 ghosts: Vec::new(),
             }),
@@ -101,6 +104,49 @@ impl SuperBlock {
     /// Get the mount source for this superblock.
     pub fn backing(&self) -> &MountSource {
         &self.backing
+    }
+
+    /// Add a new [Mount]. Called when vfs mounts a new instance of this
+    /// superblock.
+    pub fn add_mount(&self, mount: &Arc<Mount>) {
+        let mut inner = self.inner.write();
+        let weak = Arc::downgrade(mount);
+        inner.mounts.push(weak);
+    }
+
+    /// Find a [Mount] that matches the given predicate.
+    ///
+    /// This is a first-fit search. But if your code are working correctly,
+    /// there should be at most one mount for a superblock.
+    pub fn find_mount<P>(&self, pred: P) -> Option<Arc<Mount>>
+    where
+        P: Fn(&Arc<Mount>) -> bool,
+    {
+        let mut inner = self.inner.write();
+        // clean up dead weak refs while we're at it.
+        inner.mounts.retain(|weak| weak.upgrade().is_some());
+
+        inner
+            .mounts
+            .iter()
+            .filter_map(|weak| weak.upgrade())
+            .find(pred)
+    }
+
+    /// Iterate over all mounts of this superblock.
+    pub fn for_each_mount<F>(&self, mut f: F)
+    where
+        F: FnMut(&Arc<Mount>),
+    {
+        let mut inner = self.inner.write();
+        // clean up dead weak refs while we're at it.
+        inner.mounts.retain(|weak| weak.upgrade().is_some());
+
+        for weak in &inner.mounts {
+            if let Some(mount) = weak.upgrade() {
+                f(&mount);
+            }
+        }
     }
 
     /// Get the root inode of this superblock.
@@ -210,6 +256,27 @@ impl SuperBlock {
             .get(&ino)
             .cloned()
             .map(InodeRef::new)
+    }
+
+    /// Remove an inode from the inode-number index by its [Ino], while keeping
+    /// the object resident.
+    ///
+    /// Panics if the inode is not resident in the cache.
+    pub(super) fn unindex_inode_by_ino(&self, ino: Ino) {
+        let mut inner = self.inner.write();
+
+        let inode = inner
+            .indexed
+            .remove(&ino)
+            .expect("unindex_inode_by_ino: inode not found");
+        debug_assert!(inode.indexed());
+        inode.set_indexed(false);
+
+        debug_assert!(
+            inner.ghosts.iter().all(|ghost| !Arc::ptr_eq(ghost, &inode)),
+            "unindex_inode_by_ino: inode already in ghosts"
+        );
+        inner.ghosts.push(inode);
     }
 
     /// Remove an inode from the inode-number index while keeping the object

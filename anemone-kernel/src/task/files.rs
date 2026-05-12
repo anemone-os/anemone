@@ -91,7 +91,14 @@ impl FileDesc {
         self.pfile.file.read(buf).map_err(|e| e.into())
     }
 
-    #[track_caller]
+    pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+        if !self.pfile.flags.contains(FileFlags::READ) {
+            return Err(SysError::PermissionDenied);
+        }
+        self.pfile.file.read_at(offset, buf).map_err(|e| e.into())
+    }
+
+    /// This applies to both write and append mode.
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         if !self.pfile.flags.contains(FileFlags::WRITE) {
             return Err(SysError::PermissionDenied);
@@ -102,6 +109,17 @@ impl FileDesc {
         } else {
             self.pfile.file.write(buf).map_err(|e| e.into())
         }
+    }
+
+    /// Only applies to write mode.
+    pub fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize, SysError> {
+        if !self.pfile.flags.contains(FileFlags::WRITE) {
+            return Err(SysError::PermissionDenied);
+        }
+        if self.pfile.flags.contains(FileFlags::APPEND) {
+            return Err(SysError::InvalidArgument);
+        }
+        self.pfile.file.write_at(offset, buf).map_err(|e| e.into())
     }
 
     /// `whence` is Linux-specific. we handle that in syscall handler. it should

@@ -60,7 +60,7 @@ pub struct OpenedFile {
 /// Inode number type. Uniquely identifies an inode within a superblock.
 ///
 /// **0 is reserved for invalid inode.** Valid inode numbers start from 1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Ino(u64);
 
 impl Ino {
@@ -176,6 +176,19 @@ impl InodePerm {
     /// All regular rwx permission bits, excluding suid/sgid/sticky.
     pub const fn all_rwx() -> Self {
         Self::RWXU.union(Self::RWXG).union(Self::RWXO)
+    }
+
+    pub const fn all_rw() -> Self {
+        Self::IRUSR
+            .union(Self::IWUSR)
+            .union(Self::IRGRP)
+            .union(Self::IWGRP)
+            .union(Self::IROTH)
+            .union(Self::IWOTH)
+    }
+
+    pub const fn all_r() -> Self {
+        Self::IRUSR.union(Self::IRGRP).union(Self::IROTH)
     }
 }
 

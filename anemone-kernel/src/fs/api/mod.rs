@@ -25,6 +25,7 @@ pub mod openat;
 pub mod pipe2;
 pub mod read;
 pub mod readlinkat;
+pub mod sendfile;
 pub mod stat;
 pub mod symlinkat;
 pub mod umount;

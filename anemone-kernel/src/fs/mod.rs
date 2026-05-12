@@ -17,7 +17,9 @@ mod devfs;
 #[cfg(feature = "fs_ext4")]
 mod ext4;
 mod pipe;
-mod proc;
+
+pub mod proc;
+
 mod ramfs;
 
 pub mod api;
@@ -87,13 +89,15 @@ mod namespace {
 
             let mnt = Arc::new(Mount::new(
                 root_dentry,
-                sb,
+                sb.clone(),
                 parent.as_ref(),
                 mp_dentry.as_ref(),
                 flags,
             ));
 
             self.mounts.push(mnt.clone());
+            sb.add_mount(&mnt);
+            drop(sb);
 
             if let Some(parent) = parent {
                 parent.add_child(&mnt);

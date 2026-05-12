@@ -137,6 +137,18 @@ impl File {
         Ok(read)
     }
 
+    /// Reading at specified offset without changing the file cursor.
+    pub fn read_at(&self, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+
+        let mut dummy_pos = pos;
+        let read = (self.ops.read)(self, &mut dummy_pos, buf)?;
+
+        Ok(read)
+    }
+
     pub fn read_exact(&self, mut buf: &mut [u8]) -> Result<(), SysError> {
         if buf.len() == 0 {
             return Ok(());
@@ -154,7 +166,6 @@ impl File {
         Ok(())
     }
 
-    #[track_caller]
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
@@ -163,6 +174,18 @@ impl File {
         let mut pos = self.pos.lock();
 
         let written = (self.ops.write)(self, &mut *pos, buf)?;
+
+        Ok(written)
+    }
+
+    /// Writing at specified offset without changing the file cursor.
+    pub fn write_at(&self, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+
+        let mut dummy_pos = pos;
+        let written = (self.ops.write)(self, &mut dummy_pos, buf)?;
 
         Ok(written)
     }
@@ -177,6 +200,9 @@ impl File {
             let written = (self.ops.write)(self, &mut *pos, buf)?;
             if written == 0 {
                 // TODO: EIO here is not that accurate.
+                knoticeln!(
+                    "write returned 0, but there's still data to write. treating it as an IO error"
+                );
                 return Err(SysError::IO);
             }
             buf = &buf[written..];
@@ -188,8 +214,8 @@ impl File {
     /// Different from [Self::seek] + [Self::write], this is an atomic
     /// operation.
     pub fn append(&self, buf: &[u8]) -> Result<usize, SysError> {
-        let sz = self.inode().get_attr()?.size as usize;
         let mut pos = self.pos.lock();
+        let sz = self.inode().get_attr()?.size as usize;
         *pos = sz;
         let written = (self.ops.write)(self, &mut *pos, buf)?;
         Ok(written)

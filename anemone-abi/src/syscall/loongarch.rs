@@ -78,6 +78,9 @@ pub mod linux {
     pub const SYS_WRITE: u64 = 64;
     pub const SYS_WRITEV: u64 = 66;
 
+    pub const SYS_SENDFILE: u64 = 71;
+    pub const SYS_PPOLL: u64 = 73;
+
     pub const SYS_READLINKAT: u64 = 78;
     pub const SYS_NEWFSTATAT: u64 = 79;
     pub const SYS_FSTAT: u64 = 80;

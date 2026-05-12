@@ -1,4 +1,5 @@
 use core::{
+    arch::naked_asm,
     ffi::{CStr, c_char},
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -36,8 +37,27 @@ static ARGV: AtomicUsize = AtomicUsize::new(0);
 static ENVP: AtomicUsize = AtomicUsize::new(0);
 static AUXV: AtomicUsize = AtomicUsize::new(0);
 
+#[unsafe(naked)]
 #[unsafe(no_mangle)]
-pub extern "C" fn _start(stack_top: *const u64) -> ! {
+pub unsafe extern "C" fn _start() -> ! {
+    #[cfg(target_arch = "riscv64")]
+    naked_asm!(
+        "mv a0, sp",
+        "call {start_impl}",
+        "ebreak",
+        start_impl = sym start_impl,
+    );
+
+    #[cfg(target_arch = "loongarch64")]
+    naked_asm!(
+        "move $a0, $sp",
+        "call {start_impl}",
+        "break 0",
+        start_impl = sym start_impl,
+    );
+}
+
+unsafe extern "C" fn start_impl(stack_top: *const u64) -> ! {
     let argc = unsafe { *stack_top } as usize;
     let argv_ptr = unsafe { stack_top.add(1) };
     let envp_ptr = unsafe { argv_ptr.add(argc + 1) };

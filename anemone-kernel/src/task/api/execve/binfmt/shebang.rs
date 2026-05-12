@@ -30,7 +30,16 @@ fn load_binary(ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
 
     let interp_argv0 = interp;
     let interp = get_current_task()
-        .lookup_path(Path::new(&interp_argv0), ResolveFlags::empty())?
+        .lookup_path(Path::new(&interp_argv0), ResolveFlags::empty())
+        .map_err(|e| {
+            knoticeln!(
+                "shebang: failed to resolve interpreter path '{}' specified in '{}': {:?}",
+                interp_argv0,
+                ctx.path,
+                e
+            );
+            e
+        })?
         .to_string();
     ctx.path = interp;
     let mut new_argv = vec![interp_argv0];

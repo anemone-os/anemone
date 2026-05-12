@@ -51,6 +51,19 @@ impl ThreadGroup {
         }
     }
 
+    /// Get the leader task of this thread group.
+    ///
+    /// # Locks
+    ///
+    /// [TOPOLOGY]
+    pub fn leader(&self) -> Option<Arc<Task>> {
+        let topology = TOPOLOGY.inner.read_irqsave();
+        topology
+            .tasks
+            .get(&self.tgid())
+            .map(|node| node.task.clone())
+    }
+
     /// Iterate over all members of this thread group.
     ///
     /// **Topology Consistency** is guaranteed.
