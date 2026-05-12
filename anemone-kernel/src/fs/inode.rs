@@ -1,5 +1,8 @@
 use anemone_abi::fs::linux::{mode as linux_mode, stat::Stat as LinuxStat};
-use core::{fmt::Debug, time::Duration};
+use core::{
+    fmt::{Debug, Display},
+    time::Duration,
+};
 
 use crate::{
     prelude::{vmo::VmObject, *},
@@ -65,6 +68,15 @@ impl Ino {
     /// state.
     pub const INVALID: Self = Self(0);
 
+    pub const fn new(value: u64) -> Self {
+        if value == 0 {
+            // this is a bit ugly. but Rust doesn't have something like Cpp's `consteval`
+            // yet. Anyway this works. And it can check at compile time indeed.
+            panic!("inode number cannot be zero");
+        }
+        Self(value)
+    }
+
     pub const fn try_new(value: u64) -> Result<Self, InoIsZero> {
         if value == 0 {
             Err(InoIsZero)
@@ -75,6 +87,12 @@ impl Ino {
 
     pub const fn get(self) -> u64 {
         self.0
+    }
+}
+
+impl Display for Ino {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

@@ -56,6 +56,65 @@ fn map_byte_writer_error(_: ByteWriterError) -> SysError {
     SysError::BufferTooSmall
 }
 
+struct LinuxDirent64Sink {
+    writer: ByteWriter,
+    capacity: usize,
+}
+
+impl LinuxDirent64Sink {
+    fn new(writer: ByteWriter, capacity: usize) -> Self {
+        Self { writer, capacity }
+    }
+
+    fn written(&self) -> usize {
+        self.writer.current_offset()
+    }
+}
+
+impl DirSink for LinuxDirent64Sink {
+    fn push(&mut self, entry: DirEntry) -> Result<SinkResult, SysError> {
+        let reclen = dirent64_record_len(entry.name.len())?;
+        let remaining = self
+            .capacity
+            .checked_sub(self.writer.current_offset())
+            .ok_or(SysError::InvalidArgument)?;
+
+        if reclen > remaining {
+            if self.written() == 0 {
+                // buffer to small to hold even a single record, return error
+                return Err(SysError::InvalidArgument);
+            }
+            return Ok(SinkResult::Stop);
+        }
+
+        let header = LinuxDirent64Header {
+            d_ino: entry.ino.get(),
+            // actually this field can be any value. user space programs are not expected to
+            // interpret it.
+            d_off: 39,
+            d_reclen: u16::try_from(reclen).map_err(|_| SysError::InvalidArgument)?,
+            d_type: dirent64_dtype(entry.ty),
+        };
+
+        self.writer
+            .write_val_unaligned(&header)
+            .map_err(map_byte_writer_error)?;
+        self.writer
+            .write_null_terminated_str(&entry.name)
+            .map_err(map_byte_writer_error)?;
+
+        let padding = reclen - DIRENT64_HEADER_SIZE - entry.name.len() - 1;
+        if padding != 0 {
+            let zeros = [0u8; DIRENT64_ALIGN];
+            self.writer
+                .write_bytes(&zeros[..padding])
+                .map_err(map_byte_writer_error)?;
+        }
+
+        Ok(SinkResult::Accepted)
+    }
+}
+
 #[syscall(SYS_GETDENTS64)]
 fn sys_getdents64(
     fd: Fd,
@@ -66,7 +125,7 @@ fn sys_getdents64(
 ) -> Result<u64, SysError> {
     let (usp, fd) = {
         let task = get_current_task();
-        let usp = task.clone_uspace();
+        let usp = task.clone_uspace_handle();
 
         let fd = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
 
@@ -76,67 +135,18 @@ fn sys_getdents64(
 
     let buf_len = count as usize;
 
-    let mut guard = usp.write();
+    let mut guard = usp.lock();
     let mut slice = UserWriteSlice::<u8>::try_new(dirp, buf_len, &mut guard)?;
     let written = unsafe {
         slice.with_readable_ptr(|ptr| {
             let buffer = NonNull::new(ptr).expect("user slice pointer should not be null");
-            let mut writer = unsafe { ByteWriter::new(buffer) };
+            let writer = unsafe { ByteWriter::new(buffer) };
+            let mut sink = LinuxDirent64Sink::new(writer, buf_len);
 
-            let mut dir_ctx = file.dir_context()?;
-
-            // this variable is used to achieve atomicity of reading.
-            let mut committed_offset = dir_ctx.offset();
-            let mut written = 0usize;
-
-            loop {
-                let dirent = match file.iterate(&mut dir_ctx) {
-                    Ok(dirent) => dirent,
-                    Err(SysError::NoMoreEntries) => break,
-                    Err(err) => return Err(err.into()),
-                };
-
-                let reclen = dirent64_record_len(dirent.name.len())?;
-                if reclen > buf_len - writer.current_offset() {
-                    if written == 0 {
-                        // buffer to small to hold even a single record, return error
-                        return Err(SysError::InvalidArgument);
-                    }
-                    break;
-                }
-
-                let header = LinuxDirent64Header {
-                    d_ino: dirent.ino.get(),
-                    // actually this field can be any value. user space programs are not expected to
-                    // interpret it.
-                    d_off: dir_ctx.offset() as i64,
-                    d_reclen: u16::try_from(reclen).map_err(|_| SysError::InvalidArgument)?,
-                    d_type: dirent64_dtype(dirent.ty),
-                };
-
-                writer
-                    .write_val_unaligned(&header)
-                    .map_err(map_byte_writer_error)?;
-                writer
-                    .write_null_terminated_str(&dirent.name)
-                    .map_err(map_byte_writer_error)?;
-
-                let padding = reclen - DIRENT64_HEADER_SIZE - dirent.name.len() - 1;
-                if padding != 0 {
-                    let zeros = [0u8; DIRENT64_ALIGN];
-                    writer
-                        .write_bytes(&zeros[..padding])
-                        .map_err(map_byte_writer_error)?;
-                }
-
-                written += reclen;
-                committed_offset = dir_ctx.offset();
+            match file.read_dir(&mut sink) {
+                Ok(ReadDirResult::Progressed) | Ok(ReadDirResult::Eof) => Ok(sink.written()),
+                Err(err) => Err(err),
             }
-
-            file.commit_dir_context(&DirContext::from_offset(committed_offset))
-                .expect("we've checked this is indeed a directory");
-
-            Ok(written)
         })?
     }?;
     Ok(written as u64)

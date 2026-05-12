@@ -19,8 +19,8 @@ fn sys_getrandom(
     const BATCH_SIZE: usize = 256;
     const RANDOM_BYTES: &[u8; BATCH_SIZE] = &[0x4; BATCH_SIZE];
 
-    let usp = get_current_task().clone_uspace();
-    let mut guard = usp.write();
+    let usp = get_current_task().clone_uspace_handle();
+    let mut guard = usp.lock();
 
     let mut buf = UserWriteSlice::<u8>::try_new(buf, size, &mut guard)?;
 

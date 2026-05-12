@@ -14,11 +14,14 @@ use crate::{
 #[syscall(SYS_BRK)]
 fn sys_brk(#[validate_with(user_addr)] addr: VirtAddr) -> Result<u64, SysError> {
     let task = get_current_task();
-    let memsp = task.clone_uspace();
-    let brk = memsp
-        .set_brk(addr)
-        .unwrap_or_else(|_| memsp.read().brk())
-        .get();
+    let usp = task.clone_uspace_handle();
+
+    let brk = usp.set_brk(addr);
+
+    let brk = match brk {
+        Ok(_guard) => addr.get(),
+        Err(e) => usp.lock().brk().get(),
+    };
 
     return Ok(brk);
 }

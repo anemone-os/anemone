@@ -22,8 +22,8 @@ fn sys_newfstatat(
 
     kernel_fstatat(dirfd, &filename, &mut kbuf, flags)?;
 
-    let usp = get_current_task().clone_uspace();
-    let mut guard = usp.write();
+    let usp = get_current_task().clone_uspace_handle();
+    let mut guard = usp.lock();
 
     let mut statbuf = UserWritePtr::<Stat>::try_new(statbuf, &mut guard)?;
     statbuf.write(kbuf);

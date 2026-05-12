@@ -56,8 +56,8 @@ fn sys_readlinkat(
 
     kdebugln!("readlinkat: content={}", content.display());
 
-    let usp = get_current_task().clone_uspace();
-    let mut guard = usp.write();
+    let usp = get_current_task().clone_uspace_handle();
+    let mut guard = usp.lock();
     let mut buf = UserWriteSlice::<u8>::try_new(buf, bufsize, &mut guard)?;
     let content = content.as_bytes();
     let to_write = content.len().min(bufsize);

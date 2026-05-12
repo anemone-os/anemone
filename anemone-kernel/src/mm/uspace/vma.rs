@@ -75,7 +75,7 @@ bitflags! {
     #[derive(Debug, Clone, Copy)]
     pub struct VmFlags: usize {
         /// For ordinary grow-down VMAs managed by generic VMA policy.
-        /// Stack reservation growth is handled separately by [UserSpaceData].
+        /// Stack reservation growth is handled separately by [UserSpace].
         ///
         /// Currently not supported.
         const GROW_DOWN = 1 << 0;
@@ -256,6 +256,8 @@ impl VmArea {
     /// Handle a page fault in this VMA.
     ///
     /// Address of faulting page is guaranteed to be in the range of this VMA.
+    ///
+    /// A local TLB shootdown will be performed.
     pub(super) fn handle_page_fault(
         &mut self,
         mapper: &mut Mapper,
@@ -278,6 +280,9 @@ impl VmArea {
     ///
     /// Judging by its name, you might never guess that this function performs
     /// such an important work. So ***be careful***!
+    ///
+    /// A local tlb shootdown will be performed when necessary (i.e. when
+    /// [ForkPolicy::CopyOnWrite] and we need to remove write permissions).
     pub(super) fn fork(&mut self, mapper: &mut Mapper) -> Self {
         match self.on_fork {
             ForkPolicy::Shared => Self {

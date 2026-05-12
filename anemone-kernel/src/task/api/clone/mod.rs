@@ -190,7 +190,7 @@ pub fn kernel_clone(
     let (flags, terminate_signal) = (flags.flags(), flags.signal());
 
     let current_task = get_current_task();
-    let cur_uspace = current_task.clone_uspace();
+    let cur_uspace = current_task.clone_uspace_handle();
 
     let mut boxed_frame = Box::new(trap_frame);
     boxed_frame.set_syscall_retval(0);
@@ -252,7 +252,9 @@ pub fn kernel_clone(
         // new task's sigaltstack should be the same as parent's since VM is not set.
         new_task.sig_altstack = SpinLock::new(current_task.sig_altstack.lock().clone());
 
-        Arc::new(cur_uspace.fork()?)
+        let (new_usp, _guard) = cur_uspace.fork()?;
+
+        Arc::new(new_usp)
     };
 
     unsafe {
@@ -322,8 +324,8 @@ pub fn kernel_clone(
     // remove this eager validation.
     if flags.intersects(CloneFlags::CHILD_CLEARTID | CloneFlags::CHILD_SETTID) {
         if let Some(child_tid) = child_tid {
-            let new_uspace = new_task.clone_uspace();
-            let mut usp_guard = new_uspace.write();
+            let new_uspace = new_task.clone_uspace_handle();
+            let mut usp_guard = new_uspace.lock();
             match UserWritePtr::<Tid>::try_new(child_tid, &mut usp_guard) {
                 Ok(uptr) => {},
                 Err(e) => {
@@ -395,7 +397,7 @@ pub fn kernel_clone(
     if flags.contains(CloneFlags::PARENT_SETTID) {
         if let Some(parent_tid) = parent_tid {
             // again, map_err cannot be used here.
-            let mut usp_guard = cur_uspace.write();
+            let mut usp_guard = cur_uspace.lock();
             match UserWritePtr::<Tid>::try_new(parent_tid, &mut usp_guard) {
                 Ok(mut uptr) => uptr.write(new_tid),
                 Err(e) => {

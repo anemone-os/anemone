@@ -83,8 +83,6 @@ impl PathRef {
     ///
     /// If our dentry model is working correctly, this should be sufficient...?
     pub fn location_eq(&self, other: &PathRef) -> bool {
-        // Arc::ptr_eq(self.mount(), other.mount()) && Arc::ptr_eq(self.dentry(),
-        // other.dentry())
         let eq = Arc::ptr_eq(&self.dentry, &other.dentry);
         if !eq {
             return false;
@@ -97,6 +95,7 @@ impl PathRef {
 }
 
 impl PathRef {
+    /// Open the file this path points to, returning a [File] object.
     pub fn open(&self) -> Result<File, SysError> {
         let inode = self.inode();
         let OpenedFile { file_ops, prv } = inode.open()?;

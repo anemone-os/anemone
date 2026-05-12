@@ -23,7 +23,7 @@ enum StackBlobKey {
 }
 
 pub struct InitStackCtor<'a, T: AsRef<str>, U: AsRef<str>> {
-    usp: &'a mut UserSpaceData,
+    usp: &'a mut UserSpace,
     meta: &'a ElfMeta,
     exec_fn: &'a str,
     argv: &'a [T],
@@ -36,7 +36,7 @@ pub struct InitStackCtor<'a, T: AsRef<str>, U: AsRef<str>> {
 
 impl<'a, T: AsRef<str>, U: AsRef<str>> InitStackCtor<'a, T, U> {
     pub fn new(
-        usp: &'a mut UserSpaceData,
+        usp: &'a mut UserSpace,
         meta: &'a ElfMeta,
         exec_fn: &'a str,
         argv: &'a [T],

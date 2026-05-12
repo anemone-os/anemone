@@ -32,9 +32,9 @@ impl PagingArchTrait for LA64PagingArch {
     const PAGE_SIZE_BYTES: usize = 4096;
 
     /// Activate the given page table by writing its root to `PGDL` and `PGDH`.
-    unsafe fn activate_addr_space(pgtbl: &PageTable) {
+    unsafe fn activate_addr_space(root_ppn: PhysPageNum) {
         unsafe {
-            let value = pgtbl.root_ppn().to_phys_addr().get();
+            let value = root_ppn.to_phys_addr().get();
             pgdl::csr_write(value);
             pgdh::csr_write(value);
         }

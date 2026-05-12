@@ -17,7 +17,7 @@ pub struct LoadedBinaryMeta {
 ///
 /// **This function must be run in a process context.**
 pub fn dispatch_execve(
-    usp: &mut UserSpaceData,
+    usp: &mut UserSpace,
     path: &str,
     argv: &[impl AsRef<str>],
     envp: &[impl AsRef<str>],
@@ -62,7 +62,7 @@ pub const MAX_BINFMT_REDIRECTS: usize = 4;
 
 #[derive(Debug)]
 pub struct ExecCtx<'a> {
-    pub usp: &'a mut UserSpaceData,
+    pub usp: &'a mut UserSpace,
 
     /// Initial path passed to execve.
     ///

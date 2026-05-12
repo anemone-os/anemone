@@ -16,15 +16,13 @@ pub fn kernel_execve(
     argv: &[impl AsRef<str>],
     envp: &[impl AsRef<str>],
 ) -> Result<(), SysError> {
-    let usp = UserSpace::new_user()?;
-    let mut usp_data = usp.write();
-    match dispatch_execve(&mut usp_data, path.as_ref(), argv, envp) {
-        Ok(meta) => {
-            drop(usp_data);
-            let usp = Arc::new(usp);
-            unsafe {
-                let task = get_current_task();
+    let task = get_current_task();
 
+    let mut usp = UserSpace::new()?;
+    match dispatch_execve(&mut usp, path.as_ref(), argv, envp) {
+        Ok(meta) => {
+            let usp = Arc::new(UserSpaceHandle::new(usp));
+            unsafe {
                 task.dethread();
 
                 // these resoureces must be cleaned after dethreading.

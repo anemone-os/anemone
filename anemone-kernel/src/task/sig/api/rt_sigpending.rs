@@ -36,11 +36,11 @@ fn sys_rt_sigpending(
 
         kbuf.bits = (prv_set.union(&shared_set)).as_u64();
 
-        (task.clone_uspace(), kbuf)
+        (task.clone_uspace_handle(), kbuf)
     };
 
     {
-        let mut guard = usp.write();
+        let mut guard = usp.lock();
         UserWritePtr::<linux_signal::SigSet>::try_new(uset, &mut guard)?.write(set);
     }
 

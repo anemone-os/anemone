@@ -190,8 +190,8 @@ fn sys_wait4(
                 let mut kbuf: i32 = 0;
                 wstatus.serialize_to_posix(&mut kbuf);
                 if let Some(wstatus_ptr) = wstatus_ptr {
-                    let usp = task.clone_uspace();
-                    let mut guard = usp.write();
+                    let usp = task.clone_uspace_handle();
+                    let mut guard = usp.lock();
                     match UserWritePtr::<i32>::try_new(wstatus_ptr, &mut guard) {
                         Ok(mut uptr) => uptr.write(kbuf),
                         Err(e) => {

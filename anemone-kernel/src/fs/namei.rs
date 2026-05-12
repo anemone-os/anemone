@@ -30,22 +30,44 @@ impl ResolveFlags {
 /// child dentry from an existing `(parent, name, inode)` triple. If a live
 /// dentry is already cached under the same parent/name, it is reused.
 ///
-/// **This way, we ensure the uniqueness of dentries within a namespace.**
+/// A reused dentry must point to the same inode. Otherwise the namespace view
+/// has already diverged and we panic to expose the bug.
 pub(super) fn materialize_child_dentry(
     parent: &Arc<Dentry>,
     name: &str,
     inode: InodeRef,
 ) -> Result<Arc<Dentry>, SysError> {
     if let Ok(child) = parent.lookup_child(name) {
+        assert!(
+            &inode == child.inode(),
+            "dentry for existing child {} already exists but has different inode ({} vs {})",
+            name,
+            inode.ino(),
+            child.inode().ino()
+        );
         return Ok(child);
     }
 
     let child_name = name.to_string();
+    let expected_inode = inode.clone();
     let dentry = Arc::new(Dentry::new(child_name.clone(), Some(parent.clone()), inode));
 
-    match parent.insert_child(child_name, &dentry) {
+    // TODO: a lock?
+    match parent.insert_child(child_name.clone(), &dentry) {
         Ok(()) => Ok(dentry),
-        Err(SysError::AlreadyExists) => parent.lookup_child(name),
+        Err(SysError::AlreadyExists) => {
+            let child = parent
+                .lookup_child(&child_name)
+                .expect("insert_child reported AlreadyExists but child lookup failed");
+            assert!(
+                child.inode() == &expected_inode,
+                "dentry for existing child {} already exists but has different inode ({} vs {})",
+                child_name,
+                expected_inode.ino(),
+                child.inode().ino()
+            );
+            Ok(child)
+        },
         Err(err) => Err(err),
     }
 }

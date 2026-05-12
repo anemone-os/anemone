@@ -25,7 +25,7 @@ pub mod api;
 pub use self::{
     anonymous::*,
     dentry::Dentry,
-    file::{DirContext, DirEntry, File, FileOps},
+    file::{DirEntry, DirSink, File, FileOps, FixedSizeDirSink, ReadDirResult, SinkResult},
     filesystem::{FileSystem, FileSystemFlags, FileSystemOps},
     inode::{
         DeviceId, Ino, InoIsZero, InodeMeta, InodeMode, InodeOps, InodePerm, InodeRef, InodeStat,
@@ -483,10 +483,7 @@ mod vfs_ops {
         ) -> Result<File, SysError> {
             let rel_path = rel_path.into();
             let pathref = resolve_from(dir, rel_path.target, rel_path.flags)?;
-            let inode = pathref.inode();
-            let OpenedFile { file_ops, prv } = inode.open()?;
-
-            Ok(File::new(pathref, file_ops, prv))
+            pathref.open()
         }
 
         pub fn vfs_get_attr<'a, R: Into<PathResolution<'a>>>(

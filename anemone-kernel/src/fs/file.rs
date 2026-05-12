@@ -3,56 +3,87 @@ use crate::{prelude::*, utils::any_opaque::AnyOpaque};
 /// VTable a file must implement to support file operations.
 #[derive(Debug)]
 pub struct FileOps {
-    pub read: fn(&File, buf: &mut [u8]) -> Result<usize, SysError>,
-    pub write: fn(&File, buf: &[u8]) -> Result<usize, SysError>,
-    pub seek: fn(&File, pos: usize) -> Result<(), SysError>,
+    pub read: fn(&File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError>,
+    pub write: fn(&File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError>,
+    pub validate_seek: fn(&File, pos: usize) -> Result<(), SysError>,
 
-    pub iterate: fn(&File, ctx: &mut DirContext) -> Result<DirEntry, SysError>,
+    /// Read a batch of directory entries starting at `pos` into `sink`.
+    ///
+    /// Return `ReadDirResult::Progressed` when this call successfully hands at
+    /// least one new entry to the sink. Return `ReadDirResult::Eof` only when
+    /// the directory is already exhausted before any new entry is accepted.
+    pub read_dir:
+        fn(&File, pos: &mut usize, sink: &mut dyn DirSink) -> Result<ReadDirResult, SysError>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DirEntry {
     pub name: String,
     pub ino: Ino,
     pub ty: InodeType,
 }
 
-/// `DirContext` maintains a cursor internally.
-///
-/// **Users should not make any assumptions about the cursor's value. Instead,
-/// the whole struct should be treated as an opaque handle.**
-#[derive(Debug)]
-pub struct DirContext {
-    offset: usize,
+#[derive(Debug, Clone, Copy)]
+pub enum ReadDirResult {
+    /// At least one new directory entry was accepted by the sink.
+    Progressed,
+    /// The directory was already exhausted before any new entry was accepted.
+    Eof,
 }
 
-impl DirContext {
-    /// Create a new `DirContext` for iterating a directory from the beginning.
+#[derive(Debug, Clone, Copy)]
+pub enum SinkResult {
+    /// The sink accepted this entry, so the producer may advance its cursor.
+    Accepted,
+    /// The sink wants to stop before consuming this entry.
+    ///
+    /// Producers must not advance the directory cursor for the current entry.
+    /// Sinks that cannot accept even the first entry of a batch should return
+    /// [ReadDirResult::Eof] instead of [SinkResult::Stop].
+    Stop,
+}
+
+/// Trait instead of concrete struct thus allowing more flexible
+/// implementations. e.g. fixed-capacity array, zero-copy buffer, etc.
+pub trait DirSink {
+    fn push(&mut self, entry: DirEntry) -> Result<SinkResult, SysError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct FixedSizeDirSink<const N: usize> {
+    entries: Vec<DirEntry>,
+}
+
+impl<const N: usize> FixedSizeDirSink<N> {
     pub fn new() -> Self {
-        Self { offset: 0 }
+        const_assert!(N > 0, "FixedSizeDirSink must have positive capacity");
+
+        Self {
+            entries: Vec::new(),
+        }
     }
 
-    /// Rebuild a `DirContext` from an opaque cursor previously produced by the
-    /// same filesystem.
-    ///
-    /// **Only the VFS layer should use this method.**
-    pub(super) fn from_offset(cursor: usize) -> Self {
-        Self { offset: cursor }
+    pub fn entries(&self) -> &[DirEntry] {
+        &self.entries
     }
 
-    /// Get current offset.
-    ///
-    /// **Only filesystem drivers and VFS layer should use this method.**
-    pub(super) fn offset(&self) -> usize {
-        self.offset
+    pub fn entries_mut(&mut self) -> &mut [DirEntry] {
+        &mut self.entries
     }
 
-    /// Advance the offset by `n`, whose meaning is defined by the filesystem
-    /// driver.
-    ///
-    /// **Only filesystem drivers should use this method.**
-    pub(super) fn advance(&mut self, n: usize) {
-        self.offset += n;
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+impl<const N: usize> DirSink for FixedSizeDirSink<N> {
+    fn push(&mut self, entry: DirEntry) -> Result<SinkResult, SysError> {
+        if self.entries.len() < N {
+            self.entries.push(entry);
+            Ok(SinkResult::Accepted)
+        } else {
+            Ok(SinkResult::Stop)
+        }
     }
 }
 
@@ -61,7 +92,7 @@ pub struct File {
     path: PathRef,
     ops: &'static FileOps,
     prv: AnyOpaque,
-    pos: AtomicUsize,
+    pos: Mutex<usize>,
 }
 
 impl File {
@@ -70,55 +101,18 @@ impl File {
             path,
             ops,
             prv,
-            pos: AtomicUsize::new(0),
+            pos: Mutex::new(0),
         }
     }
 
     pub(super) fn prv(&self) -> &AnyOpaque {
         &self.prv
     }
-
-    /// The offset is an opaque value that can only be interpreted by the
-    /// filesystem driver and vfs layer.
-    ///
-    /// For example, for regular files, it often represents the byte offset from
-    /// the beginning of the file, which is maintained by filesystem drivers and
-    /// vfs layer together.
-    ///
-    /// While for directories, it only represents the index of the next
-    /// directory entry to read, which is only maintained by vfs layer.
-    pub(super) fn set_pos(&self, pos: usize) {
-        self.pos.store(pos, Ordering::Relaxed);
-    }
-
-    /// Get a `DirContext` for iterating the directory represented by this file.
-    ///
-    /// Returns an error if this file does not represent a directory.
-    pub(super) fn dir_context(&self) -> Result<DirContext, SysError> {
-        if self.path.inode().ty() != InodeType::Dir {
-            return Err(SysError::NotDir);
-        }
-        Ok(DirContext::from_offset(self.pos()))
-    }
-
-    /// Commit the state of a `DirContext` after iterating a directory entry.
-    /// This should be called by the VFS layer after a successful `iterate`
-    /// call to update the file's cursor.
-    ///
-    /// Returns an error if this file does not represent a directory.
-    pub(super) fn commit_dir_context(&self, ctx: &DirContext) -> Result<(), SysError> {
-        if self.path.inode().ty() != InodeType::Dir {
-            return Err(SysError::NotDir);
-        }
-
-        self.set_pos(ctx.offset());
-        Ok(())
-    }
 }
 
 impl File {
     pub fn pos(&self) -> usize {
-        self.pos.load(Ordering::Relaxed)
+        *self.pos.lock()
     }
 }
 
@@ -137,45 +131,79 @@ impl File {
             return Ok(0);
         }
 
-        (self.ops.read)(self, buf)
+        let mut pos = self.pos.lock();
+        let read = (self.ops.read)(self, &mut *pos, buf)?;
+
+        Ok(read)
     }
 
     pub fn read_exact(&self, mut buf: &mut [u8]) -> Result<(), SysError> {
+        if buf.len() == 0 {
+            return Ok(());
+        }
+
+        let mut pos = self.pos.lock();
         while !buf.is_empty() {
-            let n = self.read(buf)?;
-            if n == 0 {
+            let read = (self.ops.read)(self, &mut *pos, buf)?;
+            if read == 0 {
                 return Err(SysError::UnexpectedEof);
             }
-            buf = &mut buf[n..];
+            buf = &mut buf[read..];
         }
+
         Ok(())
     }
 
+    #[track_caller]
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
 
-        (self.ops.write)(self, buf)
+        let mut pos = self.pos.lock();
+
+        let written = (self.ops.write)(self, &mut *pos, buf)?;
+
+        Ok(written)
     }
 
     pub fn write_all(&self, mut buf: &[u8]) -> Result<(), SysError> {
+        if buf.len() == 0 {
+            return Ok(());
+        }
+
+        let mut pos = self.pos.lock();
         while !buf.is_empty() {
-            let n = self.write(buf)?;
-            if n == 0 {
+            let written = (self.ops.write)(self, &mut *pos, buf)?;
+            if written == 0 {
+                // TODO: EIO here is not that accurate.
                 return Err(SysError::IO);
             }
-            buf = &buf[n..];
+            buf = &buf[written..];
         }
+
         Ok(())
     }
 
-    pub fn seek(&self, pos: usize) -> Result<(), SysError> {
-        (self.ops.seek)(self, pos)
+    /// Different from [Self::seek] + [Self::write], this is an atomic
+    /// operation.
+    pub fn append(&self, buf: &[u8]) -> Result<usize, SysError> {
+        let sz = self.inode().get_attr()?.size as usize;
+        let mut pos = self.pos.lock();
+        *pos = sz;
+        let written = (self.ops.write)(self, &mut *pos, buf)?;
+        Ok(written)
     }
 
-    pub fn iterate(&self, ctx: &mut DirContext) -> Result<DirEntry, SysError> {
-        (self.ops.iterate)(self, ctx)
+    pub fn seek(&self, pos: usize) -> Result<(), SysError> {
+        (self.ops.validate_seek)(self, pos)?;
+        *self.pos.lock() = pos;
+        Ok(())
+    }
+
+    pub fn read_dir(&self, sink: &mut dyn DirSink) -> Result<ReadDirResult, SysError> {
+        let mut pos = self.pos.lock();
+        (self.ops.read_dir)(self, &mut *pos, sink)
     }
 
     pub fn get_attr(&self) -> Result<InodeStat, SysError> {

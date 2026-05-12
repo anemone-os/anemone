@@ -65,8 +65,8 @@ fn sys_pipe2(
             e
         })?;
 
-    let usp = task.clone_uspace();
-    let mut guard = usp.write();
+    let usp = task.clone_uspace_handle();
+    let mut guard = usp.lock();
     let mut pipefd = UserWriteSlice::<i32>::try_new(pipefd, 2, &mut guard).map_err(|_| {
         task.close_fd(rx);
         task.close_fd(tx);

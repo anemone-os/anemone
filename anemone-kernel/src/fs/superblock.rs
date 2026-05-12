@@ -26,7 +26,7 @@ pub(super) struct SuperBlockOps {
     ///
     /// If an [SysError] is returned, the eviction is cancelled and the inode is
     /// re-inserted into the cache. The eviction will be retried later.
-    pub evict_inode: fn(&SuperBlock, Arc<Inode>) -> Result<(), SysError>,
+    pub evict_inode: fn(Arc<Inode>) -> Result<(), SysError>,
 
     /// Write back the inode to the backing store. This is used to synchronize
     /// metadata updates that may have been made to the inode while it was
@@ -135,6 +135,10 @@ impl SuperBlock {
 
         // slow path
         let inode = (self.ops.load_inode)(self, ino)?;
+        debug_assert!(
+            !inode.indexed(),
+            "load_inode returned an already-indexed inode"
+        );
 
         // re-check and insert. another thread may have loaded concurrently;
         // if so, keep theirs and discard ours.
@@ -164,6 +168,11 @@ impl SuperBlock {
     ///   the cache uniqueness invariant.
     /// - The reference count of the provided inode is not zero.
     pub(super) fn seed_inode(&self, inode: Arc<Inode>) -> InodeRef {
+        debug_assert!(
+            !inode.indexed(),
+            "seed_inode: provided inode is already indexed"
+        );
+
         let mut inner = self.inner.write();
         let ino = inode.ino();
 
@@ -213,37 +222,24 @@ impl SuperBlock {
             if Arc::ptr_eq(indexed, inode) {
                 inner.indexed.remove(&ino);
             }
+        } else {
+            knoticeln!(
+                "suspicious case: this might be that multiple threads both observe the same inode with 0 nlink, and both try to unindex it concurrently."
+            );
+            return;
         }
 
-        assert!(inode.indexed());
+        debug_assert!(inode.indexed());
         inode.set_indexed(false);
 
-        // O(n) is a bit slow here. refine this later. we may use generation counts or
-        // something similar?
-        if !inner.ghosts.iter().any(|ghost| Arc::ptr_eq(ghost, inode)) {
-            inner.ghosts.push(inode.clone());
-        }
+        debug_assert!(
+            inner.ghosts.iter().all(|ghost| !Arc::ptr_eq(ghost, inode)),
+            "unindex_inode: inode already in ghosts"
+        );
+        inner.ghosts.push(inode.clone());
     }
 
-    /// Try to evict an inode by [Ino]. The inode must be resident in the cache
-    /// and have zero active references.
-    ///
-    /// After this operation, the inode will have been removed from the cache.
-    ///
-    /// Internally, this calls the backend's `evict_inode` callback to allow it
-    /// to perform any necessary cleanup or writeback.
-    pub(super) fn try_evict(&self, ino: Ino) -> Result<(), SysError> {
-        let inode = {
-            let inner = self.inner.read();
-            inner.indexed.get(&ino).cloned().ok_or(SysError::NotFound)?
-        };
-
-        self.try_evict_inode(&inode)
-    }
-
-    /// Try to evict a specific inode. Note that [SuperBlock::try_evict] only
-    /// works when the victim is indexed, but this method can evict both indexed
-    /// and ghost inodes.
+    /// Try to evict a specific inode.
     pub(super) fn try_evict_inode(&self, inode: &Arc<Inode>) -> Result<(), SysError> {
         if inode.rc() > 0 {
             return Err(SysError::Busy);
@@ -281,13 +277,25 @@ impl SuperBlock {
             }
         };
 
+        // multiple threads can race to evict the same inode, but only ont can reach
+        // here, since in above `removed` block we hold the inner lock.
+
         let (inode, was_indexed) = removed.ok_or(SysError::NotFound)?;
-        if let Err(e) = (self.ops.evict_inode)(self, inode.clone()) {
+        if let Err(e) = (self.ops.evict_inode)(inode.clone()) {
             let mut inner = self.inner.write();
             if was_indexed {
                 inode.set_indexed(true);
-                inner.indexed.insert(ino, inode);
+                let old = inner.indexed.insert(ino, inode);
+                debug_assert!(
+                    old.is_none(),
+                    "try_evict_inode: cache already has a live entry for ino {:?}",
+                    ino
+                );
             } else {
+                debug_assert!(
+                    inner.ghosts.iter().all(|ghost| !Arc::ptr_eq(ghost, &inode)),
+                    "try_evict_inode: inode already in ghosts"
+                );
                 inner.ghosts.push(inode);
             }
             return Err(e);

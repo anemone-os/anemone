@@ -60,7 +60,7 @@ static ANONY_FS_OPS: FileSystemOps = FileSystemOps {
 
 static ANONY_SB_OPS: SuperBlockOps = SuperBlockOps {
     load_inode: |_, _| unreachable!(),
-    evict_inode: |_, _| unreachable!(),
+    evict_inode: |_| unreachable!(),
     sync_inode: |_| Ok(()),
 };
 

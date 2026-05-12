@@ -49,18 +49,18 @@ fn sys_rt_sigprocmask(
     }
 
     let task = get_current_task();
-    let usp = task.clone_uspace();
+    let usp = task.clone_uspace_handle();
 
     if let Some(oldset) = oldset {
         let kset = task.sig_mask.lock().as_u64();
-        let mut guard = usp.write();
+        let mut guard = usp.lock();
         let mut uoldset = UserWritePtr::<linux_signal::SigSet>::try_new(oldset, &mut guard)?;
         uoldset.write(linux_signal::SigSet { bits: kset });
     }
 
     if let Some(set) = set {
         let set = {
-            let mut guard = usp.write();
+            let mut guard = usp.lock();
             let uset = UserReadPtr::<linux_signal::SigSet>::try_new(set, &mut guard)?;
             let mut set = SigSet::new_with_mask(uset.read().bits);
             set.clear(SigNo::SIGKILL); // SIGKILL cannot be masked.

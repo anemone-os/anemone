@@ -1,11 +1,13 @@
 //! Syscall argument validation helpers for user-controlled data.
+//!
+//! TODO: tlb shootdown, out of mutex lock.
 
-use core::{ops::DerefMut, str};
+use core::str;
 
 use crate::prelude::*;
 
 /// The validated range is only valid when caller holds the lock of the
-/// [UserSpaceData].
+/// [UserSpace].
 ///
 /// We don't consider [Protection::EXECUTE] here since syscalls only read/write
 /// user memory, and the execute permission is only relevant for instruction
@@ -15,7 +17,7 @@ use crate::prelude::*;
 /// can be mapped write-only.
 unsafe fn validate_user_range(
     write: bool,
-    usp: &mut UserSpaceData,
+    usp: &mut UserSpace,
     start: VirtAddr,
     len: usize,
 ) -> Result<(), SysError> {
@@ -31,7 +33,7 @@ unsafe fn validate_user_range(
     let evpn = VirtAddr::new(end).page_up();
 
     for vpn in VirtPageRange::new(svpn, evpn - svpn).iter() {
-        usp.inject_page_fault(
+        let _guard = usp.inject_page_fault(
             vpn.to_virt_addr(),
             if write {
                 PageFaultType::Write
@@ -52,21 +54,21 @@ mod ptrs {
     pub struct UserReadPtr<'a, T: ?Sized> {
         pub(super) ptr: *const T,
         pub(super) writable: bool,
-        pub(super) usp: &'a mut UserSpaceData,
+        pub(super) usp: &'a mut UserSpace,
     }
 
     #[derive(Debug)]
     pub struct UserWritePtr<'a, T: ?Sized> {
         pub(super) ptr: *mut T,
         pub(super) readable: bool,
-        pub(super) usp: &'a mut UserSpaceData,
+        pub(super) usp: &'a mut UserSpace,
     }
 
     pub type UserReadSlice<'a, T> = UserReadPtr<'a, [T]>;
     pub type UserWriteSlice<'a, T> = UserWritePtr<'a, [T]>;
 
     impl<'a, T: Copy> UserReadPtr<'a, T> {
-        pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpaceData) -> Result<Self, SysError> {
+        pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpace) -> Result<Self, SysError> {
             let addr = user_addr(addr.get())?;
             if addr.get() % align_of::<T>() as u64 != 0 {
                 return Err(SysError::NotAligned);
@@ -108,7 +110,7 @@ mod ptrs {
     }
 
     impl<'a, T: Copy> UserWritePtr<'a, T> {
-        pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpaceData) -> Result<Self, SysError> {
+        pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpace) -> Result<Self, SysError> {
             let addr = user_addr(addr.get())?;
             if addr.get() % align_of::<T>() as u64 != 0 {
                 return Err(SysError::NotAligned);
@@ -154,7 +156,7 @@ mod ptrs {
         pub fn try_new(
             addr: VirtAddr,
             len: usize,
-            usp: &'a mut UserSpaceData,
+            usp: &'a mut UserSpace,
         ) -> Result<Self, SysError> {
             let addr = user_addr(addr.get())?;
             if addr.get() % align_of::<T>() as u64 != 0 {
@@ -255,7 +257,7 @@ mod ptrs {
         pub fn try_new(
             addr: VirtAddr,
             len: usize,
-            usp: &'a mut UserSpaceData,
+            usp: &'a mut UserSpace,
         ) -> Result<Self, SysError> {
             let addr = user_addr(addr.get())?;
             if addr.get() % align_of::<T>() as u64 != 0 {
@@ -448,7 +450,7 @@ mod validators {
     /// In fact, this function almost always only serves as a helper for parsing
     /// C strings and arrays of C strings.
     fn c_readonly_array_from_addr<const MAX_LEN: usize, T: Eq + Copy>(
-        usp: &mut UserSpaceData,
+        usp: &mut UserSpace,
         start: VirtAddr,
         terminator: T,
         include_terminator: bool,
@@ -506,10 +508,9 @@ mod validators {
     /// excluding the null terminator, which is syscall-specific.
     pub fn c_readonly_string<const MAX_BYTES: usize>(arg: u64) -> Result<Box<str>, SysError> {
         let start = user_addr(arg)?;
-        let usp = get_current_task().clone_uspace();
-        let mut usp_data = usp.write();
+        let usp = get_current_task().clone_uspace_handle();
         let bytes =
-            c_readonly_array_from_addr::<MAX_BYTES, u8>(usp_data.deref_mut(), start, 0, false)?;
+            usp.with_usp(|usp| c_readonly_array_from_addr::<MAX_BYTES, u8>(usp, start, 0, false))?;
         let s = str::from_utf8(&bytes).map_err(|_| SysError::InvalidArgument)?;
         Ok(Box::from(s))
     }
@@ -530,26 +531,25 @@ mod validators {
         arg: u64,
     ) -> Result<Vec<Box<str>>, SysError> {
         let start = user_addr(arg)?;
-        let usp = get_current_task().clone_uspace();
-        let mut usp_data = usp.write();
-        let ptrs = c_readonly_array_from_addr::<MAX_ARRAY_LEN, u64>(
-            usp_data.deref_mut(),
-            start,
-            0,
-            false,
-        )?;
+        let usp = get_current_task().clone_uspace_handle();
 
-        let mut strings = Vec::with_capacity(ptrs.len());
-        for &ptr in ptrs.iter() {
-            let bytes = c_readonly_array_from_addr::<MAX_BYTES_EACH_STRING, u8>(
-                usp_data.deref_mut(),
-                user_addr(ptr)?,
-                0,
-                false,
-            )?;
-            let s = str::from_utf8(&bytes).map_err(|_| SysError::InvalidArgument)?;
-            strings.push(Box::from(s));
-        }
+        let strings = usp.with_usp(|usp| {
+            let ptrs = c_readonly_array_from_addr::<MAX_ARRAY_LEN, u64>(usp, start, 0, false)?;
+
+            let mut strings = Vec::with_capacity(ptrs.len());
+            for &ptr in ptrs.iter() {
+                let bytes = c_readonly_array_from_addr::<MAX_BYTES_EACH_STRING, u8>(
+                    usp,
+                    user_addr(ptr)?,
+                    0,
+                    false,
+                )?;
+                let s = str::from_utf8(&bytes).map_err(|_| SysError::InvalidArgument)?;
+                strings.push(Box::from(s));
+            }
+
+            Ok(strings)
+        })?;
         Ok(strings)
     }
 

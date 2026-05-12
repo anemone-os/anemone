@@ -25,11 +25,12 @@ fn sys_uname(#[validate_with(user_addr)] buf: VirtAddr) -> Result<u64, SysError>
     copy_from_partial(VERSION, &mut uname.version);
     copy_from_partial(MACHINE, &mut uname.machine);
 
-    let usp = get_current_task().clone_uspace();
-    let mut guard = usp.write();
+    let usp = get_current_task().clone_uspace_handle();
+    {
+        let mut guard = usp.lock();
 
-    let mut buf = UserWritePtr::<OldUtsName>::try_new(buf, &mut guard)?;
-    buf.write(uname);
-
+        let mut buf = UserWritePtr::<OldUtsName>::try_new(buf, &mut guard)?;
+        buf.write(uname);
+    }
     Ok(0)
 }

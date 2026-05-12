@@ -30,6 +30,7 @@ pub fn kunit(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Currently supported levels are:
 /// - `fs`
 /// - `driver`
+/// - `probe`
 #[proc_macro_attribute]
 pub fn initcall(attr: TokenStream, item: TokenStream) -> TokenStream {
     initcall::initcall_impl(attr, item)

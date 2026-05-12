@@ -78,7 +78,7 @@ pub trait PagingArchTrait: Sized {
     /// Switch to the given page table.
     ///
     /// This function should always do a TLB shootdown.
-    unsafe fn activate_addr_space(table: &PageTable);
+    unsafe fn activate_addr_space(root_ppn: PhysPageNum);
 
     /// Perform a TLB shootdown for the given virtual page num in all virtual
     /// address spaces on current core.

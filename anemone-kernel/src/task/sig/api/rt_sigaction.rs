@@ -36,7 +36,7 @@ fn sys_rt_sigaction(
     }
 
     let task = get_current_task();
-    let usp = task.clone_uspace();
+    let usp = task.clone_uspace_handle();
 
     if let Some(oldact) = oldact {
         let KSigAction {
@@ -62,7 +62,7 @@ fn sys_rt_sigaction(
             kbuf
         );
 
-        let mut guard = usp.write();
+        let mut guard = usp.lock();
         UserWritePtr::<linux_signal::SigAction>::try_new(oldact, &mut guard)?.write(kbuf);
     }
 
@@ -72,7 +72,7 @@ fn sys_rt_sigaction(
             sa_flags,
             sa_mask,
         } = {
-            let mut guard = usp.write();
+            let mut guard = usp.lock();
             let uact = UserReadPtr::<linux_signal::SigAction>::try_new(act, &mut guard)?.read();
             uact
         };

@@ -29,8 +29,8 @@ fn sys_nanosleep(
     #[validate_with(user_addr.nullable())] _rem: Option<VirtAddr>,
     // _rem: Option<UserReadPtr<TimeSpec>>,
 ) -> Result<u64, SysError> {
-    let usp = get_current_task().clone_uspace();
-    let mut guard = usp.write();
+    let usp = get_current_task().clone_uspace_handle();
+    let mut guard = usp.lock();
     let duration = UserReadPtr::<TimeSpec>::try_new(duration, &mut guard)?.read();
 
     validate_time_spec(&duration)?;

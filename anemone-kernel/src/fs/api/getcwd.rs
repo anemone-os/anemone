@@ -21,8 +21,8 @@ fn sys_getcwd(#[validate_with(user_addr)] buf: VirtAddr, size: usize) -> Result<
         return Err(SysError::BufferTooSmall);
     }
 
-    let usp = get_current_task().clone_uspace();
-    let mut guard = usp.write();
+    let usp = get_current_task().clone_uspace_handle();
+    let mut guard = usp.lock();
     let mut slice = UserWriteSlice::try_new(buf, size, &mut guard)?;
     slice.write_bytes_with_null_terminator(cwd_bytes);
 

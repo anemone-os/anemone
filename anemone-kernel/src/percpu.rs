@@ -396,8 +396,6 @@ mod preempt_counter {
     }
 
     /// Check if preemption is allowed on current cpu now.
-    ///
-    /// **Currerently, only trap handlers should call this function.**
     pub fn allow_preempt() -> bool {
         unsafe { with_intr_disabled(|| with_core_local(|c| c.preempt_counter.0 == 0)) }
     }

@@ -151,7 +151,7 @@ pub unsafe fn on_system_boot() {
         .iter_mut()
         .filter(|desc| desc.flags.contains(ConsoleFlags::ENABLE_ON_BOOT))
         .for_each(|desc| desc.enable());
-    
+
     if !consoles.iter().any(|desc| desc.enabled()) {
         let desc = consoles.first_mut().unwrap();
         desc.enable();
@@ -165,12 +165,12 @@ pub unsafe fn on_system_boot() {
     }
 }
 
-fn console_read(_file: &File, _buf: &mut [u8]) -> Result<usize, SysError> {
+fn console_read(_file: &File, _pos: &mut usize, _buf: &mut [u8]) -> Result<usize, SysError> {
     // currently no-op. always return EOF.
     Ok(0)
 }
 
-fn console_write(_file: &File, buf: &[u8]) -> Result<usize, SysError> {
+fn console_write(_file: &File, _pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
     let s = core::str::from_utf8(buf).map_err(|_| SysError::InvalidArgument)?;
     output(s);
     Ok(buf.len())
@@ -230,16 +230,16 @@ static CONSOLE_STDOUT_INODE_OPS: InodeOps = InodeOps {
 
 static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {
     read: console_read,
-    write: |_file, _buf| Err(SysError::NotSupported),
-    seek: |_file, _pos| Err(SysError::NotSupported),
-    iterate: |_file, _ctx| Err(SysError::NotSupported),
+    write: |_, _, _| Err(SysError::NotSupported),
+    validate_seek: |_, _| Err(SysError::NotSupported),
+    read_dir: |_, _, _| Err(SysError::NotDir),
 };
 
 static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
-    read: |_file, _buf| Err(SysError::NotSupported),
+    read: |_, _, _| Err(SysError::NotSupported),
     write: console_write,
-    seek: |_file, _pos| Err(SysError::NotSupported),
-    iterate: |_file, _ctx| Err(SysError::NotSupported),
+    validate_seek: |_, _| Err(SysError::NotSupported),
+    read_dir: |_, _, _| Err(SysError::NotDir),
 };
 
 static CONSOLE_STDIN_PATHREF: Lazy<PathRef> = Lazy::new(|| {

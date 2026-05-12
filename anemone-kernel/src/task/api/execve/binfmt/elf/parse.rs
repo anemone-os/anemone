@@ -370,7 +370,7 @@ use seg_chunk::*;
 
 /// During this process, rolling back will not be performed if any error is
 /// encountered, thus leaving the [UserSpace] in a possibly inconsistent state.
-pub unsafe fn load_image(file: &File, usp: &mut UserSpaceData) -> Result<ElfMeta, SysError> {
+pub unsafe fn load_image(file: &File, usp: &mut UserSpace) -> Result<ElfMeta, SysError> {
     let mut elf_hdr_bytes = [0; SIZEOF_EHDR];
     file.read_exact(&mut elf_hdr_bytes)?;
     let elf_hdr = validate_elf(Header::from_bytes(&elf_hdr_bytes))?;
@@ -542,7 +542,7 @@ pub unsafe fn load_image(file: &File, usp: &mut UserSpaceData) -> Result<ElfMeta
 /// The logic is mostly the same as [load_image].
 fn load_interpreter(
     file: &File,
-    usp: &mut UserSpaceData,
+    usp: &mut UserSpace,
     load_bias: u64,
 ) -> Result<InterpreterMeta, SysError> {
     let mut elf_hdr_bytes = [0; SIZEOF_EHDR];
