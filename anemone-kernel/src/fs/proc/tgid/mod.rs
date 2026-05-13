@@ -154,4 +154,5 @@ pub mod inode;
 mod cwd;
 mod environ;
 mod exe;
+mod mounts;
 mod root;

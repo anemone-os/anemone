@@ -1,7 +1,10 @@
 use crate::{
-    fs::proc::{
-        superblock::alloc_ino,
-        tgid::{SubInoRecord, TGID_ENTRIES, tgid_inode_private, validate_tgid_inode},
+    fs::{
+        iomux::PollEvent,
+        proc::{
+            superblock::alloc_ino,
+            tgid::{SubInoRecord, TGID_ENTRIES, tgid_inode_private, validate_tgid_inode},
+        },
     },
     prelude::*,
 };
@@ -59,4 +62,5 @@ pub static TGID_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::IsDir),
     validate_seek: |_, _| Err(SysError::IsDir),
     read_dir: tgid_read_dir,
+    poll: |_, _| Ok(PollEvent::READABLE),
 };

@@ -21,38 +21,22 @@ use crate::{
     utils::any_opaque::NilOpaque,
 };
 
-mod root;
-mod superblock;
-mod tgid;
-// TODO: mod tid;
-// TODO: mod pde;
-
 // hook for wait-related syscalls.
 pub use tgid::binding::try_unbind_thread_group;
 
 static PROCFS: MonoOnce<Arc<FileSystem>> = unsafe { MonoOnce::new() };
 
-/// if [None] is returned, it means procfs hasn't been mounted yet.
-fn procfs_sb() -> Option<Arc<SuperBlock>> {
-    // there must be no more than one superblock in procfs's sb list.
-    PROCFS.get().sget(
-        |sb| {
-            knoticeln!("procfs_sb: found superblock");
-            true
-        },
-        None::<fn() -> Arc<SuperBlock>>,
-    )
+static PROCFS_SB: MonoOnce<Arc<SuperBlock>> = unsafe { MonoOnce::new() };
+
+fn procfs_sb() -> Arc<SuperBlock> {
+    PROCFS_SB.get().clone()
 }
 
-/// if [None] is returned, it means procfs hasn't been mounted yet.
-///
 /// This function returns a vector, since procfs can be mounted multiple times.
-fn procfs_root_dentries() -> Option<Vec<Arc<Dentry>>> {
+fn procfs_root_dentries() -> Vec<Arc<Dentry>> {
     let mut dentries = vec![];
-    procfs_sb().map(|sb| {
-        sb.for_each_mount(|mnt| dentries.push(mnt.root().clone()));
-        dentries
-    })
+    procfs_sb().for_each_mount(|mnt| dentries.push(mnt.root().clone()));
+    dentries
 }
 
 fn procfs_mount(source: MountSource, flags: MountFlags) -> Result<Arc<SuperBlock>, SysError> {
@@ -60,43 +44,7 @@ fn procfs_mount(source: MountSource, flags: MountFlags) -> Result<Arc<SuperBlock
         return Err(SysError::InvalidArgument);
     }
 
-    let fs = PROCFS.get().clone();
-
-    let mut new = false;
-
-    let sb = fs
-        .sget(
-            |s| {
-                knoticeln!("procfs mounted already, reusing existing superblock");
-                true
-            },
-            Some(|| {
-                new = true;
-                Arc::new(SuperBlock::new(
-                    fs.clone(),
-                    &PROC_SB_OPS,
-                    NilOpaque::new(),
-                    PROC_ROOT_INO,
-                    source,
-                ))
-            }),
-        )
-        .expect("procfs should always be able to create a superblock");
-
-    if new {
-        let root_inode = Arc::new(Inode::new(
-            PROC_ROOT_INO,
-            InodeType::Dir,
-            &PROC_ROOT_INODE_OPS,
-            sb.clone(),
-            NilOpaque::new(),
-        ));
-
-        // seed the root inode.
-        let root_inode = sb.seed_inode(root_inode);
-    }
-
-    Ok(sb)
+    Ok(PROCFS_SB.get().clone())
 }
 
 fn procfs_sync_fs(_sb: &SuperBlock) -> Result<(), SysError> {
@@ -126,4 +74,40 @@ fn init() {
             panic!("failed to register procfs: {:?}", err);
         },
     }
+
+    // initialize singleton superblock and root inode for procfs. they will be
+    // reused by all mounts of procfs.
+
+    let fs = PROCFS.get().clone();
+    let sb = Arc::new(SuperBlock::new(
+        fs.clone(),
+        &PROC_SB_OPS,
+        NilOpaque::new(),
+        PROC_ROOT_INO,
+        MountSource::Pseudo,
+    ));
+    let root_inode = Arc::new(Inode::new(
+        PROC_ROOT_INO,
+        InodeType::Dir,
+        &PROC_ROOT_INODE_OPS,
+        sb.clone(),
+        NilOpaque::new(),
+    ));
+    sb.seed_inode(root_inode);
+
+    PROCFS_SB.init(|slot| {
+        slot.write(sb);
+    });
 }
+
+// infra
+mod pde;
+mod root;
+mod superblock;
+mod tgid;
+// TODO: mod tid;
+
+// pdes
+mod celf;
+mod mounts;
+mod uptime;

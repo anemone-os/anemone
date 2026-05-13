@@ -7,6 +7,7 @@ mod dentry;
 mod file;
 mod filesystem;
 mod inode;
+mod iomux;
 mod mount;
 mod namei;
 mod path;
@@ -33,6 +34,7 @@ pub use self::{
         DeviceId, Ino, InoIsZero, InodeMeta, InodeMode, InodeOps, InodePerm, InodeRef, InodeStat,
         InodeType, OpenedFile,
     },
+    iomux::{PollEvent, PollRequest, PollWaiter},
     mount::{Mount, MountFlags, MountSource},
     namei::{
         ResolveFlags, resolve, resolve_from, resolve_from_with_root, resolve_parent,
@@ -399,7 +401,7 @@ mod vfs_ops {
     };
 
     mod primitives {
-        use crate::fs::namei::resolve_parent_from;
+        use crate::fs::{inode::RenameFlags, namei::resolve_parent_from};
 
         use super::*;
 
@@ -579,6 +581,21 @@ mod vfs_ops {
             }
 
             Ok(())
+        }
+
+        /// By POSIX convention, rename won't follow last symlink. instead, it
+        /// rename the symlink itself. So [PathResolution] is not used here.
+        pub fn vfs_rename_at(
+            old_path: &PathRef,
+            new_dir: &PathRef,
+            new_name: &str,
+            flags: RenameFlags,
+        ) -> Result<(), SysError> {
+            // dentry modification must be done here to avoid stale dentries.
+
+            flags.validate()?;
+
+            todo!()
         }
 
         /// Read the target of a symbolic link.

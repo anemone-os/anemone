@@ -82,6 +82,7 @@ pub static TGID_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::IsDir),
     unlink: |_, _| Err(SysError::IsDir),
     rmdir: |_, _| Err(SysError::NotSupported),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: tgid_open,
     read_link: |_| Err(SysError::IsDir),
     get_attr: tgid_get_attr,

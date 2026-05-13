@@ -1,5 +1,8 @@
 use crate::{
-    fs::proc::tgid::{TgidEntry, validate_tgid_sub_inode},
+    fs::{
+        iomux::PollEvent,
+        proc::tgid::{TgidEntry, validate_tgid_sub_inode},
+    },
     prelude::*,
     utils::any_opaque::NilOpaque,
 };
@@ -41,6 +44,7 @@ static TGID_ENVIRON_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::NotDir),
     unlink: |_, _| Err(SysError::NotDir),
     rmdir: |_, _| Err(SysError::NotDir),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: tgid_environ_open,
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: tgid_environ_get_attr,
@@ -107,6 +111,7 @@ static TGID_ENVIRON_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::NotSupported),
     validate_seek: tgid_environ_validate_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
+    poll: |_, _| Ok(PollEvent::READABLE),
 };
 
 pub static TGID_ENVIRON_TGID_ENTRY: TgidEntry = TgidEntry {

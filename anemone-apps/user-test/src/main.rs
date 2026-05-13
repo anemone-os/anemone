@@ -159,24 +159,33 @@ fn comp_run_cmd(cmd: &str) {
 fn run_comp_tests() {
     init_environment();
 
+    println!("user-test: test busybox printf");
+    comp_run_cmd("/bin/busybox printf 'abc\\n'");
+
     // 1. basic tests
     // println!("user-test: running basic tests...");
-    // chdir("/glibc/basic").expect("user-test: failed to change directory to
-    // /glibc/basic"); comp_run_cmd("./run-all.sh");
-    // chdir("..").expect("user-test: failed to change directory to /glibc after
-    // basic tests"); println!("user-test: basic tests passed.");
+    // chdir("/glibc/basic").expect(
+    //     "user-test: failed to change directory to
+    // /glibc/basic",
+    // );
+    // comp_run_cmd("./run-all.sh");
+    // chdir("..").expect(
+    //     "user-test: failed to change directory to /glibc after
+    // basic tests",
+    // );
+    // println!("user-test: basic tests passed.");
 
     // 2. lua tests
-    println!("user-test: running lua tests...");
-    chdir("/glibc").expect("user-test: failed to change directory to /glibc");
-    comp_run_cmd("./lua_testcode.sh");
-    println!("user-test: lua tests passed.");
+    // println!("user-test: running lua tests...");
+    // chdir("/glibc").expect("user-test: failed to change directory to
+    // /glibc"); comp_run_cmd("./lua_testcode.sh");
+    // println!("user-test: lua tests passed.");
 
     // 3. busybox tests
-    // println!("user-test: running busybox tests...");
-    // chdir("/glibc").expect("user-test: failed to change directory to
-    // /glibc"); comp_run_cmd("./busybox_testcode.sh");
-    // println!("user-test: busybox tests passed.");
+    println!("user-test: running busybox tests...");
+    chdir("/glibc").expect("user-test: failed to change directory to /glibc");
+    comp_run_cmd("./busybox_testcode.sh");
+    println!("user-test: busybox tests passed.");
 }
 
 #[anemone_rs::main]

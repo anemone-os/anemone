@@ -1,6 +1,7 @@
 use super::*;
 use crate::{
     fs::proc::{
+        pde::find_pde_by_name,
         root::file::PROC_ROOT_FILE_OPS,
         superblock::alloc_ino,
         tgid::{
@@ -13,9 +14,20 @@ use crate::{
 };
 
 fn proc_root_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
-    if let Some(tgid) = u32::from_str_radix(name, 10).ok() {
-        // dynamic part.
+    kdebugln!("proc_root_lookup: name={}", name);
 
+    // static part.
+    if let Some(entry) = find_pde_by_name(name) {
+        // these inodes are already inserted into icache during probe initcall.
+        let inode = dir
+            .sb()
+            .try_iget(*entry.ino.get())
+            .expect("proc_root_lookup: pde exists but its inode does not exist");
+        return Ok(inode);
+    }
+
+    // dynamic part.
+    if let Some(tgid) = u32::from_str_radix(name, 10).ok() {
         let tgid = Tid::new(tgid);
 
         let inode = binding_tx(|bindings| {
@@ -25,8 +37,7 @@ fn proc_root_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
                 let inode = dir
                     .sb()
                     .try_iget(binding.ino)
-                    // TODO
-                    .expect("binding exists, but inode does not exist; this might be cause by that a superblock is mounted after an unmounting, when icache is cleared");
+                    .expect("binding exists, but inode does not exist");
                 Ok(inode)
             } else {
                 // lazily set up binding.
@@ -67,14 +78,6 @@ fn proc_root_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
         return Ok(inode);
     }
 
-    // TODO: static part.
-    if name == "self" {
-        // TODO: make self a real symlink. this is just a workaround.
-
-        let curr_tgid = get_current_task().tgid().get();
-        return proc_root_lookup(dir, &curr_tgid.to_string());
-    }
-
     knoticeln!("proc_root_lookup: name={} not found", name);
 
     Err(SysError::NotFound)
@@ -113,6 +116,7 @@ pub static PROC_ROOT_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::IsDir),
     unlink: |_, _| Err(SysError::IsDir),
     rmdir: |_, _| Err(SysError::NotSupported),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: proc_root_open,
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: proc_root_get_attr,

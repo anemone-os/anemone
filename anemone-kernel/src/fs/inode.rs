@@ -28,6 +28,14 @@ pub struct InodeOps {
 
     pub rmdir: fn(dir: &InodeRef, name: &str) -> Result<(), SysError>,
 
+    pub rename: fn(
+        old_dir: &InodeRef,
+        old_name: &str,
+        new_dir: &InodeRef,
+        new_name: &str,
+        flags: RenameFlags,
+    ) -> Result<(), SysError>,
+
     /// Quoted from [Linux's VFS documentation](https://docs.kernel.org/filesystems/vfs.html):
     ///
     /// "
@@ -55,6 +63,25 @@ pub struct InodeOps {
 pub struct OpenedFile {
     pub file_ops: &'static FileOps,
     pub prv: AnyOpaque,
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct RenameFlags: u32 {
+        const NO_REPLACE = 0x1;
+        const ATOMIC_EXCHANGE = 0x2;
+    }
+}
+
+impl RenameFlags {
+    /// Some flags are mutually exclusive.
+    pub fn validate(&self) -> Result<(), SysError> {
+        if self.contains(Self::NO_REPLACE) && self.contains(Self::ATOMIC_EXCHANGE) {
+            Err(SysError::InvalidArgument)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Inode number type. Uniquely identifies an inode within a superblock.
@@ -700,6 +727,16 @@ impl InodeRef {
 
     pub fn rmdir(&self, name: &str) -> Result<(), SysError> {
         (self.inode().ops.rmdir)(self, name)
+    }
+
+    pub fn rename(
+        &self,
+        old_name: &str,
+        new_dir: &InodeRef,
+        new_name: &str,
+        flags: RenameFlags,
+    ) -> Result<(), SysError> {
+        (self.inode().ops.rename)(self, old_name, new_dir, new_name, flags)
     }
 
     /// Open this inode as a file and return an [OpenedFile] containing the file

@@ -18,6 +18,9 @@ pub enum InitCallLevel {
     /// subsystem, ramdisk for block subsystem, etc.)
     ///
     /// In that sense, this can be considered as virtual device probing.
+    ///
+    /// Additionally, those pseudo filesystems may also create their inodes in
+    /// this stage.
     Probe = 2,
 }
 

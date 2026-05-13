@@ -2,9 +2,12 @@ use anemone_abi::errno::ENOENT;
 use lwext4_rust::InodeType as LwExt4InodeType;
 
 use crate::{
-    fs::ext4::{
-        ext4_ino, ext4_sb, file::EXT4_SYMLINK_FILE_OPS, map_ext4_error, map_lwext4_inode_type,
-        map_vfs_inode_type,
+    fs::{
+        ext4::{
+            ext4_ino, ext4_sb, file::EXT4_SYMLINK_FILE_OPS, map_ext4_error, map_lwext4_inode_type,
+            map_vfs_inode_type,
+        },
+        inode::RenameFlags,
     },
     prelude::*,
     utils::any_opaque::NilOpaque,
@@ -237,6 +240,16 @@ fn ext4_rmdir(dir: &InodeRef, name: &str) -> Result<(), SysError> {
     Ok(())
 }
 
+fn ext4_rename(
+    old_dir: &InodeRef,
+    old_name: &str,
+    new_dir: &InodeRef,
+    new_name: &str,
+    flags: RenameFlags,
+) -> Result<(), SysError> {
+    todo!()
+}
+
 fn ext4_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {
     let sb = inode.sb();
 
@@ -265,6 +278,7 @@ pub(super) static EXT4_DIR_INODE_OPS: InodeOps = InodeOps {
     unlink: ext4_unlink,
     rmdir: ext4_rmdir,
     open: ext4_open,
+    rename: ext4_rename,
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: ext4_get_attr,
 };
@@ -277,6 +291,7 @@ pub(super) static EXT4_REG_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::NotDir),
     unlink: |_, _| Err(SysError::NotDir),
     rmdir: |_, _| Err(SysError::NotDir),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: ext4_open,
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: ext4_get_attr,
@@ -290,6 +305,7 @@ pub(super) static EXT4_DEV_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::NotDir),
     unlink: |_, _| Err(SysError::NotDir),
     rmdir: |_, _| Err(SysError::NotDir),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: |_| Err(SysError::NotSupported),
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: ext4_get_attr,
@@ -303,6 +319,7 @@ pub(super) static EXT4_SYMLINK_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::NotDir),
     unlink: |_, _| Err(SysError::NotDir),
     rmdir: |_, _| Err(SysError::NotDir),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: |_| Err(SysError::NotSupported),
     read_link: ext4_read_link,
     get_attr: ext4_get_attr,

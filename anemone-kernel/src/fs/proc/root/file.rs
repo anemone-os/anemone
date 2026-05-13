@@ -1,4 +1,7 @@
-use crate::{fs::proc::root::PROC_ROOT_INO, prelude::*};
+use crate::{
+    fs::{iomux::PollEvent, proc::root::PROC_ROOT_INO},
+    prelude::*,
+};
 
 const PROC_ROOT_DOT_CURSOR: usize = 0;
 const PROC_ROOT_DOTDOT_CURSOR: usize = 1;
@@ -134,4 +137,5 @@ pub static PROC_ROOT_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::IsDir),
     validate_seek: |_, _| Err(SysError::IsDir),
     read_dir: proc_root_read_dir,
+    poll: |_, _| Ok(PollEvent::READABLE),
 };

@@ -168,6 +168,23 @@ pub mod linux {
             pub st_ctime_nsec: u64,
             pub __unused: [u32; 2],
         }
+
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct StatFs {
+            pub f_type: u64,
+            pub f_bsize: u64,
+            pub f_blocks: u64,
+            pub f_bfree: u64,
+            pub f_bavail: u64,
+            pub f_files: u64,
+            pub f_ffree: u64,
+            pub f_fsid: [i32; 2],
+            pub f_namelen: u64,
+            pub f_frsize: u64,
+            pub f_flags: u64,
+            pub __spare: [u64; 4],
+        }
     }
 
     pub mod dirent {
@@ -234,6 +251,30 @@ pub mod linux {
 
         pub const F_LINUX_SPECIFIC_BASE: u32 = 1024;
         pub const F_DUPFD_CLOEXEC: u32 = F_LINUX_SPECIFIC_BASE + 6;
+    }
+
+    pub mod poll {
+        // Specified by iBCS2
+        pub const POLLIN: i16 = 0x0001;
+        pub const POLLPRI: i16 = 0x0002;
+        pub const POLLOUT: i16 = 0x0004;
+        pub const POLLERR: i16 = 0x0008;
+        pub const POLLHUP: i16 = 0x0010;
+        pub const POLLNVAL: i16 = 0x0020;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[repr(C)]
+        pub struct PollFd {
+            pub fd: i32,
+            pub events: i16,
+            pub revents: i16,
+        }
+    }
+
+    pub mod rename {
+        pub const RENAME_NOREPLACE: u32 = 0x0001;
+        pub const RENAME_EXCHANGE: u32 = 0x0002;
+        pub const RENAME_WHITEOUT: u32 = 0x0004;
     }
 }
 

@@ -1,3 +1,5 @@
+use crate::fs::iomux::PollEvent;
+
 use super::*;
 
 fn tgid_cwd_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {
@@ -35,6 +37,7 @@ static TGID_CWD_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::NotSupported),
     unlink: |_, _| Err(SysError::NotSupported),
     rmdir: |_, _| Err(SysError::NotSupported),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: |_| Err(SysError::NotSupported),
     read_link: tgid_cwd_read_link,
     get_attr: tgid_cwd_get_attr,
@@ -45,6 +48,7 @@ static TGID_CWD_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::NotSupported),
     validate_seek: |_, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotSupported),
+    poll: |_, _| Ok(PollEvent::READABLE),
 };
 
 pub static TGID_CWD_TGID_ENTRY: TgidEntry = TgidEntry {

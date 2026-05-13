@@ -3,6 +3,7 @@ use crate::{
         block::{BlockDev, get_block_dev, next_block_dev},
         char::{get_char_dev, next_char_dev},
     },
+    fs::iomux::PollEvent,
     prelude::*,
     utils::iter_ctx::IterCtx,
 };
@@ -216,6 +217,7 @@ pub(super) static DEVFS_DIR_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::IsDir),
     validate_seek: |_, _| Err(SysError::IsDir),
     read_dir: dir_read_dir,
+    poll: |_, _| Ok(PollEvent::READABLE),
 };
 
 pub(super) static DEVFS_CHAR_FILE_OPS: FileOps = FileOps {
@@ -223,6 +225,7 @@ pub(super) static DEVFS_CHAR_FILE_OPS: FileOps = FileOps {
     write: char_write,
     validate_seek: |_, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
+    poll: |_, _| todo!("we should refactor devfs."),
 };
 
 pub(super) static DEVFS_BLOCK_FILE_OPS: FileOps = FileOps {
@@ -230,4 +233,5 @@ pub(super) static DEVFS_BLOCK_FILE_OPS: FileOps = FileOps {
     write: block_write,
     validate_seek: block_validate_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
+    poll: |_, _| Ok(PollEvent::READABLE | PollEvent::WRITABLE),
 };

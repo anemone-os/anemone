@@ -38,25 +38,21 @@ pub fn try_unbind_thread_group(tgid: Tid) {
     if let Some(binding) = THREAD_GROUP_BINDINGS.write().remove(&tgid) {
         binding.alive.store(false, Ordering::Release);
 
-        // we use map here since procfs might not be mounted.
-
-        procfs_sb().map(|sb| sb.unindex_inode_by_ino(binding.ino));
-        procfs_root_dentries().map(|roots| {
-            for root in roots {
-                match root.remove_child(&tgid.get().to_string()) {
-                    Ok(()) => {},
-                    Err(SysError::NotFound) => {
-                        // this might happen if /proc/<tgid> is never accessed.
-                    },
-                    Err(e) => {
-                        kalertln!(
-                            "try_unbind_thread_group: failed to remove child for tgid {} from procfs root: {:?}",
-                            tgid,
-                            e
-                        );
-                    }
-
+        procfs_sb().unindex_inode_by_ino(binding.ino);
+        procfs_root_dentries().iter().for_each(|root| {
+            match root.remove_child(&tgid.get().to_string()) {
+                Ok(()) => {},
+                Err(SysError::NotFound) => {
+                    // this might happen if /proc/<tgid> is never accessed.
+                },
+                Err(e) => {
+                    kalertln!(
+                        "try_unbind_thread_group: failed to remove child for tgid {} from procfs root: {:?}",
+                        tgid,
+                        e
+                    );
                 }
+
             }
         });
 

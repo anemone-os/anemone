@@ -1,4 +1,8 @@
-use crate::{prelude::*, utils::any_opaque::AnyOpaque};
+use crate::{
+    fs::iomux::{PollEvent, PollRequest},
+    prelude::*,
+    utils::any_opaque::AnyOpaque,
+};
 
 /// VTable a file must implement to support file operations.
 #[derive(Debug)]
@@ -14,6 +18,17 @@ pub struct FileOps {
     /// the directory is already exhausted before any new entry is accepted.
     pub read_dir:
         fn(&File, pos: &mut usize, sink: &mut dyn DirSink) -> Result<ReadDirResult, SysError>,
+
+    /// Check if the file is ready for IO operations described by `request`.
+    ///
+    /// If `request.waiter` is provided, the file should arrange to notify the
+    /// waiter when it becomes ready for any of the interested operations.
+    ///
+    /// TODO: Migrate to intrusive linked list.
+    ///
+    /// TODO: **We haven't implemented waitable poll yet. For now use busy
+    /// polling.**
+    pub poll: for<'a> fn(&File, &PollRequest<'a>) -> Result<PollEvent, SysError>,
 }
 
 #[derive(Debug, Clone)]
@@ -230,6 +245,10 @@ impl File {
     pub fn read_dir(&self, sink: &mut dyn DirSink) -> Result<ReadDirResult, SysError> {
         let mut pos = self.pos.lock();
         (self.ops.read_dir)(self, &mut *pos, sink)
+    }
+
+    pub fn poll(&self, request: &PollRequest<'_>) -> Result<PollEvent, SysError> {
+        (self.ops.poll)(self, request)
     }
 
     pub fn get_attr(&self) -> Result<InodeStat, SysError> {
