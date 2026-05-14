@@ -585,6 +585,8 @@ mod vfs_ops {
 
         /// By POSIX convention, rename won't follow last symlink. instead, it
         /// rename the symlink itself. So [PathResolution] is not used here.
+        ///
+        /// TODO: refine.
         pub fn vfs_rename_at(
             old_path: &PathRef,
             new_dir: &PathRef,
@@ -595,7 +597,59 @@ mod vfs_ops {
 
             flags.validate()?;
 
-            todo!()
+            if new_name.is_empty() || new_name.contains('/') || matches!(new_name, "." | "..") {
+                return Err(SysError::InvalidArgument);
+            }
+
+            if new_dir.inode().ty() != InodeType::Dir {
+                return Err(SysError::NotDir);
+            }
+
+            if !Arc::ptr_eq(old_path.mount(), new_dir.mount()) {
+                return Err(SysError::CrossDeviceLink);
+            }
+
+            let Some(old_parent) = old_path.dentry().parent() else {
+                return Err(SysError::Busy);
+            };
+
+            let old_name = old_path.dentry().name();
+
+            if old_name == new_name && Arc::ptr_eq(&old_parent, new_dir.dentry()) {
+                return Ok(());
+            }
+
+            if let Ok(existing) = new_dir.dentry().lookup_child(new_name) {
+                if new_dir.mount().child_at(&existing).is_some() {
+                    return Err(SysError::Busy);
+                }
+            }
+
+            if old_path.inode().ty() == InodeType::Dir {
+                let mut cur = Some(new_dir.dentry().clone());
+                while let Some(dentry) = cur {
+                    if Arc::ptr_eq(&dentry, old_path.dentry()) {
+                        return Err(SysError::InvalidArgument);
+                    }
+                    cur = dentry.parent();
+                }
+            }
+
+            old_parent
+                .inode()
+                .rename(&old_name, new_dir.inode(), new_name, flags)?;
+
+            match old_parent.remove_child(&old_name) {
+                Ok(()) | Err(SysError::NotFound) => (),
+                Err(err) => return Err(err),
+            }
+
+            match new_dir.dentry().remove_child(new_name) {
+                Ok(()) | Err(SysError::NotFound) => (),
+                Err(err) => return Err(err),
+            }
+
+            Ok(())
         }
 
         /// Read the target of a symbolic link.

@@ -69,18 +69,14 @@ bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct RenameFlags: u32 {
         const NO_REPLACE = 0x1;
-        const ATOMIC_EXCHANGE = 0x2;
     }
 }
 
 impl RenameFlags {
-    /// Some flags are mutually exclusive.
+    /// Kept as a uniform call site for now, even though currently there is
+    /// only one supported flag.
     pub fn validate(&self) -> Result<(), SysError> {
-        if self.contains(Self::NO_REPLACE) && self.contains(Self::ATOMIC_EXCHANGE) {
-            Err(SysError::InvalidArgument)
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 }
 

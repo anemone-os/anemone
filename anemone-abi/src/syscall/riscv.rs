@@ -89,6 +89,8 @@ pub mod linux {
     pub const SYS_NEWFSTATAT: u64 = 79;
     pub const SYS_FSTAT: u64 = 80;
 
+    pub const SYS_UTIMENSAT: u64 = 88;
+
     pub const SYS_EXIT: u64 = 93;
     pub const SYS_EXIT_GROUP: u64 = 94;
     pub const SYS_SET_TID_ADDRESS: u64 = 96;

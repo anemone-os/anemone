@@ -44,15 +44,6 @@ pub fn frame_allocator_stats() -> allocator::FrameAllocatorStats {
 pub fn alloc_frames(npages: usize) -> Option<OwnedFolio> {
     assert_ne!(npages, 0, "Internal error: cannot allocate zero pages");
 
-    let stats = frame_allocator_stats();
-
-    kdebugln!(
-        "alloc_frames: requesting {} pages ({} bytes), stats before allocation: {:?}",
-        npages,
-        npages * PagingArch::PAGE_SIZE_BYTES as usize,
-        stats
-    );
-
     FRAME_ALLOCATOR.alloc(npages)
 }
 

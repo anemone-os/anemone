@@ -151,15 +151,9 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
             // from this code block, the logical execution flow is considered
             // leaving the hardware interrupt environment.
 
-            // note the short-circuit behavior of && operator.
-            if allow_preempt() && fetch_clear_need_resched() {
-                // if we need reschedule, we can't waste time on disposing deferred tasks.
-                unsafe {
-                    schedule();
-                }
-            } else {
-                dispose_deferred_tasks();
-            }
+            // Kernel-preemption-off mode leaves need_resched for explicit
+            // schedule points such as idle.
+            dispose_deferred_tasks();
         }
     } else {
         let stval = riscv::register::stval::read();

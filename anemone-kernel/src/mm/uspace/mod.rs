@@ -373,7 +373,8 @@ impl UserSpace {
     /// committed when the stack grows.
     fn stack_accessible(&self, vaddr: VirtAddr) -> bool {
         let vpn = vaddr.page_down();
-        self.stack_vma().range().contains(vpn) && vpn >= self.stack.committed_bottom - 1
+        // 32 is randomly chosen. we should refine this later
+        self.stack_vma().range().contains(vpn) && vpn >= self.stack.committed_bottom - 32
     }
 
     /// Whether the given address falls in requested heap region.

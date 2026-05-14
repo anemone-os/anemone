@@ -6,7 +6,7 @@ use crate::{
             tgid::{
                 binding::ThreadGroupBinding, cwd::TGID_CWD_TGID_ENTRY,
                 environ::TGID_ENVIRON_TGID_ENTRY, exe::TGID_EXE_TGID_ENTRY, inode::TGID_INODE_OPS,
-                root::TGID_ROOT_TGID_ENTRY,
+                mounts::TGID_MOUNTS_TGID_ENTRY, root::TGID_ROOT_TGID_ENTRY,
             },
         },
     },
@@ -104,6 +104,7 @@ static TGID_ENTRIES: &[&TgidEntry] = &[
     &TGID_CWD_TGID_ENTRY,
     &TGID_ENVIRON_TGID_ENTRY,
     &TGID_EXE_TGID_ENTRY,
+    &TGID_MOUNTS_TGID_ENTRY,
     // TODO: exe, cmdline, environ, fd, etc.
 ];
 

@@ -18,18 +18,26 @@ run:
 qemu-server:
     qemu-system-riscv64 \
         -machine virt \
+        -cpu rv64 \
         -nographic \
         -m 1G \
         -smp 4 \
         -bios default \
         -kernel build/anemone.elf \
+        -drive \
+            file=sdcard-rv.img,format=raw,if=none,id=x0 \
+        -device \
+            virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 \
+        -no-reboot \
+        -drive \
+            file=build/rootfs/minimal-rv/rootfs.img,format=raw,if=none,id=x1 \
+        -device \
+            virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1 \
         -serial mon:stdio \
-        -drive file=disk.img,format=raw,if=none,id=hd0 \
-        -device virtio-blk-device,drive=hd0 \
         -S -s
 
 gdb-client:
-    riscv64-unknown-elf-gdb \
+    RUST_GDB=riscv64-unknown-elf-gdb rust-gdb \
         -ex "target remote :1234" \
         -ex "file build/anemone.elf" \
         -ex "set architecture riscv:rv64"

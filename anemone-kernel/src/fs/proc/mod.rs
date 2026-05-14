@@ -109,5 +109,6 @@ mod tgid;
 
 // pdes
 mod celf;
+mod meminfo;
 mod mounts;
 mod uptime;

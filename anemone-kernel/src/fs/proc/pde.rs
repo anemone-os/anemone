@@ -4,8 +4,9 @@ use crate::{
     fs::{
         inode::Inode,
         proc::{
-            celf::PROC_SELF_DIR_ENTRY, mounts::PROC_MOUNTS_DIR_ENTRY, procfs_sb,
-            superblock::alloc_ino, uptime::PROC_UPTIME_DIR_ENTRY,
+            celf::PROC_SELF_DIR_ENTRY, meminfo::PROC_MEMINFO_DIR_ENTRY,
+            mounts::PROC_MOUNTS_DIR_ENTRY, procfs_sb, superblock::alloc_ino,
+            uptime::PROC_UPTIME_DIR_ENTRY,
         },
     },
     prelude::*,
@@ -25,6 +26,7 @@ static PROC_DIR_ENTRIES: &[&ProcDirEntry] = &[
     &PROC_UPTIME_DIR_ENTRY,
     &PROC_SELF_DIR_ENTRY,
     &PROC_MOUNTS_DIR_ENTRY,
+    &PROC_MEMINFO_DIR_ENTRY,
     // TODO: mounts, interrupts, version, devices, kallsyms, etc.
 ];
 

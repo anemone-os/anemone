@@ -276,6 +276,11 @@ pub mod linux {
         pub const RENAME_EXCHANGE: u32 = 0x0002;
         pub const RENAME_WHITEOUT: u32 = 0x0004;
     }
+
+    pub mod utime {
+        pub const UTIME_NOW: i64 = (1i64 << 30) - 1;
+        pub const UTIME_OMIT: i64 = (1i64 << 30) - 2;
+    }
 }
 
 pub mod native {}

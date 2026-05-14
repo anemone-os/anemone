@@ -159,9 +159,6 @@ fn comp_run_cmd(cmd: &str) {
 fn run_comp_tests() {
     init_environment();
 
-    println!("user-test: test busybox printf");
-    comp_run_cmd("/bin/busybox printf 'abc\\n'");
-
     // 1. basic tests
     // println!("user-test: running basic tests...");
     // chdir("/glibc/basic").expect(

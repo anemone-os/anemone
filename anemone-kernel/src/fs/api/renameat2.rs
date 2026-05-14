@@ -38,9 +38,9 @@ impl TryFromSyscallArg for LinuxRenameFlags {
             return Err(SysError::NotYetImplemented);
         }
 
-        if flags.contains(Self::EXCHANGE) && flags.contains(Self::NOREPLACE) {
-            kdebugln!("sys_renameat2: RENAME_EXCHANGE and RENAME_NOREPLACE cannot be set together");
-            return Err(SysError::InvalidArgument);
+        if flags.contains(Self::EXCHANGE) {
+            knoticeln!("sys_renameat2: RENAME_EXCHANGE is not supported yet");
+            return Err(SysError::NotYetImplemented);
         }
 
         Ok(flags)
@@ -52,9 +52,6 @@ impl LinuxRenameFlags {
         let mut flags = RenameFlags::empty();
         if self.contains(Self::NOREPLACE) {
             flags |= RenameFlags::NO_REPLACE;
-        }
-        if self.contains(Self::EXCHANGE) {
-            flags |= RenameFlags::ATOMIC_EXCHANGE;
         }
 
         debug_assert!(flags.validate().is_ok());
@@ -98,11 +95,14 @@ fn sys_renameat2(
         )?
     };
 
-    let new_dir_pathref = if new_path.is_absolute() {
-        task.root()
+    let (new_dir_pathref, new_name) = if new_path.is_absolute() {
+        task.lookup_parent_path(new_path, ResolveFlags::empty())?
     } else {
-        new_dirfd.to_pathref(true)?
+        let new_dir_pathref = new_dirfd.to_pathref(true)?;
+        task.lookup_parent_path_from(&new_dir_pathref, new_path, ResolveFlags::empty())?
     };
 
-    todo!()
+    vfs_rename_at(&old_pathref, &new_dir_pathref, &new_name, flags)?;
+
+    Ok(0)
 }

@@ -34,6 +34,7 @@ pub mod statfs;
 pub mod symlinkat;
 pub mod umount;
 pub mod unlinkat;
+pub mod utimensat;
 pub mod write;
 pub mod writev;
 

@@ -115,3 +115,33 @@ impl Dentry {
         }
     }
 }
+
+impl Drop for Dentry {
+    fn drop(&mut self) {
+        let Some(parent) = self.parent.as_ref() else {
+            return;
+        };
+
+        // eagerly remove weak reference.
+
+        // TODO: explain the necessity. if we don't take this step, system will
+        // extremely slow down after large number of files are created and deleted,
+        // because the stale weak references will accumulate and cause the lookup to
+        // iterate over many dead entries before finding the target one.
+
+        // parent's lock is acquired here in Drop, which is not that good. but for now
+        // this works.
+
+        let name = self.inner.read().name.clone();
+        let self_ptr = self as *const Dentry;
+
+        if let Some(children) = parent.inner.write().children.as_mut() {
+            let should_remove = children
+                .get(&name)
+                .is_some_and(|weak| weak.as_ptr() == self_ptr);
+            if should_remove {
+                children.remove(&name);
+            }
+        }
+    }
+}

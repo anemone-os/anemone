@@ -37,6 +37,16 @@ mod idle_task {
 
     extern "C" fn idle_loop() -> ! {
         loop {
+            // if kernel preemption is disabled, this step must be taken to ensure other
+            // tasks can run.
+            unsafe {
+                with_intr_disabled(|| {
+                    if fetch_clear_need_resched() {
+                        schedule();
+                    }
+                })
+            }
+
             spin_loop();
         }
     }

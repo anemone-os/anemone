@@ -200,13 +200,12 @@ pub fn local_requeue_current(task: Arc<Task>) {
 /// This function never returns [None], since there is always an idle task in
 /// the run queue.
 ///
-/// This function will disable interrupts.
+/// ** Interrupts must be disabled when calling this function.**
 pub fn local_pick_next() -> Arc<Task> {
-    with_intr_disabled(|| {
-        let task = PROCESSOR.with_mut(|proc| proc.runq.pick_next());
-        debug_assert!(task.status() == TaskStatus::Runnable);
-        task
-    })
+    debug_assert!(IntrArch::local_intr_disabled());
+    let task = PROCESSOR.with_mut(|proc| proc.runq.pick_next());
+    debug_assert!(task.status() == TaskStatus::Runnable);
+    task
 }
 
 /// Called by timer interrupt handler to update the state of schedulers.
