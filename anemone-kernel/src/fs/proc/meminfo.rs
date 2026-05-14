@@ -43,13 +43,13 @@ fn meminfo_string() -> String {
     // current a fake implementation.
 
     let total_mem = format!("MemTotal:\t{} Kb\n", 393939);
-    let free_mem = format!("MemFree:\t{} Kb\n", 3939393);
+    let free_mem = format!("MemFree:\t{} Kb\n", 393939);
     let available_mem = format!("MemAvailable:\t{} Kb\n", 393939);
     let buffers = format!("Buffers:\t{} Kb\n", 393939);
     let cached = format!("Cached:\t{} Kb\n", 393939);
     let swap_total = format!("SwapTotal:\t{} Kb\n", 0);
-    let total_swap = format!("SwapFree:\t{} Kb\n", 0);
-    let free_swap = format!("SwapCached:\t{} Kb\n", 0);
+    let swap_free = format!("SwapFree:\t{} Kb\n", 0);
+    let swap_cached = format!("SwapCached:\t{} Kb\n", 0);
     let shmem = format!("Shmem:\t{} Kb\n", 0);
     let slab = format!("Slab:\t{} Kb\n", 393939);
 
@@ -59,8 +59,8 @@ fn meminfo_string() -> String {
         + &buffers
         + &cached
         + &swap_total
-        + &total_swap
-        + &free_swap
+        + &swap_cached
+        + &swap_free
         + &shmem
         + &slab
 }

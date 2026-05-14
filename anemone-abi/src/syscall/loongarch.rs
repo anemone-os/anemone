@@ -98,6 +98,7 @@ pub mod linux {
 
     pub const SYS_NANOSLEEP: u64 = 101;
     pub const SYS_CLOCK_GETTIME: u64 = 113;
+    pub const SYS_CLOCK_GETRES: u64 = 114;
 
     pub const SYS_SYSLOG: u64 = 116;
 
@@ -119,6 +120,8 @@ pub mod linux {
     pub const SYS_TIMES: u64 = 153;
 
     pub const SYS_UNAME: u64 = 160;
+
+    pub const SYS_GETRUSAGE: u64 = 165;
 
     pub const SYS_GETTIMEOFDAY: u64 = 169;
 

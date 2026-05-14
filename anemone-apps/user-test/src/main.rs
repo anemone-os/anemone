@@ -179,10 +179,16 @@ fn run_comp_tests() {
     // println!("user-test: lua tests passed.");
 
     // 3. busybox tests
-    println!("user-test: running busybox tests...");
+    // println!("user-test: running busybox tests...");
+    // chdir("/glibc").expect("user-test: failed to change directory to /glibc");
+    // comp_run_cmd("./busybox_testcode.sh");
+    // println!("user-test: busybox tests passed.");
+
+    // 4. lmbench tests
+    println!("user-test: running lmbench tests...");
     chdir("/glibc").expect("user-test: failed to change directory to /glibc");
-    comp_run_cmd("./busybox_testcode.sh");
-    println!("user-test: busybox tests passed.");
+    comp_run_cmd("./lmbench_testcode.sh");
+    println!("user-test: lmbench tests passed.");
 }
 
 #[anemone_rs::main]

@@ -235,9 +235,6 @@ impl Event {
                 guard = PreemptGuard::new();
             }
         }
-
-        self.clean_listener(&listener, exclusive);
-        None
     }
 }
 
