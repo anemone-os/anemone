@@ -114,6 +114,10 @@ pub struct Task {
     ///   has not trapped into kernel yet).
     utrapframe: MonoFlow<Option<NonNull<TrapFrame>>>,
 
+    /// Whether this task has used FPU. This is used to optimize FPU context
+    /// switching.
+    fpu_used: AtomicBool,
+
     /// Filesystem state shared by task-related FS operations.
     fs_state: Arc<RwLock<FsState>>,
     /// File descriptor table state.
@@ -354,6 +358,7 @@ impl Task {
             },
             sched_entity: SpinLock::new(sched),
             utrapframe: unsafe { MonoFlow::new(None) },
+            fpu_used: AtomicBool::new(false),
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: Arc::new(RwLock::new(FilesState::new())),
             cpu_usage: RwLock::new(TaskCpuUsage::ZERO),
@@ -398,6 +403,7 @@ impl Task {
                 },
                 sched_entity: SpinLock::new(SchedEntity::new(SchedClassPrv::Idle(()))),
                 utrapframe: unsafe { MonoFlow::new(None) },
+                fpu_used: AtomicBool::new(false),
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
                 files_state: Arc::new(RwLock::new(FilesState::new())),
                 cpu_usage: RwLock::new(TaskCpuUsage::ZERO),
@@ -614,6 +620,14 @@ impl Task {
     /// Get the current clear-child-tid target pointer.
     pub fn get_clear_child_tid(&self) -> Option<VirtAddr> {
         self.clear_child_tid.lock().clone()
+    }
+
+    pub fn fpu_used(&self) -> bool {
+        self.fpu_used.load(Ordering::Acquire)
+    }
+
+    pub fn set_fpu_used(&self, used: bool) {
+        self.fpu_used.store(used, Ordering::Release);
     }
 }
 

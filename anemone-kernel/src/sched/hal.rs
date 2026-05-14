@@ -14,7 +14,7 @@ pub trait SchedArchTrait {
     /// performed by the scheduling system.
     ///
     /// **Must be called with interrupts disabled.**
-    unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext);
+    unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext, save_fr: bool, load_fr: bool);
 }
 
 pub trait TaskContextArch {

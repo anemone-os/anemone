@@ -142,7 +142,7 @@ mod kore {
             "expected_status cannot be empty"
         );
         assert!(
-            expected_status.iter().all(|s| s.is_sleeping()),
+            expected_status.iter().all(|s| s.is_sleeping()) && !expected_status.is_empty(),
             "expected_status must be a sleeping status"
         );
 
