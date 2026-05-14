@@ -78,7 +78,7 @@ mod kore {
     /// Basically, you should never call this function in application code. this
     /// is for those who building synchronization primitives or something
     /// low-level like that. Instead, higher-level encapsulations like
-    /// [sched_yield::kernel_yield] should be used in most cases.
+    /// [higher_level::yield_now] should be used in most cases.
     ///
     /// **Interrupts must be disabled when calling this function.**
     pub unsafe fn schedule() {
@@ -220,7 +220,77 @@ pub use kore::*;
 
 /// Upper-level APIs built upon [kore] functions.
 mod higher_level {
+
+    use crate::time::timer::schedule_local_irq_timer_event;
+
     use super::*;
+
+    /// Schedule the next task to run, with timeout.
+    ///
+    /// If `timeout` is [None], then current task will wait indefinitely until
+    /// being woken up by other events.
+    ///
+    /// Returns the remaining time until timeout.
+    ///
+    /// If the returned duration is zero, it does not necessarily mean that the
+    /// timeout has expired.
+    ///
+    /// Caller should set task's status to [TaskStatus::Waiting] before calling
+    /// this function.
+    pub fn schedule_with_timeout(timeout: Option<Duration>) -> Duration {
+        if let Some(timeout) = timeout {
+            if timeout == Duration::ZERO {
+                kdebugln!("schedule_with_timeout: timeout is zero, returning immediately");
+                return Duration::ZERO;
+            }
+        }
+
+        let task = get_current_task();
+        let cloned_task = task.clone();
+        let validness = Arc::new(AtomicBool::new(true));
+        let cloned_validness = validness.clone();
+
+        let start = with_intr_disabled(|| {
+            if let Some(timeout) = timeout {
+                unsafe {
+                    schedule_local_irq_timer_event(
+                        timeout,
+                        Box::new(move || {
+                            if cloned_validness.swap(false, Ordering::SeqCst) {
+                                kdebugln!(
+                                    "schedule_with_timeout: timeout expired, waking up task {}",
+                                    cloned_task.tid()
+                                );
+                                notify(&cloned_task, true);
+                            } else {
+                                kdebugln!(
+                                    "schedule_with_timeout: timer callback called, but timer is already invalid"
+                                );
+                            }
+                        }),
+                    );
+                }
+            }
+
+            let start = Instant::now();
+            unsafe {
+                schedule();
+            }
+
+            // we're back.
+            validness.store(false, Ordering::SeqCst);
+
+            start
+        });
+
+        let elapsed = start.elapsed();
+
+        if let Some(timeout) = timeout {
+            timeout.saturating_sub(elapsed)
+        } else {
+            Duration::MAX
+        }
+    }
 
     /// Yield the current running task to let other tasks run.
     pub fn yield_now() {

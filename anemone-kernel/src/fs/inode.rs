@@ -28,6 +28,14 @@ pub struct InodeOps {
 
     pub rmdir: fn(dir: &InodeRef, name: &str) -> Result<(), SysError>,
 
+    pub rename: fn(
+        old_dir: &InodeRef,
+        old_name: &str,
+        new_dir: &InodeRef,
+        new_name: &str,
+        flags: RenameFlags,
+    ) -> Result<(), SysError>,
+
     /// Quoted from [Linux's VFS documentation](https://docs.kernel.org/filesystems/vfs.html):
     ///
     /// "
@@ -57,10 +65,25 @@ pub struct OpenedFile {
     pub prv: AnyOpaque,
 }
 
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct RenameFlags: u32 {
+        const NO_REPLACE = 0x1;
+    }
+}
+
+impl RenameFlags {
+    /// Kept as a uniform call site for now, even though currently there is
+    /// only one supported flag.
+    pub fn validate(&self) -> Result<(), SysError> {
+        Ok(())
+    }
+}
+
 /// Inode number type. Uniquely identifies an inode within a superblock.
 ///
 /// **0 is reserved for invalid inode.** Valid inode numbers start from 1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Ino(u64);
 
 impl Ino {
@@ -176,6 +199,19 @@ impl InodePerm {
     /// All regular rwx permission bits, excluding suid/sgid/sticky.
     pub const fn all_rwx() -> Self {
         Self::RWXU.union(Self::RWXG).union(Self::RWXO)
+    }
+
+    pub const fn all_rw() -> Self {
+        Self::IRUSR
+            .union(Self::IWUSR)
+            .union(Self::IRGRP)
+            .union(Self::IWGRP)
+            .union(Self::IROTH)
+            .union(Self::IWOTH)
+    }
+
+    pub const fn all_r() -> Self {
+        Self::IRUSR.union(Self::IRGRP).union(Self::IROTH)
     }
 }
 
@@ -687,6 +723,16 @@ impl InodeRef {
 
     pub fn rmdir(&self, name: &str) -> Result<(), SysError> {
         (self.inode().ops.rmdir)(self, name)
+    }
+
+    pub fn rename(
+        &self,
+        old_name: &str,
+        new_dir: &InodeRef,
+        new_name: &str,
+        flags: RenameFlags,
+    ) -> Result<(), SysError> {
+        (self.inode().ops.rename)(self, old_name, new_dir, new_name, flags)
     }
 
     /// Open this inode as a file and return an [OpenedFile] containing the file

@@ -199,6 +199,7 @@ static CONSOLE_STDIN_INODE_OPS: InodeOps = InodeOps {
     symlink: |_, _, _| Err(SysError::NotSupported),
     unlink: |_, _| Err(SysError::NotSupported),
     rmdir: |_, _| Err(SysError::NotSupported),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     link: |_, _, _| Err(SysError::NotSupported),
     get_attr: console_get_attr,
     read_link: |_| Err(SysError::NotSymlink),
@@ -220,6 +221,7 @@ static CONSOLE_STDOUT_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::NotSupported),
     get_attr: console_get_attr,
     read_link: |_| Err(SysError::NotSymlink),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: |_| {
         Ok(OpenedFile {
             file_ops: &CONSOLE_STDOUT_FILE_OPS,
@@ -233,6 +235,7 @@ static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::NotSupported),
     validate_seek: |_, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
+    poll: |_, _| todo!(),
 };
 
 static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
@@ -240,6 +243,7 @@ static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
     write: console_write,
     validate_seek: |_, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
+    poll: |_, _| todo!(),
 };
 
 static CONSOLE_STDIN_PATHREF: Lazy<PathRef> = Lazy::new(|| {

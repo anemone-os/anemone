@@ -43,6 +43,7 @@ pub fn frame_allocator_stats() -> allocator::FrameAllocatorStats {
 /// Allocates a contiguous range of physical pages.
 pub fn alloc_frames(npages: usize) -> Option<OwnedFolio> {
     assert_ne!(npages, 0, "Internal error: cannot allocate zero pages");
+
     FRAME_ALLOCATOR.alloc(npages)
 }
 

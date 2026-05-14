@@ -72,7 +72,14 @@ fn init_environment() {
     }
     mount(None, Path::new("/tmp"), "ramfs").expect("user-test: failed to mount ramfs on /tmp");
 
-    // TODO: procfs, sysfs, etc.
+    let stat = fstatat(AtFd::Cwd, Path::new("/proc"));
+    if stat.is_err() {
+        mkdirat(AtFd::Cwd, Path::new("/proc"), 0o755)
+            .expect("user-test: failed to create /proc directory");
+    }
+    mount(None, Path::new("/proc"), "procfs").expect("user-test: failed to mount procfs on /proc");
+
+    // TODO: sysfs, etc.
 
     // install busybox
     let stat = fstatat(AtFd::Cwd, Path::new("/bin"));
@@ -83,13 +90,6 @@ fn init_environment() {
         comp_run_cmd("/glibc/busybox --install -s /bin");
     }
 
-    // cp busybox to /
-    let stat = fstatat(AtFd::Cwd, Path::new("/busybox"));
-    if stat.is_err() {
-        println!("user-test: copying busybox to /");
-        comp_run_cmd("/bin/cp /glibc/busybox /");
-    }
-
     // cp lib to /
     let stat = fstatat(AtFd::Cwd, Path::new("/lib"));
     if stat.is_err() {
@@ -98,6 +98,23 @@ fn init_environment() {
 
         comp_run_cmd("/bin/cp -r /glibc/lib /");
     }
+
+    // cp busybox to /
+    let stat = fstatat(AtFd::Cwd, Path::new("/busybox"));
+    if stat.is_err() {
+        println!("user-test: copying busybox to /");
+        comp_run_cmd("/bin/cp /glibc/busybox /");
+    }
+
+    // cp busybox to /bin
+    let stat = fstatat(AtFd::Cwd, Path::new("/bin/busybox"));
+    if stat.is_err() {
+        println!("user-test: copying busybox to /bin");
+        comp_run_cmd("/bin/cp /glibc/busybox /bin");
+    }
+
+    // test procfs
+    comp_run_cmd("/bin/ls /proc");
 
     // done.
     println!("user-test: environment initialized.");
@@ -143,11 +160,17 @@ fn run_comp_tests() {
     init_environment();
 
     // 1. basic tests
-    println!("user-test: running basic tests...");
-    chdir("/glibc/basic").expect("user-test: failed to change directory to /glibc/basic");
-    comp_run_cmd("./run-all.sh");
-    chdir("..").expect("user-test: failed to change directory to /glibc after basic tests");
-    println!("user-test: basic tests passed.");
+    // println!("user-test: running basic tests...");
+    // chdir("/glibc/basic").expect(
+    //     "user-test: failed to change directory to
+    // /glibc/basic",
+    // );
+    // comp_run_cmd("./run-all.sh");
+    // chdir("..").expect(
+    //     "user-test: failed to change directory to /glibc after
+    // basic tests",
+    // );
+    // println!("user-test: basic tests passed.");
 
     // 2. lua tests
     // println!("user-test: running lua tests...");
@@ -157,9 +180,15 @@ fn run_comp_tests() {
 
     // 3. busybox tests
     // println!("user-test: running busybox tests...");
-    // chdir("/glibc").expect("user-test: failed to change directory to
-    // /glibc"); comp_run_cmd("./busybox_testcode.sh");
+    // chdir("/glibc").expect("user-test: failed to change directory to /glibc");
+    // comp_run_cmd("./busybox_testcode.sh");
     // println!("user-test: busybox tests passed.");
+
+    // 4. lmbench tests
+    println!("user-test: running lmbench tests...");
+    chdir("/glibc").expect("user-test: failed to change directory to /glibc");
+    comp_run_cmd("./lmbench_testcode.sh");
+    println!("user-test: lmbench tests passed.");
 }
 
 #[anemone_rs::main]

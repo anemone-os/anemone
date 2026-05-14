@@ -5,6 +5,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct LoadedBinaryMeta {
+    pub exe: PathRef,
     pub entry: VirtAddr,
     pub sp: VirtAddr,
 }
@@ -28,6 +29,11 @@ pub fn dispatch_execve(
             knoticeln!("execve: failed to resolve path '{}': {:?}", path, e);
             e
         })?;
+    kdebugln!(
+        "execve: resolved path '{}' to '{}'",
+        path,
+        resolved.to_pathbuf().display()
+    );
 
     let mut ctx = ExecCtx {
         usp,

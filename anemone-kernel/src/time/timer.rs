@@ -42,14 +42,17 @@ impl Ord for TimerEvent {
     }
 }
 
-static IRQ_EVENT_QUEUE: SpinLock<BinaryHeap<TimerEvent>> = SpinLock::new(BinaryHeap::new());
+#[percpu]
+static IRQ_EVENT_QUEUE: BinaryHeap<TimerEvent> = BinaryHeap::new();
+
 // TODO: threaded_event_queue
 
-/// Schedule a timer event to run in interrupt context after the given duration.
+/// Schedule a timer event to run in interrupt context on local cpu after the
+/// given duration.
 ///
 /// The callback will be run in interrupt context, so it should not do anything
 /// that may sleep or block.
-pub unsafe fn schedule_irq_timer_event(
+pub unsafe fn schedule_local_irq_timer_event(
     expire: Duration,
     callback: Box<dyn FnOnce() + Send + 'static>,
 ) {
@@ -58,7 +61,8 @@ pub unsafe fn schedule_irq_timer_event(
         expire_ticks,
         callback,
     };
-    IRQ_EVENT_QUEUE.lock_irqsave().push(event);
+
+    with_intr_disabled(|| IRQ_EVENT_QUEUE.with_mut(|queue| queue.push(event)))
 }
 
 // not a high-priority task. do this later.
@@ -70,12 +74,12 @@ pub fn schedule_threaded_timer_event(
 }
 
 pub fn on_timer_interrupt() {
+    debug_assert!(IntrArch::local_intr_disabled());
+
     // irq event handling
     {
         loop {
-            let events = {
-                let mut queue = IRQ_EVENT_QUEUE.lock_irqsave();
-
+            let events = IRQ_EVENT_QUEUE.with_mut(|queue| {
                 // use a statically allocated vector to avoid dynamic memory allocation in the
                 // interrupt handler. 8 is actually randomly chosen, which does not make much
                 // sense.
@@ -92,7 +96,7 @@ pub fn on_timer_interrupt() {
                 }
 
                 events
-            };
+            });
             if events.is_empty() {
                 break;
             }
@@ -101,5 +105,4 @@ pub fn on_timer_interrupt() {
             }
         }
     }
-    // TODO: threaded event handling.
 }

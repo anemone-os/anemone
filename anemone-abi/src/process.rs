@@ -60,6 +60,42 @@ pub mod linux {
         }
     }
 
+    pub mod resource {
+        use crate::time::linux::TimeVal;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[repr(C)]
+        pub struct RUsage {
+            pub ru_utime: TimeVal,
+            pub ru_stime: TimeVal,
+            pub ru_maxrss: u64,
+            pub ru_ixrss: u64,
+            pub ru_idrss: u64,
+            pub ru_isrss: u64,
+            pub ru_minflt: u64,
+            pub ru_majflt: u64,
+            pub ru_nswap: u64,
+            pub ru_inblock: u64,
+            pub ru_oublock: u64,
+            pub ru_msgsnd: u64,
+            pub ru_msgrcv: u64,
+            pub ru_nsignals: u64,
+            pub ru_nvcsw: u64,
+            pub ru_nivcsw: u64,
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[repr(C)]
+        pub struct RLimit {
+            pub rlim_cur: u64,
+            pub rlim_max: u64,
+        }
+
+        pub const RUSAGE_SELF: i32 = 0;
+        pub const RUSAGE_CHILDREN: i32 = -1;
+        pub const RUSAGE_THREAD: i32 = 1;
+    }
+
     pub mod clone {
         #![allow(unused)]
         // /// Signal sent to parent when child process changes state

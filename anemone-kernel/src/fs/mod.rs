@@ -7,6 +7,7 @@ mod dentry;
 mod file;
 mod filesystem;
 mod inode;
+mod iomux;
 mod mount;
 mod namei;
 mod path;
@@ -17,7 +18,9 @@ mod devfs;
 #[cfg(feature = "fs_ext4")]
 mod ext4;
 mod pipe;
-mod proc;
+
+pub mod proc;
+
 mod ramfs;
 
 pub mod api;
@@ -31,6 +34,7 @@ pub use self::{
         DeviceId, Ino, InoIsZero, InodeMeta, InodeMode, InodeOps, InodePerm, InodeRef, InodeStat,
         InodeType, OpenedFile,
     },
+    iomux::{PollEvent, PollRequest, PollWaiter},
     mount::{Mount, MountFlags, MountSource},
     namei::{
         ResolveFlags, resolve, resolve_from, resolve_from_with_root, resolve_parent,
@@ -87,13 +91,15 @@ mod namespace {
 
             let mnt = Arc::new(Mount::new(
                 root_dentry,
-                sb,
+                sb.clone(),
                 parent.as_ref(),
                 mp_dentry.as_ref(),
                 flags,
             ));
 
             self.mounts.push(mnt.clone());
+            sb.add_mount(&mnt);
+            drop(sb);
 
             if let Some(parent) = parent {
                 parent.add_child(&mnt);
@@ -395,7 +401,7 @@ mod vfs_ops {
     };
 
     mod primitives {
-        use crate::fs::namei::resolve_parent_from;
+        use crate::fs::{inode::RenameFlags, namei::resolve_parent_from};
 
         use super::*;
 
@@ -570,6 +576,75 @@ mod vfs_ops {
             // remove the dentry from the cache to prevent stale lookups. the child
             // may never have been cached, which is not an error.
             match parent.dentry().remove_child(&name) {
+                Ok(()) | Err(SysError::NotFound) => (),
+                Err(err) => return Err(err),
+            }
+
+            Ok(())
+        }
+
+        /// By POSIX convention, rename won't follow last symlink. instead, it
+        /// rename the symlink itself. So [PathResolution] is not used here.
+        ///
+        /// TODO: refine.
+        pub fn vfs_rename_at(
+            old_path: &PathRef,
+            new_dir: &PathRef,
+            new_name: &str,
+            flags: RenameFlags,
+        ) -> Result<(), SysError> {
+            // dentry modification must be done here to avoid stale dentries.
+
+            flags.validate()?;
+
+            if new_name.is_empty() || new_name.contains('/') || matches!(new_name, "." | "..") {
+                return Err(SysError::InvalidArgument);
+            }
+
+            if new_dir.inode().ty() != InodeType::Dir {
+                return Err(SysError::NotDir);
+            }
+
+            if !Arc::ptr_eq(old_path.mount(), new_dir.mount()) {
+                return Err(SysError::CrossDeviceLink);
+            }
+
+            let Some(old_parent) = old_path.dentry().parent() else {
+                return Err(SysError::Busy);
+            };
+
+            let old_name = old_path.dentry().name();
+
+            if old_name == new_name && Arc::ptr_eq(&old_parent, new_dir.dentry()) {
+                return Ok(());
+            }
+
+            if let Ok(existing) = new_dir.dentry().lookup_child(new_name) {
+                if new_dir.mount().child_at(&existing).is_some() {
+                    return Err(SysError::Busy);
+                }
+            }
+
+            if old_path.inode().ty() == InodeType::Dir {
+                let mut cur = Some(new_dir.dentry().clone());
+                while let Some(dentry) = cur {
+                    if Arc::ptr_eq(&dentry, old_path.dentry()) {
+                        return Err(SysError::InvalidArgument);
+                    }
+                    cur = dentry.parent();
+                }
+            }
+
+            old_parent
+                .inode()
+                .rename(&old_name, new_dir.inode(), new_name, flags)?;
+
+            match old_parent.remove_child(&old_name) {
+                Ok(()) | Err(SysError::NotFound) => (),
+                Err(err) => return Err(err),
+            }
+
+            match new_dir.dentry().remove_child(new_name) {
                 Ok(()) | Err(SysError::NotFound) => (),
                 Err(err) => return Err(err),
             }

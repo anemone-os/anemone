@@ -88,6 +88,7 @@ static ANONY_DIR_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::NotSupported),
     unlink: |_, _| Err(SysError::NotSupported),
     rmdir: |_, _| Err(SysError::NotSupported),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: |_| Err(SysError::NotSupported),
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: anony_get_attr,

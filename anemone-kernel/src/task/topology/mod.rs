@@ -42,7 +42,9 @@ struct TaskTopology {
 /// iteration.
 #[derive(Debug)]
 struct TaskTopologyInner {
+    /// this one for lookup.
     tasks: BTreeMap<Tid, TaskNode>,
+
     thread_groups: BTreeMap<Tid, Arc<ThreadGroup>>,
 }
 
@@ -299,6 +301,28 @@ pub fn for_each_task<F: FnMut(&Arc<Task>)>(mut f: F) {
 pub fn get_thread_group(tgid: &Tid) -> Option<Arc<ThreadGroup>> {
     let topology = TOPOLOGY.inner.read_irqsave();
     topology.thread_groups.get(tgid).cloned()
+}
+
+/// Iterate over all thread groups in the registry.
+///
+/// Internally, thread groups are stored in a [BTreeMap], so the iteration order
+/// is ascending order of TGID:
+/// - If `from` is provided, then the iteration starts from the first TGID that
+///   is greater than or equal to `from`.
+/// - If `from` is [`None`], then the iteration starts from the smallest TGID.
+///
+/// # Locks
+///
+/// [TOPOLOGY]
+pub fn for_each_thread_group_from<F: FnMut(&Arc<ThreadGroup>)>(mut f: F, from: Option<Tid>) {
+    let topology = TOPOLOGY.inner.read_irqsave();
+    let iter = match from {
+        Some(from) => topology.thread_groups.range(from..),
+        None => topology.thread_groups.range(..),
+    };
+    for (_, tg) in iter {
+        f(tg);
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

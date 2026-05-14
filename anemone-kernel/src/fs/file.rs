@@ -1,4 +1,8 @@
-use crate::{prelude::*, utils::any_opaque::AnyOpaque};
+use crate::{
+    fs::iomux::{PollEvent, PollRequest},
+    prelude::*,
+    utils::any_opaque::AnyOpaque,
+};
 
 /// VTable a file must implement to support file operations.
 #[derive(Debug)]
@@ -14,6 +18,17 @@ pub struct FileOps {
     /// the directory is already exhausted before any new entry is accepted.
     pub read_dir:
         fn(&File, pos: &mut usize, sink: &mut dyn DirSink) -> Result<ReadDirResult, SysError>,
+
+    /// Check if the file is ready for IO operations described by `request`.
+    ///
+    /// If `request.waiter` is provided, the file should arrange to notify the
+    /// waiter when it becomes ready for any of the interested operations.
+    ///
+    /// TODO: Migrate to intrusive linked list.
+    ///
+    /// TODO: **We haven't implemented waitable poll yet. For now use busy
+    /// polling.**
+    pub poll: for<'a> fn(&File, &PollRequest<'a>) -> Result<PollEvent, SysError>,
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +152,18 @@ impl File {
         Ok(read)
     }
 
+    /// Reading at specified offset without changing the file cursor.
+    pub fn read_at(&self, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+
+        let mut dummy_pos = pos;
+        let read = (self.ops.read)(self, &mut dummy_pos, buf)?;
+
+        Ok(read)
+    }
+
     pub fn read_exact(&self, mut buf: &mut [u8]) -> Result<(), SysError> {
         if buf.len() == 0 {
             return Ok(());
@@ -154,7 +181,6 @@ impl File {
         Ok(())
     }
 
-    #[track_caller]
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
@@ -163,6 +189,18 @@ impl File {
         let mut pos = self.pos.lock();
 
         let written = (self.ops.write)(self, &mut *pos, buf)?;
+
+        Ok(written)
+    }
+
+    /// Writing at specified offset without changing the file cursor.
+    pub fn write_at(&self, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+
+        let mut dummy_pos = pos;
+        let written = (self.ops.write)(self, &mut dummy_pos, buf)?;
 
         Ok(written)
     }
@@ -177,6 +215,9 @@ impl File {
             let written = (self.ops.write)(self, &mut *pos, buf)?;
             if written == 0 {
                 // TODO: EIO here is not that accurate.
+                knoticeln!(
+                    "write returned 0, but there's still data to write. treating it as an IO error"
+                );
                 return Err(SysError::IO);
             }
             buf = &buf[written..];
@@ -188,8 +229,8 @@ impl File {
     /// Different from [Self::seek] + [Self::write], this is an atomic
     /// operation.
     pub fn append(&self, buf: &[u8]) -> Result<usize, SysError> {
-        let sz = self.inode().get_attr()?.size as usize;
         let mut pos = self.pos.lock();
+        let sz = self.inode().get_attr()?.size as usize;
         *pos = sz;
         let written = (self.ops.write)(self, &mut *pos, buf)?;
         Ok(written)
@@ -204,6 +245,10 @@ impl File {
     pub fn read_dir(&self, sink: &mut dyn DirSink) -> Result<ReadDirResult, SysError> {
         let mut pos = self.pos.lock();
         (self.ops.read_dir)(self, &mut *pos, sink)
+    }
+
+    pub fn poll(&self, request: &PollRequest<'_>) -> Result<PollEvent, SysError> {
+        (self.ops.poll)(self, request)
     }
 
     pub fn get_attr(&self) -> Result<InodeStat, SysError> {

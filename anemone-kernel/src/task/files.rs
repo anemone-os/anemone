@@ -91,7 +91,14 @@ impl FileDesc {
         self.pfile.file.read(buf).map_err(|e| e.into())
     }
 
-    #[track_caller]
+    pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+        if !self.pfile.flags.contains(FileFlags::READ) {
+            return Err(SysError::PermissionDenied);
+        }
+        self.pfile.file.read_at(offset, buf).map_err(|e| e.into())
+    }
+
+    /// This applies to both write and append mode.
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         if !self.pfile.flags.contains(FileFlags::WRITE) {
             return Err(SysError::PermissionDenied);
@@ -104,6 +111,17 @@ impl FileDesc {
         }
     }
 
+    /// Only applies to write mode.
+    pub fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize, SysError> {
+        if !self.pfile.flags.contains(FileFlags::WRITE) {
+            return Err(SysError::PermissionDenied);
+        }
+        if self.pfile.flags.contains(FileFlags::APPEND) {
+            return Err(SysError::InvalidArgument);
+        }
+        self.pfile.file.write_at(offset, buf).map_err(|e| e.into())
+    }
+
     /// `whence` is Linux-specific. we handle that in syscall handler. it should
     /// not pollute our FileDesc API.
     pub fn seek(&self, offset: usize) -> Result<(), SysError> {
@@ -112,6 +130,10 @@ impl FileDesc {
 
     pub fn read_dir(&self, sink: &mut dyn DirSink) -> Result<ReadDirResult, SysError> {
         self.pfile.file.read_dir(sink).map_err(|e| e.into())
+    }
+
+    pub fn poll(&self, request: &PollRequest<'_>) -> Result<PollEvent, SysError> {
+        self.pfile.file.poll(request).map_err(|e| e.into())
     }
 }
 
@@ -123,6 +145,30 @@ bitflags! {
         const APPEND = 0b0100;
 
         // create, truncate are not persistant flags, they are only used when opening a file, so we don't need to store them in FileDesc.
+    }
+}
+
+impl FileFlags {
+    pub fn to_linux_open_flags(&self) -> u32 {
+        use anemone_abi::fs::linux::open::*;
+
+        let mut flags = 0;
+
+        // 1. O_RDONLY, O_WRONLY, O_RDWR
+        if self.contains(Self::READ) && self.contains(Self::WRITE) {
+            flags |= O_RDWR;
+        } else if self.contains(Self::READ) {
+            flags |= O_RDONLY;
+        } else if self.contains(Self::WRITE) {
+            flags |= O_WRONLY;
+        }
+
+        // 2. O_APPEND
+        if self.contains(Self::APPEND) {
+            flags |= O_APPEND;
+        }
+
+        flags
     }
 }
 

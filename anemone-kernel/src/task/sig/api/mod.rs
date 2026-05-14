@@ -6,6 +6,7 @@
 //! - https://www.man7.org/linux/man-pages/man2/rt_sigtimedwait.2.html
 //! - https://www.man7.org/linux/man-pages/man2/rt_sigprocmask.2.html
 
+pub mod kill;
 pub mod rt_sigaction;
 pub mod rt_sigpending;
 pub mod rt_sigprocmask;

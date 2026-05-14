@@ -34,6 +34,7 @@ fn load_binary(ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
         init_stack::InitStackCtor::new(ctx.usp, &meta, ctx.exec_fn, &ctx.argv, &ctx.envp).push()?;
 
     Ok(ExecResult::Loaded(LoadedBinaryMeta {
+        exe: file.path().clone(),
         entry: if let Some(interp) = meta.interp {
             interp.entry
         } else {

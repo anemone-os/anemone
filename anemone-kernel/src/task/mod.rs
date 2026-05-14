@@ -333,6 +333,7 @@ impl Task {
         cpu: Option<CpuId>,
     ) -> Result<(Task, PublishGuard), SysError> {
         let tid = alloc_tid().ok_or(SysError::OutOfMemory)?;
+        let tid_value = tid.get_typed().get();
         let tgid = tgid.unwrap_or(tid.get_typed());
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
@@ -347,7 +348,16 @@ impl Task {
             cpuid: if let Some(cpu) = cpu {
                 cpu
             } else {
-                pick_next_cpu()
+                let cpu = pick_next_cpu();
+
+                kdebugln!(
+                    "task {}:{}: no cpu specified, picked cpu {}",
+                    tid_value,
+                    name,
+                    cpu
+                );
+
+                cpu
             },
             sched_ctx: unsafe {
                 MonoFlow::new(TaskContext::from_kernel_fn(
