@@ -183,6 +183,8 @@ fn sys_wait4(
             // it, and the others will fail to find the child in topology. this is fine,
             // since they will just loop and wait again.
             if let Some(child) = tg.try_reap_child(tgid) {
+                fs::proc::try_unbind_thread_group(tgid);
+
                 let xcode = child
                     .exit_code()
                     .expect("wait4: reaped child has no exit code");

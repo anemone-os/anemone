@@ -73,6 +73,7 @@ pub const MAX_HEAP_PAGES: u64 = const {
 pub struct UserSpaceHandle {
     /// Root page number of the page table for this user space.
     table_ppn: PhysPageNum,
+    exe: PathRef,
     usp: Mutex<UserSpace>,
 }
 
@@ -115,10 +116,11 @@ struct Heap {
 }
 
 impl UserSpaceHandle {
-    pub fn new(usp: UserSpace) -> Self {
+    pub fn new(usp: UserSpace, exe: PathRef) -> Self {
         let table_ppn = usp.table.root_ppn();
         Self {
             table_ppn,
+            exe,
             usp: Mutex::new(usp),
         }
     }
@@ -131,6 +133,10 @@ impl UserSpaceHandle {
 
     pub fn root_ppn(&self) -> PhysPageNum {
         self.table_ppn
+    }
+
+    pub fn exe(&self) -> &PathRef {
+        &self.exe
     }
 
     /// Invoke a closure with mutable access to the inner [UserSpace].
@@ -161,7 +167,7 @@ impl UserSpaceHandle {
         let mut usp = self.usp.lock();
         let (new_usp, guard) = usp.fork()?;
         drop(usp);
-        Ok((UserSpaceHandle::new(new_usp), guard))
+        Ok((UserSpaceHandle::new(new_usp, self.exe.clone()), guard))
     }
 
     pub fn handle_page_fault(&self, info: &PageFaultInfo) -> Result<RemoteUspFenceGuard, SysError> {
@@ -367,7 +373,8 @@ impl UserSpace {
     /// committed when the stack grows.
     fn stack_accessible(&self, vaddr: VirtAddr) -> bool {
         let vpn = vaddr.page_down();
-        self.stack_vma().range().contains(vpn) && vpn >= self.stack.committed_bottom - 1
+        // 32 is randomly chosen. we should refine this later
+        self.stack_vma().range().contains(vpn) && vpn >= self.stack.committed_bottom - 32
     }
 
     /// Whether the given address falls in requested heap region.
@@ -575,6 +582,11 @@ impl UserSpace {
     /// pushing all data to the initial stack will lead to undefined behavior.
     pub unsafe fn mark_env_range(&mut self, start: VirtAddr, size: usize) {
         self.env_range.init((start, size));
+    }
+
+    /// Get the environment variable region for this address space.
+    pub fn env_range(&self) -> (VirtAddr, usize) {
+        self.env_range.get().clone()
     }
 
     // Mark the auxiliary vector region for this address space.

@@ -3,8 +3,7 @@
 //!
 //! Only anonymous pipes are supported for now.
 //!
-//! Since our current wait queue implementation is not that feasible, we use
-//! busy loop + yield first.
+//! TODO: turn to [Event] based implementation.
 
 use crate::{
     prelude::*,
@@ -38,6 +37,7 @@ static PIPE_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::NotDir),
     unlink: |_, _| Err(SysError::NotDir),
     rmdir: |_, _| Err(SysError::NotDir),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: |_| unreachable!(/* pipes have their own open logic */),
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: pipe_get_attr,
@@ -66,13 +66,23 @@ impl Pipe {
 
         let pipe = Arc::new(SpinLock::new(pipe));
 
-        (PipeRx { pipe: pipe.clone() }, PipeTx { pipe })
+        (
+            PipeRx {
+                pipe: pipe.clone(),
+                poll_waiters: SpinLock::new(Vec::new()),
+            },
+            PipeTx {
+                pipe,
+                poll_waiters: SpinLock::new(Vec::new()),
+            },
+        )
     }
 }
 
 #[derive(Opaque)]
 struct PipeRx {
     pipe: Arc<SpinLock<Pipe>>,
+    poll_waiters: SpinLock<Vec<Weak<PollWaiter>>>,
 }
 
 impl Drop for PipeRx {
@@ -88,6 +98,7 @@ impl Drop for PipeRx {
 #[derive(Opaque)]
 struct PipeTx {
     pipe: Arc<SpinLock<Pipe>>,
+    poll_waiters: SpinLock<Vec<Weak<PollWaiter>>>,
 }
 
 impl Drop for PipeTx {
@@ -137,6 +148,30 @@ fn pipe_rx_read(file: &File, _pos: &mut usize, buf: &mut [u8]) -> Result<usize, 
     }
 }
 
+fn pipe_rx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollEvent, SysError> {
+    let rx = file
+        .prv()
+        .cast::<PipeRx>()
+        .expect("internal error: pipe rx file without correct private data");
+
+    let pipe = rx.pipe.lock();
+    let mut rx_poll_waiters = rx.poll_waiters.lock();
+
+    let mut revents = PollEvent::empty();
+
+    if request.interests().contains(PollEvent::READABLE) {
+        if !pipe.buf.is_empty() || pipe.tx_cnt == 0 {
+            revents |= PollEvent::READABLE;
+        }
+    }
+
+    if pipe.tx_cnt == 0 {
+        revents |= PollEvent::HANG_UP;
+    }
+
+    Ok(revents)
+}
+
 fn pipe_tx_write(file: &File, _pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
     let tx = file
         .prv()
@@ -148,6 +183,7 @@ fn pipe_tx_write(file: &File, _pos: &mut usize, buf: &[u8]) -> Result<usize, Sys
     if pipe.rx_cnt == 0 {
         // no rx alive.
         // TODO: send a signal here.
+
         Err(SysError::BrokenPipe)
     } else {
         if pipe.buf.available() <= buf.len() {
@@ -180,11 +216,36 @@ fn pipe_tx_write(file: &File, _pos: &mut usize, buf: &[u8]) -> Result<usize, Sys
     }
 }
 
+fn pipe_tx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollEvent, SysError> {
+    let tx = file
+        .prv()
+        .cast::<PipeTx>()
+        .expect("internal error: pipe tx file without correct private data");
+
+    let pipe = tx.pipe.lock();
+    let mut tx_poll_waiters = tx.poll_waiters.lock();
+
+    let mut revents = PollEvent::empty();
+
+    if request.interests().contains(PollEvent::WRITABLE) {
+        if !pipe.buf.is_full() {
+            revents |= PollEvent::WRITABLE;
+        }
+    }
+
+    if pipe.rx_cnt == 0 {
+        revents |= PollEvent::ERROR;
+    }
+
+    Ok(revents)
+}
+
 static PIPE_RX_FILE_OPS: FileOps = FileOps {
     read: pipe_rx_read,
     write: |_, _, _| Err(SysError::NotSupported),
     validate_seek: |_, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
+    poll: pipe_rx_poll,
 };
 
 static PIPE_TX_FILE_OPS: FileOps = FileOps {
@@ -192,6 +253,7 @@ static PIPE_TX_FILE_OPS: FileOps = FileOps {
     write: pipe_tx_write,
     validate_seek: |_, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
+    poll: pipe_tx_poll,
 };
 
 pub struct OpenedPipe {

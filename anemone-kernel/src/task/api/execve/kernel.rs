@@ -21,7 +21,7 @@ pub fn kernel_execve(
     let mut usp = UserSpace::new()?;
     match dispatch_execve(&mut usp, path.as_ref(), argv, envp) {
         Ok(meta) => {
-            let usp = Arc::new(UserSpaceHandle::new(usp));
+            let usp = Arc::new(UserSpaceHandle::new(usp, meta.exe));
             unsafe {
                 task.dethread();
 

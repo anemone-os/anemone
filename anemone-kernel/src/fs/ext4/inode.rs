@@ -2,9 +2,12 @@ use anemone_abi::errno::ENOENT;
 use lwext4_rust::InodeType as LwExt4InodeType;
 
 use crate::{
-    fs::ext4::{
-        ext4_ino, ext4_sb, file::EXT4_SYMLINK_FILE_OPS, map_ext4_error, map_lwext4_inode_type,
-        map_vfs_inode_type,
+    fs::{
+        ext4::{
+            ext4_ino, ext4_sb, file::EXT4_SYMLINK_FILE_OPS, map_ext4_error, map_lwext4_inode_type,
+            map_vfs_inode_type,
+        },
+        inode::RenameFlags,
     },
     prelude::*,
     utils::any_opaque::NilOpaque,
@@ -237,6 +240,110 @@ fn ext4_rmdir(dir: &InodeRef, name: &str) -> Result<(), SysError> {
     Ok(())
 }
 
+fn ext4_rename(
+    old_dir: &InodeRef,
+    old_name: &str,
+    new_dir: &InodeRef,
+    new_name: &str,
+    flags: RenameFlags,
+) -> Result<(), SysError> {
+    enum RenameOutcome {
+        NoOp,
+        Renamed {
+            src_ty: InodeType,
+            overwritten: Option<(Ino, InodeType)>,
+        },
+    }
+
+    if old_dir == new_dir && old_name == new_name {
+        return Ok(());
+    }
+
+    let sb = old_dir.sb();
+    if !Arc::ptr_eq(&sb, &new_dir.sb()) {
+        return Err(SysError::CrossDeviceLink);
+    }
+
+    let outcome = ext4_sb(&sb).write_tx(|| {
+        let (src_ino, src_ty) = ext4_lookup_child(old_dir, old_name)?;
+
+        let overwritten = match ext4_lookup_child(new_dir, new_name) {
+            Ok((ino, ty)) => Some((ino, ty)),
+            Err(SysError::NotFound) => None,
+            Err(err) => return Err(err),
+        };
+
+        if overwritten.is_some() && flags.contains(RenameFlags::NO_REPLACE) {
+            return Err(SysError::AlreadyExists);
+        }
+
+        if let Some((dst_ino, dst_ty)) = overwritten {
+            if dst_ino == src_ino {
+                return Ok(RenameOutcome::NoOp);
+            }
+
+            match (src_ty, dst_ty) {
+                (InodeType::Dir, ty) if ty != InodeType::Dir => {
+                    return Err(SysError::NotDir);
+                },
+                (ty, InodeType::Dir) if ty != InodeType::Dir => {
+                    return Err(SysError::IsDir);
+                },
+                _ => {},
+            }
+        }
+
+        ext4_sb(&sb).with_fs(|fs| {
+            fs.rename(
+                old_dir.ino().get() as u32,
+                old_name,
+                new_dir.ino().get() as u32,
+                new_name,
+            )
+            .map_err(map_ext4_error)
+        })?;
+
+        Ok(RenameOutcome::Renamed {
+            src_ty,
+            overwritten,
+        })
+    })?;
+
+    let RenameOutcome::Renamed {
+        src_ty,
+        overwritten,
+    } = outcome
+    else {
+        return Ok(());
+    };
+
+    if let Some((dst_ino, dst_ty)) = overwritten {
+        if dst_ty == InodeType::Dir {
+            new_dir.inode().dec_nlink();
+        }
+
+        if let Some(inode) = sb.try_iget(dst_ino) {
+            if dst_ty == InodeType::Dir {
+                inode.inode().set_nlink(0);
+                sb.unindex_inode(inode.inode());
+            } else {
+                inode.inode().dec_nlink();
+                if inode.nlink() == 0 {
+                    sb.unindex_inode(inode.inode());
+                }
+            }
+            drop(inode);
+        }
+    }
+
+    if src_ty == InodeType::Dir && old_dir != new_dir {
+        old_dir.inode().dec_nlink();
+        new_dir.inode().inc_nlink();
+    }
+
+    Ok(())
+}
+
 fn ext4_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {
     let sb = inode.sb();
 
@@ -265,6 +372,7 @@ pub(super) static EXT4_DIR_INODE_OPS: InodeOps = InodeOps {
     unlink: ext4_unlink,
     rmdir: ext4_rmdir,
     open: ext4_open,
+    rename: ext4_rename,
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: ext4_get_attr,
 };
@@ -277,6 +385,7 @@ pub(super) static EXT4_REG_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::NotDir),
     unlink: |_, _| Err(SysError::NotDir),
     rmdir: |_, _| Err(SysError::NotDir),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: ext4_open,
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: ext4_get_attr,
@@ -290,6 +399,7 @@ pub(super) static EXT4_DEV_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::NotDir),
     unlink: |_, _| Err(SysError::NotDir),
     rmdir: |_, _| Err(SysError::NotDir),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: |_| Err(SysError::NotSupported),
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: ext4_get_attr,
@@ -303,6 +413,7 @@ pub(super) static EXT4_SYMLINK_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::NotDir),
     unlink: |_, _| Err(SysError::NotDir),
     rmdir: |_, _| Err(SysError::NotDir),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: |_| Err(SysError::NotSupported),
     read_link: ext4_read_link,
     get_attr: ext4_get_attr,

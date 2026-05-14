@@ -1,6 +1,6 @@
 //! nanosleep syscall implementation.
 //!
-//! TODO: get this working correctly when signal is implemented.
+//! TODO: nanosleep should be interruptible.
 //!
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/nanosleep.2.html
@@ -29,7 +29,8 @@ fn sys_nanosleep(
     #[validate_with(user_addr.nullable())] _rem: Option<VirtAddr>,
     // _rem: Option<UserReadPtr<TimeSpec>>,
 ) -> Result<u64, SysError> {
-    let usp = get_current_task().clone_uspace_handle();
+    let task = get_current_task();
+    let usp = task.clone_uspace_handle();
     let mut guard = usp.lock();
     let duration = UserReadPtr::<TimeSpec>::try_new(duration, &mut guard)?.read();
 
@@ -38,22 +39,23 @@ fn sys_nanosleep(
         return Err(SysError::InvalidArgument);
     }
 
-    // we don't have a strong enough wait queue.
-    // currently just use a simple loop + yield instead.
-    let duration2wait = Duration::new(
+    let mut rem = Duration::new(
         duration.tv_sec as u64,
         // this will not overflow since we checked above that tv_nsec is less than 1e9, which fits
         // in u32.
         duration.tv_nsec as u32,
     );
 
-    let now = uptime();
-    loop {
-        let cur = uptime();
-        if cur >= now + duration2wait {
-            break;
-        }
-        yield_now();
+    while rem > Duration::ZERO {
+        task.update_status_with(|_prev| {
+            (
+                TaskStatus::Waiting {
+                    interruptible: false,
+                },
+                (),
+            )
+        });
+        rem = schedule_with_timeout(Some(rem));
     }
 
     Ok(0)

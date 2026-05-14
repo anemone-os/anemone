@@ -383,6 +383,21 @@ impl Task {
 
         None
     }
+
+    pub fn sig_mask(&self) -> SigSet {
+        self.sig_mask.lock().clone()
+    }
+
+    /// Caller is responsible for ensuring the validity of `new_mask`, i.e. it
+    /// should not have SIGKILL and SIGSTOP set.
+    pub fn set_sig_mask(&self, new_mask: SigSet) {
+        debug_assert!(
+            !new_mask.get(SigNo::SIGKILL) && !new_mask.get(SigNo::SIGSTOP),
+            "SIGKILL and SIGSTOP cannot be masked"
+        );
+        let mut sig_mask = self.sig_mask.lock();
+        *sig_mask = new_mask;
+    }
 }
 
 impl ThreadGroup {

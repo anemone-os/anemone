@@ -92,6 +92,11 @@ fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
             });
             Ok(0)
         },
+        FcntlCmd::GetFl => {
+            let file = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
+            let flags = file.file_flags().to_linux_open_flags();
+            Ok(flags as u64)
+        },
         _ => {
             knoticeln!("[NYI] fcntl command {:?} is not supported yet", cmd);
             Err(SysError::NotYetImplemented)

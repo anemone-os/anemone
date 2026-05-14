@@ -1,7 +1,10 @@
 use core::str;
 
 use crate::{
-    fs::ext4::{ext4_ino, ext4_reg, ext4_sb, map_ext4_error, map_lwext4_inode_type},
+    fs::{
+        ext4::{ext4_ino, ext4_reg, ext4_sb, map_ext4_error, map_lwext4_inode_type},
+        iomux::PollEvent,
+    },
     prelude::{
         vmo::{ResolvedFrame, VmObject},
         *,
@@ -414,6 +417,7 @@ pub(super) static EXT4_REG_FILE_OPS: FileOps = FileOps {
     write: ext4_write,
     validate_seek: ext4_validate_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
+    poll: |_, _| Ok(PollEvent::READABLE | PollEvent::WRITABLE),
 };
 
 pub(super) static EXT4_DIR_FILE_OPS: FileOps = FileOps {
@@ -421,6 +425,7 @@ pub(super) static EXT4_DIR_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::IsDir),
     validate_seek: |_, _| Err(SysError::IsDir),
     read_dir: ext4_read_dir,
+    poll: |_, _| Ok(PollEvent::READABLE),
 };
 
 pub(super) static EXT4_SYMLINK_FILE_OPS: FileOps = FileOps {
@@ -428,4 +433,5 @@ pub(super) static EXT4_SYMLINK_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::NotSupported),
     validate_seek: |_, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
+    poll: |_, _| Ok(PollEvent::READABLE),
 };

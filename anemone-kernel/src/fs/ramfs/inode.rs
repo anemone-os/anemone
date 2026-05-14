@@ -344,6 +344,7 @@ pub(super) static RAMFS_DIR_INODE_OPS: InodeOps = InodeOps {
     link: ramfs_link,
     unlink: ramfs_unlink,
     rmdir: ramfs_rmdir,
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: ramfs_get_attr,
 };
@@ -357,6 +358,7 @@ pub(super) static RAMFS_REG_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::NotDir),
     unlink: |_, _| Err(SysError::NotDir),
     rmdir: |_, _| Err(SysError::NotDir),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: ramfs_get_attr,
 };
@@ -370,6 +372,7 @@ pub(super) static RAMFS_SYMLINK_INODE_OPS: InodeOps = InodeOps {
     link: |_, _, _| Err(SysError::NotDir),
     unlink: |_, _| Err(SysError::NotDir),
     rmdir: |_, _| Err(SysError::NotDir),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
     read_link: ramfs_read_link,
     get_attr: ramfs_get_attr,
 };

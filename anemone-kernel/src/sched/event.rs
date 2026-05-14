@@ -185,6 +185,63 @@ impl Event {
 
         self.clean_listener(&listener, exclusive);
     }
+
+    /// Block listening with timeout.
+    ///
+    /// Return:
+    /// - [None] if condition is satisfied.
+    /// - [TimeoutListenException::Timeout] if timeout expires.
+    /// - [TimeoutListenException::Signaled] if woken up by signal.
+    pub fn listen_with_timeout<P>(
+        &self,
+        exclusive: bool,
+        prediction: P,
+        mut timeout: Duration,
+    ) -> Option<TimeoutListenException>
+    where
+        P: Fn() -> bool,
+    {
+        let task = get_current_task();
+        let listener = Listener { task: task.clone() };
+
+        let mut guard = PreemptGuard::new();
+
+        loop {
+            self.prepare_listener(&task, exclusive, true);
+
+            if prediction() {
+                self.clean_listener(&listener, exclusive);
+                return None;
+            }
+
+            if task.has_pending_signal() {
+                kdebugln!(
+                    "task {} has pending signal, breaking the wait loop",
+                    task.tid()
+                );
+                self.clean_listener(&listener, exclusive);
+                return Some(TimeoutListenException::Signaled);
+            }
+
+            if timeout == Duration::ZERO {
+                kdebugln!("listen_with_timeout: timeout is zero, returning immediately");
+                self.clean_listener(&listener, exclusive);
+                return Some(TimeoutListenException::Timeout);
+            }
+
+            unsafe {
+                drop(guard);
+                timeout = schedule_with_timeout(Some(timeout));
+                guard = PreemptGuard::new();
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum TimeoutListenException {
+    Timeout,
+    Signaled,
 }
 
 impl Event {
