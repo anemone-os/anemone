@@ -151,7 +151,7 @@ fn sys_ppoll(
     loop {
         for poll_fd in poll_fds.iter_mut() {
             if let Some(fd) = poll_fd.fd {
-                let Some(fd) = task.get_fd(fd) else {
+                let Ok(fd) = task.get_fd(fd) else {
                     poll_fd.revents = LinuxPollEvent::NVAL;
                     nready += 1;
                     continue;

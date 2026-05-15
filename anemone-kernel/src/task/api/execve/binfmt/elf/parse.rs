@@ -504,7 +504,10 @@ pub unsafe fn load_image(file: &File, usp: &mut UserSpace) -> Result<ElfMeta, Sy
     let entry = VirtAddr::new(elf_hdr.e_entry + load_bias);
 
     if let Some(interp_path) = dyn_interp {
-        let interp = load_interpreter(&vfs_open(&interp_path)?, usp, interp_bias)?;
+        let interp_path =
+            get_current_task().lookup_path(Path::new(&interp_path), ResolveFlags::empty())?;
+        kdebugln!("loading interpreter from path: {}", interp_path);
+        let interp = load_interpreter(&interp_path.open()?, usp, interp_bias)?;
 
         kdebugln!(
             "ELF loaded: entry = {:#x}, interpreter = {} at {:#x} (base {:#x})",

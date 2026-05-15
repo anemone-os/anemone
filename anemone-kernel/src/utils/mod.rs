@@ -9,6 +9,7 @@ pub mod writer;
 #[macro_use]
 pub mod as_container;
 pub mod any_opaque;
+pub mod bitmap;
 pub mod byte_writer;
 pub mod cacheline;
 pub mod data;

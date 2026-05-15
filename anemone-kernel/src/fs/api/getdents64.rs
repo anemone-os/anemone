@@ -127,7 +127,7 @@ fn sys_getdents64(
         let task = get_current_task();
         let usp = task.clone_uspace_handle();
 
-        let fd = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
+        let fd = task.get_fd(fd)?;
 
         (usp, fd)
     };

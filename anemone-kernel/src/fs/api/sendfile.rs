@@ -27,8 +27,8 @@ fn sys_sendfile(
 
     let task = get_current_task();
 
-    let out_fd = task.get_fd(out_fd).ok_or(SysError::BadFileDescriptor)?;
-    let in_fd = task.get_fd(in_fd).ok_or(SysError::BadFileDescriptor)?;
+    let out_fd = task.get_fd(out_fd)?;
+    let in_fd = task.get_fd(in_fd)?;
 
     if !in_fd.file_flags().contains(FileFlags::READ) {
         return Err(SysError::BadFileDescriptor);
