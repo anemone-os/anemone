@@ -54,16 +54,11 @@ fn sys_pipe2(
 
     let OpenedPipe { rx, tx } = create_anonymous_pipe()?;
 
-    let rx = task
-        .open_fd(rx, FileFlags::READ, fd_flags)
-        .ok_or(SysError::NoMoreFd)?;
-    let tx = task
-        .open_fd(tx, FileFlags::WRITE, fd_flags)
-        .ok_or(SysError::NoMoreFd)
-        .map_err(|e| {
-            task.close_fd(rx);
-            e
-        })?;
+    let rx = task.open_fd(rx, FileFlags::READ, fd_flags)?;
+    let tx = task.open_fd(tx, FileFlags::WRITE, fd_flags).map_err(|e| {
+        task.close_fd(rx);
+        e
+    })?;
 
     let usp = task.clone_uspace_handle();
     let mut guard = usp.lock();

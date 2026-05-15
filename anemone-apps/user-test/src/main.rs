@@ -160,17 +160,10 @@ fn run_comp_tests() {
     init_environment();
 
     // 1. basic tests
-    // println!("user-test: running basic tests...");
-    // chdir("/glibc/basic").expect(
-    //     "user-test: failed to change directory to
-    // /glibc/basic",
-    // );
-    // comp_run_cmd("./run-all.sh");
-    // chdir("..").expect(
-    //     "user-test: failed to change directory to /glibc after
-    // basic tests",
-    // );
-    // println!("user-test: basic tests passed.");
+    println!("user-test: running basic tests...");
+    chdir("/glibc").expect("user-test: failed to change directory to /glibc");
+    comp_run_cmd("./basic_testcode.sh");
+    println!("user-test: basic tests passed.");
 
     // 2. lua tests
     // println!("user-test: running lua tests...");
@@ -180,15 +173,27 @@ fn run_comp_tests() {
 
     // 3. busybox tests
     // println!("user-test: running busybox tests...");
-    // chdir("/glibc").expect("user-test: failed to change directory to /glibc");
-    // comp_run_cmd("./busybox_testcode.sh");
+    // chdir("/glibc").expect("user-test: failed to change directory to
+    // /glibc"); comp_run_cmd("./busybox_testcode.sh");
     // println!("user-test: busybox tests passed.");
 
-    // 4. lmbench tests
-    println!("user-test: running lmbench tests...");
-    chdir("/glibc").expect("user-test: failed to change directory to /glibc");
-    comp_run_cmd("./lmbench_testcode.sh");
-    println!("user-test: lmbench tests passed.");
+    // 4. static-linked libc tests
+    // println!("user-test: running static-linked libc tests...");
+    // chdir("/glibc").expect("user-test: failed to change directory to
+    // /glibc"); comp_run_cmd("./run-static.sh");
+    // println!("user-test: static-linked libc tests passed.");
+
+    // 5. dynamic-linked libc tests
+    // println!("user-test: running dynamic-linked libc tests...");
+    // chdir("/glibc").expect("user-test: failed to change directory to
+    // /glibc"); comp_run_cmd("./run-dynamic.sh");
+    // println!("user-test: dynamic-linked libc tests passed.");
+
+    // 6. lmbench tests
+    // println!("user-test: running lmbench tests...");
+    // chdir("/glibc").expect("user-test: failed to change directory to
+    // /glibc"); comp_run_cmd("./lmbench_testcode.sh");
+    // println!("user-test: lmbench tests passed.");
 }
 
 #[anemone_rs::main]

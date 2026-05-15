@@ -9,6 +9,9 @@ pub trait Clock: Sync {
     /// The resolution of the clock in nanoseconds.
     ///
     /// 1 nanosecond resolution as a default value.
+    ///
+    /// TODO: when we have an rtc device subsystem, remove this default
+    /// placeholder.
     fn resolution_ns(&self) -> u64 {
         1
     }

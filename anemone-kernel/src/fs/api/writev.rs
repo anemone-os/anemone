@@ -33,7 +33,7 @@ fn sys_writev(
 
     let (file, uspace) = {
         let task = get_current_task();
-        let file = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
+        let file = task.get_fd(fd)?;
         let uspace = task.clone_uspace_handle();
 
         (file, uspace)

@@ -121,6 +121,7 @@ pub mod linux {
 
     pub const SYS_UNAME: u64 = 160;
 
+    pub const SYS_GETRLIMIT: u64 = 163;
     pub const SYS_GETRUSAGE: u64 = 165;
 
     pub const SYS_GETTIMEOFDAY: u64 = 169;
@@ -143,6 +144,8 @@ pub mod linux {
     pub const SYS_MADVISE: u64 = 233;
 
     pub const SYS_WAIT4: u64 = 260;
+
+    pub const SYS_PRLIMIT64: u64 = 261;
 
     pub const SYS_RENAMEAT2: u64 = 276;
 

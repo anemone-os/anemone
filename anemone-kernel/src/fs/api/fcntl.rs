@@ -62,20 +62,16 @@ fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
     match cmd {
         FcntlCmd::Dup => {
             let min_fd = Fd::try_from_syscall_arg(arg)?;
-            let new_fd = task
-                .dup_ge_than(fd, min_fd, false)
-                .ok_or(SysError::BadFileDescriptor)?;
+            let new_fd = task.dup_ge_than(fd, min_fd, false)?;
             Ok(new_fd.raw() as u64)
         },
         FcntlCmd::DupCloexec => {
             let min_fd = Fd::try_from_syscall_arg(arg)?;
-            let new_fd = task
-                .dup_ge_than(fd, min_fd, true)
-                .ok_or(SysError::BadFileDescriptor)?;
+            let new_fd = task.dup_ge_than(fd, min_fd, true)?;
             Ok(new_fd.raw() as u64)
         },
         FcntlCmd::GetFd => {
-            let file = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
+            let file = task.get_fd(fd)?;
             if file.fd_flags().contains(FdFlags::CLOSE_ON_EXEC) {
                 Ok(1)
             } else {
@@ -83,7 +79,7 @@ fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
             }
         },
         FcntlCmd::SetFd => {
-            let file = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
+            let file = task.get_fd(fd)?;
             let close_on_exec = arg != 0;
             file.set_fd_flags(if close_on_exec {
                 FdFlags::CLOSE_ON_EXEC
@@ -93,7 +89,7 @@ fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
             Ok(0)
         },
         FcntlCmd::GetFl => {
-            let file = task.get_fd(fd).ok_or(SysError::BadFileDescriptor)?;
+            let file = task.get_fd(fd)?;
             let flags = file.file_flags().to_linux_open_flags();
             Ok(flags as u64)
         },

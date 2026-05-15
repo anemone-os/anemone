@@ -69,12 +69,10 @@ fn sys_openat(
         file.seek(file.get_attr()?.size as usize)?;
     }
 
-    let fd = task
-        .open_fd(
-            file,
-            FileFlags::from_linux_open_flags(flags),
-            FdFlags::from_linux_open_flags(flags),
-        )
-        .ok_or(SysError::NoMoreFd)?;
+    let fd = task.open_fd(
+        file,
+        FileFlags::from_linux_open_flags(flags),
+        FdFlags::from_linux_open_flags(flags),
+    )?;
     Ok(fd.raw() as u64)
 }

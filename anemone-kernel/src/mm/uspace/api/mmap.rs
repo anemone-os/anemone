@@ -82,9 +82,7 @@ fn sys_mmap(
 
         let poffset = offset as usize >> PagingArch::PAGE_SIZE_BITS;
         let fd = Fd::new(raw_fd as u32).ok_or(SysError::BadFileDescriptor)?;
-        let file = get_current_task()
-            .get_fd(fd)
-            .ok_or(SysError::BadFileDescriptor)?;
+        let file = get_current_task().get_fd(fd)?;
         let supported_prot = {
             let mut prot = Protection::empty();
             let file_flags = file.file_flags();

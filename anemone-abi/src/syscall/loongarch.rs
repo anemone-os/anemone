@@ -144,6 +144,8 @@ pub mod linux {
 
     pub const SYS_WAIT4: u64 = 260;
 
+    pub const SYS_PRLIMIT64: u64 = 261;
+
     pub const SYS_RENAMEAT2: u64 = 276;
 
     pub const SYS_GETRANDOM: u64 = 278;
