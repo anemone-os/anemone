@@ -235,7 +235,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                 .expect("task topology: thread group not found when publishing task");
             if !tg.status().can_join() {
                 knoticeln!(
-                    "task topology: thread group {} is not in a state that can accept new members when publishing task {}",
+                    "task topology: thread group {} is not in a state that can accept new members when publishing {}",
                     tg.tgid(),
                     task.tid()
                 );

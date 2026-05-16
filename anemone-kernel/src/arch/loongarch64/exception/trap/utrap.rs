@@ -4,9 +4,12 @@ use la_insc::reg::{
 };
 
 use crate::{
-    arch::loongarch64::exception::{
-        intr::handle_intr,
-        trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
+    arch::loongarch64::{
+        exception::{
+            intr::handle_intr,
+            trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
+        },
+        fpu::{init_fpu_for_current_task, set_fpu_enable},
     },
     prelude::{fault::handle_user_page_fault, *},
     sched::current_task_id,
@@ -177,6 +180,9 @@ core::arch::global_asm!(
 unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
     debug_assert!(IntrArch::local_intr_disabled());
 
+    /// Fpu are disabled in kernel mode
+    set_fpu_enable(false);
+
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
@@ -287,6 +293,16 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                         },
                     ));
                 },
+                LA64Exception::FloatingPointDisabled => {
+                    debug_assert!(
+                        !get_current_task().fpu_used(),
+                        "floating point disabled exception should only happen once for each task, because we set fpu_used to true after the first time handling this exception."
+                    );
+                    unsafe {
+                        init_fpu_for_current_task();
+                        kinfoln!("({}) enabled fpu for {}", cur_cpu_id(), current_task_id());
+                    }
+                },
                 _ => {
                     kerrln!(
                         "({}) user {} aborted with unhandled exception: {:?}, pc: {:#x}, badv: {:#x}\n\ttask return value not implemented yet",
@@ -318,9 +334,16 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         // cpu usage tracking relies on interrupt being disabled.
     }
 
+    set_fpu_enable(get_current_task().fpu_used());
+
     get_current_task().on_prv_change(Privilege::User);
 }
 unsafe extern "C" {
     unsafe fn __utrap_entry() -> !;
-    pub unsafe fn __utrap_return_to_task(trapframe: *const LA64TrapFrame) -> !;
+    unsafe fn __utrap_return_to_task(trapframe: *const LA64TrapFrame) -> !;
+}
+
+pub unsafe fn utrap_return_to_task(trapframe: *const LA64TrapFrame) -> ! {
+    set_fpu_enable(get_current_task().fpu_used());
+    unsafe { __utrap_return_to_task(trapframe) }
 }

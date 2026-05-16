@@ -113,7 +113,11 @@ fn init_environment() {
         comp_run_cmd("/bin/cp /glibc/busybox /bin");
     }
 
+    println!("doing float test...");
+    comp_run_cmd("/bin/float-test");
+
     // test procfs
+    println!("testing procfs...");
     comp_run_cmd("/bin/ls /proc");
 
     // done.

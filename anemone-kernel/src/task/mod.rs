@@ -351,7 +351,7 @@ impl Task {
                 let cpu = pick_next_cpu();
 
                 kdebugln!(
-                    "task {}:{}: no cpu specified, picked cpu {}",
+                    "{}:{}: no cpu specified, picked cpu {}",
                     tid_value,
                     name,
                     cpu
@@ -588,7 +588,7 @@ impl Task {
         let mut exit_code = self.exit_code.lock();
         if let Some(old) = *exit_code {
             panic!(
-                "task {}: exit code is already set to {:?}, cannot set to {:?}",
+                "{}: exit code is already set to {:?}, cannot set to {:?}",
                 self.tid(),
                 old,
                 code
@@ -612,6 +612,7 @@ impl Task {
         name: Box<str>,
         uspace: Arc<UserSpaceHandle>,
         flags: TaskFlags,
+        fpu_used: bool,
     ) {
         // NOTE THE LOCK ORDERING
         let mut usp_ptr = self.usp.write();
@@ -620,6 +621,7 @@ impl Task {
         *usp_ptr = Some(uspace);
         *flags_ptr = flags;
         *name_ptr = name;
+        self.fpu_used.store(fpu_used, Ordering::Release);
     }
 
     /// Set `tid_ptr` as the clear-child-tid target pointer.
@@ -636,8 +638,8 @@ impl Task {
         self.fpu_used.load(Ordering::Acquire)
     }
 
-    pub fn set_fpu_used(&self, used: bool) {
-        self.fpu_used.store(used, Ordering::Release);
+    pub fn set_fpu_used(&self) {
+        self.fpu_used.store(true, Ordering::Release);
     }
 }
 

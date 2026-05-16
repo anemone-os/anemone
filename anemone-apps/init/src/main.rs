@@ -32,7 +32,11 @@ pub fn main() -> Result<(), Errno> {
         println!("platform: {:#x?}", platform());
         println!("base platform: {:#x?}", base_platform());
     }
-
+    run("/bin/float-test", &["user-test"], &[])?;
+    run("/bin/user-test", &["user-test"], &[])?;
+    Ok(())
+}
+pub fn run(app: &str, argv: &[&str], envp: &[&str]) -> Result<(), Errno> {
     let mut tidc = 0;
     match clone(
         CloneFlags::CHILD_SETTID,
@@ -73,8 +77,7 @@ pub fn main() -> Result<(), Errno> {
         },
         None => {
             // child
-            execve("/bin/user-test", &["user-test"], &[])
-                .expect("init: failed to execve user-test");
+            execve(app, argv, envp).expect("init: failed to execve user-test");
             unreachable!();
         },
     }

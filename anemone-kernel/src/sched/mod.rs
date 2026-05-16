@@ -97,7 +97,7 @@ mod kore {
             },
             TaskStatus::Waiting { interruptible } => {
                 knoticeln!(
-                    "task {} is waiting (interruptible: {}), not enqueuing it to run queue",
+                    "{} is waiting (interruptible: {}), not enqueuing it to run queue",
                     current_task_id(),
                     interruptible,
                 );
@@ -105,7 +105,7 @@ mod kore {
             },
             TaskStatus::Zombie => {
                 knoticeln!(
-                    "task {} is zombie, not enqueuing it to run queue",
+                    "{} is zombie, not enqueuing it to run queue",
                     current_task_id(),
                 );
                 drop(curr);
@@ -150,7 +150,7 @@ mod kore {
         task.update_status_with(|status| {
             if !expected_status.contains(&status) {
                 knoticeln!(
-                    "trying to wake up task {}, but its status is {:?}, which is not in expected_status {:?}",
+                    "trying to wake up {}, but its status is {:?}, which is not in expected_status {:?}",
                     task.tid(),
                     status,
                     expected_status,
@@ -169,10 +169,7 @@ mod kore {
             }
         })?;
 
-        kdebugln!(
-            "task {} is woken up, enqueueing it to run queue",
-            task.tid()
-        );
+        kdebugln!("{} is woken up, enqueueing it to run queue", task.tid());
 
         // 2. enqueue the task to run queue.
         task_enqueue(task.clone());
@@ -209,7 +206,7 @@ mod kore {
         });
         if need_enqueue {
             kdebugln!(
-                "task {} is woken up by notify, enqueueing it to run queue",
+                "{} is woken up by notify, enqueueing it to run queue",
                 task.tid()
             );
             task_enqueue(task.clone());
@@ -258,7 +255,7 @@ mod higher_level {
                         Box::new(move || {
                             if cloned_validness.swap(false, Ordering::SeqCst) {
                                 kdebugln!(
-                                    "schedule_with_timeout: timeout expired, waking up task {}",
+                                    "schedule_with_timeout: timeout expired, waking up {}",
                                     cloned_task.tid()
                                 );
                                 notify(&cloned_task, true);

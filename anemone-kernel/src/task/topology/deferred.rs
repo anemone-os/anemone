@@ -96,6 +96,6 @@ pub fn dispose_deferred_tasks() {
         }
     }
     while let Some(task) = can_be_disposed.pop() {
-        kdebugln!("disposing task {} with tid {}", task.name(), task.tid());
+        kdebugln!("disposing {} with tid {}", task.name(), task.tid());
     }
 }

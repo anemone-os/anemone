@@ -91,7 +91,7 @@ impl Event {
                 },
             ) {
                 knoticeln!(
-                    "failed to wake up listener {:?} for task {}, error: {:?}, maybe it has been woken up by other event?",
+                    "failed to wake up listener {:?} for {}, error: {:?}, maybe it has been woken up by other event?",
                     listener,
                     listener.task.tid(),
                     e,
@@ -128,10 +128,7 @@ impl Event {
             }
 
             if task.has_pending_signal() {
-                kdebugln!(
-                    "task {} has pending signal, breaking the wait loop",
-                    task.tid()
-                );
+                kdebugln!("{} has pending signal, breaking the wait loop", task.tid());
                 ret = false;
                 break;
             }
@@ -215,10 +212,7 @@ impl Event {
             }
 
             if task.has_pending_signal() {
-                kdebugln!(
-                    "task {} has pending signal, breaking the wait loop",
-                    task.tid()
-                );
+                kdebugln!("{} has pending signal, breaking the wait loop", task.tid());
                 self.clean_listener(&listener, exclusive);
                 return Some(TimeoutListenException::Signaled);
             }
@@ -255,7 +249,7 @@ impl Event {
             if exclusive {
                 if inner.exclusive.contains(&listener) {
                     knoticeln!(
-                        "task {} is already listening to this event exclusively, won't add it again",
+                        "{} is already listening to this event exclusively, won't add it again",
                         listener.task.tid()
                     );
                     return (TaskStatus::Waiting { interruptible }, ());
@@ -264,7 +258,7 @@ impl Event {
             } else {
                 if inner.non_exclusive.contains(&listener) {
                     knoticeln!(
-                        "task {} is already listening to this event non-exclusively, won't add it again",
+                        "{} is already listening to this event non-exclusively, won't add it again",
                         listener.task.tid()
                     );
                     return (TaskStatus::Waiting { interruptible }, ());

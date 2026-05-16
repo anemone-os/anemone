@@ -12,9 +12,17 @@ pub struct QemuArgs {
     #[arg(short, long)]
     #[arg(help = "Which platform to emulate")]
     platform: String,
+
     #[arg(short, long)]
     #[arg(help = "Path to the kernel image to run")]
     image: String,
+
+    #[arg(short, long)]
+    #[arg(
+        help = "Whether to enable QEMU's built-in GDB server for debugging, by default it is disabled",
+        default_value = "false"
+    )]
+    debug: bool,
 }
 
 pub fn gen_qemu_cmd(qemu: &Qemu, args: Option<&QemuArgs>) -> std::process::Command {
@@ -39,6 +47,9 @@ pub fn gen_qemu_cmd(qemu: &Qemu, args: Option<&QemuArgs>) -> std::process::Comma
     }
     if let Some(bios) = &qemu.bios {
         cmd.arg("-bios").arg(bios);
+    }
+    if let Some(true) = args.and_then(|arg| Some(arg.debug)) {
+        cmd.arg("-s").arg("-S");
     }
     cmd
 }

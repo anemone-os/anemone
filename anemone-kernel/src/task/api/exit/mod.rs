@@ -33,7 +33,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
                 Ok(mut uptr) => uptr.write(Tid::new(0)),
                 Err(e) => {
                     knoticeln!(
-                        "failed to clear child tid for task {}: {:?} at address {:#x}",
+                        "failed to clear child tid for {}: {:?} at address {:#x}",
                         task.tid(),
                         e,
                         addr.get()
