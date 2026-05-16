@@ -18,7 +18,7 @@ impl TrapArchTrait for RiscV64TrapArch {
     type SyscallCtx = RiscV64SyscallCtx;
 
     unsafe fn load_utrapframe(trapframe: Self::TrapFrame) -> ! {
-        unsafe { __utrap_return_to_task(&trapframe as *const _) }
+        unsafe { utrap_return_to_task(&trapframe as *const _) }
     }
 
     fn syscall_ctx_snapshot(trapframe: &Self::TrapFrame) -> Self::SyscallCtx {
@@ -170,6 +170,13 @@ impl RiscV64TrapFrame {
             sscratch: kstack_top.get(),
             ktp: cur_tp,
         }
+    }
+
+    pub fn sstatus(&self) -> u64 {
+        self.sstatus
+    }
+    pub fn set_sstatus(&mut self, sstatus: u64) {
+        self.sstatus = sstatus;
     }
 }
 

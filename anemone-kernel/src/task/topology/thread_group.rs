@@ -334,7 +334,7 @@ impl Task {
         tg.inner.write_irqsave().status.is_dethreading = false;
 
         kdebugln!(
-            "task {} (previously {}) has dethreaded its thread group {}",
+            "{} (previously {}) has dethreaded its thread group {}",
             new_tid,
             old_tid,
             tg.tgid()

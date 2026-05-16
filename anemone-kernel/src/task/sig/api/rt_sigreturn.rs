@@ -27,7 +27,7 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
             Err(e) => {
                 // offending address. just kill the process.
                 knoticeln!(
-                    "sys_rt_sigreturn: failed to read rtsigframe from task {}'s user stack at address {:#x}: {:?}",
+                    "sys_rt_sigreturn: failed to read rtsigframe from {}'s user stack at address {:#x}: {:?}",
                     task.tid(),
                     sigframe_base.get(),
                     e
@@ -43,7 +43,7 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
     //    users. we must do a sanity check.
     let ucontext = sigframe.validate().unwrap_or_else(|e| {
         knoticeln!(
-            "sys_rt_sigreturn: invalid sigframe at address {:#x} for task {}: {:?}",
+            "sys_rt_sigreturn: invalid sigframe at address {:#x} for {}: {:?}",
             sigframe_base.get(),
             task.tid(),
             e
@@ -62,7 +62,7 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
 
         if bits & (1u64 << 63) != 0 {
             knoticeln!(
-                "sys_rt_sigreturn: invalid sigmask with bit 63 set for task {}: {:#x}",
+                "sys_rt_sigreturn: invalid sigmask with bit 63 set for {}: {:#x}",
                 task.tid(),
                 bits
             );
@@ -74,7 +74,7 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
         let sigmask = SigSet::new_with_mask(bits);
         if sigmask.get(SigNo::SIGKILL) {
             knoticeln!(
-                "sys_rt_sigreturn: invalid sigmask with SIGKILL set for task {}: {:#x}",
+                "sys_rt_sigreturn: invalid sigmask with SIGKILL set for {}: {:#x}",
                 task.tid(),
                 bits
             );
@@ -82,7 +82,7 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
         }
         if sigmask.get(SigNo::SIGSTOP) {
             knoticeln!(
-                "sys_rt_sigreturn: invalid sigmask with SIGSTOP set for task {}: {:#x}",
+                "sys_rt_sigreturn: invalid sigmask with SIGSTOP set for {}: {:#x}",
                 task.tid(),
                 bits
             );
@@ -96,7 +96,7 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
     let ret = __trapframe__.syscall_retval();
 
     kdebugln!(
-        "sys_rt_sigreturn: successfully return to user space for task {}",
+        "sys_rt_sigreturn: successfully return to user space for {}",
         task.tid(),
     );
 

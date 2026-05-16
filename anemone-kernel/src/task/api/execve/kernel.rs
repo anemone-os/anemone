@@ -43,7 +43,7 @@ pub fn kernel_execve(
                 // dethreading possibly triggers yield, which will change mapping to old
                 // uspace!!!
                 usp.activate();
-                task.switch_exec_ctx(name, usp, flags);
+                task.switch_exec_ctx(name, usp, flags, false);
 
                 let ksp = task.kstack().stack_top();
                 task.on_prv_change(Privilege::User);

@@ -1,8 +1,9 @@
 use core::arch::naked_asm;
 
 use crate::{
-    arch::loongarch64::exception::trap::{
-        __ktrap_return_to_task, __utrap_return_to_task, LA64TrapFrame,
+    arch::loongarch64::{
+        exception::trap::{__ktrap_return_to_task, LA64TrapFrame, utrap_return_to_task},
+        fpu::{FpuTaskContext, load_next_frs, save_current_frs},
     },
     prelude::*,
     sched::{ParameterList, SchedArchTrait, TaskContextArch},
@@ -18,6 +19,7 @@ pub struct LA64TaskContext {
     sp: u64,
     /// Callee-Saved GPRs $s0 - $s11
     s: [u64; 10],
+    fpu: FpuTaskContext,
 }
 
 impl TaskContextArch for LA64TaskContext {
@@ -25,6 +27,7 @@ impl TaskContextArch for LA64TaskContext {
         ra: 0,
         sp: 0,
         s: [0; 10],
+        fpu: FpuTaskContext::ZEROED,
     };
 
     fn pc(&self) -> u64 {
@@ -43,6 +46,7 @@ impl TaskContextArch for LA64TaskContext {
             ra: user_task_entry_primary as *const () as u64,
             sp: kstack_top.get(),
             s,
+            fpu: FpuTaskContext::ZEROED,
         }
     }
 
@@ -55,7 +59,14 @@ impl TaskContextArch for LA64TaskContext {
             ra: kernel_task_entry_primary as *const () as u64,
             sp: stack_top.get(),
             s,
+            fpu: FpuTaskContext::ZEROED,
         }
+    }
+}
+
+impl LA64TaskContext {
+    pub fn clear_fpu(&mut self) {
+        self.fpu = FpuTaskContext::ZEROED;
     }
 }
 
@@ -65,9 +76,29 @@ pub struct LA64SchedArch;
 impl SchedArchTrait for LA64SchedArch {
     type TaskContext = LA64TaskContext;
 
-    unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext) {
-        debug_assert!(IntrArch::current_irq_flags() == IntrArch::DISABLED_IRQ_FLAGS);
+    unsafe fn switch(
+        cur: *mut TaskContext,
+        next: *const TaskContext,
+        save_fr: bool,
+        load_fr: bool,
+    ) {
+        debug_assert!(IntrArch::local_intr_disabled());
         unsafe {
+            if save_fr {
+                save_current_frs(
+                    &mut cur
+                        .as_mut()
+                        .expect("current task context should never be null")
+                        .fpu,
+                );
+            }
+            if load_fr {
+                load_next_frs(
+                    &next.as_ref()
+                        .expect("next task context should never be null")
+                        .fpu,
+                );
+            }
             __switch(cur, next);
         }
     }
@@ -161,7 +192,7 @@ unsafe extern "C" fn user_task_entry_secondary(
 
     // Linux/glibc user entry reads argc/argv from sp. a0 is reserved for
     // rtld_fini and must stay zero for fresh execve entries.
-    unsafe { __utrap_return_to_task(&trapframe) }
+    unsafe { utrap_return_to_task(&trapframe) }
 }
 
 /// Entry point of a kernel task, stage alpha.

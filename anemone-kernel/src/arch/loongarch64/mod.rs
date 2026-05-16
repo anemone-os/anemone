@@ -5,6 +5,7 @@ pub(super) mod exception;
 
 mod backtrace;
 mod bootstrap;
+mod fpu;
 mod machine;
 pub(super) mod mm;
 mod sched;

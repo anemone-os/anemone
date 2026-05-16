@@ -173,7 +173,7 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
         match reason {
             LA64Exception::PageModified => {
                 panic!(
-                    "Page Modified exception at address: {:#x}, pc: {:#x}, this should never happen because the 'DIRTY' bit is always set with 'WRITE' bit.",
+                    "Page Modified exception at address: {:#x}, pc: {:#x}.",
                     trapframe.badv, trapframe.era
                 )
             },
@@ -190,6 +190,14 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
                         LA64Exception::PageInvalidStore => "store",
                         _ => unreachable!(),
                     }
+                )
+            },
+            LA64Exception::FloatingPointDisabled => {
+                // this should only happen when executing FPU instructions in kernel mode, which
+                // is not allowed.
+                panic!(
+                    "Floating Point Disabled exception at pc: {:#x}, FPU instructions are not allowed in kernel mode.",
+                    trapframe.era
                 )
             },
             _ => {

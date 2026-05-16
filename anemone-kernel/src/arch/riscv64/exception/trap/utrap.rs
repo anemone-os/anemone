@@ -1,10 +1,12 @@
 use crate::{
-    arch::riscv64::exception::{
-        intr::handle_intr,
-        trap::{RiscV64Exception, RiscV64Interrupt, RiscV64TrapFrame},
+    arch::riscv64::{
+        exception::{
+            intr::handle_intr,
+            trap::{RiscV64Exception, RiscV64Interrupt, RiscV64TrapFrame},
+        },
+        fpu::{self, init_fpu_for_current_task, set_fpu_enable},
     },
     prelude::{fault::handle_user_page_fault, *},
-    sched::current_task_id,
     task::{
         cpu_usage::Privilege,
         sig::{
@@ -171,9 +173,24 @@ core::arch::global_asm!(
 
 );
 
+macro_rules! log_user_panic {
+    ($content: expr) => {
+        let task = get_current_task();
+        kerrln!(
+            "({}) user {} ({}) aborted with {}",
+            cur_cpu_id(),
+            task.tid(),
+            task.name(),
+            $content
+        );
+    };
+}
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
     debug_assert!(IntrArch::local_intr_disabled());
+    /// Fpu are disabled in kernel mode
+    set_fpu_enable(false, None);
 
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
@@ -239,11 +256,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                 restart_syscall = handle_syscall(trapframe);
             },
             RiscV64Exception::Breakpoint => {
-                kerrln!(
-                    "({}) user {} aborted with breakpoint\n\tbreakpoint not implemented yet",
-                    cur_cpu_id(),
-                    current_task_id(),
-                );
+                log_user_panic!("breakpoint: break point not implemented yet");
                 // TODO: this should be SIGTRAP. but we haven't implemented breakpoint yet.
                 get_current_task().recv_signal(Signal::new(
                     SigNo::SIGILL,
@@ -267,13 +280,31 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                     },
                 ));
             },
+            RiscV64Exception::IllegalInstruction => {
+                let task = get_current_task();
+                if task.fpu_used() {
+                    log_user_panic!(format_args!("illegal instruction at {:#x}", trapframe.sepc));
+                    get_current_task().recv_signal(Signal::new(
+                        SigNo::SIGILL,
+                        SiCode::Kernel,
+                        SigInfoFields::Ill(SigFault {
+                            addr: VirtAddr::new(trapframe.sepc),
+                        }),
+                    ));
+                } else {
+                    unsafe {
+                        init_fpu_for_current_task();
+                        kinfoln!(
+                            "({}) enabled fpu for {} ({})",
+                            cur_cpu_id(),
+                            task.tid(),
+                            task.name()
+                        );
+                    }
+                }
+            },
             _ => {
-                kerrln!(
-                    "({}) user {} aborted with error {:?}\n\t not implemented yet",
-                    cur_cpu_id(),
-                    current_task_id(),
-                    reason
-                );
+                log_user_panic!(format_args!("unhandled exception: {:?}", reason));
                 get_current_task().recv_signal(Signal::new(
                     SigNo::SIGILL,
                     SiCode::Kernel,
@@ -297,6 +328,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
         // cpu usage tracking relies on interrupt being disabled.
     }
 
+    set_fpu_enable(get_current_task().fpu_used(), Some(trapframe));
+
     get_current_task().on_prv_change(Privilege::User);
 }
 
@@ -307,5 +340,21 @@ unsafe extern "C" {
     ///
     /// **Make sure `sscratch` points to the kernel stack top before calling
     /// this function**, and the trapframe is valid.
-    pub unsafe fn __utrap_return_to_task(trapframe: *const RiscV64TrapFrame) -> !;
+    unsafe fn __utrap_return_to_task(trapframe: *const RiscV64TrapFrame) -> !;
+}
+
+/// It's used to enter a newly created user task.
+///
+/// **Make sure fpu is disabled before entering the task.**
+///
+/// **Make sure `sscratch` points to the kernel stack top before calling
+/// this function**, and the trapframe is valid.
+pub unsafe fn utrap_return_to_task(trapframe: *const RiscV64TrapFrame) -> ! {
+    unsafe {
+        debug_assert!(
+            !get_current_task().fpu_used(),
+            "the fpu use state should be false when first entering a user task"
+        );
+        __utrap_return_to_task(trapframe)
+    }
 }

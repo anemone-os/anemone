@@ -141,7 +141,7 @@ pub fn local_enqueue(task: Arc<Task>) {
                     .expect("see comments on Processor::running_task for details"),
             ) {
                 knoticeln!(
-                    "task {} is already running on cpu {}, not enqueuing it to run queue",
+                    "{} is already running on cpu {}, not enqueuing it to run queue",
                     task.tid(),
                     cur_cpu_id(),
                 );
@@ -152,7 +152,7 @@ pub fn local_enqueue(task: Arc<Task>) {
                 proc.runq.enqueue(task);
             } else {
                 knoticeln!(
-                    "task {} is already on run queue, not enqueuing it again",
+                    "{} is already on run queue, not enqueuing it again",
                     task.tid()
                 );
             }

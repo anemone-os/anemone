@@ -734,7 +734,7 @@ fn perform_signal_action(
                 match UserWritePtr::<RtSigFrame>::try_new(sigframe_base, &mut guard) {
                     Err(e) => {
                         knoticeln!(
-                            "perform_signal_action: failed to write sigframe to task {} user stack: {:?}",
+                            "perform_signal_action: failed to write sigframe to {} user stack: {:?}",
                             task.tid(),
                             e
                         );

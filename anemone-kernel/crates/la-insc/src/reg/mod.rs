@@ -4,6 +4,7 @@ pub mod asid;
 pub mod crmd;
 pub mod csr;
 pub mod dmw;
+pub mod euen;
 pub mod exception;
 pub mod pwc;
 pub mod timer;
