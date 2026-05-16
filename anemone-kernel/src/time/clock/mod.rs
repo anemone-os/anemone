@@ -1,8 +1,9 @@
 //! POSIX & Linux clock.
 
 use crate::time::clock::{
-    monotonic::MonotonicClock, process_cputime::ProcessCpuTimeClock, realtime::RealtimeClock,
-    thread_cputime::ThreadCpuTimeClock,
+    monotonic::MonotonicClock, monotonic_coarse::MonotonicCoarseClock,
+    process_cputime::ProcessCpuTimeClock, realtime::RealtimeClock,
+    realtime_coarse::RealtimeCoarseClock, thread_cputime::ThreadCpuTimeClock,
 };
 
 pub trait Clock: Sync {
@@ -24,9 +25,11 @@ pub trait Clock: Sync {
 }
 
 mod monotonic;
+mod monotonic_coarse;
 mod monotonic_raw;
 mod process_cputime;
 mod realtime;
+mod realtime_coarse;
 mod thread_cputime;
 
 mod api;
@@ -40,6 +43,8 @@ static STATIC_CLOCKS: &[&dyn Clock] = &[
     &ProcessCpuTimeClock,
     &ThreadCpuTimeClock,
     &MonotonicClock,
+    &RealtimeCoarseClock,
+    &MonotonicCoarseClock,
 ];
 
 // TODO: dynamic registration of clocks. e.g. for those dynamically-created rtc

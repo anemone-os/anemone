@@ -21,6 +21,7 @@ pub mod getdents64;
 pub mod getrandom;
 pub mod ioctl;
 pub mod iomux;
+pub mod lseek;
 pub mod mkdirat;
 pub mod mount;
 pub mod openat;

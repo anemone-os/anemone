@@ -96,7 +96,11 @@ fn init_environment() {
         mkdirat(AtFd::Cwd, Path::new("/lib"), 0o755)
             .expect("user-test: failed to create /lib directory");
 
-        comp_run_cmd("/bin/cp -r /glibc/lib /");
+        comp_run_cmd("/bin/cp -r /musl/lib /");
+
+        // musl's libc.so is a dynamic linker as well. we should create a symlink for
+        // it. for now we just cp.
+        comp_run_cmd("/bin/cp /musl/lib/libc.so /lib/ld-musl-riscv64-sf.so.1");
     }
 
     // cp busybox to /
@@ -160,10 +164,10 @@ fn run_comp_tests() {
     init_environment();
 
     // 1. basic tests
-    println!("user-test: running basic tests...");
-    chdir("/glibc").expect("user-test: failed to change directory to /glibc");
-    comp_run_cmd("./basic_testcode.sh");
-    println!("user-test: basic tests passed.");
+    // println!("user-test: running basic tests...");
+    // chdir("/glibc").expect("user-test: failed to change directory to
+    // /glibc"); comp_run_cmd("./basic_testcode.sh");
+    // println!("user-test: basic tests passed.");
 
     // 2. lua tests
     // println!("user-test: running lua tests...");
@@ -178,15 +182,15 @@ fn run_comp_tests() {
     // println!("user-test: busybox tests passed.");
 
     // 4. static-linked libc tests
-    // println!("user-test: running static-linked libc tests...");
-    // chdir("/glibc").expect("user-test: failed to change directory to
-    // /glibc"); comp_run_cmd("./run-static.sh");
-    // println!("user-test: static-linked libc tests passed.");
+    println!("user-test: running static-linked libc tests...");
+    chdir("/musl").expect("user-test: failed to change directory to /musl");
+    comp_run_cmd("./run-static.sh");
+    println!("user-test: static-linked libc tests passed.");
 
     // 5. dynamic-linked libc tests
     // println!("user-test: running dynamic-linked libc tests...");
-    // chdir("/glibc").expect("user-test: failed to change directory to
-    // /glibc"); comp_run_cmd("./run-dynamic.sh");
+    // chdir("/musl").expect("user-test: failed to change directory to /musl");
+    // comp_run_cmd("./run-dynamic.sh");
     // println!("user-test: dynamic-linked libc tests passed.");
 
     // 6. lmbench tests

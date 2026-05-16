@@ -23,7 +23,7 @@ use crate::{
     task::{
         exit::kernel_exit_group,
         sig::{
-            disposition::{KSigAction, SaFlags, SignalAction},
+            disposition::{KSigAction, SaFlags, SignalAction, SignalDisposition},
             info::{SiCode, SigInfoFields},
             set::SigSet,
         },
@@ -164,6 +164,9 @@ impl Signal {
 }
 
 /// Per task pending signals.
+///
+/// Ignored signals won't be recorded here. See [Task::recv_signal] and
+/// [ThreadGroup::recv_signal] for details.
 #[derive(Debug)]
 pub struct PendingSignals {
     /// Unreliable signals are not queued.
@@ -217,17 +220,6 @@ impl PendingSignals {
         set
     }
 
-    /// Fetch a pending signal of the given signal number, and remove it from
-    /// the pending signals.
-    pub fn fetch_at(&mut self, no: SigNo) -> Option<Signal> {
-        if let Some(rt_idx) = no.realtime_index() {
-            self.realtime[rt_idx].pop_front()
-        } else {
-            debug_assert!(no.is_unreliable());
-            self.unreliable[no.as_usize()].take()
-        }
-    }
-
     /// Fetch any pending signal that is not masked by the given [SigSet].
     ///
     /// This method has a well-defined order of fetching signals:
@@ -236,7 +228,12 @@ impl PendingSignals {
     /// - finally rest unreliable signals, in order of signal number.
     ///
     /// TODO: fetch_any_with() for custom order.
-    pub fn fetch_any(&mut self, mask: &SigSet) -> Option<Signal> {
+    pub fn fetch_any(&mut self, mask: SigSet) -> Option<Signal> {
+        debug_assert!(
+            !mask.intersects_with(&SigSet::new_with_signos(&[SigNo::SIGKILL, SigNo::SIGSTOP])),
+            "SIGKILL and SIGSTOP cannot be masked"
+        );
+
         // fatal signals first.
         if let Some(kill) = self.unreliable[SigNo::SIGKILL.as_usize()].take() {
             return Some(kill);
@@ -245,7 +242,7 @@ impl PendingSignals {
             return Some(stop);
         }
 
-        // then realtime signals. we just do a linear scan.
+        // realtime signals first. we just do a linear scan.
         for (idx, queue) in self.realtime.iter_mut().enumerate() {
             let rt_idx = SigNo::new(SIGRTMIN as usize + idx);
             if mask.get(rt_idx) {
@@ -256,7 +253,7 @@ impl PendingSignals {
             }
         }
 
-        // finally rest unreliable signals. here SIGKILL and SIGSTOP are scanned again.
+        // then rest unreliable signals. here SIGKILL and SIGSTOP are scanned again.
         // but it does not harm.
         for no in 1..SIGRTMIN as usize {
             let no = SigNo::new(no);
@@ -272,7 +269,38 @@ impl PendingSignals {
         None
     }
 
-    pub fn has_pending(&self, mask: &SigSet) -> bool {
+    /// Fetch any pending signal in the given set, and remove it from the
+    /// pending signals.
+    ///
+    /// SIGKILL and SIGSTOP won't be fetched if they're not in the set.
+    pub fn fetch_specific(&mut self, set: SigSet) -> Option<Signal> {
+        // realtime signals first.
+        for (idx, queue) in self.realtime.iter_mut().enumerate() {
+            let rt_idx = SigNo::new(SIGRTMIN as usize + idx);
+            if !set.get(rt_idx) {
+                continue;
+            }
+            if let Some(signal) = queue.pop_front() {
+                return Some(signal);
+            }
+        }
+
+        // unreliable signals.
+        for no in 1..SIGRTMIN as usize {
+            let no = SigNo::new(no);
+            if !set.get(no) {
+                continue;
+            }
+            if let Some(signal) = self.unreliable[no.as_usize()].take() {
+                self.unreliable[no.as_usize()] = None;
+                return Some(signal);
+            }
+        }
+
+        None
+    }
+
+    pub fn has_unmasked(&self, mask: SigSet) -> bool {
         for no in 1..SIGRTMIN as usize {
             let no = SigNo::new(no);
             if self.unreliable[no.as_usize()].is_some() && !mask.get(no) {
@@ -287,18 +315,53 @@ impl PendingSignals {
         }
         false
     }
+
+    pub fn has_specific(&self, set: SigSet) -> bool {
+        for no in 1..SIGRTMIN as usize {
+            let no = SigNo::new(no);
+            if self.unreliable[no.as_usize()].is_some() && set.get(no) {
+                return true;
+            }
+        }
+        for (idx, queue) in self.realtime.iter().enumerate() {
+            let rt_idx = SigNo::new(SIGRTMIN as usize + idx);
+            if !queue.is_empty() && set.get(rt_idx) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Remove all pending signals in the given set from the pending signals.
+    ///
+    /// Mainly used when a disposition is set to ignore, to flush all pending
+    /// signals that are now ignored.
+    pub fn flush_specific(&mut self, set: SigSet) {
+        for signo in set {
+            if signo.is_realtime() {
+                let idx = signo.realtime_index().unwrap();
+                kdebugln!("flushing realtime signal {:?}", signo);
+                self.realtime[idx].clear();
+            } else {
+                kdebugln!("flushing unreliable signal {:?}", signo);
+                self.unreliable[signo.as_usize()] = None;
+            }
+        }
+    }
 }
 
 impl Task {
-    /// Check whether this task has pending and unmasked signals.
+    /// Check whether this task has unmasked signals.
+    ///
+    /// 'masked' here refers to the signal mask of this task.
     ///
     /// This method relies on the fact that ignored signals won't be delivered
     /// into [PendingSignals]. See [Task::recv_signal] for details.
-    pub fn has_pending_signal(&self) -> bool {
+    pub fn has_unmasked_signal(&self) -> bool {
         let prv_pending = {
             let pending = self.sig_pending.lock();
-            let mask = self.sig_mask.lock();
-            pending.has_pending(&mask)
+            let mask = *self.sig_mask.lock();
+            pending.has_unmasked(mask)
         };
         if prv_pending {
             return true;
@@ -306,15 +369,32 @@ impl Task {
 
         // here is a window. does this matter? i think not. but im not sure.
 
-        // TODO: if the signal is ignored, it shouldn't indicate pending signals.
         let tg = self.get_thread_group();
         let tg_inner = tg.inner.read();
         let shared_pending = {
             let pending = tg_inner.sig_pending.lock();
-            let mask = self.sig_mask.lock();
-            pending.has_pending(&mask)
+            let mask = *self.sig_mask.lock();
+            pending.has_unmasked(mask)
         };
         shared_pending
+    }
+
+    pub fn has_specific_signal(&self, set: SigSet) -> bool {
+        {
+            let pending = self.sig_pending.lock();
+            if pending.has_specific(set) {
+                return true;
+            }
+        }
+        {
+            let tg = self.get_thread_group();
+            let tg_inner = tg.inner.read();
+            let pending = tg_inner.sig_pending.lock();
+            if pending.has_specific(set) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Send a signal to this task (I.e. let this task receive a signal).
@@ -330,11 +410,12 @@ impl Task {
     /// If the disposition of the signal satisfies [SignalAction::is_ignored],
     /// the signal won't be delivered, even if it is unmasked.
     pub fn recv_signal(self: &Arc<Self>, signal: Signal) {
+        kdebugln!("task {} recv_signal: {:?}", self.tid(), signal);
         let no = signal.no;
 
         let disp = self.sig_disposition.read().get_disposition(no);
         if disp.action.is_ignored() {
-            kdebugln!("signal {:?} is ignored by the task, not notifying", no);
+            kdebugln!("signal {:?} is ignored by the task, not queuing", no);
             return;
         }
 
@@ -344,6 +425,7 @@ impl Task {
             // signal masked. nothing to do now, just wait for the task to
             // unmask it.
         } else {
+            kdebugln!("signal {:?} is not masked, notifying task", no);
             notify(
                 self,
                 if matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
@@ -364,8 +446,8 @@ impl Task {
         // first private pending
         {
             let mut pending = self.sig_pending.lock();
-            let mask = self.sig_mask.lock();
-            if let Some(signal) = pending.fetch_any(&mask) {
+            let mask = *self.sig_mask.lock();
+            if let Some(signal) = pending.fetch_any(mask) {
                 return Some(signal);
             }
         }
@@ -375,8 +457,31 @@ impl Task {
             let tg = self.get_thread_group();
             let tg_inner = tg.inner.read();
             let mut pending = tg_inner.sig_pending.lock();
-            let mask = self.sig_mask.lock();
-            if let Some(signal) = pending.fetch_any(&mask) {
+            let mask = *self.sig_mask.lock();
+            if let Some(signal) = pending.fetch_any(mask) {
+                return Some(signal);
+            }
+        }
+
+        None
+    }
+
+    /// See [PendingSignals::fetch_specific] for more details.
+    pub fn fetch_specific_signal(&self, set: SigSet) -> Option<Signal> {
+        // first private pending
+        {
+            let mut pending = self.sig_pending.lock();
+            if let Some(signal) = pending.fetch_specific(set) {
+                return Some(signal);
+            }
+        }
+
+        // no private signals satisfied the criteria. check shared pending signals.
+        {
+            let tg = self.get_thread_group();
+            let tg_inner = tg.inner.read();
+            let mut pending = tg_inner.sig_pending.lock();
+            if let Some(signal) = pending.fetch_specific(set) {
                 return Some(signal);
             }
         }
@@ -401,25 +506,89 @@ impl Task {
 }
 
 impl ThreadGroup {
+    /// Get the signal disposition of this thread group.
+    ///
+    /// Internally, this relies on the fact that
+    /// [super::clone::CloneFlags::THREAD] must be used with
+    /// [clone::CloneFlags::SIGHAND], so that all threads in the same thread
+    /// group share the same [SignalDisposition].
+    ///
+    /// Return `None` if this thread group has no members, (i.e. the thread
+    /// group is waiting to be reaped).
+    pub fn signal_disposition(&self) -> Option<Arc<RwLock<SignalDisposition>>> {
+        let mut disp = None;
+        self.for_each_member(|member| {
+            disp = Some(member.sig_disposition.clone());
+            return;
+        });
+        disp
+    }
+
     /// Send a signal to this thread group.
     ///
-    /// Internally, this pushes the signal to shared pending signals, marks
-    /// all member threads as having pending signals, and notify them.
+    /// If the disposition of the signal satisfies [SignalAction::is_ignored],
+    /// the signal won't be delivered.
     pub fn recv_signal(&self, signal: Signal) {
         let no = signal.no;
+
+        let disp = {
+            let Some(disps) = self.signal_disposition() else {
+                knoticeln!(
+                    "trying to send signal {:?} to a thread group with no members",
+                    no
+                );
+
+                return;
+            };
+            disps.read().get_disposition(no)
+        };
+
+        if disp.action.is_ignored() {
+            kdebugln!(
+                "signal {:?} is ignored by the thread group, not queuing",
+                no
+            );
+            return;
+        }
+
         {
             let inner = self.inner.write();
             inner.sig_pending.lock().push_signal(signal);
         }
+
         self.for_each_member(|member| {
-            notify(
-                member,
-                if matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
-                    true
-                } else {
-                    false
-                },
-            );
+            if member.sig_mask.lock().get(no) && !matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
+                // signal masked. nothing to do now, just wait for the task to
+                // unmask it.
+            } else {
+                notify(
+                    member,
+                    if matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
+                        true
+                    } else {
+                        false
+                    },
+                );
+            }
+        });
+    }
+
+    /// Flush pending signals in the given set.
+    ///
+    /// Both each member's private pending signals and shared pending signals
+    /// will be flushed.
+    ///
+    /// TODO: [SignalDisposition] actually can be shared by multiple thread
+    /// groups. currently we restrict clone's flags to avoid this. But later we
+    /// should support that, and this method won't be put in [ThreadGroup].
+    pub fn flush_specific_signals(&self, set: SigSet) {
+        {
+            let inner = self.inner.write();
+            let mut pending = inner.sig_pending.lock();
+            pending.flush_specific(set);
+        }
+        self.for_each_member(|member| {
+            member.sig_pending.lock().flush_specific(set);
         });
     }
 }

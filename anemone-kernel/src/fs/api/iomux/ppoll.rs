@@ -15,12 +15,12 @@ use crate::{
             SyscallArgValidatorExt as _, UserReadPtr, UserReadSlice, UserWritePtr, user_addr,
         },
     },
-    task::{files::Fd, sig::set::SigSet},
+    task::{files::Fd, sig::{SigNo, set::SigSet}},
 };
 
 use anemone_abi::{
     fs::linux::poll::PollFd as LinuxPollFd,
-    process::linux::signal::{SIGKILL, SIGSTOP, SigSet as LinuxSigSet},
+    process::linux::signal::SigSet as LinuxSigSet,
     time::linux::TimeSpec,
 };
 
@@ -123,14 +123,14 @@ fn sys_ppoll(
         };
 
         let sigmask = if let Some(sigmask_ptr) = sigmask {
-            SigSet::new_with_mask(
+            let mut sigmask = SigSet::new_with_mask(
                 UserReadPtr::<LinuxSigSet>::try_new(sigmask_ptr, &mut usp)?
                     .read()
                     .bits,
-            )
-            .difference(&SigSet::new_with_mask(
-                (1u64 << SIGKILL) | (1u64 << SIGSTOP),
-            ))
+            );
+            sigmask.clear(SigNo::SIGKILL);
+            sigmask.clear(SigNo::SIGSTOP);
+            sigmask
         } else {
             SigSet::new()
         };
@@ -179,7 +179,7 @@ fn sys_ppoll(
             break;
         }
 
-        if task.has_pending_signal() {
+        if task.has_unmasked_signal() {
             kdebugln!("sys_ppoll: interrupted by signal");
             break;
         }
