@@ -127,9 +127,9 @@ impl Event {
                 break;
             }
 
-            if task.has_pending_signal() {
+            if task.has_unmasked_signal() {
                 kdebugln!(
-                    "task {} has pending signal, breaking the wait loop",
+                    "task {} has unmasked signal, breaking the wait loop",
                     task.tid()
                 );
                 ret = false;
@@ -214,9 +214,9 @@ impl Event {
                 return None;
             }
 
-            if task.has_pending_signal() {
+            if task.has_unmasked_signal() {
                 kdebugln!(
-                    "task {} has pending signal, breaking the wait loop",
+                    "task {} has unmasked signal, breaking the wait loop",
                     task.tid()
                 );
                 self.clean_listener(&listener, exclusive);

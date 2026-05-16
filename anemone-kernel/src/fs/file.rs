@@ -236,6 +236,15 @@ impl File {
         Ok(written)
     }
 
+    /// Run `f` with the file cursor as `pos`.
+    pub fn with_pos<F, R>(&self, f: F) -> Result<R, SysError>
+    where
+        F: FnOnce(&mut usize) -> Result<R, SysError>,
+    {
+        let mut pos = self.pos.lock();
+        f(&mut *pos)
+    }
+
     pub fn seek(&self, pos: usize) -> Result<(), SysError> {
         (self.ops.validate_seek)(self, pos)?;
         *self.pos.lock() = pos;

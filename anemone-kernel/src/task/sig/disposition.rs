@@ -58,11 +58,19 @@ bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct SaFlags: u64 {
         const SIGINFO = SA_SIGINFO as u64;
+        // musl still sets SA_RESTORER on some Linux targets even though our
+        // supported architectures return via the kernel-provided rt_sigreturn
+        // trampoline instead of a userspace restorer.
+        const RESTORER = 0x0400_0000;
         const ONESHOT = SA_ONESHOT as u64;
         const NODEFER = SA_NODEFER as u64;
         const ONSTACK = SA_ONSTACK as u64;
         const RESTART = SA_RESTART as u64;
         // TODO
+
+        // idk what this flag is for. seems glibc uses it.
+        // but it's not defined in Linux kernel headers.
+        const UNKNOWN = 0x0000_0000_2000_0000;
     }
 }
 
@@ -74,8 +82,6 @@ pub struct KSigAction {
     pub mask: SigSet,
 }
 
-/// Per [ThreadGroup] signal disposition.
-///
 /// This might look a bit strange - ***Struct of Arrays***, instead of Array of
 /// Structs.
 ///
@@ -144,6 +150,18 @@ impl SignalDisposition {
                 self.masks[sig] = SigSet::new();
             }
         }
+    }
+
+    /// Return a [SigSet] of all signals whose disposition
+    /// [SignalAction::is_ignored].
+    pub fn ignored_signals(&self) -> SigSet {
+        let mut ignored = SigSet::new();
+        for sig in 1..NSIG {
+            if self.actions[sig].is_ignored() {
+                ignored.set(SigNo::new(sig));
+            }
+        }
+        ignored
     }
 }
 

@@ -75,12 +75,9 @@ fn sys_rt_sigprocmask(
             },
             SigProcMaskHow::Unblock => {
                 *sig_mask = sig_mask.difference(&set);
-                // TODO: if any pending signals are now unmasked, we should try
-                // to wake up task if it is sleeping.
             },
             SigProcMaskHow::SetMask => {
                 *sig_mask = set;
-                // TODO: the same as above.
             },
         }
     }
