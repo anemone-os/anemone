@@ -60,9 +60,9 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
         // basic sanity check.
         let linux_signal::SigSet { bits } = ucontext.uc_sigmask;
 
-        if bits & (1 << 0) != 0 {
+        if bits & (1u64 << 63) != 0 {
             knoticeln!(
-                "sys_rt_sigreturn: invalid sigmask with bit 0 set for {}: {:#x}",
+                "sys_rt_sigreturn: invalid sigmask with bit 63 set for {}: {:#x}",
                 task.tid(),
                 bits
             );

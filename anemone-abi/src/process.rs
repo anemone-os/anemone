@@ -94,6 +94,23 @@ pub mod linux {
         pub const RUSAGE_SELF: i32 = 0;
         pub const RUSAGE_CHILDREN: i32 = -1;
         pub const RUSAGE_THREAD: i32 = 1;
+
+        pub const RLIMIT_CPU: u32 = 0;
+        pub const RLIMIT_FSIZE: u32 = 1;
+        pub const RLIMIT_DATA: u32 = 2;
+        pub const RLIMIT_STACK: u32 = 3;
+        pub const RLIMIT_CORE: u32 = 4;
+        pub const RLIMIT_RSS: u32 = 5;
+        pub const RLIMIT_NPROC: u32 = 6;
+        pub const RLIMIT_NOFILE: u32 = 7;
+        pub const RLIMIT_MEMLOCK: u32 = 8;
+        pub const RLIMIT_AS: u32 = 9;
+        pub const RLIMIT_LOCKS: u32 = 10;
+        pub const RLIMIT_SIGPENDING: u32 = 11;
+        pub const RLIMIT_MSGQUEUE: u32 = 12;
+        pub const RLIMIT_NICE: u32 = 13;
+        pub const RLIMIT_RTPRIO: u32 = 14;
+        pub const RLIMIT_RTTIME: u32 = 15;
     }
 
     pub mod clone {

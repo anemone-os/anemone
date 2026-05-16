@@ -238,6 +238,9 @@ mod higher_level {
         if let Some(timeout) = timeout {
             if timeout == Duration::ZERO {
                 kdebugln!("schedule_with_timeout: timeout is zero, returning immediately");
+
+                get_current_task().update_status_with(|_prev| (TaskStatus::Runnable, ()));
+
                 return Duration::ZERO;
             }
         }

@@ -127,8 +127,8 @@ impl Event {
                 break;
             }
 
-            if task.has_pending_signal() {
-                kdebugln!("{} has pending signal, breaking the wait loop", task.tid());
+            if task.has_unmasked_signal() {
+                kdebugln!("{} has unmasked signal, breaking the wait loop", task.tid());
                 ret = false;
                 break;
             }
@@ -211,8 +211,8 @@ impl Event {
                 return None;
             }
 
-            if task.has_pending_signal() {
-                kdebugln!("{} has pending signal, breaking the wait loop", task.tid());
+            if task.has_unmasked_signal() {
+                kdebugln!("{} has unmasked signal, breaking the wait loop", task.tid());
                 self.clean_listener(&listener, exclusive);
                 return Some(TimeoutListenException::Signaled);
             }

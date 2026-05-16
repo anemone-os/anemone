@@ -78,6 +78,7 @@ pub mod linux {
 
     pub const SYS_GETDENTS64: u64 = 61;
 
+    pub const SYS_LSEEK: u64 = 62;
     pub const SYS_READ: u64 = 63;
     pub const SYS_WRITE: u64 = 64;
     pub const SYS_WRITEV: u64 = 66;
@@ -143,6 +144,8 @@ pub mod linux {
     pub const SYS_MADVISE: u64 = 233;
 
     pub const SYS_WAIT4: u64 = 260;
+
+    pub const SYS_PRLIMIT64: u64 = 261;
 
     pub const SYS_RENAMEAT2: u64 = 276;
 

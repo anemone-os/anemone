@@ -38,6 +38,8 @@ pub mod linux {
 
         // Linux specific.
         pub const CLOCK_MONOTONIC_RAW: i32 = 4;
+        pub const CLOCK_REALTIME_COARSE: i32 = 5;
+        pub const CLOCK_MONOTONIC_COARSE: i32 = 6;
         // TODO
     }
 }

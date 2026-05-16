@@ -3,7 +3,10 @@
 //! Reference:
 //! - https://elixir.bootlin.com/linux/v6.6.32/source/include/linux/fdtable.h
 
-use crate::prelude::{handler::TryFromSyscallArg, *};
+use crate::{
+    prelude::{handler::TryFromSyscallArg, *},
+    utils::bitmap::Bitmap,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Fd(u32);
@@ -219,185 +222,385 @@ impl FdFlags {
     }
 }
 
+static_assert!(
+    MAX_FD_PER_PROCESS.is_multiple_of(64),
+    "to fit well with bitmap"
+);
+
 #[derive(Debug)]
 pub struct FilesState {
-    // TODO: max_fd
-    next_fd: Fd,
-    recycled_fds: BTreeSet<Fd>,
-    fd_table: HashMap<Fd, Arc<FileDesc>>,
+    // option and bitmap cause double source of truth. we should refactor this later.
+    bitmap: Bitmap<{ MAX_FD_PER_PROCESS / 64 }>,
+    fds: Vec<Option<Arc<FileDesc>>>,
 }
 
+// fd alloc
 impl FilesState {
-    fn alloc_fd(&mut self) -> Option<Fd> {
-        if let Some(recycled_fd) = self.recycled_fds.iter().next().cloned() {
-            self.recycled_fds.remove(&recycled_fd);
-            Some(recycled_fd)
+    fn alloc(&mut self) -> Result<Fd, SysError> {
+        if let Some(fd_idx) = self.bitmap.find_and_set_first_zero() {
+            let fd = Fd::new(fd_idx as u32).unwrap();
+            debug_assert!(self.fds[fd_idx].is_none());
+            Ok(fd)
         } else {
-            while self.fd_table.contains_key(&self.next_fd) {
-                let next_fd = Fd::new(self.next_fd.raw() + 1)?;
-                self.next_fd = next_fd;
-            }
-            let fd = self.next_fd;
-            self.next_fd = Fd::new(self.next_fd.raw() + 1)?;
-            Some(fd)
+            Err(SysError::NoMoreFd)
         }
     }
 
+    fn alloc_ge_than(&mut self, min_fd: Fd) -> Result<Fd, SysError> {
+        if min_fd.raw() as usize >= self.fds.len() {
+            return Err(SysError::BadFileDescriptor);
+        }
+
+        if let Some(fd_idx) = self
+            .bitmap
+            .find_and_set_first_zero_from(min_fd.raw() as usize)
+        {
+            let fd = Fd::new(fd_idx as u32).unwrap();
+            debug_assert!(self.fds[fd_idx].is_none());
+            Ok(fd)
+        } else {
+            Err(SysError::NoMoreFd)
+        }
+    }
+
+    fn alloc_at(&mut self, fd: Fd) -> Result<(), SysError> {
+        if fd.raw() as usize >= self.fds.len() {
+            return Err(SysError::BadFileDescriptor);
+        }
+
+        if self.bitmap.test(fd.raw() as usize) {
+            Err(SysError::NoMoreFd)
+        } else {
+            self.bitmap.set(fd.raw() as usize);
+            debug_assert!(self.fds[fd.raw() as usize].is_none());
+            Ok(())
+        }
+    }
+
+    fn recycle(&mut self, fd: Fd) {
+        debug_assert!(fd < Fd(MAX_FD_PER_PROCESS as u32));
+        debug_assert!(self.fds[fd.raw() as usize].is_some());
+        self.fds[fd.raw() as usize] = None;
+        self.bitmap.clear(fd.raw() as usize);
+    }
+}
+
+// operations
+impl FilesState {
     pub fn new() -> Self {
         Self {
-            next_fd: Fd(0),
-            recycled_fds: BTreeSet::new(),
-            fd_table: HashMap::new(),
+            bitmap: Bitmap::new(),
+            fds: vec![None; MAX_FD_PER_PROCESS],
         }
     }
 
-    pub fn open_fd(&mut self, file: File, file_flags: FileFlags, fd_flags: FdFlags) -> Option<Fd> {
-        let fd = self.alloc_fd()?;
-        let file = Arc::new(ProcFile {
-            file,
-            flags: file_flags,
-        });
-
-        self.fd_table
-            .insert(fd, Arc::new(FileDesc::new(file, fd_flags)));
-        Some(fd)
+    fn open_fd(
+        &mut self,
+        file: File,
+        file_flags: FileFlags,
+        fd_flags: FdFlags,
+    ) -> Result<Fd, SysError> {
+        let fd = self.alloc()?;
+        let file_desc = Arc::new(FileDesc::new(
+            Arc::new(ProcFile {
+                file,
+                flags: file_flags,
+            }),
+            fd_flags,
+        ));
+        self.fds[fd.raw() as usize] = Some(file_desc);
+        Ok(fd)
     }
 
-    pub fn get_fd(&self, fd: Fd) -> Option<Arc<FileDesc>> {
-        self.fd_table.get(&fd).cloned()
-    }
+    fn close_fd(&mut self, fd: Fd) -> Result<(), SysError> {
+        if fd.raw() as usize >= self.fds.len() {
+            return Err(SysError::BadFileDescriptor);
+        }
 
-    pub fn close_fd(&mut self, fd: Fd) -> Option<Arc<FileDesc>> {
-        if let Some(file_desc) = self.fd_table.remove(&fd) {
-            self.recycled_fds.insert(fd);
-            Some(file_desc)
+        if self.bitmap.test(fd.raw() as usize) {
+            self.recycle(fd);
+            Ok(())
         } else {
-            None
+            Err(SysError::BadFileDescriptor)
         }
     }
 
-    pub fn dup(&mut self, old_fd: Fd) -> Option<Fd> {
-        let fd = self.get_fd(old_fd)?;
-        let new_fd = self.alloc_fd()?;
-        self.fd_table.insert(
-            new_fd,
-            Arc::new(FileDesc::new(fd.pfile.clone(), FdFlags::empty())),
-        );
-        Some(new_fd)
+    fn get_fd(&self, fd: Fd) -> Result<Arc<FileDesc>, SysError> {
+        if fd.raw() as usize >= self.fds.len() {
+            return Err(SysError::BadFileDescriptor);
+        }
+
+        if let Some(file_desc) = &self.fds[fd.raw() as usize] {
+            Ok(file_desc.clone())
+        } else {
+            Err(SysError::BadFileDescriptor)
+        }
     }
 
-    /// Mainly for F_DUPFD and F_DUPFD_CLOEXEC, which require us to dup to a fd
-    /// number greater than or equal to a specified value.
-    pub fn dup_ge_than(&mut self, old_fd: Fd, min_new_fd: Fd, close_on_exec: bool) -> Option<Fd> {
-        let fd = self.get_fd(old_fd)?;
+    fn dup(&mut self, old_fd: Fd) -> Result<Fd, SysError> {
+        let file_desc = self.get_fd(old_fd)?;
+        let fd = self.alloc()?;
+        // note: new file desc, shared proc file.
+        self.fds[fd.raw() as usize] = Some(Arc::new(FileDesc::new(
+            file_desc.pfile.clone(),
+            // Linux semantics: the new fd created by dup doesn't inherit the close-on-exec flag of
+            // the old fd.
+            FdFlags::empty(),
+        )));
+        Ok(fd)
+    }
 
-        // we need to find the first available fd number which is greater than or equal
-        // to min_new_fd.
-        let mut new_fd = min_new_fd;
-        while self.fd_table.contains_key(&new_fd) {
-            new_fd = Fd::new(new_fd.raw() + 1)?;
-        }
-        self.fd_table.insert(
-            new_fd,
-            Arc::new(FileDesc::new(
-                fd.pfile.clone(),
-                if close_on_exec {
-                    FdFlags::CLOSE_ON_EXEC
-                } else {
-                    FdFlags::empty()
-                },
-            )),
-        );
-
-        Some(new_fd)
+    fn dup_ge_than(
+        &mut self,
+        old_fd: Fd,
+        min_new_fd: Fd,
+        close_on_exec: bool,
+    ) -> Result<Fd, SysError> {
+        let file_desc = self.get_fd(old_fd)?;
+        let fd = self.alloc_ge_than(min_new_fd)?;
+        let new_file_desc = Arc::new(FileDesc::new(
+            file_desc.pfile.clone(),
+            if close_on_exec {
+                FdFlags::CLOSE_ON_EXEC
+            } else {
+                FdFlags::empty()
+            },
+        ));
+        self.fds[fd.raw() as usize] = Some(new_file_desc);
+        Ok(fd)
     }
 
     /// Linux's semantics of dup3 is a bit weird, currently we implement a
     /// reasonable subset of it. If in the future we get stuck with
     /// compatibility issues, we'll implement the rest of it.
-    pub fn dup3(&mut self, old_fd: Fd, new_fd: Fd, flags: FdFlags) -> Result<(), SysError> {
+    fn dup3(&mut self, old_fd: Fd, new_fd: Fd, flags: FdFlags) -> Result<(), SysError> {
+        if new_fd.raw() as usize >= self.fds.len() {
+            return Err(SysError::BadFileDescriptor);
+        }
+
         if old_fd == new_fd {
             return Err(SysError::InvalidArgument);
         }
 
-        let fd = self.get_fd(old_fd).ok_or(SysError::BadFileDescriptor)?;
+        let file_desc = self.get_fd(old_fd)?;
 
-        if self.fd_table.contains_key(&new_fd) {
-            self.close_fd(new_fd);
+        if self.bitmap.test(new_fd.raw() as usize) {
+            self.close_fd(new_fd)?;
         }
 
-        // we need to remove new_fd from recycled_fds, because after dup3, new_fd is no
-        // longer available for allocation, though new_fd might not be in recycled_fds
-        // if new_fd is larger than any previously allocated fd.
-        let exist = self.recycled_fds.remove(&new_fd);
-
-        if new_fd >= self.next_fd {
-            match Fd::new(new_fd.raw() + 1) {
-                Some(next_fd) => self.next_fd = next_fd,
-                None => {
-                    if exist {
-                        self.recycled_fds.insert(new_fd);
-                    }
-                    return Err(SysError::InvalidArgument);
-                },
-            }
-        }
-
-        self.fd_table
-            .insert(new_fd, Arc::new(FileDesc::new(fd.pfile.clone(), flags)));
-
+        let new_file_desc = Arc::new(FileDesc::new(file_desc.pfile.clone(), flags));
+        self.fds[new_fd.raw() as usize] = Some(new_file_desc);
+        self.bitmap.set(new_fd.raw() as usize);
         Ok(())
     }
 
-    pub fn fork(&self) -> Self {
-        let mut new = Self::new();
-        new.next_fd = self.next_fd;
-        new.recycled_fds = self.recycled_fds.clone();
-        new.fd_table = self
-            .fd_table
-            .iter()
-            // note that we can't clone fd_table directly, since fd flags is per-fd.
-            .map(|(fd, file_desc)| {
-                (
-                    *fd,
-                    Arc::new(
-                        // this clones file desc itself, not the arc, so that we can have different
-                        // fd flags for the new fd table.
-                        file_desc.as_ref().clone(),
-                    ),
-                )
-            })
-            .collect();
-        new
+    fn close_on_exec(&mut self) {
+        for fd in 0..self.fds.len() {
+            if let Some(file_desc) = &self.fds[fd] {
+                if file_desc.fd_flags().contains(FdFlags::CLOSE_ON_EXEC) {
+                    self.close_fd(Fd::new(fd as u32).unwrap()).expect(
+                        "we've validated those created fds before, so they must be valid to close",
+                    );
+                }
+            }
+        }
     }
 
-    /// Call this function to close all file descriptors with O_CLOEXEC flag
-    /// when executing a new program.
-    pub fn close_on_exec(&mut self) {
-        let cloexec_fds = self
-            .fd_table
+    pub fn fork(&self) -> Self {
+        // note: we should clone file desc itself, not the arc, so that we can
+        // have different fd flags for the new fd table.
+        let fds = self
+            .fds
             .iter()
-            .filter_map(|(fd, file_desc)| {
-                file_desc
-                    .fd_flags()
-                    .contains(FdFlags::CLOSE_ON_EXEC)
-                    .then_some(*fd)
+            .map(|fd_opt| {
+                fd_opt
+                    .as_ref()
+                    .map(|fd| Arc::new(FileDesc::new(fd.pfile.clone(), fd.fd_flags())))
             })
-            .collect::<Vec<_>>();
+            .collect();
+        let bitmap = self.bitmap.clone();
 
-        for fd in cloexec_fds {
-            self.close_fd(fd);
-        }
+        Self { bitmap, fds }
     }
 }
 
+// impl FilesState {
+//     fn alloc_fd(&mut self) -> Option<Fd> {
+//         if let Some(recycled_fd) = self.recycled_fds.iter().next().cloned() {
+//             self.recycled_fds.remove(&recycled_fd);
+//             Some(recycled_fd)
+//         } else {
+//             while self.fd_table.contains_key(&self.next_fd) {
+//                 let next_fd = Fd::new(self.next_fd.raw() + 1)?;
+//                 self.next_fd = next_fd;
+//             }
+//             let fd = self.next_fd;
+//             self.next_fd = Fd::new(self.next_fd.raw() + 1)?;
+//             Some(fd)
+//         }
+//     }
+//
+//     pub fn new() -> Self {
+//         Self {
+//             next_fd: Fd(0),
+//             recycled_fds: BTreeSet::new(),
+//             fd_table: HashMap::new(),
+//         }
+//     }
+//
+//     pub fn open_fd(&mut self, file: File, file_flags: FileFlags, fd_flags:
+// FdFlags) -> Option<Fd> {         let fd = self.alloc_fd()?;
+//         let file = Arc::new(ProcFile {
+//             file,
+//             flags: file_flags,
+//         });
+//
+//         self.fd_table
+//             .insert(fd, Arc::new(FileDesc::new(file, fd_flags)));
+//         Some(fd)
+//     }
+//
+//     pub fn get_fd(&self, fd: Fd) -> Option<Arc<FileDesc>> {
+//         self.fd_table.get(&fd).cloned()
+//     }
+//
+//     pub fn close_fd(&mut self, fd: Fd) -> Option<Arc<FileDesc>> {
+//         if let Some(file_desc) = self.fd_table.remove(&fd) {
+//             self.recycled_fds.insert(fd);
+//             Some(file_desc)
+//         } else {
+//             None
+//         }
+//     }
+//
+//     pub fn dup(&mut self, old_fd: Fd) -> Option<Fd> {
+//         let fd = self.get_fd(old_fd)?;
+//         let new_fd = self.alloc_fd()?;
+//         self.fd_table.insert(
+//             new_fd,
+//             Arc::new(FileDesc::new(fd.pfile.clone(), FdFlags::empty())),
+//         );
+//         Some(new_fd)
+//     }
+//
+//     /// Mainly for F_DUPFD and F_DUPFD_CLOEXEC, which require us to dup to a
+// fd     /// number greater than or equal to a specified value.
+//     pub fn dup_ge_than(&mut self, old_fd: Fd, min_new_fd: Fd, close_on_exec:
+// bool) -> Option<Fd> {         let fd = self.get_fd(old_fd)?;
+//
+//         // we need to find the first available fd number which is greater
+// than or equal         // to min_new_fd.
+//         let mut new_fd = min_new_fd;
+//         while self.fd_table.contains_key(&new_fd) {
+//             new_fd = Fd::new(new_fd.raw() + 1)?;
+//         }
+//         self.fd_table.insert(
+//             new_fd,
+//             Arc::new(FileDesc::new(
+//                 fd.pfile.clone(),
+//                 if close_on_exec {
+//                     FdFlags::CLOSE_ON_EXEC
+//                 } else {
+//                     FdFlags::empty()
+//                 },
+//             )),
+//         );
+//
+//         Some(new_fd)
+//     }
+//
+//     /// Linux's semantics of dup3 is a bit weird, currently we implement a
+//     /// reasonable subset of it. If in the future we get stuck with
+//     /// compatibility issues, we'll implement the rest of it.
+//     pub fn dup3(&mut self, old_fd: Fd, new_fd: Fd, flags: FdFlags) ->
+// Result<(), SysError> {         if old_fd == new_fd {
+//             return Err(SysError::InvalidArgument);
+//         }
+//
+//         let fd = self.get_fd(old_fd).ok_or(SysError::BadFileDescriptor)?;
+//
+//         if self.fd_table.contains_key(&new_fd) {
+//             self.close_fd(new_fd);
+//         }
+//
+//         // we need to remove new_fd from recycled_fds, because after dup3,
+// new_fd is no         // longer available for allocation, though new_fd might
+// not be in recycled_fds         // if new_fd is larger than any previously
+// allocated fd.         let exist = self.recycled_fds.remove(&new_fd);
+//
+//         if new_fd >= self.next_fd {
+//             match Fd::new(new_fd.raw() + 1) {
+//                 Some(next_fd) => self.next_fd = next_fd,
+//                 None => {
+//                     if exist {
+//                         self.recycled_fds.insert(new_fd);
+//                     }
+//                     return Err(SysError::InvalidArgument);
+//                 },
+//             }
+//         }
+//
+//         self.fd_table
+//             .insert(new_fd, Arc::new(FileDesc::new(fd.pfile.clone(),
+// flags)));
+//
+//         Ok(())
+//     }
+//
+//     pub fn fork(&self) -> Self {
+//         let mut new = Self::new();
+//         new.next_fd = self.next_fd;
+//         new.recycled_fds = self.recycled_fds.clone();
+//         new.fd_table = self
+//             .fd_table
+//             .iter()
+//             // note that we can't clone fd_table directly, since fd flags is
+// per-fd.             .map(|(fd, file_desc)| {
+//                 (
+//                     *fd,
+//                     Arc::new(
+//                         // this clones file desc itself, not the arc, so that
+// we can have different                         // fd flags for the new fd
+// table.                         file_desc.as_ref().clone(),
+//                     ),
+//                 )
+//             })
+//             .collect();
+//         new
+//     }
+//
+//     /// Call this function to close all file descriptors with O_CLOEXEC flag
+//     /// when executing a new program.
+//     pub fn close_on_exec(&mut self) {
+//         let cloexec_fds = self
+//             .fd_table
+//             .iter()
+//             .filter_map(|(fd, file_desc)| {
+//                 file_desc
+//                     .fd_flags()
+//                     .contains(FdFlags::CLOSE_ON_EXEC)
+//                     .then_some(*fd)
+//             })
+//             .collect::<Vec<_>>();
+//
+//         for fd in cloexec_fds {
+//             self.close_fd(fd);
+//         }
+//     }
+// }
+
 impl Task {
-    pub fn open_fd(&self, file: File, file_flags: FileFlags, fd_flags: FdFlags) -> Option<Fd> {
+    pub fn open_fd(
+        &self,
+        file: File,
+        file_flags: FileFlags,
+        fd_flags: FdFlags,
+    ) -> Result<Fd, SysError> {
         let mut files_state = self.files_state.write();
         files_state.open_fd(file, file_flags, fd_flags)
     }
 
-    pub fn get_fd(&self, fd: Fd) -> Option<Arc<FileDesc>> {
+    pub fn get_fd(&self, fd: Fd) -> Result<Arc<FileDesc>, SysError> {
         let files_state = self.files_state.read();
         files_state.get_fd(fd)
     }
@@ -425,17 +628,22 @@ impl Task {
         self.files_state = files_state;
     }
 
-    pub fn close_fd(&self, fd: Fd) -> Option<Arc<FileDesc>> {
+    pub fn close_fd(&self, fd: Fd) -> Result<(), SysError> {
         let mut files_state = self.files_state.write();
         files_state.close_fd(fd)
     }
 
-    pub fn dup(&self, old_fd: Fd) -> Option<Fd> {
+    pub fn dup(&self, old_fd: Fd) -> Result<Fd, SysError> {
         let mut files_state = self.files_state.write();
         files_state.dup(old_fd)
     }
 
-    pub fn dup_ge_than(&self, old_fd: Fd, min_new_fd: Fd, close_on_exec: bool) -> Option<Fd> {
+    pub fn dup_ge_than(
+        &self,
+        old_fd: Fd,
+        min_new_fd: Fd,
+        close_on_exec: bool,
+    ) -> Result<Fd, SysError> {
         let mut files_state = self.files_state.write();
         files_state.dup_ge_than(old_fd, min_new_fd, close_on_exec)
     }

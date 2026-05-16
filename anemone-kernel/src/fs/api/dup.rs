@@ -8,7 +8,5 @@ use crate::{prelude::*, task::files::Fd};
 #[syscall(SYS_DUP)]
 fn sys_dup(oldfd: Fd) -> Result<u64, SysError> {
     let task = get_current_task();
-    task.dup(oldfd)
-        .map(|newfd| newfd.raw() as u64)
-        .ok_or(SysError::BadFileDescriptor)
+    task.dup(oldfd).map(|newfd| newfd.raw() as u64)
 }

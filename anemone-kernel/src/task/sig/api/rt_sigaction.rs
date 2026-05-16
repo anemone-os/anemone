@@ -82,10 +82,12 @@ fn sys_rt_sigaction(
             linux_signal::SIG_IGN => SignalAction::Ignore,
             addr => SignalAction::Custom(VirtAddr::new(addr as u64)),
         };
-        let sa_flags = SaFlags::from_bits(sa_flags).ok_or_else(|| {
+        // truncate upper bits.
+        let sa_flags = SaFlags::from_bits(sa_flags as u32 as u64).ok_or_else(|| {
             knoticeln!("sys_rt_sigaction: unrecognized sa_flags: {:#x}", sa_flags);
             SysError::InvalidArgument
         })?;
+        kdebugln!("sys_rt_sigaction: converted sa_flags: {:?}", sa_flags);
 
         let mut sa_mask = SigSet::new_with_mask(sa_mask.bits);
         sa_mask.clear(SigNo::SIGKILL); // SIGKILL cannot be masked.
@@ -103,6 +105,12 @@ fn sys_rt_sigaction(
         );
 
         task.sig_disposition.write().set_disposition(sig, kaction);
+        if kaction.action.is_ignored() {
+            // don't forget this step, otherwise stale ignored pending signals may cause
+            // unexpected wakeups.
+            task.get_thread_group()
+                .flush_specific_signals(SigSet::new_with_signos(&[sig]));
+        }
     }
 
     Ok(0)

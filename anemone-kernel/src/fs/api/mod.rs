@@ -21,6 +21,7 @@ pub mod getdents64;
 pub mod getrandom;
 pub mod ioctl;
 pub mod iomux;
+pub mod lseek;
 pub mod mkdirat;
 pub mod mount;
 pub mod openat;
@@ -78,7 +79,7 @@ mod args {
             match self {
                 AtFd::Cwd => Ok(task.cwd().clone()),
                 AtFd::Fd(fd) => {
-                    let file = task.get_fd(*fd).ok_or(SysError::BadFileDescriptor)?;
+                    let file = task.get_fd(*fd)?;
                     if !file.file_flags().contains(FileFlags::READ) {
                         // or O_PATH, which hasn't been implemented yet.
                         return Err(SysError::BadFileDescriptor);

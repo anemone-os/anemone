@@ -78,6 +78,13 @@ impl CloneFlags {
             return Err(SysError::InvalidArgument);
         }
 
+        if self.contains(CloneFlags::SIGHAND) && !self.contains(CloneFlags::THREAD) {
+            knoticeln!(
+                "[NYI] clone: currently CLONE_SIGHAND flag can only be used together with CLONE_THREAD flag, otherwise we need to support shared signal handlers between different thread groups, which is a bit complex to implement. so we'll just return NYI for now."
+            );
+            return Err(SysError::NotYetImplemented);
+        }
+
         // must not be used together
         if self.contains(CloneFlags::CLEAR_SIGHAND) && self.contains(CloneFlags::SIGHAND) {
             knoticeln!(

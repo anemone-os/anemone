@@ -12,5 +12,6 @@ pub mod rt_sigpending;
 pub mod rt_sigprocmask;
 pub mod rt_sigqueueinfo;
 pub mod rt_sigreturn;
+pub mod rt_sigtimedwait;
 pub mod sigaltstack;
 pub mod tgkill;
