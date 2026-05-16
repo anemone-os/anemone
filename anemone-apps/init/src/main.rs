@@ -32,9 +32,32 @@ pub fn main() -> Result<(), Errno> {
         println!("platform: {:#x?}", platform());
         println!("base platform: {:#x?}", base_platform());
     }
-    run("/bin/float-test", &["user-test"], &[])?;
+    run("/bin/float-test", &["float-test"], &[])?;
     run("/bin/user-test", &["user-test"], &[])?;
-    Ok(())
+    loop {
+        let mut wstatus = WStatusRaw::EMPTY;
+        match wait4(WaitFor::AnyChild, Some(&mut wstatus), WaitOptions::empty()) {
+            Ok(Some(tid)) => {
+                println!(
+                    "init: child task #{} exited with code {:?}",
+                    tid,
+                    wstatus.read()
+                );
+            },
+            Ok(None) => {
+                panic!(
+                    "init: wait4 returned None but no error, this should not happen, since we didn't specify WNOHANG"
+                );
+            },
+            Err(e) => {
+                if e != ECHILD {
+                    panic!("init: cannot recycle child tasks: {}", e);
+                } else {
+                    sched_yield().expect("init: failed to yield");
+                }
+            },
+        }
+    }
 }
 pub fn run(app: &str, argv: &[&str], envp: &[&str]) -> Result<(), Errno> {
     let mut tidc = 0;
@@ -50,34 +73,12 @@ pub fn run(app: &str, argv: &[&str], envp: &[&str]) -> Result<(), Errno> {
     {
         Some(tid) => {
             println!("init: forked child process with tid {}", tid);
-            loop {
-                let mut wstatus = WStatusRaw::EMPTY;
-                match wait4(WaitFor::AnyChild, Some(&mut wstatus), WaitOptions::empty()) {
-                    Ok(Some(tid)) => {
-                        println!(
-                            "init: child task #{} exited with code {:?}",
-                            tid,
-                            wstatus.read()
-                        )
-                    },
-                    Ok(None) => {
-                        panic!(
-                            "init: wait4 returned None but no error, this should not happen, since we didn't specify WNOHANG"
-                        );
-                    },
-                    Err(e) => {
-                        if e != ECHILD {
-                            panic!("init: cannot recycle child tasks: {}", e);
-                        } else {
-                            sched_yield().expect("init: failed to yield");
-                        }
-                    },
-                }
-            }
+            Ok(())
         },
         None => {
             // child
-            execve(app, argv, envp).expect("init: failed to execve user-test");
+            execve(app, argv, envp)
+                .unwrap_or_else(|code| panic!("init: failed to execve {}: {}", app, code));
             unreachable!();
         },
     }
