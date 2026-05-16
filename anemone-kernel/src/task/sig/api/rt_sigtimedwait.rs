@@ -86,7 +86,7 @@ fn sys_rt_sigtimedwait(
         Timeout(Duration),
     }
 
-    // check pending signals. this step must be place after status update.
+    // check pending signals. this step must be placed after status update.
     let wait_outcome = if let Some(signal) = task.fetch_specific_signal(uthese) {
         task.update_status_with(|_prev| (TaskStatus::Runnable, ()));
         WaitOutcome::Signal(signal)

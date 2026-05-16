@@ -43,8 +43,8 @@ static STATIC_CLOCKS: &[&dyn Clock] = &[
     &ProcessCpuTimeClock,
     &ThreadCpuTimeClock,
     &MonotonicClock,
-    &MonotonicCoarseClock,
     &RealtimeCoarseClock,
+    &MonotonicCoarseClock,
 ];
 
 // TODO: dynamic registration of clocks. e.g. for those dynamically-created rtc

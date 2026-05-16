@@ -70,6 +70,8 @@ fn sys_lseek(fd: Fd, offset: i64, whence: SeekWhence) -> Result<u64, SysError> {
         },
         SeekWhence::End => {
             // TODO: make this atomic.
+            // TODO: this is wrong for some file types (e.g. procfs files). should we
+            // delegate the seek logic to the file system?
             let new_pos = vfs_file.inode().size() as i64 + offset;
             if new_pos < 0 {
                 return Err(SysError::InvalidArgument);

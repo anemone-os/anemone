@@ -230,7 +230,7 @@ impl PendingSignals {
     /// TODO: fetch_any_with() for custom order.
     pub fn fetch_any(&mut self, mask: SigSet) -> Option<Signal> {
         debug_assert!(
-            !mask.contains(&SigSet::new_with_signos(&[SigNo::SIGKILL, SigNo::SIGSTOP])),
+            !mask.intersects_with(&SigSet::new_with_signos(&[SigNo::SIGKILL, SigNo::SIGSTOP])),
             "SIGKILL and SIGSTOP cannot be masked"
         );
 
