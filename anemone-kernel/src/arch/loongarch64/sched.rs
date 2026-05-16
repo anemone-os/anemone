@@ -94,7 +94,7 @@ impl SchedArchTrait for LA64SchedArch {
             }
             if load_fr {
                 load_next_frs(
-                    &cur.as_ref()
+                    &next.as_ref()
                         .expect("next task context should never be null")
                         .fpu,
                 );

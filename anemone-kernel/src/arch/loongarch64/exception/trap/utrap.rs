@@ -180,7 +180,7 @@ core::arch::global_asm!(
 unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
     debug_assert!(IntrArch::local_intr_disabled());
 
-    /// Fpu are disabled in kernel mode
+    // Fpu are disabled in kernel mode
     set_fpu_enable(false);
 
     // SAFETY: There is no another reference to the trapframe, and the trapframe is

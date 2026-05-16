@@ -4,7 +4,7 @@ use crate::{
             intr::handle_intr,
             trap::{RiscV64Exception, RiscV64Interrupt, RiscV64TrapFrame},
         },
-        fpu::{self, init_fpu_for_task, set_fpu_enable},
+        fpu::{self, init_fpu_for_current_task, set_fpu_enable},
     },
     prelude::{fault::handle_user_page_fault, *},
     task::{
@@ -293,7 +293,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                     ));
                 } else {
                     unsafe {
-                        init_fpu_for_task(&task);
+                        init_fpu_for_current_task();
                         kinfoln!(
                             "({}) enabled fpu for {} ({})",
                             cur_cpu_id(),

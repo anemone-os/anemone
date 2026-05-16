@@ -10,7 +10,6 @@
 			"isBackground": true,
 			"presentation": {
 				"reveal": "always",
-				"close": true
 			},
 		},
 		{
@@ -22,7 +21,6 @@
 			"isBackground": true,
 			"presentation": {
 				"reveal": "always",
-				"close": true
 			},
 		}
 	]

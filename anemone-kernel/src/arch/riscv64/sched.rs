@@ -82,10 +82,20 @@ impl SchedArchTrait for RiscV64SchedArch {
 
         unsafe {
             if save_fr {
-                save_current_frs(&mut (*cur).fpu);
+                save_current_frs(
+                    &mut cur
+                        .as_mut()
+                        .expect("current task context should never be null")
+                        .fpu,
+                );
             }
             if load_fr {
-                load_next_frs(&(*next).fpu);
+                load_next_frs(
+                    &next
+                        .as_ref()
+                        .expect("next task context should never be null")
+                        .fpu,
+                );
             }
             __switch(cur, next);
         }
