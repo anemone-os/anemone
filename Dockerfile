@@ -4,20 +4,6 @@
 FROM ubuntu:24.04 AS build_qemu
 ARG QEMU_VERSION=10.0.5
 WORKDIR /build
-RUN cat <<'EOF' > /etc/apt/sources.list
-# Ubuntu 24.04 noble 阿里云镜像源（HTTPS证书合法，无校验失败）
-deb http://mirrors.aliyun.com/ubuntu/ noble main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-updates main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-backports main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-security main restricted universe multiverse
-
-# 源码源（注释，加快update）
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-updates main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-backports main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-security main restricted universe multiverse
-EOF
-
 RUN apt update && apt install -y build-essential \
     wget \
     python3 \
@@ -40,19 +26,6 @@ FROM ubuntu:24.04 AS build_lwext4_toolchains
 ARG RISCV64_LWEXT4_TOOLCHAIN_URL=https://gitlab.educg.net/wangmingjian/os-contest-2024-image/-/raw/master/riscv64-linux-musl-cross.tgz
 ARG LOONGARCH64_LWEXT4_TOOLCHAIN_URL=https://gitlab.educg.net/wangmingjian/os-contest-2024-image/-/raw/master/loongarch64-linux-musl-cross.tgz
 WORKDIR /tmp/toolchains
-RUN cat <<'EOF' > /etc/apt/sources.list
-# Ubuntu 24.04 noble 阿里云镜像源（HTTPS证书合法，无校验失败）
-deb http://mirrors.aliyun.com/ubuntu/ noble main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-updates main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-backports main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-security main restricted universe multiverse
-
-# 源码源（注释，加快update）
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-updates main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-backports main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-security main restricted universe multiverse
-EOF
 RUN apt update && apt install -y \
     ca-certificates \
     wget \
@@ -66,23 +39,6 @@ RUN mkdir -p /opt/toolchains && \
     rm loongarch64-linux-musl-cross.tgz
 
 FROM ubuntu:24.04 AS fin_dev
-
-
-RUN cat <<'EOF' > /etc/apt/sources.list
-# Ubuntu 24.04 noble 阿里云镜像源（HTTPS证书合法，无校验失败）
-deb http://mirrors.aliyun.com/ubuntu/ noble main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-updates main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-backports main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-security main restricted universe multiverse
-
-# 源码源（注释，加快update）
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-updates main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-backports main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-security main restricted universe multiverse
-EOF
-
-
 RUN apt update && apt install -y \
     build-essential \
     python3 \
@@ -105,19 +61,6 @@ ENV LWEXT4_TOOLCHAIN_RISCV64=/opt/toolchains/riscv64-linux-musl-cross \
 ENV RUSTUP_HOME=/opt/rust/rustup \
     CARGO_HOME=/opt/rust/cargo \
     PATH="/opt/rust/cargo/bin:${PATH}"
-RUN cat <<'EOF' > /etc/apt/sources.list
-# Ubuntu 24.04 noble 阿里云镜像源（HTTPS证书合法，无校验失败）
-deb http://mirrors.aliyun.com/ubuntu/ noble main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-updates main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-backports main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-security main restricted universe multiverse
-
-# 源码源（注释，加快update）
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-updates main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-backports main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-security main restricted universe multiverse
-EOF
 RUN mkdir -p /opt/rust/cargo /opt/rust/rustup && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path && \
     cargo install cargo-fuzz just just-lsp cargo-binutils && \
@@ -129,22 +72,6 @@ ENV CARGO_HOME=
 ENTRYPOINT [ "bash" ]
 
 FROM ubuntu:24.04 AS fin_ci
-
-RUN cat <<'EOF' > /etc/apt/sources.list
-# Ubuntu 24.04 noble 阿里云镜像源（HTTPS证书合法，无校验失败）
-deb http://mirrors.aliyun.com/ubuntu/ noble main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-updates main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-backports main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ noble-security main restricted universe multiverse
-
-# 源码源（注释，加快update）
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-updates main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-backports main restricted universe multiverse
-# deb-src http://mirrors.aliyun.com/ubuntu/ noble-security main restricted universe multiverse
-EOF
-
-
 RUN apt update && apt install -y \
     build-essential \
     python3 \
