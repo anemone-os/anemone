@@ -50,6 +50,12 @@ impl KernelStack {
     pub fn stack_top(&self) -> VirtAddr {
         self.vpn_range.end().to_virt_addr()
     }
+
+    pub fn in_guard_page(&self, addr: VirtAddr) -> bool {
+        let guard_start = self.vpn_range.start().to_virt_addr();
+        let guard_end = (self.vpn_range.start() + 1).to_virt_addr();
+        addr >= guard_start && addr < guard_end
+    }
 }
 
 impl Drop for KernelStack {

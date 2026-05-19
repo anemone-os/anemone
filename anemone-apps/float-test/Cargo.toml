@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anemone-rs = { path = "../../anemone-rs" }
+paste = { version = "1.0.15" }
 
 [workspace]
 members = ["."]

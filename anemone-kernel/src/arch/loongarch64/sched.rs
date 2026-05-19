@@ -3,7 +3,7 @@ use core::arch::naked_asm;
 use crate::{
     arch::loongarch64::{
         exception::trap::{__ktrap_return_to_task, LA64TrapFrame, utrap_return_to_task},
-        fpu::{FpuTaskContext, load_next_frs, save_current_frs},
+        fpu::FpuTaskContext,
     },
     prelude::*,
     sched::{ParameterList, SchedArchTrait, TaskContextArch},
@@ -76,29 +76,9 @@ pub struct LA64SchedArch;
 impl SchedArchTrait for LA64SchedArch {
     type TaskContext = LA64TaskContext;
 
-    unsafe fn switch(
-        cur: *mut TaskContext,
-        next: *const TaskContext,
-        save_fr: bool,
-        load_fr: bool,
-    ) {
+    unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext) {
         debug_assert!(IntrArch::local_intr_disabled());
         unsafe {
-            if save_fr {
-                save_current_frs(
-                    &mut cur
-                        .as_mut()
-                        .expect("current task context should never be null")
-                        .fpu,
-                );
-            }
-            if load_fr {
-                load_next_frs(
-                    &next.as_ref()
-                        .expect("next task context should never be null")
-                        .fpu,
-                );
-            }
             __switch(cur, next);
         }
     }

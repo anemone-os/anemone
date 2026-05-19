@@ -32,8 +32,10 @@ pub fn main() -> Result<(), Errno> {
         println!("platform: {:#x?}", platform());
         println!("base platform: {:#x?}", base_platform());
     }
-    run("/bin/float-test", &["float-test"], &[])?;
-    run("/bin/user-test", &["user-test"], &[])?;
+
+    // run("/bin/float-test", &["float-test", "--type", "common"], &[])?;
+    run("/bin/float-test", &["float-test", "--type", "sig"], &[])?;
+    // run("/bin/user-test", &["user-test"], &[])?;
     loop {
         let mut wstatus = WStatusRaw::EMPTY;
         match wait4(WaitFor::AnyChild, Some(&mut wstatus), WaitOptions::empty()) {

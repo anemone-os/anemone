@@ -715,7 +715,13 @@ fn perform_signal_action(
                 // will set that anyway.
             }
 
-            SignalArch::encode_ucontext(&mut ucontext, trapframe, prev_mask, altstack);
+            SignalArch::encode_ucontext(
+                &mut ucontext,
+                trapframe,
+                prev_mask,
+                altstack,
+                task.fpu_used(),
+            );
 
             // construct signal frame on user stack.
             let frame = RtSigFrame {

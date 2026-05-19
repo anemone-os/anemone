@@ -24,9 +24,8 @@ pub unsafe fn switch_out() {
         let cur_ctx = curr_task.get_sched_ctx_mut();
         let sched_ctx = get_local_sched_ctx();
         curr_task.on_switch_out();
-        let fpu_used = curr_task.fpu_used();
         drop(curr_task);
-        SchedArch::switch(cur_ctx, sched_ctx, fpu_used, false);
+        SchedArch::switch(cur_ctx, sched_ctx);
     }
 }
 
@@ -45,9 +44,8 @@ pub unsafe fn switch_to(task: Arc<Task>) {
         let sched_ctx = get_local_sched_ctx_mut();
         let next_ctx = task.get_sched_ctx();
         task.on_switch_in();
-        let fpu_used = task.fpu_used();
         set_current_task(Some(task));
-        SchedArch::switch(sched_ctx, next_ctx, false, fpu_used);
+        SchedArch::switch(sched_ctx, next_ctx);
     }
 }
 
@@ -94,7 +92,7 @@ pub unsafe fn load_context(ctx: TaskContext) -> ! {
     assert!(IntrArch::local_intr_disabled());
     unsafe {
         let mut placeholder = TaskContext::ZEROED;
-        SchedArch::switch(&mut placeholder, &ctx, false, false);
+        SchedArch::switch(&mut placeholder, &ctx);
     }
     unreachable!();
 }

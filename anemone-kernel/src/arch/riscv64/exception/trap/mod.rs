@@ -1,6 +1,6 @@
-use core::arch::asm;
+use core::{arch::asm};
 
-use crate::prelude::*;
+use crate::{arch::riscv64::fpu::FpuTaskContext, prelude::*};
 
 mod ktrap;
 pub use ktrap::*;
@@ -96,6 +96,7 @@ pub struct RiscV64TrapFrame {
     /// Current implementation relies on the fact that we don't support
     /// cross-cpu scheduling.
     ktp: u64,
+    fpu_regs: FpuTaskContext,
 }
 
 impl RiscV64TrapFrame {
@@ -138,6 +139,7 @@ impl RiscV64TrapFrame {
             // kthread should not use this when doing traps.
             // initialize this with a canary value to catch bugs that accidentally use this field.
             ktp: 0x39393939,
+            fpu_regs: FpuTaskContext::ZEROED,
         }
     }
 
@@ -169,6 +171,7 @@ impl RiscV64TrapFrame {
             scause: 0,
             sscratch: kstack_top.get(),
             ktp: cur_tp,
+            fpu_regs: FpuTaskContext::ZEROED,
         }
     }
 
@@ -189,6 +192,7 @@ impl TrapFrameArch for RiscV64TrapFrame {
         scause: 0,
         sscratch: 0,
         ktp: 0,
+        fpu_regs: FpuTaskContext::ZEROED,
     };
 
     fn sp(&self) -> u64 {
@@ -245,6 +249,16 @@ impl SyscallCtxArch for RiscV64TrapFrame {
 
     fn set_syscall_retval(&mut self, retval: u64) {
         self.gpr.x[10] = retval;
+    }
+}
+
+impl RiscV64TrapFrame {
+    pub fn fpu_regs(&self) -> &FpuTaskContext {
+        &self.fpu_regs
+    }
+
+    pub fn fpu_regs_mut(&mut self) -> &mut FpuTaskContext {
+        &mut self.fpu_regs
     }
 }
 

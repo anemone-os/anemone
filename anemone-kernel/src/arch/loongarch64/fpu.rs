@@ -1,6 +1,4 @@
 use core::arch::naked_asm;
-
-use alloc::sync::Arc;
 use la_insc::reg::{csr::euen, euen::Euen};
 
 use crate::prelude::*;
@@ -11,21 +9,22 @@ use crate::prelude::*;
 /// (`fcc0`–`fcc7`), and the FPU control/status register (`fcsr`). Saved and
 /// restored on context switch when the task uses the FPU.
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct FpuTaskContext {
     /// All 32 FPRs `$f0`–`$f31`, each 64-bit.
-    f: [u64; 32],
+    pub(super) f: [u64; 32],
     /// FPU condition flags `fcc0`–`fcc7`, packed into one u64 (bit N = fccN).
-    fcc: u64,
+    pub(super) fcc: u64,
     /// FPU control and status register (`fcsr`).
-    fcsr: u64,
+    pub(super) fcsr: u64,
 }
 
 impl FpuTaskContext {
     /// Zeroed FPU context, used for lazy FPU initialization.
     ///
-    /// When a task first touches the FPU, the kernel enables the FPU and loads this
-    /// zeroed state — the task's FPRs, condition flags, and `fcsr` are all zeroed
-    /// out.
+    /// When a task first touches the FPU, the kernel enables the FPU and loads
+    /// this zeroed state — the task's FPRs, condition flags, and `fcsr` are
+    /// all zeroed out.
     pub const ZEROED: Self = Self {
         f: [0; 32],
         fcc: 0,
@@ -35,21 +34,28 @@ impl FpuTaskContext {
 
 /// Initialize FPU context for the current task on first FPU instruction.
 ///
-/// Marks the task as FPU-using (`fpu_used = true`) and loads a zeroed FPU context.
-/// Called once from the floating-point-disabled trap handler when a user task
-/// executes its first FPU instruction.
+/// Marks the task as FPU-using (`fpu_used = true`) and loads a zeroed FPU
+/// context. Called once from the floating-point-disabled trap handler when a
+/// user task executes its first FPU instruction.
 ///
 /// # Safety
 ///
 /// Must be called with interrupts disabled.
-pub unsafe fn init_fpu_for_current_task() {
+pub unsafe fn init_fpu_for_current_task(trapframe: &mut TrapFrame) {
     let task = get_current_task();
     unsafe {
         with_intr_disabled(|| {
             task.set_fpu_used();
             load_next_frs(&FpuTaskContext::ZEROED);
         });
+        *trapframe.fpu_regs_mut() = FpuTaskContext::ZEROED;
     }
+}
+
+/// Get the current CPU's FPU enabled/disabled status by reading the `FPE` bit
+/// in the `euen` CSR.
+pub fn get_fpu_status() -> bool {
+    (unsafe { euen::csr_read() } & Euen::FPE).bits() != 0
 }
 
 /// Enable or disable the FPU for the current CPU.
@@ -61,7 +67,7 @@ pub unsafe fn init_fpu_for_current_task() {
 /// # Panics
 ///
 /// Panics if local interrupts are not disabled.
-pub fn set_fpu_enable(enable: bool) {
+pub fn set_fpu_status(enable: bool) {
     debug_assert!(
         IntrArch::local_intr_disabled(),
         "FPU enable/disable should only be called with interrupts disabled"
@@ -81,21 +87,22 @@ pub fn set_fpu_enable(enable: bool) {
 ///
 /// The FPU is temporarily enabled for the save operation, then disabled again.
 pub fn save_current_frs(cur: *mut FpuTaskContext) {
-    set_fpu_enable(true);
+    set_fpu_status(true);
     unsafe { __save_current_frs(cur) }
-    set_fpu_enable(false);
+    set_fpu_status(false);
 }
 
 /// Load FPU state from the given `FpuTaskContext` into the current CPU.
 ///
 /// The FPU is temporarily enabled for the load operation, then disabled again.
 pub fn load_next_frs(cur: *const FpuTaskContext) {
-    set_fpu_enable(true);
+    set_fpu_status(true);
     unsafe { __load_next_frs(cur) }
-    set_fpu_enable(false);
+    set_fpu_status(false);
 }
 
-/// Low-level assembly routine to save all FPU registers from the CPU into memory.
+/// Low-level assembly routine to save all FPU registers from the CPU into
+/// memory.
 ///
 /// Stores 32 FPRs (`$f0`–`$f31`), 8 condition flags (`fcc0`–`fcc7`), and `fcsr`
 /// into the `FpuTaskContext` at `$a0`.
@@ -179,10 +186,11 @@ unsafe extern "C" fn __save_current_frs(cur: *mut FpuTaskContext) {
     )
 }
 
-/// Low-level assembly routine to load all FPU registers from memory into the CPU.
+/// Low-level assembly routine to load all FPU registers from memory into the
+/// CPU.
 ///
-/// Restores 32 FPRs (`$f0`–`$f31`), 8 condition flags (`fcc0`–`fcc7`), and `fcsr`
-/// from the `FpuTaskContext` at `$a0`.
+/// Restores 32 FPRs (`$f0`–`$f31`), 8 condition flags (`fcc0`–`fcc7`), and
+/// `fcsr` from the `FpuTaskContext` at `$a0`.
 ///
 /// # Safety
 ///

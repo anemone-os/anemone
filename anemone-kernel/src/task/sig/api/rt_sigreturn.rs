@@ -53,7 +53,7 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
     });
 
     // 3. restore the trapframe according to the ucontext.
-    SignalArch::restore_ucontext(&ucontext, __trapframe__);
+    SignalArch::restore_ucontext(&ucontext, __trapframe__, task.fpu_used());
 
     // 4. sigmask
     {

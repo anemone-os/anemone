@@ -212,38 +212,67 @@ pub mod linux {
         use core::ffi::c_void;
 
         use crate::process::linux::signal::sifields::SigInfoFields;
-
-        // unreliable signals
+        /// Hangup (POSIX).
         pub const SIGHUP: u32 = 1;
+        /// Interrupt (ANSI).
         pub const SIGINT: u32 = 2;
+        /// Quit (POSIX).
         pub const SIGQUIT: u32 = 3;
+        /// Illegal instruction (ANSI).
         pub const SIGILL: u32 = 4;
+        /// Trace trap (POSIX).
         pub const SIGTRAP: u32 = 5;
+        /// Abort (ANSI).
         pub const SIGABRT: u32 = 6;
+        /// BUS error (4.2 BSD).
         pub const SIGBUS: u32 = 7;
+        /// Floating-point exception (ANSI).
         pub const SIGFPE: u32 = 8;
+        /// Kill, unblockable (POSIX).
         pub const SIGKILL: u32 = 9;
+        /// User-defined signal 1 (POSIX).
         pub const SIGUSR1: u32 = 10;
+        /// Segmentation violation (ANSI).
         pub const SIGSEGV: u32 = 11;
+        /// User-defined signal 2 (POSIX).
         pub const SIGUSR2: u32 = 12;
+        /// Broken pipe (POSIX).
         pub const SIGPIPE: u32 = 13;
+        /// Alarm clock (POSIX).
         pub const SIGALRM: u32 = 14;
+        /// Termination (ANSI).
         pub const SIGTERM: u32 = 15;
+        /// Stack fault.
         pub const SIGSTKFLT: u32 = 16;
+        /// Child status has changed (POSIX).
         pub const SIGCHLD: u32 = 17;
+        /// Continue (POSIX).
         pub const SIGCONT: u32 = 18;
+        /// Stop, unblockable (POSIX).
         pub const SIGSTOP: u32 = 19;
+        /// Keyboard stop (POSIX).
         pub const SIGTSTP: u32 = 20;
+        /// Background read from tty (POSIX).
         pub const SIGTTIN: u32 = 21;
+        /// Background write to tty (POSIX).
         pub const SIGTTOU: u32 = 22;
+        /// Urgent condition on socket (4.2 BSD).
         pub const SIGURG: u32 = 23;
+        /// CPU limit exceeded (4.2 BSD).
         pub const SIGXCPU: u32 = 24;
+        /// File size limit exceeded (4.2 BSD).
         pub const SIGXFSZ: u32 = 25;
+        /// Virtual alarm clock (4.2 BSD).
         pub const SIGVTALRM: u32 = 26;
+        /// Profiling alarm clock (4.2 BSD).
         pub const SIGPROF: u32 = 27;
+        /// Window size change (4.3 BSD, Sun).
         pub const SIGWINCH: u32 = 28;
+        /// I/O now possible (4.2 BSD).
         pub const SIGIO: u32 = 29;
+        /// Power failure restart (System V).
         pub const SIGPWR: u32 = 30;
+        /// Bad system call.
         pub const SIGSYS: u32 = 31;
 
         // reliable/realtime signals
@@ -452,7 +481,7 @@ pub mod linux {
                 /// We only care about riscv64 with D extension for now. That
                 /// huge union in Linux is too complicated to deal with...
                 pub sc_fpregs: [u64; 32],
-                pub __fscr: u32,
+                pub fcsr: u64,
             }
 
             impl SigContext {
@@ -505,6 +534,9 @@ pub mod linux {
                 pub sc_pc: u64,
                 pub sc_regs: [u64; 32],
                 pub sc_flags: u32,
+                pub fregs: [u64; 32],
+                pub fcc: u64,
+                pub fcsr: u64,
             }
 
             impl SigContext {

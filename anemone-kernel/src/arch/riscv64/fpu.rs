@@ -1,27 +1,27 @@
 use core::arch::naked_asm;
-
-use alloc::sync::Arc;
 use riscv::register::sstatus::{self, FS, Sstatus};
 
 use crate::{arch::riscv64::exception::RiscV64TrapFrame, prelude::*};
 
 /// Saved FPU context for a RISC-V64 task.
 ///
-/// Contains all 32 floating-point registers (`f0`–`f31`) and the FPU control/status
-/// register (`fcsr`). Saved and restored on context switch when the task uses the FPU.
+/// Contains all 32 floating-point registers (`f0`–`f31`) and the FPU
+/// control/status register (`fcsr`). Saved and restored on context switch when
+/// the task uses the FPU.
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct FpuTaskContext {
     /// All 32 FPRs `f0`–`f31`, each 64-bit.
-    f: [u64; 32],
+    pub(super) f: [u64; 32],
     /// FPU control and status register (`fcsr`).
-    fcsr: u64,
+    pub(super) fcsr: u64,
 }
 
 impl FpuTaskContext {
     /// Zeroed FPU context, used for lazy FPU initialization.
     ///
-    /// When a task first touches the FPU, the kernel enables the FPU and loads this
-    /// zeroed state — the task's FPRs and `fcsr` are all zeroed out.
+    /// When a task first touches the FPU, the kernel enables the FPU and loads
+    /// this zeroed state — the task's FPRs and `fcsr` are all zeroed out.
     pub const ZEROED: Self = Self {
         f: [0; 32],
         fcsr: 0,
@@ -30,33 +30,33 @@ impl FpuTaskContext {
 
 /// Initialize FPU context for the current task on first FPU instruction.
 ///
-/// Marks the task as FPU-using (`fpu_used = true`) and loads a zeroed FPU context.
-/// Called once from the illegal-instruction trap handler when a user task executes
-/// its first FPU instruction.
+/// Marks the task as FPU-using (`fpu_used = true`) and loads a zeroed FPU
+/// context. Called once from the illegal-instruction trap handler when a user
+/// task executes its first FPU instruction.
 ///
 /// # Safety
 ///
 /// Must be called with interrupts disabled.
-pub unsafe fn init_fpu_for_current_task() {
+pub unsafe fn init_fpu_for_current_task(trapframe: &mut RiscV64TrapFrame) {
     let task = get_current_task();
     unsafe {
         with_intr_disabled(|| {
             task.set_fpu_used();
-            load_next_frs(&FpuTaskContext::ZEROED);
+            *trapframe.fpu_regs_mut() = FpuTaskContext::ZEROED;
         });
     }
 }
 
 /// Enable or disable the FPU for the current CPU.
 ///
-/// When enabling, sets `sstatus.fs` to `Initial`; when disabling, sets it to `Off`.
-/// If a `trapframe` is provided, the `sstatus` value is written back to the trapframe
-/// so the restored user task sees the correct FPU state.
+/// When enabling, sets `sstatus.fs` to `Initial`; when disabling, sets it to
+/// `Off`. If a `trapframe` is provided, the `sstatus` value is written back to
+/// the trapframe so the restored user task sees the correct FPU state.
 ///
 /// # Panics
 ///
 /// Panics if local interrupts are not disabled.
-pub fn set_fpu_enable(enable: bool, trapframe: Option<&mut RiscV64TrapFrame>) {
+pub fn set_fpu_status(fs: FS, trapframe: Option<&mut RiscV64TrapFrame>) {
     debug_assert!(
         IntrArch::local_intr_disabled(),
         "FPU enable/disable should only be called with interrupts disabled"
@@ -64,10 +64,10 @@ pub fn set_fpu_enable(enable: bool, trapframe: Option<&mut RiscV64TrapFrame>) {
     unsafe {
         if let Some(trapframe) = trapframe {
             let mut sstatus = Sstatus::from_bits(trapframe.sstatus() as usize);
-            sstatus.set_fs(if enable { FS::Initial } else { FS::Off });
+            sstatus.set_fs(fs);
             trapframe.set_sstatus(sstatus.bits() as u64);
         } else {
-            sstatus::set_fs(if enable { FS::Initial } else { FS::Off });
+            sstatus::set_fs(fs);
         }
     }
 }
@@ -76,21 +76,22 @@ pub fn set_fpu_enable(enable: bool, trapframe: Option<&mut RiscV64TrapFrame>) {
 ///
 /// The FPU is temporarily enabled for the save operation, then disabled again.
 pub fn save_current_frs(cur: *mut FpuTaskContext) {
-    set_fpu_enable(true, None);
+    set_fpu_status(FS::Dirty, None);
     unsafe { __save_current_frs(cur) }
-    set_fpu_enable(false, None);
+    set_fpu_status(FS::Off, None);
 }
 
 /// Load FPU state from the given `FpuTaskContext` into the current CPU.
 ///
 /// The FPU is temporarily enabled for the load operation, then disabled again.
 pub fn load_next_frs(cur: *const FpuTaskContext) {
-    set_fpu_enable(true, None);
+    set_fpu_status(FS::Dirty, None);
     unsafe { __load_next_frs(cur) }
-    set_fpu_enable(false, None);
+    set_fpu_status(FS::Off, None);
 }
 
-/// Low-level assembly routine to save all FPU registers from the CPU into memory.
+/// Low-level assembly routine to save all FPU registers from the CPU into
+/// memory.
 ///
 /// Stores 32 FPRs (`f0`–`f31`) and `fcsr` into the `FpuTaskContext` at `a0`.
 ///
@@ -147,7 +148,8 @@ unsafe extern "C" fn __save_current_frs(cur: *mut FpuTaskContext) {
     )
 }
 
-/// Low-level assembly routine to load all FPU registers from memory into the CPU.
+/// Low-level assembly routine to load all FPU registers from memory into the
+/// CPU.
 ///
 /// Restores 32 FPRs (`f0`–`f31`) and `fcsr` from the `FpuTaskContext` at `a0`.
 ///

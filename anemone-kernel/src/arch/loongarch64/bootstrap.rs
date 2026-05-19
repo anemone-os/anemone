@@ -6,9 +6,10 @@ use la_insc::{
     reg::{
         csr::{
             CR_CPUID, CR_CRMD, CR_DMW0, CR_DMW1, CR_DMW2, CR_PGDH, CR_PGDL, CR_PWCH, CR_PWCL,
-            CR_TLBRENTRY, dmw2,
+            CR_TLBRENTRY, dmw2, euen,
         },
         dmw::Dmw,
+        euen::Euen,
     },
     utils::{mem::MemAccessType, privl::PrivilegeFlags},
 };
@@ -165,6 +166,8 @@ extern "C" fn rusty_nun(hart_id: usize) -> ! {
     #[unsafe(link_section = ".bss.nonzero_init")]
     static mut BSP_ARRIVED: bool = false;
     unsafe {
+        euen::csr_write(Euen::SXE | Euen::ASXE | Euen::BTE);
+
         if !BSP_ARRIVED {
             BSP_ARRIVED = true;
             bsp_setup(hart_id, VirtAddr::new(DTB_BYTES.as_ptr() as u64))

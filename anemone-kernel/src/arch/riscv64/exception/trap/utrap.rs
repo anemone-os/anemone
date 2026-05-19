@@ -1,10 +1,12 @@
+use riscv::register::sstatus::{FS, Sstatus};
+
 use crate::{
     arch::riscv64::{
         exception::{
             intr::handle_intr,
             trap::{RiscV64Exception, RiscV64Interrupt, RiscV64TrapFrame},
         },
-        fpu::{self, init_fpu_for_current_task, set_fpu_enable},
+        fpu::{self, init_fpu_for_current_task, set_fpu_status},
     },
     prelude::{fault::handle_user_page_fault, *},
     task::{
@@ -189,12 +191,37 @@ macro_rules! log_user_panic {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
     debug_assert!(IntrArch::local_intr_disabled());
-    /// Fpu are disabled in kernel mode
-    set_fpu_enable(false, None);
 
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
+
+    match Sstatus::from_bits(trapframe.sstatus() as usize).fs() {
+        FS::Dirty => {
+            debug_assert!(
+                get_current_task().fpu_used(),
+                "sstatus.fs is Dirty but current task's fpu_used is false"
+            );
+            fpu::save_current_frs(trapframe.fpu_regs_mut());
+            /*kinfoln!(
+                "saved fpu registers for {} ({})",
+                get_current_task().tid(),
+                get_current_task().name()
+            );*/
+        },
+        FS::Clean | FS::Initial => {
+            debug_assert!(
+                get_current_task().fpu_used(),
+                "sstatus.fs is Clean | Initial but current task's fpu_used is false"
+            );
+            // kinfoln!("skipping saving FPU registers since sstatus.fs is Clean
+            // | Initial");
+        },
+        _ => {},
+    }
+    // Fpu are disabled in kernel mode
+    set_fpu_status(FS::Off, None);
+
     {
         let task = get_current_task();
         unsafe {
@@ -293,7 +320,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                     ));
                 } else {
                     unsafe {
-                        init_fpu_for_current_task();
+                        init_fpu_for_current_task(trapframe);
                         kinfoln!(
                             "({}) enabled fpu for {} ({})",
                             cur_cpu_id(),
@@ -328,7 +355,12 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
         // cpu usage tracking relies on interrupt being disabled.
     }
 
-    set_fpu_enable(get_current_task().fpu_used(), Some(trapframe));
+    if get_current_task().fpu_used() {
+        fpu::load_next_frs(trapframe.fpu_regs());
+        set_fpu_status(FS::Clean, Some(trapframe));
+    } else {
+        set_fpu_status(FS::Off, Some(trapframe));
+    }
 
     get_current_task().on_prv_change(Privilege::User);
 }

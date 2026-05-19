@@ -182,6 +182,10 @@ pub mod process {
             unsafe { syscall(SYS_RT_SIGPROCMASK, how, set, oldset, sigsetsize, 0, 0) }
         }
 
+        pub fn rt_sigreturn() -> Result<u64, Errno> {
+            unsafe { syscall(SYS_RT_SIGRETURN, 0, 0, 0, 0, 0, 0) }
+        }
+
         pub fn rt_sigpending(uset: u64, sigsetsize: u64) -> Result<u64, Errno> {
             unsafe { syscall(SYS_RT_SIGPENDING, uset, sigsetsize, 0, 0, 0, 0) }
         }
