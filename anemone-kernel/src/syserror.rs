@@ -130,6 +130,8 @@ pub enum SysError {
     Interrupted,
     /// Target thread group doesn't exist.
     NoSuchProcess,
+    /// Literal meaning.
+    Timeout,
     /// The syscall should be restarted after interruption.
     RestartSyscall(RestartSyscall),
 }
@@ -202,6 +204,7 @@ impl SysError {
             SysError::BinFmtUnrecognized => ENOEXEC,
             SysError::Interrupted => EINTR,
             SysError::NoSuchProcess => ESRCH,
+            SysError::Timeout => ETIMEDOUT,
             SysError::RestartSyscall(_) => EINTR,
         }
     }

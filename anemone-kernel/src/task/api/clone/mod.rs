@@ -134,6 +134,8 @@ impl TryFromSyscallArg for CloneFlagsWithSignal {
             THREAD,
             VM,
             FS,
+            SYSVSEM,
+            DETACHED,
             FILES,
             PARENT,
             SETTLS,

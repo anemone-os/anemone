@@ -130,6 +130,8 @@ pub struct Task {
     /// Alternative signal stack. Local to each task.
     sig_altstack: SpinLock<Option<SigAltStack>>,
 
+    /// Robust futex list head.
+    robust_list: SpinLock<Option<VirtAddr>>,
     /// Exit code of this task. Meaningful only when this task is a zombie.
     exit_code: SpinLock<Option<ExitCode>>,
 
@@ -345,7 +347,6 @@ impl Task {
                 cpu
             } else {
                 let cpu = pick_next_cpu();
-
                 kdebugln!(
                     "task {}:{}: no cpu specified, picked cpu {}",
                     tid_value,
@@ -373,6 +374,7 @@ impl Task {
             sig_pending: SpinLock::new(PendingSignals::new()),
             sig_altstack: SpinLock::new(None),
 
+            robust_list: SpinLock::new(None),
             exit_code: SpinLock::new(None),
             status: RwLock::new(TaskStatus::Runnable),
             clear_child_tid: SpinLock::new(None),
@@ -417,6 +419,7 @@ impl Task {
                 sig_pending: SpinLock::new(PendingSignals::new()),
                 sig_altstack: SpinLock::new(None),
 
+                robust_list: SpinLock::new(None),
                 exit_code: SpinLock::new(None),
                 status: RwLock::new(TaskStatus::Runnable),
                 clear_child_tid: SpinLock::new(None),
@@ -624,6 +627,16 @@ impl Task {
     /// Get the current clear-child-tid target pointer.
     pub fn get_clear_child_tid(&self) -> Option<VirtAddr> {
         self.clear_child_tid.lock().clone()
+    }
+
+    /// Get the robust futex list head pointer.
+    pub fn robust_list(&self) -> Option<VirtAddr> {
+        self.robust_list.lock().clone()
+    }
+
+    /// Set the robust futex list head pointer.
+    pub fn set_robust_list(&self, head: Option<VirtAddr>) {
+        *self.robust_list.lock() = head;
     }
 }
 

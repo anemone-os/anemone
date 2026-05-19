@@ -24,7 +24,7 @@ mod switch;
 pub use switch::load_context;
 
 mod event;
-pub use event::Event;
+pub use event::{Event, TimeoutListenException};
 
 pub mod class;
 

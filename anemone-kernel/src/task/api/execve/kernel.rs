@@ -1,6 +1,6 @@
 use crate::{
     prelude::*,
-    task::{cpu_usage::Privilege, execve::binfmt::dispatch_execve},
+    task::{cpu_usage::Privilege, execve::binfmt::dispatch_execve, futex::exit_robust_list},
 };
 
 /// **This function must be run in a process context.**
@@ -23,6 +23,19 @@ pub fn kernel_execve(
         Ok(meta) => {
             let usp = Arc::new(UserSpaceHandle::new(usp, meta.exe));
             unsafe {
+                if !task.flags().is_kernel() {
+                    if let Err(e) = exit_robust_list() {
+                        knoticeln!(
+                            "failed to exit robust list for task {}: {:?}",
+                            task.tid(),
+                            e,
+                        );
+                    }
+                }
+
+                task.set_clear_child_tid(None);
+                task.set_robust_list(None);
+
                 task.dethread();
 
                 // these resoureces must be cleaned after dethreading.

@@ -38,7 +38,7 @@ impl SignalArchTrait for RiscV64SignalArch {
         buf.uc_mcontext
             .sc_regs
             .gprs
-            .copy_from_slice(&trapframe.gpr.x);
+            .copy_from_slice(&trapframe.gpr.x[1..]); // except x0.
 
         // done.
     }
@@ -48,10 +48,7 @@ impl SignalArchTrait for RiscV64SignalArch {
         trapframe: &mut TrapFrame,
     ) {
         trapframe.sepc = ucontext.uc_mcontext.sc_regs.pc;
-        trapframe
-            .gpr
-            .x
-            .copy_from_slice(&ucontext.uc_mcontext.sc_regs.gprs);
+        trapframe.gpr.x[1..].copy_from_slice(&ucontext.uc_mcontext.sc_regs.gprs);
         // floating point registers are not implemented yet, so we just ignore
         // them.
     }

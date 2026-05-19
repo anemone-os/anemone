@@ -409,11 +409,11 @@ impl UserSpace {
             })
     }
 
-    fn find_vma(&self, vaddr: VirtAddr) -> Option<&VmArea> {
+    pub fn find_vma(&self, vaddr: VirtAddr) -> Option<&VmArea> {
         Self::find_vma_raw(&self.vmas, vaddr)
     }
 
-    fn find_vma_mut(&mut self, vaddr: VirtAddr) -> Option<&mut VmArea> {
+    pub fn find_vma_mut(&mut self, vaddr: VirtAddr) -> Option<&mut VmArea> {
         Self::find_vma_raw_mut(&mut self.vmas, vaddr)
     }
 }

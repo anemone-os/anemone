@@ -232,6 +232,12 @@ fn sys_wait4(
             return Ok(0);
         }
 
+        kdebugln!(
+            "wait4: parent_tgid={} listening on child_exited event={:#x}",
+            tg.tgid(),
+            &tg.child_exited as *const _ as usize,
+        );
+
         let interrupted = !tg.child_exited.listen(false, || {
             let mut scanner = Wait4Scanner::new(target);
             // note the latter condition.
@@ -253,6 +259,10 @@ fn sys_wait4(
             return Err(SysError::RestartSyscall(RestartSyscall::Idempotent));
         }
 
-        kdebugln!("wait4: woken up, rechecking wait condition");
+        kdebugln!(
+            "wait4: parent_tgid={} woke on child_exited event={:#x}, rechecking wait condition",
+            tg.tgid(),
+            &tg.child_exited as *const _ as usize,
+        );
     }
 }
