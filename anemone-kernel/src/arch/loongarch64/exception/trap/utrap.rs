@@ -360,6 +360,6 @@ unsafe extern "C" {
 }
 
 pub unsafe fn utrap_return_to_task(trapframe: *const LA64TrapFrame) -> ! {
-    set_fpu_status(get_current_task().fpu_used());
+    debug_assert!(!get_current_task().fpu_used());
     unsafe { __utrap_return_to_task(trapframe) }
 }
