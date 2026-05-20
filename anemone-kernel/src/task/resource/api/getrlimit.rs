@@ -5,7 +5,10 @@
 
 use anemone_abi::process::linux::resource::RLimit;
 
-use crate::syscall::user_access::{UserWritePtr, user_addr};
+use crate::{
+    syscall::user_access::{UserWritePtr, user_addr},
+    task::task_resource::RLimitResource,
+};
 
 use super::*;
 

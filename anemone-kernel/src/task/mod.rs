@@ -10,10 +10,13 @@ pub use tid::*;
 
 // integration with other subsystems
 pub mod cpu_usage;
+pub mod credentials;
 pub mod files;
 pub mod sig;
 #[path = "fs.rs"]
 pub mod task_fs;
+#[path = "resource/mod.rs"]
+pub mod task_resource;
 #[path = "sched.rs"]
 pub mod task_sched;
 

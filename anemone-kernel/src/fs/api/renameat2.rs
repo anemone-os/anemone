@@ -54,7 +54,7 @@ impl LinuxRenameFlags {
             flags |= RenameFlags::NO_REPLACE;
         }
 
-        debug_assert!(flags.validate().is_ok());
+        assert!(flags.validate().is_ok());
 
         flags
     }

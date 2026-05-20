@@ -173,7 +173,7 @@ core::arch::global_asm!(
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
-    debug_assert!(IntrArch::local_intr_disabled());
+    assert!(IntrArch::local_intr_disabled());
 
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
@@ -205,7 +205,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             // from this code block, the logical execution flow is considered
             // leaving the hardware interrupt environment.
 
-            debug_assert!(allow_preempt(), "for utraps, this must hold");
+            assert!(allow_preempt(), "for utraps, this must hold");
             if fetch_clear_need_resched() {
                 // if we need reschedule, we can't waste time on disposing deferred tasks.
                 unsafe {
@@ -285,7 +285,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
         }
     }
 
-    debug_assert!(IntrArch::local_intr_enabled());
+    assert!(IntrArch::local_intr_enabled());
 
     handle_signals(
         trapframe,

@@ -85,8 +85,12 @@ pub mod linux {
     pub const SYS_WRITEV: u64 = 66;
     pub const SYS_PREAD64: u64 = 67;
     pub const SYS_PWRITE64: u64 = 68;
+    pub const SYS_PREADV: u64 = 69;
+    pub const SYS_PWRITEV: u64 = 70;
 
     pub const SYS_SENDFILE: u64 = 71;
+
+    pub const SYS_PSELECT6: u64 = 72;
     pub const SYS_PPOLL: u64 = 73;
 
     pub const SYS_READLINKAT: u64 = 78;
@@ -136,7 +140,9 @@ pub mod linux {
     pub const SYS_GETPID: u64 = 172;
     pub const SYS_GETPPID: u64 = 173;
     pub const SYS_GETUID: u64 = 174;
+    pub const SYS_GETEUID: u64 = 175;
     pub const SYS_GETGID: u64 = 176;
+    pub const SYS_GETEGID: u64 = 177;
     pub const SYS_GETTID: u64 = 178;
 
     pub const SYS_SYSINFO: u64 = 179;

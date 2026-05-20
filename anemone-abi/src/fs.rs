@@ -271,6 +271,18 @@ pub mod linux {
         }
     }
 
+    pub mod select {
+        /// POSIX's definition. An unreasonably low limit for modern
+        /// applications nowadays.
+        pub const FD_SETSIZE: usize = 1024;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[repr(C)]
+        pub struct FdSet {
+            pub fds_bits: [u64; FD_SETSIZE / (8 * size_of::<u64>())],
+        }
+    }
+
     pub mod rename {
         pub const RENAME_NOREPLACE: u32 = 0x0001;
         pub const RENAME_EXCHANGE: u32 = 0x0002;

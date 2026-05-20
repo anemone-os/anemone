@@ -98,29 +98,27 @@ impl FutexSet {
     fn create_futex(&mut self, key: FutexKey) {
         match key {
             Either::Left(priv_key) => {
+                let prev = self.private_futexes.insert(
+                    priv_key,
+                    Futex {
+                        waiters: VecDeque::new(),
+                    },
+                );
                 debug_assert!(
-                    self.private_futexes
-                        .insert(
-                            priv_key,
-                            Futex {
-                                waiters: VecDeque::new()
-                            }
-                        )
-                        .is_none(),
+                    prev.is_none(),
                     "futex already exists for private key {:?}, this should never happen",
                     priv_key
                 );
             },
             Either::Right(shared_key) => {
+                let prev = self.shared_futexes.insert(
+                    shared_key,
+                    Futex {
+                        waiters: VecDeque::new(),
+                    },
+                );
                 debug_assert!(
-                    self.shared_futexes
-                        .insert(
-                            shared_key,
-                            Futex {
-                                waiters: VecDeque::new()
-                            }
-                        )
-                        .is_none(),
+                    prev.is_none(),
                     "futex already exists for shared key {:?}, this should never happen",
                     shared_key
                 );
@@ -176,15 +174,17 @@ impl FutexSet {
     fn remove_futex(&mut self, key: FutexKey) {
         match key {
             Either::Left(priv_key) => {
+                let removed = self.private_futexes.remove(&priv_key);
                 debug_assert!(
-                    self.private_futexes.remove(&priv_key).is_some(),
+                    removed.is_some(),
                     "futex not found for private key {:?}, this should never happen",
                     priv_key
                 );
             },
             Either::Right(shared_key) => {
+                let removed = self.shared_futexes.remove(&shared_key);
                 debug_assert!(
-                    self.shared_futexes.remove(&shared_key).is_some(),
+                    removed.is_some(),
                     "futex not found for shared key {:?}, this should never happen",
                     shared_key
                 );

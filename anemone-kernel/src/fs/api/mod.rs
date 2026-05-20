@@ -9,9 +9,6 @@
 //! TODO: explain how arguments' type are defined and converted. For example,
 //! libc's writev specifies `iovlen` as an `int`, but we define it as `usize`.
 //!
-//! TODO: gather those read/write syscalls together into a single module, since
-//! they share a lot of code.
-
 pub mod access;
 pub mod chdir;
 pub mod chroot;
@@ -29,9 +26,7 @@ pub mod mkdirat;
 pub mod mount;
 pub mod openat;
 pub mod pipe2;
-pub mod pread64;
-pub mod pwrite64;
-pub mod read;
+pub mod read_write;
 pub mod readlinkat;
 pub mod renameat2;
 pub mod sendfile;
@@ -41,8 +36,6 @@ pub mod symlinkat;
 pub mod umount;
 pub mod unlinkat;
 pub mod utimensat;
-pub mod write;
-pub mod writev;
 
 /// those arguments used across multiple syscalls will be defined here.
 ///

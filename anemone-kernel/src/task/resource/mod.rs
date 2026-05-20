@@ -1,7 +1,7 @@
-#[cfg(target_arch = "riscv64")]
-pub mod getrlimit;
-pub mod getrusage;
-pub mod prlimit64;
+//! POSIX resource management.
+
+mod api;
+pub use api::*;
 
 use crate::{prelude::*, syscall::handler::TryFromSyscallArg};
 

@@ -1,4 +1,5 @@
 pub mod ppoll;
+pub mod pselect6;
 
 mod args {
     use crate::prelude::*;
