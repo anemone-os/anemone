@@ -1,0 +1,27 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Qemu Virt RISC-V",
+			"type": "shell",
+			"command": "just xtask qemu --platform qemu-virt-rv64 --image build/anemone.elf --debug",
+			"args": [],
+			"problemMatcher": [],
+			"isBackground": true,
+			"presentation": {
+				"reveal": "always",
+			},
+		},
+		{
+			"label": "Qemu Virt Loongarch64",
+			"type": "shell",
+			"command": "just xtask qemu --platform qemu-virt-la64 --image build/anemone.elf --debug",
+			"args": [],
+			"problemMatcher": [],
+			"isBackground": true,
+			"presentation": {
+				"reveal": "always",
+			},
+		}
+	]
+}

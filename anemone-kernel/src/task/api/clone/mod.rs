@@ -265,7 +265,7 @@ pub fn kernel_clone(
     };
 
     unsafe {
-        new_task.switch_exec_ctx(current_task.name(), new_uspace, current_task.flags());
+        new_task.switch_exec_ctx(current_task.name(), new_uspace, current_task.flags(), false);
     }
 
     if flags.contains(CloneFlags::FS) {

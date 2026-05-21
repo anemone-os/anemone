@@ -118,6 +118,7 @@ fn init_environment() {
     }
 
     // test procfs
+    println!("testing procfs...");
     comp_run_cmd("/bin/ls /proc");
 
     // done.

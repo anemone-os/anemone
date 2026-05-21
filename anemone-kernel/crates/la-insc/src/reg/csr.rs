@@ -4,6 +4,7 @@ use crate::reg::{
     asid::Asid,
     crmd::Crmd,
     dmw::Dmw,
+    euen::Euen,
     exception::{Ecfg, Estat},
     pwc::{Pwch, Pwcl},
     timer::Tcfg,
@@ -135,3 +136,5 @@ define_csr!(64, tcfg, 0x41, Tcfg);
 
 define_csr!(64, save0, 0x30);
 define_csr!(64, save1, 0x31);
+
+define_csr!(64, euen, 0x2, Euen);

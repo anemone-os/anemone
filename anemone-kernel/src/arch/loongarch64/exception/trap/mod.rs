@@ -1,6 +1,7 @@
 use core::arch::asm;
 
 use crate::{
+    arch::loongarch64::fpu::FpuTaskContext,
     exception::trap::{TrapArchTrait, TrapFrameArch},
     prelude::*,
 };
@@ -24,7 +25,7 @@ impl TrapArchTrait for LA64TrapArch {
     type SyscallCtx = LA64SyscallCtx;
 
     unsafe fn load_utrapframe(trapframe: Self::TrapFrame) -> ! {
-        unsafe { __utrap_return_to_task(&trapframe as *const _) }
+        unsafe { utrap_return_to_task(&trapframe as *const _) }
     }
 
     fn syscall_ctx_snapshot(trapframe: &Self::TrapFrame) -> Self::SyscallCtx {
@@ -91,6 +92,7 @@ pub struct LA64TrapFrame {
     /// Stores kstack top. Meaningless for kernel threads.
     save0: u64,
     ktp: u64,
+    fpu_regs: FpuTaskContext,
 }
 
 impl LA64TrapFrame {
@@ -130,6 +132,7 @@ impl LA64TrapFrame {
             // kthread should not use this when doing traps.
             // initialize this with a canary value to catch bugs that accidentally use this field.
             ktp: 0x39393939,
+            fpu_regs: FpuTaskContext::ZEROED,
         }
     }
 
@@ -158,7 +161,17 @@ impl LA64TrapFrame {
             estat: 0,
             save0: kstack_top.get(),
             ktp: current_tp,
+            fpu_regs: FpuTaskContext::ZEROED,
         }
+    }
+}
+impl LA64TrapFrame {
+    pub fn fpu_regs(&self) -> &FpuTaskContext {
+        &self.fpu_regs
+    }
+
+    pub fn fpu_regs_mut(&mut self) -> &mut FpuTaskContext {
+        &mut self.fpu_regs
     }
 }
 
@@ -171,6 +184,7 @@ impl TrapFrameArch for LA64TrapFrame {
         estat: 0,
         save0: 0,
         ktp: 0,
+        fpu_regs: FpuTaskContext::ZEROED,
     };
 
     fn sp(&self) -> u64 {

@@ -1,7 +1,7 @@
 use core::arch::naked_asm;
 
 use crate::{
-    arch::riscv64::exception::{__ktrap_return_to_task, __utrap_return_to_task, RiscV64TrapFrame},
+    arch::riscv64::exception::{__ktrap_return_to_task, RiscV64TrapFrame, utrap_return_to_task},
     prelude::*,
     sched::{ParameterList, SchedArchTrait, TaskContextArch},
     task::exit::kernel_exit,
@@ -60,8 +60,8 @@ pub struct RiscV64SchedArch;
 impl SchedArchTrait for RiscV64SchedArch {
     type TaskContext = TaskContext;
     unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext) {
+        debug_assert!(IntrArch::current_irq_flags() == IntrArch::DISABLED_IRQ_FLAGS);
         unsafe {
-            debug_assert!(IntrArch::current_irq_flags() == IntrArch::DISABLED_IRQ_FLAGS);
             __switch(cur, next);
         }
     }
@@ -73,7 +73,7 @@ pub unsafe extern "C" fn __switch(cur: *mut TaskContext, next: *const TaskContex
     naked_asm!(
         "
             # save kernel stack of current task
-            sd sp, 8(a0)
+            sd sp, 8(a0) 
             # save ra, tp & s0~s11 of current execution
             sd ra, 0(a0)
             .set n, 0
@@ -160,7 +160,7 @@ unsafe extern "C" fn user_task_entry_secondary(
     // rtld_fini and must stay zero for fresh execve entries.
 
     // interrupts will be enabled in the end of trap returning.
-    unsafe { __utrap_return_to_task(&trapframe) }
+    unsafe { utrap_return_to_task(&trapframe) }
 }
 
 /// Entry point for a kernel task, stage alpha.

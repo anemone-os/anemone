@@ -20,13 +20,14 @@ pub trait SignalArchTrait {
         trapframe: &TrapFrame,
         mask: SigSet,
         altstack: linux_signal::SigStack,
+        fpu: bool,
     );
 
     /// Restore the signal context from the given [UContext] to the given
     /// trapframe.
     ///
     /// Almost always used by `rt_sigreturn`.
-    fn restore_ucontext(ucontext: &UContext, trapframe: &mut TrapFrame);
+    fn restore_ucontext(ucontext: &UContext, trapframe: &mut TrapFrame, fpu: bool);
 
     /// After we push the [RtSigFrame] onto user stack, we call this function to
     /// set up the trapframe for executing the user signal handler.

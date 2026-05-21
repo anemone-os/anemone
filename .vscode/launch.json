@@ -1,0 +1,72 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch Remote GDB (RISC-V)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/anemone.elf",
+            "args": [],
+            "stopAtEntry": true,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "gdb",
+            "miDebuggerServerAddress": "localhost:1234",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Load kernel ELF symbols",
+                    "text": "file ${workspaceFolder}/build/anemone.elf",
+                    "ignoreFailures": false
+                },
+                {
+                    "description": "Set source code search directory",
+                    "text": "directory ${workspaceFolder}/anemone-kernel",
+                    "ignoreFailures": false
+                }
+            ],
+            "preLaunchTask": "Qemu Virt RISC-V"
+        },
+        {
+            "name": "Launch Remote GDB (Loongarch64)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/anemone.elf",
+            "args": [],
+            "stopAtEntry": true,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "gdb",
+            "miDebuggerServerAddress": "localhost:1234",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Load kernel ELF symbols",
+                    "text": "file ${workspaceFolder}/build/anemone.elf",
+                    "ignoreFailures": false
+                },
+                {
+                    "description": "Set source code search directory",
+                    "text": "directory ${workspaceFolder}/anemone-kernel",
+                    "ignoreFailures": false
+                }
+            ],
+            "preLaunchTask": "Qemu Virt Loongarch64"
+        }
+    ]
+}
