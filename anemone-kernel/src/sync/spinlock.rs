@@ -127,3 +127,49 @@ impl<T: ?Sized> DerefMut for IrqSaveGuard<'_, T> {
             .deref_mut()
     }
 }
+
+#[derive(Debug)]
+pub struct NoIrqSpinLock<T: ?Sized> {
+    lock: spin::Mutex<T>,
+}
+
+impl<T> NoIrqSpinLock<T> {
+    pub const fn new(data: T) -> Self {
+        Self {
+            lock: spin::Mutex::new(data),
+        }
+    }
+}
+
+impl<T: ?Sized> NoIrqSpinLock<T> {
+    #[track_caller]
+    pub fn lock(&self) -> IrqSaveGuard<'_, T> {
+        loop {
+            let _intr_guard = IntrGuard::new();
+            if let Some(guard) = self.lock.try_lock() {
+                break IrqSaveGuard {
+                    guard: Some(guard),
+                    _intr_guard,
+                };
+            }
+            _ = _intr_guard; // drop to restore interrupts before spinning
+            core::hint::spin_loop();
+        }
+    }
+
+    #[track_caller]
+    pub fn try_lock(&self) -> Option<IrqSaveGuard<'_, T>> {
+        let _intr_guard = IntrGuard::new();
+        let guard = self.lock.try_lock()?;
+        Some(IrqSaveGuard {
+            guard: Some(guard),
+            _intr_guard,
+        })
+    }
+}
+
+impl<T> NoIrqSpinLock<T> {
+    pub fn into_inner(self) -> T {
+        self.lock.into_inner()
+    }
+}

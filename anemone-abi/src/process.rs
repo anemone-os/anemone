@@ -276,7 +276,7 @@ pub mod linux {
             // pub sighandler: unsafe extern "C" fn(c_int) -> (),
             pub sighandler: *const (),
             pub sa_flags: u64,
-            // sa_restorer. riscv and loongarch don't use this.
+
             pub sa_mask: SigSet,
         }
 
@@ -339,6 +339,8 @@ pub mod linux {
         pub const SI_ASYNCNL: i32 = -60;
 
         pub mod sifields {
+            use core::fmt::Debug;
+
             use super::*;
 
             #[derive(Clone, Copy)]
@@ -348,6 +350,7 @@ pub mod linux {
                 pub rt: Rt,
                 pub chld: Chld,
                 pub fault: Fault,
+                pub timer: Timer,
             }
 
             impl Default for SigInfoFields {
@@ -370,6 +373,12 @@ pub mod linux {
             pub union SigVal {
                 pub sival_int: i32,
                 pub sival_ptr: *mut c_void,
+            }
+
+            impl Debug for SigVal {
+                fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                    f.debug_struct("SigVal").finish()
+                }
             }
 
             impl SigVal {
@@ -401,6 +410,17 @@ pub mod linux {
             pub struct Fault {
                 pub addr: *mut c_void,
                 // TODO
+            }
+
+            #[derive(Debug, Clone, Copy)]
+            #[repr(C)]
+            pub struct Timer {
+                /// timer id
+                pub tid: i32,
+                pub overrun: i32,
+                pub sigval: SigVal,
+                /// Not to be passed to user.
+                pub sys_private: i32,
             }
 
             // TODO

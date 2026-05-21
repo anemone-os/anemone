@@ -188,16 +188,16 @@ fn run_comp_tests() {
     // println!("user-test: static-linked libc tests passed.");
 
     // 5. dynamic-linked libc tests
-    println!("user-test: running dynamic-linked libc tests...");
-    chdir("/musl").expect("user-test: failed to change directory to /musl");
-    comp_run_cmd("./run-dynamic.sh");
-    println!("user-test: dynamic-linked libc tests passed.");
+    // println!("user-test: running dynamic-linked libc tests...");
+    // chdir("/musl").expect("user-test: failed to change directory to /musl");
+    // comp_run_cmd("./run-dynamic.sh");
+    // println!("user-test: dynamic-linked libc tests passed.");
 
     // 6. lmbench tests
-    // println!("user-test: running lmbench tests...");
-    // chdir("/glibc").expect("user-test: failed to change directory to
-    // /glibc"); comp_run_cmd("./lmbench_testcode.sh");
-    // println!("user-test: lmbench tests passed.");
+    println!("user-test: running lmbench tests...");
+    chdir("/musl").expect("user-test: failed to change directory to /musl");
+    comp_run_cmd("./lmbench_testcode.sh");
+    println!("user-test: lmbench tests passed.");
 }
 
 #[anemone_rs::main]

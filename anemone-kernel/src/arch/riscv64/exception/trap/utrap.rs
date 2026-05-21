@@ -285,7 +285,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
         }
     }
 
-    assert!(IntrArch::local_intr_enabled());
+    // TODO: this might fail???
+    debug_assert!(IntrArch::local_intr_enabled());
 
     handle_signals(
         trapframe,

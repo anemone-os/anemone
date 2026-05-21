@@ -136,6 +136,8 @@ pub mod linux {
 
     pub const SYS_GETRUSAGE: u64 = 165;
 
+    pub const SYS_UMASK: u64 = 166;
+
     pub const SYS_GETTIMEOFDAY: u64 = 169;
 
     pub const SYS_GETPID: u64 = 172;
@@ -164,6 +166,8 @@ pub mod linux {
     pub const SYS_RENAMEAT2: u64 = 276;
 
     pub const SYS_GETRANDOM: u64 = 278;
+
+    pub const SYS_XSTAT: u64 = 291;
 
     pub const SYS_CLONE3: u64 = 435;
 

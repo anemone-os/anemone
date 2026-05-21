@@ -93,7 +93,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         // a longer critical section must be held here to avoid races. TODO: explain
         // why.
         if is_last {
-            let mut tg_inner = tg.inner.write_irqsave();
+            let mut tg_inner = tg.inner.write();
 
             let xcode = match tg_inner.status.life_cycle {
                 ThreadGroupLifeCycle::Alive => {
@@ -116,7 +116,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             // error-prone design later.
             drop(tg_inner);
             tg.reparent_orphan_children();
-            tg_inner = tg.inner.write_irqsave();
+            tg_inner = tg.inner.write();
 
             // 2. set status to Exited, so that wait4 can reap this thread group.
             tg_inner.status.life_cycle = ThreadGroupLifeCycle::Exited(xcode);

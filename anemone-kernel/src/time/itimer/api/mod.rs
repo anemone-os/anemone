@@ -1,6 +1,8 @@
 pub mod getitimer;
 pub mod setitimer;
 
+// TODO: reuse code to avoid duplication.
+
 use crate::prelude::*;
 
 mod args {
@@ -28,4 +30,3 @@ mod args {
         }
     }
 }
-use args::*;

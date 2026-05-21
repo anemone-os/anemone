@@ -19,19 +19,19 @@ impl ThreadGroup {
 
     /// How many members are in this thread group.
     pub fn ntasks(&self) -> usize {
-        self.inner.read_irqsave().members.len()
+        self.inner.read().members.len()
     }
 
     /// Get the status of this thread group.
     pub fn status(&self) -> ThreadGroupStatus {
-        self.inner.read_irqsave().status
+        self.inner.read().status
     }
 
     pub fn update_life_cycle_with<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&ThreadGroupLifeCycle) -> (ThreadGroupLifeCycle, R),
     {
-        let mut inner = self.inner.write_irqsave();
+        let mut inner = self.inner.write();
         let (new_life_cycle, ret) = f(&inner.status.life_cycle);
         inner.status.life_cycle = new_life_cycle;
         ret
@@ -57,7 +57,7 @@ impl ThreadGroup {
     ///
     /// [TOPOLOGY]
     pub fn leader(&self) -> Option<Arc<Task>> {
-        let topology = TOPOLOGY.inner.read_irqsave();
+        let topology = TOPOLOGY.inner.read();
         topology
             .tasks
             .get(&self.tgid())
@@ -72,8 +72,8 @@ impl ThreadGroup {
     ///
     /// [TOPOLOGY] -> [ThreadGroup]
     pub fn for_each_member<F: FnMut(&Arc<Task>)>(&self, mut f: F) {
-        let topology = TOPOLOGY.inner.read_irqsave();
-        for member_tid in self.inner.read_irqsave().members.iter() {
+        let topology = TOPOLOGY.inner.read();
+        for member_tid in self.inner.read().members.iter() {
             let member = &topology
                 .tasks
                 .get(member_tid)
@@ -92,13 +92,13 @@ impl ThreadGroup {
     ///
     /// Useful when the lock chain is too deep.
     pub fn get_members(&self) -> Vec<Arc<Task>> {
-        let topology = TOPOLOGY.inner.read_irqsave();
+        let topology = TOPOLOGY.inner.read();
         let tg = topology
             .thread_groups
             .get(&self.tgid())
             .expect("task topology: thread group not found");
         tg.inner
-            .read_irqsave()
+            .read()
             .members
             .iter()
             .map(|member_tid| {
@@ -118,13 +118,13 @@ impl ThreadGroup {
     /// Only **Object Consistency** is guaranteed.
     pub fn find_member<P: FnMut(&Arc<Task>) -> bool>(&self, prediction: P) -> Option<Arc<Task>> {
         let children = {
-            let topology = TOPOLOGY.inner.read_irqsave();
+            let topology = TOPOLOGY.inner.read();
             let tg = topology
                 .thread_groups
                 .get(&self.tgid())
                 .expect("task topology: thread group not found");
             tg.inner
-                .read_irqsave()
+                .read()
                 .members
                 .iter()
                 .map(|member_tid| {
@@ -176,7 +176,7 @@ impl Task {
     ///
     /// [TOPOLOGY]
     pub fn get_thread_group(&self) -> Arc<ThreadGroup> {
-        let topology = TOPOLOGY.inner.read_irqsave();
+        let topology = TOPOLOGY.inner.read();
         let tg = topology
             .thread_groups
             .get(&self.tgid())
@@ -205,7 +205,7 @@ impl Task {
     where
         F: FnOnce(&Arc<ThreadGroup>) -> R,
     {
-        let topology = TOPOLOGY.inner.read_irqsave();
+        let topology = TOPOLOGY.inner.read();
         let tg = topology
             .thread_groups
             .get(&self.tgid())
@@ -225,7 +225,7 @@ impl Task {
     /// After this operation, the task is unreachable from the topology (i.e.
     /// defunct), and should be disposed soon.
     pub fn detach_from_topology(&self) -> bool {
-        let mut topology = TOPOLOGY.inner.write_irqsave();
+        let mut topology = TOPOLOGY.inner.write();
 
         let is_last = {
             let tg = topology
@@ -233,7 +233,7 @@ impl Task {
                 .get(&self.tgid())
                 .expect("task topology: thread group not found");
 
-            let mut inner = tg.inner.write_irqsave();
+            let mut inner = tg.inner.write();
             assert!(inner.members.remove(&self.tid()));
             inner.members.is_empty()
         };
@@ -248,7 +248,7 @@ impl Task {
     /// The thread group itself stays alive.
     pub fn dethread(self: &Arc<Self>) {
         let tg = {
-            let topology = TOPOLOGY.inner.read_irqsave();
+            let topology = TOPOLOGY.inner.read();
 
             // we can't call above encapsulated APIs here since that will cause deadlocks.
 
@@ -259,9 +259,9 @@ impl Task {
                 .clone();
 
             // make sure no new thread can join this thread group.
-            tg.inner.write_irqsave().status.is_dethreading = true;
+            tg.inner.write().status.is_dethreading = true;
 
-            for member_tid in tg.inner.read_irqsave().members.iter() {
+            for member_tid in tg.inner.read().members.iter() {
                 if *member_tid != self.tid() {
                     let member = &topology
                         .tasks
@@ -301,9 +301,9 @@ impl Task {
         if !self.is_tg_leader() {
             // this transition must be a topology transaction.
             // whoa! what a big lock chain... but i do think it's necessary.
-            let mut topology = TOPOLOGY.inner.write_irqsave();
-            let mut tg_inner = tg.inner.write_irqsave();
-            let mut tid = self.tid.write_irqsave();
+            let mut topology = TOPOLOGY.inner.write();
+            let mut tg_inner = tg.inner.write();
+            let mut tid = self.tid.write();
             debug_assert!(matches!(*tid, TidRef::Owned(_)));
             *tid = TidRef::Leader;
             assert!(
@@ -331,7 +331,7 @@ impl Task {
         }
 
         // dethreading done.
-        tg.inner.write_irqsave().status.is_dethreading = false;
+        tg.inner.write().status.is_dethreading = false;
 
         kdebugln!(
             "task {} (previously {}) has dethreaded its thread group {}",

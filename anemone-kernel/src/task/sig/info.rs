@@ -10,6 +10,7 @@ pub enum SiCode {
     Kernel,
     User,
     Queue,
+    Timer,
     TKill,
     // TODO
 }
@@ -22,6 +23,7 @@ impl SiCode {
             SI_KERNEL => Ok(Self::Kernel),
             SI_USER => Ok(Self::User),
             SI_QUEUE => Ok(Self::Queue),
+            SI_TIMER => Ok(Self::Timer),
             SI_TKILL => Ok(Self::TKill),
             _ => {
                 knoticeln!("unrecognized si_code {} in siginfo_t", code);
@@ -36,6 +38,7 @@ impl SiCode {
             Self::Kernel => SI_KERNEL,
             Self::User => SI_USER,
             Self::Queue => SI_QUEUE,
+            Self::Timer => SI_TIMER,
             Self::TKill => SI_TKILL,
         }
     }
@@ -58,6 +61,7 @@ pub enum SigInfoFields {
     Rt(SigRt),
     Chld(SigChld),
     Fault(SigFault),
+    Timer(SigTimer),
     TKill(SigKill),
     Ill(SigFault),
     // TODO: SigPoll, SigTimer, SigSys.
@@ -81,6 +85,16 @@ pub struct SigRt {
     /// Either an `i32` or a `pointer`. Anyway kernel doesn't care about
     /// that, so we just use `u64` here.
     pub sigval: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SigTimer {
+    /// Timer ID. we don't use it for now.
+    pub tid: i32,
+    pub overrun: i32,
+    pub sigval: u64,
+    /// Linux sets this. But we don't have a use for it, so just set it to 0.
+    pub sys_private: i32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -129,6 +143,21 @@ impl SigInfoFields {
                     },
                 }
             },
+            Self::Timer(SigTimer {
+                tid,
+                overrun,
+                sigval,
+                sys_private,
+            }) => {
+                dst.timer = Timer {
+                    tid: *tid,
+                    overrun: *overrun,
+                    sigval: SigVal {
+                        sival_ptr: *sigval as *mut _,
+                    },
+                    sys_private: *sys_private,
+                }
+            },
             Self::Chld(SigChld {
                 pid,
                 uid,
@@ -157,6 +186,7 @@ impl SigInfoFields {
         match (self, code) {
             (Self::Kill(_), SiCode::User | SiCode::Kernel) => true,
             (Self::Rt(_), SiCode::Queue) => true,
+            (Self::Timer(_), SiCode::Timer) => true,
             (Self::Chld(_), SiCode::Kernel) => true,
             (Self::Fault(_), SiCode::Kernel) => true,
             (Self::Ill(_), SiCode::Kernel) => true,

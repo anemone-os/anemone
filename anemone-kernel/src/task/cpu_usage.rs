@@ -125,7 +125,7 @@ impl TaskCpuUsage {
 
 impl Task {
     pub fn cpu_usage_snapshot(&self) -> TaskCpuUsage {
-        let cpu_usage = self.cpu_usage.read_irqsave();
+        let cpu_usage = self.cpu_usage.read();
         let mut snapshot = *cpu_usage;
         if snapshot.running_flow.is_some() {
             snapshot.settle();
@@ -134,16 +134,16 @@ impl Task {
     }
 
     pub fn on_switch_in(&self) {
-        self.cpu_usage.write_irqsave().on_switch_in();
+        self.cpu_usage.write().on_switch_in();
     }
 
     pub fn on_switch_out(&self) {
-        self.cpu_usage.write_irqsave().on_switch_out();
+        self.cpu_usage.write().on_switch_out();
     }
 
     #[track_caller]
     pub fn on_prv_change(&self, to: Privilege) {
-        self.cpu_usage.write_irqsave().on_prv_change(to);
+        self.cpu_usage.write().on_prv_change(to);
     }
 }
 
@@ -172,7 +172,7 @@ impl ThreadGroupCpuUsage {
 
 impl ThreadGroup {
     pub fn cpu_usage_snapshot(&self) -> ThreadGroupCpuUsage {
-        let mut snapshot = self.inner.read_irqsave().cpu_usage;
+        let mut snapshot = self.inner.read().cpu_usage;
 
         self.for_each_member(|member| {
             let member_cpu_usage = member.cpu_usage_snapshot();
@@ -185,10 +185,7 @@ impl ThreadGroup {
     pub fn on_reap(&self, child: &ThreadGroup) {
         let child_cpu_usage = child.cpu_usage_snapshot();
         // self.cpu_usage.write_irqsave().on_reap(&child_cpu_usage);
-        self.inner
-            .write_irqsave()
-            .cpu_usage
-            .on_reap(&child_cpu_usage);
+        self.inner.write().cpu_usage.on_reap(&child_cpu_usage);
     }
 
     /// Accumulate the cpu usage of a member task to thread group cpu usage.
@@ -198,7 +195,7 @@ impl ThreadGroup {
     /// Panics if the given task is not a member of this thread group.
     pub fn accumulate_member_usage(&self, member: &Task) {
         let member_cpu_usage = member.cpu_usage_snapshot();
-        let mut inner = self.inner.write_irqsave();
+        let mut inner = self.inner.write();
         assert!(inner.members.contains(&member.tid()));
         inner.cpu_usage.accumulate_member_usage(&member_cpu_usage);
     }

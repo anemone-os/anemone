@@ -253,13 +253,13 @@ pub fn kernel_clone(
     let new_uspace = if flags.contains(CloneFlags::VM) {
         if flags.contains(CloneFlags::VFORK) {
             // sigaltstack can be reused
-            new_task.sig_altstack = SpinLock::new(current_task.sig_altstack.lock().clone());
+            new_task.sig_altstack = NoIrqSpinLock::new(current_task.sig_altstack.lock().clone());
         }
 
         cur_uspace.clone()
     } else {
         // new task's sigaltstack should be the same as parent's since VM is not set.
-        new_task.sig_altstack = SpinLock::new(current_task.sig_altstack.lock().clone());
+        new_task.sig_altstack = NoIrqSpinLock::new(current_task.sig_altstack.lock().clone());
 
         let (new_usp, _guard) = cur_uspace.fork()?;
 

@@ -180,3 +180,54 @@ impl<T: ?Sized> DerefMut for WriteNoPreemptGuard<'_, T> {
             .deref_mut()
     }
 }
+
+#[derive(Debug)]
+pub struct NoIrqRwLock<T: ?Sized> {
+    lock: spin::RwLock<T>,
+}
+
+impl<T> NoIrqRwLock<T> {
+    pub const fn new(data: T) -> Self {
+        Self {
+            lock: spin::RwLock::new(data),
+        }
+    }
+}
+
+impl<T: ?Sized> NoIrqRwLock<T> {
+    #[track_caller]
+    pub fn read(&self) -> ReadIrqSaveGuard<'_, T> {
+        loop {
+            let _intr_guard = IntrGuard::new();
+            if let Some(guard) = self.lock.try_read() {
+                break ReadIrqSaveGuard {
+                    guard: Some(guard),
+                    _intr_guard,
+                };
+            }
+            _ = _intr_guard;
+            core::hint::spin_loop();
+        }
+    }
+
+    #[track_caller]
+    pub fn write(&self) -> WriteIrqSaveGuard<'_, T> {
+        loop {
+            let _intr_guard = IntrGuard::new();
+            if let Some(guard) = self.lock.try_write() {
+                break WriteIrqSaveGuard {
+                    guard: Some(guard),
+                    _intr_guard,
+                };
+            }
+            _ = _intr_guard;
+            core::hint::spin_loop();
+        }
+    }
+}
+
+impl<T> NoIrqRwLock<T> {
+    pub fn into_inner(self) -> T {
+        self.lock.into_inner()
+    }
+}

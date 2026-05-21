@@ -101,15 +101,19 @@ pub fn sys_pselect6(
             .map(|sig| {
                 let linux_signal::SigSetArgPack { p, size } =
                     UserReadPtr::<linux_signal::SigSetArgPack>::try_new(sig, &mut usp)?.read();
+                if p.is_null() {
+                    return Ok(None);
+                }
                 if size as usize != size_of::<linux_signal::SigSet>() {
                     return Err(SysError::InvalidArgument);
                 }
                 let linux_signal::SigSet { bits } =
                     UserReadPtr::<linux_signal::SigSet>::try_new(user_addr(p as u64)?, &mut usp)?
                         .read();
-                Ok(SigSet::new_with_mask(bits))
+                Ok(Some(SigSet::new_with_mask(bits)))
             })
             .transpose()?
+            .flatten()
             .map(|sigmask| {
                 sigmask.difference(&SigSet::new_with_signos(&[SigNo::SIGKILL, SigNo::SIGSTOP]))
             });

@@ -515,7 +515,7 @@ impl ThreadGroup {
     ///
     /// Return `None` if this thread group has no members, (i.e. the thread
     /// group is waiting to be reaped).
-    pub fn signal_disposition(&self) -> Option<Arc<RwLock<SignalDisposition>>> {
+    pub fn signal_disposition(&self) -> Option<Arc<NoIrqRwLock<SignalDisposition>>> {
         let mut disp = None;
         self.for_each_member(|member| {
             disp = Some(member.sig_disposition.clone());
