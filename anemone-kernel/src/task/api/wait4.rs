@@ -108,10 +108,10 @@ impl TryFromSyscallArg for WaitOptions {
         let raw = syscall_arg_flag32(raw)? as i32;
         let options = Self::from_bits(raw).ok_or(SysError::InvalidArgument)?;
 
-        if options != WaitOptions::empty() && options != WaitOptions::NOHANG {
-            knoticeln!("wait4: nyi wait options: {:#x}", raw);
-            return Err(SysError::NotYetImplemented);
-        }
+        // if options != WaitOptions::empty() && options != WaitOptions::NOHANG {
+        //     knoticeln!("wait4: nyi wait options: {:#x}", raw);
+        //     return Err(SysError::NotYetImplemented);
+        // }
 
         Ok(options)
     }
