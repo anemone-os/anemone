@@ -1,4 +1,5 @@
 pub mod clock;
+pub mod itimer;
 pub mod timer;
 
 mod hal;

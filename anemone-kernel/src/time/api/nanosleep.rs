@@ -56,6 +56,7 @@ fn sys_nanosleep(
             )
         });
         rem = schedule_with_timeout(Some(rem));
+        // TODO: check signal interruption
     }
 
     Ok(0)

@@ -263,6 +263,13 @@ pub mod linux {
             pub bits: u64,
         }
 
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct SigSetArgPack {
+            pub p: *const SigSet,
+            pub size: u64,
+        }
+
         #[derive(Debug, Clone, Copy)]
         #[repr(C)]
         pub struct SigAction {

@@ -107,6 +107,8 @@ pub mod linux {
     pub const SYS_GET_ROBUST_LIST: u64 = 100;
 
     pub const SYS_NANOSLEEP: u64 = 101;
+    pub const SYS_GETITIMER: u64 = 102;
+    pub const SYS_SETITIMER: u64 = 103;
     pub const SYS_CLOCK_GETTIME: u64 = 113;
     pub const SYS_CLOCK_GETRES: u64 = 114;
 

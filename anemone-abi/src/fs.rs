@@ -262,6 +262,9 @@ pub mod linux {
         pub const POLLHUP: i16 = 0x0010;
         pub const POLLNVAL: i16 = 0x0020;
 
+        // less-or-more non-standard.
+        pub const POLLRDHUP: i16 = 0x2000;
+
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
         #[repr(C)]
         pub struct PollFd {

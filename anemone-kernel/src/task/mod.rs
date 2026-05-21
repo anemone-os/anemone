@@ -15,6 +15,8 @@ pub mod files;
 pub mod sig;
 #[path = "fs.rs"]
 pub mod task_fs;
+#[path = "itimer.rs"]
+pub mod task_itimer;
 #[path = "resource/mod.rs"]
 pub mod task_resource;
 #[path = "sched.rs"]

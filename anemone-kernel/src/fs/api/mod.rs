@@ -9,6 +9,9 @@
 //! TODO: explain how arguments' type are defined and converted. For example,
 //! libc's writev specifies `iovlen` as an `int`, but we define it as `usize`.
 //!
+//! TODO: should we put those syscalls manipulating directories into a single
+//! module?
+
 pub mod access;
 pub mod chdir;
 pub mod chroot;

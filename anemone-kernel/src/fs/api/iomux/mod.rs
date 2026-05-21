@@ -14,6 +14,7 @@ mod args {
             const ERR = POLLERR;
             const HUP = POLLHUP;
             const NVAL = POLLNVAL;
+            const RDHUP = POLLRDHUP;
         }
     }
 
