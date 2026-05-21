@@ -4,9 +4,15 @@ use la_insc::reg::{
 };
 
 use crate::{
-    arch::loongarch64::exception::{
-        intr::handle_intr,
-        trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
+    arch::loongarch64::{
+        exception::{
+            intr::handle_intr,
+            trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
+        },
+        fpu::{
+            get_fpu_status, init_fpu_for_current_task, load_next_frs, save_current_frs,
+            set_fpu_status,
+        },
     },
     prelude::{fault::handle_user_page_fault, *},
     sched::current_task_id,
@@ -180,6 +186,18 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
     // SAFETY: There is no another reference to the trapframe, and the trapframe is
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
+
+    if get_fpu_status() {
+        debug_assert!(
+            get_current_task().fpu_used(),
+            "FPU enabled but current task's fpu_used is false. This should never happen because we set fpu_used to true when enabling FPU for the current task."
+        );
+        save_current_frs(trapframe.fpu_regs_mut());
+    }
+
+    // Fpu are disabled in kernel mode
+    set_fpu_status(false);
+
     {
         let task = get_current_task();
         unsafe {
@@ -287,6 +305,16 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                         },
                     ));
                 },
+                LA64Exception::FloatingPointDisabled => {
+                    debug_assert!(
+                        !get_current_task().fpu_used(),
+                        "floating point disabled exception should only happen once for each task, because we set fpu_used to true after the first time handling this exception."
+                    );
+                    unsafe {
+                        init_fpu_for_current_task(trapframe);
+                        kinfoln!("({}) enabled fpu for {}", cur_cpu_id(), current_task_id());
+                    }
+                },
                 _ => {
                     kerrln!(
                         "({}) user {} aborted with unhandled exception: {:?}, pc: {:#x}, badv: {:#x}\n\ttask return value not implemented yet",
@@ -317,10 +345,21 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         IntrArch::local_intr_disable();
         // cpu usage tracking relies on interrupt being disabled.
     }
+    if get_current_task().fpu_used() {
+        load_next_frs(trapframe.fpu_regs());
+        set_fpu_status(true);
+    } else {
+        set_fpu_status(false);
+    }
 
     get_current_task().on_prv_change(Privilege::User);
 }
 unsafe extern "C" {
     unsafe fn __utrap_entry() -> !;
-    pub unsafe fn __utrap_return_to_task(trapframe: *const LA64TrapFrame) -> !;
+    unsafe fn __utrap_return_to_task(trapframe: *const LA64TrapFrame) -> !;
+}
+
+pub unsafe fn utrap_return_to_task(trapframe: *const LA64TrapFrame) -> ! {
+    debug_assert!(!get_current_task().fpu_used());
+    unsafe { __utrap_return_to_task(trapframe) }
 }

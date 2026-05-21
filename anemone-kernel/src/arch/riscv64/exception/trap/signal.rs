@@ -17,6 +17,7 @@ impl SignalArchTrait for RiscV64SignalArch {
         trapframe: &TrapFrame,
         mask: sig::set::SigSet,
         altstack: linux_signal::SigStack,
+        fpu: bool,
     ) {
         // unused fields.
         {
@@ -32,25 +33,41 @@ impl SignalArchTrait for RiscV64SignalArch {
         // ucontext...
 
         // floating point registers are not implemented yet.
-        buf.uc_mcontext.__fscr = 0;
-        buf.uc_mcontext.sc_fpregs.fill(0);
         buf.uc_mcontext.sc_regs.pc = trapframe.sepc;
         buf.uc_mcontext
             .sc_regs
             .gprs
             .copy_from_slice(&trapframe.gpr.x[1..]); // except x0.
 
+        if fpu {
+            buf.uc_mcontext
+                .sc_fpregs
+                .copy_from_slice(&trapframe.fpu_regs().f);
+            buf.uc_mcontext.fcsr = trapframe.fpu_regs.fcsr
+        } else {
+            buf.uc_mcontext.sc_fpregs.fill(0);
+            buf.uc_mcontext.fcsr = 0;
+        }
         // done.
     }
 
     fn restore_ucontext(
         ucontext: &anemone_abi::process::linux::ucontext::UContext,
         trapframe: &mut TrapFrame,
+        fpu: bool,
     ) {
         trapframe.sepc = ucontext.uc_mcontext.sc_regs.pc;
         trapframe.gpr.x[1..].copy_from_slice(&ucontext.uc_mcontext.sc_regs.gprs);
-        // floating point registers are not implemented yet, so we just ignore
-        // them.
+
+        if fpu {
+            trapframe
+                .fpu_regs_mut()
+                .f
+                .copy_from_slice(&ucontext.uc_mcontext.sc_fpregs);
+            trapframe.fpu_regs_mut().fcsr = ucontext.uc_mcontext.fcsr;
+        } else {
+            // keep
+        }
     }
 
     fn prepare_trapframe_for_signal_handler(

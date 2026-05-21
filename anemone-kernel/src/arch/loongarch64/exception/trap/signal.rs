@@ -17,6 +17,7 @@ impl SignalArchTrait for LA64SignalArch {
         trapframe: &TrapFrame,
         mask: sig::set::SigSet,
         altstack: linux_signal::SigStack,
+        fpu: bool,
     ) {
         // unused fields.
         {
@@ -34,19 +35,36 @@ impl SignalArchTrait for LA64SignalArch {
         buf.uc_mcontext.sc_regs.copy_from_slice(&trapframe.gpr.r);
         // idk what sc_flags is for. let's just set it to 0.
         buf.uc_mcontext.sc_flags = 0;
+
+        if fpu {
+            buf.uc_mcontext
+                .fregs
+                .copy_from_slice(&trapframe.fpu_regs().f);
+            buf.uc_mcontext.fcc = trapframe.fpu_regs().fcc;
+            buf.uc_mcontext.fcsr = trapframe.fpu_regs().fcsr;
+        } else {
+            // keep
+        }
     }
 
     fn restore_ucontext(
         ucontext: &anemone_abi::process::linux::ucontext::UContext,
         trapframe: &mut TrapFrame,
+        fpu: bool,
     ) {
         trapframe.era = ucontext.uc_mcontext.sc_pc;
         trapframe
             .gpr
             .r
             .copy_from_slice(&ucontext.uc_mcontext.sc_regs);
-        // floating point registers are not implemented yet, so we just ignore
-        // them.
+        if fpu {
+            trapframe
+                .fpu_regs_mut()
+                .f
+                .copy_from_slice(&ucontext.uc_mcontext.fregs);
+            trapframe.fpu_regs_mut().fcc = ucontext.uc_mcontext.fcc;
+            trapframe.fpu_regs_mut().fcsr = ucontext.uc_mcontext.fcsr;
+        }
     }
 
     fn prepare_trapframe_for_signal_handler(

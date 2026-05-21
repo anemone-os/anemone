@@ -245,6 +245,7 @@ extern "C" fn rusty_nun(hart_id: usize, fdt_pa: PhysAddr) -> ! {
     static mut BSP_ARRIVED: bool = false;
     unsafe {
         sstatus::set_sum();
+        sstatus::set_fs(sstatus::FS::Off);
     }
     unsafe {
         if !BSP_ARRIVED {

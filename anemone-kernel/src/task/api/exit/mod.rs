@@ -51,7 +51,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             if cleard {
                 if let Err(e) = futex::wake_at(&task.clone_uspace_handle(), addr, 1) {
                     knoticeln!(
-                        "failed to wake futex for task {}: {:?} at address {:#x}",
+                        "failed to clear child tid for {}: {:?} at address {:#x}",
                         task.tid(),
                         e,
                         addr.get()

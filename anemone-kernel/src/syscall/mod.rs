@@ -87,7 +87,7 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) -> Option<RestartSyscall> {
 
     if sysno < ANEMONE_SYSNO_MAX as usize && handler.sysno == 0 {
         knoticeln!(
-            "unknown syscall number {} from task {}",
+            "unknown syscall number {} from {}",
             sysno,
             current_task_id()
         );

@@ -715,7 +715,13 @@ fn perform_signal_action(
                 // will set that anyway.
             }
 
-            SignalArch::encode_ucontext(&mut ucontext, trapframe, prev_mask, altstack);
+            SignalArch::encode_ucontext(
+                &mut ucontext,
+                trapframe,
+                prev_mask,
+                altstack,
+                task.fpu_used(),
+            );
 
             // construct signal frame on user stack.
             let frame = RtSigFrame {
@@ -734,7 +740,7 @@ fn perform_signal_action(
                 match UserWritePtr::<RtSigFrame>::try_new(sigframe_base, &mut guard) {
                     Err(e) => {
                         knoticeln!(
-                            "perform_signal_action: failed to write sigframe to task {} user stack: {:?}",
+                            "perform_signal_action: failed to write sigframe to {} user stack: {:?}",
                             task.tid(),
                             e
                         );

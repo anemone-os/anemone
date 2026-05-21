@@ -120,6 +120,10 @@ pub struct Task {
     ///   has not trapped into kernel yet).
     utrapframe: MonoFlow<Option<NonNull<TrapFrame>>>,
 
+    /// Whether this task has used FPU. This is used to optimize FPU context
+    /// switching.
+    fpu_used: AtomicBool,
+
     /// Filesystem state shared by task-related FS operations.
     fs_state: Arc<RwLock<FsState>>,
     /// File descriptor table state.
@@ -355,7 +359,7 @@ impl Task {
             } else {
                 let cpu = pick_next_cpu();
                 kdebugln!(
-                    "task {}:{}: no cpu specified, picked cpu {}",
+                    "{}:{}: no cpu specified, picked cpu {}",
                     tid_value,
                     name,
                     cpu
@@ -372,6 +376,7 @@ impl Task {
             },
             sched_entity: SpinLock::new(sched),
             utrapframe: unsafe { MonoFlow::new(None) },
+            fpu_used: AtomicBool::new(false),
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: Arc::new(RwLock::new(FilesState::new())),
             cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
@@ -417,6 +422,7 @@ impl Task {
                 },
                 sched_entity: SpinLock::new(SchedEntity::new(SchedClassPrv::Idle(()))),
                 utrapframe: unsafe { MonoFlow::new(None) },
+                fpu_used: AtomicBool::new(false),
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
                 files_state: Arc::new(RwLock::new(FilesState::new())),
                 cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
@@ -592,7 +598,7 @@ impl Task {
         let mut exit_code = self.exit_code.lock();
         if let Some(old) = *exit_code {
             panic!(
-                "task {}: exit code is already set to {:?}, cannot set to {:?}",
+                "{}: exit code is already set to {:?}, cannot set to {:?}",
                 self.tid(),
                 old,
                 code
@@ -616,6 +622,7 @@ impl Task {
         name: Box<str>,
         uspace: Arc<UserSpaceHandle>,
         flags: TaskFlags,
+        fpu_used: bool,
     ) {
         // NOTE THE LOCK ORDERING
         let mut usp_ptr = self.usp.write();
@@ -624,6 +631,7 @@ impl Task {
         *usp_ptr = Some(uspace);
         *flags_ptr = flags;
         *name_ptr = name;
+        self.fpu_used.store(fpu_used, Ordering::Release);
     }
 
     /// Set `tid_ptr` as the clear-child-tid target pointer.
@@ -644,6 +652,14 @@ impl Task {
     /// Set the robust futex list head pointer.
     pub fn set_robust_list(&self, head: Option<VirtAddr>) {
         *self.robust_list.lock() = head;
+    }
+    
+    pub fn fpu_used(&self) -> bool {
+        self.fpu_used.load(Ordering::Acquire)
+    }
+
+    pub fn set_fpu_used(&self) {
+        self.fpu_used.store(true, Ordering::Release);
     }
 }
 

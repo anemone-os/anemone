@@ -82,6 +82,11 @@ pub unsafe fn switch_mapping(prev: &Task, next: &Task) {
 
 /// As title.
 ///
+/// # Safety
+///
+/// This function is used to load a **new** context, because we assume that frs
+/// are not used in the new context.
+///
 /// **Interrupts must be disabled.**
 pub unsafe fn load_context(ctx: TaskContext) -> ! {
     assert!(IntrArch::local_intr_disabled());

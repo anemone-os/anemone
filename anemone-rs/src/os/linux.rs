@@ -504,5 +504,9 @@ pub mod process {
             let tgid = getpid()?;
             tgkill(tgid, tid, sig)
         }
+
+        pub fn sigreturn() -> Result<(), Errno> {
+            signal::rt_sigreturn().map(|_| ())
+        }
     }
 }
