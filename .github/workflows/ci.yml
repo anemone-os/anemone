@@ -1,5 +1,5 @@
 # TODO: Add tests; Support different architectures.
-# TODO: Add ci/cd for docs and book checks and deployments.
+# TODO: Add docs checks and anemone-book checks/deployments.
 
 name: CI
 
