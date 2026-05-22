@@ -8,6 +8,9 @@
 //!
 //! TODO: explain how arguments' type are defined and converted. For example,
 //! libc's writev specifies `iovlen` as an `int`, but we define it as `usize`.
+//!
+//! TODO: should we put those syscalls manipulating directories into a single
+//! module?
 
 pub mod access;
 pub mod chdir;
@@ -26,18 +29,17 @@ pub mod mkdirat;
 pub mod mount;
 pub mod openat;
 pub mod pipe2;
-pub mod read;
+pub mod read_write;
 pub mod readlinkat;
 pub mod renameat2;
 pub mod sendfile;
 pub mod stat;
 pub mod statfs;
 pub mod symlinkat;
+pub mod umask;
 pub mod umount;
 pub mod unlinkat;
 pub mod utimensat;
-pub mod write;
-pub mod writev;
 
 /// those arguments used across multiple syscalls will be defined here.
 ///

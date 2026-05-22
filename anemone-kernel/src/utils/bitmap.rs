@@ -23,6 +23,18 @@ impl<const NUM_DWORDS: usize> Bitmap<NUM_DWORDS> {
         Self { bits }
     }
 
+    pub fn new_with(bitmap: Box<[u64; NUM_DWORDS]>) -> Self {
+        Self { bits: bitmap }
+    }
+
+    pub fn into_boxed(self) -> Box<[u64; NUM_DWORDS]> {
+        self.bits
+    }
+
+    pub fn dwords(&self) -> &[u64; NUM_DWORDS] {
+        &self.bits
+    }
+
     pub fn capacity(&self) -> usize {
         NUM_DWORDS * 64
     }
@@ -150,5 +162,30 @@ impl<const NUM_DWORDS: usize> Bitmap<NUM_DWORDS> {
             }
         }
         None
+    }
+
+    pub fn iter(&self) -> BitmapIter<'_, NUM_DWORDS> {
+        BitmapIter {
+            bitmap: self,
+            current_index: 0,
+        }
+    }
+}
+
+pub struct BitmapIter<'a, const NUM_DWORDS: usize> {
+    bitmap: &'a Bitmap<NUM_DWORDS>,
+    current_index: usize,
+}
+
+impl<'a, const NUM_DWORDS: usize> Iterator for BitmapIter<'a, NUM_DWORDS> {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_index >= self.bitmap.capacity() {
+            return None;
+        }
+        let bit = self.bitmap.test(self.current_index);
+        self.current_index += 1;
+        Some(bit)
     }
 }

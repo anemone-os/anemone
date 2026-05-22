@@ -96,7 +96,7 @@ static PROC_MEMINFO_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::NotSupported),
     validate_seek: proc_meminfo_validate_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
-    poll: |_, _| Ok(PollEvent::READABLE),
+    poll: |_, req| Ok(PollEvent::READABLE & req.interests()),
 };
 
 pub static PROC_MEMINFO_DIR_ENTRY: ProcDirEntry = ProcDirEntry {

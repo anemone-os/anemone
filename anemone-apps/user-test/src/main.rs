@@ -4,8 +4,8 @@
 
 use anemone_rs::{
     os::linux::{
-        fs::{chdir, chroot, fstatat, mkdirat, mount, AtFd},
-        process::{execve, fork, wait4, WStatusRaw, WaitFor, WaitOptions},
+        fs::{AtFd, chdir, chroot, fstatat, mkdirat, mount},
+        process::{WStatusRaw, WaitFor, WaitOptions, execve, fork, wait4},
     },
     prelude::*,
 };
@@ -44,9 +44,14 @@ fn local_run_cmd(cmd: &str, args: &[&str], envs: &[&str]) {
 /// local tests for development.
 fn run_local_tests() {
     // 1. signal test
-    println!("user-test: running signal test...");
-    local_run_cmd("/bin/signal-test", &["signal-test"], &[]);
-    println!("user-test: signal test finished.");
+    // println!("user-test: running signal test...");
+    // local_run_cmd("/bin/signal-test", &["signal-test"], &[]);
+    // println!("user-test: signal test finished.");
+
+    // 2. float test
+    println!("user-test: running float test...");
+    local_run_cmd("/bin/float-test", &["float-test", "--type", "sig"], &[]);
+    println!("user-test: float test finished.");
 }
 
 fn init_environment() {
@@ -90,17 +95,31 @@ fn init_environment() {
         comp_run_cmd("/glibc/busybox --install -s /bin");
     }
 
-    // cp lib to /
-    let stat = fstatat(AtFd::Cwd, Path::new("/lib"));
+    // cp lib to /lib or /lib64
+    cfg_select! {
+        target_arch = "riscv64" => {
+            const LIB_DIR: &str = "/lib";
+            const LDSO_NAME: &str = "ld-musl-riscv64-sf.so.1";
+        },
+        target_arch = "loongarch64" => {
+            const LIB_DIR: &str = "/lib64";
+            const LDSO_NAME: &str = "ld-musl-loongarch-lp64.so.1";
+        }
+    }
+
+    let stat = fstatat(AtFd::Cwd, Path::new(LIB_DIR));
     if stat.is_err() {
-        mkdirat(AtFd::Cwd, Path::new("/lib"), 0o755)
+        mkdirat(AtFd::Cwd, Path::new(LIB_DIR), 0o755)
             .expect("user-test: failed to create /lib directory");
 
-        comp_run_cmd("/bin/cp -r /musl/lib /");
+        comp_run_cmd(&format!("/bin/cp -r /musl/lib {}", LIB_DIR));
 
         // musl's libc.so is a dynamic linker as well. we should create a symlink for
         // it. for now we just cp.
-        comp_run_cmd("/bin/cp /musl/lib/libc.so /lib/ld-musl-riscv64-sf.so.1");
+        comp_run_cmd(&format!(
+            "/bin/cp /musl/lib/libc.so {}/{}",
+            LIB_DIR, LDSO_NAME
+        ));
     }
 
     // cp busybox to /
@@ -162,6 +181,8 @@ fn comp_run_cmd(cmd: &str) {
 
 /// competition tests.
 fn run_comp_tests() {
+    run_local_tests();
+
     init_environment();
 
     // 1. basic tests
@@ -196,8 +217,8 @@ fn run_comp_tests() {
 
     // 6. lmbench tests
     // println!("user-test: running lmbench tests...");
-    // chdir("/glibc").expect("user-test: failed to change directory to
-    // /glibc"); comp_run_cmd("./lmbench_testcode.sh");
+    // chdir("/musl").expect("user-test: failed to change directory to /musl");
+    // comp_run_cmd("./lmbench_testcode.sh");
     // println!("user-test: lmbench tests passed.");
 }
 

@@ -1,4 +1,4 @@
-use crate::{prelude::*, task::sig::SigNo};
+use crate::task::sig::SigNo;
 
 const UNUSED_MASK: u64 = 1u64 << 63;
 const VALID_MASK: u64 = !UNUSED_MASK;
@@ -25,13 +25,6 @@ impl SigSet {
 
     /// Create a signal mask with the given raw value.
     pub fn new_with_mask(mask: u64) -> Self {
-        if mask & UNUSED_MASK != 0 {
-            kdebugln!(
-                "SigSet::new_with_mask: invalid signal mask with bit 63 set: {:#x}",
-                mask
-            );
-        }
-
         Self(mask & VALID_MASK)
     }
 

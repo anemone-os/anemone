@@ -9,6 +9,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(transparent)]
 pub struct Fd(u32);
 
 impl Fd {
@@ -30,7 +31,6 @@ impl Fd {
 
 impl TryFromSyscallArg for Fd {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-        // let raw = syscall_arg_flag32(raw)?;
         let raw = i32::try_from_syscall_arg(raw)? as u32;
         Fd::new(raw).ok_or(SysError::InvalidArgument)
     }

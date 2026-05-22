@@ -292,13 +292,20 @@ pub mod linux {
             pub bits: u64,
         }
 
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct SigSetArgPack {
+            pub p: *const SigSet,
+            pub size: u64,
+        }
+
         #[derive(Debug, Clone, Copy)]
         #[repr(C)]
         pub struct SigAction {
             // pub sighandler: unsafe extern "C" fn(c_int) -> (),
             pub sighandler: *const (),
             pub sa_flags: u64,
-            // sa_restorer. riscv and loongarch don't use this.
+
             pub sa_mask: SigSet,
         }
 
@@ -361,6 +368,8 @@ pub mod linux {
         pub const SI_ASYNCNL: i32 = -60;
 
         pub mod sifields {
+            use core::fmt::Debug;
+
             use super::*;
 
             #[derive(Clone, Copy)]
@@ -370,6 +379,7 @@ pub mod linux {
                 pub rt: Rt,
                 pub chld: Chld,
                 pub fault: Fault,
+                pub timer: Timer,
             }
 
             impl Default for SigInfoFields {
@@ -392,6 +402,12 @@ pub mod linux {
             pub union SigVal {
                 pub sival_int: i32,
                 pub sival_ptr: *mut c_void,
+            }
+
+            impl Debug for SigVal {
+                fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                    f.debug_struct("SigVal").finish()
+                }
             }
 
             impl SigVal {
@@ -423,6 +439,17 @@ pub mod linux {
             pub struct Fault {
                 pub addr: *mut c_void,
                 // TODO
+            }
+
+            #[derive(Debug, Clone, Copy)]
+            #[repr(C)]
+            pub struct Timer {
+                /// timer id
+                pub tid: i32,
+                pub overrun: i32,
+                pub sigval: SigVal,
+                /// Not to be passed to user.
+                pub sys_private: i32,
             }
 
             // TODO
@@ -494,7 +521,8 @@ pub mod linux {
             #[repr(C)]
             pub struct UserRegsStruct {
                 pub pc: u64,
-                pub gprs: [u64; 32],
+                /// except x0.
+                pub gprs: [u64; 31],
             }
         }
         #[cfg(target_arch = "riscv64")]
@@ -551,6 +579,67 @@ pub mod linux {
         impl UContext {
             pub const ZEROED: Self = unsafe { core::mem::zeroed() };
         }
+    }
+
+    /// Reference:
+    /// - https://elixir.bootlin.com/linux/v6.6.32/source/include/uapi/linux/futex.h
+    pub mod futex {
+        pub const FUTEX_WAIT: i32 = 0;
+        pub const FUTEX_WAKE: i32 = 1;
+        /// deprecated. docs here for clarity.
+        pub const FUTEX_FD: i32 = 2;
+        pub const FUTEX_REQUEUE: i32 = 3;
+        pub const FUTEX_CMP_REQUEUE: i32 = 4;
+        pub const FUTEX_WAKE_OP: i32 = 5;
+        pub const FUTEX_LOCK_PI: i32 = 6;
+        pub const FUTEX_UNLOCK_PI: i32 = 7;
+        pub const FUTEX_TRYLOCK_PI: i32 = 8;
+        pub const FUTEX_WAIT_BITSET: i32 = 9;
+        pub const FUTEX_WAKE_BITSET: i32 = 10;
+        pub const FUTEX_WAIT_REQUEUE_PI: i32 = 11;
+        pub const FUTEX_CMP_REQUEUE_PI: i32 = 12;
+
+        pub const FUTEX_CMD_MASK: i32 = !(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME);
+
+        // flags
+        pub const FUTEX_PRIVATE_FLAG: i32 = 128;
+        pub const FUTEX_CLOCK_REALTIME: i32 = 256;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct RobustList {
+            pub next: *mut RobustList,
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct RobustListHead {
+            pub list: RobustList,
+            pub futex_offset: i64,
+            pub list_op_pending: *mut RobustList,
+        }
+
+        pub const FUTEX_WAITERS: u32 = 0x80000000;
+        pub const FUTEX_OWNER_DIED: u32 = 0x40000000;
+        pub const FUTEX_TID_MASK: u32 = 0x3fffffff;
+
+        // [op:4|cmp:4|oparg:12|cmparg:12]
+        pub const FUTEX_OP_SET: u32 = 0;
+        pub const FUTEX_OP_ADD: u32 = 1;
+        pub const FUTEX_OP_OR: u32 = 2;
+        pub const FUTEX_OP_ANDN: u32 = 3;
+        pub const FUTEX_OP_XOR: u32 = 4;
+
+        pub const FUTEX_OP_OPARG_SHIFT: usize = 8;
+
+        pub const FUTEX_OP_CMP_EQ: u32 = 0;
+        pub const FUTEX_OP_CMP_NE: u32 = 1;
+        pub const FUTEX_OP_CMP_LT: u32 = 2;
+        pub const FUTEX_OP_CMP_LE: u32 = 3;
+        pub const FUTEX_OP_CMP_GT: u32 = 4;
+        pub const FUTEX_OP_CMP_GE: u32 = 5;
+
+        pub const FUTEX_BITSET_MATCH_ANY: u32 = 0xffffffff;
     }
 }
 

@@ -110,6 +110,13 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) -> Option<RestartSyscall> {
     let (retval, restart) = match (handler.handler)(&regs, trapframe) {
         Ok(retval) => (retval, None),
         Err(err) => {
+            kdebugln!(
+                "{} failed with error {:?} for task {}",
+                handler.name,
+                err,
+                current_task_id(),
+            );
+
             let retval = -(i64::from(err.as_errno())) as u64;
             let restart = if let SysError::RestartSyscall(restart) = err {
                 Some(restart)

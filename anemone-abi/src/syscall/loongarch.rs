@@ -81,9 +81,16 @@ pub mod linux {
     pub const SYS_LSEEK: u64 = 62;
     pub const SYS_READ: u64 = 63;
     pub const SYS_WRITE: u64 = 64;
+    pub const SYS_READV: u64 = 65;
     pub const SYS_WRITEV: u64 = 66;
+    pub const SYS_PREAD64: u64 = 67;
+    pub const SYS_PWRITE64: u64 = 68;
+    pub const SYS_PREADV: u64 = 69;
+    pub const SYS_PWRITEV: u64 = 70;
 
     pub const SYS_SENDFILE: u64 = 71;
+
+    pub const SYS_PSELECT6: u64 = 72;
     pub const SYS_PPOLL: u64 = 73;
 
     pub const SYS_READLINKAT: u64 = 78;
@@ -95,9 +102,13 @@ pub mod linux {
     pub const SYS_EXIT: u64 = 93;
     pub const SYS_EXIT_GROUP: u64 = 94;
     pub const SYS_SET_TID_ADDRESS: u64 = 96;
+    pub const SYS_FUTEX: u64 = 98;
     pub const SYS_SET_ROBUST_LIST: u64 = 99;
+    pub const SYS_GET_ROBUST_LIST: u64 = 100;
 
     pub const SYS_NANOSLEEP: u64 = 101;
+    pub const SYS_GETITIMER: u64 = 102;
+    pub const SYS_SETITIMER: u64 = 103;
     pub const SYS_CLOCK_GETTIME: u64 = 113;
     pub const SYS_CLOCK_GETRES: u64 = 114;
 
@@ -106,6 +117,7 @@ pub mod linux {
     pub const SYS_SCHED_YIELD: u64 = 124;
 
     pub const SYS_KILL: u64 = 129;
+    pub const SYS_TKILL: u64 = 130;
     pub const SYS_TGKILL: u64 = 131;
     pub const SYS_SIGALTSTACK: u64 = 132;
     pub const SYS_RT_SIGACTION: u64 = 134;
@@ -124,12 +136,16 @@ pub mod linux {
 
     pub const SYS_GETRUSAGE: u64 = 165;
 
+    pub const SYS_UMASK: u64 = 166;
+
     pub const SYS_GETTIMEOFDAY: u64 = 169;
 
     pub const SYS_GETPID: u64 = 172;
     pub const SYS_GETPPID: u64 = 173;
     pub const SYS_GETUID: u64 = 174;
+    pub const SYS_GETEUID: u64 = 175;
     pub const SYS_GETGID: u64 = 176;
+    pub const SYS_GETEGID: u64 = 177;
     pub const SYS_GETTID: u64 = 178;
 
     pub const SYS_SYSINFO: u64 = 179;
@@ -150,6 +166,8 @@ pub mod linux {
     pub const SYS_RENAMEAT2: u64 = 276;
 
     pub const SYS_GETRANDOM: u64 = 278;
+
+    pub const SYS_XSTAT: u64 = 291;
 
     pub const SYS_CLONE3: u64 = 435;
 

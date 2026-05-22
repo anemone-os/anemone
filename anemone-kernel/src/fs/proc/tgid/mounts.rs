@@ -66,7 +66,7 @@ static TGID_MOUNTS_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::NotSupported),
     validate_seek: tgid_mounts_validate_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
-    poll: |_, _| Ok(PollEvent::READABLE),
+    poll: |_, req| Ok(PollEvent::READABLE & req.interests()),
 };
 
 pub static TGID_MOUNTS_TGID_ENTRY: TgidEntry = TgidEntry {

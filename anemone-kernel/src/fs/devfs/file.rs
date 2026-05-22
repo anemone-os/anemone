@@ -217,7 +217,7 @@ pub(super) static DEVFS_DIR_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::IsDir),
     validate_seek: |_, _| Err(SysError::IsDir),
     read_dir: dir_read_dir,
-    poll: |_, _| Ok(PollEvent::READABLE),
+    poll: |_, req| Ok(PollEvent::READABLE & req.interests()),
 };
 
 pub(super) static DEVFS_CHAR_FILE_OPS: FileOps = FileOps {
@@ -233,5 +233,5 @@ pub(super) static DEVFS_BLOCK_FILE_OPS: FileOps = FileOps {
     write: block_write,
     validate_seek: block_validate_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
-    poll: |_, _| Ok(PollEvent::READABLE | PollEvent::WRITABLE),
+    poll: |_, req| Ok((PollEvent::READABLE | PollEvent::WRITABLE) & req.interests()),
 };

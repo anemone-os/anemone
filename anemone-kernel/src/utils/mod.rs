@@ -13,6 +13,7 @@ pub mod bitmap;
 pub mod byte_writer;
 pub mod cacheline;
 pub mod data;
+pub mod either;
 pub mod identity;
 pub mod iter_ctx;
 pub mod mmio;

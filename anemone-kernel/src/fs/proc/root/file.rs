@@ -137,5 +137,5 @@ pub static PROC_ROOT_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::IsDir),
     validate_seek: |_, _| Err(SysError::IsDir),
     read_dir: proc_root_read_dir,
-    poll: |_, _| Ok(PollEvent::READABLE),
+    poll: |_, req| Ok(PollEvent::READABLE & req.interests()),
 };

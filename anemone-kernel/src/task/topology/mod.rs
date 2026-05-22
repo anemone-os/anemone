@@ -31,7 +31,7 @@ pub mod thread_group;
 /// TODO: fine-grained locking.
 #[derive(Debug)]
 struct TaskTopology {
-    inner: RwLock<TaskTopologyInner>,
+    inner: NoIrqRwLock<TaskTopologyInner>,
 }
 
 /// [Vec] + [HashMap] would be better, but we don't have intrusive list,
@@ -54,7 +54,7 @@ struct TaskNode {
 }
 
 static TOPOLOGY: TaskTopology = TaskTopology {
-    inner: RwLock::new(TaskTopologyInner {
+    inner: NoIrqRwLock::new(TaskTopologyInner {
         tasks: BTreeMap::new(),
         thread_groups: BTreeMap::new(),
     }),
@@ -107,7 +107,7 @@ impl PublishGuard {
     /// Receiver type (self) is intentionally not used, you can only call this
     /// method as [PublishGuard::register_root].
     pub unsafe fn register_root(guard: Self, mut task: Task) -> Arc<Task> {
-        let mut topology = TOPOLOGY.inner.write_irqsave();
+        let mut topology = TOPOLOGY.inner.write();
         debug_assert!(
             topology.tasks.is_empty(),
             "task topology: root task must be registered before any other task"
@@ -126,7 +126,7 @@ impl PublishGuard {
             TidRef::Owned(h) => h,
             _ => panic!("task topology: leader task must have an owned TID handle"),
         };
-        task.tid = RwLock::new(TidRef::Leader);
+        task.tid = NoIrqRwLock::new(TidRef::Leader);
 
         let task = Arc::new(task);
         let node = TaskNode { task: task.clone() };
@@ -134,13 +134,14 @@ impl PublishGuard {
             tgid: handle,
             child_exited: Event::new(),
             terminate_signal: None,
-            inner: RwLock::new(ThreadGroupInner {
+            itimers: ITimers::new(),
+            inner: NoIrqRwLock::new(ThreadGroupInner {
                 status: ThreadGroupStatus::new_alive(),
                 members: BTreeSet::from([Tid::INIT]),
                 parent_tgid: None,
                 children_tgids: BTreeSet::new(),
                 cpu_usage: ThreadGroupCpuUsage::ZERO,
-                sig_pending: SpinLock::new(PendingSignals::new()),
+                sig_pending: NoIrqSpinLock::new(PendingSignals::new()),
             }),
         };
 
@@ -163,7 +164,7 @@ impl Drop for PublishGuard {
 fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task, SysError)> {
     let tid = task.tid();
     let tgid = task.tgid();
-    let mut topology = TOPOLOGY.inner.write_irqsave();
+    let mut topology = TOPOLOGY.inner.write();
     match binding {
         TaskBinding::Leader {
             parent_tgid,
@@ -174,7 +175,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                 TidRef::Owned(h) => h,
                 _ => panic!("task topology: leader task must have an owned TID handle"),
             };
-            task.tid = RwLock::new(TidRef::Leader);
+            task.tid = NoIrqRwLock::new(TidRef::Leader);
 
             let task = Arc::new(task);
 
@@ -186,7 +187,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                 parent_tgid: Some(parent_tgid),
                 children_tgids: BTreeSet::new(),
                 cpu_usage: ThreadGroupCpuUsage::ZERO,
-                sig_pending: SpinLock::new(PendingSignals::new()),
+                sig_pending: NoIrqSpinLock::new(PendingSignals::new()),
             };
 
             inner.parent_tgid = Some(parent_tgid);
@@ -198,7 +199,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
             assert!(
                 parent_tg
                     .inner
-                    .write_irqsave()
+                    .write()
                     .children_tgids
                     .insert(node.task.tgid()),
                 "task topology: duplicate child TGID {} when publishing task",
@@ -218,7 +219,8 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                             tgid: handle,
                             child_exited: Event::new(),
                             terminate_signal,
-                            inner: RwLock::new(inner),
+                            itimers: ITimers::new(),
+                            inner: NoIrqRwLock::new(inner),
                         })
                     )
                     .is_none(),
@@ -246,7 +248,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
             let task = Arc::new(task);
 
             assert!(
-                tg.inner.write_irqsave().members.insert(task.tid()),
+                tg.inner.write().members.insert(task.tid()),
                 "task topology: duplicate member TID {} when publishing task",
                 tid
             );
@@ -268,7 +270,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
 ///
 /// [TOPOLOGY]
 pub fn get_task(tid: &Tid) -> Option<Arc<Task>> {
-    let topology = TOPOLOGY.inner.read_irqsave();
+    let topology = TOPOLOGY.inner.read();
     topology.tasks.get(tid).map(|node| node.task.clone())
 }
 
@@ -287,7 +289,7 @@ pub fn get_init_task() -> Arc<Task> {
 ///
 /// [TOPOLOGY]
 pub fn for_each_task<F: FnMut(&Arc<Task>)>(mut f: F) {
-    let topology = TOPOLOGY.inner.read_irqsave();
+    let topology = TOPOLOGY.inner.read();
     for node in topology.tasks.values() {
         f(&node.task);
     }
@@ -299,7 +301,7 @@ pub fn for_each_task<F: FnMut(&Arc<Task>)>(mut f: F) {
 ///
 /// [TOPOLOGY]
 pub fn get_thread_group(tgid: &Tid) -> Option<Arc<ThreadGroup>> {
-    let topology = TOPOLOGY.inner.read_irqsave();
+    let topology = TOPOLOGY.inner.read();
     topology.thread_groups.get(tgid).cloned()
 }
 
@@ -315,7 +317,7 @@ pub fn get_thread_group(tgid: &Tid) -> Option<Arc<ThreadGroup>> {
 ///
 /// [TOPOLOGY]
 pub fn for_each_thread_group_from<F: FnMut(&Arc<ThreadGroup>)>(mut f: F, from: Option<Tid>) {
-    let topology = TOPOLOGY.inner.read_irqsave();
+    let topology = TOPOLOGY.inner.read();
     let iter = match from {
         Some(from) => topology.thread_groups.range(from..),
         None => topology.thread_groups.range(..),
@@ -338,7 +340,7 @@ pub struct TopologyStat {
 ///
 /// [TOPOLOGY]
 pub fn topology_stat() -> TopologyStat {
-    let topology = TOPOLOGY.inner.read_irqsave();
+    let topology = TOPOLOGY.inner.read();
 
     TopologyStat {
         ntasks: topology.tasks.len(),

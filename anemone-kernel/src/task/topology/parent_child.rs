@@ -10,7 +10,7 @@ impl ThreadGroup {
     ///
     /// For init and idle thread groups, this will return [None].
     pub fn parent_tgid(&self) -> Option<Tid> {
-        self.inner.read_irqsave().parent_tgid
+        self.inner.read().parent_tgid
     }
 
     /// Get the parent thread group.
@@ -28,11 +28,11 @@ impl ThreadGroup {
     pub fn get_parent(&self) -> Arc<ThreadGroup> {
         let parent_tgid = self
             .inner
-            .read_irqsave()
+            .read()
             .parent_tgid
             .expect("task topology: parent thread group not found");
 
-        let topology = TOPOLOGY.inner.read_irqsave();
+        let topology = TOPOLOGY.inner.read();
 
         let parent = topology
             .thread_groups
@@ -64,11 +64,11 @@ impl ThreadGroup {
     where
         F: FnOnce(&Arc<ThreadGroup>) -> R,
     {
-        let topology = TOPOLOGY.inner.write_irqsave();
+        let topology = TOPOLOGY.inner.write();
 
         let parent_tgid = self
             .inner
-            .read_irqsave()
+            .read()
             .parent_tgid
             .expect("task topology: parent thread group not found");
 
@@ -93,8 +93,8 @@ impl ThreadGroup {
     /// - [TOPOLOGY] -> [ThreadGroup]
     /// - [TOPOLOGY] -> ‵f‵
     pub fn for_each_child<F: FnMut(&Arc<ThreadGroup>)>(&self, mut f: F) {
-        let topology = TOPOLOGY.inner.read_irqsave();
-        for child_tgid in self.inner.read_irqsave().children_tgids.iter() {
+        let topology = TOPOLOGY.inner.read();
+        for child_tgid in self.inner.read().children_tgids.iter() {
             let child_tg = topology
                 .thread_groups
                 .get(child_tgid)
@@ -116,13 +116,13 @@ impl ThreadGroup {
     /// you really need such strong consistency guarantee before using this
     /// method.
     pub fn for_each_child_task<F: FnMut(&Arc<Task>)>(&self, mut f: F) {
-        let topology = TOPOLOGY.inner.read_irqsave();
-        for child_tgid in self.inner.read_irqsave().children_tgids.iter() {
+        let topology = TOPOLOGY.inner.read();
+        for child_tgid in self.inner.read().children_tgids.iter() {
             let child_tg = topology
                 .thread_groups
                 .get(child_tgid)
                 .expect("task topology: child thread group not found");
-            for member_tid in child_tg.inner.read_irqsave().members.iter() {
+            for member_tid in child_tg.inner.read().members.iter() {
                 let member = topology
                     .tasks
                     .get(member_tid)
@@ -144,8 +144,8 @@ impl ThreadGroup {
     ///
     /// Useful when the lock chain is too deep.
     pub fn get_children(&self) -> Vec<Arc<ThreadGroup>> {
-        let child_tgids = self.inner.read_irqsave().children_tgids.clone();
-        let topology = TOPOLOGY.inner.read_irqsave();
+        let child_tgids = self.inner.read().children_tgids.clone();
+        let topology = TOPOLOGY.inner.read();
         child_tgids
             .iter()
             // filter_map must be used here cz there is a window between the read and the clone.
@@ -155,7 +155,7 @@ impl ThreadGroup {
 
     /// Get the number of children thread groups of this thread group.
     pub fn nchildren(&self) -> usize {
-        self.inner.read_irqsave().children_tgids.len()
+        self.inner.read().children_tgids.len()
     }
 
     /// Find a child thread group of the thread group of this task by its TGID.
@@ -167,9 +167,9 @@ impl ThreadGroup {
         &self,
         mut prediction: P,
     ) -> Option<Arc<ThreadGroup>> {
-        let topology = TOPOLOGY.inner.read_irqsave();
+        let topology = TOPOLOGY.inner.read();
 
-        for child_tgid in self.inner.read_irqsave().children_tgids.iter() {
+        for child_tgid in self.inner.read().children_tgids.iter() {
             let child_tg = topology
                 .thread_groups
                 .get(child_tgid)
@@ -188,9 +188,9 @@ impl ThreadGroup {
     /// this method.
     pub fn reparent_orphan_children(&self) {
         // we may need get_many_mut... but it's still a nightly feature.
-        let topology = TOPOLOGY.inner.read_irqsave();
+        let topology = TOPOLOGY.inner.read();
         let mut child_tgids = vec![];
-        while let Some(child_tgid) = self.inner.write_irqsave().children_tgids.pop_last() {
+        while let Some(child_tgid) = self.inner.write().children_tgids.pop_last() {
             knoticeln!(
                 "reparenting orphan child thread group {} of parent thread group {}",
                 child_tgid,
@@ -203,7 +203,7 @@ impl ThreadGroup {
             let child_tg = topology.thread_groups.get(child_tgid).expect(
                 "task topology: child thread group not found when reparenting orphan children",
             );
-            child_tg.inner.write_irqsave().parent_tgid = Some(Tid::INIT);
+            child_tg.inner.write().parent_tgid = Some(Tid::INIT);
         }
 
         let init_tg = topology
@@ -213,11 +213,7 @@ impl ThreadGroup {
 
         for child_tgid in child_tgids {
             assert!(
-                init_tg
-                    .inner
-                    .write_irqsave()
-                    .children_tgids
-                    .insert(child_tgid),
+                init_tg.inner.write().children_tgids.insert(child_tgid),
                 "task topology: duplicate child TGID {} when reparenting orphan children",
                 child_tgid
             );
@@ -241,15 +237,10 @@ impl ThreadGroup {
     /// Result<Option<Arc<ThreadGroup>>, SomeError> to distinguish those two
     /// cases?
     pub fn try_reap_child(&self, child_tgid: Tid) -> Option<Arc<ThreadGroup>> {
-        let mut topology = TOPOLOGY.inner.write_irqsave();
+        let mut topology = TOPOLOGY.inner.write();
 
         // make sure this is indeed a child thread group of us.
-        if !self
-            .inner
-            .read_irqsave()
-            .children_tgids
-            .contains(&child_tgid)
-        {
+        if !self.inner.read().children_tgids.contains(&child_tgid) {
             return None;
         }
 
@@ -276,10 +267,7 @@ impl ThreadGroup {
         );
 
         assert!(
-            self.inner
-                .write_irqsave()
-                .children_tgids
-                .remove(&child_tgid),
+            self.inner.write().children_tgids.remove(&child_tgid),
             "task topology: child thread group {} disappeared from parent {} when reaping",
             child_tgid,
             self.tgid()

@@ -42,6 +42,21 @@ pub mod linux {
         pub const CLOCK_MONOTONIC_COARSE: i32 = 6;
         // TODO
     }
+
+    pub mod itimer {
+        use crate::time::linux::TimeVal;
+
+        pub const ITIMER_REAL: i32 = 0;
+        pub const ITIMER_VIRTUAL: i32 = 1;
+        pub const ITIMER_PROF: i32 = 2;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[repr(C)]
+        pub struct OldITimerVal {
+            pub it_interval: TimeVal,
+            pub it_value: TimeVal,
+        }
+    }
 }
 
 pub mod native {}

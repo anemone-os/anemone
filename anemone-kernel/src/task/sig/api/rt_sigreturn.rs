@@ -14,7 +14,7 @@ use anemone_abi::process::linux::signal::{self as linux_signal};
 
 #[syscall(SYS_RT_SIGRETURN)]
 fn sys_rt_sigreturn() -> Result<u64, SysError> {
-    kdebugln!("sys_rt_sigreturn: called");
+    kdebugln!("sys_rt_sigreturn: called {}", current_task_id());
 
     let task = get_current_task();
     let usp = task.clone_uspace_handle();

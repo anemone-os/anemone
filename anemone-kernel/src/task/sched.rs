@@ -7,13 +7,13 @@ impl Task {
     /// using [Self::with_sched_entity_mut] instead to avoid unnecessary bytes
     /// copying.
     pub fn sched_entity(&self) -> SchedEntity {
-        *self.sched_entity.lock()
+        *self.sched_entity.lock_irqsave()
     }
 
     /// Run a closure with a mutable reference to the scheduling entity of this
     /// task.
     pub fn with_sched_entity_mut<F: FnOnce(&mut SchedEntity) -> R, R>(&self, f: F) -> R {
-        let mut guard = self.sched_entity.lock();
+        let mut guard = self.sched_entity.lock_irqsave();
         f(&mut guard)
     }
 

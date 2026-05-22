@@ -15,3 +15,4 @@ pub mod rt_sigreturn;
 pub mod rt_sigtimedwait;
 pub mod sigaltstack;
 pub mod tgkill;
+pub mod tkill;

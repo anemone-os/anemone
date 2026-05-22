@@ -1,4 +1,6 @@
-//! Timer events and related functionality.
+//! Soft timer.
+//!
+//! Currently dosen't support cancellation.
 
 use core::fmt::Debug;
 

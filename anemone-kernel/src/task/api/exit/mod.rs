@@ -5,6 +5,7 @@
 use crate::{
     prelude::{user_access::UserWritePtr, *},
     task::{
+        futex::exit_robust_list,
         sig::{
             SigNo, Signal,
             info::{SiCode, SigChld, SigInfoFields, SigKill},
@@ -25,22 +26,54 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         if task.tid() == Tid::INIT {
             panic!("init task shall not exit");
         }
+        kdebugln!("kernel_exit: task={} exit with code {:?}", task.tid(), code);
 
         if let Some(addr) = task.get_clear_child_tid() {
             let usp = task.clone_uspace_handle();
-            let mut guard = usp.lock();
-            match UserWritePtr::<Tid>::try_new(addr, &mut guard) {
-                Ok(mut uptr) => uptr.write(Tid::new(0)),
-                Err(e) => {
+            let cleard = {
+                let mut guard = usp.lock();
+                match UserWritePtr::<Tid>::try_new(addr, &mut guard) {
+                    Ok(mut uptr) => {
+                        uptr.write(Tid::new(0));
+                        true
+                    },
+                    Err(e) => {
+                        knoticeln!(
+                            "failed to clear child tid for task {}: {:?} at address {:#x}",
+                            task.tid(),
+                            e,
+                            addr.get()
+                        );
+                        false
+                    },
+                }
+            };
+            if cleard {
+                if let Err(e) = futex::wake_at(&task.clone_uspace_handle(), addr, 1) {
                     knoticeln!(
                         "failed to clear child tid for {}: {:?} at address {:#x}",
                         task.tid(),
                         e,
                         addr.get()
                     );
-                },
+                } else {
+                    kdebugln!(
+                        "cleared child tid and woke futex for task {} at address {:#x}",
+                        task.tid(),
+                        addr.get()
+                    );
+                }
             }
-            // todo: futex.
+        }
+
+        if !task.flags().is_kernel() {
+            if let Err(e) = exit_robust_list() {
+                knoticeln!(
+                    "failed to exit robust list for task {}: {:?}",
+                    task.tid(),
+                    e,
+                );
+            }
         }
 
         let tg = task.get_thread_group();
@@ -60,7 +93,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         // a longer critical section must be held here to avoid races. TODO: explain
         // why.
         if is_last {
-            let mut tg_inner = tg.inner.write_irqsave();
+            let mut tg_inner = tg.inner.write();
 
             let xcode = match tg_inner.status.life_cycle {
                 ThreadGroupLifeCycle::Alive => {
@@ -83,7 +116,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             // error-prone design later.
             drop(tg_inner);
             tg.reparent_orphan_children();
-            tg_inner = tg.inner.write_irqsave();
+            tg_inner = tg.inner.write();
 
             // 2. set status to Exited, so that wait4 can reap this thread group.
             tg_inner.status.life_cycle = ThreadGroupLifeCycle::Exited(xcode);

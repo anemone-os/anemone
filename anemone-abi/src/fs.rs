@@ -262,12 +262,27 @@ pub mod linux {
         pub const POLLHUP: i16 = 0x0010;
         pub const POLLNVAL: i16 = 0x0020;
 
+        // less-or-more non-standard.
+        pub const POLLRDHUP: i16 = 0x2000;
+
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
         #[repr(C)]
         pub struct PollFd {
             pub fd: i32,
             pub events: i16,
             pub revents: i16,
+        }
+    }
+
+    pub mod select {
+        /// POSIX's definition. An unreasonably low limit for modern
+        /// applications nowadays.
+        pub const FD_SETSIZE: usize = 1024;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[repr(C)]
+        pub struct FdSet {
+            pub fds_bits: [u64; FD_SETSIZE / (8 * size_of::<u64>())],
         }
     }
 

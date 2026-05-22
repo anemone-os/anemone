@@ -1,4 +1,5 @@
 pub mod ppoll;
+pub mod pselect6;
 
 mod args {
     use crate::prelude::*;
@@ -13,6 +14,7 @@ mod args {
             const ERR = POLLERR;
             const HUP = POLLHUP;
             const NVAL = POLLNVAL;
+            const RDHUP = POLLRDHUP;
         }
     }
 

@@ -60,8 +60,8 @@ pub struct RiscV64SchedArch;
 impl SchedArchTrait for RiscV64SchedArch {
     type TaskContext = TaskContext;
     unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext) {
-        debug_assert!(IntrArch::current_irq_flags() == IntrArch::DISABLED_IRQ_FLAGS);
         unsafe {
+            assert!(IntrArch::local_intr_disabled());
             __switch(cur, next);
         }
     }

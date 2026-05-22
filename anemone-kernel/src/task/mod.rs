@@ -10,10 +10,15 @@ pub use tid::*;
 
 // integration with other subsystems
 pub mod cpu_usage;
+pub mod credentials;
 pub mod files;
 pub mod sig;
 #[path = "fs.rs"]
 pub mod task_fs;
+#[path = "itimer.rs"]
+pub mod task_itimer;
+#[path = "resource/mod.rs"]
+pub mod task_resource;
 #[path = "sched.rs"]
 pub mod task_sched;
 
@@ -37,6 +42,7 @@ use crate::{
             PendingSignals, SigNo, altstack::SigAltStack, disposition::SignalDisposition,
             set::SigSet,
         },
+        task_itimer::ITimers,
     },
 };
 
@@ -62,7 +68,7 @@ pub enum TidRef {
 /// TODO: full lock ordering chain.
 pub struct Task {
     /// Task ID.
-    tid: RwLock<TidRef>,
+    tid: NoIrqRwLock<TidRef>,
     /// What linux folks call "real parent". Tid of the task who cloned/forked
     /// this task.
     ///
@@ -92,7 +98,7 @@ pub struct Task {
     ///
     /// Memory of TCB is quite precious, so single bool field should not be used
     /// for each flag. Instead, use this bitfield to store all flags.
-    flags: RwLock<TaskFlags>,
+    flags: NoIrqRwLock<TaskFlags>,
 
     /// User address space, or [None] for pure kernel tasks.
     usp: RwLock<Option<Arc<UserSpaceHandle>>>,
@@ -123,22 +129,24 @@ pub struct Task {
     /// File descriptor table state.
     files_state: Arc<RwLock<FilesState>>,
     /// Cpu usage information.
-    cpu_usage: RwLock<TaskCpuUsage>,
+    cpu_usage: NoIrqRwLock<TaskCpuUsage>,
 
     /// Signal disposition table.
-    sig_disposition: Arc<RwLock<SignalDisposition>>,
+    sig_disposition: Arc<NoIrqRwLock<SignalDisposition>>,
     /// Determines which signals are blocked.
-    sig_mask: SpinLock<SigSet>,
+    sig_mask: NoIrqSpinLock<SigSet>,
     /// Current pending signals. Local to each task.
-    sig_pending: SpinLock<PendingSignals>,
+    sig_pending: NoIrqSpinLock<PendingSignals>,
     /// Alternative signal stack. Local to each task.
-    sig_altstack: SpinLock<Option<SigAltStack>>,
+    sig_altstack: NoIrqSpinLock<Option<SigAltStack>>,
 
+    /// Robust futex list head.
+    robust_list: SpinLock<Option<VirtAddr>>,
     /// Exit code of this task. Meaningful only when this task is a zombie.
     exit_code: SpinLock<Option<ExitCode>>,
 
     /// See [TaskStatus] for a precise definition.
-    status: RwLock<TaskStatus>,
+    status: NoIrqRwLock<TaskStatus>,
 
     /// Optional user pointer updated during child clear-tid handling.
     ///
@@ -217,8 +225,9 @@ pub struct ThreadGroup {
     child_exited: Event,
     /// Signal to send to parent when this thread group exits.
     terminate_signal: Option<SigNo>,
-    /// Mutable state.
-    inner: RwLock<ThreadGroupInner>,
+    /// POSIX interval timers. Shared by all member threads.
+    itimers: ITimers,
+    inner: NoIrqRwLock<ThreadGroupInner>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -281,7 +290,7 @@ struct ThreadGroupInner {
     /// CPU usage of this thread group.
     cpu_usage: ThreadGroupCpuUsage,
     /// Pending signals for this thread group. Shared by all member threads.
-    sig_pending: SpinLock<PendingSignals>,
+    sig_pending: NoIrqSpinLock<PendingSignals>,
 }
 
 // endregion: definitions
@@ -338,18 +347,17 @@ impl Task {
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
         let task = Self {
-            tid: RwLock::new(TidRef::Owned(tid)),
+            tid: NoIrqRwLock::new(TidRef::Owned(tid)),
             creator,
             tgid,
             kstack: stack,
             name: RwLock::new((String::from("@kernel/") + name).into_boxed_str()),
-            flags: RwLock::new(flags | TaskFlags::KERNEL),
+            flags: NoIrqRwLock::new(flags | TaskFlags::KERNEL),
             usp: RwLock::new(None),
             cpuid: if let Some(cpu) = cpu {
                 cpu
             } else {
                 let cpu = pick_next_cpu();
-
                 kdebugln!(
                     "{}:{}: no cpu specified, picked cpu {}",
                     tid_value,
@@ -371,15 +379,16 @@ impl Task {
             fpu_used: AtomicBool::new(false),
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: Arc::new(RwLock::new(FilesState::new())),
-            cpu_usage: RwLock::new(TaskCpuUsage::ZERO),
+            cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
 
-            sig_disposition: Arc::new(RwLock::new(SignalDisposition::new())),
-            sig_mask: SpinLock::new(SigSet::new()),
-            sig_pending: SpinLock::new(PendingSignals::new()),
-            sig_altstack: SpinLock::new(None),
+            sig_disposition: Arc::new(NoIrqRwLock::new(SignalDisposition::new())),
+            sig_mask: NoIrqSpinLock::new(SigSet::new()),
+            sig_pending: NoIrqSpinLock::new(PendingSignals::new()),
+            sig_altstack: NoIrqSpinLock::new(None),
 
+            robust_list: SpinLock::new(None),
             exit_code: SpinLock::new(None),
-            status: RwLock::new(TaskStatus::Runnable),
+            status: NoIrqRwLock::new(TaskStatus::Runnable),
             clear_child_tid: SpinLock::new(None),
         };
         Ok((task, PublishGuard))
@@ -396,12 +405,12 @@ impl Task {
         let stack_top = stack.stack_top();
         Ok((
             Task {
-                tid: RwLock::new(TidRef::Idle),
+                tid: NoIrqRwLock::new(TidRef::Idle),
                 creator: None,
                 tgid: Tid::IDLE,
                 kstack: stack,
                 name: RwLock::new(Box::from("@idle")),
-                flags: RwLock::new(TaskFlags::IDLE | TaskFlags::KERNEL),
+                flags: NoIrqRwLock::new(TaskFlags::IDLE | TaskFlags::KERNEL),
                 usp: RwLock::new(None),
                 cpuid: cur_cpu_id(),
                 sched_ctx: unsafe {
@@ -416,15 +425,16 @@ impl Task {
                 fpu_used: AtomicBool::new(false),
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
                 files_state: Arc::new(RwLock::new(FilesState::new())),
-                cpu_usage: RwLock::new(TaskCpuUsage::ZERO),
+                cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
 
-                sig_disposition: Arc::new(RwLock::new(SignalDisposition::new())),
-                sig_mask: SpinLock::new(SigSet::new()),
-                sig_pending: SpinLock::new(PendingSignals::new()),
-                sig_altstack: SpinLock::new(None),
+                sig_disposition: Arc::new(NoIrqRwLock::new(SignalDisposition::new())),
+                sig_mask: NoIrqSpinLock::new(SigSet::new()),
+                sig_pending: NoIrqSpinLock::new(PendingSignals::new()),
+                sig_altstack: NoIrqSpinLock::new(None),
 
+                robust_list: SpinLock::new(None),
                 exit_code: SpinLock::new(None),
-                status: RwLock::new(TaskStatus::Runnable),
+                status: NoIrqRwLock::new(TaskStatus::Runnable),
                 clear_child_tid: SpinLock::new(None),
             },
             PublishGuard,
@@ -634,6 +644,16 @@ impl Task {
         self.clear_child_tid.lock().clone()
     }
 
+    /// Get the robust futex list head pointer.
+    pub fn robust_list(&self) -> Option<VirtAddr> {
+        self.robust_list.lock().clone()
+    }
+
+    /// Set the robust futex list head pointer.
+    pub fn set_robust_list(&self, head: Option<VirtAddr>) {
+        *self.robust_list.lock() = head;
+    }
+    
     pub fn fpu_used(&self) -> bool {
         self.fpu_used.load(Ordering::Acquire)
     }

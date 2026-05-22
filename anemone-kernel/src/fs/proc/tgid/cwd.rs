@@ -48,7 +48,7 @@ static TGID_CWD_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::NotSupported),
     validate_seek: |_, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotSupported),
-    poll: |_, _| Ok(PollEvent::READABLE),
+    poll: |_, req| Ok(PollEvent::READABLE & req.interests()),
 };
 
 pub static TGID_CWD_TGID_ENTRY: TgidEntry = TgidEntry {

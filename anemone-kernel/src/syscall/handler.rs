@@ -29,6 +29,31 @@ pub trait TryFromSyscallArg: Sized {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError>;
 }
 
+pub fn parse_syscall_arg<T>(
+    regs: &SyscallRegs,
+    arg_index: usize,
+    handler_name: &'static str,
+    parse: impl FnOnce(u64) -> Result<T, SysError>,
+) -> Result<T, SysError> {
+    let raw = regs.args[arg_index];
+
+    match parse(raw) {
+        Ok(value) => Ok(value),
+        Err(err) => {
+            kdebugln!(
+                "syscall arg parse failed: task={}, sysno={}, handler={}, arg{}={:#x}, err={:?}",
+                current_task_id(),
+                regs.sysno,
+                handler_name,
+                arg_index,
+                raw,
+                err,
+            );
+            Err(err)
+        },
+    }
+}
+
 /// Accept a syscall register as a transported 32-bit bit pattern.
 ///
 /// At the syscall boundary, Linux-compatible 32-bit flags and modes may reach
@@ -59,23 +84,25 @@ macro_rules! gen_basic_try_from_syscall_arg {
     (unsigned, $ty:ty) => {
         impl TryFromSyscallArg for $ty {
             fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-                if raw <= <$ty>::MAX as u64 {
-                    Ok(raw as $ty)
-                } else {
-                    Err(SysError::InvalidArgument)
-                }
+                Ok(raw as $ty)
+                // if raw <= <$ty>::MAX as u64 {
+                //     Ok(raw as $ty)
+                // } else {
+                //     Err(SysError::InvalidArgument)
+                // }
             }
         }
     };
     (signed, $ty:ty) => {
         impl TryFromSyscallArg for $ty {
             fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
-                let signed = raw as i64;
-                if signed >= <$ty>::MIN as i64 && signed <= <$ty>::MAX as i64 {
-                    Ok(signed as $ty)
-                } else {
-                    Err(SysError::InvalidArgument)
-                }
+                Ok(raw as $ty)
+                // let signed = raw as i64;
+                // if signed >= <$ty>::MIN as i64 && signed <= <$ty>::MAX as i64 {
+                //     Ok(signed as $ty)
+                // } else {
+                //     Err(SysError::InvalidArgument)
+                // }
             }
         }
     };

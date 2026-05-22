@@ -91,6 +91,7 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let wrapper_name = format_ident!("__sys_wrap_{}", name);
     let static_name = format_ident!("__SYSCALL_{}", name.to_string().to_uppercase());
     let hidden_trapframe_arg = format_ident!("__trapframe__");
+    let handler_name_expr = quote! { concat!(module_path!(), "::", stringify!(#name)) };
 
     let mut arg_bindings = Vec::new();
     let mut arg_names = Vec::new();
@@ -143,12 +144,22 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         arg_bindings.push(match validate_with {
             Some(validate_with) => quote! {
-                let __validate_with = (#validate_with);
-                let #arg_name: #arg_ty = __validate_with(regs.args[#arg_index])?;
+                let #arg_name: #arg_ty = crate::syscall::handler::parse_syscall_arg(
+                    regs,
+                    #arg_index,
+                    #handler_name_expr,
+                    |raw| {
+                        let __validate_with = (#validate_with);
+                        __validate_with(raw)
+                    },
+                )?;
             },
             None => quote! {
-                let #arg_name = <#arg_ty as crate::syscall::handler::TryFromSyscallArg>::try_from_syscall_arg(
-                    regs.args[#arg_index],
+                let #arg_name: #arg_ty = crate::syscall::handler::parse_syscall_arg(
+                    regs,
+                    #arg_index,
+                    #handler_name_expr,
+                    |raw| <#arg_ty as crate::syscall::handler::TryFromSyscallArg>::try_from_syscall_arg(raw),
                 )?;
             },
         });

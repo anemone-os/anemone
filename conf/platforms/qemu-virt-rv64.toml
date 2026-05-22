@@ -30,6 +30,8 @@ args = [
     "virtio-net-device,netdev=net",
     "-netdev",
     "user,id=net",
+    "-accel",
+    "tcg,thread=multi",
 
     # "-drive",
     # "file=sdcard-rv.img,format=raw,if=none,id=x0",
