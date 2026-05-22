@@ -149,6 +149,7 @@ impl UserSpaceHandle {
     }
 
     /// TODO: remove this. it's really unsafe.
+    #[track_caller]
     pub fn lock(&self) -> MutexGuard<'_, UserSpace> {
         self.usp.lock()
     }
