@@ -297,6 +297,15 @@ pub fn kernel_clone(
             }
         };
         *child_mask = *parent_mask;
+
+        // note the drop ordering.
+        if current_task.tid() < new_task.tid() {
+            drop(child_mask);
+            drop(parent_mask);
+        } else {
+            drop(parent_mask);
+            drop(child_mask);
+        }
     }
 
     if flags.contains(CloneFlags::SIGHAND) {
@@ -317,6 +326,15 @@ pub fn kernel_clone(
             }
         };
         *child_disp = parent_disp.clone();
+
+        // note the drop ordering.
+        if current_task.tid() < new_task.tid() {
+            drop(child_disp);
+            drop(parent_disp);
+        } else {
+            drop(parent_disp);
+            drop(child_disp);
+        }
     }
 
     if flags.contains(CloneFlags::CLEAR_SIGHAND) {

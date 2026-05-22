@@ -81,9 +81,8 @@ impl TryFromSyscallArg for FutexOp {
             flags |= FutexCmdFlags::PRIVATE;
         }
         if raw & FUTEX_CLOCK_REALTIME != 0 {
-            // flags |= FutexCmdFlags::CLOCK_REALTIME;
-            knoticeln!("futex: FUTEX_CLOCK_REALTIME is not yet implemented");
-            return Err(SysError::NotYetImplemented);
+            // stub
+            flags |= FutexCmdFlags::CLOCK_REALTIME;
         }
 
         Ok(Self { cmd, flags })

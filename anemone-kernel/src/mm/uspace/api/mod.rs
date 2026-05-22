@@ -60,6 +60,15 @@ mod args {
             // Currently not supported. Now we only have fixed-length mappings.
             // const MAP_GROWSDOWN = mmap::MAP_GROWSDOWN;
 
+            /// Deprecated. Reserved for compatibility with old programs.
+            const MAP_DENYWRITE = mmap::MAP_DENYWRITE;
+
+            /// No-op. For compatibility.
+            const MAP_STACK = mmap::MAP_STACK;
+
+            /// Currently no swapping, so this flag is effectively a no-op.
+            const MAP_NORESERVE = mmap::MAP_NORESERVE;
+
             /// Currently this flag is ignored, but the effect is the same from user's perspective.
             const MAP_UNINITIALIZED = mmap::MAP_UNINITIALIZED;
         }
