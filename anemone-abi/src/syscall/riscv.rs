@@ -154,6 +154,11 @@ pub mod linux {
 
     pub const SYS_SYSINFO: u64 = 179;
 
+    pub const SYS_SHMGET: u64 = 194;
+    pub const SYS_SHMCTL: u64 = 195;
+    pub const SYS_SHMAT: u64 = 196;
+    pub const SYS_SHMDT: u64 = 197;
+
     pub const SYS_BRK: u64 = 214;
     pub const SYS_MUNMAP: u64 = 215;
 
