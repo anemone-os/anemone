@@ -36,6 +36,7 @@ pub mod sendfile;
 pub mod stat;
 pub mod statfs;
 pub mod symlinkat;
+pub mod truncate;
 pub mod umask;
 pub mod umount;
 pub mod unlinkat;

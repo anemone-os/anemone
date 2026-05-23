@@ -43,6 +43,7 @@ static TGID_MOUNTS_INODE_OPS: InodeOps = InodeOps {
     rmdir: |_, _| Err(SysError::NotDir),
     rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: tgid_mounts_open,
+    truncate: |_, _| Err(SysError::NotSupported),
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: tgid_mounts_get_attr,
 };

@@ -31,6 +31,48 @@ impl RamfsRegState {
         self.size.fetch_max(new, Ordering::AcqRel);
     }
 
+    fn resident_page_count(size: usize) -> usize {
+        if size == 0 {
+            0
+        } else {
+            ((size - 1) >> PagingArch::PAGE_SIZE_BITS) + 1
+        }
+    }
+
+    fn zero_page_tail(frame: &FrameHandle, start: usize) {
+        let page = unsafe {
+            core::slice::from_raw_parts_mut(
+                frame.ppn().to_phys_addr().to_hhdm().as_ptr_mut(),
+                PagingArch::PAGE_SIZE_BYTES,
+            )
+        };
+        page[start..].fill(0);
+    }
+
+    pub(super) fn truncate(&self, new_size: usize) {
+        let old_size = self.size.swap(new_size, Ordering::AcqRel);
+        let mut pages = self.pages.write();
+
+        if new_size < old_size {
+            let keep_pages = Self::resident_page_count(new_size);
+            pages.retain(|pidx, _| *pidx < keep_pages);
+
+            let tail_offset = new_size & (PagingArch::PAGE_SIZE_BYTES - 1);
+            if tail_offset != 0 {
+                if let Some(frame) = pages.get(&(new_size >> PagingArch::PAGE_SIZE_BITS)) {
+                    Self::zero_page_tail(frame, tail_offset);
+                }
+            }
+        } else if new_size > old_size {
+            let tail_offset = old_size & (PagingArch::PAGE_SIZE_BYTES - 1);
+            if tail_offset != 0 {
+                if let Some(frame) = pages.get(&(old_size >> PagingArch::PAGE_SIZE_BITS)) {
+                    Self::zero_page_tail(frame, tail_offset);
+                }
+            }
+        }
+    }
+
     fn page_start(pidx: usize) -> Result<usize, SysError> {
         pidx.checked_mul(PagingArch::PAGE_SIZE_BYTES)
             .ok_or(SysError::InvalidArgument)

@@ -201,6 +201,7 @@ static CONSOLE_STDIN_INODE_OPS: InodeOps = InodeOps {
     rmdir: |_, _| Err(SysError::NotSupported),
     rename: |_, _, _, _, _| Err(SysError::NotSupported),
     link: |_, _, _| Err(SysError::NotSupported),
+    truncate: |_, _| Err(SysError::NotSupported),
     get_attr: console_get_attr,
     read_link: |_| Err(SysError::NotSymlink),
     open: |_| {
@@ -219,6 +220,7 @@ static CONSOLE_STDOUT_INODE_OPS: InodeOps = InodeOps {
     unlink: |_, _| Err(SysError::NotSupported),
     rmdir: |_, _| Err(SysError::NotSupported),
     link: |_, _, _| Err(SysError::NotSupported),
+    truncate: |_, _| Err(SysError::NotSupported),
     get_attr: console_get_attr,
     read_link: |_| Err(SysError::NotSymlink),
     rename: |_, _, _, _, _| Err(SysError::NotSupported),

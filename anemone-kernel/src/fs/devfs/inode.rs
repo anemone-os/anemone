@@ -1,167 +1,165 @@
 use crate::{
-    device::{block::get_block_dev, char::get_char_dev},
-    fs::{
-        devfs::{DevfsNode, devfs_ino_for, devfs_inode_data, devfs_lookup_name, devfs_root_ino},
-        inode::Inode,
-    },
-    prelude::*,
-    utils::any_opaque::AnyOpaque,
+	fs::{
+		devfs::{DEVFS_ROOT_INO, DevfsNode, DevfsNodeAttr, published_node_by_name},
+		inode::Inode,
+	},
+	prelude::*,
+	utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
-use super::file::{DEVFS_BLOCK_FILE_OPS, DEVFS_CHAR_FILE_OPS, DEVFS_DIR_FILE_OPS, DevfsFile};
+use super::file::DEVFS_ROOT_FILE_OPS;
 
-#[derive(Debug, Clone, Copy, Opaque)]
-pub(super) struct DevfsInode {
-    node: DevfsNode,
+#[derive(Opaque)]
+struct DevfsInode {
+	node: Arc<DevfsNode>,
 }
 
-impl DevfsInode {
-    fn new(node: DevfsNode) -> Self {
-        Self { node }
-    }
-
-    fn node(self) -> DevfsNode {
-        self.node
-    }
+fn devfs_inode_node(inode: &InodeRef) -> &Arc<DevfsNode> {
+	&inode
+		.inode()
+		.prv()
+		.cast::<DevfsInode>()
+		.expect("devfs leaf inode must carry DevfsInode private data")
+		.node
 }
 
-pub(super) fn devfs_new_inode(
-    sb: Arc<SuperBlock>,
-    node: DevfsNode,
-) -> Result<Arc<Inode>, SysError> {
-    let inode = Arc::new(Inode::new(
-        devfs_ino_for(node),
-        match node {
-            DevfsNode::Root => InodeType::Dir,
-            DevfsNode::Char(_) => InodeType::Char,
-            DevfsNode::Block(_) => InodeType::Block,
-        },
-        match node {
-            DevfsNode::Root => &DEVFS_ROOT_INODE_OPS,
-            DevfsNode::Char(_) | DevfsNode::Block(_) => &DEVFS_DEV_INODE_OPS,
-        },
-        sb,
-        AnyOpaque::new(DevfsInode::new(node)),
-    ));
+fn make_inode_stat(inode: &InodeRef, attr: DevfsNodeAttr, size: u64) -> InodeStat {
+	let meta = inode.inode().meta_snapshot();
 
-    match node {
-        DevfsNode::Root => {
-            inode.set_nlink(2);
-            inode.set_perm(InodePerm::all_rwx());
-            inode.set_size(0);
-        },
-        DevfsNode::Char(_) => {
-            inode.set_nlink(1);
-            inode.set_perm(InodePerm::all_rwx());
-            inode.set_size(0);
-        },
-        DevfsNode::Block(devnum) => {
-            let dev = get_block_dev(devnum).ok_or(SysError::NotFound)?;
-            inode.set_nlink(1);
-            inode.set_perm(InodePerm::all_rwx());
-            inode.set_size((dev.block_size().bytes() * dev.total_blocks()) as u64);
-        },
-    }
-
-    Ok(inode)
+	InodeStat {
+		fs_dev: DeviceId::None,
+		ino: inode.ino(),
+		mode: InodeMode::new(attr.ty, meta.perm),
+		nlink: meta.nlink,
+		uid: 0,
+		gid: 0,
+		rdev: attr.rdev,
+		size,
+		atime: meta.atime,
+		mtime: meta.mtime,
+		ctime: meta.ctime,
+	}
 }
 
-fn devfs_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
-    match devfs_inode_data(dir).node() {
-        DevfsNode::Root => {
-            let node = devfs_lookup_name(name)?;
-            dir.sb().iget(devfs_ino_for(node))
-        },
-        _ => Err(SysError::NotDir),
-    }
+pub(super) fn devfs_new_root_inode(sb: Arc<SuperBlock>) -> Arc<Inode> {
+	let inode = Arc::new(Inode::new(
+		DEVFS_ROOT_INO,
+		InodeType::Dir,
+		&DEVFS_ROOT_INODE_OPS,
+		sb,
+		NilOpaque::new(),
+	));
+
+	inode.set_nlink(2);
+	// Directories need execute permission for traversal, so `/dev` itself
+	// remains searchable even though device leaves below it are non-executable.
+	inode.set_perm(InodePerm::all_rwx());
+	inode.set_size(0);
+	inode.set_times(
+		Instant::ZERO.to_duration(),
+		Instant::ZERO.to_duration(),
+		Instant::ZERO.to_duration(),
+	);
+
+	inode
 }
 
-fn devfs_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
-    let node = devfs_inode_data(inode).node();
+pub(super) fn devfs_new_leaf_inode(
+	sb: Arc<SuperBlock>,
+	node: Arc<DevfsNode>,
+) -> Arc<Inode> {
+	let attr = node.attr;
+	let inode = Arc::new(Inode::new(
+		node.ino,
+		attr.ty,
+		&DEVFS_LEAF_INODE_OPS,
+		sb,
+		AnyOpaque::new(DevfsInode { node }),
+	));
 
-    Ok(OpenedFile {
-        file_ops: match node {
-            DevfsNode::Root => &DEVFS_DIR_FILE_OPS,
-            DevfsNode::Char(_) => &DEVFS_CHAR_FILE_OPS,
-            DevfsNode::Block(_) => &DEVFS_BLOCK_FILE_OPS,
-        },
-        prv: AnyOpaque::new(DevfsFile::new(node)),
-    })
+	inode.set_nlink(1);
+	inode.set_perm(attr.perm);
+	inode.set_size(0);
+	inode.set_times(
+		Instant::ZERO.to_duration(),
+		Instant::ZERO.to_duration(),
+		Instant::ZERO.to_duration(),
+	);
+
+	inode
 }
 
-fn devfs_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
-    let node = devfs_inode_data(inode).node();
-    let meta = inode.inode().meta_snapshot();
+fn devfs_root_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
+	if matches!(name, "." | "..") {
+		return Ok(dir.sb().root_inode());
+	}
 
-    let (mode, nlink, rdev, size) = match node {
-        DevfsNode::Root => (
-            InodeMode::new(InodeType::Dir, meta.perm),
-            2,
-            DeviceId::None,
-            0,
-        ),
-        DevfsNode::Char(devnum) => {
-            get_char_dev(devnum).ok_or(SysError::NotFound)?;
-            (
-                InodeMode::new(InodeType::Char, meta.perm),
-                1,
-                DeviceId::Char(devnum),
-                0,
-            )
-        },
-        DevfsNode::Block(devnum) => {
-            let dev = get_block_dev(devnum).ok_or(SysError::NotFound)?;
-            (
-                InodeMode::new(InodeType::Block, meta.perm),
-                1,
-                DeviceId::Block(devnum),
-                (dev.block_size().bytes() * dev.total_blocks()) as u64,
-            )
-        },
-    };
+	let node = published_node_by_name(name).ok_or(SysError::NotFound)?;
 
-    Ok(InodeStat {
-        fs_dev: DeviceId::None,
-        ino: match node {
-            DevfsNode::Root => devfs_root_ino(),
-            _ => inode.ino(),
-        },
-        mode,
-        nlink,
-        uid: 0,
-        gid: 0,
-        rdev,
-        size,
-        atime: meta.atime,
-        mtime: meta.mtime,
-        ctime: meta.ctime,
-    })
+	// Leaf inodes are seeded at publish time, so lookup should only resolve an
+	// existing icache entry here.
+	Ok(dir
+		.sb()
+		.try_iget(node.ino)
+		.expect("published devfs inode missing from icache"))
+}
+
+fn devfs_root_open(_inode: &InodeRef) -> Result<OpenedFile, SysError> {
+	Ok(OpenedFile {
+		file_ops: &DEVFS_ROOT_FILE_OPS,
+		prv: NilOpaque::new(),
+	})
+}
+
+fn devfs_root_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
+	Ok(make_inode_stat(
+		inode,
+		DevfsNodeAttr {
+			ty: InodeType::Dir,
+			perm: inode.perm(),
+			rdev: DeviceId::None,
+		},
+		0,
+	))
+}
+
+fn devfs_leaf_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
+	let node = devfs_inode_node(inode);
+	node.ops.open(inode)
+}
+
+fn devfs_leaf_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
+	let node = devfs_inode_node(inode);
+	node.ops.get_attr(inode, node.attr)
 }
 
 pub(super) static DEVFS_ROOT_INODE_OPS: InodeOps = InodeOps {
-    lookup: devfs_lookup,
-    touch: |_, _, _| Err(SysError::NotSupported),
-    mkdir: |_, _, _| Err(SysError::NotSupported),
-    symlink: |_, _, _| Err(SysError::NotSupported),
-    link: |_, _, _| Err(SysError::NotSupported),
-    unlink: |_, _| Err(SysError::NotSupported),
-    rmdir: |_, _| Err(SysError::NotSupported),
-    rename: |_, _, _, _, _| Err(SysError::NotSupported),
-    open: devfs_open,
-    read_link: |_| Err(SysError::NotSymlink),
-    get_attr: devfs_get_attr,
+	lookup: devfs_root_lookup,
+	touch: |_, _, _| Err(SysError::NotSupported),
+	mkdir: |_, _, _| Err(SysError::NotSupported),
+	symlink: |_, _, _| Err(SysError::NotSupported),
+	link: |_, _, _| Err(SysError::IsDir),
+	unlink: |_, _| Err(SysError::IsDir),
+	rmdir: |_, _| Err(SysError::NotSupported),
+	rename: |_, _, _, _, _| Err(SysError::NotSupported),
+	open: devfs_root_open,
+	truncate: |_, _| Err(SysError::NotSupported),
+	read_link: |_| Err(SysError::NotSymlink),
+	get_attr: devfs_root_get_attr,
 };
 
-pub(super) static DEVFS_DEV_INODE_OPS: InodeOps = InodeOps {
-    lookup: |_, _| Err(SysError::NotDir),
-    touch: |_, _, _| Err(SysError::NotDir),
-    mkdir: |_, _, _| Err(SysError::NotDir),
-    symlink: |_, _, _| Err(SysError::NotDir),
-    link: |_, _, _| Err(SysError::NotDir),
-    unlink: |_, _| Err(SysError::NotDir),
-    rmdir: |_, _| Err(SysError::NotDir),
-    rename: |_, _, _, _, _| Err(SysError::NotSupported),
-    open: devfs_open,
-    read_link: |_| Err(SysError::NotSymlink),
-    get_attr: devfs_get_attr,
+pub(super) static DEVFS_LEAF_INODE_OPS: InodeOps = InodeOps {
+	lookup: |_, _| Err(SysError::NotDir),
+	touch: |_, _, _| Err(SysError::NotDir),
+	mkdir: |_, _, _| Err(SysError::NotDir),
+	symlink: |_, _, _| Err(SysError::NotDir),
+	link: |_, _, _| Err(SysError::NotDir),
+	unlink: |_, _| Err(SysError::NotDir),
+	rmdir: |_, _| Err(SysError::NotDir),
+	rename: |_, _, _, _, _| Err(SysError::NotSupported),
+	open: devfs_leaf_open,
+	truncate: |_, _| Err(SysError::NotSupported),
+	read_link: |_| Err(SysError::NotSymlink),
+	get_attr: devfs_leaf_get_attr,
 };
+

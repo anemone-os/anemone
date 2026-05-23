@@ -67,6 +67,9 @@ pub mod linux {
 
     pub const SYS_STATFS: u64 = 43;
 
+    pub const SYS_TRUNCATE: u64 = 45;
+    pub const SYS_FTRUNCATE: u64 = 46;
+
     pub const SYS_FACCESSAT: u64 = 48;
 
     pub const SYS_CHDIR: u64 = 49;
@@ -149,6 +152,11 @@ pub mod linux {
     pub const SYS_GETTID: u64 = 178;
 
     pub const SYS_SYSINFO: u64 = 179;
+
+    pub const SYS_SHMGET: u64 = 194;
+    pub const SYS_SHMCTL: u64 = 195;
+    pub const SYS_SHMAT: u64 = 196;
+    pub const SYS_SHMDT: u64 = 197;
 
     pub const SYS_BRK: u64 = 214;
     pub const SYS_MUNMAP: u64 = 215;

@@ -53,6 +53,12 @@ pub struct InodeOps {
     /// So we put this method here.
     pub open: fn(&InodeRef) -> Result<OpenedFile, SysError>,
 
+    /// Change the logical size of a regular file.
+    ///
+    /// Filesystems are expected to update cached metadata and keep any
+    /// resident file pages coherent enough for subsequent VFS reads.
+    pub truncate: fn(&InodeRef, size: u64) -> Result<(), SysError>,
+
     /// If this is a symlink, return the target path.
     pub read_link: fn(&InodeRef) -> Result<PathBuf, SysError>,
 
@@ -740,6 +746,14 @@ impl InodeRef {
     /// [File] object finally.
     pub fn open(&self) -> Result<OpenedFile, SysError> {
         (self.inode().ops.open)(self)
+    }
+
+    pub fn truncate(&self, size: u64) -> Result<(), SysError> {
+        match self.ty() {
+            InodeType::Dir => Err(SysError::IsDir),
+            InodeType::Regular => (self.inode().ops.truncate)(self, size),
+            _ => Err(SysError::NotReg),
+        }
     }
 
     pub fn read_link(&self) -> Result<PathBuf, SysError> {

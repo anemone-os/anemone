@@ -1,345 +1,363 @@
-//! Abstract devices into inodes.
-//!
-//! Neither devfs nor devtmpfs. We chose a middle ground.
-//!
-//! TODO: refactor. current design and implementation is a huge mess...
+//! Global singleton /dev publish layer.
 
 use crate::{
-    device::{block::get_block_dev_by_name, char::get_char_dev_by_name},
-    fs::devfs::inode::DevfsInode,
-    prelude::*,
-    utils::any_opaque::NilOpaque,
+	prelude::*,
+	utils::any_opaque::NilOpaque,
 };
 
-use self::{inode::devfs_new_inode, superblock::DEVFS_SB_OPS};
-
-#[inline(always)]
-fn devfs_inode_data(inode: &InodeRef) -> &DevfsInode {
-    inode
-        .inode()
-        .prv()
-        .cast::<DevfsInode>()
-        .expect("devfs inode must carry DevfsInode private data")
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Opaque)]
-pub(super) enum DevfsNode {
-    Root,
-    Char(CharDevNum),
-    Block(BlockDevNum),
-}
-
-impl DevfsNode {
-    fn new(ino: Ino) -> Result<Self, SysError> {
-        if ino == devfs_root_ino() {
-            return Ok(DevfsNode::Root);
-        }
-
-        let raw = ino.get();
-        let tag = raw >> DEVFS_INO_TAG_SHIFT;
-        let dev_raw = raw & ((1u64 << DEVFS_INO_TAG_SHIFT) - 1);
-
-        match tag {
-            DEVFS_INO_CHAR_TAG => Ok(DevfsNode::Char(CharDevNum::new(
-                MajorNum::from(dev_raw >> devnum::MINOR_BITS),
-                MinorNum::from(dev_raw & ((1u64 << devnum::MINOR_BITS) - 1)),
-            ))),
-            DEVFS_INO_BLOCK_TAG => Ok(DevfsNode::Block(BlockDevNum::new(
-                MajorNum::from(dev_raw >> devnum::MINOR_BITS),
-                MinorNum::from(dev_raw & ((1u64 << devnum::MINOR_BITS) - 1)),
-            ))),
-            _ => Err(SysError::NotFound),
-        }
-    }
-}
-
-const DEVFS_INO_TAG_SHIFT: u64 = 48;
-const DEVFS_INO_CHAR_TAG: u64 = 1;
-const DEVFS_INO_BLOCK_TAG: u64 = 2;
+use self::{
+	inode::{devfs_new_leaf_inode, devfs_new_root_inode},
+	superblock::{DEVFS_SB_OPS, alloc_ino},
+};
 
 mod file;
 mod inode;
 mod superblock;
 
+const DEVFS_ROOT_INO: Ino = Ino::new(1);
+
 static DEVFS: MonoOnce<Arc<FileSystem>> = unsafe { MonoOnce::new() };
 
-fn devfs_root_ino() -> Ino {
-    Ino::try_from(1u64).unwrap()
+static DEVFS_SB: MonoOnce<Arc<SuperBlock>> = unsafe { MonoOnce::new() };
+
+// Static-publish-only registry for the singleton /dev instance.
+static DEVFS_REGISTRY: Lazy<RwLock<DevfsRegistry>> = Lazy::new(|| RwLock::new(DevfsRegistry::new()));
+
+#[derive(Debug, Clone, Copy)]
+pub struct DevfsNodeAttr {
+	pub ty: InodeType,
+	pub perm: InodePerm,
+	pub rdev: DeviceId,
 }
 
-fn devfs_ino_for(node: DevfsNode) -> Ino {
-    let raw = match node {
-        DevfsNode::Root => return devfs_root_ino(),
-        DevfsNode::Char(devnum) => {
-            (DEVFS_INO_CHAR_TAG << DEVFS_INO_TAG_SHIFT) | devnum.raw() as u64
-        },
-        DevfsNode::Block(devnum) => {
-            (DEVFS_INO_BLOCK_TAG << DEVFS_INO_TAG_SHIFT) | devnum.raw() as u64
-        },
-    };
+// devfs only owns name lookup and stable inode identity. Device-attached
+// semantics should stay in the owning subsystem, which returns the real file
+// behavior from `open`.
+pub trait DevfsNodeOps: Send + Sync {
+	fn open(&self, inode: &InodeRef) -> Result<OpenedFile, SysError>;
 
-    Ino::try_from(raw).unwrap()
+	fn get_attr(&self, inode: &InodeRef, attr: DevfsNodeAttr) -> Result<InodeStat, SysError>;
 }
 
-fn devfs_lookup_name(name: &str) -> Result<DevfsNode, SysError> {
-    if matches!(name, "." | "..") {
-        return Ok(DevfsNode::Root);
-    }
+pub struct DevfsPublish {
+	pub name: String,
+	pub attr: DevfsNodeAttr,
+	// The singleton devfs registry stores this handle for the lifetime of the
+	// published node, so implementations must be stable long-lived objects.
+	pub ops: Arc<dyn DevfsNodeOps>,
+}
 
-    let cdev = get_char_dev_by_name(name).map(|dev| dev.devnum());
-    let bdev = get_block_dev_by_name(name).map(|dev| dev.devnum());
+// Unlike procfs tgid bindings, this is not a second lifetime protocol. It is
+// just the stable publish record shared by the registry and the leaf inode.
+struct DevfsNode {
+	name: String,
+	ino: Ino,
+	attr: DevfsNodeAttr,
+	ops: Arc<dyn DevfsNodeOps>,
+}
 
-    match (cdev, bdev) {
-        (Some(_), Some(_)) => {
-            // we should refine this later to avoid naming collisions.
-            // fow now, panic immediately to make it obvious that we have a problem.
-            panic!("devfs flat namespace collision for device node {name}");
-        },
-        (Some(devnum), None) => Ok(DevfsNode::Char(devnum)),
-        (None, Some(devnum)) => Ok(DevfsNode::Block(devnum)),
-        (None, None) => Err(SysError::NotFound),
-    }
+struct DevfsRegistry {
+	by_name: HashMap<String, Arc<DevfsNode>>,
+	ordered: Vec<Arc<DevfsNode>>,
+}
+
+impl DevfsRegistry {
+	fn new() -> Self {
+		Self {
+			by_name: HashMap::new(),
+			ordered: Vec::new(),
+		}
+	}
+}
+
+fn devfs_sb() -> Arc<SuperBlock> {
+	DEVFS_SB.get().clone()
+}
+
+fn published_node_by_name(name: &str) -> Option<Arc<DevfsNode>> {
+	DEVFS_REGISTRY.read().by_name.get(name).cloned()
+}
+
+fn published_node_at(index: usize) -> Option<Arc<DevfsNode>> {
+	DEVFS_REGISTRY.read().ordered.get(index).cloned()
+}
+
+// Publish allocates a stable inode number and seeds the singleton icache
+// before the name becomes visible in the registry. Lookup therefore never
+// needs to synthesize leaf inodes on demand.
+pub fn publish(desc: DevfsPublish) -> Result<Ino, SysError> {
+	if desc.name.is_empty() || desc.name.contains('/') || matches!(desc.name.as_str(), "." | "..") {
+		return Err(SysError::InvalidArgument);
+	}
+
+	if desc.attr.ty == InodeType::Dir {
+		return Err(SysError::InvalidArgument);
+	}
+
+	let sb = devfs_sb();
+	let mut registry = DEVFS_REGISTRY.write();
+
+	if registry.by_name.contains_key(desc.name.as_str()) {
+		return Err(SysError::AlreadyExists);
+	}
+
+	let node = Arc::new(DevfsNode {
+		name: desc.name,
+		ino: alloc_ino(),
+		attr: desc.attr,
+		ops: desc.ops,
+	});
+
+	let inode = devfs_new_leaf_inode(sb.clone(), node.clone());
+	sb.seed_inode(inode);
+
+	registry.by_name.insert(node.name.clone(), node.clone());
+	registry.ordered.push(node.clone());
+
+	kdebugln!(
+		"devfs: published {} with ino {}",
+		node.name,
+		node.ino
+	);
+
+	Ok(node.ino)
 }
 
 fn devfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, SysError> {
-    if !matches!(source, MountSource::Pseudo) {
-        return Err(SysError::InvalidArgument);
-    }
+	if !matches!(source, MountSource::Pseudo) {
+		return Err(SysError::InvalidArgument);
+	}
 
-    let fs = DEVFS.get().clone();
-    let root_ino = devfs_root_ino();
-    let sb = Arc::new(SuperBlock::new(
-        fs.clone(),
-        &DEVFS_SB_OPS,
-        NilOpaque::new(),
-        root_ino,
-        source,
-    ));
-
-    fs.sget(|_| false, Some(|| sb.clone()))
-        .expect("newly created devfs superblock must be tracked by filesystem");
-
-    let root_inode = devfs_new_inode(sb.clone(), DevfsNode::Root)?;
-    sb.seed_inode(root_inode);
-
-    Ok(sb)
+	Ok(DEVFS_SB.get().clone())
 }
 
 fn devfs_sync_fs(_sb: &SuperBlock) -> Result<(), SysError> {
-    // no-op.
-    Ok(())
+	Ok(())
 }
 
-fn devfs_kill_sb(_sb: Arc<SuperBlock>) {
-    // devfs is a pure registry-backed pseudo filesystem and has no private
-    // backing resources to tear down.
-    //
-    // note that we intentionally do not implement devfs as a singleton.
-    // instead, it's just a lightweight view over device subsystems.
-}
+fn devfs_kill_sb(_sb: Arc<SuperBlock>) {}
 
 static DEVFS_FS_OPS: FileSystemOps = FileSystemOps {
-    name: "devfs",
-    flags: FileSystemFlags::empty(),
-    mount: devfs_mount,
-    sync_fs: devfs_sync_fs,
-    kill_sb: devfs_kill_sb,
+	name: "devfs",
+	flags: FileSystemFlags::PERSISTENT_SB,
+	mount: devfs_mount,
+	sync_fs: devfs_sync_fs,
+	kill_sb: devfs_kill_sb,
 };
 
 #[initcall(fs)]
 fn init() {
-    match register_filesystem(&DEVFS_FS_OPS) {
-        Ok(fs) => DEVFS.init(|slot| {
-            slot.write(fs);
-        }),
-        Err(err) => {
-            kerrln!("failed to register devfs: {:?}", err);
-        },
-    }
+	match register_filesystem(&DEVFS_FS_OPS) {
+		Ok(fs) => DEVFS.init(|slot| {
+			slot.write(fs);
+		}),
+		Err(err) => {
+			panic!("failed to register devfs: {:?}", err);
+		},
+	}
+
+	let fs = DEVFS.get().clone();
+	let sb = Arc::new(SuperBlock::new(
+		fs,
+		&DEVFS_SB_OPS,
+		NilOpaque::new(),
+		DEVFS_ROOT_INO,
+		MountSource::Pseudo,
+	));
+	let root_inode = devfs_new_root_inode(sb.clone());
+	sb.seed_inode(root_inode);
+
+	DEVFS_SB.init(|slot| {
+		slot.write(sb);
+	});
 }
 
 #[cfg(feature = "kunit")]
 mod kunits {
-    use super::*;
+	use super::*;
 
-    const DEVFS_TEST_SINK_CAPACITY: usize = 64;
+	const DEVFS_TEST_SINK_CAPACITY: usize = 64;
 
-    fn devfs_read_dir_entries(root: &File) -> Vec<DirEntry> {
-        let mut sink = FixedSizeDirSink::<DEVFS_TEST_SINK_CAPACITY>::new();
-        let mut entries = Vec::new();
+	fn devfs_read_dir_entries(root: &File) -> Vec<DirEntry> {
+		let mut sink = FixedSizeDirSink::<DEVFS_TEST_SINK_CAPACITY>::new();
+		let mut entries = Vec::new();
 
-        loop {
-            sink.clear();
-            match root.read_dir(&mut sink) {
-                Ok(ReadDirResult::Progressed) => entries.extend_from_slice(sink.entries()),
-                Ok(ReadDirResult::Eof) => break,
-                Err(err) => panic!("failed to read devfs dir: {:?}", err),
-            }
-        }
+		loop {
+			sink.clear();
+			match root.read_dir(&mut sink) {
+				Ok(ReadDirResult::Progressed) => entries.extend_from_slice(sink.entries()),
+				Ok(ReadDirResult::Eof) => break,
+				Err(err) => panic!("failed to read devfs dir: {:?}", err),
+			}
+		}
 
-        for entry in &entries {
-            kdebugln!(
-                "devfs dir entry: name={}, ino={}, ty={:?}",
-                entry.name,
-                entry.ino.get(),
-                entry.ty
-            );
-        }
+		entries
+	}
 
-        entries
-    }
+	fn mount_devfs(test_name: &str) -> String {
+		let mountpoint = format!("/kunit-devfs-{test_name}");
+		let mountpoint_path = Path::new(mountpoint.as_str());
 
-    #[kunit]
-    fn ls_dev() {
-        let mountpoint = mount_devfs("ls");
+		vfs_mkdir(mountpoint_path, InodePerm::all_rwx()).unwrap();
+		vfs_mount_at(
+			"devfs",
+			MountSource::Pseudo,
+			MountFlags::empty(),
+			mountpoint_path,
+		)
+		.unwrap();
 
-        let root = vfs_open(Path::new(mountpoint.as_str())).unwrap();
-        for dirent in devfs_read_dir_entries(&root) {
-            kprintln!("{} {} {:?}", dirent.name, dirent.ino.get(), dirent.ty);
-        }
+		mountpoint
+	}
 
-        unmount_devfs(&mountpoint);
-    }
+	fn unmount_devfs(mountpoint: &str) {
+		let mountpoint_path = Path::new(mountpoint);
 
-    fn mount_devfs(test_name: &str) -> String {
-        let mountpoint = format!("/kunit-devfs-{test_name}");
-        let mountpoint_path = Path::new(mountpoint.as_str());
+		vfs_unmount(mountpoint_path).unwrap();
+		vfs_rmdir(mountpoint_path).unwrap();
+	}
 
-        vfs_mkdir(mountpoint_path, InodePerm::all_rwx()).unwrap();
-        vfs_mount_at(
-            "devfs",
-            MountSource::Pseudo,
-            MountFlags::empty(),
-            mountpoint_path,
-        )
-        .unwrap();
+	fn devfs_entries(mountpoint: &str) -> Vec<String> {
+		let root = vfs_open(Path::new(mountpoint)).unwrap();
+		devfs_read_dir_entries(&root)
+			.into_iter()
+			.map(|entry| entry.name)
+			.collect()
+	}
 
-        mountpoint
-    }
+	#[kunit]
+	fn test_devfs_mount_and_root_lookup() {
+		let mountpoint = mount_devfs("mount");
 
-    fn unmount_devfs(mountpoint: &str) {
-        let mountpoint_path = Path::new(mountpoint);
+		let root_ref = vfs_lookup(Path::new(mountpoint.as_str())).unwrap();
+		assert_eq!(root_ref.to_string(), mountpoint);
 
-        vfs_unmount(mountpoint_path).unwrap();
-        vfs_rmdir(mountpoint_path).unwrap();
-    }
+		let root_attr = vfs_get_attr(Path::new(mountpoint.as_str())).unwrap();
+		assert_eq!(root_attr.mode.ty(), InodeType::Dir);
+		assert_eq!(root_attr.nlink, 2);
+		assert_eq!(root_attr.rdev, DeviceId::None);
 
-    fn devfs_entries(mountpoint: &str) -> Vec<String> {
-        let root = vfs_open(Path::new(mountpoint)).unwrap();
-        devfs_read_dir_entries(&root)
-            .into_iter()
-            .map(|entry| entry.name)
-            .collect()
-    }
+		assert_eq!(
+			vfs_lookup(Path::new("/kunit-devfs-mount/missing")).unwrap_err(),
+			SysError::NotFound
+		);
 
-    #[kunit]
-    fn test_devfs_mount_and_root_lookup() {
-        let mountpoint = mount_devfs("mount");
+		drop(root_ref);
+		unmount_devfs(&mountpoint);
+	}
 
-        let root_ref = vfs_lookup(Path::new(mountpoint.as_str())).unwrap();
-        assert_eq!(root_ref.to_string(), mountpoint);
+	#[kunit]
+	fn test_devfs_flat_directory_iteration() {
+		let mountpoint = mount_devfs("iterate");
 
-        let root_attr = vfs_get_attr(Path::new(mountpoint.as_str())).unwrap();
-        assert_eq!(root_attr.mode.ty(), InodeType::Dir);
-        assert_eq!(root_attr.nlink, 2);
-        assert_eq!(root_attr.rdev, DeviceId::None);
+		let entries = devfs_entries(&mountpoint);
+		assert_eq!(entries[0], ".");
+		assert_eq!(entries[1], "..");
+		assert!(entries.iter().any(|name| name == "null"));
+		assert!(entries.iter().any(|name| name == "zero"));
+		assert!(entries.iter().any(|name| name.starts_with("ram")));
 
-        assert_eq!(
-            vfs_lookup(Path::new("/kunit-devfs-mount/missing")).unwrap_err(),
-            SysError::NotFound
-        );
+		unmount_devfs(&mountpoint);
+	}
 
-        drop(root_ref);
-        unmount_devfs(&mountpoint);
-    }
+	#[kunit]
+	fn test_devfs_char_device_io_and_attrs() {
+		let mountpoint = mount_devfs("char-io");
 
-    #[kunit]
-    fn test_devfs_flat_directory_iteration() {
-        let mountpoint = mount_devfs("iterate");
+		let null_path = format!("{mountpoint}/null");
+		let zero_path = format!("{mountpoint}/zero");
 
-        let entries = devfs_entries(&mountpoint);
-        assert!(entries.len() >= 5);
-        assert_eq!(entries[0], ".");
-        assert_eq!(entries[1], "..");
-        assert!(entries.iter().any(|name| name == "null"));
-        assert!(entries.iter().any(|name| name == "zero"));
-        assert!(entries.iter().any(|name| name == "full"));
-        assert!(entries.iter().any(|name| name.starts_with("ram")));
+		let null = vfs_open(Path::new(null_path.as_str())).unwrap();
+		let zero = vfs_open(Path::new(zero_path.as_str())).unwrap();
 
-        unmount_devfs(&mountpoint);
-    }
+		let null_attr = vfs_get_attr(Path::new(null_path.as_str())).unwrap();
+		assert_eq!(null_attr.mode.ty(), InodeType::Char);
+		assert_eq!(
+			null_attr.rdev,
+			DeviceId::Char(CharDevNum::new(
+				MajorNum::new(devnum::char::major::MEMORY),
+				MinorNum::new(devnum::char::minor::NULL)
+			))
+		);
 
-    #[kunit]
-    fn test_devfs_char_device_io_and_attrs() {
-        let mountpoint = mount_devfs("char-io");
+		assert_eq!(null.write(b"abc").unwrap(), 3);
+		let mut buf = [0u8; 8];
+		assert_eq!(null.read(&mut buf).unwrap(), 0);
 
-        let null_path = format!("{mountpoint}/null");
-        let zero_path = format!("{mountpoint}/zero");
-        let full_path = format!("{mountpoint}/full");
+		let mut zero_buf = [0xffu8; 8];
+		assert_eq!(zero.read(&mut zero_buf).unwrap(), 8);
+		assert_eq!(zero_buf, [0u8; 8]);
 
-        let null = vfs_open(Path::new(null_path.as_str())).unwrap();
-        let zero = vfs_open(Path::new(zero_path.as_str())).unwrap();
-        let full = vfs_open(Path::new(full_path.as_str())).unwrap();
+		drop(null);
+		drop(zero);
 
-        let null_attr = vfs_get_attr(Path::new(null_path.as_str())).unwrap();
-        assert_eq!(null_attr.mode.ty(), InodeType::Char);
-        assert_eq!(
-            null_attr.rdev,
-            DeviceId::Char(CharDevNum::new(
-                MajorNum::new(devnum::char::major::MEMORY),
-                MinorNum::new(devnum::char::minor::NULL)
-            ))
-        );
+		unmount_devfs(&mountpoint);
+	}
 
-        assert_eq!(null.write(b"abc").unwrap(), 3);
-        let mut buf = [0u8; 8];
-        assert_eq!(null.read(&mut buf).unwrap(), 0);
+	#[kunit]
+	fn test_devfs_block_device_io_and_attrs() {
+		let mountpoint = mount_devfs("block-io");
 
-        let mut zero_buf = [0xffu8; 8];
-        assert_eq!(zero.read(&mut zero_buf).unwrap(), 8);
-        assert_eq!(zero_buf, [0u8; 8]);
+		let block_path = format!("{mountpoint}/ram0");
+		let block = vfs_open(Path::new(block_path.as_str())).unwrap();
 
-        assert_eq!(full.write(b"hello").unwrap_err(), SysError::NoSpace);
+		let attr = vfs_get_attr(Path::new(block_path.as_str())).unwrap();
+		assert_eq!(attr.mode.ty(), InodeType::Block);
+		assert_eq!(
+			attr.rdev,
+			DeviceId::Block(BlockDevNum::new(
+				MajorNum::new(devnum::block::major::RAMDISK),
+				MinorNum::new(0)
+			))
+		);
+		assert!(attr.size > 0);
 
-        drop(null);
-        drop(zero);
-        drop(full);
+		let mut write_buf = vec![0u8; 4096];
+		for (idx, byte) in write_buf.iter_mut().enumerate() {
+			*byte = (idx % 251) as u8;
+		}
 
-        unmount_devfs(&mountpoint);
-    }
+		assert_eq!(block.write(write_buf.as_slice()).unwrap(), write_buf.len());
+		block.seek(0).unwrap();
 
-    #[kunit]
-    fn test_devfs_block_device_io_and_attrs() {
-        let mountpoint = mount_devfs("block-io");
+		let mut read_buf = vec![0u8; 4096];
+		assert_eq!(block.read(read_buf.as_mut_slice()).unwrap(), read_buf.len());
+		assert_eq!(read_buf, write_buf);
 
-        let block_path = format!("{mountpoint}/ram0");
-        let block = vfs_open(Path::new(block_path.as_str())).unwrap();
+		drop(block);
 
-        let attr = vfs_get_attr(Path::new(block_path.as_str())).unwrap();
-        assert_eq!(attr.mode.ty(), InodeType::Block);
-        assert_eq!(
-            attr.rdev,
-            DeviceId::Block(BlockDevNum::new(
-                MajorNum::new(devnum::block::major::RAMDISK),
-                MinorNum::new(0)
-            ))
-        );
-        assert!(attr.size > 0);
+		unmount_devfs(&mountpoint);
+	}
 
-        let mut write_buf = vec![0u8; 4096];
-        for (idx, byte) in write_buf.iter_mut().enumerate() {
-            *byte = (idx % 251) as u8;
-        }
+	#[kunit]
+	fn test_devfs_shared_inode_identity_across_mounts() {
+		let left_mount = mount_devfs("left");
+		let right_mount = mount_devfs("right");
 
-        assert_eq!(block.write(write_buf.as_slice()).unwrap(), write_buf.len());
-        block.seek(0).unwrap();
+		let left = vfs_lookup(Path::new(format!("{left_mount}/null").as_str())).unwrap();
+		let right = vfs_lookup(Path::new(format!("{right_mount}/null").as_str())).unwrap();
 
-        let mut read_buf = vec![0u8; 4096];
-        assert_eq!(block.read(read_buf.as_mut_slice()).unwrap(), read_buf.len());
-        assert_eq!(read_buf, write_buf);
+		assert_eq!(left.inode(), right.inode());
 
-        drop(block);
+		drop(left);
+		drop(right);
 
-        unmount_devfs(&mountpoint);
-    }
+		unmount_devfs(&left_mount);
+		unmount_devfs(&right_mount);
+	}
+
+	#[kunit]
+	fn test_devfs_remount_after_last_unmount() {
+		let first_mount = mount_devfs("remount-first");
+		let first_null = vfs_get_attr(Path::new(format!("{first_mount}/null").as_str())).unwrap();
+		unmount_devfs(&first_mount);
+
+		let second_mount = mount_devfs("remount-second");
+		let second_null = vfs_get_attr(Path::new(format!("{second_mount}/null").as_str())).unwrap();
+
+		assert_eq!(first_null.ino, second_null.ino);
+		assert_eq!(first_null.rdev, second_null.rdev);
+
+		unmount_devfs(&second_mount);
+	}
 }

@@ -4,7 +4,7 @@
 //! - https://www.man7.org/linux/man-pages/man2/openat.2.html
 
 use anemone_abi::fs::linux::open::{
-    O_ACCMODE, O_APPEND, O_CREAT, O_DIRECTORY, O_EXCL, O_RDWR, O_TMPFILE, O_WRONLY,
+    O_ACCMODE, O_APPEND, O_CREAT, O_DIRECTORY, O_EXCL, O_RDWR, O_TMPFILE, O_TRUNC, O_WRONLY,
 };
 
 use crate::{
@@ -17,6 +17,11 @@ static TMPFILE_NAME_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn has_tmpfile_flag(flags: u32) -> bool {
     flags & O_TMPFILE == O_TMPFILE
+}
+
+fn allows_write_access(flags: u32) -> bool {
+    let access = flags & O_ACCMODE;
+    access == O_WRONLY || access == O_RDWR
 }
 
 fn validate_tmpfile_flags(flags: u32) -> Result<(), SysError> {
@@ -83,6 +88,11 @@ fn finish_open(file: File, flags: u32) -> Result<u64, SysError> {
     // object is a regular file rather than a directory fd.
     if !has_tmpfile_flag(flags) && file.inode().ty() != InodeType::Dir && flags & O_DIRECTORY != 0 {
         return Err(SysError::NotDir.into());
+    }
+
+    if flags & O_TRUNC != 0 && allows_write_access(flags) && file.inode().ty() == InodeType::Regular
+    {
+        file.inode().truncate(0)?;
     }
 
     if flags & O_APPEND != 0 {

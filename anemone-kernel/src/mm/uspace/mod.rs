@@ -26,6 +26,7 @@ pub use api::*;
 
 pub mod fault;
 pub mod mmap;
+pub mod shm;
 pub mod vma;
 pub mod vmo;
 // TODO: vdso

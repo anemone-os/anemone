@@ -18,7 +18,7 @@ const COMPETITION_DISK: &str = "/dev/vdb";
 const COMP_PATH_ENV: &str = "PATH=/bin:/usr/bin:/usr/sbin:/sbin:/";
 const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "basic_testcode.sh",
-    "lua_testcode.sh",
+    // "lua_testcode.sh",
     // "busybox_testcode.sh",
     // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
@@ -33,7 +33,7 @@ const MUSL_TEST_SCRIPTS: &[&str] = &[
     // "basic_testcode.sh",
     // "lua_testcode.sh",
     // "busybox_testcode.sh",
-    "libctest_testcode.sh",
+    // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
     // "iozone_testcode.sh",
     // "iperf_testcode.sh",
@@ -46,15 +46,26 @@ const MUSL_TEST_SCRIPTS: &[&str] = &[
 cfg_select! {
     target_arch = "riscv64" => {
         const ACTIVE_LIB_DIR: &str = "/lib";
-        const MUSL_LOADER_NAME: &str = "ld-musl-riscv64-sf.so.1";
+        const MUSL_LOADER_NAMES: &[&str] = &[
+            "ld-musl-riscv64.so.1",
+            "ld-musl-riscv64-sf.so.1",
+        ];
     },
     target_arch = "loongarch64" => {
         const ACTIVE_LIB_DIR: &str = "/lib64";
-        const MUSL_LOADER_NAME: &str = "ld-musl-loongarch-lp64d.so.1";
+        const MUSL_LOADER_NAMES: &[&str] = &["ld-musl-loongarch-lp64d.so.1"];
     }
 }
 
 fn wait_child_exit_ok(pid: u32, name: &str) {
+    match wait_child_status(pid, name) {
+        Ok(WStatus::Exited(0)) => return,
+        Ok(other) => panic!("user-test: {name} child exited unexpectedly: {other:?}"),
+        Err(errno) => panic!("user-test: {name} wait4 failed: {errno:?}"),
+    }
+}
+
+pub(crate) fn wait_child_status(pid: u32, name: &str) -> Result<WStatus, Errno> {
     loop {
         let mut wstatus = WStatusRaw::EMPTY;
         match wait4(
@@ -63,11 +74,11 @@ fn wait_child_exit_ok(pid: u32, name: &str) {
             WaitOptions::empty(),
         ) {
             Ok(Some(waited)) => {
-                assert_eq!(waited, pid, "user-test: {name} waited pid mismatch");
-                match wstatus.read() {
-                    WStatus::Exited(0) => return,
-                    other => panic!("user-test: {name} child exited unexpectedly: {other:?}"),
+                if waited != pid {
+                    println!("user-test: {name} waited pid mismatch");
+                    return Err(ECHILD);
                 }
+                return Ok(wstatus.read());
             },
             Ok(None) => {
                 panic!("user-test: {name} wait4 returned None without WNOHANG");
@@ -197,7 +208,9 @@ fn init_competition_environment() {
     ensure_symlink("/usr/bin", "/bin");
     ensure_symlink("/usr/sbin", "/bin");
     ensure_symlink("/sbin", "/bin");
-    ensure_symlink(&format!("/musl/lib/{MUSL_LOADER_NAME}"), "libc.so");
+    for loader_name in MUSL_LOADER_NAMES {
+        ensure_symlink(&format!("/musl/lib/{loader_name}"), "libc.so");
+    }
 
     if fstatat(AtFd::Cwd, Path::new("/glibc/lib/libc.so")).is_ok()
         && fstatat(AtFd::Cwd, Path::new("/glibc/lib/libc.so.6")).is_err()
@@ -216,13 +229,13 @@ fn init_competition_environment() {
     println!("user-test: competition environment initialized.");
 }
 
-fn switch_runtime(family: &str) {
+pub(crate) fn switch_runtime(family: &str) {
     println!("user-test: switching active runtime to {family}...");
     let target = format!("/{family}/lib");
     replace_with_symlink(ACTIVE_LIB_DIR, target.as_str());
 }
 
-fn clear_tmp() {
+pub(crate) fn clear_tmp() {
     run_busybox(
         &[
             "busybox",
@@ -267,6 +280,7 @@ fn run_comp_tests() {
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
+    ltp::run_ltp_tests();
 
     println!("user-test: all competition tests finished.");
 }

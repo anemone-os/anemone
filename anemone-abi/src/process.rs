@@ -644,6 +644,15 @@ pub mod linux {
 
         pub const FUTEX_BITSET_MATCH_ANY: u32 = 0xffffffff;
     }
+
+    pub mod shm {
+        /// create if key is nonexistent.
+        pub const IPC_CREAT: i32 = 0o1000;
+        /// fail if key exists.
+        pub const IPC_EXCL: i32 = 0o2000;
+        /// Do not reserve swap space.
+        pub const SHM_NORESERVE: i32 = 0o4000;
+    }
 }
 
 pub mod native {
