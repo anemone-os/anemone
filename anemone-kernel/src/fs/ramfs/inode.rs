@@ -6,7 +6,7 @@ use crate::{
                 RAMFS_DIR_FILE_OPS, RAMFS_REG_FILE_OPS, RAMFS_SYMLINK_FILE_OPS, RamfsRegMapping,
                 RamfsRegState,
             },
-            ramfs_dir, ramfs_sb, ramfs_symlink,
+            ramfs_dir, ramfs_reg, ramfs_sb, ramfs_symlink,
         },
     },
     prelude::{vmo::VmObject, *},
@@ -263,6 +263,15 @@ fn ramfs_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
     Ok(of)
 }
 
+fn ramfs_truncate(inode: &InodeRef, size: u64) -> Result<(), SysError> {
+    let size = usize::try_from(size).map_err(|_| SysError::InvalidArgument)?;
+    let reg = ramfs_reg(inode)?;
+
+    reg.state().truncate(size);
+    inode.inode().set_size(size as u64);
+    Ok(())
+}
+
 fn ramfs_link(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), SysError> {
     if let InodeType::Dir = target.ty() {
         return Err(SysError::IsDir);
@@ -341,6 +350,7 @@ pub(super) static RAMFS_DIR_INODE_OPS: InodeOps = InodeOps {
     symlink: ramfs_symlink_create,
     lookup: ramfs_lookup,
     open: ramfs_open,
+    truncate: |_, _| Err(SysError::NotSupported),
     link: ramfs_link,
     unlink: ramfs_unlink,
     rmdir: ramfs_rmdir,
@@ -355,6 +365,7 @@ pub(super) static RAMFS_REG_INODE_OPS: InodeOps = InodeOps {
     symlink: |_, _, _| Err(SysError::NotDir),
     lookup: |_, _| Err(SysError::NotDir),
     open: ramfs_open,
+    truncate: ramfs_truncate,
     link: |_, _, _| Err(SysError::NotDir),
     unlink: |_, _| Err(SysError::NotDir),
     rmdir: |_, _| Err(SysError::NotDir),
@@ -369,6 +380,7 @@ pub(super) static RAMFS_SYMLINK_INODE_OPS: InodeOps = InodeOps {
     symlink: |_, _, _| Err(SysError::NotDir),
     lookup: |_, _| Err(SysError::NotDir),
     open: |_| Err(SysError::NotSupported),
+    truncate: |_, _| Err(SysError::NotSupported),
     link: |_, _, _| Err(SysError::NotDir),
     unlink: |_, _| Err(SysError::NotDir),
     rmdir: |_, _| Err(SysError::NotDir),

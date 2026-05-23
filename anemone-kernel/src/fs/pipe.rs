@@ -39,6 +39,7 @@ static PIPE_INODE_OPS: InodeOps = InodeOps {
     rmdir: |_, _| Err(SysError::NotDir),
     rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: |_| unreachable!(/* pipes have their own open logic */),
+    truncate: |_, _| Err(SysError::NotSupported),
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: pipe_get_attr,
 };

@@ -1,0 +1,1118 @@
+[1;36m        QEMU[0m Launching QEMU emulator...
+$ qemu-system-riscv64 -machine virt -smp 4 -m 1G -nographic -serial mon:stdio -rtc base=utc -device virtio-net-device,netdev=net -netdev user,id=net -accel tcg,thread=multi -drive file=sdcard-rv.img,format=raw,if=none,id=x0 -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 -no-reboot -drive file=build/rootfs/minimal-rv/rootfs.img,format=raw,if=none,id=x1 -device virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1 -cpu rv64 -kernel build/anemone.elf -bios default
+
+OpenSBI v1.5.1
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name             : riscv-virtio,qemu
+Platform Features         : medeleg
+Platform HART Count       : 4
+Platform IPI Device       : aclint-mswi
+Platform Timer Device     : aclint-mtimer @ 10000000Hz
+Platform Console Device   : uart8250
+Platform HSM Device       : ---
+Platform PMU Device       : ---
+Platform Reboot Device    : syscon-reboot
+Platform Shutdown Device  : syscon-poweroff
+Platform Suspend Device   : ---
+Platform CPPC Device      : ---
+Firmware Base             : 0x80000000
+Firmware Size             : 357 KB
+Firmware RW Offset        : 0x40000
+Firmware RW Size          : 101 KB
+Firmware Heap Offset      : 0x4f000
+Firmware Heap Size        : 41 KB (total), 2 KB (reserved), 11 KB (used), 27 KB (free)
+Firmware Scratch Size     : 4096 B (total), 416 B (used), 3680 B (free)
+Runtime SBI Version       : 2.0
+
+Domain0 Name              : root
+Domain0 Boot HART         : 0
+Domain0 HARTs             : 0*,1*,2*,3*
+Domain0 Region00          : 0x0000000000100000-0x0000000000100fff M: (I,R,W) S/U: (R,W)
+Domain0 Region01          : 0x0000000010000000-0x0000000010000fff M: (I,R,W) S/U: (R,W)
+Domain0 Region02          : 0x0000000002000000-0x000000000200ffff M: (I,R,W) S/U: ()
+Domain0 Region03          : 0x0000000080040000-0x000000008005ffff M: (R,W) S/U: ()
+Domain0 Region04          : 0x0000000080000000-0x000000008003ffff M: (R,X) S/U: ()
+Domain0 Region05          : 0x000000000c400000-0x000000000c5fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region06          : 0x000000000c000000-0x000000000c3fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region07          : 0x0000000000000000-0xffffffffffffffff M: () S/U: (R,W,X)
+Domain0 Next Address      : 0x0000000080200000
+Domain0 Next Arg1         : 0x00000000bfe00000
+Domain0 Next Mode         : S-mode
+Domain0 SysReset          : yes
+Domain0 SysSuspend        : yes
+
+Boot HART ID              : 0
+Boot HART Domain          : root
+Boot HART Priv Version    : v1.12
+Boot HART Base ISA        : rv64imafdch
+Boot HART ISA Extensions  : sstc,zicntr,zihpm,zicboz,zicbom,sdtrig,svadu
+Boot HART PMP Count       : 16
+Boot HART PMP Granularity : 2 bits
+Boot HART PMP Address Bits: 54
+Boot HART MHPM Info       : 16 (0x0007fff8)
+Boot HART Debug Triggers  : 2 triggers
+Boot HART MIDELEG         : 0x0000000000001666
+Boot HART MEDELEG         : 0x0000000000f0b509
+[[36m   INFO[0m] HeapOomHandler: claimed bootstrap heap 0xffffffff80448000..0xffffffff80548000
+[[36m   INFO[0m] anemone kernel booting on bsp #0
+[[36m   INFO[0m] EarlyMemoryScanner: found memory region: 0x80000000 - 0xc0000000
+[[36m   INFO[0m] EarlyMemoryScanner: found reserved memory region: 0x80000000 - 0x80040000, flags: RsvMemFlags(NOMAP | REUSABLE)
+[[36m   INFO[0m] EarlyMemoryScanner: found reserved memory region: 0x80040000 - 0x80060000, flags: RsvMemFlags(NOMAP | REUSABLE)
+[[36m   INFO[0m] EarlyMemoryScanner: found kernel image region: 0x80200000 - 0x8074a000
+[[36m   INFO[0m] EarlyMemoryScanner: allocated folio: 0x80060000 - 0x80064000
+[[35m NOTICE[0m] percpu data range: [0xffffffc080060, 0xffffffc080064)
+[[36m   INFO[0m] percpu data initialized
+[[32m  DEBUG[0m] memmap init: allocating 1027 pages
+[[32m  DEBUG[0m] SysMemZones::leak: leaking 1027 pages
+[[32m  DEBUG[0m] initializing memmap for zone: [0x80064000, 0x80200000) (412 pages)
+[[32m  DEBUG[0m] initializing memmap in section starting at ppn 0x80000
+[[32m  DEBUG[0m] initializing memmap for zone: [0x80b4d000, 0xbfe00000) (258739 pages)
+[[32m  DEBUG[0m] initializing memmap in section starting at ppn 0x80000
+[[32m  DEBUG[0m] initializing memmap in section starting at ppn 0x88000
+[[32m  DEBUG[0m] initializing memmap in section starting at ppn 0x90000
+[[32m  DEBUG[0m] initializing memmap in section starting at ppn 0x98000
+[[32m  DEBUG[0m] initializing memmap in section starting at ppn 0xa0000
+[[32m  DEBUG[0m] initializing memmap in section starting at ppn 0xa8000
+[[32m  DEBUG[0m] initializing memmap in section starting at ppn 0xb0000
+[[32m  DEBUG[0m] initializing memmap in section starting at ppn 0xb8000
+[[32m  DEBUG[0m] initializing memmap for zone: [0xbfe03000, 0xc0000000) (509 pages)
+[[32m  DEBUG[0m] initializing memmap in section starting at ppn 0xb8000
+[[32m  DEBUG[0m] memmap init: finished allocating, 0 pages wasted
+[[32m  DEBUG[0m] pmm_init: adding range [0x80064000, 0x80200000) (412 pages)
+[[32m  DEBUG[0m] pmm_init: adding range [0x80b4d000, 0xbfe00000) (258739 pages)
+[[32m  DEBUG[0m] pmm_init: adding range [0xbfe03000, 0xc0000000) (509 pages)
+[[36m   INFO[0m] physical memory management initialized
+[[32m  DEBUG[0m] mapping kernel image segments...
+[[32m  DEBUG[0m] mapped kernel bootstrap segment: [0xffffffff80200000, 0xffffffff80200054) -> [0x80200000, 0x80200054), flags=PteFlags(READ | EXECUTE | GLOBAL)
+[[32m  DEBUG[0m] mapped kernel text segment: [0xffffffff80202000, 0xffffffff80331a3e) -> [0x80202000, 0x80331a3e), flags=PteFlags(READ | EXECUTE | GLOBAL)
+[[32m  DEBUG[0m] mapped kernel trampoline segment: [0xffffffff80201000, 0xffffffff80201008) -> [0x80201000, 0x80201008), flags=PteFlags(READ | EXECUTE | USER | GLOBAL)
+[[32m  DEBUG[0m] mapped kernel rodata segment: [0xffffffff80332000, 0xffffffff8037fdc0) -> [0x80332000, 0x8037fdc0), flags=PteFlags(READ | GLOBAL)
+[[32m  DEBUG[0m] mapped kernel data segment: [0xffffffff80380000, 0xffffffff804470b0) -> [0x80380000, 0x804470b0), flags=PteFlags(READ | WRITE | GLOBAL)
+[[32m  DEBUG[0m] mapped kernel bss segment: [0xffffffff80448000, 0xffffffff807494ac) -> [0x80448000, 0x807494ac), flags=PteFlags(READ | WRITE | GLOBAL)
+[[32m  DEBUG[0m] setting up direct mapping region...
+[[32m  DEBUG[0m] mapped direct mapping region:
+	virtual page number 0x000ffffffc080064 ~ 0x000ffffffc080200,
+	physical page number 0x0000000000080064 ~ 0x0000000000080200
+[[32m  DEBUG[0m] mapped direct mapping region:
+	virtual page number 0x000ffffffc080b4d ~ 0x000ffffffc0bfe00,
+	physical page number 0x0000000000080b4d ~ 0x00000000000bfe00
+[[32m  DEBUG[0m] mapped direct mapping region:
+	virtual page number 0x000ffffffc0bfe03 ~ 0x000ffffffc0c0000,
+	physical page number 0x00000000000bfe03 ~ 0x00000000000c0000
+[[32m  DEBUG[0m] mapped reserved memory region to hhdm:
+	virtual page number 0x000ffffffc080060 ~ 0x000ffffffc080064,
+	physical page number 0x0000000000080060 ~ 0x0000000000080064,
+	flags = RsvMemFlags(EARLY_ALLOC)
+[[32m  DEBUG[0m] mapped reserved memory region to hhdm:
+	virtual page number 0x000ffffffc080200 ~ 0x000ffffffc08074a,
+	physical page number 0x0000000000080200 ~ 0x000000000008074a,
+	flags = RsvMemFlags(KVIRT)
+[[32m  DEBUG[0m] mapped reserved memory region to hhdm:
+	virtual page number 0x000ffffffc0bfe00 ~ 0x000ffffffc0bfe03,
+	physical page number 0x00000000000bfe00 ~ 0x00000000000bfe03,
+	flags = RsvMemFlags(FDT)
+[[32m  DEBUG[0m] mapped reserved memory region to hhdm:
+	virtual page number 0x000ffffffc08074a ~ 0x000ffffffc080b4d,
+	physical page number 0x000000000008074a ~ 0x0000000000080b4d,
+	flags = RsvMemFlags(LEAKED)
+[[32m  DEBUG[0m] preallocating pgdirs for the rest of kernel space regions...
+[[36m   INFO[0m] kernel mapping initialized
+[[36m   INFO[0m] kernel mapping activated
+[[36m   INFO[0m] cpu #0: boot stack remapped with guard page at [0xffffffc100000000, 0xffffffc100001000), stack [0xffffffc100001000, 0xffffffc100021000)
+[[36m   INFO[0m] cpu #1: boot stack remapped with guard page at [0xffffffc100021000, 0xffffffc100022000), stack [0xffffffc100022000, 0xffffffc100042000)
+[[36m   INFO[0m] cpu #2: boot stack remapped with guard page at [0xffffffc100042000, 0xffffffc100043000), stack [0xffffffc100043000, 0xffffffc100063000)
+[[36m   INFO[0m] cpu #3: boot stack remapped with guard page at [0xffffffc100063000, 0xffffffc100064000), stack [0xffffffc100064000, 0xffffffc100084000)
+[[36m   INFO[0m] cpu #4: boot stack remapped with guard page at [0xffffffc100084000, 0xffffffc100085000), stack [0xffffffc100085000, 0xffffffc1000a5000)
+[[36m   INFO[0m] cpu #5: boot stack remapped with guard page at [0xffffffc1000a5000, 0xffffffc1000a6000), stack [0xffffffc1000a6000, 0xffffffc1000c6000)
+[[36m   INFO[0m] cpu #6: boot stack remapped with guard page at [0xffffffc1000c6000, 0xffffffc1000c7000), stack [0xffffffc1000c7000, 0xffffffc1000e7000)
+[[36m   INFO[0m] cpu #7: boot stack remapped with guard page at [0xffffffc1000e7000, 0xffffffc1000e8000), stack [0xffffffc1000e8000, 0xffffffc100108000)
+[[36m   INFO[0m] cpu #8: boot stack remapped with guard page at [0xffffffc100108000, 0xffffffc100109000), stack [0xffffffc100109000, 0xffffffc100129000)
+[[36m   INFO[0m] cpu #9: boot stack remapped with guard page at [0xffffffc100129000, 0xffffffc10012a000), stack [0xffffffc10012a000, 0xffffffc10014a000)
+[[36m   INFO[0m] cpu #10: boot stack remapped with guard page at [0xffffffc10014a000, 0xffffffc10014b000), stack [0xffffffc10014b000, 0xffffffc10016b000)
+[[36m   INFO[0m] cpu #11: boot stack remapped with guard page at [0xffffffc10016b000, 0xffffffc10016c000), stack [0xffffffc10016c000, 0xffffffc10018c000)
+[[36m   INFO[0m] cpu #12: boot stack remapped with guard page at [0xffffffc10018c000, 0xffffffc10018d000), stack [0xffffffc10018d000, 0xffffffc1001ad000)
+[[36m   INFO[0m] cpu #13: boot stack remapped with guard page at [0xffffffc1001ad000, 0xffffffc1001ae000), stack [0xffffffc1001ae000, 0xffffffc1001ce000)
+[[36m   INFO[0m] cpu #14: boot stack remapped with guard page at [0xffffffc1001ce000, 0xffffffc1001cf000), stack [0xffffffc1001cf000, 0xffffffc1001ef000)
+[[36m   INFO[0m] cpu #15: boot stack remapped with guard page at [0xffffffc1001ef000, 0xffffffc1001f0000), stack [0xffffffc1001f0000, 0xffffffc100210000)
+[[32m  DEBUG[0m] waking up ap 1
+[[32m  DEBUG[0m] waking up ap 2
+[[32m  DEBUG[0m] waking up ap 3
+[[35m NOTICE[0m] stage 1 bootstrap finished, switching to stage 2...
+[[32m  DEBUG[0m] anemone kernel booting on ap #2
+[[32m  DEBUG[0m] anemone kernel booting on ap #3
+[[32m  DEBUG[0m] anemone kernel booting on ap #1
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[35m NOTICE[0m] Counter 'registering init task' synchronized
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[35m NOTICE[0m] scheduler started
+[[35m NOTICE[0m] scheduler started
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[35m NOTICE[0m] scheduler started
+[[35m NOTICE[0m] scheduler started
+[[36m   INFO[0m] bsp #0 kinit running on task #1...
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::stat::fstat::sys_fstat for syscall number 80
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::mm::uspace::api::brk::sys_brk for syscall number 214
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::api::futex::get_robust_list::sys_get_robust_list for syscall number 100
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::sig::api::tgkill::sys_tgkill for syscall number 131
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::readlinkat::sys_readlinkat for syscall number 78
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::renameat2::sys_renameat2 for syscall number 276
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::utimensat::sys_utimensat for syscall number 88
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::api::set_tid_address::sys_set_tid_address for syscall number 96
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::api::wait4::sys_wait4 for syscall number 260
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::read_write::readv::sys_readv for syscall number 65
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::read_write::pwrite64::sys_pwrite64 for syscall number 68
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::iomux::ppoll::sys_ppoll for syscall number 73
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::api::futex::futex::sys_futex for syscall number 98
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::sig::api::rt_sigtimedwait::sys_rt_sigtimedwait for syscall number 137
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::time::itimer::api::getitimer::sys_getitimer for syscall number 102
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::time::itimer::api::setitimer::sys_setitimer for syscall number 103
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::getdents64::sys_getdents64 for syscall number 61
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::chdir::sys_chdir for syscall number 49
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::close::sys_close for syscall number 57
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::mount::sys_mount for syscall number 40
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::pipe2::sys_pipe2 for syscall number 59
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::chroot::sys_chroot for syscall number 51
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::openat::sys_openat for syscall number 56
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::umount::sys_umount2 for syscall number 39
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::mkdirat::sys_mkdirat for syscall number 34
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::unlinkat::unlinkat for syscall number 35
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::symlinkat::sys_symlinkat for syscall number 36
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::api::getpid::sys_getpid for syscall number 172
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::read_write::write::sys_write for syscall number 64
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::read_write::pread64::sys_pread64 for syscall number 67
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::stat::newfstatat::sys_newfstatat for syscall number 79
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::access::faccessat2::sys_faccessat2 for syscall number 439
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::truncate::truncate::sys_truncate for syscall number 45
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::sig::api::tkill::sys_tkill for syscall number 130
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::dup3::sys_dup3 for syscall number 24
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::sendfile::sys_sendfile for syscall number 71
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::getrandom::sys_getrandom for syscall number 278
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::time::api::gettimeofday::sys_gettimeofday for syscall number 169
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::time::api::times::sys_times for syscall number 153
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::read_write::read::sys_read for syscall number 63
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::read_write::preadv::sys_preadv for syscall number 69
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::read_write::writev::sys_writev for syscall number 66
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::read_write::pwritev::sys_pwritev for syscall number 70
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::mm::uspace::api::mmap::sys_mmap for syscall number 222
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::mm::uspace::api::munmap::sys_munmap for syscall number 215
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::mm::uspace::api::mprotect::sys_mprotect for syscall number 226
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::api::exit::exit::sys_exit for syscall number 93
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::api::clone::sys_clone::sys_clone for syscall number 220
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::api::futex::set_robust_list::sys_set_robust_list for syscall number 99
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::sig::api::rt_sigreturn::sys_rt_sigreturn for syscall number 139
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::time::clock::api::clock_getres::sys_clock_getres for syscall number 114
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::fcntl::sys_fcntl for syscall number 25
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::ioctl::sys_ioctl for syscall number 29
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::lseek::sys_lseek for syscall number 62
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::sched::api::sched_yield::sys_yield for syscall number 124
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::truncate::ftruncate::sys_ftruncate for syscall number 46
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::credentials::api::setgid::sys_setgid for syscall number 144
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::api::gettid::sys_gettid for syscall number 178
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::credentials::api::geteuid::sys_geteuid for syscall number 175
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::api::exit::exit_group::sys_exit_group for syscall number 94
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::credentials::api::getegid::sys_getegid for syscall number 177
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::umask::sys_umask for syscall number 166
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::uts::api::uname::sys_uname for syscall number 160
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::time::api::nanosleep::sys_nanosleep for syscall number 101
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::iomux::pselect6::sys_pselect6 for syscall number 72
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::task_resource::api::getrusage::sys_getrusage for syscall number 165
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::sig::api::rt_sigpending::sys_rt_sigpending for syscall number 136
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::sig::api::rt_sigqueueinfo::sys_rt_sigqueueinfo for syscall number 138
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::time::clock::api::clock_gettime::sys_clock_gettime for syscall number 113
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::mm::uspace::api::madvise::sys_madvise for syscall number 233
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::credentials::api::getuid::sys_getuid for syscall number 174
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::credentials::api::setuid::sys_setuid for syscall number 146
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::api::getppid::sys_getppid for syscall number 173
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::access::faccessat::sys_faccessat for syscall number 48
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::task_resource::api::prlimit64::sys_prlimit64 for syscall number 261
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::sig::api::sigaltstack::sys_sigaltstack for syscall number 132
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::sig::api::rt_sigaction::sys_rt_sigaction for syscall number 134
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::sig::api::rt_sigprocmask::sys_rt_sigprocmask for syscall number 135
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::sig::api::kill::sys_kill for syscall number 129
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::dup::sys_dup for syscall number 23
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::getcwd::sys_getcwd for syscall number 17
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::fs::api::statfs::sys_statfs for syscall number 43
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::debug::api::syslog::sys_syslog for syscall number 116
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::debug::api::sysinfo::sys_sysinfo for syscall number 179
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::debug::api::dbg_print::sys_dbg_print for syscall number 512
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::credentials::api::getgid::sys_getgid for syscall number 176
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::task_resource::api::getrlimit::sys_getrlimit for syscall number 163
+[[35m NOTICE[0m] registering syscall handler anemone_kernel::task::api::execve::syscall::execve for syscall number 221
+[[36m   INFO[0m] registered filesystem: procfs
+[[36m   INFO[0m] registered filesystem: devfs
+[[36m   INFO[0m] registered filesystem: anonymous
+[[35m NOTICE[0m] mounted filesystem: anonymous at none with flags MountFlags(0x0)
+[[35m NOTICE[0m] anonymous namespace initialized
+[[36m   INFO[0m] registered filesystem: ext4
+[[36m   INFO[0m] registered filesystem: ramfs
+[[36m   INFO[0m] driver goldfish-rtc registered on platform bus
+[[36m   INFO[0m] driver pcie-bridge-driver registered on pcie bus
+[[36m   INFO[0m] driver pci-host-ecam-generic registered on platform bus
+[[36m   INFO[0m] driver ns16550a registered on platform bus
+[[36m   INFO[0m] register ns16550a as char driver with major number 234
+[[36m   INFO[0m] driver virtio-blk registered on virtio bus
+[[36m   INFO[0m] register "virtio-blk" as block driver with major number 2048
+[[36m   INFO[0m] driver virtio-mmio-transport registered on platform bus
+[[36m   INFO[0m] driver virtio-pcie-transport registered on pcie bus
+[[36m   INFO[0m] stdout-path: /soc/serial@10000000
+[[36m   INFO[0m] initializing interrupt controller for qemu virt machine
+[[32m  DEBUG[0m] found plic node: /soc/plic@c000000
+[[32m  DEBUG[0m] plic: base = 0xc000000, len = 0x600000, ndev = 95
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[36m   INFO[0m] registered root irq domain: plic@c000000
+[[36m   INFO[0m] initializing timer for qemu virt machine
+[[36m   INFO[0m] device poweroff registered on platform bus
+[[36m   INFO[0m] device reboot registered on platform bus
+[[36m   INFO[0m] device platform-bus@4000000 registered on platform bus
+[[36m   INFO[0m] device pmu registered on platform bus
+[[36m   INFO[0m] device fw-cfg@10100000 registered on platform bus
+[[36m   INFO[0m] device flash@20000000 registered on platform bus
+[[36m   INFO[0m] device soc registered on platform bus
+[[36m   INFO[0m] device rtc@101000 registered on platform bus
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[32m  DEBUG[0m] request intr info
+[[32m  DEBUG[0m] request_irq: dev_id=rtc@101000, domain=plic@c000000, virq=1, hwirq=0xb
+[[36m   INFO[0m] rtc@101000: probed
+[[36m   INFO[0m] device serial@10000000 registered on platform bus
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[36m   INFO[0m] register CharDevDesc { name: "serial@10000000" } as char device with devnum 234:0
+[[36m   INFO[0m] serial@10000000: registered as stdout console
+[[32m  DEBUG[0m] request intr info
+[[32m  DEBUG[0m] request_irq: dev_id=serial@10000000, domain=plic@c000000, virq=2, hwirq=0xa
+[[36m   INFO[0m] serial@10000000: probed
+[[36m   INFO[0m] device test@100000 registered on platform bus
+[[36m   INFO[0m] device virtio_mmio@10008000 registered on platform bus
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[36m   INFO[0m] detected virtio mmio device: vendor id: 0x554d4551, device type: Network, version: Legacy
+[[36m   INFO[0m] virtio_mmio@10008000: probed
+[[36m   INFO[0m] device virtio_mmio@10008000 registered on virtio bus
+[[36m   INFO[0m] device virtio_mmio@10007000 registered on platform bus
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[33mWARNING[0m] failed to initialize VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0
+[[31m    ERR[0m] failed to probe device virtio_mmio@10007000 with driver virtio-mmio-transport: DriverIncompatible
+[[36m   INFO[0m] device virtio_mmio@10006000 registered on platform bus
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[33mWARNING[0m] failed to initialize VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0
+[[31m    ERR[0m] failed to probe device virtio_mmio@10006000 with driver virtio-mmio-transport: DriverIncompatible
+[[36m   INFO[0m] device virtio_mmio@10005000 registered on platform bus
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[33mWARNING[0m] failed to initialize VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0
+[[31m    ERR[0m] failed to probe device virtio_mmio@10005000 with driver virtio-mmio-transport: DriverIncompatible
+[[36m   INFO[0m] device virtio_mmio@10004000 registered on platform bus
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[33mWARNING[0m] failed to initialize VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0
+[[31m    ERR[0m] failed to probe device virtio_mmio@10004000 with driver virtio-mmio-transport: DriverIncompatible
+[[36m   INFO[0m] device virtio_mmio@10003000 registered on platform bus
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[33mWARNING[0m] failed to initialize VirtIO MMIO transport: Invalid or unknown device ID: Invalid or unknown virtio device type 0
+[[31m    ERR[0m] failed to probe device virtio_mmio@10003000 with driver virtio-mmio-transport: DriverIncompatible
+[[36m   INFO[0m] device virtio_mmio@10002000 registered on platform bus
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[36m   INFO[0m] detected virtio mmio device: vendor id: 0x554d4551, device type: Block, version: Legacy
+[[36m   INFO[0m] virtio_mmio@10002000: probed
+[[36m   INFO[0m] device virtio_mmio@10002000 registered on virtio bus
+[[32m  DEBUG[0m] request intr info
+[[32m  DEBUG[0m] request_irq: dev_id=virtio_mmio@10002000, domain=plic@c000000, virq=3, hwirq=0x2
+[[36m   INFO[0m] block device registered: devnum=2048:0, name=vda, class=Virtio
+[[36m   INFO[0m] virtio-blk device virtio_mmio@10002000 registered as vda
+[[36m   INFO[0m] device virtio_mmio@10001000 registered on platform bus
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[36m   INFO[0m] detected virtio mmio device: vendor id: 0x554d4551, device type: Block, version: Legacy
+[[36m   INFO[0m] virtio_mmio@10001000: probed
+[[36m   INFO[0m] device virtio_mmio@10001000 registered on virtio bus
+[[32m  DEBUG[0m] request intr info
+[[32m  DEBUG[0m] request_irq: dev_id=virtio_mmio@10001000, domain=plic@c000000, virq=4, hwirq=0x1
+[[36m   INFO[0m] block device registered: devnum=2048:1, name=vdb, class=Virtio
+[[36m   INFO[0m] virtio-blk device virtio_mmio@10001000 registered as vdb
+[[36m   INFO[0m] device clint@2000000 registered on platform bus
+[[36m   INFO[0m] device pci@30000000 registered on platform bus
+[[33mWARNING[0m] failed to send TLB shootdown IPI in TlbShootdownGuard: TargetOffline
+[[35m NOTICE[0m] Available PCIe ECAM resource window: pcie_addr=OfPciAddr { space_type: IO, flags: OfPciAddrFlags(0x0), bus: BusNum(0x0), dev: DevNum(0x0), func: FuncNum(0x0), register_offset: 0, address: 0x0 }, mem_addr=0x3000000, size=0x10000
+[[35m NOTICE[0m] Available PCIe ECAM resource window: pcie_addr=OfPciAddr { space_type: Mem32, flags: OfPciAddrFlags(0x0), bus: BusNum(0x0), dev: DevNum(0x0), func: FuncNum(0x0), register_offset: 0, address: 0x40000000 }, mem_addr=0x40000000, size=0x40000000
+[[35m NOTICE[0m] Available PCIe ECAM resource window: pcie_addr=OfPciAddr { space_type: Mem64, flags: OfPciAddrFlags(0x0), bus: BusNum(0x0), dev: DevNum(0x0), func: FuncNum(0x0), register_offset: 0, address: 0x400000000 }, mem_addr=0x400000000, size=0x400000000
+[[36m   INFO[0m] device pci0000:00 registered on pcie bus
+[[36m   INFO[0m] initializing pcie bus device pci0000:00 with driver pcie-bridge-driver
+[[36m   INFO[0m] enumerating pcie devices on BusNum(0x0)
+[[36m   INFO[0m] allocating resources for pcie bus device pci0000:00 with driver pcie-bridge-driver
+[[36m   INFO[0m] finalizing initialization for pcie bus device pci0000:00 with driver pcie-bridge-driver
+[[36m   INFO[0m] probing pcie bus device pci0000:00 with driver pcie-bridge-driver
+[[32m  DEBUG[0m] procfs: registered pde uptime with ino 2
+[[32m  DEBUG[0m] procfs: registered pde self with ino 3
+[[32m  DEBUG[0m] procfs: registered pde mounts with ino 4
+[[32m  DEBUG[0m] procfs: registered pde meminfo with ino 5
+[[36m   INFO[0m] register CharDevDesc { name: "full" } as char device with devnum 1:7
+[[35m NOTICE[0m] full device registered
+[[36m   INFO[0m] register CharDevDesc { name: "null" } as char device with devnum 1:3
+[[35m NOTICE[0m] null device registered
+[[36m   INFO[0m] register CharDevDesc { name: "zero" } as char device with devnum 1:5
+[[35m NOTICE[0m] zero device registered
+[[36m   INFO[0m] register CharDevDesc { name: "urandom" } as char device with devnum 1:9
+[[35m NOTICE[0m] urandom device registered
+[[36m   INFO[0m] block device registered: devnum=1:0, name=ram0, class=RamDisk
+[[35m NOTICE[0m] ram0 registered
+[[36m   INFO[0m] block device registered: devnum=1:1, name=ram1, class=RamDisk
+[[35m NOTICE[0m] ram1 registered
+[[36m   INFO[0m] block device registered: devnum=1:2, name=ram2, class=RamDisk
+[[35m NOTICE[0m] ram2 registered
+[[36m   INFO[0m] block device registered: devnum=1:3, name=ram3, class=RamDisk
+[[35m NOTICE[0m] ram3 registered
+[[36m   INFO[0m] block device registered: devnum=1:4, name=ram4, class=RamDisk
+[[35m NOTICE[0m] ram4 registered
+[[36m   INFO[0m] block device registered: devnum=1:5, name=ram5, class=RamDisk
+[[35m NOTICE[0m] ram5 registered
+[[36m   INFO[0m] block device registered: devnum=1:6, name=ram6, class=RamDisk
+[[35m NOTICE[0m] ram6 registered
+[[36m   INFO[0m] block device registered: devnum=1:7, name=ram7, class=RamDisk
+[[35m NOTICE[0m] ram7 registered
+[[36m   INFO[0m] block device registered: devnum=1:8, name=ram8, class=RamDisk
+[[35m NOTICE[0m] ram8 registered
+[[36m   INFO[0m] block device registered: devnum=1:9, name=ram9, class=RamDisk
+[[35m NOTICE[0m] ram9 registered
+[[36m   INFO[0m] block device registered: devnum=1:10, name=ram10, class=RamDisk
+[[35m NOTICE[0m] ram10 registered
+[[36m   INFO[0m] block device registered: devnum=1:11, name=ram11, class=RamDisk
+[[35m NOTICE[0m] ram11 registered
+[[36m   INFO[0m] block device registered: devnum=1:12, name=ram12, class=RamDisk
+[[35m NOTICE[0m] ram12 registered
+[[36m   INFO[0m] block device registered: devnum=1:13, name=ram13, class=RamDisk
+[[35m NOTICE[0m] ram13 registered
+[[36m   INFO[0m] block device registered: devnum=1:14, name=ram14, class=RamDisk
+[[35m NOTICE[0m] ram14 registered
+[[36m   INFO[0m] block device registered: devnum=1:15, name=ram15, class=RamDisk
+[[35m NOTICE[0m] ram15 registered
+[[36m   INFO[0m] normal console(s) registered, early consoles have been unregistered
+[[35m NOTICE[0m] Counter 'init' synchronized
+[[36m   INFO[0m] ap #2 kinit running on task #4...
+[[36m   INFO[0m] ap #3 kinit running on task #3...
+[[36m   INFO[0m] ap #1 kinit running on task #2...
+[[35m NOTICE[0m] Counter 'finish' synchronized
+[[36m   INFO[0m] ap #1 kinit finished
+[[36m   INFO[0m] ap #3 kinit finished
+[[36m   INFO[0m] bsp #0 kinit finished
+[[36m   INFO[0m] ap #2 kinit finished
+[[35m NOTICE[0m] ext4: loaded inode Ino(2) into icache
+[[35m NOTICE[0m] mounted filesystem: ext4 at none with flags MountFlags(0x0)
+[[32m  DEBUG[0m] /lost+found (Dir)
+[[35m NOTICE[0m] ext4: loaded inode Ino(11) into icache
+[[32m  DEBUG[0m] /basic (Dir)
+[[35m NOTICE[0m] ext4: loaded inode Ino(12) into icache
+[[32m  DEBUG[0m] /basic/mmap (Regular)
+[[32m  DEBUG[0m] /basic/fstat (Regular)
+[[32m  DEBUG[0m] /basic/read (Regular)
+[[32m  DEBUG[0m] /basic/wait (Regular)
+[[32m  DEBUG[0m] /basic/mkdir_ (Regular)
+[[32m  DEBUG[0m] /basic/yield (Regular)
+[[32m  DEBUG[0m] /basic/getcwd (Regular)
+[[32m  DEBUG[0m] /basic/close (Regular)
+[[32m  DEBUG[0m] /basic/getdents (Regular)
+[[32m  DEBUG[0m] /basic/mount (Regular)
+[[32m  DEBUG[0m] /basic/dup (Regular)
+[[32m  DEBUG[0m] /basic/open (Regular)
+[[32m  DEBUG[0m] /basic/exit (Regular)
+[[32m  DEBUG[0m] /basic/getppid (Regular)
+[[32m  DEBUG[0m] /basic/write (Regular)
+[[32m  DEBUG[0m] /basic/umount (Regular)
+[[32m  DEBUG[0m] /basic/sleep (Regular)
+[[32m  DEBUG[0m] /basic/clone (Regular)
+[[32m  DEBUG[0m] /basic/dup2 (Regular)
+[[32m  DEBUG[0m] /basic/execve (Regular)
+[[32m  DEBUG[0m] /basic/pipe (Regular)
+[[32m  DEBUG[0m] /basic/getpid (Regular)
+[[32m  DEBUG[0m] /basic/text.txt (Regular)
+[[32m  DEBUG[0m] /basic/brk (Regular)
+[[32m  DEBUG[0m] /basic/unlink (Regular)
+[[32m  DEBUG[0m] /basic/waitpid (Regular)
+[[32m  DEBUG[0m] /basic/fork (Regular)
+[[32m  DEBUG[0m] /basic/times (Regular)
+[[32m  DEBUG[0m] /basic/chdir (Regular)
+[[32m  DEBUG[0m] /basic/mnt (Dir)
+[[35m NOTICE[0m] ext4: loaded inode Ino(42) into icache
+[[32m  DEBUG[0m] /basic/mnt/test_mount (Regular)
+[[32m  DEBUG[0m] /basic/munmap (Regular)
+[[32m  DEBUG[0m] /basic/openat (Regular)
+[[32m  DEBUG[0m] /basic/run-all.sh (Regular)
+[[32m  DEBUG[0m] /basic/gettimeofday (Regular)
+[[32m  DEBUG[0m] /basic/uname (Regular)
+[[32m  DEBUG[0m] /basic/test_echo (Regular)
+[[32m  DEBUG[0m] /.anemone (Dir)
+[[35m NOTICE[0m] ext4: loaded inode Ino(50) into icache
+[[32m  DEBUG[0m] /.anemone/init (Regular)
+[[32m  DEBUG[0m] /dev (Dir)
+[[35m NOTICE[0m] ext4: loaded inode Ino(52) into icache
+[[32m  DEBUG[0m] /sbin (Dir)
+[[35m NOTICE[0m] ext4: loaded inode Ino(53) into icache
+[[32m  DEBUG[0m] /sbin/init (Regular)
+[[32m  DEBUG[0m] /mnt (Dir)
+[[35m NOTICE[0m] ext4: loaded inode Ino(55) into icache
+[[32m  DEBUG[0m] /etc (Dir)
+[[35m NOTICE[0m] ext4: loaded inode Ino(56) into icache
+[[32m  DEBUG[0m] /bin (Dir)
+[[35m NOTICE[0m] ext4: loaded inode Ino(57) into icache
+[[32m  DEBUG[0m] /bin/user-test (Regular)
+[[32m  DEBUG[0m] /bin/float-test (Regular)
+[[32m  DEBUG[0m] /lib (Dir)
+[[35m NOTICE[0m] ext4: loaded inode Ino(60) into icache
+[[32m  DEBUG[0m] /lib/ld-linux-riscv64-lp64d.so.1 (Regular)
+[[32m  DEBUG[0m] /kunit-openat-otrunc (Regular)
+[1m-- KUnit Test Runner --[0m
+[1mRunning 50 tests...[0m
+anemone_kernel::fs::api::args::kunits::test_linux_inode_perm_ignores_file_type_bits...[[32m  DEBUG[0m] unknown permission bits are set: raw=0o100644, truncated=0o644, ignored.
+[[32m  DEBUG[0m] unknown permission bits are set: raw=0o40755, truncated=0o755, ignored.
+[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::unmap_middle_of_anonymous_vma_punches_hole...[[32m  DEBUG[0m] mapped anonymous range [0x3fff7e0000, 0x3fff7e8000) (8 pages) with prot=Protection(READ | WRITE), shared=false, flags=VmFlags(0x0)
+[[32m  DEBUG[0m] unmapped region [0x3fff7e3000, 0x3fff7e5000) (2 pages)
+[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::protect_range_rejects_holes_and_reservations...[[32m  DEBUG[0m] mapped anonymous range [0x3fff7c0000, 0x3fff7c2000) (2 pages) with prot=Protection(READ | WRITE), shared=false, flags=VmFlags(0x0)
+[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::fixed_replace_and_noreplace_follow_unified_editing...[[32m  DEBUG[0m] mapped anonymous range [0x3fff7b0000, 0x3fff7b8000) (8 pages) with prot=Protection(READ | WRITE), shared=false, flags=VmFlags(0x0)
+[[32m  DEBUG[0m] mapped anonymous range [0x3fff7b2000, 0x3fff7b6000) (4 pages) with prot=Protection(READ), shared=false, flags=VmFlags(0x0)
+[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::anonymous_fork_keeps_shared_backing_and_cow_private...[[32m  DEBUG[0m] mapped anonymous range [0x3fff7a0000, 0x3fff7a2000) (2 pages) with prot=Protection(READ | WRITE), shared=true, flags=VmFlags(0x0)
+[[32m  DEBUG[0m] mapped anonymous range [0x3fff790000, 0x3fff792000) (2 pages) with prot=Protection(READ | WRITE), shared=false, flags=VmFlags(0x0)
+[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::protect_range_splits_vma_and_invalidates_present_ptes...[[32m  DEBUG[0m] mapped anonymous range [0x3fff7d0000, 0x3fff7d8000) (8 pages) with prot=Protection(READ | WRITE), shared=false, flags=VmFlags(0x0)
+[[32m  DEBUG[0m] changed protection on range [0x3fff7d2000, 0x3fff7d4000) (2 pages) to Protection(READ)
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_root_lookup...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_mount_cycle_stress...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-cycle with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-cycle" }
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-cycle with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-cycle" }
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-cycle with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-cycle" }
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-cycle with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-cycle" }
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-cycle with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-cycle" }
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-cycle with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-cycle" }
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-cycle with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-cycle" }
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-cycle with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-cycle" }
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_mkdir_link_and_rmdir...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_create_lookup_and_cleanup...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_file_read_write_semantics...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_multiple_mounts_are_isolated...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-left-mnt with flags MountFlags(0x0)
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-right-mnt with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-left-mnt" }
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-right-mnt" }
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_unmount_busy_with_child_mount...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-parent-mnt with flags MountFlags(0x0)
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-parent-mnt/nested with flags MountFlags(0x0)
+[[35m NOTICE[0m] cannot unmount filesystem: superblock still has alive inodes
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "nested" }
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-parent-mnt" }
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_mount_dot_and_dotdot_traversal...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-walk with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-walk" }
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_direct_multi_mount_stack_stress...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-direct-stack-stress with flags MountFlags(0x0)
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-direct-stack-stress with flags MountFlags(0x0)
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-direct-stack-stress with flags MountFlags(0x0)
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-direct-stack-stress with flags MountFlags(0x0)
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-direct-stack-stress with flags MountFlags(0x0)
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-direct-stack-stress with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-direct-stack-stress" }
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-direct-stack-stress" }
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-direct-stack-stress" }
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-direct-stack-stress" }
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-direct-stack-stress" }
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-direct-stack-stress" }
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_get_attr_reports_basic_metadata...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(65) into icache
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_get_attr_tracks_hard_link_counts...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_get_attr_tracks_size_after_writes...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_symlink_relative_parent_traversal...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(65) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(66) into icache
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_namespace_churn_stress_under_mount...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-churn with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-churn" }
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_unmount_busy_with_active_inode_ref...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-busy with flags MountFlags(0x0)
+[[35m NOTICE[0m] cannot unmount filesystem: superblock still has alive inodes
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-busy" }
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_symlink_relative_lookup_and_readlink...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(65) into icache
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_symlink_loop_limit_and_rmdir_nofollow...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(65) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(66) into icache
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_symlink_absolute_and_intermediate_resolution...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(65) into icache
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_symlink_absolute_target_crosses_mount_boundary...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-sym-mount with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-sym-mount" }
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_mount_overrides_mountpoint_and_restores_on_unmount...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-mnt with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-mnt" }
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_symlink_resolution_flags_propagate_to_parent_lookup...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(65) into icache
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_direct_multi_mount_same_mountpoint_visibility_switch...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-direct-stack with flags MountFlags(0x0)
+[[35m NOTICE[0m] mounted filesystem: ramfs at /kunit-vfs-direct-stack with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-direct-stack" }
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-vfs-direct-stack" }
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_resolve_from_root_clamps_parent_traversal_at_logical_root...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(65) into icache
+[[32m  DEBUG[0m] prevent escaping logical root via '..'
+[32;1mok[0m
+anemone_kernel::fs::kunits::test_resolve_from_root_uses_logical_root_for_absolute_symlinks...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(65) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(66) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(67) into icache
+[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::ls_dev...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] mounted filesystem: devfs at /kunit-devfs-ls with flags MountFlags(0x0)
+[[32m  DEBUG[0m] devfs dir entry: name=., ino=1, ty=Dir
+[[32m  DEBUG[0m] devfs dir entry: name=.., ino=1, ty=Dir
+[[32m  DEBUG[0m] devfs dir entry: name=serial@10000000, ino=281474992046080, ty=Char
+[[32m  DEBUG[0m] devfs dir entry: name=full, ino=281474976776199, ty=Char
+[[32m  DEBUG[0m] devfs dir entry: name=null, ino=281474976776195, ty=Char
+[[32m  DEBUG[0m] devfs dir entry: name=zero, ino=281474976776197, ty=Char
+[[32m  DEBUG[0m] devfs dir entry: name=urandom, ino=281474976776201, ty=Char
+[[32m  DEBUG[0m] devfs dir entry: name=vda, ino=562950087639040, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=vdb, ino=562950087639041, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram0, ino=562949953486848, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram1, ino=562949953486849, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram2, ino=562949953486850, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram3, ino=562949953486851, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram4, ino=562949953486852, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram5, ino=562949953486853, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram6, ino=562949953486854, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram7, ino=562949953486855, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram8, ino=562949953486856, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram9, ino=562949953486857, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram10, ino=562949953486858, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram11, ino=562949953486859, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram12, ino=562949953486860, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram13, ino=562949953486861, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram14, ino=562949953486862, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram15, ino=562949953486863, ty=Block
+. 1 Dir
+.. 1 Dir
+serial@10000000 281474992046080 Char
+full 281474976776199 Char
+null 281474976776195 Char
+zero 281474976776197 Char
+urandom 281474976776201 Char
+vda 562950087639040 Block
+vdb 562950087639041 Block
+ram0 562949953486848 Block
+ram1 562949953486849 Block
+ram2 562949953486850 Block
+ram3 562949953486851 Block
+ram4 562949953486852 Block
+ram5 562949953486853 Block
+ram6 562949953486854 Block
+ram7 562949953486855 Block
+ram8 562949953486856 Block
+ram9 562949953486857 Block
+ram10 562949953486858 Block
+ram11 562949953486859 Block
+ram12 562949953486860 Block
+ram13 562949953486861 Block
+ram14 562949953486862 Block
+ram15 562949953486863 Block
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-devfs-ls" }
+[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_mount_and_root_lookup...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] mounted filesystem: devfs at /kunit-devfs-mount with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-devfs-mount" }
+[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_char_device_io_and_attrs...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] mounted filesystem: devfs at /kunit-devfs-char-io with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-devfs-char-io" }
+[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_flat_directory_iteration...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] mounted filesystem: devfs at /kunit-devfs-iterate with flags MountFlags(0x0)
+[[32m  DEBUG[0m] devfs dir entry: name=., ino=1, ty=Dir
+[[32m  DEBUG[0m] devfs dir entry: name=.., ino=1, ty=Dir
+[[32m  DEBUG[0m] devfs dir entry: name=serial@10000000, ino=281474992046080, ty=Char
+[[32m  DEBUG[0m] devfs dir entry: name=full, ino=281474976776199, ty=Char
+[[32m  DEBUG[0m] devfs dir entry: name=null, ino=281474976776195, ty=Char
+[[32m  DEBUG[0m] devfs dir entry: name=zero, ino=281474976776197, ty=Char
+[[32m  DEBUG[0m] devfs dir entry: name=urandom, ino=281474976776201, ty=Char
+[[32m  DEBUG[0m] devfs dir entry: name=vda, ino=562950087639040, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=vdb, ino=562950087639041, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram0, ino=562949953486848, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram1, ino=562949953486849, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram2, ino=562949953486850, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram3, ino=562949953486851, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram4, ino=562949953486852, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram5, ino=562949953486853, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram6, ino=562949953486854, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram7, ino=562949953486855, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram8, ino=562949953486856, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram9, ino=562949953486857, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram10, ino=562949953486858, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram11, ino=562949953486859, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram12, ino=562949953486860, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram13, ino=562949953486861, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram14, ino=562949953486862, ty=Block
+[[32m  DEBUG[0m] devfs dir entry: name=ram15, ino=562949953486863, ty=Block
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-devfs-iterate" }
+[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_block_device_io_and_attrs...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] mounted filesystem: devfs at /kunit-devfs-block-io with flags MountFlags(0x0)
+[[35m NOTICE[0m] unmounted filesystem at Dentry { name: "kunit-devfs-block-io" }
+[32;1mok[0m
+anemone_kernel::fs::api::truncate::kunits::test_inode_truncate_rejects_directory...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[32;1mok[0m
+anemone_kernel::device::char::kunits::test_cdev...
+[1;31m御伽噺[0m
+[1;34mOtogibanashi[0m
+[1;35mおとぎばなし[0m
+[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::elf::parse::seg_chunk::kunits::merges_overlapping_pages_per_page_protection...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_stage1_tmpfile_requires_write_access_mode...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_stage1_tmpfile_is_unlinked_but_remains_usable...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_finish_open_tmpfile_skips_odirectory_result_check...[[35m NOTICE[0m] ext4: loaded inode Ino(63) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(64) into icache
+[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::shebang::kunits::test_basic...[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::shebang::kunits::test_invalid...[32;1mok[0m
+anemone_kernel::device::block::kunits::test_alpha_disk_name_encoding...[32;1mok[0m
+anemone_kernel::device::bus::virtio::ls_virtio_devices...
+virtio bus:
+  device: virtio_mmio@10008000
+  device: virtio_mmio@10002000
+  device: virtio_mmio@10001000
+  driver: virtio-blk
+[32;1mok[0m
+anemone_kernel::device::ls_devices...
+devices : platform device
+	resources: []
+devices/poweroff : platform device
+	resources: []
+devices/reboot : platform device
+	resources: []
+devices/platform-bus@4000000 : platform device
+	resources: []
+devices/pmu : platform device
+	resources: []
+devices/fw-cfg@10100000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10100000), len: 18 }]
+devices/flash@20000000 : platform device
+	resources: [Mmio { base: PhysAddr(0x20000000), len: 2000000 }, Mmio { base: PhysAddr(0x22000000), len: 2000000 }]
+devices/soc : platform device
+	resources: []
+devices/soc/rtc@101000 : platform device
+	resources: [Mmio { base: PhysAddr(0x101000), len: 1000 }]
+devices/soc/serial@10000000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10000000), len: 100 }]
+devices/soc/test@100000 : platform device
+	resources: [Mmio { base: PhysAddr(0x100000), len: 1000 }]
+devices/soc/virtio_mmio@10008000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10008000), len: 1000 }]
+devices/soc/virtio_mmio@10008000/virtio_mmio@10008000 : virtio device
+devices/soc/virtio_mmio@10007000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10007000), len: 1000 }]
+devices/soc/virtio_mmio@10006000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10006000), len: 1000 }]
+devices/soc/virtio_mmio@10005000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10005000), len: 1000 }]
+devices/soc/virtio_mmio@10004000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10004000), len: 1000 }]
+devices/soc/virtio_mmio@10003000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10003000), len: 1000 }]
+devices/soc/virtio_mmio@10002000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10002000), len: 1000 }]
+devices/soc/virtio_mmio@10002000/virtio_mmio@10002000 : virtio device
+devices/soc/virtio_mmio@10001000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10001000), len: 1000 }]
+devices/soc/virtio_mmio@10001000/virtio_mmio@10001000 : virtio device
+devices/soc/clint@2000000 : platform device
+	resources: [Mmio { base: PhysAddr(0x2000000), len: 10000 }]
+devices/soc/pci@30000000 : platform device
+	resources: [Mmio { base: PhysAddr(0x30000000), len: 10000000 }]
+devices/pci0000:00 : pcie device
+[32;1mok[0m
+anemone_kernel::device::bus::pcie::ls_pcie_bus...
+pcie bus:
+  device: pci0000:00
+  driver: pcie-bridge-driver
+  driver: virtio-pcie-transport
+[32;1mok[0m
+anemone_kernel::device::bus::platform::ls_platform_bus...
+platform bus:
+  device: poweroff
+  device: reboot
+  device: platform-bus@4000000
+  device: pmu
+  device: fw-cfg@10100000
+  device: flash@20000000
+  device: soc
+  device: rtc@101000
+  device: serial@10000000
+  device: test@100000
+  device: virtio_mmio@10008000
+  device: virtio_mmio@10007000
+  device: virtio_mmio@10006000
+  device: virtio_mmio@10005000
+  device: virtio_mmio@10004000
+  device: virtio_mmio@10003000
+  device: virtio_mmio@10002000
+  device: virtio_mmio@10001000
+  device: clint@2000000
+  device: pci@30000000
+  driver: goldfish-rtc
+  driver: pci-host-ecam-generic
+  driver: ns16550a
+  driver: virtio-mmio-transport
+[32;1mok[0m
+anemone_kernel::mm::frame::alloc_frame_updates_stats_and_refcount...[32;1mok[0m
+anemone_kernel::mm::frame::alloc_frames_updates_stats_and_refcount...[32;1mok[0m
+[1mAll tests passed![0m
+[[35m NOTICE[0m] Counter 'kunit' synchronized
+[[35m NOTICE[0m] ext4: loaded inode Ino(51) into icache
+[[32m  DEBUG[0m] kernel_exit: task=task #2 exit with code Exited(0)
+[[32m  DEBUG[0m] kernel_exit: task=task #3 exit with code Exited(0)
+[[32m  DEBUG[0m] kernel_exit: task=task #4 exit with code Exited(0)
+[[35m NOTICE[0m] task #2 is zombie, not enqueuing it to run queue
+[[35m NOTICE[0m] task #3 is zombie, not enqueuing it to run queue
+[[35m NOTICE[0m] task #4 is zombie, not enqueuing it to run queue
+[[35m NOTICE[0m] ext4: loaded inode Ino(54) into icache
+[[32m  DEBUG[0m] execve: resolved path '/sbin/init' to '/sbin/init'
+[[32m  DEBUG[0m] disposing @kernel/kinit-ap with tid task #3
+[[32m  DEBUG[0m] disposing @kernel/kinit-ap with tid task #4
+[[32m  DEBUG[0m] disposing @kernel/kinit-ap with tid task #2
+[[32m  DEBUG[0m] ELF loaded: entry = 0x3c008
+[[32m  DEBUG[0m] task #1 (previously task #1) has dethreaded its thread group task #1
+[[32m  DEBUG[0m] user task entry: entry=0x3c008, ustack_top=0x3ffffffe00, kstack_top=0xffffffc100231000
+[[36m   INFO[0m] brk of task #1 set to 0x0000000000542000
+init: started:
+	cwd:/
+	pid:1
+init: env OS=anemone
+init: env one=1
+init: env two=2
+init: env three=3
+init: env MIKU=39
+page size: Some(
+    0x1000,
+)
+random bytes: Some(
+    [
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+    ],
+)
+clock ticks per second: Some(
+    0x64,
+)
+exec filename: Some(
+    "/sbin/init",
+)
+platform: Some(
+    "riscv64",
+)
+base platform: Some(
+    "riscv64",
+)
+[[32m  DEBUG[0m] sys_clone called with flags=0x1000011, new_sp=0x0, parent_tid=0x0, tls=0x0, child_tid=0x3ffffffb9c
+[[32m  DEBUG[0m] __sys_clone_impl called with flags=CloneFlagsWithSignal {
+    flags: CloneFlags(
+        CHILD_SETTID,
+    ),
+    signal: Some(
+        SigNo(
+            17,
+        ),
+    ),
+}, new_sp=SameAsParent, parent_tid=None, tls=VirtAddr(0x0), child_tid=Some(VirtAddr(0x3ffffffb9c))
+[[32m  DEBUG[0m] 2:@kernel/clone: no cpu specified, picked cpu core #0
+[[32m  DEBUG[0m] clone: creating a new thread group with parent tgid task #1
+init: forked child process with tid [[32m  DEBUG[0m] entering cloned user task with tid task #2
+2
+[[32m  DEBUG[0m] wait4: parent_tgid=task #1 listening on child_exited event=0xffffffff8044d2a0
+[[32m  DEBUG[0m] wait4: check wait condition: res=false, matched_any=true
+[[35m NOTICE[0m] task #1 is waiting (interruptible: true), not enqueuing it to run queue
+[[32m  DEBUG[0m] preparsing execve syscall arguments
+[[35m NOTICE[0m] ext4: loaded inode Ino(58) into icache
+[[32m  DEBUG[0m] execve: resolved path '/bin/user-test' to '/bin/user-test'
+[[32m  DEBUG[0m] ELF loaded: entry = 0x44a54
+[[32m  DEBUG[0m] task #2 (previously task #2) has dethreaded its thread group task #2
+[[32m  DEBUG[0m] dropping user space with root page at ppn 0x00000000000bfd49
+[[32m  DEBUG[0m] user task entry: entry=0x44a54, ustack_top=0x3ffffffe50, kstack_top=0xffffffc100252000
+user-test: running float test...
+[[32m  DEBUG[0m] sys_clone called with flags=0x11, new_sp=0x0, parent_tid=0x0, tls=0x0, child_tid=0x0
+[[32m  DEBUG[0m] __sys_clone_impl called with flags=CloneFlagsWithSignal {
+    flags: CloneFlags(
+        0x0,
+    ),
+    signal: Some(
+        SigNo(
+            17,
+        ),
+    ),
+}, new_sp=SameAsParent, parent_tid=None, tls=VirtAddr(0x0), child_tid=None
+[[32m  DEBUG[0m] 3:@kernel/clone: no cpu specified, picked cpu core #1
+[[32m  DEBUG[0m] clone: creating a new thread group with parent tgid task #2
+[[32m  DEBUG[0m] entering cloned user task with tid task #3
+[[32m  DEBUG[0m] wait4: parent_tgid=task #2 listening on child_exited event=0xffffffff804531d8
+[[32m  DEBUG[0m] wait4: check wait condition: res=false, matched_any=true
+[[35m NOTICE[0m] task #2 is waiting (interruptible: true), not enqueuing it to run queue
+[[36m   INFO[0m] brk of task #3 set to 0x0000000000543000
+[[32m  DEBUG[0m] preparsing execve syscall arguments
+[[35m NOTICE[0m] ext4: loaded inode Ino(59) into icache
+[[32m  DEBUG[0m] execve: resolved path '/bin/float-test' to '/bin/float-test'
+[[32m  DEBUG[0m] ELF loaded: entry = 0x3fa20
+[[32m  DEBUG[0m] task #3 (previously task #3) has dethreaded its thread group task #3
+[[32m  DEBUG[0m] dropping user space with root page at ppn 0x00000000000bfd50
+[[32m  DEBUG[0m] user task entry: entry=0x3fa20, ustack_top=0x3ffffffe40, kstack_top=0xffffffc100273000
+===== float test version 5 =====
+----- running signal handler test -----
+[[32m  DEBUG[0m] sys_rt_sigaction: sig=10, act=Some(VirtAddr(0x3ffffffbf8)), oldact=None, sigsetsize=8
+[[32m  DEBUG[0m] sys_rt_sigaction: converted sa_flags: SaFlags(SIGINFO)
+[[32m  DEBUG[0m] sys_rt_sigaction: new action for sig 10: KSigAction { action: Custom(VirtAddr(0x3e7cc)), flags: SaFlags(SIGINFO), mask: SigSet(0) }
+[[32m  DEBUG[0m] sys_tgkill: tgid=3, tid=3, sig=10
+[[32m  DEBUG[0m] task task #3 recv_signal: Signal { no: SigNo(10), errno: 0, code: TKill, fields: TKill(SigKill { pid: task #3, uid: 0 }) }
+[[32m  DEBUG[0m] signal SigNo(10) is not masked, notifying task
+[SIG] ra = 0xffffffff80201000
+[SIG] in signal handler for signal 10, siginfo at 0x3ffffff710, ucontext at 0x3ffffff790
+[[36m   INFO[0m] (core #1) enabled fpu for task #3 (@user/float-test)
+[SIG] in signal handler, fa0=666, fa1=233
+[SIG] signal handler done
+[[32m  DEBUG[0m] sys_rt_sigreturn: called task #3
+[[32m  DEBUG[0m] sys_rt_sigreturn: successfully return to user space for task #3
+0.114514+1919.81=1919.924514
+[[32m  DEBUG[0m] sys_tgkill: tgid=3, tid=3, sig=10
+[[32m  DEBUG[0m] task task #3 recv_signal: Signal { no: SigNo(10), errno: 0, code: TKill, fields: TKill(SigKill { pid: task #3, uid: 0 }) }
+[[32m  DEBUG[0m] signal SigNo(10) is not masked, notifying task
+[SIG] ra = 0xffffffff80201000
+[SIG] in signal handler for signal 10, siginfo at 0x3ffffff660, ucontext at 0x3ffffff6e0
+[SIG] in signal handler, fa0=666, fa1=233
+[SIG] signal handler done
+[[32m  DEBUG[0m] sys_rt_sigreturn: called task #3
+[[32m  DEBUG[0m] sys_rt_sigreturn: successfully return to user space for task #3
+After signal handler, fa0=114514, fa1=1919810
+----- all tests passed -----
+[[32m  DEBUG[0m] kernel_exit: task=task #3 exit with code Exited(0)
+[[32m  DEBUG[0m] signal SigNo(17) is ignored by the thread group, not queuing
+[[35m NOTICE[0m] waking up listener Listener { task: Task { tid: task #2, status: Waiting { interruptible: true }, flags: TaskFlags(0x0) } }
+[[32m  DEBUG[0m] task #2 is woken up, enqueueing it to run queue
+[[35m NOTICE[0m] waking up listener Listener { task: Task { tid: task #1, status: Waiting { interruptible: true }, flags: TaskFlags(0x0) } }
+[[32m  DEBUG[0m] wait4: check wait condition: res=true, matched_any=true
+[[32m  DEBUG[0m] task #1 is woken up, enqueueing it to run queue
+[[35m NOTICE[0m] task #3 is zombie, not enqueuing it to run queue
+[[32m  DEBUG[0m] wait4: parent_tgid=task #2 woke on child_exited event=0xffffffff804531d8, rechecking wait condition
+[[32m  DEBUG[0m] wait4: found a child task #3 that satisfies the wait condition
+[[32m  DEBUG[0m] try_unbind_thread_group: no binding found for tgid task #3, maybe it was never accessed?
+[[32m  DEBUG[0m] thread group task #3 is dropped
+user-test: float test finished.
+[[32m  DEBUG[0m] wait4: check wait condition: res=false, matched_any=true
+[[35m NOTICE[0m] task #1 is waiting (interruptible: true), not enqueuing it to run queue
+[[36m   INFO[0m] brk of task #2 set to 0x0000000000543000
+[[32m  DEBUG[0m] disposing @user/float-test with tid task #3
+[[32m  DEBUG[0m] dropping user space with root page at ppn 0x0000000000080e00
+[[35m NOTICE[0m] mounted filesystem: devfs at /dev with flags MountFlags(0x0)
+[[35m NOTICE[0m] ext4: loaded inode Ino(2) into icache
+[[35m NOTICE[0m] mounted filesystem: ext4 at /mnt with flags MountFlags(0x0)
+[[32m  DEBUG[0m] anemone_kernel::fs::api::stat::newfstatat::sys_newfstatat failed with error NotFound for task task #2
+[[35m NOTICE[0m] ext4: loaded inode Ino(3213) into icache
+[[35m NOTICE[0m] mounted filesystem: devfs at /mnt/dev with flags MountFlags(0x0)
+[[32m  DEBUG[0m] anemone_kernel::fs::api::stat::newfstatat::sys_newfstatat failed with error NotFound for task task #2
+[[35m NOTICE[0m] ext4: loaded inode Ino(3214) into icache
+[[35m NOTICE[0m] mounted filesystem: ramfs at /mnt/tmp with flags MountFlags(0x0)
+[[32m  DEBUG[0m] anemone_kernel::fs::api::stat::newfstatat::sys_newfstatat failed with error NotFound for task task #2
+[[35m NOTICE[0m] ext4: loaded inode Ino(3215) into icache
+[[35m NOTICE[0m] mounted filesystem: procfs at /mnt/proc with flags MountFlags(0x0)
+[[32m  DEBUG[0m] anemone_kernel::fs::api::stat::newfstatat::sys_newfstatat failed with error NotFound for task task #2
+[[35m NOTICE[0m] ext4: loaded inode Ino(3216) into icache
+[[32m  DEBUG[0m] anemone_kernel::fs::api::stat::newfstatat::sys_newfstatat failed with error NotFound for task task #2
+[[35m NOTICE[0m] ext4: loaded inode Ino(3217) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(12) into icache
+[[35m NOTICE[0m] ext4: loaded inode Ino(55) into icache
+[[32m  DEBUG[0m] sys_clone called with flags=0x11, new_sp=0x0, parent_tid=0x0, tls=0x0, child_tid=0x0
+[[32m  DEBUG[0m] __sys_clone_impl called with flags=CloneFlagsWithSignal {
+    flags: CloneFlags(
+        0x0,
+    ),
+    signal: Some(
+        SigNo(
+            17,
+        ),
+    ),
+}, new_sp=SameAsParent, parent_tid=None, tls=VirtAddr(0x0), child_tid=None
+[[32m  DEBUG[0m] 3:@kernel/clone: no cpu specified, picked cpu core #2
+[[32m  DEBUG[0m] clone: creating a new thread group with parent tgid task #2
+[[32m  DEBUG[0m] entering cloned user task with tid task #3
+[[32m  DEBUG[0m] wait4: parent_tgid=task #2 listening on child_exited event=0xffffffff804531d8
+[[32m  DEBUG[0m] wait4: check wait condition: res=false, matched_any=true
+[[35m NOTICE[0m] task #2 is waiting (interruptible: true), not enqueuing it to run queue
+[[32m  DEBUG[0m] preparsing execve syscall arguments
+[[32m  DEBUG[0m] execve: resolved path '/musl/busybox' to '/mnt/musl/busybox'
+[[32m  DEBUG[0m] ELF loaded: entry = 0x10148
+[[32m  DEBUG[0m] task #3 (previously task #3) has dethreaded its thread group task #3
+[[32m  DEBUG[0m] dropping user space with root page at ppn 0x0000000000080e5a
+[[32m  DEBUG[0m] user task entry: entry=0x10148, ustack_top=0x3ffffffde0, kstack_top=0xffffffc100273000
+[[32m  DEBUG[0m] set_tid_address: tidptr=Some(
+    VirtAddr(0x163c14),
+)
+[[32m  DEBUG[0m] getuid
+[[32m  DEBUG[0m] anemone_kernel::fs::api::stat::newfstatat::sys_newfstatat failed with error NotFound for task task #3
+[[32m  DEBUG[0m] kernel_exit: task=task #3 exit with code Exited(0)
+[[32m  DEBUG[0m] cleared child tid and woke futex for task task #3 at address 0x163c14
+[[32m  DEBUG[0m] signal SigNo(17) is ignored by the thread group, not queuing
+[[35m NOTICE[0m] waking up listener Listener { task: Task { tid: task #2, status: Waiting { interruptible: true }, flags: TaskFlags(0x0) } }
+[[32m  DEBUG[0m] task #2 is woken up, enqueueing it to run queue
+[[35m NOTICE[0m] waking up listener Listener { task: Task { tid: task #1, status: Waiting { interruptible: true }, flags: TaskFlags(0x0) } }
+[[32m  DEBUG[0m] wait4: check wait condition: res=true, matched_any=true
+[[32m  DEBUG[0m] task #1 is woken up, enqueueing it to run queue
+[[32m  DEBUG[0m] wait4: parent_tgid=task #2 woke on child_exited event=0xffffffff804531d8, rechecking wait condition
+[[35m NOTICE[0m] task #3 is zombie, not enqueuing it to run queue
+[[32m  DEBUG[0m] wait4: check wait condition: res=false, matched_any=true
+[[35m NOTICE[0m] task #1 is waiting (interruptible: true), not enqueuing it to run queue
+[[32m  DEBUG[0m] wait4: found a child task #3 that satisfies the wait condition
+[[32m  DEBUG[0m] try_unbind_thread_group: no binding found for tgid task #3, maybe it was never accessed?
+[[32m  DEBUG[0m] thread group task #3 is dropped
+[[32m  DEBUG[0m] disposing @user/busybox with tid task #3
+[[32m  DEBUG[0m] dropping user space with root page at ppn 0x0000000000080e73
+[[32m  DEBUG[0m] sys_clone called with flags=0x11, new_sp=0x0, parent_tid=0x0, tls=0x0, child_tid=0x0
+[[32m  DEBUG[0m] __sys_clone_impl called with flags=CloneFlagsWithSignal {
+    flags: CloneFlags(
+        0x0,
+    ),
+    signal: Some(
+        SigNo(
+            17,
+        ),
+    ),
+}, new_sp=SameAsParent, parent_tid=None, tls=VirtAddr(0x0), child_tid=None
+[[32m  DEBUG[0m] 3:@kernel/clone: no cpu specified, picked cpu core #3
+[[32m  DEBUG[0m] clone: creating a new thread group with parent tgid task #2
+[[32m  DEBUG[0m] entering cloned user task with tid task #3
+[[32m  DEBUG[0m] wait4: parent_tgid=task #2 listening on child_exited event=0xffffffff804531d8
+[[32m  DEBUG[0m] wait4: check wait condition: res=false, matched_any=true
+[[35m NOTICE[0m] task #2 is waiting (interruptible: true), not enqueuing it to run queue
+[[32m  DEBUG[0m] preparsing execve syscall arguments
+[[32m  DEBUG[0m] execve: resolved path '/musl/busybox' to '/mnt/musl/busybox'
+[[32m  DEBUG[0m] ELF loaded: entry = 0x10148
+[[32m  DEBUG[0m] task #3 (previously task #3) has dethreaded its thread group task #3
+[[32m  DEBUG[0m] dropping user space with root page at ppn 0x0000000000080e67
+[[32m  DEBUG[0m] user task entry: entry=0x10148, ustack_top=0x3ffffffdd0, kstack_top=0xffffffc100273000
+[[32m  DEBUG[0m] set_tid_address: tidptr=Some(
+    VirtAddr(0x163c14),
+)
+[[32m  DEBUG[0m] getuid
+[[32m  DEBUG[0m] anemone_kernel::fs::api::stat::newfstatat::sys_newfstatat failed with error NotFound for task task #3
+[[32m  DEBUG[0m] symlinkat: target=/musl/busybox, newdirfd=Cwd, linkpath=/bin/busybox
+[[35m NOTICE[0m] ext4: loaded inode Ino(3218) into icache
+[[32m  DEBUG[0m] kernel_exit: task=task #3 exit with code Exited(0)
+[[32m  DEBUG[0m] cleared child tid and woke futex for task task #3 at address 0x163c14
+[[32m  DEBUG[0m] signal SigNo(17) is ignored by the thread group, not queuing
+[[35m NOTICE[0m] waking up listener Listener { task: Task { tid: task #2, status: Waiting { interruptible: true }, flags: TaskFlags(0x0) } }
+[[32m  DEBUG[0m] task #2 is woken up, enqueueing it to run queue
+[[35m NOTICE[0m] waking up listener Listener { task: Task { tid: task #1, status: Waiting { interruptible: true }, flags: TaskFlags(0x0) } }
+[[32m  DEBUG[0m] wait4: check wait condition: res=true, matched_any=true
+[[32m  DEBUG[0m] task #1 is woken up, enqueueing it to run queue
+[[32m  DEBUG[0m] wait4: parent_tgid=task #2 woke on child_exited event=0xffffffff804531d8, rechecking wait condition
+[[35m NOTICE[0m] task #3 is zombie, not enqueuing it to run queue
+[[32m  DEBUG[0m] wait4: check wait condition: res=false, matched_any=true
+[[35m NOTICE[0m] task #1 is waiting (interruptible: true), not enqueuing it to run queue
+[[32m  DEBUG[0m] wait4: found a child task #3 that satisfies the wait condition
+[[32m  DEBUG[0m] try_unbind_thread_group: no binding found for tgid task #3, maybe it was never accessed?
+[[32m  DEBUG[0m] thread group task #3 is dropped
+[[32m  DEBUG[0m] sys_clone called with flags=0x11, new_sp=0x0, parent_tid=0x0, tls=0x0, child_tid=0x0
+[[32m  DEBUG[0m] __sys_clone_impl called with flags=CloneFlagsWithSignal {
+    flags: CloneFlags(
+        0x0,
+    ),
+    signal: Some(
+        SigNo(
+            17,
+        ),
+    ),
+}, new_sp=SameAsParent, parent_tid=None, tls=VirtAddr(0x0), child_tid=None
+[[32m  DEBUG[0m] 3:@kernel/clone: no cpu specified, picked cpu core #0
+[[32m  DEBUG[0m] clone: creating a new thread group with parent tgid task #2
+[[32m  DEBUG[0m] wait4: parent_tgid=task #2 listening on child_exited event=0xffffffff804531d8
+[[32m  DEBUG[0m] wait4: check wait condition: res=false, matched_any=true
+[[35m NOTICE[0m] task #2 is waiting (interruptible: true), not enqueuing it to run queue
+[[32m  DEBUG[0m] entering cloned user task with tid task #3
+[[32m  DEBUG[0m] disposing @user/busybox with tid task #3
+[[32m  DEBUG[0m] dropping user space with root page at ppn 0x0000000000080ec7
+[[32m  DEBUG[0m] preparsing execve syscall arguments
+[[32m  DEBUG[0m] execve: resolved path '/bin/busybox' to '/mnt/musl/busybox'
+[[32m  DEBUG[0m] ELF loaded: entry = 0x10148
+[[32m  DEBUG[0m] task #3 (previously task #3) has dethreaded its thread group task #3
+[[32m  DEBUG[0m] dropping user space with root page at ppn 0x0000000000080ebb
+[[32m  DEBUG[0m] user task entry: entry=0x10148, ustack_top=0x3ffffffde0, kstack_top=0xffffffc100294000
+[[32m  DEBUG[0m] set_tid_address: tidptr=Some(
+    VirtAddr(0x163c14),
+)
+[[32m  DEBUG[0m] getuid
+[[36m   INFO[0m] brk of task #3 set to 0x0000000000167000
+[[32m  DEBUG[0m] readlinkat: dirfd=Cwd, pathname=/proc/self/exe, buf=0x166020, bufsize=80
+[[32m  DEBUG[0m] proc_root_lookup: name=self
+[[32m  DEBUG[0m] proc_root_lookup: name=3
+[[32m  DEBUG[0m] proc_root_lookup: bound thread group with tgid task #3 to inode 6
+QEMU: Terminated
+

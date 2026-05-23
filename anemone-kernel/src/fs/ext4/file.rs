@@ -39,12 +39,40 @@ impl Ext4RegState {
             .ok_or(SysError::InvalidArgument)
     }
 
+    fn page_index(offset: usize) -> usize {
+        offset >> PagingArch::PAGE_SIZE_BITS
+    }
+
     pub(super) fn size(&self) -> usize {
         self.size.load(Ordering::Acquire)
     }
 
     pub(super) fn update_size_max(&self, new: usize) {
         self.size.fetch_max(new, Ordering::AcqRel);
+    }
+
+    fn invalidate_pages_inclusive(&self, first: usize, last: usize) {
+        self.pages
+            .write()
+            .retain(|pidx, _| *pidx < first || *pidx > last);
+    }
+
+    pub(super) fn apply_truncate(&self, new_size: usize) {
+        let old_size = self.size.swap(new_size, Ordering::AcqRel);
+        if new_size == old_size {
+            return;
+        }
+
+        // Root-cause boundary: pages whose visible byte range changes across
+        // truncate are not safe to preserve in-cache yet. The on-disk ext4
+        // image is already authoritative here, so invalidate only the pages
+        // intersecting the visibility delta and reload them on demand.
+        let (first, last) = if new_size < old_size {
+            (Self::page_index(new_size), Self::page_index(old_size - 1))
+        } else {
+            (Self::page_index(old_size), Self::page_index(new_size - 1))
+        };
+        self.invalidate_pages_inclusive(first, last);
     }
 
     fn visible_end(&self) -> Result<usize, SysError> {
@@ -87,6 +115,10 @@ impl Ext4Reg {
 
     pub(super) fn sync_all(&self) -> Result<(), SysError> {
         Ext4RegMapping::new(self.state.clone()).sync_all()
+    }
+
+    pub(super) fn apply_truncate(&self, new_size: usize) {
+        self.state.apply_truncate(new_size);
     }
 }
 

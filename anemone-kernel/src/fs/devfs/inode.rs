@@ -148,6 +148,7 @@ pub(super) static DEVFS_ROOT_INODE_OPS: InodeOps = InodeOps {
     rmdir: |_, _| Err(SysError::NotSupported),
     rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: devfs_open,
+    truncate: |_, _| Err(SysError::NotSupported),
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: devfs_get_attr,
 };
@@ -162,6 +163,7 @@ pub(super) static DEVFS_DEV_INODE_OPS: InodeOps = InodeOps {
     rmdir: |_, _| Err(SysError::NotDir),
     rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: devfs_open,
+    truncate: |_, _| Err(SysError::NotSupported),
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: devfs_get_attr,
 };

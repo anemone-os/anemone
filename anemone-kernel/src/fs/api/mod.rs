@@ -35,6 +35,7 @@ pub mod renameat2;
 pub mod sendfile;
 pub mod stat;
 pub mod statfs;
+pub mod truncate;
 pub mod symlinkat;
 pub mod umask;
 pub mod umount;

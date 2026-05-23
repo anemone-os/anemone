@@ -67,6 +67,9 @@ pub mod linux {
 
     pub const SYS_STATFS: u64 = 43;
 
+    pub const SYS_TRUNCATE: u64 = 45;
+    pub const SYS_FTRUNCATE: u64 = 46;
+
     pub const SYS_FACCESSAT: u64 = 48;
 
     pub const SYS_CHDIR: u64 = 49;
