@@ -382,12 +382,12 @@ unsafe extern "C" {
 ///
 /// **Make sure `sscratch` points to the kernel stack top before calling
 /// this function**, and the trapframe is valid.
-pub unsafe fn utrap_return_to_task(trapframe: *const RiscV64TrapFrame) -> ! {
-    unsafe {
-        debug_assert!(
-            !get_current_task().fpu_used(),
-            "the fpu use state should be false when first entering a user task"
-        );
-        __utrap_return_to_task(trapframe)
+pub unsafe fn utrap_return_to_task(trapframe: &mut RiscV64TrapFrame) -> ! {
+    if get_current_task().fpu_used() {
+        fpu::load_next_frs(trapframe.fpu_regs());
+        set_fpu_status(FS::Clean, Some(trapframe));
+    } else {
+        set_fpu_status(FS::Off, Some(trapframe));
     }
+    unsafe { __utrap_return_to_task(trapframe) }
 }

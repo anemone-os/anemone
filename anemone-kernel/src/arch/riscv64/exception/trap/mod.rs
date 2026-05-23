@@ -1,4 +1,4 @@
-use core::{arch::asm};
+use core::arch::asm;
 
 use crate::{arch::riscv64::fpu::FpuTaskContext, prelude::*};
 
@@ -9,7 +9,7 @@ pub use utrap::*;
 mod signal;
 pub use signal::*;
 
-use riscv::register::sstatus::{self, SPP};
+use riscv::register::sstatus::{self, FS, SPP, Sstatus};
 
 pub struct RiscV64TrapArch;
 
@@ -17,8 +17,8 @@ impl TrapArchTrait for RiscV64TrapArch {
     type TrapFrame = RiscV64TrapFrame;
     type SyscallCtx = RiscV64SyscallCtx;
 
-    unsafe fn load_utrapframe(trapframe: Self::TrapFrame) -> ! {
-        unsafe { utrap_return_to_task(&trapframe as *const _) }
+    unsafe fn load_utrapframe(mut trapframe: Self::TrapFrame) -> ! {
+        unsafe { utrap_return_to_task(&mut trapframe) }
     }
 
     fn syscall_ctx_snapshot(trapframe: &Self::TrapFrame) -> Self::SyscallCtx {

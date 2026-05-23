@@ -62,6 +62,11 @@ mod args {
 
             /// Currently this flag is ignored, but the effect is the same from user's perspective.
             const MAP_UNINITIALIZED = mmap::MAP_UNINITIALIZED;
+
+            /// Deprecated
+            const MAP_DENYWRITE = mmap::MAP_DENYWRITE;
+            /// Deprecated
+            const MAP_STACK = mmap::MAP_STACK;
         }
     }
 

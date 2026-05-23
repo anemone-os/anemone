@@ -24,8 +24,8 @@ impl TrapArchTrait for LA64TrapArch {
     type TrapFrame = LA64TrapFrame;
     type SyscallCtx = LA64SyscallCtx;
 
-    unsafe fn load_utrapframe(trapframe: Self::TrapFrame) -> ! {
-        unsafe { utrap_return_to_task(&trapframe as *const _) }
+    unsafe fn load_utrapframe(mut trapframe: Self::TrapFrame) -> ! {
+        unsafe { utrap_return_to_task(&mut trapframe) }
     }
 
     fn syscall_ctx_snapshot(trapframe: &Self::TrapFrame) -> Self::SyscallCtx {

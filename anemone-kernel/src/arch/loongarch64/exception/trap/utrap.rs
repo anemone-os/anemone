@@ -359,7 +359,12 @@ unsafe extern "C" {
     unsafe fn __utrap_return_to_task(trapframe: *const LA64TrapFrame) -> !;
 }
 
-pub unsafe fn utrap_return_to_task(trapframe: *const LA64TrapFrame) -> ! {
-    debug_assert!(!get_current_task().fpu_used());
+pub unsafe fn utrap_return_to_task(trapframe: &mut LA64TrapFrame) -> ! {
+    if get_current_task().fpu_used() {
+        load_next_frs(trapframe.fpu_regs());
+        set_fpu_status(true);
+    } else {
+        set_fpu_status(false);
+    }
     unsafe { __utrap_return_to_task(trapframe) }
 }
