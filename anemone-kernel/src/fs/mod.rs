@@ -14,6 +14,7 @@ mod path;
 mod superblock;
 
 // filesystem drivers
+// old
 mod devfs;
 #[cfg(feature = "fs_ext4")]
 mod ext4;
