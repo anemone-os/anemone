@@ -1,5 +1,5 @@
 use crate::{
-    device::char::{CharDev, register_char_device},
+    device::char::{CharDev, devfs::publish_char_device, register_char_device},
     prelude::*,
 };
 
@@ -30,7 +30,11 @@ impl CharDev for Zero {
 fn init() {
     match register_char_device(ZERO_DEVNUM, "zero".to_string(), Arc::new(Zero)) {
         Ok(()) => {
-            knoticeln!("zero device registered");
+            if let Err(err) = publish_char_device(ZERO_DEVNUM) {
+                knoticeln!("zero device registered, but devfs publish failed: {:?}", err);
+            } else {
+                knoticeln!("zero device registered");
+            }
         },
         Err(e) => {
             knoticeln!("failed to register zero device: {:?}", e);

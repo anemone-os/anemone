@@ -14,8 +14,7 @@ mod path;
 mod superblock;
 
 // filesystem drivers
-// old
-mod devfs;
+pub mod devfs;
 #[cfg(feature = "fs_ext4")]
 mod ext4;
 mod pipe;
@@ -156,6 +155,8 @@ mod namespace {
             }
 
             let sb = mount.sb().clone();
+            let fs = sb.fs().clone();
+            let persistent_sb = fs.flags().contains(FileSystemFlags::PERSISTENT_SB);
             let sb_still_used = self
                 .mounts
                 .iter()
@@ -169,11 +170,10 @@ mod namespace {
             }
 
             // tear down the superblock if no other mount is using it.
-            if !sb_still_used {
+            if !sb_still_used && !persistent_sb {
                 // we can not recover. it's too complex.
                 sb.try_evict_all()?;
 
-                let fs = sb.fs().clone();
                 fs.remove_sb(|s| Arc::ptr_eq(s, &sb));
                 fs.kill_sb(sb);
             }

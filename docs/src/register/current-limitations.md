@@ -46,3 +46,33 @@
 **Owner:** doruche
 **Last Verified:** 2026-05-23
 **Related:** [开发日志：2026-05-11 至 2026-05-24](../devlog/2026-05-11_to_2026-05-24.md), [当前限制](./current-limitations.md)
+
+## ANE-20260524-DEVFS-STATIC-PUBLISH
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** devfs / device model
+
+**Summary:** 当前 devfs 第一版只支持启动期静态 publish 到扁平 `/dev` 根目录，不支持运行期 unpublish/hot-unplug、目录层级、别名或 symlink。
+
+**Exit Condition:** 只有在真实设备热插拔或多级命名空间需求出现后，再为 devfs 增加显式的发布失效协议、目录发布能力与相应的 dentry/inode 回收路径。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-24
+**Related:** [开发日志：2026-05-11 至 2026-05-24](../devlog/2026-05-11_to_2026-05-24.md)
+
+## ANE-20260524-DEVFS-BLOCK-DEFAULT-SEMANTICS
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** block / devfs
+
+**Summary:** 当前 block 子系统默认 `/dev` helper 仍采用块对齐 seek/read/write 语义，不提供 Linux 风格更接近字节流的块设备文件兼容层，也不提供 waitable poll。
+
+**Exit Condition:** 明确目标 userspace 对块设备节点的兼容性需求后，为默认 block helper 增加所需的兼容层或正式收敛成受文档约束的语义，并补齐对应验证。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-24
+**Related:** [开发日志：2026-05-11 至 2026-05-24](../devlog/2026-05-11_to_2026-05-24.md)
