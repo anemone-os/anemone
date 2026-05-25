@@ -101,16 +101,6 @@ fn sys_shmget(
     size: usize,
     shmflg: ShmGetFlagsWithPermissions,
 ) -> Result<u64, SysError> {
-    if size < SHMMIN || size > SHMMAX {
-        knoticeln!(
-            "sys_shmget: rejected size {} outside [{}, {}]",
-            size,
-            SHMMIN,
-            SHMMAX
-        );
-        return Err(SysError::InvalidArgument);
-    }
-
     if shmflg.flags.contains(ShmGetFlags::HUGETLB) {
         knoticeln!(
             "sys_shmget: SHM_HUGETLB requested for key {:?}, accepting in compatibility mode",
@@ -151,6 +141,16 @@ fn sys_shmget(
                 knoticeln!("sys_shmget: key {:#x} not found without IPC_CREAT", key.raw());
                 return Err(SysError::NotFound);
             }
+        }
+
+        if size < SHMMIN || size > SHMMAX {
+            knoticeln!(
+                "sys_shmget: rejected size {} outside [{}, {}]",
+                size,
+                SHMMIN,
+                SHMMAX
+            );
+            return Err(SysError::InvalidArgument);
         }
 
         let perm = IpcPerm {
