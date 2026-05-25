@@ -213,6 +213,25 @@ impl Task {
         f(&tg)
     }
 
+    /// Whether this task is the only topology-visible task using `uspace`.
+    ///
+    /// This is used by address-space scoped cleanup paths. It deliberately
+    /// counts tasks, not transient `Arc` holders, so syscall-local references
+    /// do not postpone process cleanup.
+    pub fn is_last_user_of_uspace(&self, uspace: &Arc<UserSpaceHandle>) -> bool {
+        let topology = TOPOLOGY.inner.read();
+        !topology.tasks.values().any(|node| {
+            if node.task.tid() == self.tid() {
+                return false;
+            }
+
+            node.task
+                .try_clone_uspace_handle()
+                .map(|other| Arc::ptr_eq(&other, uspace))
+                .unwrap_or(false)
+        })
+    }
+
     /// Detach this task from the topology, which includes:
     /// - removing this task from its thread group members.
     /// - removing this task from the topology registry.

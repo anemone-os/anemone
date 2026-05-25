@@ -84,6 +84,8 @@ pub struct UserSpace {
     table: PageTable,
     /// User virtual memory areas, including stack and heap.
     vmas: BTreeMap<VirtPageNum, VmArea>,
+    /// SysV shared memory attachments by page-aligned attach start.
+    sysv_shm: BTreeMap<VirtPageNum, shm::ShmAttachment>,
     stack: Stack,
     heap: Heap,
 
@@ -189,14 +191,10 @@ impl UserSpaceHandle {
         drop(usp);
         res
     }
-}
 
-impl Drop for UserSpaceHandle {
-    fn drop(&mut self) {
-        kdebugln!(
-            "dropping user space with root page at ppn {}",
-            self.table_ppn
-        );
+    pub fn detach_all_sysv_shm_for(&self, tgid: Tid) -> Result<(), SysError> {
+        let mut usp = self.usp.lock();
+        usp.detach_all_sysv_shm_for(tgid)
     }
 }
 
@@ -291,6 +289,7 @@ impl UserSpace {
         let mut res = Self {
             table,
             vmas,
+            sysv_shm: BTreeMap::new(),
             stack: Stack {
                 init_sp: VirtAddr::new(KernelLayout::USPACE_TOP_ADDR),
                 svpn: sstack,
@@ -417,6 +416,17 @@ impl UserSpace {
 
     pub fn find_vma_mut(&mut self, vaddr: VirtAddr) -> Option<&mut VmArea> {
         Self::find_vma_raw_mut(&mut self.vmas, vaddr)
+    }
+
+    fn detach_all_sysv_shm_for(&mut self, tgid: Tid) -> Result<(), SysError> {
+        let attachments: Vec<shm::ShmAttachment> = self.sysv_shm.values().cloned().collect();
+        self.sysv_shm.clear();
+
+        for attachment in attachments {
+            shm::detach_attachment(&attachment, tgid);
+        }
+
+        Ok(())
     }
 }
 
@@ -650,10 +660,15 @@ impl UserSpace {
         let new_inner = UserSpace {
             table: new_table,
             vmas: new_vmas,
+            sysv_shm: self.sysv_shm.clone(),
             stack: self.stack,
             heap: self.heap,
             env_range: self.env_range,
         };
+
+        for attachment in new_inner.sysv_shm.values() {
+            attachment.segment.inherit_attachment_for_fork();
+        }
 
         // local tlb shootdown
         PagingArch::tlb_shootdown_all();

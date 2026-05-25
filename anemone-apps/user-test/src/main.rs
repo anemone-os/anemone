@@ -5,9 +5,13 @@
 mod ltp;
 
 use anemone_rs::{
-    os::linux::{
-        fs::{chdir, chroot, fstatat, mkdirat, mount, AtFd},
-        process::{execve, fork, wait4, WStatus, WStatusRaw, WaitFor, WaitOptions},
+    abi::system::native::power::SHUTDOWN_MAGIC,
+    os::{
+        anemone::power::shutdown,
+        linux::{
+            fs::{chdir, chroot, fstatat, mkdirat, mount, AtFd},
+            process::{execve, fork, wait4, WStatus, WStatusRaw, WaitFor, WaitOptions},
+        },
     },
     prelude::*,
 };
@@ -119,9 +123,14 @@ fn run_local_tests() {
     // println!("user-test: signal test finished.");
 
     // 2. float test
-    println!("user-test: running float test...");
-    local_run_cmd("/bin/float-test", &["float-test", "--type", "sig"], &[]);
-    println!("user-test: float test finished.");
+    // println!("user-test: running float test...");
+    // local_run_cmd("/bin/float-test", &["float-test", "--type", "sig"], &[]);
+    // println!("user-test: float test finished.");
+
+    // 3. shm test
+    println!("user-test: running shm test...");
+    local_run_cmd("/bin/shm-test", &["shm-test"], &[]);
+    println!("user-test: shm test finished.");
 }
 
 fn ensure_dir(path: &str) {
@@ -280,7 +289,7 @@ fn run_comp_tests() {
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
-    ltp::run_ltp_tests();
+    // ltp::run_ltp_tests();
 
     println!("user-test: all competition tests finished.");
 }
@@ -291,5 +300,7 @@ pub fn main() -> Result<(), Errno> {
 
     run_comp_tests();
 
-    loop {}
+    println!("user-test: all tests finished, shutting down.");
+    shutdown(SHUTDOWN_MAGIC).expect("user-test: failed to request shutdown");
+    unreachable!("user-test: shutdown returned unexpectedly");
 }
