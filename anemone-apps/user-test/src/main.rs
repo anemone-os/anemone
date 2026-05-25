@@ -26,7 +26,7 @@ const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "busybox_testcode.sh",
     // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
-    // "iozone_testcode.sh",
+    "iozone_testcode.sh",
     // "iperf_testcode.sh",
     // "libcbench_testcode.sh",
     // "lmbench_testcode.sh",

@@ -32,12 +32,6 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/.." && pwd)
 cd "$repo_root"
 
-cleanup() {
-    rm -f -- "$sdcard_target"
-    if [[ -n "${temp_sdcard_dir:-}" ]]; then
-        rm -rf -- "$temp_sdcard_dir"
-    fi
-}
 
 if [[ ! -f "$rootfs_config" ]]; then
     printf 'error: rootfs config not found: %s\n' "$rootfs_config" >&2
@@ -53,7 +47,6 @@ if [[ -e "$sdcard_target" ]]; then
     printf 'warning: %s already exists; will be overwritten\n' "$sdcard_target" >&2
 fi
 
-trap cleanup EXIT INT TERM
 mkdir -p -- "$(dirname -- "$log_file")"
 
 current_platform=$(
@@ -96,9 +89,7 @@ if [[ "$rootfs_image" != "$rootfs_target" ]]; then
 fi
 
 printf 'test-chain: staging sdcard image\n'
-temp_sdcard_dir=$(mktemp -d build/user-test-rv64.XXXXXX)
-cp -- "$sdcard_image" "$temp_sdcard_dir/sdcard-rv.img"
-ln -s -- "$temp_sdcard_dir/sdcard-rv.img" "$sdcard_target"
+cp -- "$sdcard_image" "sdcard-rv.img"
 
 printf 'test-chain: building kernel\n'
 just build
