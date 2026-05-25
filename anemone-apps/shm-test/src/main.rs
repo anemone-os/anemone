@@ -225,12 +225,19 @@ fn test_keyed_lookup_and_rmid() -> Result<(), Errno> {
         "existing keyed shmget with oversized request",
     );
 
+    let addr = unique_shmat(shmid, None, 0)?;
     unique_shmctl_nobuf(shmid, IPC_RMID)?;
+    expect_errno(
+        unique_shmat(shmid, None, 0),
+        EIDRM,
+        "attach after IPC_RMID must fail",
+    );
     expect_errno(
         unique_shmget(key, PAGE_SIZE, 0),
         ENOENT,
         "removed key must no longer resolve",
     );
+    unique_shmdt(addr)?;
 
     Ok(())
 }

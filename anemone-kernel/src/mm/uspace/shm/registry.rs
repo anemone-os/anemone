@@ -240,7 +240,7 @@ impl ShmRegistry {
         id: ShmId,
     ) -> Result<ShmAttachReservation, SysError> {
         let segment = self.lookup_by_shmid(id)?;
-        Ok(ShmAttachReservation::new(segment))
+        ShmAttachReservation::try_new(segment)
     }
 
     pub fn lookup_by_index(&self, index: ShmSlotIndex) -> Result<Arc<ShmSegment>, SysError> {

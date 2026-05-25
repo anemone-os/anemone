@@ -34,9 +34,18 @@ pub(super) struct ShmAttachReservation {
 }
 
 impl ShmAttachReservation {
-    pub(super) fn new(segment: Arc<ShmSegment>) -> Self {
-        segment.increment_attach_count();
-        Self { segment }
+    pub(super) fn try_new(segment: Arc<ShmSegment>) -> Result<Self, SysError> {
+        let mut inner = segment.inner.lock();
+        if inner.state.removed {
+            return Err(SysError::IdentifierRemoved);
+        }
+        inner.state.attach_count = inner
+            .state
+            .attach_count
+            .checked_add(1)
+            .expect("SysV shm attach count overflow");
+        drop(inner);
+        Ok(Self { segment })
     }
 
     pub(super) fn segment(&self) -> &Arc<ShmSegment> {
