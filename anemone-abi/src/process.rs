@@ -645,13 +645,93 @@ pub mod linux {
         pub const FUTEX_BITSET_MATCH_ANY: u32 = 0xffffffff;
     }
 
-    pub mod shm {
-        /// create if key is nonexistent.
+    pub mod ipc {
+        pub const IPC_PRIVATE: i32 = 0;
+
         pub const IPC_CREAT: i32 = 0o1000;
-        /// fail if key exists.
         pub const IPC_EXCL: i32 = 0o2000;
-        /// Do not reserve swap space.
-        pub const SHM_NORESERVE: i32 = 0o4000;
+        pub const IPC_NOWAIT: i32 = 0o4000;
+
+        pub const IPC_RMID: i32 = 0;
+        pub const IPC_SET: i32 = 1;
+        pub const IPC_STAT: i32 = 2;
+        pub const IPC_INFO: i32 = 3;
+    }
+
+    pub mod shm {
+        use crate::fs::linux::mode::*;
+
+        // shmget() shmflg values
+        pub const SHM_R: i32 = (S_IRUSR | S_IRGRP | S_IROTH) as i32;
+        pub const SHM_W: i32 = (S_IWUSR | S_IWGRP | S_IWOTH) as i32;
+        pub const SHM_HUGETLB: i32 = 0o4000;
+        pub const SHM_NORESERVE: i32 = 0o10000;
+        // TODO: hugetlb encodings?
+
+        // shmat() shmflg values
+        pub const SHM_RDONLY: i32 = 0o10000;
+        pub const SHM_RND: i32 = 0o20000;
+        pub const SHM_REMAP: i32 = 0o40000;
+        pub const SHM_EXEC: i32 = 0o100000;
+
+        // superuser shmctl commands
+        pub const SHM_LOCK: i32 = 11;
+        pub const SHM_UNLOCK: i32 = 12;
+
+        // ipcs ctl commands
+        pub const SHM_STAT: i32 = 13;
+        pub const SHM_INFO: i32 = 14;
+        pub const SHM_STAT_ANY: i32 = 15;
+
+        /// Obsolete, used only for backwards compatibility.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct ShmInfo {
+            pub shmmax: i32,
+            pub shmmin: i32,
+            pub shmmni: i32,
+            pub shmseg: i32,
+            pub shmall: usize,
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct Shm_Info {
+            pub used_ids: i32,
+            pub shm_tot: u64,
+            pub shm_rss: u64,
+            pub shm_swp: u64,
+            pub swap_attempts: u64,
+            pub swap_successes: u64,
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct ShmIdDs {
+            pub shm_perm: IpcPerm,
+            pub shm_segsz: u64,
+            pub shm_atime: i64,
+            pub shm_dtime: i64,
+            pub shm_ctime: i64,
+            pub shm_cpid: i32,
+            pub shm_lpid: i32,
+            pub shm_nattch: u16,
+            pub shm_unused: u16,
+            pub shm_unused2: u64,
+            pub shm_unused3: u64,
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct IpcPerm {
+            pub key: i32,
+            pub uid: u32,
+            pub gid: u32,
+            pub cuid: u32,
+            pub cgid: u32,
+            pub mode: u16,
+            pub __seq: u16,
+        }
     }
 }
 

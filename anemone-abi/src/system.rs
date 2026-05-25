@@ -18,3 +18,10 @@ pub mod linux {
         pub _f: [u8; 20 - 2 * size_of::<u64>() - size_of::<u32>()],
     }
 }
+
+pub mod native {
+    pub mod power {
+        /// Dead Cell.
+        pub const SHUTDOWN_MAGIC: u64 = 0xdeadce11;
+    }
+}

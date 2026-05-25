@@ -17,6 +17,8 @@ pub fn kernel_execve(
     envp: &[impl AsRef<str>],
 ) -> Result<(), SysError> {
     let task = get_current_task();
+    let mut old_uspace = task.try_clone_uspace_handle();
+    let tgid = task.tgid();
 
     let mut usp = UserSpace::new()?;
     match dispatch_execve(&mut usp, path.as_ref(), argv, envp) {
@@ -44,6 +46,12 @@ pub fn kernel_execve(
                 task.sig_disposition.write().clear_custom_actions();
                 task.sig_altstack.lock().take();
                 // mask, pending stay unchanged.
+
+                if let Some(old_uspace) = old_uspace.take() {
+                    if task.is_last_user_of_uspace(&old_uspace) {
+                        old_uspace.detach_all_sysv_shm_for(tgid)?;
+                    }
+                }
 
                 // this must be a user task.
                 let exec_fn = path.as_ref().split('/').last().unwrap_or(path.as_ref());

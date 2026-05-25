@@ -76,3 +76,45 @@
 **Owner:** doruche
 **Last Verified:** 2026-05-24
 **Related:** [开发日志：2026-05-11 至 2026-05-24](../devlog/2026-05-11_to_2026-05-24.md)
+
+## ANE-20260525-SYSV-SHM-MUNMAP-DETACH
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** mm / SysV shm
+
+**Summary:** 当前 SysV shm 只保证通过 `shmdt`、`fork`、`exec` 和进程退出维护 attach 生命周期；如果用户直接对 shm 映射调用 `munmap`，内核不会把它视为一次 SysV shm detach，也不会同步修正 `shm_nattch` 或 attachment 记录。
+
+**Exit Condition:** 为 VMA 增加可追踪的 SysV shm 来源标记或 unmap hook，使任意 `munmap` 路径都能一致驱动 detach / 计数回收，并用专门回归验证 partial unmap、whole unmap 与 `shmdt` 的一致性。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-25
+
+## ANE-20260525-SYSV-SHM-LOCK-NOOP
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** mm / SysV shm
+
+**Summary:** 当前 `SHM_LOCK` / `SHM_UNLOCK` 只保留兼容入口和日志，不实际执行页锁定、解锁或 `SHM_LOCKED` 状态维护，因此不会产生 Linux 风格的驻留锁页语义。
+
+**Exit Condition:** 为 SysV shm 接入真实的页锁定路径、权限校验与 `SHM_LOCKED` 状态同步，并补齐相关回归测试。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-25
+
+## ANE-20260525-SYSV-SHM-PERMISSIONS-PENDING-CREDENTIALS
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** mm / SysV shm / credentials
+
+**Summary:** 当前一期不纳入权限敏感的 SysV shm 测例，像 `shmat02`、`shmctl02` 这类依赖 `setuid`/`setgid` 和有效 uid/gid 切换的路径，仍会受限于现有 credentials 线的未完成状态。
+
+**Exit Condition:** 单独实现 credentials 的真实有效/真实 uid/gid 语义、`setuid`/`setgid` 行为和 IPC 权限检查之后，再把这些权限敏感测例纳入 SysV shm 白名单并回归验证。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-25

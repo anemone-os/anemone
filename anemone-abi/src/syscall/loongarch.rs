@@ -100,6 +100,9 @@ pub mod linux {
     pub const SYS_NEWFSTATAT: u64 = 79;
     pub const SYS_FSTAT: u64 = 80;
 
+    pub const SYS_SYNC: u64 = 81;
+    pub const SYS_FSYNC: u64 = 82;
+
     pub const SYS_UTIMENSAT: u64 = 88;
 
     pub const SYS_EXIT: u64 = 93;
@@ -114,6 +117,7 @@ pub mod linux {
     pub const SYS_SETITIMER: u64 = 103;
     pub const SYS_CLOCK_GETTIME: u64 = 113;
     pub const SYS_CLOCK_GETRES: u64 = 114;
+    pub const SYS_CLOCK_NANOSLEEP: u64 = 115;
 
     pub const SYS_SYSLOG: u64 = 116;
 

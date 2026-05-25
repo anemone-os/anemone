@@ -49,6 +49,9 @@ pub struct Parameters {
     pub user_stack_shift_kb: Option<u64>,
     pub user_init_stack_shift_kb: Option<u64>,
     pub user_heap_shift_mb: Option<u64>,
+    pub shmmax_bytes: Option<usize>,
+    pub shmall_pages: Option<usize>,
+    pub shmmni: Option<usize>,
     pub symlink_resolve_limit: Option<usize>,
     pub max_fd_per_process: Option<usize>,
 }
@@ -114,6 +117,12 @@ pub const USER_STACK_SHIFT_KB: u64 = {};
 pub const USER_INIT_STACK_SHIFT_KB: u64 = {};
 /// Max user heap size as a power of 2 in MB
 pub const USER_HEAP_SHIFT_MB: u64 = {};
+/// Default maximum size in bytes for a single System V shared memory segment.
+pub const SHMMAX: usize = {};
+/// Default maximum number of pages that may be allocated to System V shared memory.
+pub const SHMALL: usize = {};
+/// Default maximum number of System V shared memory segments.
+pub const SHMMNI: usize = {};
 /// Maximum number of symbolic links to resolve in a single path resolution
 pub const SYMLINK_RESOLVE_LIMIT: usize = {};
 /// Default maximum number of file descriptors per process. Might be overridden by certain syscalls.
@@ -133,6 +142,9 @@ pub const MAX_FD_PER_PROCESS: usize = {};
             default_or!(user_stack_shift_kb),
             default_or!(user_init_stack_shift_kb),
             default_or!(user_heap_shift_mb),
+            default_or!(shmmax_bytes),
+            default_or!(shmall_pages),
+            default_or!(shmmni),
             default_or!(symlink_resolve_limit),
             default_or!(max_fd_per_process),
         )

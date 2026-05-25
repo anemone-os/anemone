@@ -25,6 +25,8 @@ pub enum SysError {
     /// Permission denied. This includes file permission, memory access
     /// permission, etc.
     PermissionDenied,
+    /// Access is denied by user-visible permission checks.
+    AccessDenied,
     /// The provided file descriptor is invalid.
     BadFileDescriptor,
     /// No more file descriptors available for allocation.
@@ -48,6 +50,8 @@ pub enum SysError {
     AlreadyExists,
     /// Specified target entity (e.g. file, directory, etc.) does not exist.
     NotFound,
+    /// The IPC identifier refers to an object that has been removed.
+    IdentifierRemoved,
     /// The target is not a directory.
     NotDir,
     /// The target is a directory (but shouldn't be).
@@ -164,6 +168,7 @@ impl SysError {
             | SysError::NotAligned => EINVAL,
             SysError::BufferTooSmall => ERANGE,
             SysError::PermissionDenied => EPERM,
+            SysError::AccessDenied => EACCES,
             SysError::BadFileDescriptor => EBADF,
             SysError::NoMoreFd => EMFILE,
             SysError::OutOfMemory => ENOMEM,
@@ -175,6 +180,7 @@ impl SysError {
             | SysError::ExistingDriver
             | SysError::DevAlreadyRegistered => EEXIST,
             SysError::NotFound => ENOENT,
+            SysError::IdentifierRemoved => EIDRM,
             SysError::NotDir => ENOTDIR,
             SysError::IsDir => EISDIR,
             SysError::Busy | SysError::IrqAlreadyRequested => EBUSY,

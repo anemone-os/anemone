@@ -73,3 +73,21 @@ pub unsafe fn reboot() -> ! {
         core::hint::spin_loop();
     }
 }
+
+mod api {
+    use anemone_abi::system::native::power::SHUTDOWN_MAGIC;
+
+    use super::*;
+
+    #[syscall(SYS_POWER_SHUTDOWN)]
+    pub fn sys_power_shutdown(magic: u64) -> Result<u64, SysError> {
+        if magic != SHUTDOWN_MAGIC {
+            return Err(SysError::InvalidArgument);
+        }
+
+        unsafe {
+            power_off();
+        }
+    }
+}
+pub use api::*;
