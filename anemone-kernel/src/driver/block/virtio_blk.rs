@@ -11,7 +11,7 @@ use crate::{
     device::{
         block::{
             BlockDev, BlockDevClass, BlockDevRegistration, BlockDriver, BlockSize,
-            register_block_device, register_block_driver,
+            devfs::publish_block_device, register_block_device, register_block_driver,
         },
         bus::virtio::VirtIODriver,
         devnum::GeneralMinorAllocator,
@@ -146,6 +146,15 @@ impl DriverOps for VirtIOBlkDriver {
             vdev.name(),
             node_name
         );
+
+        if let Err(err) = publish_block_device(devnum) {
+            knoticeln!(
+                "virtio-blk device {} registered as {}, but devfs publish failed: {:?}",
+                vdev.name(),
+                node_name,
+                err
+            );
+        }
 
         vdev.set_drv_state(AnyOpaque::new(state));
 

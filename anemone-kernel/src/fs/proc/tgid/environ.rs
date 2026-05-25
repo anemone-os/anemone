@@ -46,6 +46,7 @@ static TGID_ENVIRON_INODE_OPS: InodeOps = InodeOps {
     rmdir: |_, _| Err(SysError::NotDir),
     rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: tgid_environ_open,
+    truncate: |_, _| Err(SysError::NotSupported),
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: tgid_environ_get_attr,
 };

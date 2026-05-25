@@ -4,8 +4,8 @@ use lwext4_rust::InodeType as LwExt4InodeType;
 use crate::{
     fs::{
         ext4::{
-            ext4_ino, ext4_sb, file::EXT4_SYMLINK_FILE_OPS, map_ext4_error, map_lwext4_inode_type,
-            map_vfs_inode_type,
+            Ext4Fs, ext4_ino, ext4_reg, ext4_sb, file::EXT4_SYMLINK_FILE_OPS, map_ext4_error,
+            map_lwext4_inode_type, map_vfs_inode_type,
         },
         inode::RenameFlags,
     },
@@ -81,6 +81,52 @@ fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
         file_ops,
         prv: NilOpaque::new(),
     })
+}
+
+fn ext4_zero_grown_range(
+    fs: &mut Ext4Fs,
+    ino: u32,
+    old_size: u64,
+    new_size: u64,
+) -> Result<(), SysError> {
+    if new_size <= old_size {
+        return Ok(());
+    }
+
+    static ZEROS: [u8; PagingArch::PAGE_SIZE_BYTES] = [0u8; PagingArch::PAGE_SIZE_BYTES];
+    let mut offset = old_size;
+
+    while offset < new_size {
+        let chunk = ((new_size - offset) as usize).min(ZEROS.len());
+        fs.write_at(ino, &ZEROS[..chunk], offset)
+            .map_err(map_ext4_error)?;
+        offset += chunk as u64;
+    }
+
+    Ok(())
+}
+
+fn ext4_truncate(inode: &InodeRef, size: u64) -> Result<(), SysError> {
+    let size_usize = usize::try_from(size).map_err(|_| SysError::InvalidArgument)?;
+    let reg = ext4_reg(inode)?;
+    let ino = inode.ino().get() as u32;
+    let old_size = inode.size();
+
+    reg.sync_all()?;
+
+    let sb = inode.sb();
+    ext4_sb(&sb).write_tx(|| {
+        ext4_sb(&sb).with_fs(|fs| {
+            fs.set_len(ino, size).map_err(map_ext4_error)?;
+            ext4_zero_grown_range(fs, ino, old_size, size)?;
+
+            fs.flush().map_err(map_ext4_error)
+        })
+    })?;
+
+    reg.apply_truncate(size_usize);
+    inode.inode().set_size(size);
+    Ok(())
 }
 
 #[inline]
@@ -372,6 +418,7 @@ pub(super) static EXT4_DIR_INODE_OPS: InodeOps = InodeOps {
     unlink: ext4_unlink,
     rmdir: ext4_rmdir,
     open: ext4_open,
+    truncate: |_, _| Err(SysError::NotSupported),
     rename: ext4_rename,
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: ext4_get_attr,
@@ -387,6 +434,7 @@ pub(super) static EXT4_REG_INODE_OPS: InodeOps = InodeOps {
     rmdir: |_, _| Err(SysError::NotDir),
     rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: ext4_open,
+    truncate: ext4_truncate,
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: ext4_get_attr,
 };
@@ -401,6 +449,7 @@ pub(super) static EXT4_DEV_INODE_OPS: InodeOps = InodeOps {
     rmdir: |_, _| Err(SysError::NotDir),
     rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: |_| Err(SysError::NotSupported),
+    truncate: |_, _| Err(SysError::NotSupported),
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: ext4_get_attr,
 };
@@ -415,6 +464,7 @@ pub(super) static EXT4_SYMLINK_INODE_OPS: InodeOps = InodeOps {
     rmdir: |_, _| Err(SysError::NotDir),
     rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: |_| Err(SysError::NotSupported),
+    truncate: |_, _| Err(SysError::NotSupported),
     read_link: ext4_read_link,
     get_attr: ext4_get_attr,
 };

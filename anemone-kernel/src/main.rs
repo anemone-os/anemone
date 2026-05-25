@@ -92,8 +92,6 @@ fn mount_rootfs() {
 
 // recursively ls
 fn ls_dir(path: &Path) {
-    // let mut ctx = DirContext::new();
-
     const MAX_ENTRIES: usize = 256;
 
     let mut sink = FixedSizeDirSink::<MAX_ENTRIES>::new();
@@ -147,8 +145,6 @@ fn exec_init_proc() {
         kinit.set_fs_state(FsState::new_root());
     }
 
-    // TODO: signals.
-
     kernel_execve(
         &init_path,
         &[&init_path, &"1".to_string()],
@@ -194,7 +190,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
 
     #[cfg(feature = "kunit")]
     {
-        // crate::debug::kunit::kunit_runner();
+        crate::debug::kunit::kunit_runner();
         unsafe {
             KUNIT_SYNC_COUNTER.sync_with_counter();
         }

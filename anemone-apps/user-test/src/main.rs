@@ -2,43 +2,113 @@
 #![no_main]
 #![allow(unused)]
 
+mod ltp;
+
 use anemone_rs::{
     os::linux::{
-        fs::{AtFd, chdir, chroot, fstatat, mkdirat, mount},
-        process::{WStatusRaw, WaitFor, WaitOptions, execve, fork, wait4},
+        fs::{chdir, chroot, fstatat, mkdirat, mount, AtFd},
+        process::{execve, fork, wait4, WStatus, WStatusRaw, WaitFor, WaitOptions},
     },
     prelude::*,
 };
 
-fn local_run_cmd(cmd: &str, args: &[&str], envs: &[&str]) {
+const BOOTSTRAP_BUSYBOX_PRIMARY: &str = "/musl/busybox";
+const BOOTSTRAP_BUSYBOX_FALLBACK: &str = "/glibc/busybox";
+const COMPETITION_DISK: &str = "/dev/vdb";
+const COMP_PATH_ENV: &str = "PATH=/bin:/usr/bin:/usr/sbin:/sbin:/";
+const GLIBC_TEST_SCRIPTS: &[&str] = &[
+    // "basic_testcode.sh",
+    // "lua_testcode.sh",
+    // "busybox_testcode.sh",
+    // "libctest_testcode.sh",
+    // "cyclictest_testcode.sh",
+    // "iozone_testcode.sh",
+    // "iperf_testcode.sh",
+    // "libcbench_testcode.sh",
+    // "lmbench_testcode.sh",
+    // "netperf_testcode.sh",
+    // "unixbench_testcode.sh",
+];
+const MUSL_TEST_SCRIPTS: &[&str] = &[
+    // "basic_testcode.sh",
+    // "lua_testcode.sh",
+    // "busybox_testcode.sh",
+    // "libctest_testcode.sh",
+    // "cyclictest_testcode.sh",
+    // "iozone_testcode.sh",
+    // "iperf_testcode.sh",
+    // "libcbench_testcode.sh",
+    // "lmbench_testcode.sh",
+    // "netperf_testcode.sh",
+    // "unixbench_testcode.sh",
+];
+
+cfg_select! {
+    target_arch = "riscv64" => {
+        const ACTIVE_LIB_DIR: &str = "/lib";
+        const MUSL_LOADER_NAMES: &[&str] = &[
+            "ld-musl-riscv64.so.1",
+            "ld-musl-riscv64-sf.so.1",
+        ];
+    },
+    target_arch = "loongarch64" => {
+        const ACTIVE_LIB_DIR: &str = "/lib64";
+        const MUSL_LOADER_NAMES: &[&str] = &["ld-musl-loongarch-lp64d.so.1"];
+    }
+}
+
+fn wait_child_exit_ok(pid: u32, name: &str) {
+    match wait_child_status(pid, name) {
+        Ok(WStatus::Exited(0)) => return,
+        Ok(other) => panic!("user-test: {name} child exited unexpectedly: {other:?}"),
+        Err(errno) => panic!("user-test: {name} wait4 failed: {errno:?}"),
+    }
+}
+
+pub(crate) fn wait_child_status(pid: u32, name: &str) -> Result<WStatus, Errno> {
+    loop {
+        let mut wstatus = WStatusRaw::EMPTY;
+        match wait4(
+            WaitFor::ChildWithTgid(pid),
+            Some(&mut wstatus),
+            WaitOptions::empty(),
+        ) {
+            Ok(Some(waited)) => {
+                if waited != pid {
+                    println!("user-test: {name} waited pid mismatch");
+                    return Err(ECHILD);
+                }
+                return Ok(wstatus.read());
+            },
+            Ok(None) => {
+                panic!("user-test: {name} wait4 returned None without WNOHANG");
+            },
+            Err(EINTR) => continue,
+            Err(errno) => panic!("user-test: {name} wait4 failed: {errno:?}"),
+        }
+    }
+}
+
+fn run_execve_in_dir(workdir: Option<&str>, cmd: &str, args: &[&str], envs: &[&str], name: &str) {
     match fork().expect("user-test: failed to fork") {
         Some(tid) => {
-            // parent
-            let mut wstatus = WStatusRaw::EMPTY;
-            match wait4(
-                WaitFor::ChildWithTgid(tid),
-                Some(&mut wstatus),
-                WaitOptions::empty(),
-            )
-            .expect("user-test: failed to wait4")
-            {
-                Some(tid) => {
-                    println!(
-                        "user-test: child task #{} exited with code {:?}",
-                        tid,
-                        wstatus.read()
-                    )
-                },
-                None => {
-                    panic!("user-test: wait4 returned None unexpectedly");
-                },
-            }
+            wait_child_exit_ok(tid, name);
         },
         None => {
-            // child
+            if let Some(dir) = workdir {
+                chdir(dir).expect("user-test: failed to chdir before execve");
+            }
             execve(cmd, args, envs).expect("user-test: failed to execve");
         },
     }
+}
+
+fn run_execve(cmd: &str, args: &[&str], envs: &[&str], name: &str) {
+    run_execve_in_dir(None, cmd, args, envs, name);
+}
+
+fn local_run_cmd(cmd: &str, args: &[&str], envs: &[&str]) {
+    run_execve(cmd, args, envs, cmd);
 }
 
 /// local tests for development.
@@ -54,177 +124,170 @@ fn run_local_tests() {
     println!("user-test: float test finished.");
 }
 
-fn init_environment() {
+fn ensure_dir(path: &str) {
+    if fstatat(AtFd::Cwd, Path::new(path)).is_err() {
+        mkdirat(AtFd::Cwd, Path::new(path), 0o755)
+            .unwrap_or_else(|_| panic!("user-test: failed to create {path}"));
+    }
+}
+
+fn bootstrap_busybox() -> &'static str {
+    if fstatat(AtFd::Cwd, Path::new(BOOTSTRAP_BUSYBOX_PRIMARY)).is_ok() {
+        BOOTSTRAP_BUSYBOX_PRIMARY
+    } else if fstatat(AtFd::Cwd, Path::new(BOOTSTRAP_BUSYBOX_FALLBACK)).is_ok() {
+        BOOTSTRAP_BUSYBOX_FALLBACK
+    } else {
+        panic!("user-test: no static busybox found under /musl or /glibc");
+    }
+}
+
+fn run_comp_exec(cmd: &str, args: &[&str], name: &str) {
+    let ld_library_path = format!("LD_LIBRARY_PATH={ACTIVE_LIB_DIR}");
+    let envs = [COMP_PATH_ENV, ld_library_path.as_str()];
+    run_execve(cmd, args, &envs, name);
+}
+
+fn run_comp_exec_in_dir(workdir: &str, cmd: &str, args: &[&str], name: &str) {
+    let ld_library_path = format!("LD_LIBRARY_PATH={ACTIVE_LIB_DIR}");
+    let envs = [COMP_PATH_ENV, ld_library_path.as_str()];
+    run_execve_in_dir(Some(workdir), cmd, args, &envs, name);
+}
+
+fn run_bootstrap_busybox(args: &[&str], name: &str) {
+    run_comp_exec(bootstrap_busybox(), args, name);
+}
+
+fn run_busybox(args: &[&str], name: &str) {
+    run_comp_exec("/bin/busybox", args, name);
+}
+
+fn run_busybox_in_dir(workdir: &str, args: &[&str], name: &str) {
+    run_comp_exec_in_dir(workdir, "/bin/busybox", args, name);
+}
+
+fn ensure_symlink(link_path: &str, target: &str) {
+    if fstatat(AtFd::Cwd, Path::new(link_path)).is_err() {
+        run_busybox(&["busybox", "ln", "-s", target, link_path], link_path);
+    }
+}
+
+fn replace_with_symlink(link_path: &str, target: &str) {
+    run_busybox(&["busybox", "rm", "-rf", link_path], link_path);
+    run_busybox(&["busybox", "ln", "-s", target, link_path], link_path);
+}
+
+fn mount_competition_root() {
     mount(None, Path::new("/dev"), "devfs").expect("user-test: failed to mount devfs on /dev");
-    mount(Some(Path::new("/dev/vdb")), Path::new("/mnt"), "ext4")
+    mount(Some(Path::new(COMPETITION_DISK)), Path::new("/mnt"), "ext4")
         .expect("user-test: failed to mount /dev/vdb on /mnt with ext4");
 
     chroot("/mnt").expect("user-test: failed to chroot to /mnt");
     chdir("/").expect("user-test: failed to change directory to / after chroot");
-
-    // now we should mount devfs again, for this new root.
-    let stat = fstatat(AtFd::Cwd, Path::new("dev"));
-    if stat.is_err() {
-        mkdirat(AtFd::Cwd, Path::new("dev"), 0o755)
-            .expect("user-test: failed to create /dev directory");
-    }
-    mount(None, Path::new("/dev"), "devfs").expect("user-test: failed to mount devfs on /dev");
-
-    let stat = fstatat(AtFd::Cwd, Path::new("tmp"));
-    if stat.is_err() {
-        mkdirat(AtFd::Cwd, Path::new("tmp"), 0o755)
-            .expect("user-test: failed to create /tmp directory");
-    }
-    mount(None, Path::new("/tmp"), "ramfs").expect("user-test: failed to mount ramfs on /tmp");
-
-    let stat = fstatat(AtFd::Cwd, Path::new("/proc"));
-    if stat.is_err() {
-        mkdirat(AtFd::Cwd, Path::new("/proc"), 0o755)
-            .expect("user-test: failed to create /proc directory");
-    }
-    mount(None, Path::new("/proc"), "procfs").expect("user-test: failed to mount procfs on /proc");
-
-    // TODO: sysfs, etc.
-
-    // install busybox
-    let stat = fstatat(AtFd::Cwd, Path::new("/bin"));
-    if stat.is_err() {
-        mkdirat(AtFd::Cwd, Path::new("/bin"), 0o755)
-            .expect("user-test: failed to create /bin directory");
-
-        comp_run_cmd("/glibc/busybox --install -s /bin");
-    }
-
-    // cp lib to /lib or /lib64
-    cfg_select! {
-        target_arch = "riscv64" => {
-            const LIB_DIR: &str = "/lib";
-            const LDSO_NAME: &str = "ld-musl-riscv64-sf.so.1";
-        },
-        target_arch = "loongarch64" => {
-            const LIB_DIR: &str = "/lib64";
-            const LDSO_NAME: &str = "ld-musl-loongarch-lp64.so.1";
-        }
-    }
-
-    let stat = fstatat(AtFd::Cwd, Path::new(LIB_DIR));
-    if stat.is_err() {
-        mkdirat(AtFd::Cwd, Path::new(LIB_DIR), 0o755)
-            .expect("user-test: failed to create /lib directory");
-
-        comp_run_cmd(&format!("/bin/cp -r /musl/lib {}", LIB_DIR));
-
-        // musl's libc.so is a dynamic linker as well. we should create a symlink for
-        // it. for now we just cp.
-        comp_run_cmd(&format!(
-            "/bin/cp /musl/lib/libc.so {}/{}",
-            LIB_DIR, LDSO_NAME
-        ));
-    }
-
-    // cp busybox to /
-    let stat = fstatat(AtFd::Cwd, Path::new("/busybox"));
-    if stat.is_err() {
-        println!("user-test: copying busybox to /");
-        comp_run_cmd("/bin/cp /glibc/busybox /");
-    }
-
-    // cp busybox to /bin
-    let stat = fstatat(AtFd::Cwd, Path::new("/bin/busybox"));
-    if stat.is_err() {
-        println!("user-test: copying busybox to /bin");
-        comp_run_cmd("/bin/cp /glibc/busybox /bin");
-    }
-
-    // test procfs
-    println!("testing procfs...");
-    comp_run_cmd("/bin/ls /proc");
-
-    // done.
-    println!("user-test: environment initialized.");
 }
 
-fn comp_run_cmd(cmd: &str) {
-    match fork().expect("user-test: failed to fork") {
-        Some(tid) => {
-            // parent. wait for child to exit.
-            let mut wstatus = WStatusRaw::EMPTY;
-            match wait4(
-                WaitFor::ChildWithTgid(tid),
-                Some(&mut wstatus),
-                WaitOptions::empty(),
-            )
-            .expect("user-test: failed to wait4")
-            {
-                Some(tid) => {
-                    println!(
-                        "user-test: child task #{} exited with code {:?}",
-                        tid,
-                        wstatus.read()
-                    )
-                },
-                None => {
-                    panic!("user-test: wait4 returned None unexpectedly");
-                },
-            }
-        },
-        None => {
-            execve(
-                "/glibc/busybox",
-                &["busybox", "sh", "-c", cmd],
-                &["PATH=/:/bin:/lib", "LD_LIBRARY_PATH=/lib"],
-            )
-            .expect("user-test: failed to execve");
-        },
+fn init_competition_environment() {
+    ensure_dir("/dev");
+    mount(None, Path::new("/dev"), "devfs").expect("user-test: failed to mount devfs on /dev");
+
+    ensure_dir("/tmp");
+    mount(None, Path::new("/tmp"), "ramfs").expect("user-test: failed to mount ramfs on /tmp");
+
+    ensure_dir("/proc");
+    mount(None, Path::new("/proc"), "procfs").expect("user-test: failed to mount procfs on /proc");
+
+    ensure_dir("/bin");
+    ensure_dir("/usr");
+
+    run_bootstrap_busybox(&["busybox", "rm", "-f", "/bin/busybox"], "/bin/busybox");
+    run_bootstrap_busybox(
+        &["busybox", "ln", "-s", bootstrap_busybox(), "/bin/busybox"],
+        "/bin/busybox",
+    );
+    run_busybox(&["busybox", "--install", "-s", "/bin"], "busybox --install");
+
+    ensure_symlink("/usr/bin", "/bin");
+    ensure_symlink("/usr/sbin", "/bin");
+    ensure_symlink("/sbin", "/bin");
+    for loader_name in MUSL_LOADER_NAMES {
+        ensure_symlink(&format!("/musl/lib/{loader_name}"), "libc.so");
     }
+
+    if fstatat(AtFd::Cwd, Path::new("/glibc/lib/libc.so")).is_ok()
+        && fstatat(AtFd::Cwd, Path::new("/glibc/lib/libc.so.6")).is_err()
+    {
+        ensure_symlink("/glibc/lib/libc.so.6", "libc.so");
+    }
+
+    if fstatat(AtFd::Cwd, Path::new("/glibc/lib/libm.so")).is_ok()
+        && fstatat(AtFd::Cwd, Path::new("/glibc/lib/libm.so.6")).is_err()
+    {
+        ensure_symlink("/glibc/lib/libm.so.6", "libm.so");
+    }
+
+    println!("testing procfs...");
+    run_busybox(&["busybox", "ls", "/proc"], "ls /proc");
+    println!("user-test: competition environment initialized.");
+}
+
+pub(crate) fn switch_runtime(family: &str) {
+    println!("user-test: switching active runtime to {family}...");
+    let target = format!("/{family}/lib");
+    replace_with_symlink(ACTIVE_LIB_DIR, target.as_str());
+}
+
+pub(crate) fn clear_tmp() {
+    run_busybox(
+        &[
+            "busybox",
+            "find",
+            "/tmp",
+            "-mindepth",
+            "1",
+            "-maxdepth",
+            "1",
+            "-exec",
+            "/bin/busybox",
+            "rm",
+            "-rf",
+            "{}",
+            ";",
+        ],
+        "clear /tmp",
+    );
+}
+
+fn run_test_family(family: &str, scripts: &[&str]) {
+    switch_runtime(family);
+    clear_tmp();
+
+    println!("user-test: running {family} competition tests...");
+    let workdir = format!("/{family}");
+    for script in scripts {
+        let script_path = format!("{workdir}/{script}");
+        if fstatat(AtFd::Cwd, Path::new(script_path.as_str())).is_err() {
+            panic!("user-test: missing competition script {script_path}");
+        }
+        println!("user-test: running {family} {script}...");
+        run_busybox_in_dir(workdir.as_str(), &["busybox", "sh", script], script);
+    }
+    println!("user-test: {family} competition tests finished.");
 }
 
 /// competition tests.
 fn run_comp_tests() {
-    run_local_tests();
+    mount_competition_root();
+    init_competition_environment();
 
-    init_environment();
+    run_test_family("glibc", GLIBC_TEST_SCRIPTS);
+    run_test_family("musl", MUSL_TEST_SCRIPTS);
+    ltp::run_ltp_tests();
 
-    // 1. basic tests
-    // println!("user-test: running basic tests...");
-    // chdir("/glibc").expect("user-test: failed to change directory to
-    // /glibc"); comp_run_cmd("./basic_testcode.sh");
-    // println!("user-test: basic tests passed.");
-
-    // 2. lua tests
-    // println!("user-test: running lua tests...");
-    // chdir("/glibc").expect("user-test: failed to change directory to
-    // /glibc"); comp_run_cmd("./lua_testcode.sh");
-    // println!("user-test: lua tests passed.");
-
-    // 3. busybox tests
-    // println!("user-test: running busybox tests...");
-    // chdir("/glibc").expect("user-test: failed to change directory to
-    // /glibc"); comp_run_cmd("./busybox_testcode.sh");
-    // println!("user-test: busybox tests passed.");
-
-    // 4. static-linked libc tests
-    println!("user-test: running static-linked libc tests...");
-    chdir("/musl").expect("user-test: failed to change directory to /musl");
-    comp_run_cmd("./run-static.sh");
-    println!("user-test: static-linked libc tests passed.");
-
-    // 5. dynamic-linked libc tests
-    // println!("user-test: running dynamic-linked libc tests...");
-    // chdir("/musl").expect("user-test: failed to change directory to /musl");
-    // comp_run_cmd("./run-dynamic.sh");
-    // println!("user-test: dynamic-linked libc tests passed.");
-
-    // 6. lmbench tests
-    // println!("user-test: running lmbench tests...");
-    // chdir("/musl").expect("user-test: failed to change directory to /musl");
-    // comp_run_cmd("./lmbench_testcode.sh");
-    // println!("user-test: lmbench tests passed.");
+    println!("user-test: all competition tests finished.");
 }
 
 #[anemone_rs::main]
 pub fn main() -> Result<(), Errno> {
-    // run_local_tests();
+    run_local_tests();
 
     run_comp_tests();
 

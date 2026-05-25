@@ -288,22 +288,28 @@ pub fn kernel_clone(
     }
 
     // mask is always inherited.
-    //
-    // Lock ordering (smaller TID first) avoids ABBA deadlock.
-    // Each branch acquires locks and copies inline — there is no tuple return —
-    // so that the Rust drop order (reverse declaration) always matches the
-    // IntrGuard creation order.  A mismatch would leave interrupts disabled and
-    // cause the subsequent Mutex::lock() on the uspace handle to panic.
-    // See https://github.com/anemone-os/anemone/issues/93
     {
+        let (parent_mask, mut child_mask) = {
+            // note the lock ordering!
+            if current_task.tid() < new_task.tid() {
+                let parent_mask = current_task.sig_mask.lock();
+                let child_mask = new_task.sig_mask.lock();
+                (parent_mask, child_mask)
+            } else {
+                let child_mask = new_task.sig_mask.lock();
+                let parent_mask = current_task.sig_mask.lock();
+                (parent_mask, child_mask)
+            }
+        };
+        *child_mask = *parent_mask;
+
+        // note the drop ordering.
         if current_task.tid() < new_task.tid() {
-            let parent_mask = current_task.sig_mask.lock();
-            let mut child_mask = new_task.sig_mask.lock();
-            *child_mask = *parent_mask;
+            drop(child_mask);
+            drop(parent_mask);
         } else {
-            let mut child_mask = new_task.sig_mask.lock();
-            let parent_mask = current_task.sig_mask.lock();
-            *child_mask = *parent_mask;
+            drop(parent_mask);
+            drop(child_mask);
         }
     }
 
@@ -312,17 +318,27 @@ pub fn kernel_clone(
         new_task.sig_disposition = current_task.sig_disposition.clone();
     } else {
         // copy
-        //
-        // Same lock-ordering + inline-drop pattern as the sig_mask block above.
-        // See https://github.com/anemone-os/anemone/issues/93
+        let (parent_disp, mut child_disp) = {
+            // lock ordering, again.
+            if current_task.tid() < new_task.tid() {
+                let parent_disp = current_task.sig_disposition.read();
+                let child_disp = new_task.sig_disposition.write();
+                (parent_disp, child_disp)
+            } else {
+                let child_disp = new_task.sig_disposition.write();
+                let parent_disp = current_task.sig_disposition.read();
+                (parent_disp, child_disp)
+            }
+        };
+        *child_disp = parent_disp.clone();
+
+        // note the drop ordering.
         if current_task.tid() < new_task.tid() {
-            let parent_disp = current_task.sig_disposition.read();
-            let mut child_disp = new_task.sig_disposition.write();
-            *child_disp = parent_disp.clone();
+            drop(child_disp);
+            drop(parent_disp);
         } else {
-            let mut child_disp = new_task.sig_disposition.write();
-            let parent_disp = current_task.sig_disposition.read();
-            *child_disp = parent_disp.clone();
+            drop(parent_disp);
+            drop(child_disp);
         }
     }
 

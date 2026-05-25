@@ -207,6 +207,7 @@ pub fn next_char_dev(ctx: &mut IterCtx) -> Option<CharDevEntry> {
     })
 }
 
+pub mod devfs;
 mod full;
 mod null;
 mod urandom;

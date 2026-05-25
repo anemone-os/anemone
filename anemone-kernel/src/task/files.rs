@@ -125,6 +125,14 @@ impl FileDesc {
         self.pfile.file.write_at(offset, buf).map_err(|e| e.into())
     }
 
+    pub fn truncate(&self, len: u64) -> Result<(), SysError> {
+        if !self.pfile.flags.contains(FileFlags::WRITE) {
+            return Err(SysError::PermissionDenied);
+        }
+
+        self.pfile.file.inode().truncate(len)
+    }
+
     /// `whence` is Linux-specific. we handle that in syscall handler. it should
     /// not pollute our FileDesc API.
     pub fn seek(&self, offset: usize) -> Result<(), SysError> {

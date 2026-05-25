@@ -49,6 +49,7 @@ static TGID_EXE_INODE_OPS: InodeOps = InodeOps {
     rmdir: |_, _| Err(SysError::NotDir),
     rename: |_, _, _, _, _| Err(SysError::NotSupported),
     open: |_| Err(SysError::NotSupported),
+    truncate: |_, _| Err(SysError::NotSupported),
     read_link: tgid_exe_read_link,
     get_attr: tgid_exe_get_attr,
 };

@@ -203,7 +203,10 @@ pub mod linux {
         pub const MAP_FIXED: i32 = 0x10;
         pub const MAP_ANONYMOUS: i32 = 0x20;
         pub const MAP_ANON: i32 = MAP_ANONYMOUS;
+        pub const MAP_DENYWRITE: i32 = 0x800;
         pub const MAP_GROWSDOWN: i32 = 0x1000;
+        pub const MAP_NORESERVE: i32 = 0x4000;
+        pub const MAP_STACK: i32 = 0x20000;
         pub const MAP_FIXED_NOREPLACE: i32 = 0x100000;
         pub const MAP_UNINITIALIZED: i32 = 0x4000000;
 
@@ -643,6 +646,15 @@ pub mod linux {
         pub const FUTEX_OP_CMP_GE: u32 = 5;
 
         pub const FUTEX_BITSET_MATCH_ANY: u32 = 0xffffffff;
+    }
+
+    pub mod shm {
+        /// create if key is nonexistent.
+        pub const IPC_CREAT: i32 = 0o1000;
+        /// fail if key exists.
+        pub const IPC_EXCL: i32 = 0o2000;
+        /// Do not reserve swap space.
+        pub const SHM_NORESERVE: i32 = 0o4000;
     }
 }
 

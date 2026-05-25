@@ -8,6 +8,13 @@ bitflags! {
         /// This file system is used for kernel-internal purposes,
         /// and should not be mountable by user processes.
         const KERNEL_FS = 1 << 0;
+
+        /// This file system keeps a prebuilt superblock alive even when the
+        /// last mount goes away.
+        ///
+        /// VFS must not evict its resident inode cache or call `kill_sb` on
+        /// last unmount. The filesystem implementation owns that lifetime.
+        const PERSISTENT_SB = 1 << 1;
     }
 }
 

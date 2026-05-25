@@ -1,6 +1,7 @@
 use crate::{
     device::block::{
-        BlockDev, BlockDevClass, BlockDevRegistration, BlockSize, register_block_device,
+        BlockDev, BlockDevClass, BlockDevRegistration, BlockSize, devfs::publish_block_device,
+        register_block_device,
     },
     prelude::*,
     utils::align::{AlignedBytes, PhantomAligned4096},
@@ -109,7 +110,11 @@ fn init() {
             device: Arc::new(dev),
         }) {
             Ok(name) => {
-                knoticeln!("{} registered", name);
+                if let Err(err) = publish_block_device(devnum_for(id)) {
+                    knoticeln!("{} registered, but devfs publish failed: {:?}", name, err);
+                } else {
+                    knoticeln!("{} registered", name);
+                }
             },
             Err(e) => {
                 knoticeln!("failed to register ramdisk {}: {:?}", id, e);
