@@ -12,10 +12,7 @@
 pub mod fchmod;
 pub mod fchmodat;
 
-use crate::{
-    fs::api::args::{AtFd, LinuxInodePerm},
-    prelude::*,
-};
+use crate::prelude::*;
 
 // Reserved for future fchmodat2 (sysno=452).
 #[allow(dead_code)]
@@ -52,7 +49,6 @@ mod args {
         }
     }
 }
-use args::*;
 
 pub fn kernel_fchmod(pathref: &PathRef, perm: InodePerm, ctime: Duration) -> Result<(), SysError> {
     let inode = pathref.inode();
