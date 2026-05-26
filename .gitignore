@@ -17,3 +17,6 @@ rootfs-la*
 la-base
 rv-base
 Dockerfile_*
+rcopy.sh
+sdcard-*
+/issues

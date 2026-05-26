@@ -190,6 +190,7 @@ fn mount_competition_root() {
     mount(Some(Path::new(COMPETITION_DISK)), Path::new("/mnt"), "ext4")
         .expect("user-test: failed to mount /dev/vdb on /mnt with ext4");
 
+    println!("user-test: entering environment...");
     chroot("/mnt").expect("user-test: failed to chroot to /mnt");
     chdir("/").expect("user-test: failed to change directory to / after chroot");
 }

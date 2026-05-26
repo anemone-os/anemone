@@ -1165,8 +1165,8 @@ mod kunits {
             linux_mode::S_IFDIR | InodePerm::all_rwx().bits() as u32
         );
         assert_eq!(dir_attr.nlink, 2);
-        assert_eq!(dir_attr.uid, 0);
-        assert_eq!(dir_attr.gid, 0);
+        assert_eq!(dir_attr.uid, Uid::ROOT);
+        assert_eq!(dir_attr.gid, Gid::ROOT);
         // dir size is filesystem-specific.
         assert_eq!(dir_attr.rdev, DeviceId::None);
 
@@ -1180,8 +1180,8 @@ mod kunits {
             linux_mode::S_IFREG | InodePerm::all_rwx().bits() as u32
         );
         assert_eq!(file_attr.nlink, 1);
-        assert_eq!(file_attr.uid, 0);
-        assert_eq!(file_attr.gid, 0);
+        assert_eq!(file_attr.uid, Uid::ROOT);
+        assert_eq!(file_attr.gid, Gid::ROOT);
         assert_eq!(file_attr.size, 0);
         assert_eq!(file_attr.rdev, DeviceId::None);
 

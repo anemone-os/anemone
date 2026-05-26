@@ -9,6 +9,7 @@ fn proc_self_read_link(_inode: &InodeRef) -> Result<PathBuf, SysError> {
 }
 
 fn proc_self_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
+    let meta = inode.inode().meta_snapshot();
     let now = Instant::now().to_duration();
 
     Ok(InodeStat {
@@ -16,8 +17,8 @@ fn proc_self_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
         ino: inode.ino(),
         mode: inode.mode(),
         nlink: 1,
-        uid: 0,
-        gid: 0,
+        uid: meta.uid,
+        gid: meta.gid,
         rdev: DeviceId::None,
         size: 0,
         atime: now,

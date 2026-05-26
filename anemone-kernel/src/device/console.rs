@@ -182,8 +182,8 @@ fn console_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
         ino: inode.ino(),
         mode: InodeMode::new(InodeType::Char, inode.perm()),
         nlink: inode.nlink(),
-        uid: 0,
-        gid: 0,
+        uid: inode.uid(),
+        gid: inode.gid(),
         rdev: DeviceId::None,
         size: inode.size(),
         atime: inode.atime(),
@@ -237,7 +237,10 @@ static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::NotSupported),
     validate_seek: |_, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
-    poll: |_, _| todo!(),
+    poll: |_, _| {
+        kerrln!("console stdin poll is not implemented yet");
+        Err(SysError::NotYetImplemented)
+    },
 };
 
 static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
@@ -245,7 +248,10 @@ static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
     write: console_write,
     validate_seek: |_, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
-    poll: |_, _| todo!(),
+    poll: |_, _| {
+        kerrln!("console stdout poll is not implemented yet");
+        Err(SysError::NotYetImplemented)
+    },
 };
 
 static CONSOLE_STDIN_PATHREF: Lazy<PathRef> = Lazy::new(|| {

@@ -160,7 +160,7 @@ unsafe extern "C" fn user_task_entry_secondary(
     // rtld_fini and must stay zero for fresh execve entries.
 
     // interrupts will be enabled in the end of trap returning.
-    unsafe { utrap_return_to_task(&trapframe) }
+    unsafe { utrap_return_to_task(&mut trapframe) }
 }
 
 /// Entry point for a kernel task, stage alpha.

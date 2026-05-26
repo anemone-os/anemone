@@ -11,6 +11,7 @@ pub use tid::*;
 // integration with other subsystems
 pub mod cpu_usage;
 pub mod credentials;
+pub use credentials::*;
 pub mod files;
 pub mod sig;
 #[path = "fs.rs"]

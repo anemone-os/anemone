@@ -172,7 +172,7 @@ unsafe extern "C" fn user_task_entry_secondary(
 
     // Linux/glibc user entry reads argc/argv from sp. a0 is reserved for
     // rtld_fini and must stay zero for fresh execve entries.
-    unsafe { utrap_return_to_task(&trapframe) }
+    unsafe { utrap_return_to_task(&mut trapframe) }
 }
 
 /// Entry point of a kernel task, stage alpha.

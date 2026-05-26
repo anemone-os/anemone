@@ -18,6 +18,8 @@ pub mod chroot;
 pub mod close;
 pub mod dup;
 pub mod dup3;
+pub mod fchmod;
+pub mod fchown;
 pub mod fcntl;
 pub mod getcwd;
 pub mod getdents64;
@@ -84,10 +86,9 @@ mod args {
                 AtFd::Cwd => Ok(task.cwd().clone()),
                 AtFd::Fd(fd) => {
                     let file = task.get_fd(*fd)?;
-                    if !file.file_flags().contains(FileFlags::READ) {
-                        // or O_PATH, which hasn't been implemented yet.
-                        return Err(SysError::BadFileDescriptor);
-                    }
+                    // Linux dirfd_path_init() uses fdget_raw() which does not check
+                    // f_mode (READ/WRITE/PATH). Only checks: (1) fd valid, (2) is
+                    // directory when pathname is non-empty.
                     if check_is_dir && file.vfs_file().inode().ty() != InodeType::Dir {
                         return Err(SysError::NotDir);
                     }

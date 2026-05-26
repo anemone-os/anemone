@@ -146,18 +146,8 @@ fn ext4_fs_dev(sb: &SuperBlock) -> DeviceId {
 
 fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let sb = inode.sb();
-    let attr = ext4_sb(&sb).read_tx(|| {
-        ext4_sb(&sb).with_fs(|fs| {
-            let mut attr = lwext4_rust::FileAttr::default();
-            fs.get_attr(inode.ino().get() as u32, &mut attr)
-                .map_err(map_ext4_error)?;
-            Ok(attr)
-        })
-    })?;
-
-    // some metadata may haven't been synced to disk yet, so we need to look at the
-    // in-memory inode state first to get the most up-to-date metadata.
-
+    // fchown updates the VFS inode cache first; lwext4 has no owner setter yet,
+    // so stat must report the cached owner instead of re-reading disk attrs.
     let meta = inode.inode().meta_snapshot();
 
     Ok(InodeStat {
@@ -165,8 +155,8 @@ fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
         ino: inode.ino(),
         mode: InodeMode::new(inode.ty(), inode.perm()),
         nlink: meta.nlink,
-        uid: attr.uid,
-        gid: attr.gid,
+        uid: meta.uid,
+        gid: meta.gid,
         rdev: DeviceId::None,
         size: meta.size,
         atime: meta.atime,

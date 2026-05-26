@@ -31,8 +31,8 @@ fn make_inode_stat(inode: &InodeRef, attr: DevfsNodeAttr, size: u64) -> InodeSta
 		ino: inode.ino(),
 		mode: InodeMode::new(attr.ty, meta.perm),
 		nlink: meta.nlink,
-		uid: 0,
-		gid: 0,
+		uid: meta.uid,
+		gid: meta.gid,
 		rdev: attr.rdev,
 		size,
 		atime: meta.atime,
@@ -162,4 +162,3 @@ pub(super) static DEVFS_LEAF_INODE_OPS: InodeOps = InodeOps {
 	read_link: |_| Err(SysError::NotSymlink),
 	get_attr: devfs_leaf_get_attr,
 };
-
