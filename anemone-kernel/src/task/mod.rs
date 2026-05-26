@@ -217,7 +217,36 @@ pub enum ExitCode {
 
 /// **LOCK ORDERING**
 ///
-/// TOPOLOGY -> ThreadGroup.inner
+/// TOPOLOGY -> Session.inner -> ProcessGroup.inner -> ThreadGroup.inner
+#[derive(Debug)]
+pub struct Session {
+    sid: Tid,
+    inner: NoIrqRwLock<SessionInner>,
+}
+
+#[derive(Debug)]
+struct SessionInner {
+    process_groups: BTreeSet<Tid>,
+}
+
+/// **LOCK ORDERING**
+///
+/// TOPOLOGY -> Session.inner -> ProcessGroup.inner -> ThreadGroup.inner
+#[derive(Debug)]
+pub struct ProcessGroup {
+    pgid: Tid,
+    sid: Tid,
+    inner: NoIrqRwLock<ProcessGroupInner>,
+}
+
+#[derive(Debug)]
+struct ProcessGroupInner {
+    members: BTreeSet<Tid>,
+}
+
+/// **LOCK ORDERING**
+///
+/// TOPOLOGY -> Session.inner -> ProcessGroup.inner -> ThreadGroup.inner
 #[derive(Debug)]
 pub struct ThreadGroup {
     /// The thread group ID, which is the same as the leader thread's ID.
@@ -235,6 +264,9 @@ pub struct ThreadGroup {
 pub struct ThreadGroupStatus {
     /// See [kernel_execve] for details.
     is_dethreading: bool,
+    /// Whether this thread group has successfully executed a new image after
+    /// fork. Used by setpgid's fork/exec race semantics.
+    has_executed: bool,
     life_cycle: ThreadGroupLifeCycle,
 }
 
@@ -256,7 +288,15 @@ impl ThreadGroupStatus {
     pub fn new_alive() -> Self {
         Self {
             is_dethreading: false,
+            has_executed: false,
             life_cycle: ThreadGroupLifeCycle::Alive,
+        }
+    }
+
+    pub fn new_alive_executed() -> Self {
+        Self {
+            has_executed: true,
+            ..Self::new_alive()
         }
     }
 
@@ -266,6 +306,10 @@ impl ThreadGroupStatus {
 
     pub fn is_dethreading(&self) -> bool {
         self.is_dethreading
+    }
+
+    pub fn has_executed(&self) -> bool {
+        self.has_executed
     }
 
     /// Whether clone operation can add a new thread to this thread group.
@@ -282,6 +326,10 @@ impl ThreadGroupStatus {
 struct ThreadGroupInner {
     /// Running status of this thread group.
     status: ThreadGroupStatus,
+    /// Process group ID cached on the process identity.
+    pgid: Tid,
+    /// Session ID cached on the process identity.
+    sid: Tid,
     /// TIDs of all member threads, including the leader thread.
     members: BTreeSet<Tid>,
     /// Tgid of parent thread group. [None] for init/idle thread group.

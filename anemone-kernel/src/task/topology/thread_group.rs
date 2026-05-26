@@ -246,16 +246,73 @@ impl Task {
     pub fn detach_from_topology(&self) -> bool {
         let mut topology = TOPOLOGY.inner.write();
 
-        let is_last = {
-            let tg = topology
-                .thread_groups
-                .get(&self.tgid())
-                .expect("task topology: thread group not found");
+        let tg = topology
+            .thread_groups
+            .get(&self.tgid())
+            .expect("task topology: thread group not found")
+            .clone();
 
-            let mut inner = tg.inner.write();
-            assert!(inner.members.remove(&self.tid()));
-            inner.members.is_empty()
+        // The topology write lock keeps the process-group/session links stable
+        // while we collect the lock keys, then we take the canonical
+        // Session -> ProcessGroup -> ThreadGroup chain for the mutation.
+        let tg_snapshot = tg.inner.read();
+        let pgid = tg_snapshot.pgid;
+        let sid = tg_snapshot.sid;
+        drop(tg_snapshot);
+
+        let session = topology
+            .sessions
+            .get(&sid)
+            .expect("task topology: session not found when detaching task")
+            .clone();
+        let pg = topology
+            .process_groups
+            .get(&pgid)
+            .expect("task topology: process group not found when detaching task")
+            .clone();
+
+        let mut session_inner = session.inner.write();
+        let mut pg_inner = pg.inner.write();
+        let mut tg_inner = tg.inner.write();
+        assert!(tg_inner.members.remove(&self.tid()));
+        let is_last = tg_inner.members.is_empty();
+        let pg_empty = if is_last {
+            assert!(
+                pg_inner.members.remove(&self.tgid()),
+                "task topology: thread group {} not found in process group {}",
+                self.tgid(),
+                pgid
+            );
+            pg_inner.members.is_empty()
+        } else {
+            false
         };
+
+        drop(tg_inner);
+        drop(pg_inner);
+
+        if pg_empty {
+            assert!(
+                session_inner.process_groups.remove(&pgid),
+                "task topology: process group {} not found in session {}",
+                pgid,
+                sid
+            );
+            assert!(
+                topology.process_groups.remove(&pgid).is_some(),
+                "task topology: process group {} not found",
+                pgid
+            );
+            if session_inner.process_groups.is_empty() {
+                assert!(
+                    topology.sessions.remove(&sid).is_some(),
+                    "task topology: session {} not found",
+                    sid
+                );
+            }
+        }
+
+        drop(session_inner);
         assert!(topology.tasks.remove(&self.tid()).is_some());
 
         is_last

@@ -392,8 +392,9 @@ pub fn kernel_clone(
     } else {
         // new thread group
 
+        let current_tg = current_task.get_thread_group();
         let parent_tgid = if flags.contains(CloneFlags::PARENT) {
-            if let Some(tgid) = current_task.get_thread_group().parent_tgid() {
+            if let Some(tgid) = current_tg.parent_tgid() {
                 tgid
             } else {
                 kcritln!("clone: CLONE_PARENT flag set, called by init task. this is invalid...");
@@ -412,6 +413,8 @@ pub fn kernel_clone(
 
         TaskBinding::Leader {
             parent_tgid,
+            pgid: current_tg.pgid(),
+            sid: current_tg.sid(),
             terminate_signal: {
                 terminate_signal.map(|sig| {
                     if sig != SigNo::SIGCHLD {

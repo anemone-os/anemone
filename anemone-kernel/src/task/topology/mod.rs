@@ -14,6 +14,7 @@ pub use deferred::*;
 
 // concrete topology
 pub mod parent_child;
+pub mod process_group;
 pub mod thread_group;
 
 /// Global task topology. Singleton instance.
@@ -46,6 +47,8 @@ struct TaskTopologyInner {
     tasks: BTreeMap<Tid, TaskNode>,
 
     thread_groups: BTreeMap<Tid, Arc<ThreadGroup>>,
+    process_groups: BTreeMap<Tid, Arc<ProcessGroup>>,
+    sessions: BTreeMap<Tid, Arc<Session>>,
 }
 
 #[derive(Debug)]
@@ -57,6 +60,8 @@ static TOPOLOGY: TaskTopology = TaskTopology {
     inner: NoIrqRwLock::new(TaskTopologyInner {
         tasks: BTreeMap::new(),
         thread_groups: BTreeMap::new(),
+        process_groups: BTreeMap::new(),
+        sessions: BTreeMap::new(),
     }),
 };
 
@@ -66,6 +71,8 @@ static TOPOLOGY: TaskTopology = TaskTopology {
 pub enum TaskBinding {
     Leader {
         parent_tgid: Tid,
+        pgid: Tid,
+        sid: Tid,
         /// To put this field here is a bit weird, but [publish_task] is where a
         /// [ThreadGroup] is constructed.
         ///
@@ -130,13 +137,28 @@ impl PublishGuard {
 
         let task = Arc::new(task);
         let node = TaskNode { task: task.clone() };
+        let session = Arc::new(Session {
+            sid: Tid::INIT,
+            inner: NoIrqRwLock::new(SessionInner {
+                process_groups: BTreeSet::from([Tid::INIT]),
+            }),
+        });
+        let pg = Arc::new(ProcessGroup {
+            pgid: Tid::INIT,
+            sid: Tid::INIT,
+            inner: NoIrqRwLock::new(ProcessGroupInner {
+                members: BTreeSet::from([Tid::INIT]),
+            }),
+        });
         let tg = ThreadGroup {
             tgid: handle,
             child_exited: Event::new(),
             terminate_signal: None,
             itimers: ITimers::new(),
             inner: NoIrqRwLock::new(ThreadGroupInner {
-                status: ThreadGroupStatus::new_alive(),
+                status: ThreadGroupStatus::new_alive_executed(),
+                pgid: Tid::INIT,
+                sid: Tid::INIT,
                 members: BTreeSet::from([Tid::INIT]),
                 parent_tgid: None,
                 children_tgids: BTreeSet::new(),
@@ -146,6 +168,8 @@ impl PublishGuard {
         };
 
         topology.tasks.insert(Tid::INIT, node);
+        topology.sessions.insert(Tid::INIT, session);
+        topology.process_groups.insert(Tid::INIT, pg);
         topology.thread_groups.insert(Tid::INIT, Arc::new(tg));
         let _ = ManuallyDrop::new(guard);
 
@@ -168,6 +192,8 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
     match binding {
         TaskBinding::Leader {
             parent_tgid,
+            pgid,
+            sid,
             terminate_signal,
         } => {
             let tidref = task.tid.into_inner();
@@ -183,6 +209,8 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
 
             let mut inner = ThreadGroupInner {
                 status: ThreadGroupStatus::new_alive(),
+                pgid,
+                sid,
                 members: BTreeSet::from([node.task.tid()]),
                 parent_tgid: Some(parent_tgid),
                 children_tgids: BTreeSet::new(),
@@ -191,6 +219,36 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
             };
 
             inner.parent_tgid = Some(parent_tgid);
+
+            let session = topology
+                .sessions
+                .get(&sid)
+                .expect("task topology: inherited session not found when publishing task");
+            let pg = topology
+                .process_groups
+                .get(&pgid)
+                .expect("task topology: inherited process group not found when publishing task");
+            assert!(
+                pg.sid == sid,
+                "task topology: process group {} belongs to session {}, not {}",
+                pgid,
+                pg.sid,
+                sid
+            );
+            let session_inner = session.inner.read();
+            assert!(
+                session_inner.process_groups.contains(&pgid),
+                "task topology: process group {} not linked from session {}",
+                pgid,
+                sid
+            );
+            assert!(
+                pg.inner.write().members.insert(node.task.tgid()),
+                "task topology: duplicate process TGID {} in process group {}",
+                node.task.tgid(),
+                pgid
+            );
+            drop(session_inner);
 
             let parent_tg = topology
                 .thread_groups
