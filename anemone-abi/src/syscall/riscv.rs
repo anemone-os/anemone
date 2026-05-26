@@ -146,6 +146,8 @@ pub mod linux {
 
     pub const SYS_SETPGID: u64 = 154;
     pub const SYS_GETPGID: u64 = 155;
+    pub const SYS_GETSID: u64 = 156;
+    pub const SYS_SETSID: u64 = 157;
 
     pub const SYS_UNAME: u64 = 160;
 

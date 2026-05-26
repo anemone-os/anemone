@@ -70,6 +70,15 @@ pub mod fs {
         fs::close(fd as u64).map(|_| ())
     }
 
+    pub fn unlinkat(dirfd: AtFd, path: &Path, flags: u32) -> Result<(), Errno> {
+        let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+        fs::unlinkat(dirfd.to_raw() as u64, path.as_ptr() as u64, flags as u64).map(|_| ())
+    }
+
+    pub fn ftruncate(fd: Fd, length: u64) -> Result<(), Errno> {
+        fs::ftruncate(fd as u64, length).map(|_| ())
+    }
+
     pub fn read(fd: Fd, buf: &mut [u8]) -> Result<usize, Errno> {
         fs::read(fd as u64, buf.as_mut_ptr() as u64, buf.len() as u64).map(|count| count as usize)
     }
