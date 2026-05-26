@@ -58,10 +58,7 @@ bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct SaFlags: u64 {
         const SIGINFO = SA_SIGINFO as u64;
-        // musl still sets SA_RESTORER on some Linux targets even though our
-        // supported architectures return via the kernel-provided rt_sigreturn
-        // trampoline instead of a userspace restorer.
-        const RESTORER = 0x0400_0000;
+        const RESTORER = SA_RESTORER as u64;
         const ONESHOT = SA_ONESHOT as u64;
         const NODEFER = SA_NODEFER as u64;
         const ONSTACK = SA_ONSTACK as u64;
@@ -79,6 +76,7 @@ bitflags! {
 pub struct KSigAction {
     pub action: SignalAction,
     pub flags: SaFlags,
+    pub restorer: VirtAddr,
     pub mask: SigSet,
 }
 
@@ -92,8 +90,10 @@ pub struct KSigAction {
 pub struct SignalDisposition {
     actions: [SignalAction; NSIG],
     flags: [SaFlags; NSIG],
-    // currently-supported architectures (riscv64, loongarch64) both don't use sa_restorer. so we
-    // don't support it for now. we can add it later if needed.
+    /// currently-supported architectures (riscv64, loongarch64) both don't use
+    /// sa_restorer in newer kernels. set this here for compatibility with
+    /// testsuits compiled with older kernel headers. this is really ugly...
+    restorers: [VirtAddr; NSIG],
     masks: [SigSet; NSIG],
 }
 
@@ -110,6 +110,7 @@ impl SignalDisposition {
                 actions
             },
             flags: [SaFlags::empty(); NSIG],
+            restorers: [VirtAddr::new(0); NSIG],
             masks: [SigSet::new(); NSIG],
         }
     }
@@ -120,6 +121,7 @@ impl SignalDisposition {
     pub fn set_disposition(&mut self, sig: SigNo, disp: KSigAction) {
         self.actions[sig.as_usize()] = disp.action;
         self.flags[sig.as_usize()] = disp.flags;
+        self.restorers[sig.as_usize()] = disp.restorer;
         self.masks[sig.as_usize()] = disp.mask;
     }
 
@@ -128,6 +130,7 @@ impl SignalDisposition {
         KSigAction {
             action: self.actions[sig.as_usize()],
             flags: self.flags[sig.as_usize()],
+            restorer: self.restorers[sig.as_usize()],
             mask: self.masks[sig.as_usize()],
         }
     }
@@ -138,6 +141,7 @@ impl SignalDisposition {
     pub fn set_to_default(&mut self, sig: SigNo) {
         self.actions[sig.as_usize()] = SignalAction::Default(sig.default_action());
         self.flags[sig.as_usize()] = SaFlags::empty();
+        self.restorers[sig.as_usize()] = VirtAddr::new(0);
         self.masks[sig.as_usize()] = SigSet::new();
     }
 
@@ -147,6 +151,7 @@ impl SignalDisposition {
             if let SignalAction::Custom(_) = self.actions[sig] {
                 self.actions[sig] = SignalAction::Default(SigNo::new(sig).default_action());
                 self.flags[sig] = SaFlags::empty();
+                self.restorers[sig] = VirtAddr::new(0);
                 self.masks[sig] = SigSet::new();
             }
         }

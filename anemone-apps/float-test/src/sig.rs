@@ -6,12 +6,12 @@ use core::{
 
 use anemone_rs::{
     abi::process::linux::{
-        signal::{SA_SIGINFO, SigAction, SigInfo, SigSet},
+        signal::{SigAction, SigInfo, SigSet, SA_SIGINFO},
         ucontext::UContext,
     },
     os::linux::process::{
         getpid, gettid,
-        signal::{SigNo, sigaction, tgkill},
+        signal::{sigaction, tgkill, SigNo},
     },
     prelude::*,
 };
@@ -79,6 +79,7 @@ pub fn run() {
     let action = SigAction {
         sighandler: sig_usr1_handler as *const (),
         sa_flags: SA_SIGINFO,
+        sa_restorer: core::ptr::null(),
         sa_mask: SigSet { bits: 0 },
     };
     sigaction(SigNo::SIGUSR1, Some(&action), None).expect("fatal: failed to register sigaction");

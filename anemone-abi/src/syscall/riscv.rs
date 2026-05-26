@@ -144,6 +144,9 @@ pub mod linux {
 
     pub const SYS_TIMES: u64 = 153;
 
+    pub const SYS_SETPGID: u64 = 154;
+    pub const SYS_GETPGID: u64 = 155;
+
     pub const SYS_UNAME: u64 = 160;
 
     pub const SYS_GETRLIMIT: u64 = 163;

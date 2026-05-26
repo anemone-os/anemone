@@ -250,7 +250,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             // leaving the hardware interrupt environment.
 
             assert!(allow_preempt(), "for utraps, this must hold");
-            if fetch_clear_need_resched() {
+            if cfg!(feature = "kernel_preempt") && fetch_clear_need_resched() {
                 // if we need reschedule, we can't waste time on disposing deferred tasks.
                 unsafe {
                     schedule();

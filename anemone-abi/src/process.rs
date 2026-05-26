@@ -308,7 +308,12 @@ pub mod linux {
             // pub sighandler: unsafe extern "C" fn(c_int) -> (),
             pub sighandler: *const (),
             pub sa_flags: u64,
-
+            /// deprecated in nowadays Linux. our testsuits assume an old uapi,
+            /// set this temporarily here.
+            ///
+            /// TODO: introduce conditional compilation for better compatibility
+            /// with modern Linux.
+            pub sa_restorer: *const (),
             pub sa_mask: SigSet,
         }
 
@@ -318,6 +323,7 @@ pub mod linux {
         pub const SA_NOCLDSTOP: u64 = 0x00000001;
         pub const SA_NOCLDWAIT: u64 = 0x00000002;
         pub const SA_SIGINFO: u64 = 0x00000004;
+        pub const SA_RESTORER: u64 = 0x04000000;
         pub const SA_ONSTACK: u64 = 0x08000000;
         pub const SA_RESTART: u64 = 0x10000000;
         pub const SA_NODEFER: u64 = 0x40000000;
@@ -505,7 +511,7 @@ pub mod linux {
             /// POSIX this type is named `struct mcontext`. Linux calls it
             /// `struct sigcontext`.
             #[derive(Debug, Clone, Copy)]
-            #[repr(C)]
+            #[repr(C, align(16))]
             pub struct SigContext {
                 pub sc_regs: UserRegsStruct,
                 /// We only care about riscv64 with D extension for now. That
@@ -565,6 +571,13 @@ pub mod linux {
                 pub sc_pc: u64,
                 pub sc_regs: [u64; 32],
                 pub sc_flags: u32,
+                pub sc_fpuctx: FpuContext,
+            }
+
+            #[derive(Debug, Clone, Copy)]
+            #[repr(C)]
+            #[repr(align(16))]
+            pub struct FpuContext {
                 pub fregs: [u64; 32],
                 pub fcc: u64,
                 pub fcsr: u64,

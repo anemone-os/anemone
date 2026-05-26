@@ -207,6 +207,10 @@ impl TrapFrameArch for LA64TrapFrame {
         const_assert!(IDX < 7);
         self.gpr.r[4 + IDX] = arg;
     }
+
+    fn set_return_addr(&mut self, addr: u64) {
+        self.gpr.r[1] = addr; // ra
+    }
 }
 
 impl SyscallCtxArch for LA64TrapFrame {

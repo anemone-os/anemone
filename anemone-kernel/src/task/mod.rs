@@ -11,7 +11,7 @@ pub use tid::*;
 // integration with other subsystems
 pub mod cpu_usage;
 pub mod credentials;
-pub use credentials::*;
+pub use credentials::{Gid, Uid};
 pub mod files;
 pub mod sig;
 #[path = "fs.rs"]
@@ -654,7 +654,7 @@ impl Task {
     pub fn set_robust_list(&self, head: Option<VirtAddr>) {
         *self.robust_list.lock() = head;
     }
-    
+
     pub fn fpu_used(&self) -> bool {
         self.fpu_used.load(Ordering::Acquire)
     }

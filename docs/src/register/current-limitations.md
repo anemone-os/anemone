@@ -118,3 +118,18 @@
 
 **Owner:** doruche
 **Last Verified:** 2026-05-25
+
+## ANE-20260526-SIGNAL-RESTORER-LEGACY-COMPAT
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** signal / ABI
+
+**Summary:** 当前 signal ABI 仍按 legacy `sa_restorer` 语义兼容老测例，主要目标是 `musl 1.2.2` 的 `pthread_cancel`；`glibc 2.3.5` 只是对照参考，不引入面向新内核头的条件编译分支来切换 UAPI 结构。
+
+**Exit Condition:** 当需要同时支持新旧用户态头文件时，再单独设计一层可配置的 signal UAPI 适配，并补齐 musl / glibc / libc-test 的回归验证。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-26
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)

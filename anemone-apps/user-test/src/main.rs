@@ -26,7 +26,7 @@ const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "busybox_testcode.sh",
     // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
-    "iozone_testcode.sh",
+    // "iozone_testcode.sh",
     // "iperf_testcode.sh",
     // "libcbench_testcode.sh",
     // "lmbench_testcode.sh",
@@ -123,9 +123,9 @@ fn run_local_tests() {
     // println!("user-test: signal test finished.");
 
     // 2. float test
-    // println!("user-test: running float test...");
-    // local_run_cmd("/bin/float-test", &["float-test", "--type", "sig"], &[]);
-    // println!("user-test: float test finished.");
+    println!("user-test: running float test...");
+    local_run_cmd("/bin/float-test", &["float-test", "--type", "sig"], &[]);
+    println!("user-test: float test finished.");
 
     // 3. shm test
     println!("user-test: running shm test...");

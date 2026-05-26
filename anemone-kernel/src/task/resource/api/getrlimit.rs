@@ -11,8 +11,6 @@ use crate::{
     task::task_resource::RLimitResource,
 };
 
-use super::*;
-
 #[syscall(SYS_GETRLIMIT)]
 fn sys_getrlimit(
     resource: RLimitResource,

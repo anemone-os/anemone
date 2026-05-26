@@ -4,6 +4,7 @@
 - [代码库地图](./codebase-map.md)
 - [开发日志](./development-log.md)
 	- [2026-05-11 至 2026-05-24](./devlog/2026-05-11_to_2026-05-24.md)
+	- [2026-05-25 至 2026-06-07](./devlog/2026-05-25_to_2026-06-07.md)
 - [初赛冲刺策略（2026-05 至 2026-06）](./preliminary-contest-sprint.md)
 - [已知问题与当前限制](./known-issues-and-limitations.md)
 	- [活动登记册](./register.md)

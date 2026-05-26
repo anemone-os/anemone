@@ -32,7 +32,6 @@ impl SignalArchTrait for RiscV64SignalArch {
         // now let's do the heavy lifting of encoding the trapframe into the
         // ucontext...
 
-        // floating point registers are not implemented yet.
         buf.uc_mcontext.sc_regs.pc = trapframe.sepc;
         buf.uc_mcontext
             .sc_regs
