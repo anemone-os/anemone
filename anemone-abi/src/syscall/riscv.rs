@@ -75,6 +75,11 @@ pub mod linux {
     pub const SYS_CHDIR: u64 = 49;
     pub const SYS_CHROOT: u64 = 51;
 
+    pub const SYS_FCHMOD: u64 = 52;
+    pub const SYS_FCHMODAT: u64 = 53;
+    pub const SYS_FCHOWNAT: u64 = 54;
+    pub const SYS_FCHOWN: u64 = 55;
+
     pub const SYS_OPENAT: u64 = 56;
     pub const SYS_CLOSE: u64 = 57;
     pub const SYS_PIPE2: u64 = 59;

@@ -91,6 +91,7 @@ fn proc_root_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
 }
 
 fn proc_root_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
+    let meta = inode.inode().meta_snapshot();
     let now = Instant::now().to_duration();
 
     Ok(InodeStat {
@@ -98,8 +99,8 @@ fn proc_root_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
         ino: PROC_ROOT_INO,
         mode: InodeMode::new(InodeType::Dir, InodePerm::all_rwx()),
         nlink: 3, // TODO: should we calculate this dynamically? it's not hard, but it's too slow.
-        uid: 0,
-        gid: 0,
+        uid: meta.uid,
+        gid: meta.gid,
         rdev: DeviceId::None,
         size: 0,
         atime: now,

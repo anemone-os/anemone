@@ -11,7 +11,7 @@ fn tgid_cwd_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {
 
 fn tgid_cwd_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let _binding = validate_tgid_sub_inode(inode)?;
-
+    let meta = inode.inode().meta_snapshot();
     let now = Instant::now().to_duration();
 
     Ok(InodeStat {
@@ -19,8 +19,8 @@ fn tgid_cwd_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
         ino: inode.ino(),
         mode: inode.mode(),
         nlink: inode.nlink(),
-        uid: 0,
-        gid: 0,
+        uid: meta.uid,
+        gid: meta.gid,
         rdev: DeviceId::None,
         size: 0,
         atime: now,

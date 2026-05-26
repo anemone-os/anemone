@@ -1,3 +1,6 @@
+//! This test is AI-generated. It is used to test the floating-point support of
+//! Anemone.
+
 #![no_std]
 #![no_main]
 

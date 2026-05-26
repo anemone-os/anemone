@@ -43,6 +43,8 @@ static ANONY_FS_OPS: FileSystemOps = FileSystemOps {
                         nlink: 1,
                         size: 0,
                         perm: InodePerm::all_rwx(),
+                        uid: Uid::ROOT,
+                        gid: Gid::ROOT,
                         atime: Duration::ZERO,
                         mtime: Duration::ZERO,
                         ctime: Duration::ZERO,
@@ -65,18 +67,20 @@ static ANONY_SB_OPS: SuperBlockOps = SuperBlockOps {
 };
 
 fn anony_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
+    let meta = inode.inode().meta_snapshot();
+
     Ok(InodeStat {
         fs_dev: DeviceId::None,
         ino: inode.ino(),
-        mode: InodeMode::new(inode.ty(), inode.perm()),
-        nlink: inode.nlink(),
-        uid: 0,
-        gid: 0,
+        mode: InodeMode::new(inode.ty(), meta.perm),
+        nlink: meta.nlink,
+        uid: meta.uid,
+        gid: meta.gid,
         rdev: DeviceId::None,
-        size: inode.size(),
-        atime: inode.atime(),
-        mtime: inode.mtime(),
-        ctime: inode.ctime(),
+        size: meta.size,
+        atime: meta.atime,
+        mtime: meta.mtime,
+        ctime: meta.ctime,
     })
 }
 

@@ -53,6 +53,8 @@ pub fn anony_new_inode(
         nlink: 1,
         size: 0,
         perm: InodePerm::all_rwx(),
+        uid: Uid::ROOT,
+        gid: Gid::ROOT,
         atime: Duration::ZERO,
         mtime: Duration::ZERO,
         ctime: Duration::ZERO,

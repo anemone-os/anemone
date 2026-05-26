@@ -56,6 +56,8 @@ fn init() {
             nlink: if mode.ty() == InodeType::Dir { 3 } else { 1 },
             size: 0,
             perm: mode.perm(),
+            uid: Uid::ROOT,
+            gid: Gid::ROOT,
             atime: Instant::ZERO.to_duration(),
             mtime: Instant::ZERO.to_duration(),
             ctime: Instant::ZERO.to_duration(),

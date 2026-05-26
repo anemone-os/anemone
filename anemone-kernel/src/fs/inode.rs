@@ -296,8 +296,8 @@ pub struct InodeStat {
     pub ino: Ino,
     pub mode: InodeMode,
     pub nlink: u64,
-    pub uid: u32,
-    pub gid: u32,
+    pub uid: Uid,
+    pub gid: Gid,
     /// Note the difference between `fs_dev` and `rdev`.
     pub rdev: DeviceId,
     /// Idk why Linux uses i64 for this field. We'll use u64 here.
@@ -337,6 +337,10 @@ pub struct InodeMeta {
     pub size: u64,
     /// Permission bits for this inode.
     pub perm: InodePerm,
+    /// Owner user ID.
+    pub uid: Uid,
+    /// Owner group ID.
+    pub gid: Gid,
     /// Access time.
     pub atime: Duration,
     /// Modification time.
@@ -350,6 +354,8 @@ impl InodeMeta {
         nlink: 0,
         size: 0,
         perm: InodePerm::empty(),
+        uid: Uid::ROOT,
+        gid: Gid::ROOT,
         atime: Duration::ZERO,
         mtime: Duration::ZERO,
         ctime: Duration::ZERO,
@@ -364,8 +370,8 @@ impl InodeStat {
             st_ino: self.ino.get(),
             st_mode: self.mode.to_linux_mode(),
             st_nlink: self.nlink.min(u32::MAX as u64) as u32,
-            st_uid: self.uid,
-            st_gid: self.gid,
+            st_uid: self.uid.get(),
+            st_gid: self.gid.get(),
             st_rdev: self.rdev.raw(),
             __pad1: 0,
             st_size: self.size as i64,
@@ -512,6 +518,8 @@ impl Inode {
         m.nlink = meta.nlink;
         m.size = meta.size;
         m.perm = meta.perm;
+        m.uid = meta.uid;
+        m.gid = meta.gid;
         m.atime = meta.atime;
         m.mtime = meta.mtime;
         m.ctime = meta.ctime;
@@ -572,6 +580,24 @@ impl Inode {
         let mut meta = self.meta.write();
         meta.atime = atime;
         meta.mtime = mtime;
+        meta.ctime = ctime;
+    }
+
+    pub(super) fn chmod(&self, perm: InodePerm, ctime: Duration) {
+        let mut meta = self.meta.write();
+        meta.perm = perm;
+        meta.ctime = ctime;
+    }
+
+    pub(super) fn chown(&self, owner: Option<Uid>, group: Option<Gid>, ctime: Duration) {
+        let mut meta = self.meta.write();
+        // None means Linux's -1 no-change sentinel survived syscall decoding.
+        if let Some(owner) = owner {
+            meta.uid = owner;
+        }
+        if let Some(group) = group {
+            meta.gid = group;
+        }
         meta.ctime = ctime;
     }
 
@@ -668,6 +694,14 @@ impl InodeRef {
 
     pub fn nlink(&self) -> u64 {
         self.inode().nlink()
+    }
+
+    pub fn uid(&self) -> Uid {
+        self.inode().meta.read().uid
+    }
+
+    pub fn gid(&self) -> Gid {
+        self.inode().meta.read().gid
     }
 
     pub fn mapping(&self) -> Option<&Arc<dyn VmObject>> {

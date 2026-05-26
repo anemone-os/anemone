@@ -90,6 +90,8 @@ impl TgidEntry {
             },
             size: 0,
             perm: self.mode.perm(),
+            uid: Uid::ROOT,
+            gid: Gid::ROOT,
             atime: now,
             mtime: now,
             ctime: now,
@@ -138,6 +140,8 @@ pub fn new_tgid_dir_inode(
         nlink: 3, // randomly chosen. doesn't make much sense.
         size: 0,
         perm: InodePerm::all_rw(),
+        uid: Uid::ROOT,
+        gid: Gid::ROOT,
         atime: now,
         mtime: now,
         ctime: now,

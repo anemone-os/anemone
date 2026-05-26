@@ -209,9 +209,6 @@ pub mod linux {
         pub const MAP_STACK: i32 = 0x20000;
         pub const MAP_FIXED_NOREPLACE: i32 = 0x100000;
         pub const MAP_UNINITIALIZED: i32 = 0x4000000;
-
-        pub const MAP_STACK: i32 = 0x20020;
-        pub const MAP_DENYWRITE: i32 = 0x800;
     }
 
     pub mod signal {
