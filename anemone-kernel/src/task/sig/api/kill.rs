@@ -33,14 +33,6 @@ impl TryFromSyscallArg for KillTarget {
 fn sys_kill(target: KillTarget, signo: SigNo) -> Result<u64, SysError> {
     kdebugln!("kill: target={:?}, signo={:?}", target, signo);
 
-    if matches!(
-        target,
-        KillTarget::CurrentProcessGroup | KillTarget::ProcessGroup(..)
-    ) {
-        knoticeln!("[NYI] sys_kill: process group targets are not supported yet");
-        return Err(SysError::NotYetImplemented);
-    }
-
     let signal = Signal::new(
         signo,
         SiCode::User,
@@ -55,10 +47,18 @@ fn sys_kill(target: KillTarget, signo: SigNo) -> Result<u64, SysError> {
             let tg = get_thread_group(&tgid).ok_or(SysError::NoSuchProcess)?;
             tg.recv_signal(signal);
         },
+        KillTarget::CurrentProcessGroup => {
+            let pgid = get_current_task().get_thread_group().pgid();
+            let pg = get_process_group(&pgid).ok_or(SysError::NoSuchProcess)?;
+            pg.recv_signal(signal);
+        },
+        KillTarget::ProcessGroup(pgid) => {
+            let pg = get_process_group(&pgid).ok_or(SysError::NoSuchProcess)?;
+            pg.recv_signal(signal);
+        },
         KillTarget::Broadcast => {
             todo!("api with lock already acquired");
         },
-        _ => unreachable!(/* handled above */),
     }
 
     Ok(0)

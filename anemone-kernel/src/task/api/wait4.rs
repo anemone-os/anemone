@@ -20,7 +20,7 @@ use crate::{
 
 #[derive(Debug, Clone, Copy)]
 enum WaitFor {
-    AnyChildWithPgid(Todo),
+    AnyChildWithPgid(Tid),
     AnyChild,
     AnyChildWithCurrentPgid,
     ChildWithTgid(Tid),
@@ -90,14 +90,11 @@ impl TryFromSyscallArg for WaitFor {
         let raw = i32::try_from_syscall_arg(raw)?;
         match raw {
             ..-1 => {
-                knoticeln!("wait4: nyi wait for child with pgid: {}", raw);
-                Err(SysError::NotYetImplemented)
+                let pgid = raw.checked_neg().ok_or(SysError::InvalidArgument)?;
+                Ok(Self::AnyChildWithPgid(Tid::new(pgid as u32)))
             },
             -1 => Ok(Self::AnyChild),
-            0 => {
-                knoticeln!("wait4: nyi wait for child with current pgid");
-                Err(SysError::NotYetImplemented)
-            },
+            0 => Ok(Self::AnyChildWithCurrentPgid),
             _ => Ok(Self::ChildWithTgid(Tid::new(raw as u32))),
         }
     }
@@ -120,13 +117,15 @@ impl TryFromSyscallArg for WaitOptions {
 /// One struct for one scan of the child list.
 struct Wait4Scanner {
     wait4: WaitFor,
+    current_pgid: Tid,
     matched_any: bool,
 }
 
 impl Wait4Scanner {
-    fn new(wait4: WaitFor) -> Self {
+    fn new(wait4: WaitFor, current_pgid: Tid) -> Self {
         Self {
             wait4,
+            current_pgid,
             matched_any: false,
         }
     }
@@ -139,9 +138,8 @@ impl Wait4Scanner {
         let matched = match self.wait4 {
             WaitFor::AnyChild => true,
             WaitFor::ChildWithTgid(tgid) => tg.tgid() == tgid,
-            WaitFor::AnyChildWithPgid(_) | WaitFor::AnyChildWithCurrentPgid => {
-                unreachable!("wait4: unsupported target reached scanner")
-            },
+            WaitFor::AnyChildWithPgid(pgid) => tg.pgid() == pgid,
+            WaitFor::AnyChildWithCurrentPgid => tg.pgid() == self.current_pgid,
         };
 
         if !matched {
@@ -163,11 +161,12 @@ fn sys_wait4(
 ) -> Result<u64, SysError> {
     let task = get_current_task();
     let tg = task.get_thread_group();
+    let current_pgid = tg.pgid();
 
     // TODO: optimize this. we did a double scan, which is not necessary.
 
     loop {
-        let mut scanner = Wait4Scanner::new(target);
+        let mut scanner = Wait4Scanner::new(target, current_pgid);
         // scanning does not need topology consistency. it's just a best effort to find
         // a child that satisfies the wait condition. if such child is found,
         // then we can lock topology and do the heavy lifting.
@@ -239,7 +238,7 @@ fn sys_wait4(
         );
 
         let interrupted = !tg.child_exited.listen(false, || {
-            let mut scanner = Wait4Scanner::new(target);
+            let mut scanner = Wait4Scanner::new(target, current_pgid);
             // note the latter condition.
             let res =
                 tg.find_child(|child| scanner.scan_one(child)).is_some() || !scanner.matched_any();

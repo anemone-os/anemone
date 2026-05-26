@@ -76,6 +76,11 @@ impl ThreadGroup {
     }
 
     pub fn mark_executed(&self) {
+        let topology = TOPOLOGY.inner.read();
+        assert!(
+            topology.thread_groups.contains_key(&self.tgid()),
+            "task topology: marking an unpublished thread group as executed"
+        );
         self.inner.write().status.has_executed = true;
     }
 
@@ -88,6 +93,23 @@ impl ThreadGroup {
     ///
     /// [TOPOLOGY] -> [Session] -> [ProcessGroup] -> [ThreadGroup]
     pub fn move_to_process_group(self: &Arc<Self>, new_pgid: Tid) -> Result<(), SysError> {
+        self.move_to_process_group_if(new_pgid, |_| Ok(()))
+    }
+
+    /// Move this thread group into a process group after validating the move
+    /// inside the same topology transaction.
+    ///
+    /// # Locks
+    ///
+    /// [TOPOLOGY] -> [Session] -> [ProcessGroup] -> [ThreadGroup]
+    pub fn move_to_process_group_if<F>(
+        self: &Arc<Self>,
+        new_pgid: Tid,
+        validate: F,
+    ) -> Result<(), SysError>
+    where
+        F: FnOnce(&ProcessGroupMoveContext) -> Result<(), SysError>,
+    {
         let target_tgid = self.tgid();
         let mut topology = TOPOLOGY.inner.write();
         if !topology.thread_groups.contains_key(&target_tgid) {
@@ -97,7 +119,15 @@ impl ThreadGroup {
         let target_snapshot = self.inner.read();
         let old_pgid = target_snapshot.pgid;
         let target_sid = target_snapshot.sid;
+        let target_has_executed = target_snapshot.status.has_executed();
         drop(target_snapshot);
+
+        validate(&ProcessGroupMoveContext {
+            target_tgid,
+            old_pgid,
+            target_sid,
+            target_has_executed,
+        })?;
 
         if old_pgid == new_pgid {
             return Ok(());
@@ -142,27 +172,39 @@ impl ThreadGroup {
             let mut new_pg_inner = new_pg.inner.write();
             let mut target_inner = self.inner.write();
 
-            move_thread_group_between_process_groups(
+            let old_pg_empty = move_thread_group_between_process_groups(
                 target_tgid,
                 new_pgid,
                 target_sid,
                 &mut old_pg_inner,
                 &mut new_pg_inner,
                 &mut target_inner,
-            )
+            );
+
+            drop(target_inner);
+            drop(new_pg_inner);
+            drop(old_pg_inner);
+
+            old_pg_empty
         } else {
             let mut new_pg_inner = new_pg.inner.write();
             let mut old_pg_inner = old_pg.inner.write();
             let mut target_inner = self.inner.write();
 
-            move_thread_group_between_process_groups(
+            let old_pg_empty = move_thread_group_between_process_groups(
                 target_tgid,
                 new_pgid,
                 target_sid,
                 &mut old_pg_inner,
                 &mut new_pg_inner,
                 &mut target_inner,
-            )
+            );
+
+            drop(target_inner);
+            drop(old_pg_inner);
+            drop(new_pg_inner);
+
+            old_pg_empty
         };
 
         if creating_new_pg {
@@ -311,6 +353,19 @@ impl ThreadGroup {
         }
 
         Ok(target_tgid)
+    }
+}
+
+pub struct ProcessGroupMoveContext {
+    pub target_tgid: Tid,
+    pub old_pgid: Tid,
+    pub target_sid: Tid,
+    pub target_has_executed: bool,
+}
+
+impl ProcessGroupMoveContext {
+    pub fn target_is_child_of(&self, parent: &ThreadGroup) -> bool {
+        parent.inner.read().children_tgids.contains(&self.target_tgid)
     }
 }
 

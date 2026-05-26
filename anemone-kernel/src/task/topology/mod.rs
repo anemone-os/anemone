@@ -15,6 +15,7 @@ pub use deferred::*;
 // concrete topology
 pub mod parent_child;
 pub mod process_group;
+pub use process_group::{get_process_group, get_session};
 pub mod thread_group;
 
 /// Global task topology. Singleton instance.
