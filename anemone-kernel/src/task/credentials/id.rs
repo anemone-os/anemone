@@ -23,7 +23,7 @@ impl Uid {
 impl Debug for Uid {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if self.0 == u32::MAX {
-            f.write_fmt(format_args!("user #self"))
+            f.write_fmt(format_args!("user #no-change"))
         } else {
             f.write_fmt(format_args!("user #{}", self.0))
         }
@@ -33,7 +33,7 @@ impl Debug for Uid {
 impl Display for Uid {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if self.0 == u32::MAX {
-            f.write_fmt(format_args!("user #self"))
+            f.write_fmt(format_args!("user #no-change"))
         } else {
             f.write_fmt(format_args!("user #{}", self.0))
         }
@@ -69,7 +69,7 @@ impl Gid {
 impl Debug for Gid {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if self.0 == u32::MAX {
-            f.write_fmt(format_args!("group #self"))
+            f.write_fmt(format_args!("group #no-change"))
         } else {
             f.write_fmt(format_args!("group #{}", self.0))
         }
@@ -79,7 +79,7 @@ impl Debug for Gid {
 impl Display for Gid {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if self.0 == u32::MAX {
-            f.write_fmt(format_args!("group #self"))
+            f.write_fmt(format_args!("group #no-change"))
         } else {
             f.write_fmt(format_args!("group #{}", self.0))
         }
