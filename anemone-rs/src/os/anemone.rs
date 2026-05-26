@@ -11,3 +11,12 @@ pub mod debug {
         debug::dbg_print(cstr.as_ptr() as _)
     }
 }
+
+pub mod power {
+    use super::*;
+    use sys::anemone::power;
+
+    pub fn shutdown(magic: u64) -> Result<(), Errno> {
+        power::shutdown(magic)
+    }
+}

@@ -41,6 +41,8 @@ pub mod linux {
         pub const CLOCK_REALTIME_COARSE: i32 = 5;
         pub const CLOCK_MONOTONIC_COARSE: i32 = 6;
         // TODO
+
+        pub const TIMER_ABSTIME: i32 = 1;
     }
 
     pub mod itimer {

@@ -9,7 +9,7 @@
 
 use crate::prelude::{
     vma::{ForkPolicy, Protection, VmArea, VmFlags},
-    vmo::{anon::AnonObject, shadow::ShadowObject},
+    vmo::{VmObject, anon::AnonObject, shadow::ShadowObject},
     *,
 };
 
@@ -125,6 +125,22 @@ pub struct FileMapping {
     pub inode: InodeRef,
 }
 
+/// Map an already-owned VMO into user space.
+///
+/// This is narrower than the public anonymous/file mmap helpers and is used by
+/// kernel subsystems, such as SysV shm, that already own their backing object.
+#[derive(Debug)]
+pub(in crate::mm::uspace) struct ObjectMapping {
+    pub hint: Option<(VirtPageNum, bool)>,
+    pub clobber: bool,
+    pub npages: usize,
+    pub prot: Protection,
+    pub on_fork: ForkPolicy,
+    pub flags: VmFlags,
+    pub poffset: usize,
+    pub backing: Arc<dyn VmObject>,
+}
+
 impl UserSpace {
     /// Map an anonymous memory region for the user space.
     ///
@@ -233,6 +249,42 @@ impl UserSpace {
         } else {
             Err(SysError::NotSupported)
         }
+    }
+
+    pub(in crate::mm::uspace) fn map_object(
+        &mut self,
+        mapping: &ObjectMapping,
+    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
+        let fixed = mapping.hint.is_some_and(|(_, fixed)| fixed);
+        let vpn = match mapping.hint {
+            Some((hint, true)) => hint,
+            Some((hint, false)) => self
+                .find_avail_range(mapping.npages, Some(hint))
+                .ok_or(SysError::OutOfMemory)?,
+            None => self
+                .find_avail_range(mapping.npages, None)
+                .ok_or(SysError::OutOfMemory)?,
+        };
+        let range = VirtPageRange::new(vpn, mapping.npages as u64);
+        self.validate_range(range)?;
+
+        let vma = VmArea::new(
+            range,
+            mapping.poffset,
+            mapping.prot,
+            mapping.on_fork,
+            mapping.flags,
+            mapping.backing.clone(),
+        );
+
+        let guard = if fixed && mapping.clobber {
+            Some(self.replace_range(range, vma)?)
+        } else {
+            self.insert_vma(vma)?;
+            None
+        };
+
+        Ok((vpn.to_virt_addr(), guard))
     }
 
     /// Try to insert the given [VmArea] into user space.

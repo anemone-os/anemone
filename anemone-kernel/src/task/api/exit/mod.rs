@@ -85,6 +85,19 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         // TODO: this is not very accurate. but good enough for now.
         tg.accumulate_member_usage(&task);
 
+        let old_uspace = task.try_clone_uspace_handle();
+        if let Some(old_uspace) = &old_uspace {
+            if task.is_last_user_of_uspace(old_uspace) {
+                if let Err(e) = old_uspace.detach_all_sysv_shm_for(task.tgid()) {
+                    knoticeln!(
+                        "failed to detach SysV shm for exiting task {}: {:?}",
+                        task.tid(),
+                        e,
+                    );
+                }
+            }
+        }
+
         let is_last = task.detach_from_topology();
 
         // if we are the last thread in this thread group, we should do the cleanup
