@@ -105,8 +105,30 @@ pub mod process {
         unsafe { syscall(SYS_MUNMAP, addr, length, 0, 0, 0, 0) }
     }
 
+    pub fn mremap(
+        old_addr: u64,
+        old_size: u64,
+        new_size: u64,
+        flags: u64,
+        new_addr: u64,
+    ) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_MREMAP, old_addr, old_size, new_size, flags, new_addr, 0) }
+    }
+
     pub fn mprotect(addr: u64, length: u64, prot: u64) -> Result<u64, Errno> {
         unsafe { syscall(SYS_MPROTECT, addr, length, prot, 0, 0, 0) }
+    }
+
+    pub fn msync(addr: u64, length: u64, flags: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_MSYNC, addr, length, flags, 0, 0, 0) }
+    }
+
+    pub fn mlock(addr: u64, length: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_MLOCK, addr, length, 0, 0, 0, 0) }
+    }
+
+    pub fn munlock(addr: u64, length: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_MUNLOCK, addr, length, 0, 0, 0, 0) }
     }
 
     pub fn execve(path_ptr: u64, argv_ptr: u64, envp_ptr: u64) -> Result<u64, Errno> {

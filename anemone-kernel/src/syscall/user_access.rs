@@ -6,6 +6,24 @@ use core::str;
 
 use crate::prelude::*;
 
+fn user_pointer_addr(arg: u64) -> Result<VirtAddr, SysError> {
+    if arg < KernelLayout::USPACE_TOP_ADDR {
+        Ok(VirtAddr::new(arg))
+    } else {
+        Err(SysError::BadAddress)
+    }
+}
+
+fn user_memory_error(err: SysError) -> SysError {
+    match err {
+        SysError::InvalidArgument
+        | SysError::PermissionDenied
+        | SysError::NotMapped
+        | SysError::RangeNotMapped => SysError::BadAddress,
+        other => other,
+    }
+}
+
 /// The validated range is only valid when caller holds the lock of the
 /// [UserSpace].
 ///
@@ -24,23 +42,25 @@ unsafe fn validate_user_range(
     let end = start
         .get()
         .checked_add(len as u64)
-        .ok_or(SysError::InvalidArgument)?;
+        .ok_or(SysError::BadAddress)?;
     if end < start.get() {
-        return Err(SysError::InvalidArgument);
+        return Err(SysError::BadAddress);
     }
 
     let svpn = start.page_down();
     let evpn = VirtAddr::new(end).page_up();
 
     for vpn in VirtPageRange::new(svpn, evpn - svpn).iter() {
-        let _guard = usp.inject_page_fault(
-            vpn.to_virt_addr(),
-            if write {
-                PageFaultType::Write
-            } else {
-                PageFaultType::Read
-            },
-        )?;
+        let _guard = usp
+            .inject_page_fault(
+                vpn.to_virt_addr(),
+                if write {
+                    PageFaultType::Write
+                } else {
+                    PageFaultType::Read
+                },
+            )
+            .map_err(user_memory_error)?;
     }
     Ok(())
 }
@@ -69,7 +89,7 @@ mod ptrs {
 
     impl<'a, T: Copy> UserReadPtr<'a, T> {
         pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpace) -> Result<Self, SysError> {
-            let addr = user_addr(addr.get())?;
+            let addr = user_pointer_addr(addr.get())?;
             if addr.get() % align_of::<T>() as u64 != 0 {
                 return Err(SysError::NotAligned);
             }
@@ -111,7 +131,7 @@ mod ptrs {
 
     impl<'a, T: Copy> UserWritePtr<'a, T> {
         pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpace) -> Result<Self, SysError> {
-            let addr = user_addr(addr.get())?;
+            let addr = user_pointer_addr(addr.get())?;
             if addr.get() % align_of::<T>() as u64 != 0 {
                 return Err(SysError::NotAligned);
             }
@@ -158,7 +178,7 @@ mod ptrs {
             len: usize,
             usp: &'a mut UserSpace,
         ) -> Result<Self, SysError> {
-            let addr = user_addr(addr.get())?;
+            let addr = user_pointer_addr(addr.get())?;
             if addr.get() % align_of::<T>() as u64 != 0 {
                 return Err(SysError::NotAligned);
             }
@@ -259,7 +279,7 @@ mod ptrs {
             len: usize,
             usp: &'a mut UserSpace,
         ) -> Result<Self, SysError> {
-            let addr = user_addr(addr.get())?;
+            let addr = user_pointer_addr(addr.get())?;
             if addr.get() % align_of::<T>() as u64 != 0 {
                 return Err(SysError::NotAligned);
             }
@@ -472,11 +492,11 @@ mod validators {
             let elem_end = current
                 .get()
                 .checked_add(elem_size_u64)
-                .ok_or(SysError::InvalidArgument)?;
+                .ok_or(SysError::BadAddress)?;
             if current.get() >= KernelLayout::USPACE_TOP_ADDR
                 || elem_end > KernelLayout::USPACE_TOP_ADDR
             {
-                return Err(SysError::InvalidArgument);
+                return Err(SysError::BadAddress);
             }
 
             if elem_end > validated_until {
@@ -507,7 +527,7 @@ mod validators {
     /// `MAX_BYTES` defines the maximum allowed length of the string in bytes,
     /// excluding the null terminator, which is syscall-specific.
     pub fn c_readonly_string<const MAX_BYTES: usize>(arg: u64) -> Result<Box<str>, SysError> {
-        let start = user_addr(arg)?;
+        let start = user_pointer_addr(arg)?;
         let usp = get_current_task().clone_uspace_handle();
         let bytes =
             usp.with_usp(|usp| c_readonly_array_from_addr::<MAX_BYTES, u8>(usp, start, 0, false))?;
@@ -530,7 +550,7 @@ mod validators {
     >(
         arg: u64,
     ) -> Result<Vec<Box<str>>, SysError> {
-        let start = user_addr(arg)?;
+        let start = user_pointer_addr(arg)?;
         let usp = get_current_task().clone_uspace_handle();
 
         let strings = usp.with_usp(|usp| {
@@ -540,7 +560,7 @@ mod validators {
             for &ptr in ptrs.iter() {
                 let bytes = c_readonly_array_from_addr::<MAX_BYTES_EACH_STRING, u8>(
                     usp,
-                    user_addr(ptr)?,
+                    user_pointer_addr(ptr)?,
                     0,
                     false,
                 )?;

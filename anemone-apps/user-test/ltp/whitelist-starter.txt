@@ -267,18 +267,18 @@ chdir04
 # pwritev201_64
 # pwritev202
 # pwritev202_64
-# read01
-# read02
-# read03
-# read04
-# read_all -d /proc -q -r 3
+read01
+read02
+read03
+read04
+read_all -d /proc -q -r 3
 # readahead01
-# readdir01
-# readdir21
-# readlink01
-# readlink03
-# readlinkat01
-# readlinkat02
+readdir01
+readdir21
+readlink01
+readlink03
+readlinkat01
+readlinkat02
 # readv01
 # readv02
 # rename01
@@ -370,8 +370,8 @@ madvise10
 # munmap01
 # munmap02
 # munmap03
-# sbrk01
-# sbrk02
+sbrk01
+sbrk02
 # 
 # # time / iomux
 # clock_getres01

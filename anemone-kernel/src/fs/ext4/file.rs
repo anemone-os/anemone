@@ -344,6 +344,13 @@ impl VmObject for Ext4RegMapping {
         })
     }
 
+    fn sync_range(&self, range: core::ops::Range<usize>) -> Result<(), SysError> {
+        for pidx in range {
+            self.sync_page(pidx)?;
+        }
+        Ok(())
+    }
+
     fn read(&self, offset: usize, buffer: &mut [u8]) -> Result<(), SysError> {
         self.state.validate_mmap_range(offset, buffer.len())?;
         self.copy_out(offset, buffer)

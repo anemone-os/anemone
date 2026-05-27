@@ -1,14 +1,53 @@
 pub mod brk;
+pub mod madvise;
+pub mod mlock;
 pub mod mmap;
 pub mod mprotect;
+pub mod mremap;
+pub mod msync;
+pub mod munlock;
 pub mod munmap;
-// TODO: mremap
-pub mod madvise;
+
+use crate::prelude::*;
+
+pub(super) fn checked_page_count(len: u64) -> Result<usize, SysError> {
+    if len == 0 {
+        return Err(SysError::InvalidArgument);
+    }
+
+    let len = usize::try_from(len).map_err(|_| SysError::InvalidArgument)?;
+    let aligned = len
+        .checked_add(PagingArch::PAGE_SIZE_BYTES - 1)
+        .ok_or(SysError::InvalidArgument)?
+        & !(PagingArch::PAGE_SIZE_BYTES - 1);
+    Ok(aligned >> PagingArch::PAGE_SIZE_BITS)
+}
+
+pub(super) fn checked_user_page_range(
+    addr: VirtAddr,
+    len: u64,
+) -> Result<Option<VirtPageRange>, SysError> {
+    if len == 0 {
+        return Ok(None);
+    }
+
+    let end = addr
+        .get()
+        .checked_add(len)
+        .ok_or(SysError::InvalidArgument)?;
+    if end > KernelLayout::USPACE_TOP_ADDR {
+        return Err(SysError::InvalidArgument);
+    }
+
+    let start = addr.page_down();
+    let end = VirtAddr::new(end).page_up();
+    Ok(Some(VirtPageRange::new(start, end - start)))
+}
 
 mod args {
 
     use crate::prelude::{
-        handler::{TryFromSyscallArg, syscall_arg_flag32},
+        handler::{syscall_arg_flag32, TryFromSyscallArg},
         vma::{Protection, VmFlags},
         *,
     };
@@ -69,6 +108,12 @@ mod args {
             /// Currently no swapping, so this flag is effectively a no-op.
             const MAP_NORESERVE = mmap::MAP_NORESERVE;
 
+            /// Currently mappings are still populated lazily.
+            const MAP_POPULATE = mmap::MAP_POPULATE;
+
+            /// Only meaningful together with MAP_POPULATE, which is lazy here.
+            const MAP_NONBLOCK = mmap::MAP_NONBLOCK;
+
             /// Currently this flag is ignored, but the effect is the same from user's perspective.
             const MAP_UNINITIALIZED = mmap::MAP_UNINITIALIZED;
         }
@@ -100,6 +145,24 @@ mod args {
         pub aux: AuxMmapFlags,
     }
 
+    bitflags! {
+        #[derive(Debug)]
+        pub struct MsyncFlags: i32 {
+            const MS_ASYNC = mmap::MS_ASYNC;
+            const MS_INVALIDATE = mmap::MS_INVALIDATE;
+            const MS_SYNC = mmap::MS_SYNC;
+        }
+    }
+
+    bitflags! {
+        #[derive(Debug)]
+        pub struct MremapFlags: i32 {
+            const MREMAP_MAYMOVE = mmap::MREMAP_MAYMOVE;
+            const MREMAP_FIXED = mmap::MREMAP_FIXED;
+            const MREMAP_DONTUNMAP = mmap::MREMAP_DONTUNMAP;
+        }
+    }
+
     impl TryFromSyscallArg for MmapProt {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
             let raw = syscall_arg_flag32(raw)? as i32;
@@ -129,6 +192,24 @@ mod args {
                 })?;
 
             Ok(Self { exclusive, aux })
+        }
+    }
+
+    impl TryFromSyscallArg for MsyncFlags {
+        fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+            let raw = syscall_arg_flag32(raw)? as i32;
+            let flags = Self::from_bits(raw).ok_or(SysError::InvalidArgument)?;
+            if flags.contains(Self::MS_ASYNC) && flags.contains(Self::MS_SYNC) {
+                return Err(SysError::InvalidArgument);
+            }
+            Ok(flags)
+        }
+    }
+
+    impl TryFromSyscallArg for MremapFlags {
+        fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+            let raw = syscall_arg_flag32(raw)? as i32;
+            Self::from_bits(raw).ok_or(SysError::InvalidArgument)
         }
     }
 

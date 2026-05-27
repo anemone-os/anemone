@@ -69,7 +69,7 @@ pub mod linux {
 
     pub const SYS_TRUNCATE: u64 = 45;
     pub const SYS_FTRUNCATE: u64 = 46;
-
+    pub const SYS_FALLOCATE: u64 = 47;
     pub const SYS_FACCESSAT: u64 = 48;
 
     pub const SYS_CHDIR: u64 = 49;
@@ -172,13 +172,19 @@ pub mod linux {
     pub const SYS_SHMAT: u64 = 196;
     pub const SYS_SHMDT: u64 = 197;
 
+    pub const SYS_READAHEAD: u64 = 213;
+
     pub const SYS_BRK: u64 = 214;
     pub const SYS_MUNMAP: u64 = 215;
+    pub const SYS_MREMAP: u64 = 216;
 
     pub const SYS_CLONE: u64 = 220;
     pub const SYS_EXECVE: u64 = 221;
     pub const SYS_MMAP: u64 = 222;
     pub const SYS_MPROTECT: u64 = 226;
+    pub const SYS_MSYNC: u64 = 227;
+    pub const SYS_MLOCK: u64 = 228;
+    pub const SYS_MUNLOCK: u64 = 229;
     pub const SYS_MADVISE: u64 = 233;
 
     pub const SYS_WAIT4: u64 = 260;

@@ -32,7 +32,7 @@ impl Fd {
 impl TryFromSyscallArg for Fd {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
         let raw = i32::try_from_syscall_arg(raw)? as u32;
-        Fd::new(raw).ok_or(SysError::InvalidArgument)
+        Fd::new(raw).ok_or(SysError::BadFileDescriptor)
     }
 }
 

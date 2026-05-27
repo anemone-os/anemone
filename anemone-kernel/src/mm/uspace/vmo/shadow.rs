@@ -57,4 +57,14 @@ impl VmObject for ShadowObject {
             },
         }
     }
+
+    fn discard_range(&self, range: core::ops::Range<usize>) -> Result<(), SysError> {
+        if range.start > range.end {
+            return Err(SysError::InvalidArgument);
+        }
+
+        let mut overlay = self.overlay.write();
+        overlay.retain(|pidx, _| !range.contains(pidx));
+        Ok(())
+    }
 }

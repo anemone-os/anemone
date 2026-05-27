@@ -206,9 +206,41 @@ pub mod linux {
         pub const MAP_DENYWRITE: i32 = 0x800;
         pub const MAP_GROWSDOWN: i32 = 0x1000;
         pub const MAP_NORESERVE: i32 = 0x4000;
+        pub const MAP_POPULATE: i32 = 0x8000;
+        pub const MAP_NONBLOCK: i32 = 0x10000;
         pub const MAP_STACK: i32 = 0x20000;
         pub const MAP_FIXED_NOREPLACE: i32 = 0x100000;
         pub const MAP_UNINITIALIZED: i32 = 0x4000000;
+
+        pub const MS_ASYNC: i32 = 0x1;
+        pub const MS_INVALIDATE: i32 = 0x2;
+        pub const MS_SYNC: i32 = 0x4;
+
+        pub const MREMAP_MAYMOVE: i32 = 0x1;
+        pub const MREMAP_FIXED: i32 = 0x2;
+        pub const MREMAP_DONTUNMAP: i32 = 0x4;
+
+        pub const MADV_NORMAL: i32 = 0;
+        pub const MADV_RANDOM: i32 = 1;
+        pub const MADV_SEQUENTIAL: i32 = 2;
+        pub const MADV_WILLNEED: i32 = 3;
+        pub const MADV_DONTNEED: i32 = 4;
+        pub const MADV_FREE: i32 = 8;
+        pub const MADV_REMOVE: i32 = 9;
+        pub const MADV_DONTFORK: i32 = 10;
+        pub const MADV_DOFORK: i32 = 11;
+        pub const MADV_MERGEABLE: i32 = 12;
+        pub const MADV_UNMERGEABLE: i32 = 13;
+        pub const MADV_HUGEPAGE: i32 = 14;
+        pub const MADV_NOHUGEPAGE: i32 = 15;
+        pub const MADV_DONTDUMP: i32 = 16;
+        pub const MADV_DODUMP: i32 = 17;
+        pub const MADV_WIPEONFORK: i32 = 18;
+        pub const MADV_KEEPONFORK: i32 = 19;
+        pub const MADV_COLD: i32 = 20;
+        pub const MADV_PAGEOUT: i32 = 21;
+        pub const MADV_DONTNEED_LOCKED: i32 = 24;
+        pub const MADV_HWPOISON: i32 = 100;
     }
 
     pub mod signal {

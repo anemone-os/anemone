@@ -148,3 +148,48 @@
 **Owner:** doruche
 **Last Verified:** 2026-05-27
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260527-MMAP-LOCK-SYNC-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** mm / mlock / msync
+
+**Summary:** 当前 `mlock` / `munlock` 只做页面覆盖校验，不记录 lock 状态，也不做 swap 驻留控制；`msync` 只对连续覆盖到的已映射区间做同步，遇到 hole 时直接返回错误，不承诺 Linux 那种部分覆盖继续推进的语义。
+
+**Exit Condition:** 接入真实页锁定/解锁账本，并把 `msync` 改成按 VMA / file-backed range 逐段处理，重新验证 `VmLck`、holes 和 `MS_INVALIDATE` 行为。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-27
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260527-MREMAP-ANON-ONLY
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** mm / mremap
+
+**Summary:** 当前 `mremap` 只适合单个、可按匿名风格编辑的 VMA；如果旧区间跨越多个 VMA，或者目标需要保留 file-backed / shared backing 与 `pgoff`，现有实现会把尾部按匿名模板重建，语义会偏离 Linux。
+
+**Exit Condition:** 为 backing-aware grow / move 单独建路径，或者在入口显式拒绝不支持的 VMA 类型，并补齐对应回归。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-27
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260527-FALLOCATE-BASIC-REGULAR-ONLY
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** fs / fallocate
+
+**Summary:** 当前 `fallocate` 只开放普通文件上的基本延展语义，并且只接受 `FALLOC_FL_KEEP_SIZE` 这一类兼容入口；洞填充、零范围、collapse / insert / unshare 等模式，以及特殊文件类型，都还处在兼容收口阶段。
+
+**Exit Condition:** 为不同文件系统和文件类型补齐真正的 `fallocate` 后端，再逐步放开更多 mode 组合和对应的 errno 约束。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-27
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)

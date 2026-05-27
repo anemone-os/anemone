@@ -32,16 +32,12 @@ fn sys_readlinkat(
     let bufsize = bufsize as usize;
 
     let path = Path::new(pathname.as_ref());
-    // TODO: Since Linux 2.6.39, path can be an empty string, in which case the call
-    // operates on the symbolic link referred to by dirfd (which should have been
-    // obtained using open(2) with the O_PATH and O_NOFOLLOW flags).
-    if path.as_bytes().is_empty() {
-        knoticeln!("[NYI] sys_readlinkat: empty path");
-        return Err(SysError::NotYetImplemented);
-    }
-
     let task = get_current_task();
-    let pathref = if path.is_absolute() {
+    let pathref = if path.as_bytes().is_empty() {
+        // Empty path is a dirfd-relative lookup on the object itself. Linux
+        // expects this to work for O_PATH symlink descriptors as well.
+        dirfd.to_pathref(false)?
+    } else if path.is_absolute() {
         task.lookup_path(path, ResolveFlags::UNFOLLOW_LAST_SYMLINK)?
     } else {
         let dir_path = dirfd.to_pathref(true)?;

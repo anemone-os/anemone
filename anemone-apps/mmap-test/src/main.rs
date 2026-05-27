@@ -9,8 +9,9 @@ use core::{
 
 use anemone_rs::{
     os::linux::process::{
-        self, CloneFlags, MmapFlags, MmapProt, WStatus, WStatusRaw, WaitFor, WaitOptions, clone,
-        getpid, mmap, mprotect, munmap, wait4,
+        self, clone, getpid, mlock, mmap, mprotect, mremap, msync, munlock, munmap, wait4,
+        CloneFlags, MmapFlags, MmapProt, MremapFlags, MsyncFlags, WStatus, WStatusRaw, WaitFor,
+        WaitOptions,
     },
     prelude::*,
 };
@@ -23,6 +24,7 @@ type TestFn = fn() -> Result<(), Errno>;
 const TESTS: &[(&str, TestFn)] = &[
     ("basic-anon-private", test_basic_anonymous_private_mapping),
     ("invalid-arguments", test_invalid_arguments),
+    ("mlock-msync-mremap", test_mlock_msync_mremap),
     ("munmap-hole-and-mprotect", test_partial_unmap_and_mprotect),
     (
         "fixed-replace-and-noreplace",
@@ -94,6 +96,7 @@ fn fork_like() -> Result<u32, Errno> {
     let mut child_tid = 0;
     clone(
         CloneFlags::CHILD_SETTID,
+        None,
         None,
         None,
         null_mut(),
@@ -243,6 +246,85 @@ fn test_invalid_arguments() -> Result<(), Errno> {
     );
 
     munmap(base, PAGE_SIZE)
+}
+
+fn test_mlock_msync_mremap() -> Result<(), Errno> {
+    let reservation = map_anon(
+        0,
+        PAGE_SIZE * 2,
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+        MmapFlags::MAP_PRIVATE | MmapFlags::MAP_ANONYMOUS,
+    )?;
+    munmap(reservation, PAGE_SIZE * 2)?;
+
+    let base = map_anon(
+        reservation as u64,
+        PAGE_SIZE,
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+        MmapFlags::MAP_PRIVATE | MmapFlags::MAP_ANONYMOUS | MmapFlags::MAP_FIXED_NOREPLACE,
+    )?;
+    assert_eq!(base, reservation);
+
+    store_byte(base, 0, 0x31);
+    store_byte(base, PAGE_SIZE - 1, 0x32);
+
+    mlock(unsafe { base.add(1) }, PAGE_SIZE - 1)?;
+    munlock(unsafe { base.add(1) }, PAGE_SIZE - 1)?;
+    msync(base, PAGE_SIZE, MsyncFlags::MS_SYNC)?;
+    msync(base, PAGE_SIZE, MsyncFlags::empty())?;
+    expect_errno(
+        msync(unsafe { base.add(1) }, PAGE_SIZE, MsyncFlags::MS_SYNC),
+        EINVAL,
+        "unaligned msync",
+    );
+    expect_errno(
+        mlock(unsafe { base.add(PAGE_SIZE) }, PAGE_SIZE),
+        ENOMEM,
+        "mlock unmapped range",
+    );
+
+    let grown = mremap(base, PAGE_SIZE, PAGE_SIZE * 2, MremapFlags::empty(), None)?.as_ptr();
+    assert_eq!(grown, base, "mremap should grow in place when tail is free");
+    assert_eq!(load_byte(grown, 0), 0x31);
+    assert_eq!(load_byte(grown, PAGE_SIZE - 1), 0x32);
+    assert_eq!(load_byte(grown, PAGE_SIZE), 0);
+    store_byte(grown, PAGE_SIZE, 0x33);
+
+    let shrunk = mremap(grown, PAGE_SIZE * 2, PAGE_SIZE, MremapFlags::empty(), None)?.as_ptr();
+    assert_eq!(shrunk, grown, "mremap shrink should keep base address");
+    assert_eq!(load_byte(shrunk, 0), 0x31);
+
+    let target = map_anon(
+        0,
+        PAGE_SIZE,
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+        MmapFlags::MAP_PRIVATE | MmapFlags::MAP_ANONYMOUS,
+    )?;
+    store_byte(target, 0, 0xee);
+    let moved = mremap(
+        shrunk,
+        PAGE_SIZE,
+        PAGE_SIZE,
+        MremapFlags::MREMAP_MAYMOVE | MremapFlags::MREMAP_FIXED,
+        Some(target),
+    )?
+    .as_ptr();
+    assert_eq!(moved, target, "fixed mremap must return requested target");
+    assert_eq!(load_byte(moved, 0), 0x31);
+    assert_eq!(load_byte(moved, PAGE_SIZE - 1), 0x32);
+
+    expect_err(
+        mremap(
+            moved,
+            PAGE_SIZE,
+            PAGE_SIZE,
+            MremapFlags::MREMAP_FIXED,
+            Some(base),
+        ),
+        "MREMAP_FIXED without MREMAP_MAYMOVE",
+    );
+
+    munmap(moved, PAGE_SIZE)
 }
 
 fn test_partial_unmap_and_mprotect() -> Result<(), Errno> {

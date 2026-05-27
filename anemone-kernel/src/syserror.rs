@@ -25,6 +25,8 @@ pub enum SysError {
     /// Permission denied. This includes file permission, memory access
     /// permission, etc.
     PermissionDenied,
+    /// A user-provided memory address could not be accessed by the kernel.
+    BadAddress,
     /// Access is denied by user-visible permission checks.
     AccessDenied,
     /// The provided file descriptor is invalid.
@@ -62,6 +64,8 @@ pub enum SysError {
     NotSymlink,
     /// The entity is busy (e.g. still has active references).
     Busy,
+    /// File is too large.
+    FileTooLarge,
     /// The directory is not empty.
     DirNotEmpty,
     /// Trying to link across different filesystems.
@@ -84,6 +88,8 @@ pub enum SysError {
     /// Invalid path (e.g. path contains invalid UTF-8 sequences, or path is not
     /// valid for other reasons).
     InvalidPath,
+    /// A path or path component is too long.
+    NameTooLong,
     /// The device is incompatible with the driver.
     DriverIncompatible,
     /// The device is incompatible with the bus.
@@ -168,6 +174,7 @@ impl SysError {
             | SysError::NotAligned => EINVAL,
             SysError::BufferTooSmall => ERANGE,
             SysError::PermissionDenied => EPERM,
+            SysError::BadAddress => EFAULT,
             SysError::AccessDenied => EACCES,
             SysError::BadFileDescriptor => EBADF,
             SysError::NoMoreFd => EMFILE,
@@ -184,6 +191,7 @@ impl SysError {
             SysError::NotDir => ENOTDIR,
             SysError::IsDir => EISDIR,
             SysError::Busy | SysError::IrqAlreadyRequested => EBUSY,
+            SysError::FileTooLarge => EFBIG,
             SysError::DirNotEmpty => ENOTEMPTY,
             SysError::CrossDeviceLink => EXDEV,
             SysError::NoSpace | SysError::ResourceExhausted | SysError::NoMinorAvailable => ENOSPC,
@@ -192,6 +200,7 @@ impl SysError {
             // ELOOP here might be a bit inaccurate for TooManyLinks, but POSIX actually doesn't
             // specify the error code for this case, so we choose a close enough one.
             SysError::TooManyLinks | SysError::LinkEncountered => ELOOP,
+            SysError::NameTooLong => ENAMETOOLONG,
             SysError::DriverIncompatible
             | SysError::BusIncompatibleDev
             | SysError::BusIncompatibleDrv
