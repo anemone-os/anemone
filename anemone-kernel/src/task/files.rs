@@ -114,13 +114,22 @@ impl FileDesc {
         }
     }
 
-    /// Only applies to write mode.
+    /// Positioned writes keep the file cursor unchanged.
     pub fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize, SysError> {
+        self.pfile
+            .file
+            .validate_seek(offset)
+            .map_err(|e| e.into())?;
+
         if !self.pfile.flags.contains(FileFlags::WRITE) {
             return Err(SysError::BadFileDescriptor);
         }
         if self.pfile.flags.contains(FileFlags::APPEND) {
-            return Err(SysError::InvalidArgument);
+            return self
+                .pfile
+                .file
+                .append_at_current_end(buf)
+                .map_err(|e| e.into());
         }
         self.pfile.file.write_at(offset, buf).map_err(|e| e.into())
     }

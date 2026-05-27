@@ -240,6 +240,18 @@ impl File {
         Ok(written)
     }
 
+    /// Append without changing the file cursor.
+    pub fn append_at_current_end(&self, buf: &[u8]) -> Result<usize, SysError> {
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+
+        let _pos = self.pos.lock();
+        let mut append_pos = self.inode().get_attr()?.size as usize;
+        let written = (self.ops.write)(self, &mut append_pos, buf)?;
+        Ok(written)
+    }
+
     pub fn validate_seek(&self, pos: usize) -> Result<(), SysError> {
         (self.ops.validate_seek)(self, pos)
     }
