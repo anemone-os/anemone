@@ -173,6 +173,8 @@ pub mod linux {
     pub const SYS_SHMAT: u64 = 196;
     pub const SYS_SHMDT: u64 = 197;
 
+    pub const SYS_READAHEAD: u64 = 213;
+
     pub const SYS_BRK: u64 = 214;
     pub const SYS_MUNMAP: u64 = 215;
     pub const SYS_MREMAP: u64 = 216;

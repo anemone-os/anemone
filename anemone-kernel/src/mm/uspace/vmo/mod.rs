@@ -57,7 +57,10 @@ pub trait VmObject: Send + Sync {
     }
 
     fn discard_range(&self, _range: core::ops::Range<usize>) -> Result<(), SysError> {
-        Err(SysError::InvalidArgument)
+        // `madvise(DONTNEED)` is a hint. Backings that do not support a
+        // dedicated discard path can safely ignore it and let the caller drop
+        // the current PTEs.
+        Ok(())
     }
 
     fn read_frame(

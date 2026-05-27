@@ -159,7 +159,7 @@ fn run_ltp_root(root: &LtpRoot) -> LtpSummary {
 }
 
 fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpCaseOutcome {
-    println!("RUN LTP CASE {}", case.name);
+    println!("\nRUN LTP CASE {}", case.name);
 
     match fork() {
         Ok(Some(tid)) => match crate::wait_child_status(tid, case.name) {

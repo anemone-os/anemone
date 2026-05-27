@@ -17,8 +17,7 @@ fn sys_mremap(
     old_size: u64,
     new_size: u64,
     flags: MremapFlags,
-    #[validate_with(aligned_to::<{ PagingArch::PAGE_SIZE_BYTES }>.and_then(user_addr).nullable())]
-    new_addr: Option<VirtAddr>,
+    new_addr: u64,
 ) -> Result<u64, SysError> {
     if flags.contains(MremapFlags::MREMAP_DONTUNMAP) {
         kwarningln!("mremap: MREMAP_DONTUNMAP is not supported");
@@ -38,7 +37,11 @@ fn sys_mremap(
     // tail helper below rebuilds growth as anonymous memory, so file-backed or
     // shared mappings need a separate backing-aware path later.
     let fixed_target = if fixed {
-        Some(new_addr.ok_or(SysError::InvalidArgument)?.page_down())
+        let new_addr = user_addr(new_addr)?;
+        if new_addr.page_offset() != 0 {
+            return Err(SysError::InvalidArgument);
+        }
+        Some(new_addr.page_down())
     } else {
         None
     };
