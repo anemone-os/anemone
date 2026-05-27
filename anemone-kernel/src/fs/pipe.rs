@@ -246,7 +246,7 @@ fn pipe_tx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollEvent, Sys
 static PIPE_RX_FILE_OPS: FileOps = FileOps {
     read: pipe_rx_read,
     write: |_, _, _| Err(SysError::NotSupported),
-    validate_seek: |_, _| Err(SysError::NotSupported),
+    validate_seek: |_, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_rx_poll,
 };
@@ -254,7 +254,7 @@ static PIPE_RX_FILE_OPS: FileOps = FileOps {
 static PIPE_TX_FILE_OPS: FileOps = FileOps {
     read: |_, _, _| Err(SysError::NotSupported),
     write: pipe_tx_write,
-    validate_seek: |_, _| Err(SysError::NotSupported),
+    validate_seek: |_, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_tx_poll,
 };

@@ -7,6 +7,8 @@ use crate::prelude::*;
 
 #[syscall(SYS_SETPGID)]
 fn sys_setpgid(pid: i32, pgid: i32) -> Result<u64, SysError> {
+    kdebugln!("setpgid: pid={}, pgid={}", pid, pgid);
+
     if pgid < 0 {
         return Err(SysError::InvalidArgument);
     }

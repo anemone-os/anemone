@@ -158,6 +158,8 @@ impl File {
             return Ok(0);
         }
 
+        self.validate_seek(pos)?;
+
         let mut dummy_pos = pos;
         let read = (self.ops.read)(self, &mut dummy_pos, buf)?;
 
@@ -199,6 +201,8 @@ impl File {
             return Ok(0);
         }
 
+        self.validate_seek(pos)?;
+
         let mut dummy_pos = pos;
         let written = (self.ops.write)(self, &mut dummy_pos, buf)?;
 
@@ -236,6 +240,10 @@ impl File {
         Ok(written)
     }
 
+    pub fn validate_seek(&self, pos: usize) -> Result<(), SysError> {
+        (self.ops.validate_seek)(self, pos)
+    }
+
     /// Run `f` with the file cursor as `pos`.
     pub fn with_pos<F, R>(&self, f: F) -> Result<R, SysError>
     where
@@ -246,7 +254,7 @@ impl File {
     }
 
     pub fn seek(&self, pos: usize) -> Result<(), SysError> {
-        (self.ops.validate_seek)(self, pos)?;
+        self.validate_seek(pos)?;
         *self.pos.lock() = pos;
         Ok(())
     }

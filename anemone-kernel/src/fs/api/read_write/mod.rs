@@ -6,7 +6,7 @@ use anemone_abi::fs::linux::IoVec;
 
 use crate::{
     prelude::{
-        user_access::{UserReadSlice, UserWriteSlice, user_addr},
+        user_access::{UserReadSlice, UserWriteSlice},
         *,
     },
     task::files::{Fd, FileDesc},
@@ -131,16 +131,17 @@ fn load_iovecs(
             continue;
         }
 
-        let remaining = MAX_RW_COUNT.saturating_sub(total);
-        if remaining == 0 {
-            break;
+        let new_total = total
+            .checked_add(len)
+            .ok_or(SysError::InvalidArgument)?;
+        if new_total > MAX_RW_COUNT {
+            return Err(SysError::InvalidArgument);
         }
 
-        let base = user_addr(raw_iovec.iov_base as u64)?;
-        let len = len.min(remaining);
+        let base = VirtAddr::new(raw_iovec.iov_base as u64);
 
         iovecs.push(CheckedIoVec { base, len });
-        total += len;
+        total = new_total;
     }
 
     Ok(iovecs)
