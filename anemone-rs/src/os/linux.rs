@@ -153,6 +153,24 @@ pub mod process {
         }
     }
 
+    bitflags! {
+        #[derive(Debug, Clone, Copy)]
+        pub struct MsyncFlags: i32 {
+            const MS_ASYNC = mmap::MS_ASYNC;
+            const MS_INVALIDATE = mmap::MS_INVALIDATE;
+            const MS_SYNC = mmap::MS_SYNC;
+        }
+    }
+
+    bitflags! {
+        #[derive(Debug, Clone, Copy)]
+        pub struct MremapFlags: i32 {
+            const MREMAP_MAYMOVE = mmap::MREMAP_MAYMOVE;
+            const MREMAP_FIXED = mmap::MREMAP_FIXED;
+            const MREMAP_DONTUNMAP = mmap::MREMAP_DONTUNMAP;
+        }
+    }
+
     pub fn mmap(
         addr: u64,
         length: usize,
@@ -176,8 +194,37 @@ pub mod process {
         process::munmap(addr as u64, length as u64).map(|_| ())
     }
 
+    pub fn mremap(
+        old_addr: *mut u8,
+        old_size: usize,
+        new_size: usize,
+        flags: MremapFlags,
+        new_addr: Option<*mut u8>,
+    ) -> Result<NonNull<u8>, Errno> {
+        process::mremap(
+            old_addr as u64,
+            old_size as u64,
+            new_size as u64,
+            flags.bits() as u64,
+            new_addr.map_or(0, |addr| addr as u64),
+        )
+        .and_then(|ptr| Ok(NonNull::new(ptr as *mut u8).expect("mremap returned null pointer")))
+    }
+
     pub fn mprotect(addr: *mut u8, length: usize, prot: MmapProt) -> Result<(), Errno> {
         process::mprotect(addr as u64, length as u64, prot.bits() as u64).map(|_| ())
+    }
+
+    pub fn msync(addr: *mut u8, length: usize, flags: MsyncFlags) -> Result<(), Errno> {
+        process::msync(addr as u64, length as u64, flags.bits() as u64).map(|_| ())
+    }
+
+    pub fn mlock(addr: *mut u8, length: usize) -> Result<(), Errno> {
+        process::mlock(addr as u64, length as u64).map(|_| ())
+    }
+
+    pub fn munlock(addr: *mut u8, length: usize) -> Result<(), Errno> {
+        process::munlock(addr as u64, length as u64).map(|_| ())
     }
 
     pub fn execve(path: &str, argv: &[&str], envp: &[&str]) -> Result<u64, Errno> {

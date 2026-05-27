@@ -209,6 +209,14 @@ pub mod linux {
         pub const MAP_STACK: i32 = 0x20000;
         pub const MAP_FIXED_NOREPLACE: i32 = 0x100000;
         pub const MAP_UNINITIALIZED: i32 = 0x4000000;
+
+        pub const MS_ASYNC: i32 = 0x1;
+        pub const MS_INVALIDATE: i32 = 0x2;
+        pub const MS_SYNC: i32 = 0x4;
+
+        pub const MREMAP_MAYMOVE: i32 = 0x1;
+        pub const MREMAP_FIXED: i32 = 0x2;
+        pub const MREMAP_DONTUNMAP: i32 = 0x4;
     }
 
     pub mod signal {

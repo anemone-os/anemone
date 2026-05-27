@@ -136,6 +136,11 @@ fn run_local_tests() {
     println!("user-test: running pg test...");
     local_run_cmd("/bin/pg-test", &["pg-test"], &[]);
     println!("user-test: pg test finished.");
+
+    // 5. mmap test
+    println!("user-test: running mmap test...");
+    local_run_cmd("/bin/mmap-test", &["mmap-test"], &[]);
+    println!("user-test: mmap test finished.");
 }
 
 fn ensure_dir(path: &str) {
@@ -297,7 +302,7 @@ fn run_comp_tests() {
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
-    // ltp::run_ltp_tests();
+    ltp::run_ltp_tests();
 
     println!("user-test: all competition tests finished.");
 }

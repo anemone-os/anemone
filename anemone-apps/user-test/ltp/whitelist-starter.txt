@@ -370,8 +370,8 @@ madvise10
 # munmap01
 # munmap02
 # munmap03
-# sbrk01
-# sbrk02
+sbrk01
+sbrk02
 # 
 # # time / iomux
 # clock_getres01

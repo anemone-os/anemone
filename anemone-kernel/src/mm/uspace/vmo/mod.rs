@@ -52,6 +52,10 @@ pub trait VmObject: Send + Sync {
     /// [shadow::ShadowObject].
     fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError>;
 
+    fn sync_range(&self, _range: core::ops::Range<usize>) -> Result<(), SysError> {
+        Ok(())
+    }
+
     fn read_frame(
         &self,
         pidx: usize,

@@ -9,7 +9,7 @@
 
 use crate::prelude::{
     vma::{ForkPolicy, Protection, VmArea, VmFlags},
-    vmo::{VmObject, anon::AnonObject, shadow::ShadowObject},
+    vmo::{anon::AnonObject, shadow::ShadowObject, VmObject},
     *,
 };
 
@@ -123,6 +123,14 @@ pub struct FileMapping {
     /// Offset, in page.
     pub poffset: usize,
     pub inode: InodeRef,
+}
+
+#[derive(Debug)]
+pub struct RemapMapping {
+    pub old_range: VirtPageRange,
+    pub new_npages: usize,
+    pub may_move: bool,
+    pub fixed_target: Option<VirtPageNum>,
 }
 
 /// Map an already-owned VMO into user space.
@@ -330,6 +338,128 @@ impl UserSpace {
         kdebugln!("changed protection on range {:#x?} to {:?}", range, prot);
         Ok(guard)
     }
+
+    pub fn validate_mapped_range(&self, range: VirtPageRange) -> Result<(), SysError> {
+        self.find_intersection_starts_covering(range).map(|_| ())
+    }
+
+    fn collect_sync_ranges(
+        &self,
+        range: VirtPageRange,
+    ) -> Result<Vec<(Arc<dyn VmObject>, core::ops::Range<usize>)>, SysError> {
+        let mut ranges = Vec::new();
+
+        for start in self.find_intersection_starts_covering(range)? {
+            let vma = self
+                .vmas
+                .get(&start)
+                .expect("intersection key must resolve to a VMA");
+
+            let cut_start = if vma.range().start() > range.start() {
+                vma.range().start()
+            } else {
+                range.start()
+            };
+            let cut_end = if vma.range().end() < range.end() {
+                vma.range().end()
+            } else {
+                range.end()
+            };
+
+            let start_pidx = vma.vmo_pidx(cut_start);
+            let end_pidx = start_pidx + (cut_end - cut_start) as usize;
+            ranges.push((vma.backing().clone(), start_pidx..end_pidx));
+        }
+
+        Ok(ranges)
+    }
+
+    pub fn remap_range(
+        &mut self,
+        mapping: &RemapMapping,
+    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
+        self.validate_range(mapping.old_range)?;
+        if mapping.new_npages == 0 {
+            return Err(SysError::InvalidArgument);
+        }
+
+        let old_npages =
+            usize::try_from(mapping.old_range.npages()).map_err(|_| SysError::InvalidArgument)?;
+
+        if mapping.fixed_target.is_none() {
+            if mapping.new_npages == old_npages {
+                self.collect_movable_vmas(mapping.old_range, mapping.old_range.start())?;
+                return Ok((mapping.old_range.start().to_virt_addr(), None));
+            }
+
+            if mapping.new_npages < old_npages {
+                self.collect_movable_vmas(mapping.old_range, mapping.old_range.start())?;
+                let tail_start = mapping.old_range.start() + mapping.new_npages as u64;
+                let tail =
+                    VirtPageRange::new(tail_start, old_npages as u64 - mapping.new_npages as u64);
+                let guard = self.unmap(tail)?;
+                return Ok((mapping.old_range.start().to_virt_addr(), Some(guard)));
+            }
+
+            let tail = VirtPageRange::new(
+                mapping.old_range.end(),
+                (mapping.new_npages - old_npages) as u64,
+            );
+            if self.is_range_avail(tail) {
+                let fragments =
+                    self.collect_movable_vmas(mapping.old_range, mapping.old_range.start())?;
+                let template = fragments
+                    .last()
+                    .expect("non-empty old range must produce a template VMA");
+                self.insert_vma(Self::anonymous_tail_from_template(template, tail))?;
+                return Ok((mapping.old_range.start().to_virt_addr(), None));
+            }
+
+            if !mapping.may_move {
+                return Err(SysError::OutOfMemory);
+            }
+        }
+
+        let target_start = match mapping.fixed_target {
+            Some(target_start) => target_start,
+            None => self
+                .find_avail_range(mapping.new_npages, None)
+                .ok_or(SysError::OutOfMemory)?,
+        };
+        let target_range = VirtPageRange::new(target_start, mapping.new_npages as u64);
+        self.validate_range(target_range)?;
+
+        if mapping.fixed_target.is_some() && target_range.intersects(&mapping.old_range) {
+            return Err(SysError::InvalidArgument);
+        }
+
+        let move_npages = old_npages.min(mapping.new_npages);
+        let move_source = VirtPageRange::new(mapping.old_range.start(), move_npages as u64);
+        let mut moved = self.collect_movable_vmas(move_source, target_start)?;
+        if mapping.new_npages > old_npages {
+            let template = moved
+                .last()
+                .expect("non-empty old range must produce a template VMA");
+            let tail = VirtPageRange::new(
+                target_start + old_npages as u64,
+                (mapping.new_npages - old_npages) as u64,
+            );
+            moved.push(Self::anonymous_tail_from_template(template, tail));
+        }
+
+        let mut tx = VmTransaction::new();
+        if mapping.fixed_target.is_some() {
+            tx.ops.extend(self.compose_unmap_range(target_range)?.ops);
+        }
+        tx.ops
+            .extend(self.compose_unmap_range(mapping.old_range)?.ops);
+        for vma in moved {
+            tx.insert(vma);
+        }
+
+        let guard = unsafe { self.run_transaction(tx) };
+        Ok((target_start.to_virt_addr(), Some(guard)))
+    }
 }
 
 impl UserSpaceHandle {
@@ -367,6 +497,38 @@ impl UserSpaceHandle {
     ) -> Result<RemoteUspFenceGuard, SysError> {
         let mut usp = self.usp.lock();
         let res = usp.protect_range(range, prot);
+        drop(usp);
+        res
+    }
+
+    pub fn validate_mapped_range(&self, range: VirtPageRange) -> Result<(), SysError> {
+        let usp = self.usp.lock();
+        let res = usp.validate_mapped_range(range);
+        drop(usp);
+        res
+    }
+
+    pub fn sync_range(&self, range: VirtPageRange) -> Result<(), SysError> {
+        let sync_ranges = {
+            let usp = self.usp.lock();
+            let res = usp.collect_sync_ranges(range);
+            drop(usp);
+            res?
+        };
+
+        for (backing, range) in sync_ranges {
+            backing.sync_range(range)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn remap_range(
+        &self,
+        mapping: &RemapMapping,
+    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
+        let mut usp = self.usp.lock();
+        let res = usp.remap_range(mapping);
         drop(usp);
         res
     }
@@ -499,6 +661,66 @@ impl UserSpace {
         }
 
         !self.vmas.values().any(|vma| vma.range().intersects(&range))
+    }
+
+    fn collect_movable_vmas(
+        &self,
+        source: VirtPageRange,
+        target_start: VirtPageNum,
+    ) -> Result<Vec<VmArea>, SysError> {
+        let mut fragments = Vec::new();
+
+        for start in self.find_intersection_starts_covering(source)? {
+            let vma = self
+                .vmas
+                .get(&start)
+                .expect("intersection key must resolve to a VMA");
+
+            if vma.reservation().is_some() {
+                return Err(SysError::PermissionDenied);
+            }
+
+            let cut_start = if vma.range().start() > source.start() {
+                vma.range().start()
+            } else {
+                source.start()
+            };
+            let cut_end = if vma.range().end() < source.end() {
+                vma.range().end()
+            } else {
+                source.end()
+            };
+
+            let (left, maybe_target) = vma
+                .clone()
+                .split(cut_start)
+                .expect("remap source must split on an intersecting VMA boundary");
+            drop(left);
+            let (target, _right) = maybe_target
+                .expect("remap source split must leave a target segment")
+                .split(cut_end)
+                .expect("remap source end must split on an intersecting VMA boundary");
+            let mut target = target.expect("remap source must produce a target VMA");
+            let offset = cut_start - source.start();
+            target.set_range(VirtPageRange::new(
+                target_start + offset,
+                cut_end - cut_start,
+            ));
+            fragments.push(target);
+        }
+
+        Ok(fragments)
+    }
+
+    fn anonymous_tail_from_template(template: &VmArea, range: VirtPageRange) -> VmArea {
+        VmArea::new(
+            range,
+            0,
+            template.prot(),
+            template.on_fork(),
+            template.flags(),
+            Arc::new(AnonObject::new(range.npages() as usize)),
+        )
     }
 }
 
@@ -789,13 +1011,11 @@ mod kunits {
         uspace
             .inject_page_fault((base + 3).to_virt_addr(), PageFaultType::Read)
             .expect("faulting mapped page should succeed");
-        assert!(
-            uspace
-                .page_table_mut()
-                .mapper()
-                .translate(base + 3)
-                .is_some()
-        );
+        assert!(uspace
+            .page_table_mut()
+            .mapper()
+            .translate(base + 3)
+            .is_some());
 
         uspace
             .protect_range(VirtPageRange::new(base + 2, 2), Protection::READ)
@@ -815,13 +1035,11 @@ mod kunits {
                 ),
             ]
         );
-        assert!(
-            uspace
-                .page_table_mut()
-                .mapper()
-                .translate(base + 3)
-                .is_none()
-        );
+        assert!(uspace
+            .page_table_mut()
+            .mapper()
+            .translate(base + 3)
+            .is_none());
     }
 
     #[kunit]
