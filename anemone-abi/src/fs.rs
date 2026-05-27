@@ -253,6 +253,16 @@ pub mod linux {
         pub const F_DUPFD_CLOEXEC: u32 = F_LINUX_SPECIFIC_BASE + 6;
     }
 
+    pub mod fallocate {
+        pub const FALLOC_FL_KEEP_SIZE: u32 = 0x01;
+        pub const FALLOC_FL_PUNCH_HOLE: u32 = 0x02;
+        pub const FALLOC_FL_NO_HIDE_STALE: u32 = 0x04;
+        pub const FALLOC_FL_COLLAPSE_RANGE: u32 = 0x08;
+        pub const FALLOC_FL_ZERO_RANGE: u32 = 0x10;
+        pub const FALLOC_FL_INSERT_RANGE: u32 = 0x20;
+        pub const FALLOC_FL_UNSHARE_RANGE: u32 = 0x40;
+    }
+
     pub mod poll {
         // Specified by iBCS2
         pub const POLLIN: i16 = 0x0001;

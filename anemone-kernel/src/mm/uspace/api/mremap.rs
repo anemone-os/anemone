@@ -34,6 +34,9 @@ fn sys_mremap(
     let old_npages = checked_page_count(old_size)?;
     let new_npages = checked_page_count(new_size)?;
     let old_range = VirtPageRange::new(old_addr.page_down(), old_npages as u64);
+    // Stage-1 note: this path only models anonymous-style remap editing. The
+    // tail helper below rebuilds growth as anonymous memory, so file-backed or
+    // shared mappings need a separate backing-aware path later.
     let fixed_target = if fixed {
         Some(new_addr.ok_or(SysError::InvalidArgument)?.page_down())
     } else {

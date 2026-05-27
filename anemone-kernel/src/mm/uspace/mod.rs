@@ -380,7 +380,8 @@ impl UserSpace {
 
     /// Whether the given address falls in requested heap region.
     fn heap_accessible(&self, vaddr: VirtAddr) -> bool {
-        self.heap_vma().range().contains(vaddr.page_down()) && vaddr < self.heap.brk
+        let vpn = vaddr.page_down();
+        self.heap_vma().range().contains(vpn) && vpn < self.heap.brk.page_up()
     }
 
     fn find_vma_raw(map: &BTreeMap<VirtPageNum, VmArea>, vaddr: VirtAddr) -> Option<&VmArea> {

@@ -71,4 +71,14 @@ impl VmObject for AnonObject {
             },
         }
     }
+
+    fn discard_range(&self, range: core::ops::Range<usize>) -> Result<(), SysError> {
+        if range.start >= self.max_pages || range.end > self.max_pages || range.start > range.end {
+            return Err(SysError::InvalidArgument);
+        }
+
+        let mut pages = self.pages.write();
+        pages.retain(|pidx, _| !range.contains(pidx));
+        Ok(())
+    }
 }

@@ -108,6 +108,12 @@ mod args {
             /// Currently no swapping, so this flag is effectively a no-op.
             const MAP_NORESERVE = mmap::MAP_NORESERVE;
 
+            /// Currently mappings are still populated lazily.
+            const MAP_POPULATE = mmap::MAP_POPULATE;
+
+            /// Only meaningful together with MAP_POPULATE, which is lazy here.
+            const MAP_NONBLOCK = mmap::MAP_NONBLOCK;
+
             /// Currently this flag is ignored, but the effect is the same from user's perspective.
             const MAP_UNINITIALIZED = mmap::MAP_UNINITIALIZED;
         }

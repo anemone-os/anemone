@@ -333,6 +333,18 @@ impl UserSpace {
         range: VirtPageRange,
         prot: Protection,
     ) -> Result<RemoteUspFenceGuard, SysError> {
+        let heap_range = *self.heap_vma().range();
+        if heap_range.covers(&range) && range.end() <= self.heap.brk.page_up() {
+            let new_flags = PteFlags::from(prot) | PteFlags::USER;
+            let mut mapper = self.table.mapper();
+            unsafe {
+                mapper.change_flags(range, |_, _| Some(new_flags), TraverseOrder::PreOrder);
+            }
+            PagingArch::tlb_shootdown_all();
+            kdebugln!("changed heap protection on range {:#x?} to {:?}", range, prot);
+            return Ok(RemoteUspFenceGuard { vpn: Some(range) });
+        }
+
         let tx = self.compose_protect_range(range, prot)?;
         let guard = unsafe { self.run_transaction(tx) };
         kdebugln!("changed protection on range {:#x?} to {:?}", range, prot);
@@ -523,6 +535,13 @@ impl UserSpaceHandle {
         Ok(())
     }
 
+    pub fn discard_range(&self, range: VirtPageRange) -> Result<RemoteUspFenceGuard, SysError> {
+        let mut usp = self.usp.lock();
+        let res = usp.discard_range(range);
+        drop(usp);
+        res
+    }
+
     pub fn remap_range(
         &self,
         mapping: &RemapMapping,
@@ -558,6 +577,50 @@ impl UserSpace {
         let guard = unsafe { self.run_transaction(tx) };
 
         Ok(guard)
+    }
+
+    /// Discard the contents of a mapped range without changing its VMAs.
+    pub fn discard_range(&mut self, range: VirtPageRange) -> Result<RemoteUspFenceGuard, SysError> {
+        self.validate_mapped_range(range)?;
+
+        let mut ops = Vec::new();
+        for start in self.find_intersection_starts_covering(range)? {
+            let vma = self
+                .vmas
+                .get(&start)
+                .expect("intersection key must resolve to a VMA");
+
+            let cut_start = if vma.range().start() > range.start() {
+                vma.range().start()
+            } else {
+                range.start()
+            };
+            let cut_end = if vma.range().end() < range.end() {
+                vma.range().end()
+            } else {
+                range.end()
+            };
+            let cut_range = VirtPageRange::new(cut_start, cut_end - cut_start);
+            let obj_range = vma.vmo_pidx(cut_start)..vma.vmo_pidx(cut_end);
+            ops.push((vma.backing().clone(), obj_range, cut_range));
+        }
+
+        for (backing, obj_range, _) in &ops {
+            backing.discard_range(obj_range.clone())?;
+        }
+
+        {
+            let mut mapper = self.table.mapper();
+            for (_, _, cut_range) in &ops {
+                unsafe {
+                    mapper.try_unmap(Unmapping { range: *cut_range });
+                }
+            }
+        }
+
+        PagingArch::tlb_shootdown_all();
+
+        Ok(RemoteUspFenceGuard { vpn: Some(range) })
     }
 }
 

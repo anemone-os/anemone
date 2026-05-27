@@ -37,13 +37,16 @@ fn parse_mount_source(raw: Option<Box<str>>) -> Result<MountSource, SysError> {
     }
 }
 
+fn mount_fs_name(fstype: &str) -> &str {
+    match fstype {
+        "tmpfs" => "ramfs",
+        _ => fstype,
+    }
+}
+
 #[syscall(SYS_MOUNT)]
 fn sys_mount(
-    #[validate_with(
-        c_readonly_string::<MAX_PATH_LEN_BYTES>
-            .nullable()
-            .and_then(parse_mount_source))]
-    source: MountSource,
+    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>.nullable())] source: Option<Box<str>>,
     #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] target: Box<str>,
     #[validate_with(c_readonly_string::<MAX_FILE_NAME_LEN_BYTES>)] fstype: Box<str>,
     // currently used. but we will support some important flags in the future, e.g. MS_BIND.
@@ -51,16 +54,23 @@ fn sys_mount(
     // we don't support this argument. vfs now doesn't use it at all.
     _data: u64,
 ) -> Result<u64, SysError> {
-    let fs = get_filesystem(&fstype).ok_or(SysError::InvalidArgument)?;
+    let fs_name = mount_fs_name(&fstype);
+    let fs = get_filesystem(fs_name).ok_or(SysError::InvalidArgument)?;
     if fs.flags().contains(FileSystemFlags::KERNEL_FS) {
         return Err(SysError::PermissionDenied);
     }
     drop(fs);
 
+    let source = if fstype.as_ref() == "tmpfs" {
+        MountSource::Pseudo
+    } else {
+        parse_mount_source(source)?
+    };
+
     let target =
         get_current_task().lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
 
-    mount_at(&fstype, source, MountFlags::empty(), &target)?;
+    mount_at(fs_name, source, MountFlags::empty(), &target)?;
 
     Ok(0)
 }

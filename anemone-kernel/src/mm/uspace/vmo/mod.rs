@@ -56,6 +56,10 @@ pub trait VmObject: Send + Sync {
         Ok(())
     }
 
+    fn discard_range(&self, _range: core::ops::Range<usize>) -> Result<(), SysError> {
+        Err(SysError::InvalidArgument)
+    }
+
     fn read_frame(
         &self,
         pidx: usize,

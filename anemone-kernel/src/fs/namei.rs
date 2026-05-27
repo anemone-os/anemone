@@ -236,6 +236,9 @@ fn collect_components(path: &Path) -> Result<VecDeque<PendingComponent>, SysErro
             UnixComponent::CurDir => pending.push_back(PendingComponent::CurDir),
             UnixComponent::ParentDir => pending.push_back(PendingComponent::ParentDir),
             UnixComponent::Normal(raw) => {
+                if raw.len() > MAX_FILE_NAME_LEN_BYTES {
+                    return Err(SysError::NameTooLong);
+                }
                 let name = core::str::from_utf8(raw).map_err(|_| SysError::InvalidArgument)?;
                 pending.push_back(PendingComponent::Normal(name.to_string()));
             },

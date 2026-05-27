@@ -11,6 +11,8 @@ fn sys_munlock(#[validate_with(user_addr)] addr: VirtAddr, len: u64) -> Result<u
     };
 
     let usp = get_current_task().clone_uspace_handle();
+    // Placeholder semantics: this mirrors mlock's validation-only behavior and
+    // does not clear any lock accounting because no swap lock state exists yet.
     usp.validate_mapped_range(range)?;
     Ok(0)
 }

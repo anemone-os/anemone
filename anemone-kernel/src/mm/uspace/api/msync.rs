@@ -23,6 +23,8 @@ fn sys_msync(
     };
 
     let usp = get_current_task().clone_uspace_handle();
+    // This is still a coarse sync path: the whole interval must be mapped, and
+    // the current VMA walk only synchronizes the covered mapped pieces.
     usp.sync_range(range)?;
     Ok(0)
 }

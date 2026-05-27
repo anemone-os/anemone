@@ -165,10 +165,11 @@ fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpC
         Ok(Some(tid)) => match crate::wait_child_status(tid, case.name) {
             Ok(wstatus) => {
                 let exit_code = ltp_exit_code(wstatus);
-                println!("FAIL LTP CASE {} : {}", case.name, exit_code);
                 if exit_code == 0 {
+                    println!("PASS LTP CASE {} : {}", case.name, exit_code);
                     LtpCaseOutcome::Passed
                 } else {
+                    println!("FAIL LTP CASE {} : {}", case.name, exit_code);
                     LtpCaseOutcome::Failed
                 }
             },
