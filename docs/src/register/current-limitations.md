@@ -193,3 +193,18 @@
 **Owner:** doruche
 **Last Verified:** 2026-05-27
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260527-PWRITEV2-FLAGS-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** fs / pwritev2 / vectored IO
+
+**Summary:** 当前 `pwritev2` 是为了收口 LTP 基础 errno 和 offset 语义的 stage-1 入口，只支持 `flags == 0` 与 `offset == -1` 的 current-position 行为；非零 `RWF_*` flags 统一返回 `EOPNOTSUPP`，尚不提供 per-IO append、sync、nowait 或 hipri 语义。
+
+**Exit Condition:** 明确逐项实现或文档化拒绝 `RWF_HIPRI`、`RWF_DSYNC`、`RWF_SYNC`、`RWF_NOWAIT`、`RWF_APPEND` 等 flags，并补齐 `pwritev2` flags 组合的回归验证。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-27
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)

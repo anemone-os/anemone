@@ -6,7 +6,7 @@ use anemone_abi::fs::linux::IoVec;
 
 use crate::{
     prelude::{
-        user_access::{UserReadSlice, UserWriteSlice, user_addr},
+        user_access::{UserReadSlice, UserWriteSlice},
         *,
     },
     task::files::{Fd, FileDesc},
@@ -16,6 +16,7 @@ pub mod pread64;
 pub mod preadv;
 pub mod pwrite64;
 pub mod pwritev;
+pub mod pwritev2;
 pub mod read;
 pub mod readv;
 pub mod write;
@@ -56,10 +57,20 @@ fn checked_nonnegative_offset(offset: i64) -> Result<usize, SysError> {
 }
 
 fn checked_hilo_offset(low: usize, high: usize) -> Result<usize, SysError> {
+    checked_nonnegative_offset(hilo_offset(low, high))
+}
+
+fn checked_hilo_offset_or_current(low: usize, high: usize) -> Result<Option<usize>, SysError> {
+    match hilo_offset(low, high) {
+        -1 => Ok(None),
+        offset => checked_nonnegative_offset(offset).map(Some),
+    }
+}
+
+fn hilo_offset(low: usize, high: usize) -> i64 {
     const HALF_LONG_BITS: u32 = usize::BITS / 2;
 
-    let raw = (((high as u64) << HALF_LONG_BITS) << HALF_LONG_BITS) | low as u64;
-    checked_nonnegative_offset(raw as i64)
+    ((((high as u64) << HALF_LONG_BITS) << HALF_LONG_BITS) | low as u64) as i64
 }
 
 fn read_into_user_buffer(
@@ -131,16 +142,17 @@ fn load_iovecs(
             continue;
         }
 
-        let remaining = MAX_RW_COUNT.saturating_sub(total);
-        if remaining == 0 {
-            break;
+        let new_total = total
+            .checked_add(len)
+            .ok_or(SysError::InvalidArgument)?;
+        if new_total > MAX_RW_COUNT {
+            return Err(SysError::InvalidArgument);
         }
 
-        let base = user_addr(raw_iovec.iov_base as u64)?;
-        let len = len.min(remaining);
+        let base = VirtAddr::new(raw_iovec.iov_base as u64);
 
         iovecs.push(CheckedIoVec { base, len });
-        total += len;
+        total = new_total;
     }
 
     Ok(iovecs)

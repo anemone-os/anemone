@@ -80,6 +80,8 @@ pub enum SysError {
     Again,
     /// Pipe write attempted after all readers were gone.
     BrokenPipe,
+    /// The file does not support seeking.
+    IllegalSeek,
     /// Too many symbolic links were encountered in resolving a path.
     TooManyLinks,
     /// A symbolic link was encountered while doing a path resolution operation
@@ -197,6 +199,7 @@ impl SysError {
             SysError::NoSpace | SysError::ResourceExhausted | SysError::NoMinorAvailable => ENOSPC,
             SysError::Again => EAGAIN,
             SysError::BrokenPipe => EPIPE,
+            SysError::IllegalSeek => ESPIPE,
             // ELOOP here might be a bit inaccurate for TooManyLinks, but POSIX actually doesn't
             // specify the error code for this case, so we choose a close enough one.
             SysError::TooManyLinks | SysError::LinkEncountered => ELOOP,

@@ -67,6 +67,14 @@ fn validate_fallocate_file(file: &FileDesc) -> Result<(), SysError> {
 
 #[syscall(SYS_FALLOCATE)]
 fn sys_fallocate(fd: Fd, mode: FallocateMode, offset: i64, len: i64) -> Result<u64, SysError> {
+    kdebugln!(
+        "fallocate: fd={:?}, mode={:#x}, offset={}, len={}",
+        fd,
+        mode.0,
+        offset,
+        len
+    );
+
     let end = checked_fallocate_end(offset, len)?;
 
     if mode.has_unsupported_flags() {

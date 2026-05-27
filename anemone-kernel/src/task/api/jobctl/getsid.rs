@@ -7,6 +7,8 @@ use crate::prelude::*;
 
 #[syscall(SYS_GETSID)]
 fn sys_getsid(pid: i32) -> Result<u64, SysError> {
+    kdebugln!("getsid: pid={}", pid);
+
     if pid < 0 {
         return Err(SysError::NoSuchProcess);
     }

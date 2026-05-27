@@ -19,6 +19,15 @@ fn sys_mremap(
     flags: MremapFlags,
     new_addr: u64,
 ) -> Result<u64, SysError> {
+    kdebugln!(
+        "mremap: old_addr={:#x}, old_size={}, new_size={}, flags={:?}, new_addr={:#x}",
+        old_addr.get(),
+        old_size,
+        new_size,
+        flags,
+        new_addr
+    );
+
     if flags.contains(MremapFlags::MREMAP_DONTUNMAP) {
         kwarningln!("mremap: MREMAP_DONTUNMAP is not supported");
         return Err(SysError::InvalidArgument);
