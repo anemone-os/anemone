@@ -73,6 +73,7 @@ pub mod linux {
     pub const SYS_FACCESSAT: u64 = 48;
 
     pub const SYS_CHDIR: u64 = 49;
+    pub const SYS_FCHDIR: u64 = 50;
     pub const SYS_CHROOT: u64 = 51;
 
     pub const SYS_FCHMOD: u64 = 52;

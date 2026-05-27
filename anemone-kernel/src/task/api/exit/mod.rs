@@ -169,6 +169,8 @@ pub fn kernel_exit(code: ExitCode) -> ! {
                 .get_thread_group()
                 .child_exited
                 .publish(1, false);
+
+            task.vfork_done.publish(1, true);
         }
 
         // ORDER MATTERS.

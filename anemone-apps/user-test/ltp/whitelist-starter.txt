@@ -33,22 +33,22 @@ chdir04
 # creat07
 # creat08
 # creat09
-# dup01
-# dup02
-# dup03
-# dup04
-# dup05
-# dup06
-# dup07
-# dup201
-# dup202
-# dup203
-# dup204
-# dup205
-# dup206
-# dup207
-# dup3_01
-# dup3_02
+dup01
+dup02
+dup03
+dup04
+dup05
+dup06
+dup07
+dup201
+dup202
+dup203
+dup204
+dup205
+dup206
+dup207
+dup3_01
+dup3_02
 # faccessat01
 # faccessat02
 # faccessat201
@@ -59,9 +59,9 @@ chdir04
 # fallocate04
 # fallocate05
 # fallocate06
-# fchdir01
-# fchdir02
-# fchdir03
+fchdir01
+fchdir02
+fchdir03
 # fchmod01
 # fchmod02
 # fchmod03
@@ -163,16 +163,16 @@ chdir04
 # fstatfs01_64
 # fstatfs02
 # fstatfs02_64
-# fsync01
-# fsync02
-# fsync03
-# fsync04
-# ftruncate01
-# ftruncate01_64
-# ftruncate03
-# ftruncate03_64
-# ftruncate04
-# ftruncate04_64
+fsync01
+fsync02
+fsync03
+fsync04
+ftruncate01
+ftruncate01_64
+ftruncate03
+ftruncate03_64
+ftruncate04
+ftruncate04_64
 # futimesat01
 # getcwd01
 # getcwd02
@@ -400,10 +400,14 @@ sbrk02
 # # process / wait
 # fork01
 # fork03
+# fork04
+# fork05
 # fork07
 # fork08
 # fork09
 # fork10
+# fork13
+# fork14
 # clone01
 # clone02
 # clone03
@@ -411,7 +415,29 @@ sbrk02
 # clone05
 # clone06
 # clone07
-# execve03
+# clone08
+# clone09
+# clone301
+# clone302
+# clone303
+execl01
+execle01
+execlp01
+execv01
+execve01
+execve02
+execve03
+execve04
+execve05
+execve06
+# execveat_child
+# execveat_errno
+# execveat01
+# execveat02
+# execveat03
+execvp01
+# exit01
+# exit02
 # wait01
 # wait02
 # wait401
@@ -460,3 +486,13 @@ sbrk02
 # futex_wake01
 # futex_wake02
 # futex_wake03
+
+# Standalone exec helper binaries cannot pass from the whitelist: they call
+# tst_reinit(), but LTP_IPC_PATH is only set by their parent tests.
+# execl01_child
+# execle01_child
+# execlp01_child
+# execv01_child
+# execve01_child
+# execve06_child
+# execvp01_child

@@ -145,6 +145,8 @@ pub struct Task {
     robust_list: SpinLock<Option<VirtAddr>>,
     /// Exit code of this task. Meaningful only when this task is a zombie.
     exit_code: SpinLock<Option<ExitCode>>,
+    /// Published by the child when a vfork parent may continue.
+    vfork_done: Event,
 
     /// See [TaskStatus] for a precise definition.
     status: NoIrqRwLock<TaskStatus>,
@@ -437,6 +439,7 @@ impl Task {
 
             robust_list: SpinLock::new(None),
             exit_code: SpinLock::new(None),
+            vfork_done: Event::new(),
             status: NoIrqRwLock::new(TaskStatus::Runnable),
             clear_child_tid: SpinLock::new(None),
         };
@@ -483,6 +486,7 @@ impl Task {
 
                 robust_list: SpinLock::new(None),
                 exit_code: SpinLock::new(None),
+                vfork_done: Event::new(),
                 status: NoIrqRwLock::new(TaskStatus::Runnable),
                 clear_child_tid: SpinLock::new(None),
             },
