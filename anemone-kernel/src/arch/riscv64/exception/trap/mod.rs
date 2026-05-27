@@ -9,7 +9,7 @@ pub use utrap::*;
 mod signal;
 pub use signal::*;
 
-use riscv::register::sstatus::{self, FS, SPP, Sstatus};
+use riscv::register::sstatus::{self, SPP};
 
 pub struct RiscV64TrapArch;
 
@@ -214,6 +214,10 @@ impl TrapFrameArch for RiscV64TrapFrame {
     fn set_arg<const IDX: usize>(&mut self, arg: u64) {
         const_assert!(IDX < 7);
         self.gpr.x[10 + IDX] = arg;
+    }
+
+    fn set_return_addr(&mut self, addr: u64) {
+        self.gpr.x[1] = addr; // ra
     }
 }
 

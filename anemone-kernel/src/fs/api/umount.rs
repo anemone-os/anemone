@@ -13,7 +13,8 @@ fn sys_umount2(
     // currently unused.
     _flags: u64,
 ) -> Result<u64, SysError> {
-    let target = get_current_task().lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
+    let target =
+        get_current_task().lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
     let mount_root = target.mount().root();
     if !Arc::ptr_eq(target.dentry(), &mount_root) {
         return Err(SysError::NotMounted);

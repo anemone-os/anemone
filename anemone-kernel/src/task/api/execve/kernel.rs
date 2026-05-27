@@ -53,6 +53,8 @@ pub fn kernel_execve(
                     }
                 }
 
+                task.get_thread_group().mark_executed();
+
                 // this must be a user task.
                 let exec_fn = path.as_ref().split('/').last().unwrap_or(path.as_ref());
                 let name = (String::from("@user/") + exec_fn).into_boxed_str();

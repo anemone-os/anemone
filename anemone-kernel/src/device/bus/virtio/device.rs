@@ -96,7 +96,7 @@ impl VirtIODevice {
             .expect("virtio device should have parent transport device")
             .upgrade()
             .expect("parent device should be alive");
-        
+
         let transport_dev: &dyn Device =
             match (kobj.as_ref() as &dyn Any).downcast_ref::<PlatformDevice>() {
                 Some(dev) => dev,

@@ -630,6 +630,7 @@ fn perform_signal_action(
     let KSigAction {
         action,
         flags,
+        restorer,
         mask,
     } = task.sig_disposition.read().get_disposition(no);
 
@@ -759,6 +760,11 @@ fn perform_signal_action(
                 handler_addr,
                 sigframe_base,
             );
+
+            // place this after preparing trapframe for overwriting.
+            if flags.contains(SaFlags::RESTORER) {
+                trapframe.set_return_addr(restorer.get());
+            }
 
             break_loop = true;
         },

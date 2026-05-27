@@ -57,7 +57,8 @@ fn sys_mount(
     }
     drop(fs);
 
-    let target = get_current_task().lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
+    let target =
+        get_current_task().lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
 
     mount_at(&fstype, source, MountFlags::empty(), &target)?;
 

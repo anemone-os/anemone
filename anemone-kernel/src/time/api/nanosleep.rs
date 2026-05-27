@@ -7,7 +7,7 @@ use anemone_abi::time::linux::clock::CLOCK_MONOTONIC;
 
 use crate::{
     prelude::{
-        user_access::{user_addr, SyscallArgValidatorExt},
+        user_access::{SyscallArgValidatorExt, user_addr},
         *,
     },
     time::clock::clock_nanosleep::clock_nanosleep,

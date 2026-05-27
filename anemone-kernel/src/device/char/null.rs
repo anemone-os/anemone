@@ -32,7 +32,10 @@ fn init() {
     match register_char_device(NULL_DEVNUM, "null".to_string(), Arc::new(Null)) {
         Ok(()) => {
             if let Err(err) = publish_char_device(NULL_DEVNUM) {
-                knoticeln!("null device registered, but devfs publish failed: {:?}", err);
+                knoticeln!(
+                    "null device registered, but devfs publish failed: {:?}",
+                    err
+                );
             } else {
                 knoticeln!("null device registered");
             }

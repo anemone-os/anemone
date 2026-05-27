@@ -5,7 +5,10 @@ use crate::{
 
 use anemone_abi::process::linux::{ipc::IPC_PRIVATE, shm::IpcPerm};
 
-use super::{SHMALL, SHMMNI, segment::{ShmAttachReservation, ShmSegment}};
+use super::{
+    SHMALL, SHMMNI,
+    segment::{ShmAttachReservation, ShmSegment},
+};
 
 const SHM_INDEX_BITS: usize = 16;
 const SHM_SEQ_BITS: usize = 15;
@@ -150,8 +153,7 @@ pub(super) struct ShmRegistry {
 // Registry operations may allocate slot vectors, key maps, and segment objects.
 // Keep this as a sleeping mutex instead of a spin lock; per-segment metadata is
 // separately protected by a short spin lock.
-pub(super) static SYSV_SHM: Lazy<Mutex<ShmRegistry>> =
-    Lazy::new(|| Mutex::new(ShmRegistry::new()));
+pub(super) static SYSV_SHM: Lazy<Mutex<ShmRegistry>> = Lazy::new(|| Mutex::new(ShmRegistry::new()));
 
 pub(super) fn with_registry<R>(f: impl FnOnce(&mut ShmRegistry) -> R) -> R {
     let mut guard = SYSV_SHM.lock();
@@ -235,10 +237,7 @@ impl ShmRegistry {
         slot.segment.clone().ok_or(SysError::InvalidArgument)
     }
 
-    pub fn reserve_attach_by_shmid(
-        &self,
-        id: ShmId,
-    ) -> Result<ShmAttachReservation, SysError> {
+    pub fn reserve_attach_by_shmid(&self, id: ShmId) -> Result<ShmAttachReservation, SysError> {
         let segment = self.lookup_by_shmid(id)?;
         ShmAttachReservation::try_new(segment)
     }
@@ -261,7 +260,12 @@ impl ShmRegistry {
         if npages == 0 || size == 0 {
             return Err(SysError::InvalidArgument);
         }
-        if self.used_pages.checked_add(npages).ok_or(SysError::NoSpace)? > SHMALL {
+        if self
+            .used_pages
+            .checked_add(npages)
+            .ok_or(SysError::NoSpace)?
+            > SHMALL
+        {
             return Err(SysError::NoSpace);
         }
 
@@ -296,7 +300,11 @@ impl ShmRegistry {
             return Err(SysError::InvalidArgument);
         }
 
-        let segment = slot.segment.as_ref().ok_or(SysError::InvalidArgument)?.clone();
+        let segment = slot
+            .segment
+            .as_ref()
+            .ok_or(SysError::InvalidArgument)?
+            .clone();
         if !segment.mark_removed() {
             return Err(SysError::IdentifierRemoved);
         }
@@ -319,7 +327,9 @@ impl ShmRegistry {
     pub fn release(&mut self, segment: Arc<ShmSegment>) {
         assert!(segment.is_reclaimable());
         let index = segment.index();
-        let slot = self.slot(index).expect("reclaimable segment slot must exist");
+        let slot = self
+            .slot(index)
+            .expect("reclaimable segment slot must exist");
         assert_eq!(slot.seq, segment.seq());
         let current = slot
             .segment

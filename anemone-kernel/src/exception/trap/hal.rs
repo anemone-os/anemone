@@ -39,6 +39,11 @@ pub trait TrapFrameArch: SyscallCtxArch {
     ///
     /// Used by kernel thread context initialization.
     fn set_arg<const IDX: usize>(&mut self, arg: u64);
+
+    /// Set the return address register.
+    ///
+    /// Note this is not the exception return address.
+    fn set_return_addr(&mut self, addr: u64);
 }
 
 /// Syscall register context, which contains:

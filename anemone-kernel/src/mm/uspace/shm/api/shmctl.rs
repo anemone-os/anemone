@@ -8,7 +8,7 @@ use crate::{
 use anemone_abi::process::linux::{ipc::*, shm::*};
 
 use super::super::{
-    SHMALL, SHMMAX, SHMMIN, SHMSEG, SHMMNI, ShmAccess, ShmSegment, check_access,
+    SHMALL, SHMMAX, SHMMIN, SHMMNI, SHMSEG, ShmAccess, ShmSegment, check_access,
     registry::{ShmId, ShmRegistryStats, ShmSlotIndex, with_registry},
 };
 

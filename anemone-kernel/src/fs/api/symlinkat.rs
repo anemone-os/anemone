@@ -32,7 +32,11 @@ fn sys_symlinkat(
         task.lookup_parent_path_from(&newdir_path, linkpath, ResolveFlags::empty())?
     };
 
-    vfs_symlink_at(&parent, Path::new(target.as_ref()), Path::new(name.as_str()))?;
+    vfs_symlink_at(
+        &parent,
+        Path::new(target.as_ref()),
+        Path::new(name.as_str()),
+    )?;
 
     Ok(0)
 }

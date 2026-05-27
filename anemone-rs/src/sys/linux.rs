@@ -32,6 +32,10 @@ pub mod fs {
         unsafe { syscall(SYS_UNLINKAT, dirfd, path_ptr, flags, 0, 0, 0) }
     }
 
+    pub fn ftruncate(fd: u64, length: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_FTRUNCATE, fd, length, 0, 0, 0, 0) }
+    }
+
     pub fn read(fd: u64, buf_ptr: u64, count: u64) -> Result<u64, Errno> {
         unsafe { syscall(SYS_READ, fd, buf_ptr, count, 0, 0, 0) }
     }

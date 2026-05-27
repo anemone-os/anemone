@@ -92,13 +92,9 @@ pub fn run_ltp_tests() {
     }
 
     println!(
-		"user-test: LTP whitelist finished: attempted={} passed={} failed={} infra_failed={} skipped={}",
-		overall.attempted,
-		overall.passed,
-		overall.failed,
-		overall.infra_failed,
-		overall.skipped,
-	);
+        "user-test: LTP whitelist finished: attempted={} passed={} failed={} infra_failed={} skipped={}",
+        overall.attempted, overall.passed, overall.failed, overall.infra_failed, overall.skipped,
+    );
 }
 
 fn run_ltp_root(root: &LtpRoot) -> LtpSummary {

@@ -26,7 +26,7 @@ const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "busybox_testcode.sh",
     // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
-    "iozone_testcode.sh",
+    // "iozone_testcode.sh",
     // "iperf_testcode.sh",
     // "libcbench_testcode.sh",
     // "lmbench_testcode.sh",
@@ -123,14 +123,19 @@ fn run_local_tests() {
     // println!("user-test: signal test finished.");
 
     // 2. float test
-    // println!("user-test: running float test...");
-    // local_run_cmd("/bin/float-test", &["float-test", "--type", "sig"], &[]);
-    // println!("user-test: float test finished.");
+    println!("user-test: running float test...");
+    local_run_cmd("/bin/float-test", &["float-test", "--type", "sig"], &[]);
+    println!("user-test: float test finished.");
 
     // 3. shm test
     println!("user-test: running shm test...");
     local_run_cmd("/bin/shm-test", &["shm-test"], &[]);
     println!("user-test: shm test finished.");
+
+    // 4. pg test
+    println!("user-test: running pg test...");
+    local_run_cmd("/bin/pg-test", &["pg-test"], &[]);
+    println!("user-test: pg test finished.");
 }
 
 fn ensure_dir(path: &str) {
@@ -198,6 +203,8 @@ fn mount_competition_root() {
 fn init_competition_environment() {
     ensure_dir("/dev");
     mount(None, Path::new("/dev"), "devfs").expect("user-test: failed to mount devfs on /dev");
+    mount(None, Path::new("/dev/shm"), "ramfs")
+        .expect("user-test: failed to mount ramfs on /dev/shm");
 
     ensure_dir("/tmp");
     mount(None, Path::new("/tmp"), "ramfs").expect("user-test: failed to mount ramfs on /tmp");

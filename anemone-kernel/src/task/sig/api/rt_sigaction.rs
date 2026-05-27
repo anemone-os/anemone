@@ -42,6 +42,7 @@ fn sys_rt_sigaction(
         let KSigAction {
             action,
             flags,
+            restorer,
             mask,
         } = task.sig_disposition.read().get_disposition(sig);
 
@@ -52,6 +53,7 @@ fn sys_rt_sigaction(
                 SignalAction::Custom(addr) => addr.get() as *const (),
             },
             sa_flags: flags.bits(),
+            sa_restorer: restorer.as_ptr(),
             sa_mask: linux_signal::SigSet {
                 bits: mask.as_u64(),
             },
@@ -70,6 +72,7 @@ fn sys_rt_sigaction(
         let linux_signal::SigAction {
             sighandler,
             sa_flags,
+            sa_restorer,
             sa_mask,
         } = {
             let mut guard = usp.lock();
@@ -96,6 +99,7 @@ fn sys_rt_sigaction(
         let kaction = KSigAction {
             action,
             flags: sa_flags,
+            restorer: VirtAddr::new(sa_restorer as u64),
             mask: sa_mask,
         };
         kdebugln!(

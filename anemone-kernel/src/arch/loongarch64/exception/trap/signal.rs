@@ -38,10 +38,11 @@ impl SignalArchTrait for LA64SignalArch {
 
         if fpu {
             buf.uc_mcontext
+                .sc_fpuctx
                 .fregs
                 .copy_from_slice(&trapframe.fpu_regs().f);
-            buf.uc_mcontext.fcc = trapframe.fpu_regs().fcc;
-            buf.uc_mcontext.fcsr = trapframe.fpu_regs().fcsr;
+            buf.uc_mcontext.sc_fpuctx.fcc = trapframe.fpu_regs().fcc;
+            buf.uc_mcontext.sc_fpuctx.fcsr = trapframe.fpu_regs().fcsr;
         } else {
             // keep
         }
@@ -61,9 +62,9 @@ impl SignalArchTrait for LA64SignalArch {
             trapframe
                 .fpu_regs_mut()
                 .f
-                .copy_from_slice(&ucontext.uc_mcontext.fregs);
-            trapframe.fpu_regs_mut().fcc = ucontext.uc_mcontext.fcc;
-            trapframe.fpu_regs_mut().fcsr = ucontext.uc_mcontext.fcsr;
+                .copy_from_slice(&ucontext.uc_mcontext.sc_fpuctx.fregs);
+            trapframe.fpu_regs_mut().fcc = ucontext.uc_mcontext.sc_fpuctx.fcc;
+            trapframe.fpu_regs_mut().fcsr = ucontext.uc_mcontext.sc_fpuctx.fcsr;
         }
     }
 
