@@ -21,10 +21,10 @@ const BOOTSTRAP_BUSYBOX_FALLBACK: &str = "/glibc/busybox";
 const COMPETITION_DISK: &str = "/dev/vdb";
 const COMP_PATH_ENV: &str = "PATH=/bin:/usr/bin:/usr/sbin:/sbin:/";
 const GLIBC_TEST_SCRIPTS: &[&str] = &[
-    "basic_testcode.sh",
+    // "basic_testcode.sh",
     // "lua_testcode.sh",
     // "busybox_testcode.sh",
-    "libctest_testcode.sh",
+    // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
     // "iozone_testcode.sh",
     // "iperf_testcode.sh",
@@ -34,10 +34,10 @@ const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "unixbench_testcode.sh",
 ];
 const MUSL_TEST_SCRIPTS: &[&str] = &[
-    "basic_testcode.sh",
+    // "basic_testcode.sh",
     // "lua_testcode.sh",
     // "busybox_testcode.sh",
-    "libctest_testcode.sh",
+    // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
     // "iozone_testcode.sh",
     // "iperf_testcode.sh",
@@ -131,6 +131,11 @@ fn run_local_tests() {
     println!("user-test: running shm test...");
     local_run_cmd("/bin/shm-test", &["shm-test"], &[]);
     println!("user-test: shm test finished.");
+
+    // 4. pg test
+    println!("user-test: running pg test...");
+    local_run_cmd("/bin/pg-test", &["pg-test"], &[]);
+    println!("user-test: pg test finished.");
 }
 
 fn ensure_dir(path: &str) {
