@@ -132,6 +132,7 @@ impl TryFromSyscallArg for CloneFlagsWithSignal {
             SIGHAND,
             CLEAR_SIGHAND,
             THREAD,
+            VFORK,
             VM,
             FS,
             SYSVSEM,
@@ -184,6 +185,12 @@ impl TryFromSyscallArg for CloneStack {
             Ok(Self::New(vaddr))
         }
     }
+}
+
+fn wait_for_vfork_done(child: &Arc<Task>) {
+    child.vfork_done.listen_uninterruptible(true, || {
+        child.exit_code().is_some() || child.get_thread_group().has_executed()
+    });
 }
 
 /// TODO: rolling back is toooooooo tedious and complex! this function is really
@@ -452,7 +459,12 @@ pub fn kernel_clone(
     }
 
     match guard.publish(new_task, binding) {
-        Ok(published) => task_enqueue(published),
+        Ok(published) => {
+            task_enqueue(published.clone());
+            if flags.contains(CloneFlags::VFORK) {
+                wait_for_vfork_done(&published);
+            }
+        },
         Err((new_task, e)) => {
             knoticeln!("failed to publish cloned task: {:?}", e);
 

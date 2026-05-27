@@ -70,6 +70,7 @@ pub fn kernel_execve(
 
                 let ksp = task.kstack().stack_top();
                 task.on_prv_change(Privilege::User);
+                task.vfork_done.publish(1, true);
 
                 // DROP
                 drop(task);

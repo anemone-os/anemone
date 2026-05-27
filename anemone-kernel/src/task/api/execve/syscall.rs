@@ -24,6 +24,11 @@ pub fn execve(
     >,
 ) -> Result<u64, SysError> {
     let path = Path::new(path.as_ref());
+    let argv = if argv.is_empty() {
+        vec![Box::<str>::from("")]
+    } else {
+        argv
+    };
 
     kernel_execve(
         &path.to_str().expect("we've already validated path to be a valid C string, whose encoding is a subset of UTF-8"), 
