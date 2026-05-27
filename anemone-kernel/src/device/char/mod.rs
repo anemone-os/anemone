@@ -213,22 +213,3 @@ mod null;
 mod urandom;
 mod zero;
 // TODO: implement kernel entropy source and use it for urandom.
-
-#[cfg(feature = "kunit")]
-mod kunits {
-    use super::*;
-    #[kunit]
-    fn test_cdev() {
-        let mut ctx = IterCtx::new();
-        let cdev = next_char_dev(&mut ctx).and_then(|entry| get_char_dev(entry.devnum));
-
-        if let Some(cdev) = cdev {
-            use yansi::*;
-            let mut writer = cdev.writer();
-            writeln!(writer).unwrap();
-            writeln!(writer, "{}", "御伽噺".red().bold()).unwrap();
-            writeln!(writer, "{}", "Otogibanashi".blue().bold()).unwrap();
-            writeln!(writer, "{}", "おとぎばなし".magenta().bold()).unwrap();
-        }
-    }
-}

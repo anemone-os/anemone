@@ -138,7 +138,10 @@ fn sys_shmget(
             }
 
             if !shmflg.flags.contains(ShmGetFlags::CREATE) {
-                knoticeln!("sys_shmget: key {:#x} not found without IPC_CREAT", key.raw());
+                knoticeln!(
+                    "sys_shmget: key {:#x} not found without IPC_CREAT",
+                    key.raw()
+                );
                 return Err(SysError::NotFound);
             }
         }

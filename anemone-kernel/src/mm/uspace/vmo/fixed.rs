@@ -23,7 +23,11 @@ impl FixedObject {
 }
 
 impl VmObject for FixedObject {
-    fn resolve_frame(&self, pidx: usize, _access: PageFaultType) -> Result<ResolvedFrame, SysError> {
+    fn resolve_frame(
+        &self,
+        pidx: usize,
+        _access: PageFaultType,
+    ) -> Result<ResolvedFrame, SysError> {
         self.check_pidx(pidx)?;
         Ok(ResolvedFrame {
             frame: self.pages[pidx].clone(),

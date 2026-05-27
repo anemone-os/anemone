@@ -3,10 +3,7 @@ use crate::{
         args::{AtFd, LinuxInodePerm},
         fchmod::kernel_fchmod,
     },
-    prelude::{
-        user_access::c_readonly_string,
-        *,
-    },
+    prelude::{user_access::c_readonly_string, *},
 };
 
 #[syscall(SYS_FCHMODAT)]

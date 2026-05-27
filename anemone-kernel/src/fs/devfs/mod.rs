@@ -1,13 +1,10 @@
 //! Global singleton /dev publish layer.
 
-use crate::{
-	prelude::*,
-	utils::any_opaque::NilOpaque,
-};
+use crate::{prelude::*, utils::any_opaque::NilOpaque};
 
 use self::{
-	inode::{devfs_new_leaf_inode, devfs_new_root_inode},
-	superblock::{DEVFS_SB_OPS, alloc_ino},
+	inode::{devfs_new_node_inode, devfs_new_root_inode},
+	superblock::{alloc_ino, DEVFS_SB_OPS},
 };
 
 mod file;
@@ -15,13 +12,15 @@ mod inode;
 mod superblock;
 
 const DEVFS_ROOT_INO: Ino = Ino::new(1);
+const DEVFS_SHM_DIR_NAME: &str = "shm";
 
 static DEVFS: MonoOnce<Arc<FileSystem>> = unsafe { MonoOnce::new() };
 
 static DEVFS_SB: MonoOnce<Arc<SuperBlock>> = unsafe { MonoOnce::new() };
 
 // Static-publish-only registry for the singleton /dev instance.
-static DEVFS_REGISTRY: Lazy<RwLock<DevfsRegistry>> = Lazy::new(|| RwLock::new(DevfsRegistry::new()));
+static DEVFS_REGISTRY: Lazy<RwLock<DevfsRegistry>> =
+	Lazy::new(|| RwLock::new(DevfsRegistry::new()));
 
 #[derive(Debug, Clone, Copy)]
 pub struct DevfsNodeAttr {
@@ -39,6 +38,12 @@ pub trait DevfsNodeOps: Send + Sync {
 	fn get_attr(&self, inode: &InodeRef, attr: DevfsNodeAttr) -> Result<InodeStat, SysError>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DevfsNodeKind {
+	Dir,
+	Leaf,
+}
+
 pub struct DevfsPublish {
 	pub name: String,
 	pub attr: DevfsNodeAttr,
@@ -52,8 +57,9 @@ pub struct DevfsPublish {
 struct DevfsNode {
 	name: String,
 	ino: Ino,
+	kind: DevfsNodeKind,
 	attr: DevfsNodeAttr,
-	ops: Arc<dyn DevfsNodeOps>,
+	ops: Option<Arc<dyn DevfsNodeOps>>,
 }
 
 struct DevfsRegistry {
@@ -86,41 +92,72 @@ fn published_node_at(index: usize) -> Option<Arc<DevfsNode>> {
 // before the name becomes visible in the registry. Lookup therefore never
 // needs to synthesize leaf inodes on demand.
 pub fn publish(desc: DevfsPublish) -> Result<Ino, SysError> {
-	if desc.name.is_empty() || desc.name.contains('/') || matches!(desc.name.as_str(), "." | "..") {
+	devfs_publish_node(desc.name, DevfsNodeKind::Leaf, desc.attr, Some(desc.ops))
+}
+
+fn devfs_publish_node(
+	name: String,
+	kind: DevfsNodeKind,
+	attr: DevfsNodeAttr,
+	ops: Option<Arc<dyn DevfsNodeOps>>,
+) -> Result<Ino, SysError> {
+	if name.is_empty() || name.contains('/') || matches!(name.as_str(), "." | "..") {
 		return Err(SysError::InvalidArgument);
 	}
 
-	if desc.attr.ty == InodeType::Dir {
+	if matches!(kind, DevfsNodeKind::Dir) && attr.ty != InodeType::Dir {
+		return Err(SysError::InvalidArgument);
+	}
+
+	if matches!(kind, DevfsNodeKind::Leaf) && attr.ty == InodeType::Dir {
+		return Err(SysError::InvalidArgument);
+	}
+
+	if matches!(kind, DevfsNodeKind::Leaf) && ops.is_none() {
 		return Err(SysError::InvalidArgument);
 	}
 
 	let sb = devfs_sb();
 	let mut registry = DEVFS_REGISTRY.write();
 
-	if registry.by_name.contains_key(desc.name.as_str()) {
+	if registry.by_name.contains_key(name.as_str()) {
 		return Err(SysError::AlreadyExists);
 	}
 
 	let node = Arc::new(DevfsNode {
-		name: desc.name,
+		name,
 		ino: alloc_ino(),
-		attr: desc.attr,
-		ops: desc.ops,
+		kind,
+		attr,
+		ops,
 	});
 
-	let inode = devfs_new_leaf_inode(sb.clone(), node.clone());
+	let inode = devfs_new_node_inode(sb.clone(), node.clone());
 	sb.seed_inode(inode);
+
+	if matches!(kind, DevfsNodeKind::Dir) {
+		sb.root_inode().inode().inc_nlink();
+	}
 
 	registry.by_name.insert(node.name.clone(), node.clone());
 	registry.ordered.push(node.clone());
 
-	kdebugln!(
-		"devfs: published {} with ino {}",
-		node.name,
-		node.ino
-	);
+	kdebugln!("devfs: published {} with ino {}", node.name, node.ino);
 
 	Ok(node.ino)
+}
+
+fn devfs_publish_static_dir(name: &str) -> Result<Ino, SysError> {
+	devfs_publish_node(
+		name.to_string(),
+		DevfsNodeKind::Dir,
+		DevfsNodeAttr {
+			ty: InodeType::Dir,
+			perm: InodePerm::all_rwx(),
+			rdev: DeviceId::None,
+		},
+		None,
+	)
 }
 
 fn devfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, SysError> {
@@ -170,6 +207,13 @@ fn init() {
 	DEVFS_SB.init(|slot| {
 		slot.write(sb);
 	});
+
+	if let Err(err) = devfs_publish_static_dir(DEVFS_SHM_DIR_NAME) {
+		panic!(
+			"failed to register devfs static mountpoint {}: {:?}",
+			DEVFS_SHM_DIR_NAME, err
+		);
+	}
 }
 
 #[cfg(feature = "kunit")]
@@ -232,16 +276,26 @@ mod kunits {
 		let root_ref = vfs_lookup(Path::new(mountpoint.as_str())).unwrap();
 		assert_eq!(root_ref.to_string(), mountpoint);
 
+		let shm_path = format!("{mountpoint}/shm");
+		let shm_ref = vfs_lookup(Path::new(shm_path.as_str())).unwrap();
+		assert_eq!(shm_ref.to_string(), shm_path);
+
 		let root_attr = vfs_get_attr(Path::new(mountpoint.as_str())).unwrap();
 		assert_eq!(root_attr.mode.ty(), InodeType::Dir);
-		assert_eq!(root_attr.nlink, 2);
+		assert_eq!(root_attr.nlink, 3);
 		assert_eq!(root_attr.rdev, DeviceId::None);
+
+		let shm_attr = vfs_get_attr(Path::new(shm_path.as_str())).unwrap();
+		assert_eq!(shm_attr.mode.ty(), InodeType::Dir);
+		assert_eq!(shm_attr.nlink, 2);
+		assert_eq!(shm_attr.rdev, DeviceId::None);
 
 		assert_eq!(
 			vfs_lookup(Path::new("/kunit-devfs-mount/missing")).unwrap_err(),
 			SysError::NotFound
 		);
 
+		drop(shm_ref);
 		drop(root_ref);
 		unmount_devfs(&mountpoint);
 	}
@@ -253,6 +307,7 @@ mod kunits {
 		let entries = devfs_entries(&mountpoint);
 		assert_eq!(entries[0], ".");
 		assert_eq!(entries[1], "..");
+		assert!(entries.iter().any(|name| name == "shm"));
 		assert!(entries.iter().any(|name| name == "null"));
 		assert!(entries.iter().any(|name| name == "zero"));
 		assert!(entries.iter().any(|name| name.starts_with("ram")));

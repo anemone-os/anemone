@@ -203,6 +203,8 @@ fn mount_competition_root() {
 fn init_competition_environment() {
     ensure_dir("/dev");
     mount(None, Path::new("/dev"), "devfs").expect("user-test: failed to mount devfs on /dev");
+    mount(None, Path::new("/dev/shm"), "ramfs")
+        .expect("user-test: failed to mount ramfs on /dev/shm");
 
     ensure_dir("/tmp");
     mount(None, Path::new("/tmp"), "ramfs").expect("user-test: failed to mount ramfs on /tmp");

@@ -8,9 +8,10 @@ use super::{
 
 /// A single attachment of one SysV shared-memory segment in an address space.
 ///
-/// The attach address is page-granular by construction. Syscall entry points may
-/// accept byte addresses, but the user-space bookkeeping should not preserve the
-/// redundant byte offset once validation and rounding are complete.
+/// The attach address is page-granular by construction. Syscall entry points
+/// may accept byte addresses, but the user-space bookkeeping should not
+/// preserve the redundant byte offset once validation and rounding are
+/// complete.
 #[derive(Debug, Clone)]
 pub struct ShmAttachment {
     pub segment: Arc<ShmSegment>,
@@ -66,8 +67,9 @@ impl ShmAttachReservation {
 /// Kernel object for one SysV shared-memory segment.
 ///
 /// Immutable identity and sizing data are kept lock-free after construction.
-/// Mutable IPC metadata is protected by a short spin critical section because it
-/// is small, non-sleeping state that may be touched from process teardown paths.
+/// Mutable IPC metadata is protected by a short spin critical section because
+/// it is small, non-sleeping state that may be touched from process teardown
+/// paths.
 #[derive(Debug)]
 pub struct ShmSegment {
     id: ShmId,

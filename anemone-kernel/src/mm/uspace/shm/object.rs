@@ -6,8 +6,8 @@ pub struct ShmObject {
     ///
     /// Pages are allocated lazily on first fault. Unlike private anonymous
     /// mappings, shared memory must materialize a real zeroed page even for the
-    /// first read so later writes from another attachment become visible through
-    /// the same frame.
+    /// first read so later writes from another attachment become visible
+    /// through the same frame.
     pages: RwLock<BTreeMap<usize, FrameHandle>>,
     max_pages: usize,
 }

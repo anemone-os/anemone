@@ -184,9 +184,9 @@ impl DriverOps for PcieEcamDriver {
         })?;
 
         let intr_mask = of_node.prop_read_raw("interrupt-map-mask");
-        
+
         if let Some(intr_mask) = intr_mask {
-            if intr_mask.len() != (3 + intr_cells) * 4{
+            if intr_mask.len() != (3 + intr_cells) * 4 {
                 kerrln!(
                     "error probing PCIe ECAM device {}: invalid 'interrupt-map-mask' length {}.",
                     pdev.name(),
@@ -199,9 +199,14 @@ impl DriverOps for PcieEcamDriver {
             let mut specifier = 0;
             for i in 0..intr_cells {
                 specifier <<= 32;
-                specifier |= u32::from_be_bytes(specifier_raw[(i as usize * 4)..][..4].try_into().unwrap()) as u64;
+                specifier |=
+                    u32::from_be_bytes(specifier_raw[(i as usize * 4)..][..4].try_into().unwrap())
+                        as u64;
             }
-            domain.resources_mut().set_intr_key_mask(PcieIntrKey { func_addr: addr.func_addr(), intr_pin: specifier as u8 });
+            domain.resources_mut().set_intr_key_mask(PcieIntrKey {
+                func_addr: addr.func_addr(),
+                intr_pin: specifier as u8,
+            });
         }
 
         // Lower half of an interrupt-map entry: 3 cells child address +
@@ -209,12 +214,11 @@ impl DriverOps for PcieEcamDriver {
         let intr_map_item_width_half = ((3 + intr_cells + 1) * 4) as usize;
         let mut index = 0;
         while index + intr_map_item_width_half <= intr_map.len() {
-
             let lower_half = &intr_map[index..][..intr_map_item_width_half];
 
             let child_addr = &lower_half[0..12];
             let child_addr = OfPciAddr::from_be_bytes(child_addr.try_into().unwrap());
-            
+
             let child_intr_spec_raw = &lower_half[12..][..intr_cells * 4];
 
             let mut child_intr_spec = 0;
@@ -271,12 +275,16 @@ impl DriverOps for PcieEcamDriver {
             let parent_addr = &upper_half[0..addr_cells_par * 4];
 
             let parent_intr_spec = &upper_half[addr_cells_par * 4..][..intr_cells_par * 4];
-            domain.resources_mut().add_intr_map(PcieIntrKey{func_addr:child_addr.func_addr(),
-                intr_pin: child_intr_spec as u8
-            }, PcieIntrInfo{
-                parent: parent_node,
-                parent_intr_spec: Box::from(parent_intr_spec)
-            });
+            domain.resources_mut().add_intr_map(
+                PcieIntrKey {
+                    func_addr: child_addr.func_addr(),
+                    intr_pin: child_intr_spec as u8,
+                },
+                PcieIntrInfo {
+                    parent: parent_node,
+                    parent_intr_spec: Box::from(parent_intr_spec),
+                },
+            );
             index += intr_map_item_width_half + intr_map_item_width_half_upper;
         }
 

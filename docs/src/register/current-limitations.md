@@ -54,7 +54,7 @@
 **Severity:** Medium
 **Area:** devfs / device model
 
-**Summary:** 当前 devfs 第一版只支持启动期静态 publish 到扁平 `/dev` 根目录，不支持运行期 unpublish/hot-unplug、目录层级、别名或 symlink。
+**Summary:** 当前 devfs 第一版主要只支持启动期静态 publish 到扁平 `/dev` 根目录；为了 `user-test` 的 `ramfs` 挂载，另有一个静态 `/dev/shm` 目录挂载点，但这不代表通用目录层级能力。不支持运行期 unpublish/hot-unplug、别名或 symlink。
 
 **Exit Condition:** 只有在真实设备热插拔或多级命名空间需求出现后，再为 devfs 增加显式的发布失效协议、目录发布能力与相应的 dentry/inode 回收路径。
 
@@ -132,4 +132,19 @@
 
 **Owner:** doruche
 **Last Verified:** 2026-05-26
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260527-PROCESS-GROUP-SESSION-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** task topology / process group / session / job control
+
+**Summary:** 当前进程组与会话实现是从 `69bff4b` 之后引入的 stage-1 主干，已经覆盖 PGID/SID 拓扑、`setpgid` / `getpgid` / `setsid` / `getsid`、process-group `kill` 和 `wait4` 的基础选择语义，但还不是完整 job-control 实现；尚未接入 controlling tty、foreground/background process group、terminal job-control 信号、orphaned process group 的 `SIGHUP` / `SIGCONT` 规则，也尚未提供 `waitid`。
+
+**Exit Condition:** 补齐 `waitid` 的 P_PID / P_PGID / P_ALL 基础语义，接入 controlling tty 和 foreground process-group 管理，并为 background terminal access、session leader 退出、newly orphaned stopped process group 等路径补齐 Linux/POSIX 对齐的回归测试。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-27
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)

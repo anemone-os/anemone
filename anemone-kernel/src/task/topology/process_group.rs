@@ -2,9 +2,7 @@
 
 use crate::{
     prelude::*,
-    task::{
-        ProcessGroupInner, SessionInner, ThreadGroupInner, sig::Signal, topology::TOPOLOGY,
-    },
+    task::{ProcessGroupInner, SessionInner, ThreadGroupInner, sig::Signal, topology::TOPOLOGY},
 };
 
 impl Session {
@@ -245,7 +243,8 @@ impl ThreadGroup {
         Ok(())
     }
 
-    /// Create a new session and process group containing only this thread group.
+    /// Create a new session and process group containing only this thread
+    /// group.
     ///
     /// # Locks
     ///
@@ -332,7 +331,10 @@ impl ThreadGroup {
             target_tgid
         );
         assert!(
-            topology.process_groups.insert(target_tgid, new_pg).is_none(),
+            topology
+                .process_groups
+                .insert(target_tgid, new_pg)
+                .is_none(),
             "task topology: duplicate process group {}",
             target_tgid
         );
@@ -365,7 +367,11 @@ pub struct ProcessGroupMoveContext {
 
 impl ProcessGroupMoveContext {
     pub fn target_is_child_of(&self, parent: &ThreadGroup) -> bool {
-        parent.inner.read().children_tgids.contains(&self.target_tgid)
+        parent
+            .inner
+            .read()
+            .children_tgids
+            .contains(&self.target_tgid)
     }
 }
 

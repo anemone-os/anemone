@@ -3,7 +3,10 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/pread.2.html
 
-use crate::{prelude::{user_access::user_addr, *}, task::files::Fd};
+use crate::{
+    prelude::{user_access::user_addr, *},
+    task::files::Fd,
+};
 
 use super::{checked_nonnegative_offset, current_file_and_uspace, read_into_user_buffer};
 

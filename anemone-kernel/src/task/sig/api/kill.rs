@@ -57,7 +57,26 @@ fn sys_kill(target: KillTarget, signo: SigNo) -> Result<u64, SysError> {
             pg.recv_signal(signal);
         },
         KillTarget::Broadcast => {
-            todo!("api with lock already acquired");
+            let current_tgid = get_current_task().tgid();
+            let mut targets = Vec::new();
+
+            for_each_thread_group_from(
+                |tg| {
+                    let tgid = tg.tgid();
+                    if tgid != Tid::INIT && tgid != current_tgid {
+                        targets.push(tg.clone());
+                    }
+                },
+                None,
+            );
+
+            if targets.is_empty() {
+                return Err(SysError::NoSuchProcess);
+            }
+
+            for tg in targets {
+                tg.recv_signal(signal.clone());
+            }
         },
     }
 
