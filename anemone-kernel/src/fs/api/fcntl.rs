@@ -5,7 +5,7 @@
 
 use crate::{
     prelude::{handler::TryFromSyscallArg, *},
-    task::files::{Fd, FileFlags},
+    task::files::{Fd, FileStatusFlags},
 };
 
 #[derive(Debug)]
@@ -94,22 +94,49 @@ fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
         },
         FcntlCmd::GetFl => {
             let file = task.get_fd(fd)?;
-            let flags = file.file_flags().to_linux_open_flags();
+            let flags = file.to_linux_getfl_flags();
             Ok(flags as u64)
         },
         FcntlCmd::SetFl => {
-            use anemone_abi::fs::linux::open::{O_APPEND, O_DIRECT, O_NONBLOCK};
+            use anemone_abi::fs::linux::open::{O_DSYNC, O_NOATIME, O_SYNC};
 
             let file = task.get_fd(fd)?;
+            // Linux treats O_PATH file descriptions as path handles, not as
+            // mutable file descriptions for F_SETFL.
+            if file.is_path_only() {
+                return Err(SysError::BadFileDescriptor);
+            }
+
             let raw_flags = u32::try_from_syscall_arg(arg)?;
+            let ignored = raw_flags & (O_DSYNC | O_SYNC | O_NOATIME);
+            if ignored != 0 {
+                knoticeln!(
+                    "fcntl(F_SETFL): ignoring non-settable status flags: {:#x}",
+                    ignored
+                );
+            }
+
+            // F_SETFL can change only a narrow dynamic subset. Access mode,
+            // O_PATH, O_CLOEXEC, creation flags, and saved compatibility bits
+            // stay fixed on the open file description / fd.
             let mut flags = file.file_flags();
-            flags.set(FileFlags::APPEND, raw_flags & O_APPEND != 0);
-            flags.set(FileFlags::NONBLOCK, raw_flags & O_NONBLOCK != 0);
-            flags.set(FileFlags::DIRECT, raw_flags & O_DIRECT != 0);
+            let settable = FileStatusFlags::settable_from_linux_flags(raw_flags);
+            flags.set(
+                FileStatusFlags::APPEND,
+                settable.contains(FileStatusFlags::APPEND),
+            );
+            flags.set(
+                FileStatusFlags::NONBLOCK,
+                settable.contains(FileStatusFlags::NONBLOCK),
+            );
+            flags.set(
+                FileStatusFlags::DIRECT,
+                settable.contains(FileStatusFlags::DIRECT),
+            );
             file.set_file_flags(flags);
             crate::fs::pipe::update_nonblock(
                 file.vfs_file(),
-                flags.contains(FileFlags::NONBLOCK),
+                flags.contains(FileStatusFlags::NONBLOCK),
             );
             Ok(0)
         },

@@ -246,8 +246,6 @@ fn init_competition_environment() {
         ensure_symlink("/glibc/lib/libm.so.6", "libm.so");
     }
 
-    println!("testing procfs...");
-    run_busybox(&["busybox", "ls", "/proc"], "ls /proc");
     println!("user-test: competition environment initialized.");
 }
 

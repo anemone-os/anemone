@@ -30,15 +30,18 @@ fn sys_sendfile(
     let out_fd = task.get_fd(out_fd)?;
     let in_fd = task.get_fd(in_fd)?;
 
-    if !in_fd.file_flags().contains(FileFlags::READ) {
+    if !in_fd.can_read() {
         return Err(SysError::BadFileDescriptor);
     }
 
-    if !out_fd.file_flags().contains(FileFlags::WRITE) {
+    if !out_fd.can_write() {
         return Err(SysError::BadFileDescriptor);
     }
 
-    if out_fd.file_flags().contains(FileFlags::APPEND) {
+    if out_fd
+        .file_flags()
+        .contains(crate::task::files::FileStatusFlags::APPEND)
+    {
         // Linux returns EINVAL if the output file descriptor has O_APPEND flag.
         return Err(SysError::InvalidArgument);
     }

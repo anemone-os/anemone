@@ -83,23 +83,25 @@ fn sys_mmap(
         let poffset = offset as usize >> PagingArch::PAGE_SIZE_BITS;
         let fd = Fd::new(raw_fd as u32).ok_or(SysError::BadFileDescriptor)?;
         let file = get_current_task().get_fd(fd)?;
+        if file.is_path_only() {
+            return Err(SysError::BadFileDescriptor);
+        }
         let supported_prot = {
             let mut prot = Protection::empty();
-            let file_flags = file.file_flags();
-            if file_flags.contains(FileFlags::READ) {
+            if file.can_read() {
                 prot |= Protection::READ;
                 prot |= Protection::EXECUTE;
             }
 
             if shared {
-                if file_flags.contains(FileFlags::WRITE) {
+                if file.can_write() {
                     prot |= Protection::WRITE;
                 }
             } else {
                 // for private mapping, readable file can be mapped with write
                 // permission, because the changes will not be written back to
                 // the file.
-                if file_flags.contains(FileFlags::READ) {
+                if file.can_read() {
                     prot |= Protection::WRITE;
                 }
             }

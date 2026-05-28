@@ -1,7 +1,7 @@
 use crate::{
     fs::iomux::{PollEvent, PollRequest},
     prelude::*,
-    utils::any_opaque::AnyOpaque,
+    utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
 /// VTable a file must implement to support file operations.
@@ -118,6 +118,18 @@ impl File {
             prv,
             pos: Mutex::new(0),
         }
+    }
+
+    pub(super) fn path_only(path: PathRef) -> Self {
+        static PATH_ONLY_FILE_OPS: FileOps = FileOps {
+            read: |_, _, _| Err(SysError::BadFileDescriptor),
+            write: |_, _, _| Err(SysError::BadFileDescriptor),
+            validate_seek: |_, _| Err(SysError::BadFileDescriptor),
+            read_dir: |_, _, _| Err(SysError::BadFileDescriptor),
+            poll: |_, req| Ok(PollEvent::empty() & req.interests()),
+        };
+
+        Self::new(path, &PATH_ONLY_FILE_OPS, NilOpaque::new())
     }
 
     pub(super) fn prv(&self) -> &AnyOpaque {

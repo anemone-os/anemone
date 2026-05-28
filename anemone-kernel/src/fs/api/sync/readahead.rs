@@ -2,7 +2,7 @@
 
 use crate::{
     prelude::*,
-    task::files::{Fd, FileFlags},
+    task::files::Fd,
 };
 
 #[syscall(SYS_READAHEAD)]
@@ -19,7 +19,7 @@ fn sys_readahead(raw_fd: i32, _offset: i64, count: usize) -> Result<u64, SysErro
     let task = get_current_task();
     let file = task.get_fd(fd)?;
 
-    if !file.file_flags().contains(FileFlags::READ) {
+    if !file.can_read() {
         return Err(SysError::BadFileDescriptor);
     }
 

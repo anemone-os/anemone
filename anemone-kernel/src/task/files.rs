@@ -38,9 +38,14 @@ impl TryFromSyscallArg for Fd {
 
 #[derive(Debug)]
 pub struct ProcFile {
-    /// Vfs file.
+    /// Shared VFS opened handle.
+    ///
+    /// This object is not process-local. Duplicated descriptors and forked file
+    /// tables share it, including file status flags and the opened file handle.
     file: File,
-    flags: SpinLock<FileFlags>,
+    access: OpenAccessMode,
+    status_flags: SpinLock<FileStatusFlags>,
+    compat: LinuxOpenCompat,
 }
 
 #[derive(Debug)]
@@ -64,10 +69,10 @@ impl Clone for FileDesc {
 // TODO: we only checked permission of fd, but we haven't checked permission of
 // the file itself.
 impl FileDesc {
-    fn new(pfile: Arc<ProcFile>, flags: FdFlags) -> Self {
+    fn new(pfile: Arc<ProcFile>, fd_flags: FdFlags) -> Self {
         Self {
             pfile,
-            flags: SpinLock::new(flags),
+            flags: SpinLock::new(fd_flags),
         }
     }
 
@@ -75,12 +80,34 @@ impl FileDesc {
         &self.pfile.file
     }
 
-    pub fn file_flags(&self) -> FileFlags {
-        *self.pfile.flags.lock()
+    pub fn access_mode(&self) -> OpenAccessMode {
+        self.pfile.access
     }
 
-    pub fn set_file_flags(&self, flags: FileFlags) {
-        *self.pfile.flags.lock() = flags;
+    pub fn can_read(&self) -> bool {
+        self.pfile.access.can_read()
+    }
+
+    pub fn can_write(&self) -> bool {
+        self.pfile.access.can_write()
+    }
+
+    pub fn is_path_only(&self) -> bool {
+        self.pfile.access.is_path_only()
+    }
+
+    pub fn file_flags(&self) -> FileStatusFlags {
+        *self.pfile.status_flags.lock()
+    }
+
+    pub fn set_file_flags(&self, flags: FileStatusFlags) {
+        *self.pfile.status_flags.lock() = flags;
+    }
+
+    pub fn to_linux_getfl_flags(&self) -> u32 {
+        self.pfile.access.to_linux_open_flags()
+            | self.file_flags().to_linux_open_flags()
+            | self.pfile.compat.getfl_visible_flags()
     }
 
     pub fn fd_flags(&self) -> FdFlags {
@@ -92,16 +119,14 @@ impl FileDesc {
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
-        let flags = self.file_flags();
-        if !flags.contains(FileFlags::READ) {
+        if !self.can_read() {
             return Err(SysError::BadFileDescriptor);
         }
         self.pfile.file.read(buf).map_err(|e| e.into())
     }
 
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, SysError> {
-        let flags = self.file_flags();
-        if !flags.contains(FileFlags::READ) {
+        if !self.can_read() {
             return Err(SysError::BadFileDescriptor);
         }
         self.pfile.file.read_at(offset, buf).map_err(|e| e.into())
@@ -110,11 +135,11 @@ impl FileDesc {
     /// This applies to both write and append mode.
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         let flags = self.file_flags();
-        if !flags.contains(FileFlags::WRITE) {
+        if !self.can_write() {
             return Err(SysError::BadFileDescriptor);
         }
 
-        if flags.contains(FileFlags::APPEND) {
+        if flags.contains(FileStatusFlags::APPEND) {
             self.pfile.file.append(buf).map_err(|e| e.into())
         } else {
             self.pfile.file.write(buf).map_err(|e| e.into())
@@ -123,16 +148,15 @@ impl FileDesc {
 
     /// Positioned writes keep the file cursor unchanged.
     pub fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize, SysError> {
+        let flags = self.file_flags();
+        if !self.can_write() {
+            return Err(SysError::BadFileDescriptor);
+        }
         self.pfile
             .file
             .validate_seek(offset)
             .map_err(|e| e.into())?;
-
-        let flags = self.file_flags();
-        if !flags.contains(FileFlags::WRITE) {
-            return Err(SysError::BadFileDescriptor);
-        }
-        if flags.contains(FileFlags::APPEND) {
+        if flags.contains(FileStatusFlags::APPEND) {
             return self
                 .pfile
                 .file
@@ -143,7 +167,7 @@ impl FileDesc {
     }
 
     pub fn truncate(&self, len: u64) -> Result<(), SysError> {
-        if !self.file_flags().contains(FileFlags::WRITE) {
+        if !self.can_write() {
             return Err(SysError::PermissionDenied);
         }
 
@@ -157,10 +181,16 @@ impl FileDesc {
     /// `whence` is Linux-specific. we handle that in syscall handler. it should
     /// not pollute our FileDesc API.
     pub fn seek(&self, offset: usize) -> Result<(), SysError> {
+        if self.is_path_only() {
+            return Err(SysError::BadFileDescriptor);
+        }
         self.pfile.file.seek(offset).map_err(|e| e.into())
     }
 
     pub fn read_dir(&self, sink: &mut dyn DirSink) -> Result<ReadDirResult, SysError> {
+        if self.is_path_only() {
+            return Err(SysError::BadFileDescriptor);
+        }
         self.pfile.file.read_dir(sink).map_err(|e| e.into())
     }
 
@@ -171,33 +201,85 @@ impl FileDesc {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct FileFlags: u32 {
-        const READ = 0b0001;
-        const WRITE = 0b0010;
-        const APPEND = 0b0100;
-        const NONBLOCK = 0b1000;
-        const DIRECT = 0b1_0000;
+    pub struct FileStatusFlags: u32 {
+        const APPEND = 0b0001;
+        const NONBLOCK = 0b0010;
+        const DIRECT = 0b0100;
+        const DSYNC = 0b1000;
+        const SYNC = 0b1_0000;
+        const NOATIME = 0b10_0000;
 
-        // create, truncate are not persistant flags, they are only used when opening a file, so we don't need to store them in FileDesc.
+        // create, truncate, and fd-local close-on-exec are not persistent file
+        // status flags, so they don't live in the shared ProcFile status state.
     }
 }
 
-impl FileFlags {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenAccessMode {
+    Read,
+    Write,
+    ReadWrite,
+    Path,
+}
+
+impl OpenAccessMode {
+    pub const fn can_read(self) -> bool {
+        matches!(self, Self::Read | Self::ReadWrite)
+    }
+
+    pub const fn can_write(self) -> bool {
+        matches!(self, Self::Write | Self::ReadWrite)
+    }
+
+    pub const fn is_path_only(self) -> bool {
+        matches!(self, Self::Path)
+    }
+
+    pub fn to_linux_open_flags(self) -> u32 {
+        use anemone_abi::fs::linux::open::*;
+
+        match self {
+            Self::Read => O_RDONLY,
+            Self::Write => O_WRONLY,
+            Self::ReadWrite => O_RDWR,
+            Self::Path => O_PATH,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LinuxOpenCompat {
+    getfl_visible_flags: u32,
+    accepted_noop_flags: u32,
+}
+
+impl LinuxOpenCompat {
+    pub const fn new(getfl_visible_flags: u32, accepted_noop_flags: u32) -> Self {
+        Self {
+            getfl_visible_flags,
+            accepted_noop_flags,
+        }
+    }
+
+    pub const fn empty() -> Self {
+        Self::new(0, 0)
+    }
+
+    pub const fn getfl_visible_flags(self) -> u32 {
+        self.getfl_visible_flags
+    }
+
+    pub const fn accepted_noop_flags(self) -> u32 {
+        self.accepted_noop_flags
+    }
+}
+
+impl FileStatusFlags {
     pub fn to_linux_open_flags(&self) -> u32 {
         use anemone_abi::fs::linux::open::*;
 
         let mut flags = 0;
 
-        // 1. O_RDONLY, O_WRONLY, O_RDWR
-        if self.contains(Self::READ) && self.contains(Self::WRITE) {
-            flags |= O_RDWR;
-        } else if self.contains(Self::READ) {
-            flags |= O_RDONLY;
-        } else if self.contains(Self::WRITE) {
-            flags |= O_WRONLY;
-        }
-
-        // 2. O_APPEND
         if self.contains(Self::APPEND) {
             flags |= O_APPEND;
         }
@@ -207,7 +289,26 @@ impl FileFlags {
         if self.contains(Self::DIRECT) {
             flags |= O_DIRECT;
         }
+        if self.contains(Self::DSYNC) {
+            flags |= O_DSYNC;
+        }
+        if self.contains(Self::SYNC) {
+            flags |= O_SYNC;
+        }
+        if self.contains(Self::NOATIME) {
+            flags |= O_NOATIME;
+        }
 
+        flags
+    }
+
+    pub fn settable_from_linux_flags(raw: u32) -> Self {
+        use anemone_abi::fs::linux::open::*;
+
+        let mut flags = Self::empty();
+        flags.set(Self::APPEND, raw & O_APPEND != 0);
+        flags.set(Self::NONBLOCK, raw & O_NONBLOCK != 0);
+        flags.set(Self::DIRECT, raw & O_DIRECT != 0);
         flags
     }
 }
@@ -220,37 +321,6 @@ bitflags! {
         ///
         /// Hmm... it seems that O_CLOEXEC is the only FdFlag?
         const CLOSE_ON_EXEC = 0b0001;
-    }
-}
-
-impl FileFlags {
-    pub fn from_linux_open_flags(flags: u32) -> Self {
-        let mut open_flags = Self::empty();
-        // 1. rw bits
-        match flags & 0b11 {
-            anemone_abi::fs::linux::open::O_RDONLY => {
-                open_flags |= Self::READ;
-            },
-            anemone_abi::fs::linux::open::O_WRONLY => {
-                open_flags |= Self::WRITE;
-            },
-            anemone_abi::fs::linux::open::O_RDWR => {
-                open_flags |= Self::READ | Self::WRITE;
-            },
-            _ => {},
-        }
-        // 2. append bit
-        if flags & anemone_abi::fs::linux::open::O_APPEND != 0 {
-            open_flags |= Self::APPEND;
-        }
-        if flags & anemone_abi::fs::linux::open::O_NONBLOCK != 0 {
-            open_flags |= Self::NONBLOCK;
-        }
-        if flags & anemone_abi::fs::linux::open::O_DIRECT != 0 {
-            open_flags |= Self::DIRECT;
-        }
-
-        open_flags
     }
 }
 
@@ -340,14 +410,18 @@ impl FilesState {
     fn open_fd(
         &mut self,
         file: File,
-        file_flags: FileFlags,
+        access: OpenAccessMode,
+        status_flags: FileStatusFlags,
+        compat: LinuxOpenCompat,
         fd_flags: FdFlags,
     ) -> Result<Fd, SysError> {
         let fd = self.alloc()?;
         let file_desc = Arc::new(FileDesc::new(
             Arc::new(ProcFile {
                 file,
-                flags: SpinLock::new(file_flags),
+                access,
+                status_flags: SpinLock::new(status_flags),
+                compat,
             }),
             fd_flags,
         ));
@@ -539,7 +613,7 @@ impl FilesState {
 //         }
 //     }
 //
-//     pub fn open_fd(&mut self, file: File, file_flags: FileFlags, fd_flags:
+//     pub fn open_fd(&mut self, file: File, file_flags: FileStatusFlags, fd_flags:
 // FdFlags) -> Option<Fd> {         let fd = self.alloc_fd()?;
 //         let file = Arc::new(ProcFile {
 //             file,
@@ -684,12 +758,14 @@ impl Task {
     pub fn open_fd(
         &self,
         file: File,
-        file_flags: FileFlags,
+        access: OpenAccessMode,
+        status_flags: FileStatusFlags,
+        compat: LinuxOpenCompat,
         fd_flags: FdFlags,
     ) -> Result<Fd, SysError> {
         let files_state = self.files_state();
         let mut files_state = files_state.write();
-        files_state.open_fd(file, file_flags, fd_flags)
+        files_state.open_fd(file, access, status_flags, compat, fd_flags)
     }
 
     pub fn get_fd(&self, fd: Fd) -> Result<Arc<FileDesc>, SysError> {

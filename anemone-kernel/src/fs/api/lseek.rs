@@ -47,6 +47,9 @@ fn sys_lseek(fd: Fd, offset: i64, whence: SeekWhence) -> Result<u64, SysError> {
 
     let task = get_current_task();
     let fd = task.get_fd(fd)?;
+    if fd.is_path_only() {
+        return Err(SysError::BadFileDescriptor);
+    }
 
     let vfs_file = fd.vfs_file();
 
@@ -55,7 +58,7 @@ fn sys_lseek(fd: Fd, offset: i64, whence: SeekWhence) -> Result<u64, SysError> {
             if offset < 0 {
                 return Err(SysError::InvalidArgument);
             }
-            vfs_file.seek(offset as usize)?;
+            fd.seek(offset as usize)?;
             Ok(offset as u64)
         },
         SeekWhence::Cur => {
@@ -65,7 +68,7 @@ fn sys_lseek(fd: Fd, offset: i64, whence: SeekWhence) -> Result<u64, SysError> {
                 return Err(SysError::InvalidArgument);
             }
             let new_pos = new_pos as usize;
-            vfs_file.seek(new_pos)?;
+            fd.seek(new_pos)?;
             Ok(new_pos as u64)
         },
         SeekWhence::End => {
@@ -77,7 +80,7 @@ fn sys_lseek(fd: Fd, offset: i64, whence: SeekWhence) -> Result<u64, SysError> {
                 return Err(SysError::InvalidArgument);
             }
             let new_pos = new_pos as usize;
-            vfs_file.seek(new_pos)?;
+            fd.seek(new_pos)?;
             Ok(new_pos as u64)
         },
         _ => unreachable!(/* handled above */),

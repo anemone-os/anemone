@@ -59,21 +59,21 @@
 ## ANE-20260527-OPENAT-NOFOLLOW-OPATH-SYMLINK
 
 **Type:** Issue
-**Status:** Open
+**Status:** Resolved
 **Area:** fs / openat / readlinkat
 
-**Symptom / Trigger:** `openat` 目前还没有真正支持 `O_NOFOLLOW`，`O_PATH | O_NOFOLLOW` 打开的 symlink 不能稳定保留“指向符号链接本体”的语义，导致 `readlinkat("", ...)` 这类空路径用例仍然失败。
+**Symptom / Trigger:** `openat` 曾经没有真正支持 `O_NOFOLLOW`，`O_PATH | O_NOFOLLOW` 打开的 symlink 不能稳定保留“指向符号链接本体”的语义，导致 `readlinkat("", ...)` 这类空路径用例失败。
 
-**Impact:** LTP `readlinkat01` 的空路径分支无法按 Linux 预期工作，`AT_EMPTY_PATH` 风格的后续接口也会受影响。
+**Impact:** 已通过 fd/openat cleanup 收敛：final `O_NOFOLLOW` symlink 拒绝、`O_PATH | O_NOFOLLOW` symlink fd 保存和 `readlinkat(fd, "", ...)` 路径已经落地；剩余 `O_PATH` 后续能力按当前限制跟踪。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-27
-**Exit Condition:** 为 `openat` 补上 `O_NOFOLLOW` / `O_PATH` 的路径解析与 fd 语义，并重新验证 `readlinkat01` 的空路径用例。
+**Last Verified:** 2026-05-28
+**Exit Condition:** 已完成。focused rv64 LTP 中 `readlinkat01` 的 glibc / musl 空路径分支通过。
 
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [当前限制](./current-limitations.md)
 
 **Severity:** Medium
-**Workaround:** 暂时避开依赖 `O_PATH | O_NOFOLLOW` 语义的空路径调用链。
+**Workaround:** 无需针对该问题绕过；完整 `O_PATH` 能力仍见 `ANE-20260528-OPATH-STAGE1-CAPABILITIES`。
 
 ## ANE-20260527-LTP-MKNOD-LEGACY-READDIR
 

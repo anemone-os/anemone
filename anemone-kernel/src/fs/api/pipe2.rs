@@ -12,6 +12,7 @@ use crate::{
         user_access::{UserWriteSlice, user_addr},
         *,
     },
+    task::files::{FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
 };
 
 bitflags! {
@@ -48,23 +49,37 @@ fn sys_pipe2(
     let task = get_current_task();
 
     let OpenedPipe { rx, tx } = create_anonymous_pipe()?;
-    let mut rx_file_flags = FileFlags::READ;
-    let mut tx_file_flags = FileFlags::WRITE;
+    let mut rx_status_flags = FileStatusFlags::empty();
+    let mut tx_status_flags = FileStatusFlags::empty();
     if flags.contains(PipeFlags::O_NONBLOCK) {
         crate::fs::pipe::update_nonblock(&rx, true);
         crate::fs::pipe::update_nonblock(&tx, true);
-        rx_file_flags |= FileFlags::NONBLOCK;
-        tx_file_flags |= FileFlags::NONBLOCK;
+        rx_status_flags |= FileStatusFlags::NONBLOCK;
+        tx_status_flags |= FileStatusFlags::NONBLOCK;
     }
     if flags.contains(PipeFlags::O_DIRECT) {
-        tx_file_flags |= FileFlags::DIRECT;
+        tx_status_flags |= FileStatusFlags::DIRECT;
     }
 
-    let rx = task.open_fd(rx, rx_file_flags, fd_flags)?;
-    let tx = task.open_fd(tx, tx_file_flags, fd_flags).map_err(|e| {
-        task.close_fd(rx);
-        e
-    })?;
+    let rx = task.open_fd(
+        rx,
+        OpenAccessMode::Read,
+        rx_status_flags,
+        LinuxOpenCompat::empty(),
+        fd_flags,
+    )?;
+    let tx = task
+        .open_fd(
+            tx,
+            OpenAccessMode::Write,
+            tx_status_flags,
+            LinuxOpenCompat::empty(),
+            fd_flags,
+        )
+        .map_err(|e| {
+            task.close_fd(rx);
+            e
+        })?;
 
     let usp = task.clone_uspace_handle();
     let mut guard = usp.lock();

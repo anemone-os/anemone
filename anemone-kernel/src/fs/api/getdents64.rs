@@ -131,7 +131,6 @@ fn sys_getdents64(
 
         (usp, fd)
     };
-    let file = fd.vfs_file();
 
     let buf_len = count as usize;
 
@@ -143,7 +142,7 @@ fn sys_getdents64(
             let writer = unsafe { ByteWriter::new(buffer) };
             let mut sink = LinuxDirent64Sink::new(writer, buf_len);
 
-            match file.read_dir(&mut sink) {
+            match fd.read_dir(&mut sink) {
                 Ok(ReadDirResult::Progressed) | Ok(ReadDirResult::Eof) => Ok(sink.written()),
                 Err(err) => Err(err),
             }

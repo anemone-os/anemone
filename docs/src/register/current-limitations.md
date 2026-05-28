@@ -224,6 +224,36 @@
 **Last Verified:** 2026-05-28
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
+## ANE-20260528-OPATH-STAGE1-CAPABILITIES
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** VFS / openat / fd
+
+**Summary:** 当前 `O_PATH` 已作为独立 access mode 建模，支持 `readlinkat(fd, "", ...)`、`fstat` / `newfstatat(fd, "", AT_EMPTY_PATH)` 和作为 `openat` dirfd 的基础子集；普通 `read`、`write`、`lseek`、`mmap`、`getdents64` 会按 path-only fd 边界拒绝。尚未提供 `O_PATH` directory fd 上的 `fchdir`、完整 chmod/chown/ioctl 边界，或 `/proc/<pid>/fd` 对 path fd 的完整可见性。
+
+**Exit Condition:** 明确并补齐 `O_PATH` fd 在 fchdir、metadata mutation、ioctl、procfs fd link 和权限检查上的完整 Linux 兼容边界，并用覆盖 symlink、directory、regular file 与 empty-path syscall 的回归矩阵验证。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-28
+**Related:** [开放问题](./open-issues.md), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260528-OPEN-STATUS-FLAGS-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** VFS / openat / fcntl
+
+**Summary:** `openat` 已把 access mode、fd-local flags、file status flags 和 Linux-visible compat bits 分开保存，`F_GETFL` 能还原 open 时保存的持久 flag，`F_SETFL` 只动态修改 `O_APPEND`、`O_NONBLOCK` 和 `O_DIRECT`。`O_SYNC`、`O_DSYNC` 和 `O_NOATIME` 当前会保存并通过 `F_GETFL` 可见，但只记录兼容状态，不承诺真实同步写入或 atime 抑制语义；通过 `F_SETFL` 传入这些不可动态修改位会被忽略并打日志。
+
+**Exit Condition:** 为同步写、direct I/O 和 atime 更新引入真实文件系统语义，或者逐项收敛为明确拒绝/兼容策略，并补齐 `openat`、`fcntl(F_GETFL/F_SETFL)` 与 IO 可见性的回归验证。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-28
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
 ## ANE-20260528-PIPE-PROCFS-KNOBS-STAGE1
 
 **Type:** Limitation
