@@ -208,3 +208,48 @@
 **Owner:** doruche
 **Last Verified:** 2026-05-27
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260528-PROC-TGID-FD-FRAMEWORK-PENDING
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** procfs / fd / path visibility
+
+**Summary:** 当前 procfs 还没有 `/proc/<tgid>/fd` 目录框架。glibc 的 `realpath("/tmp")` 可通过普通 `readlink("/tmp") -> EINVAL` 路径完成，但 musl 的 `realpath` 在某些路径上会依赖 `readlink("/proc/self/fd/<n>")`，因此 `getcwd02` 的 musl 变体仍会因 `/proc/self/fd/3` 不存在而 `ENOENT`。
+
+**Exit Condition:** 引入系统性的 `/proc/<tgid>/fd` 目录实现，基于目标 thread group 的 fd 表提供 `readdir`、`readlink`、`stat/open` 所需的稳定语义，并明确 fd 生命周期、权限和路径可见性规则；完成后重新验证 musl `getcwd02` 及依赖 fd symlink 的相关 libc 路径。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-28
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260528-RAMFS-RENAME-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** ramfs / rename
+
+**Summary:** 当前 `ramfs` 的 `rename` 是为了收口 LTP `getcwd04` regular-file 链式改名而加入的 stage-1 实现，只支持同一 superblock 内非目录项改名、普通覆盖和 `RENAME_NOREPLACE`。目录 rename、循环检测、跨目录目录树移动以及更完整的 Linux rename flag 组合仍未实现。
+
+**Exit Condition:** 为 `ramfs` 补齐 directory rename 的父子关系维护、空目录/非空目录覆盖规则、循环防护和需要支持的额外 rename flags，并增加覆盖 cross-directory、directory 与 overwrite 场景的回归测试。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-28
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260528-ROFS-DIRECT-WRITE-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** fs / mount / VFS / mmap
+
+**Summary:** 当前 `MS_RDONLY` 已能通过 mount flags 传播到 VFS，并覆盖直接写路径：目录项创建/删除/改名、普通文件 open-for-write / write / truncate、`chmod` / `chown` / `utimensat` / `fallocate` 会在只读挂载上返回 `EROFS`。这不是完整 Linux ROFS：shared writable mmap、dirty/writeback 与 `msync` 关系、remount/bind/move mount 语义，以及除 `MS_RDONLY` 外的 mount flags 仍未系统化。
+
+**Exit Condition:** 为 file-backed shared writable mmap 和 writeback 引入明确的只读挂载约束；补齐或显式拒绝 remount、bind、move、propagation 等 mount flag 组合；用覆盖 open/write/truncate/metadata/mmap/remount 的回归矩阵验证 ROFS 语义。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-28
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)

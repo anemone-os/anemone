@@ -128,7 +128,7 @@ pub struct Task {
     /// Filesystem state shared by task-related FS operations.
     fs_state: Arc<RwLock<FsState>>,
     /// File descriptor table state.
-    files_state: Arc<RwLock<FilesState>>,
+    files_state: RwLock<Arc<RwLock<FilesState>>>,
     /// Cpu usage information.
     cpu_usage: NoIrqRwLock<TaskCpuUsage>,
 
@@ -429,7 +429,7 @@ impl Task {
             utrapframe: unsafe { MonoFlow::new(None) },
             fpu_used: AtomicBool::new(false),
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
-            files_state: Arc::new(RwLock::new(FilesState::new())),
+            files_state: RwLock::new(Arc::new(RwLock::new(FilesState::new()))),
             cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
 
             sig_disposition: Arc::new(NoIrqRwLock::new(SignalDisposition::new())),
@@ -476,7 +476,7 @@ impl Task {
                 utrapframe: unsafe { MonoFlow::new(None) },
                 fpu_used: AtomicBool::new(false),
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
-                files_state: Arc::new(RwLock::new(FilesState::new())),
+                files_state: RwLock::new(Arc::new(RwLock::new(FilesState::new()))),
                 cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
 
                 sig_disposition: Arc::new(NoIrqRwLock::new(SignalDisposition::new())),

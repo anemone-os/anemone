@@ -1,0 +1,15 @@
+getcwd01
+getcwd02
+getcwd03
+getcwd04
+
+chdir01
+chdir04
+
+mkdir02
+mkdir03
+mkdir04
+mkdir05
+mkdir09
+mkdirat01
+mkdirat02

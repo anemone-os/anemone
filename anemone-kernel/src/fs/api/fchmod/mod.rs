@@ -58,6 +58,8 @@ pub fn kernel_fchmod(pathref: &PathRef, perm: InodePerm, ctime: Duration) -> Res
         return Err(SysError::NotSupported);
     }
 
+    pathref.mount().ensure_writable()?;
+
     inode.inode().chmod(perm, ctime);
     Ok(())
 }

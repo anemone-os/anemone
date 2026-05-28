@@ -176,7 +176,7 @@ fn run_bootstrap_busybox(args: &[&str], name: &str) {
     run_comp_exec(bootstrap_busybox(), args, name);
 }
 
-fn run_busybox(args: &[&str], name: &str) {
+pub(crate) fn run_busybox(args: &[&str], name: &str) {
     run_comp_exec("/bin/busybox", args, name);
 }
 
@@ -299,6 +299,7 @@ fn run_test_family(family: &str, scripts: &[&str]) {
 fn run_comp_tests() {
     mount_competition_root();
     init_competition_environment();
+    ltp::install_ltp_fixtures();
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);

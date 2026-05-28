@@ -60,7 +60,7 @@ fn validate_fallocate_file(file: &FileDesc) -> Result<(), SysError> {
     // allocation path, and other file types are rejected as unsupported.
     match file.vfs_file().inode().ty() {
         InodeType::Dir => Err(SysError::IsDir),
-        InodeType::Regular => Ok(()),
+        InodeType::Regular => file.vfs_file().path().mount().ensure_writable(),
         _ => Err(SysError::NotSupported),
     }
 }

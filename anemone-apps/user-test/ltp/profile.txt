@@ -1,0 +1,7 @@
+# Active LTP profile for user-test.
+#
+# Edit this file and rebuild user-test to switch the selected LTP groups.
+# Use "all" to run every registered group.
+
+fs
+pipe

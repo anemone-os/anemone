@@ -13,6 +13,10 @@ fn sys_truncate(
     let path = Path::new(pathname.as_ref());
     let pathref = task.lookup_path(path, ResolveFlags::empty())?;
 
+    if pathref.inode().ty() == InodeType::Regular {
+        pathref.mount().ensure_writable()?;
+    }
+
     pathref.inode().truncate(length as u64)?;
     Ok(0)
 }

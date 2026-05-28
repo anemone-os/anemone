@@ -108,6 +108,10 @@ fn sys_utimensat(
         Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
     }
 
+    if atime.is_some() || mtime.is_some() {
+        pathref.mount().ensure_writable()?;
+    }
+
     atime.map(|atime| inode.set_atime(ts_to_duration(atime)));
     mtime.map(|mtime| inode.set_mtime(ts_to_duration(mtime)));
 

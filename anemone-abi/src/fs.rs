@@ -31,6 +31,11 @@ pub mod linux {
         pub const O_TMPFILE: u32 = 0x0041_0000;
     }
 
+    pub mod close_range {
+        pub const CLOSE_RANGE_UNSHARE: u32 = 1 << 1;
+        pub const CLOSE_RANGE_CLOEXEC: u32 = 1 << 2;
+    }
+
     pub mod mode {
         pub const S_IFMT: u32 = 0o170000;
         pub const S_IFSOCK: u32 = 0o140000;
@@ -214,6 +219,10 @@ pub mod linux {
         pub const R_OK: u32 = 4;
         pub const W_OK: u32 = 2;
         pub const X_OK: u32 = 1;
+    }
+
+    pub mod mount {
+        pub const MS_RDONLY: u64 = 1;
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

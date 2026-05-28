@@ -139,6 +139,10 @@ impl FileDesc {
             return Err(SysError::PermissionDenied);
         }
 
+        if self.pfile.file.inode().ty() == InodeType::Regular {
+            self.pfile.file.path().mount().ensure_writable()?;
+        }
+
         self.pfile.file.inode().truncate(len)
     }
 
@@ -339,6 +343,54 @@ impl FilesState {
             Ok(())
         } else {
             Err(SysError::BadFileDescriptor)
+        }
+    }
+
+    fn close_range(&mut self, first: u32, last: u32) {
+        let first = first as usize;
+        if first >= self.fds.len() {
+            return;
+        }
+
+        let last = core::cmp::min(last as usize, self.fds.len() - 1);
+        if first > last {
+            return;
+        }
+
+        let mut fds = Vec::new();
+        for fd in first..=last {
+            if self.bitmap.test(fd) {
+                fds.push(Fd::new(fd as u32).unwrap());
+            }
+        }
+
+        for fd in fds {
+            let _ = self.close_fd(fd);
+        }
+    }
+
+    fn set_close_on_exec_range(&self, first: u32, last: u32) {
+        let first = first as usize;
+        if first >= self.fds.len() {
+            return;
+        }
+
+        let last = core::cmp::min(last as usize, self.fds.len() - 1);
+        if first > last {
+            return;
+        }
+
+        let mut fds = Vec::new();
+        for fd in first..=last {
+            if let Some(file_desc) = &self.fds[fd] {
+                fds.push(file_desc.clone());
+            }
+        }
+
+        for file_desc in fds {
+            let mut flags = file_desc.fd_flags();
+            flags.insert(FdFlags::CLOSE_ON_EXEC);
+            file_desc.set_fd_flags(flags);
         }
     }
 
@@ -613,17 +665,18 @@ impl Task {
         file_flags: FileFlags,
         fd_flags: FdFlags,
     ) -> Result<Fd, SysError> {
-        let mut files_state = self.files_state.write();
+        let files_state = self.files_state();
+        let mut files_state = files_state.write();
         files_state.open_fd(file, file_flags, fd_flags)
     }
 
     pub fn get_fd(&self, fd: Fd) -> Result<Arc<FileDesc>, SysError> {
-        let files_state = self.files_state.read();
-        files_state.get_fd(fd)
+        let files_state = self.files_state();
+        files_state.read().get_fd(fd)
     }
 
     pub fn files_state(&self) -> Arc<RwLock<FilesState>> {
-        self.files_state.clone()
+        self.files_state.read().clone()
     }
 
     /// Replace the contents of the current file-table state object.
@@ -634,24 +687,30 @@ impl Task {
     /// Note the semantic difference between this function and
     /// [`Self::replace_files_state_handle`].
     pub fn set_files_state(&self, files_state: FilesState) {
-        *self.files_state.write() = files_state;
+        let files_state_handle = self.files_state();
+        *files_state_handle.write() = files_state;
     }
 
     /// Replace the shared file-table state handle.
     ///
     /// This should only be used while the task is still uniquely owned, such
     /// as during task construction or clone setup.
-    pub fn replace_files_state_handle(&mut self, files_state: Arc<RwLock<FilesState>>) {
-        self.files_state = files_state;
+    pub fn replace_files_state_handle(
+        &mut self,
+        files_state: Arc<RwLock<FilesState>>,
+    ) {
+        *self.files_state.write() = files_state;
     }
 
     pub fn close_fd(&self, fd: Fd) -> Result<(), SysError> {
-        let mut files_state = self.files_state.write();
+        let files_state = self.files_state();
+        let mut files_state = files_state.write();
         files_state.close_fd(fd)
     }
 
     pub fn dup(&self, old_fd: Fd) -> Result<Fd, SysError> {
-        let mut files_state = self.files_state.write();
+        let files_state = self.files_state();
+        let mut files_state = files_state.write();
         files_state.dup(old_fd)
     }
 
@@ -661,17 +720,48 @@ impl Task {
         min_new_fd: Fd,
         close_on_exec: bool,
     ) -> Result<Fd, SysError> {
-        let mut files_state = self.files_state.write();
+        let files_state = self.files_state();
+        let mut files_state = files_state.write();
         files_state.dup_ge_than(old_fd, min_new_fd, close_on_exec)
     }
 
     pub fn dup3(&self, old_fd: Fd, new_fd: Fd, flags: FdFlags) -> Result<Fd, SysError> {
-        let mut files_state = self.files_state.write();
+        let files_state = self.files_state();
+        let mut files_state = files_state.write();
         files_state.dup3(old_fd, new_fd, flags)?;
         Ok(new_fd)
     }
 
     pub fn close_cloexec_fds(&self) {
-        self.files_state.write().close_on_exec();
+        let files_state = self.files_state();
+        files_state.write().close_on_exec();
+    }
+
+    pub fn unshare_files_state(&self) {
+        let forked = {
+            let files_state = self.files_state();
+            Arc::new(RwLock::new(files_state.read().fork()))
+        };
+
+        *self.files_state.write() = forked;
+    }
+
+    pub fn close_range(
+        &self,
+        first: u32,
+        last: u32,
+        flags: crate::fs::api::close::CloseRangeFlags,
+    ) {
+        if flags.contains(crate::fs::api::close::CloseRangeFlags::UNSHARE) {
+            self.unshare_files_state();
+        }
+
+        let files_state = self.files_state();
+        let mut files_state = files_state.write();
+        if flags.contains(crate::fs::api::close::CloseRangeFlags::CLOEXEC) {
+            files_state.set_close_on_exec_range(first, last);
+        } else {
+            files_state.close_range(first, last);
+        }
     }
 }

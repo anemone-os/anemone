@@ -1,6 +1,6 @@
 use crate::{
     fs::{
-        inode::{Inode, InodeMode},
+        inode::{Inode, InodeMode, RenameFlags},
         ramfs::{
             file::{
                 RAMFS_DIR_FILE_OPS, RAMFS_REG_FILE_OPS, RAMFS_SYMLINK_FILE_OPS, RamfsRegMapping,
@@ -320,6 +320,57 @@ fn ramfs_rmdir(dir: &InodeRef, name: &str) -> Result<(), SysError> {
     })
 }
 
+fn ramfs_rename(
+    old_dir: &InodeRef,
+    old_name: &str,
+    new_dir: &InodeRef,
+    new_name: &str,
+    flags: RenameFlags,
+) -> Result<(), SysError> {
+    if old_dir == new_dir && old_name == new_name {
+        return Ok(());
+    }
+
+    let sb = old_dir.sb();
+    if !Arc::ptr_eq(&sb, &new_dir.sb()) {
+        return Err(SysError::CrossDeviceLink);
+    }
+
+    ramfs_sb(&sb).write_tx(|| {
+        let old_data = ramfs_dir(old_dir)?;
+        let new_data = ramfs_dir(new_dir)?;
+        let src_ino = old_data.get_by_name(old_name).ok_or(SysError::NotFound)?;
+        let src_inode = sb.iget(src_ino).expect("ino exists but failed to load");
+
+        if src_inode.ty() == InodeType::Dir {
+            return Err(SysError::NotSupported);
+        }
+
+        if let Some(dst_ino) = new_data.get_by_name(new_name) {
+            if flags.contains(RenameFlags::NO_REPLACE) {
+                return Err(SysError::AlreadyExists);
+            }
+            if dst_ino == src_ino {
+                return Ok(());
+            }
+
+            let dst_inode = sb.iget(dst_ino).expect("ino exists but failed to load");
+            if dst_inode.ty() == InodeType::Dir {
+                return Err(SysError::IsDir);
+            }
+
+            assert!(new_data.remove(new_name).is_some());
+            dst_inode.inode().dec_nlink();
+            if dst_inode.nlink() == 0 {
+                sb.unindex_inode(dst_inode.inode());
+            }
+        }
+
+        assert_eq!(old_data.remove(old_name), Some(src_ino));
+        new_data.insert(new_name.to_string(), src_ino)
+    })
+}
+
 fn ramfs_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {
     let symlink_data = ramfs_symlink(inode)?;
 
@@ -354,7 +405,7 @@ pub(super) static RAMFS_DIR_INODE_OPS: InodeOps = InodeOps {
     link: ramfs_link,
     unlink: ramfs_unlink,
     rmdir: ramfs_rmdir,
-    rename: |_, _, _, _, _| Err(SysError::NotSupported),
+    rename: ramfs_rename,
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: ramfs_get_attr,
 };

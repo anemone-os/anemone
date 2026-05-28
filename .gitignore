@@ -4,7 +4,7 @@ build
 **/.gdb_history
 kconfig
 rootfsconfig*
-etc
+/etc
 disk.img
 .DS_Store
 rootfs*.img

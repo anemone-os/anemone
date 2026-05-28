@@ -1,0 +1,14 @@
+# Exec-family LTP cases.
+# Format: one case per line, optional arguments after the case name.
+
+execl01
+execle01
+execlp01
+execv01
+execve01
+execve02
+execve03
+execve04
+execve05
+execve06
+execvp01
