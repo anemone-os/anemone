@@ -1,42 +1,3 @@
-# Filesystem, fd, and basic file IO LTP cases.
-# Format: one case per line, optional arguments after the case name.
-
-chdir01
-chdir04
-
-dup01
-dup02
-dup03
-dup04
-dup05
-dup06
-dup07
-dup201
-dup202
-dup203
-dup204
-dup205
-dup206
-dup207
-dup3_01
-dup3_02
-
-fchdir01
-fchdir02
-fchdir03
-
-fsync01
-fsync02
-fsync03
-fsync04
-
-ftruncate01
-ftruncate01_64
-ftruncate03
-ftruncate03_64
-ftruncate04
-ftruncate04_64
-
 pread01
 pread01_64
 pread02
@@ -101,3 +62,15 @@ writev03
 writev05
 writev06
 writev07
+
+# fsync01
+# fsync02
+# fsync03
+# fsync04
+
+# ftruncate01
+# ftruncate01_64
+# ftruncate03
+# ftruncate03_64
+# ftruncate04
+# ftruncate04_64

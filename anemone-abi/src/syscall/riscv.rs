@@ -203,6 +203,8 @@ pub mod linux {
 
     pub const SYS_CLONE3: u64 = 435;
 
+    pub const SYS_CLOSE_RANGE: u64 = 436;
+
     pub const SYS_FACCESSAT2: u64 = 439;
 }
 

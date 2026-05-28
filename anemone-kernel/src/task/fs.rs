@@ -170,7 +170,7 @@ impl Task {
             if rel.as_bytes().is_empty() {
                 "/".into()
             } else {
-                rel.into()
+                PathBuf::from("/").join(rel)
             }
         } else {
             // this may happen as user might deliberately set root to a path that is not an

@@ -39,12 +39,19 @@ unsafe fn validate_user_range(
     start: VirtAddr,
     len: usize,
 ) -> Result<(), SysError> {
+    if start.get() >= KernelLayout::USPACE_TOP_ADDR {
+        return Err(SysError::BadAddress);
+    }
+
     let end = start
         .get()
         .checked_add(len as u64)
         .ok_or(SysError::BadAddress)?;
-    if end < start.get() {
+    if end > KernelLayout::USPACE_TOP_ADDR {
         return Err(SysError::BadAddress);
+    }
+    if len == 0 {
+        return Ok(());
     }
 
     let svpn = start.page_down();
@@ -457,7 +464,7 @@ mod validators {
         if arg < KernelLayout::USPACE_TOP_ADDR {
             Ok(VirtAddr::new(arg))
         } else {
-            Err(SysError::InvalidArgument)
+            Err(SysError::BadAddress)
         }
     }
 

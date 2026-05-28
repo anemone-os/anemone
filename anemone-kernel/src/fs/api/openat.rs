@@ -10,6 +10,7 @@ use anemone_abi::fs::linux::open::{
 use crate::{
     fs::api::args::{AtFd, LinuxInodePerm},
     prelude::{user_access::c_readonly_string, *},
+    syscall::handler::TryFromSyscallArg,
     task::files::{FdFlags, FileFlags},
 };
 
@@ -113,13 +114,17 @@ fn sys_openat(
     dirfd: AtFd,
     #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
     flags: u32,
-    mode: LinuxInodePerm,
+    mode: u32,
 ) -> Result<u64, SysError> {
     let is_tmpfile = has_tmpfile_flag(flags);
     let path = Path::new(pathname.as_ref());
     let task = get_current_task();
 
-    let perm = InodePerm::try_from(mode)?;
+    let perm = if flags & O_CREAT != 0 || is_tmpfile {
+        InodePerm::try_from(LinuxInodePerm::try_from_syscall_arg(mode as u64)?)?
+    } else {
+        InodePerm::empty()
+    };
 
     let file = if is_tmpfile {
         let dir = if path.is_absolute() {

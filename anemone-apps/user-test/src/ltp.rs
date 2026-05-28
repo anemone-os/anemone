@@ -58,8 +58,12 @@ struct LtpGroup {
 
 const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
-        name: "fs-fd",
-        cases: include_str!("../ltp/groups/fs-fd.txt"),
+        name: "fd",
+        cases: include_str!("../ltp/groups/fd.txt"),
+    },
+    LtpGroup {
+        name: "fs",
+        cases: include_str!("../ltp/groups/fs.txt"),
     },
     LtpGroup {
         name: "memory",
@@ -68,6 +72,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
         name: "process-exec",
         cases: include_str!("../ltp/groups/process-exec.txt"),
+    },
+    LtpGroup {
+        name: "read-write",
+        cases: include_str!("../ltp/groups/read-write.txt"),
     },
 ];
 
