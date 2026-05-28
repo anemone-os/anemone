@@ -93,22 +93,3 @@
 
 **Severity:** Medium
 **Workaround:** 先把这两个用例从当前白名单里隔离出来，或者等 syscall 入口补齐后再回归。
-
-## ANE-20260527-WRITE-EPIPE-SIGPIPE
-
-**Type:** Issue
-**Status:** Open
-**Area:** fs / pipe / signal / write
-
-**Symptom / Trigger:** LTP `write05` 关闭 pipe 读端后向写端写入，当前写入路径已经返回 `EPIPE`，但注册的 `SIGPIPE` handler 没有被调用，测例观察到 `sigpipe_cnt = 0`。
-
-**Impact:** 这说明 pipe 写端的 no-reader 路径还没有把 Linux/POSIX 预期的 `SIGPIPE` 投递接入 signal 子系统；依赖 `SIGPIPE` handler 或默认终止行为的用户态会和 Linux 语义不一致。
-
-**Owner:** doruche
-**Last Verified:** 2026-05-27
-**Exit Condition:** pipe 写入在无读者导致 `EPIPE` 时向当前任务投递 `SIGPIPE`，并在 signal handler / ignore / block 等路径下重新验证 `write05` 和相关 pipe 写入测例。
-
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
-
-**Severity:** Medium
-**Workaround:** 当前阶段不要把 `write05` 视为纯测试设施问题；涉及 pipe no-reader 的用户态需要显式处理 `EPIPE`，不能依赖 `SIGPIPE` 行为已经完整。

@@ -260,6 +260,12 @@ pub mod linux {
 
         pub const F_LINUX_SPECIFIC_BASE: u32 = 1024;
         pub const F_DUPFD_CLOEXEC: u32 = F_LINUX_SPECIFIC_BASE + 6;
+        pub const F_SETPIPE_SZ: u32 = F_LINUX_SPECIFIC_BASE + 7;
+        pub const F_GETPIPE_SZ: u32 = F_LINUX_SPECIFIC_BASE + 8;
+    }
+
+    pub mod ioctl {
+        pub const FIONREAD: u32 = 0x541B;
     }
 
     pub mod fallocate {

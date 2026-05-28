@@ -30,10 +30,6 @@ impl TryFromSyscallArg for PipeFlags {
 
         let flags = PipeFlags::from_bits(raw).ok_or(SysError::InvalidArgument)?;
 
-        if flags.intersects(PipeFlags::O_DIRECT | PipeFlags::O_NONBLOCK) {
-            return Err(SysError::NotYetImplemented);
-        }
-
         Ok(flags)
     }
 }
@@ -43,7 +39,6 @@ fn sys_pipe2(
     #[validate_with(user_addr)] pipefd: VirtAddr,
     flags: PipeFlags,
 ) -> Result<u64, SysError> {
-    // O_DIRECT and O_NONBLOCK nyi.
     let fd_flags = if flags.contains(PipeFlags::O_CLOEXEC) {
         FdFlags::CLOSE_ON_EXEC
     } else {
@@ -53,19 +48,30 @@ fn sys_pipe2(
     let task = get_current_task();
 
     let OpenedPipe { rx, tx } = create_anonymous_pipe()?;
+    let mut rx_file_flags = FileFlags::READ;
+    let mut tx_file_flags = FileFlags::WRITE;
+    if flags.contains(PipeFlags::O_NONBLOCK) {
+        crate::fs::pipe::update_nonblock(&rx, true);
+        crate::fs::pipe::update_nonblock(&tx, true);
+        rx_file_flags |= FileFlags::NONBLOCK;
+        tx_file_flags |= FileFlags::NONBLOCK;
+    }
+    if flags.contains(PipeFlags::O_DIRECT) {
+        tx_file_flags |= FileFlags::DIRECT;
+    }
 
-    let rx = task.open_fd(rx, FileFlags::READ, fd_flags)?;
-    let tx = task.open_fd(tx, FileFlags::WRITE, fd_flags).map_err(|e| {
+    let rx = task.open_fd(rx, rx_file_flags, fd_flags)?;
+    let tx = task.open_fd(tx, tx_file_flags, fd_flags).map_err(|e| {
         task.close_fd(rx);
         e
     })?;
 
     let usp = task.clone_uspace_handle();
     let mut guard = usp.lock();
-    let mut pipefd = UserWriteSlice::<i32>::try_new(pipefd, 2, &mut guard).map_err(|_| {
+    let mut pipefd = UserWriteSlice::<i32>::try_new(pipefd, 2, &mut guard).map_err(|e| {
         task.close_fd(rx);
         task.close_fd(tx);
-        SysError::InvalidArgument
+        e
     })?;
     pipefd.copy_from_slice(&[rx.raw() as i32, tx.raw() as i32]);
 

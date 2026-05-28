@@ -7,11 +7,17 @@
 
 use crate::{
     prelude::*,
+    task::sig::{
+        SigNo, Signal,
+        info::{SiCode, SigInfoFields, SigKill},
+    },
     utils::{
         any_opaque::{AnyOpaque, NilOpaque},
         ring_buffer::RingBuffer,
     },
 };
+
+const PIPE_CAPACITY_BYTES: usize = PagingArch::PAGE_SIZE_BYTES;
 
 fn pipe_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let meta = inode.inode().meta_snapshot();
@@ -73,12 +79,18 @@ impl Pipe {
             PipeRx {
                 pipe: pipe.clone(),
                 poll_waiters: SpinLock::new(Vec::new()),
+                nonblock: AtomicBool::new(false),
             },
             PipeTx {
                 pipe,
                 poll_waiters: SpinLock::new(Vec::new()),
+                nonblock: AtomicBool::new(false),
             },
         )
+    }
+
+    fn capacity(&self) -> usize {
+        self.buf.len() + self.buf.available()
     }
 }
 
@@ -86,6 +98,7 @@ impl Pipe {
 struct PipeRx {
     pipe: Arc<SpinLock<Pipe>>,
     poll_waiters: SpinLock<Vec<Weak<PollWaiter>>>,
+    nonblock: AtomicBool,
 }
 
 impl Drop for PipeRx {
@@ -102,6 +115,7 @@ impl Drop for PipeRx {
 struct PipeTx {
     pipe: Arc<SpinLock<Pipe>>,
     poll_waiters: SpinLock<Vec<Weak<PollWaiter>>>,
+    nonblock: AtomicBool,
 }
 
 impl Drop for PipeTx {
@@ -126,10 +140,13 @@ fn pipe_rx_read(file: &File, _pos: &mut usize, buf: &mut [u8]) -> Result<usize, 
         if pipe.tx_cnt == 0 {
             // no tx alive. return EOF.
             Ok(0)
+        } else if rx.nonblock.load(Ordering::Relaxed) {
+            Err(SysError::Again)
         } else {
-            // currently O_NONBLOCK is not supported, so we just block here.
-
             while pipe.buf.is_empty() && pipe.tx_cnt > 0 {
+                if get_current_task().has_unmasked_signal() {
+                    return Err(SysError::Interrupted);
+                }
                 drop(pipe);
                 yield_now();
                 pipe = rx.pipe.lock();
@@ -184,39 +201,124 @@ fn pipe_tx_write(file: &File, _pos: &mut usize, buf: &[u8]) -> Result<usize, Sys
     let mut pipe = tx.pipe.lock();
 
     if pipe.rx_cnt == 0 {
-        // no rx alive.
-        // TODO: send a signal here.
-
-        Err(SysError::BrokenPipe)
-    } else {
-        if pipe.buf.available() <= buf.len() {
-            // currently O_NONBLOCK is not supported, so we just block here.
-
-            while pipe.buf.available() <= buf.len() && pipe.rx_cnt > 0 {
-                drop(pipe);
-                yield_now();
-                pipe = tx.pipe.lock();
-            }
-
-            // out of loop. see what happened.
-
-            if pipe.buf.available() <= buf.len() {
-                // all rx dead
-                Err(SysError::BrokenPipe)
-            } else {
-                // space available!
-                let written = pipe.buf.try_push_slice(buf);
-                assert!(
-                    written == buf.len(),
-                    "we should have enough space to write all data"
-                );
-                Ok(written)
-            }
-        } else {
-            let written = pipe.buf.try_push_slice(buf);
-            Ok(written)
-        }
+        send_sigpipe();
+        return Err(SysError::BrokenPipe);
     }
+
+    if tx.nonblock.load(Ordering::Relaxed) {
+        let available = pipe.buf.available();
+        if available == 0 || (buf.len() <= PIPE_CAPACITY_BYTES && available < buf.len()) {
+            return Err(SysError::Again);
+        }
+
+        let to_write = if buf.len() > PIPE_CAPACITY_BYTES {
+            available.min(buf.len())
+        } else {
+            buf.len()
+        };
+        return Ok(pipe.buf.try_push_slice(&buf[..to_write]));
+    }
+
+    let needs_atomic_write = buf.len() <= PIPE_CAPACITY_BYTES;
+
+    while pipe.rx_cnt > 0
+        && if needs_atomic_write {
+            pipe.buf.available() < buf.len()
+        } else {
+            pipe.buf.available() == 0
+        }
+    {
+        if get_current_task().has_unmasked_signal() {
+            return Err(SysError::Interrupted);
+        }
+        drop(pipe);
+        yield_now();
+        pipe = tx.pipe.lock();
+    }
+
+    if pipe.rx_cnt == 0 {
+        send_sigpipe();
+        Err(SysError::BrokenPipe)
+    } else if needs_atomic_write {
+        let written = pipe.buf.try_push_slice(buf);
+        assert!(
+            written == buf.len(),
+            "we should have enough space to write all data"
+        );
+        Ok(written)
+    } else {
+        let to_write = pipe.buf.available().min(buf.len());
+        Ok(pipe.buf.try_push_slice(&buf[..to_write]))
+    }
+}
+
+fn send_sigpipe() {
+    let task = get_current_task();
+    task.recv_signal(Signal::new(
+        SigNo::SIGPIPE,
+        SiCode::Kernel,
+        SigInfoFields::Kill(SigKill {
+            pid: task.tgid(),
+            uid: 0,
+        }),
+    ));
+}
+
+fn with_pipe_endpoint<T>(
+    file: &File,
+    f: impl FnOnce(&Arc<SpinLock<Pipe>>, Option<&PipeRx>, Option<&PipeTx>) -> T,
+) -> Option<T> {
+    if let Some(rx) = file.prv().cast::<PipeRx>() {
+        Some(f(&rx.pipe, Some(rx), None))
+    } else {
+        file.prv()
+            .cast::<PipeTx>()
+            .map(|tx| f(&tx.pipe, None, Some(tx)))
+    }
+}
+
+pub(super) fn update_nonblock(file: &File, nonblock: bool) {
+    let _ = with_pipe_endpoint(file, |_, rx, tx| {
+        if let Some(rx) = rx {
+            rx.nonblock.store(nonblock, Ordering::Relaxed);
+        }
+        if let Some(tx) = tx {
+            tx.nonblock.store(nonblock, Ordering::Relaxed);
+        }
+    });
+}
+
+pub(super) fn readable_bytes(file: &File) -> Result<usize, SysError> {
+    with_pipe_endpoint(file, |pipe, _, _| pipe.lock().buf.len()).ok_or(SysError::InvalidArgument)
+}
+
+pub(super) fn capacity(file: &File) -> Result<usize, SysError> {
+    with_pipe_endpoint(file, |pipe, _, _| pipe.lock().capacity()).ok_or(SysError::InvalidArgument)
+}
+
+pub(super) fn set_capacity(file: &File, requested: u64) -> Result<usize, SysError> {
+    if requested > i32::MAX as u64 {
+        return Err(SysError::InvalidArgument);
+    }
+
+    with_pipe_endpoint(file, |pipe, _, _| {
+        let pipe = pipe.lock();
+        let requested = requested as usize;
+        let rounded = if requested == 0 {
+            PagingArch::PAGE_SIZE_BYTES
+        } else {
+            align_up_power_of_2!(requested, PagingArch::PAGE_SIZE_BYTES)
+        };
+
+        if rounded < pipe.buf.len() {
+            Err(SysError::Busy)
+        } else if rounded <= pipe.capacity() {
+            Ok(pipe.capacity())
+        } else {
+            Err(SysError::PermissionDenied)
+        }
+    })
+    .ok_or(SysError::InvalidArgument)?
 }
 
 fn pipe_tx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollEvent, SysError> {

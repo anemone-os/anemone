@@ -5,7 +5,7 @@
 
 use crate::{
     prelude::{handler::TryFromSyscallArg, *},
-    task::files::Fd,
+    task::files::{Fd, FileFlags},
 };
 
 #[derive(Debug)]
@@ -24,6 +24,8 @@ enum FcntlCmd {
     SetSig,
     // Linux-specific commands
     DupCloexec,
+    SetPipeSz,
+    GetPipeSz,
 }
 
 impl TryFromSyscallArg for FcntlCmd {
@@ -45,6 +47,8 @@ impl TryFromSyscallArg for FcntlCmd {
             F_GETSIG => Err(SysError::NotYetImplemented),
             F_SETSIG => Err(SysError::NotYetImplemented),
             F_DUPFD_CLOEXEC => Ok(Self::DupCloexec),
+            F_SETPIPE_SZ => Ok(Self::SetPipeSz),
+            F_GETPIPE_SZ => Ok(Self::GetPipeSz),
             _ => Err(SysError::InvalidArgument),
         };
         if ret.is_err() {
@@ -92,6 +96,30 @@ fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
             let file = task.get_fd(fd)?;
             let flags = file.file_flags().to_linux_open_flags();
             Ok(flags as u64)
+        },
+        FcntlCmd::SetFl => {
+            use anemone_abi::fs::linux::open::{O_APPEND, O_DIRECT, O_NONBLOCK};
+
+            let file = task.get_fd(fd)?;
+            let raw_flags = u32::try_from_syscall_arg(arg)?;
+            let mut flags = file.file_flags();
+            flags.set(FileFlags::APPEND, raw_flags & O_APPEND != 0);
+            flags.set(FileFlags::NONBLOCK, raw_flags & O_NONBLOCK != 0);
+            flags.set(FileFlags::DIRECT, raw_flags & O_DIRECT != 0);
+            file.set_file_flags(flags);
+            crate::fs::pipe::update_nonblock(
+                file.vfs_file(),
+                flags.contains(FileFlags::NONBLOCK),
+            );
+            Ok(0)
+        },
+        FcntlCmd::GetPipeSz => {
+            let file = task.get_fd(fd)?;
+            Ok(crate::fs::pipe::capacity(file.vfs_file())? as u64)
+        },
+        FcntlCmd::SetPipeSz => {
+            let file = task.get_fd(fd)?;
+            Ok(crate::fs::pipe::set_capacity(file.vfs_file(), arg)? as u64)
         },
         _ => {
             knoticeln!("[NYI] fcntl command {:?} is not supported yet", cmd);

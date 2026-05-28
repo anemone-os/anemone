@@ -40,7 +40,7 @@ impl TryFromSyscallArg for Fd {
 pub struct ProcFile {
     /// Vfs file.
     file: File,
-    flags: FileFlags,
+    flags: SpinLock<FileFlags>,
 }
 
 #[derive(Debug)]
@@ -76,7 +76,11 @@ impl FileDesc {
     }
 
     pub fn file_flags(&self) -> FileFlags {
-        self.pfile.flags
+        *self.pfile.flags.lock()
+    }
+
+    pub fn set_file_flags(&self, flags: FileFlags) {
+        *self.pfile.flags.lock() = flags;
     }
 
     pub fn fd_flags(&self) -> FdFlags {
@@ -88,14 +92,16 @@ impl FileDesc {
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
-        if !self.pfile.flags.contains(FileFlags::READ) {
+        let flags = self.file_flags();
+        if !flags.contains(FileFlags::READ) {
             return Err(SysError::BadFileDescriptor);
         }
         self.pfile.file.read(buf).map_err(|e| e.into())
     }
 
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, SysError> {
-        if !self.pfile.flags.contains(FileFlags::READ) {
+        let flags = self.file_flags();
+        if !flags.contains(FileFlags::READ) {
             return Err(SysError::BadFileDescriptor);
         }
         self.pfile.file.read_at(offset, buf).map_err(|e| e.into())
@@ -103,11 +109,12 @@ impl FileDesc {
 
     /// This applies to both write and append mode.
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
-        if !self.pfile.flags.contains(FileFlags::WRITE) {
+        let flags = self.file_flags();
+        if !flags.contains(FileFlags::WRITE) {
             return Err(SysError::BadFileDescriptor);
         }
 
-        if self.pfile.flags.contains(FileFlags::APPEND) {
+        if flags.contains(FileFlags::APPEND) {
             self.pfile.file.append(buf).map_err(|e| e.into())
         } else {
             self.pfile.file.write(buf).map_err(|e| e.into())
@@ -121,10 +128,11 @@ impl FileDesc {
             .validate_seek(offset)
             .map_err(|e| e.into())?;
 
-        if !self.pfile.flags.contains(FileFlags::WRITE) {
+        let flags = self.file_flags();
+        if !flags.contains(FileFlags::WRITE) {
             return Err(SysError::BadFileDescriptor);
         }
-        if self.pfile.flags.contains(FileFlags::APPEND) {
+        if flags.contains(FileFlags::APPEND) {
             return self
                 .pfile
                 .file
@@ -135,7 +143,7 @@ impl FileDesc {
     }
 
     pub fn truncate(&self, len: u64) -> Result<(), SysError> {
-        if !self.pfile.flags.contains(FileFlags::WRITE) {
+        if !self.file_flags().contains(FileFlags::WRITE) {
             return Err(SysError::PermissionDenied);
         }
 
@@ -167,6 +175,8 @@ bitflags! {
         const READ = 0b0001;
         const WRITE = 0b0010;
         const APPEND = 0b0100;
+        const NONBLOCK = 0b1000;
+        const DIRECT = 0b1_0000;
 
         // create, truncate are not persistant flags, they are only used when opening a file, so we don't need to store them in FileDesc.
     }
@@ -190,6 +200,12 @@ impl FileFlags {
         // 2. O_APPEND
         if self.contains(Self::APPEND) {
             flags |= O_APPEND;
+        }
+        if self.contains(Self::NONBLOCK) {
+            flags |= O_NONBLOCK;
+        }
+        if self.contains(Self::DIRECT) {
+            flags |= O_DIRECT;
         }
 
         flags
@@ -226,6 +242,12 @@ impl FileFlags {
         // 2. append bit
         if flags & anemone_abi::fs::linux::open::O_APPEND != 0 {
             open_flags |= Self::APPEND;
+        }
+        if flags & anemone_abi::fs::linux::open::O_NONBLOCK != 0 {
+            open_flags |= Self::NONBLOCK;
+        }
+        if flags & anemone_abi::fs::linux::open::O_DIRECT != 0 {
+            open_flags |= Self::DIRECT;
         }
 
         open_flags
@@ -325,7 +347,7 @@ impl FilesState {
         let file_desc = Arc::new(FileDesc::new(
             Arc::new(ProcFile {
                 file,
-                flags: file_flags,
+                flags: SpinLock::new(file_flags),
             }),
             fd_flags,
         ));

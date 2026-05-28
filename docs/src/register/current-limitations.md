@@ -216,9 +216,24 @@
 **Severity:** Medium
 **Area:** procfs / fd / path visibility
 
-**Summary:** 当前 procfs 还没有 `/proc/<tgid>/fd` 目录框架。glibc 的 `realpath("/tmp")` 可通过普通 `readlink("/tmp") -> EINVAL` 路径完成，但 musl 的 `realpath` 在某些路径上会依赖 `readlink("/proc/self/fd/<n>")`，因此 `getcwd02` 的 musl 变体仍会因 `/proc/self/fd/3` 不存在而 `ENOENT`。
+**Summary:** 当前 procfs 还没有 `/proc/<tgid>/fd` 目录框架。glibc 的 `realpath("/tmp")` 可通过普通 `readlink("/tmp") -> EINVAL` 路径完成，但 musl 的 `realpath` 在某些路径上会依赖 `readlink("/proc/self/fd/<n>")`，因此 `getcwd02` 的 musl 变体仍会因 `/proc/self/fd/3` 不存在而 `ENOENT`；LTP `pipe07` 也会因为缺少 `/proc/self/fd` 目录枚举而失败。
 
-**Exit Condition:** 引入系统性的 `/proc/<tgid>/fd` 目录实现，基于目标 thread group 的 fd 表提供 `readdir`、`readlink`、`stat/open` 所需的稳定语义，并明确 fd 生命周期、权限和路径可见性规则；完成后重新验证 musl `getcwd02` 及依赖 fd symlink 的相关 libc 路径。
+**Exit Condition:** 引入系统性的 `/proc/<tgid>/fd` 目录实现，基于目标 thread group 的 fd 表提供 `readdir`、`readlink`、`stat/open` 所需的稳定语义，并明确 fd 生命周期、权限和路径可见性规则；完成后重新验证 musl `getcwd02`、LTP `pipe07` 及依赖 fd symlink 的相关 libc 路径。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-28
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260528-PIPE-PROCFS-KNOBS-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** pipe / fcntl / procfs / user-test
+
+**Summary:** 当前匿名 pipe 的基础语义已覆盖 `SIGPIPE`、`O_NONBLOCK`、`F_GETPIPE_SZ`、`F_SETPIPE_SZ(0)` 与 `FIONREAD`，但容量仍是单页固定 stage-1；`F_SETPIPE_SZ` 不支持真实扩容，`O_DIRECT` 只保留可观察 flag 而未实现 packet-mode pipe。LTP `pipe15` 还依赖 `/proc/sys/fs/pipe-user-pages-soft`，`pipe2_04` 的阻塞状态检查依赖 `/proc/<pid>/stat`，这些 procfs knobs/process stat 入口尚未提供。
+
+**Exit Condition:** 为 pipe 容量引入可增长/可收缩的真实 backing 和资源限制账本，补齐 `/proc/sys/fs/pipe-*` 与 `/proc/<pid>/stat` 中测试所需的最小可观察语义，并重新验证 `pipe15`、`pipe2_04` 及 `fcntl(F_SETPIPE_SZ)` 边界测例。
 
 **Owner:** doruche
 **Last Verified:** 2026-05-28
