@@ -6,7 +6,9 @@ use anemone_rs::{
     prelude::*,
 };
 
-const STARTER_WHITELIST: &str = include_str!("../ltp/whitelist-starter.txt");
+const ACTIVE_PROFILE: &str = include_str!("../ltp/profile.txt");
+const ETC_PASSWD: &str = include_str!("../fixtures/passwd");
+const ETC_GROUP: &str = include_str!("../fixtures/group");
 
 const GLIBC_LTP_ENV: &[&str] = &[
     "PATH=/glibc/ltp/testcases/bin:/glibc/bin:/glibc/usr/bin:/bin:/usr/bin:/sbin:/usr/sbin",
@@ -29,7 +31,6 @@ struct LtpRoot {
     label: &'static str,
     workdir: &'static str,
     envp: &'static [&'static str],
-    whitelist: &'static str,
     disabled_cases: &'static [&'static str],
 }
 
@@ -39,7 +40,6 @@ const LTP_ROOTS: &[LtpRoot] = &[
         label: "ltp-glibc",
         workdir: "/glibc",
         envp: GLIBC_LTP_ENV,
-        whitelist: STARTER_WHITELIST,
         disabled_cases: &[],
     },
     LtpRoot {
@@ -47,8 +47,43 @@ const LTP_ROOTS: &[LtpRoot] = &[
         label: "ltp-musl",
         workdir: "/musl",
         envp: MUSL_LTP_ENV,
-        whitelist: STARTER_WHITELIST,
         disabled_cases: &["sbrk01"],
+    },
+];
+
+struct LtpGroup {
+    name: &'static str,
+    cases: &'static str,
+}
+
+const LTP_GROUPS: &[LtpGroup] = &[
+    LtpGroup {
+        name: "fs-fd",
+        cases: include_str!("../ltp/groups/fs-fd.txt"),
+    },
+    LtpGroup {
+        name: "memory",
+        cases: include_str!("../ltp/groups/memory.txt"),
+    },
+    LtpGroup {
+        name: "process-exec",
+        cases: include_str!("../ltp/groups/process-exec.txt"),
+    },
+];
+
+struct LtpFixture {
+    path: &'static str,
+    content: &'static str,
+}
+
+const LTP_FIXTURES: &[LtpFixture] = &[
+    LtpFixture {
+        path: "/etc/passwd",
+        content: ETC_PASSWD,
+    },
+    LtpFixture {
+        path: "/etc/group",
+        content: ETC_GROUP,
     },
 ];
 
@@ -82,12 +117,27 @@ enum LtpCaseOutcome {
     InfraFailed,
 }
 
+pub fn install_ltp_fixtures() {
+    println!("user-test: installing LTP fixtures...");
+
+    for fixture in LTP_FIXTURES {
+        install_ltp_fixture(fixture);
+        println!("user-test: ensured LTP fixture {}", fixture.path);
+    }
+}
+
 pub fn run_ltp_tests() {
-    println!("user-test: running LTP whitelist...");
+    let groups = select_ltp_groups();
+
+    print!("user-test: running LTP profile groups:");
+    for group in &groups {
+        print!(" {}", group.name);
+    }
+    println!();
 
     let mut overall = LtpSummary::default();
     for root in LTP_ROOTS {
-        let summary = run_ltp_root(root);
+        let summary = run_ltp_root(root, groups.as_slice());
         overall.merge(summary);
     }
 
@@ -97,14 +147,13 @@ pub fn run_ltp_tests() {
     );
 }
 
-fn run_ltp_root(root: &LtpRoot) -> LtpSummary {
+fn run_ltp_root(root: &LtpRoot, groups: &[&'static LtpGroup]) -> LtpSummary {
     crate::switch_runtime(root.family);
     crate::clear_tmp();
 
-    println!("#### OS COMP TEST GROUP START {} ####", root.label);
-
     let mut summary = LtpSummary::default();
     if fstatat(AtFd::Cwd, Path::new(root.workdir)).is_err() {
+        println!("#### OS COMP TEST GROUP START {} ####", root.label);
         println!(
             "user-test: skipping {} because {} is missing",
             root.label, root.workdir,
@@ -113,7 +162,31 @@ fn run_ltp_root(root: &LtpRoot) -> LtpSummary {
         return summary;
     }
 
-    for line in root.whitelist.lines() {
+    for group in groups {
+        let group_summary = run_ltp_group(root, group);
+        summary.merge(group_summary);
+    }
+
+    println!(
+        "user-test: {} summary attempted={} passed={} failed={} infra_failed={} skipped={}",
+        root.label,
+        summary.attempted,
+        summary.passed,
+        summary.failed,
+        summary.infra_failed,
+        summary.skipped,
+    );
+    summary
+}
+
+fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
+    println!(
+        "#### OS COMP TEST GROUP START {}/{} ####",
+        root.label, group.name,
+    );
+
+    let mut summary = LtpSummary::default();
+    for line in group.cases.lines() {
         let Some(case) = parse_case_line(line) else {
             continue;
         };
@@ -145,10 +218,14 @@ fn run_ltp_root(root: &LtpRoot) -> LtpSummary {
         }
     }
 
-    println!("#### OS COMP TEST GROUP END {} ####", root.label);
     println!(
-        "user-test: {} summary attempted={} passed={} failed={} infra_failed={} skipped={}",
+        "#### OS COMP TEST GROUP END {}/{} ####",
+        root.label, group.name,
+    );
+    println!(
+        "user-test: {}/{} summary attempted={} passed={} failed={} infra_failed={} skipped={}",
         root.label,
+        group.name,
         summary.attempted,
         summary.passed,
         summary.failed,
@@ -156,6 +233,50 @@ fn run_ltp_root(root: &LtpRoot) -> LtpSummary {
         summary.skipped,
     );
     summary
+}
+
+fn select_ltp_groups() -> Vec<&'static LtpGroup> {
+    let mut selected: Vec<&'static LtpGroup> = Vec::new();
+    let mut select_all = false;
+
+    for line in ACTIVE_PROFILE.lines() {
+        let Some(name) = parse_profile_line(line) else {
+            continue;
+        };
+
+        if name == "all" {
+            if select_all || !selected.is_empty() {
+                panic!("user-test: LTP profile uses all with other groups");
+            }
+            select_all = true;
+            continue;
+        }
+
+        if select_all {
+            panic!("user-test: LTP profile uses all with other groups");
+        }
+
+        let group = find_ltp_group(name)
+            .unwrap_or_else(|| panic!("user-test: unknown LTP profile group {name}"));
+        if selected.iter().any(|selected| selected.name == group.name) {
+            panic!("user-test: duplicate LTP profile group {name}");
+        }
+        selected.push(group);
+    }
+
+    if select_all {
+        selected.extend(LTP_GROUPS.iter());
+    }
+
+    if selected.is_empty() {
+        panic!("user-test: LTP profile selected no groups");
+    }
+
+    selected
+}
+
+fn find_ltp_group(name: &str) -> Option<&'static LtpGroup> {
+    LTP_GROUPS.iter().find(|group| group.name == name)
 }
 
 fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpCaseOutcome {
@@ -208,6 +329,20 @@ fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpC
     }
 }
 
+fn parse_profile_line(line: &str) -> Option<&str> {
+    let line = line.split('#').next().unwrap_or("").trim();
+    if line.is_empty() {
+        return None;
+    }
+
+    let mut parts = line.split_ascii_whitespace();
+    let name = parts.next()?;
+    if parts.next().is_some() {
+        panic!("user-test: invalid LTP profile line {line}");
+    }
+    Some(name)
+}
+
 fn parse_case_line(line: &str) -> Option<LtpCaseSpec<'_>> {
     let line = line.split('#').next().unwrap_or("").trim();
     if line.is_empty() {
@@ -226,4 +361,20 @@ fn ltp_exit_code(wstatus: WStatus) -> i32 {
         WStatus::Signal(sig) | WStatus::Stopped(sig) => 128 + i32::from(sig),
         WStatus::Continued => 128,
     }
+}
+
+fn install_ltp_fixture(fixture: &LtpFixture) {
+    let parent = fixture.path.rsplit_once('/').map(|(parent, _)| parent);
+    let parent = parent.filter(|parent| !parent.is_empty()).unwrap_or("/");
+    let script = format!(
+        "if [ ! -e {path} ]; then mkdir -p {parent} && cat > {path} <<'EOF'\n{content}EOF\nfi",
+        path = fixture.path,
+        parent = parent,
+        content = fixture.content,
+    );
+
+    crate::run_busybox(
+        &["busybox", "sh", "-c", script.as_str()],
+        "install LTP fixture",
+    );
 }

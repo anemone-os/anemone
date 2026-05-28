@@ -1,0 +1,12 @@
+# Memory-management LTP cases.
+# Format: one case per line, optional arguments after the case name.
+
+brk01
+brk02
+madvise01
+madvise02
+madvise03
+madvise05
+madvise10
+sbrk01
+sbrk02
