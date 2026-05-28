@@ -196,6 +196,8 @@ pub mod linux {
 
     pub const SYS_GETRANDOM: u64 = 278;
 
+    pub const SYS_EXECVEAT: u64 = 281;
+
     pub const SYS_PWRITEV2: u64 = 287;
 
     pub const SYS_XSTAT: u64 = 291;

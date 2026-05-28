@@ -58,6 +58,14 @@ struct LtpGroup {
 
 const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
+        name: "clone",
+        cases: include_str!("../ltp/groups/clone.txt"),
+    },
+    LtpGroup {
+        name: "exec",
+        cases: include_str!("../ltp/groups/exec.txt"),
+    },
+    LtpGroup {
         name: "fd",
         cases: include_str!("../ltp/groups/fd.txt"),
     },
@@ -66,16 +74,20 @@ const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../ltp/groups/fs.txt"),
     },
     LtpGroup {
+        name: "futex",
+        cases: include_str!("../ltp/groups/futex.txt"),
+    },
+    LtpGroup {
         name: "memory",
         cases: include_str!("../ltp/groups/memory.txt"),
     },
     LtpGroup {
-        name: "pipe",
-        cases: include_str!("../ltp/groups/pipe.txt"),
+        name: "open",
+        cases: include_str!("../ltp/groups/open.txt"),
     },
     LtpGroup {
-        name: "process-exec",
-        cases: include_str!("../ltp/groups/process-exec.txt"),
+        name: "pipe",
+        cases: include_str!("../ltp/groups/pipe.txt"),
     },
     LtpGroup {
         name: "read-write",

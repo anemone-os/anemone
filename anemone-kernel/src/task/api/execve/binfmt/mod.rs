@@ -19,31 +19,36 @@ pub struct LoadedBinaryMeta {
 /// **This function must be run in a process context.**
 pub fn dispatch_execve(
     usp: &mut UserSpace,
-    path: &str,
+    exec_fn: &str,
+    path: PathRef,
     argv: &[impl AsRef<str>],
     envp: &[impl AsRef<str>],
 ) -> Result<LoadedBinaryMeta, SysError> {
-    let resolved = get_current_task()
-        .lookup_path(Path::new(path), ResolveFlags::empty())
-        .map_err(|e| {
-            knoticeln!("execve: failed to resolve path '{}': {:?}", path, e);
-            e
-        })?;
     kdebugln!(
         "execve: resolved path '{}' to '{}'",
-        path,
-        resolved.to_pathbuf().display()
+        exec_fn,
+        path.to_pathbuf().display()
     );
 
     let mut ctx = ExecCtx {
         usp,
-        exec_fn: path,
-        path: resolved.to_string(),
+        exec_fn,
+        path,
         argv: argv.iter().map(|s| s.as_ref().to_string()).collect(),
         envp: envp.iter().map(|s| s.as_ref().to_string()).collect(),
     };
 
     for _ in 0..MAX_BINFMT_REDIRECTS {
+        if ctx.path.inode().ty() == InodeType::Regular
+            && !ctx
+                .path
+                .inode()
+                .perm()
+                .intersects(InodePerm::IXUSR | InodePerm::IXGRP | InodePerm::IXOTH)
+        {
+            return Err(SysError::AccessDenied);
+        }
+
         for &fmt in BINARY_FMTS {
             match (fmt.load_binary)(&mut ctx)? {
                 ExecResult::Loaded(meta) => {
@@ -74,10 +79,10 @@ pub struct ExecCtx<'a> {
     ///
     /// **Relative to the current process's filesystem context.**
     pub exec_fn: &'a str,
-    /// The path to the binary to execute, within global namespace. This may be
-    /// different from `exec_fn` if there are redirections (e.g. shebang), or if
-    /// current process has a custom filesystem context (e.g. with chroot).
-    pub path: String,
+    /// The resolved binary to execute. This may be different from `exec_fn` if
+    /// there are redirections (e.g. shebang), or if current process has a
+    /// custom filesystem context (e.g. with chroot).
+    pub path: PathRef,
 
     // following fields both result in some heap allocation... sad.
     // but this seems inevitable cz redirecting to another binary may change the arguments and
