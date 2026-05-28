@@ -70,6 +70,8 @@ pub enum SysError {
     DirNotEmpty,
     /// Trying to link across different filesystems.
     CrossDeviceLink,
+    /// The target filesystem is mounted read-only.
+    ReadOnlyFs,
     /// Path is not a mountpoint.
     NotMounted,
     /// Path is a mountpoint.
@@ -196,6 +198,7 @@ impl SysError {
             SysError::FileTooLarge => EFBIG,
             SysError::DirNotEmpty => ENOTEMPTY,
             SysError::CrossDeviceLink => EXDEV,
+            SysError::ReadOnlyFs => EROFS,
             SysError::NoSpace | SysError::ResourceExhausted | SysError::NoMinorAvailable => ENOSPC,
             SysError::Again => EAGAIN,
             SysError::BrokenPipe => EPIPE,

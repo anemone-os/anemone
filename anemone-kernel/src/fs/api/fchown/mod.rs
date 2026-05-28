@@ -25,6 +25,12 @@ pub fn kernel_fchown(
     group: Option<Gid>,
     ctime: Duration,
 ) -> Result<(), SysError> {
+    if owner.is_none() && group.is_none() {
+        return Ok(());
+    }
+
+    pathref.mount().ensure_writable()?;
+
     pathref.inode().inode().chown(owner, group, ctime);
     Ok(())
 }

@@ -91,6 +91,10 @@ fn finish_open(file: File, flags: u32) -> Result<u64, SysError> {
         return Err(SysError::NotDir.into());
     }
 
+    if allows_write_access(flags) && file.inode().ty() == InodeType::Regular {
+        file.path().mount().ensure_writable()?;
+    }
+
     if flags & O_TRUNC != 0 && allows_write_access(flags) && file.inode().ty() == InodeType::Regular
     {
         file.inode().truncate(0)?;

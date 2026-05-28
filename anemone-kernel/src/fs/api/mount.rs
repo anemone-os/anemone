@@ -1,9 +1,9 @@
 //! mount system call.
 //!
-//! TODO: mount flags.
-//!
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/mount.2.html
+
+use anemone_abi::fs::linux::mount::MS_RDONLY;
 
 use crate::{
     device::block::get_block_dev,
@@ -44,13 +44,27 @@ fn mount_fs_name(fstype: &str) -> &str {
     }
 }
 
+fn parse_mount_flags(raw: u64) -> MountFlags {
+    let mut flags = MountFlags::empty();
+
+    if raw & MS_RDONLY != 0 {
+        flags |= MountFlags::RDONLY;
+    }
+
+    let ignored = raw & !MS_RDONLY;
+    if ignored != 0 {
+        knoticeln!("[NYI] mount: ignoring unsupported flags {:#x}", ignored);
+    }
+
+    flags
+}
+
 #[syscall(SYS_MOUNT)]
 fn sys_mount(
     #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>.nullable())] source: Option<Box<str>>,
     #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] target: Box<str>,
     #[validate_with(c_readonly_string::<MAX_FILE_NAME_LEN_BYTES>)] fstype: Box<str>,
-    // currently used. but we will support some important flags in the future, e.g. MS_BIND.
-    _mountflags: u64,
+    mountflags: u64,
     // we don't support this argument. vfs now doesn't use it at all.
     _data: u64,
 ) -> Result<u64, SysError> {
@@ -70,7 +84,7 @@ fn sys_mount(
     let target =
         get_current_task().lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
 
-    mount_at(fs_name, source, MountFlags::empty(), &target)?;
+    mount_at(fs_name, source, parse_mount_flags(mountflags), &target)?;
 
     Ok(0)
 }

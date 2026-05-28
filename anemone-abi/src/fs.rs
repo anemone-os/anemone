@@ -221,6 +221,10 @@ pub mod linux {
         pub const X_OK: u32 = 1;
     }
 
+    pub mod mount {
+        pub const MS_RDONLY: u64 = 1;
+    }
+
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     #[repr(C)]
     pub struct IoVec {

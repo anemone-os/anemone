@@ -238,3 +238,18 @@
 **Owner:** doruche
 **Last Verified:** 2026-05-28
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260528-ROFS-DIRECT-WRITE-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** fs / mount / VFS / mmap
+
+**Summary:** 当前 `MS_RDONLY` 已能通过 mount flags 传播到 VFS，并覆盖直接写路径：目录项创建/删除/改名、普通文件 open-for-write / write / truncate、`chmod` / `chown` / `utimensat` / `fallocate` 会在只读挂载上返回 `EROFS`。这不是完整 Linux ROFS：shared writable mmap、dirty/writeback 与 `msync` 关系、remount/bind/move mount 语义，以及除 `MS_RDONLY` 外的 mount flags 仍未系统化。
+
+**Exit Condition:** 为 file-backed shared writable mmap 和 writeback 引入明确的只读挂载约束；补齐或显式拒绝 remount、bind、move、propagation 等 mount flag 组合；用覆盖 open/write/truncate/metadata/mmap/remount 的回归矩阵验证 ROFS 语义。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-28
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)

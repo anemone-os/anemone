@@ -141,6 +141,13 @@ impl File {
         &self.path
     }
 
+    fn ensure_regular_content_writable(&self) -> Result<(), SysError> {
+        if self.inode().ty() == InodeType::Regular {
+            self.path.mount().ensure_writable()?;
+        }
+        Ok(())
+    }
+
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
@@ -188,6 +195,8 @@ impl File {
             return Ok(0);
         }
 
+        self.ensure_regular_content_writable()?;
+
         let mut pos = self.pos.lock();
 
         let written = (self.ops.write)(self, &mut *pos, buf)?;
@@ -202,6 +211,7 @@ impl File {
         }
 
         self.validate_seek(pos)?;
+        self.ensure_regular_content_writable()?;
 
         let mut dummy_pos = pos;
         let written = (self.ops.write)(self, &mut dummy_pos, buf)?;
@@ -213,6 +223,8 @@ impl File {
         if buf.len() == 0 {
             return Ok(());
         }
+
+        self.ensure_regular_content_writable()?;
 
         let mut pos = self.pos.lock();
         while !buf.is_empty() {
@@ -233,6 +245,12 @@ impl File {
     /// Different from [Self::seek] + [Self::write], this is an atomic
     /// operation.
     pub fn append(&self, buf: &[u8]) -> Result<usize, SysError> {
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+
+        self.ensure_regular_content_writable()?;
+
         let mut pos = self.pos.lock();
         let sz = self.inode().get_attr()?.size as usize;
         *pos = sz;
@@ -245,6 +263,8 @@ impl File {
         if buf.len() == 0 {
             return Ok(0);
         }
+
+        self.ensure_regular_content_writable()?;
 
         let _pos = self.pos.lock();
         let mut append_pos = self.inode().get_attr()?.size as usize;

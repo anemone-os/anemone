@@ -4,3 +4,4 @@
 # Use "all" to run every registered group.
 
 fs
+pipe

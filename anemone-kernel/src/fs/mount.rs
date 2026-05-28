@@ -7,7 +7,7 @@ bitflags! {
     pub struct MountFlags: u32 {
         // The filesystem is mounted read-only. Kernel will enforce this by
         // disallowing any write operations on the mount.
-        // const RDONLY = 1 << 0;
+        const RDONLY = 1 << 0;
     }
 }
 
@@ -88,6 +88,14 @@ impl Mount {
 
     pub fn flags(&self) -> MountFlags {
         self.flags
+    }
+
+    pub fn ensure_writable(&self) -> Result<(), SysError> {
+        if self.flags.contains(MountFlags::RDONLY) {
+            Err(SysError::ReadOnlyFs)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn add_child(&self, child: &Arc<Mount>) {

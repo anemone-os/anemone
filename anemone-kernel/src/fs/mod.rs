@@ -473,6 +473,8 @@ mod vfs_ops {
             let rel_path = rel_path.into();
             let (parent, name) = resolve_parent_from(dir, rel_path.target, rel_path.flags)?;
 
+            parent.mount().ensure_writable()?;
+
             let inode = parent.inode().touch(&name, perm)?;
 
             let dentry = materialize_child_dentry(parent.dentry(), &name, inode)?;
@@ -515,6 +517,8 @@ mod vfs_ops {
             let rel_path = rel_path.into();
             let (parent, name) = resolve_parent_from(dir, rel_path.target, rel_path.flags)?;
 
+            parent.mount().ensure_writable()?;
+
             let inode = parent.inode().mkdir(&name, perm)?;
 
             let dentry = materialize_child_dentry(parent.dentry(), &name, inode)?;
@@ -531,6 +535,7 @@ mod vfs_ops {
             }
 
             let (parent, name) = resolve_parent(new_path, ResolveFlags::empty())?;
+            parent.mount().ensure_writable()?;
             parent.inode().link(&name, target.inode())?;
 
             Ok(())
@@ -556,6 +561,7 @@ mod vfs_ops {
             }
 
             let (parent, name) = resolve_parent_from(dir, rel_path.target, rel_path.flags)?;
+            parent.mount().ensure_writable()?;
             let inode = parent.inode().symlink(&name, target)?;
             let dentry = materialize_child_dentry(parent.dentry(), &name, inode)?;
 
@@ -572,6 +578,7 @@ mod vfs_ops {
         /// [PathResolution] here.
         pub fn vfs_unlink_at(dir: &PathRef, rel_path: &Path) -> Result<(), SysError> {
             let (parent, name) = resolve_parent_from(dir, rel_path, ResolveFlags::empty())?;
+            parent.mount().ensure_writable()?;
             parent.inode().unlink(&name)?;
 
             // remove the dentry from the cache to prevent stale lookups. the child
@@ -619,6 +626,8 @@ mod vfs_ops {
             if old_name == new_name && Arc::ptr_eq(&old_parent, new_dir.dentry()) {
                 return Ok(());
             }
+
+            old_path.mount().ensure_writable()?;
 
             if let Ok(existing) = new_dir.dentry().lookup_child(new_name) {
                 if new_dir.mount().child_at(&existing).is_some() {
@@ -687,6 +696,8 @@ mod vfs_ops {
             if !Arc::ptr_eq(target.mount(), parent.mount()) {
                 return Err(SysError::IsMountPoint);
             }
+
+            parent.mount().ensure_writable()?;
 
             parent.inode().rmdir(&name)?;
 

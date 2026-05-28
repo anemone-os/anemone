@@ -70,6 +70,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../ltp/groups/memory.txt"),
     },
     LtpGroup {
+        name: "pipe",
+        cases: include_str!("../ltp/groups/pipe.txt"),
+    },
+    LtpGroup {
         name: "process-exec",
         cases: include_str!("../ltp/groups/process-exec.txt"),
     },

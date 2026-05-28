@@ -139,6 +139,10 @@ impl FileDesc {
             return Err(SysError::PermissionDenied);
         }
 
+        if self.pfile.file.inode().ty() == InodeType::Regular {
+            self.pfile.file.path().mount().ensure_writable()?;
+        }
+
         self.pfile.file.inode().truncate(len)
     }
 
