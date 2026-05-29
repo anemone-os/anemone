@@ -18,9 +18,7 @@ fn sys_newfstatat(
     #[validate_with(user_addr)] statbuf: VirtAddr,
     flags: StatAtFlag,
 ) -> Result<u64, SysError> {
-    let mut kbuf = Stat::default();
-
-    kernel_fstatat(dirfd, &filename, &mut kbuf, flags)?;
+    let kbuf = kernel_fstatat(dirfd, &filename, flags)?.to_linux_stat();
 
     let usp = get_current_task().clone_uspace_handle();
     let mut guard = usp.lock();

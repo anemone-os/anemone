@@ -1,5 +1,4 @@
 use crate::{mm::uspace::vma::Protection, prelude::*};
-use anemone_abi::process::linux::shm::IpcPerm;
 
 use super::{
     SHM_DEST, ShmObject,
@@ -101,8 +100,26 @@ pub struct ShmSegmentState {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct ShmPerm {
+    pub key: i32,
+    pub uid: u32,
+    pub gid: u32,
+    pub cuid: u32,
+    pub cgid: u32,
+    pub mode: u16,
+    pub seq: u16,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ShmPermUpdate {
+    pub uid: u32,
+    pub gid: u32,
+    pub mode: u16,
+}
+
+#[derive(Debug, Clone, Copy)]
 struct ShmSegmentInner {
-    perm: IpcPerm,
+    perm: ShmPerm,
     state: ShmSegmentState,
 }
 
@@ -113,7 +130,7 @@ impl ShmSegment {
         seq: ShmSeq,
         key: Option<ShmKey>,
         size: usize,
-        perm: IpcPerm,
+        perm: ShmPerm,
         creator_tgid: Tid,
     ) -> Self {
         let npages = align_up!(size, PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES;
@@ -167,7 +184,7 @@ impl ShmSegment {
         self.object.clone()
     }
 
-    pub fn perm(&self) -> IpcPerm {
+    pub fn perm(&self) -> ShmPerm {
         self.inner.lock().perm
     }
 
@@ -242,14 +259,23 @@ impl ShmSegment {
         true
     }
 
-    pub fn update_from_ipc_set(&self, new_perm: IpcPerm) {
+    pub fn update_from_ipc_set(&self, update: ShmPermUpdate) {
         let now = Instant::now().to_duration();
         let mut inner = self.inner.lock();
 
-        inner.perm.uid = new_perm.uid;
-        inner.perm.gid = new_perm.gid;
-        inner.perm.mode = (inner.perm.mode & !0o777) | (new_perm.mode & 0o777);
+        inner.perm.uid = update.uid;
+        inner.perm.gid = update.gid;
+        inner.perm.mode = (inner.perm.mode & !0o777) | (update.mode & 0o777);
         inner.state.last_change_time = now;
+    }
+
+    pub fn set_locked(&self, locked: bool) {
+        let mut inner = self.inner.lock();
+        if locked {
+            inner.perm.mode |= super::SHM_LOCKED;
+        } else {
+            inner.perm.mode &= !super::SHM_LOCKED;
+        }
     }
 
     pub fn is_reclaimable(&self) -> bool {

@@ -1,4 +1,8 @@
-use anemone_abi::fs::linux::{mode as linux_mode, stat::Stat as LinuxStat};
+use anemone_abi::fs::linux::{
+    mode as linux_mode,
+    stat::Stat as LinuxStat,
+    statx::{self as linux_statx, StatX as LinuxStatX, StatXTimestamp as LinuxStatXTimestamp},
+};
 use core::{
     fmt::{Debug, Display},
     time::Duration,
@@ -325,6 +329,60 @@ impl InodeStat {
     /// / 512`, i.e., the number of 512-byte blocks this file occupies.
     pub const fn linux_blocks(self) -> i64 {
         ((self.size + 511) / 512) as i64
+    }
+
+    fn linux_statx_timestamp(time: Duration) -> LinuxStatXTimestamp {
+        LinuxStatXTimestamp {
+            tv_sec: time.as_secs() as i64,
+            tv_nsec: time.subsec_nanos(),
+            __reserved: 0,
+        }
+    }
+
+    fn linux_statx_dev_parts(dev: DeviceId) -> (u32, u32) {
+        let raw = dev.raw();
+        let major = raw >> crate::device::devnum::MINOR_BITS;
+        let minor = raw & ((1 << crate::device::devnum::MINOR_BITS) - 1);
+
+        (major as u32, minor as u32)
+    }
+
+    /// Convert to Linux's `struct statx`.
+    pub fn to_linux_statx(self, requested_mask: u32) -> LinuxStatX {
+        let mask = if requested_mask == 0 {
+            linux_statx::BASIC_STATS
+        } else {
+            requested_mask & linux_statx::BASIC_STATS
+        };
+        let (stx_dev_major, stx_dev_minor) = Self::linux_statx_dev_parts(self.fs_dev);
+        let (stx_rdev_major, stx_rdev_minor) = Self::linux_statx_dev_parts(self.rdev);
+
+        LinuxStatX {
+            stx_mask: mask,
+            stx_blksize: Self::linux_blksize() as u32,
+            stx_attributes: 0,
+            stx_nlink: self.nlink.min(u32::MAX as u64) as u32,
+            stx_uid: self.uid.get(),
+            stx_gid: self.gid.get(),
+            stx_mode: self.mode.to_linux_mode() as u16,
+            __spare0: [0; 1],
+            stx_ino: self.ino.get(),
+            stx_size: self.size,
+            stx_blocks: self.linux_blocks() as u64,
+            stx_attributes_mask: 0,
+            stx_atime: Self::linux_statx_timestamp(self.atime),
+            stx_btime: LinuxStatXTimestamp::default(),
+            stx_ctime: Self::linux_statx_timestamp(self.ctime),
+            stx_mtime: Self::linux_statx_timestamp(self.mtime),
+            stx_rdev_major,
+            stx_rdev_minor,
+            stx_dev_major,
+            stx_dev_minor,
+            stx_mnt_id: 0,
+            stx_dio_mem_align: 0,
+            stx_dio_offset_align: 0,
+            __spare3: [0; 12],
+        }
     }
 }
 

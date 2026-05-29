@@ -728,15 +728,22 @@ pub mod linux {
         pub const SHM_INFO: i32 = 14;
         pub const SHM_STAT_ANY: i32 = 15;
 
-        /// Obsolete, used only for backwards compatibility.
+        /// Linux `struct shminfo64` layout used by IPC_64 shmctl().
+        ///
+        /// riscv64 and loongarch64 both use the asm-generic SysV IPC UAPI
+        /// layout, where these fields are unsigned long-sized.
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         #[repr(C)]
         pub struct ShmInfo {
-            pub shmmax: i32,
-            pub shmmin: i32,
-            pub shmmni: i32,
-            pub shmseg: i32,
-            pub shmall: usize,
+            pub shmmax: u64,
+            pub shmmin: u64,
+            pub shmmni: u64,
+            pub shmseg: u64,
+            pub shmall: u64,
+            pub __unused1: u64,
+            pub __unused2: u64,
+            pub __unused3: u64,
+            pub __unused4: u64,
         }
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -760,12 +767,12 @@ pub mod linux {
             pub shm_ctime: i64,
             pub shm_cpid: i32,
             pub shm_lpid: i32,
-            pub shm_nattch: u16,
-            pub shm_unused: u16,
-            pub shm_unused2: u64,
-            pub shm_unused3: u64,
+            pub shm_nattch: u64,
+            pub __unused4: u64,
+            pub __unused5: u64,
         }
 
+        /// Linux `struct ipc64_perm` layout for asm-generic 64-bit targets.
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         #[repr(C)]
         pub struct IpcPerm {
@@ -774,8 +781,11 @@ pub mod linux {
             pub gid: u32,
             pub cuid: u32,
             pub cgid: u32,
-            pub mode: u16,
+            pub mode: u32,
             pub __seq: u16,
+            pub __pad2: u16,
+            pub __unused1: u64,
+            pub __unused2: u64,
         }
     }
 }

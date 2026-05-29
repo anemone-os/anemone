@@ -3,11 +3,11 @@ use crate::{
     syscall::handler::{TryFromSyscallArg, syscall_arg_flag32},
 };
 
-use anemone_abi::process::linux::{ipc::IPC_PRIVATE, shm::IpcPerm};
+use anemone_abi::process::linux::ipc::IPC_PRIVATE;
 
 use super::{
     SHMALL, SHMMNI,
-    segment::{ShmAttachReservation, ShmSegment},
+    segment::{ShmAttachReservation, ShmPerm, ShmSegment},
 };
 
 const SHM_INDEX_BITS: usize = 16;
@@ -50,11 +50,11 @@ impl ShmSlotIndex {
         }
     }
 
-    pub fn from_user_index(index: i32) -> Result<Self, SysError> {
-        if index < 0 || index as usize >= SHM_INDEX_LIMIT {
+    pub fn from_linux_stat_target(target: i32) -> Result<Self, SysError> {
+        if target < 0 {
             return Err(SysError::InvalidArgument);
         }
-        Ok(Self(index as u16))
+        Ok(Self((target & SHM_INDEX_MASK) as u16))
     }
 
     pub fn get(self) -> usize {
@@ -253,7 +253,7 @@ impl ShmRegistry {
         &mut self,
         key: Option<ShmKey>,
         size: usize,
-        perm: IpcPerm,
+        perm: ShmPerm,
         creator_tgid: Tid,
     ) -> Result<Arc<ShmSegment>, SysError> {
         let npages = align_up!(size, PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES;
@@ -273,7 +273,7 @@ impl ShmRegistry {
         let seq = self.slots[index.get()].seq;
         let id = ShmId::new(index, seq);
         let mut perm = perm;
-        perm.__seq = seq.raw();
+        perm.seq = seq.raw();
         let segment = Arc::new(ShmSegment::new(
             id,
             index,

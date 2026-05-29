@@ -10,6 +10,7 @@ use anemone_abi::process::linux::{ipc::*, shm::*};
 use super::super::{
     SHMALL, SHMMAX, SHMMIN, SHMMNI, SHMSEG, ShmAccess, ShmSegment, check_access,
     registry::{ShmId, ShmRegistryStats, ShmSlotIndex, with_registry},
+    segment::{ShmPerm, ShmPermUpdate},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,11 +92,26 @@ fn usize_to_i32_saturating(value: usize) -> i32 {
     }
 }
 
-fn usize_to_u16_saturating(value: usize) -> u16 {
-    if value > u16::MAX as usize {
-        u16::MAX
-    } else {
-        value as u16
+fn linux_ipc_perm(perm: ShmPerm) -> IpcPerm {
+    IpcPerm {
+        key: perm.key,
+        uid: perm.uid,
+        gid: perm.gid,
+        cuid: perm.cuid,
+        cgid: perm.cgid,
+        mode: perm.mode as u32,
+        __seq: perm.seq,
+        __pad2: 0,
+        __unused1: 0,
+        __unused2: 0,
+    }
+}
+
+fn ipc_set_update_from_linux(ds: ShmIdDs) -> ShmPermUpdate {
+    ShmPermUpdate {
+        uid: ds.shm_perm.uid,
+        gid: ds.shm_perm.gid,
+        mode: ds.shm_perm.mode as u16,
     }
 }
 
@@ -103,17 +119,16 @@ fn segment_ds(segment: &ShmSegment) -> ShmIdDs {
     let state = segment.state();
 
     ShmIdDs {
-        shm_perm: segment.perm(),
+        shm_perm: linux_ipc_perm(segment.perm()),
         shm_segsz: segment.size() as u64,
         shm_atime: duration_to_time_t(state.last_attach_time),
         shm_dtime: duration_to_time_t(state.last_detach_time),
         shm_ctime: duration_to_time_t(state.last_change_time),
         shm_cpid: tid_to_pid(state.creator_tgid),
         shm_lpid: tid_to_pid(state.last_operator_tgid),
-        shm_nattch: usize_to_u16_saturating(state.attach_count),
-        shm_unused: 0,
-        shm_unused2: 0,
-        shm_unused3: 0,
+        shm_nattch: state.attach_count as u64,
+        __unused4: 0,
+        __unused5: 0,
     }
 }
 
@@ -140,11 +155,15 @@ fn stats_return(stats: ShmRegistryStats) -> u64 {
 fn ipc_info(stats: ShmRegistryStats) -> (ShmInfo, u64) {
     (
         ShmInfo {
-            shmmax: usize_to_i32_saturating(SHMMAX),
-            shmmin: usize_to_i32_saturating(SHMMIN),
-            shmmni: usize_to_i32_saturating(SHMMNI),
-            shmseg: usize_to_i32_saturating(SHMSEG),
-            shmall: SHMALL,
+            shmmax: SHMMAX as u64,
+            shmmin: SHMMIN as u64,
+            shmmni: SHMMNI as u64,
+            shmseg: SHMSEG as u64,
+            shmall: SHMALL as u64,
+            __unused1: 0,
+            __unused2: 0,
+            __unused3: 0,
+            __unused4: 0,
         },
         stats_return(stats),
     )
@@ -183,7 +202,7 @@ fn sys_shmctl(
             let segment = with_registry(|registry| registry.lookup_by_shmid(id))?;
             check_access(&segment, ShmAccess::Admin)?;
             let new_ds = read_user::<ShmIdDs>(required_buf(buf)?)?;
-            segment.update_from_ipc_set(new_ds.shm_perm);
+            segment.update_from_ipc_set(ipc_set_update_from_linux(new_ds));
             Ok(0)
         },
         ShmCtlCmd::IpcRmId => {
@@ -206,7 +225,7 @@ fn sys_shmctl(
             Ok(ret)
         },
         ShmCtlCmd::ShmStat | ShmCtlCmd::ShmStatAny => {
-            let index = ShmSlotIndex::from_user_index(target.raw())?;
+            let index = ShmSlotIndex::from_linux_stat_target(target.raw())?;
             let segment = with_registry(|registry| registry.lookup_by_index(index))?;
             if matches!(cmd, ShmCtlCmd::ShmStat) {
                 check_access(&segment, ShmAccess::Read)?;
@@ -218,7 +237,7 @@ fn sys_shmctl(
             let id = ShmId::from_raw(target.raw())?;
             let segment = with_registry(|registry| registry.lookup_by_shmid(id))?;
             check_access(&segment, ShmAccess::Admin)?;
-            knoticeln!("sys_shmctl: {:?} accepted as a no-op", cmd);
+            segment.set_locked(matches!(cmd, ShmCtlCmd::ShmLock));
             Ok(0)
         },
     }

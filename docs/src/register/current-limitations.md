@@ -106,19 +106,21 @@
 **Owner:** doruche
 **Last Verified:** 2026-05-25
 
-## ANE-20260525-SYSV-SHM-LOCK-NOOP
+## ANE-20260525-SYSV-SHM-LOCK-RESIDENCY-STAGE1
 
 **Type:** Limitation
 **Status:** Active
 **Severity:** Low
 **Area:** mm / SysV shm
 
-**Summary:** 当前 `SHM_LOCK` / `SHM_UNLOCK` 只保留兼容入口和日志，不实际执行页锁定、解锁或 `SHM_LOCKED` 状态维护，因此不会产生 Linux 风格的驻留锁页语义。
+**Summary:** 当前 `SHM_LOCK` / `SHM_UNLOCK` 已维护 Linux 可见的 `SHM_LOCKED` mode bit，`IPC_STAT` / `SHM_STAT` 能观察状态切换，满足 LTP `shmctl07` 这类元数据检查。但这仍是 stage-1 兼容状态，不实际 pin / unpin 页面，不接入驻留页账本、`RLIMIT_MEMLOCK` 或 `CAP_IPC_LOCK` / credentials 权限。
 
-**Exit Condition:** 为 SysV shm 接入真实的页锁定路径、权限校验与 `SHM_LOCKED` 状态同步，并补齐相关回归测试。
+**Exit Condition:** 为 SysV shm 接入真实的页锁定路径、驻留页统计、memlock 限额和权限校验，并补齐覆盖 `SHM_LOCKED` 状态、页驻留和失败 errno 的回归测试。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-25
+**Last Verified:** 2026-05-29
+
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
 ## ANE-20260525-SYSV-SHM-PERMISSIONS-PENDING-CREDENTIALS
 
@@ -127,12 +129,30 @@
 **Severity:** Medium
 **Area:** mm / SysV shm / credentials
 
-**Summary:** 当前一期不纳入权限敏感的 SysV shm 测例，像 `shmat02`、`shmctl02` 这类依赖 `setuid`/`setgid` 和有效 uid/gid 切换的路径，仍会受限于现有 credentials 线的未完成状态。
+**Summary:** 当前一期不纳入权限敏感的 SysV shm 测例，像 `shmctl02`、`shmctl04`、`shmget04`、`shmat02` 这类依赖 `setuid` / `setgid`、有效 uid/gid 切换或 IPC 权限检查的路径，仍会受限于现有 credentials 线的未完成状态。
 
 **Exit Condition:** 单独实现 credentials 的真实有效/真实 uid/gid 语义、`setuid`/`setgid` 行为和 IPC 权限检查之后，再把这些权限敏感测例纳入 SysV shm 白名单并回归验证。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-25
+**Last Verified:** 2026-05-29
+
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260529-SYSV-SHM-LTP-INFRA-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** procfs / sysctl / kconfig / SysV shm / user-test
+
+**Summary:** SysV shm 组仍依赖若干当前未提供或未纳入当前架构目标的 Linux 可观察设施：`shmctl03` / `shmget02` 读取 `/proc/sys/kernel/shmmax` 等 sysctl，`shmget03` 读取 `/proc/sysvipc/shm`，`shmget05` / `shmget06` 需要可解析的 kernel `.config`，`shmctl05` 在当前 rv64 目标上因 `__NR_remap_file_pages` 不存在而 TCONF，`shmctl06` 因当前 64-bit ABI 不具备 `time_high` 字段而 TCONF，`shmat01` 的只读写 fault 检查还会经过缺失的 `getrlimit(RLIMIT_CORE)` coredump 辅助路径。这些不表示 SysV shm registry 或 asm-generic ABI 布局本身仍有同类小修缺口。
+
+**Exit Condition:** 为 procfs/sysctl 补齐 SysV shm 需要的只读 knobs 和 `/proc/sysvipc/shm` 视图，提供测试环境可消费的内核配置视图，明确 profile 对架构 TCONF 项的处理策略，并补齐 LTP 所需的基础 rlimit 读路径后，重新验证 `shmctl03`、`shmget02`、`shmget03`、`shmget05`、`shmget06` 和 `shmat01`。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-29
+
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
 ## ANE-20260526-SIGNAL-RESTORER-LEGACY-COMPAT
 
