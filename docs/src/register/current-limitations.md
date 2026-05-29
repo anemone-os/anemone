@@ -47,6 +47,21 @@
 **Last Verified:** 2026-05-23
 **Related:** [开发日志：2026-05-11 至 2026-05-24](../devlog/2026-05-11_to_2026-05-24.md), [当前限制](./current-limitations.md)
 
+## ANE-20260529-FILE-BACKED-MMAP-FAULT-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** mm / mmap / file-backed mapping
+
+**Summary:** 当前 file-backed mmap 已能覆盖基础映射与权限 errno，但 page fault 路径仍是 stage-1。稀疏扩展文件或未分配洞页读取可能从 ext4/lwext4 返回 `InvalidArgument` 并触发 `SIGSEGV`，EOF 后映射页也仍通过 `NotMapped -> SIGSEGV` 暴露，尚未实现 Linux 风格的洞页零填充与 EOF 后 `SIGBUS` 分流。
+
+**Exit Condition:** 明确 file-backed backing fault 的错误域，支持文件洞页零填充或对应页缓存语义，并让 fault 顶层能区分“无 VMA / guard hole”与“VMA 存在但 backing 不可提供页面”，重新验证 LTP `mmap001`、`mmap13` 以及 truncate / mmap 交互。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-29
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [当前限制](./current-limitations.md)
+
 ## ANE-20260524-DEVFS-STATIC-PUBLISH
 
 **Type:** Limitation
@@ -171,12 +186,27 @@
 **Severity:** Medium
 **Area:** mm / mremap
 
-**Summary:** 当前 `mremap` 只适合单个、可按匿名风格编辑的 VMA；如果旧区间跨越多个 VMA，或者目标需要保留 file-backed / shared backing 与 `pgoff`，现有实现会把尾部按匿名模板重建，语义会偏离 Linux。
+**Summary:** 当前 `mremap` 只适合单个、可按匿名风格编辑的 VMA；如果旧区间跨越多个 VMA，或者目标需要保留 file-backed / shared backing 与 `pgoff`，现有实现会把尾部按匿名模板重建，语义会偏离 Linux。2026-05-29 已把 `mremap03` 这类 old range 无效的用户可见 errno 收口到 `EFAULT`，但 `mremap01` 的 file-backed grow tail 仍会因为 backing 丢失而 fault。
 
 **Exit Condition:** 为 backing-aware grow / move 单独建路径，或者在入口显式拒绝不支持的 VMA 类型，并补齐对应回归。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-27
+**Last Verified:** 2026-05-29
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260529-MEMORY-LTP-PROCFS-DEVZERO-RLIMIT-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** procfs / devfs / resource limits / mmap
+
+**Summary:** LTP memory 组仍依赖若干尚未系统化的 Linux 可观察接口：`mmap04` 需要 `/proc/self/maps`，`mmap12` 需要 `/proc/self/pagemap`，`mmap14` 需要 `/proc/<pid>/status`，`mmap10` 需要 `/dev/zero` mmap backing，`mmap18` 需要 `MAP_GROWSDOWN` 和 `getrlimit(RLIMIT_CORE)`，`munmap03` 需要 `getrlimit(RLIMIT_DATA)`。这些不是本轮 mmap errno 收口能局部修掉的核心 VMA 编辑问题。
+
+**Exit Condition:** 为 procfs 补齐 memory 组所需的 maps / pagemap / status 只读语义，为 `/dev/zero` 提供匿名零页 mmap backing，明确支持或拒绝 `MAP_GROWSDOWN` 的栈增长模型，并实现 LTP 所需的基础 rlimit 读写语义后，重新验证 `mmap04`、`mmap10`、`mmap12`、`mmap14`、`mmap18` 和 `munmap03`。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-29
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
 ## ANE-20260527-FALLOCATE-BASIC-REGULAR-ONLY

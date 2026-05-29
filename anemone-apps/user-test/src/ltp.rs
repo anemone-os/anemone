@@ -93,6 +93,14 @@ const LTP_GROUPS: &[LtpGroup] = &[
         name: "read-write",
         cases: include_str!("../ltp/groups/read-write.txt"),
     },
+    LtpGroup {
+        name: "shm",
+        cases: include_str!("../ltp/groups/shm.txt"),
+    },
+    LtpGroup {
+        name: "tmp",
+        cases: include_str!("../ltp/groups/tmp.txt"),
+    },
 ];
 
 struct LtpFixture {
