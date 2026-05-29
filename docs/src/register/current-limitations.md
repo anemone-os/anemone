@@ -209,6 +209,21 @@
 **Last Verified:** 2026-05-29
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
+## ANE-20260529-PROC-TGID-STAT-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** procfs / task / mm / scheduler
+
+**Summary:** 当前 `/proc/<tgid>/stat` 已提供 Linux 兼容的 52 字段格式，并填入 pid、ppid、pgrp、session、leader status 粗映射、thread 数、CPU usage ticks、starttime、vsize、cmdline/env range、exit signal/code 等已有数据源；但 rss、fault 统计、tty/job-control、ELF segment 边界、signal bitmap、realtime/delay/guest time 等字段仍是 stage-1 占位值。
+
+**Exit Condition:** 为 resident page accounting、minor/major fault 统计、ELF load/data/brk 边界、signal mask/disposition bitmap、controlling tty / foreground process group 和更完整调度策略字段补齐真实数据源，并用依赖 `/proc/<pid>/stat` 的 LTP / libc 脚本重新验证字段语义。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-29
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
 ## ANE-20260527-FALLOCATE-BASIC-REGULAR-ONLY
 
 **Type:** Limitation

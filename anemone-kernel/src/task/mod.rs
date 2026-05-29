@@ -77,6 +77,8 @@ pub struct Task {
     creator: Option<Tid>,
     /// Thread group ID.
     tgid: Tid,
+    /// Task creation time on the kernel monotonic timeline.
+    create_instant: Instant,
 
     /// Kernel stack owned by this task.
     kstack: KernelStack,
@@ -397,10 +399,12 @@ impl Task {
         let tgid = tgid.unwrap_or(tid.get_typed());
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
+        let create_instant = Instant::now();
         let task = Self {
             tid: NoIrqRwLock::new(TidRef::Owned(tid)),
             creator,
             tgid,
+            create_instant,
             kstack: stack,
             name: RwLock::new((String::from("@kernel/") + name).into_boxed_str()),
             flags: NoIrqRwLock::new(flags | TaskFlags::KERNEL),
@@ -460,6 +464,7 @@ impl Task {
                 tid: NoIrqRwLock::new(TidRef::Idle),
                 creator: None,
                 tgid: Tid::IDLE,
+                create_instant: Instant::now(),
                 kstack: stack,
                 name: RwLock::new(Box::from("@idle")),
                 flags: NoIrqRwLock::new(TaskFlags::IDLE | TaskFlags::KERNEL),
@@ -598,6 +603,11 @@ impl Task {
     /// creator.
     pub fn creator_tid(&self) -> Tid {
         self.creator.unwrap()
+    }
+
+    /// Get the task creation time on the kernel monotonic timeline.
+    pub fn create_instant(&self) -> Instant {
+        self.create_instant
     }
 
     /// Get the task name. This introduces a heap allocation. Pay attention.
