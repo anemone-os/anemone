@@ -78,7 +78,7 @@ mod args {
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum ExclusiveMmapFlags {
         Shared,
         Private,
@@ -182,14 +182,15 @@ mod args {
                 _ => return Err(SysError::InvalidArgument),
             };
 
-            let aux = AuxMmapFlags::from_bits(raw as i32 & !ExclusiveMmapFlags::MASK as i32)
-                .ok_or_else(|| {
-                    kwarningln!(
-                        "unrecognized mmap flags: {:#x}",
-                        raw as i32 & !ExclusiveMmapFlags::MASK as i32
-                    );
+            let raw_aux = raw as i32 & !ExclusiveMmapFlags::MASK as i32;
+            let aux = AuxMmapFlags::from_bits(raw_aux).ok_or_else(|| {
+                kwarningln!("unrecognized mmap flags: {:#x}", raw_aux);
+                if exclusive == ExclusiveMmapFlags::SharedValidate {
+                    SysError::NotSupported
+                } else {
                     SysError::InvalidArgument
-                })?;
+                }
+            })?;
 
             Ok(Self { exclusive, aux })
         }
@@ -210,6 +211,14 @@ mod args {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
             let raw = syscall_arg_flag32(raw)? as i32;
             Self::from_bits(raw).ok_or(SysError::InvalidArgument)
+        }
+    }
+
+    pub fn mmap_addr(raw: u64) -> Result<Option<VirtAddr>, SysError> {
+        if raw == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(VirtAddr::new(raw)))
         }
     }
 

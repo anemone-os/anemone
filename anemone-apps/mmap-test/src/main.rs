@@ -392,7 +392,7 @@ fn test_fixed_replace_and_noreplace() -> Result<(), Errno> {
             MmapProt::PROT_READ | MmapProt::PROT_WRITE,
             MmapFlags::MAP_PRIVATE | MmapFlags::MAP_ANONYMOUS | MmapFlags::MAP_FIXED_NOREPLACE,
         ),
-        EFAULT,
+        EEXIST,
         "MAP_FIXED_NOREPLACE over existing mapping",
     );
 
