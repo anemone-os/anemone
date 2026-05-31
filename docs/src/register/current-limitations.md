@@ -244,6 +244,21 @@
 **Last Verified:** 2026-05-29
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
+## ANE-20260531-IOMUX-INFINITE-WAIT-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** iomux / scheduler / procfs / user-test
+
+**Summary:** 当前 `ppoll` / `pselect` 的 `timeout == NULL` 路径仍是基于轮询的 stage-1 实现，而不是把当前任务挂到 poll waiter / event 上并进入真实睡眠。因此，当没有 fd 立即 ready 且 timeout 为空时，内核不承诺 Linux 风格的可观察睡眠状态；像 LTP `shmctl01` 这类直接依赖 `ppoll(NULL timeout)` 使目标进程进入睡眠、随后通过 `/proc/<pid>/stat` 看到 `S` state 的测例，当前不能通过。这是 iomux 等待协议与 scheduler/procfs 可观察状态的限制，不表示 SysV shm 主语义仍有同类小修缺口。
+
+**Exit Condition:** 为 `ppoll` / `pselect` 引入基于 poll waiter / event 的阻塞等待协议，明确多 fd 注册、signal mask、timeout、取消/唤醒清理和锁顺序，避免 waiter 与 fd/file/socket/pipe 状态之间的死锁；同时保证 `/proc/<pid>/stat` 能观察到对应睡眠 state，并重新验证 `shmctl01` 及基础 `ppoll` / `pselect` 阻塞语义。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-31
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
 ## ANE-20260527-FALLOCATE-BASIC-REGULAR-ONLY
 
 **Type:** Limitation
