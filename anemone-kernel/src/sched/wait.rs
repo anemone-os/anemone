@@ -1,11 +1,12 @@
-//! Scheduler wait-core skeleton.
+//! Scheduler wait core.
 //!
-//! The production Event, timeout, and signal wait paths still use the legacy
-//! status compatibility entry point until their migration phases.  The wait
-//! core wake API already owns both logical completion and stale-safe physical
-//! placement.
+//! Event wait paths are migrated onto this core. Standalone timeout and signal
+//! wait paths still have legacy users until their migration phase, while the
+//! wait-core wake API already owns both logical completion and stale-safe
+//! physical placement.
 
 use core::fmt::{Debug, Formatter};
+use core::marker::PhantomData;
 
 use crate::prelude::*;
 
@@ -286,6 +287,25 @@ pub enum WakeResult {
     AlreadyCompleted(WaitReason),
     AlreadyCancelled(WaitReason),
     Retired,
+}
+
+/// Short-lived capability proving a mode-blocked listener still belongs to the
+/// current armed wait round.
+///
+/// The permit is intentionally non-cloneable and carries a borrow tied to the
+/// sched-state transaction that created it. It only authorizes Event to requeue
+/// the already-detached listener while that transaction is still live.
+#[derive(Debug)]
+pub struct RequeuePermit<'a> {
+    wait_id: usize,
+    _guard: crate::sync::rwlock::WriteIrqSaveGuard<'a, TaskSchedState>,
+    _not_send_sync: PhantomData<*mut ()>,
+}
+
+impl RequeuePermit<'_> {
+    pub fn wait_id(&self) -> usize {
+        self.wait_id
+    }
 }
 
 /// Start one wait-core round for `task`.
@@ -579,6 +599,55 @@ pub fn wake_active_wait(task: &Arc<Task>, reason: WaitReason, mode: WakeMode) ->
     });
 
     finish_wake_attempt(task, wait_id, reason, mode, commit)
+}
+
+/// Return a short-lived Event requeue permit when `token` still names the
+/// task's current armed wait and `mode` is still blocked by its interruptible
+/// flag.
+///
+/// This is not a general query API. The returned permit keeps the task
+/// sched-state write guard alive so Event can requeue the detached listener
+/// under the required task-state -> event-lock ordering.
+pub fn requeue_permit_if_mode_blocked<'a>(
+    task: &'a Arc<Task>,
+    token: &WakeToken,
+    mode: WakeMode,
+) -> Option<RequeuePermit<'a>> {
+    let guard = task.sched_state_guard();
+    match &*guard {
+        TaskSchedState::Waiting {
+            state,
+            interruptible,
+            ..
+        } if Arc::ptr_eq(state, &token.state)
+            && state.status() == WaitStateStatus::Armed
+            && !mode.allows(*interruptible) =>
+        {
+            let wait_id = state.debug_id();
+            kdebugln!(
+                "wait_core: requeue permit task={} wait={:#x} mode={:?}",
+                task.tid(),
+                wait_id,
+                mode,
+            );
+            Some(RequeuePermit {
+                wait_id,
+                _guard: guard,
+                _not_send_sync: PhantomData,
+            })
+        },
+        other => {
+            kdebugln!(
+                "wait_core: requeue permit denied task={} wait={:#x} mode={:?} state={:?} token_status={:?}",
+                task.tid(),
+                token.wait_id(),
+                mode,
+                other,
+                token.state.status(),
+            );
+            None
+        },
+    }
 }
 
 fn finish_wake_attempt(

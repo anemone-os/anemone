@@ -112,9 +112,30 @@
 
 **Next:** 阶段 3 可以开始迁移 Event listener identity、publish、exclusive quota 和 mode-blocked requeue；进入生产接线前，上面两条前置和这条 hardening 已经到位。
 
+### 2026-06-01 - 阶段 3 Event wait-core 接线
+
+**Phase:** phase 3 - Event wait-core adapter
+
+**Change:** `Event` listener 现在保存 `WaitTarget { task: Weak<Task>, token: WakeToken }`，listener 相等性改为 `WakeToken::same_wait()` 的 wait identity 比较。`Event::listen*()` 每轮等待先通过 `sched::wait::begin_wait()` 建立 `WaitState`，再注册 listener；predicate ready、signal precheck、timeout zero 等主动退出路径改为 `cancel_wait()`，返回路径统一按 wait identity 清理 listener 并 `finish_wait()` 退役本轮等待。
+
+**Change:** `Event::publish()` 不再调用 `try_to_wake_up()`，也不直接写 `TaskStatus` 或补做 runqueue placement。publish 只从 Event 队列 detach listener，在 event lock 外升级 weak task 并调用 `wake_wait()`；`WakeResult::Woke` 只更新 successful exclusive quota 和诊断，placement 已由 wait core 完成。stale、already completed、already cancelled 和 retired listener 会被丢弃。
+
+**Change:** exclusive quota 改为只按成功完成的 wait 计数。非独占队列和独占队列都按本轮 publish 开始时的原始节点数设置扫描上限，本轮 mode-blocked 回挂到队尾的 listener 不会在同一轮 publish 中再次参与，避免回挂导致队列内无限旋转。
+
+**Change:** 增加 wait-core `RequeuePermit` 和 `requeue_permit_if_mode_blocked()`，并在 Event 内部实现 `requeue_blocked_listener_if_current_armed()`。mode-blocked listener 只有在回挂前重新验证 task 当前 active wait 仍与 token 同一轮、`WaitState` 仍为 `Armed`、并且当前 `WakeMode` 仍被 interruptible 属性阻止时，才会按原队列类型回挂到尾部；验证失败时直接丢弃 detached listener。
+
+**Temporary:** 为了把阶段 3 和阶段 4 分开提交，`notify()` 增加了一个临时桥接分支：先尝试 `wake_active_wait(task, WaitReason::Signal, mode)`，只有返回 `Stale` 时才继续处理 `LegacyWaiting`。这不是最终 signal 迁移形态；阶段 4 仍需要把 signal 路径本身收敛到 wait-core 语义、清理旧 `notify()` / `TaskStatus` completion 边界。
+
+**Temporary:** `Event::listen_with_timeout()` 现在使用 Event-local token timer callback：timer callback 持有本轮 `WakeToken` 并调用 `wake_wait(..., WaitReason::Timeout, WakeMode::AnyWait)`，避免已迁移的 Event wait 被旧 `schedule_with_timeout()` / `notify()` 旁路写穿。这个 helper 是阶段 3/4 分离时的过渡设施，不应视为最终 timeout 架构；阶段 4 仍要迁移通用 `schedule_with_timeout()`、`clock_nanosleep()`、`rt_sigtimedwait()` 和主动 cancel 入口。
+
+**Audit:** 搜索 `anemone-kernel/src/sched/event.rs` 中的 `try_to_wake_up`、`update_status_with`、`TaskStatus::Waiting` 和 `schedule_with_timeout`，确认 Event 生产路径已经不再使用旧 wake/status/timeout completion。剩余旧旁路集中在 `sched::notify()` 的 `LegacyWaiting` 分支、`try_to_wake_up()`、通用 `schedule_with_timeout()`、`clock_nanosleep()` 和 `rt_sigtimedwait()`，属于阶段 4/5 收口范围。
+
+**Validation:** 运行 `just build` 通过。当前仍只有仓库里既有的 `anemone-kernel/src/sync/mono.rs` unused import warning。
+
+**Next:** 阶段 4 需要迁移通用 timeout、signal 和主动 cancel，移除本阶段为了拆分提交而保留的 `notify()` wait-core bridge / Event-local token timer 过渡边界，并重新分类所有 `update_status_with()`、`try_to_wake_up()`、`notify()` 和 `schedule_with_timeout()` 命中。
+
 ## Open Items
 
-- 阶段 3：迁移 `Event` listener identity、publish、exclusive quota 和 mode-blocked requeue。
 - 阶段 4：迁移 timeout、signal 和主动 cancel。
 - 阶段 5：审计旧旁路并收缩旧 wake API。
 - 阶段 6：运行已知触发 profile，并保存带 debug/trace 的验证摘要。

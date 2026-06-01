@@ -344,21 +344,38 @@ mod kore {
     ///
     /// Mainly used by signals.
     pub fn notify(task: &Arc<Task>, uninterruptible: bool) {
-        let need_enqueue = task.update_status_with(|prev| match prev {
-            TaskStatus::Runnable => (prev, false),
-            TaskStatus::Waiting {
+        let mode = if uninterruptible {
+            WakeMode::Force
+        } else {
+            WakeMode::InterruptibleOnly
+        };
+
+        let result = wait::wake_active_wait(task, WaitReason::Signal, mode);
+        if result != WakeResult::Stale {
+            kdebugln!(
+                "{} is notified through wait core, uninterruptible={}, result={:?}",
+                task.tid(),
+                uninterruptible,
+                result,
+            );
+            return;
+        }
+
+        let need_enqueue = task.update_sched_state_with(|prev| match prev {
+            TaskSchedState::Runnable => (prev, false),
+            TaskSchedState::LegacyWaiting {
                 interruptible: true,
-            } => (TaskStatus::Runnable, true),
-            TaskStatus::Waiting {
+            } => (TaskSchedState::Runnable, true),
+            TaskSchedState::LegacyWaiting {
                 interruptible: false,
             } => {
                 if uninterruptible {
-                    (TaskStatus::Runnable, true)
+                    (TaskSchedState::Runnable, true)
                 } else {
                     (prev, false)
                 }
             },
-            TaskStatus::Zombie => (prev, false),
+            TaskSchedState::Waiting { .. } | TaskSchedState::Zombie => (prev, false),
         });
         if need_enqueue {
             kdebugln!(

@@ -34,6 +34,14 @@ impl Task {
         self.sched_state.read().clone()
     }
 
+    /// Borrow the internal scheduler state for wait-core owned transactions
+    /// that must keep the state lock live across a narrow capability handoff.
+    pub(crate) fn sched_state_guard(
+        &self,
+    ) -> crate::sync::rwlock::WriteIrqSaveGuard<'_, TaskSchedState> {
+        self.sched_state.write()
+    }
+
     /// Run a closure with current task status, and update the status with the
     /// returned one.
     ///
@@ -41,12 +49,13 @@ impl Task {
     /// updating is always tied to certain transaction, and this method can
     /// ensure the atomicity of the transaction and the status update.
     ///
-    /// **Migration compatibility only.** Existing Event, timeout, and signal
-    /// paths still write [TaskStatus] during the wait-core migration. New
-    /// wait-core code must use [Self::update_sched_state_with] so it cannot
-    /// complete a wait round without the matching [WaitState]. If the current
-    /// internal state is wait-core [TaskSchedState::Waiting], this legacy
-    /// entry point will panic instead of silently overwriting the active wait.
+    /// **Migration compatibility only.** Legacy timeout/signal users and other
+    /// not-yet-migrated paths still write [TaskStatus] during the wait-core
+    /// migration. New wait-core code must use [Self::update_sched_state_with]
+    /// so it cannot complete a wait round without the matching [WaitState]. If
+    /// the current internal state is wait-core [TaskSchedState::Waiting], this
+    /// legacy entry point will panic instead of silently overwriting the active
+    /// wait.
     pub fn update_status_with<F, R>(&self, f: F) -> R
     where
         F: FnOnce(TaskStatus) -> (TaskStatus, R),
