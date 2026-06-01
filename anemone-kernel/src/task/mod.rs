@@ -150,8 +150,8 @@ pub struct Task {
     /// Published by the child when a vfork parent may continue.
     vfork_done: Event,
 
-    /// See [TaskStatus] for a precise definition.
-    status: NoIrqRwLock<TaskStatus>,
+    /// Internal scheduling state. [TaskStatus] is a compatibility projection.
+    sched_state: NoIrqRwLock<TaskSchedState>,
 
     /// Optional user pointer updated during child clear-tid handling.
     ///
@@ -444,7 +444,7 @@ impl Task {
             robust_list: SpinLock::new(None),
             exit_code: SpinLock::new(None),
             vfork_done: Event::new(),
-            status: NoIrqRwLock::new(TaskStatus::Runnable),
+            sched_state: NoIrqRwLock::new(TaskSchedState::Runnable),
             clear_child_tid: SpinLock::new(None),
         };
         Ok((task, PublishGuard))
@@ -492,7 +492,7 @@ impl Task {
                 robust_list: SpinLock::new(None),
                 exit_code: SpinLock::new(None),
                 vfork_done: Event::new(),
-                status: NoIrqRwLock::new(TaskStatus::Runnable),
+                sched_state: NoIrqRwLock::new(TaskSchedState::Runnable),
                 clear_child_tid: SpinLock::new(None),
             },
             PublishGuard,
@@ -738,7 +738,7 @@ impl Debug for Task {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Task")
             .field("tid", &self.tid())
-            .field("status", &*self.status.read())
+            .field("status", &self.status())
             .field("flags", &self.flags())
             .finish()
     }

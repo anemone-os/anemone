@@ -23,7 +23,15 @@ impl Task {
     /// dosn't rely on the accuracy of the status, or you can ensure that you
     /// just need a single read.**
     pub fn status(&self) -> TaskStatus {
-        self.status.read().clone()
+        self.sched_state.read().as_task_status()
+    }
+
+    /// Get the internal scheduler state.
+    ///
+    /// This is primarily for scheduler/wait-core diagnostics while the wait
+    /// refactor is in flight. Most users should keep using [Self::status].
+    pub fn sched_state(&self) -> TaskSchedState {
+        self.sched_state.read().clone()
     }
 
     /// Run a closure with current task status, and update the status with the
@@ -33,14 +41,29 @@ impl Task {
     /// updating is always tied to certain transaction, and this method can
     /// ensure the atomicity of the transaction and the status update.
     ///
-    /// **Only scheduling primitives have the right to call this method.**
+    /// **Migration compatibility only.** Existing Event, timeout, and signal
+    /// paths still write [TaskStatus] during the wait-core migration. New
+    /// wait-core code must use [Self::update_sched_state_with] so it cannot
+    /// complete a wait round without the matching [WaitState].
     pub fn update_status_with<F, R>(&self, f: F) -> R
     where
         F: FnOnce(TaskStatus) -> (TaskStatus, R),
     {
-        let mut guard = self.status.write();
-        let (status, r) = f(*guard);
-        *guard = status;
+        let mut guard = self.sched_state.write();
+        let (status, r) = f(guard.as_task_status());
+        *guard = TaskSchedState::from_legacy_status(status);
+        r
+    }
+
+    /// Run a closure with the internal scheduler state and update it with the
+    /// returned state in the same NoIrq transaction.
+    pub(crate) fn update_sched_state_with<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(TaskSchedState) -> (TaskSchedState, R),
+    {
+        let mut guard = self.sched_state.write();
+        let (state, r) = f(guard.clone());
+        *guard = state;
         r
     }
 

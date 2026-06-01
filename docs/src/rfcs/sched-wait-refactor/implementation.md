@@ -6,6 +6,7 @@
 
 ## 0. 迁移原则
 
+0. 实现过程中，如非必要，每个阶段不要强行为下一阶段预留抽象或接口，否则反而可能制造错误约束。
 1. 每个阶段都必须保持需求文档中的 wait identity、唯一线性化点、requeue permit、park latch 和 stale-safe placement 不变量。
 2. 阶段性交付允许临时兼容 wrapper，但不得新增绕过 wait core 的普通等待完成路径。
 3. 实现过程可以调整类型名和模块路径，但不能改变 API 责任归属：逻辑完成属于 wait core，wake 成功后的 stale-safe placement 也由 wait core 触发。

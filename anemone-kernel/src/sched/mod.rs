@@ -27,6 +27,12 @@ mod event;
 pub use event::{Event, TimeoutListenException};
 
 pub mod class;
+pub mod wait;
+pub use wait::{
+    BeginWait, ParkState, TaskSchedState, WaitGuard, WaitOutcome, WaitReason, WaitResult,
+    WaitState, WaitStateStatus, WakeMode, WakeResult, WakeToken, begin_wait, cancel_wait,
+    finish_wait,
+};
 
 /// Core scheduler loop. Called by bootstrap code.
 ///

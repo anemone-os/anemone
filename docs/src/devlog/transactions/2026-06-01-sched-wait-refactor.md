@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / event / timer / signal / wait core
 **Canonical Plan:** [RFC-20260601-sched-wait-refactor](../../rfcs/sched-wait-refactor/index.md), [Invariants](../../rfcs/sched-wait-refactor/invariants.md), [Implementation Plan](../../rfcs/sched-wait-refactor/implementation.md)
-**Current Phase:** pre-implementation planning
+**Current Phase:** phase 1 complete; phase 2 pending
 
 ## Scope
 
@@ -42,9 +42,28 @@
 
 **Next:** 开始阶段 1 前，先确认旧等待路径仍完整保留，新 wait core 骨架不会被生产路径误用；阶段 1 完成后把旁路分类结果记录到本事务日志或对应 progress 文件。
 
+### 2026-06-01 - 阶段 1 wait core 骨架
+
+**Phase:** phase 1 - scheduler wait core skeleton
+
+**Change:** 新增 `sched::wait` 模块，建立 `WaitState`、`WakeToken`、`WaitGuard`、`BeginWait`、`WaitReason`、`WakeMode`、`WaitResult`、`WaitOutcome` 和 `WakeResult` 等 wait-core 类型。`WaitState` 保存本轮等待的稳定指针身份、状态、创建 task 和创建时间，不持有强 `Arc<Task>` 或 `Event` 回指。`WaitGuard` 不实现 clone，`WakeToken` 只暴露 wait identity 诊断和指针身份比较。
+
+**Change:** 将 `Task` 的内部状态字段从旧 `TaskStatus` 换成 `TaskSchedState`。新状态区分 `Runnable`、带 `Arc<WaitState>` 和 `ParkState` 的 wait-core `Waiting`、迁移期 `LegacyWaiting` 以及 `Zombie`。`task.status()` 保持只读兼容投影，观察者仍只看到旧 `TaskStatus`。
+
+**Change:** 增加 `begin_wait()`、`cancel_wait()`、`finish_wait()` 的阶段 1 事务骨架：它们通过 `Task::update_sched_state_with()` 在同一个 NoIrq 调度状态事务中写入或清理 wait-core `TaskSchedState::Waiting`，并在 debug 日志中记录 task id、wait identity、reason 和 outcome。
+
+**Compatibility:** `Task::update_status_with()` 保留为迁移期兼容写入口，输入输出仍是旧 `TaskStatus`，但内部会投影到 `TaskSchedState::LegacyWaiting` / `Runnable` / `Zombie`。现有 Event、timeout、signal、exit 等生产路径继续完整走旧协议，没有被接到新 wait core。
+
+**Compatibility:** `wake_wait()` 和 `wake_active_wait()` 只作为 `sched::wait` 内部受控骨架存在，返回 `WakeResult::DisabledUntilWakePlacement`，没有 re-export 给外部生产路径。阶段 2 完成 stale-safe `wake_enqueue()` 和 park latch 前，不允许把它们接入 Event、timeout、signal 或 cancel 路径，避免出现“逻辑 wake 已完成但 physical placement 未由 wait core 负责”的半套协议。
+
+**Audit:** 搜索 `begin_wait()`、`cancel_wait()`、`finish_wait()`、`wake_wait()`、`wake_active_wait()` 的调用点，确认新 wait-core API 只在 `sched::wait` 内定义，未被 Event、timeout、signal 接入。旧旁路仍集中在 `try_to_wake_up()`、`notify()`、`schedule_with_timeout()` 和生产路径的 `update_status_with()` 调用上，后续阶段继续按计划迁移。
+
+**Validation:** 运行 `just build` 通过。构建目标为当前配置的 LoongArch64 kernel release + `fs_ext4` + `kunit`，只剩既有 `sync/mono.rs` unused import warning。
+
+**Next:** 进入阶段 2 前，需要新增 stale-safe `wake_enqueue()`，把 `schedule()` 的 park latch / abort-park 接入 `TaskSchedState::Waiting { park, .. }`，并把 `wake_wait()` / `wake_active_wait()` 补齐为“逻辑完成提交后由 wait core 执行一次 stale-safe placement”的完整入口。
+
 ## Open Items
 
-- 阶段 1：建立 `sched::wait` 骨架、`TaskSchedState` 兼容观察接口和 wait core debug/trace 边界。
 - 阶段 2：补齐 stale-safe `wake_enqueue()`、park latch / abort-park 和完整 wake API。
 - 阶段 3：迁移 `Event` listener identity、publish、exclusive quota 和 mode-blocked requeue。
 - 阶段 4：迁移 timeout、signal 和主动 cancel。
