@@ -18,7 +18,8 @@ pub use api::*;
 mod processor;
 pub use processor::{
     fetch_clear_need_resched, get_current_task, init_routines, local_enqueue, local_sched_tick,
-    mark_need_resched, pick_next_cpu, remote_enqueue, task_enqueue,
+    local_wake_enqueue, mark_need_resched, pick_next_cpu, remote_enqueue, remote_wake_enqueue,
+    task_enqueue, wake_enqueue,
 };
 mod switch;
 pub use switch::load_context;
@@ -29,9 +30,10 @@ pub use event::{Event, TimeoutListenException};
 pub mod class;
 pub mod wait;
 pub use wait::{
-    BeginWait, ParkState, TaskSchedState, WaitGuard, WaitOutcome, WaitReason, WaitResult,
-    WaitState, WaitStateStatus, WakeMode, WakeResult, WakeToken, begin_wait, cancel_wait,
-    finish_wait,
+    BeginWait, ParkState, TaskSchedState, WaitGuard, WaitOutcome, WaitReason,
+    WaitResult, WaitState, WaitStateStatus, WakeEnqueueResult, WakeMode,
+    WakeResult, WakeToken, begin_wait, cancel_wait, finish_wait,
+    wake_active_wait, wake_wait,
 };
 
 /// Core scheduler loop. Called by bootstrap code.
@@ -79,6 +81,19 @@ mod kore {
 
     use super::*;
 
+    #[derive(Debug)]
+    enum ScheduleDecision {
+        Runnable,
+        LegacyWaiting {
+            interruptible: bool,
+        },
+        WaitCoreParked {
+            interruptible: bool,
+            wait_id: usize,
+        },
+        Zombie,
+    }
+
     /// Schedule the next task to run.
     ///
     /// Basically, you should never call this function in application code. this
@@ -91,17 +106,60 @@ mod kore {
         debug_assert!(IntrArch::local_intr_disabled());
         let curr = get_current_task();
 
-        let status = curr.status();
+        let decision = curr.update_sched_state_with(|state| match state {
+            TaskSchedState::Runnable => (TaskSchedState::Runnable, ScheduleDecision::Runnable),
+            TaskSchedState::LegacyWaiting { interruptible } => (
+                TaskSchedState::LegacyWaiting { interruptible },
+                ScheduleDecision::LegacyWaiting { interruptible },
+            ),
+            TaskSchedState::Waiting {
+                state,
+                interruptible,
+                park: ParkState::PrePark,
+            } => {
+                let wait_id = state.debug_id();
+                (
+                    TaskSchedState::Waiting {
+                        state,
+                        interruptible,
+                        park: ParkState::Parked,
+                    },
+                    ScheduleDecision::WaitCoreParked {
+                        interruptible,
+                        wait_id,
+                    },
+                )
+            },
+            TaskSchedState::Waiting {
+                state,
+                interruptible,
+                park: ParkState::Parked,
+            } => {
+                let wait_id = state.debug_id();
+                (
+                    TaskSchedState::Waiting {
+                        state,
+                        interruptible,
+                        park: ParkState::Parked,
+                    },
+                    ScheduleDecision::WaitCoreParked {
+                        interruptible,
+                        wait_id,
+                    },
+                )
+            },
+            TaskSchedState::Zombie => (TaskSchedState::Zombie, ScheduleDecision::Zombie),
+        });
 
-        match status {
-            TaskStatus::Runnable => {
+        match decision {
+            ScheduleDecision::Runnable => {
                 if !curr.flags().is_idle() {
                     local_requeue_current(curr);
                 } else {
                     drop(curr);
                 }
             },
-            TaskStatus::Waiting { interruptible } => {
+            ScheduleDecision::LegacyWaiting { interruptible } => {
                 knoticeln!(
                     "{} is waiting (interruptible: {}), not enqueuing it to run queue",
                     current_task_id(),
@@ -109,7 +167,32 @@ mod kore {
                 );
                 drop(curr);
             },
-            TaskStatus::Zombie => {
+            ScheduleDecision::WaitCoreParked {
+                interruptible,
+                wait_id,
+            } => {
+                if matches!(curr.sched_state(), TaskSchedState::Runnable) {
+                    kdebugln!(
+                        "schedule: abort park for task={} wait={:#x}; wait already completed",
+                        curr.tid(),
+                        wait_id,
+                    );
+                    if !curr.flags().is_idle() {
+                        local_requeue_current(curr);
+                    } else {
+                        drop(curr);
+                    }
+                } else {
+                    knoticeln!(
+                        "{} is wait-core parked (wait={:#x}, interruptible: {}), not enqueuing it to run queue",
+                        current_task_id(),
+                        wait_id,
+                        interruptible,
+                    );
+                    drop(curr);
+                }
+            },
+            ScheduleDecision::Zombie => {
                 knoticeln!(
                     "{} is zombie, not enqueuing it to run queue",
                     current_task_id(),

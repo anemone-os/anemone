@@ -87,6 +87,16 @@ pub fn get_current_task() -> Arc<Task> {
     })
 }
 
+fn is_local_current_task(task: &Arc<Task>) -> bool {
+    debug_assert!(IntrArch::local_intr_disabled());
+    PROCESSOR.with(|proc| {
+        proc.running_task
+            .as_ref()
+            .map(|current| Arc::ptr_eq(current, task))
+            .unwrap_or(false)
+    })
+}
+
 /// Mark the current running task of this processor as needing a reschedule.
 ///
 /// This function will disable interrupts, since need_resched flag will also be
@@ -158,6 +168,52 @@ pub fn local_enqueue(task: Arc<Task>) {
             }
         });
     });
+}
+
+/// Stale-safe local physical placement for a task already logically woken by
+/// the wait core.
+///
+/// Unlike [local_enqueue], this entry point never asserts on stale wake tails.
+/// It only performs physical placement if the task is still runnable and not
+/// already current or queued.
+pub fn local_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
+    assert!(task.cpuid() == cur_cpu_id());
+
+    with_intr_disabled(|| {
+        if task.status() != TaskStatus::Runnable {
+            kdebugln!(
+                "wake_enqueue: task={} stale status={:?}",
+                task.tid(),
+                task.status()
+            );
+            return WakeEnqueueResult::Stale;
+        }
+
+        if is_local_current_task(&task) {
+            let result = match park {
+                ParkState::PrePark => WakeEnqueueResult::AlreadyCurrent,
+                ParkState::Parked => WakeEnqueueResult::ParkPending,
+            };
+            kdebugln!(
+                "wake_enqueue: task={} local current park={:?} result={:?}",
+                task.tid(),
+                park,
+                result
+            );
+            return result;
+        }
+
+        if task.with_sched_entity_mut(|se| se.on_runq()) {
+            kdebugln!("wake_enqueue: task={} already queued", task.tid());
+            return WakeEnqueueResult::AlreadyQueued;
+        }
+
+        PROCESSOR.with_mut(|proc| {
+            proc.runq.enqueue(task.clone());
+        });
+        kdebugln!("wake_enqueue: task={} enqueued locally", task.tid());
+        WakeEnqueueResult::Enqueued
+    })
 }
 
 /// Requeue the current running task back to its local run queue.
@@ -250,6 +306,32 @@ pub fn remote_enqueue(task: Arc<Task>) {
     .expect("failed to enqueue task to another cpu");
 }
 
+pub fn remote_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
+    assert!(task.cpuid() != cur_cpu_id());
+    if task.status() != TaskStatus::Runnable {
+        kdebugln!(
+            "wake_enqueue: task={} stale before remote placement status={:?}",
+            task.tid(),
+            task.status()
+        );
+        return WakeEnqueueResult::Stale;
+    }
+
+    let tid = task.tid();
+    let placement = send_ipi_wait_result(
+        task.cpuid().get(),
+        IpiPayload::WakeUpTaskStaleSafe { tid, park },
+    )
+    .expect("failed to enqueue task to another cpu");
+
+    kdebugln!(
+        "wake_enqueue: task={} remote placement requested park={:?}",
+        tid,
+        park
+    );
+    placement
+}
+
 /// Thin wrapper around [local_enqueue] and [remote_enqueue].
 pub fn task_enqueue(task: Arc<Task>) {
     assert!(task.status() == TaskStatus::Runnable);
@@ -257,6 +339,25 @@ pub fn task_enqueue(task: Arc<Task>) {
         local_enqueue(task);
     } else {
         remote_enqueue(task);
+    }
+}
+
+/// Stale-safe physical placement used only after wait-core logical wake
+/// completion.
+pub fn wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
+    if task.status() != TaskStatus::Runnable {
+        kdebugln!(
+            "wake_enqueue: task={} stale before placement status={:?}",
+            task.tid(),
+            task.status()
+        );
+        return WakeEnqueueResult::Stale;
+    }
+
+    if task.cpuid() == cur_cpu_id() {
+        local_wake_enqueue(task, park)
+    } else {
+        remote_wake_enqueue(task, park)
     }
 }
 

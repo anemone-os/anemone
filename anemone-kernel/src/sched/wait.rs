@@ -1,9 +1,9 @@
 //! Scheduler wait-core skeleton.
 //!
-//! Phase 1 of RFC-20260601-sched-wait-refactor establishes the shared types
-//! and the task scheduling-state container.  Production Event, timeout, and
-//! signal wait paths still use the legacy status compatibility entry point
-//! until stale-safe wake placement and the park latch land in later phases.
+//! The production Event, timeout, and signal wait paths still use the legacy
+//! status compatibility entry point until their migration phases.  The wait
+//! core wake API already owns both logical completion and stale-safe physical
+//! placement.
 
 use core::fmt::{Debug, Formatter};
 
@@ -134,6 +134,19 @@ impl WaitState {
         }
     }
 
+    fn complete_if_armed(&self, reason: WaitReason) -> WaitTransition {
+        let mut status = self.status.write();
+        match *status {
+            WaitStateStatus::Armed => {
+                *status = WaitStateStatus::Completed(reason);
+                WaitTransition::Completed
+            },
+            WaitStateStatus::Completed(reason) => WaitTransition::AlreadyCompleted(reason),
+            WaitStateStatus::Cancelled(reason) => WaitTransition::AlreadyCancelled(reason),
+            WaitStateStatus::Retired => WaitTransition::Retired,
+        }
+    }
+
     fn retire(&self) -> WaitOutcome {
         let mut status = self.status.write();
         let outcome = WaitOutcome::from_status(*status);
@@ -208,11 +221,30 @@ impl BeginWait {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WaitTransition {
+    Completed,
+    AlreadyCompleted(WaitReason),
+    AlreadyCancelled(WaitReason),
+    Retired,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WaitResult {
     Cancelled(WaitReason),
     Completed(WaitReason),
     Retired,
     Stale,
+}
+
+impl WaitResult {
+    fn from_status(status: WaitStateStatus) -> Self {
+        match status {
+            WaitStateStatus::Armed => Self::Stale,
+            WaitStateStatus::Completed(reason) => Self::Completed(reason),
+            WaitStateStatus::Cancelled(reason) => Self::Cancelled(reason),
+            WaitStateStatus::Retired => Self::Retired,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -234,14 +266,26 @@ impl WaitOutcome {
     }
 }
 
-/// Result for wake attempts through the new wait core.
-///
-/// Phase 1 intentionally never reports `Woke`: the stale-safe physical
-/// placement entry point does not exist yet, so exposing a logical wake success
-/// would create a half-protocol.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WakeEnqueueResult {
+    Stale,
+    AlreadyCurrent,
+    ParkPending,
+    AlreadyQueued,
+    Enqueued,
+}
+
+/// Result for wake attempts through the wait core.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WakeResult {
-    DisabledUntilWakePlacement,
+    Woke {
+        placement: WakeEnqueueResult,
+    },
+    ModeBlocked,
+    Stale,
+    AlreadyCompleted(WaitReason),
+    AlreadyCancelled(WaitReason),
+    Retired,
 }
 
 /// Start one wait-core round for `task`.
@@ -305,7 +349,10 @@ pub fn cancel_wait(guard: &WaitGuard, reason: WaitReason) -> WaitResult {
                 ),
             }
         },
-        _ => (prev, WaitResult::Stale),
+        _ => {
+            let result = WaitResult::from_status(guard.state.status());
+            (prev, result)
+        },
     });
 
     kdebugln!(
@@ -340,38 +387,209 @@ pub fn finish_wait(guard: WaitGuard) -> WaitOutcome {
     outcome
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WakeCommit {
+    Woke { park: ParkState },
+    ModeBlocked,
+    Stale,
+    AlreadyCompleted(WaitReason),
+    AlreadyCancelled(WaitReason),
+    Retired,
+}
+
+impl From<WaitTransition> for WakeCommit {
+    fn from(transition: WaitTransition) -> Self {
+        match transition {
+            WaitTransition::Completed => unreachable!("new completion must carry park state"),
+            WaitTransition::AlreadyCompleted(reason) => Self::AlreadyCompleted(reason),
+            WaitTransition::AlreadyCancelled(reason) => Self::AlreadyCancelled(reason),
+            WaitTransition::Retired => Self::Retired,
+        }
+    }
+}
+
 /// Wake a wait round through a source-held token.
 ///
-/// This is a disabled phase-1 skeleton.  It must not be connected to Event,
-/// timeout, or signal paths until phase 2 adds stale-safe wake placement.
-pub(crate) fn wake_wait(
+/// `WakeResult::Woke` means the wait core has completed the logical wake and
+/// executed one stale-safe physical placement attempt.
+pub fn wake_wait(
     task: &Arc<Task>,
     token: &WakeToken,
     reason: WaitReason,
     mode: WakeMode,
 ) -> WakeResult {
-    kdebugln!(
-        "wait_core: wake_wait disabled task={} wait={:#x} reason={:?} mode={:?}",
-        task.tid(),
-        token.wait_id(),
-        reason,
-        mode,
-    );
-    let _ = mode.allows(true);
-    WakeResult::DisabledUntilWakePlacement
+    let commit = task.update_sched_state_with(|prev| match prev {
+        TaskSchedState::Waiting {
+            state,
+            interruptible,
+            park,
+        } if Arc::ptr_eq(&state, &token.state) => {
+            match state.status() {
+                WaitStateStatus::Armed => {},
+                WaitStateStatus::Completed(reason) => {
+                    return (
+                        TaskSchedState::Waiting {
+                            state,
+                            interruptible,
+                            park,
+                        },
+                        WakeCommit::AlreadyCompleted(reason),
+                    );
+                },
+                WaitStateStatus::Cancelled(reason) => {
+                    return (
+                        TaskSchedState::Waiting {
+                            state,
+                            interruptible,
+                            park,
+                        },
+                        WakeCommit::AlreadyCancelled(reason),
+                    );
+                },
+                WaitStateStatus::Retired => {
+                    return (
+                        TaskSchedState::Waiting {
+                            state,
+                            interruptible,
+                            park,
+                        },
+                        WakeCommit::Retired,
+                    );
+                },
+            }
+
+            if !mode.allows(interruptible) {
+                return (
+                    TaskSchedState::Waiting {
+                        state,
+                        interruptible,
+                        park,
+                    },
+                    WakeCommit::ModeBlocked,
+                );
+            }
+
+            match state.complete_if_armed(reason) {
+                WaitTransition::Completed => (TaskSchedState::Runnable, WakeCommit::Woke { park }),
+                transition => (
+                    TaskSchedState::Waiting {
+                        state,
+                        interruptible,
+                        park,
+                    },
+                    WakeCommit::from(transition),
+                ),
+            }
+        },
+        _ => (prev, WakeCommit::Stale),
+    });
+
+    finish_wake_attempt(task, Some(token.wait_id()), reason, mode, commit)
 }
 
 /// Wake the currently active wait without an external token.
 ///
-/// This helper is scheduler-internal and disabled until phase 2 closes the
-/// post-commit placement semantics.
-pub(crate) fn wake_active_wait(task: &Arc<Task>, reason: WaitReason, mode: WakeMode) -> WakeResult {
+/// `WakeResult::Woke` means the wait core has completed the logical wake and
+/// executed one stale-safe physical placement attempt.
+pub fn wake_active_wait(task: &Arc<Task>, reason: WaitReason, mode: WakeMode) -> WakeResult {
+    let mut wait_id = None;
+    let commit = task.update_sched_state_with(|prev| match prev {
+        TaskSchedState::Waiting {
+            state,
+            interruptible,
+            park,
+        } => {
+            wait_id = Some(state.debug_id());
+            match state.status() {
+                WaitStateStatus::Armed => {},
+                WaitStateStatus::Completed(reason) => {
+                    return (
+                        TaskSchedState::Waiting {
+                            state,
+                            interruptible,
+                            park,
+                        },
+                        WakeCommit::AlreadyCompleted(reason),
+                    );
+                },
+                WaitStateStatus::Cancelled(reason) => {
+                    return (
+                        TaskSchedState::Waiting {
+                            state,
+                            interruptible,
+                            park,
+                        },
+                        WakeCommit::AlreadyCancelled(reason),
+                    );
+                },
+                WaitStateStatus::Retired => {
+                    return (
+                        TaskSchedState::Waiting {
+                            state,
+                            interruptible,
+                            park,
+                        },
+                        WakeCommit::Retired,
+                    );
+                },
+            }
+
+            if !mode.allows(interruptible) {
+                return (
+                    TaskSchedState::Waiting {
+                        state,
+                        interruptible,
+                        park,
+                    },
+                    WakeCommit::ModeBlocked,
+                );
+            }
+
+            match state.complete_if_armed(reason) {
+                WaitTransition::Completed => (TaskSchedState::Runnable, WakeCommit::Woke { park }),
+                transition => (
+                    TaskSchedState::Waiting {
+                        state,
+                        interruptible,
+                        park,
+                    },
+                    WakeCommit::from(transition),
+                ),
+            }
+        },
+        _ => (prev, WakeCommit::Stale),
+    });
+
+    finish_wake_attempt(task, wait_id, reason, mode, commit)
+}
+
+fn finish_wake_attempt(
+    task: &Arc<Task>,
+    wait_id: Option<usize>,
+    reason: WaitReason,
+    mode: WakeMode,
+    commit: WakeCommit,
+) -> WakeResult {
+    let result = match commit {
+        WakeCommit::Woke { park } => {
+            let placement = crate::sched::wake_enqueue(task.clone(), park);
+            WakeResult::Woke { placement }
+        },
+        WakeCommit::ModeBlocked => WakeResult::ModeBlocked,
+        WakeCommit::Stale => WakeResult::Stale,
+        WakeCommit::AlreadyCompleted(reason) => WakeResult::AlreadyCompleted(reason),
+        WakeCommit::AlreadyCancelled(reason) => WakeResult::AlreadyCancelled(reason),
+        WakeCommit::Retired => WakeResult::Retired,
+    };
+
     kdebugln!(
-        "wait_core: wake_active_wait disabled task={} reason={:?} mode={:?}",
+        "wait_core: wake task={} wait={:?} reason={:?} mode={:?} result={:?}",
         task.tid(),
+        wait_id,
         reason,
         mode,
+        result,
     );
-    let _ = mode.allows(true);
-    WakeResult::DisabledUntilWakePlacement
+
+    result
 }

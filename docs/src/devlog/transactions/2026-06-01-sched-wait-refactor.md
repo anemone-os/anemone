@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / event / timer / signal / wait core
 **Canonical Plan:** [RFC-20260601-sched-wait-refactor](../../rfcs/sched-wait-refactor/index.md), [Invariants](../../rfcs/sched-wait-refactor/invariants.md), [Implementation Plan](../../rfcs/sched-wait-refactor/implementation.md)
-**Current Phase:** phase 1 complete; phase 2 pending
+**Current Phase:** phase 2 complete; phase 3 pending
 
 ## Scope
 
@@ -62,9 +62,26 @@
 
 **Next:** 进入阶段 2 前，需要新增 stale-safe `wake_enqueue()`，把 `schedule()` 的 park latch / abort-park 接入 `TaskSchedState::Waiting { park, .. }`，并把 `wake_wait()` / `wake_active_wait()` 补齐为“逻辑完成提交后由 wait core 执行一次 stale-safe placement”的完整入口。
 
+### 2026-06-01 - 阶段 2 stale-safe wake placement
+
+**Phase:** phase 2 - stale-safe wake placement
+
+**Change:** 为 wait core 补齐 `WakeEnqueueResult`，结果分成 `Stale`、`AlreadyCurrent`、`ParkPending`、`AlreadyQueued` 和 `Enqueued`。`wake_enqueue()` 现在作为单独的物理 placement 入口，保留 `task_enqueue()` 的严格断言不变，只让它继续服务新建 runnable 或非 wake-tail 物理入队路径。
+
+**Change:** `wake_wait()` 和 `wake_active_wait()` 现在执行完整的 wait-core 事务：在 task sched-state 事务里校验 `WaitState` 身份、`WakeMode` 和当前等待状态，完成 `WaitState` 的逻辑提交后，再在释放 task sched-state lock 后调用 `wake_enqueue()`，并把 placement 结果装入 `WakeResult::Woke { placement }`。
+
+**Change:** `TaskSchedState::Waiting` 继续携带 `ParkState`，`schedule()` 现在会把 `PrePark` 提交成 `Parked`，再重读调度状态；如果这轮 wait 已经在 wake / cancel 事务里回到 `Runnable`，调度器会走 abort-park 路径而不是把已完成的 wait 留成悬挂态。
+
+**Change:** 远端 wake 也改成走 stale-safe placement。`WakeUpTaskStaleSafe` IPI 只负责把 placement 请求送到目标 CPU，handler 里调用 `wake_enqueue()`，并把 `WakeEnqueueResult` 回传给发送端；旧 `WakeUpTask` IPI 和 `task_enqueue()` 仍保留给非 wait-tail 的兼容路径。
+
+**Compatibility:** `Task::update_status_with()`、`try_to_wake_up()`、`notify()`、`schedule_with_timeout()`、`clock_nanosleep()` 和 `rt_sigtimedwait()` 仍处于迁移期兼容路径，没有改成新 wait-core 入口。阶段 2 没有把 Event、timeout 或 signal 的生产调用切到 `wake_wait()` / `wake_active_wait()`，这会留到后续阶段再接。
+
+**Validation:** 运行 `just build` 通过。当前仍只有仓库里既有的 `sync/mono.rs` unused import warning。
+
+**Next:** 阶段 3 开始迁移 Event listener identity、publish、exclusive quota 和 mode-blocked requeue；那一阶段才会把生产 Event 路径真正接到 `wake_wait()`，并开始收紧旧 listener 兼容层。
+
 ## Open Items
 
-- 阶段 2：补齐 stale-safe `wake_enqueue()`、park latch / abort-park 和完整 wake API。
 - 阶段 3：迁移 `Event` listener identity、publish、exclusive quota 和 mode-blocked requeue。
 - 阶段 4：迁移 timeout、signal 和主动 cancel。
 - 阶段 5：审计旧旁路并收缩旧 wake API。

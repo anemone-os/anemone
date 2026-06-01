@@ -22,6 +22,10 @@ pub enum IpiPayload {
     WakeUpTask {
         tid: Tid,
     },
+    WakeUpTaskStaleSafe {
+        tid: Tid,
+        park: ParkState,
+    },
     #[cfg(feature = "kunit")]
     RunKUnitPerCpu {
         test_fn: fn(),
@@ -33,6 +37,7 @@ pub enum IpiPayload {
 struct IpiMsg {
     payload: IpiPayload,
     is_accomplished: AtomicBool,
+    wake_result: NoIrqSpinLock<Option<WakeEnqueueResult>>,
 }
 
 impl IpiMsg {
@@ -40,6 +45,7 @@ impl IpiMsg {
         Self {
             payload,
             is_accomplished: AtomicBool::new(false),
+            wake_result: NoIrqSpinLock::new(None),
         }
     }
 }
@@ -53,6 +59,15 @@ static IPI_QUEUE: SpinLock<LinkedList<Arc<IpiMsg>>> = SpinLock::new(LinkedList::
 #[inline(always)]
 fn alloc_ipi_msg(payload: IpiPayload) -> Result<Arc<IpiMsg>, IpiError> {
     Arc::try_new(IpiMsg::new(payload)).map_err(IpiError::Alloc)
+}
+
+fn wait_ipi_accomplished(msg: &Arc<IpiMsg>) -> Option<WakeEnqueueResult> {
+    loop {
+        if msg.is_accomplished.load(Ordering::Acquire) {
+            return *msg.wake_result.lock();
+        }
+        spin_loop();
+    }
 }
 
 #[inline(always)]
@@ -78,14 +93,25 @@ pub fn send_ipi(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
 
     let msg = alloc_ipi_msg(payload)?;
     enqueue_ipi(cpu_id, Arc::clone(&msg));
-    loop {
-        if msg.is_accomplished.load(Ordering::Acquire) {
-            break;
-        }
-        spin_loop();
-    }
+    let _ = wait_ipi_accomplished(&msg);
 
     Ok(())
+}
+
+pub fn send_ipi_wait_result(
+    cpu_id: usize,
+    payload: IpiPayload,
+) -> Result<WakeEnqueueResult, IpiError> {
+    if cpu_id == cur_cpu_id().get() {
+        panic!("cannot send ipi to self");
+    }
+    if !target_online(cpu_id) {
+        return Err(IpiError::TargetOffline);
+    }
+
+    let msg = alloc_ipi_msg(payload)?;
+    enqueue_ipi(cpu_id, Arc::clone(&msg));
+    Ok(wait_ipi_accomplished(&msg).unwrap_or(WakeEnqueueResult::Stale))
 }
 
 /// Broadcast an IPI to all other CPUs, synchronously waiting for all of them to
@@ -108,9 +134,7 @@ pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
     }
 
     for msg in pending {
-        while !msg.is_accomplished.load(Ordering::Acquire) {
-            spin_loop();
-        }
+        let _ = wait_ipi_accomplished(&msg);
     }
     Ok(())
 }
@@ -188,6 +212,21 @@ pub fn handle_ipi() {
                     // safe to do this in hwirq context.
                     local_enqueue(task);
                     mark_need_resched();
+                    msg.is_accomplished.store(true, Ordering::Release);
+                },
+                WakeUpTaskStaleSafe { tid, park } => {
+                    let task = get_task(&tid).expect("internal error: no such task to wake up");
+                    let placement = wake_enqueue(task, park);
+                    *msg.wake_result.lock() = Some(placement);
+                    if matches!(placement, WakeEnqueueResult::Enqueued) {
+                        mark_need_resched();
+                    }
+                    kdebugln!(
+                        "ipi wake placement: tid={} park={:?} placement={:?}",
+                        tid,
+                        park,
+                        placement
+                    );
                     msg.is_accomplished.store(true, Ordering::Release);
                 },
                 StopExecution => {
