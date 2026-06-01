@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / event / timer / signal / wait core
 **Canonical Plan:** [RFC-20260601-sched-wait-refactor](../../rfcs/sched-wait-refactor/index.md), [Invariants](../../rfcs/sched-wait-refactor/invariants.md), [Implementation Plan](../../rfcs/sched-wait-refactor/implementation.md)
-**Current Phase:** phase 2 complete; phase 3 pending
+**Current Phase:** phase 3 prerequisites complete; phase 3 pending
 
 ## Scope
 
@@ -79,6 +79,38 @@
 **Validation:** 运行 `just build` 通过。当前仍只有仓库里既有的 `sync/mono.rs` unused import warning。
 
 **Next:** 阶段 3 开始迁移 Event listener identity、publish、exclusive quota 和 mode-blocked requeue；那一阶段才会把生产 Event 路径真正接到 `wake_wait()`，并开始收紧旧 listener 兼容层。
+
+### 2026-06-01 - 阶段 2 代码审查与阶段 3 前置边界
+
+**Phase:** phase 2 review / phase 3 readiness
+
+**Audit:** 对阶段 1、阶段 2 两个提交做代码审查后，结论是当前 phase 2 skeleton 没有把生产等待路径接到新 wait core，因此下列问题不是当前运行路径的直接回归。它们主要来自迁移中间态：旧 `Event`、timeout、signal 和主动 cancel 仍走 `TaskStatus` / `notify()` / `try_to_wake_up()` 兼容协议，而新 wait core 已经具备完整 `WaitState` identity 和 stale-safe placement 入口。
+
+**Blocker:** `Task::update_status_with()` 仍会把内部 `TaskSchedState::Waiting { state, .. }` 投影成旧 `TaskStatus::Waiting`，再写回 `TaskSchedState::from_legacy_status(status)`。如果阶段 3 只把 `Event` 接到 wait core，而阶段 4 的 signal/timeout 仍走旧 `notify()` / `try_to_wake_up()`，旧路径可以擦掉 wait identity、绕过 `WakeToken` 匹配、绕过 `WaitState` completion，并裸调用 `task_enqueue()`。这不会随着“只完成阶段 3”自然消失；阶段 3 前必须给 `update_status_with()` 加硬护栏，或把 phase 3/4 合并成不会暴露双 completion 协议的一次性迁移。首选边界是：legacy 写入口只能处理 `LegacyWaiting` / `Runnable` / `Zombie`，遇到 wait-core `Waiting` 必须拒绝、断言或显式转入 wait-core wake/cancel 入口。
+
+**Blocker:** `sched::wait` 的完整入口已经通过 `sched::mod` crate-wide re-export。当前搜索确认 `begin_wait()`、`wake_wait()`、`wake_active_wait()` 仍无生产调用点，但阶段 2 的语义只是“后续阶段可受控接线”，不是“任意模块现在可半迁移”。阶段 3 接线前需要收紧可见性，或添加明确的阶段 guard / debug assert，避免 Event、timeout、signal 中某条旧旁路提前接入 wait core 后又被旧 completion 路径覆盖。
+
+**Boundary:** `cancel_wait()` 和 `finish_wait()` 目前可以把匹配的 wait-core state 改回 `Runnable`，但不执行 `wake_enqueue()`。如果它们只服务当前 waiter 拥有的主动 cleanup，这个语义可以成立；如果后续被 timeout、signal 或其他线程当作异步 completion，会产生 runnable-but-not-queued 状态。阶段 3/4 前需要用注释、可见性或类型边界固定：异步或远端完成只能走 `wake_wait()` / `wake_active_wait()`；`cancel_wait()` / `finish_wait()` 只服务 waiter-owned cleanup。
+
+**Hardening:** `schedule()` 的 abort-park 路径提交 `Parked` 后会重读 task sched-state，但当前只判断是否已经变成 `Runnable`，没有确认该变化来自同一轮 `WaitState` 的正常 completion。这个问题通常依赖 legacy 覆盖或异常状态触发，不单独阻塞 phase 2；阶段 3 接线时应把重读结果区分为 `Runnable`、同一 wait 仍 `Waiting`、不同 wait / `LegacyWaiting` / 异常状态，并为异常分支保留 debug log 或 debug assert。
+
+**Decision:** 可以把当前代码作为 phase 2 skeleton 保留；不需要为了封存 phase 2 立即修所有问题。但阶段 3 不能在 `update_status_with()` 护栏和 wait-core API 接线边界未明确前接入生产 Event。`cancel_wait()` / `finish_wait()` 的语义边界和 `schedule()` abort-park 诊断可与阶段 3 hardening 同批完成。
+
+### 2026-06-01 - 阶段 3 前置护栏与调度重读加固
+
+**Phase:** phase 3 prerequisites / hardening
+
+**Change:** 给 `Task::update_status_with()` 加了 wait-core `TaskSchedState::Waiting` 护栏。只要当前内部状态已经是 wait-core waiting，legacy 写入口就会直接 panic，不再允许旧 `TaskStatus` 兼容路径静默覆盖 `WaitState` identity。这个护栏把旧 completion 旁路和新 wait-core completion 线分开了，避免阶段 3 只接 Event 时被阶段 4 的 timeout/signal 旧路径绕回去。
+
+**Change:** 收紧了 wait-core 生产接线边界。`begin_wait()`、`wake_wait()`、`wake_active_wait()` 不再从 `sched::mod` crate-wide re-export，调用方必须显式进入 `sched::wait` 模块。与此同时，`sched::wait` 里的文档补上了阶段语义：`begin_wait()` 是受控 wait-core 入口，`wake_wait()` / `wake_active_wait()` 是远端或 producer completion 入口，不能和 `cancel_wait()` / `finish_wait()` 的 waiter-owned cleanup 混用。
+
+**Change:** `cancel_wait()` 和 `finish_wait()` 的文档边界被固定为 waiter-owned cleanup only。异步或远端 completion 需要继续走 `wake_wait()` / `wake_active_wait()`，这样逻辑完成和 stale-safe physical placement 才会一直绑在同一个 wait-core 事务里。
+
+**Change:** `schedule()` 的 abort-park 重读路径现在会携带 `WaitState` 身份快照，并把重读结果拆成明确分支：`Runnable` 走 abort-park；同一轮 wait 仍 `Waiting` 时记录正常 parked；不同 wait、`LegacyWaiting` 或 `Zombie` 会打警告并保留 debug assert。这个加固只做诊断和边界收敛，没有改 Event 或 timeout 的生产迁移。
+
+**Validation:** 运行 `just build` 通过。当前仍只有仓库里既有的 `anemone-kernel/src/sync/mono.rs` unused import warning。
+
+**Next:** 阶段 3 可以开始迁移 Event listener identity、publish、exclusive quota 和 mode-blocked requeue；进入生产接线前，上面两条前置和这条 hardening 已经到位。
 
 ## Open Items
 

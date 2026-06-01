@@ -291,7 +291,9 @@ pub enum WakeResult {
 /// Start one wait-core round for `task`.
 ///
 /// The linearization point is the task scheduling-state transaction.  This API
-/// is not wired into production wait sources in phase 1.
+/// stays as a controlled wait-core entry point; production wait sources are not
+/// wired through `sched::mod` and should only attach here when the migration
+/// phase explicitly calls for it.
 pub fn begin_wait(task: &Arc<Task>, interruptible: bool) -> BeginWait {
     let state = WaitState::new(task);
     let guard = WaitGuard {
@@ -329,6 +331,10 @@ pub fn begin_wait(task: &Arc<Task>, interruptible: bool) -> BeginWait {
 }
 
 /// Cancel a wait round owned by `guard`.
+///
+/// This is waiter-owned cleanup only. Remote or async completion must use
+/// [wake_wait] or [wake_active_wait] so logical completion and stale-safe
+/// placement stay coupled.
 pub fn cancel_wait(guard: &WaitGuard, reason: WaitReason) -> WaitResult {
     let result = guard.task.update_sched_state_with(|prev| match prev {
         TaskSchedState::Waiting {
@@ -367,6 +373,10 @@ pub fn cancel_wait(guard: &WaitGuard, reason: WaitReason) -> WaitResult {
 }
 
 /// Retire the wait round and return its final recorded outcome.
+///
+/// This is waiter-owned cleanup only. Remote or async completion must use
+/// [wake_wait] or [wake_active_wait] so logical completion and stale-safe
+/// placement stay coupled.
 pub fn finish_wait(guard: WaitGuard) -> WaitOutcome {
     let outcome = guard.task.update_sched_state_with(|prev| match prev {
         TaskSchedState::Waiting { state, .. } if Arc::ptr_eq(&state, &guard.state) => {
@@ -409,6 +419,10 @@ impl From<WaitTransition> for WakeCommit {
 }
 
 /// Wake a wait round through a source-held token.
+///
+/// This is the remote/producer completion entry point. Do not use it for
+/// waiter-owned cleanup; `cancel_wait()` and `finish_wait()` are the local
+/// cleanup paths.
 ///
 /// `WakeResult::Woke` means the wait core has completed the logical wake and
 /// executed one stale-safe physical placement attempt.
@@ -488,6 +502,10 @@ pub fn wake_wait(
 }
 
 /// Wake the currently active wait without an external token.
+///
+/// This is the remote/producer completion entry point for active waits. Do not
+/// use it for waiter-owned cleanup; `cancel_wait()` and `finish_wait()` are the
+/// local cleanup paths.
 ///
 /// `WakeResult::Woke` means the wait core has completed the logical wake and
 /// executed one stale-safe physical placement attempt.

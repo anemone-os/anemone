@@ -32,8 +32,7 @@ pub mod wait;
 pub use wait::{
     BeginWait, ParkState, TaskSchedState, WaitGuard, WaitOutcome, WaitReason,
     WaitResult, WaitState, WaitStateStatus, WakeEnqueueResult, WakeMode,
-    WakeResult, WakeToken, begin_wait, cancel_wait, finish_wait,
-    wake_active_wait, wake_wait,
+    WakeResult, WakeToken,
 };
 
 /// Core scheduler loop. Called by bootstrap code.
@@ -88,6 +87,7 @@ mod kore {
             interruptible: bool,
         },
         WaitCoreParked {
+            state: Arc<WaitState>,
             interruptible: bool,
             wait_id: usize,
         },
@@ -118,6 +118,7 @@ mod kore {
                 park: ParkState::PrePark,
             } => {
                 let wait_id = state.debug_id();
+                let wait_state = state.clone();
                 (
                     TaskSchedState::Waiting {
                         state,
@@ -125,6 +126,7 @@ mod kore {
                         park: ParkState::Parked,
                     },
                     ScheduleDecision::WaitCoreParked {
+                        state: wait_state,
                         interruptible,
                         wait_id,
                     },
@@ -136,6 +138,7 @@ mod kore {
                 park: ParkState::Parked,
             } => {
                 let wait_id = state.debug_id();
+                let wait_state = state.clone();
                 (
                     TaskSchedState::Waiting {
                         state,
@@ -143,6 +146,7 @@ mod kore {
                         park: ParkState::Parked,
                     },
                     ScheduleDecision::WaitCoreParked {
+                        state: wait_state,
                         interruptible,
                         wait_id,
                     },
@@ -168,28 +172,91 @@ mod kore {
                 drop(curr);
             },
             ScheduleDecision::WaitCoreParked {
+                state,
                 interruptible,
                 wait_id,
             } => {
-                if matches!(curr.sched_state(), TaskSchedState::Runnable) {
-                    kdebugln!(
-                        "schedule: abort park for task={} wait={:#x}; wait already completed",
-                        curr.tid(),
-                        wait_id,
-                    );
-                    if !curr.flags().is_idle() {
-                        local_requeue_current(curr);
-                    } else {
+                let task_id = curr.tid();
+                match curr.sched_state() {
+                    TaskSchedState::Runnable => {
+                        kdebugln!(
+                            "schedule: abort park for task={} wait={:#x}; wait already completed",
+                            task_id,
+                            wait_id,
+                        );
+                        if !curr.flags().is_idle() {
+                            local_requeue_current(curr);
+                        } else {
+                            drop(curr);
+                        }
+                    },
+                    TaskSchedState::Waiting {
+                        state: observed,
+                        interruptible: observed_interruptible,
+                        park,
+                    } if Arc::ptr_eq(&observed, &state) => {
+                        if observed_interruptible != interruptible {
+                            kwarningln!(
+                                "schedule: wait-core interruptible changed while parking task={} wait={:#x}: expected={} observed={}",
+                                task_id,
+                                wait_id,
+                                interruptible,
+                                observed_interruptible,
+                            );
+                            debug_assert_eq!(observed_interruptible, interruptible);
+                        }
+                        knoticeln!(
+                            "{} is wait-core parked (wait={:#x}, interruptible: {}, park: {:?}), not enqueuing it to run queue",
+                            task_id,
+                            wait_id,
+                            observed_interruptible,
+                            park,
+                        );
                         drop(curr);
-                    }
-                } else {
-                    knoticeln!(
-                        "{} is wait-core parked (wait={:#x}, interruptible: {}), not enqueuing it to run queue",
-                        current_task_id(),
-                        wait_id,
-                        interruptible,
-                    );
-                    drop(curr);
+                    },
+                    TaskSchedState::Waiting {
+                        state: observed,
+                        interruptible: observed_interruptible,
+                        park,
+                    } => {
+                        kwarningln!(
+                            "schedule: unexpected wait-core state after parking task={} wait={:#x}: observed wait={:#x}, interruptible={}, park={:?}",
+                            task_id,
+                            wait_id,
+                            observed.debug_id(),
+                            observed_interruptible,
+                            park,
+                        );
+                        debug_assert!(
+                            Arc::ptr_eq(&observed, &state),
+                            "schedule observed a different wait round after parking"
+                        );
+                        drop(curr);
+                    },
+                    TaskSchedState::LegacyWaiting {
+                        interruptible: observed_interruptible,
+                    } => {
+                        kwarningln!(
+                            "schedule: wait-core park for task={} wait={:#x} was overwritten by legacy waiting (interruptible={})",
+                            task_id,
+                            wait_id,
+                            observed_interruptible,
+                        );
+                        debug_assert!(
+                            false,
+                            "legacy wait state observed after wait-core park"
+                        );
+                        drop(curr);
+                    },
+                    TaskSchedState::Zombie => {
+                        kwarningln!(
+                            "schedule: wait-core park for task={} wait={:#x} became zombie",
+                            task_id,
+                            wait_id,
+                        );
+                        debug_assert!(false, "zombie state observed after wait-core park");
+                        drop(curr);
+                    },
                 }
             },
             ScheduleDecision::Zombie => {
