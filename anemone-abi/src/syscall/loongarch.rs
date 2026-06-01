@@ -192,6 +192,9 @@ pub mod linux {
 
     pub const SYS_PRLIMIT64: u64 = 261;
 
+    pub const SYS_FANOTIFY_INIT: u64 = 262;
+    pub const SYS_FANOTIFY_MARK: u64 = 263;
+
     pub const SYS_RENAMEAT2: u64 = 276;
 
     pub const SYS_GETRANDOM: u64 = 278;
