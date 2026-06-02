@@ -128,6 +128,8 @@
 
 **Temporary:** `Event::listen_with_timeout()` 现在使用 Event-local token timer callback：timer callback 持有本轮 `WakeToken` 并调用 `wake_wait(..., WaitReason::Timeout, WakeMode::AnyWait)`，避免已迁移的 Event wait 被旧 `schedule_with_timeout()` / `notify()` 旁路写穿。这个 helper 是阶段 3/4 分离时的过渡设施，不应视为最终 timeout 架构；阶段 4 仍要迁移通用 `schedule_with_timeout()`、`clock_nanosleep()`、`rt_sigtimedwait()` 和主动 cancel 入口。
 
+**Review Boundary:** 阶段 3 review 中观察到 `Event::listen*()` 在 wait-core `Completed(Signal | Force)` 或 `Completed(Timeout)` 返回后会重新检查 predicate，并可能把 signal/timeout completion 映射成普通成功返回。这个问题不破坏 wait identity、listener cleanup、exclusive quota、mode-blocked requeue 或 stale-safe placement，也不会重新打开原 Event wake race，因此不阻塞阶段 3。它也不会仅因阶段 4 开始而自然消失：阶段 4 迁移通用 timeout/signal 时必须显式决定并收口 `Event::listen*()` 的返回原因语义，是保留旧实现的“predicate wins”行为并更新契约，还是让 `Completed(Signal)` / `Completed(Timeout)` 严格返回 interrupted / timeout。
+
 **Audit:** 搜索 `anemone-kernel/src/sched/event.rs` 中的 `try_to_wake_up`、`update_status_with`、`TaskStatus::Waiting` 和 `schedule_with_timeout`，确认 Event 生产路径已经不再使用旧 wake/status/timeout completion。剩余旧旁路集中在 `sched::notify()` 的 `LegacyWaiting` 分支、`try_to_wake_up()`、通用 `schedule_with_timeout()`、`clock_nanosleep()` 和 `rt_sigtimedwait()`，属于阶段 4/5 收口范围。
 
 **Validation:** 运行 `just build` 通过。当前仍只有仓库里既有的 `anemone-kernel/src/sync/mono.rs` unused import warning。
