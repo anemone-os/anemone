@@ -127,8 +127,10 @@ pub fn fetch_clear_need_resched() -> bool {
 /// [class::SchedEntity] of the task will determine which queue it will be
 /// enqueued to.
 ///
-/// This entry point is for wakeup and newly-created runnable tasks. The
-/// current running task should use [local_requeue_current] instead.
+/// This entry point is for non-wait-tail placement of tasks that are already
+/// known to be runnable, primarily new task publication. Wait completion tails
+/// must use [wake_enqueue] so late or stale wake placement is revalidated
+/// instead of asserted through this path.
 ///
 /// This function will disable interrupts.
 ///
@@ -297,6 +299,9 @@ pub fn pick_next_cpu() -> CpuId {
 ///
 /// Internally, this function sends an IPI to the target processor, which is a
 /// bit expensive.
+///
+/// This is a strict non-wait-tail placement path. Wait completion tails must
+/// use [wake_enqueue].
 pub fn remote_enqueue(task: Arc<Task>) {
     assert!(task.status() == TaskStatus::Runnable);
     send_ipi(
@@ -332,7 +337,11 @@ pub fn remote_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResul
     placement
 }
 
-/// Thin wrapper around [local_enqueue] and [remote_enqueue].
+/// Strict non-wait-tail placement wrapper around [local_enqueue] and
+/// [remote_enqueue].
+///
+/// New task publication can use this path because the task is already known
+/// runnable and has no late wake tail. Wait completion must use [wake_enqueue].
 pub fn task_enqueue(task: Arc<Task>) {
     assert!(task.status() == TaskStatus::Runnable);
     if task.cpuid() == cur_cpu_id() {

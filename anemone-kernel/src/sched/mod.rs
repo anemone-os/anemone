@@ -18,8 +18,7 @@ pub use api::*;
 mod processor;
 pub use processor::{
     fetch_clear_need_resched, get_current_task, init_routines, local_enqueue, local_sched_tick,
-    local_wake_enqueue, mark_need_resched, pick_next_cpu, remote_enqueue, remote_wake_enqueue,
-    task_enqueue, wake_enqueue,
+    mark_need_resched, pick_next_cpu, task_enqueue, wake_enqueue,
 };
 mod switch;
 pub use switch::load_context;
@@ -28,11 +27,10 @@ mod event;
 pub use event::{Event, TimeoutListenException};
 
 pub mod class;
-pub mod wait;
+mod wait;
 pub use wait::{
-    BeginWait, ParkState, TaskSchedState, WaitGuard, WaitOutcome, WaitReason,
-    WaitResult, WaitState, WaitStateStatus, WakeEnqueueResult, WakeMode,
-    WakeResult, WakeToken,
+    ActiveWait, ParkState, TaskSchedState, WaitOutcome, WaitReason, WaitState,
+    WaitStateStatus, WakeEnqueueResult, WakeMode, WakeResult, WakeToken,
 };
 
 /// Core scheduler loop. Called by bootstrap code.
@@ -276,7 +274,7 @@ mod higher_level {
     /// Schedule the current wait-core round with an optional timeout.
     ///
     /// `token` names the wait round already published through
-    /// `wait::begin_wait()`. A late timer callback races through
+    /// `ActiveWait::begin()`. A late timer callback races through
     /// `wake_wait()`, so timeout validity is derived from the wait identity
     /// rather than an external cancellation flag.
     pub fn schedule_wait_with_timeout(

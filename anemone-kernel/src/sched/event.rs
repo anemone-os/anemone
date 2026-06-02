@@ -114,20 +114,20 @@ impl Event {
         let mut guard = PreemptGuard::new();
 
         loop {
-            let (wait_guard, listener) = self.prepare_listener(&task, exclusive, true);
+            let (active_wait, listener) = self.prepare_listener(&task, exclusive, true);
 
             if prediction() {
-                wait::cancel_wait(&wait_guard, WaitReason::PredicateReady);
+                active_wait.cancel(WaitReason::PredicateReady);
                 self.clean_listener(&listener, exclusive);
-                wait::finish_wait(wait_guard);
+                active_wait.finish();
                 return true;
             }
 
             if task.has_unmasked_signal() {
                 kdebugln!("{} has unmasked signal, breaking the wait loop", task.tid());
-                wait::cancel_wait(&wait_guard, WaitReason::Signal);
+                active_wait.cancel(WaitReason::Signal);
                 self.clean_listener(&listener, exclusive);
-                wait::finish_wait(wait_guard);
+                active_wait.finish();
                 return false;
             }
 
@@ -140,7 +140,7 @@ impl Event {
             }
 
             self.clean_listener(&listener, exclusive);
-            let outcome = wait::finish_wait(wait_guard);
+            let outcome = active_wait.finish();
             kdebugln!(
                 "event: listen woke event={:#x} task={} listener={:?} outcome={:?}",
                 self.debug_id(),
@@ -148,11 +148,13 @@ impl Event {
                 listener,
                 outcome,
             );
-            if matches!(
-                outcome,
-                WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force)
-            ) {
-                return false;
+            match outcome {
+                WaitOutcome::Completed(WaitReason::Event) => {},
+                WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force) => return false,
+                other => {
+                    self.assert_unexpected_wait_outcome("listen", &task, &listener, other);
+                    return false;
+                },
             }
         }
     }
@@ -168,12 +170,12 @@ impl Event {
         let mut guard = PreemptGuard::new();
 
         loop {
-            let (wait_guard, listener) = self.prepare_listener(&task, exclusive, false);
+            let (active_wait, listener) = self.prepare_listener(&task, exclusive, false);
 
             if prediction() {
-                wait::cancel_wait(&wait_guard, WaitReason::PredicateReady);
+                active_wait.cancel(WaitReason::PredicateReady);
                 self.clean_listener(&listener, exclusive);
-                wait::finish_wait(wait_guard);
+                active_wait.finish();
                 return;
             }
 
@@ -186,7 +188,7 @@ impl Event {
             }
 
             self.clean_listener(&listener, exclusive);
-            let outcome = wait::finish_wait(wait_guard);
+            let outcome = active_wait.finish();
             kdebugln!(
                 "event: listen_uninterruptible woke event={:#x} task={} listener={:?} outcome={:?}",
                 self.debug_id(),
@@ -194,6 +196,18 @@ impl Event {
                 listener,
                 outcome,
             );
+            match outcome {
+                WaitOutcome::Completed(WaitReason::Event) => {},
+                other => {
+                    self.assert_unexpected_wait_outcome(
+                        "listen_uninterruptible",
+                        &task,
+                        &listener,
+                        other,
+                    );
+                    return;
+                },
+            }
         }
     }
 
@@ -216,28 +230,28 @@ impl Event {
         let mut guard = PreemptGuard::new();
 
         loop {
-            let (wait_guard, listener) = self.prepare_listener(&task, exclusive, true);
+            let (active_wait, listener) = self.prepare_listener(&task, exclusive, true);
 
             if prediction() {
-                wait::cancel_wait(&wait_guard, WaitReason::PredicateReady);
+                active_wait.cancel(WaitReason::PredicateReady);
                 self.clean_listener(&listener, exclusive);
-                wait::finish_wait(wait_guard);
+                active_wait.finish();
                 return None;
             }
 
             if task.has_unmasked_signal() {
                 kdebugln!("{} has unmasked signal, breaking the wait loop", task.tid());
-                wait::cancel_wait(&wait_guard, WaitReason::Signal);
+                active_wait.cancel(WaitReason::Signal);
                 self.clean_listener(&listener, exclusive);
-                wait::finish_wait(wait_guard);
+                active_wait.finish();
                 return Some(TimeoutListenException::Signaled);
             }
 
             if timeout == Duration::ZERO {
                 kdebugln!("listen_with_timeout: timeout is zero, returning immediately");
-                wait::cancel_wait(&wait_guard, WaitReason::Timeout);
+                active_wait.cancel(WaitReason::Timeout);
                 self.clean_listener(&listener, exclusive);
-                wait::finish_wait(wait_guard);
+                active_wait.finish();
                 return Some(TimeoutListenException::Timeout);
             }
 
@@ -249,16 +263,7 @@ impl Event {
             guard = PreemptGuard::new();
 
             self.clean_listener(&listener, exclusive);
-            let outcome = wait::finish_wait(wait_guard);
-            if matches!(
-                outcome,
-                WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force)
-            ) {
-                return Some(TimeoutListenException::Signaled);
-            }
-            if matches!(outcome, WaitOutcome::Completed(WaitReason::Timeout)) {
-                return Some(TimeoutListenException::Timeout);
-            }
+            let outcome = active_wait.finish();
 
             let elapsed = timeout.saturating_sub(remaining);
             timeout = remaining;
@@ -271,6 +276,24 @@ impl Event {
                 elapsed,
                 timeout,
             );
+            match outcome {
+                WaitOutcome::Completed(WaitReason::Event) => {},
+                WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force) => {
+                    return Some(TimeoutListenException::Signaled);
+                },
+                WaitOutcome::Completed(WaitReason::Timeout) => {
+                    return Some(TimeoutListenException::Timeout);
+                },
+                other => {
+                    self.assert_unexpected_wait_outcome(
+                        "listen_with_timeout",
+                        &task,
+                        &listener,
+                        other,
+                    );
+                    return Some(TimeoutListenException::Signaled);
+                },
+            }
         }
     }
 }
@@ -291,12 +314,29 @@ impl Event {
         task: &Arc<Task>,
         exclusive: bool,
         interruptible: bool,
-    ) -> (WaitGuard, Listener) {
-        let begin = wait::begin_wait(task, interruptible);
-        let (guard, token) = begin.into_parts();
-        let listener = Listener::new(task, token);
+    ) -> (wait::ActiveWait, Listener) {
+        let active_wait = wait::ActiveWait::begin(task, interruptible);
+        let listener = Listener::new(task, active_wait.token());
         self.register_listener(listener.clone(), exclusive);
-        (guard, listener)
+        (active_wait, listener)
+    }
+
+    fn assert_unexpected_wait_outcome(
+        &self,
+        operation: &str,
+        task: &Task,
+        listener: &Listener,
+        outcome: WaitOutcome,
+    ) {
+        kwarningln!(
+            "event: {} unexpected wait outcome event={:#x} task={} listener={:?} outcome={:?}",
+            operation,
+            self.debug_id(),
+            task.tid(),
+            listener,
+            outcome,
+        );
+        assert!(false, "event wait saw unexpected wait outcome");
     }
 
     fn register_listener(&self, listener: Listener, exclusive: bool) {

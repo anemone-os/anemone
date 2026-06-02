@@ -156,19 +156,13 @@ impl Debug for WaitState {
 /// It owns active cleanup and retirement for exactly one wait round.  It is not
 /// cloneable by design.
 #[derive(Debug)]
-pub struct WaitGuard {
+struct WaitGuard {
     task: Arc<Task>,
     state: Arc<WaitState>,
 }
 
 impl WaitGuard {
-    pub fn token(&self) -> WakeToken {
-        WakeToken {
-            state: self.state.clone(),
-        }
-    }
-
-    pub fn wait_id(&self) -> usize {
+    fn wait_id(&self) -> usize {
         self.state.debug_id()
     }
 }
@@ -190,18 +184,45 @@ impl WakeToken {
 }
 
 #[derive(Debug)]
-pub struct BeginWait {
+struct BeginWait {
     guard: WaitGuard,
     token: WakeToken,
 }
 
 impl BeginWait {
+    fn into_parts(self) -> (WaitGuard, WakeToken) {
+        (self.guard, self.token)
+    }
+}
+
+/// Owned handle for a current task wait round.
+///
+/// Higher-level wait adapters use this facade to begin, actively cancel, and
+/// explicitly finish one wait round without exposing the raw lifecycle
+/// primitives as general scheduler state operations.
+#[derive(Debug)]
+pub struct ActiveWait {
+    guard: WaitGuard,
+    token: WakeToken,
+}
+
+impl ActiveWait {
+    pub fn begin(task: &Arc<Task>, interruptible: bool) -> Self {
+        let begin = begin_wait(task, interruptible);
+        let (guard, token) = begin.into_parts();
+        Self { guard, token }
+    }
+
     pub fn token(&self) -> WakeToken {
         self.token.clone()
     }
 
-    pub fn into_parts(self) -> (WaitGuard, WakeToken) {
-        (self.guard, self.token)
+    pub fn cancel(&self, reason: WaitReason) {
+        cancel_wait(&self.guard, reason);
+    }
+
+    pub fn finish(self) -> WaitOutcome {
+        finish_wait(self.guard)
     }
 }
 
@@ -214,7 +235,7 @@ enum WaitTransition {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WaitResult {
+enum WaitResult {
     Cancelled(WaitReason),
     Completed(WaitReason),
     Retired,
@@ -295,10 +316,9 @@ impl RequeuePermit<'_> {
 /// Start one wait-core round for `task`.
 ///
 /// The linearization point is the task scheduling-state transaction.  This API
-/// stays as a controlled wait-core entry point; production wait sources are not
-/// wired through `sched::mod` and should only attach here when the migration
-/// phase explicitly calls for it.
-pub fn begin_wait(task: &Arc<Task>, interruptible: bool) -> BeginWait {
+/// stays private to the wait core.  Wait adapters should use [ActiveWait]
+/// instead of reaching for raw lifecycle primitives.
+fn begin_wait(task: &Arc<Task>, interruptible: bool) -> BeginWait {
     let state = WaitState::new(task);
     let guard = WaitGuard {
         task: task.clone(),
@@ -339,7 +359,7 @@ pub fn begin_wait(task: &Arc<Task>, interruptible: bool) -> BeginWait {
 /// This is waiter-owned cleanup only. Remote or async completion must use
 /// [wake_wait] or [wake_active_wait] so logical completion and stale-safe
 /// placement stay coupled.
-pub fn cancel_wait(guard: &WaitGuard, reason: WaitReason) -> WaitResult {
+fn cancel_wait(guard: &WaitGuard, reason: WaitReason) -> WaitResult {
     let result = guard.task.update_sched_state_with(|prev| match prev {
         TaskSchedState::Waiting {
             state,
@@ -381,7 +401,7 @@ pub fn cancel_wait(guard: &WaitGuard, reason: WaitReason) -> WaitResult {
 /// This is waiter-owned cleanup only. Remote or async completion must use
 /// [wake_wait] or [wake_active_wait] so logical completion and stale-safe
 /// placement stay coupled.
-pub fn finish_wait(guard: WaitGuard) -> WaitOutcome {
+fn finish_wait(guard: WaitGuard) -> WaitOutcome {
     let outcome = guard.task.update_sched_state_with(|prev| match prev {
         TaskSchedState::Waiting { state, .. } if Arc::ptr_eq(&state, &guard.state) => {
             let outcome = guard.state.retire();

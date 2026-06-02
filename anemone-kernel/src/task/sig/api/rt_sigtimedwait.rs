@@ -71,8 +71,8 @@ fn sys_rt_sigtimedwait(
         prev_mask
     };
 
-    let begin = wait::begin_wait(&task, true);
-    let (guard, token) = begin.into_parts();
+    let active_wait = ActiveWait::begin(&task, true);
+    let token = active_wait.token();
 
     enum WaitOutcome {
         Signal(Signal),
@@ -82,20 +82,20 @@ fn sys_rt_sigtimedwait(
 
     // check pending signals. this step must be placed after status update.
     let wait_outcome = if let Some(signal) = task.fetch_specific_signal(uthese) {
-        wait::cancel_wait(&guard, WaitReason::PredicateReady);
-        wait::finish_wait(guard);
+        active_wait.cancel(WaitReason::PredicateReady);
+        active_wait.finish();
         WaitOutcome::Signal(signal)
     } else if task.has_unmasked_signal() {
-        wait::cancel_wait(&guard, WaitReason::Signal);
-        wait::finish_wait(guard);
+        active_wait.cancel(WaitReason::Signal);
+        active_wait.finish();
         WaitOutcome::Interrupted
     } else if matches!(timeout, Some(timeout) if timeout == Duration::ZERO) {
-        wait::cancel_wait(&guard, WaitReason::Timeout);
-        wait::finish_wait(guard);
+        active_wait.cancel(WaitReason::Timeout);
+        active_wait.finish();
         WaitOutcome::Timeout(Duration::ZERO)
     } else {
         let rem = schedule_wait_with_timeout(&task, token, timeout);
-        let outcome = wait::finish_wait(guard);
+        let outcome = active_wait.finish();
         kdebugln!(
             "sys_rt_sigtimedwait: wait finished task={} outcome={:?} rem={:?}",
             task.tid(),
@@ -109,8 +109,10 @@ fn sys_rt_sigtimedwait(
             WaitOutcome::Signal(signal)
         } else {
             match outcome {
-                wait::WaitOutcome::Completed(WaitReason::Timeout) => WaitOutcome::Timeout(rem),
-                wait::WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force) => {
+                crate::sched::WaitOutcome::Completed(WaitReason::Timeout) => {
+                    WaitOutcome::Timeout(rem)
+                },
+                crate::sched::WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force) => {
                     WaitOutcome::Interrupted
                 },
                 other if task.has_unmasked_signal() => {

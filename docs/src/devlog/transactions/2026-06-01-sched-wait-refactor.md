@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / event / timer / signal / wait core
 **Canonical Plan:** [RFC-20260601-sched-wait-refactor](../../rfcs/sched-wait-refactor/index.md), [Invariants](../../rfcs/sched-wait-refactor/invariants.md), [Implementation Plan](../../rfcs/sched-wait-refactor/implementation.md)
-**Current Phase:** phase 5 audit 1 complete; phase 5 further audits pending
+**Current Phase:** phase 5 audit 2 fixes landed; phase 5 further audits pending
 
 ## Scope
 
@@ -178,9 +178,41 @@
 
 **Next:** 继续阶段 5 的后续审计轮次，直到所有保留旁路都有明确分类和理由；完成多轮审计后再进入阶段 6 验证和文档跟进。
 
+### 2026-06-02 - 阶段 5 审计 2：Event outcome 与保留入口边界
+
+**Phase:** phase 5 audit 2 - Event finish outcome and retained API boundary audit
+
+**Audit:** 复核两轮审计结果后，确认以下问题与上一轮人工审计中的 Event fail-closed、wait-core API 可见性和 placement 入口分类问题重复，应合并记录，不再拆成独立 issue。它们不重新打开原始 Event wake race，也没有证明当前存在裸 `task_enqueue()` wait-tail 调用；风险在于阶段 5 还不能声明异常状态覆盖和保留入口收缩已经闭合。
+
+**Finding (Medium):** `Event::listen()`、`Event::listen_uninterruptible()` 和 `Event::listen_with_timeout()` 对 `finish_wait()` outcome 仍未 fail-closed。阶段 5 审计 1 已把 `clock_nanosleep()` / `rt_sigtimedwait()` 改为显式分类，但 Event 侧仍会把除 `Completed(Signal | Force)` 或 `Completed(Timeout)` 以外的结果归入普通循环重试。如果出现 `Armed`、`Cancelled`、`Retired`，或当前 listener 不应收到的 completion reason，Event 会静默吞掉 wait-core 协议偏离。修复方向是让 Event 阻塞返回后显式 match outcome：只允许 `Completed(Event)` 作为普通 spurious/event wake 继续循环，按接口语义处理 signal/timeout，其余状态 warning + 普通 `assert!` 或受控 fail-closed。
+
+**Finding (Medium):** `sched::wait` 仍是公开模块，`begin_wait()`、`wake_wait()`、`wake_active_wait()`、`cancel_wait()` 和 `finish_wait()` 等生命周期原语仍可被任意内核模块直接调用。阶段 5 审计 1 删除了旧 wrapper，但迁移证明仍依赖调用约定：后续代码可以绕开 listener cleanup 纪律创建 wait round，或把 `wake_active_wait()` 当成泛用 wake API。修复方向是把生命周期原语收窄到已知 adapter，或只公开带明确调用契约的窄 helper，避免 wait-core capability 边界退化成普通状态操作面。
+
+**Finding (Low/Medium):** `local_enqueue()` / `remote_enqueue()` / `task_enqueue()` 当前调用面仍分类为新任务发布和调度器基础 placement，未发现 wait completion tail 调用；但 `local_enqueue()` 文档仍写着“for wakeup and newly-created runnable tasks”，与阶段 5 不变量中“wait completion tail 必须走 `wake_enqueue()`”的表述冲突。修复方向是把这些裸 enqueue API 的注释和分类改成明确的非 wait-tail placement / new-task placement，保留严格断言；把 wait completion 相关命名和文档只留给 stale-safe `wake_enqueue()`。
+
+**Validation:** 本轮只记录审计结果，未改代码，未运行构建或 QEMU 验证。
+
+**Next:** 阶段 5 后续修复应优先关闭 Event outcome fail-closed；随后收窄 wait-core 生命周期 API 与裸 enqueue placement 文档/可见性边界。修复后需要重新搜索 `wait::begin_wait` / `wake_wait` / `wake_active_wait` / `task_enqueue` / `local_enqueue` / `remote_enqueue` 命中并更新旁路分类。
+
+### 2026-06-02 - 阶段 5 审计 2 修复：Event fail-closed 与入口收缩
+
+**Phase:** phase 5 audit 2 fixes
+
+**Change:** `Event::listen()`、`Event::listen_uninterruptible()` 和 `Event::listen_with_timeout()` 的阻塞返回路径改为显式分类 `finish_wait()` outcome。正常 Event wake 只接受 `Completed(Event)` 并继续按 spurious wake 语义重新检查 predicate；signal / force 和 timeout 按各接口返回语义处理；`Armed`、`Cancelled`、`Retired` 或非当前接口应收到的 completion reason 会记录 warning 并触发普通 `assert!`，不再静默归入普通循环重试。
+
+**Change:** 新增 wait-core owner-side `ActiveWait` facade，并把 Event、`clock_nanosleep()`、`rt_sigtimedwait()` 迁移到 `ActiveWait::begin()` / `cancel()` / `finish()`。底层 `WaitGuard`、`BeginWait`、`WaitResult`、`begin_wait()`、`cancel_wait()` 和 `finish_wait()` 改为 `sched::wait` 私有实现细节；`sched::wait` 模块本身也从公开模块收回，只通过 `sched` 根导出必要的受控类型和窄 capability。
+
+**Change:** `local_wake_enqueue()` / `remote_wake_enqueue()` 不再从 `sched` 根导出。`local_enqueue()`、`remote_enqueue()` 和 `task_enqueue()` 的文档改为严格非 wait-tail placement / 新任务发布路径，明确 wait completion tail 必须走 stale-safe `wake_enqueue()`，并保留现有 runnable 断言。
+
+**Audit:** 重新搜索 `wait::begin_wait`、`wait::cancel_wait`、`wait::finish_wait`、`wait::wake_wait`、`wait::wake_active_wait`、`BeginWait`、`WaitGuard` 和 `WaitResult`。raw lifecycle 原语只剩 `sched::wait` 内部定义和 Event / timer / notify 这些 scheduler 内部 adapter 的 producer 入口；外部直接等待路径只使用 `ActiveWait`。重新搜索 `TaskStatus::Waiting`、`update_status_with`、`try_to_wake_up`、`schedule_with_timeout(` 和 `is_sleeping(`，内核源码中仍无旧 completion API 命中，`TaskStatus::Waiting` 只剩 wait-core 投影和 procfs/stat 观察。重新搜索 `task_enqueue()` / `local_enqueue()` / `remote_enqueue()` / `wake_enqueue()`，wait completion tail 仍只通过 wait core 调用 `wake_enqueue()`；裸 enqueue 命中为 IPI strict wake payload、新任务发布和调度器内部定义。
+
+**Validation:** 运行 `just build` 通过。当前仍只有仓库里既有的 `anemone-kernel/src/sync/mono.rs` unused import warning。
+
+**Next:** 阶段 5 继续后续旁路审计，重点检查剩余 `notify()` active-wake 语义、`WakeUpTask` IPI strict placement 分类、`TaskStatus` 观察投影边界、异常状态 `assert!` 覆盖面和 debug/trace 字段完整性。阶段 5 仍未整体收口。
+
 ## Open Items
 
-- 阶段 5：继续多轮旁路审计，确认旧 API 收缩、保留入口分类和 `assert!` 覆盖。
+- 阶段 5：继续 audit 2 修复后的旁路审计，确认保留入口分类、`assert!` 覆盖和 debug/trace 字段完整性。
 - 阶段 6：运行已知触发 profile，并保存带 debug/trace 的验证摘要。
 
 ## Closure
