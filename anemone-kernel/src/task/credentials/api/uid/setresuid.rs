@@ -1,9 +1,6 @@
 //! setresuid system call.
 
-use crate::{
-    prelude::*,
-    task::credentials::{Uid, UserId},
-};
+use crate::{prelude::*, task::credentials::Uid};
 
 use super::{super::id::UserTarget, update_caps_by_fsuid, update_caps_by_uid};
 

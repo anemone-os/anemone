@@ -1,5 +1,5 @@
 # Memory-management LTP cases.
-# Format: one case per line, optional arguments after the case name.
+# Format: "case", "case: args...", or "case executable[: args...]".
 
 brk01
 brk02

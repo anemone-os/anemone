@@ -1,5 +1,5 @@
 # Filesystem, fd, and basic file IO LTP cases.
-# Format: one case per line, optional arguments after the case name.
+# Format: "case", "case: args...", or "case executable[: args...]".
 
 dup01
 dup02

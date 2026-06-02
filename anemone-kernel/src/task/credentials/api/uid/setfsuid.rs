@@ -1,9 +1,6 @@
 //! setfsuid system call.
 
-use crate::{
-    prelude::*,
-    task::credentials::{Uid, UserId},
-};
+use crate::{prelude::*, task::credentials::Uid};
 
 use super::{super::id::UserTarget, update_caps_by_fsuid};
 
@@ -25,7 +22,10 @@ fn sys_setfsuid(uid: UserTarget<Uid>) -> Result<u64, SysError> {
     let task = get_current_task();
     let old_fsuid = task.cred().uid.fs.get() as u64;
     let Some(uid) = uid.specified() else {
-        knoticeln!("setfsuid denied: invalid uid target, old fsuid={}", old_fsuid);
+        knoticeln!(
+            "setfsuid denied: invalid uid target, old fsuid={}",
+            old_fsuid
+        );
         return Ok(old_fsuid);
     };
     let _ = task.update_cred_with(|old| {

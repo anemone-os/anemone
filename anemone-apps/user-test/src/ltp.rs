@@ -355,7 +355,7 @@ fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpC
             }
 
             let mut argv = Vec::with_capacity(case.args.len() + 1);
-            argv.push(case_path);
+            argv.push(case.executable);
             argv.extend(case.args.iter().copied());
 
             if let Err(errno) = execve(case_path, argv.as_slice(), root.envp) {
@@ -394,30 +394,29 @@ fn parse_case_line(line: &str) -> Option<LtpCaseSpec<'_>> {
         return None;
     }
 
-    let mut fields = line.split("=>");
-    let raw_name = fields.next()?.trim();
-    let mut name_parts = raw_name.split_ascii_whitespace();
-    let name = name_parts.next()?;
-    if name.is_empty() {
-        panic!("user-test: invalid LTP case line {line}");
+    if line.contains("=>") {
+        panic!(
+            "user-test: invalid LTP case line {line}: use 'case [executable][: args...]'"
+        );
     }
 
-    let command = fields.next();
-    if fields.next().is_some() {
-        panic!("user-test: invalid LTP case line {line}");
-    }
+    let (header, args) = match line.split_once(':') {
+        Some((header, args)) => {
+            let args = args.split_ascii_whitespace().collect::<Vec<_>>();
+            if args.is_empty() {
+                panic!("user-test: invalid LTP case line {line}: missing arguments");
+            }
+            (header, args)
+        },
+        None => (line, Vec::new()),
+    };
 
-    if command.is_some() && name_parts.next().is_some() {
-        panic!("user-test: invalid LTP case alias {line}");
+    let mut header_parts = header.split_ascii_whitespace();
+    let name = header_parts.next()?;
+    let executable = header_parts.next().unwrap_or(name);
+    if header_parts.next().is_some() {
+        panic!("user-test: invalid LTP case line {line}: invalid case header");
     }
-
-    let command = command.map(str::trim);
-    if matches!(command, Some("")) {
-        panic!("user-test: invalid LTP case alias {line}");
-    }
-    let mut parts = command.unwrap_or(line).split_ascii_whitespace();
-    let executable = parts.next().unwrap_or(name);
-    let args = parts.collect();
     Some(LtpCaseSpec {
         name,
         executable,

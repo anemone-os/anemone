@@ -1,6 +1,6 @@
 //! getgid system call.
 
-use crate::{prelude::*, task::credentials::UserId};
+use crate::prelude::*;
 
 /// Returns the current task's real group ID.
 ///

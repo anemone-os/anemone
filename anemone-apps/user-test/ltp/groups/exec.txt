@@ -1,5 +1,5 @@
 # Exec-family LTP cases.
-# Format: one case per line, optional arguments after the case name.
+# Format: "case", "case: args...", or "case executable[: args...]".
 
 execl01
 execle01

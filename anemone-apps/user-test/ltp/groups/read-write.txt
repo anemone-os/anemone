@@ -38,7 +38,7 @@ read01
 read02
 read03
 read04
-read_all -d /proc -q -r 3
+read_all: -d /proc -q -r 3
 readahead01
 readdir01
 readdir21
