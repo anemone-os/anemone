@@ -3,7 +3,7 @@
 **Status:** Active
 **Owners:** doruche, Codex
 **Area:** credentials / task / VFS / exec / syscall ABI / user-test
-**Current Phase:** rv64 build gate passed; la64 pending
+**Current Phase:** build gate passed; reviewer pending
 
 ## Handoff
 
@@ -11,7 +11,7 @@
 
 **Current Branch:** `dev/drc/merge-cred`
 
-**Current HEAD:** `030280a65108b1e3944b5e8f8fdb1588ac25c846`
+**Current HEAD Before This Handoff:** `60b87e529e944b8ad47889fec0ad4834b76f29bd` (`[ckpt] cred merge rv64 handoff`)
 
 **Origin Main:** `892f89d3415a30aa7284f83d8ca619c540b6d14d`
 
@@ -23,13 +23,15 @@
 
 **Latest Build-Fix Checkpoint:** `030280a65108b1e3944b5e8f8fdb1588ac25c846` (`[ckpt] cred merge rv64 build fix`)
 
+**Latest Handoff Checkpoint:** `60b87e529e944b8ad47889fec0ad4834b76f29bd` (`[ckpt] cred merge rv64 handoff`)
+
 **Conflicts Remaining:** 0。
 
-**Completed:** 迁移编排计划已写入 `etc/cred-merge/agent-plan.md`；事务日志已建立；merge-state 已建立；实际冲突地图已刷新；Worker A 已审查 credentials core / syscall ABI 自动合入结果，并在 `anemone-kernel/src/task/credentials/id.rs` 恢复 `Uid::get()` / `Gid::get()` inherent accessor；Worker B 已审查并修复 Task lifecycle / accessor 基座，手工改动限制在 `anemone-kernel/src/task/mod.rs` 与 `anemone-kernel/src/task/api/clone/mod.rs`；Worker C 已解析并暂存 VFS/open/fd 冲突；Worker D 已解析并暂存 exec credential / PathRef 冲突；Worker E 已解析并暂存 user-test fixtures/groups/profile/registry 冲突。
+**Completed:** 迁移编排计划已写入 `etc/cred-merge/agent-plan.md`；事务日志已建立；merge-state 已建立；实际冲突地图已刷新；Worker A 已审查 credentials core / syscall ABI 自动合入结果，并在 `anemone-kernel/src/task/credentials/id.rs` 恢复 `Uid::get()` / `Gid::get()` inherent accessor；Worker B 已审查并修复 Task lifecycle / accessor 基座，手工改动限制在 `anemone-kernel/src/task/mod.rs` 与 `anemone-kernel/src/task/api/clone/mod.rs`；Worker C 已解析并暂存 VFS/open/fd 冲突；Worker D 已解析并暂存 exec credential / PathRef 冲突；Worker E 已解析并暂存 user-test fixtures/groups/profile/registry 冲突；rv64 user-test app build 已通过；rv64 `just build` 在 `pipe.rs` typed `Uid` 窄修后已通过；用户确认 la64 构建已通过。
 
-**Open Blockers:** 无文本冲突 blocker。`anemone-kernel/src/syscall/user_access.rs` 被 git 自动合入但不在当前 worker write set 中；目前只读审查看到它提供 `c_readonly_path()` 与 `ListTooLong -> NameTooLong` 路径校验支撑，未再手工修改。rv64 `just build` 已通过；la64 `just build` 和只读 reviewer 尚未运行。
+**Open Blockers:** 无文本冲突 blocker。`anemone-kernel/src/syscall/user_access.rs` 被 git 自动合入但不在当前 worker write set 中；目前只读审查看到它提供 `c_readonly_path()` 与 `ListTooLong -> NameTooLong` 路径校验支撑，未再手工修改。只读 reviewer 尚未运行；LTP 尚未运行且仍由用户手动执行。
 
-**Next Action:** 切到 la64 运行 `just build`，随后启动/执行只读 reviewer 审查 P0/P1 语义闭合。LTP 仍由用户手动执行。
+**Next Action:** 启动/执行只读 reviewer 审查 P0/P1 语义闭合；如 reviewer 发现 P0/P1 问题，按计划窄修、checkpoint commit 并追加新的 handoff。LTP 仍由用户手动执行。
 
 **Do Not Redo:** 不要重新审查已闭合的计划原则，除非 `origin/main` 或 merge-base 改变；不要恢复远端旧 `process-exec` group；不要重拆、合并或改名本地已有 LTP group；不要运行 LTP；不要 push、force-push、`git reset --hard`、`git clean` 或丢弃未归属改动。
 
@@ -159,3 +161,17 @@
 **Validation:** `just xtask app build user-test --arch riscv64` 已通过。rv64 `just build` 首次失败后已修复代码，rerun 通过；仅余既有 unused-import warnings。
 
 **Next:** 提交本 build-gate 修复 checkpoint，然后切到 la64 运行 `just build`。
+
+### 2026-06-02 - Build gate handoff
+
+**Phase:** validation / build-gate-handoff
+
+**Change:** rv64 build gate 后已创建代码 checkpoint `030280a65108b1e3944b5e8f8fdb1588ac25c846` 和 handoff checkpoint `60b87e529e944b8ad47889fec0ad4834b76f29bd`。用户随后明确要求 agent 不再构建 la64，并报告 la64 构建已经通过；总控据此停止 la64 gate 重跑，只记录用户提供的 validation 结论。
+
+**Boundary:** 本阶段只更新事务 handoff，不改内核、ABI、user-test 或脚本代码；不运行 LTP。agent 侧此前遇到的 la64 `just build` 问题是本地 `build/rootfs/minimal-la/rootfs.img` 缺失导致的前置 rootfs/image blocker，不是 la64 kernel compile failure；用户已在其环境完成 la64 构建并确认通过。
+
+**Validation:** `just xtask app build user-test --arch riscv64` 已通过；rv64 `just build` 已在 `pipe.rs` typed `Uid` 窄修后通过；la64 `just build` 由用户确认通过。LTP 未运行。
+
+**Checkpoint:** 最新代码 checkpoint 为 `030280a65108b1e3944b5e8f8fdb1588ac25c846`；本条 handoff 前的 HEAD 为 `60b87e529e944b8ad47889fec0ad4834b76f29bd`。本条记录将作为 `[ckpt] cred merge build handoff` 提交承载，避免在文件中写入不可自洽的自引用 commit hash。
+
+**Next:** 启动/执行只读 reviewer，按 `etc/cred-merge/agent-plan.md` 阶段 4 检查 P0/P1 语义闭合：Task credential 与 sched lock 分离、VFS `FsPermChecker`、`access/faccessat` id 语义、namei search checks、setid drop 路径、exec credential commit point、`PathRef`/typed open/fd model 保留、双架构 syscall 表和 user-test group 注册。
