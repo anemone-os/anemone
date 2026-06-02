@@ -56,13 +56,13 @@ impl Event {
         };
 
         let non_exclusive_len = self.inner.lock().non_exclusive.len();
-        kdebugln!(
-            "event: publish begin event={:#x} non_exclusive={} exclusive_quota={} mode={:?}",
-            self.debug_id(),
-            non_exclusive_len,
-            n_exclusive,
-            mode,
-        );
+        // kdebugln!(
+        //     "event: publish begin event={:#x} non_exclusive={} exclusive_quota={}
+        // mode={:?}",     self.debug_id(),
+        //     non_exclusive_len,
+        //     n_exclusive,
+        //     mode,
+        // );
 
         for _ in 0..non_exclusive_len {
             let Some(listener) = self.pop_listener(ListenerQueueKind::NonExclusive) else {
@@ -92,12 +92,12 @@ impl Event {
             }
         }
 
-        kdebugln!(
-            "event: publish end event={:#x} exclusive_scanned={} exclusive_success={}",
-            self.debug_id(),
-            exclusive_scanned,
-            exclusive_success,
-        );
+        // kdebugln!(
+        //     "event: publish end event={:#x} exclusive_scanned={}
+        // exclusive_success={}",     self.debug_id(),
+        //     exclusive_scanned,
+        //     exclusive_success,
+        // );
     }
 
     /// Blocking listen. Interruptible by signals.

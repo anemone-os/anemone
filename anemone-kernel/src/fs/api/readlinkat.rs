@@ -58,7 +58,7 @@ fn sys_readlinkat(
     let content = content.as_bytes();
     let to_write = content.len().min(bufsize);
     // silently truncate. this is what Linux does.
-    buf.write_bytes_with_null_terminator(&content[..to_write]);
+    buf.copy_from_slice(&content[..to_write]);
 
     Ok(to_write as u64)
 }
