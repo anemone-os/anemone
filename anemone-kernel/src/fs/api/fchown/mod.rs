@@ -25,12 +25,30 @@ pub fn kernel_fchown(
     group: Option<Gid>,
     ctime: Duration,
 ) -> Result<(), SysError> {
-    if owner.is_none() && group.is_none() {
-        return Ok(());
-    }
+    let checker = FsPermChecker::for_current_fs();
+    let inode = pathref.inode();
 
     pathref.mount().ensure_writable()?;
 
-    pathref.inode().inode().chown(owner, group, ctime);
+    if let Some(owner) = owner {
+        if !(checker.is_owner(inode) && owner == inode.uid())
+            && !checker.has_cap(Capability::CHOWN)
+        {
+            return Err(SysError::PermissionDenied);
+        }
+    }
+
+    if let Some(group) = group {
+        if !(checker.is_owner(inode)
+            && (group == inode.gid() || checker.fs_group_allowed(group)))
+            && !checker.has_cap(Capability::CHOWN)
+        {
+            return Err(SysError::PermissionDenied);
+        }
+    }
+
+    let cred = get_current_task().cred();
+    inode.chown(owner, group, ctime);
+    inode.after_modified(&cred, ModifType::Own, ctime);
     Ok(())
 }

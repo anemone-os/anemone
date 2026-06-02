@@ -58,6 +58,14 @@ struct LtpGroup {
 
 const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
+        name: "chmod",
+        cases: include_str!("../ltp/groups/chmod.txt"),
+    },
+    LtpGroup {
+        name: "chown",
+        cases: include_str!("../ltp/groups/chown.txt"),
+    },
+    LtpGroup {
         name: "fd",
         cases: include_str!("../ltp/groups/fd.txt"),
     },
@@ -80,6 +88,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
         name: "read-write",
         cases: include_str!("../ltp/groups/read-write.txt"),
+    },
+    LtpGroup {
+        name: "credentials",
+        cases: include_str!("../ltp/groups/credentials.txt"),
     },
 ];
 
@@ -379,7 +391,7 @@ fn install_ltp_fixture(fixture: &LtpFixture) {
     let parent = fixture.path.rsplit_once('/').map(|(parent, _)| parent);
     let parent = parent.filter(|parent| !parent.is_empty()).unwrap_or("/");
     let script = format!(
-        "if [ ! -e {path} ]; then mkdir -p {parent} && cat > {path} <<'EOF'\n{content}EOF\nfi",
+        "mkdir -p {parent} && cat > {path} <<'EOF'\n{content}\nEOF",
         path = fixture.path,
         parent = parent,
         content = fixture.content,

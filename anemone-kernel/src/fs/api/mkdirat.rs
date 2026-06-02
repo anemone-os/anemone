@@ -5,13 +5,13 @@
 
 use crate::{
     fs::api::args::{AtFd, LinuxInodePerm},
-    prelude::{user_access::c_readonly_string, *},
+    prelude::{user_access::c_readonly_path, *},
 };
 
 #[syscall(SYS_MKDIRAT)]
 fn sys_mkdirat(
     dirfd: AtFd,
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
+    #[validate_with(c_readonly_path)] pathname: Box<str>,
     mode: LinuxInodePerm,
 ) -> Result<u64, SysError> {
     let path = Path::new(pathname.as_ref());
@@ -45,6 +45,9 @@ fn sys_mkdirat(
         },
         Err(err) => return Err(err),
     };
+
+    parent.mount().ensure_writable()?;
+    FsPermChecker::for_current_fs().check_path(&parent, FsAccess::WRITE | FsAccess::EXECUTE)?;
 
     vfs_mkdir_at(&parent, Path::new(name.as_str()), perm)?;
 

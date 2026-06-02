@@ -110,6 +110,8 @@ pub mod linux {
     pub const SYS_FSYNC: u64 = 82;
 
     pub const SYS_UTIMENSAT: u64 = 88;
+    pub const SYS_CAPGET: u64 = 90;
+    pub const SYS_CAPSET: u64 = 91;
 
     pub const SYS_EXIT: u64 = 93;
     pub const SYS_EXIT_GROUP: u64 = 94;
@@ -140,8 +142,19 @@ pub mod linux {
     pub const SYS_RT_SIGQUEUEINFO: u64 = 138;
     pub const SYS_RT_SIGRETURN: u64 = 139;
 
+    pub const SYS_SETPRIORITY: u64 = 140;
+    pub const SYS_GETPRIORITY: u64 = 141;
+
+    pub const SYS_SETREGID: u64 = 143;
     pub const SYS_SETGID: u64 = 144;
+    pub const SYS_SETREUID: u64 = 145;
     pub const SYS_SETUID: u64 = 146;
+    pub const SYS_SETRESUID: u64 = 147;
+    pub const SYS_GETRESUID: u64 = 148;
+    pub const SYS_SETRESGID: u64 = 149;
+    pub const SYS_GETRESGID: u64 = 150;
+    pub const SYS_SETFSUID: u64 = 151;
+    pub const SYS_SETFSGID: u64 = 152;
 
     pub const SYS_TIMES: u64 = 153;
 
@@ -149,6 +162,8 @@ pub mod linux {
     pub const SYS_GETPGID: u64 = 155;
     pub const SYS_GETSID: u64 = 156;
     pub const SYS_SETSID: u64 = 157;
+    pub const SYS_GETGROUPS: u64 = 158;
+    pub const SYS_SETGROUPS: u64 = 159;
 
     pub const SYS_UNAME: u64 = 160;
 
@@ -156,6 +171,7 @@ pub mod linux {
     pub const SYS_GETRUSAGE: u64 = 165;
 
     pub const SYS_UMASK: u64 = 166;
+    pub const SYS_PRCTL: u64 = 167;
 
     pub const SYS_GETTIMEOFDAY: u64 = 169;
 

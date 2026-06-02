@@ -294,6 +294,11 @@ pub fn kernel_clone(
         new_task.set_files_state(current_task.files_state().read().fork());
     }
 
+    new_task.replace_cred(current_task.cred());
+    if current_task.no_new_privs() {
+        new_task.set_no_new_privs();
+    }
+
     // mask is always inherited.
     {
         let (parent_mask, mut child_mask) = {

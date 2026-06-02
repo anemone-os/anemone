@@ -1,6 +1,6 @@
 use crate::{
     prelude::*,
-    task::execve::binfmt::{BinaryFmt, ExecCtx, ExecResult},
+    task::execve::binfmt::{BinaryFmt, ExecCtx, ExecResult, check_exec_permission},
 };
 
 /// The same as Linux's BINPRM_BUF_SIZE.
@@ -39,8 +39,9 @@ fn load_binary(ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
                 e
             );
             e
-        })?
-        .to_string();
+        })?;
+    check_exec_permission(&interp)?;
+    let interp = interp.to_string();
     ctx.path = interp;
     let mut new_argv = vec![interp_argv0];
     if let Some(arg) = interp_arg {
@@ -69,7 +70,20 @@ impl ShebangArgs {
             return None;
         }
 
-        let end = buf.iter().position(|&b| b == b'\n').unwrap_or(buf.len());
+        let end = match buf.iter().position(|&b| b == b'\n') {
+            Some(end) => end,
+            None => {
+                let content = &buf[SHEBANG_MAGIC.len()..];
+                let start = content.iter().position(|&b| b != b' ' && b != b'\t')?;
+                let interp = &content[start..];
+                if buf.len() == SHEBANG_MAX_LEN
+                    && !interp.iter().any(|&b| b == b' ' || b == b'\t' || b == 0)
+                {
+                    return None;
+                }
+                buf.iter().position(|&b| b == 0).unwrap_or(buf.len())
+            },
+        };
         let mut line = &buf[SHEBANG_MAGIC.len()..end];
 
         // shebang's format is unexpectedly a bit tedious to parse...

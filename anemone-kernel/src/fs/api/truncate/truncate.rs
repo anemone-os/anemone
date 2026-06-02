@@ -1,8 +1,8 @@
-use crate::prelude::{user_access::c_readonly_string, *};
+use crate::prelude::{user_access::c_readonly_path, *};
 
 #[syscall(SYS_TRUNCATE)]
 fn sys_truncate(
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
+    #[validate_with(c_readonly_path)] pathname: Box<str>,
     length: i64,
 ) -> Result<u64, SysError> {
     if length < 0 {
@@ -13,10 +13,16 @@ fn sys_truncate(
     let path = Path::new(pathname.as_ref());
     let pathref = task.lookup_path(path, ResolveFlags::empty())?;
 
-    if pathref.inode().ty() == InodeType::Regular {
-        pathref.mount().ensure_writable()?;
+    match pathref.inode().ty() {
+        InodeType::Dir => return Err(SysError::IsDir),
+        InodeType::Regular => (),
+        _ => return Err(SysError::InvalidArgument),
     }
 
-    pathref.inode().truncate(length as u64)?;
+    pathref.mount().ensure_writable()?;
+    FsPermChecker::for_current_fs().check_path(&pathref, FsAccess::WRITE)?;
+
+    let cred = task.cred();
+    pathref.inode().truncate(length as u64, &cred)?;
     Ok(0)
 }

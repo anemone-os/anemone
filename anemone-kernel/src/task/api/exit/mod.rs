@@ -88,13 +88,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         let old_uspace = task.try_clone_uspace_handle();
         if let Some(old_uspace) = &old_uspace {
             if task.is_last_user_of_uspace(old_uspace) {
-                if let Err(e) = old_uspace.detach_all_sysv_shm_for(task.tgid()) {
-                    knoticeln!(
-                        "failed to detach SysV shm for exiting task {}: {:?}",
-                        task.tid(),
-                        e,
-                    );
-                }
+                old_uspace.detach_all_sysv_shm_for(task.tgid());
             }
         }
 
@@ -139,12 +133,16 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             let cpu_usage = tg.cpu_usage_snapshot();
 
             if let Some(terminate_signal) = tg.terminate_signal() {
+                let uid = tg
+                    .leader()
+                    .map(|leader| leader.cred().uid.real)
+                    .unwrap_or_else(|| task.cred().uid.real);
                 tg.get_parent().recv_signal(Signal::new(
                     terminate_signal,
                     SiCode::Kernel,
                     SigInfoFields::Chld(SigChld {
                         pid: tg.tgid(),
-                        uid: 0, // only root user.
+                        uid,
                         // TODO: this is false. we should look at si_code first.
                         status: match xcode {
                             ExitCode::Exited(xcode) => xcode as i32,
@@ -232,7 +230,7 @@ pub fn kernel_exit_group(code: ExitCode) -> ! {
                     SiCode::Kernel,
                     SigInfoFields::Kill(SigKill {
                         pid: task.tgid(),
-                        uid: 0, // only root user.
+                        uid: task.cred().uid.real,
                     }),
                 ))
             }

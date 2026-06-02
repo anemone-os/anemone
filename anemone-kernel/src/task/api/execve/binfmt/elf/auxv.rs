@@ -1,4 +1,7 @@
-use crate::prelude::*;
+use crate::{
+    prelude::*,
+    task::credentials::{CredentialSet, Gid, Uid, UserId},
+};
 
 use anemone_abi::process::linux::aux_vec::*;
 
@@ -17,14 +20,14 @@ pub enum AuxEntry {
     Flags(NotSupported) = AT_FLAGS,
     Entry(VirtAddr) = AT_ENTRY,
     NotElf = AT_NOTELF,
-    Uid(Todo) = AT_UID,
-    Euid(Todo) = AT_EUID,
-    Gid(Todo) = AT_GID,
-    Egid(Todo) = AT_EGID,
+    RealUid(Uid) = AT_UID,
+    EffectiveUid(Uid) = AT_EUID,
+    RealGid(Gid) = AT_GID,
+    EffectiveGid(Gid) = AT_EGID,
     Platform(VirtAddr) = AT_PLATFORM,
     HwCap(NotSupported) = AT_HWCAP,
     ClkTck = AT_CLKTCK,
-    Secure(NotSupported) = AT_SECURE,
+    Secure(bool) = AT_SECURE,
     BasePlatform(VirtAddr) = AT_BASE_PLATFORM,
     Random(VirtAddr) = AT_RANDOM,
     HwCap2(NotSupported) = AT_HWCAP2,
@@ -48,11 +51,9 @@ impl AuxEntry {
         let val = match self {
             Self::Null | Self::Ignore | Self::NotElf => 0,
             Self::ClkTck => SYSTEM_HZ as u64,
-            Self::Uid(Todo)
-            | Self::Euid(Todo)
-            | Self::Gid(Todo)
-            | Self::Egid(Todo)
-            | Self::MinSigStkSz(Todo) => 0, // TODO
+            Self::RealUid(uid) | Self::EffectiveUid(uid) => uid.get() as u64,
+            Self::RealGid(gid) | Self::EffectiveGid(gid) => gid.get() as u64,
+            Self::MinSigStkSz(Todo) => 0, // TODO
             Self::ExecFd(Todo) => unimplemented!(),
             Self::Phdr(addr)
             | Self::Entry(addr)
@@ -62,8 +63,8 @@ impl AuxEntry {
             | Self::Platform(addr)
             | Self::BasePlatform(addr) => addr.get(),
             Self::PhEnt(size) | Self::PhNum(size) | Self::PageSz(size) => *size as u64,
+            Self::Secure(secure_exec) => *secure_exec as u64,
             Self::HwCap(NotSupported)
-            | Self::Secure(NotSupported)
             | Self::HwCap2(NotSupported)
             | Self::RseqFeatureSize(NotSupported)
             | Self::RseqAlign(NotSupported)
@@ -111,17 +112,17 @@ impl AuxV {
     ///   virtualization, so this entry is always the same as [AT_PLATFORM].
     /// - [AT_BASE] describing the load bias of the ELF interpreter, if one is
     ///   present.
-    pub fn new_partial() -> Self {
+    pub fn new_partial(cred: &CredentialSet, secure_exec: bool) -> Self {
         let entries = vec![
             AuxEntry::Null,
             AuxEntry::ClkTck,
-            AuxEntry::Uid(Todo),
-            AuxEntry::Euid(Todo),
-            AuxEntry::Gid(Todo),
-            AuxEntry::Egid(Todo),
             AuxEntry::PageSz(PagingArch::PAGE_SIZE_BYTES),
             AuxEntry::Flags(NotSupported),
-            AuxEntry::Secure(NotSupported),
+            AuxEntry::Secure(secure_exec),
+            AuxEntry::EffectiveGid(cred.gid.effective),
+            AuxEntry::RealGid(cred.gid.real),
+            AuxEntry::EffectiveUid(cred.uid.effective),
+            AuxEntry::RealUid(cred.uid.real),
             AuxEntry::HwCap(NotSupported),
             AuxEntry::HwCap2(NotSupported),
             AuxEntry::RseqFeatureSize(NotSupported),
@@ -169,7 +170,5 @@ mod helpers {
             *byte = 39;
         }
     }
-
-    // TODO: current_task_cred ...
 }
 pub use helpers::*;

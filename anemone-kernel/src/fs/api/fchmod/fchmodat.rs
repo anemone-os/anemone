@@ -3,13 +3,13 @@ use crate::{
         args::{AtFd, LinuxInodePerm},
         fchmod::kernel_fchmod,
     },
-    prelude::{user_access::c_readonly_string, *},
+    prelude::{user_access::c_readonly_path, *},
 };
 
 #[syscall(SYS_FCHMODAT)]
 fn sys_fchmodat(
     dirfd: AtFd,
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
+    #[validate_with(c_readonly_path)] pathname: Box<str>,
     linux_perm: LinuxInodePerm,
 ) -> Result<u64, SysError> {
     knoticeln!(
@@ -20,6 +20,9 @@ fn sys_fchmodat(
     );
 
     let path = Path::new(pathname.as_ref());
+    if pathname.is_empty() {
+        return Err(SysError::NotFound);
+    }
 
     let task = get_current_task();
     let pathref = if path.is_absolute() {
