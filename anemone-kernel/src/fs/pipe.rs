@@ -259,7 +259,7 @@ fn send_sigpipe() {
         SiCode::Kernel,
         SigInfoFields::Kill(SigKill {
             pid: task.tgid(),
-            uid: 0,
+            uid: task.cred().uid.real,
         }),
     ));
 }

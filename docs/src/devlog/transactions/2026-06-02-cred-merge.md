@@ -3,7 +3,7 @@
 **Status:** Active
 **Owners:** doruche, Codex
 **Area:** credentials / task / VFS / exec / syscall ABI / user-test
-**Current Phase:** merge checkpoint committed; build gate pending
+**Current Phase:** rv64 build gate passed; la64 pending
 
 ## Handoff
 
@@ -25,9 +25,9 @@
 
 **Completed:** 迁移编排计划已写入 `etc/cred-merge/agent-plan.md`；事务日志已建立；merge-state 已建立；实际冲突地图已刷新；Worker A 已审查 credentials core / syscall ABI 自动合入结果，并在 `anemone-kernel/src/task/credentials/id.rs` 恢复 `Uid::get()` / `Gid::get()` inherent accessor；Worker B 已审查并修复 Task lifecycle / accessor 基座，手工改动限制在 `anemone-kernel/src/task/mod.rs` 与 `anemone-kernel/src/task/api/clone/mod.rs`；Worker C 已解析并暂存 VFS/open/fd 冲突；Worker D 已解析并暂存 exec credential / PathRef 冲突；Worker E 已解析并暂存 user-test fixtures/groups/profile/registry 冲突。
 
-**Open Blockers:** 无文本冲突 blocker。`anemone-kernel/src/syscall/user_access.rs` 被 git 自动合入但不在当前 worker write set 中；目前只读审查看到它提供 `c_readonly_path()` 与 `ListTooLong -> NameTooLong` 路径校验支撑，未再手工修改。构建 gate 和只读 reviewer 尚未运行。
+**Open Blockers:** 无文本冲突 blocker。`anemone-kernel/src/syscall/user_access.rs` 被 git 自动合入但不在当前 worker write set 中；目前只读审查看到它提供 `c_readonly_path()` 与 `ListTooLong -> NameTooLong` 路径校验支撑，未再手工修改。rv64 `just build` 已通过；la64 `just build` 和只读 reviewer 尚未运行。
 
-**Next Action:** 运行构建 gate；随后启动/执行只读 reviewer 审查 P0/P1 语义闭合。LTP 仍由用户手动执行。
+**Next Action:** 提交 rv64 build-gate 修复 checkpoint，切到 la64 运行 `just build`，随后启动/执行只读 reviewer 审查 P0/P1 语义闭合。LTP 仍由用户手动执行。
 
 **Do Not Redo:** 不要重新审查已闭合的计划原则，除非 `origin/main` 或 merge-base 改变；不要恢复远端旧 `process-exec` group；不要重拆、合并或改名本地已有 LTP group；不要运行 LTP；不要 push、force-push、`git reset --hard`、`git clean` 或丢弃未归属改动。
 
@@ -145,3 +145,15 @@
 **Validation:** merge 提交前确认无 unmerged paths，`git diff --check` 通过，关键冲突标记扫描无输出。构建 gate 尚未运行。
 
 **Next:** 运行构建 gate，并在 gate 结果后刷新本 handoff。
+
+### 2026-06-02 - Build gate rv64 first failure
+
+**Phase:** validation / build-gate
+
+**Change:** rv64 `just build` 首次执行失败，编译错误为 `anemone-kernel/src/fs/pipe.rs` 中 `SigKill.uid` 仍写 raw `0`，而 credentials merge 后 `SigKill.uid` 是 typed `Uid`。总控做窄修：`send_sigpipe()` 的 `si_uid` 改为 `get_current_task().cred().uid.real`，与 `kill` / `tkill` / `tgkill` 等信号路径的 sender credential 来源一致。
+
+**Boundary:** 这是构建 gate 暴露的 post-merge typed credential 修复，不改变 pipe I/O 语义，不运行 LTP。
+
+**Validation:** `just xtask app build user-test --arch riscv64` 已通过。rv64 `just build` 首次失败后已修复代码，rerun 通过；仅余既有 unused-import warnings。
+
+**Next:** 提交本 build-gate 修复 checkpoint，然后切到 la64 运行 `just build`。
