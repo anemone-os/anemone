@@ -4,14 +4,14 @@ use crate::{
             args::{AccessFlag, AccessMode},
             kernel_faccess,
         },
-        args::AtFd,
+        args::RawAtFd,
     },
     prelude::{user_access::c_readonly_path, *},
 };
 
 #[syscall(SYS_FACCESSAT)]
 fn sys_faccessat(
-    dirfd: AtFd,
+    dirfd: RawAtFd,
     #[validate_with(c_readonly_path)] pathname: Box<str>,
     mode: AccessMode,
 ) -> Result<u64, SysError> {

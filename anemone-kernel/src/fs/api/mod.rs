@@ -65,6 +65,24 @@ mod args {
         Fd(Fd),
     }
 
+    #[derive(Debug, Clone, Copy)]
+    pub struct RawAtFd(u32);
+
+    impl TryFromSyscallArg for RawAtFd {
+        fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+            Ok(Self(raw as u32))
+        }
+    }
+
+    impl RawAtFd {
+        /// Resolve delayed dirfd validation when the pathname semantics require
+        /// the fd to be used. Absolute pathnames ignore dirfd, so callers must
+        /// not resolve this wrapper before checking the pathname.
+        pub fn resolve(self) -> Result<AtFd, SysError> {
+            AtFd::try_from_syscall_arg(self.0 as u64)
+        }
+    }
+
     impl TryFromSyscallArg for AtFd {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
             let raw = i32::try_from_syscall_arg(raw)?;

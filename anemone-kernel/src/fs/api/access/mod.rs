@@ -6,7 +6,7 @@
 pub mod faccessat;
 pub mod faccessat2;
 
-use crate::{fs::api::args::AtFd, prelude::*};
+use crate::{fs::api::args::RawAtFd, prelude::*};
 
 mod args {
     use anemone_abi::fs::linux::{access::*, at::*};
@@ -51,7 +51,7 @@ mod args {
 use args::*;
 
 pub fn kernel_faccess(
-    dirfd: AtFd,
+    dirfd: RawAtFd,
     pathname: &str,
     mode: AccessMode,
     flags: AccessFlag,
@@ -66,7 +66,7 @@ pub fn kernel_faccess(
         if !flags.contains(AccessFlag::EMPTY_PATH) {
             return Err(SysError::NotFound);
         }
-        dirfd.to_pathref(false)?
+        dirfd.resolve()?.to_pathref(false)?
     } else {
         let path = Path::new(pathname);
         let resolve_flags = if flags.contains(AccessFlag::SYMLINK_NOFOLLOW) {
@@ -77,7 +77,7 @@ pub fn kernel_faccess(
         if path.is_absolute() {
             get_current_task().lookup_path_with_checker(&path, resolve_flags, &checker)?
         } else {
-            let dir_path = dirfd.to_pathref(true)?;
+            let dir_path = dirfd.resolve()?.to_pathref(true)?;
             get_current_task().lookup_path_from_with_checker(
                 &dir_path,
                 &path,
