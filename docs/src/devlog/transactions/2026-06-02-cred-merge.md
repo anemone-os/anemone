@@ -3,15 +3,15 @@
 **Status:** Active
 **Owners:** doruche, Codex
 **Area:** credentials / task / VFS / exec / syscall ABI / user-test
-**Current Phase:** build gate passed; reviewer pending
+**Current Phase:** reviewer P0/P1 fixed; LTP pending
 
 ## Handoff
 
-**Last Updated:** 2026-06-02
+**Last Updated:** 2026-06-03
 
 **Current Branch:** `dev/drc/merge-cred`
 
-**Current HEAD Before This Handoff:** `60b87e529e944b8ad47889fec0ad4834b76f29bd` (`[ckpt] cred merge rv64 handoff`)
+**Current HEAD Before This Handoff:** `c50cc208b9fe8216fe281a955d2cba7dfdfe34d5` (`[ckpt] cred merge reviewer fs fix`)
 
 **Origin Main:** `892f89d3415a30aa7284f83d8ca619c540b6d14d`
 
@@ -23,15 +23,17 @@
 
 **Latest Build-Fix Checkpoint:** `030280a65108b1e3944b5e8f8fdb1588ac25c846` (`[ckpt] cred merge rv64 build fix`)
 
-**Latest Handoff Checkpoint:** `60b87e529e944b8ad47889fec0ad4834b76f29bd` (`[ckpt] cred merge rv64 handoff`)
+**Latest Reviewer-Fix Checkpoint:** `c50cc208b9fe8216fe281a955d2cba7dfdfe34d5` (`[ckpt] cred merge reviewer fs fix`)
+
+**Previous Handoff Checkpoint:** `7e9c8ec3992dabea702f000c9e9f4e8454390955` (`[ckpt] cred merge build handoff`)
 
 **Conflicts Remaining:** 0。
 
-**Completed:** 迁移编排计划已写入 `etc/cred-merge/agent-plan.md`；事务日志已建立；merge-state 已建立；实际冲突地图已刷新；Worker A 已审查 credentials core / syscall ABI 自动合入结果，并在 `anemone-kernel/src/task/credentials/id.rs` 恢复 `Uid::get()` / `Gid::get()` inherent accessor；Worker B 已审查并修复 Task lifecycle / accessor 基座，手工改动限制在 `anemone-kernel/src/task/mod.rs` 与 `anemone-kernel/src/task/api/clone/mod.rs`；Worker C 已解析并暂存 VFS/open/fd 冲突；Worker D 已解析并暂存 exec credential / PathRef 冲突；Worker E 已解析并暂存 user-test fixtures/groups/profile/registry 冲突；rv64 user-test app build 已通过；rv64 `just build` 在 `pipe.rs` typed `Uid` 窄修后已通过；用户确认 la64 构建已通过。
+**Completed:** 迁移编排计划已写入 `etc/cred-merge/agent-plan.md`；事务日志已建立；merge-state 已建立；实际冲突地图已刷新；Worker A 已审查 credentials core / syscall ABI 自动合入结果，并在 `anemone-kernel/src/task/credentials/id.rs` 恢复 `Uid::get()` / `Gid::get()` inherent accessor；Worker B 已审查并修复 Task lifecycle / accessor 基座，手工改动限制在 `anemone-kernel/src/task/mod.rs` 与 `anemone-kernel/src/task/api/clone/mod.rs`；Worker C 已解析并暂存 VFS/open/fd 冲突；Worker D 已解析并暂存 exec credential / PathRef 冲突；Worker E 已解析并暂存 user-test fixtures/groups/profile/registry 冲突；rv64 user-test app build 已通过；rv64 `just build` 在 `pipe.rs` typed `Uid` 窄修后已通过；用户确认 la64 构建已通过；阶段 4 只读 reviewer 已运行，Task/exec 与 ABI/user-test 未发现 P0/P1，VFS reviewer 发现的 `O_PATH` fd metadata syscall gate 与 `fchmod` mode/setid-drop 语义问题已窄修并提交 reviewer-fix checkpoint。
 
-**Open Blockers:** 无文本冲突 blocker。`anemone-kernel/src/syscall/user_access.rs` 被 git 自动合入但不在当前 worker write set 中；目前只读审查看到它提供 `c_readonly_path()` 与 `ListTooLong -> NameTooLong` 路径校验支撑，未再手工修改。只读 reviewer 尚未运行；LTP 尚未运行且仍由用户手动执行。
+**Open Blockers:** 无文本冲突 blocker。阶段 4 reviewer 当前无未闭合 P0/P1。`anemone-kernel/src/syscall/user_access.rs` 被 git 自动合入但不在当前 worker write set 中；目前只读审查看到它提供 `c_readonly_path()` 与 `ListTooLong -> NameTooLong` 路径校验支撑，未再手工修改。LTP 尚未运行且仍由用户手动执行。
 
-**Next Action:** 启动/执行只读 reviewer 审查 P0/P1 语义闭合；如 reviewer 发现 P0/P1 问题，按计划窄修、checkpoint commit 并追加新的 handoff。LTP 仍由用户手动执行。
+**Next Action:** 等待用户手动执行 rv64 / la64 LTP 并提供日志；agent 只按本事务的失败归类规则分析日志，若出现无法归入既有限制的权限/uid/gid/exec 回归，再做窄修和新的 checkpoint。LTP 仍由用户手动执行。
 
 **Do Not Redo:** 不要重新审查已闭合的计划原则，除非 `origin/main` 或 merge-base 改变；不要恢复远端旧 `process-exec` group；不要重拆、合并或改名本地已有 LTP group；不要运行 LTP；不要 push、force-push、`git reset --hard`、`git clean` 或丢弃未归属改动。
 
@@ -175,3 +177,17 @@
 **Checkpoint:** 最新代码 checkpoint 为 `030280a65108b1e3944b5e8f8fdb1588ac25c846`；本条 handoff 前的 HEAD 为 `60b87e529e944b8ad47889fec0ad4834b76f29bd`。本条记录将作为 `[ckpt] cred merge build handoff` 提交承载，避免在文件中写入不可自洽的自引用 commit hash。
 
 **Next:** 启动/执行只读 reviewer，按 `etc/cred-merge/agent-plan.md` 阶段 4 检查 P0/P1 语义闭合：Task credential 与 sched lock 分离、VFS `FsPermChecker`、`access/faccessat` id 语义、namei search checks、setid drop 路径、exec credential commit point、`PathRef`/typed open/fd model 保留、双架构 syscall 表和 user-test group 注册。
+
+### 2026-06-03 - Reviewer P0/P1 窄修
+
+**Phase:** review / fs-metadata-fix
+
+**Change:** 阶段 4 只读 reviewer 已执行。Task/exec 范围未发现 P0/P1：`Task` 同时保留 credential state 与 sched wait state，credential accessor 不持有 sched-state lock，clone 在发布前继承 `cred()` / `no_new_privs()` / `nice()`，exec credential 只在 `dispatch_execve()` 成功返回后的提交路径替换，`PathRef` / `execveat` 边界保留。ABI/user-test 范围未发现 P0/P1：riscv64 与 loongarch64 syscall 表等价扩展，`credentials` / `chmod` / `chown` 已在 `LTP_GROUPS` 注册，`profile.txt` 保留 `all`，未恢复远端旧 `process-exec`，alias parser 支持 `case => executable args...`。VFS reviewer 发现两个问题并已窄修：`sys_fchmod()` / `sys_fchown()` 对 `O_PATH` fd 先返回 `EBADF`，避免路径型 fd 绕过本地 fd model；`kernel_fchmod()` 不再把 chmod mode update 当作 content modification 调用 `after_modified(ModifType::Modify)`，保留 Linux `ATTR_MODE` 路径只按 group/cap 规则剥 `ISGID` 的语义。
+
+**Boundary:** 本阶段只修改 `anemone-kernel/src/fs/api/fchmod/fchmod.rs`、`anemone-kernel/src/fs/api/fchown/fchown.rs`、`anemone-kernel/src/fs/api/fchmod/mod.rs`。不重跑 Worker A/B/C/D/E，不运行 LTP，不运行 la64 build；la64 build 仍使用用户已确认通过的结论。`fchownat(..., AT_EMPTY_PATH)` 等 pathref 入口不在 syscall fd 层做 `O_PATH` 拒绝，避免把 `fchmod` / `fchown` 的 fd access model 规则错误下沉到 metadata helper。
+
+**Validation:** `git diff --check` 通过；切到 `qemu-virt-rv64` 后 `just build` 通过，仅余既有 unused-import warnings；验证后已切回 `qemu-virt-la64` 配置。LTP 未运行且仍由用户手动执行。
+
+**Checkpoint:** reviewer fix checkpoint 为 `c50cc208b9fe8216fe281a955d2cba7dfdfe34d5`，提交信息为 `[ckpt] cred merge reviewer fs fix`。本条 handoff 前的 HEAD 为该 reviewer fix checkpoint；本条记录将作为新的 handoff checkpoint 提交承载，避免在文件中写入不可自洽的自引用 commit hash。
+
+**Next:** 等待用户手动执行 rv64 / la64 LTP 并提供日志。优先关注 `open13`、`fchmod*`、`fchown*`、credentials/fs_perms、open/exec/shm 相关窄集合；如日志出现无法按既有限制归类的权限、uid/gid 或 exec 回归，再按本事务规则窄修并创建新的 checkpoint。
