@@ -321,6 +321,12 @@ pub struct InodeStat {
     pub ctime: Duration,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModifType {
+    Modify,
+    Own,
+}
+
 impl InodeStat {
     /// This, in fact, is not the block size of either the block size of
     /// underlying storage or the IO block size of the filesystem. It's the
@@ -612,28 +618,52 @@ impl Inode {
         meta.ctime = ctime;
     }
 
-    /// Remove set-id privileges that must not survive a successful write.
-    pub(super) fn after_write(&self, cred: &CredentialSet, ctime: Duration) {
-        if self.ty != InodeType::Regular {
-            return;
-        }
-
-        let checker = FsPermChecker::new(cred.clone());
-        if checker.has_cap(Capability::FSETID) {
-            return;
-        }
-
-        let mut meta = self.meta.write();
+    fn setid_drop_mask(
+        ty: InodeType,
+        perm: InodePerm,
+        gid: Gid,
+        checker: &FsPermChecker,
+        modif: ModifType,
+    ) -> InodePerm {
         let mut remove = InodePerm::empty();
 
-        if meta.perm.contains(InodePerm::ISUID) {
-            remove.insert(InodePerm::ISUID);
+        if ty != InodeType::Regular {
+            return remove;
         }
-        if meta.perm.contains(InodePerm::ISGID)
-            && (meta.perm.contains(InodePerm::IXGRP) || !checker.fs_group_allowed(meta.gid))
-        {
-            remove.insert(InodePerm::ISGID);
+
+        match modif {
+            ModifType::Modify => {
+                if checker.has_cap(Capability::FSETID) {
+                    return remove;
+                }
+                if perm.contains(InodePerm::ISUID) {
+                    remove.insert(InodePerm::ISUID);
+                }
+            },
+            ModifType::Own => {
+                if perm.contains(InodePerm::ISUID) {
+                    remove.insert(InodePerm::ISUID);
+                }
+            },
         }
+
+        if perm.contains(InodePerm::ISGID) {
+            if perm.contains(InodePerm::IXGRP)
+                || (!checker.fs_group_allowed(gid) && !checker.has_cap(Capability::FSETID))
+            {
+                remove.insert(InodePerm::ISGID);
+            }
+        }
+
+        remove
+    }
+
+    /// Remove set-id privileges that must not survive a successful file
+    /// content or ownership modification.
+    pub(super) fn after_modified(&self, cred: &CredentialSet, modif: ModifType, ctime: Duration) {
+        let checker = FsPermChecker::new(cred.clone());
+        let mut meta = self.meta.write();
+        let remove = Self::setid_drop_mask(self.ty, meta.perm, meta.gid, &checker, modif);
 
         if remove.is_empty() {
             return;
@@ -790,8 +820,8 @@ impl InodeRef {
         meta.ctime = ctime;
     }
 
-    pub fn after_write(&self, cred: &CredentialSet, ctime: Duration) {
-        self.inode().after_write(cred, ctime);
+    pub fn after_modified(&self, cred: &CredentialSet, modif: ModifType, ctime: Duration) {
+        self.inode().after_modified(cred, modif, ctime);
     }
 
     /// Get the superblock that this inode belongs to.
@@ -857,7 +887,7 @@ impl InodeRef {
             InodeType::Dir => Err(SysError::IsDir),
             InodeType::Regular => {
                 (self.inode().ops.truncate)(self, size)?;
-                self.after_write(cred, Instant::now().to_duration());
+                self.after_modified(cred, ModifType::Modify, Instant::now().to_duration());
                 Ok(())
             },
             _ => Err(SysError::NotReg),

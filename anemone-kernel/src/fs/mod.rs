@@ -33,7 +33,7 @@ pub use self::{
     filesystem::{FileSystem, FileSystemFlags, FileSystemOps},
     inode::{
         DeviceId, Ino, InoIsZero, InodeMeta, InodeMode, InodeOps, InodePerm, InodeRef, InodeStat,
-        InodeType, OpenedFile,
+        InodeType, ModifType, OpenedFile,
     },
     iomux::{PollEvent, PollRequest, PollWaiter},
     mount::{Mount, MountFlags, MountSource},

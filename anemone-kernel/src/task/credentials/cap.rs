@@ -53,7 +53,7 @@ bitflags! {
         const SYS_ADMIN = 1u64 << abi::CAP_SYS_ADMIN;
         /// [NYI] Allows reboot and other system boot-control operations.
         const SYS_BOOT = 1u64 << abi::CAP_SYS_BOOT;
-        /// [NYI] Allows privileged scheduler priority and affinity changes.
+        /// Allows privileged scheduler priority changes.
         const SYS_NICE = 1u64 << abi::CAP_SYS_NICE;
         /// Allows overriding and raising resource limits.
         const SYS_RESOURCE = 1u64 << abi::CAP_SYS_RESOURCE;
@@ -104,6 +104,7 @@ bitflags! {
             | Self::IPC_OWNER.bits()
             | Self::SYS_CHROOT.bits()
             | Self::SYS_ADMIN.bits()
+            | Self::SYS_NICE.bits()
             | Self::SYS_RESOURCE.bits();
     }
 }

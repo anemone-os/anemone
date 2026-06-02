@@ -203,7 +203,7 @@ impl File {
         let written = (self.ops.write)(self, &mut *pos, buf)?;
         if written > 0 {
             self.inode()
-                .after_write(&cred, Instant::now().to_duration());
+                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
         }
 
         Ok(written)
@@ -223,7 +223,7 @@ impl File {
         let written = (self.ops.write)(self, &mut dummy_pos, buf)?;
         if written > 0 {
             self.inode()
-                .after_write(&cred, Instant::now().to_duration());
+                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
         }
 
         Ok(written)
@@ -248,7 +248,7 @@ impl File {
                 return Err(SysError::IO);
             }
             self.inode()
-                .after_write(&cred, Instant::now().to_duration());
+                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
             buf = &buf[written..];
         }
 
@@ -271,7 +271,7 @@ impl File {
         let written = (self.ops.write)(self, &mut *pos, buf)?;
         if written > 0 {
             self.inode()
-                .after_write(&cred, Instant::now().to_duration());
+                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
         }
         Ok(written)
     }
@@ -290,7 +290,7 @@ impl File {
         let written = (self.ops.write)(self, &mut append_pos, buf)?;
         if written > 0 {
             self.inode()
-                .after_write(&cred, Instant::now().to_duration());
+                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
         }
         Ok(written)
     }

@@ -20,6 +20,9 @@ fn sys_fchmodat(
     );
 
     let path = Path::new(pathname.as_ref());
+    if pathname.is_empty() {
+        return Err(SysError::NotFound);
+    }
 
     let task = get_current_task();
     let pathref = if path.is_absolute() {

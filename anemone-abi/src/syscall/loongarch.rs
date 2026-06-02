@@ -142,6 +142,9 @@ pub mod linux {
     pub const SYS_RT_SIGQUEUEINFO: u64 = 138;
     pub const SYS_RT_SIGRETURN: u64 = 139;
 
+    pub const SYS_SETPRIORITY: u64 = 140;
+    pub const SYS_GETPRIORITY: u64 = 141;
+
     pub const SYS_SETREGID: u64 = 143;
     pub const SYS_SETGID: u64 = 144;
     pub const SYS_SETREUID: u64 = 145;

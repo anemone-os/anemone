@@ -27,7 +27,6 @@ pub fn kernel_fchown(
 ) -> Result<(), SysError> {
     let checker = FsPermChecker::for_current_fs();
     let inode = pathref.inode();
-    let mut perm = inode.perm();
 
     pathref.mount().ensure_writable()?;
 
@@ -48,21 +47,8 @@ pub fn kernel_fchown(
         }
     }
 
-    let old_perm = perm;
-    if inode.ty() != InodeType::Dir {
-        perm.remove(InodePerm::ISUID);
-        if perm.contains(InodePerm::ISGID)
-            && (perm.contains(InodePerm::IXGRP)
-                || (!checker.fs_group_allowed(inode.gid())
-                    && !checker.has_cap(Capability::FSETID)))
-        {
-            perm.remove(InodePerm::ISGID);
-        }
-    }
-
+    let cred = get_current_task().cred();
     inode.chown(owner, group, ctime);
-    if perm != old_perm {
-        inode.chmod(perm, ctime);
-    }
+    inode.after_modified(&cred, ModifType::Own, ctime);
     Ok(())
 }

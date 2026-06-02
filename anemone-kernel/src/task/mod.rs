@@ -110,6 +110,8 @@ pub struct Task {
     /// Which cpu this task is scheduled to run on.
     cpuid: CpuId,
 
+    /// stub.
+    nice: AtomicIsize,
     /// Scheduling context. Used for context switching.
     sched_ctx: MonoFlow<TaskContext>,
     /// Scheduling entity. Used for scheduling.
@@ -425,6 +427,7 @@ impl Task {
 
                 cpu
             },
+            nice: AtomicIsize::new(0),
             sched_ctx: unsafe {
                 MonoFlow::new(TaskContext::from_kernel_fn(
                     VirtAddr::new(entry as u64),
@@ -474,6 +477,7 @@ impl Task {
                 flags: NoIrqRwLock::new(TaskFlags::IDLE | TaskFlags::KERNEL),
                 usp: RwLock::new(None),
                 cpuid: cur_cpu_id(),
+                nice: AtomicIsize::new(0),
                 sched_ctx: unsafe {
                     MonoFlow::new(TaskContext::from_kernel_fn(
                         VirtAddr::new(entry as u64),
@@ -724,6 +728,14 @@ impl Task {
 
     pub fn set_fpu_used(&self) {
         self.fpu_used.store(true, Ordering::Release);
+    }
+
+    pub fn nice(&self) -> isize {
+        self.nice.load(Ordering::Acquire)
+    }
+
+    pub fn set_nice(&self, nice: isize) {
+        self.nice.store(nice, Ordering::Release);
     }
 
     pub fn cred(&self) -> CredentialSet {
