@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / event / timer / signal / wait core
 **Canonical Plan:** [RFC-20260601-sched-wait-refactor](../../rfcs/sched-wait-refactor/index.md), [Invariants](../../rfcs/sched-wait-refactor/invariants.md), [Implementation Plan](../../rfcs/sched-wait-refactor/implementation.md)
-**Current Phase:** phase 5 audit 2 fixes landed; phase 5 further audits pending
+**Current Phase:** phase 5 complete; phase 6 verification pending
 
 ## Scope
 
@@ -210,9 +210,28 @@
 
 **Next:** 阶段 5 继续后续旁路审计，重点检查剩余 `notify()` active-wake 语义、`WakeUpTask` IPI strict placement 分类、`TaskStatus` 观察投影边界、异常状态 `assert!` 覆盖面和 debug/trace 字段完整性。阶段 5 仍未整体收口。
 
+### 2026-06-02 - 阶段 5 审计 3：保留入口分类与阶段 5 收口
+
+**Phase:** phase 5 audit 3 - retained entry classification and closeout
+
+**Finding:** `notify(task, uninterruptible=true)` 使用 `WakeMode::Force` 允许 SIGKILL / SIGSTOP 等强制通知完成不可中断 wait，但 completion reason 仍写成 `WaitReason::Signal`。这不会绕过 wait core，也不会重开旧 wake-tail race；风险是 `finish_wait()` outcome 把 force wake 伪装成普通 signal，导致 Event、timeout 或 direct wait 的 fail-closed 分类无法从日志和结果中区分强制完成。
+
+**Change:** `notify()` 现在按语义同时选择 reason 和 mode：普通 signal 使用 `WaitReason::Signal` + `WakeMode::InterruptibleOnly`，强制通知使用 `WaitReason::Force` + `WakeMode::Force`。日志字段补充 reason 和 mode，方便把 signal 被 interruptible 阻止、force wake 成功和 stale/no-active-wait 分支区分开。
+
+**Audit:** 重新分类 `notify()` 调用面。当前 signal sender 仍是唯一调用者；普通未屏蔽 signal 通过 `wake_active_wait()` 只完成 interruptible wait，SIGKILL / SIGSTOP 通过 force mode 完成当前 active wait。若 task 没有 active wait，`notify()` 只记录 stale/no-active-wait，不写 `TaskSchedState`，不调用裸 enqueue。
+
+**Audit:** 重新分类 `WakeUpTask` / `WakeUpTaskStaleSafe` IPI 和 enqueue 入口。`WakeUpTask` 只由 `remote_enqueue()` 发出，属于 strict non-wait-tail placement；handler 中的 `local_enqueue()` 保留 runnable 断言。wait completion 远端尾巴只经 `wake_enqueue()` -> `remote_wake_enqueue()` -> `WakeUpTaskStaleSafe`，handler 会重新执行 stale-safe placement 并回传 `WakeEnqueueResult`。
+
+**Audit:** 重新分类 `TaskStatus::Waiting`、旧 completion API 和直接等待路径。`TaskStatus::Waiting` 只剩 `TaskSchedState::as_task_status()` 观察投影和 procfs/stat 状态字符映射；`update_status_with`、`try_to_wake_up`、`schedule_with_timeout(`、`LegacyWaiting` 和 `is_sleeping(` 在内核源码中无命中。Event、`clock_nanosleep()` 和 `rt_sigtimedwait()` 都通过 `ActiveWait` owner-side facade 开始、主动 cancel 和 finish，异常 `WaitOutcome` 分支均 warning + 普通 `assert!`。
+
+**Audit:** 审计 debug/trace 覆盖面后，阶段 5 需要的关键字段已经可从当前记录点恢复：wait core begin/cancel/finish/wake 记录 task、wait identity、reason、mode 和 result；`wake_enqueue()` / IPI placement 记录 task、park 和 placement；Event publish、detach、quota、discard、mode-blocked requeue 记录 event、listener/wait identity、queue 和结果；timeout callback 与 direct wait finish 记录 task、wait identity 或 outcome、剩余时间和 result。默认路径仍使用 debug 级记录，未新增高频 notice 级刷屏。
+
+**Validation:** 运行 `just build` 通过。当前仍只有仓库里既有的 `anemone-kernel/src/sync/mono.rs` unused import warning。
+
+**Decision:** 阶段 5 的旁路审计到此收口。保留入口都有明确分类：`notify()` 是 signal/force active-wake producer，`wake_wait()` 是 token producer，`ActiveWait` 是 waiter-owned lifecycle facade，`task_enqueue()` / `local_enqueue()` / `remote_enqueue()` 是 strict non-wait-tail placement，`TaskStatus` 是观察投影。下一阶段不再继续阶段 5 issue-hunting，转入阶段 6 验证和证据沉淀。
+
 ## Open Items
 
-- 阶段 5：继续 audit 2 修复后的旁路审计，确认保留入口分类、`assert!` 覆盖和 debug/trace 字段完整性。
 - 阶段 6：运行已知触发 profile，并保存带 debug/trace 的验证摘要。
 
 ## Closure

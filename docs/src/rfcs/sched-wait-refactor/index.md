@@ -1,12 +1,12 @@
 # RFC-20260601-sched-wait-refactor
 
-**状态：** 已接受，阶段 5 审计 1 已完成，阶段 5 后续审计继续
+**状态：** 已接受，阶段 5 已完成，阶段 6 验证待开始
 **负责人：** doruche, Codex
 **最后更新：** 2026-06-02
 **领域：** scheduler / event / timer / signal / wait core
 **事务日志：** [2026-06-01 - Sched Wait Refactor](../../devlog/transactions/2026-06-01-sched-wait-refactor.md)
-**开放问题：** 当前没有阻塞阶段 5 后续审计的 P0/P1 协议缺口；剩余工作是继续旁路审计、保留入口分类、`assert!` 覆盖检查、验证证据沉淀和最终限制登记。
-**下一步：** 继续阶段 5 后续审计轮次，确认所有保留旁路都有明确分类和理由；完成多轮审计后再进入阶段 6 验证。
+**开放问题：** 当前没有阻塞阶段 6 验证的 P0/P1 协议缺口；剩余工作是复跑已知触发 profile、保存 debug/trace 证据并登记最终限制。
+**下一步：** 进入阶段 6 验证，保存 late wake、stale placement、mode-blocked requeue 和 timeout/signal 竞争的观测摘要。
 
 ## 摘要
 

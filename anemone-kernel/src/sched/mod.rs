@@ -238,17 +238,19 @@ mod kore {
 
     /// Signal or force-complete the currently active wait, if any.
     pub fn notify(task: &Arc<Task>, uninterruptible: bool) {
-        let mode = if uninterruptible {
-            WakeMode::Force
+        let (reason, mode) = if uninterruptible {
+            (WaitReason::Force, WakeMode::Force)
         } else {
-            WakeMode::InterruptibleOnly
+            (WaitReason::Signal, WakeMode::InterruptibleOnly)
         };
 
-        let result = wait::wake_active_wait(task, WaitReason::Signal, mode);
+        let result = wait::wake_active_wait(task, reason, mode);
         if result != WakeResult::Stale {
             kdebugln!(
-                "{} is notified through wait core, uninterruptible={}, result={:?}",
+                "{} is notified through wait core, reason={:?}, mode={:?}, uninterruptible={}, result={:?}",
                 task.tid(),
+                reason,
+                mode,
                 uninterruptible,
                 result,
             );
@@ -256,8 +258,10 @@ mod kore {
         }
 
         kdebugln!(
-            "{} notify found no active wait, uninterruptible={}",
+            "{} notify found no active wait, reason={:?}, mode={:?}, uninterruptible={}",
             task.tid(),
+            reason,
+            mode,
             uninterruptible,
         );
     }
