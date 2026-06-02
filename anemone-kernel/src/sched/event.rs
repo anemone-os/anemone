@@ -198,6 +198,9 @@ impl Event {
             );
             match outcome {
                 WaitOutcome::Completed(WaitReason::Event) => {},
+                // Force is a legal wake for fatal signal/stop, but this
+                // no-return API must still retry until the predicate holds.
+                WaitOutcome::Completed(WaitReason::Force) => {},
                 other => {
                     self.assert_unexpected_wait_outcome(
                         "listen_uninterruptible",

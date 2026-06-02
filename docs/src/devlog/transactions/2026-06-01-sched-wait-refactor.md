@@ -230,6 +230,16 @@
 
 **Decision:** 阶段 5 的旁路审计到此收口。保留入口都有明确分类：`notify()` 是 signal/force active-wake producer，`wake_wait()` 是 token producer，`ActiveWait` 是 waiter-owned lifecycle facade，`task_enqueue()` / `local_enqueue()` / `remote_enqueue()` 是 strict non-wait-tail placement，`TaskStatus` 是观察投影。下一阶段不再继续阶段 5 issue-hunting，转入阶段 6 验证和证据沉淀。
 
+### 2026-06-02 - shmat01 panic 修复：不可中断 Event 的 Force 分类
+
+**Phase:** phase 6 validation follow-up
+
+**Finding:** `build/shmat01-panic.log` 显示 `shmat01` 运行中，task 在 `Event::listen_uninterruptible()` 内收到 `SIGKILL` 触发的 `WaitReason::Force`，wait core 正常完成 active wait 并返回 `Completed(Force)`；随后 Event adapter 把该 outcome 归入 unexpected 分支并在 `event.rs:339` panic。该现象不破坏 wait identity、listener cleanup、mode-blocked requeue 或 stale-safe placement；问题是 Event 不可中断接口在阶段 5 fail-closed 修复后仍遗漏了 force completion 的合法分类。
+
+**Change:** `Event::listen_uninterruptible()` 现在接受 `Completed(Force)` 作为合法非 predicate wake，并回到循环重新检查 predicate。它不会把 Force 当作 predicate success 直接返回，因为该 API 没有 interrupted return，且现有调用点（内核 mutex、vfork wait）都依赖“返回时等待条件已经成立”。普通 `Completed(Signal)` 仍保持 unexpected，因为 `WakeMode::InterruptibleOnly` 不应完成不可中断 wait。
+
+**Validation:** 运行 `just build` 通过。当前仍只有仓库里既有的 `anemone-kernel/src/sync/mono.rs` unused import warning。
+
 ## Open Items
 
 - 阶段 6：运行已知触发 profile，并保存带 debug/trace 的验证摘要。
