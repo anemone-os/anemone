@@ -395,33 +395,26 @@ mod higher_level {
 
     use super::*;
 
-    /// Schedule the next task to run, with timeout.
+    /// Schedule the current wait-core round with an optional timeout.
     ///
-    /// If `timeout` is [None], then current task will wait indefinitely until
-    /// being woken up by other events.
-    ///
-    /// Returns the remaining time until timeout.
-    ///
-    /// If the returned duration is zero, it does not necessarily mean that the
-    /// timeout has expired.
-    ///
-    /// Caller should set task's status to [TaskStatus::Waiting] before calling
-    /// this function.
-    pub fn schedule_with_timeout(timeout: Option<Duration>) -> Duration {
-        if let Some(timeout) = timeout {
-            if timeout == Duration::ZERO {
-                kdebugln!("schedule_with_timeout: timeout is zero, returning immediately");
+    /// `token` names the wait round already published through
+    /// `wait::begin_wait()`. A late timer callback races through
+    /// `wake_wait()`, so timeout validity is derived from the wait identity
+    /// rather than an external cancellation flag.
+    pub fn schedule_wait_with_timeout(
+        task: &Arc<Task>,
+        token: WakeToken,
+        timeout: Option<Duration>,
+    ) -> Duration {
+        let current = get_current_task();
+        assert!(
+            Arc::ptr_eq(task, &current),
+            "schedule_wait_with_timeout only schedules the current task"
+        );
+        drop(current);
 
-                get_current_task().update_status_with(|_prev| (TaskStatus::Runnable, ()));
-
-                return Duration::ZERO;
-            }
-        }
-
-        let task = get_current_task();
         let cloned_task = task.clone();
-        let validness = Arc::new(AtomicBool::new(true));
-        let cloned_validness = validness.clone();
+        let wait_id = token.wait_id();
 
         let start = with_intr_disabled(|| {
             if let Some(timeout) = timeout {
@@ -429,17 +422,18 @@ mod higher_level {
                     schedule_local_irq_timer_event(
                         timeout,
                         Box::new(move || {
-                            if cloned_validness.swap(false, Ordering::SeqCst) {
-                                kdebugln!(
-                                    "schedule_with_timeout: timeout expired, waking up {}",
-                                    cloned_task.tid()
-                                );
-                                notify(&cloned_task, true);
-                            } else {
-                                kdebugln!(
-                                    "schedule_with_timeout: timer callback called, but timer is already invalid"
-                                );
-                            }
+                            let result = wait::wake_wait(
+                                &cloned_task,
+                                &token,
+                                WaitReason::Timeout,
+                                WakeMode::AnyWait,
+                            );
+                            kdebugln!(
+                                "schedule_wait_with_timeout: timeout task={} wait={:#x} result={:?}",
+                                cloned_task.tid(),
+                                wait_id,
+                                result,
+                            );
                         }),
                     );
                 }
@@ -449,9 +443,6 @@ mod higher_level {
             unsafe {
                 schedule();
             }
-
-            // we're back.
-            validness.store(false, Ordering::SeqCst);
 
             start
         });
@@ -463,6 +454,32 @@ mod higher_level {
         } else {
             Duration::MAX
         }
+    }
+
+    /// Schedule the next task to run, with timeout.
+    ///
+    /// This compatibility wrapper starts and finishes a wait-core round for the
+    /// current task. Callers that need to classify the exact wake reason should
+    /// use `wait::begin_wait()`, [schedule_wait_with_timeout], and
+    /// `wait::finish_wait()` directly.
+    pub fn schedule_with_timeout(timeout: Option<Duration>) -> Duration {
+        if matches!(timeout, Some(timeout) if timeout == Duration::ZERO) {
+            kdebugln!("schedule_with_timeout: timeout is zero, returning immediately");
+            return Duration::ZERO;
+        }
+
+        let task = get_current_task();
+        let begin = wait::begin_wait(&task, true);
+        let (guard, token) = begin.into_parts();
+        let rem = schedule_wait_with_timeout(&task, token, timeout);
+        let outcome = wait::finish_wait(guard);
+        kdebugln!(
+            "schedule_with_timeout: compatibility wait task={} outcome={:?} remaining={:?}",
+            task.tid(),
+            outcome,
+            rem,
+        );
+        rem
     }
 
     /// Yield the current running task to let other tasks run.

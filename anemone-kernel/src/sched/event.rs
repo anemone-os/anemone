@@ -5,7 +5,7 @@
 
 use core::fmt::{Debug, Formatter};
 
-use crate::{prelude::*, sched::wait, time::timer::schedule_local_irq_timer_event};
+use crate::{prelude::*, sched::wait};
 
 /// An occurrence of an event does not guarantee that the event is still valid
 /// when the listener wakes up, so the listener should always check the
@@ -152,7 +152,7 @@ impl Event {
                 outcome,
                 WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force)
             ) {
-                return prediction();
+                return false;
             }
         }
     }
@@ -242,7 +242,7 @@ impl Event {
             }
 
             let token = listener.token().clone();
-            let start = unsafe {
+            let remaining = {
                 drop(guard);
                 self.schedule_with_wait_token_timeout(&task, token, timeout)
             };
@@ -254,22 +254,14 @@ impl Event {
                 outcome,
                 WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force)
             ) {
-                return if prediction() {
-                    None
-                } else {
-                    Some(TimeoutListenException::Signaled)
-                };
+                return Some(TimeoutListenException::Signaled);
             }
             if matches!(outcome, WaitOutcome::Completed(WaitReason::Timeout)) {
-                return if prediction() {
-                    None
-                } else {
-                    Some(TimeoutListenException::Timeout)
-                };
+                return Some(TimeoutListenException::Timeout);
             }
 
-            let elapsed = start.elapsed();
-            timeout = timeout.saturating_sub(elapsed);
+            let elapsed = timeout.saturating_sub(remaining);
+            timeout = remaining;
             kdebugln!(
                 "event: listen_with_timeout woke event={:#x} task={} listener={:?} outcome={:?} elapsed={:?} remaining={:?}",
                 self.debug_id(),
@@ -480,50 +472,13 @@ impl Event {
         true
     }
 
-    unsafe fn schedule_with_wait_token_timeout(
+    fn schedule_with_wait_token_timeout(
         &self,
         task: &Arc<Task>,
         token: WakeToken,
         timeout: Duration,
-    ) -> Instant {
-        let cloned_task = task.clone();
-        let validness = Arc::new(AtomicBool::new(true));
-        let cloned_validness = validness.clone();
-
-        with_intr_disabled(|| {
-            unsafe {
-                schedule_local_irq_timer_event(
-                    timeout,
-                    Box::new(move || {
-                        if cloned_validness.swap(false, Ordering::SeqCst) {
-                            let result = wait::wake_wait(
-                                &cloned_task,
-                                &token,
-                                WaitReason::Timeout,
-                                WakeMode::AnyWait,
-                            );
-                            kdebugln!(
-                                "event: timeout wake task={} wait={:#x} result={:?}",
-                                cloned_task.tid(),
-                                token.wait_id(),
-                                result,
-                            );
-                        } else {
-                            kdebugln!(
-                                "event: timeout callback called, but timer is already invalid"
-                            );
-                        }
-                    }),
-                );
-            }
-
-            let start = Instant::now();
-            unsafe {
-                schedule();
-            }
-            validness.store(false, Ordering::SeqCst);
-            start
-        })
+    ) -> Duration {
+        schedule_wait_with_timeout(task, token, Some(timeout))
     }
 }
 

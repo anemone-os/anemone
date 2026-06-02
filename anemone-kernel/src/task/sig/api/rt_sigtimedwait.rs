@@ -71,14 +71,8 @@ fn sys_rt_sigtimedwait(
         prev_mask
     };
 
-    task.update_status_with(|_prev| {
-        (
-            TaskStatus::Waiting {
-                interruptible: true,
-            },
-            (),
-        )
-    });
+    let begin = wait::begin_wait(&task, true);
+    let (guard, token) = begin.into_parts();
 
     enum WaitOutcome {
         Signal(Signal),
@@ -88,18 +82,37 @@ fn sys_rt_sigtimedwait(
 
     // check pending signals. this step must be placed after status update.
     let wait_outcome = if let Some(signal) = task.fetch_specific_signal(uthese) {
-        task.update_status_with(|_prev| (TaskStatus::Runnable, ()));
+        wait::cancel_wait(&guard, WaitReason::PredicateReady);
+        wait::finish_wait(guard);
         WaitOutcome::Signal(signal)
     } else if task.has_unmasked_signal() {
-        task.update_status_with(|_prev| (TaskStatus::Runnable, ()));
+        wait::cancel_wait(&guard, WaitReason::Signal);
+        wait::finish_wait(guard);
         WaitOutcome::Interrupted
+    } else if matches!(timeout, Some(timeout) if timeout == Duration::ZERO) {
+        wait::cancel_wait(&guard, WaitReason::Timeout);
+        wait::finish_wait(guard);
+        WaitOutcome::Timeout(Duration::ZERO)
     } else {
-        let rem = schedule_with_timeout(timeout);
+        let rem = schedule_wait_with_timeout(&task, token, timeout);
+        let outcome = wait::finish_wait(guard);
+        kdebugln!(
+            "sys_rt_sigtimedwait: wait finished task={} outcome={:?} rem={:?}",
+            task.tid(),
+            outcome,
+            rem,
+        );
 
         // waited signals are temporarily unmasked during the sleep, so we must
         // check them before restoring the original mask.
         if let Some(signal) = task.fetch_specific_signal(uthese) {
             WaitOutcome::Signal(signal)
+        } else if matches!(
+            outcome,
+            wait::WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force)
+        ) || task.has_unmasked_signal()
+        {
+            WaitOutcome::Interrupted
         } else {
             WaitOutcome::Timeout(rem)
         }

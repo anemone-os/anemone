@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / event / timer / signal / wait core
 **Canonical Plan:** [RFC-20260601-sched-wait-refactor](../../rfcs/sched-wait-refactor/index.md), [Invariants](../../rfcs/sched-wait-refactor/invariants.md), [Implementation Plan](../../rfcs/sched-wait-refactor/implementation.md)
-**Current Phase:** phase 3 prerequisites complete; phase 3 pending
+**Current Phase:** phase 4 complete; phase 5 pending
 
 ## Scope
 
@@ -136,9 +136,28 @@
 
 **Next:** 阶段 4 需要迁移通用 timeout、signal 和主动 cancel，移除本阶段为了拆分提交而保留的 `notify()` wait-core bridge / Event-local token timer 过渡边界，并重新分类所有 `update_status_with()`、`try_to_wake_up()`、`notify()` 和 `schedule_with_timeout()` 命中。
 
+### 2026-06-02 - 阶段 4 timeout / signal / cancel 收口
+
+**Phase:** phase 4 - timeout, signal, and active cancel migration
+
+**Change:** 新增通用 `schedule_wait_with_timeout(task, token, timeout)`。调用方必须先通过 `wait::begin_wait()` 发布本轮 `WaitState`，再把 `WakeToken` 交给 timeout helper；timer callback 只调用 `wake_wait(..., WaitReason::Timeout, WakeMode::AnyWait)`，晚到 callback 通过 wait identity 返回 stale / retired / already-completed 结果，不再依赖独立 `AtomicBool validness` 决定 timeout 是否有效。
+
+**Change:** `clock_nanosleep()` 和 `rt_sigtimedwait()` 已从旧 `TaskStatus::Waiting` + `schedule_with_timeout()` 组合迁移到 wait core。signal precheck、timeout zero、predicate / pending-signal ready 等主动退出路径都通过 `cancel_wait()` 竞争本轮 wait，再由 `finish_wait()` 退役；真正异步 signal / force / timeout completion 统一由 `wake_active_wait()` 或 token-based timeout callback 完成。
+
+**Change:** `Event::listen_with_timeout()` 移除了阶段 3 的 Event-local token timer callback 和独立有效位，改用同一个 `schedule_wait_with_timeout()`。阶段 3 review 中标出的返回语义也在本阶段收口：`Completed(Signal | Force)` 严格映射为 signal return，`Completed(Timeout)` 严格映射为 timeout return，不再在 completion 后重新检查 predicate 并把 signal / timeout 改写成普通成功。
+
+**Change:** `notify()` 现在是 signal / force 的 wait-core producer 入口：先以 `wake_active_wait(task, WaitReason::Signal, mode)` 完成当前 active wait，并由 wait core 负责 stale-safe placement。`LegacyWaiting` 分支只保留为阶段 5 旁路审计前的迁移兼容尾巴，不再是 Event、timeout、`clock_nanosleep()` 或 `rt_sigtimedwait()` 的普通 completion 路径。
+
+**Compatibility:** `schedule_with_timeout()` 仍保留为兼容 wrapper，但内部已经自行 `begin_wait()` / `schedule_wait_with_timeout()` / `finish_wait()`，不再要求调用方先写 `TaskStatus::Waiting`。阶段 4 结束时仓库内没有生产调用点继续使用它；阶段 5 可以决定删除、收窄可见性或继续作为明确分类的兼容 API。
+
+**Audit:** 搜索 `schedule_with_timeout(`、`TaskStatus::Waiting`、`update_status_with`、`try_to_wake_up`、`notify(` 和 `task_enqueue(`。Event、timeout、signal、主动 cancel 的迁移路径已经不再写 `TaskStatus::Waiting`，也不再通过旧 `notify()` timeout callback 或裸 `task_enqueue()` 完成 wake tail。剩余旧命中分类为：`try_to_wake_up()` / `schedule_with_timeout()` 兼容 API 定义本身、`notify()` 的 `LegacyWaiting` 兼容分支、`update_status_with()` 的 exit zombie 写入、clone / bootstrap 的新任务 placement、procfs/status 观察投影，以及非 wait 协议的 itimer / futex / iomux 自有状态。
+
+**Validation:** 运行 `just build` 通过。当前仍只有仓库里既有的 `anemone-kernel/src/sync/mono.rs` unused import warning。
+
+**Next:** 阶段 5 进入旁路审计和旧 API 收缩：重点处理 `try_to_wake_up()`、`schedule_with_timeout()`、`notify()` 的 `LegacyWaiting` fallback、`Task::update_status_with()` 保留边界，以及 `task_enqueue()` 命中的非 wait-tail 分类说明。
+
 ## Open Items
 
-- 阶段 4：迁移 timeout、signal 和主动 cancel。
 - 阶段 5：审计旧旁路并收缩旧 wake API。
 - 阶段 6：运行已知触发 profile，并保存带 debug/trace 的验证摘要。
 
