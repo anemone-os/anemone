@@ -152,6 +152,8 @@
 
 **Audit:** 搜索 `schedule_with_timeout(`、`TaskStatus::Waiting`、`update_status_with`、`try_to_wake_up`、`notify(` 和 `task_enqueue(`。Event、timeout、signal、主动 cancel 的迁移路径已经不再写 `TaskStatus::Waiting`，也不再通过旧 `notify()` timeout callback 或裸 `task_enqueue()` 完成 wake tail。剩余旧命中分类为：`try_to_wake_up()` / `schedule_with_timeout()` 兼容 API 定义本身、`notify()` 的 `LegacyWaiting` 兼容分支、`update_status_with()` 的 exit zombie 写入、clone / bootstrap 的新任务 placement、procfs/status 观察投影，以及非 wait 协议的 itimer / futex / iomux 自有状态。
 
+**Review Finding:** 阶段 4 审计发现 `clock_nanosleep()` 和 `rt_sigtimedwait()` 在 `schedule_wait_with_timeout()` 返回后，对 `finish_wait()` 的结果分类还不够 fail-closed。当前正常设计下，阻塞后的直接等待路径应只接受 `Completed(Timeout)`、`Completed(Signal | Force)`，以及调用方自己明确处理的 pending-signal ready；如果出现 `Armed`、`Cancelled`、`Retired` 或其他完成原因，说明 wait-core 协议或调用方状态机已经偏离预期。当前实现会把这些异常 outcome 折叠成普通 timeout / success 返回。这不是已观察到的用户态语义回归，也不重新打开原 Event wake race，但它会掩盖 wait-core 不变量破坏，应在阶段 5 旁路收缩前或同批改成显式 match、debug assert / warning、或受控 retry。
+
 **Validation:** 运行 `just build` 通过。当前仍只有仓库里既有的 `anemone-kernel/src/sync/mono.rs` unused import warning。
 
 **Next:** 阶段 5 进入旁路审计和旧 API 收缩：重点处理 `try_to_wake_up()`、`schedule_with_timeout()`、`notify()` 的 `LegacyWaiting` fallback、`Task::update_status_with()` 保留边界，以及 `task_enqueue()` 命中的非 wait-tail 分类说明。
