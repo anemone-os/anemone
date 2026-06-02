@@ -17,15 +17,13 @@ pub fn handle_user_page_fault(info: PageFaultInfo) {
             info.fault_type(),
             e
         );
-        get_current_task()
-            .get_thread_group()
-            .recv_signal(Signal::new(
-                SigNo::SIGSEGV,
-                SiCode::Kernel,
-                SigInfoFields::Fault(SigFault {
-                    addr: info.fault_addr(),
-                }),
-            ));
+        get_current_task().recv_signal(Signal::new(
+            SigNo::SIGSEGV,
+            SiCode::Kernel,
+            SigInfoFields::Fault(SigFault {
+                addr: info.fault_addr(),
+            }),
+        ));
     }
 }
 
