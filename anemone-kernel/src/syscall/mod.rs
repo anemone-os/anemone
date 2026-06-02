@@ -86,7 +86,7 @@ pub fn handle_syscall(trapframe: &mut TrapFrame) -> Option<RestartSyscall> {
         .unwrap_or(INVALID_SYSCALL);
 
     if sysno < ANEMONE_SYSNO_MAX as usize && handler.sysno == 0 {
-        knoticeln!(
+        kerrln!(
             "unknown syscall number {} from {}",
             sysno,
             current_task_id()

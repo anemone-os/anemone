@@ -184,6 +184,21 @@
 **Last Verified:** 2026-05-27
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
+## ANE-20260602-CLONE3-STAGE1-ADAPTER
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** task / clone3 / pidfd / cgroup / pid namespace
+
+**Summary:** 当前 `clone3` 是现有 `kernel_clone()` 的 ABI 适配层：支持读取并校验 Linux `struct clone_args`，复用已有 fork-like clone、`CLONE_VFORK`、`CLONE_SETTLS`、`PARENT_SETTID`、`CHILD_SETTID`、`CHILD_CLEARTID` 和 `CLONE_CLEAR_SIGHAND` 路径。需要新基础设施的 `CLONE_PIDFD`、`CLONE_INTO_CGROUP`、`set_tid` / `set_tid_size` 和 pid namespace / cgroup / pidfd 文件对象语义仍明确返回未实现，不伪造 pidfd 或指定 tid 分配。
+
+**Exit Condition:** 引入 pidfd 文件对象与 fd 分配、`pidfd_send_signal` 目标解析、cgroup task 归属模型、指定 TID 分配和 pid namespace 层级/权限语义后，重新验证 LTP `clone301` 的 pidfd 分支、`clone303` 以及 clone3 set_tid/selftests。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-02
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [当前限制](./current-limitations.md)
+
 ## ANE-20260527-MMAP-LOCK-SYNC-STAGE1
 
 **Type:** Limitation
