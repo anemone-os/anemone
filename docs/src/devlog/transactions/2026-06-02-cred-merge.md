@@ -3,7 +3,7 @@
 **Status:** Active
 **Owners:** doruche, Codex
 **Area:** credentials / task / VFS / exec / syscall ABI / user-test
-**Current Phase:** all workers integrated; checkpoint pending
+**Current Phase:** merge checkpoint committed; build gate pending
 
 ## Handoff
 
@@ -11,13 +11,15 @@
 
 **Current Branch:** `dev/drc/merge-cred`
 
-**Current HEAD:** `0f357d978cfec0c7a8485b09fa16132fd44fbb40`
+**Current HEAD:** `6e094ec52a69a0c01eb553fb573ed291564db11e`
 
 **Origin Main:** `892f89d3415a30aa7284f83d8ca619c540b6d14d`
 
 **Merge Base:** `210a9e07d1c8381ac5913298c8d6f26daf878581`
 
-**Merge State:** `git merge --no-commit origin/main` 已建立，所有文本冲突已解析并暂存，merge 尚未提交。
+**Merge State:** merge checkpoint 已提交。
+
+**Merge Checkpoint Commit:** `6e094ec52a69a0c01eb553fb573ed291564db11e` (`[ckpt] merge origin main credentials`)
 
 **Conflicts Remaining:** 0。
 
@@ -25,7 +27,7 @@
 
 **Open Blockers:** 无文本冲突 blocker。`anemone-kernel/src/syscall/user_access.rs` 被 git 自动合入但不在当前 worker write set 中；目前只读审查看到它提供 `c_readonly_path()` 与 `ListTooLong -> NameTooLong` 路径校验支撑，未再手工修改。构建 gate 和只读 reviewer 尚未运行。
 
-**Next Action:** 创建本地 merge checkpoint commit，然后刷新本 handoff 记录实际 commit hash；随后进入构建 gate 和只读 reviewer 阶段。
+**Next Action:** 运行构建 gate；随后启动/执行只读 reviewer 审查 P0/P1 语义闭合。LTP 仍由用户手动执行。
 
 **Do Not Redo:** 不要重新审查已闭合的计划原则，除非 `origin/main` 或 merge-base 改变；不要恢复远端旧 `process-exec` group；不要重拆、合并或改名本地已有 LTP group；不要运行 LTP；不要 push、force-push、`git reset --hard`、`git clean` 或丢弃未归属改动。
 
@@ -131,3 +133,15 @@
 **Checkpoint:** 所有 unmerged paths 已解析，下一步创建本地 merge checkpoint commit。
 
 **Next:** 创建 checkpoint commit，随后刷新 handoff 记录 commit hash，再进入构建 gate 和只读 reviewer 阶段。
+
+### 2026-06-02 - Merge checkpoint
+
+**Phase:** execution / checkpoint
+
+**Change:** 总控在所有 worker write set 解析完成、无 unmerged paths、全局 `git diff --check` 通过后，创建本地 merge checkpoint commit `6e094ec52a69a0c01eb553fb573ed291564db11e`，提交信息为 `[ckpt] merge origin main credentials`。该 commit 有两个 parent：本地 pre-merge checkpoint `0f357d978cfec0c7a8485b09fa16132fd44fbb40` 与 `origin/main` 的 `892f89d3415a30aa7284f83d8ca619c540b6d14d`。
+
+**Boundary:** 本 checkpoint 只固化当前 merge 分支状态；未 push、未 force-push、未改写其他分支、未运行 LTP。
+
+**Validation:** merge 提交前确认无 unmerged paths，`git diff --check` 通过，关键冲突标记扫描无输出。构建 gate 尚未运行。
+
+**Next:** 运行构建 gate，并在 gate 结果后刷新本 handoff。
