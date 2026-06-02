@@ -10,6 +10,9 @@ fn sys_fchown(fd: Fd, owner: Uid, group: Gid) -> Result<u64, SysError> {
 
     let task = get_current_task();
     let file_desc = task.get_fd(fd)?;
+    if file_desc.is_path_only() {
+        return Err(SysError::BadFileDescriptor);
+    }
     let pathref = file_desc.vfs_file().path().clone();
     let ctime = Instant::now().to_duration();
 

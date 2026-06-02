@@ -75,8 +75,6 @@ pub fn kernel_fchmod(
         perm.remove(InodePerm::ISGID);
     }
 
-    let cred = get_current_task().cred();
     inode.inode().chmod(perm, ctime);
-    inode.after_modified(&cred, ModifType::Modify, ctime);
     Ok(())
 }
