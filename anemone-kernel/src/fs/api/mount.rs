@@ -8,7 +8,7 @@ use anemone_abi::fs::linux::mount::MS_RDONLY;
 use crate::{
     device::block::get_block_dev,
     prelude::{
-        user_access::{SyscallArgValidatorExt, c_readonly_string},
+        user_access::{SyscallArgValidatorExt, c_readonly_path, c_readonly_string},
         *,
     },
 };
@@ -61,13 +61,20 @@ fn parse_mount_flags(raw: u64) -> MountFlags {
 
 #[syscall(SYS_MOUNT)]
 fn sys_mount(
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>.nullable())] source: Option<Box<str>>,
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] target: Box<str>,
+    #[validate_with(c_readonly_path.nullable())] source: Option<Box<str>>,
+    #[validate_with(c_readonly_path)] target: Box<str>,
     #[validate_with(c_readonly_string::<MAX_FILE_NAME_LEN_BYTES>)] fstype: Box<str>,
     mountflags: u64,
     // we don't support this argument. vfs now doesn't use it at all.
     _data: u64,
 ) -> Result<u64, SysError> {
+    if !get_current_task()
+        .cred()
+        .has_cap_effective(Capability::SYS_ADMIN)
+    {
+        return Err(SysError::PermissionDenied);
+    }
+
     let fs_name = mount_fs_name(&fstype);
     let fs = get_filesystem(fs_name).ok_or(SysError::InvalidArgument)?;
     if fs.flags().contains(FileSystemFlags::KERNEL_FS) {

@@ -11,7 +11,10 @@ pub use tid::*;
 // integration with other subsystems
 pub mod cpu_usage;
 pub mod credentials;
-pub use credentials::{Gid, Uid};
+pub use credentials::{CredentialSet, Credentials, Gid, Uid, UserId};
+pub use credentials::{
+    cap::{Capability, CredCapabilities, FileCapabilities, SecureBits},
+};
 pub mod files;
 pub mod sig;
 #[path = "fs.rs"]
@@ -129,6 +132,10 @@ pub struct Task {
     fs_state: Arc<RwLock<FsState>>,
     /// File descriptor table state.
     files_state: RwLock<Arc<RwLock<FilesState>>>,
+    /// Identity, group, and capability state used for permission checks.
+    cred: RwLock<CredentialSet>,
+    /// Irreversible bit set by `PR_SET_NO_NEW_PRIVS`.
+    no_new_privs: AtomicBool,
     /// Cpu usage information.
     cpu_usage: NoIrqRwLock<TaskCpuUsage>,
 
@@ -430,6 +437,8 @@ impl Task {
             fpu_used: AtomicBool::new(false),
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: RwLock::new(Arc::new(RwLock::new(FilesState::new()))),
+            cred: RwLock::new(CredentialSet::new_root()),
+            no_new_privs: AtomicBool::new(false),
             cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
 
             sig_disposition: Arc::new(NoIrqRwLock::new(SignalDisposition::new())),
@@ -477,6 +486,8 @@ impl Task {
                 fpu_used: AtomicBool::new(false),
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
                 files_state: RwLock::new(Arc::new(RwLock::new(FilesState::new()))),
+                cred: RwLock::new(CredentialSet::new_root()),
+                no_new_privs: AtomicBool::new(false),
                 cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
 
                 sig_disposition: Arc::new(NoIrqRwLock::new(SignalDisposition::new())),
@@ -713,6 +724,34 @@ impl Task {
 
     pub fn set_fpu_used(&self) {
         self.fpu_used.store(true, Ordering::Release);
+    }
+
+    pub fn cred(&self) -> CredentialSet {
+        self.cred.read().clone()
+    }
+
+    pub fn replace_cred(&mut self, cred: CredentialSet) {
+        self.cred = RwLock::new(cred);
+    }
+
+    pub fn update_cred_with<F>(&self, f: F) -> Result<(), SysError>
+    where
+        F: FnOnce(&mut CredentialSet) -> Result<(), SysError>,
+    {
+        let mut cred = self.cred.write();
+        f(&mut cred)
+    }
+
+    pub fn has_cap(&self, cap: Capability) -> bool {
+        self.cred.read().has_cap_effective(cap)
+    }
+
+    pub fn no_new_privs(&self) -> bool {
+        self.no_new_privs.load(Ordering::Acquire)
+    }
+
+    pub fn set_no_new_privs(&self) {
+        self.no_new_privs.store(true, Ordering::Release);
     }
 }
 

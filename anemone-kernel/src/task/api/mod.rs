@@ -1,4 +1,12 @@
 // TODO: better clone.
+macro_rules! deny_permission {
+    ($($arg:tt)*) => {{
+        use crate::prelude::*;
+        knoticeln!($($arg)*);
+        SysError::PermissionDenied
+    }};
+}
+
 pub mod clone;
 pub mod execve;
 pub mod exit;

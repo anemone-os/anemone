@@ -16,7 +16,8 @@ mod kunits {
 
         let dir = vfs_mkdir(path, InodePerm::all_rwx()).unwrap();
 
-        assert_eq!(dir.inode().truncate(0).unwrap_err(), SysError::IsDir);
+        let cred = get_current_task().cred();
+        assert_eq!(dir.inode().truncate(0, &cred).unwrap_err(), SysError::IsDir);
 
         vfs_rmdir(path).unwrap();
     }

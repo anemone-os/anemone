@@ -20,6 +20,9 @@ pub enum SysError {
     NotSupported,
     /// The syscall arguments are invalid.
     InvalidArgument,
+    /// A user-provided null-terminated list or string-like array exceeded its
+    /// configured bound before the terminator was found.
+    ListTooLong,
     /// The provided buffer is too small to hold the output.
     BufferTooSmall,
     /// Permission denied. This includes file permission, memory access
@@ -169,6 +172,7 @@ impl SysError {
             SysError::NoSys | SysError::NotYetImplemented => ENOSYS,
             SysError::NotSupported => EOPNOTSUPP,
             SysError::InvalidArgument
+            | SysError::ListTooLong
             | SysError::NotReg
             | SysError::NotSymlink
             | SysError::NotMounted

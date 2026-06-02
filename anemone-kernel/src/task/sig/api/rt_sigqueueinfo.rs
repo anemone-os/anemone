@@ -9,6 +9,16 @@ use crate::{
 
 use anemone_abi::process::linux::signal as linux_signal;
 
+use super::check_send_signal_permission;
+
+/// Sends a queued signal with user-provided siginfo to a thread group.
+///
+/// Man page: https://www.man7.org/linux/man-pages/man2/rt_sigqueueinfo.2.html
+///
+/// Current permission check: sending to another thread group requires the
+/// caller real/effective uid to match the target real/saved uid, or
+/// `CAP_KILL`. `SIGCONT` is also allowed within the same session. Existing
+/// siginfo validation remains unchanged.
 #[syscall(SYS_RT_SIGQUEUEINFO)]
 fn sys_rt_sigqueueinfo(
     pid: Tid,
@@ -46,7 +56,7 @@ fn sys_rt_sigqueueinfo(
     let si_fields = unsafe {
         SigInfoFields::Rt(SigRt {
             pid: task.tgid(),
-            uid: 0, // only root user
+            uid: task.cred().uid.real,
             sigval: sifields.rt.sigval.as_u64(),
         })
     };
@@ -54,6 +64,8 @@ fn sys_rt_sigqueueinfo(
     let signal = Signal::new_with_errno(sig, si_code, si_fields, si_errno);
 
     let target = get_thread_group(&pid).ok_or(SysError::NoSuchProcess)?;
+    let leader = target.leader().ok_or(SysError::NoSuchProcess)?;
+    check_send_signal_permission(&leader, sig)?;
     target.recv_signal(signal);
 
     Ok(0)

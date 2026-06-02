@@ -27,12 +27,7 @@ mod args {
     impl TryFromSyscallArg for AccessFlag {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
             let raw = syscall_arg_flag32(raw)?;
-            let flags = Self::from_bits(raw).ok_or(SysError::InvalidArgument)?;
-            if flags.contains(Self::EACCESS) {
-                knoticeln!("[NYI] AT_EACCESS flag is not supported yet");
-                return Err(SysError::NotYetImplemented);
-            }
-            Ok(flags)
+            Self::from_bits(raw).ok_or(SysError::InvalidArgument)
         }
     }
 
@@ -55,24 +50,21 @@ mod args {
 }
 use args::*;
 
-/// Note. Currently we don't check user's access right. We only check permission
-/// of file itself.
-///
-/// TODO: explain why this is not `vfs_faccess` in fs module, but
-/// `kernel_faccess` in api module. (TLDR: calling context)
 pub fn kernel_faccess(
     dirfd: AtFd,
     pathname: &str,
     mode: AccessMode,
     flags: AccessFlag,
 ) -> Result<(), SysError> {
-    if flags.contains(AccessFlag::EACCESS) {
-        return Err(SysError::NotSupported);
-    }
+    let checker = if flags.contains(AccessFlag::EACCESS) {
+        FsPermChecker::for_access_effective_ids()
+    } else {
+        FsPermChecker::for_access_real_ids()
+    };
 
     let pathref = if pathname.is_empty() {
         if !flags.contains(AccessFlag::EMPTY_PATH) {
-            return Err(SysError::InvalidArgument);
+            return Err(SysError::NotFound);
         }
         dirfd.to_pathref(false)?
     } else {
@@ -83,34 +75,38 @@ pub fn kernel_faccess(
             ResolveFlags::empty()
         };
         if path.is_absolute() {
-            get_current_task().lookup_path(&path, resolve_flags)?
+            get_current_task().lookup_path_with_checker(&path, resolve_flags, &checker)?
         } else {
             let dir_path = dirfd.to_pathref(true)?;
-            get_current_task().lookup_path_from(&dir_path, &path, resolve_flags)?
+            get_current_task().lookup_path_from_with_checker(
+                &dir_path,
+                &path,
+                resolve_flags,
+                &checker,
+            )?
         }
     };
 
-    let perm = pathref.inode().perm();
-
-    // now do the check.
-    // a really thin check. since now we don't have concept of user/group/other.
-
-    if mode.contains(AccessMode::R_OK)
-        && !perm.intersects(InodePerm::IRUSR | InodePerm::IRGRP | InodePerm::IROTH)
-    {
-        return Err(SysError::PermissionDenied);
+    let mut access = FsAccess::empty();
+    if mode.contains(AccessMode::R_OK) {
+        access |= FsAccess::READ;
     }
+    if mode.contains(AccessMode::W_OK) {
+        access |= FsAccess::WRITE;
+    }
+    if mode.contains(AccessMode::X_OK) {
+        access |= FsAccess::EXECUTE;
+    }
+
+    checker.check_path(&pathref, access)?;
 
     if mode.contains(AccessMode::W_OK)
-        && !perm.intersects(InodePerm::IWUSR | InodePerm::IWGRP | InodePerm::IWOTH)
+        && matches!(
+            pathref.inode().ty(),
+            InodeType::Regular | InodeType::Dir | InodeType::Symlink
+        )
     {
-        return Err(SysError::PermissionDenied);
-    }
-
-    if mode.contains(AccessMode::X_OK)
-        && !perm.intersects(InodePerm::IXUSR | InodePerm::IXGRP | InodePerm::IXOTH)
-    {
-        return Err(SysError::PermissionDenied);
+        pathref.mount().ensure_writable()?;
     }
 
     Ok(())

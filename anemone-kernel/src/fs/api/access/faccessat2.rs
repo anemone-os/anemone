@@ -6,13 +6,13 @@ use crate::{
         },
         args::AtFd,
     },
-    prelude::{user_access::c_readonly_string, *},
+    prelude::{user_access::c_readonly_path, *},
 };
 
 #[syscall(SYS_FACCESSAT2)]
 fn sys_faccessat2(
     dirfd: AtFd,
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
+    #[validate_with(c_readonly_path)] pathname: Box<str>,
     mode: AccessMode,
     flags: AccessFlag,
 ) -> Result<u64, SysError> {

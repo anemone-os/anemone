@@ -25,12 +25,44 @@ pub fn kernel_fchown(
     group: Option<Gid>,
     ctime: Duration,
 ) -> Result<(), SysError> {
-    if owner.is_none() && group.is_none() {
-        return Ok(());
-    }
+    let checker = FsPermChecker::for_current_fs();
+    let inode = pathref.inode();
+    let mut perm = inode.perm();
 
     pathref.mount().ensure_writable()?;
 
-    pathref.inode().inode().chown(owner, group, ctime);
+    if let Some(owner) = owner {
+        if !(checker.is_owner(inode) && owner == inode.uid())
+            && !checker.has_cap(Capability::CHOWN)
+        {
+            return Err(SysError::PermissionDenied);
+        }
+    }
+
+    if let Some(group) = group {
+        if !(checker.is_owner(inode)
+            && (group == inode.gid() || checker.fs_group_allowed(group)))
+            && !checker.has_cap(Capability::CHOWN)
+        {
+            return Err(SysError::PermissionDenied);
+        }
+    }
+
+    let old_perm = perm;
+    if inode.ty() != InodeType::Dir {
+        perm.remove(InodePerm::ISUID);
+        if perm.contains(InodePerm::ISGID)
+            && (perm.contains(InodePerm::IXGRP)
+                || (!checker.fs_group_allowed(inode.gid())
+                    && !checker.has_cap(Capability::FSETID)))
+        {
+            perm.remove(InodePerm::ISGID);
+        }
+    }
+
+    inode.chown(owner, group, ctime);
+    if perm != old_perm {
+        inode.chmod(perm, ctime);
+    }
     Ok(())
 }

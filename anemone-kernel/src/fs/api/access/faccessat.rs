@@ -6,13 +6,13 @@ use crate::{
         },
         args::AtFd,
     },
-    prelude::{user_access::c_readonly_string, *},
+    prelude::{user_access::c_readonly_path, *},
 };
 
 #[syscall(SYS_FACCESSAT)]
 fn sys_faccessat(
     dirfd: AtFd,
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
+    #[validate_with(c_readonly_path)] pathname: Box<str>,
     mode: AccessMode,
 ) -> Result<u64, SysError> {
     knoticeln!(

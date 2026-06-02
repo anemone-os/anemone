@@ -1,11 +1,15 @@
 use crate::{
     prelude::*,
-    task::execve::binfmt::{elf::ELF_FMT, shebang::SHEBANG_FMT},
+    task::execve::{
+        binfmt::{elf::ELF_FMT, shebang::SHEBANG_FMT},
+        compute_exec_credentials,
+    },
 };
 
 #[derive(Debug)]
 pub struct LoadedBinaryMeta {
     pub exe: PathRef,
+    pub cred: CredentialSet,
     pub entry: VirtAddr,
     pub sp: VirtAddr,
 }
@@ -22,6 +26,8 @@ pub fn dispatch_execve(
     path: &str,
     argv: &[impl AsRef<str>],
     envp: &[impl AsRef<str>],
+    old_cred: &CredentialSet,
+    no_new_privs: bool,
 ) -> Result<LoadedBinaryMeta, SysError> {
     let resolved = get_current_task()
         .lookup_path(Path::new(path), ResolveFlags::empty())
@@ -34,16 +40,22 @@ pub fn dispatch_execve(
         path,
         resolved.to_pathbuf().display()
     );
+    check_exec_permission(&resolved)?;
 
     let mut ctx = ExecCtx {
         usp,
         exec_fn: path,
         path: resolved.to_string(),
+        old_cred,
+        no_new_privs,
+        cred: old_cred.clone(),
+        secure_exec: false,
         argv: argv.iter().map(|s| s.as_ref().to_string()).collect(),
         envp: envp.iter().map(|s| s.as_ref().to_string()).collect(),
     };
 
     for _ in 0..MAX_BINFMT_REDIRECTS {
+        let mut redirected = false;
         for &fmt in BINARY_FMTS {
             match (fmt.load_binary)(&mut ctx)? {
                 ExecResult::Loaded(meta) => {
@@ -52,13 +64,25 @@ pub fn dispatch_execve(
                 ExecResult::NotRecognized => continue,
                 ExecResult::Redirected => {
                     // break inner loop to try loading the new binary from the start of BINARY_FMTS.
+                    redirected = true;
                     break;
                 },
             }
         }
+
+        if !redirected {
+            return Err(SysError::BinFmtUnrecognized);
+        }
     }
 
-    Err(SysError::BinFmtUnrecognized)
+    Err(SysError::TooManyLinks)
+}
+
+pub fn check_exec_permission(path: &PathRef) -> Result<(), SysError> {
+    if path.inode().ty() != InodeType::Regular {
+        return Err(SysError::AccessDenied);
+    }
+    FsPermChecker::for_current_fs().check_path(path, FsAccess::EXECUTE)
 }
 
 /// Maximum number of times a handler may redirect execution to another file.
@@ -78,12 +102,28 @@ pub struct ExecCtx<'a> {
     /// different from `exec_fn` if there are redirections (e.g. shebang), or if
     /// current process has a custom filesystem context (e.g. with chroot).
     pub path: String,
+    old_cred: &'a CredentialSet,
+    no_new_privs: bool,
+    pub cred: CredentialSet,
+    pub secure_exec: bool,
 
     // following fields both result in some heap allocation... sad.
     // but this seems inevitable cz redirecting to another binary may change the arguments and
     // environment variables. so we can't just keep them as lightweight slices of references.
     pub argv: Vec<String>,
     pub envp: Vec<String>,
+}
+
+impl ExecCtx<'_> {
+    pub fn prepare_credentials_for(&mut self, path: &PathRef) -> Result<(), SysError> {
+        let attr = path.inode().get_attr()?;
+        let file_caps = path.inode().get_file_cap()?;
+        let exec_cred =
+            compute_exec_credentials(self.old_cred, attr, file_caps, self.no_new_privs)?;
+        self.cred = exec_cred.cred;
+        self.secure_exec = exec_cred.secure_exec;
+        Ok(())
+    }
 }
 
 #[derive(Debug)]

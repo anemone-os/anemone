@@ -349,7 +349,7 @@ impl Task {
                         SiCode::Kernel,
                         SigInfoFields::Kill(SigKill {
                             pid: tg.tgid(),
-                            uid: 0, // only root user
+                            uid: self.cred().uid.real,
                         }),
                     ));
                 }

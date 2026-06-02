@@ -7,7 +7,7 @@ use crate::{
     },
     prelude::{
         handler::{TryFromSyscallArg, syscall_arg_flag32},
-        user_access::c_readonly_string,
+        user_access::c_readonly_path,
         *,
     },
 };
@@ -30,7 +30,7 @@ impl TryFromSyscallArg for FchownAtFlags {
 #[syscall(SYS_FCHOWNAT)]
 fn sys_fchownat(
     dirfd: AtFd,
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
+    #[validate_with(c_readonly_path)] pathname: Box<str>,
     owner: Uid,
     group: Gid,
     flags: FchownAtFlags,

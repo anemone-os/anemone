@@ -11,15 +11,28 @@ const MAX_ARG_BYTES_LEN: usize = MAX_PATH_LEN_BYTES * 2;
 // the same as above.
 const MAX_ARG_COUNT: usize = 128;
 
+fn nullable_c_readonly_string_array<
+    const MAX_ARRAY_LEN: usize,
+    const MAX_BYTES_EACH_STRING: usize,
+>(
+    arg: u64,
+) -> Result<Vec<Box<str>>, SysError> {
+    if arg == 0 {
+        return Ok(Vec::new());
+    }
+
+    c_readonly_string_array::<MAX_ARRAY_LEN, MAX_BYTES_EACH_STRING>(arg)
+}
+
 #[syscall(SYS_EXECVE, preparse = |_, _, _| {
     kdebugln!("preparsing execve syscall arguments");
 })]
 pub fn execve(
     #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] path: Box<str>,
-    #[validate_with(c_readonly_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] argv: Vec<
+    #[validate_with(nullable_c_readonly_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] argv: Vec<
         Box<str>,
     >,
-    #[validate_with(c_readonly_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] envp: Vec<
+    #[validate_with(nullable_c_readonly_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] envp: Vec<
         Box<str>,
     >,
 ) -> Result<u64, SysError> {

@@ -229,16 +229,8 @@ mod args {
         type Error = SysError;
 
         fn try_from(value: LinuxInodePerm) -> Result<Self, Self::Error> {
-            if value.intersects(
-                LinuxInodePerm::S_ISUID | LinuxInodePerm::S_ISGID | LinuxInodePerm::S_ISVTX,
-            ) {
-                knoticeln!(
-                    "Inode perm with S_ISUID/S_ISGID/S_ISVTX is not supported yet. value: {:?}",
-                    value
-                );
-                return Err(SysError::NotYetImplemented);
-            }
-
+            // The old temporary rejection of S_ISUID/S_ISGID/S_ISVTX was removed
+            // once chmod/chown/write paths learned to handle those bits.
             Ok(InodePerm::from_bits(value.bits() as u16).expect(
                 "In-core InodePerm should have the same bit representation as LinuxInodePerm",
             ))

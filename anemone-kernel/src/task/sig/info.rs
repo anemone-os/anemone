@@ -1,6 +1,6 @@
 //! Typed POSIX/Linux siginfo_t with Rust enums and structs.
 
-use crate::prelude::*;
+use crate::{prelude::*, task::credentials::UserId};
 
 /// `int si_code` in `struct siginfo_t`.
 ///
@@ -72,7 +72,7 @@ pub struct SigKill {
     /// Sender's thread group ID.
     pub pid: Tid,
     /// Sender's user ID.
-    pub uid: u32,
+    pub uid: Uid,
 }
 
 /// POSIX.1b signals
@@ -81,7 +81,7 @@ pub struct SigRt {
     /// Sender's thread group ID.
     pub pid: Tid,
     /// Sender's user ID.
-    pub uid: u32,
+    pub uid: Uid,
     /// Either an `i32` or a `pointer`. Anyway kernel doesn't care about
     /// that, so we just use `u64` here.
     pub sigval: u64,
@@ -102,7 +102,7 @@ pub struct SigChld {
     /// Child's thread group ID.
     pub pid: Tid,
     /// Sender's user ID.
-    pub uid: u32,
+    pub uid: Uid,
     /// Exit code
     pub status: i32,
     /// User time consumed by the child.
@@ -130,13 +130,13 @@ impl SigInfoFields {
             Self::Kill(SigKill { pid, uid }) | Self::TKill(SigKill { pid, uid }) => {
                 dst.kill = Kill {
                     pid: pid.get() as i32,
-                    uid: *uid,
+                    uid: uid.get(),
                 }
             },
             Self::Rt(SigRt { pid, uid, sigval }) => {
                 dst.rt = Rt {
                     pid: pid.get() as i32,
-                    uid: *uid,
+                    uid: uid.get(),
                     sigval: SigVal {
                         // just use the pointer field to store the sigval.
                         sival_ptr: *sigval as *mut _,
@@ -167,7 +167,7 @@ impl SigInfoFields {
             }) => {
                 dst.chld = Chld {
                     pid: pid.get() as i32,
-                    uid: *uid,
+                    uid: uid.get(),
                     status: *status,
                     utime: *utime,
                     stime: *stime,

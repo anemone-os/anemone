@@ -1,6 +1,7 @@
 //! Path resolution and name lookup.
 
 use crate::{fs::root_pathref, prelude::*};
+use super::permission::{FsAccess, FsPermChecker};
 use typed_path::UnixComponent;
 
 bitflags! {
@@ -135,6 +136,29 @@ pub fn resolve_from_with_root(
     resolve_components(root.clone(), cur_path, pending, flags)
 }
 
+/// Resolve a path while enforcing directory search permission during walk.
+pub fn resolve_from_with_root_checked(
+    root: &PathRef,
+    from: &PathRef,
+    path: &Path,
+    flags: ResolveFlags,
+    checker: &FsPermChecker,
+) -> Result<PathRef, SysError> {
+    if path.components().next().is_none() {
+        // empty path
+        return Err(SysError::InvalidArgument);
+    }
+
+    let pending = collect_components(path)?;
+    let cur_path = if path.is_absolute() {
+        root.clone()
+    } else {
+        from.clone()
+    };
+
+    resolve_components_checked(root.clone(), cur_path, pending, flags, checker)
+}
+
 /// Resolve the parent directory of a path, returning the parent [PathRef] and
 /// the final component as a string.
 ///
@@ -219,6 +243,39 @@ pub fn resolve_parent_from_with_root(
     ))
 }
 
+/// Resolve a parent directory while enforcing directory search permission
+/// during the parent walk.
+pub fn resolve_parent_from_with_root_checked(
+    root: &PathRef,
+    from: &PathRef,
+    path: &Path,
+    flags: ResolveFlags,
+    checker: &FsPermChecker,
+) -> Result<(PathRef, String), SysError> {
+    let mut pending = collect_components(path)?;
+    let Some(last) = pending.pop_back() else {
+        return Err(SysError::InvalidArgument);
+    };
+
+    let name = match last {
+        PendingComponent::Normal(name) => name,
+        PendingComponent::CurDir | PendingComponent::ParentDir => {
+            return Err(SysError::InvalidArgument);
+        },
+    };
+
+    let cur_path = if path.is_absolute() {
+        root.clone()
+    } else {
+        from.clone()
+    };
+
+    Ok((
+        resolve_components_checked(root.clone(), cur_path, pending, flags, checker)?,
+        name,
+    ))
+}
+
 /// Helper function to collect components of a path into a queue for resolution.
 ///
 /// This function seems a bit long to make it an inline? idk.
@@ -273,14 +330,48 @@ fn resolve_components(
     mut pending: VecDeque<PendingComponent>,
     flags: ResolveFlags,
 ) -> Result<PathRef, SysError> {
+    do_resolve_components(logical_root, cur_path, pending, flags, None)
+}
+
+fn resolve_components_checked(
+    logical_root: PathRef,
+    cur_path: PathRef,
+    pending: VecDeque<PendingComponent>,
+    flags: ResolveFlags,
+    checker: &FsPermChecker,
+) -> Result<PathRef, SysError> {
+    do_resolve_components(logical_root, cur_path, pending, flags, Some(checker))
+}
+
+fn do_resolve_components(
+    logical_root: PathRef,
+    mut cur_path: PathRef,
+    mut pending: VecDeque<PendingComponent>,
+    flags: ResolveFlags,
+    checker: Option<&FsPermChecker>,
+) -> Result<PathRef, SysError> {
     let mut remaining_links = SYMLINK_RESOLVE_LIMIT;
 
     while let Some(component) = pending.pop_front() {
         let is_last = pending.is_empty();
 
         match component {
-            PendingComponent::CurDir => continue,
+            PendingComponent::CurDir => {
+                if cur_path.inode().ty() != InodeType::Dir {
+                    return Err(SysError::NotDir);
+                }
+                if let Some(checker) = checker {
+                    checker.check_path(&cur_path, FsAccess::EXECUTE)?;
+                }
+                continue;
+            },
             PendingComponent::ParentDir => {
+                if cur_path.inode().ty() != InodeType::Dir {
+                    return Err(SysError::NotDir);
+                }
+                if let Some(checker) = checker {
+                    checker.check_path(&cur_path, FsAccess::EXECUTE)?;
+                }
                 // prevent escaping logical root via '..' components
                 if cur_path.location_eq(&logical_root) {
                     kdebugln!("prevent escaping logical root via '..'");
@@ -289,6 +380,12 @@ fn resolve_components(
                 cur_path = walk_parent(&cur_path);
             },
             PendingComponent::Normal(name) => {
+                if cur_path.inode().ty() != InodeType::Dir {
+                    return Err(SysError::NotDir);
+                }
+                if let Some(checker) = checker {
+                    checker.check_path(&cur_path, FsAccess::EXECUTE)?;
+                }
                 let child = lookup_child(&cur_path, &name)?;
                 let child_ty = child.inode().ty();
 

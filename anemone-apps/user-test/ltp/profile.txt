@@ -3,5 +3,9 @@
 # Edit this file and rebuild user-test to switch the selected LTP groups.
 # Use "all" to run every registered group.
 
+credentials
+chmod
+chown
 fs
-pipe
+process-exec
+read-write

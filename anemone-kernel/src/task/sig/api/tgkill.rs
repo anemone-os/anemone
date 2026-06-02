@@ -11,6 +11,8 @@ use crate::{
     },
 };
 
+use super::check_send_signal_permission;
+
 #[syscall(SYS_TGKILL)]
 fn sys_tgkill(tgid: Tid, tid: Tid, sig: SigNo) -> Result<u64, SysError> {
     kdebugln!(
@@ -20,12 +22,13 @@ fn sys_tgkill(tgid: Tid, tid: Tid, sig: SigNo) -> Result<u64, SysError> {
         sig.as_usize(),
     );
 
+    let current = get_current_task();
     let signal = Signal::new(
         sig,
         SiCode::TKill,
         SigInfoFields::TKill(SigKill {
-            pid: get_current_task().tgid(),
-            uid: 0,
+            pid: current.tgid(),
+            uid: current.cred().uid.real,
         }),
     );
 
@@ -33,6 +36,7 @@ fn sys_tgkill(tgid: Tid, tid: Tid, sig: SigNo) -> Result<u64, SysError> {
     let thread = tg
         .find_member(|member| member.tid() == tid)
         .ok_or(SysError::NoSuchProcess)?;
+    check_send_signal_permission(&thread, sig)?;
     thread.recv_signal(signal);
 
     Ok(0)

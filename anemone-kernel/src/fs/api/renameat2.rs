@@ -8,7 +8,7 @@ use crate::{
     prelude::*,
     syscall::{
         handler::{TryFromSyscallArg, syscall_arg_flag32},
-        user_access::c_readonly_string,
+        user_access::c_readonly_path,
     },
 };
 
@@ -63,9 +63,9 @@ impl LinuxRenameFlags {
 #[syscall(SYS_RENAMEAT2)]
 fn sys_renameat2(
     old_dirfd: AtFd,
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] old_path: Box<str>,
+    #[validate_with(c_readonly_path)] old_path: Box<str>,
     new_dirfd: AtFd,
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] new_path: Box<str>,
+    #[validate_with(c_readonly_path)] new_path: Box<str>,
     flags: LinuxRenameFlags,
 ) -> Result<u64, SysError> {
     kdebugln!(
@@ -101,6 +101,44 @@ fn sys_renameat2(
         let new_dir_pathref = new_dirfd.to_pathref(true)?;
         task.lookup_parent_path_from(&new_dir_pathref, new_path, ResolveFlags::empty())?
     };
+
+    let Some(old_parent_dentry) = old_pathref.dentry().parent() else {
+        return Err(SysError::Busy);
+    };
+    let old_parent_pathref = PathRef::new(old_pathref.mount().clone(), old_parent_dentry);
+
+    let checker = FsPermChecker::for_current_fs();
+    old_parent_pathref.mount().ensure_writable()?;
+    checker.check_path(&old_parent_pathref, FsAccess::WRITE | FsAccess::EXECUTE)?;
+    if old_parent_pathref.inode().perm().contains(InodePerm::ISVTX)
+        && !checker.is_owner(old_pathref.inode())
+        && !checker.is_owner(old_parent_pathref.inode())
+        && !checker.has_cap(Capability::FOWNER)
+    {
+        return Err(SysError::PermissionDenied);
+    }
+
+    new_dir_pathref.mount().ensure_writable()?;
+    checker.check_path(&new_dir_pathref, FsAccess::WRITE | FsAccess::EXECUTE)?;
+    if let Ok(existing) = task.lookup_path_from(
+        &new_dir_pathref,
+        Path::new(new_name.as_str()),
+        ResolveFlags::UNFOLLOW_LAST_SYMLINK,
+    ) {
+        if new_dir_pathref.inode().perm().contains(InodePerm::ISVTX)
+            && !checker.is_owner(existing.inode())
+            && !checker.is_owner(new_dir_pathref.inode())
+            && !checker.has_cap(Capability::FOWNER)
+        {
+            return Err(SysError::PermissionDenied);
+        }
+    }
+
+    if old_pathref.inode().ty() == InodeType::Dir
+        && !old_parent_pathref.location_eq(&new_dir_pathref)
+    {
+        checker.check_path(&old_pathref, FsAccess::WRITE)?;
+    }
 
     vfs_rename_at(&old_pathref, &new_dir_pathref, &new_name, flags)?;
 
