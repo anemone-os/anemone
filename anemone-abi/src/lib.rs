@@ -1,6 +1,7 @@
 //! The Application Binary Interface for Anemone.
 #![no_std]
 
+pub mod capability;
 pub mod errno;
 pub mod fs;
 pub mod process;

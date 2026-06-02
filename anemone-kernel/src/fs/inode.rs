@@ -9,7 +9,9 @@ use core::{
 };
 
 use crate::{
+    fs::permission::FsPermChecker,
     prelude::{vmo::VmObject, *},
+    task::credentials::cap::{Capability, FileCapabilities},
     utils::any_opaque::AnyOpaque,
 };
 
@@ -220,6 +222,15 @@ impl InodePerm {
             .union(Self::IWOTH)
     }
 
+    pub const fn all_rx() -> Self {
+        Self::IRUSR
+            .union(Self::IXUSR)
+            .union(Self::IRGRP)
+            .union(Self::IXGRP)
+            .union(Self::IROTH)
+            .union(Self::IXOTH)
+    }
+
     pub const fn all_r() -> Self {
         Self::IRUSR.union(Self::IRGRP).union(Self::IROTH)
     }
@@ -312,6 +323,12 @@ pub struct InodeStat {
     pub mtime: Duration,
     /// Status change time.
     pub ctime: Duration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModifType {
+    Modify,
+    Own,
 }
 
 impl InodeStat {
@@ -659,6 +676,61 @@ impl Inode {
         meta.ctime = ctime;
     }
 
+    fn setid_drop_mask(
+        ty: InodeType,
+        perm: InodePerm,
+        gid: Gid,
+        checker: &FsPermChecker,
+        modif: ModifType,
+    ) -> InodePerm {
+        let mut remove = InodePerm::empty();
+
+        if ty != InodeType::Regular {
+            return remove;
+        }
+
+        match modif {
+            ModifType::Modify => {
+                if checker.has_cap(Capability::FSETID) {
+                    return remove;
+                }
+                if perm.contains(InodePerm::ISUID) {
+                    remove.insert(InodePerm::ISUID);
+                }
+            },
+            ModifType::Own => {
+                if perm.contains(InodePerm::ISUID) {
+                    remove.insert(InodePerm::ISUID);
+                }
+            },
+        }
+
+        if perm.contains(InodePerm::ISGID) {
+            if perm.contains(InodePerm::IXGRP)
+                || (!checker.fs_group_allowed(gid) && !checker.has_cap(Capability::FSETID))
+            {
+                remove.insert(InodePerm::ISGID);
+            }
+        }
+
+        remove
+    }
+
+    /// Remove set-id privileges that must not survive a successful file
+    /// content or ownership modification.
+    pub(super) fn after_modified(&self, cred: &CredentialSet, modif: ModifType, ctime: Duration) {
+        let checker = FsPermChecker::new(cred.clone());
+        let mut meta = self.meta.write();
+        let remove = Self::setid_drop_mask(self.ty, meta.perm, meta.gid, &checker, modif);
+
+        if remove.is_empty() {
+            return;
+        }
+
+        meta.perm.remove(remove);
+        meta.ctime = ctime;
+    }
+
     gen_set_xtime!(atime, mtime, ctime);
 }
 
@@ -782,6 +854,34 @@ impl InodeRef {
         self.inode().meta.read().ctime
     }
 
+    pub fn chmod(&self, perm: InodePerm, ctime: Duration) {
+        self.inode().chmod(perm, ctime);
+    }
+
+    pub fn chown(&self, owner: Option<Uid>, group: Option<Gid>, ctime: Duration) {
+        self.inode().chown(owner, group, ctime);
+    }
+
+    pub fn set_times(
+        &self,
+        atime: Option<Duration>,
+        mtime: Option<Duration>,
+        ctime: Duration,
+    ) {
+        let mut meta = self.inode().meta.write();
+        if let Some(atime) = atime {
+            meta.atime = atime;
+        }
+        if let Some(mtime) = mtime {
+            meta.mtime = mtime;
+        }
+        meta.ctime = ctime;
+    }
+
+    pub fn after_modified(&self, cred: &CredentialSet, modif: ModifType, ctime: Duration) {
+        self.inode().after_modified(cred, modif, ctime);
+    }
+
     /// Get the superblock that this inode belongs to.
     pub fn sb(&self) -> Arc<SuperBlock> {
         if let Some(sb) = self.inode().sb.upgrade() {
@@ -840,10 +940,14 @@ impl InodeRef {
         (self.inode().ops.open)(self)
     }
 
-    pub fn truncate(&self, size: u64) -> Result<(), SysError> {
+    pub fn truncate(&self, size: u64, cred: &CredentialSet) -> Result<(), SysError> {
         match self.ty() {
             InodeType::Dir => Err(SysError::IsDir),
-            InodeType::Regular => (self.inode().ops.truncate)(self, size),
+            InodeType::Regular => {
+                (self.inode().ops.truncate)(self, size)?;
+                self.after_modified(cred, ModifType::Modify, Instant::now().to_duration());
+                Ok(())
+            },
             _ => Err(SysError::NotReg),
         }
     }
@@ -854,5 +958,9 @@ impl InodeRef {
 
     pub fn get_attr(&self) -> Result<InodeStat, SysError> {
         (self.inode().ops.get_attr)(self)
+    }
+
+    pub fn get_file_cap(&self) -> Result<FileCapabilities, SysError> {
+        Ok(FileCapabilities::empty())
     }
 }

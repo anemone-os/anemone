@@ -7,7 +7,7 @@ use anemone_abi::fs::linux::open::*;
 
 use crate::{
     fs::api::args::{AtFd, LinuxInodePerm},
-    prelude::{user_access::c_readonly_string, *},
+    prelude::{user_access::c_readonly_path, *},
     syscall::handler::TryFromSyscallArg,
     task::files::{FdFlags, FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
 };
@@ -198,6 +198,22 @@ impl OpenHow {
         self.lookup.resolve_flags(self.access)
     }
 
+    fn requested_access(self, file: &File, created: bool) -> FsAccess {
+        if created || self.access.is_path_only() {
+            return FsAccess::empty();
+        }
+
+        let mut access = FsAccess::empty();
+        if self.access.can_read() {
+            access |= FsAccess::READ;
+        }
+        if self.access.can_write()
+            || self.create.trunc && file.inode().ty() == InodeType::Regular
+        {
+            access |= FsAccess::WRITE;
+        }
+        access
+    }
 }
 
 /// Stage-1 `O_TMPFILE` implementation.
@@ -213,10 +229,16 @@ impl OpenHow {
 /// - the opened file cannot be linked back into the filesystem later because
 ///   `linkat(2)` with `AT_EMPTY_PATH` is not implemented yet;
 /// - creation/open/unlink is not atomic across the whole sequence.
-fn open_tmpfile_at(dir: &PathRef, how: OpenHow) -> Result<File, SysError> {
+fn open_tmpfile_at(
+    dir: &PathRef,
+    how: OpenHow,
+    checker: &FsPermChecker,
+) -> Result<File, SysError> {
     if dir.inode().ty() != InodeType::Dir {
         return Err(SysError::NotDir);
     }
+    dir.mount().ensure_writable()?;
+    checker.check_path(dir, FsAccess::WRITE | FsAccess::EXECUTE)?;
 
     loop {
         let seq = TMPFILE_NAME_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -245,74 +267,40 @@ fn open_tmpfile_at(dir: &PathRef, how: OpenHow) -> Result<File, SysError> {
     }
 }
 
-fn check_open_inode_access(file: &File, access: OpenAccessMode) -> Result<(), SysError> {
-    if access.is_path_only() {
-        return Ok(());
-    }
-
-    if access.can_write() && file.inode().ty() == InodeType::Dir {
-        return Err(SysError::IsDir);
-    }
-
-    if matches!(file.inode().ty(), InodeType::Regular | InodeType::Dir) {
-        let perm = file.inode().perm();
-        if access.can_read()
-            && !perm.intersects(InodePerm::IRUSR | InodePerm::IRGRP | InodePerm::IROTH)
-        {
-            return Err(SysError::AccessDenied);
-        }
-
-        if access.can_write()
-            && !perm.intersects(InodePerm::IWUSR | InodePerm::IWGRP | InodePerm::IWOTH)
-        {
-            return Err(SysError::AccessDenied);
-        }
-    }
-
-    Ok(())
-}
-
-fn check_open_inode_write_access(file: &File) -> Result<(), SysError> {
-    if file.inode().ty() == InodeType::Dir {
-        return Err(SysError::IsDir);
-    }
-
-    if matches!(file.inode().ty(), InodeType::Regular | InodeType::Dir) {
-        let perm = file.inode().perm();
-        if !perm.intersects(InodePerm::IWUSR | InodePerm::IWGRP | InodePerm::IWOTH) {
-            return Err(SysError::AccessDenied);
-        }
-    }
-
-    Ok(())
-}
-
-fn finish_open(file: File, how: OpenHow, created: bool) -> Result<u64, SysError> {
+fn finish_open(
+    file: File,
+    how: OpenHow,
+    checker: &FsPermChecker,
+    created: bool,
+) -> Result<u64, SysError> {
     // Linux encodes `O_TMPFILE` with the `O_DIRECTORY` bit, but the returned
     // object is a regular file rather than a directory fd.
     if !how.create.tmpfile && file.inode().ty() != InodeType::Dir && how.lookup.directory {
         return Err(SysError::NotDir);
     }
 
-    if !created {
-        check_open_inode_access(&file, how.access)?;
-    } else if how.access.can_write() && file.inode().ty() == InodeType::Dir {
+    if how.access.can_write() && file.inode().ty() == InodeType::Dir {
         return Err(SysError::IsDir);
     }
 
-    if how.create.trunc && !created && file.inode().ty() == InodeType::Regular {
-        check_open_inode_write_access(&file)?;
+    let access = how.requested_access(&file, created);
+    if !access.is_empty() {
+        checker.check_inode(file.inode(), access)?;
     }
 
-    if (how.access.can_write()
-        || how.create.trunc && !created && file.inode().ty() == InodeType::Regular)
-        && file.inode().ty() == InodeType::Regular
-    {
+    if how.status.contains(FileStatusFlags::NOATIME) && !checker.owner_or_capable(file.inode()) {
+        return Err(SysError::PermissionDenied);
+    }
+
+    let should_truncate =
+        how.create.trunc && !created && file.inode().ty() == InodeType::Regular;
+    if file.inode().ty() == InodeType::Regular && (how.access.can_write() || should_truncate) {
         file.path().mount().ensure_writable()?;
     }
 
-    if how.create.trunc && !created && file.inode().ty() == InodeType::Regular {
-        file.inode().truncate(0)?;
+    if should_truncate {
+        let cred = get_current_task().cred();
+        file.inode().truncate(0, &cred)?;
     }
 
     if how.status.contains(FileStatusFlags::APPEND) {
@@ -324,15 +312,20 @@ fn finish_open(file: File, how: OpenHow, created: bool) -> Result<u64, SysError>
     Ok(fd.raw() as u64)
 }
 
-fn lookup_open_path(dirfd: AtFd, path: &Path, how: OpenHow) -> Result<PathRef, SysError> {
+fn lookup_open_path(
+    dirfd: AtFd,
+    path: &Path,
+    how: OpenHow,
+    checker: &FsPermChecker,
+) -> Result<PathRef, SysError> {
     let task = get_current_task();
     let resolve_flags = how.resolve_flags();
 
     if path.is_absolute() {
-        task.lookup_path(path, resolve_flags)
+        task.lookup_path_with_checker(path, resolve_flags, checker)
     } else {
         let dir_path = dirfd.to_pathref(true)?;
-        task.lookup_path_from(&dir_path, path, resolve_flags)
+        task.lookup_path_from_with_checker(&dir_path, path, resolve_flags, checker)
     }
 }
 
@@ -344,7 +337,12 @@ fn file_for_path(pathref: PathRef, access: OpenAccessMode) -> Result<File, SysEr
     }
 }
 
-fn create_or_open_path(dirfd: AtFd, path: &Path, how: OpenHow) -> Result<(File, bool), SysError> {
+fn create_or_open_path(
+    dirfd: AtFd,
+    path: &Path,
+    how: OpenHow,
+    checker: &FsPermChecker,
+) -> Result<(File, bool), SysError> {
     let task = get_current_task();
     let parent_flags = how.resolve_flags().remove_last_symlink_flags();
     let (parent, name) = if path.is_absolute() {
@@ -362,7 +360,7 @@ fn create_or_open_path(dirfd: AtFd, path: &Path, how: OpenHow) -> Result<(File, 
         how.resolve_flags()
     };
 
-    match task.lookup_path_from(&parent, leaf, resolve_flags) {
+    match task.lookup_path_from_with_checker(&parent, leaf, resolve_flags, checker) {
         Ok(pathref) => {
             if how.create.excl {
                 return Err(SysError::AlreadyExists);
@@ -370,8 +368,18 @@ fn create_or_open_path(dirfd: AtFd, path: &Path, how: OpenHow) -> Result<(File, 
             Ok((file_for_path(pathref, how.access)?, false))
         },
         Err(SysError::NotFound) => {
-            let created = vfs_touch_at(&parent, leaf, how.perm)?;
-            Ok((file_for_path(created, how.access)?, true))
+            parent.mount().ensure_writable()?;
+            checker.check_path(&parent, FsAccess::WRITE | FsAccess::EXECUTE)?;
+
+            match vfs_touch_at(&parent, leaf, how.perm) {
+                Ok(created) => Ok((file_for_path(created, how.access)?, true)),
+                Err(SysError::AlreadyExists) if !how.create.excl => {
+                    let pathref =
+                        task.lookup_path_from_with_checker(&parent, leaf, resolve_flags, checker)?;
+                    Ok((file_for_path(pathref, how.access)?, false))
+                },
+                Err(err) => Err(err),
+            }
         },
         Err(err) => Err(err),
     }
@@ -380,24 +388,25 @@ fn create_or_open_path(dirfd: AtFd, path: &Path, how: OpenHow) -> Result<(File, 
 #[syscall(SYS_OPENAT)]
 fn sys_openat(
     dirfd: AtFd,
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
+    #[validate_with(c_readonly_path)] pathname: Box<str>,
     flags: u32,
     mode: u32,
 ) -> Result<u64, SysError> {
     let how = OpenHow::from_linux(flags, mode)?;
     let path = Path::new(pathname.as_ref());
+    let checker = FsPermChecker::for_current_fs();
 
     let (file, created) = if how.create.tmpfile {
-        let dir = lookup_open_path(dirfd, &path, how)?;
-        (open_tmpfile_at(&dir, how)?, true)
+        let dir = lookup_open_path(dirfd, &path, how, &checker)?;
+        (open_tmpfile_at(&dir, how, &checker)?, true)
     } else if how.create.creat {
-        create_or_open_path(dirfd, &path, how)?
+        create_or_open_path(dirfd, &path, how, &checker)?
     } else {
-        let pathref = lookup_open_path(dirfd, &path, how)?;
+        let pathref = lookup_open_path(dirfd, &path, how, &checker)?;
         (file_for_path(pathref, how.access)?, false)
     };
 
-    finish_open(file, how, created)
+    finish_open(file, how, &checker, created)
 }
 
 #[cfg(feature = "kunit")]
@@ -474,9 +483,14 @@ mod kunits {
         vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
         let before = read_dir_entries(dir_path);
         let dir = vfs_lookup(dir_path).unwrap();
+        let checker = FsPermChecker::for_current_fs();
 
-        let file = open_tmpfile_at(&dir, open_how(O_TMPFILE | O_RDWR, InodePerm::all_rwx()))
-            .unwrap();
+        let file = open_tmpfile_at(
+            &dir,
+            open_how(O_TMPFILE | O_RDWR, InodePerm::all_rwx()),
+            &checker,
+        )
+        .unwrap();
 
         assert_eq!(file.inode().ty(), InodeType::Regular);
         assert_eq!(file.get_attr().unwrap().nlink, 0);
@@ -498,7 +512,6 @@ mod kunits {
         let dir_path = Path::new("/kunit-openat-tmpfile-ro");
 
         vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
-        let dir = vfs_lookup(dir_path).unwrap();
 
         assert_eq!(
             OpenHow::from_linux(O_TMPFILE, InodePerm::all_rwx().bits() as u32).unwrap_err(),
@@ -515,6 +528,7 @@ mod kunits {
         vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
         let before = read_dir_entries(dir_path);
         let dir = vfs_lookup(dir_path).unwrap();
+        let checker = FsPermChecker::for_current_fs();
         let how = open_how(
             O_TMPFILE | O_RDWR,
             InodePerm::from_bits_truncate(
@@ -522,9 +536,9 @@ mod kunits {
             ),
         );
 
-        let file = open_tmpfile_at(&dir, how).unwrap();
+        let file = open_tmpfile_at(&dir, how, &checker).unwrap();
 
-        let fd = Fd::new(finish_open(file, how, true).unwrap() as u32).unwrap();
+        let fd = Fd::new(finish_open(file, how, &checker, true).unwrap() as u32).unwrap();
 
         let task = get_current_task();
         let file = task.get_fd(fd).unwrap();
@@ -544,8 +558,13 @@ mod kunits {
         file.write(b"payload").unwrap();
 
         let fd = Fd::new(
-            finish_open(file, open_how(O_RDONLY | O_TRUNC, InodePerm::empty()), false).unwrap()
-                as u32,
+            finish_open(
+                file,
+                open_how(O_RDONLY | O_TRUNC, InodePerm::empty()),
+                &FsPermChecker::for_current_fs(),
+                false,
+            )
+            .unwrap() as u32,
         )
         .unwrap();
 

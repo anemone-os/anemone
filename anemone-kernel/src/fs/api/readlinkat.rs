@@ -6,7 +6,7 @@
 use crate::{
     fs::api::args::AtFd,
     prelude::{
-        user_access::{UserWriteSlice, c_readonly_string, user_addr},
+        user_access::{UserWriteSlice, c_readonly_path, user_addr},
         *,
     },
 };
@@ -14,7 +14,7 @@ use crate::{
 #[syscall(SYS_READLINKAT)]
 fn sys_readlinkat(
     dirfd: AtFd,
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
+    #[validate_with(c_readonly_path)] pathname: Box<str>,
     #[validate_with(user_addr)] buf: VirtAddr,
     bufsize: i32,
 ) -> Result<u64, SysError> {

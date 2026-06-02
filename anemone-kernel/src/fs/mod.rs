@@ -11,6 +11,7 @@ mod iomux;
 mod mount;
 mod namei;
 mod path;
+mod permission;
 mod superblock;
 
 // filesystem drivers
@@ -32,15 +33,17 @@ pub use self::{
     filesystem::{FileSystem, FileSystemFlags, FileSystemOps},
     inode::{
         DeviceId, Ino, InoIsZero, InodeMeta, InodeMode, InodeOps, InodePerm, InodeRef, InodeStat,
-        InodeType, OpenedFile,
+        InodeType, ModifType, OpenedFile,
     },
     iomux::{PollEvent, PollRequest, PollWaiter},
     mount::{Mount, MountFlags, MountSource},
     namei::{
         ResolveFlags, resolve, resolve_from, resolve_from_with_root, resolve_parent,
         resolve_parent_from, resolve_parent_from_with_root,
+        resolve_parent_from_with_root_checked, resolve_from_with_root_checked,
     },
     path::PathRef,
+    permission::{FsAccess, FsPermChecker},
     superblock::SuperBlock,
 };
 
@@ -406,6 +409,42 @@ mod vfs_ops {
 
         use super::*;
 
+        fn new_inode_perm(parent: &InodeRef, ty: InodeType, mut perm: InodePerm) -> InodePerm {
+            let checker = FsPermChecker::for_current_fs();
+            let parent_perm = parent.inode().perm();
+
+            if ty == InodeType::Dir {
+                perm.remove(InodePerm::ISUID | InodePerm::ISGID);
+                if parent_perm.contains(InodePerm::ISGID) {
+                    perm.insert(InodePerm::ISGID);
+                }
+                return perm;
+            }
+
+            if perm.contains(InodePerm::ISGID)
+                && perm.contains(InodePerm::IXGRP)
+                && parent_perm.contains(InodePerm::ISGID)
+                && !checker.fs_group_allowed(parent.gid())
+                && !checker.has_cap(Capability::FSETID)
+            {
+                perm.remove(InodePerm::ISGID);
+            }
+            perm
+        }
+
+        fn init_new_inode_owner(parent: &InodeRef, inode: &InodeRef, perm: InodePerm) {
+            let cred = get_current_task().cred();
+            let group = if parent.inode().perm().contains(InodePerm::ISGID) {
+                parent.gid()
+            } else {
+                cred.gid.fs
+            };
+            let ctime = Instant::now().to_duration();
+
+            inode.chown(Some(cred.uid.fs), Some(group), ctime);
+            inode.chmod(perm, ctime);
+        }
+
         /// Mount a filesystem at the specified mountpoint.
         pub fn vfs_mount_at<'a, R: Into<PathResolution<'a>>>(
             fs_name: &str,
@@ -475,7 +514,9 @@ mod vfs_ops {
 
             parent.mount().ensure_writable()?;
 
+            let perm = new_inode_perm(parent.inode(), InodeType::Regular, perm);
             let inode = parent.inode().touch(&name, perm)?;
+            init_new_inode_owner(parent.inode(), &inode, perm);
 
             let dentry = materialize_child_dentry(parent.dentry(), &name, inode)?;
 
@@ -519,7 +560,9 @@ mod vfs_ops {
 
             parent.mount().ensure_writable()?;
 
+            let perm = new_inode_perm(parent.inode(), InodeType::Dir, perm);
             let inode = parent.inode().mkdir(&name, perm)?;
+            init_new_inode_owner(parent.inode(), &inode, perm);
 
             let dentry = materialize_child_dentry(parent.dentry(), &name, inode)?;
 
@@ -563,6 +606,7 @@ mod vfs_ops {
             let (parent, name) = resolve_parent_from(dir, rel_path.target, rel_path.flags)?;
             parent.mount().ensure_writable()?;
             let inode = parent.inode().symlink(&name, target)?;
+            init_new_inode_owner(parent.inode(), &inode, InodePerm::all_rwx());
             let dentry = materialize_child_dentry(parent.dentry(), &name, inode)?;
 
             Ok(PathRef::new(parent.mount().clone(), dentry))

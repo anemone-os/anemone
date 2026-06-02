@@ -4,9 +4,12 @@ use anemone_abi::process::linux::aux_vec::AuxvEntry;
 
 use crate::{
     prelude::*,
-    task::execve::binfmt::elf::{
-        auxv::{AuxEntry, AuxV},
-        parse::ElfMeta,
+    task::{
+        credentials::CredentialSet,
+        execve::binfmt::elf::{
+            auxv::{AuxEntry, AuxV},
+            parse::ElfMeta,
+        },
     },
 };
 
@@ -41,6 +44,8 @@ impl<'a, T: AsRef<str>, U: AsRef<str>> InitStackCtor<'a, T, U> {
         exec_fn: &'a str,
         argv: &'a [T],
         env: &'a [U],
+        cred: &CredentialSet,
+        secure_exec: bool,
     ) -> Self {
         Self {
             usp,
@@ -48,7 +53,7 @@ impl<'a, T: AsRef<str>, U: AsRef<str>> InitStackCtor<'a, T, U> {
             exec_fn,
             argv,
             env,
-            auxv: AuxV::new_partial(),
+            auxv: AuxV::new_partial(cred, secure_exec),
             record: HashMap::new(),
         }
     }
@@ -130,28 +135,33 @@ impl<'a, T: AsRef<str>, U: AsRef<str>> InitStackCtor<'a, T, U> {
     /// see [AuxV::new_partial] for details on extra entries we should push
     /// here.
     fn push_aux_blob(&mut self) -> Result<(), SysError> {
-        unsafe {
-            // 1. AT_EXECFN
-            self.usp.push_to_init_stack::<u8>(&[0])?;
-            let execfn = self.usp.push_to_init_stack::<u8>(self.exec_fn.as_bytes())?;
-            self.record.insert(StackBlobKey::ExecFn, execfn);
+        // 1. AT_EXECFN
+        let execfn = self.push_c_string_bytes(self.exec_fn.as_bytes())?;
+        self.record.insert(StackBlobKey::ExecFn, execfn);
 
-            // 2. AT_RANDOM
-            let mut random = [0u8; 16];
-            super::auxv::auxv_fill_random_bytes(&mut random);
-            let random = self.usp.push_to_init_stack::<u8>(&random)?;
-            self.record.insert(StackBlobKey::Random, random);
+        // 2. AT_RANDOM
+        let mut random = [0u8; 16];
+        super::auxv::auxv_fill_random_bytes(&mut random);
+        let random = unsafe { self.usp.push_to_init_stack::<u8>(&random)? };
+        self.record.insert(StackBlobKey::Random, random);
 
-            // 3. AT_PLATFORM & AT_BASE_PLATFORM
-            let platform_str = uts::MACHINE;
-            let platform = self.usp.push_to_init_stack::<u8>(platform_str)?;
-            self.record.insert(StackBlobKey::Platform, platform);
-            self.record.insert(StackBlobKey::BasePlatform, platform);
-
-            // TODO: add more auxv entries here.
-        }
+        // 3. AT_PLATFORM & AT_BASE_PLATFORM
+        let platform_str = match uts::MACHINE.split_last() {
+            Some((&0, bytes)) => bytes,
+            _ => uts::MACHINE,
+        };
+        let platform = self.push_c_string_bytes(platform_str)?;
+        self.record.insert(StackBlobKey::Platform, platform);
+        self.record.insert(StackBlobKey::BasePlatform, platform);
 
         Ok(())
+    }
+
+    fn push_c_string_bytes(&mut self, bytes: &[u8]) -> Result<VirtAddr, SysError> {
+        unsafe {
+            self.usp.push_to_init_stack::<u8>(&[0])?;
+            self.usp.push_to_init_stack::<u8>(bytes)
+        }
     }
 
     /// Push the rest of auxv entries.

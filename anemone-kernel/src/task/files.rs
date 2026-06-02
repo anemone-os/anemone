@@ -166,16 +166,17 @@ impl FileDesc {
         self.pfile.file.write_at(offset, buf).map_err(|e| e.into())
     }
 
-    pub fn truncate(&self, len: u64) -> Result<(), SysError> {
+    pub fn truncate(&self, len: u64, cred: &CredentialSet) -> Result<(), SysError> {
         if !self.can_write() {
-            return Err(SysError::PermissionDenied);
+            return Err(SysError::BadFileDescriptor);
         }
 
-        if self.pfile.file.inode().ty() == InodeType::Regular {
+        let inode = self.pfile.file.inode();
+        if inode.ty() == InodeType::Regular {
             self.pfile.file.path().mount().ensure_writable()?;
         }
 
-        self.pfile.file.inode().truncate(len)
+        inode.truncate(len, cred)
     }
 
     /// `whence` is Linux-specific. we handle that in syscall handler. it should
@@ -793,10 +794,7 @@ impl Task {
     ///
     /// This should only be used while the task is still uniquely owned, such
     /// as during task construction or clone setup.
-    pub fn replace_files_state_handle(
-        &mut self,
-        files_state: Arc<RwLock<FilesState>>,
-    ) {
+    pub fn replace_files_state_handle(&mut self, files_state: Arc<RwLock<FilesState>>) {
         *self.files_state.write() = files_state;
     }
 

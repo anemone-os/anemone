@@ -6,7 +6,7 @@ use crate::{
         stat::{args::StatAtFlag, kernel_fstatat},
     },
     prelude::{
-        user_access::{UserWritePtr, c_readonly_string, user_addr},
+        user_access::{UserWritePtr, c_readonly_path, user_addr},
         *,
     },
 };
@@ -14,7 +14,7 @@ use crate::{
 #[syscall(SYS_NEWFSTATAT)]
 fn sys_newfstatat(
     dirfd: AtFd,
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] filename: Box<str>,
+    #[validate_with(c_readonly_path)] filename: Box<str>,
     #[validate_with(user_addr)] statbuf: VirtAddr,
     flags: StatAtFlag,
 ) -> Result<u64, SysError> {

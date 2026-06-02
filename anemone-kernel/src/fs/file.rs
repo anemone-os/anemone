@@ -211,7 +211,12 @@ impl File {
 
         let mut pos = self.pos.lock();
 
+        let cred = get_current_task().cred();
         let written = (self.ops.write)(self, &mut *pos, buf)?;
+        if written > 0 {
+            self.inode()
+                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+        }
 
         Ok(written)
     }
@@ -226,7 +231,12 @@ impl File {
         self.ensure_regular_content_writable()?;
 
         let mut dummy_pos = pos;
+        let cred = get_current_task().cred();
         let written = (self.ops.write)(self, &mut dummy_pos, buf)?;
+        if written > 0 {
+            self.inode()
+                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+        }
 
         Ok(written)
     }
@@ -239,6 +249,7 @@ impl File {
         self.ensure_regular_content_writable()?;
 
         let mut pos = self.pos.lock();
+        let cred = get_current_task().cred();
         while !buf.is_empty() {
             let written = (self.ops.write)(self, &mut *pos, buf)?;
             if written == 0 {
@@ -248,6 +259,8 @@ impl File {
                 );
                 return Err(SysError::IO);
             }
+            self.inode()
+                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
             buf = &buf[written..];
         }
 
@@ -266,7 +279,12 @@ impl File {
         let mut pos = self.pos.lock();
         let sz = self.inode().get_attr()?.size as usize;
         *pos = sz;
+        let cred = get_current_task().cred();
         let written = (self.ops.write)(self, &mut *pos, buf)?;
+        if written > 0 {
+            self.inode()
+                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+        }
         Ok(written)
     }
 
@@ -280,7 +298,12 @@ impl File {
 
         let _pos = self.pos.lock();
         let mut append_pos = self.inode().get_attr()?.size as usize;
+        let cred = get_current_task().cred();
         let written = (self.ops.write)(self, &mut append_pos, buf)?;
+        if written > 0 {
+            self.inode()
+                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+        }
         Ok(written)
     }
 

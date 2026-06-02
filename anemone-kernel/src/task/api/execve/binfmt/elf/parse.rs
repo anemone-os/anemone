@@ -19,6 +19,7 @@ use crate::{
         vma::{ForkPolicy, Protection, VmArea, VmFlags},
         *,
     },
+    task::execve::binfmt::check_exec_permission,
     utils::data::FileDataSource,
 };
 
@@ -506,6 +507,7 @@ pub unsafe fn load_image(file: &File, usp: &mut UserSpace) -> Result<ElfMeta, Sy
     if let Some(interp_path) = dyn_interp {
         let interp_path =
             get_current_task().lookup_path(Path::new(&interp_path), ResolveFlags::empty())?;
+        check_exec_permission(&interp_path)?;
         kdebugln!("loading interpreter from path: {}", interp_path);
         let interp = load_interpreter(&interp_path.open()?, usp, interp_bias)?;
 

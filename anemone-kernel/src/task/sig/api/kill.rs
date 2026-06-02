@@ -7,6 +7,8 @@ use crate::{
     },
 };
 
+use super::{can_send_signal_to, check_send_signal_permission};
+
 #[derive(Debug)]
 enum KillTarget {
     ThreadGroup(Tid),
@@ -33,31 +35,56 @@ impl TryFromSyscallArg for KillTarget {
 fn sys_kill(target: KillTarget, signo: SigNo) -> Result<u64, SysError> {
     kdebugln!("kill: target={:?}, signo={:?}", target, signo);
 
+    let current = get_current_task();
     let signal = Signal::new(
         signo,
         SiCode::User,
         SigInfoFields::Kill(SigKill {
-            pid: get_current_task().tgid(),
-            uid: 0,
+            pid: current.tgid(),
+            uid: current.cred().uid.real,
         }),
     );
 
     match target {
         KillTarget::ThreadGroup(tgid) => {
             let tg = get_thread_group(&tgid).ok_or(SysError::NoSuchProcess)?;
+            let leader = tg.leader().ok_or(SysError::NoSuchProcess)?;
+            check_send_signal_permission(&leader, signo)?;
             tg.recv_signal(signal);
         },
         KillTarget::CurrentProcessGroup => {
-            let pgid = get_current_task().get_thread_group().pgid();
+            let pgid = current.get_thread_group().pgid();
             let pg = get_process_group(&pgid).ok_or(SysError::NoSuchProcess)?;
-            pg.recv_signal(signal);
+            let mut delivered = false;
+            for tg in pg.get_members() {
+                if let Some(leader) = tg.leader() {
+                    if can_send_signal_to(&leader, signo) {
+                        tg.recv_signal(signal.clone());
+                        delivered = true;
+                    }
+                }
+            }
+            if !delivered {
+                return Err(SysError::PermissionDenied);
+            }
         },
         KillTarget::ProcessGroup(pgid) => {
             let pg = get_process_group(&pgid).ok_or(SysError::NoSuchProcess)?;
-            pg.recv_signal(signal);
+            let mut delivered = false;
+            for tg in pg.get_members() {
+                if let Some(leader) = tg.leader() {
+                    if can_send_signal_to(&leader, signo) {
+                        tg.recv_signal(signal.clone());
+                        delivered = true;
+                    }
+                }
+            }
+            if !delivered {
+                return Err(SysError::PermissionDenied);
+            }
         },
         KillTarget::Broadcast => {
-            let current_tgid = get_current_task().tgid();
+            let current_tgid = current.tgid();
             let mut targets = Vec::new();
 
             for_each_thread_group_from(
@@ -74,8 +101,17 @@ fn sys_kill(target: KillTarget, signo: SigNo) -> Result<u64, SysError> {
                 return Err(SysError::NoSuchProcess);
             }
 
+            let mut delivered = false;
             for tg in targets {
-                tg.recv_signal(signal.clone());
+                if let Some(leader) = tg.leader() {
+                    if can_send_signal_to(&leader, signo) {
+                        tg.recv_signal(signal.clone());
+                        delivered = true;
+                    }
+                }
+            }
+            if !delivered {
+                return Err(SysError::PermissionDenied);
             }
         },
     }

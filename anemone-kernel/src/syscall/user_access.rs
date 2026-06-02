@@ -522,7 +522,7 @@ mod validators {
             }
 
             if values.len() == MAX_LEN {
-                return Err(SysError::InvalidArgument);
+                return Err(SysError::ListTooLong);
             }
             values.push(value);
             current = VirtAddr::new(elem_end);
@@ -540,6 +540,14 @@ mod validators {
             usp.with_usp(|usp| c_readonly_array_from_addr::<MAX_BYTES, u8>(usp, start, 0, false))?;
         let s = str::from_utf8(&bytes).map_err(|_| SysError::InvalidArgument)?;
         Ok(Box::from(s))
+    }
+
+    /// Validate a user C string pointer as a filesystem pathname.
+    pub fn c_readonly_path(arg: u64) -> Result<Box<str>, SysError> {
+        c_readonly_string::<MAX_PATH_LEN_BYTES>(arg).map_err(|err| match err {
+            SysError::ListTooLong => SysError::NameTooLong,
+            other => other,
+        })
     }
 
     /// Validate a user pointer to an array of C strings and return copied

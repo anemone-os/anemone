@@ -196,7 +196,7 @@ impl UserSpaceHandle {
         res
     }
 
-    pub fn detach_all_sysv_shm_for(&self, tgid: Tid) -> Result<(), SysError> {
+    pub fn detach_all_sysv_shm_for(&self, tgid: Tid) {
         let mut usp = self.usp.lock();
         usp.detach_all_sysv_shm_for(tgid)
     }
@@ -424,15 +424,13 @@ impl UserSpace {
         Self::find_vma_raw_mut(&mut self.vmas, vaddr)
     }
 
-    fn detach_all_sysv_shm_for(&mut self, tgid: Tid) -> Result<(), SysError> {
+    fn detach_all_sysv_shm_for(&mut self, tgid: Tid) {
         let attachments: Vec<shm::ShmAttachment> = self.sysv_shm.values().cloned().collect();
         self.sysv_shm.clear();
 
         for attachment in attachments {
             shm::detach_attachment(&attachment, tgid);
         }
-
-        Ok(())
     }
 }
 

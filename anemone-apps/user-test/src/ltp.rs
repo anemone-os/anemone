@@ -66,6 +66,14 @@ const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../ltp/groups/exec.txt"),
     },
     LtpGroup {
+        name: "chmod",
+        cases: include_str!("../ltp/groups/chmod.txt"),
+    },
+    LtpGroup {
+        name: "chown",
+        cases: include_str!("../ltp/groups/chown.txt"),
+    },
+    LtpGroup {
         name: "fd",
         cases: include_str!("../ltp/groups/fd.txt"),
     },
@@ -101,6 +109,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
         name: "tmp",
         cases: include_str!("../ltp/groups/tmp.txt"),
     },
+    LtpGroup {
+        name: "credentials",
+        cases: include_str!("../ltp/groups/credentials.txt"),
+    },
 ];
 
 struct LtpFixture {
@@ -121,6 +133,7 @@ const LTP_FIXTURES: &[LtpFixture] = &[
 
 struct LtpCaseSpec<'a> {
     name: &'a str,
+    executable: &'a str,
     args: Vec<&'a str>,
 }
 
@@ -232,11 +245,11 @@ fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
             continue;
         }
 
-        let case_path = format!("/{}/ltp/testcases/bin/{}", root.family, case.name);
+        let case_path = format!("/{}/ltp/testcases/bin/{}", root.family, case.executable);
         if fstatat(AtFd::Cwd, Path::new(case_path.as_str())).is_err() {
             println!(
-                "user-test: skipping {} missing case {}",
-                root.label, case.name,
+                "user-test: skipping {} missing case {} executable {}",
+                root.label, case.name, case.executable,
             );
             summary.skipped += 1;
             continue;
@@ -381,10 +394,35 @@ fn parse_case_line(line: &str) -> Option<LtpCaseSpec<'_>> {
         return None;
     }
 
-    let mut parts = line.split_ascii_whitespace();
-    let name = parts.next()?;
+    let mut fields = line.split("=>");
+    let raw_name = fields.next()?.trim();
+    let mut name_parts = raw_name.split_ascii_whitespace();
+    let name = name_parts.next()?;
+    if name.is_empty() {
+        panic!("user-test: invalid LTP case line {line}");
+    }
+
+    let command = fields.next();
+    if fields.next().is_some() {
+        panic!("user-test: invalid LTP case line {line}");
+    }
+
+    if command.is_some() && name_parts.next().is_some() {
+        panic!("user-test: invalid LTP case alias {line}");
+    }
+
+    let command = command.map(str::trim);
+    if matches!(command, Some("")) {
+        panic!("user-test: invalid LTP case alias {line}");
+    }
+    let mut parts = command.unwrap_or(line).split_ascii_whitespace();
+    let executable = parts.next().unwrap_or(name);
     let args = parts.collect();
-    Some(LtpCaseSpec { name, args })
+    Some(LtpCaseSpec {
+        name,
+        executable,
+        args,
+    })
 }
 
 fn ltp_exit_code(wstatus: WStatus) -> i32 {
@@ -399,7 +437,7 @@ fn install_ltp_fixture(fixture: &LtpFixture) {
     let parent = fixture.path.rsplit_once('/').map(|(parent, _)| parent);
     let parent = parent.filter(|parent| !parent.is_empty()).unwrap_or("/");
     let script = format!(
-        "if [ ! -e {path} ]; then mkdir -p {parent} && cat > {path} <<'EOF'\n{content}EOF\nfi",
+        "mkdir -p {parent} && cat > {path} <<'EOF'\n{content}\nEOF",
         path = fixture.path,
         parent = parent,
         content = fixture.content,

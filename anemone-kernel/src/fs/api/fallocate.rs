@@ -94,7 +94,8 @@ fn sys_fallocate(fd: Fd, mode: FallocateMode, offset: i64, len: i64) -> Result<u
     validate_fallocate_file(&file)?;
 
     if !mode.keep_size() && file.vfs_file().inode().size() < end {
-        file.vfs_file().inode().truncate(end)?;
+        let cred = task.cred();
+        file.vfs_file().inode().truncate(end, &cred)?;
     }
 
     Ok(0)

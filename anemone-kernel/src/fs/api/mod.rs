@@ -65,6 +65,24 @@ mod args {
         Fd(Fd),
     }
 
+    #[derive(Debug, Clone, Copy)]
+    pub struct RawAtFd(u32);
+
+    impl TryFromSyscallArg for RawAtFd {
+        fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+            Ok(Self(raw as u32))
+        }
+    }
+
+    impl RawAtFd {
+        /// Resolve delayed dirfd validation when the pathname semantics require
+        /// the fd to be used. Absolute pathnames ignore dirfd, so callers must
+        /// not resolve this wrapper before checking the pathname.
+        pub fn resolve(self) -> Result<AtFd, SysError> {
+            AtFd::try_from_syscall_arg(self.0 as u64)
+        }
+    }
+
     impl TryFromSyscallArg for AtFd {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
             let raw = i32::try_from_syscall_arg(raw)?;
@@ -229,16 +247,8 @@ mod args {
         type Error = SysError;
 
         fn try_from(value: LinuxInodePerm) -> Result<Self, Self::Error> {
-            if value.intersects(
-                LinuxInodePerm::S_ISUID | LinuxInodePerm::S_ISGID | LinuxInodePerm::S_ISVTX,
-            ) {
-                knoticeln!(
-                    "Inode perm with S_ISUID/S_ISGID/S_ISVTX is not supported yet. value: {:?}",
-                    value
-                );
-                return Err(SysError::NotYetImplemented);
-            }
-
+            // The old temporary rejection of S_ISUID/S_ISGID/S_ISVTX was removed
+            // once chmod/chown/write paths learned to handle those bits.
             Ok(InodePerm::from_bits(value.bits() as u16).expect(
                 "In-core InodePerm should have the same bit representation as LinuxInodePerm",
             ))

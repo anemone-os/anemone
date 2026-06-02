@@ -1,6 +1,14 @@
-pub mod getegid;
-pub mod geteuid;
-pub mod getgid;
-pub mod getuid;
-pub mod setgid;
-pub mod setuid;
+macro_rules! deny_permission {
+    ($($arg:tt)*) => {{
+        use crate::prelude::*;
+        knoticeln!($($arg)*);
+        SysError::PermissionDenied
+    }};
+}
+
+pub mod cap;
+pub mod gid;
+pub mod groups;
+pub mod id;
+pub mod prctl;
+pub mod uid;

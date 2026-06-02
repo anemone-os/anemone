@@ -26,15 +26,25 @@ fn load_binary(ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
     if elf_hdr.e_ident[0..4] != [0x7F, b'E', b'L', b'F'] {
         return Ok(ExecResult::NotRecognized);
     }
+    ctx.prepare_credentials_for(file.path())?;
     file.seek(0)?;
 
     let meta = unsafe { parse::load_image(&file, ctx.usp)? };
 
-    let sp =
-        init_stack::InitStackCtor::new(ctx.usp, &meta, ctx.exec_fn, &ctx.argv, &ctx.envp).push()?;
+    let sp = init_stack::InitStackCtor::new(
+        ctx.usp,
+        &meta,
+        ctx.exec_fn,
+        &ctx.argv,
+        &ctx.envp,
+        &ctx.cred,
+        ctx.secure_exec,
+    )
+    .push()?;
 
     Ok(ExecResult::Loaded(LoadedBinaryMeta {
         exe: file.path().clone(),
+        cred: ctx.cred.clone(),
         entry: if let Some(interp) = meta.interp {
             interp.entry
         } else {

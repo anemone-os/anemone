@@ -11,7 +11,10 @@ pub use tid::*;
 // integration with other subsystems
 pub mod cpu_usage;
 pub mod credentials;
-pub use credentials::{Gid, Uid};
+pub use credentials::{CredentialSet, Credentials, Gid, Uid, UserId};
+pub use credentials::{
+    cap::{Capability, CredCapabilities, FileCapabilities, SecureBits},
+};
 pub mod files;
 pub mod sig;
 #[path = "fs.rs"]
@@ -109,6 +112,8 @@ pub struct Task {
     /// Which cpu this task is scheduled to run on.
     cpuid: CpuId,
 
+    /// stub.
+    nice: AtomicIsize,
     /// Scheduling context. Used for context switching.
     sched_ctx: MonoFlow<TaskContext>,
     /// Scheduling entity. Used for scheduling.
@@ -131,6 +136,10 @@ pub struct Task {
     fs_state: Arc<RwLock<FsState>>,
     /// File descriptor table state.
     files_state: RwLock<Arc<RwLock<FilesState>>>,
+    /// Identity, group, and capability state used for permission checks.
+    cred: RwLock<CredentialSet>,
+    /// Irreversible bit set by `PR_SET_NO_NEW_PRIVS`.
+    no_new_privs: AtomicBool,
     /// Cpu usage information.
     cpu_usage: NoIrqRwLock<TaskCpuUsage>,
 
@@ -416,6 +425,7 @@ impl Task {
 
                 cpu
             },
+            nice: AtomicIsize::new(0),
             sched_ctx: unsafe {
                 MonoFlow::new(TaskContext::from_kernel_fn(
                     VirtAddr::new(entry as u64),
@@ -428,6 +438,8 @@ impl Task {
             fpu_used: AtomicBool::new(false),
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: RwLock::new(Arc::new(RwLock::new(FilesState::new()))),
+            cred: RwLock::new(CredentialSet::new_root()),
+            no_new_privs: AtomicBool::new(false),
             cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
 
             sig_disposition: Arc::new(NoIrqRwLock::new(SignalDisposition::new())),
@@ -464,6 +476,7 @@ impl Task {
                 flags: NoIrqRwLock::new(TaskFlags::IDLE | TaskFlags::KERNEL),
                 usp: RwLock::new(None),
                 cpuid: cur_cpu_id(),
+                nice: AtomicIsize::new(0),
                 sched_ctx: unsafe {
                     MonoFlow::new(TaskContext::from_kernel_fn(
                         VirtAddr::new(entry as u64),
@@ -476,6 +489,8 @@ impl Task {
                 fpu_used: AtomicBool::new(false),
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
                 files_state: RwLock::new(Arc::new(RwLock::new(FilesState::new()))),
+                cred: RwLock::new(CredentialSet::new_root()),
+                no_new_privs: AtomicBool::new(false),
                 cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
 
                 sig_disposition: Arc::new(NoIrqRwLock::new(SignalDisposition::new())),
@@ -717,6 +732,55 @@ impl Task {
 
     pub fn set_fpu_used(&self) {
         self.fpu_used.store(true, Ordering::Release);
+    }
+
+    pub fn nice(&self) -> isize {
+        self.nice.load(Ordering::Acquire)
+    }
+
+    pub fn set_nice(&self, nice: isize) {
+        self.nice.store(nice, Ordering::Release);
+    }
+
+    /// Return a credential snapshot.
+    ///
+    /// This accessor intentionally clones the credential set so callers do not
+    /// hold the credential lock across scheduler, topology, VFS, or user memory
+    /// operations.
+    pub fn cred(&self) -> CredentialSet {
+        self.cred.read().clone()
+    }
+
+    /// Replace the whole credential snapshot.
+    ///
+    /// This method only takes the credential lock. Callers must not hold a
+    /// scheduler-state lock while replacing credentials.
+    pub fn replace_cred(&self, cred: CredentialSet) {
+        *self.cred.write() = cred;
+    }
+
+    /// Mutate credentials transactionally under the credential lock.
+    ///
+    /// The closure must stay local to credential state and must not acquire
+    /// scheduler-state locks or perform operations that can block.
+    pub fn update_cred_with<F>(&self, f: F) -> Result<(), SysError>
+    where
+        F: FnOnce(&mut CredentialSet) -> Result<(), SysError>,
+    {
+        let mut cred = self.cred.write();
+        f(&mut cred)
+    }
+
+    pub fn has_cap(&self, cap: Capability) -> bool {
+        self.cred.read().has_cap_effective(cap)
+    }
+
+    pub fn no_new_privs(&self) -> bool {
+        self.no_new_privs.load(Ordering::Acquire)
+    }
+
+    pub fn set_no_new_privs(&self) {
+        self.no_new_privs.store(true, Ordering::Release);
     }
 }
 

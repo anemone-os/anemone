@@ -5,16 +5,16 @@
 
 use crate::{
     fs::api::args::AtFd,
-    prelude::{user_access::c_readonly_string, *},
+    prelude::{user_access::c_readonly_path, *},
 };
 
 #[syscall(SYS_SYMLINKAT)]
 fn sys_symlinkat(
     // content of link.
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] target: Box<str>,
+    #[validate_with(c_readonly_path)] target: Box<str>,
     newdirfd: AtFd,
     // where link itself should be created.
-    #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] linkpath: Box<str>,
+    #[validate_with(c_readonly_path)] linkpath: Box<str>,
 ) -> Result<u64, SysError> {
     kdebugln!(
         "symlinkat: target={}, newdirfd={:?}, linkpath={}",
@@ -31,6 +31,9 @@ fn sys_symlinkat(
         let newdir_path = newdirfd.to_pathref(true)?;
         task.lookup_parent_path_from(&newdir_path, linkpath, ResolveFlags::empty())?
     };
+
+    parent.mount().ensure_writable()?;
+    FsPermChecker::for_current_fs().check_path(&parent, FsAccess::WRITE | FsAccess::EXECUTE)?;
 
     vfs_symlink_at(
         &parent,

@@ -50,7 +50,11 @@ mod args {
     }
 }
 
-pub fn kernel_fchmod(pathref: &PathRef, perm: InodePerm, ctime: Duration) -> Result<(), SysError> {
+pub fn kernel_fchmod(
+    pathref: &PathRef,
+    mut perm: InodePerm,
+    ctime: Duration,
+) -> Result<(), SysError> {
     let inode = pathref.inode();
 
     if inode.ty() == InodeType::Symlink {
@@ -60,6 +64,19 @@ pub fn kernel_fchmod(pathref: &PathRef, perm: InodePerm, ctime: Duration) -> Res
 
     pathref.mount().ensure_writable()?;
 
+    let checker = FsPermChecker::for_current_fs();
+    if !checker.owner_or_capable(inode) {
+        return Err(SysError::PermissionDenied);
+    }
+    if perm.contains(InodePerm::ISGID)
+        && !checker.fs_group_allowed(inode.gid())
+        && !checker.has_cap(Capability::FSETID)
+    {
+        perm.remove(InodePerm::ISGID);
+    }
+
+    let cred = get_current_task().cred();
     inode.inode().chmod(perm, ctime);
+    inode.after_modified(&cred, ModifType::Modify, ctime);
     Ok(())
 }
