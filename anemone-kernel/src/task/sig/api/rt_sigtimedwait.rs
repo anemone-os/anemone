@@ -107,14 +107,31 @@ fn sys_rt_sigtimedwait(
         // check them before restoring the original mask.
         if let Some(signal) = task.fetch_specific_signal(uthese) {
             WaitOutcome::Signal(signal)
-        } else if matches!(
-            outcome,
-            wait::WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force)
-        ) || task.has_unmasked_signal()
-        {
-            WaitOutcome::Interrupted
         } else {
-            WaitOutcome::Timeout(rem)
+            match outcome {
+                wait::WaitOutcome::Completed(WaitReason::Timeout) => WaitOutcome::Timeout(rem),
+                wait::WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force) => {
+                    WaitOutcome::Interrupted
+                },
+                other if task.has_unmasked_signal() => {
+                    kdebugln!(
+                        "sys_rt_sigtimedwait: unmasked signal after wait task={} outcome={:?}",
+                        task.tid(),
+                        other,
+                    );
+                    WaitOutcome::Interrupted
+                },
+                other => {
+                    kwarningln!(
+                        "sys_rt_sigtimedwait: unexpected wait outcome task={} outcome={:?} rem={:?}",
+                        task.tid(),
+                        other,
+                        rem,
+                    );
+                    assert!(false, "rt_sigtimedwait saw unexpected wait outcome");
+                    WaitOutcome::Interrupted
+                },
+            }
         }
     };
 

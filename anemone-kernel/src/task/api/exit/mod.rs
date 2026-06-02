@@ -178,7 +178,15 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         // the task. Otherwise if a preemption occurs after setting status to Zombie but
         // before we, e.g., detach from thread group, we'll end up with a zombie task
         // that still appears in the thread group.
-        task.update_status_with(|_prev| (TaskStatus::Zombie, ()));
+        task.update_sched_state_with(|prev| {
+            assert!(
+                matches!(prev, TaskSchedState::Runnable | TaskSchedState::Zombie),
+                "exiting task should not own an active wait-core state: task={} state={:?}",
+                task.tid(),
+                prev,
+            );
+            (TaskSchedState::Zombie, ())
+        });
     }
 
     with_intr_disabled(|| unsafe {

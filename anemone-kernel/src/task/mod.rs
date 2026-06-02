@@ -183,12 +183,6 @@ pub enum TaskStatus {
     Waiting { interruptible: bool },
 }
 
-impl TaskStatus {
-    pub fn is_sleeping(&self) -> bool {
-        matches!(self, TaskStatus::Waiting { .. })
-    }
-}
-
 bitflags! {
     /// TODO: Remove current flags.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

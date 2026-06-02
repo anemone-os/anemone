@@ -67,7 +67,6 @@ pub(crate) fn clock_nanosleep(
             return Err(SysError::Interrupted);
         }
 
-        let start_rem = rem;
         rem = schedule_wait_with_timeout(&task, token, Some(rem));
         let outcome = wait::finish_wait(guard);
         kdebugln!(
@@ -77,21 +76,33 @@ pub(crate) fn clock_nanosleep(
             rem,
         );
 
-        if matches!(
-            outcome,
-            WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force)
-        ) || task.has_unmasked_signal()
-        {
-            write_remaining_time(rmtp, rem)?;
-            return Err(SysError::Interrupted);
-        }
-
-        if matches!(outcome, WaitOutcome::Completed(WaitReason::Timeout)) {
-            break;
-        }
-
-        if rem == start_rem {
-            break;
+        match outcome {
+            WaitOutcome::Completed(WaitReason::Timeout) => {
+                if task.has_unmasked_signal() {
+                    write_remaining_time(rmtp, rem)?;
+                    return Err(SysError::Interrupted);
+                }
+                break;
+            },
+            WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force) => {
+                write_remaining_time(rmtp, rem)?;
+                return Err(SysError::Interrupted);
+            },
+            other => {
+                if task.has_unmasked_signal() {
+                    write_remaining_time(rmtp, rem)?;
+                    return Err(SysError::Interrupted);
+                }
+                kwarningln!(
+                    "clock_nanosleep: unexpected wait outcome task={} outcome={:?} rem={:?}",
+                    task.tid(),
+                    other,
+                    rem,
+                );
+                assert!(false, "clock_nanosleep saw unexpected wait outcome");
+                write_remaining_time(rmtp, rem)?;
+                return Err(SysError::Interrupted);
+            },
         }
     }
 

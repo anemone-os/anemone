@@ -42,35 +42,6 @@ impl Task {
         self.sched_state.write()
     }
 
-    /// Run a closure with current task status, and update the status with the
-    /// returned one.
-    ///
-    /// Note that we don't provide a method that just updates the status. Status
-    /// updating is always tied to certain transaction, and this method can
-    /// ensure the atomicity of the transaction and the status update.
-    ///
-    /// **Migration compatibility only.** Legacy timeout/signal users and other
-    /// not-yet-migrated paths still write [TaskStatus] during the wait-core
-    /// migration. New wait-core code must use [Self::update_sched_state_with]
-    /// so it cannot complete a wait round without the matching [WaitState]. If
-    /// the current internal state is wait-core [TaskSchedState::Waiting], this
-    /// legacy entry point will panic instead of silently overwriting the active
-    /// wait.
-    pub fn update_status_with<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(TaskStatus) -> (TaskStatus, R),
-    {
-        let mut guard = self.sched_state.write();
-        if matches!(&*guard, TaskSchedState::Waiting { .. }) {
-            panic!(
-                "legacy update_status_with cannot mutate wait-core Waiting; use wait-core wake/cancel entry points"
-            );
-        }
-        let (status, r) = f(guard.as_task_status());
-        *guard = TaskSchedState::from_legacy_status(status);
-        r
-    }
-
     /// Run a closure with the internal scheduler state and update it with the
     /// returned state in the same NoIrq transaction.
     pub(crate) fn update_sched_state_with<F, R>(&self, f: F) -> R

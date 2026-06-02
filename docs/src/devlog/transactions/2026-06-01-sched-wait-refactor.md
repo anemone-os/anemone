@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / event / timer / signal / wait core
 **Canonical Plan:** [RFC-20260601-sched-wait-refactor](../../rfcs/sched-wait-refactor/index.md), [Invariants](../../rfcs/sched-wait-refactor/invariants.md), [Implementation Plan](../../rfcs/sched-wait-refactor/implementation.md)
-**Current Phase:** phase 4 complete; phase 5 pending
+**Current Phase:** phase 5 audit 1 complete; phase 5 further audits pending
 
 ## Scope
 
@@ -158,9 +158,29 @@
 
 **Next:** 阶段 5 进入旁路审计和旧 API 收缩：重点处理 `try_to_wake_up()`、`schedule_with_timeout()`、`notify()` 的 `LegacyWaiting` fallback、`Task::update_status_with()` 保留边界，以及 `task_enqueue()` 命中的非 wait-tail 分类说明。
 
+### 2026-06-02 - 阶段 5 审计 1：旧兼容接口收缩
+
+**Phase:** phase 5 audit 1 - bypass audit and legacy API removal
+
+**Change:** 删除 `TaskSchedState::LegacyWaiting`，调度器不再接受无 wait identity 的 legacy waiting 状态。`schedule()` 的 park / abort-park 重读分支只处理 `Runnable`、同一轮 `Waiting`、不同轮 `Waiting` 和 `Zombie`；旧状态覆盖 wait-core park 的诊断分支随状态一起移除。
+
+**Change:** 删除无生产调用点的 `try_to_wake_up()` / `WakeUpError` 和 `schedule_with_timeout()` 兼容 wrapper。timeout 用户必须显式 `begin_wait()` 后把 `WakeToken` 交给 `schedule_wait_with_timeout()`，signal / force 用户必须走 `notify()` -> `wake_active_wait()`，event / timer producer 必须走 `wake_wait()`。这次没有保留“以后再迁移”的旧 wrapper。
+
+**Change:** 删除 `Task::update_status_with()` 和 `TaskSchedState::from_legacy_status()`。剩余的 exit zombie 写入改为直接 `update_sched_state_with()`，并在退出任务仍持有 active wait-core state 时记录 warning 和普通 `assert!`。`TaskStatus` 保留为 `task.status()` 和 procfs 等观察投影，不再是普通等待 begin/completion/cancel 写入口。
+
+**Change:** 关闭阶段 4 review finding：`clock_nanosleep()` 和 `rt_sigtimedwait()` 对 `finish_wait()` outcome 改为显式 match。阻塞后只接受 `Completed(Timeout)`、`Completed(Signal | Force)`，以及 syscall 自己处理的 pending-signal ready；`Armed`、`Cancelled`、`Retired` 或其他 completion reason 会 warning + 普通 `assert!`，不再折叠成普通 timeout / success。
+
+**Audit:** 搜索 `LegacyWaiting`、`update_status_with`、`from_legacy_status`、`try_to_wake_up`、`WakeUpError`、`schedule_with_timeout(` 和 `is_sleeping(`，确认内核源码已无命中。剩余 `TaskStatus::Waiting` 只在 wait-core 到旧观察状态的投影和 procfs/status 观察层。剩余 `task_enqueue()` 命中为新任务发布和调度器基础 placement；wait completion 尾巴只通过 `wake_enqueue()`。剩余 `notify()` 命中为 signal sender 调用和 `notify()` 自身的 wait-core active-wake 入口。
+
+**Validation:** 运行 `just build` 通过。当前仍只有仓库里既有的 `anemone-kernel/src/sync/mono.rs` unused import warning。
+
+**Boundary:** 这只是阶段 5 的第一次审计，不代表阶段 5 完成。当前只收缩了低成本、无生产调用点的旧兼容接口，并关闭阶段 4 direct-wait outcome 的 fail-closed 问题。后续阶段 5 审计仍需要继续检查 wait-core API 可见性、`notify()` signal 入口语义、`task_enqueue()` / `wake_enqueue()` placement 分类、`TaskStatus` 观察投影边界、异常状态 `assert!` 覆盖面，以及是否还有应该进一步收窄或删除的普通入口。
+
+**Next:** 继续阶段 5 的后续审计轮次，直到所有保留旁路都有明确分类和理由；完成多轮审计后再进入阶段 6 验证和文档跟进。
+
 ## Open Items
 
-- 阶段 5：审计旧旁路并收缩旧 wake API。
+- 阶段 5：继续多轮旁路审计，确认旧 API 收缩、保留入口分类和 `assert!` 覆盖。
 - 阶段 6：运行已知触发 profile，并保存带 debug/trace 的验证摘要。
 
 ## Closure

@@ -71,21 +71,13 @@ pub unsafe fn scheduler() -> ! {
     }
 }
 
-/// Only 2 functions are considered "core" functions of scheduler,
-/// - [schedule] : xxx
-/// - [try_to_wake_up] : xxx
-/// along with state transition of task.
+/// Core scheduler state transitions.
 mod kore {
-    use crate::sched::processor::task_enqueue;
-
     use super::*;
 
     #[derive(Debug)]
     enum ScheduleDecision {
         Runnable,
-        LegacyWaiting {
-            interruptible: bool,
-        },
         WaitCoreParked {
             state: Arc<WaitState>,
             interruptible: bool,
@@ -108,10 +100,6 @@ mod kore {
 
         let decision = curr.update_sched_state_with(|state| match state {
             TaskSchedState::Runnable => (TaskSchedState::Runnable, ScheduleDecision::Runnable),
-            TaskSchedState::LegacyWaiting { interruptible } => (
-                TaskSchedState::LegacyWaiting { interruptible },
-                ScheduleDecision::LegacyWaiting { interruptible },
-            ),
             TaskSchedState::Waiting {
                 state,
                 interruptible,
@@ -162,14 +150,6 @@ mod kore {
                 } else {
                     drop(curr);
                 }
-            },
-            ScheduleDecision::LegacyWaiting { interruptible } => {
-                knoticeln!(
-                    "{} is waiting (interruptible: {}), not enqueuing it to run queue",
-                    current_task_id(),
-                    interruptible,
-                );
-                drop(curr);
             },
             ScheduleDecision::WaitCoreParked {
                 state,
@@ -233,21 +213,6 @@ mod kore {
                         );
                         drop(curr);
                     },
-                    TaskSchedState::LegacyWaiting {
-                        interruptible: observed_interruptible,
-                    } => {
-                        kwarningln!(
-                            "schedule: wait-core park for task={} wait={:#x} was overwritten by legacy waiting (interruptible={})",
-                            task_id,
-                            wait_id,
-                            observed_interruptible,
-                        );
-                        debug_assert!(
-                            false,
-                            "legacy wait state observed after wait-core park"
-                        );
-                        drop(curr);
-                    },
                     TaskSchedState::Zombie => {
                         kwarningln!(
                             "schedule: wait-core park for task={} wait={:#x} became zombie",
@@ -273,76 +238,7 @@ mod kore {
         }
     }
 
-    #[derive(Debug)]
-    pub enum WakeUpError {
-        TaskAlreadyRunnable,
-        /// The status won't be [TaskStatus::Runnable].
-        UnexpectedStatus(TaskStatus),
-    }
-
-    /// Try to wake up a task.
-    ///
-    /// What linux folks often called "ttwp".
-    ///
-    /// Panics if expected_status contains any non-sleeping status or is empty.
-    /// If you just want to wake up a task regardless of its current status,
-    /// call [notify] instead.
-    ///
-    /// TODO: docs.
-    pub fn try_to_wake_up(
-        task: &Arc<Task>,
-        expected_status: &[TaskStatus],
-    ) -> Result<(), WakeUpError> {
-        assert!(
-            !expected_status.is_empty(),
-            "expected_status cannot be empty"
-        );
-        assert!(
-            expected_status.iter().all(|s| s.is_sleeping()) && !expected_status.is_empty(),
-            "expected_status must be a sleeping status"
-        );
-
-        // 1. grab the right to wake up the task.
-        task.update_status_with(|status| {
-            if !expected_status.contains(&status) {
-                knoticeln!(
-                    "trying to wake up {}, but its status is {:?}, which is not in expected_status {:?}",
-                    task.tid(),
-                    status,
-                    expected_status,
-                );
-                let err = if let TaskStatus::Runnable = status {
-                    WakeUpError::TaskAlreadyRunnable
-                } else {
-                    WakeUpError::UnexpectedStatus(status)
-                };
-                return (status, Err(err));
-            }
-
-            match status {
-                TaskStatus::Runnable | TaskStatus::Zombie => unreachable!(/* handled above */),
-                TaskStatus::Waiting { .. } => (TaskStatus::Runnable, Ok(())),
-            }
-        })?;
-
-        kdebugln!("{} is woken up, enqueueing it to run queue", task.tid());
-
-        // 2. enqueue the task to run queue.
-        task_enqueue(task.clone());
-
-        Ok(())
-    }
-
-    /// Whatever task's status is, try to wake it up.
-    ///
-    /// If task's status is [TaskStatus::Runnable], [TaskStatus::Zombie], the
-    /// no-op.
-    ///
-    /// If `uninterruptible` is true, even if the task is in uninterruptible
-    /// sleep, it will be woken up. This is useful when we want to do a forceful
-    /// wake up, e.g., when a thread group is exiting.
-    ///
-    /// Mainly used by signals.
+    /// Signal or force-complete the currently active wait, if any.
     pub fn notify(task: &Arc<Task>, uninterruptible: bool) {
         let mode = if uninterruptible {
             WakeMode::Force
@@ -361,29 +257,11 @@ mod kore {
             return;
         }
 
-        let need_enqueue = task.update_sched_state_with(|prev| match prev {
-            TaskSchedState::Runnable => (prev, false),
-            TaskSchedState::LegacyWaiting {
-                interruptible: true,
-            } => (TaskSchedState::Runnable, true),
-            TaskSchedState::LegacyWaiting {
-                interruptible: false,
-            } => {
-                if uninterruptible {
-                    (TaskSchedState::Runnable, true)
-                } else {
-                    (prev, false)
-                }
-            },
-            TaskSchedState::Waiting { .. } | TaskSchedState::Zombie => (prev, false),
-        });
-        if need_enqueue {
-            kdebugln!(
-                "{} is woken up by notify, enqueueing it to run queue",
-                task.tid()
-            );
-            task_enqueue(task.clone());
-        }
+        kdebugln!(
+            "{} notify found no active wait, uninterruptible={}",
+            task.tid(),
+            uninterruptible,
+        );
     }
 }
 pub use kore::*;
@@ -454,32 +332,6 @@ mod higher_level {
         } else {
             Duration::MAX
         }
-    }
-
-    /// Schedule the next task to run, with timeout.
-    ///
-    /// This compatibility wrapper starts and finishes a wait-core round for the
-    /// current task. Callers that need to classify the exact wake reason should
-    /// use `wait::begin_wait()`, [schedule_wait_with_timeout], and
-    /// `wait::finish_wait()` directly.
-    pub fn schedule_with_timeout(timeout: Option<Duration>) -> Duration {
-        if matches!(timeout, Some(timeout) if timeout == Duration::ZERO) {
-            kdebugln!("schedule_with_timeout: timeout is zero, returning immediately");
-            return Duration::ZERO;
-        }
-
-        let task = get_current_task();
-        let begin = wait::begin_wait(&task, true);
-        let (guard, token) = begin.into_parts();
-        let rem = schedule_wait_with_timeout(&task, token, timeout);
-        let outcome = wait::finish_wait(guard);
-        kdebugln!(
-            "schedule_with_timeout: compatibility wait task={} outcome={:?} remaining={:?}",
-            task.tid(),
-            outcome,
-            rem,
-        );
-        rem
     }
 
     /// Yield the current running task to let other tasks run.

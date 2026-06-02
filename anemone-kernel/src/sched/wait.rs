@@ -1,9 +1,8 @@
 //! Scheduler wait core.
 //!
-//! Event wait paths are migrated onto this core. Standalone timeout and signal
-//! wait paths still have legacy users until their migration phase, while the
-//! wait-core wake API already owns both logical completion and stale-safe
-//! physical placement.
+//! Event, timeout, and signal wait paths are migrated onto this core. The
+//! wait-core wake API owns both logical completion and stale-safe physical
+//! placement.
 
 use core::fmt::{Debug, Formatter};
 use core::marker::PhantomData;
@@ -11,10 +10,6 @@ use core::marker::PhantomData;
 use crate::prelude::*;
 
 /// Internal scheduler state for a task.
-///
-/// `LegacyWaiting` is the migration compatibility state written by
-/// `Task::update_status_with()`.  New wait-core code must use `Waiting`, which
-/// carries a stable `WaitState` identity for one wait round.
 #[derive(Clone, Debug)]
 pub enum TaskSchedState {
     Runnable,
@@ -23,9 +18,6 @@ pub enum TaskSchedState {
         interruptible: bool,
         park: ParkState,
     },
-    LegacyWaiting {
-        interruptible: bool,
-    },
     Zombie,
 }
 
@@ -33,20 +25,12 @@ impl TaskSchedState {
     pub fn as_task_status(&self) -> TaskStatus {
         match self {
             Self::Runnable => TaskStatus::Runnable,
-            Self::Waiting { interruptible, .. } | Self::LegacyWaiting { interruptible } => {
+            Self::Waiting { interruptible, .. } => {
                 TaskStatus::Waiting {
                     interruptible: *interruptible,
                 }
             },
             Self::Zombie => TaskStatus::Zombie,
-        }
-    }
-
-    pub fn from_legacy_status(status: TaskStatus) -> Self {
-        match status {
-            TaskStatus::Runnable => Self::Runnable,
-            TaskStatus::Zombie => Self::Zombie,
-            TaskStatus::Waiting { interruptible } => Self::LegacyWaiting { interruptible },
         }
     }
 
