@@ -11,7 +11,7 @@
 
 **Current Branch:** `dev/drc/merge-cred`
 
-**Current HEAD:** `6e094ec52a69a0c01eb553fb573ed291564db11e`
+**Current HEAD:** `030280a65108b1e3944b5e8f8fdb1588ac25c846`
 
 **Origin Main:** `892f89d3415a30aa7284f83d8ca619c540b6d14d`
 
@@ -21,13 +21,15 @@
 
 **Merge Checkpoint Commit:** `6e094ec52a69a0c01eb553fb573ed291564db11e` (`[ckpt] merge origin main credentials`)
 
+**Latest Build-Fix Checkpoint:** `030280a65108b1e3944b5e8f8fdb1588ac25c846` (`[ckpt] cred merge rv64 build fix`)
+
 **Conflicts Remaining:** 0。
 
 **Completed:** 迁移编排计划已写入 `etc/cred-merge/agent-plan.md`；事务日志已建立；merge-state 已建立；实际冲突地图已刷新；Worker A 已审查 credentials core / syscall ABI 自动合入结果，并在 `anemone-kernel/src/task/credentials/id.rs` 恢复 `Uid::get()` / `Gid::get()` inherent accessor；Worker B 已审查并修复 Task lifecycle / accessor 基座，手工改动限制在 `anemone-kernel/src/task/mod.rs` 与 `anemone-kernel/src/task/api/clone/mod.rs`；Worker C 已解析并暂存 VFS/open/fd 冲突；Worker D 已解析并暂存 exec credential / PathRef 冲突；Worker E 已解析并暂存 user-test fixtures/groups/profile/registry 冲突。
 
 **Open Blockers:** 无文本冲突 blocker。`anemone-kernel/src/syscall/user_access.rs` 被 git 自动合入但不在当前 worker write set 中；目前只读审查看到它提供 `c_readonly_path()` 与 `ListTooLong -> NameTooLong` 路径校验支撑，未再手工修改。rv64 `just build` 已通过；la64 `just build` 和只读 reviewer 尚未运行。
 
-**Next Action:** 提交 rv64 build-gate 修复 checkpoint，切到 la64 运行 `just build`，随后启动/执行只读 reviewer 审查 P0/P1 语义闭合。LTP 仍由用户手动执行。
+**Next Action:** 切到 la64 运行 `just build`，随后启动/执行只读 reviewer 审查 P0/P1 语义闭合。LTP 仍由用户手动执行。
 
 **Do Not Redo:** 不要重新审查已闭合的计划原则，除非 `origin/main` 或 merge-base 改变；不要恢复远端旧 `process-exec` group；不要重拆、合并或改名本地已有 LTP group；不要运行 LTP；不要 push、force-push、`git reset --hard`、`git clean` 或丢弃未归属改动。
 
