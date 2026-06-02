@@ -7,6 +7,7 @@
 ## Active
 
 - [Sched Wait Refactor](./2026-06-01-sched-wait-refactor.md)
+- [Cred Merge](./2026-06-02-cred-merge.md)
 
 ## Completed
 

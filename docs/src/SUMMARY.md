@@ -7,6 +7,7 @@
 	- [2026-05-25 至 2026-06-07](./devlog/2026-05-25_to_2026-06-07.md)
 	- [事务日志](./devlog/transactions/index.md)
 		- [Sched Wait Refactor](./devlog/transactions/2026-06-01-sched-wait-refactor.md)
+		- [Cred Merge](./devlog/transactions/2026-06-02-cred-merge.md)
 - [初赛冲刺策略（2026-05 至 2026-06）](./preliminary-contest-sprint.md)
 - [已知问题与当前限制](./known-issues-and-limitations.md)
 	- [活动登记册](./register.md)
