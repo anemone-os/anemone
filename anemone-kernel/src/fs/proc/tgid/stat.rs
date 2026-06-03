@@ -224,7 +224,7 @@ fn build_stat_line(inode: &InodeRef) -> Result<String, SysError> {
     ))
 }
 
-fn proc_comm(task: &Task) -> String {
+pub(super) fn proc_comm(task: &Task) -> String {
     let name = task.name();
     let trimmed = name.strip_prefix("@user/").unwrap_or(&name);
     let trimmed = trimmed.strip_prefix("@kernel/").unwrap_or(trimmed);
@@ -232,7 +232,7 @@ fn proc_comm(task: &Task) -> String {
     comm.chars().take(15).collect()
 }
 
-fn proc_state(leader: &Task) -> char {
+pub(super) fn proc_state(leader: &Task) -> char {
     match leader.status() {
         TaskStatus::Runnable => 'R',
         TaskStatus::Zombie => 'Z',

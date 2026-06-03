@@ -8,6 +8,7 @@ use crate::{
                 cwd::TGID_CWD_TGID_ENTRY, environ::TGID_ENVIRON_TGID_ENTRY,
                 exe::TGID_EXE_TGID_ENTRY, inode::TGID_INODE_OPS, mounts::TGID_MOUNTS_TGID_ENTRY,
                 root::TGID_ROOT_TGID_ENTRY, stat::TGID_STAT_TGID_ENTRY,
+                status::TGID_STATUS_TGID_ENTRY,
             },
         },
     },
@@ -110,7 +111,8 @@ static TGID_ENTRIES: &[&TgidEntry] = &[
     &TGID_EXE_TGID_ENTRY,
     &TGID_MOUNTS_TGID_ENTRY,
     &TGID_STAT_TGID_ENTRY,
-    // TODO: fd, task, maps, status, etc.
+    &TGID_STATUS_TGID_ENTRY,
+    // TODO: fd, task, maps, etc.
 ];
 
 fn find_tgid_entry_by_name(name: &str) -> Option<&'static TgidEntry> {
@@ -166,3 +168,4 @@ mod exe;
 mod mounts;
 mod root;
 mod stat;
+mod status;
