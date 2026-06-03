@@ -5,7 +5,12 @@
 
 use core::fmt::{Debug, Formatter};
 
-use crate::{prelude::*, sched::wait};
+use crate::prelude::*;
+
+use super::higher_level::schedule_wait_with_timeout;
+use super::wait::{
+    self, ActiveWait, WaitOutcome, WaitReason, WakeMode, WakeResult, WakeToken,
+};
 
 /// An occurrence of an event does not guarantee that the event is still valid
 /// when the listener wakes up, so the listener should always check the
@@ -317,8 +322,8 @@ impl Event {
         task: &Arc<Task>,
         exclusive: bool,
         interruptible: bool,
-    ) -> (wait::ActiveWait, Listener) {
-        let active_wait = wait::ActiveWait::begin(task, interruptible);
+    ) -> (ActiveWait, Listener) {
+        let active_wait = ActiveWait::begin(task, interruptible);
         let listener = Listener::new(task, active_wait.token());
         self.register_listener(listener.clone(), exclusive);
         (active_wait, listener)
