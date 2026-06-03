@@ -338,7 +338,7 @@ mod higher_level {
 
     /// Yield the current running task to let other tasks run.
     pub fn yield_now() {
-        assert!(get_current_task().status() == TaskStatus::Runnable);
+        assert!(get_current_task().is_sched_runnable());
         with_intr_disabled(|| unsafe {
             schedule();
         });

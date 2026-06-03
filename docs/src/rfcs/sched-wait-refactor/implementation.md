@@ -10,7 +10,7 @@
 1. 每个阶段都必须保持需求文档中的 wait identity、唯一线性化点、requeue permit、park latch 和 stale-safe placement 不变量。
 2. 阶段性交付允许临时兼容 wrapper，但不得新增绕过 wait core 的普通等待完成路径。
 3. 实现过程可以调整类型名和模块路径，但不能改变 API 责任归属：逻辑完成属于 wait core，wake 成功后的 stale-safe placement 也由 wait core 触发。
-4. 旧 `TaskStatus` 只能作为观察投影逐步保留，不能继续作为新等待协议的写入口。
+4. 旧 `TaskStatus` 只能作为观察投影逐步保留，不能继续作为新等待协议的写入口，也不能作为调度内部协议判断的普通入口。
 5. 每个阶段完成后都要重新分类旁路命中，不能只看是否编译通过。
 6. `wake_wait()` / `wake_active_wait()` 一旦被生产等待路径调用，就必须已经同时具备逻辑完成、post-commit stale-safe placement 和 park latch 闭合；不得先上线一个“只改状态、不负责 placement”的半成品入口。
 7. 每个阶段开始前先确认前置阶段的禁用/启用边界：旧路径可以继续完整保留，新路径也可以完整接管，但不能让同一个等待来源同时被两套 completion 协议处理。
@@ -23,7 +23,7 @@
 1. 新增 `sched::wait` 或等价子模块。
 2. 定义 `WaitState`、`WakeToken`、`WaitGuard`、`WaitReason`、`WakeMode`、结果类型。
 3. 将 `Task` 的 `status` 扩展为枚举式 `TaskSchedState`。
-4. 提供只读兼容接口 `task.status()`，避免一次性改动所有观察路径。
+4. 提供只读兼容接口 `task.status()`，避免一次性改动 procfs、debug 等观察路径；调度内部应使用 `TaskSchedState` helper 或事务。
 5. 新增 `begin_wait()`、`cancel_wait()`、`finish_wait()` 的事务骨架。
 6. 新增 `wake_wait()`、`wake_active_wait()` 的类型和私有实现骨架，但在阶段 2 完成前不得接入 Event、timeout、signal 等生产等待路径。
 7. 让 `wake_active_wait()` 只作为 sched 内部受控 helper。
@@ -34,10 +34,11 @@
 
 1. 旧代码仍能构建。
 2. `TaskStatus` 观察者不需要理解 `WaitState`。
-3. 新接口文档明确线性化点、调用条件、暂未接入生产路径的禁用边界，以及 placement 责任归属。
-4. `WaitState` 不持有强 `Arc<Task>` / `Event` 回指。
-5. 阶段结束时，旧等待路径仍完整走旧协议；新 wait core 不应形成“完成了逻辑 wake 但没有 placement”的可调用路径。
-6. 日志字段不暴露 `WaitState` 内部可变结构，但能用稳定身份区分新旧等待轮次。
+3. 调度、wait、wake、enqueue 路径不通过 `task.status()` 投影判断内部协议状态。
+4. 新接口文档明确线性化点、调用条件、暂未接入生产路径的禁用边界，以及 placement 责任归属。
+5. `WaitState` 不持有强 `Arc<Task>` / `Event` 回指。
+6. 阶段结束时，旧等待路径仍完整走旧协议；新 wait core 不应形成“完成了逻辑 wake 但没有 placement”的可调用路径。
+7. 日志字段不暴露 `WaitState` 内部可变结构，但能用稳定身份区分新旧等待轮次。
 
 ## 2. 阶段 2：新增 stale-safe wake placement
 
@@ -124,7 +125,7 @@
 2. 审计所有 `TaskStatus::Waiting` 写入点。
 3. 审计所有 `notify()`、`try_to_wake_up()` 和 `task_enqueue()` 调用点。
 4. 将旧 wake API 收缩为兼容 wrapper，或明确标记为只允许非 wait 协议路径使用。
-5. 给关键入口补充 debug assert，检查 `TaskSchedState` 状态转换、`ParkState::Parked` 只能出现在 `Waiting` 上、兼容 `task.status()` 投影与内部状态一致。
+5. 给关键入口补充 debug assert，检查 `TaskSchedState` 状态转换、`ParkState::Parked` 只能出现在 `Waiting` 上，并确认调度内部判断不依赖 `task.status()` 兼容投影。
 6. 审计 debug/trace 覆盖面，确认关键分支都有可打开的诊断信息，且默认配置下不会在高频路径产生不可接受噪声。
 
 验收：
@@ -134,7 +135,8 @@
 3. 裸 `task_enqueue()` 不再出现在 wait/wake 完成尾巴中。
 4. 所有保留旁路都有明确分类和理由。
 5. `update_status_with()` 不再作为普通等待 begin/completion/cancel 写入口；保留命中必须能说明不是 wait 协议路径。
-6. 关键日志字段统一：至少包含 task id、wait identity、wait reason、wake mode、状态转换结果和 placement 结果；缺字段的记录点必须说明原因。
+6. `TaskStatus` / `task.status()` 命中只剩观察投影、procfs/status、debug 输出或等价观察层；调度内部 runnable / waiting / zombie 判断使用 `TaskSchedState` helper 或事务。
+7. 关键日志字段统一：至少包含 task id、wait identity、wait reason、wake mode、状态转换结果和 placement 结果；缺字段的记录点必须说明原因。
 
 ## 6. 阶段 6：验证和文档跟进
 

@@ -68,7 +68,7 @@ enum ParkState {
 3. `Waiting { state, .. }` 表示当前 task 只属于这一轮等待；`Runnable` / `Zombie` 状态下不存在 active wait。
 4. `ParkState` 只闭合 wait / schedule / wake-tail 的时序，不表示第二套等待状态。
 5. park 状态必须和 wait identity 一起在同一个调度事务内翻转。
-6. `task.status()` 迁移后只能作为兼容观察接口，从 `TaskSchedState` 投影出旧 `TaskStatus` 视图，不得作为 wait core 写入口。
+6. `task.status()` 迁移后只能作为兼容观察接口，从 `TaskSchedState` 投影出旧 `TaskStatus` 视图，不得作为 wait core 写入口，也不得作为调度内部协议判断的普通入口。
 
 ## 3. 等待轮次身份
 
@@ -109,7 +109,7 @@ enum ParkState {
 
 1. `sched::wait` 或等价 wait core 拥有等待事务、完成权、退役语义、wake 成功后的 stale-safe placement 触发权，以及 requeue permit 的签发权。
 2. `Event`、timeout、signal、exit 只作为适配器调用 wait core，不各自维护一套可完成状态机。
-3. `TaskStatus` 兼容读接口只允许观察，不允许成为新的写入口。
+3. `TaskStatus` 兼容读接口只允许 procfs、debug 和一次性状态观察使用，不允许成为新的写入口或调度内部协议判断入口。
 4. 新 helper 应优先放在 wait core 边界上，不能在 `Event`、timer 或 signal 模块里重复实现状态切换。
 5. wait core 不应执行 Event 提供的任意闭包；跨 event / task 的特殊顺序必须通过不可外部构造的短寿命 capability 表达。
 
@@ -403,7 +403,8 @@ mode-blocked 回挂的竞争结果必须闭合：
 7. current no-op 没有 park latch。
 8. mode-blocked listener 被直接丢弃。
 9. mode-blocked listener 依据 `wake_wait()` 的旧返回结果直接回挂。
-10. `RequeuePermit` 可外部构造、可复制、可缓存，或被用于回挂之外的能力扩张。
+10. 调度、wait、wake 或 enqueue 路径通过 `TaskStatus` 投影判断 runnable / waiting / zombie，而不是直接使用 `TaskSchedState` 或受控 helper。
+11. `RequeuePermit` 可外部构造、可复制、可缓存，或被用于回挂之外的能力扩张。
 
 ## 14. 完成标准
 

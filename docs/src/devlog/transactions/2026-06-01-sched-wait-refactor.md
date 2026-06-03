@@ -240,6 +240,22 @@
 
 **Validation:** 运行 `just build` 通过。当前仍只有仓库里既有的 `anemone-kernel/src/sync/mono.rs` unused import warning。
 
+### 2026-06-03 - TaskStatus 观察投影边界收紧
+
+**Phase:** phase 6 documentation and retained-boundary follow-up
+
+**Decision:** `TaskStatus` / `task.status()` 继续保留，但只作为 procfs、debug 和一次性状态观察接口。它是从 `TaskSchedState` 投影出的有损 snapshot，不携带 wait identity 或 park latch，不再作为调度、wait、wake、enqueue 路径的协议判断入口。
+
+**Change:** `TaskStatus` 和 `Task::status()` 的代码注释改为 observation-only compatibility snapshot。新增 `TaskSchedState::is_runnable()` 与 `Task::is_sched_runnable()`，让调度 placement / assertion 路径直接检查内部 scheduler state，而不是通过 `TaskStatus` 投影判断 runnable。
+
+**Change:** `local_enqueue()`、`local_requeue_current()`、`local_pick_next()`、`remote_enqueue()`、`task_enqueue()`、`wake_enqueue()`、`local_wake_enqueue()`、`remote_wake_enqueue()`、bootstrap first enqueue 和 `yield_now()` 已从 `task.status() == TaskStatus::Runnable` 改为使用 scheduler-state helper 或直接记录 `TaskSchedState` snapshot。stale wake 日志字段也从 `status={:?}` 改为 `sched_state={:?}`，避免把兼容投影当成诊断真相。
+
+**Docs:** RFC 不变量和实施计划同步收紧：`task.status()` 只能作为观察接口，不得作为 wait core 写入口，也不得作为调度内部协议判断入口；阶段 5 验收增加 `TaskStatus` 命中分类要求，要求调度内部 runnable / waiting / zombie 判断使用 `TaskSchedState` helper 或事务。
+
+**Audit:** 搜索 `get_current_task().status`、`task.status()`、`.status() == TaskStatus`、`.status() != TaskStatus` 和 `TaskStatus::Runnable`，`sched` 内部已无通过 `Task::status()` 判断 runnable 的命中。剩余 `TaskStatus` 命中为 `TaskSchedState::as_task_status()` 观察投影、procfs/stat 和 procfs/status 映射。
+
+**Validation:** 运行 `just build` 通过。当前仍只有仓库里既有的 `anemone-kernel/src/sync/mono.rs` unused import warning。
+
 ## Open Items
 
 - 阶段 6：运行已知触发 profile，并保存带 debug/trace 的验证摘要。

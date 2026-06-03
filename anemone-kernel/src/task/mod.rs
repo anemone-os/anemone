@@ -168,27 +168,18 @@ pub struct Task {
     clear_child_tid: SpinLock<Option<VirtAddr>>,
 }
 
-/// **[TaskStatus] is not the objective truth of a task's state. Instead, it's
-/// the intended state of the task.**
+/// Observation-only compatibility state for status readers.
 ///
-/// Most of the time, the actual state of a task is consistent with its
-/// [TaskStatus], but there are various windows where they are inconsistent. And
-/// that's not a mistake. **It's expected behavior.** It's precisely the
-/// foundation upon which we build various synchronization primitives.
-///
-/// This is, in fact, so-called ***lock-free programming***.
-///
-/// TODO: explain more specifically. maybe we should write a dedicated chapter
-/// about this topic in the book.
-///
-/// TODO: atomic enum is better.
+/// [TaskStatus] is a lossy snapshot projected from [TaskSchedState]. It hides
+/// wait identity and park state, so scheduler, wait, wake, and enqueue paths
+/// must use scheduler-state helpers or transactions instead of this projection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStatus {
-    /// Task can be scheduled to run.
+    /// Task is observable as schedulable.
     Runnable,
-    /// Task can be reapped by its parent, but cannot run anymore.
+    /// Task is observable as exited and cannot run anymore.
     Zombie,
-    /// Task can be waken up.
+    /// Task is observable as waiting.
     Waiting { interruptible: bool },
 }
 

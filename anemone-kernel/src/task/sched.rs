@@ -17,20 +17,30 @@ impl Task {
         f(&mut guard)
     }
 
-    /// Get the current task status.
+    /// Return an observation-only compatibility snapshot.
     ///
-    /// **Do not call this method unless you are those observers and your work
-    /// dosn't rely on the accuracy of the status, or you can ensure that you
-    /// just need a single read.**
+    /// This is for procfs, debug, and other status observers that need one
+    /// lossy read. Scheduler, wait, wake, and enqueue code must use
+    /// scheduler-state helpers or transactions instead.
     pub fn status(&self) -> TaskStatus {
         self.sched_state.read().as_task_status()
     }
 
-    /// Get the internal scheduler state.
+    /// Return whether the internal scheduler state is runnable.
     ///
-    /// This is primarily for scheduler/wait-core diagnostics while the wait
-    /// refactor is in flight. Most users should keep using [Self::status].
-    pub fn sched_state(&self) -> TaskSchedState {
+    /// This is for scheduler placement and assertion paths that need a one-shot
+    /// state check without going through the [TaskStatus] observation
+    /// projection.
+    pub(crate) fn is_sched_runnable(&self) -> bool {
+        self.sched_state.read().is_runnable()
+    }
+
+    /// Get an internal scheduler-state snapshot.
+    ///
+    /// This is for scheduler/wait-core diagnostics and assertions. State
+    /// transitions must use [Self::update_sched_state_with] or a narrower
+    /// wait-core capability.
+    pub(crate) fn sched_state(&self) -> TaskSchedState {
         self.sched_state.read().clone()
     }
 

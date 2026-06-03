@@ -37,6 +37,10 @@ impl TaskSchedState {
     pub fn is_wait_core_waiting(&self) -> bool {
         matches!(self, Self::Waiting { .. })
     }
+
+    pub fn is_runnable(&self) -> bool {
+        matches!(self, Self::Runnable)
+    }
 }
 
 /// Park latch state.  Phase 1 only creates the state container; `schedule()`
