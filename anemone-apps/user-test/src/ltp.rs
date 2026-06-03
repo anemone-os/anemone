@@ -102,8 +102,8 @@ const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../ltp/groups/read-write.txt"),
     },
     LtpGroup {
-        name: "shm",
-        cases: include_str!("../ltp/groups/shm.txt"),
+        name: "ipc",
+        cases: include_str!("../ltp/groups/ipc.txt"),
     },
     LtpGroup {
         name: "tmp",
@@ -112,6 +112,18 @@ const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
         name: "credentials",
         cases: include_str!("../ltp/groups/credentials.txt"),
+    },
+    LtpGroup {
+        name: "signal",
+        cases: include_str!("../ltp/groups/signal.txt"),
+    },
+    LtpGroup {
+        name: "schedule",
+        cases: include_str!("../ltp/groups/schedule.txt"),
+    },
+    LtpGroup {
+        name: "iomux",
+        cases: include_str!("../ltp/groups/iomux.txt"),
     },
 ];
 
@@ -395,9 +407,7 @@ fn parse_case_line(line: &str) -> Option<LtpCaseSpec<'_>> {
     }
 
     if line.contains("=>") {
-        panic!(
-            "user-test: invalid LTP case line {line}: use 'case [executable][: args...]'"
-        );
+        panic!("user-test: invalid LTP case line {line}: use 'case [executable][: args...]'");
     }
 
     let (header, args) = match line.split_once(':') {

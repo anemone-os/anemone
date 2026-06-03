@@ -18,9 +18,7 @@ dup207
 dup3_01
 dup3_02
 
-fchdir01
-fchdir02
-fchdir03
+
 close01
 close02
 close_range01

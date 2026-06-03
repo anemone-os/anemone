@@ -31,3 +31,14 @@ shmt07
 shmt08
 shmt09
 shmt10
+
+msgctl04
+msgctl06
+msgget02
+msgrcv02
+msgsnd02
+
+semctl02
+semctl04
+semctl09
+

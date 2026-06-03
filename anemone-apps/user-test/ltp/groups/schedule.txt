@@ -1,0 +1,8 @@
+setpriority01
+setpriority02
+
+sched_setparam05
+
+sched_setscheduler02
+sched_setscheduler03
+
