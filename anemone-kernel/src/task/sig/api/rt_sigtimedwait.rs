@@ -71,14 +71,8 @@ fn sys_rt_sigtimedwait(
         prev_mask
     };
 
-    task.update_status_with(|_prev| {
-        (
-            TaskStatus::Waiting {
-                interruptible: true,
-            },
-            (),
-        )
-    });
+    let active_wait = ActiveWait::begin(&task, true);
+    let token = active_wait.token();
 
     enum WaitOutcome {
         Signal(Signal),
@@ -88,20 +82,58 @@ fn sys_rt_sigtimedwait(
 
     // check pending signals. this step must be placed after status update.
     let wait_outcome = if let Some(signal) = task.fetch_specific_signal(uthese) {
-        task.update_status_with(|_prev| (TaskStatus::Runnable, ()));
+        active_wait.cancel(WaitReason::PredicateReady);
+        active_wait.finish();
         WaitOutcome::Signal(signal)
     } else if task.has_unmasked_signal() {
-        task.update_status_with(|_prev| (TaskStatus::Runnable, ()));
+        active_wait.cancel(WaitReason::Signal);
+        active_wait.finish();
         WaitOutcome::Interrupted
+    } else if matches!(timeout, Some(timeout) if timeout == Duration::ZERO) {
+        active_wait.cancel(WaitReason::Timeout);
+        active_wait.finish();
+        WaitOutcome::Timeout(Duration::ZERO)
     } else {
-        let rem = schedule_with_timeout(timeout);
+        let rem = schedule_wait_with_timeout(&task, token, timeout);
+        let outcome = active_wait.finish();
+        kdebugln!(
+            "sys_rt_sigtimedwait: wait finished task={} outcome={:?} rem={:?}",
+            task.tid(),
+            outcome,
+            rem,
+        );
 
         // waited signals are temporarily unmasked during the sleep, so we must
         // check them before restoring the original mask.
         if let Some(signal) = task.fetch_specific_signal(uthese) {
             WaitOutcome::Signal(signal)
         } else {
-            WaitOutcome::Timeout(rem)
+            match outcome {
+                crate::sched::WaitOutcome::Completed(WaitReason::Timeout) => {
+                    WaitOutcome::Timeout(rem)
+                },
+                crate::sched::WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force) => {
+                    WaitOutcome::Interrupted
+                },
+                other if task.has_unmasked_signal() => {
+                    kdebugln!(
+                        "sys_rt_sigtimedwait: unmasked signal after wait task={} outcome={:?}",
+                        task.tid(),
+                        other,
+                    );
+                    WaitOutcome::Interrupted
+                },
+                other => {
+                    kwarningln!(
+                        "sys_rt_sigtimedwait: unexpected wait outcome task={} outcome={:?} rem={:?}",
+                        task.tid(),
+                        other,
+                        rem,
+                    );
+                    assert!(false, "rt_sigtimedwait saw unexpected wait outcome");
+                    WaitOutcome::Interrupted
+                },
+            }
         }
     };
 

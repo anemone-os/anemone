@@ -1,9 +1,6 @@
 //! setresgid system call.
 
-use crate::{
-    prelude::*,
-    task::credentials::{Gid, UserId},
-};
+use crate::{prelude::*, task::credentials::Gid};
 
 use super::super::id::UserTarget;
 

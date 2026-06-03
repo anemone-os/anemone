@@ -57,7 +57,7 @@ use crate::{
     sync::{counter::CpuSync, mono::MonoOnce},
     task::{
         execve::kernel::kernel_execve,
-        files::{FdFlags, FileFlags},
+        files::{FdFlags, FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
         task_fs::FsState,
     },
 };
@@ -134,9 +134,27 @@ fn exec_init_proc() {
     {
         use device::console::{open_console_stdin, open_console_stdout};
         let kinit = get_current_task();
-        kinit.open_fd(open_console_stdin(), FileFlags::READ, FdFlags::empty());
-        kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
-        kinit.open_fd(open_console_stdout(), FileFlags::WRITE, FdFlags::empty());
+        kinit.open_fd(
+            open_console_stdin(),
+            OpenAccessMode::Read,
+            FileStatusFlags::empty(),
+            LinuxOpenCompat::empty(),
+            FdFlags::empty(),
+        );
+        kinit.open_fd(
+            open_console_stdout(),
+            OpenAccessMode::Write,
+            FileStatusFlags::empty(),
+            LinuxOpenCompat::empty(),
+            FdFlags::empty(),
+        );
+        kinit.open_fd(
+            open_console_stdout(),
+            OpenAccessMode::Write,
+            FileStatusFlags::empty(),
+            LinuxOpenCompat::empty(),
+            FdFlags::empty(),
+        );
     }
 
     // set up initial root and cwd for inheritance.

@@ -18,7 +18,7 @@ pub use api::*;
 mod processor;
 pub use processor::{
     fetch_clear_need_resched, get_current_task, init_routines, local_enqueue, local_sched_tick,
-    mark_need_resched, pick_next_cpu, remote_enqueue, task_enqueue,
+    mark_need_resched, pick_next_cpu, task_enqueue, wake_enqueue,
 };
 mod switch;
 pub use switch::load_context;
@@ -27,6 +27,11 @@ mod event;
 pub use event::{Event, TimeoutListenException};
 
 pub mod class;
+mod wait;
+pub use wait::{
+    ActiveWait, ParkState, TaskSchedState, WaitOutcome, WaitReason, WaitState,
+    WaitStateStatus, WakeEnqueueResult, WakeMode, WakeResult, WakeToken,
+};
 
 /// Core scheduler loop. Called by bootstrap code.
 ///
@@ -64,14 +69,20 @@ pub unsafe fn scheduler() -> ! {
     }
 }
 
-/// Only 2 functions are considered "core" functions of scheduler,
-/// - [schedule] : xxx
-/// - [try_to_wake_up] : xxx
-/// along with state transition of task.
+/// Core scheduler state transitions.
 mod kore {
-    use crate::sched::processor::task_enqueue;
-
     use super::*;
+
+    #[derive(Debug)]
+    enum ScheduleDecision {
+        Runnable,
+        WaitCoreParked {
+            state: Arc<WaitState>,
+            interruptible: bool,
+            wait_id: usize,
+        },
+        Zombie,
+    }
 
     /// Schedule the next task to run.
     ///
@@ -85,25 +96,133 @@ mod kore {
         debug_assert!(IntrArch::local_intr_disabled());
         let curr = get_current_task();
 
-        let status = curr.status();
+        let decision = curr.update_sched_state_with(|state| match state {
+            TaskSchedState::Runnable => (TaskSchedState::Runnable, ScheduleDecision::Runnable),
+            TaskSchedState::Waiting {
+                state,
+                interruptible,
+                park: ParkState::PrePark,
+            } => {
+                let wait_id = state.debug_id();
+                let wait_state = state.clone();
+                (
+                    TaskSchedState::Waiting {
+                        state,
+                        interruptible,
+                        park: ParkState::Parked,
+                    },
+                    ScheduleDecision::WaitCoreParked {
+                        state: wait_state,
+                        interruptible,
+                        wait_id,
+                    },
+                )
+            },
+            TaskSchedState::Waiting {
+                state,
+                interruptible,
+                park: ParkState::Parked,
+            } => {
+                let wait_id = state.debug_id();
+                let wait_state = state.clone();
+                (
+                    TaskSchedState::Waiting {
+                        state,
+                        interruptible,
+                        park: ParkState::Parked,
+                    },
+                    ScheduleDecision::WaitCoreParked {
+                        state: wait_state,
+                        interruptible,
+                        wait_id,
+                    },
+                )
+            },
+            TaskSchedState::Zombie => (TaskSchedState::Zombie, ScheduleDecision::Zombie),
+        });
 
-        match status {
-            TaskStatus::Runnable => {
+        match decision {
+            ScheduleDecision::Runnable => {
                 if !curr.flags().is_idle() {
                     local_requeue_current(curr);
                 } else {
                     drop(curr);
                 }
             },
-            TaskStatus::Waiting { interruptible } => {
-                knoticeln!(
-                    "{} is waiting (interruptible: {}), not enqueuing it to run queue",
-                    current_task_id(),
-                    interruptible,
-                );
-                drop(curr);
+            ScheduleDecision::WaitCoreParked {
+                state,
+                interruptible,
+                wait_id,
+            } => {
+                let task_id = curr.tid();
+                match curr.sched_state() {
+                    TaskSchedState::Runnable => {
+                        kdebugln!(
+                            "schedule: abort park for task={} wait={:#x}; wait already completed",
+                            task_id,
+                            wait_id,
+                        );
+                        if !curr.flags().is_idle() {
+                            local_requeue_current(curr);
+                        } else {
+                            drop(curr);
+                        }
+                    },
+                    TaskSchedState::Waiting {
+                        state: observed,
+                        interruptible: observed_interruptible,
+                        park,
+                    } if Arc::ptr_eq(&observed, &state) => {
+                        if observed_interruptible != interruptible {
+                            kwarningln!(
+                                "schedule: wait-core interruptible changed while parking task={} wait={:#x}: expected={} observed={}",
+                                task_id,
+                                wait_id,
+                                interruptible,
+                                observed_interruptible,
+                            );
+                            debug_assert_eq!(observed_interruptible, interruptible);
+                        }
+                        knoticeln!(
+                            "{} is wait-core parked (wait={:#x}, interruptible: {}, park: {:?}), not enqueuing it to run queue",
+                            task_id,
+                            wait_id,
+                            observed_interruptible,
+                            park,
+                        );
+                        drop(curr);
+                    },
+                    TaskSchedState::Waiting {
+                        state: observed,
+                        interruptible: observed_interruptible,
+                        park,
+                    } => {
+                        kwarningln!(
+                            "schedule: unexpected wait-core state after parking task={} wait={:#x}: observed wait={:#x}, interruptible={}, park={:?}",
+                            task_id,
+                            wait_id,
+                            observed.debug_id(),
+                            observed_interruptible,
+                            park,
+                        );
+                        debug_assert!(
+                            Arc::ptr_eq(&observed, &state),
+                            "schedule observed a different wait round after parking"
+                        );
+                        drop(curr);
+                    },
+                    TaskSchedState::Zombie => {
+                        kwarningln!(
+                            "schedule: wait-core park for task={} wait={:#x} became zombie",
+                            task_id,
+                            wait_id,
+                        );
+                        debug_assert!(false, "zombie state observed after wait-core park");
+                        drop(curr);
+                    },
+                }
             },
-            TaskStatus::Zombie => {
+            ScheduleDecision::Zombie => {
                 knoticeln!(
                     "{} is zombie, not enqueuing it to run queue",
                     current_task_id(),
@@ -117,100 +236,34 @@ mod kore {
         }
     }
 
-    #[derive(Debug)]
-    pub enum WakeUpError {
-        TaskAlreadyRunnable,
-        /// The status won't be [TaskStatus::Runnable].
-        UnexpectedStatus(TaskStatus),
-    }
-
-    /// Try to wake up a task.
-    ///
-    /// What linux folks often called "ttwp".
-    ///
-    /// Panics if expected_status contains any non-sleeping status or is empty.
-    /// If you just want to wake up a task regardless of its current status,
-    /// call [notify] instead.
-    ///
-    /// TODO: docs.
-    pub fn try_to_wake_up(
-        task: &Arc<Task>,
-        expected_status: &[TaskStatus],
-    ) -> Result<(), WakeUpError> {
-        assert!(
-            !expected_status.is_empty(),
-            "expected_status cannot be empty"
-        );
-        assert!(
-            expected_status.iter().all(|s| s.is_sleeping()) && !expected_status.is_empty(),
-            "expected_status must be a sleeping status"
-        );
-
-        // 1. grab the right to wake up the task.
-        task.update_status_with(|status| {
-            if !expected_status.contains(&status) {
-                knoticeln!(
-                    "trying to wake up {}, but its status is {:?}, which is not in expected_status {:?}",
-                    task.tid(),
-                    status,
-                    expected_status,
-                );
-                let err = if let TaskStatus::Runnable = status {
-                    WakeUpError::TaskAlreadyRunnable
-                } else {
-                    WakeUpError::UnexpectedStatus(status)
-                };
-                return (status, Err(err));
-            }
-
-            match status {
-                TaskStatus::Runnable | TaskStatus::Zombie => unreachable!(/* handled above */),
-                TaskStatus::Waiting { .. } => (TaskStatus::Runnable, Ok(())),
-            }
-        })?;
-
-        kdebugln!("{} is woken up, enqueueing it to run queue", task.tid());
-
-        // 2. enqueue the task to run queue.
-        task_enqueue(task.clone());
-
-        Ok(())
-    }
-
-    /// Whatever task's status is, try to wake it up.
-    ///
-    /// If task's status is [TaskStatus::Runnable], [TaskStatus::Zombie], the
-    /// no-op.
-    ///
-    /// If `uninterruptible` is true, even if the task is in uninterruptible
-    /// sleep, it will be woken up. This is useful when we want to do a forceful
-    /// wake up, e.g., when a thread group is exiting.
-    ///
-    /// Mainly used by signals.
+    /// Signal or force-complete the currently active wait, if any.
     pub fn notify(task: &Arc<Task>, uninterruptible: bool) {
-        let need_enqueue = task.update_status_with(|prev| match prev {
-            TaskStatus::Runnable => (prev, false),
-            TaskStatus::Waiting {
-                interruptible: true,
-            } => (TaskStatus::Runnable, true),
-            TaskStatus::Waiting {
-                interruptible: false,
-            } => {
-                if uninterruptible {
-                    (TaskStatus::Runnable, true)
-                } else {
-                    (prev, false)
-                }
-            },
-            TaskStatus::Zombie => (prev, false),
-        });
-        if need_enqueue {
+        let (reason, mode) = if uninterruptible {
+            (WaitReason::Force, WakeMode::Force)
+        } else {
+            (WaitReason::Signal, WakeMode::InterruptibleOnly)
+        };
+
+        let result = wait::wake_active_wait(task, reason, mode);
+        if result != WakeResult::Stale {
             kdebugln!(
-                "{} is woken up by notify, enqueueing it to run queue",
-                task.tid()
+                "{} is notified through wait core, reason={:?}, mode={:?}, uninterruptible={}, result={:?}",
+                task.tid(),
+                reason,
+                mode,
+                uninterruptible,
+                result,
             );
-            task_enqueue(task.clone());
+            return;
         }
+
+        kdebugln!(
+            "{} notify found no active wait, reason={:?}, mode={:?}, uninterruptible={}",
+            task.tid(),
+            reason,
+            mode,
+            uninterruptible,
+        );
     }
 }
 pub use kore::*;
@@ -222,33 +275,26 @@ mod higher_level {
 
     use super::*;
 
-    /// Schedule the next task to run, with timeout.
+    /// Schedule the current wait-core round with an optional timeout.
     ///
-    /// If `timeout` is [None], then current task will wait indefinitely until
-    /// being woken up by other events.
-    ///
-    /// Returns the remaining time until timeout.
-    ///
-    /// If the returned duration is zero, it does not necessarily mean that the
-    /// timeout has expired.
-    ///
-    /// Caller should set task's status to [TaskStatus::Waiting] before calling
-    /// this function.
-    pub fn schedule_with_timeout(timeout: Option<Duration>) -> Duration {
-        if let Some(timeout) = timeout {
-            if timeout == Duration::ZERO {
-                kdebugln!("schedule_with_timeout: timeout is zero, returning immediately");
+    /// `token` names the wait round already published through
+    /// `ActiveWait::begin()`. A late timer callback races through
+    /// `wake_wait()`, so timeout validity is derived from the wait identity
+    /// rather than an external cancellation flag.
+    pub fn schedule_wait_with_timeout(
+        task: &Arc<Task>,
+        token: WakeToken,
+        timeout: Option<Duration>,
+    ) -> Duration {
+        let current = get_current_task();
+        assert!(
+            Arc::ptr_eq(task, &current),
+            "schedule_wait_with_timeout only schedules the current task"
+        );
+        drop(current);
 
-                get_current_task().update_status_with(|_prev| (TaskStatus::Runnable, ()));
-
-                return Duration::ZERO;
-            }
-        }
-
-        let task = get_current_task();
         let cloned_task = task.clone();
-        let validness = Arc::new(AtomicBool::new(true));
-        let cloned_validness = validness.clone();
+        let wait_id = token.wait_id();
 
         let start = with_intr_disabled(|| {
             if let Some(timeout) = timeout {
@@ -256,17 +302,18 @@ mod higher_level {
                     schedule_local_irq_timer_event(
                         timeout,
                         Box::new(move || {
-                            if cloned_validness.swap(false, Ordering::SeqCst) {
-                                kdebugln!(
-                                    "schedule_with_timeout: timeout expired, waking up {}",
-                                    cloned_task.tid()
-                                );
-                                notify(&cloned_task, true);
-                            } else {
-                                kdebugln!(
-                                    "schedule_with_timeout: timer callback called, but timer is already invalid"
-                                );
-                            }
+                            let result = wait::wake_wait(
+                                &cloned_task,
+                                &token,
+                                WaitReason::Timeout,
+                                WakeMode::AnyWait,
+                            );
+                            kdebugln!(
+                                "schedule_wait_with_timeout: timeout task={} wait={:#x} result={:?}",
+                                cloned_task.tid(),
+                                wait_id,
+                                result,
+                            );
                         }),
                     );
                 }
@@ -276,9 +323,6 @@ mod higher_level {
             unsafe {
                 schedule();
             }
-
-            // we're back.
-            validness.store(false, Ordering::SeqCst);
 
             start
         });
@@ -294,7 +338,7 @@ mod higher_level {
 
     /// Yield the current running task to let other tasks run.
     pub fn yield_now() {
-        assert!(get_current_task().status() == TaskStatus::Runnable);
+        assert!(get_current_task().is_sched_runnable());
         with_intr_disabled(|| unsafe {
             schedule();
         });

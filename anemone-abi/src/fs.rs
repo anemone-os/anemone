@@ -92,10 +92,13 @@ pub mod linux {
         pub const SIZE: u32 = 0x0000_0200;
         pub const BLOCKS: u32 = 0x0000_0400;
         pub const BASIC_STATS: u32 = 0x0000_07ff;
+
         pub const BTIME: u32 = 0x0000_0800;
         pub const MNT_ID: u32 = 0x0000_1000;
         pub const DIOALIGN: u32 = 0x0000_2000;
         pub const ALL: u32 = 0x0000_3fff;
+
+        pub const RESERVED: u32 = 0x8000_0000;
 
         pub const ATTRIBUTE_COMPRESSED: u64 = 0x0000_0004;
         pub const ATTRIBUTE_IMMUTABLE: u64 = 0x0000_0010;
@@ -260,6 +263,12 @@ pub mod linux {
 
         pub const F_LINUX_SPECIFIC_BASE: u32 = 1024;
         pub const F_DUPFD_CLOEXEC: u32 = F_LINUX_SPECIFIC_BASE + 6;
+        pub const F_SETPIPE_SZ: u32 = F_LINUX_SPECIFIC_BASE + 7;
+        pub const F_GETPIPE_SZ: u32 = F_LINUX_SPECIFIC_BASE + 8;
+    }
+
+    pub mod ioctl {
+        pub const FIONREAD: u32 = 0x541B;
     }
 
     pub mod fallocate {

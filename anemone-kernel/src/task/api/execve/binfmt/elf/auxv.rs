@@ -1,6 +1,6 @@
 use crate::{
     prelude::*,
-    task::credentials::{CredentialSet, Gid, Uid, UserId},
+    task::credentials::{CredentialSet, Gid, Uid},
 };
 
 use anemone_abi::process::linux::aux_vec::*;

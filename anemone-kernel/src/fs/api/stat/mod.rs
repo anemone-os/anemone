@@ -8,8 +8,9 @@ use crate::{fs::api::args::AtFd, prelude::*};
 
 pub mod fstat;
 pub mod newfstatat;
+pub mod statx;
 
-mod args {
+pub(super) mod args {
     use anemone_abi::fs::linux::at::*;
     use bitflags::bitflags;
 
@@ -30,29 +31,13 @@ mod args {
         fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
             let raw = syscall_arg_flag32(raw)?;
             let ret = Self::from_bits(raw).ok_or(SysError::InvalidArgument)?;
-
-            if ret.contains(Self::NO_AUTOMOUNT) {
-                knoticeln!("[NYI] AT_NO_AUTOMOUNT flag is not supported yet");
-                return Err(SysError::NotYetImplemented);
-            }
             Ok(ret)
         }
     }
 }
-use anemone_abi::fs::linux::stat::Stat;
 use args::*;
 
-pub fn kernel_fstatat(
-    dirfd: AtFd,
-    path: &str,
-    statbuf: &mut Stat,
-    flags: StatAtFlag,
-) -> Result<(), SysError> {
-    if flags.contains(StatAtFlag::NO_AUTOMOUNT) {
-        knoticeln!("[NYI] AT_NO_AUTOMOUNT flag is not supported yet");
-        return Err(SysError::NotYetImplemented);
-    }
-
+pub fn kernel_fstatat(dirfd: AtFd, path: &str, flags: StatAtFlag) -> Result<InodeStat, SysError> {
     let pathref = if path.is_empty() {
         if !flags.contains(StatAtFlag::EMPTY_PATH) {
             return Err(SysError::InvalidArgument);
@@ -73,7 +58,5 @@ pub fn kernel_fstatat(
         }
     };
 
-    let stat = pathref.inode().get_attr()?.to_linux_stat();
-    *statbuf = stat;
-    Ok(())
+    pathref.inode().get_attr()
 }

@@ -17,30 +17,50 @@ impl Task {
         f(&mut guard)
     }
 
-    /// Get the current task status.
+    /// Return an observation-only compatibility snapshot.
     ///
-    /// **Do not call this method unless you are those observers and your work
-    /// dosn't rely on the accuracy of the status, or you can ensure that you
-    /// just need a single read.**
+    /// This is for procfs, debug, and other status observers that need one
+    /// lossy read. Scheduler, wait, wake, and enqueue code must use
+    /// scheduler-state helpers or transactions instead.
     pub fn status(&self) -> TaskStatus {
-        self.status.read().clone()
+        self.sched_state.read().as_task_status()
     }
 
-    /// Run a closure with current task status, and update the status with the
-    /// returned one.
+    /// Return whether the internal scheduler state is runnable.
     ///
-    /// Note that we don't provide a method that just updates the status. Status
-    /// updating is always tied to certain transaction, and this method can
-    /// ensure the atomicity of the transaction and the status update.
+    /// This is for scheduler placement and assertion paths that need a one-shot
+    /// state check without going through the [TaskStatus] observation
+    /// projection.
+    pub(crate) fn is_sched_runnable(&self) -> bool {
+        self.sched_state.read().is_runnable()
+    }
+
+    /// Get an internal scheduler-state snapshot.
     ///
-    /// **Only scheduling primitives have the right to call this method.**
-    pub fn update_status_with<F, R>(&self, f: F) -> R
+    /// This is for scheduler/wait-core diagnostics and assertions. State
+    /// transitions must use [Self::update_sched_state_with] or a narrower
+    /// wait-core capability.
+    pub(crate) fn sched_state(&self) -> TaskSchedState {
+        self.sched_state.read().clone()
+    }
+
+    /// Borrow the internal scheduler state for wait-core owned transactions
+    /// that must keep the state lock live across a narrow capability handoff.
+    pub(crate) fn sched_state_guard(
+        &self,
+    ) -> crate::sync::rwlock::WriteIrqSaveGuard<'_, TaskSchedState> {
+        self.sched_state.write()
+    }
+
+    /// Run a closure with the internal scheduler state and update it with the
+    /// returned state in the same NoIrq transaction.
+    pub(crate) fn update_sched_state_with<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(TaskStatus) -> (TaskStatus, R),
+        F: FnOnce(TaskSchedState) -> (TaskSchedState, R),
     {
-        let mut guard = self.status.write();
-        let (status, r) = f(*guard);
-        *guard = status;
+        let mut guard = self.sched_state.write();
+        let (state, r) = f(guard.clone());
+        *guard = state;
         r
     }
 

@@ -59,21 +59,21 @@
 ## ANE-20260527-OPENAT-NOFOLLOW-OPATH-SYMLINK
 
 **Type:** Issue
-**Status:** Open
+**Status:** Resolved
 **Area:** fs / openat / readlinkat
 
-**Symptom / Trigger:** `openat` 目前还没有真正支持 `O_NOFOLLOW`，`O_PATH | O_NOFOLLOW` 打开的 symlink 不能稳定保留“指向符号链接本体”的语义，导致 `readlinkat("", ...)` 这类空路径用例仍然失败。
+**Symptom / Trigger:** `openat` 曾经没有真正支持 `O_NOFOLLOW`，`O_PATH | O_NOFOLLOW` 打开的 symlink 不能稳定保留“指向符号链接本体”的语义，导致 `readlinkat("", ...)` 这类空路径用例失败。
 
-**Impact:** LTP `readlinkat01` 的空路径分支无法按 Linux 预期工作，`AT_EMPTY_PATH` 风格的后续接口也会受影响。
+**Impact:** 已通过 fd/openat cleanup 收敛：final `O_NOFOLLOW` symlink 拒绝、`O_PATH | O_NOFOLLOW` symlink fd 保存和 `readlinkat(fd, "", ...)` 路径已经落地；剩余 `O_PATH` 后续能力按当前限制跟踪。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-27
-**Exit Condition:** 为 `openat` 补上 `O_NOFOLLOW` / `O_PATH` 的路径解析与 fd 语义，并重新验证 `readlinkat01` 的空路径用例。
+**Last Verified:** 2026-05-28
+**Exit Condition:** 已完成。focused rv64 LTP 中 `readlinkat01` 的 glibc / musl 空路径分支通过。
 
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [当前限制](./current-limitations.md)
 
 **Severity:** Medium
-**Workaround:** 暂时避开依赖 `O_PATH | O_NOFOLLOW` 语义的空路径调用链。
+**Workaround:** 无需针对该问题绕过；完整 `O_PATH` 能力仍见 `ANE-20260528-OPATH-STAGE1-CAPABILITIES`。
 
 ## ANE-20260527-LTP-MKNOD-LEGACY-READDIR
 
@@ -94,21 +94,78 @@
 **Severity:** Medium
 **Workaround:** 先把这两个用例从当前白名单里隔离出来，或者等 syscall 入口补齐后再回归。
 
-## ANE-20260527-WRITE-EPIPE-SIGPIPE
+## ANE-20260528-EXEC-ETXTBSY-WRITER-ACCOUNTING
 
 **Type:** Issue
 **Status:** Open
-**Area:** fs / pipe / signal / write
+**Area:** fs / execve / open-file accounting
 
-**Symptom / Trigger:** LTP `write05` 关闭 pipe 读端后向写端写入，当前写入路径已经返回 `EPIPE`，但注册的 `SIGPIPE` handler 没有被调用，测例观察到 `sigpipe_cnt = 0`。
+**Symptom / Trigger:** LTP `execve04` 让子进程以 `O_WRONLY` 打开 `execve_child`，父进程随后 `execve("execve_child", ...)`；Linux 期望返回 `ETXTBSY`，当前内核仍允许执行，导致 `execve_child` 运行并输出 `execve_child shouldn't be executed`。
 
-**Impact:** 这说明 pipe 写端的 no-reader 路径还没有把 Linux/POSIX 预期的 `SIGPIPE` 投递接入 signal 子系统；依赖 `SIGPIPE` handler 或默认终止行为的用户态会和 Linux 语义不一致。
+**Impact:** 缺少 executable-vs-writer 排斥语义，会让正在被写打开的文件仍可作为新程序映像执行，和 Linux 的 text file busy 语义不一致。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-27
-**Exit Condition:** pipe 写入在无读者导致 `EPIPE` 时向当前任务投递 `SIGPIPE`，并在 signal handler / ignore / block 等路径下重新验证 `write05` 和相关 pipe 写入测例。
+**Last Verified:** 2026-05-28
+**Exit Condition:** 为 VFS/open-file-description 或 inode 增加系统性的写打开/可执行打开账本，补齐 `execve` 与 writable open/truncate/write 之间的排斥规则，并重新验证 `execve04`。
 
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
 **Severity:** Medium
-**Workaround:** 当前阶段不要把 `write05` 视为纯测试设施问题；涉及 pipe no-reader 的用户态需要显式处理 `EPIPE`，不能依赖 `SIGPIPE` 行为已经完整。
+**Workaround:** 暂时不要把 `execve04` 视为 exec 主路径回归；等 VFS busy 账本系统性实现后再纳入通过项。
+
+## ANE-20260529-MUSL-MEMORY-MADVISE01-SCHED-ASSERT
+
+**Type:** Issue
+**Status:** Open
+**Area:** sched / task / user-test / LTP
+
+**Symptom / Trigger:** 使用 `./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/ltp-debug.log` 复跑 memory profile 时，glibc memory 组已经完整结束；切到 musl memory 后，在 `madvise01` 执行到 `MADV_DOFORK` 附近触发 `anemone-kernel/src/sched/processor.rs:131` 的 `assertion failed: task.status() == TaskStatus::Runnable`。
+
+**Impact:** musl memory 组无法完整跑完，导致本轮只能确认 glibc memory 组的 mmap / mremap errno 修复结果；后续 musl memory 的剩余失败矩阵会被这个调度断言遮蔽。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-29
+**Exit Condition:** 定位该断言对应的 task 状态转移竞态或错误唤醒路径，保证 musl memory 组至少能跑完整组并正常关机，再重新评估 musl 侧 mmap / madvise 失败项。
+
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+**Severity:** High
+**Workaround:** 当前先用 glibc memory 组验证 mmap / mremap errno 修复；musl memory 组需要等 scheduler 断言修复后再作为完整回归依据。
+
+## ANE-20260531-SCHED-EVENT-WAKE-RUNNABLE-RACE
+
+**Type:** Issue
+**Status:** Open
+**Area:** sched / event / task / user-test
+
+**Symptom / Trigger:** 在 `Event::listen*()` 的等待循环与 `publish()` 唤醒交错时，`prepare_listener()` 会过早把当前 task 标成 `Waiting`，而 waker 侧 `try_to_wake_up()` 先把它切回 `Runnable` 再独立调用 `task_enqueue()`；如果 waiter 在这段窗口里完成一轮 `schedule()` 并进入下一轮等待，旧 wake 的尾巴就可能撞上新的 `Waiting` 状态，触发 `anemone-kernel/src/sched/processor.rs:255` 的 `assert!(task.status() == TaskStatus::Runnable)`。
+
+**Impact:** 会让部分 user-test / LTP profile 随机 panic，遮蔽后续语义回归判断；这是 scheduler / event 的状态交错问题，不是平台硬件语义差异本身。
+
+**Owner:** doruche
+**Last Verified:** 2026-05-31
+**Exit Condition:** 将 event 等待轮次、唤醒归属和 task 入队时序收口，确保 waiter 下一轮不会接到前一轮 wake 的尾巴，并在已知触发 profile 上不再出现该断言。
+
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [RFC-20260601-sched-wait-refactor](../rfcs/sched-wait-refactor/index.md), [Sched Wait Refactor 事务日志](../devlog/transactions/2026-06-01-sched-wait-refactor.md)
+
+**Severity:** High
+**Workaround:** 继续用同一类 profile 复跑确认是否命中该竞态，但不要把它当成已收敛的功能缺口。
+
+## ANE-20260602-SHMAT1-SIGILL-MASKS-SEGV-HANG-REVALIDATION
+
+**Type:** Issue
+**Status:** Open
+**Area:** mm / signal / SysV shm / user-test / LTP
+
+**Symptom / Trigger:** `shmat1` 曾在只读 attach 后写入触发缺页异常，内核投递 `SIGSEGV` 后进入线程组退出路径并卡住，`build/shmat01-stuck.log` 后段表现为大量重复的 event publish。修正同步 fault 的 `SIGSEGV` 应投递给 faulting task 而不是线程组后，最新 rv64 多次复跑未再复现该卡死；但最新 `build/user-test-rv64.log` 里的 glibc / musl `shmat1` 都更早以 illegal instruction 退出，状态码为 132。
+
+**Impact:** 当前 rv64 日志只能说明原来的 `SIGSEGV -> exit_group` 卡死没有再次出现，不能证明原始 `NotMapped -> SIGSEGV -> task exit` 路径已经被完整覆盖；`SIGILL` 132 会遮蔽 `shmat1` 对只读映射 fault 语义和退出收敛性的回归判断。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-02
+**Exit Condition:** 先定位并消除 rv64 `shmat1` 的 illegal instruction 132，或构造一个定向用例稳定覆盖只读 `shmat` 写 fault；确认同步 `SIGSEGV` 只投递到 faulting task，线程组退出能收敛，且不再出现重复 event publish 卡死。
+
+**Related:** [Sched Wait Refactor 事务日志](../devlog/transactions/2026-06-01-sched-wait-refactor.md), [RFC-20260601-sched-wait-refactor](../rfcs/sched-wait-refactor/index.md), [当前限制：SysV shm LTP infra](./current-limitations.md#ane-20260529-sysv-shm-ltp-infra-stage1)
+
+**Severity:** High
+**Workaround:** 当前只把最新 rv64 结果视为“未复现卡死但被 SIGILL 遮蔽”；不要用旧 la64 日志判断本轮修复结果，也不要把该项标成已验证通过。

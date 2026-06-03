@@ -6,6 +6,10 @@ getcwd04
 chdir01
 chdir04
 
+fchdir01
+fchdir02
+fchdir03
+
 mkdir02
 mkdir03
 mkdir04
@@ -13,3 +17,4 @@ mkdir05
 mkdir09
 mkdirat01
 mkdirat02
+

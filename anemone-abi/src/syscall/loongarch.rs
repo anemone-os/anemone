@@ -209,13 +209,18 @@ pub mod linux {
 
     pub const SYS_PRLIMIT64: u64 = 261;
 
+    pub const SYS_FANOTIFY_INIT: u64 = 262;
+    pub const SYS_FANOTIFY_MARK: u64 = 263;
+
     pub const SYS_RENAMEAT2: u64 = 276;
 
     pub const SYS_GETRANDOM: u64 = 278;
 
+    pub const SYS_EXECVEAT: u64 = 281;
+
     pub const SYS_PWRITEV2: u64 = 287;
 
-    pub const SYS_XSTAT: u64 = 291;
+    pub const SYS_STATX: u64 = 291;
 
     pub const SYS_CLONE3: u64 = 435;
 

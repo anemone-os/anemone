@@ -1,70 +1,248 @@
 # RFC 模板
 
-复制本页内容时，替换所有占位字段与说明文字。
+RFC 默认使用目录结构，而不是单个 Markdown 文件。
+
+目录名使用稳定 slug：
+
+```text
+docs/src/rfcs/<short-slug>/
+```
+
+最小结构：
+
+```text
+docs/src/rfcs/<short-slug>/
+  index.md
+  implementation.md
+  invariants.md          # 可选
+  tracking-issues.md     # 可选
+  backgrounds/           # 可选
+    index.md
+```
+
+`index.md` 与 `implementation.md` 必须存在。`invariants.md` 在协议、不变量、锁序、生命周期或证明义务复杂时创建。`tracking-issues.md` 在实现期需要持续分级跟踪问题时创建。`backgrounds/` 用于历史背景、旧问题清单、被拒绝方案和旧计划归档；背景材料不能覆盖 canonical 结论。
+
+RFC 一旦进入实现阶段，必须创建对应事务日志：
+
+```text
+docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
+```
+
+并在 RFC `index.md`、事务日志索引、当前双周 devlog 和 mdBook Summary 中建立链接。
+
+## `index.md`
 
 ```md
 # RFC-YYYYMMDD-short-slug
 
-**Status:** Draft
-**Owners:** name1, name2
-**Last Updated:** YYYY-MM-DD
-**Related:** 开发日志、问题条目、已有决策记录、相关 PR 或 issue
+**状态：** Draft / Accepted for Implementation / Superseded / Closed
+**负责人：** name1, name2
+**最后更新：** YYYY-MM-DD
+**领域：** scheduler / fs / mm / ...
+**事务日志：** Draft 阶段可写 `None`；进入实现阶段后必须链接对应 transaction。
+**开放问题：** 简短列出待决问题；没有则写 `None`。
+**下一步：** 下一次 review、原型、迁移阶段、验证或收口动作。
 
-## Summary
+## 摘要
 
-用一段话说明这份 RFC 要解决什么问题，以及提议的核心方向。
+用一到两段说明问题是什么，以及 RFC 提议的方向。
 
-## Context
+## 背景
 
-说明当前背景、已有约束、已有实现状态，以及为什么这个问题现在必须被处理。
+记录当前实现状态、已观察到的失败模式、已有约束，以及为什么现在需要共享评审。
 
-## Goals
+## 目标
 
-- 本 RFC 明确要解决的目标 1。
-- 本 RFC 明确要解决的目标 2。
+- 目标 1。
+- 目标 2。
 
-## Non-Goals
+## 非目标
 
-- 本 RFC 明确不处理的内容 1。
-- 本 RFC 明确不处理的内容 2。
+- 明确排除的范围 1。
+- 明确排除的范围 2。
 
-## Proposal
+## 文档地图
 
-按主题解释提议方案本身。必要时拆成多个小节，例如：
+Canonical：
 
-### Interfaces
+- [不变量需求](./invariants.md)
+- [迁移实施计划](./implementation.md)
+- [Tracking Issues](./tracking-issues.md)（如果存在）
 
-描述对外接口、配置、ABI、行为边界或用户可见语义。
+背景材料：
 
-### Internal Design
+- [背景材料索引](./backgrounds/index.md)
 
-描述内部结构、关键数据流、状态机、不变量或子系统边界。
+## 方案
 
-### Migration / Rollout
+概括最终方向。如果细节很多，这里保持短摘要，并链接到 canonical 子文档。
 
-描述如何从当前状态迁移到目标状态，以及中间阶段怎样保持系统可工作。
+## 接受边界
 
-## Alternatives Considered
+说明本 RFC 被接受意味着什么，哪些内容仍需审查，以及哪些变化必须回到本 RFC 或 follow-up RFC。
 
-### Alternative A
+## 备选方案
 
-说明这个方案是什么，以及为什么没有采用。
+记录考虑过的合理备选方案，以及为什么拒绝或延期。
 
-### Alternative B
+## 风险
 
-说明这个方案是什么，以及为什么没有采用。
+- 风险 1 及控制方式。
+- 风险 2 及控制方式。
 
-## Risks
+## 收口
 
-- 风险 1，以及打算如何控制。
-- 风险 2，以及打算如何控制。
+完成后记录最终验证、剩余限制，以及 register / devlog 链接。
+```
 
-## Open Questions
+## `tracking-issues.md`
 
-- 仍未决的问题 1。
-- 仍未决的问题 2。
+```md
+# <标题> Tracking Issues
 
-## Next Step
+**状态：** Active / Closed
+**最后更新：** YYYY-MM-DD
+**父 RFC：** [RFC-YYYYMMDD-short-slug](./index.md)
+**事务日志：** [YYYY-MM-DD-short-slug](../../devlog/transactions/YYYY-MM-DD-short-slug.md)
 
-说明这份 RFC 下一步会进入什么状态，例如继续讨论、补原型、拆任务、转 ADR 等。
-```# RFC 模板
+本文只跟踪当前仍影响实现顺序、review gate、停止边界或验收判断的问题。历史问题清单和旧 review 材料放在 `backgrounds/`。
+
+## Apollyon
+
+- 当前必须修复的错误结果、数据损坏、安全问题、崩溃或严重不可恢复状态。
+
+## Keter
+
+- 当前必须修复的架构方向、状态所有权、边界或后续开发阻塞问题。
+
+## Euclid
+
+- 通常值得修，但不阻塞主线的问题。
+
+## Safe
+
+- 记录即可，默认不修的问题。
+
+## Neutralized
+
+- 已处理完成的问题、neutralize 依据和对应事务日志条目。
+```
+
+## `invariants.md`
+
+```md
+# <标题> 不变量需求
+
+**状态：** Draft / Canonical / Superseded
+**最后更新：** YYYY-MM-DD
+**父 RFC：** [RFC-YYYYMMDD-short-slug](./index.md)
+
+## 闭合条件
+
+- 必须满足的条件 1。
+- 必须满足的条件 2。
+
+## 非目标
+
+- 非目标 1。
+- 非目标 2。
+
+## 状态所有权
+
+定义单一真相源，以及每个状态转换由哪个子系统拥有。
+
+## 身份与能力模型
+
+定义稳定身份、token、guard、permit 或其他 capability，并说明哪些比较有效、哪些比较禁止。
+
+## 线性化点
+
+定义外部可见状态变化在哪个事务或锁边界上成立。
+
+## 锁序与生命周期规则
+
+定义锁序、引用所有权、cleanup 责任和 teardown 行为。
+
+## 禁止退化项
+
+- 会破坏证明的模式。
+- 会制造第二套真相源的模式。
+
+## 完成标准
+
+- 声明协议闭合的标准。
+- 只能声明为迁移中间态的标准。
+```
+
+## `implementation.md`
+
+```md
+# <标题> 迁移实施计划
+
+**状态：** Draft / Active / Completed
+**最后更新：** YYYY-MM-DD
+**父 RFC：** [RFC-YYYYMMDD-short-slug](./index.md)
+**不变量：** [不变量需求](./invariants.md)
+
+## 迁移原则
+
+- 原则 1。
+- 原则 2。
+
+## 阶段 1：简短阶段名
+
+前置条件：
+
+- 开始前必须满足的条件。
+
+交付：
+
+- 具体交付 1。
+- 具体交付 2。
+
+审计：
+
+- 本阶段需要执行的搜索、review 或分类。
+
+可观测性：
+
+- 本阶段要求的 debug / trace / assertion 证据。
+
+验证：
+
+- 命令、测试、stress profile 或证明材料。
+
+退出条件：
+
+- 进入下一阶段的标准。
+
+## 旁路审计清单
+
+列出精确代码搜索、分类方式和允许保留旁路的理由。
+
+## 可观测性清单
+
+列出后续 review 必须能依赖的 logs / traces / assertions。
+
+## 停止边界
+
+说明什么时候应继续追查 issue，什么时候应停止实现形状争论。
+```
+
+## `backgrounds/index.md`
+
+```md
+# <RFC 标题> 背景材料
+
+本目录保存 [RFC-YYYYMMDD-short-slug](../index.md) 的历史上下文。
+
+Canonical：
+
+- [不变量需求](../invariants.md)
+- [迁移实施计划](../implementation.md)
+
+历史材料：
+
+- [问题简述](./problem-brief.md)
+- [被否决的窄化方案](./rejected-narrow-fix.md)
+```

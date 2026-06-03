@@ -294,10 +294,13 @@ pub fn kernel_clone(
         new_task.set_files_state(current_task.files_state().read().fork());
     }
 
+    // Credential state is inherited before the task is published. These
+    // accessors only touch credential/nice state and do not take sched locks.
     new_task.replace_cred(current_task.cred());
     if current_task.no_new_privs() {
         new_task.set_no_new_privs();
     }
+    new_task.set_nice(current_task.nice());
 
     // mask is always inherited.
     {

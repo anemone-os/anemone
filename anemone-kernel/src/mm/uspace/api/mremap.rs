@@ -61,7 +61,15 @@ fn sys_mremap(
         new_npages,
         may_move,
         fixed_target,
-    })?;
+    })
+    .map_err(mremap_error_at_syscall_boundary)?;
 
     Ok(addr.get())
+}
+
+fn mremap_error_at_syscall_boundary(err: SysError) -> SysError {
+    match err {
+        SysError::PermissionDenied | SysError::RangeNotMapped => SysError::BadAddress,
+        err => err,
+    }
 }

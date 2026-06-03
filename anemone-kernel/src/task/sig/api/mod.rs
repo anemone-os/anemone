@@ -8,10 +8,7 @@
 
 use crate::{
     prelude::*,
-    task::{
-        credentials::{UserId, cap::Capability},
-        sig::SigNo,
-    },
+    task::{credentials::cap::Capability, sig::SigNo},
 };
 
 macro_rules! deny_signal_permission {

@@ -20,6 +20,26 @@ pub fn kernel_execve(
     argv: &[impl AsRef<str>],
     envp: &[impl AsRef<str>],
 ) -> Result<(), SysError> {
+    let path = path.as_ref();
+    let resolved = get_current_task()
+        .lookup_path(Path::new(path), ResolveFlags::empty())
+        .map_err(|e| {
+            knoticeln!("execve: failed to resolve path '{}': {:?}", path, e);
+            e
+        })?;
+    kernel_execve_from_pathref(path, resolved, argv, envp)
+}
+
+/// **This function must be run in a process context.**
+///
+/// `exec_fn` is the filename exposed to the new image through argv/auxv, while
+/// `path` is the already resolved executable object.
+pub fn kernel_execve_from_pathref(
+    exec_fn: &str,
+    path: PathRef,
+    argv: &[impl AsRef<str>],
+    envp: &[impl AsRef<str>],
+) -> Result<(), SysError> {
     let task = get_current_task();
     let mut old_uspace = task.try_clone_uspace_handle();
     let tgid = task.tgid();
@@ -27,7 +47,8 @@ pub fn kernel_execve(
     let mut usp = UserSpace::new()?;
     match dispatch_execve(
         &mut usp,
-        path.as_ref(),
+        exec_fn,
+        path,
         argv,
         envp,
         &task.cred(),
@@ -66,14 +87,11 @@ pub fn kernel_execve(
                 }
 
                 task.get_thread_group().mark_executed();
-                task.update_cred_with(|cred| {
-                    *cred = new_cred;
-                    Ok(())
-                })?;
+                task.replace_cred(new_cred);
 
                 // this must be a user task.
-                let exec_fn = path.as_ref().split('/').last().unwrap_or(path.as_ref());
-                let name = (String::from("@user/") + exec_fn).into_boxed_str();
+                let name_part = exec_fn.split('/').last().unwrap_or(exec_fn);
+                let name = (String::from("@user/") + name_part).into_boxed_str();
                 let flags = TaskFlags::empty();
 
                 IntrArch::local_intr_disable();

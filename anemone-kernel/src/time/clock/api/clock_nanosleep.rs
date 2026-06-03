@@ -57,26 +57,52 @@ pub(crate) fn clock_nanosleep(
 
     let mut rem = duration;
     while rem > Duration::ZERO {
-        task.update_status_with(|_prev| {
-            (
-                TaskStatus::Waiting {
-                    interruptible: true,
-                },
-                (),
-            )
-        });
+        let active_wait = ActiveWait::begin(&task, true);
+        let token = active_wait.token();
 
         if task.has_unmasked_signal() {
-            task.update_status_with(|_prev| (TaskStatus::Runnable, ()));
+            active_wait.cancel(WaitReason::Signal);
+            active_wait.finish();
             write_remaining_time(rmtp, rem)?;
             return Err(SysError::Interrupted);
         }
 
-        rem = schedule_with_timeout(Some(rem));
+        rem = schedule_wait_with_timeout(&task, token, Some(rem));
+        let outcome = active_wait.finish();
+        kdebugln!(
+            "clock_nanosleep: wait finished task={} outcome={:?} rem={:?}",
+            task.tid(),
+            outcome,
+            rem,
+        );
 
-        if task.has_unmasked_signal() {
-            write_remaining_time(rmtp, rem)?;
-            return Err(SysError::Interrupted);
+        match outcome {
+            WaitOutcome::Completed(WaitReason::Timeout) => {
+                if task.has_unmasked_signal() {
+                    write_remaining_time(rmtp, rem)?;
+                    return Err(SysError::Interrupted);
+                }
+                break;
+            },
+            WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force) => {
+                write_remaining_time(rmtp, rem)?;
+                return Err(SysError::Interrupted);
+            },
+            other => {
+                if task.has_unmasked_signal() {
+                    write_remaining_time(rmtp, rem)?;
+                    return Err(SysError::Interrupted);
+                }
+                kwarningln!(
+                    "clock_nanosleep: unexpected wait outcome task={} outcome={:?} rem={:?}",
+                    task.tid(),
+                    other,
+                    rem,
+                );
+                assert!(false, "clock_nanosleep saw unexpected wait outcome");
+                write_remaining_time(rmtp, rem)?;
+                return Err(SysError::Interrupted);
+            },
         }
     }
 

@@ -1,6 +1,6 @@
 //! Typed POSIX/Linux siginfo_t with Rust enums and structs.
 
-use crate::{prelude::*, task::credentials::UserId};
+use crate::prelude::*;
 
 /// `int si_code` in `struct siginfo_t`.
 ///

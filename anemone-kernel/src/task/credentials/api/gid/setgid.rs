@@ -1,9 +1,6 @@
 //! setgid system call.
 
-use crate::{
-    prelude::*,
-    task::credentials::{Gid, UserId},
-};
+use crate::{prelude::*, task::credentials::Gid};
 
 /// Sets the current task's group IDs.
 ///

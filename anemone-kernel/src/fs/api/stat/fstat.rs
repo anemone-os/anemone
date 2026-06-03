@@ -14,9 +14,7 @@ use crate::{
 
 #[syscall(SYS_FSTAT)]
 fn sys_fstat(fd: Fd, #[validate_with(user_addr)] statbuf: VirtAddr) -> Result<u64, SysError> {
-    let mut kbuf = Stat::default();
-
-    kernel_fstatat(AtFd::Fd(fd), "", &mut kbuf, StatAtFlag::EMPTY_PATH)?;
+    let kbuf = kernel_fstatat(AtFd::Fd(fd), "", StatAtFlag::EMPTY_PATH)?.to_linux_stat();
 
     let usp = get_current_task().clone_uspace_handle();
     let mut guard = usp.lock();

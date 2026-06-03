@@ -493,6 +493,11 @@ impl Task {
         self.sig_mask.lock().clone()
     }
 
+    /// Return a snapshot of this task's private pending signal set.
+    pub fn pending_signal_set(&self) -> SigSet {
+        self.sig_pending.lock().to_sigset()
+    }
+
     /// Caller is responsible for ensuring the validity of `new_mask`, i.e. it
     /// should not have SIGKILL and SIGSTOP set.
     pub fn set_sig_mask(&self, new_mask: SigSet) {
@@ -522,6 +527,11 @@ impl ThreadGroup {
             return;
         });
         disp
+    }
+
+    /// Return a snapshot of this thread group's shared pending signal set.
+    pub fn shared_pending_signal_set(&self) -> SigSet {
+        self.inner.read().sig_pending.lock().to_sigset()
     }
 
     /// Send a signal to this thread group.

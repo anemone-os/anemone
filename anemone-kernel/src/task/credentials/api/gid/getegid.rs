@@ -1,10 +1,11 @@
 //! getegid system call.
 
-use crate::{prelude::*, task::credentials::UserId};
+use crate::prelude::*;
 
 /// Returns the current task's effective group ID.
 ///
-/// Permission check: none; a task may always inspect its own effective group ID.
+/// Permission check: none; a task may always inspect its own effective group
+/// ID.
 ///
 /// Reference: <https://man7.org/linux/man-pages/man2/getegid.2.html>.
 #[syscall(SYS_GETEGID)]

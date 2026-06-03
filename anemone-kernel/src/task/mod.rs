@@ -80,6 +80,8 @@ pub struct Task {
     creator: Option<Tid>,
     /// Thread group ID.
     tgid: Tid,
+    /// Task creation time on the kernel monotonic timeline.
+    create_instant: Instant,
 
     /// Kernel stack owned by this task.
     kstack: KernelStack,
@@ -157,8 +159,8 @@ pub struct Task {
     /// Published by the child when a vfork parent may continue.
     vfork_done: Event,
 
-    /// See [TaskStatus] for a precise definition.
-    status: NoIrqRwLock<TaskStatus>,
+    /// Internal scheduling state. [TaskStatus] is a compatibility projection.
+    sched_state: NoIrqRwLock<TaskSchedState>,
 
     /// Optional user pointer updated during child clear-tid handling.
     ///
@@ -166,34 +168,19 @@ pub struct Task {
     clear_child_tid: SpinLock<Option<VirtAddr>>,
 }
 
-/// **[TaskStatus] is not the objective truth of a task's state. Instead, it's
-/// the intended state of the task.**
+/// Observation-only compatibility state for status readers.
 ///
-/// Most of the time, the actual state of a task is consistent with its
-/// [TaskStatus], but there are various windows where they are inconsistent. And
-/// that's not a mistake. **It's expected behavior.** It's precisely the
-/// foundation upon which we build various synchronization primitives.
-///
-/// This is, in fact, so-called ***lock-free programming***.
-///
-/// TODO: explain more specifically. maybe we should write a dedicated chapter
-/// about this topic in the book.
-///
-/// TODO: atomic enum is better.
+/// [TaskStatus] is a lossy snapshot projected from [TaskSchedState]. It hides
+/// wait identity and park state, so scheduler, wait, wake, and enqueue paths
+/// must use scheduler-state helpers or transactions instead of this projection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStatus {
-    /// Task can be scheduled to run.
+    /// Task is observable as schedulable.
     Runnable,
-    /// Task can be reapped by its parent, but cannot run anymore.
+    /// Task is observable as exited and cannot run anymore.
     Zombie,
-    /// Task can be waken up.
+    /// Task is observable as waiting.
     Waiting { interruptible: bool },
-}
-
-impl TaskStatus {
-    pub fn is_sleeping(&self) -> bool {
-        matches!(self, TaskStatus::Waiting { .. })
-    }
 }
 
 bitflags! {
@@ -406,10 +393,12 @@ impl Task {
         let tgid = tgid.unwrap_or(tid.get_typed());
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
+        let create_instant = Instant::now();
         let task = Self {
             tid: NoIrqRwLock::new(TidRef::Owned(tid)),
             creator,
             tgid,
+            create_instant,
             kstack: stack,
             name: RwLock::new((String::from("@kernel/") + name).into_boxed_str()),
             flags: NoIrqRwLock::new(flags | TaskFlags::KERNEL),
@@ -452,7 +441,7 @@ impl Task {
             robust_list: SpinLock::new(None),
             exit_code: SpinLock::new(None),
             vfork_done: Event::new(),
-            status: NoIrqRwLock::new(TaskStatus::Runnable),
+            sched_state: NoIrqRwLock::new(TaskSchedState::Runnable),
             clear_child_tid: SpinLock::new(None),
         };
         Ok((task, PublishGuard))
@@ -472,6 +461,7 @@ impl Task {
                 tid: NoIrqRwLock::new(TidRef::Idle),
                 creator: None,
                 tgid: Tid::IDLE,
+                create_instant: Instant::now(),
                 kstack: stack,
                 name: RwLock::new(Box::from("@idle")),
                 flags: NoIrqRwLock::new(TaskFlags::IDLE | TaskFlags::KERNEL),
@@ -502,7 +492,7 @@ impl Task {
                 robust_list: SpinLock::new(None),
                 exit_code: SpinLock::new(None),
                 vfork_done: Event::new(),
-                status: NoIrqRwLock::new(TaskStatus::Runnable),
+                sched_state: NoIrqRwLock::new(TaskSchedState::Runnable),
                 clear_child_tid: SpinLock::new(None),
             },
             PublishGuard,
@@ -613,6 +603,11 @@ impl Task {
     /// creator.
     pub fn creator_tid(&self) -> Tid {
         self.creator.unwrap()
+    }
+
+    /// Get the task creation time on the kernel monotonic timeline.
+    pub fn create_instant(&self) -> Instant {
+        self.create_instant
     }
 
     /// Get the task name. This introduces a heap allocation. Pay attention.
@@ -738,14 +733,27 @@ impl Task {
         self.nice.store(nice, Ordering::Release);
     }
 
+    /// Return a credential snapshot.
+    ///
+    /// This accessor intentionally clones the credential set so callers do not
+    /// hold the credential lock across scheduler, topology, VFS, or user memory
+    /// operations.
     pub fn cred(&self) -> CredentialSet {
         self.cred.read().clone()
     }
 
-    pub fn replace_cred(&mut self, cred: CredentialSet) {
-        self.cred = RwLock::new(cred);
+    /// Replace the whole credential snapshot.
+    ///
+    /// This method only takes the credential lock. Callers must not hold a
+    /// scheduler-state lock while replacing credentials.
+    pub fn replace_cred(&self, cred: CredentialSet) {
+        *self.cred.write() = cred;
     }
 
+    /// Mutate credentials transactionally under the credential lock.
+    ///
+    /// The closure must stay local to credential state and must not acquire
+    /// scheduler-state locks or perform operations that can block.
     pub fn update_cred_with<F>(&self, f: F) -> Result<(), SysError>
     where
         F: FnOnce(&mut CredentialSet) -> Result<(), SysError>,
@@ -779,7 +787,7 @@ impl Debug for Task {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Task")
             .field("tid", &self.tid())
-            .field("status", &*self.status.read())
+            .field("status", &self.status())
             .field("flags", &self.flags())
             .finish()
     }

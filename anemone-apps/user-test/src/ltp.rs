@@ -58,6 +58,14 @@ struct LtpGroup {
 
 const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
+        name: "clone",
+        cases: include_str!("../ltp/groups/clone.txt"),
+    },
+    LtpGroup {
+        name: "exec",
+        cases: include_str!("../ltp/groups/exec.txt"),
+    },
+    LtpGroup {
         name: "chmod",
         cases: include_str!("../ltp/groups/chmod.txt"),
     },
@@ -74,24 +82,48 @@ const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../ltp/groups/fs.txt"),
     },
     LtpGroup {
+        name: "futex",
+        cases: include_str!("../ltp/groups/futex.txt"),
+    },
+    LtpGroup {
         name: "memory",
         cases: include_str!("../ltp/groups/memory.txt"),
+    },
+    LtpGroup {
+        name: "open",
+        cases: include_str!("../ltp/groups/open.txt"),
     },
     LtpGroup {
         name: "pipe",
         cases: include_str!("../ltp/groups/pipe.txt"),
     },
     LtpGroup {
-        name: "process-exec",
-        cases: include_str!("../ltp/groups/process-exec.txt"),
-    },
-    LtpGroup {
         name: "read-write",
         cases: include_str!("../ltp/groups/read-write.txt"),
     },
     LtpGroup {
+        name: "ipc",
+        cases: include_str!("../ltp/groups/ipc.txt"),
+    },
+    LtpGroup {
+        name: "tmp",
+        cases: include_str!("../ltp/groups/tmp.txt"),
+    },
+    LtpGroup {
         name: "credentials",
         cases: include_str!("../ltp/groups/credentials.txt"),
+    },
+    LtpGroup {
+        name: "signal",
+        cases: include_str!("../ltp/groups/signal.txt"),
+    },
+    LtpGroup {
+        name: "schedule",
+        cases: include_str!("../ltp/groups/schedule.txt"),
+    },
+    LtpGroup {
+        name: "iomux",
+        cases: include_str!("../ltp/groups/iomux.txt"),
     },
 ];
 
@@ -113,6 +145,7 @@ const LTP_FIXTURES: &[LtpFixture] = &[
 
 struct LtpCaseSpec<'a> {
     name: &'a str,
+    executable: &'a str,
     args: Vec<&'a str>,
 }
 
@@ -224,11 +257,11 @@ fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
             continue;
         }
 
-        let case_path = format!("/{}/ltp/testcases/bin/{}", root.family, case.name);
+        let case_path = format!("/{}/ltp/testcases/bin/{}", root.family, case.executable);
         if fstatat(AtFd::Cwd, Path::new(case_path.as_str())).is_err() {
             println!(
-                "user-test: skipping {} missing case {}",
-                root.label, case.name,
+                "user-test: skipping {} missing case {} executable {}",
+                root.label, case.name, case.executable,
             );
             summary.skipped += 1;
             continue;
@@ -334,7 +367,7 @@ fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpC
             }
 
             let mut argv = Vec::with_capacity(case.args.len() + 1);
-            argv.push(case_path);
+            argv.push(case.executable);
             argv.extend(case.args.iter().copied());
 
             if let Err(errno) = execve(case_path, argv.as_slice(), root.envp) {
@@ -373,10 +406,32 @@ fn parse_case_line(line: &str) -> Option<LtpCaseSpec<'_>> {
         return None;
     }
 
-    let mut parts = line.split_ascii_whitespace();
-    let name = parts.next()?;
-    let args = parts.collect();
-    Some(LtpCaseSpec { name, args })
+    if line.contains("=>") {
+        panic!("user-test: invalid LTP case line {line}: use 'case [executable][: args...]'");
+    }
+
+    let (header, args) = match line.split_once(':') {
+        Some((header, args)) => {
+            let args = args.split_ascii_whitespace().collect::<Vec<_>>();
+            if args.is_empty() {
+                panic!("user-test: invalid LTP case line {line}: missing arguments");
+            }
+            (header, args)
+        },
+        None => (line, Vec::new()),
+    };
+
+    let mut header_parts = header.split_ascii_whitespace();
+    let name = header_parts.next()?;
+    let executable = header_parts.next().unwrap_or(name);
+    if header_parts.next().is_some() {
+        panic!("user-test: invalid LTP case line {line}: invalid case header");
+    }
+    Some(LtpCaseSpec {
+        name,
+        executable,
+        args,
+    })
 }
 
 fn ltp_exit_code(wstatus: WStatus) -> i32 {

@@ -24,6 +24,46 @@
 **Related:** issue ID、决策记录、公开调查材料。
 ```
 
+## 事务日志
+
+```md
+# 2026-05-22 - 简短事务标题
+
+**Status:** Active / Blocked / Completed
+**Owners:** name1, name2
+**Area:** scheduler / futex / timer
+**Canonical Plan:** 计划、不变量文档或 RFC 链接。
+**Current Phase:** 阶段名或阶段编号。
+
+## Scope
+
+这次事务要完成什么，不包含什么。
+
+## Invariants
+
+- 必须一直保持的不变量。
+- 阶段性交付不能破坏的边界。
+
+## Phase Log
+
+### 2026-05-22 - 阶段标题
+
+**Phase:** 阶段编号或名称。
+**Change:** 本阶段实际推进的内容。
+**Audit:** 旁路审计、关键命中分类或 review 结论。
+**Observability:** 新增或验证的 debug / trace / 断言 / 日志证据。
+**Validation:** 实际运行的命令、测试或复现步骤。
+**Next:** 下一阶段入口条件。
+
+## Open Items
+
+- 仍未完成但属于本事务范围的事项。
+
+## Closure
+
+事务完成时记录最终验证、剩余限制和相关 register / devlog 链接。
+```
+
 ## 问题条目
 
 ```md

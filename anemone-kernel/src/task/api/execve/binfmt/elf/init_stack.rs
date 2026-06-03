@@ -84,7 +84,13 @@ impl<'a, T: AsRef<str>, U: AsRef<str>> InitStackCtor<'a, T, U> {
                 .mark_env_range(after_env, (pre_env - after_env) as usize);
         }
 
+        let pre_cmdline = unsafe { self.usp.current_init_sp() };
         self.push_arg_strings()?;
+        let after_cmdline = unsafe { self.usp.current_init_sp() };
+        unsafe {
+            self.usp
+                .mark_cmdline_range(after_cmdline, (pre_cmdline - after_cmdline) as usize);
+        }
 
         // padding down.
         self.prepare_auxv();

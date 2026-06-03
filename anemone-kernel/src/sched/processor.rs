@@ -87,6 +87,16 @@ pub fn get_current_task() -> Arc<Task> {
     })
 }
 
+fn is_local_current_task(task: &Arc<Task>) -> bool {
+    debug_assert!(IntrArch::local_intr_disabled());
+    PROCESSOR.with(|proc| {
+        proc.running_task
+            .as_ref()
+            .map(|current| Arc::ptr_eq(current, task))
+            .unwrap_or(false)
+    })
+}
+
 /// Mark the current running task of this processor as needing a reschedule.
 ///
 /// This function will disable interrupts, since need_resched flag will also be
@@ -117,18 +127,19 @@ pub fn fetch_clear_need_resched() -> bool {
 /// [class::SchedEntity] of the task will determine which queue it will be
 /// enqueued to.
 ///
-/// This entry point is for wakeup and newly-created runnable tasks. The
-/// current running task should use [local_requeue_current] instead.
+/// This entry point is for non-wait-tail placement of tasks that are already
+/// known to be runnable, primarily new task publication. Wait completion tails
+/// must use [wake_enqueue] so late or stale wake placement is revalidated
+/// instead of asserted through this path.
 ///
 /// This function will disable interrupts.
 ///
 /// # Panics
 ///
-/// This function will panic if the task is not in [TaskStatus::Runnable]
-/// status.
+/// This function will panic if the task is not internally runnable.
 pub fn local_enqueue(task: Arc<Task>) {
     assert!(task.cpuid() == cur_cpu_id());
-    assert!(task.status() == TaskStatus::Runnable);
+    assert!(task.is_sched_runnable());
 
     with_intr_disabled(|| {
         PROCESSOR.with_mut(|proc| {
@@ -160,6 +171,53 @@ pub fn local_enqueue(task: Arc<Task>) {
     });
 }
 
+/// Stale-safe local physical placement for a task already logically woken by
+/// the wait core.
+///
+/// Unlike [local_enqueue], this entry point never asserts on stale wake tails.
+/// It only performs physical placement if the task is still runnable and not
+/// already current or queued.
+pub fn local_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
+    assert!(task.cpuid() == cur_cpu_id());
+
+    with_intr_disabled(|| {
+        let state = task.sched_state();
+        if !matches!(state, TaskSchedState::Runnable) {
+            kdebugln!(
+                "wake_enqueue: task={} stale sched_state={:?}",
+                task.tid(),
+                state,
+            );
+            return WakeEnqueueResult::Stale;
+        }
+
+        if is_local_current_task(&task) {
+            let result = match park {
+                ParkState::PrePark => WakeEnqueueResult::AlreadyCurrent,
+                ParkState::Parked => WakeEnqueueResult::ParkPending,
+            };
+            kdebugln!(
+                "wake_enqueue: task={} local current park={:?} result={:?}",
+                task.tid(),
+                park,
+                result
+            );
+            return result;
+        }
+
+        if task.with_sched_entity_mut(|se| se.on_runq()) {
+            kdebugln!("wake_enqueue: task={} already queued", task.tid());
+            return WakeEnqueueResult::AlreadyQueued;
+        }
+
+        PROCESSOR.with_mut(|proc| {
+            proc.runq.enqueue(task.clone());
+        });
+        kdebugln!("wake_enqueue: task={} enqueued locally", task.tid());
+        WakeEnqueueResult::Enqueued
+    })
+}
+
 /// Requeue the current running task back to its local run queue.
 ///
 /// This is used by [schedule] when the current task remains runnable across a
@@ -169,11 +227,10 @@ pub fn local_enqueue(task: Arc<Task>) {
 ///
 /// # Panics
 ///
-/// This function will panic if the task is not in [TaskStatus::Runnable]
-/// status.
+/// This function will panic if the task is not internally runnable.
 pub fn local_requeue_current(task: Arc<Task>) {
     assert!(task.cpuid() == cur_cpu_id());
-    assert!(task.status() == TaskStatus::Runnable);
+    assert!(task.is_sched_runnable());
 
     with_intr_disabled(|| {
         PROCESSOR.with_mut(|proc| {
@@ -204,7 +261,7 @@ pub fn local_requeue_current(task: Arc<Task>) {
 pub fn local_pick_next() -> Arc<Task> {
     debug_assert!(IntrArch::local_intr_disabled());
     let task = PROCESSOR.with_mut(|proc| proc.runq.pick_next());
-    debug_assert!(task.status() == TaskStatus::Runnable);
+    debug_assert!(task.is_sched_runnable());
     task
 }
 
@@ -241,8 +298,11 @@ pub fn pick_next_cpu() -> CpuId {
 ///
 /// Internally, this function sends an IPI to the target processor, which is a
 /// bit expensive.
+///
+/// This is a strict non-wait-tail placement path. Wait completion tails must
+/// use [wake_enqueue].
 pub fn remote_enqueue(task: Arc<Task>) {
-    assert!(task.status() == TaskStatus::Runnable);
+    assert!(task.is_sched_runnable());
     send_ipi(
         task.cpuid().get(),
         IpiPayload::WakeUpTask { tid: task.tid() },
@@ -250,13 +310,64 @@ pub fn remote_enqueue(task: Arc<Task>) {
     .expect("failed to enqueue task to another cpu");
 }
 
-/// Thin wrapper around [local_enqueue] and [remote_enqueue].
+pub fn remote_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
+    assert!(task.cpuid() != cur_cpu_id());
+    let state = task.sched_state();
+    if !matches!(state, TaskSchedState::Runnable) {
+        kdebugln!(
+            "wake_enqueue: task={} stale before remote placement sched_state={:?}",
+            task.tid(),
+            state,
+        );
+        return WakeEnqueueResult::Stale;
+    }
+
+    let tid = task.tid();
+    let placement = send_ipi_wait_result(
+        task.cpuid().get(),
+        IpiPayload::WakeUpTaskStaleSafe { tid, park },
+    )
+    .expect("failed to enqueue task to another cpu");
+
+    kdebugln!(
+        "wake_enqueue: task={} remote placement requested park={:?}",
+        tid,
+        park
+    );
+    placement
+}
+
+/// Strict non-wait-tail placement wrapper around [local_enqueue] and
+/// [remote_enqueue].
+///
+/// New task publication can use this path because the task is already known
+/// runnable and has no late wake tail. Wait completion must use [wake_enqueue].
 pub fn task_enqueue(task: Arc<Task>) {
-    assert!(task.status() == TaskStatus::Runnable);
+    assert!(task.is_sched_runnable());
     if task.cpuid() == cur_cpu_id() {
         local_enqueue(task);
     } else {
         remote_enqueue(task);
+    }
+}
+
+/// Stale-safe physical placement used only after wait-core logical wake
+/// completion.
+pub fn wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
+    let state = task.sched_state();
+    if !matches!(state, TaskSchedState::Runnable) {
+        kdebugln!(
+            "wake_enqueue: task={} stale before placement sched_state={:?}",
+            task.tid(),
+            state,
+        );
+        return WakeEnqueueResult::Stale;
+    }
+
+    if task.cpuid() == cur_cpu_id() {
+        local_wake_enqueue(task, park)
+    } else {
+        remote_wake_enqueue(task, park)
     }
 }
 
@@ -271,7 +382,7 @@ pub mod init_routines {
     /// [bsp_kinit]/[ap_kinit] tasks.
     pub fn local_enqueue_first(task: Arc<Task>) {
         assert!(task.cpuid() == cur_cpu_id());
-        assert!(task.status() == TaskStatus::Runnable);
+        assert!(task.is_sched_runnable());
 
         with_intr_disabled(|| {
             PROCESSOR.with_mut(|proc| {

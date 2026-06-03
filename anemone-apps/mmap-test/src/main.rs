@@ -94,15 +94,16 @@ fn expect_errno<T>(result: Result<T, Errno>, expected: Errno, what: &str) {
 
 fn fork_like() -> Result<u32, Errno> {
     let mut child_tid = 0;
-    clone(
+    let ret = clone(
         CloneFlags::CHILD_SETTID,
         None,
         None,
         None,
         null_mut(),
         Some(&mut child_tid),
-    )
-    .map(|_| child_tid as u32)
+    )?;
+
+    Ok(ret.unwrap_or(0))
 }
 
 fn wait_child_exit_ok(pid: u32, name: &str) -> Result<(), Errno> {
@@ -392,7 +393,7 @@ fn test_fixed_replace_and_noreplace() -> Result<(), Errno> {
             MmapProt::PROT_READ | MmapProt::PROT_WRITE,
             MmapFlags::MAP_PRIVATE | MmapFlags::MAP_ANONYMOUS | MmapFlags::MAP_FIXED_NOREPLACE,
         ),
-        EFAULT,
+        EEXIST,
         "MAP_FIXED_NOREPLACE over existing mapping",
     );
 

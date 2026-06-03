@@ -1,9 +1,6 @@
 //! setfsgid system call.
 
-use crate::{
-    prelude::*,
-    task::credentials::{Gid, UserId},
-};
+use crate::{prelude::*, task::credentials::Gid};
 
 use super::super::id::UserTarget;
 
@@ -25,7 +22,10 @@ fn sys_setfsgid(gid: UserTarget<Gid>) -> Result<u64, SysError> {
     let task = get_current_task();
     let old_fsgid = task.cred().gid.fs.get() as u64;
     let Some(gid) = gid.specified() else {
-        knoticeln!("setfsgid denied: invalid gid target, old fsgid={}", old_fsgid);
+        knoticeln!(
+            "setfsgid denied: invalid gid target, old fsgid={}",
+            old_fsgid
+        );
         return Ok(old_fsgid);
     };
     let _ = task.update_cred_with(|old| {

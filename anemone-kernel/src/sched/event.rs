@@ -3,7 +3,9 @@
 //! Almost the same as linux's wait queue, but with a more appropriate name,
 //! maybe?
 
-use crate::prelude::*;
+use core::fmt::{Debug, Formatter};
+
+use crate::{prelude::*, sched::wait};
 
 /// An occurrence of an event does not guarantee that the event is still valid
 /// when the listener wakes up, so the listener should always check the
@@ -21,13 +23,10 @@ use crate::prelude::*;
 /// **System Invariant: A [Task] can only listen to one [Event] at a time.**
 #[derive(Debug)]
 pub struct Event {
-    /// This [SpinLock] must be embedded into [Event] itself, cz the correctness
-    /// of [Event] relies on certain lock ordering. If we put the [SpinLock]
-    /// outside of [Event], then the safety can't be guaranteed.
-    ///
-    /// **Only [SpinLock::lock_irqsave] can be used, since an [Event] can be
-    /// accessed from interrupt context.**
-    inner: SpinLock<EventInner>,
+    /// This [NoIrqSpinLock] must be embedded into [Event] itself, cz the
+    /// correctness of [Event] relies on certain lock ordering. If we put the
+    /// [NoIrqSpinLock] outside of [Event], then the safety can't be guaranteed.
+    inner: NoIrqSpinLock<EventInner>,
 }
 
 #[derive(Debug)]
@@ -39,7 +38,7 @@ struct EventInner {
 impl Event {
     pub const fn new() -> Self {
         Self {
-            inner: SpinLock::new(EventInner {
+            inner: NoIrqSpinLock::new(EventInner {
                 non_exclusive: VecDeque::new(),
                 exclusive: VecDeque::new(),
             }),
@@ -50,54 +49,55 @@ impl Event {
     /// a ***fire-and-forget*** operation. Caller is both not expected and
     /// unable to handle any error.
     pub fn publish(&self, n_exclusive: usize, wakeup_uninterruptible: bool) {
-        let mut to_wakeup = vec![];
+        let mode = if wakeup_uninterruptible {
+            WakeMode::AnyWait
+        } else {
+            WakeMode::InterruptibleOnly
+        };
 
-        {
-            let mut inner = self.inner.lock_irqsave();
+        let non_exclusive_len = self.inner.lock().non_exclusive.len();
+        // kdebugln!(
+        //     "event: publish begin event={:#x} non_exclusive={} exclusive_quota={}
+        // mode={:?}",     self.debug_id(),
+        //     non_exclusive_len,
+        //     n_exclusive,
+        //     mode,
+        // );
 
-            // 1. wake up non-exclusive listeners. they are usually those observers who
-            //    don't consume resources.
-            while let Some(listener) = inner.non_exclusive.pop_front() {
-                to_wakeup.push(listener);
-            }
-
-            // 2. wake up exclusive listeners. they are usually those actors who consume
-            //    resources, so we only wake up a few of them.
-            for _ in 0..n_exclusive {
-                let Some(listener) = inner.exclusive.pop_front() else {
-                    break;
-                };
-                to_wakeup.push(listener);
-            }
+        for _ in 0..non_exclusive_len {
+            let Some(listener) = self.pop_listener(ListenerQueueKind::NonExclusive) else {
+                break;
+            };
+            self.wake_detached_listener(listener, ListenerQueueKind::NonExclusive, mode);
         }
 
-        for listener in to_wakeup {
-            knoticeln!("waking up listener {:?}", listener);
-            if let Err(e) = try_to_wake_up(
-                &listener.task,
-                if wakeup_uninterruptible {
-                    &[
-                        TaskStatus::Waiting {
-                            interruptible: false,
-                        },
-                        TaskStatus::Waiting {
-                            interruptible: true,
-                        },
-                    ]
-                } else {
-                    &[TaskStatus::Waiting {
-                        interruptible: true,
-                    }]
-                },
-            ) {
-                knoticeln!(
-                    "failed to wake up listener {:?} for {}, error: {:?}, maybe it has been woken up by other event?",
-                    listener,
-                    listener.task.tid(),
-                    e,
+        let exclusive_len = self.inner.lock().exclusive.len();
+        let mut exclusive_success = 0;
+        let mut exclusive_scanned = 0;
+
+        while exclusive_success < n_exclusive && exclusive_scanned < exclusive_len {
+            let Some(listener) = self.pop_listener(ListenerQueueKind::Exclusive) else {
+                break;
+            };
+            exclusive_scanned += 1;
+
+            if self.wake_detached_listener(listener, ListenerQueueKind::Exclusive, mode) {
+                exclusive_success += 1;
+                kdebugln!(
+                    "event: exclusive quota consumed event={:#x} success={} quota={}",
+                    self.debug_id(),
+                    exclusive_success,
+                    n_exclusive,
                 );
             }
         }
+
+        // kdebugln!(
+        //     "event: publish end event={:#x} exclusive_scanned={}
+        // exclusive_success={}",     self.debug_id(),
+        //     exclusive_scanned,
+        //     exclusive_success,
+        // );
     }
 
     /// Blocking listen. Interruptible by signals.
@@ -111,26 +111,24 @@ impl Event {
         P: Fn() -> bool,
     {
         let task = get_current_task();
-        let listener = Listener { task: task.clone() };
-        let ret;
-
         let mut guard = PreemptGuard::new();
 
         loop {
-            // ugly and costly... we should use intrusive linked list later.
-            self.prepare_listener(&task, exclusive, true);
-
-            // if a preemption occurs here, then the listener will never be woken up!
+            let (active_wait, listener) = self.prepare_listener(&task, exclusive, true);
 
             if prediction() {
-                ret = true;
-                break;
+                active_wait.cancel(WaitReason::PredicateReady);
+                self.clean_listener(&listener, exclusive);
+                active_wait.finish();
+                return true;
             }
 
             if task.has_unmasked_signal() {
                 kdebugln!("{} has unmasked signal, breaking the wait loop", task.tid());
-                ret = false;
-                break;
+                active_wait.cancel(WaitReason::Signal);
+                self.clean_listener(&listener, exclusive);
+                active_wait.finish();
+                return false;
             }
 
             unsafe {
@@ -140,11 +138,25 @@ impl Event {
                 });
                 guard = PreemptGuard::new();
             }
+
+            self.clean_listener(&listener, exclusive);
+            let outcome = active_wait.finish();
+            kdebugln!(
+                "event: listen woke event={:#x} task={} listener={:?} outcome={:?}",
+                self.debug_id(),
+                task.tid(),
+                listener,
+                outcome,
+            );
+            match outcome {
+                WaitOutcome::Completed(WaitReason::Event) => {},
+                WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force) => return false,
+                other => {
+                    self.assert_unexpected_wait_outcome("listen", &task, &listener, other);
+                    return false;
+                },
+            }
         }
-
-        self.clean_listener(&listener, exclusive);
-
-        ret
     }
 
     /// Block listening. Won't be woken up by signals.
@@ -155,21 +167,17 @@ impl Event {
         P: Fn() -> bool,
     {
         let task = get_current_task();
-        let listener = Listener { task: task.clone() };
-
         let mut guard = PreemptGuard::new();
 
         loop {
-            // ugly and costly... we should use intrusive linked list later.
-            self.prepare_listener(&task, exclusive, false);
-
-            // if a preemption occurs here, then the listener will never be woken up!
+            let (active_wait, listener) = self.prepare_listener(&task, exclusive, false);
 
             if prediction() {
-                break;
+                active_wait.cancel(WaitReason::PredicateReady);
+                self.clean_listener(&listener, exclusive);
+                active_wait.finish();
+                return;
             }
-
-            // do not check pending signals here, since this is uninterruptible wait.
 
             unsafe {
                 drop(guard);
@@ -178,9 +186,32 @@ impl Event {
                 });
                 guard = PreemptGuard::new();
             }
-        }
 
-        self.clean_listener(&listener, exclusive);
+            self.clean_listener(&listener, exclusive);
+            let outcome = active_wait.finish();
+            kdebugln!(
+                "event: listen_uninterruptible woke event={:#x} task={} listener={:?} outcome={:?}",
+                self.debug_id(),
+                task.tid(),
+                listener,
+                outcome,
+            );
+            match outcome {
+                WaitOutcome::Completed(WaitReason::Event) => {},
+                // Force is a legal wake for fatal signal/stop, but this
+                // no-return API must still retry until the predicate holds.
+                WaitOutcome::Completed(WaitReason::Force) => {},
+                other => {
+                    self.assert_unexpected_wait_outcome(
+                        "listen_uninterruptible",
+                        &task,
+                        &listener,
+                        other,
+                    );
+                    return;
+                },
+            }
+        }
     }
 
     /// Block listening with timeout.
@@ -199,34 +230,72 @@ impl Event {
         P: Fn() -> bool,
     {
         let task = get_current_task();
-        let listener = Listener { task: task.clone() };
-
         let mut guard = PreemptGuard::new();
 
         loop {
-            self.prepare_listener(&task, exclusive, true);
+            let (active_wait, listener) = self.prepare_listener(&task, exclusive, true);
 
             if prediction() {
+                active_wait.cancel(WaitReason::PredicateReady);
                 self.clean_listener(&listener, exclusive);
+                active_wait.finish();
                 return None;
             }
 
             if task.has_unmasked_signal() {
                 kdebugln!("{} has unmasked signal, breaking the wait loop", task.tid());
+                active_wait.cancel(WaitReason::Signal);
                 self.clean_listener(&listener, exclusive);
+                active_wait.finish();
                 return Some(TimeoutListenException::Signaled);
             }
 
             if timeout == Duration::ZERO {
                 kdebugln!("listen_with_timeout: timeout is zero, returning immediately");
+                active_wait.cancel(WaitReason::Timeout);
                 self.clean_listener(&listener, exclusive);
+                active_wait.finish();
                 return Some(TimeoutListenException::Timeout);
             }
 
-            unsafe {
+            let token = listener.token().clone();
+            let remaining = {
                 drop(guard);
-                timeout = schedule_with_timeout(Some(timeout));
-                guard = PreemptGuard::new();
+                self.schedule_with_wait_token_timeout(&task, token, timeout)
+            };
+            guard = PreemptGuard::new();
+
+            self.clean_listener(&listener, exclusive);
+            let outcome = active_wait.finish();
+
+            let elapsed = timeout.saturating_sub(remaining);
+            timeout = remaining;
+            kdebugln!(
+                "event: listen_with_timeout woke event={:#x} task={} listener={:?} outcome={:?} elapsed={:?} remaining={:?}",
+                self.debug_id(),
+                task.tid(),
+                listener,
+                outcome,
+                elapsed,
+                timeout,
+            );
+            match outcome {
+                WaitOutcome::Completed(WaitReason::Event) => {},
+                WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force) => {
+                    return Some(TimeoutListenException::Signaled);
+                },
+                WaitOutcome::Completed(WaitReason::Timeout) => {
+                    return Some(TimeoutListenException::Timeout);
+                },
+                other => {
+                    self.assert_unexpected_wait_outcome(
+                        "listen_with_timeout",
+                        &task,
+                        &listener,
+                        other,
+                    );
+                    return Some(TimeoutListenException::Signaled);
+                },
             }
         }
     }
@@ -239,59 +308,287 @@ pub enum TimeoutListenException {
 }
 
 impl Event {
-    fn prepare_listener(&self, listener: &Arc<Task>, exclusive: bool, interruptible: bool) {
-        let mut inner = self.inner.lock_irqsave();
-        listener.update_status_with(|_prev| {
-            let listener = Listener {
-                task: listener.clone(),
-            };
+    fn debug_id(&self) -> usize {
+        self as *const Self as usize
+    }
 
-            if exclusive {
-                if inner.exclusive.contains(&listener) {
-                    knoticeln!(
-                        "{} is already listening to this event exclusively, won't add it again",
-                        listener.task.tid()
-                    );
-                    return (TaskStatus::Waiting { interruptible }, ());
-                }
-                inner.exclusive.push_back(listener);
-            } else {
-                if inner.non_exclusive.contains(&listener) {
-                    knoticeln!(
-                        "{} is already listening to this event non-exclusively, won't add it again",
-                        listener.task.tid()
-                    );
-                    return (TaskStatus::Waiting { interruptible }, ());
-                }
-                inner.non_exclusive.push_back(listener);
-            }
+    fn prepare_listener(
+        &self,
+        task: &Arc<Task>,
+        exclusive: bool,
+        interruptible: bool,
+    ) -> (wait::ActiveWait, Listener) {
+        let active_wait = wait::ActiveWait::begin(task, interruptible);
+        let listener = Listener::new(task, active_wait.token());
+        self.register_listener(listener.clone(), exclusive);
+        (active_wait, listener)
+    }
 
-            (TaskStatus::Waiting { interruptible }, ())
-        })
+    fn assert_unexpected_wait_outcome(
+        &self,
+        operation: &str,
+        task: &Task,
+        listener: &Listener,
+        outcome: WaitOutcome,
+    ) {
+        kwarningln!(
+            "event: {} unexpected wait outcome event={:#x} task={} listener={:?} outcome={:?}",
+            operation,
+            self.debug_id(),
+            task.tid(),
+            listener,
+            outcome,
+        );
+        assert!(false, "event wait saw unexpected wait outcome");
+    }
+
+    fn register_listener(&self, listener: Listener, exclusive: bool) {
+        let mut inner = self.inner.lock();
+        let queue = if exclusive {
+            &mut inner.exclusive
+        } else {
+            &mut inner.non_exclusive
+        };
+
+        if queue.contains(&listener) {
+            knoticeln!(
+                "event: listener already registered event={:#x} listener={:?} exclusive={}",
+                self.debug_id(),
+                listener,
+                exclusive,
+            );
+            return;
+        }
+
+        kdebugln!(
+            "event: register listener event={:#x} listener={:?} exclusive={}",
+            self.debug_id(),
+            listener,
+            exclusive,
+        );
+        queue.push_back(listener);
     }
 
     fn clean_listener(&self, listener: &Listener, exclusive: bool) {
-        let mut inner = self.inner.lock_irqsave();
-        listener.task.update_status_with(|_prev| {
-            if exclusive {
-                inner.exclusive.retain(|l| l != listener);
-            } else {
-                inner.non_exclusive.retain(|l| l != listener);
-            }
+        let mut inner = self.inner.lock();
+        let queue = if exclusive {
+            &mut inner.exclusive
+        } else {
+            &mut inner.non_exclusive
+        };
+        let old_len = queue.len();
+        queue.retain(|l| l != listener);
+        let removed = old_len != queue.len();
+        kdebugln!(
+            "event: clean listener event={:#x} listener={:?} exclusive={} removed={}",
+            self.debug_id(),
+            listener,
+            exclusive,
+            removed,
+        );
+    }
 
-            (TaskStatus::Runnable, ())
-        });
+    fn pop_listener(&self, queue: ListenerQueueKind) -> Option<Listener> {
+        let mut inner = self.inner.lock();
+        let listener = match queue {
+            ListenerQueueKind::NonExclusive => inner.non_exclusive.pop_front(),
+            ListenerQueueKind::Exclusive => inner.exclusive.pop_front(),
+        };
+
+        if let Some(listener) = &listener {
+            kdebugln!(
+                "event: detach listener event={:#x} listener={:?} queue={:?}",
+                self.debug_id(),
+                listener,
+                queue,
+            );
+        }
+
+        listener
+    }
+
+    /// Return true only when an exclusive listener successfully consumed one
+    /// publish quota slot.
+    fn wake_detached_listener(
+        &self,
+        listener: Listener,
+        queue: ListenerQueueKind,
+        mode: WakeMode,
+    ) -> bool {
+        let Some(task) = listener.task() else {
+            kdebugln!(
+                "event: stale listener task dropped event={:#x} listener={:?}",
+                self.debug_id(),
+                listener,
+            );
+            return false;
+        };
+
+        let result = wait::wake_wait(&task, listener.token(), WaitReason::Event, mode);
+        match result {
+            WakeResult::Woke { placement } => {
+                kdebugln!(
+                    "event: listener woke event={:#x} task={} listener={:?} placement={:?}",
+                    self.debug_id(),
+                    task.tid(),
+                    listener,
+                    placement,
+                );
+                true
+            },
+            WakeResult::ModeBlocked => {
+                let requeued =
+                    self.requeue_blocked_listener_if_current_armed(listener, queue, mode);
+                kdebugln!(
+                    "event: mode-blocked listener requeue event={:#x} queue={:?} requeued={}",
+                    self.debug_id(),
+                    queue,
+                    requeued,
+                );
+                false
+            },
+            WakeResult::Stale
+            | WakeResult::AlreadyCompleted(_)
+            | WakeResult::AlreadyCancelled(_)
+            | WakeResult::Retired => {
+                kdebugln!(
+                    "event: discard listener event={:#x} task={} listener={:?} result={:?}",
+                    self.debug_id(),
+                    task.tid(),
+                    listener,
+                    result,
+                );
+                false
+            },
+        }
+    }
+
+    fn requeue_blocked_listener_if_current_armed(
+        &self,
+        listener: Listener,
+        queue: ListenerQueueKind,
+        mode: WakeMode,
+    ) -> bool {
+        let Some(task) = listener.task() else {
+            kdebugln!(
+                "event: requeue failed, task dropped event={:#x} listener={:?}",
+                self.debug_id(),
+                listener,
+            );
+            return false;
+        };
+
+        let Some(permit) = wait::requeue_permit_if_mode_blocked(&task, listener.token(), mode)
+        else {
+            kdebugln!(
+                "event: requeue denied by wait core event={:#x} listener={:?}",
+                self.debug_id(),
+                listener,
+            );
+            return false;
+        };
+
+        let wait_id = permit.wait_id();
+        let mut inner = self.inner.lock();
+        let target_queue = match queue {
+            ListenerQueueKind::NonExclusive => &mut inner.non_exclusive,
+            ListenerQueueKind::Exclusive => &mut inner.exclusive,
+        };
+        if target_queue.contains(&listener) {
+            kdebugln!(
+                "event: requeue skipped duplicate event={:#x} listener={:?} wait={:#x} queue={:?}",
+                self.debug_id(),
+                listener,
+                wait_id,
+                queue,
+            );
+            return true;
+        }
+
+        target_queue.push_back(listener);
+        kdebugln!(
+            "event: requeued blocked listener event={:#x} wait={:#x} queue={:?}",
+            self.debug_id(),
+            wait_id,
+            queue,
+        );
+        true
+    }
+
+    fn schedule_with_wait_token_timeout(
+        &self,
+        task: &Arc<Task>,
+        token: WakeToken,
+        timeout: Duration,
+    ) -> Duration {
+        schedule_wait_with_timeout(task, token, Some(timeout))
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ListenerQueueKind {
+    NonExclusive,
+    Exclusive,
+}
+
+#[derive(Clone)]
+struct WaitTarget {
+    task: Weak<Task>,
+    token: WakeToken,
+    tid: Tid,
+}
+
+impl WaitTarget {
+    fn new(task: &Arc<Task>, token: WakeToken) -> Self {
+        Self {
+            task: Arc::downgrade(task),
+            token,
+            tid: task.tid(),
+        }
+    }
+}
+
+impl Debug for WaitTarget {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("WaitTarget")
+            .field("tid", &self.tid)
+            .field("wait_id", &self.token.wait_id())
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 struct Listener {
-    task: Arc<Task>,
+    target: WaitTarget,
+}
+
+impl Listener {
+    fn new(task: &Arc<Task>, token: WakeToken) -> Self {
+        Self {
+            target: WaitTarget::new(task, token),
+        }
+    }
+
+    fn task(&self) -> Option<Arc<Task>> {
+        self.target.task.upgrade()
+    }
+
+    fn token(&self) -> &WakeToken {
+        &self.target.token
+    }
+}
+
+impl Debug for Listener {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Listener")
+            .field("target", &self.target)
+            .finish()
+    }
 }
 
 impl PartialEq for Listener {
     fn eq(&self, other: &Self) -> bool {
-        self.task.tid().eq(&other.task.tid())
+        self.target.token.same_wait(&other.target.token)
     }
 }
 

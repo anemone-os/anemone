@@ -3,14 +3,12 @@ use crate::{
     syscall::handler::{TryFromSyscallArg, syscall_arg_flag32},
 };
 
-use anemone_abi::process::linux::{
-    ipc::*,
-    shm::{IpcPerm, *},
-};
+use anemone_abi::process::linux::{ipc::*, shm::*};
 
 use super::super::{
     SHMMAX, SHMMIN,
     registry::{ShmKey, with_registry},
+    segment::ShmPerm,
 };
 
 /// Syscall-boundary interpretation of `shmget(key, ...)`.
@@ -156,14 +154,14 @@ fn sys_shmget(
             return Err(SysError::InvalidArgument);
         }
 
-        let perm = IpcPerm {
+        let perm = ShmPerm {
             key: key.raw(),
             uid: 0,
             gid: 0,
             cuid: 0,
             cgid: 0,
             mode: shmflg.permissions.bits(),
-            __seq: 0,
+            seq: 0,
         };
 
         registry.create_segment(key.keyed(), size, perm, creator_tgid)

@@ -12,7 +12,7 @@ use crate::{
         handler::{TryFromSyscallArg, syscall_arg_flag32},
         *,
     },
-    task::files::{Fd, FileDesc, FileFlags},
+    task::files::{Fd, FileDesc},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -52,7 +52,7 @@ fn checked_fallocate_end(offset: i64, len: i64) -> Result<u64, SysError> {
 }
 
 fn validate_fallocate_file(file: &FileDesc) -> Result<(), SysError> {
-    if !file.file_flags().contains(FileFlags::WRITE) {
+    if !file.can_write() {
         return Err(SysError::BadFileDescriptor);
     }
 

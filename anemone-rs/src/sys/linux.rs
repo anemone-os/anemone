@@ -142,14 +142,19 @@ pub mod process {
         tls_ptr: u64,
         child_tid_ptr: u64,
     ) -> Result<u64, Errno> {
+        #[cfg(target_arch = "loongarch64")]
+        let (arg3, arg4) = (child_tid_ptr, tls_ptr);
+        #[cfg(not(target_arch = "loongarch64"))]
+        let (arg3, arg4) = (tls_ptr, child_tid_ptr);
+
         unsafe {
             syscall(
                 SYS_CLONE,
                 flags,
                 stack_ptr,
                 parent_tid_ptr,
-                tls_ptr,
-                child_tid_ptr,
+                arg3,
+                arg4,
                 0,
             )
         }

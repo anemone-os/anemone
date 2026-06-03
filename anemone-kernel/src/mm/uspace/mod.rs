@@ -89,9 +89,13 @@ pub struct UserSpace {
     stack: Stack,
     heap: Heap,
 
-    // note that following variable is not put in TaskExecInfo, since they are bound to the
+    // note that following variables are not put in TaskExecInfo, since they are bound to the
     // address space, not the process.
-    // TODO: argv
+    /// Command-line argument region. [start, start + size). Strings, not
+    /// pointers.
+    ///
+    /// /proc/[id]/cmdline needs this.
+    cmdline_range: Final<(VirtAddr, usize)>,
     /// Environment variable region. [start, start + size). Strings, not
     /// pointers.
     ///
@@ -299,6 +303,7 @@ impl UserSpace {
                 svpn: sheap,
                 brk: sheap.to_virt_addr(),
             },
+            cmdline_range: Final::new_uninit(),
             env_range: Final::new_uninit(),
         };
 
@@ -600,6 +605,37 @@ impl UserSpace {
         self.env_range.get().clone()
     }
 
+    /// Mark the command-line argument region for this address space.
+    ///
+    /// Used after all argument strings are pushed to the initial stack.
+    ///
+    /// # Safety
+    ///
+    /// Calling this function multiple times or calling this function before
+    /// pushing all argument strings to the initial stack will lead to undefined
+    /// behavior.
+    pub unsafe fn mark_cmdline_range(&mut self, start: VirtAddr, size: usize) {
+        self.cmdline_range.init((start, size));
+    }
+
+    /// Get the command-line argument region for this address space.
+    pub fn cmdline_range(&self) -> (VirtAddr, usize) {
+        self.cmdline_range.get().clone()
+    }
+
+    /// Return a cheap virtual-size estimate in bytes.
+    ///
+    /// This includes reserved VMAs, matching the coarse "address space size"
+    /// nature of `/proc/<pid>/stat`'s vsize field. It deliberately does not
+    /// attempt resident accounting.
+    pub fn vsize_bytes(&self) -> usize {
+        self.vmas
+            .values()
+            .filter(|vma| vma.reservation() != Some(VmReservation::Guard))
+            .map(|vma| vma.range().npages() as usize * PagingArch::PAGE_SIZE_BYTES)
+            .sum()
+    }
+
     // Mark the auxiliary vector region for this address space.
     //
     // Used after all data is pushed to the initial stack.
@@ -662,6 +698,7 @@ impl UserSpace {
             sysv_shm: self.sysv_shm.clone(),
             stack: self.stack,
             heap: self.heap,
+            cmdline_range: self.cmdline_range,
             env_range: self.env_range,
         };
 

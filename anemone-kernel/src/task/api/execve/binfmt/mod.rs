@@ -23,29 +23,24 @@ pub struct LoadedBinaryMeta {
 /// **This function must be run in a process context.**
 pub fn dispatch_execve(
     usp: &mut UserSpace,
-    path: &str,
+    exec_fn: &str,
+    path: PathRef,
     argv: &[impl AsRef<str>],
     envp: &[impl AsRef<str>],
     old_cred: &CredentialSet,
     no_new_privs: bool,
 ) -> Result<LoadedBinaryMeta, SysError> {
-    let resolved = get_current_task()
-        .lookup_path(Path::new(path), ResolveFlags::empty())
-        .map_err(|e| {
-            knoticeln!("execve: failed to resolve path '{}': {:?}", path, e);
-            e
-        })?;
     kdebugln!(
         "execve: resolved path '{}' to '{}'",
-        path,
-        resolved.to_pathbuf().display()
+        exec_fn,
+        path.to_pathbuf().display()
     );
-    check_exec_permission(&resolved)?;
+    check_exec_permission(&path)?;
 
     let mut ctx = ExecCtx {
         usp,
-        exec_fn: path,
-        path: resolved.to_string(),
+        exec_fn,
+        path,
         old_cred,
         no_new_privs,
         cred: old_cred.clone(),
@@ -56,6 +51,7 @@ pub fn dispatch_execve(
 
     for _ in 0..MAX_BINFMT_REDIRECTS {
         let mut redirected = false;
+        check_exec_permission(&ctx.path)?;
         for &fmt in BINARY_FMTS {
             match (fmt.load_binary)(&mut ctx)? {
                 ExecResult::Loaded(meta) => {
@@ -98,10 +94,10 @@ pub struct ExecCtx<'a> {
     ///
     /// **Relative to the current process's filesystem context.**
     pub exec_fn: &'a str,
-    /// The path to the binary to execute, within global namespace. This may be
-    /// different from `exec_fn` if there are redirections (e.g. shebang), or if
-    /// current process has a custom filesystem context (e.g. with chroot).
-    pub path: String,
+    /// The resolved binary to execute. This may be different from `exec_fn` if
+    /// there are redirections (e.g. shebang), or if current process has a
+    /// custom filesystem context (e.g. with chroot).
+    pub path: PathRef,
     old_cred: &'a CredentialSet,
     no_new_privs: bool,
     pub cred: CredentialSet,

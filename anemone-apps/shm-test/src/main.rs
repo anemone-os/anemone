@@ -27,6 +27,7 @@ use anemone_rs::{
 
 const PAGE_SIZE: usize = 4096;
 const WAIT_RETRIES: usize = 1_000_000;
+const SHM_LOCKED: u32 = 0o2000;
 
 type TestFn = fn() -> Result<(), Errno>;
 
@@ -311,7 +312,11 @@ fn test_metadata_stats_and_ctl() -> Result<(), Errno> {
     assert!(after_set.shm_ctime >= ds.shm_ctime);
 
     unique_shmctl_nobuf(shmid, SHM_LOCK)?;
+    let after_lock = ipc_stat(shmid)?;
+    assert_ne!(after_lock.shm_perm.mode & SHM_LOCKED, 0);
     unique_shmctl_nobuf(shmid, SHM_UNLOCK)?;
+    let after_unlock = ipc_stat(shmid)?;
+    assert_eq!(after_unlock.shm_perm.mode & SHM_LOCKED, 0);
 
     unique_shmdt(addr)?;
 
@@ -327,7 +332,7 @@ fn test_metadata_stats_and_ctl() -> Result<(), Errno> {
     assert_eq!(final_info.shm_rss, baseline_info.shm_rss);
 
     assert_eq!(baseline_ipc.shmmin, 1);
-    assert!(baseline_ipc.shmmax >= PAGE_SIZE as i32);
+    assert!(baseline_ipc.shmmax >= PAGE_SIZE as u64);
     assert!(baseline_ipc.shmmni > 0);
     assert_eq!(baseline_ipc.shmseg, baseline_ipc.shmmni);
 

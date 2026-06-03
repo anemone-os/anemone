@@ -50,6 +50,7 @@ const MUSL_TEST_SCRIPTS: &[&str] = &[
 cfg_select! {
     target_arch = "riscv64" => {
         const ACTIVE_LIB_DIR: &str = "/lib";
+        const ACTIVE_LIB_DIRS: &[&str] = &["/lib"];
         const MUSL_LOADER_NAMES: &[&str] = &[
             "ld-musl-riscv64.so.1",
             "ld-musl-riscv64-sf.so.1",
@@ -57,6 +58,7 @@ cfg_select! {
     },
     target_arch = "loongarch64" => {
         const ACTIVE_LIB_DIR: &str = "/lib64";
+        const ACTIVE_LIB_DIRS: &[&str] = &["/lib64", "/usr/lib64"];
         const MUSL_LOADER_NAMES: &[&str] = &["ld-musl-loongarch-lp64d.so.1"];
     }
 }
@@ -246,15 +248,15 @@ fn init_competition_environment() {
         ensure_symlink("/glibc/lib/libm.so.6", "libm.so");
     }
 
-    println!("testing procfs...");
-    run_busybox(&["busybox", "ls", "/proc"], "ls /proc");
     println!("user-test: competition environment initialized.");
 }
 
 pub(crate) fn switch_runtime(family: &str) {
     println!("user-test: switching active runtime to {family}...");
     let target = format!("/{family}/lib");
-    replace_with_symlink(ACTIVE_LIB_DIR, target.as_str());
+    for active_lib_dir in ACTIVE_LIB_DIRS {
+        replace_with_symlink(active_lib_dir, target.as_str());
+    }
 }
 
 pub(crate) fn clear_tmp() {

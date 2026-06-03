@@ -168,6 +168,18 @@ impl SignalDisposition {
         }
         ignored
     }
+
+    /// Return a [SigSet] of all signals whose disposition is a userspace
+    /// handler.
+    pub fn caught_signals(&self) -> SigSet {
+        let mut caught = SigSet::new();
+        for sig in 1..NSIG {
+            if matches!(self.actions[sig], SignalAction::Custom(_)) {
+                caught.set(SigNo::new(sig));
+            }
+        }
+        caught
+    }
 }
 
 mod default_actions {

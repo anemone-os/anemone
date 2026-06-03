@@ -93,6 +93,16 @@ fn init() {
         sb.clone(),
         NilOpaque::new(),
     ));
+    root_inode.set_meta(&InodeMeta {
+        nlink: 3,
+        size: 0,
+        perm: InodePerm::all_rwx(),
+        uid: Uid::ROOT,
+        gid: Gid::ROOT,
+        atime: Instant::ZERO.to_duration(),
+        mtime: Instant::ZERO.to_duration(),
+        ctime: Instant::ZERO.to_duration(),
+    });
     sb.seed_inode(root_inode);
 
     PROCFS_SB.init(|slot| {

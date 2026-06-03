@@ -17,6 +17,11 @@ impl Uid {
     pub const fn new(id: u32) -> Self {
         Self(id)
     }
+
+    #[inline(always)]
+    pub const fn get(&self) -> u32 {
+        self.0
+    }
 }
 
 impl UserId for Uid {
@@ -49,6 +54,11 @@ impl Gid {
     #[inline(always)]
     pub const fn new(id: u32) -> Self {
         Self(id)
+    }
+
+    #[inline(always)]
+    pub const fn get(&self) -> u32 {
+        self.0
     }
 }
 

@@ -1,12 +1,52 @@
 # Memory-management LTP cases.
-# Format: one case per line, optional arguments after the case name.
+# Format: "case", "case: args...", or "case executable[: args...]".
 
 brk01
 brk02
+
+sbrk01
+sbrk02
+
 madvise01
 madvise02
 madvise03
 madvise05
 madvise10
-sbrk01
-sbrk02
+
+mmap-corruption01
+mmap001
+mmap01
+mmap02
+mmap03
+mmap04
+mmap05
+mmap06
+mmap08
+mmap09
+mmap10
+mmap11
+mmap12
+mmap13
+mmap14
+mmap15
+mmap17
+mmap18
+mmap19
+mmap20
+
+mprotect01
+mprotect02
+mprotect03
+mprotect04
+mprotect05
+
+mremap01
+mremap02
+mremap03
+mremap04
+mremap05
+mremap06
+
+munmap01
+munmap02
+munmap03
