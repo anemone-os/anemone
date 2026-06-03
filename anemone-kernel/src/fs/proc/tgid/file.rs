@@ -62,5 +62,5 @@ pub static TGID_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::IsDir),
     validate_seek: |_, _| Err(SysError::IsDir),
     read_dir: tgid_read_dir,
-    poll: |_, req| Ok(PollEvent::READABLE & req.interests()),
+    poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
 };

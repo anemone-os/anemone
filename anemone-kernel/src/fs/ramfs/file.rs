@@ -298,7 +298,9 @@ pub(super) static RAMFS_REG_FILE_OPS: FileOps = FileOps {
     write: ramfs_write,
     validate_seek: ramfs_validate_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
-    poll: |_, req| Ok((PollEvent::READABLE | PollEvent::WRITABLE) & req.interests()),
+    poll: |_, req| {
+        Ok(req.ready_or_unsupported((PollEvent::READABLE | PollEvent::WRITABLE) & req.interests()))
+    },
 };
 
 pub(super) static RAMFS_DIR_FILE_OPS: FileOps = FileOps {
@@ -306,7 +308,7 @@ pub(super) static RAMFS_DIR_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::IsDir),
     validate_seek: |_, _| Err(SysError::IsDir),
     read_dir: ramfs_read_dir,
-    poll: |_, req| Ok(PollEvent::READABLE & req.interests()),
+    poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
 };
 
 pub(super) static RAMFS_SYMLINK_FILE_OPS: FileOps = FileOps {
@@ -314,5 +316,5 @@ pub(super) static RAMFS_SYMLINK_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::NotSupported),
     validate_seek: |_, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
-    poll: |_, req| Ok(PollEvent::READABLE & req.interests()),
+    poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
 };

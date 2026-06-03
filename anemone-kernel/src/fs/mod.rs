@@ -35,7 +35,7 @@ pub use self::{
         DeviceId, Ino, InoIsZero, InodeMeta, InodeMode, InodeOps, InodePerm, InodeRef, InodeStat,
         InodeType, ModifType, OpenedFile,
     },
-    iomux::{PollEvent, PollRequest, PollWaiter},
+    iomux::{PollEvent, PollRegisterResult, PollRequest},
     mount::{Mount, MountFlags, MountSource},
     namei::{
         ResolveFlags, resolve, resolve_from, resolve_from_with_root, resolve_parent,

@@ -144,7 +144,9 @@ pub fn sys_pselect6(
                     let fd = task.get_fd(fd)?;
 
                     if let Some(interests) = interests {
-                        let revents = fd.poll(&PollRequest::snapshot(interests))?;
+                        let revents = fd
+                            .poll(&PollRequest::snapshot(interests))?
+                            .expect_ready("sys_pselect6 snapshot");
                         if !revents.is_empty() {
                             ready_fds.set(fd_idx);
                             progressed = true;

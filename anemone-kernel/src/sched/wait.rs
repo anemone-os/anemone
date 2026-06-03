@@ -186,6 +186,10 @@ impl WakeToken {
     pub fn same_wait(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.state, &other.state)
     }
+
+    pub(super) fn is_armed(&self) -> bool {
+        self.state.status() == WaitStateStatus::Armed
+    }
 }
 
 #[derive(Debug)]

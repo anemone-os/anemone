@@ -174,7 +174,8 @@ fn sys_ppoll(
                         continue;
                     };
                     match fd.poll(&PollRequest::snapshot(poll_fd.events)) {
-                        Ok(r) => {
+                        Ok(result) => {
+                            let r = result.expect_ready("sys_ppoll snapshot");
                             if !r.is_empty() {
                                 poll_fd.revents = LinuxPollEvent::from_kernel_poll_event(r);
                                 nready += 1;

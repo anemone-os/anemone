@@ -346,6 +346,21 @@ impl LatchTrigger {
     pub fn wait_id(&self) -> usize {
         self.wait_id
     }
+
+    /// Whether this trigger can be pruned from a source queue.
+    ///
+    /// This is a resource-hygiene hint only. Sources must not use it to decide
+    /// readiness or to compensate for a failed wake; old trigger correctness is
+    /// still owned by wait-core identity and retired-state checks.
+    pub fn is_prunable(&self) -> bool {
+        if self.task.upgrade().is_none() {
+            return true;
+        }
+        match self.token.as_ref() {
+            Some(token) => !token.is_armed(),
+            None => true,
+        }
+    }
 }
 
 impl core::fmt::Debug for LatchTrigger {

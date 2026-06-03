@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / wait core / iomux / poll / select
 **RFC:** [RFC-20260603-sched-latch](../../rfcs/sched-latch/index.md)
-**Current Phase:** Stage 1 complete; paused before typed register API + pipe source
+**Current Phase:** Agent 2 complete; paused before `ppoll` latch loop
 
 ## Scope
 
@@ -46,11 +46,11 @@
 
 **Canonical RFC:** [RFC-20260603-sched-latch](../../rfcs/sched-latch/index.md), [Invariants](../../rfcs/sched-latch/invariants.md), [Implementation Plan](../../rfcs/sched-latch/implementation.md), [Tracking Issues](../../rfcs/sched-latch/tracking-issues.md)
 
-**Completed:** `etc/plans/sched-latch` 草稿已提升为公开 RFC；文档协议审查未发现新的 Apollyon / Keter 级硬障碍；软件工程审查结果已作为实现工程指导写入 implementation gate；事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。Agent 0.5 已完成 wait-core surface hardening：`crate::sched::*` 不再 re-export `ActiveWait`、`WakeToken`、`WaitReason`、`WaitOutcome`、`WakeResult` 或 `WaitStateStatus`；clock / signal syscall adapter 改走受限 current-wait wrapper；`Event` 仍作为 scheduler 内部合法 wait adapter 直接使用 wait core。Agent 1 已完成 `sched::latch` 原语，并通过 Gate 1 review。
+**Completed:** `etc/plans/sched-latch` 草稿已提升为公开 RFC；文档协议审查未发现新的 Apollyon / Keter 级硬障碍；软件工程审查结果已作为实现工程指导写入 implementation gate；事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。Agent 0.5 已完成 wait-core surface hardening：`crate::sched::*` 不再 re-export `ActiveWait`、`WakeToken`、`WaitReason`、`WaitOutcome`、`WakeResult` 或 `WaitStateStatus`；clock / signal syscall adapter 改走受限 current-wait wrapper；`Event` 仍作为 scheduler 内部合法 wait adapter 直接使用 wait core。Agent 1 已完成 `sched::latch` 原语，并通过 Gate 1 review。Agent 2 已完成 typed `PollRequest` / `PollRegisterResult` 协议和 pipe source trigger queue 迁移，旧 `PollWaiter` / `poll_waiters` 草稿入口已清除。
 
 **Open Blockers:** 当前没有 Still open plan gap。所有原 Keter 风险均作为 implementation gate 保留。Agent 0.5 只收窄 wait lifecycle / token surface；`TaskSchedState` 和 `Task::update_sched_state_with()` 仍是 crate-internal scheduler-state surface，完全封住普通 source 写 task sched state 需要后续单独阶段扩大 write set 到 `task/sched.rs` 等 owner 文件。
 
-**Next Action:** 暂停在阶段 1 / Gate 1 之后。恢复时派发 Agent 2，合并执行 typed `PollRequest` / `PollRegisterResult` 协议和 pipe source 迁移；阶段 2/3 必须记录 source queue pruning / cleanup 上界，并补充 consumer finish/drop 后 late trigger 的 runtime evidence。
+**Next Action:** 暂停在 Agent 2 之后。恢复时进入 Agent 3：迁移 `ppoll` 到 snapshot scan -> begin latch -> register scan -> schedule -> finish -> final snapshot scan，并固定可供 `pselect6` 复用的 helper / outcome mapping。Agent 2 的运行时验证由用户侧 `LTP iomux` 通过结果覆盖；后续 Agent 3 仍需针对 `ppoll` latch loop 补充 final scan / outcome race 证据。
 
 **Do Not Redo:** 不要重新把 `etc/` 个人草稿作为 canonical source；不要把 `PollWaiter` / `poll_waiters` 草稿扩展成新的 waitable poll 协议；不要让 `ppoll` 与 `pselect6` 分裂 outcome mapping；不要把未迁移 source 当成 armed source。
 
@@ -112,10 +112,28 @@
 
 **Next:** 按用户要求暂停在阶段 1 / Gate 1 之后。恢复时进入 Agent 2；阶段 2/3 必须把 weak task + strong `WakeToken` 策略落到 source queue pruning / cleanup 上界，并在 pipe source queue 落地后补 consumer finish/drop 后 late trigger 的 runtime evidence。
 
+### 2026-06-03 - Agent 2 typed poll register + pipe source
+
+**Phase:** stage 2/3 / typed source register protocol + pipe source
+
+**Change:** `fs::iomux` 的 `PollRequest` 已拆成 snapshot 与 register 两种构造：`PollRequest::snapshot(interests)` 保持纯快照，`PollRequest::register(interests, &LatchTrigger)` 携带本轮 producer capability。`FileOps::poll` / `File::poll` / `FileDesc::poll` 返回 typed `PollRegisterResult::{Ready(PollEvent), Armed, Unsupported}`；snapshot-only source 通过 `ready_or_unsupported()` 保持旧 readiness 语义，并在 register + not-ready 时 fail closed 为 `Unsupported`。
+
+**Change:** 旧 `PollWaiter` / `poll_waiters` 草稿入口已移除：`fs::mod` 不再 re-export `PollWaiter`，pipe endpoint 上的 `poll_waiters` 字段已删除，代码搜索无残留。`ppoll` / `pselect6` 本阶段只做 snapshot typed-result 适配，仍保留原 busy loop；生产 latch wait loop 留给 Agent 3。
+
+**Change:** pipe source 已迁移为共享 `Pipe` 状态内的 `rx_poll_triggers` / `tx_poll_triggers` 队列。`pipe_rx_poll()` / `pipe_tx_poll()` 在同一 `Pipe` lock 下先检查 readiness；ready 直接返回 `Ready(events)`，not-ready register 请求才保存 `LatchTrigger` 并返回 `Armed`。pipe read、write、rx drop、tx drop 在同一 `Pipe` lock 临界区内完成 predicate update 与对应 trigger detach，释放 pipe lock 后再逐个 `LatchTrigger::trigger()`。
+
+**Change:** 阶段 1 选择的 weak task + strong `WakeToken` 策略已落到 source queue hygiene：`LatchTrigger::is_prunable()` 只暴露资源清理 hint，不返回 wake result，不允许 source 据此判断 readiness 或补做 completion；pipe 在注册与 detach 前 lazy prune retired / task-gone trigger。old trigger 正确性仍依赖 wait-core identity 和 retired-state fail-closed，不依赖 cleanup 成功。
+
+**Review:** KETER-001 已处理：typed register result 已落地，未迁移 snapshot-only source 在 register + not-ready 时返回 `Unsupported`，不能被后续 syscall 当作 armed source。KETER-002 已处理：pipe predicate update + trigger detach 使用共享 `Pipe` lock 作为线性化点，触发发生在释放 source lock 之后。KETER-006 已处理到 Agent 2 边界：source queue cleanup 是 lazy pruning / resource hygiene，不参与 correctness；强 `WakeToken` 残留只到 source queue 下次 register / detach / drop。EUCLID-002 / EUCLID-003 已处理到诊断边界：pipe register / detach / trigger 日志包含 side、wait id、interests、reason 和 detach/prune count。
+
+**Boundary:** 本阶段没有迁移 `ppoll` / `pselect6` 到 latch schedule；它们仍通过 snapshot scan + `yield_now()` busy loop 工作。Agent 3 必须复用本阶段的 typed register result，并保证 `Unsupported` 不进入 schedule。
+
+**Validation:** `just build` 通过。构建期间仅保留既有 warning：`anemone-kernel/src/sync/mono.rs` 中 `AtomicBool` / `Ordering` 未使用；本阶段未修改该文件。`git diff --check` 通过。用户侧已运行 `LTP iomux`，结果通过。
+
+**Next:** 进入 Agent 3：迁移 `ppoll` 并建立可供 `pselect6` 复用的 latch wait helper、final scan 和 outcome mapping。
+
 ## Open Items
 
-- 阶段 2：定义 typed `PollRequest` / `PollRegisterResult`，移除、私有化或废弃 `PollWaiter` 草稿入口，并记录 source queue pruning / cleanup 上界。
-- 阶段 3：迁移 pipe source，清理 `poll_waiters` 残留或替换为明确 latch trigger queue，并补 consumer finish/drop 后 late trigger 的 runtime evidence。
 - 阶段 4：迁移 `ppoll`，固定可复用的 latch loop / final scan / outcome helper。
 - 阶段 5：迁移 `pselect6`，复用 `ppoll` 的等待协议。
 - 阶段 6：旁路审计 `PollRequest`、`PollWaiter`、`poll_waiters`、`yield_now()`、wait-core wake 调用和 source trigger queue，并执行 rv64 / LTP 验证。
