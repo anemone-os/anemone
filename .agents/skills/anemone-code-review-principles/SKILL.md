@@ -74,6 +74,7 @@ When reviewing, stop issue hunting once remaining observations are Safe unless t
 9. **Observability and diagnosis**
    - Ask whether a future failure can be diagnosed from logs, traces, counters, assertions, panic messages, or test artifacts.
    - Add or request observability at subsystem boundaries and rare failure paths, not noisy logs in hot paths.
+   - Prefer ordinary `assert!` over `debug_assert!` for lightweight invariant checks, so correctness bugs are exposed in normal runs. Reserve `debug_assert!` for checks that are too expensive for release paths, such as broad collection scans.
    - Preserve enough context in errors and debug output to connect symptoms to syscall arguments, object identities, state transitions, and errno or signal results.
 
 10. **Tests and evidence**
