@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / wait core / iomux / poll / select
 **RFC:** [RFC-20260603-sched-latch](../../rfcs/sched-latch/index.md)
-**Current Phase:** Agent 0.5 wait-core surface hardening complete; awaiting Agent 1 gate decision
+**Current Phase:** Stage 1 complete; paused before typed register API + pipe source
 
 ## Scope
 
@@ -46,11 +46,11 @@
 
 **Canonical RFC:** [RFC-20260603-sched-latch](../../rfcs/sched-latch/index.md), [Invariants](../../rfcs/sched-latch/invariants.md), [Implementation Plan](../../rfcs/sched-latch/implementation.md), [Tracking Issues](../../rfcs/sched-latch/tracking-issues.md)
 
-**Completed:** `etc/plans/sched-latch` 草稿已提升为公开 RFC；文档协议审查未发现新的 Apollyon / Keter 级硬障碍；软件工程审查结果已作为实现工程指导写入 implementation gate；事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。Agent 0.5 已完成 wait-core surface hardening：`crate::sched::*` 不再 re-export `ActiveWait`、`WakeToken`、`WaitReason`、`WaitOutcome`、`WakeResult` 或 `WaitStateStatus`；clock / signal syscall adapter 改走受限 current-wait wrapper；`Event` 仍作为 scheduler 内部合法 wait adapter 直接使用 wait core。
+**Completed:** `etc/plans/sched-latch` 草稿已提升为公开 RFC；文档协议审查未发现新的 Apollyon / Keter 级硬障碍；软件工程审查结果已作为实现工程指导写入 implementation gate；事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。Agent 0.5 已完成 wait-core surface hardening：`crate::sched::*` 不再 re-export `ActiveWait`、`WakeToken`、`WaitReason`、`WaitOutcome`、`WakeResult` 或 `WaitStateStatus`；clock / signal syscall adapter 改走受限 current-wait wrapper；`Event` 仍作为 scheduler 内部合法 wait adapter 直接使用 wait core。Agent 1 已完成 `sched::latch` 原语，并通过 Gate 1 review。
 
 **Open Blockers:** 当前没有 Still open plan gap。所有原 Keter 风险均作为 implementation gate 保留。Agent 0.5 只收窄 wait lifecycle / token surface；`TaskSchedState` 和 `Task::update_sched_state_with()` 仍是 crate-internal scheduler-state surface，完全封住普通 source 写 task sched state 需要后续单独阶段扩大 write set 到 `task/sched.rs` 等 owner 文件。
 
-**Next Action:** 总控可重新判定是否进入 Agent 1。Agent 1 仍需实现 `sched::latch`，并按 RFC gate 记录每阶段交付、审计和验证；不要把 Agent 0.5 的 restricted current-wait wrapper 当成 `Latch` 或 `LatchTrigger`。
+**Next Action:** 暂停在阶段 1 / Gate 1 之后。恢复时派发 Agent 2，合并执行 typed `PollRequest` / `PollRegisterResult` 协议和 pipe source 迁移；阶段 2/3 必须记录 source queue pruning / cleanup 上界，并补充 consumer finish/drop 后 late trigger 的 runtime evidence。
 
 **Do Not Redo:** 不要重新把 `etc/` 个人草稿作为 canonical source；不要把 `PollWaiter` / `poll_waiters` 草稿扩展成新的 waitable poll 协议；不要让 `ppoll` 与 `pselect6` 分裂 outcome mapping；不要把未迁移 source 当成 armed source。
 
@@ -90,11 +90,32 @@
 
 **Next:** 总控可基于本 hardening 重新判定是否派发 Agent 1。Agent 1 仍需按 RFC 阶段 1 实现 owner-bound `Latch`、no-return / fail-closed `LatchTrigger`、受限 cancel reason 和 trigger 生命周期策略。
 
+### 2026-06-03 - Agent 1 sched::latch primitive
+
+**Phase:** stage 1 / `sched::latch` primitive
+
+**Change:** 新增 `sched::latch` 子模块，并只通过 `sched::mod` 暴露 `Latch`、`LatchTrigger`、`LatchCancelReason` 和 `LatchWaitOutcome`。`sched::wait` 只新增 `WaitReason::Latch`，没有重新向 `crate::sched::*` 暴露 `ActiveWait`、`WakeToken`、`WakeResult`、`WaitOutcome` 或 raw wait-core lifecycle API。
+
+**Change:** `Latch::begin_current(interruptible)` 为当前 task 创建一轮 `ActiveWait`；`Latch` 字段私有、不实现 `Clone`，并用 `PhantomData<*mut ()>` 保持 `!Send` / `!Sync`。waiter-owned 方法记录 owner task id 和 wait id；owner misuse、finish 后 cancel / make-trigger / schedule 和 double finish 都先记录上下文，再用 release build 生效的 `assert!` 暴露代码错误；drop-without-finish 先执行 `Drop` cancel + retire，保持 fail-closed cleanup，再 `assert!` 暴露 owner bug。
+
+**Change:** `Latch::make_trigger()` 派生 cloneable `LatchTrigger`。producer handle 保存 weak task + strong `WakeToken`，普通 `trigger()` 通过 `wake_wait(..., WaitReason::Latch, WakeMode::AnyWait)` 完成本轮 wait，返回值不暴露给 caller，只在 scheduler debug log 中记录 woke / stale / retired / already completed / already cancelled / mode-blocked 等诊断结果。
+
+**Change:** `Latch::cancel(reason: LatchCancelReason)` 使用受限 consumer cancel reason，并委托 wait core 的 `cancel_if_armed()`；因此 cancel 是同一 wait transaction 上的一次 completion attempt，不覆盖已经完成的 winning outcome。`finish(self)` 消耗 `Latch` 并 retire 本轮 wait；`Drop` 对未 finish 的 latch 记录 warning，执行 `Drop` cancel，再 retire，然后用 release assertion 暴露未显式 finish 的代码错误。
+
+**Review:** KETER-003 已处理：consumer capability 是 owner-bound linear guard，类型上 `!Send` / `!Sync`，字段私有，不可 clone。KETER-004 已处理：cancel / finish 仍由 wait core 线性化，first-completion-wins，begin 后通过 `finish(self)` 或 Drop fail-closed retire。KETER-005 继承 Agent 0.5 结论：producer trigger 走 `wake_wait()`，timeout / signal / force 入口未改变，`Woke` 语义仍包含 stale-safe placement。KETER-006 本阶段选择 weak task + strong `WakeToken`；阶段 2 source 注册协议必须定义 source queue pruning / cleanup 上界，正确性仍不得依赖 cleanup。KETER-007 已处理：普通 producer API no-return / fail-closed，不公开 `WakeToken`、强 `Task`、`WakeResult`、`WakeEnqueueResult` 或 waiter lifecycle API。
+
+**Boundary:** 本阶段没有接入生产 iomux 路径，没有修改 pipe、ppoll、pselect6、fs、task 或 time 文件。old trigger late-arrival 行为当前通过 wait-core identity 和 trigger debug result code audit 覆盖；限定 write set 内未新增 KUnit/runtime hook。后续 Agent 2/3 在 source queue 和 pipe 注册落地时补充 consumer finish 后 late trigger 的 runtime evidence。
+
+**Validation:** `just build` 通过。构建期间仅保留既有 warning：`anemone-kernel/src/sync/mono.rs` 中 `AtomicBool` / `Ordering` 未使用；本阶段未修改该文件。`git diff --check` 通过。
+
+**Review:** Gate 1 reviewer 初审发现 `Drop` 路径在 cleanup 前执行 `debug_assert!`，debug/asserting kernel 下无法保证 drop-without-finish fail-closed retire。已修复为 warning 后执行 `Drop` cancel + `finish_inner("drop")` retire；窄复核确认 KETER-004 blocker 关闭，Gate 1 当前无 Apollyon / Keter 阻塞项。随后按用户要求固化断言纪律：非重型 invariant 不能只放在 `debug_assert!`，必须用 release build 生效的 `assert!` 让 user-test / LTP 暴露代码错误；重型扫描或昂贵诊断才使用 debug-only 检查。该规则已写入 agent 编排文档。
+
+**Next:** 按用户要求暂停在阶段 1 / Gate 1 之后。恢复时进入 Agent 2；阶段 2/3 必须把 weak task + strong `WakeToken` 策略落到 source queue pruning / cleanup 上界，并在 pipe source queue 落地后补 consumer finish/drop 后 late trigger 的 runtime evidence。
+
 ## Open Items
 
-- 阶段 1：建立 `sched::latch`，确认 owner-bound `Latch`、no-return `LatchTrigger`、受限 cancel reason 和 exactly-once finish / retire 策略；不要重新向 `crate::sched::*` 暴露 wait-core raw lifecycle。
-- 阶段 2：定义 typed `PollRequest` / `PollRegisterResult`，移除、私有化或废弃 `PollWaiter` 草稿入口。
-- 阶段 3：迁移 pipe source，清理 `poll_waiters` 残留或替换为明确 latch trigger queue。
+- 阶段 2：定义 typed `PollRequest` / `PollRegisterResult`，移除、私有化或废弃 `PollWaiter` 草稿入口，并记录 source queue pruning / cleanup 上界。
+- 阶段 3：迁移 pipe source，清理 `poll_waiters` 残留或替换为明确 latch trigger queue，并补 consumer finish/drop 后 late trigger 的 runtime evidence。
 - 阶段 4：迁移 `ppoll`，固定可复用的 latch loop / final scan / outcome helper。
 - 阶段 5：迁移 `pselect6`，复用 `ppoll` 的等待协议。
 - 阶段 6：旁路审计 `PollRequest`、`PollWaiter`、`poll_waiters`、`yield_now()`、wait-core wake 调用和 source trigger queue，并执行 rv64 / LTP 验证。

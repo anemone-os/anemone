@@ -17,6 +17,9 @@ worker、reviewer 和验收顺序。
 6. 只通过 `just build` 不能替代协议审计；阶段退出必须引用对应 tracking gate。
 7. 尚未迁移的 source 可以继续走旧路径，但不能被当成 latch wait 的 armed source。
 8. 不允许把 `PollWaiter` / `poll_waiters` 草稿扩展成新的 waitable poll 协议。
+9. 非重型 invariant 必须用 release build 也生效的 `assert!` 暴露错误；`debug_assert!`
+   只用于集合扫描、昂贵诊断或 stress-only 检查。`Drop` / cleanup 路径可以先完成
+   retire / cleanup，再用 `assert!` 暴露 owner bug，不能在 cleanup 前 panic。
 
 ## 总控 Agent 使用方式
 
@@ -120,6 +123,8 @@ write set：
 - producer 普通路径 no-return / fail-closed，不把 `WakeResult` 暴露给普通 source 分支。
 - consumer cancel 使用受限 `LatchCancelReason`，不接受任意 `WaitReason`。
 - 每个 begin 后有 exactly-once finish / retire 策略。
+- owner misuse、double finish、finish 后继续使用等低成本 invariant 必须使用 release build
+  生效的 `assert!`；drop-without-finish 必须先 cancel + retire，再 `assert!` 暴露错误。
 - 记录 weak trigger 或 strong trigger + pruning 的资源策略，作为 Agent 2 前置条件。
 
 验证：
@@ -140,6 +145,8 @@ Gate 1 reviewer 检查：
 - KETER-005：producer、timeout、signal、force、cancel 共享 wait-core placement 合同。
 - KETER-006：trigger 生命周期策略已记录，能作为 source 注册协议前置约束。
 - KETER-007：producer capability no-return、fail-closed、隐藏 `WakeToken`。
+- 断言纪律：低成本 invariant 不得只放在 `debug_assert!`；release build 的 user-test /
+  LTP 也必须能暴露这些代码错误。cleanup 路径必须先收尾再 assert。
 
 ## Agent 2：Typed Register API + Pipe Source
 
@@ -363,7 +370,9 @@ docs/src/rfcs/sched-latch/backgrounds/agent-orchestration.md。
 必须满足的 gate：
 <填入对应 KETER/EUCLID gate>
 
-不要修改无关文件，不要 revert 用户或其他 agent 的改动。遇到必须越界、协议无法闭合、
+不要修改无关文件，不要 revert 用户或其他 agent 的改动。低成本 invariant 使用
+release build 生效的 `assert!`，不要只用 `debug_assert!` 掩盖 user-test / LTP 下的
+代码错误；重型扫描或昂贵诊断才使用 debug-only 检查。遇到必须越界、协议无法闭合、
 或停止条件命中时，停止并报告。完成后更新
 docs/src/devlog/transactions/2026-06-03-sched-latch.md，并在最终回复中列出：
 改动文件、满足的 gate、运行过的验证、未解决风险。

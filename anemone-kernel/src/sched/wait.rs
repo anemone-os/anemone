@@ -55,6 +55,7 @@ pub enum ParkState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum WaitReason {
     Event,
+    Latch,
     Timeout,
     Signal,
     Force,

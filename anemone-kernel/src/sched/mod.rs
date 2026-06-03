@@ -26,6 +26,9 @@ pub use switch::load_context;
 mod event;
 pub use event::{Event, TimeoutListenException};
 
+mod latch;
+pub use latch::{Latch, LatchCancelReason, LatchTrigger, LatchWaitOutcome};
+
 pub mod class;
 mod wait;
 pub use wait::{ParkState, TaskSchedState, WaitState, WakeEnqueueResult};
