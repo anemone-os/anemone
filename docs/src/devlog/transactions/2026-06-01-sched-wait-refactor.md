@@ -1,10 +1,10 @@
 # 2026-06-01 - Sched Wait Refactor
 
-**Status:** Active
+**Status:** Completed
 **Owners:** doruche, Codex
 **Area:** scheduler / event / timer / signal / wait core
 **Canonical Plan:** [RFC-20260601-sched-wait-refactor](../../rfcs/sched-wait-refactor/index.md), [Invariants](../../rfcs/sched-wait-refactor/invariants.md), [Implementation Plan](../../rfcs/sched-wait-refactor/implementation.md)
-**Current Phase:** phase 5 complete; phase 6 verification pending
+**Current Phase:** completed
 
 ## Scope
 

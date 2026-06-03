@@ -15,11 +15,12 @@ docs/src/rfcs/<short-slug>/
   index.md
   implementation.md
   invariants.md          # 可选
+  tracking-issues.md     # 可选
   backgrounds/           # 可选
     index.md
 ```
 
-`index.md` 与 `implementation.md` 必须存在。`invariants.md` 在协议、不变量、锁序、生命周期或证明义务复杂时创建。`backgrounds/` 用于历史背景、问题清单、被拒绝方案和旧计划归档；背景材料不能覆盖 canonical 结论。
+`index.md` 与 `implementation.md` 必须存在。`invariants.md` 在协议、不变量、锁序、生命周期或证明义务复杂时创建。`tracking-issues.md` 在实现期需要持续分级跟踪问题时创建。`backgrounds/` 用于历史背景、旧问题清单、被拒绝方案和旧计划归档；背景材料不能覆盖 canonical 结论。
 
 RFC 一旦进入实现阶段，必须创建对应事务日志：
 
@@ -66,6 +67,7 @@ Canonical：
 
 - [不变量需求](./invariants.md)
 - [迁移实施计划](./implementation.md)
+- [Tracking Issues](./tracking-issues.md)（如果存在）
 
 背景材料：
 
@@ -91,6 +93,39 @@ Canonical：
 ## 收口
 
 完成后记录最终验证、剩余限制，以及 register / devlog 链接。
+```
+
+## `tracking-issues.md`
+
+```md
+# <标题> Tracking Issues
+
+**状态：** Active / Closed
+**最后更新：** YYYY-MM-DD
+**父 RFC：** [RFC-YYYYMMDD-short-slug](./index.md)
+**事务日志：** [YYYY-MM-DD-short-slug](../../devlog/transactions/YYYY-MM-DD-short-slug.md)
+
+本文只跟踪当前仍影响实现顺序、review gate、停止边界或验收判断的问题。历史问题清单和旧 review 材料放在 `backgrounds/`。
+
+## Apollyon
+
+- 当前必须修复的错误结果、数据损坏、安全问题、崩溃或严重不可恢复状态。
+
+## Keter
+
+- 当前必须修复的架构方向、状态所有权、边界或后续开发阻塞问题。
+
+## Euclid
+
+- 通常值得修，但不阻塞主线的问题。
+
+## Safe
+
+- 记录即可，默认不修的问题。
+
+## Neutralized
+
+- 已处理完成的问题、neutralize 依据和对应事务日志条目。
 ```
 
 ## `invariants.md`

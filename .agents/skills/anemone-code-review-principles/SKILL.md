@@ -11,6 +11,17 @@ Assume the submitted code already builds and basic syntax is not the main review
 
 Keep the review scoped to the requested files, subsystem, or patch unless evidence shows the risk crosses a boundary. Prefer concrete findings tied to code paths, invariants, logs, tests, or externally visible behavior.
 
+## Issue Levels
+
+Use explicit issue levels to keep reviews bounded by real risk. Always use the current level names below. Older notes may map these to P0/P1/P2/P3 in the same order, but review output should not use the old names.
+
+- **Apollyon**: Causes wrong results, data corruption, security problems, crashes, or severe unrecoverable state. Must fix.
+- **Keter**: Does not immediately explode today, but clearly blocks later development, such as misplaced module boundaries, confused state ownership, or a wrong direction for a core abstraction. Must fix.
+- **Euclid**: Usually worth fixing, but not mainline-blocking: inelegant design, local coupling, mediocre naming, awkward tests, or refactorable code whose current shape does not break the main path.
+- **Safe**: Record only unless it is cheap and local to fix: pure style preference, theoretical purity, abstraction for abstraction's sake, or something that may only matter in a speculative future. Default to not fixing.
+
+When reviewing, stop issue hunting once remaining observations are Safe unless the user explicitly asks for polish or cleanup. Do not promote Safe or Euclid items into blockers to keep a review going.
+
 ## Review Priorities
 
 1. **System architecture**
@@ -72,7 +83,7 @@ Keep the review scoped to the requested files, subsystem, or patch unless eviden
 
 ## Review Output
 
-Lead with findings, ordered by severity. Each finding should include the affected file or code path, the violated invariant or user-visible behavior, why it matters, and a concrete fix direction when possible.
+Lead with findings, ordered by severity, and label each finding as Apollyon, Keter, Euclid, or Safe. Each finding should include the affected file or code path, the violated invariant or user-visible behavior, why it matters, and a concrete fix direction when possible.
 
 Separate confirmed issues from questions, assumptions, and optional cleanup. Do not block a review on style preferences unless the style issue hides a real correctness, maintainability, or diagnostic risk.
 

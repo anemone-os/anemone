@@ -1,12 +1,12 @@
 # RFC-20260601-sched-wait-refactor
 
-**状态：** 已接受，阶段 5 已完成，阶段 6 验证待开始
+**状态：** 已完成
 **负责人：** doruche, Codex
-**最后更新：** 2026-06-02
+**最后更新：** 2026-06-03
 **领域：** scheduler / event / timer / signal / wait core
 **事务日志：** [2026-06-01 - Sched Wait Refactor](../../devlog/transactions/2026-06-01-sched-wait-refactor.md)
-**开放问题：** 当前没有阻塞阶段 6 验证的 P0/P1 协议缺口；剩余工作是复跑已知触发 profile、保存 debug/trace 证据并登记最终限制。
-**下一步：** 进入阶段 6 验证，保存 late wake、stale placement、mode-blocked requeue 和 timeout/signal 竞争的观测摘要。
+**开放问题：** None
+**下一步：** None
 
 ## 摘要
 
@@ -62,6 +62,6 @@ Canonical：
 
 ## 接受边界
 
-本 RFC 已作为 scheduler wait refactor 的实现计划来源被接受。它在事务日志记录阶段完成、验证证据和剩余限制前保持 active。
+本 RFC 已作为 scheduler wait refactor 的实现计划来源被接受，并已完成对应事务日志跟踪。
 
 如果后续实现发现会改变 wait identity、线性化点、状态所有权、锁序、listener requeue、exclusive quota、stale-safe placement 或 wait-core capability 边界的内容，必须先更新本 RFC 或新增 follow-up RFC，再声明协议闭合。

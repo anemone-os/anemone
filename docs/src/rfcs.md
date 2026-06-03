@@ -22,11 +22,12 @@ docs/src/rfcs/<short-slug>/
   index.md
   implementation.md
   invariants.md          # 可选；协议、不变量或证明义务复杂时使用
+  tracking-issues.md     # 可选；实现期需要持续分级跟踪问题时使用
   backgrounds/           # 可选；保存历史背景、问题清单和被拒绝方案
     index.md
 ```
 
-`index.md` 是总入口，负责说明状态、范围、文档地图、接受边界和下一步。`implementation.md` 是实现计划，负责记录阶段、审查合同、验证和停止边界。`invariants.md` 只在正确性依赖明确协议、不变量或证明义务时创建；调度、等待、锁序、生命周期等子系统通常需要它。`backgrounds/` 只保存背景材料，不作为当前 canonical 结论的来源。
+`index.md` 是总入口，负责说明状态、范围、文档地图、接受边界和下一步。`implementation.md` 是实现计划，负责记录阶段、审查合同、验证和停止边界。`invariants.md` 只在正确性依赖明确协议、不变量或证明义务时创建；调度、等待、锁序、生命周期等子系统通常需要它。`tracking-issues.md` 只在实现期存在一组需要持续 review、分级和关闭的问题时创建。`backgrounds/` 只保存背景材料，不作为当前 canonical 结论的来源。
 
 大型重构应把不变量、实现顺序、历史材料拆成同一目录下的子文档，避免 devlog 或 register 直接引用个人 `etc/` 草稿。
 
@@ -58,10 +59,31 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 事务日志记录实际执行、checkpoint、review 结论、验证证据、剩余限制和更正说明；RFC 记录计划、边界和 accepted contract。事务日志应链接回 RFC，RFC 也应链接到事务日志。
 
+## Tracking Issues
+
+不是每个 RFC 都需要 `tracking-issues.md`。只有当问题清单会影响实现顺序、review gate、停止边界或验收判断时，才在 RFC 根目录创建它。
+
+`tracking-issues.md` 是当前问题跟踪页，不是历史归档：
+
+- 当前仍影响实现或验收的问题放在 `tracking-issues.md`；
+- 已过期的旧问题清单、被否决方案和历史 review 材料放在 `backgrounds/`；
+- 实际阶段推进、checkpoint、验证证据和更正说明仍写入事务日志；
+- 不要用它替代 GitHub issue、PR 讨论或双周 devlog。
+
+问题等级必须使用当前 review skill 的名称：
+
+- `Apollyon`：错误结果、数据损坏、安全问题、崩溃或严重不可恢复状态，必须修。
+- `Keter`：不会马上爆炸，但会阻塞后续开发或把核心抽象带错方向，必须修。
+- `Euclid`：通常值得修，但不阻塞主线。
+- `Safe`：记录即可，默认不修，除非局部且低成本。
+- `Neutralized`：已经处理完成的问题；必须保留 neutralize 依据和对应事务日志条目。
+
+旧文档可能仍出现 `P0/P1/P2/P3` 历史称呼；新增 RFC、review 输出和 tracking issue 不再使用这些旧等级名。
+
 ## 当前 RFC
 
 - [RFC-20260602-cred-merge](./rfcs/cred-merge/index.md)：credentials feature merge 的 canonical 执行计划和审查合同。
-- [RFC-20260601-sched-wait-refactor](./rfcs/sched-wait-refactor/index.md)：scheduler wait/wake 协议重构的 canonical 不变量和迁移计划。
+- [RFC-20260601-sched-wait-refactor](./rfcs/sched-wait-refactor/index.md)：已完成的 scheduler wait/wake 协议重构 RFC。
 
 ## 目录级 RFC 何时必需
 
