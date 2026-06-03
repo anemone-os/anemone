@@ -39,6 +39,11 @@ docs/src/rfcs/<short-slug>/
 
 可直接复制的草案结构见 [RFC 模板](./rfc-template.md)。
 
+## 当前 RFC
+
+- [RFC-20260602-cred-merge](./rfcs/cred-merge/index.md)：credentials feature merge 的 canonical 执行计划和审查合同。
+- [RFC-20260601-sched-wait-refactor](./rfcs/sched-wait-refactor/index.md)：scheduler wait/wake 协议重构的 canonical 不变量和迁移计划。
+
 ## 目录级 RFC 何时必需
 
 满足以下任一条件时，必须使用目录级 RFC，而不是单文件草案：

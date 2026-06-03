@@ -3,6 +3,7 @@
 **Status:** Active
 **Owners:** doruche, Codex
 **Area:** credentials / task / VFS / exec / syscall ABI / user-test
+**RFC:** [RFC-20260602-cred-merge](../../rfcs/cred-merge/index.md)
 **Current Phase:** reviewer P0/P1 fixed; LTP pending
 
 ## Handoff
@@ -29,7 +30,7 @@
 
 **Conflicts Remaining:** 0。
 
-**Completed:** 迁移编排计划已写入 `etc/cred-merge/agent-plan.md`；事务日志已建立；merge-state 已建立；实际冲突地图已刷新；Worker A 已审查 credentials core / syscall ABI 自动合入结果，并在 `anemone-kernel/src/task/credentials/id.rs` 恢复 `Uid::get()` / `Gid::get()` inherent accessor；Worker B 已审查并修复 Task lifecycle / accessor 基座，手工改动限制在 `anemone-kernel/src/task/mod.rs` 与 `anemone-kernel/src/task/api/clone/mod.rs`；Worker C 已解析并暂存 VFS/open/fd 冲突；Worker D 已解析并暂存 exec credential / PathRef 冲突；Worker E 已解析并暂存 user-test fixtures/groups/profile/registry 冲突；rv64 user-test app build 已通过；rv64 `just build` 在 `pipe.rs` typed `Uid` 窄修后已通过；用户确认 la64 构建已通过；阶段 4 只读 reviewer 已运行，Task/exec 与 ABI/user-test 未发现 P0/P1，VFS reviewer 发现的 `O_PATH` fd metadata syscall gate 与 `fchmod` mode/setid-drop 语义问题已窄修并提交 reviewer-fix checkpoint。
+**Completed:** 迁移编排计划已提升为公开 [RFC-20260602-cred-merge](../../rfcs/cred-merge/index.md)；事务日志已建立；merge-state 已建立；实际冲突地图已刷新；Worker A 已审查 credentials core / syscall ABI 自动合入结果，并在 `anemone-kernel/src/task/credentials/id.rs` 恢复 `Uid::get()` / `Gid::get()` inherent accessor；Worker B 已审查并修复 Task lifecycle / accessor 基座，手工改动限制在 `anemone-kernel/src/task/mod.rs` 与 `anemone-kernel/src/task/api/clone/mod.rs`；Worker C 已解析并暂存 VFS/open/fd 冲突；Worker D 已解析并暂存 exec credential / PathRef 冲突；Worker E 已解析并暂存 user-test fixtures/groups/profile/registry 冲突；rv64 user-test app build 已通过；rv64 `just build` 在 `pipe.rs` typed `Uid` 窄修后已通过；用户确认 la64 构建已通过；阶段 4 只读 reviewer 已运行，Task/exec 与 ABI/user-test 未发现 P0/P1，VFS reviewer 发现的 `O_PATH` fd metadata syscall gate 与 `fchmod` mode/setid-drop 语义问题已窄修并提交 reviewer-fix checkpoint。
 
 **Open Blockers:** 无文本冲突 blocker。阶段 4 reviewer 当前无未闭合 P0/P1。`anemone-kernel/src/syscall/user_access.rs` 被 git 自动合入但不在当前 worker write set 中；目前只读审查看到它提供 `c_readonly_path()` 与 `ListTooLong -> NameTooLong` 路径校验支撑，未再手工修改。LTP 尚未运行且仍由用户手动执行。
 
@@ -176,7 +177,7 @@
 
 **Checkpoint:** 最新代码 checkpoint 为 `030280a65108b1e3944b5e8f8fdb1588ac25c846`；本条 handoff 前的 HEAD 为 `60b87e529e944b8ad47889fec0ad4834b76f29bd`。本条记录将作为 `[ckpt] cred merge build handoff` 提交承载，避免在文件中写入不可自洽的自引用 commit hash。
 
-**Next:** 启动/执行只读 reviewer，按 `etc/cred-merge/agent-plan.md` 阶段 4 检查 P0/P1 语义闭合：Task credential 与 sched lock 分离、VFS `FsPermChecker`、`access/faccessat` id 语义、namei search checks、setid drop 路径、exec credential commit point、`PathRef`/typed open/fd model 保留、双架构 syscall 表和 user-test group 注册。
+**Next:** 启动/执行只读 reviewer，按 [RFC-20260602-cred-merge 实施计划](../../rfcs/cred-merge/implementation.md) 阶段 4 检查 P0/P1 语义闭合：Task credential 与 sched lock 分离、VFS `FsPermChecker`、`access/faccessat` id 语义、namei search checks、setid drop 路径、exec credential commit point、`PathRef`/typed open/fd model 保留、双架构 syscall 表和 user-test group 注册。
 
 ### 2026-06-03 - Reviewer P0/P1 窄修
 
