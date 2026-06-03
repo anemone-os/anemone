@@ -1,4 +1,4 @@
-# Event WaitState/WakeToken 修订版实现计划（补 requeue 再校验）
+# WaitState/WakeToken 修订版实现计划（补 requeue 再校验）
 
 日期：2026-06-01
 
@@ -6,8 +6,8 @@
 
 相关材料：
 
-1. [Event Wake Race 问题简述](./event-wake-race-problem-brief.md)
-2. [Event WaitState/WakeToken 问题清单](./event-waitstate-waketoken-issues.md)
+1. [Wait/Wake Race 问题简述](./wake-race-problem-brief.md)
+2. [WaitState/WakeToken 问题清单](./waitstate-waketoken-issues.md)
 3. [Sched Wait Refactor 不变量需求](../invariants.md)
 4. [Sched Wait Refactor 迁移实施计划](../implementation.md)
 

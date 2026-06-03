@@ -13,13 +13,21 @@ docs/src/rfcs/<short-slug>/
 ```text
 docs/src/rfcs/<short-slug>/
   index.md
-  invariants.md
   implementation.md
-  background/
+  invariants.md          # 可选
+  backgrounds/           # 可选
     index.md
 ```
 
-如果 RFC 不需要单独的不变量或实施计划，可以省略对应文件，但 `index.md` 必须说明为什么不拆分。
+`index.md` 与 `implementation.md` 必须存在。`invariants.md` 在协议、不变量、锁序、生命周期或证明义务复杂时创建。`backgrounds/` 用于历史背景、问题清单、被拒绝方案和旧计划归档；背景材料不能覆盖 canonical 结论。
+
+RFC 一旦进入实现阶段，必须创建对应事务日志：
+
+```text
+docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
+```
+
+并在 RFC `index.md`、事务日志索引、当前双周 devlog 和 mdBook Summary 中建立链接。
 
 ## `index.md`
 
@@ -30,7 +38,7 @@ docs/src/rfcs/<short-slug>/
 **负责人：** name1, name2
 **最后更新：** YYYY-MM-DD
 **领域：** scheduler / fs / mm / ...
-**事务日志：** 如果有对应 devlog transaction，在这里链接；否则写 `None`。
+**事务日志：** Draft 阶段可写 `None`；进入实现阶段后必须链接对应 transaction。
 **开放问题：** 简短列出待决问题；没有则写 `None`。
 **下一步：** 下一次 review、原型、迁移阶段、验证或收口动作。
 
@@ -61,7 +69,7 @@ Canonical：
 
 背景材料：
 
-- [背景材料索引](./background/index.md)
+- [背景材料索引](./backgrounds/index.md)
 
 ## 方案
 
@@ -186,7 +194,7 @@ Canonical：
 说明什么时候应继续追查 issue，什么时候应停止实现形状争论。
 ```
 
-## `background/index.md`
+## `backgrounds/index.md`
 
 ```md
 # <RFC 标题> 背景材料

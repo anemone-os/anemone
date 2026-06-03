@@ -17,7 +17,7 @@
 - [不变量需求](./invariants.md)：必须保持的协议边界和证明义务。
 - [迁移实施计划](./implementation.md)：落地顺序、审计范围、可观测性、验证和停止边界。
 
-历史 review 材料保存在 [背景材料](./background/index.md) 下。它们解释原始 race、被否决的窄化方案和 issue 收口过程，但不覆盖 canonical 不变量和实施计划。
+历史 review 材料保存在 [背景材料](./backgrounds/index.md) 下。它们解释原始 race、被否决的窄化方案和 issue 收口过程，但不覆盖 canonical 不变量和实施计划。
 
 ## 背景
 
@@ -54,11 +54,11 @@ Canonical：
 
 背景材料：
 
-- [背景材料索引](./background/index.md)
-- [Event Wake Race 问题简述](./background/event-wake-race-problem-brief.md)
-- [Event WaitState/WakeToken 问题清单](./background/event-waitstate-waketoken-issues.md)
-- [Event wake-tail 条件入队窄化修复草案](./background/event-try-task-enqueue-narrow-fix.md)
-- [Event WaitState/WakeToken 单文件归档](./background/event-waitstate-waketoken-plan-monolith.md)
+- [背景材料索引](./backgrounds/index.md)
+- [Wait/Wake Race 问题简述](./backgrounds/wake-race-problem-brief.md)
+- [WaitState/WakeToken 问题清单](./backgrounds/waitstate-waketoken-issues.md)
+- [Wake-tail 条件入队窄化修复草案](./backgrounds/wake-tail-narrow-fix.md)
+- [WaitState/WakeToken 单文件归档](./backgrounds/waitstate-waketoken-plan-monolith.md)
 
 ## 接受边界
 

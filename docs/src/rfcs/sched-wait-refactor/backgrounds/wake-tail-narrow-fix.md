@@ -1,4 +1,4 @@
-# Event wake-tail 条件入队窄化修复草案
+# Wake-tail 条件入队窄化修复草案
 
 日期：2026-05-31
 
@@ -8,7 +8,7 @@
 
 相关材料：
 
-1. [Event Wake Race 问题简述](./event-wake-race-problem-brief.md)
+1. [Wait/Wake Race 问题简述](./wake-race-problem-brief.md)
 2. [Sched Wait Refactor 不变量需求](../invariants.md)
 
 ## 0. 目标

@@ -41,7 +41,7 @@
 - 当前事实页面记录“现在是怎样”。
 - 公开草案页面记录“可能如何改变”。
 
-共享但未定稿的内容，只有在确实需要多人协作评审时才进入公共仓库。此类页面应统一放在 `docs/src/rfcs/`。大型重构默认使用 `docs/src/rfcs/<short-slug>/` 目录形式，入口为 `index.md`，必要时拆出 `invariants.md`、`implementation.md` 和 `background/` 历史材料。
+共享但未定稿的内容，只有在确实需要多人协作评审时才进入公共仓库。此类页面应统一放在 `docs/src/rfcs/`。大型重构默认使用 `docs/src/rfcs/<short-slug>/` 目录形式，入口为 `index.md`，实施计划为 `implementation.md`，必要时拆出 `invariants.md` 和 `backgrounds/` 历史材料。
 
 RFC 入口应在页首明确给出以下字段：
 

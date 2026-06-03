@@ -149,7 +149,7 @@ git merge --no-commit origin/main
 
 ```text
 工作目录是仓库根目录。请作为 credentials merge 的总控 agent，
-阅读 docs/src/rfcs/cred-merge/background/merge-context.md、
+阅读 docs/src/rfcs/cred-merge/backgrounds/merge-context.md、
 docs/src/rfcs/cred-merge/implementation.md 和
 docs/src/devlog/transactions/2026-06-02-cred-merge.md。
 

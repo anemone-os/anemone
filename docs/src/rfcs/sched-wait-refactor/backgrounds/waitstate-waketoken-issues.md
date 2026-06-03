@@ -1,4 +1,4 @@
-# Event WaitState/WakeToken 问题清单
+# WaitState/WakeToken 问题清单
 
 日期：2026-05-31
 
@@ -8,7 +8,7 @@
 
 1. [Sched Wait Refactor 不变量需求](../invariants.md)
 2. [Sched Wait Refactor 迁移实施计划](../implementation.md)
-3. [Event WaitState/WakeToken 2026-06-01 单文件归档](./event-waitstate-waketoken-plan-monolith.md)
+3. [WaitState/WakeToken 2026-06-01 单文件归档](./waitstate-waketoken-plan-monolith.md)
 4. 对拆分前计划的 code review 结论
 5. 2026-06-01 对 `publish()` / `wake_wait()` / listener 回挂路径的追加 review
 

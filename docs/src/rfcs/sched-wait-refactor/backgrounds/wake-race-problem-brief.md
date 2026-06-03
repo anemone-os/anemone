@@ -1,4 +1,4 @@
-# Event Wake Race 问题简述
+# Wait/Wake Race 问题简述
 
 日期：2026-05-31
 
@@ -26,6 +26,6 @@
 
 - [Sched Wait Refactor 不变量需求](../invariants.md)
 - [Sched Wait Refactor 迁移实施计划](../implementation.md)
-- [Event WaitState/WakeToken 问题清单](./event-waitstate-waketoken-issues.md)
-- [Event WaitState/WakeToken 2026-06-01 单文件归档](./event-waitstate-waketoken-plan-monolith.md)
-- [Event wake-tail 条件入队窄化修复草案（历史备选）](./event-try-task-enqueue-narrow-fix.md)
+- [WaitState/WakeToken 问题清单](./waitstate-waketoken-issues.md)
+- [WaitState/WakeToken 2026-06-01 单文件归档](./waitstate-waketoken-plan-monolith.md)
+- [Wake-tail 条件入队窄化修复草案（历史备选）](./wake-tail-narrow-fix.md)

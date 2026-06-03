@@ -32,7 +32,7 @@
 
 **Phase:** pre-implementation planning
 
-**Change:** 将原 `Event WaitState/WakeToken` 计划提升为公开 RFC 目录：[RFC-20260601-sched-wait-refactor](../../rfcs/sched-wait-refactor/index.md)。RFC 内部拆分为 canonical 不变量需求文档和迁移实施计划。实施计划明确阶段边界：第 1 阶段只建立 wait core 骨架；`wake_wait()` / `wake_active_wait()` 在阶段 2 补齐 stale-safe placement 和 park latch 前不得接入生产等待路径。
+**Change:** 将原 wait/wake `WaitState/WakeToken` 计划提升为公开 RFC 目录：[RFC-20260601-sched-wait-refactor](../../rfcs/sched-wait-refactor/index.md)。RFC 内部拆分为 canonical 不变量需求文档和迁移实施计划。实施计划明确阶段边界：第 1 阶段只建立 wait core 骨架；`wake_wait()` / `wake_active_wait()` 在阶段 2 补齐 stale-safe placement 和 park latch 前不得接入生产等待路径。
 
 **Audit:** 复审重点是实施顺序是否会制造半套协议。结论是：必须避免“逻辑 wake 已完成，但 placement 仍由 Event/timer/signal 适配层补做”的中间态。计划已补充阶段前置条件、旁路审计和 `update_status_with()` 收口要求。
 

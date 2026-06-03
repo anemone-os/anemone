@@ -23,8 +23,8 @@ Canonical：
 
 背景材料：
 
-- [背景材料索引](./background/index.md)
-- [Merge 背景与风险](./background/merge-context.md)
+- [背景材料索引](./backgrounds/index.md)
+- [Merge 背景与风险](./backgrounds/merge-context.md)
 
 ## 接受边界
 

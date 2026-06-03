@@ -20,13 +20,15 @@
 ```text
 docs/src/rfcs/<short-slug>/
   index.md
-  invariants.md
   implementation.md
-  background/
+  invariants.md          # 可选；协议、不变量或证明义务复杂时使用
+  backgrounds/           # 可选；保存历史背景、问题清单和被拒绝方案
     index.md
 ```
 
-`index.md` 是总入口，负责说明状态、范围、文档地图、接受边界和下一步。大型重构应把不变量、实现顺序、历史材料拆成同一目录下的子文档，避免 devlog 或 register 直接引用个人 `etc/` 草稿。
+`index.md` 是总入口，负责说明状态、范围、文档地图、接受边界和下一步。`implementation.md` 是实现计划，负责记录阶段、审查合同、验证和停止边界。`invariants.md` 只在正确性依赖明确协议、不变量或证明义务时创建；调度、等待、锁序、生命周期等子系统通常需要它。`backgrounds/` 只保存背景材料，不作为当前 canonical 结论的来源。
+
+大型重构应把不变量、实现顺序、历史材料拆成同一目录下的子文档，避免 devlog 或 register 直接引用个人 `etc/` 草稿。
 
 每个 RFC 入口都应在页首明确给出：
 
@@ -38,6 +40,23 @@ docs/src/rfcs/<short-slug>/
 - `下一步`
 
 可直接复制的草案结构见 [RFC 模板](./rfc-template.md)。
+
+## 实现期事务日志
+
+RFC 一旦进入实现阶段，必须建立对应的事务级 devlog：
+
+```text
+docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
+```
+
+同时更新：
+
+- RFC `index.md` 页首的 `事务日志` 字段；
+- `docs/src/devlog/transactions/index.md`；
+- 当前双周 devlog，只追加该事务的入口摘要；
+- `docs/src/SUMMARY.md`，让 RFC 和事务日志都出现在 mdBook 导航中。
+
+事务日志记录实际执行、checkpoint、review 结论、验证证据、剩余限制和更正说明；RFC 记录计划、边界和 accepted contract。事务日志应链接回 RFC，RFC 也应链接到事务日志。
 
 ## 当前 RFC
 

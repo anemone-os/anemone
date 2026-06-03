@@ -6,10 +6,10 @@
 
 来源：
 
-1. [Event Wake Race 问题简述](./background/event-wake-race-problem-brief.md)
-2. [Event WaitState/WakeToken 问题清单](./background/event-waitstate-waketoken-issues.md)
-3. [Event wake-tail 条件入队窄化修复草案（历史备选）](./background/event-try-task-enqueue-narrow-fix.md)
-4. [Event WaitState/WakeToken 2026-06-01 单文件归档](./background/event-waitstate-waketoken-plan-monolith.md)
+1. [Wait/Wake Race 问题简述](./backgrounds/wake-race-problem-brief.md)
+2. [WaitState/WakeToken 问题清单](./backgrounds/waitstate-waketoken-issues.md)
+3. [Wake-tail 条件入队窄化修复草案（历史备选）](./backgrounds/wake-tail-narrow-fix.md)
+4. [WaitState/WakeToken 2026-06-01 单文件归档](./backgrounds/waitstate-waketoken-plan-monolith.md)
 
 ## 0. 闭合条件
 
