@@ -9,6 +9,7 @@ use anemone_rs::{
 const ACTIVE_PROFILE: &str = include_str!("../ltp/profile.txt");
 const ETC_PASSWD: &str = include_str!("../fixtures/passwd");
 const ETC_GROUP: &str = include_str!("../fixtures/group");
+const LTP_KCONFIG: &str = include_str!("../fixtures/ltp-kconfig");
 
 const GLIBC_LTP_ENV: &[&str] = &[
     "PATH=/glibc/ltp/testcases/bin:/glibc/bin:/glibc/usr/bin:/bin:/usr/bin:/sbin:/usr/sbin",
@@ -16,6 +17,7 @@ const GLIBC_LTP_ENV: &[&str] = &[
     "LTP_VIRT_OVERRIDE=kvm",
     "LTP_COLORIZE_OUTPUT=1",
     "TMPDIR=/tmp",
+    "KCONFIG_PATH=/etc/ltp/anemone-kconfig",
 ];
 
 const MUSL_LTP_ENV: &[&str] = &[
@@ -24,6 +26,7 @@ const MUSL_LTP_ENV: &[&str] = &[
     "LTP_VIRT_OVERRIDE=kvm",
     "LTP_COLORIZE_OUTPUT=1",
     "TMPDIR=/tmp",
+    "KCONFIG_PATH=/etc/ltp/anemone-kconfig",
 ];
 
 struct LtpRoot {
@@ -144,6 +147,10 @@ const LTP_FIXTURES: &[LtpFixture] = &[
     LtpFixture {
         path: "/etc/group",
         content: ETC_GROUP,
+    },
+    LtpFixture {
+        path: "/etc/ltp/anemone-kconfig",
+        content: LTP_KCONFIG,
     },
 ];
 
