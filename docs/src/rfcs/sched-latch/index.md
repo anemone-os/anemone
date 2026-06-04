@@ -1,12 +1,12 @@
 # RFC-20260603-sched-latch
 
-**状态：** 已接受，Protocol Closed，进入实现阶段 gate
+**状态：** 已接受，Protocol Closed，Stage 6 审计完成
 **负责人：** doruche, Codex
 **最后更新：** 2026-06-03
 **领域：** scheduler / wait core / iomux / poll / select
 **事务日志：** [2026-06-03 - Sched Latch](../../devlog/transactions/2026-06-03-sched-latch.md)
 **开放问题：** None（文档协议层无 Still open plan gap；[Tracking Issues](./tracking-issues.md) 仅保留实现 gate）。
-**下一步：** 按 [迁移实施计划](./implementation.md) 的阶段 gate 执行，实现进度、审计证据和验证结果记录到事务日志。
+**下一步：** 核心 `ppoll` / `pselect6` latch OR wait 迁移已完成；后续 source 扩展、POLLPRI / exception readiness、epoll 或异步通知作为独立 follow-up 处理。
 
 ## 摘要
 
@@ -89,10 +89,10 @@ Canonical：
 
 ## 收口
 
-当前文档协议已经收口；剩余工作是在实现阶段执行 gate：
+当前文档协议已经收口；实现阶段 gate 已按事务日志完成阶段 6 审计：
 
-1. 实现阶段按 [Tracking Issues](./tracking-issues.md) 中的 gate 验收阶段退出。
-2. 每个阶段把交付、审计、验证和剩余限制追加到 [事务日志](../../devlog/transactions/2026-06-03-sched-latch.md)。
-3. 实现完成后记录最终验证、剩余限制和 register / devlog 链接。
+1. [Tracking Issues](./tracking-issues.md) 中的 implementation gate 已有阶段退出证据。
+2. 每个阶段的交付、审计、验证和剩余限制已追加到 [事务日志](../../devlog/transactions/2026-06-03-sched-latch.md)。
+3. 旧 iomux stage-1 睡眠可观测性限制已在 [current limitations](../../register/current-limitations.md) 标记为 resolved。
 
 如果后续审查新增 Still open plan gap，必须先回到本文档集收口；不得把协议空洞推迟到实现时再决定。

@@ -1,6 +1,6 @@
 # Sched Latch Tracking Issues
 
-**状态：** Protocol Closed / Implementation Gates
+**状态：** Protocol Closed / Implementation Gates Closed
 **最后更新：** 2026-06-03
 **父 RFC：** [RFC-20260603-sched-latch](./index.md)
 **事务日志：** [2026-06-03 - Sched Latch](../../devlog/transactions/2026-06-03-sched-latch.md)
@@ -31,6 +31,12 @@
 None。
 
 如果后续审查发现会改变 wait identity、completion 线性化点、owner boundary、source register gate、source wake detach、cleanup 非正确性支柱、placement 责任或 `ppoll` / `pselect6` outcome mapping 的缺口，必须在这里新增 Still open plan gap，并先修 RFC 文本。
+
+## Implementation Gate Closure
+
+阶段 6 旁路审计已完成，未发现 Apollyon / Keter 阻塞项。`PollWaiter` / `poll_waiters` 无代码残留，`ppoll` / `pselect6` iomux wait path 不再使用 `yield_now()`，source register gate 对未迁移 not-ready source fail closed 为 `Unsupported`，pipe source wake 在释放 `Pipe` lock 后触发 detached `LatchTrigger`，fd source 未直接调用 wait-core lifecycle、直接写 `TaskSchedState` 或直接做 runqueue placement。
+
+最终证据记录在 [Sched Latch 事务日志](../../devlog/transactions/2026-06-03-sched-latch.md) 的 “Agent 5 side audit and closure” 条目；旧 `ANE-20260531-IOMUX-INFINITE-WAIT-STAGE1` 限制已在 [current limitations](../../register/current-limitations.md) 标记为 resolved。
 
 ## Accepted Implementation Gates
 
