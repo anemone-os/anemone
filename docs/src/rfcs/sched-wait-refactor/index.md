@@ -43,7 +43,7 @@
 - 不重写调度策略、调度类、时间片行为或负载均衡。
 - 不在本 RFC 中完成 futex PI、poll/epoll 或完整 Linux waitqueue 兼容。
 - 不通过弱化 `task_enqueue()` 断言掩盖竞态。
-- 不让个人 `etc/` 笔记成为公共 canonical 引用。
+- 不让个人笔记成为公共 canonical 引用。
 
 ## 文档地图
 

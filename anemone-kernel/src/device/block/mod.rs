@@ -88,6 +88,46 @@ pub trait BlockDev: Send + Sync {
     /// - `buf` is the buffer to write from, whose length is guaranteed to be a
     ///   multiple of [Self::block_size()].
     fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), SysError>;
+
+    /// Handle block-driver private ioctl commands after the block subsystem has
+    /// processed generic `BLK*` commands.
+    fn ioctl(&self, _ctx: BlockIoctlCtx<'_>) -> Result<u64, SysError> {
+        Err(SysError::UnsupportedIoctl)
+    }
+}
+
+pub struct BlockIoctlCtx<'a> {
+    inner: IoctlCtx<'a>,
+}
+
+impl<'a> BlockIoctlCtx<'a> {
+    pub const fn new(inner: IoctlCtx<'a>) -> Self {
+        Self { inner }
+    }
+
+    pub const fn cmd(&self) -> u32 {
+        self.inner.cmd()
+    }
+
+    pub const fn arg(&self) -> u64 {
+        self.inner.arg()
+    }
+
+    pub const fn target_access(&self) -> IoctlFileAccess {
+        self.inner.target_access()
+    }
+
+    pub fn uspace(&self) -> &Arc<UserSpaceHandle> {
+        self.inner.uspace()
+    }
+
+    pub fn lookup_arg_fd(&self) -> Result<IoctlArgFile, SysError> {
+        self.inner.lookup_arg_fd()
+    }
+
+    pub fn lookup_fd_arg(&self, raw_fd: u64) -> Result<IoctlArgFile, SysError> {
+        self.inner.lookup_fd_arg(raw_fd)
+    }
 }
 
 impl Debug for dyn BlockDev {
@@ -146,6 +186,7 @@ struct BlockDevDesc {
     class: BlockDevClass,
     name: String,
     ops: Arc<dyn BlockDev>,
+    readahead: AtomicUsize,
 }
 
 impl Debug for BlockDevDesc {
@@ -153,6 +194,7 @@ impl Debug for BlockDevDesc {
         f.debug_struct("BlockDevDesc")
             .field("class", &self.class)
             .field("name", &self.name)
+            .field("readahead", &self.readahead.load(Ordering::Relaxed))
             .finish()
     }
 }
@@ -266,6 +308,7 @@ pub fn register_block_device(registration: BlockDevRegistration) -> Result<Strin
         class: registration.class,
         name: name.clone(),
         ops: registration.device,
+        readahead: AtomicUsize::new(0),
     };
 
     registry.names.insert(name.clone(), registration.devnum);
@@ -290,6 +333,22 @@ pub fn get_block_dev(devnum: BlockDevNum) -> Option<Arc<dyn BlockDev>> {
         .devices
         .get(&devnum)
         .map(|desc| desc.ops.clone())
+}
+
+fn get_block_dev_readahead(devnum: BlockDevNum) -> Option<usize> {
+    SUBSYS
+        .registry
+        .read_irqsave()
+        .devices
+        .get(&devnum)
+        .map(|desc| desc.readahead.load(Ordering::Relaxed))
+}
+
+fn set_block_dev_readahead(devnum: BlockDevNum, readahead: usize) -> Result<(), SysError> {
+    let registry = SUBSYS.registry.read_irqsave();
+    let desc = registry.devices.get(&devnum).ok_or(SysError::NotFound)?;
+    desc.readahead.store(readahead, Ordering::Relaxed);
+    Ok(())
 }
 
 /// Get the block device corresponding to the given canonical name, if it
@@ -334,6 +393,7 @@ pub fn next_block_dev(ctx: &mut IterCtx) -> Option<BlockDevEntry> {
 }
 
 pub mod devfs;
+mod r#loop;
 mod ramdisk;
 
 #[cfg(feature = "kunit")]

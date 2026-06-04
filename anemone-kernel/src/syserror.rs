@@ -34,6 +34,8 @@ pub enum SysError {
     AccessDenied,
     /// The provided file descriptor is invalid.
     BadFileDescriptor,
+    /// The target file or device does not support this ioctl command.
+    UnsupportedIoctl,
     /// No more file descriptors available for allocation.
     NoMoreFd,
     /// System or current process is out of memory.
@@ -111,6 +113,8 @@ pub enum SysError {
     NoSuchDriver,
     /// The device is not existing.
     NoSuchDevice,
+    /// No such device or address.
+    NoSuchDeviceOrAddress,
     /// No available resource for the driver when probing the device.
     ResourceExhausted,
     /// The device doesn't have a firmware node, but the driver requires one.
@@ -185,6 +189,7 @@ impl SysError {
             SysError::BadAddress => EFAULT,
             SysError::AccessDenied => EACCES,
             SysError::BadFileDescriptor => EBADF,
+            SysError::UnsupportedIoctl => ENOTTY,
             SysError::NoMoreFd => EMFILE,
             SysError::OutOfMemory => ENOMEM,
             SysError::AlreadyMapped | SysError::NotMapped | SysError::SharedFrame => EFAULT,
@@ -223,6 +228,7 @@ impl SysError {
             | SysError::MissingResource
             | SysError::UnknownInterrupt
             | SysError::ProbeFailed => ENODEV,
+            SysError::NoSuchDeviceOrAddress => ENXIO,
             SysError::IO => EIO,
             SysError::UnexpectedEof => ENODATA,
             SysError::ChildNotFound => ECHILD,

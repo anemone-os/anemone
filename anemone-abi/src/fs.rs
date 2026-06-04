@@ -268,7 +268,205 @@ pub mod linux {
     }
 
     pub mod ioctl {
+        pub const IOC_NRBITS: u32 = 8;
+        pub const IOC_TYPEBITS: u32 = 8;
+        pub const IOC_SIZEBITS: u32 = 14;
+        pub const IOC_DIRBITS: u32 = 2;
+
+        pub const IOC_NRSHIFT: u32 = 0;
+        pub const IOC_TYPESHIFT: u32 = IOC_NRSHIFT + IOC_NRBITS;
+        pub const IOC_SIZESHIFT: u32 = IOC_TYPESHIFT + IOC_TYPEBITS;
+        pub const IOC_DIRSHIFT: u32 = IOC_SIZESHIFT + IOC_SIZEBITS;
+
+        pub const IOC_NONE: u32 = 0;
+        pub const IOC_WRITE: u32 = 1;
+        pub const IOC_READ: u32 = 2;
+
+        pub const fn ioc(dir: u32, ty: u32, nr: u32, size: usize) -> u32 {
+            (dir << IOC_DIRSHIFT)
+                | (ty << IOC_TYPESHIFT)
+                | (nr << IOC_NRSHIFT)
+                | ((size as u32) << IOC_SIZESHIFT)
+        }
+
+        pub const fn io(ty: u32, nr: u32) -> u32 {
+            ioc(IOC_NONE, ty, nr, 0)
+        }
+
+        pub const fn ior(ty: u32, nr: u32, size: usize) -> u32 {
+            ioc(IOC_READ, ty, nr, size)
+        }
+
         pub const FIONREAD: u32 = 0x541B;
+
+        pub const BLKGETSIZE: u32 = io(0x12, 96);
+        pub const BLKSSZGET: u32 = io(0x12, 104);
+        pub const BLKRASET: u32 = io(0x12, 98);
+        pub const BLKRAGET: u32 = io(0x12, 99);
+        pub const BLKGETSIZE64: u32 = ior(0x12, 114, core::mem::size_of::<usize>());
+
+        pub const LO_NAME_SIZE: usize = 64;
+        pub const LO_KEY_SIZE: usize = 32;
+
+        pub const LO_FLAGS_READ_ONLY: u32 = 1;
+        pub const LO_FLAGS_AUTOCLEAR: u32 = 4;
+        pub const LO_FLAGS_PARTSCAN: u32 = 8;
+        pub const LO_FLAGS_DIRECT_IO: u32 = 16;
+
+        pub const LOOP_KNOWN_FLAGS: u32 = LO_FLAGS_READ_ONLY
+            | LO_FLAGS_AUTOCLEAR
+            | LO_FLAGS_PARTSCAN
+            | LO_FLAGS_DIRECT_IO;
+        pub const LOOP_SET_STATUS_SETTABLE_FLAGS: u32 =
+            LO_FLAGS_AUTOCLEAR | LO_FLAGS_PARTSCAN;
+        pub const LOOP_SET_STATUS_CLEARABLE_FLAGS: u32 = LO_FLAGS_AUTOCLEAR;
+        pub const LOOP_CONFIGURE_SETTABLE_FLAGS: u32 = LOOP_KNOWN_FLAGS;
+
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        #[repr(transparent)]
+        pub struct LoopFlags(u32);
+
+        impl LoopFlags {
+            pub const READ_ONLY: Self = Self(LO_FLAGS_READ_ONLY);
+            pub const AUTOCLEAR: Self = Self(LO_FLAGS_AUTOCLEAR);
+            pub const PARTSCAN: Self = Self(LO_FLAGS_PARTSCAN);
+            pub const DIRECT_IO: Self = Self(LO_FLAGS_DIRECT_IO);
+
+            pub const fn from_bits(bits: u32) -> Option<Self> {
+                if bits & !LOOP_KNOWN_FLAGS == 0 {
+                    Some(Self(bits))
+                } else {
+                    None
+                }
+            }
+
+            pub const fn from_bits_truncate(bits: u32) -> Self {
+                Self(bits & LOOP_KNOWN_FLAGS)
+            }
+
+            pub const fn bits(self) -> u32 {
+                self.0
+            }
+
+            pub const fn contains(self, other: Self) -> bool {
+                self.0 & other.0 == other.0
+            }
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        #[allow(non_camel_case_types)]
+        pub struct loop_info {
+            pub lo_number: i32,
+            pub lo_device: u32,
+            pub lo_inode: usize,
+            pub lo_rdevice: u32,
+            pub lo_offset: i32,
+            pub lo_encrypt_type: i32,
+            pub lo_encrypt_key_size: i32,
+            pub lo_flags: i32,
+            pub lo_name: [u8; LO_NAME_SIZE],
+            pub lo_encrypt_key: [u8; LO_KEY_SIZE],
+            pub lo_init: [usize; 2],
+            pub reserved: [u8; 4],
+        }
+
+        impl Default for loop_info {
+            fn default() -> Self {
+                Self {
+                    lo_number: 0,
+                    lo_device: 0,
+                    lo_inode: 0,
+                    lo_rdevice: 0,
+                    lo_offset: 0,
+                    lo_encrypt_type: 0,
+                    lo_encrypt_key_size: 0,
+                    lo_flags: 0,
+                    lo_name: [0; LO_NAME_SIZE],
+                    lo_encrypt_key: [0; LO_KEY_SIZE],
+                    lo_init: [0; 2],
+                    reserved: [0; 4],
+                }
+            }
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        #[allow(non_camel_case_types)]
+        pub struct loop_info64 {
+            pub lo_device: u64,
+            pub lo_inode: u64,
+            pub lo_rdevice: u64,
+            pub lo_offset: u64,
+            pub lo_sizelimit: u64,
+            pub lo_number: u32,
+            pub lo_encrypt_type: u32,
+            pub lo_encrypt_key_size: u32,
+            pub lo_flags: u32,
+            pub lo_file_name: [u8; LO_NAME_SIZE],
+            pub lo_crypt_name: [u8; LO_NAME_SIZE],
+            pub lo_encrypt_key: [u8; LO_KEY_SIZE],
+            pub lo_init: [u64; 2],
+        }
+
+        impl Default for loop_info64 {
+            fn default() -> Self {
+                Self {
+                    lo_device: 0,
+                    lo_inode: 0,
+                    lo_rdevice: 0,
+                    lo_offset: 0,
+                    lo_sizelimit: 0,
+                    lo_number: 0,
+                    lo_encrypt_type: 0,
+                    lo_encrypt_key_size: 0,
+                    lo_flags: 0,
+                    lo_file_name: [0; LO_NAME_SIZE],
+                    lo_crypt_name: [0; LO_NAME_SIZE],
+                    lo_encrypt_key: [0; LO_KEY_SIZE],
+                    lo_init: [0; 2],
+                }
+            }
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        #[allow(non_camel_case_types)]
+        pub struct loop_config {
+            pub fd: u32,
+            pub block_size: u32,
+            pub info: loop_info64,
+            pub __reserved: [u64; 8],
+        }
+
+        impl Default for loop_config {
+            fn default() -> Self {
+                Self {
+                    fd: 0,
+                    block_size: 0,
+                    info: loop_info64::default(),
+                    __reserved: [0; 8],
+                }
+            }
+        }
+
+        const _: [(); 160] = [(); core::mem::size_of::<loop_info>()];
+        const _: [(); 232] = [(); core::mem::size_of::<loop_info64>()];
+        const _: [(); 304] = [(); core::mem::size_of::<loop_config>()];
+
+        pub const LOOP_SET_FD: u32 = 0x4C00;
+        pub const LOOP_CLR_FD: u32 = 0x4C01;
+        pub const LOOP_SET_STATUS: u32 = 0x4C02;
+        pub const LOOP_GET_STATUS: u32 = 0x4C03;
+        pub const LOOP_SET_STATUS64: u32 = 0x4C04;
+        pub const LOOP_GET_STATUS64: u32 = 0x4C05;
+        pub const LOOP_CHANGE_FD: u32 = 0x4C06;
+        pub const LOOP_SET_CAPACITY: u32 = 0x4C07;
+        pub const LOOP_SET_DIRECT_IO: u32 = 0x4C08;
+        pub const LOOP_SET_BLOCK_SIZE: u32 = 0x4C09;
+        pub const LOOP_CONFIGURE: u32 = 0x4C0A;
+
+        pub const LOOP_CTL_GET_FREE: u32 = 0x4C82;
     }
 
     pub mod fallocate {

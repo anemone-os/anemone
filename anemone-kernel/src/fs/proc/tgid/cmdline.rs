@@ -118,6 +118,7 @@ static TGID_CMDLINE_FILE_OPS: FileOps = FileOps {
     validate_seek: tgid_cmdline_validate_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 pub static TGID_CMDLINE_TGID_ENTRY: TgidEntry = TgidEntry {

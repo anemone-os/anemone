@@ -82,6 +82,7 @@ static PROC_UPTIME_FILE_OPS: FileOps = FileOps {
     validate_seek: proc_uptime_validate_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 pub static PROC_UPTIME_DIR_ENTRY: ProcDirEntry = ProcDirEntry {

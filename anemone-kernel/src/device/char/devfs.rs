@@ -40,6 +40,7 @@ static CHAR_DEV_FILE_OPS: FileOps = FileOps {
     // Char devices do not have a waitable poll path yet. Report NYI instead of
     // pretending every device is immediately readable or writable.
     poll: |_, _| Err(SysError::NotYetImplemented),
+    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 struct CharDevFsNodeOps {

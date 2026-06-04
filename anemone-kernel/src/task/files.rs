@@ -42,7 +42,7 @@ pub struct ProcFile {
     ///
     /// This object is not process-local. Duplicated descriptors and forked file
     /// tables share it, including file status flags and the opened file handle.
-    file: File,
+    file: Arc<File>,
     access: OpenAccessMode,
     status_flags: SpinLock<FileStatusFlags>,
     compat: LinuxOpenCompat,
@@ -76,7 +76,7 @@ impl FileDesc {
         }
     }
 
-    pub fn vfs_file(&self) -> &File {
+    pub fn vfs_file(&self) -> &Arc<File> {
         &self.pfile.file
     }
 
@@ -98,6 +98,42 @@ impl FileDesc {
 
     pub fn file_flags(&self) -> FileStatusFlags {
         *self.pfile.status_flags.lock()
+    }
+
+    pub fn ioctl_access(&self) -> IoctlFileAccess {
+        let flags = self.file_flags();
+        let mut status_flags = IoctlFileStatusFlags::empty();
+        status_flags.set(
+            IoctlFileStatusFlags::APPEND,
+            flags.contains(FileStatusFlags::APPEND),
+        );
+        status_flags.set(
+            IoctlFileStatusFlags::NONBLOCK,
+            flags.contains(FileStatusFlags::NONBLOCK),
+        );
+        status_flags.set(
+            IoctlFileStatusFlags::DIRECT,
+            flags.contains(FileStatusFlags::DIRECT),
+        );
+        status_flags.set(
+            IoctlFileStatusFlags::DSYNC,
+            flags.contains(FileStatusFlags::DSYNC),
+        );
+        status_flags.set(
+            IoctlFileStatusFlags::SYNC,
+            flags.contains(FileStatusFlags::SYNC),
+        );
+        status_flags.set(
+            IoctlFileStatusFlags::NOATIME,
+            flags.contains(FileStatusFlags::NOATIME),
+        );
+
+        IoctlFileAccess::new(
+            self.can_read(),
+            self.can_write(),
+            self.is_path_only(),
+            status_flags,
+        )
     }
 
     pub fn set_file_flags(&self, flags: FileStatusFlags) {
@@ -419,7 +455,7 @@ impl FilesState {
         let fd = self.alloc()?;
         let file_desc = Arc::new(FileDesc::new(
             Arc::new(ProcFile {
-                file,
+                file: Arc::new(file),
                 access,
                 status_flags: SpinLock::new(status_flags),
                 compat,

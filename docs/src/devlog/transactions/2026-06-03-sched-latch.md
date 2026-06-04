@@ -46,13 +46,13 @@
 
 **Canonical RFC:** [RFC-20260603-sched-latch](../../rfcs/sched-latch/index.md), [Invariants](../../rfcs/sched-latch/invariants.md), [Implementation Plan](../../rfcs/sched-latch/implementation.md), [Tracking Issues](../../rfcs/sched-latch/tracking-issues.md)
 
-**Completed:** `etc/plans/sched-latch` 草稿已提升为公开 RFC；文档协议审查未发现新的 Apollyon / Keter 级硬障碍；软件工程审查结果已作为实现工程指导写入 implementation gate；事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。Agent 0.5 已完成 wait-core surface hardening：`crate::sched::*` 不再 re-export `ActiveWait`、`WakeToken`、`WaitReason`、`WaitOutcome`、`WakeResult` 或 `WaitStateStatus`；clock / signal syscall adapter 改走受限 current-wait wrapper；`Event` 仍作为 scheduler 内部合法 wait adapter 直接使用 wait core。Agent 1 已完成 `sched::latch` 原语，并通过 Gate 1 review。Agent 2 已完成 typed `PollRequest` / `PollRegisterResult` 协议和 pipe source trigger queue 迁移，旧 `PollWaiter` / `poll_waiters` 草稿入口已清除。Agent 3 已将 `sys_ppoll` 迁移到 latch wait loop，并建立 `fs/api/iomux/wait.rs` 作为 `pselect6` 可复用的 snapshot/register/final-scan outcome mapping 边界。Agent 4 已将 `sys_pselect6` 迁移到同一 helper，移除 pselect wait path 中的 `yield_now()`，并保持 Linux fd_set / SigSetArgPack ABI copy-in/copy-out 在 syscall adapter 层。Agent 5 已完成阶段 6 旁路审计，未发现 Apollyon / Keter 阻塞项；旧 `ANE-20260531-IOMUX-INFINITE-WAIT-STAGE1` 限制已按 latch 迁移结果标记为关闭。
+**Completed:** `sched-latch` 草稿已提升为公开 RFC；文档协议审查未发现新的 Apollyon / Keter 级硬障碍；软件工程审查结果已作为实现工程指导写入 implementation gate；事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。Agent 0.5 已完成 wait-core surface hardening：`crate::sched::*` 不再 re-export `ActiveWait`、`WakeToken`、`WaitReason`、`WaitOutcome`、`WakeResult` 或 `WaitStateStatus`；clock / signal syscall adapter 改走受限 current-wait wrapper；`Event` 仍作为 scheduler 内部合法 wait adapter 直接使用 wait core。Agent 1 已完成 `sched::latch` 原语，并通过 Gate 1 review。Agent 2 已完成 typed `PollRequest` / `PollRegisterResult` 协议和 pipe source trigger queue 迁移，旧 `PollWaiter` / `poll_waiters` 草稿入口已清除。Agent 3 已将 `sys_ppoll` 迁移到 latch wait loop，并建立 `fs/api/iomux/wait.rs` 作为 `pselect6` 可复用的 snapshot/register/final-scan outcome mapping 边界。Agent 4 已将 `sys_pselect6` 迁移到同一 helper，移除 pselect wait path 中的 `yield_now()`，并保持 Linux fd_set / SigSetArgPack ABI copy-in/copy-out 在 syscall adapter 层。Agent 5 已完成阶段 6 旁路审计，未发现 Apollyon / Keter 阻塞项；旧 `ANE-20260531-IOMUX-INFINITE-WAIT-STAGE1` 限制已按 latch 迁移结果标记为关闭。
 
 **Open Blockers:** 当前没有 Still open plan gap，也没有阶段 6 发现的 Apollyon / Keter 阻塞项。`TaskSchedState` 和 `Task::update_sched_state_with()` 仍是 crate-internal scheduler-state surface；阶段 6 审计未发现 fd source 直接使用这些入口或直接做 runqueue placement。`pselect6` exception / POLLPRI 仍是显式 stub，属于后续功能边界，不影响当前 READABLE / WRITABLE OR wait 语义闭合。
 
 **Next Action:** `sched-latch` 核心迁移关闭。后续新增 source、POLLPRI / exception readiness、epoll 或异步通知必须作为独立 follow-up，不应重新打开本事务的 wait identity / register gate / outcome mapping。
 
-**Do Not Redo:** 不要重新把 `etc/` 个人草稿作为 canonical source；不要把 `PollWaiter` / `poll_waiters` 草稿扩展成新的 waitable poll 协议；不要让 `ppoll` 与 `pselect6` 分裂 outcome mapping；不要把未迁移 source 当成 armed source；不要在 `Unsupported` register result 上 fallback 到 `yield_now()` 或其它会睡在未 armed source 上的路径。
+**Do Not Redo:** 不要把个人草稿作为 canonical source；不要把 `PollWaiter` / `poll_waiters` 草稿扩展成新的 waitable poll 协议；不要让 `ppoll` 与 `pselect6` 分裂 outcome mapping；不要把未迁移 source 当成 armed source；不要在 `Unsupported` register result 上 fallback 到 `yield_now()` 或其它会睡在未 armed source 上的路径。
 
 ## Phase Log
 
@@ -60,9 +60,9 @@
 
 **Phase:** planning / RFC promotion
 
-**Change:** 将 `etc/plans/sched-latch` 的已收口内容提升到 [docs/src/rfcs/sched-latch](../../rfcs/sched-latch/index.md)，并建立本事务日志。RFC 目录包含入口、[不变量需求](../../rfcs/sched-latch/invariants.md)、[迁移实施计划](../../rfcs/sched-latch/implementation.md)、[Tracking Issues](../../rfcs/sched-latch/tracking-issues.md) 和背景材料索引。
+**Change:** 将 `sched-latch` 的已收口内容提升到 [docs/src/rfcs/sched-latch](../../rfcs/sched-latch/index.md)，并建立本事务日志。RFC 目录包含入口、[不变量需求](../../rfcs/sched-latch/invariants.md)、[迁移实施计划](../../rfcs/sched-latch/implementation.md)、[Tracking Issues](../../rfcs/sched-latch/tracking-issues.md) 和背景材料索引。
 
-**Change:** RFC 页首、Tracking Issues、事务日志索引、mdBook Summary 和当前双周 devlog 均已建立公开链接。后续实现记录写入本事务日志，不再引用个人 `etc/` 草稿作为 canonical source。
+**Change:** RFC 页首、Tracking Issues、事务日志索引、mdBook Summary 和当前双周 devlog 均已建立公开链接。后续实现记录写入本事务日志，不再引用个人草稿作为 canonical source。
 
 **Review:** 协议层多线审查结论为：当前没有新的 Apollyon / Keter 硬障碍。单轮 wait identity、owner-bound `Latch`、producer no-return / fail-closed capability、source register gate、source wake detach、cleanup 非正确性支柱、final readiness scan 和 `ppoll` / `pselect6` 统一 outcome mapping 均已在 RFC 中闭合。
 

@@ -395,3 +395,20 @@
 **Owner:** doruche
 **Last Verified:** 2026-05-28
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260604-IOCTL-LTP-STAGE1-GAPS
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** ioctl / block / loop / random / procfs / user-test
+
+**Summary:** LTP ioctl 组的直接小缺口已经部分收口：block EOF read 在 EOF 处返回 `0`，通用 block devfs 支持 `BLKRASET` / `BLKRAGET` 读回，`/dev/urandom` 已发布，user-test 为 LTP 的 loop built-in driver 检测安装 `/lib/modules/6.6.32/modules.dep` 和 `modules.builtin` fixture。但这不是完整 ioctl 组闭环：`ioctl01` 仍依赖 pty/devpts/ptmx，`ioctl02` 的本地 group entry 尚未改为 upstream wrapper，`ioctl03` 仍缺 TUN/TAP，`ioctl04` 后续还需要可靠 mkfs/setup 与 `BLKROGET` / `BLKROSET` 加只读 mount 语义，`ioctl07` 进入下一层后仍需要 `RNDGETENTCNT` 和 `/proc/sys/kernel/random/entropy_avail`，`ioctl08` / `ioctl09` 分别依赖 btrfs、parted、partscan、loop partition nodes 和 `/sys/block` 可观察面。`ioctl_loop01..07` 现在可以越过 driver availability false-negative；最新 `ioctl_loop01` 已找到 `/dev/loop0`，但继续暴露 `parted` 环境缺失与 `/sys/block/loop0/loop/partscan` 缺失。后续仍会暴露 `LOOP_CHANGE_FD`、`LOOP_SET_CAPACITY`、`LOOP_SET_BLOCK_SIZE`、`LOOP_CONFIGURE`、partscan、direct I/O、autoclear 和 loop sysfs 等真实语义缺口。
+
+**Decision:** 当前不为 `ioctl_loop01` 单独伪造 `/sys/block/loopN/loop/{partscan,autoclear,backing_file}`，也不把 `LO_FLAGS_PARTSCAN` / `LO_FLAGS_DIRECT_IO` / 未具备释放 hook 的 `LO_FLAGS_AUTOCLEAR` 伪装成成功。补一个只读 `partscan` 文件只能解除首个 `ENOENT`，随后会马上遇到 flag 回显、sysfs 状态、partition node 和真实 partscan 语义要求；这属于 loop sysfs / partition 子域，不纳入本轮实现。
+
+**Exit Condition:** 按子域分阶段补齐并重新验证 ioctl 组：tty/pty wrapper 与基础 tty ioctl、TUN/TAP feature gating、generic block readonly ioctl 与 readonly mount、random ioctl/procfs entropy 面、loop 扩展 ioctl/sysfs/partscan/partition nodes、以及 rootfs 工具与 btrfs/parted 环境边界。每个子域完成后用对应 LTP case 重新归类，避免把 prerequisite false-negative 与真实 ioctl 语义混在一起。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-04
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [IOCTL Loop 事务日志](../devlog/transactions/2026-06-04-ioctl-loop.md), [rv64 LTP ioctl 运行证据](../rfcs/ioctl-loop/backgrounds/ltp-ioctl-rv64-20260604/index.md), [RFC-20260603-IOCTL-LOOP](../rfcs/ioctl-loop/index.md)
