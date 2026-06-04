@@ -113,6 +113,8 @@ pub enum SysError {
     NoSuchDriver,
     /// The device is not existing.
     NoSuchDevice,
+    /// No such device or address.
+    NoSuchDeviceOrAddress,
     /// No available resource for the driver when probing the device.
     ResourceExhausted,
     /// The device doesn't have a firmware node, but the driver requires one.
@@ -226,6 +228,7 @@ impl SysError {
             | SysError::MissingResource
             | SysError::UnknownInterrupt
             | SysError::ProbeFailed => ENODEV,
+            SysError::NoSuchDeviceOrAddress => ENXIO,
             SysError::IO => EIO,
             SysError::UnexpectedEof => ENODATA,
             SysError::ChildNotFound => ECHILD,
