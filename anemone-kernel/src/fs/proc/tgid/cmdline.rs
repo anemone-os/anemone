@@ -1,7 +1,7 @@
 use crate::{
     fs::{
         iomux::PollEvent,
-        proc::tgid::{TgidEntry, validate_tgid_sub_inode},
+        proc::tgid::{default_tgid_entry_prv, validate_tgid_sub_inode, TgidEntry},
     },
     prelude::*,
     utils::any_opaque::NilOpaque,
@@ -125,4 +125,5 @@ pub static TGID_CMDLINE_TGID_ENTRY: TgidEntry = TgidEntry {
     name: "cmdline",
     mode: InodeMode::new(InodeType::Regular, InodePerm::all_r()),
     inode_ops: &TGID_CMDLINE_INODE_OPS,
+    make_prv: default_tgid_entry_prv,
 };

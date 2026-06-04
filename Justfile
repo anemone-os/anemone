@@ -23,6 +23,10 @@ mrproper:
 build:
     @just xtask build
 
+[doc("format Rust sources. optionally pass `kernel` or an app name")]
+fmt *args:
+    @just xtask fmt {{ args }}
+
 [doc("manage configurations. type `just conf -h` for more details.")]
 conf *args:
     @just xtask conf {{ args }}

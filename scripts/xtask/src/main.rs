@@ -32,6 +32,8 @@ enum Commands {
     App(tasks::app::AppArgs),
     #[command(about = "Build Anemone")]
     Build(tasks::build::BuildArgs),
+    #[command(about = "Format Rust sources")]
+    Fmt(tasks::fmt::FmtArgs),
     #[command(about = "Run Anemone in QEMU emulator")]
     Qemu(tasks::qemu::QemuArgs),
     #[command(about = "Clean build artifacts")]
@@ -51,6 +53,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Rootfs(args) => tasks::rootfs::run(args),
         Commands::App(args) => tasks::app::run(args),
         Commands::Build(args) => tasks::build::run(args),
+        Commands::Fmt(args) => tasks::fmt::run(args),
         Commands::Qemu(args) => tasks::qemu::run(args),
         Commands::Clean => tasks::clean::run(),
         Commands::Mrproper => tasks::mrproper::run(),

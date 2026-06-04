@@ -444,6 +444,13 @@ fn with_pipe_endpoint<T>(
     }
 }
 
+pub(super) fn display_name(file: &File) -> Option<PathBuf> {
+    with_pipe_endpoint(file, |_, _, _| {
+        let target = format!("pipe:[{}]", file.inode().ino().get());
+        PathBuf::from(target.as_str())
+    })
+}
+
 pub(super) fn update_nonblock(file: &File, nonblock: bool) {
     let _ = with_pipe_endpoint(file, |_, rx, tx| {
         if let Some(rx) = rx {

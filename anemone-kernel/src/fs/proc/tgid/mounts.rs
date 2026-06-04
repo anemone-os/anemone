@@ -1,5 +1,5 @@
 use crate::{
-    fs::proc::tgid::{TgidEntry, validate_tgid_sub_inode},
+    fs::proc::tgid::{default_tgid_entry_prv, validate_tgid_sub_inode, TgidEntry},
     prelude::*,
     utils::any_opaque::NilOpaque,
 };
@@ -75,4 +75,5 @@ pub static TGID_MOUNTS_TGID_ENTRY: TgidEntry = TgidEntry {
     name: "mounts",
     mode: InodeMode::new(InodeType::Regular, InodePerm::all_r()),
     inode_ops: &TGID_MOUNTS_INODE_OPS,
+    make_prv: default_tgid_entry_prv,
 };

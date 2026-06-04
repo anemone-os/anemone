@@ -1,13 +1,13 @@
 ---
 name: anemone-build-system
-description: Use when building, cleaning, configuring, packaging rootfs images, building apps, or running QEMU for the Anemone repository. Route all build-facing work through Justfile and scripts/xtask, inspect outputs under build/, and avoid invoking bare cargo or ad-hoc target commands directly because xtask owns generated files, target specs, and platform-specific wiring.
+description: Use when building, cleaning, configuring, formatting, packaging rootfs images, building apps, or running QEMU for the Anemone repository. Route all build-facing work through Justfile and scripts/xtask, inspect outputs under build/, and avoid invoking bare cargo or ad-hoc target commands directly because xtask owns generated files, target specs, rustfmt configuration, linker scripts, DTB generation, and platform-specific wiring.
 ---
 
 # Anemone Build System
 
 ## Overview
 
-Route all Anemone build, app, rootfs, configuration, and QEMU tasks through `just` or `just xtask`. Avoid bare `cargo`, `rustc`, `cargo clean`, and hand-written linker or target invocations because `xtask` injects target specs, generated Rust definitions, linker scripts, DTB generation, and staged outputs under `build/`.
+Route all Anemone build, app, rootfs, configuration, formatting, and QEMU tasks through `just` or `just xtask`. Avoid bare `cargo`, `rustc`, `cargo clean`, `cargo fmt`, and hand-written linker or target invocations because `xtask` injects target specs, generated Rust definitions, the repository `rustfmt.toml`, linker scripts, DTB generation, and staged outputs under `build/`.
 
 ## Follow These Rules
 
@@ -17,13 +17,15 @@ Route all Anemone build, app, rootfs, configuration, and QEMU tasks through `jus
 4. Inspect results under `build/`. Treat `target/` as cargo cache or intermediate state unless a task explicitly requires looking there.
 5. Read `kconfig`, `conf/.defconfig`, `conf/platforms/*.toml`, `conf/rootfs/*.toml`, and `anemone-apps/*/app.toml` before changing build behavior.
 6. Use `just clean` or `just mrproper` for cleanup. Do not run bare `cargo clean`.
-7. Let `xtask` invoke cargo internally when needed. Do not bypass it by running `cargo build`, `cargo run`, or `cargo test` directly from the workspace or from `anemone-kernel` or `anemone-apps`.
+7. Use `just fmt`, `just fmt kernel`, `just fmt <app>`, or `just fmt <package> --check` for Rust formatting. The formatter path is wired to the repository `rustfmt.toml`.
+8. Let `xtask` invoke cargo internally when needed. Do not bypass it by running `cargo build`, `cargo run`, `cargo test`, or `cargo fmt` directly from the workspace or from `anemone-kernel` or `anemone-apps`.
 
 ## Choose The Workflow
 
 1. Determine the task category.
 	- Build the kernel or regenerate generated files -> use `just build` or `just xtask build`.
 	- Switch or inspect platform configuration -> use `just conf list` or `just conf switch <platform>`.
+	- Format Rust sources -> use `just fmt` for kernel plus all apps, `just fmt kernel` for the kernel workspace, `just fmt <app>` for one app, or add `--check` to verify without writing.
 	- Build one userspace app -> use `just xtask app build <app> --arch <arch>`.
 	- Build a rootfs image -> use `just xtask rootfs mkfs -c <manifest>`.
 	- Run QEMU -> use `just xtask qemu --platform <platform> --image build/anemone.elf`.
@@ -63,4 +65,3 @@ Remember that `conf/platforms/qemu-virt-rv64.toml` currently points QEMU at `bui
 ## Keep The Scope Tight
 
 Use this skill to drive repo-local builds and build-system edits. Do not introduce a second build entrypoint, a parallel wrapper script, or cargo-only instructions that contradict the repository workflow.
-

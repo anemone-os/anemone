@@ -539,6 +539,22 @@ impl FilesState {
         }
     }
 
+    pub fn opened_fd_numbers_snapshot(&self) -> Vec<Fd> {
+        self.fds
+            .iter()
+            .enumerate()
+            .filter_map(|(fd, file_desc)| {
+                let opened = file_desc.is_some();
+                assert!(
+                    self.bitmap.test(fd) == opened,
+                    "FilesState bitmap/fds open-state diverged"
+                );
+
+                opened.then(|| Fd::new(fd as u32).expect("fd table index must fit in Fd"))
+            })
+            .collect()
+    }
+
     fn dup(&mut self, old_fd: Fd) -> Result<Fd, SysError> {
         let file_desc = self.get_fd(old_fd)?;
         let fd = self.alloc()?;
@@ -808,6 +824,11 @@ impl Task {
     pub fn get_fd(&self, fd: Fd) -> Result<Arc<FileDesc>, SysError> {
         let files_state = self.files_state();
         files_state.read().get_fd(fd)
+    }
+
+    pub fn opened_fd_numbers_snapshot(&self) -> Vec<Fd> {
+        let files_state = self.files_state();
+        files_state.read().opened_fd_numbers_snapshot()
     }
 
     pub fn files_state(&self) -> Arc<RwLock<FilesState>> {
