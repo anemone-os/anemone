@@ -88,6 +88,46 @@ pub trait BlockDev: Send + Sync {
     /// - `buf` is the buffer to write from, whose length is guaranteed to be a
     ///   multiple of [Self::block_size()].
     fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), SysError>;
+
+    /// Handle block-driver private ioctl commands after the block subsystem has
+    /// processed generic `BLK*` commands.
+    fn ioctl(&self, _ctx: BlockIoctlCtx<'_>) -> Result<u64, SysError> {
+        Err(SysError::UnsupportedIoctl)
+    }
+}
+
+pub struct BlockIoctlCtx<'a> {
+    inner: IoctlCtx<'a>,
+}
+
+impl<'a> BlockIoctlCtx<'a> {
+    pub const fn new(inner: IoctlCtx<'a>) -> Self {
+        Self { inner }
+    }
+
+    pub const fn cmd(&self) -> u32 {
+        self.inner.cmd()
+    }
+
+    pub const fn arg(&self) -> u64 {
+        self.inner.arg()
+    }
+
+    pub const fn target_access(&self) -> IoctlFileAccess {
+        self.inner.target_access()
+    }
+
+    pub fn uspace(&self) -> &Arc<UserSpaceHandle> {
+        self.inner.uspace()
+    }
+
+    pub fn lookup_arg_fd(&self) -> Result<IoctlArgFile, SysError> {
+        self.inner.lookup_arg_fd()
+    }
+
+    pub fn lookup_fd_arg(&self, raw_fd: u64) -> Result<IoctlArgFile, SysError> {
+        self.inner.lookup_fd_arg(raw_fd)
+    }
 }
 
 impl Debug for dyn BlockDev {

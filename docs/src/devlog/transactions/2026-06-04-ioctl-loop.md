@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** syscall ABI / VFS / devfs / block device / loop / mount / LTP
 **RFC:** [RFC-20260603-IOCTL-LOOP](../../rfcs/ioctl-loop/index.md)
-**Current Phase:** Agent 2 ready
+**Current Phase:** Gate 2 passed; Agent 3 ready
 
 ## Scope
 
@@ -43,17 +43,17 @@
 
 **Current Branch:** `dev/drc/ioctl`
 
-**Current HEAD:** `99d4f30` (`ltp kconfig`)
+**Current HEAD:** `4807bc3` (`docs: wire ioctl-loop transaction log`)
 
 **Canonical RFC:** [RFC-20260603-IOCTL-LOOP](../../rfcs/ioctl-loop/index.md), [Invariants](../../rfcs/ioctl-loop/invariants.md), [Implementation Plan](../../rfcs/ioctl-loop/implementation.md), [Tracking Issues](../../rfcs/ioctl-loop/tracking-issues.md)
 
-**Completed:** RFC 已提升到公开文档；design review 发现的 Keter / Euclid 项已经吸收到 RFC、不变量需求和迁移实施计划；本事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。总控前置检查确认当前分支为 `dev/drc/ioctl`。Agent 0 只读前置审计已完成，未发现 Apollyon / Keter blocker，停止条件未触发。Agent 1 已完成 UAPI 常量与 loop ABI 结构、语义化 `UnsupportedIoctl -> ENOTTY` errno 映射、`IoctlCtx` / `FileOps::ioctl` VFS 分发和默认 unsupported ioctl 行为。Gate 1 review 发现的 `FIONREAD` / `O_PATH` Keter 已修复，复审后未保留 Apollyon / Keter blocker。
+**Completed:** RFC 已提升到公开文档；design review 发现的 Keter / Euclid 项已经吸收到 RFC、不变量需求和迁移实施计划；本事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。总控前置检查确认当前分支为 `dev/drc/ioctl`。Agent 0 只读前置审计已完成，未发现 Apollyon / Keter blocker，停止条件未触发。Agent 1 已完成 UAPI 常量与 loop ABI 结构、语义化 `UnsupportedIoctl -> ENOTTY` errno 映射、`IoctlCtx` / `FileOps::ioctl` VFS 分发和默认 unsupported ioctl 行为。Gate 1 review 发现的 `FIONREAD` / `O_PATH` Keter 已修复，复审后未保留 Apollyon / Keter blocker。Agent 2 已完成统一 block devfs `BLKGETSIZE64` / `BLKGETSIZE` / `BLKSSZGET` 和 block private ioctl hook；Gate 2 review 通过，未保留 Apollyon / Keter blocker。
 
-**In Progress:** 尚未启动 Agent 2。
+**In Progress:** 暂无。Agent 3 尚未启动。
 
 **Open Blockers:** 暂无已确认 blocker。
 
-**Next Action:** 进入 Agent 2：实现统一 block devfs `BLKGETSIZE64` / `BLKGETSIZE` / `BLKSSZGET` 与 block private ioctl hook，并保持所有 block devfs 节点走同一套 file ops。
+**Next Action:** 若用户确认继续，进入 Agent 3：实现静态 loop block device pool；write set 限于 `anemone-kernel/src/device/block/mod.rs`、`anemone-kernel/src/device/block/loop.rs`、必要设备初始化入口、必要 devfs publish 调用点和本事务 devlog。
 
 **Do Not Redo:** 不要把 loop 或 block 私有 ioctl 塞回 `sys_ioctl()`；不要把 `FileDesc` / `ProcFile` / `FilesState` / 当前 task 传进 VFS 或设备层；不要为 `/dev/loopN` 发布绕过统一 block devfs file ops 的专属 file ops；不要发布半成品 `/dev/loop-control`；不要改 mount 层直接解析普通 image 文件或 `-o loop`。
 
@@ -120,3 +120,33 @@
 **Validation:** `just build` 通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。`git diff --check` 通过，无 whitespace 报告。未运行 QEMU / LTP。
 
 **Next:** 可以进入 Agent 2，write set 限于 block 子系统与事务日志。
+
+### 2026-06-04 - Agent 2 通用块设备 ioctl 完成
+
+**Phase:** Agent 2 / generic block ioctl
+
+**Change:** 在 `BlockDev` trait 上新增 block private ioctl hook，默认返回 `SysError::UnsupportedIoctl`，因此现有 virtio-blk 和 ramdisk 不需要逐个补空实现；后续 loop 私有 `LOOP_*` 只能通过该 hook 接入。
+
+**Change:** 统一 `BLOCK_DEV_FILE_OPS` 新增 ioctl 分发：先处理 `BLKGETSIZE64`、`BLKGETSIZE`、`BLKSSZGET`，未匹配命令再委托具体 `BlockDev::ioctl(BlockIoctlCtx)`。用户态写回继续使用 `IoctlCtx` 携带的 `UserSpaceHandle` 与现有 `UserWritePtr` API，未新增 ioctl 专用 copy helper。
+
+**Change:** `BLKGETSIZE64` 返回设备总字节数；`BLKGETSIZE` 返回 512 字节扇区数，并用 checked arithmetic 处理 sector count 溢出；`BLKSSZGET` 返回当前 block device 的逻辑块大小。顺手把 block read/write/seek 和 devfs stat size 的容量乘法改为同一 checked helper，但没有改变现有块对齐约束。
+
+**Boundary:** 未修改 `sys_ioctl()`、`FileOps::ioctl`、`anemone-abi`、mount、ext4、devfs 发布层或 loop 设备池；未新增 `/dev/loop-control`；未实现任何 `LOOP_*` 成功路径；未为 `/dev/loopN` 创建专属 file ops；未把 block/loop 私有 ioctl 塞回 syscall 层。
+
+**Validation:** `just build` 通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。`git diff --check` 通过，无 whitespace 报告。未运行 QEMU / LTP。
+
+**Next:** 进入 Gate 2 review。
+
+### 2026-06-04 - Gate 2 review 通过
+
+**Phase:** Gate 2 / block devfs ioctl review
+
+**Review:** Gate 2 未发现 Apollyon / Keter blocker。确认所有 block devfs 节点仍由统一 `BLOCK_DEV_FILE_OPS` 打开，`block_ioctl()` 先处理通用 `BLKGETSIZE64`、`BLKGETSIZE`、`BLKSSZGET`，未匹配命令再委托 `BlockDev::ioctl(BlockIoctlCtx)`；默认 private hook 返回 `SysError::UnsupportedIoctl`，继续映射到 Linux `ENOTTY`。
+
+**Review:** `BLKGETSIZE` 使用 block size 的 512-byte unit 数计算 sector count，并通过 checked arithmetic 处理溢出；`BLKSSZGET` 返回 block device 的逻辑块大小；用户态写回经 `IoctlCtx.uspace()` 与现有 `UserWritePtr` 完成，没有新增 ioctl 专用 copy helper。
+
+**Boundary:** 旁路搜索确认没有修改 `sys_ioctl()`、`FileOps::ioctl`、`anemone-abi`、mount、ext4 或 devfs 发布层；没有发布 `/dev/loop-control`；没有新增 loop 设备池或任何 `LOOP_*` 成功路径；没有为 future `/dev/loopN` 创建专属 file ops。
+
+**Validation:** 总控复跑 `just build` 通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。总控复跑 `git diff --check` 通过。未运行 QEMU / LTP。
+
+**Next:** Agent 3 可以开始，但本轮未启动。
