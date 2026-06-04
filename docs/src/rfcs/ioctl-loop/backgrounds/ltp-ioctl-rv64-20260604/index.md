@@ -10,4 +10,4 @@
 边界：
 
 - 该日志是一次 rv64 user-test 运行结果，不代表所有 ioctl 组失败都已经进入目标 syscall 语义。
-- 调查报告把 prerequisite / rootfs / device visibility / kernel semantic gap 分开归类，后续实现和 devlog 应引用本目录内的公开材料，不再引用个人开发环境中的 `etc/` 草稿路径。
+- 调查报告把 prerequisite / rootfs / device visibility / kernel semantic gap 分开归类，后续实现和 devlog 应引用本目录内的公开材料，不再引用个人草稿路径。
