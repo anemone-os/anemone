@@ -301,6 +301,8 @@ pub mod linux {
 
         pub const BLKGETSIZE: u32 = io(0x12, 96);
         pub const BLKSSZGET: u32 = io(0x12, 104);
+        pub const BLKRASET: u32 = io(0x12, 98);
+        pub const BLKRAGET: u32 = io(0x12, 99);
         pub const BLKGETSIZE64: u32 = ior(0x12, 114, core::mem::size_of::<usize>());
 
         pub const LO_NAME_SIZE: usize = 64;

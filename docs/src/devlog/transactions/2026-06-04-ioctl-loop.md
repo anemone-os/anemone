@@ -43,7 +43,7 @@
 
 **Current Branch:** `dev/drc/ioctl`
 
-**Current HEAD:** `0c10517` (`ioctl-loop: implement loop ioctl stage 1`); Gate 3 fixups are currently in the working tree.
+**Current HEAD:** `5b314b7` (`ioctl-loop: add ioctl07 to the test group`); LTP ioctl direct fixups are currently in the working tree.
 
 **Canonical RFC:** [RFC-20260603-IOCTL-LOOP](../../rfcs/ioctl-loop/index.md), [Invariants](../../rfcs/ioctl-loop/invariants.md), [Implementation Plan](../../rfcs/ioctl-loop/implementation.md), [Tracking Issues](../../rfcs/ioctl-loop/tracking-issues.md)
 
@@ -220,3 +220,19 @@
 **Remaining Classification:** `ioctl_loop02` 的 `LOOP_CHANGE_FD` 分支、`ioctl_loop07` 的 `/sys/block/loop*` 观测、`LOOP_CONFIGURE` 成功路径、partscan、direct I/O、autoclear 完整 close-last-fd 语义和阶段 6 mount flags 仍属于后续范围，不阻塞 loop 第一阶段闭环。
 
 **Validation:** `just build` 通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。`git diff --check` 通过。未运行 QEMU / LTP，按编排等待用户运行日志或后续明确授权。
+
+### 2026-06-04 - LTP ioctl 组直接修复收口
+
+**Phase:** Post-Agent-5 / LTP ioctl direct fixups
+
+**Change:** 根据 [rv64 LTP ioctl 运行证据](../../rfcs/ioctl-loop/backgrounds/ltp-ioctl-rv64-20260604/index.md) 的失败归类，收口不需要新架构阶段的小缺口。统一 block devfs 的 `read()` 在设备 EOF 处先返回 `0`，再检查位置和长度对齐，避免 `ioctl05` 在 `lseek(end)` 后 1 字节 read 被错误映射为 `EINVAL`。非 EOF 的非对齐 block read 仍按当前 block `/dev` stage-1 语义返回 `EINVAL`。
+
+**Change:** 在 `anemone-abi` 补充 `BLKRASET` / `BLKRAGET` 常量，并在统一 block devfs ioctl 中保存和读回每个 block device 的通用 readahead 值。该状态挂在 block registry 描述上，`/dev/vda`、`/dev/ramN`、`/dev/loopN` 都继续走同一套 block file ops；未把该行为下沉到 loop 私有 ioctl，也未修改 `sys_ioctl()`。
+
+**Change:** `/dev/urandom` 现在和 `null` / `zero` 一样在注册 char device 后发布到 devfs，消除 `ioctl07` 的首层 `ENOENT`。这只让测试进入 random ioctl/procfs 语义层；`RNDGETENTCNT` 与 `/proc/sys/kernel/random/entropy_avail` 仍未实现。
+
+**Change:** user-test LTP fixture 安装 `/lib/modules/6.6.32/modules.dep` 和 `modules.builtin`，其中 `modules.builtin` 声明内建 loop driver，使 LTP `.needs_drivers = "loop"` 能识别 Anemone 的 built-in loop 设备模型。该 fixture 只解除 driver availability false-negative，不声明 `ioctl_loop01..07` 后续语义已经完整。
+
+**Boundary:** 按用户要求未修改 `ioctl02` 本地 group entry。未发布 `/dev/loop-control`，未新增 loop 专属 file ops，未实现 `LOOP_CHANGE_FD`、`LOOP_SET_CAPACITY`、`LOOP_SET_BLOCK_SIZE`、`LOOP_CONFIGURE`、partscan、direct I/O、loop sysfs 或 random procfs/ioctl 面。
+
+**Validation:** `git diff --check` 通过。`just build` 通过；仅保留既有 `anemone-kernel/src/sync/mono.rs` unused import warning。未运行 QEMU / LTP，因此本条只声明编译和静态 diff 检查通过。

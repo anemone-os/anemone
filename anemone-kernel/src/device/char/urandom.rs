@@ -4,7 +4,7 @@
 //! "chosen by fair dice roll. guaranteed to be random." :P
 
 use crate::{
-    device::char::{CharDev, register_char_device},
+    device::char::{CharDev, devfs::publish_char_device, register_char_device},
     prelude::*,
 };
 
@@ -35,7 +35,14 @@ impl CharDev for URandom {
 fn init() {
     match register_char_device(URANDOM_DEVNUM, "urandom".to_string(), Arc::new(URandom)) {
         Ok(()) => {
-            knoticeln!("urandom device registered");
+            if let Err(err) = publish_char_device(URANDOM_DEVNUM) {
+                knoticeln!(
+                    "urandom device registered, but devfs publish failed: {:?}",
+                    err
+                );
+            } else {
+                knoticeln!("urandom device registered");
+            }
         },
         Err(e) => {
             knoticeln!("failed to register urandom device: {:?}", e);

@@ -12,5 +12,6 @@ Canonical：
 
 - [LTP IOCTL 测例覆盖面](./ltp-ioctl-coverage.md)
 - [Agent 编排建议](./agent-orchestration.md)
+- [rv64 LTP ioctl 运行证据](./ltp-ioctl-rv64-20260604/index.md)
 
 本 RFC 目录内的入口、不变量需求、迁移实施计划和 tracking issues 是后续实现、review gate 和事务日志的 canonical source。

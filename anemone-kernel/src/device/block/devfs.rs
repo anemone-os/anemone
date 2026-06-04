@@ -1,4 +1,4 @@
-use anemone_abi::fs::linux::ioctl::{BLKGETSIZE, BLKGETSIZE64, BLKSSZGET};
+use anemone_abi::fs::linux::ioctl::{BLKGETSIZE, BLKGETSIZE64, BLKRAGET, BLKRASET, BLKSSZGET};
 
 use crate::{
     fs::devfs::{DevfsNodeAttr, DevfsNodeOps, DevfsPublish, publish as devfs_publish},
@@ -7,7 +7,10 @@ use crate::{
     utils::any_opaque::NilOpaque,
 };
 
-use super::{BlockDev, BlockIoctlCtx, get_block_dev, get_block_dev_name};
+use super::{
+    BlockDev, BlockIoctlCtx, get_block_dev, get_block_dev_name, get_block_dev_readahead,
+    set_block_dev_readahead,
+};
 
 fn opened_block_file() -> OpenedFile {
     OpenedFile {
@@ -63,12 +66,12 @@ fn block_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, Sys
     let block_size = dev.block_size().bytes();
     let total_bytes = block_total_bytes(dev.as_ref())?;
 
-    if old_pos % block_size != 0 || buf.len() % block_size != 0 {
-        return Err(SysError::InvalidArgument);
-    }
-
     if old_pos >= total_bytes {
         return Ok(0);
+    }
+
+    if old_pos % block_size != 0 || buf.len() % block_size != 0 {
+        return Err(SysError::InvalidArgument);
     }
 
     let nbytes = usize::min(buf.len(), total_bytes - old_pos);
@@ -111,7 +114,8 @@ fn write_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>, value: T) -> Result<(), SysErr
 }
 
 fn block_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
-    let dev = block_file_dev(file)?;
+    let devnum = block_file_devnum(file)?;
+    let dev = get_block_dev(devnum).ok_or(SysError::NotFound)?;
 
     match ctx.cmd() {
         BLKGETSIZE64 => {
@@ -128,6 +132,16 @@ fn block_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
             let block_size =
                 i32::try_from(dev.block_size().bytes()).map_err(|_| SysError::FileTooLarge)?;
             write_ioctl_value(&ctx, block_size)?;
+            Ok(0)
+        },
+        BLKRASET => {
+            let readahead = usize::try_from(ctx.arg()).map_err(|_| SysError::InvalidArgument)?;
+            set_block_dev_readahead(devnum, readahead)?;
+            Ok(0)
+        },
+        BLKRAGET => {
+            let readahead = get_block_dev_readahead(devnum).ok_or(SysError::NotFound)?;
+            write_ioctl_value(&ctx, readahead)?;
             Ok(0)
         },
         _ => dev.ioctl(BlockIoctlCtx::new(ctx)),

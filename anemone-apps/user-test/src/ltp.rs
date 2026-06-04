@@ -10,6 +10,8 @@ const ACTIVE_PROFILE: &str = include_str!("../ltp/profile.txt");
 const ETC_PASSWD: &str = include_str!("../fixtures/passwd");
 const ETC_GROUP: &str = include_str!("../fixtures/group");
 const LTP_KCONFIG: &str = include_str!("../fixtures/ltp-kconfig");
+const LTP_MODULES_BUILTIN: &str = include_str!("../fixtures/modules.builtin");
+const LTP_MODULES_DEP: &str = include_str!("../fixtures/modules.dep");
 
 const GLIBC_LTP_ENV: &[&str] = &[
     "PATH=/glibc/ltp/testcases/bin:/glibc/bin:/glibc/usr/bin:/bin:/usr/bin:/sbin:/usr/sbin",
@@ -151,6 +153,32 @@ const LTP_FIXTURES: &[LtpFixture] = &[
     LtpFixture {
         path: "/etc/ltp/anemone-kconfig",
         content: LTP_KCONFIG,
+    },
+    // rv64 switches /lib between runtime lib directories before running LTP.
+    // Keep the module metadata visible through that active /lib symlink.
+    LtpFixture {
+        path: "/glibc/lib/modules/6.6.32/modules.dep",
+        content: LTP_MODULES_DEP,
+    },
+    LtpFixture {
+        path: "/glibc/lib/modules/6.6.32/modules.builtin",
+        content: LTP_MODULES_BUILTIN,
+    },
+    LtpFixture {
+        path: "/musl/lib/modules/6.6.32/modules.dep",
+        content: LTP_MODULES_DEP,
+    },
+    LtpFixture {
+        path: "/musl/lib/modules/6.6.32/modules.builtin",
+        content: LTP_MODULES_BUILTIN,
+    },
+    LtpFixture {
+        path: "/lib/modules/6.6.32/modules.dep",
+        content: LTP_MODULES_DEP,
+    },
+    LtpFixture {
+        path: "/lib/modules/6.6.32/modules.builtin",
+        content: LTP_MODULES_BUILTIN,
     },
 ];
 

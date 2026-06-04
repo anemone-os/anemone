@@ -1,0 +1,743 @@
+[1;36m        QEMU[0m Launching QEMU emulator...
+$ qemu-system-riscv64 -machine virt -smp 4 -m 1G -nographic -serial mon:stdio -rtc base=utc -device virtio-net-device,netdev=net -netdev user,id=net -accel tcg,thread=multi -drive file=sdcard-rv.img,format=raw,if=none,id=x0 -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 -no-reboot -drive file=build/rootfs/minimal-rv/rootfs.img,format=raw,if=none,id=x1 -device virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1 -cpu rv64 -kernel build/anemone.elf -bios default
+
+OpenSBI v1.5.1
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name             : riscv-virtio,qemu
+Platform Features         : medeleg
+Platform HART Count       : 4
+Platform IPI Device       : aclint-mswi
+Platform Timer Device     : aclint-mtimer @ 10000000Hz
+Platform Console Device   : uart8250
+Platform HSM Device       : ---
+Platform PMU Device       : ---
+Platform Reboot Device    : syscon-reboot
+Platform Shutdown Device  : syscon-poweroff
+Platform Suspend Device   : ---
+Platform CPPC Device      : ---
+Firmware Base             : 0x80000000
+Firmware Size             : 357 KB
+Firmware RW Offset        : 0x40000
+Firmware RW Size          : 101 KB
+Firmware Heap Offset      : 0x4f000
+Firmware Heap Size        : 41 KB (total), 2 KB (reserved), 11 KB (used), 27 KB (free)
+Firmware Scratch Size     : 4096 B (total), 416 B (used), 3680 B (free)
+Runtime SBI Version       : 2.0
+
+Domain0 Name              : root
+Domain0 Boot HART         : 2
+Domain0 HARTs             : 0*,1*,2*,3*
+Domain0 Region00          : 0x0000000000100000-0x0000000000100fff M: (I,R,W) S/U: (R,W)
+Domain0 Region01          : 0x0000000010000000-0x0000000010000fff M: (I,R,W) S/U: (R,W)
+Domain0 Region02          : 0x0000000002000000-0x000000000200ffff M: (I,R,W) S/U: ()
+Domain0 Region03          : 0x0000000080040000-0x000000008005ffff M: (R,W) S/U: ()
+Domain0 Region04          : 0x0000000080000000-0x000000008003ffff M: (R,X) S/U: ()
+Domain0 Region05          : 0x000000000c400000-0x000000000c5fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region06          : 0x000000000c000000-0x000000000c3fffff M: (I,R,W) S/U: (R,W)
+Domain0 Region07          : 0x0000000000000000-0xffffffffffffffff M: () S/U: (R,W,X)
+Domain0 Next Address      : 0x0000000080200000
+Domain0 Next Arg1         : 0x00000000bfe00000
+Domain0 Next Mode         : S-mode
+Domain0 SysReset          : yes
+Domain0 SysSuspend        : yes
+
+Boot HART ID              : 2
+Boot HART Domain          : root
+Boot HART Priv Version    : v1.12
+Boot HART Base ISA        : rv64imafdch
+Boot HART ISA Extensions  : sstc,zicntr,zihpm,zicboz,zicbom,sdtrig,svadu
+Boot HART PMP Count       : 16
+Boot HART PMP Granularity : 2 bits
+Boot HART PMP Address Bits: 54
+Boot HART MHPM Info       : 16 (0x0007fff8)
+Boot HART Debug Triggers  : 2 triggers
+Boot HART MIDELEG         : 0x0000000000001666
+Boot HART MEDELEG         : 0x0000000000f0b509
+[[31m    ERR[0m] failed to probe device virtio_mmio@10007000 with driver virtio-mmio-transport: DriverIncompatible
+[[31m    ERR[0m] failed to probe device virtio_mmio@10006000 with driver virtio-mmio-transport: DriverIncompatible
+[[31m    ERR[0m] failed to probe device virtio_mmio@10005000 with driver virtio-mmio-transport: DriverIncompatible
+[[31m    ERR[0m] failed to probe device virtio_mmio@10004000 with driver virtio-mmio-transport: DriverIncompatible
+[[31m    ERR[0m] failed to probe device virtio_mmio@10003000 with driver virtio-mmio-transport: DriverIncompatible
+[1m-- KUnit Test Runner --[0m
+[1mRunning 54 tests...[0m
+anemone_kernel::fs::kunits::test_vfs_root_lookup...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_mount_cycle_stress...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_mkdir_link_and_rmdir...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_create_lookup_and_cleanup...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_file_read_write_semantics...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_multiple_mounts_are_isolated...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_unmount_busy_with_child_mount...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_mount_dot_and_dotdot_traversal...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_direct_multi_mount_stack_stress...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_get_attr_reports_basic_metadata...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_get_attr_tracks_hard_link_counts...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_get_attr_tracks_size_after_writes...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_symlink_relative_parent_traversal...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_namespace_churn_stress_under_mount...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_unmount_busy_with_active_inode_ref...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_symlink_relative_lookup_and_readlink...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_symlink_loop_limit_and_rmdir_nofollow...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_symlink_absolute_and_intermediate_resolution...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_symlink_absolute_target_crosses_mount_boundary...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_mount_overrides_mountpoint_and_restores_on_unmount...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_symlink_resolution_flags_propagate_to_parent_lookup...[32;1mok[0m
+anemone_kernel::fs::kunits::test_vfs_direct_multi_mount_same_mountpoint_visibility_switch...[32;1mok[0m
+anemone_kernel::fs::kunits::test_resolve_from_root_clamps_parent_traversal_at_logical_root...[32;1mok[0m
+anemone_kernel::fs::kunits::test_resolve_from_root_uses_logical_root_for_absolute_symlinks...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_mount_and_root_lookup...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_char_device_io_and_attrs...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_flat_directory_iteration...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_block_device_io_and_attrs...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_remount_after_last_unmount...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_shared_inode_identity_across_mounts...[32;1mok[0m
+anemone_kernel::fs::api::truncate::kunits::test_inode_truncate_rejects_directory...[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::elf::parse::seg_chunk::kunits::merges_overlapping_pages_per_page_protection...[32;1mok[0m
+anemone_kernel::device::block::kunits::test_alpha_disk_name_encoding...[32;1mok[0m
+anemone_kernel::device::ls_devices...
+devices : platform device
+	resources: []
+devices/poweroff : platform device
+	resources: []
+devices/reboot : platform device
+	resources: []
+devices/platform-bus@4000000 : platform device
+	resources: []
+devices/pmu : platform device
+	resources: []
+devices/fw-cfg@10100000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10100000), len: 18 }]
+devices/flash@20000000 : platform device
+	resources: [Mmio { base: PhysAddr(0x20000000), len: 2000000 }, Mmio { base: PhysAddr(0x22000000), len: 2000000 }]
+devices/soc : platform device
+	resources: []
+devices/soc/rtc@101000 : platform device
+	resources: [Mmio { base: PhysAddr(0x101000), len: 1000 }]
+devices/soc/serial@10000000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10000000), len: 100 }]
+devices/soc/test@100000 : platform device
+	resources: [Mmio { base: PhysAddr(0x100000), len: 1000 }]
+devices/soc/virtio_mmio@10008000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10008000), len: 1000 }]
+devices/soc/virtio_mmio@10008000/virtio_mmio@10008000 : virtio device
+devices/soc/virtio_mmio@10007000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10007000), len: 1000 }]
+devices/soc/virtio_mmio@10006000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10006000), len: 1000 }]
+devices/soc/virtio_mmio@10005000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10005000), len: 1000 }]
+devices/soc/virtio_mmio@10004000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10004000), len: 1000 }]
+devices/soc/virtio_mmio@10003000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10003000), len: 1000 }]
+devices/soc/virtio_mmio@10002000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10002000), len: 1000 }]
+devices/soc/virtio_mmio@10002000/virtio_mmio@10002000 : virtio device
+devices/soc/virtio_mmio@10001000 : platform device
+	resources: [Mmio { base: PhysAddr(0x10001000), len: 1000 }]
+devices/soc/virtio_mmio@10001000/virtio_mmio@10001000 : virtio device
+devices/soc/clint@2000000 : platform device
+	resources: [Mmio { base: PhysAddr(0x2000000), len: 10000 }]
+devices/soc/pci@30000000 : platform device
+	resources: [Mmio { base: PhysAddr(0x30000000), len: 10000000 }]
+devices/pci0000:00 : pcie device
+[32;1mok[0m
+anemone_kernel::device::bus::platform::ls_platform_bus...
+platform bus:
+  device: poweroff
+  device: reboot
+  device: platform-bus@4000000
+  device: pmu
+  device: fw-cfg@10100000
+  device: flash@20000000
+  device: soc
+  device: rtc@101000
+  device: serial@10000000
+  device: test@100000
+  device: virtio_mmio@10008000
+  device: virtio_mmio@10007000
+  device: virtio_mmio@10006000
+  device: virtio_mmio@10005000
+  device: virtio_mmio@10004000
+  device: virtio_mmio@10003000
+  device: virtio_mmio@10002000
+  device: virtio_mmio@10001000
+  device: clint@2000000
+  device: pci@30000000
+  driver: goldfish-rtc
+  driver: pci-host-ecam-generic
+  driver: virtio-mmio-transport
+  driver: ns16550a
+[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::shebang::kunits::test_basic...[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::shebang::kunits::test_invalid...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_open_how_rejects_bare_tmpfile_bit...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_stage1_tmpfile_requires_write_access_mode...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_open_how_rejects_unknown_regular_open_flags...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_open_how_rejects_creat_directory_combination...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_stage1_tmpfile_is_unlinked_but_remains_usable...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_finish_open_readonly_trunc_truncates_regular_file...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_finish_open_tmpfile_skips_odirectory_result_check...[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::unmap_middle_of_anonymous_vma_punches_hole...[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::protect_range_rejects_holes_and_reservations...[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::fixed_replace_and_noreplace_follow_unified_editing...[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::anonymous_fork_keeps_shared_backing_and_cow_private...[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::protect_range_splits_vma_and_invalidates_present_ptes...[32;1mok[0m
+anemone_kernel::device::bus::pcie::ls_pcie_bus...
+pcie bus:
+  device: pci0000:00
+  driver: pcie-bridge-driver
+  driver: virtio-pcie-transport
+[32;1mok[0m
+anemone_kernel::device::bus::virtio::ls_virtio_devices...
+virtio bus:
+  device: virtio_mmio@10008000
+  device: virtio_mmio@10002000
+  device: virtio_mmio@10001000
+  driver: virtio-blk
+[32;1mok[0m
+anemone_kernel::fs::api::args::kunits::test_linux_inode_perm_ignores_file_type_bits...[32;1mok[0m
+anemone_kernel::mm::frame::alloc_frame_updates_stats_and_refcount...[32;1mok[0m
+anemone_kernel::mm::frame::alloc_frames_updates_stats_and_refcount...[32;1mok[0m
+[1mAll tests passed![0m
+init: started:
+	cwd:/
+	pid:1
+init: env OS=anemone
+init: env one=1
+init: env two=2
+init: env three=3
+init: env MIKU=39
+page size: Some(
+    0x1000,
+)
+random bytes: Some(
+    [
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+        0x27,
+    ],
+)
+clock ticks per second: Some(
+    0x64,
+)
+exec filename: Some(
+    "/sbin/init",
+)
+platform: Some(
+    "riscv64",
+)
+base platform: Some(
+    "riscv64",
+)
+init: forked child process with tid 4
+user-test: running float test...
+===== float test version 5 =====
+----- running signal handler test -----
+[SIG] ra = 0xffffffff80201000
+[SIG] in signal handler for signal 10, siginfo at 0x3ffffff6e0, ucontext at 0x3ffffff760
+[SIG] in signal handler, fa0=666, fa1=233
+[SIG] signal handler done
+0.114514+1919.81=1919.924514
+[SIG] ra = 0xffffffff80201000
+[SIG] in signal handler for signal 10, siginfo at 0x3ffffff630, ucontext at 0x3ffffff6b0
+[SIG] in signal handler, fa0=666, fa1=233
+[SIG] signal handler done
+After signal handler, fa0=114514, fa1=1919810
+----- all tests passed -----
+user-test: float test finished.
+user-test: running shm test...
+===== shm test =====
+shm-test: CASE keyed-lookup-and-rmid start
+shm-test: CASE keyed-lookup-and-rmid ok
+shm-test: CASE metadata-stats-and-ctl start
+shm-test: CASE metadata-stats-and-ctl ok
+shm-test: CASE fork-shared-and-detach start
+shm-test: CASE fork-shared-and-detach ok
+shm-test: CASE rounding-and-remap start
+shm-test: CASE rounding-and-remap ok
+shm-test: CASE readonly-and-detach-fault start
+[[31m    ERR[0m] (core #0) user task #6 aborted with page fault at address VirtAddr(0x3fff7fe000) with pc: VirtAddr(0x4120e), error type: Write, error code: PermissionDenied
+[[31m    ERR[0m] (core #1) user task #6 aborted with page fault at address VirtAddr(0x3fff7fe000) with pc: VirtAddr(0x4120e), error type: Write, error code: NotMapped
+shm-test: CASE readonly-and-detach-fault ok
+shm-test: CASE invalid-arguments start
+shm-test: CASE invalid-arguments ok
+shm-test: all cases passed
+user-test: shm test finished.
+user-test: running pg test...
+pg-test: CASE identity-and-invalid-arguments start
+pg-test: CASE identity-and-invalid-arguments ok
+pg-test: CASE fork-inherits-pgid-and-sid start
+pg-test: CASE fork-inherits-pgid-and-sid ok
+pg-test: CASE setpgid-self start
+pg-test: CASE setpgid-self ok
+pg-test: CASE parent-setpgid-existing-group-and-broadcast start
+pg-test: CASE parent-setpgid-existing-group-and-broadcast ok
+pg-test: CASE setpgid-child-after-exec start
+pg-test: CASE setpgid-child-after-exec ok
+pg-test: CASE setpgid-child-different-session start
+pg-test: CASE setpgid-child-different-session ok
+pg-test: CASE setsid-success-and-leader-failures start
+pg-test: CASE setsid-success-and-leader-failures ok
+pg-test: CASE wait4-process-group-selection start
+pg-test: CASE wait4-process-group-selection ok
+pg-test: CASE wait4-current-process-group-selection start
+pg-test: CASE wait4-current-process-group-selection ok
+pg-test: CASE reaped-process-lookup start
+pg-test: CASE reaped-process-lookup ok
+pg-test: all cases passed
+user-test: pg test finished.
+user-test: running mmap test...
+mmap-test: started with pid 5
+mmap-test: loop 0/4
+mmap-test: CASE basic-anon-private start
+mmap-test: CASE basic-anon-private ok
+mmap-test: CASE invalid-arguments start
+mmap-test: CASE invalid-arguments ok
+mmap-test: CASE mlock-msync-mremap start
+mmap-test: CASE mlock-msync-mremap ok
+mmap-test: CASE munmap-hole-and-mprotect start
+mmap-test: CASE munmap-hole-and-mprotect ok
+mmap-test: CASE fixed-replace-and-noreplace start
+mmap-test: CASE fixed-replace-and-noreplace ok
+mmap-test: CASE fork-shared-vs-private start
+mmap-test: CASE fork-shared-vs-private ok
+mmap-test: CASE multi-fork-sequential-snapshots start
+mmap-test: CASE multi-fork-sequential-snapshots ok
+mmap-test: CASE multi-fork-nested-lineage start
+mmap-test: CASE multi-fork-nested-lineage ok
+mmap-test: loop 1/4
+mmap-test: CASE basic-anon-private start
+mmap-test: CASE basic-anon-private ok
+mmap-test: CASE invalid-arguments start
+mmap-test: CASE invalid-arguments ok
+mmap-test: CASE mlock-msync-mremap start
+mmap-test: CASE mlock-msync-mremap ok
+mmap-test: CASE munmap-hole-and-mprotect start
+mmap-test: CASE munmap-hole-and-mprotect ok
+mmap-test: CASE fixed-replace-and-noreplace start
+mmap-test: CASE fixed-replace-and-noreplace ok
+mmap-test: CASE fork-shared-vs-private start
+mmap-test: CASE fork-shared-vs-private ok
+mmap-test: CASE multi-fork-sequential-snapshots start
+mmap-test: CASE multi-fork-sequential-snapshots ok
+mmap-test: CASE multi-fork-nested-lineage start
+mmap-test: CASE multi-fork-nested-lineage ok
+mmap-test: loop 2/4
+mmap-test: CASE basic-anon-private start
+mmap-test: CASE basic-anon-private ok
+mmap-test: CASE invalid-arguments start
+mmap-test: CASE invalid-arguments ok
+mmap-test: CASE mlock-msync-mremap start
+mmap-test: CASE mlock-msync-mremap ok
+mmap-test: CASE munmap-hole-and-mprotect start
+mmap-test: CASE munmap-hole-and-mprotect ok
+mmap-test: CASE fixed-replace-and-noreplace start
+mmap-test: CASE fixed-replace-and-noreplace ok
+mmap-test: CASE fork-shared-vs-private start
+mmap-test: CASE fork-shared-vs-private ok
+mmap-test: CASE multi-fork-sequential-snapshots start
+mmap-test: CASE multi-fork-sequential-snapshots ok
+mmap-test: CASE multi-fork-nested-lineage start
+mmap-test: CASE multi-fork-nested-lineage ok
+mmap-test: loop 3/4
+mmap-test: CASE basic-anon-private start
+mmap-test: CASE basic-anon-private ok
+mmap-test: CASE invalid-arguments start
+mmap-test: CASE invalid-arguments ok
+mmap-test: CASE mlock-msync-mremap start
+mmap-test: CASE mlock-msync-mremap ok
+mmap-test: CASE munmap-hole-and-mprotect start
+mmap-test: CASE munmap-hole-and-mprotect ok
+mmap-test: CASE fixed-replace-and-noreplace start
+mmap-test: CASE fixed-replace-and-noreplace ok
+mmap-test: CASE fork-shared-vs-private start
+mmap-test: CASE fork-shared-vs-private ok
+mmap-test: CASE multi-fork-sequential-snapshots start
+mmap-test: CASE multi-fork-sequential-snapshots ok
+mmap-test: CASE multi-fork-nested-lineage start
+mmap-test: CASE multi-fork-nested-lineage ok
+mmap-test: all cases passed
+user-test: mmap test finished.
+user-test: entering environment...
+user-test: competition environment initialized.
+user-test: installing LTP fixtures...
+user-test: ensured LTP fixture /etc/passwd
+user-test: ensured LTP fixture /etc/group
+user-test: ensured LTP fixture /etc/ltp/anemone-kconfig
+user-test: switching active runtime to glibc...
+user-test: running glibc competition tests...
+user-test: glibc competition tests finished.
+user-test: switching active runtime to musl...
+user-test: running musl competition tests...
+user-test: musl competition tests finished.
+user-test: running LTP profile groups: ioctl
+user-test: switching active runtime to glibc...
+#### OS COMP TEST GROUP START ltp-glibc/ioctl ####
+
+RUN LTP CASE ioctl01
+[[31m    ERR[0m] unknown syscall number 123 from task #6
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+tst_test.c:1733: [1;34mTINFO: [0mLTP version: 20240524
+tst_test.c:1617: [1;34mTINFO: [0mTimeout per run is 0h 00m 30s
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+ioctl01.c:69: [1;31mTBROK: [0munable to open pty: ENOENT (2)
+
+Summary:
+passed   0
+failed   0
+broken   1
+skipped  0
+warnings 0
+FAIL LTP CASE ioctl01 : 2
+
+RUN LTP CASE ioctl02
+[[31m    ERR[0m] unknown syscall number 123 from task #8
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+tst_test.c:1733: [1;34mTINFO: [0mLTP version: 20240524
+tst_test.c:1617: [1;34mTINFO: [0mTimeout per run is 0h 00m 30s
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+ioctl02.c:226: [1;31mTBROK: [0mYou must specify a tty device with -d option
+
+Summary:
+passed   0
+failed   0
+broken   1
+skipped  0
+warnings 0
+FAIL LTP CASE ioctl02 : 2
+
+RUN LTP CASE ioctl03
+[[31m    ERR[0m] unknown syscall number 123 from task #10
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+tst_test.c:1733: [1;34mTINFO: [0mLTP version: 20240524
+tst_test.c:1617: [1;34mTINFO: [0mTimeout per run is 0h 00m 30s
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+ioctl03.c:76: [1;33mTCONF: [0mTUN support is missing?
+
+Summary:
+passed   0
+failed   0
+broken   0
+skipped  1
+warnings 0
+FAIL LTP CASE ioctl03 : 32
+
+RUN LTP CASE ioctl04
+[[31m    ERR[0m] unknown syscall number 123 from task #12
+tst_device.c:135: [1;34mTINFO: [0mFound free device '/dev/loop0'
+tst_test.c:1106: [1;34mTINFO: [0mFormatting /dev/loop0 with ext2 opts='' extra opts=''
+tst_cmd.c:145: [1;35mTWARN: [0mopen() on /dev/null failed at tst_cmd.c:145: EOPNOTSUPP (95)
+mkfs.ext2: image is too small
+tst_test.c:1106: [1;31mTBROK: [0mmkfs.ext2 failed with exit code 1
+
+Summary:
+passed   0
+failed   0
+broken   1
+skipped  0
+warnings 1
+FAIL LTP CASE ioctl04 : 6
+
+RUN LTP CASE ioctl05
+[[31m    ERR[0m] unknown syscall number 123 from task #12
+tst_device.c:135: [1;34mTINFO: [0mFound free device '/dev/loop0'
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+tst_test.c:1733: [1;34mTINFO: [0mLTP version: 20240524
+tst_test.c:1617: [1;34mTINFO: [0mTimeout per run is 0h 00m 30s
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+ioctl05.c:37: [1;32mTPASS: [0mBLKGETSIZE returned 614400, BLKGETSIZE64 314572800
+ioctl05.c:49: [1;32mTPASS: [0mCould lseek to the end of the device
+ioctl05.c:58: [1;31mTFAIL: [0mRead at the end of device returned -1: EINVAL (22)
+
+Summary:
+passed   2
+failed   1
+broken   0
+skipped  0
+warnings 0
+FAIL LTP CASE ioctl05 : 1
+
+RUN LTP CASE ioctl06
+[[31m    ERR[0m] unknown syscall number 123 from task #15
+tst_device.c:135: [1;34mTINFO: [0mFound free device '/dev/loop0'
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+tst_test.c:1733: [1;34mTINFO: [0mLTP version: 20240524
+tst_test.c:1617: [1;34mTINFO: [0mTimeout per run is 0h 00m 30s
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+ioctl06.c:27: [1;31mTBROK: [0mioctl(3,((((0U) << (((0+8)+8)+14)) | (((0x12)) << (0+8)) | (((99)) << 0) | ((0) << ((0+8)+8)))),...) failed: ENOTTY (25)
+
+Summary:
+passed   0
+failed   0
+broken   1
+skipped  0
+warnings 0
+FAIL LTP CASE ioctl06 : 2
+
+RUN LTP CASE ioctl07
+[[31m    ERR[0m] unknown syscall number 123 from task #17
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+tst_test.c:1733: [1;34mTINFO: [0mLTP version: 20240524
+tst_test.c:1617: [1;34mTINFO: [0mTimeout per run is 0h 00m 30s
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+ioctl07.c:41: [1;31mTBROK: [0mopen(/dev/urandom,0,0000) failed: ENOENT (2)
+
+Summary:
+passed   0
+failed   0
+broken   1
+skipped  0
+warnings 0
+FAIL LTP CASE ioctl07 : 2
+
+RUN LTP CASE ioctl08
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mbtrfs driver not available
+FAIL LTP CASE ioctl08 : 32
+
+RUN LTP CASE ioctl09
+tst_cmd.c:257: [1;33mTCONF: [0mCouldn't find 'parted' in $PATH
+FAIL LTP CASE ioctl09 : 32
+
+RUN LTP CASE ioctl_loop01
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop01 : 32
+
+RUN LTP CASE ioctl_loop02
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop02 : 32
+
+RUN LTP CASE ioctl_loop03
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop03 : 32
+
+RUN LTP CASE ioctl_loop04
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop04 : 32
+
+RUN LTP CASE ioctl_loop05
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop05 : 32
+
+RUN LTP CASE ioctl_loop06
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop06 : 32
+
+RUN LTP CASE ioctl_loop07
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop07 : 32
+#### OS COMP TEST GROUP END ltp-glibc/ioctl ####
+user-test: ltp-glibc/ioctl summary attempted=16 passed=0 failed=16 infra_failed=0 skipped=0
+user-test: ltp-glibc summary attempted=16 passed=0 failed=16 infra_failed=0 skipped=0
+user-test: switching active runtime to musl...
+#### OS COMP TEST GROUP START ltp-musl/ioctl ####
+
+RUN LTP CASE ioctl01
+[[31m    ERR[0m] unknown syscall number 123 from task #19
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+tst_test.c:1733: [1;34mTINFO: [0mLTP version: 20240524
+tst_test.c:1617: [1;34mTINFO: [0mTimeout per run is 0h 00m 30s
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+ioctl01.c:69: [1;31mTBROK: [0munable to open pty: ENOENT (2)
+
+Summary:
+passed   0
+failed   0
+broken   1
+skipped  0
+warnings 0
+FAIL LTP CASE ioctl01 : 2
+
+RUN LTP CASE ioctl02
+[[31m    ERR[0m] unknown syscall number 123 from task #21
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+tst_test.c:1733: [1;34mTINFO: [0mLTP version: 20240524
+tst_test.c:1617: [1;34mTINFO: [0mTimeout per run is 0h 00m 30s
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+ioctl02.c:226: [1;31mTBROK: [0mYou must specify a tty device with -d option
+
+Summary:
+passed   0
+failed   0
+broken   1
+skipped  0
+warnings 0
+FAIL LTP CASE ioctl02 : 2
+
+RUN LTP CASE ioctl03
+[[31m    ERR[0m] unknown syscall number 123 from task #23
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+tst_test.c:1733: [1;34mTINFO: [0mLTP version: 20240524
+tst_test.c:1617: [1;34mTINFO: [0mTimeout per run is 0h 00m 30s
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+ioctl03.c:76: [1;33mTCONF: [0mTUN support is missing?
+
+Summary:
+passed   0
+failed   0
+broken   0
+skipped  1
+warnings 0
+FAIL LTP CASE ioctl03 : 32
+
+RUN LTP CASE ioctl04
+[[31m    ERR[0m] unknown syscall number 123 from task #25
+tst_device.c:135: [1;34mTINFO: [0mFound free device '/dev/loop0'
+tst_test.c:1106: [1;34mTINFO: [0mFormatting /dev/loop0 with ext2 opts='' extra opts=''
+tst_cmd.c:145: [1;35mTWARN: [0mopen() on /dev/null failed at tst_cmd.c:145: EOPNOTSUPP (95)
+mkfs.ext2: image is too small
+tst_test.c:1106: [1;31mTBROK: [0mmkfs.ext2 failed with exit code 1
+
+Summary:
+passed   0
+failed   0
+broken   1
+skipped  0
+warnings 1
+FAIL LTP CASE ioctl04 : 6
+
+RUN LTP CASE ioctl05
+[[31m    ERR[0m] unknown syscall number 123 from task #25
+tst_device.c:135: [1;34mTINFO: [0mFound free device '/dev/loop0'
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+tst_test.c:1733: [1;34mTINFO: [0mLTP version: 20240524
+tst_test.c:1617: [1;34mTINFO: [0mTimeout per run is 0h 00m 30s
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+ioctl05.c:37: [1;32mTPASS: [0mBLKGETSIZE returned 614400, BLKGETSIZE64 314572800
+ioctl05.c:49: [1;32mTPASS: [0mCould lseek to the end of the device
+ioctl05.c:58: [1;31mTFAIL: [0mRead at the end of device returned -1: EINVAL (22)
+
+Summary:
+passed   2
+failed   1
+broken   0
+skipped  0
+warnings 0
+FAIL LTP CASE ioctl05 : 1
+
+RUN LTP CASE ioctl06
+[[31m    ERR[0m] unknown syscall number 123 from task #28
+tst_device.c:135: [1;34mTINFO: [0mFound free device '/dev/loop0'
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+tst_test.c:1733: [1;34mTINFO: [0mLTP version: 20240524
+tst_test.c:1617: [1;34mTINFO: [0mTimeout per run is 0h 00m 30s
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+ioctl06.c:27: [1;31mTBROK: [0mioctl(3,(( ((0U)<<30) | (((0x12))<<8) | ((99)) | ((0)<<16) )),...) failed: ENOTTY (25)
+
+Summary:
+passed   0
+failed   0
+broken   1
+skipped  0
+warnings 0
+FAIL LTP CASE ioctl06 : 2
+
+RUN LTP CASE ioctl07
+[[31m    ERR[0m] unknown syscall number 123 from task #30
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+tst_test.c:1733: [1;34mTINFO: [0mLTP version: 20240524
+tst_test.c:1617: [1;34mTINFO: [0mTimeout per run is 0h 00m 30s
+tst_memutils.c:152: [1;34mTINFO: [0moom_score_adj does not exist, skipping the adjustment
+ioctl07.c:41: [1;31mTBROK: [0mopen(/dev/urandom,0,0000) failed: ENOENT (2)
+
+Summary:
+passed   0
+failed   0
+broken   1
+skipped  0
+warnings 0
+FAIL LTP CASE ioctl07 : 2
+
+RUN LTP CASE ioctl08
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mbtrfs driver not available
+FAIL LTP CASE ioctl08 : 32
+
+RUN LTP CASE ioctl09
+tst_cmd.c:257: [1;33mTCONF: [0mCouldn't find 'parted' in $PATH
+FAIL LTP CASE ioctl09 : 32
+
+RUN LTP CASE ioctl_loop01
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop01 : 32
+
+RUN LTP CASE ioctl_loop02
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop02 : 32
+
+RUN LTP CASE ioctl_loop03
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop03 : 32
+
+RUN LTP CASE ioctl_loop04
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop04 : 32
+
+RUN LTP CASE ioctl_loop05
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop05 : 32
+
+RUN LTP CASE ioctl_loop06
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop06 : 32
+
+RUN LTP CASE ioctl_loop07
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.dep does not exist or not a file
+tst_kernel.c:126: [1;35mTWARN: [0mexpected file /lib/modules/6.6.32/modules.builtin does not exist or not a file
+tst_test.c:1229: [1;33mTCONF: [0mloop driver not available
+FAIL LTP CASE ioctl_loop07 : 32
+#### OS COMP TEST GROUP END ltp-musl/ioctl ####
+user-test: ltp-musl/ioctl summary attempted=16 passed=0 failed=16 infra_failed=0 skipped=0
+user-test: ltp-musl summary attempted=16 passed=0 failed=16 infra_failed=0 skipped=0
+user-test: LTP whitelist finished: attempted=32 passed=0 failed=32 infra_failed=0 skipped=0
+user-test: all competition tests finished.
+user-test: all tests finished, shutting down.

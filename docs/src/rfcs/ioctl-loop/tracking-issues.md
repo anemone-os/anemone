@@ -23,7 +23,17 @@
 
 ## Safe
 
-- 暂无。
+### SAFE-001：不为 `ioctl_loop01` 伪造 loop sysfs / partscan 成功语义
+
+**状态：** Accepted Limitation
+
+**观察：** 修复 LTP runner 的 loop 模块元数据路径后，`ioctl_loop01` 已经越过 driver availability 检查并能通过 `tst_find_free_loopdev()` 找到 `/dev/loop0`。当前失败推进到下一层：测试环境缺少或无法运行 `parted`，随后 LTP 仍会读取 `/sys/block/loop0/loop/partscan` 并因 `ENOENT` 报 `TBROK`。
+
+**结论：** 这不是单个文件缺失的小修。`ioctl_loop01` 后续还会要求 `LOOP_SET_STATUS` 接受 `LO_FLAGS_AUTOCLEAR | LO_FLAGS_PARTSCAN | LO_FLAGS_DIRECT_IO` 的输入、`LOOP_GET_STATUS` 至少回显 `AUTOCLEAR | PARTSCAN`、`/sys/block/loopN/loop/{partscan,autoclear,backing_file}` 反映状态；若 `parted` 可用，还会要求 `/dev/loopNp1` 与 `/sys/block/loopN/loopNp1` 可见。只伪造 `partscan` 文件会把失败点推到 flag 回显或 partition node，且会与 RFC 的“unsupported loop 功能不能伪成功”边界冲突。
+
+**处理：** 本轮不实现 loop sysfs、partscan、partition node、direct I/O 或完整 autoclear release hook，也不加入兼容 shim 让这些 flag 成功污染状态。保持 `LO_FLAGS_PARTSCAN` / `LO_FLAGS_DIRECT_IO` 和未具备释放 hook 的 `LO_FLAGS_AUTOCLEAR` 失败或 unsupported，直到后续阶段按完整语义补齐。
+
+**关联：** [当前限制](../../register/current-limitations.md), [RFC index](./index.md), [迁移实施计划](./implementation.md)
 
 ## Neutralized
 

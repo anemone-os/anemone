@@ -186,6 +186,7 @@ struct BlockDevDesc {
     class: BlockDevClass,
     name: String,
     ops: Arc<dyn BlockDev>,
+    readahead: AtomicUsize,
 }
 
 impl Debug for BlockDevDesc {
@@ -193,6 +194,7 @@ impl Debug for BlockDevDesc {
         f.debug_struct("BlockDevDesc")
             .field("class", &self.class)
             .field("name", &self.name)
+            .field("readahead", &self.readahead.load(Ordering::Relaxed))
             .finish()
     }
 }
@@ -306,6 +308,7 @@ pub fn register_block_device(registration: BlockDevRegistration) -> Result<Strin
         class: registration.class,
         name: name.clone(),
         ops: registration.device,
+        readahead: AtomicUsize::new(0),
     };
 
     registry.names.insert(name.clone(), registration.devnum);
@@ -330,6 +333,22 @@ pub fn get_block_dev(devnum: BlockDevNum) -> Option<Arc<dyn BlockDev>> {
         .devices
         .get(&devnum)
         .map(|desc| desc.ops.clone())
+}
+
+fn get_block_dev_readahead(devnum: BlockDevNum) -> Option<usize> {
+    SUBSYS
+        .registry
+        .read_irqsave()
+        .devices
+        .get(&devnum)
+        .map(|desc| desc.readahead.load(Ordering::Relaxed))
+}
+
+fn set_block_dev_readahead(devnum: BlockDevNum, readahead: usize) -> Result<(), SysError> {
+    let registry = SUBSYS.registry.read_irqsave();
+    let desc = registry.devices.get(&devnum).ok_or(SysError::NotFound)?;
+    desc.readahead.store(readahead, Ordering::Relaxed);
+    Ok(())
 }
 
 /// Get the block device corresponding to the given canonical name, if it

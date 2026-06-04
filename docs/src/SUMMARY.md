@@ -46,4 +46,5 @@
 		- [背景材料](./rfcs/ioctl-loop/backgrounds/index.md)
 			- [LTP IOCTL 测例覆盖面](./rfcs/ioctl-loop/backgrounds/ltp-ioctl-coverage.md)
 			- [Agent 编排建议](./rfcs/ioctl-loop/backgrounds/agent-orchestration.md)
+			- [rv64 LTP ioctl 运行证据](./rfcs/ioctl-loop/backgrounds/ltp-ioctl-rv64-20260604/index.md)
 - [模板](./templates.md)
