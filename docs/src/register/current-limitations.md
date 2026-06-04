@@ -313,13 +313,13 @@
 **Severity:** Medium
 **Area:** procfs / fd / path visibility
 
-**Summary:** 当前 procfs 还没有 `/proc/<tgid>/fd` 目录框架。glibc 的 `realpath("/tmp")` 可通过普通 `readlink("/tmp") -> EINVAL` 路径完成，但 musl 的 `realpath` 在某些路径上会依赖 `readlink("/proc/self/fd/<n>")`，因此 `getcwd02` 的 musl 变体仍会因 `/proc/self/fd/3` 不存在而 `ENOENT`；LTP `pipe07` 也会因为缺少 `/proc/self/fd` 目录枚举而失败。
+**Summary:** `/proc/<tgid>/fd` 目录缺失本身已在 `proc-tgid-fd` 阶段 1 中收口：当前实现提供 same-tgid 范围内的 fd number snapshot、`/proc/<tgid>/fd` 目录枚举、数字 fd lookup、`fd/<n>` symlink `readlink()` 和基本 `getattr()`，普通路径按目标 leader root 视角显示，pipe 显示为 `pipe:[ino]`。本条目重分类为阶段 1 residual limitations：尚未实现完整 Linux magic-link open / open file description 重新打开语义，跨进程权限仍固定为 `same-tgid only` 而非 ptrace / dumpable / namespace 策略，`/proc/<tgid>/fdinfo` 仍缺失，pipe 以外匿名对象只提供稳定 fallback 而非完整 Linux-like 精确显示名，`O_PATH` 在 proc fd link、权限和后续能力上的完整边界仍需跟 `O_PATH` 条目一并收敛。本轮未运行 musl `getcwd02`、LTP `pipe07`、QEMU 或 smoke，因此不把这些用例记录为已通过。
 
-**Exit Condition:** 引入系统性的 `/proc/<tgid>/fd` 目录实现，基于目标 thread group 的 fd 表提供 `readdir`、`readlink`、`stat/open` 所需的稳定语义，并明确 fd 生命周期、权限和路径可见性规则；完成后重新验证 musl `getcwd02`、LTP `pipe07` 及依赖 fd symlink 的相关 libc 路径。
+**Exit Condition:** 按后续阶段补齐 fd entry open / magic-link follow、跨进程权限、`fdinfo`、匿名对象精确显示名和 `O_PATH` 相关 proc fd 能力，并重新验证 musl `getcwd02`、LTP `pipe07` 及依赖 fd symlink 的相关 libc 路径。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-28
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-06-04
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [PROC TGID FD 事务日志](../devlog/transactions/2026-06-04-proc-tgid-fd.md)
 
 ## ANE-20260528-OPATH-STAGE1-CAPABILITIES
 

@@ -57,4 +57,5 @@ pub static TGID_CWD_TGID_ENTRY: TgidEntry = TgidEntry {
     name: "cwd",
     mode: InodeMode::new(InodeType::Symlink, InodePerm::all_rwx()),
     inode_ops: &TGID_CWD_INODE_OPS,
+    make_prv: default_tgid_entry_prv,
 };

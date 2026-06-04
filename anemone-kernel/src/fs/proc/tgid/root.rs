@@ -60,4 +60,5 @@ pub static TGID_ROOT_TGID_ENTRY: TgidEntry = TgidEntry {
     name: "root",
     mode: InodeMode::new(InodeType::Symlink, InodePerm::all_rwx()),
     inode_ops: &TGID_ROOT_INODE_OPS,
+    make_prv: default_tgid_entry_prv,
 };

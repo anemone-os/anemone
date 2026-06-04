@@ -6,9 +6,9 @@ use crate::{
             tgid::{
                 binding::ThreadGroupBinding, cmdline::TGID_CMDLINE_TGID_ENTRY,
                 cwd::TGID_CWD_TGID_ENTRY, environ::TGID_ENVIRON_TGID_ENTRY,
-                exe::TGID_EXE_TGID_ENTRY, inode::TGID_INODE_OPS, mounts::TGID_MOUNTS_TGID_ENTRY,
-                root::TGID_ROOT_TGID_ENTRY, stat::TGID_STAT_TGID_ENTRY,
-                status::TGID_STATUS_TGID_ENTRY,
+                exe::TGID_EXE_TGID_ENTRY, fd::TGID_FD_TGID_ENTRY, inode::TGID_INODE_OPS,
+                mounts::TGID_MOUNTS_TGID_ENTRY, root::TGID_ROOT_TGID_ENTRY,
+                stat::TGID_STAT_TGID_ENTRY, status::TGID_STATUS_TGID_ENTRY,
             },
         },
     },
@@ -66,6 +66,7 @@ pub struct TgidEntry {
     pub name: &'static str,
     pub mode: InodeMode,
     pub inode_ops: &'static InodeOps,
+    pub make_prv: fn(Arc<ThreadGroupBinding>) -> AnyOpaque,
 }
 
 impl TgidEntry {
@@ -81,7 +82,7 @@ impl TgidEntry {
             self.mode.ty(),
             self.inode_ops,
             sb,
-            AnyOpaque::new(TgidSubInodePrivate { binding }),
+            (self.make_prv)(binding),
         );
 
         let now = Instant::now().to_duration();
@@ -103,16 +104,21 @@ impl TgidEntry {
     }
 }
 
+pub fn default_tgid_entry_prv(binding: Arc<ThreadGroupBinding>) -> AnyOpaque {
+    AnyOpaque::new(TgidSubInodePrivate { binding })
+}
+
 static TGID_ENTRIES: &[&TgidEntry] = &[
     &TGID_ROOT_TGID_ENTRY,
     &TGID_CWD_TGID_ENTRY,
     &TGID_CMDLINE_TGID_ENTRY,
     &TGID_ENVIRON_TGID_ENTRY,
     &TGID_EXE_TGID_ENTRY,
+    &TGID_FD_TGID_ENTRY,
     &TGID_MOUNTS_TGID_ENTRY,
     &TGID_STAT_TGID_ENTRY,
     &TGID_STATUS_TGID_ENTRY,
-    // TODO: fd, task, maps, etc.
+    // TODO: task, maps, etc.
 ];
 
 fn find_tgid_entry_by_name(name: &str) -> Option<&'static TgidEntry> {
@@ -157,6 +163,7 @@ pub fn new_tgid_dir_inode(
 
 // infra
 pub mod binding;
+pub mod fd;
 pub mod file;
 pub mod inode;
 

@@ -1,7 +1,7 @@
 use crate::{
     fs::{
         iomux::PollEvent,
-        proc::tgid::{TgidEntry, validate_tgid_sub_inode},
+        proc::tgid::{default_tgid_entry_prv, validate_tgid_sub_inode, TgidEntry},
     },
     prelude::*,
     time::duration_to_ticks,
@@ -89,6 +89,7 @@ pub static TGID_STAT_TGID_ENTRY: TgidEntry = TgidEntry {
     name: "stat",
     mode: InodeMode::new(InodeType::Regular, InodePerm::all_r()),
     inode_ops: &TGID_STAT_INODE_OPS,
+    make_prv: default_tgid_entry_prv,
 };
 
 fn build_stat_line(inode: &InodeRef) -> Result<String, SysError> {

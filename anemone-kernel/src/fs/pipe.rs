@@ -5,8 +5,11 @@
 //!
 //! TODO: turn to [Event] based implementation.
 
+use anemone_abi::fs::linux::ioctl::FIONREAD;
+
 use crate::{
     prelude::*,
+    syscall::user_access::UserWritePtr,
     task::sig::{
         SigNo, Signal,
         info::{SiCode, SigInfoFields, SigKill},
@@ -441,6 +444,13 @@ fn with_pipe_endpoint<T>(
     }
 }
 
+pub(super) fn display_name(file: &File) -> Option<PathBuf> {
+    with_pipe_endpoint(file, |_, _, _| {
+        let target = format!("pipe:[{}]", file.inode().ino().get());
+        PathBuf::from(target.as_str())
+    })
+}
+
 pub(super) fn update_nonblock(file: &File, nonblock: bool) {
     let _ = with_pipe_endpoint(file, |_, rx, tx| {
         if let Some(rx) = rx {
@@ -452,8 +462,27 @@ pub(super) fn update_nonblock(file: &File, nonblock: bool) {
     });
 }
 
-pub(super) fn readable_bytes(file: &File) -> Result<usize, SysError> {
+fn readable_bytes(file: &File) -> Result<usize, SysError> {
     with_pipe_endpoint(file, |pipe, _, _| pipe.lock().buf.len()).ok_or(SysError::InvalidArgument)
+}
+
+fn write_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>, value: T) -> Result<(), SysError> {
+    ctx.uspace().with_usp(|usp| {
+        UserWritePtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(value);
+        Ok(())
+    })
+}
+
+fn pipe_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
+    match ctx.cmd() {
+        FIONREAD => {
+            let nbytes = readable_bytes(file)?;
+            let nbytes = i32::try_from(nbytes).map_err(|_| SysError::FileTooLarge)?;
+            write_ioctl_value(&ctx, nbytes)?;
+            Ok(0)
+        },
+        _ => Err(SysError::UnsupportedIoctl),
+    }
 }
 
 pub(super) fn capacity(file: &File) -> Result<usize, SysError> {
@@ -523,7 +552,7 @@ static PIPE_RX_FILE_OPS: FileOps = FileOps {
     validate_seek: |_, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_rx_poll,
-    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
+    ioctl: pipe_ioctl,
 };
 
 static PIPE_TX_FILE_OPS: FileOps = FileOps {
@@ -532,7 +561,7 @@ static PIPE_TX_FILE_OPS: FileOps = FileOps {
     validate_seek: |_, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_tx_poll,
-    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
+    ioctl: pipe_ioctl,
 };
 
 pub struct OpenedPipe {

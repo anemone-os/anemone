@@ -1,5 +1,5 @@
 use crate::{
-    fs::proc::tgid::{TgidEntry, validate_tgid_sub_inode},
+    fs::proc::tgid::{default_tgid_entry_prv, validate_tgid_sub_inode, TgidEntry},
     prelude::*,
 };
 
@@ -58,4 +58,5 @@ pub static TGID_EXE_TGID_ENTRY: TgidEntry = TgidEntry {
     name: "exe",
     mode: InodeMode::new(InodeType::Symlink, InodePerm::all_rwx()),
     inode_ops: &TGID_EXE_INODE_OPS,
+    make_prv: default_tgid_entry_prv,
 };

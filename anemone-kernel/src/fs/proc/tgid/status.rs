@@ -4,9 +4,9 @@ use crate::{
     fs::{
         iomux::PollEvent,
         proc::tgid::{
-            TgidEntry,
+            default_tgid_entry_prv,
             stat::{proc_comm, proc_state},
-            validate_tgid_sub_inode,
+            validate_tgid_sub_inode, TgidEntry,
         },
     },
     prelude::*,
@@ -95,6 +95,7 @@ pub static TGID_STATUS_TGID_ENTRY: TgidEntry = TgidEntry {
     name: "status",
     mode: InodeMode::new(InodeType::Regular, InodePerm::all_r()),
     inode_ops: &TGID_STATUS_INODE_OPS,
+    make_prv: default_tgid_entry_prv,
 };
 
 fn build_status_text(inode: &InodeRef) -> Result<String, SysError> {
