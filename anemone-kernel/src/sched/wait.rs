@@ -53,8 +53,9 @@ pub enum ParkState {
 
 /// Why a wait round is completed or cancelled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WaitReason {
+pub(super) enum WaitReason {
     Event,
+    Latch,
     Timeout,
     Signal,
     Force,
@@ -64,7 +65,7 @@ pub enum WaitReason {
 
 /// Wake mode requested by a producer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WakeMode {
+pub(super) enum WakeMode {
     InterruptibleOnly,
     AnyWait,
     Force,
@@ -80,7 +81,7 @@ impl WakeMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WaitStateStatus {
+pub(super) enum WaitStateStatus {
     Armed,
     Completed(WaitReason),
     Cancelled(WaitReason),
@@ -102,7 +103,7 @@ impl WaitState {
         })
     }
 
-    pub fn status(&self) -> WaitStateStatus {
+    pub(super) fn status(&self) -> WaitStateStatus {
         *self.status.read()
     }
 
@@ -173,7 +174,7 @@ impl WaitGuard {
 
 /// Restricted wake capability held by event sources.
 #[derive(Clone, Debug)]
-pub struct WakeToken {
+pub(super) struct WakeToken {
     state: Arc<WaitState>,
 }
 
@@ -184,6 +185,10 @@ impl WakeToken {
 
     pub fn same_wait(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.state, &other.state)
+    }
+
+    pub(super) fn is_armed(&self) -> bool {
+        self.state.status() == WaitStateStatus::Armed
     }
 }
 
@@ -205,7 +210,7 @@ impl BeginWait {
 /// explicitly finish one wait round without exposing the raw lifecycle
 /// primitives as general scheduler state operations.
 #[derive(Debug)]
-pub struct ActiveWait {
+pub(super) struct ActiveWait {
     guard: WaitGuard,
     token: WakeToken,
 }
@@ -258,7 +263,7 @@ impl WaitResult {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WaitOutcome {
+pub(super) enum WaitOutcome {
     Armed,
     Completed(WaitReason),
     Cancelled(WaitReason),
@@ -287,7 +292,7 @@ pub enum WakeEnqueueResult {
 
 /// Result for wake attempts through the wait core.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WakeResult {
+pub(super) enum WakeResult {
     Woke {
         placement: WakeEnqueueResult,
     },
@@ -305,7 +310,7 @@ pub enum WakeResult {
 /// sched-state transaction that created it. It only authorizes Event to requeue
 /// the already-detached listener while that transaction is still live.
 #[derive(Debug)]
-pub struct RequeuePermit<'a> {
+pub(super) struct RequeuePermit<'a> {
     wait_id: usize,
     _guard: crate::sync::rwlock::WriteIrqSaveGuard<'a, TaskSchedState>,
     _not_send_sync: PhantomData<*mut ()>,
@@ -454,7 +459,7 @@ impl From<WaitTransition> for WakeCommit {
 ///
 /// `WakeResult::Woke` means the wait core has completed the logical wake and
 /// executed one stale-safe physical placement attempt.
-pub fn wake_wait(
+pub(super) fn wake_wait(
     task: &Arc<Task>,
     token: &WakeToken,
     reason: WaitReason,
@@ -537,7 +542,7 @@ pub fn wake_wait(
 ///
 /// `WakeResult::Woke` means the wait core has completed the logical wake and
 /// executed one stale-safe physical placement attempt.
-pub fn wake_active_wait(task: &Arc<Task>, reason: WaitReason, mode: WakeMode) -> WakeResult {
+pub(super) fn wake_active_wait(task: &Arc<Task>, reason: WaitReason, mode: WakeMode) -> WakeResult {
     let mut wait_id = None;
     let commit = task.update_sched_state_with(|prev| match prev {
         TaskSchedState::Waiting {
@@ -616,7 +621,7 @@ pub fn wake_active_wait(task: &Arc<Task>, reason: WaitReason, mode: WakeMode) ->
 /// This is not a general query API. The returned permit keeps the task
 /// sched-state write guard alive so Event can requeue the detached listener
 /// under the required task-state -> event-lock ordering.
-pub fn requeue_permit_if_mode_blocked<'a>(
+pub(super) fn requeue_permit_if_mode_blocked<'a>(
     task: &'a Arc<Task>,
     token: &WakeToken,
     mode: WakeMode,

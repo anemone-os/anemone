@@ -1,5 +1,5 @@
 use crate::{
-    fs::iomux::{PollEvent, PollRequest},
+    fs::iomux::{PollEvent, PollRegisterResult, PollRequest},
     prelude::*,
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
@@ -21,14 +21,12 @@ pub struct FileOps {
 
     /// Check if the file is ready for IO operations described by `request`.
     ///
-    /// If `request.waiter` is provided, the file should arrange to notify the
-    /// waiter when it becomes ready for any of the interested operations.
-    ///
-    /// TODO: Migrate to intrusive linked list.
-    ///
-    /// TODO: **We haven't implemented waitable poll yet. For now use busy
-    /// polling.**
-    pub poll: for<'a> fn(&File, &PollRequest<'a>) -> Result<PollEvent, SysError>,
+    /// Snapshot requests return `Ready(events)`, including an empty ready set.
+    /// Register requests must return `Armed` only after the source has saved
+    /// the request's latch trigger under the same lock that checked readiness.
+    /// Sources that cannot arm a not-ready register request must return
+    /// `Unsupported`, so syscall code cannot sleep on an unarmed source.
+    pub poll: for<'a> fn(&File, &PollRequest<'a>) -> Result<PollRegisterResult, SysError>,
 }
 
 #[derive(Debug, Clone)]
@@ -126,7 +124,7 @@ impl File {
             write: |_, _, _| Err(SysError::BadFileDescriptor),
             validate_seek: |_, _| Err(SysError::BadFileDescriptor),
             read_dir: |_, _, _| Err(SysError::BadFileDescriptor),
-            poll: |_, req| Ok(PollEvent::empty() & req.interests()),
+            poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::empty() & req.interests())),
         };
 
         Self::new(path, &PATH_ONLY_FILE_OPS, NilOpaque::new())
@@ -331,7 +329,7 @@ impl File {
         (self.ops.read_dir)(self, &mut *pos, sink)
     }
 
-    pub fn poll(&self, request: &PollRequest<'_>) -> Result<PollEvent, SysError> {
+    pub fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
         (self.ops.poll)(self, request)
     }
 

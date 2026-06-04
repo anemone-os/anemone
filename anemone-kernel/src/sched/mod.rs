@@ -26,12 +26,12 @@ pub use switch::load_context;
 mod event;
 pub use event::{Event, TimeoutListenException};
 
+mod latch;
+pub use latch::{Latch, LatchCancelReason, LatchTrigger, LatchWaitOutcome};
+
 pub mod class;
 mod wait;
-pub use wait::{
-    ActiveWait, ParkState, TaskSchedState, WaitOutcome, WaitReason, WaitState,
-    WaitStateStatus, WakeEnqueueResult, WakeMode, WakeResult, WakeToken,
-};
+pub use wait::{ParkState, TaskSchedState, WaitState, WakeEnqueueResult};
 
 /// Core scheduler loop. Called by bootstrap code.
 ///
@@ -72,6 +72,7 @@ pub unsafe fn scheduler() -> ! {
 /// Core scheduler state transitions.
 mod kore {
     use super::*;
+    use super::wait::{WaitReason, WakeMode, WakeResult};
 
     #[derive(Debug)]
     enum ScheduleDecision {
@@ -274,6 +275,26 @@ mod higher_level {
     use crate::time::timer::schedule_local_irq_timer_event;
 
     use super::*;
+    use super::wait::{WaitOutcome, WaitReason, WakeMode, WakeToken};
+
+    /// Immediate completion requested by a current-task wait precheck.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum CurrentWaitPrecheck {
+        PredicateReady,
+        Signal,
+        Timeout,
+    }
+
+    /// Restricted outcome for one current-task wait round.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum CurrentWaitOutcome {
+        PredicateReady,
+        Timeout,
+        Signal,
+        Force,
+        Cancelled,
+        Unexpected,
+    }
 
     /// Schedule the current wait-core round with an optional timeout.
     ///
@@ -281,7 +302,7 @@ mod higher_level {
     /// `ActiveWait::begin()`. A late timer callback races through
     /// `wake_wait()`, so timeout validity is derived from the wait identity
     /// rather than an external cancellation flag.
-    pub fn schedule_wait_with_timeout(
+    pub(super) fn schedule_wait_with_timeout(
         task: &Arc<Task>,
         token: WakeToken,
         timeout: Option<Duration>,
@@ -333,6 +354,74 @@ mod higher_level {
             timeout.saturating_sub(elapsed)
         } else {
             Duration::MAX
+        }
+    }
+
+    /// Begin, schedule, and finish one current-task wait round.
+    ///
+    /// This is the narrow public adapter for non-Event syscall waits. Callers
+    /// can provide a precheck that wins the round by cancellation, but they
+    /// never receive the wait token or raw lifecycle operations.
+    pub fn wait_current_with_timeout<F>(
+        task: &Arc<Task>,
+        interruptible: bool,
+        timeout: Option<Duration>,
+        precheck: F,
+    ) -> (CurrentWaitOutcome, Duration)
+    where
+        F: FnOnce() -> Option<CurrentWaitPrecheck>,
+    {
+        let active_wait = wait::ActiveWait::begin(task, interruptible);
+        let token = active_wait.token();
+
+        if let Some(precheck) = precheck() {
+            let reason = match precheck {
+                CurrentWaitPrecheck::PredicateReady => WaitReason::PredicateReady,
+                CurrentWaitPrecheck::Signal => WaitReason::Signal,
+                CurrentWaitPrecheck::Timeout => WaitReason::Timeout,
+            };
+            active_wait.cancel(reason);
+            let outcome = active_wait.finish();
+            kdebugln!(
+                "wait_current_with_timeout: precheck task={} request={:?} outcome={:?}",
+                task.tid(),
+                precheck,
+                outcome,
+            );
+            return (precheck.into(), timeout.unwrap_or(Duration::MAX));
+        }
+
+        let rem = schedule_wait_with_timeout(task, token, timeout);
+        let outcome = active_wait.finish();
+        let outcome = CurrentWaitOutcome::from(outcome);
+        kdebugln!(
+            "wait_current_with_timeout: finished task={} outcome={:?} rem={:?}",
+            task.tid(),
+            outcome,
+            rem,
+        );
+        (outcome, rem)
+    }
+
+    impl From<CurrentWaitPrecheck> for CurrentWaitOutcome {
+        fn from(value: CurrentWaitPrecheck) -> Self {
+            match value {
+                CurrentWaitPrecheck::PredicateReady => Self::PredicateReady,
+                CurrentWaitPrecheck::Signal => Self::Signal,
+                CurrentWaitPrecheck::Timeout => Self::Timeout,
+            }
+        }
+    }
+
+    impl From<WaitOutcome> for CurrentWaitOutcome {
+        fn from(value: WaitOutcome) -> Self {
+            match value {
+                WaitOutcome::Completed(WaitReason::Timeout) => Self::Timeout,
+                WaitOutcome::Completed(WaitReason::Signal) => Self::Signal,
+                WaitOutcome::Completed(WaitReason::Force) => Self::Force,
+                WaitOutcome::Cancelled(_) => Self::Cancelled,
+                _ => Self::Unexpected,
+            }
         }
     }
 

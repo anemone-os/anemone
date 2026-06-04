@@ -195,7 +195,7 @@ impl FileDesc {
         self.pfile.file.read_dir(sink).map_err(|e| e.into())
     }
 
-    pub fn poll(&self, request: &PollRequest<'_>) -> Result<PollEvent, SysError> {
+    pub fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
         self.pfile.file.poll(request).map_err(|e| e.into())
     }
 }

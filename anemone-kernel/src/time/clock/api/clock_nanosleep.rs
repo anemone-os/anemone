@@ -57,18 +57,11 @@ pub(crate) fn clock_nanosleep(
 
     let mut rem = duration;
     while rem > Duration::ZERO {
-        let active_wait = ActiveWait::begin(&task, true);
-        let token = active_wait.token();
-
-        if task.has_unmasked_signal() {
-            active_wait.cancel(WaitReason::Signal);
-            active_wait.finish();
-            write_remaining_time(rmtp, rem)?;
-            return Err(SysError::Interrupted);
-        }
-
-        rem = schedule_wait_with_timeout(&task, token, Some(rem));
-        let outcome = active_wait.finish();
+        let (outcome, next_rem) = wait_current_with_timeout(&task, true, Some(rem), || {
+            task.has_unmasked_signal()
+                .then_some(CurrentWaitPrecheck::Signal)
+        });
+        rem = next_rem;
         kdebugln!(
             "clock_nanosleep: wait finished task={} outcome={:?} rem={:?}",
             task.tid(),
@@ -77,14 +70,14 @@ pub(crate) fn clock_nanosleep(
         );
 
         match outcome {
-            WaitOutcome::Completed(WaitReason::Timeout) => {
+            CurrentWaitOutcome::Timeout => {
                 if task.has_unmasked_signal() {
                     write_remaining_time(rmtp, rem)?;
                     return Err(SysError::Interrupted);
                 }
                 break;
             },
-            WaitOutcome::Completed(WaitReason::Signal | WaitReason::Force) => {
+            CurrentWaitOutcome::Signal | CurrentWaitOutcome::Force => {
                 write_remaining_time(rmtp, rem)?;
                 return Err(SysError::Interrupted);
             },

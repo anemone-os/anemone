@@ -112,7 +112,7 @@ static TGID_ENVIRON_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::NotSupported),
     validate_seek: tgid_environ_validate_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
-    poll: |_, req| Ok(PollEvent::READABLE & req.interests()),
+    poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
 };
 
 pub static TGID_ENVIRON_TGID_ENTRY: TgidEntry = TgidEntry {

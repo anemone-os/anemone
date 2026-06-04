@@ -3,8 +3,6 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/pselect6.2.html
 //! - https://elixir.bootlin.com/linux/v6.6.32/source/fs/select.c#L795
-//!
-//! Currently busy polling.
 
 use anemone_abi::{
     fs::linux::select::{FD_SETSIZE, FdSet},
@@ -25,11 +23,160 @@ use crate::{
     utils::bitmap::Bitmap,
 };
 
+use super::*;
+
 type FdBitmap = Bitmap<{ FD_SETSIZE / 64 }>;
 
 fn trim_fdset(bitmap: &mut FdBitmap, n: usize) {
     for fd_idx in n..FD_SETSIZE {
         bitmap.clear(fd_idx);
+    }
+}
+
+fn clear_ready_outputs(
+    in_ready: &mut Option<FdBitmap>,
+    out_ready: &mut Option<FdBitmap>,
+    exp_ready: &mut Option<FdBitmap>,
+) {
+    if let Some(fds) = in_ready.as_mut() {
+        fds.clear_all();
+    }
+    if let Some(fds) = out_ready.as_mut() {
+        fds.clear_all();
+    }
+    if let Some(fds) = exp_ready.as_mut() {
+        fds.clear_all();
+    }
+}
+
+fn scan_pselect_fdset(
+    task: &Arc<Task>,
+    n: usize,
+    interest_fds: Option<&FdBitmap>,
+    ready_fds: Option<&mut FdBitmap>,
+    request: PollRequest<'_>,
+    nready: &mut usize,
+    unsupported: &mut bool,
+) -> Result<(), SysError> {
+    let Some(interest_fds) = interest_fds else {
+        return Ok(());
+    };
+    let ready_fds = ready_fds.expect("pselect interest fdset without ready output fdset");
+
+    for fd_idx in 0..n {
+        if !interest_fds.test(fd_idx) {
+            continue;
+        }
+
+        let fd = Fd::try_from_syscall_arg(fd_idx as u64)?;
+        let fd = task.get_fd(fd)?;
+
+        match fd.poll(&request) {
+            Ok(PollRegisterResult::Ready(revents)) if !revents.is_empty() => {
+                ready_fds.set(fd_idx);
+                *nready += 1;
+            },
+            Ok(PollRegisterResult::Ready(_)) if request.is_register() => {
+                kwarningln!(
+                    "sys_pselect6: register scan returned empty ready for fd {} interests={:?}",
+                    fd_idx,
+                    request.interests(),
+                );
+                *unsupported = true;
+            },
+            Ok(PollRegisterResult::Ready(_)) => {},
+            Ok(PollRegisterResult::Armed) if request.is_register() => {},
+            Ok(PollRegisterResult::Armed) => {
+                kwarningln!("sys_pselect6: snapshot scan unexpectedly armed fd {}", fd_idx);
+                return Err(SysError::IO);
+            },
+            Ok(PollRegisterResult::Unsupported) => {
+                kdebugln!(
+                    "sys_pselect6: unsupported register source fd {} interests={:?}",
+                    fd_idx,
+                    request.interests(),
+                );
+                *unsupported = true;
+            },
+            Err(err) => {
+                knoticeln!("sys_pselect6: poll error for fd {}: {:?}", fd_idx, err);
+                return Err(err);
+            },
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_exception_fdset(
+    task: &Arc<Task>,
+    n: usize,
+    exception_fds: Option<&FdBitmap>,
+) -> Result<bool, SysError> {
+    let Some(exception_fds) = exception_fds else {
+        return Ok(false);
+    };
+
+    let mut has_interest = false;
+    for fd_idx in 0..n {
+        if !exception_fds.test(fd_idx) {
+            continue;
+        }
+        has_interest = true;
+
+        let fd = Fd::try_from_syscall_arg(fd_idx as u64)?;
+        let _ = task.get_fd(fd)?;
+    }
+
+    Ok(has_interest)
+}
+
+fn scan_pselect_fds(
+    task: &Arc<Task>,
+    n: usize,
+    in_interests: Option<&FdBitmap>,
+    out_interests: Option<&FdBitmap>,
+    exp_interests: Option<&FdBitmap>,
+    in_ready: &mut Option<FdBitmap>,
+    out_ready: &mut Option<FdBitmap>,
+    exp_ready: &mut Option<FdBitmap>,
+    mode: IomuxScanMode<'_>,
+) -> Result<IomuxScanOutcome, SysError> {
+    clear_ready_outputs(in_ready, out_ready, exp_ready);
+
+    let mut nready = 0;
+    let mut unsupported = false;
+
+    scan_pselect_fdset(
+        task,
+        n,
+        in_interests,
+        in_ready.as_mut(),
+        mode.poll_request(PollEvent::READABLE),
+        &mut nready,
+        &mut unsupported,
+    )?;
+
+    scan_pselect_fdset(
+        task,
+        n,
+        out_interests,
+        out_ready.as_mut(),
+        mode.poll_request(PollEvent::WRITABLE),
+        &mut nready,
+        &mut unsupported,
+    )?;
+
+    // Exception readiness has no internal PollEvent yet; keep output empty and
+    // do not register it as a latch source.
+    let has_exception_interest = validate_exception_fdset(task, n, exp_interests)?;
+
+    if nready > 0 {
+        Ok(IomuxScanOutcome::Ready(nready))
+    } else if unsupported || (mode.is_register() && has_exception_interest) {
+        Ok(IomuxScanOutcome::Unsupported)
+    } else {
+        Ok(IomuxScanOutcome::NotReady)
     }
 }
 
@@ -65,7 +212,7 @@ pub fn sys_pselect6(
     let task = get_current_task();
     let usp_handle = task.clone_uspace_handle();
 
-    let (mut in_fds, mut out_fds, mut exp_fds, timeout, sigmask) = {
+    let (in_interests, out_interests, exp_interests, timeout, sigmask) = {
         let mut usp = usp_handle.lock();
 
         // this closure doesn't check if fds are indeed in task's fd table. it'll be
@@ -121,74 +268,32 @@ pub fn sys_pselect6(
         (in_fds, out_fds, exp_fds, timeout, sigmask)
     };
 
+    let mut in_ready = in_interests.as_ref().map(|_| FdBitmap::new());
+    let mut out_ready = out_interests.as_ref().map(|_| FdBitmap::new());
+    let mut exp_ready = exp_interests.as_ref().map(|_| FdBitmap::new());
+
     let prev_mask = sigmask.map(|mask| {
         let prev_mask = task.sig_mask();
         task.set_sig_mask(mask);
         prev_mask
     });
 
-    let deadline = timeout.map(|timeout| Instant::now() + timeout);
     let wait_result = (|| -> Result<u64, SysError> {
-        loop {
-            let mut progressed = false;
+        let nready = wait_for_iomux_ready("sys_pselect6", &task, timeout, |mode| {
+            scan_pselect_fds(
+                &task,
+                n,
+                in_interests.as_ref(),
+                out_interests.as_ref(),
+                exp_interests.as_ref(),
+                &mut in_ready,
+                &mut out_ready,
+                &mut exp_ready,
+                mode,
+            )
+        })?;
 
-            let mut scan_fds = |fds: &mut FdBitmap, interests: Option<PollEvent>| {
-                let mut ready_fds = FdBitmap::new();
-
-                for fd_idx in 0..n {
-                    if !fds.test(fd_idx) {
-                        continue;
-                    }
-
-                    let fd = Fd::try_from_syscall_arg(fd_idx as u64)?;
-                    let fd = task.get_fd(fd)?;
-
-                    if let Some(interests) = interests {
-                        let revents = fd.poll(&PollRequest::snapshot(interests))?;
-                        if !revents.is_empty() {
-                            ready_fds.set(fd_idx);
-                            progressed = true;
-                        }
-                    }
-                }
-
-                *fds = ready_fds;
-
-                Ok(())
-            };
-
-            if let Some(in_fds) = in_fds.as_mut() {
-                scan_fds(in_fds, Some(PollEvent::READABLE))?;
-            }
-            if let Some(out_fds) = out_fds.as_mut() {
-                scan_fds(out_fds, Some(PollEvent::WRITABLE))?;
-            }
-            // stub implementation for POLLPRI.
-            if let Some(exp_fds) = exp_fds.as_mut() {
-                scan_fds(exp_fds, None)?;
-            }
-
-            if progressed {
-                break;
-            }
-
-            if task.has_unmasked_signal() {
-                kdebugln!("sys_pselect6: interrupted by signal");
-                return Err(SysError::Interrupted);
-            }
-
-            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-                break;
-            }
-
-            yield_now();
-        }
-
-        let ready = in_fds.as_ref().map(|fds| fds.count_ones()).unwrap_or(0)
-            + out_fds.as_ref().map(|fds| fds.count_ones()).unwrap_or(0)
-            + exp_fds.as_ref().map(|fds| fds.count_ones()).unwrap_or(0);
-
-        Ok(ready as u64)
+        Ok(nready as u64)
     })();
 
     if let Some(mask) = prev_mask {
@@ -209,13 +314,13 @@ pub fn sys_pselect6(
             Ok(())
         };
 
-        if let Some(in_fds) = in_fds.as_ref() {
+        if let Some(in_fds) = in_ready.as_ref() {
             update_user_fds(in_fds, inp.unwrap())?;
         }
-        if let Some(out_fds) = out_fds.as_ref() {
+        if let Some(out_fds) = out_ready.as_ref() {
             update_user_fds(out_fds, outp.unwrap())?;
         }
-        if let Some(exp_fds) = exp_fds.as_ref() {
+        if let Some(exp_fds) = exp_ready.as_ref() {
             update_user_fds(exp_fds, exp.unwrap())?;
         }
     }
