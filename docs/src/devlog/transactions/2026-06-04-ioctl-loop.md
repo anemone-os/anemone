@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** syscall ABI / VFS / devfs / block device / loop / mount / LTP
 **RFC:** [RFC-20260603-IOCTL-LOOP](../../rfcs/ioctl-loop/index.md)
-**Current Phase:** Gate 2 passed; Agent 3 ready
+**Current Phase:** Agent 3 completed; Agent 4 ready
 
 ## Scope
 
@@ -47,13 +47,13 @@
 
 **Canonical RFC:** [RFC-20260603-IOCTL-LOOP](../../rfcs/ioctl-loop/index.md), [Invariants](../../rfcs/ioctl-loop/invariants.md), [Implementation Plan](../../rfcs/ioctl-loop/implementation.md), [Tracking Issues](../../rfcs/ioctl-loop/tracking-issues.md)
 
-**Completed:** RFC 已提升到公开文档；design review 发现的 Keter / Euclid 项已经吸收到 RFC、不变量需求和迁移实施计划；本事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。总控前置检查确认当前分支为 `dev/drc/ioctl`。Agent 0 只读前置审计已完成，未发现 Apollyon / Keter blocker，停止条件未触发。Agent 1 已完成 UAPI 常量与 loop ABI 结构、语义化 `UnsupportedIoctl -> ENOTTY` errno 映射、`IoctlCtx` / `FileOps::ioctl` VFS 分发和默认 unsupported ioctl 行为。Gate 1 review 发现的 `FIONREAD` / `O_PATH` Keter 已修复，复审后未保留 Apollyon / Keter blocker。Agent 2 已完成统一 block devfs `BLKGETSIZE64` / `BLKGETSIZE` / `BLKSSZGET` 和 block private ioctl hook；Gate 2 review 通过，未保留 Apollyon / Keter blocker。
+**Completed:** RFC 已提升到公开文档；design review 发现的 Keter / Euclid 项已经吸收到 RFC、不变量需求和迁移实施计划；本事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。总控前置检查确认当前分支为 `dev/drc/ioctl`。Agent 0 只读前置审计已完成，未发现 Apollyon / Keter blocker，停止条件未触发。Agent 1 已完成 UAPI 常量与 loop ABI 结构、语义化 `UnsupportedIoctl -> ENOTTY` errno 映射、`IoctlCtx` / `FileOps::ioctl` VFS 分发和默认 unsupported ioctl 行为。Gate 1 review 发现的 `FIONREAD` / `O_PATH` Keter 已修复，复审后未保留 Apollyon / Keter blocker。Agent 2 已完成统一 block devfs `BLKGETSIZE64` / `BLKGETSIZE` / `BLKSSZGET` 和 block private ioctl hook；Gate 2 review 通过，未保留 Apollyon / Keter blocker。Agent 3 已完成 kconfig 控制的静态 loop block device pool，并保留统一 block devfs file ops 与默认 private ioctl unsupported 行为。
 
-**In Progress:** 暂无。Agent 3 尚未启动。
+**In Progress:** 暂无。Agent 4 尚未启动。
 
 **Open Blockers:** 暂无已确认 blocker。
 
-**Next Action:** 若用户确认继续，进入 Agent 3：实现静态 loop block device pool；write set 限于 `anemone-kernel/src/device/block/mod.rs`、`anemone-kernel/src/device/block/loop.rs`、必要设备初始化入口、必要 devfs publish 调用点和本事务 devlog。
+**Next Action:** 进入 Agent 4 前先做 Gate 3 预检或按用户指令启动 Agent 4：实现 loop 私有 ioctl 第一阶段；不得发布 `/dev/loop-control`，不得绕过统一 block devfs file ops。
 
 **Do Not Redo:** 不要把 loop 或 block 私有 ioctl 塞回 `sys_ioctl()`；不要把 `FileDesc` / `ProcFile` / `FilesState` / 当前 task 传进 VFS 或设备层；不要为 `/dev/loopN` 发布绕过统一 block devfs file ops 的专属 file ops；不要发布半成品 `/dev/loop-control`；不要改 mount 层直接解析普通 image 文件或 `-o loop`。
 
@@ -150,3 +150,21 @@
 **Validation:** 总控复跑 `just build` 通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。总控复跑 `git diff --check` 通过。未运行 QEMU / LTP。
 
 **Next:** Agent 3 可以开始，但本轮未启动。
+
+### 2026-06-04 - Agent 3 静态 loop 设备池完成
+
+**Phase:** Agent 3 / loop block device pool
+
+**Change:** 新增 `anemone-kernel/src/device/block/loop.rs`，启动期按 `LOOP_DEVICE_COUNT` 创建并注册静态 `/dev/loop0..loopN`。每个 loop 设备使用 major 7 与对应 minor，注册为 `BlockDevClass::Loop` 的真实 `BlockDev`，并通过既有 `publish_block_device()` 发布为 devfs block 节点；未发布 `/dev/loop-control`。
+
+**Change:** loop 状态的单一真相源是 `LoopState::{Unbound, Bound}`。Agent 3 阶段所有设备初始为 `Unbound`：`block_size()` 固定 512 字节，`total_blocks()` 返回 0，`read_blocks()` / `write_blocks()` 返回 `SysError::NoSuchDevice`，避免空闲设备对 read/write/mount 伪成功。`Bound` 状态、backing file、offset、sizelimit、readonly、display name 和内部 flags 类型已预留给 Agent 4，但本阶段没有任何 `LOOP_*` ioctl 成功路径。
+
+**Change:** 预留的 Bound I/O 形状满足锁序边界：loop 状态用短持有 `SpinLock` 保护，read/write/容量查询只在锁内复制 `LoopBoundSnapshot`，锁外再查询 backing file attr 或调用 backing file `read_at` / `write_at`。readonly 写入映射为 `ReadOnlyFs`，越界与溢出使用 checked arithmetic。
+
+**Change:** 将 loop 设备数量接入 kconfig：`scripts/xtask/src/config/kconfig.rs` 新增 `loop_device_count` 参数并生成 `LOOP_DEVICE_COUNT`；`conf/.defconfig` 默认值为 8。按用户补充要求，顺手把 ramdisk 数量从内嵌常量迁到同一套 kconfig 参数：新增 `ramdisk_count`，生成 `RAMDISK_COUNT`，默认保持 16。
+
+**Boundary:** 未修改 `sys_ioctl()`、`FileOps::ioctl`、mount、ext4 或 `anemone-abi`；未实现 Agent 4 的 `LOOP_GET_STATUS*`、`LOOP_SET_FD`、`LOOP_SET_STATUS*`、`LOOP_CLR_FD` 成功路径；未为 `/dev/loopN` 发布专属 file ops；未发布 `/dev/loop-control`。
+
+**Validation:** `just build` 通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。`git diff --check` 通过。未运行 QEMU / LTP，因此 `/dev/loop0` 可见性、`/dev/loop-control` 不存在和空闲读写/mount errno 尚待运行态验证。
+
+**Next:** 停在 Agent 4 之前。下一阶段应只通过 block private ioctl hook 实现 loop 私有 ioctl 第一阶段，并在进入 Gate 3 前补齐 loop discovery / bind / BLKGETSIZE64 / release 的运行态证据。

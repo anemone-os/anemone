@@ -54,6 +54,8 @@ pub struct Parameters {
     pub shmmni: Option<usize>,
     pub symlink_resolve_limit: Option<usize>,
     pub max_fd_per_process: Option<usize>,
+    pub ramdisk_count: Option<usize>,
+    pub loop_device_count: Option<usize>,
 }
 
 impl Parameters {
@@ -127,6 +129,10 @@ pub const SHMMNI: usize = {};
 pub const SYMLINK_RESOLVE_LIMIT: usize = {};
 /// Default maximum number of file descriptors per process. Might be overridden by certain syscalls.
 pub const MAX_FD_PER_PROCESS: usize = {};
+/// Number of static ramdisk block devices to publish at boot.
+pub const RAMDISK_COUNT: usize = {};
+/// Number of static loop block devices to publish at boot.
+pub const LOOP_DEVICE_COUNT: usize = {};
         "#,
             default_or!(bootstrap_heap_shift_kb),
             default_or!(log_buffer_shift_kb),
@@ -147,6 +153,8 @@ pub const MAX_FD_PER_PROCESS: usize = {};
             default_or!(shmmni),
             default_or!(symlink_resolve_limit),
             default_or!(max_fd_per_process),
+            default_or!(ramdisk_count),
+            default_or!(loop_device_count),
         )
     }
 }

@@ -14,12 +14,9 @@ const fn devnum_for(id: usize) -> BlockDevNum {
     )
 }
 
-// TODO: move these constants to kconfig.
-
 const RAMDISK_SECTOR_SIZE: usize = 4096;
 const RAMDISK_MB: usize = 4;
 const RAMDISK_NUM_SECTORS: usize = (RAMDISK_MB * 1024 * 1024) / RAMDISK_SECTOR_SIZE;
-const NRAMDISKS: usize = 16;
 
 #[derive(Debug)]
 struct RamDisk {
@@ -102,7 +99,12 @@ impl BlockDev for RamDisk {
 
 #[initcall(probe)]
 fn init() {
-    for id in 0..NRAMDISKS {
+    assert!(
+        RAMDISK_COUNT <= (1usize << devnum::MINOR_BITS),
+        "ramdisk count exceeds block minor number space"
+    );
+
+    for id in 0..RAMDISK_COUNT {
         let dev = RamDisk::new(id);
         match register_block_device(BlockDevRegistration {
             devnum: dev.devnum(),

@@ -374,6 +374,7 @@ pub fn next_block_dev(ctx: &mut IterCtx) -> Option<BlockDevEntry> {
 }
 
 pub mod devfs;
+mod r#loop;
 mod ramdisk;
 
 #[cfg(feature = "kunit")]

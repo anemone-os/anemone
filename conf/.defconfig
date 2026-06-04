@@ -39,3 +39,5 @@ shmall_pages = 9223372036837998591 # Default max pages for SysV shm accounting, 
 shmmni = 4096 # Default maximum number of System V shared memory segments.
 symlink_resolve_limit = 16 # Maximum number of symbolic links to resolve in a single path resolution
 max_fd_per_process = 1024 # Default maximum number of file descriptors per process. Might be overridden by certain syscalls.
+ramdisk_count = 16 # Number of static ramdisk block devices to publish at boot.
+loop_device_count = 8 # Number of static loop block devices to publish at boot.
