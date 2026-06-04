@@ -52,4 +52,6 @@
 	- [PROC TGID FD](./rfcs/proc-tgid-fd/index.md)
 		- [迁移实施计划](./rfcs/proc-tgid-fd/implementation.md)
 		- [Tracking Issues](./rfcs/proc-tgid-fd/tracking-issues.md)
+		- [背景材料](./rfcs/proc-tgid-fd/backgrounds/index.md)
+			- [Agent 编排建议](./rfcs/proc-tgid-fd/backgrounds/agent-orchestration.md)
 - [模板](./templates.md)

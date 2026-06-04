@@ -3,11 +3,9 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/ioctl.2.html
 
-use anemone_abi::fs::linux::ioctl::FIONREAD;
-
 use crate::{
     prelude::*,
-    syscall::{handler::TryFromSyscallArg, user_access::UserWritePtr},
+    syscall::handler::TryFromSyscallArg,
     task::files::Fd,
 };
 
@@ -35,24 +33,12 @@ fn sys_ioctl(fd: Fd, cmd: u32, arg: u64) -> Result<u64, SysError> {
         return Err(SysError::BadFileDescriptor);
     }
 
-    match cmd {
-        FIONREAD => {
-            let nbytes = crate::fs::pipe::readable_bytes(file.vfs_file())?;
-            let usp = task.clone_uspace_handle();
-            let mut guard = usp.lock();
-            UserWritePtr::<i32>::try_new(VirtAddr::new(arg), &mut guard)?
-                .write(nbytes as i32);
-            Ok(0)
-        },
-        _ => {
-            let vfs_file = file.vfs_file().clone();
-            let usp = task.clone_uspace_handle();
-            drop(file);
-            drop(task);
+    let vfs_file = file.vfs_file().clone();
+    let usp = task.clone_uspace_handle();
+    drop(file);
+    drop(task);
 
-            let arg_fd_lookup = IoctlArgFdLookup::new(lookup_ioctl_arg_fd);
-            let ctx = IoctlCtx::new(cmd, arg, target_access, usp, &arg_fd_lookup);
-            vfs_file.ioctl(ctx)
-        },
-    }
+    let arg_fd_lookup = IoctlArgFdLookup::new(lookup_ioctl_arg_fd);
+    let ctx = IoctlCtx::new(cmd, arg, target_access, usp, &arg_fd_lookup);
+    vfs_file.ioctl(ctx)
 }

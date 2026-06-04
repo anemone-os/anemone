@@ -59,6 +59,7 @@ Canonical：
 背景材料：
 
 - [当前限制：PROC-TGID-FD-FRAMEWORK-PENDING](../../register/current-limitations.md#ane-20260528-proc-tgid-fd-framework-pending)
+- [Agent 编排建议](./backgrounds/agent-orchestration.md)
 
 ## 方案
 

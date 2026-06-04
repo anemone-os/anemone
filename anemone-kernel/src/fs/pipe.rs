@@ -5,8 +5,11 @@
 //!
 //! TODO: turn to [Event] based implementation.
 
+use anemone_abi::fs::linux::ioctl::FIONREAD;
+
 use crate::{
     prelude::*,
+    syscall::user_access::UserWritePtr,
     task::sig::{
         SigNo, Signal,
         info::{SiCode, SigInfoFields, SigKill},
@@ -452,8 +455,27 @@ pub(super) fn update_nonblock(file: &File, nonblock: bool) {
     });
 }
 
-pub(super) fn readable_bytes(file: &File) -> Result<usize, SysError> {
+fn readable_bytes(file: &File) -> Result<usize, SysError> {
     with_pipe_endpoint(file, |pipe, _, _| pipe.lock().buf.len()).ok_or(SysError::InvalidArgument)
+}
+
+fn write_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>, value: T) -> Result<(), SysError> {
+    ctx.uspace().with_usp(|usp| {
+        UserWritePtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(value);
+        Ok(())
+    })
+}
+
+fn pipe_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
+    match ctx.cmd() {
+        FIONREAD => {
+            let nbytes = readable_bytes(file)?;
+            let nbytes = i32::try_from(nbytes).map_err(|_| SysError::FileTooLarge)?;
+            write_ioctl_value(&ctx, nbytes)?;
+            Ok(0)
+        },
+        _ => Err(SysError::UnsupportedIoctl),
+    }
 }
 
 pub(super) fn capacity(file: &File) -> Result<usize, SysError> {
@@ -523,7 +545,7 @@ static PIPE_RX_FILE_OPS: FileOps = FileOps {
     validate_seek: |_, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_rx_poll,
-    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
+    ioctl: pipe_ioctl,
 };
 
 static PIPE_TX_FILE_OPS: FileOps = FileOps {
@@ -532,7 +554,7 @@ static PIPE_TX_FILE_OPS: FileOps = FileOps {
     validate_seek: |_, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_tx_poll,
-    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
+    ioctl: pipe_ioctl,
 };
 
 pub struct OpenedPipe {
