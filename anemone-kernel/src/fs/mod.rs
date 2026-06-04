@@ -581,8 +581,24 @@ mod vfs_ops {
             }
 
             let (parent, name) = resolve_parent(new_path, ResolveFlags::empty())?;
-            parent.mount().ensure_writable()?;
-            parent.inode().link(&name, target.inode())?;
+            vfs_link_at(&target, &parent, &name)
+        }
+
+        pub fn vfs_link_at(
+            target: &PathRef,
+            new_parent: &PathRef,
+            new_name: &str,
+        ) -> Result<(), SysError> {
+            if new_name.is_empty() || new_name.contains('/') || matches!(new_name, "." | "..") {
+                return Err(SysError::InvalidArgument);
+            }
+
+            if target.inode().ty() == InodeType::Dir {
+                return Err(SysError::IsDir);
+            }
+
+            new_parent.mount().ensure_writable()?;
+            new_parent.inode().link(new_name, target.inode())?;
 
             Ok(())
         }

@@ -226,8 +226,8 @@ impl OpenHow {
 /// - the hidden name exists briefly before unlink, so this is not fully
 ///   race-free;
 /// - `O_EXCL` is accepted but does not change behavior yet;
-/// - the opened file cannot be linked back into the filesystem later because
-///   `linkat(2)` with `AT_EMPTY_PATH` is not implemented yet;
+/// - the opened file still is not a true anonymous inode that can be relinked
+///   with Linux `O_TMPFILE` semantics;
 /// - creation/open/unlink is not atomic across the whole sequence.
 fn open_tmpfile_at(
     dir: &PathRef,
