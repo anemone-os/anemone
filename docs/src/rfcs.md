@@ -40,7 +40,7 @@ docs/src/rfcs/<short-slug>/
 - `开放问题`
 - `下一步`
 
-可直接复制的草案结构见 [RFC 模板](./rfc-template.md)。
+完整生命周期见 [RFC 工作流](./rfc-workflow.md)。可直接复制的草案结构见 [RFC 模板](./rfc-template.md)。
 
 ## 实现期事务日志
 

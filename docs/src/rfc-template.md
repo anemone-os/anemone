@@ -1,5 +1,7 @@
 # RFC 模板
 
+创建、review、提升和实现期记录的完整流程见 [RFC 工作流](./rfc-workflow.md)。本页只定义目录结构和单页内容模板。
+
 RFC 默认使用目录结构，而不是单个 Markdown 文件。
 
 目录名使用稳定 slug：

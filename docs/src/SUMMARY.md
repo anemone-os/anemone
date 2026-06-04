@@ -21,6 +21,7 @@
 	- [性能 Bench](./testsuits-benchmarks.md)
 - [决策记录](./decision-records.md)
 - [公开草案与 RFC](./rfcs.md)
+	- [RFC 工作流](./rfc-workflow.md)
 	- [RFC 模板](./rfc-template.md)
 	- [Cred Merge](./rfcs/cred-merge/index.md)
 		- [实施计划](./rfcs/cred-merge/implementation.md)
