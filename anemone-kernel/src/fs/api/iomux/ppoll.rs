@@ -69,6 +69,76 @@ impl PollFd {
     }
 }
 
+fn scan_ppoll_fds(
+    task: &Arc<Task>,
+    poll_fds: &mut [PollFd],
+    mode: IomuxScanMode<'_>,
+) -> Result<IomuxScanOutcome, SysError> {
+    let mut nready = 0;
+    let mut unsupported = false;
+
+    for poll_fd in poll_fds.iter_mut() {
+        poll_fd.revents = LinuxPollEvent::empty();
+
+        let Some(fd) = poll_fd.fd else {
+            continue;
+        };
+
+        let Ok(file) = task.get_fd(fd) else {
+            poll_fd.revents = LinuxPollEvent::NVAL;
+            nready += 1;
+            continue;
+        };
+
+        match file.poll(&mode.poll_request(poll_fd.events)) {
+            Ok(PollRegisterResult::Ready(revents)) if !revents.is_empty() => {
+                poll_fd.revents = LinuxPollEvent::from_kernel_poll_event(revents);
+                nready += 1;
+                if mode.is_register() {
+                    break;
+                }
+            },
+            Ok(PollRegisterResult::Ready(_)) if mode.is_register() => {
+                kwarningln!(
+                    "sys_ppoll: register scan returned empty ready for fd {:?}",
+                    fd,
+                );
+                unsupported = true;
+                break;
+            },
+            Ok(PollRegisterResult::Ready(_)) => {},
+            Ok(PollRegisterResult::Armed) if mode.is_register() => {},
+            Ok(PollRegisterResult::Armed) => {
+                kwarningln!("sys_ppoll: snapshot scan unexpectedly armed fd {:?}", fd);
+                return Err(SysError::IO);
+            },
+            Ok(PollRegisterResult::Unsupported) => {
+                kdebugln!(
+                    "sys_ppoll: unsupported register source fd {:?} interests={:?}",
+                    fd,
+                    poll_fd.events,
+                );
+                unsupported = true;
+                break;
+            },
+            Err(e) => {
+                knoticeln!("sys_ppoll: poll error: {:?}", e);
+                poll_fd.revents = LinuxPollEvent::ERR;
+                nready += 1;
+                if mode.is_register() {
+                    break;
+                }
+            },
+        }
+    }
+
+    if unsupported {
+        Ok(IomuxScanOutcome::Unsupported)
+    } else {
+        Ok(IomuxScanOutcome::from_ready_count(nready))
+    }
+}
+
 #[syscall(SYS_PPOLL)]
 fn sys_ppoll(
     #[validate_with(user_addr.nullable())] ufds: Option<VirtAddr>,
@@ -159,52 +229,10 @@ fn sys_ppoll(
         prev_sigmask
     });
 
-    let deadline = timeout.map(|timeout| Instant::now() + timeout);
     let wait_result = (|| -> Result<u64, SysError> {
-        let nready = loop {
-            let mut nready = 0;
-
-            for poll_fd in poll_fds.iter_mut() {
-                poll_fd.revents = LinuxPollEvent::empty();
-
-                if let Some(fd) = poll_fd.fd {
-                    let Ok(fd) = task.get_fd(fd) else {
-                        poll_fd.revents = LinuxPollEvent::NVAL;
-                        nready += 1;
-                        continue;
-                    };
-                    match fd.poll(&PollRequest::snapshot(poll_fd.events)) {
-                        Ok(result) => {
-                            let r = result.expect_ready("sys_ppoll snapshot");
-                            if !r.is_empty() {
-                                poll_fd.revents = LinuxPollEvent::from_kernel_poll_event(r);
-                                nready += 1;
-                            }
-                        },
-                        Err(e) => {
-                            knoticeln!("sys_ppoll: poll error: {:?}", e);
-                            poll_fd.revents = LinuxPollEvent::ERR;
-                            nready += 1;
-                        },
-                    }
-                }
-            }
-
-            if nready > 0 {
-                break nready;
-            }
-
-            if task.has_unmasked_signal() {
-                kdebugln!("sys_ppoll: interrupted by signal");
-                return Err(SysError::Interrupted);
-            }
-
-            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-                break 0;
-            }
-
-            yield_now();
-        };
+        let nready = wait_for_iomux_ready("sys_ppoll", &task, timeout, |mode| {
+            scan_ppoll_fds(&task, &mut poll_fds, mode)
+        })?;
 
         if !revent_ptrs.is_empty() {
             let usp_handle = task.clone_uspace_handle();
@@ -216,7 +244,7 @@ fn sys_ppoll(
             }
         }
 
-        Ok(nready)
+        Ok(nready as u64)
     })();
 
     if let Some(prev_sigmask) = prev_sigmask {

@@ -1,6 +1,8 @@
 pub mod ppoll;
 pub mod pselect6;
 
+mod wait;
+
 mod args {
     use crate::prelude::*;
     use anemone_abi::fs::linux::poll::*;
@@ -40,3 +42,4 @@ mod args {
     }
 }
 use args::*;
+use wait::*;

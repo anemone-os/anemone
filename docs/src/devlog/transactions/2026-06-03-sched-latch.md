@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / wait core / iomux / poll / select
 **RFC:** [RFC-20260603-sched-latch](../../rfcs/sched-latch/index.md)
-**Current Phase:** Agent 2 complete; paused before `ppoll` latch loop
+**Current Phase:** Agent 3 complete; paused before `pselect6` latch loop
 
 ## Scope
 
@@ -40,19 +40,19 @@
 
 ## Handoff
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-06-04
 
 **Current Branch:** `dev/drc/latch`
 
 **Canonical RFC:** [RFC-20260603-sched-latch](../../rfcs/sched-latch/index.md), [Invariants](../../rfcs/sched-latch/invariants.md), [Implementation Plan](../../rfcs/sched-latch/implementation.md), [Tracking Issues](../../rfcs/sched-latch/tracking-issues.md)
 
-**Completed:** `etc/plans/sched-latch` 草稿已提升为公开 RFC；文档协议审查未发现新的 Apollyon / Keter 级硬障碍；软件工程审查结果已作为实现工程指导写入 implementation gate；事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。Agent 0.5 已完成 wait-core surface hardening：`crate::sched::*` 不再 re-export `ActiveWait`、`WakeToken`、`WaitReason`、`WaitOutcome`、`WakeResult` 或 `WaitStateStatus`；clock / signal syscall adapter 改走受限 current-wait wrapper；`Event` 仍作为 scheduler 内部合法 wait adapter 直接使用 wait core。Agent 1 已完成 `sched::latch` 原语，并通过 Gate 1 review。Agent 2 已完成 typed `PollRequest` / `PollRegisterResult` 协议和 pipe source trigger queue 迁移，旧 `PollWaiter` / `poll_waiters` 草稿入口已清除。
+**Completed:** `etc/plans/sched-latch` 草稿已提升为公开 RFC；文档协议审查未发现新的 Apollyon / Keter 级硬障碍；软件工程审查结果已作为实现工程指导写入 implementation gate；事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。Agent 0.5 已完成 wait-core surface hardening：`crate::sched::*` 不再 re-export `ActiveWait`、`WakeToken`、`WaitReason`、`WaitOutcome`、`WakeResult` 或 `WaitStateStatus`；clock / signal syscall adapter 改走受限 current-wait wrapper；`Event` 仍作为 scheduler 内部合法 wait adapter 直接使用 wait core。Agent 1 已完成 `sched::latch` 原语，并通过 Gate 1 review。Agent 2 已完成 typed `PollRequest` / `PollRegisterResult` 协议和 pipe source trigger queue 迁移，旧 `PollWaiter` / `poll_waiters` 草稿入口已清除。Agent 3 已将 `sys_ppoll` 迁移到 latch wait loop，并建立 `fs/api/iomux/wait.rs` 作为 `pselect6` 可复用的 snapshot/register/final-scan outcome mapping 边界。
 
 **Open Blockers:** 当前没有 Still open plan gap。所有原 Keter 风险均作为 implementation gate 保留。Agent 0.5 只收窄 wait lifecycle / token surface；`TaskSchedState` 和 `Task::update_sched_state_with()` 仍是 crate-internal scheduler-state surface，完全封住普通 source 写 task sched state 需要后续单独阶段扩大 write set 到 `task/sched.rs` 等 owner 文件。
 
-**Next Action:** 暂停在 Agent 2 之后。恢复时进入 Agent 3：迁移 `ppoll` 到 snapshot scan -> begin latch -> register scan -> schedule -> finish -> final snapshot scan，并固定可供 `pselect6` 复用的 helper / outcome mapping。Agent 2 的运行时验证由用户侧 `LTP iomux` 通过结果覆盖；后续 Agent 3 仍需针对 `ppoll` latch loop 补充 final scan / outcome race 证据。
+**Next Action:** 暂停在 Agent 3 之后。恢复时进入 Agent 4：迁移 `pselect6`，复用 `fs/api/iomux/wait.rs` 的 wait loop / final scan / outcome mapping，而不是复制一套 timeout / signal / cancel 解释。Agent 2 的运行时验证由用户侧 `LTP iomux` 通过结果覆盖；Agent 3 只按本 worker 合同完成 `just build` 和 `git diff --check`，未运行 QEMU / LTP。
 
-**Do Not Redo:** 不要重新把 `etc/` 个人草稿作为 canonical source；不要把 `PollWaiter` / `poll_waiters` 草稿扩展成新的 waitable poll 协议；不要让 `ppoll` 与 `pselect6` 分裂 outcome mapping；不要把未迁移 source 当成 armed source。
+**Do Not Redo:** 不要重新把 `etc/` 个人草稿作为 canonical source；不要把 `PollWaiter` / `poll_waiters` 草稿扩展成新的 waitable poll 协议；不要让 `ppoll` 与 `pselect6` 分裂 outcome mapping；不要把未迁移 source 当成 armed source；不要在 `ppoll` 的 `Unsupported` register result 上 fallback 到 `yield_now()` 或其它会睡在未 armed source 上的路径。
 
 ## Phase Log
 
@@ -132,8 +132,29 @@
 
 **Next:** 进入 Agent 3：迁移 `ppoll` 并建立可供 `pselect6` 复用的 latch wait helper、final scan 和 outcome mapping。
 
+### 2026-06-04 - Agent 3 ppoll latch loop + shared iomux wait helper
+
+**Phase:** stage 4 / `ppoll` latch loop
+
+**Change:** 新增 `fs/api/iomux/wait.rs`，作为 `ppoll` 与后续 `pselect6` 共享的 wait loop / outcome mapping 边界。helper 只暴露 `IomuxScanMode::{Snapshot, Register(&LatchTrigger)}`、`IomuxScanOutcome::{Ready, NotReady, Unsupported}` 和 `wait_for_iomux_ready()`；Linux `pollfd` / `fd_set` ABI copy-in/copy-out 仍留在 syscall adapter 层。
+
+**Change:** `sys_ppoll` 现在先安装临时 signal mask，再通过 snapshot scan 填充 Linux `revents`。snapshot 有 `Ready`、`POLLNVAL` 或 source poll error 时直接返回，不创建 `Latch`。snapshot 后若已有 unmasked signal、zero timeout 或 deadline expired，直接返回 `EINTR` / `0`，不创建 `Latch`。
+
+**Change:** 只有确实需要阻塞时才 `Latch::begin_current(true)`。`ppoll` 用同一个 `LatchTrigger` 对所有有效 fd 做 register scan；register scan 发现 ready / `POLLNVAL` / source poll error 时立即停止扫描，`cancel(PredicateReady)` + `finish()` 后返回当前 ready 结果，不 schedule。所有未 ready source 都返回 `Armed` 后，才调用 `schedule_with_timeout(remaining)`。
+
+**Change:** wake / timeout / signal / force 返回后，helper 先 `finish()` 当前 latch round，再做 final snapshot scan。register scan 的 `Unsupported` 或 `Err` 路径也在 `cancel + finish` 后执行同一 final snapshot scan，避免前序已 armed source 竞态触发后被误报成 register failure。final scan 的 ready 结果优先；若 final scan 仍无 ready，则统一映射 `Triggered -> retry`、`Timeout -> 0`、`Signal | Force -> EINTR`、`Cancelled | Unexpected -> EIO`。这条 mapping 是阶段 5 `pselect6` 必须复用的边界。
+
+**Unsupported Strategy:** register scan 遇到 `PollRegisterResult::Unsupported` 时 fail closed：`cancel(RegisterError)` + `finish()` 后先做 final snapshot scan；若 final scan 仍无 ready，返回 `SysError::NotSupported`，映射为 `EOPNOTSUPP`。本阶段不使用 busy-loop fallback，也不让 syscall 睡在未 armed source 上；尚未迁移的 snapshot-only source 只有在 snapshot 已 ready 时可返回。
+
+**Review:** KETER-001 已处理到 `ppoll` 边界：未 armed source 不进入 schedule。KETER-004 已处理：helper 中每个 begin 后路径都显式 `finish()`，包括 register ready、register unsupported、register error 和 schedule return。KETER-008 已固定：final scan 先于 timeout/signal outcome mapping，register-fail 竞态也先 final scan 再返回错误，且 mapping 位于 `wait.rs`，供 `pselect6` 复用。EUCLID-001 已处理：signal precheck、zero timeout 和 deadline expired 都发生在 latch begin 前。
+
+**Boundary:** 本阶段没有修改 `pselect6.rs`；该 syscall 仍是 snapshot + `yield_now()` 旧路径，阶段 5 必须迁移到 `wait.rs`。本阶段没有改变 source 协议语义，也没有调整 pipe source。
+
+**Validation:** `just build` 通过。构建期间仅保留既有 warning：`anemone-kernel/src/sync/mono.rs` 中 `AtomicBool` / `Ordering` 未使用；本阶段未修改该文件。`git diff --check` 通过。未运行 QEMU / LTP。
+
+**Next:** 进入 Agent 4：迁移 `pselect6`，复用 `fs/api/iomux/wait.rs` 的 latch loop、final scan 和 outcome mapping。
+
 ## Open Items
 
-- 阶段 4：迁移 `ppoll`，固定可复用的 latch loop / final scan / outcome helper。
 - 阶段 5：迁移 `pselect6`，复用 `ppoll` 的等待协议。
 - 阶段 6：旁路审计 `PollRequest`、`PollWaiter`、`poll_waiters`、`yield_now()`、wait-core wake 调用和 source trigger queue，并执行 rv64 / LTP 验证。
