@@ -5,7 +5,19 @@
 
 use anemone_abi::fs::linux::ioctl::FIONREAD;
 
-use crate::{prelude::*, syscall::user_access::UserWritePtr, task::files::Fd};
+use crate::{
+    prelude::*,
+    syscall::{handler::TryFromSyscallArg, user_access::UserWritePtr},
+    task::files::Fd,
+};
+
+fn lookup_ioctl_arg_fd(raw_fd: u64) -> Result<IoctlArgFile, SysError> {
+    let fd = Fd::try_from_syscall_arg(raw_fd)?;
+    let task = get_current_task();
+    let file = task.get_fd(fd)?;
+
+    Ok(IoctlArgFile::new(file.vfs_file().clone(), file.ioctl_access()))
+}
 
 #[syscall(SYS_IOCTL)]
 fn sys_ioctl(fd: Fd, cmd: u32, arg: u64) -> Result<u64, SysError> {
@@ -16,10 +28,15 @@ fn sys_ioctl(fd: Fd, cmd: u32, arg: u64) -> Result<u64, SysError> {
         arg
     );
 
+    let task = get_current_task();
+    let file = task.get_fd(fd)?;
+    let target_access = file.ioctl_access();
+    if target_access.is_path_only() {
+        return Err(SysError::BadFileDescriptor);
+    }
+
     match cmd {
         FIONREAD => {
-            let task = get_current_task();
-            let file = task.get_fd(fd)?;
             let nbytes = crate::fs::pipe::readable_bytes(file.vfs_file())?;
             let usp = task.clone_uspace_handle();
             let mut guard = usp.lock();
@@ -28,8 +45,14 @@ fn sys_ioctl(fd: Fd, cmd: u32, arg: u64) -> Result<u64, SysError> {
             Ok(0)
         },
         _ => {
-            knoticeln!("[NYI] sys_ioctl command {:#x} is not supported yet", cmd);
-            Err(SysError::NotYetImplemented)
+            let vfs_file = file.vfs_file().clone();
+            let usp = task.clone_uspace_handle();
+            drop(file);
+            drop(task);
+
+            let arg_fd_lookup = IoctlArgFdLookup::new(lookup_ioctl_arg_fd);
+            let ctx = IoctlCtx::new(cmd, arg, target_access, usp, &arg_fd_lookup);
+            vfs_file.ioctl(ctx)
         },
     }
 }

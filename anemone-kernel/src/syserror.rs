@@ -34,6 +34,8 @@ pub enum SysError {
     AccessDenied,
     /// The provided file descriptor is invalid.
     BadFileDescriptor,
+    /// The target file or device does not support this ioctl command.
+    UnsupportedIoctl,
     /// No more file descriptors available for allocation.
     NoMoreFd,
     /// System or current process is out of memory.
@@ -185,6 +187,7 @@ impl SysError {
             SysError::BadAddress => EFAULT,
             SysError::AccessDenied => EACCES,
             SysError::BadFileDescriptor => EBADF,
+            SysError::UnsupportedIoctl => ENOTTY,
             SysError::NoMoreFd => EMFILE,
             SysError::OutOfMemory => ENOMEM,
             SysError::AlreadyMapped | SysError::NotMapped | SysError::SharedFrame => EFAULT,

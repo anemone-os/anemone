@@ -241,6 +241,7 @@ static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {
         kerrln!("console stdin poll is not implemented yet");
         Err(SysError::NotYetImplemented)
     },
+    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
@@ -252,6 +253,7 @@ static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
         kerrln!("console stdout poll is not implemented yet");
         Err(SysError::NotYetImplemented)
     },
+    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 static CONSOLE_STDIN_PATHREF: Lazy<PathRef> = Lazy::new(|| {

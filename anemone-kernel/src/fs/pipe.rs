@@ -523,6 +523,7 @@ static PIPE_RX_FILE_OPS: FileOps = FileOps {
     validate_seek: |_, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_rx_poll,
+    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 static PIPE_TX_FILE_OPS: FileOps = FileOps {
@@ -531,6 +532,7 @@ static PIPE_TX_FILE_OPS: FileOps = FileOps {
     validate_seek: |_, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_tx_poll,
+    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 pub struct OpenedPipe {

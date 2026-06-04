@@ -29,7 +29,10 @@ pub mod api;
 pub use self::{
     anonymous::*,
     dentry::Dentry,
-    file::{DirEntry, DirSink, File, FileOps, FixedSizeDirSink, ReadDirResult, SinkResult},
+    file::{
+        DirEntry, DirSink, File, FileOps, FixedSizeDirSink, IoctlArgFdLookup, IoctlArgFile,
+        IoctlCtx, IoctlFileAccess, IoctlFileStatusFlags, ReadDirResult, SinkResult,
+    },
     filesystem::{FileSystem, FileSystemFlags, FileSystemOps},
     inode::{
         DeviceId, Ino, InoIsZero, InodeMeta, InodeMode, InodeOps, InodePerm, InodeRef, InodeStat,

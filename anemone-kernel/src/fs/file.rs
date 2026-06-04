@@ -4,6 +4,148 @@ use crate::{
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct IoctlFileStatusFlags: u32 {
+        const APPEND = 0b0001;
+        const NONBLOCK = 0b0010;
+        const DIRECT = 0b0100;
+        const DSYNC = 0b1000;
+        const SYNC = 0b1_0000;
+        const NOATIME = 0b10_0000;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IoctlFileAccess {
+    can_read: bool,
+    can_write: bool,
+    path_only: bool,
+    status_flags: IoctlFileStatusFlags,
+}
+
+impl IoctlFileAccess {
+    pub const fn new(
+        can_read: bool,
+        can_write: bool,
+        path_only: bool,
+        status_flags: IoctlFileStatusFlags,
+    ) -> Self {
+        Self {
+            can_read,
+            can_write,
+            path_only,
+            status_flags,
+        }
+    }
+
+    pub const fn can_read(self) -> bool {
+        self.can_read
+    }
+
+    pub const fn can_write(self) -> bool {
+        self.can_write
+    }
+
+    pub const fn is_path_only(self) -> bool {
+        self.path_only
+    }
+
+    pub const fn status_flags(self) -> IoctlFileStatusFlags {
+        self.status_flags
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IoctlArgFile {
+    file: Arc<File>,
+    access: IoctlFileAccess,
+}
+
+impl IoctlArgFile {
+    pub fn new(file: Arc<File>, access: IoctlFileAccess) -> Self {
+        Self { file, access }
+    }
+
+    pub fn file(&self) -> &File {
+        self.file.as_ref()
+    }
+
+    pub fn file_handle(&self) -> Arc<File> {
+        self.file.clone()
+    }
+
+    pub const fn access(&self) -> IoctlFileAccess {
+        self.access
+    }
+}
+
+pub type IoctlArgFdLookupFn = fn(raw_fd: u64) -> Result<IoctlArgFile, SysError>;
+
+pub struct IoctlArgFdLookup {
+    lookup: IoctlArgFdLookupFn,
+}
+
+impl IoctlArgFdLookup {
+    pub const fn new(lookup: IoctlArgFdLookupFn) -> Self {
+        Self { lookup }
+    }
+
+    pub fn lookup(&self, raw_fd: u64) -> Result<IoctlArgFile, SysError> {
+        (self.lookup)(raw_fd)
+    }
+}
+
+pub struct IoctlCtx<'a> {
+    cmd: u32,
+    arg: u64,
+    target_access: IoctlFileAccess,
+    uspace: Arc<UserSpaceHandle>,
+    arg_fd_lookup: &'a IoctlArgFdLookup,
+}
+
+impl<'a> IoctlCtx<'a> {
+    pub fn new(
+        cmd: u32,
+        arg: u64,
+        target_access: IoctlFileAccess,
+        uspace: Arc<UserSpaceHandle>,
+        arg_fd_lookup: &'a IoctlArgFdLookup,
+    ) -> Self {
+        Self {
+            cmd,
+            arg,
+            target_access,
+            uspace,
+            arg_fd_lookup,
+        }
+    }
+
+    pub const fn cmd(&self) -> u32 {
+        self.cmd
+    }
+
+    pub const fn arg(&self) -> u64 {
+        self.arg
+    }
+
+    pub const fn target_access(&self) -> IoctlFileAccess {
+        self.target_access
+    }
+
+    pub fn uspace(&self) -> &Arc<UserSpaceHandle> {
+        &self.uspace
+    }
+
+    pub fn lookup_arg_fd(&self) -> Result<IoctlArgFile, SysError> {
+        self.arg_fd_lookup.lookup(self.arg)
+    }
+
+    pub fn lookup_fd_arg(&self, raw_fd: u64) -> Result<IoctlArgFile, SysError> {
+        self.arg_fd_lookup.lookup(raw_fd)
+    }
+}
+
 /// VTable a file must implement to support file operations.
 #[derive(Debug)]
 pub struct FileOps {
@@ -27,6 +169,8 @@ pub struct FileOps {
     /// Sources that cannot arm a not-ready register request must return
     /// `Unsupported`, so syscall code cannot sleep on an unarmed source.
     pub poll: for<'a> fn(&File, &PollRequest<'a>) -> Result<PollRegisterResult, SysError>,
+
+    pub ioctl: for<'a> fn(&File, IoctlCtx<'a>) -> Result<u64, SysError>,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +269,7 @@ impl File {
             validate_seek: |_, _| Err(SysError::BadFileDescriptor),
             read_dir: |_, _, _| Err(SysError::BadFileDescriptor),
             poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::empty() & req.interests())),
+            ioctl: |_, _| Err(SysError::BadFileDescriptor),
         };
 
         Self::new(path, &PATH_ONLY_FILE_OPS, NilOpaque::new())
@@ -331,6 +476,10 @@ impl File {
 
     pub fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
         (self.ops.poll)(self, request)
+    }
+
+    pub fn ioctl(&self, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
+        (self.ops.ioctl)(self, ctx)
     }
 
     pub fn get_attr(&self) -> Result<InodeStat, SysError> {

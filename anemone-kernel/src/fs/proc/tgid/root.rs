@@ -53,6 +53,7 @@ static TGID_ROOT_FILE_OPS: FileOps = FileOps {
     validate_seek: |_, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotSupported),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 pub static TGID_ROOT_TGID_ENTRY: TgidEntry = TgidEntry {

@@ -63,4 +63,5 @@ pub static TGID_FILE_OPS: FileOps = FileOps {
     validate_seek: |_, _| Err(SysError::IsDir),
     read_dir: tgid_read_dir,
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
