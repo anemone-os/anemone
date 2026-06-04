@@ -83,6 +83,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 ## 当前 RFC
 
 - [RFC-20260602-cred-merge](./rfcs/cred-merge/index.md)：credentials feature merge 的 canonical 执行计划和审查合同。
+- [RFC-20260603-IOCTL-LOOP](./rfcs/ioctl-loop/index.md)：`ioctl(2)` VFS 分发、通用块设备 ioctl 和 loop 设备最小闭环计划。
 - [RFC-20260603-sched-latch](./rfcs/sched-latch/index.md)：`poll` / `select` OR wait 所需的 wait-core latch 原语和 iomux 迁移计划。
 - [RFC-20260601-sched-wait-refactor](./rfcs/sched-wait-refactor/index.md)：已完成的 scheduler wait/wake 协议重构 RFC。
 
