@@ -60,7 +60,7 @@
 
 - 给 `FileOps` 增加 `ioctl` 方法：
   - 参数为 `&File` 加短生命周期 `IoctlCtx` 或等价结构，不是裸 `cmd` + `arg`，也不是 `Arc<FileDesc>`。
-  - `IoctlCtx` 至少包含 `cmd`、`arg`、目标 fd 访问能力快照、用户空间 copy helper、受控的 arg-fd lookup helper。
+  - `IoctlCtx` 是薄请求参数包，至少包含 `cmd`、`arg`、目标 fd 访问能力快照、用户空间访问 handle、受控的 arg-fd lookup helper；不得实现成 ioctl 专用 fd wrapper。
   - 目标 fd 的 `OpenAccessMode`、`O_PATH` 和 `FileStatusFlags` 在 `sys_ioctl()` 中转换为值语义快照后进入上下文；上下文类型不得依赖 `task::files::FileDesc`。
   - 如果第一阶段需要权限输入，只能传不可变、最小化的 credential/capability snapshot；不得传完整 task 或允许设备代码重新获取 current-task 权限上下文。
   - 默认实现返回适合 Linux ioctl 的“不支持该 fd 的 ioctl”错误，例如 `ENOTTY`。
@@ -70,8 +70,8 @@
   - 保留或迁移 `FIONREAD` 行为，确保 pipe 现有用例不退化。
   - 从 `FileDesc` 派生 access snapshot 后丢弃 task/fd 层对象，构造 `IoctlCtx` 后对其他命令调用 `file.ioctl(ctx)`。
 - 为所有现有 `FileOps` 补默认 ioctl 方法。
-- 将用户指针 copy-in/copy-out 的通用 helper 留在 ioctl ABI 边界，避免每个驱动重复写裸 user pointer 逻辑。
-- `IoctlCtx::get_arg_fd()` 或等价 helper 只用于命令定义要求 arg 是 fd 的场景，例如 `LOOP_SET_FD`；helper 返回窄化后的 `IoctlArgFile` / `BackingFileHandle` 和访问能力快照，不允许设备实现保存原始 fd number、`FileDesc` 或文件表引用。
+- 用户指针读写使用现有 `UserSpaceHandle` / `usp` 和 `user_access` API；不要新增 ioctl 专用 `copy_from_user` / `copy_to_user` helper，避免制造与其他 syscall 模块不一致的封装层。
+- `IoctlCtx::get_arg_fd()` 或等价 helper 只用于命令定义要求 arg 是 fd 的场景，例如 `LOOP_SET_FD`。设备实现可以看到原始 `arg`，但 fd-table lookup 只能通过该 helper 完成；helper 返回窄化后的 `IoctlArgFile` / `BackingFileHandle` 和访问能力快照，不允许设备实现保存原始 fd number、`FileDesc` 或文件表引用。
 
 验收条件：
 
@@ -84,6 +84,7 @@
 - 不要让 `FileOps` 直接依赖某个具体设备子系统。
 - 不要让设备实现调用 `get_current_task().get_fd(raw_arg)` 来弥补上下文缺口。
 - 不要把 `task::files::{FileDesc, ProcFile, FilesState}` 引入 `fs::file` 或设备 file ops。
+- 不要把 `FileDesc` 作为简化参数直接下沉到设备层；它包含 task/files 层的 fd-local flags、共享 status flags 和访问包装，loop 绑定需要的是经 ioctl 边界窄化后的 backing file handle。
 - 不要把 Linux ABI 结构体保存进长期内核状态。
 - errno 要区分“命令不适用于该 fd”、“设备空闲”、“参数非法”和“功能暂缓”。
 

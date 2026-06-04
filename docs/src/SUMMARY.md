@@ -9,6 +9,7 @@
 		- [Sched Wait Refactor](./devlog/transactions/2026-06-01-sched-wait-refactor.md)
 		- [Cred Merge](./devlog/transactions/2026-06-02-cred-merge.md)
 		- [Sched Latch](./devlog/transactions/2026-06-03-sched-latch.md)
+		- [IOCTL Loop](./devlog/transactions/2026-06-04-ioctl-loop.md)
 - [初赛冲刺策略（2026-05 至 2026-06）](./preliminary-contest-sprint.md)
 - [已知问题与当前限制](./known-issues-and-limitations.md)
 	- [活动登记册](./register.md)

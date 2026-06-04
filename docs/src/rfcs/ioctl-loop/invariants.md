@@ -9,7 +9,7 @@
 - `ioctl(2)` 从 fd 到打开文件对象的分发路径闭合，设备私有命令不继续散落在 `sys_ioctl()` 全局分支中。
 - loop 设备同时具备稳定 devfs 节点、块设备注册身份和 loop 私有 ioctl 状态，三者指向同一个设备对象。
 - loop discovery 不被半发布的控制节点遮蔽；第一阶段不发布 `/dev/loop-control`，后续发布时必须绑定 `LOOP_CTL_GET_FREE` 和同一份 loop 设备池。
-- ioctl 分发上下文显式传递目标打开描述符能力快照、用户指针访问能力和受控的 arg-fd 查找能力；VFS/设备层不得接收 `FileDesc`、`ProcFile`、当前 task 或文件表对象。
+- ioctl 分发上下文显式传递目标打开描述符能力快照、当前用户空间访问 handle 和受控的 arg-fd 查找能力；VFS/设备层不得接收 `FileDesc`、`ProcFile`、当前 task 或文件表对象。
 - 块设备 `/dev` file ops 保持单一路径：通用 `BLK*` 由 block 子系统处理，loop 私有 ioctl 只能通过 block 子系统拥有的私有 hook 接入。
 - 绑定成功后，loop backing file 的生命周期独立于用户态传入 fd 的后续关闭。
 - 空闲、绑定、busy、unsupported、参数非法和只读写入等结果用稳定 errno 表达。
@@ -30,11 +30,13 @@
 `FileOps::ioctl` 的输入必须来自 `sys_ioctl()` 构造的短生命周期上下文。该上下文至少能表达：
 
 - 目标 fd 的值语义能力快照，包括 `OpenAccessMode`、`O_PATH` 和 file status flags。
-- 用户态 copy-in/copy-out helper。
+- 用户空间访问 handle，例如当前 syscall 模块惯用的 `UserSpaceHandle` / `usp`；具体读写继续使用现有 `user_access` API，不新增 ioctl 专用 copy helper。
 - 对 arg-fd 的受控 lookup helper，用于 `LOOP_SET_FD` 这类协议；返回值必须是窄化后的 backing file handle 和能力快照。
 - 必要时的不可变、最小 credential/capability snapshot。
 
-设备实现不得保存原始 fd number，也不得自行调用当前 task 文件表来重新解释 syscall 参数。`FileDesc`、`ProcFile`、`FilesState` 和完整 task 对象不能跨过 syscall/VFS ioctl 边界进入 `FileOps` 或设备私有 ioctl。`O_PATH`、目标 fd 不可读写、backing fd 不可读写等 fd capability 错误必须在统一上下文规则下表达为稳定 errno。
+设备实现可以按 ioctl 命令语义知道某个 `arg` 是 fd number，但不得保存原始 fd number，也不得自行调用当前 task 文件表来重新解释 syscall 参数。`FileDesc`、`ProcFile`、`FilesState` 和完整 task 对象不能跨过 syscall/VFS ioctl 边界进入 `FileOps` 或设备私有 ioctl。`O_PATH`、目标 fd 不可读写、backing fd 不可读写等 fd capability 错误必须在统一上下文规则下表达为稳定 errno。
+
+该限制不是为了隐藏 fd 参数，而是为了区分一次性 fd number、当前 task fd-table lookup 和可被设备长期保存的 file handle。`FileDesc` 属于 task/files 层，包含 fd-local flags、共享 status flags mutator 和 syscall 访问包装；loop 绑定成功后只能保存经 helper 窄化并延长生命周期的 backing file handle，不能把调用者文件表或 `FileDesc` 变成设备状态的一部分。
 
 块设备子系统拥有通用块设备查询语义，例如 `BLKGETSIZE64`、`BLKGETSIZE` 和 `BLKSSZGET`。loop 设备拥有 loop 私有状态机和 loop ioctl 语义，但必须通过同一个 `BlockDev` 对象暴露给 mount 层。
 

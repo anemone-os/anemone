@@ -6,6 +6,7 @@
 
 ## Active
 
+- [IOCTL Loop](./2026-06-04-ioctl-loop.md)
 - [Cred Merge](./2026-06-02-cred-merge.md)
 - [Sched Latch](./2026-06-03-sched-latch.md)
 

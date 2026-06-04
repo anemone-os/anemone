@@ -3,7 +3,7 @@
 **状态：** Active
 **最后更新：** 2026-06-04
 **父 RFC：** [RFC-20260603-IOCTL-LOOP](./index.md)
-**事务日志：** None
+**事务日志：** [IOCTL Loop 事务日志](../../devlog/transactions/2026-06-04-ioctl-loop.md)
 
 本文只跟踪 design review 后确认的 RFC 草案缺陷、证明缺口、边界冲突或需要回到草案修改的设计问题。
 
@@ -47,7 +47,7 @@
 
 **修复落点：**
 
-- [RFC index](./index.md) 的方案和 `ioctl 边界` 定义了短生命周期 `IoctlCtx`：显式携带目标 fd 的值语义能力快照、用户态 copy helper、受控 arg-fd lookup helper 和最小 credential/capability snapshot。
+- [RFC index](./index.md) 的方案和 `ioctl 边界` 定义了短生命周期薄 `IoctlCtx`：显式携带目标 fd 的值语义能力快照、用户空间访问 handle、受控 arg-fd lookup helper 和最小 credential/capability snapshot；用户指针读写继续使用现有 `user_access` API，不新增 ioctl 专用 copy helper。
 - [不变量需求](./invariants.md) 的闭合条件和状态所有权明确：设备实现不得保存 raw fd number，也不得自行调用当前 task 文件表重新解释 ioctl 参数；`FileDesc`、`ProcFile`、`FilesState` 和完整 task 对象不得跨过 syscall/VFS ioctl 边界。
 - [迁移实施计划](./implementation.md) 的阶段 1 改为 `FileOps::ioctl(&File, ctx)` 或等价形式，并把 `O_PATH`、打开模式快照、arg-fd lookup 和默认 `ENOTTY` 行为列为实现与审查重点。
 
@@ -77,11 +77,13 @@
 
 - [RFC index](./index.md) 的方案和 `ioctl 边界` 明确：`sys_ioctl()` 可以读取调用者 `FileDesc`，但必须把 `FileDesc` / `ProcFile` / 当前 task / 文件表压缩成值语义 `target_access` 后再进入 `FileOps::ioctl`。
 - [不变量需求](./invariants.md) 的闭合条件、状态所有权和禁止退化项明确：VFS/设备层不得接收 `FileDesc`、`ProcFile`、`FilesState` 或完整 task/capability 对象。
-- [迁移实施计划](./implementation.md) 的阶段 1 明确：`FileOps::ioctl` 形状是 `&File` + `IoctlCtx` 或等价结构，不是 `Arc<FileDesc>`；`IoctlCtx::get_arg_fd()` 只返回窄化后的 `IoctlArgFile` / `BackingFileHandle` 和能力快照。
+- [迁移实施计划](./implementation.md) 的阶段 1 明确：`FileOps::ioctl` 形状是 `&File` + 薄 `IoctlCtx` 或等价结构，不是 `Arc<FileDesc>` 或 ioctl 专用 fd wrapper；`IoctlCtx::get_arg_fd()` 只返回窄化后的 `IoctlArgFile` / `BackingFileHandle` 和能力快照。
 
 **原问题：** 先前修复 KETER-002 时把“必须显式传递 fd capability”写成了 `IoctlCtx` 可携带 `Arc<FileDesc>`。这会把 `task::files` 层反向拉进 VFS file ops，破坏当前方向：`FileDesc` 包装 `fs::File`，而不是 `fs::FileOps` 依赖 `FileDesc`。
 
 **原违反的不变量：** syscall 层拥有 fd 表和打开描述符解析；VFS file ops 拥有打开文件对象语义。两者之间只能传递窄化后的能力事实，不能传递 task/fd 层对象。
+
+**补充理由：** 设备实现可以知道 ioctl `arg` 是 fd number，但 fd number、当前 task fd-table lookup 和可长期保存的 backing file handle 不是同一层对象。`FileDesc` 还携带 fd-local flags、共享 status flags mutator 和 syscall 访问包装；loop 绑定成功后需要保存的是经边界窄化并延长生命周期的 backing file handle，而不是调用者文件表对象。
 
 ### KETER-005：loop 私有 ioctl 不得分叉 `/dev` block-device file ops
 
