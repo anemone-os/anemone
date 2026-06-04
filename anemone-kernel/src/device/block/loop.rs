@@ -52,6 +52,13 @@ impl LoopDevice {
             return Err(SysError::BadFileDescriptor);
         }
 
+        {
+            let state = self.state.lock();
+            if matches!(*state, LoopState::Bound(_)) {
+                return Err(SysError::Busy);
+            }
+        }
+
         let backing = ctx.lookup_arg_fd()?;
         let backing_access = backing.access();
         if backing_access.is_path_only() || !backing_access.can_read() {
@@ -117,9 +124,7 @@ impl LoopDevice {
         bound.size_limit = update.size_limit;
         bound.readonly = update.readonly || !bound.backing_writable;
         bound.flags = LoopFlags::new(bound.readonly, false);
-        if !update.display_name.is_empty() {
-            bound.display_name = update.display_name;
-        }
+        bound.display_name = update.display_name;
 
         Ok(0)
     }

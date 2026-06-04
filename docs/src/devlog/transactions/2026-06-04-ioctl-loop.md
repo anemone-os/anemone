@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** syscall ABI / VFS / devfs / block device / loop / mount / LTP
 **RFC:** [RFC-20260603-IOCTL-LOOP](../../rfcs/ioctl-loop/index.md)
-**Current Phase:** Agent 4 completed; Gate 3 review pending
+**Current Phase:** Agent 5 verification handoff; runtime evidence pending
 
 ## Scope
 
@@ -43,17 +43,17 @@
 
 **Current Branch:** `dev/drc/ioctl`
 
-**Current HEAD:** `1cb2c02` (`ioctl-loop: add static loop device pool`); Agent 4 changes are currently in the working tree.
+**Current HEAD:** `0c10517` (`ioctl-loop: implement loop ioctl stage 1`); Gate 3 fixups are currently in the working tree.
 
 **Canonical RFC:** [RFC-20260603-IOCTL-LOOP](../../rfcs/ioctl-loop/index.md), [Invariants](../../rfcs/ioctl-loop/invariants.md), [Implementation Plan](../../rfcs/ioctl-loop/implementation.md), [Tracking Issues](../../rfcs/ioctl-loop/tracking-issues.md)
 
-**Completed:** RFC 已提升到公开文档；design review 发现的 Keter / Euclid 项已经吸收到 RFC、不变量需求和迁移实施计划；本事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。总控前置检查确认当前分支为 `dev/drc/ioctl`。Agent 0 只读前置审计已完成，未发现 Apollyon / Keter blocker，停止条件未触发。Agent 1 已完成 UAPI 常量与 loop ABI 结构、语义化 `UnsupportedIoctl -> ENOTTY` errno 映射、`IoctlCtx` / `FileOps::ioctl` VFS 分发和默认 unsupported ioctl 行为。Gate 1 review 发现的 `FIONREAD` / `O_PATH` Keter 已修复，复审后未保留 Apollyon / Keter blocker。Agent 2 已完成统一 block devfs `BLKGETSIZE64` / `BLKGETSIZE` / `BLKSSZGET` 和 block private ioctl hook；Gate 2 review 通过，未保留 Apollyon / Keter blocker。Agent 3 已完成 kconfig 控制的静态 loop block device pool，并保留统一 block devfs file ops 与默认 private ioctl unsupported 行为。Agent 4 已完成第一阶段 loop 私有 ioctl 本地实现：`LOOP_GET_STATUS*`、`LOOP_SET_FD`、`LOOP_SET_STATUS*`、`LOOP_CLR_FD`、暂缓命令 stable unsupported 和空闲 loop `ENXIO` errno 映射。
+**Completed:** RFC 已提升到公开文档；design review 发现的 Keter / Euclid 项已经吸收到 RFC、不变量需求和迁移实施计划；本事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。总控前置检查确认当前分支为 `dev/drc/ioctl`。Agent 0 只读前置审计已完成，未发现 Apollyon / Keter blocker，停止条件未触发。Agent 1 已完成 UAPI 常量与 loop ABI 结构、语义化 `UnsupportedIoctl -> ENOTTY` errno 映射、`IoctlCtx` / `FileOps::ioctl` VFS 分发和默认 unsupported ioctl 行为。Gate 1 review 发现的 `FIONREAD` / `O_PATH` Keter 已修复，复审后未保留 Apollyon / Keter blocker。Agent 2 已完成统一 block devfs `BLKGETSIZE64` / `BLKGETSIZE` / `BLKSSZGET` 和 block private ioctl hook；Gate 2 review 通过，未保留 Apollyon / Keter blocker。Agent 3 已完成 kconfig 控制的静态 loop block device pool，并保留统一 block devfs file ops 与默认 private ioctl unsupported 行为。Agent 4 已完成第一阶段 loop 私有 ioctl 本地实现：`LOOP_GET_STATUS*`、`LOOP_SET_FD`、`LOOP_SET_STATUS*`、`LOOP_CLR_FD`、暂缓命令 stable unsupported 和空闲 loop `ENXIO` errno 映射。Gate 3 review 未发现 Apollyon / Keter blocker；reviewer 提出的 `LOOP_SET_STATUS*` 空名称提交 Euclid 已修复，`LOOP_CLR_FD` strong-count busy 判定记录为后续 Safe 维护项。
 
-**In Progress:** Gate 3 review 尚未完成；未进入 Agent 5。
+**In Progress:** Agent 5 只读验证准备与 handoff 已完成；QEMU / LTP / BusyBox 运行态证据仍待用户日志或后续明确授权运行。
 
 **Open Blockers:** 暂无已确认 blocker。
 
-**Next Action:** 进行 Gate 3 review：确认 loop identity、backing file 生命周期、flag 策略、`LOOP_CLR_FD` busy 判定、锁序和 `/dev/loop-control` 未发布；通过后再进入 Agent 5 的最小闭环验证准备。
+**Next Action:** 由用户或后续授权运行最小闭环：确认 `/dev/loop0` 可见、`LOOP_GET_STATUS* == ENXIO` discovery、`LOOP_SET_FD + LOOP_SET_STATUS` bind、`BLKGETSIZE64`、`mount -t ext4 /dev/loopN <mnt>`、umount 后 `LOOP_CLR_FD` release；失败按 ioctl/loop、filesystem type、mount flags、sysfs、partscan、direct I/O、procfs/statfs 或测试环境分类。
 
 **Do Not Redo:** 不要把 loop 或 block 私有 ioctl 塞回 `sys_ioctl()`；不要把 `FileDesc` / `ProcFile` / `FilesState` / 当前 task 传进 VFS 或设备层；不要为 `/dev/loopN` 发布绕过统一 block devfs file ops 的专属 file ops；不要发布半成品 `/dev/loop-control`；不要改 mount 层直接解析普通 image 文件或 `-o loop`。
 
@@ -186,3 +186,37 @@
 **Validation:** `just build` 通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。`git diff --check` 通过。未运行 QEMU / LTP，因此 loop discovery、bind 后 `BLKGETSIZE64`、mkfs/mount/umount/release 的运行态证据仍待 Agent 5 或用户日志。
 
 **Next:** 进入 Gate 3 review，重点审查 loop identity、backing file 生命周期、`LOOP_CLR_FD` busy 判定、unsupported flag 策略、锁序和 `/dev/loop-control` 未发布。
+
+### 2026-06-04 - Gate 3 review 通过并完成窄修
+
+**Phase:** Gate 3 / loop identity and lifecycle review
+
+**Review:** Gate 3 未发现 Apollyon / Keter blocker。确认 `/dev/loopN` 通过统一 block devfs file ops 发布，mount source lookup 只从 `DeviceId::Block` 取同一个 block registry 对象；loop 状态保存 `Arc<File>`，没有保存 raw fd、`FileDesc`、`ProcFile`、task 或 fd table；unsupported `LO_FLAGS_AUTOCLEAR` / `LO_FLAGS_PARTSCAN` / `LO_FLAGS_DIRECT_IO` / `LOOP_CONFIGURE` 不写入状态；锁内只复制或提交状态，backing I/O 在锁外；未发现 `/dev/loop-control` 发布或 mount 层 image / `-o loop` 特判。
+
+**Fix:** 总控窄修 `LOOP_SET_FD` 错误优先级：已绑定 loop 设备先返回 `EBUSY`，不先解析 backing fd；提交前保留二次 bound 检查，避免并发绑定穿透。
+
+**Fix:** 修复 reviewer 提出的 Euclid：`LOOP_SET_STATUS*` 成功后总是按用户传入状态提交 `display_name`，空 `lo_name` / `lo_file_name` 也会覆盖旧名称，保证后续 `GET_STATUS*` 反映已提交状态。
+
+**Residual:** reviewer 记录一个 Euclid 但本阶段不引入新 API：unbound loop 的 `total_blocks() == 0` 会让统一 block devfs `read()` 在调用 `LoopDevice::read_blocks()` 前返回 EOF。该行为不影响 loop discovery、bind、mount 主路径；阶段 5 验证口径收窄为 ioctl/mount 不伪成功，不把空闲 block read EOF 作为闭环阻塞项。后续若要细分，应在 block 层增加显式 configured / active-use 查询，而不是为 loop 分叉 file ops。
+
+**Residual:** reviewer 将 `LOOP_CLR_FD` 的 `Arc::strong_count(&dev) > 3` busy 判定列为 Safe。当前基线覆盖 registry、ioctl dispatch 和临时 lookup，额外引用可保守识别 ext4 mount / block path 使用；后续若提高并发语义，应改为 block 层显式 active-use / ref reservation。
+
+**Validation:** `just build` 通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。`git diff --check` 通过。未运行 QEMU / LTP。
+
+**Next:** 进入 Agent 5 验证准备与外部运行 handoff；阶段 6 mount option 语义不并入本轮 loop 收口。
+
+### 2026-06-04 - Agent 5 最小闭环验证准备
+
+**Phase:** Agent 5 / verification handoff and bypass audit
+
+**Audit:** LTP `tst_find_free_loopdev()` 会先尝试 `/dev/loop-control`；当前未发布该节点时，`ENOENT` 路径会回退到扫描 `/dev/loopN` 并以 `LOOP_GET_STATUS == ENXIO` 识别空闲设备。`tst_attach_device()` 的基础路径是 `LOOP_SET_FD` + legacy `LOOP_SET_STATUS`，当前实现支持该路径。`tst_get_device_size()` 依赖 `BLKGETSIZE64`，已由统一 block devfs ioctl 提供。
+
+**Audit:** BusyBox `libbb/loop.c` 同样在缺少 `/dev/loop-control` 时走 `/dev/loopN` 扫描；`mount -o loop` 会尝试设置 `LO_FLAGS_AUTOCLEAR`，当前实现会按 RFC 第一阶段策略拒绝该 bit 并由 BusyBox fallback 清除 autoclear 后重试。最小内核闭环仍以显式 `mount -t ext4 /dev/loopN <mnt>` 验证为准。
+
+**Audit:** `mount(2)` 仍只把 source path 解析为 `DeviceId::Block` 后进入 `MountSource::Block`；ext4 仍要求 block size 为 512 字节。未引入 mount 层解析普通 image 文件或 `-o loop` 的特判。
+
+**Expected Runtime Evidence:** 需要用户或后续授权运行：`/dev/loop0` stat 为 block device；空闲 `LOOP_GET_STATUS*` 返回 `ENXIO`；`LOOP_SET_FD + LOOP_SET_STATUS` 成功；绑定后 `BLKGETSIZE64` 返回 backing image 容量；mkfs ext4 成功；`mount -t ext4 /dev/loopN <mnt>` 成功；挂载点普通文件 create/read/delete 成功；umount 后 `LOOP_CLR_FD` 最终返回空闲状态；unsupported flags 不污染后续 `GET_STATUS*`。
+
+**Remaining Classification:** `ioctl_loop02` 的 `LOOP_CHANGE_FD` 分支、`ioctl_loop07` 的 `/sys/block/loop*` 观测、`LOOP_CONFIGURE` 成功路径、partscan、direct I/O、autoclear 完整 close-last-fd 语义和阶段 6 mount flags 仍属于后续范围，不阻塞 loop 第一阶段闭环。
+
+**Validation:** `just build` 通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。`git diff --check` 通过。未运行 QEMU / LTP，按编排等待用户运行日志或后续明确授权。

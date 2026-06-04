@@ -56,6 +56,7 @@ Canonical：
 背景材料：
 
 - [背景材料索引](./backgrounds/index.md)
+- [LTP IOCTL 测例覆盖面](./backgrounds/ltp-ioctl-coverage.md)
 - [Agent 编排建议](./backgrounds/agent-orchestration.md)
 
 ## 方案

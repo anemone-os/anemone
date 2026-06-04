@@ -44,5 +44,6 @@
 		- [迁移实施计划](./rfcs/ioctl-loop/implementation.md)
 		- [Tracking Issues](./rfcs/ioctl-loop/tracking-issues.md)
 		- [背景材料](./rfcs/ioctl-loop/backgrounds/index.md)
+			- [LTP IOCTL 测例覆盖面](./rfcs/ioctl-loop/backgrounds/ltp-ioctl-coverage.md)
 			- [Agent 编排建议](./rfcs/ioctl-loop/backgrounds/agent-orchestration.md)
 - [模板](./templates.md)
