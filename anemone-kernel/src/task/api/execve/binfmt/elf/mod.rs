@@ -27,7 +27,7 @@ fn load_binary(ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
         return Ok(ExecResult::NotRecognized);
     }
     ctx.prepare_credentials_for(file.path())?;
-    file.seek(0)?;
+    file.seek_set_checked(0)?;
 
     let meta = unsafe { parse::load_image(&file, ctx.usp)? };
 

@@ -6,43 +6,40 @@
 use crate::{prelude::*, syscall::handler::TryFromSyscallArg, task::files::Fd};
 
 #[derive(Debug)]
-enum SeekWhence {
-    Set,
-    Cur,
-    End,
-    Data,
-    Hole,
-}
+struct LseekFrom(SeekFrom);
 
-impl TryFromSyscallArg for SeekWhence {
+impl TryFromSyscallArg for LseekFrom {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
         use anemone_abi::fs::linux::seek::*;
 
         let whence = match raw as usize {
-            SEEK_SET => Self::Set,
-            SEEK_CUR => Self::Cur,
-            SEEK_END => Self::End,
-            SEEK_DATA => Self::Data,
-            SEEK_HOLE => Self::Hole,
+            SEEK_SET => SeekFrom::Set(0),
+            SEEK_CUR => SeekFrom::Cur(0),
+            SEEK_END => SeekFrom::End(0),
+            SEEK_DATA | SEEK_HOLE => {
+                knoticeln!("[NYI] sys_lseek: SEEK_DATA and SEEK_HOLE are not supported yet");
+                return Err(SysError::NotYetImplemented);
+            },
             _ => return Err(SysError::InvalidArgument),
         };
 
-        if matches!(whence, Self::Data | Self::Hole) {
-            knoticeln!("[NYI] sys_lseek: SEEK_DATA and SEEK_HOLE are not supported yet");
-            return Err(SysError::NotYetImplemented);
-        }
-
-        Ok(whence)
+        Ok(Self(whence))
     }
 }
 
 #[syscall(SYS_LSEEK)]
-fn sys_lseek(fd: Fd, offset: i64, whence: SeekWhence) -> Result<u64, SysError> {
+fn sys_lseek(fd: Fd, offset: i64, whence: LseekFrom) -> Result<u64, SysError> {
+    let from = match whence.0 {
+        SeekFrom::Set(_) => SeekFrom::Set(offset),
+        SeekFrom::Cur(_) => SeekFrom::Cur(offset),
+        SeekFrom::End(_) => SeekFrom::End(offset),
+    };
+
     kdebugln!(
         "sys_lseek: fd={:?}, offset={}, whence={:?}",
         fd,
         offset,
-        whence
+        from
     );
 
     let task = get_current_task();
@@ -51,38 +48,5 @@ fn sys_lseek(fd: Fd, offset: i64, whence: SeekWhence) -> Result<u64, SysError> {
         return Err(SysError::BadFileDescriptor);
     }
 
-    let vfs_file = fd.vfs_file();
-
-    match whence {
-        SeekWhence::Set => {
-            if offset < 0 {
-                return Err(SysError::InvalidArgument);
-            }
-            fd.seek(offset as usize)?;
-            Ok(offset as u64)
-        },
-        SeekWhence::Cur => {
-            // TODO: make this atomic.
-            let new_pos = vfs_file.pos() as i64 + offset;
-            if new_pos < 0 {
-                return Err(SysError::InvalidArgument);
-            }
-            let new_pos = new_pos as usize;
-            fd.seek(new_pos)?;
-            Ok(new_pos as u64)
-        },
-        SeekWhence::End => {
-            // TODO: make this atomic.
-            // TODO: this is wrong for some file types (e.g. procfs files). should we
-            // delegate the seek logic to the file system?
-            let new_pos = vfs_file.inode().size() as i64 + offset;
-            if new_pos < 0 {
-                return Err(SysError::InvalidArgument);
-            }
-            let new_pos = new_pos as usize;
-            fd.seek(new_pos)?;
-            Ok(new_pos as u64)
-        },
-        _ => unreachable!(/* handled above */),
-    }
+    fd.seek(from).map(|pos| pos as u64)
 }

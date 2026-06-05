@@ -42,7 +42,7 @@ fn block_sector_count(dev: &dyn BlockDev) -> Result<usize, SysError> {
         .ok_or(SysError::FileTooLarge)
 }
 
-fn block_validate_seek(file: &File, pos: usize) -> Result<(), SysError> {
+fn block_validate_offset(file: &File, pos: usize) -> Result<(), SysError> {
     let dev = block_file_dev(file)?;
     let block_size = dev.block_size().bytes();
     let total_bytes = block_total_bytes(dev.as_ref())?;
@@ -52,6 +52,16 @@ fn block_validate_seek(file: &File, pos: usize) -> Result<(), SysError> {
     }
 
     Ok(())
+}
+
+fn block_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
+    let dev = block_file_dev(file)?;
+    let total_bytes = block_total_bytes(dev.as_ref())?;
+    let mut candidate = *pos;
+    let new_pos = seek_with_fixed_size(file, &mut candidate, from, total_bytes)?;
+    block_validate_offset(file, new_pos)?;
+    *pos = new_pos;
+    Ok(new_pos)
 }
 
 // The block subsystem's default `/dev` behavior is still block-oriented: the
@@ -80,6 +90,11 @@ fn block_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, Sys
     Ok(nbytes)
 }
 
+fn block_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+    let mut local_pos = pos;
+    block_read(file, &mut local_pos, buf)
+}
+
 fn block_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
     if buf.is_empty() {
         return Ok(0);
@@ -104,6 +119,11 @@ fn block_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysErr
     dev.write_blocks(old_pos / block_size, buf)?;
     *pos = end_pos;
     Ok(buf.len())
+}
+
+fn block_write_at(file: &File, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
+    let mut local_pos = pos;
+    block_write(file, &mut local_pos, buf)
 }
 
 fn write_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>, value: T) -> Result<(), SysError> {
@@ -151,7 +171,9 @@ fn block_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
 static BLOCK_DEV_FILE_OPS: FileOps = FileOps {
     read: block_read,
     write: block_write,
-    validate_seek: block_validate_seek,
+    read_at: block_read_at,
+    write_at: block_write_at,
+    seek: block_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     // Block devices also do not have a waitable poll path yet.
     poll: |_, _| Err(SysError::NotYetImplemented),

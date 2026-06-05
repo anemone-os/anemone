@@ -92,6 +92,17 @@ RFC 记录 accepted contract、边界和计划。transaction devlog 记录实际
 
 阶段推进、review 结论和验证证据写入 transaction devlog。RFC 只在 accepted contract 变化时更新；如果实现发现 RFC 的不变量或边界错误，应先回到 RFC 文档层修正，再继续实现。
 
+write set 是协作边界，不是架构边界。写入型 agent 不能静默越过已分配的 write set；但如果更合适的架构需要触碰新的 owner surface、移动 shared contract，或把 helper 放到更自然的子系统，agent 应停止并向总控或用户汇报扩展申请，而不是在原 write set 内做兼容性绕路。
+
+write set 扩展申请至少说明：
+
+- 为什么原 write set 会导致错误分层、重复状态、旁路路径或不可维护的适配层；
+- 需要新增的文件、模块或子系统边界；
+- 对 RFC accepted contract、阶段 gate、review gate 和验证 floor 的影响；
+- 批准后由谁集成，以及 transaction devlog 或 orchestration 文档中的记录位置。
+
+扩展通过后，应先更新 transaction devlog、阶段说明或 agent 编排文档中的 write set，再继续实现。扩展未通过前，worker 仍只能在原 write set 内修改，或保持停止状态等待人工决策。
+
 ### 7. 收口
 
 事务完成时应更新：
@@ -123,3 +134,5 @@ RFC 记录 accepted contract、边界和计划。transaction devlog 记录实际
 Agent 处理 RFC 工作流时应优先读取本文和 [RFC 模板](./rfc-template.md)。如果任务涉及 review 输出，还应使用当前 Anemone review 等级。
 
 Agent 可以帮助整理私有草案、执行文档层 review、修复 RFC 文本、提升公开 RFC、建立 transaction devlog 和更新导航。但 agent 不应把私有草稿路径写入公共 canonical 链接，也不应在用户明确要求文档层闭合时提前开始代码实现。
+
+在实现文档或 agent 编排中，agent 应把 write set 视为默认协作合同。遇到必须越界的架构依赖时，正确动作是提交扩展申请并等待批准；不得自行扩大范围，也不得为了服从旧 write set 引入错误 owner boundary 或长期 compatibility layer。

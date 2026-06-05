@@ -146,12 +146,89 @@ impl<'a> IoctlCtx<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct BackingFileHandle {
+    file: Arc<File>,
+    writable: bool,
+    display_name: String,
+}
+
+impl BackingFileHandle {
+    pub fn from_ioctl_arg_file(backing: IoctlArgFile) -> Result<Self, SysError> {
+        let access = backing.access();
+        if access.is_path_only() || !access.can_read() {
+            return Err(SysError::BadFileDescriptor);
+        }
+
+        let file = backing.file_handle();
+        if file.inode().ty() != InodeType::Regular {
+            return Err(SysError::InvalidArgument);
+        }
+
+        Ok(Self {
+            display_name: format!("{}", file.path()),
+            file,
+            writable: access.can_write(),
+        })
+    }
+
+    pub const fn can_write(&self) -> bool {
+        self.writable
+    }
+
+    pub fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
+    pub fn get_attr(&self) -> Result<InodeStat, SysError> {
+        self.file.get_attr()
+    }
+
+    pub fn visible_size(&self) -> Result<usize, SysError> {
+        usize::try_from(self.get_attr()?.size).map_err(|_| SysError::FileTooLarge)
+    }
+
+    pub fn read_exact_at(&self, mut offset: usize, mut buf: &mut [u8]) -> Result<(), SysError> {
+        while !buf.is_empty() {
+            let read = self.file.read_at(offset, buf)?;
+            if read == 0 {
+                return Err(SysError::UnexpectedEof);
+            }
+
+            offset = offset.checked_add(read).ok_or(SysError::InvalidArgument)?;
+            buf = &mut buf[read..];
+        }
+
+        Ok(())
+    }
+
+    pub fn write_all_at(&self, mut offset: usize, mut buf: &[u8]) -> Result<(), SysError> {
+        if !self.writable {
+            return Err(SysError::BadFileDescriptor);
+        }
+
+        while !buf.is_empty() {
+            let written = self.file.write_at(offset, buf)?;
+            if written == 0 {
+                return Err(SysError::IO);
+            }
+
+            offset = offset.checked_add(written).ok_or(SysError::InvalidArgument)?;
+            buf = &buf[written..];
+        }
+
+        Ok(())
+    }
+}
+
 /// VTable a file must implement to support file operations.
 #[derive(Debug)]
 pub struct FileOps {
     pub read: fn(&File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError>,
     pub write: fn(&File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError>,
-    pub validate_seek: fn(&File, pos: usize) -> Result<(), SysError>,
+    pub read_at: fn(&File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError>,
+    pub write_at: fn(&File, pos: usize, buf: &[u8]) -> Result<usize, SysError>,
+    pub seek: fn(&File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError>,
 
     /// Read a batch of directory entries starting at `pos` into `sink`.
     ///
@@ -172,6 +249,96 @@ pub struct FileOps {
 
     pub ioctl: for<'a> fn(&File, IoctlCtx<'a>) -> Result<u64, SysError>,
 }
+
+mod seek {
+    use super::*;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum SeekFrom {
+        Set(i64),
+        Cur(i64),
+        End(i64),
+    }
+
+    fn apply_seek_offset(base: usize, offset: i64) -> Result<usize, SysError> {
+        if offset >= 0 {
+            let offset = usize::try_from(offset).map_err(|_| SysError::FileTooLarge)?;
+            base.checked_add(offset).ok_or(SysError::FileTooLarge)
+        } else {
+            let offset =
+                usize::try_from(offset.unsigned_abs()).map_err(|_| SysError::InvalidArgument)?;
+            base.checked_sub(offset).ok_or(SysError::InvalidArgument)
+        }
+    }
+
+    pub fn seek_with_fixed_size(
+        _file: &File,
+        pos: &mut usize,
+        from: SeekFrom,
+        size: usize,
+    ) -> Result<usize, SysError> {
+        let base = match from {
+            SeekFrom::Set(_) => 0,
+            SeekFrom::Cur(_) => *pos,
+            SeekFrom::End(_) => size,
+        };
+        let offset = match from {
+            SeekFrom::Set(offset) | SeekFrom::Cur(offset) | SeekFrom::End(offset) => offset,
+        };
+
+        let new_pos = apply_seek_offset(base, offset)?;
+        *pos = new_pos;
+        Ok(new_pos)
+    }
+
+    pub fn seek_with_inode_size(
+        file: &File,
+        pos: &mut usize,
+        from: SeekFrom,
+    ) -> Result<usize, SysError> {
+        let size = usize::try_from(file.inode().size()).map_err(|_| SysError::FileTooLarge)?;
+        seek_with_fixed_size(file, pos, from, size)
+    }
+
+    pub fn seek_with_bounded_size(
+        file: &File,
+        pos: &mut usize,
+        from: SeekFrom,
+        size: usize,
+    ) -> Result<usize, SysError> {
+        let mut candidate = *pos;
+        let new_pos = seek_with_fixed_size(file, &mut candidate, from, size)?;
+        if new_pos > size {
+            return Err(SysError::InvalidArgument);
+        }
+        *pos = new_pos;
+        Ok(new_pos)
+    }
+
+    pub fn seek_dir_rewind(
+        _file: &File,
+        pos: &mut usize,
+        from: SeekFrom,
+    ) -> Result<usize, SysError> {
+        match from {
+            SeekFrom::Set(0) => {
+                *pos = 0;
+                Ok(0)
+            },
+            _ => Err(SysError::InvalidArgument),
+        }
+    }
+
+    pub(super) fn seek_set_offset(pos: usize) -> Result<i64, SysError> {
+        i64::try_from(pos).map_err(|_| SysError::FileTooLarge)
+    }
+}
+
+use self::seek::seek_set_offset;
+pub use self::seek::{
+    SeekFrom, seek_dir_rewind, seek_with_bounded_size, seek_with_fixed_size,
+    seek_with_inode_size,
+};
 
 #[derive(Debug, Clone)]
 pub struct DirEntry {
@@ -266,7 +433,9 @@ impl File {
         static PATH_ONLY_FILE_OPS: FileOps = FileOps {
             read: |_, _, _| Err(SysError::BadFileDescriptor),
             write: |_, _, _| Err(SysError::BadFileDescriptor),
-            validate_seek: |_, _| Err(SysError::BadFileDescriptor),
+            read_at: |_, _, _| Err(SysError::BadFileDescriptor),
+            write_at: |_, _, _| Err(SysError::BadFileDescriptor),
+            seek: |_, _, _| Err(SysError::BadFileDescriptor),
             read_dir: |_, _, _| Err(SysError::BadFileDescriptor),
             poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::empty() & req.interests())),
             ioctl: |_, _| Err(SysError::BadFileDescriptor),
@@ -320,10 +489,7 @@ impl File {
             return Ok(0);
         }
 
-        self.validate_seek(pos)?;
-
-        let mut dummy_pos = pos;
-        let read = (self.ops.read)(self, &mut dummy_pos, buf)?;
+        let read = (self.ops.read_at)(self, pos, buf)?;
 
         Ok(read)
     }
@@ -370,12 +536,10 @@ impl File {
             return Ok(0);
         }
 
-        self.validate_seek(pos)?;
         self.ensure_regular_content_writable()?;
 
-        let mut dummy_pos = pos;
         let cred = get_current_task().cred();
-        let written = (self.ops.write)(self, &mut dummy_pos, buf)?;
+        let written = (self.ops.write_at)(self, pos, buf)?;
         if written > 0 {
             self.inode()
                 .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
@@ -450,10 +614,6 @@ impl File {
         Ok(written)
     }
 
-    pub fn validate_seek(&self, pos: usize) -> Result<(), SysError> {
-        (self.ops.validate_seek)(self, pos)
-    }
-
     /// Run `f` with the file cursor as `pos`.
     pub fn with_pos<F, R>(&self, f: F) -> Result<R, SysError>
     where
@@ -463,10 +623,23 @@ impl File {
         f(&mut *pos)
     }
 
-    pub fn seek(&self, pos: usize) -> Result<(), SysError> {
-        self.validate_seek(pos)?;
-        *self.pos.lock() = pos;
-        Ok(())
+    pub fn seek(&self, from: SeekFrom) -> Result<usize, SysError> {
+        let mut pos = self.pos.lock();
+        let old_pos = *pos;
+        match (self.ops.seek)(self, &mut *pos, from) {
+            Ok(new_pos) => {
+                *pos = new_pos;
+                Ok(new_pos)
+            },
+            Err(err) => {
+                *pos = old_pos;
+                Err(err)
+            },
+        }
+    }
+
+    pub fn seek_set_checked(&self, pos: usize) -> Result<usize, SysError> {
+        self.seek(SeekFrom::Set(seek_set_offset(pos)?))
     }
 
     pub fn read_dir(&self, sink: &mut dyn DirSink) -> Result<ReadDirResult, SysError> {

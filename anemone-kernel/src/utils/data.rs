@@ -34,7 +34,7 @@ impl DataSource for FileDataSource<'_> {
             .base
             .checked_add(offset)
             .ok_or(SysError::InvalidArgument)?;
-        self.file.seek(offset)?;
+        self.file.seek_set_checked(offset)?;
 
         let mut copied = 0usize;
         while copied < dest.len() {

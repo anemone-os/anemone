@@ -24,6 +24,16 @@ use crate::{
 // hook for wait-related syscalls.
 pub use tgid::binding::try_unbind_thread_group;
 
+pub(super) fn read_snapshot_at(pos: usize, buf: &mut [u8], data: &[u8]) -> Result<usize, SysError> {
+    if pos >= data.len() {
+        return Ok(0);
+    }
+
+    let to_read = usize::min(buf.len(), data.len() - pos);
+    buf[..to_read].copy_from_slice(&data[pos..pos + to_read]);
+    Ok(to_read)
+}
+
 static PROCFS: MonoOnce<Arc<FileSystem>> = unsafe { MonoOnce::new() };
 
 static PROCFS_SB: MonoOnce<Arc<SuperBlock>> = unsafe { MonoOnce::new() };

@@ -1,7 +1,7 @@
 //! /dev/null character device.
 
 use crate::{
-    device::char::{CharDev, devfs::publish_char_device, register_char_device},
+    device::char::{CharDev, CharSeekCtx, devfs::publish_char_device, register_char_device},
     prelude::*,
 };
 
@@ -24,6 +24,12 @@ impl CharDev for Null {
 
     fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         Ok(buf.len())
+    }
+
+    fn seek(&self, mut ctx: CharSeekCtx<'_>) -> Result<usize, SysError> {
+        let _ = ctx.from();
+        ctx.set_pos(0);
+        Ok(0)
     }
 }
 

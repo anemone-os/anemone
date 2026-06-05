@@ -165,6 +165,9 @@ impl FileDesc {
         if !self.can_read() {
             return Err(SysError::BadFileDescriptor);
         }
+        if self.is_path_only() {
+            return Err(SysError::BadFileDescriptor);
+        }
         self.pfile.file.read_at(offset, buf).map_err(|e| e.into())
     }
 
@@ -188,10 +191,9 @@ impl FileDesc {
         if !self.can_write() {
             return Err(SysError::BadFileDescriptor);
         }
-        self.pfile
-            .file
-            .validate_seek(offset)
-            .map_err(|e| e.into())?;
+        if self.is_path_only() {
+            return Err(SysError::BadFileDescriptor);
+        }
         if flags.contains(FileStatusFlags::APPEND) {
             return self
                 .pfile
@@ -215,13 +217,13 @@ impl FileDesc {
         inode.truncate(len, cred)
     }
 
-    /// `whence` is Linux-specific. we handle that in syscall handler. it should
-    /// not pollute our FileDesc API.
-    pub fn seek(&self, offset: usize) -> Result<(), SysError> {
+    /// Linux whence values are converted in syscall handlers; FileDesc only
+    /// forwards the internal seek intent.
+    pub fn seek(&self, from: SeekFrom) -> Result<usize, SysError> {
         if self.is_path_only() {
             return Err(SysError::BadFileDescriptor);
         }
-        self.pfile.file.seek(offset).map_err(|e| e.into())
+        self.pfile.file.seek(from).map_err(|e| e.into())
     }
 
     pub fn read_dir(&self, sink: &mut dyn DirSink) -> Result<ReadDirResult, SysError> {

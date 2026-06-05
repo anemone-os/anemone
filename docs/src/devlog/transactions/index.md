@@ -6,6 +6,7 @@
 
 ## Active
 
+- [FileOps Seek and Char Device ioctl](./2026-06-05-fileops-seek-char-ioctl.md)
 - [IOCTL Loop](./2026-06-04-ioctl-loop.md)
 - [PROC TGID FD](./2026-06-04-proc-tgid-fd.md)
 - [Cred Merge](./2026-06-02-cred-merge.md)

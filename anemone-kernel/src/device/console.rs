@@ -235,7 +235,9 @@ static CONSOLE_STDOUT_INODE_OPS: InodeOps = InodeOps {
 static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {
     read: console_read,
     write: |_, _, _| Err(SysError::NotSupported),
-    validate_seek: |_, _| Err(SysError::NotSupported),
+    read_at: |_, _, _| Err(SysError::IllegalSeek),
+    write_at: |_, _, _| Err(SysError::NotSupported),
+    seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, _| {
         kerrln!("console stdin poll is not implemented yet");
@@ -247,7 +249,9 @@ static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {
 static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
     read: |_, _, _| Err(SysError::NotSupported),
     write: console_write,
-    validate_seek: |_, _| Err(SysError::NotSupported),
+    read_at: |_, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _| Err(SysError::IllegalSeek),
+    seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, _| {
         kerrln!("console stdout poll is not implemented yet");

@@ -549,7 +549,9 @@ fn pipe_tx_poll(
 static PIPE_RX_FILE_OPS: FileOps = FileOps {
     read: pipe_rx_read,
     write: |_, _, _| Err(SysError::NotSupported),
-    validate_seek: |_, _| Err(SysError::IllegalSeek),
+    read_at: |_, _, _| Err(SysError::IllegalSeek),
+    write_at: |_, _, _| Err(SysError::NotSupported),
+    seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_rx_poll,
     ioctl: pipe_ioctl,
@@ -558,7 +560,9 @@ static PIPE_RX_FILE_OPS: FileOps = FileOps {
 static PIPE_TX_FILE_OPS: FileOps = FileOps {
     read: |_, _, _| Err(SysError::NotSupported),
     write: pipe_tx_write,
-    validate_seek: |_, _| Err(SysError::IllegalSeek),
+    read_at: |_, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _| Err(SysError::IllegalSeek),
+    seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_tx_poll,
     ioctl: pipe_ioctl,

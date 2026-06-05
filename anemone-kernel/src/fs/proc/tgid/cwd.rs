@@ -47,7 +47,9 @@ static TGID_CWD_INODE_OPS: InodeOps = InodeOps {
 static TGID_CWD_FILE_OPS: FileOps = FileOps {
     read: |_, _, _| Err(SysError::NotSupported),
     write: |_, _, _| Err(SysError::NotSupported),
-    validate_seek: |_, _| Err(SysError::NotSupported),
+    read_at: |_, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _| Err(SysError::NotSupported),
+    seek: |_, _, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotSupported),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),

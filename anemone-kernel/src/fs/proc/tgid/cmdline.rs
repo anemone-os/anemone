@@ -91,31 +91,30 @@ fn tgid_cmdline_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usi
     Ok(to_read)
 }
 
-fn tgid_cmdline_validate_seek(file: &File, pos: usize) -> Result<(), SysError> {
+fn tgid_cmdline_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+    let mut local_pos = pos;
+    tgid_cmdline_read(file, &mut local_pos, buf)
+}
+
+fn tgid_cmdline_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
     let binding = validate_tgid_sub_inode(file.inode())?;
 
     let leader = binding.tg.leader().ok_or(SysError::NoSuchProcess)?;
     let Some(usp_handle) = leader.try_clone_uspace_handle() else {
-        return if pos == 0 {
-            Ok(())
-        } else {
-            Err(SysError::InvalidArgument)
-        };
+        return seek_with_bounded_size(file, pos, from, 0);
     };
 
     let (_addr, len) = usp_handle.lock().cmdline_range();
 
-    if pos > len {
-        return Err(SysError::InvalidArgument);
-    }
-
-    Ok(())
+    seek_with_bounded_size(file, pos, from, len)
 }
 
 static TGID_CMDLINE_FILE_OPS: FileOps = FileOps {
     read: tgid_cmdline_read,
     write: |_, _, _| Err(SysError::NotSupported),
-    validate_seek: tgid_cmdline_validate_seek,
+    read_at: tgid_cmdline_read_at,
+    write_at: |_, _, _| Err(SysError::NotSupported),
+    seek: tgid_cmdline_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),

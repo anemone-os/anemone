@@ -1,6 +1,7 @@
 use crate::{
     fs::{
         iomux::PollEvent,
+        proc::read_snapshot_at,
         proc::tgid::{default_tgid_entry_prv, validate_tgid_sub_inode, TgidEntry},
     },
     prelude::*,
@@ -66,20 +67,24 @@ fn tgid_stat_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize,
     Ok(to_read)
 }
 
-fn tgid_stat_validate_seek(file: &File, pos: usize) -> Result<(), SysError> {
+fn tgid_stat_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
     let data = build_stat_line(file.inode())?;
 
-    if pos > data.len() {
-        return Err(SysError::InvalidArgument);
-    }
+    read_snapshot_at(pos, buf, data.as_bytes())
+}
 
-    Ok(())
+fn tgid_stat_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
+    let data = build_stat_line(file.inode())?;
+
+    seek_with_bounded_size(file, pos, from, data.len())
 }
 
 static TGID_STAT_FILE_OPS: FileOps = FileOps {
     read: tgid_stat_read,
     write: |_, _, _| Err(SysError::NotSupported),
-    validate_seek: tgid_stat_validate_seek,
+    read_at: tgid_stat_read_at,
+    write_at: |_, _, _| Err(SysError::NotSupported),
+    seek: tgid_stat_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),

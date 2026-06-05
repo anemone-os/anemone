@@ -242,6 +242,11 @@ fn ramfs_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, Sys
     Ok(n)
 }
 
+fn ramfs_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+    let mut local_pos = pos;
+    ramfs_read(file, &mut local_pos, buf)
+}
+
 fn ramfs_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
     let inode = file.inode();
     let state = ramfs_reg_state(inode)?;
@@ -258,9 +263,21 @@ fn ramfs_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysErr
     Ok(buf.len())
 }
 
-fn ramfs_validate_seek(file: &File, pos: usize) -> Result<(), SysError> {
+fn ramfs_write_at(file: &File, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
+    let mut local_pos = pos;
+    ramfs_write(file, &mut local_pos, buf)
+}
+
+fn ramfs_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
+    let base = match from {
+        SeekFrom::End(_) => {
+            usize::try_from(file.inode().size()).map_err(|_| SysError::FileTooLarge)?
+        },
+        _ => 0,
+    };
+
     // allow seeking beyond EOF; the gap will be zero-filled on the next write.
-    Ok(())
+    seek_with_fixed_size(file, pos, from, base)
 }
 
 fn ramfs_read_dir(
@@ -296,7 +313,9 @@ fn ramfs_read_dir(
 pub(super) static RAMFS_REG_FILE_OPS: FileOps = FileOps {
     read: ramfs_read,
     write: ramfs_write,
-    validate_seek: ramfs_validate_seek,
+    read_at: ramfs_read_at,
+    write_at: ramfs_write_at,
+    seek: ramfs_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| {
         Ok(req.ready_or_unsupported((PollEvent::READABLE | PollEvent::WRITABLE) & req.interests()))
@@ -307,7 +326,9 @@ pub(super) static RAMFS_REG_FILE_OPS: FileOps = FileOps {
 pub(super) static RAMFS_DIR_FILE_OPS: FileOps = FileOps {
     read: |_, _, _| Err(SysError::IsDir),
     write: |_, _, _| Err(SysError::IsDir),
-    validate_seek: |_, _| Err(SysError::IsDir),
+    read_at: |_, _, _| Err(SysError::IsDir),
+    write_at: |_, _, _| Err(SysError::IsDir),
+    seek: seek_dir_rewind,
     read_dir: ramfs_read_dir,
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
@@ -316,7 +337,9 @@ pub(super) static RAMFS_DIR_FILE_OPS: FileOps = FileOps {
 pub(super) static RAMFS_SYMLINK_FILE_OPS: FileOps = FileOps {
     read: |_, _, _| Err(SysError::NotSupported),
     write: |_, _, _| Err(SysError::NotSupported),
-    validate_seek: |_, _| Err(SysError::NotSupported),
+    read_at: |_, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _| Err(SysError::NotSupported),
+    seek: |_, _, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
