@@ -92,6 +92,23 @@
 **Last Verified:** 2026-05-24
 **Related:** [开发日志：2026-05-11 至 2026-05-24](../devlog/2026-05-11_to_2026-05-24.md)
 
+## ANE-20260605-DEVFS-CHAR-SEEK-IOCTL-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** devfs / char device / lseek / ioctl
+
+**Summary:** 当前字符设备 devfs 入口只提供统一的 read/write 分发，`validate_seek` 固定返回 unsupported，`ioctl` 也固定返回 unsupported。这样会让 Linux 上可 seek 的内存类字符设备偏离预期：`/dev/null`、`/dev/zero`、`/dev/full` 这类设备在 Linux 上有专门的 `null_lseek` 行为，可支持 `O_APPEND` 打开并把 seek 结果归零；`/dev/urandom` 等设备也通过 `noop_llseek` 接受无副作用 seek。当前 LTP `tst_cmd_()` 用 `O_WRONLY | O_APPEND | O_CREAT` 打开 `/dev/null` 重定向命令输出时，会因为该缺口得到 `EOPNOTSUPP` warning。字符设备侧还没有类似 block devfs `BlockDev::ioctl` 的私有 ioctl hook，因此 random、tty、misc 等后续字符设备 ioctl 只能停在统一 unsupported，不能按设备分发。
+
+**Decision:** 当前不为了单个 `/dev/null` warning 贸然扩展 `FileOps` 或在 VFS 层硬编码特殊设备。后续需要先明确字符设备拥有的最小 seek/ioctl contract：默认 ioctl 应保持 Linux 风格稳定 unsupported，具体字符设备再通过自身 hook 接收私有命令；seek 语义应能表达内存类字符设备的 `null_lseek` / `noop_llseek`，同时不破坏 pipe、目录、普通文件和 block devfs 的现有边界。
+
+**Exit Condition:** 为字符设备子系统补齐可审查的 seek 与私有 ioctl 分发模型，并让 `/dev/null`、`/dev/zero`、`/dev/full`、`/dev/urandom` 至少覆盖 `O_APPEND` 打开、显式 `lseek` 返回值和未知 ioctl errno 的 Linux 兼容边界；随后重新验证触发该 warning 的 LTP mkfs/setup 路径，并把 random/tty 类后续 ioctl 缺口重新归类到对应子域。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-05
+**Related:** [IOCTL Loop 事务日志](../devlog/transactions/2026-06-04-ioctl-loop.md), [当前限制：IOCTL LTP stage-1 gaps](./current-limitations.md#ane-20260604-ioctl-ltp-stage1-gaps)
+
 ## ANE-20260525-SYSV-SHM-MUNMAP-DETACH
 
 **Type:** Limitation
