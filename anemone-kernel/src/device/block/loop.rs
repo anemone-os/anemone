@@ -1,7 +1,7 @@
 use crate::{
     device::block::{
         BlockDev, BlockDevClass, BlockDevRegistration, BlockIoctlCtx, BlockSize,
-        devfs::publish_block_device, get_block_dev, register_block_device,
+        devfs::publish_block_device, register_block_device,
     },
     fs::BackingFileHandle,
     prelude::*,
@@ -49,32 +49,34 @@ impl LoopDevice {
             return Err(SysError::BadFileDescriptor);
         }
 
-        {
-            let state = self.state.lock();
-            if matches!(*state, LoopState::Bound(_)) {
+        ctx.with_io_lock(|| {
+            if matches!(*self.state.lock(), LoopState::Bound(_)) {
                 return Err(SysError::Busy);
             }
-        }
+            Ok(())
+        })?;
 
         let backing = BackingFileHandle::from_ioctl_arg_file(ctx.lookup_arg_fd()?)?;
         let backing_writable = backing.can_write();
         let readonly = !backing_writable;
         let display_name = backing.display_name().to_string();
-        let mut state = self.state.lock();
-        if matches!(*state, LoopState::Bound(_)) {
-            return Err(SysError::Busy);
-        }
+        ctx.with_io_lock(|| {
+            let mut state = self.state.lock();
+            if matches!(*state, LoopState::Bound(_)) {
+                return Err(SysError::Busy);
+            }
 
-        *state = LoopState::Bound(LoopBoundState::new(
-            backing,
-            0,
-            None,
-            readonly,
-            backing_writable,
-            display_name,
-            LoopFlags::new(readonly, false),
-        ));
-        Ok(0)
+            *state = LoopState::Bound(LoopBoundState::new(
+                backing,
+                0,
+                None,
+                readonly,
+                backing_writable,
+                display_name,
+                LoopFlags::new(readonly, false),
+            ));
+            Ok(0)
+        })
     }
 
     fn get_status(&self, ctx: &BlockIoctlCtx<'_>, legacy: bool) -> Result<u64, SysError> {
@@ -98,46 +100,46 @@ impl LoopDevice {
             LoopStatusUpdate::from_loop_info64(read_ioctl_value::<loop_info64>(ctx)?)?
         };
 
-        let mut state = self.state.lock();
-        let LoopState::Bound(bound) = &mut *state else {
-            return Err(SysError::NoSuchDeviceOrAddress);
-        };
+        ctx.with_io_lock(|| {
+            let mut state = self.state.lock();
+            let LoopState::Bound(bound) = &mut *state else {
+                return Err(SysError::NoSuchDeviceOrAddress);
+            };
 
-        if !update.readonly && !bound.backing_writable {
-            return Err(SysError::BadFileDescriptor);
-        }
+            if !update.readonly && !bound.backing_writable {
+                return Err(SysError::BadFileDescriptor);
+            }
 
-        bound.offset = update.offset;
-        bound.size_limit = update.size_limit;
-        bound.readonly = update.readonly || !bound.backing_writable;
-        bound.flags = LoopFlags::new(bound.readonly, false);
-        bound.display_name = update.display_name;
+            bound.offset = update.offset;
+            bound.size_limit = update.size_limit;
+            bound.readonly = update.readonly || !bound.backing_writable;
+            bound.flags = LoopFlags::new(bound.readonly, false);
+            bound.display_name = update.display_name;
 
-        Ok(0)
+            Ok(0)
+        })
     }
 
-    fn clear_fd(&self) -> Result<u64, SysError> {
-        let mut state = self.state.lock();
-        if matches!(*state, LoopState::Unbound) {
-            return Err(SysError::NoSuchDeviceOrAddress);
-        }
-        if self.has_external_block_refs() {
-            return Err(SysError::Busy);
-        }
+    fn clear_fd(&self, ctx: &BlockIoctlCtx<'_>) -> Result<u64, SysError> {
+        ctx.with_io_lock(|| {
+            let mut state = self.state.lock();
+            if matches!(*state, LoopState::Unbound) {
+                return Err(SysError::NoSuchDeviceOrAddress);
+            }
+            if self.has_external_block_refs(ctx) {
+                return Err(SysError::Busy);
+            }
 
-        *state = LoopState::Unbound;
-        Ok(0)
+            *state = LoopState::Unbound;
+            Ok(0)
+        })
     }
 
-    fn has_external_block_refs(&self) -> bool {
-        let Some(dev) = get_block_dev(self.devnum()) else {
-            return false;
-        };
-
-        // Registry + block devfs ioctl dispatch + this temporary lookup are
+    fn has_external_block_refs(&self, ctx: &BlockIoctlCtx<'_>) -> bool {
+        // Registry + block devfs ioctl dispatch are
         // the baseline refs while handling LOOP_CLR_FD. Anything more means a
         // mount or another block path still observes this device.
-        Arc::strong_count(&dev) > 3
+        ctx.target_device_persistent_ref_count() > 2
     }
 }
 
@@ -439,7 +441,7 @@ impl BlockDev for LoopDevice {
             LOOP_SET_FD => self.set_fd(&ctx),
             LOOP_SET_STATUS => self.set_status(&ctx, true),
             LOOP_SET_STATUS64 => self.set_status(&ctx, false),
-            LOOP_CLR_FD => self.clear_fd(),
+            LOOP_CLR_FD => self.clear_fd(&ctx),
             LOOP_SET_DIRECT_IO | LOOP_CONFIGURE => Err(SysError::UnsupportedIoctl),
             _ => Err(SysError::UnsupportedIoctl),
         }

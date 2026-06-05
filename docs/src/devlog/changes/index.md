@@ -32,4 +32,4 @@
 
 ## 当前记录
 
-暂无独立小迭代记录。既有双周开发日志保持原状，不回填拆分。
+- [2026-06-05 - Block Byte I/O Loop Mkfs](./2026-06-05-block-byte-io-loop-mkfs.md)

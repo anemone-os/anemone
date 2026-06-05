@@ -58,6 +58,13 @@ impl TryFromSyscallArg for FcntlCmd {
     }
 }
 
+fn validate_setfl_status_flags(file: &File, flags: FileStatusFlags) -> Result<(), SysError> {
+    if file.inode().ty() == InodeType::Block && flags.contains(FileStatusFlags::DIRECT) {
+        return Err(SysError::InvalidArgument);
+    }
+    Ok(())
+}
+
 #[syscall(SYS_FCNTL)]
 fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
     kdebugln!("fcntl: fd={:?}, cmd={:?}, arg={:#x}", fd, cmd, arg);
@@ -133,6 +140,7 @@ fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
                 FileStatusFlags::DIRECT,
                 settable.contains(FileStatusFlags::DIRECT),
             );
+            validate_setfl_status_flags(file.vfs_file(), flags)?;
             file.set_file_flags(flags);
             crate::fs::pipe::update_nonblock(
                 file.vfs_file(),
@@ -152,5 +160,75 @@ fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
             knoticeln!("[NYI] fcntl command {:?} is not supported yet", cmd);
             Err(SysError::NotYetImplemented)
         },
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use crate::utils::any_opaque::NilOpaque;
+
+    #[kunit]
+    fn test_setfl_status_rejects_odirect_on_block_special_file() {
+        let mut flags = FileStatusFlags::APPEND;
+        flags.insert(FileStatusFlags::DIRECT);
+
+        assert_eq!(
+            validate_setfl_status_flags(&kunit_block_file(), flags).unwrap_err(),
+            SysError::InvalidArgument
+        );
+    }
+
+    fn kunit_block_file() -> File {
+        static KUNIT_BLOCK_INODE_OPS: InodeOps = InodeOps {
+            lookup: |_, _| Err(SysError::NotDir),
+            touch: |_, _, _| Err(SysError::NotDir),
+            mkdir: |_, _, _| Err(SysError::NotDir),
+            symlink: |_, _, _| Err(SysError::NotDir),
+            link: |_, _, _| Err(SysError::NotDir),
+            unlink: |_, _| Err(SysError::NotDir),
+            rmdir: |_, _| Err(SysError::NotDir),
+            rename: |_, _, _, _, _| Err(SysError::NotDir),
+            open: |_| {
+                Ok(OpenedFile {
+                    file_ops: &KUNIT_BLOCK_FILE_OPS,
+                    prv: NilOpaque::new(),
+                })
+            },
+            truncate: |_, _| Err(SysError::InvalidArgument),
+            read_link: |_| Err(SysError::InvalidArgument),
+            get_attr: |inode| {
+                Ok(InodeStat {
+                    fs_dev: DeviceId::None,
+                    ino: inode.ino(),
+                    mode: InodeMode::new(inode.ty(), inode.perm()),
+                    nlink: inode.nlink(),
+                    uid: inode.uid(),
+                    gid: inode.gid(),
+                    rdev: DeviceId::Block(BlockDevNum::new(
+                        MajorNum::new(devnum::block::major::DYNAMIC_ALLOC.0),
+                        MinorNum::new(2),
+                    )),
+                    size: 0,
+                    atime: inode.atime(),
+                    mtime: inode.mtime(),
+                    ctime: inode.ctime(),
+                })
+            },
+        };
+        static KUNIT_BLOCK_FILE_OPS: FileOps = FileOps {
+            read: |_, _, _| Err(SysError::IO),
+            write: |_, _, _| Err(SysError::IO),
+            read_at: |_, _, _| Err(SysError::IO),
+            write_at: |_, _, _| Err(SysError::IO),
+            seek: |_, _, _| Err(SysError::IO),
+            read_dir: |_, _, _| Err(SysError::NotDir),
+            poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::empty() & req.interests())),
+            ioctl: |_, _| Err(SysError::UnsupportedIoctl),
+        };
+
+        let inode =
+            anony_new_inode(InodeType::Block, &KUNIT_BLOCK_INODE_OPS, NilOpaque::new()).unwrap();
+        anony_open(&inode).unwrap()
     }
 }
