@@ -1,5 +1,5 @@
 all:
-	apt install -y just
+	cargo install just
 	cp conf/.benchconf kconfig
 	just conf switch rv
 	just build
