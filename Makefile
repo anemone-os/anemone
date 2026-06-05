@@ -1,4 +1,5 @@
 all:
+	apt install -y just
 	cp conf/.benchconf kconfig
 	just conf switch rv
 	just build
@@ -6,5 +7,5 @@ all:
 	just conf switch la
 	just build
 	cp build/anemone.elf kernel-la
-	
+
 .PHONY: all
