@@ -21,6 +21,7 @@ If the task involves review findings or issue severity, also use `anemone-code-r
 - Public RFCs live under `docs/src/rfcs/<short-slug>/` and become canonical immediately after promotion.
 - Large feature work should close the document protocol before code implementation unless the user explicitly narrows the task differently.
 - RFCs record accepted contract, scope, invariants, and planned gates. Transaction devlogs record execution facts, checkpoints, review results, validation evidence, corrections, and handoff.
+- Write sets are coordination contracts, not architecture constraints. A worker must not silently edit outside its assigned write set, but if the better design needs a different owning surface, it should stop and report the proposed expansion instead of forcing compatibility inside the old write set.
 
 ## Workflow
 
@@ -57,6 +58,7 @@ If the task involves review findings or issue severity, also use `anemone-code-r
    - Link RFC `index.md` to the transaction and transaction `Canonical Plan` back to the RFC.
    - Update `docs/src/devlog/transactions/index.md`, the current biweekly devlog, and `docs/src/SUMMARY.md`.
    - Transaction entries should be append-only. Add correction notes instead of silently rewriting completed stages.
+   - If a worker needs a larger write set for architectural reasons, require an upward report with the reason, proposed files/modules, affected contract, and validation gate. After approval, record the updated write set in the transaction devlog or orchestration doc before continuing.
 
 7. Close the workflow.
    - Update RFC status, transaction status, tracking issues, current limitations/register, and final validation notes.

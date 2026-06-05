@@ -12,7 +12,7 @@ worker、reviewer 和验收顺序。
 3. 阶段 2 的通用 `BLK*` ioctl 与 block private hook 强耦合，建议由同一实现 agent 完成。
 4. 阶段 3 的 loop 设备池和阶段 4 的 loop 私有 ioctl 可以同一 agent 串行推进，但必须保留 checkpoint；设备池未闭合前不要实现 `LOOP_SET_FD`。
 5. review agent 只放在有意义的 gate 上，不在每个小补丁后立即审查。
-6. 写入型 worker 只改自己的 write set；遇到必须越界的依赖，停止并回报总控。
+6. 写入型 worker 默认只改自己的 write set；若更合适的架构必须扩大范围，停止并向总控提交 write set 扩展申请，批准后再继续。
 7. 每个实现阶段都要保持 `just build` 通过；功能阶段必须提供最小用户态或 LTP 风格验证证据。
 8. LTP/QEMU 默认由用户验证，除非用户后续明确授权 agent 运行。
 9. 第一阶段不发布 `/dev/loop-control`；任何 worker 都不得用半发布控制节点绕过 `/dev/loopN` discovery。
@@ -25,7 +25,7 @@ worker、reviewer 和验收顺序。
 
 - 可以执行前置检查、代码搜索和构建级 gate。
 - 可以启动只读 explorer / reviewer。
-- 可以启动写入型 worker，但必须使用本文列出的 write set 和 worker 合同。
+- 可以启动写入型 worker，但必须使用本文列出的 write set 和 worker 合同；需要扩大 write set 时，先记录原因、范围、contract/gate 影响和批准结果。
 - 可以串行集成 worker diff。
 - 可以在实现开始后建立并更新事务 devlog。
 - 不运行 QEMU / LTP，除非用户后续明确要求；rv64 / LTP 日志默认由用户提供。
@@ -61,7 +61,7 @@ LOOP_SET_STATUS* / LOOP_CLR_FD 等第一阶段 loop ioctl，并准备 mount -t e
 /dev/loopN 的最小闭环验证。
 
 你可以启动子 agent，但必须按 agent-orchestration.md 的顺序、write set 和 review gate
-分工，不允许 worker 越界修改。你不是独自在代码库里工作；不得 revert 用户或其他
+分工；未经批准不允许 worker 越界修改。你不是独自在代码库里工作；不得 revert 用户或其他
 agent 的改动。实现开始后需要建立并维护对应事务 devlog。
 
 第一步只做前置检查、刷新当前代码落点和准备启动的 agent 列表。不要直接一次性启动

@@ -206,6 +206,12 @@ Canonical：
 
 - 本阶段需要执行的搜索、review 或分类。
 
+write set：
+
+- 默认允许修改的文件、模块或文档。
+- 不应触碰的边界。
+- 如果更合适的架构需要扩大 write set，应停止并上报扩展申请；申请需说明原因、拟新增范围、contract/gate/验证影响和批准后的记录位置。
+
 可观测性：
 
 - 本阶段要求的 debug / trace / assertion 证据。
@@ -229,6 +235,10 @@ Canonical：
 ## 停止边界
 
 说明什么时候应继续追查 issue，什么时候应停止实现形状争论。
+
+## Write Set 扩展记录
+
+- YYYY-MM-DD：原 write set、申请原因、批准后的新增范围、对应 review/验证 gate、transaction devlog 链接。
 ```
 
 ## `backgrounds/index.md`

@@ -21,7 +21,7 @@ worker、reviewer 和验收顺序。
 4. 阶段 2 不与阶段 1 混写。只要 `readdir` / `lookup` / `readlink` / `getattr`
    能支撑 `getcwd02` 和 `pipe07`，总控就应先收口阶段 1。
 5. review agent 只放在有意义的 gate 上，不在每个小补丁后立即审查。
-6. 写入型 worker 只改自己的 write set；遇到必须越界的依赖，停止并回报总控。
+6. 写入型 worker 默认只改自己的 write set；若更合适的架构必须扩大范围，停止并向总控提交 write set 扩展申请，批准后再继续。
 7. 每个实现阶段退出都要更新事务日志：
    [2026-06-04 - PROC TGID FD](../../../devlog/transactions/2026-06-04-proc-tgid-fd.md)。
 8. `just build` 是最低构建 gate，不能替代 procfs/fd 语义审计。
@@ -36,7 +36,7 @@ worker、reviewer 和验收顺序。
 
 - 可以执行前置检查、代码搜索和构建级 gate。
 - 可以启动只读 explorer / reviewer。
-- 可以启动写入型 worker，但必须使用本文列出的 write set 和 worker 合同。
+- 可以启动写入型 worker，但必须使用本文列出的 write set 和 worker 合同；需要扩大 write set 时，先记录原因、范围、contract/gate 影响和批准结果。
 - 可以串行集成 worker diff。
 - 可以更新事务 devlog。
 - 不运行 QEMU / LTP，除非用户后续明确要求；rv64 / LTP 日志默认由用户提供。
@@ -71,7 +71,7 @@ docs/src/devlog/transactions/2026-06-04-proc-tgid-fd.md。
 只在阶段 1 后确认成为新的直接阻塞项时推进。
 
 你可以启动子 agent，但必须按 agent-orchestration.md 的顺序、write set 和 review gate
-分工，不允许 worker 越界修改。你不是独自在代码库里工作；不得 revert 用户或其他
+分工；未经批准不允许 worker 越界修改。你不是独自在代码库里工作；不得 revert 用户或其他
 agent 的改动。每集成一个阶段都要更新
 docs/src/devlog/transactions/2026-06-04-proc-tgid-fd.md。
 

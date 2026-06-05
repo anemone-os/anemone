@@ -11,7 +11,7 @@ worker、reviewer 和验收顺序。
 2. 阶段 2 的 typed register API 与阶段 3 的 pipe source 强耦合，建议由同一实现 agent
    完成，但中间保留 checkpoint。
 3. review agent 只放在有意义的 gate 上，不在每个微小实现步后立即审查。
-4. 写入型 worker 只改自己的 write set；遇到必须越界的依赖，停止并回报总控。
+4. 写入型 worker 默认只改自己的 write set；若更合适的架构必须扩大范围，停止并向总控提交 write set 扩展申请，批准后再继续。
 5. 每个实现阶段退出都要更新事务日志：
    [2026-06-03 - Sched Latch](../../../devlog/transactions/2026-06-03-sched-latch.md)。
 6. 只通过 `just build` 不能替代协议审计；阶段退出必须引用对应 tracking gate。
@@ -28,7 +28,7 @@ worker、reviewer 和验收顺序。
 
 - 可以执行前置检查、代码搜索和构建级 gate。
 - 可以启动只读 explorer / reviewer。
-- 可以启动写入型 worker，但必须使用本文列出的 write set 和 worker 合同。
+- 可以启动写入型 worker，但必须使用本文列出的 write set 和 worker 合同；需要扩大 write set 时，先记录原因、范围、contract/gate 影响和批准结果。
 - 可以串行集成 worker diff。
 - 可以更新事务 devlog。
 - 不运行 QEMU / LTP，除非用户后续明确要求；rv64 / LTP 日志默认由用户提供。
@@ -63,7 +63,7 @@ docs/src/devlog/transactions/2026-06-03-sched-latch.md。
 source register protocol、迁移 pipe source、迁移 ppoll、迁移 pselect6，并做旁路审计。
 
 你可以启动子 agent，但必须按 agent-orchestration.md 的顺序、write set 和 review gate
-分工，不允许 worker 越界修改。你不是独自在代码库里工作；不得 revert 用户或其他
+分工；未经批准不允许 worker 越界修改。你不是独自在代码库里工作；不得 revert 用户或其他
 agent 的改动。每集成一个阶段都要更新
 docs/src/devlog/transactions/2026-06-03-sched-latch.md。
 
@@ -350,7 +350,7 @@ agent 之间来回传递，反而降低审查质量。
   source wake detach、cleanup 非正确性支柱、placement 责任或 syscall outcome mapping。
 - `ppoll` / `pselect6` 共享 helper 做不出来，只能复制两套可漂移的 wait loop。
 - source lock 与 wait core lock 出现新的不确定锁序。
-- worker 必须越过 write set 才能继续。
+- worker 需要扩大 write set 才能继续，且尚未获得批准或记录。
 
 ## Worker Prompt 模板
 
@@ -364,7 +364,7 @@ docs/src/rfcs/sched-latch/backgrounds/agent-orchestration.md。
 
 你的任务是：<填入 Agent N 的职责>。
 
-只允许修改以下 write set：
+未经批准只允许修改以下 write set：
 <填入 write set>
 
 必须满足的 gate：
@@ -372,8 +372,8 @@ docs/src/rfcs/sched-latch/backgrounds/agent-orchestration.md。
 
 不要修改无关文件，不要 revert 用户或其他 agent 的改动。低成本 invariant 使用
 release build 生效的 `assert!`，不要只用 `debug_assert!` 掩盖 user-test / LTP 下的
-代码错误；重型扫描或昂贵诊断才使用 debug-only 检查。遇到必须越界、协议无法闭合、
-或停止条件命中时，停止并报告。完成后更新
+代码错误；重型扫描或昂贵诊断才使用 debug-only 检查。遇到必须扩大 write set、
+协议无法闭合、或停止条件命中时，停止并报告扩展申请或阻塞原因。完成后更新
 docs/src/devlog/transactions/2026-06-03-sched-latch.md，并在最终回复中列出：
 改动文件、满足的 gate、运行过的验证、未解决风险。
 ```

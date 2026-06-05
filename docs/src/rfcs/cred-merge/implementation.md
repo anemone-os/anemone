@@ -30,7 +30,8 @@ syscall、VFS、exec、mm、sched、测试脚本等修复。
 
 4. 所有 worker 都必须使用 disjoint write set。
    worker 不是独自在代码库里工作，不能 revert 其他 agent 的改动；遇到越界依赖时
-   停下来报告给总控，而不是顺手改别人的文件。
+   停下来向总控提交 write set 扩展申请，而不是顺手改别人的文件。申请通过后，
+   总控先记录新增范围、原因和 gate 影响，再继续集成。
 
 5. 允许总控 agent 在 `dev/drc/merge-cred` 上使用 git 做本地版本管理。
    总控可以创建阶段性 checkpoint commit、worker 集成 commit 和最终 merge commit，
@@ -120,7 +121,7 @@ git merge --no-commit origin/main
 
 - 可以执行前置检查和 `git merge --no-commit origin/main`。
 - 可以启动只读 reviewer / explorer。
-- 可以启动写入型 worker，但必须使用本文列出的 write set 和 worker 合同。
+- 可以启动写入型 worker，但必须使用本文列出的 write set 和 worker 合同；需要扩大 write set 时，先记录原因、范围、contract/gate 影响和批准结果。
 - 可以把 worker diff 串行集成到 merge-state。
 - 可以在 `dev/drc/merge-cred` 上使用 git 做本地 checkpoint commit / 阶段 commit，
   记录 worker 集成点、review 修复点和构建 gate 点。
@@ -158,7 +159,7 @@ docs/src/devlog/transactions/2026-06-02-cred-merge.md。
 exec、mm、sched、LTP group 拆分和脚本修复默认以当前分支为准。
 
 你可以启动子 agent，但必须按 docs/src/rfcs/cred-merge/implementation.md 的
-worker write set 分工，不允许让 worker
+worker write set 分工；未经批准不允许让 worker
 越界修改。你不是独自在代码库里工作；不得 revert 用户或其他 agent 的改动。
 你可以在 dev/drc/merge-cred 上使用 git 做本地版本管理，包括阶段性 checkpoint commit
 和 worker 集成 commit；但不要 push、force-push、reset hard、clean，或改写其他分支。
@@ -599,7 +600,7 @@ merge gate。
 - `openat` 无法同时保留 typed parser/fd model 和 `FsPermChecker` DAC 语义。
 - exec credential 计算与 `PathRef`/`execveat` loader 的提交顺序无法闭合。
 - `Task` credential lock 与 sched wait state 出现真实锁序不确定性。
-- worker 必须越过 write set 才能继续。
+- worker 需要扩大 write set 才能继续，且尚未获得批准或记录。
 - 用户反馈的 cred-core 窄集合日志出现无法归入既有限制的权限/uid/gid/exec 回归。
 - 需要引入临时兼容层，但没有明确的后续删除点和 devlog 记录位置。
 
@@ -626,8 +627,8 @@ merge gate。
 
 ```text
 工作目录是仓库根目录。你不是独自在代码库里工作；不要 revert
-别人或其他 agent 的改动。只允许修改本任务列出的 write set。遇到必须越界的
-依赖，停止并报告给总控。merge 原则：credentials 语义以 origin/main 为准，
+别人或其他 agent 的改动。未经批准只允许修改本任务列出的 write set。遇到必须扩大
+write set 的依赖，停止并向总控提交扩展申请。merge 原则：credentials 语义以 origin/main 为准，
 credentials 以外的本地 bugfix 和重构默认以当前 HEAD 为准。最终回复必须列出：
 改动文件、保留的本地语义、移植的 origin/main 语义、未闭合问题、已跑的构建检查；
 不要运行 LTP，LTP 由用户手动执行。
