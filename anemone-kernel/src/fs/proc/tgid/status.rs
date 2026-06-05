@@ -72,20 +72,18 @@ fn tgid_status_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usiz
     Ok(to_read)
 }
 
-fn tgid_status_validate_seek(file: &File, pos: usize) -> Result<(), SysError> {
+fn tgid_status_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
     let data = build_status_text(file.inode())?;
 
-    if pos > data.len() {
-        return Err(SysError::InvalidArgument);
-    }
-
-    Ok(())
+    seek_with_bounded_size(file, pos, from, data.len())
 }
 
 static TGID_STATUS_FILE_OPS: FileOps = FileOps {
     read: tgid_status_read,
     write: |_, _, _| Err(SysError::NotSupported),
-    validate_seek: tgid_status_validate_seek,
+    read_at: compat_read_at_via_seek_then_read_1c_delete,
+    write_at: |_, _, _| Err(SysError::NotSupported),
+    seek: tgid_status_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),

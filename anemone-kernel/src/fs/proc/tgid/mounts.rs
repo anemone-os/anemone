@@ -54,18 +54,16 @@ fn tgid_mounts_read(_file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usi
     Ok(0)
 }
 
-fn tgid_mounts_validate_seek(_file: &File, pos: usize) -> Result<(), SysError> {
-    if pos > 0 {
-        Err(SysError::InvalidArgument)
-    } else {
-        Ok(())
-    }
+fn tgid_mounts_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
+    seek_with_bounded_size(file, pos, from, 0)
 }
 
 static TGID_MOUNTS_FILE_OPS: FileOps = FileOps {
     read: tgid_mounts_read,
     write: |_, _, _| Err(SysError::NotSupported),
-    validate_seek: tgid_mounts_validate_seek,
+    read_at: compat_read_at_via_seek_then_read_1c_delete,
+    write_at: |_, _, _| Err(SysError::NotSupported),
+    seek: tgid_mounts_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),

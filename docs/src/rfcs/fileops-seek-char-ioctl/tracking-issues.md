@@ -3,7 +3,7 @@
 **状态：** Closed
 **最后更新：** 2026-06-05
 **父 RFC：** [RFC-20260605-fileops-seek-char-ioctl](./index.md)
-**事务日志：** None
+**事务日志：** [2026-06-05-fileops-seek-char-ioctl](../../devlog/transactions/2026-06-05-fileops-seek-char-ioctl.md)
 
 本文只跟踪当前仍影响实现顺序、review gate、停止边界或验收判断的问题。修复后必须把结论折回 `index.md`、`invariants.md` 或 `implementation.md`，本页只保留问题状态和 neutralize 依据。
 

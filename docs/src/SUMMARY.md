@@ -11,6 +11,7 @@
 		- [Sched Latch](./devlog/transactions/2026-06-03-sched-latch.md)
 		- [IOCTL Loop](./devlog/transactions/2026-06-04-ioctl-loop.md)
 		- [PROC TGID FD](./devlog/transactions/2026-06-04-proc-tgid-fd.md)
+		- [FileOps Seek 与字符设备 ioctl](./devlog/transactions/2026-06-05-fileops-seek-char-ioctl.md)
 - [初赛冲刺策略（2026-05 至 2026-06）](./preliminary-contest-sprint.md)
 - [已知问题与当前限制](./known-issues-and-limitations.md)
 	- [活动登记册](./register.md)

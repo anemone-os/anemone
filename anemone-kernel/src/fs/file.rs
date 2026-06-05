@@ -151,7 +151,9 @@ impl<'a> IoctlCtx<'a> {
 pub struct FileOps {
     pub read: fn(&File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError>,
     pub write: fn(&File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError>,
-    pub validate_seek: fn(&File, pos: usize) -> Result<(), SysError>,
+    pub read_at: fn(&File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError>,
+    pub write_at: fn(&File, pos: usize, buf: &[u8]) -> Result<usize, SysError>,
+    pub seek: fn(&File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError>,
 
     /// Read a batch of directory entries starting at `pos` into `sink`.
     ///
@@ -171,6 +173,96 @@ pub struct FileOps {
     pub poll: for<'a> fn(&File, &PollRequest<'a>) -> Result<PollRegisterResult, SysError>,
 
     pub ioctl: for<'a> fn(&File, IoctlCtx<'a>) -> Result<u64, SysError>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeekFrom {
+    Set(i64),
+    Cur(i64),
+    End(i64),
+}
+
+fn apply_seek_offset(base: usize, offset: i64) -> Result<usize, SysError> {
+    if offset >= 0 {
+        let offset = usize::try_from(offset).map_err(|_| SysError::FileTooLarge)?;
+        base.checked_add(offset).ok_or(SysError::FileTooLarge)
+    } else {
+        let offset =
+            usize::try_from(offset.unsigned_abs()).map_err(|_| SysError::InvalidArgument)?;
+        base.checked_sub(offset).ok_or(SysError::InvalidArgument)
+    }
+}
+
+pub fn seek_with_fixed_size(
+    _file: &File,
+    pos: &mut usize,
+    from: SeekFrom,
+    size: usize,
+) -> Result<usize, SysError> {
+    let base = match from {
+        SeekFrom::Set(_) => 0,
+        SeekFrom::Cur(_) => *pos,
+        SeekFrom::End(_) => size,
+    };
+    let offset = match from {
+        SeekFrom::Set(offset) | SeekFrom::Cur(offset) | SeekFrom::End(offset) => offset,
+    };
+
+    let new_pos = apply_seek_offset(base, offset)?;
+    *pos = new_pos;
+    Ok(new_pos)
+}
+
+pub fn seek_with_inode_size(
+    file: &File,
+    pos: &mut usize,
+    from: SeekFrom,
+) -> Result<usize, SysError> {
+    let size = usize::try_from(file.inode().size()).map_err(|_| SysError::FileTooLarge)?;
+    seek_with_fixed_size(file, pos, from, size)
+}
+
+pub fn seek_with_bounded_size(
+    file: &File,
+    pos: &mut usize,
+    from: SeekFrom,
+    size: usize,
+) -> Result<usize, SysError> {
+    let mut candidate = *pos;
+    let new_pos = seek_with_fixed_size(file, &mut candidate, from, size)?;
+    if new_pos > size {
+        return Err(SysError::InvalidArgument);
+    }
+    *pos = new_pos;
+    Ok(new_pos)
+}
+
+// Stage 1A compatibility helper. It is deliberately named so Agent 3 / phase
+// 1C can replace each use with backend-local positioned I/O classification.
+pub fn compat_read_at_via_seek_then_read_1c_delete(
+    file: &File,
+    pos: usize,
+    buf: &mut [u8],
+) -> Result<usize, SysError> {
+    let mut local_pos = 0;
+    (file.ops.seek)(file, &mut local_pos, SeekFrom::Set(seek_set_offset(pos)?))?;
+    (file.ops.read)(file, &mut local_pos, buf)
+}
+
+// Stage 1A compatibility helper. It is deliberately named so Agent 3 / phase
+// 1C can replace each use with backend-local positioned I/O classification.
+pub fn compat_write_at_via_seek_then_write_1c_delete(
+    file: &File,
+    pos: usize,
+    buf: &[u8],
+) -> Result<usize, SysError> {
+    let mut local_pos = 0;
+    (file.ops.seek)(file, &mut local_pos, SeekFrom::Set(seek_set_offset(pos)?))?;
+    (file.ops.write)(file, &mut local_pos, buf)
+}
+
+fn seek_set_offset(pos: usize) -> Result<i64, SysError> {
+    i64::try_from(pos).map_err(|_| SysError::FileTooLarge)
 }
 
 #[derive(Debug, Clone)]
@@ -266,7 +358,9 @@ impl File {
         static PATH_ONLY_FILE_OPS: FileOps = FileOps {
             read: |_, _, _| Err(SysError::BadFileDescriptor),
             write: |_, _, _| Err(SysError::BadFileDescriptor),
-            validate_seek: |_, _| Err(SysError::BadFileDescriptor),
+            read_at: |_, _, _| Err(SysError::BadFileDescriptor),
+            write_at: |_, _, _| Err(SysError::BadFileDescriptor),
+            seek: |_, _, _| Err(SysError::BadFileDescriptor),
             read_dir: |_, _, _| Err(SysError::BadFileDescriptor),
             poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::empty() & req.interests())),
             ioctl: |_, _| Err(SysError::BadFileDescriptor),
@@ -320,10 +414,7 @@ impl File {
             return Ok(0);
         }
 
-        self.validate_seek(pos)?;
-
-        let mut dummy_pos = pos;
-        let read = (self.ops.read)(self, &mut dummy_pos, buf)?;
+        let read = (self.ops.read_at)(self, pos, buf)?;
 
         Ok(read)
     }
@@ -370,12 +461,10 @@ impl File {
             return Ok(0);
         }
 
-        self.validate_seek(pos)?;
         self.ensure_regular_content_writable()?;
 
-        let mut dummy_pos = pos;
         let cred = get_current_task().cred();
-        let written = (self.ops.write)(self, &mut dummy_pos, buf)?;
+        let written = (self.ops.write_at)(self, pos, buf)?;
         if written > 0 {
             self.inode()
                 .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
@@ -451,7 +540,12 @@ impl File {
     }
 
     pub fn validate_seek(&self, pos: usize) -> Result<(), SysError> {
-        (self.ops.validate_seek)(self, pos)
+        // Stage 1A compatibility for callers outside the FileOps initializer
+        // sweep. Later gates must classify these callers into seek intent or
+        // positioned I/O policy before this old API disappears.
+        let mut local_pos = 0;
+        (self.ops.seek)(self, &mut local_pos, SeekFrom::Set(seek_set_offset(pos)?))?;
+        Ok(())
     }
 
     /// Run `f` with the file cursor as `pos`.
@@ -463,9 +557,27 @@ impl File {
         f(&mut *pos)
     }
 
+    pub fn seek_from(&self, from: SeekFrom) -> Result<usize, SysError> {
+        let mut pos = self.pos.lock();
+        let old_pos = *pos;
+        match (self.ops.seek)(self, &mut *pos, from) {
+            Ok(new_pos) => {
+                *pos = new_pos;
+                Ok(new_pos)
+            },
+            Err(err) => {
+                *pos = old_pos;
+                Err(err)
+            },
+        }
+    }
+
+    pub fn seek_set_checked(&self, pos: usize) -> Result<usize, SysError> {
+        self.seek_from(SeekFrom::Set(seek_set_offset(pos)?))
+    }
+
     pub fn seek(&self, pos: usize) -> Result<(), SysError> {
-        self.validate_seek(pos)?;
-        *self.pos.lock() = pos;
+        self.seek_set_checked(pos)?;
         Ok(())
     }
 

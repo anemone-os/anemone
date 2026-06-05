@@ -400,8 +400,8 @@ fn ext4_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysErro
     Ok(buf.len())
 }
 
-fn ext4_validate_seek(file: &File, pos: usize) -> Result<(), SysError> {
-    Ok(())
+fn ext4_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
+    seek_with_inode_size(file, pos, from)
 }
 
 fn ext4_read_dir(
@@ -454,7 +454,9 @@ fn ext4_read_dir(
 pub(super) static EXT4_REG_FILE_OPS: FileOps = FileOps {
     read: ext4_read,
     write: ext4_write,
-    validate_seek: ext4_validate_seek,
+    read_at: compat_read_at_via_seek_then_read_1c_delete,
+    write_at: compat_write_at_via_seek_then_write_1c_delete,
+    seek: ext4_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| {
         Ok(req.ready_or_unsupported((PollEvent::READABLE | PollEvent::WRITABLE) & req.interests()))
@@ -465,7 +467,9 @@ pub(super) static EXT4_REG_FILE_OPS: FileOps = FileOps {
 pub(super) static EXT4_DIR_FILE_OPS: FileOps = FileOps {
     read: |_, _, _| Err(SysError::IsDir),
     write: |_, _, _| Err(SysError::IsDir),
-    validate_seek: |_, _| Err(SysError::IsDir),
+    read_at: |_, _, _| Err(SysError::IsDir),
+    write_at: |_, _, _| Err(SysError::IsDir),
+    seek: |_, _, _| Err(SysError::IsDir),
     read_dir: ext4_read_dir,
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
@@ -474,7 +478,9 @@ pub(super) static EXT4_DIR_FILE_OPS: FileOps = FileOps {
 pub(super) static EXT4_SYMLINK_FILE_OPS: FileOps = FileOps {
     read: |_, _, _| Err(SysError::NotSupported),
     write: |_, _, _| Err(SysError::NotSupported),
-    validate_seek: |_, _| Err(SysError::NotSupported),
+    read_at: |_, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _| Err(SysError::NotSupported),
+    seek: |_, _, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),

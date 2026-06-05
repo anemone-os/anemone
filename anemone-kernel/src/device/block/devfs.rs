@@ -42,7 +42,7 @@ fn block_sector_count(dev: &dyn BlockDev) -> Result<usize, SysError> {
         .ok_or(SysError::FileTooLarge)
 }
 
-fn block_validate_seek(file: &File, pos: usize) -> Result<(), SysError> {
+fn block_validate_offset(file: &File, pos: usize) -> Result<(), SysError> {
     let dev = block_file_dev(file)?;
     let block_size = dev.block_size().bytes();
     let total_bytes = block_total_bytes(dev.as_ref())?;
@@ -52,6 +52,16 @@ fn block_validate_seek(file: &File, pos: usize) -> Result<(), SysError> {
     }
 
     Ok(())
+}
+
+fn block_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
+    let dev = block_file_dev(file)?;
+    let total_bytes = block_total_bytes(dev.as_ref())?;
+    let mut candidate = *pos;
+    let new_pos = seek_with_fixed_size(file, &mut candidate, from, total_bytes)?;
+    block_validate_offset(file, new_pos)?;
+    *pos = new_pos;
+    Ok(new_pos)
 }
 
 // The block subsystem's default `/dev` behavior is still block-oriented: the
@@ -151,7 +161,9 @@ fn block_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
 static BLOCK_DEV_FILE_OPS: FileOps = FileOps {
     read: block_read,
     write: block_write,
-    validate_seek: block_validate_seek,
+    read_at: compat_read_at_via_seek_then_read_1c_delete,
+    write_at: compat_write_at_via_seek_then_write_1c_delete,
+    seek: block_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     // Block devices also do not have a waitable poll path yet.
     poll: |_, _| Err(SysError::NotYetImplemented),

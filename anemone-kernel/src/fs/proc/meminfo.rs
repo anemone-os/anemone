@@ -82,21 +82,19 @@ fn proc_meminfo_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usi
     Ok(to_read)
 }
 
-fn proc_meminfo_validate_seek(_file: &File, pos: usize) -> Result<(), SysError> {
+fn proc_meminfo_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
     let meminfo_string = meminfo_string();
     let meminfo_bytes = meminfo_string.as_bytes();
 
-    if pos > meminfo_bytes.len() {
-        return Err(SysError::InvalidArgument);
-    }
-
-    Ok(())
+    seek_with_bounded_size(file, pos, from, meminfo_bytes.len())
 }
 
 static PROC_MEMINFO_FILE_OPS: FileOps = FileOps {
     read: proc_meminfo_read,
     write: |_, _, _| Err(SysError::NotSupported),
-    validate_seek: proc_meminfo_validate_seek,
+    read_at: compat_read_at_via_seek_then_read_1c_delete,
+    write_at: |_, _, _| Err(SysError::NotSupported),
+    seek: proc_meminfo_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),

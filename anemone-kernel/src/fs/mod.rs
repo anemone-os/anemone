@@ -31,7 +31,10 @@ pub use self::{
     dentry::Dentry,
     file::{
         DirEntry, DirSink, File, FileOps, FixedSizeDirSink, IoctlArgFdLookup, IoctlArgFile,
-        IoctlCtx, IoctlFileAccess, IoctlFileStatusFlags, ReadDirResult, SinkResult,
+        IoctlCtx, IoctlFileAccess, IoctlFileStatusFlags, ReadDirResult, SeekFrom, SinkResult,
+        compat_read_at_via_seek_then_read_1c_delete,
+        compat_write_at_via_seek_then_write_1c_delete, seek_with_bounded_size,
+        seek_with_fixed_size, seek_with_inode_size,
     },
     filesystem::{FileSystem, FileSystemFlags, FileSystemOps},
     inode::{

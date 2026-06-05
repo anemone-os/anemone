@@ -35,7 +35,9 @@ fn char_file_write(file: &File, _pos: &mut usize, buf: &[u8]) -> Result<usize, S
 static CHAR_DEV_FILE_OPS: FileOps = FileOps {
     read: char_file_read,
     write: char_file_write,
-    validate_seek: |_, _| Err(SysError::NotSupported),
+    read_at: |_, _, _| Err(SysError::IllegalSeek),
+    write_at: |_, _, _| Err(SysError::IllegalSeek),
+    seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     // Char devices do not have a waitable poll path yet. Report NYI instead of
     // pretending every device is immediately readable or writable.

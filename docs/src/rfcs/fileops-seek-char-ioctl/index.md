@@ -1,12 +1,12 @@
 # RFC-20260605-fileops-seek-char-ioctl
 
-**状态：** Draft，已提升为公开 RFC 草案
+**状态：** Accepted for Implementation
 **负责人：** doruche, Codex
 **最后更新：** 2026-06-05
 **领域：** VFS / syscall ABI / devfs / character device
-**事务日志：** None；进入实现阶段前建立。
+**事务日志：** [2026-06-05-fileops-seek-char-ioctl](../../devlog/transactions/2026-06-05-fileops-seek-char-ioctl.md)
 **开放问题：** None；已处理的 review finding 见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** 完成公开 RFC review；若进入实现，先创建事务日志，再按 [迁移实施计划](./implementation.md) 的阶段 0 前置审计和阶段 1A/1B/1C 小 gate 推进。
+**下一步：** 按 [迁移实施计划](./implementation.md) 先推进阶段 1A mechanical API sweep 与 Gate 1 review；后续 worker 不得越过 [Agent 编排建议](./backgrounds/agent-orchestration.md) 的顺序和 write set。
 
 ## 摘要
 

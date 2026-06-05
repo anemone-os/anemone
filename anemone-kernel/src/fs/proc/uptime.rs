@@ -65,21 +65,19 @@ fn proc_uptime_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usiz
     Ok(to_read)
 }
 
-fn proc_uptime_validate_seek(_file: &File, pos: usize) -> Result<(), SysError> {
+fn proc_uptime_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
     let uptime_string = uptime_string();
     let uptime_bytes = uptime_string.as_bytes();
 
-    if pos > uptime_bytes.len() {
-        return Err(SysError::InvalidArgument);
-    }
-
-    Ok(())
+    seek_with_bounded_size(file, pos, from, uptime_bytes.len())
 }
 
 static PROC_UPTIME_FILE_OPS: FileOps = FileOps {
     read: proc_uptime_read,
     write: |_, _, _| Err(SysError::NotSupported),
-    validate_seek: proc_uptime_validate_seek,
+    read_at: compat_read_at_via_seek_then_read_1c_delete,
+    write_at: |_, _, _| Err(SysError::NotSupported),
+    seek: proc_uptime_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),

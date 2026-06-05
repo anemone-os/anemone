@@ -1,0 +1,116 @@
+# 2026-06-05 - FileOps Seek and Char Device ioctl
+
+**Status:** Active
+**Owners:** doruche, Codex
+**Area:** VFS / syscall ABI / devfs / character device / loop
+**RFC:** [RFC-20260605-fileops-seek-char-ioctl](../../rfcs/fileops-seek-char-ioctl/index.md)
+**Current Phase:** Gate 1 passed; stopped before Agent 2
+
+## Scope
+
+本事务跟踪 `FileOps::validate_seek` 到 `FileOps::seek` / positioned I/O / `CharDev` ioctl
+的 staged 迁移。实现按 RFC gate 推进：
+
+- 阶段 1A：shared `FileOps` mechanical API sweep 与 fail-closed 默认实现；
+- 阶段 1B：迁移 `lseek(2)` 到 opened file seek intent；
+- 阶段 1C：收紧 fd / VFS / backend positioned I/O contract，并引入 loop backing narrowed handle；
+- 阶段 2：接通 `CharDev` seek policy 和 memory char device null-style seek；
+- 阶段 3：接通字符设备 ioctl 默认分发；
+- 最终旁路审计、构建 gate、最小证据整理和收口。
+
+非目标：
+
+- 不引入完整 Linux `FMODE_*` 能力模型。
+- 不实现完整 `SEEK_DATA` / `SEEK_HOLE`。
+- 不扩大 tty、random、serial 等字符设备的完整 ioctl 协议。
+- 不改变 loop 设备作为 block private ioctl hook 的边界。
+- 不运行 QEMU / LTP，除非用户后续明确授权；运行态证据默认由用户提供。
+
+## Invariants
+
+- `lseek(2)`、positioned I/O 和 ioctl 分发必须有各自清晰 owner，不能继续共用
+  `validate_seek(pos)` 这一模糊入口。
+- `FileOps::seek` 接收 seek intent，而不是 syscall 层预先算好的最终 offset。
+- `File::{read_at,write_at}` 不得通过通用 dummy cursor wrapper 偷换成普通
+  `read` / `write`。
+- fd-local policy、VFS-wide gate 和 backend positioned I/O capability 必须分层表达。
+- loop state 只保存 VFS/fd 边界产出的 narrowed backing handle，不保存任意
+  `FileDesc` / `IoctlArgFile` 后再推断能力。
+- `CharDev` seek / ioctl 只接收窄 ctx，不默认暴露完整 `File`、`FileDesc`、task 或 fd table。
+- 每个 worker 只能写入编排文档指定 write set；需要扩大 write set 时必须停止上报。
+
+## Handoff
+
+**Last Updated:** 2026-06-05
+
+**Current Branch:** `dev/drc/seek`
+
+**Canonical RFC:** [RFC-20260605-fileops-seek-char-ioctl](../../rfcs/fileops-seek-char-ioctl/index.md), [Invariants](../../rfcs/fileops-seek-char-ioctl/invariants.md), [Implementation Plan](../../rfcs/fileops-seek-char-ioctl/implementation.md), [Tracking Issues](../../rfcs/fileops-seek-char-ioctl/tracking-issues.md)
+
+**Completed:** 公开 RFC、invariants、implementation、tracking issues 和 agent orchestration 文档已存在。总控完成 Agent 0 级只读前置审计：当前分支仍处于 RFC 描述的旧形状，`FileOps` 仍有 `validate_seek`，`File::read_at` / `File::write_at` 仍通过 `validate_seek + dummy_pos` 复用普通 `read` / `write`，`sys_lseek()` 仍在 syscall 层计算 `SEEK_CUR` / `SEEK_END`，char devfs 仍统一 seek unsupported / ioctl unsupported，loop backing 仍通过保存的 backing file 调 `read_at` / `write_at`。未发现 RFC 停止条件。
+
+**In Progress:** 暂停在 Agent 2 前，等待用户确认是否继续阶段 1B。
+
+**Open Blockers:** 暂无已确认 blocker。
+
+**Next Action:** 如用户继续，按编排启动 Agent 2，完成阶段 1B `lseek` / seek intent 迁移。不得直接启动 Agent 3+。
+
+**Do Not Redo:** 不要把 `FileDesc` / `ProcFile` / task / fd table 传进 file ops 或 `CharDev` hook；不要让 worker 越界改后续阶段；不要把 `SEEK_DATA` / `SEEK_HOLE` 交给 backend；不要用通用 wrapper 给 stream 后端继承 positioned I/O 能力；不要改 loop / block ioctl 所有权边界。
+
+## Phase Log
+
+### 2026-06-05 - 事务日志启动与 Agent 0 前置审计记录
+
+**Phase:** orchestration / pre-audit
+
+**Change:** 建立本事务日志，并把 [RFC-20260605-fileops-seek-char-ioctl](../../rfcs/fileops-seek-char-ioctl/index.md)、事务索引、mdBook Summary 和当前双周 devlog 连接到同一条实现记录。
+
+**Review:** 总控只读刷新当前落点：分支为 `dev/drc/seek`，前置审计时工作区干净；未发现已引入且与 RFC 不兼容的 `FileOps` seek / positioned I/O 抽象；loop backing 尚未扩大到任意 VFS object 且缺 narrowed conversion contract；字符设备 seek / ioctl 尚未开始传递完整 `FileDesc`、task 或 fd table。
+
+**Validation:** 用户明确要求跳过 baseline `just build`；本阶段未运行构建、QEMU 或 LTP。
+
+**Next:** 启动 Agent 1 与 Gate 1 review agent；不启动 Agent 2+。
+
+### 2026-06-05 - Agent 1 与 Gate 1 review agent 启动
+
+**Phase:** Agent 1 / Gate 1 setup
+
+**Change:** Agent 1 write set 限定为 `anemone-kernel/src/fs/file.rs`、所有直接 `FileOps` initializer 文件、必要的 `fs::mod` re-export 和本事务 devlog。Agent 1 只能完成阶段 1A mechanical API sweep 与 fail-closed 默认实现；不得迁移 `sys_lseek()` 外部语义，不得改 loop backing handle，不得实现 `CharDev` hook。
+
+**Review:** Gate 1 reviewer 只读准备审查清单，等待 Agent 1 diff 后检查阶段 1A gate。reviewer 不改代码。
+
+**Validation:** 按用户要求，本轮不跑 baseline build；Agent 1 完成后可运行 `git diff --check`，是否运行 `just build` 由用户后续指示或 gate 需要决定。
+
+### 2026-06-05 - Agent 1 阶段 1A mechanical sweep 完成
+
+**Phase:** Agent 1 / Stage 1A
+
+**Change:** `FileOps` vtable 移除 `validate_seek` 字段，新增 `seek`、`read_at`、`write_at` 字段。新增内部 `SeekFrom::{Set, Cur, End}` 和 `seek_with_fixed_size` / `seek_with_inode_size` / `seek_with_bounded_size` helper，使后端能接收 seek intent。`SEEK_DATA` / `SEEK_HOLE` 仍停留在现有 syscall whence 转换层，本阶段未进入 backend contract。
+
+**Change:** `File::read_at()` / `File::write_at()` 不再通过 `validate_seek + dummy_pos` 复用普通 `read` / `write`，改为完成 zero-length / VFS writable gate 后委托 `ops.read_at` / `ops.write_at`。`File::seek_from()` 持有 `File.pos` lock 后调用 backend seek，并保留 `seek_set_checked()` 和旧 `seek(pos)` 作为阶段 1A 内部绝对定位兼容入口。
+
+**Change:** 所有直接 `FileOps` initializer 显式补齐 `read_at`、`write_at`、`seek`。pipe、console、stream char devfs、path-only、symlink 和目录类对象 fail closed；regular file、block devfs 和 proc snapshot 类对象使用阶段 1A 临时 helper `compat_read_at_via_seek_then_read_1c_delete` / `compat_write_at_via_seek_then_write_1c_delete` 或 bounded seek helper 保持机械闭合。
+
+**Boundary:** 未修改 `sys_lseek()` 外部语义；未迁移 `SEEK_CUR` / `SEEK_END` 的 syscall 层计算；未改 loop backing handle；未实现 `CharDev` seek 或 ioctl hook。`File::validate_seek()` 仍作为阶段 1A 兼容迁移点保留，因为 `FileDesc::write_at()` 属于后续 fd-layer positioned I/O 分类，不在 Agent 1 write set；该残留必须在阶段 1B/1C 分类并删除。
+
+**Review:** 原 Agent 1 worker 在完成部分 initializer sweep 后被总控中断停止；总控接管同一 write set 补齐剩余 proc / tgid / proc root direct `FileOps` initializer。未触发 write set 扩展申请，未触发 RFC 停止条件。
+
+**Audit:** `rg -n "validate_seek|FileOps \\{|read_at:|write_at:|seek:" anemone-kernel/src` 显示 `validate_seek:` vtable 字段已消失，所有 direct `FileOps` initializer 都显式列出 `read_at` / `write_at` / `seek`。剩余 `validate_seek` 命中仅为 `File::validate_seek()` 兼容迁移点和 `task/files.rs` 中 `FileDesc::write_at()` 对该迁移点的调用。`compat_*_1c_delete` helper 命名可搜索，并在本条记录为阶段 1C 删除/分类点。
+
+**Validation:** `git diff --check` 通过。按用户要求未运行 `just build`、QEMU 或 LTP。
+
+**Next:** Gate 1 reviewer 只读审查本阶段 diff；通过后才能进入 Agent 2，不能直接启动后续 worker。
+
+### 2026-06-05 - Gate 1 review 通过
+
+**Phase:** Gate 1 / Stage 1A review
+
+**Review:** Gate 1 reviewer 未发现 Apollyon / Keter blocker。确认本 diff 满足阶段 1A：`FileOps::validate_seek` 已不再是 vtable 字段，所有 direct initializer 显式提供 `seek` / `read_at` / `write_at`，`File::read_at()` / `File::write_at()` 委托新 ops，stream / path-only / directory / symlink 对象 fail closed，且本阶段没有迁移 `sys_lseek()`、loop backing handle 或 `CharDev` hook。
+
+**Review:** reviewer 记录一个 Euclid：`compat_*_1c_delete` 临时 helper 经 `fs/mod.rs` 导出，作为短期 backend migration helper 略宽；因 helper 命名清楚、可搜索，且当前只用于 regular / block / proc snapshot 风格 initializer，不阻塞 Gate 1。阶段 1C 必须删除或 backend-localize。
+
+**Review:** reviewer 记录一个 Safe：`File::validate_seek()` 兼容方法及 `FileDesc::write_at()` 调用仍存在。由于 `task/files.rs` 不在 Agent 1 write set，且该方法不再是 `FileOps` vtable 字段，并已在本事务记录为阶段 1A 兼容迁移点，Gate 1 接受。后续 1B/1C 必须分类并移除旧 API。
+
+**Validation:** reviewer 未运行 build / QEMU / LTP。当前已运行且通过的验证仍为 `git diff --check`；按用户要求未运行 `just build`。
+
+**Next:** 停止在 Agent 2 前，等待用户确认继续。
