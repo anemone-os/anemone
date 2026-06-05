@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** VFS / syscall ABI / devfs / character device / loop
 **RFC:** [RFC-20260605-fileops-seek-char-ioctl](../../rfcs/fileops-seek-char-ioctl/index.md)
-**Current Phase:** Gate 4 passed; stopped before Agent 5
+**Current Phase:** Gate 5 passed; stopped before Agent 6
 
 ## Scope
 
@@ -47,13 +47,13 @@
 
 **Canonical RFC:** [RFC-20260605-fileops-seek-char-ioctl](../../rfcs/fileops-seek-char-ioctl/index.md), [Invariants](../../rfcs/fileops-seek-char-ioctl/invariants.md), [Implementation Plan](../../rfcs/fileops-seek-char-ioctl/implementation.md), [Tracking Issues](../../rfcs/fileops-seek-char-ioctl/tracking-issues.md)
 
-**Completed:** 公开 RFC、invariants、implementation、tracking issues 和 agent orchestration 文档已存在。Agent 0 只读前置审计完成；Agent 1 阶段 1A mechanical API sweep 和 Gate 1 review 已完成。Agent 2 阶段 1B 已迁移 `sys_lseek()` 到 opened file seek intent，`File::seek` 现在接收 `SeekFrom` 并在 `File.pos` lock 内调用 backend seek，目录类 file ops 最小支持 `SEEK_SET(0)` rewind，内部绝对定位调用已改为 `seek_set_checked()`。Agent 3 阶段 1C 已删除阶段 1A compat helper / `validate_seek()` 残留，分类 positioned I/O，并让 loop 保存 VFS/fd 边界产出的 `BackingFileHandle`；Gate 3 独立 reviewer 已通过。Agent 4 阶段 2 已接通 `CharDev` seek policy，并让 memory char device 显式提供 null-style seek；Gate 4 独立 reviewer 已通过。
+**Completed:** 公开 RFC、invariants、implementation、tracking issues 和 agent orchestration 文档已存在。Agent 0 只读前置审计完成；Agent 1 阶段 1A mechanical API sweep 和 Gate 1 review 已完成。Agent 2 阶段 1B 已迁移 `sys_lseek()` 到 opened file seek intent，`File::seek` 现在接收 `SeekFrom` 并在 `File.pos` lock 内调用 backend seek，目录类 file ops 最小支持 `SEEK_SET(0)` rewind，内部绝对定位调用已改为 `seek_set_checked()`。Agent 3 阶段 1C 已删除阶段 1A compat helper / `validate_seek()` 残留，分类 positioned I/O，并让 loop 保存 VFS/fd 边界产出的 `BackingFileHandle`；Gate 3 独立 reviewer 已通过。Agent 4 阶段 2 已接通 `CharDev` seek policy，并让 memory char device 显式提供 null-style seek；Gate 4 独立 reviewer 已通过。Agent 5 阶段 3 已接通 `CharDev` ioctl 默认分发；Gate 5 独立 reviewer 已通过。
 
-**In Progress:** 暂停在 Agent 5 前。不得自行扩大到字符设备 ioctl 默认分发。
+**In Progress:** 暂停在 Agent 6 前。不得自行执行最终旁路审计收口。
 
 **Open Blockers:** 暂无已确认 blocker。
 
-**Next Action:** 如继续本 RFC，按编排启动 Agent 5，完成阶段 3 字符设备 ioctl 默认分发；不要回退 block / loop ioctl 所有权边界。
+**Next Action:** 如继续本 RFC，按编排启动 Agent 6，做最终旁路审计、证据整理和事务收口；不要回退 block / loop ioctl 所有权边界。
 
 **Do Not Redo:** 不要把 `FileDesc` / `ProcFile` / task / fd table 传进 file ops 或 `CharDev` hook；不要让 worker 越界改后续阶段；不要把 `SEEK_DATA` / `SEEK_HOLE` 交给 backend；不要用通用 wrapper 给 stream 后端继承 positioned I/O 能力；不要改 loop / block ioctl 所有权边界。
 
@@ -218,3 +218,35 @@
 **Validation:** Agent 4 已运行 `git diff --check` 和 `just build`，均通过；构建期间仅出现既有 `anemone-kernel/src/sync/mono.rs` unused import 警告。reviewer 重跑 `git diff --check` 通过。未运行 QEMU / LTP。
 
 **Next:** 启动 Agent 5；不得扩大 tty/random/serial 完整 ioctl 协议。后续 review 仍由独立 reviewer agent 执行，不能由总控代替。
+
+### 2026-06-05 - Agent 5 阶段 3 CharDev ioctl 完成
+
+**Phase:** Agent 5 / Stage 3
+
+**Change:** 在字符设备子系统新增 `CharIoctlCtx<'a>`，作为 `IoctlCtx<'a>` 的窄包装。ctx 只转发 ioctl command、raw arg、target access snapshot、user-space copy handle 和 fd-argument lookup helper；注释明确禁止把目标 `FileDesc`、当前 task 或 fd table 暴露给 `CharDev` 实现。
+
+**Change:** `CharDev` trait 增加默认 `ioctl()` hook，默认返回 `SysError::UnsupportedIoctl`，保持未知字符设备 ioctl 映射到 Linux `ENOTTY` 的失败形状。`/dev/null`、`/dev/zero`、`/dev/full` 和 `/dev/urandom` 未新增私有 ioctl 实现，继续走默认 unsupported。
+
+**Change:** `CHAR_DEV_FILE_OPS.ioctl` 从固定返回 `UnsupportedIoctl` 改为通过节点 `rdev` 查找 `CharDev`，包装 `CharIoctlCtx`，再分发到设备 hook。统一 char devfs file ops 仍只做 lookup 和分发，不承载具体设备协议。
+
+**Boundary:** 未修改 `sys_ioctl()`，未给字符设备新增全局 ioctl 特判，未实现 tty/random/serial 完整 ioctl 协议，未修改 block devfs ioctl 或 loop private ioctl ownership。未触发需要传入完整 `FileDesc`、`ProcFile`、task 或 fd table 的停止条件，也未触发 write set 扩展。
+
+**Audit:** `rg -n "CharIoctlCtx|CharSeekCtx|fn ioctl|CHAR_DEV_FILE_OPS|UnsupportedIoctl|FileDesc|ProcFile|get_current_task|fd table|task" anemone-kernel/src/device/char` 确认 `CharIoctlCtx` 只在 char subsystem 和 char devfs dispatch 中出现；`FileDesc` / task / fd table 命中仅为边界注释，没有作为 ctx 字段或 hook 参数。`rg -n "sys_ioctl|CharIoctlCtx|CHAR_DEV_FILE_OPS|BLOCK_DEV_FILE_OPS|LOOP_SET_FD|block_ioctl|UnsupportedIoctl|FIONREAD" ...` 确认 `sys_ioctl()` 未新增 char special-case，pipe `FIONREAD`、block ioctl 和 loop `LOOP_SET_FD` 仍在既有所有权路径。旁路审计搜索确认 `validate_seek` 无残留，char devfs seek/ioctl 分别分发到 `CharDev`，block / loop 边界未被本阶段修改。
+
+**Validation:** `git diff --check` 通过。`just build` 通过；构建期间仅出现既有 `anemone-kernel/src/sync/mono.rs` unused import 警告。未运行 QEMU / LTP。
+
+**Next:** 停止在 Agent 6 前。后续如继续，只做最终旁路审计、证据整理和事务收口；不得扩大到 tty/random/serial 完整 ioctl 协议。
+
+### 2026-06-05 - Gate 5 review 通过
+
+**Phase:** Gate 5 / Stage 3 review
+
+**Review:** Gate 5 独立 readonly reviewer 未发现 Apollyon / Keter / Euclid blocker。确认 `CharIoctlCtx<'a>` 是 `IoctlCtx<'a>` 的窄包装，只转发 `cmd`、`arg`、`target_access`、`uspace`、`lookup_arg_fd` 和 `lookup_fd_arg`，不暴露目标 `FileDesc`、`ProcFile`、current task 或 fd table。
+
+**Review:** reviewer 确认 `CharDev::ioctl` 默认返回 `SysError::UnsupportedIoctl`，该错误映射到 Linux `ENOTTY`；`CHAR_DEV_FILE_OPS.ioctl` 通过 `rdev` lookup `CharDev`，包装 `CharIoctlCtx` 后调用设备 hook。`/dev/null`、`/dev/zero`、`/dev/full`、`/dev/urandom` 没有新增私有 ioctl override，继续默认 unsupported。
+
+**Review:** reviewer 确认 `sys_ioctl()` 未新增字符设备全局特判，pipe `FIONREAD` 仍在 pipe file ops 内，block ioctl 和 loop private ioctl ownership 未改变，loop 仍在 `BlockDev::ioctl` 内处理 `LOOP_SET_FD`。未触发需要完整 `FileDesc` / `ProcFile` / task / fd table、block/loop ownership 改造或 write set 扩展的停止条件。
+
+**Validation:** Agent 5 已运行 `git diff --check` 和 `just build`，均通过；构建期间仅出现既有 `anemone-kernel/src/sync/mono.rs` unused import 警告。reviewer 重跑 `git diff --check` 通过。未运行 QEMU / LTP。
+
+**Next:** 启动 Agent 6，只做最终旁路审计、证据整理和事务收口；不得扩大 tty/random/serial ioctl 协议或改变 block/loop ownership。

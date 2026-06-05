@@ -25,6 +25,45 @@ impl<'a> CharSeekCtx<'a> {
     }
 }
 
+/// Narrow ioctl view for character devices.
+///
+/// This intentionally forwards only value snapshots, user-memory access, and
+/// fd-argument lookup helpers from `IoctlCtx`. It does not expose the target
+/// `FileDesc`, current task, or fd table to `CharDev` implementations.
+pub struct CharIoctlCtx<'a> {
+    inner: IoctlCtx<'a>,
+}
+
+impl<'a> CharIoctlCtx<'a> {
+    pub const fn new(inner: IoctlCtx<'a>) -> Self {
+        Self { inner }
+    }
+
+    pub const fn cmd(&self) -> u32 {
+        self.inner.cmd()
+    }
+
+    pub const fn arg(&self) -> u64 {
+        self.inner.arg()
+    }
+
+    pub const fn target_access(&self) -> IoctlFileAccess {
+        self.inner.target_access()
+    }
+
+    pub fn uspace(&self) -> &Arc<UserSpaceHandle> {
+        self.inner.uspace()
+    }
+
+    pub fn lookup_arg_fd(&self) -> Result<IoctlArgFile, SysError> {
+        self.inner.lookup_arg_fd()
+    }
+
+    pub fn lookup_fd_arg(&self, raw_fd: u64) -> Result<IoctlArgFile, SysError> {
+        self.inner.lookup_fd_arg(raw_fd)
+    }
+}
+
 /// A character device is a type of device that provides a stream of bytes, as
 /// opposed to block devices which provide fixed-size blocks of data.
 ///
@@ -45,6 +84,14 @@ pub trait CharDev: Send + Sync {
 
     fn seek(&self, _ctx: CharSeekCtx<'_>) -> Result<usize, SysError> {
         Err(SysError::IllegalSeek)
+    }
+
+    /// Handle character-driver private ioctl commands.
+    ///
+    /// Unknown commands default to `UnsupportedIoctl`, which maps to Linux's
+    /// `ENOTTY` ioctl failure shape.
+    fn ioctl(&self, _ctx: CharIoctlCtx<'_>) -> Result<u64, SysError> {
+        Err(SysError::UnsupportedIoctl)
     }
 }
 
