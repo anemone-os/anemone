@@ -1,5 +1,5 @@
 use crate::{
-    fs::proc::tgid::{default_tgid_entry_prv, validate_tgid_sub_inode, TgidEntry},
+    fs::proc::tgid::{TgidEntry, default_tgid_entry_prv, validate_tgid_sub_inode},
     prelude::*,
 };
 

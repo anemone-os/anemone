@@ -1,15 +1,13 @@
 //! capget system call.
 
-use crate::{
-    prelude::{
-        user_access::{UserWritePtr, user_addr},
-        *,
-    },
+use crate::prelude::{
+    user_access::{UserWritePtr, user_addr},
+    *,
 };
 
 use super::{
-    abi, cap_validate_magic, capget_data, read_cap_pid, read_cap_version, user_addr_offset,
-    write_preferred_cap_version, USER_CAP_DATA_SIZE,
+    USER_CAP_DATA_SIZE, abi, cap_validate_magic, capget_data, read_cap_pid, read_cap_version,
+    user_addr_offset, write_preferred_cap_version,
 };
 
 fn target_cred_for_capget(pid: i32) -> Result<CredentialSet, SysError> {

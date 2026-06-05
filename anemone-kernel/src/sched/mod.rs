@@ -71,8 +71,10 @@ pub unsafe fn scheduler() -> ! {
 
 /// Core scheduler state transitions.
 mod kore {
-    use super::*;
-    use super::wait::{WaitReason, WakeMode, WakeResult};
+    use super::{
+        wait::{WaitReason, WakeMode, WakeResult},
+        *,
+    };
 
     #[derive(Debug)]
     enum ScheduleDecision {
@@ -274,8 +276,10 @@ mod higher_level {
 
     use crate::time::timer::schedule_local_irq_timer_event;
 
-    use super::*;
-    use super::wait::{WaitOutcome, WaitReason, WakeMode, WakeToken};
+    use super::{
+        wait::{WaitOutcome, WaitReason, WakeMode, WakeToken},
+        *,
+    };
 
     /// Immediate completion requested by a current-task wait precheck.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

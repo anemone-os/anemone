@@ -164,9 +164,7 @@ fn reject_deferred_clone3_features(
         return Err(SysError::InvalidArgument);
     }
     if args.set_tid != 0 || args.set_tid_size != 0 {
-        knoticeln!(
-            "[NYI] clone3: set_tid/set_tid_size require pid namespace aware TID allocation"
-        );
+        knoticeln!("[NYI] clone3: set_tid/set_tid_size require pid namespace aware TID allocation");
         return Err(SysError::NotYetImplemented);
     }
 

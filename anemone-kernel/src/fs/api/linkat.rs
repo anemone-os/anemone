@@ -60,10 +60,7 @@ fn resolve_link_target(
     }
 }
 
-fn resolve_link_parent(
-    newdirfd: RawAtFd,
-    newpath: &Path,
-) -> Result<(PathRef, String), SysError> {
+fn resolve_link_parent(newdirfd: RawAtFd, newpath: &Path) -> Result<(PathRef, String), SysError> {
     let task = get_current_task();
 
     if newpath.is_absolute() {

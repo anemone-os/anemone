@@ -3,12 +3,14 @@ use core::fmt::Write as _;
 use crate::{
     fs::{
         iomux::PollEvent,
-        proc::tgid::{
-            default_tgid_entry_prv,
-            stat::{proc_comm, proc_state},
-            validate_tgid_sub_inode, TgidEntry,
+        proc::{
+            read_snapshot_at,
+            tgid::{
+                TgidEntry, default_tgid_entry_prv,
+                stat::{proc_comm, proc_state},
+                validate_tgid_sub_inode,
+            },
         },
-        proc::read_snapshot_at,
     },
     prelude::*,
     task::sig::set::SigSet,

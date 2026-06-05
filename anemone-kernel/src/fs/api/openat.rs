@@ -103,8 +103,7 @@ impl OpenHow {
         };
 
         if is_path {
-            let allowed =
-                O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC | O_NOCTTY | O_LARGEFILE;
+            let allowed = O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC | O_NOCTTY | O_LARGEFILE;
             let ignored = flags & O_ACCMODE;
             if flags & !(allowed | ignored) != 0 {
                 knoticeln!(
@@ -137,9 +136,9 @@ impl OpenHow {
         status.set(FileStatusFlags::SYNC, flags & O_SYNC == O_SYNC);
         status.set(FileStatusFlags::NOATIME, flags & O_NOATIME != 0);
 
-        if status.intersects(
-            FileStatusFlags::DSYNC | FileStatusFlags::SYNC | FileStatusFlags::NOATIME,
-        ) {
+        if status
+            .intersects(FileStatusFlags::DSYNC | FileStatusFlags::SYNC | FileStatusFlags::NOATIME)
+        {
             knoticeln!(
                 "openat: accepting status flags without full sync/atime semantics: {:#x}",
                 flags & (O_DSYNC | O_SYNC | O_NOATIME)
@@ -207,9 +206,7 @@ impl OpenHow {
         if self.access.can_read() {
             access |= FsAccess::READ;
         }
-        if self.access.can_write()
-            || self.create.trunc && file.inode().ty() == InodeType::Regular
-        {
+        if self.access.can_write() || self.create.trunc && file.inode().ty() == InodeType::Regular {
             access |= FsAccess::WRITE;
         }
         access
@@ -229,11 +226,7 @@ impl OpenHow {
 /// - the opened file still is not a true anonymous inode that can be relinked
 ///   with Linux `O_TMPFILE` semantics;
 /// - creation/open/unlink is not atomic across the whole sequence.
-fn open_tmpfile_at(
-    dir: &PathRef,
-    how: OpenHow,
-    checker: &FsPermChecker,
-) -> Result<File, SysError> {
+fn open_tmpfile_at(dir: &PathRef, how: OpenHow, checker: &FsPermChecker) -> Result<File, SysError> {
     if dir.inode().ty() != InodeType::Dir {
         return Err(SysError::NotDir);
     }
@@ -292,8 +285,7 @@ fn finish_open(
         return Err(SysError::PermissionDenied);
     }
 
-    let should_truncate =
-        how.create.trunc && !created && file.inode().ty() == InodeType::Regular;
+    let should_truncate = how.create.trunc && !created && file.inode().ty() == InodeType::Regular;
     if file.inode().ty() == InodeType::Regular && (how.access.can_write() || should_truncate) {
         file.path().mount().ensure_writable()?;
     }

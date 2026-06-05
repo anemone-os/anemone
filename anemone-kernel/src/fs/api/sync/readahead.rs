@@ -1,9 +1,6 @@
 //! readahead system call.
 
-use crate::{
-    prelude::*,
-    task::files::Fd,
-};
+use crate::{prelude::*, task::files::Fd};
 
 #[syscall(SYS_READAHEAD)]
 fn sys_readahead(raw_fd: i32, _offset: i64, count: usize) -> Result<u64, SysError> {
@@ -23,7 +20,10 @@ fn sys_readahead(raw_fd: i32, _offset: i64, count: usize) -> Result<u64, SysErro
         return Err(SysError::BadFileDescriptor);
     }
 
-    if !matches!(file.vfs_file().inode().ty(), InodeType::Regular | InodeType::Block) {
+    if !matches!(
+        file.vfs_file().inode().ty(),
+        InodeType::Regular | InodeType::Block
+    ) {
         return Err(SysError::InvalidArgument);
     }
 

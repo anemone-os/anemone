@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use super::{published_node_at, DEVFS_ROOT_INO};
+use super::{DEVFS_ROOT_INO, published_node_at};
 
 const DEVFS_DOT_CURSOR: usize = 0;
 const DEVFS_DOTDOT_CURSOR: usize = 1;

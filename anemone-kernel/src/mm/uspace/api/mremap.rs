@@ -3,7 +3,7 @@
 use crate::{
     mm::uspace::mmap::RemapMapping,
     prelude::{
-        user_access::{aligned_to, user_addr, SyscallArgValidatorExt},
+        user_access::{SyscallArgValidatorExt, aligned_to, user_addr},
         *,
     },
 };
@@ -56,13 +56,14 @@ fn sys_mremap(
     };
 
     let usp = get_current_task().clone_uspace_handle();
-    let (addr, _guard) = usp.remap_range(&RemapMapping {
-        old_range,
-        new_npages,
-        may_move,
-        fixed_target,
-    })
-    .map_err(mremap_error_at_syscall_boundary)?;
+    let (addr, _guard) = usp
+        .remap_range(&RemapMapping {
+            old_range,
+            new_npages,
+            may_move,
+            fixed_target,
+        })
+        .map_err(mremap_error_at_syscall_boundary)?;
 
     Ok(addr.get())
 }

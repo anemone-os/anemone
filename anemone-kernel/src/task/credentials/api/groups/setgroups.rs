@@ -5,11 +5,7 @@ use crate::{
         user_access::{UserReadPtr, user_addr},
         *,
     },
-    task::credentials::{
-        Gid,
-        cap::Capability,
-        groups::NGROUPS_MAX,
-    },
+    task::credentials::{Gid, cap::Capability, groups::NGROUPS_MAX},
 };
 
 /// Replaces the current task's supplementary group list.

@@ -321,10 +321,7 @@ fn pipe_rx_read(file: &File, _pos: &mut usize, buf: &mut [u8]) -> Result<usize, 
     result
 }
 
-fn pipe_rx_poll(
-    file: &File,
-    request: &PollRequest<'_>,
-) -> Result<PollRegisterResult, SysError> {
+fn pipe_rx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
     let rx = file
         .prv()
         .cast::<PipeRx>()
@@ -514,10 +511,7 @@ pub(super) fn set_capacity(file: &File, requested: u64) -> Result<usize, SysErro
     .ok_or(SysError::InvalidArgument)?
 }
 
-fn pipe_tx_poll(
-    file: &File,
-    request: &PollRequest<'_>,
-) -> Result<PollRegisterResult, SysError> {
+fn pipe_tx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
     let tx = file
         .prv()
         .cast::<PipeTx>()

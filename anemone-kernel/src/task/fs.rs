@@ -172,7 +172,13 @@ impl Task {
     ) -> Result<(PathRef, String), SysError> {
         let fs_state = self.fs_state.read();
         let checker = FsPermChecker::new(self.cred());
-        resolve_parent_from_with_root_checked(fs_state.root(), fs_state.cwd(), path, flags, &checker)
+        resolve_parent_from_with_root_checked(
+            fs_state.root(),
+            fs_state.cwd(),
+            path,
+            flags,
+            &checker,
+        )
     }
 
     /// Lookup the parent directory of a path in this task's filesystem context,

@@ -4,8 +4,10 @@
 //! wait-core wake API owns both logical completion and stale-safe physical
 //! placement.
 
-use core::fmt::{Debug, Formatter};
-use core::marker::PhantomData;
+use core::{
+    fmt::{Debug, Formatter},
+    marker::PhantomData,
+};
 
 use crate::prelude::*;
 
@@ -25,10 +27,8 @@ impl TaskSchedState {
     pub fn as_task_status(&self) -> TaskStatus {
         match self {
             Self::Runnable => TaskStatus::Runnable,
-            Self::Waiting { interruptible, .. } => {
-                TaskStatus::Waiting {
-                    interruptible: *interruptible,
-                }
+            Self::Waiting { interruptible, .. } => TaskStatus::Waiting {
+                interruptible: *interruptible,
             },
             Self::Zombie => TaskStatus::Zombie,
         }
@@ -293,9 +293,7 @@ pub enum WakeEnqueueResult {
 /// Result for wake attempts through the wait core.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum WakeResult {
-    Woke {
-        placement: WakeEnqueueResult,
-    },
+    Woke { placement: WakeEnqueueResult },
     ModeBlocked,
     Stale,
     AlreadyCompleted(WaitReason),

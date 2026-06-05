@@ -1,7 +1,7 @@
 use crate::{
     fs::proc::{
         read_snapshot_at,
-        tgid::{default_tgid_entry_prv, validate_tgid_sub_inode, TgidEntry},
+        tgid::{TgidEntry, default_tgid_entry_prv, validate_tgid_sub_inode},
     },
     prelude::*,
     utils::any_opaque::NilOpaque,

@@ -16,10 +16,7 @@ use anemone_abi::fs::linux::ioctl::{
 const LOOP_BLOCK_SIZE: BlockSize = BlockSize::new(1);
 
 const fn devnum_for(id: usize) -> BlockDevNum {
-    BlockDevNum::new(
-        MajorNum::new(devnum::block::major::LOOP),
-        MinorNum::new(id),
-    )
+    BlockDevNum::new(MajorNum::new(devnum::block::major::LOOP), MinorNum::new(id))
 }
 
 #[derive(Debug)]
@@ -246,9 +243,9 @@ impl LoopBoundSnapshot {
         }
 
         let available = backing_size - self.offset;
-        Ok(self.size_limit.map_or(available, |limit| {
-            usize::min(available, limit)
-        }))
+        Ok(self
+            .size_limit
+            .map_or(available, |limit| usize::min(available, limit)))
     }
 
     fn total_blocks(&self) -> Result<usize, SysError> {
@@ -259,7 +256,9 @@ impl LoopBoundSnapshot {
         let byte_offset = block_idx
             .checked_mul(self.block_size.bytes())
             .ok_or(SysError::InvalidArgument)?;
-        let end = byte_offset.checked_add(len).ok_or(SysError::InvalidArgument)?;
+        let end = byte_offset
+            .checked_add(len)
+            .ok_or(SysError::InvalidArgument)?;
         if end > self.visible_bytes()? {
             return Err(SysError::IO);
         }
@@ -401,9 +400,8 @@ fn copy_name(raw: &mut [u8; LO_NAME_SIZE], name: &str) {
 }
 
 fn read_ioctl_value<T: Copy>(ctx: &BlockIoctlCtx<'_>) -> Result<T, SysError> {
-    ctx.uspace().with_usp(|usp| {
-        Ok(UserReadPtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.read())
-    })
+    ctx.uspace()
+        .with_usp(|usp| Ok(UserReadPtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.read()))
 }
 
 fn write_ioctl_value<T: Copy>(ctx: &BlockIoctlCtx<'_>, value: T) -> Result<(), SysError> {

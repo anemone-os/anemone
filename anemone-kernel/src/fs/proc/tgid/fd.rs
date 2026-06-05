@@ -5,7 +5,7 @@ use crate::{
         pipe,
         proc::{
             superblock::alloc_ino,
-            tgid::{binding::ThreadGroupBinding, SubInoRecord, TgidEntry},
+            tgid::{SubInoRecord, TgidEntry, binding::ThreadGroupBinding},
         },
     },
     prelude::*,
@@ -87,9 +87,7 @@ fn proc_fd_readlink_target(leader: &Task, file_desc: &FileDesc) -> Result<PathBu
     }
 
     let path = file.path().to_pathbuf();
-    leader
-        .rel_abs_path(&path)
-        .ok_or(SysError::PermissionDenied)
+    leader.rel_abs_path(&path).ok_or(SysError::PermissionDenied)
 }
 
 fn proc_fd_child_ino(dir: &ProcFdDirPrivate, fd: Fd) -> (Ino, bool) {

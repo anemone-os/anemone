@@ -862,12 +862,7 @@ impl InodeRef {
         self.inode().chown(owner, group, ctime);
     }
 
-    pub fn set_times(
-        &self,
-        atime: Option<Duration>,
-        mtime: Option<Duration>,
-        ctime: Duration,
-    ) {
+    pub fn set_times(&self, atime: Option<Duration>, mtime: Option<Duration>, ctime: Duration) {
         let mut meta = self.inode().meta.write();
         if let Some(atime) = atime {
             meta.atime = atime;

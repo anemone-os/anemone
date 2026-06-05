@@ -47,7 +47,7 @@ pub(super) fn checked_user_page_range(
 mod args {
 
     use crate::prelude::{
-        handler::{syscall_arg_flag32, TryFromSyscallArg},
+        handler::{TryFromSyscallArg, syscall_arg_flag32},
         vma::{Protection, VmFlags},
         *,
     };

@@ -213,7 +213,9 @@ impl BackingFileHandle {
                 return Err(SysError::IO);
             }
 
-            offset = offset.checked_add(written).ok_or(SysError::InvalidArgument)?;
+            offset = offset
+                .checked_add(written)
+                .ok_or(SysError::InvalidArgument)?;
             buf = &buf[written..];
         }
 
@@ -336,8 +338,7 @@ mod seek {
 
 use self::seek::seek_set_offset;
 pub use self::seek::{
-    SeekFrom, seek_dir_rewind, seek_with_bounded_size, seek_with_fixed_size,
-    seek_with_inode_size,
+    SeekFrom, seek_dir_rewind, seek_with_bounded_size, seek_with_fixed_size, seek_with_inode_size,
 };
 
 #[derive(Debug, Clone)]

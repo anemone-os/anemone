@@ -1,7 +1,7 @@
 //! Path resolution and name lookup.
 
-use crate::{fs::root_pathref, prelude::*};
 use super::permission::{FsAccess, FsPermChecker};
+use crate::{fs::root_pathref, prelude::*};
 use typed_path::UnixComponent;
 
 bitflags! {

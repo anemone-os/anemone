@@ -142,9 +142,7 @@ fn load_iovecs(
             continue;
         }
 
-        let new_total = total
-            .checked_add(len)
-            .ok_or(SysError::InvalidArgument)?;
+        let new_total = total.checked_add(len).ok_or(SysError::InvalidArgument)?;
         if new_total > MAX_RW_COUNT {
             return Err(SysError::InvalidArgument);
         }
