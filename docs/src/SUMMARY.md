@@ -5,6 +5,7 @@
 - [开发日志](./development-log.md)
 	- [2026-05-11 至 2026-05-24](./devlog/2026-05-11_to_2026-05-24.md)
 	- [2026-05-25 至 2026-06-07](./devlog/2026-05-25_to_2026-06-07.md)
+	- [小迭代记录](./devlog/changes/index.md)
 	- [事务日志](./devlog/transactions/index.md)
 		- [Sched Wait Refactor](./devlog/transactions/2026-06-01-sched-wait-refactor.md)
 		- [Cred Merge](./devlog/transactions/2026-06-02-cred-merge.md)

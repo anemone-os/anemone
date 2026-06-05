@@ -24,6 +24,59 @@
 **Related:** issue ID、决策记录、公开调查材料。
 ```
 
+## 小迭代记录
+
+默认使用单文件。如果需要背景材料，可以使用同名目录，并把下面的记录本体放在 `index.md`。
+
+```md
+# ANE-CHG-20260522-short-slug
+
+**Type:** Bugfix / Small Feature / Cleanup / Investigation
+**Status:** Completed / Reverted / Superseded / Follow-up
+**Date:** 2026-05-22
+**Authors:** name1, name2
+**Area:** scheduler / futex
+
+## Trigger
+
+触发这次工作的失败现象、任务目标或观察。
+
+## Scope
+
+本次只改什么；明确不改什么。
+
+## Change
+
+实际发生的行为或结构变化。必要时列出关键文件、commit 或语义边界。
+
+## Validation
+
+实际运行的命令、测试、复现步骤，或说明验证由用户运行 / 尚未运行。
+
+## Risk / Follow-up
+
+仍然开放、存在风险、明确延期，或需要 register / current limitations 记录的内容。
+
+## Links
+
+- Biweekly devlog:
+- Register / limitations:
+- RFC / transaction:
+- Issue / PR / commit:
+```
+
+目录版小迭代记录可以使用以下形态：
+
+```text
+docs/src/devlog/changes/2026-05-22-short-slug/
+  index.md
+  backgrounds/
+    ltp-evidence.md
+    linux-reference.md
+```
+
+`backgrounds/` 只保存证据摘要、Linux / LTP 对照、历史材料或运行记录；不要在小迭代记录中维护 accepted contract、不变量、阶段计划或 review tracking issues。
+
 ## 事务日志
 
 ```md

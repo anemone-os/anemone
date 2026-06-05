@@ -91,6 +91,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../ltp/groups/fs.txt"),
     },
     LtpGroup {
+        name: "full",
+        cases: include_str!("../ltp/groups/full.txt"),
+    },
+    LtpGroup {
         name: "futex",
         cases: include_str!("../ltp/groups/futex.txt"),
     },
