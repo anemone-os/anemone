@@ -146,6 +146,81 @@ impl<'a> IoctlCtx<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct BackingFileHandle {
+    file: Arc<File>,
+    writable: bool,
+    display_name: String,
+}
+
+impl BackingFileHandle {
+    pub fn from_ioctl_arg_file(backing: IoctlArgFile) -> Result<Self, SysError> {
+        let access = backing.access();
+        if access.is_path_only() || !access.can_read() {
+            return Err(SysError::BadFileDescriptor);
+        }
+
+        let file = backing.file_handle();
+        if file.inode().ty() != InodeType::Regular {
+            return Err(SysError::InvalidArgument);
+        }
+
+        Ok(Self {
+            display_name: format!("{}", file.path()),
+            file,
+            writable: access.can_write(),
+        })
+    }
+
+    pub const fn can_write(&self) -> bool {
+        self.writable
+    }
+
+    pub fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
+    pub fn get_attr(&self) -> Result<InodeStat, SysError> {
+        self.file.get_attr()
+    }
+
+    pub fn visible_size(&self) -> Result<usize, SysError> {
+        usize::try_from(self.get_attr()?.size).map_err(|_| SysError::FileTooLarge)
+    }
+
+    pub fn read_exact_at(&self, mut offset: usize, mut buf: &mut [u8]) -> Result<(), SysError> {
+        while !buf.is_empty() {
+            let read = self.file.read_at(offset, buf)?;
+            if read == 0 {
+                return Err(SysError::UnexpectedEof);
+            }
+
+            offset = offset.checked_add(read).ok_or(SysError::InvalidArgument)?;
+            buf = &mut buf[read..];
+        }
+
+        Ok(())
+    }
+
+    pub fn write_all_at(&self, mut offset: usize, mut buf: &[u8]) -> Result<(), SysError> {
+        if !self.writable {
+            return Err(SysError::BadFileDescriptor);
+        }
+
+        while !buf.is_empty() {
+            let written = self.file.write_at(offset, buf)?;
+            if written == 0 {
+                return Err(SysError::IO);
+            }
+
+            offset = offset.checked_add(written).ok_or(SysError::InvalidArgument)?;
+            buf = &buf[written..];
+        }
+
+        Ok(())
+    }
+}
+
 /// VTable a file must implement to support file operations.
 #[derive(Debug)]
 pub struct FileOps {
@@ -254,32 +329,6 @@ mod seek {
         }
     }
 
-    // Stage 1A compatibility helper. It is deliberately named so Agent 3 /
-    // phase 1C can replace each use with backend-local positioned I/O
-    // classification.
-    pub fn compat_read_at_via_seek_then_read_1c_delete(
-        file: &File,
-        pos: usize,
-        buf: &mut [u8],
-    ) -> Result<usize, SysError> {
-        let mut local_pos = 0;
-        (file.ops.seek)(file, &mut local_pos, SeekFrom::Set(seek_set_offset(pos)?))?;
-        (file.ops.read)(file, &mut local_pos, buf)
-    }
-
-    // Stage 1A compatibility helper. It is deliberately named so Agent 3 /
-    // phase 1C can replace each use with backend-local positioned I/O
-    // classification.
-    pub fn compat_write_at_via_seek_then_write_1c_delete(
-        file: &File,
-        pos: usize,
-        buf: &[u8],
-    ) -> Result<usize, SysError> {
-        let mut local_pos = 0;
-        (file.ops.seek)(file, &mut local_pos, SeekFrom::Set(seek_set_offset(pos)?))?;
-        (file.ops.write)(file, &mut local_pos, buf)
-    }
-
     pub(super) fn seek_set_offset(pos: usize) -> Result<i64, SysError> {
         i64::try_from(pos).map_err(|_| SysError::FileTooLarge)
     }
@@ -287,9 +336,8 @@ mod seek {
 
 use self::seek::seek_set_offset;
 pub use self::seek::{
-    SeekFrom, compat_read_at_via_seek_then_read_1c_delete,
-    compat_write_at_via_seek_then_write_1c_delete, seek_dir_rewind, seek_with_bounded_size,
-    seek_with_fixed_size, seek_with_inode_size,
+    SeekFrom, seek_dir_rewind, seek_with_bounded_size, seek_with_fixed_size,
+    seek_with_inode_size,
 };
 
 #[derive(Debug, Clone)]
@@ -564,15 +612,6 @@ impl File {
                 .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
         }
         Ok(written)
-    }
-
-    pub fn validate_seek(&self, pos: usize) -> Result<(), SysError> {
-        // Stage 1A compatibility for callers outside the FileOps initializer
-        // sweep. Later gates must classify these callers into seek intent or
-        // positioned I/O policy before this old API disappears.
-        let mut local_pos = 0;
-        (self.ops.seek)(self, &mut local_pos, SeekFrom::Set(seek_set_offset(pos)?))?;
-        Ok(())
     }
 
     /// Run `f` with the file cursor as `pos`.

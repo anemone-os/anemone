@@ -90,6 +90,11 @@ fn block_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, Sys
     Ok(nbytes)
 }
 
+fn block_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+    let mut local_pos = pos;
+    block_read(file, &mut local_pos, buf)
+}
+
 fn block_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
     if buf.is_empty() {
         return Ok(0);
@@ -114,6 +119,11 @@ fn block_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysErr
     dev.write_blocks(old_pos / block_size, buf)?;
     *pos = end_pos;
     Ok(buf.len())
+}
+
+fn block_write_at(file: &File, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
+    let mut local_pos = pos;
+    block_write(file, &mut local_pos, buf)
 }
 
 fn write_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>, value: T) -> Result<(), SysError> {
@@ -161,8 +171,8 @@ fn block_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
 static BLOCK_DEV_FILE_OPS: FileOps = FileOps {
     read: block_read,
     write: block_write,
-    read_at: compat_read_at_via_seek_then_read_1c_delete,
-    write_at: compat_write_at_via_seek_then_write_1c_delete,
+    read_at: block_read_at,
+    write_at: block_write_at,
     seek: block_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     // Block devices also do not have a waitable poll path yet.

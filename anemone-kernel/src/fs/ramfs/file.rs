@@ -242,6 +242,11 @@ fn ramfs_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, Sys
     Ok(n)
 }
 
+fn ramfs_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+    let mut local_pos = pos;
+    ramfs_read(file, &mut local_pos, buf)
+}
+
 fn ramfs_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
     let inode = file.inode();
     let state = ramfs_reg_state(inode)?;
@@ -256,6 +261,11 @@ fn ramfs_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysErr
     inode.inode().update_size_max(new_pos as u64);
     *pos = new_pos;
     Ok(buf.len())
+}
+
+fn ramfs_write_at(file: &File, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
+    let mut local_pos = pos;
+    ramfs_write(file, &mut local_pos, buf)
 }
 
 fn ramfs_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
@@ -303,8 +313,8 @@ fn ramfs_read_dir(
 pub(super) static RAMFS_REG_FILE_OPS: FileOps = FileOps {
     read: ramfs_read,
     write: ramfs_write,
-    read_at: compat_read_at_via_seek_then_read_1c_delete,
-    write_at: compat_write_at_via_seek_then_write_1c_delete,
+    read_at: ramfs_read_at,
+    write_at: ramfs_write_at,
     seek: ramfs_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| {

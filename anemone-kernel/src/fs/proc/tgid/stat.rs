@@ -1,6 +1,7 @@
 use crate::{
     fs::{
         iomux::PollEvent,
+        proc::read_snapshot_at,
         proc::tgid::{default_tgid_entry_prv, validate_tgid_sub_inode, TgidEntry},
     },
     prelude::*,
@@ -66,6 +67,12 @@ fn tgid_stat_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize,
     Ok(to_read)
 }
 
+fn tgid_stat_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+    let data = build_stat_line(file.inode())?;
+
+    read_snapshot_at(pos, buf, data.as_bytes())
+}
+
 fn tgid_stat_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
     let data = build_stat_line(file.inode())?;
 
@@ -75,7 +82,7 @@ fn tgid_stat_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize,
 static TGID_STAT_FILE_OPS: FileOps = FileOps {
     read: tgid_stat_read,
     write: |_, _, _| Err(SysError::NotSupported),
-    read_at: compat_read_at_via_seek_then_read_1c_delete,
+    read_at: tgid_stat_read_at,
     write_at: |_, _, _| Err(SysError::NotSupported),
     seek: tgid_stat_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),

@@ -384,6 +384,11 @@ fn ext4_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysE
     Ok(n)
 }
 
+fn ext4_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+    let mut local_pos = pos;
+    ext4_read(file, &mut local_pos, buf)
+}
+
 fn ext4_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
     let inode = file.inode();
     if inode.ty() != InodeType::Regular {
@@ -398,6 +403,11 @@ fn ext4_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysErro
     inode.inode().update_size_max(new_pos as u64);
     *pos = new_pos;
     Ok(buf.len())
+}
+
+fn ext4_write_at(file: &File, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
+    let mut local_pos = pos;
+    ext4_write(file, &mut local_pos, buf)
 }
 
 fn ext4_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
@@ -454,8 +464,8 @@ fn ext4_read_dir(
 pub(super) static EXT4_REG_FILE_OPS: FileOps = FileOps {
     read: ext4_read,
     write: ext4_write,
-    read_at: compat_read_at_via_seek_then_read_1c_delete,
-    write_at: compat_write_at_via_seek_then_write_1c_delete,
+    read_at: ext4_read_at,
+    write_at: ext4_write_at,
     seek: ext4_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| {

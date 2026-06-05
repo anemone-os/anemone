@@ -8,6 +8,7 @@ use crate::{
             stat::{proc_comm, proc_state},
             validate_tgid_sub_inode, TgidEntry,
         },
+        proc::read_snapshot_at,
     },
     prelude::*,
     task::sig::set::SigSet,
@@ -72,6 +73,12 @@ fn tgid_status_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usiz
     Ok(to_read)
 }
 
+fn tgid_status_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+    let data = build_status_text(file.inode())?;
+
+    read_snapshot_at(pos, buf, data.as_bytes())
+}
+
 fn tgid_status_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
     let data = build_status_text(file.inode())?;
 
@@ -81,7 +88,7 @@ fn tgid_status_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usiz
 static TGID_STATUS_FILE_OPS: FileOps = FileOps {
     read: tgid_status_read,
     write: |_, _, _| Err(SysError::NotSupported),
-    read_at: compat_read_at_via_seek_then_read_1c_delete,
+    read_at: tgid_status_read_at,
     write_at: |_, _, _| Err(SysError::NotSupported),
     seek: tgid_status_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),

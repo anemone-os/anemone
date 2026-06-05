@@ -165,6 +165,9 @@ impl FileDesc {
         if !self.can_read() {
             return Err(SysError::BadFileDescriptor);
         }
+        if self.is_path_only() {
+            return Err(SysError::BadFileDescriptor);
+        }
         self.pfile.file.read_at(offset, buf).map_err(|e| e.into())
     }
 
@@ -188,10 +191,9 @@ impl FileDesc {
         if !self.can_write() {
             return Err(SysError::BadFileDescriptor);
         }
-        self.pfile
-            .file
-            .validate_seek(offset)
-            .map_err(|e| e.into())?;
+        if self.is_path_only() {
+            return Err(SysError::BadFileDescriptor);
+        }
         if flags.contains(FileStatusFlags::APPEND) {
             return self
                 .pfile

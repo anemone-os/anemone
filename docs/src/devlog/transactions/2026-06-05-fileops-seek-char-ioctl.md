@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** VFS / syscall ABI / devfs / character device / loop
 **RFC:** [RFC-20260605-fileops-seek-char-ioctl](../../rfcs/fileops-seek-char-ioctl/index.md)
-**Current Phase:** Gate 2 passed; stopped before Agent 3
+**Current Phase:** Gate 3 passed; stopped before Agent 4
 
 ## Scope
 
@@ -47,13 +47,13 @@
 
 **Canonical RFC:** [RFC-20260605-fileops-seek-char-ioctl](../../rfcs/fileops-seek-char-ioctl/index.md), [Invariants](../../rfcs/fileops-seek-char-ioctl/invariants.md), [Implementation Plan](../../rfcs/fileops-seek-char-ioctl/implementation.md), [Tracking Issues](../../rfcs/fileops-seek-char-ioctl/tracking-issues.md)
 
-**Completed:** 公开 RFC、invariants、implementation、tracking issues 和 agent orchestration 文档已存在。Agent 0 只读前置审计完成；Agent 1 阶段 1A mechanical API sweep 和 Gate 1 review 已完成。Agent 2 阶段 1B 已迁移 `sys_lseek()` 到 opened file seek intent，`File::seek` 现在接收 `SeekFrom` 并在 `File.pos` lock 内调用 backend seek，目录类 file ops 最小支持 `SEEK_SET(0)` rewind，内部绝对定位调用已改为 `seek_set_checked()`。
+**Completed:** 公开 RFC、invariants、implementation、tracking issues 和 agent orchestration 文档已存在。Agent 0 只读前置审计完成；Agent 1 阶段 1A mechanical API sweep 和 Gate 1 review 已完成。Agent 2 阶段 1B 已迁移 `sys_lseek()` 到 opened file seek intent，`File::seek` 现在接收 `SeekFrom` 并在 `File.pos` lock 内调用 backend seek，目录类 file ops 最小支持 `SEEK_SET(0)` rewind，内部绝对定位调用已改为 `seek_set_checked()`。Agent 3 阶段 1C 已删除阶段 1A compat helper / `validate_seek()` 残留，分类 positioned I/O，并让 loop 保存 VFS/fd 边界产出的 `BackingFileHandle`；Gate 3 独立 reviewer 已通过。
 
-**In Progress:** 暂停在 Agent 3 前，等待用户确认是否继续阶段 1C。不得直接启动 Agent 4+。
+**In Progress:** 暂停在 Agent 4 前。不得直接启动 Agent 5+。
 
 **Open Blockers:** 暂无已确认 blocker。
 
-**Next Action:** 如用户继续，按编排启动 Agent 3，完成阶段 1C positioned I/O 分类与 loop backing narrowed handle。不得直接启动 Agent 4+。
+**Next Action:** 按编排启动 Agent 4，完成阶段 2 `CharDev` seek policy 和 memory char device null-style seek。不得直接启动 Agent 5+。
 
 **Do Not Redo:** 不要把 `FileDesc` / `ProcFile` / task / fd table 传进 file ops 或 `CharDev` hook；不要让 worker 越界改后续阶段；不要把 `SEEK_DATA` / `SEEK_HOLE` 交给 backend；不要用通用 wrapper 给 stream 后端继承 positioned I/O 能力；不要改 loop / block ioctl 所有权边界。
 
@@ -148,3 +148,39 @@
 **Validation:** `git diff --check` 通过。`just build` 通过；构建期间仅出现既有 `anemone-kernel/src/sync/mono.rs` unused import 警告。未运行 QEMU / LTP。
 
 **Next:** 停止在 Agent 3 前，等待用户确认继续阶段 1C。
+
+### 2026-06-05 - Agent 3 阶段 1C positioned I/O / loop handle 完成
+
+**Phase:** Agent 3 / Stage 1C
+
+**Change:** `FileDesc::{read_at,write_at}` 去掉旧 `File::validate_seek()` 兼容调用，只保留 fd-local read/write access、path-only gate、status flags 和 `O_APPEND` 决策。`File::{read_at,write_at}` 保持 zero-length fast path、regular content readonly mount gate 和 successful write metadata update 后委托 `ops.read_at` / `ops.write_at`。
+
+**Change:** 删除阶段 1A 的全局 `compat_read_at_via_seek_then_read_1c_delete` / `compat_write_at_via_seek_then_write_1c_delete` helper 和 `File::validate_seek()`。regular file 后端改为 backend-local positioned helper：`ext4_read_at` / `ext4_write_at`、`ramfs_read_at` / `ramfs_write_at`。block devfs 改为 `block_read_at` / `block_write_at`，继续复用 block backend 内 alignment、bounds 和 overflow 检查。pipe、console、stream char devfs、directory、symlink/path-only 等对象继续 fail closed。
+
+**Change:** procfs snapshot 类文件按现有读取模型显式分类：`/proc/meminfo`、`/proc/uptime`、`/proc/<tgid>/{cmdline,environ,mounts,stat,status}` 增加局部 `read_at` 实现，并复用 procfs 内部 `read_snapshot_at` helper 或局部 cursor。未扩大 procfs 写入或复杂 snapshot 语义。
+
+**Change:** 新增 VFS/fd 边界 narrowed `BackingFileHandle`，由 `IoctlArgFile` conversion 验证 path-only、read access、regular file 和 backing writability，并只向 loop 暴露 `read_exact_at`、`write_all_at`、`visible_size`、`get_attr` / display 信息。`LoopBoundState` / snapshot 保存 `BackingFileHandle`，不再保存裸 `Arc<File>`；loop block I/O 通过 handle 的 positioned methods 访问 backing storage。
+
+**Boundary:** Agent 3 worker 先完成 positioned I/O 分类后停在 loop handle 中间态；总控在同一 Agent 3 write set 内删除 loop 本地重复 handle 并收口到唯一 `fs::BackingFileHandle`。未启动 Agent 4 / Agent 5，未接通 `CharDev` seek 或 ioctl hook，未触发 write set 扩展申请或 RFC 停止条件。
+
+**Audit:** `rg -n "compat_.*1c_delete|validate_seek|struct BackingFileHandle|IoctlArgFile|Arc<File>|file_handle\\(|read_exact_at\\(|write_all_at\\(" anemone-kernel/src/fs anemone-kernel/src/device/block/loop.rs anemone-kernel/src/task/files.rs` 显示 `compat_*_1c_delete` 和 `validate_seek` 无残留；`BackingFileHandle` 只在 `fs::file` 定义，loop state / snapshot 使用该 narrowed handle；裸 `Arc<File>` 只存在于 fd/VFS-owned `ProcFile` / `IoctlArgFile` / handle 内部，不由 loop state 直接保存。
+
+**Audit:** 旁路审计搜索 `rg -n "validate_seek|FileOps \\{|sys_lseek|read_at\\(|write_at\\(|\\.seek\\(|CHAR_DEV_FILE_OPS|BLOCK_DEV_FILE_OPS|LOOP_SET_FD|BackingFileHandle|CharSeekCtx|CharIoctlCtx" anemone-kernel/src` 已执行。结果确认 `validate_seek` 无残留，`BLOCK_DEV_FILE_OPS` 使用 explicit `block_read_at` / `block_write_at`，`CHAR_DEV_FILE_OPS` 仍保持阶段 2 前 fail-closed seek/ioctl 边界，未提前引入 `CharSeekCtx` / `CharIoctlCtx`。
+
+**Validation:** `git diff --check` 通过。`just build` 通过；构建期间仅出现既有 `anemone-kernel/src/sync/mono.rs` unused import 警告。未运行 QEMU / LTP。
+
+**Next:** 启动 Gate 3 readonly reviewer；review 必须由独立 agent 执行，不能由总控代替。Gate 3 通过后才能启动 Agent 4。
+
+### 2026-06-05 - Gate 3 review 通过
+
+**Phase:** Gate 3 / Stage 1C review
+
+**Review:** Gate 3 独立 readonly reviewer 未发现 Apollyon / Keter / Euclid blocker。确认 `FileDesc::{read_at,write_at}` 只保留 fd-local access、path-only gate、status flags / `O_APPEND` 决策；`File::{read_at,write_at}` 只做 zero-length、regular readonly mount gate、successful write metadata update 后委托 ops；`File::validate_seek()` 和 `compat_*_1c_delete` 已无残留。
+
+**Review:** reviewer 确认 regular / block / proc positioned I/O 已 backend-local，pipe、stream char、console、directory、symlink/path-only fail closed。`BackingFileHandle` 在 VFS/fd 边界验证 path-only、read access、regular file 和 writable snapshot，loop state 保存该 narrowed handle，而不是任意 `Arc<File>` / `FileDesc` / `IoctlArgFile`。未发现越界接通 `CharDev` seek/ioctl，block / loop ioctl ownership 未回退。
+
+**Review:** reviewer 记录一个 Safe：未重跑 `just build`、QEMU 或 LTP；只重跑 `git diff --check` 并通过。构建结论沿用主控已运行通过的 `just build`。
+
+**Validation:** 主控已运行 `git diff --check` 和 `just build`，均通过；构建期间仅出现既有 `anemone-kernel/src/sync/mono.rs` unused import 警告。reviewer 重跑 `git diff --check` 通过。未运行 QEMU / LTP。
+
+**Next:** 启动 Agent 4；不得直接启动 Agent 5+。后续 review 仍由独立 reviewer agent 执行，不能由总控代替。

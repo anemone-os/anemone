@@ -3,7 +3,7 @@ use crate::{
         BlockDev, BlockDevClass, BlockDevRegistration, BlockIoctlCtx, BlockSize,
         devfs::publish_block_device, get_block_dev, register_block_device,
     },
-    fs::File,
+    fs::BackingFileHandle,
     prelude::*,
     syscall::user_access::{UserReadPtr, UserWritePtr},
 };
@@ -59,27 +59,17 @@ impl LoopDevice {
             }
         }
 
-        let backing = ctx.lookup_arg_fd()?;
-        let backing_access = backing.access();
-        if backing_access.is_path_only() || !backing_access.can_read() {
-            return Err(SysError::BadFileDescriptor);
-        }
-
-        let backing_file = backing.file_handle();
-        if backing_file.inode().ty() != InodeType::Regular {
-            return Err(SysError::InvalidArgument);
-        }
-
-        let backing_writable = backing_access.can_write();
+        let backing = BackingFileHandle::from_ioctl_arg_file(ctx.lookup_arg_fd()?)?;
+        let backing_writable = backing.can_write();
         let readonly = !backing_writable;
-        let display_name = format!("{}", backing_file.path());
+        let display_name = backing.display_name().to_string();
         let mut state = self.state.lock();
         if matches!(*state, LoopState::Bound(_)) {
             return Err(SysError::Busy);
         }
 
         *state = LoopState::Bound(LoopBoundState::new(
-            backing_file,
+            backing,
             0,
             None,
             readonly,
@@ -164,7 +154,7 @@ enum LoopState {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(super) struct LoopBoundState {
-    backing: Arc<File>,
+    backing: BackingFileHandle,
     offset: usize,
     size_limit: Option<usize>,
     readonly: bool,
@@ -176,8 +166,8 @@ pub(super) struct LoopBoundState {
 
 impl LoopBoundState {
     #[allow(dead_code)]
-    pub(super) fn new(
-        backing: Arc<File>,
+    fn new(
+        backing: BackingFileHandle,
         offset: usize,
         size_limit: Option<usize>,
         readonly: bool,
@@ -239,7 +229,7 @@ impl LoopFlags {
 }
 
 struct LoopBoundSnapshot {
-    backing: Arc<File>,
+    backing: BackingFileHandle,
     offset: usize,
     size_limit: Option<usize>,
     readonly: bool,
@@ -250,8 +240,7 @@ struct LoopBoundSnapshot {
 
 impl LoopBoundSnapshot {
     fn visible_bytes(&self) -> Result<usize, SysError> {
-        let backing_size =
-            usize::try_from(self.backing.get_attr()?.size).map_err(|_| SysError::FileTooLarge)?;
+        let backing_size = self.backing.visible_size()?;
         if self.offset >= backing_size {
             return Ok(0);
         }
@@ -282,7 +271,7 @@ impl LoopBoundSnapshot {
 
     fn read_blocks(&self, block_idx: usize, buf: &mut [u8]) -> Result<(), SysError> {
         let file_offset = self.io_range(block_idx, buf.len())?;
-        read_exact_at(self.backing.as_ref(), file_offset, buf)
+        self.backing.read_exact_at(file_offset, buf)
     }
 
     fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), SysError> {
@@ -291,7 +280,7 @@ impl LoopBoundSnapshot {
         }
 
         let file_offset = self.io_range(block_idx, buf.len())?;
-        write_all_at(self.backing.as_ref(), file_offset, buf)
+        self.backing.write_all_at(file_offset, buf)
     }
 
     fn to_loop_info(&self, id: usize) -> Result<loop_info, SysError> {
@@ -422,34 +411,6 @@ fn write_ioctl_value<T: Copy>(ctx: &BlockIoctlCtx<'_>, value: T) -> Result<(), S
         UserWritePtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(value);
         Ok(())
     })
-}
-
-fn read_exact_at(file: &File, mut offset: usize, mut buf: &mut [u8]) -> Result<(), SysError> {
-    while !buf.is_empty() {
-        let read = file.read_at(offset, buf)?;
-        if read == 0 {
-            return Err(SysError::UnexpectedEof);
-        }
-
-        offset = offset.checked_add(read).ok_or(SysError::InvalidArgument)?;
-        buf = &mut buf[read..];
-    }
-
-    Ok(())
-}
-
-fn write_all_at(file: &File, mut offset: usize, mut buf: &[u8]) -> Result<(), SysError> {
-    while !buf.is_empty() {
-        let written = file.write_at(offset, buf)?;
-        if written == 0 {
-            return Err(SysError::IO);
-        }
-
-        offset = offset.checked_add(written).ok_or(SysError::InvalidArgument)?;
-        buf = &buf[written..];
-    }
-
-    Ok(())
 }
 
 impl BlockDev for LoopDevice {
