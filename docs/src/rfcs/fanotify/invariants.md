@@ -12,6 +12,8 @@
 - fanotify 内部状态使用 Anemone 语义类型；Linux UAPI struct 只在 syscall 参数解析和 group fd read/write copy 边界出现。
 - VFS hook 只生成 fanotify event queue item，不在 hook 内打开事件 fd、copy user buffer 或等待 permission response。
 - event queue readiness 与 poll trigger 注册/触发在线性化点内闭合，不能 lost wake。
+- group fd 是 stream-like fanotify object：普通 read/readv 可以消费 queue，poll 只观察 readiness，可选 ioctl 只处理 group fd 命令；`seek`、`read_at`、`write_at` 和 `read_dir` 必须 fail closed，不能消费 queue、创建 metadata fd 或改变 fanotify 状态。
+- group fd nonblock read 必须观察当前 opened file description `FileStatusFlags`；`F_SETFL(O_NONBLOCK)` 后续变更必须影响 empty read。fanotify private nonblock 副本只能作为临时 bridge，不能作为首个公开 gate 的闭合证据。
 - event queue 必须在首个真实 VFS enqueue 前有固定 cap 和 overflow sentinel；无界队列、只统计不丢弃或 silent fail-open 都不能作为 path-fd event 阶段的实现状态。
 - path-fd event 的对象 fd 只在 `read(fanotify_fd)` 时为当前读取 task 创建。
 - path-fd read 的 event 消费、event fd 安装、metadata copyout 和失败回滚/丢弃策略必须是单个可复审提交协议；copyout 失败不得留下用户不可见的新 fd。
@@ -35,9 +37,13 @@ syscall 层拥有 Linux ABI 参数解析：
 - `fanotify_init(flags, event_f_flags)` 解析 group class、report mode、fd flags 和 event fd flags。
 - `fanotify_mark(fanotify_fd, flags, mask, dfd, pathname)` 解析 mark command、target type、mark flags、event mask 和 path resolution 规则。
 - 用户态 `read()` 只在 fanotify group fd file ops 中解释 fanotify metadata。`write()` 只有在 permission event gate 引入 pending response queue 后才解释 permission response ABI；首批通知类实现必须对 permission response write 返回稳定 unsupported / invalid errno，不能静默成功。
+- fanotify group fd 的 `ioctl()` 只在 group fd file ops 中解释可选命令，例如 `FIONREAD`；未知 ioctl 返回 `UnsupportedIoctl` / `ENOTTY`。`sys_ioctl()` 不得 downcast fanotify private state 或新增 fanotify-specific 分支。
+- fanotify group fd 的 `seek`、`read_at`、`write_at` 和 `read_dir` 不属于 fanotify ABI；这些入口必须返回稳定非支持错误，`pread` / `pwrite` 不得绕过 read-user 提交协议或产生 permission response 语义。
 - syscall 层不得通过 `AnyOpaque` downcast 判断某个 fd 是否 fanotify；它只能调用 fd/file 层提供的 typed operation 或 fanotify syscall facade。
 
 VFS hook 拥有事件发生点的事实输入：事件种类、当前 task、target path、parent path、name、directory/self/child 属性。它不拥有 group state，也不直接决定 userspace event layout。
+
+VFS/opened-file 层拥有 fanotify 基础 I/O 事件注入边界。`FAN_ACCESS` 必须覆盖顺序 read 和 positioned read 成功路径；`FAN_MODIFY` 必须覆盖顺序 write、positioned write、append、truncate 或等价内容修改成功路径。hook 应落在 fd/VFS gate 后、backend 成功返回后的统一边界，不下沉到每个具体 `FileOps::{read_at,write_at}` backend，也不在 char/block/proc 等设备 hook 中承载 fanotify policy。
 
 task/fd 层拥有 fd table、fd reservation 和 file description lifetime。fanotify 可以通过受控 helper 在 read 边界安装 event object fd，但不得保存用户态 fd number 作为长期身份，也不得维护与 fd table 并行的 descriptor/open-state 真相源。path-fd read 使用的 fd reservation 必须独占一个未发布 fd slot；commit 前其他 fd 分配和 close 路径都不能观察或复用该 slot，commit 只发布已准备好的 file、不得再分配/阻塞/失败，rollback 在 commit 前幂等释放 slot 和 file。reserved slot open-state 必须由 task/fd 层与普通 fd table 状态统一维护。`FAN_CLOSE_NOWRITE` / `FAN_CLOSE_WRITE` 需要从 opened file description release 取得事件事实，而不是从 group fd close 或 fd table slot close 推断。每个被监控 opened file description 必须保存 fanotify close snapshot：对象 `PathRef` / `FanPathKey` 和打开时 access mode 是否包含写能力；dup/fork 共享同一 opened file description 时只在最后 release 产生一次 close event。后续成功内容修改状态只服务 `FAN_MODIFY` 和 legacy ignore-mask clearing，不参与 close mask 分类。
 

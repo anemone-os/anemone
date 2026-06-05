@@ -6,6 +6,7 @@
 
 - 本文是实施计划初稿前的基础设施评估，保留历史判断和素材索引；规范性阶段 gate 以后续 [tracking issues](../tracking-issues.md)、[不变量需求](../invariants.md) 和 [迁移实施计划](../implementation.md) 为准。
 - 文中的 stage/phase 编排、`PathRef::location_eq()` 可用性、`FAN_CLOSE` bridge、目录项事件和 queue overflow 优先级已经被 tracking issues 收紧：Stage 0 不再是独立用户可见 gate，`FAN_CLOSE_*` 正式来源必须是 opened file description release，path/self/child 匹配必须使用 mount+dentry identity，dirent/name 类正向事件移入 FID/name follow-up，queue cap 前移到首个真实 VFS enqueue 前。
+- 2026-06-05 后 ioctl-loop 和 fileops-seek-char-ioctl 已改变当前 file-op 事实：`FileOps` 现在包含 `read_at`、`write_at`、`seek` 和 `ioctl`，`sys_ioctl()` 已分发到 opened file 的 `FileOps::ioctl`。因此本文中关于 `FIONREAD` 可在 `sys_ioctl` 探测 fanotify private state 的历史选项已经废弃；canonical RFC 要求 fanotify `FIONREAD` 若实现，必须在 group fd `FileOps::ioctl` 内完成。
 
 ## 结论
 
@@ -25,7 +26,7 @@
 现有匿名 inode 支持可以直接承载 fanotify group fd：
 
 1. `fs::anonymous::{anony_new_inode, anony_open_with}` 已经能创建内核内部匿名文件。
-2. `FileOps` 已有 `read`、`write`、`poll` vtable，fanotify group fd 可以用自己的 private state。
+2. `FileOps` 在本文写作时已有 `read`、`write`、`poll` vtable，fanotify group fd 可以用自己的 private state；2026-06-05 后还必须补齐 `read_at`、`write_at`、`seek`、`ioctl` 等 mandatory vtable 入口，具体 fail-closed 规则以现行 implementation 为准。
 3. `Task::open_fd()` 支持 `FdFlags::CLOSE_ON_EXEC` 和共享 file status flags，足够实现 `FAN_CLOEXEC`、`FAN_NONBLOCK`、`event_f_flags` 的 stage-1 边界。
 4. `FileStatusFlags::NONBLOCK` 已经存在，但 fanotify read 需要自己按 group fd flags 映射 `EAGAIN`。
 
@@ -87,10 +88,10 @@ sched latch 与 typed poll registration 已经足够：
 
 ### group fd 的 FIONREAD
 
-`sys_ioctl(FIONREAD)` 当前只识别 pipe。fanotify LTP 中可能会用到 fanotify fd 的 readable byte count。可选方案：
+本文写作时 `sys_ioctl(FIONREAD)` 只识别 pipe。fanotify LTP 中可能会用到 fanotify fd 的 readable byte count。当前 canonical RFC 已采用后续落地的 `FileOps::ioctl` 边界：
 
-1. 短期在 `sys_ioctl` 内探测 fanotify private state。
-2. 稍好一点是给 `FileOps` 增加窄接口，例如 `ioctl` 或 `bytes_readable`。
+1. 历史选项：短期在 `sys_ioctl` 内探测 fanotify private state。该选项已被现行 RFC 禁止。
+2. 现行方向：通过已经落地的 `FileOps::ioctl` 在 fanotify group fd file ops 内处理 `FIONREAD`，未知命令返回 `UnsupportedIoctl` / `ENOTTY`。
 
 这个不是首批事件主路径的硬前置，但补起来成本低。
 

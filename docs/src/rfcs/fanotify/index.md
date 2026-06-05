@@ -18,12 +18,13 @@ FID/name records、pidfd、permission events、完整 `/proc/<pid>/fdinfo`、FS 
 
 LTP 的 fanotify 组占分高，当前内核只有 `SYS_FANOTIFY_INIT` / `SYS_FANOTIFY_MARK` syscall number，尚无 fanotify UAPI 常量、syscall handler、group fd、mark registry 或 VFS 事件派发路径。
 
-现有基础设施已经足够启动 stage-1：
+现有基础设施已经足够启动 stage-1。2026-06-05 的 ioctl-loop 与 fileops-seek-char-ioctl 收口没有改变 fanotify 的 group / registry / queue / path-fd 基本设计，但刷新了 VFS file-op 边界：
 
 - 匿名 inode 与 `anony_open_with()` 可以承载 fanotify group fd。
-- `FileOps` 已有 `read`、`write`、`poll`，typed `PollRequest` / `PollRegisterResult` 和 sched latch 已能支撑可阻塞 readiness。
+- `FileOps` 已有 `read`、`write`、`read_at`、`write_at`、`seek`、`read_dir`、`poll`、`ioctl`，typed `PollRequest` / `PollRegisterResult` 和 sched latch 已能支撑可阻塞 readiness；fanotify group fd 必须提供完整 vtable，其中不可 seek / positioned I/O 的入口 fail closed。
+- `sys_ioctl()` 已通过 `IoctlCtx` 分发到打开文件对象的 `FileOps::ioctl`；fanotify group fd 若支持 `FIONREAD`，必须在自己的 file ops 内处理，不能在 syscall 层 downcast fanotify private state。
 - `PathRef = Mount + Dentry`、`InodeRef`、`Mount`、`SuperBlock` 足够表达 fanotify mark target。
-- `openat`、`File::read*()`、`File::write*()`、metadata syscall 和 VFS dirent primitive 已有集中事件注入点。
+- `openat`、`File::{read,read_at}`、`File::{write,write_at,append}`、metadata syscall 和 VFS dirent primitive 已有集中事件注入点；positioned I/O hook 必须落在保留 fd/VFS gate 后的 VFS/opened-file 边界，不下沉到具体 backend `FileOps::{read_at,write_at}`。
 - `CredentialSet` 与 `Capability::SYS_ADMIN` 已能表达首批 privileged listener 边界。
 
 详细基础设施评估见 [fanotify 基础设施评估](./backgrounds/infra-assessment-20260604.md)。
@@ -31,7 +32,7 @@ LTP 的 fanotify 组占分高，当前内核只有 `SYS_FANOTIFY_INIT` / `SYS_FA
 ## 目标
 
 - 建立 fanotify syscall ABI 边界和 Linux-compatible flag / errno validation。
-- 建立 fanotify group fd：`read()`、`poll()`、nonblock read、`FIONREAD` 可选支持、close teardown。
+- 建立 fanotify group fd：`read()`、`poll()`、nonblock read、完整 vtable fail-closed、`FIONREAD` 可选支持、close teardown。
 - 建立 mark registry，支持 inode / mount / filesystem mark 的基础匹配。
 - 覆盖 path-fd 模式的基础事件：`FAN_OPEN`、`FAN_ACCESS`、`FAN_MODIFY`、`FAN_CLOSE`。
 - 支持 `FAN_MARK_ONLYDIR`、`FAN_MARK_DONT_FOLLOW`、`FAN_MARK_FLUSH`、`FAN_EVENT_ON_CHILD`、`FAN_ONDIR` 和 basic ignore mask。
@@ -67,7 +68,7 @@ Canonical：
 
 新增 `fs::fanotify` 子系统模块，拥有 fanotify group、mark registry、event queue、event matching 和 fanotify fd file ops。该模块按 group / event / queue / registry / mark / file / hooks 等内部职责拆分，只有 `mod.rs` facade 暴露窄 API；syscall、VFS、task/fd 和 procfs 不直接访问 registry、queue、mark record 或 group lock。syscall handler 只负责 Linux ABI 参数解析、flag validation、用户指针读取和 fd 安装；fanotify 内部长期状态使用 Anemone 语义类型，例如 `FanMask`、`FanMarkFlags`、`FanGroupMode`、`FanEventKind`、`FanTarget`。
 
-fanotify group fd 使用匿名 inode 创建。group private state 保存 init flags、event fd flags、marks、event queue、poll trigger queue 和 teardown 状态。`read()` 从队列取出事件，path-fd 模式在 read 时为事件对象创建新的 fd；`poll()` 只暴露 queue readiness；event enqueue 在 queue 从空变非空时触发已注册的 latch triggers。
+fanotify group fd 使用匿名 inode 创建。group private state 保存 init flags、event fd flags、marks、event queue、poll trigger queue 和 teardown 状态。group fd 是 stream-like 对象：普通 `read()` 从队列取出事件，path-fd 模式在 read 时为事件对象创建新的 fd；`poll()` 只暴露 queue readiness；`seek`、`read_at`、`write_at` 和 `read_dir` 不消费队列、不创建 metadata fd，并返回稳定非支持错误；可选 ioctl 只在 group fd file ops 内处理。event enqueue 在 queue 从空变非空时触发已注册的 latch triggers。
 
 VFS 事件派发通过窄 hook 接入现有集中入口。hook 只接收事件语义、当前 task identity、target `PathRef` 和必要 parent/name 信息；它不在持有 VFS mutating lock 时打开事件 fd 或 copy user buffer。matching 只生成 fanotify queue item，实际 fd 分配和 userspace copy 发生在 group fd read 边界。
 

@@ -19,7 +19,8 @@ Stage 0 是内部 ABI/probe checkpoint，不是独立用户可见 LTP gate。首
 - unsupported feature 必须返回稳定 errno，不得空成功。
 - event enqueue 不做用户态 copy，不打开事件 fd，不阻塞。
 - poll/read readiness 使用 typed `PollRequest` / `PollRegisterResult` 与 `LatchTrigger`；不得重新引入 busy-poll waiter。
-- 首个用户可见 group fd 不允许 empty blocking read 返回 `EAGAIN`；nonblock 判断读取当前 file status flags。
+- 首个用户可见 group fd 不允许 empty blocking read 返回 `EAGAIN`；nonblock 判断必须读取当前 opened file description 的 `FileStatusFlags`，使 `F_SETFL(O_NONBLOCK)` 后续变更生效。
+- fanotify group fd 需要完整实现当前 `FileOps` vtable：普通 `read` / readv 系列进入 fanotify read-user 路径，`poll` 使用 latch readiness，`ioctl` 只处理可选 group fd 命令；`seek`、`read_at`、`write_at` 和 `read_dir` 必须 fail closed，不能消费 group queue、创建 event metadata fd 或改变 fanotify 状态。
 - 首个真实 VFS enqueue 前必须已有固定 queue cap 和 overflow sentinel；无界队列或只统计不丢弃都不能进入 path-fd event 阶段。
 - 首批 legacy basic ignore mask 只覆盖 `FAN_MARK_IGNORED_MASK` / `FAN_MARK_IGNORED_SURV_MODIFY` 的 add/remove/modify-survive 语义；新的 `FAN_MARK_IGNORE` 和跨 inode/mount 合并规则进入独立 backlog gate。
 - fd reservation / commit / rollback 和 opened-description release 由 task/fd 层拥有，fanotify 只能调用受控 helper 或接收 release 回调，不维护并行 fd-table 状态或用户 fd number 身份。
@@ -46,7 +47,7 @@ Stage 0 是内部 ABI/probe checkpoint，不是独立用户可见 LTP gate。首
 - 新增 `fanotify_init()` syscall handler。
 - 新增 `fanotify_mark()` syscall handler。
 - `fanotify_init(FAN_CLASS_NOTIF, valid_event_f_flags)` 的公开成功推迟到 Stage 0 + Stage 1 合并 gate；若 Stage 0 单独提交，只能作为内部 probe checkpoint。
-- `FAN_CLOEXEC` / `FAN_NONBLOCK` 映射到 fd flags；后续 read 行为必须读取当前 file status flags，使 `F_SETFL(O_NONBLOCK)` 生效。
+- `FAN_CLOEXEC` 映射到 fd flags；`FAN_NONBLOCK` 映射到 opened file description 的 file status flags。后续 read 行为必须读取当前 `FileStatusFlags`，使 `F_SETFL(O_NONBLOCK)` 生效。若实现期只能通过类似 pipe 的同步桥把 `FileStatusFlags::NONBLOCK` 镜像到 fanotify private state，该桥只能作为 temporary compatibility bridge 记录，不能作为 Stage 0 + Stage 1 合并 gate 的闭合证据。
 - `FAN_CLASS_CONTENT` / `FAN_CLASS_PRE_CONTENT` 可以先创建通知类 group 以支撑 permission feature probe，但 permission masks 在 mark 阶段返回 `EINVAL`；permission response `write()` 在 permission gate 前也必须返回稳定 unsupported / invalid errno，不能接受无 pending event 的假回复。
 - 默认拒绝 FID/name、pidfd、unprivileged FID-only、audit、unlimited queue/marks 等暂缓 init flags。
 - 对非法 `event_f_flags`、非法 class 组合和未知 bits 返回 `EINVAL`。
@@ -57,7 +58,7 @@ Stage 0 init flag matrix：
 | --- | --- | --- | --- |
 | `FAN_CLASS_NOTIF` | 接受 parser；公开成功只能在 Stage 0 + Stage 1 合并 gate 宣称。 | 合并 gate 后支撑 `fanotify01/02/04/08` 基础 setup；Stage 0 单独落地不得作为 LTP 成功证据。 | Stage 0 + Stage 1 |
 | `FAN_CLOEXEC` | 接受，映射到 group fd `CLOSE_ON_EXEC`。 | `fanotify08` 或等价 fcntl probe。 | Stage 0 + Stage 1 |
-| `FAN_NONBLOCK` | 接受，映射到 group fd 初始 file status flags；`read()` 每次读取当前 flags。 | empty nonblock read 返回 `EAGAIN`；`F_SETFL(O_NONBLOCK)` 后续变更必须生效。 | Stage 0 + Stage 1 |
+| `FAN_NONBLOCK` | 接受，映射到 group fd 初始 file status flags；`read()` 每次读取当前 opened file description status flags，而不是 fanotify private 副本。 | empty nonblock read 返回 `EAGAIN`；`F_SETFL(O_NONBLOCK)` 后续变更必须生效。 | Stage 0 + Stage 1 |
 | valid `event_f_flags` | 接受并保存为 event object fd 创建模板，只允许外部 open status/access flags。 | invalid bits 或非法 access mode 返回 `EINVAL`。 | Stage 3 path-fd read |
 | `FAN_CLASS_CONTENT` / `FAN_CLASS_PRE_CONTENT` | 接受通知类 group creation，避免 permission 用例在 `SAFE_FANOTIFY_INIT()` 处 TBROK；不创建 pending permission queue。 | permission mask 在 `fanotify_mark()` 返回 `EINVAL`，让 permission feature probe TCONF；permission response `write()` 在 follow-up 前返回稳定 unsupported / invalid errno。 | permission follow-up |
 | FID/name report flags | 拒绝：`FAN_REPORT_FID`、`FAN_REPORT_DIR_FID`、`FAN_REPORT_NAME`、`FAN_REPORT_TARGET_FID` 均返回 `EINVAL`。 | helper-based probe 归类为 unsupported；stock FID 用例属于暂缓清单。 | FID/name follow-up |
@@ -76,6 +77,7 @@ Stage 0 init flag matrix：
 - 确认失败路径不泄漏 fd 或 group state。
 - 确认 `FAN_CLASS_CONTENT` probe 不会在 `SAFE_FANOTIFY_INIT()` 处 TBROK permission 用例。
 - 确认本阶段单独落地时不会被记录为 fanotify 用户可见成功 gate。
+- 确认 `FAN_NONBLOCK` 不被固化到 fanotify group private state；若存在临时同步桥，事务日志必须标注为 bridge，并在 Stage 1 合并 gate 前替换为 current-status-flags 可复审路径。
 
 验证：
 
@@ -99,6 +101,7 @@ Stage 0 init flag matrix：
 
 - 阶段 0 完成。
 - `fs::fanotify` owner module 边界确定，global registry、group lock、queue、mark record 和 file private state 均不被模块外直接访问。
+- read/readv 系列已经能通过 typed read dispatch、FileDesc-aware read context 或等价机制让 fanotify group fd read 观察当前 opened file description `FileStatusFlags`；Stage 0 + Stage 1 合并 gate 不能依赖 fanotify private nonblock 副本。
 - task/fd 层 semantic release hook 或等价 opened-description release 机制已确定；fanotify 不维护独立 fd table 或用户 fd number 计数。
 - 首个用户可见 gate 采用 Stage 0 + Stage 1 合并验收。
 
@@ -117,17 +120,22 @@ Stage 0 init flag matrix：
   - dead/closing 状态
 - 实现 group fd `read()`：
   - empty + blocking：等待，并能被 enqueue / close / dead-group 唤醒。
-  - empty + nonblock：按当前 file status flags 返回 `EAGAIN`。
+  - empty + nonblock：按当前 opened file description `FileStatusFlags` 返回 `EAGAIN`，`F_SETFL(O_NONBLOCK)` 的后续变化必须即时生效。
   - buffer 太小：返回 `EINVAL`。
   - 输出 `fanotify_event_metadata`。
   - Stage 1 synthetic event 使用 `fd = FAN_NOFD`，不创建 path-fd event object。
+- 实现 group fd 其余 vtable：
+  - `seek` 返回 `IllegalSeek` / `ESPIPE` 风格错误。
+  - `read_at` / `write_at` 返回稳定 unsupported / illegal seek 错误，不得进入 fanotify queue read 或 permission response path。
+  - `read_dir` 返回 `NotDir`。
+  - `ioctl` 默认返回 `UnsupportedIoctl` / `ENOTTY`；若实现 `FIONREAD`，只在 group fd `FileOps::ioctl` 内通过 `IoctlCtx` 写回 queued bytes / records，不得新增 `sys_ioctl()` fanotify special-case。
 - 实现 group fd `poll()`：
   - queue 非空返回 `READABLE`。
   - queue 为空的 register 请求保存 `LatchTrigger`。
   - enqueue 后 detach triggers 并在 lock 外 trigger。
 - group fd file ops 内部可以从 `AnyOpaque` 取出 typed group state；模块外代码不得对 fanotify private state 做 cast 或按 private type 分支。
 - 固定首批 queue cap：默认 `DEFAULT_MAX_EVENTS = 16384`，并在 group state 中保存 `max_events`、`overflow_queued`、`dropped_events`。队满时若当前没有 overflow sentinel，则排入单个 `FAN_Q_OVERFLOW` / `FAN_NOFD` event；若 sentinel 已在队列中，则丢弃新事件并递增 `dropped_events`。精确 sysctl、merge/order 和 `FAN_UNLIMITED_QUEUE` 后移，但资源上限和可观测 overflow 不后移。
-- group fd `FIONREAD` 仍为可选；若不实现，不作为 Stage 1 验收项。
+- group fd `FIONREAD` 仍为可选；若不实现，不作为 Stage 1 验收项；若实现，必须走 fanotify group fd `FileOps::ioctl`，未知命令返回 `UnsupportedIoctl` / `ENOTTY`。
 - 最后一个用户可见 descriptor / opened-description ref 关闭时执行 semantic close teardown：标记 closing/dead、清理 queue、marks、poll triggers，并唤醒 blocking read / poll；shared group state 的实际内存释放可以等 in-flight syscall transient refs 归零。
 - Stage 1 必须提供 fd/task 层 release hook、table-ref 计数或等价机制来触发 semantic close teardown；不得依赖 group state memory last-drop 唤醒当前正在阻塞且持有 transient ref 的 read，也不得把任意 fd number close 当作 shared group teardown。
 
@@ -139,6 +147,7 @@ Stage 0 init flag matrix：
 - queue item 不持有短生命周期引用。
 - close/dead 唤醒 blocking read 和 poll waiters。
 - blocking read 持有 transient ref 时，最后 descriptor close 仍能触发 semantic close wakeup。
+- read 路径能观察当前 opened file description status flags；`F_SETFL(O_NONBLOCK)` 后 empty read 返回 `EAGAIN`，清除后恢复 blocking 语义。临时 private nonblock mirror 不能作为合并 gate 闭合证据。
 - queue 中持有的 `PathRef` 或等价引用在解锁后释放。
 - Stage 1 不打开 event object fd，不需要 no-notify guard。
 - group state 不保存用户 fd number，也不保存与 task/fd 表并行的 descriptor 计数。
@@ -148,7 +157,7 @@ Stage 0 init flag matrix：
 - `just build`
 - 最小内核或用户态 smoke：创建 group，poll empty 不 ready，手工注入 `FAN_NOFD` event 后 poll/read ready。
 - blocking empty read 会等待，并能被 synthetic enqueue 或 close/dead 唤醒。
-- nonblock empty read 返回 `EAGAIN`。
+- `FAN_NONBLOCK` 和 `F_SETFL(O_NONBLOCK)` 后的 empty read 返回 `EAGAIN`；清除 `O_NONBLOCK` 后 empty read 重新进入 blocking 路径。
 
 退出条件：
 
@@ -251,14 +260,14 @@ Stage 0 init flag matrix：
 
 - 阶段 2 完成。
 - fanotify enqueue API 已封装，VFS 不直接操作 registry 内部。
-- fanotify 专用 read-user 提交协议或等价 typed `FileOps` / read syscall dispatch 机制已确定；syscall 层不得通过 downcast 识别 fanotify fd。
+- fanotify 专用 read-user 提交协议或等价 typed `FileOps` / read syscall dispatch 机制已确定；syscall 层不得通过 downcast 识别 fanotify fd。Stage 1 已经为 current `FileStatusFlags` nonblock read 提供同一 dispatch / context 基础，本阶段只扩展 path-fd metadata 提交。
 - task/fd 层 `reserve_event_fd()` / commit / rollback helper 已确定，并把 reserved slot 状态纳入 fd table 单一真相源。
 - no-notify guard 形态已确定，且只覆盖 fanotify 内部 event-fd helper；event fd 后续 suppression 使用通用 file/opened-description notification flag。
 - queue cap 已在 Stage 1 生效。
 
 fanotify read-user 提交协议：
 
-1. `read(fanotify_fd)` 走 fanotify 专用 read-user path，不复用 “先生成 kernel buffer、再 generic copyout” 的普通 `FileOps::read` 事务。该路径应通过 typed file operation / read dispatch 暴露给 read/readv 系列 syscall；syscall 层不能直接识别 fanotify private state。
+1. `read(fanotify_fd)` 走 fanotify 专用 read-user path，不复用 “先生成 kernel buffer、再 generic copyout” 的普通 `FileOps::read` 事务。该路径应通过 typed file operation / read dispatch 暴露给 read/readv 系列 syscall，并能观察当前 opened file description status flags；syscall 层不能直接识别 fanotify private state。
 2. 在 group lock 下处理 empty blocking/nonblock、buffer-too-small、close/dead wakeup；选择一个完整 event 后从队列移除，普通通知 event 的消费点就是出队点，首批不保留重读。
 3. 释放 group lock 后构造 metadata。path-fd event 使用 `NoNotifyGuard` 打开事件对象；对象打开失败时输出 `fd = FAN_NOFD` 并继续 copyout，不 panic，也不把 open failure 变成半读。
 4. event fd 安装使用 task/fd 层的 “预留但未发布” 或等价可回滚 helper：`reserve_event_fd()` 返回未发布但独占的 fd slot 和稳定 fd number；commit 只发布已准备好的 file，不分配、不阻塞、不可失败；rollback 在 commit 前幂等释放 slot 和 file。reserved slot 状态必须由 task/fd 层与普通 fd table open-state 一起维护，不能让 fanotify 自己保存并行 fd 分配状态。
@@ -268,8 +277,8 @@ fanotify read-user 提交协议：
 交付：
 
 - 在 open path 成功后派发 `FAN_OPEN`。
-- 在 read 成功读取后派发 `FAN_ACCESS`。
-- 在 write/truncate 成功修改内容后派发 `FAN_MODIFY`。
+- 在 `File::{read,read_at}` 成功读取后派发 `FAN_ACCESS`；hook 放在 fd/VFS gate 已完成、backend 成功返回之后，不下沉到具体 backend `FileOps::{read,read_at}`。
+- 在 `File::{write,write_at,append,append_at_current_end}`、truncate 或等价内容修改路径成功后派发 `FAN_MODIFY`；hook 放在 VFS/opened-file 边界，避免每个 backend 重复 fanotify policy。
 - 在 opened file description release 中派发 `FAN_CLOSE_NOWRITE` / `FAN_CLOSE_WRITE`：
   - open 成功时在 opened file description 上记录 fanotify close snapshot：`PathRef` / `FanPathKey`、打开时 access mode 是否包含写能力。
   - write/truncate/content modify 成功路径仍记录 `did_modify` 或等价状态，但该状态只服务 `FAN_MODIFY` 和 legacy ignore-mask clearing，不参与 close mask 分类。
@@ -302,6 +311,7 @@ fanotify read-user 提交协议：
 - event fd 的 opened file description 有 no-notify 标记，且该标记不泄漏到普通 open。
 - copyout 失败、event object open 失败和 partial read 不会半成功。
 - read/readv 入口不会通过 syscall 层 downcast fanotify private state；fd reservation commit/rollback 由 task/fd helper 统一维护。
+- `pread` / `pwrite` / positioned VFS paths 的普通文件事件被覆盖，但对 fanotify group fd 自身的 `read_at` / `write_at` 仍 fail closed，不产生 metadata 或 permission response。
 - write/read 失败不生成成功事件。
 - close event 来源是 opened file description release；若保留 bridge，注释必须写明 temporary LTP bridge。
 - ADD / REMOVE / FLUSH 与 matching snapshot / queue append 的线性化点无歧义。
