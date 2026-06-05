@@ -4,7 +4,7 @@ use crate::{
     utils::any_opaque::NilOpaque,
 };
 
-use super::{get_char_dev, get_char_dev_name};
+use super::{CharSeekCtx, get_char_dev, get_char_dev_name};
 
 fn opened_char_file() -> OpenedFile {
     OpenedFile {
@@ -32,12 +32,18 @@ fn char_file_write(file: &File, _pos: &mut usize, buf: &[u8]) -> Result<usize, S
         .write(buf)
 }
 
+fn char_file_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
+    get_char_dev(char_file_devnum(file)?)
+        .ok_or(SysError::NotFound)?
+        .seek(CharSeekCtx::new(from, pos))
+}
+
 static CHAR_DEV_FILE_OPS: FileOps = FileOps {
     read: char_file_read,
     write: char_file_write,
     read_at: |_, _, _| Err(SysError::IllegalSeek),
     write_at: |_, _, _| Err(SysError::IllegalSeek),
-    seek: |_, _, _| Err(SysError::IllegalSeek),
+    seek: char_file_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     // Char devices do not have a waitable poll path yet. Report NYI instead of
     // pretending every device is immediately readable or writable.

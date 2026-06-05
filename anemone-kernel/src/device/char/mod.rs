@@ -6,6 +6,25 @@ use idalloc::{IdAllocator, IdentityBijection, OneShotAlloc};
 
 use crate::{prelude::*, utils::iter_ctx::IterCtx};
 
+pub struct CharSeekCtx<'a> {
+    from: SeekFrom,
+    pos: &'a mut usize,
+}
+
+impl<'a> CharSeekCtx<'a> {
+    pub const fn new(from: SeekFrom, pos: &'a mut usize) -> Self {
+        Self { from, pos }
+    }
+
+    pub const fn from(&self) -> SeekFrom {
+        self.from
+    }
+
+    pub fn set_pos(&mut self, pos: usize) {
+        *self.pos = pos;
+    }
+}
+
 /// A character device is a type of device that provides a stream of bytes, as
 /// opposed to block devices which provide fixed-size blocks of data.
 ///
@@ -23,6 +42,10 @@ pub trait CharDev: Send + Sync {
     /// Write data from the provided buffer to the device. Returns the number
     /// of bytes written, or an error if the write operation fails.
     fn write(&self, buf: &[u8]) -> Result<usize, SysError>;
+
+    fn seek(&self, _ctx: CharSeekCtx<'_>) -> Result<usize, SysError> {
+        Err(SysError::IllegalSeek)
+    }
 }
 
 impl dyn CharDev {
