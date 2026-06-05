@@ -12,7 +12,7 @@
 - 后续实现预计跨多天、多个 agent 或多个 checkpoint；
 - devlog、register 或后续 RFC 需要长期引用该计划。
 
-简单 bugfix、局部清理、一次性实验和不影响公共契约的小补丁不需要 RFC。它们可以只写普通 devlog、register 条目，或不写正式文档。
+简单 bugfix、局部清理、一次性实验和不影响公共契约的小补丁不需要 RFC。它们可以只写普通 devlog、register 条目、小迭代记录，或不写正式文档。小迭代记录可以在单页内写清局部问题、解决方案和本迭代内部 tracking issues；如果这些内容开始需要仓库级 contract、不变量、阶段 gate 或多轮 review，再升级为 RFC。
 
 ## 生命周期
 

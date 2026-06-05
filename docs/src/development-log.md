@@ -32,7 +32,9 @@
 
 ## 小迭代记录
 
-小迭代记录用于承载不值得开 RFC、但又不适合塞进双周日志的一次性事实。它记录已经发生的实现、修复、调查和验证证据，不记录未接受的中大型计划。
+小迭代记录用于承载不值得开 RFC、但又不适合塞进双周日志的一次局部迭代。它必须是自洽、可自描述的记录：读者只打开这一页，就能理解问题是什么、为什么按当前方案处理、实际推进到哪里、验证到哪里、还剩哪些局部风险。
+
+小迭代记录不只记录完成后的事实。对于仍在推进的小问题，它可以在记录内部维护 `Problem`、`Solution` 和 `Tracking Issues` 章节，用来说明本轮问题、局部方案、review concern、验证缺口和关闭依据。但这些 tracking issues 只服务于当前小迭代本身，不承担仓库级 accepted contract、跨子系统不变量或长期阶段计划。
 
 适合建立小迭代记录的情况：
 
@@ -40,6 +42,7 @@
 - 一次 bugfix 的触发条件、根因、验证或剩余风险超过双周日志的合理长度；
 - 小功能或局部清理影响明确 owning surface，且需要说明不改什么；
 - 一次调查没有进入 RFC，但产出的分类结论会影响后续诊断；
+- 一个局部问题需要先写清问题、解法和少量待关闭事项，确认它不值得启动 RFC；
 - register / current limitations 需要链接到更具体的修复或调查事实。
 
 不需要建立小迭代记录的情况：
@@ -55,7 +58,8 @@
 - 当记录需要背景材料时，可以升级为同名目录：`docs/src/devlog/changes/YYYY-MM-DD-short-slug/index.md` 是记录本体，`backgrounds/` 保存证据摘要、Linux / LTP 对照、历史材料或运行记录。
 - 双周开发日志追加一条短摘要并链接小迭代记录。
 - 小迭代记录可以被 register、current limitations、RFC 背景材料或后续事务日志引用。
-- 如果小迭代后来升级为 RFC，原记录保留事实历史，并在 `Status` 或 `Follow-up` 中标明被哪个 RFC 或事务日志取代。
+- `Tracking Issues` 章节可以记录本迭代内的 review concern、方案缺口、验证缺口和关闭依据；问题关闭后应把结论折回 `Solution`、`Change`、`Validation` 或 `Risk / Follow-up`，不要只在 tracker 中留下最终语义。
+- 如果小迭代后来升级为 RFC，原记录保留事实历史，并在 `Status`、`Follow-up` 或 `Tracking Issues` 中标明被哪个 RFC 或事务日志取代。
 - 如果记录后来被证明有误，追加更正说明；不要静默改写已经完成的事实判断。
 
 适合升级为目录的小迭代记录：
@@ -65,7 +69,7 @@
 - 调查结论没有进入 RFC，但背景材料会被后续反复引用；
 - 单文件已经影响扫读。
 
-目录形态只是事实记录扩容，不是小型 RFC。`backgrounds/` 不承载 accepted contract、不变量、阶段计划或 review tracking issues；如果材料已经需要这些结构，应升级为 RFC 工作流。
+目录形态只是让小迭代记录容纳证据包和局部跟踪，不是小型 RFC。`index.md` 仍是唯一的自描述记录本体；`backgrounds/` 只保存证据摘要、Linux / LTP 对照、历史材料或运行记录。如果记录开始需要仓库级 accepted contract、非平凡不变量、跨阶段实施计划、独立 `tracking-issues.md`、多轮文档层 review 或多个 agent/checkpoint 编排，应升级为 RFC 工作流，而不是继续扩张 `changes/` 目录。
 
 ## 事务日志
 

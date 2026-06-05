@@ -23,13 +23,14 @@ If the task involves review findings or issue severity, also use `anemone-code-r
 ## Core Boundaries
 
 - Private drafts are working material, not public canonical sources. Use a user-provided private draft path if one is given, but do not publish that path as a stable link in docs, devlog, or register.
-- Small change records live under `docs/src/devlog/changes/`. They record facts for bugfixes, small features, cleanup, and investigations; they do not define accepted contracts, invariants, stage plans, or review tracking issues.
+- Small change records live under `docs/src/devlog/changes/`. They are self-contained local iteration records for bugfixes, small features, cleanup, and investigations. They may include `Problem`, `Solution`, and an inline `Tracking Issues` section for local review concerns, validation gaps, and closure notes.
 - Small change records default to one file: `YYYY-MM-DD-short-slug.md`. Use a same-name directory with `index.md` plus optional `backgrounds/` only when evidence, Linux/LTP references, history, or run logs would make the single file hard to scan. `backgrounds/` remains factual evidence, not a plan layer.
+- Small change tracking issues are local to the record. Do not create standalone `tracking-issues.md`, `invariants.md`, or `implementation.md` under `changes/`; if the work needs repository-level accepted contracts, non-trivial invariants, staged gates, multi-agent/checkpoint orchestration, or repeated document-layer review, upgrade to the RFC workflow.
 - Biweekly devlogs are timeline summaries and query entry points. Keep enough summary, area, validation status, and links for scanning; put longer small-change facts in `changes/` and long-running execution facts in `transactions/`.
 - Public RFCs live under `docs/src/rfcs/<short-slug>/` and become canonical immediately after promotion.
 - Large feature work should close the document protocol before code implementation unless the user explicitly narrows the task differently.
 - RFCs record accepted contract, scope, invariants, and planned gates. Transaction devlogs record execution facts, checkpoints, review results, validation evidence, corrections, and handoff.
-- If a small change starts needing accepted contract text, non-trivial invariants, staged implementation gates, or `tracking-issues.md`, upgrade to the RFC workflow instead of expanding `changes/` into a small RFC.
+- If a small change starts needing repository-level accepted contract text, non-trivial invariants, staged implementation gates, standalone `tracking-issues.md`, or multi-agent/checkpoint orchestration, upgrade to the RFC workflow instead of expanding `changes/` into a small RFC.
 - Write sets are coordination contracts, not architecture constraints. A worker must not silently edit outside its assigned write set, but if the better design needs a different owning surface, it should stop and report the proposed expansion instead of forcing compatibility inside the old write set.
 
 ## Workflow
@@ -47,12 +48,13 @@ If the task involves review findings or issue severity, also use `anemone-code-r
 
 2. Handle small change records.
    - Use the template in `docs/src/templates.md`.
-   - Keep the record factual: trigger, scope, change, validation, risk/follow-up, and links.
+   - Keep the record self-contained: problem, scope, solution, change, validation, local tracking issues, risk/follow-up, and links.
    - Default to `docs/src/devlog/changes/YYYY-MM-DD-short-slug.md`.
    - Use `docs/src/devlog/changes/YYYY-MM-DD-short-slug/index.md` plus `backgrounds/` only for evidence packets or reusable references.
    - Update the current biweekly devlog with a short summary and link to the small change record.
    - Update `docs/src/devlog/changes/index.md` when adding a new record so it remains discoverable.
-   - Do not add `invariants.md`, `implementation.md`, or `tracking-issues.md` under `changes/`.
+   - Use an inline `Tracking Issues` section for local review concerns, validation gaps, and closure notes. When closing an item, fold the conclusion back into the record body instead of leaving the tracker as the only repair location.
+   - Do not add `invariants.md`, `implementation.md`, or standalone `tracking-issues.md` under `changes/`.
 
 3. Align RFC draft shape.
    - Ensure `index.md` and `implementation.md` exist for directory-level RFCs.
