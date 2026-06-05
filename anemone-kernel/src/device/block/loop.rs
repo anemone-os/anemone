@@ -136,10 +136,10 @@ impl LoopDevice {
     }
 
     fn has_external_block_refs(&self, ctx: &BlockIoctlCtx<'_>) -> bool {
-        // Registry + block devfs ioctl dispatch are
-        // the baseline refs while handling LOOP_CLR_FD. Anything more means a
+        // Transient devfs/ioctl refs are already subtracted here. The block
+        // registry is the only persistent baseline; anything more means a
         // mount or another block path still observes this device.
-        ctx.target_device_persistent_ref_count() > 2
+        ctx.target_device_persistent_ref_count() > 1
     }
 }
 

@@ -143,7 +143,8 @@ backing fd lookup 和 backing file I/O 不在 loop `state` lock 下执行。
 
 **Resolution:** `BlockDevIoHandle` 只在 registry 中保存弱引用；block private ioctl 分发时用
 transient guard 标记临时强引用。`LOOP_CLR_FD` 使用 persistent ref count，扣除 devfs/ioctl
-临时引用后再与 registry + dispatch 基线比较。
+临时引用后只把 block registry 视为 persistent baseline；任何额外 persistent ref 都会保留
+`EBUSY`。
 
 ### CHG-003 - Bounce buffer bound
 
