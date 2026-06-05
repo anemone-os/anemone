@@ -9,7 +9,7 @@
 
 use crate::prelude::{
     vma::{ForkPolicy, Protection, VmArea, VmFlags},
-    vmo::{anon::AnonObject, shadow::ShadowObject, VmObject},
+    vmo::{VmObject, anon::AnonObject, shadow::ShadowObject},
     *,
 };
 
@@ -341,7 +341,11 @@ impl UserSpace {
                 mapper.change_flags(range, |_, _| Some(new_flags), TraverseOrder::PreOrder);
             }
             PagingArch::tlb_shootdown_all();
-            kdebugln!("changed heap protection on range {:#x?} to {:?}", range, prot);
+            kdebugln!(
+                "changed heap protection on range {:#x?} to {:?}",
+                range,
+                prot
+            );
             return Ok(RemoteUspFenceGuard { vpn: Some(range) });
         }
 
@@ -1074,11 +1078,13 @@ mod kunits {
         uspace
             .inject_page_fault((base + 3).to_virt_addr(), PageFaultType::Read)
             .expect("faulting mapped page should succeed");
-        assert!(uspace
-            .page_table_mut()
-            .mapper()
-            .translate(base + 3)
-            .is_some());
+        assert!(
+            uspace
+                .page_table_mut()
+                .mapper()
+                .translate(base + 3)
+                .is_some()
+        );
 
         uspace
             .protect_range(VirtPageRange::new(base + 2, 2), Protection::READ)
@@ -1098,11 +1104,13 @@ mod kunits {
                 ),
             ]
         );
-        assert!(uspace
-            .page_table_mut()
-            .mapper()
-            .translate(base + 3)
-            .is_none());
+        assert!(
+            uspace
+                .page_table_mut()
+                .mapper()
+                .translate(base + 3)
+                .is_none()
+        );
     }
 
     #[kunit]

@@ -96,12 +96,8 @@ fn resolve_execveat_path(
 })]
 pub fn execve(
     #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] path: Box<str>,
-    #[validate_with(nullable_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] argv: Vec<
-        Box<str>,
-    >,
-    #[validate_with(nullable_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] envp: Vec<
-        Box<str>,
-    >,
+    #[validate_with(nullable_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] argv: Vec<Box<str>>,
+    #[validate_with(nullable_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] envp: Vec<Box<str>>,
 ) -> Result<u64, SysError> {
     let path = Path::new(path.as_ref());
     let argv = if argv.is_empty() {
@@ -124,12 +120,8 @@ pub fn execve(
 fn execveat(
     dirfd: i32,
     #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
-    #[validate_with(nullable_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] argv: Vec<
-        Box<str>,
-    >,
-    #[validate_with(nullable_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] envp: Vec<
-        Box<str>,
-    >,
+    #[validate_with(nullable_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] argv: Vec<Box<str>>,
+    #[validate_with(nullable_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] envp: Vec<Box<str>>,
     flags: ExecveAtFlags,
 ) -> Result<u64, SysError> {
     let exec_path = resolve_execveat_path(dirfd, pathname.as_ref(), flags)?;

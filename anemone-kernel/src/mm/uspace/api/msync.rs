@@ -1,7 +1,7 @@
 //! msync system call.
 
 use crate::prelude::{
-    user_access::{aligned_to, user_addr, SyscallArgValidatorExt},
+    user_access::{SyscallArgValidatorExt, aligned_to, user_addr},
     *,
 };
 
@@ -14,7 +14,12 @@ fn sys_msync(
     len: u64,
     flags: MsyncFlags,
 ) -> Result<u64, SysError> {
-    kdebugln!("msync: addr={:#x}, len={}, flags={:?}", addr.get(), len, flags);
+    kdebugln!(
+        "msync: addr={:#x}, len={}, flags={:?}",
+        addr.get(),
+        len,
+        flags
+    );
 
     if flags.contains(MsyncFlags::MS_INVALIDATE) {
         kwarningln!("msync: ignoring MS_INVALIDATE");

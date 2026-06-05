@@ -668,8 +668,8 @@ impl FilesState {
 //         }
 //     }
 //
-//     pub fn open_fd(&mut self, file: File, file_flags: FileStatusFlags, fd_flags:
-// FdFlags) -> Option<Fd> {         let fd = self.alloc_fd()?;
+//     pub fn open_fd(&mut self, file: File, file_flags: FileStatusFlags,
+// fd_flags: FdFlags) -> Option<Fd> {         let fd = self.alloc_fd()?;
 //         let file = Arc::new(ProcFile {
 //             file,
 //             flags: file_flags,

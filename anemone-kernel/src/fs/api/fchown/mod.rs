@@ -31,16 +31,14 @@ pub fn kernel_fchown(
     pathref.mount().ensure_writable()?;
 
     if let Some(owner) = owner {
-        if !(checker.is_owner(inode) && owner == inode.uid())
-            && !checker.has_cap(Capability::CHOWN)
+        if !(checker.is_owner(inode) && owner == inode.uid()) && !checker.has_cap(Capability::CHOWN)
         {
             return Err(SysError::PermissionDenied);
         }
     }
 
     if let Some(group) = group {
-        if !(checker.is_owner(inode)
-            && (group == inode.gid() || checker.fs_group_allowed(group)))
+        if !(checker.is_owner(inode) && (group == inode.gid() || checker.fs_group_allowed(group)))
             && !checker.has_cap(Capability::CHOWN)
         {
             return Err(SysError::PermissionDenied);

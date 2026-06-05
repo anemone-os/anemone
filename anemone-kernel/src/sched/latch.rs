@@ -14,8 +14,10 @@ use core::marker::PhantomData;
 
 use crate::prelude::*;
 
-use super::higher_level::schedule_wait_with_timeout;
-use super::wait::{self, WaitOutcome, WaitReason, WakeMode, WakeResult, WakeToken};
+use super::{
+    higher_level::schedule_wait_with_timeout,
+    wait::{self, WaitOutcome, WaitReason, WakeMode, WakeResult, WakeToken},
+};
 
 /// Waiter-owned guard for exactly one current-task latch round.
 ///
@@ -131,7 +133,8 @@ impl Latch {
     ///
     /// Timeout uses the same wait identity as producer triggers. A returned
     /// wakeup is only a readiness hint; iomux callers must finish the latch and
-    /// then re-scan their actual fd predicates before deciding a syscall result.
+    /// then re-scan their actual fd predicates before deciding a syscall
+    /// result.
     pub fn schedule_with_timeout(&self, timeout: Option<Duration>) -> Duration {
         self.assert_owner("schedule_with_timeout");
         if self.active_wait.is_none() {
@@ -153,8 +156,8 @@ impl Latch {
     /// Retire the wait round and return the recorded winner.
     ///
     /// `finish(self)` consumes the consumer handle so the normal path has one
-    /// explicit retirement point. Drop exists only as an assertion-backed safety
-    /// net for missed finish paths.
+    /// explicit retirement point. Drop exists only as an assertion-backed
+    /// safety net for missed finish paths.
     pub fn finish(mut self) -> LatchWaitOutcome {
         self.assert_owner("finish");
         let outcome = self.finish_inner("finish");

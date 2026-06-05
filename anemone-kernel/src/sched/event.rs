@@ -7,9 +7,9 @@ use core::fmt::{Debug, Formatter};
 
 use crate::prelude::*;
 
-use super::higher_level::schedule_wait_with_timeout;
-use super::wait::{
-    self, ActiveWait, WaitOutcome, WaitReason, WakeMode, WakeResult, WakeToken,
+use super::{
+    higher_level::schedule_wait_with_timeout,
+    wait::{self, ActiveWait, WaitOutcome, WaitReason, WakeMode, WakeResult, WakeToken},
 };
 
 /// An occurrence of an event does not guarantee that the event is still valid

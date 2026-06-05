@@ -24,6 +24,76 @@
 **Related:** issue ID、决策记录、公开调查材料。
 ```
 
+## 小迭代记录
+
+默认使用单文件。如果需要背景材料，可以使用同名目录，并把下面的记录本体放在 `index.md`。
+
+```md
+# ANE-CHG-20260522-short-slug
+
+**Type:** Bugfix / Small Feature / Cleanup / Investigation
+**Status:** Draft / Active / Completed / Reverted / Superseded / Follow-up
+**Date:** 2026-05-22
+**Authors:** name1, name2
+**Area:** scheduler / futex
+
+## Problem
+
+触发这次工作的失败现象、任务目标或观察；说明为什么双周日志不足以承载这次记录，但又不需要 RFC。
+
+## Scope
+
+本次只改什么；明确不改什么。
+
+## Solution
+
+本轮选择的局部方案、关键权衡、拒绝的轻量替代方案，以及不升级 RFC 的理由。
+
+## Change
+
+实际发生的行为或结构变化。必要时列出关键文件、commit 或语义边界。
+
+## Validation
+
+实际运行的命令、测试、复现步骤，或说明验证由用户运行 / 尚未运行。
+
+## Tracking Issues
+
+本节只记录当前小迭代内部需要关闭的 review concern、方案缺口、验证缺口或延期项。问题关闭后，把结论折回 `Solution`、`Change`、`Validation` 或 `Risk / Follow-up`。
+
+### CHG-001 - 简短问题标题
+
+**Status:** Open / Neutralized / Deferred / Superseded
+**Severity:** Keter / Euclid / Safe
+
+**Issue:** 问题、风险或缺口是什么。
+
+**Resolution:** 关闭依据、折回位置，或升级到 RFC / register / current limitations 的链接。
+
+## Risk / Follow-up
+
+仍然开放、存在风险、明确延期，或需要 register / current limitations 记录的内容。
+
+## Links
+
+- Biweekly devlog:
+- Register / limitations:
+- RFC / transaction:
+- Issue / PR / commit:
+```
+
+目录版小迭代记录可以使用以下形态：
+
+```text
+docs/src/devlog/changes/2026-05-22-short-slug/
+  index.md
+  backgrounds/
+    ltp-evidence.md
+    linux-reference.md
+```
+
+`backgrounds/` 只保存证据摘要、Linux / LTP 对照、历史材料或运行记录。小迭代可以在记录本体中维护 `Tracking Issues` 章节，但不要在小迭代目录下拆出独立 `tracking-issues.md`、`invariants.md` 或 `implementation.md`；如果需要这些文件，说明问题已经进入 RFC 工作流。
+
 ## 事务日志
 
 ```md

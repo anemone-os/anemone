@@ -1,7 +1,4 @@
-use crate::{
-    prelude::*,
-    task::files::Fd,
-};
+use crate::{prelude::*, task::files::Fd};
 
 use super::kernel_chdir;
 

@@ -239,7 +239,7 @@ impl DriverOps for PcieEcamDriver {
                 .ok_or_else(||{
                     kerrln!(
                         "error probing PCIe ECAM device {}: failed to lookup interrupt parent node with phandle {:#x}.", 
-                        pdev.name(), 
+                        pdev.name(),
                         intr_parent_handle
                     );
                     SysError::FwNodeLookupFailed

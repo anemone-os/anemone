@@ -43,9 +43,9 @@ pub use self::{
     iomux::{PollEvent, PollRegisterResult, PollRequest},
     mount::{Mount, MountFlags, MountSource},
     namei::{
-        ResolveFlags, resolve, resolve_from, resolve_from_with_root, resolve_parent,
-        resolve_parent_from, resolve_parent_from_with_root,
-        resolve_parent_from_with_root_checked, resolve_from_with_root_checked,
+        ResolveFlags, resolve, resolve_from, resolve_from_with_root,
+        resolve_from_with_root_checked, resolve_parent, resolve_parent_from,
+        resolve_parent_from_with_root, resolve_parent_from_with_root_checked,
     },
     path::PathRef,
     permission::{FsAccess, FsPermChecker},

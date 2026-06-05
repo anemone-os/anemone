@@ -1,7 +1,7 @@
 use crate::{
     device::block::{
         BlockDev, BlockDevClass, BlockDevRegistration, BlockIoctlCtx, BlockSize,
-        devfs::publish_block_device, get_block_dev, register_block_device,
+        devfs::publish_block_device, register_block_device,
     },
     fs::BackingFileHandle,
     prelude::*,
@@ -16,10 +16,7 @@ use anemone_abi::fs::linux::ioctl::{
 const LOOP_BLOCK_SIZE: BlockSize = BlockSize::new(1);
 
 const fn devnum_for(id: usize) -> BlockDevNum {
-    BlockDevNum::new(
-        MajorNum::new(devnum::block::major::LOOP),
-        MinorNum::new(id),
-    )
+    BlockDevNum::new(MajorNum::new(devnum::block::major::LOOP), MinorNum::new(id))
 }
 
 #[derive(Debug)]
@@ -52,32 +49,34 @@ impl LoopDevice {
             return Err(SysError::BadFileDescriptor);
         }
 
-        {
-            let state = self.state.lock();
-            if matches!(*state, LoopState::Bound(_)) {
+        ctx.with_io_lock(|| {
+            if matches!(*self.state.lock(), LoopState::Bound(_)) {
                 return Err(SysError::Busy);
             }
-        }
+            Ok(())
+        })?;
 
         let backing = BackingFileHandle::from_ioctl_arg_file(ctx.lookup_arg_fd()?)?;
         let backing_writable = backing.can_write();
         let readonly = !backing_writable;
         let display_name = backing.display_name().to_string();
-        let mut state = self.state.lock();
-        if matches!(*state, LoopState::Bound(_)) {
-            return Err(SysError::Busy);
-        }
+        ctx.with_io_lock(|| {
+            let mut state = self.state.lock();
+            if matches!(*state, LoopState::Bound(_)) {
+                return Err(SysError::Busy);
+            }
 
-        *state = LoopState::Bound(LoopBoundState::new(
-            backing,
-            0,
-            None,
-            readonly,
-            backing_writable,
-            display_name,
-            LoopFlags::new(readonly, false),
-        ));
-        Ok(0)
+            *state = LoopState::Bound(LoopBoundState::new(
+                backing,
+                0,
+                None,
+                readonly,
+                backing_writable,
+                display_name,
+                LoopFlags::new(readonly, false),
+            ));
+            Ok(0)
+        })
     }
 
     fn get_status(&self, ctx: &BlockIoctlCtx<'_>, legacy: bool) -> Result<u64, SysError> {
@@ -101,46 +100,46 @@ impl LoopDevice {
             LoopStatusUpdate::from_loop_info64(read_ioctl_value::<loop_info64>(ctx)?)?
         };
 
-        let mut state = self.state.lock();
-        let LoopState::Bound(bound) = &mut *state else {
-            return Err(SysError::NoSuchDeviceOrAddress);
-        };
+        ctx.with_io_lock(|| {
+            let mut state = self.state.lock();
+            let LoopState::Bound(bound) = &mut *state else {
+                return Err(SysError::NoSuchDeviceOrAddress);
+            };
 
-        if !update.readonly && !bound.backing_writable {
-            return Err(SysError::BadFileDescriptor);
-        }
+            if !update.readonly && !bound.backing_writable {
+                return Err(SysError::BadFileDescriptor);
+            }
 
-        bound.offset = update.offset;
-        bound.size_limit = update.size_limit;
-        bound.readonly = update.readonly || !bound.backing_writable;
-        bound.flags = LoopFlags::new(bound.readonly, false);
-        bound.display_name = update.display_name;
+            bound.offset = update.offset;
+            bound.size_limit = update.size_limit;
+            bound.readonly = update.readonly || !bound.backing_writable;
+            bound.flags = LoopFlags::new(bound.readonly, false);
+            bound.display_name = update.display_name;
 
-        Ok(0)
+            Ok(0)
+        })
     }
 
-    fn clear_fd(&self) -> Result<u64, SysError> {
-        let mut state = self.state.lock();
-        if matches!(*state, LoopState::Unbound) {
-            return Err(SysError::NoSuchDeviceOrAddress);
-        }
-        if self.has_external_block_refs() {
-            return Err(SysError::Busy);
-        }
+    fn clear_fd(&self, ctx: &BlockIoctlCtx<'_>) -> Result<u64, SysError> {
+        ctx.with_io_lock(|| {
+            let mut state = self.state.lock();
+            if matches!(*state, LoopState::Unbound) {
+                return Err(SysError::NoSuchDeviceOrAddress);
+            }
+            if self.has_external_block_refs(ctx) {
+                return Err(SysError::Busy);
+            }
 
-        *state = LoopState::Unbound;
-        Ok(0)
+            *state = LoopState::Unbound;
+            Ok(0)
+        })
     }
 
-    fn has_external_block_refs(&self) -> bool {
-        let Some(dev) = get_block_dev(self.devnum()) else {
-            return false;
-        };
-
-        // Registry + block devfs ioctl dispatch + this temporary lookup are
-        // the baseline refs while handling LOOP_CLR_FD. Anything more means a
+    fn has_external_block_refs(&self, ctx: &BlockIoctlCtx<'_>) -> bool {
+        // Transient devfs/ioctl refs are already subtracted here. The block
+        // registry is the only persistent baseline; anything more means a
         // mount or another block path still observes this device.
-        Arc::strong_count(&dev) > 3
+        ctx.target_device_persistent_ref_count() > 1
     }
 }
 
@@ -246,9 +245,9 @@ impl LoopBoundSnapshot {
         }
 
         let available = backing_size - self.offset;
-        Ok(self.size_limit.map_or(available, |limit| {
-            usize::min(available, limit)
-        }))
+        Ok(self
+            .size_limit
+            .map_or(available, |limit| usize::min(available, limit)))
     }
 
     fn total_blocks(&self) -> Result<usize, SysError> {
@@ -259,7 +258,9 @@ impl LoopBoundSnapshot {
         let byte_offset = block_idx
             .checked_mul(self.block_size.bytes())
             .ok_or(SysError::InvalidArgument)?;
-        let end = byte_offset.checked_add(len).ok_or(SysError::InvalidArgument)?;
+        let end = byte_offset
+            .checked_add(len)
+            .ok_or(SysError::InvalidArgument)?;
         if end > self.visible_bytes()? {
             return Err(SysError::IO);
         }
@@ -401,9 +402,8 @@ fn copy_name(raw: &mut [u8; LO_NAME_SIZE], name: &str) {
 }
 
 fn read_ioctl_value<T: Copy>(ctx: &BlockIoctlCtx<'_>) -> Result<T, SysError> {
-    ctx.uspace().with_usp(|usp| {
-        Ok(UserReadPtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.read())
-    })
+    ctx.uspace()
+        .with_usp(|usp| Ok(UserReadPtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.read()))
 }
 
 fn write_ioctl_value<T: Copy>(ctx: &BlockIoctlCtx<'_>, value: T) -> Result<(), SysError> {
@@ -441,7 +441,7 @@ impl BlockDev for LoopDevice {
             LOOP_SET_FD => self.set_fd(&ctx),
             LOOP_SET_STATUS => self.set_status(&ctx, true),
             LOOP_SET_STATUS64 => self.set_status(&ctx, false),
-            LOOP_CLR_FD => self.clear_fd(),
+            LOOP_CLR_FD => self.clear_fd(&ctx),
             LOOP_SET_DIRECT_IO | LOOP_CONFIGURE => Err(SysError::UnsupportedIoctl),
             _ => Err(SysError::UnsupportedIoctl),
         }

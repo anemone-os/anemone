@@ -1,8 +1,5 @@
 use crate::{
-    prelude::{
-        user_access::user_addr,
-        *,
-    },
+    prelude::{user_access::user_addr, *},
     syscall::handler::TryFromSyscallArg,
     task::clone::{CloneFlags, CloneFlagsWithSignal, CloneStack, kernel_clone},
 };
@@ -71,8 +68,7 @@ fn __sys_clone_impl(
     } else {
         None
     };
-    let child_tid = if raw_flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID)
-    {
+    let child_tid = if raw_flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID) {
         optional_user_addr(child_tid)?
     } else {
         None

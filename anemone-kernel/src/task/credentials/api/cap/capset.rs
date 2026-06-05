@@ -11,11 +11,12 @@ use crate::{
 };
 
 use super::{
-    cap_validate_magic, read_cap_data, read_cap_pid, read_cap_version, user_addr_offset,
-    write_preferred_cap_version, USER_CAP_DATA_SIZE,
+    USER_CAP_DATA_SIZE, cap_validate_magic, read_cap_data, read_cap_pid, read_cap_version,
+    user_addr_offset, write_preferred_cap_version,
 };
 
-/// Replaces the current task's effective, permitted, and inheritable capability sets.
+/// Replaces the current task's effective, permitted, and inheritable capability
+/// sets.
 ///
 /// Permission check: `pid` must target the current task. The new effective set
 /// must be a subset of the new permitted set; the new permitted set must be a
@@ -75,23 +76,34 @@ fn sys_capset(
     task.update_cred_with(|old| {
         let old_caps = &old.caps;
         if !old_caps.effective().contains(Capability::SETPCAP)
-            && !old_caps.permitted().union(old_caps.inheritable()).contains(inheritable)
+            && !old_caps
+                .permitted()
+                .union(old_caps.inheritable())
+                .contains(inheritable)
         {
             return Err(deny_permission!(
                 "capset denied: inheritable exceeds old permitted|inheritable without {:?}",
                 Capability::SETPCAP
             ));
         }
-        if !old_caps.bounding().union(old_caps.inheritable()).contains(inheritable) {
+        if !old_caps
+            .bounding()
+            .union(old_caps.inheritable())
+            .contains(inheritable)
+        {
             return Err(deny_permission!(
                 "capset denied: inheritable exceeds bounding|old inheritable"
             ));
         }
         if !old_caps.permitted().contains(permitted) {
-            return Err(deny_permission!("capset denied: permitted is not a subset of old permitted"));
+            return Err(deny_permission!(
+                "capset denied: permitted is not a subset of old permitted"
+            ));
         }
         if !permitted.contains(effective) {
-            return Err(deny_permission!("capset denied: effective is not a subset of permitted"));
+            return Err(deny_permission!(
+                "capset denied: effective is not a subset of permitted"
+            ));
         }
 
         let ambient = old_caps.ambient() & permitted & inheritable;

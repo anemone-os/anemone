@@ -3,28 +3,22 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/ioctl.2.html
 
-use crate::{
-    prelude::*,
-    syscall::handler::TryFromSyscallArg,
-    task::files::Fd,
-};
+use crate::{prelude::*, syscall::handler::TryFromSyscallArg, task::files::Fd};
 
 fn lookup_ioctl_arg_fd(raw_fd: u64) -> Result<IoctlArgFile, SysError> {
     let fd = Fd::try_from_syscall_arg(raw_fd)?;
     let task = get_current_task();
     let file = task.get_fd(fd)?;
 
-    Ok(IoctlArgFile::new(file.vfs_file().clone(), file.ioctl_access()))
+    Ok(IoctlArgFile::new(
+        file.vfs_file().clone(),
+        file.ioctl_access(),
+    ))
 }
 
 #[syscall(SYS_IOCTL)]
 fn sys_ioctl(fd: Fd, cmd: u32, arg: u64) -> Result<u64, SysError> {
-    kdebugln!(
-        "sys_ioctl: fd={:?}, cmd={:#x}, arg={:#x}",
-        fd,
-        cmd,
-        arg
-    );
+    kdebugln!("sys_ioctl: fd={:?}, cmd={:#x}, arg={:#x}", fd, cmd, arg);
 
     let task = get_current_task();
     let file = task.get_fd(fd)?;

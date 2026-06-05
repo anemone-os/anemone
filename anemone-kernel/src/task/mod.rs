@@ -11,8 +11,8 @@ pub use tid::*;
 // integration with other subsystems
 pub mod cpu_usage;
 pub mod credentials;
-pub use credentials::{CredentialSet, Credentials, Gid, Uid, UserId};
 pub use credentials::{
+    CredentialSet, Credentials, Gid, Uid, UserId,
     cap::{Capability, CredCapabilities, FileCapabilities, SecureBits},
 };
 pub mod files;

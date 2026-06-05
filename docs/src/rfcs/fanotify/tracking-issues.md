@@ -3,7 +3,7 @@
 **状态：** Active
 **最后更新：** 2026-06-05
 **父 RFC：** [RFC-20260604-fanotify](./index.md)
-**来源：** 2026-06-04 system-design review；2026-06-05 software-engineering review
+**来源：** 2026-06-04 system-design review；2026-06-05 software-engineering review；2026-06-05 ioctl-loop / fileops-seek freshness review
 
 本文只跟踪 design review 后确认的 fanotify 草案缺陷、证明缺口、边界冲突或需要回到草案修改的设计问题。
 
@@ -453,3 +453,51 @@
 - [迁移实施计划](./implementation.md) 的 Stage 0 同时要求 kernel syscall API 模块封装 ABI parser、errno matrix 和 feature gate，fanotify 内部长期状态继续使用语义类型。
 
 **原问题：** `anemone-abi/src/fs.rs` 已有组织整理压力。若 fanotify 常量、metadata struct、response struct 和 parser 分散在 open/ioctl/syscall 边界附近，后续 FID/name、pidfd、permission response 和 fdinfo gate 会扩大 ABI 表示泄漏面。
+
+### FANOTIFY-037: Stage 1 nonblock read 不能依赖 fanotify 私有 flags 副本
+
+**状态：** Neutralized
+
+**修复落点：**
+
+- [迁移实施计划](./implementation.md) 的迁移原则、Stage 0 matrix 和 Stage 1 前置条件明确：fanotify group fd read 必须观察当前 opened file description `FileStatusFlags`，使 `F_SETFL(O_NONBLOCK)` 后续变更生效。
+- [迁移实施计划](./implementation.md) 的 Stage 1 审计和验证要求覆盖 `FAN_NONBLOCK`、`F_SETFL(O_NONBLOCK)`、清除 `O_NONBLOCK` 后恢复 blocking 的行为；类似 pipe 的 private nonblock mirror 只能作为 temporary compatibility bridge，不能作为合并 gate 闭合证据。
+- [不变量需求](./invariants.md) 的闭合条件明确：group fd nonblock read 不能固化到 fanotify private state，必须读取当前 opened file description status flags。
+
+**原问题：** Stage 0 + Stage 1 已要求 `fanotify_init(FAN_NONBLOCK)` 和后续 `F_SETFL(O_NONBLOCK)` 影响 empty read，但当前普通 `FileOps::read` 只接收 `&File` / cursor / buffer，看不到 `FileDesc` 上的 shared `FileStatusFlags`。若实现只在 fanotify group state 保存 init-time nonblock，`F_SETFL` 后续变更会失效，首个公开 gate 的 nonblock 语义不闭合。
+
+### FANOTIFY-038: fileops-seek 后 group fd 完整 vtable 行为需要固定
+
+**状态：** Neutralized
+
+**修复落点：**
+
+- [RFC index](./index.md) 的背景和方案刷新当前 `FileOps` 事实：`read_at`、`write_at`、`seek`、`read_dir`、`poll`、`ioctl` 都是 fanotify group fd 必须提供的 vtable 面。
+- [迁移实施计划](./implementation.md) 的 Stage 1 交付明确：group fd `seek`、`read_at`、`write_at`、`read_dir` fail closed；`ioctl` 只处理可选 group fd 命令，未知命令返回 `UnsupportedIoctl` / `ENOTTY`。
+- [不变量需求](./invariants.md) 的闭合条件和状态所有权明确：`lseek` / `pread` / `pwrite` 不得消费 fanotify queue、创建 metadata fd 或绕过 read-user 提交协议。
+
+**原问题：** fanotify RFC 形成后，fileops-seek-char-ioctl 已把 `FileOps::seek`、`read_at`、`write_at` 和 `ioctl` 变成当前 vtable 事实。原 fanotify 文本只规范 `read()` / `write()` / `poll()`，没有说明 fanotify group fd 是 stream-like object，也没有阻止 `pread` / `pwrite` 误进入 metadata read 或 permission response path。
+
+### FANOTIFY-039: `FIONREAD` 不能再通过 `sys_ioctl` fanotify 特判实现
+
+**状态：** Neutralized
+
+**修复落点：**
+
+- [RFC index](./index.md) 的背景明确：`sys_ioctl()` 已经通过 `IoctlCtx` 分发到 opened file 的 `FileOps::ioctl`；fanotify `FIONREAD` 若支持，必须在 group fd file ops 内处理。
+- [迁移实施计划](./implementation.md) 的 Stage 1 明确：group fd `FIONREAD` 可选，若实现必须走 `FileOps::ioctl`，未知命令返回 `UnsupportedIoctl` / `ENOTTY`。
+- [fanotify 基础设施评估](./backgrounds/infra-assessment-20260604.md) 已加审查后注记，说明旧的 `sys_ioctl` fanotify private-state 探测选项已经废弃。
+
+**原问题：** 旧背景材料写过 `sys_ioctl(FIONREAD)` 当时只识别 pipe，并列出在 `sys_ioctl` 内探测 fanotify private state 的短期选项。ioctl-loop 已经建立 `sys_ioctl -> FileOps::ioctl` 的统一边界，继续沿用旧选项会把 fanotify private state 泄漏到 syscall 层。
+
+### FANOTIFY-040: 基础 VFS 事件 hook 必须覆盖 positioned I/O
+
+**状态：** Neutralized
+
+**修复落点：**
+
+- [RFC index](./index.md) 的背景刷新事件注入点：`File::{read,read_at}`、`File::{write,write_at,append}` 和 metadata syscall 都属于首批基础事件候选边界。
+- [迁移实施计划](./implementation.md) 的 Stage 3 交付明确：`FAN_ACCESS` 覆盖顺序 read 和 positioned read 成功路径；`FAN_MODIFY` 覆盖顺序 write、positioned write、append、truncate 或等价内容修改成功路径。
+- [不变量需求](./invariants.md) 的 VFS/opened-file 边界明确：hook 放在 fd/VFS gate 后、backend 成功返回后的统一边界，不下沉到具体 `FileOps::{read_at,write_at}` backend。
+
+**原问题：** fileops-seek-char-ioctl 完成后，`read_at` / `write_at` 是独立 file-op 路径，不再通过普通 `read` / `write` 的 dummy cursor wrapper。原 Stage 3 只写 “read 成功读取” 和 “write/truncate 成功修改” 容易让实现漏掉 `pread` / `pwrite`，导致 positioned I/O 不产生基础 fanotify 事件。

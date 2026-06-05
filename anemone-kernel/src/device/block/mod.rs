@@ -96,13 +96,88 @@ pub trait BlockDev: Send + Sync {
     }
 }
 
+#[derive(Clone)]
+pub struct BlockDevIoHandle {
+    dev: Weak<dyn BlockDev>,
+    io_lock: Arc<Mutex<()>>,
+    transient_refs: Arc<AtomicUsize>,
+}
+
+impl Debug for BlockDevIoHandle {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("BlockDevIoHandle")
+            .field("strong_count", &self.strong_count())
+            .finish()
+    }
+}
+
+impl BlockDevIoHandle {
+    fn new(
+        dev: &Arc<dyn BlockDev>,
+        io_lock: Arc<Mutex<()>>,
+        transient_refs: Arc<AtomicUsize>,
+    ) -> Self {
+        Self {
+            dev: Arc::downgrade(dev),
+            io_lock,
+            transient_refs,
+        }
+    }
+
+    pub fn dev(&self) -> Result<Arc<dyn BlockDev>, SysError> {
+        self.dev.upgrade().ok_or(SysError::NotFound)
+    }
+
+    pub fn with_locked_dev<R>(
+        &self,
+        f: impl FnOnce(&dyn BlockDev) -> Result<R, SysError>,
+    ) -> Result<R, SysError> {
+        let _io = self.io_lock.lock();
+        let dev = self.dev()?;
+        f(dev.as_ref())
+    }
+
+    pub fn with_io_lock<R>(&self, f: impl FnOnce() -> Result<R, SysError>) -> Result<R, SysError> {
+        let _io = self.io_lock.lock();
+        f()
+    }
+
+    pub fn strong_count(&self) -> usize {
+        self.dev.strong_count()
+    }
+
+    pub fn begin_transient_ref(&self) -> BlockDevTransientRef {
+        self.transient_refs.fetch_add(1, Ordering::AcqRel);
+        BlockDevTransientRef {
+            transient_refs: self.transient_refs.clone(),
+        }
+    }
+
+    pub fn persistent_ref_count(&self) -> usize {
+        self.dev
+            .strong_count()
+            .saturating_sub(self.transient_refs.load(Ordering::Acquire))
+    }
+}
+
+pub struct BlockDevTransientRef {
+    transient_refs: Arc<AtomicUsize>,
+}
+
+impl Drop for BlockDevTransientRef {
+    fn drop(&mut self) {
+        self.transient_refs.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 pub struct BlockIoctlCtx<'a> {
     inner: IoctlCtx<'a>,
+    io: BlockDevIoHandle,
 }
 
 impl<'a> BlockIoctlCtx<'a> {
-    pub const fn new(inner: IoctlCtx<'a>) -> Self {
-        Self { inner }
+    pub const fn new(inner: IoctlCtx<'a>, io: BlockDevIoHandle) -> Self {
+        Self { inner, io }
     }
 
     pub const fn cmd(&self) -> u32 {
@@ -127,6 +202,14 @@ impl<'a> BlockIoctlCtx<'a> {
 
     pub fn lookup_fd_arg(&self, raw_fd: u64) -> Result<IoctlArgFile, SysError> {
         self.inner.lookup_fd_arg(raw_fd)
+    }
+
+    pub fn with_io_lock<R>(&self, f: impl FnOnce() -> Result<R, SysError>) -> Result<R, SysError> {
+        self.io.with_io_lock(f)
+    }
+
+    pub fn target_device_persistent_ref_count(&self) -> usize {
+        self.io.persistent_ref_count()
     }
 }
 
@@ -186,6 +269,8 @@ struct BlockDevDesc {
     class: BlockDevClass,
     name: String,
     ops: Arc<dyn BlockDev>,
+    io_lock: Arc<Mutex<()>>,
+    transient_refs: Arc<AtomicUsize>,
     readahead: AtomicUsize,
 }
 
@@ -308,6 +393,8 @@ pub fn register_block_device(registration: BlockDevRegistration) -> Result<Strin
         class: registration.class,
         name: name.clone(),
         ops: registration.device,
+        io_lock: Arc::new(Mutex::new(())),
+        transient_refs: Arc::new(AtomicUsize::new(0)),
         readahead: AtomicUsize::new(0),
     };
 
@@ -333,6 +420,16 @@ pub fn get_block_dev(devnum: BlockDevNum) -> Option<Arc<dyn BlockDev>> {
         .devices
         .get(&devnum)
         .map(|desc| desc.ops.clone())
+}
+
+pub fn get_block_dev_io_handle(devnum: BlockDevNum) -> Option<BlockDevIoHandle> {
+    let registry = SUBSYS.registry.read_irqsave();
+    let desc = registry.devices.get(&devnum)?;
+    Some(BlockDevIoHandle::new(
+        &desc.ops,
+        desc.io_lock.clone(),
+        desc.transient_refs.clone(),
+    ))
 }
 
 fn get_block_dev_readahead(devnum: BlockDevNum) -> Option<usize> {

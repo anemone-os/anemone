@@ -1,10 +1,6 @@
 use crate::{
     prelude::*,
-    task::{
-        cpu_usage::Privilege,
-        execve::binfmt::dispatch_execve,
-        futex::exit_robust_list,
-    },
+    task::{cpu_usage::Privilege, execve::binfmt::dispatch_execve, futex::exit_robust_list},
 };
 
 /// **This function must be run in a process context.**

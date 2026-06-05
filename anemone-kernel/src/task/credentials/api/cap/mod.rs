@@ -32,7 +32,10 @@ pub(super) fn cap_validate_magic(version: u32) -> Result<usize, SysError> {
     }
 }
 
-pub(super) fn read_cap_version(header_addr: VirtAddr, usp: &mut UserSpace) -> Result<u32, SysError> {
+pub(super) fn read_cap_version(
+    header_addr: VirtAddr,
+    usp: &mut UserSpace,
+) -> Result<u32, SysError> {
     UserReadPtr::<u32>::try_new(header_addr, usp).map(|version| version.read())
 }
 

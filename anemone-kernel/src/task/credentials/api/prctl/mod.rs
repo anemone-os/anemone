@@ -9,10 +9,9 @@ use crate::prelude::*;
 use bitflags::Flags;
 
 use cap::{
-    cap_from_prctl_arg, parse_ambient_command, parse_bool_arg, parse_securebits,
-    prctl_cap_ambient, prctl_capbset_drop, prctl_capbset_read, prctl_get_keepcaps,
-    prctl_get_no_new_privs, prctl_get_securebits, prctl_set_keepcaps,
-    prctl_set_no_new_privs, prctl_set_securebits,
+    cap_from_prctl_arg, parse_ambient_command, parse_bool_arg, parse_securebits, prctl_cap_ambient,
+    prctl_capbset_drop, prctl_capbset_read, prctl_get_keepcaps, prctl_get_no_new_privs,
+    prctl_get_securebits, prctl_set_keepcaps, prctl_set_no_new_privs, prctl_set_securebits,
 };
 
 bitflags! {
@@ -187,15 +186,11 @@ fn dispatch_prctl(option: PrctlOption, args: PrctlArgs) -> Result<u64, SysError>
         // Purpose: report whether a capability is still in the bounding set.
         // Permission check: no extra privilege; the capability number must be valid.
         // Man page: https://man7.org/linux/man-pages/man2/PR_CAPBSET_READ.2const.html
-        PrctlOption::CAPBSET_READ => {
-            prctl_capbset_read(cap_from_prctl_arg(option, args.arg2)?)
-        },
+        PrctlOption::CAPBSET_READ => prctl_capbset_read(cap_from_prctl_arg(option, args.arg2)?),
         // Purpose: permanently remove a capability from the bounding set.
         // Permission check: caller must hold CAP_SETPCAP.
         // Man page: https://man7.org/linux/man-pages/man2/PR_CAPBSET_DROP.2const.html
-        PrctlOption::CAPBSET_DROP => {
-            prctl_capbset_drop(cap_from_prctl_arg(option, args.arg2)?)
-        },
+        PrctlOption::CAPBSET_DROP => prctl_capbset_drop(cap_from_prctl_arg(option, args.arg2)?),
         // Purpose: report whether future privilege gains are blocked.
         // Permission check: no extra privilege; all extra arguments must be zero.
         // Man page: https://man7.org/linux/man-pages/man2/PR_GET_NO_NEW_PRIVS.2const.html
@@ -223,9 +218,7 @@ fn dispatch_prctl(option: PrctlOption, args: PrctlArgs) -> Result<u64, SysError>
         // Purpose: update securebits and their one-way lock bits.
         // Permission check: caller must hold CAP_SETPCAP; locked bits cannot be changed.
         // Man page: https://man7.org/linux/man-pages/man2/PR_SET_SECUREBITS.2const.html
-        PrctlOption::SET_SECUREBITS => {
-            prctl_set_securebits(parse_securebits(option, args)?)
-        },
+        PrctlOption::SET_SECUREBITS => prctl_set_securebits(parse_securebits(option, args)?),
         // Purpose: report whether capabilities are retained across uid changes.
         // Permission check: no extra privilege.
         // Man page: https://man7.org/linux/man-pages/man2/PR_GET_KEEPCAPS.2const.html
@@ -233,16 +226,12 @@ fn dispatch_prctl(option: PrctlOption, args: PrctlArgs) -> Result<u64, SysError>
         // Purpose: enable or disable retaining permitted capabilities across uid changes.
         // Permission check: denied when KEEP_CAPS is locked.
         // Man page: https://man7.org/linux/man-pages/man2/PR_SET_KEEPCAPS.2const.html
-        PrctlOption::SET_KEEPCAPS => {
-            prctl_set_keepcaps(parse_bool_arg(option, args)?)
-        },
+        PrctlOption::SET_KEEPCAPS => prctl_set_keepcaps(parse_bool_arg(option, args)?),
         // Purpose: query, raise, lower, or clear ambient capabilities.
         // Permission check: raise requires the capability in permitted and inheritable sets,
         // and ambient raising must not be blocked by securebits.
         // Man page: https://man7.org/linux/man-pages/man2/PR_CAP_AMBIENT.2const.html
-        PrctlOption::CAP_AMBIENT => {
-            prctl_cap_ambient(parse_ambient_command(option, args)?)
-        },
+        PrctlOption::CAP_AMBIENT => prctl_cap_ambient(parse_ambient_command(option, args)?),
         _ => prctl_not_implemented(option),
     }
 }

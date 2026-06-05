@@ -1,8 +1,10 @@
 use crate::{
     fs::{
         iomux::PollEvent,
-        proc::read_snapshot_at,
-        proc::tgid::{default_tgid_entry_prv, validate_tgid_sub_inode, TgidEntry},
+        proc::{
+            read_snapshot_at,
+            tgid::{TgidEntry, default_tgid_entry_prv, validate_tgid_sub_inode},
+        },
     },
     prelude::*,
     time::duration_to_ticks,

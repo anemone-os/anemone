@@ -8,7 +8,8 @@ use crate::{
     task::credentials::Gid,
 };
 
-/// Writes the current task's real, effective, and saved group IDs to user memory.
+/// Writes the current task's real, effective, and saved group IDs to user
+/// memory.
 ///
 /// Permission check: none; a task may always inspect its own group IDs. The
 /// syscall still validates that all output pointers are writable user pointers.

@@ -1,7 +1,7 @@
 use crate::{
     fs::{
         iomux::PollEvent,
-        proc::tgid::{default_tgid_entry_prv, validate_tgid_sub_inode, TgidEntry},
+        proc::tgid::{TgidEntry, default_tgid_entry_prv, validate_tgid_sub_inode},
     },
     prelude::*,
     utils::any_opaque::NilOpaque,
