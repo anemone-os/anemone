@@ -1,12 +1,12 @@
 # RFC-20260605-fileops-seek-char-ioctl
 
-**状态：** Accepted for Implementation
+**状态：** Closed
 **负责人：** doruche, Codex
 **最后更新：** 2026-06-05
 **领域：** VFS / syscall ABI / devfs / character device
 **事务日志：** [2026-06-05-fileops-seek-char-ioctl](../../devlog/transactions/2026-06-05-fileops-seek-char-ioctl.md)
 **开放问题：** None；已处理的 review finding 见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** 按 [迁移实施计划](./implementation.md) 先推进阶段 1A mechanical API sweep 与 Gate 1 review；后续 worker 不得越过 [Agent 编排建议](./backgrounds/agent-orchestration.md) 的顺序和 write set。
+**下一步：** 本事务已按 [迁移实施计划](./implementation.md) 完成 Agent 6 收口；后续 `SEEK_DATA` / `SEEK_HOLE`、tty/random/serial 完整 ioctl、非 regular loop backing 等能力应作为 follow-up 处理。
 
 ## 摘要
 
@@ -179,8 +179,11 @@ pub struct FileOps {
 - `FileOps::validate_seek` 不再作为 vtable 字段存在，或已降级为非 seek helper。
 - `FileOps::read_at` / `FileOps::write_at` 成为 positioned I/O 的唯一通用入口，pipe 和 stream char device 不会通过普通 `read` / `write` 偶然支持 `pread` / `pwrite`。
 - `sys_lseek()` 不再自行使用 `inode().size()` 解释所有 `SEEK_END`。
-- `/dev/null`、`/dev/zero` 的 lseek 最小行为通过测试覆盖。
+- `/dev/null`、`/dev/zero` 的 lseek 最小行为已在字符设备 hook 中接通；运行态覆盖情况见事务日志。
 - 目录 fd 支持 `lseek(fd, 0, SEEK_SET)` rewind，复杂目录 offset 语义仍作为 follow-up 限制。
 - 块设备 `lseek(end)` 和 alignment 行为保持。
 - 未知字符设备 ioctl 经字符设备子系统默认 hook 返回 `ENOTTY`。
 - `just build` 通过。
+
+最终执行事实、旁路审计、agent-run validation、未运行的 QEMU / LTP 和接受限制见
+[事务日志 Agent 6 收口记录](../../devlog/transactions/2026-06-05-fileops-seek-char-ioctl.md)。

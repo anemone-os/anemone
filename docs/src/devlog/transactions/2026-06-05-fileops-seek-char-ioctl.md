@@ -1,10 +1,10 @@
 # 2026-06-05 - FileOps Seek and Char Device ioctl
 
-**Status:** Active
+**Status:** Complete
 **Owners:** doruche, Codex
 **Area:** VFS / syscall ABI / devfs / character device / loop
 **RFC:** [RFC-20260605-fileops-seek-char-ioctl](../../rfcs/fileops-seek-char-ioctl/index.md)
-**Current Phase:** Gate 5 passed; stopped before Agent 6
+**Current Phase:** Agent 6 audit complete
 
 ## Scope
 
@@ -47,13 +47,13 @@
 
 **Canonical RFC:** [RFC-20260605-fileops-seek-char-ioctl](../../rfcs/fileops-seek-char-ioctl/index.md), [Invariants](../../rfcs/fileops-seek-char-ioctl/invariants.md), [Implementation Plan](../../rfcs/fileops-seek-char-ioctl/implementation.md), [Tracking Issues](../../rfcs/fileops-seek-char-ioctl/tracking-issues.md)
 
-**Completed:** 公开 RFC、invariants、implementation、tracking issues 和 agent orchestration 文档已存在。Agent 0 只读前置审计完成；Agent 1 阶段 1A mechanical API sweep 和 Gate 1 review 已完成。Agent 2 阶段 1B 已迁移 `sys_lseek()` 到 opened file seek intent，`File::seek` 现在接收 `SeekFrom` 并在 `File.pos` lock 内调用 backend seek，目录类 file ops 最小支持 `SEEK_SET(0)` rewind，内部绝对定位调用已改为 `seek_set_checked()`。Agent 3 阶段 1C 已删除阶段 1A compat helper / `validate_seek()` 残留，分类 positioned I/O，并让 loop 保存 VFS/fd 边界产出的 `BackingFileHandle`；Gate 3 独立 reviewer 已通过。Agent 4 阶段 2 已接通 `CharDev` seek policy，并让 memory char device 显式提供 null-style seek；Gate 4 独立 reviewer 已通过。Agent 5 阶段 3 已接通 `CharDev` ioctl 默认分发；Gate 5 独立 reviewer 已通过。
+**Completed:** 公开 RFC、invariants、implementation、tracking issues 和 agent orchestration 文档已存在。Agent 0 只读前置审计完成；Agent 1 阶段 1A mechanical API sweep 和 Gate 1 review 已完成。Agent 2 阶段 1B 已迁移 `sys_lseek()` 到 opened file seek intent，`File::seek` 现在接收 `SeekFrom` 并在 `File.pos` lock 内调用 backend seek，目录类 file ops 最小支持 `SEEK_SET(0)` rewind，内部绝对定位调用已改为 `seek_set_checked()`。Agent 3 阶段 1C 已删除阶段 1A compat helper / `validate_seek()` 残留，分类 positioned I/O，并让 loop 保存 VFS/fd 边界产出的 `BackingFileHandle`；Gate 3 独立 reviewer 已通过。Agent 4 阶段 2 已接通 `CharDev` seek policy，并让 memory char device 显式提供 null-style seek；Gate 4 独立 reviewer 已通过。Agent 5 阶段 3 已接通 `CharDev` ioctl 默认分发；Gate 5 独立 reviewer 已通过。Agent 6 已完成最终旁路审计、`git diff --check`、`just build` 和事务日志收口。
 
-**In Progress:** 暂停在 Agent 6 前。不得自行执行最终旁路审计收口。
+**In Progress:** 无。
 
-**Open Blockers:** 暂无已确认 blocker。
+**Open Blockers:** 无。
 
-**Next Action:** 如继续本 RFC，按编排启动 Agent 6，做最终旁路审计、证据整理和事务收口；不要回退 block / loop ioctl 所有权边界。
+**Next Action:** 本 RFC 事务在构建级别收口。后续若要实现完整 `SEEK_DATA` / `SEEK_HOLE`、tty/random/serial ioctl 协议、非 regular loop backing，或扩大字符设备具体 ioctl 协议，应作为 follow-up RFC / transaction 处理。
 
 **Do Not Redo:** 不要把 `FileDesc` / `ProcFile` / task / fd table 传进 file ops 或 `CharDev` hook；不要让 worker 越界改后续阶段；不要把 `SEEK_DATA` / `SEEK_HOLE` 交给 backend；不要用通用 wrapper 给 stream 后端继承 positioned I/O 能力；不要改 loop / block ioctl 所有权边界。
 
@@ -250,3 +250,31 @@
 **Validation:** Agent 5 已运行 `git diff --check` 和 `just build`，均通过；构建期间仅出现既有 `anemone-kernel/src/sync/mono.rs` unused import 警告。reviewer 重跑 `git diff --check` 通过。未运行 QEMU / LTP。
 
 **Next:** 启动 Agent 6，只做最终旁路审计、证据整理和事务收口；不得扩大 tty/random/serial ioctl 协议或改变 block/loop ownership。
+
+### 2026-06-05 - Agent 6 最终旁路审计与事务收口
+
+**Phase:** Agent 6 / final audit and closure
+
+**Change:** 只做最终旁路审计、验证 gate 和事务日志收口。未实现新功能，未扩大 tty/random/serial ioctl 协议，未修改 block / loop ownership，未运行 QEMU boot/runtime 或 LTP，未提交 commit。
+
+**Audit:** 已执行 RFC 要求的旁路搜索：
+`rg -n "validate_seek|FileOps \\{|sys_lseek|read_at\\(|write_at\\(|\\.seek\\(|CHAR_DEV_FILE_OPS|BLOCK_DEV_FILE_OPS|LOOP_SET_FD|BackingFileHandle|CharSeekCtx|CharIoctlCtx" anemone-kernel/src`。
+结果确认 `validate_seek` 无残留；`FileOps` 只包含 `seek`、`read_at`、`write_at` 等新字段；`sys_lseek()` 只做 whence 转换、fd/path-only gate 和 `FileDesc::seek(SeekFrom)` dispatch，不再直接使用 `inode().size()` 解释所有 `SEEK_END`。
+
+**Audit:** fd / VFS / backend positioned I/O 边界闭合：`FileDesc::{read_at,write_at}` 保留 fd access、path-only 和 `O_APPEND` 决策；`File::{read_at,write_at}` 保留 zero-length、regular mount writable gate 和 metadata update 后委托 ops；pipe、console 和 stream char devfs 的 positioned I/O fail closed，没有通过普通 `read` / `write` 获得 `pread` / `pwrite` 能力。
+
+**Audit:** loop state 保存 `BackingFileHandle` narrowed capability；`LOOP_SET_FD` 通过 `BackingFileHandle::from_ioctl_arg_file(ctx.lookup_arg_fd()?)` 在 VFS/fd 边界验证 path-only、read access、regular file 和 writable snapshot。`LoopBoundState` / snapshot 保存 handle，不保存裸 `Arc<File>` / `FileDesc` / `IoctlArgFile`。
+
+**Audit:** char devfs seek / ioctl 均分发到 `CharDev`：`CHAR_DEV_FILE_OPS.seek` 通过 `rdev` lookup 构造 `CharSeekCtx`，`CHAR_DEV_FILE_OPS.ioctl` 构造 `CharIoctlCtx` 并调用设备 hook。`CharSeekCtx` 只携带 seek intent 和短生命周期 cursor；`CharIoctlCtx` 只转发 ioctl command、arg、access snapshot、user-space copy handle 和 fd-arg lookup helper，不暴露目标 `FileDesc`、`ProcFile`、current task 或 fd table。`/dev/null`、`/dev/zero`、`/dev/full` 显式 null-style seek；未知 char ioctl 继续默认 `UnsupportedIoctl` / `ENOTTY`。
+
+**Audit:** block devfs ioctl 和 loop private hook 未回退：`BLOCK_DEV_FILE_OPS.ioctl` 仍处理通用 block ioctl 后委托 `BlockDev::ioctl(BlockIoctlCtx)`；loop 仍在 block device ioctl hook 内处理 `LOOP_SET_FD` 等 private command。未发现需要回到 RFC 的 blocker。
+
+**Agent-run Validation:** `git diff --check` passed。`just build` passed；构建期间仍只有既有 `anemone-kernel/src/sync/mono.rs` 的 `AtomicBool` / `Ordering` unused import warning。
+
+**User-run Validation:** 本轮没有用户提供新的 QEMU / LTP / runtime 用例结果。
+
+**Not Run:** 未运行 QEMU boot/runtime、LTP、user-test 或手工 runtime smoke。因此没有把 `/dev/null` / `/dev/zero` lseek、未知 char ioctl `ENOTTY`、block `BLKGETSIZE64`、pipe `FIONREAD` 或 loop setup runtime 行为记录为本轮 agent-run passed。
+
+**Accepted Limitations:** 完整 `SEEK_DATA` / `SEEK_HOLE` 仍未实现，继续在 `sys_lseek()` whence 转换层返回 `NotYetImplemented`。目录 seek 只声明最小 `SEEK_SET(0)` rewind，复杂目录 offset cookie / `SEEK_CUR` / `SEEK_END` / 非零 `SEEK_SET` 仍是 follow-up。loop backing 第一阶段保守限制为 regular file narrowed handle；非 regular positioned-capable backend 需要后续扩展 handle conversion contract。tty、random、serial 等具体字符设备的完整 ioctl 协议未实现，未知 char ioctl 走默认 `UnsupportedIoctl`。
+
+**Handoff:** 本事务可在构建级别收口。建议总控提交一个只包含 Agent 6 文档收口的 commit；不要把后续 runtime tests、QEMU/LTP 或具体设备 ioctl 协议并入本收口 commit。

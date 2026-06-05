@@ -1,6 +1,6 @@
 # FileOps seek 与字符设备 ioctl 不变量需求
 
-**状态：** Draft
+**状态：** Protocol Closed
 **最后更新：** 2026-06-05
 **父 RFC：** [RFC-20260605-fileops-seek-char-ioctl](./index.md)
 
