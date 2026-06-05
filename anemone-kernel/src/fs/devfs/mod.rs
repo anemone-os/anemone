@@ -373,7 +373,7 @@ mod kunits {
 		}
 
 		assert_eq!(block.write(write_buf.as_slice()).unwrap(), write_buf.len());
-		block.seek(0).unwrap();
+		block.seek_set_checked(0).unwrap();
 
 		let mut read_buf = vec![0u8; 4096];
 		assert_eq!(block.read(read_buf.as_mut_slice()).unwrap(), read_buf.len());

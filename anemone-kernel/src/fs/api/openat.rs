@@ -304,7 +304,7 @@ fn finish_open(
     }
 
     if how.status.contains(FileStatusFlags::APPEND) {
-        file.seek(file.get_attr()?.size as usize)?;
+        file.seek_set_checked(file.get_attr()?.size as usize)?;
     }
 
     let task = get_current_task();
@@ -497,7 +497,7 @@ mod kunits {
         assert_eq!(read_dir_entries(dir_path), before);
 
         assert_eq!(file.write(b"tmp").unwrap(), 3);
-        file.seek(0).unwrap();
+        file.seek_set_checked(0).unwrap();
 
         let mut buf = [0u8; 3];
         assert_eq!(file.read(&mut buf).unwrap(), 3);

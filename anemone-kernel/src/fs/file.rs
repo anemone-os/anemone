@@ -175,95 +175,122 @@ pub struct FileOps {
     pub ioctl: for<'a> fn(&File, IoctlCtx<'a>) -> Result<u64, SysError>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SeekFrom {
-    Set(i64),
-    Cur(i64),
-    End(i64),
-}
+mod seek {
+    use super::*;
 
-fn apply_seek_offset(base: usize, offset: i64) -> Result<usize, SysError> {
-    if offset >= 0 {
-        let offset = usize::try_from(offset).map_err(|_| SysError::FileTooLarge)?;
-        base.checked_add(offset).ok_or(SysError::FileTooLarge)
-    } else {
-        let offset =
-            usize::try_from(offset.unsigned_abs()).map_err(|_| SysError::InvalidArgument)?;
-        base.checked_sub(offset).ok_or(SysError::InvalidArgument)
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum SeekFrom {
+        Set(i64),
+        Cur(i64),
+        End(i64),
+    }
+
+    fn apply_seek_offset(base: usize, offset: i64) -> Result<usize, SysError> {
+        if offset >= 0 {
+            let offset = usize::try_from(offset).map_err(|_| SysError::FileTooLarge)?;
+            base.checked_add(offset).ok_or(SysError::FileTooLarge)
+        } else {
+            let offset =
+                usize::try_from(offset.unsigned_abs()).map_err(|_| SysError::InvalidArgument)?;
+            base.checked_sub(offset).ok_or(SysError::InvalidArgument)
+        }
+    }
+
+    pub fn seek_with_fixed_size(
+        _file: &File,
+        pos: &mut usize,
+        from: SeekFrom,
+        size: usize,
+    ) -> Result<usize, SysError> {
+        let base = match from {
+            SeekFrom::Set(_) => 0,
+            SeekFrom::Cur(_) => *pos,
+            SeekFrom::End(_) => size,
+        };
+        let offset = match from {
+            SeekFrom::Set(offset) | SeekFrom::Cur(offset) | SeekFrom::End(offset) => offset,
+        };
+
+        let new_pos = apply_seek_offset(base, offset)?;
+        *pos = new_pos;
+        Ok(new_pos)
+    }
+
+    pub fn seek_with_inode_size(
+        file: &File,
+        pos: &mut usize,
+        from: SeekFrom,
+    ) -> Result<usize, SysError> {
+        let size = usize::try_from(file.inode().size()).map_err(|_| SysError::FileTooLarge)?;
+        seek_with_fixed_size(file, pos, from, size)
+    }
+
+    pub fn seek_with_bounded_size(
+        file: &File,
+        pos: &mut usize,
+        from: SeekFrom,
+        size: usize,
+    ) -> Result<usize, SysError> {
+        let mut candidate = *pos;
+        let new_pos = seek_with_fixed_size(file, &mut candidate, from, size)?;
+        if new_pos > size {
+            return Err(SysError::InvalidArgument);
+        }
+        *pos = new_pos;
+        Ok(new_pos)
+    }
+
+    pub fn seek_dir_rewind(
+        _file: &File,
+        pos: &mut usize,
+        from: SeekFrom,
+    ) -> Result<usize, SysError> {
+        match from {
+            SeekFrom::Set(0) => {
+                *pos = 0;
+                Ok(0)
+            },
+            _ => Err(SysError::InvalidArgument),
+        }
+    }
+
+    // Stage 1A compatibility helper. It is deliberately named so Agent 3 /
+    // phase 1C can replace each use with backend-local positioned I/O
+    // classification.
+    pub fn compat_read_at_via_seek_then_read_1c_delete(
+        file: &File,
+        pos: usize,
+        buf: &mut [u8],
+    ) -> Result<usize, SysError> {
+        let mut local_pos = 0;
+        (file.ops.seek)(file, &mut local_pos, SeekFrom::Set(seek_set_offset(pos)?))?;
+        (file.ops.read)(file, &mut local_pos, buf)
+    }
+
+    // Stage 1A compatibility helper. It is deliberately named so Agent 3 /
+    // phase 1C can replace each use with backend-local positioned I/O
+    // classification.
+    pub fn compat_write_at_via_seek_then_write_1c_delete(
+        file: &File,
+        pos: usize,
+        buf: &[u8],
+    ) -> Result<usize, SysError> {
+        let mut local_pos = 0;
+        (file.ops.seek)(file, &mut local_pos, SeekFrom::Set(seek_set_offset(pos)?))?;
+        (file.ops.write)(file, &mut local_pos, buf)
+    }
+
+    pub(super) fn seek_set_offset(pos: usize) -> Result<i64, SysError> {
+        i64::try_from(pos).map_err(|_| SysError::FileTooLarge)
     }
 }
 
-pub fn seek_with_fixed_size(
-    _file: &File,
-    pos: &mut usize,
-    from: SeekFrom,
-    size: usize,
-) -> Result<usize, SysError> {
-    let base = match from {
-        SeekFrom::Set(_) => 0,
-        SeekFrom::Cur(_) => *pos,
-        SeekFrom::End(_) => size,
-    };
-    let offset = match from {
-        SeekFrom::Set(offset) | SeekFrom::Cur(offset) | SeekFrom::End(offset) => offset,
-    };
-
-    let new_pos = apply_seek_offset(base, offset)?;
-    *pos = new_pos;
-    Ok(new_pos)
-}
-
-pub fn seek_with_inode_size(
-    file: &File,
-    pos: &mut usize,
-    from: SeekFrom,
-) -> Result<usize, SysError> {
-    let size = usize::try_from(file.inode().size()).map_err(|_| SysError::FileTooLarge)?;
-    seek_with_fixed_size(file, pos, from, size)
-}
-
-pub fn seek_with_bounded_size(
-    file: &File,
-    pos: &mut usize,
-    from: SeekFrom,
-    size: usize,
-) -> Result<usize, SysError> {
-    let mut candidate = *pos;
-    let new_pos = seek_with_fixed_size(file, &mut candidate, from, size)?;
-    if new_pos > size {
-        return Err(SysError::InvalidArgument);
-    }
-    *pos = new_pos;
-    Ok(new_pos)
-}
-
-// Stage 1A compatibility helper. It is deliberately named so Agent 3 / phase
-// 1C can replace each use with backend-local positioned I/O classification.
-pub fn compat_read_at_via_seek_then_read_1c_delete(
-    file: &File,
-    pos: usize,
-    buf: &mut [u8],
-) -> Result<usize, SysError> {
-    let mut local_pos = 0;
-    (file.ops.seek)(file, &mut local_pos, SeekFrom::Set(seek_set_offset(pos)?))?;
-    (file.ops.read)(file, &mut local_pos, buf)
-}
-
-// Stage 1A compatibility helper. It is deliberately named so Agent 3 / phase
-// 1C can replace each use with backend-local positioned I/O classification.
-pub fn compat_write_at_via_seek_then_write_1c_delete(
-    file: &File,
-    pos: usize,
-    buf: &[u8],
-) -> Result<usize, SysError> {
-    let mut local_pos = 0;
-    (file.ops.seek)(file, &mut local_pos, SeekFrom::Set(seek_set_offset(pos)?))?;
-    (file.ops.write)(file, &mut local_pos, buf)
-}
-
-fn seek_set_offset(pos: usize) -> Result<i64, SysError> {
-    i64::try_from(pos).map_err(|_| SysError::FileTooLarge)
-}
+use self::seek::seek_set_offset;
+pub use self::seek::{
+    SeekFrom, compat_read_at_via_seek_then_read_1c_delete,
+    compat_write_at_via_seek_then_write_1c_delete, seek_dir_rewind, seek_with_bounded_size,
+    seek_with_fixed_size, seek_with_inode_size,
+};
 
 #[derive(Debug, Clone)]
 pub struct DirEntry {
@@ -557,7 +584,7 @@ impl File {
         f(&mut *pos)
     }
 
-    pub fn seek_from(&self, from: SeekFrom) -> Result<usize, SysError> {
+    pub fn seek(&self, from: SeekFrom) -> Result<usize, SysError> {
         let mut pos = self.pos.lock();
         let old_pos = *pos;
         match (self.ops.seek)(self, &mut *pos, from) {
@@ -573,12 +600,7 @@ impl File {
     }
 
     pub fn seek_set_checked(&self, pos: usize) -> Result<usize, SysError> {
-        self.seek_from(SeekFrom::Set(seek_set_offset(pos)?))
-    }
-
-    pub fn seek(&self, pos: usize) -> Result<(), SysError> {
-        self.seek_set_checked(pos)?;
-        Ok(())
+        self.seek(SeekFrom::Set(seek_set_offset(pos)?))
     }
 
     pub fn read_dir(&self, sink: &mut dyn DirSink) -> Result<ReadDirResult, SysError> {

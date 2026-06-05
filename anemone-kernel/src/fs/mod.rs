@@ -33,7 +33,7 @@ pub use self::{
         DirEntry, DirSink, File, FileOps, FixedSizeDirSink, IoctlArgFdLookup, IoctlArgFile,
         IoctlCtx, IoctlFileAccess, IoctlFileStatusFlags, ReadDirResult, SeekFrom, SinkResult,
         compat_read_at_via_seek_then_read_1c_delete,
-        compat_write_at_via_seek_then_write_1c_delete, seek_with_bounded_size,
+        compat_write_at_via_seek_then_write_1c_delete, seek_dir_rewind, seek_with_bounded_size,
         seek_with_fixed_size, seek_with_inode_size,
     },
     filesystem::{FileSystem, FileSystemFlags, FileSystemOps},
@@ -796,7 +796,7 @@ mod vfs_ops {
             let file = vfs_open(path)?;
             let mut buf = Vec::new();
             let mut handle = file;
-            handle.seek(0)?;
+            handle.seek_set_checked(0)?;
             loop {
                 let mut chunk = [0u8; 128];
                 let n = handle.read(&mut chunk)?;
@@ -1194,15 +1194,15 @@ mod kunits {
         assert_eq!(opened.write(b"hello").unwrap(), 5);
         assert_eq!(opened.pos(), 5);
 
-        opened.seek(2).unwrap();
+        opened.seek_set_checked(2).unwrap();
         assert_eq!(opened.write(b"X").unwrap(), 1);
         assert_eq!(opened.pos(), 3);
 
-        opened.seek(8).unwrap();
+        opened.seek_set_checked(8).unwrap();
         assert_eq!(opened.write(b"Z").unwrap(), 1);
         assert_eq!(opened.pos(), 9);
 
-        opened.seek(0).unwrap();
+        opened.seek_set_checked(0).unwrap();
         let mut buf = [0u8; 9];
         assert_eq!(opened.read(&mut buf).unwrap(), 9);
         assert_eq!(&buf, b"heXlo\0\0\0Z");
@@ -1215,7 +1215,7 @@ mod kunits {
         assert_eq!(&prefix, b"heXl");
 
         let mut eof_buf = [0u8; 4];
-        second_handle.seek(32).unwrap();
+        second_handle.seek_set_checked(32).unwrap();
         assert_eq!(second_handle.read(&mut eof_buf).unwrap(), 0);
 
         drop(second_handle);
@@ -1315,7 +1315,7 @@ mod kunits {
         assert_eq!(after_append.linux_blocks(), 1);
         assert_eq!(after_append.nlink, 1);
 
-        opened.seek(8).unwrap();
+        opened.seek_set_checked(8).unwrap();
         assert_eq!(opened.write(b"z").unwrap(), 1);
 
         let after_hole = vfs_get_attr(path).unwrap();
@@ -1359,7 +1359,7 @@ mod kunits {
         let file = vfs_touch(upper, InodePerm::all_rwx()).unwrap();
         let reopened = vfs_open(upper).unwrap();
         assert_eq!(reopened.write(b"mounted").unwrap(), 7);
-        reopened.seek(0).unwrap();
+        reopened.seek_set_checked(0).unwrap();
 
         let mut buf = [0u8; 7];
         assert_eq!(reopened.read(&mut buf).unwrap(), 7);
@@ -1560,7 +1560,7 @@ mod kunits {
 
                 let opened = vfs_open(Path::new(&path)).unwrap();
                 assert_eq!(opened.write(payload.as_bytes()).unwrap(), payload.len());
-                opened.seek(0).unwrap();
+                opened.seek_set_checked(0).unwrap();
 
                 let mut buf = vec![0u8; payload.len()];
                 assert_eq!(opened.read(buf.as_mut_slice()).unwrap(), payload.len());
@@ -1607,7 +1607,7 @@ mod kunits {
                 let opened = vfs_open(Path::new(&file)).unwrap();
 
                 assert_eq!(opened.write(payload.as_bytes()).unwrap(), payload.len());
-                opened.seek(0).unwrap();
+                opened.seek_set_checked(0).unwrap();
 
                 let mut buf = vec![0u8; payload.len()];
                 assert_eq!(opened.read(buf.as_mut_slice()).unwrap(), payload.len());

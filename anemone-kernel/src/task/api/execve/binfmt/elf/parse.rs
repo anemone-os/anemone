@@ -417,7 +417,7 @@ pub unsafe fn load_image(file: &File, usp: &mut UserSpace) -> Result<ElfMeta, Sy
                 )
             };
 
-            file.seek(phdrs_offset)?;
+            file.seek_set_checked(phdrs_offset)?;
             file.read_exact(raw_bytes)?;
         }
 
@@ -439,7 +439,7 @@ pub unsafe fn load_image(file: &File, usp: &mut UserSpace) -> Result<ElfMeta, Sy
             }
 
             let mut buf = vec![0u8; phdr.p_filesz as usize];
-            file.seek(phdr.p_offset as usize)?;
+            file.seek_set_checked(phdr.p_offset as usize)?;
             file.read_exact(buf.as_mut())?;
             let cstr = CStr::from_bytes_until_nul(&buf).map_err(|_| SysError::InvalidArgument)?;
             let interp = cstr
@@ -595,7 +595,7 @@ fn load_interpreter(
                 )
             };
 
-            file.seek(phdrs_offset)?;
+            file.seek_set_checked(phdrs_offset)?;
             file.read_exact(raw_bytes)?;
         }
 

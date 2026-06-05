@@ -318,7 +318,7 @@ static PROC_FD_DIR_FILE_OPS: FileOps = FileOps {
     write: |_, _, _| Err(SysError::IsDir),
     read_at: |_, _, _| Err(SysError::IsDir),
     write_at: |_, _, _| Err(SysError::IsDir),
-    seek: |_, _, _| Err(SysError::IsDir),
+    seek: seek_dir_rewind,
     read_dir: proc_fd_read_dir,
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),

@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** VFS / syscall ABI / devfs / character device / loop
 **RFC:** [RFC-20260605-fileops-seek-char-ioctl](../../rfcs/fileops-seek-char-ioctl/index.md)
-**Current Phase:** Gate 1 passed; stopped before Agent 2
+**Current Phase:** Gate 2 passed; stopped before Agent 3
 
 ## Scope
 
@@ -47,13 +47,13 @@
 
 **Canonical RFC:** [RFC-20260605-fileops-seek-char-ioctl](../../rfcs/fileops-seek-char-ioctl/index.md), [Invariants](../../rfcs/fileops-seek-char-ioctl/invariants.md), [Implementation Plan](../../rfcs/fileops-seek-char-ioctl/implementation.md), [Tracking Issues](../../rfcs/fileops-seek-char-ioctl/tracking-issues.md)
 
-**Completed:** 公开 RFC、invariants、implementation、tracking issues 和 agent orchestration 文档已存在。总控完成 Agent 0 级只读前置审计：当前分支仍处于 RFC 描述的旧形状，`FileOps` 仍有 `validate_seek`，`File::read_at` / `File::write_at` 仍通过 `validate_seek + dummy_pos` 复用普通 `read` / `write`，`sys_lseek()` 仍在 syscall 层计算 `SEEK_CUR` / `SEEK_END`，char devfs 仍统一 seek unsupported / ioctl unsupported，loop backing 仍通过保存的 backing file 调 `read_at` / `write_at`。未发现 RFC 停止条件。
+**Completed:** 公开 RFC、invariants、implementation、tracking issues 和 agent orchestration 文档已存在。Agent 0 只读前置审计完成；Agent 1 阶段 1A mechanical API sweep 和 Gate 1 review 已完成。Agent 2 阶段 1B 已迁移 `sys_lseek()` 到 opened file seek intent，`File::seek` 现在接收 `SeekFrom` 并在 `File.pos` lock 内调用 backend seek，目录类 file ops 最小支持 `SEEK_SET(0)` rewind，内部绝对定位调用已改为 `seek_set_checked()`。
 
-**In Progress:** 暂停在 Agent 2 前，等待用户确认是否继续阶段 1B。
+**In Progress:** 暂停在 Agent 3 前，等待用户确认是否继续阶段 1C。不得直接启动 Agent 4+。
 
 **Open Blockers:** 暂无已确认 blocker。
 
-**Next Action:** 如用户继续，按编排启动 Agent 2，完成阶段 1B `lseek` / seek intent 迁移。不得直接启动 Agent 3+。
+**Next Action:** 如用户继续，按编排启动 Agent 3，完成阶段 1C positioned I/O 分类与 loop backing narrowed handle。不得直接启动 Agent 4+。
 
 **Do Not Redo:** 不要把 `FileDesc` / `ProcFile` / task / fd table 传进 file ops 或 `CharDev` hook；不要让 worker 越界改后续阶段；不要把 `SEEK_DATA` / `SEEK_HOLE` 交给 backend；不要用通用 wrapper 给 stream 后端继承 positioned I/O 能力；不要改 loop / block ioctl 所有权边界。
 
@@ -114,3 +114,37 @@
 **Validation:** reviewer 未运行 build / QEMU / LTP。当前已运行且通过的验证仍为 `git diff --check`；按用户要求未运行 `just build`。
 
 **Next:** 停止在 Agent 2 前，等待用户确认继续。
+
+### 2026-06-05 - Agent 2 阶段 1B lseek / seek intent 迁移完成
+
+**Phase:** Agent 2 / Stage 1B
+
+**Change:** `sys_lseek()` 现在只做 fd lookup、path-only 检查、Linux `whence` 转换和 dispatch；不再在 syscall 层读取 `File.pos` 或 `inode().size()` 来解释 `SEEK_CUR` / `SEEK_END`。`SEEK_DATA` / `SEEK_HOLE` 继续在 whence 转换层返回 `NotYetImplemented`，不进入 backend seek。
+
+**Change:** `File::seek` 改为接收 `SeekFrom` intent，并在持有 `File.pos` lock 时调用 backend `ops.seek`、写回并返回用户可见新 position；错误时恢复旧 position。旧 `File::seek(pos)` wrapper 已删除，内部绝对定位调用改为 `seek_set_checked(pos)`。常用 seek helper 按用户要求保留在 `anemone-kernel/src/fs/file.rs` 内的 `mod seek { ... }` 中，而不是拆成单独文件。
+
+**Change:** regular file 后端继续通过 inode size 处理 `SEEK_END`；proc snapshot 类文件使用 bounded-size seek；block devfs seek 使用设备总字节数处理 `SEEK_END`，并保留 alignment / end boundary 检查；pipe、console 和 char devfs seek 继续返回 `IllegalSeek`。ext4、ramfs、devfs、proc root、`/proc/<tgid>` 和 `/proc/<tgid>/fd` 目录 file ops 改为 `SEEK_SET(0)` rewind-only helper，复杂目录 seek 仍 fail closed。
+
+**Boundary:** 未修改 loop backing handle，未接通 `CharDev` seek/ioctl hook，未启动阶段 1C positioned I/O 分类。`File::validate_seek()` 和 `FileDesc::write_at()` 中的调用仍作为阶段 1C 残留迁移点存在；`compat_*_1c_delete` helper 也仍等待 Agent 3 删除或 backend-localize。
+
+**Audit:** `rg -n "inode\\(\\)\\.size\\(\\)|vfs_file\\.pos\\(\\)" anemone-kernel/src/fs/api/lseek.rs` 无命中。`rg -n "\\.seek\\(" anemone-kernel/src --glob "*.rs"` 只剩 `sys_lseek` -> `FileDesc::seek(SeekFrom)` -> `File::seek(SeekFrom)` intent dispatch 和 `seek_set_checked()` 内部调用。`rg -n "seek: \\|_, _, _\\| Err\\(SysError::IsDir\\)" anemone-kernel/src/fs anemone-kernel/src/device` 无命中。
+
+**Validation:** `git diff --check` 通过。`just build` 通过；构建期间仅出现既有 `anemone-kernel/src/sync/mono.rs` unused import 警告。未运行 QEMU / LTP。
+
+**Next:** 启动 Gate 2 review；不得直接进入 Agent 3。
+
+### 2026-06-05 - Gate 2 review 通过
+
+**Phase:** Gate 2 / Stage 1B review
+
+**Review:** Gate 2 readonly reviewer 未发现 Apollyon / Keter / Euclid blocker。确认 `sys_lseek()` 不再直接使用 `inode().size()` 解释全局 `SEEK_END`，也不再在 syscall 层执行 `pos()` + `seek()` 的非原子 `SEEK_CUR` 读改写；`SEEK_DATA` / `SEEK_HOLE` 仍停在 whence 转换层返回 `NotYetImplemented`，没有进入 backend seek。
+
+**Review:** reviewer 确认 `FileDesc::seek(SeekFrom)` 只做 fd/path-only gate 和 intent forwarding，`File::seek(SeekFrom)` 在 `File.pos` lock 内调用 backend seek、成功写回新位置、失败恢复旧位置。regular file、block devfs、pipe、char devfs 和目录 rewind 行为符合阶段 1B contract；没有发现越界接通 loop backing handle、`CharDev` seek/ioctl 或阶段 1C positioned I/O 分类。
+
+**Review:** reviewer 记录一个 Safe：`FileDesc::write_at()` 仍调用 `File::validate_seek()`，`compat_*_1c_delete` 仍被 regular / block / proc snapshot 后端使用。这符合 Gate 2 边界，不阻塞阶段 1B；Agent 3 必须删除或 backend-localize 这些阶段 1A/1C 残留。
+
+**Audit:** 总控复查 `rg -n "\\.seek\\(|seek_set_checked\\(|validate_seek\\(|seek_from\\(" anemone-kernel/src --glob '*.rs'`，确认 `.seek(` 只剩 `sys_lseek` -> `FileDesc::seek(SeekFrom)` -> `File::seek(SeekFrom)` intent dispatch；内部绝对定位调用已改为 `seek_set_checked()`；`validate_seek()` 只剩阶段 1C positioned I/O 残留。`rg -n "inode\\(\\)\\.size\\(\\)|vfs_file\\.pos\\(\\)|pos\\(\\).*\\+|SEEK_DATA|SEEK_HOLE|sys_lseek|NotYetImplemented" anemone-kernel/src/fs/api/lseek.rs` 确认 lseek syscall 层没有全局 inode-size / pos arithmetic 残留。
+
+**Validation:** `git diff --check` 通过。`just build` 通过；构建期间仅出现既有 `anemone-kernel/src/sync/mono.rs` unused import 警告。未运行 QEMU / LTP。
+
+**Next:** 停止在 Agent 3 前，等待用户确认继续阶段 1C。
