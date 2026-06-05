@@ -1,5 +1,5 @@
-RUSTUP_UPDATE_ROOT	:=	https://mirrors.tuna.tsinghua.edu.cn/rustup/rustup
-RUSTUP_DIST_SERVER 	:=	https://mirrors.tuna.tsinghua.edu.cn/rustup
+RUSTUP_UPDATE_ROOT	:=	https://mirrors.aliyun.com/rustup/rustup
+RUSTUP_DIST_SERVER 	:=	https://mirrors.aliyun.com/rustup
 all:
 	bash ./setup_mirror.sh
 	cargo install just
