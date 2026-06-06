@@ -20,3 +20,5 @@ Dockerfile_*
 rcopy.sh
 sdcard-*
 /issues
+kernel-la
+kernel-rv
