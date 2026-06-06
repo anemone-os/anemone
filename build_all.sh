@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-export RUSTUP_UPDATE_ROOT=https://mirrors.cernet.edu.cn/rustup/rustup
-export RUSTUP_DIST_SERVER=https://mirrors.cernet.edu.cn/rustup
+export RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
+export RUSTUP_DIST_SERVER=https://rsproxy.cn
 
 set -euo pipefail
 
