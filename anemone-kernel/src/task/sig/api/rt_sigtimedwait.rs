@@ -64,12 +64,9 @@ fn sys_rt_sigtimedwait(
         (uthese, timeout)
     };
 
-    let prev_mask = {
-        let mut sigmask = task.sig_mask.lock();
-        let prev_mask = *sigmask;
+    let prev_mask = task.mutate_syscall_body_current_sig_mask(|sigmask| {
         sigmask.difference_with(&uthese);
-        prev_mask
-    };
+    });
 
     enum WaitOutcome {
         Signal(Signal),
@@ -132,7 +129,7 @@ fn sys_rt_sigtimedwait(
         },
     };
 
-    *task.sig_mask.lock() = prev_mask;
+    task.restore_syscall_body_current_sig_mask(prev_mask);
 
     let wait_outcome = match wait_outcome {
         WaitOutcome::Timeout(rem) => {

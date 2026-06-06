@@ -90,7 +90,7 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
         }
 
         // ok.
-        *task.sig_mask.lock() = sigmask;
+        task.restore_sigframe_current_sig_mask(sigmask);
     }
 
     let ret = __trapframe__.syscall_retval();
