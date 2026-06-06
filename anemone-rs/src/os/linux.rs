@@ -355,6 +355,10 @@ pub mod process {
         process::getppid().and_then(|x| Ok(x as Tid))
     }
 
+    pub fn setpgid(pid: i32, pgid: i32) -> Result<(), Errno> {
+        process::setpgid(pid as i64 as u64, pgid as i64 as u64).map(|_| ())
+    }
+
     #[repr(transparent)]
     #[derive(Debug)]
     pub struct WStatusRaw(u32);

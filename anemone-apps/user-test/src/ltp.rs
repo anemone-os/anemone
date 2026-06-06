@@ -1,7 +1,7 @@
 use anemone_rs::{
     os::linux::{
         fs::{chdir, fstatat, AtFd},
-        process::{execve, exit, fork, WStatus},
+        process::{execve, exit, fork, setpgid, WStatus},
     },
     prelude::*,
 };
@@ -133,6 +133,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
         name: "iomux",
         cases: include_str!("../ltp/groups/iomux.txt"),
+    },
+    LtpGroup {
+        name: "syscalls",
+        cases: include_str!("../ltp/groups/syscalls.txt"),
     },
 ];
 
@@ -397,6 +401,11 @@ fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpC
             },
         },
         Ok(None) => {
+            if let Err(errno) = setpgid(0, 0) {
+                println!("user-test: {} setpgid(0, 0) failed: {errno:?}", case.name);
+                exit(127);
+            }
+
             if let Err(errno) = chdir(root.workdir) {
                 println!(
                     "user-test: {} chdir({}) failed: {errno:?}",

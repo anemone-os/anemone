@@ -184,6 +184,10 @@ pub mod process {
         unsafe { syscall(SYS_GETPPID, 0, 0, 0, 0, 0, 0) }
     }
 
+    pub fn setpgid(pid: u64, pgid: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_SETPGID, pid, pgid, 0, 0, 0, 0) }
+    }
+
     pub fn wait4(pid: u64, wstatus_ptr: u64, options: u64, rusage_ptr: u64) -> Result<u64, Errno> {
         unsafe { syscall(SYS_WAIT4, pid, wstatus_ptr, options, rusage_ptr, 0, 0) }
     }
