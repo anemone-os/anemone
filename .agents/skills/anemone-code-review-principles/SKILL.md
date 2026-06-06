@@ -65,6 +65,8 @@ When reviewing, stop issue hunting once remaining observations are Safe unless t
    - Avoid clever control flow, hidden side effects, broad catch-all helpers, and duplicated compatibility logic.
    - Keep subsystem internals local. If code needs another subsystem's details, prefer adding a narrow API at the owner boundary over importing its private representation.
    - Comments should explain non-obvious invariants, ordering constraints, ABI choices, and missing features; they should not restate obvious code.
+   - Treat missing comments on non-obvious invariants, ABI tradeoffs, lock or lifetime ordering, temporary compatibility bridges, accepted limitations, and special cases as maintainability or diagnostic risk, not as pure style. It is Safe only when the behavior is evident from the code and future misuse is unlikely.
+   - Do not request narrative filler comments. A useful comment must preserve a decision, invariant, boundary, failure mode, or removal condition that would otherwise be easy to lose during future edits.
 
 8. **Directness**
    - Favor the shortest path that preserves the subsystem contract.
