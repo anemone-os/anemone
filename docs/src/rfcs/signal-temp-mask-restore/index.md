@@ -1,12 +1,12 @@
 # RFC-20260606-signal-temp-mask-restore
 
-**状态：** Draft，已提升为公开 RFC 草案
+**状态：** Accepted for Implementation
 **负责人：** doruche, Codex
 **最后更新：** 2026-06-06
 **领域：** signal / wait-core / syscall ABI
-**事务日志：** None
+**事务日志：** [2026-06-06-signal-temp-mask-restore](../../devlog/transactions/2026-06-06-signal-temp-mask-restore.md)
 **开放问题：** None；document-layer review 与软件工程审查发现的问题均已折回 accepted contract，并列入 [Tracking Issues](./tracking-issues.md) 的 Neutralized。
-**下一步：** 完成公开 RFC review；若进入实现，先建立事务级 devlog，再按 [迁移实施计划](./implementation.md) 推进。
+**下一步：** 按 [Agent 编排建议](./backgrounds/agent-orchestration.md) 等待 Agent 0 只读前置审计结论；通过后进入 [迁移实施计划](./implementation.md) 的阶段 1A。
 
 ## 摘要
 

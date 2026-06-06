@@ -3,7 +3,7 @@
 **状态：** Closed
 **最后更新：** 2026-06-06
 **父 RFC：** [RFC-20260606-signal-temp-mask-restore](./index.md)
-**事务日志：** None
+**事务日志：** [2026-06-06-signal-temp-mask-restore](../../devlog/transactions/2026-06-06-signal-temp-mask-restore.md)
 
 本文只跟踪 design review 后确认的 RFC 缺陷、证明缺口、边界冲突或需要回到 RFC 修改的设计问题。
 
