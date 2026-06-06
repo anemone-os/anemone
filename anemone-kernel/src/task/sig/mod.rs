@@ -40,6 +40,48 @@ pub mod disposition;
 pub mod info;
 pub mod set;
 
+/// Per-task signal mask state.
+///
+/// Stage 1A only exposes ordinary current-mask APIs. The `restore` slot is the
+/// single future delayed-restore owner, but token/commit/cleanup semantics are
+/// introduced by later RFC stages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TaskSigMaskState {
+    current: SigSet,
+    restore: Option<SigSet>,
+}
+
+impl TaskSigMaskState {
+    pub const fn new() -> Self {
+        Self {
+            current: SigSet::new(),
+            restore: None,
+        }
+    }
+
+    fn current(&self) -> SigSet {
+        self.current
+    }
+
+    fn set_permanent_current(&mut self, new_mask: SigSet) {
+        assert!(
+            !new_mask.get(SigNo::SIGKILL) && !new_mask.get(SigNo::SIGSTOP),
+            "SIGKILL and SIGSTOP cannot be masked"
+        );
+        self.current = new_mask;
+    }
+
+    fn mutate_current(&mut self, f: impl FnOnce(&mut SigSet)) -> SigSet {
+        let old_mask = self.current;
+        f(&mut self.current);
+        assert!(
+            !self.current.get(SigNo::SIGKILL) && !self.current.get(SigNo::SIGSTOP),
+            "SIGKILL and SIGSTOP cannot be masked"
+        );
+        old_mask
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SigNo(usize);
 
@@ -360,7 +402,7 @@ impl Task {
     pub fn has_unmasked_signal(&self) -> bool {
         let prv_pending = {
             let pending = self.sig_pending.lock();
-            let mask = *self.sig_mask.lock();
+            let mask = self.snapshot_current_sig_mask();
             pending.has_unmasked(mask)
         };
         if prv_pending {
@@ -373,7 +415,7 @@ impl Task {
         let tg_inner = tg.inner.read();
         let shared_pending = {
             let pending = tg_inner.sig_pending.lock();
-            let mask = *self.sig_mask.lock();
+            let mask = self.snapshot_current_sig_mask();
             pending.has_unmasked(mask)
         };
         shared_pending
@@ -421,7 +463,8 @@ impl Task {
 
         self.sig_pending.lock().push_signal(signal);
 
-        if self.sig_mask.lock().get(no) && !matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
+        if self.is_current_sig_mask_blocking(no) && !matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP)
+        {
             // signal masked. nothing to do now, just wait for the task to
             // unmask it.
         } else {
@@ -446,7 +489,7 @@ impl Task {
         // first private pending
         {
             let mut pending = self.sig_pending.lock();
-            let mask = *self.sig_mask.lock();
+            let mask = self.snapshot_current_sig_mask();
             if let Some(signal) = pending.fetch_any(mask) {
                 return Some(signal);
             }
@@ -457,7 +500,7 @@ impl Task {
             let tg = self.get_thread_group();
             let tg_inner = tg.inner.read();
             let mut pending = tg_inner.sig_pending.lock();
-            let mask = *self.sig_mask.lock();
+            let mask = self.snapshot_current_sig_mask();
             if let Some(signal) = pending.fetch_any(mask) {
                 return Some(signal);
             }
@@ -489,8 +532,10 @@ impl Task {
         None
     }
 
-    pub fn sig_mask(&self) -> SigSet {
-        self.sig_mask.lock().clone()
+    /// Snapshot the current signal mask. Pending delayed-restore state is not
+    /// exposed by this API.
+    pub fn snapshot_current_sig_mask(&self) -> SigSet {
+        self.sig_mask.lock().current()
     }
 
     /// Return a snapshot of this task's private pending signal set.
@@ -498,15 +543,53 @@ impl Task {
         self.sig_pending.lock().to_sigset()
     }
 
-    /// Caller is responsible for ensuring the validity of `new_mask`, i.e. it
-    /// should not have SIGKILL and SIGSTOP set.
+    /// Set the permanent current signal mask. Caller is responsible for
+    /// ensuring the validity of `new_mask`, i.e. it should not have SIGKILL and
+    /// SIGSTOP set.
+    pub fn set_permanent_sig_mask(&self, new_mask: SigSet) {
+        self.sig_mask.lock().set_permanent_current(new_mask);
+    }
+
+    /// Mutate the current mask for ordinary current-mask operations and return
+    /// the previous mask.
+    pub fn mutate_current_sig_mask(&self, f: impl FnOnce(&mut SigSet)) -> SigSet {
+        self.sig_mask.lock().mutate_current(f)
+    }
+
+    /// Restore the current mask from a committed signal frame context.
+    ///
+    /// This is intentionally distinct from delayed temporary-mask restore. It
+    /// does not read, consume, or overwrite the pending restore slot.
+    pub fn restore_sigframe_current_sig_mask(&self, new_mask: SigSet) {
+        self.set_permanent_sig_mask(new_mask);
+    }
+
+    /// Temporarily mutate current signal mask inside a syscall body and return
+    /// the previous mask. The caller must restore with
+    /// [Task::restore_syscall_body_current_sig_mask].
+    pub fn mutate_syscall_body_current_sig_mask(&self, f: impl FnOnce(&mut SigSet)) -> SigSet {
+        self.mutate_current_sig_mask(f)
+    }
+
+    /// Restore a syscall-body-only temporary current mask.
+    pub fn restore_syscall_body_current_sig_mask(&self, old_mask: SigSet) {
+        self.set_permanent_sig_mask(old_mask);
+    }
+
+    fn is_current_sig_mask_blocking(&self, no: SigNo) -> bool {
+        self.snapshot_current_sig_mask().get(no)
+    }
+
+    // Stage 4 debt: ppoll/pselect6 still use the legacy save/set/restore path.
+    // Keep this wrapper only so the residual rg hits are explicitly classified.
+    pub fn sig_mask(&self) -> SigSet {
+        self.snapshot_current_sig_mask()
+    }
+
+    // Stage 4 debt: ppoll/pselect6 still use the legacy save/set/restore path.
+    // New ordinary mask code must use the named current-mask APIs above.
     pub fn set_sig_mask(&self, new_mask: SigSet) {
-        debug_assert!(
-            !new_mask.get(SigNo::SIGKILL) && !new_mask.get(SigNo::SIGSTOP),
-            "SIGKILL and SIGSTOP cannot be masked"
-        );
-        let mut sig_mask = self.sig_mask.lock();
-        *sig_mask = new_mask;
+        self.set_permanent_sig_mask(new_mask);
     }
 }
 
@@ -567,7 +650,9 @@ impl ThreadGroup {
         }
 
         self.for_each_member(|member| {
-            if member.sig_mask.lock().get(no) && !matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
+            if member.is_current_sig_mask_blocking(no)
+                && !matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP)
+            {
                 // signal masked. nothing to do now, just wait for the task to
                 // unmask it.
             } else {
@@ -652,19 +737,16 @@ fn perform_signal_action(
             // do nothing.
         },
         SignalAction::Custom(handler_addr) => {
-            let prev_mask = {
-                let mut sig_mask = task.sig_mask.lock();
+            let prev_mask = task.mutate_current_sig_mask(|sig_mask| {
                 debug_assert!(
                     !mask.get(SigNo::SIGKILL) && !mask.get(SigNo::SIGSTOP),
                     "SIGKILL and SIGSTOP cannot be masked"
                 );
-                let prev_mask = *sig_mask;
                 sig_mask.union_with(&mask);
                 if !flags.contains(SaFlags::NODEFER) {
                     sig_mask.set(no);
                 }
-                prev_mask
-            };
+            });
 
             // if SA_ONSTACK is set, and altstack is configured:
             // - if we're not currently on the altstack, use the altstack.
