@@ -1,5 +1,3 @@
-export RUSTUP_UPDATE_ROOT=https://mirrors.aliyun.com/rustup/rustup
-export RUSTUP_DIST_SERVER=https://mirrors.aliyun.com/rustup
 bash ./setup_mirror.sh
 cargo install just
 cp conf/.benchconf kconfig
