@@ -69,7 +69,7 @@ Canonical：
 
 背景材料：
 
-- None；历史私有工作记录不作为 canonical plan 引用。
+- [背景材料](./backgrounds/index.md)
 
 ## 方案
 

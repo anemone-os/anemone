@@ -61,6 +61,8 @@
 		- [不变量需求](./rfcs/signal-temp-mask-restore/invariants.md)
 		- [迁移实施计划](./rfcs/signal-temp-mask-restore/implementation.md)
 		- [Tracking Issues](./rfcs/signal-temp-mask-restore/tracking-issues.md)
+		- [背景材料](./rfcs/signal-temp-mask-restore/backgrounds/index.md)
+			- [Agent 编排建议](./rfcs/signal-temp-mask-restore/backgrounds/agent-orchestration.md)
 	- [FANOTIFY](./rfcs/fanotify/index.md)
 		- [不变量需求](./rfcs/fanotify/invariants.md)
 		- [迁移实施计划](./rfcs/fanotify/implementation.md)
