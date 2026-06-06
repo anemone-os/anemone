@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+export RUSTUP_UPDATE_ROOT=https://mirrors.aliyun.com/rustup/rustup
+export RUSTUP_DIST_SERVER=https://mirrors.aliyun.com/rustup
+
 set -euo pipefail
 
 cargo install just
