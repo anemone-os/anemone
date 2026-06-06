@@ -20,12 +20,16 @@ cp build/rootfs/test-rv/rootfs.img disk.img
 just build
 cp build/anemone.elf kernel-rv
 
+rm -rf sdcard-rv.img
+
 # LA
-# rm -rf la-base
-# mkdir -p la-base/dev
-# mkdir -p la-base/mnt
-# just conf switch pre-test-la64
-# just rootfs mkfs --config conf/rootfs/test-la
-# cp build/rootfs/test-la/rootfs.img disk-la.img
-# just build
-# cp build/anemone.elf kernel-la
+rm -rf la-base
+mkdir -p la-base/dev
+mkdir -p la-base/mnt
+just conf switch pre-test-la64
+just rootfs mkfs --config conf/rootfs/test-la
+cp build/rootfs/test-la/rootfs.img disk-la.img
+just build
+cp build/anemone.elf kernel-la
+
+rm -rf sdcard-la.img

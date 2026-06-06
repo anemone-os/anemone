@@ -18,7 +18,13 @@ use anemone_rs::{
 
 const BOOTSTRAP_BUSYBOX_PRIMARY: &str = "/musl/busybox";
 const BOOTSTRAP_BUSYBOX_FALLBACK: &str = "/glibc/busybox";
+
+#[cfg(target_arch = "riscv64")]
 const COMPETITION_DISK: &str = "/dev/vdb";
+
+#[cfg(target_arch = "loongarch64")]
+const COMPETITION_DISK: &str = "/dev/vda";
+
 const COMP_PATH_ENV: &str = "PATH=/bin:/usr/bin:/usr/sbin:/sbin:/";
 const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "basic_testcode.sh",
