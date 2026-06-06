@@ -5,5 +5,5 @@ cat << EOF | tee ${CARGO_HOME:-$HOME/.cargo}/config.toml
 replace-with = 'mirror'
 
 [source.mirror]
-registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"
+registry = "https://mirrors.aliyun.com/crates.io-index/"
 EOF
