@@ -1,6 +1,6 @@
 [build]
-name = "qemu-virt-la64"
-abbrs = ["la", "la64", "loongarch", "loongarch64"]
+name = "pre-test-la64"
+abbrs = []
 arch = "loongarch64"
 exec_env = "sbi"
 
@@ -31,19 +31,19 @@ args = [
     "-device",
     "pcie-root-port,id=pcie.1,bus=pcie.0",
 
-    # "-drive",
-    # "file=build/rootfs/minimal-la/rootfs.img,format=raw,if=none,id=x0", # vda
-    # "-device",
-    # "virtio-blk-pci-transitional,drive=x0,bus=pcie.0",
-    # "-drive",
-    # "file=sdcard-la.img,format=raw,if=none,id=x1",     # vdb
-    # "-device",
-    # "virtio-blk-pci-transitional,drive=x1,bus=pcie.0",
+    "-drive",
+    "file=sdcard-la.img,format=raw,if=none,id=x0",     # vda
+    "-device",
+    "virtio-blk-pci-transitional,drive=x0,bus=pcie.0",
+    "-drive",
+    "file=disk-la.img,format=raw,if=none,id=x1",       # vdb
+    "-device",
+    "virtio-blk-pci-transitional,drive=x1,bus=pcie.0",
 ]
 
 [rootfs]
 fstype = "ext4"
-source = { type = "block", path = "vda" }
+source = { type = "block", path = "vdb" }
 
 
 [dtb]
