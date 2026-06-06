@@ -26,7 +26,9 @@ fast_radix_trie = { workspace = true }
 safe-mmio = { workspace = true }
 virtio-drivers = { workspace = true }
 typed-path = { workspace = true }
-lwext4_rust = { workspace = true }
+lwext4_rust = { path = "crates/lwext4-rust", default-features = false, features = [
+    "print",
+] }
 buddy-system = { path = "crates/buddy-system", features = ["stats"] }
 device-tree = { path = "crates/device-tree", features = ["alloc"] }
 idalloc = { path = "crates/idalloc" }

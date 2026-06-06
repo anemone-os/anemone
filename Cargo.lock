@@ -550,7 +550,6 @@ dependencies = [
 [[package]]
 name = "lwext4_rust"
 version = "0.2.0"
-source = "git+https://github.com/anemone-os/lwext4_rust.git?rev=502b48b#502b48b33b5a6b6a75f78edc6c979c2638fc9323"
 dependencies = [
  "bindgen",
  "log",
