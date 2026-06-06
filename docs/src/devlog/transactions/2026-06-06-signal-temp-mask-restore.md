@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** signal / wait-core / syscall ABI / iomux
 **RFC:** [RFC-20260606-signal-temp-mask-restore](../../rfcs/signal-temp-mask-restore/index.md)
-**Current Phase:** Agent 2 Stage 1B pending
+**Current Phase:** Gate 2 passed; Stage 2 pending
 
 ## Scope
 
@@ -53,7 +53,7 @@ restore 协议实现，并审计 `rt_sigtimedwait` 继续保持 syscall-body-onl
 
 ## Handoff
 
-**Last Updated:** 2026-06-06
+**Last Updated:** 2026-06-07
 
 **Current Branch:** `dev/drc/signal-temp-mask`
 
@@ -61,12 +61,13 @@ restore 协议实现，并审计 `rt_sigtimedwait` 继续保持 syscall-body-onl
 
 **Completed:** 公开 RFC、invariants、implementation、tracking issues 和 agent orchestration
 文档已存在。总控完成实现前第一轮只读刷新：当前分支为 `dev/drc/signal-temp-mask`，工作区在事务启动前干净；代码仍是旧 `Task.sig_mask: NoIrqSpinLock<SigSet>` 模型；`rt_sigsuspend` 尚未注册；`ppoll` / `pselect6` 仍保留 legacy save / set / wait / restore 路径；`rt_sigtimedwait` 仍有 RFC 点名的 signal / force wake 后 waited-set dequeue 边界。Agent 0 只读前置审计已完成，未发现 RFC blocker 或停止条件，允许进入 Agent 1 阶段 1A。Agent 1 阶段 1A 已完成 `TaskSigMaskState` storage 与 ordinary current-mask API 迁移；Gate 1 review 已通过。
+Agent 2 阶段 1B 已完成 `TemporarySigMaskToken` 与 helper contract；Gate 2 review 已通过。
 
-**In Progress:** 无。
+**In Progress:** 无。Stage 2 尚未启动。
 
 **Open Blockers:** 暂无。
 
-**Next Action:** 启动 Agent 2 阶段 1B，只允许建立 `TemporarySigMaskToken` 与 helper contract；不得接入 trap-return delivery、classifier、`rt_sigsuspend` 或 iomux typed outcome。
+**Next Action:** 可以启动 Agent 3 阶段 2 signal delivery 接入；不得跳过阶段 2 直接启动 classifier、`rt_sigsuspend`、iomux 或 `rt_sigtimedwait` worker。
 
 **Do Not Redo:** 不要一次性启动所有 worker；不要在 Stage 1A 迁移 `ppoll` / `pselect6` delayed restore；不要把 `rt_sigtimedwait` 放进 `TemporarySigMaskToken` helper；不要用 wait-core `Signal` / `Force` outcome 直接证明 defer；不要把 cleanup 语义复制到 riscv64 / loongarch64 trap-return 层；不要 revert 用户或其他 agent 的改动。
 
@@ -149,3 +150,33 @@ restore 协议实现，并审计 `rt_sigtimedwait` 继续保持 syscall-body-onl
 **Validation:** reviewer 只读运行 `git diff --check` 通过；主控在修复后运行 `git diff --check` 和 `just build` 均通过，build 仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。未运行 QEMU / LTP。
 
 **Next:** 可以启动 Agent 2 阶段 1B；不得启动 Agent 3 或后续 worker。
+
+### 2026-06-06 - Agent 2 阶段 1B 完成
+
+**Phase:** Agent 2 / Stage 1B
+
+**Change:** 在 `TaskSigMaskState` 内将 Stage 1A 预留的 `restore` slot 纳入 helper contract，并新增私有 `TemporarySigMaskSlotId` identity。`begin_temporary_sig_mask(new_mask)` 在安装 `new_mask` 前断言没有既有 pending restore、校验 mask 合法性、保存旧 mask 到单一 restore slot，并返回 `#[must_use]` 的线性 `TemporarySigMaskToken`。token 持有 owning `Task` 引用与 slot identity，不实现 `Clone` / `Copy`；`restore_now(self)` 恢复旧 mask 并清空 restore slot，`defer_to_signal_delivery(self)` 只校验当前 task 与 pending slot 仍匹配并把恢复责任留给后续 signal delivery。`Drop` 只记录 / assert active token leak，不恢复 mask、不清空 slot、也不选择 defer。
+
+**Change:** 新增 helper contract surface：`sigmask_to_save_for_signal_frame()`、`signal_frame_committed_restore_mask()` 和 `restore_temporary_sig_mask_if_pending()`。本阶段只提供 helper，不在 `perform_signal_action()` 中调用 `sigmask_to_save_for_signal_frame()`，不新增 handler frame commit 点，不修改 `handle_signals()` cleanup，不接入 classifier、`rt_sigsuspend`、`ppoll` / `pselect6` typed outcome，且不修改 `rt_sigtimedwait`。
+
+**Audit:** 普通 current-mask mutation 现在由 `TaskSigMaskState` owner 在 `restore != None` 时 fail-closed assert，避免 `rt_sigprocmask`、`rt_sigreturn`、syscall-body-only restore 或 Stage 4 legacy wrapper 静默覆盖 pending restore。唯一允许 pending restore window 内修改 current 的 API 是 `mutate_current_sig_mask_for_signal_delivery()`，并且 `perform_signal_action()` 的 handler-mask installation 只改为走这个命名 helper；本阶段没有改变 sigframe mask 来源、frame commit 或 delayed restore cleanup 行为。helper 的所有状态转换只在 mask-state lock 临界区内读写 `TaskSigMaskState`，没有在持锁状态下执行 user copy 或 schedule。
+
+**Residual:** `rg` residual 中 `ppoll.rs` / `pselect6.rs` 仍是 Stage 4 legacy save / set / restore debt；`rt_sigtimedwait.rs` 仍保持 helper 外 syscall-body-only temporary mask path，Stage 5 再修 waited-set dequeue 边界；`perform_signal_action()` / `handle_signals()` 的 delayed restore delivery 接入仍是 Stage 2；未发现 `classify_temporary_mask_wait()` 或 `rt_sigsuspend` 新实现。
+
+**Validation:** `git diff --check` 通过；`just build` 通过，仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。未运行 QEMU / LTP。
+
+**Next:** Gate 2 review。不得跳过 review 直接启动 Agent 3。
+
+### 2026-06-07 - Gate 2 review 通过
+
+**Phase:** Gate 2 / Stage 1B review
+
+**Review:** Gate 2 reviewer 未发现 Apollyon / Keter / Euclid blocker。确认 `TemporarySigMaskToken` 是 `#[must_use]`、非 `Clone` / 非 `Copy` 的线性 token，`restore_now(self)` 与 `defer_to_signal_delivery(self)` 消耗 `self`，`Drop` 只记录并普通 `assert!` active-token leak，不恢复 mask、不清空 slot、不选择 defer。最初关于 drop assert 可能引入 unwind double-panic 的 finding 已撤回：当前内核没有 unwind，该 assert 只作为 fail-closed invariant 暴露。
+
+**Review:** reviewer 确认 token 不再保存独立 `task_id` 字段，owner 校验使用 `Arc::ptr_eq(&current, &self.task)`，日志和 assertion 需要 task id 时直接读取 `self.task.tid()`。`TemporarySigMaskSlotId` 只作为 restore slot identity 元数据，不是第二个 mask 来源；begin 时已有 restore 会在安装新 mask 前普通 `assert!` fail-closed。
+
+**Review:** ordinary current-mask mutation 在 `restore != None` 时普通 `assert!`，唯一命名允许在 pending restore window 内修改 current 的路径是 `mutate_current_sig_mask_for_signal_delivery()`。本阶段没有接入 Stage 2+：`perform_signal_action()` 尚未调用 `sigmask_to_save_for_signal_frame()`，`handle_signals()` 尚未接入 cleanup，未实现 classifier、`rt_sigsuspend`、iomux typed outcome 或 `rt_sigtimedwait` waited-set fix。
+
+**Validation:** `git diff --check` 通过；`just build` 通过，仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。未运行 QEMU / LTP。
+
+**Next:** 可以启动 Agent 3 阶段 2 signal delivery 接入。当前先停止，不启动 Agent 3 或后续 worker。

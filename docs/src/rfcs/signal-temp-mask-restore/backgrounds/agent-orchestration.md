@@ -5,8 +5,10 @@
 [迁移实施计划](../implementation.md) 和 [Tracking Issues](../tracking-issues.md)
 为准；本文只说明如何按这些 gate 组织 worker、reviewer 和验收顺序。
 
-本 RFC 尚未进入实现阶段。真正开始实现前，总控 agent 必须先建立事务 devlog，并在
-RFC 入口和事务日志之间建立双向链接。
+本 RFC 已进入实现阶段，并已建立对应的
+[事务 devlog](../../../devlog/transactions/2026-06-06-signal-temp-mask-restore.md)。
+当前执行进度、checkpoint、review 结论和验证证据以事务 devlog 为准；本文保留
+worker / reviewer 的编排顺序和 write set 边界。
 
 ## 编排原则
 

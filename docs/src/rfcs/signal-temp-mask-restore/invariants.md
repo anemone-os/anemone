@@ -1,7 +1,7 @@
 # signal temporary mask restore 不变量需求
 
-**状态：** Draft
-**最后更新：** 2026-06-06
+**状态：** Canonical
+**最后更新：** 2026-06-07
 **父 RFC：** [RFC-20260606-signal-temp-mask-restore](./index.md)
 
 ## 闭合条件
