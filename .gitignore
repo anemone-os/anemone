@@ -6,6 +6,7 @@ kconfig
 rootfsconfig*
 /etc
 disk.img
+disk-la.img
 .DS_Store
 rootfs*.img
 .envrc.local
