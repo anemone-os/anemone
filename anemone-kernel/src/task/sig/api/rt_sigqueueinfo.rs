@@ -21,7 +21,7 @@ use super::check_send_signal_permission;
 /// siginfo validation remains unchanged.
 #[syscall(SYS_RT_SIGQUEUEINFO)]
 fn sys_rt_sigqueueinfo(
-    pid: Tid,
+    pid: i32,
     sig: SigNo,
     #[validate_with(user_addr)] uinfo: VirtAddr,
 ) -> Result<u64, SysError> {
@@ -33,6 +33,7 @@ fn sys_rt_sigqueueinfo(
     );
 
     let task = get_current_task();
+    let pid = Tid::new(pid as u32);
 
     let mut kbuf = linux_signal::SigInfoWrapper::default();
 
@@ -63,10 +64,13 @@ fn sys_rt_sigqueueinfo(
 
     let signal = Signal::new_with_errno(sig, si_code, si_fields, si_errno);
 
-    let target = get_thread_group(&pid).ok_or(SysError::NoSuchProcess)?;
-    let leader = target.leader().ok_or(SysError::NoSuchProcess)?;
-    check_send_signal_permission(&leader, sig)?;
-    target.recv_signal(signal);
+    // Linux rt_sigqueueinfo() first resolves pid as PIDTYPE_PID, then sends a
+    // process-directed signal to the resolved task's thread group. This matters
+    // for callers that pass a non-leader gettid(): lookup must succeed even
+    // though delivery remains on the shared pending queue.
+    let target = get_task(&pid).ok_or(SysError::NoSuchProcess)?;
+    check_send_signal_permission(&target, sig)?;
+    target.get_thread_group().recv_signal(signal);
 
     Ok(0)
 }

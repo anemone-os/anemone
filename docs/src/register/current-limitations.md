@@ -429,3 +429,18 @@
 **Owner:** doruche
 **Last Verified:** 2026-06-04
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [IOCTL Loop 事务日志](../devlog/transactions/2026-06-04-ioctl-loop.md), [rv64 LTP ioctl 运行证据](../rfcs/ioctl-loop/backgrounds/ltp-ioctl-rv64-20260604/index.md), [RFC-20260603-IOCTL-LOOP](../rfcs/ioctl-loop/index.md)
+
+## ANE-20260607-SIGNAL-LTP-INFRA-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** signal / procfs / resource limits / kconfig / user-test
+
+**Summary:** signal profile 中仍有若干 LTP 设施或 Linux 可观察面缺口，不应和本轮 signal syscall 语义修复混为一类：`kill03` 与 `tkill02` 需要读取 `/proc/sys/kernel/pid_max`，当前返回 `ENOENT` 并 `TBROK`；`kill11` 的 setup 依赖 `getrlimit(RLIMIT_CORE)`，当前 `getrlimit(4, ...)` 返回 `ENOSYS`；`kill13` 通过 `/etc/ltp/anemone-kconfig` 检查 `CONFIG_UBSAN_SIGNED_OVERFLOW`，当前 fixture 未声明而 `TCONF`。日志里的 `unknown syscall number 123` 是缺少 `sched_getaffinity` 的 LTP 启动噪声，`rt_sigqueueinfo01` 附近的 `unknown syscall number 283` 是缺少 `membarrier` 的线程库噪声；它们不是本次 `tgkill03` / `rt_sigqueueinfo01` 的直接根因。
+
+**Exit Condition:** 为 LTP signal profile 所需的 procfs/sysctl、基础 `getrlimit` 和 kconfig fixture 补齐最小可观察语义，并决定是否实现或静默兼容 `sched_getaffinity` / `membarrier` 这类启动探测 syscall；随后复跑 signal profile，确认这些 case 不再以设施缺口遮蔽 syscall 语义判断。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-07
+**Related:** [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [开放问题：Signal LTP remaining semantics](./open-issues.md#ane-20260607-signal-ltp-remaining-semantics), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)

@@ -14,13 +14,23 @@ use crate::{
 use super::check_send_signal_permission;
 
 #[syscall(SYS_TGKILL)]
-fn sys_tgkill(tgid: Tid, tid: Tid, sig: SigNo) -> Result<u64, SysError> {
+fn sys_tgkill(tgid: i32, tid: i32, sig: SigNo) -> Result<u64, SysError> {
     kdebugln!(
         "sys_tgkill: tgid={}, tid={}, sig={}",
-        tgid.get(),
-        tid.get(),
+        tgid,
+        tid,
         sig.as_usize(),
     );
+
+    // Linux tgkill(2) takes pid_t arguments and rejects non-positive task
+    // identities before task lookup. Keep that check before converting into
+    // Anemone's unsigned Tid, otherwise negative pid_t values would turn into
+    // large synthetic TIDs and report ESRCH instead of EINVAL.
+    if tgid <= 0 || tid <= 0 {
+        return Err(SysError::InvalidArgument);
+    }
+    let tgid = Tid::new(tgid as u32);
+    let tid = Tid::new(tid as u32);
 
     let current = get_current_task();
     let signal = Signal::new(

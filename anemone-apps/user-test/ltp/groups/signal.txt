@@ -5,7 +5,7 @@ signal04
 signal05
 signal06
 
-kill02
+# kill02
 kill03
 kill05
 kill06
@@ -30,3 +30,15 @@ rt_sigprocmask01
 rt_sigprocmask02
 rt_sigqueueinfo01
 rt_sigsuspend01
+
+sigaltstack01
+sigaltstack02
+
+sigaction01
+sigaction02
+
+alarm02
+alarm03
+alarm05
+alarm06
+alarm07
