@@ -1099,17 +1099,6 @@ impl Task {
         self.snapshot_current_sig_mask().get(no)
     }
 
-    // Stage 4 debt: ppoll/pselect6 still use the legacy save/set/restore path.
-    // Keep this wrapper only so the residual rg hits are explicitly classified.
-    pub fn sig_mask(&self) -> SigSet {
-        self.snapshot_current_sig_mask()
-    }
-
-    // Stage 4 debt: ppoll/pselect6 still use the legacy save/set/restore path.
-    // New ordinary mask code must use the named current-mask APIs above.
-    pub fn set_sig_mask(&self, new_mask: SigSet) {
-        self.set_permanent_sig_mask(new_mask);
-    }
 }
 
 fn force_signal_set() -> SigSet {
