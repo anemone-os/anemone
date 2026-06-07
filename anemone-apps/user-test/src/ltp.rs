@@ -291,10 +291,10 @@ fn run_ltp_root(root: &LtpRoot, groups: &[&'static LtpGroup]) -> LtpSummary {
 }
 
 fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
-    println!(
-        "#### OS COMP TEST GROUP START {}/{} ####",
-        root.label, group.name,
-    );
+    // println!(
+    //     "#### OS COMP TEST GROUP START {}/{} ####",
+    //     root.label, group.name,
+    // );
 
     let mut summary = LtpSummary::default();
     for line in group.cases.lines() {
@@ -329,10 +329,10 @@ fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
         }
     }
 
-    println!(
-        "#### OS COMP TEST GROUP END {}/{} ####",
-        root.label, group.name,
-    );
+    // println!(
+    //     "#### OS COMP TEST GROUP END {}/{} ####",
+    //     root.label, group.name,
+    // );
     println!(
         "user-test: {}/{} summary attempted={} passed={} failed={} infra_failed={} skipped={}",
         root.label,
