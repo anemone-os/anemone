@@ -260,8 +260,8 @@ fn run_ltp_root(root: &LtpRoot, groups: &[&'static LtpGroup]) -> LtpSummary {
     crate::clear_tmp();
 
     let mut summary = LtpSummary::default();
+    println!("#### OS COMP TEST GROUP START {} ####", root.label);
     if fstatat(AtFd::Cwd, Path::new(root.workdir)).is_err() {
-        println!("#### OS COMP TEST GROUP START {} ####", root.label);
         println!(
             "user-test: skipping {} because {} is missing",
             root.label, root.workdir,
@@ -274,6 +274,7 @@ fn run_ltp_root(root: &LtpRoot, groups: &[&'static LtpGroup]) -> LtpSummary {
         let group_summary = run_ltp_group(root, group);
         summary.merge(group_summary);
     }
+    println!("#### OS COMP TEST GROUP END {} ####", root.label);
 
     println!(
         "user-test: {} summary attempted={} passed={} failed={} infra_failed={} skipped={}",
@@ -327,7 +328,7 @@ fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
     }
 
     println!(
-        "#### OS COMP TEST GROUP END {}/{} ####",
+        "#### OS COMP TEST GROUP END {} ####",
         root.label, group.name,
     );
     println!(
