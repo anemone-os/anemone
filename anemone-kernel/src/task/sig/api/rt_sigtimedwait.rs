@@ -95,7 +95,16 @@ fn sys_rt_sigtimedwait(
                 precheck_signal.expect("rt_sigtimedwait predicate-ready wait must have a signal");
             WaitOutcome::Signal(signal)
         },
-        CurrentWaitOutcome::Signal | CurrentWaitOutcome::Force => WaitOutcome::Interrupted,
+        CurrentWaitOutcome::Signal | CurrentWaitOutcome::Force => {
+            // `rt_sigtimedwait` consumes waited signals inside the syscall
+            // body. A signal/force wake only says the wait round was broken,
+            // so retry the waited set before restoring the temporary unmask.
+            if let Some(signal) = task.fetch_specific_signal(uthese) {
+                WaitOutcome::Signal(signal)
+            } else {
+                WaitOutcome::Interrupted
+            }
+        },
         CurrentWaitOutcome::Timeout => WaitOutcome::Timeout(rem),
         _ => {
             kdebugln!(

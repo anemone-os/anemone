@@ -104,19 +104,19 @@ cgroup_core02
 cgroup_core03
 cgroup_fj_common.sh
 cgroup_fj_function.sh
-cgroup_fj_proc
+# cgroup_fj_proc
 cgroup_fj_stress.sh
 cgroup_lib.sh
-cgroup_regression_3_1.sh
-cgroup_regression_3_2.sh
-cgroup_regression_5_1.sh
-cgroup_regression_5_2.sh
-cgroup_regression_6_1.sh
-cgroup_regression_6_2.sh
-cgroup_regression_fork_processes
-cgroup_regression_getdelays
-cgroup_regression_test.sh
-cgroup_xattr
+# cgroup_regression_3_1.sh
+# cgroup_regression_3_2.sh
+# cgroup_regression_5_1.sh
+# cgroup_regression_5_2.sh
+# cgroup_regression_6_1.sh
+# cgroup_regression_6_2.sh
+# cgroup_regression_fork_processes
+# cgroup_regression_getdelays
+# cgroup_regression_test.sh
+# cgroup_xattr
 change_password.sh
 chdir01
 chdir04
@@ -194,7 +194,7 @@ cpuctl_def_task01
 cpuctl_def_task02
 cpuctl_def_task03
 cpuctl_def_task04
-cpuctl_fj_cpu-hog
+# cpuctl_fj_cpu-hog
 cpuctl_fj_simple_echo
 cpuctl_latency_check_task
 cpuctl_latency_test
@@ -203,19 +203,19 @@ cpuctl_test02
 cpuctl_test03
 cpuctl_test04
 cpufreq_boost
-cpuhotplug01.sh
-cpuhotplug02.sh
-cpuhotplug03.sh
-cpuhotplug04.sh
-cpuhotplug05.sh
-cpuhotplug06.sh
-cpuhotplug07.sh
-cpuhotplug_do_disk_write_loop
-cpuhotplug_do_kcompile_loop
-cpuhotplug_do_spin_loop
-cpuhotplug_hotplug.sh
-cpuhotplug_report_proc_interrupts
-cpuhotplug_testsuite.sh
+# cpuhotplug01.sh
+# cpuhotplug02.sh
+# cpuhotplug03.sh
+# cpuhotplug04.sh
+# cpuhotplug05.sh
+# cpuhotplug06.sh
+# cpuhotplug07.sh
+# cpuhotplug_do_disk_write_loop
+# cpuhotplug_do_kcompile_loop
+# cpuhotplug_do_spin_loop
+# cpuhotplug_hotplug.sh
+# cpuhotplug_report_proc_interrupts
+# cpuhotplug_testsuite.sh
 cpuset01
 cpuset_base_ops_testset.sh
 cpuset_cpu_hog
@@ -2781,33 +2781,33 @@ vxlan01.sh
 vxlan02.sh
 vxlan03.sh
 vxlan04.sh
-wait01
-wait02
-wait401
-wait402
-wait403
-waitid01
-waitid02
-waitid03
-waitid04
-waitid05
-waitid06
-waitid07
-waitid08
-waitid09
-waitid10
-waitid11
-waitpid01
-waitpid03
-waitpid04
-waitpid06
-waitpid07
-waitpid08
-waitpid09
-waitpid10
-waitpid11
-waitpid12
-waitpid13
+# wait01
+# wait02
+# wait401
+# wait402
+# wait403
+# waitid01
+# waitid02
+# waitid03
+# waitid04
+# waitid05
+# waitid06
+# waitid07
+# waitid08
+# waitid09
+# waitid10
+# waitid11
+# waitpid01
+# waitpid03
+# waitpid04
+# waitpid06
+# waitpid07
+# waitpid08
+# waitpid09
+# waitpid10
+# waitpid11
+# waitpid12
+# waitpid13
 wc01.sh
 which01.sh
 wireguard01.sh

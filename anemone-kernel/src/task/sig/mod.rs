@@ -19,6 +19,7 @@ use anemone_abi::process::linux::{signal as linux_signal, signal::NSIG, ucontext
 
 use crate::{
     prelude::*,
+    sched::CurrentWaitOutcome,
     syscall::{handler::TryFromSyscallArg, user_access::UserWritePtr},
     task::{
         exit::kernel_exit_group,
@@ -274,6 +275,69 @@ impl Drop for TemporarySigMaskToken {
     }
 }
 
+/// Typed wait outcome candidate for delayed temporary-mask classification.
+///
+/// This is intentionally signal-owned. Delayed-restore callsites should pass
+/// their scheduler/latch outcome through this type instead of interpreting
+/// pending queues, dispositions, ignore/default/custom actions, or force wakes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TemporaryMaskWaitCandidate {
+    PredicateReady,
+    Timeout,
+    Signal,
+    Force,
+    Cancelled,
+    Unexpected,
+}
+
+impl From<CurrentWaitOutcome> for TemporaryMaskWaitCandidate {
+    fn from(value: CurrentWaitOutcome) -> Self {
+        match value {
+            CurrentWaitOutcome::PredicateReady => Self::PredicateReady,
+            CurrentWaitOutcome::Timeout => Self::Timeout,
+            CurrentWaitOutcome::Signal => Self::Signal,
+            CurrentWaitOutcome::Force => Self::Force,
+            CurrentWaitOutcome::Cancelled => Self::Cancelled,
+            CurrentWaitOutcome::Unexpected => Self::Unexpected,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TemporaryMaskWaitContext {
+    RtSigsuspend,
+    Ppoll,
+    Pselect6,
+}
+
+impl TemporaryMaskWaitContext {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::RtSigsuspend => "rt_sigsuspend",
+            Self::Ppoll => "ppoll",
+            Self::Pselect6 => "pselect6",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TemporaryMaskWaitReturn {
+    /// The wait was not a signal-delivery carrier; restore the token and let
+    /// the caller map its original typed wait result.
+    OriginalOutcome,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TemporaryMaskWaitDecision {
+    /// A stable trap-return delivery target is already reserved for this task.
+    DeferToTrapReturnDelivery,
+    RestoreThenReturn(TemporaryMaskWaitReturn),
+    RestoreThenFailClosed(SysError),
+    /// A force wake matched a non-returning signal target. Callers must not map
+    /// this to an ordinary `EINTR` carrier.
+    NoReturnForce,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SigNo(usize);
 
@@ -403,6 +467,16 @@ impl Signal {
 /// [ThreadGroup::recv_signal] for details.
 #[derive(Debug)]
 pub struct PendingSignals {
+    /// Stable handoff target for trap-return delivery.
+    ///
+    /// For a task-private signal, `classify_temporary_mask_wait()` moves the
+    /// target out of the ordinary private pending set before allowing a
+    /// temporary-mask caller to defer restore. For a shared thread-group signal,
+    /// the classifier first claims it from the shared pending set, then moves it
+    /// into this current-task private reservation. In both cases the signal is
+    /// no longer eligible for ordinary private/shared pending competition and
+    /// must be consumed first by `handle_signals()` through `Task::fetch_signal()`.
+    reserved_delivery: Option<Signal>,
     /// Unreliable signals are not queued.
     ///
     /// Plus 1 for easy indexing, since signal numbers start from 1.
@@ -414,6 +488,7 @@ pub struct PendingSignals {
 impl PendingSignals {
     pub fn new() -> Self {
         Self {
+            reserved_delivery: None,
             unreliable: [const { None }; NUNRELIABLESIG + 1],
             realtime: [const { VecDeque::new() }; NRTSIG],
         }
@@ -438,6 +513,9 @@ impl PendingSignals {
     /// included.
     pub fn to_sigset(&self) -> SigSet {
         let mut set = SigSet::new();
+        if let Some(signal) = &self.reserved_delivery {
+            set.set(signal.no);
+        }
         for (no, signal) in self.unreliable.iter().enumerate() {
             if signal.is_some() {
                 set.set(SigNo::new(no));
@@ -463,6 +541,14 @@ impl PendingSignals {
     ///
     /// TODO: fetch_any_with() for custom order.
     pub fn fetch_any(&mut self, mask: SigSet) -> Option<Signal> {
+        if let Some(signal) = self.reserved_delivery.take() {
+            return Some(signal);
+        }
+
+        self.fetch_unreserved_any(mask)
+    }
+
+    fn fetch_unreserved_any(&mut self, mask: SigSet) -> Option<Signal> {
         debug_assert!(
             !mask.intersects_with(&SigSet::new_with_signos(&[SigNo::SIGKILL, SigNo::SIGSTOP])),
             "SIGKILL and SIGSTOP cannot be masked"
@@ -503,6 +589,49 @@ impl PendingSignals {
         None
     }
 
+    /// Reserve one unmasked signal for this task's next trap-return delivery.
+    fn reserve_any_for_delivery(&mut self, mask: SigSet) -> bool {
+        assert!(
+            self.reserved_delivery.is_none(),
+            "temporary signal delivery target is already reserved"
+        );
+
+        if let Some(signal) = self.fetch_unreserved_any(mask) {
+            self.reserved_delivery = Some(signal);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn reserve_specific_for_delivery(&mut self, set: SigSet) -> bool {
+        assert!(
+            self.reserved_delivery.is_none(),
+            "temporary signal delivery target is already reserved"
+        );
+
+        if let Some(signal) = self.fetch_specific(set) {
+            self.reserved_delivery = Some(signal);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn reserve_delivery_target(&mut self, signal: Signal) -> SigNo {
+        assert!(
+            self.reserved_delivery.is_none(),
+            "temporary signal delivery target is already reserved"
+        );
+        let no = signal.no;
+        self.reserved_delivery = Some(signal);
+        no
+    }
+
+    fn reserved_delivery_signo(&self) -> Option<SigNo> {
+        self.reserved_delivery.as_ref().map(|signal| signal.no)
+    }
+
     /// Fetch any pending signal in the given set, and remove it from the
     /// pending signals.
     ///
@@ -535,6 +664,9 @@ impl PendingSignals {
     }
 
     pub fn has_unmasked(&self, mask: SigSet) -> bool {
+        if self.reserved_delivery.is_some() {
+            return true;
+        }
         for no in 1..SIGRTMIN as usize {
             let no = SigNo::new(no);
             if self.unreliable[no.as_usize()].is_some() && !mask.get(no) {
@@ -551,6 +683,11 @@ impl PendingSignals {
     }
 
     pub fn has_specific(&self, set: SigSet) -> bool {
+        if let Some(signal) = &self.reserved_delivery {
+            if set.get(signal.no) {
+                return true;
+            }
+        }
         for no in 1..SIGRTMIN as usize {
             let no = SigNo::new(no);
             if self.unreliable[no.as_usize()].is_some() && set.get(no) {
@@ -724,6 +861,134 @@ impl Task {
         None
     }
 
+    pub fn classify_temporary_mask_wait(
+        &self,
+        candidate: impl Into<TemporaryMaskWaitCandidate>,
+        context: TemporaryMaskWaitContext,
+    ) -> TemporaryMaskWaitDecision {
+        let candidate = candidate.into();
+        match candidate {
+            TemporaryMaskWaitCandidate::PredicateReady | TemporaryMaskWaitCandidate::Timeout => {
+                TemporaryMaskWaitDecision::RestoreThenReturn(
+                    TemporaryMaskWaitReturn::OriginalOutcome,
+                )
+            },
+            TemporaryMaskWaitCandidate::Cancelled | TemporaryMaskWaitCandidate::Unexpected => {
+                self.log_temporary_mask_classifier_fail_closed(candidate, context);
+                TemporaryMaskWaitDecision::RestoreThenFailClosed(SysError::IO)
+            },
+            TemporaryMaskWaitCandidate::Signal | TemporaryMaskWaitCandidate::Force => {
+                self.classify_signal_temporary_mask_candidate(candidate, context)
+            },
+        }
+    }
+
+    fn classify_signal_temporary_mask_candidate(
+        &self,
+        candidate: TemporaryMaskWaitCandidate,
+        context: TemporaryMaskWaitContext,
+    ) -> TemporaryMaskWaitDecision {
+        let force_only = matches!(candidate, TemporaryMaskWaitCandidate::Force);
+        let Some(signo) = self.reserve_temporary_mask_delivery_target(force_only) else {
+            self.log_temporary_mask_classifier_fail_closed(candidate, context);
+            return TemporaryMaskWaitDecision::RestoreThenFailClosed(SysError::IO);
+        };
+
+        let action = self.sig_disposition.read().get_disposition(signo).action;
+        kdebugln!(
+            "{}: temporary-mask classifier reserved task={} candidate={:?} signo={:?} action={:?}",
+            context.as_str(),
+            self.tid(),
+            candidate,
+            signo,
+            action,
+        );
+
+        if matches!(signo, SigNo::SIGKILL | SigNo::SIGSTOP) {
+            // Force-wake targets are deliberately not represented as an
+            // ordinary EINTR carrier. The signal is reserved for trap return;
+            // the callsite must restore the token and enter its no-return
+            // force path instead of treating the wait as a recoverable signal.
+            return TemporaryMaskWaitDecision::NoReturnForce;
+        }
+
+        if force_only {
+            self.log_temporary_mask_classifier_fail_closed(candidate, context);
+            return TemporaryMaskWaitDecision::RestoreThenFailClosed(SysError::IO);
+        }
+
+        TemporaryMaskWaitDecision::DeferToTrapReturnDelivery
+    }
+
+    fn reserve_temporary_mask_delivery_target(&self, force_only: bool) -> Option<SigNo> {
+        if let Some(signo) = self.private_reserved_delivery_signo() {
+            return Some(signo);
+        }
+
+        if let Some(signo) = self.reserve_private_temporary_mask_delivery_target(force_only) {
+            return Some(signo);
+        }
+
+        self.reserve_shared_temporary_mask_delivery_target(force_only)
+    }
+
+    fn private_reserved_delivery_signo(&self) -> Option<SigNo> {
+        self.sig_pending.lock().reserved_delivery_signo()
+    }
+
+    fn reserve_private_temporary_mask_delivery_target(&self, force_only: bool) -> Option<SigNo> {
+        let mut pending = self.sig_pending.lock();
+        if let Some(signo) = pending.reserved_delivery_signo() {
+            return Some(signo);
+        }
+
+        let reserved = if force_only {
+            pending.reserve_specific_for_delivery(force_signal_set())
+        } else {
+            let mask = self.sig_mask.lock().current();
+            pending.reserve_any_for_delivery(mask)
+        };
+
+        reserved.then(|| {
+            pending
+                .reserved_delivery_signo()
+                .expect("reserved temporary delivery target must record a signal number")
+        })
+    }
+
+    fn reserve_shared_temporary_mask_delivery_target(&self, force_only: bool) -> Option<SigNo> {
+        let signal = {
+            let tg = self.get_thread_group();
+            let tg_inner = tg.inner.read();
+            let mut pending = tg_inner.sig_pending.lock();
+            if force_only {
+                pending.fetch_specific(force_signal_set())
+            } else {
+                let mask = self.sig_mask.lock().current();
+                pending.fetch_unreserved_any(mask)
+            }
+        }?;
+
+        let mut pending = self.sig_pending.lock();
+        Some(pending.reserve_delivery_target(signal))
+    }
+
+    fn log_temporary_mask_classifier_fail_closed(
+        &self,
+        candidate: TemporaryMaskWaitCandidate,
+        context: TemporaryMaskWaitContext,
+    ) {
+        kwarningln!(
+            "{}: temporary-mask classifier fail-closed task={} candidate={:?} current_mask={:?} private_pending={:?} shared_pending={:?}",
+            context.as_str(),
+            self.tid(),
+            candidate,
+            self.snapshot_current_sig_mask(),
+            self.pending_signal_set(),
+            self.get_thread_group().shared_pending_signal_set(),
+        );
+    }
+
     /// Snapshot the current signal mask. Pending delayed-restore state is not
     /// exposed by this API.
     pub fn snapshot_current_sig_mask(&self) -> SigSet {
@@ -819,17 +1084,10 @@ impl Task {
         self.snapshot_current_sig_mask().get(no)
     }
 
-    // Stage 4 debt: ppoll/pselect6 still use the legacy save/set/restore path.
-    // Keep this wrapper only so the residual rg hits are explicitly classified.
-    pub fn sig_mask(&self) -> SigSet {
-        self.snapshot_current_sig_mask()
-    }
+}
 
-    // Stage 4 debt: ppoll/pselect6 still use the legacy save/set/restore path.
-    // New ordinary mask code must use the named current-mask APIs above.
-    pub fn set_sig_mask(&self, new_mask: SigSet) {
-        self.set_permanent_sig_mask(new_mask);
-    }
+fn force_signal_set() -> SigSet {
+    SigSet::new_with_signos(&[SigNo::SIGKILL, SigNo::SIGSTOP])
 }
 
 impl ThreadGroup {
@@ -938,14 +1196,23 @@ pub fn handle_signals(
     mut restart_syscall: Option<(RestartSyscall, SyscallCtx)>,
 ) {
     let task = get_current_task();
+    let mut committed_handler_frame = false;
     loop {
         if let Some(signal) = task.fetch_signal() {
             if perform_signal_action(signal, trapframe, &mut restart_syscall) {
+                committed_handler_frame = true;
                 break;
             }
         } else {
             break;
         }
+    }
+
+    // Ignored signals do not leave an rt_sigreturn frame behind. If this
+    // trap-return pass consumed no handler signal, signal code remains the
+    // owner responsible for closing any deferred temporary-mask restore.
+    if !committed_handler_frame {
+        task.restore_temporary_sig_mask_if_pending();
     }
 }
 
@@ -976,7 +1243,8 @@ fn perform_signal_action(
             // do nothing.
         },
         SignalAction::Custom(handler_addr) => {
-            let prev_mask = task.mutate_current_sig_mask_for_signal_delivery(|sig_mask| {
+            let mask_to_save = task.sigmask_to_save_for_signal_frame();
+            task.mutate_current_sig_mask_for_signal_delivery(|sig_mask| {
                 assert!(
                     !mask.get(SigNo::SIGKILL) && !mask.get(SigNo::SIGSTOP),
                     "SIGKILL and SIGSTOP cannot be masked"
@@ -1050,7 +1318,7 @@ fn perform_signal_action(
             SignalArch::encode_ucontext(
                 &mut ucontext,
                 trapframe,
-                prev_mask,
+                mask_to_save,
                 altstack,
                 task.fpu_used(),
             );
@@ -1097,6 +1365,7 @@ fn perform_signal_action(
                 trapframe.set_return_addr(restorer.get());
             }
 
+            task.signal_frame_committed_restore_mask();
             break_loop = true;
         },
     }

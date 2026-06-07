@@ -538,9 +538,15 @@ enum ListenerQueueKind {
 
 #[derive(Clone)]
 struct WaitTarget {
+    /// Weak task reference is the wake target. It may expire while a detached
+    /// listener is still queued, so diagnostic identity is stored separately.
     task: Weak<Task>,
+    /// Wait-core token is the protocol identity for this listener.
     token: WakeToken,
-    tid: Tid,
+    /// Diagnostic tid retained only for logs after `task` can no longer be
+    /// upgraded. It must not be used to decide listener equality or wake
+    /// eligibility.
+    diagnostic_tid: Tid,
 }
 
 impl WaitTarget {
@@ -548,7 +554,7 @@ impl WaitTarget {
         Self {
             task: Arc::downgrade(task),
             token,
-            tid: task.tid(),
+            diagnostic_tid: task.tid(),
         }
     }
 }
@@ -556,7 +562,7 @@ impl WaitTarget {
 impl Debug for WaitTarget {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("WaitTarget")
-            .field("tid", &self.tid)
+            .field("diagnostic_tid", &self.diagnostic_tid)
             .field("wait_id", &self.token.wait_id())
             .finish()
     }

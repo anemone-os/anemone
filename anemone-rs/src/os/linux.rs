@@ -355,6 +355,10 @@ pub mod process {
         process::getppid().and_then(|x| Ok(x as Tid))
     }
 
+    pub fn setpgid(pid: i32, pgid: i32) -> Result<(), Errno> {
+        process::setpgid(pid, pgid).map(|_| ())
+    }
+
     #[repr(transparent)]
     #[derive(Debug)]
     pub struct WStatusRaw(u32);
@@ -495,6 +499,10 @@ pub mod process {
                 size_of::<SigSet>() as u64,
             )
             .map(|_| ())
+        }
+
+        pub fn kill(pid: i32, sig: SigNo) -> Result<(), Errno> {
+            signal::kill(pid, sig.as_usize() as u32).map(|_| ())
         }
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]

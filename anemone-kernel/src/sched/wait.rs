@@ -90,7 +90,12 @@ pub(super) enum WaitStateStatus {
 
 pub struct WaitState {
     status: NoIrqRwLock<WaitStateStatus>,
+    /// Diagnostic creator tid captured for stale tokens and debug dumps. Wait
+    /// ownership is not keyed by this field; `Arc<WaitState>` identity is the
+    /// protocol truth source.
     created_by: Tid,
+    /// Diagnostic creation timestamp used to reason about stuck or stale waits.
+    /// It must not drive wake, cancel, or retirement decisions.
     created_at: Instant,
 }
 
@@ -107,6 +112,8 @@ impl WaitState {
         *self.status.read()
     }
 
+    /// Pointer-derived diagnostic id for logs. Do not use this as a wait
+    /// equality key; use `Arc::ptr_eq` or `WakeToken::same_wait`.
     pub fn debug_id(&self) -> usize {
         self as *const Self as usize
     }
@@ -175,10 +182,14 @@ impl WaitGuard {
 /// Restricted wake capability held by event sources.
 #[derive(Clone, Debug)]
 pub(super) struct WakeToken {
+    /// Strong wait-state identity. Source queues may retain this after the
+    /// waiter task has gone away; stale and retired handling remains owned by
+    /// wait-core state transitions.
     state: Arc<WaitState>,
 }
 
 impl WakeToken {
+    /// Diagnostic id of the targeted wait round.
     pub fn wait_id(&self) -> usize {
         self.state.debug_id()
     }
@@ -224,6 +235,10 @@ impl ActiveWait {
 
     pub fn token(&self) -> WakeToken {
         self.token.clone()
+    }
+
+    pub fn wait_id(&self) -> usize {
+        self.token.wait_id()
     }
 
     pub fn cancel(&self, reason: WaitReason) {
@@ -309,14 +324,19 @@ pub(super) enum WakeResult {
 /// the already-detached listener while that transaction is still live.
 #[derive(Debug)]
 pub(super) struct RequeuePermit<'a> {
-    wait_id: usize,
-    _guard: crate::sync::rwlock::WriteIrqSaveGuard<'a, TaskSchedState>,
+    /// Holds the task sched-state write lock across the Event requeue handoff.
+    /// The wait id is derived from the guarded state for diagnostics instead
+    /// of cached as a second source of truth.
+    guard: crate::sync::rwlock::WriteIrqSaveGuard<'a, TaskSchedState>,
     _not_send_sync: PhantomData<*mut ()>,
 }
 
 impl RequeuePermit<'_> {
     pub fn wait_id(&self) -> usize {
-        self.wait_id
+        let TaskSchedState::Waiting { state, .. } = &*self.guard else {
+            unreachable!("requeue permit must guard an active wait state");
+        };
+        state.debug_id()
     }
 }
 
@@ -642,8 +662,7 @@ pub(super) fn requeue_permit_if_mode_blocked<'a>(
                 mode,
             );
             Some(RequeuePermit {
-                wait_id,
-                _guard: guard,
+                guard,
                 _not_send_sync: PhantomData,
             })
         },

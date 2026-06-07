@@ -18,7 +18,7 @@ use crate::{
     },
     task::{
         files::Fd,
-        sig::{SigNo, set::SigSet},
+        sig::{SigNo, TemporaryMaskWaitContext, set::SigSet},
     },
     utils::bitmap::Bitmap,
 };
@@ -275,35 +275,30 @@ pub fn sys_pselect6(
     let mut out_ready = out_interests.as_ref().map(|_| FdBitmap::new());
     let mut exp_ready = exp_interests.as_ref().map(|_| FdBitmap::new());
 
-    let prev_mask = sigmask.map(|mask| {
-        let prev_mask = task.sig_mask();
-        task.set_sig_mask(mask);
-        prev_mask
+    let token = sigmask.map(|mask| task.begin_temporary_sig_mask(mask));
+    let wait_outcome = wait_for_iomux_ready("sys_pselect6", &task, timeout, |mode| {
+        scan_pselect_fds(
+            &task,
+            n,
+            in_interests.as_ref(),
+            out_interests.as_ref(),
+            exp_interests.as_ref(),
+            &mut in_ready,
+            &mut out_ready,
+            &mut exp_ready,
+            mode,
+        )
     });
-
-    let wait_result = (|| -> Result<u64, SysError> {
-        let nready = wait_for_iomux_ready("sys_pselect6", &task, timeout, |mode| {
-            scan_pselect_fds(
-                &task,
-                n,
-                in_interests.as_ref(),
-                out_interests.as_ref(),
-                exp_interests.as_ref(),
-                &mut in_ready,
-                &mut out_ready,
-                &mut exp_ready,
-                mode,
-            )
-        })?;
-
-        Ok(nready as u64)
-    })();
-
-    if let Some(mask) = prev_mask {
-        task.set_sig_mask(mask);
-    }
-
-    let retval = wait_result?;
+    let retval = match token {
+        Some(token) => finish_temporary_iomux_wait(
+            "sys_pselect6",
+            &task,
+            token,
+            wait_outcome,
+            TemporaryMaskWaitContext::Pselect6,
+        )?,
+        None => wait_outcome.into_result_without_temporary_mask()?,
+    };
 
     {
         // update user's fd sets.
@@ -328,5 +323,5 @@ pub fn sys_pselect6(
         }
     }
 
-    Ok(retval)
+    Ok(retval as u64)
 }

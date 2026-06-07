@@ -31,8 +31,6 @@ pub struct Latch {
     // option makes double-finish and use-after-finish cheap invariants that can
     // be asserted in release builds.
     active_wait: Option<wait::ActiveWait>,
-    owner: Tid,
-    wait_id: usize,
     _not_send_sync: PhantomData<*mut ()>,
 }
 
@@ -45,13 +43,11 @@ impl Latch {
     pub fn begin_current(interruptible: bool) -> Self {
         let task = get_current_task();
         let active_wait = wait::ActiveWait::begin(&task, interruptible);
-        let token = active_wait.token();
-        let wait_id = token.wait_id();
-        let owner = task.tid();
+        let wait_id = active_wait.wait_id();
 
         kdebugln!(
             "latch: begin task={} wait={:#x} interruptible={}",
-            owner,
+            task.tid(),
             wait_id,
             interruptible,
         );
@@ -59,8 +55,6 @@ impl Latch {
         Self {
             task,
             active_wait: Some(active_wait),
-            owner,
-            wait_id,
             _not_send_sync: PhantomData,
         }
     }
@@ -73,11 +67,7 @@ impl Latch {
     pub fn make_trigger(&self) -> LatchTrigger {
         self.assert_owner("make_trigger");
         if self.active_wait.is_none() {
-            kwarningln!(
-                "latch: make_trigger after finish task={} wait={:#x}",
-                self.owner,
-                self.wait_id,
-            );
+            kwarningln!("latch: make_trigger after finish task={}", self.task.tid(),);
         }
         assert!(
             self.active_wait.is_some(),
@@ -87,12 +77,13 @@ impl Latch {
             .active_wait
             .as_ref()
             .expect("latch active wait disappeared after make_trigger assert");
+        let wait_id = active_wait.wait_id();
         let token = active_wait.token();
 
         kdebugln!(
             "latch: make_trigger task={} wait={:#x}",
-            self.owner,
-            self.wait_id,
+            self.task.tid(),
+            wait_id,
         );
 
         LatchTrigger::new(&self.task, token)
@@ -108,9 +99,8 @@ impl Latch {
 
         if self.active_wait.is_none() {
             kwarningln!(
-                "latch: cancel after finish task={} wait={:#x} reason={:?}",
-                self.owner,
-                self.wait_id,
+                "latch: cancel after finish task={} reason={:?}",
+                self.task.tid(),
                 reason,
             );
         }
@@ -119,12 +109,13 @@ impl Latch {
             .active_wait
             .as_ref()
             .expect("latch active wait disappeared after cancel assert");
+        let wait_id = active_wait.wait_id();
 
         active_wait.cancel(reason.into());
         kdebugln!(
             "latch: cancel task={} wait={:#x} reason={:?}",
-            self.owner,
-            self.wait_id,
+            self.task.tid(),
+            wait_id,
             reason,
         );
     }
@@ -138,11 +129,7 @@ impl Latch {
     pub fn schedule_with_timeout(&self, timeout: Option<Duration>) -> Duration {
         self.assert_owner("schedule_with_timeout");
         if self.active_wait.is_none() {
-            kwarningln!(
-                "latch: schedule after finish task={} wait={:#x}",
-                self.owner,
-                self.wait_id,
-            );
+            kwarningln!("latch: schedule after finish task={}", self.task.tid(),);
         }
         assert!(self.active_wait.is_some(), "latch schedule after finish");
         let active_wait = self
@@ -164,51 +151,52 @@ impl Latch {
         LatchWaitOutcome::from(outcome)
     }
 
-    pub fn wait_id(&self) -> usize {
-        self.wait_id
-    }
-
-    pub fn owner(&self) -> Tid {
-        self.owner
-    }
-
     fn finish_inner(&mut self, op: &str) -> WaitOutcome {
         if self.active_wait.is_none() {
-            kwarningln!(
-                "latch: double finish task={} wait={:#x} op={}",
-                self.owner,
-                self.wait_id,
-                op,
-            );
+            kwarningln!("latch: double finish task={} op={}", self.task.tid(), op,);
         }
         assert!(self.active_wait.is_some(), "latch double finish");
         let active_wait = self
             .active_wait
             .take()
             .expect("latch active wait disappeared after finish assert");
+        let wait_id = active_wait.wait_id();
 
         let outcome = active_wait.finish();
         kdebugln!(
             "latch: finish task={} wait={:#x} op={} outcome={:?}",
-            self.owner,
-            self.wait_id,
+            self.task.tid(),
+            wait_id,
             op,
             outcome,
         );
         outcome
     }
 
+    fn active_wait_id(&self) -> Option<usize> {
+        self.active_wait.as_ref().map(wait::ActiveWait::wait_id)
+    }
+
     fn assert_owner(&self, op: &str) {
         let current = get_current_task();
         let is_owner = Arc::ptr_eq(&current, &self.task);
         if !is_owner {
-            kwarningln!(
-                "latch: owner check failed op={} owner={} current={} wait={:#x}",
-                op,
-                self.owner,
-                current.tid(),
-                self.wait_id,
-            );
+            if let Some(wait_id) = self.active_wait_id() {
+                kwarningln!(
+                    "latch: owner check failed op={} owner={} current={} wait={:#x}",
+                    op,
+                    self.task.tid(),
+                    current.tid(),
+                    wait_id,
+                );
+            } else {
+                kwarningln!(
+                    "latch: owner check failed op={} owner={} current={} wait=retired",
+                    op,
+                    self.task.tid(),
+                    current.tid(),
+                );
+            }
         }
         assert!(is_owner, "latch used from non-owner task");
     }
@@ -222,10 +210,13 @@ impl Drop for Latch {
 
         // Missing an explicit finish is a kernel bug, but the wait round must
         // still be retired before the release-build assertion exposes it.
+        let wait_id = self
+            .active_wait_id()
+            .expect("latch active wait disappeared before drop retirement");
         kwarningln!(
             "latch: drop without finish task={} wait={:#x}",
-            self.owner,
-            self.wait_id,
+            self.task.tid(),
+            wait_id,
         );
 
         if let Some(active_wait) = self.active_wait.as_ref() {
@@ -234,11 +225,11 @@ impl Drop for Latch {
         let outcome = self.finish_inner("drop");
         kdebugln!(
             "latch: drop retired task={} wait={:#x} outcome={:?}",
-            self.owner,
-            self.wait_id,
+            self.task.tid(),
+            wait_id,
             outcome,
         );
-        // Drop must retire the wait round before exposing the owner bug.
+        // Drop must retire the wait round before exposing the lifecycle bug.
         assert!(false, "latch dropped without finish");
     }
 }
@@ -253,27 +244,20 @@ impl Drop for Latch {
 #[derive(Clone)]
 pub struct LatchTrigger {
     task: Weak<Task>,
-    token: Option<WakeToken>,
-    owner: Tid,
-    wait_id: usize,
+    token: WakeToken,
+    /// Diagnostic task id captured at trigger creation. It is retained only so
+    /// stale source-queue entries can still name the original waiter after the
+    /// weak task reference has expired; wait-core token identity owns
+    /// correctness.
+    diagnostic_tid: Tid,
 }
 
 impl LatchTrigger {
     fn new(task: &Arc<Task>, token: WakeToken) -> Self {
         Self {
             task: Arc::downgrade(task),
-            owner: task.tid(),
-            wait_id: token.wait_id(),
-            token: Some(token),
-        }
-    }
-
-    fn retired(owner: Tid, wait_id: usize) -> Self {
-        Self {
-            task: Weak::new(),
-            owner,
-            wait_id,
-            token: None,
+            token,
+            diagnostic_tid: task.tid(),
         }
     }
 
@@ -283,59 +267,51 @@ impl LatchTrigger {
     /// wake was stale, retired, or successful, but they must not branch into a
     /// second completion protocol or compensate with direct enqueue.
     pub fn trigger(&self) {
+        let wait_id = self.wait_id();
         kdebugln!(
             "latch: trigger attempt task={} wait={:#x}",
-            self.owner,
-            self.wait_id,
+            self.diagnostic_tid,
+            wait_id,
         );
 
         let Some(task) = self.task.upgrade() else {
             kdebugln!(
                 "latch: trigger stale task={} wait={:#x} result=task_gone",
-                self.owner,
-                self.wait_id,
+                self.diagnostic_tid,
+                wait_id,
             );
             return;
         };
 
-        let Some(token) = self.token.as_ref() else {
-            kdebugln!(
-                "latch: trigger retired task={} wait={:#x} result=no_token",
-                self.owner,
-                self.wait_id,
-            );
-            return;
-        };
-
-        let result = wait::wake_wait(&task, token, WaitReason::Latch, WakeMode::AnyWait);
+        let result = wait::wake_wait(&task, &self.token, WaitReason::Latch, WakeMode::AnyWait);
         match result {
             WakeResult::Woke { placement } => {
                 kdebugln!(
                     "latch: trigger woke task={} wait={:#x} placement={:?}",
-                    self.owner,
-                    self.wait_id,
+                    self.diagnostic_tid,
+                    wait_id,
                     placement,
                 );
             },
             WakeResult::Stale => {
                 kdebugln!(
                     "latch: trigger stale task={} wait={:#x}",
-                    self.owner,
-                    self.wait_id,
+                    self.diagnostic_tid,
+                    wait_id,
                 );
             },
             WakeResult::Retired => {
                 kdebugln!(
                     "latch: trigger retired task={} wait={:#x}",
-                    self.owner,
-                    self.wait_id,
+                    self.diagnostic_tid,
+                    wait_id,
                 );
             },
             other => {
                 kdebugln!(
                     "latch: trigger ignored task={} wait={:#x} result={:?}",
-                    self.owner,
-                    self.wait_id,
+                    self.diagnostic_tid,
+                    wait_id,
                     other,
                 );
             },
@@ -347,7 +323,7 @@ impl LatchTrigger {
     /// This is for logs and source queue diagnostics only; it is not a
     /// correctness key and must not be used to match new rounds.
     pub fn wait_id(&self) -> usize {
-        self.wait_id
+        self.token.wait_id()
     }
 
     /// Whether this trigger can be pruned from a source queue.
@@ -359,18 +335,15 @@ impl LatchTrigger {
         if self.task.upgrade().is_none() {
             return true;
         }
-        match self.token.as_ref() {
-            Some(token) => !token.is_armed(),
-            None => true,
-        }
+        !self.token.is_armed()
     }
 }
 
 impl core::fmt::Debug for LatchTrigger {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("LatchTrigger")
-            .field("owner", &self.owner)
-            .field("wait_id", &self.wait_id)
+            .field("diagnostic_tid", &self.diagnostic_tid)
+            .field("wait_id", &self.wait_id())
             .finish()
     }
 }

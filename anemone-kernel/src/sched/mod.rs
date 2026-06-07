@@ -42,7 +42,7 @@ pub use wait::{ParkState, TaskSchedState, WaitState, WakeEnqueueResult};
 pub unsafe fn scheduler() -> ! {
     // on entering this function from bootstrap code, some invariants of the loop
     // are not satisfied yet.
-    debug_assert!(IntrArch::local_intr_disabled());
+    assert!(IntrArch::local_intr_disabled());
 
     // this satisfies the first invariant.
     set_current_task(Some(clone_local_idle_task()));
@@ -82,7 +82,6 @@ mod kore {
         WaitCoreParked {
             state: Arc<WaitState>,
             interruptible: bool,
-            wait_id: usize,
         },
         Zombie,
     }
@@ -96,7 +95,7 @@ mod kore {
     ///
     /// **Interrupts must be disabled when calling this function.**
     pub unsafe fn schedule() {
-        debug_assert!(IntrArch::local_intr_disabled());
+        assert!(IntrArch::local_intr_disabled());
         let curr = get_current_task();
 
         let decision = curr.update_sched_state_with(|state| match state {
@@ -106,7 +105,6 @@ mod kore {
                 interruptible,
                 park: ParkState::PrePark,
             } => {
-                let wait_id = state.debug_id();
                 let wait_state = state.clone();
                 (
                     TaskSchedState::Waiting {
@@ -117,7 +115,6 @@ mod kore {
                     ScheduleDecision::WaitCoreParked {
                         state: wait_state,
                         interruptible,
-                        wait_id,
                     },
                 )
             },
@@ -126,7 +123,6 @@ mod kore {
                 interruptible,
                 park: ParkState::Parked,
             } => {
-                let wait_id = state.debug_id();
                 let wait_state = state.clone();
                 (
                     TaskSchedState::Waiting {
@@ -137,7 +133,6 @@ mod kore {
                     ScheduleDecision::WaitCoreParked {
                         state: wait_state,
                         interruptible,
-                        wait_id,
                     },
                 )
             },
@@ -155,9 +150,9 @@ mod kore {
             ScheduleDecision::WaitCoreParked {
                 state,
                 interruptible,
-                wait_id,
             } => {
                 let task_id = curr.tid();
+                let wait_id = state.debug_id();
                 match curr.sched_state() {
                     TaskSchedState::Runnable => {
                         kdebugln!(
@@ -184,7 +179,7 @@ mod kore {
                                 interruptible,
                                 observed_interruptible,
                             );
-                            debug_assert_eq!(observed_interruptible, interruptible);
+                            assert_eq!(observed_interruptible, interruptible);
                         }
                         knoticeln!(
                             "{} is wait-core parked (wait={:#x}, interruptible: {}, park: {:?}), not enqueuing it to run queue",
@@ -208,7 +203,7 @@ mod kore {
                             observed_interruptible,
                             park,
                         );
-                        debug_assert!(
+                        assert!(
                             Arc::ptr_eq(&observed, &state),
                             "schedule observed a different wait round after parking"
                         );
@@ -220,7 +215,7 @@ mod kore {
                             task_id,
                             wait_id,
                         );
-                        debug_assert!(false, "zombie state observed after wait-core park");
+                        assert!(false, "zombie state observed after wait-core park");
                         drop(curr);
                     },
                 }
@@ -319,7 +314,6 @@ mod higher_level {
         drop(current);
 
         let cloned_task = task.clone();
-        let wait_id = token.wait_id();
 
         let start = with_intr_disabled(|| {
             if let Some(timeout) = timeout {
@@ -336,7 +330,7 @@ mod higher_level {
                             kdebugln!(
                                 "schedule_wait_with_timeout: timeout task={} wait={:#x} result={:?}",
                                 cloned_task.tid(),
-                                wait_id,
+                                token.wait_id(),
                                 result,
                             );
                         }),
