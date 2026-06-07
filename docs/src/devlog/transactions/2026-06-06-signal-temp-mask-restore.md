@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** signal / wait-core / syscall ABI / iomux
 **RFC:** [RFC-20260606-signal-temp-mask-restore](../../rfcs/signal-temp-mask-restore/index.md)
-**Current Phase:** Gate 5 passed; Agent 6 pending
+**Current Phase:** Gate 6 passed; Agent 7 pending
 
 ## Scope
 
@@ -65,12 +65,13 @@ Agent 2 阶段 1B 已完成 `TemporarySigMaskToken` 与 helper contract；Gate 2
 Agent 3 阶段 2 已完成 signal delivery commit / cleanup 接入；Gate 3 review 已通过。
 Agent 4 已完成 signal-owned classifier / stable handoff；Gate 4 review 已通过。
 Agent 5 已完成 `rt_sigsuspend` syscall；Gate 5 review 已通过。
+Agent 6 已完成 `ppoll` / `pselect6` typed outcome 与 shared helper 迁移；Gate 6 review 已通过。
 
-**In Progress:** 无。Agent 6 尚未启动。
+**In Progress:** 无。Agent 7 尚未启动。
 
 **Open Blockers:** 暂无。
 
-**Next Action:** 可以启动 Agent 6 `ppoll` / `pselect6` typed outcome 与 shared helper 迁移；不得跳过 Gate 6 review 直接启动 `rt_sigtimedwait` worker。
+**Next Action:** 可以启动 Agent 7 `rt_sigtimedwait` 本地 waited-set dequeue 边界修复；不得跳过 Gate 7 review 直接启动最终收口。
 
 **Do Not Redo:** 不要一次性启动所有 worker；不要在 Stage 1A 迁移 `ppoll` / `pselect6` delayed restore；不要把 `rt_sigtimedwait` 放进 `TemporarySigMaskToken` helper；不要用 wait-core `Signal` / `Force` outcome 直接证明 defer；不要把 cleanup 语义复制到 riscv64 / loongarch64 trap-return 层；不要 revert 用户或其他 agent 的改动。
 
@@ -292,3 +293,33 @@ classifier 已保留的 force target。
 **Validation:** reviewer 和主控均运行 `git diff --check` 与 `just build` 通过，build 仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。未运行 QEMU / LTP。
 
 **Next:** 可以启动 Agent 6 `ppoll` / `pselect6` typed outcome 与 shared helper 迁移。不得跳过 Gate 6 review 直接启动 Agent 7 `rt_sigtimedwait`。
+
+### 2026-06-07 - Agent 6 ppoll / pselect6 迁移完成
+
+**Phase:** Agent 6 / Stage 4 iomux temporary mask migration
+
+**Change:** `wait_for_iomux_ready()` 现在返回 typed `IomuxWaitOutcome`，区分 ready、timeout、syscall/register error、signal candidate 和 force，不再在 shared iomux wait helper 内把 latch `Signal` / `Force` 直接压成 `SysError::Interrupted`。register abort 仍保留既有 final snapshot scan，以免 concurrent ready fd 被 unsupported/register error 路径吞掉。
+
+**Change:** 新增 `finish_temporary_iomux_wait()` 作为 `ppoll` / `pselect6` 的 token-active completion 边界：ready、timeout、wait/register error 都先 `restore_now()` 再返回；signal candidate / force 交给 signal-owned `classify_temporary_mask_wait()`，只有 `DeferToTrapReturnDelivery` 才 `defer_to_signal_delivery()` 并返回 `EINTR` carrier。`NoReturnForce` 保持与 ordinary `EINTR` 分离，先终止 token 后 fail-closed 返回 `EIO`，预留给 trap-return 消费已保留的 force target。
+
+**Change:** `sys_ppoll` 和 `sys_pselect6` 的 sigmask path 改为 `begin_temporary_sig_mask()` / typed wait outcome / shared completion helper，删除阶段 1A 登记的 `prev = task.sig_mask(); set_sig_mask(); wait; set_sig_mask(prev)` legacy save / set / restore path。no-sigmask path 不创建 token，继续把 typed outcome 按普通 syscall 结果映射。copy-out 更新 fd revents / fdsets 发生在 token terminal 之后，因此 copy-out error 不会携带 active temporary token 返回。
+
+**Scope:** 未修改 `rt_sigtimedwait`、arch trap-return 层、scheduler / wait-core 语义、ABI syscall number 表或 unrelated docs/code；未扩大 write set。
+
+**Validation:** `git diff --check` 通过；`just build` 通过，仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。按 Agent 6 要求未运行 QEMU / LTP。
+
+**Next:** Gate 6 review。不得跳过 review 直接启动 Agent 7 `rt_sigtimedwait` 或 Agent 8 收口。
+
+### 2026-06-07 - Gate 6 review 通过
+
+**Phase:** Gate 6 / iomux temporary mask migration review
+
+**Review:** Gate 6 readonly reviewer 未发现 Apollyon / Keter / Euclid / Safe finding，确认阶段 4 可以通过。reviewer 确认 `wait_for_iomux_ready()` 返回 typed `IomuxWaitOutcome`，`Signal` / `Force` 保持 typed candidate 直到 temporary-mask completion 边界。
+
+**Review:** reviewer 确认 `ppoll` / `pselect6` 的 no-sigmask path 不创建 temporary token；token-active path 中 ready、timeout、wait/register error、signal candidate 和 force 都通过 `restore_now()` 或 `defer_to_signal_delivery()` exactly one terminal 收口。copy-out 发生在 token terminal 之后，不会携带 active token 返回用户态。
+
+**Review:** reviewer 确认 fs/iomux 只调用 signal-owned `classify_temporary_mask_wait()`，没有复制 pending queue、disposition、ignore/default/custom action 或 force policy。未发现 `rt_sigtimedwait`、arch trap-return、scheduler / wait-core 或 ABI syscall number 表越界修改。
+
+**Validation:** reviewer 与主控均运行 `git diff --check` 与 `just build` 通过，build 仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。未运行 QEMU / LTP。
+
+**Next:** 可以启动 Agent 7 `rt_sigtimedwait` 本地 waited-set dequeue 边界修复。不得跳过 Gate 7 review 直接启动 Agent 8 收口。
