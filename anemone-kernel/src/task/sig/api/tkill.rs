@@ -11,7 +11,7 @@ use crate::{
     },
 };
 
-use super::check_send_signal_permission;
+use super::{KillSignal, check_send_kill_signal_permission};
 
 /// Sends a signal to one specific task id.
 ///
@@ -19,25 +19,36 @@ use super::check_send_signal_permission;
 ///
 /// Current permission check: sending to another thread group requires the
 /// caller real/effective uid to match the target real/saved uid, or
-/// `CAP_KILL`. `SIGCONT` is also allowed within the same session. The current
-/// `SigNo` argument parser rejects signal 0 before this function is entered.
+/// `CAP_KILL`. `SIGCONT` is also allowed within the same session. Signal 0 is
+/// a Linux null-signal probe: it checks target existence and permissions
+/// without queueing or waking a signal.
 #[syscall(SYS_TKILL)]
-fn sys_tkill(tid: Tid, sig: SigNo) -> Result<u64, SysError> {
-    kdebugln!("sys_tkill: tid={}, sig={}", tid.get(), sig.as_usize(),);
+fn sys_tkill(tid: i32, sig: KillSignal) -> Result<u64, SysError> {
+    kdebugln!("sys_tkill: tid={}, sig={:?}", tid, sig);
 
+    if tid <= 0 {
+        return Err(SysError::InvalidArgument);
+    }
+    let tid = Tid::new(tid as u32);
+
+    let target = get_task(&tid).ok_or(SysError::NoSuchProcess)?;
+    check_send_kill_signal_permission(&target, sig)?;
+
+    if let KillSignal::Armed(signo) = sig {
+        target.recv_signal(tkill_signal(signo));
+    }
+
+    Ok(0)
+}
+
+fn tkill_signal(signo: SigNo) -> Signal {
     let current = get_current_task();
-    let signal = Signal::new(
-        sig,
+    Signal::new(
+        signo,
         SiCode::TKill,
         SigInfoFields::TKill(SigKill {
             pid: current.tgid(),
             uid: current.cred().uid.real,
         }),
-    );
-
-    let target = get_task(&tid).ok_or(SysError::NoSuchProcess)?;
-    check_send_signal_permission(&target, sig)?;
-    target.recv_signal(signal);
-
-    Ok(0)
+    )
 }

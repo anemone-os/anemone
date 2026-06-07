@@ -2,14 +2,14 @@ use crate::{
     prelude::*,
     syscall::user_access::{UserReadPtr, user_addr},
     task::sig::{
-        SigNo, Signal,
+        Signal,
         info::{SiCode, SigInfoFields, SigRt},
     },
 };
 
 use anemone_abi::process::linux::signal as linux_signal;
 
-use super::check_send_signal_permission;
+use super::{KillSignal, check_send_kill_signal_permission};
 
 /// Sends a queued signal with user-provided siginfo to a thread group.
 ///
@@ -22,13 +22,13 @@ use super::check_send_signal_permission;
 #[syscall(SYS_RT_SIGQUEUEINFO)]
 fn sys_rt_sigqueueinfo(
     pid: i32,
-    sig: SigNo,
+    sig: KillSignal,
     #[validate_with(user_addr)] uinfo: VirtAddr,
 ) -> Result<u64, SysError> {
     kdebugln!(
-        "sys_rt_sigqueueinfo: pid={}, sig={}, uinfo={:?}",
+        "sys_rt_sigqueueinfo: pid={}, sig={:?}, uinfo={:?}",
         pid,
-        sig.as_usize(),
+        sig,
         uinfo
     );
 
@@ -62,15 +62,16 @@ fn sys_rt_sigqueueinfo(
         })
     };
 
-    let signal = Signal::new_with_errno(sig, si_code, si_fields, si_errno);
-
     // Linux rt_sigqueueinfo() first resolves pid as PIDTYPE_PID, then sends a
     // process-directed signal to the resolved task's thread group. This matters
     // for callers that pass a non-leader gettid(): lookup must succeed even
     // though delivery remains on the shared pending queue.
     let target = get_task(&pid).ok_or(SysError::NoSuchProcess)?;
-    check_send_signal_permission(&target, sig)?;
-    target.get_thread_group().recv_signal(signal);
+    check_send_kill_signal_permission(&target, sig)?;
+    if let KillSignal::Armed(signo) = sig {
+        let signal = Signal::new_with_errno(signo, si_code, si_fields, si_errno);
+        target.get_thread_group().recv_signal(signal);
+    }
 
     Ok(0)
 }

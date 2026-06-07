@@ -8,8 +8,38 @@
 
 use crate::{
     prelude::*,
+    syscall::handler::TryFromSyscallArg,
     task::{credentials::cap::Capability, sig::SigNo},
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum KillSignal {
+    /// Linux treats signal 0 as a null signal: check target existence and
+    /// permissions, but do not publish anything into pending signal queues.
+    Probe,
+    Armed(SigNo),
+}
+
+impl KillSignal {
+    pub(super) const fn as_raw(self) -> usize {
+        match self {
+            Self::Probe => 0,
+            Self::Armed(sig) => sig.as_usize(),
+        }
+    }
+}
+
+impl TryFromSyscallArg for KillSignal {
+    fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
+        if raw == 0 {
+            return Ok(Self::Probe);
+        }
+        if raw >= anemone_abi::process::linux::signal::NSIG as u64 {
+            return Err(SysError::InvalidArgument);
+        }
+        Ok(Self::Armed(SigNo::new(raw as usize)))
+    }
+}
 
 macro_rules! deny_signal_permission {
     ($($arg:tt)*) => {{
@@ -18,7 +48,7 @@ macro_rules! deny_signal_permission {
     }};
 }
 
-pub(super) fn can_send_signal_to(target: &Arc<Task>, sig: SigNo) -> bool {
+fn can_send_signal_by_cred(target: &Arc<Task>) -> bool {
     let current = get_current_task();
     let current_cred = current.cred();
     let target_cred = target.cred();
@@ -27,10 +57,15 @@ pub(super) fn can_send_signal_to(target: &Arc<Task>, sig: SigNo) -> bool {
         || current_cred.uid.real == target_cred.uid.saved
         || current_cred.uid.effective == target_cred.uid.real
         || current_cred.uid.effective == target_cred.uid.saved;
-    if uid_matches || current_cred.has_cap_effective(Capability::KILL) {
+    uid_matches || current_cred.has_cap_effective(Capability::KILL)
+}
+
+pub(super) fn can_send_signal_to(target: &Arc<Task>, sig: SigNo) -> bool {
+    if can_send_signal_by_cred(target) {
         return true;
     }
 
+    let current = get_current_task();
     if sig == SigNo::SIGCONT && current.get_thread_group().sid() == target.get_thread_group().sid()
     {
         return true;
@@ -39,18 +74,31 @@ pub(super) fn can_send_signal_to(target: &Arc<Task>, sig: SigNo) -> bool {
     false
 }
 
-pub(super) fn check_send_signal_permission(target: &Arc<Task>, sig: SigNo) -> Result<(), SysError> {
-    if can_send_signal_to(target, sig) {
+pub(super) fn can_send_kill_signal_to(target: &Arc<Task>, sig: KillSignal) -> bool {
+    match sig {
+        KillSignal::Probe => can_send_signal_by_cred(target),
+        KillSignal::Armed(signo) => can_send_signal_to(target, signo),
+    }
+}
+
+pub(super) fn check_send_kill_signal_permission(
+    target: &Arc<Task>,
+    sig: KillSignal,
+) -> Result<(), SysError> {
+    if can_send_kill_signal_to(target, sig) {
         return Ok(());
     }
+    deny_send_signal_permission(target, sig.as_raw())
+}
 
+fn deny_send_signal_permission(target: &Arc<Task>, sig: usize) -> Result<(), SysError> {
     let current = get_current_task();
     let current_cred = current.cred();
     let target_cred = target.cred();
 
     Err(deny_signal_permission!(
         "signal denied: sig={}, sender uid/euid={}/{}, target uid/suid={}/{}, missing={:?}",
-        sig.as_usize(),
+        sig,
         current_cred.uid.real.get(),
         current_cred.uid.effective.get(),
         target_cred.uid.real.get(),
