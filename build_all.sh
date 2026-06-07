@@ -26,6 +26,7 @@ rm -rf sdcard-rv.img
 rm -rf la-base
 mkdir -p la-base/dev
 mkdir -p la-base/mnt
+dd if=/dev/zero of=sdcard-la.img bs=1M count=1
 just conf switch pre-test-la64
 just rootfs mkfs --config conf/rootfs/test-la
 cp build/rootfs/test-la/rootfs.img disk-la.img
