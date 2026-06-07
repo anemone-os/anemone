@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** signal / wait-core / syscall ABI / iomux
 **RFC:** [RFC-20260606-signal-temp-mask-restore](../../rfcs/signal-temp-mask-restore/index.md)
-**Current Phase:** Gate 2 passed; Stage 2 pending
+**Current Phase:** Gate 3 passed; Agent 4 pending
 
 ## Scope
 
@@ -62,12 +62,13 @@ restore 协议实现，并审计 `rt_sigtimedwait` 继续保持 syscall-body-onl
 **Completed:** 公开 RFC、invariants、implementation、tracking issues 和 agent orchestration
 文档已存在。总控完成实现前第一轮只读刷新：当前分支为 `dev/drc/signal-temp-mask`，工作区在事务启动前干净；代码仍是旧 `Task.sig_mask: NoIrqSpinLock<SigSet>` 模型；`rt_sigsuspend` 尚未注册；`ppoll` / `pselect6` 仍保留 legacy save / set / wait / restore 路径；`rt_sigtimedwait` 仍有 RFC 点名的 signal / force wake 后 waited-set dequeue 边界。Agent 0 只读前置审计已完成，未发现 RFC blocker 或停止条件，允许进入 Agent 1 阶段 1A。Agent 1 阶段 1A 已完成 `TaskSigMaskState` storage 与 ordinary current-mask API 迁移；Gate 1 review 已通过。
 Agent 2 阶段 1B 已完成 `TemporarySigMaskToken` 与 helper contract；Gate 2 review 已通过。
+Agent 3 阶段 2 已完成 signal delivery commit / cleanup 接入；Gate 3 review 已通过。
 
-**In Progress:** 无。Stage 2 尚未启动。
+**In Progress:** 无。Agent 4 尚未启动。
 
 **Open Blockers:** 暂无。
 
-**Next Action:** 可以启动 Agent 3 阶段 2 signal delivery 接入；不得跳过阶段 2 直接启动 classifier、`rt_sigsuspend`、iomux 或 `rt_sigtimedwait` worker。
+**Next Action:** 可以启动 Agent 4 signal-owned classifier / stable handoff；不得跳过 Gate 4 review 直接启动 `rt_sigsuspend`、iomux 或 `rt_sigtimedwait` worker。
 
 **Do Not Redo:** 不要一次性启动所有 worker；不要在 Stage 1A 迁移 `ppoll` / `pselect6` delayed restore；不要把 `rt_sigtimedwait` 放进 `TemporarySigMaskToken` helper；不要用 wait-core `Signal` / `Force` outcome 直接证明 defer；不要把 cleanup 语义复制到 riscv64 / loongarch64 trap-return 层；不要 revert 用户或其他 agent 的改动。
 
@@ -180,3 +181,33 @@ Agent 2 阶段 1B 已完成 `TemporarySigMaskToken` 与 helper contract；Gate 2
 **Validation:** `git diff --check` 通过；`just build` 通过，仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。未运行 QEMU / LTP。
 
 **Next:** 可以启动 Agent 3 阶段 2 signal delivery 接入。当前先停止，不启动 Agent 3 或后续 worker。
+
+### 2026-06-07 - Agent 3 阶段 2 完成
+
+**Phase:** Agent 3 / Stage 2
+
+**Change:** `perform_signal_action()` 的用户 handler 路径现在先用 `sigmask_to_save_for_signal_frame()` 选择写入 sigframe 的 mask，再通过 `mutate_current_sig_mask_for_signal_delivery()` 安装 handler `sa_mask` / self-mask。sigframe 写入和 arch trapframe 准备完成、可选 `sa_restorer` 返回地址写入完成后，才在 frame commit 点调用 `signal_frame_committed_restore_mask()`，把 pending restore 责任转移给后续 `rt_sigreturn()`。
+
+**Change:** `handle_signals()` 记录本轮 trap-return 是否已提交用户 handler frame；如果没有留下 handler frame，则在 signal 模块内部统一调用 `restore_temporary_sig_mask_if_pending()`。default terminate 路径保持不返回；default ignore / explicit ignore 消费 signal 后由这个统一 cleanup 恢复旧 mask。
+
+**Audit:** `rt_sigreturn` 现有代码已经只从用户 sigframe 的 `uc_sigmask` 恢复 `TaskSigMaskState.current`，不读取、不消费、也不清理 pending restore slot，因此本阶段未修改 `anemone-kernel/src/task/sig/api/rt_sigreturn.rs`。frame 写失败路径仍直接 `kernel_exit_group(SIGSEGV)`，不会伪造返回用户态 cleanup；当前 arch `prepare_trapframe_for_signal_handler()` 不返回错误，cleanup 语义未下沉到 riscv64 / loongarch64 trap-return 层。
+
+**Scope:** 未启动 signal-owned classifier / stable handoff，未注册或实现 `rt_sigsuspend`，未修改 `ppoll` / `pselect6` / iomux typed outcome，未修改 `rt_sigtimedwait`。
+
+**Validation:** `git diff --check` 通过；`just build` 通过，仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。未运行 QEMU / LTP。
+
+**Next:** Gate 3 review。不得跳过 review 直接启动 Agent 4 classifier、Agent 5 `rt_sigsuspend`、Agent 6 iomux 或 Agent 7 `rt_sigtimedwait`。
+
+### 2026-06-07 - Gate 3 review 通过
+
+**Phase:** Gate 3 / Stage 2 review
+
+**Review:** Gate 3 readonly reviewer 未发现 Apollyon / Keter / Euclid / Safe finding，确认阶段 2 可以通过。reviewer 核对 `perform_signal_action()` 的用户 handler 路径：先在安装 handler mask 前选择 `mask_to_save`，再写入 sigframe、准备 trapframe、应用可选 restorer，并且只在 commit 点消费 restore slot。
+
+**Review:** reviewer 确认 `handle_signals()` 只在没有提交用户 handler frame 时调用 `restore_temporary_sig_mask_if_pending()`，覆盖 default ignore / explicit ignore 返回用户态路径；default terminate 保持不返回。`rt_sigreturn` 仍只通过 sigframe `uc_sigmask` 恢复 `TaskSigMaskState.current`，不读取、不消费、不清理 pending restore slot。
+
+**Review:** cleanup 语义仍收口在 signal 模块内部，riscv64 / loongarch64 trap-return 层没有复制 restore cleanup。reviewer 未发现 classifier、`rt_sigsuspend`、iomux typed outcome 或 `rt_sigtimedwait` helper migration 越界实现。
+
+**Validation:** reviewer 运行只读搜索与 `git diff --check` 通过；主控在 Stage 2 完成后运行 `git diff --check` 与 `just build` 通过，build 仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。未运行 QEMU / LTP。
+
+**Next:** 可以启动 Agent 4 signal-owned classifier / stable handoff。不得跳过 Gate 4 review 直接启动 Agent 5 `rt_sigsuspend`、Agent 6 iomux 或 Agent 7 `rt_sigtimedwait`。

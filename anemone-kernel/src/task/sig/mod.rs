@@ -938,14 +938,23 @@ pub fn handle_signals(
     mut restart_syscall: Option<(RestartSyscall, SyscallCtx)>,
 ) {
     let task = get_current_task();
+    let mut committed_handler_frame = false;
     loop {
         if let Some(signal) = task.fetch_signal() {
             if perform_signal_action(signal, trapframe, &mut restart_syscall) {
+                committed_handler_frame = true;
                 break;
             }
         } else {
             break;
         }
+    }
+
+    // Ignored signals do not leave an rt_sigreturn frame behind. If this
+    // trap-return pass consumed no handler signal, signal code remains the
+    // owner responsible for closing any deferred temporary-mask restore.
+    if !committed_handler_frame {
+        task.restore_temporary_sig_mask_if_pending();
     }
 }
 
@@ -976,7 +985,8 @@ fn perform_signal_action(
             // do nothing.
         },
         SignalAction::Custom(handler_addr) => {
-            let prev_mask = task.mutate_current_sig_mask_for_signal_delivery(|sig_mask| {
+            let mask_to_save = task.sigmask_to_save_for_signal_frame();
+            task.mutate_current_sig_mask_for_signal_delivery(|sig_mask| {
                 assert!(
                     !mask.get(SigNo::SIGKILL) && !mask.get(SigNo::SIGSTOP),
                     "SIGKILL and SIGSTOP cannot be masked"
@@ -1050,7 +1060,7 @@ fn perform_signal_action(
             SignalArch::encode_ucontext(
                 &mut ucontext,
                 trapframe,
-                prev_mask,
+                mask_to_save,
                 altstack,
                 task.fpu_used(),
             );
@@ -1097,6 +1107,7 @@ fn perform_signal_action(
                 trapframe.set_return_addr(restorer.get());
             }
 
+            task.signal_frame_committed_restore_mask();
             break_loop = true;
         },
     }
