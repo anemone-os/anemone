@@ -328,7 +328,7 @@ fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
     }
 
     println!(
-        "#### OS COMP TEST GROUP END {} ####",
+        "#### OS COMP TEST GROUP END {}/{} ####",
         root.label, group.name,
     );
     println!(
