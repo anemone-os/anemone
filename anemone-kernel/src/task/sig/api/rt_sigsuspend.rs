@@ -58,14 +58,9 @@ fn sys_rt_sigsuspend(
             token.defer_to_signal_delivery();
             Err(SysError::Interrupted)
         },
-        TemporaryMaskWaitDecision::RestoreThenReturn(ret) => {
+        TemporaryMaskWaitDecision::RestoreThenReturn(TemporaryMaskWaitReturn::OriginalOutcome) => {
             token.restore_now();
-            match ret {
-                TemporaryMaskWaitReturn::OriginalOutcome => {
-                    fail_closed_original_outcome(&task, outcome, rem)
-                },
-                TemporaryMaskWaitReturn::Err(err) => Err(err),
-            }
+            fail_closed_original_outcome(&task, outcome, rem)
         },
         TemporaryMaskWaitDecision::RestoreThenFailClosed(err) => {
             token.restore_now();

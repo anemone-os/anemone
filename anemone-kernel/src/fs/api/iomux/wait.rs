@@ -100,20 +100,17 @@ pub(super) fn finish_temporary_iomux_wait(
                     token.defer_to_signal_delivery();
                     Err(SysError::Interrupted)
                 },
-                TemporaryMaskWaitDecision::RestoreThenReturn(ret) => {
+                TemporaryMaskWaitDecision::RestoreThenReturn(
+                    TemporaryMaskWaitReturn::OriginalOutcome,
+                ) => {
                     token.restore_now();
-                    match ret {
-                        TemporaryMaskWaitReturn::OriginalOutcome => {
-                            kwarningln!(
-                                "{}: classifier returned original outcome for signal candidate task={} outcome={:?}",
-                                context,
-                                task.tid(),
-                                outcome,
-                            );
-                            Err(SysError::IO)
-                        },
-                        TemporaryMaskWaitReturn::Err(err) => Err(err),
-                    }
+                    kwarningln!(
+                        "{}: classifier returned original outcome for signal candidate task={} outcome={:?}",
+                        context,
+                        task.tid(),
+                        outcome,
+                    );
+                    Err(SysError::IO)
                 },
                 TemporaryMaskWaitDecision::RestoreThenFailClosed(err) => {
                     token.restore_now();

@@ -19,7 +19,7 @@ use anemone_abi::process::linux::{signal as linux_signal, signal::NSIG, ucontext
 
 use crate::{
     prelude::*,
-    sched::{CurrentWaitOutcome, LatchWaitOutcome},
+    sched::CurrentWaitOutcome,
     syscall::{handler::TryFromSyscallArg, user_access::UserWritePtr},
     task::{
         exit::kernel_exit_group,
@@ -303,19 +303,6 @@ impl From<CurrentWaitOutcome> for TemporaryMaskWaitCandidate {
     }
 }
 
-impl From<LatchWaitOutcome> for TemporaryMaskWaitCandidate {
-    fn from(value: LatchWaitOutcome) -> Self {
-        match value {
-            LatchWaitOutcome::Triggered => Self::PredicateReady,
-            LatchWaitOutcome::Timeout => Self::Timeout,
-            LatchWaitOutcome::Signal => Self::Signal,
-            LatchWaitOutcome::Force => Self::Force,
-            LatchWaitOutcome::Cancelled => Self::Cancelled,
-            LatchWaitOutcome::Unexpected => Self::Unexpected,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TemporaryMaskWaitContext {
     RtSigsuspend,
@@ -338,8 +325,6 @@ pub enum TemporaryMaskWaitReturn {
     /// The wait was not a signal-delivery carrier; restore the token and let
     /// the caller map its original typed wait result.
     OriginalOutcome,
-    /// Restore the token and return this syscall error.
-    Err(SysError),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
