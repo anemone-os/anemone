@@ -1,7 +1,7 @@
 # ANE-CHG-20260607-user-test-ltp-pgrp-isolation
 
 **Type:** Test Infra Improvement / Investigation
-**Status:** Active
+**Status:** Completed
 **Date:** 2026-06-07
 **Authors:** doruche, Codex
 **Area:** anemone-apps/user-test / LTP runner / process group
@@ -101,33 +101,41 @@ follow-up 也不应默认使用 `setsid()`，除非明确需要新的 session。
 - 本轮 scope 收紧为只做 per-case pgrp isolation，timeout / interrupt / orphan
   cleanup 明确延期。
 
-代码实现尚未开始。预期最小代码改动只涉及
-`anemone-apps/user-test/src/ltp.rs`：引入 `process::setpgid`，并在
-`run_ltp_case()` child 分支 `execve()` 前调用 `setpgid(0, 0)`。
+代码实现已完成，最小代码改动只涉及 `anemone-apps/user-test/src/ltp.rs`：
+
+- 从 `anemone_rs::os::linux::process` 引入 `setpgid`。
+- 在 `run_ltp_case()` 的 child 分支、任何 `chdir()` / argv 组装 / `execve()` 之前调用
+  `setpgid(0, 0)`，让每个 LTP case 进入以自身 PID 为 PGID 的独立进程组。
+- `setpgid(0, 0)` 失败时打印明确的 `user-test: INFRA ... setpgid(0, 0) failed before execve`
+  日志并 `exit(127)`，不继续执行被测 case。
+- 未引入 `setsid()`、timeout、interrupt、orphan cleanup，也未调整现有 LTP group/profile
+  边界。
 
 ## Validation
 
-文档层提升验证：
+文档层提升时已完成的验证：
 
 - `git diff --check` 通过。
 - `mdbook build docs` 通过。
 
-实现后建议按从小到大的顺序验证：
+本次实现验证：
 
-1. 构建验证：
-   - `just xtask app build user-test --arch riscv64`
-   - `git diff --check -- anemone-apps/user-test/src/ltp.rs`
-2. 定向行为验证：
+- `just xtask app build user-test --arch riscv64` 通过。
+- `git diff --check -- anemone-apps/user-test/src/ltp.rs` 通过。
+
+尚未运行的验证：
+
+1. 定向行为验证：
    - 临时跑一个打印 `getpgrp()` / `getpid()` 的 case，确认 case PGID 等于自身 PID，
      且不同于 runner；
    - 跑一个在 case 内执行 `kill(0, SIGTERM)` 的定向用例，确认 runner 不被杀；
    - 跑一个会创建子进程的 case，确认子进程继承该 case pgrp。
-3. LTP smoke：
+2. LTP smoke：
    - `kill06` / `kill08`：覆盖负 pid / 当前 pgrp kill；
    - `setpgid01` / `setpgid02` / `setpgid03`；
    - `setsid01`：确认不因 runner 使用 `setsid()` 改变初始条件。
 
-端到端 LTP / QEMU 验证仍按用户当前习惯执行；本记录只给出应验证的最小语义点。
+端到端 LTP / QEMU 验证未运行，仍按用户当前习惯执行。
 
 ## Tracking Issues
 
