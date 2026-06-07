@@ -169,3 +169,21 @@
 
 **Severity:** High
 **Workaround:** 当前只把最新 rv64 结果视为“未复现卡死但被 SIGILL 遮蔽”；不要用旧 la64 日志判断本轮修复结果，也不要把该项标成已验证通过。
+
+## ANE-20260606-RT-SIGTIMEDWAIT-ASYNC-WAITED-SIGNAL-EINTR
+
+**Type:** Issue
+**Status:** Open
+**Area:** signal / wait-core / syscall ABI
+
+**Symptom / Trigger:** `rt_sigtimedwait` 在 wait-core 返回 `Signal` 或 `Force` outcome 时，会先把结果分类为 interrupted，恢复旧 signal mask，然后返回 `EINTR`；该分支没有先尝试 dequeue waited set 中的 pending signal。如果 waited signal 在 syscall precheck 之后到达并完成当前 wait round，调用可能错误返回 `EINTR`，而不是消费该 signal 并返回 signal number / siginfo。
+
+**Impact:** 这会破坏 `rt_sigtimedwait` 的同步等待语义，并影响 `sigtimedwait` / `sigwaitinfo` 以及依赖它同步收割信号的 libc、BusyBox 或 LTP 路径。该问题不是 `sigsuspend` delayed mask restore 的范围扩张理由：`rt_sigtimedwait` 仍应在 syscall body 内同步 dequeue waited signal 并恢复 mask，不应改造成 trap-return signal delivery / `rt_sigreturn()` 协议。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-06
+**Exit Condition:** `rt_sigtimedwait` 在 wait completion 后先按 waited set 尝试 dequeue matching signal，只有确认没有 waited signal 且存在其他未屏蔽 signal / force 条件时才返回 `EINTR` 或进入对应 fail-closed 路径；重新验证 waited signal 在 precheck 后到达的定向用例，以及 LTP `rt_sigtimedwait01` / `sigtimedwait01`。
+**Related:** [Sched Wait Refactor 事务日志](../devlog/transactions/2026-06-01-sched-wait-refactor.md), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+**Severity:** Medium
+**Workaround:** 不要把当前 `rt_sigtimedwait` 的 async wake `EINTR` 结果当成已收敛 ABI；需要验证同步信号等待语义时，应使用覆盖 precheck-after-arrival 窗口的定向用例重新确认。

@@ -44,7 +44,7 @@ use crate::{
         files::FilesState,
         sig::{
             PendingSignals, SigNo, altstack::SigAltStack, disposition::SignalDisposition,
-            set::SigSet,
+            TaskSigMaskState,
         },
         task_itimer::ITimers,
     },
@@ -145,8 +145,8 @@ pub struct Task {
 
     /// Signal disposition table.
     sig_disposition: Arc<NoIrqRwLock<SignalDisposition>>,
-    /// Determines which signals are blocked.
-    sig_mask: NoIrqSpinLock<SigSet>,
+    /// Current signal mask state.
+    sig_mask: NoIrqSpinLock<TaskSigMaskState>,
     /// Current pending signals. Local to each task.
     sig_pending: NoIrqSpinLock<PendingSignals>,
     /// Alternative signal stack. Local to each task.
@@ -434,7 +434,7 @@ impl Task {
             cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
 
             sig_disposition: Arc::new(NoIrqRwLock::new(SignalDisposition::new())),
-            sig_mask: NoIrqSpinLock::new(SigSet::new()),
+            sig_mask: NoIrqSpinLock::new(TaskSigMaskState::new()),
             sig_pending: NoIrqSpinLock::new(PendingSignals::new()),
             sig_altstack: NoIrqSpinLock::new(None),
 
@@ -485,7 +485,7 @@ impl Task {
                 cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
 
                 sig_disposition: Arc::new(NoIrqRwLock::new(SignalDisposition::new())),
-                sig_mask: NoIrqSpinLock::new(SigSet::new()),
+                sig_mask: NoIrqSpinLock::new(TaskSigMaskState::new()),
                 sig_pending: NoIrqSpinLock::new(PendingSignals::new()),
                 sig_altstack: NoIrqSpinLock::new(None),
 

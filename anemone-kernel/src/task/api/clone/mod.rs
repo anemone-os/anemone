@@ -302,59 +302,19 @@ pub fn kernel_clone(
     }
     new_task.set_nice(current_task.nice());
 
-    // mask is always inherited.
-    {
-        let (parent_mask, mut child_mask) = {
-            // note the lock ordering!
-            if current_task.tid() < new_task.tid() {
-                let parent_mask = current_task.sig_mask.lock();
-                let child_mask = new_task.sig_mask.lock();
-                (parent_mask, child_mask)
-            } else {
-                let child_mask = new_task.sig_mask.lock();
-                let parent_mask = current_task.sig_mask.lock();
-                (parent_mask, child_mask)
-            }
-        };
-        *child_mask = *parent_mask;
-
-        // note the drop ordering.
-        if current_task.tid() < new_task.tid() {
-            drop(child_mask);
-            drop(parent_mask);
-        } else {
-            drop(parent_mask);
-            drop(child_mask);
-        }
-    }
+    // The child is not published yet, so no other task can observe or lock its
+    // signal mask. Snapshot only the parent's current mask and do not copy the
+    // task-local pending temporary restore slot.
+    new_task.set_permanent_sig_mask(current_task.snapshot_current_sig_mask());
 
     if flags.contains(CloneFlags::SIGHAND) {
         // share
         new_task.sig_disposition = current_task.sig_disposition.clone();
     } else {
-        // copy
-        let (parent_disp, mut child_disp) = {
-            // lock ordering, again.
-            if current_task.tid() < new_task.tid() {
-                let parent_disp = current_task.sig_disposition.read();
-                let child_disp = new_task.sig_disposition.write();
-                (parent_disp, child_disp)
-            } else {
-                let child_disp = new_task.sig_disposition.write();
-                let parent_disp = current_task.sig_disposition.read();
-                (parent_disp, child_disp)
-            }
-        };
-        *child_disp = parent_disp.clone();
-
-        // note the drop ordering.
-        if current_task.tid() < new_task.tid() {
-            drop(child_disp);
-            drop(parent_disp);
-        } else {
-            drop(parent_disp);
-            drop(child_disp);
-        }
+        // The child is not published yet, so there is no parent/child lock
+        // ordering problem. Snapshot the parent disposition, then initialize
+        // the child's private disposition table.
+        *new_task.sig_disposition.write() = current_task.sig_disposition.read().clone();
     }
 
     if flags.contains(CloneFlags::CLEAR_SIGHAND) {

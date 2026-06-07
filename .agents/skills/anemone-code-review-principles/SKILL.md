@@ -11,6 +11,8 @@ Assume the submitted code already builds and basic syntax is not the main review
 
 Keep the review scoped to the requested files, subsystem, or patch unless evidence shows the risk crosses a boundary. Prefer concrete findings tied to code paths, invariants, logs, tests, or externally visible behavior.
 
+Also check the repository-level coding rules in `AGENTS.md`, especially the kernel code-shape constraints. Treat violations of single-source-of-truth, diagnostic-field boundaries, narrow interfaces, assertion policy, or temporary-bridge exit conditions as review issues, not as cosmetic style comments.
+
 ## Issue Levels
 
 Use explicit issue levels to keep reviews bounded by real risk. Always use the current level names below. Older notes may map these to P0/P1/P2/P3 in the same order, but review output should not use the old names.
@@ -63,8 +65,12 @@ When reviewing, stop issue hunting once remaining observations are Safe unless t
 7. **Clean code and local clarity**
    - Prefer small functions with explicit invariants, names that match kernel concepts, and data structures that make illegal states hard to represent.
    - Avoid clever control flow, hidden side effects, broad catch-all helpers, and duplicated compatibility logic.
+   - Avoid caching fields that can be derived from the owning object unless the field is a justified performance cache, stable snapshot, or cross-lifetime diagnostic identity with an explicit comment and cheap consistency assertion where possible.
+   - Mark diagnostic-only fields such as owner ids, wait ids, token ids, and debug labels at the field declaration. They must not drive behavior unless they are promoted into explicit protocol state.
    - Keep subsystem internals local. If code needs another subsystem's details, prefer adding a narrow API at the owner boundary over importing its private representation.
    - Comments should explain non-obvious invariants, ordering constraints, ABI choices, and missing features; they should not restate obvious code.
+   - Treat missing comments on non-obvious invariants, ABI tradeoffs, lock or lifetime ordering, temporary compatibility bridges, accepted limitations, and special cases as maintainability or diagnostic risk, not as pure style. It is Safe only when the behavior is evident from the code and future misuse is unlikely.
+   - Do not request narrative filler comments. A useful comment must preserve a decision, invariant, boundary, failure mode, or removal condition that would otherwise be easy to lose during future edits.
 
 8. **Directness**
    - Favor the shortest path that preserves the subsystem contract.

@@ -122,7 +122,7 @@ fn build_status_text(inode: &InodeRef) -> Result<String, SysError> {
         .unwrap_or(0);
     let sig_pnd = leader.pending_signal_set();
     let shd_pnd = tg.shared_pending_signal_set();
-    let sig_blk = leader.sig_mask();
+    let sig_blk = leader.snapshot_current_sig_mask();
     let (sig_ign, sig_cgt) = tg
         .signal_disposition()
         .map(|disp| {

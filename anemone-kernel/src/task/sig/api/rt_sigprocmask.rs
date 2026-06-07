@@ -52,7 +52,7 @@ fn sys_rt_sigprocmask(
     let usp = task.clone_uspace_handle();
 
     if let Some(oldset) = oldset {
-        let kset = task.sig_mask.lock().as_u64();
+        let kset = task.snapshot_current_sig_mask().as_u64();
         let mut guard = usp.lock();
         let mut uoldset = UserWritePtr::<linux_signal::SigSet>::try_new(oldset, &mut guard)?;
         uoldset.write(linux_signal::SigSet { bits: kset });
@@ -68,18 +68,11 @@ fn sys_rt_sigprocmask(
             set
         };
 
-        let mut sig_mask = task.sig_mask.lock();
-        match how {
-            SigProcMaskHow::Block => {
-                *sig_mask = sig_mask.union(&set);
-            },
-            SigProcMaskHow::Unblock => {
-                *sig_mask = sig_mask.difference(&set);
-            },
-            SigProcMaskHow::SetMask => {
-                *sig_mask = set;
-            },
-        }
+        task.mutate_current_sig_mask(|sig_mask| match how {
+            SigProcMaskHow::Block => sig_mask.union_with(&set),
+            SigProcMaskHow::Unblock => sig_mask.difference_with(&set),
+            SigProcMaskHow::SetMask => *sig_mask = set,
+        });
     }
 
     Ok(0)
