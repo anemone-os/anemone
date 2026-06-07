@@ -40,10 +40,10 @@ const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "unixbench_testcode.sh",
 ];
 const MUSL_TEST_SCRIPTS: &[&str] = &[
-    "basic_testcode.sh",
+    // "basic_testcode.sh",
     // "lua_testcode.sh",
     "busybox_testcode.sh",
-    // "libctest_testcode.sh",
+    "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
     // "iozone_testcode.sh",
     // "iperf_testcode.sh",
