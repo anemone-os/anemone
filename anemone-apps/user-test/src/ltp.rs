@@ -17,7 +17,8 @@ const GLIBC_LTP_ENV: &[&str] = &[
     "PATH=/glibc/ltp/testcases/bin:/glibc/bin:/glibc/usr/bin:/bin:/usr/bin:/sbin:/usr/sbin",
     "LTPROOT=/glibc/ltp",
     "LTP_VIRT_OVERRIDE=kvm",
-    "LTP_COLORIZE_OUTPUT=1",
+    // "LTP_COLORIZE_OUTPUT=1",
+    "ANSI_COLOR=0",
     "TMPDIR=/tmp",
     "KCONFIG_PATH=/etc/ltp/anemone-kconfig",
 ];
@@ -26,7 +27,8 @@ const MUSL_LTP_ENV: &[&str] = &[
     "PATH=/musl/ltp/testcases/bin:/musl/bin:/musl/usr/bin:/bin:/usr/bin:/sbin:/usr/sbin",
     "LTPROOT=/musl/ltp",
     "LTP_VIRT_OVERRIDE=kvm",
-    "LTP_COLORIZE_OUTPUT=1",
+    // "LTP_COLORIZE_OUTPUT=1",
+    "ANSI_COLOR=0",
     "TMPDIR=/tmp",
     "KCONFIG_PATH=/etc/ltp/anemone-kconfig",
 ];
