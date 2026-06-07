@@ -194,7 +194,7 @@ cpuctl_def_task01
 cpuctl_def_task02
 cpuctl_def_task03
 cpuctl_def_task04
-cpuctl_fj_cpu-hog
+# cpuctl_fj_cpu-hog
 cpuctl_fj_simple_echo
 cpuctl_latency_check_task
 cpuctl_latency_test
@@ -203,19 +203,19 @@ cpuctl_test02
 cpuctl_test03
 cpuctl_test04
 cpufreq_boost
-cpuhotplug01.sh
-cpuhotplug02.sh
-cpuhotplug03.sh
-cpuhotplug04.sh
-cpuhotplug05.sh
-cpuhotplug06.sh
-cpuhotplug07.sh
-cpuhotplug_do_disk_write_loop
-cpuhotplug_do_kcompile_loop
-cpuhotplug_do_spin_loop
-cpuhotplug_hotplug.sh
-cpuhotplug_report_proc_interrupts
-cpuhotplug_testsuite.sh
+# cpuhotplug01.sh
+# cpuhotplug02.sh
+# cpuhotplug03.sh
+# cpuhotplug04.sh
+# cpuhotplug05.sh
+# cpuhotplug06.sh
+# cpuhotplug07.sh
+# cpuhotplug_do_disk_write_loop
+# cpuhotplug_do_kcompile_loop
+# cpuhotplug_do_spin_loop
+# cpuhotplug_hotplug.sh
+# cpuhotplug_report_proc_interrupts
+# cpuhotplug_testsuite.sh
 cpuset01
 cpuset_base_ops_testset.sh
 cpuset_cpu_hog

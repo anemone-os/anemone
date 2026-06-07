@@ -1,6 +1,6 @@
 use crate::{
     prelude::*,
-    syscall::user_access::{UserReadPtr, user_addr},
+    syscall::user_access::UserReadPtr,
     task::sig::{
         Signal,
         info::{SiCode, SigInfoFields, SigRt},
@@ -20,29 +20,43 @@ use super::{KillSignal, check_send_kill_signal_permission};
 /// `CAP_KILL`. `SIGCONT` is also allowed within the same session. Existing
 /// siginfo validation remains unchanged.
 #[syscall(SYS_RT_SIGQUEUEINFO)]
-fn sys_rt_sigqueueinfo(
-    pid: i32,
-    sig: KillSignal,
-    #[validate_with(user_addr)] uinfo: VirtAddr,
-) -> Result<u64, SysError> {
+fn sys_rt_sigqueueinfo(pid: i32, sig: KillSignal, uinfo: u64) -> Result<u64, SysError> {
     kdebugln!(
-        "sys_rt_sigqueueinfo: pid={}, sig={:?}, uinfo={:?}",
+        "sys_rt_sigqueueinfo: pid={}, sig={:?}, uinfo={:#x}",
         pid,
         sig,
         uinfo
     );
 
     let task = get_current_task();
+
+    // rt_sigqueueinfo() resolves only a positive task id. Reject non-positive
+    // pid_t values before converting to Anemone's unsigned Tid, otherwise they
+    // become synthetic task ids and report ESRCH instead of EINVAL.
+    if pid <= 0 {
+        return Err(SysError::InvalidArgument);
+    }
     let pid = Tid::new(pid as u32);
 
-    let mut kbuf = linux_signal::SigInfoWrapper::default();
+    // Linux signal 0 is a null-signal probe. It checks target existence and
+    // permission, but it must not depend on caller-provided siginfo contents or
+    // publish anything into pending signal queues.
+    let signo = match sig {
+        KillSignal::Probe => {
+            let target = get_task(&pid).ok_or(SysError::NoSuchProcess)?;
+            check_send_kill_signal_permission(&target, sig)?;
+            return Ok(0);
+        },
+        KillSignal::Armed(signo) => signo,
+    };
 
-    {
+    let kbuf = {
         let usp = task.clone_uspace_handle();
         let mut guard = usp.lock();
-        let uinfo = UserReadPtr::<linux_signal::SigInfoWrapper>::try_new(uinfo, &mut guard)?;
-        kbuf = uinfo.read();
-    }
+        let uinfo =
+            UserReadPtr::<linux_signal::SigInfoWrapper>::try_new(VirtAddr::new(uinfo), &mut guard)?;
+        uinfo.read()
+    };
 
     // parse kbuf to our internal data structure.
 
@@ -68,10 +82,8 @@ fn sys_rt_sigqueueinfo(
     // though delivery remains on the shared pending queue.
     let target = get_task(&pid).ok_or(SysError::NoSuchProcess)?;
     check_send_kill_signal_permission(&target, sig)?;
-    if let KillSignal::Armed(signo) = sig {
-        let signal = Signal::new_with_errno(signo, si_code, si_fields, si_errno);
-        target.get_thread_group().recv_signal(signal);
-    }
+    let signal = Signal::new_with_errno(signo, si_code, si_fields, si_errno);
+    target.get_thread_group().recv_signal(signal);
 
     Ok(0)
 }
