@@ -398,7 +398,7 @@ fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpC
             Ok(wstatus) => {
                 let exit_code = ltp_exit_code(wstatus);
                 if exit_code == 0 {
-                    println!("PASS LTP CASE {} : {}", case.name, exit_code);
+                    println!("FAIL LTP CASE {} : {}", case.name, exit_code);
                     LtpCaseOutcome::Passed
                 } else {
                     println!("FAIL LTP CASE {} : {}", case.name, exit_code);
