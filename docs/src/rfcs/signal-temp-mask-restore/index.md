@@ -6,7 +6,7 @@
 **领域：** signal / wait-core / syscall ABI
 **事务日志：** [2026-06-06-signal-temp-mask-restore](../../devlog/transactions/2026-06-06-signal-temp-mask-restore.md)
 **开放问题：** None；document-layer review 与软件工程审查发现的问题均已折回 accepted contract，并列入 [Tracking Issues](./tracking-issues.md) 的 Neutralized。
-**下一步：** 阶段 1A / 1B / 2 已完成并通过 Gate 1 / Gate 2 / Gate 3 review；下一步按 [Agent 编排建议](./backgrounds/agent-orchestration.md) 启动 Agent 4 的 signal-owned classifier / stable handoff，当前尚未启动。
+**下一步：** 阶段 1A / 1B / 2 与 signal-owned classifier / stable handoff 已完成，并通过 Gate 1 / Gate 2 / Gate 3 / Gate 4 review；下一步按 [Agent 编排建议](./backgrounds/agent-orchestration.md) 启动 Agent 5 的 `rt_sigsuspend` syscall，当前尚未启动。
 
 ## 摘要
 

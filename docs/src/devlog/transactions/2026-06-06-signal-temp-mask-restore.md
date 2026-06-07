@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** signal / wait-core / syscall ABI / iomux
 **RFC:** [RFC-20260606-signal-temp-mask-restore](../../rfcs/signal-temp-mask-restore/index.md)
-**Current Phase:** Gate 3 passed; Agent 4 pending
+**Current Phase:** Gate 4 passed; Agent 5 pending
 
 ## Scope
 
@@ -63,12 +63,13 @@ restore 协议实现，并审计 `rt_sigtimedwait` 继续保持 syscall-body-onl
 文档已存在。总控完成实现前第一轮只读刷新：当前分支为 `dev/drc/signal-temp-mask`，工作区在事务启动前干净；代码仍是旧 `Task.sig_mask: NoIrqSpinLock<SigSet>` 模型；`rt_sigsuspend` 尚未注册；`ppoll` / `pselect6` 仍保留 legacy save / set / wait / restore 路径；`rt_sigtimedwait` 仍有 RFC 点名的 signal / force wake 后 waited-set dequeue 边界。Agent 0 只读前置审计已完成，未发现 RFC blocker 或停止条件，允许进入 Agent 1 阶段 1A。Agent 1 阶段 1A 已完成 `TaskSigMaskState` storage 与 ordinary current-mask API 迁移；Gate 1 review 已通过。
 Agent 2 阶段 1B 已完成 `TemporarySigMaskToken` 与 helper contract；Gate 2 review 已通过。
 Agent 3 阶段 2 已完成 signal delivery commit / cleanup 接入；Gate 3 review 已通过。
+Agent 4 已完成 signal-owned classifier / stable handoff；Gate 4 review 已通过。
 
-**In Progress:** 无。Agent 4 尚未启动。
+**In Progress:** 无。Agent 5 尚未启动。
 
 **Open Blockers:** 暂无。
 
-**Next Action:** 可以启动 Agent 4 signal-owned classifier / stable handoff；不得跳过 Gate 4 review 直接启动 `rt_sigsuspend`、iomux 或 `rt_sigtimedwait` worker。
+**Next Action:** 可以启动 Agent 5 `rt_sigsuspend` syscall；不得跳过 Gate 5 review 直接启动 iomux 或 `rt_sigtimedwait` worker。
 
 **Do Not Redo:** 不要一次性启动所有 worker；不要在 Stage 1A 迁移 `ppoll` / `pselect6` delayed restore；不要把 `rt_sigtimedwait` 放进 `TemporarySigMaskToken` helper；不要用 wait-core `Signal` / `Force` outcome 直接证明 defer；不要把 cleanup 语义复制到 riscv64 / loongarch64 trap-return 层；不要 revert 用户或其他 agent 的改动。
 
@@ -211,3 +212,33 @@ Agent 3 阶段 2 已完成 signal delivery commit / cleanup 接入；Gate 3 revi
 **Validation:** reviewer 运行只读搜索与 `git diff --check` 通过；主控在 Stage 2 完成后运行 `git diff --check` 与 `just build` 通过，build 仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。未运行 QEMU / LTP。
 
 **Next:** 可以启动 Agent 4 signal-owned classifier / stable handoff。不得跳过 Gate 4 review 直接启动 Agent 5 `rt_sigsuspend`、Agent 6 iomux 或 Agent 7 `rt_sigtimedwait`。
+
+### 2026-06-07 - Agent 4 classifier / stable handoff 完成
+
+**Phase:** Agent 4 / signal-owned classifier and handoff
+
+**Change:** 在 `anemone-kernel/src/task/sig/mod.rs` 新增 signal-owned delayed-restore 分类 API：`TemporaryMaskWaitCandidate`、`TemporaryMaskWaitContext`、`TemporaryMaskWaitDecision` 和 `Task::classify_temporary_mask_wait()`。后续 `rt_sigsuspend`、`ppoll` 和 `pselect6` callsite 只需要传入 typed wait outcome 与 syscall context；pending queue、disposition、ignore/default/custom action 和 force wake policy 都仍由 signal 模块内部解释。
+
+**Change:** `PendingSignals` 增加 task-private `reserved_delivery` handoff slot，并让 `Task::fetch_signal()` 通过既有 private-pending 优先路径先消费 reserved target。private pending target 会从普通 pending 队列移动到该 slot；shared thread-group pending target 会先从 shared queue claim 出来，再移动到当前 task 的 private reservation，因此不会留下“先观察、后竞争”的 shared pending 窗口。当前实际模型已经存在 shared thread-group pending queue，本阶段没有虚构新的 shared-pending 机制。
+
+**Semantics:** `DeferToTrapReturnDelivery` 只在成功建立当前 task 的 stable reserved delivery target 后返回。无法 reserve / handoff 的 `Signal` candidate 返回 `RestoreThenFailClosed(SysError::IO)`；`Cancelled` / `Unexpected` 也 fail-closed。`Force` candidate 只按 `SIGKILL` / `SIGSTOP` 这类 force-wake target claim，并返回 `NoReturnForce`，不会被降级成 ordinary `EINTR` defer proof。普通 `Signal` candidate 若实际 claim 到 `SIGKILL` / `SIGSTOP`，同样返回 `NoReturnForce`。
+
+**Audit:** reserved target 被 `handle_signals()` 的真实 `fetch_signal()` 路径优先消费；custom handler 继续走 Agent 3 的 frame commit，default / explicit ignore no-handler-frame 路径继续由 signal 模块统一 cleanup 恢复 temporary mask。classifier 不注册或实现 `rt_sigsuspend`，不修改 `ppoll` / `pselect6` / iomux typed outcome，不修改 `rt_sigtimedwait`，也不改 arch trap-return cleanup 或 scheduler/wait-core。
+
+**Validation:** `git diff --check` 通过；`just build` 通过，仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。未运行 QEMU / LTP。
+
+**Next:** Gate 4 review。不得跳过 Gate 4 review 直接启动 Agent 5 `rt_sigsuspend`、Agent 6 iomux 或 Agent 7 `rt_sigtimedwait`。
+
+### 2026-06-07 - Gate 4 review 通过
+
+**Phase:** Gate 4 / signal-owned classifier review
+
+**Review:** Gate 4 readonly reviewer 未发现 Apollyon / Keter / Euclid / Safe finding，确认阶段 3 classifier / stable handoff 可以通过。reviewer 确认 `classify_temporary_mask_wait()` 是 signal-owned API，只接收 typed wait outcome 与 syscall context，`DeferToTrapReturnDelivery` 只在建立 stable reserved target 后返回。
+
+**Review:** reviewer 确认 private pending signal 会移动到 `reserved_delivery`，shared thread-group pending signal 会先从 shared queue claim，再移动到当前 task reservation，避免 shared pending “先观察、后竞争”窗口。`fetch_signal()` 通过真实 trap-return delivery 路径优先消费 reservation。
+
+**Review:** reviewer 确认 `Force` 没有被降级为 ordinary `EINTR` proof；force target 返回 `NoReturnForce`，reserve / handoff 失败路径 fail-closed。Stage 2 no-handler cleanup 仍通过 `handle_signals()` 收口，未发现 `rt_sigsuspend`、iomux typed outcome、`rt_sigtimedwait` 或 arch cleanup 越界实现。
+
+**Validation:** reviewer 运行 `git diff --check` 与 `just build` 通过，build 仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。未运行 QEMU / LTP。
+
+**Next:** 可以启动 Agent 5 `rt_sigsuspend` syscall。不得跳过 Gate 5 review 直接启动 Agent 6 iomux 或 Agent 7 `rt_sigtimedwait`。
