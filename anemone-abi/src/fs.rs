@@ -228,6 +228,92 @@ pub mod linux {
         pub const MS_RDONLY: u64 = 1;
     }
 
+    pub mod fanotify {
+        pub const FAN_ACCESS: u64 = 0x0000_0001;
+        pub const FAN_MODIFY: u64 = 0x0000_0002;
+        pub const FAN_ATTRIB: u64 = 0x0000_0004;
+        pub const FAN_CLOSE_WRITE: u64 = 0x0000_0008;
+        pub const FAN_CLOSE_NOWRITE: u64 = 0x0000_0010;
+        pub const FAN_OPEN: u64 = 0x0000_0020;
+        pub const FAN_MOVED_FROM: u64 = 0x0000_0040;
+        pub const FAN_MOVED_TO: u64 = 0x0000_0080;
+        pub const FAN_CREATE: u64 = 0x0000_0100;
+        pub const FAN_DELETE: u64 = 0x0000_0200;
+        pub const FAN_DELETE_SELF: u64 = 0x0000_0400;
+        pub const FAN_MOVE_SELF: u64 = 0x0000_0800;
+        pub const FAN_OPEN_EXEC: u64 = 0x0000_1000;
+        pub const FAN_Q_OVERFLOW: u64 = 0x0000_4000;
+        pub const FAN_FS_ERROR: u64 = 0x0000_8000;
+        pub const FAN_OPEN_PERM: u64 = 0x0001_0000;
+        pub const FAN_ACCESS_PERM: u64 = 0x0002_0000;
+        pub const FAN_OPEN_EXEC_PERM: u64 = 0x0004_0000;
+        pub const FAN_EVENT_ON_CHILD: u64 = 0x0800_0000;
+        pub const FAN_RENAME: u64 = 0x1000_0000;
+        pub const FAN_ONDIR: u64 = 0x4000_0000;
+        pub const FAN_CLOSE: u64 = FAN_CLOSE_WRITE | FAN_CLOSE_NOWRITE;
+        pub const FAN_MOVE: u64 = FAN_MOVED_FROM | FAN_MOVED_TO;
+
+        pub const FAN_CLOEXEC: u32 = 0x0000_0001;
+        pub const FAN_NONBLOCK: u32 = 0x0000_0002;
+        pub const FAN_CLASS_NOTIF: u32 = 0x0000_0000;
+        pub const FAN_CLASS_CONTENT: u32 = 0x0000_0004;
+        pub const FAN_CLASS_PRE_CONTENT: u32 = 0x0000_0008;
+        pub const FAN_UNLIMITED_QUEUE: u32 = 0x0000_0010;
+        pub const FAN_UNLIMITED_MARKS: u32 = 0x0000_0020;
+        pub const FAN_ENABLE_AUDIT: u32 = 0x0000_0040;
+        pub const FAN_REPORT_PIDFD: u32 = 0x0000_0080;
+        pub const FAN_REPORT_TID: u32 = 0x0000_0100;
+        pub const FAN_REPORT_FID: u32 = 0x0000_0200;
+        pub const FAN_REPORT_DIR_FID: u32 = 0x0000_0400;
+        pub const FAN_REPORT_NAME: u32 = 0x0000_0800;
+        pub const FAN_REPORT_TARGET_FID: u32 = 0x0000_1000;
+
+        pub const FAN_MARK_ADD: u32 = 0x0000_0001;
+        pub const FAN_MARK_REMOVE: u32 = 0x0000_0002;
+        pub const FAN_MARK_DONT_FOLLOW: u32 = 0x0000_0004;
+        pub const FAN_MARK_ONLYDIR: u32 = 0x0000_0008;
+        pub const FAN_MARK_INODE: u32 = 0x0000_0000;
+        pub const FAN_MARK_MOUNT: u32 = 0x0000_0010;
+        pub const FAN_MARK_IGNORED_MASK: u32 = 0x0000_0020;
+        pub const FAN_MARK_IGNORED_SURV_MODIFY: u32 = 0x0000_0040;
+        pub const FAN_MARK_FLUSH: u32 = 0x0000_0080;
+        pub const FAN_MARK_FILESYSTEM: u32 = 0x0000_0100;
+        pub const FAN_MARK_EVICTABLE: u32 = 0x0000_0200;
+        pub const FAN_MARK_IGNORE: u32 = 0x0000_0400;
+
+        pub const FANOTIFY_METADATA_VERSION: u8 = 3;
+        pub const FAN_NOFD: i32 = -1;
+        pub const FAN_NOPIDFD: i32 = FAN_NOFD;
+        pub const FAN_EPIDFD: i32 = -2;
+
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct FanotifyEventMetadata {
+            pub event_len: u32,
+            pub vers: u8,
+            pub reserved: u8,
+            pub metadata_len: u16,
+            pub mask: u64,
+            pub fd: i32,
+            pub pid: i32,
+        }
+
+        pub const FAN_EVENT_METADATA_LEN: u16 =
+            core::mem::size_of::<FanotifyEventMetadata>() as u16;
+
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct FanotifyResponse {
+            pub fd: i32,
+            pub response: u32,
+        }
+
+        pub const FAN_ALLOW: u32 = 0x01;
+        pub const FAN_DENY: u32 = 0x02;
+        pub const FAN_AUDIT: u32 = 0x10;
+        pub const FAN_INFO: u32 = 0x20;
+    }
+
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     #[repr(C)]
     pub struct IoVec {

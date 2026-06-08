@@ -9,7 +9,7 @@ use crate::{
         user_access::{UserReadSlice, UserWriteSlice},
         *,
     },
-    task::files::{Fd, FileDesc},
+    task::files::{Fd, FileDesc, OpenedFileReadUserSegment},
 };
 
 pub mod pread64;
@@ -83,6 +83,13 @@ fn read_into_user_buffer(
     let count = clamp_rw_count(count);
     if count == 0 {
         return Ok(0);
+    }
+
+    if offset.is_none() {
+        let segment = OpenedFileReadUserSegment::new(buf, count);
+        if let Some(result) = file.read_user(uspace, core::slice::from_ref(&segment)) {
+            return result;
+        }
     }
 
     validate_user_write_buffer(uspace, buf, count)?;
@@ -165,6 +172,20 @@ fn read_iovecs(
     iovecs: &[CheckedIoVec],
     mut offset: Option<usize>,
 ) -> Result<u64, SysError> {
+    if iovecs.is_empty() {
+        return Ok(0);
+    }
+
+    if offset.is_none() {
+        let segments = iovecs
+            .iter()
+            .map(|iov| OpenedFileReadUserSegment::new(iov.base, iov.len))
+            .collect::<Vec<_>>();
+        if let Some(result) = file.read_user(uspace, &segments) {
+            return result.map(|n| n as u64);
+        }
+    }
+
     let mut total = 0u64;
 
     for iovec in iovecs {

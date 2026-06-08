@@ -3,6 +3,7 @@
 // vfs infrastructure
 mod anonymous;
 mod dentry;
+mod fanotify;
 // mod error;
 mod file;
 mod filesystem;
