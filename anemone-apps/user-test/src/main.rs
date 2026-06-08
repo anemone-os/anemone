@@ -27,7 +27,7 @@ const COMPETITION_DISK: &str = "/dev/vda";
 
 const COMP_PATH_ENV: &str = "PATH=/bin:/usr/bin:/usr/sbin:/sbin:/";
 const GLIBC_TEST_SCRIPTS: &[&str] = &[
-    // "basic_testcode.sh",
+    "basic_testcode.sh",
     // "lua_testcode.sh",
     // "busybox_testcode.sh",
     "libctest_testcode.sh",
@@ -40,7 +40,7 @@ const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "unixbench_testcode.sh",
 ];
 const MUSL_TEST_SCRIPTS: &[&str] = &[
-    // "basic_testcode.sh",
+    "basic_testcode.sh",
     // "lua_testcode.sh",
     // "busybox_testcode.sh",
     "libctest_testcode.sh",
@@ -308,6 +308,16 @@ fn run_comp_tests() {
     mount_competition_root();
     init_competition_environment();
     ltp::install_ltp_fixtures();
+    run_busybox(
+        &[
+            "busybox",
+            "chmod",
+            "a+x",
+            "/glibc/basic/run-all.sh",
+            "/musl/basic/run-all.sh",
+        ],
+        "basic run-all chmod",
+    );
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
