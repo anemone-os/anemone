@@ -1,4 +1,9 @@
 all:
+	mkdir -p .cargo
+	cp cargo-config.toml .cargo/config.toml
+	make build
+
+build:
 	bash ./build_all.sh
 
 local: 
@@ -6,7 +11,7 @@ local:
 	make local_test
 
 local_build:
-	docker exec -u root -w /workspaces/anemone gallant_lamarr make all
+	docker exec -u root -w /workspaces/anemone gallant_lamarr make build
 	bash ./rcopy.sh
 	mkdir -p etc
 

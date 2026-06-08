@@ -1,0 +1,32 @@
+[package]
+authors = [
+    "The RISC-V Team <risc-v@teams.rust-embedded.org>",
+]
+categories = ["embedded", "no-std"]
+description = "Procedural macros re-exported in `riscv`"
+documentation = "https://docs.rs/riscv-macros"
+keywords = ["riscv", "register", "peripheral"]
+license = "MIT OR Apache-2.0"
+name = "riscv-macros"
+repository = "https://github.com/rust-embedded/riscv"
+version = "0.4.1"
+edition = "2021"
+
+[package.metadata.docs.rs]
+features = ["riscv-rt"]
+
+[lib]
+proc-macro = true
+
+[features]
+rt = []
+rt-v-trap = ["rt"]
+riscv-rt = ["rt", "syn/extra-traits", "syn/full"]
+rvrt-pre-default-start-trap = ["riscv-rt"]
+rvrt-u-boot = ["riscv-rt"]
+s-mode = []
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = "2.0"

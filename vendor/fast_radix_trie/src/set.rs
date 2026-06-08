@@ -1,0 +1,521 @@
+//! A set based on a patricia tree.
+use crate::Bytes;
+use crate::map::{self, GenericRadixMap};
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::iter::FromIterator;
+
+/// Patricia tree based set with [`Vec<u8>`] as key.
+pub type RadixSet = GenericRadixSet<Vec<u8>>;
+
+/// Patricia tree based set with [`String`] as key.
+pub type StringRadixSet = GenericRadixSet<String>;
+
+/// Radix tree based set.
+#[derive(Debug)]
+pub struct GenericRadixSet<T> {
+    map: GenericRadixMap<T, ()>,
+}
+impl<T> GenericRadixSet<T> {
+    /// Makes a new empty [`GenericRadixSet`] instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fast_radix_trie::RadixSet;
+    ///
+    /// let set = RadixSet::new();
+    /// assert!(set.is_empty());
+    /// ```
+    pub fn new() -> Self {
+        GenericRadixSet {
+            map: GenericRadixMap::new(),
+        }
+    }
+
+    /// Returns the number of elements in this set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fast_radix_trie::RadixSet;
+    ///
+    /// let mut set = RadixSet::new();
+    /// set.insert("foo");
+    /// set.insert("bar");
+    /// assert_eq!(set.len(), 2);
+    /// ```
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Returns true if this set contains no elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fast_radix_trie::RadixSet;
+    ///
+    /// let mut set = RadixSet::new();
+    /// assert!(set.is_empty());
+    ///
+    /// set.insert("foo");
+    /// assert!(!set.is_empty());
+    ///
+    /// set.clear();
+    /// assert!(set.is_empty());
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Clears this set, removing all values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fast_radix_trie::RadixSet;
+    ///
+    /// let mut set = RadixSet::new();
+    /// set.insert("foo");
+    /// set.clear();
+    /// assert!(set.is_empty());
+    /// ```
+    pub fn clear(&mut self) {
+        self.map.clear();
+    }
+
+    /// create map from node (NOTE: calling methods on node directly seriously mess up your tree)
+    pub fn from_node(node: crate::Node<()>) -> Self {
+        Self {
+            map: GenericRadixMap::from_node(node),
+        }
+    }
+
+    /// get ref to root node  (NOTE: calling methods on node directly seriously mess up your tree)
+    pub fn as_node(&self) -> &crate::Node<()> {
+        self.map.as_node()
+    }
+
+    /// get root node out of map (NOTE: calling methods on node directly seriously mess up your tree)
+    pub fn into_node(self) -> crate::Node<()> {
+        self.map.into_node()
+    }
+}
+impl<T: Bytes> GenericRadixSet<T> {
+    /// Returns `true` if this set contains a value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fast_radix_trie::RadixSet;
+    ///
+    /// let mut set = RadixSet::new();
+    /// set.insert("foo");
+    /// assert!(set.contains("foo"));
+    /// assert!(!set.contains("bar"));
+    /// ```
+    pub fn contains<U: AsRef<T::Borrowed>>(&self, value: U) -> bool {
+        self.map.get(value).is_some()
+    }
+
+    /// Finds the longest common prefix of `value` and the elements in this set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fast_radix_trie::RadixSet;
+    ///
+    /// let mut set = RadixSet::new();
+    ///
+    /// set.insert("foo");
+    /// set.insert("foobar");
+    /// assert_eq!(set.get_longest_common_prefix("fo"), None);
+    /// assert_eq!(set.get_longest_common_prefix("foo"), Some("foo".as_bytes()));
+    /// assert_eq!(set.get_longest_common_prefix("fooba"), Some("foo".as_bytes()));
+    /// assert_eq!(set.get_longest_common_prefix("foobar"), Some("foobar".as_bytes()));
+    /// assert_eq!(set.get_longest_common_prefix("foobarbaz"), Some("foobar".as_bytes()));
+    /// ```
+    pub fn get_longest_common_prefix<'a, U>(&self, value: &'a U) -> Option<&'a T::Borrowed>
+    where
+        U: ?Sized + AsRef<T::Borrowed>,
+    {
+        self.map.get_longest_common_prefix(value).map(|x| x.0)
+    }
+
+    /// Returns the longest common prefix length of `value` and the elements in this set.
+    ///
+    /// Unlike `get_longest_common_prefix()`, this method does not check if there is a element that matches the prefix in this set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fast_radix_trie::RadixSet;
+    ///
+    /// let mut set = RadixSet::new();
+    /// set.insert("foo");
+    /// set.insert("foobar");
+    /// assert_eq!(set.longest_common_prefix_len("fo"), 2);
+    /// assert_eq!(set.longest_common_prefix_len("foo"), 3);
+    /// assert_eq!(set.longest_common_prefix_len("fooba"), 5);
+    /// assert_eq!(set.longest_common_prefix_len("foobar"), 6);
+    /// assert_eq!(set.longest_common_prefix_len("foobarbaz"), 6);
+    /// assert_eq!(set.longest_common_prefix_len("foba"), 2);
+    /// ```
+    pub fn longest_common_prefix_len<U>(&self, value: &U) -> usize
+    where
+        U: ?Sized + AsRef<T::Borrowed>,
+    {
+        self.map.longest_common_prefix_len(value)
+    }
+
+    /// Adds a value to this set.
+    ///
+    /// If the set did not have this value present, `true` is returned.
+    /// If the set did have this value present, `false` is returned, and the entry is not updated.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fast_radix_trie::RadixSet;
+    ///
+    /// let mut set = RadixSet::new();
+    /// assert!(set.insert("foo"));
+    /// assert!(!set.insert("foo"));
+    /// assert_eq!(set.len(), 1);
+    /// ```
+    pub fn insert<U: AsRef<T::Borrowed>>(&mut self, value: U) -> bool {
+        self.map.insert(value, ()).is_none()
+    }
+
+    /// Removes a value from the set. Returns `true` is the value was present in this set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fast_radix_trie::RadixSet;
+    ///
+    /// let mut set = RadixSet::new();
+    /// set.insert("foo");
+    /// assert_eq!(set.remove("foo"), true);
+    /// assert_eq!(set.remove("foo"), false);
+    /// ```
+    pub fn remove<U: AsRef<T::Borrowed>>(&mut self, value: U) -> bool {
+        self.map.remove(value).is_some()
+    }
+
+    /// Splits the set into two at the given prefix.
+    ///
+    /// The returned set contains all the entries that prefixed by `prefix`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fast_radix_trie::RadixSet;
+    ///
+    /// let mut a = RadixSet::new();
+    /// a.insert("rust");
+    /// a.insert("ruby");
+    /// a.insert("python");
+    /// a.insert("erlang");
+    ///
+    /// let b = a.split_by_prefix("ru");
+    ///
+    /// assert_eq!(a.iter().collect::<Vec<_>>(), [b"erlang", b"python"]);
+    /// assert_eq!(b.iter().collect::<Vec<_>>(), [b"ruby", b"rust"]);
+    /// ```
+    pub fn split_by_prefix<U: AsRef<T::Borrowed>>(&mut self, prefix: U) -> Self {
+        GenericRadixSet {
+            map: self.map.split_by_prefix(prefix),
+        }
+    }
+
+    /// Gets an iterator over the contents of this set, in sorted order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fast_radix_trie::RadixSet;
+    ///
+    /// let mut set = RadixSet::new();
+    /// set.insert("foo");
+    /// set.insert("bar");
+    /// set.insert("baz");
+    ///
+    /// assert_eq!(set.iter().collect::<Vec<_>>(), [Vec::from("bar"), "baz".into(), "foo".into()]);
+    /// ```
+    pub fn iter(&self) -> Iter<'_, T> {
+        Iter(self.map.keys())
+    }
+
+    /// Gets an iterator over entries matching a wildcard pattern.
+    ///
+    /// The pattern supports:
+    /// - `*` matches zero or more characters
+    /// - `?` matches exactly one character
+    /// - Any other byte matches literally
+    ///
+    /// Patterns `?` and `*` can be escaped with `\\` like so: `foo\\*b?r` to search the literal "foo*b" and `?r`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fast_radix_trie::RadixSet;
+    ///
+    /// let mut set = RadixSet::new();
+    /// set.insert("foo.bar.com");
+    /// set.insert("foo.baz.com");
+    /// set.insert("hello.world");
+    ///
+    /// let matches: Vec<_> = set.wildcard_iter(b"foo.*.com").collect();
+    /// assert_eq!(matches.len(), 2);
+    /// ```
+    pub fn wildcard_iter<'a, 'b, U>(&'a self, pattern: &'b U) -> WildcardIter<'a, 'b, T>
+    where
+        U: ?Sized + AsRef<T::Borrowed>,
+        <T as Bytes>::Borrowed: 'b,
+    {
+        WildcardIter(self.map.wildcard_iter(pattern))
+    }
+
+    /// Gets an iterator over the contents having the given prefix of this set, in sorted order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fast_radix_trie::RadixSet;
+    ///
+    /// let mut set = RadixSet::new();
+    /// set.insert("foo");
+    /// set.insert("bar");
+    /// set.insert("baz");
+    ///
+    /// assert_eq!(set.iter_prefix(b"ba").collect::<Vec<_>>(), [Vec::from("bar"), "baz".into()]);
+    /// ```
+    pub fn iter_prefix<U>(&self, prefix: &U) -> impl Iterator<Item = T>
+    where
+        U: ?Sized + AsRef<T::Borrowed>,
+    {
+        self.map.iter_prefix(prefix).map(|(k, _)| k)
+    }
+}
+
+// impl<T: Bytes + fmt::Debug> fmt::Debug for GenericRadixSet<T> {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         f.debug_struct("RadixSet")
+//             .field("root", &self.as_node())
+//             .finish()
+//     }
+// }
+
+impl<T> Clone for GenericRadixSet<T> {
+    fn clone(&self) -> Self {
+        GenericRadixSet {
+            map: self.map.clone(),
+        }
+    }
+}
+impl<T> Default for GenericRadixSet<T> {
+    fn default() -> Self {
+        GenericRadixSet::new()
+    }
+}
+
+impl<T: Bytes> IntoIterator for GenericRadixSet<T> {
+    type Item = T;
+    type IntoIter = IntoIter<T>;
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter(self.map.into_iter())
+    }
+}
+
+impl<T: Bytes, U: AsRef<T::Borrowed>> FromIterator<U> for GenericRadixSet<T> {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = U>,
+    {
+        let mut set = GenericRadixSet::new();
+        for t in iter {
+            set.insert(t);
+        }
+        set
+    }
+}
+
+impl<T: Bytes, U: AsRef<T::Borrowed>> Extend<U> for GenericRadixSet<T> {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = U>,
+    {
+        for t in iter {
+            self.insert(t);
+        }
+    }
+}
+
+/// An Iterator over a `RadixSet`'s items.
+#[derive(Debug)]
+pub struct Iter<'a, T>(map::Keys<'a, T, ()>);
+impl<T: Bytes> Iterator for Iter<'_, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+}
+
+/// An Iterator over a `RadixSet`'s items matching a wildcard pattern.
+#[derive(Debug)]
+pub struct WildcardIter<'a, 'b, T>(map::WildcardIter<'a, 'b, T, ()>);
+impl<T: Bytes> Iterator for WildcardIter<'_, '_, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(k, _)| k)
+    }
+}
+
+/// An owning iterator over a `RadixSet`'s items.
+#[derive(Debug)]
+pub struct IntoIter<T>(map::IntoIter<T, ()>);
+impl<T: Bytes> Iterator for IntoIter<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(k, _)| k)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clear_works() {
+        let mut set = RadixSet::new();
+        set.insert("foo");
+        assert!(!set.is_empty());
+
+        set.clear();
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn into_iter_works() {
+        let set: RadixSet = vec!["foo", "bar", "baz"].into_iter().collect();
+        assert_eq!(
+            set.into_iter().collect::<Vec<_>>(),
+            [Vec::from("bar"), "baz".into(), "foo".into()]
+        );
+    }
+
+    #[test]
+    fn split_by_prefix_works() {
+        let mut set: RadixSet = vec!["foo", "bar", "baz"].into_iter().collect();
+
+        let splitted_set = set.split_by_prefix("f");
+        assert_eq!(set.iter().collect::<Vec<_>>(), [b"bar", b"baz"]);
+        assert_eq!(splitted_set.iter().collect::<Vec<_>>(), [b"foo"]);
+
+        let mut set: RadixSet = vec!["foo", "bar", "baz"].into_iter().collect();
+        let splitted_set = set.split_by_prefix("bax");
+        assert_eq!(set.iter().collect::<Vec<_>>(), [b"bar", b"baz", b"foo"]);
+        assert!(splitted_set.iter().collect::<Vec<_>>().is_empty());
+
+        let mut set: RadixSet = vec!["foo", "bar", "baz"].into_iter().collect();
+        let splitted_set = set.split_by_prefix("fo");
+        assert_eq!(set.iter().collect::<Vec<_>>(), [b"bar", b"baz"]);
+        assert_eq!(splitted_set.iter().collect::<Vec<_>>(), [b"foo"]);
+
+        let mut set: RadixSet = vec!["foo", "bar", "baz"].into_iter().collect();
+        let splitted_set = set.split_by_prefix("foo");
+        assert_eq!(set.iter().collect::<Vec<_>>(), [b"bar", b"baz"]);
+        assert_eq!(splitted_set.iter().collect::<Vec<_>>(), [b"foo"]);
+
+        let mut set: RadixSet = vec!["foo", "bar", "baz"].into_iter().collect();
+        let splitted_set = set.split_by_prefix("b");
+        assert_eq!(set.iter().collect::<Vec<_>>(), [b"foo"]);
+        assert_eq!(splitted_set.iter().collect::<Vec<_>>(), [b"bar", b"baz"]);
+
+        let mut set: RadixSet = vec!["foo", "bar", "baz"].into_iter().collect();
+        let splitted_set = set.split_by_prefix("ba");
+        assert_eq!(set.iter().collect::<Vec<_>>(), [b"foo"]);
+        assert_eq!(splitted_set.iter().collect::<Vec<_>>(), [b"bar", b"baz"]);
+
+        let mut set: RadixSet = vec!["foo", "bar", "baz"].into_iter().collect();
+        let splitted_set = set.split_by_prefix("bar");
+        assert_eq!(set.iter().collect::<Vec<_>>(), [b"baz", b"foo"]);
+        assert_eq!(splitted_set.iter().collect::<Vec<_>>(), [b"bar"]);
+
+        let mut set: RadixSet = vec!["foo", "bar", "baz"].into_iter().collect();
+        let mut splitted_set = set.split_by_prefix("baz");
+        assert_eq!(set.iter().collect::<Vec<_>>(), [b"bar", b"foo"]);
+        assert_eq!(splitted_set.iter().collect::<Vec<_>>(), [b"baz"]);
+
+        splitted_set.insert("aaa");
+        assert_eq!(splitted_set.iter().collect::<Vec<_>>(), [b"aaa", b"baz"]);
+
+        let mut set: RadixSet = vec!["foo", "bar", "baz"].into_iter().collect();
+        let splitted_set = set.split_by_prefix("bazz");
+        assert_eq!(set.iter().collect::<Vec<_>>(), [b"bar", b"baz", b"foo"]);
+        assert!(splitted_set.is_empty());
+
+        let mut set: RadixSet = vec!["foo", "bar", "baz"].into_iter().collect();
+        let splitted_set = set.split_by_prefix("for");
+        assert_eq!(set.iter().collect::<Vec<_>>(), [b"bar", b"baz", b"foo"]);
+        assert!(splitted_set.is_empty());
+
+        let mut set: RadixSet = vec!["foo", "bar", "baz"].into_iter().collect();
+        let splitted_set = set.split_by_prefix("qux");
+        assert_eq!(set.iter().collect::<Vec<_>>(), [b"bar", b"baz", b"foo"]);
+        assert!(splitted_set.is_empty());
+    }
+
+    #[test]
+    fn iter_prefix_works() {
+        fn assert_iter_prefix(set: &RadixSet, prefix: &str) {
+            let actual = set.iter_prefix(prefix.as_bytes()).collect::<Vec<_>>();
+            let expected = set
+                .iter()
+                .filter(|key| key.starts_with(prefix.as_bytes()))
+                .collect::<Vec<_>>();
+            assert_eq!(actual, expected);
+        }
+
+        let set: RadixSet = vec!["foo", "bar", "baz"].into_iter().collect();
+        let prefixes = [
+            "", "a", "b", "ba", "bar", "baz", "bax", "c", "f", "fo", "foo",
+        ];
+        for prefix in &prefixes {
+            assert_iter_prefix(&set, prefix);
+        }
+
+        let set: RadixSet = vec![
+            "JavaScript",
+            "Python",
+            "Java",
+            "C++",
+            "Swift",
+            "TypeScript",
+            "Go",
+            "SQL",
+            "Ruby",
+            "R",
+            "PHP",
+            "Perl",
+            "Kotlin",
+            "C#",
+            "Rust",
+            "Scheme",
+            "Erlang",
+            "Scala",
+            "Elixir",
+            "Haskell",
+        ]
+        .into_iter()
+        .collect();
+        let prefixes = [
+            "", "P", "Py", "J", "Jav", "Java", "JavaS", "Rusti", "E", "El", "H", "S", "Sc",
+        ];
+        for prefix in &prefixes {
+            assert_iter_prefix(&set, prefix);
+        }
+    }
+}
