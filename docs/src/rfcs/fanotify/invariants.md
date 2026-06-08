@@ -30,9 +30,44 @@
 
 ## 状态所有权
 
-`fs::fanotify` 拥有 group、mark、event queue、poll trigger queue、registry storage、file ops private state 和 matching 语义。VFS、task/fd、procfs 和 syscall 层只能通过窄 typed API 与它交互。fanotify 内部可以按 group / event / queue / registry / mark / file / hooks 等职责拆分，但只有 module facade 暴露外部 API；global registry、group lock、queue、mark record 和 private state cast 都必须留在 owner 模块内。
+`fs::fanotify` 拥有 group、mark、event queue、poll trigger queue、registry storage、file ops private state、matching 语义和 fanotify syscall API。VFS、task/fd、procfs 和 syscall dispatch 层只能通过窄 typed API 与它交互。fanotify syscall API 放在 `anemone-kernel/src/fs/fanotify/api/`，不放在 `anemone-kernel/src/fs/api/fanotify/`；`fs/api` 不新增 fanotify 子目录，也不承载 fanotify parser、errno matrix 或 group/mark 逻辑。
 
-syscall 层拥有 Linux ABI 参数解析：
+固定模块骨架如下：
+
+```text
+anemone-kernel/src/fs/fanotify/
+├── mod.rs
+├── types.rs
+├── api/
+│   ├── mod.rs
+│   ├── init.rs
+│   └── mark.rs
+├── group.rs
+├── file.rs
+├── event.rs
+├── queue.rs
+├── registry.rs
+├── mark.rs
+└── hooks.rs
+```
+
+职责边界：
+
+- `mod.rs`：唯一模块外 facade；re-export syscall-facing `api::{sys_fanotify_init, sys_fanotify_mark}`、VFS-facing hook API、task/fd-facing release / no-notify helper 和必要 opaque handle。
+- `types.rs`：跨子模块共享的 Anemone 语义类型，例如 mask、flag、mode、event kind、target key 和 path key；不放 Linux UAPI struct。
+- `api/init.rs`：`fanotify_init()` 参数解析、init flag matrix、event fd flags validation、group creation facade 调用和 fd install 入口。
+- `api/mark.rs`：`fanotify_mark()` 参数解析、mark command/mask validation、path resolution 入口和 registry facade 调用。
+- `group.rs`：group identity、state、lifecycle、closing/dead、mark handle list 和 teardown。
+- `file.rs`：fanotify group fd `FileOps`、private-state downcast、read/poll/ioctl/fail-closed vtable 和 read-user glue。
+- `event.rs`：event kind、queue item、metadata build input 和 path-fd event description。
+- `queue.rs`：bounded queue、overflow sentinel、poll trigger queue 和 wake detachment。
+- `registry.rs`：global registry、mark record storage、target maps、matching snapshot 和 cleanup by handle。
+- `mark.rs`：mark record、`MarkHandle`、mask/ignored-mask operations 和 target-dead state。
+- `hooks.rs`：VFS-facing event input functions；只收集事实并调用 registry/matching facade。
+
+global registry、group lock、queue、mark record、private state cast 和 fanotify-specific ioctl/read/write interpretation 都必须留在 owner 模块内。模块外不得直接访问这些 storage，也不得使用 `AnyOpaque` 判断 fanotify concrete type。
+
+`fs/fanotify/api/` 拥有 fanotify Linux ABI 参数解析：
 
 - `fanotify_init(flags, event_f_flags)` 解析 group class、report mode、fd flags 和 event fd flags。
 - `fanotify_mark(fanotify_fd, flags, mask, dfd, pathname)` 解析 mark command、target type、mark flags、event mask 和 path resolution 规则。

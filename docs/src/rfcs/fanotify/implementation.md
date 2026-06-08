@@ -11,9 +11,9 @@ Stage 0 是内部 ABI/probe checkpoint，不是独立用户可见 LTP gate。首
 
 ## 迁移原则
 
-- Linux ABI 常量、结构体和 flag parser 只放在 ABI/syscall/fanotify fd 边界。
+- Linux ABI 常量、结构体和 flag parser 只放在 `anemone_abi`、`fs/fanotify/api/` 和 fanotify fd copy 边界。
 - fanotify 内部长期状态使用语义类型，不直接保存 Linux UAPI struct。
-- `fs::fanotify` 必须作为 owner 模块隐藏 group、registry、queue、mark record、lock 和 file private state；syscall / VFS / task-fd 层只通过 `mod.rs` facade 暴露的 typed API 交互。
+- `fs::fanotify` 必须作为 owner 模块隐藏 group、registry、queue、mark record、lock 和 file private state；syscall dispatch / VFS / task-fd 层只通过 `mod.rs` facade 暴露的 typed API 交互。fanotify syscall API 必须位于 `anemone-kernel/src/fs/fanotify/api/`，不新增 `anemone-kernel/src/fs/api/fanotify/`。
 - fanotify group fd 的 `AnyOpaque` downcast 只允许发生在 fanotify 自己的 file ops / helper 内，不能让 syscall、VFS hook 或 task/fd 层识别 fanotify private state。
 - 先实现 privileged path-fd notification；FID/name、pidfd、permission events、FS error、evictable marks 和 exec-open events 暂缓。
 - unsupported feature 必须返回稳定 errno，不得空成功。
@@ -42,8 +42,22 @@ Stage 0 是内部 ABI/probe checkpoint，不是独立用户可见 LTP gate。首
   - `fanotify_response`
   - 基础 `FAN_*` init flags、mark flags、event masks
   - `FAN_EVENT_METADATA_LEN`、`FAN_NOFD`、metadata version
-- 新增 `fs/api/fanotify/` 或等价 syscall API 模块，封装 `fanotify_init()` / `fanotify_mark()` 的 Linux ABI parser、errno matrix 和 feature gate。
-- 新增 `fs::fanotify` owner module skeleton；建议内部职责至少拆为 `group`、`event`、`queue`、`registry`、`mark`、`file`、`hooks`，只从 `fs::fanotify::mod` 暴露 syscall/VFS/task-fd 需要的 typed facade。
+- 新增 `fs::fanotify` owner module skeleton，固定文件骨架：
+  - `anemone-kernel/src/fs/fanotify/mod.rs`
+  - `anemone-kernel/src/fs/fanotify/types.rs`
+  - `anemone-kernel/src/fs/fanotify/api/mod.rs`
+  - `anemone-kernel/src/fs/fanotify/api/init.rs`
+  - `anemone-kernel/src/fs/fanotify/api/mark.rs`
+  - `anemone-kernel/src/fs/fanotify/group.rs`
+  - `anemone-kernel/src/fs/fanotify/file.rs`
+  - `anemone-kernel/src/fs/fanotify/event.rs`
+  - `anemone-kernel/src/fs/fanotify/queue.rs`
+  - `anemone-kernel/src/fs/fanotify/registry.rs`
+  - `anemone-kernel/src/fs/fanotify/mark.rs`
+  - `anemone-kernel/src/fs/fanotify/hooks.rs`
+- `fs/fanotify/api/{init,mark}.rs` 封装 `fanotify_init()` / `fanotify_mark()` 的 Linux ABI parser、errno matrix、feature gate、path resolution 入口和 facade 调用；不得新增 `fs/api/fanotify/` 作为 fanotify syscall 逻辑目录。
+- `fs/api` 不新增 fanotify 子目录，也不承载 fanotify parser、errno matrix 或 group/mark 逻辑；若 syscall 宏注册需要模块可达性，通过 `fs/mod.rs` 引入 `mod fanotify;` 和 `fs/fanotify/mod.rs` 内部 wiring 完成。
+- `fs::fanotify::mod` 是唯一模块外 facade，暴露 syscall/VFS/task-fd 需要的 typed API；`group.rs`、`file.rs`、`queue.rs`、`registry.rs`、`mark.rs`、`event.rs` 和 `hooks.rs` 的内部 storage 不直接对模块外公开。
 - 新增 `fanotify_init()` syscall handler。
 - 新增 `fanotify_mark()` syscall handler。
 - `fanotify_init(FAN_CLASS_NOTIF, valid_event_f_flags)` 的公开成功推迟到 Stage 0 + Stage 1 合并 gate；若 Stage 0 单独提交，只能作为内部 probe checkpoint。

@@ -70,6 +70,7 @@
 		- [迁移实施计划](./rfcs/fanotify/implementation.md)
 		- [Tracking Issues](./rfcs/fanotify/tracking-issues.md)
 		- [背景材料](./rfcs/fanotify/backgrounds/index.md)
+			- [Agent 编排建议](./rfcs/fanotify/backgrounds/agent-orchestration.md)
 			- [Linux fanotify ABI 与客观语义参考手册](./rfcs/fanotify/backgrounds/fanotify-reference-20260531.md)
 			- [fanotify 基础设施评估](./rfcs/fanotify/backgrounds/infra-assessment-20260604.md)
 			- [LTP fanotify 测例调查报告](./rfcs/fanotify/backgrounds/ltp-fanotify-coverage-20260605.md)

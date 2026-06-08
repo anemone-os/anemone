@@ -60,15 +60,37 @@ Canonical：
 背景材料：
 
 - [背景材料索引](./backgrounds/index.md)
+- [Agent 编排建议](./backgrounds/agent-orchestration.md)
 - [Linux fanotify ABI 与客观语义参考手册](./backgrounds/fanotify-reference-20260531.md)
 - [fanotify 基础设施评估](./backgrounds/infra-assessment-20260604.md)
 - [LTP fanotify 测例调查报告](./backgrounds/ltp-fanotify-coverage-20260605.md)
 
 ## 方案
 
-新增 `fs::fanotify` 子系统模块，拥有 fanotify group、mark registry、event queue、event matching 和 fanotify fd file ops。该模块按 group / event / queue / registry / mark / file / hooks 等内部职责拆分，只有 `mod.rs` facade 暴露窄 API；syscall、VFS、task/fd 和 procfs 不直接访问 registry、queue、mark record 或 group lock。syscall handler 只负责 Linux ABI 参数解析、flag validation、用户指针读取和 fd 安装；fanotify 内部长期状态使用 Anemone 语义类型，例如 `FanMask`、`FanMarkFlags`、`FanGroupMode`、`FanEventKind`、`FanTarget`。
+新增 `fs::fanotify` 子系统目录，拥有 fanotify group、mark registry、event queue、event matching、fanotify fd file ops 和 fanotify syscall API。fanotify syscall API 不放在 `fs/api/fanotify/` 下；`fs/api` 不承载 fanotify 子目录或 fanotify 逻辑，`fanotify_init()` / `fanotify_mark()` 的 parser、errno matrix、用户指针读取和 fd 安装入口归 `fs/fanotify/api/` 所有。该目录按如下骨架组织：
 
-fanotify group fd 使用匿名 inode 创建。group private state 保存 init flags、event fd flags、marks、event queue、poll trigger queue 和 teardown 状态。group fd 是 stream-like 对象：普通 `read()` 从队列取出事件，path-fd 模式在 read 时为事件对象创建新的 fd；`poll()` 只暴露 queue readiness；`seek`、`read_at`、`write_at` 和 `read_dir` 不消费队列、不创建 metadata fd，并返回稳定非支持错误；可选 ioctl 只在 group fd file ops 内处理。event enqueue 在 queue 从空变非空时触发已注册的 latch triggers。
+```text
+anemone-kernel/src/fs/fanotify/
+├── mod.rs
+├── types.rs
+├── api/
+│   ├── mod.rs
+│   ├── init.rs
+│   └── mark.rs
+├── group.rs
+├── file.rs
+├── event.rs
+├── queue.rs
+├── registry.rs
+├── mark.rs
+└── hooks.rs
+```
+
+`mod.rs` 是唯一对模块外暴露 typed facade 的文件，负责 re-export syscall-facing `api::{sys_fanotify_init, sys_fanotify_mark}`、VFS-facing hook facade、task/fd-facing release / no-notify helper，以及必要的不透明 group/file handle 类型。`types.rs` 放跨子模块共享的语义类型，例如 `FanMask`、`FanMarkFlags`、`FanGroupMode`、`FanEventKind`、`FanTarget`、`FanTargetKey`、`FanPathKey`。`api/{init,mark}.rs` 只做 Linux ABI 参数解析、flag validation、errno matrix、path resolution 入口和 facade 调用，不保存 registry、queue、mark record 或 group lock。`group.rs` 拥有 group state、lifecycle 和 teardown；`file.rs` 拥有 anonymous group fd `FileOps`、read/poll/ioctl/close-facing glue 和 fanotify private-state downcast；`event.rs` 定义 queue item 与 metadata build 输入；`queue.rs` 管理 bounded queue、overflow sentinel 和 poll triggers；`registry.rs` 是 mark record 的唯一 owner；`mark.rs` 定义 mark record、handle 与 mask 操作；`hooks.rs` 是 VFS event 输入 facade。
+
+syscall、VFS、task/fd 和 procfs 不直接访问 registry、queue、mark record 或 group lock，不在模块外 downcast fanotify private state。fanotify 内部长期状态使用 Anemone 语义类型；Linux UAPI struct 只在 `anemone_abi`、`fs/fanotify/api/` 和 group fd read/write copy 边界出现。
+
+fanotify group fd 使用匿名 inode 创建。group private state 保存 init flags、event fd flags、group-owned `MarkHandle` list、event queue、poll trigger queue 和 teardown 状态；mark record 仍由 registry 单一拥有。group fd 是 stream-like 对象：普通 `read()` 从队列取出事件，path-fd 模式在 read 时为事件对象创建新的 fd；`poll()` 只暴露 queue readiness；`seek`、`read_at`、`write_at` 和 `read_dir` 不消费队列、不创建 metadata fd，并返回稳定非支持错误；可选 ioctl 只在 group fd file ops 内处理。event enqueue 在 queue 从空变非空时触发已注册的 latch triggers。
 
 VFS 事件派发通过窄 hook 接入现有集中入口。hook 只接收事件语义、当前 task identity、target `PathRef` 和必要 parent/name 信息；它不在持有 VFS mutating lock 时打开事件 fd 或 copy user buffer。matching 只生成 fanotify queue item，实际 fd 分配和 userspace copy 发生在 group fd read 边界。
 

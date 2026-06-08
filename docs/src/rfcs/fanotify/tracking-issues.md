@@ -391,9 +391,9 @@
 
 **修复落点：**
 
-- [RFC index](./index.md) 的方案明确 `fs::fanotify` 是 owner module，并按 group / event / queue / registry / mark / file / hooks 等职责拆分，只有 module facade 暴露窄 API。
-- [迁移实施计划](./implementation.md) 的迁移原则、Stage 0 和 Stage 1 前置条件要求 syscall / VFS / task-fd 层只通过 typed facade 交互，不能访问 registry、queue、mark record、group lock 或 file private state。
-- [不变量需求](./invariants.md) 的闭合条件和状态所有权禁止模块外 downcast fanotify private state 或访问内部 storage。
+- [RFC index](./index.md) 的方案明确 `fs::fanotify` 是 owner module，并固定 `mod.rs`、`types.rs`、`api/{mod,init,mark}.rs`、`group.rs`、`file.rs`、`event.rs`、`queue.rs`、`registry.rs`、`mark.rs`、`hooks.rs` 文件骨架。
+- [迁移实施计划](./implementation.md) 的迁移原则、Stage 0 和 Stage 1 前置条件要求 fanotify syscall API 位于 `fs/fanotify/api/`，syscall dispatch / VFS / task-fd 层只通过 typed facade 交互，不能访问 registry、queue、mark record、group lock 或 file private state。
+- [不变量需求](./invariants.md) 的状态所有权写入具体文件职责边界，禁止模块外 downcast fanotify private state 或访问内部 storage。
 
 **原问题：** 原草案只写 “新增 `fs::fanotify` 或等价模块”，没有把目录组织、owner module、public facade 和内部 storage 可见性固定下来。实现者可能把 registry helper、group private state 或 file ops cast 分散到 syscall、VFS hook、task/fd 或 procfs 层。
 
