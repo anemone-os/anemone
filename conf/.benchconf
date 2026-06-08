@@ -1,0 +1,43 @@
+#! kconfig configuration for Anemone OS
+#! This file specifies how the kernel is configured and built.
+#! This is an example configuration file.
+
+# This section specifies how to build kernel
+[build]
+platform = "qemu-virt-rv64" # Target platform. The same name as in conf/platforms/*.toml
+profile = "release" # Build profile: "dev" or "release". We may add more profiles later.
+
+disasm = true # Whether to generate a disassembly file for kernel.
+
+# Kernel tailoring options
+[features]
+kunit = true # Enable KUnit testing
+fs_ext4 = true # Enable ext4 filesystem support
+kernel_preempt = true # Enable trap-exit kernel preemption
+# virtio_gpu = true # Enable Virtio GPU support
+# smp = true # Enable Symmetric Multiprocessing support
+# intr_stack = true # Enable Interrupt Stack support
+
+# Parameters for kernel and loader
+[parameters]
+bootstrap_heap_shift_kb = 10 # Size of bootstrap heap as a power of 2 in KB
+log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
+log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
+console_log_level = 3 # Maximum log level emitted to consoles: Emerg=0 ... Debug=7
+kstack_shift_kb = 9 # Kernel stack size as a power of 2 in KB
+remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
+max_ident_len_bytes = 255 # Maximum length of identity strings in bytes
+max_path_len_bytes = 4096 # Maximum length of file paths in bytes
+max_processes = 32768 # Maximum number of processes
+system_hz = 100 # System timer frequency in hertz, i.e. number of timer interrupts per second
+backtrace_depth = 16 # Maximum depth of captured backtrace
+user_stack_shift_kb = 13 # Max user stack size as a power of 2 in KB
+user_init_stack_shift_kb = 4 # Initial user stack size as a power of 2 in KB
+user_heap_shift_mb = 12 # Max user heap size as a power of 2 in MB
+shmmax_bytes = 9223372036837998591 # Default max bytes for a single SysV shm segment, within TOML's signed integer range.
+shmall_pages = 9223372036837998591 # Default max pages for SysV shm accounting, within TOML's signed integer range.
+shmmni = 4096 # Default maximum number of System V shared memory segments.
+symlink_resolve_limit = 16 # Maximum number of symbolic links to resolve in a single path resolution
+max_fd_per_process = 1024 # Default maximum number of file descriptors per process. Might be overridden by certain syscalls.
+ramdisk_count = 16 # Number of static ramdisk block devices to publish at boot.
+loop_device_count = 8 # Number of static loop block devices to publish at boot.

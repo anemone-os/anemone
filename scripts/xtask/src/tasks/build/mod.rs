@@ -130,7 +130,16 @@ impl<'a> BuildContext<'a> {
                     }
                 },
                 DtbType::File => {
-                    todo!();
+                    let source = dtb.source.as_deref().ok_or_else(|| {
+                        anyhow::anyhow!("DTB source is required when dtb.type is \"file\"")
+                    })?;
+                    let target = Path::new("anemone-kernel/src").join(&dtb.path);
+                    log_progress!("DTB", &format!("Copying DTB from {}", source));
+                    if let Some(parent) = target.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::copy(source, &target)?;
+                    log_progress!("DTB", &format!("Copied DTB to {}", target.display()));
                 },
             }
         }

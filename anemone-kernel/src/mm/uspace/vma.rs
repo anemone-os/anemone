@@ -227,8 +227,16 @@ impl VmArea {
     /// Translate a virtual page inside this VMA to an object-relative page
     /// index.
     pub fn vmo_pidx(&self, vpn: VirtPageNum) -> usize {
-        debug_assert!(self.range.contains(vpn));
+        assert!(self.range.contains(vpn));
         self.poffset + (vpn - self.range.start()) as usize
+    }
+
+    /// Translate a virtual page range inside this VMA to an object-relative page
+    /// range.
+    pub fn vmo_pidx_range(&self, range: VirtPageRange) -> core::ops::Range<usize> {
+        assert!(self.range.covers(&range));
+        let start = self.vmo_pidx(range.start());
+        start..start + range.npages() as usize
     }
 
     fn map_page(

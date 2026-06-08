@@ -158,13 +158,15 @@ impl DriverOps for PcieEcamDriver {
 
         // Parse "interrupt-map" property: translate PCIe INTx pins to platform
         // interrupt specifiers and register them with the domain.
-        let intr_cells = of_node.node().interrupt_cells().ok_or_else(|| {
-            kerrln!(
-                "error probing PCIe ECAM device {}: '#interrupt-cells' not specified.",
+        let intr_cells = of_node.node().interrupt_cells().unwrap_or_else(|| {
+            kwarningln!(
+                "PCIe ECAM device {}: '#interrupt-cells' not specified; defaulting to 1",
                 pdev.name()
             );
-            SysError::InvalidArgument
-        })? as usize;
+            // PCI child interrupt specifiers for INTx routing are standardly one cell. This
+            // fallback keeps older or incomplete DTBs usable while preserving a visible warning.
+            1
+        }) as usize;
 
         if intr_cells == 0 || intr_cells > 2 {
             kerrln!(

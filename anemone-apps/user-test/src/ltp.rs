@@ -17,7 +17,8 @@ const GLIBC_LTP_ENV: &[&str] = &[
     "PATH=/glibc/ltp/testcases/bin:/glibc/bin:/glibc/usr/bin:/bin:/usr/bin:/sbin:/usr/sbin",
     "LTPROOT=/glibc/ltp",
     "LTP_VIRT_OVERRIDE=kvm",
-    "LTP_COLORIZE_OUTPUT=1",
+    // "LTP_COLORIZE_OUTPUT=1",
+    "ANSI_COLOR=0",
     "TMPDIR=/tmp",
     "KCONFIG_PATH=/etc/ltp/anemone-kconfig",
 ];
@@ -26,7 +27,8 @@ const MUSL_LTP_ENV: &[&str] = &[
     "PATH=/musl/ltp/testcases/bin:/musl/bin:/musl/usr/bin:/bin:/usr/bin:/sbin:/usr/sbin",
     "LTPROOT=/musl/ltp",
     "LTP_VIRT_OVERRIDE=kvm",
-    "LTP_COLORIZE_OUTPUT=1",
+    // "LTP_COLORIZE_OUTPUT=1",
+    "ANSI_COLOR=0",
     "TMPDIR=/tmp",
     "KCONFIG_PATH=/etc/ltp/anemone-kconfig",
 ];
@@ -142,6 +144,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
         name: "iomux",
         cases: include_str!("../ltp/groups/iomux.txt"),
     },
+    LtpGroup {
+        name: "syscalls",
+        cases: include_str!("../ltp/groups/syscalls.txt"),
+    },
 ];
 
 struct LtpFixture {
@@ -256,8 +262,8 @@ fn run_ltp_root(root: &LtpRoot, groups: &[&'static LtpGroup]) -> LtpSummary {
     crate::clear_tmp();
 
     let mut summary = LtpSummary::default();
+    println!("#### OS COMP TEST GROUP START {} ####", root.label);
     if fstatat(AtFd::Cwd, Path::new(root.workdir)).is_err() {
-        println!("#### OS COMP TEST GROUP START {} ####", root.label);
         println!(
             "user-test: skipping {} because {} is missing",
             root.label, root.workdir,
@@ -270,6 +276,7 @@ fn run_ltp_root(root: &LtpRoot, groups: &[&'static LtpGroup]) -> LtpSummary {
         let group_summary = run_ltp_group(root, group);
         summary.merge(group_summary);
     }
+    println!("#### OS COMP TEST GROUP END {} ####", root.label);
 
     println!(
         "user-test: {} summary attempted={} passed={} failed={} infra_failed={} skipped={}",
@@ -284,10 +291,10 @@ fn run_ltp_root(root: &LtpRoot, groups: &[&'static LtpGroup]) -> LtpSummary {
 }
 
 fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
-    println!(
-        "#### OS COMP TEST GROUP START {}/{} ####",
-        root.label, group.name,
-    );
+    // println!(
+    //     "#### OS COMP TEST GROUP START {}/{} ####",
+    //     root.label, group.name,
+    // );
 
     let mut summary = LtpSummary::default();
     for line in group.cases.lines() {
@@ -322,10 +329,10 @@ fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
         }
     }
 
-    println!(
-        "#### OS COMP TEST GROUP END {}/{} ####",
-        root.label, group.name,
-    );
+    // println!(
+    //     "#### OS COMP TEST GROUP END {}/{} ####",
+    //     root.label, group.name,
+    // );
     println!(
         "user-test: {}/{} summary attempted={} passed={} failed={} infra_failed={} skipped={}",
         root.label,
@@ -391,7 +398,7 @@ fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpC
             Ok(wstatus) => {
                 let exit_code = ltp_exit_code(wstatus);
                 if exit_code == 0 {
-                    println!("PASS LTP CASE {} : {}", case.name, exit_code);
+                    println!("FAIL LTP CASE {} : {}", case.name, exit_code);
                     LtpCaseOutcome::Passed
                 } else {
                     println!("FAIL LTP CASE {} : {}", case.name, exit_code);

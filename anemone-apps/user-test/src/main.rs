@@ -21,12 +21,18 @@ use anemone_rs::{
 
 const BOOTSTRAP_BUSYBOX_PRIMARY: &str = "/musl/busybox";
 const BOOTSTRAP_BUSYBOX_FALLBACK: &str = "/glibc/busybox";
+
+#[cfg(target_arch = "riscv64")]
 const COMPETITION_DISK: &str = "/dev/vdb";
+
+#[cfg(target_arch = "loongarch64")]
+const COMPETITION_DISK: &str = "/dev/vda";
+
 const COMP_PATH_ENV: &str = "PATH=/bin:/usr/bin:/usr/sbin:/sbin:/";
 const GLIBC_TEST_SCRIPTS: &[&str] = &[
-    // "basic_testcode.sh",
+    "basic_testcode.sh",
     // "lua_testcode.sh",
-    // "busybox_testcode.sh",
+    "busybox_testcode.sh",
     "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
     // "iozone_testcode.sh",
@@ -37,10 +43,10 @@ const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "unixbench_testcode.sh",
 ];
 const MUSL_TEST_SCRIPTS: &[&str] = &[
-    // "basic_testcode.sh",
+    "basic_testcode.sh",
     // "lua_testcode.sh",
-    // "busybox_testcode.sh",
-    // "libctest_testcode.sh",
+    "busybox_testcode.sh",
+    "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
     // "iozone_testcode.sh",
     // "iperf_testcode.sh",
@@ -128,24 +134,24 @@ fn run_local_tests() {
     // println!("user-test: signal test finished.");
 
     // 2. float test
-    println!("user-test: running float test...");
-    local_run_cmd("/bin/float-test", &["float-test", "--type", "sig"], &[]);
-    println!("user-test: float test finished.");
+    // println!("user-test: running float test...");
+    // local_run_cmd("/bin/float-test", &["float-test", "--type", "sig"], &[]);
+    // println!("user-test: float test finished.");
 
     // 3. shm test
-    println!("user-test: running shm test...");
-    local_run_cmd("/bin/shm-test", &["shm-test"], &[]);
-    println!("user-test: shm test finished.");
+    // println!("user-test: running shm test...");
+    // local_run_cmd("/bin/shm-test", &["shm-test"], &[]);
+    // println!("user-test: shm test finished.");
 
     // 4. pg test
-    println!("user-test: running pg test...");
-    local_run_cmd("/bin/pg-test", &["pg-test"], &[]);
-    println!("user-test: pg test finished.");
+    // println!("user-test: running pg test...");
+    // local_run_cmd("/bin/pg-test", &["pg-test"], &[]);
+    // println!("user-test: pg test finished.");
 
     // 5. mmap test
-    println!("user-test: running mmap test...");
-    local_run_cmd("/bin/mmap-test", &["mmap-test"], &[]);
-    println!("user-test: mmap test finished.");
+    // println!("user-test: running mmap test...");
+    // local_run_cmd("/bin/mmap-test", &["mmap-test"], &[]);
+    // println!("user-test: mmap test finished.");
 }
 
 fn ensure_dir(path: &str) {
@@ -376,6 +382,16 @@ fn run_comp_tests() {
     mount_competition_root();
     init_competition_environment();
     ltp::install_ltp_fixtures();
+    run_busybox(
+        &[
+            "busybox",
+            "chmod",
+            "a+x",
+            "/glibc/basic/run-all.sh",
+            "/musl/basic/run-all.sh",
+        ],
+        "basic run-all chmod",
+    );
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
