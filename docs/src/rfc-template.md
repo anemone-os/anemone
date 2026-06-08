@@ -206,6 +206,12 @@ Canonical：
 
 - 本阶段需要执行的搜索、review 或分类。
 
+模块边界预检：
+
+- 当前文件/模块是否已经混合 syscall ABI、核心状态机、后端实现、兼容桥、锁/生命周期规则或 UAPI/internal 转换。
+- 继续实现前是否需要同一 owner 内的行为保持型拆分；如果需要，列出 split-only checkpoint、预期移动的文件和应保持不变的 public API。
+- 若拆分会改变 owner surface、public API、shared contract 或 write set，先走扩展申请，不在本阶段静默完成。
+
 write set：
 
 - 默认允许修改的文件、模块或文档。
@@ -239,6 +245,10 @@ write set：
 ## Write Set 扩展记录
 
 - YYYY-MM-DD：原 write set、申请原因、批准后的新增范围、对应 review/验证 gate、transaction devlog 链接。
+
+## 结构维护记录
+
+- YYYY-MM-DD：拆分前职责混杂点、split-only checkpoint 范围、保持不变的 public API、验证命令和后续语义阶段链接。
 ```
 
 ## `backgrounds/index.md`

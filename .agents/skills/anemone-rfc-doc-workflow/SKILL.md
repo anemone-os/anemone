@@ -31,6 +31,7 @@ If the task involves review findings or issue severity, also use `anemone-code-r
 - Large feature work should close the document protocol before code implementation unless the user explicitly narrows the task differently.
 - RFCs record accepted contract, scope, invariants, and planned gates. Transaction devlogs record execution facts, checkpoints, review results, validation evidence, corrections, and handoff.
 - When a feature spans multiple RFCs, use a lightweight navigation entry in an umbrella RFC or `docs/src/rfcs.md`; do not create a parallel feature-progress ledger or copy transaction-devlog facts into another status file.
+- Structural module splitting is allowed when it preserves behavior inside the same owner boundary and prevents more responsibility from accumulating in an already-mixed file. If the split changes owner surfaces, public APIs, shared contracts, or write sets, require the normal expansion report and record it before implementation continues.
 - If a small change starts needing repository-level accepted contract text, non-trivial invariants, staged implementation gates, standalone `tracking-issues.md`, or multi-agent/checkpoint orchestration, upgrade to the RFC workflow instead of expanding `changes/` into a small RFC.
 - Write sets are coordination contracts, not architecture constraints. A worker must not silently edit outside its assigned write set, but if the better design needs a different owning surface, it should stop and report the proposed expansion instead of forcing compatibility inside the old write set.
 
@@ -85,6 +86,7 @@ If the task involves review findings or issue severity, also use `anemone-code-r
    - Link RFC `index.md` to the transaction and transaction `Canonical Plan` back to the RFC.
    - Update `docs/src/devlog/transactions/index.md`, the current biweekly devlog, and `docs/src/SUMMARY.md`.
    - Transaction entries should be append-only. Add correction notes instead of silently rewriting completed stages.
+   - For large or fast-growing modules, add a module-boundary preflight or split-only checkpoint before feature code if continuing in the same file would reinforce a wrong owner boundary.
    - If a worker needs a larger write set for architectural reasons, require an upward report with the reason, proposed files/modules, affected contract, and validation gate. After approval, record the updated write set in the transaction devlog or orchestration doc before continuing.
 
 8. Close the workflow.
