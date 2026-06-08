@@ -21,10 +21,6 @@ mod types;
 #[allow(unused_imports)]
 pub use api::{sys_fanotify_init, sys_fanotify_mark};
 #[allow(unused_imports)]
-pub use event::{FanEvent, FanEventKind};
+pub use hooks::{FanHookEvent, notify_path_event};
 #[allow(unused_imports)]
-pub use group::{FanGroup, FanGroupId};
-#[allow(unused_imports)]
-pub use hooks::*;
-#[allow(unused_imports)]
-pub use types::{FanEventFdTemplate, FanGroupMode, FanInitFlags, FanMask};
+pub use types::FanMask;

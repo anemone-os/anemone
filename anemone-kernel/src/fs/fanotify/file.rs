@@ -34,6 +34,13 @@ impl FanGroupFile {
     }
 }
 
+pub(super) fn ensure_group_file(file: &File) -> Result<(), SysError> {
+    file.prv()
+        .cast::<FanGroupFile>()
+        .map(|_| ())
+        .ok_or(SysError::InvalidArgument)
+}
+
 pub fn open_group_file(group: Arc<FanGroup>) -> Result<File, SysError> {
     let path = anony_new_inode(InodeType::Regular, &FANOTIFY_INODE_OPS, NilOpaque::new())?;
     anony_open_with(
@@ -79,6 +86,9 @@ fn fanotify_read_user(ctx: OpenedFileReadUserCtx<'_>) -> Result<usize, SysError>
         },
     };
 
+    // Gate A only emits FAN_NOFD metadata. D4 path-fd read must replace this
+    // consume-before-copy shape with the RFC reserve/copy/commit/rollback
+    // protocol before read() can publish real event object fds.
     write_metadata_to_segments(ctx.uspace(), ctx.segments(), &event.to_metadata())
 }
 
@@ -122,10 +132,12 @@ fn write_metadata_to_segments(
 }
 
 fn fanotify_final_release(ctx: OpenedFileFinalReleaseCtx<'_>) {
-    if ctx.notification_suppressed() {
-        return;
-    }
+    let notification_suppressed = ctx.notification_suppressed();
     FanGroupFile::group(ctx.file()).mark_dead();
+    assert!(
+        !notification_suppressed,
+        "fanotify group fd final-release must not be notification-suppressed"
+    );
 }
 
 fn fanotify_legacy_read(_file: &File, _pos: &mut usize, _buf: &mut [u8]) -> Result<usize, SysError> {

@@ -10,6 +10,8 @@ use crate::{
     task::files::Fd,
 };
 
+use super::super::{file, registry};
+
 const KNOWN_MARK_FLAGS: u32 = abi::FAN_MARK_ADD
     | abi::FAN_MARK_REMOVE
     | abi::FAN_MARK_DONT_FOLLOW
@@ -66,7 +68,7 @@ pub fn sys_fanotify_mark(
     dfd: i32,
     #[validate_with(user_addr.nullable())] pathname: Option<VirtAddr>,
 ) -> Result<u64, SysError> {
-    let _ = (fanotify_fd, dfd, pathname);
+    let _ = (dfd, pathname);
     if mask & !(STAGE_A_SUPPORTED_MASK | STAGE_A_DEFERRED_MASK) != 0 {
         knoticeln!(
             "fanotify_mark: unknown mask bits rejected bits={:#x}",
@@ -83,6 +85,9 @@ pub fn sys_fanotify_mark(
         return Err(SysError::InvalidArgument);
     }
 
-    super::super::registry::reject_until_registry_gate()?;
+    let group_fd = get_current_task().get_fd(fanotify_fd)?;
+    file::ensure_group_file(group_fd.vfs_file())?;
+
+    registry::reject_until_registry_gate()?;
     Ok(0)
 }

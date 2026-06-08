@@ -7,6 +7,8 @@ pub const DEFAULT_MAX_EVENTS: usize = 16_384;
 #[derive(Clone, Debug)]
 pub(super) struct FanPollTrigger {
     trigger: LatchTrigger,
+    // Diagnostic only: readiness is recomputed under the group lock when poll()
+    // wakes. Stored interests only make wake logs explain which waiter fired.
     interests: PollEvent,
 }
 
@@ -60,6 +62,8 @@ pub struct FanQueue {
     events: VecDeque<FanEvent>,
     max_events: usize,
     overflow_queued: bool,
+    // Telemetry only until a later resource-limit/fdinfo gate deliberately
+    // exposes overflow accounting. Queue behavior is driven by overflow_queued.
     dropped_events: u64,
     poll_triggers: Vec<FanPollTrigger>,
     read_triggers: Vec<FanReadTrigger>,
