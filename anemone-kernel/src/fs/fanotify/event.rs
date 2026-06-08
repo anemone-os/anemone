@@ -98,6 +98,9 @@ impl FanEvent {
 }
 
 fn current_pid() -> i32 {
-    let raw = get_current_task().tid().get();
+    // FAN_REPORT_TID is rejected in the current gate, so metadata.pid follows
+    // Linux's default fanotify ABI and reports the thread-group id. If TID
+    // reporting is later enabled, make this a group report-mode decision.
+    let raw = get_current_task().tgid().get();
     i32::try_from(raw).unwrap_or(i32::MAX)
 }

@@ -6,7 +6,7 @@
 **领域：** fs / VFS / syscall ABI / iomux / procfs / LTP
 **事务日志：** [2026-06-08 - Fanotify](../../devlog/transactions/2026-06-08-fanotify.md)
 **开放问题：** [fanotify tracking issues](./tracking-issues.md) 当前无 Open Keter / Euclid；强一致或高成本 Linux 语义仍按非目标和 Stage 5 backlog 暂缓。
-**下一步：** Gate A 已按 [Fanotify 事务日志](../../devlog/transactions/2026-06-08-fanotify.md) 闭合；后续需等待用户确认后启动 D3 mark registry worker，不得把 path-fd read 提交、VFS 基础事件 hook 或 FID/name negative gate 合入 Gate A。
+**下一步：** Gate C 已按 [Fanotify 事务日志](../../devlog/transactions/2026-06-08-fanotify.md) 闭合；后续需等待用户确认后启动 D5 VFS 基础 event injection worker，不得把 FID/name 正向 ABI、procfs fdinfo 或 permission events 合入 Gate C。
 
 ## 摘要
 
