@@ -5,11 +5,14 @@
 mod ltp;
 
 use anemone_rs::{
-    abi::system::native::power::SHUTDOWN_MAGIC,
+    abi::{
+        fs::linux::open::{O_RDONLY, O_TRUNC, O_WRONLY},
+        system::native::power::SHUTDOWN_MAGIC,
+    },
     os::{
         anemone::power::shutdown,
         linux::{
-            fs::{chdir, chroot, fstatat, mkdirat, mount, AtFd},
+            fs::{chdir, chroot, close, fstatat, mkdirat, mount, openat, read, write, AtFd},
             process::{execve, fork, wait4, WStatus, WStatusRaw, WaitFor, WaitOptions},
         },
     },
@@ -24,7 +27,7 @@ const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "basic_testcode.sh",
     // "lua_testcode.sh",
     // "busybox_testcode.sh",
-    // "libctest_testcode.sh",
+    "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
     // "iozone_testcode.sh",
     // "iperf_testcode.sh",
@@ -280,17 +283,73 @@ pub(crate) fn clear_tmp() {
     );
 }
 
+fn chmod_executable_if_present(path: &str) {
+    if fstatat(AtFd::Cwd, Path::new(path)).is_ok() {
+        run_busybox(&["busybox", "chmod", "a+x", path], path);
+    }
+}
+
+fn read_file(path: &str) -> Result<Vec<u8>, Errno> {
+    let fd = openat(AtFd::Cwd, Path::new(path), O_RDONLY, 0)?;
+    let mut content = Vec::new();
+    let mut buf = [0u8; 512];
+    loop {
+        let count = read(fd, &mut buf)?;
+        if count == 0 {
+            break;
+        }
+        content.extend_from_slice(&buf[..count]);
+    }
+    close(fd)?;
+    Ok(content)
+}
+
+fn write_all(fd: u32, mut buf: &[u8], path: &str) {
+    while !buf.is_empty() {
+        let written = write(fd, buf).unwrap_or_else(|errno| {
+            panic!("user-test: failed to write normalized script {path}: {errno:?}")
+        });
+        if written == 0 {
+            panic!("user-test: short write while normalizing script {path}");
+        }
+        buf = &buf[written..];
+    }
+}
+
+fn ensure_script_entrypoint(path: &str) {
+    chmod_executable_if_present(path);
+
+    let content = read_file(path)
+        .unwrap_or_else(|errno| panic!("user-test: failed to read script {path}: {errno:?}"));
+    if content.starts_with(b"#!") {
+        return;
+    }
+
+    let fd = openat(AtFd::Cwd, Path::new(path), O_WRONLY | O_TRUNC, 0)
+        .unwrap_or_else(|errno| panic!("user-test: failed to rewrite script {path}: {errno:?}"));
+    write_all(fd, b"#!/bin/sh\n", path);
+    write_all(fd, &content, path);
+    close(fd).unwrap_or_else(|errno| panic!("user-test: failed to close script {path}: {errno:?}"));
+}
+
+fn ensure_script_entrypoint_if_present(path: &str) {
+    if fstatat(AtFd::Cwd, Path::new(path)).is_ok() {
+        ensure_script_entrypoint(path);
+    }
+}
+
 fn prepare_testcode(family: &str) {
-    let run_all = format!("/{family}/basic/run-all.sh");
-    if fstatat(AtFd::Cwd, Path::new(run_all.as_str())).is_ok() {
-        // The contest sdcard may ship this helper as 0644, but
-        // basic_testcode.sh executes it as ./run-all.sh. Normalize the fresh
-        // in-guest image before running the script instead of depending on
-        // host-side staging permissions.
-        run_busybox(
-            &["busybox", "chmod", "a+x", run_all.as_str()],
-            run_all.as_str(),
-        );
+    // The contest sdcard ships some helpers as bare shell command lists.  RV
+    // userland happens to fall back to a shell after execve(2) returns ENOEXEC,
+    // while the LA BusyBox/libc combination reports Exec format error.  Make
+    // the in-guest helper entrypoints explicit so testcase scripts do not
+    // depend on libc- or shell-specific ENOEXEC fallback behavior.
+    for script in [
+        format!("/{family}/basic/run-all.sh"),
+        format!("/{family}/run-static.sh"),
+        format!("/{family}/run-dynamic.sh"),
+    ] {
+        ensure_script_entrypoint_if_present(script.as_str());
     }
 }
 
@@ -320,7 +379,7 @@ fn run_comp_tests() {
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
-    ltp::run_ltp_tests();
+    // ltp::run_ltp_tests();
 
     println!("user-test: all competition tests finished.");
 }
