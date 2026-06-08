@@ -7,7 +7,19 @@ use super::types::FanMask;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FanEventKind {
     Synthetic,
+    Path,
     QueueOverflow,
+}
+
+#[derive(Debug, Clone)]
+enum FanEventTarget {
+    // Synthetic and overflow events are pure metadata records. They must keep
+    // fd == FAN_NOFD so Stage 1 behavior does not accidentally enter the D4
+    // path-fd open/commit protocol.
+    NoFd,
+    // Path events hold a stable path snapshot until read() reopens the object
+    // for the listener. The bounded queue owns this reference while queued.
+    Path(PathRef),
 }
 
 #[derive(Debug, Clone)]
@@ -15,6 +27,10 @@ pub struct FanEvent {
     kind: FanEventKind,
     mask: FanMask,
     pid: i32,
+    // This is the queued object identity, not a userspace fd identity. D4
+    // turns it into metadata.fd only inside the read-user submit protocol, so
+    // fanotify never stores a long-lived fd number outside the task/fd table.
+    target: FanEventTarget,
 }
 
 impl FanEvent {
@@ -23,6 +39,19 @@ impl FanEvent {
             kind: FanEventKind::Synthetic,
             mask,
             pid: current_pid(),
+            target: FanEventTarget::NoFd,
+        }
+    }
+
+    pub fn path(mask: FanMask, path: PathRef) -> Self {
+        // Path events are intentionally internal until real VFS hooks land.
+        // Synthetic Stage 1 events still use FanEvent::synthetic() and cannot
+        // accidentally allocate event fds during read().
+        Self {
+            kind: FanEventKind::Path,
+            mask,
+            pid: current_pid(),
+            target: FanEventTarget::Path(path),
         }
     }
 
@@ -31,6 +60,7 @@ impl FanEvent {
             kind: FanEventKind::QueueOverflow,
             mask: FanMask::Q_OVERFLOW,
             pid: current_pid(),
+            target: FanEventTarget::NoFd,
         }
     }
 
@@ -46,7 +76,14 @@ impl FanEvent {
         abi::FAN_EVENT_METADATA_LEN as usize
     }
 
-    pub fn to_metadata(&self) -> abi::FanotifyEventMetadata {
+    pub fn path_target(&self) -> Option<&PathRef> {
+        match &self.target {
+            FanEventTarget::NoFd => None,
+            FanEventTarget::Path(path) => Some(path),
+        }
+    }
+
+    pub fn to_metadata_with_fd(&self, fd: i32) -> abi::FanotifyEventMetadata {
         let metadata_len = abi::FAN_EVENT_METADATA_LEN;
         abi::FanotifyEventMetadata {
             event_len: metadata_len as u32,
@@ -54,7 +91,7 @@ impl FanEvent {
             reserved: 0,
             metadata_len,
             mask: self.mask.bits(),
-            fd: abi::FAN_NOFD,
+            fd,
             pid: self.pid,
         }
     }
