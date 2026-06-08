@@ -81,6 +81,18 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 RFC 记录 accepted contract、边界和计划。transaction devlog 记录实际执行、checkpoint、review 结论、验证证据、更正说明、剩余限制和 handoff。
 
+### 5.1 跨 RFC 功能入口
+
+有些能力会被多个 RFC 分段覆盖。此时不要为“功能进度”新建一份并行账本，也不要把 transaction devlog 的阶段事实复制到另一个状态文件中。
+
+推荐做法是提供一个轻量导航入口：
+
+- 如果某个 RFC 是 umbrella / parent RFC，在该 RFC 的 `index.md` 中列出后续 RFC、事务日志、register / current limitations 链接；
+- 如果没有明确 parent RFC，在 [公开草案与 RFC](./rfcs.md) 的“当前 RFC”或领域分组中聚合相关 RFC 链接；
+- 导航入口只说明“该看哪些文档”和每个链接覆盖的范围，不重新记录阶段完成度、验证证据或剩余问题。
+
+跨 RFC 功能的当前事实仍按原职责归属：accepted contract 写在对应 RFC，执行进展写在 transaction devlog，开放问题和接受限制写在 register / current limitations。这样可以给读者一个 feature 级入口，同时避免多重真相源。
+
 ### 6. 实现阶段
 
 实现必须按 RFC 和 transaction 中的阶段推进。每个阶段至少说明：
@@ -126,6 +138,7 @@ write set 扩展申请至少说明：
 | `tracking-issues.md` | 当前 design-review issue 状态 | 普通 TODO、实现进度、历史归档 |
 | `backgrounds/` | 历史材料、旧计划、被拒绝方案、证据索引 | 覆盖 canonical 结论 |
 | Transaction devlog | 执行事实、checkpoint、review、验证、handoff | 重新定义 accepted contract |
+| 跨 RFC 功能入口 | 相关 RFC / transaction / register 的导航索引 | 阶段进度账本、验证事实副本、第二套问题状态 |
 | 双周 devlog | 入口摘要和重要结论 | 长篇阶段日志 |
 | Register / limitations | 当前开放问题和接受限制 | 设计草案或实现计划 |
 

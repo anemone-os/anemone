@@ -30,6 +30,7 @@ If the task involves review findings or issue severity, also use `anemone-code-r
 - Public RFCs live under `docs/src/rfcs/<short-slug>/` and become canonical immediately after promotion.
 - Large feature work should close the document protocol before code implementation unless the user explicitly narrows the task differently.
 - RFCs record accepted contract, scope, invariants, and planned gates. Transaction devlogs record execution facts, checkpoints, review results, validation evidence, corrections, and handoff.
+- When a feature spans multiple RFCs, use a lightweight navigation entry in an umbrella RFC or `docs/src/rfcs.md`; do not create a parallel feature-progress ledger or copy transaction-devlog facts into another status file.
 - If a small change starts needing repository-level accepted contract text, non-trivial invariants, staged implementation gates, standalone `tracking-issues.md`, or multi-agent/checkpoint orchestration, upgrade to the RFC workflow instead of expanding `changes/` into a small RFC.
 - Write sets are coordination contracts, not architecture constraints. A worker must not silently edit outside its assigned write set, but if the better design needs a different owning surface, it should stop and report the proposed expansion instead of forcing compatibility inside the old write set.
 
