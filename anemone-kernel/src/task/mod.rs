@@ -29,10 +29,7 @@ pub mod task_sched;
 mod api;
 pub use api::*;
 
-use core::{
-    fmt::{Debug, Display},
-    ptr::NonNull,
-};
+use core::fmt::{Debug, Display};
 
 use crate::{
     mm::stack::KernelStack,
@@ -43,8 +40,8 @@ use crate::{
         cpu_usage::{TaskCpuUsage, ThreadGroupCpuUsage},
         files::FilesState,
         sig::{
-            PendingSignals, SigNo, altstack::SigAltStack, disposition::SignalDisposition,
-            TaskSigMaskState,
+            PendingSignals, SigNo, TaskSigMaskState, altstack::SigAltStack,
+            disposition::SignalDisposition,
         },
         task_itimer::ITimers,
     },
@@ -118,15 +115,6 @@ pub struct Task {
     sched_ctx: MonoFlow<TaskContext>,
     /// Scheduling entity. Used for scheduling.
     sched_entity: SpinLock<SchedEntity>,
-
-    /// User trapframe pointer. Set to:
-    /// - [Some] when this task traps into kernel,
-    /// - [None] when this task finishes handling the trap and is ready to
-    ///   return to user space,
-    /// - [None] if this task is a pure kernel thread, and
-    /// - [None] if this is a newly created task that has not run yet (i.e. it
-    ///   has not trapped into kernel yet).
-    utrapframe: MonoFlow<Option<NonNull<TrapFrame>>>,
 
     /// Whether this task has used FPU. This is used to optimize FPU context
     /// switching.
@@ -425,7 +413,6 @@ impl Task {
                 ))
             },
             sched_entity: SpinLock::new(sched),
-            utrapframe: unsafe { MonoFlow::new(None) },
             fpu_used: AtomicBool::new(false),
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: RwLock::new(Arc::new(RwLock::new(FilesState::new()))),
@@ -476,7 +463,6 @@ impl Task {
                     ))
                 },
                 sched_entity: SpinLock::new(SchedEntity::new(SchedClassPrv::Idle(()))),
-                utrapframe: unsafe { MonoFlow::new(None) },
                 fpu_used: AtomicBool::new(false),
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
                 files_state: RwLock::new(Arc::new(RwLock::new(FilesState::new()))),
@@ -531,53 +517,6 @@ impl Task {
     pub unsafe fn get_sched_ctx_mut(&self) -> *mut TaskContext {
         debug_assert!(IntrArch::local_intr_disabled());
         self.sched_ctx.with_mut(|inner| inner as *mut TaskContext)
-    }
-
-    /// Set user trapframe pointer. Called by user trap handler when a task
-    /// traps into kernel.
-    ///
-    /// # Safety
-    ///
-    /// **Only user trap handler's code can call this function.**
-    #[track_caller]
-    pub unsafe fn set_utrapframe(&self, trapframe: *mut TrapFrame) {
-        self.utrapframe.with_mut(|inner| {
-            *inner = Some(NonNull::new(trapframe).expect("trapframe pointer cannot be null"))
-        });
-    }
-
-    /// Get a copy of the user trapframe.
-    ///
-    /// TODO: explain **Why no accessors are provided**.
-    #[track_caller]
-    pub fn utrapframe(&self) -> TrapFrame {
-        unsafe {
-            self.utrapframe.with(|inner| {
-                inner
-                    .as_ref()
-                    .expect("trapframe pointer is not set")
-                    .as_ref()
-                    .clone()
-            })
-        }
-    }
-
-    /// Get a pointer to the user trapframe.
-    ///
-    /// **Only pointer access is provided.** For temporarily easy use, you can
-    /// transform the pointer into a reference. But be careful to follow Rust's
-    /// aliasing rules.
-    #[track_caller]
-    pub unsafe fn utrapframe_ptr(&self) -> NonNull<TrapFrame> {
-        unsafe {
-            self.utrapframe.with(|inner| {
-                inner
-                    .as_ref()
-                    .expect("trapframe pointer is not set")
-                    .as_ref()
-                    .into()
-            })
-        }
     }
 }
 

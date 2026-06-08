@@ -293,6 +293,21 @@
 **Last Verified:** 2026-06-04
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [Sched Latch 事务日志](../devlog/transactions/2026-06-03-sched-latch.md), [RFC-20260603-sched-latch](../rfcs/sched-latch/index.md)
 
+## ANE-20260608-PSELECT6-EXCEPTFDS-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** fs / iomux / pselect6
+
+**Summary:** `pselect6` 当前接受 `exceptfds` 作为 stage-1 兼容入口：置位 fd 仍会被校验，返回前对应用户 fdset 会被清空，并在非空 `exceptfds` 请求时打 notice；但内核尚无内部 `POLLPRI` / exception readiness `PollEvent`，也没有 source-side register / wake 能力，因此不会把任何 fd 报告为 exception-ready。这个兼容 no-op 是为了让 lmbench 等 defensive `exceptfds` 探测不再被 `ENOTSUP` 拦截，不代表完整 Linux `exceptfds` 语义已经实现。
+
+**Exit Condition:** 为 iomux 引入明确的 exception / priority readiness 表达，补齐相关 source 的 snapshot 与 latch register 语义，并让 `pselect6 exceptfds` 按真实 readiness 更新输出 fdset；随后用 lmbench 与覆盖 `POLLPRI` / exception readiness 的回归重新验证。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-08
+**Related:** [pselect6 exceptfds 小迭代记录](../devlog/changes/2026-06-08-pselect6-exceptfds-compat.md), [开发日志：2026-06-08 至 2026-06-21](../devlog/2026-06-08_to_2026-06-21.md)
+
 ## ANE-20260527-FALLOCATE-BASIC-REGULAR-ONLY
 
 **Type:** Limitation

@@ -205,3 +205,21 @@
 
 **Severity:** Medium
 **Workaround:** 当前先不要把 `tgkill02` / `rt_sigaction01` / `rt_sigaction02` / `kill02` 当成同一个 signal delivery bug；优先按上述子问题分别构造或复跑定向用例。
+
+## ANE-20260608-RISCV-FPU-TRAP-RETURN-UNSAFE-BOUNDARY
+
+**Type:** Issue
+**Status:** Open
+**Area:** riscv64 / trap return / FPU / unsafe boundary
+
+**Symptom / Trigger:** rv64 LTP `poll02`、`pselect01` 等路径在 release 运行中会在用户态浮点指令附近收到 `SIGILL`，即使日志已经显示 lazy-FPU 路径曾为该 task 打印 `enabled fpu`。问题对插桩高度敏感：在 `utrap` 路径打日志会让原始 `SIGILL` 消失；普通 `let _ = trapframe.sstatus()` 不改变行为；`core::hint::black_box(trapframe.sstatus())` 又能让失败消失。TCB 侧缓存 `utrapframe` pointer 的旧别名风险已移除，syscall / signal 路径已统一使用 `__trapframe__`，但当前仍只能用 `black_box` 作为 release 止血。
+
+**Impact:** 该现象说明 riscv64 用户返回、FPU lazy enable、trapframe 内存提交和 `sstatus.FS` CSR 恢复之间的 unsafe Rust / assembly 边界仍未被充分建模。`Task::fpu_used()` 只能证明 task 有 FPU 上下文，不能证明每次 `sret` 前 return assembly 都消费到了已提交的非 `Off` `sstatus.FS`。如果该边界在 release 下仍可能被优化、重排或以错误别名假设处理，就会把原本应继续执行的用户态浮点指令错误暴露为 `SIGILL`，并遮蔽 `poll02` / `pselect01` 以及其它 rv64 SIGILL 相关回归判断。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-08
+**Exit Condition:** 明确并收敛 riscv64 FPU/trap-return unsafe 边界，使返回用户态前的 trapframe `sstatus.FS` 更新成为真实、有序且对 return assembly 可见的提交；移除 `black_box` 止血后，release rv64 `poll02` / `pselect01` 不再在已启用 FPU 后因同类浮点指令收到 `SIGILL`，并补充足够诊断确认 repeated illegal-instruction 分支不再被正常路径依赖。
+**Related:** [SHMAT1 SIGILL revalidation](#ane-20260602-shmat1-sigill-masks-segv-hang-revalidation)
+
+**Severity:** High
+**Workaround:** 暂时保留 `core::hint::black_box(trapframe.sstatus())` 作为 release 稳定器；不要把该 workaround 当成 FPU 状态管理已经正确的证明，也不要用被它改变过的失败表面反向归类后续 `SIGIOT` / `SIGABRT` 等 LTP harness 失败。

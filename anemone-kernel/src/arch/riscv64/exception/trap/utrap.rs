@@ -222,13 +222,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
     // Fpu are disabled in kernel mode
     set_fpu_status(FS::Off, None);
 
-    {
-        let task = get_current_task();
-        unsafe {
-            task.set_utrapframe(trapframe);
-        }
-        task.on_prv_change(Privilege::Kernel);
-    }
+    get_current_task().on_prv_change(Privilege::Kernel);
 
     let (mut restart_syscall, syscall_ctx) = (None, TrapArch::syscall_ctx_snapshot(trapframe));
 
@@ -311,6 +305,10 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                 let task = get_current_task();
                 if task.fpu_used() {
                     log_user_panic!(format_args!("illegal instruction at {:#x}", trapframe.sepc));
+
+                    // temporary workaround for current wrong unsafe code.
+                    core::hint::black_box(trapframe.sstatus());
+
                     get_current_task().recv_signal(Signal::new(
                         SigNo::SIGILL,
                         SiCode::Kernel,
@@ -321,7 +319,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                 } else {
                     unsafe {
                         init_fpu_for_current_task(trapframe);
-                        kinfoln!(
+                        knoticeln!(
                             "({}) enabled fpu for {} ({})",
                             cur_cpu_id(),
                             task.tid(),
@@ -343,8 +341,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
         }
     }
 
-    // TODO: this might fail???
-    debug_assert!(IntrArch::local_intr_enabled());
+    assert!(IntrArch::local_intr_enabled());
 
     handle_signals(
         trapframe,

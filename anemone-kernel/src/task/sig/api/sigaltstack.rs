@@ -31,7 +31,7 @@ fn sys_sigaltstack(
             let mut kbuf = altstack.to_linux_sigstack();
 
             // check whether user is on stack.
-            let cur_sp = task.utrapframe().sp();
+            let cur_sp = __trapframe__.sp();
             if on_stack(cur_sp, &altstack) {
                 kbuf.ss_flags |= SS_ONSTACK;
             }
@@ -70,7 +70,7 @@ fn sys_sigaltstack(
             }
 
             if let Some(altstack) = *sig_altstack {
-                if on_stack(task.utrapframe().sp(), &altstack) {
+                if on_stack(__trapframe__.sp(), &altstack) {
                     return Err(SysError::PermissionDenied);
                 }
             }
@@ -84,7 +84,7 @@ fn sys_sigaltstack(
                 return Err(SysError::InvalidArgument);
             }
             if let Some(altstack) = *sig_altstack {
-                if on_stack(task.utrapframe().sp(), &altstack) {
+                if on_stack(__trapframe__.sp(), &altstack) {
                     return Err(SysError::PermissionDenied);
                 }
             }
