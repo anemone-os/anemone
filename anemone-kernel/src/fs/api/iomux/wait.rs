@@ -4,10 +4,12 @@
 //! results, and scheduler latch outcomes. Linux `pollfd` and `fd_set` layout
 //! conversion stays in the syscall adapters.
 
-use crate::prelude::*;
-use crate::task::sig::{
-    TemporaryMaskWaitCandidate, TemporaryMaskWaitContext, TemporaryMaskWaitDecision,
-    TemporaryMaskWaitReturn, TemporarySigMaskToken,
+use crate::{
+    prelude::*,
+    task::sig::{
+        TemporaryMaskWaitCandidate, TemporaryMaskWaitContext, TemporaryMaskWaitDecision,
+        TemporaryMaskWaitReturn, TemporarySigMaskToken,
+    },
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -33,6 +35,7 @@ impl<'a> IomuxScanMode<'a> {
 pub(super) enum IomuxScanOutcome {
     Ready(usize),
     NotReady,
+    NoSources,
     Unsupported,
 }
 
@@ -146,15 +149,20 @@ where
     let deadline = timeout.map(|timeout| Instant::now() + timeout);
 
     loop {
-        match snapshot_scan(context, &mut scan) {
-            Ok(Some(nready)) => return IomuxWaitOutcome::Ready(nready),
-            Ok(None) => {},
+        let no_sources = match snapshot_scan(context, &mut scan) {
+            Ok(SnapshotScanOutcome::Ready(nready)) => return IomuxWaitOutcome::Ready(nready),
+            Ok(SnapshotScanOutcome::NotReady) => false,
+            Ok(SnapshotScanOutcome::NoSources) => true,
             Err(err) => return IomuxWaitOutcome::Error(err),
-        }
+        };
 
         if task.has_unmasked_signal() {
             kdebugln!("{}: interrupted by signal before latch begin", context);
             return IomuxWaitOutcome::Signal;
+        }
+
+        if no_sources {
+            return wait_without_iomux_sources(context, task, timeout);
         }
 
         let remaining = match deadline {
@@ -183,7 +191,9 @@ where
                 );
                 return IomuxWaitOutcome::Ready(nready);
             },
-            Ok(IomuxScanOutcome::Ready(_)) | Ok(IomuxScanOutcome::NotReady) => {},
+            Ok(IomuxScanOutcome::Ready(_))
+            | Ok(IomuxScanOutcome::NotReady)
+            | Ok(IomuxScanOutcome::NoSources) => {},
             Ok(IomuxScanOutcome::Unsupported) => {
                 latch.cancel(LatchCancelReason::RegisterError);
                 let outcome = latch.finish();
@@ -225,8 +235,8 @@ where
         );
 
         match snapshot_scan(context, &mut scan) {
-            Ok(Some(nready)) => return IomuxWaitOutcome::Ready(nready),
-            Ok(None) => {},
+            Ok(SnapshotScanOutcome::Ready(nready)) => return IomuxWaitOutcome::Ready(nready),
+            Ok(SnapshotScanOutcome::NotReady | SnapshotScanOutcome::NoSources) => {},
             Err(err) => return IomuxWaitOutcome::Error(err),
         }
 
@@ -245,26 +255,78 @@ where
     F: for<'a> FnMut(IomuxScanMode<'a>) -> Result<IomuxScanOutcome, SysError>,
 {
     let result = snapshot_scan(context, scan)?;
-    if let Some(nready) = result {
+    if let SnapshotScanOutcome::Ready(nready) = result {
         kdebugln!(
             "{}: final snapshot after register abort found {} ready",
             context,
             nready,
         );
+        Ok(Some(nready))
+    } else {
+        Ok(None)
     }
-    Ok(result)
 }
 
-fn snapshot_scan<F>(context: &'static str, scan: &mut F) -> Result<Option<usize>, SysError>
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SnapshotScanOutcome {
+    Ready(usize),
+    NotReady,
+    NoSources,
+}
+
+fn snapshot_scan<F>(context: &'static str, scan: &mut F) -> Result<SnapshotScanOutcome, SysError>
 where
     F: for<'a> FnMut(IomuxScanMode<'a>) -> Result<IomuxScanOutcome, SysError>,
 {
     match scan(IomuxScanMode::Snapshot)? {
-        IomuxScanOutcome::Ready(nready) if nready > 0 => Ok(Some(nready)),
-        IomuxScanOutcome::Ready(_) | IomuxScanOutcome::NotReady => Ok(None),
+        IomuxScanOutcome::Ready(nready) if nready > 0 => Ok(SnapshotScanOutcome::Ready(nready)),
+        IomuxScanOutcome::Ready(_) | IomuxScanOutcome::NotReady => {
+            Ok(SnapshotScanOutcome::NotReady)
+        },
+        IomuxScanOutcome::NoSources => Ok(SnapshotScanOutcome::NoSources),
         IomuxScanOutcome::Unsupported => {
             kwarningln!("{}: snapshot scan returned unsupported", context);
             Err(SysError::NotSupported)
+        },
+    }
+}
+
+fn wait_without_iomux_sources(
+    context: &'static str,
+    task: &Arc<Task>,
+    timeout: Option<Duration>,
+) -> IomuxWaitOutcome {
+    if matches!(timeout, Some(timeout) if timeout == Duration::ZERO) {
+        return IomuxWaitOutcome::Timeout;
+    }
+
+    // Linux treats select/poll with no armable fd sources as a timeout sleep:
+    // zero timeout probes return immediately, but positive or NULL timeouts
+    // must still enter an interruptible wait so tiny sleeps do not become
+    // pure userspace-visible busy polling.
+    let latch = Latch::begin_current(true);
+    let remaining_after_wait = latch.schedule_with_timeout(timeout);
+    let outcome = latch.finish();
+    kdebugln!(
+        "{}: no-source wait finished outcome={:?} remaining={:?}",
+        context,
+        outcome,
+        remaining_after_wait,
+    );
+
+    match outcome {
+        LatchWaitOutcome::Timeout => IomuxWaitOutcome::Timeout,
+        LatchWaitOutcome::Signal => IomuxWaitOutcome::Signal,
+        LatchWaitOutcome::Force => IomuxWaitOutcome::Force,
+        LatchWaitOutcome::Triggered
+        | LatchWaitOutcome::Cancelled
+        | LatchWaitOutcome::Unexpected => {
+            kwarningln!(
+                "{}: unexpected no-source latch outcome after schedule: {:?}",
+                context,
+                outcome,
+            );
+            IomuxWaitOutcome::Error(SysError::IO)
         },
     }
 }
@@ -275,10 +337,7 @@ enum IomuxWaitDisposition {
     Done(IomuxWaitOutcome),
 }
 
-fn map_latch_outcome(
-    context: &'static str,
-    outcome: LatchWaitOutcome,
-) -> IomuxWaitDisposition {
+fn map_latch_outcome(context: &'static str, outcome: LatchWaitOutcome) -> IomuxWaitDisposition {
     match outcome {
         LatchWaitOutcome::Triggered => IomuxWaitDisposition::Retry,
         LatchWaitOutcome::Timeout => IomuxWaitDisposition::Done(IomuxWaitOutcome::Timeout),

@@ -75,6 +75,7 @@ fn scan_ppoll_fds(
     mode: IomuxScanMode<'_>,
 ) -> Result<IomuxScanOutcome, SysError> {
     let mut nready = 0;
+    let mut has_source = false;
     let mut unsupported = false;
 
     for poll_fd in poll_fds.iter_mut() {
@@ -83,6 +84,7 @@ fn scan_ppoll_fds(
         let Some(fd) = poll_fd.fd else {
             continue;
         };
+        has_source = true;
 
         let Ok(file) = task.get_fd(fd) else {
             poll_fd.revents = LinuxPollEvent::NVAL;
@@ -134,6 +136,8 @@ fn scan_ppoll_fds(
 
     if unsupported {
         Ok(IomuxScanOutcome::Unsupported)
+    } else if !has_source {
+        Ok(IomuxScanOutcome::NoSources)
     } else {
         Ok(IomuxScanOutcome::from_ready_count(nready))
     }

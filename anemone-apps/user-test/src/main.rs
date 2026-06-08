@@ -27,7 +27,7 @@ const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "basic_testcode.sh",
     // "lua_testcode.sh",
     // "busybox_testcode.sh",
-    "libctest_testcode.sh",
+    // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
     // "iozone_testcode.sh",
     // "iperf_testcode.sh",
@@ -42,7 +42,7 @@ const MUSL_TEST_SCRIPTS: &[&str] = &[
     // "busybox_testcode.sh",
     // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
-    // "iozone_testcode.sh",
+    "iozone_testcode.sh",
     // "iperf_testcode.sh",
     // "libcbench_testcode.sh",
     // "lmbench_testcode.sh",
@@ -353,6 +353,19 @@ fn prepare_testcode(family: &str) {
     }
 }
 
+fn runtime_for_test_script<'a>(family: &'a str, script: &str) -> &'a str {
+    // The contest images currently label basic_testcode.sh under /musl, but
+    // their basic/* ELF binaries still carry the arch glibc PT_INTERP path.
+    // Keep the musl script tree intact and expose the glibc loader only while
+    // this script runs.  Remove this bridge once the images ship musl-linked
+    // basic binaries or a loader layout that makes /musl/basic self-contained.
+    if family == "musl" && script == "basic_testcode.sh" {
+        "glibc"
+    } else {
+        family
+    }
+}
+
 fn run_test_family(family: &str, scripts: &[&str]) {
     switch_runtime(family);
     prepare_testcode(family);
@@ -360,10 +373,17 @@ fn run_test_family(family: &str, scripts: &[&str]) {
 
     println!("user-test: running {family} competition tests...");
     let workdir = format!("/{family}");
+    let mut active_runtime = family;
     for script in scripts {
         let script_path = format!("{workdir}/{script}");
         if fstatat(AtFd::Cwd, Path::new(script_path.as_str())).is_err() {
             panic!("user-test: missing competition script {script_path}");
+        }
+        let script_runtime = runtime_for_test_script(family, script);
+        if script_runtime != active_runtime {
+            println!("user-test: using {script_runtime} runtime for {family} {script}...");
+            switch_runtime(script_runtime);
+            active_runtime = script_runtime;
         }
         println!("user-test: running {family} {script}...");
         run_busybox_in_dir(workdir.as_str(), &["busybox", "sh", script], script);
@@ -379,7 +399,7 @@ fn run_comp_tests() {
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
-    // ltp::run_ltp_tests();
+    ltp::run_ltp_tests();
 
     println!("user-test: all competition tests finished.");
 }
