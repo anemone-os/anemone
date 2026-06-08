@@ -2,7 +2,9 @@ use crate::prelude::*;
 
 use super::{
     event::FanEvent,
-    queue::{DEFAULT_MAX_EVENTS, FanQueue, trigger_detached_triggers},
+    mark::MarkHandle,
+    queue::{DEFAULT_MAX_EVENTS, FanDetachedTriggers, FanQueue, trigger_detached_triggers},
+    registry,
     types::{FanEventFdTemplate, FanGroupMode, FanInitFlags},
 };
 
@@ -20,6 +22,7 @@ impl FanGroupId {
 #[derive(Debug)]
 struct FanGroupState {
     queue: FanQueue,
+    mark_handles: Vec<MarkHandle>,
     dead: bool,
 }
 
@@ -33,6 +36,7 @@ pub(super) enum FanReadState {
 #[derive(Debug)]
 pub struct FanGroup {
     id: FanGroupId,
+    generation: u64,
     mode: FanGroupMode,
     init_flags: FanInitFlags,
     event_fd_template: FanEventFdTemplate,
@@ -47,11 +51,13 @@ impl FanGroup {
     ) -> Arc<Self> {
         Arc::new(Self {
             id: FanGroupId::next(),
+            generation: 1,
             mode,
             init_flags,
             event_fd_template,
             state: Mutex::new(FanGroupState {
                 queue: FanQueue::new(DEFAULT_MAX_EVENTS),
+                mark_handles: Vec::new(),
                 dead: false,
             }),
         })
@@ -59,6 +65,10 @@ impl FanGroup {
 
     pub const fn id(&self) -> FanGroupId {
         self.id
+    }
+
+    pub const fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub const fn mode(&self) -> FanGroupMode {
@@ -71,6 +81,49 @@ impl FanGroup {
 
     pub const fn event_fd_template(&self) -> FanEventFdTemplate {
         self.event_fd_template
+    }
+
+    pub fn is_dead(&self) -> bool {
+        self.state.lock().dead
+    }
+
+    pub(super) fn add_mark_handle_from_registry(
+        &self,
+        handle: MarkHandle,
+    ) -> Result<(), SysError> {
+        let mut state = self.state.lock();
+        if state.dead {
+            return Err(SysError::InvalidArgument);
+        }
+        assert!(
+            state.mark_handles.iter().all(|existing| *existing != handle),
+            "fanotify group cleanup list cannot contain duplicate mark handles"
+        );
+        state.mark_handles.push(handle);
+        Ok(())
+    }
+
+    pub(super) fn remove_mark_handle_from_registry(&self, handle: MarkHandle) {
+        let mut state = self.state.lock();
+        state.mark_handles.retain(|existing| *existing != handle);
+    }
+
+    pub(super) fn begin_mark_dead_from_registry(&self) -> Option<Vec<MarkHandle>> {
+        let mut state = self.state.lock();
+        if state.dead {
+            return None;
+        }
+        state.dead = true;
+        Some(core::mem::take(&mut state.mark_handles))
+    }
+
+    pub(super) fn clear_dead_queue_after_registry(&self) -> FanDetachedTriggers {
+        let mut state = self.state.lock();
+        assert!(
+            state.dead,
+            "fanotify dead-queue cleanup must follow registry-owned death mark"
+        );
+        state.queue.clear()
     }
 
     pub fn enqueue(&self, event: FanEvent) {
@@ -106,26 +159,20 @@ impl FanGroup {
     }
 
     pub fn mark_dead(&self) {
-        let detached = {
-            let mut state = self.state.lock();
-            if state.dead {
-                return;
-            }
-            state.dead = true;
-            state.queue.clear()
-        };
-        trigger_detached_triggers(detached, "group_dead");
+        if let Some(detached) = registry::mark_group_dead(self) {
+            trigger_detached_triggers(detached, "group_dead");
+        }
     }
 
     pub fn wait_for_event(&self) -> Result<Option<FanEvent>, SysError> {
         loop {
             {
                 let mut state = self.state.lock();
-                if let Some(event) = state.queue.pop_front() {
-                    return Ok(Some(event));
-                }
                 if state.dead {
                     return Ok(None);
+                }
+                if let Some(event) = state.queue.pop_front() {
+                    return Ok(Some(event));
                 }
             }
 
@@ -143,15 +190,6 @@ impl FanGroup {
             // and the blocking schedule.
             {
                 let mut state = self.state.lock();
-                if let Some(event) = state.queue.pop_front() {
-                    latch.cancel(LatchCancelReason::PredicateReady);
-                    let outcome = latch.finish();
-                    kdebugln!(
-                        "fanotify: read wait found queued event before sleep outcome={:?}",
-                        outcome,
-                    );
-                    return Ok(Some(event));
-                }
                 if state.dead {
                     latch.cancel(LatchCancelReason::PredicateReady);
                     let outcome = latch.finish();
@@ -160,6 +198,15 @@ impl FanGroup {
                         outcome,
                     );
                     return Ok(None);
+                }
+                if let Some(event) = state.queue.pop_front() {
+                    latch.cancel(LatchCancelReason::PredicateReady);
+                    let outcome = latch.finish();
+                    kdebugln!(
+                        "fanotify: read wait found queued event before sleep outcome={:?}",
+                        outcome,
+                    );
+                    return Ok(Some(event));
                 }
                 state.queue.register_read_wait(&trigger);
             }

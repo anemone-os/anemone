@@ -25,6 +25,12 @@ impl FanGroupFile {
         Self { group }
     }
 
+    fn group_arc(file: &File) -> Option<Arc<FanGroup>> {
+        file.prv()
+            .cast::<FanGroupFile>()
+            .map(|group_file| group_file.group.clone())
+    }
+
     fn group(file: &File) -> &FanGroup {
         file.prv()
             .cast::<FanGroupFile>()
@@ -34,11 +40,8 @@ impl FanGroupFile {
     }
 }
 
-pub(super) fn ensure_group_file(file: &File) -> Result<(), SysError> {
-    file.prv()
-        .cast::<FanGroupFile>()
-        .map(|_| ())
-        .ok_or(SysError::InvalidArgument)
+pub(super) fn group_from_file(file: &File) -> Result<Arc<FanGroup>, SysError> {
+    FanGroupFile::group_arc(file).ok_or(SysError::InvalidArgument)
 }
 
 pub fn open_group_file(group: Arc<FanGroup>) -> Result<File, SysError> {

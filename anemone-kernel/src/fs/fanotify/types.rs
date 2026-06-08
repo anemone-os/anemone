@@ -13,6 +13,8 @@ bitflags! {
         const CLOSE_WRITE = abi::FAN_CLOSE_WRITE;
         const CLOSE_NOWRITE = abi::FAN_CLOSE_NOWRITE;
         const OPEN = abi::FAN_OPEN;
+        const EVENT_ON_CHILD = abi::FAN_EVENT_ON_CHILD;
+        const ONDIR = abi::FAN_ONDIR;
         const Q_OVERFLOW = abi::FAN_Q_OVERFLOW;
     }
 }
@@ -30,6 +32,98 @@ pub enum FanGroupMode {
     Notify,
     Content,
     PreContent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FanTargetClass {
+    Inode,
+    Mount,
+    Filesystem,
+}
+
+#[derive(Debug, Clone)]
+pub enum FanTarget {
+    Inode(InodeRef),
+    Mount(Arc<Mount>),
+    Filesystem(Arc<SuperBlock>),
+}
+
+impl FanTarget {
+    pub fn from_path(class: FanTargetClass, path: &PathRef) -> Self {
+        match class {
+            FanTargetClass::Inode => Self::Inode(path.inode().clone()),
+            FanTargetClass::Mount => Self::Mount(path.mount().clone()),
+            FanTargetClass::Filesystem => Self::Filesystem(path.mount().sb().clone()),
+        }
+    }
+
+    pub fn key(&self) -> FanTargetKey {
+        match self {
+            Self::Inode(inode) => FanTargetKey::from_inode(inode),
+            Self::Mount(mount) => FanTargetKey::from_mount(mount),
+            Self::Filesystem(sb) => FanTargetKey::from_superblock(sb),
+        }
+    }
+
+    pub const fn class(&self) -> FanTargetClass {
+        match self {
+            Self::Inode(_) => FanTargetClass::Inode,
+            Self::Mount(_) => FanTargetClass::Mount,
+            Self::Filesystem(_) => FanTargetClass::Filesystem,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FanTargetKey {
+    Inode { sb: usize, ino: Ino },
+    Mount { mount: usize },
+    SuperBlock { sb: usize },
+}
+
+impl FanTargetKey {
+    pub fn from_inode(inode: &InodeRef) -> Self {
+        let sb = inode.sb();
+        Self::Inode {
+            sb: Arc::as_ptr(&sb) as usize,
+            ino: inode.ino(),
+        }
+    }
+
+    pub fn from_mount(mount: &Arc<Mount>) -> Self {
+        Self::Mount {
+            mount: Arc::as_ptr(mount) as usize,
+        }
+    }
+
+    pub fn from_superblock(sb: &Arc<SuperBlock>) -> Self {
+        Self::SuperBlock {
+            sb: Arc::as_ptr(sb) as usize,
+        }
+    }
+
+    pub const fn class(self) -> FanTargetClass {
+        match self {
+            Self::Inode { .. } => FanTargetClass::Inode,
+            Self::Mount { .. } => FanTargetClass::Mount,
+            Self::SuperBlock { .. } => FanTargetClass::Filesystem,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FanPathKey {
+    mount: usize,
+    dentry: usize,
+}
+
+impl FanPathKey {
+    pub fn from_path(path: &PathRef) -> Self {
+        Self {
+            mount: Arc::as_ptr(path.mount()) as usize,
+            dentry: Arc::as_ptr(path.dentry()) as usize,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
