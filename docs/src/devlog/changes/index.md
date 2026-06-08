@@ -32,4 +32,7 @@
 
 ## 当前记录
 
+- [2026-06-08 - pselect6 exceptfds compat](./2026-06-08-pselect6-exceptfds-compat.md)
+- [2026-06-07 - User-test LTP Pgrp Isolation](./2026-06-07-user-test-ltp-pgrp-isolation.md)
+- [2026-06-07 - Signal LTP Tgkill Sigqueueinfo](./2026-06-07-signal-ltp-tgkill-sigqueueinfo.md)
 - [2026-06-05 - Block Byte I/O Loop Mkfs](./2026-06-05-block-byte-io-loop-mkfs.md)

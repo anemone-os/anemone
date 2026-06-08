@@ -356,7 +356,7 @@ pub mod process {
     }
 
     pub fn setpgid(pid: i32, pgid: i32) -> Result<(), Errno> {
-        process::setpgid(pid as i64 as u64, pgid as i64 as u64).map(|_| ())
+        process::setpgid(pid, pgid).map(|_| ())
     }
 
     #[repr(transparent)]
@@ -499,6 +499,10 @@ pub mod process {
                 size_of::<SigSet>() as u64,
             )
             .map(|_| ())
+        }
+
+        pub fn kill(pid: i32, sig: SigNo) -> Result<(), Errno> {
+            signal::kill(pid, sig.as_usize() as u32).map(|_| ())
         }
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]

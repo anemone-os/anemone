@@ -136,6 +136,7 @@ pub mod linux {
     pub const SYS_TKILL: u64 = 130;
     pub const SYS_TGKILL: u64 = 131;
     pub const SYS_SIGALTSTACK: u64 = 132;
+    pub const SYS_RT_SIGSUSPEND: u64 = 133;
     pub const SYS_RT_SIGACTION: u64 = 134;
     pub const SYS_RT_SIGPROCMASK: u64 = 135;
     pub const SYS_RT_SIGPENDING: u64 = 136;

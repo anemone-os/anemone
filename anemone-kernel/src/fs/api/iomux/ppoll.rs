@@ -17,7 +17,7 @@ use crate::{
     },
     task::{
         files::Fd,
-        sig::{SigNo, set::SigSet},
+        sig::{SigNo, TemporaryMaskWaitContext, set::SigSet},
     },
 };
 
@@ -223,36 +223,30 @@ fn sys_ppoll(
         (poll_fds, revent_ptrs, timeout, sigmask)
     };
 
-    let prev_sigmask = sigmask.map(|sigmask| {
-        let prev_sigmask = task.sig_mask();
-        task.set_sig_mask(sigmask);
-        prev_sigmask
+    let token = sigmask.map(|sigmask| task.begin_temporary_sig_mask(sigmask));
+    let wait_outcome = wait_for_iomux_ready("sys_ppoll", &task, timeout, |mode| {
+        scan_ppoll_fds(&task, &mut poll_fds, mode)
     });
+    let nready = match token {
+        Some(token) => finish_temporary_iomux_wait(
+            "sys_ppoll",
+            &task,
+            token,
+            wait_outcome,
+            TemporaryMaskWaitContext::Ppoll,
+        )?,
+        None => wait_outcome.into_result_without_temporary_mask()?,
+    };
 
-    let wait_result = (|| -> Result<u64, SysError> {
-        let nready = wait_for_iomux_ready("sys_ppoll", &task, timeout, |mode| {
-            scan_ppoll_fds(&task, &mut poll_fds, mode)
-        })?;
+    if !revent_ptrs.is_empty() {
+        let usp_handle = task.clone_uspace_handle();
+        let mut usp = usp_handle.lock();
 
-        if !revent_ptrs.is_empty() {
-            let usp_handle = task.clone_uspace_handle();
-            let mut usp = usp_handle.lock();
-
-            for (poll_fd, revent_ptr) in poll_fds.iter().zip(revent_ptrs.iter()) {
-                UserWritePtr::<LinuxPollEvent>::try_new(*revent_ptr, &mut usp)?
-                    .write(poll_fd.revents);
-            }
+        for (poll_fd, revent_ptr) in poll_fds.iter().zip(revent_ptrs.iter()) {
+            UserWritePtr::<LinuxPollEvent>::try_new(*revent_ptr, &mut usp)?.write(poll_fd.revents);
         }
-
-        Ok(nready as u64)
-    })();
-
-    if let Some(prev_sigmask) = prev_sigmask {
-        task.set_sig_mask(prev_sigmask);
     }
 
-    let nready = wait_result?;
-
     kdebugln!("sys_ppoll: {} fds are ready", nready);
-    Ok(nready)
+    Ok(nready as u64)
 }

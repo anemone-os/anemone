@@ -5,11 +5,14 @@
 mod ltp;
 
 use anemone_rs::{
-    abi::system::native::power::SHUTDOWN_MAGIC,
+    abi::{
+        fs::linux::open::{O_RDONLY, O_TRUNC, O_WRONLY},
+        system::native::power::SHUTDOWN_MAGIC,
+    },
     os::{
         anemone::power::shutdown,
         linux::{
-            fs::{chdir, chroot, fstatat, mkdirat, mount, AtFd},
+            fs::{chdir, chroot, close, fstatat, mkdirat, mount, openat, read, write, AtFd},
             process::{execve, fork, wait4, WStatus, WStatusRaw, WaitFor, WaitOptions},
         },
     },
@@ -286,8 +289,79 @@ pub(crate) fn clear_tmp() {
     );
 }
 
+fn chmod_executable_if_present(path: &str) {
+    if fstatat(AtFd::Cwd, Path::new(path)).is_ok() {
+        run_busybox(&["busybox", "chmod", "a+x", path], path);
+    }
+}
+
+fn read_file(path: &str) -> Result<Vec<u8>, Errno> {
+    let fd = openat(AtFd::Cwd, Path::new(path), O_RDONLY, 0)?;
+    let mut content = Vec::new();
+    let mut buf = [0u8; 512];
+    loop {
+        let count = read(fd, &mut buf)?;
+        if count == 0 {
+            break;
+        }
+        content.extend_from_slice(&buf[..count]);
+    }
+    close(fd)?;
+    Ok(content)
+}
+
+fn write_all(fd: u32, mut buf: &[u8], path: &str) {
+    while !buf.is_empty() {
+        let written = write(fd, buf).unwrap_or_else(|errno| {
+            panic!("user-test: failed to write normalized script {path}: {errno:?}")
+        });
+        if written == 0 {
+            panic!("user-test: short write while normalizing script {path}");
+        }
+        buf = &buf[written..];
+    }
+}
+
+fn ensure_script_entrypoint(path: &str) {
+    chmod_executable_if_present(path);
+
+    let content = read_file(path)
+        .unwrap_or_else(|errno| panic!("user-test: failed to read script {path}: {errno:?}"));
+    if content.starts_with(b"#!") {
+        return;
+    }
+
+    let fd = openat(AtFd::Cwd, Path::new(path), O_WRONLY | O_TRUNC, 0)
+        .unwrap_or_else(|errno| panic!("user-test: failed to rewrite script {path}: {errno:?}"));
+    write_all(fd, b"#!/bin/sh\n", path);
+    write_all(fd, &content, path);
+    close(fd).unwrap_or_else(|errno| panic!("user-test: failed to close script {path}: {errno:?}"));
+}
+
+fn ensure_script_entrypoint_if_present(path: &str) {
+    if fstatat(AtFd::Cwd, Path::new(path)).is_ok() {
+        ensure_script_entrypoint(path);
+    }
+}
+
+fn prepare_testcode(family: &str) {
+    // The contest sdcard ships some helpers as bare shell command lists.  RV
+    // userland happens to fall back to a shell after execve(2) returns ENOEXEC,
+    // while the LA BusyBox/libc combination reports Exec format error.  Make
+    // the in-guest helper entrypoints explicit so testcase scripts do not
+    // depend on libc- or shell-specific ENOEXEC fallback behavior.
+    for script in [
+        format!("/{family}/basic/run-all.sh"),
+        format!("/{family}/run-static.sh"),
+        format!("/{family}/run-dynamic.sh"),
+    ] {
+        ensure_script_entrypoint_if_present(script.as_str());
+    }
+}
+
 fn run_test_family(family: &str, scripts: &[&str]) {
     switch_runtime(family);
+    prepare_testcode(family);
     clear_tmp();
 
     println!("user-test: running {family} competition tests...");

@@ -5,7 +5,7 @@
 //! - https://elixir.bootlin.com/linux/v6.6.32/source/fs/select.c#L795
 
 use anemone_abi::{
-    fs::linux::select::{FD_SETSIZE, FdSet},
+    fs::linux::select::{FdSet, FD_SETSIZE},
     process::linux::signal as linux_signal,
     time::linux::TimeSpec,
 };
@@ -14,11 +14,11 @@ use crate::{
     prelude::*,
     syscall::{
         handler::TryFromSyscallArg,
-        user_access::{SyscallArgValidatorExt as _, UserReadPtr, UserWritePtr, user_addr},
+        user_access::{user_addr, SyscallArgValidatorExt as _, UserReadPtr, UserWritePtr},
     },
     task::{
         files::Fd,
-        sig::{SigNo, set::SigSet},
+        sig::{set::SigSet, SigNo, TemporaryMaskWaitContext},
     },
     utils::bitmap::Bitmap,
 };
@@ -115,23 +115,21 @@ fn validate_exception_fdset(
     task: &Arc<Task>,
     n: usize,
     exception_fds: Option<&FdBitmap>,
-) -> Result<bool, SysError> {
+) -> Result<(), SysError> {
     let Some(exception_fds) = exception_fds else {
-        return Ok(false);
+        return Ok(());
     };
 
-    let mut has_interest = false;
     for fd_idx in 0..n {
         if !exception_fds.test(fd_idx) {
             continue;
         }
-        has_interest = true;
 
         let fd = Fd::try_from_syscall_arg(fd_idx as u64)?;
         let _ = task.get_fd(fd)?;
     }
 
-    Ok(has_interest)
+    Ok(())
 }
 
 fn scan_pselect_fds(
@@ -170,13 +168,16 @@ fn scan_pselect_fds(
         &mut unsupported,
     )?;
 
-    // Exception readiness has no internal PollEvent yet; keep output empty and
-    // do not register it as a latch source.
-    let has_exception_interest = validate_exception_fdset(task, n, exp_interests)?;
+    // Exception readiness has no internal PollEvent yet. Keep output empty and
+    // treat it as not ready instead of failing register scans: current Anemone
+    // sources cannot produce POLLPRI-style readiness, so this is a compatibility
+    // no-op for software that passes exceptfds defensively. Remove this stub
+    // once exception readiness has a real PollEvent and source registration.
+    validate_exception_fdset(task, n, exp_interests)?;
 
     if nready > 0 {
         Ok(IomuxScanOutcome::Ready(nready))
-    } else if unsupported || (mode.is_register() && has_exception_interest) {
+    } else if unsupported {
         Ok(IomuxScanOutcome::Unsupported)
     } else {
         Ok(IomuxScanOutcome::NotReady)
@@ -275,35 +276,36 @@ pub fn sys_pselect6(
     let mut out_ready = out_interests.as_ref().map(|_| FdBitmap::new());
     let mut exp_ready = exp_interests.as_ref().map(|_| FdBitmap::new());
 
-    let prev_mask = sigmask.map(|mask| {
-        let prev_mask = task.sig_mask();
-        task.set_sig_mask(mask);
-        prev_mask
-    });
-
-    let wait_result = (|| -> Result<u64, SysError> {
-        let nready = wait_for_iomux_ready("sys_pselect6", &task, timeout, |mode| {
-            scan_pselect_fds(
-                &task,
-                n,
-                in_interests.as_ref(),
-                out_interests.as_ref(),
-                exp_interests.as_ref(),
-                &mut in_ready,
-                &mut out_ready,
-                &mut exp_ready,
-                mode,
-            )
-        })?;
-
-        Ok(nready as u64)
-    })();
-
-    if let Some(mask) = prev_mask {
-        task.set_sig_mask(mask);
+    if exp_interests.as_ref().is_some_and(|fds| !fds.is_empty()) {
+        knoticeln!(
+            "sys_pselect6: exceptfds requested; exception readiness is a compatibility stub"
+        );
     }
 
-    let retval = wait_result?;
+    let token = sigmask.map(|mask| task.begin_temporary_sig_mask(mask));
+    let wait_outcome = wait_for_iomux_ready("sys_pselect6", &task, timeout, |mode| {
+        scan_pselect_fds(
+            &task,
+            n,
+            in_interests.as_ref(),
+            out_interests.as_ref(),
+            exp_interests.as_ref(),
+            &mut in_ready,
+            &mut out_ready,
+            &mut exp_ready,
+            mode,
+        )
+    });
+    let retval = match token {
+        Some(token) => finish_temporary_iomux_wait(
+            "sys_pselect6",
+            &task,
+            token,
+            wait_outcome,
+            TemporaryMaskWaitContext::Pselect6,
+        )?,
+        None => wait_outcome.into_result_without_temporary_mask()?,
+    };
 
     {
         // update user's fd sets.
@@ -328,5 +330,5 @@ pub fn sys_pselect6(
         }
     }
 
-    Ok(retval)
+    Ok(retval as u64)
 }

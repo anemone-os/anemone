@@ -1,15 +1,15 @@
 use crate::{
     prelude::*,
-    syscall::user_access::{UserReadPtr, user_addr},
+    syscall::user_access::UserReadPtr,
     task::sig::{
-        SigNo, Signal,
+        Signal,
         info::{SiCode, SigInfoFields, SigRt},
     },
 };
 
 use anemone_abi::process::linux::signal as linux_signal;
 
-use super::check_send_signal_permission;
+use super::{KillSignal, check_send_kill_signal_permission};
 
 /// Sends a queued signal with user-provided siginfo to a thread group.
 ///
@@ -20,28 +20,43 @@ use super::check_send_signal_permission;
 /// `CAP_KILL`. `SIGCONT` is also allowed within the same session. Existing
 /// siginfo validation remains unchanged.
 #[syscall(SYS_RT_SIGQUEUEINFO)]
-fn sys_rt_sigqueueinfo(
-    pid: Tid,
-    sig: SigNo,
-    #[validate_with(user_addr)] uinfo: VirtAddr,
-) -> Result<u64, SysError> {
+fn sys_rt_sigqueueinfo(pid: i32, sig: KillSignal, uinfo: u64) -> Result<u64, SysError> {
     kdebugln!(
-        "sys_rt_sigqueueinfo: pid={}, sig={}, uinfo={:?}",
+        "sys_rt_sigqueueinfo: pid={}, sig={:?}, uinfo={:#x}",
         pid,
-        sig.as_usize(),
+        sig,
         uinfo
     );
 
     let task = get_current_task();
 
-    let mut kbuf = linux_signal::SigInfoWrapper::default();
+    // rt_sigqueueinfo() resolves only a positive task id. Reject non-positive
+    // pid_t values before converting to Anemone's unsigned Tid, otherwise they
+    // become synthetic task ids and report ESRCH instead of EINVAL.
+    if pid <= 0 {
+        return Err(SysError::InvalidArgument);
+    }
+    let pid = Tid::new(pid as u32);
 
-    {
+    // Linux signal 0 is a null-signal probe. It checks target existence and
+    // permission, but it must not depend on caller-provided siginfo contents or
+    // publish anything into pending signal queues.
+    let signo = match sig {
+        KillSignal::Probe => {
+            let target = get_task(&pid).ok_or(SysError::NoSuchProcess)?;
+            check_send_kill_signal_permission(&target, sig)?;
+            return Ok(0);
+        },
+        KillSignal::Armed(signo) => signo,
+    };
+
+    let kbuf = {
         let usp = task.clone_uspace_handle();
         let mut guard = usp.lock();
-        let uinfo = UserReadPtr::<linux_signal::SigInfoWrapper>::try_new(uinfo, &mut guard)?;
-        kbuf = uinfo.read();
-    }
+        let uinfo =
+            UserReadPtr::<linux_signal::SigInfoWrapper>::try_new(VirtAddr::new(uinfo), &mut guard)?;
+        uinfo.read()
+    };
 
     // parse kbuf to our internal data structure.
 
@@ -61,12 +76,14 @@ fn sys_rt_sigqueueinfo(
         })
     };
 
-    let signal = Signal::new_with_errno(sig, si_code, si_fields, si_errno);
-
-    let target = get_thread_group(&pid).ok_or(SysError::NoSuchProcess)?;
-    let leader = target.leader().ok_or(SysError::NoSuchProcess)?;
-    check_send_signal_permission(&leader, sig)?;
-    target.recv_signal(signal);
+    // Linux rt_sigqueueinfo() first resolves pid as PIDTYPE_PID, then sends a
+    // process-directed signal to the resolved task's thread group. This matters
+    // for callers that pass a non-leader gettid(): lookup must succeed even
+    // though delivery remains on the shared pending queue.
+    let target = get_task(&pid).ok_or(SysError::NoSuchProcess)?;
+    check_send_kill_signal_permission(&target, sig)?;
+    let signal = Signal::new_with_errno(signo, si_code, si_fields, si_errno);
+    target.get_thread_group().recv_signal(signal);
 
     Ok(0)
 }

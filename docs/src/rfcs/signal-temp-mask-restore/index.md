@@ -1,12 +1,12 @@
 # RFC-20260606-signal-temp-mask-restore
 
-**状态：** Accepted for Implementation
+**状态：** Implemented; Runtime Validation Pending
 **负责人：** doruche, Codex
 **最后更新：** 2026-06-07
 **领域：** signal / wait-core / syscall ABI
 **事务日志：** [2026-06-06-signal-temp-mask-restore](../../devlog/transactions/2026-06-06-signal-temp-mask-restore.md)
 **开放问题：** None；document-layer review 与软件工程审查发现的问题均已折回 accepted contract，并列入 [Tracking Issues](./tracking-issues.md) 的 Neutralized。
-**下一步：** 阶段 1A / 1B 已完成并通过 Gate 1 / Gate 2 review；下一步按 [Agent 编排建议](./backgrounds/agent-orchestration.md) 启动 Agent 3 的阶段 2 signal delivery 接入，当前尚未启动。
+**下一步：** 阶段 1A / 1B / 2、signal-owned classifier / stable handoff、`rt_sigsuspend`、`ppoll` / `pselect6` typed outcome 迁移、`rt_sigtimedwait` 本地 waited-set dequeue 边界修复，以及 Agent 8 最终旁路审计与事务收口已完成；运行态 smoke、`rt_sigsuspend01`、`sigsuspend01`、`rt_sigtimedwait01`、`sigtimedwait01` 和 signal group 验证尚未由 agent 运行，待用户或后续获授权运行确认。
 
 ## 摘要
 
@@ -179,3 +179,5 @@ TemporaryMaskWaitDecision {
 - `ppoll` / `pselect6` 迁移到 shared helper 的证据。
 - `rt_sigtimedwait` 未迁入 delayed restore helper、并在本地修复 signal / force wake 后 waited-set dequeue 的边界审查。
 - `just build`、自建 signal smoke、`rt_sigsuspend01`、`sigsuspend01` 和相关 signal group 验证结果。
+
+当前实现阶段已按事务日志收口：Agent 8 完成旁路审计，未发现需要回到 RFC review 的代码遗漏或停止条件。agent-run 最低验证以最终事务日志为准；QEMU、smoke 和 LTP 运行态证据未由本阶段 agent 执行，不能视为已通过。

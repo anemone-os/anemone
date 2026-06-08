@@ -7,7 +7,7 @@ use crate::{
     },
 };
 
-use super::{can_send_signal_to, check_send_signal_permission};
+use super::{KillSignal, can_send_kill_signal_to, check_send_kill_signal_permission};
 
 #[derive(Debug)]
 enum KillTarget {
@@ -32,25 +32,19 @@ impl TryFromSyscallArg for KillTarget {
 }
 
 #[syscall(SYS_KILL)]
-fn sys_kill(target: KillTarget, signo: SigNo) -> Result<u64, SysError> {
-    kdebugln!("kill: target={:?}, signo={:?}", target, signo);
+fn sys_kill(target: KillTarget, sig: KillSignal) -> Result<u64, SysError> {
+    kdebugln!("kill: target={:?}, sig={:?}", target, sig);
 
     let current = get_current_task();
-    let signal = Signal::new(
-        signo,
-        SiCode::User,
-        SigInfoFields::Kill(SigKill {
-            pid: current.tgid(),
-            uid: current.cred().uid.real,
-        }),
-    );
 
     match target {
         KillTarget::ThreadGroup(tgid) => {
             let tg = get_thread_group(&tgid).ok_or(SysError::NoSuchProcess)?;
             let leader = tg.leader().ok_or(SysError::NoSuchProcess)?;
-            check_send_signal_permission(&leader, signo)?;
-            tg.recv_signal(signal);
+            check_send_kill_signal_permission(&leader, sig)?;
+            if let KillSignal::Armed(signo) = sig {
+                tg.recv_signal(kill_signal(signo));
+            }
         },
         KillTarget::CurrentProcessGroup => {
             let pgid = current.get_thread_group().pgid();
@@ -58,8 +52,10 @@ fn sys_kill(target: KillTarget, signo: SigNo) -> Result<u64, SysError> {
             let mut delivered = false;
             for tg in pg.get_members() {
                 if let Some(leader) = tg.leader() {
-                    if can_send_signal_to(&leader, signo) {
-                        tg.recv_signal(signal.clone());
+                    if can_send_kill_signal_to(&leader, sig) {
+                        if let KillSignal::Armed(signo) = sig {
+                            tg.recv_signal(kill_signal(signo));
+                        }
                         delivered = true;
                     }
                 }
@@ -73,8 +69,10 @@ fn sys_kill(target: KillTarget, signo: SigNo) -> Result<u64, SysError> {
             let mut delivered = false;
             for tg in pg.get_members() {
                 if let Some(leader) = tg.leader() {
-                    if can_send_signal_to(&leader, signo) {
-                        tg.recv_signal(signal.clone());
+                    if can_send_kill_signal_to(&leader, sig) {
+                        if let KillSignal::Armed(signo) = sig {
+                            tg.recv_signal(kill_signal(signo));
+                        }
                         delivered = true;
                     }
                 }
@@ -104,8 +102,10 @@ fn sys_kill(target: KillTarget, signo: SigNo) -> Result<u64, SysError> {
             let mut delivered = false;
             for tg in targets {
                 if let Some(leader) = tg.leader() {
-                    if can_send_signal_to(&leader, signo) {
-                        tg.recv_signal(signal.clone());
+                    if can_send_kill_signal_to(&leader, sig) {
+                        if let KillSignal::Armed(signo) = sig {
+                            tg.recv_signal(kill_signal(signo));
+                        }
                         delivered = true;
                     }
                 }
@@ -117,4 +117,16 @@ fn sys_kill(target: KillTarget, signo: SigNo) -> Result<u64, SysError> {
     }
 
     Ok(0)
+}
+
+fn kill_signal(signo: SigNo) -> Signal {
+    let current = get_current_task();
+    Signal::new(
+        signo,
+        SiCode::User,
+        SigInfoFields::Kill(SigKill {
+            pid: current.tgid(),
+            uid: current.cred().uid.real,
+        }),
+    )
 }

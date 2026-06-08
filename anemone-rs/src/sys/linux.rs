@@ -184,8 +184,18 @@ pub mod process {
         unsafe { syscall(SYS_GETPPID, 0, 0, 0, 0, 0, 0) }
     }
 
-    pub fn setpgid(pid: u64, pgid: u64) -> Result<u64, Errno> {
-        unsafe { syscall(SYS_SETPGID, pid, pgid, 0, 0, 0, 0) }
+    pub fn setpgid(pid: i32, pgid: i32) -> Result<u64, Errno> {
+        unsafe {
+            syscall(
+                SYS_SETPGID,
+                pid as i64 as u64,
+                pgid as i64 as u64,
+                0,
+                0,
+                0,
+                0,
+            )
+        }
     }
 
     pub fn wait4(pid: u64, wstatus_ptr: u64, options: u64, rusage_ptr: u64) -> Result<u64, Errno> {
@@ -194,6 +204,20 @@ pub mod process {
 
     pub mod signal {
         use super::*;
+
+        pub fn kill(pid: i32, sig: u32) -> Result<u64, Errno> {
+            unsafe {
+                syscall(
+                    SYS_KILL,
+                    pid as i64 as u64,
+                    sig as u64,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            }
+        }
 
         pub fn sigaltstack(uss: u64, uoss: u64) -> Result<u64, Errno> {
             unsafe { syscall(SYS_SIGALTSTACK, uss, uoss, 0, 0, 0, 0) }

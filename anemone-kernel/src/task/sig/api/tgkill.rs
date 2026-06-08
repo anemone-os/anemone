@@ -11,33 +11,42 @@ use crate::{
     },
 };
 
-use super::check_send_signal_permission;
+use super::{KillSignal, check_send_kill_signal_permission};
 
 #[syscall(SYS_TGKILL)]
-fn sys_tgkill(tgid: Tid, tid: Tid, sig: SigNo) -> Result<u64, SysError> {
-    kdebugln!(
-        "sys_tgkill: tgid={}, tid={}, sig={}",
-        tgid.get(),
-        tid.get(),
-        sig.as_usize(),
-    );
+fn sys_tgkill(tgid: i32, tid: i32, sig: KillSignal) -> Result<u64, SysError> {
+    kdebugln!("sys_tgkill: tgid={}, tid={}, sig={:?}", tgid, tid, sig);
 
-    let current = get_current_task();
-    let signal = Signal::new(
-        sig,
-        SiCode::TKill,
-        SigInfoFields::TKill(SigKill {
-            pid: current.tgid(),
-            uid: current.cred().uid.real,
-        }),
-    );
+    // Linux tgkill(2) takes pid_t arguments and rejects non-positive task
+    // identities before task lookup. Keep that check before converting into
+    // Anemone's unsigned Tid, otherwise negative pid_t values would turn into
+    // large synthetic TIDs and report ESRCH instead of EINVAL.
+    if tgid <= 0 || tid <= 0 {
+        return Err(SysError::InvalidArgument);
+    }
+    let tgid = Tid::new(tgid as u32);
+    let tid = Tid::new(tid as u32);
 
     let tg = get_thread_group(&tgid).ok_or(SysError::NoSuchProcess)?;
     let thread = tg
         .find_member(|member| member.tid() == tid)
         .ok_or(SysError::NoSuchProcess)?;
-    check_send_signal_permission(&thread, sig)?;
-    thread.recv_signal(signal);
+    check_send_kill_signal_permission(&thread, sig)?;
+    if let KillSignal::Armed(signo) = sig {
+        thread.recv_signal(tkill_signal(signo));
+    }
 
     Ok(0)
+}
+
+fn tkill_signal(signo: SigNo) -> Signal {
+    let current = get_current_task();
+    Signal::new(
+        signo,
+        SiCode::TKill,
+        SigInfoFields::TKill(SigKill {
+            pid: current.tgid(),
+            uid: current.cred().uid.real,
+        }),
+    )
 }

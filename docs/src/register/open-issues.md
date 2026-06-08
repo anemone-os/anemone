@@ -187,3 +187,39 @@
 
 **Severity:** Medium
 **Workaround:** 不要把当前 `rt_sigtimedwait` 的 async wake `EINTR` 结果当成已收敛 ABI；需要验证同步信号等待语义时，应使用覆盖 precheck-after-arrival 窗口的定向用例重新确认。
+
+## ANE-20260607-SIGNAL-LTP-REMAINING-SEMANTICS
+
+**Type:** Issue
+**Status:** Open
+**Area:** signal / syscall ABI / scheduler / user-test / LTP
+
+**Symptom / Trigger:** `build/user-test-rv64.log` 的 signal profile 中，`tgkill03` 和 `rt_sigqueueinfo01` 已有明确窄修；剩余仍有若干非设施型缺口需要单独收敛：`tgkill02` 在 `RLIMIT_SIGPENDING=0` 且 realtime signal 被阻塞时，Linux/LTP 期望 `tgkill()` 返回 `EAGAIN`，当前仍成功；`rt_sigaction01` / `rt_sigaction02` 在 signal 64 边界分别表现为期望成功却得到 `EINVAL`、坏用户指针期望 `EFAULT` 却先被 signal 编号校验拦成 `EINVAL`；`kill02` 在 child setup 阶段 timeout 并 `TBROK`，当前判断更像 LTP busy-poll/setup 与 scheduler/preemption 可观察性问题，不能作为 kill syscall errno 语义失败直接处理。
+
+**Impact:** 这些残余会继续拉低 signal profile 得分，并且会把三类问题混在一起：realtime pending queue/resource accounting、signal number ABI 上界与参数校验顺序、以及 LTP setup 运行时可调度性。若不分开处理，后续容易为单个 TFAIL 写出过宽的 signal 子系统改动。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-07
+**Exit Condition:** 分别补齐并验证：realtime signal queue 与 `RLIMIT_SIGPENDING` 的 `EAGAIN` 语义；rt signal 编号上界 / `NSIG` 与 bad pointer 校验顺序策略；`kill02` setup timeout 的调度或 runner 根因。随后复跑 signal profile，确认 `tgkill02`、`rt_sigaction01`、`rt_sigaction02` 和 `kill02` 被重新归类或通过。
+**Related:** [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [当前限制：Signal LTP infra](./current-limitations.md#ane-20260607-signal-ltp-infra-stage1), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+**Severity:** Medium
+**Workaround:** 当前先不要把 `tgkill02` / `rt_sigaction01` / `rt_sigaction02` / `kill02` 当成同一个 signal delivery bug；优先按上述子问题分别构造或复跑定向用例。
+
+## ANE-20260608-RISCV-FPU-TRAP-RETURN-UNSAFE-BOUNDARY
+
+**Type:** Issue
+**Status:** Open
+**Area:** riscv64 / trap return / FPU / unsafe boundary
+
+**Symptom / Trigger:** rv64 LTP `poll02`、`pselect01` 等路径在 release 运行中会在用户态浮点指令附近收到 `SIGILL`，即使日志已经显示 lazy-FPU 路径曾为该 task 打印 `enabled fpu`。问题对插桩高度敏感：在 `utrap` 路径打日志会让原始 `SIGILL` 消失；普通 `let _ = trapframe.sstatus()` 不改变行为；`core::hint::black_box(trapframe.sstatus())` 又能让失败消失。TCB 侧缓存 `utrapframe` pointer 的旧别名风险已移除，syscall / signal 路径已统一使用 `__trapframe__`，但当前仍只能用 `black_box` 作为 release 止血。
+
+**Impact:** 该现象说明 riscv64 用户返回、FPU lazy enable、trapframe 内存提交和 `sstatus.FS` CSR 恢复之间的 unsafe Rust / assembly 边界仍未被充分建模。`Task::fpu_used()` 只能证明 task 有 FPU 上下文，不能证明每次 `sret` 前 return assembly 都消费到了已提交的非 `Off` `sstatus.FS`。如果该边界在 release 下仍可能被优化、重排或以错误别名假设处理，就会把原本应继续执行的用户态浮点指令错误暴露为 `SIGILL`，并遮蔽 `poll02` / `pselect01` 以及其它 rv64 SIGILL 相关回归判断。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-08
+**Exit Condition:** 明确并收敛 riscv64 FPU/trap-return unsafe 边界，使返回用户态前的 trapframe `sstatus.FS` 更新成为真实、有序且对 return assembly 可见的提交；移除 `black_box` 止血后，release rv64 `poll02` / `pselect01` 不再在已启用 FPU 后因同类浮点指令收到 `SIGILL`，并补充足够诊断确认 repeated illegal-instruction 分支不再被正常路径依赖。
+**Related:** [SHMAT1 SIGILL revalidation](#ane-20260602-shmat1-sigill-masks-segv-hang-revalidation)
+
+**Severity:** High
+**Workaround:** 暂时保留 `core::hint::black_box(trapframe.sstatus())` 作为 release 稳定器；不要把该 workaround 当成 FPU 状态管理已经正确的证明，也不要用被它改变过的失败表面反向归类后续 `SIGIOT` / `SIGABRT` 等 LTP harness 失败。

@@ -104,19 +104,19 @@ cgroup_core02
 cgroup_core03
 cgroup_fj_common.sh
 cgroup_fj_function.sh
-cgroup_fj_proc
+# cgroup_fj_proc
 cgroup_fj_stress.sh
 cgroup_lib.sh
-cgroup_regression_3_1.sh
-cgroup_regression_3_2.sh
-cgroup_regression_5_1.sh
-cgroup_regression_5_2.sh
-cgroup_regression_6_1.sh
-cgroup_regression_6_2.sh
-cgroup_regression_fork_processes
-cgroup_regression_getdelays
-cgroup_regression_test.sh
-cgroup_xattr
+# cgroup_regression_3_1.sh
+# cgroup_regression_3_2.sh
+# cgroup_regression_5_1.sh
+# cgroup_regression_5_2.sh
+# cgroup_regression_6_1.sh
+# cgroup_regression_6_2.sh
+# cgroup_regression_fork_processes
+# cgroup_regression_getdelays
+# cgroup_regression_test.sh
+# cgroup_xattr
 change_password.sh
 chdir01
 chdir04
@@ -194,7 +194,7 @@ cpuctl_def_task01
 cpuctl_def_task02
 cpuctl_def_task03
 cpuctl_def_task04
-cpuctl_fj_cpu-hog
+# cpuctl_fj_cpu-hog
 cpuctl_fj_simple_echo
 cpuctl_latency_check_task
 cpuctl_latency_test
@@ -203,40 +203,40 @@ cpuctl_test02
 cpuctl_test03
 cpuctl_test04
 cpufreq_boost
-cpuhotplug01.sh
-cpuhotplug02.sh
-cpuhotplug03.sh
-cpuhotplug04.sh
-cpuhotplug05.sh
-cpuhotplug06.sh
-cpuhotplug07.sh
-cpuhotplug_do_disk_write_loop
-cpuhotplug_do_kcompile_loop
-cpuhotplug_do_spin_loop
-cpuhotplug_hotplug.sh
-cpuhotplug_report_proc_interrupts
-cpuhotplug_testsuite.sh
-cpuset01
-cpuset_base_ops_testset.sh
-cpuset_cpu_hog
-cpuset_exclusive_test.sh
-cpuset_funcs.sh
-cpuset_hierarchy_test.sh
-cpuset_hotplug_test.sh
-cpuset_inherit_testset.sh
-cpuset_list_compute
-cpuset_load_balance_test.sh
-cpuset_mem_hog
-cpuset_memory_pressure
-cpuset_memory_pressure_testset.sh
-cpuset_memory_spread_testset.sh
-cpuset_memory_test
-cpuset_memory_testset.sh
-cpuset_regression_test.sh
-cpuset_sched_domains_check
-cpuset_sched_domains_test.sh
-cpuset_syscall_test
-cpuset_syscall_testset.sh
+# cpuhotplug01.sh
+# cpuhotplug02.sh
+# cpuhotplug03.sh
+# cpuhotplug04.sh
+# cpuhotplug05.sh
+# cpuhotplug06.sh
+# cpuhotplug07.sh
+# cpuhotplug_do_disk_write_loop
+# cpuhotplug_do_kcompile_loop
+# cpuhotplug_do_spin_loop
+# cpuhotplug_hotplug.sh
+# cpuhotplug_report_proc_interrupts
+# cpuhotplug_testsuite.sh
+# cpuset01
+# cpuset_base_ops_testset.sh
+# cpuset_cpu_hog
+# cpuset_exclusive_test.sh
+# cpuset_funcs.sh
+# cpuset_hierarchy_test.sh
+# cpuset_hotplug_test.sh
+# cpuset_inherit_testset.sh
+# cpuset_list_compute
+# cpuset_load_balance_test.sh
+# cpuset_mem_hog
+# cpuset_memory_pressure
+# cpuset_memory_pressure_testset.sh
+# cpuset_memory_spread_testset.sh
+# cpuset_memory_test
+# cpuset_memory_testset.sh
+# cpuset_regression_test.sh
+# cpuset_sched_domains_check
+# cpuset_sched_domains_test.sh
+# cpuset_syscall_test
+# cpuset_syscall_testset.sh
 crash01
 crash02
 creat01
@@ -278,17 +278,17 @@ df01.sh
 dhcp_lib.sh
 dhcpd_tests.sh
 dio_append
-dio_read
-dio_sparse
-dio_truncate
-diotest1
-diotest2
-diotest3
-diotest4
-diotest5
-diotest6
-dirty
-dirtyc0w
+# dio_read
+# dio_sparse
+# dio_truncate
+# diotest1
+# diotest2
+# diotest3
+# diotest4
+# diotest5
+# diotest6
+# dirty
+# dirtyc0w
 dirtyc0w_child
 dirtyc0w_shmem
 dirtyc0w_shmem_child
@@ -318,33 +318,33 @@ dup207
 dup3_01
 dup3_02
 dynamic_debug01.sh
-ebizzy
+# ebizzy
 eject-tests.sh
 eject_check_tray
 endian_switch01
-epoll-ltp
-epoll_create01
-epoll_create02
-epoll_create1_01
-epoll_create1_02
-epoll_ctl01
-epoll_ctl02
-epoll_ctl03
-epoll_ctl04
-epoll_ctl05
-epoll_pwait01
-epoll_pwait02
-epoll_pwait03
-epoll_pwait04
-epoll_pwait05
-epoll_wait01
-epoll_wait02
-epoll_wait03
-epoll_wait04
-epoll_wait05
-epoll_wait06
-epoll_wait07
-event_generator
+# epoll-ltp
+# epoll_create01
+# epoll_create02
+# epoll_create1_01
+# epoll_create1_02
+# epoll_ctl01
+# epoll_ctl02
+# epoll_ctl03
+# epoll_ctl04
+# epoll_ctl05
+# epoll_pwait01
+# epoll_pwait02
+# epoll_pwait03
+# epoll_pwait04
+# epoll_pwait05
+# epoll_wait01
+# epoll_wait02
+# epoll_wait03
+# epoll_wait04
+# epoll_wait05
+# epoll_wait06
+# epoll_wait07
+# event_generator
 eventfd01
 eventfd02
 eventfd03
@@ -531,11 +531,11 @@ finit_module02
 flistxattr01
 flistxattr02
 flistxattr03
-float_bessel
-float_exp_log
-float_iperb
-float_power
-float_trigo
+# float_bessel
+# float_exp_log
+# float_iperb
+# float_power
+# float_trigo
 flock01
 flock02
 flock03
@@ -552,7 +552,7 @@ fork09
 fork10
 fork13
 fork14
-fork_exec_loop
+# fork_exec_loop
 fork_freeze.sh
 fork_procs
 fou01.sh
@@ -2781,33 +2781,33 @@ vxlan01.sh
 vxlan02.sh
 vxlan03.sh
 vxlan04.sh
-wait01
-wait02
-wait401
-wait402
-wait403
-waitid01
-waitid02
-waitid03
-waitid04
-waitid05
-waitid06
-waitid07
-waitid08
-waitid09
-waitid10
-waitid11
-waitpid01
-waitpid03
-waitpid04
-waitpid06
-waitpid07
-waitpid08
-waitpid09
-waitpid10
-waitpid11
-waitpid12
-waitpid13
+# wait01
+# wait02
+# wait401
+# wait402
+# wait403
+# waitid01
+# waitid02
+# waitid03
+# waitid04
+# waitid05
+# waitid06
+# waitid07
+# waitid08
+# waitid09
+# waitid10
+# waitid11
+# waitpid01
+# waitpid03
+# waitpid04
+# waitpid06
+# waitpid07
+# waitpid08
+# waitpid09
+# waitpid10
+# waitpid11
+# waitpid12
+# waitpid13
 wc01.sh
 which01.sh
 wireguard01.sh

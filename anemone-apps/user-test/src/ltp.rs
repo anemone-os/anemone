@@ -413,7 +413,10 @@ fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpC
         },
         Ok(None) => {
             if let Err(errno) = setpgid(0, 0) {
-                println!("user-test: {} setpgid(0, 0) failed: {errno:?}", case.name);
+                println!(
+                    "user-test: INFRA {} setpgid(0, 0) failed before execve: {errno:?}; not running case",
+                    case.name,
+                );
                 exit(127);
             }
 
