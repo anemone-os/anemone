@@ -49,4 +49,5 @@ source = { type = "block", path = "vdb" }
 
 [dtb]
 path = "arch/loongarch64/generated.dtb"
-type = "qemu"
+type = "file"
+source = "conf/platforms/pre-test-la64.dtb"
