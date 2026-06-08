@@ -1,6 +1,4 @@
 all:
-	mkdir -p .cargo
-	cp cargo-config.toml .cargo/config.toml
 	make build
 
 build:
@@ -24,4 +22,4 @@ local_test:
 	@echo PASS COUNT ON LA:
 	@cat etc/log-la.log | grep "TPASS" | wc -l
 
-.PHONY: all local_test local_build
+.PHONY: local_test local_build build

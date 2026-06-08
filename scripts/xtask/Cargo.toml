@@ -5,8 +5,8 @@ edition = "2024"
 
 [dependencies]
 # xshell = "0.2.7"
-xshell = { git = "https://github.com/doruche/xshell", branch = "feature/echo" }
-anyhow = "1.0.100"
+xshell = { path = "./crates/xshell" }
+anyhow = "1.0.102"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = { version = "0.9.11" }
 clap = { version = "4.5.55", features = ["derive"] }
