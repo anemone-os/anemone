@@ -2,11 +2,11 @@
 
 **状态：** Draft，已提升为公开 RFC 草案
 **负责人：** doruche, Codex
-**最后更新：** 2026-06-05
+**最后更新：** 2026-06-08
 **领域：** fs / VFS / syscall ABI / iomux / procfs / LTP
-**事务日志：** None；进入实现阶段前建立。
+**事务日志：** [2026-06-08 - Fanotify](../../devlog/transactions/2026-06-08-fanotify.md)
 **开放问题：** [fanotify tracking issues](./tracking-issues.md) 当前无 Open Keter / Euclid；强一致或高成本 Linux 语义仍按非目标和 Stage 5 backlog 暂缓。
-**下一步：** 完成公开 RFC review；若进入实现，先创建事务日志，再按 [迁移实施计划](./implementation.md) 推进 Stage 0 + Stage 1 合并 gate，并在实现证据中复核 feature gate、module/API 可见性、registry/lifecycle、path-fd read 提交、fd reservation 和 close release 来源。
+**下一步：** 按 [Fanotify 事务日志](../../devlog/transactions/2026-06-08-fanotify.md) 推进 Gate A：先建立 task/fd 通用能力与 `fs::fanotify` owner module，使 Stage 0 + Stage 1 合并 gate 闭合；后续再进入 mark registry、path-fd read 提交、VFS 基础事件 hook 和 FID/name negative gate。
 
 ## 摘要
 

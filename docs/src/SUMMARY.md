@@ -15,6 +15,7 @@
 		- [PROC TGID FD](./devlog/transactions/2026-06-04-proc-tgid-fd.md)
 		- [FileOps Seek 与字符设备 ioctl](./devlog/transactions/2026-06-05-fileops-seek-char-ioctl.md)
 		- [Signal 临时 Mask Restore](./devlog/transactions/2026-06-06-signal-temp-mask-restore.md)
+		- [Fanotify](./devlog/transactions/2026-06-08-fanotify.md)
 - [初赛冲刺策略（2026-05 至 2026-06）](./preliminary-contest-sprint.md)
 - [已知问题与当前限制](./known-issues-and-limitations.md)
 	- [活动登记册](./register.md)
