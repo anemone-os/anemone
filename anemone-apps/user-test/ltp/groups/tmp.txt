@@ -1,7 +1,2 @@
-connect01
-kill06
-kill08
-setpgid01
-setpgid02
-setpgid03
-setsid01
+pselect01
+poll02

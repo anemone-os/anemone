@@ -198,13 +198,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
     // Fpu are disabled in kernel mode
     set_fpu_status(false);
 
-    {
-        let task = get_current_task();
-        unsafe {
-            task.set_utrapframe(trapframe);
-        }
-        task.on_prv_change(Privilege::Kernel);
-    }
+    get_current_task().on_prv_change(Privilege::Kernel);
 
     let (mut restart_syscall, syscall_ctx) = (None, TrapArch::syscall_ctx_snapshot(trapframe));
 

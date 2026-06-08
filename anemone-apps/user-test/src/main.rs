@@ -280,8 +280,23 @@ pub(crate) fn clear_tmp() {
     );
 }
 
+fn prepare_testcode(family: &str) {
+    let run_all = format!("/{family}/basic/run-all.sh");
+    if fstatat(AtFd::Cwd, Path::new(run_all.as_str())).is_ok() {
+        // The contest sdcard may ship this helper as 0644, but
+        // basic_testcode.sh executes it as ./run-all.sh. Normalize the fresh
+        // in-guest image before running the script instead of depending on
+        // host-side staging permissions.
+        run_busybox(
+            &["busybox", "chmod", "a+x", run_all.as_str()],
+            run_all.as_str(),
+        );
+    }
+}
+
 fn run_test_family(family: &str, scripts: &[&str]) {
     switch_runtime(family);
+    prepare_testcode(family);
     clear_tmp();
 
     println!("user-test: running {family} competition tests...");
