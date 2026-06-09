@@ -919,6 +919,30 @@ impl FilesState {
         closed
     }
 
+    fn drain_all_published_fds(&mut self) -> Vec<Arc<ProcFile>> {
+        let mut closed = Vec::new();
+        for (fd, file_desc) in self.fds.iter_mut().enumerate() {
+            if let Some(file_desc) = file_desc.take() {
+                assert!(
+                    self.bitmap.test(fd),
+                    "published fd slot missing allocator bit during explicit fd-table cleanup"
+                );
+                assert!(
+                    !self.reserved_bitmap.test(fd),
+                    "published fd slot marked reserved during explicit fd-table cleanup"
+                );
+                closed.push(file_desc.unpublish_from_fd_table());
+            }
+        }
+
+        // This is an explicit lifetime boundary for a whole fd table. Reserved
+        // slots are allocator state, not opened descriptions, so they are
+        // cleared here instead of relying on `Drop` to repair leaked state.
+        self.bitmap.clear_all();
+        self.reserved_bitmap.clear_all();
+        closed
+    }
+
     pub fn fork(&self) -> Self {
         // note: we should clone file desc itself, not the arc, so that we can
         // have different fd flags for the new fd table.
@@ -951,19 +975,45 @@ impl FilesState {
 
 impl Drop for FilesState {
     fn drop(&mut self) {
-        let mut closed = Vec::new();
-        for file_desc in self.fds.iter_mut().filter_map(Option::take) {
-            closed.push(file_desc.unpublish_from_fd_table());
-        }
-        self.bitmap.clear_all();
-        self.reserved_bitmap.clear_all();
-        for pfile in closed {
-            pfile.release_description_ref();
-        }
+        assert!(
+            self.fds.iter().all(Option::is_none),
+            "FilesState dropped with published fd slots; missing explicit fd-table cleanup"
+        );
+        assert!(
+            self.bitmap.is_empty(),
+            "FilesState dropped with allocator bits set; missing explicit fd-table cleanup"
+        );
+        assert!(
+            self.reserved_bitmap.is_empty(),
+            "FilesState dropped with reserved fd slots; missing explicit fd-table cleanup"
+        );
     }
 }
 
 impl Task {
+    fn release_description_ref(pfile: Arc<ProcFile>) {
+        pfile.release_description_ref();
+    }
+
+    fn release_description_refs(closed: Vec<Arc<ProcFile>>) {
+        for pfile in closed {
+            Self::release_description_ref(pfile);
+        }
+    }
+
+    fn drain_files_state_handle_if_last_arc(files_state: Arc<RwLock<FilesState>>) {
+        // A shared CLONE_FILES table has one set of published slots owned by the
+        // still-shared table. Replacing this task's handle must not unpublish
+        // those slots while another task can still observe them. The Arc count
+        // is a conservative ownership proxy: count > 1 may include temporary
+        // observers, but skipping semantic cleanup is preferable to closing a
+        // table another task may still share.
+        if Arc::strong_count(&files_state) == 1 {
+            let closed = files_state.write().drain_all_published_fds();
+            Self::release_description_refs(closed);
+        }
+    }
+
     pub fn open_fd(
         &self,
         file: File,
@@ -1031,10 +1081,12 @@ impl Task {
     /// [`Self::replace_files_state_handle`].
     pub fn set_files_state(&self, files_state: FilesState) {
         let files_state_handle = self.files_state();
-        let old = {
+        let mut old = {
             let mut guard = files_state_handle.write();
             core::mem::replace(&mut *guard, files_state)
         };
+        let closed = old.drain_all_published_fds();
+        Self::release_description_refs(closed);
         drop(old);
     }
 
@@ -1047,7 +1099,24 @@ impl Task {
             let mut guard = self.files_state.write();
             core::mem::replace(&mut *guard, files_state)
         };
-        drop(old);
+        Self::drain_files_state_handle_if_last_arc(old);
+    }
+
+    pub fn close_all_fds_for_exit(&self) {
+        assert!(
+            IntrArch::local_intr_enabled(),
+            "fd-table exit cleanup must run with interrupts enabled"
+        );
+        assert!(
+            allow_preempt(),
+            "fd-table exit cleanup must run in a sleepable context"
+        );
+
+        let old = {
+            let mut guard = self.files_state.write();
+            core::mem::replace(&mut *guard, Arc::new(RwLock::new(FilesState::new())))
+        };
+        Self::drain_files_state_handle_if_last_arc(old);
     }
 
     pub fn close_fd(&self, fd: Fd) -> Result<(), SysError> {
@@ -1056,7 +1125,7 @@ impl Task {
             let mut files_state = files_state.write();
             files_state.close_fd(fd)?
         };
-        pfile.release_description_ref();
+        Self::release_description_ref(pfile);
         Ok(())
     }
 
@@ -1083,18 +1152,14 @@ impl Task {
             let mut files_state = files_state.write();
             files_state.dup3(old_fd, new_fd, flags)?
         };
-        for pfile in closed {
-            pfile.release_description_ref();
-        }
+        Self::release_description_refs(closed);
         Ok(new_fd)
     }
 
     pub fn close_cloexec_fds(&self) {
         let files_state = self.files_state();
         let closed = files_state.write().close_on_exec();
-        for pfile in closed {
-            pfile.release_description_ref();
-        }
+        Self::release_description_refs(closed);
     }
 
     pub fn unshare_files_state(&self) {
@@ -1107,7 +1172,7 @@ impl Task {
             let mut guard = self.files_state.write();
             core::mem::replace(&mut *guard, forked)
         };
-        drop(old);
+        Self::drain_files_state_handle_if_last_arc(old);
     }
 
     pub fn close_range(
@@ -1125,9 +1190,7 @@ impl Task {
             files_state.read().set_close_on_exec_range(first, last);
         } else {
             let closed = files_state.write().close_range(first, last);
-            for pfile in closed {
-                pfile.release_description_ref();
-            }
+            Self::release_description_refs(closed);
         }
     }
 }

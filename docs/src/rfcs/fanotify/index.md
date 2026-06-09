@@ -5,8 +5,8 @@
 **最后更新：** 2026-06-09
 **领域：** fs / VFS / syscall ABI / iomux / procfs / LTP
 **事务日志：** [2026-06-08 - Fanotify](../../devlog/transactions/2026-06-08-fanotify.md)
-**开放问题：** [fanotify tracking issues](./tracking-issues.md) 当前有 `FANOTIFY-041` Gate C corrective Keter：fd table / task `Drop` 不得触发 group semantic teardown。强一致或高成本 Linux 语义仍按非目标和 Stage 5 backlog 暂缓。
-**下一步：** Gate C 在源码层已完成 D4，但 D5 前必须先按 [Fanotify 事务日志](../../devlog/transactions/2026-06-08-fanotify.md) 修复 `FANOTIFY-041`；不得把 FID/name 正向 ABI、procfs fdinfo 或 permission events 合入该 corrective repair。
+**开放问题：** [fanotify tracking issues](./tracking-issues.md) 当前无活跃 Keter；`FANOTIFY-041` Gate C corrective Keter 已 neutralized。强一致或高成本 Linux 语义仍按非目标和 Stage 5 backlog 暂缓。
+**下一步：** Gate C 在源码层已完成 D4 与 `FANOTIFY-041` corrective repair；等待用户确认后启动 D5 VFS 基础 event injection。不得把 FID/name 正向 ABI、procfs fdinfo 或 permission events 合入 D5 前置修复。
 
 ## 摘要
 

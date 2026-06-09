@@ -21,9 +21,21 @@
 
 ## Keter
 
+- 暂无。
+
+## Euclid
+
+- 暂无。
+
+## Safe
+
+- 暂无。
+
+## Neutralized
+
 ### FANOTIFY-041: fd table / task `Drop` 不得触发 group semantic teardown
 
-**状态：** Keter
+**状态：** Neutralized
 
 **发现证据：** D4 完成后的 `fanotify07` runtime smoke 中，permission event probe 按当前 RFC
 暂缓边界返回 `EINVAL` 并被 LTP 归类为 `TCONF`，但 testcase 退出后 panic：
@@ -52,15 +64,15 @@ drain published fd refs 并运行 opened-description final-release；`FilesState
 应断言当前可睡眠 / interrupts enabled，以防后续回归。修复后 `fanotify07` 可以继续 TCONF，但不
 得 panic。
 
-## Euclid
+**实际修复：** `task/files.rs` 新增显式 fd-table drain 路径，`kernel_exit()`、fd-table
+replacement / unshare 和 clone 失败清理在可睡眠、interrupts-enabled 的显式生命周期点摘除
+published fd refs 并在锁外运行 opened-description final-release。`FilesState::drop()` 不再补做
+final-release，只断言没有 published / reserved slot。fanotify group fd final-release 入口断言
+非 notification-suppressed、interrupts enabled 且 sleepable，再执行 `mark_dead()`。
 
-- 暂无。
-
-## Safe
-
-- 暂无。
-
-## Neutralized
+**复核与残余风险：** review agent 未发现 Apollyon / Keter。`Arc::strong_count == 1` 作为
+fd-table drain 的保守条件不是精确 task-owner 计数；若未来出现非 owner observer 跨越最后 task
+owner exit 的真实路径，`FilesState::drop()` 会断言暴露遗漏，而不会在 Drop 中静默执行系统资源释放。
 
 ### FANOTIFY-001A: blocking `read(fanotify_fd)` 与首个 group fd gate 未闭合
 

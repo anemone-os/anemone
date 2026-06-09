@@ -346,11 +346,19 @@ fn write_metadata_to_segments(
 
 fn fanotify_final_release(ctx: OpenedFileFinalReleaseCtx<'_>) {
     let notification_suppressed = ctx.notification_suppressed;
-    FanGroupFile::group(ctx.file).mark_dead();
     assert!(
         !notification_suppressed,
         "fanotify group fd final-release must not be notification-suppressed"
     );
+    assert!(
+        IntrArch::local_intr_enabled(),
+        "fanotify group fd final-release must run with interrupts enabled"
+    );
+    assert!(
+        allow_preempt(),
+        "fanotify group fd final-release must run in a sleepable context"
+    );
+    FanGroupFile::group(ctx.file).mark_dead();
 }
 
 fn fanotify_legacy_read(
