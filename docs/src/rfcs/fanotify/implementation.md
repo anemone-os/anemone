@@ -1,7 +1,7 @@
 # fanotify 迁移实施计划
 
 **状态：** Draft
-**最后更新：** 2026-06-05
+**最后更新：** 2026-06-09
 **父 RFC：** [RFC-20260604-fanotify](./index.md)
 **不变量：** [不变量需求](./invariants.md)
 
@@ -151,7 +151,7 @@ Stage 0 init flag matrix：
 - 固定首批 queue cap：默认 `DEFAULT_MAX_EVENTS = 16384`，并在 group state 中保存 `max_events`、`overflow_queued`、`dropped_events`。队满时若当前没有 overflow sentinel，则排入单个 `FAN_Q_OVERFLOW` / `FAN_NOFD` event；若 sentinel 已在队列中，则丢弃新事件并递增 `dropped_events`。精确 sysctl、merge/order 和 `FAN_UNLIMITED_QUEUE` 后移，但资源上限和可观测 overflow 不后移。
 - group fd `FIONREAD` 仍为可选；若不实现，不作为 Stage 1 验收项；若实现，必须走 fanotify group fd `FileOps::ioctl`，未知命令返回 `UnsupportedIoctl` / `ENOTTY`。
 - 最后一个用户可见 descriptor / opened-description ref 关闭时执行 semantic close teardown：标记 closing/dead、清理 queue、marks、poll triggers，并唤醒 blocking read / poll；shared group state 的实际内存释放可以等 in-flight syscall transient refs 归零。
-- Stage 1 必须提供 fd/task 层 release hook、table-ref 计数或等价机制来触发 semantic close teardown；不得依赖 group state memory last-drop 唤醒当前正在阻塞且持有 transient ref 的 read，也不得把任意 fd number close 当作 shared group teardown。
+- Stage 1 必须提供 fd/task 层 release hook、table-ref 计数或等价机制来触发 semantic close teardown；该 release hook 必须由显式 close、task exit、fd-table replacement / unshare 等可睡眠、interrupts-enabled 生命周期路径调用。不得依赖 group state memory last-drop、`FilesState::drop()`、task `Drop` 或 deferred task dispose 唤醒当前正在阻塞且持有 transient ref 的 read，也不得把任意 fd number close 当作 shared group teardown。
 
 审计：
 
@@ -161,6 +161,7 @@ Stage 0 init flag matrix：
 - queue item 不持有短生命周期引用。
 - close/dead 唤醒 blocking read 和 poll waiters。
 - blocking read 持有 transient ref 时，最后 descriptor close 仍能触发 semantic close wakeup。
+- `Drop` 只负责内存释放或断言遗漏的显式清理；不能在 `Drop` / deferred task dispose 中调用 opened-description final-release、获取 fanotify registry 普通 `Mutex`、触发 waiters 或修改 marks。
 - read 路径能观察当前 opened file description status flags；`F_SETFL(O_NONBLOCK)` 后 empty read 返回 `EAGAIN`，清除后恢复 blocking 语义。临时 private nonblock mirror 不能作为合并 gate 闭合证据。
 - queue 中持有的 `PathRef` 或等价引用在解锁后释放。
 - Stage 1 不打开 event object fd，不需要 no-notify guard。

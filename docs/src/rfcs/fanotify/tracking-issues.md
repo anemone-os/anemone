@@ -1,9 +1,9 @@
 # fanotify tracking issues
 
 **状态：** Active
-**最后更新：** 2026-06-05
+**最后更新：** 2026-06-09
 **父 RFC：** [RFC-20260604-fanotify](./index.md)
-**来源：** 2026-06-04 system-design review；2026-06-05 software-engineering review；2026-06-05 ioctl-loop / fileops-seek freshness review
+**来源：** 2026-06-04 system-design review；2026-06-05 software-engineering review；2026-06-05 ioctl-loop / fileops-seek freshness review；2026-06-09 Gate C runtime regression review
 
 本文只跟踪 design review 后确认的 fanotify 草案缺陷、证明缺口、边界冲突或需要回到草案修改的设计问题。
 
@@ -21,7 +21,36 @@
 
 ## Keter
 
-- 暂无。
+### FANOTIFY-041: fd table / task `Drop` 不得触发 group semantic teardown
+
+**状态：** Keter
+
+**发现证据：** D4 完成后的 `fanotify07` runtime smoke 中，permission event probe 按当前 RFC
+暂缓边界返回 `EINVAL` 并被 LTP 归类为 `TCONF`，但 testcase 退出后 panic：
+`fanotify/registry.rs:218: Mutex cannot be locked when interrupts are disabled`。触发链路是
+fanotify group fd opened-description final-release 进入 `mark_dead()`，而 final-release 可能由
+task / fd table 的 deferred drop 或 scheduler/trap cleanup 间接触发，此时 interrupts 可能已关闭。
+
+**RFC 修正落点：**
+
+- [不变量需求](./invariants.md) 现在明确：group semantic teardown 必须由 task/fd 显式
+  close / exit / fd-table replacement 生命周期路径触发；`Drop`、memory last-drop 和 deferred
+  task dispose 不得执行 fanotify registry mutation、waiter wakeup 或其它系统资源释放。
+- [迁移实施计划](./implementation.md) 的 Stage 1 现在要求 opened-description final-release hook
+  在可睡眠、interrupts-enabled 的显式生命周期路径运行；`FilesState::drop()` / task `Drop`
+  只能释放内存或断言显式清理遗漏。
+
+**原问题：** RFC 已经区分 semantic close 与 memory last-drop，但仍允许实现者把
+opened-description final-release 的最后兜底留给 fd table / task 析构路径。析构路径可能出现在
+deferred task dispose、scheduler loop 或 interrupt-return cleanup 中，不能拿普通 `Mutex`、触发
+waiter 或修改全局 registry。若继续让 `Drop` 补做系统资源释放，fanotify group close、mark
+registry cleanup 和后续 `FAN_CLOSE_*` release 都会继承同一个不可复审的上下文风险。
+
+**实施修复要求：** task/fd 层必须在显式 close、task exit、fd-table replacement / unshare 等路径
+drain published fd refs 并运行 opened-description final-release；`FilesState::drop()` 不得再调用
+`release_description_ref()`，只能断言没有 published / reserved slot。fanotify final-release 入口
+应断言当前可睡眠 / interrupts enabled，以防后续回归。修复后 `fanotify07` 可以继续 TCONF，但不
+得 panic。
 
 ## Euclid
 

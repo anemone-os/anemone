@@ -2,11 +2,11 @@
 
 **状态：** Draft，已提升为公开 RFC 草案
 **负责人：** doruche, Codex
-**最后更新：** 2026-06-08
+**最后更新：** 2026-06-09
 **领域：** fs / VFS / syscall ABI / iomux / procfs / LTP
 **事务日志：** [2026-06-08 - Fanotify](../../devlog/transactions/2026-06-08-fanotify.md)
-**开放问题：** [fanotify tracking issues](./tracking-issues.md) 当前无 Open Keter / Euclid；强一致或高成本 Linux 语义仍按非目标和 Stage 5 backlog 暂缓。
-**下一步：** Gate C 已按 [Fanotify 事务日志](../../devlog/transactions/2026-06-08-fanotify.md) 闭合；后续需等待用户确认后启动 D5 VFS 基础 event injection worker，不得把 FID/name 正向 ABI、procfs fdinfo 或 permission events 合入 Gate C。
+**开放问题：** [fanotify tracking issues](./tracking-issues.md) 当前有 `FANOTIFY-041` Gate C corrective Keter：fd table / task `Drop` 不得触发 group semantic teardown。强一致或高成本 Linux 语义仍按非目标和 Stage 5 backlog 暂缓。
+**下一步：** Gate C 在源码层已完成 D4，但 D5 前必须先按 [Fanotify 事务日志](../../devlog/transactions/2026-06-08-fanotify.md) 修复 `FANOTIFY-041`；不得把 FID/name 正向 ABI、procfs fdinfo 或 permission events 合入该 corrective repair。
 
 ## 摘要
 
