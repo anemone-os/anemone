@@ -26,7 +26,10 @@ enum FanEventTarget {
 pub struct FanEvent {
     kind: FanEventKind,
     mask: FanMask,
-    pid: i32,
+    // FAN_REPORT_TID is rejected in the current gate, so metadata.pid follows
+    // Linux's default fanotify ABI and reports the thread-group id. If TID
+    // reporting is later enabled, make this a group report-mode decision.
+    tgid: Tid,
     // This is the queued object identity, not a userspace fd identity. D4
     // turns it into metadata.fd only inside the read-user submit protocol, so
     // fanotify never stores a long-lived fd number outside the task/fd table.
@@ -38,7 +41,7 @@ impl FanEvent {
         Self {
             kind: FanEventKind::Synthetic,
             mask,
-            pid: current_pid(),
+            tgid: current_task_id(),
             target: FanEventTarget::NoFd,
         }
     }
@@ -50,7 +53,7 @@ impl FanEvent {
         Self {
             kind: FanEventKind::Path,
             mask,
-            pid: current_pid(),
+            tgid: current_task_id(),
             target: FanEventTarget::Path(path),
         }
     }
@@ -59,7 +62,7 @@ impl FanEvent {
         Self {
             kind: FanEventKind::QueueOverflow,
             mask: FanMask::Q_OVERFLOW,
-            pid: current_pid(),
+            tgid: current_task_id(),
             target: FanEventTarget::NoFd,
         }
     }
@@ -92,15 +95,7 @@ impl FanEvent {
             metadata_len,
             mask: self.mask.bits(),
             fd,
-            pid: self.pid,
+            pid: self.tgid.get() as i32,
         }
     }
-}
-
-fn current_pid() -> i32 {
-    // FAN_REPORT_TID is rejected in the current gate, so metadata.pid follows
-    // Linux's default fanotify ABI and reports the thread-group id. If TID
-    // reporting is later enabled, make this a group report-mode decision.
-    let raw = get_current_task().tgid().get();
-    i32::try_from(raw).unwrap_or(i32::MAX)
 }

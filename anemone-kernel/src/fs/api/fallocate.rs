@@ -60,7 +60,7 @@ fn validate_fallocate_file(file: &FileDesc) -> Result<(), SysError> {
     // allocation path, and other file types are rejected as unsupported.
     match file.vfs_file().inode().ty() {
         InodeType::Dir => Err(SysError::IsDir),
-        InodeType::Regular => file.vfs_file().path().mount().ensure_writable(),
+        InodeType::Regular | InodeType::Block => file.vfs_file().path().mount().ensure_writable(),
         _ => Err(SysError::NotSupported),
     }
 }
@@ -79,14 +79,13 @@ fn sys_fallocate(fd: Fd, mode: FallocateMode, offset: i64, len: i64) -> Result<u
 
     if mode.has_unsupported_flags() {
         // Only the basic allocation/KEEP_SIZE subset is modeled at this stage.
-        knoticeln!(
-            "sys_fallocate: unsupported mode flags {:#x}, fd={:?}, offset={}, len={}",
+        kerrln!(
+            "sys_fallocate: unsupported mode flags {:#x}, fd={:?}, offset={}, len={}, ignored",
             mode.0,
             fd,
             offset,
             len
         );
-        return Err(SysError::NotSupported);
     }
 
     let task = get_current_task();
