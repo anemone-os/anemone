@@ -49,9 +49,8 @@ impl RawFanotifyInitFlags {
         }
 
         let mode = FanGroupMode::from_init_flags(raw)?;
-        let init_flags =
-            FanInitFlags::from_bits(raw & (abi::FAN_CLOEXEC | abi::FAN_NONBLOCK))
-                .ok_or(SysError::InvalidArgument)?;
+        let init_flags = FanInitFlags::from_bits(raw & (abi::FAN_CLOEXEC | abi::FAN_NONBLOCK))
+            .ok_or(SysError::InvalidArgument)?;
 
         Ok(ParsedInitFlags { mode, init_flags })
     }

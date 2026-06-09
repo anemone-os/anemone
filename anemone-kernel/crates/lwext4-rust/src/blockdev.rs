@@ -110,7 +110,7 @@ impl<Dev: BlockDevice> Ext4BlockDevice<Dev> {
             Err(err) => {
                 error!("num_blocks failed: {err:?}");
                 return EIO as _;
-            }
+            },
         };
 
         bdev.part_offset = 0;

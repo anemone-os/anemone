@@ -217,10 +217,7 @@ impl FanQueue {
     }
 }
 
-pub(super) fn trigger_detached_triggers(
-    triggers: FanDetachedTriggers,
-    reason: &'static str,
-) {
+pub(super) fn trigger_detached_triggers(triggers: FanDetachedTriggers, reason: &'static str) {
     for trigger in triggers.poll {
         kdebugln!(
             "fanotify: trigger poll wait={:#x} interests={:?} reason={}",

@@ -10,8 +10,9 @@ use crate::{
 };
 
 use super::super::{
-    file, registry,
+    file,
     mark::FanMarkUpdate,
+    registry,
     types::{FanMask, FanTarget, FanTargetClass},
 };
 
@@ -43,8 +44,7 @@ const SUPPORTED_EVENT_MASK: u64 = abi::FAN_ACCESS
     | abi::FAN_EVENT_ON_CHILD
     | abi::FAN_ONDIR;
 
-const DEFERRED_EVENT_MASK: u64 =
-    abi::FAN_ATTRIB
+const DEFERRED_EVENT_MASK: u64 = abi::FAN_ATTRIB
     | abi::FAN_MOVED_FROM
     | abi::FAN_MOVED_TO
     | abi::FAN_CREATE
@@ -100,20 +100,16 @@ impl ParsedMarkFlags {
             _ => return Err(SysError::InvalidArgument),
         };
 
-        if command == FanMarkCommand::Flush
-            && raw & !(MARK_TARGET_BITS | abi::FAN_MARK_FLUSH) != 0
+        if command == FanMarkCommand::Flush && raw & !(MARK_TARGET_BITS | abi::FAN_MARK_FLUSH) != 0
         {
             return Err(SysError::InvalidArgument);
         }
 
-        if raw & abi::FAN_MARK_IGNORED_SURV_MODIFY != 0
-            && raw & abi::FAN_MARK_IGNORED_MASK == 0
-        {
+        if raw & abi::FAN_MARK_IGNORED_SURV_MODIFY != 0 && raw & abi::FAN_MARK_IGNORED_MASK == 0 {
             return Err(SysError::InvalidArgument);
         }
 
-        if matches!(command, FanMarkCommand::Remove)
-            && raw & abi::FAN_MARK_IGNORED_SURV_MODIFY != 0
+        if matches!(command, FanMarkCommand::Remove) && raw & abi::FAN_MARK_IGNORED_SURV_MODIFY != 0
         {
             return Err(SysError::InvalidArgument);
         }
@@ -216,11 +212,7 @@ fn fd_target_pathref(dfd: i32, check_is_dir: bool) -> Result<PathRef, SysError> 
     Ok(path.clone())
 }
 
-fn resolve_mark_path(
-    dfd: i32,
-    pathname: u64,
-    flags: ParsedMarkFlags,
-) -> Result<PathRef, SysError> {
+fn resolve_mark_path(dfd: i32, pathname: u64, flags: ParsedMarkFlags) -> Result<PathRef, SysError> {
     let task = get_current_task();
     let path = if pathname != 0 {
         let pathname = c_readonly_path(pathname)?;

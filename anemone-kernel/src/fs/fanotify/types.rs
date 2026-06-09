@@ -233,6 +233,9 @@ pub fn init_fd_flags(flags: FanInitFlags) -> FdFlags {
 
 pub fn init_file_status_flags(flags: FanInitFlags) -> FileStatusFlags {
     let mut status = FileStatusFlags::empty();
-    status.set(FileStatusFlags::NONBLOCK, flags.contains(FanInitFlags::NONBLOCK));
+    status.set(
+        FileStatusFlags::NONBLOCK,
+        flags.contains(FanInitFlags::NONBLOCK),
+    );
     status
 }

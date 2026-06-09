@@ -75,8 +75,7 @@ impl FanRegistry {
 
         let record = self.records.remove(&handle.slot)?;
         let target_key = handle.target_key;
-        let remove_target_entry = if let Some(handles) = self.marks_by_target.get_mut(&target_key)
-        {
+        let remove_target_entry = if let Some(handles) = self.marks_by_target.get_mut(&target_key) {
             handles.retain(|existing| *existing != handle);
             handles.is_empty()
         } else {
@@ -107,8 +106,7 @@ pub(super) fn add_mark(
         return Err(SysError::InvalidArgument);
     }
 
-    if let Some(handle) =
-        registry.find_handle_for_group(target_key, group.id(), group.generation())
+    if let Some(handle) = registry.find_handle_for_group(target_key, group.id(), group.generation())
     {
         let record = registry
             .record_mut(handle)

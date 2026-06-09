@@ -4,9 +4,8 @@ use crate::{
     prelude::*,
     syscall::user_access::{UserWritePtr, UserWriteSlice},
     task::files::{
-        Fd, FdReservation, FileDesc, FileStatusFlags, LinuxOpenCompat,
-        OpenedFileDescriptionOps, OpenedFileFinalReleaseCtx, OpenedFileReadUserCtx,
-        OpenedFileReadUserSegment,
+        Fd, FdReservation, FileDesc, FileStatusFlags, LinuxOpenCompat, OpenedFileDescriptionOps,
+        OpenedFileFinalReleaseCtx, OpenedFileReadUserCtx, OpenedFileReadUserSegment,
     },
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
@@ -74,12 +73,10 @@ fn fanotify_read_user(ctx: OpenedFileReadUserCtx<'_>) -> Result<usize, SysError>
         "fanotify group fd read must not be notification-suppressed"
     );
 
-    let total_len = ctx
-        .segments()
-        .iter()
-        .try_fold(0usize, |acc, segment| {
-            acc.checked_add(segment.len()).ok_or(SysError::InvalidArgument)
-        })?;
+    let total_len = ctx.segments().iter().try_fold(0usize, |acc, segment| {
+        acc.checked_add(segment.len())
+            .ok_or(SysError::InvalidArgument)
+    })?;
     if total_len < abi::FAN_EVENT_METADATA_LEN as usize {
         return Err(SysError::InvalidArgument);
     }
@@ -354,7 +351,11 @@ fn fanotify_final_release(ctx: OpenedFileFinalReleaseCtx<'_>) {
     );
 }
 
-fn fanotify_legacy_read(_file: &File, _pos: &mut usize, _buf: &mut [u8]) -> Result<usize, SysError> {
+fn fanotify_legacy_read(
+    _file: &File,
+    _pos: &mut usize,
+    _buf: &mut [u8],
+) -> Result<usize, SysError> {
     // Fanotify read must observe current opened-description status flags.
     // Generic read/readv use `OpenedFileDescriptionOps::read_user`; this
     // vtable fallback deliberately fails closed so old kernel-buffer reads do

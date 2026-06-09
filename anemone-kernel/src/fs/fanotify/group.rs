@@ -87,16 +87,16 @@ impl FanGroup {
         self.state.lock().dead
     }
 
-    pub(super) fn add_mark_handle_from_registry(
-        &self,
-        handle: MarkHandle,
-    ) -> Result<(), SysError> {
+    pub(super) fn add_mark_handle_from_registry(&self, handle: MarkHandle) -> Result<(), SysError> {
         let mut state = self.state.lock();
         if state.dead {
             return Err(SysError::InvalidArgument);
         }
         assert!(
-            state.mark_handles.iter().all(|existing| *existing != handle),
+            state
+                .mark_handles
+                .iter()
+                .all(|existing| *existing != handle),
             "fanotify group cleanup list cannot contain duplicate mark handles"
         );
         state.mark_handles.push(handle);

@@ -36,12 +36,13 @@ impl TryFromSyscallArg for Fd {
     }
 }
 
+/// Shared VFS opened handle.
+///
+/// This object is not process-local. Duplicated descriptors and forked file
+/// tables share it, including file status flags and the opened file handle.
 #[derive(Debug)]
 struct ProcFile {
-    /// Shared VFS opened handle.
-    ///
-    /// This object is not process-local. Duplicated descriptors and forked file
-    /// tables share it, including file status flags and the opened file handle.
+    /// Vfs file handle. Task-agnostic.
     file: Arc<File>,
     access: OpenAccessMode,
     status_flags: SpinLock<FileStatusFlags>,

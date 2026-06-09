@@ -43,7 +43,10 @@ fn main() {
     println!("cargo:rustc-link-lib=static={lwext4_lib}");
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rerun-if-changed=c/wrapper.h");
-    println!("cargo:rerun-if-changed={}/Makefile", c_path.to_str().unwrap());
+    println!(
+        "cargo:rerun-if-changed={}/Makefile",
+        c_path.to_str().unwrap()
+    );
     println!("cargo:rerun-if-changed={}/src", c_path.to_str().unwrap());
     println!(
         "cargo:rerun-if-changed={}/toolchain/musl-generic.cmake",
