@@ -262,7 +262,7 @@ pub fn sys_fanotify_mark(
     }
 
     if matches!(flags.command, FanMarkCommand::Flush) {
-        registry::flush_group(&group, flags.target_class)?;
+        registry::flush_group(&group, flags.target_class);
         return Ok(0);
     }
 

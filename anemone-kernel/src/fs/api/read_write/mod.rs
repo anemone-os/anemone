@@ -86,7 +86,10 @@ fn read_into_user_buffer(
     }
 
     if offset.is_none() {
-        let segment = OpenedFileReadUserSegment::new(buf, count);
+        let segment = OpenedFileReadUserSegment {
+            base: buf,
+            len: count,
+        };
         if let Some(result) = file.read_user(uspace, core::slice::from_ref(&segment)) {
             return result;
         }
@@ -179,7 +182,10 @@ fn read_iovecs(
     if offset.is_none() {
         let segments = iovecs
             .iter()
-            .map(|iov| OpenedFileReadUserSegment::new(iov.base, iov.len))
+            .map(|iov| OpenedFileReadUserSegment {
+                base: iov.base,
+                len: iov.len,
+            })
             .collect::<Vec<_>>();
         if let Some(result) = file.read_user(uspace, &segments) {
             return result.map(|n| n as u64);

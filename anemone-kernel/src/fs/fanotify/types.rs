@@ -128,33 +128,11 @@ impl FanPathKey {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FanEventFdTemplate {
-    access: OpenAccessMode,
-    status: FileStatusFlags,
-    fd: FdFlags,
-    getfl_visible_flags: u32,
-    accepted_noop_flags: u32,
-}
-
-impl FanEventFdTemplate {
-    pub const fn access(self) -> OpenAccessMode {
-        self.access
-    }
-
-    pub const fn status(self) -> FileStatusFlags {
-        self.status
-    }
-
-    pub const fn fd(self) -> FdFlags {
-        self.fd
-    }
-
-    pub const fn getfl_visible_flags(self) -> u32 {
-        self.getfl_visible_flags
-    }
-
-    pub const fn accepted_noop_flags(self) -> u32 {
-        self.accepted_noop_flags
-    }
+    pub(super) access: OpenAccessMode,
+    pub(super) status: FileStatusFlags,
+    pub(super) fd: FdFlags,
+    pub(super) getfl_visible_flags: u32,
+    pub(super) accepted_noop_flags: u32,
 }
 
 impl FanGroupMode {

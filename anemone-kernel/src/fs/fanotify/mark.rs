@@ -40,9 +40,9 @@ impl MarkHandle {
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FanMarkUpdate {
-    mask: FanMask,
-    ignored: bool,
-    ignored_survives_modify: bool,
+    pub(super) mask: FanMask,
+    pub(super) ignored: bool,
+    pub(super) ignored_survives_modify: bool,
 }
 
 impl FanMarkUpdate {
@@ -61,24 +61,14 @@ impl FanMarkUpdate {
             ignored_survives_modify,
         }
     }
-
-    pub(super) const fn mask(self) -> FanMask {
-        self.mask
-    }
-
-    pub(super) const fn ignored(self) -> bool {
-        self.ignored
-    }
-
-    pub(super) const fn ignored_survives_modify(self) -> bool {
-        self.ignored_survives_modify
-    }
 }
 
 #[derive(Debug)]
 pub(super) struct FanMarkRecord {
     handle: MarkHandle,
     group: Weak<FanGroup>,
+    // Keeps the watched object alive; registry identity uses handle.target_key.
+    #[allow(dead_code)]
     target: FanTarget,
     mask: FanMask,
     ignored_mask: FanMask,
@@ -91,6 +81,11 @@ impl FanMarkRecord {
         assert!(
             handle.group_id == group.id() && handle.group_generation == group.generation(),
             "fanotify mark handle/group identity mismatch"
+        );
+        assert_eq!(
+            handle.target_key,
+            target.key(),
+            "fanotify mark handle/target identity mismatch"
         );
         Self {
             handle,
@@ -115,29 +110,29 @@ impl FanMarkRecord {
         self.handle.group_generation
     }
 
-    pub(super) fn target_key(&self) -> FanTargetKey {
-        self.target.key()
+    pub(super) const fn target_key(&self) -> FanTargetKey {
+        self.handle.target_key
     }
 
     pub(super) fn add_mask(&mut self, update: FanMarkUpdate) {
-        if update.ignored() {
-            self.ignored_mask.insert(update.mask());
-            if update.ignored_survives_modify() {
+        if update.ignored {
+            self.ignored_mask.insert(update.mask);
+            if update.ignored_survives_modify {
                 self.ignored_survives_modify = true;
             }
         } else {
-            self.mask.insert(update.mask());
+            self.mask.insert(update.mask);
         }
     }
 
     pub(super) fn remove_mask(&mut self, update: FanMarkUpdate) {
-        if update.ignored() {
-            self.ignored_mask.remove(update.mask());
+        if update.ignored {
+            self.ignored_mask.remove(update.mask);
             if self.ignored_mask.is_empty() {
                 self.ignored_survives_modify = false;
             }
         } else {
-            self.mask.remove(update.mask());
+            self.mask.remove(update.mask);
         }
     }
 

@@ -58,9 +58,11 @@ pub fn open_group_file(group: Arc<FanGroup>) -> Result<File, SysError> {
 }
 
 pub fn description_ops() -> OpenedFileDescriptionOps {
-    OpenedFileDescriptionOps::empty()
-        .with_read_user(fanotify_read_user)
-        .with_final_release(fanotify_final_release)
+    OpenedFileDescriptionOps {
+        read_user: Some(fanotify_read_user),
+        final_release: Some(fanotify_final_release),
+        notification_suppressed: false,
+    }
 }
 
 pub fn enqueue_synthetic(file: &File, event: FanEvent) {
@@ -69,23 +71,23 @@ pub fn enqueue_synthetic(file: &File, event: FanEvent) {
 
 fn fanotify_read_user(ctx: OpenedFileReadUserCtx<'_>) -> Result<usize, SysError> {
     assert!(
-        !ctx.notification_suppressed(),
+        !ctx.notification_suppressed,
         "fanotify group fd read must not be notification-suppressed"
     );
 
-    let total_len = ctx.segments().iter().try_fold(0usize, |acc, segment| {
-        acc.checked_add(segment.len())
+    let total_len = ctx.segments.iter().try_fold(0usize, |acc, segment| {
+        acc.checked_add(segment.len)
             .ok_or(SysError::InvalidArgument)
     })?;
     if total_len < abi::FAN_EVENT_METADATA_LEN as usize {
         return Err(SysError::InvalidArgument);
     }
 
-    let group = FanGroupFile::group(ctx.file());
+    let group = FanGroupFile::group(ctx.file);
     let event = match group.pop_read_state()? {
         FanReadState::Event(event) => event,
         FanReadState::Dead => return Ok(0),
-        FanReadState::Empty if ctx.status_flags().contains(FileStatusFlags::NONBLOCK) => {
+        FanReadState::Empty if ctx.status_flags.contains(FileStatusFlags::NONBLOCK) => {
             return Err(SysError::Again);
         },
         FanReadState::Empty => match group.wait_for_event()? {
@@ -149,7 +151,7 @@ fn submit_event_record(
         .unwrap_or(abi::FAN_NOFD);
     let metadata = event.to_metadata_with_fd(metadata_fd);
 
-    let copied = match write_metadata_to_segments(ctx.uspace(), ctx.segments(), &metadata) {
+    let copied = match write_metadata_to_segments(ctx.uspace, ctx.segments, &metadata) {
         Ok(copied) => copied,
         Err(err) => return Err(err),
     };
@@ -193,18 +195,18 @@ fn prepare_event_fd(
     let reservation = get_current_task().reserve_fd()?;
     let file_desc = FileDesc::new_opened(
         file,
-        template.access(),
-        template.status(),
-        LinuxOpenCompat::new(
-            template.getfl_visible_flags(),
-            template.accepted_noop_flags(),
-        ),
-        template.fd(),
+        template.access,
+        template.status,
+        LinuxOpenCompat::new(template.getfl_visible_flags, template.accepted_noop_flags),
+        template.fd,
         // This marker belongs to the event object fd after it is returned to
         // userspace. It is deliberately generic task/fd state, so later VFS
         // hooks can suppress read/write/close notifications without knowing
         // this is a fanotify-created descriptor.
-        OpenedFileDescriptionOps::empty().suppress_notifications(),
+        OpenedFileDescriptionOps {
+            notification_suppressed: true,
+            ..OpenedFileDescriptionOps::default()
+        },
     );
 
     Ok(Some(PendingEventFd {
@@ -230,7 +232,7 @@ fn open_event_target(target: &PathRef, template: FanEventFdTemplate) -> Result<F
     // task. This deliberately mirrors only the event_f_flags subset accepted
     // by fanotify_init(): no create/truncate/path resolution side effects are
     // introduced at read time, and ordinary permission checks still apply.
-    let access = template.access();
+    let access = template.access;
     if target.inode().ty() == InodeType::Fifo {
         return Err(SysError::NotSupported);
     }
@@ -245,20 +247,20 @@ fn open_event_target(target: &PathRef, template: FanEventFdTemplate) -> Result<F
     let checker = FsPermChecker::for_current_fs();
     checker.check_path(target, requested)?;
 
-    if template.status().contains(FileStatusFlags::NOATIME)
+    if template.status.contains(FileStatusFlags::NOATIME)
         && !checker.owner_or_capable(target.inode())
     {
         return Err(SysError::PermissionDenied);
     }
 
-    validate_event_status_flags(target, template.status())?;
+    validate_event_status_flags(target, template.status)?;
 
     if access.can_write() && target.inode().ty() == InodeType::Regular {
         target.mount().ensure_writable()?;
     }
 
     let file = target.open()?;
-    if template.status().contains(FileStatusFlags::APPEND) {
+    if template.status.contains(FileStatusFlags::APPEND) {
         let size = usize::try_from(file.get_attr()?.size).map_err(|_| SysError::FileTooLarge)?;
         file.seek_set_checked(size)?;
     }
@@ -295,16 +297,16 @@ fn write_metadata_to_segments(
     // bad second iovec rolls back the reserved event fd without leaving a
     // partially visible fanotify record.
     for segment in segments {
-        if segment.is_empty() {
+        if segment.len == 0 {
             continue;
         }
         let remaining = metadata_bytes.len() - copied;
-        let validate_len = remaining.min(segment.len());
+        let validate_len = remaining.min(segment.len);
         if validate_len == 0 {
             break;
         }
 
-        let _ = UserWriteSlice::<u8>::try_new(segment.base(), validate_len, &mut guard)?;
+        let _ = UserWriteSlice::<u8>::try_new(segment.base, validate_len, &mut guard)?;
         copied += validate_len;
         if copied == metadata_bytes.len() {
             break;
@@ -318,16 +320,16 @@ fn write_metadata_to_segments(
 
     copied = 0;
     for segment in segments {
-        if segment.is_empty() {
+        if segment.len == 0 {
             continue;
         }
         let remaining = &metadata_bytes[copied..];
-        let copy_len = remaining.len().min(segment.len());
+        let copy_len = remaining.len().min(segment.len);
         if copy_len == 0 {
             break;
         }
 
-        let mut dst = UserWriteSlice::<u8>::try_new(segment.base(), copy_len, &mut guard)?;
+        let mut dst = UserWriteSlice::<u8>::try_new(segment.base, copy_len, &mut guard)?;
         dst.copy_from_slice(&remaining[..copy_len]);
         copied += copy_len;
         if copied == metadata_bytes.len() {
@@ -343,8 +345,8 @@ fn write_metadata_to_segments(
 }
 
 fn fanotify_final_release(ctx: OpenedFileFinalReleaseCtx<'_>) {
-    let notification_suppressed = ctx.notification_suppressed();
-    FanGroupFile::group(ctx.file()).mark_dead();
+    let notification_suppressed = ctx.notification_suppressed;
+    FanGroupFile::group(ctx.file).mark_dead();
     assert!(
         !notification_suppressed,
         "fanotify group fd final-release must not be notification-suppressed"

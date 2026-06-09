@@ -79,13 +79,13 @@ pub struct OpenedFileDescriptionOps {
     /// Optional direct userspace read operation for files whose read
     /// transaction cannot be modeled as kernel-buffer fill followed by
     /// generic copyout.
-    read_user: Option<OpenedFileReadUserFn>,
+    pub read_user: Option<OpenedFileReadUserFn>,
     /// Runs when the last published fd-table slot for this opened file
     /// description is removed. Transient syscall refs do not delay it.
-    final_release: Option<OpenedFileFinalReleaseFn>,
+    pub final_release: Option<OpenedFileFinalReleaseFn>,
     /// Generic kernel-only event suppression marker. VFS hooks may inspect this
     /// capability, but task/fd code must not attach feature-specific meaning.
-    notification_suppressed: bool,
+    pub notification_suppressed: bool,
 }
 
 impl core::fmt::Debug for OpenedFileDescriptionOps {
@@ -98,103 +98,24 @@ impl core::fmt::Debug for OpenedFileDescriptionOps {
     }
 }
 
-impl OpenedFileDescriptionOps {
-    pub const fn empty() -> Self {
-        Self {
-            read_user: None,
-            final_release: None,
-            notification_suppressed: false,
-        }
-    }
-
-    pub fn with_read_user(mut self, read_user: OpenedFileReadUserFn) -> Self {
-        self.read_user = Some(read_user);
-        self
-    }
-
-    pub fn with_final_release(mut self, final_release: OpenedFileFinalReleaseFn) -> Self {
-        self.final_release = Some(final_release);
-        self
-    }
-
-    pub fn suppress_notifications(mut self) -> Self {
-        self.notification_suppressed = true;
-        self
-    }
-}
-
 pub struct OpenedFileReadUserCtx<'a> {
-    file: &'a File,
-    status_flags: FileStatusFlags,
-    uspace: &'a UserSpaceHandle,
-    segments: &'a [OpenedFileReadUserSegment],
-    notification_suppressed: bool,
+    pub file: &'a File,
+    pub status_flags: FileStatusFlags,
+    pub uspace: &'a UserSpaceHandle,
+    pub segments: &'a [OpenedFileReadUserSegment],
+    pub notification_suppressed: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct OpenedFileReadUserSegment {
-    base: VirtAddr,
-    len: usize,
-}
-
-impl OpenedFileReadUserSegment {
-    pub const fn new(base: VirtAddr, len: usize) -> Self {
-        Self { base, len }
-    }
-
-    pub const fn base(self) -> VirtAddr {
-        self.base
-    }
-
-    pub const fn len(self) -> usize {
-        self.len
-    }
-
-    pub const fn is_empty(self) -> bool {
-        self.len == 0
-    }
-}
-
-impl<'a> OpenedFileReadUserCtx<'a> {
-    pub const fn file(&self) -> &'a File {
-        self.file
-    }
-
-    pub const fn status_flags(&self) -> FileStatusFlags {
-        self.status_flags
-    }
-
-    pub const fn uspace(&self) -> &'a UserSpaceHandle {
-        self.uspace
-    }
-
-    pub const fn segments(&self) -> &'a [OpenedFileReadUserSegment] {
-        self.segments
-    }
-
-    pub const fn notification_suppressed(&self) -> bool {
-        self.notification_suppressed
-    }
+    pub base: VirtAddr,
+    pub len: usize,
 }
 
 pub struct OpenedFileFinalReleaseCtx<'a> {
-    file: &'a File,
-    access: OpenAccessMode,
-    notification_suppressed: bool,
-}
-
-impl<'a> OpenedFileFinalReleaseCtx<'a> {
-    pub const fn file(&self) -> &'a File {
-        self.file
-    }
-
-    pub const fn access(&self) -> OpenAccessMode {
-        self.access
-    }
-
-    pub const fn notification_suppressed(&self) -> bool {
-        self.notification_suppressed
-    }
+    pub file: &'a File,
+    pub access: OpenAccessMode,
+    pub notification_suppressed: bool,
 }
 
 impl ProcFile {
@@ -236,12 +157,6 @@ impl ProcFile {
                 });
             }
         }
-    }
-}
-
-fn release_closed_descriptions(closed: Vec<Arc<ProcFile>>) {
-    for pfile in closed {
-        pfile.release_description_ref();
     }
 }
 
@@ -797,7 +712,7 @@ impl FilesState {
             status_flags,
             compat,
             fd_flags,
-            OpenedFileDescriptionOps::empty(),
+            OpenedFileDescriptionOps::default(),
         )
     }
 
@@ -1042,7 +957,9 @@ impl Drop for FilesState {
         }
         self.bitmap.clear_all();
         self.reserved_bitmap.clear_all();
-        release_closed_descriptions(closed);
+        for pfile in closed {
+            pfile.release_description_ref();
+        }
     }
 }
 
@@ -1166,14 +1083,18 @@ impl Task {
             let mut files_state = files_state.write();
             files_state.dup3(old_fd, new_fd, flags)?
         };
-        release_closed_descriptions(closed);
+        for pfile in closed {
+            pfile.release_description_ref();
+        }
         Ok(new_fd)
     }
 
     pub fn close_cloexec_fds(&self) {
         let files_state = self.files_state();
         let closed = files_state.write().close_on_exec();
-        release_closed_descriptions(closed);
+        for pfile in closed {
+            pfile.release_description_ref();
+        }
     }
 
     pub fn unshare_files_state(&self) {
@@ -1204,7 +1125,9 @@ impl Task {
             files_state.read().set_close_on_exec_range(first, last);
         } else {
             let closed = files_state.write().close_range(first, last);
-            release_closed_descriptions(closed);
+            for pfile in closed {
+                pfile.release_description_ref();
+            }
         }
     }
 }

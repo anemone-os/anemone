@@ -116,8 +116,8 @@ pub(super) fn add_mark(
             "fanotify_mark: updated mark group={:?} target={:?} mask={:#x} ignored={}",
             group.id(),
             target_key,
-            update.mask().bits(),
-            update.ignored(),
+            update.mask.bits(),
+            update.ignored,
         );
         return Ok(());
     }
@@ -142,8 +142,8 @@ pub(super) fn add_mark(
         "fanotify_mark: added mark group={:?} target={:?} mask={:#x} ignored={}",
         group.id(),
         target_key,
-        update.mask().bits(),
-        update.ignored(),
+        update.mask.bits(),
+        update.ignored,
     );
 
     Ok(())
@@ -178,18 +178,15 @@ pub(super) fn remove_mark(
         "fanotify_mark: removed mark bits group={:?} target={:?} mask={:#x} ignored={} destroy={}",
         group.id(),
         target_key,
-        update.mask().bits(),
-        update.ignored(),
+        update.mask.bits(),
+        update.ignored,
         destroy,
     );
 
     Ok(())
 }
 
-pub(super) fn flush_group(
-    group: &Arc<FanGroup>,
-    target_class: FanTargetClass,
-) -> Result<(), SysError> {
+pub(super) fn flush_group(group: &Arc<FanGroup>, target_class: FanTargetClass) {
     let mut registry = REGISTRY.lock();
     let handles: Vec<_> = registry
         .records
@@ -214,8 +211,6 @@ pub(super) fn flush_group(
         target_class,
         handles.len(),
     );
-
-    Ok(())
 }
 
 pub(super) fn mark_group_dead(group: &FanGroup) -> Option<FanDetachedTriggers> {
