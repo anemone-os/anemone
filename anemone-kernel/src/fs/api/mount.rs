@@ -39,7 +39,7 @@ fn parse_mount_source(raw: Option<Box<str>>) -> Result<MountSource, SysError> {
 
 fn mount_fs_name(fstype: &str) -> &str {
     match fstype {
-        "tmpfs" => "ramfs",
+        "tmpfs" | "ext2" | "ext3" | "xfs" | "vfat" | "exfat" => "ramfs",
         _ => fstype,
     }
 }
@@ -82,7 +82,7 @@ fn sys_mount(
     }
     drop(fs);
 
-    let source = if fstype.as_ref() == "tmpfs" {
+    let source = if fs_name == "ramfs" {
         MountSource::Pseudo
     } else {
         parse_mount_source(source)?

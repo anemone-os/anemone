@@ -82,6 +82,6 @@ pub fn current_task_notifications_suppressed() -> bool {
 #[allow(unused_imports)]
 pub use api::{sys_fanotify_init, sys_fanotify_mark};
 #[allow(unused_imports)]
-pub use hooks::{FanHookEvent, notify_path_event};
+pub use hooks::{FanHookEvent, notify_path_event, observed_file_description_ops};
 #[allow(unused_imports)]
 pub use types::FanMask;

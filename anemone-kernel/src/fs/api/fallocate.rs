@@ -8,6 +8,7 @@
 use anemone_abi::fs::linux::fallocate::FALLOC_FL_KEEP_SIZE;
 
 use crate::{
+    fs::fanotify::{FanHookEvent, FanMask, notify_path_event},
     prelude::{
         handler::{TryFromSyscallArg, syscall_arg_flag32},
         *,
@@ -93,8 +94,13 @@ fn sys_fallocate(fd: Fd, mode: FallocateMode, offset: i64, len: i64) -> Result<u
     validate_fallocate_file(&file)?;
 
     if !mode.keep_size() && file.vfs_file().inode().size() < end {
+        let path = file.vfs_file().path().clone();
         let cred = task.cred();
         file.vfs_file().inode().truncate(end, &cred)?;
+        notify_path_event(
+            FanHookEvent::new(FanMask::MODIFY, path)
+                .with_notification_suppressed(file.notifications_suppressed()),
+        );
     }
 
     Ok(0)

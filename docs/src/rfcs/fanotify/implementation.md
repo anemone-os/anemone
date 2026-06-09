@@ -292,8 +292,8 @@ fanotify read-user 提交协议：
 交付：
 
 - 在 open path 成功后派发 `FAN_OPEN`。
-- 在 `File::{read,read_at}` 成功读取后派发 `FAN_ACCESS`；hook 放在 fd/VFS gate 已完成、backend 成功返回之后，不下沉到具体 backend `FileOps::{read,read_at}`。
-- 在 `File::{write,write_at,append,append_at_current_end}`、truncate 或等价内容修改路径成功后派发 `FAN_MODIFY`；hook 放在 VFS/opened-file 边界，避免每个 backend 重复 fanotify policy。
+- 在用户可见 opened-fd read/read_at 成功读取后派发 `FAN_ACCESS`；hook 放在 fd/VFS gate 已完成、backend 成功返回之后，不下沉到具体 backend `FileOps::{read,read_at}`，也不把内核内部直接 `File` helper 当作事件源。
+- 在用户可见 opened-fd write/write_at/append、truncate 或等价内容修改路径成功后派发 `FAN_MODIFY`；hook 放在 VFS/opened-file 边界，避免每个 backend 重复 fanotify policy。
 - 在 opened file description release 中派发 `FAN_CLOSE_NOWRITE` / `FAN_CLOSE_WRITE`：
   - open 成功时在 opened file description 上记录 fanotify close snapshot：`PathRef` / `FanPathKey`、打开时 access mode 是否包含写能力。
   - write/truncate/content modify 成功路径仍记录 `did_modify` 或等价状态，但该状态只服务 `FAN_MODIFY` 和 legacy ignore-mask clearing，不参与 close mask 分类。

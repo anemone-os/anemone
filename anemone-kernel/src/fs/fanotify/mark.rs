@@ -114,6 +114,18 @@ impl FanMarkRecord {
         self.handle.target_key
     }
 
+    pub(super) const fn mask(&self) -> FanMask {
+        self.mask
+    }
+
+    pub(super) const fn ignored_mask(&self) -> FanMask {
+        self.ignored_mask
+    }
+
+    pub(super) const fn ignored_survives_modify(&self) -> bool {
+        self.ignored_survives_modify
+    }
+
     pub(super) fn add_mask(&mut self, update: FanMarkUpdate) {
         if update.ignored {
             self.ignored_mask.insert(update.mask);
@@ -136,6 +148,14 @@ impl FanMarkRecord {
         }
     }
 
+    pub(super) fn clear_ignored_mask_after_modify(&mut self) {
+        if self.ignored_survives_modify {
+            return;
+        }
+        self.ignored_mask = FanMask::empty();
+        self.ignored_survives_modify = false;
+    }
+
     pub(super) const fn is_empty(&self) -> bool {
         self.mask.is_empty() && self.ignored_mask.is_empty()
     }
@@ -150,7 +170,6 @@ impl FanMarkRecord {
         self.target_dead = true;
     }
 
-    #[allow(dead_code)]
     pub(super) fn resolve_group(&self) -> Option<Arc<FanGroup>> {
         let group = self.group.upgrade()?;
         if group.id() != self.handle.group_id

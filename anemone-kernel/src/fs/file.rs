@@ -1,5 +1,8 @@
 use crate::{
-    fs::iomux::{PollEvent, PollRegisterResult, PollRequest},
+    fs::{
+        fanotify::{FanHookEvent, FanMask, notify_path_event},
+        iomux::{PollEvent, PollRegisterResult, PollRequest},
+    },
     prelude::*,
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
@@ -473,26 +476,62 @@ impl File {
         Ok(())
     }
 
-    pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
+    fn notify_fanotify(&self, mask: FanMask, notification_suppressed: bool) {
+        if notification_suppressed {
+            return;
+        }
+        notify_path_event(FanHookEvent::new(mask, self.path.clone()));
+    }
+
+    fn read_with_notify(
+        &self,
+        buf: &mut [u8],
+        notification_suppressed: bool,
+    ) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
 
-        let mut pos = self.pos.lock();
-        let read = (self.ops.read)(self, &mut *pos, buf)?;
+        let read = {
+            let mut pos = self.pos.lock();
+            (self.ops.read)(self, &mut *pos, buf)?
+        };
+        if read > 0 {
+            self.notify_fanotify(FanMask::ACCESS, notification_suppressed);
+        }
 
         Ok(read)
     }
 
+    pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
+        // Direct `File` handles are also used by kernel-internal backends such
+        // as exec loaders, VMO data sources, and loop/ext4 backing I/O. Only
+        // opened-fd `FileDesc` wrappers are fanotify-visible; direct calls must
+        // not enter fanotify's sleepable locks from preemption-disabled paths.
+        self.read_with_notify(buf, true)
+    }
+
     /// Reading at specified offset without changing the file cursor.
-    pub fn read_at(&self, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+    fn read_at_with_notify(
+        &self,
+        pos: usize,
+        buf: &mut [u8],
+        notification_suppressed: bool,
+    ) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
 
         let read = (self.ops.read_at)(self, pos, buf)?;
+        if read > 0 {
+            self.notify_fanotify(FanMask::ACCESS, notification_suppressed);
+        }
 
         Ok(read)
+    }
+
+    pub fn read_at(&self, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+        self.read_at_with_notify(pos, buf, true)
     }
 
     pub fn read_exact(&self, mut buf: &mut [u8]) -> Result<(), SysError> {
@@ -512,27 +551,42 @@ impl File {
         Ok(())
     }
 
-    pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
+    fn write_with_notify(
+        &self,
+        buf: &[u8],
+        notification_suppressed: bool,
+    ) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
 
         self.ensure_regular_content_writable()?;
 
-        let mut pos = self.pos.lock();
-
         let cred = get_current_task().cred();
-        let written = (self.ops.write)(self, &mut *pos, buf)?;
+        let written = {
+            let mut pos = self.pos.lock();
+            (self.ops.write)(self, &mut *pos, buf)?
+        };
         if written > 0 {
             self.inode()
                 .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+            self.notify_fanotify(FanMask::MODIFY, notification_suppressed);
         }
 
         Ok(written)
     }
 
+    pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
+        self.write_with_notify(buf, true)
+    }
+
     /// Writing at specified offset without changing the file cursor.
-    pub fn write_at(&self, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
+    fn write_at_with_notify(
+        &self,
+        pos: usize,
+        buf: &[u8],
+        notification_suppressed: bool,
+    ) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
@@ -544,9 +598,14 @@ impl File {
         if written > 0 {
             self.inode()
                 .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+            self.notify_fanotify(FanMask::MODIFY, notification_suppressed);
         }
 
         Ok(written)
+    }
+
+    pub fn write_at(&self, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
+        self.write_at_with_notify(pos, buf, true)
     }
 
     pub fn write_all(&self, mut buf: &[u8]) -> Result<(), SysError> {
@@ -577,42 +636,114 @@ impl File {
 
     /// Different from [Self::seek] + [Self::write], this is an atomic
     /// operation.
-    pub fn append(&self, buf: &[u8]) -> Result<usize, SysError> {
+    fn append_with_notify(
+        &self,
+        buf: &[u8],
+        notification_suppressed: bool,
+    ) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
 
         self.ensure_regular_content_writable()?;
 
-        let mut pos = self.pos.lock();
         let sz = self.inode().get_attr()?.size as usize;
-        *pos = sz;
         let cred = get_current_task().cred();
-        let written = (self.ops.write)(self, &mut *pos, buf)?;
+        let written = {
+            let mut pos = self.pos.lock();
+            *pos = sz;
+            (self.ops.write)(self, &mut *pos, buf)?
+        };
         if written > 0 {
             self.inode()
                 .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+            self.notify_fanotify(FanMask::MODIFY, notification_suppressed);
         }
         Ok(written)
     }
 
+    pub fn append(&self, buf: &[u8]) -> Result<usize, SysError> {
+        self.append_with_notify(buf, true)
+    }
+
     /// Append without changing the file cursor.
-    pub fn append_at_current_end(&self, buf: &[u8]) -> Result<usize, SysError> {
+    fn append_at_current_end_with_notify(
+        &self,
+        buf: &[u8],
+        notification_suppressed: bool,
+    ) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
 
         self.ensure_regular_content_writable()?;
 
-        let _pos = self.pos.lock();
         let mut append_pos = self.inode().get_attr()?.size as usize;
         let cred = get_current_task().cred();
-        let written = (self.ops.write)(self, &mut append_pos, buf)?;
+        let written = {
+            let _pos = self.pos.lock();
+            (self.ops.write)(self, &mut append_pos, buf)?
+        };
         if written > 0 {
             self.inode()
                 .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+            self.notify_fanotify(FanMask::MODIFY, notification_suppressed);
         }
         Ok(written)
+    }
+
+    pub fn append_at_current_end(&self, buf: &[u8]) -> Result<usize, SysError> {
+        self.append_at_current_end_with_notify(buf, true)
+    }
+
+    pub(crate) fn read_opened(
+        &self,
+        buf: &mut [u8],
+        notification_suppressed: bool,
+    ) -> Result<usize, SysError> {
+        self.read_with_notify(buf, notification_suppressed)
+    }
+
+    pub(crate) fn read_at_opened(
+        &self,
+        pos: usize,
+        buf: &mut [u8],
+        notification_suppressed: bool,
+    ) -> Result<usize, SysError> {
+        self.read_at_with_notify(pos, buf, notification_suppressed)
+    }
+
+    pub(crate) fn write_opened(
+        &self,
+        buf: &[u8],
+        notification_suppressed: bool,
+    ) -> Result<usize, SysError> {
+        self.write_with_notify(buf, notification_suppressed)
+    }
+
+    pub(crate) fn write_at_opened(
+        &self,
+        pos: usize,
+        buf: &[u8],
+        notification_suppressed: bool,
+    ) -> Result<usize, SysError> {
+        self.write_at_with_notify(pos, buf, notification_suppressed)
+    }
+
+    pub(crate) fn append_opened(
+        &self,
+        buf: &[u8],
+        notification_suppressed: bool,
+    ) -> Result<usize, SysError> {
+        self.append_with_notify(buf, notification_suppressed)
+    }
+
+    pub(crate) fn append_at_current_end_opened(
+        &self,
+        buf: &[u8],
+        notification_suppressed: bool,
+    ) -> Result<usize, SysError> {
+        self.append_at_current_end_with_notify(buf, notification_suppressed)
     }
 
     /// Run `f` with the file cursor as `pos`.

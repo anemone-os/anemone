@@ -7,10 +7,12 @@
 use crate::prelude::*;
 
 use super::{
+    event::FanEvent,
     group::{FanGroup, FanGroupId},
+    hooks::FanHookEvent,
     mark::{FanMarkRecord, FanMarkUpdate, MarkHandle},
     queue::FanDetachedTriggers,
-    types::{FanTarget, FanTargetClass, FanTargetKey},
+    types::{FanMask, FanTarget, FanTargetClass, FanTargetKey},
 };
 
 static REGISTRY: Lazy<Mutex<FanRegistry>> = Lazy::new(|| Mutex::new(FanRegistry::new()));
@@ -91,6 +93,242 @@ impl FanRegistry {
         if let Some(group) = record.resolve_group() {
             group.remove_mark_handle_from_registry(record.handle());
         }
+    }
+
+    fn matching_handles(&self, target_key: FanTargetKey) -> Vec<MarkHandle> {
+        self.marks_by_target
+            .get(&target_key)
+            .map(|handles| handles.to_vec())
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FanMatchKind {
+    SelfTarget,
+    ParentChild,
+}
+
+#[derive(Debug)]
+struct GroupMatch {
+    group: Arc<FanGroup>,
+    mask: FanMask,
+    ignored_mask: FanMask,
+}
+
+impl GroupMatch {
+    fn new(group: Arc<FanGroup>) -> Self {
+        Self {
+            group,
+            mask: FanMask::empty(),
+            ignored_mask: FanMask::empty(),
+        }
+    }
+}
+
+fn mark_applies_to_event(record_mask: FanMask, is_dir: bool, kind: FanMatchKind) -> bool {
+    if is_dir && !record_mask.contains(FanMask::ONDIR) {
+        return false;
+    }
+    if matches!(kind, FanMatchKind::ParentChild) && !record_mask.contains(FanMask::EVENT_ON_CHILD) {
+        return false;
+    }
+    true
+}
+
+fn effective_legacy_ignored_mask(record: &FanMarkRecord, kind: FanMatchKind) -> FanMask {
+    let ignored_mask = record.ignored_mask();
+    if ignored_mask.is_empty() {
+        return FanMask::empty();
+    }
+
+    match kind {
+        FanMatchKind::SelfTarget => ignored_mask,
+        // Current gate only accepts legacy FAN_MARK_IGNORED_MASK. Linux's
+        // legacy mode ignores child events only when the ordinary mark mask
+        // watches children; FAN_MARK_IGNORE's independent flag semantics stay
+        // rejected by the parser.
+        FanMatchKind::ParentChild if record.mask().contains(FanMask::EVENT_ON_CHILD) => {
+            ignored_mask
+        },
+        FanMatchKind::ParentChild => FanMask::empty(),
+    }
+}
+
+fn should_clear_legacy_ignore_after_modify(
+    event_mask: FanMask,
+    ignored_mask: FanMask,
+    survives_modify: bool,
+) -> bool {
+    event_mask.contains(FanMask::MODIFY) && !ignored_mask.is_empty() && !survives_modify
+}
+
+fn add_group_match(
+    matches: &mut Vec<GroupMatch>,
+    group: Arc<FanGroup>,
+    mask: FanMask,
+    ignored_mask: FanMask,
+) {
+    if let Some(existing) = matches.iter_mut().find(|entry| {
+        entry.group.id() == group.id() && entry.group.generation() == group.generation()
+    }) {
+        existing.mask.insert(mask);
+        existing.ignored_mask.insert(ignored_mask);
+        return;
+    }
+
+    let mut entry = GroupMatch::new(group);
+    entry.mask.insert(mask);
+    entry.ignored_mask.insert(ignored_mask);
+    matches.push(entry);
+}
+
+fn collect_match_for_handle(
+    registry: &mut FanRegistry,
+    handle: MarkHandle,
+    event_mask: FanMask,
+    is_dir: bool,
+    kind: FanMatchKind,
+    matches: &mut Vec<GroupMatch>,
+    remove_after_modify: &mut Vec<MarkHandle>,
+) {
+    let Some(record) = registry.record_mut(handle) else {
+        return;
+    };
+    if record.target_dead() {
+        return;
+    }
+
+    let record_mask = record.mask();
+    let matched_mask = if mark_applies_to_event(record_mask, is_dir, kind) {
+        record_mask
+    } else {
+        FanMask::empty()
+    };
+    let mut ignored_mask = effective_legacy_ignored_mask(record, kind);
+    if should_clear_legacy_ignore_after_modify(
+        event_mask,
+        ignored_mask,
+        record.ignored_survives_modify(),
+    ) {
+        // Linux clears non-surviving legacy ignore masks before deciding
+        // whether the current modify event is ignored. Keep that ordering so
+        // a FAN_MODIFY can both clear a legacy ignore mask and be delivered to
+        // the same group when the ordinary mark mask is interested in it.
+        record.clear_ignored_mask_after_modify();
+        ignored_mask = FanMask::empty();
+        if record.is_empty() {
+            remove_after_modify.push(handle);
+        }
+    }
+    if matched_mask.is_empty() && ignored_mask.is_empty() {
+        return;
+    }
+
+    let Some(group) = record.resolve_group() else {
+        return;
+    };
+
+    add_group_match(matches, group, matched_mask, ignored_mask);
+}
+
+fn collect_matches(
+    registry: &mut FanRegistry,
+    target_key: FanTargetKey,
+    event_mask: FanMask,
+    is_dir: bool,
+    kind: FanMatchKind,
+    matches: &mut Vec<GroupMatch>,
+    remove_after_modify: &mut Vec<MarkHandle>,
+) {
+    for handle in registry.matching_handles(target_key) {
+        collect_match_for_handle(
+            registry,
+            handle,
+            event_mask,
+            is_dir,
+            kind,
+            matches,
+            remove_after_modify,
+        );
+    }
+}
+
+pub(super) fn notify_path_event(event: FanHookEvent) {
+    let path = event.path().clone();
+    let event_mask = event.mask();
+    let is_dir = path.inode().ty() == InodeType::Dir;
+
+    let target_inode = FanTargetKey::from_inode(path.inode());
+    let target_mount = FanTargetKey::from_mount(path.mount());
+    let target_sb = FanTargetKey::from_superblock(path.mount().sb());
+    let parent_inode = event
+        .parent_path()
+        .map(|parent| FanTargetKey::from_inode(parent.inode()));
+
+    let mut matches = Vec::new();
+    {
+        let mut registry = REGISTRY.lock();
+        let mut remove_after_modify = Vec::new();
+
+        collect_matches(
+            &mut registry,
+            target_inode,
+            event_mask,
+            is_dir,
+            FanMatchKind::SelfTarget,
+            &mut matches,
+            &mut remove_after_modify,
+        );
+        collect_matches(
+            &mut registry,
+            target_mount,
+            event_mask,
+            is_dir,
+            FanMatchKind::SelfTarget,
+            &mut matches,
+            &mut remove_after_modify,
+        );
+        collect_matches(
+            &mut registry,
+            target_sb,
+            event_mask,
+            is_dir,
+            FanMatchKind::SelfTarget,
+            &mut matches,
+            &mut remove_after_modify,
+        );
+        if let Some(parent_inode) = parent_inode {
+            collect_matches(
+                &mut registry,
+                parent_inode,
+                event_mask,
+                is_dir,
+                FanMatchKind::ParentChild,
+                &mut matches,
+                &mut remove_after_modify,
+            );
+        }
+
+        for handle in remove_after_modify {
+            if let Some(record) = registry.remove_record_by_handle(handle) {
+                FanRegistry::remove_group_handle_for_record(&record);
+            }
+        }
+    }
+
+    matches.sort_by_key(|entry| entry.group.id());
+    for group_match in matches {
+        // Current groups are legacy path-fd listeners. FAN_ONDIR and
+        // FAN_EVENT_ON_CHILD decide whether a mark applies, but Linux does not
+        // report those event-flag bits in metadata until FID mode is enabled.
+        let delivered = event_mask & group_match.mask & !group_match.ignored_mask;
+        if delivered.is_empty() {
+            continue;
+        }
+        group_match
+            .group
+            .enqueue(FanEvent::path(delivered, path.clone()));
     }
 }
 

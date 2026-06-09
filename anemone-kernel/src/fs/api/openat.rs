@@ -6,10 +6,13 @@
 use anemone_abi::fs::linux::open::*;
 
 use crate::{
-    fs::api::args::{AtFd, LinuxInodePerm},
+    fs::{
+        api::args::{AtFd, LinuxInodePerm},
+        fanotify::{FanHookEvent, FanMask, notify_path_event, observed_file_description_ops},
+    },
     prelude::{user_access::c_readonly_path, *},
     syscall::handler::TryFromSyscallArg,
-    task::files::{FdFlags, FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
+    task::files::{FdFlags, FileDesc, FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
 };
 
 static TMPFILE_NAME_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -295,6 +298,7 @@ fn finish_open(
     if should_truncate {
         let cred = get_current_task().cred();
         file.inode().truncate(0, &cred)?;
+        notify_path_event(FanHookEvent::new(FanMask::MODIFY, file.path().clone()));
     }
 
     if how.status.contains(FileStatusFlags::APPEND) {
@@ -302,7 +306,27 @@ fn finish_open(
     }
 
     let task = get_current_task();
-    let fd = task.open_fd(file, how.access, how.status, how.compat, how.fd)?;
+    let reservation = task.reserve_fd()?;
+    let reserved_fd = reservation.fd();
+    let opened_path = file.path().clone();
+    let file_desc = FileDesc::new_opened(
+        file,
+        how.access,
+        how.status,
+        how.compat,
+        how.fd,
+        observed_file_description_ops(),
+    );
+    // FAN_OPEN must be queued before the new fd becomes visible. Once the slot
+    // is published, a CLONE_FILES peer can close it and run the final-release
+    // callback; committing after this infallible notification step preserves
+    // the observable OPEN-before-CLOSE order for the opened description.
+    notify_path_event(FanHookEvent::new(FanMask::OPEN, opened_path));
+    let fd = reservation.commit(file_desc);
+    assert_eq!(
+        fd, reserved_fd,
+        "fanotify open reservation changed fd number during commit"
+    );
     Ok(fd.raw() as u64)
 }
 

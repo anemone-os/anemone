@@ -4,6 +4,7 @@
 //! - https://elixir.bootlin.com/linux/v6.6.32/source/include/linux/fdtable.h
 
 use crate::{
+    fs::fanotify::{FanHookEvent, FanMask, notify_path_event},
     prelude::{handler::TryFromSyscallArg, *},
     utils::bitmap::Bitmap,
 };
@@ -357,7 +358,10 @@ impl FileDesc {
         if !self.can_read() {
             return Err(SysError::BadFileDescriptor);
         }
-        self.pfile.file.read(buf).map_err(|e| e.into())
+        self.pfile
+            .file
+            .read_opened(buf, self.notifications_suppressed())
+            .map_err(|e| e.into())
     }
 
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, SysError> {
@@ -367,7 +371,10 @@ impl FileDesc {
         if self.is_path_only() {
             return Err(SysError::BadFileDescriptor);
         }
-        self.pfile.file.read_at(offset, buf).map_err(|e| e.into())
+        self.pfile
+            .file
+            .read_at_opened(offset, buf, self.notifications_suppressed())
+            .map_err(|e| e.into())
     }
 
     /// This applies to both write and append mode.
@@ -378,9 +385,15 @@ impl FileDesc {
         }
 
         if flags.contains(FileStatusFlags::APPEND) {
-            self.pfile.file.append(buf).map_err(|e| e.into())
+            self.pfile
+                .file
+                .append_opened(buf, self.notifications_suppressed())
+                .map_err(|e| e.into())
         } else {
-            self.pfile.file.write(buf).map_err(|e| e.into())
+            self.pfile
+                .file
+                .write_opened(buf, self.notifications_suppressed())
+                .map_err(|e| e.into())
         }
     }
 
@@ -397,10 +410,13 @@ impl FileDesc {
             return self
                 .pfile
                 .file
-                .append_at_current_end(buf)
+                .append_at_current_end_opened(buf, self.notifications_suppressed())
                 .map_err(|e| e.into());
         }
-        self.pfile.file.write_at(offset, buf).map_err(|e| e.into())
+        self.pfile
+            .file
+            .write_at_opened(offset, buf, self.notifications_suppressed())
+            .map_err(|e| e.into())
     }
 
     pub fn truncate(&self, len: u64, cred: &CredentialSet) -> Result<(), SysError> {
@@ -413,7 +429,12 @@ impl FileDesc {
             self.pfile.file.path().mount().ensure_writable()?;
         }
 
-        inode.truncate(len, cred)
+        inode.truncate(len, cred)?;
+        notify_path_event(
+            FanHookEvent::new(FanMask::MODIFY, self.pfile.file.path().clone())
+                .with_notification_suppressed(self.notifications_suppressed()),
+        );
+        Ok(())
     }
 
     /// Linux whence values are converted in syscall handlers; FileDesc only

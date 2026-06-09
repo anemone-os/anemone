@@ -451,10 +451,11 @@ write set：
 语义要求：
 
 - open 成功后派发 `FAN_OPEN`。
-- `File::{read,read_at}` 成功读取后派发 `FAN_ACCESS`；hook 位于 fd/VFS gate 后、
-  backend 成功返回后，不下沉到具体 backend `FileOps::{read_at,write_at}`。
-- write/write_at/append/truncate 等成功内容修改后派发 `FAN_MODIFY`，并服务 legacy
-  ignored mask modify clearing。
+- 用户可见 opened-fd read/read_at 成功读取后派发 `FAN_ACCESS`；hook 位于 fd/VFS gate 后、
+  backend 成功返回后，不下沉到具体 backend `FileOps::{read_at,write_at}`，也不把内核内部
+  直接 `File` helper 当作事件源。
+- 用户可见 opened-fd write/write_at/append/truncate 等成功内容修改后派发 `FAN_MODIFY`，
+  并服务 legacy ignored mask modify clearing。
 - open 成功时在 opened file description 上记录 close snapshot：`PathRef` / `FanPathKey`
   和打开时 access mode 是否具备写能力。
 - 最后 opened-description release 时派发 `FAN_CLOSE_WRITE` 或 `FAN_CLOSE_NOWRITE`；

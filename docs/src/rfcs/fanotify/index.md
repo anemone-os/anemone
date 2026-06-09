@@ -6,7 +6,7 @@
 **领域：** fs / VFS / syscall ABI / iomux / procfs / LTP
 **事务日志：** [2026-06-08 - Fanotify](../../devlog/transactions/2026-06-08-fanotify.md)
 **开放问题：** [fanotify tracking issues](./tracking-issues.md) 当前无活跃 Keter；`FANOTIFY-041` Gate C corrective Keter 已 neutralized。强一致或高成本 Linux 语义仍按非目标和 Stage 5 backlog 暂缓。
-**下一步：** Gate C 在源码层已完成 D4 与 `FANOTIFY-041` corrective repair；等待用户确认后启动 D5 VFS 基础 event injection。不得把 FID/name 正向 ABI、procfs fdinfo 或 permission events 合入 D5 前置修复。
+**下一步：** Gate D / D5 VFS 基础 event injection 已源码级闭合；下一步启动 D6 FID/name negative gate 与 LTP 分类。不得把 FID/name 正向 ABI、procfs fdinfo 或 permission events 合入 D6 negative gate。
 
 ## 摘要
 
@@ -24,7 +24,7 @@ LTP 的 fanotify 组占分高，当前内核只有 `SYS_FANOTIFY_INIT` / `SYS_FA
 - `FileOps` 已有 `read`、`write`、`read_at`、`write_at`、`seek`、`read_dir`、`poll`、`ioctl`，typed `PollRequest` / `PollRegisterResult` 和 sched latch 已能支撑可阻塞 readiness；fanotify group fd 必须提供完整 vtable，其中不可 seek / positioned I/O 的入口 fail closed。
 - `sys_ioctl()` 已通过 `IoctlCtx` 分发到打开文件对象的 `FileOps::ioctl`；fanotify group fd 若支持 `FIONREAD`，必须在自己的 file ops 内处理，不能在 syscall 层 downcast fanotify private state。
 - `PathRef = Mount + Dentry`、`InodeRef`、`Mount`、`SuperBlock` 足够表达 fanotify mark target。
-- `openat`、`File::{read,read_at}`、`File::{write,write_at,append}`、metadata syscall 和 VFS dirent primitive 已有集中事件注入点；positioned I/O hook 必须落在保留 fd/VFS gate 后的 VFS/opened-file 边界，不下沉到具体 backend `FileOps::{read_at,write_at}`。
+- `openat`、opened-fd read/read_at/write/write_at/append、metadata syscall 和 VFS dirent primitive 已有集中事件注入点；positioned I/O hook 必须落在保留 fd/VFS gate 后的 VFS/opened-file 边界，不下沉到具体 backend `FileOps::{read_at,write_at}`，也不把内核内部直接 `File` helper 当作用户可见事件源。
 - `CredentialSet` 与 `Capability::SYS_ADMIN` 已能表达首批 privileged listener 边界。
 
 详细基础设施评估见 [fanotify 基础设施评估](./backgrounds/infra-assessment-20260604.md)。

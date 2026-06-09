@@ -12,8 +12,8 @@ use anemone_rs::{
     os::{
         anemone::power::shutdown,
         linux::{
-            fs::{AtFd, chdir, chroot, close, fstatat, mkdirat, mount, openat, read, write},
-            process::{WStatus, WStatusRaw, WaitFor, WaitOptions, execve, fork, wait4},
+            fs::{chdir, chroot, close, fstatat, mkdirat, mount, openat, read, write, AtFd},
+            process::{execve, fork, wait4, WStatus, WStatusRaw, WaitFor, WaitOptions},
         },
     },
     prelude::*,
@@ -58,10 +58,28 @@ cfg_select! {
             "ld-musl-riscv64.so.1",
             "ld-musl-riscv64-sf.so.1",
         ];
-        const STAGED_COMPETITION_FIXTURES: &[StagedCompetitionFixture] = &[StagedCompetitionFixture {
-            source: "/fixtures/user-test/tools/mkfs.ext4",
-            dest: "/bin/mkfs.ext4",
-        }];
+        const STAGED_COMPETITION_FIXTURES: &[StagedCompetitionFixture] = &[
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/mke2fs",
+                dest: "/bin/mkfs.ext4",
+            },
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/mke2fs",
+                dest: "/bin/mkfs.ext3",
+            },
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/mke2fs",
+                dest: "/bin/mkfs.xfs",
+            },
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/mke2fs",
+                dest: "/bin/mkfs.exfat",
+            },
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/mke2fs",
+                dest: "/bin/mkfs.vfat",
+            },
+        ];
     },
     target_arch = "loongarch64" => {
         const ACTIVE_LIB_DIR: &str = "/lib64";

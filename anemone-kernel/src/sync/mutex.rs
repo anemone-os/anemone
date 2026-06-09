@@ -36,10 +36,12 @@ impl<T: ?Sized> Mutex<T> {
             IntrArch::local_intr_enabled(),
             "Mutex cannot be locked when interrupts are disabled"
         );
-        assert!(
-            allow_preempt(),
-            "Mutex cannot be locked when preemption is disabled"
-        );
+        if cfg!(feature = "kernel_preempt") {
+            assert!(
+                allow_preempt(),
+                "Mutex cannot be locked when preemption is disabled"
+            );
+        }
         assert!(
             self.locker.load(Ordering::Acquire) != Arc::as_ptr(&get_current_task()) as usize,
             "Mutex cannot be locked recursively"
