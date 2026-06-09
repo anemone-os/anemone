@@ -76,7 +76,7 @@ fn sys_mount(
     }
 
     let fs_name = mount_fs_name(&fstype);
-    let fs = get_filesystem(fs_name).ok_or(SysError::InvalidArgument)?;
+    let fs = get_filesystem(fs_name).ok_or(SysError::UnsupportedFileSystem)?;
     if fs.flags().contains(FileSystemFlags::KERNEL_FS) {
         return Err(SysError::PermissionDenied);
     }
