@@ -1,7 +1,7 @@
 use anemone_rs::{
     os::linux::{
-        fs::{AtFd, chdir, fstatat},
-        process::{WStatus, execve, exit, fork, setpgid},
+        fs::{chdir, fstatat, AtFd},
+        process::{execve, exit, fork, setpgid, WStatus},
     },
     prelude::*,
 };
@@ -129,6 +129,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
         name: "credentials",
         cases: include_str!("../ltp/groups/credentials.txt"),
+    },
+    LtpGroup {
+        name: "sendfile",
+        cases: include_str!("../ltp/groups/sendfile.txt"),
     },
     LtpGroup {
         name: "signal",

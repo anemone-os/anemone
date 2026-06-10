@@ -83,13 +83,13 @@ impl PathRef {
     ///
     /// If our dentry model is working correctly, this should be sufficient...?
     pub fn location_eq(&self, other: &PathRef) -> bool {
-        let eq = Arc::ptr_eq(&self.dentry, &other.dentry);
-        if !eq {
+        if !Arc::ptr_eq(&self.dentry, &other.dentry) {
             return false;
         }
-        // this should hold if the dentry is the same, but let's be safe and check it
-        // anyway.
-        assert!(Arc::ptr_eq(&self.mount, &other.mount));
+        if !Arc::ptr_eq(&self.mount, &other.mount) {
+            return false;
+        }
+
         true
     }
 }

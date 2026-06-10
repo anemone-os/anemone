@@ -57,7 +57,8 @@ fn sys_sendfile(
     if let Some(offset_ptr) = offset_ptr {
         let update_offset = |offset: usize| -> Result<(), SysError> {
             let usp_handle = task.clone_uspace_handle();
-            UserWritePtr::<i64>::try_new(offset_ptr, &mut usp_handle.lock())?.write(offset as i64);
+            let offset = i64::try_from(offset).map_err(|_| SysError::FileTooLarge)?;
+            UserWritePtr::<i64>::try_new(offset_ptr, &mut usp_handle.lock())?.write(offset);
             Ok(())
         };
 
@@ -65,16 +66,27 @@ fn sys_sendfile(
         let init_offset = {
             let usp_handle = task.clone_uspace_handle();
             // kernel_long_t
-            UserReadPtr::<i64>::try_new(offset_ptr, &mut usp_handle.lock())?.read() as usize
+            let offset = UserReadPtr::<i64>::try_new(offset_ptr, &mut usp_handle.lock())?.read();
+            if offset < 0 {
+                return Err(SysError::InvalidArgument);
+            }
+            usize::try_from(offset).map_err(|_| SysError::InvalidArgument)?
         };
 
         let mut offset = init_offset;
-        loop {
-            let bytes_read = match in_fd.read_at(offset, &mut buf) {
+        while total_written < count {
+            let read_len = usize::min(BUF_SIZE, count - total_written);
+            let bytes_read = match in_fd.read_at(offset, &mut buf[..read_len]) {
                 Ok(bytes_read) => bytes_read,
                 Err(err) => {
-                    notify_sendfile_progress(&in_fd, total_read, &out_fd, total_written);
-                    return Err(err);
+                    return finish_sendfile_transfer(
+                        &in_fd,
+                        total_read,
+                        &out_fd,
+                        total_written,
+                        update_offset(offset),
+                        Some(err),
+                    );
                 },
             };
             if bytes_read == 0 {
@@ -88,8 +100,14 @@ fn sys_sendfile(
                 let once_written = match out_fd.write(&buf[written..bytes_read]) {
                     Ok(once_written) => once_written,
                     Err(err) => {
-                        notify_sendfile_progress(&in_fd, total_read, &out_fd, total_written);
-                        return Err(err);
+                        return finish_sendfile_transfer(
+                            &in_fd,
+                            total_read,
+                            &out_fd,
+                            total_written,
+                            update_offset(offset),
+                            Some(err),
+                        );
                     },
                 };
 
@@ -97,34 +115,56 @@ fn sys_sendfile(
                     knoticeln!(
                         "write returned 0, but there's still data to write. treating it as an IO error"
                     );
-                    if let Err(err) = update_offset(offset + written) {
-                        notify_sendfile_progress(&in_fd, total_read, &out_fd, total_written);
-                        return Err(err);
-                    }
-                    notify_sendfile_progress(&in_fd, total_read, &out_fd, total_written);
-                    return Err(SysError::IO);
+                    return finish_sendfile_transfer(
+                        &in_fd,
+                        total_read,
+                        &out_fd,
+                        total_written,
+                        update_offset(offset),
+                        Some(SysError::IO),
+                    );
                 }
                 written += once_written;
                 total_written += once_written;
+                offset = offset
+                    .checked_add(once_written)
+                    .ok_or(SysError::FileTooLarge)?;
             }
-
-            offset += bytes_read;
         }
 
-        if let Err(err) = update_offset(offset) {
-            notify_sendfile_progress(&in_fd, total_read, &out_fd, total_written);
-            return Err(err);
-        }
-
-        total_written = offset - init_offset;
+        return finish_sendfile_transfer(
+            &in_fd,
+            total_read,
+            &out_fd,
+            total_written,
+            update_offset(offset),
+            None,
+        );
     } else {
-        // read starting at file offset, and update file offset.
-        loop {
-            let bytes_read = match in_fd.read(&mut buf) {
+        let update_offset = |offset: usize| -> Result<(), SysError> {
+            in_fd
+                .seek(SeekFrom::Set(
+                    i64::try_from(offset).map_err(|_| SysError::FileTooLarge)?,
+                ))
+                .map(|_| ())
+        };
+
+        // Read from the current input cursor, but only commit cursor movement
+        // for bytes that are actually written to out_fd.
+        let mut offset = in_fd.seek(SeekFrom::Cur(0))?;
+        while total_written < count {
+            let read_len = usize::min(BUF_SIZE, count - total_written);
+            let bytes_read = match in_fd.read_at(offset, &mut buf[..read_len]) {
                 Ok(bytes_read) => bytes_read,
                 Err(err) => {
-                    notify_sendfile_progress(&in_fd, total_read, &out_fd, total_written);
-                    return Err(err);
+                    return finish_sendfile_transfer(
+                        &in_fd,
+                        total_read,
+                        &out_fd,
+                        total_written,
+                        update_offset(offset),
+                        Some(err),
+                    );
                 },
             };
             if bytes_read == 0 {
@@ -138,8 +178,14 @@ fn sys_sendfile(
                 let once_written = match out_fd.write(&buf[written..bytes_read]) {
                     Ok(once_written) => once_written,
                     Err(err) => {
-                        notify_sendfile_progress(&in_fd, total_read, &out_fd, total_written);
-                        return Err(err);
+                        return finish_sendfile_transfer(
+                            &in_fd,
+                            total_read,
+                            &out_fd,
+                            total_written,
+                            update_offset(offset),
+                            Some(err),
+                        );
                     },
                 };
 
@@ -148,17 +194,55 @@ fn sys_sendfile(
                     knoticeln!(
                         "write returned 0, but there's still data to write. treating it as an IO error"
                     );
-                    notify_sendfile_progress(&in_fd, total_read, &out_fd, total_written);
-                    return Err(SysError::IO);
+                    return finish_sendfile_transfer(
+                        &in_fd,
+                        total_read,
+                        &out_fd,
+                        total_written,
+                        update_offset(offset),
+                        Some(SysError::IO),
+                    );
                 }
 
                 written += once_written;
                 total_written += once_written;
+                offset = offset
+                    .checked_add(once_written)
+                    .ok_or(SysError::FileTooLarge)?;
             }
+        }
+
+        return finish_sendfile_transfer(
+            &in_fd,
+            total_read,
+            &out_fd,
+            total_written,
+            update_offset(offset),
+            None,
+        );
+    }
+}
+
+fn finish_sendfile_transfer(
+    in_fd: &FileDesc,
+    total_read: usize,
+    out_fd: &FileDesc,
+    total_written: usize,
+    state_update: Result<(), SysError>,
+    transfer_error: Option<SysError>,
+) -> Result<u64, SysError> {
+    notify_sendfile_progress(in_fd, total_read, out_fd, total_written);
+    state_update?;
+
+    // Linux sendfile(2) reports partial transfer success: read/write errors
+    // after at least one written byte return the byte count. Copy-out failures
+    // such as an invalid offset pointer still surface through state_update.
+    if let Some(err) = transfer_error {
+        if total_written == 0 {
+            return Err(err);
         }
     }
 
-    notify_sendfile_progress(&in_fd, total_read, &out_fd, total_written);
     Ok(total_written as u64)
 }
 
