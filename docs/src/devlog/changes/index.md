@@ -32,6 +32,9 @@
 
 ## 当前记录
 
+- [2026-06-10 - FileOps status ctx 边界清理](./2026-06-10-fileops-status-ctx.md)
+- [2026-06-09 - User-test staged 工具通道](./2026-06-09-user-test-staged-tools.md)
+- [2026-06-08 - 空 iomux 超时睡眠修复](./2026-06-08-iomux-empty-timeout-sleep.md)
 - [2026-06-08 - pselect6 exceptfds compat](./2026-06-08-pselect6-exceptfds-compat.md)
 - [2026-06-07 - User-test LTP Pgrp Isolation](./2026-06-07-user-test-ltp-pgrp-isolation.md)
 - [2026-06-07 - Signal LTP Tgkill Sigqueueinfo](./2026-06-07-signal-ltp-tgkill-sigqueueinfo.md)

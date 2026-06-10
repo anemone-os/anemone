@@ -81,14 +81,31 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 RFC 记录 accepted contract、边界和计划。transaction devlog 记录实际执行、checkpoint、review 结论、验证证据、更正说明、剩余限制和 handoff。
 
+### 5.1 跨 RFC 功能入口
+
+有些能力会被多个 RFC 分段覆盖。此时不要为“功能进度”新建一份并行账本，也不要把 transaction devlog 的阶段事实复制到另一个状态文件中。
+
+推荐做法是提供一个轻量导航入口：
+
+- 如果某个 RFC 是 umbrella / parent RFC，在该 RFC 的 `index.md` 中列出后续 RFC、事务日志、register / current limitations 链接；
+- 如果没有明确 parent RFC，在 [公开草案与 RFC](./rfcs.md) 的“当前 RFC”或领域分组中聚合相关 RFC 链接；
+- 导航入口只说明“该看哪些文档”和每个链接覆盖的范围，不重新记录阶段完成度、验证证据或剩余问题。
+
+跨 RFC 功能的当前事实仍按原职责归属：accepted contract 写在对应 RFC，执行进展写在 transaction devlog，开放问题和接受限制写在 register / current limitations。这样可以给读者一个 feature 级入口，同时避免多重真相源。
+
 ### 6. 实现阶段
 
 实现必须按 RFC 和 transaction 中的阶段推进。每个阶段至少说明：
 
 - write set 和不应触碰的边界；
+- 模块边界预检：当前文件/模块是否已经混合多个职责，继续追加代码是否会强化错误 owner boundary；
 - review gate 和停止条件；
 - 验证 floor，例如 `just build`、用户运行的 LTP、或只读审计；
 - 临时兼容层、旁路路径和后续删除点。
+
+实现阶段可以安排独立的结构维护 gate。这个 gate 只做同一 owner 内的行为保持型拆分、模块目录化、可见性收窄、导入路径调整和调用面不变的文件搬移；不应顺手改变 syscall 语义、状态机、不变量或 ABI。推荐验证 floor 是 `git diff --check`、`just build`，以及必要的 `rg` 检查，确认外部调用面没有被扩大、旧兼容入口没有被误保留。
+
+当拆分需要移动 owner surface、改变 public API、引入新的 facade、调整 shared contract，或扩大原 write set 时，不能把它包装成普通整理；应走 write set 扩展申请，并在 transaction devlog、阶段说明或 agent 编排文档中记录批准后的结构边界。
 
 阶段推进、review 结论和验证证据写入 transaction devlog。RFC 只在 accepted contract 变化时更新；如果实现发现 RFC 的不变量或边界错误，应先回到 RFC 文档层修正，再继续实现。
 
@@ -123,9 +140,11 @@ write set 扩展申请至少说明：
 | RFC `index.md` | 状态、范围、方案摘要、接受边界、文档地图 | 阶段流水账 |
 | `invariants.md` | 协议和不变量证明边界 | 实现步骤细节 |
 | `implementation.md` | 阶段计划、gate、验证、停止条件 | 已执行 checkpoint 日志 |
+| 结构维护 gate | 同一 owner 内行为保持的模块拆分、目录化、可见性收窄和调用面确认 | 借整理名义改变语义、移动 owner surface、扩大 public API |
 | `tracking-issues.md` | 当前 design-review issue 状态 | 普通 TODO、实现进度、历史归档 |
 | `backgrounds/` | 历史材料、旧计划、被拒绝方案、证据索引 | 覆盖 canonical 结论 |
 | Transaction devlog | 执行事实、checkpoint、review、验证、handoff | 重新定义 accepted contract |
+| 跨 RFC 功能入口 | 相关 RFC / transaction / register 的导航索引 | 阶段进度账本、验证事实副本、第二套问题状态 |
 | 双周 devlog | 入口摘要和重要结论 | 长篇阶段日志 |
 | Register / limitations | 当前开放问题和接受限制 | 设计草案或实现计划 |
 

@@ -39,7 +39,7 @@ fn parse_mount_source(raw: Option<Box<str>>) -> Result<MountSource, SysError> {
 
 fn mount_fs_name(fstype: &str) -> &str {
     match fstype {
-        "tmpfs" => "ramfs",
+        "tmpfs" | "ext2" | "ext3" | "vfat" => "ramfs",
         _ => fstype,
     }
 }
@@ -76,13 +76,13 @@ fn sys_mount(
     }
 
     let fs_name = mount_fs_name(&fstype);
-    let fs = get_filesystem(fs_name).ok_or(SysError::InvalidArgument)?;
+    let fs = get_filesystem(fs_name).ok_or(SysError::UnsupportedFileSystem)?;
     if fs.flags().contains(FileSystemFlags::KERNEL_FS) {
         return Err(SysError::PermissionDenied);
     }
     drop(fs);
 
-    let source = if fstype.as_ref() == "tmpfs" {
+    let source = if fs_name == "ramfs" {
         MountSource::Pseudo
     } else {
         parse_mount_source(source)?

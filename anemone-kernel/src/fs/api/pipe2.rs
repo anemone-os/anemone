@@ -52,14 +52,16 @@ fn sys_pipe2(
     let mut rx_status_flags = FileStatusFlags::empty();
     let mut tx_status_flags = FileStatusFlags::empty();
     if flags.contains(PipeFlags::O_NONBLOCK) {
-        crate::fs::pipe::update_nonblock(&rx, true);
-        crate::fs::pipe::update_nonblock(&tx, true);
         rx_status_flags |= FileStatusFlags::NONBLOCK;
         tx_status_flags |= FileStatusFlags::NONBLOCK;
     }
     if flags.contains(PipeFlags::O_DIRECT) {
+        // pipe2 owns this anonymous endpoint protocol: O_DIRECT remains only a
+        // visible packet-mode compatibility bit and pipe FileOps accepts it.
         tx_status_flags |= FileStatusFlags::DIRECT;
     }
+    rx.check_status_flags(rx_status_flags.to_file_op_status_flags())?;
+    tx.check_status_flags(tx_status_flags.to_file_op_status_flags())?;
 
     let rx = task.open_fd(
         rx,

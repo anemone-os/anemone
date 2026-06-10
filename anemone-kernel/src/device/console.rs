@@ -165,12 +165,22 @@ pub unsafe fn on_system_boot() {
     }
 }
 
-fn console_read(_file: &File, _pos: &mut usize, _buf: &mut [u8]) -> Result<usize, SysError> {
+fn console_read(
+    _file: &File,
+    _pos: &mut usize,
+    _buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     // currently no-op. always return EOF.
     Ok(0)
 }
 
-fn console_write(_file: &File, _pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
+fn console_write(
+    _file: &File,
+    _pos: &mut usize,
+    buf: &[u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let s = core::str::from_utf8(buf).map_err(|_| SysError::InvalidArgument)?;
     output(s);
     Ok(buf.len())
@@ -234,9 +244,10 @@ static CONSOLE_STDOUT_INODE_OPS: InodeOps = InodeOps {
 
 static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {
     read: console_read,
-    write: |_, _, _| Err(SysError::NotSupported),
-    read_at: |_, _, _| Err(SysError::IllegalSeek),
-    write_at: |_, _, _| Err(SysError::NotSupported),
+    write: |_, _, _, _| Err(SysError::NotSupported),
+    read_at: |_, _, _, _| Err(SysError::IllegalSeek),
+    write_at: |_, _, _, _| Err(SysError::NotSupported),
+    check_status_flags: accept_file_op_status_flags,
     seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, _| {
@@ -247,10 +258,11 @@ static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {
 };
 
 static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
-    read: |_, _, _| Err(SysError::NotSupported),
+    read: |_, _, _, _| Err(SysError::NotSupported),
     write: console_write,
-    read_at: |_, _, _| Err(SysError::NotSupported),
-    write_at: |_, _, _| Err(SysError::IllegalSeek),
+    read_at: |_, _, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _, _| Err(SysError::IllegalSeek),
+    check_status_flags: accept_file_op_status_flags,
     seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, _| {

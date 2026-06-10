@@ -22,6 +22,8 @@ Use explicit issue levels to keep reviews bounded by real risk. Always use the c
 - **Euclid**: Usually worth fixing, but not mainline-blocking: inelegant design, local coupling, mediocre naming, awkward tests, or refactorable code whose current shape does not break the main path.
 - **Safe**: Record only unless it is cheap and local to fix: pure style preference, theoretical purity, abstraction for abstraction's sake, or something that may only matter in a speculative future. Default to not fixing.
 
+For file/module size findings, classify by responsibility rather than line count. A long table or ABI definition file can be Safe; a file that mixes syscall ABI, core state ownership, backend operations, compatibility bridges, and lifecycle rules is at least Euclid, and becomes Keter when the mixed shape is already causing owner-boundary mistakes, duplicated truth, ABI leakage, or blocked follow-up work.
+
 When reviewing, stop issue hunting once remaining observations are Safe unless the user explicitly asks for polish or cleanup. Do not promote Safe or Euclid items into blockers to keep a review going.
 
 ## Review Priorities
@@ -33,6 +35,8 @@ When reviewing, stop issue hunting once remaining observations are Safe unless t
    - Do subsystems communicate through explicit interfaces instead of reaching into another subsystem's private types, locks, storage, or internal state?
    - Does a cross-subsystem dependency preserve direction and ownership, or does it make one subsystem implement another subsystem's policy?
    - Is the abstraction justified by real reuse or complexity reduction, or is a direct local implementation clearer?
+   - If a file keeps growing, is the growth still one owner doing one job, or is it accumulating multiple roles that should be split by boundary?
+   - Would a behavior-preserving split inside the same owner make future changes safer without creating a new abstraction layer?
 
 2. **Concurrency and races**
    - Identify shared mutable state and check which lock, atomic rule, interrupt rule, or ownership transfer protects it.
@@ -71,11 +75,14 @@ When reviewing, stop issue hunting once remaining observations are Safe unless t
    - Comments should explain non-obvious invariants, ordering constraints, ABI choices, and missing features; they should not restate obvious code.
    - Treat missing comments on non-obvious invariants, ABI tradeoffs, lock or lifetime ordering, temporary compatibility bridges, accepted limitations, and special cases as maintainability or diagnostic risk, not as pure style. It is Safe only when the behavior is evident from the code and future misuse is unlikely.
    - Do not request narrative filler comments. A useful comment must preserve a decision, invariant, boundary, failure mode, or removal condition that would otherwise be easy to lose during future edits.
+   - Do not treat every split as scope creep. When a file already mixes unrelated responsibilities, ask for a split-only checkpoint that preserves public behavior and narrows visibility before more feature logic is added.
+   - Prefer directory modules over oversized flat files when a module has stable sub-roles such as ABI conversion, internal state, operations, lifecycle, or tests. Keep re-exports narrow so the split enforces the boundary instead of only moving text around.
 
 8. **Directness**
    - Favor the shortest path that preserves the subsystem contract.
    - Avoid speculative generalization, new framework layers, or repo-wide cleanup inside a narrow fix.
    - A small compatibility fix with precise comments is often better than a broad refactor unless the existing structure is the cause of the bug.
+   - If the existing structure is the cause of the risk, make the structural step explicit and bounded: same-owner split, no semantic change, no public API expansion, and validation that call sites still use the intended facade.
 
 9. **Observability and diagnosis**
    - Ask whether a future failure can be diagnosed from logs, traces, counters, assertions, panic messages, or test artifacts.

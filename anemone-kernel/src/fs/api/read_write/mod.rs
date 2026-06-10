@@ -5,11 +5,12 @@ use alloc::vec::Vec;
 use anemone_abi::fs::linux::IoVec;
 
 use crate::{
+    fs::fanotify::{FanMask, notify_opened_file_event},
     prelude::{
         user_access::{UserReadSlice, UserWriteSlice},
         *,
     },
-    task::files::{Fd, FileDesc},
+    task::files::{Fd, FileDesc, OpenedFileReadUserSegment},
 };
 
 pub mod pread64;
@@ -85,6 +86,34 @@ fn read_into_user_buffer(
         return Ok(0);
     }
 
+    if offset.is_none() {
+        let segment = OpenedFileReadUserSegment {
+            base: buf,
+            len: count,
+        };
+        if let Some(result) = file.read_user(uspace, core::slice::from_ref(&segment)) {
+            let read = result?;
+            notify_read_user_success(file, read as u64);
+            return Ok(read);
+        }
+    }
+
+    validate_user_write_buffer(uspace, buf, count)?;
+
+    let kbuf = do_read(file, count, offset)?;
+    copy_user_write_buffer(uspace, buf, &kbuf)?;
+    notify_read_success(file, kbuf.len() as u64);
+
+    Ok(kbuf.len())
+}
+
+fn read_into_user_buffer_without_notify(
+    file: &FileDesc,
+    uspace: &UserSpaceHandle,
+    buf: VirtAddr,
+    count: usize,
+    offset: Option<usize>,
+) -> Result<usize, SysError> {
     validate_user_write_buffer(uspace, buf, count)?;
 
     let kbuf = do_read(file, count, offset)?;
@@ -102,6 +131,17 @@ fn write_from_user_buffer(
 ) -> Result<usize, SysError> {
     let kbuf = copy_user_read_buffer(uspace, buf, count)?;
     do_write(file, &kbuf, offset)
+}
+
+fn write_from_user_buffer_without_notify(
+    file: &FileDesc,
+    uspace: &UserSpaceHandle,
+    buf: VirtAddr,
+    count: usize,
+    offset: Option<usize>,
+) -> Result<usize, SysError> {
+    let kbuf = copy_user_read_buffer(uspace, buf, count)?;
+    do_write_without_notify(file, &kbuf, offset)
 }
 
 fn load_iovecs(
@@ -165,20 +205,47 @@ fn read_iovecs(
     iovecs: &[CheckedIoVec],
     mut offset: Option<usize>,
 ) -> Result<u64, SysError> {
+    if iovecs.is_empty() {
+        return Ok(0);
+    }
+
+    if offset.is_none() {
+        let segments = iovecs
+            .iter()
+            .map(|iov| OpenedFileReadUserSegment {
+                base: iov.base,
+                len: iov.len,
+            })
+            .collect::<Vec<_>>();
+        if let Some(result) = file.read_user(uspace, &segments) {
+            let read = result? as u64;
+            notify_read_user_success(file, read);
+            return Ok(read);
+        }
+    }
+
     let mut total = 0u64;
 
     for iovec in iovecs {
-        let read = match read_into_user_buffer(file, uspace, iovec.base, iovec.len, offset) {
-            Ok(read) => read,
-            Err(err) if total > 0 => return Ok(total),
-            Err(err) => return Err(err),
-        };
+        let read =
+            match read_into_user_buffer_without_notify(file, uspace, iovec.base, iovec.len, offset)
+            {
+                Ok(read) => read,
+                Err(err) if total > 0 => {
+                    notify_read_success(file, total);
+                    return Ok(total);
+                },
+                Err(err) => return Err(err),
+            };
 
         total += read as u64;
 
         match advance_offset(&mut offset, read) {
             Ok(()) => {},
-            Err(err) if total > 0 => return Ok(total),
+            Err(err) if total > 0 => {
+                notify_read_success(file, total);
+                return Ok(total);
+            },
             Err(err) => return Err(err),
         }
 
@@ -187,6 +254,7 @@ fn read_iovecs(
         }
     }
 
+    notify_read_success(file, total);
     Ok(total)
 }
 
@@ -199,9 +267,14 @@ fn write_iovecs(
     let mut total = 0u64;
 
     for iovec in iovecs {
-        let written = match write_from_user_buffer(file, uspace, iovec.base, iovec.len, offset) {
+        let written = match write_from_user_buffer_without_notify(
+            file, uspace, iovec.base, iovec.len, offset,
+        ) {
             Ok(written) => written,
-            Err(err) if total > 0 => return Ok(total),
+            Err(err) if total > 0 => {
+                notify_write_success(file, total);
+                return Ok(total);
+            },
             Err(err) => return Err(err),
         };
 
@@ -209,7 +282,10 @@ fn write_iovecs(
 
         match advance_offset(&mut offset, written) {
             Ok(()) => {},
-            Err(err) if total > 0 => return Ok(total),
+            Err(err) if total > 0 => {
+                notify_write_success(file, total);
+                return Ok(total);
+            },
             Err(err) => return Err(err),
         }
 
@@ -218,6 +294,7 @@ fn write_iovecs(
         }
     }
 
+    notify_write_success(file, total);
     Ok(total)
 }
 
@@ -245,9 +322,37 @@ fn do_read(file: &FileDesc, count: usize, offset: Option<usize>) -> Result<Vec<u
 }
 
 fn do_write(file: &FileDesc, buf: &[u8], offset: Option<usize>) -> Result<usize, SysError> {
+    let written = do_write_without_notify(file, buf, offset)?;
+    notify_write_success(file, written as u64);
+    Ok(written)
+}
+
+fn do_write_without_notify(
+    file: &FileDesc,
+    buf: &[u8],
+    offset: Option<usize>,
+) -> Result<usize, SysError> {
     match offset {
         Some(offset) => file.write_at(offset, buf),
         None => file.write(buf),
+    }
+}
+
+fn notify_read_success(file: &FileDesc, bytes: u64) {
+    if bytes > 0 {
+        notify_opened_file_event(file, FanMask::ACCESS);
+    }
+}
+
+fn notify_read_user_success(file: &FileDesc, bytes: u64) {
+    if file.notify_read_user_access() {
+        notify_read_success(file, bytes);
+    }
+}
+
+fn notify_write_success(file: &FileDesc, bytes: u64) {
+    if bytes > 0 {
+        notify_opened_file_event(file, FanMask::MODIFY);
     }
 }
 

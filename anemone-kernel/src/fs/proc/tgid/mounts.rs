@@ -53,11 +53,21 @@ static TGID_MOUNTS_INODE_OPS: InodeOps = InodeOps {
 
 // TODO: for now we just return empty content.
 
-fn tgid_mounts_read(_file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn tgid_mounts_read(
+    _file: &File,
+    _pos: &mut usize,
+    _buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     Ok(0)
 }
 
-fn tgid_mounts_read_at(_file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn tgid_mounts_read_at(
+    _file: &File,
+    pos: usize,
+    buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     read_snapshot_at(pos, buf, &[])
 }
 
@@ -67,9 +77,10 @@ fn tgid_mounts_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usiz
 
 static TGID_MOUNTS_FILE_OPS: FileOps = FileOps {
     read: tgid_mounts_read,
-    write: |_, _, _| Err(SysError::NotSupported),
+    write: |_, _, _, _| Err(SysError::NotSupported),
     read_at: tgid_mounts_read_at,
-    write_at: |_, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _, _| Err(SysError::NotSupported),
+    check_status_flags: accept_file_op_status_flags,
     seek: tgid_mounts_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),

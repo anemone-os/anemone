@@ -43,9 +43,9 @@ pub mod set;
 
 /// Per-task signal mask state.
 ///
-/// The `restore` slot is the single delayed-restore owner. `active_restore_slot`
-/// is identity metadata for linear temporary-mask tokens; it is not a second
-/// mask source.
+/// The `restore` slot is the single delayed-restore owner.
+/// `active_restore_slot` is identity metadata for linear temporary-mask tokens;
+/// it is not a second mask source.
 #[derive(Debug)]
 pub struct TaskSigMaskState {
     current: SigSet,
@@ -202,7 +202,11 @@ impl TemporarySigMaskSlotId {
     }
 
     pub fn next(self) -> Self {
-        Self(self.0.checked_add(1).expect("temporary sigmask slot id overflow"))
+        Self(
+            self.0
+                .checked_add(1)
+                .expect("temporary sigmask slot id overflow"),
+        )
     }
 }
 
@@ -471,11 +475,12 @@ pub struct PendingSignals {
     ///
     /// For a task-private signal, `classify_temporary_mask_wait()` moves the
     /// target out of the ordinary private pending set before allowing a
-    /// temporary-mask caller to defer restore. For a shared thread-group signal,
-    /// the classifier first claims it from the shared pending set, then moves it
-    /// into this current-task private reservation. In both cases the signal is
-    /// no longer eligible for ordinary private/shared pending competition and
-    /// must be consumed first by `handle_signals()` through `Task::fetch_signal()`.
+    /// temporary-mask caller to defer restore. For a shared thread-group
+    /// signal, the classifier first claims it from the shared pending set,
+    /// then moves it into this current-task private reservation. In both
+    /// cases the signal is no longer eligible for ordinary private/shared
+    /// pending competition and must be consumed first by `handle_signals()`
+    /// through `Task::fetch_signal()`.
     reserved_delivery: Option<Signal>,
     /// Unreliable signals are not queued.
     ///
@@ -792,8 +797,7 @@ impl Task {
 
         self.sig_pending.lock().push_signal(signal);
 
-        if self.is_current_sig_mask_blocking(no) && !matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP)
-        {
+        if self.is_current_sig_mask_blocking(no) && !matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
             // signal masked. nothing to do now, just wait for the task to
             // unmask it.
         } else {
@@ -1083,7 +1087,6 @@ impl Task {
     fn is_current_sig_mask_blocking(&self, no: SigNo) -> bool {
         self.snapshot_current_sig_mask().get(no)
     }
-
 }
 
 fn force_signal_set() -> SigSet {

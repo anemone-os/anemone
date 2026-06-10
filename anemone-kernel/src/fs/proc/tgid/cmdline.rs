@@ -51,7 +51,12 @@ static TGID_CMDLINE_INODE_OPS: InodeOps = InodeOps {
     get_attr: tgid_cmdline_get_attr,
 };
 
-fn tgid_cmdline_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn tgid_cmdline_read(
+    file: &File,
+    pos: &mut usize,
+    buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let binding = validate_tgid_sub_inode(file.inode())?;
     let leader = binding.tg.leader().ok_or(SysError::NoSuchProcess)?;
 
@@ -91,9 +96,14 @@ fn tgid_cmdline_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usi
     Ok(to_read)
 }
 
-fn tgid_cmdline_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn tgid_cmdline_read_at(
+    file: &File,
+    pos: usize,
+    buf: &mut [u8],
+    ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let mut local_pos = pos;
-    tgid_cmdline_read(file, &mut local_pos, buf)
+    tgid_cmdline_read(file, &mut local_pos, buf, ctx)
 }
 
 fn tgid_cmdline_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
@@ -111,9 +121,10 @@ fn tgid_cmdline_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usi
 
 static TGID_CMDLINE_FILE_OPS: FileOps = FileOps {
     read: tgid_cmdline_read,
-    write: |_, _, _| Err(SysError::NotSupported),
+    write: |_, _, _, _| Err(SysError::NotSupported),
     read_at: tgid_cmdline_read_at,
-    write_at: |_, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _, _| Err(SysError::NotSupported),
+    check_status_flags: accept_file_op_status_flags,
     seek: tgid_cmdline_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),

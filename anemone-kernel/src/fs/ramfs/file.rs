@@ -224,7 +224,12 @@ fn ramfs_reg_state(inode: &InodeRef) -> Result<Arc<RamfsRegState>, SysError> {
     Ok(ramfs_reg(inode)?.state())
 }
 
-fn ramfs_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn ramfs_read(
+    file: &File,
+    pos: &mut usize,
+    buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let inode = file.inode();
     let state = ramfs_reg_state(inode)?;
 
@@ -242,12 +247,22 @@ fn ramfs_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, Sys
     Ok(n)
 }
 
-fn ramfs_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn ramfs_read_at(
+    file: &File,
+    pos: usize,
+    buf: &mut [u8],
+    ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let mut local_pos = pos;
-    ramfs_read(file, &mut local_pos, buf)
+    ramfs_read(file, &mut local_pos, buf, ctx)
 }
 
-fn ramfs_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
+fn ramfs_write(
+    file: &File,
+    pos: &mut usize,
+    buf: &[u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let inode = file.inode();
     let state = ramfs_reg_state(inode)?;
 
@@ -263,9 +278,9 @@ fn ramfs_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysErr
     Ok(buf.len())
 }
 
-fn ramfs_write_at(file: &File, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
+fn ramfs_write_at(file: &File, pos: usize, buf: &[u8], ctx: FileIoCtx) -> Result<usize, SysError> {
     let mut local_pos = pos;
-    ramfs_write(file, &mut local_pos, buf)
+    ramfs_write(file, &mut local_pos, buf, ctx)
 }
 
 fn ramfs_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
@@ -315,6 +330,7 @@ pub(super) static RAMFS_REG_FILE_OPS: FileOps = FileOps {
     write: ramfs_write,
     read_at: ramfs_read_at,
     write_at: ramfs_write_at,
+    check_status_flags: accept_file_op_status_flags,
     seek: ramfs_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| {
@@ -324,10 +340,11 @@ pub(super) static RAMFS_REG_FILE_OPS: FileOps = FileOps {
 };
 
 pub(super) static RAMFS_DIR_FILE_OPS: FileOps = FileOps {
-    read: |_, _, _| Err(SysError::IsDir),
-    write: |_, _, _| Err(SysError::IsDir),
-    read_at: |_, _, _| Err(SysError::IsDir),
-    write_at: |_, _, _| Err(SysError::IsDir),
+    read: |_, _, _, _| Err(SysError::IsDir),
+    write: |_, _, _, _| Err(SysError::IsDir),
+    read_at: |_, _, _, _| Err(SysError::IsDir),
+    write_at: |_, _, _, _| Err(SysError::IsDir),
+    check_status_flags: accept_file_op_status_flags,
     seek: seek_dir_rewind,
     read_dir: ramfs_read_dir,
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
@@ -335,10 +352,11 @@ pub(super) static RAMFS_DIR_FILE_OPS: FileOps = FileOps {
 };
 
 pub(super) static RAMFS_SYMLINK_FILE_OPS: FileOps = FileOps {
-    read: |_, _, _| Err(SysError::NotSupported),
-    write: |_, _, _| Err(SysError::NotSupported),
-    read_at: |_, _, _| Err(SysError::NotSupported),
-    write_at: |_, _, _| Err(SysError::NotSupported),
+    read: |_, _, _, _| Err(SysError::NotSupported),
+    write: |_, _, _, _| Err(SysError::NotSupported),
+    read_at: |_, _, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _, _| Err(SysError::NotSupported),
+    check_status_flags: accept_file_op_status_flags,
     seek: |_, _, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),

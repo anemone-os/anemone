@@ -30,10 +30,14 @@ mod uprint {
 }
 
 mod ualloc {
-    use alloc::alloc::{Layout, alloc, dealloc};
-    use alloc::slice::from_raw_parts_mut;
-    use core::cmp::min;
-    use core::ffi::{c_int, c_size_t, c_void};
+    use alloc::{
+        alloc::{Layout, alloc, dealloc},
+        slice::from_raw_parts_mut,
+    };
+    use core::{
+        cmp::min,
+        ffi::{c_int, c_size_t, c_void},
+    };
 
     #[unsafe(no_mangle)]
     pub extern "C" fn ext4_user_calloc(m: c_size_t, n: c_size_t) -> *mut c_void {
@@ -76,7 +80,8 @@ mod ualloc {
     /// Allocate size bytes memory and return the memory address.
     #[unsafe(no_mangle)]
     pub extern "C" fn ext4_user_malloc(size: c_size_t) -> *mut c_void {
-        // Allocate `(actual length) + 8`. The lowest 8 Bytes are stored in the actual allocated space size.
+        // Allocate `(actual length) + 8`. The lowest 8 Bytes are stored in the actual
+        // allocated space size.
         let layout = Layout::from_size_align(size + CTRL_BLK_SIZE, 8).unwrap();
         unsafe {
             let ptr = alloc(layout);

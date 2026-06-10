@@ -5,7 +5,7 @@
 //! - https://elixir.bootlin.com/linux/v6.6.32/source/fs/select.c#L795
 
 use anemone_abi::{
-    fs::linux::select::{FdSet, FD_SETSIZE},
+    fs::linux::select::{FD_SETSIZE, FdSet},
     process::linux::signal as linux_signal,
     time::linux::TimeSpec,
 };
@@ -14,11 +14,11 @@ use crate::{
     prelude::*,
     syscall::{
         handler::TryFromSyscallArg,
-        user_access::{user_addr, SyscallArgValidatorExt as _, UserReadPtr, UserWritePtr},
+        user_access::{SyscallArgValidatorExt as _, UserReadPtr, UserWritePtr, user_addr},
     },
     task::{
         files::Fd,
-        sig::{set::SigSet, SigNo, TemporaryMaskWaitContext},
+        sig::{SigNo, TemporaryMaskWaitContext, set::SigSet},
     },
     utils::bitmap::Bitmap,
 };
@@ -56,6 +56,7 @@ fn scan_pselect_fdset(
     ready_fds: Option<&mut FdBitmap>,
     request: PollRequest<'_>,
     nready: &mut usize,
+    has_source: &mut bool,
     unsupported: &mut bool,
 ) -> Result<(), SysError> {
     let Some(interest_fds) = interest_fds else {
@@ -67,6 +68,7 @@ fn scan_pselect_fdset(
         if !interest_fds.test(fd_idx) {
             continue;
         }
+        *has_source = true;
 
         let fd = Fd::try_from_syscall_arg(fd_idx as u64)?;
         let fd = task.get_fd(fd)?;
@@ -146,6 +148,7 @@ fn scan_pselect_fds(
     clear_ready_outputs(in_ready, out_ready, exp_ready);
 
     let mut nready = 0;
+    let mut has_source = false;
     let mut unsupported = false;
 
     scan_pselect_fdset(
@@ -155,6 +158,7 @@ fn scan_pselect_fds(
         in_ready.as_mut(),
         mode.poll_request(PollEvent::READABLE),
         &mut nready,
+        &mut has_source,
         &mut unsupported,
     )?;
 
@@ -165,6 +169,7 @@ fn scan_pselect_fds(
         out_ready.as_mut(),
         mode.poll_request(PollEvent::WRITABLE),
         &mut nready,
+        &mut has_source,
         &mut unsupported,
     )?;
 
@@ -179,6 +184,8 @@ fn scan_pselect_fds(
         Ok(IomuxScanOutcome::Ready(nready))
     } else if unsupported {
         Ok(IomuxScanOutcome::Unsupported)
+    } else if !has_source {
+        Ok(IomuxScanOutcome::NoSources)
     } else {
         Ok(IomuxScanOutcome::NotReady)
     }
