@@ -128,7 +128,12 @@ fn block_read_bytes_locked(
     Ok(done)
 }
 
-fn block_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn block_read(
+    file: &File,
+    pos: &mut usize,
+    buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let old_pos = *pos;
     let nbytes = block_file_io_handle(file)?
         .with_locked_dev(|dev| block_read_bytes_locked(dev, old_pos, buf))?;
@@ -136,7 +141,12 @@ fn block_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, Sys
     Ok(nbytes)
 }
 
-fn block_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn block_read_at(
+    file: &File,
+    pos: usize,
+    buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     block_file_io_handle(file)?.with_locked_dev(|dev| block_read_bytes_locked(dev, pos, buf))
 }
 
@@ -191,7 +201,12 @@ fn block_write_bytes_locked(
     Ok(done)
 }
 
-fn block_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
+fn block_write(
+    file: &File,
+    pos: &mut usize,
+    buf: &[u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let old_pos = *pos;
     let nbytes = block_file_io_handle(file)?
         .with_locked_dev(|dev| block_write_bytes_locked(dev, old_pos, buf))?;
@@ -199,8 +214,21 @@ fn block_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysErr
     Ok(nbytes)
 }
 
-fn block_write_at(file: &File, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
+fn block_write_at(file: &File, pos: usize, buf: &[u8], _ctx: FileIoCtx) -> Result<usize, SysError> {
     block_file_io_handle(file)?.with_locked_dev(|dev| block_write_bytes_locked(dev, pos, buf))
+}
+
+fn check_block_status_flags(flags: FileOpStatusFlags) -> Result<(), SysError> {
+    // O_DIRECT is a visible status flag when accepted, but this byte-oriented
+    // block-devfs path has no direct-I/O alignment/cache-bypass contract yet.
+    if flags.contains(FileOpStatusFlags::DIRECT) {
+        return Err(SysError::InvalidArgument);
+    }
+    Ok(())
+}
+
+fn block_check_status_flags(_file: &File, flags: FileOpStatusFlags) -> Result<(), SysError> {
+    check_block_status_flags(flags)
 }
 
 fn write_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>, value: T) -> Result<(), SysError> {
@@ -253,6 +281,7 @@ static BLOCK_DEV_FILE_OPS: FileOps = FileOps {
     write: block_write,
     read_at: block_read_at,
     write_at: block_write_at,
+    check_status_flags: block_check_status_flags,
     seek: block_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     // Block devices also do not have a waitable poll path yet.
@@ -484,5 +513,14 @@ mod kunits {
         let after = dev.snapshot();
         assert_eq!(&after[17..21], b"left");
         assert_eq!(&after[21..26], b"right");
+    }
+
+    #[kunit]
+    fn test_block_status_rejects_odirect() {
+        assert_eq!(
+            check_block_status_flags(FileOpStatusFlags::DIRECT).unwrap_err(),
+            SysError::InvalidArgument
+        );
+        check_block_status_flags(FileOpStatusFlags::NONBLOCK).unwrap();
     }
 }

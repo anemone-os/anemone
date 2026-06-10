@@ -238,29 +238,17 @@ fn open_event_target(target: &PathRef, template: FanEventFdTemplate) -> Result<F
         return Err(SysError::PermissionDenied);
     }
 
-    validate_event_status_flags(target, template.status)?;
-
     if access.can_write() && target.inode().ty() == InodeType::Regular {
         target.mount().ensure_writable()?;
     }
 
     let file = target.open()?;
+    file.check_status_flags(template.status.to_file_op_status_flags())?;
     if template.status.contains(FileStatusFlags::APPEND) {
         let size = usize::try_from(file.get_attr()?.size).map_err(|_| SysError::FileTooLarge)?;
         file.seek_set_checked(size)?;
     }
     Ok(file)
-}
-
-fn validate_event_status_flags(path: &PathRef, flags: FileStatusFlags) -> Result<(), SysError> {
-    // Keep fanotify event-fd status validation aligned with ordinary open:
-    // event_f_flags are accepted at fanotify_init() time as a template, but
-    // object-type-dependent rejection can only happen when read() reopens the
-    // queued target.
-    if path.inode().ty() == InodeType::Block && flags.contains(FileStatusFlags::DIRECT) {
-        return Err(SysError::InvalidArgument);
-    }
-    Ok(())
 }
 
 fn write_metadata_to_segments(
@@ -350,6 +338,7 @@ fn fanotify_legacy_read(
     _file: &File,
     _pos: &mut usize,
     _buf: &mut [u8],
+    _ctx: FileIoCtx,
 ) -> Result<usize, SysError> {
     // Fanotify read must observe current opened-description status flags.
     // Generic read/readv use `OpenedFileDescriptionOps::read_user`; this
@@ -358,7 +347,12 @@ fn fanotify_legacy_read(
     Err(SysError::NotSupported)
 }
 
-fn fanotify_write(_file: &File, _pos: &mut usize, _buf: &[u8]) -> Result<usize, SysError> {
+fn fanotify_write(
+    _file: &File,
+    _pos: &mut usize,
+    _buf: &[u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     // Permission events are rejected at init/mark validation. Accepting writes
     // here would make the response ABI appear to work without a pending
     // permission queue.
@@ -391,8 +385,9 @@ fn fanotify_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
 static FANOTIFY_FILE_OPS: FileOps = FileOps {
     read: fanotify_legacy_read,
     write: fanotify_write,
-    read_at: |_, _, _| Err(SysError::IllegalSeek),
-    write_at: |_, _, _| Err(SysError::IllegalSeek),
+    read_at: |_, _, _, _| Err(SysError::IllegalSeek),
+    write_at: |_, _, _, _| Err(SysError::IllegalSeek),
+    check_status_flags: accept_file_op_status_flags,
     seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: fanotify_poll,

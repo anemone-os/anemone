@@ -45,10 +45,11 @@ static TGID_CWD_INODE_OPS: InodeOps = InodeOps {
 };
 
 static TGID_CWD_FILE_OPS: FileOps = FileOps {
-    read: |_, _, _| Err(SysError::NotSupported),
-    write: |_, _, _| Err(SysError::NotSupported),
-    read_at: |_, _, _| Err(SysError::NotSupported),
-    write_at: |_, _, _| Err(SysError::NotSupported),
+    read: |_, _, _, _| Err(SysError::NotSupported),
+    write: |_, _, _, _| Err(SysError::NotSupported),
+    read_at: |_, _, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _, _| Err(SysError::NotSupported),
+    check_status_flags: accept_file_op_status_flags,
     seek: |_, _, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotSupported),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),

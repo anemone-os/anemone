@@ -20,13 +20,23 @@ fn char_file_devnum(file: &File) -> Result<CharDevNum, SysError> {
     }
 }
 
-fn char_file_read(file: &File, _pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn char_file_read(
+    file: &File,
+    _pos: &mut usize,
+    buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     get_char_dev(char_file_devnum(file)?)
         .ok_or(SysError::NotFound)?
         .read(buf)
 }
 
-fn char_file_write(file: &File, _pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
+fn char_file_write(
+    file: &File,
+    _pos: &mut usize,
+    buf: &[u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     get_char_dev(char_file_devnum(file)?)
         .ok_or(SysError::NotFound)?
         .write(buf)
@@ -49,8 +59,9 @@ fn char_file_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
 static CHAR_DEV_FILE_OPS: FileOps = FileOps {
     read: char_file_read,
     write: char_file_write,
-    read_at: |_, _, _| Err(SysError::IllegalSeek),
-    write_at: |_, _, _| Err(SysError::IllegalSeek),
+    read_at: |_, _, _, _| Err(SysError::IllegalSeek),
+    write_at: |_, _, _, _| Err(SysError::IllegalSeek),
+    check_status_flags: accept_file_op_status_flags,
     seek: char_file_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     // Char devices do not have a waitable poll path yet. Report NYI instead of

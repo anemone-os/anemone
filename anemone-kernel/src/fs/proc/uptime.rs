@@ -54,7 +54,12 @@ fn uptime_string() -> String {
     format!("{}.{:02} {}.{:02}\n", uptime, 0, idle_uptime, 0)
 }
 
-fn proc_uptime_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn proc_uptime_read(
+    file: &File,
+    pos: &mut usize,
+    buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let uptime_string = uptime_string();
     let uptime_bytes = uptime_string.as_bytes();
 
@@ -69,7 +74,12 @@ fn proc_uptime_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usiz
     Ok(to_read)
 }
 
-fn proc_uptime_read_at(_file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn proc_uptime_read_at(
+    _file: &File,
+    pos: usize,
+    buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let uptime_string = uptime_string();
 
     read_snapshot_at(pos, buf, uptime_string.as_bytes())
@@ -84,9 +94,10 @@ fn proc_uptime_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usiz
 
 static PROC_UPTIME_FILE_OPS: FileOps = FileOps {
     read: proc_uptime_read,
-    write: |_, _, _| Err(SysError::NotSupported),
+    write: |_, _, _, _| Err(SysError::NotSupported),
     read_at: proc_uptime_read_at,
-    write_at: |_, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _, _| Err(SysError::NotSupported),
+    check_status_flags: accept_file_op_status_flags,
     seek: proc_uptime_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),

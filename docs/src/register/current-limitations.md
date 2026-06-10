@@ -375,7 +375,7 @@
 **Severity:** Low
 **Area:** VFS / openat / fcntl
 
-**Summary:** `openat` 已把 access mode、fd-local flags、file status flags 和 Linux-visible compat bits 分开保存，`F_GETFL` 能还原 open 时保存的持久 flag，`F_SETFL` 只动态修改 `O_APPEND`、`O_NONBLOCK` 和 `O_DIRECT`。`O_SYNC`、`O_DSYNC` 和 `O_NOATIME` 当前会保存并通过 `F_GETFL` 可见，但只记录兼容状态，不承诺真实同步写入或 atime 抑制语义；通过 `F_SETFL` 传入这些不可动态修改位会被忽略并打日志。
+**Summary:** `openat` 已把 access mode、fd-local flags、file status flags 和 Linux-visible compat bits 分开保存，`F_GETFL` 能还原 open 时保存的持久 flag，`F_SETFL` 只动态修改 `O_APPEND`、`O_NONBLOCK` 和 `O_DIRECT`。opened file description 仍是 file status flags 的唯一真相源；`FileOps` data I/O 通过短生命周期 ctx 观察 normalized status snapshot，pipe 不再保存私有 `nonblock` 行为状态，block special file 的 `O_DIRECT` 拒绝由后端 status check 表达。`O_SYNC`、`O_DSYNC` 和 `O_NOATIME` 当前会保存并通过 `F_GETFL` 可见，但只记录兼容状态，不承诺真实同步写入或 atime 抑制语义；通过 `F_SETFL` 传入这些不可动态修改位会被忽略并打日志。
 
 **Exit Condition:** 为同步写、direct I/O 和 atime 更新引入真实文件系统语义，或者逐项收敛为明确拒绝/兼容策略，并补齐 `openat`、`fcntl(F_GETFL/F_SETFL)` 与 IO 可见性的回归验证。
 

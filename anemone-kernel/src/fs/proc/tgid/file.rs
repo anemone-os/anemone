@@ -58,10 +58,11 @@ fn tgid_read_dir(
 }
 
 pub static TGID_FILE_OPS: FileOps = FileOps {
-    read: |_, _, _| Err(SysError::IsDir),
-    write: |_, _, _| Err(SysError::IsDir),
-    read_at: |_, _, _| Err(SysError::IsDir),
-    write_at: |_, _, _| Err(SysError::IsDir),
+    read: |_, _, _, _| Err(SysError::IsDir),
+    write: |_, _, _, _| Err(SysError::IsDir),
+    read_at: |_, _, _, _| Err(SysError::IsDir),
+    write_at: |_, _, _, _| Err(SysError::IsDir),
+    check_status_flags: accept_file_op_status_flags,
     seek: seek_dir_rewind,
     read_dir: tgid_read_dir,
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),

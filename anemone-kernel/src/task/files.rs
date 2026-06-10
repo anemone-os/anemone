@@ -4,6 +4,7 @@
 //! - https://elixir.bootlin.com/linux/v6.6.32/source/include/linux/fdtable.h
 
 use crate::{
+    fs::{FileIoCtx, FileOpStatusFlags},
     prelude::{handler::TryFromSyscallArg, *},
     utils::bitmap::Bitmap,
 };
@@ -294,37 +295,11 @@ impl FileDesc {
 
     pub fn ioctl_access(&self) -> IoctlFileAccess {
         let flags = self.file_flags();
-        let mut status_flags = IoctlFileStatusFlags::empty();
-        status_flags.set(
-            IoctlFileStatusFlags::APPEND,
-            flags.contains(FileStatusFlags::APPEND),
-        );
-        status_flags.set(
-            IoctlFileStatusFlags::NONBLOCK,
-            flags.contains(FileStatusFlags::NONBLOCK),
-        );
-        status_flags.set(
-            IoctlFileStatusFlags::DIRECT,
-            flags.contains(FileStatusFlags::DIRECT),
-        );
-        status_flags.set(
-            IoctlFileStatusFlags::DSYNC,
-            flags.contains(FileStatusFlags::DSYNC),
-        );
-        status_flags.set(
-            IoctlFileStatusFlags::SYNC,
-            flags.contains(FileStatusFlags::SYNC),
-        );
-        status_flags.set(
-            IoctlFileStatusFlags::NOATIME,
-            flags.contains(FileStatusFlags::NOATIME),
-        );
-
         IoctlFileAccess::new(
             self.can_read(),
             self.can_write(),
             self.is_path_only(),
-            status_flags,
+            flags.to_file_op_status_flags(),
         )
     }
 
@@ -377,7 +352,11 @@ impl FileDesc {
         if !self.can_read() {
             return Err(SysError::BadFileDescriptor);
         }
-        self.pfile.file.read(buf).map_err(|e| e.into())
+        let ctx = FileIoCtx::new(self.file_flags().to_file_op_status_flags());
+        self.pfile
+            .file
+            .read_with_ctx(buf, ctx)
+            .map_err(|e| e.into())
     }
 
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, SysError> {
@@ -387,7 +366,11 @@ impl FileDesc {
         if self.is_path_only() {
             return Err(SysError::BadFileDescriptor);
         }
-        self.pfile.file.read_at(offset, buf).map_err(|e| e.into())
+        let ctx = FileIoCtx::new(self.file_flags().to_file_op_status_flags());
+        self.pfile
+            .file
+            .read_at_with_ctx(offset, buf, ctx)
+            .map_err(|e| e.into())
     }
 
     /// This applies to both write and append mode.
@@ -397,10 +380,17 @@ impl FileDesc {
             return Err(SysError::BadFileDescriptor);
         }
 
+        let ctx = FileIoCtx::new(flags.to_file_op_status_flags());
         if flags.contains(FileStatusFlags::APPEND) {
-            self.pfile.file.append(buf).map_err(|e| e.into())
+            self.pfile
+                .file
+                .append_with_ctx(buf, ctx)
+                .map_err(|e| e.into())
         } else {
-            self.pfile.file.write(buf).map_err(|e| e.into())
+            self.pfile
+                .file
+                .write_with_ctx(buf, ctx)
+                .map_err(|e| e.into())
         }
     }
 
@@ -413,14 +403,18 @@ impl FileDesc {
         if self.is_path_only() {
             return Err(SysError::BadFileDescriptor);
         }
+        let ctx = FileIoCtx::new(flags.to_file_op_status_flags());
         if flags.contains(FileStatusFlags::APPEND) {
             return self
                 .pfile
                 .file
-                .append_at_current_end(buf)
+                .append_at_current_end_with_ctx(buf, ctx)
                 .map_err(|e| e.into());
         }
-        self.pfile.file.write_at(offset, buf).map_err(|e| e.into())
+        self.pfile
+            .file
+            .write_at_with_ctx(offset, buf, ctx)
+            .map_err(|e| e.into())
     }
 
     pub fn truncate(&self, len: u64, cred: &CredentialSet) -> Result<(), SysError> {
@@ -533,6 +527,37 @@ impl LinuxOpenCompat {
 }
 
 impl FileStatusFlags {
+    /// Normalized short-lived snapshot passed to FileOps contexts. The opened
+    /// file description remains the only owner of mutable status flags.
+    pub fn to_file_op_status_flags(self) -> FileOpStatusFlags {
+        let mut flags = FileOpStatusFlags::empty();
+        flags.set(
+            FileOpStatusFlags::APPEND,
+            self.contains(FileStatusFlags::APPEND),
+        );
+        flags.set(
+            FileOpStatusFlags::NONBLOCK,
+            self.contains(FileStatusFlags::NONBLOCK),
+        );
+        flags.set(
+            FileOpStatusFlags::DIRECT,
+            self.contains(FileStatusFlags::DIRECT),
+        );
+        flags.set(
+            FileOpStatusFlags::DSYNC,
+            self.contains(FileStatusFlags::DSYNC),
+        );
+        flags.set(
+            FileOpStatusFlags::SYNC,
+            self.contains(FileStatusFlags::SYNC),
+        );
+        flags.set(
+            FileOpStatusFlags::NOATIME,
+            self.contains(FileStatusFlags::NOATIME),
+        );
+        flags
+    }
+
     pub fn to_linux_open_flags(&self) -> u32 {
         use anemone_abi::fs::linux::open::*;
 

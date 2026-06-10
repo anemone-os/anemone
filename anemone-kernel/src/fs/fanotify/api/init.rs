@@ -1,4 +1,4 @@
-use anemone_abi::fs::linux::{fanotify as abi, open};
+use anemone_abi::fs::linux::fanotify as abi;
 
 use crate::{
     prelude::{
@@ -95,19 +95,17 @@ pub fn sys_fanotify_init(
     let group = FanGroup::new(mode, event_fd_template);
     let file = file::open_group_file(group.clone())?;
     let task = get_current_task();
+    let status = init_file_status_flags(init_flags);
+    file.check_status_flags(status.to_file_op_status_flags())?;
 
-    let compat = LinuxOpenCompat::new(
-        if event_f_flags.0 & open::O_LARGEFILE != 0 {
-            open::O_LARGEFILE
-        } else {
-            0
-        },
-        0,
-    );
+    // `event_f_flags` is a template for event object fds, not the group fd
+    // returned by fanotify_init(). Keep the group opened-description compat
+    // state tied only to init flags.
+    let compat = LinuxOpenCompat::empty();
     let fd = task.open_fd_with_description_ops(
         file,
         OpenAccessMode::ReadWrite,
-        init_file_status_flags(init_flags),
+        status,
         compat,
         init_fd_flags(init_flags),
         file::description_ops(),
