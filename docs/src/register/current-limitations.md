@@ -380,8 +380,8 @@
 **Exit Condition:** 为同步写、direct I/O 和 atime 更新引入真实文件系统语义，或者逐项收敛为明确拒绝/兼容策略，并补齐 `openat`、`fcntl(F_GETFL/F_SETFL)` 与 IO 可见性的回归验证。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-28
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-06-10
+**Related:** [FileOps status ctx 边界清理小迭代记录](../devlog/changes/2026-06-10-fileops-status-ctx.md), [开发日志：2026-06-08 至 2026-06-21](../devlog/2026-06-08_to_2026-06-21.md), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
 ## ANE-20260528-PIPE-PROCFS-KNOBS-STAGE1
 
