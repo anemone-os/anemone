@@ -5,8 +5,8 @@
 **最后更新：** 2026-06-10
 **领域：** fs / VFS / syscall ABI / iomux / procfs / LTP
 **事务日志：** [2026-06-08 - Fanotify](../../devlog/transactions/2026-06-08-fanotify.md)
-**开放问题：** [fanotify tracking issues](./tracking-issues.md) 当前无活跃 Keter；`FANOTIFY-041` 与 `FANOTIFY-042` corrective Keter 均已 neutralized。强一致或高成本 Linux 语义仍按非目标和 Stage 5 backlog 暂缓。
-**下一步：** 启动 D6 FID/name negative gate 与 LTP 分类。不得把 FID/name 正向 ABI、procfs fdinfo 或 permission events 合入 D6 negative gate。
+**开放问题：** [fanotify tracking issues](./tracking-issues.md) 当前无活跃 Keter；`FANOTIFY-041` 与 `FANOTIFY-042` corrective Keter 均已 neutralized。D6 FID/name negative gate 已闭合；强一致或高成本 Linux 语义仍按非目标和 Stage 5 backlog 暂缓。
+**下一步：** 按完整 fanotify profile 失败表选择独立 Stage 5 backlog gate；不得把 FID/name 正向 ABI、procfs fdinfo 或 permission events 回填到已闭合的 D6 negative gate。
 
 ## 摘要
 
@@ -18,7 +18,7 @@ FID/name records、pidfd、permission events、完整 `/proc/<pid>/fdinfo`、FS 
 
 LTP 的 fanotify 组占分高。RFC 提升时，内核只有 `SYS_FANOTIFY_INIT` / `SYS_FANOTIFY_MARK` syscall number，尚无 fanotify UAPI 常量、syscall handler、group fd、mark registry 或用户可见事件派发路径；这些缺口已经在后续 D1-D5 实现中推进为 `fs::fanotify` owner module、group fd、mark registry、path-fd read 提交协议和基础 event dispatch。
 
-D5 之后的源码级基线是：privileged path-fd listener、inode / mount / filesystem mark、metadata-only overflow record、path-fd metadata read、opened-description close notification 和基础 `FAN_OPEN` / `FAN_ACCESS` / `FAN_MODIFY` / `FAN_CLOSE_*` event injection 已在源码层闭合；运行态修正已经证明内核内部 direct `File` helper 不得作为 fanotify 事件源。当前接受边界已收紧为 user-visible fd/API event boundary：路径型 syscall/API、fd I/O syscall helper、`sendfile` 和 task/fd opened-description lifecycle 负责提交事件，`fs::File` / backend `FileOps` 保持 fanotify-agnostic。下一步基线是 D6 FID/name negative gate 与 LTP 分类，不把 FID/name 正向 ABI、procfs fdinfo 或 permission events 并入该 gate。
+D5 之后的源码级基线是：privileged path-fd listener、inode / mount / filesystem mark、metadata-only overflow record、path-fd metadata read、opened-description close notification 和基础 `FAN_OPEN` / `FAN_ACCESS` / `FAN_MODIFY` / `FAN_CLOSE_*` event injection 已在源码层闭合；运行态修正已经证明内核内部 direct `File` helper 不得作为 fanotify 事件源。当前接受边界已收紧为 user-visible fd/API event boundary：路径型 syscall/API、fd I/O syscall helper、`sendfile` 和 task/fd opened-description lifecycle 负责提交事件，`fs::File` / backend `FileOps` 保持 fanotify-agnostic。D6 已确认 FID/name report flags、dirent/name/self/metadata masks、pidfd、permission、FS error 和 evictable mark 等暂缓项继续 fail closed，并将 stock LTP 失败按 helper TCONF、stock 暂缓失败、Stage 5 backlog 和测试设施缺口分类；未把 FID/name 正向 ABI、procfs fdinfo 或 permission events 并入 D6。
 
 2026-06-05 的 ioctl-loop 与 fileops-seek-char-ioctl 收口没有改变 fanotify 的 group / registry / queue / path-fd 基本设计，但刷新了 VFS file-op 边界：
 
