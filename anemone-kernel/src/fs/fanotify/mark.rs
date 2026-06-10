@@ -68,7 +68,6 @@ pub(super) struct FanMarkRecord {
     handle: MarkHandle,
     group: Weak<FanGroup>,
     // Keeps the watched object alive; registry identity uses handle.target_key.
-    #[allow(dead_code)]
     target: FanTarget,
     mask: FanMask,
     ignored_mask: FanMask,
@@ -160,12 +159,10 @@ impl FanMarkRecord {
         self.mask.is_empty() && self.ignored_mask.is_empty()
     }
 
-    #[allow(dead_code)]
     pub(super) const fn target_dead(&self) -> bool {
         self.target_dead
     }
 
-    #[allow(dead_code)]
     pub(super) fn mark_target_dead(&mut self) {
         self.target_dead = true;
     }

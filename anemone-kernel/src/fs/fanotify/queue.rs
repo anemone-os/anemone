@@ -82,10 +82,6 @@ impl FanQueue {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.events.is_empty()
-    }
-
     pub fn queued_bytes(&self) -> usize {
         self.events
             .iter()

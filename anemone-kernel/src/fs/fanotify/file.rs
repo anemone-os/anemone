@@ -65,10 +65,6 @@ pub fn description_ops() -> OpenedFileDescriptionOps {
     }
 }
 
-pub fn enqueue_synthetic(file: &File, event: FanEvent) {
-    FanGroupFile::group(file).enqueue(event);
-}
-
 fn fanotify_read_user(ctx: OpenedFileReadUserCtx<'_>) -> Result<usize, SysError> {
     assert!(
         !ctx.notification_suppressed,
@@ -134,7 +130,7 @@ fn submit_event_record(
     group: &FanGroup,
     event: FanEvent,
 ) -> Result<usize, SysError> {
-    // D4 commit protocol for a single metadata record:
+    // Path-fd read submission protocol for a single metadata record:
     // 1. prepare the event fd, if this event has a path target;
     // 2. copy exactly one metadata record with the reserved fd number;
     // 3. publish the fd only after the full record is visible to userspace.
@@ -374,8 +370,9 @@ fn fanotify_legacy_read(
 }
 
 fn fanotify_write(_file: &File, _pos: &mut usize, _buf: &[u8]) -> Result<usize, SysError> {
-    // Permission responses are not in Gate A. Accepting writes here would make
-    // permission-event ABI appear to succeed without a pending response queue.
+    // Permission events are rejected at init/mark validation. Accepting writes
+    // here would make the response ABI appear to work without a pending
+    // permission queue.
     Err(SysError::InvalidArgument)
 }
 

@@ -85,15 +85,14 @@ pub fn sys_fanotify_init(
     let ParsedInitFlags { mode, init_flags } = flags.parse()?;
 
     if !get_current_task().has_cap(Capability::SYS_ADMIN) {
-        // Gate A only supports privileged path-fd listeners. Linux has a
-        // restricted unprivileged FID-only mode, but FID reporting is deferred
-        // here, so creating a partial unprivileged listener would be a false
-        // success.
+        // Only privileged path-fd listeners are implemented. Linux has a
+        // restricted unprivileged FID-only mode, but FID reporting is deferred,
+        // so creating a partial unprivileged listener would be a false success.
         return Err(SysError::PermissionDenied);
     }
 
     let event_fd_template = super::super::types::parse_event_fd_template(event_f_flags.0)?;
-    let group = FanGroup::new(mode, init_flags, event_fd_template);
+    let group = FanGroup::new(mode, event_fd_template);
     let file = file::open_group_file(group.clone())?;
     let task = get_current_task();
 

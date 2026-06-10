@@ -64,14 +64,6 @@ impl FanTarget {
             Self::Filesystem(sb) => FanTargetKey::from_superblock(sb),
         }
     }
-
-    pub const fn class(&self) -> FanTargetClass {
-        match self {
-            Self::Inode(_) => FanTargetClass::Inode,
-            Self::Mount(_) => FanTargetClass::Mount,
-            Self::Filesystem(_) => FanTargetClass::Filesystem,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

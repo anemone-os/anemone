@@ -30,14 +30,14 @@ static NO_NOTIFY_GUARDS: Lazy<Mutex<HashMap<Tid, usize>>> =
 /// It is deliberately separate from task/fd notification suppression: this
 /// guard suppresses recursive enqueue during construction only, while the
 /// returned event fd gets a generic opened-description marker for later I/O and
-/// close paths. D5 hook code should consult the public facade below, not this
-/// concrete guard type.
-pub(super) struct NoNotifyGuard {
+/// close paths. Hook code must consult the public facade below, not this
+/// concrete guard type or the guard map directly.
+struct NoNotifyGuard {
     tid: Tid,
 }
 
 impl NoNotifyGuard {
-    pub(super) fn begin_current() -> Self {
+    fn begin_current() -> Self {
         let tid = get_current_task().tid();
         let mut guards = NO_NOTIFY_GUARDS.lock();
         *guards.entry(tid).or_insert(0) += 1;
@@ -64,11 +64,10 @@ impl Drop for NoNotifyGuard {
 
 /// Fanotify-local construction-time suppression state.
 ///
-/// D4 only uses this guard around event-fd object open. D5 VFS hooks can query
-/// this facade when they start enqueuing real events; returned event fds still
-/// carry the generic opened-description notification-suppression marker.
-#[allow(dead_code)]
-pub fn current_task_notifications_suppressed() -> bool {
+/// The guard only covers the internal open that manufactures metadata.fd.
+/// Returned event fds carry the generic opened-description marker for later
+/// read/write/close suppression.
+fn current_task_notifications_suppressed() -> bool {
     let tid = get_current_task().tid();
     NO_NOTIFY_GUARDS
         .lock()
@@ -76,12 +75,6 @@ pub fn current_task_notifications_suppressed() -> bool {
         .is_some_and(|count| *count > 0)
 }
 
-// Gate A fixes the owner-module facade before VFS/registry/path-fd users are
-// wired in. Keep these re-exports as the only module-external typed surface;
-// later gates should consume them instead of reaching into fanotify internals.
-#[allow(unused_imports)]
-pub use api::{sys_fanotify_init, sys_fanotify_mark};
-#[allow(unused_imports)]
+pub use api::*;
 pub use hooks::{FanHookEvent, notify_path_event, observed_file_description_ops};
-#[allow(unused_imports)]
 pub use types::FanMask;

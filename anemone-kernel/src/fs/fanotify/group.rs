@@ -5,7 +5,7 @@ use super::{
     mark::MarkHandle,
     queue::{DEFAULT_MAX_EVENTS, FanDetachedTriggers, FanQueue, trigger_detached_triggers},
     registry,
-    types::{FanEventFdTemplate, FanGroupMode, FanInitFlags},
+    types::{FanEventFdTemplate, FanGroupMode},
 };
 
 static NEXT_GROUP_ID: AtomicU64 = AtomicU64::new(1);
@@ -38,22 +38,16 @@ pub struct FanGroup {
     id: FanGroupId,
     generation: u64,
     mode: FanGroupMode,
-    init_flags: FanInitFlags,
     event_fd_template: FanEventFdTemplate,
     state: Mutex<FanGroupState>,
 }
 
 impl FanGroup {
-    pub fn new(
-        mode: FanGroupMode,
-        init_flags: FanInitFlags,
-        event_fd_template: FanEventFdTemplate,
-    ) -> Arc<Self> {
+    pub fn new(mode: FanGroupMode, event_fd_template: FanEventFdTemplate) -> Arc<Self> {
         Arc::new(Self {
             id: FanGroupId::next(),
             generation: 1,
             mode,
-            init_flags,
             event_fd_template,
             state: Mutex::new(FanGroupState {
                 queue: FanQueue::new(DEFAULT_MAX_EVENTS),
@@ -73,10 +67,6 @@ impl FanGroup {
 
     pub const fn mode(&self) -> FanGroupMode {
         self.mode
-    }
-
-    pub const fn init_flags(&self) -> FanInitFlags {
-        self.init_flags
     }
 
     pub const fn event_fd_template(&self) -> FanEventFdTemplate {

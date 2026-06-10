@@ -1,8 +1,8 @@
 //! Fanotify mark registry owner.
 //!
-//! All ADD / REMOVE / FLUSH operations take this single registry lock. D5
-//! matching must use the same lock before it snapshots matching records, so a
-//! completed remove/flush cannot be observed by later matching.
+//! All ADD / REMOVE / FLUSH operations and event matching take this single
+//! registry lock. A completed remove/flush therefore cannot be observed by
+//! later matching.
 
 use crate::prelude::*;
 
