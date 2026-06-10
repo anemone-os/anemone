@@ -271,7 +271,7 @@ pub fn sys_fanotify_mark(
 
     match flags.command {
         FanMarkCommand::Add => registry::add_mark(&group, target, update)?,
-        FanMarkCommand::Remove => registry::remove_mark(&group, target.key(), update)?,
+        FanMarkCommand::Remove => registry::remove_mark(&group, target, update)?,
         FanMarkCommand::Flush => unreachable!("flush handled before path resolution"),
     }
     Ok(0)

@@ -3,7 +3,7 @@
 **状态：** Active
 **最后更新：** 2026-06-10
 **父 RFC：** [RFC-20260604-fanotify](./index.md)
-**来源：** 2026-06-04 system-design review；2026-06-05 software-engineering review；2026-06-05 ioctl-loop / fileops-seek freshness review；2026-06-09 Gate C runtime regression review；2026-06-10 D5 event source boundary review
+**来源：** 2026-06-04 system-design review；2026-06-05 software-engineering review；2026-06-05 ioctl-loop / fileops-seek freshness review；2026-06-09 Gate C runtime regression review；2026-06-10 D5 event source boundary review；2026-06-10 D7 bypass review
 
 本文只跟踪 design review 后确认的 fanotify 草案缺陷、证明缺口、边界冲突或需要回到草案修改的设计问题。
 
@@ -32,6 +32,29 @@
 - 暂无。
 
 ## Neutralized
+
+### FANOTIFY-043: `FanPathKey` 不得停留为未使用的 path identity 占位
+
+**状态：** Neutralized
+
+**发现证据：** D7 旁路审计确认 `FanPathKey { mount, dentry }` 仅在 `types.rs` 中定义，未参与
+mark install 或 self/child matching 证据链。与此同时，RFC 已要求 path/self/child
+匹配不得退回到只看 inode 或 dentry-only helper 的不可复审形态。
+
+**原问题：** D5/D6 后的基础 matching 使用 `FanTargetKey::Inode` 找 self 与 parent-child
+candidate。这样虽然保留了 registry 的 inode/mount/filesystem target map，但会让同一 inode 在
+不同 mount/dentry 位置上的 inode mark 候选缺少安装位置过滤，后续 bind mount、hardlink 或
+child/on-dir ignore gate 难以判断是基础机制缺陷还是 Stage 5 精确语义缺口。
+
+**实际修复：** `FanTarget::Inode` 现在保存安装 mark 时的 `FanPathKey`；registry 仍用
+`FanTargetKey::{Inode, Mount, SuperBlock}` 做外层索引，但 inode mark 的 add/remove 和
+self/child matching 会同时比较安装位置的 `FanPathKey` 与事件 self/parent `FanPathKey`。mount
+和 filesystem mark 不携带 path-location filter。该修复没有接受新的 FID/name、permission、
+pidfd、fdinfo 或 Stage 5 feature flag。
+
+**复核与残余风险：** D7 bypass search 未发现 syscall / VFS / task-fd / procfs 层 downcast
+fanotify private state，未发现暂缓 feature silent success。完整 bind-mount / hardlink merge-order、
+`FAN_MARK_IGNORE` 和 fdinfo 可观测性仍属 Stage 5 独立 gate。
 
 ### FANOTIFY-042: D5 事件源边界不得停留在 `fs::File` / `*_opened()` 桥
 

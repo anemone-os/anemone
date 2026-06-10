@@ -5,7 +5,7 @@
 **最后更新：** 2026-06-10
 **领域：** fs / VFS / syscall ABI / iomux / procfs / LTP
 **事务日志：** [2026-06-08 - Fanotify](../../devlog/transactions/2026-06-08-fanotify.md)
-**开放问题：** [fanotify tracking issues](./tracking-issues.md) 当前无活跃 Keter；`FANOTIFY-041` 与 `FANOTIFY-042` corrective Keter 均已 neutralized。D6 FID/name negative gate 已闭合；强一致或高成本 Linux 语义仍按非目标和 Stage 5 backlog 暂缓。
+**开放问题：** [fanotify tracking issues](./tracking-issues.md) 当前无活跃 Keter；`FANOTIFY-041`、`FANOTIFY-042` 与 `FANOTIFY-043` corrective findings 均已 neutralized。D6 FID/name negative gate 与 D7 旁路审计已闭合；强一致或高成本 Linux 语义仍按非目标和 Stage 5 backlog 暂缓。
 **下一步：** 按完整 fanotify profile 失败表选择独立 Stage 5 backlog gate；不得把 FID/name 正向 ABI、procfs fdinfo 或 permission events 回填到已闭合的 D6 negative gate。
 
 ## 摘要
