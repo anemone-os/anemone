@@ -43,10 +43,7 @@ pub enum FanTargetClass {
 
 #[derive(Debug, Clone)]
 pub enum FanTarget {
-    Inode {
-        inode: InodeRef,
-        path_key: FanPathKey,
-    },
+    Inode(InodeRef),
     Mount(Arc<Mount>),
     Filesystem(Arc<SuperBlock>),
 }
@@ -54,10 +51,7 @@ pub enum FanTarget {
 impl FanTarget {
     pub fn from_path(class: FanTargetClass, path: &PathRef) -> Self {
         match class {
-            FanTargetClass::Inode => Self::Inode {
-                inode: path.inode().clone(),
-                path_key: FanPathKey::from_path(path),
-            },
+            FanTargetClass::Inode => Self::Inode(path.inode().clone()),
             FanTargetClass::Mount => Self::Mount(path.mount().clone()),
             FanTargetClass::Filesystem => Self::Filesystem(path.mount().sb().clone()),
         }
@@ -65,16 +59,9 @@ impl FanTarget {
 
     pub fn key(&self) -> FanTargetKey {
         match self {
-            Self::Inode { inode, .. } => FanTargetKey::from_inode(inode),
+            Self::Inode(inode) => FanTargetKey::from_inode(inode),
             Self::Mount(mount) => FanTargetKey::from_mount(mount),
             Self::Filesystem(sb) => FanTargetKey::from_superblock(sb),
-        }
-    }
-
-    pub fn path_key(&self) -> Option<FanPathKey> {
-        match self {
-            Self::Inode { path_key, .. } => Some(*path_key),
-            Self::Mount(_) | Self::Filesystem(_) => None,
         }
     }
 }
@@ -112,21 +99,6 @@ impl FanTargetKey {
             Self::Inode { .. } => FanTargetClass::Inode,
             Self::Mount { .. } => FanTargetClass::Mount,
             Self::SuperBlock { .. } => FanTargetClass::Filesystem,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FanPathKey {
-    mount: usize,
-    dentry: usize,
-}
-
-impl FanPathKey {
-    pub fn from_path(path: &PathRef) -> Self {
-        Self {
-            mount: Arc::as_ptr(path.mount()) as usize,
-            dentry: Arc::as_ptr(path.dentry()) as usize,
         }
     }
 }

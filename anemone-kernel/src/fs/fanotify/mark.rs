@@ -8,7 +8,7 @@ use crate::prelude::*;
 
 use super::{
     group::{FanGroup, FanGroupId},
-    types::{FanMask, FanPathKey, FanTarget, FanTargetKey},
+    types::{FanMask, FanTarget, FanTargetKey},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -68,9 +68,6 @@ pub(super) struct FanMarkRecord {
     handle: MarkHandle,
     group: Weak<FanGroup>,
     // Keeps the watched object alive; registry identity uses handle.target_key.
-    // Inode marks also retain their install-time path key for self/child
-    // matching, so bind-mount or dentry aliases do not satisfy a different
-    // watched location.
     target: FanTarget,
     mask: FanMask,
     ignored_mask: FanMask,
@@ -114,10 +111,6 @@ impl FanMarkRecord {
 
     pub(super) const fn target_key(&self) -> FanTargetKey {
         self.handle.target_key
-    }
-
-    pub(super) fn target_path_key(&self) -> Option<FanPathKey> {
-        self.target.path_key()
     }
 
     pub(super) const fn mask(&self) -> FanMask {

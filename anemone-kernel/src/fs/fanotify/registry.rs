@@ -12,7 +12,7 @@ use super::{
     hooks::FanHookEvent,
     mark::{FanMarkRecord, FanMarkUpdate, MarkHandle},
     queue::FanDetachedTriggers,
-    types::{FanMask, FanPathKey, FanTarget, FanTargetClass, FanTargetKey},
+    types::{FanMask, FanTarget, FanTargetClass, FanTargetKey},
 };
 
 static REGISTRY: Lazy<Mutex<FanRegistry>> = Lazy::new(|| Mutex::new(FanRegistry::new()));
@@ -45,7 +45,6 @@ impl FanRegistry {
     fn find_handle_for_group(
         &self,
         target_key: FanTargetKey,
-        target_path_key: Option<FanPathKey>,
         group_id: FanGroupId,
         group_generation: u64,
     ) -> Option<MarkHandle> {
@@ -57,9 +56,7 @@ impl FanRegistry {
                 handle.group_id == group_id
                     && handle.group_generation == group_generation
                     && self.records.get(&handle.slot).is_some_and(|record| {
-                        record.handle() == *handle
-                            && record.target_key() == target_key
-                            && record.target_path_key() == target_path_key
+                        record.handle() == *handle && record.target_key() == target_key
                     })
             })
     }
@@ -189,7 +186,6 @@ fn add_group_match(
 fn collect_match_for_handle(
     registry: &mut FanRegistry,
     handle: MarkHandle,
-    event_path_key: Option<FanPathKey>,
     event_mask: FanMask,
     is_dir: bool,
     kind: FanMatchKind,
@@ -200,9 +196,6 @@ fn collect_match_for_handle(
         return;
     };
     if record.target_dead() {
-        return;
-    }
-    if record.target_path_key().is_some() && record.target_path_key() != event_path_key {
         return;
     }
 
@@ -242,7 +235,6 @@ fn collect_match_for_handle(
 fn collect_matches(
     registry: &mut FanRegistry,
     target_key: FanTargetKey,
-    event_path_key: Option<FanPathKey>,
     event_mask: FanMask,
     is_dir: bool,
     kind: FanMatchKind,
@@ -253,7 +245,6 @@ fn collect_matches(
         collect_match_for_handle(
             registry,
             handle,
-            event_path_key,
             event_mask,
             is_dir,
             kind,
@@ -271,25 +262,18 @@ pub(super) fn notify_path_event(event: FanHookEvent) {
     let target_inode = FanTargetKey::from_inode(path.inode());
     let target_mount = FanTargetKey::from_mount(path.mount());
     let target_sb = FanTargetKey::from_superblock(path.mount().sb());
-    let target_path_key = FanPathKey::from_path(&path);
-    let parent_path = event.parent_path();
-    let parent_inode = parent_path
-        .as_ref()
+    let parent_inode = event
+        .parent_path()
         .map(|parent| FanTargetKey::from_inode(parent.inode()));
-    let parent_path_key = parent_path.as_ref().map(FanPathKey::from_path);
 
     let mut matches = Vec::new();
     {
         let mut registry = REGISTRY.lock();
         let mut remove_after_modify = Vec::new();
 
-        // Inode marks are indexed by inode for registry ownership, then
-        // narrowed by FanPathKey for self/child matching. Mount and filesystem
-        // marks intentionally do not carry this path-location filter.
         collect_matches(
             &mut registry,
             target_inode,
-            Some(target_path_key),
             event_mask,
             is_dir,
             FanMatchKind::SelfTarget,
@@ -299,7 +283,6 @@ pub(super) fn notify_path_event(event: FanHookEvent) {
         collect_matches(
             &mut registry,
             target_mount,
-            None,
             event_mask,
             is_dir,
             FanMatchKind::SelfTarget,
@@ -309,7 +292,6 @@ pub(super) fn notify_path_event(event: FanHookEvent) {
         collect_matches(
             &mut registry,
             target_sb,
-            None,
             event_mask,
             is_dir,
             FanMatchKind::SelfTarget,
@@ -320,7 +302,6 @@ pub(super) fn notify_path_event(event: FanHookEvent) {
             collect_matches(
                 &mut registry,
                 parent_inode,
-                parent_path_key,
                 event_mask,
                 is_dir,
                 FanMatchKind::ParentChild,
@@ -357,15 +338,13 @@ pub(super) fn add_mark(
     update: FanMarkUpdate,
 ) -> Result<(), SysError> {
     let target_key = target.key();
-    let target_path_key = target.path_key();
     let mut registry = REGISTRY.lock();
 
     if group.is_dead() {
         return Err(SysError::InvalidArgument);
     }
 
-    if let Some(handle) =
-        registry.find_handle_for_group(target_key, target_path_key, group.id(), group.generation())
+    if let Some(handle) = registry.find_handle_for_group(target_key, group.id(), group.generation())
     {
         let record = registry
             .record_mut(handle)
@@ -410,14 +389,12 @@ pub(super) fn add_mark(
 
 pub(super) fn remove_mark(
     group: &Arc<FanGroup>,
-    target: FanTarget,
+    target_key: FanTargetKey,
     update: FanMarkUpdate,
 ) -> Result<(), SysError> {
-    let target_key = target.key();
-    let target_path_key = target.path_key();
     let mut registry = REGISTRY.lock();
     let handle = registry
-        .find_handle_for_group(target_key, target_path_key, group.id(), group.generation())
+        .find_handle_for_group(target_key, group.id(), group.generation())
         .ok_or(SysError::NotFound)?;
 
     let destroy = {

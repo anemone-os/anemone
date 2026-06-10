@@ -67,18 +67,6 @@ cfg_select! {
                 source: "/fixtures/user-test/tools/mke2fs",
                 dest: "/bin/mkfs.ext3",
             },
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/mke2fs",
-                dest: "/bin/mkfs.xfs",
-            },
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/mke2fs",
-                dest: "/bin/mkfs.exfat",
-            },
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/mke2fs",
-                dest: "/bin/mkfs.vfat",
-            },
         ];
     },
     target_arch = "loongarch64" => {

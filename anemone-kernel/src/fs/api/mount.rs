@@ -39,7 +39,7 @@ fn parse_mount_source(raw: Option<Box<str>>) -> Result<MountSource, SysError> {
 
 fn mount_fs_name(fstype: &str) -> &str {
     match fstype {
-        "tmpfs" | "ext2" | "ext3" | "xfs" | "vfat" | "exfat" => "ramfs",
+        "tmpfs" | "ext2" | "ext3" | "vfat" => "ramfs",
         _ => fstype,
     }
 }

@@ -33,7 +33,7 @@
 
 ## Neutralized
 
-### FANOTIFY-043: `FanPathKey` 不得停留为未使用的 path identity 占位
+### FANOTIFY-043: `FanPathKey` 不得错误收窄 inode mark identity
 
 **状态：** Neutralized
 
@@ -41,20 +41,20 @@
 mark install 或 self/child matching 证据链。与此同时，RFC 已要求 path/self/child
 匹配不得退回到只看 inode 或 dentry-only helper 的不可复审形态。
 
-**原问题：** D5/D6 后的基础 matching 使用 `FanTargetKey::Inode` 找 self 与 parent-child
-candidate。这样虽然保留了 registry 的 inode/mount/filesystem target map，但会让同一 inode 在
-不同 mount/dentry 位置上的 inode mark 候选缺少安装位置过滤，后续 bind mount、hardlink 或
-child/on-dir ignore gate 难以判断是基础机制缺陷还是 Stage 5 精确语义缺口。
+**原问题：** 仅为消除未使用占位而把 `FanPathKey` 接入 `FanTarget::Inode`、add/remove
+或 self/child matching，会把 Linux-style inode mark 错误收窄成安装时 path mark。同一 inode
+经 hardlink、rename 后路径或 bind mount 等别名触发事件时，inode mark 仍应按 inode identity
+匹配；不同路径不应在同一 group 下制造多份互相独立的 inode mark。
 
-**实际修复：** `FanTarget::Inode` 现在保存安装 mark 时的 `FanPathKey`；registry 仍用
-`FanTargetKey::{Inode, Mount, SuperBlock}` 做外层索引，但 inode mark 的 add/remove 和
-self/child matching 会同时比较安装位置的 `FanPathKey` 与事件 self/parent `FanPathKey`。mount
-和 filesystem mark 不携带 path-location filter。该修复没有接受新的 FID/name、permission、
-pidfd、fdinfo 或 Stage 5 feature flag。
+**实际修复：** 当前阶段删除 `FanPathKey` 代码占位，并明确基础 inode mark 只以
+`FanTargetKey::Inode` 作为行为 identity。`PathRef` 继续作为 queued event target 和 path-fd
+reopen snapshot；parent-child matching 继续使用 parent inode identity 与 `FAN_EVENT_ON_CHILD`。
+后续 FID/name/rename 或其它 path-specific gate 若需要 mount+dentry identity，必须以明确消费者
+重新引入 dedicated key 类型，不能把该 key 接到 inode mark add/remove/matching 上。
 
 **复核与残余风险：** D7 bypass search 未发现 syscall / VFS / task-fd / procfs 层 downcast
 fanotify private state，未发现暂缓 feature silent success。完整 bind-mount / hardlink merge-order、
-`FAN_MARK_IGNORE` 和 fdinfo 可观测性仍属 Stage 5 独立 gate。
+`FAN_MARK_IGNORE`、FID/name/rename path identity 和 fdinfo 可观测性仍属 Stage 5 独立 gate。
 
 ### FANOTIFY-042: D5 事件源边界不得停留在 `fs::File` / `*_opened()` 桥
 
@@ -187,7 +187,7 @@ owner exit 的真实路径，`FilesState::drop()` 会断言暴露遗漏，而不
 
 - [RFC index](./index.md) 的风险明确：`FAN_CLOSE_*` 正式语义绑定 opened file description release；fd-close bridge 只能是 temporary LTP bridge。
 - [不变量需求](./invariants.md) 的状态所有权明确：每个被监控 opened file description 保存 fanotify close snapshot，dup/fork 共享时只在最后 release 产生一次 close event。
-- [迁移实施计划](./implementation.md) 的 Stage 3 明确 snapshot 字段：`PathRef` / `FanPathKey` 和打开时 access mode 是否包含写能力；release hook 基于写打开能力选择 `FAN_CLOSE_WRITE` 或 `FAN_CLOSE_NOWRITE`。
+- [迁移实施计划](./implementation.md) 的 Stage 3 明确 snapshot 字段：`PathRef` 和打开时 access mode 是否包含写能力；release hook 基于写打开能力选择 `FAN_CLOSE_WRITE` 或 `FAN_CLOSE_NOWRITE`。
 
 **原问题：** `FAN_CLOSE_NOWRITE` / `FAN_CLOSE_WRITE` 的语义来源必须是被监控对象的 opened file description release，而不是 fanotify group fd 自己的 close，也不是任意 fd number close。
 
@@ -210,7 +210,7 @@ owner exit 的真实路径，`FilesState::drop()` 会断言暴露遗漏，而不
 **修复落点：**
 
 - [不变量需求](./invariants.md) 的身份模型明确 `FanTargetKey::{Inode, Mount, SuperBlock}` 集中定义相等和 hash；首批可封装 pointer identity 或对象内 stable id，但 callsite 不得比较裸指针。
-- [迁移实施计划](./implementation.md) 的 Stage 2 定义 `FanPathKey { mount, dentry }`，path/self/child 匹配不得依赖 `PathRef::location_eq()` 的 dentry-only TODO 行为。
+- [迁移实施计划](./implementation.md) 的 Stage 2 明确基础 self/child 匹配不依赖 `PathRef::location_eq()` 的 dentry-only TODO 行为，也不把 inode mark 收窄成安装时 path mark；后续 path-specific gate 如需 mount+dentry identity，必须以明确消费者重新引入 dedicated key 类型。
 - [迁移实施计划](./implementation.md) 的 Stage 2 给出 `marks_by_target`、`mark_handles` 和 `MarkHandle` 数据关系。
 
 **原问题：** 原草案写 inode / mount / filesystem mark 使用 `InodeRef`、`Arc<Mount>`、`Arc<SuperBlock>` identity，但没有定义可复审的 key 构造、相等和 hash 规则。

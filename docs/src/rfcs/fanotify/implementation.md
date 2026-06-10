@@ -199,7 +199,6 @@ Stage 0 init flag matrix：
   - `FanMarkCommand`
   - `FanTarget::{Inode, Mount, Filesystem}`
   - `FanTargetKey::{Inode, Mount, SuperBlock}`，集中封装 pointer identity 或对象内 stable id 的相等/hash
-  - `FanPathKey { mount, dentry }` 或等价 mount+dentry path identity
   - `FanMark`
 - registry 区分 `marks_by_target` 与 group-owned cleanup handles：
   - `marks_by_target: HashMap<FanTargetKey, Vec<MarkHandle>>`
@@ -252,7 +251,7 @@ Stage 0 init flag matrix：
 - registry 不保存 fd number。
 - registry 不强持有 group，不通过 mark entry 延长 group 生命周期。
 - target key 相等/hash 规则集中封装，不把 pointer identity 规则散落到 registry callsite。
-- path/self/child 匹配不依赖 `PathRef::location_eq()` 的 dentry-only TODO 行为。
+- 当前基础 self/child 匹配不依赖 `PathRef::location_eq()` 的 dentry-only TODO 行为，也不把 inode mark 收窄成安装时 path mark；后续 path-specific gate 如需 mount+dentry identity，必须以明确消费者重新引入 dedicated key 类型。
 - ADD / REMOVE / FLUSH 与后续 matching 使用同一 registry lock 策略序列化。
 
 验证：
@@ -298,7 +297,7 @@ fanotify read-user 提交协议：
 - 在 fd-based metadata syscall helper（例如 `ftruncate`、`fallocate` grow）和 path-based metadata syscall/API（例如 `truncate(path)`、`O_TRUNC`）成功修改内容后派发 `FAN_MODIFY`。
 - `fs::File` 和 backend `FileOps` 不得 import fanotify、不得接收 notification suppression 参数、不得提供 `*_opened()` wrapper，也不得把内核内部 direct `File` helper 当作事件源。
 - 在 opened file description release 中派发 `FAN_CLOSE_NOWRITE` / `FAN_CLOSE_WRITE`：
-  - open 成功时在 opened file description 上记录 fanotify close snapshot：`PathRef` / `FanPathKey`、打开时 access mode 是否包含写能力。
+  - open 成功时在 opened file description 上记录 fanotify close snapshot：`PathRef`、打开时 access mode 是否包含写能力。
   - write/truncate/content modify 成功路径仍记录 `did_modify` 或等价状态，但该状态只服务 `FAN_MODIFY` 和 legacy ignore-mask clearing，不参与 close mask 分类。
   - 最后 release 时，若 snapshot 的 access mode 具备写能力则生成 `FAN_CLOSE_WRITE`，否则生成 `FAN_CLOSE_NOWRITE`；dup/fork 共享 opened file description 时只在最后 release 产生一次 close event。
 - 若短期为了 LTP 单 fd 场景使用 fd-close bridge，必须标注为 temporary LTP bridge，不能算完整 release 语义闭合；带 bridge 的实现不能通过 Stage 3 退出条件，只能记录为降级验收或临时得分路径。

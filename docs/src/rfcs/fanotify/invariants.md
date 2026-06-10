@@ -54,7 +54,7 @@ anemone-kernel/src/fs/fanotify/
 职责边界：
 
 - `mod.rs`：唯一模块外 facade；re-export syscall-facing `api::{sys_fanotify_init, sys_fanotify_mark}`、user-visible event hook API、task/fd-facing release / no-notify helper 和必要 opaque handle。
-- `types.rs`：跨子模块共享的 Anemone 语义类型，例如 mask、flag、mode、event kind、target key 和 path key；不放 Linux UAPI struct。
+- `types.rs`：跨子模块共享的 Anemone 语义类型，例如 mask、flag、mode、event kind 和 target key；不放 Linux UAPI struct。
 - `api/init.rs`：`fanotify_init()` 参数解析、init flag matrix、event fd flags validation、group creation facade 调用和 fd install 入口。
 - `api/mark.rs`：`fanotify_mark()` 参数解析、mark command/mask validation、path resolution 入口和 registry facade 调用。
 - `group.rs`：group identity、state、lifecycle、closing/dead、mark handle list 和 teardown。
@@ -80,7 +80,7 @@ fanotify event hook 拥有事件发生点的事实输入：事件种类、当前
 
 syscall/API helper 与 task/fd lifecycle 拥有 fanotify 基础事件注入边界。`FAN_OPEN` 由 open API 在对象权限、flag validation 和 `O_TRUNC` 副作用处理完成后、fd 发布前提交。`FAN_ACCESS` 必须覆盖用户可见 fd 的顺序 read 和 positioned read 成功路径；`FAN_MODIFY` 必须覆盖用户可见 fd 的顺序 write、positioned write、append、fd/path truncate、fallocate grow 或等价内容修改成功路径。`FAN_CLOSE_*` 来源是 task/fd opened-description final-release。事件源可以调用 `fs::fanotify` 的 typed hook，但不得把 fanotify policy 下沉到 `fs::File`、具体 backend `FileOps::{read,read_at,write,write_at}`、char/block/proc backend 或 loop/ext4 backing I/O。`fs::File` 是内核内部 opened object handle；它不得 import fanotify、持有 notification suppression policy、提供 `*_opened()` 这类用户 fd 语义 wrapper，或为了 fanotify 进入 registry/no-notify 等 sleepable lock。
 
-task/fd 层拥有 fd table、fd reservation、file description lifetime 和 user-visible fd event suppression marker。fanotify 可以通过受控 helper 在 read 边界安装 event object fd，但不得保存用户态 fd number 作为长期身份，也不得维护与 fd table 并行的 descriptor/open-state 真相源。path-fd read 使用的 fd reservation 必须独占一个未发布 fd slot；commit 前其他 fd 分配和 close 路径都不能观察或复用该 slot，commit 只发布已准备好的 file、不得再分配/阻塞/失败，rollback 在 commit 前幂等释放 slot 和 file。reserved slot open-state 必须由 task/fd 层与普通 fd table 状态统一维护。opened-description final-release 是 task/fd 层的显式语义释放事件，必须在可睡眠、interrupts-enabled 的 close / exit / fd-table replacement 路径运行；fd table、task 或 group 的 `Drop` 只能释放内存或断言显式释放遗漏，不得运行 fanotify registry mutation、waiter wakeup 或其它系统资源释放。`FAN_CLOSE_NOWRITE` / `FAN_CLOSE_WRITE` 需要从 opened file description release 取得事件事实，而不是从 group fd close 或 fd table slot close 推断。每个被监控 opened file description 必须保存 fanotify close snapshot：对象 `PathRef` / `FanPathKey` 和打开时 access mode 是否包含写能力；dup/fork 共享同一 opened file description 时只在最后 release 产生一次 close event。后续成功内容修改状态只服务 `FAN_MODIFY` 和 legacy ignore-mask clearing，不参与 close mask 分类。event fd 的 suppression marker 只由 syscall/API helper 或 task/fd lifecycle 在提交 fanotify event 前检查，不能作为参数继续下沉到 `fs::File`。
+task/fd 层拥有 fd table、fd reservation、file description lifetime 和 user-visible fd event suppression marker。fanotify 可以通过受控 helper 在 read 边界安装 event object fd，但不得保存用户态 fd number 作为长期身份，也不得维护与 fd table 并行的 descriptor/open-state 真相源。path-fd read 使用的 fd reservation 必须独占一个未发布 fd slot；commit 前其他 fd 分配和 close 路径都不能观察或复用该 slot，commit 只发布已准备好的 file、不得再分配/阻塞/失败，rollback 在 commit 前幂等释放 slot 和 file。reserved slot open-state 必须由 task/fd 层与普通 fd table 状态统一维护。opened-description final-release 是 task/fd 层的显式语义释放事件，必须在可睡眠、interrupts-enabled 的 close / exit / fd-table replacement 路径运行；fd table、task 或 group 的 `Drop` 只能释放内存或断言显式释放遗漏，不得运行 fanotify registry mutation、waiter wakeup 或其它系统资源释放。`FAN_CLOSE_NOWRITE` / `FAN_CLOSE_WRITE` 需要从 opened file description release 取得事件事实，而不是从 group fd close 或 fd table slot close 推断。每个被监控 opened file description 必须保存 fanotify close snapshot：对象 `PathRef` 和打开时 access mode 是否包含写能力；dup/fork 共享同一 opened file description 时只在最后 release 产生一次 close event。后续成功内容修改状态只服务 `FAN_MODIFY` 和 legacy ignore-mask clearing，不参与 close mask 分类。event fd 的 suppression marker 只由 syscall/API helper 或 task/fd lifecycle 在提交 fanotify event 前检查，不能作为参数继续下沉到 `fs::File`。
 
 ## 身份与能力模型
 
@@ -96,7 +96,7 @@ mark target 使用内部身份：
 
 首批 mark target lifecycle 采用强引用 + pre-unmount flush / mark-dead。mark 和 queued event 可以 pin `InodeRef` / `Arc<Mount>` / `Arc<SuperBlock>`，但完整 umount/filesystem kill 兼容必须等 VFS 在 umount 或 filesystem kill 前调用 fanotify 清理相关 marks、标记 target dead 后才能宣称。late enqueue 观察到 dead target 或 dead group 必须 fail closed。
 
-event target 使用 `PathRef` 或明确 parent/name snapshot。path-fd mode 需要能在 read 时打开事件对象；如果对象已删除或不能打开，按 fanotify path-fd 语义返回 `FAN_NOFD`，不得 panic。path/self/child 匹配必须使用 `FanPathKey { mount, dentry }` 或等价 mount+dentry identity；不得依赖只比较 dentry 的 helper 作为 fanotify identity。
+event target 使用 `PathRef` 或明确 parent/name snapshot。path-fd mode 需要能在 read 时打开事件对象；如果对象已删除或不能打开，按 fanotify path-fd 语义返回 `FAN_NOFD`，不得 panic。当前基础 inode mark 匹配以 inode identity 为准，parent-child 匹配以 parent inode identity 和 `FAN_EVENT_ON_CHILD` 为准；不得用安装时 path key 把 inode mark 收窄成 path mark。后续 FID/name/rename 或其它 path-specific gate 若需要 mount+dentry identity，应以明确消费者重新引入 dedicated key 类型，不得依赖只比较 dentry 的 helper 作为 fanotify identity。
 
 poll producer capability 使用 `LatchTrigger`，只保存到 group queue 中。fanotify source 不能直接拿到 wait-core `WakeToken` 或 task scheduling API。
 
