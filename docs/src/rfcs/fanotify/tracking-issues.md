@@ -21,18 +21,30 @@
 
 ## Keter
 
+- 暂无。
+
+## Euclid
+
+- 暂无。
+
+## Safe
+
+- 暂无。
+
+## Neutralized
+
 ### FANOTIFY-042: D5 事件源边界不得停留在 `fs::File` / `*_opened()` 桥
 
-**状态：** Active
+**状态：** Neutralized
 
 **发现证据：** D5 runtime corrective repair 已证明内核内部 direct `File` helper 会进入 loop/ext4
 backing I/O、exec loader、VMO datasource 或 filesystem backend 路径；若这些路径查询 fanotify
 no-notify state 或 registry，可能在 preemption-disabled / non-sleepable 上下文触发普通 `Mutex`
-或 fanotify queue 逻辑。当前实现通过 `File::{read,read_at,write,write_at,append,...}` 默认
+或 fanotify queue 逻辑。后续实现通过 `File::{read,read_at,write,write_at,append,...}` 默认
 suppression、再由 `File::*_opened()` 让 `FileDesc` 传入 `notification_suppressed` 来恢复用户 fd
 事件。这修复了 panic，但把“用户可见 fd 操作”这个 policy 塞进了 `fs::File`。
 
-**问题：** `fs::File` 在 Anemone 中既是用户 fd 背后的 opened object，也是大量内核内部 I/O 的
+**原问题：** `fs::File` 在 Anemone 中既是用户 fd 背后的 opened object，也是大量内核内部 I/O 的
 直接 handle。把 fanotify 触发、`notification_suppressed` 判断或 `*_opened()` wrapper 留在
 `fs::File`，会让后续每个 direct `File` 调用点都需要证明自己是不是用户可见事件源；这违反单一
 真相源和窄接口原则，也会阻塞 D6 / Stage 5 继续扩展事件种类。
@@ -47,21 +59,26 @@ suppression、再由 `File::*_opened()` 让 `FileDesc` 传入 `notification_supp
   path-fd read，并把 open、read/write syscall helper、metadata syscall/API 和 opened-description
   final-release 分别列为事件源。
 
-**实施修复要求：** 后续实现应把 `FAN_ACCESS` / `FAN_MODIFY` 从 `fs::File` 移到
-`fs/api/read_write` 共用 helper、`FileDesc::truncate()` 或对应 fd/path metadata syscall/API 成功
-边界；`FAN_OPEN` 继续由 open API 在 fd publish 前提交；`FAN_CLOSE_*` 继续由 task/fd
-opened-description final-release 提交。修复完成前，不应继续把 D6 或 Stage 5 事件扩展接到
-`fs::File` 的 `*_opened()` 桥上。
+**实际修复：** `fs::File` 已删除 fanotify import、`notify_fanotify()`、`*_with_notify()`
+suppression 参数和 `read_opened()` / `write_opened()` / `append_opened()` wrapper；`FileDesc`
+重新只做 fd 权限检查并调用普通 `File` backend helper。`FAN_ACCESS` / `FAN_MODIFY` 迁到
+`fs/api/read_write` 共用 helper 的成功边界，vectored I/O 在总成功字节数确定后只提交一次；
+`sendfile` 按 input fd 成功读出和 output fd 成功写入分别提交一次；`ftruncate` 在 syscall
+成功后提交 `FAN_MODIFY`。`truncate(path)`、`fallocate` grow 和 `O_TRUNC` 继续在对应 API 成功
+边界提交 `FAN_MODIFY`，`FAN_OPEN` 继续由 `openat` 在 fd publish 前提交，`FAN_CLOSE_*` 继续由
+opened-description final-release callback 提交。
 
-## Euclid
+**Read-user control fd 收口：** shared read helper 不在 syscall 层 downcast fanotify private
+state；它通过 generic opened-description 能力位判断 direct read-user hook 是否属于 ordinary
+`FAN_ACCESS` source。fanotify group fd 的 read-user path 显式关闭该能力，因此即使用户用
+`fanotify_mark(pathname == NULL, dfd=fanotify_fd)` 标记控制 fd，`read(fanotify_fd)` 也不会递归
+向该 group 入队。
 
-- 暂无。
-
-## Safe
-
-- 暂无。
-
-## Neutralized
+**No-notify 收口：** `NoNotifyGuard`、`NO_NOTIFY_GUARDS` 和
+`current_task_notifications_suppressed()` 已删除；`notify_path_event()` 只检查 event 自带的
+opened-description suppression marker。fanotify event fd 创建仍安装
+`OpenedFileDescriptionOps { notification_suppressed: true, ... }`，使该 fd 后续 I/O 和 final-release
+不递归生成 fanotify event。
 
 ### FANOTIFY-041: fd table / task `Drop` 不得触发 group semantic teardown
 
@@ -252,8 +269,8 @@ owner exit 的真实路径，`FilesState::drop()` 会断言暴露遗漏，而不
 
 **修复落点：**
 
-- [不变量需求](./invariants.md) 的锁序与生命周期规则定义两层 no-notify 模型：构造期 `NoNotifyGuard` 抑制 metadata fd open 自激，返回给用户的 event fd 还带 kernel-only no-notify 标记。
-- [迁移实施计划](./implementation.md) 的 Stage 3 将构造期 guard 和 event-fd no-notify 标记作为交付项，并明确它们不绕过普通 VFS 权限、生命周期或用户可见 I/O 语义；2026-06-10 的边界收紧进一步要求：如果 event-fd helper 只走不发通知的内部 object-open 路径，构造期 guard 应删除或缩小。
+- [不变量需求](./invariants.md) 的锁序与生命周期规则定义 event-fd opened-description no-notify 模型：返回给用户的 event fd 带 kernel-only no-notify 标记，后续 I/O / close / final-release 不递归生成 fanotify event。
+- [迁移实施计划](./implementation.md) 的 Stage 3 明确：fanotify event-fd helper 只走不发通知的内部 object-open 路径，构造期 guard 已删除；event-fd no-notify 标记不绕过普通 VFS 权限、生命周期或用户可见 I/O 语义。
 
 **原问题：** 草案禁止 fanotify 内部 open 递归生成 fanotify event，但没有定义 guard 形态。
 
@@ -374,7 +391,7 @@ owner exit 的真实路径，`FilesState::drop()` 会断言暴露遗漏，而不
 
 **修复落点：**
 
-- [不变量需求](./invariants.md) 的 no-notify 模型改为两层：返回给用户的 event object fd 必须在 opened file description 上携带 kernel-only no-notify 标记；构造期 `NoNotifyGuard` 只在 event-fd helper 会调用用户可见 event source 时保留。
+- [不变量需求](./invariants.md) 的 no-notify 模型改为 opened-description suppression：返回给用户的 event object fd 必须在 opened file description 上携带 kernel-only no-notify 标记；event-fd helper 只使用内部 object-open 路径，不保留构造期 guard。
 - [迁移实施计划](./implementation.md) 的 Stage 3 交付和审计要求 event fd 后续 read/write/close/final-release 不反向生成 fanotify event，且标记不得泄漏到普通用户 open。
 
 **原问题：** 原草案只要求 fanotify 内部 open 有 guard，同时禁止 guard 泄漏到普通用户 open/read/write/close。path-fd read 返回给用户的 event fd 后续 I/O / close 若重新进入 fanotify hook，会形成自激队列；但完全禁止 fd 上的持久 no-notify 标记又会挡住正确模型。后续 `FANOTIFY-042` 已把事件源收紧到 syscall/API + task/fd lifecycle，因此构造期 guard 不再是默认长期抽象。

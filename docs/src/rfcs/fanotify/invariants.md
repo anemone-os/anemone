@@ -114,6 +114,8 @@ event matching snapshot 是 event 的线性化点，并且必须与 ADD / REMOVE
 
 `read(fanotify_fd)` 的线性化点由 fanotify 专用 read-user 提交协议定义。group lock 下选择完整 event 并出队，普通通知 event 的消费点就是出队点，首批不保留重读。path-fd event fd 必须通过可回滚的 fd 预留/安装 helper 提交：fd reservation 独占未发布 slot，metadata copyout 全部成功后 commit，commit 必须不可失败；copyout 失败时 rollback 并释放已创建 file。对象打开失败输出 `fd = FAN_NOFD` 并继续 copyout。一个 metadata record 不得半提交；若本次 read 已经提交前面的完整 records，后续 record 失败只能 rollback 未提交 fd，并返回已提交字节数。首批采用这一简化返回策略，Linux `EFAULT` 细节差异必须在验证中记录。permission event 首批不支持。Stage 1 synthetic event 使用 `fd = FAN_NOFD`，不触发 path-fd event fd 创建。
 
+generic read-user hook 只是 opened-description 提供 direct userspace copyout 的能力，不天然代表被观察文件内容读取。ordinary `FAN_ACCESS` 只能由声明为 read-user access source 的 opened description 或普通 backend read 成功边界提交；fanotify group fd 的 control read-user 必须关闭该能力，避免 group fd 被标记后通过 `read(fanotify_fd)` 递归生成队列事件。
+
 `poll(fanotify_fd)` register 的线性化点是 group lock 下检查 queue readiness，并在仍 empty 时保存 trigger。若 queue 已非空，必须直接返回 ready，不得保存 trigger 后再要求等待。
 
 group semantic teardown 的线性化点是最后一个用户可见 descriptor / opened-description ref 关闭时，由 task/fd 显式 close / exit / fd-table replacement 路径按 `registry -> group` 锁序标记 closing/dead 并从 registry 移除所有 marks。之后 event source hook 不得再向该 group enqueue 新事件。teardown 必须按 group-owned handles 删除本 group marks、detach blocking read / poll waiters、把 queue 内容搬出锁外释放。shared group state 的实际内存释放可以延后到 in-flight syscall transient refs 归零；不能把 memory last-drop 当作 close wakeup 的唯一触发点，也不能让 `Drop` / deferred task dispose 触发需要普通 `Mutex`、waiter trigger 或 registry mutation 的语义释放。`FAN_CLOSE_*` 事件另有独立线性化点：被监控 opened file description 的 release。
@@ -138,7 +140,7 @@ group teardown 必须先按 `registry -> group` 顺序阻止新 enqueue，再清
 
 `Drop` 路径不得获取 fanotify registry lock、group lock 或 task/fd semantic-release 相关锁来补做系统资源释放。fd table / group / queue 的析构只能释放已经脱离可见系统状态的内存；若析构时仍发现 published fd、reserved fd、live mark 或未完成 semantic teardown，应使用断言暴露生命周期 bug，而不是在析构中继续清理。
 
-no-notify 采用两层模型：`NoNotifyGuard` 或等价构造期 context 只允许覆盖 fanotify event-fd helper 调用可能触发用户可见 event source 的短窗口；如果 helper 只走不发通知的内部 `PathRef::open()` / `fs::File` 路径，则不应保留构造期 guard。返回给用户的 event object fd 必须在 opened file description 上携带 kernel-only 通用 notification suppression 标记，使该 fd 后续经 syscall/API helper 或 opened-description final-release 时跳过 fanotify enqueue。guard 必须 RAII/drop-safe；file 标记只属于 fanotify 生成的 event fd，不得传播到普通用户 open，也不得绕过普通 VFS 权限、生命周期或用户可见 I/O 语义；task/fd 核心不得依赖 fanotify 具体 private type。
+no-notify 当前采用 opened-description 持久 suppression 模型：fanotify event-fd helper 只走不提交用户可见 open event 的内部 `PathRef::open()` / `fs::File` 路径，因此不保留构造期 `NoNotifyGuard`。返回给用户的 event object fd 必须在 opened file description 上携带 kernel-only 通用 notification suppression 标记，使该 fd 后续经 syscall/API helper 或 opened-description final-release 时跳过 fanotify enqueue。file 标记只属于 fanotify 生成的 event fd，不得传播到普通用户 open，也不得绕过普通 VFS 权限、生命周期或用户可见 I/O 语义；task/fd 核心不得依赖 fanotify 具体 private type。
 
 ## unsupported feature 边界
 
@@ -170,7 +172,7 @@ no-notify 采用两层模型：`NoNotifyGuard` 或等价构造期 context 只允
 - poll register 在 queue 已 ready 时仍保存 trigger 并返回 `Armed`。
 - source 保存 trigger 后依赖 cleanup 才能保证正确性；late trigger 必须由 wait identity fail closed。
 - fanotify 内部 open 事件 fd 时递归生成 fanotify event，或 fanotify 生成的 event fd 后续 I/O / close 再次生成 fanotify event。
-- `NoNotifyGuard` / event-fd no-notify 标记泄漏到非 fanotify event fd，或绕过 VFS 权限检查。
+- event-fd no-notify 标记泄漏到非 fanotify event fd，或绕过 VFS 权限检查。
 - 在 task/fd 核心中加入 fanotify-specific concrete type 判断，而不是通用 notification suppression / release hook 能力。
 - 在 `fs::File` 或 backend `FileOps` 中保留 fanotify import、notification suppression 参数、`*_opened()` wrapper 或其它用户 fd 可见性 policy。
 - unsupported high-level feature 返回成功但事件格式或行为不可观测。

@@ -5,10 +5,10 @@
 
 use crate::{
     prelude::*,
-    task::files::{OpenedFileDescriptionOps, OpenedFileFinalReleaseCtx},
+    task::files::{FileDesc, OpenedFileDescriptionOps, OpenedFileFinalReleaseCtx},
 };
 
-use super::{current_task_notifications_suppressed, registry, types::FanMask};
+use super::{registry, types::FanMask};
 
 #[derive(Debug, Clone)]
 pub struct FanHookEvent {
@@ -52,11 +52,18 @@ impl FanHookEvent {
 }
 
 pub fn notify_path_event(event: FanHookEvent) {
-    if event.notification_suppressed() || current_task_notifications_suppressed() {
+    if event.notification_suppressed() {
         return;
     }
 
     registry::notify_path_event(event);
+}
+
+pub fn notify_opened_file_event(file: &FileDesc, mask: FanMask) {
+    notify_path_event(
+        FanHookEvent::new(mask, file.vfs_file().path().clone())
+            .with_notification_suppressed(file.notifications_suppressed()),
+    );
 }
 
 pub fn observed_file_description_ops() -> OpenedFileDescriptionOps {

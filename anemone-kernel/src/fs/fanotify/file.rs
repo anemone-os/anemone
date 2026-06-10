@@ -11,7 +11,6 @@ use crate::{
 };
 
 use super::{
-    NoNotifyGuard,
     event::FanEvent,
     group::{FanGroup, FanReadState},
     types::FanEventFdTemplate,
@@ -60,6 +59,7 @@ pub fn open_group_file(group: Arc<FanGroup>) -> Result<File, SysError> {
 pub fn description_ops() -> OpenedFileDescriptionOps {
     OpenedFileDescriptionOps {
         read_user: Some(fanotify_read_user),
+        notify_read_user_access: false,
         final_release: Some(fanotify_final_release),
         notification_suppressed: false,
     }
@@ -168,7 +168,7 @@ fn prepare_event_fd(
     };
 
     let template = group.event_fd_template();
-    let file = match open_event_target_with_no_notify(target, template) {
+    let file = match open_event_target(target, template) {
         Ok(file) => file,
         Err(err) => {
             // The object may no longer be openable by the time the listener
@@ -210,17 +210,6 @@ fn prepare_event_fd(
         reservation,
         file_desc,
     }))
-}
-
-fn open_event_target_with_no_notify(
-    target: &PathRef,
-    template: FanEventFdTemplate,
-) -> Result<File, SysError> {
-    // Only the internal open that manufactures metadata.fd is guarded. The
-    // guard is gone before fd publication; subsequent operations on the event
-    // fd rely on the opened-description suppression marker installed below.
-    let _guard = NoNotifyGuard::begin_current();
-    open_event_target(target, template)
 }
 
 fn open_event_target(target: &PathRef, template: FanEventFdTemplate) -> Result<File, SysError> {
