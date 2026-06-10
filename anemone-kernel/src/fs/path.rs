@@ -89,7 +89,7 @@ impl PathRef {
         }
         // this should hold if the dentry is the same, but let's be safe and check it
         // anyway.
-        debug_assert!(Arc::ptr_eq(&self.mount, &other.mount));
+        assert!(Arc::ptr_eq(&self.mount, &other.mount));
         true
     }
 }

@@ -1,7 +1,7 @@
 # fanotify 迁移实施计划
 
 **状态：** Draft
-**最后更新：** 2026-06-09
+**最后更新：** 2026-06-10
 **父 RFC：** [RFC-20260604-fanotify](./index.md)
 **不变量：** [不变量需求](./invariants.md)
 
@@ -14,17 +14,18 @@ Stage 0 是内部 ABI/probe checkpoint，不是独立用户可见 LTP gate。首
 - Linux ABI 常量、结构体和 flag parser 只放在 `anemone_abi`、`fs/fanotify/api/` 和 fanotify fd copy 边界。
 - fanotify 内部长期状态使用语义类型，不直接保存 Linux UAPI struct。
 - `fs::fanotify` 必须作为 owner 模块隐藏 group、registry、queue、mark record、lock 和 file private state；syscall dispatch / VFS / task-fd 层只通过 `mod.rs` facade 暴露的 typed API 交互。fanotify syscall API 必须位于 `anemone-kernel/src/fs/fanotify/api/`，不新增 `anemone-kernel/src/fs/api/fanotify/`。
-- fanotify group fd 的 `AnyOpaque` downcast 只允许发生在 fanotify 自己的 file ops / helper 内，不能让 syscall、VFS hook 或 task/fd 层识别 fanotify private state。
+- fanotify group fd 的 `AnyOpaque` downcast 只允许发生在 fanotify 自己的 file ops / helper 内，不能让 syscall、event source hook 或 task/fd 层识别 fanotify private state。
 - 先实现 privileged path-fd notification；FID/name、pidfd、permission events、FS error、evictable marks 和 exec-open events 暂缓。
 - unsupported feature 必须返回稳定 errno，不得空成功。
 - event enqueue 不做用户态 copy，不打开事件 fd，不阻塞。
 - poll/read readiness 使用 typed `PollRequest` / `PollRegisterResult` 与 `LatchTrigger`；不得重新引入 busy-poll waiter。
 - 首个用户可见 group fd 不允许 empty blocking read 返回 `EAGAIN`；nonblock 判断必须读取当前 opened file description 的 `FileStatusFlags`，使 `F_SETFL(O_NONBLOCK)` 后续变更生效。
 - fanotify group fd 需要完整实现当前 `FileOps` vtable：普通 `read` / readv 系列进入 fanotify read-user 路径，`poll` 使用 latch readiness，`ioctl` 只处理可选 group fd 命令；`seek`、`read_at`、`write_at` 和 `read_dir` 必须 fail closed，不能消费 group queue、创建 event metadata fd 或改变 fanotify 状态。
-- 首个真实 VFS enqueue 前必须已有固定 queue cap 和 overflow sentinel；无界队列或只统计不丢弃都不能进入 path-fd event 阶段。
+- 首个真实 fanotify enqueue 前必须已有固定 queue cap 和 overflow sentinel；无界队列或只统计不丢弃都不能进入 path-fd event 阶段。
 - 首批 legacy basic ignore mask 只覆盖 `FAN_MARK_IGNORED_MASK` / `FAN_MARK_IGNORED_SURV_MODIFY` 的 add/remove/modify-survive 语义；新的 `FAN_MARK_IGNORE` 和跨 inode/mount 合并规则进入独立 backlog gate。
 - fd reservation / commit / rollback 和 opened-description release 由 task/fd 层拥有，fanotify 只能调用受控 helper 或接收 release 回调，不维护并行 fd-table 状态或用户 fd number 身份。
-- event-fd no-notify 标记必须落为通用 file/opened-description notification suppression 能力，不让 task/fd 核心依赖 fanotify 具体类型。
+- event-fd no-notify 标记必须落为通用 file/opened-description notification suppression 能力，不让 task/fd 核心依赖 fanotify 具体类型；该标记由 syscall/API helper 或 task/fd lifecycle 在提交 fanotify event 前检查，不能继续下沉到 `fs::File`。
+- 基础事件源采用 user-visible fd/API event boundary：路径型 syscall/API、fd I/O syscall helper 和 task/fd opened-description lifecycle 显式提交事件；`fs::File` 与 backend `FileOps` 不承载 fanotify policy。
 - 每个阶段都保持现有 VFS、pipe、iomux 和 credentials 行为不退化。
 
 ## 阶段 0：UAPI 与 syscall probe（内部 checkpoint）
@@ -267,33 +268,34 @@ Stage 0 init flag matrix：
 - LTP 特性探测能把暂缓项归类为 unsupported。
 - registry key、target lifecycle、cleanup handles 和锁序进入 RFC，不再作为实现期临时选择。
 
-## 阶段 3：基础 VFS 事件 hook 与 path-fd read
+## 阶段 3：user-visible fd/API event boundary 与 path-fd read
 
-目标：让 open/read/write/close 事件进入 fanotify queue。
+目标：让用户可见 open/read/write/close 与 metadata 修改事件进入 fanotify queue，同时保持 `fs::File` / backend I/O fanotify-agnostic。
 
 前置条件：
 
 - 阶段 2 完成。
-- fanotify enqueue API 已封装，VFS 不直接操作 registry 内部。
+- fanotify enqueue API 已封装，syscall/API helper、task/fd lifecycle 和 VFS dirent primitive 不直接操作 registry 内部。
 - fanotify 专用 read-user 提交协议或等价 typed `FileOps` / read syscall dispatch 机制已确定；syscall 层不得通过 downcast 识别 fanotify fd。Stage 1 已经为 current `FileStatusFlags` nonblock read 提供同一 dispatch / context 基础，本阶段只扩展 path-fd metadata 提交。
 - task/fd 层 `reserve_event_fd()` / commit / rollback helper 已确定，并把 reserved slot 状态纳入 fd table 单一真相源。
-- no-notify guard 形态已确定，且只覆盖 fanotify 内部 event-fd helper；event fd 后续 suppression 使用通用 file/opened-description notification flag。
+- no-notify 形态已确定：event fd 后续 suppression 使用通用 file/opened-description notification flag；构造期 guard 只在 fanotify event-fd helper 需要调用会提交用户可见事件的 API 时保留。
 - queue cap 已在 Stage 1 生效。
 
 fanotify read-user 提交协议：
 
 1. `read(fanotify_fd)` 走 fanotify 专用 read-user path，不复用 “先生成 kernel buffer、再 generic copyout” 的普通 `FileOps::read` 事务。该路径应通过 typed file operation / read dispatch 暴露给 read/readv 系列 syscall，并能观察当前 opened file description status flags；syscall 层不能直接识别 fanotify private state。
 2. 在 group lock 下处理 empty blocking/nonblock、buffer-too-small、close/dead wakeup；选择一个完整 event 后从队列移除，普通通知 event 的消费点就是出队点，首批不保留重读。
-3. 释放 group lock 后构造 metadata。path-fd event 使用 `NoNotifyGuard` 打开事件对象；对象打开失败时输出 `fd = FAN_NOFD` 并继续 copyout，不 panic，也不把 open failure 变成半读。
+3. 释放 group lock 后构造 metadata。path-fd event 打开事件对象时应优先使用不提交 fanotify event 的内部 object-open helper；只有当 helper 必须调用用户可见 open API 时才使用构造期 no-notify guard。对象打开失败时输出 `fd = FAN_NOFD` 并继续 copyout，不 panic，也不把 open failure 变成半读。
 4. event fd 安装使用 task/fd 层的 “预留但未发布” 或等价可回滚 helper：`reserve_event_fd()` 返回未发布但独占的 fd slot 和稳定 fd number；commit 只发布已准备好的 file，不分配、不阻塞、不可失败；rollback 在 commit 前幂等释放 slot 和 file。reserved slot 状态必须由 task/fd 层与普通 fd table open-state 一起维护，不能让 fanotify 自己保存并行 fd 分配状态。
 5. 一个 metadata record 不能半提交。若本次 read 已经成功提交前面的完整 records，后续 record copyout 失败时返回已提交字节数；未提交 record 的 fd rollback，event 按普通通知消费策略丢弃。若没有任何 record 提交成功，则返回 copyout 错误。首批采用这一简化返回策略，Linux `EFAULT` 细节差异必须在验证记录中标注。
 6. Stage 1 synthetic event 固定 `fd = FAN_NOFD`，不进入 path-fd open，不需要 `NoNotifyGuard`。
 
 交付：
 
-- 在 open path 成功后派发 `FAN_OPEN`。
-- 在用户可见 opened-fd read/read_at 成功读取后派发 `FAN_ACCESS`；hook 放在 fd/VFS gate 已完成、backend 成功返回之后，不下沉到具体 backend `FileOps::{read,read_at}`，也不把内核内部直接 `File` helper 当作事件源。
-- 在用户可见 opened-fd write/write_at/append、truncate 或等价内容修改路径成功后派发 `FAN_MODIFY`；hook 放在 VFS/opened-file 边界，避免每个 backend 重复 fanotify policy。
+- 在 open API 成功后、fd 发布前派发 `FAN_OPEN`；若同一 open 包含 `O_TRUNC`，`FAN_MODIFY` / `FAN_OPEN` 的顺序必须在事务日志中明确记录，不能由 backend side effect 隐式决定。
+- 在 read/write syscall helper 取得用户可见 fd、完成权限/offset/copy 边界并且 backend 成功后派发 `FAN_ACCESS` / `FAN_MODIFY`；覆盖顺序 read/write、positioned read/write、readv/writev、preadv/pwritev 和 append 语义。
+- 在 fd-based metadata syscall helper（例如 `ftruncate`、`fallocate` grow）和 path-based metadata syscall/API（例如 `truncate(path)`、`O_TRUNC`）成功修改内容后派发 `FAN_MODIFY`。
+- `fs::File` 和 backend `FileOps` 不得 import fanotify、不得接收 notification suppression 参数、不得提供 `*_opened()` wrapper，也不得把内核内部 direct `File` helper 当作事件源。
 - 在 opened file description release 中派发 `FAN_CLOSE_NOWRITE` / `FAN_CLOSE_WRITE`：
   - open 成功时在 opened file description 上记录 fanotify close snapshot：`PathRef` / `FanPathKey`、打开时 access mode 是否包含写能力。
   - write/truncate/content modify 成功路径仍记录 `did_modify` 或等价状态，但该状态只服务 `FAN_MODIFY` 和 legacy ignore-mask clearing，不参与 close mask 分类。
@@ -307,10 +309,10 @@ fanotify read-user 提交协议：
   - parent directory + `FAN_EVENT_ON_CHILD`
   - `FAN_ONDIR`
   - basic ignore mask
-- 增加 `NoNotifyGuard` 或等价 notify context：
-  - `NoNotifyGuard` 只能由 fanotify event-fd helper 创建，只抑制 helper 打开 metadata fd 时产生的 fanotify enqueue。
-  - 返回给用户的 event object fd 还必须在 opened file description 上携带 kernel-only 通用 notification suppression 标记，确保该 fd 后续 read/write/close 不反向生成 fanotify event；task/fd 核心不得依赖 fanotify 具体 private type。
-  - guard 是 RAII/drop-safe，open 失败、copyout 失败和 rollback 都必须退出构造期 no-notify 状态。
+- 增加 event-fd no-notify 模型：
+  - 返回给用户的 event object fd 必须在 opened file description 上携带 kernel-only 通用 notification suppression 标记，确保该 fd 后续 read/write/close/final-release 经过 user-visible fd/API event boundary 时不反向生成 fanotify event；task/fd 核心不得依赖 fanotify 具体 private type。
+  - 构造期 `NoNotifyGuard` 不是长期必需抽象；只有当 fanotify event-fd helper 需要调用会提交用户可见 event 的 open API 时才保留。若 helper 使用内部 `PathRef::open()` / `fs::File` 路径，则必须删除或缩小 guard，而不是让 hook 查询 fanotify-local guard map。
+  - guard 若存在，必须 RAII/drop-safe，open 失败、copyout 失败和 rollback 都必须退出构造期 no-notify 状态。
   - event-fd no-notify 标记只属于 fanotify 生成的 event fd，不传播到普通用户 open，不绕过普通 VFS 权限、生命周期或用户可见 I/O 语义。
 - read event 时创建 path-fd metadata `fd`：
   - 按 group `event_f_flags` 解析 access/status/fd flags。
@@ -322,13 +324,14 @@ fanotify read-user 提交协议：
 审计：
 
 - hook 不在 VFS mutating lock 内打开 fd 或 copy user buffer。
-- internal event fd open 有 no-notify guard。
+- internal event fd open 不调用用户可见 open API；如果必须调用，则构造期 no-notify guard 的范围和删除条件必须写清。
 - event fd 的 opened file description 有 no-notify 标记，且该标记不泄漏到普通 open。
 - copyout 失败、event object open 失败和 partial read 不会半成功。
 - read/readv 入口不会通过 syscall 层 downcast fanotify private state；fd reservation commit/rollback 由 task/fd helper 统一维护。
-- `pread` / `pwrite` / positioned VFS paths 的普通文件事件被覆盖，但对 fanotify group fd 自身的 `read_at` / `write_at` 仍 fail closed，不产生 metadata 或 permission response。
+- `pread` / `pwrite` / positioned fd syscall helper 的普通文件事件被覆盖，但对 fanotify group fd 自身的 `read_at` / `write_at` 仍 fail closed，不产生 metadata 或 permission response。
 - write/read 失败不生成成功事件。
 - close event 来源是 opened file description release；若保留 bridge，注释必须写明 temporary LTP bridge。
+- `fs::File` / backend `FileOps` 不含 fanotify import、notification suppression 参数或 `*_opened()` 用户 fd wrapper。
 - ADD / REMOVE / FLUSH 与 matching snapshot / queue append 的线性化点无歧义。
 
 验证：
@@ -345,6 +348,7 @@ fanotify read-user 提交协议：
 - path-fd 基础通知闭环可用。
 - inode/mount/filesystem mark 对基础事件可匹配。
 - `FAN_CLOSE_*` 的正式 opened file description release 语义闭合；temporary bridge 只能作为降级记录，不能满足 Stage 3 退出条件。
+- `fs::File` fanotify-agnostic 边界闭合；所有基础事件源均可追溯到 syscall/API helper 或 task/fd lifecycle。
 
 ## 阶段 4：FID/name 边界验证与 dirent hook 草稿
 
@@ -433,7 +437,8 @@ stock LTP 分类必须按具体 helper 路径记录，不能把所有 unsupporte
 实现阶段每个 gate 至少搜索并分类：
 
 - `rg -n "fanotify|fsnotify|FAN_" anemone-kernel anemone-abi`
-- `rg -n "after_modified|ModifType|vfs_touch|vfs_mkdir|vfs_unlink|vfs_rmdir|vfs_rename|finish_open|close_fd" anemone-kernel/src/fs anemone-kernel/src/task`
+- `rg -n "after_modified|ModifType|vfs_touch|vfs_mkdir|vfs_unlink|vfs_rmdir|vfs_rename|finish_open|close_fd|read_into_user_buffer|write_from_user_buffer" anemone-kernel/src/fs anemone-kernel/src/task`
+- `rg -n "read_opened|write_opened|notification_suppressed|notify_fanotify" anemone-kernel/src/fs/file.rs anemone-kernel/src/task/files.rs`
 - `rg -n "PollRequest|PollRegisterResult|LatchTrigger|poll:" anemone-kernel/src`
 - `rg -n "FIONREAD|fdinfo|pidfd|name_to_handle|open_by_handle" anemone-kernel anemone-abi`
 

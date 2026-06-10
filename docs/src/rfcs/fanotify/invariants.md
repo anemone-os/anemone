@@ -1,20 +1,20 @@
 # fanotify 不变量需求
 
 **状态：** Draft
-**最后更新：** 2026-06-09
+**最后更新：** 2026-06-10
 **父 RFC：** [RFC-20260604-fanotify](./index.md)
 
 ## 闭合条件
 
 - `fanotify_init()` 创建的 group fd 有单一 group state，`read()`、`poll()`、mark 操作和 close teardown 都引用同一状态。
-- mark registry 是 fanotify matching 的单一真相源；VFS hook 不复制 mark 状态。
+- mark registry 是 fanotify matching 的单一真相源；event source hook 不复制 mark 状态。
 - `fs::fanotify` 是 group、registry、queue、mark record、file ops private state 和 matching 的 owner；模块外只能通过 typed facade 交互，不能 downcast fanotify private state 或访问内部 lock/storage。
 - fanotify 内部状态使用 Anemone 语义类型；Linux UAPI struct 只在 syscall 参数解析和 group fd read/write copy 边界出现。
-- VFS hook 只生成 fanotify event queue item，不在 hook 内打开事件 fd、copy user buffer 或等待 permission response。
+- event source hook 只生成 fanotify event queue item，不在 hook 内打开事件 fd、copy user buffer 或等待 permission response。
 - event queue readiness 与 poll trigger 注册/触发在线性化点内闭合，不能 lost wake。
 - group fd 是 stream-like fanotify object：普通 read/readv 可以消费 queue，poll 只观察 readiness，可选 ioctl 只处理 group fd 命令；`seek`、`read_at`、`write_at` 和 `read_dir` 必须 fail closed，不能消费 queue、创建 metadata fd 或改变 fanotify 状态。
 - group fd nonblock read 必须观察当前 opened file description `FileStatusFlags`；`F_SETFL(O_NONBLOCK)` 后续变更必须影响 empty read。fanotify private nonblock 副本只能作为临时 bridge，不能作为首个公开 gate 的闭合证据。
-- event queue 必须在首个真实 VFS enqueue 前有固定 cap 和 overflow sentinel；无界队列、只统计不丢弃或 silent fail-open 都不能作为 path-fd event 阶段的实现状态。
+- event queue 必须在首个真实 fanotify enqueue 前有固定 cap 和 overflow sentinel；无界队列、只统计不丢弃或 silent fail-open 都不能作为 path-fd event 阶段的实现状态。
 - path-fd event 的对象 fd 只在 `read(fanotify_fd)` 时为当前读取 task 创建。
 - path-fd read 的 event 消费、event fd 安装、metadata copyout 和失败回滚/丢弃策略必须是单个可复审提交协议；copyout 失败不得留下用户不可见的新 fd。
 - 暂缓特性不能伪成功；必须稳定返回 Linux-compatible unsupported/invalid/permission errno。
@@ -53,7 +53,7 @@ anemone-kernel/src/fs/fanotify/
 
 职责边界：
 
-- `mod.rs`：唯一模块外 facade；re-export syscall-facing `api::{sys_fanotify_init, sys_fanotify_mark}`、VFS-facing hook API、task/fd-facing release / no-notify helper 和必要 opaque handle。
+- `mod.rs`：唯一模块外 facade；re-export syscall-facing `api::{sys_fanotify_init, sys_fanotify_mark}`、user-visible event hook API、task/fd-facing release / no-notify helper 和必要 opaque handle。
 - `types.rs`：跨子模块共享的 Anemone 语义类型，例如 mask、flag、mode、event kind、target key 和 path key；不放 Linux UAPI struct。
 - `api/init.rs`：`fanotify_init()` 参数解析、init flag matrix、event fd flags validation、group creation facade 调用和 fd install 入口。
 - `api/mark.rs`：`fanotify_mark()` 参数解析、mark command/mask validation、path resolution 入口和 registry facade 调用。
@@ -63,7 +63,7 @@ anemone-kernel/src/fs/fanotify/
 - `queue.rs`：bounded queue、overflow sentinel、poll trigger queue 和 wake detachment。
 - `registry.rs`：global registry、mark record storage、target maps、matching snapshot 和 cleanup by handle。
 - `mark.rs`：mark record、`MarkHandle`、mask/ignored-mask operations 和 target-dead state。
-- `hooks.rs`：VFS-facing event input functions；只收集事实并调用 registry/matching facade。
+- `hooks.rs`：user-visible event input functions；只收集事实并调用 registry/matching facade。
 
 global registry、group lock、queue、mark record、private state cast 和 fanotify-specific ioctl/read/write interpretation 都必须留在 owner 模块内。模块外不得直接访问这些 storage，也不得使用 `AnyOpaque` 判断 fanotify concrete type。
 
@@ -76,11 +76,11 @@ global registry、group lock、queue、mark record、private state cast 和 fano
 - fanotify group fd 的 `seek`、`read_at`、`write_at` 和 `read_dir` 不属于 fanotify ABI；这些入口必须返回稳定非支持错误，`pread` / `pwrite` 不得绕过 read-user 提交协议或产生 permission response 语义。
 - syscall 层不得通过 `AnyOpaque` downcast 判断某个 fd 是否 fanotify；它只能调用 fd/file 层提供的 typed operation 或 fanotify syscall facade。
 
-VFS hook 拥有事件发生点的事实输入：事件种类、当前 task、target path、parent path、name、directory/self/child 属性。它不拥有 group state，也不直接决定 userspace event layout。
+fanotify event hook 拥有事件发生点的事实输入：事件种类、当前 task、target path、parent path、name、directory/self/child 属性。它不拥有 group state，也不直接决定 userspace event layout。
 
-VFS/opened-file 层拥有 fanotify 基础 I/O 事件注入边界。`FAN_ACCESS` 必须覆盖用户可见 opened-fd 的顺序 read 和 positioned read 成功路径；`FAN_MODIFY` 必须覆盖用户可见 opened-fd 的顺序 write、positioned write、append、truncate 或等价内容修改成功路径。hook 应落在 fd/VFS gate 后、backend 成功返回后的统一边界，不下沉到每个具体 `FileOps::{read_at,write_at}` backend，也不在 char/block/proc 等设备 hook 中承载 fanotify policy。内核内部直接 `File` helper 可用于 exec loader、VMO datasource、loop backing 或 filesystem backend I/O，这些路径不得为了 fanotify 进入 registry/no-notify 等 sleepable lock。
+syscall/API helper 与 task/fd lifecycle 拥有 fanotify 基础事件注入边界。`FAN_OPEN` 由 open API 在对象权限、flag validation 和 `O_TRUNC` 副作用处理完成后、fd 发布前提交。`FAN_ACCESS` 必须覆盖用户可见 fd 的顺序 read 和 positioned read 成功路径；`FAN_MODIFY` 必须覆盖用户可见 fd 的顺序 write、positioned write、append、fd/path truncate、fallocate grow 或等价内容修改成功路径。`FAN_CLOSE_*` 来源是 task/fd opened-description final-release。事件源可以调用 `fs::fanotify` 的 typed hook，但不得把 fanotify policy 下沉到 `fs::File`、具体 backend `FileOps::{read,read_at,write,write_at}`、char/block/proc backend 或 loop/ext4 backing I/O。`fs::File` 是内核内部 opened object handle；它不得 import fanotify、持有 notification suppression policy、提供 `*_opened()` 这类用户 fd 语义 wrapper，或为了 fanotify 进入 registry/no-notify 等 sleepable lock。
 
-task/fd 层拥有 fd table、fd reservation 和 file description lifetime。fanotify 可以通过受控 helper 在 read 边界安装 event object fd，但不得保存用户态 fd number 作为长期身份，也不得维护与 fd table 并行的 descriptor/open-state 真相源。path-fd read 使用的 fd reservation 必须独占一个未发布 fd slot；commit 前其他 fd 分配和 close 路径都不能观察或复用该 slot，commit 只发布已准备好的 file、不得再分配/阻塞/失败，rollback 在 commit 前幂等释放 slot 和 file。reserved slot open-state 必须由 task/fd 层与普通 fd table 状态统一维护。opened-description final-release 是 task/fd 层的显式语义释放事件，必须在可睡眠、interrupts-enabled 的 close / exit / fd-table replacement 路径运行；fd table、task 或 group 的 `Drop` 只能释放内存或断言显式释放遗漏，不得运行 fanotify registry mutation、waiter wakeup 或其它系统资源释放。`FAN_CLOSE_NOWRITE` / `FAN_CLOSE_WRITE` 需要从 opened file description release 取得事件事实，而不是从 group fd close 或 fd table slot close 推断。每个被监控 opened file description 必须保存 fanotify close snapshot：对象 `PathRef` / `FanPathKey` 和打开时 access mode 是否包含写能力；dup/fork 共享同一 opened file description 时只在最后 release 产生一次 close event。后续成功内容修改状态只服务 `FAN_MODIFY` 和 legacy ignore-mask clearing，不参与 close mask 分类。
+task/fd 层拥有 fd table、fd reservation、file description lifetime 和 user-visible fd event suppression marker。fanotify 可以通过受控 helper 在 read 边界安装 event object fd，但不得保存用户态 fd number 作为长期身份，也不得维护与 fd table 并行的 descriptor/open-state 真相源。path-fd read 使用的 fd reservation 必须独占一个未发布 fd slot；commit 前其他 fd 分配和 close 路径都不能观察或复用该 slot，commit 只发布已准备好的 file、不得再分配/阻塞/失败，rollback 在 commit 前幂等释放 slot 和 file。reserved slot open-state 必须由 task/fd 层与普通 fd table 状态统一维护。opened-description final-release 是 task/fd 层的显式语义释放事件，必须在可睡眠、interrupts-enabled 的 close / exit / fd-table replacement 路径运行；fd table、task 或 group 的 `Drop` 只能释放内存或断言显式释放遗漏，不得运行 fanotify registry mutation、waiter wakeup 或其它系统资源释放。`FAN_CLOSE_NOWRITE` / `FAN_CLOSE_WRITE` 需要从 opened file description release 取得事件事实，而不是从 group fd close 或 fd table slot close 推断。每个被监控 opened file description 必须保存 fanotify close snapshot：对象 `PathRef` / `FanPathKey` 和打开时 access mode 是否包含写能力；dup/fork 共享同一 opened file description 时只在最后 release 产生一次 close event。后续成功内容修改状态只服务 `FAN_MODIFY` 和 legacy ignore-mask clearing，不参与 close mask 分类。event fd 的 suppression marker 只由 syscall/API helper 或 task/fd lifecycle 在提交 fanotify event 前检查，不能作为参数继续下沉到 `fs::File`。
 
 ## 身份与能力模型
 
@@ -116,7 +116,7 @@ event matching snapshot 是 event 的线性化点，并且必须与 ADD / REMOVE
 
 `poll(fanotify_fd)` register 的线性化点是 group lock 下检查 queue readiness，并在仍 empty 时保存 trigger。若 queue 已非空，必须直接返回 ready，不得保存 trigger 后再要求等待。
 
-group semantic teardown 的线性化点是最后一个用户可见 descriptor / opened-description ref 关闭时，由 task/fd 显式 close / exit / fd-table replacement 路径按 `registry -> group` 锁序标记 closing/dead 并从 registry 移除所有 marks。之后 VFS hook 不得再向该 group enqueue 新事件。teardown 必须按 group-owned handles 删除本 group marks、detach blocking read / poll waiters、把 queue 内容搬出锁外释放。shared group state 的实际内存释放可以延后到 in-flight syscall transient refs 归零；不能把 memory last-drop 当作 close wakeup 的唯一触发点，也不能让 `Drop` / deferred task dispose 触发需要普通 `Mutex`、waiter trigger 或 registry mutation 的语义释放。`FAN_CLOSE_*` 事件另有独立线性化点：被监控 opened file description 的 release。
+group semantic teardown 的线性化点是最后一个用户可见 descriptor / opened-description ref 关闭时，由 task/fd 显式 close / exit / fd-table replacement 路径按 `registry -> group` 锁序标记 closing/dead 并从 registry 移除所有 marks。之后 event source hook 不得再向该 group enqueue 新事件。teardown 必须按 group-owned handles 删除本 group marks、detach blocking read / poll waiters、把 queue 内容搬出锁外释放。shared group state 的实际内存释放可以延后到 in-flight syscall transient refs 归零；不能把 memory last-drop 当作 close wakeup 的唯一触发点，也不能让 `Drop` / deferred task dispose 触发需要普通 `Mutex`、waiter trigger 或 registry mutation 的语义释放。`FAN_CLOSE_*` 事件另有独立线性化点：被监控 opened file description 的 release。
 
 ## 锁序与生命周期规则
 
@@ -124,7 +124,7 @@ fanotify registry lock 不得包住用户态 copy、event object fd open、VFS p
 
 固定锁序：
 
-1. VFS hook 收集事件输入。
+1. syscall/API helper 或 task/fd lifecycle 收集事件输入。
 2. fanotify registry lock 下做 target dead check、mark matching snapshot、mask / ignored mask 计算。
 3. 按固定 group id 顺序进入每个 group lock，重查 group dead、target dead、queue cap 和 overflow sentinel，append event 或丢弃，并 detach poll triggers。
 4. 释放 lock。
@@ -138,7 +138,7 @@ group teardown 必须先按 `registry -> group` 顺序阻止新 enqueue，再清
 
 `Drop` 路径不得获取 fanotify registry lock、group lock 或 task/fd semantic-release 相关锁来补做系统资源释放。fd table / group / queue 的析构只能释放已经脱离可见系统状态的内存；若析构时仍发现 published fd、reserved fd、live mark 或未完成 semantic teardown，应使用断言暴露生命周期 bug，而不是在析构中继续清理。
 
-no-notify 采用两层模型：`NoNotifyGuard` 或等价构造期 context 只能由 fanotify event-fd helper 创建，用于抑制 helper 打开 metadata fd 时产生的 fanotify enqueue；返回给用户的 event object fd 还必须在 opened file description 上携带 kernel-only 通用 notification suppression 标记，使该 fd 后续 read/write/close 经过 VFS hook 时同样跳过 fanotify enqueue。guard 必须 RAII/drop-safe；file 标记只属于 fanotify 生成的 event fd，不得传播到普通用户 open，也不得绕过普通 VFS 权限、生命周期或用户可见 I/O 语义；task/fd 核心不得依赖 fanotify 具体 private type。
+no-notify 采用两层模型：`NoNotifyGuard` 或等价构造期 context 只允许覆盖 fanotify event-fd helper 调用可能触发用户可见 event source 的短窗口；如果 helper 只走不发通知的内部 `PathRef::open()` / `fs::File` 路径，则不应保留构造期 guard。返回给用户的 event object fd 必须在 opened file description 上携带 kernel-only 通用 notification suppression 标记，使该 fd 后续经 syscall/API helper 或 opened-description final-release 时跳过 fanotify enqueue。guard 必须 RAII/drop-safe；file 标记只属于 fanotify 生成的 event fd，不得传播到普通用户 open，也不得绕过普通 VFS 权限、生命周期或用户可见 I/O 语义；task/fd 核心不得依赖 fanotify 具体 private type。
 
 ## unsupported feature 边界
 
@@ -163,8 +163,8 @@ no-notify 采用两层模型：`NoNotifyGuard` 或等价构造期 context 只能
 
 ## 禁止退化项
 
-- 在 VFS 各 syscall 中直接遍历 fanotify group 内部结构。
-- 在 syscall、VFS hook、task/fd 或 procfs 层 downcast fanotify group fd private state，绕过 `fs::fanotify` facade。
+- 在各 syscall/API 事件源中直接遍历 fanotify group 内部结构。
+- 在 syscall、event source hook、task/fd 或 procfs 层 downcast fanotify group fd private state，绕过 `fs::fanotify` facade。
 - 在 fanotify 内部长期保存 Linux ABI struct 作为核心状态。
 - 在 event enqueue hook 中创建 event object fd 或 copy user buffer。
 - poll register 在 queue 已 ready 时仍保存 trigger 并返回 `Armed`。
@@ -172,6 +172,7 @@ no-notify 采用两层模型：`NoNotifyGuard` 或等价构造期 context 只能
 - fanotify 内部 open 事件 fd 时递归生成 fanotify event，或 fanotify 生成的 event fd 后续 I/O / close 再次生成 fanotify event。
 - `NoNotifyGuard` / event-fd no-notify 标记泄漏到非 fanotify event fd，或绕过 VFS 权限检查。
 - 在 task/fd 核心中加入 fanotify-specific concrete type 判断，而不是通用 notification suppression / release hook 能力。
+- 在 `fs::File` 或 backend `FileOps` 中保留 fanotify import、notification suppression 参数、`*_opened()` wrapper 或其它用户 fd 可见性 policy。
 - unsupported high-level feature 返回成功但事件格式或行为不可观测。
 - group fd close 后 registry 仍保留 live mark。
 - target map、group cleanup list 或 group state 中复制 mark mask / ignored mask / target refs，形成 registry 之外的第二份 mark 真相源。
@@ -186,6 +187,6 @@ no-notify 采用两层模型：`NoNotifyGuard` 或等价构造期 context 只能
 - syscall probe、flag validation、group fd lifecycle、blocking read/nonblock/poll/close wakeup 和 basic mark add/remove/flush 均有验证证据。
 - open/read/write/close 基础事件能经过 inode / mount / filesystem mark 匹配进入 queue。
 - path-fd read 提交协议、queue cap、registry key/lifecycle 和 `FAN_CLOSE_*` opened file description release source 均有闭合证据；temporary fd-close bridge 只能作为降级实现记录，不能作为第一阶段闭合证据。
-- fanotify module/API 可见性、mark record 单一 owner、task/fd fd reservation 单一真相源和通用 no-notify file 标记均有源码级或审查证据。
+- fanotify module/API 可见性、mark record 单一 owner、task/fd fd reservation 单一真相源、通用 no-notify file 标记和 `fs::File` fanotify-agnostic 边界均有源码级或审查证据。
 - unsupported feature 的 errno 策略有 LTP probe 证据或源码级验证。
 - 剩余失败能被归类到明确暂缓项，而不是基础通知队列或 mark registry 缺陷。

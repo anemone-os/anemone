@@ -5,8 +5,8 @@
 **最后更新：** 2026-06-10
 **领域：** fs / VFS / syscall ABI / iomux / procfs / LTP
 **事务日志：** [2026-06-08 - Fanotify](../../devlog/transactions/2026-06-08-fanotify.md)
-**开放问题：** [fanotify tracking issues](./tracking-issues.md) 当前无活跃 Keter；`FANOTIFY-041` Gate C corrective Keter 已 neutralized。强一致或高成本 Linux 语义仍按非目标和 Stage 5 backlog 暂缓。
-**下一步：** Gate D / D5 VFS 基础 event injection 已源码级闭合；下一步启动 D6 FID/name negative gate 与 LTP 分类。不得把 FID/name 正向 ABI、procfs fdinfo 或 permission events 合入 D6 negative gate。
+**开放问题：** [fanotify tracking issues](./tracking-issues.md) 当前有活跃 Keter：`FANOTIFY-042` 要求把 D5 事件源边界从 `fs::File` 桥回收到 syscall/API helper 与 task/fd lifecycle。`FANOTIFY-041` Gate C corrective Keter 已 neutralized。强一致或高成本 Linux 语义仍按非目标和 Stage 5 backlog 暂缓。
+**下一步：** 先收口 `FANOTIFY-042` 的 user-visible fd/API event boundary，再启动 D6 FID/name negative gate 与 LTP 分类。不得把 FID/name 正向 ABI、procfs fdinfo 或 permission events 合入 D6 negative gate。
 
 ## 摘要
 
@@ -16,9 +16,9 @@ FID/name records、pidfd、permission events、完整 `/proc/<pid>/fdinfo`、FS 
 
 ## 背景
 
-LTP 的 fanotify 组占分高。RFC 提升时，内核只有 `SYS_FANOTIFY_INIT` / `SYS_FANOTIFY_MARK` syscall number，尚无 fanotify UAPI 常量、syscall handler、group fd、mark registry 或 VFS 事件派发路径；这些缺口已经在后续 D1-D5 实现中推进为 `fs::fanotify` owner module、group fd、mark registry、path-fd read 提交协议和基础 VFS event dispatch。
+LTP 的 fanotify 组占分高。RFC 提升时，内核只有 `SYS_FANOTIFY_INIT` / `SYS_FANOTIFY_MARK` syscall number，尚无 fanotify UAPI 常量、syscall handler、group fd、mark registry 或用户可见事件派发路径；这些缺口已经在后续 D1-D5 实现中推进为 `fs::fanotify` owner module、group fd、mark registry、path-fd read 提交协议和基础 event dispatch。
 
-D5 之后的源码级基线是：privileged path-fd listener、inode / mount / filesystem mark、metadata-only overflow record、path-fd metadata read、opened-description close notification 和基础 `FAN_OPEN` / `FAN_ACCESS` / `FAN_MODIFY` / `FAN_CLOSE_*` event injection 已在源码层闭合；运行证据与更高阶 Linux 兼容项仍按事务日志记录。下一步基线是启动 D6 FID/name negative gate 与 LTP 分类，不把 FID/name 正向 ABI、procfs fdinfo 或 permission events 并入该 gate。
+D5 之后的源码级基线是：privileged path-fd listener、inode / mount / filesystem mark、metadata-only overflow record、path-fd metadata read、opened-description close notification 和基础 `FAN_OPEN` / `FAN_ACCESS` / `FAN_MODIFY` / `FAN_CLOSE_*` event injection 已在源码层闭合；运行态修正已经证明内核内部 direct `File` helper 不得作为 fanotify 事件源。当前接受边界进一步收紧为 user-visible fd/API event boundary：路径型 syscall/API、fd I/O syscall helper 和 task/fd opened-description lifecycle 负责提交事件，`fs::File` / backend `FileOps` 保持 fanotify-agnostic。下一步基线是在收口该边界后启动 D6 FID/name negative gate 与 LTP 分类，不把 FID/name 正向 ABI、procfs fdinfo 或 permission events 并入该 gate。
 
 2026-06-05 的 ioctl-loop 与 fileops-seek-char-ioctl 收口没有改变 fanotify 的 group / registry / queue / path-fd 基本设计，但刷新了 VFS file-op 边界：
 
@@ -26,7 +26,7 @@ D5 之后的源码级基线是：privileged path-fd listener、inode / mount / f
 - `FileOps` 已有 `read`、`write`、`read_at`、`write_at`、`seek`、`read_dir`、`poll`、`ioctl`，typed `PollRequest` / `PollRegisterResult` 和 sched latch 已能支撑可阻塞 readiness；fanotify group fd 必须提供完整 vtable，其中不可 seek / positioned I/O 的入口 fail closed。
 - `sys_ioctl()` 已通过 `IoctlCtx` 分发到打开文件对象的 `FileOps::ioctl`；fanotify group fd 若支持 `FIONREAD`，必须在自己的 file ops 内处理，不能在 syscall 层 downcast fanotify private state。
 - `PathRef = Mount + Dentry`、`InodeRef`、`Mount`、`SuperBlock` 足够表达 fanotify mark target。
-- `openat`、opened-fd read/read_at/write/write_at/append、metadata syscall 和 VFS dirent primitive 已有集中事件注入点；positioned I/O hook 必须落在保留 fd/VFS gate 后的 VFS/opened-file 边界，不下沉到具体 backend `FileOps::{read_at,write_at}`，也不把内核内部直接 `File` helper 当作用户可见事件源。
+- `openat`、read/write syscall helper、fd-based metadata syscall、path-based metadata syscall、opened-description final-release 和后续 VFS dirent primitive 是首批集中事件源边界；positioned I/O hook 必须落在 syscall/API helper 取得用户可见 fd 并确认 backend 成功之后，不下沉到 `fs::File`、具体 backend `FileOps::{read_at,write_at}` 或内核内部 direct `File` helper。
 - `CredentialSet` 与 `Capability::SYS_ADMIN` 已能表达首批 privileged listener 边界。
 
 详细基础设施评估见 [fanotify 基础设施评估](./backgrounds/infra-assessment-20260604.md)。
@@ -88,13 +88,13 @@ anemone-kernel/src/fs/fanotify/
 └── hooks.rs
 ```
 
-`mod.rs` 是唯一对模块外暴露 typed facade 的文件，负责 re-export syscall-facing `api::{sys_fanotify_init, sys_fanotify_mark}`、VFS-facing hook facade、task/fd-facing release / no-notify helper，以及必要的不透明 group/file handle 类型。`types.rs` 放跨子模块共享的语义类型，例如 `FanMask`、`FanMarkFlags`、`FanGroupMode`、`FanTarget`、`FanTargetKey`、`FanPathKey`。`api/{init,mark}.rs` 只做 Linux ABI 参数解析、flag validation、errno matrix、path resolution 入口和 facade 调用，不保存 registry、queue、mark record 或 group lock。`group.rs` 拥有 group state、lifecycle 和 teardown；`file.rs` 拥有 anonymous group fd `FileOps`、read/poll/ioctl/close-facing glue 和 fanotify private-state downcast；`event.rs` 定义 queue item 与 metadata build 输入；`queue.rs` 管理 bounded queue、overflow sentinel 和 poll triggers；`registry.rs` 是 mark record 的唯一 owner；`mark.rs` 定义 mark record、handle 与 mask 操作；`hooks.rs` 是 VFS event 输入 facade。
+`mod.rs` 是唯一对模块外暴露 typed facade 的文件，负责 re-export syscall-facing `api::{sys_fanotify_init, sys_fanotify_mark}`、event-source hook facade、task/fd-facing release / no-notify helper，以及必要的不透明 group/file handle 类型。`types.rs` 放跨子模块共享的语义类型，例如 `FanMask`、`FanMarkFlags`、`FanGroupMode`、`FanTarget`、`FanTargetKey`、`FanPathKey`。`api/{init,mark}.rs` 只做 Linux ABI 参数解析、flag validation、errno matrix、path resolution 入口和 facade 调用，不保存 registry、queue、mark record 或 group lock。`group.rs` 拥有 group state、lifecycle 和 teardown；`file.rs` 拥有 anonymous group fd `FileOps`、read/poll/ioctl/close-facing glue 和 fanotify private-state downcast；`event.rs` 定义 queue item 与 metadata build 输入；`queue.rs` 管理 bounded queue、overflow sentinel 和 poll triggers；`registry.rs` 是 mark record 的唯一 owner；`mark.rs` 定义 mark record、handle 与 mask 操作；`hooks.rs` 是 user-visible fd/API event 输入 facade，不属于 `fs::File` 或 backend `FileOps`。
 
 syscall、VFS、task/fd 和 procfs 不直接访问 registry、queue、mark record 或 group lock，不在模块外 downcast fanotify private state。fanotify 内部长期状态使用 Anemone 语义类型；Linux UAPI struct 只在 `anemone_abi`、`fs/fanotify/api/` 和 group fd read/write copy 边界出现。
 
 fanotify group fd 使用匿名 inode 创建。group private state 保存 group mode、event fd template、group-owned `MarkHandle` list、event queue、poll trigger queue 和 teardown 状态；mark record 仍由 registry 单一拥有。group fd 是 stream-like 对象：普通 `read()` 从队列取出事件，path-fd 模式在 read 时为事件对象创建新的 fd；`poll()` 只暴露 queue readiness；`seek`、`read_at`、`write_at` 和 `read_dir` 不消费队列、不创建 metadata fd，并返回稳定非支持错误；可选 ioctl 只在 group fd file ops 内处理。event enqueue 在 queue 从空变非空时触发已注册的 latch triggers。
 
-VFS 事件派发通过窄 hook 接入现有集中入口。hook 只接收事件语义、当前 task identity、target `PathRef` 和必要 parent/name 信息；它不在持有 VFS mutating lock 时打开事件 fd 或 copy user buffer。matching 只生成 fanotify queue item，实际 fd 分配和 userspace copy 发生在 group fd read 边界。
+用户可见事件派发通过窄 hook 接入 syscall/API helper 与 task/fd lifecycle 的集中入口。hook 只接收事件语义、当前 task identity、target `PathRef` 和必要 parent/name 信息；它不在持有 VFS mutating lock 时打开事件 fd 或 copy user buffer。matching 只生成 fanotify queue item，实际 fd 分配和 userspace copy 发生在 group fd read 边界。`fs::File`、backend `FileOps`、loop/ext4 backing I/O、exec loader 和 VMO datasource 等内核内部文件访问路径不得承载 fanotify policy，也不得通过 `notification_suppressed` 参数或 `*_opened()` wrapper 表达用户 fd 可见性。
 
 首批 privileged path-fd listener 可以支持 inode / mount / filesystem mark。非特权 listener、FID mode、pidfd、permission event、exec-open event、dirent/name/self/metadata event 和 FS error 均先通过 validation gate fail closed；LTP 结果按具体 helper 路径记录为 TCONF 或暂缓失败。
 
@@ -107,7 +107,7 @@ Stage 0 不作为独立用户可见 LTP gate。`fanotify_init()` 公开成功必
 接受本 RFC 意味着 fanotify 可以按 staged feature 推进，第一阶段只需证明 path-fd 通知类机制闭合。以下变化必须回到本 RFC 或新增 follow-up RFC：
 
 - 把 FID/name reporting、pidfd、permission events 或 FS error 提前并入第一阶段验收。
-- 改变 fanotify group fd、mark registry、VFS hook 或 event queue 的状态所有权。
+- 改变 fanotify group fd、mark registry、user-visible event source boundary 或 event queue 的状态所有权。
 - 让 fanotify 内部长期保存 Linux UAPI struct 而不是语义类型。
 - 在 VFS mutating lock 内执行 event fd open、用户态 copy 或可能重入 VFS 的长路径操作。
 - 对暂缓特性返回成功但不提供真实可观测语义。
