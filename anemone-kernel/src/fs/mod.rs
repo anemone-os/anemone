@@ -3,6 +3,7 @@
 // vfs infrastructure
 mod anonymous;
 mod dentry;
+mod eventfd;
 pub mod fanotify;
 // mod error;
 mod file;

@@ -83,8 +83,7 @@ pub struct FileDescOps {
     /// Optional direct userspace read operation for files whose read
     /// transaction cannot be modeled as kernel-buffer fill followed by
     /// generic copyout.
-    pub read_user:
-        Option<for<'a> fn(OpenedFileReadUserCtx<'a>) -> Result<usize, SysError>>,
+    pub read_user: Option<for<'a> fn(OpenedFileReadUserCtx<'a>) -> Result<usize, SysError>>,
     /// Whether successful direct read-user dispatch is an ordinary access
     /// event source. Protocol/control fds can use read_user for copyout while
     /// remaining outside file-content access notification.

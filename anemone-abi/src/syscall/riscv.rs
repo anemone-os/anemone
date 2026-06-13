@@ -49,6 +49,8 @@ pub unsafe fn syscall(
 /// Linux syscalls. Therefore, we define Linux syscall numbers here for
 /// reference.
 pub mod linux {
+    pub const SYS_EVENTFD2: u64 = 19;
+
     pub const SYS_GETCWD: u64 = 17;
 
     pub const SYS_DUP: u64 = 23;

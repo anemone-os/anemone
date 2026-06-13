@@ -71,6 +71,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../ltp/groups/exec.txt"),
     },
     LtpGroup {
+        name: "eventfd",
+        cases: include_str!("../ltp/groups/eventfd.txt"),
+    },
+    LtpGroup {
         name: "chmod",
         cases: include_str!("../ltp/groups/chmod.txt"),
     },

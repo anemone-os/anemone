@@ -31,6 +31,14 @@ pub mod linux {
         pub const O_TMPFILE: u32 = 0x0041_0000;
     }
 
+    pub mod eventfd {
+        use super::open::{O_CLOEXEC, O_NONBLOCK};
+
+        pub const EFD_SEMAPHORE: u32 = 0x0001;
+        pub const EFD_CLOEXEC: u32 = O_CLOEXEC;
+        pub const EFD_NONBLOCK: u32 = O_NONBLOCK;
+    }
+
     pub mod close_range {
         pub const CLOSE_RANGE_UNSHARE: u32 = 1 << 1;
         pub const CLOSE_RANGE_CLOEXEC: u32 = 1 << 2;

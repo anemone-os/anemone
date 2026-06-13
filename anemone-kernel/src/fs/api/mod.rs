@@ -18,6 +18,7 @@ pub mod chroot;
 pub mod close;
 pub mod dup;
 pub mod dup3;
+pub mod eventfd2;
 pub mod fallocate;
 pub mod fchmod;
 pub mod fchown;

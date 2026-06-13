@@ -1,3 +1,4 @@
 # Minimal kernel capability declarations for LTP's tst_kconfig checks.
+CONFIG_EVENTFD=y
 CONFIG_KSM=y
 # CONFIG_CHECKPOINT_RESTORE is not set
