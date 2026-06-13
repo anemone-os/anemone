@@ -5,7 +5,7 @@
 //! - https://elixir.bootlin.com/linux/v6.6.32/source/fs/select.c#L795
 
 use anemone_abi::{
-    fs::linux::select::{FdSet, FD_SETSIZE},
+    fs::linux::select::{FD_SETSIZE, FdSet},
     process::linux::signal as linux_signal,
     time::linux::TimeSpec,
 };
@@ -14,11 +14,11 @@ use crate::{
     prelude::*,
     syscall::{
         handler::TryFromSyscallArg,
-        user_access::{user_addr, SyscallArgValidatorExt as _, UserReadPtr, UserWritePtr},
+        user_access::{SyscallArgValidatorExt as _, UserReadPtr, UserWritePtr, user_addr},
     },
     task::{
         files::Fd,
-        sig::{set::SigSet, SigNo, TemporaryMaskWaitContext},
+        sig::{SigNo, TemporaryMaskWaitContext, set::SigSet},
     },
     utils::bitmap::Bitmap,
 };

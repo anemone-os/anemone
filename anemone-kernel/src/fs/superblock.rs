@@ -157,6 +157,13 @@ impl SuperBlock {
 }
 
 impl SuperBlock {
+    fn inode_is_busy(inode: &Arc<Inode>) -> bool {
+        inode.rc() > 0
+            || inode
+                .mapping()
+                .is_some_and(|mapping| Arc::strong_count(mapping) > 1)
+    }
+
     /// Get or load an inode by inode number. This is the canonical way to
     /// obtain inodes from a superblock.
     ///
@@ -306,21 +313,46 @@ impl SuperBlock {
         inner.ghosts.push(inode.clone());
     }
 
+    /// Snapshot shrink candidates. Callers must recheck under eviction lock.
+    pub(super) fn cached_inode_snapshot(&self, include_indexed: bool) -> Vec<Arc<Inode>> {
+        let inner = self.inner.read();
+        let mut snapshot = Vec::new();
+
+        for inode in &inner.ghosts {
+            snapshot.push(inode.clone());
+        }
+
+        if include_indexed {
+            for inode in inner.indexed.values() {
+                snapshot.push(inode.clone());
+            }
+        }
+
+        snapshot
+    }
+
     /// Try to evict a specific inode.
     pub(super) fn try_evict_inode(&self, inode: &Arc<Inode>) -> Result<(), SysError> {
-        if inode.rc() > 0 {
+        if Self::inode_is_busy(inode) {
             return Err(SysError::Busy);
         }
-        if inode
-            .mapping()
-            .is_some_and(|mapping| Arc::strong_count(mapping) > 1)
+
+        // Sync before cache removal. If a later opener misses this inode and
+        // reloads it from backing storage, it must not see stale dirty state.
         {
-            return Err(SysError::Busy);
+            let inode_ref = InodeRef::new(inode.clone());
+            (self.ops.sync_inode)(&inode_ref)?;
         }
 
         let ino = inode.ino();
         let removed = {
             let mut inner = self.inner.write();
+
+            // An inode can be reopened after a shrinker snapshot. Recheck under
+            // the cache write lock before removing it from indexed/ghosts.
+            if Self::inode_is_busy(inode) {
+                return Err(SysError::Busy);
+            }
 
             if let Some(indexed) = inner.indexed.get(&ino) {
                 if Arc::ptr_eq(indexed, inode) {

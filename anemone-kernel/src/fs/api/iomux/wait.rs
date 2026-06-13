@@ -4,10 +4,12 @@
 //! results, and scheduler latch outcomes. Linux `pollfd` and `fd_set` layout
 //! conversion stays in the syscall adapters.
 
-use crate::prelude::*;
-use crate::task::sig::{
-    TemporaryMaskWaitCandidate, TemporaryMaskWaitContext, TemporaryMaskWaitDecision,
-    TemporaryMaskWaitReturn, TemporarySigMaskToken,
+use crate::{
+    prelude::*,
+    task::sig::{
+        TemporaryMaskWaitCandidate, TemporaryMaskWaitContext, TemporaryMaskWaitDecision,
+        TemporaryMaskWaitReturn, TemporarySigMaskToken,
+    },
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -275,10 +277,7 @@ enum IomuxWaitDisposition {
     Done(IomuxWaitOutcome),
 }
 
-fn map_latch_outcome(
-    context: &'static str,
-    outcome: LatchWaitOutcome,
-) -> IomuxWaitDisposition {
+fn map_latch_outcome(context: &'static str, outcome: LatchWaitOutcome) -> IomuxWaitDisposition {
     match outcome {
         LatchWaitOutcome::Triggered => IomuxWaitDisposition::Retry,
         LatchWaitOutcome::Timeout => IomuxWaitDisposition::Done(IomuxWaitOutcome::Timeout),

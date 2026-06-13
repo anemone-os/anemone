@@ -196,11 +196,15 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         program_first_timer();
         percpu_login();
         IntrArch::init_local_irq();
+        task::kthread::init_kthreadd();
 
         device::console::on_system_boot();
         INIT_SYNC_COUNTER.sync_with_counter();
 
         FINISH_SYNC_COUNTER.sync_with_counter();
+        // Ordinary kthreads may round-robin onto any CPU, so wait until every CPU
+        // has completed local init and marked itself online before publishing one.
+        fs::init_inode_shrinker();
         kinfoln!("bsp #{} kinit finished", bsp_id);
     }
 

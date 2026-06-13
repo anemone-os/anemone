@@ -15,6 +15,10 @@ bitflags! {
         /// VFS must not evict its resident inode cache or call `kill_sb` on
         /// last unmount. The filesystem implementation owns that lifetime.
         const PERSISTENT_SB = 1 << 1;
+
+        /// Indexed resident inodes can be evicted and later rebuilt by
+        /// `load_inode`. Ghost eviction does not require this flag.
+        const SHRINKABLE_ICACHE = 1 << 2;
     }
 }
 

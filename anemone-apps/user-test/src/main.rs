@@ -40,7 +40,7 @@ const MUSL_TEST_SCRIPTS: &[&str] = &[
     // "basic_testcode.sh",
     // "lua_testcode.sh",
     // "busybox_testcode.sh",
-    // "libctest_testcode.sh",
+    "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
     // "iozone_testcode.sh",
     // "iperf_testcode.sh",
@@ -379,7 +379,7 @@ fn run_comp_tests() {
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
-    // ltp::run_ltp_tests();
+    ltp::run_ltp_tests();
 
     println!("user-test: all competition tests finished.");
 }
