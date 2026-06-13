@@ -251,16 +251,13 @@ fn ramfs_lookup(parent: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
 
 /// Open is not yet implemented for ramfs.
 fn ramfs_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
-    let of = OpenedFile {
-        file_ops: match inode.ty() {
-            InodeType::Dir => &RAMFS_DIR_FILE_OPS,
-            InodeType::Regular => &RAMFS_REG_FILE_OPS,
-            InodeType::Symlink => &RAMFS_SYMLINK_FILE_OPS,
-            _ => unreachable!(),
-        },
-        prv: NilOpaque::new(),
+    let file_ops = match inode.ty() {
+        InodeType::Dir => &RAMFS_DIR_FILE_OPS,
+        InodeType::Regular => &RAMFS_REG_FILE_OPS,
+        InodeType::Symlink => &RAMFS_SYMLINK_FILE_OPS,
+        _ => unreachable!(),
     };
-    Ok(of)
+    Ok(OpenedFile::new(file_ops, NilOpaque::new()))
 }
 
 fn ramfs_truncate(inode: &InodeRef, size: u64) -> Result<(), SysError> {

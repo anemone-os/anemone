@@ -214,12 +214,7 @@ static CONSOLE_STDIN_INODE_OPS: InodeOps = InodeOps {
     truncate: |_, _| Err(SysError::NotSupported),
     get_attr: console_get_attr,
     read_link: |_| Err(SysError::NotSymlink),
-    open: |_| {
-        Ok(OpenedFile {
-            file_ops: &CONSOLE_STDIN_FILE_OPS,
-            prv: NilOpaque::new(),
-        })
-    },
+    open: |_| Ok(OpenedFile::new(&CONSOLE_STDIN_FILE_OPS, NilOpaque::new())),
 };
 
 static CONSOLE_STDOUT_INODE_OPS: InodeOps = InodeOps {
@@ -234,12 +229,7 @@ static CONSOLE_STDOUT_INODE_OPS: InodeOps = InodeOps {
     get_attr: console_get_attr,
     read_link: |_| Err(SysError::NotSymlink),
     rename: |_, _, _, _, _| Err(SysError::NotSupported),
-    open: |_| {
-        Ok(OpenedFile {
-            file_ops: &CONSOLE_STDOUT_FILE_OPS,
-            prv: NilOpaque::new(),
-        })
-    },
+    open: |_| Ok(OpenedFile::new(&CONSOLE_STDOUT_FILE_OPS, NilOpaque::new())),
 };
 
 static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {

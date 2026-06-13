@@ -5,10 +5,7 @@ use crate::{
 };
 
 fn proc_meminfo_open(_inode: &InodeRef) -> Result<OpenedFile, SysError> {
-    Ok(OpenedFile {
-        file_ops: &PROC_MEMINFO_FILE_OPS,
-        prv: NilOpaque::new(),
-    })
+    Ok(OpenedFile::new(&PROC_MEMINFO_FILE_OPS, NilOpaque::new()))
 }
 
 fn proc_meminfo_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {

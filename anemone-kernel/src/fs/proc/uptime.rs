@@ -5,10 +5,7 @@ use crate::{
 };
 
 fn proc_uptime_open(_inode: &InodeRef) -> Result<OpenedFile, SysError> {
-    Ok(OpenedFile {
-        file_ops: &PROC_UPTIME_FILE_OPS,
-        prv: NilOpaque::new(),
-    })
+    Ok(OpenedFile::new(&PROC_UPTIME_FILE_OPS, NilOpaque::new()))
 }
 
 fn proc_uptime_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {

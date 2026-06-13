@@ -10,10 +10,7 @@ use crate::{
 fn tgid_environ_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
     let _binding = validate_tgid_sub_inode(inode)?;
 
-    Ok(OpenedFile {
-        file_ops: &TGID_ENVIRON_FILE_OPS,
-        prv: NilOpaque::new(),
-    })
+    Ok(OpenedFile::new(&TGID_ENVIRON_FILE_OPS, NilOpaque::new()))
 }
 
 fn tgid_environ_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {

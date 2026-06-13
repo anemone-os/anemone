@@ -77,9 +77,13 @@ pub fn anony_new_inode(
 /// For a more flexible version that takes an explicitly constructed
 /// [OpenedFile], see [anony_open_with].
 pub fn anony_open(path: &PathRef) -> Result<File, SysError> {
-    let OpenedFile { file_ops, prv } = path.inode().open()?;
+    let OpenedFile {
+        file_ops,
+        mode,
+        prv,
+    } = path.inode().open()?;
 
-    Ok(File::new(path.clone(), file_ops, prv))
+    Ok(File::new_with_mode(path.clone(), file_ops, mode, prv))
 }
 
 /// Create a [File] from an explicitly constructed [OpenedFile]. This is useful
@@ -87,7 +91,11 @@ pub fn anony_open(path: &PathRef) -> Result<File, SysError> {
 /// from the inode, e.g. when creating a pipe file which may be either a read
 /// end or a write end, and thus has different file ops and private data.
 pub fn anony_open_with(path: &PathRef, state: OpenedFile) -> Result<File, SysError> {
-    let OpenedFile { file_ops, prv } = state;
+    let OpenedFile {
+        file_ops,
+        mode,
+        prv,
+    } = state;
 
-    Ok(File::new(path.clone(), file_ops, prv))
+    Ok(File::new_with_mode(path.clone(), file_ops, mode, prv))
 }

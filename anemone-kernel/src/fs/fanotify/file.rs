@@ -1,6 +1,7 @@
 use anemone_abi::fs::linux::{fanotify as abi, ioctl::FIONREAD};
 
 use crate::{
+    fs::FileMode,
     prelude::*,
     syscall::user_access::{UserWritePtr, UserWriteSlice},
     task::files::{
@@ -49,10 +50,11 @@ pub(super) fn open_group_file(group: Arc<FanGroup>) -> Result<File, SysError> {
     let path = anony_new_inode(InodeType::Regular, &FANOTIFY_INODE_OPS, NilOpaque::new())?;
     anony_open_with(
         &path,
-        OpenedFile {
-            file_ops: &FANOTIFY_FILE_OPS,
-            prv: AnyOpaque::new(FanGroupFile::new(group)),
-        },
+        OpenedFile::with_mode(
+            &FANOTIFY_FILE_OPS,
+            FileMode::STREAM,
+            AnyOpaque::new(FanGroupFile::new(group)),
+        ),
     )
 }
 

@@ -385,16 +385,15 @@ impl FileDesc {
         }
 
         let ctx = FileIoCtx::new(flags.to_file_op_status_flags());
+        let file = self.pfile.file.as_ref();
+        if file.is_stream() {
+            return file.write_with_ctx(buf, ctx).map_err(|e| e.into());
+        }
+
         if flags.contains(FileStatusFlags::APPEND) {
-            self.pfile
-                .file
-                .append_with_ctx(buf, ctx)
-                .map_err(|e| e.into())
+            file.append_with_ctx(buf, ctx).map_err(|e| e.into())
         } else {
-            self.pfile
-                .file
-                .write_with_ctx(buf, ctx)
-                .map_err(|e| e.into())
+            file.write_with_ctx(buf, ctx).map_err(|e| e.into())
         }
     }
 
@@ -408,16 +407,19 @@ impl FileDesc {
             return Err(SysError::BadFileDescriptor);
         }
         let ctx = FileIoCtx::new(flags.to_file_op_status_flags());
+        let file = self.pfile.file.as_ref();
+        if file.is_stream() {
+            return file
+                .write_at_with_ctx(offset, buf, ctx)
+                .map_err(|e| e.into());
+        }
+
         if flags.contains(FileStatusFlags::APPEND) {
-            return self
-                .pfile
-                .file
+            return file
                 .append_at_current_end_with_ctx(buf, ctx)
                 .map_err(|e| e.into());
         }
-        self.pfile
-            .file
-            .write_at_with_ctx(offset, buf, ctx)
+        file.write_at_with_ctx(offset, buf, ctx)
             .map_err(|e| e.into())
     }
 

@@ -15,10 +15,7 @@ use super::{
 const BLOCK_BYTE_IO_WINDOW_BYTES: usize = 16 * 1024;
 
 fn opened_block_file() -> OpenedFile {
-    OpenedFile {
-        file_ops: &BLOCK_DEV_FILE_OPS,
-        prv: NilOpaque::new(),
-    }
+    OpenedFile::new(&BLOCK_DEV_FILE_OPS, NilOpaque::new())
 }
 
 fn block_file_devnum(file: &File) -> Result<BlockDevNum, SysError> {
