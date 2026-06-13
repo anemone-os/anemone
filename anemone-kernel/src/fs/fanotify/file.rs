@@ -4,7 +4,7 @@ use crate::{
     prelude::*,
     syscall::user_access::{UserWritePtr, UserWriteSlice},
     task::files::{
-        Fd, FdReservation, FileDesc, FileStatusFlags, LinuxOpenCompat, OpenedFileDescriptionOps,
+        Fd, FdReservation, FileDesc, FileDescOps, FileStatusFlags, LinuxOpenCompat,
         OpenedFileFinalReleaseCtx, OpenedFileReadUserCtx, OpenedFileReadUserSegment,
     },
     utils::any_opaque::{AnyOpaque, NilOpaque},
@@ -45,7 +45,7 @@ pub(super) fn group_from_file(file: &File) -> Result<Arc<FanGroup>, SysError> {
     FanGroupFile::group_arc(file).ok_or(SysError::InvalidArgument)
 }
 
-pub fn open_group_file(group: Arc<FanGroup>) -> Result<File, SysError> {
+pub(super) fn open_group_file(group: Arc<FanGroup>) -> Result<File, SysError> {
     let path = anony_new_inode(InodeType::Regular, &FANOTIFY_INODE_OPS, NilOpaque::new())?;
     anony_open_with(
         &path,
@@ -56,8 +56,8 @@ pub fn open_group_file(group: Arc<FanGroup>) -> Result<File, SysError> {
     )
 }
 
-pub fn description_ops() -> OpenedFileDescriptionOps {
-    OpenedFileDescriptionOps {
+pub(super) fn description_ops() -> FileDescOps {
+    FileDescOps {
         read_user: Some(fanotify_read_user),
         notify_read_user_access: false,
         final_release: Some(fanotify_final_release),
@@ -147,10 +147,7 @@ fn submit_event_record(
         .unwrap_or(abi::FAN_NOFD);
     let metadata = event.to_metadata_with_fd(metadata_fd);
 
-    let copied = match write_metadata_to_segments(ctx.uspace, ctx.segments, &metadata) {
-        Ok(copied) => copied,
-        Err(err) => return Err(err),
-    };
+    let copied = write_metadata_to_segments(ctx.uspace, ctx.segments, &metadata)?;
 
     if let Some(pending_fd) = pending_fd {
         pending_fd.commit();
@@ -199,9 +196,9 @@ fn prepare_event_fd(
         // userspace. It is deliberately generic task/fd state, so later VFS
         // hooks can suppress read/write/close notifications without knowing
         // this is a fanotify-created descriptor.
-        OpenedFileDescriptionOps {
+        FileDescOps {
             notification_suppressed: true,
-            ..OpenedFileDescriptionOps::default()
+            ..FileDescOps::default()
         },
     );
 
@@ -318,9 +315,8 @@ fn write_metadata_to_segments(
 }
 
 fn fanotify_final_release(ctx: OpenedFileFinalReleaseCtx<'_>) {
-    let notification_suppressed = ctx.notification_suppressed;
     assert!(
-        !notification_suppressed,
+        !ctx.notification_suppressed,
         "fanotify group fd final-release must not be notification-suppressed"
     );
     assert!(
@@ -341,7 +337,7 @@ fn fanotify_legacy_read(
     _ctx: FileIoCtx,
 ) -> Result<usize, SysError> {
     // Fanotify read must observe current opened-description status flags.
-    // Generic read/readv use `OpenedFileDescriptionOps::read_user`; this
+    // Generic read/readv use `FileDescOps::read_user`; this
     // vtable fallback deliberately fails closed so old kernel-buffer reads do
     // not introduce a private nonblock mirror.
     Err(SysError::NotSupported)

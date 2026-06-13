@@ -5,7 +5,7 @@
 
 use crate::{
     prelude::*,
-    task::files::{FileDesc, OpenedFileDescriptionOps, OpenedFileFinalReleaseCtx},
+    task::files::{FileDesc, FileDescOps, OpenedFileFinalReleaseCtx},
 };
 
 use super::{registry, types::FanMask};
@@ -66,13 +66,13 @@ pub fn notify_opened_file_event(file: &FileDesc, mask: FanMask) {
     );
 }
 
-pub fn observed_file_description_ops() -> OpenedFileDescriptionOps {
+pub fn observed_file_description_ops() -> FileDescOps {
     // This is attached to ordinary opened file descriptions so FAN_CLOSE_*
     // comes from the final opened-description release. Fanotify group fds use
     // their own file ops and must not reuse this callback.
-    OpenedFileDescriptionOps {
+    FileDescOps {
         final_release: Some(fanotify_observed_final_release),
-        ..OpenedFileDescriptionOps::default()
+        ..FileDescOps::default()
     }
 }
 

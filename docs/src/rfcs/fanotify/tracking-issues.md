@@ -100,7 +100,7 @@ state；它通过 generic opened-description 能力位判断 direct read-user ho
 **No-notify 收口：** `NoNotifyGuard`、`NO_NOTIFY_GUARDS` 和
 `current_task_notifications_suppressed()` 已删除；`notify_path_event()` 只检查 event 自带的
 opened-description suppression marker。fanotify event fd 创建仍安装
-`OpenedFileDescriptionOps { notification_suppressed: true, ... }`，使该 fd 后续 I/O 和 final-release
+`FileDescOps { notification_suppressed: true, ... }`，使该 fd 后续 I/O 和 final-release
 不递归生成 fanotify event。
 
 ### FANOTIFY-041: fd table / task `Drop` 不得触发 group semantic teardown
