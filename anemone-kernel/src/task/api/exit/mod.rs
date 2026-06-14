@@ -27,6 +27,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             panic!("init task shall not exit");
         }
         kdebugln!("kernel_exit: task={} exit with code {:?}", task.tid(), code);
+        task.assert_kthread_exit_ready();
 
         if let Some(addr) = task.get_clear_child_tid() {
             let usp = task.clone_uspace_handle();
@@ -170,6 +171,8 @@ pub fn kernel_exit(code: ExitCode) -> ! {
 
             task.vfork_done.publish(1, true);
         }
+
+        crate::fs::submit_inode_shrink_request();
 
         // ORDER MATTERS.
         // Setting status to Zombie must be the last thing before we drop
