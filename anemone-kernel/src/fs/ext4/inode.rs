@@ -77,10 +77,7 @@ fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
         InodeType::Char | InodeType::Block => unimplemented!("ext4 dev file"),
     };
 
-    Ok(OpenedFile {
-        file_ops,
-        prv: NilOpaque::new(),
-    })
+    Ok(OpenedFile::new(file_ops, NilOpaque::new()))
 }
 
 fn ext4_zero_grown_range(

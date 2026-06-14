@@ -8,6 +8,7 @@
 use anemone_abi::fs::linux::ioctl::FIONREAD;
 
 use crate::{
+    fs::FileMode,
     prelude::*,
     syscall::user_access::UserWritePtr,
     task::sig::{
@@ -565,18 +566,12 @@ pub fn create_anonymous_pipe() -> Result<OpenedPipe, SysError> {
 
     let rx = anony_open_with(
         &inode,
-        OpenedFile {
-            file_ops: &PIPE_RX_FILE_OPS,
-            prv: AnyOpaque::new(rx),
-        },
+        OpenedFile::with_mode(&PIPE_RX_FILE_OPS, FileMode::STREAM, AnyOpaque::new(rx)),
     )?;
 
     let tx = anony_open_with(
         &inode,
-        OpenedFile {
-            file_ops: &PIPE_TX_FILE_OPS,
-            prv: AnyOpaque::new(tx),
-        },
+        OpenedFile::with_mode(&PIPE_TX_FILE_OPS, FileMode::STREAM, AnyOpaque::new(tx)),
     )?;
 
     Ok(OpenedPipe { rx, tx })

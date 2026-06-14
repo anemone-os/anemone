@@ -54,7 +54,7 @@ struct ProcFile {
     /// boundary, so syscall-local clones from `get_fd()` cannot keep semantic
     /// close teardown from running.
     description_refs: AtomicUsize,
-    description_ops: OpenedFileDescriptionOps,
+    description_ops: FileDescOps,
 }
 
 #[derive(Debug)]
@@ -72,28 +72,31 @@ impl Clone for FileDesc {
     }
 }
 
-pub type OpenedFileReadUserFn = for<'a> fn(OpenedFileReadUserCtx<'a>) -> Result<usize, SysError>;
-pub type OpenedFileFinalReleaseFn = for<'a> fn(OpenedFileFinalReleaseCtx<'a>);
-
+/// Rare hooks attached to an opened file description.
+///
+/// This is not a backend vtable like `FileOps`: most files use the default
+/// empty hooks. Add entries here only for behavior that depends on the opened
+/// description or fd-facing syscall transaction, such as direct userspace
+/// copyout, final published-fd release, or generic notification suppression.
 #[derive(Clone, Copy)]
-pub struct OpenedFileDescriptionOps {
+pub struct FileDescOps {
     /// Optional direct userspace read operation for files whose read
     /// transaction cannot be modeled as kernel-buffer fill followed by
     /// generic copyout.
-    pub read_user: Option<OpenedFileReadUserFn>,
+    pub read_user: Option<for<'a> fn(OpenedFileReadUserCtx<'a>) -> Result<usize, SysError>>,
     /// Whether successful direct read-user dispatch is an ordinary access
     /// event source. Protocol/control fds can use read_user for copyout while
     /// remaining outside file-content access notification.
     pub notify_read_user_access: bool,
     /// Runs when the last published fd-table slot for this opened file
     /// description is removed. Transient syscall refs do not delay it.
-    pub final_release: Option<OpenedFileFinalReleaseFn>,
+    pub final_release: Option<for<'a> fn(OpenedFileFinalReleaseCtx<'a>)>,
     /// Generic kernel-only event suppression marker. VFS hooks may inspect this
     /// capability, but task/fd code must not attach feature-specific meaning.
     pub notification_suppressed: bool,
 }
 
-impl Default for OpenedFileDescriptionOps {
+impl Default for FileDescOps {
     fn default() -> Self {
         Self {
             read_user: None,
@@ -104,9 +107,9 @@ impl Default for OpenedFileDescriptionOps {
     }
 }
 
-impl core::fmt::Debug for OpenedFileDescriptionOps {
+impl core::fmt::Debug for FileDescOps {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("OpenedFileDescriptionOps")
+        f.debug_struct("FileDescOps")
             .field("read_user", &self.read_user.is_some())
             .field("notify_read_user_access", &self.notify_read_user_access)
             .field("final_release", &self.final_release.is_some())
@@ -141,7 +144,7 @@ impl ProcFile {
         access: OpenAccessMode,
         status_flags: FileStatusFlags,
         compat: LinuxOpenCompat,
-        description_ops: OpenedFileDescriptionOps,
+        description_ops: FileDescOps,
     ) -> Self {
         Self {
             file: Arc::new(file),
@@ -240,7 +243,7 @@ impl FileDesc {
         status_flags: FileStatusFlags,
         compat: LinuxOpenCompat,
         fd_flags: FdFlags,
-        description_ops: OpenedFileDescriptionOps,
+        description_ops: FileDescOps,
     ) -> Arc<Self> {
         Arc::new(Self::new_unpublished(
             Arc::new(ProcFile::new(
@@ -381,16 +384,15 @@ impl FileDesc {
         }
 
         let ctx = FileIoCtx::new(flags.to_file_op_status_flags());
+        let file = self.pfile.file.as_ref();
+        if file.is_stream() {
+            return file.write_with_ctx(buf, ctx).map_err(|e| e.into());
+        }
+
         if flags.contains(FileStatusFlags::APPEND) {
-            self.pfile
-                .file
-                .append_with_ctx(buf, ctx)
-                .map_err(|e| e.into())
+            file.append_with_ctx(buf, ctx).map_err(|e| e.into())
         } else {
-            self.pfile
-                .file
-                .write_with_ctx(buf, ctx)
-                .map_err(|e| e.into())
+            file.write_with_ctx(buf, ctx).map_err(|e| e.into())
         }
     }
 
@@ -404,16 +406,19 @@ impl FileDesc {
             return Err(SysError::BadFileDescriptor);
         }
         let ctx = FileIoCtx::new(flags.to_file_op_status_flags());
+        let file = self.pfile.file.as_ref();
+        if file.is_stream() {
+            return file
+                .write_at_with_ctx(offset, buf, ctx)
+                .map_err(|e| e.into());
+        }
+
         if flags.contains(FileStatusFlags::APPEND) {
-            return self
-                .pfile
-                .file
+            return file
                 .append_at_current_end_with_ctx(buf, ctx)
                 .map_err(|e| e.into());
         }
-        self.pfile
-            .file
-            .write_at_with_ctx(offset, buf, ctx)
+        file.write_at_with_ctx(offset, buf, ctx)
             .map_err(|e| e.into())
     }
 
@@ -757,7 +762,7 @@ impl FilesState {
             status_flags,
             compat,
             fd_flags,
-            OpenedFileDescriptionOps::default(),
+            FileDescOps::default(),
         )
     }
 
@@ -768,7 +773,7 @@ impl FilesState {
         status_flags: FileStatusFlags,
         compat: LinuxOpenCompat,
         fd_flags: FdFlags,
-        description_ops: OpenedFileDescriptionOps,
+        description_ops: FileDescOps,
     ) -> Result<Fd, SysError> {
         let fd = self.alloc()?;
         let file_desc = FileDesc::new_opened(
@@ -1079,7 +1084,7 @@ impl Task {
         status_flags: FileStatusFlags,
         compat: LinuxOpenCompat,
         fd_flags: FdFlags,
-        description_ops: OpenedFileDescriptionOps,
+        description_ops: FileDescOps,
     ) -> Result<Fd, SysError> {
         let files_state = self.files_state();
         let mut files_state = files_state.write();

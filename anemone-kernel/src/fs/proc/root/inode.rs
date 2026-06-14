@@ -84,10 +84,7 @@ fn proc_root_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
 }
 
 fn proc_root_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
-    Ok(OpenedFile {
-        file_ops: &PROC_ROOT_FILE_OPS,
-        prv: NilOpaque::new(),
-    })
+    Ok(OpenedFile::new(&PROC_ROOT_FILE_OPS, NilOpaque::new()))
 }
 
 fn proc_root_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {

@@ -7,10 +7,7 @@ use crate::{
 use super::{CharIoctlCtx, CharSeekCtx, get_char_dev, get_char_dev_name};
 
 fn opened_char_file() -> OpenedFile {
-    OpenedFile {
-        file_ops: &CHAR_DEV_FILE_OPS,
-        prv: NilOpaque::new(),
-    }
+    OpenedFile::new(&CHAR_DEV_FILE_OPS, NilOpaque::new())
 }
 
 fn char_file_devnum(file: &File) -> Result<CharDevNum, SysError> {

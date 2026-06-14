@@ -71,6 +71,14 @@ const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../ltp/groups/exec.txt"),
     },
     LtpGroup {
+        name: "eventfd",
+        cases: include_str!("../ltp/groups/eventfd.txt"),
+    },
+    LtpGroup {
+        name: "timerfd",
+        cases: include_str!("../ltp/groups/timerfd.txt"),
+    },
+    LtpGroup {
         name: "chmod",
         cases: include_str!("../ltp/groups/chmod.txt"),
     },
@@ -81,6 +89,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
         name: "fanotify",
         cases: include_str!("../ltp/groups/fanotify.txt"),
+    },
+    LtpGroup {
+        name: "fcntl",
+        cases: include_str!("../ltp/groups/fcntl.txt"),
     },
     LtpGroup {
         name: "fd",

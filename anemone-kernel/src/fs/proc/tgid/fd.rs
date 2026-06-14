@@ -180,10 +180,7 @@ fn proc_fd_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
     let dir = proc_fd_dir_private(inode);
     let _leader = validate_fd_access(&dir.binding)?;
 
-    Ok(OpenedFile {
-        file_ops: &PROC_FD_DIR_FILE_OPS,
-        prv: NilOpaque::new(),
-    })
+    Ok(OpenedFile::new(&PROC_FD_DIR_FILE_OPS, NilOpaque::new()))
 }
 
 fn proc_fd_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {

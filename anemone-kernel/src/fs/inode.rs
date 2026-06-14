@@ -9,7 +9,7 @@ use core::{
 };
 
 use crate::{
-    fs::permission::FsPermChecker,
+    fs::{file::FileMode, permission::FsPermChecker},
     prelude::{vmo::VmObject, *},
     task::credentials::cap::{Capability, FileCapabilities},
     utils::any_opaque::AnyOpaque,
@@ -74,7 +74,26 @@ pub struct InodeOps {
 
 pub struct OpenedFile {
     pub file_ops: &'static FileOps,
+    /// Open-time VFS behavior for the resulting file object.
+    ///
+    /// The empty default keeps ordinary VFS cursor semantics; stream-like
+    /// objects must opt in explicitly at their open boundary.
+    pub mode: FileMode,
     pub prv: AnyOpaque,
+}
+
+impl OpenedFile {
+    pub fn new(file_ops: &'static FileOps, prv: AnyOpaque) -> Self {
+        Self::with_mode(file_ops, FileMode::empty(), prv)
+    }
+
+    pub fn with_mode(file_ops: &'static FileOps, mode: FileMode, prv: AnyOpaque) -> Self {
+        Self {
+            file_ops,
+            mode,
+            prv,
+        }
+    }
 }
 
 bitflags! {
