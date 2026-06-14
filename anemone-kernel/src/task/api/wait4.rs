@@ -88,9 +88,14 @@ impl From<ExitCode> for WStatus {
 impl TryFromSyscallArg for WaitFor {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
         let raw = i32::try_from_syscall_arg(raw)?;
+        // Linux wait4() returns ESRCH for INT_MIN because negating it is not
+        // defined; keep that ABI boundary before the negative-pgid conversion.
+        if raw == i32::MIN {
+            return Err(SysError::NoSuchProcess);
+        }
         match raw {
             ..-1 => {
-                let pgid = raw.checked_neg().ok_or(SysError::InvalidArgument)?;
+                let pgid = -raw;
                 Ok(Self::AnyChildWithPgid(Tid::new(pgid as u32)))
             },
             -1 => Ok(Self::AnyChild),

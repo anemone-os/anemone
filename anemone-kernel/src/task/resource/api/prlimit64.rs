@@ -12,7 +12,6 @@ use crate::{
         user_access::{SyscallArgValidatorExt as _, UserWritePtr, user_addr},
     },
     task::task_resource::RLimitResource,
-    //task::task_resource::RLimitResource,
 };
 
 #[derive(Debug)]
@@ -78,8 +77,12 @@ fn sys_prlimit64(
                 rlim_cur: 1 << (USER_STACK_SHIFT_KB + 10),
                 rlim_max: 1 << (USER_STACK_SHIFT_KB + 10),
             },
+            RLimitResource::Core => RLimit {
+                rlim_cur: 0, // no core dump
+                rlim_max: 0,
+            },
             r => {
-                knoticeln!("getrlimit: unimplemented resource {:?}", r);
+                kerrln!("getrlimit: unimplemented resource {:?}", r);
                 return Err(SysError::NotYetImplemented);
             },
         };
