@@ -283,6 +283,7 @@ static BLOCK_DEV_FILE_OPS: FileOps = FileOps {
     read_dir: |_, _, _| Err(SysError::NotDir),
     // Block devices also do not have a waitable poll path yet.
     poll: |_, _| Err(SysError::NotYetImplemented),
+    fcntl: None,
     ioctl: block_ioctl,
 };
 

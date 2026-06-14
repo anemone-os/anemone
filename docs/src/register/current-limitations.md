@@ -130,14 +130,14 @@
 **Severity:** Low
 **Area:** mm / SysV shm
 
-**Summary:** 当前 `SHM_LOCK` / `SHM_UNLOCK` 已维护 Linux 可见的 `SHM_LOCKED` mode bit，`IPC_STAT` / `SHM_STAT` 能观察状态切换，满足 LTP `shmctl07` 这类元数据检查。但这仍是 stage-1 兼容状态，不实际 pin / unpin 页面，不接入驻留页账本、`RLIMIT_MEMLOCK` 或 `CAP_IPC_LOCK` / credentials 权限。
+**Summary:** 当前 `SHM_LOCK` / `SHM_UNLOCK` 已维护 Linux 可见的 `SHM_LOCKED` mode bit，并在 SysV shm credentials 小迭代后接入 owner/creator 或 `CAP_IPC_LOCK` gate。但这仍是 stage-1 兼容状态，不实际 pin / unpin 页面，不接入驻留页账本、`RLIMIT_MEMLOCK` 或对应失败路径。
 
-**Exit Condition:** 为 SysV shm 接入真实的页锁定路径、驻留页统计、memlock 限额和权限校验，并补齐覆盖 `SHM_LOCKED` 状态、页驻留和失败 errno 的回归测试。
+**Exit Condition:** 为 SysV shm 接入真实的页锁定路径、驻留页统计和 memlock 限额，并补齐覆盖 `SHM_LOCKED` 状态、页驻留、`RLIMIT_MEMLOCK` 和失败 errno 的回归测试。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-29
+**Last Verified:** 2026-06-14
 
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [SysV shm credentials permission hook 小迭代记录](../devlog/changes/2026-06-14-sysv-shm-cred-permissions.md)
 
 ## ANE-20260525-SYSV-SHM-PERMISSIONS-PENDING-CREDENTIALS
 
@@ -146,14 +146,14 @@
 **Severity:** Medium
 **Area:** mm / SysV shm / credentials
 
-**Summary:** 当前一期不纳入权限敏感的 SysV shm 测例，像 `shmctl02`、`shmctl04`、`shmget04`、`shmat02` 这类依赖 `setuid` / `setgid`、有效 uid/gid 切换或 IPC 权限检查的路径，仍会受限于现有 credentials 线的未完成状态。
+**Summary:** SysV shm 已在 2026-06-14 小迭代中接入 effective uid/gid、supplementary groups 和 `CAP_IPC_OWNER` / `CAP_SYS_ADMIN` / `CAP_IPC_LOCK` 的局部权限 hook，并用 `shm-test` smoke 覆盖核心拒绝路径。但 `shmget04`、`shmat02`、`shmctl02` 这类权限敏感 LTP 尚未由 agent 侧 QEMU / user-test profile 验证通过；`shmctl04` 的 `SHM_STAT_ANY` 权限绕过已接线，但完整 case 仍依赖 `/proc/sysvipc/shm` 视图。
 
-**Exit Condition:** 单独实现 credentials 的真实有效/真实 uid/gid 语义、`setuid`/`setgid` 行为和 IPC 权限检查之后，再把这些权限敏感测例纳入 SysV shm 白名单并回归验证。
+**Exit Condition:** 定向运行包含 `shmget04`、`shmat02`、`shmctl02` 的 SysV shm 权限 profile，确认 glibc / musl 权限路径通过，或把剩余失败明确归入非本轮 infra 缺口；随后关闭本 residual limitation 或改挂到对应 infra 条目。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-29
+**Last Verified:** 2026-06-14
 
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [SysV shm credentials permission hook 小迭代记录](../devlog/changes/2026-06-14-sysv-shm-cred-permissions.md), [当前限制：SysV shm LTP infra](#ane-20260529-sysv-shm-ltp-infra-stage1)
 
 ## ANE-20260529-SYSV-SHM-LTP-INFRA-STAGE1
 
@@ -162,14 +162,14 @@
 **Severity:** Medium
 **Area:** procfs / sysctl / kconfig / SysV shm / user-test
 
-**Summary:** SysV shm 组仍依赖若干当前未提供或未纳入当前架构目标的 Linux 可观察设施：`shmctl03` / `shmget02` 读取 `/proc/sys/kernel/shmmax` 等 sysctl，`shmget03` 读取 `/proc/sysvipc/shm`，`shmget05` / `shmget06` 需要可解析的 kernel `.config`，`shmctl05` 在当前 rv64 目标上因 `__NR_remap_file_pages` 不存在而 TCONF，`shmctl06` 因当前 64-bit ABI 不具备 `time_high` 字段而 TCONF，`shmat01` 的只读写 fault 检查还会经过缺失的 `getrlimit(RLIMIT_CORE)` coredump 辅助路径。这些不表示 SysV shm registry 或 asm-generic ABI 布局本身仍有同类小修缺口。
+**Summary:** SysV shm 组仍依赖若干当前未提供或未纳入当前架构目标的 Linux 可观察设施。本轮已补齐 `/proc/sys/kernel/shmmax`、`shmall` 和 `shmmni` 的只读观察面，但这不等于完整 SysV shm LTP infra 已关闭：`shmget02` 的 save / restore 路径仍需要可写 sysctl 语义，`shmget03` 仍读取 `/proc/sysvipc/shm`，`shmget05` / `shmget06` 需要可解析的 kernel `.config`，`shmctl05` 在当前 rv64 目标上因 `__NR_remap_file_pages` 不存在而 TCONF，`shmctl06` 因当前 64-bit ABI 不具备 `time_high` 字段而 TCONF，`shmat01` 的只读写 fault 检查还会经过缺失的 `getrlimit(RLIMIT_CORE)` coredump 辅助路径。这些不表示 SysV shm registry 或 asm-generic ABI 布局本身仍有同类小修缺口。
 
-**Exit Condition:** 为 procfs/sysctl 补齐 SysV shm 需要的只读 knobs 和 `/proc/sysvipc/shm` 视图，提供测试环境可消费的内核配置视图，明确 profile 对架构 TCONF 项的处理策略，并补齐 LTP 所需的基础 rlimit 读路径后，重新验证 `shmctl03`、`shmget02`、`shmget03`、`shmget05`、`shmget06` 和 `shmat01`。
+**Exit Condition:** 为 SysV shm 相关可写 sysctl、`/proc/sysvipc/shm` 视图、测试环境可消费的内核配置视图和 LTP 所需的基础 rlimit 读路径补齐最小可观察语义；明确 profile 对架构 TCONF 项的处理策略；随后重新验证 `shmctl03`、`shmget02`、`shmget03`、`shmget05`、`shmget06` 和 `shmat01`。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-29
+**Last Verified:** 2026-06-14
 
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md)
 
 ## ANE-20260526-SIGNAL-RESTORER-LEGACY-COMPAT
 
@@ -193,13 +193,13 @@
 **Severity:** Medium
 **Area:** task topology / process group / session / job control
 
-**Summary:** 当前进程组与会话实现是从 `69bff4b` 之后引入的 stage-1 主干，已经覆盖 PGID/SID 拓扑、`setpgid` / `getpgid` / `setsid` / `getsid`、process-group `kill` 和 `wait4` 的基础选择语义，但还不是完整 job-control 实现；尚未接入 controlling tty、foreground/background process group、terminal job-control 信号、orphaned process group 的 `SIGHUP` / `SIGCONT` 规则，也尚未提供 `waitid`。
+**Summary:** 当前进程组与会话实现是从 `69bff4b` 之后引入的 stage-1 主干，已经覆盖 PGID/SID 拓扑、`setpgid` / `getpgid` / `setsid` / `getsid`、process-group `kill`、`wait4` 的基础选择语义，以及 `waitid` 的 P_ALL / P_PID / P_PGID exited-child 基础语义，但还不是完整 job-control 实现；尚未接入 controlling tty、foreground/background process group、terminal job-control 信号、orphaned process group 的 `SIGHUP` / `SIGCONT` 规则，也尚未提供 stopped / continued child wait reporting。
 
-**Exit Condition:** 补齐 `waitid` 的 P_PID / P_PGID / P_ALL 基础语义，接入 controlling tty 和 foreground process-group 管理，并为 background terminal access、session leader 退出、newly orphaned stopped process group 等路径补齐 Linux/POSIX 对齐的回归测试。
+**Exit Condition:** 接入 controlling tty 和 foreground process-group 管理，补齐 stopped / continued child wait reporting，并为 background terminal access、session leader 退出、newly orphaned stopped process group 等路径补齐 Linux/POSIX 对齐的回归测试。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-27
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-06-14
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [开发日志：2026-06-08 至 2026-06-21](../devlog/2026-06-08_to_2026-06-21.md#2026-06-14---waitid-exited-child-syscall-bridge), [waitid 小迭代记录](../devlog/changes/2026-06-14-waitid.md)
 
 ## ANE-20260602-CLONE3-STAGE1-ADAPTER
 
@@ -452,10 +452,10 @@
 **Severity:** Low
 **Area:** signal / procfs / resource limits / kconfig / user-test
 
-**Summary:** signal profile 中仍有若干 LTP 设施或 Linux 可观察面缺口，不应和本轮 signal syscall 语义修复混为一类：`kill03` 与 `tkill02` 需要读取 `/proc/sys/kernel/pid_max`，当前返回 `ENOENT` 并 `TBROK`；`kill11` 的 setup 依赖 `getrlimit(RLIMIT_CORE)`，当前 `getrlimit(4, ...)` 返回 `ENOSYS`；`kill13` 通过 `/etc/ltp/anemone-kconfig` 检查 `CONFIG_UBSAN_SIGNED_OVERFLOW`，当前 fixture 未声明而 `TCONF`。日志里的 `unknown syscall number 123` 是缺少 `sched_getaffinity` 的 LTP 启动噪声，`rt_sigqueueinfo01` 附近的 `unknown syscall number 283` 是缺少 `membarrier` 的线程库噪声；它们不是本次 `tgkill03` / `rt_sigqueueinfo01` 的直接根因。
+**Summary:** signal profile 中仍有若干 LTP 设施或 Linux 可观察面缺口，不应和本轮 signal syscall 语义修复混为一类。本轮已补齐 `/proc/sys/kernel/pid_max` 的只读观察面，但尚未复跑 signal profile，因此只表示该 ENOENT 缺口已有源码层修复。`kill11` 的 setup 仍依赖 `getrlimit(RLIMIT_CORE)`，当前 `getrlimit(4, ...)` 返回 `ENOSYS`；`kill13` 通过 `/etc/ltp/anemone-kconfig` 检查 `CONFIG_UBSAN_SIGNED_OVERFLOW`，当前 fixture 未声明而 `TCONF`。日志里的 `unknown syscall number 123` 是缺少 `sched_getaffinity` 的 LTP 启动噪声，`rt_sigqueueinfo01` 附近的 `unknown syscall number 283` 是缺少 `membarrier` 的线程库噪声；它们不是本次 `tgkill03` / `rt_sigqueueinfo01` 的直接根因。
 
-**Exit Condition:** 为 LTP signal profile 所需的 procfs/sysctl、基础 `getrlimit` 和 kconfig fixture 补齐最小可观察语义，并决定是否实现或静默兼容 `sched_getaffinity` / `membarrier` 这类启动探测 syscall；随后复跑 signal profile，确认这些 case 不再以设施缺口遮蔽 syscall 语义判断。
+**Exit Condition:** 为 LTP signal profile 所需的剩余基础 `getrlimit`、kconfig fixture 和启动探测 syscall 补齐最小可观察语义，并复跑 signal profile，确认 `pid_max`、`getrlimit`、kconfig fixture、`sched_getaffinity` / `membarrier` 不再以设施缺口遮蔽 syscall 语义判断。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-07
-**Related:** [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [开放问题：Signal LTP remaining semantics](./open-issues.md#ane-20260607-signal-ltp-remaining-semantics), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-06-14
+**Related:** [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md), [开放问题：Signal LTP remaining semantics](./open-issues.md#ane-20260607-signal-ltp-remaining-semantics), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)

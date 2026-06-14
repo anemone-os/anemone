@@ -142,6 +142,7 @@ pub(super) static DEVFS_ROOT_FILE_OPS: FileOps = FileOps {
     read_dir: devfs_root_read_dir,
     // We do not have a real poll story for pseudo directories yet.
     poll: |_, _| Err(SysError::NotYetImplemented),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
@@ -155,5 +156,6 @@ pub(super) static DEVFS_DIR_FILE_OPS: FileOps = FileOps {
     read_dir: devfs_dir_read_dir,
     // We do not have a real poll story for pseudo directories yet.
     poll: |_, _| Err(SysError::NotYetImplemented),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };

@@ -1,5 +1,8 @@
 use crate::{
-    fs::proc::{pde::ProcDirEntry, read_snapshot_at},
+    fs::proc::{
+        pde::{ProcDirEntry, ProcDirEntryKind},
+        read_snapshot_at,
+    },
     prelude::*,
     utils::any_opaque::NilOpaque,
 };
@@ -115,12 +118,13 @@ static PROC_MEMINFO_FILE_OPS: FileOps = FileOps {
     seek: proc_meminfo_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 pub static PROC_MEMINFO_DIR_ENTRY: ProcDirEntry = ProcDirEntry {
     name: "meminfo",
     mode: InodeMode::new(InodeType::Regular, InodePerm::all_r()),
-    ops: &PROC_MEMINFO_INODE_OPS,
+    kind: ProcDirEntryKind::Custom(&PROC_MEMINFO_INODE_OPS),
     ino: unsafe { MonoOnce::new() },
 };

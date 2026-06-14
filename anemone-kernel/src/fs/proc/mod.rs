@@ -124,6 +124,7 @@ fn init() {
 mod pde;
 mod root;
 mod superblock;
+mod sys;
 mod tgid;
 // TODO: mod tid;
 

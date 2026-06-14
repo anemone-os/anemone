@@ -103,6 +103,7 @@ static TGID_STATUS_FILE_OPS: FileOps = FileOps {
     seek: tgid_status_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 

@@ -493,6 +493,7 @@ static EVENTFD_FILE_OPS: FileOps = FileOps {
     seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: eventfd_poll,
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 

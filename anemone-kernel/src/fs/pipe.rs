@@ -8,7 +8,7 @@
 use anemone_abi::fs::linux::ioctl::FIONREAD;
 
 use crate::{
-    fs::FileMode,
+    fs::{FcntlCtx, FileFcntlCmd, FileFcntlOutcome, FileMode},
     prelude::*,
     syscall::user_access::UserWritePtr,
     task::sig::{
@@ -441,6 +441,14 @@ fn with_pipe_endpoint<T>(
     }
 }
 
+fn pipe_state(file: &File) -> Option<&Arc<SpinLock<Pipe>>> {
+    if let Some(rx) = file.prv().cast::<PipeRx>() {
+        Some(&rx.pipe)
+    } else {
+        file.prv().cast::<PipeTx>().map(|tx| &tx.pipe)
+    }
+}
+
 pub(super) fn display_name(file: &File) -> Option<PathBuf> {
     with_pipe_endpoint(file, |_, _, _| {
         let target = format!("pipe:[{}]", file.inode().ino().get());
@@ -471,33 +479,38 @@ fn pipe_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
     }
 }
 
-pub(super) fn capacity(file: &File) -> Result<usize, SysError> {
-    with_pipe_endpoint(file, |pipe, _, _| pipe.lock().capacity()).ok_or(SysError::InvalidArgument)
-}
-
-pub(super) fn set_capacity(file: &File, requested: u64) -> Result<usize, SysError> {
+fn pipe_set_capacity(pipe: &SpinLock<Pipe>, requested: u64) -> Result<usize, SysError> {
     if requested > i32::MAX as u64 {
         return Err(SysError::InvalidArgument);
     }
 
-    with_pipe_endpoint(file, |pipe, _, _| {
-        let pipe = pipe.lock();
-        let requested = requested as usize;
-        let rounded = if requested == 0 {
-            PagingArch::PAGE_SIZE_BYTES
-        } else {
-            align_up_power_of_2!(requested, PagingArch::PAGE_SIZE_BYTES)
-        };
+    let pipe = pipe.lock();
+    let requested = requested as usize;
+    let rounded = if requested == 0 {
+        PagingArch::PAGE_SIZE_BYTES
+    } else {
+        align_up_power_of_2!(requested, PagingArch::PAGE_SIZE_BYTES)
+    };
 
-        if rounded < pipe.buf.len() {
-            Err(SysError::Busy)
-        } else if rounded <= pipe.capacity() {
-            Ok(pipe.capacity())
-        } else {
-            Err(SysError::PermissionDenied)
-        }
-    })
-    .ok_or(SysError::InvalidArgument)?
+    if rounded < pipe.buf.len() {
+        Err(SysError::Busy)
+    } else if rounded <= pipe.capacity() {
+        Ok(pipe.capacity())
+    } else {
+        Err(SysError::PermissionDenied)
+    }
+}
+
+fn pipe_fcntl(file: &File, ctx: &FcntlCtx) -> Result<FileFcntlOutcome, SysError> {
+    let pipe = pipe_state(file).expect("internal error: pipe fcntl without pipe private data");
+
+    match ctx.cmd() {
+        FileFcntlCmd::GetPipeSize => Ok(FileFcntlOutcome::Handled(pipe.lock().capacity() as u64)),
+        FileFcntlCmd::SetPipeSize => Ok(FileFcntlOutcome::Handled(pipe_set_capacity(
+            pipe,
+            ctx.arg(),
+        )? as u64)),
+    }
 }
 
 fn pipe_tx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
@@ -538,6 +551,7 @@ static PIPE_RX_FILE_OPS: FileOps = FileOps {
     seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_rx_poll,
+    fcntl: Some(pipe_fcntl),
     ioctl: pipe_ioctl,
 };
 
@@ -550,6 +564,7 @@ static PIPE_TX_FILE_OPS: FileOps = FileOps {
     seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_tx_poll,
+    fcntl: Some(pipe_fcntl),
     ioctl: pipe_ioctl,
 };
 

@@ -4,6 +4,7 @@
 //! - https://www.man7.org/linux/man-pages/man2/fcntl.2.html
 
 use crate::{
+    fs::FileFcntlCmd,
     prelude::{handler::TryFromSyscallArg, *},
     task::files::{Fd, FileStatusFlags},
 };
@@ -24,8 +25,18 @@ enum FcntlCmd {
     SetSig,
     // Linux-specific commands
     DupCloexec,
-    SetPipeSz,
-    GetPipeSz,
+    SetPipeSize,
+    GetPipeSize,
+}
+
+impl FcntlCmd {
+    const fn to_file_cmd(self) -> Option<FileFcntlCmd> {
+        match self {
+            Self::GetPipeSize => Some(FileFcntlCmd::GetPipeSize),
+            Self::SetPipeSize => Some(FileFcntlCmd::SetPipeSize),
+            _ => None,
+        }
+    }
 }
 
 impl TryFromSyscallArg for FcntlCmd {
@@ -47,8 +58,8 @@ impl TryFromSyscallArg for FcntlCmd {
             F_GETSIG => Err(SysError::NotYetImplemented),
             F_SETSIG => Err(SysError::NotYetImplemented),
             F_DUPFD_CLOEXEC => Ok(Self::DupCloexec),
-            F_SETPIPE_SZ => Ok(Self::SetPipeSz),
-            F_GETPIPE_SZ => Ok(Self::GetPipeSz),
+            F_SETPIPE_SZ => Ok(Self::SetPipeSize),
+            F_GETPIPE_SZ => Ok(Self::GetPipeSize),
             _ => Err(SysError::InvalidArgument),
         };
         if ret.is_err() {
@@ -138,13 +149,13 @@ fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
             file.set_file_flags(flags);
             Ok(0)
         },
-        FcntlCmd::GetPipeSz => {
+        FcntlCmd::GetPipeSize | FcntlCmd::SetPipeSize => {
             let file = task.get_fd(fd)?;
-            Ok(crate::fs::pipe::capacity(file.vfs_file())? as u64)
-        },
-        FcntlCmd::SetPipeSz => {
-            let file = task.get_fd(fd)?;
-            Ok(crate::fs::pipe::set_capacity(file.vfs_file(), arg)? as u64)
+            let file_cmd = cmd
+                .to_file_cmd()
+                .expect("pipe size fcntl commands must have a VFS command");
+            let ctx = file.fcntl_ctx(file_cmd, arg)?;
+            file.vfs_file().fcntl(ctx)
         },
         _ => {
             knoticeln!("[NYI] fcntl command {:?} is not supported yet", cmd);

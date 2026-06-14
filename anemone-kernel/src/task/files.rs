@@ -4,7 +4,7 @@
 //! - https://elixir.bootlin.com/linux/v6.6.32/source/include/linux/fdtable.h
 
 use crate::{
-    fs::{FileIoCtx, FileOpStatusFlags},
+    fs::{FcntlAccess, FcntlCtx, FileFcntlCmd, FileIoCtx, FileOpStatusFlags},
     prelude::{handler::TryFromSyscallArg, *},
     utils::bitmap::Bitmap,
 };
@@ -304,6 +304,20 @@ impl FileDesc {
             self.is_path_only(),
             flags.to_file_op_status_flags(),
         )
+    }
+
+    pub fn fcntl_ctx(&self, cmd: FileFcntlCmd, arg: u64) -> Result<FcntlCtx, SysError> {
+        if self.is_path_only() {
+            return Err(SysError::BadFileDescriptor);
+        }
+
+        let flags = self.file_flags();
+        let access = FcntlAccess::new(
+            self.can_read(),
+            self.can_write(),
+            flags.to_file_op_status_flags(),
+        );
+        Ok(FcntlCtx::new(cmd, arg, access))
     }
 
     pub fn set_file_flags(&self, flags: FileStatusFlags) {

@@ -1,5 +1,8 @@
 use crate::{
-    fs::proc::{pde::ProcDirEntry, read_snapshot_at},
+    fs::proc::{
+        pde::{ProcDirEntry, ProcDirEntryKind},
+        read_snapshot_at,
+    },
     prelude::*,
     utils::any_opaque::NilOpaque,
 };
@@ -98,12 +101,13 @@ static PROC_UPTIME_FILE_OPS: FileOps = FileOps {
     seek: proc_uptime_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 pub static PROC_UPTIME_DIR_ENTRY: ProcDirEntry = ProcDirEntry {
     name: "uptime",
     mode: InodeMode::new(InodeType::Regular, InodePerm::all_r()),
-    ops: &PROC_UPTIME_INODE_OPS,
+    kind: ProcDirEntryKind::Custom(&PROC_UPTIME_INODE_OPS),
     ino: unsafe { MonoOnce::new() },
 };

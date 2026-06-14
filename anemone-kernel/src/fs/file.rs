@@ -51,6 +51,76 @@ impl FileIoCtx {
     }
 }
 
+/// File-object fcntl commands that may be handled by VFS backends.
+///
+/// The full Linux command set stays at the syscall adapter so fd-table,
+/// fd-local, and opened-description status commands cannot be implemented by
+/// backend hooks by accident.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileFcntlCmd {
+    GetPipeSize,
+    SetPipeSize,
+}
+
+/// Short-lived snapshot for one backend fcntl operation.
+///
+/// This carries only file-object facts. `O_PATH` and fd-table policy are
+/// rejected before this context is built, and mutable status flags remain owned
+/// by the opened file description.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FcntlAccess {
+    can_read: bool,
+    can_write: bool,
+    status_flags: FileOpStatusFlags,
+}
+
+impl FcntlAccess {
+    pub const fn new(can_read: bool, can_write: bool, status_flags: FileOpStatusFlags) -> Self {
+        Self {
+            can_read,
+            can_write,
+            status_flags,
+        }
+    }
+
+    pub const fn can_read(self) -> bool {
+        self.can_read
+    }
+
+    pub const fn can_write(self) -> bool {
+        self.can_write
+    }
+
+    pub const fn status_flags(self) -> FileOpStatusFlags {
+        self.status_flags
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FcntlCtx {
+    cmd: FileFcntlCmd,
+    arg: u64,
+    access: FcntlAccess,
+}
+
+impl FcntlCtx {
+    pub const fn new(cmd: FileFcntlCmd, arg: u64, access: FcntlAccess) -> Self {
+        Self { cmd, arg, access }
+    }
+
+    pub const fn cmd(&self) -> FileFcntlCmd {
+        self.cmd
+    }
+
+    pub const fn arg(&self) -> u64 {
+        self.arg
+    }
+
+    pub const fn access(&self) -> FcntlAccess {
+        self.access
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IoctlFileAccess {
     can_read: bool,
@@ -289,14 +359,35 @@ pub struct FileOps {
     /// `Unsupported`, so syscall code cannot sleep on an unarmed source.
     pub poll: for<'a> fn(&File, &PollRequest<'a>) -> Result<PollRegisterResult, SysError>,
 
+    /// Optional backend hook for the narrowed file-object fcntl subset.
+    ///
+    /// Generic fd-owned commands must stay outside this hook. Returning
+    /// `Unhandled` asks the VFS wrapper to apply the command-family default
+    /// errno; returning `Err` means the backend handled the command and chose
+    /// that failure.
+    pub fcntl: Option<FileFcntlHook>,
     pub ioctl: for<'a> fn(&File, IoctlCtx<'a>) -> Result<u64, SysError>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileFcntlOutcome {
+    Handled(u64),
+    Unhandled,
+}
+
+pub type FileFcntlHook = fn(&File, &FcntlCtx) -> Result<FileFcntlOutcome, SysError>;
 
 pub fn accept_file_op_status_flags(
     _file: &File,
     _flags: FileOpStatusFlags,
 ) -> Result<(), SysError> {
     Ok(())
+}
+
+fn default_file_fcntl(_file: &File, ctx: &FcntlCtx) -> Result<u64, SysError> {
+    match ctx.cmd() {
+        FileFcntlCmd::GetPipeSize | FileFcntlCmd::SetPipeSize => Err(SysError::BadFileDescriptor),
+    }
 }
 
 mod seek {
@@ -501,6 +592,7 @@ impl File {
             seek: |_, _, _| Err(SysError::BadFileDescriptor),
             read_dir: |_, _, _| Err(SysError::BadFileDescriptor),
             poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::empty() & req.interests())),
+            fcntl: None,
             ioctl: |_, _| Err(SysError::BadFileDescriptor),
         };
 
@@ -750,6 +842,17 @@ impl File {
 
     pub fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
         (self.ops.poll)(self, request)
+    }
+
+    pub fn fcntl(&self, ctx: FcntlCtx) -> Result<u64, SysError> {
+        if let Some(fcntl) = self.ops.fcntl {
+            match fcntl(self, &ctx)? {
+                FileFcntlOutcome::Handled(ret) => return Ok(ret),
+                FileFcntlOutcome::Unhandled => {},
+            }
+        }
+
+        default_file_fcntl(self, &ctx)
     }
 
     pub fn ioctl(&self, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
