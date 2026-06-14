@@ -1,46 +1,19 @@
-use crate::{fs::proc::pde::ProcDirEntry, prelude::*};
+use crate::{
+    fs::proc::pde::{ProcDirEntry, ProcDirEntryKind, ProcSymlinkEntryOps},
+    prelude::*,
+};
 
-fn proc_mounts_read_link(_inode: &InodeRef) -> Result<PathBuf, SysError> {
-    Ok(PathBuf::from("self/mounts"))
+fn proc_mounts_read_link() -> PathBuf {
+    PathBuf::from("self/mounts")
 }
 
-fn proc_mounts_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
-    let meta = inode.inode().meta_snapshot();
-    let now = Instant::now().to_duration();
-
-    Ok(InodeStat {
-        fs_dev: DeviceId::None,
-        ino: inode.ino(),
-        mode: inode.mode(),
-        nlink: 1,
-        uid: meta.uid,
-        gid: meta.gid,
-        rdev: DeviceId::None,
-        size: 0,
-        atime: now,
-        mtime: now,
-        ctime: now,
-    })
-}
-
-static PROC_MOUNTS_INODE_OPS: InodeOps = InodeOps {
-    lookup: |_, _| Err(SysError::NotDir),
-    touch: |_, _, _| Err(SysError::NotDir),
-    mkdir: |_, _, _| Err(SysError::NotDir),
-    symlink: |_, _, _| Err(SysError::NotDir),
-    link: |_, _, _| Err(SysError::NotDir),
-    unlink: |_, _| Err(SysError::NotDir),
-    rmdir: |_, _| Err(SysError::NotDir),
-    rename: |_, _, _, _, _| Err(SysError::NotSupported),
-    open: |_| Err(SysError::IsDir),
-    truncate: |_, _| Err(SysError::NotSupported),
-    read_link: proc_mounts_read_link,
-    get_attr: proc_mounts_get_attr,
+static PROC_MOUNTS_SYMLINK_OPS: ProcSymlinkEntryOps = ProcSymlinkEntryOps {
+    target: proc_mounts_read_link,
 };
 
 pub static PROC_MOUNTS_DIR_ENTRY: ProcDirEntry = ProcDirEntry {
     name: "mounts",
     mode: InodeMode::new(InodeType::Symlink, InodePerm::all_rwx()),
-    ops: &PROC_MOUNTS_INODE_OPS,
+    kind: ProcDirEntryKind::Symlink(&PROC_MOUNTS_SYMLINK_OPS),
     ino: unsafe { MonoOnce::new() },
 };

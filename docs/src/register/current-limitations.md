@@ -162,14 +162,14 @@
 **Severity:** Medium
 **Area:** procfs / sysctl / kconfig / SysV shm / user-test
 
-**Summary:** SysV shm 组仍依赖若干当前未提供或未纳入当前架构目标的 Linux 可观察设施：`shmctl03` / `shmget02` 读取 `/proc/sys/kernel/shmmax` 等 sysctl，`shmget03` 读取 `/proc/sysvipc/shm`，`shmget05` / `shmget06` 需要可解析的 kernel `.config`，`shmctl05` 在当前 rv64 目标上因 `__NR_remap_file_pages` 不存在而 TCONF，`shmctl06` 因当前 64-bit ABI 不具备 `time_high` 字段而 TCONF，`shmat01` 的只读写 fault 检查还会经过缺失的 `getrlimit(RLIMIT_CORE)` coredump 辅助路径。这些不表示 SysV shm registry 或 asm-generic ABI 布局本身仍有同类小修缺口。
+**Summary:** SysV shm 组仍依赖若干当前未提供或未纳入当前架构目标的 Linux 可观察设施。本轮已补齐 `/proc/sys/kernel/shmmax`、`shmall` 和 `shmmni` 的只读观察面，但这不等于完整 SysV shm LTP infra 已关闭：`shmget02` 的 save / restore 路径仍需要可写 sysctl 语义，`shmget03` 仍读取 `/proc/sysvipc/shm`，`shmget05` / `shmget06` 需要可解析的 kernel `.config`，`shmctl05` 在当前 rv64 目标上因 `__NR_remap_file_pages` 不存在而 TCONF，`shmctl06` 因当前 64-bit ABI 不具备 `time_high` 字段而 TCONF，`shmat01` 的只读写 fault 检查还会经过缺失的 `getrlimit(RLIMIT_CORE)` coredump 辅助路径。这些不表示 SysV shm registry 或 asm-generic ABI 布局本身仍有同类小修缺口。
 
-**Exit Condition:** 为 procfs/sysctl 补齐 SysV shm 需要的只读 knobs 和 `/proc/sysvipc/shm` 视图，提供测试环境可消费的内核配置视图，明确 profile 对架构 TCONF 项的处理策略，并补齐 LTP 所需的基础 rlimit 读路径后，重新验证 `shmctl03`、`shmget02`、`shmget03`、`shmget05`、`shmget06` 和 `shmat01`。
+**Exit Condition:** 为 SysV shm 相关可写 sysctl、`/proc/sysvipc/shm` 视图、测试环境可消费的内核配置视图和 LTP 所需的基础 rlimit 读路径补齐最小可观察语义；明确 profile 对架构 TCONF 项的处理策略；随后重新验证 `shmctl03`、`shmget02`、`shmget03`、`shmget05`、`shmget06` 和 `shmat01`。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-29
+**Last Verified:** 2026-06-14
 
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md)
 
 ## ANE-20260526-SIGNAL-RESTORER-LEGACY-COMPAT
 
@@ -452,10 +452,10 @@
 **Severity:** Low
 **Area:** signal / procfs / resource limits / kconfig / user-test
 
-**Summary:** signal profile 中仍有若干 LTP 设施或 Linux 可观察面缺口，不应和本轮 signal syscall 语义修复混为一类：`kill03` 与 `tkill02` 需要读取 `/proc/sys/kernel/pid_max`，当前返回 `ENOENT` 并 `TBROK`；`kill11` 的 setup 依赖 `getrlimit(RLIMIT_CORE)`，当前 `getrlimit(4, ...)` 返回 `ENOSYS`；`kill13` 通过 `/etc/ltp/anemone-kconfig` 检查 `CONFIG_UBSAN_SIGNED_OVERFLOW`，当前 fixture 未声明而 `TCONF`。日志里的 `unknown syscall number 123` 是缺少 `sched_getaffinity` 的 LTP 启动噪声，`rt_sigqueueinfo01` 附近的 `unknown syscall number 283` 是缺少 `membarrier` 的线程库噪声；它们不是本次 `tgkill03` / `rt_sigqueueinfo01` 的直接根因。
+**Summary:** signal profile 中仍有若干 LTP 设施或 Linux 可观察面缺口，不应和本轮 signal syscall 语义修复混为一类。本轮已补齐 `/proc/sys/kernel/pid_max` 的只读观察面，但尚未复跑 signal profile，因此只表示该 ENOENT 缺口已有源码层修复。`kill11` 的 setup 仍依赖 `getrlimit(RLIMIT_CORE)`，当前 `getrlimit(4, ...)` 返回 `ENOSYS`；`kill13` 通过 `/etc/ltp/anemone-kconfig` 检查 `CONFIG_UBSAN_SIGNED_OVERFLOW`，当前 fixture 未声明而 `TCONF`。日志里的 `unknown syscall number 123` 是缺少 `sched_getaffinity` 的 LTP 启动噪声，`rt_sigqueueinfo01` 附近的 `unknown syscall number 283` 是缺少 `membarrier` 的线程库噪声；它们不是本次 `tgkill03` / `rt_sigqueueinfo01` 的直接根因。
 
-**Exit Condition:** 为 LTP signal profile 所需的 procfs/sysctl、基础 `getrlimit` 和 kconfig fixture 补齐最小可观察语义，并决定是否实现或静默兼容 `sched_getaffinity` / `membarrier` 这类启动探测 syscall；随后复跑 signal profile，确认这些 case 不再以设施缺口遮蔽 syscall 语义判断。
+**Exit Condition:** 为 LTP signal profile 所需的剩余基础 `getrlimit`、kconfig fixture 和启动探测 syscall 补齐最小可观察语义，并复跑 signal profile，确认 `pid_max`、`getrlimit`、kconfig fixture、`sched_getaffinity` / `membarrier` 不再以设施缺口遮蔽 syscall 语义判断。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-07
-**Related:** [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [开放问题：Signal LTP remaining semantics](./open-issues.md#ane-20260607-signal-ltp-remaining-semantics), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-06-14
+**Related:** [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md), [开放问题：Signal LTP remaining semantics](./open-issues.md#ane-20260607-signal-ltp-remaining-semantics), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)

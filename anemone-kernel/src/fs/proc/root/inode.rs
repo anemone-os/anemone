@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     fs::proc::{
-        pde::find_pde_by_name,
+        pde::find_proc_root_pde_by_name,
         root::file::PROC_ROOT_FILE_OPS,
         superblock::alloc_ino,
         tgid::{
@@ -17,7 +17,7 @@ fn proc_root_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
     kdebugln!("proc_root_lookup: name={}", name);
 
     // static part.
-    if let Some(entry) = find_pde_by_name(name) {
+    if let Some(entry) = find_proc_root_pde_by_name(name) {
         // these inodes are already inserted into icache during probe initcall.
         let inode = dir
             .sb()

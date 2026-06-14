@@ -1,12 +1,14 @@
 use crate::{
-    fs::{iomux::PollEvent, proc::root::PROC_ROOT_INO},
+    fs::{
+        iomux::PollEvent,
+        proc::pde::{proc_root_dir_entries, read_pde_root_entries},
+    },
     prelude::*,
 };
 
-const PROC_ROOT_DOT_CURSOR: usize = 0;
-const PROC_ROOT_DOTDOT_CURSOR: usize = 1;
-const PROC_ROOT_SELF_CURSOR: usize = 2;
-const PROC_ROOT_TGID_CURSOR_BASE: usize = 3;
+fn proc_root_tgid_cursor_base() -> usize {
+    2 + proc_root_dir_entries().len()
+}
 
 fn push_root_entry(
     sink: &mut dyn DirSink,
@@ -29,64 +31,27 @@ fn proc_root_read_dir(
 ) -> Result<ReadDirResult, SysError> {
     let mut pushed_any = false;
 
-    loop {
-        match *pos {
-            PROC_ROOT_DOT_CURSOR => {
-                match push_root_entry(sink, ".", PROC_ROOT_INO, InodeType::Dir)? {
-                    SinkResult::Accepted => {
-                        pushed_any = true;
-                        *pos = PROC_ROOT_DOTDOT_CURSOR;
-                    },
-                    SinkResult::Stop => {
-                        return Ok(if pushed_any {
-                            ReadDirResult::Progressed
-                        } else {
-                            ReadDirResult::Eof
-                        });
-                    },
-                }
-            },
-            PROC_ROOT_DOTDOT_CURSOR => {
-                match push_root_entry(sink, "..", PROC_ROOT_INO, InodeType::Dir)? {
-                    SinkResult::Accepted => {
-                        pushed_any = true;
-                        *pos = PROC_ROOT_SELF_CURSOR;
-                    },
-                    SinkResult::Stop => {
-                        return Ok(if pushed_any {
-                            ReadDirResult::Progressed
-                        } else {
-                            ReadDirResult::Eof
-                        });
-                    },
-                }
-            },
-            PROC_ROOT_SELF_CURSOR => {
-                // `self` is currently still a lookup-time rewrite instead of a
-                // real symlink inode, so keep `d_type` aligned with the current
-                // behavior and avoid touching binding state in readdir.
-                match push_root_entry(sink, "self", Ino::INVALID, InodeType::Dir)? {
-                    SinkResult::Accepted => {
-                        pushed_any = true;
-                        *pos = PROC_ROOT_TGID_CURSOR_BASE;
-                    },
-                    SinkResult::Stop => {
-                        return Ok(if pushed_any {
-                            ReadDirResult::Progressed
-                        } else {
-                            ReadDirResult::Eof
-                        });
-                    },
-                }
-            },
-            _ => break,
+    let tgid_cursor_base = proc_root_tgid_cursor_base();
+
+    if *pos < tgid_cursor_base {
+        match read_pde_root_entries(pos, sink)? {
+            ReadDirResult::Progressed => pushed_any = true,
+            ReadDirResult::Eof => {},
+        }
+
+        if *pos < tgid_cursor_base {
+            return Ok(if pushed_any {
+                ReadDirResult::Progressed
+            } else {
+                ReadDirResult::Eof
+            });
         }
     }
 
-    let from = if *pos == PROC_ROOT_TGID_CURSOR_BASE {
+    let from = if *pos == tgid_cursor_base {
         None
     } else {
-        Some(Tid::new((*pos - PROC_ROOT_TGID_CURSOR_BASE) as u32))
+        Some(Tid::new((*pos - tgid_cursor_base) as u32))
     };
 
     let mut stop = false;
@@ -105,7 +70,7 @@ fn proc_root_read_dir(
             match push_root_entry(sink, &tgid.get().to_string(), Ino::INVALID, InodeType::Dir) {
                 Ok(SinkResult::Accepted) => {
                     pushed_any = true;
-                    *pos = PROC_ROOT_TGID_CURSOR_BASE
+                    *pos = tgid_cursor_base
                         .checked_add(tgid.get() as usize)
                         .and_then(|value| value.checked_add(1))
                         .expect("proc root readdir cursor overflow");
