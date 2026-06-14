@@ -271,6 +271,7 @@ static PROC_PDE_DIR_FILE_OPS: FileOps = FileOps {
     seek: seek_dir_rewind,
     read_dir: proc_pde_read_dir,
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
@@ -344,6 +345,7 @@ static PROC_PDE_FILE_OPS: FileOps = FileOps {
     seek: proc_pde_file_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 

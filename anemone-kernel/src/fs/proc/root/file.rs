@@ -106,5 +106,6 @@ pub static PROC_ROOT_FILE_OPS: FileOps = FileOps {
     seek: seek_dir_rewind,
     read_dir: proc_root_read_dir,
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };

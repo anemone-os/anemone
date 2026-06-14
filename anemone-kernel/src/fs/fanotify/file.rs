@@ -389,6 +389,7 @@ static FANOTIFY_FILE_OPS: FileOps = FileOps {
     seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: fanotify_poll,
+    fcntl: None,
     ioctl: fanotify_ioctl,
 };
 

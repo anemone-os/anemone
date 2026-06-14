@@ -118,6 +118,7 @@ static PROC_MEMINFO_FILE_OPS: FileOps = FileOps {
     seek: proc_meminfo_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 

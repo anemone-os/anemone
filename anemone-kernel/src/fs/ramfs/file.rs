@@ -336,6 +336,7 @@ pub(super) static RAMFS_REG_FILE_OPS: FileOps = FileOps {
     poll: |_, req| {
         Ok(req.ready_or_unsupported((PollEvent::READABLE | PollEvent::WRITABLE) & req.interests()))
     },
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
@@ -348,6 +349,7 @@ pub(super) static RAMFS_DIR_FILE_OPS: FileOps = FileOps {
     seek: seek_dir_rewind,
     read_dir: ramfs_read_dir,
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
@@ -360,5 +362,6 @@ pub(super) static RAMFS_SYMLINK_FILE_OPS: FileOps = FileOps {
     seek: |_, _, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };

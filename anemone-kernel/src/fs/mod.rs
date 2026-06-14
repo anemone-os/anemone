@@ -33,10 +33,11 @@ pub use self::{
     anonymous::*,
     dentry::Dentry,
     file::{
-        BackingFileHandle, DirEntry, DirSink, File, FileIoCtx, FileMode, FileOpStatusFlags,
-        FileOps, FixedSizeDirSink, IoctlArgFdLookup, IoctlArgFile, IoctlCtx, IoctlFileAccess,
-        ReadDirResult, SeekFrom, SinkResult, accept_file_op_status_flags, seek_dir_rewind,
-        seek_with_bounded_size, seek_with_fixed_size, seek_with_inode_size,
+        BackingFileHandle, DirEntry, DirSink, FcntlAccess, FcntlCtx, File, FileFcntlCmd,
+        FileFcntlHook, FileFcntlOutcome, FileIoCtx, FileMode, FileOpStatusFlags, FileOps,
+        FixedSizeDirSink, IoctlArgFdLookup, IoctlArgFile, IoctlCtx, IoctlFileAccess, ReadDirResult,
+        SeekFrom, SinkResult, accept_file_op_status_flags, seek_dir_rewind, seek_with_bounded_size,
+        seek_with_fixed_size, seek_with_inode_size,
     },
     filesystem::{FileSystem, FileSystemFlags, FileSystemOps},
     inode::{

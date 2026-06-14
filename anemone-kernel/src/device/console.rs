@@ -244,6 +244,7 @@ static CONSOLE_STDIN_FILE_OPS: FileOps = FileOps {
         kerrln!("console stdin poll is not implemented yet");
         Err(SysError::NotYetImplemented)
     },
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
@@ -259,6 +260,7 @@ static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
         kerrln!("console stdout poll is not implemented yet");
         Err(SysError::NotYetImplemented)
     },
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
