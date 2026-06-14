@@ -7,6 +7,7 @@ use anemone_abi::process::linux::{ipc::*, shm::*};
 
 use super::super::{
     SHMMAX, SHMMIN,
+    permission::{ShmCredView, ShmPermAccess, check_perm_access},
     registry::{ShmKey, with_registry},
     segment::ShmPerm,
 };
@@ -109,7 +110,9 @@ fn sys_shmget(
         knoticeln!("sys_shmget: SHM_NORESERVE requested, currently a no-op");
     }
 
-    let creator_tgid = get_current_task().tgid();
+    let task = get_current_task();
+    let creator_tgid = task.tgid();
+    let cred = ShmCredView::from_cred(task.cred());
 
     let segment = with_registry(|registry| {
         if let Some(key) = key.keyed() {
@@ -132,6 +135,11 @@ fn sys_shmget(
                     );
                     return Err(SysError::InvalidArgument);
                 }
+                check_perm_access(
+                    &existing,
+                    &cred,
+                    ShmPermAccess::from_mode_bits(shmflg.permissions.bits()),
+                )?;
                 return Ok(existing);
             }
 
@@ -156,10 +164,10 @@ fn sys_shmget(
 
         let perm = ShmPerm {
             key: key.raw(),
-            uid: 0,
-            gid: 0,
-            cuid: 0,
-            cgid: 0,
+            uid: cred.euid(),
+            gid: cred.egid(),
+            cuid: cred.euid(),
+            cgid: cred.egid(),
             mode: shmflg.permissions.bits(),
             seq: 0,
         };

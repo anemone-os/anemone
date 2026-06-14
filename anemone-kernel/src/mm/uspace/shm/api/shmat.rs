@@ -10,7 +10,8 @@ use crate::{
 use anemone_abi::process::linux::shm::*;
 
 use super::super::{
-    SHMLBA, ShmAccess, check_access,
+    SHMLBA,
+    permission::{ShmCredView, ShmPermAccess, check_perm_access},
     registry::{ShmId, with_registry},
 };
 
@@ -72,15 +73,18 @@ fn sys_shmat(
         prot |= Protection::EXECUTE;
     }
 
+    let task = get_current_task();
+    let cred = ShmCredView::from_cred(task.cred());
+    let mut access = ShmPermAccess::READ;
+    if !flags.contains(ShmAtFlags::RDONLY) {
+        access |= ShmPermAccess::WRITE;
+    }
+    if flags.contains(ShmAtFlags::EXEC) {
+        access |= ShmPermAccess::EXECUTE;
+    }
+
     let reservation = with_registry(|registry| registry.reserve_attach_by_shmid(id))?;
-    if let Err(err) = check_access(
-        reservation.segment(),
-        if flags.contains(ShmAtFlags::RDONLY) {
-            ShmAccess::Read
-        } else {
-            ShmAccess::ReadWrite
-        },
-    ) {
+    if let Err(err) = check_perm_access(reservation.segment(), &cred, access) {
         let segment = reservation.cancel();
         if segment.is_reclaimable() {
             with_registry(|registry| registry.release(segment));
@@ -88,7 +92,6 @@ fn sys_shmat(
         return Err(err);
     }
 
-    let task = get_current_task();
     let tgid = task.tgid();
     let usp = task.clone_uspace_handle();
     let hint = attach_addr.map(|addr| (addr.page_down(), true));

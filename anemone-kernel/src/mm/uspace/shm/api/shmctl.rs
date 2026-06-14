@@ -8,7 +8,10 @@ use crate::{
 use anemone_abi::process::linux::{ipc::*, shm::*};
 
 use super::super::{
-    SHMALL, SHMMAX, SHMMIN, SHMMNI, SHMSEG, ShmAccess, ShmSegment, check_access,
+    SHMALL, SHMMAX, SHMMIN, SHMMNI, SHMSEG, ShmSegment,
+    permission::{
+        ShmControlAccess, ShmCredView, ShmPermAccess, check_control_access, check_perm_access,
+    },
     registry::{ShmId, ShmRegistryStats, ShmSlotIndex, with_registry},
     segment::{ShmPerm, ShmPermUpdate},
 };
@@ -95,10 +98,10 @@ fn usize_to_i32_saturating(value: usize) -> i32 {
 fn linux_ipc_perm(perm: ShmPerm) -> IpcPerm {
     IpcPerm {
         key: perm.key,
-        uid: perm.uid,
-        gid: perm.gid,
-        cuid: perm.cuid,
-        cgid: perm.cgid,
+        uid: perm.uid.get(),
+        gid: perm.gid.get(),
+        cuid: perm.cuid.get(),
+        cgid: perm.cgid.get(),
         mode: perm.mode as u32,
         __seq: perm.seq,
         __pad2: 0,
@@ -109,8 +112,8 @@ fn linux_ipc_perm(perm: ShmPerm) -> IpcPerm {
 
 fn ipc_set_update_from_linux(ds: ShmIdDs) -> ShmPermUpdate {
     ShmPermUpdate {
-        uid: ds.shm_perm.uid,
-        gid: ds.shm_perm.gid,
+        uid: Uid::new(ds.shm_perm.uid),
+        gid: Gid::new(ds.shm_perm.gid),
         mode: ds.shm_perm.mode as u16,
     }
 }
@@ -192,23 +195,26 @@ fn sys_shmctl(
     match cmd {
         ShmCtlCmd::IpcStat => {
             let id = ShmId::from_raw(target.raw())?;
+            let cred = ShmCredView::from_cred(get_current_task().cred());
             let segment = with_registry(|registry| registry.lookup_by_shmid(id))?;
-            check_access(&segment, ShmAccess::Read)?;
+            check_perm_access(&segment, &cred, ShmPermAccess::READ)?;
             write_user(required_buf(buf)?, segment_ds(&segment))?;
             Ok(0)
         },
         ShmCtlCmd::IpcSet => {
-            let id = ShmId::from_raw(target.raw())?;
-            let segment = with_registry(|registry| registry.lookup_by_shmid(id))?;
-            check_access(&segment, ShmAccess::Admin)?;
             let new_ds = read_user::<ShmIdDs>(required_buf(buf)?)?;
+            let id = ShmId::from_raw(target.raw())?;
+            let cred = ShmCredView::from_cred(get_current_task().cred());
+            let segment = with_registry(|registry| registry.lookup_by_shmid(id))?;
+            check_control_access(&segment, &cred, ShmControlAccess::OwnerAdmin)?;
             segment.update_from_ipc_set(ipc_set_update_from_linux(new_ds));
             Ok(0)
         },
         ShmCtlCmd::IpcRmId => {
             let id = ShmId::from_raw(target.raw())?;
+            let cred = ShmCredView::from_cred(get_current_task().cred());
             let segment = with_registry(|registry| registry.lookup_by_shmid(id))?;
-            check_access(&segment, ShmAccess::Admin)?;
+            check_control_access(&segment, &cred, ShmControlAccess::OwnerAdmin)?;
             with_registry(|registry| registry.remove_by_shmid(id))?;
             Ok(0)
         },
@@ -228,15 +234,26 @@ fn sys_shmctl(
             let index = ShmSlotIndex::from_linux_stat_target(target.raw())?;
             let segment = with_registry(|registry| registry.lookup_by_index(index))?;
             if matches!(cmd, ShmCtlCmd::ShmStat) {
-                check_access(&segment, ShmAccess::Read)?;
+                let cred = ShmCredView::from_cred(get_current_task().cred());
+                check_perm_access(&segment, &cred, ShmPermAccess::READ)?;
             }
+            // SHM_STAT_ANY intentionally mirrors Linux's /proc/sysvipc/shm
+            // visibility and bypasses traditional object DAC checks.
             write_user(required_buf(buf)?, segment_ds(&segment))?;
             Ok(segment.id().raw() as u64)
         },
         ShmCtlCmd::ShmLock | ShmCtlCmd::ShmUnlock => {
             let id = ShmId::from_raw(target.raw())?;
+            let cred = ShmCredView::from_cred(get_current_task().cred());
             let segment = with_registry(|registry| registry.lookup_by_shmid(id))?;
-            check_access(&segment, ShmAccess::Admin)?;
+            check_control_access(&segment, &cred, ShmControlAccess::LockAdmin)?;
+            // Stage-1 compatibility only updates the Linux-visible metadata
+            // bit. Real page residency, memlock accounting, and their failure
+            // paths belong to the later SHM_LOCK residency iteration.
+            knoticeln!(
+                "sys_shmctl: {:?} updates SHM_LOCKED metadata only; page residency is not implemented",
+                cmd
+            );
             segment.set_locked(matches!(cmd, ShmCtlCmd::ShmLock));
             Ok(0)
         },

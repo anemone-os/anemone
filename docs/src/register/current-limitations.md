@@ -130,14 +130,14 @@
 **Severity:** Low
 **Area:** mm / SysV shm
 
-**Summary:** 当前 `SHM_LOCK` / `SHM_UNLOCK` 已维护 Linux 可见的 `SHM_LOCKED` mode bit，`IPC_STAT` / `SHM_STAT` 能观察状态切换，满足 LTP `shmctl07` 这类元数据检查。但这仍是 stage-1 兼容状态，不实际 pin / unpin 页面，不接入驻留页账本、`RLIMIT_MEMLOCK` 或 `CAP_IPC_LOCK` / credentials 权限。
+**Summary:** 当前 `SHM_LOCK` / `SHM_UNLOCK` 已维护 Linux 可见的 `SHM_LOCKED` mode bit，并在 SysV shm credentials 小迭代后接入 owner/creator 或 `CAP_IPC_LOCK` gate。但这仍是 stage-1 兼容状态，不实际 pin / unpin 页面，不接入驻留页账本、`RLIMIT_MEMLOCK` 或对应失败路径。
 
-**Exit Condition:** 为 SysV shm 接入真实的页锁定路径、驻留页统计、memlock 限额和权限校验，并补齐覆盖 `SHM_LOCKED` 状态、页驻留和失败 errno 的回归测试。
+**Exit Condition:** 为 SysV shm 接入真实的页锁定路径、驻留页统计和 memlock 限额，并补齐覆盖 `SHM_LOCKED` 状态、页驻留、`RLIMIT_MEMLOCK` 和失败 errno 的回归测试。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-29
+**Last Verified:** 2026-06-14
 
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [SysV shm credentials permission hook 小迭代记录](../devlog/changes/2026-06-14-sysv-shm-cred-permissions.md)
 
 ## ANE-20260525-SYSV-SHM-PERMISSIONS-PENDING-CREDENTIALS
 
@@ -146,14 +146,14 @@
 **Severity:** Medium
 **Area:** mm / SysV shm / credentials
 
-**Summary:** 当前一期不纳入权限敏感的 SysV shm 测例，像 `shmctl02`、`shmctl04`、`shmget04`、`shmat02` 这类依赖 `setuid` / `setgid`、有效 uid/gid 切换或 IPC 权限检查的路径，仍会受限于现有 credentials 线的未完成状态。
+**Summary:** SysV shm 已在 2026-06-14 小迭代中接入 effective uid/gid、supplementary groups 和 `CAP_IPC_OWNER` / `CAP_SYS_ADMIN` / `CAP_IPC_LOCK` 的局部权限 hook，并用 `shm-test` smoke 覆盖核心拒绝路径。但 `shmget04`、`shmat02`、`shmctl02` 这类权限敏感 LTP 尚未由 agent 侧 QEMU / user-test profile 验证通过；`shmctl04` 的 `SHM_STAT_ANY` 权限绕过已接线，但完整 case 仍依赖 `/proc/sysvipc/shm` 视图。
 
-**Exit Condition:** 单独实现 credentials 的真实有效/真实 uid/gid 语义、`setuid`/`setgid` 行为和 IPC 权限检查之后，再把这些权限敏感测例纳入 SysV shm 白名单并回归验证。
+**Exit Condition:** 定向运行包含 `shmget04`、`shmat02`、`shmctl02` 的 SysV shm 权限 profile，确认 glibc / musl 权限路径通过，或把剩余失败明确归入非本轮 infra 缺口；随后关闭本 residual limitation 或改挂到对应 infra 条目。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-29
+**Last Verified:** 2026-06-14
 
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [SysV shm credentials permission hook 小迭代记录](../devlog/changes/2026-06-14-sysv-shm-cred-permissions.md), [当前限制：SysV shm LTP infra](#ane-20260529-sysv-shm-ltp-infra-stage1)
 
 ## ANE-20260529-SYSV-SHM-LTP-INFRA-STAGE1
 

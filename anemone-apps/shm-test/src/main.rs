@@ -11,18 +11,16 @@ use anemone_rs::{
     abi::{
         process::linux::{ipc::*, shm::*, signal::SIGSEGV},
         syscall::{
-            linux::{SYS_SHMAT, SYS_SHMCTL, SYS_SHMDT, SYS_SHMGET},
+            linux::{SYS_SETUID, SYS_SHMAT, SYS_SHMCTL, SYS_SHMDT, SYS_SHMGET},
             syscall,
         },
     },
-    os::linux::{
-        process::{
-            exit, fork, mmap, sched_yield, wait4, MmapFlags, MmapProt, WStatus, WStatusRaw,
-            WaitFor, WaitOptions,
-        },
+    os::linux::process::{
+        MmapFlags, MmapProt, WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork, mmap,
+        sched_yield, wait4,
     },
-    process::process_id,
     prelude::*,
+    process::process_id,
 };
 
 const PAGE_SIZE: usize = 4096;
@@ -37,6 +35,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("fork-shared-and-detach", test_fork_shared_and_detach),
     ("rounding-and-remap", test_rounding_and_remap),
     ("readonly-and-detach-fault", test_readonly_and_detach_fault),
+    ("credential-permissions", test_credential_permissions),
     ("invalid-arguments", test_invalid_arguments),
 ];
 
@@ -79,6 +78,10 @@ fn unique_shmctl_nobuf(shmid: i32, cmd: i32) -> Result<i32, Errno> {
 
 fn unique_shmctl_buf<T>(shmid: i32, cmd: i32, buf: &mut T) -> Result<i32, Errno> {
     unique_shmctl(shmid, cmd, buf as *mut T as u64)
+}
+
+fn setuid(uid: u32) -> Result<(), Errno> {
+    unsafe { syscall(SYS_SETUID, uid as u64, 0, 0, 0, 0, 0) }.map(|_| ())
 }
 
 fn shm_info() -> Result<Shm_Info, Errno> {
@@ -203,7 +206,10 @@ fn test_keyed_lookup_and_rmid() -> Result<(), Errno> {
     let shmid = unique_shmget(key, PAGE_SIZE, IPC_CREAT | IPC_EXCL | 0o600)?;
 
     let same = unique_shmget(key, 0, 0)?;
-    assert_eq!(same, shmid, "keyed lookup with size 0 must return the segment");
+    assert_eq!(
+        same, shmid,
+        "keyed lookup with size 0 must return the segment"
+    );
 
     expect_errno(
         unique_shmget(key, PAGE_SIZE, IPC_CREAT | IPC_EXCL | 0o600),
@@ -444,6 +450,67 @@ fn test_readonly_and_detach_fault() -> Result<(), Errno> {
     };
     wait_child_signal(detach_pid, SIGSEGV as i8, "detach fault")?;
     unique_shmctl_nobuf(detach_id, IPC_RMID)?;
+    Ok(())
+}
+
+fn test_credential_permissions() -> Result<(), Errno> {
+    let key = test_key(0x07);
+    let shmid = unique_shmget(key, PAGE_SIZE, IPC_CREAT | IPC_EXCL | 0o600)?;
+    let index = shmid & 0xffff;
+
+    let pid = match fork()? {
+        Some(pid) => pid,
+        None => {
+            setuid(65534)?;
+
+            expect_errno(
+                unique_shmget(key, PAGE_SIZE, SHM_R),
+                EACCES,
+                "unprivileged keyed shmget read access",
+            );
+            expect_errno(
+                unique_shmat(shmid, None, 0),
+                EACCES,
+                "unprivileged shmat read-write access",
+            );
+
+            let mut ds: ShmIdDs = unsafe { zeroed() };
+            expect_errno(
+                unique_shmctl_buf(shmid, IPC_STAT, &mut ds),
+                EACCES,
+                "unprivileged IPC_STAT",
+            );
+            expect_errno(
+                unique_shmctl_buf(shmid, IPC_SET, &mut ds),
+                EPERM,
+                "unprivileged IPC_SET",
+            );
+            expect_errno(
+                unique_shmctl_nobuf(shmid, IPC_RMID),
+                EPERM,
+                "unprivileged IPC_RMID",
+            );
+            expect_errno(
+                unique_shmctl_nobuf(shmid, SHM_LOCK),
+                EPERM,
+                "unprivileged SHM_LOCK",
+            );
+            expect_errno(
+                unique_shmctl_nobuf(shmid, SHM_UNLOCK),
+                EPERM,
+                "unprivileged SHM_UNLOCK",
+            );
+
+            let (stat_any_id, stat_any_ds) = shm_stat_any(index)?;
+            assert_eq!(stat_any_id, shmid);
+            assert_eq!(stat_any_ds.shm_perm.mode & 0o777, 0o600);
+
+            exit(0);
+        },
+    };
+
+    wait_child_exit_ok(pid, "credential-permissions")?;
+    unique_shmctl_nobuf(shmid, IPC_RMID)?;
     Ok(())
 }
 
