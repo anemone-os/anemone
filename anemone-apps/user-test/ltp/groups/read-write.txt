@@ -63,7 +63,7 @@ writev05
 writev06
 writev07
 
-# fsync01
+fsync01
 # fsync02
 # fsync03
 # fsync04

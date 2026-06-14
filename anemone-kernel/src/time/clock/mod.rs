@@ -45,6 +45,10 @@ static STATIC_CLOCKS: &[&dyn Clock] = &[
     &MonotonicClock,
     &RealtimeCoarseClock,
     &MonotonicCoarseClock,
+    // Stage-1 CLOCK_BOOTTIME compatibility for timerfd: this aliases the
+    // monotonic timeline until suspend/resume accounting and time namespaces
+    // exist. Revisit absolute timer semantics when those clock domains land.
+    &MonotonicClock,
 ];
 
 // TODO: dynamic registration of clocks. e.g. for those dynamically-created rtc

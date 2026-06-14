@@ -15,6 +15,7 @@ mod namei;
 mod path;
 mod permission;
 mod superblock;
+pub mod timerfd;
 
 // filesystem drivers
 pub mod devfs;

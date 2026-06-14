@@ -112,6 +112,10 @@ pub mod linux {
     pub const SYS_SYNC: u64 = 81;
     pub const SYS_FSYNC: u64 = 82;
 
+    pub const SYS_TIMERFD_CREATE: u64 = 85;
+    pub const SYS_TIMERFD_SETTIME: u64 = 86;
+    pub const SYS_TIMERFD_GETTIME: u64 = 87;
+
     pub const SYS_UTIMENSAT: u64 = 88;
     pub const SYS_CAPGET: u64 = 90;
     pub const SYS_CAPSET: u64 = 91;

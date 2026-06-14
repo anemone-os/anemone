@@ -22,6 +22,13 @@ pub mod linux {
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     #[repr(C)]
+    pub struct ITimerSpec {
+        pub it_interval: TimeSpec,
+        pub it_value: TimeSpec,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[repr(C)]
     pub struct Tms {
         pub tms_utime: i64,
         pub tms_stime: i64,
@@ -40,9 +47,19 @@ pub mod linux {
         pub const CLOCK_MONOTONIC_RAW: i32 = 4;
         pub const CLOCK_REALTIME_COARSE: i32 = 5;
         pub const CLOCK_MONOTONIC_COARSE: i32 = 6;
-        // TODO
+        pub const CLOCK_BOOTTIME: i32 = 7;
 
         pub const TIMER_ABSTIME: i32 = 1;
+    }
+
+    pub mod timerfd {
+        use crate::fs::linux::open::{O_CLOEXEC, O_NONBLOCK};
+
+        pub const TFD_TIMER_ABSTIME: u32 = 1 << 0;
+        pub const TFD_TIMER_CANCEL_ON_SET: u32 = 1 << 1;
+
+        pub const TFD_CLOEXEC: u32 = O_CLOEXEC;
+        pub const TFD_NONBLOCK: u32 = O_NONBLOCK;
     }
 
     pub mod itimer {
