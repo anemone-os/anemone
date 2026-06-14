@@ -13,3 +13,15 @@ waitpid10
 waitpid11
 waitpid12
 # waitpid13
+
+waitid01
+waitid02
+waitid03
+waitid04
+waitid05
+waitid06
+# waitid07 requires stopped child reporting.
+# waitid08 requires continued child reporting.
+waitid09
+# waitid10 requires core-dump reporting plus core-pattern/rlimit setup.
+waitid11

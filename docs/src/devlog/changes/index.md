@@ -32,6 +32,7 @@
 
 ## 当前记录
 
+- [2026-06-14 - waitid exited-child syscall bridge](./2026-06-14-waitid.md)
 - [2026-06-14 - timerfd anonymous fd](./2026-06-14-timerfd.md)
 - [2026-06-13 - eventfd2 anonymous fd](./2026-06-13-eventfd.md)
 - [2026-06-13 - VFS stream file mode 边界清理](./2026-06-13-vfs-stream-file-mode.md)

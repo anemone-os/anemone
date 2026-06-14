@@ -17,4 +17,4 @@ pub mod gettid;
 pub mod jobctl;
 pub mod priority;
 pub mod set_tid_address;
-pub mod wait4;
+pub mod wait;

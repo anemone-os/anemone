@@ -122,6 +122,7 @@ pub mod linux {
 
     pub const SYS_EXIT: u64 = 93;
     pub const SYS_EXIT_GROUP: u64 = 94;
+    pub const SYS_WAITID: u64 = 95;
     pub const SYS_SET_TID_ADDRESS: u64 = 96;
     pub const SYS_FUTEX: u64 = 98;
     pub const SYS_SET_ROBUST_LIST: u64 = 99;
