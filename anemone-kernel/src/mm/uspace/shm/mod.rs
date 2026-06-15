@@ -21,28 +21,13 @@ pub const SHM_LOCKED: u16 = 0o2000;
 
 mod api;
 mod object;
+mod permission;
 mod registry;
 mod segment;
 
 pub use api::*;
 pub(super) use object::ShmObject;
 pub(super) use segment::{ShmAttachment, ShmSegment};
-
-#[derive(Debug, Clone, Copy)]
-pub(super) enum ShmAccess {
-    Read,
-    ReadWrite,
-    Admin,
-}
-
-/// Centralized permission gate for the first SysV shm landing.
-///
-/// Credential semantics are still pending elsewhere in the kernel, so the
-/// helper intentionally permits every operation while keeping syscall handlers
-/// free of scattered permission decisions.
-pub(super) fn check_access(_segment: &ShmSegment, _access: ShmAccess) -> Result<(), SysError> {
-    Ok(())
-}
 
 pub(super) fn detach_attachment(attachment: &ShmAttachment, tgid: Tid) {
     attachment.segment.on_detach(tgid);

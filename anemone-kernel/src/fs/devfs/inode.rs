@@ -42,10 +42,7 @@ fn make_inode_stat(inode: &InodeRef, attr: DevfsNodeAttr, size: u64) -> InodeSta
 }
 
 fn devfs_dir_open(_inode: &InodeRef) -> Result<OpenedFile, SysError> {
-    Ok(OpenedFile {
-        file_ops: &DEVFS_DIR_FILE_OPS,
-        prv: NilOpaque::new(),
-    })
+    Ok(OpenedFile::new(&DEVFS_DIR_FILE_OPS, NilOpaque::new()))
 }
 
 fn devfs_dir_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
@@ -124,10 +121,7 @@ fn devfs_root_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
 }
 
 fn devfs_root_open(_inode: &InodeRef) -> Result<OpenedFile, SysError> {
-    Ok(OpenedFile {
-        file_ops: &DEVFS_ROOT_FILE_OPS,
-        prv: NilOpaque::new(),
-    })
+    Ok(OpenedFile::new(&DEVFS_ROOT_FILE_OPS, NilOpaque::new()))
 }
 
 fn devfs_node_lookup(inode: &InodeRef, _name: &str) -> Result<InodeRef, SysError> {

@@ -4,6 +4,7 @@
 //! - https://elixir.bootlin.com/linux/v6.6.32/source/include/linux/fdtable.h
 
 use crate::{
+    fs::{FcntlAccess, FcntlCtx, FileFcntlCmd, FileIoCtx, FileOpStatusFlags},
     prelude::{handler::TryFromSyscallArg, *},
     utils::bitmap::Bitmap,
 };
@@ -36,16 +37,24 @@ impl TryFromSyscallArg for Fd {
     }
 }
 
+/// Shared VFS opened handle.
+///
+/// This object is not process-local. Duplicated descriptors and forked file
+/// tables share it, including file status flags and the opened file handle.
 #[derive(Debug)]
-pub struct ProcFile {
-    /// Shared VFS opened handle.
-    ///
-    /// This object is not process-local. Duplicated descriptors and forked file
-    /// tables share it, including file status flags and the opened file handle.
+struct ProcFile {
+    /// Vfs file handle. Task-agnostic.
     file: Arc<File>,
     access: OpenAccessMode,
     status_flags: SpinLock<FileStatusFlags>,
     compat: LinuxOpenCompat,
+    /// Counts published fd-table slots, not transient `Arc<FileDesc>` borrows.
+    ///
+    /// Final-release callbacks use this as the opened-file-description lifetime
+    /// boundary, so syscall-local clones from `get_fd()` cannot keep semantic
+    /// close teardown from running.
+    description_refs: AtomicUsize,
+    description_ops: FileDescOps,
 }
 
 #[derive(Debug)]
@@ -53,14 +62,165 @@ pub struct FileDesc {
     pfile: Arc<ProcFile>,
     // atomic integer may be better.
     flags: SpinLock<FdFlags>,
+    /// True only while this descriptor object occupies a visible fd-table slot.
+    published: AtomicBool,
 }
 
 impl Clone for FileDesc {
     fn clone(&self) -> Self {
+        Self::new_unpublished(self.pfile.clone(), self.fd_flags())
+    }
+}
+
+/// Rare hooks attached to an opened file description.
+///
+/// This is not a backend vtable like `FileOps`: most files use the default
+/// empty hooks. Add entries here only for behavior that depends on the opened
+/// description or fd-facing syscall transaction, such as direct userspace
+/// copyout, final published-fd release, or generic notification suppression.
+#[derive(Clone, Copy)]
+pub struct FileDescOps {
+    /// Optional direct userspace read operation for files whose read
+    /// transaction cannot be modeled as kernel-buffer fill followed by
+    /// generic copyout.
+    pub read_user: Option<for<'a> fn(OpenedFileReadUserCtx<'a>) -> Result<usize, SysError>>,
+    /// Whether successful direct read-user dispatch is an ordinary access
+    /// event source. Protocol/control fds can use read_user for copyout while
+    /// remaining outside file-content access notification.
+    pub notify_read_user_access: bool,
+    /// Runs when the last published fd-table slot for this opened file
+    /// description is removed. Transient syscall refs do not delay it.
+    pub final_release: Option<for<'a> fn(OpenedFileFinalReleaseCtx<'a>)>,
+    /// Generic kernel-only event suppression marker. VFS hooks may inspect this
+    /// capability, but task/fd code must not attach feature-specific meaning.
+    pub notification_suppressed: bool,
+}
+
+impl Default for FileDescOps {
+    fn default() -> Self {
         Self {
-            pfile: self.pfile.clone(),
-            flags: SpinLock::new(self.flags.lock().clone()),
+            read_user: None,
+            notify_read_user_access: true,
+            final_release: None,
+            notification_suppressed: false,
         }
+    }
+}
+
+impl core::fmt::Debug for FileDescOps {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FileDescOps")
+            .field("read_user", &self.read_user.is_some())
+            .field("notify_read_user_access", &self.notify_read_user_access)
+            .field("final_release", &self.final_release.is_some())
+            .field("notification_suppressed", &self.notification_suppressed)
+            .finish()
+    }
+}
+
+pub struct OpenedFileReadUserCtx<'a> {
+    pub file: &'a File,
+    pub status_flags: FileStatusFlags,
+    pub uspace: &'a UserSpaceHandle,
+    pub segments: &'a [OpenedFileReadUserSegment],
+    pub notification_suppressed: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct OpenedFileReadUserSegment {
+    pub base: VirtAddr,
+    pub len: usize,
+}
+
+pub struct OpenedFileFinalReleaseCtx<'a> {
+    pub file: &'a File,
+    pub access: OpenAccessMode,
+    pub notification_suppressed: bool,
+}
+
+impl ProcFile {
+    fn new(
+        file: File,
+        access: OpenAccessMode,
+        status_flags: FileStatusFlags,
+        compat: LinuxOpenCompat,
+        description_ops: FileDescOps,
+    ) -> Self {
+        Self {
+            file: Arc::new(file),
+            access,
+            status_flags: SpinLock::new(status_flags),
+            compat,
+            description_refs: AtomicUsize::new(0),
+            description_ops,
+        }
+    }
+
+    fn acquire_description_ref(&self) {
+        let prev = self.description_refs.fetch_add(1, Ordering::AcqRel);
+        assert!(
+            prev < usize::MAX,
+            "opened file description refcount overflow"
+        );
+    }
+
+    fn release_description_ref(&self) {
+        let prev = self.description_refs.fetch_sub(1, Ordering::AcqRel);
+        assert!(prev > 0, "opened file description refcount underflow");
+
+        if prev == 1 {
+            if let Some(final_release) = self.description_ops.final_release {
+                final_release(OpenedFileFinalReleaseCtx {
+                    file: self.file.as_ref(),
+                    access: self.access,
+                    notification_suppressed: self.description_ops.notification_suppressed,
+                });
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct FdReservation {
+    files_state: Arc<RwLock<FilesState>>,
+    fd: Fd,
+    active: bool,
+}
+
+impl FdReservation {
+    pub const fn fd(&self) -> Fd {
+        self.fd
+    }
+
+    /// Publish a fully prepared file description into the reserved slot.
+    ///
+    /// Reservation already owns the allocator bit, so commit only transitions
+    /// the slot from reserved to visible. It must not allocate or call
+    /// file-specific code while holding the fd-table lock.
+    pub fn commit(mut self, file_desc: Arc<FileDesc>) -> Fd {
+        {
+            let mut files_state = self.files_state.write();
+            files_state.commit_reserved_fd(self.fd, file_desc);
+        }
+        self.active = false;
+        self.fd
+    }
+
+    pub fn rollback(mut self) {
+        self.rollback_inner();
+    }
+
+    fn rollback_inner(&mut self) {
+        if self.active {
+            self.files_state.write().rollback_reserved_fd(self.fd);
+            self.active = false;
+        }
+    }
+}
+
+impl Drop for FdReservation {
+    fn drop(&mut self) {
+        self.rollback_inner();
     }
 }
 
@@ -69,11 +229,47 @@ impl Clone for FileDesc {
 // TODO: we only checked permission of fd, but we haven't checked permission of
 // the file itself.
 impl FileDesc {
-    fn new(pfile: Arc<ProcFile>, fd_flags: FdFlags) -> Self {
+    fn new_unpublished(pfile: Arc<ProcFile>, fd_flags: FdFlags) -> Self {
         Self {
             pfile,
             flags: SpinLock::new(fd_flags),
+            published: AtomicBool::new(false),
         }
+    }
+
+    pub fn new_opened(
+        file: File,
+        access: OpenAccessMode,
+        status_flags: FileStatusFlags,
+        compat: LinuxOpenCompat,
+        fd_flags: FdFlags,
+        description_ops: FileDescOps,
+    ) -> Arc<Self> {
+        Arc::new(Self::new_unpublished(
+            Arc::new(ProcFile::new(
+                file,
+                access,
+                status_flags,
+                compat,
+                description_ops,
+            )),
+            fd_flags,
+        ))
+    }
+
+    fn publish_to_fd_table(&self) {
+        let already_published = self.published.swap(true, Ordering::AcqRel);
+        assert!(
+            !already_published,
+            "file description published into multiple fd table slots"
+        );
+        self.pfile.acquire_description_ref();
+    }
+
+    fn unpublish_from_fd_table(&self) -> Arc<ProcFile> {
+        let was_published = self.published.swap(false, Ordering::AcqRel);
+        assert!(was_published, "unpublishing unpublished file descriptor");
+        self.pfile.clone()
     }
 
     pub fn vfs_file(&self) -> &Arc<File> {
@@ -102,38 +298,26 @@ impl FileDesc {
 
     pub fn ioctl_access(&self) -> IoctlFileAccess {
         let flags = self.file_flags();
-        let mut status_flags = IoctlFileStatusFlags::empty();
-        status_flags.set(
-            IoctlFileStatusFlags::APPEND,
-            flags.contains(FileStatusFlags::APPEND),
-        );
-        status_flags.set(
-            IoctlFileStatusFlags::NONBLOCK,
-            flags.contains(FileStatusFlags::NONBLOCK),
-        );
-        status_flags.set(
-            IoctlFileStatusFlags::DIRECT,
-            flags.contains(FileStatusFlags::DIRECT),
-        );
-        status_flags.set(
-            IoctlFileStatusFlags::DSYNC,
-            flags.contains(FileStatusFlags::DSYNC),
-        );
-        status_flags.set(
-            IoctlFileStatusFlags::SYNC,
-            flags.contains(FileStatusFlags::SYNC),
-        );
-        status_flags.set(
-            IoctlFileStatusFlags::NOATIME,
-            flags.contains(FileStatusFlags::NOATIME),
-        );
-
         IoctlFileAccess::new(
             self.can_read(),
             self.can_write(),
             self.is_path_only(),
-            status_flags,
+            flags.to_file_op_status_flags(),
         )
+    }
+
+    pub fn fcntl_ctx(&self, cmd: FileFcntlCmd, arg: u64) -> Result<FcntlCtx, SysError> {
+        if self.is_path_only() {
+            return Err(SysError::BadFileDescriptor);
+        }
+
+        let flags = self.file_flags();
+        let access = FcntlAccess::new(
+            self.can_read(),
+            self.can_write(),
+            flags.to_file_op_status_flags(),
+        );
+        Ok(FcntlCtx::new(cmd, arg, access))
     }
 
     pub fn set_file_flags(&self, flags: FileStatusFlags) {
@@ -154,11 +338,42 @@ impl FileDesc {
         *self.flags.lock() = flags;
     }
 
+    pub fn notifications_suppressed(&self) -> bool {
+        self.pfile.description_ops.notification_suppressed
+    }
+
+    pub fn notify_read_user_access(&self) -> bool {
+        self.pfile.description_ops.notify_read_user_access
+    }
+
+    pub fn read_user(
+        &self,
+        uspace: &UserSpaceHandle,
+        segments: &[OpenedFileReadUserSegment],
+    ) -> Option<Result<usize, SysError>> {
+        if !self.can_read() {
+            return Some(Err(SysError::BadFileDescriptor));
+        }
+
+        let read_user = self.pfile.description_ops.read_user?;
+        Some(read_user(OpenedFileReadUserCtx {
+            file: self.pfile.file.as_ref(),
+            status_flags: self.file_flags(),
+            uspace,
+            segments,
+            notification_suppressed: self.notifications_suppressed(),
+        }))
+    }
+
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
         if !self.can_read() {
             return Err(SysError::BadFileDescriptor);
         }
-        self.pfile.file.read(buf).map_err(|e| e.into())
+        let ctx = FileIoCtx::new(self.file_flags().to_file_op_status_flags());
+        self.pfile
+            .file
+            .read_with_ctx(buf, ctx)
+            .map_err(|e| e.into())
     }
 
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, SysError> {
@@ -168,7 +383,11 @@ impl FileDesc {
         if self.is_path_only() {
             return Err(SysError::BadFileDescriptor);
         }
-        self.pfile.file.read_at(offset, buf).map_err(|e| e.into())
+        let ctx = FileIoCtx::new(self.file_flags().to_file_op_status_flags());
+        self.pfile
+            .file
+            .read_at_with_ctx(offset, buf, ctx)
+            .map_err(|e| e.into())
     }
 
     /// This applies to both write and append mode.
@@ -178,10 +397,16 @@ impl FileDesc {
             return Err(SysError::BadFileDescriptor);
         }
 
+        let ctx = FileIoCtx::new(flags.to_file_op_status_flags());
+        let file = self.pfile.file.as_ref();
+        if file.is_stream() {
+            return file.write_with_ctx(buf, ctx).map_err(|e| e.into());
+        }
+
         if flags.contains(FileStatusFlags::APPEND) {
-            self.pfile.file.append(buf).map_err(|e| e.into())
+            file.append_with_ctx(buf, ctx).map_err(|e| e.into())
         } else {
-            self.pfile.file.write(buf).map_err(|e| e.into())
+            file.write_with_ctx(buf, ctx).map_err(|e| e.into())
         }
     }
 
@@ -194,14 +419,21 @@ impl FileDesc {
         if self.is_path_only() {
             return Err(SysError::BadFileDescriptor);
         }
-        if flags.contains(FileStatusFlags::APPEND) {
-            return self
-                .pfile
-                .file
-                .append_at_current_end(buf)
+        let ctx = FileIoCtx::new(flags.to_file_op_status_flags());
+        let file = self.pfile.file.as_ref();
+        if file.is_stream() {
+            return file
+                .write_at_with_ctx(offset, buf, ctx)
                 .map_err(|e| e.into());
         }
-        self.pfile.file.write_at(offset, buf).map_err(|e| e.into())
+
+        if flags.contains(FileStatusFlags::APPEND) {
+            return file
+                .append_at_current_end_with_ctx(buf, ctx)
+                .map_err(|e| e.into());
+        }
+        file.write_at_with_ctx(offset, buf, ctx)
+            .map_err(|e| e.into())
     }
 
     pub fn truncate(&self, len: u64, cred: &CredentialSet) -> Result<(), SysError> {
@@ -314,6 +546,37 @@ impl LinuxOpenCompat {
 }
 
 impl FileStatusFlags {
+    /// Normalized short-lived snapshot passed to FileOps contexts. The opened
+    /// file description remains the only owner of mutable status flags.
+    pub fn to_file_op_status_flags(self) -> FileOpStatusFlags {
+        let mut flags = FileOpStatusFlags::empty();
+        flags.set(
+            FileOpStatusFlags::APPEND,
+            self.contains(FileStatusFlags::APPEND),
+        );
+        flags.set(
+            FileOpStatusFlags::NONBLOCK,
+            self.contains(FileStatusFlags::NONBLOCK),
+        );
+        flags.set(
+            FileOpStatusFlags::DIRECT,
+            self.contains(FileStatusFlags::DIRECT),
+        );
+        flags.set(
+            FileOpStatusFlags::DSYNC,
+            self.contains(FileStatusFlags::DSYNC),
+        );
+        flags.set(
+            FileOpStatusFlags::SYNC,
+            self.contains(FileStatusFlags::SYNC),
+        );
+        flags.set(
+            FileOpStatusFlags::NOATIME,
+            self.contains(FileStatusFlags::NOATIME),
+        );
+        flags
+    }
+
     pub fn to_linux_open_flags(&self) -> u32 {
         use anemone_abi::fs::linux::open::*;
 
@@ -381,8 +644,11 @@ static_assert!(
 
 #[derive(Debug)]
 pub struct FilesState {
-    // option and bitmap cause double source of truth. we should refactor this later.
+    // `bitmap` is the allocator truth source: a set bit means the slot is
+    // either published or reserved. `reserved_bitmap` marks the unpublished
+    // subset. Published slots are the only ones visible through `fds`.
     bitmap: Bitmap<{ MAX_FD_PER_PROCESS / 64 }>,
+    reserved_bitmap: Bitmap<{ MAX_FD_PER_PROCESS / 64 }>,
     fds: Vec<Option<Arc<FileDesc>>>,
 }
 
@@ -429,11 +695,60 @@ impl FilesState {
         }
     }
 
-    fn recycle(&mut self, fd: Fd) {
+    fn publish_fd_desc(&mut self, fd: Fd, file_desc: Arc<FileDesc>) {
+        let idx = fd.raw() as usize;
+        assert!(self.bitmap.test(idx), "publishing fd without allocator bit");
+        assert!(
+            !self.reserved_bitmap.test(idx),
+            "regular publish cannot target a reserved fd slot"
+        );
+        assert!(self.fds[idx].is_none(), "publishing over live fd slot");
+        file_desc.publish_to_fd_table();
+        self.fds[idx] = Some(file_desc);
+    }
+
+    fn recycle(&mut self, fd: Fd) -> Arc<ProcFile> {
         debug_assert!(fd < Fd(MAX_FD_PER_PROCESS as u32));
         debug_assert!(self.fds[fd.raw() as usize].is_some());
-        self.fds[fd.raw() as usize] = None;
+        let file_desc = self.fds[fd.raw() as usize].take().unwrap();
         self.bitmap.clear(fd.raw() as usize);
+        file_desc.unpublish_from_fd_table()
+    }
+
+    fn reserve_fd(&mut self) -> Result<Fd, SysError> {
+        let fd = self.alloc()?;
+        let idx = fd.raw() as usize;
+        assert!(self.fds[idx].is_none());
+        assert!(!self.reserved_bitmap.test(idx));
+        self.reserved_bitmap.set(idx);
+        Ok(fd)
+    }
+
+    fn commit_reserved_fd(&mut self, fd: Fd, file_desc: Arc<FileDesc>) {
+        let idx = fd.raw() as usize;
+        assert!(idx < self.fds.len(), "reserved fd index out of bounds");
+        assert!(
+            self.bitmap.test(idx) && self.reserved_bitmap.test(idx),
+            "committing a non-reserved fd slot"
+        );
+        assert!(self.fds[idx].is_none(), "reserved fd slot became visible");
+        file_desc.publish_to_fd_table();
+        self.fds[idx] = Some(file_desc);
+        self.reserved_bitmap.clear(idx);
+    }
+
+    fn rollback_reserved_fd(&mut self, fd: Fd) {
+        let idx = fd.raw() as usize;
+        assert!(idx < self.fds.len(), "reserved fd index out of bounds");
+        assert!(
+            self.fds[idx].is_none(),
+            "rollback cannot target a published fd slot"
+        );
+        if self.reserved_bitmap.test(idx) {
+            assert!(self.bitmap.test(idx), "reserved slot missing allocator bit");
+            self.reserved_bitmap.clear(idx);
+            self.bitmap.clear(idx);
+        }
     }
 }
 
@@ -442,6 +757,7 @@ impl FilesState {
     pub fn new() -> Self {
         Self {
             bitmap: Bitmap::new(),
+            reserved_bitmap: Bitmap::new(),
             fds: vec![None; MAX_FD_PER_PROCESS],
         }
     }
@@ -454,54 +770,75 @@ impl FilesState {
         compat: LinuxOpenCompat,
         fd_flags: FdFlags,
     ) -> Result<Fd, SysError> {
-        let fd = self.alloc()?;
-        let file_desc = Arc::new(FileDesc::new(
-            Arc::new(ProcFile {
-                file: Arc::new(file),
-                access,
-                status_flags: SpinLock::new(status_flags),
-                compat,
-            }),
+        self.open_fd_with_description_ops(
+            file,
+            access,
+            status_flags,
+            compat,
             fd_flags,
-        ));
-        self.fds[fd.raw() as usize] = Some(file_desc);
+            FileDescOps::default(),
+        )
+    }
+
+    fn open_fd_with_description_ops(
+        &mut self,
+        file: File,
+        access: OpenAccessMode,
+        status_flags: FileStatusFlags,
+        compat: LinuxOpenCompat,
+        fd_flags: FdFlags,
+        description_ops: FileDescOps,
+    ) -> Result<Fd, SysError> {
+        let fd = self.alloc()?;
+        let file_desc = FileDesc::new_opened(
+            file,
+            access,
+            status_flags,
+            compat,
+            fd_flags,
+            description_ops,
+        );
+        self.publish_fd_desc(fd, file_desc);
         Ok(fd)
     }
 
-    fn close_fd(&mut self, fd: Fd) -> Result<(), SysError> {
+    fn close_fd(&mut self, fd: Fd) -> Result<Arc<ProcFile>, SysError> {
         if fd.raw() as usize >= self.fds.len() {
             return Err(SysError::BadFileDescriptor);
         }
 
-        if self.bitmap.test(fd.raw() as usize) {
-            self.recycle(fd);
-            Ok(())
+        if self.fds[fd.raw() as usize].is_some() {
+            Ok(self.recycle(fd))
         } else {
             Err(SysError::BadFileDescriptor)
         }
     }
 
-    fn close_range(&mut self, first: u32, last: u32) {
+    fn close_range(&mut self, first: u32, last: u32) -> Vec<Arc<ProcFile>> {
         let first = first as usize;
         if first >= self.fds.len() {
-            return;
+            return Vec::new();
         }
 
         let last = core::cmp::min(last as usize, self.fds.len() - 1);
         if first > last {
-            return;
+            return Vec::new();
         }
 
         let mut fds = Vec::new();
         for fd in first..=last {
-            if self.bitmap.test(fd) {
+            if self.fds[fd].is_some() {
                 fds.push(Fd::new(fd as u32).unwrap());
             }
         }
 
+        let mut closed = Vec::new();
         for fd in fds {
-            let _ = self.close_fd(fd);
+            if let Ok(pfile) = self.close_fd(fd) {
+                closed.push(pfile);
+            }
         }
+        closed
     }
 
     fn set_close_on_exec_range(&self, first: u32, last: u32) {
@@ -547,9 +884,14 @@ impl FilesState {
             .enumerate()
             .filter_map(|(fd, file_desc)| {
                 let opened = file_desc.is_some();
+                let reserved = self.reserved_bitmap.test(fd);
                 assert!(
-                    self.bitmap.test(fd) == opened,
+                    self.bitmap.test(fd) == (opened || reserved),
                     "FilesState bitmap/fds open-state diverged"
+                );
+                assert!(
+                    !(opened && reserved),
+                    "FilesState slot cannot be both open and reserved"
                 );
 
                 opened.then(|| Fd::new(fd as u32).expect("fd table index must fit in Fd"))
@@ -561,12 +903,15 @@ impl FilesState {
         let file_desc = self.get_fd(old_fd)?;
         let fd = self.alloc()?;
         // note: new file desc, shared proc file.
-        self.fds[fd.raw() as usize] = Some(Arc::new(FileDesc::new(
-            file_desc.pfile.clone(),
-            // Linux semantics: the new fd created by dup doesn't inherit the close-on-exec flag of
-            // the old fd.
-            FdFlags::empty(),
-        )));
+        self.publish_fd_desc(
+            fd,
+            Arc::new(FileDesc::new_unpublished(
+                file_desc.pfile.clone(),
+                // Linux semantics: the new fd created by dup doesn't inherit the close-on-exec
+                // flag of the old fd.
+                FdFlags::empty(),
+            )),
+        );
         Ok(fd)
     }
 
@@ -578,7 +923,7 @@ impl FilesState {
     ) -> Result<Fd, SysError> {
         let file_desc = self.get_fd(old_fd)?;
         let fd = self.alloc_ge_than(min_new_fd)?;
-        let new_file_desc = Arc::new(FileDesc::new(
+        let new_file_desc = Arc::new(FileDesc::new_unpublished(
             file_desc.pfile.clone(),
             if close_on_exec {
                 FdFlags::CLOSE_ON_EXEC
@@ -586,14 +931,19 @@ impl FilesState {
                 FdFlags::empty()
             },
         ));
-        self.fds[fd.raw() as usize] = Some(new_file_desc);
+        self.publish_fd_desc(fd, new_file_desc);
         Ok(fd)
     }
 
     /// Linux's semantics of dup3 is a bit weird, currently we implement a
     /// reasonable subset of it. If in the future we get stuck with
     /// compatibility issues, we'll implement the rest of it.
-    fn dup3(&mut self, old_fd: Fd, new_fd: Fd, flags: FdFlags) -> Result<(), SysError> {
+    fn dup3(
+        &mut self,
+        old_fd: Fd,
+        new_fd: Fd,
+        flags: FdFlags,
+    ) -> Result<Vec<Arc<ProcFile>>, SysError> {
         if new_fd.raw() as usize >= self.fds.len() {
             return Err(SysError::BadFileDescriptor);
         }
@@ -603,213 +953,131 @@ impl FilesState {
         }
 
         let file_desc = self.get_fd(old_fd)?;
+        let new_idx = new_fd.raw() as usize;
+        let mut closed = Vec::new();
 
-        if self.bitmap.test(new_fd.raw() as usize) {
-            self.close_fd(new_fd)?;
+        if self.fds[new_idx].is_some() {
+            closed.push(self.close_fd(new_fd)?);
+        } else if self.bitmap.test(new_idx) {
+            return Err(SysError::NoMoreFd);
         }
 
-        let new_file_desc = Arc::new(FileDesc::new(file_desc.pfile.clone(), flags));
-        self.fds[new_fd.raw() as usize] = Some(new_file_desc);
-        self.bitmap.set(new_fd.raw() as usize);
-        Ok(())
+        self.alloc_at(new_fd)?;
+        let new_file_desc = Arc::new(FileDesc::new_unpublished(file_desc.pfile.clone(), flags));
+        self.publish_fd_desc(new_fd, new_file_desc);
+        Ok(closed)
     }
 
-    fn close_on_exec(&mut self) {
+    fn close_on_exec(&mut self) -> Vec<Arc<ProcFile>> {
+        let mut closed = Vec::new();
         for fd in 0..self.fds.len() {
             if let Some(file_desc) = &self.fds[fd] {
                 if file_desc.fd_flags().contains(FdFlags::CLOSE_ON_EXEC) {
-                    self.close_fd(Fd::new(fd as u32).unwrap()).expect(
+                    let pfile = self.close_fd(Fd::new(fd as u32).unwrap()).expect(
                         "we've validated those created fds before, so they must be valid to close",
                     );
+                    closed.push(pfile);
                 }
             }
         }
+        closed
+    }
+
+    fn drain_all_published_fds(&mut self) -> Vec<Arc<ProcFile>> {
+        let mut closed = Vec::new();
+        for (fd, file_desc) in self.fds.iter_mut().enumerate() {
+            if let Some(file_desc) = file_desc.take() {
+                assert!(
+                    self.bitmap.test(fd),
+                    "published fd slot missing allocator bit during explicit fd-table cleanup"
+                );
+                assert!(
+                    !self.reserved_bitmap.test(fd),
+                    "published fd slot marked reserved during explicit fd-table cleanup"
+                );
+                closed.push(file_desc.unpublish_from_fd_table());
+            }
+        }
+
+        // This is an explicit lifetime boundary for a whole fd table. Reserved
+        // slots are allocator state, not opened descriptions, so they are
+        // cleared here instead of relying on `Drop` to repair leaked state.
+        self.bitmap.clear_all();
+        self.reserved_bitmap.clear_all();
+        closed
     }
 
     pub fn fork(&self) -> Self {
         // note: we should clone file desc itself, not the arc, so that we can
         // have different fd flags for the new fd table.
+        let mut bitmap = Bitmap::new();
         let fds = self
             .fds
             .iter()
-            .map(|fd_opt| {
-                fd_opt
-                    .as_ref()
-                    .map(|fd| Arc::new(FileDesc::new(fd.pfile.clone(), fd.fd_flags())))
+            .enumerate()
+            .map(|(fd_idx, fd_opt)| {
+                fd_opt.as_ref().map(|file_desc| {
+                    let new_fd = Arc::new(FileDesc::new_unpublished(
+                        file_desc.pfile.clone(),
+                        file_desc.fd_flags(),
+                    ));
+                    new_fd.publish_to_fd_table();
+                    bitmap.set(fd_idx);
+                    new_fd
+                })
             })
             .collect();
-        let bitmap = self.bitmap.clone();
+        let reserved_bitmap = Bitmap::new();
 
-        Self { bitmap, fds }
+        Self {
+            bitmap,
+            reserved_bitmap,
+            fds,
+        }
     }
 }
 
-// impl FilesState {
-//     fn alloc_fd(&mut self) -> Option<Fd> {
-//         if let Some(recycled_fd) = self.recycled_fds.iter().next().cloned() {
-//             self.recycled_fds.remove(&recycled_fd);
-//             Some(recycled_fd)
-//         } else {
-//             while self.fd_table.contains_key(&self.next_fd) {
-//                 let next_fd = Fd::new(self.next_fd.raw() + 1)?;
-//                 self.next_fd = next_fd;
-//             }
-//             let fd = self.next_fd;
-//             self.next_fd = Fd::new(self.next_fd.raw() + 1)?;
-//             Some(fd)
-//         }
-//     }
-//
-//     pub fn new() -> Self {
-//         Self {
-//             next_fd: Fd(0),
-//             recycled_fds: BTreeSet::new(),
-//             fd_table: HashMap::new(),
-//         }
-//     }
-//
-//     pub fn open_fd(&mut self, file: File, file_flags: FileStatusFlags,
-// fd_flags: FdFlags) -> Option<Fd> {         let fd = self.alloc_fd()?;
-//         let file = Arc::new(ProcFile {
-//             file,
-//             flags: file_flags,
-//         });
-//
-//         self.fd_table
-//             .insert(fd, Arc::new(FileDesc::new(file, fd_flags)));
-//         Some(fd)
-//     }
-//
-//     pub fn get_fd(&self, fd: Fd) -> Option<Arc<FileDesc>> {
-//         self.fd_table.get(&fd).cloned()
-//     }
-//
-//     pub fn close_fd(&mut self, fd: Fd) -> Option<Arc<FileDesc>> {
-//         if let Some(file_desc) = self.fd_table.remove(&fd) {
-//             self.recycled_fds.insert(fd);
-//             Some(file_desc)
-//         } else {
-//             None
-//         }
-//     }
-//
-//     pub fn dup(&mut self, old_fd: Fd) -> Option<Fd> {
-//         let fd = self.get_fd(old_fd)?;
-//         let new_fd = self.alloc_fd()?;
-//         self.fd_table.insert(
-//             new_fd,
-//             Arc::new(FileDesc::new(fd.pfile.clone(), FdFlags::empty())),
-//         );
-//         Some(new_fd)
-//     }
-//
-//     /// Mainly for F_DUPFD and F_DUPFD_CLOEXEC, which require us to dup to a
-// fd     /// number greater than or equal to a specified value.
-//     pub fn dup_ge_than(&mut self, old_fd: Fd, min_new_fd: Fd, close_on_exec:
-// bool) -> Option<Fd> {         let fd = self.get_fd(old_fd)?;
-//
-//         // we need to find the first available fd number which is greater
-// than or equal         // to min_new_fd.
-//         let mut new_fd = min_new_fd;
-//         while self.fd_table.contains_key(&new_fd) {
-//             new_fd = Fd::new(new_fd.raw() + 1)?;
-//         }
-//         self.fd_table.insert(
-//             new_fd,
-//             Arc::new(FileDesc::new(
-//                 fd.pfile.clone(),
-//                 if close_on_exec {
-//                     FdFlags::CLOSE_ON_EXEC
-//                 } else {
-//                     FdFlags::empty()
-//                 },
-//             )),
-//         );
-//
-//         Some(new_fd)
-//     }
-//
-//     /// Linux's semantics of dup3 is a bit weird, currently we implement a
-//     /// reasonable subset of it. If in the future we get stuck with
-//     /// compatibility issues, we'll implement the rest of it.
-//     pub fn dup3(&mut self, old_fd: Fd, new_fd: Fd, flags: FdFlags) ->
-// Result<(), SysError> {         if old_fd == new_fd {
-//             return Err(SysError::InvalidArgument);
-//         }
-//
-//         let fd = self.get_fd(old_fd).ok_or(SysError::BadFileDescriptor)?;
-//
-//         if self.fd_table.contains_key(&new_fd) {
-//             self.close_fd(new_fd);
-//         }
-//
-//         // we need to remove new_fd from recycled_fds, because after dup3,
-// new_fd is no         // longer available for allocation, though new_fd might
-// not be in recycled_fds         // if new_fd is larger than any previously
-// allocated fd.         let exist = self.recycled_fds.remove(&new_fd);
-//
-//         if new_fd >= self.next_fd {
-//             match Fd::new(new_fd.raw() + 1) {
-//                 Some(next_fd) => self.next_fd = next_fd,
-//                 None => {
-//                     if exist {
-//                         self.recycled_fds.insert(new_fd);
-//                     }
-//                     return Err(SysError::InvalidArgument);
-//                 },
-//             }
-//         }
-//
-//         self.fd_table
-//             .insert(new_fd, Arc::new(FileDesc::new(fd.pfile.clone(),
-// flags)));
-//
-//         Ok(())
-//     }
-//
-//     pub fn fork(&self) -> Self {
-//         let mut new = Self::new();
-//         new.next_fd = self.next_fd;
-//         new.recycled_fds = self.recycled_fds.clone();
-//         new.fd_table = self
-//             .fd_table
-//             .iter()
-//             // note that we can't clone fd_table directly, since fd flags is
-// per-fd.             .map(|(fd, file_desc)| {
-//                 (
-//                     *fd,
-//                     Arc::new(
-//                         // this clones file desc itself, not the arc, so that
-// we can have different                         // fd flags for the new fd
-// table.                         file_desc.as_ref().clone(),
-//                     ),
-//                 )
-//             })
-//             .collect();
-//         new
-//     }
-//
-//     /// Call this function to close all file descriptors with O_CLOEXEC flag
-//     /// when executing a new program.
-//     pub fn close_on_exec(&mut self) {
-//         let cloexec_fds = self
-//             .fd_table
-//             .iter()
-//             .filter_map(|(fd, file_desc)| {
-//                 file_desc
-//                     .fd_flags()
-//                     .contains(FdFlags::CLOSE_ON_EXEC)
-//                     .then_some(*fd)
-//             })
-//             .collect::<Vec<_>>();
-//
-//         for fd in cloexec_fds {
-//             self.close_fd(fd);
-//         }
-//     }
-// }
+impl Drop for FilesState {
+    fn drop(&mut self) {
+        assert!(
+            self.fds.iter().all(Option::is_none),
+            "FilesState dropped with published fd slots; missing explicit fd-table cleanup"
+        );
+        assert!(
+            self.bitmap.is_empty(),
+            "FilesState dropped with allocator bits set; missing explicit fd-table cleanup"
+        );
+        assert!(
+            self.reserved_bitmap.is_empty(),
+            "FilesState dropped with reserved fd slots; missing explicit fd-table cleanup"
+        );
+    }
+}
 
 impl Task {
+    fn release_description_ref(pfile: Arc<ProcFile>) {
+        pfile.release_description_ref();
+    }
+
+    fn release_description_refs(closed: Vec<Arc<ProcFile>>) {
+        for pfile in closed {
+            Self::release_description_ref(pfile);
+        }
+    }
+
+    fn drain_files_state_handle_if_last_arc(files_state: Arc<RwLock<FilesState>>) {
+        // A shared CLONE_FILES table has one set of published slots owned by the
+        // still-shared table. Replacing this task's handle must not unpublish
+        // those slots while another task can still observe them. The Arc count
+        // is a conservative ownership proxy: count > 1 may include temporary
+        // observers, but skipping semantic cleanup is preferable to closing a
+        // table another task may still share.
+        if Arc::strong_count(&files_state) == 1 {
+            let closed = files_state.write().drain_all_published_fds();
+            Self::release_description_refs(closed);
+        }
+    }
+
     pub fn open_fd(
         &self,
         file: File,
@@ -821,6 +1089,37 @@ impl Task {
         let files_state = self.files_state();
         let mut files_state = files_state.write();
         files_state.open_fd(file, access, status_flags, compat, fd_flags)
+    }
+
+    pub fn open_fd_with_description_ops(
+        &self,
+        file: File,
+        access: OpenAccessMode,
+        status_flags: FileStatusFlags,
+        compat: LinuxOpenCompat,
+        fd_flags: FdFlags,
+        description_ops: FileDescOps,
+    ) -> Result<Fd, SysError> {
+        let files_state = self.files_state();
+        let mut files_state = files_state.write();
+        files_state.open_fd_with_description_ops(
+            file,
+            access,
+            status_flags,
+            compat,
+            fd_flags,
+            description_ops,
+        )
+    }
+
+    pub fn reserve_fd(&self) -> Result<FdReservation, SysError> {
+        let files_state = self.files_state();
+        let fd = files_state.write().reserve_fd()?;
+        Ok(FdReservation {
+            files_state,
+            fd,
+            active: true,
+        })
     }
 
     pub fn get_fd(&self, fd: Fd) -> Result<Arc<FileDesc>, SysError> {
@@ -846,7 +1145,13 @@ impl Task {
     /// [`Self::replace_files_state_handle`].
     pub fn set_files_state(&self, files_state: FilesState) {
         let files_state_handle = self.files_state();
-        *files_state_handle.write() = files_state;
+        let mut old = {
+            let mut guard = files_state_handle.write();
+            core::mem::replace(&mut *guard, files_state)
+        };
+        let closed = old.drain_all_published_fds();
+        Self::release_description_refs(closed);
+        drop(old);
     }
 
     /// Replace the shared file-table state handle.
@@ -854,13 +1159,38 @@ impl Task {
     /// This should only be used while the task is still uniquely owned, such
     /// as during task construction or clone setup.
     pub fn replace_files_state_handle(&mut self, files_state: Arc<RwLock<FilesState>>) {
-        *self.files_state.write() = files_state;
+        let old = {
+            let mut guard = self.files_state.write();
+            core::mem::replace(&mut *guard, files_state)
+        };
+        Self::drain_files_state_handle_if_last_arc(old);
+    }
+
+    pub fn close_all_fds_for_exit(&self) {
+        assert!(
+            IntrArch::local_intr_enabled(),
+            "fd-table exit cleanup must run with interrupts enabled"
+        );
+        assert!(
+            allow_preempt(),
+            "fd-table exit cleanup must run in a sleepable context"
+        );
+
+        let old = {
+            let mut guard = self.files_state.write();
+            core::mem::replace(&mut *guard, Arc::new(RwLock::new(FilesState::new())))
+        };
+        Self::drain_files_state_handle_if_last_arc(old);
     }
 
     pub fn close_fd(&self, fd: Fd) -> Result<(), SysError> {
         let files_state = self.files_state();
-        let mut files_state = files_state.write();
-        files_state.close_fd(fd)
+        let pfile = {
+            let mut files_state = files_state.write();
+            files_state.close_fd(fd)?
+        };
+        Self::release_description_ref(pfile);
+        Ok(())
     }
 
     pub fn dup(&self, old_fd: Fd) -> Result<Fd, SysError> {
@@ -882,14 +1212,18 @@ impl Task {
 
     pub fn dup3(&self, old_fd: Fd, new_fd: Fd, flags: FdFlags) -> Result<Fd, SysError> {
         let files_state = self.files_state();
-        let mut files_state = files_state.write();
-        files_state.dup3(old_fd, new_fd, flags)?;
+        let closed = {
+            let mut files_state = files_state.write();
+            files_state.dup3(old_fd, new_fd, flags)?
+        };
+        Self::release_description_refs(closed);
         Ok(new_fd)
     }
 
     pub fn close_cloexec_fds(&self) {
         let files_state = self.files_state();
-        files_state.write().close_on_exec();
+        let closed = files_state.write().close_on_exec();
+        Self::release_description_refs(closed);
     }
 
     pub fn unshare_files_state(&self) {
@@ -898,7 +1232,11 @@ impl Task {
             Arc::new(RwLock::new(files_state.read().fork()))
         };
 
-        *self.files_state.write() = forked;
+        let old = {
+            let mut guard = self.files_state.write();
+            core::mem::replace(&mut *guard, forked)
+        };
+        Self::drain_files_state_handle_if_last_arc(old);
     }
 
     pub fn close_range(
@@ -912,11 +1250,11 @@ impl Task {
         }
 
         let files_state = self.files_state();
-        let mut files_state = files_state.write();
         if flags.contains(crate::fs::api::close::CloseRangeFlags::CLOEXEC) {
-            files_state.set_close_on_exec_range(first, last);
+            files_state.read().set_close_on_exec_range(first, last);
         } else {
-            files_state.close_range(first, last);
+            let closed = files_state.write().close_range(first, last);
+            Self::release_description_refs(closed);
         }
     }
 }

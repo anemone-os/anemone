@@ -133,25 +133,29 @@ fn devfs_dir_read_dir(
 }
 
 pub(super) static DEVFS_ROOT_FILE_OPS: FileOps = FileOps {
-    read: |_, _, _| Err(SysError::IsDir),
-    write: |_, _, _| Err(SysError::IsDir),
-    read_at: |_, _, _| Err(SysError::IsDir),
-    write_at: |_, _, _| Err(SysError::IsDir),
+    read: |_, _, _, _| Err(SysError::IsDir),
+    write: |_, _, _, _| Err(SysError::IsDir),
+    read_at: |_, _, _, _| Err(SysError::IsDir),
+    write_at: |_, _, _, _| Err(SysError::IsDir),
+    check_status_flags: accept_file_op_status_flags,
     seek: seek_dir_rewind,
     read_dir: devfs_root_read_dir,
     // We do not have a real poll story for pseudo directories yet.
     poll: |_, _| Err(SysError::NotYetImplemented),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 pub(super) static DEVFS_DIR_FILE_OPS: FileOps = FileOps {
-    read: |_, _, _| Err(SysError::IsDir),
-    write: |_, _, _| Err(SysError::IsDir),
-    read_at: |_, _, _| Err(SysError::IsDir),
-    write_at: |_, _, _| Err(SysError::IsDir),
+    read: |_, _, _, _| Err(SysError::IsDir),
+    write: |_, _, _, _| Err(SysError::IsDir),
+    read_at: |_, _, _, _| Err(SysError::IsDir),
+    write_at: |_, _, _, _| Err(SysError::IsDir),
+    check_status_flags: accept_file_op_status_flags,
     seek: seek_dir_rewind,
     read_dir: devfs_dir_read_dir,
     // We do not have a real poll story for pseudo directories yet.
     poll: |_, _| Err(SysError::NotYetImplemented),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };

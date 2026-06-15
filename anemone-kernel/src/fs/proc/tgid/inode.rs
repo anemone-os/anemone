@@ -48,10 +48,7 @@ fn tgid_lookup(inode: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
 fn tgid_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
     let _binding = validate_tgid_inode(inode)?;
 
-    Ok(OpenedFile {
-        file_ops: &TGID_FILE_OPS,
-        prv: NilOpaque::new(),
-    })
+    Ok(OpenedFile::new(&TGID_FILE_OPS, NilOpaque::new()))
 }
 
 fn tgid_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {

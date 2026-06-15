@@ -336,8 +336,10 @@ pub fn kernel_clone(
             match UserWritePtr::<Tid>::try_new(child_tid, &mut usp_guard) {
                 Ok(uptr) => {},
                 Err(e) => {
+                    drop(usp_guard);
                     let _ = unsafe { Box::from_raw(frame_ptr) };
                     unsafe { guard.forget() };
+                    new_task.close_all_fds_for_exit();
                     defer_to_dispose(Arc::new(new_task));
                     return Err(e);
                 },
@@ -375,6 +377,7 @@ pub fn kernel_clone(
                 kcritln!("clone: CLONE_PARENT flag set, called by init task. this is invalid...");
                 let _ = unsafe { Box::from_raw(frame_ptr) };
                 unsafe { guard.forget() };
+                new_task.close_all_fds_for_exit();
                 return Err(SysError::InvalidArgument);
             }
         } else {
@@ -411,8 +414,10 @@ pub fn kernel_clone(
             match UserWritePtr::<Tid>::try_new(parent_tid, &mut usp_guard) {
                 Ok(mut uptr) => uptr.write(new_tid),
                 Err(e) => {
+                    drop(usp_guard);
                     let _ = unsafe { Box::from_raw(frame_ptr) };
                     unsafe { guard.forget() };
+                    new_task.close_all_fds_for_exit();
                     defer_to_dispose(Arc::new(new_task));
                     return Err(e);
                 },
@@ -437,6 +442,7 @@ pub fn kernel_clone(
             knoticeln!("failed to publish cloned task: {:?}", e);
 
             // distroy this task immediately is a bit heavy. send it to defer queue.
+            new_task.close_all_fds_for_exit();
             defer_to_dispose(Arc::new(new_task));
 
             // some resoureces cannot be rolled back. but we'll try our best.

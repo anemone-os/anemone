@@ -20,10 +20,7 @@ use crate::{
 fn tgid_status_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
     let _binding = validate_tgid_sub_inode(inode)?;
 
-    Ok(OpenedFile {
-        file_ops: &TGID_STATUS_FILE_OPS,
-        prv: NilOpaque::new(),
-    })
+    Ok(OpenedFile::new(&TGID_STATUS_FILE_OPS, NilOpaque::new()))
 }
 
 fn tgid_status_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
@@ -61,7 +58,12 @@ static TGID_STATUS_INODE_OPS: InodeOps = InodeOps {
     get_attr: tgid_status_get_attr,
 };
 
-fn tgid_status_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn tgid_status_read(
+    file: &File,
+    pos: &mut usize,
+    buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let data = build_status_text(file.inode())?;
 
     if *pos >= data.len() {
@@ -75,7 +77,12 @@ fn tgid_status_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usiz
     Ok(to_read)
 }
 
-fn tgid_status_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn tgid_status_read_at(
+    file: &File,
+    pos: usize,
+    buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let data = build_status_text(file.inode())?;
 
     read_snapshot_at(pos, buf, data.as_bytes())
@@ -89,12 +96,14 @@ fn tgid_status_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usiz
 
 static TGID_STATUS_FILE_OPS: FileOps = FileOps {
     read: tgid_status_read,
-    write: |_, _, _| Err(SysError::NotSupported),
+    write: |_, _, _, _| Err(SysError::NotSupported),
     read_at: tgid_status_read_at,
-    write_at: |_, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _, _| Err(SysError::NotSupported),
+    check_status_flags: accept_file_op_status_flags,
     seek: tgid_status_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 

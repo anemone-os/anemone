@@ -4,6 +4,7 @@
 //! - https://www.man7.org/linux/man-pages/man2/fcntl.2.html
 
 use crate::{
+    fs::FileFcntlCmd,
     prelude::{handler::TryFromSyscallArg, *},
     task::files::{Fd, FileStatusFlags},
 };
@@ -24,8 +25,18 @@ enum FcntlCmd {
     SetSig,
     // Linux-specific commands
     DupCloexec,
-    SetPipeSz,
-    GetPipeSz,
+    SetPipeSize,
+    GetPipeSize,
+}
+
+impl FcntlCmd {
+    const fn to_file_cmd(self) -> Option<FileFcntlCmd> {
+        match self {
+            Self::GetPipeSize => Some(FileFcntlCmd::GetPipeSize),
+            Self::SetPipeSize => Some(FileFcntlCmd::SetPipeSize),
+            _ => None,
+        }
+    }
 }
 
 impl TryFromSyscallArg for FcntlCmd {
@@ -47,8 +58,8 @@ impl TryFromSyscallArg for FcntlCmd {
             F_GETSIG => Err(SysError::NotYetImplemented),
             F_SETSIG => Err(SysError::NotYetImplemented),
             F_DUPFD_CLOEXEC => Ok(Self::DupCloexec),
-            F_SETPIPE_SZ => Ok(Self::SetPipeSz),
-            F_GETPIPE_SZ => Ok(Self::GetPipeSz),
+            F_SETPIPE_SZ => Ok(Self::SetPipeSize),
+            F_GETPIPE_SZ => Ok(Self::GetPipeSize),
             _ => Err(SysError::InvalidArgument),
         };
         if ret.is_err() {
@@ -56,13 +67,6 @@ impl TryFromSyscallArg for FcntlCmd {
         }
         ret
     }
-}
-
-fn validate_setfl_status_flags(file: &File, flags: FileStatusFlags) -> Result<(), SysError> {
-    if file.inode().ty() == InodeType::Block && flags.contains(FileStatusFlags::DIRECT) {
-        return Err(SysError::InvalidArgument);
-    }
-    Ok(())
 }
 
 #[syscall(SYS_FCNTL)]
@@ -140,95 +144,22 @@ fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
                 FileStatusFlags::DIRECT,
                 settable.contains(FileStatusFlags::DIRECT),
             );
-            validate_setfl_status_flags(file.vfs_file(), flags)?;
+            file.vfs_file()
+                .check_status_flags(flags.to_file_op_status_flags())?;
             file.set_file_flags(flags);
-            crate::fs::pipe::update_nonblock(
-                file.vfs_file(),
-                flags.contains(FileStatusFlags::NONBLOCK),
-            );
             Ok(0)
         },
-        FcntlCmd::GetPipeSz => {
+        FcntlCmd::GetPipeSize | FcntlCmd::SetPipeSize => {
             let file = task.get_fd(fd)?;
-            Ok(crate::fs::pipe::capacity(file.vfs_file())? as u64)
-        },
-        FcntlCmd::SetPipeSz => {
-            let file = task.get_fd(fd)?;
-            Ok(crate::fs::pipe::set_capacity(file.vfs_file(), arg)? as u64)
+            let file_cmd = cmd
+                .to_file_cmd()
+                .expect("pipe size fcntl commands must have a VFS command");
+            let ctx = file.fcntl_ctx(file_cmd, arg)?;
+            file.vfs_file().fcntl(ctx)
         },
         _ => {
             knoticeln!("[NYI] fcntl command {:?} is not supported yet", cmd);
             Err(SysError::NotYetImplemented)
         },
-    }
-}
-
-#[cfg(feature = "kunit")]
-mod kunits {
-    use super::*;
-    use crate::utils::any_opaque::NilOpaque;
-
-    #[kunit]
-    fn test_setfl_status_rejects_odirect_on_block_special_file() {
-        let mut flags = FileStatusFlags::APPEND;
-        flags.insert(FileStatusFlags::DIRECT);
-
-        assert_eq!(
-            validate_setfl_status_flags(&kunit_block_file(), flags).unwrap_err(),
-            SysError::InvalidArgument
-        );
-    }
-
-    fn kunit_block_file() -> File {
-        static KUNIT_BLOCK_INODE_OPS: InodeOps = InodeOps {
-            lookup: |_, _| Err(SysError::NotDir),
-            touch: |_, _, _| Err(SysError::NotDir),
-            mkdir: |_, _, _| Err(SysError::NotDir),
-            symlink: |_, _, _| Err(SysError::NotDir),
-            link: |_, _, _| Err(SysError::NotDir),
-            unlink: |_, _| Err(SysError::NotDir),
-            rmdir: |_, _| Err(SysError::NotDir),
-            rename: |_, _, _, _, _| Err(SysError::NotDir),
-            open: |_| {
-                Ok(OpenedFile {
-                    file_ops: &KUNIT_BLOCK_FILE_OPS,
-                    prv: NilOpaque::new(),
-                })
-            },
-            truncate: |_, _| Err(SysError::InvalidArgument),
-            read_link: |_| Err(SysError::InvalidArgument),
-            get_attr: |inode| {
-                Ok(InodeStat {
-                    fs_dev: DeviceId::None,
-                    ino: inode.ino(),
-                    mode: InodeMode::new(inode.ty(), inode.perm()),
-                    nlink: inode.nlink(),
-                    uid: inode.uid(),
-                    gid: inode.gid(),
-                    rdev: DeviceId::Block(BlockDevNum::new(
-                        MajorNum::new(devnum::block::major::DYNAMIC_ALLOC.0),
-                        MinorNum::new(2),
-                    )),
-                    size: 0,
-                    atime: inode.atime(),
-                    mtime: inode.mtime(),
-                    ctime: inode.ctime(),
-                })
-            },
-        };
-        static KUNIT_BLOCK_FILE_OPS: FileOps = FileOps {
-            read: |_, _, _| Err(SysError::IO),
-            write: |_, _, _| Err(SysError::IO),
-            read_at: |_, _, _| Err(SysError::IO),
-            write_at: |_, _, _| Err(SysError::IO),
-            seek: |_, _, _| Err(SysError::IO),
-            read_dir: |_, _, _| Err(SysError::NotDir),
-            poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::empty() & req.interests())),
-            ioctl: |_, _| Err(SysError::UnsupportedIoctl),
-        };
-
-        let inode =
-            anony_new_inode(InodeType::Block, &KUNIT_BLOCK_INODE_OPS, NilOpaque::new()).unwrap();
-        anony_open(&inode).unwrap()
     }
 }

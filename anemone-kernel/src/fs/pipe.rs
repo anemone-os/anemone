@@ -8,6 +8,7 @@
 use anemone_abi::fs::linux::ioctl::FIONREAD;
 
 use crate::{
+    fs::{FcntlCtx, FileFcntlCmd, FileFcntlOutcome, FileMode},
     prelude::*,
     syscall::user_access::UserWritePtr,
     task::sig::{
@@ -98,16 +99,7 @@ impl Pipe {
 
         let pipe = Arc::new(SpinLock::new(pipe));
 
-        (
-            PipeRx {
-                pipe: pipe.clone(),
-                nonblock: AtomicBool::new(false),
-            },
-            PipeTx {
-                pipe,
-                nonblock: AtomicBool::new(false),
-            },
-        )
+        (PipeRx { pipe: pipe.clone() }, PipeTx { pipe })
     }
 
     fn capacity(&self) -> usize {
@@ -152,7 +144,6 @@ impl Pipe {
 #[derive(Opaque)]
 struct PipeRx {
     pipe: Arc<SpinLock<Pipe>>,
-    nonblock: AtomicBool,
 }
 
 impl Drop for PipeRx {
@@ -175,7 +166,6 @@ impl Drop for PipeRx {
 #[derive(Opaque)]
 struct PipeTx {
     pipe: Arc<SpinLock<Pipe>>,
-    nonblock: AtomicBool,
 }
 
 impl Drop for PipeTx {
@@ -277,7 +267,12 @@ fn pipe_write_locked(
     (written, detached)
 }
 
-fn pipe_rx_read(file: &File, _pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn pipe_rx_read(
+    file: &File,
+    _pos: &mut usize,
+    buf: &mut [u8],
+    ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let rx = file
         .prv()
         .cast::<PipeRx>()
@@ -289,7 +284,7 @@ fn pipe_rx_read(file: &File, _pos: &mut usize, buf: &mut [u8]) -> Result<usize, 
         if pipe.tx_cnt == 0 {
             // no tx alive. return EOF.
             (Ok(0), Vec::new())
-        } else if rx.nonblock.load(Ordering::Relaxed) {
+        } else if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
             (Err(SysError::Again), Vec::new())
         } else {
             while pipe.buf.is_empty() && pipe.tx_cnt > 0 {
@@ -350,7 +345,12 @@ fn pipe_rx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterRe
     Ok(PollRegisterResult::Armed)
 }
 
-fn pipe_tx_write(file: &File, _pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
+fn pipe_tx_write(
+    file: &File,
+    _pos: &mut usize,
+    buf: &[u8],
+    ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let tx = file
         .prv()
         .cast::<PipeTx>()
@@ -363,7 +363,7 @@ fn pipe_tx_write(file: &File, _pos: &mut usize, buf: &[u8]) -> Result<usize, Sys
         return Err(SysError::BrokenPipe);
     }
 
-    let (result, detached) = if tx.nonblock.load(Ordering::Relaxed) {
+    let (result, detached) = if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
         let available = pipe.buf.available();
         if available == 0 || (buf.len() <= PIPE_CAPACITY_BYTES && available < buf.len()) {
             return Err(SysError::Again);
@@ -441,22 +441,19 @@ fn with_pipe_endpoint<T>(
     }
 }
 
+fn pipe_state(file: &File) -> Option<&Arc<SpinLock<Pipe>>> {
+    if let Some(rx) = file.prv().cast::<PipeRx>() {
+        Some(&rx.pipe)
+    } else {
+        file.prv().cast::<PipeTx>().map(|tx| &tx.pipe)
+    }
+}
+
 pub(super) fn display_name(file: &File) -> Option<PathBuf> {
     with_pipe_endpoint(file, |_, _, _| {
         let target = format!("pipe:[{}]", file.inode().ino().get());
         PathBuf::from(target.as_str())
     })
-}
-
-pub(super) fn update_nonblock(file: &File, nonblock: bool) {
-    let _ = with_pipe_endpoint(file, |_, rx, tx| {
-        if let Some(rx) = rx {
-            rx.nonblock.store(nonblock, Ordering::Relaxed);
-        }
-        if let Some(tx) = tx {
-            tx.nonblock.store(nonblock, Ordering::Relaxed);
-        }
-    });
 }
 
 fn readable_bytes(file: &File) -> Result<usize, SysError> {
@@ -482,33 +479,38 @@ fn pipe_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
     }
 }
 
-pub(super) fn capacity(file: &File) -> Result<usize, SysError> {
-    with_pipe_endpoint(file, |pipe, _, _| pipe.lock().capacity()).ok_or(SysError::InvalidArgument)
-}
-
-pub(super) fn set_capacity(file: &File, requested: u64) -> Result<usize, SysError> {
+fn pipe_set_capacity(pipe: &SpinLock<Pipe>, requested: u64) -> Result<usize, SysError> {
     if requested > i32::MAX as u64 {
         return Err(SysError::InvalidArgument);
     }
 
-    with_pipe_endpoint(file, |pipe, _, _| {
-        let pipe = pipe.lock();
-        let requested = requested as usize;
-        let rounded = if requested == 0 {
-            PagingArch::PAGE_SIZE_BYTES
-        } else {
-            align_up_power_of_2!(requested, PagingArch::PAGE_SIZE_BYTES)
-        };
+    let pipe = pipe.lock();
+    let requested = requested as usize;
+    let rounded = if requested == 0 {
+        PagingArch::PAGE_SIZE_BYTES
+    } else {
+        align_up_power_of_2!(requested, PagingArch::PAGE_SIZE_BYTES)
+    };
 
-        if rounded < pipe.buf.len() {
-            Err(SysError::Busy)
-        } else if rounded <= pipe.capacity() {
-            Ok(pipe.capacity())
-        } else {
-            Err(SysError::PermissionDenied)
-        }
-    })
-    .ok_or(SysError::InvalidArgument)?
+    if rounded < pipe.buf.len() {
+        Err(SysError::Busy)
+    } else if rounded <= pipe.capacity() {
+        Ok(pipe.capacity())
+    } else {
+        Err(SysError::PermissionDenied)
+    }
+}
+
+fn pipe_fcntl(file: &File, ctx: &FcntlCtx) -> Result<FileFcntlOutcome, SysError> {
+    let pipe = pipe_state(file).expect("internal error: pipe fcntl without pipe private data");
+
+    match ctx.cmd() {
+        FileFcntlCmd::GetPipeSize => Ok(FileFcntlOutcome::Handled(pipe.lock().capacity() as u64)),
+        FileFcntlCmd::SetPipeSize => Ok(FileFcntlOutcome::Handled(pipe_set_capacity(
+            pipe,
+            ctx.arg(),
+        )? as u64)),
+    }
 }
 
 fn pipe_tx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
@@ -542,23 +544,27 @@ fn pipe_tx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterRe
 
 static PIPE_RX_FILE_OPS: FileOps = FileOps {
     read: pipe_rx_read,
-    write: |_, _, _| Err(SysError::NotSupported),
-    read_at: |_, _, _| Err(SysError::IllegalSeek),
-    write_at: |_, _, _| Err(SysError::NotSupported),
+    write: |_, _, _, _| Err(SysError::NotSupported),
+    read_at: |_, _, _, _| Err(SysError::IllegalSeek),
+    write_at: |_, _, _, _| Err(SysError::NotSupported),
+    check_status_flags: accept_file_op_status_flags,
     seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_rx_poll,
+    fcntl: Some(pipe_fcntl),
     ioctl: pipe_ioctl,
 };
 
 static PIPE_TX_FILE_OPS: FileOps = FileOps {
-    read: |_, _, _| Err(SysError::NotSupported),
+    read: |_, _, _, _| Err(SysError::NotSupported),
     write: pipe_tx_write,
-    read_at: |_, _, _| Err(SysError::NotSupported),
-    write_at: |_, _, _| Err(SysError::IllegalSeek),
+    read_at: |_, _, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _, _| Err(SysError::IllegalSeek),
+    check_status_flags: accept_file_op_status_flags,
     seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: pipe_tx_poll,
+    fcntl: Some(pipe_fcntl),
     ioctl: pipe_ioctl,
 };
 
@@ -575,18 +581,12 @@ pub fn create_anonymous_pipe() -> Result<OpenedPipe, SysError> {
 
     let rx = anony_open_with(
         &inode,
-        OpenedFile {
-            file_ops: &PIPE_RX_FILE_OPS,
-            prv: AnyOpaque::new(rx),
-        },
+        OpenedFile::with_mode(&PIPE_RX_FILE_OPS, FileMode::STREAM, AnyOpaque::new(rx)),
     )?;
 
     let tx = anony_open_with(
         &inode,
-        OpenedFile {
-            file_ops: &PIPE_TX_FILE_OPS,
-            prv: AnyOpaque::new(tx),
-        },
+        OpenedFile::with_mode(&PIPE_TX_FILE_OPS, FileMode::STREAM, AnyOpaque::new(tx)),
     )?;
 
     Ok(OpenedPipe { rx, tx })

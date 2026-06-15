@@ -188,6 +188,14 @@ pub mod linux {
         pub const WEXITED: i32 = 4;
         pub const WCONTINUED: i32 = 8;
         pub const WNOWAIT: i32 = 0x1000000;
+        pub const __WNOTHREAD: i32 = 0x20000000;
+        pub const __WALL: i32 = 0x40000000;
+        pub const __WCLONE: i32 = 0x80000000u32 as i32;
+
+        pub const P_ALL: i32 = 0;
+        pub const P_PID: i32 = 1;
+        pub const P_PGID: i32 = 2;
+        pub const P_PIDFD: i32 = 3;
     }
 
     pub mod mmap {
@@ -309,6 +317,13 @@ pub mod linux {
         pub const SIGPWR: u32 = 30;
         /// Bad system call.
         pub const SIGSYS: u32 = 31;
+
+        pub const CLD_EXITED: i32 = 1;
+        pub const CLD_KILLED: i32 = 2;
+        pub const CLD_DUMPED: i32 = 3;
+        pub const CLD_TRAPPED: i32 = 4;
+        pub const CLD_STOPPED: i32 = 5;
+        pub const CLD_CONTINUED: i32 = 6;
 
         // reliable/realtime signals
         pub const SIGRTMIN: u32 = 32;

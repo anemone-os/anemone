@@ -102,18 +102,18 @@ pub struct ShmSegmentState {
 #[derive(Debug, Clone, Copy)]
 pub struct ShmPerm {
     pub key: i32,
-    pub uid: u32,
-    pub gid: u32,
-    pub cuid: u32,
-    pub cgid: u32,
+    pub uid: Uid,
+    pub gid: Gid,
+    pub cuid: Uid,
+    pub cgid: Gid,
     pub mode: u16,
     pub seq: u16,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct ShmPermUpdate {
-    pub uid: u32,
-    pub gid: u32,
+    pub uid: Uid,
+    pub gid: Gid,
     pub mode: u16,
 }
 

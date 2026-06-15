@@ -1,4 +1,7 @@
-use crate::prelude::{user_access::c_readonly_path, *};
+use crate::{
+    fs::fanotify::{FanHookEvent, FanMask, notify_path_event},
+    prelude::{user_access::c_readonly_path, *},
+};
 
 #[syscall(SYS_TRUNCATE)]
 fn sys_truncate(
@@ -24,5 +27,6 @@ fn sys_truncate(
 
     let cred = task.cred();
     pathref.inode().truncate(length as u64, &cred)?;
+    notify_path_event(FanHookEvent::new(FanMask::MODIFY, pathref));
     Ok(0)
 }

@@ -49,6 +49,8 @@ pub unsafe fn syscall(
 /// Linux syscalls. Therefore, we define Linux syscall numbers here for
 /// reference.
 pub mod linux {
+    pub const SYS_EVENTFD2: u64 = 19;
+
     pub const SYS_GETCWD: u64 = 17;
 
     pub const SYS_DUP: u64 = 23;
@@ -110,12 +112,17 @@ pub mod linux {
     pub const SYS_SYNC: u64 = 81;
     pub const SYS_FSYNC: u64 = 82;
 
+    pub const SYS_TIMERFD_CREATE: u64 = 85;
+    pub const SYS_TIMERFD_SETTIME: u64 = 86;
+    pub const SYS_TIMERFD_GETTIME: u64 = 87;
+
     pub const SYS_UTIMENSAT: u64 = 88;
     pub const SYS_CAPGET: u64 = 90;
     pub const SYS_CAPSET: u64 = 91;
 
     pub const SYS_EXIT: u64 = 93;
     pub const SYS_EXIT_GROUP: u64 = 94;
+    pub const SYS_WAITID: u64 = 95;
     pub const SYS_SET_TID_ADDRESS: u64 = 96;
     pub const SYS_FUTEX: u64 = 98;
     pub const SYS_SET_ROBUST_LIST: u64 = 99;

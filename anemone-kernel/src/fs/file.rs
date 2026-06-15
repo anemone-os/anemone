@@ -6,7 +6,23 @@ use crate::{
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct IoctlFileStatusFlags: u32 {
+    /// Open-time VFS behavior flags for one file object.
+    ///
+    /// This is not a Linux UAPI bitset or a mirror of Linux `fmode_t` values.
+    pub struct FileMode: u32 {
+        /// Ordinary read/write do not consume the VFS-managed cursor.
+        const STREAM = 0b0001;
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    /// Normalized internal view of opened-description status flags.
+    ///
+    /// This is not a Linux UAPI bitset and must not become a second owner of
+    /// mutable status state. Callers pass it as a short-lived snapshot for one
+    /// operation or one candidate-status validation.
+    pub struct FileOpStatusFlags: u32 {
         const APPEND = 0b0001;
         const NONBLOCK = 0b0010;
         const DIRECT = 0b0100;
@@ -17,11 +33,100 @@ bitflags! {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileIoCtx {
+    status_flags: FileOpStatusFlags,
+}
+
+impl FileIoCtx {
+    pub const fn new(status_flags: FileOpStatusFlags) -> Self {
+        Self { status_flags }
+    }
+
+    pub fn blocking() -> Self {
+        Self::new(FileOpStatusFlags::empty())
+    }
+
+    pub const fn status_flags(self) -> FileOpStatusFlags {
+        self.status_flags
+    }
+}
+
+/// File-object fcntl commands that may be handled by VFS backends.
+///
+/// The full Linux command set stays at the syscall adapter so fd-table,
+/// fd-local, and opened-description status commands cannot be implemented by
+/// backend hooks by accident.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileFcntlCmd {
+    GetPipeSize,
+    SetPipeSize,
+}
+
+/// Short-lived snapshot for one backend fcntl operation.
+///
+/// This carries only file-object facts. `O_PATH` and fd-table policy are
+/// rejected before this context is built, and mutable status flags remain owned
+/// by the opened file description.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FcntlAccess {
+    can_read: bool,
+    can_write: bool,
+    status_flags: FileOpStatusFlags,
+}
+
+impl FcntlAccess {
+    pub const fn new(can_read: bool, can_write: bool, status_flags: FileOpStatusFlags) -> Self {
+        Self {
+            can_read,
+            can_write,
+            status_flags,
+        }
+    }
+
+    pub const fn can_read(self) -> bool {
+        self.can_read
+    }
+
+    pub const fn can_write(self) -> bool {
+        self.can_write
+    }
+
+    pub const fn status_flags(self) -> FileOpStatusFlags {
+        self.status_flags
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FcntlCtx {
+    cmd: FileFcntlCmd,
+    arg: u64,
+    access: FcntlAccess,
+}
+
+impl FcntlCtx {
+    pub const fn new(cmd: FileFcntlCmd, arg: u64, access: FcntlAccess) -> Self {
+        Self { cmd, arg, access }
+    }
+
+    pub const fn cmd(&self) -> FileFcntlCmd {
+        self.cmd
+    }
+
+    pub const fn arg(&self) -> u64 {
+        self.arg
+    }
+
+    pub const fn access(&self) -> FcntlAccess {
+        self.access
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IoctlFileAccess {
     can_read: bool,
     can_write: bool,
     path_only: bool,
-    status_flags: IoctlFileStatusFlags,
+    status_flags: FileOpStatusFlags,
 }
 
 impl IoctlFileAccess {
@@ -29,7 +134,7 @@ impl IoctlFileAccess {
         can_read: bool,
         can_write: bool,
         path_only: bool,
-        status_flags: IoctlFileStatusFlags,
+        status_flags: FileOpStatusFlags,
     ) -> Self {
         Self {
             can_read,
@@ -51,7 +156,7 @@ impl IoctlFileAccess {
         self.path_only
     }
 
-    pub const fn status_flags(self) -> IoctlFileStatusFlags {
+    pub const fn status_flags(self) -> FileOpStatusFlags {
         self.status_flags
     }
 }
@@ -226,10 +331,15 @@ impl BackingFileHandle {
 /// VTable a file must implement to support file operations.
 #[derive(Debug)]
 pub struct FileOps {
-    pub read: fn(&File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError>,
-    pub write: fn(&File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError>,
-    pub read_at: fn(&File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError>,
-    pub write_at: fn(&File, pos: usize, buf: &[u8]) -> Result<usize, SysError>,
+    pub read: fn(&File, pos: &mut usize, buf: &mut [u8], ctx: FileIoCtx) -> Result<usize, SysError>,
+    pub write: fn(&File, pos: &mut usize, buf: &[u8], ctx: FileIoCtx) -> Result<usize, SysError>,
+    pub read_at: fn(&File, pos: usize, buf: &mut [u8], ctx: FileIoCtx) -> Result<usize, SysError>,
+    pub write_at: fn(&File, pos: usize, buf: &[u8], ctx: FileIoCtx) -> Result<usize, SysError>,
+    /// Validate a candidate opened-description status snapshot.
+    ///
+    /// This hook must be side-effect free: it may reject unsupported status
+    /// combinations, but it must not cache flags or change later I/O behavior.
+    pub check_status_flags: fn(&File, FileOpStatusFlags) -> Result<(), SysError>,
     pub seek: fn(&File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError>,
 
     /// Read a batch of directory entries starting at `pos` into `sink`.
@@ -249,7 +359,35 @@ pub struct FileOps {
     /// `Unsupported`, so syscall code cannot sleep on an unarmed source.
     pub poll: for<'a> fn(&File, &PollRequest<'a>) -> Result<PollRegisterResult, SysError>,
 
+    /// Optional backend hook for the narrowed file-object fcntl subset.
+    ///
+    /// Generic fd-owned commands must stay outside this hook. Returning
+    /// `Unhandled` asks the VFS wrapper to apply the command-family default
+    /// errno; returning `Err` means the backend handled the command and chose
+    /// that failure.
+    pub fcntl: Option<FileFcntlHook>,
     pub ioctl: for<'a> fn(&File, IoctlCtx<'a>) -> Result<u64, SysError>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileFcntlOutcome {
+    Handled(u64),
+    Unhandled,
+}
+
+pub type FileFcntlHook = fn(&File, &FcntlCtx) -> Result<FileFcntlOutcome, SysError>;
+
+pub fn accept_file_op_status_flags(
+    _file: &File,
+    _flags: FileOpStatusFlags,
+) -> Result<(), SysError> {
+    Ok(())
+}
+
+fn default_file_fcntl(_file: &File, ctx: &FcntlCtx) -> Result<u64, SysError> {
+    match ctx.cmd() {
+        FileFcntlCmd::GetPipeSize | FileFcntlCmd::SetPipeSize => Err(SysError::BadFileDescriptor),
+    }
 }
 
 mod seek {
@@ -416,15 +554,29 @@ impl<const N: usize> DirSink for FixedSizeDirSink<N> {
 pub struct File {
     path: PathRef,
     ops: &'static FileOps,
+    /// Immutable VFS behavior selected by the open path.
+    ///
+    /// This is not mutable file status and must not be changed by fcntl.
+    mode: FileMode,
     prv: AnyOpaque,
     pos: Mutex<usize>,
 }
 
 impl File {
     pub(super) fn new(path: PathRef, ops: &'static FileOps, prv: AnyOpaque) -> Self {
+        Self::new_with_mode(path, ops, FileMode::empty(), prv)
+    }
+
+    pub(super) fn new_with_mode(
+        path: PathRef,
+        ops: &'static FileOps,
+        mode: FileMode,
+        prv: AnyOpaque,
+    ) -> Self {
         Self {
             path,
             ops,
+            mode,
             prv,
             pos: Mutex::new(0),
         }
@@ -432,13 +584,15 @@ impl File {
 
     pub(super) fn path_only(path: PathRef) -> Self {
         static PATH_ONLY_FILE_OPS: FileOps = FileOps {
-            read: |_, _, _| Err(SysError::BadFileDescriptor),
-            write: |_, _, _| Err(SysError::BadFileDescriptor),
-            read_at: |_, _, _| Err(SysError::BadFileDescriptor),
-            write_at: |_, _, _| Err(SysError::BadFileDescriptor),
+            read: |_, _, _, _| Err(SysError::BadFileDescriptor),
+            write: |_, _, _, _| Err(SysError::BadFileDescriptor),
+            read_at: |_, _, _, _| Err(SysError::BadFileDescriptor),
+            write_at: |_, _, _, _| Err(SysError::BadFileDescriptor),
+            check_status_flags: accept_file_op_status_flags,
             seek: |_, _, _| Err(SysError::BadFileDescriptor),
             read_dir: |_, _, _| Err(SysError::BadFileDescriptor),
             poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::empty() & req.interests())),
+            fcntl: None,
             ioctl: |_, _| Err(SysError::BadFileDescriptor),
         };
 
@@ -451,6 +605,14 @@ impl File {
 }
 
 impl File {
+    pub const fn mode(&self) -> FileMode {
+        self.mode
+    }
+
+    pub fn is_stream(&self) -> bool {
+        self.mode().contains(FileMode::STREAM)
+    }
+
     pub fn pos(&self) -> usize {
         *self.pos.lock()
     }
@@ -474,25 +636,41 @@ impl File {
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
+        self.read_with_ctx(buf, FileIoCtx::blocking())
+    }
+
+    pub fn read_with_ctx(&self, buf: &mut [u8], ctx: FileIoCtx) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
 
-        let mut pos = self.pos.lock();
-        let read = (self.ops.read)(self, &mut *pos, buf)?;
+        if self.is_stream() {
+            // Stream files keep their cursor in the backend, if they have one.
+            // The local value only preserves the existing FileOps signature.
+            let mut pos = 0;
+            return (self.ops.read)(self, &mut pos, buf, ctx);
+        }
 
-        Ok(read)
+        let mut pos = self.pos.lock();
+        (self.ops.read)(self, &mut *pos, buf, ctx)
     }
 
     /// Reading at specified offset without changing the file cursor.
     pub fn read_at(&self, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+        self.read_at_with_ctx(pos, buf, FileIoCtx::blocking())
+    }
+
+    pub fn read_at_with_ctx(
+        &self,
+        pos: usize,
+        buf: &mut [u8],
+        ctx: FileIoCtx,
+    ) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
 
-        let read = (self.ops.read_at)(self, pos, buf)?;
-
-        Ok(read)
+        (self.ops.read_at)(self, pos, buf, ctx)
     }
 
     pub fn read_exact(&self, mut buf: &mut [u8]) -> Result<(), SysError> {
@@ -500,9 +678,23 @@ impl File {
             return Ok(());
         }
 
+        let ctx = FileIoCtx::blocking();
+        if self.is_stream() {
+            let mut pos = 0;
+            while !buf.is_empty() {
+                let read = (self.ops.read)(self, &mut pos, buf, ctx)?;
+                if read == 0 {
+                    return Err(SysError::UnexpectedEof);
+                }
+                buf = &mut buf[read..];
+            }
+
+            return Ok(());
+        }
+
         let mut pos = self.pos.lock();
         while !buf.is_empty() {
-            let read = (self.ops.read)(self, &mut *pos, buf)?;
+            let read = (self.ops.read)(self, &mut *pos, buf, ctx)?;
             if read == 0 {
                 return Err(SysError::UnexpectedEof);
             }
@@ -513,16 +705,26 @@ impl File {
     }
 
     pub fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
+        self.write_with_ctx(buf, FileIoCtx::blocking())
+    }
+
+    pub fn write_with_ctx(&self, buf: &[u8], ctx: FileIoCtx) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
 
         self.ensure_regular_content_writable()?;
 
-        let mut pos = self.pos.lock();
-
         let cred = get_current_task().cred();
-        let written = (self.ops.write)(self, &mut *pos, buf)?;
+        let written = {
+            if self.is_stream() {
+                let mut pos = 0;
+                (self.ops.write)(self, &mut pos, buf, ctx)?
+            } else {
+                let mut pos = self.pos.lock();
+                (self.ops.write)(self, &mut *pos, buf, ctx)?
+            }
+        };
         if written > 0 {
             self.inode()
                 .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
@@ -533,6 +735,15 @@ impl File {
 
     /// Writing at specified offset without changing the file cursor.
     pub fn write_at(&self, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
+        self.write_at_with_ctx(pos, buf, FileIoCtx::blocking())
+    }
+
+    pub fn write_at_with_ctx(
+        &self,
+        pos: usize,
+        buf: &[u8],
+        ctx: FileIoCtx,
+    ) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
@@ -540,7 +751,7 @@ impl File {
         self.ensure_regular_content_writable()?;
 
         let cred = get_current_task().cred();
-        let written = (self.ops.write_at)(self, pos, buf)?;
+        let written = (self.ops.write_at)(self, pos, buf, ctx)?;
         if written > 0 {
             self.inode()
                 .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
@@ -549,46 +760,26 @@ impl File {
         Ok(written)
     }
 
-    pub fn write_all(&self, mut buf: &[u8]) -> Result<(), SysError> {
-        if buf.len() == 0 {
-            return Ok(());
-        }
-
-        self.ensure_regular_content_writable()?;
-
-        let mut pos = self.pos.lock();
-        let cred = get_current_task().cred();
-        while !buf.is_empty() {
-            let written = (self.ops.write)(self, &mut *pos, buf)?;
-            if written == 0 {
-                // TODO: EIO here is not that accurate.
-                knoticeln!(
-                    "write returned 0, but there's still data to write. treating it as an IO error"
-                );
-                return Err(SysError::IO);
-            }
-            self.inode()
-                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
-            buf = &buf[written..];
-        }
-
-        Ok(())
-    }
-
     /// Different from [Self::seek] + [Self::write], this is an atomic
     /// operation.
     pub fn append(&self, buf: &[u8]) -> Result<usize, SysError> {
+        self.append_with_ctx(buf, FileIoCtx::blocking())
+    }
+
+    pub fn append_with_ctx(&self, buf: &[u8], ctx: FileIoCtx) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
 
         self.ensure_regular_content_writable()?;
 
-        let mut pos = self.pos.lock();
         let sz = self.inode().get_attr()?.size as usize;
-        *pos = sz;
         let cred = get_current_task().cred();
-        let written = (self.ops.write)(self, &mut *pos, buf)?;
+        let written = {
+            let mut pos = self.pos.lock();
+            *pos = sz;
+            (self.ops.write)(self, &mut *pos, buf, ctx)?
+        };
         if written > 0 {
             self.inode()
                 .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
@@ -598,30 +789,31 @@ impl File {
 
     /// Append without changing the file cursor.
     pub fn append_at_current_end(&self, buf: &[u8]) -> Result<usize, SysError> {
+        self.append_at_current_end_with_ctx(buf, FileIoCtx::blocking())
+    }
+
+    pub fn append_at_current_end_with_ctx(
+        &self,
+        buf: &[u8],
+        ctx: FileIoCtx,
+    ) -> Result<usize, SysError> {
         if buf.len() == 0 {
             return Ok(0);
         }
 
         self.ensure_regular_content_writable()?;
 
-        let _pos = self.pos.lock();
         let mut append_pos = self.inode().get_attr()?.size as usize;
         let cred = get_current_task().cred();
-        let written = (self.ops.write)(self, &mut append_pos, buf)?;
+        let written = {
+            let _pos = self.pos.lock();
+            (self.ops.write)(self, &mut append_pos, buf, ctx)?
+        };
         if written > 0 {
             self.inode()
                 .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
         }
         Ok(written)
-    }
-
-    /// Run `f` with the file cursor as `pos`.
-    pub fn with_pos<F, R>(&self, f: F) -> Result<R, SysError>
-    where
-        F: FnOnce(&mut usize) -> Result<R, SysError>,
-    {
-        let mut pos = self.pos.lock();
-        f(&mut *pos)
     }
 
     pub fn seek(&self, from: SeekFrom) -> Result<usize, SysError> {
@@ -652,8 +844,23 @@ impl File {
         (self.ops.poll)(self, request)
     }
 
+    pub fn fcntl(&self, ctx: FcntlCtx) -> Result<u64, SysError> {
+        if let Some(fcntl) = self.ops.fcntl {
+            match fcntl(self, &ctx)? {
+                FileFcntlOutcome::Handled(ret) => return Ok(ret),
+                FileFcntlOutcome::Unhandled => {},
+            }
+        }
+
+        default_file_fcntl(self, &ctx)
+    }
+
     pub fn ioctl(&self, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
         (self.ops.ioctl)(self, ctx)
+    }
+
+    pub fn check_status_flags(&self, flags: FileOpStatusFlags) -> Result<(), SysError> {
+        (self.ops.check_status_flags)(self, flags)
     }
 
     pub fn get_attr(&self) -> Result<InodeStat, SysError> {
