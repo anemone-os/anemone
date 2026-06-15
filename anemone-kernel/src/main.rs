@@ -134,27 +134,25 @@ fn exec_init_proc() {
     {
         use device::console::{open_console_stdin, open_console_stdout};
         let kinit = get_current_task();
-        kinit.open_fd(
-            open_console_stdin(),
-            OpenAccessMode::Read,
-            FileStatusFlags::empty(),
-            LinuxOpenCompat::empty(),
-            FdFlags::empty(),
-        );
-        kinit.open_fd(
-            open_console_stdout(),
-            OpenAccessMode::Write,
-            FileStatusFlags::empty(),
-            LinuxOpenCompat::empty(),
-            FdFlags::empty(),
-        );
-        kinit.open_fd(
-            open_console_stdout(),
-            OpenAccessMode::Write,
-            FileStatusFlags::empty(),
-            LinuxOpenCompat::empty(),
-            FdFlags::empty(),
-        );
+        let open_stdio = |file: File, access| {
+            let status = FileStatusFlags::empty();
+            // Boot stdio is an anonymous console protocol: no Linux open flags
+            // are accepted here, but keep the status hook boundary explicit.
+            file.check_status_flags(status.to_file_op_status_flags())
+                .expect("initial stdio status rejected");
+            kinit
+                .open_fd(
+                    file,
+                    access,
+                    status,
+                    LinuxOpenCompat::empty(),
+                    FdFlags::empty(),
+                )
+                .expect("failed to open initial stdio fd");
+        };
+        open_stdio(open_console_stdin(), OpenAccessMode::Read);
+        open_stdio(open_console_stdout(), OpenAccessMode::Write);
+        open_stdio(open_console_stdout(), OpenAccessMode::Write);
     }
 
     // set up initial root and cwd for inheritance.

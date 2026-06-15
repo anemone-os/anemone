@@ -375,7 +375,12 @@ fn ext4_reg_state(inode: &InodeRef) -> Result<Arc<Ext4RegState>, SysError> {
     Ok(ext4_reg(inode)?.state().clone())
 }
 
-fn ext4_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn ext4_read(
+    file: &File,
+    pos: &mut usize,
+    buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let inode = file.inode();
     if inode.ty() != InodeType::Regular {
         return Err(SysError::NotReg);
@@ -394,12 +399,22 @@ fn ext4_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysE
     Ok(n)
 }
 
-fn ext4_read_at(file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn ext4_read_at(
+    file: &File,
+    pos: usize,
+    buf: &mut [u8],
+    ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let mut local_pos = pos;
-    ext4_read(file, &mut local_pos, buf)
+    ext4_read(file, &mut local_pos, buf, ctx)
 }
 
-fn ext4_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysError> {
+fn ext4_write(
+    file: &File,
+    pos: &mut usize,
+    buf: &[u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let inode = file.inode();
     if inode.ty() != InodeType::Regular {
         return Err(SysError::NotReg);
@@ -415,9 +430,9 @@ fn ext4_write(file: &File, pos: &mut usize, buf: &[u8]) -> Result<usize, SysErro
     Ok(buf.len())
 }
 
-fn ext4_write_at(file: &File, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
+fn ext4_write_at(file: &File, pos: usize, buf: &[u8], ctx: FileIoCtx) -> Result<usize, SysError> {
     let mut local_pos = pos;
-    ext4_write(file, &mut local_pos, buf)
+    ext4_write(file, &mut local_pos, buf, ctx)
 }
 
 fn ext4_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
@@ -476,32 +491,38 @@ pub(super) static EXT4_REG_FILE_OPS: FileOps = FileOps {
     write: ext4_write,
     read_at: ext4_read_at,
     write_at: ext4_write_at,
+    check_status_flags: accept_file_op_status_flags,
     seek: ext4_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| {
         Ok(req.ready_or_unsupported((PollEvent::READABLE | PollEvent::WRITABLE) & req.interests()))
     },
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 pub(super) static EXT4_DIR_FILE_OPS: FileOps = FileOps {
-    read: |_, _, _| Err(SysError::IsDir),
-    write: |_, _, _| Err(SysError::IsDir),
-    read_at: |_, _, _| Err(SysError::IsDir),
-    write_at: |_, _, _| Err(SysError::IsDir),
+    read: |_, _, _, _| Err(SysError::IsDir),
+    write: |_, _, _, _| Err(SysError::IsDir),
+    read_at: |_, _, _, _| Err(SysError::IsDir),
+    write_at: |_, _, _, _| Err(SysError::IsDir),
+    check_status_flags: accept_file_op_status_flags,
     seek: seek_dir_rewind,
     read_dir: ext4_read_dir,
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 pub(super) static EXT4_SYMLINK_FILE_OPS: FileOps = FileOps {
-    read: |_, _, _| Err(SysError::NotSupported),
-    write: |_, _, _| Err(SysError::NotSupported),
-    read_at: |_, _, _| Err(SysError::NotSupported),
-    write_at: |_, _, _| Err(SysError::NotSupported),
+    read: |_, _, _, _| Err(SysError::NotSupported),
+    write: |_, _, _, _| Err(SysError::NotSupported),
+    read_at: |_, _, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _, _| Err(SysError::NotSupported),
+    check_status_flags: accept_file_op_status_flags,
     seek: |_, _, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };

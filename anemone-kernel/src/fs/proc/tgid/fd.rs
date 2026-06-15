@@ -180,10 +180,7 @@ fn proc_fd_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
     let dir = proc_fd_dir_private(inode);
     let _leader = validate_fd_access(&dir.binding)?;
 
-    Ok(OpenedFile {
-        file_ops: &PROC_FD_DIR_FILE_OPS,
-        prv: NilOpaque::new(),
-    })
+    Ok(OpenedFile::new(&PROC_FD_DIR_FILE_OPS, NilOpaque::new()))
 }
 
 fn proc_fd_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
@@ -312,13 +309,15 @@ static PROC_FD_ENTRY_INODE_OPS: InodeOps = InodeOps {
 };
 
 static PROC_FD_DIR_FILE_OPS: FileOps = FileOps {
-    read: |_, _, _| Err(SysError::IsDir),
-    write: |_, _, _| Err(SysError::IsDir),
-    read_at: |_, _, _| Err(SysError::IsDir),
-    write_at: |_, _, _| Err(SysError::IsDir),
+    read: |_, _, _, _| Err(SysError::IsDir),
+    write: |_, _, _, _| Err(SysError::IsDir),
+    read_at: |_, _, _, _| Err(SysError::IsDir),
+    write_at: |_, _, _, _| Err(SysError::IsDir),
+    check_status_flags: accept_file_op_status_flags,
     seek: seek_dir_rewind,
     read_dir: proc_fd_read_dir,
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 

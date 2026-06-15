@@ -6,7 +6,7 @@ mod ltp;
 
 use anemone_rs::{
     abi::{
-        fs::linux::open::{O_RDONLY, O_TRUNC, O_WRONLY},
+        fs::linux::open::{O_CREAT, O_RDONLY, O_TRUNC, O_WRONLY},
         system::native::power::SHUTDOWN_MAGIC,
     },
     os::{
@@ -64,12 +64,28 @@ cfg_select! {
             "ld-musl-riscv64.so.1",
             "ld-musl-riscv64-sf.so.1",
         ];
+        const STAGED_COMPETITION_FIXTURES: &[StagedCompetitionFixture] = &[
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/mke2fs",
+                dest: "/bin/mkfs.ext4",
+            },
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/mke2fs",
+                dest: "/bin/mkfs.ext3",
+            },
+        ];
     },
     target_arch = "loongarch64" => {
         const ACTIVE_LIB_DIR: &str = "/lib64";
         const ACTIVE_LIB_DIRS: &[&str] = &["/lib64", "/usr/lib64"];
         const MUSL_LOADER_NAMES: &[&str] = &["ld-musl-loongarch-lp64d.so.1"];
+        const STAGED_COMPETITION_FIXTURES: &[StagedCompetitionFixture] = &[];
     }
+}
+
+struct StagedCompetitionFixture {
+    source: &'static str,
+    dest: &'static str,
 }
 
 fn wait_child_exit_ok(pid: u32, name: &str) {
@@ -161,6 +177,24 @@ fn ensure_dir(path: &str) {
     }
 }
 
+fn ensure_dir_tree(path: &str) {
+    let mut current = String::new();
+    for component in path.split('/') {
+        if component.is_empty() {
+            if current.is_empty() {
+                current.push('/');
+            }
+            continue;
+        }
+
+        if current.len() > 1 {
+            current.push('/');
+        }
+        current.push_str(component);
+        ensure_dir(current.as_str());
+    }
+}
+
 fn bootstrap_busybox() -> &'static str {
     if fstatat(AtFd::Cwd, Path::new(BOOTSTRAP_BUSYBOX_PRIMARY)).is_ok() {
         BOOTSTRAP_BUSYBOX_PRIMARY
@@ -210,6 +244,9 @@ fn mount_competition_root() {
     mount(None, Path::new("/dev"), "devfs").expect("user-test: failed to mount devfs on /dev");
     mount(Some(Path::new(COMPETITION_DISK)), Path::new("/mnt"), "ext4")
         .expect("user-test: failed to mount /dev/vdb on /mnt with ext4");
+    // Staged tools live on the boot rootfs and disappear after chroot, so copy
+    // them into the mounted competition image before entering it.
+    install_staged_competition_fixtures("/mnt");
 
     println!("user-test: entering environment...");
     chroot("/mnt").expect("user-test: failed to chroot to /mnt");
@@ -312,13 +349,73 @@ fn read_file(path: &str) -> Result<Vec<u8>, Errno> {
 
 fn write_all(fd: u32, mut buf: &[u8], path: &str) {
     while !buf.is_empty() {
-        let written = write(fd, buf).unwrap_or_else(|errno| {
-            panic!("user-test: failed to write normalized script {path}: {errno:?}")
-        });
+        let written = write(fd, buf)
+            .unwrap_or_else(|errno| panic!("user-test: failed to write {path}: {errno:?}"));
         if written == 0 {
-            panic!("user-test: short write while normalizing script {path}");
+            panic!("user-test: short write while writing {path}");
         }
         buf = &buf[written..];
+    }
+}
+
+fn copy_staged_fixture(source: &str, dest: &str) {
+    let source_fd = openat(AtFd::Cwd, Path::new(source), O_RDONLY, 0).unwrap_or_else(|errno| {
+        panic!("user-test: failed to open staged fixture source {source}: {errno:?}")
+    });
+    let dest_fd = openat(
+        AtFd::Cwd,
+        Path::new(dest),
+        O_WRONLY | O_CREAT | O_TRUNC,
+        0o755,
+    )
+    .unwrap_or_else(|errno| {
+        panic!("user-test: failed to create staged fixture dest {dest}: {errno:?}")
+    });
+
+    let mut buf = [0u8; 4096];
+    loop {
+        let count = read(source_fd, &mut buf).unwrap_or_else(|errno| {
+            panic!("user-test: failed to read staged fixture source {source}: {errno:?}")
+        });
+        if count == 0 {
+            break;
+        }
+        write_all(dest_fd, &buf[..count], dest);
+    }
+
+    close(source_fd).unwrap_or_else(|errno| {
+        panic!("user-test: failed to close staged fixture source {source}: {errno:?}")
+    });
+    close(dest_fd).unwrap_or_else(|errno| {
+        panic!("user-test: failed to close staged fixture dest {dest}: {errno:?}")
+    });
+}
+
+fn parent_dir(path: &str) -> &str {
+    match path.rsplit_once('/') {
+        Some(("", _)) => "/",
+        Some((parent, _)) => parent,
+        None => ".",
+    }
+}
+
+fn install_staged_competition_fixtures(mountpoint: &str) {
+    for fixture in STAGED_COMPETITION_FIXTURES {
+        if let Err(errno) = fstatat(AtFd::Cwd, Path::new(fixture.source)) {
+            println!(
+                "user-test: missing staged competition fixture: source {} -> dest {} ({errno:?})",
+                fixture.source, fixture.dest
+            );
+            panic!("user-test: staged competition fixture source missing");
+        }
+
+        let dest = format!("{mountpoint}{}", fixture.dest);
+        ensure_dir_tree(parent_dir(dest.as_str()));
+        copy_staged_fixture(fixture.source, dest.as_str());
+        println!(
+            "user-test: installed staged competition fixture: {} -> {}",
+            fixture.source, fixture.dest
+        );
     }
 }
 
@@ -359,6 +456,19 @@ fn prepare_testcode(family: &str) {
     }
 }
 
+fn runtime_for_test_script<'a>(family: &'a str, script: &str) -> &'a str {
+    // The contest images currently label basic_testcode.sh under /musl, but
+    // their basic/* ELF binaries still carry the arch glibc PT_INTERP path.
+    // Keep the musl script tree intact and expose the glibc loader only while
+    // this script runs.  Remove this bridge once the images ship musl-linked
+    // basic binaries or a loader layout that makes /musl/basic self-contained.
+    if family == "musl" && script == "basic_testcode.sh" {
+        "glibc"
+    } else {
+        family
+    }
+}
+
 fn run_test_family(family: &str, scripts: &[&str]) {
     switch_runtime(family);
     prepare_testcode(family);
@@ -366,10 +476,17 @@ fn run_test_family(family: &str, scripts: &[&str]) {
 
     println!("user-test: running {family} competition tests...");
     let workdir = format!("/{family}");
+    let mut active_runtime = family;
     for script in scripts {
         let script_path = format!("{workdir}/{script}");
         if fstatat(AtFd::Cwd, Path::new(script_path.as_str())).is_err() {
             panic!("user-test: missing competition script {script_path}");
+        }
+        let script_runtime = runtime_for_test_script(family, script);
+        if script_runtime != active_runtime {
+            println!("user-test: using {script_runtime} runtime for {family} {script}...");
+            switch_runtime(script_runtime);
+            active_runtime = script_runtime;
         }
         println!("user-test: running {family} {script}...");
         run_busybox_in_dir(workdir.as_str(), &["busybox", "sh", script], script);

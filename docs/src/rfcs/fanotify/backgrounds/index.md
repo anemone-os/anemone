@@ -10,6 +10,7 @@ Canonical：
 
 历史材料：
 
+- [Agent 编排建议](./agent-orchestration.md)
 - [Linux fanotify ABI 与客观语义参考手册](./fanotify-reference-20260531.md)
 - [fanotify 基础设施评估](./infra-assessment-20260604.md)
 - [LTP fanotify 测例调查报告](./ltp-fanotify-coverage-20260605.md)

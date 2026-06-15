@@ -153,6 +153,9 @@ pub enum SysError {
     NoSuchProcess,
     /// Literal meaning.
     Timeout,
+    /// The filesystem type is not supported.
+    UnsupportedFileSystem,
+
     /// The syscall should be restarted after interruption.
     RestartSyscall(RestartSyscall),
 }
@@ -227,7 +230,8 @@ impl SysError {
             | SysError::NoInterruptInfo
             | SysError::MissingResource
             | SysError::UnknownInterrupt
-            | SysError::ProbeFailed => ENODEV,
+            | SysError::ProbeFailed
+            | SysError::UnsupportedFileSystem => ENODEV,
             SysError::NoSuchDeviceOrAddress => ENXIO,
             SysError::IO => EIO,
             SysError::UnexpectedEof => ENODATA,

@@ -81,6 +81,12 @@ pub fn kernel_exit(code: ExitCode) -> ! {
 
         defer_to_dispose(task.clone());
 
+        // Opened-description final-release can run fanotify mark cleanup and
+        // wake waiters, so it must happen while the exiting task is still in a
+        // sleepable, interrupts-enabled process context. Deferred task disposal
+        // and `Drop` are memory cleanup only.
+        task.close_all_fds_for_exit();
+
         task.set_exit_code(code);
 
         // TODO: this is not very accurate. but good enough for now.

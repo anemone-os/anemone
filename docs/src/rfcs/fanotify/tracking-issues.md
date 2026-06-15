@@ -1,9 +1,9 @@
 # fanotify tracking issues
 
 **状态：** Active
-**最后更新：** 2026-06-05
+**最后更新：** 2026-06-10
 **父 RFC：** [RFC-20260604-fanotify](./index.md)
-**来源：** 2026-06-04 system-design review；2026-06-05 software-engineering review；2026-06-05 ioctl-loop / fileops-seek freshness review
+**来源：** 2026-06-04 system-design review；2026-06-05 software-engineering review；2026-06-05 ioctl-loop / fileops-seek freshness review；2026-06-09 Gate C runtime regression review；2026-06-10 D5 event source boundary review；2026-06-10 D7 bypass review
 
 本文只跟踪 design review 后确认的 fanotify 草案缺陷、证明缺口、边界冲突或需要回到草案修改的设计问题。
 
@@ -32,6 +32,117 @@
 - 暂无。
 
 ## Neutralized
+
+### FANOTIFY-043: `FanPathKey` 不得错误收窄 inode mark identity
+
+**状态：** Neutralized
+
+**发现证据：** D7 旁路审计确认 `FanPathKey { mount, dentry }` 仅在 `types.rs` 中定义，未参与
+mark install 或 self/child matching 证据链。与此同时，RFC 已要求 path/self/child
+匹配不得退回到只看 inode 或 dentry-only helper 的不可复审形态。
+
+**原问题：** 仅为消除未使用占位而把 `FanPathKey` 接入 `FanTarget::Inode`、add/remove
+或 self/child matching，会把 Linux-style inode mark 错误收窄成安装时 path mark。同一 inode
+经 hardlink、rename 后路径或 bind mount 等别名触发事件时，inode mark 仍应按 inode identity
+匹配；不同路径不应在同一 group 下制造多份互相独立的 inode mark。
+
+**实际修复：** 当前阶段删除 `FanPathKey` 代码占位，并明确基础 inode mark 只以
+`FanTargetKey::Inode` 作为行为 identity。`PathRef` 继续作为 queued event target 和 path-fd
+reopen snapshot；parent-child matching 继续使用 parent inode identity 与 `FAN_EVENT_ON_CHILD`。
+后续 FID/name/rename 或其它 path-specific gate 若需要 mount+dentry identity，必须以明确消费者
+重新引入 dedicated key 类型，不能把该 key 接到 inode mark add/remove/matching 上。
+
+**复核与残余风险：** D7 bypass search 未发现 syscall / VFS / task-fd / procfs 层 downcast
+fanotify private state，未发现暂缓 feature silent success。完整 bind-mount / hardlink merge-order、
+`FAN_MARK_IGNORE`、FID/name/rename path identity 和 fdinfo 可观测性仍属 Stage 5 独立 gate。
+
+### FANOTIFY-042: D5 事件源边界不得停留在 `fs::File` / `*_opened()` 桥
+
+**状态：** Neutralized
+
+**发现证据：** D5 runtime corrective repair 已证明内核内部 direct `File` helper 会进入 loop/ext4
+backing I/O、exec loader、VMO datasource 或 filesystem backend 路径；若这些路径查询 fanotify
+no-notify state 或 registry，可能在 preemption-disabled / non-sleepable 上下文触发普通 `Mutex`
+或 fanotify queue 逻辑。后续实现通过 `File::{read,read_at,write,write_at,append,...}` 默认
+suppression、再由 `File::*_opened()` 让 `FileDesc` 传入 `notification_suppressed` 来恢复用户 fd
+事件。这修复了 panic，但把“用户可见 fd 操作”这个 policy 塞进了 `fs::File`。
+
+**原问题：** `fs::File` 在 Anemone 中既是用户 fd 背后的 opened object，也是大量内核内部 I/O 的
+直接 handle。把 fanotify 触发、`notification_suppressed` 判断或 `*_opened()` wrapper 留在
+`fs::File`，会让后续每个 direct `File` 调用点都需要证明自己是不是用户可见事件源；这违反单一
+真相源和窄接口原则，也会阻塞 D6 / Stage 5 继续扩展事件种类。
+
+**RFC 修正落点：**
+
+- [RFC index](./index.md) 将下一步改为先收口 user-visible fd/API event boundary，再启动 D6。
+- [不变量需求](./invariants.md) 现在明确：syscall/API helper 与 task/fd lifecycle 拥有基础事件源；
+  `fs::File` / backend `FileOps` 必须 fanotify-agnostic，不得保留 fanotify import、
+  notification suppression 参数或 `*_opened()` 用户 fd wrapper。
+- [迁移实施计划](./implementation.md) 的 Stage 3 改名为 user-visible fd/API event boundary 与
+  path-fd read，并把 open、read/write syscall helper、metadata syscall/API 和 opened-description
+  final-release 分别列为事件源。
+
+**实际修复：** `fs::File` 已删除 fanotify import、`notify_fanotify()`、`*_with_notify()`
+suppression 参数和 `read_opened()` / `write_opened()` / `append_opened()` wrapper；`FileDesc`
+重新只做 fd 权限检查并调用普通 `File` backend helper。`FAN_ACCESS` / `FAN_MODIFY` 迁到
+`fs/api/read_write` 共用 helper 的成功边界，vectored I/O 在总成功字节数确定后只提交一次；
+`sendfile` 按 input fd 成功读出和 output fd 成功写入分别提交一次；`ftruncate` 在 syscall
+成功后提交 `FAN_MODIFY`。`truncate(path)`、`fallocate` grow 和 `O_TRUNC` 继续在对应 API 成功
+边界提交 `FAN_MODIFY`，`FAN_OPEN` 继续由 `openat` 在 fd publish 前提交，`FAN_CLOSE_*` 继续由
+opened-description final-release callback 提交。
+
+**Read-user control fd 收口：** shared read helper 不在 syscall 层 downcast fanotify private
+state；它通过 generic opened-description 能力位判断 direct read-user hook 是否属于 ordinary
+`FAN_ACCESS` source。fanotify group fd 的 read-user path 显式关闭该能力，因此即使用户用
+`fanotify_mark(pathname == NULL, dfd=fanotify_fd)` 标记控制 fd，`read(fanotify_fd)` 也不会递归
+向该 group 入队。
+
+**No-notify 收口：** `NoNotifyGuard`、`NO_NOTIFY_GUARDS` 和
+`current_task_notifications_suppressed()` 已删除；`notify_path_event()` 只检查 event 自带的
+opened-description suppression marker。fanotify event fd 创建仍安装
+`FileDescOps { notification_suppressed: true, ... }`，使该 fd 后续 I/O 和 final-release
+不递归生成 fanotify event。
+
+### FANOTIFY-041: fd table / task `Drop` 不得触发 group semantic teardown
+
+**状态：** Neutralized
+
+**发现证据：** D4 完成后的 `fanotify07` runtime smoke 中，permission event probe 按当前 RFC
+暂缓边界返回 `EINVAL` 并被 LTP 归类为 `TCONF`，但 testcase 退出后 panic：
+`fanotify/registry.rs:218: Mutex cannot be locked when interrupts are disabled`。触发链路是
+fanotify group fd opened-description final-release 进入 `mark_dead()`，而 final-release 可能由
+task / fd table 的 deferred drop 或 scheduler/trap cleanup 间接触发，此时 interrupts 可能已关闭。
+
+**RFC 修正落点：**
+
+- [不变量需求](./invariants.md) 现在明确：group semantic teardown 必须由 task/fd 显式
+  close / exit / fd-table replacement 生命周期路径触发；`Drop`、memory last-drop 和 deferred
+  task dispose 不得执行 fanotify registry mutation、waiter wakeup 或其它系统资源释放。
+- [迁移实施计划](./implementation.md) 的 Stage 1 现在要求 opened-description final-release hook
+  在可睡眠、interrupts-enabled 的显式生命周期路径运行；`FilesState::drop()` / task `Drop`
+  只能释放内存或断言显式清理遗漏。
+
+**原问题：** RFC 已经区分 semantic close 与 memory last-drop，但仍允许实现者把
+opened-description final-release 的最后兜底留给 fd table / task 析构路径。析构路径可能出现在
+deferred task dispose、scheduler loop 或 interrupt-return cleanup 中，不能拿普通 `Mutex`、触发
+waiter 或修改全局 registry。若继续让 `Drop` 补做系统资源释放，fanotify group close、mark
+registry cleanup 和后续 `FAN_CLOSE_*` release 都会继承同一个不可复审的上下文风险。
+
+**实施修复要求：** task/fd 层必须在显式 close、task exit、fd-table replacement / unshare 等路径
+drain published fd refs 并运行 opened-description final-release；`FilesState::drop()` 不得再调用
+`release_description_ref()`，只能断言没有 published / reserved slot。fanotify final-release 入口
+应断言当前可睡眠 / interrupts enabled，以防后续回归。修复后 `fanotify07` 可以继续 TCONF，但不
+得 panic。
+
+**实际修复：** `task/files.rs` 新增显式 fd-table drain 路径，`kernel_exit()`、fd-table
+replacement / unshare 和 clone 失败清理在可睡眠、interrupts-enabled 的显式生命周期点摘除
+published fd refs 并在锁外运行 opened-description final-release。`FilesState::drop()` 不再补做
+final-release，只断言没有 published / reserved slot。fanotify group fd final-release 入口断言
+非 notification-suppressed、interrupts enabled 且 sleepable，再执行 `mark_dead()`。
+
+**复核与残余风险：** review agent 未发现 Apollyon / Keter。`Arc::strong_count == 1` 作为
+fd-table drain 的保守条件不是精确 task-owner 计数；若未来出现非 owner observer 跨越最后 task
+owner exit 的真实路径，`FilesState::drop()` 会断言暴露遗漏，而不会在 Drop 中静默执行系统资源释放。
 
 ### FANOTIFY-001A: blocking `read(fanotify_fd)` 与首个 group fd gate 未闭合
 
@@ -76,7 +187,7 @@
 
 - [RFC index](./index.md) 的风险明确：`FAN_CLOSE_*` 正式语义绑定 opened file description release；fd-close bridge 只能是 temporary LTP bridge。
 - [不变量需求](./invariants.md) 的状态所有权明确：每个被监控 opened file description 保存 fanotify close snapshot，dup/fork 共享时只在最后 release 产生一次 close event。
-- [迁移实施计划](./implementation.md) 的 Stage 3 明确 snapshot 字段：`PathRef` / `FanPathKey` 和打开时 access mode 是否包含写能力；release hook 基于写打开能力选择 `FAN_CLOSE_WRITE` 或 `FAN_CLOSE_NOWRITE`。
+- [迁移实施计划](./implementation.md) 的 Stage 3 明确 snapshot 字段：`PathRef` 和打开时 access mode 是否包含写能力；release hook 基于写打开能力选择 `FAN_CLOSE_WRITE` 或 `FAN_CLOSE_NOWRITE`。
 
 **原问题：** `FAN_CLOSE_NOWRITE` / `FAN_CLOSE_WRITE` 的语义来源必须是被监控对象的 opened file description release，而不是 fanotify group fd 自己的 close，也不是任意 fd number close。
 
@@ -86,7 +197,7 @@
 
 **修复落点：**
 
-- [不变量需求](./invariants.md) 的闭合条件要求首个真实 VFS enqueue 前必须有固定 cap 和 overflow sentinel。
+- [不变量需求](./invariants.md) 的闭合条件要求首个真实 fanotify enqueue 前必须有固定 cap 和 overflow sentinel。
 - [迁移实施计划](./implementation.md) 的 Stage 1 固定默认 `DEFAULT_MAX_EVENTS = 16384`，group state 保存 `max_events`、`overflow_queued`、`dropped_events`。
 - [迁移实施计划](./implementation.md) 明确队满策略：若没有 overflow sentinel，排入单个 `FAN_Q_OVERFLOW` / `FAN_NOFD` event；若 sentinel 已排队，丢弃新事件并计数。
 
@@ -99,7 +210,7 @@
 **修复落点：**
 
 - [不变量需求](./invariants.md) 的身份模型明确 `FanTargetKey::{Inode, Mount, SuperBlock}` 集中定义相等和 hash；首批可封装 pointer identity 或对象内 stable id，但 callsite 不得比较裸指针。
-- [迁移实施计划](./implementation.md) 的 Stage 2 定义 `FanPathKey { mount, dentry }`，path/self/child 匹配不得依赖 `PathRef::location_eq()` 的 dentry-only TODO 行为。
+- [迁移实施计划](./implementation.md) 的 Stage 2 明确基础 self/child 匹配不依赖 `PathRef::location_eq()` 的 dentry-only TODO 行为，也不把 inode mark 收窄成安装时 path mark；后续 path-specific gate 如需 mount+dentry identity，必须以明确消费者重新引入 dedicated key 类型。
 - [迁移实施计划](./implementation.md) 的 Stage 2 给出 `marks_by_target`、`mark_handles` 和 `MarkHandle` 数据关系。
 
 **原问题：** 原草案写 inode / mount / filesystem mark 使用 `InodeRef`、`Arc<Mount>`、`Arc<SuperBlock>` identity，但没有定义可复审的 key 构造、相等和 hash 规则。
@@ -181,8 +292,8 @@
 
 **修复落点：**
 
-- [不变量需求](./invariants.md) 的锁序与生命周期规则定义两层 no-notify 模型：构造期 `NoNotifyGuard` 抑制 metadata fd open 自激，返回给用户的 event fd 还带 kernel-only no-notify 标记。
-- [迁移实施计划](./implementation.md) 的 Stage 3 将构造期 guard 和 event-fd no-notify 标记作为交付项，并明确它们不绕过普通 VFS 权限、生命周期或用户可见 I/O 语义。
+- [不变量需求](./invariants.md) 的锁序与生命周期规则定义 event-fd opened-description no-notify 模型：返回给用户的 event fd 带 kernel-only no-notify 标记，后续 I/O / close / final-release 不递归生成 fanotify event。
+- [迁移实施计划](./implementation.md) 的 Stage 3 明确：fanotify event-fd helper 只走不发通知的内部 object-open 路径，构造期 guard 已删除；event-fd no-notify 标记不绕过普通 VFS 权限、生命周期或用户可见 I/O 语义。
 
 **原问题：** 草案禁止 fanotify 内部 open 递归生成 fanotify event，但没有定义 guard 形态。
 
@@ -303,10 +414,10 @@
 
 **修复落点：**
 
-- [不变量需求](./invariants.md) 的 no-notify 模型改为两层：构造期 `NoNotifyGuard` 抑制 metadata fd open 自激；返回给用户的 event object fd 还必须在 opened file description 上携带 kernel-only no-notify 标记。
-- [迁移实施计划](./implementation.md) 的 Stage 3 交付和审计要求 event fd 后续 read/write/close 不反向生成 fanotify event，且标记不得泄漏到普通用户 open。
+- [不变量需求](./invariants.md) 的 no-notify 模型改为 opened-description suppression：返回给用户的 event object fd 必须在 opened file description 上携带 kernel-only no-notify 标记；event-fd helper 只使用内部 object-open 路径，不保留构造期 guard。
+- [迁移实施计划](./implementation.md) 的 Stage 3 交付和审计要求 event fd 后续 read/write/close/final-release 不反向生成 fanotify event，且标记不得泄漏到普通用户 open。
 
-**原问题：** 原草案只要求 fanotify 内部 open 有 guard，同时禁止 guard 泄漏到普通用户 open/read/write/close。path-fd read 返回给用户的 event fd 后续 I/O / close 若重新进入 fanotify hook，会形成自激队列；但完全禁止 fd 上的持久 no-notify 标记又会挡住正确模型。
+**原问题：** 原草案只要求 fanotify 内部 open 有 guard，同时禁止 guard 泄漏到普通用户 open/read/write/close。path-fd read 返回给用户的 event fd 后续 I/O / close 若重新进入 fanotify hook，会形成自激队列；但完全禁止 fd 上的持久 no-notify 标记又会挡住正确模型。后续 `FANOTIFY-042` 已把事件源收紧到 syscall/API + task/fd lifecycle，因此构造期 guard 不再是默认长期抽象。
 
 ### FANOTIFY-024: path-fd read 的 fd reserve / commit helper 缺少不可失败契约
 
@@ -391,11 +502,11 @@
 
 **修复落点：**
 
-- [RFC index](./index.md) 的方案明确 `fs::fanotify` 是 owner module，并按 group / event / queue / registry / mark / file / hooks 等职责拆分，只有 module facade 暴露窄 API。
-- [迁移实施计划](./implementation.md) 的迁移原则、Stage 0 和 Stage 1 前置条件要求 syscall / VFS / task-fd 层只通过 typed facade 交互，不能访问 registry、queue、mark record、group lock 或 file private state。
-- [不变量需求](./invariants.md) 的闭合条件和状态所有权禁止模块外 downcast fanotify private state 或访问内部 storage。
+- [RFC index](./index.md) 的方案明确 `fs::fanotify` 是 owner module，并固定 `mod.rs`、`types.rs`、`api/{mod,init,mark}.rs`、`group.rs`、`file.rs`、`event.rs`、`queue.rs`、`registry.rs`、`mark.rs`、`hooks.rs` 文件骨架。
+- [迁移实施计划](./implementation.md) 的迁移原则、Stage 0 和 Stage 1 前置条件要求 fanotify syscall API 位于 `fs/fanotify/api/`，syscall dispatch / VFS / task-fd 层只通过 typed facade 交互，不能访问 registry、queue、mark record、group lock 或 file private state。
+- [不变量需求](./invariants.md) 的状态所有权写入具体文件职责边界，禁止模块外 downcast fanotify private state 或访问内部 storage。
 
-**原问题：** 原草案只写 “新增 `fs::fanotify` 或等价模块”，没有把目录组织、owner module、public facade 和内部 storage 可见性固定下来。实现者可能把 registry helper、group private state 或 file ops cast 分散到 syscall、VFS hook、task/fd 或 procfs 层。
+**原问题：** 原草案只写 “新增 `fs::fanotify` 或等价模块”，没有把目录组织、owner module、public facade 和内部 storage 可见性固定下来。实现者可能把 registry helper、group private state 或 file ops cast 分散到 syscall、event source hook、task/fd 或 procfs 层。
 
 ### FANOTIFY-032: mark registry 与 group cleanup list 可能形成双重真相源
 
@@ -441,7 +552,7 @@
 - [迁移实施计划](./implementation.md) 的迁移原则和 Stage 3 交付改为通用 file/opened-description notification suppression 标记。
 - [不变量需求](./invariants.md) 的 no-notify 模型和禁止退化项要求 task/fd 核心不得依赖 fanotify concrete private type。
 
-**原问题：** 原草案使用 `FanEventFdNoNotify` 作为示例名称，容易被实现成 task/fd 层里的 fanotify-specific 字段或类型判断。正确方向应是通用 notification suppression 能力，由 fanotify 创建 event fd 时设置，VFS hook 读取，不让 fd 核心反向依赖 fanotify。
+**原问题：** 原草案使用 `FanEventFdNoNotify` 作为示例名称，容易被实现成 task/fd 层里的 fanotify-specific 字段或类型判断。正确方向应是通用 notification suppression 能力，由 fanotify 创建 event fd 时设置，由 user-visible fd/API event boundary 读取，不让 fd 核心反向依赖 fanotify。
 
 ### FANOTIFY-036: fanotify ABI 组织需要固定到 `anemone_abi::fs::linux::fanotify`
 
@@ -490,14 +601,14 @@
 
 **原问题：** 旧背景材料写过 `sys_ioctl(FIONREAD)` 当时只识别 pipe，并列出在 `sys_ioctl` 内探测 fanotify private state 的短期选项。ioctl-loop 已经建立 `sys_ioctl -> FileOps::ioctl` 的统一边界，继续沿用旧选项会把 fanotify private state 泄漏到 syscall 层。
 
-### FANOTIFY-040: 基础 VFS 事件 hook 必须覆盖 positioned I/O
+### FANOTIFY-040: 基础事件 hook 必须覆盖 positioned I/O
 
 **状态：** Neutralized
 
 **修复落点：**
 
-- [RFC index](./index.md) 的背景刷新事件注入点：`File::{read,read_at}`、`File::{write,write_at,append}` 和 metadata syscall 都属于首批基础事件候选边界。
+- [RFC index](./index.md) 的背景刷新事件注入点：read/write syscall helper、fd/path metadata syscall/API 和 opened-description final-release 都属于首批基础事件源边界。
 - [迁移实施计划](./implementation.md) 的 Stage 3 交付明确：`FAN_ACCESS` 覆盖顺序 read 和 positioned read 成功路径；`FAN_MODIFY` 覆盖顺序 write、positioned write、append、truncate 或等价内容修改成功路径。
-- [不变量需求](./invariants.md) 的 VFS/opened-file 边界明确：hook 放在 fd/VFS gate 后、backend 成功返回后的统一边界，不下沉到具体 `FileOps::{read_at,write_at}` backend。
+- [不变量需求](./invariants.md) 的 user-visible fd/API event boundary 明确：hook 放在 syscall/API helper 取得用户可见 fd 并确认 backend 成功之后，不下沉到 `fs::File` 或具体 `FileOps::{read_at,write_at}` backend。
 
-**原问题：** fileops-seek-char-ioctl 完成后，`read_at` / `write_at` 是独立 file-op 路径，不再通过普通 `read` / `write` 的 dummy cursor wrapper。原 Stage 3 只写 “read 成功读取” 和 “write/truncate 成功修改” 容易让实现漏掉 `pread` / `pwrite`，导致 positioned I/O 不产生基础 fanotify 事件。
+**原问题：** fileops-seek-char-ioctl 完成后，`read_at` / `write_at` 是独立 file-op 路径，不再通过普通 `read` / `write` 的 dummy cursor wrapper。原 Stage 3 只写 “read 成功读取” 和 “write/truncate 成功修改” 容易让实现漏掉 `pread` / `pwrite`，导致 positioned I/O 不产生基础 fanotify 事件。2026-06-10 的 D5 边界复核进一步收紧该结论：覆盖 positioned I/O 的统一点应是 read/write syscall helper，而不是 `fs::File` 层 wrapper。

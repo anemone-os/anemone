@@ -1,14 +1,14 @@
 use crate::{
-    fs::proc::{pde::ProcDirEntry, read_snapshot_at},
+    fs::proc::{
+        pde::{ProcDirEntry, ProcDirEntryKind},
+        read_snapshot_at,
+    },
     prelude::*,
     utils::any_opaque::NilOpaque,
 };
 
 fn proc_meminfo_open(_inode: &InodeRef) -> Result<OpenedFile, SysError> {
-    Ok(OpenedFile {
-        file_ops: &PROC_MEMINFO_FILE_OPS,
-        prv: NilOpaque::new(),
-    })
+    Ok(OpenedFile::new(&PROC_MEMINFO_FILE_OPS, NilOpaque::new()))
 }
 
 fn proc_meminfo_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
@@ -71,7 +71,12 @@ fn meminfo_string() -> String {
         + &slab
 }
 
-fn proc_meminfo_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn proc_meminfo_read(
+    file: &File,
+    pos: &mut usize,
+    buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let meminfo_string = meminfo_string();
     let meminfo_bytes = meminfo_string.as_bytes();
 
@@ -86,7 +91,12 @@ fn proc_meminfo_read(file: &File, pos: &mut usize, buf: &mut [u8]) -> Result<usi
     Ok(to_read)
 }
 
-fn proc_meminfo_read_at(_file: &File, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
+fn proc_meminfo_read_at(
+    _file: &File,
+    pos: usize,
+    buf: &mut [u8],
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
     let meminfo_string = meminfo_string();
 
     read_snapshot_at(pos, buf, meminfo_string.as_bytes())
@@ -101,18 +111,20 @@ fn proc_meminfo_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usi
 
 static PROC_MEMINFO_FILE_OPS: FileOps = FileOps {
     read: proc_meminfo_read,
-    write: |_, _, _| Err(SysError::NotSupported),
+    write: |_, _, _, _| Err(SysError::NotSupported),
     read_at: proc_meminfo_read_at,
-    write_at: |_, _, _| Err(SysError::NotSupported),
+    write_at: |_, _, _, _| Err(SysError::NotSupported),
+    check_status_flags: accept_file_op_status_flags,
     seek: proc_meminfo_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+    fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
 pub static PROC_MEMINFO_DIR_ENTRY: ProcDirEntry = ProcDirEntry {
     name: "meminfo",
     mode: InodeMode::new(InodeType::Regular, InodePerm::all_r()),
-    ops: &PROC_MEMINFO_INODE_OPS,
+    kind: ProcDirEntryKind::Custom(&PROC_MEMINFO_INODE_OPS),
     ino: unsafe { MonoOnce::new() },
 };

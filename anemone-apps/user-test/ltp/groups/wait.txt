@@ -1,0 +1,27 @@
+wait401
+wait402
+wait403
+
+waitpid01
+waitpid03
+waitpid04
+waitpid06
+waitpid07
+# waitpid08
+# waitpid09
+waitpid10
+waitpid11
+waitpid12
+# waitpid13
+
+waitid01
+waitid02
+waitid03
+waitid04
+waitid05
+waitid06
+# waitid07 requires stopped child reporting.
+# waitid08 requires continued child reporting.
+waitid09
+# waitid10 requires core-dump reporting plus core-pattern/rlimit setup.
+waitid11
