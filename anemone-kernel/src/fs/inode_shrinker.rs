@@ -31,6 +31,15 @@ struct InodeShrinker;
 
 impl KThreadRequestHandler<InodeShrinkRequest> for InodeShrinker {
     fn handle(&self, ctx: &KThreadContext, _request: InodeShrinkRequest) {
+        let threshold = io_shrink_threshold();
+        if !usage_exceeds_threshold(frame_allocator_stats(), threshold) {
+            kdebugln!(
+                "inode shrinker: skip task-exit hint, physical memory usage is at or below {}%",
+                threshold
+            );
+            return;
+        }
+
         shrink_inodes(ctx);
     }
 }
@@ -91,6 +100,29 @@ fn shrink_inodes(ctx: &KThreadContext) {
     }
 }
 
+const fn io_shrink_threshold() -> u8 {
+    const_assert!(
+        IO_SHRINK_THRESHOLD <= 100,
+        "io shrink threshold must be a percentage"
+    );
+    IO_SHRINK_THRESHOLD
+}
+
+fn usage_exceeds_threshold(stats: FrameAllocatorStats, threshold_percent: u8) -> bool {
+    assert!(
+        threshold_percent <= 100,
+        "io shrink threshold must be a percentage"
+    );
+    if stats.total_pages == 0 {
+        return false;
+    }
+
+    stats.used_pages().saturating_mul(100)
+        > stats
+            .total_pages
+            .saturating_mul(threshold_percent as u64)
+}
+
 fn shrinkable_superblock(sb: &SuperBlock) -> bool {
     !sb.fs()
         .flags()
@@ -111,4 +143,29 @@ fn try_shrink_inode(sb: &SuperBlock, inode: &Arc<Inode>) -> bool {
             false
         },
     }
+}
+
+#[kunit]
+fn memory_pressure_threshold_is_strictly_greater() {
+    assert!(!usage_exceeds_threshold(
+        FrameAllocatorStats {
+            total_pages: 100,
+            free_pages: 50,
+        },
+        50,
+    ));
+    assert!(usage_exceeds_threshold(
+        FrameAllocatorStats {
+            total_pages: 100,
+            free_pages: 49,
+        },
+        50,
+    ));
+    assert!(!usage_exceeds_threshold(
+        FrameAllocatorStats {
+            total_pages: 0,
+            free_pages: 0,
+        },
+        50,
+    ));
 }

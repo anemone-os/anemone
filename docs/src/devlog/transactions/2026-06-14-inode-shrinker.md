@@ -47,13 +47,13 @@
 
 **Dependency:** [RFC-20260614-kthread](../../rfcs/kthread/index.md), [KThread transaction](./2026-06-14-kthread.md)
 
-**Completed:** VFS 增加 explicit inode eviction path；ext4 声明 shrinkable icache 并提供 eviction callback；regular file page cache 维护 backing page counter；task exit 提交 shrink hint；boot path 创建 `inode-shrink-0` service。
+**Completed:** VFS 增加 explicit inode eviction path；ext4 声明 shrinkable icache 并提供 eviction callback；regular file page cache 维护 backing page counter；task exit 提交 shrink hint；worker 按 `io_shrink_threshold` 判断物理页占用后决定是否扫描；boot path 创建 `inode-shrink-0` service。
 
-**Open Blockers:** 当前文档层没有已确认的 Apollyon / Keter 设计 blocker。本轮只追补文档，未重新运行构建、QEMU 或 LTP。
+**Open Blockers:** 当前文档层没有已确认的 Apollyon / Keter 设计 blocker。阈值 gate follow-up 需要以本轮 agent 输出中的构建/检查结果为准；QEMU 或 LTP 未作为强制 gate。
 
-**Next Action:** 如果后续需要 pressure-driven reclaim、LRU、限额或跨 filesystem 的通用 shrinker registry，另建 follow-up RFC。当前 shrinker 只作为 task-exit-triggered opportunistic cleanup。
+**Next Action:** 如果后续需要超出单一 kconfig 阈值 gate 的 pressure-driven reclaim、LRU、限额或跨 filesystem 的通用 shrinker registry，另建 follow-up RFC。当前 shrinker 只作为 task-exit-triggered opportunistic cleanup。
 
-**Do Not Redo:** 不要在 inode `Drop` 中做 blocking eviction；不要回收 kernel/persistent superblock；不要对未声明 `SHRINKABLE_ICACHE` 的 filesystem 回收 indexed inode；不要用 cache page counter 驱动 eviction 正确性。
+**Do Not Redo:** 不要在 inode `Drop` 中做 blocking eviction；不要回收 kernel/persistent superblock；不要对未声明 `SHRINKABLE_ICACHE` 的 filesystem 回收 indexed inode；不要用 cache page counter 驱动 eviction 正确性；不要把 `io_shrink_threshold` 判断下沉到 frame allocator 或 task exit path。
 
 ## Phase Log
 
@@ -73,7 +73,19 @@
 
 **Validation:** 本事务追补文档时未运行 `just build`、QEMU 或 LTP。commit 级运行结果如需长期引用，应由后续开发日志或新的 validation transaction 补充。
 
+### 2026-06-15 - task-exit hint pressure gate
+
+**Phase:** follow-up implementation / RFC alignment
+
+**Correction:** 原始事务范围中的“不实现内存压力”指不实现 generic pressure-driven reclaim、LRU、quota 或 allocator direct reclaim。2026-06-15 的 follow-up 只增加 task-exit hint 上的单一 kconfig 阈值 gate：worker 消费 hint 后读取 frame allocator stats，只有物理页占用严格超过 `io_shrink_threshold` 才扫描 inode cache。
+
+**Change:** `io_shrink_threshold` 进入 kconfig，默认 50；task exit 路径仍只提交可合并 hint，不读取 frame allocator stats，不同步执行 scan。
+
+**Review:** 阈值判断属于 inode shrinker worker 策略；frame allocator 只提供统计类型和 stats 读取接口。低于或等于阈值时 hint 被消费并跳过扫描，不形成 backlog。
+
+**Validation:** 增加 KUnit 覆盖严格大于阈值、等于阈值不触发和零总页数不触发。构建和运行验证见本轮 agent 输出。
+
 ## Open Items
 
 - 运行验证未在本轮文档任务中重跑。
-- 内存压力、LRU、quota、allocator direct reclaim 和完整 generic shrinker API 不在本事务范围内。
+- 超出单一 kconfig 阈值 gate 的 pressure-driven reclaim、LRU、quota、allocator direct reclaim 和完整 generic shrinker API 不在本事务范围内。

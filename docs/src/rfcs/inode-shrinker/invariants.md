@@ -21,6 +21,7 @@ inode shrinker 被视为闭合时，必须同时满足：
 9. `evict_inode` 不在 superblock cache lock 下运行。
 10. `evict_inode` 失败时必须按原 indexed/ghost 身份回滚。
 11. backing file cache page counter 只统计 backing filesystem regular file cache pages，不驱动 eviction 决策。
+12. task-exit hint 被 worker 消费后，只有物理页占用严格超过 `io_shrink_threshold` 时才执行 inode scan。
 
 任一条件不成立时，当前实现只能视为临时 cache cleanup helper，不能声明为可审查的 inode shrinker。
 
@@ -30,7 +31,7 @@ inode shrinker 被视为闭合时，必须同时满足：
 
 1. 完整 generic shrinker API。
 2. allocator OOM direct reclaim。
-3. LRU、age、priority、memcg、quota 或 pressure-based shrink policy。
+3. LRU、age、priority、memcg、quota、timer-driven reclaim 或 allocator direct reclaim。
 4. slab、anonymous page、ramfs、devfs、SysV shm 或 kernel-internal filesystem 回收。
 5. 对每次 task exit 都执行完整 shrink scan 的保证。
 
@@ -71,6 +72,19 @@ inode shrinker 被视为闭合时，必须同时满足：
 1. 重复 task exit 提交可以 merge，不累计扫描次数。
 2. service stopping 时提交失败不向 task exit 暴露错误。
 3. shrinker 尚未初始化时 task exit 提交可以静默忽略。
+4. 低于或等于 `io_shrink_threshold` 时，worker 可以消费该 hint 并跳过扫描。
+
+### Memory pressure gate
+
+`io_shrink_threshold` 是 kconfig 百分比，默认 50。它只控制 task-exit hint 到达后 worker 是否执行一次 inode scan。
+
+要求：
+
+1. 阈值判断属于 inode shrinker worker，不属于 task exit path 或 frame allocator。
+2. frame allocator 只提供 `FrameAllocatorStats`；shrink policy 不能下沉到 frame 层。
+3. 判断必须是严格大于：`used_pages * 100 > total_pages * threshold`。
+4. `total_pages == 0` 时不执行 scan。
+5. 该 gate 只影响是否进入 scan，不参与 candidate 选择、busy 判定、eviction 成败或回滚语义。
 
 ## 身份与能力模型
 
@@ -143,7 +157,7 @@ ext4 的 `sync_inode` / `evict_inode` 共享 `ext4_sync_inode_inner()`：
 1. shrinker 遍历 mounted superblocks 时不能持 VFS namespace lock 执行 inode eviction；`mounted_superblocks()` 返回 `Arc<SuperBlock>` 快照。
 2. superblock cache lock 不得覆盖 filesystem `sync_inode` 或 `evict_inode`。
 3. ext4 backend I/O 由 ext4 自身 `tx_lock` 与 `fs_lock` 管理，VFS shrinker 不绕过它们。
-4. task exit 只提交 shrink hint，不在 exit path 直接执行 inode scan。
+4. task exit 只提交 shrink hint，不在 exit path 直接读取 frame stats 或执行 inode scan。
 5. kthread worker 在每个 superblock 和 inode 边界检查 stop / park。
 
 ## 禁止退化项
@@ -158,10 +172,11 @@ ext4 的 `sync_inode` / `evict_inode` 共享 `ext4_sync_inode_inner()`：
 6. `evict_inode` 失败后不回滚 resident cache。
 7. 用 backing file cache counter 驱动 eviction 正确性判断。
 8. 在 task exit path 同步扫描所有 superblock。
+9. 把 `io_shrink_threshold` 判断放入 frame allocator 或 task exit path。
 
 ## 完成标准
 
-本 RFC 当前满足文档层闭合：superblock cache 身份、filesystem flag、candidate snapshot、busy recheck、sync-before-remove、failure rollback、task-exit hint 和 page counter 边界均已写入 canonical 文本。
+本 RFC 当前满足文档层闭合：superblock cache 身份、filesystem flag、candidate snapshot、busy recheck、sync-before-remove、failure rollback、task-exit hint、memory pressure gate 和 page counter 边界均已写入 canonical 文本。
 
 后续只有在以下验证完成后，才能把运行验证也标记为闭合：
 
