@@ -10,7 +10,7 @@
 
 inode shrinker 被视为闭合时，必须同时满足：
 
-1. shrink request 是可合并 hint，不是需要逐一处理的计数型 work。
+1. shrinker worker 自循环检查物理页占用，不依赖 task exit 或 allocator OOM 触发。
 2. shrinker 不扫描 `KERNEL_FS` 或 `PERSISTENT_SB` superblock。
 3. ghost inode 可以作为候选；indexed inode 只有在 filesystem 声明 `SHRINKABLE_ICACHE` 时才作为候选。
 4. `cached_inode_snapshot()` 只提供候选快照，不是 eviction 决策真相。
@@ -21,7 +21,7 @@ inode shrinker 被视为闭合时，必须同时满足：
 9. `evict_inode` 不在 superblock cache lock 下运行。
 10. `evict_inode` 失败时必须按原 indexed/ghost 身份回滚。
 11. backing file cache page counter 只统计 backing filesystem regular file cache pages，不驱动 eviction 决策。
-12. task-exit hint 被 worker 消费后，只有物理页占用严格超过 `io_shrink_threshold` 时才执行 inode scan。
+12. worker 只有在物理页占用严格超过 `io_shrink_threshold` 时才执行 inode scan；低于或等于阈值时必须让出调度器。
 
 任一条件不成立时，当前实现只能视为临时 cache cleanup helper，不能声明为可审查的 inode shrinker。
 
@@ -33,7 +33,7 @@ inode shrinker 被视为闭合时，必须同时满足：
 2. allocator OOM direct reclaim。
 3. LRU、age、priority、memcg、quota、timer-driven reclaim 或 allocator direct reclaim。
 4. slab、anonymous page、ramfs、devfs、SysV shm 或 kernel-internal filesystem 回收。
-5. 对每次 task exit 都执行完整 shrink scan 的保证。
+5. sleep/wakeup 水位、timer backoff，或每个轮询周期都执行完整 scan 的保证。
 
 ## 状态所有权
 
@@ -63,28 +63,27 @@ inode shrinker 被视为闭合时，必须同时满足：
 
 这些 flag 是 filesystem 对 VFS 的能力声明，不是 shrinker 动态判断结果。
 
-### Pending request
-
-`InodeShrinkRequest` 没有 payload。pending slot 只说明“至少有一次 shrink hint 尚未处理”。
+### Worker loop
 
 要求：
 
-1. 重复 task exit 提交可以 merge，不累计扫描次数。
-2. service stopping 时提交失败不向 task exit 暴露错误。
-3. shrinker 尚未初始化时 task exit 提交可以静默忽略。
-4. 低于或等于 `io_shrink_threshold` 时，worker 可以消费该 hint 并跳过扫描。
+1. `INODE_SHRINKER` 只保存 worker weak handle，用于防止重复初始化；它不是 work queue。
+2. worker 每轮必须先检查 `KThreadContext::should_stop()` 和 `should_park()`。
+3. worker 不维护 pending request、exit hint 计数或 scan backlog。
+4. task exit path 不提交 shrink 请求。
 
 ### Memory pressure gate
 
-`io_shrink_threshold` 是 kconfig 百分比，默认 50。它只控制 task-exit hint 到达后 worker 是否执行一次 inode scan。
+`io_shrink_threshold` 是 kconfig 百分比，默认 50。它只控制 worker 每轮是否执行一次 inode scan。
 
 要求：
 
-1. 阈值判断属于 inode shrinker worker，不属于 task exit path 或 frame allocator。
+1. 阈值判断属于 inode shrinker worker，不属于 task exit path、allocator OOM 路径或 frame allocator。
 2. frame allocator 只提供 `FrameAllocatorStats`；shrink policy 不能下沉到 frame 层。
 3. 判断必须是严格大于：`used_pages * 100 > total_pages * threshold`。
 4. `total_pages == 0` 时不执行 scan。
-5. 该 gate 只影响是否进入 scan，不参与 candidate 选择、busy 判定、eviction 成败或回滚语义。
+5. 低于或等于阈值时，worker 调用 `yield_now()` 让出调度器。
+6. 该 gate 只影响是否进入 scan，不参与 candidate 选择、busy 判定、eviction 成败或回滚语义。
 
 ## 身份与能力模型
 
@@ -157,8 +156,8 @@ ext4 的 `sync_inode` / `evict_inode` 共享 `ext4_sync_inode_inner()`：
 1. shrinker 遍历 mounted superblocks 时不能持 VFS namespace lock 执行 inode eviction；`mounted_superblocks()` 返回 `Arc<SuperBlock>` 快照。
 2. superblock cache lock 不得覆盖 filesystem `sync_inode` 或 `evict_inode`。
 3. ext4 backend I/O 由 ext4 自身 `tx_lock` 与 `fs_lock` 管理，VFS shrinker 不绕过它们。
-4. task exit 只提交 shrink hint，不在 exit path 直接读取 frame stats 或执行 inode scan。
-5. kthread worker 在每个 superblock 和 inode 边界检查 stop / park。
+4. task exit path 不提交 shrink 请求，不直接读取 frame stats 或执行 inode scan。
+5. kthread worker 在每轮 loop、每个 superblock 和 inode 边界检查 stop / park。
 
 ## 禁止退化项
 
@@ -171,15 +170,16 @@ ext4 的 `sync_inode` / `evict_inode` 共享 `ext4_sync_inode_inner()`：
 5. sync 之后不在 cache write lock 下再次检查 busy。
 6. `evict_inode` 失败后不回滚 resident cache。
 7. 用 backing file cache counter 驱动 eviction 正确性判断。
-8. 在 task exit path 同步扫描所有 superblock。
-9. 把 `io_shrink_threshold` 判断放入 frame allocator 或 task exit path。
+8. 在 task exit path 同步扫描所有 superblock，或提交 shrink request。
+9. 把 `io_shrink_threshold` 判断放入 frame allocator、allocator OOM path 或 task exit path。
+10. 低于或等于阈值时继续 busy spin 而不让出调度器。
 
 ## 完成标准
 
-本 RFC 当前满足文档层闭合：superblock cache 身份、filesystem flag、candidate snapshot、busy recheck、sync-before-remove、failure rollback、task-exit hint、memory pressure gate 和 page counter 边界均已写入 canonical 文本。
+本 RFC 当前满足文档层闭合：superblock cache 身份、filesystem flag、candidate snapshot、busy recheck、sync-before-remove、failure rollback、worker loop、memory pressure gate 和 page counter 边界均已写入 canonical 文本。
 
 后续只有在以下验证完成后，才能把运行验证也标记为闭合：
 
 1. `just build` 或等价构建通过。
-2. QEMU/user-test 中存在 task exit 后 shrinker worker 执行记录，且无 kthread lifecycle panic。
+2. QEMU/user-test 中存在 shrinker worker 低压 yield 或高压 scan 记录，且无 kthread lifecycle panic。
 3. 针对 ext4 indexed inode reload、deleted ghost inode 回收、dirty regular page sync 和 eviction failure rollback 的路径有定向验证或审计记录。

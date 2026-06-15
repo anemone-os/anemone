@@ -1,73 +1,41 @@
 use crate::{
     fs::inode::Inode,
     prelude::*,
-    task::kthread::{
-        KThreadContext, KThreadMergeRequest, KThreadPendingSlot, KThreadRequestHandler,
-        KThreadService, KThreadServiceOptions, SubmitError,
-    },
+    task::kthread::{KThreadBuilder, KThreadContext, KThreadRef},
 };
 
-static INODE_SHRINKER: SpinLock<
-    Option<KThreadService<KThreadPendingSlot<InodeShrinkRequest>, InodeShrinker>>,
-> = SpinLock::new(None);
+static INODE_SHRINKER: SpinLock<Option<KThreadRef>> = SpinLock::new(None);
 
-#[derive(Debug, Clone, Copy)]
-struct InodeShrinkRequest;
-
-impl InodeShrinkRequest {
-    fn task_exit() -> Self {
-        Self
-    }
-}
-
-impl KThreadMergeRequest for InodeShrinkRequest {
-    // The slot only records that shrink work is pending; duplicate exit
-    // requests do not change the work shape.
-    fn merge(&mut self, _other: Self) {}
-}
-
-#[derive(Debug)]
-struct InodeShrinker;
-
-impl KThreadRequestHandler<InodeShrinkRequest> for InodeShrinker {
-    fn handle(&self, ctx: &KThreadContext, _request: InodeShrinkRequest) {
-        let threshold = io_shrink_threshold();
-        if !usage_exceeds_threshold(frame_allocator_stats(), threshold) {
-            kdebugln!(
-                "inode shrinker: skip task-exit hint, physical memory usage is at or below {}%",
-                threshold
-            );
-            return;
+fn inode_shrinker_entry(ctx: KThreadContext, _: ()) -> i32 {
+    loop {
+        if ctx.should_stop() {
+            break;
+        }
+        if ctx.should_park() {
+            ctx.parkme();
+            continue;
         }
 
-        shrink_inodes(ctx);
+        let threshold = io_shrink_threshold();
+        if !usage_exceeds_threshold(frame_allocator_stats(), threshold) {
+            yield_now();
+            continue;
+        }
+
+        shrink_inodes(&ctx);
     }
+
+    0
 }
 
 pub fn init_inode_shrinker() {
-    let service = KThreadService::spawn(
-        "inode-shrink",
-        1,
-        KThreadPendingSlot::new(),
-        InodeShrinker,
-        KThreadServiceOptions::default(),
-    )
-    .unwrap_or_else(|err| panic!("failed to spawn inode shrinker: {:?}", err));
+    let worker = KThreadBuilder::new("inode-shrink-0")
+        .spawn(inode_shrinker_entry, ())
+        .unwrap_or_else(|err| panic!("failed to spawn inode shrinker: {:?}", err));
 
     let mut slot = INODE_SHRINKER.lock();
     assert!(slot.is_none(), "inode shrinker initialized twice");
-    *slot = Some(service);
-}
-
-pub fn submit_inode_shrink_request() {
-    let slot = INODE_SHRINKER.lock();
-    let Some(service) = slot.as_ref() else {
-        return;
-    };
-
-    match service.submit(InodeShrinkRequest::task_exit()) {
-        Ok(()) | Err(SubmitError::Stopping) => {},
-    }
+    *slot = Some(worker);
 }
 
 fn shrink_inodes(ctx: &KThreadContext) {
@@ -118,9 +86,7 @@ fn usage_exceeds_threshold(stats: FrameAllocatorStats, threshold_percent: u8) ->
     }
 
     stats.used_pages().saturating_mul(100)
-        > stats
-            .total_pages
-            .saturating_mul(threshold_percent as u64)
+        > stats.total_pages.saturating_mul(threshold_percent as u64)
 }
 
 fn shrinkable_superblock(sb: &SuperBlock) -> bool {

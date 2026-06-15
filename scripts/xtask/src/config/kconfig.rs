@@ -126,7 +126,7 @@ pub const SHMMAX: usize = {};
 pub const SHMALL: usize = {};
 /// Default maximum number of System V shared memory segments.
 pub const SHMMNI: usize = {};
-/// Physical memory usage percentage above which task-exit inode shrinker hints run a scan.
+/// Physical memory usage percentage above which the inode shrinker worker runs a scan.
 pub const IO_SHRINK_THRESHOLD: u8 = {};
 /// Maximum number of symbolic links to resolve in a single path resolution
 pub const SYMLINK_RESOLVE_LIMIT: usize = {};

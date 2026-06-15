@@ -83,7 +83,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 ## 当前 RFC
 
 - [RFC-20260614-kthread](./rfcs/kthread/index.md)：轻量 kthread 创建代理、typed entry、stop/park 生命周期和 `KThreadService` 后台 worker 合同。
-- [RFC-20260614-inode-shrinker](./rfcs/inode-shrinker/index.md)：task-exit-triggered inode cache shrinker、superblock eviction path 和 ext4 backing file cache 计数合同。
+- [RFC-20260614-inode-shrinker](./rfcs/inode-shrinker/index.md)：自循环 `io_shrink_threshold` gate 的 inode cache shrinker、superblock eviction path 和 ext4 backing file cache 计数合同。
 - [RFC-20260602-cred-merge](./rfcs/cred-merge/index.md)：credentials feature merge 的 canonical 执行计划和审查合同。
 - [RFC-20260606-signal-temp-mask-restore](./rfcs/signal-temp-mask-restore/index.md)：`rt_sigsuspend`、`ppoll`、`pselect6` 临时 signal mask delayed restore 协议、trap-return delivery handoff 和 staged 实施计划。
 - [RFC-20260605-fileops-seek-char-ioctl](./rfcs/fileops-seek-char-ioctl/index.md)：`FileOps::seek`、positioned I/O 分层和字符设备 ioctl 默认分发计划。

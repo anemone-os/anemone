@@ -128,27 +128,26 @@ write set：
 交付：
 
 - `bsp_kinit()` 中在 `IntrArch::init_local_irq()` 后初始化 `kthreadd`。
-- 所有 CPU online 后初始化 inode shrinker service。
-- `task/api/exit` 在普通 task exit 末尾提交 inode shrinker 请求。
+- 所有 CPU online 后初始化 inode shrinker ordinary worker。
+- inode shrinker worker 自循环执行 pressure polling，不依赖 task exit 提交请求。
 
 审计：
 
 - `kthreadd` 本身不是 ordinary kthread，不能通过 `KThreadBuilder` 创建。
-- ordinary kthread service 不应早于所有 CPU online 发布。
+- ordinary kthread worker 不应早于所有 CPU online 发布。
 
 write set：
 
 - `anemone-kernel/src/main.rs`
 - `anemone-kernel/src/fs/inode_shrinker.rs`
-- `anemone-kernel/src/task/api/exit/mod.rs`
 
 验证：
 
-- 本轮文档追补未运行 QEMU 或 LTP。建议后续运行用户态退出密集的 user-test profile，观察 `inode-shrink-0` 是否稳定运行。
+- 本轮文档追补未运行 QEMU 或 LTP。建议后续运行 user-test profile，观察 `inode-shrink-0` 是否稳定运行。
 
 退出条件：
 
-- boot 后存在可提交 work 的 kthread service，且普通 task exit 可以触发首个 consumer。
+- boot 后存在 ordinary kthread consumer，且 `inode-shrink-0` 可以在不依赖 task exit 的情况下进入自己的 lifecycle loop。
 
 ## 旁路审计清单
 

@@ -5,15 +5,15 @@
 **父 RFC：** [RFC-20260614-inode-shrinker](./index.md)
 **不变量：** [Inode Shrinker 不变量需求](./invariants.md)
 
-本文追补记录 `2b0e3900279895c3d8eb604e463249a02c3bddc9` 中已经落地并在 2026-06-15 调整触发策略的 inode shrinker 实施形状。当前实现是 VFS inode cache 的后台 opportunistic shrink，只在 task-exit hint 到达后按 kconfig 阈值判断是否扫描，不是通用内存压力 shrinker。
+本文追补记录 `2b0e3900279895c3d8eb604e463249a02c3bddc9` 中已经落地并在 2026-06-15 调整触发策略的 inode shrinker 实施形状。当前实现是 VFS inode cache 的后台 opportunistic shrink，由 ordinary kthread 自循环检查 kconfig 阈值决定是否扫描，不是通用内存压力 shrinker。
 
 ## 迁移原则
 
 - eviction 必须是显式路径，不能藏在 `Drop` 中。
 - snapshot 只是候选列表，所有正确性由 eviction recheck 和 cache lock 下 removal 负责。
 - filesystem 必须通过 `FileSystemFlags` 声明自己的 shrink 能力和 lifetime 边界。
-- task exit 只提交 hint，不能在 exit path 做同步 scan。
-- 是否执行扫描由 shrinker worker 根据物理页占用和 `io_shrink_threshold` 决定；该策略不下沉到 frame allocator。
+- task exit path 不参与 shrinker 触发，不能在 exit path 做同步 scan。
+- 是否执行扫描由 shrinker worker 根据物理页占用和 `io_shrink_threshold` 决定；该策略不下沉到 frame allocator 或 task exit path。
 - backing file cache page counter 是观察数据，不是回收策略。
 
 ## 阶段 1：VFS eviction surface
@@ -88,30 +88,29 @@ write set：
 
 - ext4 indexed inode 可以被 evict 后通过 `load_inode` 重建，且 backing file page counter 不 underflow。
 
-## 阶段 3：后台 worker 与 task exit hint
+## 阶段 3：后台 worker 与压力轮询
 
 前置条件：
 
-- [kthread service](../kthread/index.md) 可用。
+- [kthread](../kthread/index.md) ordinary worker 创建路径可用。
 - superblock eviction API 已可用。
 
 交付：
 
 - 新增 `anemone-kernel/src/fs/inode_shrinker.rs`。
-- 新增全局 `INODE_SHRINKER` service。
-- `InodeShrinkRequest` 使用 merge slot，重复 hint 合并。
-- `init_inode_shrinker()` 创建单 worker `inode-shrink-0`。
-- `submit_inode_shrink_request()` 在 shrinker 未初始化或 stopping 时 fail closed。
-- `task/api/exit` 在 task exit 末尾提交 shrink hint。
+- 新增全局 `INODE_SHRINKER` weak handle slot，用于防止重复初始化。
+- `init_inode_shrinker()` 通过 `KThreadBuilder` 创建单 worker `inode-shrink-0`。
 - `io_shrink_threshold` 进入 kconfig，默认 50。
-- worker 消费 hint 后读取 `frame_allocator_stats()`；只有物理页占用严格超过阈值时才调用 `shrink_inodes()`，否则直接返回。
+- worker 自循环检查 stop / park；随后读取 `frame_allocator_stats()`。
+- 只有物理页占用严格超过阈值时才调用 `shrink_inodes()`；低于或等于阈值时调用 `yield_now()` 让出调度器。
+- `task/api/exit` 不再提交 shrink 请求。
 
 审计：
 
 - task exit path 不读取 frame allocator stats，也不同步执行 scan。
 - frame allocator 只暴露 stats，不承载 shrinker policy。
 - 阈值判断必须是严格大于：`used_pages * 100 > total_pages * threshold`。
-- 低于或等于阈值时，合并 hint 被消费但不保留额外 backlog。
+- 低于或等于阈值时，worker 必须让出调度器，避免低压 busy spin。
 - worker 应在 superblock 和 inode 循环边界检查 stop / park。
 - worker 不应扫描 kernel/persistent superblock。
 - worker 对 `Busy` / `NotFound` 静默跳过，对其他错误记录日志。
@@ -128,11 +127,11 @@ write set：
 验证：
 
 - KUnit 覆盖阈值严格大于语义。
-- 建议运行 task exit 密集的 user-test 或 LTP profile，观察低于阈值时不会扫描，高于阈值时 shrinker 不影响 exit 收敛。
+- 建议运行 user-test 或 LTP profile，观察低于阈值时 worker 只 yield，高于阈值时 shrinker 执行扫描且不影响调度收敛。
 
 退出条件：
 
-- task exit 可以异步提交 inode shrink hint，重复 exit hint 不导致 pending queue 无界增长，worker 只在物理页占用超过 `io_shrink_threshold` 时扫描。
+- inode shrinker 在 boot 后自行轮询物理页占用；低于或等于 `io_shrink_threshold` 时让出调度器，严格超过阈值时扫描。
 
 ## 阶段 4：boot 接入与边界审计
 
@@ -165,7 +164,7 @@ write set：
 
 退出条件：
 
-- inode shrinker 在 boot 后常驻，并能处理 task exit 提交的合并 hint。
+- inode shrinker 在 boot 后常驻，并能自行执行阈值检查和 inode scan。
 
 ## 旁路审计清单
 
@@ -176,8 +175,8 @@ write set：
 - filesystem capability flag 仍是 shrink 范围的边界，kernel/persistent superblock 不被 shrinker 回收。
 - eviction 仍保持 snapshot 候选、busy recheck、sync-before-remove、cache-lock removal 和 evict-failure rollback 顺序。
 - backing file cache page counter 只作为观察数据，不参与候选选择或回收正确性判断。
-- task exit 或其它 trigger 只提交 shrink hint，不在触发路径同步读取物理内存占用或执行全局 inode scan。
-- `io_shrink_threshold` gate 仍属于 shrinker worker 策略；frame allocator 只提供统计。
+- task exit 和 allocator OOM 路径不触发 shrinker scan，不同步读取物理内存占用或执行全局 inode scan。
+- `io_shrink_threshold` gate 仍属于 shrinker worker 策略；frame allocator 只提供统计，低压路径只让出调度器。
 
 审计结论应把相关路径分类为 cache identity、filesystem capability、eviction path、counter path、trigger path 或观察路径。
 
@@ -190,8 +189,8 @@ write set：
 - successful eviction 数量是多少。
 - ext4 dirty regular pages 是否在 eviction 前同步。
 - backing file cache page counter 是否和 page insert / invalidate / drop 匹配。
-- task exit 是否只提交 hint，没有同步执行 shrink scan。
-- 物理内存占用低于或等于 `io_shrink_threshold` 时，worker 是否消费 hint 并跳过扫描。
+- task exit 是否不再参与 shrinker 触发。
+- 物理内存占用低于或等于 `io_shrink_threshold` 时，worker 是否调用 `yield_now()` 并跳过扫描。
 
 ## 停止边界
 
@@ -201,7 +200,7 @@ write set：
 - 新增 filesystem 想回收 indexed inode，但不能证明 `load_inode` 可重建。
 - 新增 busy pin 类型，例如 dentry alias、writeback pin、mmap invalidation pin。
 - 修改 eviction 顺序为 remove-before-sync 或 evict-under-cache-lock。
-- 让 counter、task exit 次数或阈值采样参与 eviction 正确性判断。
+- 让 counter、轮询次数或阈值采样参与 eviction 正确性判断。
 
 可以作为普通小改继续推进的情况：
 
@@ -213,4 +212,4 @@ write set：
 ## Write Set 扩展记录
 
 - 2026-06-15：本文是 commit `2b0e3900279895c3d8eb604e463249a02c3bddc9` 的追补文档，没有新的代码 write set 扩展。
-- 2026-06-15：task-exit hint 保持不变，新增 worker 内物理内存占用 gate 与 kconfig `io_shrink_threshold`；write set 扩展到 `inode_shrinker.rs`、frame stats 类型 re-export、kconfig 生成器和默认配置。
+- 2026-06-15：task-exit hint 被自循环 pressure polling 取代，新增 worker 内物理内存占用 gate 与 kconfig `io_shrink_threshold`；write set 扩展到 `inode_shrinker.rs`、`fs/mod.rs`、`task/api/exit/mod.rs`、frame stats 类型 re-export、kconfig 生成器和默认配置。

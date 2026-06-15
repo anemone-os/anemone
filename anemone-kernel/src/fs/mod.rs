@@ -58,7 +58,7 @@ pub use self::{
     superblock::SuperBlock,
 };
 pub use cache_stats::resident_file_inode_cache_pages;
-pub use inode_shrinker::{init_inode_shrinker, submit_inode_shrink_request};
+pub use inode_shrinker::init_inode_shrinker;
 
 mod namespace {
     use crate::prelude::*;

@@ -178,8 +178,6 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             task.vfork_done.publish(1, true);
         }
 
-        crate::fs::submit_inode_shrink_request();
-
         // ORDER MATTERS.
         // Setting status to Zombie must be the last thing before we drop
         // the task. Otherwise if a preemption occurs after setting status to Zombie but
