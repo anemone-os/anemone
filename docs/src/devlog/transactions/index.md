@@ -15,4 +15,6 @@
 
 ## Completed
 
+- [KThread](./2026-06-14-kthread.md)
+- [Inode Shrinker](./2026-06-14-inode-shrinker.md)
 - [Sched Wait Refactor](./2026-06-01-sched-wait-refactor.md)
