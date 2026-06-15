@@ -8,6 +8,7 @@ use crate::{
 pub(super) mod allocator;
 mod buddy;
 mod managed;
+pub use allocator::FrameAllocatorStats;
 pub use managed::*;
 
 mod memmap;
