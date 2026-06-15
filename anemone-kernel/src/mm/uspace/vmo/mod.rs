@@ -63,6 +63,10 @@ pub trait VmObject: Send + Sync {
         Ok(())
     }
 
+    fn exclusive_physical_pages(&self, _range: core::ops::Range<usize>) -> usize {
+        0
+    }
+
     fn read_frame(
         &self,
         pidx: usize,

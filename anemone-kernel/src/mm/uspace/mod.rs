@@ -200,6 +200,10 @@ impl UserSpaceHandle {
         let mut usp = self.usp.lock();
         usp.detach_all_sysv_shm_for(tgid)
     }
+
+    pub fn exclusive_physical_pages_snapshot(&self) -> usize {
+        self.usp.lock().exclusive_physical_pages_snapshot()
+    }
 }
 
 impl PartialEq for UserSpaceHandle {
@@ -633,6 +637,24 @@ impl UserSpace {
             .values()
             .filter(|vma| vma.reservation() != Some(VmReservation::Guard))
             .map(|vma| vma.range().npages() as usize * PagingArch::PAGE_SIZE_BYTES)
+            .sum()
+    }
+
+    /// Return a best-effort count of physical pages likely freed by dropping
+    /// this address space. This is only for OOM victim ordering, not a stable
+    /// RSS or `/proc` accounting source.
+    pub fn exclusive_physical_pages_snapshot(&self) -> usize {
+        self.vmas
+            .values()
+            .filter(|vma| {
+                vma.reservation() != Some(VmReservation::Guard)
+                    && !matches!(vma.on_fork(), ForkPolicy::Shared)
+            })
+            .map(|vma| {
+                let start = vma.vmo_pidx(vma.range().start());
+                let end = start + vma.range().npages() as usize;
+                vma.backing().exclusive_physical_pages(start..end)
+            })
             .sum()
     }
 

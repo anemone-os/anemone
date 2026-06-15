@@ -203,6 +203,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         // Ordinary kthreads may round-robin onto any CPU, so wait until every CPU
         // has completed local init and marked itself online before publishing one.
         fs::init_inode_shrinker();
+        mm::oom::init_oom_killer();
         kinfoln!("bsp #{} kinit finished", bsp_id);
     }
 

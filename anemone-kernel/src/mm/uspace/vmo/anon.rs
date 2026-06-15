@@ -81,4 +81,21 @@ impl VmObject for AnonObject {
         pages.retain(|pidx, _| !range.contains(pidx));
         Ok(())
     }
+
+    fn exclusive_physical_pages(&self, range: core::ops::Range<usize>) -> usize {
+        if range.start > range.end {
+            return 0;
+        }
+
+        let end = range.end.min(self.max_pages);
+        if range.start >= end {
+            return 0;
+        }
+
+        self.pages
+            .read()
+            .range(range.start..end)
+            .filter(|(_, frame)| frame.meta().rc() == 1)
+            .count()
+    }
 }

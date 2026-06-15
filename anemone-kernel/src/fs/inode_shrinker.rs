@@ -16,8 +16,7 @@ fn inode_shrinker_entry(ctx: KThreadContext, _: ()) -> i32 {
             continue;
         }
 
-        let threshold = io_shrink_threshold();
-        if !usage_exceeds_threshold(frame_allocator_stats(), threshold) {
+        if !frame_allocator_stats().exceeds_io_shrink_threshold() {
             yield_now();
             continue;
         }
@@ -68,27 +67,6 @@ fn shrink_inodes(ctx: &KThreadContext) {
     }
 }
 
-const fn io_shrink_threshold() -> u8 {
-    const_assert!(
-        IO_SHRINK_THRESHOLD <= 100,
-        "io shrink threshold must be a percentage"
-    );
-    IO_SHRINK_THRESHOLD
-}
-
-fn usage_exceeds_threshold(stats: FrameAllocatorStats, threshold_percent: u8) -> bool {
-    assert!(
-        threshold_percent <= 100,
-        "io shrink threshold must be a percentage"
-    );
-    if stats.total_pages == 0 {
-        return false;
-    }
-
-    stats.used_pages().saturating_mul(100)
-        > stats.total_pages.saturating_mul(threshold_percent as u64)
-}
-
 fn shrinkable_superblock(sb: &SuperBlock) -> bool {
     !sb.fs()
         .flags()
@@ -113,25 +91,50 @@ fn try_shrink_inode(sb: &SuperBlock, inode: &Arc<Inode>) -> bool {
 
 #[kunit]
 fn memory_pressure_threshold_is_strictly_greater() {
-    assert!(!usage_exceeds_threshold(
-        FrameAllocatorStats {
+    assert!(
+        !FrameAllocatorStats {
             total_pages: 100,
             free_pages: 50,
-        },
-        50,
-    ));
-    assert!(usage_exceeds_threshold(
+        }
+        .exceeds_io_shrink_threshold()
+    );
+    assert!(
         FrameAllocatorStats {
             total_pages: 100,
             free_pages: 49,
-        },
-        50,
-    ));
-    assert!(!usage_exceeds_threshold(
-        FrameAllocatorStats {
+        }
+        .exceeds_io_shrink_threshold()
+    );
+    assert!(
+        !FrameAllocatorStats {
             total_pages: 0,
             free_pages: 0,
-        },
-        50,
-    ));
+        }
+        .exceeds_io_shrink_threshold()
+    );
+}
+
+#[kunit]
+fn oom_kill_threshold_is_strictly_greater() {
+    assert!(
+        !FrameAllocatorStats {
+            total_pages: 100,
+            free_pages: 10,
+        }
+        .exceeds_oom_kill_threshold()
+    );
+    assert!(
+        FrameAllocatorStats {
+            total_pages: 100,
+            free_pages: 9,
+        }
+        .exceeds_oom_kill_threshold()
+    );
+    assert!(
+        !FrameAllocatorStats {
+            total_pages: 0,
+            free_pages: 0,
+        }
+        .exceeds_oom_kill_threshold()
+    );
 }

@@ -66,6 +66,35 @@ mod allocator_stats {
         pub fn used_pages(&self) -> u64 {
             self.total_pages - self.free_pages
         }
+
+        pub fn exceeds_io_shrink_threshold(&self) -> bool {
+            crate::const_assert!(
+                crate::kconfig_defs::IO_SHRINK_THRESHOLD <= 100,
+                "io shrink threshold must be a percentage"
+            );
+            self.used_pages_exceeds_percent(crate::kconfig_defs::IO_SHRINK_THRESHOLD)
+        }
+
+        pub fn exceeds_oom_kill_threshold(&self) -> bool {
+            crate::const_assert!(
+                crate::kconfig_defs::OOM_KILL_THRESHOLD <= 100,
+                "oom kill threshold must be a percentage"
+            );
+            self.used_pages_exceeds_percent(crate::kconfig_defs::OOM_KILL_THRESHOLD)
+        }
+
+        fn used_pages_exceeds_percent(&self, threshold_percent: u8) -> bool {
+            assert!(
+                threshold_percent <= 100,
+                "frame usage threshold must be a percentage"
+            );
+            if self.total_pages == 0 {
+                return false;
+            }
+
+            self.used_pages().saturating_mul(100)
+                > self.total_pages.saturating_mul(threshold_percent as u64)
+        }
     }
 }
 pub use allocator_stats::*;
