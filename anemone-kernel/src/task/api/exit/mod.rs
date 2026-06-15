@@ -96,6 +96,9 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         if let Some(old_uspace) = &old_uspace {
             if task.is_last_user_of_uspace(old_uspace) {
                 old_uspace.detach_all_sysv_shm_for(task.tgid());
+                unsafe {
+                    old_uspace.clear();
+                }
             }
         }
 
@@ -177,8 +180,6 @@ pub fn kernel_exit(code: ExitCode) -> ! {
 
             task.vfork_done.publish(1, true);
         }
-
-        crate::fs::submit_inode_shrink_request();
 
         // ORDER MATTERS.
         // Setting status to Zombie must be the last thing before we drop

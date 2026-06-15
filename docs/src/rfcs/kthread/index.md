@@ -16,7 +16,7 @@
 
 ## 背景
 
-内核已经有 `Task::new_kernel()` 可以创建 kernel task，但它只是低层 task 构造入口，没有为长期后台任务提供稳定的外部 handle、stop/park 协议、类型化启动参数回收或服务化 pending queue。`inode_shrinker` 这类后台清理任务需要一个可以安全提交工作、协作停止、并在 exit 路径暴露错误退出的基础设施。
+内核已经有 `Task::new_kernel()` 可以创建 kernel task，但它只是低层 task 构造入口，没有为长期后台任务提供稳定的外部 handle、stop/park 协议、类型化启动参数回收或服务化 pending queue。`inode_shrinker` 这类后台清理任务需要一个可以协作停止、让出调度器、并在 exit 路径暴露错误退出的基础设施。
 
 本次提交把 kthread 做成 task 子系统内部能力，而不是用户可见 ABI。它复用现有 scheduler、topology、`Event` 和 `kernel_exit()` 路径，但把 kthread 生命周期状态从 scheduler 状态中分离出来，避免制造第二套 task runnable/waiting 真相源。
 
@@ -47,7 +47,7 @@ Canonical：
 
 相关 RFC：
 
-- [RFC-20260614-inode-shrinker](../inode-shrinker/index.md)：首个基于 `KThreadService` 的实际后台服务。
+- [RFC-20260614-inode-shrinker](../inode-shrinker/index.md)：首个基于 ordinary kthread 的实际后台清理 worker；当前使用自循环 pressure polling，而不是 `KThreadService` pending backend。
 
 ## 方案
 

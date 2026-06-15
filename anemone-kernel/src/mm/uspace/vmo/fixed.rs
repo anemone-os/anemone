@@ -34,4 +34,20 @@ impl VmObject for FixedObject {
             writable: true,
         })
     }
+
+    fn exclusive_physical_pages(&self, range: core::ops::Range<usize>) -> usize {
+        if range.start > range.end {
+            return 0;
+        }
+
+        let end = range.end.min(self.pages.len());
+        if range.start >= end {
+            return 0;
+        }
+
+        self.pages[range.start..end]
+            .iter()
+            .filter(|frame| frame.meta().rc() == 1)
+            .count()
+    }
 }

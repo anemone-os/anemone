@@ -6,6 +6,7 @@
 
 ## Active
 
+- [OOM Killer](./2026-06-15-oom-killer.md)
 - [Fanotify](./2026-06-08-fanotify.md)
 - [Signal Temporary Mask Restore](./2026-06-06-signal-temp-mask-restore.md)
 - [FileOps Seek and Char Device ioctl](./2026-06-05-fileops-seek-char-ioctl.md)
