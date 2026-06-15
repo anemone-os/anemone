@@ -3,12 +3,12 @@
 use crate::{
     prelude::*,
     task::{
+        for_each_thread_group_from, get_thread_group,
         kthread::{KThreadBuilder, KThreadContext, KThreadRef},
         sig::{
             SigNo, Signal,
             info::{SiCode, SigInfoFields, SigKill},
         },
-        for_each_thread_group_from, get_thread_group,
     },
 };
 
@@ -119,10 +119,7 @@ fn active_victim_is_pending(active_victim: Option<Tid>) -> bool {
         return false;
     };
 
-    !matches!(
-        tg.status().life_cycle(),
-        ThreadGroupLifeCycle::Exited(_)
-    )
+    !matches!(tg.status().life_cycle(), ThreadGroupLifeCycle::Exited(_))
 }
 
 fn select_victim() -> Option<OomVictim> {

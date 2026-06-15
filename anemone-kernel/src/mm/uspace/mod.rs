@@ -201,6 +201,22 @@ impl UserSpaceHandle {
         usp.detach_all_sysv_shm_for(tgid)
     }
 
+    /// Clear user-owned mappings before an exiting task is finally disposed.
+    ///
+    /// # Safety
+    ///
+    /// The only intended caller is the task exit path, after all user-memory
+    /// based exit fixups have completed and after the caller has proven this
+    /// address space has no other topology-visible users. The task may still be
+    /// running on this page table until the scheduler switches it out, so this
+    /// must not drop or replace the [PageTable] itself.
+    pub unsafe fn clear(&self) {
+        let mut usp = self.usp.lock();
+        unsafe {
+            usp.clear();
+        }
+    }
+
     pub fn exclusive_physical_pages_snapshot(&self) -> usize {
         self.usp.lock().exclusive_physical_pages_snapshot()
     }
@@ -435,6 +451,32 @@ impl UserSpace {
         for attachment in attachments {
             shm::detach_attachment(&attachment, tgid);
         }
+    }
+
+    /// Drop user VMA/VMO ownership while keeping this address space's root page
+    /// table alive.
+    ///
+    /// # Safety
+    ///
+    /// This exists only for `kernel_exit()`: after all exit work that can touch
+    /// user memory is done, and only when the exiting task is the last
+    /// topology-visible user of the address space. The current CPU may still be
+    /// executing with this page table active, so this method unmaps user leaves
+    /// and drops VMA-owned frames but deliberately preserves the [PageTable]
+    /// object and its root page-directory frame for normal `UserSpace` drop.
+    pub unsafe fn clear(&mut self) {
+        unsafe {
+            self.table.mapper().try_unmap(Unmapping {
+                range: VirtPageRange::new(VirtPageNum::new(0), KernelLayout::USPACE_TOP_VPN.get()),
+            });
+        }
+        PagingArch::tlb_shootdown_all();
+
+        assert!(
+            self.sysv_shm.is_empty(),
+            "UserSpace::clear must run after SysV shm attachments are detached"
+        );
+        self.vmas.clear();
     }
 }
 

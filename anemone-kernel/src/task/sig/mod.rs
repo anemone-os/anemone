@@ -1198,10 +1198,9 @@ pub fn handle_signals(
     trapframe: &mut TrapFrame,
     mut restart_syscall: Option<(RestartSyscall, SyscallCtx)>,
 ) {
-    let task = get_current_task();
     let mut committed_handler_frame = false;
     loop {
-        if let Some(signal) = task.fetch_signal() {
+        if let Some(signal) = get_current_task().fetch_signal() {
             if perform_signal_action(signal, trapframe, &mut restart_syscall) {
                 committed_handler_frame = true;
                 break;
@@ -1215,7 +1214,7 @@ pub fn handle_signals(
     // trap-return pass consumed no handler signal, signal code remains the
     // owner responsible for closing any deferred temporary-mask restore.
     if !committed_handler_frame {
-        task.restore_temporary_sig_mask_if_pending();
+        get_current_task().restore_temporary_sig_mask_if_pending();
     }
 }
 
@@ -1240,7 +1239,9 @@ fn perform_signal_action(
 
     match action {
         SignalAction::Default(default) => {
+            drop(task);
             default(no);
+            return false;
         },
         SignalAction::Ignore => {
             // do nothing.
