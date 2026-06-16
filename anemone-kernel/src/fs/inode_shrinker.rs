@@ -1,12 +1,13 @@
 use crate::{
     fs::inode::Inode,
     prelude::*,
-    task::kthread::{KThreadBuilder, KThreadContext, KThreadRef},
+    task::kthread::{KThreadBuilder, KThreadCtx, KThreadHandle},
+    utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
-static INODE_SHRINKER: SpinLock<Option<KThreadRef>> = SpinLock::new(None);
+static INODE_SHRINKER: SpinLock<Option<KThreadHandle>> = SpinLock::new(None);
 
-fn inode_shrinker_entry(ctx: KThreadContext, _: ()) -> i32 {
+fn inode_shrinker_entry(ctx: KThreadCtx, _: AnyOpaque) -> i32 {
     loop {
         if ctx.should_stop() {
             break;
@@ -25,7 +26,7 @@ fn inode_shrinker_entry(ctx: KThreadContext, _: ()) -> i32 {
 
 pub fn init_inode_shrinker() {
     let worker = KThreadBuilder::new("inode-shrink-0")
-        .spawn(inode_shrinker_entry, ())
+        .spawn(inode_shrinker_entry, NilOpaque::new())
         .unwrap_or_else(|err| panic!("failed to spawn inode shrinker: {:?}", err));
 
     let mut slot = INODE_SHRINKER.lock();
@@ -33,7 +34,7 @@ pub fn init_inode_shrinker() {
     *slot = Some(worker);
 }
 
-fn shrink_inodes(ctx: &KThreadContext) {
+fn shrink_inodes(ctx: &KThreadCtx) {
     let mut evicted = 0;
 
     for sb in crate::fs::mounted_superblocks() {

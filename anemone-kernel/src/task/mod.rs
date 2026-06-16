@@ -40,7 +40,7 @@ use crate::{
     task::{
         cpu_usage::{TaskCpuUsage, ThreadGroupCpuUsage},
         files::FilesState,
-        kthread::KThread,
+        kthread::KThreadTaskLocal,
         sig::{
             PendingSignals, SigNo, TaskSigMaskState, altstack::SigAltStack,
             disposition::SignalDisposition,
@@ -157,11 +157,12 @@ pub struct Task {
     /// This pointer is not guaranteed to be valid. It's user's responsibility.
     clear_child_tid: SpinLock<Option<VirtAddr>>,
 
-    /// Ordinary kthread state owned by this task.
+    /// Ordinary kthread task-local attachment owned by this task.
     ///
-    /// This is the strong owner, matching Linux's task-held `struct kthread`.
-    /// `KThread` only keeps a weak task pointer, so this does not form a cycle.
-    kthread: SpinLock<Option<Arc<KThread>>>,
+    /// The attachment is installed before the task is published. It is not an
+    /// external lifecycle owner; shared lifecycle state lives only in the
+    /// `Arc<KThreadControl>` stored inside this attachment.
+    kthread: SpinLock<Option<KThreadTaskLocal>>,
 }
 
 /// Observation-only compatibility state for status readers.

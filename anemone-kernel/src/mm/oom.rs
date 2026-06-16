@@ -4,15 +4,16 @@ use crate::{
     prelude::*,
     task::{
         for_each_thread_group_from, get_thread_group,
-        kthread::{KThreadBuilder, KThreadContext, KThreadRef},
+        kthread::{KThreadBuilder, KThreadCtx, KThreadHandle},
         sig::{
             SigNo, Signal,
             info::{SiCode, SigInfoFields, SigKill},
         },
     },
+    utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
-static OOM_KILLER: SpinLock<Option<KThreadRef>> = SpinLock::new(None);
+static OOM_KILLER: SpinLock<Option<KThreadHandle>> = SpinLock::new(None);
 
 #[derive(Debug)]
 struct OomVictim {
@@ -23,7 +24,7 @@ struct OomVictim {
 
 pub fn init_oom_killer() {
     let worker = KThreadBuilder::new("oom-killer-0")
-        .spawn(oom_killer_entry, ())
+        .spawn(oom_killer_entry, NilOpaque::new())
         .unwrap_or_else(|err| panic!("failed to spawn OOM killer: {:?}", err));
 
     let mut slot = OOM_KILLER.lock();
@@ -32,16 +33,12 @@ pub fn init_oom_killer() {
 }
 
 pub fn wake_oom_killer() {
-    if let Some(worker) = OOM_KILLER
-        .lock()
-        .as_ref()
-        .and_then(|worker| worker.upgrade())
-    {
+    if let Some(worker) = OOM_KILLER.lock().as_ref().cloned() {
         worker.wake();
     }
 }
 
-fn oom_killer_entry(ctx: KThreadContext, _: ()) -> i32 {
+fn oom_killer_entry(ctx: KThreadCtx, _: AnyOpaque) -> i32 {
     let mut active_victim = None;
 
     loop {

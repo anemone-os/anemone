@@ -322,10 +322,76 @@
 
 **下一步：** 若总控继续推进，只启动 `phase3-kthread-handle-worker` 一名 implementation worker。worker 返回后总控本地复核 diff，再启动 `phase3-reviewer`。
 
+### 2026-06-16 - 阶段 3 strong handle 与 create transaction
+
+**阶段：** 阶段 3 - strong `KThreadHandle` 与 create transaction。
+
+**执行：** 启动 `phase3-kthread-handle-worker`，只分配阶段 3 write set。worker 返回后，总控本地复核 diff，修正 `has_exited()` / `wait_exited()` 外部完成语义，然后启动只读 `phase3-reviewer`。未启动阶段 4+ worker。
+
+**实际 write set：**
+
+- `anemone-kernel/src/task/kthread/mod.rs`
+- `anemone-kernel/src/task/kthread/create.rs`（删除）
+- `anemone-kernel/src/task/kthread/control.rs`
+- `anemone-kernel/src/task/kthread/ctx.rs`
+- `anemone-kernel/src/task/kthread/entry.rs`
+- `anemone-kernel/src/task/kthread/handle.rs`
+- `anemone-kernel/src/task/kthread/kthreadd.rs`
+- `anemone-kernel/src/task/kthread/spawn.rs`
+- `anemone-kernel/src/task/mod.rs`
+- `anemone-kernel/src/fs/inode_shrinker.rs`
+- `anemone-kernel/src/mm/oom.rs`
+- 本事务日志
+
+**变更：**
+
+- 按 RFC 文件组织拆分 `task::kthread`：`mod.rs` facade、`spawn.rs` builder / placement、`kthreadd.rs` create transaction、`entry.rs` launch slot / entry shim、`control.rs` lifecycle owner、`handle.rs` strong public handle、`ctx.rs` entry ctx。
+- 删除 `create.rs`，不再保留 kthread create / kthreadd / entry / control 聚合文件。
+- 删除 public weak-only `KThreadRef` 和内部 `KThread` 实体；`Task` task-local kthread 字段改为直接保存 `KThreadTaskLocal`。
+- 引入 `KThreadHandle`，public API 只暴露 `request_stop()`、`wake()`、`wait_exited()` 和 `has_exited()`；没有 public `stop()`、`Arc<Task>`、scheduler state 或 topology mutation capability。
+- `KThreadControl` 只拥有 lifecycle phase、wake event、external exited event 和 external completion result；`KThreadPhase` 只有 `Running`、`StopRequested`、`Exited(i32)`。
+- 总控集成修正：`has_exited()` / `wait_exited()` 观察 `external_result` + `exited` event，不直接把 internal `phase == Exited(code)` 当作 handle-visible completion。阶段 3 仍在 entry result 后立即 publish external completion；阶段 4 必须把该 publish 移到 task-local closeout 与 topology/procfs unpublish 之后。
+- Entry API 改为 `KThreadEntry = fn(KThreadCtx, AnyOpaque) -> i32`；kthread core 只搬运 / drop opaque payload，不 downcast。
+- ordinary kthread launch payload 改为 task-local `KThreadLaunch`，在 publish 前安装到 `KThreadTaskLocal`；entry shim 从 current task 的 launch slot `take()`，缺失或重复进入直接 panic。
+- ordinary kthread task creation 不再通过 `ParameterList` 或 raw pointer 传递 start payload；kernel task entry 使用 `ParameterList::empty()`。
+- create transaction 改名为 `SpawnRequest` / `SpawnReply` / `SpawnOutcome`、`kthreadd::submit()` / `run()` / `spawn()`，静态名改为 `KTHREADD` / `SPAWN_QUEUE` / `SPAWN_WAKE`。
+- inode shrinker 与 OOM killer 改为持有 strong `KThreadHandle`；`wake_oom_killer()` 直接 clone strong handle 后 `wake()`，不再 weak upgrade。
+
+**边界确认：**
+
+- 未修改 TID allocator。
+- 未修改 topology publish 语义；`kthreadd` 与 ordinary kthread 仍以 `TaskBinding::UserLeader` 发布，`TaskBinding::KThread` 仍是阶段 4 前未启用 scaffolding。
+- 未修改 `task/api/exit`、procfs、wait、signal、job-control、priority 或 resource-style API。
+- `kthread_entry_shim` 在完成 kthread result 后仍调用完整 `kernel_exit()`；专用 `kthread_exit()`、task-local closeout、topology/procfs unpublish 和 user-facing API 分流仍留给阶段 4 同 gate。
+- 未重新引入 service/request/workqueue、park/unpark、独立 registry、`KThreadId` 或外部 `Arc<Task>` lifecycle handle。
+
+**Review：** `phase3-reviewer` 只读审查未发现 Apollyon 或 Keter，结论为 Phase 3 gate can continue。reviewer 记录的 residual notes 是阶段 4 边界：external completion 当前仍紧随 entry result；`kthreadd` 仍发布为 `TaskBinding::UserLeader`，且尚未安装 `KThreadTaskLocal { launch: None }`，这与阶段 3 stop boundary 一致。
+
+**验证：**
+
+- `just fmt kernel`：通过。
+- `git diff --check`：通过。
+- 新增 `task/kthread/{control.rs,ctx.rs,entry.rs,handle.rs,kthreadd.rs,spawn.rs}` 对 `/dev/null` 的 `git diff --no-index --check` 均无 whitespace 诊断；非零退出码为新文件差异的正常状态。
+- `just build`：通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。
+- source audit：`rg "KThreadRef|struct KThread\\b|ParameterList::new\\(\\&\\[start_arg|KThreadStart|KThreadStartPointer" anemone-kernel/src/task/kthread anemone-kernel/src/fs/inode_shrinker.rs anemone-kernel/src/mm/oom.rs` 无输出。
+- source audit：`rg "mod create|create::|task/kthread/create|KThreadContext|KThreadSnapshot|KThreadRunState|\\.stop\\(\\)" anemone-kernel/src/task/kthread anemone-kernel/src/fs/inode_shrinker.rs anemone-kernel/src/mm/oom.rs anemone-kernel/src/task/mod.rs` 无输出。
+- source audit：`test ! -e anemone-kernel/src/task/kthread/create.rs` 通过。
+- phase 4 boundary audit：`TaskBinding::KThread` 只在 RFC/事务文本、topology scaffolding 和 kthread 注释中出现；`task/kthread` 未实际消费该 binding。
+
+**未运行：** QEMU、boot smoke、LTP / user-test。阶段 3 gate 要求 build 与 source audit；procfs/exit/user-facing runtime smoke 留给阶段 4+。
+
+**残余风险：**
+
+- `kthread_entry_shim` 仍调用完整 `kernel_exit()`；阶段 4 必须落地专用 `kthread_exit()`、task-local closeout、topology/procfs unpublish 和最小 user-facing API 分流。
+- `kthreadd` 与 ordinary kthread 仍是 `TaskBinding::UserLeader` 迁移中间态；实际 `TaskBinding::KThread` publish 留阶段 4 同 gate。
+- `KThreadTaskLocal { launch: None }` 尚未安装到 `kthreadd`；阶段 4 启用 `kthreadd` `TaskBinding::KThread` 前必须补齐。
+
+**结论：** 阶段 3 gate 已关闭。下一步只能准备阶段 4 `kthreadd` / ordinary kthread topology、专用 exit、topology/procfs unpublish 与最小 user-facing API 分流同 gate；不得把其中任一部分拆成可独立发布的中间态。
+
 ## 开放事项
 
-- 启动阶段 3 首位 worker，但不能直接启动阶段 4+ worker。
-- 阶段 3 worker 必须继续保留 `TaskBinding::KThread` 为未启用 scaffolding；实际 `kthreadd` / ordinary kthread `KThread` publish 留到阶段 4。
+- 准备阶段 4，但不能拆分启用 `kthreadd` / ordinary kthread `TaskBinding::KThread`、专用 `kthread_exit()`、task-local closeout、topology/procfs unpublish 和最小 user-facing API 分流。
+- 阶段 4 worker 必须先拿到 write set 批准；若 source inventory 发现 priority/resource/scheduler user API 需要额外文件，必须先上报 expansion request。
 
 ## 收口
 
