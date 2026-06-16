@@ -287,8 +287,9 @@
 
 **阶段 3 implementation write set：**
 
-- `anemone-kernel/src/task/kthread/{mod.rs,create.rs}`
-- 若 worker 选择按 RFC 目标形态拆分，允许在同一 owner 内新增 `anemone-kernel/src/task/kthread/{spawn.rs,kthreadd.rs,entry.rs,control.rs,handle.rs,ctx.rs}`，但不得把纯拆分与阶段 4 语义混在一起。
+- `anemone-kernel/src/task/kthread/mod.rs`
+- `anemone-kernel/src/task/kthread/create.rs`（仅作为迁移来源与删除目标，不作为阶段 3 实现落点）
+- 阶段 3 开始必须按 RFC 目标形态拆分源码：新增 `anemone-kernel/src/task/kthread/{spawn.rs,kthreadd.rs,entry.rs,control.rs,handle.rs,ctx.rs}`，并迁移当前 `create.rs` 内容；`create.rs` 只作为迁移来源，阶段 3 worker 不能继续把它作为长期实现文件保留。
 - `anemone-kernel/src/task/mod.rs`
 - `anemone-kernel/src/fs/inode_shrinker.rs`
 - `anemone-kernel/src/mm/oom.rs`
@@ -299,10 +300,12 @@
 - 不让 `kthreadd` 或 ordinary kthread 在阶段 3 发布为 `TaskBinding::KThread`。
 - 不把 `kthread_entry_shim` 改成专用 `kthread_exit()` 或调整 `kernel_exit()` guard；这些必须留给阶段 4 同 gate。
 - 不新增 service/request/workqueue、park/unpark、独立 registry、`KThreadId` 或外部 `Arc<Task>` lifecycle handle。
+- 不保留 `create.rs` 作为阶段 3 之后的 kthread create/kthreadd/entry/control 实现聚合文件；若拆分过程中发现必须临时保留兼容 shim，worker 必须停止并上报保留原因、删除条件和验证 gate。
 
 **准备启动的 agent 列表：**
 
 - `phase3-kthread-handle-worker`：阶段 3 代码 worker。只在批准 write set 内实现 strong `KThreadHandle` / `KThreadControl`、`KThreadTaskLocal` + `KThreadLaunch` task-local attachment、`AnyOpaque` entry payload、publish 前 attachment 安装和 create transaction commit 边界；同步更新 inode shrinker / OOM killer 持有 strong handle。若需要拆分 `task/kthread` 文件，必须保持同 owner 内拆分，且不得触碰阶段 4 gate。
+- `phase3-kthread-handle-worker` 的源码组织要求：先把现有 `create.rs` 按 RFC 文件组织迁移到 `spawn.rs`、`kthreadd.rs`、`entry.rs`、`control.rs`、`handle.rs`、`ctx.rs`，再在这些文件中落地阶段 3 语义；完成后删除 `create.rs` 和对应 module wiring。
 - `phase3-reviewer`：阶段 3 worker 返回后的只读 reviewer。检查 public API 不暴露 `Arc<Task>` / raw scheduler / topology mutation，`request_stop()` 与 already-exited stop 幂等，`wake()` 不表达业务 request，`wait_exited()` 只观察 external exited event，control 不保存 post-exit diagnostic identity，launch slot 只被 entry shim take 一次，publish 后没有可失败 rollback。
 - `phase3-source-audit-explorer`：阶段 3 worker 合入后按需启动的只读 explorer。只做 source audit：外部 owner 不再依赖 weak-only `KThreadRef` 等待 exit result；没有内部 `KThread` object 作为 Task/topology/control 之外的第四实体；payload 不再经 `ParameterList` / raw pointer 传递。
 
@@ -313,6 +316,7 @@
 - worker 需要编辑批准 write set 之外的文件。
 - worker 认为必须启用 `TaskBinding::KThread`、改 exit path、改 procfs/unpublish 或改 user-facing API 才能完成阶段 3。
 - worker 需要重新引入 weak-only lifecycle API 作为 public contract、外部 `Arc<Task>` handle、service/request/workqueue、park/unpark 或独立 registry。
+- worker 无法删除 `create.rs`，或需要把阶段 3 新语义继续集中写进 `create.rs`。
 - worker 无法在 publish 前安装 task-local kthread attachment，或无法证明 publish 后步骤只剩 infallible enqueue / success completion。
 - worker 无法让 `wait_exited()` / `has_exited()` 保持 external exited completion 语义，而只能直接暴露 `phase == Exited(code)`。
 
