@@ -1338,22 +1338,24 @@ fn perform_signal_action(
                 // 16 bytes should be enough for all architectures.
                 16
             ) as u64);
-            {
+            let write_sigframe = {
                 let usp = task.clone_uspace_handle();
                 let mut guard = usp.lock();
                 match UserWritePtr::<RtSigFrame>::try_new(sigframe_base, &mut guard) {
-                    Err(e) => {
-                        knoticeln!(
-                            "perform_signal_action: failed to write sigframe to {} user stack: {:?}",
-                            task.tid(),
-                            e
-                        );
-                        kernel_exit_group(ExitCode::Signaled(SigNo::SIGSEGV))
-                    },
                     Ok(mut uptr) => {
                         uptr.write(frame);
+                        Ok(())
                     },
+                    Err(e) => Err(e),
                 }
+            };
+            if let Err(e) = write_sigframe {
+                knoticeln!(
+                    "perform_signal_action: failed to write sigframe to {} user stack: {:?}",
+                    task.tid(),
+                    e
+                );
+                kernel_exit_group(ExitCode::Signaled(SigNo::SIGSEGV))
             }
 
             // we're done. finally prepare the trapframe.
