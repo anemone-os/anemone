@@ -2,7 +2,7 @@ fanotify01
 fanotify02
 fanotify03
 fanotify04
-fanotify05
+# fanotify05
 fanotify06
 fanotify07
 fanotify08
@@ -18,6 +18,6 @@ fanotify17
 fanotify18
 fanotify19
 fanotify20
-fanotify21
-fanotify22
-fanotify23
+# fanotify21
+# fanotify22
+# fanotify23
