@@ -2,7 +2,7 @@
 
 use crate::{
     prelude::*,
-    task::{tid::Tid, topology::TOPOLOGY},
+    task::{ThreadGroupType, tid::Tid, topology::TOPOLOGY},
 };
 
 impl ThreadGroup {
@@ -10,6 +10,11 @@ impl ThreadGroup {
     ///
     /// For init and idle thread groups, this will return [None].
     pub fn parent_tgid(&self) -> Option<Tid> {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user parent",
+            self.tgid()
+        );
         self.inner.read().parent_tgid
     }
 
@@ -26,6 +31,11 @@ impl ThreadGroup {
     /// - [TOPOLOGY]
     /// - self [ThreadGroup]
     pub fn get_parent(&self) -> Arc<ThreadGroup> {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user parent",
+            self.tgid()
+        );
         let parent_tgid = self
             .inner
             .read()
@@ -64,6 +74,11 @@ impl ThreadGroup {
     where
         F: FnOnce(&Arc<ThreadGroup>) -> R,
     {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user parent",
+            self.tgid()
+        );
         let topology = TOPOLOGY.inner.write();
 
         let parent_tgid = self
@@ -93,6 +108,11 @@ impl ThreadGroup {
     /// - [TOPOLOGY] -> [ThreadGroup]
     /// - [TOPOLOGY] -> ‵f‵
     pub fn for_each_child<F: FnMut(&Arc<ThreadGroup>)>(&self, mut f: F) {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user children",
+            self.tgid()
+        );
         let topology = TOPOLOGY.inner.read();
         for child_tgid in self.inner.read().children_tgids.iter() {
             let child_tg = topology
@@ -116,6 +136,11 @@ impl ThreadGroup {
     /// you really need such strong consistency guarantee before using this
     /// method.
     pub fn for_each_child_task<F: FnMut(&Arc<Task>)>(&self, mut f: F) {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user children",
+            self.tgid()
+        );
         let topology = TOPOLOGY.inner.read();
         for child_tgid in self.inner.read().children_tgids.iter() {
             let child_tg = topology
@@ -144,6 +169,11 @@ impl ThreadGroup {
     ///
     /// Useful when the lock chain is too deep.
     pub fn get_children(&self) -> Vec<Arc<ThreadGroup>> {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user children",
+            self.tgid()
+        );
         let child_tgids = self.inner.read().children_tgids.clone();
         let topology = TOPOLOGY.inner.read();
         child_tgids
@@ -155,6 +185,11 @@ impl ThreadGroup {
 
     /// Get the number of children thread groups of this thread group.
     pub fn nchildren(&self) -> usize {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user children",
+            self.tgid()
+        );
         self.inner.read().children_tgids.len()
     }
 
@@ -167,6 +202,11 @@ impl ThreadGroup {
         &self,
         mut prediction: P,
     ) -> Option<Arc<ThreadGroup>> {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user children",
+            self.tgid()
+        );
         let topology = TOPOLOGY.inner.read();
 
         for child_tgid in self.inner.read().children_tgids.iter() {
@@ -187,6 +227,11 @@ impl ThreadGroup {
     /// **Topology Consistency** is guaranteed natually due to the objective of
     /// this method.
     pub fn reparent_orphan_children(&self) {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} cannot reparent user children",
+            self.tgid()
+        );
         // we may need get_many_mut... but it's still a nightly feature.
         let topology = TOPOLOGY.inner.read();
         let mut child_tgids = vec![];
@@ -202,6 +247,11 @@ impl ThreadGroup {
         for child_tgid in &child_tgids {
             let child_tg = topology.thread_groups.get(child_tgid).expect(
                 "task topology: child thread group not found when reparenting orphan children",
+            );
+            assert!(
+                child_tg.ty() == ThreadGroupType::User,
+                "task topology: non-user child thread group {} in user child topology",
+                child_tgid
             );
             child_tg.inner.write().parent_tgid = Some(Tid::INIT);
         }
@@ -237,6 +287,11 @@ impl ThreadGroup {
     /// Result<Option<Arc<ThreadGroup>>, SomeError> to distinguish those two
     /// cases?
     pub fn try_reap_child(&self, child_tgid: Tid) -> Option<Arc<ThreadGroup>> {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} cannot reap user children",
+            self.tgid()
+        );
         let mut topology = TOPOLOGY.inner.write();
 
         // make sure this is indeed a child thread group of us.

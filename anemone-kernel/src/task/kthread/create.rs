@@ -4,7 +4,7 @@ use crate::{
     prelude::*,
     sched::class::{SchedClassPrv, SchedEntity},
     sync::mono::MonoFlow,
-    task::exit::kernel_exit,
+    task::{Tid, exit::kernel_exit, tid::alloc_kthreadd_tid},
 };
 
 use super::{KThread, KThreadContext, KThreadEntry, KThreadRef, KThreadShimEntry};
@@ -194,25 +194,39 @@ static KTHREADD_TASK: SpinLock<Option<Arc<Task>>> = SpinLock::new(None);
 pub fn init_kthreadd() {
     let init = get_init_task();
     let init_tg = init.get_thread_group();
+    let kthreadd_tid = alloc_kthreadd_tid();
 
     let (task, guard) = unsafe {
-        Task::new_kernel(
+        Task::new_kernel_with_tid_handle(
             "kthreadd",
             kthreadd_entry as *const (),
             ParameterList::empty(),
             Some(init.tid()),
-            None,
+            Some(Tid::KTHREADD),
             SchedEntity::new(SchedClassPrv::RoundRobin(())),
             TaskFlags::empty(),
             Some(cur_cpu_id()),
+            kthreadd_tid,
         )
     }
     .unwrap_or_else(|e| panic!("failed to create kthreadd task: {:?}", e));
+    assert!(
+        task.tid() == Tid::KTHREADD && task.tgid() == Tid::KTHREADD,
+        "kthreadd must be created with fixed tid/tgid {}",
+        Tid::KTHREADD
+    );
+    if let Some(existing) = get_task(&Tid::KTHREADD) {
+        panic!(
+            "task topology already contains TID {} before kthreadd publish: {}",
+            Tid::KTHREADD,
+            existing.name()
+        );
+    }
 
     let task = guard
         .publish(
             task,
-            TaskBinding::Leader {
+            TaskBinding::UserLeader {
                 parent_tgid: init.tgid(),
                 pgid: init_tg.pgid(),
                 sid: init_tg.sid(),
@@ -220,6 +234,11 @@ pub fn init_kthreadd() {
             },
         )
         .unwrap_or_else(|(_, e)| panic!("failed to publish kthreadd task: {:?}", e));
+    assert!(
+        task.tid() == Tid::KTHREADD && task.tgid() == Tid::KTHREADD,
+        "published kthreadd must have fixed tid/tgid {}",
+        Tid::KTHREADD
+    );
 
     {
         let mut kthreadd = KTHREADD_TASK.lock();
@@ -310,7 +329,7 @@ fn kthreadd_create_kthread(create: KThreadCreateInfo) {
 
     let task = match guard.publish(
         task,
-        TaskBinding::Leader {
+        TaskBinding::UserLeader {
             parent_tgid: kthreadd.tgid(),
             pgid: kthreadd_tg.pgid(),
             sid: kthreadd_tg.sid(),

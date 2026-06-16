@@ -245,6 +245,7 @@ struct ProcessGroupInner {
 pub struct ThreadGroup {
     /// The thread group ID, which is the same as the leader thread's ID.
     tgid: TidHandle,
+    ty: ThreadGroupType,
     /// Event that will be published when a child thread group exits.
     child_exited: Event,
     /// Signal to send to parent when this thread group exits.
@@ -252,6 +253,12 @@ pub struct ThreadGroup {
     /// POSIX interval timers. Shared by all member threads.
     itimers: ITimers,
     inner: NoIrqRwLock<ThreadGroupInner>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadGroupType {
+    User,
+    KThread,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -321,9 +328,9 @@ struct ThreadGroupInner {
     /// Running status of this thread group.
     status: ThreadGroupStatus,
     /// Process group ID cached on the process identity.
-    pgid: Tid,
+    pgid: Option<Tid>,
     /// Session ID cached on the process identity.
-    sid: Tid,
+    sid: Option<Tid>,
     /// TIDs of all member threads, including the leader thread.
     members: BTreeSet<Tid>,
     /// Tgid of parent thread group. [None] for init/idle thread group.
@@ -384,7 +391,35 @@ impl Task {
         flags: TaskFlags,
         cpu: Option<CpuId>,
     ) -> Result<(Task, PublishGuard), SysError> {
-        let tid = alloc_tid().ok_or(SysError::OutOfMemory)?;
+        // TID 1 is outside the ordinary allocator. The BSP root task is the
+        // only caller that may consume this one-shot handle; later AP kinit
+        // member tasks still join TGID 1 but receive ordinary TIDs from 3 up.
+        let tid = if tgid == Some(Tid::INIT) {
+            tid::try_alloc_init_tid()
+                .or_else(alloc_tid)
+                .ok_or(SysError::OutOfMemory)?
+        } else {
+            alloc_tid().ok_or(SysError::OutOfMemory)?
+        };
+
+        unsafe {
+            Self::new_kernel_with_tid_handle(
+                name, entry, args, creator, tgid, sched, flags, cpu, tid,
+            )
+        }
+    }
+
+    pub(in crate::task) unsafe fn new_kernel_with_tid_handle(
+        name: &str,
+        entry: *const (),
+        args: ParameterList,
+        creator: Option<Tid>,
+        tgid: Option<Tid>,
+        sched: SchedEntity,
+        flags: TaskFlags,
+        cpu: Option<CpuId>,
+        tid: TidHandle,
+    ) -> Result<(Task, PublishGuard), SysError> {
         let tid_value = tid.get_typed().get();
         let tgid = tgid.unwrap_or(tid.get_typed());
         let stack = KernelStack::new()?;

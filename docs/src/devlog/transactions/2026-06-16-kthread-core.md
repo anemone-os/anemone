@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** task / topology / procfs / kthread
 **权威计划：** [RFC-20260616-kthread-core](../../rfcs/kthread-core/index.md), [不变量需求](../../rfcs/kthread-core/invariants.md), [迁移实施计划](../../rfcs/kthread-core/implementation.md)
-**当前阶段：** 阶段 1 已关闭，等待阶段 2 准备
+**当前阶段：** 阶段 2 review 暂停，等待 gate 决策
 
 ## 范围
 
@@ -143,11 +143,105 @@
 
 **结论：** 阶段 1 gate 已关闭。下一步只能准备阶段 2 fixed `kthreadd` TID 与 topology preflight；不得直接启动阶段 3+ 或 ordinary kthread binding enablement。
 
+### 2026-06-16 - 阶段 2 write set 扩展批准
+
+**阶段：** 阶段 2 - fixed `kthreadd` TID 与 topology preflight。
+
+**执行：** 启动只读 `phase2-tid-topology-explorer`，盘点 TID allocator、`Task::new_kernel()` 调用点、publish guard、`TaskBinding`、topology accessor 和当前 kthread 文件落点。explorer 未修改文件。
+
+**发现：**
+
+- 当前代码尚未拆分为 RFC 目标形态；`init_kthreadd()` 与 ordinary kthread create path 仍位于 `anemone-kernel/src/task/kthread/create.rs`，仓库中没有 `task/kthread/kthreadd.rs`。
+- Phase 2 必须触碰 `init_kthreadd()` 才能固定 `kthreadd` TID/TGID；若严格按目标文件名只允许 `kthreadd.rs`，worker 会无法实现该 gate。
+- root/init 当前也通过普通 allocator 间接取得 TID 1；普通 allocator 改为从 3 开始后，需要一个 fixed init TID 路径或内部 task constructor 辅助。
+- ordinary kthread create path 仍依赖 `kthreadd_tg.pgid()` / `sid()` 与 `TaskBinding::Leader` 兼容形态。Phase 2 不得把 ordinary kthread 切到 `TaskBinding::KThread`，也不得让 `kthreadd` 的实际 KThread publish 迫使 ordinary create path 越过 Phase 4 gate。
+
+**批准的 Phase 2 implementation write set：**
+
+- `anemone-kernel/src/task/tid.rs`
+- `anemone-kernel/src/task/mod.rs`
+- `anemone-kernel/src/task/topology/{mod.rs,thread_group.rs,parent_child.rs,process_group.rs}`
+- `anemone-kernel/src/task/kthread/create.rs`
+- `anemone-kernel/src/arch/{riscv64,loongarch64}/bootstrap.rs`
+- `anemone-kernel/src/task/kthread/mod.rs`（仅限必要 re-export 或同 owner wiring）
+
+本批准把 `task/kthread/create.rs` 作为当前未拆分 checkout 中 `kthreadd.rs` 的实际落点；它不批准 worker 修改 exit、procfs、wait、signal、job-control、priority、resource-style API，亦不批准 ordinary kthread binding enablement。
+
+**Phase 2 worker 交付边界：**
+
+- 增加 `Tid::KTHREADD == 2`。
+- ordinary `alloc_tid()` 不返回 0、1 或 2。
+- root/init 与 `kthreadd` 使用专用 fixed handle，不暴露通用 `reserve_tid(Tid)`。
+- 落地 `ThreadGroupType`、`TaskBinding` rename / scaffolding、`ty()`、User-only accessor panic 和 shape assertions。
+- ordinary kthread create path 仍不得切到 `TaskBinding::KThread`；若实现发现必须提前切换，必须停止并上报。
+- 阶段 2 退出声明不得声称 ordinary kthread 已满足最终 topology / exit / procfs contract。
+
+**补充批准：** 用户随后批准 Phase 2 worker 修改 clone 路径中与线程组类型直接相关的代码，因为强行在既有 write set 内兼容会固化不自然的 owner boundary。追加 write set：
+
+- `anemone-kernel/src/task/api/clone/{mod.rs,clone.rs,clone3.rs}`
+
+该批准只覆盖 Phase 2 topology type / binding rename / shape assertion 所需的 clone 调用点调整；不批准 clone 路径顺带修改用户可见 clone ABI、exit、procfs、wait、signal、job-control、priority 或 resource policy。
+
+### 2026-06-16 - 阶段 2 worker 集成与暂停点
+
+**阶段：** 阶段 2 - fixed `kthreadd` TID 与 topology preflight。
+
+**执行：** 启动 `phase2-tid-topology-worker`，按批准 write set 落地 Phase 2 代码。worker 返回后，总控复核 diff、关闭 worker，并做一个局部修正：普通 TID allocator 从 3 开始后，容量从 `MAX_PROCESSES` 调整为 `MAX_PROCESSES - 3 + 1`，避免 `/proc/sys/kernel/pid_max` 仍输出 `MAX_PROCESSES` 时普通分配上界越过 pid_max。
+
+**实际 write set：**
+
+- `anemone-kernel/src/task/tid.rs`
+- `anemone-kernel/src/task/mod.rs`
+- `anemone-kernel/src/task/topology/mod.rs`
+- `anemone-kernel/src/task/topology/thread_group.rs`
+- `anemone-kernel/src/task/topology/parent_child.rs`
+- `anemone-kernel/src/task/topology/process_group.rs`
+- `anemone-kernel/src/task/kthread/create.rs`
+- `anemone-kernel/src/task/api/clone/mod.rs`
+- 本事务日志
+
+未修改 arch bootstrap、exit、procfs、wait、signal、job-control、priority 或 resource-style API。
+
+**变更：**
+
+- 增加 `Tid::KTHREADD == 2`。
+- 普通 `alloc_tid()` 范围改为从 3 到 `MAX_PROCESSES`；TID 0、1、2 均不进入普通 allocator。
+- TID 1 由内部 one-shot init handle 消费，TID 2 由 `alloc_kthreadd_tid()` 专用 one-shot handle 消费；未新增通用 `reserve_tid(Tid)`。
+- `init_kthreadd()` 改用 fixed TID handle 创建 TID/TGID 2，并在发布前后 assert `tid == tgid == Tid::KTHREADD`。
+- `TaskBinding::Leader` 重命名为 `TaskBinding::UserLeader`，新增 guarded `TaskBinding::KThread` scaffolding。
+- 引入 `ThreadGroupType::{User, KThread}` 与 `ThreadGroup::ty()`。
+- `ThreadGroupInner.pgid/sid` 改为 `Option<Tid>`；User-only `pgid()`、`sid()`、`parent_tgid()` 和 parent/child/process-group 操作在非 `User` 上 panic。
+- `User` / `KThread` thread-group shape assertion 已覆盖 pgid/sid、children 和 singleton member；`Member` 只能加入 `User` thread group。
+- clone 路径仅同步 `TaskBinding::UserLeader` 命名，没有改变 clone ABI 或用户可见策略。
+
+**暂停原因：**
+
+当前代码没有把 `kthreadd` 实际发布为 `TaskBinding::KThread`。原因不只是 Phase 3 的 task-local prepublish attachment 尚未落地：只要 `kthreadd` 先成为 `ThreadGroupType::KThread`，legacy ordinary kthread create path 仍以 `TaskBinding::UserLeader` 发布时就失去合法的 `parent_tgid` / `pgid` / `sid` 来源，并会迫使 ordinary kthread binding 提前进入 Phase 4 gate。按照 RFC，ordinary kthread `TaskBinding::KThread`、专用 exit、topology/procfs unpublish 和最小 user-facing API 分流必须同 gate 闭合，因此总控不能自行把这一步拍板为 Phase 2 内完成。
+
+**当前 gate 结论：**
+
+- fixed TID 与 topology scaffolding 已落地。
+- ordinary kthread create path 未越过 Phase 2 boundary，仍是 `TaskBinding::UserLeader`。
+- `TaskBinding::KThread` 目前是 fail-fast scaffolding；source audit 确认 `task/kthread` 还没有实际消费该 binding。
+- `phase2-reviewer` 结论为 Keter：当前 diff 可作为 fixed TID + topology scaffolding checkpoint，但不能声明 Phase 2 full gate 完整关闭，因为 `kthreadd` 仍发布为 `TaskBinding::UserLeader`，不是 `ThreadGroupType::KThread`。
+- Phase 2 不能声明完整关闭，除非负责人明确接受将 “`kthreadd` 实际 `ThreadGroupType::KThread` publish” 从 Phase 2 出口改为 Phase 4 同 gate，或批准重排阶段把相关 Phase 4 语义提前合并。
+
+**已运行验证：**
+
+- `just fmt kernel`：通过。
+- `git diff --check`：通过。
+- `just build`：通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning，本阶段未处理。
+- source audit：`TaskBinding::KThread` 未被 `task/kthread` 消费；ordinary kthread create path 仍未切到 `TaskBinding::KThread`。
+- `phase2-reviewer` 只读审查：未发现越界 write set 或 ordinary kthread 提前切换；确认 TID allocator 范围与 `/proc/sys/kernel/pid_max` 语义一致；确认 Keter 暂停项如上。
+
+**未完成验证：**
+
+- focused boot / procfs smoke 尚未运行；按 RFC 该 smoke 与实际 topology / procfs 可见性 gate 相关，当前尚未启用 `KThread` publish。
+
 ## 开放事项
 
-- 阶段 2 worker 尚未启动。
-- 阶段 2 需要先盘点 `Task::new_kernel()`、TID allocator、publish guard、`TaskBinding` 和 topology accessor 调用点。
-- 阶段 3+ worker 要等阶段 2 关闭并把 review evidence 写入本事务后再准备启动。
+- 等待负责人决定：接受当前阶段为 fixed TID + topology scaffolding checkpoint 并把 `kthreadd` 实际 `KThread` publish 并入 Phase 4，还是重排阶段以更早合并 Phase 4 语义。总控不会在该决策前启动阶段 3+ worker。
+- 阶段 3+ worker 要等阶段 2 gate 状态明确并把 review evidence 写入本事务后再准备启动。
 
 ## 收口
 
