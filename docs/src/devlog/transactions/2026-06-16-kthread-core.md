@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** task / topology / procfs / kthread
 **权威计划：** [RFC-20260616-kthread-core](../../rfcs/kthread-core/index.md), [不变量需求](../../rfcs/kthread-core/invariants.md), [迁移实施计划](../../rfcs/kthread-core/implementation.md)
-**当前阶段：** 阶段 2 checkpoint 已关闭，准备阶段 3
+**当前阶段：** 阶段 3 前置检查已完成，准备启动首个阶段 3 worker
 
 ## 范围
 
@@ -266,9 +266,61 @@
 
 **边界：** 未改变 Phase 2 / Phase 4 gate 决策；`TaskBinding::KThread` 仍是未启用 scaffolding，`kthreadd` 与 ordinary kthread 实际 `KThread` publish 仍留到阶段 4 同 gate。
 
+### 2026-06-16 - 阶段 3 前置检查与 worker 准备
+
+**阶段：** 阶段 3 - strong `KThreadHandle` 与 create transaction。
+
+**执行：** 总控重新阅读 RFC index、invariants、implementation、tracking issues、当前 register 条目和本事务日志；刷新当前代码落点，准备阶段 3 worker 列表。本步骤未启动 worker，也未修改内核代码。
+
+**当前代码落点：**
+
+- Git 基线：分支 `dev/drc/kthread`，前置检查开始时工作树干净；最新本地提交为 `b01cd3e kthread: clean up fixed tid construction`。
+- `task::kthread` 当前仍只有 `mod.rs` 与 `create.rs` 两个实现文件；RFC 目标文件 `spawn.rs`、`kthreadd.rs`、`entry.rs`、`control.rs`、`handle.rs`、`ctx.rs` 尚未建立。
+- `KThreadService` 与 park/unpark core surface 已删除；代码中不再有 `start_parked`、`park()`、`unpark()`、`should_park()`、`parkme()`、`Parking` 或 `Parked` kthread 状态。
+- public surface 仍是阶段 3 前 legacy 形态：`KThreadBuilder`、generic `KThreadEntry<A>`、weak `KThreadRef`、内部 `KThread` object、`KThreadContext`、`KThreadRunState` 和 `KThreadSnapshot`。
+- `Task` 仍保存 `SpinLock<Option<Arc<KThread>>>`；`KThread` 反向 weak 指向 `Task`，`KThreadRef` 只是 weak handle。
+- ordinary kthread create path 仍通过 `KThreadStart<A>`、`KThreadStartPointer` 和 `ParameterList::new(&[start_arg])` 传递 typed start payload；entry shim 再恢复 leaked `Box<KThreadStart<A>>`。
+- ordinary kthread 的 task-local kthread state 仍在 `TaskBinding::UserLeader` publish 之后安装；阶段 3 必须修正为 publish 前安装 task-local attachment，但不得启用实际 `TaskBinding::KThread` publish。
+- `kthreadd` fixed TID/TGID 2 与普通 allocator 从 3 开始已落地；但 `kthreadd` 与 ordinary kthread 仍以 `TaskBinding::UserLeader` 发布，`TaskBinding::KThread` 仍只是未启用 scaffolding。
+- `kthread_entry_shim` 在 entry return 后仍调用完整 `kernel_exit()`；这属于阶段 4 gate，阶段 3 不得提前改 exit path。
+- inode shrinker 与 OOM killer 已是 explicit loop，但仍持有 `KThreadRef`；`wake_oom_killer()` 仍通过 `upgrade()` 获取弱引用后调用 `wake()`。
+
+**阶段 3 implementation write set：**
+
+- `anemone-kernel/src/task/kthread/{mod.rs,create.rs}`
+- 若 worker 选择按 RFC 目标形态拆分，允许在同一 owner 内新增 `anemone-kernel/src/task/kthread/{spawn.rs,kthreadd.rs,entry.rs,control.rs,handle.rs,ctx.rs}`，但不得把纯拆分与阶段 4 语义混在一起。
+- `anemone-kernel/src/task/mod.rs`
+- `anemone-kernel/src/fs/inode_shrinker.rs`
+- `anemone-kernel/src/mm/oom.rs`
+
+**不批准的写集和行为：**
+
+- 不修改 TID allocator、topology publish、`TaskBinding::KThread` 实际消费、procfs、wait、signal、job-control、priority、resource-style API 或 `task/api/exit`。
+- 不让 `kthreadd` 或 ordinary kthread 在阶段 3 发布为 `TaskBinding::KThread`。
+- 不把 `kthread_entry_shim` 改成专用 `kthread_exit()` 或调整 `kernel_exit()` guard；这些必须留给阶段 4 同 gate。
+- 不新增 service/request/workqueue、park/unpark、独立 registry、`KThreadId` 或外部 `Arc<Task>` lifecycle handle。
+
+**准备启动的 agent 列表：**
+
+- `phase3-kthread-handle-worker`：阶段 3 代码 worker。只在批准 write set 内实现 strong `KThreadHandle` / `KThreadControl`、`KThreadTaskLocal` + `KThreadLaunch` task-local attachment、`AnyOpaque` entry payload、publish 前 attachment 安装和 create transaction commit 边界；同步更新 inode shrinker / OOM killer 持有 strong handle。若需要拆分 `task/kthread` 文件，必须保持同 owner 内拆分，且不得触碰阶段 4 gate。
+- `phase3-reviewer`：阶段 3 worker 返回后的只读 reviewer。检查 public API 不暴露 `Arc<Task>` / raw scheduler / topology mutation，`request_stop()` 与 already-exited stop 幂等，`wake()` 不表达业务 request，`wait_exited()` 只观察 external exited event，control 不保存 post-exit diagnostic identity，launch slot 只被 entry shim take 一次，publish 后没有可失败 rollback。
+- `phase3-source-audit-explorer`：阶段 3 worker 合入后按需启动的只读 explorer。只做 source audit：外部 owner 不再依赖 weak-only `KThreadRef` 等待 exit result；没有内部 `KThread` object 作为 Task/topology/control 之外的第四实体；payload 不再经 `ParameterList` / raw pointer 传递。
+
+本条记录不批准也不启动阶段 4+ implementation worker。阶段 3 首轮只能先启动 `phase3-kthread-handle-worker`；reviewer 与 explorer 必须等 worker 返回或总控需要并行只读审计时再启动。
+
+**阶段 3 停止条件：**
+
+- worker 需要编辑批准 write set 之外的文件。
+- worker 认为必须启用 `TaskBinding::KThread`、改 exit path、改 procfs/unpublish 或改 user-facing API 才能完成阶段 3。
+- worker 需要重新引入 weak-only lifecycle API 作为 public contract、外部 `Arc<Task>` handle、service/request/workqueue、park/unpark 或独立 registry。
+- worker 无法在 publish 前安装 task-local kthread attachment，或无法证明 publish 后步骤只剩 infallible enqueue / success completion。
+- worker 无法让 `wait_exited()` / `has_exited()` 保持 external exited completion 语义，而只能直接暴露 `phase == Exited(code)`。
+
+**下一步：** 若总控继续推进，只启动 `phase3-kthread-handle-worker` 一名 implementation worker。worker 返回后总控本地复核 diff，再启动 `phase3-reviewer`。
+
 ## 开放事项
 
-- 准备阶段 3 worker，但不能直接启动阶段 4+ worker。
+- 启动阶段 3 首位 worker，但不能直接启动阶段 4+ worker。
 - 阶段 3 worker 必须继续保留 `TaskBinding::KThread` 为未启用 scaffolding；实际 `kthreadd` / ordinary kthread `KThread` publish 留到阶段 4。
 
 ## 收口
