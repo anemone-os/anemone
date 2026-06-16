@@ -23,6 +23,9 @@ fn sys_setpgid(pid: i32, pgid: i32) -> Result<u64, SysError> {
         Tid::new(pid as u32)
     };
     let target = get_thread_group(&target_tgid).ok_or(SysError::NoSuchProcess)?;
+    if pid != 0 && target.ty() != ThreadGroupType::User {
+        return Err(SysError::NoSuchProcess);
+    }
     let new_pgid = if pgid == 0 {
         target.tgid()
     } else {

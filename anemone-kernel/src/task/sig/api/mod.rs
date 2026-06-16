@@ -9,7 +9,7 @@
 use crate::{
     prelude::*,
     syscall::handler::TryFromSyscallArg,
-    task::{credentials::cap::Capability, sig::SigNo},
+    task::{ThreadGroup, ThreadGroupType, credentials::cap::Capability, sig::SigNo},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,12 +66,28 @@ pub(super) fn can_send_signal_to(target: &Arc<Task>, sig: SigNo) -> bool {
     }
 
     let current = get_current_task();
-    if sig == SigNo::SIGCONT && current.get_thread_group().sid() == target.get_thread_group().sid()
-    {
+    let current_tg = current.get_thread_group();
+    let target_tg = target.get_thread_group();
+    if target_tg.ty() != ThreadGroupType::User {
+        return false;
+    }
+    if sig == SigNo::SIGCONT && current_tg.sid() == target_tg.sid() {
         return true;
     }
 
     false
+}
+
+pub(super) fn reject_kthread_signal_target(tg: &ThreadGroup) -> Result<(), SysError> {
+    if tg.ty() == ThreadGroupType::KThread {
+        return Err(SysError::NoSuchProcess);
+    }
+    Ok(())
+}
+
+pub(super) fn reject_kthread_task_signal_target(task: &Task) -> Result<(), SysError> {
+    let tg = task.get_thread_group();
+    reject_kthread_signal_target(&tg)
 }
 
 pub(super) fn can_send_kill_signal_to(target: &Arc<Task>, sig: KillSignal) -> bool {

@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** task / topology / procfs / kthread
 **权威计划：** [RFC-20260616-kthread-core](../../rfcs/kthread-core/index.md), [不变量需求](../../rfcs/kthread-core/invariants.md), [迁移实施计划](../../rfcs/kthread-core/implementation.md)
-**当前阶段：** 阶段 3 前置检查已完成，准备启动首个阶段 3 worker
+**当前阶段：** 阶段 4 gate 已关闭，准备阶段 5 post-gate user-facing boundary closeout
 
 ## 范围
 
@@ -388,10 +388,347 @@
 
 **结论：** 阶段 3 gate 已关闭。下一步只能准备阶段 4 `kthreadd` / ordinary kthread topology、专用 exit、topology/procfs unpublish 与最小 user-facing API 分流同 gate；不得把其中任一部分拆成可独立发布的中间态。
 
+### 2026-06-17 - 阶段 4 前置检查与 worker 准备
+
+**阶段：** 阶段 4 - `kthreadd` / ordinary kthread topology / exit / user-facing API gate。
+
+**执行：** 总控重新阅读 `kthread-core` RFC index、invariants、implementation、tracking issues、当前 register 和本事务日志；刷新当前代码落点，准备阶段 4 worker 列表。本步骤未启动 worker，也未修改内核代码。
+
+**当前代码落点：**
+
+- Git 基线：分支 `dev/drc/kthread`，前置检查开始时工作树干净；最新本地提交为 `50c2e7a kthread: close phase3 handle gate`。
+- 阶段 3 已关闭：`task::kthread` 已拆为 `mod.rs`、`spawn.rs`、`kthreadd.rs`、`entry.rs`、`control.rs`、`handle.rs`、`ctx.rs`，`create.rs` 已删除。
+- `KThreadService`、park/unpark、weak-only `KThreadRef`、内部 `KThread` 实体、typed start pointer 和 `ParameterList` start payload 均已从 kthread core 消失。
+- `KThreadHandle` 是 strong lifecycle capability；inode shrinker 与 OOM killer 已持有 strong handle。
+- `kthreadd` fixed TID/TGID 2 与普通 allocator 从 3 开始已落地。
+- `TaskBinding::KThread` 与 `ThreadGroupType::KThread` 仍只是 topology scaffolding；`kthreadd` 与 ordinary kthread 仍实际发布为 `TaskBinding::UserLeader`。
+- `kthreadd` 尚未安装 `KThreadTaskLocal { launch: None }`；ordinary kthread 已在 publish 前安装 `KThreadTaskLocal { launch: Some(...) }`。
+- `kthread_entry_shim` 仍在完成 kthread result 后调用完整 `kernel_exit()`；`kernel_exit()` 仍执行 user-process cleanup、fd closeout、ordinary topology detach、child-exited、reparent、`SIGCHLD`、wait/reap 和 scheduler zombie tail。
+- procfs `status` / `stat` 仍直接读取 user-process `parent_tgid()`、`pgid()`、`sid()`；阶段 4 需要分离 procfs display helper 与 user-process accessor。
+- `getpgid()`、`getsid()`、`setpgid()`、`setsid()`、wait、signal permission / kill paths、priority 和 resource-style user API 仍需要在启用 `TaskBinding::KThread` 前完成 source inventory 与最小 fail-closed 分流。
+
+**阶段 4 首轮 write set：**
+
+第一位 worker 只能做 source inventory，不编辑文件：
+
+- `anemone-kernel/src/task/api/exit/mod.rs`
+- `anemone-kernel/src/task/kthread/{mod.rs,entry.rs,control.rs,kthreadd.rs}`
+- `anemone-kernel/src/task/topology/{mod.rs,thread_group.rs,parent_child.rs}`
+- `anemone-kernel/src/fs/proc/tgid/binding.rs`
+- `anemone-kernel/src/task/mod.rs`
+- `anemone-kernel/src/fs/proc/root/file.rs`
+- `anemone-kernel/src/fs/proc/tgid/{cmdline.rs,mod.rs,stat.rs,status.rs}`
+- `anemone-kernel/src/task/api/wait/*`
+- `anemone-kernel/src/task/api/jobctl/{getpgid.rs,getsid.rs,setpgid.rs,setsid.rs}`
+- `anemone-kernel/src/task/sig/api/{mod.rs,kill.rs,tkill.rs,tgkill.rs,rt_sigqueueinfo.rs}`
+- `anemone-kernel/src/task/api/priority.rs`
+- source inventory 发现的 resource / scheduler user API files
+
+**准备启动的 agent 列表：**
+
+- `phase4-source-inventory-explorer`：只读 explorer。盘点 `pgid()` / `sid()` / `parent_tgid()` 调用点、procfs binding lazy creation / unbind 路径、wait/job-control/signal/priority/resource/scheduler user-facing target resolver，并输出最小实现切片、需要的实际 write set 和必须同 gate 闭合的调用点清单。不编辑文件。
+- `phase4-exit-topology-procfs-worker`：阶段 4 首个 implementation worker，必须等待 source inventory 和总控批准后才能启动。负责 `kthreadd` / ordinary kthread `TaskBinding::KThread` publish、专用 `kthread_exit()`、task-local closeout、topology/procfs unpublish 和 procfs display helper 的同 gate 实现。
+- `phase4-user-api-worker`：阶段 4 第二个 implementation worker，必须等待 source inventory 和总控批准后才能启动。负责 wait、job-control、signal、priority/resource/scheduler user-facing API 的最小 kthread fail-closed 分流。该 worker 的 write set 必须与 exit/topology/procfs worker 协调，不能抢先启用 `TaskBinding::KThread`。
+- `phase4-reviewer`：阶段 4 implementation diff 返回后的只读 reviewer。检查 kthread exit 未执行 user-process cleanup，task-local closeout 边界与注释符合 RFC，procfs lookup 不会重建已 unpublish kthread binding，strong handle 的 external completion 晚于 closeout/unpublish，user-facing API 不会把 kthread 当 ordinary process 管理。
+
+本条记录不批准也不启动任何阶段 4 implementation worker。下一步最多先启动 `phase4-source-inventory-explorer` 一名只读 explorer；implementation worker 必须等 source inventory 返回、总控确认 write set 后再启动。
+
+**阶段 4 停止条件：**
+
+- source inventory 发现阶段 4 最小 gate 需要编辑上述 write set 之外的文件，且该扩展尚未被批准。
+- 任何 worker 试图把 `kthreadd` 或 ordinary kthread 提前发布为 `TaskBinding::KThread`，但专用 exit、topology/procfs unpublish 和最小 user-facing API 分流不能同 gate 闭合。
+- worker 需要让 kthread 进入 ordinary process group/session、ordinary parent children list 或 ordinary wait/reap topology。
+- worker 需要让 `kthread_exit()` 复用完整 `kernel_exit()`，或跳过 task-local resource closeout 且没有 RFC 要求的 assert/comment 边界。
+- worker 需要让 user-facing API 通过 procfs inert display helper 推导 job-control、signal permission、waitability、priority/resource policy 或 lifecycle truth。
+- worker 需要重新引入 service/request/workqueue、park/unpark、独立 registry、`KThreadId` 或外部 `Arc<Task>` lifecycle handle。
+
+**验证计划：**
+
+- source inventory 后先记录 `pgid()` / `sid()` / `parent_tgid()` 调用点分类和实际 write set。
+- implementation diff 后至少运行 `git diff --check`、`just build`、`rg "kernel_exit\\(" anemone-kernel/src/task/kthread anemone-kernel/src/task/api/exit` source audit、procfs binding lazy rebuild source audit、wait/job-control/signal/priority/resource/scheduler user path source audit。
+- 若代码 gate 合入，追加 focused smoke：entry return 后 `wait_exited()` 得到 result；退出后 `/proc/<pid>` 不可见；ordinary user process exit 不退化；`/proc/2/status`、ordinary kthread `status` / `stat` / `cmdline`；job-control 与 signal kthread target 不触发 User-only accessor panic。
+
+**下一步：** 若总控继续推进，只启动 `phase4-source-inventory-explorer` 一名只读 explorer。explorer 返回后，总控更新事务日志并决定是否申请 write set 扩展或启动第一名 implementation worker。
+
+### 2026-06-17 - 阶段 4 执行决策修正
+
+**阶段：** 阶段 4 - `kthreadd` / ordinary kthread topology / exit / user-facing API gate。
+
+**决策：** 用户明确指示不启动 explorer，直接开始实现。总控据此跳过只读 source inventory worker，不再等待 `phase4-source-inventory-explorer`。
+
+**执行边界：**
+
+- 首个 implementation worker 必须覆盖阶段 4 的完整 semantic gate：`kthreadd` 与 ordinary kthread `TaskBinding::KThread` publish、专用 `kthread_exit()`、task-local closeout、topology/procfs unpublish 和最小 user-facing API 分流。
+- 不允许把 `TaskBinding::KThread` enablement 拆成独立中间态；如果 worker 无法在同一个 review gate 内闭合 exit / procfs / user-facing API，必须停止并上报。
+- worker 初始 write set 仍按 [迁移实施计划](../../rfcs/kthread-core/implementation.md) 阶段 4 执行；若发现 priority、resource 或 scheduler user API 需要额外文件，必须提交 write-set expansion request，说明理由、文件、contract/gate 影响和建议验证。
+- reviewer 只在 implementation worker 返回后启动；本轮不一次性启动所有 worker。
+
+### 2026-06-17 - 阶段 4 implementation worker 启动
+
+**阶段：** 阶段 4 - `kthreadd` / ordinary kthread topology / exit / user-facing API gate。
+
+**执行：** 启动 `phase4-gate-worker`（Faraday）作为本阶段首个且当前唯一 implementation worker。总控不在 worker 的实现 write set 上并行编辑。
+
+**分配任务：** worker 必须同 gate 实现 `kthreadd` 与 ordinary kthread `TaskBinding::KThread` publish、专用 `kthread_exit()`、task-local closeout、topology/procfs unpublish、external handle completion 延后，以及 wait/job-control/signal/priority/resource/scheduler user-facing API 的最小 kthread 分流。
+
+**分配 write set：**
+
+- `anemone-kernel/src/task/api/exit/mod.rs`
+- `anemone-kernel/src/task/kthread/{mod.rs,entry.rs,control.rs,kthreadd.rs}`
+- `anemone-kernel/src/task/topology/{mod.rs,thread_group.rs,parent_child.rs}`
+- `anemone-kernel/src/fs/proc/tgid/binding.rs`
+- `anemone-kernel/src/task/mod.rs`
+- `anemone-kernel/src/fs/proc/root/file.rs`
+- `anemone-kernel/src/fs/proc/tgid/{cmdline.rs,mod.rs,stat.rs,status.rs}`
+- `anemone-kernel/src/task/api/wait/*`
+- `anemone-kernel/src/task/api/jobctl/{getpgid.rs,getsid.rs,setpgid.rs}`
+- `anemone-kernel/src/task/sig/api/{mod.rs,kill.rs,tkill.rs,tgkill.rs,rt_sigqueueinfo.rs}`
+- `anemone-kernel/src/task/api/priority.rs`
+
+**停止条件：** 若 worker 需要编辑上述 write set 之外的 resource / scheduler user API 文件，或无法同 gate 闭合 `TaskBinding::KThread`、专用 exit、unpublish 与 user-facing 分流，必须停止并上报 write-set expansion request；总控不得代为静默扩展。
+
+### 2026-06-17 - 阶段 4 write-set expansion request
+
+**阶段：** 阶段 4 - resource user API 分流。
+
+**执行：** `phase4-gate-worker`（Faraday）按停止条件暂停，未修改代码。
+
+**请求扩展：**
+
+- `anemone-kernel/src/task/resource/api/prlimit64.rs`
+
+**理由：** `prlimit64(pid, ...)` 是 resource-style user API。当前代码解析 target pid，但实际只使用 current task 的 uspace / limits；它没有解析目标 thread group，也无法在 direct target 命中 kthread 时 fail closed。
+
+**contract / gate 影响：** 阶段 4 要求 resource-style user API 直指 kthread 时 fail closed，或明确登记为只读 inert policy。若不纳入 `prlimit64.rs`，启用 `TaskBinding::KThread` 后 resource user API 分流无法完整闭合。
+
+**建议验证：**
+
+- `git diff --check`
+- `just build`
+- source audit：`rg -n "prlimit64|ThreadGroupType::KThread|PrLimitTarget" anemone-kernel/src/task`
+
+### 2026-06-17 - 阶段 4 write-set expansion 批准
+
+**阶段：** 阶段 4 - resource user API 分流。
+
+**决策：** 用户批准将 `anemone-kernel/src/task/resource/api/prlimit64.rs` 纳入阶段 4 write set。
+
+**批准边界：**
+
+- 仅限 `prlimit64(pid, ...)` 的 kthread target policy 与阶段 4 resource-style user API 分流。
+- 不批准顺带扩展完整 resource-limit 语义、rlimit 写入支持、全局 resource accounting 或其它 resource API 重构。
+- 阶段 4 worker 继续必须保持同 gate 闭合 `TaskBinding::KThread`、专用 exit、topology/procfs unpublish 和最小 user-facing API 分流。
+
+### 2026-06-17 - 阶段 4 procfs root lookup expansion request
+
+**阶段：** 阶段 4 - procfs binding invalidation / lazy rebuild boundary。
+
+**执行：** `phase4-gate-worker`（Faraday）按停止条件再次暂停。worker 已做部分 topology/procfs scaffolding，但尚未启用 `TaskBinding::KThread`，因此没有形成 independently published intermediate state。
+
+**请求扩展：**
+
+- `anemone-kernel/src/fs/proc/root/inode.rs`
+
+**理由：** `/proc/<tgid>` lazy lookup 的实际 binding 创建点在 `proc_root_lookup()`。当前路径先进入 `binding_tx(...)`，再调用 `get_thread_group(&tgid)`；而阶段 4 要求 kthread unpublish 由 topology owner 驱动，并按 topology -> procfs binding 的顺序 invalidation。若 root lookup 继续按 binding lock -> topology lookup 的顺序创建 binding，就无法证明 unpublish 与 lazy rebuild 之间没有锁序反转或重建窗口。
+
+**contract / gate 影响：** 阶段 4 要求 procfs binding invalidation 与 topology unpublish 同协议闭合，且 unpublish 开始后 lookup / readdir 不得重建 kthread binding。若不纳入 `fs/proc/root/inode.rs`，只能 invalidation 已有 binding，不能完整约束 lazy lookup 创建路径。
+
+**拟定范围：** 仅调整 `/proc/<tgid>` lazy binding creation / revalidation，使其遵守 kthread unpublish ordering 和 no-rebuild 语义；不扩展 procfs 功能，不改静态 PDE 语义。
+
+**建议验证：**
+
+- `git diff --check`
+- `just build`
+- source audit：`rg -n "binding_tx|get_thread_group|invalidate_thread_group_binding|proc_root_lookup" anemone-kernel/src/fs/proc anemone-kernel/src/task/topology`
+
+### 2026-06-17 - 阶段 4 procfs root lookup expansion 批准
+
+**阶段：** 阶段 4 - procfs binding invalidation / lazy rebuild boundary。
+
+**决策：** 用户批准将 `anemone-kernel/src/fs/proc/root/inode.rs` 纳入阶段 4 write set。
+
+**批准边界：**
+
+- 仅限 `/proc/<tgid>` lazy binding creation / revalidation 的锁序和 no-rebuild 语义。
+- 不批准顺带扩展 procfs 静态 PDE、目录功能、inode cache 策略或其它 procfs 行为。
+- 阶段 4 worker 继续必须保持 topology-owned unpublish、procfs narrow invalidation hook、专用 kthread exit 和最小 user-facing API 分流同 gate 闭合。
+
+### 2026-06-17 - 阶段 4 syscall current-task policy
+
+**阶段：** 阶段 4 - user-facing API 分流。
+
+**决策：** 用户指出 syscall 当前执行者不可能是 kthread，因为 kthread 不会触发 syscall。阶段 4 实现不得新增 “current task 是否 kthread” 的虚假防御性检查。
+
+**执行边界：**
+
+- syscall `current` 路径按 user task by construction 处理；`pid == 0`、`who == 0`、current process group/session 等 self/current selector 不需要检查 current 是否 kthread。
+- 只在 direct pid/tgid/tid target、process-group/session/uid/broadcast 枚举或 signal permission target 可能命中 kthread 时做 `ThreadGroupType::KThread` 分流。
+- 如果 touched code 中已有 current-kthread 防御，只能在与阶段 4 target policy 直接相关时收窄或删除；不得借机清理无关 syscall。
+
+### 2026-06-17 - 阶段 4 worker 返回与总控/用户复核
+
+**阶段：** 阶段 4 - implementation diff review。
+
+**执行：** `phase4-gate-worker`（Faraday）完成阶段 4 implementation diff，并运行验证。总控本地复核 diff；用户随后确认已审过该 diff，结论为“基本对”，并明确不再启动 reviewer。
+
+**实际 write set：**
+
+- `anemone-kernel/src/task/api/exit/mod.rs`
+- `anemone-kernel/src/task/kthread/{mod.rs,entry.rs,control.rs,kthreadd.rs}`
+- `anemone-kernel/src/task/topology/{mod.rs,parent_child.rs}`
+- `anemone-kernel/src/fs/proc/{mod.rs,root/inode.rs,tgid/binding.rs,tgid/stat.rs,tgid/status.rs}`
+- `anemone-kernel/src/task/api/wait/mod.rs`
+- `anemone-kernel/src/task/api/jobctl/{getpgid.rs,getsid.rs,setpgid.rs}`
+- `anemone-kernel/src/task/sig/api/{mod.rs,kill.rs,tkill.rs,tgkill.rs,rt_sigqueueinfo.rs}`
+- `anemone-kernel/src/task/api/priority.rs`
+- `anemone-kernel/src/task/resource/api/prlimit64.rs`
+- 本事务日志
+
+`fs/proc/mod.rs` 仅用于 re-export topology-owned procfs invalidation hook，未扩展 procfs 行为。
+
+**worker 结果：**
+
+- `kthreadd` 和 ordinary kthread 改为 `TaskBinding::KThread` publish；`kthreadd` publish 前安装 `KThreadTaskLocal { launch: None }`。
+- `kthread_entry_shim()` 调用专用 `kthread_exit(result)`，不再进入完整 `kernel_exit()`；`kernel_exit()` 对 kthread 直接 panic。
+- `kthread_exit()` 顺序为 internal result completion、阶段 4 fd-table 空断言、topology/procfs unpublish、external completion publish、scheduler zombie tail。
+- procfs root lazy lookup 改为 topology -> binding lock order；procfs `status` / `stat` 使用 display-only parentage helper。
+- wait/job-control/signal/priority/prlimit 最小 kthread fail-closed / skip 分流已落地。
+
+**验证：**
+
+- worker：`just fmt kernel` 通过。
+- worker：`git diff --check` 通过。
+- worker：`just build` 通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。
+- 总控复跑：`git diff --check` 通过。
+- 总控复跑：`just build` 通过；同样仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。
+- source audit：`rg "kernel_exit\\(" anemone-kernel/src/task/kthread anemone-kernel/src/task/api/exit` 无 kthread entry 调用完整 `kernel_exit()`。
+- source audit：kthread core legacy `KThreadService` / park / weak handle / typed start pointer 查询无输出。
+
+**复核结果：** 用户复核后认为 diff 基本正确，不再安排 reviewer。总控 source audit 发现一个 Euclid：`SYS_GET_ROBUST_LIST` 是剩余 direct-TID user resolver，当前可通过指定 kthread TID 观察到有效但空的 robust-list 响应；需要对 `KThread` fail closed，或明确记录为只读 inert policy。
+
+### 2026-06-17 - 阶段 4 futex robust-list expansion request
+
+**阶段：** 阶段 4 - direct-TID user resolver 分流。
+
+**请求扩展：**
+
+- `anemone-kernel/src/task/api/futex/get_robust_list.rs`
+
+**理由：** `get_robust_list(tid, ...)` 是按 task id 解析目标的 user-facing syscall。RFC 不变量要求 direct signal、priority / scheduler user API、pid/tgid resolver 或其它可能命中 kthread 的用户入口按 `ThreadGroupType` 拒绝或跳过 kthread。当前实现对指定 TID 直接 `get_task(&tid)`，未分流 kthread。
+
+**contract / gate 影响：** 若不纳入该文件，阶段 4 user-facing fail-closed source audit 仍有一个 direct-TID resolver 漏口。该问题是 Euclid 而非 blocking Keter，但修复成本低且与阶段 4 gate 直接相邻。
+
+**拟定范围：** 仅在 `SYS_GET_ROBUST_LIST` 目标解析后对 `ThreadGroupType::KThread` 返回 `NoSuchProcess`，不扩展 robust futex 语义，不修改 `set_robust_list` 或 `exit_robust_list`。
+
+**建议验证：**
+
+- `git diff --check`
+- `just build`
+- source audit：`rg -n "get_robust_list|ThreadGroupType::KThread|robust_list" anemone-kernel/src/task/api/futex anemone-kernel/src/task`
+
+### 2026-06-17 - 阶段 4 futex robust-list expansion 批准
+
+**阶段：** 阶段 4 - direct-TID user resolver 分流。
+
+**决策：** 用户批准将 `anemone-kernel/src/task/api/futex/get_robust_list.rs` 纳入阶段 4 write set。
+
+**批准边界：**
+
+- 仅限 `get_robust_list(tid, ...)` 指定 TID target 命中 kthread 时的 fail-closed 分流。
+- `tid == 0` 的 current-task selector 不需要 kthread 防御；kthread 不触发 syscall。
+- 不批准扩展 robust futex 语义，不修改 `set_robust_list` 或 `exit_robust_list`。
+
+### 2026-06-17 - 阶段 4 futex robust-list 窄修复
+
+**阶段：** 阶段 4 - direct-TID user resolver 分流。
+
+**实际 write set：**
+
+- `anemone-kernel/src/task/api/futex/get_robust_list.rs`
+- 本事务日志
+
+**变更：**
+
+- `get_robust_list(tid, ...)` 的指定 TID 分支在 `get_task(&tid)` 后检查目标 `ThreadGroupType`。
+- 指定 TID 命中 `ThreadGroupType::KThread` 时返回 `NoSuchProcess`，与阶段 4 direct target fail-closed policy 对齐。
+- `tid == 0` 的 current-task selector 未增加 current-kthread 防御；kthread 不触发 syscall。
+
+**边界确认：**
+
+- 未修改 `set_robust_list`。
+- 未修改 `exit_robust_list`。
+- 未扩展 robust futex 语义，也未改变 kthread exit 的 robust-list cleanup policy。
+
+**验证：**
+
+- `just fmt kernel`：通过。
+- `git diff --check`：通过。
+- `just build`：通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。
+- source audit：`rg -n "get_robust_list|ThreadGroupType::KThread|robust_list" anemone-kernel/src/task/api/futex anemone-kernel/src/task` 确认新增分流只落在 `get_robust_list` 指定 TID 路径；`set_robust_list` 和 `exit_robust_list` 未改。
+
+**结论：** `SYS_GET_ROBUST_LIST` direct-TID kthread 漏口已按批准边界修复，可回到总控 source audit。
+
+### 2026-06-17 - 阶段 4 current/self selector policy cleanup
+
+**阶段：** 阶段 4 - user-facing API 分流。
+
+**实际 write set：**
+
+- `anemone-kernel/src/task/api/jobctl/{getpgid.rs,getsid.rs,setpgid.rs}`
+- `anemone-kernel/src/task/api/priority.rs`
+- `anemone-kernel/src/task/api/wait/mod.rs`
+- `anemone-kernel/src/task/resource/api/prlimit64.rs`
+- `anemone-kernel/src/task/sig/api/{kill.rs,mod.rs}`
+- 本事务日志
+
+**变更：**
+
+- 去掉 current/self selector 上的“current task 是否 kthread”防御分支。
+- `pid == 0`、`who == 0`、current process group / session 等 current selector 继续按 user task by construction 处理，不再做虚假 current-kthread 检查。
+- 保留 direct pid/tid/tgid target 命中 kthread 的 fail-closed 分流，以及 broadcast / UID / process-group 枚举中对 kthread 的跳过。
+
+**边界确认：**
+
+- 未改变 `get_robust_list(tid, ...)`、`prlimit64(pid, ...)` 或 signal direct target 的 kthread policy。
+- 未放宽 any direct target fail-closed 语义。
+
+**验证：**
+
+- `just fmt kernel`：通过。
+- `git diff --check`：通过。
+- source audit：`rg -n "current_tg\\.ty\\(|caller\\.ty\\(|get_current_task\\(\\)\\.get_thread_group\\(\\)\\.ty\\(|current.*ThreadGroupType::KThread|current.*ThreadGroupType::User" anemone-kernel/src/task/api anemone-kernel/src/task/sig/api anemone-kernel/src/task/resource/api` 不再命中 current/self selector 的 kthread 防御。
+
+**结论：** current/self selector 的防御性编程已按阶段 4 policy cleanup 收窄；剩余 kthread 分流只保留在 direct target 和枚举路径。
+
+### 2026-06-17 - 阶段 4 gate closeout
+
+**阶段：** 阶段 4 - closeout。
+
+**结论：** 阶段 4 gate 已关闭。`kthreadd` 与 ordinary kthread `TaskBinding::KThread` publish、专用 `kthread_exit()`、task-local closeout 边界、topology/procfs unpublish、external handle completion 延后，以及最小 user-facing API 分流已同 gate 落地。
+
+**总控复核要点：**
+
+- `kthread_entry_shim()` 不再调用完整 `kernel_exit()`；`kernel_exit()` 对 kthread 直接 panic。
+- `kthread_exit()` 完成 internal result 后，先执行阶段 4 fd-table 空断言，再执行 topology/procfs unpublish，随后 publish external completion 并进入 scheduler zombie tail。
+- `/proc/<tgid>` lazy lookup 的 binding 创建走 topology -> procfs binding lock order；procfs `status` / `stat` 使用 display-only parentage helper。
+- wait/job-control/signal/priority/prlimit/get_robust_list 的 kthread 分流只作用于 direct target 或枚举路径；`pid == 0`、`who == 0`、current process-group/session 等 current/self selector 未新增 kthread 防御。
+
+**验证：**
+
+- `git diff --check`：通过。
+- `mdbook build docs`：通过，写入 `docs/book`。
+- `just build`：通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。
+- source audit：`rg -n "kernel_exit\\(" anemone-kernel/src/task/kthread anemone-kernel/src/task/api/exit` 确认 kthread entry 不调用完整 `kernel_exit()`。
+- source audit：kthread core legacy `KThreadService` / park / weak handle / typed start pointer 查询无输出。
+- source audit：`get_robust_list` 新增分流只落在指定 TID 路径；`tid == 0` current selector 未增加 kthread 防御。
+
+**未运行：** QEMU、boot smoke、LTP / user-test。阶段 4 当前关闭在 source/build gate；runtime smoke 与更广的 user-facing policy 复查进入阶段 5。
+
 ## 开放事项
 
-- 准备阶段 4，但不能拆分启用 `kthreadd` / ordinary kthread `TaskBinding::KThread`、专用 `kthread_exit()`、task-local closeout、topology/procfs unpublish 和最小 user-facing API 分流。
-- 阶段 4 worker 必须先拿到 write set 批准；若 source inventory 发现 priority/resource/scheduler user API 需要额外文件，必须先上报 expansion request。
+- 准备阶段 5 post-gate user-facing boundary closeout：补齐更广的 source audit、errno / inert policy 记录和 focused smoke。
+- 阶段 5 若发现阶段 4 遗漏能命中 kthread 的 user-facing path，必须回到阶段 4 gate 补修并记录 correction，不能作为普通阶段 5 后续项处理。
+- QEMU / procfs / job-control / signal smoke 尚未运行。
 
 ## 收口
 

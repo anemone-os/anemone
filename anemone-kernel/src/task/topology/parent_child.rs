@@ -1,9 +1,17 @@
 //! Inter-thread group operations.
 
 use crate::{
+    fs,
     prelude::*,
     task::{ThreadGroupType, tid::Tid, topology::TOPOLOGY},
 };
+
+#[derive(Debug, Clone, Copy)]
+pub struct ProcThreadGroupDisplay {
+    pub ppid: Tid,
+    pub pgrp: Tid,
+    pub session: Tid,
+}
 
 impl ThreadGroup {
     /// Get the parent thread group ID of this thread group.
@@ -16,6 +24,31 @@ impl ThreadGroup {
             self.tgid()
         );
         self.inner.read().parent_tgid
+    }
+
+    /// Display-only parent/process-group/session values for procfs.
+    ///
+    /// These fields are not topology truth. User-process APIs must use
+    /// User-only accessors (`parent_tgid`, `pgid`, `sid`) after checking
+    /// `ThreadGroupType`; procfs is the only consumer allowed to show inert
+    /// kthread values.
+    pub fn proc_display_parentage(&self) -> ProcThreadGroupDisplay {
+        match self.ty() {
+            ThreadGroupType::User => ProcThreadGroupDisplay {
+                ppid: self.parent_tgid().unwrap_or(Tid::new(0)),
+                pgrp: self.pgid(),
+                session: self.sid(),
+            },
+            ThreadGroupType::KThread => ProcThreadGroupDisplay {
+                ppid: if self.tgid() == Tid::KTHREADD {
+                    Tid::new(0)
+                } else {
+                    Tid::KTHREADD
+                },
+                pgrp: Tid::new(0),
+                session: Tid::new(0),
+            },
+        }
     }
 
     /// Get the parent thread group.
@@ -329,6 +362,64 @@ impl ThreadGroup {
         );
 
         Some(child_tg)
+    }
+
+    /// Unpublish a singleton kthread from active topology and procfs.
+    ///
+    /// Kthreads do not enter ordinary children, process-group/session, or
+    /// wait/reap topology. This transaction is therefore the only lifecycle
+    /// owner for their procfs-visible identity, and procfs only receives a
+    /// narrow binding invalidation hook.
+    pub fn unpublish_kthread_topology(&self) {
+        assert!(
+            self.ty() == ThreadGroupType::KThread,
+            "task topology: user thread group {} cannot use kthread unpublish",
+            self.tgid()
+        );
+        let tgid = self.tgid();
+        let mut topology = TOPOLOGY.inner.write();
+        let tg = topology
+            .thread_groups
+            .get(&tgid)
+            .expect("task topology: kthread thread group not found during unpublish")
+            .clone();
+        assert!(
+            tg.ty() == ThreadGroupType::KThread,
+            "task topology: kthread unpublish found non-kthread thread group {}",
+            tgid
+        );
+
+        let mut inner = tg.inner.write();
+        assert!(
+            inner.members.len() == 1 && inner.members.contains(&tgid),
+            "task topology: kthread {} must be singleton during unpublish",
+            tgid
+        );
+        assert!(
+            inner.children_tgids.is_empty(),
+            "task topology: kthread {} must not own children during unpublish",
+            tgid
+        );
+        assert!(inner.members.remove(&tgid));
+        drop(inner);
+
+        // Topology owns the unpublish transaction and takes the locks in the
+        // documented order: topology first, procfs binding second. Marking the
+        // procfs binding dead before removing topology membership prevents
+        // operation-time revalidation from accepting a kthread that is already
+        // exiting, while lookup cannot rebuild a binding until this topology
+        // write lock is released.
+        fs::proc::invalidate_thread_group_binding(tgid);
+        assert!(
+            topology.tasks.remove(&tgid).is_some(),
+            "task topology: kthread task {} not found during unpublish",
+            tgid
+        );
+        assert!(
+            topology.thread_groups.remove(&tgid).is_some(),
+            "task topology: kthread thread group {} not found during unpublish",
+            tgid
+        );
     }
 }
 

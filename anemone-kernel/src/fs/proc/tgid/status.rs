@@ -121,9 +121,10 @@ fn build_status_text(inode: &InodeRef) -> Result<String, SysError> {
 
     let pid = leader.tid().get();
     let tgid = tg.tgid().get();
-    let ppid = tg.parent_tgid().map(|tid| tid.get()).unwrap_or(0);
-    let pgrp = tg.pgid().get();
-    let session = tg.sid().get();
+    let display = tg.proc_display_parentage();
+    let ppid = display.ppid.get();
+    let pgrp = display.pgrp.get();
+    let session = display.session.get();
     let cred = leader.cred();
     let vsize_kb = leader
         .try_clone_uspace_handle()

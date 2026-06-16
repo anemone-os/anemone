@@ -1,4 +1,4 @@
-use crate::{prelude::*, task::exit::kernel_exit, utils::any_opaque::AnyOpaque};
+use crate::{prelude::*, task::exit::kthread_exit, utils::any_opaque::AnyOpaque};
 
 use super::{KThreadCtx, control::KThreadControl};
 
@@ -39,10 +39,5 @@ pub(super) fn kthread_entry_shim() -> ! {
     } else {
         (launch.entry)(ctx, launch.arg)
     };
-    control.complete_returned_entry(code);
-
-    // Stage 4 owns the dedicated kthread exit path and `kernel_exit()` guard
-    // changes. Until that gate, the shim still uses the full user-process exit
-    // tail after completing the kthread result expected by the current guard.
-    kernel_exit(ExitCode::Exited(code as i8))
+    kthread_exit(code)
 }

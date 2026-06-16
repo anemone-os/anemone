@@ -318,9 +318,6 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                 task.flags().is_kernel(),
                 "task topology: TaskBinding::KThread requires a kernel task"
             );
-            // Phase 2 only scaffolds this binding. Current legacy kthread
-            // attachments are installed after publish, so any real KThread
-            // publish must wait for the Phase 3 task-local prepublish gate.
             assert!(
                 task.kthread.lock().is_some(),
                 "task topology: TaskBinding::KThread requires task-local kthread state before publish"
@@ -472,6 +469,30 @@ pub fn for_each_task<F: FnMut(&Arc<Task>)>(mut f: F) {
 pub fn get_thread_group(tgid: &Tid) -> Option<Arc<ThreadGroup>> {
     let topology = TOPOLOGY.inner.read();
     topology.thread_groups.get(tgid).cloned()
+}
+
+/// Run `f` while the requested thread group is still active in topology.
+///
+/// This intentionally holds the topology read lock across `f`. It exists for
+/// procfs lazy `<tgid>` binding creation so lookup can take locks in topology
+/// -> procfs-binding order and cannot rebuild a binding once kthread unpublish
+/// has acquired the topology write lock.
+pub(crate) fn with_active_thread_group<R>(
+    tgid: &Tid,
+    f: impl FnOnce(&Arc<ThreadGroup>) -> R,
+) -> Option<R> {
+    let topology = TOPOLOGY.inner.read();
+    topology.thread_groups.get(tgid).map(f)
+}
+
+/// Return whether a TGID is currently an active kernel-thread thread group.
+///
+/// User-facing resolvers use this as a fail-closed policy hook before touching
+/// User-only process-group/session accessors.
+pub fn is_kthread_tgid(tgid: Tid) -> bool {
+    get_thread_group(&tgid)
+        .map(|tg| tg.ty() == ThreadGroupType::KThread)
+        .unwrap_or(false)
 }
 
 /// Iterate over all thread groups in the registry.

@@ -42,6 +42,22 @@ impl Task {
             .map(|local| KThreadHandle::new(local.control.clone()))
     }
 
+    pub(in crate::task) fn complete_kthread_returned_entry(&self, code: i32) {
+        let slot = self.kthread.lock();
+        let local = slot
+            .as_ref()
+            .expect("kthread exit requires task-local kthread state");
+        local.control.complete_returned_entry(code);
+    }
+
+    pub(in crate::task) fn publish_kthread_external_exit(&self, code: i32) {
+        let slot = self.kthread.lock();
+        let local = slot
+            .as_ref()
+            .expect("kthread external exit requires task-local kthread state");
+        local.control.publish_external_exit(code);
+    }
+
     fn has_kthread_attachment(&self) -> bool {
         self.kthread.lock().is_some()
     }

@@ -17,9 +17,7 @@ use crate::{
 pub mod exit;
 pub mod exit_group;
 
-/// Exit current task.
-///
-/// TODO: distinguish kernel thread and user process.
+/// Exit current task through the user-process lifecycle path.
 pub fn kernel_exit(code: ExitCode) -> ! {
     {
         let task = get_current_task();
@@ -27,10 +25,9 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             panic!("init task shall not exit");
         }
         kdebugln!("kernel_exit: task={} exit with code {:?}", task.tid(), code);
-        if let Some(kthread) = task.kthread() {
-            assert!(
-                kthread.has_exited(),
-                "kthread task {} exited without kthread finish path",
+        if task.kthread().is_some() {
+            panic!(
+                "kthread task {} entered user-process kernel_exit path",
                 task.tid()
             );
         }
@@ -187,22 +184,67 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             task.vfork_done.publish(1, true);
         }
 
-        // ORDER MATTERS.
-        // Setting status to Zombie must be the last thing before we drop
-        // the task. Otherwise if a preemption occurs after setting status to Zombie but
-        // before we, e.g., detach from thread group, we'll end up with a zombie task
-        // that still appears in the thread group.
-        task.update_sched_state_with(|prev| {
-            assert!(
-                matches!(prev, TaskSchedState::Runnable | TaskSchedState::Zombie),
-                "exiting task should not own an active wait-core state: task={} state={:?}",
-                task.tid(),
-                prev,
-            );
-            (TaskSchedState::Zombie, ())
-        });
+        scheduler_zombie_tail(&task);
     }
 
+    schedule_never_return()
+}
+
+/// Exit current kthread without entering ordinary user-process cleanup.
+pub fn kthread_exit(result: i32) -> ! {
+    {
+        let task = get_current_task();
+        let tg = task.get_thread_group();
+        assert!(
+            tg.ty() == ThreadGroupType::KThread,
+            "kthread_exit called by non-kthread task {}",
+            task.tid()
+        );
+        assert!(
+            task.tid() != Tid::KTHREADD,
+            "kthreadd must not exit in phase-4 kthread core"
+        );
+        task.complete_kthread_returned_entry(result);
+
+        // Phase 4 keeps kthreads from owning fd tables. This assertion is the
+        // temporary task-local resource closeout boundary: before any future
+        // consumer is allowed to inherit or open fds in a kthread, this must be
+        // replaced by a full kthread-safe fd-table closeout helper that can run
+        // opened-description final-release hooks in process context.
+        assert!(
+            task.opened_fd_numbers_snapshot().is_empty(),
+            "kthread {} exited with published fd table entries",
+            task.tid()
+        );
+
+        task.set_exit_code(ExitCode::Exited(result as i8));
+        defer_to_dispose(task.clone());
+        tg.unpublish_kthread_topology();
+        task.publish_kthread_external_exit(result);
+        scheduler_zombie_tail(&task);
+    }
+
+    schedule_never_return()
+}
+
+fn scheduler_zombie_tail(task: &Task) {
+    // ORDER MATTERS.
+    // Setting status to Zombie must be the last thing before we drop the task.
+    // Otherwise if a preemption occurs after setting status to Zombie but
+    // before we, e.g., detach from thread group, we'll end up with a zombie
+    // task that still appears in the thread group.
+    task.update_sched_state_with(|prev| {
+        assert!(
+            matches!(prev, TaskSchedState::Runnable | TaskSchedState::Zombie),
+            "exiting task should not own an active wait-core state: task={} state={:?}",
+            task.tid(),
+            prev,
+        );
+        (TaskSchedState::Zombie, ())
+    });
+}
+
+fn schedule_never_return() -> ! {
     with_intr_disabled(|| unsafe {
         schedule();
     });

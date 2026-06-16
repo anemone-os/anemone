@@ -1,7 +1,7 @@
 # KThread Core 迁移实施计划
 
-**状态：** Accepted for Implementation，阶段 2 checkpoint 已完成
-**最后更新：** 2026-06-16
+**状态：** Accepted for Implementation，阶段 4 gate 已关闭
+**最后更新：** 2026-06-17
 **父 RFC：** [RFC-20260616-kthread-core](./index.md)
 **不变量：** [不变量需求](./invariants.md)
 

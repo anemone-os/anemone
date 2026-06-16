@@ -128,9 +128,10 @@ fn build_stat_line(inode: &InodeRef) -> Result<String, SysError> {
     let pid = tg.tgid().get();
     let comm = proc_comm(&leader);
     let state = proc_state(&leader);
-    let ppid = tg.parent_tgid().map(|tid| tid.get()).unwrap_or(0);
-    let pgrp = tg.pgid().get();
-    let session = tg.sid().get();
+    let display = tg.proc_display_parentage();
+    let ppid = display.ppid.get();
+    let pgrp = display.pgrp.get();
+    let session = display.session.get();
     let num_threads = tg.ntasks();
     let utime = duration_to_ticks(cpu_usage.self_user());
     let stime = duration_to_ticks(cpu_usage.self_kernel());

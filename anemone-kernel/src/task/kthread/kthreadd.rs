@@ -62,12 +62,10 @@ pub(super) static SPAWN_WAKE: Event = Event::new();
 /// Initialize the special `kthreadd` task.
 ///
 /// This is a boot-time hook, not a general kthread constructor. `kthreadd`
-/// remains published as `UserLeader` until the Phase 4 topology/exit/procfs
-/// gate enables `TaskBinding::KThread` for both `kthreadd` and ordinary
-/// kthreads.
+/// owns only the create transaction and installs task-local kthread state with
+/// no launch payload to satisfy the `TaskBinding::KThread` publish invariant.
 pub fn init_kthreadd() {
     let init = get_init_task();
-    let init_tg = init.get_thread_group();
     let kthreadd_tid = alloc_kthreadd_tid();
 
     let (task, guard) = unsafe {
@@ -97,16 +95,15 @@ pub fn init_kthreadd() {
         );
     }
 
+    let control = Arc::new(KThreadControl::new());
+    task.install_kthread(KThreadTaskLocal::new(control, None));
+    assert!(
+        task.has_kthread_attachment(),
+        "kthreadd task-local control link must be installed before publish"
+    );
+
     let task = guard
-        .publish(
-            task,
-            TaskBinding::UserLeader {
-                parent_tgid: init.tgid(),
-                pgid: init_tg.pgid(),
-                sid: init_tg.sid(),
-                terminate_signal: None,
-            },
-        )
+        .publish(task, TaskBinding::KThread)
         .unwrap_or_else(|(_, e)| panic!("failed to publish kthreadd task: {:?}", e));
     assert!(
         task.tid() == Tid::KTHREADD && task.tgid() == Tid::KTHREADD,
@@ -177,7 +174,6 @@ pub(super) fn spawn(request: SpawnRequest) {
         },
     };
 
-    let kthreadd_tg = kthreadd.get_thread_group();
     let (task, guard) = match unsafe {
         Task::new_kernel(
             name.as_ref(),
@@ -205,15 +201,7 @@ pub(super) fn spawn(request: SpawnRequest) {
         "kthread task-local control link must be installed before publish"
     );
 
-    let task = match guard.publish(
-        task,
-        TaskBinding::UserLeader {
-            parent_tgid: kthreadd.tgid(),
-            pgid: kthreadd_tg.pgid(),
-            sid: kthreadd_tg.sid(),
-            terminate_signal: None,
-        },
-    ) {
+    let task = match guard.publish(task, TaskBinding::KThread) {
         Ok(task) => task,
         Err((_task, err)) => {
             reply.complete(SpawnOutcome::Failed(err));

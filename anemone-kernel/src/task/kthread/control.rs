@@ -58,7 +58,7 @@ impl KThreadControl {
             .listen_uninterruptible(false, || self.should_stop() || predicate());
     }
 
-    pub(super) fn complete_returned_entry(&self, code: i32) {
+    pub(in crate::task) fn complete_returned_entry(&self, code: i32) {
         {
             let mut phase = self.phase.lock();
             match *phase {
@@ -70,12 +70,6 @@ impl KThreadControl {
                 },
             }
         }
-
-        // Stage 3 still tails into `kernel_exit()`, so external completion is
-        // temporarily published immediately after the entry result is recorded.
-        // Stage 4 must move this call after kthread task-local closeout and
-        // topology/procfs unpublish without changing handle API.
-        self.publish_external_exit(code);
         self.wake();
     }
 
@@ -93,7 +87,7 @@ impl KThreadControl {
         self.external_result.lock().is_some()
     }
 
-    fn publish_external_exit(&self, code: i32) {
+    pub(in crate::task) fn publish_external_exit(&self, code: i32) {
         {
             let mut external_result = self.external_result.lock();
             assert!(
