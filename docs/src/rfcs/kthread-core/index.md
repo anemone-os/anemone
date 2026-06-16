@@ -1,12 +1,12 @@
 # RFC-20260616-kthread-core
 
-**状态：** 已接受，阶段 1 已关闭
+**状态：** 已接受，阶段 2 checkpoint 已关闭
 **负责人：** doruche, Codex
 **最后更新：** 2026-06-16
 **领域：** task / topology / procfs / kthread
 **事务日志：** [2026-06-16-kthread-core](../../devlog/transactions/2026-06-16-kthread-core.md)
 **开放问题：** 当前无 active tracking gate；已关闭的 review findings 保留在 [Tracking Issues](./tracking-issues.md)。
-**下一步：** 按 [迁移实施计划](./implementation.md) 准备阶段 2 fixed `kthreadd` TID 与 topology preflight；不得跳过阶段 2 gate。
+**下一步：** 按 [迁移实施计划](./implementation.md) 准备阶段 3 strong `KThreadHandle` 与 create transaction；`kthreadd` 实际 `TaskBinding::KThread` publish 已并入阶段 4 同 gate。
 
 ## 摘要
 

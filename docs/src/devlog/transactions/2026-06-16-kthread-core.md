@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** task / topology / procfs / kthread
 **权威计划：** [RFC-20260616-kthread-core](../../rfcs/kthread-core/index.md), [不变量需求](../../rfcs/kthread-core/invariants.md), [迁移实施计划](../../rfcs/kthread-core/implementation.md)
-**当前阶段：** 阶段 2 review 暂停，等待 gate 决策
+**当前阶段：** 阶段 2 checkpoint 已关闭，准备阶段 3
 
 ## 范围
 
@@ -224,7 +224,7 @@
 - ordinary kthread create path 未越过 Phase 2 boundary，仍是 `TaskBinding::UserLeader`。
 - `TaskBinding::KThread` 目前是 fail-fast scaffolding；source audit 确认 `task/kthread` 还没有实际消费该 binding。
 - `phase2-reviewer` 结论为 Keter：当前 diff 可作为 fixed TID + topology scaffolding checkpoint，但不能声明 Phase 2 full gate 完整关闭，因为 `kthreadd` 仍发布为 `TaskBinding::UserLeader`，不是 `ThreadGroupType::KThread`。
-- Phase 2 不能声明完整关闭，除非负责人明确接受将 “`kthreadd` 实际 `ThreadGroupType::KThread` publish” 从 Phase 2 出口改为 Phase 4 同 gate，或批准重排阶段把相关 Phase 4 语义提前合并。
+- 负责人已接受将 “`kthreadd` 实际 `ThreadGroupType::KThread` publish” 从 Phase 2 出口改为 Phase 4 同 gate；Phase 2 以 fixed TID anchor + topology scaffolding checkpoint 关闭。
 
 **已运行验证：**
 
@@ -238,10 +238,22 @@
 
 - focused boot / procfs smoke 尚未运行；按 RFC 该 smoke 与实际 topology / procfs 可见性 gate 相关，当前尚未启用 `KThread` publish。
 
+### 2026-06-16 - 阶段 2 gate 决策修正
+
+**阶段：** 阶段 2 closeout 决策。
+
+**决策：** 负责人接受将 `kthreadd` 的实际 `TaskBinding::KThread` publish 并入阶段 4 同 gate。阶段 2 不再要求 `kthreadd` type publish，只要求 fixed TID anchor、ordinary allocator 隔离、`ThreadGroupType` / `TaskBinding::KThread` scaffolding、User-only accessor panic 与 shape assertion 就绪。
+
+**理由：** 当前 legacy ordinary kthread create path 仍需要从 `kthreadd` 的 ordinary `pgid/sid` 兼容形态发布 `TaskBinding::UserLeader`。若 Phase 2 单独把 `kthreadd` 切到 `KThread`，会迫使 ordinary kthread binding 提前越过 Phase 4 的专用 exit、topology/procfs unpublish 和 user-facing API 分流 gate。
+
+**文档同步：** [RFC index](../../rfcs/kthread-core/index.md)、[不变量需求](../../rfcs/kthread-core/invariants.md) 和 [迁移实施计划](../../rfcs/kthread-core/implementation.md) 已同步：最终不变量不变；迁移顺序改为阶段 4 同 gate 启用 `kthreadd` 与 ordinary kthread 的 `TaskBinding::KThread`。
+
+**结论：** 阶段 2 checkpoint 已关闭。下一步只允许准备阶段 3 strong `KThreadHandle` 与 create transaction；不得启动阶段 4 或任何 user-facing API 分流 worker。
+
 ## 开放事项
 
-- 等待负责人决定：接受当前阶段为 fixed TID + topology scaffolding checkpoint 并把 `kthreadd` 实际 `KThread` publish 并入 Phase 4，还是重排阶段以更早合并 Phase 4 语义。总控不会在该决策前启动阶段 3+ worker。
-- 阶段 3+ worker 要等阶段 2 gate 状态明确并把 review evidence 写入本事务后再准备启动。
+- 准备阶段 3 worker，但不能直接启动阶段 4+ worker。
+- 阶段 3 worker 必须继续保留 `TaskBinding::KThread` 为未启用 scaffolding；实际 `kthreadd` / ordinary kthread `KThread` publish 留到阶段 4。
 
 ## 收口
 

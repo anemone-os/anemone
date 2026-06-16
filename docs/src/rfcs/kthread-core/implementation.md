@@ -1,6 +1,6 @@
 # KThread Core 迁移实施计划
 
-**状态：** Accepted for Implementation，阶段 1 已完成
+**状态：** Accepted for Implementation，阶段 2 checkpoint 已完成
 **最后更新：** 2026-06-16
 **父 RFC：** [RFC-20260616-kthread-core](./index.md)
 **不变量：** [不变量需求](./invariants.md)
@@ -123,7 +123,7 @@ write set：
 
 ## 阶段 2：固定 `kthreadd` TID 与 topology preflight
 
-目标：先落地 `kthreadd` fixed identity、`ThreadGroupType` / accessor / shape assertion scaffolding，避免后续阶段继续依赖未区分的 topology。阶段 2 不是 ordinary kthread binding 切换 gate；ordinary kthread 不能在仍调用完整 `kernel_exit()` 的状态下切到 `TaskBinding::KThread`。任何实际发布为 `TaskBinding::KThread` 的 task 都必须已经安装 kthread task-local attachment。
+目标：先落地 `kthreadd` fixed TID identity、`ThreadGroupType` / accessor / shape assertion scaffolding，避免后续阶段继续依赖未区分的 topology。阶段 2 不是任何 kthread 的实际 `TaskBinding::KThread` publish gate；`kthreadd` 和 ordinary kthread 都不能在仍调用完整 `kernel_exit()`、仍缺少 task-local prepublish attachment 或仍缺少 user-facing API 分流的状态下切到 `TaskBinding::KThread`。所有实际 `KThread` publish 均并入阶段 4 同 gate。
 
 前置条件：
 
@@ -141,13 +141,13 @@ write set：
 2. Topology type：
    - 引入 `ThreadGroupType::{User, KThread}`。
    - `init` / user process 使用 `User`。
-   - `kthreadd` 使用 `KThread` 时，必须在 publish 前安装 `KThreadTaskLocal { control, launch: None }`，`tid == tgid == Tid::KTHREADD`，thread group 只有 leader 自己。
-   - ordinary kthread 在阶段 2 只允许获得编译期 type / accessor / assertion preflight；不得把 ordinary kthread create path 切到 `TaskBinding::KThread`。
+   - `KThread` type 在阶段 2 只作为编译期 type / accessor / assertion preflight 出现；不得把 `kthreadd` 或 ordinary kthread create path 切到 `TaskBinding::KThread`。
+   - `kthreadd` 的实际 `KThread` publish 留到阶段 4：届时必须在 publish 前安装 `KThreadTaskLocal { control, launch: None }`，`tid == tgid == Tid::KTHREADD`，thread group 只有 leader 自己。
    - `kthreadd` 的特殊身份由 `tgid == Tid::KTHREADD` 派生，不新增单独 topology type。
 3. Binding API：
    - 用 `TaskBinding::{UserLeader, KThread, Member}` 表达 user-process leader、kernel thread leader、thread member。
-   - 阶段 2 只允许 `kthreadd` 消费 `KThread` binding；若本阶段尚未提供 kthread task-local attachment，则 `KThread` binding 只能作为 scaffolding，`kthreadd` 的实际 `KThread` publish 必须推迟到 attachment 可用的同 gate。
-   - ordinary kthread binding 切换留到阶段 4，与专用 `kthread_exit()`、task-local closeout 和 topology/procfs unpublish 同一个 review gate。
+   - 阶段 2 的 `KThread` binding 只能作为 fail-fast scaffolding，不允许有实际消费点。
+   - `kthreadd` 和 ordinary kthread binding 切换均留到阶段 4，与专用 `kthread_exit()`、task-local closeout、topology/procfs unpublish 和最小 user-facing API 分流同一个 review gate。
    - `KThread` publish 不得继承 ordinary `pgid/sid`。
    - `KThread` 不插入 `ProcessGroup.members` 或 `Session.process_groups`。
    - ordinary kthread 的 procfs display parent 规则可以先定义 helper shape，但不得在阶段 2 对 active ordinary kthread 生效；实际启用留到阶段 4。
@@ -175,7 +175,7 @@ write set：
 
 1. `alloc_tid()` 普通路径不会返回 0、1 或 2。
 2. `init_kthreadd()` assert `tid == tgid == Tid::KTHREADD`。
-3. 阶段 2 diff 中 ordinary kthread create path 仍未切到 `TaskBinding::KThread`；若为编译引入临时桥，注释必须说明它只持续到阶段 4。
+3. 阶段 2 diff 中 `kthreadd` 与 ordinary kthread create path 均未切到 `TaskBinding::KThread`；若为编译引入临时桥，注释必须说明它只持续到阶段 4。
 4. `KThread` shape assertion 已覆盖无 `pgid/sid`、空 `children_tgids`、singleton member、task-local attachment present 和 `Member` 禁止加入 `KThread`。
 5. `for_each_thread_group_from()` 对 `ThreadGroupType` scaffolding 仍能枚举 active thread group，供后续 procfs root 使用。
 
@@ -184,13 +184,13 @@ write set：
 1. `git diff --check`
 2. `just build`
 3. focused smoke / log：`kthreadd` TID/TGID 为 2；AP kinit 或其它 kernel task 不消耗 2；普通分配起点为 3。
-4. source audit：ordinary kthread create path 没有在阶段 2 切到 `TaskBinding::KThread`；`TaskBinding::KThread` 只服务 `kthreadd` 或未启用的 scaffolding。
+4. source audit：`kthreadd` 与 ordinary kthread create path 均没有在阶段 2 切到 `TaskBinding::KThread`；`TaskBinding::KThread` 只是未启用的 scaffolding。
 
 退出条件：
 
-1. `kthreadd` fixed TID/type anchor 已成为单一真相源。
-2. topology type、process-only accessor 和 shape assertion 已就绪，可供阶段 4 一次性启用 ordinary kthread binding / exit / unpublish / user-facing API gate。
-3. ordinary kthread 仍处在迁移中间态；阶段 2 退出声明不得声称 ordinary kthread 已满足最终 topology contract。
+1. `kthreadd` fixed TID anchor 已成为单一真相源；TID 2 不依赖启动顺序或普通 allocator。
+2. topology type、process-only accessor 和 shape assertion 已就绪，可供阶段 4 一次性启用 `kthreadd` / ordinary kthread binding、专用 exit、unpublish 和 user-facing API gate。
+3. `kthreadd` 与 ordinary kthread 仍处在迁移中间态；阶段 2 退出声明不得声称 kthread 已满足最终 topology contract。
 
 ## 阶段 3：strong `KThreadHandle` 与 create transaction
 
@@ -285,15 +285,15 @@ write set：
 1. lifecycle owner 是 strong handle/control，不是 topology、`kthreadd`、scheduler state、weak ref 或内部 `KThread` object。
 2. create failure、publish commit 和 entry start payload move/drop 协议有可复审证据，且不依赖 typed erased pointer reclaim。
 
-## 阶段 4：ordinary kthread topology / exit / user-facing API gate
+## 阶段 4：kthreadd / ordinary kthread topology / exit / user-facing API gate
 
-目标：让 ordinary kthread binding 切换、专用 `kthread_exit()`、task-local closeout、topology/procfs unpublish 和最小 user-facing API 分流在同一个 gate 闭合。ordinary kthread exit 不再调用完整 user-process `kernel_exit()`，但也不能漏掉 task-local resource closeout；ordinary kthread 一旦发布为 `TaskBinding::KThread`，用户入口也不能再把它当 ordinary process 管理。
+目标：让 `kthreadd` / ordinary kthread binding 切换、专用 `kthread_exit()`、task-local closeout、topology/procfs unpublish 和最小 user-facing API 分流在同一个 gate 闭合。ordinary kthread exit 不再调用完整 user-process `kernel_exit()`，但也不能漏掉 task-local resource closeout；任何 kthread 一旦发布为 `TaskBinding::KThread`，用户入口也不能再把它当 ordinary process 管理。
 
 前置条件：
 
 1. 阶段 3 完成。
 2. topology 已能按 kthread type 执行 kthread-specific unpublish。
-3. 阶段 2 只完成 preflight，ordinary kthread binding 尚未切到 `TaskBinding::KThread`。
+3. 阶段 2 只完成 preflight，`kthreadd` 与 ordinary kthread binding 均尚未切到 `TaskBinding::KThread`。
 4. `pgid()`、`sid()`、`parent_tgid()` 调用点已有 source inventory；未分类调用点不能和 ordinary kthread binding 一起合入。
 
 交付：
@@ -308,11 +308,15 @@ write set：
    - never return
 3. 新增 `kthread_exit(result: i32) -> !` 或等价 kthread entry tail。
 4. `kthread_entry_shim` 在 entry 返回或 stop-before-entry 后调用专用 kthread exit tail，不调用完整 `kernel_exit()`。
-5. 同一 gate 启用 ordinary kthread `TaskBinding::KThread`：
+5. 同一 gate 启用 `kthreadd` `TaskBinding::KThread`：
+   - `kthreadd` publish 前安装 `KThreadTaskLocal { control, launch: None }`。
+   - `kthreadd` 不继承 ordinary `pgid/sid`，不插入 `ProcessGroup.members` 或 `Session.process_groups`。
+   - `kthreadd` 自己的 procfs display parent、pgrp 和 session 输出 inert value。
+6. 同一 gate 启用 ordinary kthread `TaskBinding::KThread`：
    - ordinary kthread publish 不继承 ordinary `pgid/sid`。
    - ordinary kthread 不插入 `ProcessGroup.members`、`Session.process_groups` 或 parent `children_tgids`。
    - ordinary kthread 的 procfs display parent 是 `Tid::KTHREADD`，但这只是展示 helper，不形成 waitable parent。
-6. 同一 gate 完成最小 user-facing API 分流；这是启用 ordinary kthread `TaskBinding::KThread` 的前置条件，不是后续阶段：
+7. 同一 gate 完成最小 user-facing API 分流；这是启用任何 kthread `TaskBinding::KThread` 的前置条件，不是后续阶段：
    - procfs root readdir / lookup 可以枚举 active `KThread`；`/proc/<pid>/status`、`stat` 和 `cmdline` 使用 kthread display helper 输出 inert parent、pgrp/session 和空 cmdline。
    - wait4/waitid 不会 match 或 reap kthread，且不能从 procfs display parent 推导 waitability。
    - `setpgid()`、`setsid()`、process-group mutation 对 kthread fail closed。
@@ -322,17 +326,17 @@ write set：
    - signal permission helper 中 `SIGCONT` same-session check 必须在读取 target `sid()` 前完成 kthread 分流；procfs inert session 不得作为 permission truth。
    - priority、resource limit、scheduler user API 的 pid / task-id target 遇到 kthread 必须 fail closed 或记录为只读 inert policy；UID、process-group 或 broadcast 枚举必须跳过 kthread。
    - `pgid()`、`sid()`、`parent_tgid()` 的所有调用点必须分类为 User-only caller、procfs display helper 或 kthread fail-closed resolver；source audit 结果写入 transaction devlog 或阶段退出记录。
-7. exit 线性化顺序：
+8. exit 线性化顺序：
    - complete control `exit_result`
    - run kthread task-local resource closeout，或 assert 第一阶段 fd table / task-local resources 为空
    - unpublish kthread procfs/topology binding
    - publish `exited` event
    - enter scheduler zombie tail
-8. kthread topology/procfs unpublish owner：
+9. kthread topology/procfs unpublish owner：
    - `task::topology` 拥有唯一 kthread unpublish transaction，procfs `<tgid>` binding invalidation 只能通过该 transaction 调用的窄 helper 发生。
    - lookup / readdir 只以 topology published/alive 状态为可重建条件；一旦 unpublish transaction 标记 kthread 为 unpublishing 或 removed，procfs lookup 不得重建 `<tgid>` binding。
    - 锁序固定为 topology publish/unpublish lock -> procfs `<tgid>` binding transaction lock -> control/event -> sched-state；不得从 procfs binding 路径反向持锁后再进入 topology mutation。
-9. kthread topology unpublish：
+10. kthread topology unpublish：
    - 标记该 kthread 不再可被 procfs lookup 重建。
    - invalidate 已存在的 procfs `<tgid>` binding / dentry / inode 可见入口。
    - 移除 task registry entry。
@@ -340,7 +344,7 @@ write set：
    - 不触发 ordinary child-exited event。
    - 不 reparent children。
    - 不等待 user-space reap。
-10. `kernel_exit()` 保留 guard：若 ordinary kthread 意外进入完整 user-process exit，panic 或 fail closed。
+11. `kernel_exit()` 保留 guard：若 ordinary kthread 意外进入完整 user-process exit，panic 或 fail closed。
 
 write set：
 
@@ -365,7 +369,7 @@ write set：
 3. topology/procfs unpublish 后 `/proc/<pid>` lookup 不再找到该 kthread，且不能通过 lazy binding 重建。
 4. control result 和 exited event 在 topology/procfs removal 后仍可由 strong handle 读取。
 5. scheduler zombie tail 不包含 user-process cleanup 或 procfs binding mutation。
-6. ordinary kthread 只在本阶段切到 `TaskBinding::KThread`，且切换 diff 与专用 exit / unpublish diff 同 gate review。
+6. `kthreadd` 与 ordinary kthread 只在本阶段切到 `TaskBinding::KThread`，且切换 diff 与专用 exit / unpublish diff 同 gate review。
 7. procfs display fields do not drive job-control, signal permission, waitability or lifecycle.
 8. wait/job-control/signal/priority/resource/scheduler user paths have explicit kthread type handling or cannot reach kthread by construction.
 9. `getpgid(pid)`、`getsid(pid)` 和 `SIGCONT` same-session permission check 不会在 kthread target 上调用 User-only accessor。

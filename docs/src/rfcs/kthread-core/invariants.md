@@ -4,7 +4,7 @@
 **最后更新：** 2026-06-16
 **父 RFC：** [RFC-20260616-kthread-core](./index.md)
 
-本文定义 kthread-core 的状态所有权、procfs-visible topology、handle 能力、线性化点和禁止退化项。本文已作为 accepted contract 收口，但实现尚未开始；已确认的文档层 review findings 记录在 [Tracking Issues](./tracking-issues.md)，落地顺序见 [迁移实施计划](./implementation.md)。
+本文定义 kthread-core 的状态所有权、procfs-visible topology、handle 能力、线性化点和禁止退化项。本文已作为 accepted contract 收口；实现正在按 [迁移实施计划](./implementation.md) 分阶段推进。已确认的文档层 review findings 记录在 [Tracking Issues](./tracking-issues.md)。
 
 ## 闭合条件
 
