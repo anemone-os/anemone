@@ -1,18 +1,20 @@
 # RFC-20260614-kthread
 
-**状态：** 已接受，代码已落地，文档追补完成
+**状态：** Superseded / historical baseline
 **负责人：** EDGW, Codex
-**最后更新：** 2026-06-15
+**最后更新：** 2026-06-16
 **领域：** task / scheduler / kthread / background service
 **事务日志：** [2026-06-14 - KThread](../../devlog/transactions/2026-06-14-kthread.md)
-**开放问题：** None；本轮文档追补未重新运行构建、QEMU 或 LTP。
-**下一步：** 后续新增长期后台服务应复用本文定义的 kthread 生命周期合同；若要引入 freezer、优先级继承、信号投递、cgroup 或通用 workqueue，应另建 follow-up RFC。
+**开放问题：** None；后续 kthread 纠偏以 [RFC-20260616-kthread-core](../kthread-core/index.md) 为准。
+**下一步：** 不再基于本文扩展 kthread core；本文只保留 commit `2b0e3900279895c3d8eb604e463249a02c3bddc9` 的历史实现记录。
+
+> Superseded：后续 `kthread` core 的权威设计是 [RFC-20260616-kthread-core](../kthread-core/index.md)。本文继续作为既有实现和事务日志的 historical baseline。
 
 ## 摘要
 
 本 RFC 记录 `2b0e3900279895c3d8eb604e463249a02c3bddc9` 中落地的轻量 kthread 系统。该系统提供一个 boot-time `kthreadd` 创建代理、类型化入口参数恢复、普通 kthread 的 stop / park / wake / exited 协作生命周期，以及可复用的 `KThreadService` 后台 worker 抽象。
 
-它的核心边界是：`Task` 仍然是调度和拓扑对象，`KThreadControl` 只拥有普通 kthread 的生命周期状态，`kthreadd` 只负责创建与拓扑父子关系，不拥有 ordinary kthread 的运行状态。
+本文不再作为后续 kthread core 的 accepted contract。它的核心价值是保留当前实现事实：`Task` 仍然是调度和拓扑对象，`KThreadControl` 只拥有普通 kthread 的生命周期状态，`kthreadd` 只负责创建与拓扑父子关系，不拥有 ordinary kthread 的运行状态。
 
 ## 背景
 
@@ -59,9 +61,9 @@ ordinary kthread 的入口不是直接调用业务 entry，而是先进入 typed
 
 ## 接受边界
 
-本 RFC 已作为 `kthread` 系统的 canonical 文档被接受，并追补记录 commit `2b0e3900279895c3d8eb604e463249a02c3bddc9` 的实现形状。
+本 RFC 曾作为 `kthread` 系统的 canonical 文档被接受，并追补记录 commit `2b0e3900279895c3d8eb604e463249a02c3bddc9` 的实现形状。自 [RFC-20260616-kthread-core](../kthread-core/index.md) 提升后，本文只作为 historical baseline。
 
-后续修改如果改变以下任一边界，必须先更新本 RFC 或新增 follow-up RFC：
+后续纠偏如果改变以下任一历史边界，应以 [RFC-20260616-kthread-core](../kthread-core/index.md) 或新的 follow-up RFC 为准，而不是继续扩展本文：
 
 - ordinary kthread 是否必须经由 `kthreadd` 创建；
 - `Task` 与 `KThread` 的强/弱引用所有权；
@@ -92,4 +94,4 @@ ordinary kthread 的入口不是直接调用业务 entry，而是先进入 typed
 
 ## 收口
 
-代码已在 commit `2b0e3900279895c3d8eb604e463249a02c3bddc9` 落地，事务事实记录在 [KThread 事务日志](../../devlog/transactions/2026-06-14-kthread.md)。本轮只补文档，未重新运行构建、QEMU 或 LTP；验证状态以后续事务或开发日志记录为准。
+代码已在 commit `2b0e3900279895c3d8eb604e463249a02c3bddc9` 落地，事务事实记录在 [KThread 事务日志](../../devlog/transactions/2026-06-14-kthread.md)。本文已被 [RFC-20260616-kthread-core](../kthread-core/index.md) supersede；验证状态以后续纠偏事务或开发日志记录为准。

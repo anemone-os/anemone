@@ -10,14 +10,8 @@ use core::ptr::NonNull;
 use crate::prelude::*;
 
 mod create;
-pub mod service;
 
 pub use create::{KThreadBuilder, init_kthreadd};
-pub use service::{
-    KThreadMergeRequest, KThreadPending, KThreadPendingQueue, KThreadPendingSlot,
-    KThreadRequestHandler, KThreadService, KThreadServiceOptions, StopMode, SubmitError,
-    WakePolicy,
-};
 
 /// The public entry signature accepted by kthread creation.
 ///
