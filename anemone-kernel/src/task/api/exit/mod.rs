@@ -27,6 +27,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             panic!("init task shall not exit");
         }
         kdebugln!("kernel_exit: task={} exit with code {:?}", task.tid(), code);
+        task.assert_kthread_exit_ready();
 
         if let Some(addr) = task.get_clear_child_tid() {
             let usp = task.clone_uspace_handle();
@@ -95,6 +96,9 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         if let Some(old_uspace) = &old_uspace {
             if task.is_last_user_of_uspace(old_uspace) {
                 old_uspace.detach_all_sysv_shm_for(task.tgid());
+                unsafe {
+                    old_uspace.clear();
+                }
             }
         }
 

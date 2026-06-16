@@ -2,6 +2,7 @@
 
 // vfs infrastructure
 mod anonymous;
+mod cache_stats;
 mod dentry;
 mod eventfd;
 pub mod fanotify;
@@ -9,6 +10,7 @@ pub mod fanotify;
 mod file;
 mod filesystem;
 mod inode;
+mod inode_shrinker;
 mod iomux;
 mod mount;
 mod namei;
@@ -55,6 +57,8 @@ pub use self::{
     permission::{FsAccess, FsPermChecker},
     superblock::SuperBlock,
 };
+pub use cache_stats::resident_file_inode_cache_pages;
+pub use inode_shrinker::init_inode_shrinker;
 
 mod namespace {
     use crate::prelude::*;
@@ -336,6 +340,10 @@ mod vfs {
         }
 
         superblocks
+    }
+
+    pub fn mounted_superblocks() -> Vec<Arc<SuperBlock>> {
+        mounted_superblocks_for(&VFS.visible.read())
     }
 
     /// Called when the system is shutting down. This will flush all cached data

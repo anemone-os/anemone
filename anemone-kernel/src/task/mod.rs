@@ -16,6 +16,7 @@ pub use credentials::{
     cap::{Capability, CredCapabilities, FileCapabilities, SecureBits},
 };
 pub mod files;
+pub mod kthread;
 pub mod sig;
 #[path = "fs.rs"]
 pub mod task_fs;
@@ -154,6 +155,12 @@ pub struct Task {
     ///
     /// This pointer is not guaranteed to be valid. It's user's responsibility.
     clear_child_tid: SpinLock<Option<VirtAddr>>,
+
+    /// Ordinary kthread state owned by this task.
+    ///
+    /// This is the strong owner, matching Linux's task-held `struct kthread`.
+    /// `KThread` only keeps a weak task pointer, so this does not form a cycle.
+    kthread: SpinLock<Option<Arc<kthread::KThread>>>,
 }
 
 /// Observation-only compatibility state for status readers.
@@ -430,6 +437,7 @@ impl Task {
             vfork_done: Event::new(),
             sched_state: NoIrqRwLock::new(TaskSchedState::Runnable),
             clear_child_tid: SpinLock::new(None),
+            kthread: SpinLock::new(None),
         };
         Ok((task, PublishGuard))
     }
@@ -480,6 +488,7 @@ impl Task {
                 vfork_done: Event::new(),
                 sched_state: NoIrqRwLock::new(TaskSchedState::Runnable),
                 clear_child_tid: SpinLock::new(None),
+                kthread: SpinLock::new(None),
             },
             PublishGuard,
         ))
@@ -711,6 +720,49 @@ impl Task {
 
     pub fn set_no_new_privs(&self) {
         self.no_new_privs.store(true, Ordering::Release);
+    }
+
+    fn install_kthread(&self, kthread: Arc<kthread::KThread>) {
+        let mut slot = self.kthread.lock();
+        assert!(
+            slot.is_none(),
+            "kthread installed more than once for task {}",
+            self.tid()
+        );
+        *slot = Some(kthread);
+    }
+
+    fn kthread(&self) -> Option<Arc<kthread::KThread>> {
+        self.kthread.lock().clone()
+    }
+
+    fn clear_kthread(&self, kthread: &Arc<kthread::KThread>) {
+        let mut slot = self.kthread.lock();
+        if slot
+            .as_ref()
+            .map(|installed| Arc::ptr_eq(installed, kthread))
+            .unwrap_or(false)
+        {
+            *slot = None;
+        }
+    }
+
+    fn assert_kthread_exit_ready(&self) {
+        let kthread = self.kthread.lock();
+        if let Some(kthread) = kthread.as_ref() {
+            assert!(
+                kthread.has_exited(),
+                "kthread task {} exited without kthread finish path",
+                self.tid()
+            );
+        }
+    }
+
+    fn expect_kthread(&self) -> Arc<kthread::KThread> {
+        self.kthread
+            .lock()
+            .clone()
+            .expect("ordinary kthread is missing task-local state")
     }
 }
 

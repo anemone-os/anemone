@@ -52,6 +52,8 @@ pub struct Parameters {
     pub shmmax_bytes: Option<usize>,
     pub shmall_pages: Option<usize>,
     pub shmmni: Option<usize>,
+    pub io_shrink_threshold: Option<u8>,
+    pub oom_kill_threshold: Option<u8>,
     pub symlink_resolve_limit: Option<usize>,
     pub max_fd_per_process: Option<usize>,
     pub ramdisk_count: Option<usize>,
@@ -125,6 +127,10 @@ pub const SHMMAX: usize = {};
 pub const SHMALL: usize = {};
 /// Default maximum number of System V shared memory segments.
 pub const SHMMNI: usize = {};
+/// Physical memory usage percentage above which the inode shrinker worker runs a scan.
+pub const IO_SHRINK_THRESHOLD: u8 = {};
+/// Physical memory usage percentage above which the OOM killer worker is woken.
+pub const OOM_KILL_THRESHOLD: u8 = {};
 /// Maximum number of symbolic links to resolve in a single path resolution
 pub const SYMLINK_RESOLVE_LIMIT: usize = {};
 /// Default maximum number of file descriptors per process. Might be overridden by certain syscalls.
@@ -151,6 +157,8 @@ pub const LOOP_DEVICE_COUNT: usize = {};
             default_or!(shmmax_bytes),
             default_or!(shmall_pages),
             default_or!(shmmni),
+            default_or!(io_shrink_threshold),
+            default_or!(oom_kill_threshold),
             default_or!(symlink_resolve_limit),
             default_or!(max_fd_per_process),
             default_or!(ramdisk_count),

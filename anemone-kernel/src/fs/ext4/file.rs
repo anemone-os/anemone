@@ -2,6 +2,7 @@ use core::str;
 
 use crate::{
     fs::{
+        cache_stats::{backing_file_cache_page_inserted, backing_file_cache_pages_removed},
         ext4::{ext4_ino, ext4_reg, ext4_sb, map_ext4_error, map_lwext4_inode_type},
         iomux::PollEvent,
     },
@@ -52,9 +53,10 @@ impl Ext4RegState {
     }
 
     fn invalidate_pages_inclusive(&self, first: usize, last: usize) {
-        self.pages
-            .write()
-            .retain(|pidx, _| *pidx < first || *pidx > last);
+        let mut pages = self.pages.write();
+        let old_len = pages.len();
+        pages.retain(|pidx, _| *pidx < first || *pidx > last);
+        backing_file_cache_pages_removed(old_len - pages.len());
     }
 
     pub(super) fn apply_truncate(&self, new_size: usize) {
@@ -94,6 +96,12 @@ impl Ext4RegState {
         }
 
         Ok(())
+    }
+}
+
+impl Drop for Ext4RegState {
+    fn drop(&mut self) {
+        backing_file_cache_pages_removed(self.pages.read().len());
     }
 }
 
@@ -201,6 +209,7 @@ impl Ext4RegMapping {
             return Ok(existing.clone());
         }
         pages.insert(pidx, page.clone());
+        backing_file_cache_page_inserted();
         Ok(page)
     }
 
@@ -239,6 +248,7 @@ impl Ext4RegMapping {
             return Ok(existing.clone());
         }
         pages.insert(pidx, page.clone());
+        backing_file_cache_page_inserted();
 
         Ok(page)
     }

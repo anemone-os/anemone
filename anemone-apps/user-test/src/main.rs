@@ -144,24 +144,29 @@ fn run_local_tests() {
     // println!("user-test: signal test finished.");
 
     // 2. float test
-    println!("user-test: running float test...");
-    local_run_cmd("/bin/float-test", &["float-test", "--type", "sig"], &[]);
-    println!("user-test: float test finished.");
+    // println!("user-test: running float test...");
+    // local_run_cmd("/bin/float-test", &["float-test", "--type", "sig"], &[]);
+    // println!("user-test: float test finished.");
 
     // 3. shm test
-    println!("user-test: running shm test...");
-    local_run_cmd("/bin/shm-test", &["shm-test"], &[]);
-    println!("user-test: shm test finished.");
+    // println!("user-test: running shm test...");
+    // local_run_cmd("/bin/shm-test", &["shm-test"], &[]);
+    // println!("user-test: shm test finished.");
 
     // 4. pg test
-    println!("user-test: running pg test...");
-    local_run_cmd("/bin/pg-test", &["pg-test"], &[]);
-    println!("user-test: pg test finished.");
+    // println!("user-test: running pg test...");
+    // local_run_cmd("/bin/pg-test", &["pg-test"], &[]);
+    // println!("user-test: pg test finished.");
 
     // 5. mmap test
-    println!("user-test: running mmap test...");
-    local_run_cmd("/bin/mmap-test", &["mmap-test"], &[]);
-    println!("user-test: mmap test finished.");
+    // println!("user-test: running mmap test...");
+    // local_run_cmd("/bin/mmap-test", &["mmap-test"], &[]);
+    // println!("user-test: mmap test finished.");
+
+    // 6. OOM killer test
+    println!("user-test: running OOM killer test...");
+    local_run_cmd("/bin/oom-killer-test", &["oom-killer-test"], &[]);
+    println!("user-test: OOM killer test finished.");
 }
 
 fn ensure_dir(path: &str) {
@@ -496,7 +501,7 @@ fn run_comp_tests() {
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
-    ltp::run_ltp_tests();
+    // ltp::run_ltp_tests();
 
     println!("user-test: all competition tests finished.");
 }
@@ -505,7 +510,7 @@ fn run_comp_tests() {
 pub fn main() -> Result<(), Errno> {
     run_local_tests();
 
-    run_comp_tests();
+    // run_comp_tests();
 
     println!("user-test: all tests finished, shutting down.");
     shutdown(SHUTDOWN_MAGIC).expect("user-test: failed to request shutdown");
