@@ -391,16 +391,7 @@ impl Task {
         flags: TaskFlags,
         cpu: Option<CpuId>,
     ) -> Result<(Task, PublishGuard), SysError> {
-        // TID 1 is outside the ordinary allocator. The BSP root task is the
-        // only caller that may consume this one-shot handle; later AP kinit
-        // member tasks still join TGID 1 but receive ordinary TIDs from 3 up.
-        let tid = if tgid == Some(Tid::INIT) {
-            tid::try_alloc_init_tid()
-                .or_else(alloc_tid)
-                .ok_or(SysError::OutOfMemory)?
-        } else {
-            alloc_tid().ok_or(SysError::OutOfMemory)?
-        };
+        let tid = alloc_tid().ok_or(SysError::OutOfMemory)?;
 
         unsafe {
             Self::new_kernel_with_tid_handle(
@@ -409,7 +400,12 @@ impl Task {
         }
     }
 
-    pub(in crate::task) unsafe fn new_kernel_with_tid_handle(
+    /// Create a kernel task from a caller-owned TID handle.
+    ///
+    /// This exists for fixed kernel identities such as the boot init task and
+    /// `kthreadd`. Ordinary callers must use [`Task::new_kernel`] so fixed TID
+    /// ownership stays visible at the bootstrap/kthread call site.
+    pub(crate) unsafe fn new_kernel_with_tid_handle(
         name: &str,
         entry: *const (),
         args: ParameterList,

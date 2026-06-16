@@ -250,6 +250,22 @@
 
 **结论：** 阶段 2 checkpoint 已关闭。下一步只允许准备阶段 3 strong `KThreadHandle` 与 create transaction；不得启动阶段 4 或任何 user-facing API 分流 worker。
 
+### 2026-06-16 - 阶段 2.1 fixed TID constructor cleanup
+
+**阶段：** 阶段 2 corrective cleanup。
+
+**原因：** 阶段 2 checkpoint 中 `Task::new_kernel()` 通过 `tgid == Tid::INIT` 隐式决定是否消费 fixed init TID。这把 “创建 init leader” 和 “创建 init thread-group member” 混在同一个 generic constructor 内，AP kinit 还依赖 init handle 已被 BSP 消费后的 fallback 普通分配，形状不自然，也会污染阶段 3 create transaction 的 owner boundary。
+
+**变更：**
+
+- `Task::new_kernel()` 恢复为只使用普通 `alloc_tid()`，不再认识 `Tid::INIT` 或其它 fixed identity。
+- `alloc_init_tid()` 改为显式 one-shot fixed handle，重复消费直接 panic。
+- BSP bootstrap 通过 `Task::new_kernel_with_tid_handle(..., alloc_init_tid())` 显式创建 init leader。
+- AP bootstrap 继续使用普通 `Task::new_kernel(..., Some(Tid::INIT), ...)` 加入 init thread group，因此自然获得普通 TID。
+- `kthreadd` 继续使用 `alloc_kthreadd_tid()` 与 `new_kernel_with_tid_handle()`；fixed TID ownership 只出现在 fixed identity caller 上。
+
+**边界：** 未改变 Phase 2 / Phase 4 gate 决策；`TaskBinding::KThread` 仍是未启用 scaffolding，`kthreadd` 与 ordinary kthread 实际 `KThread` publish 仍留到阶段 4 同 gate。
+
 ## 开放事项
 
 - 准备阶段 3 worker，但不能直接启动阶段 4+ worker。

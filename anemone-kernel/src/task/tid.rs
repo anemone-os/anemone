@@ -137,14 +137,15 @@ pub fn alloc_tid() -> Option<TidHandle> {
 
 /// Allocate the boot init task's fixed TID.
 ///
-/// TID 1 is outside the ordinary allocator. The one-shot guard is permanent:
-/// a failed boot-time root construction is a boot invariant violation, not a
-/// recoverable allocator transaction.
-pub(in crate::task) fn try_alloc_init_tid() -> Option<TidHandle> {
-    INIT_TID_CONSUMED
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .ok()
-        .map(|_| TidHandle(Tid::INIT.get()))
+/// TID 1 is outside the ordinary allocator. Only the BSP bootstrap path should
+/// consume this handle; secondary init-thread members use ordinary TIDs while
+/// joining TGID 1.
+pub(crate) fn alloc_init_tid() -> TidHandle {
+    assert!(
+        !INIT_TID_CONSUMED.swap(true, Ordering::AcqRel),
+        "init fixed TID handle consumed more than once"
+    );
+    TidHandle(Tid::INIT.get())
 }
 
 /// Allocate `kthreadd`'s fixed TID.
