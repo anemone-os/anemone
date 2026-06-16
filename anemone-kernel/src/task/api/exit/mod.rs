@@ -140,6 +140,12 @@ pub fn kernel_exit(code: ExitCode) -> ! {
 
             drop(tg_inner);
 
+            // Parent/reaper selection must be a single snapshot for this exit
+            // notification round. A concurrent parent exit may reparent this
+            // zombie to init, but SIGCHLD and child_exited must not observe
+            // different parents within the same thread-group exit.
+            let parent_tg = tg.get_parent();
+            let init_tg = get_init_task().get_thread_group();
             let cpu_usage = tg.cpu_usage_snapshot();
 
             if let Some(terminate_signal) = tg.terminate_signal() {
@@ -167,16 +173,13 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             }
 
             // 3. publish child_exited event.
-            tg.get_parent().child_exited.publish(1, false);
+            parent_tg.child_exited.publish(1, false);
 
             // 4. orphan children reparented to init may contain zombie thread groups. let's
             //    publish that to init as well.
             // this hardcoding is a bit ugly. when we support subreapers, we should publish
             // this to the actual reaper.
-            get_init_task()
-                .get_thread_group()
-                .child_exited
-                .publish(1, false);
+            init_tg.child_exited.publish(1, false);
 
             task.vfork_done.publish(1, true);
         }
