@@ -11,10 +11,6 @@ fn inode_shrinker_entry(ctx: KThreadContext, _: ()) -> i32 {
         if ctx.should_stop() {
             break;
         }
-        if ctx.should_park() {
-            ctx.parkme();
-            continue;
-        }
 
         if !frame_allocator_stats().exceeds_io_shrink_threshold() {
             yield_now();
@@ -41,7 +37,7 @@ fn shrink_inodes(ctx: &KThreadContext) {
     let mut evicted = 0;
 
     for sb in crate::fs::mounted_superblocks() {
-        if ctx.should_stop() || ctx.should_park() {
+        if ctx.should_stop() {
             break;
         }
         if !shrinkable_superblock(&sb) {
@@ -52,7 +48,7 @@ fn shrink_inodes(ctx: &KThreadContext) {
         let candidates = sb.cached_inode_snapshot(include_indexed);
 
         for inode in candidates {
-            if ctx.should_stop() || ctx.should_park() {
+            if ctx.should_stop() {
                 break;
             }
 

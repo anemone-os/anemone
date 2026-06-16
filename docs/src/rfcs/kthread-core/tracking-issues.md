@@ -3,7 +3,7 @@
 **状态：** Closed
 **最后更新：** 2026-06-16
 **父 RFC：** [RFC-20260616-kthread-core](./index.md)
-**事务日志：** None
+**事务日志：** [2026-06-16-kthread-core](../../devlog/transactions/2026-06-16-kthread-core.md)
 
 本文只跟踪 design review 后确认的 RFC 草案缺陷、证明缺口、边界冲突或需要回到草案修改的设计问题。
 

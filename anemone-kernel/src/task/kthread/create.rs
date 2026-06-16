@@ -14,7 +14,6 @@ use super::{KThread, KThreadContext, KThreadEntry, KThreadRef, KThreadShimEntry}
 pub struct KThreadBuilder {
     name: Box<str>,
     cpu: Option<CpuId>,
-    start_parked: bool,
 }
 
 impl KThreadBuilder {
@@ -23,7 +22,6 @@ impl KThreadBuilder {
         Self {
             name: name.into(),
             cpu: None,
-            start_parked: false,
         }
     }
 
@@ -38,14 +36,6 @@ impl KThreadBuilder {
             cpu.get()
         );
         self.cpu = Some(cpu);
-        self
-    }
-
-    /// Create the kthread in parked state after the shim has recovered the
-    /// start object. The task must still run once so `kthread_entry_shim`
-    /// can reBox the leaked `KThreadStart<A>`.
-    pub fn start_parked(mut self) -> Self {
-        self.start_parked = true;
         self
     }
 
@@ -65,7 +55,6 @@ impl KThreadBuilder {
             name,
             cpu: self.cpu,
             start,
-            start_parked: self.start_parked,
             completion: completion.clone(),
         };
 
@@ -146,7 +135,6 @@ struct KThreadCreateInfo {
     name: Box<str>,
     cpu: Option<CpuId>,
     start: KThreadStartPointer,
-    start_parked: bool,
     completion: Arc<KThreadCreateCompletion>,
 }
 
@@ -288,7 +276,6 @@ fn kthreadd_create_kthread(create: KThreadCreateInfo) {
         name,
         cpu,
         start,
-        start_parked,
         completion,
     } = create;
 
@@ -339,7 +326,7 @@ fn kthreadd_create_kthread(create: KThreadCreateInfo) {
 
     let thread = Arc::new(KThread {
         task: Arc::downgrade(&task),
-        control: super::KThreadControl::new(start_parked),
+        control: super::KThreadControl::new(),
     });
     let thread_ref = KThreadRef::new(&thread);
     task.install_kthread(thread);
@@ -367,9 +354,6 @@ where
     let ctx = KThreadContext {
         thread: thread.clone(),
     };
-    if ctx.should_park() {
-        ctx.parkme();
-    }
 
     let code = if ctx.should_stop() {
         -EINTR

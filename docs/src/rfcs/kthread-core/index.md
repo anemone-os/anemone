@@ -1,12 +1,12 @@
 # RFC-20260616-kthread-core
 
-**状态：** 已接受，等待实现
+**状态：** 已接受，阶段 1 已关闭
 **负责人：** doruche, Codex
 **最后更新：** 2026-06-16
 **领域：** task / topology / procfs / kthread
-**事务日志：** None
+**事务日志：** [2026-06-16-kthread-core](../../devlog/transactions/2026-06-16-kthread-core.md)
 **开放问题：** 当前无 active tracking gate；已关闭的 review findings 保留在 [Tracking Issues](./tracking-issues.md)。
-**下一步：** 实现尚未开始；若要进入实现，先按 [迁移实施计划](./implementation.md) 创建 transaction / preflight 记录。
+**下一步：** 按 [迁移实施计划](./implementation.md) 准备阶段 2 fixed `kthreadd` TID 与 topology preflight；不得跳过阶段 2 gate。
 
 ## 摘要
 
@@ -307,9 +307,9 @@ ordinary kthread consumer 由所属子系统自己的 init path 启动。initcal
 
 ## 收口
 
-本文已提升为公开 RFC，并成为后续 `kthread-core` 纠偏实现的 canonical source。实现尚未开始；进入代码阶段前需要：
+本文已提升为公开 RFC，并成为后续 `kthread-core` 纠偏实现的 canonical source。阶段 1 已删除 legacy service / park surface；后续推进需要：
 
-1. 按 [迁移实施计划](./implementation.md) 建立 transaction devlog 或明确的 preflight 记录。
+1. 按 [迁移实施计划](./implementation.md) 维护 [transaction devlog](../../devlog/transactions/2026-06-16-kthread-core.md) 的阶段记录。
 2. 在 transaction 中记录阶段 write set、验证 floor 和 source-audit 证据。
 3. 保持旧 [RFC-20260614-kthread](../kthread/index.md) 作为 historical baseline；后续纠偏实现以本文为准。
 4. 实现推进时同步更新 [Tracking Issues](./tracking-issues.md) 与 transaction devlog 的 gate 证据。

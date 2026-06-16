@@ -2,7 +2,7 @@
 //!
 //! Callers submit create requests to `kthreadd`; `kthreadd` creates and
 //! publishes the `Task`, then the task is enqueued so the typed entry shim can
-//! recover the leaked start object. Ordinary kthread stop/park/exited state is
+//! recover the leaked start object. Ordinary kthread stop/exited state is
 //! owned by `KThreadControl`, not by `TaskSchedState` or `kthreadd`.
 
 use core::ptr::NonNull;
@@ -62,14 +62,6 @@ impl KThread {
         let code = self.control.stop_and_wait();
         self.detach_from_task();
         code
-    }
-
-    pub fn park(&self) {
-        self.control.park();
-    }
-
-    pub fn unpark(&self) {
-        self.control.unpark();
     }
 
     fn finish_returned_entry(self: &Arc<Self>, code: i32) {
@@ -156,24 +148,8 @@ impl KThreadContext {
     pub fn should_stop(&self) -> bool {
         matches!(
             self.thread.control.state(),
-            KThreadRunState::Stopping | KThreadRunState::Exited
+            KThreadRunState::StopRequested | KThreadRunState::Exited
         )
-    }
-
-    pub fn should_park(&self) -> bool {
-        matches!(
-            self.thread.control.state(),
-            KThreadRunState::Parking | KThreadRunState::Parked
-        )
-    }
-
-    /// Enter parked state from the running kthread's own safe point.
-    ///
-    /// Park is cooperative: external callers only request `Parking`; the worker
-    /// becomes truly `Parked` here after leaving its own critical section.
-    pub fn parkme(&self) {
-        self.thread.control.enter_parked();
-        self.thread.control.wait_until_unpark_or_stop();
     }
 
     /// Wait for a business predicate or a stop request.
@@ -187,12 +163,11 @@ impl KThreadContext {
         event.listen_uninterruptible(false, || self.should_stop() || predicate());
     }
 
-    /// Wait on the kthread lifecycle wake event until lifecycle or business
-    /// state needs to be rechecked.
+    /// Wait on the kthread lifecycle wake event until the entry must recheck
+    /// stop state or its own business predicate.
     ///
-    /// Services update their pending state first, then wake workers through
-    /// `KThread::wake()`. The lifecycle event remains only a wake capability;
-    /// request truth stays in the service pending backend.
+    /// `wake()` is only a wake capability. The consumer remains responsible for
+    /// storing and checking any business request truth before and after waking.
     pub fn wait_until_woken<P>(&self, predicate: P)
     where
         P: Fn() -> bool,
@@ -200,18 +175,14 @@ impl KThreadContext {
         self.thread
             .control
             .wake_event
-            .listen_uninterruptible(false, || {
-                self.should_stop() || self.should_park() || predicate()
-            });
+            .listen_uninterruptible(false, || self.should_stop() || predicate());
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KThreadRunState {
-    Runnable,
-    Parking,
-    Parked,
-    Stopping,
+    Running,
+    StopRequested,
     Exited,
 }
 
@@ -235,7 +206,7 @@ struct KThreadInner {
 
 /// Lifecycle owner for one ordinary kthread.
 ///
-/// `KThreadControl` owns stop/park/exited state and the wake/state-change
+/// `KThreadControl` owns stop/exited state and the wake/state-change
 /// events. It is not a scheduler entity and it does not own request queue
 /// state.
 #[derive(Debug)]
@@ -246,14 +217,10 @@ struct KThreadControl {
 }
 
 impl KThreadControl {
-    fn new(start_parked: bool) -> Self {
+    fn new() -> Self {
         Self {
             inner: SpinLock::new(KThreadInner {
-                state: if start_parked {
-                    KThreadRunState::Parked
-                } else {
-                    KThreadRunState::Runnable
-                },
+                state: KThreadRunState::Running,
                 exit_code: 0,
             }),
             wake_event: Event::new(),
@@ -271,24 +238,13 @@ impl KThreadControl {
         self.wait_exited()
     }
 
-    fn park(&self) {
-        self.request_park();
-        self.wake();
-        self.wait_parked_or_cancelled();
-    }
-
-    fn unpark(&self) {
-        self.request_unpark();
-        self.wake();
-    }
-
     fn request_stop(&self) {
         let changed = {
             let mut inner = self.inner.lock();
             match inner.state {
-                KThreadRunState::Exited | KThreadRunState::Stopping => false,
+                KThreadRunState::Exited | KThreadRunState::StopRequested => false,
                 _ => {
-                    inner.state = KThreadRunState::Stopping;
+                    inner.state = KThreadRunState::StopRequested;
                     true
                 },
             }
@@ -296,61 +252,6 @@ impl KThreadControl {
         if changed {
             self.state_changed.publish(usize::MAX, true);
         }
-    }
-
-    fn request_park(&self) {
-        let changed = {
-            let mut inner = self.inner.lock();
-            match inner.state {
-                KThreadRunState::Runnable => {
-                    inner.state = KThreadRunState::Parking;
-                    true
-                },
-                _ => false,
-            }
-        };
-        if changed {
-            self.state_changed.publish(usize::MAX, true);
-        }
-    }
-
-    fn request_unpark(&self) {
-        let changed = {
-            let mut inner = self.inner.lock();
-            match inner.state {
-                KThreadRunState::Parking | KThreadRunState::Parked => {
-                    inner.state = KThreadRunState::Runnable;
-                    true
-                },
-                _ => false,
-            }
-        };
-        if changed {
-            self.state_changed.publish(usize::MAX, true);
-        }
-    }
-
-    fn enter_parked(&self) {
-        {
-            let mut inner = self.inner.lock();
-            if matches!(inner.state, KThreadRunState::Parking) {
-                inner.state = KThreadRunState::Parked;
-            }
-        }
-        self.state_changed.publish(usize::MAX, true);
-    }
-
-    fn wait_parked_or_cancelled(&self) {
-        self.state_changed
-            .listen_uninterruptible(false, || !matches!(self.state(), KThreadRunState::Parking));
-    }
-
-    fn wait_until_unpark_or_stop(&self) {
-        self.wake_event.listen_uninterruptible(false, || {
-            let state = self.inner.lock().state;
-            !matches!(state, KThreadRunState::Parked)
-                || matches!(state, KThreadRunState::Stopping | KThreadRunState::Exited)
-        });
     }
 
     fn finish_returned_entry(&self, code: i32) {

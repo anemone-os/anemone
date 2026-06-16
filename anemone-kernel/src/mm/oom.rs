@@ -48,18 +48,11 @@ fn oom_killer_entry(ctx: KThreadContext, _: ()) -> i32 {
         if ctx.should_stop() {
             break;
         }
-        if ctx.should_park() {
-            ctx.parkme();
-            continue;
-        }
 
         ctx.wait_until_woken(|| frame_allocator_stats().exceeds_oom_kill_threshold());
 
         if ctx.should_stop() {
             break;
-        }
-        if ctx.should_park() {
-            continue;
         }
         if !frame_allocator_stats().exceeds_oom_kill_threshold() {
             continue;
