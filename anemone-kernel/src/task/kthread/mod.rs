@@ -122,6 +122,33 @@ impl Drop for KThread {
     }
 }
 
+impl Task {
+    pub fn install_kthread(&self, kthread: Arc<KThread>) {
+        let mut slot = self.kthread.lock();
+        assert!(
+            slot.is_none(),
+            "kthread installed more than once for task {}",
+            self.tid()
+        );
+        *slot = Some(kthread);
+    }
+
+    pub fn kthread(&self) -> Option<Arc<KThread>> {
+        self.kthread.lock().clone()
+    }
+
+    pub fn clear_kthread(&self, kthread: &Arc<KThread>) {
+        let mut slot = self.kthread.lock();
+        if slot
+            .as_ref()
+            .map(|installed| Arc::ptr_eq(installed, kthread))
+            .unwrap_or(false)
+        {
+            *slot = None;
+        }
+    }
+}
+
 /// Context passed to kthread entries.
 ///
 /// The context lets the running kthread observe lifecycle requests at explicit

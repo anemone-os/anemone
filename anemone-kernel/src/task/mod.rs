@@ -40,6 +40,7 @@ use crate::{
     task::{
         cpu_usage::{TaskCpuUsage, ThreadGroupCpuUsage},
         files::FilesState,
+        kthread::KThread,
         sig::{
             PendingSignals, SigNo, TaskSigMaskState, altstack::SigAltStack,
             disposition::SignalDisposition,
@@ -160,7 +161,7 @@ pub struct Task {
     ///
     /// This is the strong owner, matching Linux's task-held `struct kthread`.
     /// `KThread` only keeps a weak task pointer, so this does not form a cycle.
-    kthread: SpinLock<Option<Arc<kthread::KThread>>>,
+    kthread: SpinLock<Option<Arc<KThread>>>,
 }
 
 /// Observation-only compatibility state for status readers.
@@ -720,49 +721,6 @@ impl Task {
 
     pub fn set_no_new_privs(&self) {
         self.no_new_privs.store(true, Ordering::Release);
-    }
-
-    fn install_kthread(&self, kthread: Arc<kthread::KThread>) {
-        let mut slot = self.kthread.lock();
-        assert!(
-            slot.is_none(),
-            "kthread installed more than once for task {}",
-            self.tid()
-        );
-        *slot = Some(kthread);
-    }
-
-    fn kthread(&self) -> Option<Arc<kthread::KThread>> {
-        self.kthread.lock().clone()
-    }
-
-    fn clear_kthread(&self, kthread: &Arc<kthread::KThread>) {
-        let mut slot = self.kthread.lock();
-        if slot
-            .as_ref()
-            .map(|installed| Arc::ptr_eq(installed, kthread))
-            .unwrap_or(false)
-        {
-            *slot = None;
-        }
-    }
-
-    fn assert_kthread_exit_ready(&self) {
-        let kthread = self.kthread.lock();
-        if let Some(kthread) = kthread.as_ref() {
-            assert!(
-                kthread.has_exited(),
-                "kthread task {} exited without kthread finish path",
-                self.tid()
-            );
-        }
-    }
-
-    fn expect_kthread(&self) -> Arc<kthread::KThread> {
-        self.kthread
-            .lock()
-            .clone()
-            .expect("ordinary kthread is missing task-local state")
     }
 }
 

@@ -361,7 +361,9 @@ where
     let start = start.cast::<KThreadStart<A>>();
     let start = unsafe { Box::from_raw(start.as_ptr()) };
     let entry = unsafe { core::mem::transmute::<*const (), KThreadEntry<A>>(start.entry) };
-    let thread = get_current_task().expect_kthread();
+    let thread = get_current_task()
+        .kthread()
+        .expect("ordinary kthread is missing task-local state");
     let ctx = KThreadContext {
         thread: thread.clone(),
     };

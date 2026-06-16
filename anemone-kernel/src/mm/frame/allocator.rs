@@ -50,6 +50,7 @@ pub trait FrameAllocator {
 /// TODO: more detailed statistics, such as fragmentation, peak memory usage,
 /// etc.
 mod allocator_stats {
+    use super::*;
 
     #[derive(Debug, Clone, Copy)]
     pub struct FrameAllocatorStats {
@@ -69,18 +70,18 @@ mod allocator_stats {
 
         pub fn exceeds_io_shrink_threshold(&self) -> bool {
             crate::const_assert!(
-                crate::kconfig_defs::IO_SHRINK_THRESHOLD <= 100,
+                IO_SHRINK_THRESHOLD <= 100,
                 "io shrink threshold must be a percentage"
             );
-            self.used_pages_exceeds_percent(crate::kconfig_defs::IO_SHRINK_THRESHOLD)
+            self.used_pages_exceeds_percent(IO_SHRINK_THRESHOLD)
         }
 
         pub fn exceeds_oom_kill_threshold(&self) -> bool {
             crate::const_assert!(
-                crate::kconfig_defs::OOM_KILL_THRESHOLD <= 100,
+                OOM_KILL_THRESHOLD <= 100,
                 "oom kill threshold must be a percentage"
             );
-            self.used_pages_exceeds_percent(crate::kconfig_defs::OOM_KILL_THRESHOLD)
+            self.used_pages_exceeds_percent(OOM_KILL_THRESHOLD)
         }
 
         fn used_pages_exceeds_percent(&self, threshold_percent: u8) -> bool {
