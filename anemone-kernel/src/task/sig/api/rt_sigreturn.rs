@@ -21,22 +21,26 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
 
     // 1. read back sigframe from user stack.
     let sigframe_base = VirtAddr::new(__trapframe__.sp());
-    let sigframe = {
+    let read_sigframe = {
         let mut guard = usp.lock();
         match UserReadPtr::<RtSigFrame>::try_new(sigframe_base, &mut guard) {
-            Err(e) => {
-                // offending address. just kill the process.
-                knoticeln!(
-                    "sys_rt_sigreturn: failed to read rtsigframe from {}'s user stack at address {:#x}: {:?}",
-                    task.tid(),
-                    sigframe_base.get(),
-                    e
-                );
-
-                kernel_exit_group(ExitCode::Signaled(SigNo::SIGSEGV))
-            },
-            Ok(uptr) => uptr.read(),
+            Ok(uptr) => Ok(uptr.read()),
+            Err(e) => Err(e),
         }
+    };
+    let sigframe = match read_sigframe {
+        Ok(sigframe) => sigframe,
+        Err(e) => {
+            // offending address. just kill the process.
+            knoticeln!(
+                "sys_rt_sigreturn: failed to read rtsigframe from {}'s user stack at address {:#x}: {:?}",
+                task.tid(),
+                sigframe_base.get(),
+                e
+            );
+
+            kernel_exit_group(ExitCode::Signaled(SigNo::SIGSEGV))
+        },
     };
 
     // 2. this sigframe is read from userspace. it might be constructed by malicious
