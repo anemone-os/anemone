@@ -79,7 +79,7 @@ fn run_oom_kill_round(active_victim: &mut Option<Tid>) {
         return;
     };
 
-    knoticeln!(
+    kalertln!(
         "oom killer: killing tgid {} with {} exclusive physical page(s); frame usage {}/{} pages",
         victim.tgid,
         victim.exclusive_pages,
