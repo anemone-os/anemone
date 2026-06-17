@@ -276,7 +276,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
 
         knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
         set_boot_mono(true);
-        let (bsp_kinit, guard) = Task::new_kernel(
+        let (bsp_kinit, guard) = Task::new_kernel_with_tid_handle(
             "bsp-kinit",
             bsp_kinit as *const (),
             ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
@@ -285,6 +285,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
             SchedEntity::new(SchedClassPrv::RoundRobin(())),
             TaskFlags::empty(),
             Some(cur_cpu_id()),
+            crate::task::alloc_init_tid(),
         )
         .unwrap_or_else(|e| panic!("failed to create bsp kinit task: {:?}", e));
 

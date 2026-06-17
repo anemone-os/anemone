@@ -118,17 +118,20 @@ fn build_status_text(inode: &InodeRef) -> Result<String, SysError> {
     let binding = validate_tgid_sub_inode(inode)?;
     let tg = &binding.tg;
     let leader = tg.leader().ok_or(SysError::NoSuchProcess)?;
+    let is_kthread = tg.ty() == ThreadGroupType::KThread;
 
     let pid = leader.tid().get();
     let tgid = tg.tgid().get();
-    let ppid = tg.parent_tgid().map(|tid| tid.get()).unwrap_or(0);
-    let pgrp = tg.pgid().get();
-    let session = tg.sid().get();
+    let display = tg.proc_display_parentage();
+    let ppid = display.ppid.get();
+    let pgrp = display.pgrp.get();
+    let session = display.session.get();
     let cred = leader.cred();
-    let vsize_kb = leader
-        .try_clone_uspace_handle()
-        .map(|usp| bytes_to_kb(usp.lock().vsize_bytes()))
-        .unwrap_or(0);
+    let vsize_kb = if is_kthread {
+        0
+    } else {
+        bytes_to_kb(leader.clone_uspace_handle().lock().vsize_bytes())
+    };
     let sig_pnd = leader.pending_signal_set();
     let shd_pnd = tg.shared_pending_signal_set();
     let sig_blk = leader.snapshot_current_sig_mask();
@@ -142,7 +145,7 @@ fn build_status_text(inode: &InodeRef) -> Result<String, SysError> {
     let pending_count = sig_pnd.union(&shd_pnd).as_u64().count_ones();
     let cpu_list = cpus_allowed_list();
     let cpu_mask = cpus_allowed_mask();
-    let kthread = leader.flags().is_kernel() as u8;
+    let kthread = is_kthread as u8;
 
     // Stage-1 placeholders:
     // - no resident, locked, per-segment, or page-table accounting is wired yet.

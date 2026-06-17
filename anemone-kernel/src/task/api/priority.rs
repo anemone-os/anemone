@@ -70,12 +70,15 @@ fn collect_priority_targets(
     match which {
         PriorityWhich::Process => {
             let task = if who == 0 {
-                current.clone()
+                return Ok(vec![current.clone()]);
             } else if who > 0 {
                 get_task(&Tid::new(who as u32)).ok_or(SysError::NoSuchProcess)?
             } else {
                 return Err(SysError::NoSuchProcess);
             };
+            if task.get_thread_group().ty() != ThreadGroupType::User {
+                return Err(SysError::NoSuchProcess);
+            }
             Ok(vec![task])
         },
         PriorityWhich::ProcessGroup => {
@@ -89,6 +92,9 @@ fn collect_priority_targets(
             let process_group = get_process_group(&pgid).ok_or(SysError::NoSuchProcess)?;
             let mut targets = Vec::new();
             for tg in process_group.get_members() {
+                if tg.ty() != ThreadGroupType::User {
+                    continue;
+                }
                 if let Some(leader) = tg.leader() {
                     targets.push(leader);
                 }
@@ -109,7 +115,10 @@ fn collect_priority_targets(
             };
             let mut targets = Vec::new();
             for_each_task(|task| {
-                if task.cred().uid.real == uid && task.tid() != Tid::IDLE {
+                if task.cred().uid.real == uid
+                    && task.tid() != Tid::IDLE
+                    && task.get_thread_group().ty() == ThreadGroupType::User
+                {
                     targets.push(task.clone());
                 }
             });

@@ -55,11 +55,12 @@ fn tgid_cmdline_read(
     _ctx: FileIoCtx,
 ) -> Result<usize, SysError> {
     let binding = validate_tgid_sub_inode(file.inode())?;
+    if binding.tg.ty() == ThreadGroupType::KThread {
+        return Ok(0);
+    }
     let leader = binding.tg.leader().ok_or(SysError::NoSuchProcess)?;
 
-    let Some(usp_handle) = leader.try_clone_uspace_handle() else {
-        return Ok(0);
-    };
+    let usp_handle = leader.clone_uspace_handle();
 
     let (addr, len) = usp_handle.lock().cmdline_range();
 
@@ -105,11 +106,12 @@ fn tgid_cmdline_read_at(
 
 fn tgid_cmdline_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
     let binding = validate_tgid_sub_inode(file.inode())?;
+    if binding.tg.ty() == ThreadGroupType::KThread {
+        return seek_with_bounded_size(file, pos, from, 0);
+    }
 
     let leader = binding.tg.leader().ok_or(SysError::NoSuchProcess)?;
-    let Some(usp_handle) = leader.try_clone_uspace_handle() else {
-        return seek_with_bounded_size(file, pos, from, 0);
-    };
+    let usp_handle = leader.clone_uspace_handle();
 
     let (_addr, len) = usp_handle.lock().cmdline_range();
 

@@ -14,7 +14,10 @@ use crate::{
         handler::{TryFromSyscallArg, syscall_arg_flag32},
         *,
     },
-    task::{ExitCode, ThreadGroup, ThreadGroupLifeCycle, cpu_usage::ThreadGroupCpuUsage, tid::Tid},
+    task::{
+        ExitCode, ThreadGroup, ThreadGroupLifeCycle, ThreadGroupType,
+        cpu_usage::ThreadGroupCpuUsage, tid::Tid,
+    },
 };
 
 mod wait4;
@@ -108,6 +111,9 @@ impl WaitScanner {
     }
 
     fn scan_one(&mut self, tg: &Arc<ThreadGroup>) -> bool {
+        if tg.ty() != ThreadGroupType::User {
+            return false;
+        }
         let matched = match self.target {
             WaitTarget::AnyChild => true,
             WaitTarget::ChildWithTgid(tgid) => tg.tgid() == tgid,

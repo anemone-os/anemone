@@ -70,7 +70,7 @@ static TOPOLOGY: TaskTopology = TaskTopology {
 /// and thus has no parent. other tasks must have a parent.
 #[derive(Debug)]
 pub enum TaskBinding {
-    Leader {
+    UserLeader {
         parent_tgid: Tid,
         pgid: Tid,
         sid: Tid,
@@ -80,6 +80,7 @@ pub enum TaskBinding {
         /// We do need refactor this later.
         terminate_signal: Option<SigNo>,
     },
+    KThread,
     Member,
 }
 
@@ -153,13 +154,14 @@ impl PublishGuard {
         });
         let tg = ThreadGroup {
             tgid: handle,
+            ty: ThreadGroupType::User,
             child_exited: Event::new(),
             terminate_signal: None,
             itimers: ITimers::new(),
             inner: NoIrqRwLock::new(ThreadGroupInner {
                 status: ThreadGroupStatus::new_alive_executed(),
-                pgid: Tid::INIT,
-                sid: Tid::INIT,
+                pgid: Some(Tid::INIT),
+                sid: Some(Tid::INIT),
                 members: BTreeSet::from([Tid::INIT]),
                 parent_tgid: None,
                 children_tgids: BTreeSet::new(),
@@ -167,6 +169,7 @@ impl PublishGuard {
                 sig_pending: NoIrqSpinLock::new(PendingSignals::new()),
             }),
         };
+        assert_thread_group_shape(Tid::INIT, &tg);
 
         topology.tasks.insert(Tid::INIT, node);
         topology.sessions.insert(Tid::INIT, session);
@@ -191,7 +194,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
     let tgid = task.tgid();
     let mut topology = TOPOLOGY.inner.write();
     match binding {
-        TaskBinding::Leader {
+        TaskBinding::UserLeader {
             parent_tgid,
             pgid,
             sid,
@@ -208,18 +211,16 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
 
             let node = TaskNode { task: task.clone() };
 
-            let mut inner = ThreadGroupInner {
+            let inner = ThreadGroupInner {
                 status: ThreadGroupStatus::new_alive(),
-                pgid,
-                sid,
+                pgid: Some(pgid),
+                sid: Some(sid),
                 members: BTreeSet::from([node.task.tid()]),
                 parent_tgid: Some(parent_tgid),
                 children_tgids: BTreeSet::new(),
                 cpu_usage: ThreadGroupCpuUsage::ZERO,
                 sig_pending: NoIrqSpinLock::new(PendingSignals::new()),
             };
-
-            inner.parent_tgid = Some(parent_tgid);
 
             let session = topology
                 .sessions
@@ -256,6 +257,12 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                 .get(&parent_tgid)
                 .expect("task topology: parent thread group not found when publishing task");
             assert!(
+                parent_tg.ty() == ThreadGroupType::User,
+                "task topology: user thread group {} cannot use non-user parent {}",
+                node.task.tgid(),
+                parent_tgid
+            );
+            assert!(
                 parent_tg
                     .inner
                     .write()
@@ -274,15 +281,76 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                     .thread_groups
                     .insert(
                         tgid,
-                        Arc::new(ThreadGroup {
-                            tgid: handle,
-                            child_exited: Event::new(),
-                            terminate_signal,
-                            itimers: ITimers::new(),
-                            inner: NoIrqRwLock::new(inner),
+                        Arc::new({
+                            let tg = ThreadGroup {
+                                tgid: handle,
+                                ty: ThreadGroupType::User,
+                                child_exited: Event::new(),
+                                terminate_signal,
+                                itimers: ITimers::new(),
+                                inner: NoIrqRwLock::new(inner),
+                            };
+                            assert_thread_group_shape(tgid, &tg);
+                            tg
                         })
                     )
                     .is_none(),
+                "task topology: duplicate TGID {} when publishing task",
+                tgid,
+            );
+
+            Ok(task)
+        },
+        TaskBinding::KThread => {
+            let tidref = task.tid.into_inner();
+            let handle = match tidref {
+                TidRef::Owned(h) => h,
+                _ => panic!("task topology: kthread leader must have an owned TID handle"),
+            };
+            task.tid = NoIrqRwLock::new(TidRef::Leader);
+            assert!(
+                tid == tgid,
+                "task topology: kthread leader must have tid == tgid, got tid={} tgid={}",
+                tid,
+                tgid
+            );
+            assert!(
+                task.flags().is_kernel(),
+                "task topology: TaskBinding::KThread requires a kernel task"
+            );
+            assert!(
+                task.kthread.lock().is_some(),
+                "task topology: TaskBinding::KThread requires task-local kthread state before publish"
+            );
+
+            let task = Arc::new(task);
+            let node = TaskNode { task: task.clone() };
+            let tg = ThreadGroup {
+                tgid: handle,
+                ty: ThreadGroupType::KThread,
+                child_exited: Event::new(),
+                terminate_signal: None,
+                itimers: ITimers::new(),
+                inner: NoIrqRwLock::new(ThreadGroupInner {
+                    status: ThreadGroupStatus::new_alive(),
+                    pgid: None,
+                    sid: None,
+                    members: BTreeSet::from([node.task.tid()]),
+                    parent_tgid: None,
+                    children_tgids: BTreeSet::new(),
+                    cpu_usage: ThreadGroupCpuUsage::ZERO,
+                    sig_pending: NoIrqSpinLock::new(PendingSignals::new()),
+                }),
+            };
+            assert_thread_group_shape(tgid, &tg);
+
+            assert!(
+                topology.tasks.insert(node.task.tid(), node).is_none(),
+                "task topology: duplicate TID {} when publishing task",
+                tid
+            );
+            assert!(
+                topology.thread_groups.insert(tgid, Arc::new(tg)).is_none(),
                 "task topology: duplicate TGID {} when publishing task",
                 tgid,
             );
@@ -294,6 +362,10 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                 .thread_groups
                 .get(&task.tgid())
                 .expect("task topology: thread group not found when publishing task");
+            assert!(
+                tg.ty() == ThreadGroupType::User,
+                "task topology: thread-group members can only join user thread groups"
+            );
             if !tg.status().can_join() {
                 knoticeln!(
                     "task topology: thread group {} is not in a state that can accept new members when publishing {}",
@@ -319,6 +391,41 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
             );
 
             Ok(task)
+        },
+    }
+}
+
+fn assert_thread_group_shape(tgid: Tid, tg: &ThreadGroup) {
+    let inner = tg.inner.read();
+    match tg.ty {
+        ThreadGroupType::User => {
+            assert!(
+                inner.pgid.is_some(),
+                "task topology: user thread group {} missing process group",
+                tgid
+            );
+            assert!(
+                inner.sid.is_some(),
+                "task topology: user thread group {} missing session",
+                tgid
+            );
+        },
+        ThreadGroupType::KThread => {
+            assert!(
+                inner.pgid.is_none() && inner.sid.is_none(),
+                "task topology: kthread {} must not have process group/session",
+                tgid
+            );
+            assert!(
+                inner.children_tgids.is_empty(),
+                "task topology: kthread {} must not own user child topology",
+                tgid
+            );
+            assert!(
+                inner.members.len() == 1 && inner.members.contains(&tgid),
+                "task topology: kthread {} must be a singleton thread group",
+                tgid
+            );
         },
     }
 }
@@ -362,6 +469,30 @@ pub fn for_each_task<F: FnMut(&Arc<Task>)>(mut f: F) {
 pub fn get_thread_group(tgid: &Tid) -> Option<Arc<ThreadGroup>> {
     let topology = TOPOLOGY.inner.read();
     topology.thread_groups.get(tgid).cloned()
+}
+
+/// Run `f` while the requested thread group is still active in topology.
+///
+/// This intentionally holds the topology read lock across `f`. It exists for
+/// procfs lazy `<tgid>` binding creation so lookup can take locks in topology
+/// -> procfs-binding order and cannot rebuild a binding once kthread unpublish
+/// has acquired the topology write lock.
+pub(crate) fn with_active_thread_group<R>(
+    tgid: &Tid,
+    f: impl FnOnce(&Arc<ThreadGroup>) -> R,
+) -> Option<R> {
+    let topology = TOPOLOGY.inner.read();
+    topology.thread_groups.get(tgid).map(f)
+}
+
+/// Return whether a TGID is currently an active kernel-thread thread group.
+///
+/// User-facing resolvers use this as a fail-closed policy hook before touching
+/// User-only process-group/session accessors.
+pub fn is_kthread_tgid(tgid: Tid) -> bool {
+    get_thread_group(&tgid)
+        .map(|tg| tg.ty() == ThreadGroupType::KThread)
+        .unwrap_or(false)
 }
 
 /// Iterate over all thread groups in the registry.

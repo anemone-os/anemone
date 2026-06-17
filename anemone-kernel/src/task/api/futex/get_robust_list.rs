@@ -39,7 +39,15 @@ fn sys_get_robust_list(
 
     let target = match target {
         Target::CurrentTask => get_current_task(),
-        Target::SpecifiedTask(tid) => get_task(&tid).ok_or(SysError::NoSuchProcess)?,
+        Target::SpecifiedTask(tid) => {
+            let task = get_task(&tid).ok_or(SysError::NoSuchProcess)?;
+            // A specified TID is a user-facing resolver and must not expose
+            // kthread task-local state as an inert robust-list view.
+            if task.get_thread_group().ty() == ThreadGroupType::KThread {
+                return Err(SysError::NoSuchProcess);
+            }
+            task
+        },
     };
     let head = target.robust_list();
 

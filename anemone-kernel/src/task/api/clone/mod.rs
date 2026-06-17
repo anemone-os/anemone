@@ -421,7 +421,7 @@ pub fn kernel_clone(
             parent_tgid
         );
 
-        TaskBinding::Leader {
+        TaskBinding::UserLeader {
             parent_tgid,
             pgid: current_tg.pgid(),
             sid: current_tg.sid(),

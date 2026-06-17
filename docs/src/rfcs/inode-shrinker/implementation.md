@@ -101,7 +101,7 @@ write set：
 - 新增全局 `INODE_SHRINKER` weak handle slot，用于防止重复初始化。
 - `init_inode_shrinker()` 通过 `KThreadBuilder` 创建单 worker `inode-shrink-0`。
 - `io_shrink_threshold` 进入 kconfig，默认 50。
-- worker 自循环检查 stop / park；随后读取 `frame_allocator_stats()`。
+- worker 自循环检查 stop；随后读取 `frame_allocator_stats()`。
 - 只有物理页占用严格超过阈值时才调用 `shrink_inodes()`；低于或等于阈值时调用 `yield_now()` 让出调度器。
 - `task/api/exit` 不再提交 shrink 请求。
 
@@ -111,7 +111,7 @@ write set：
 - frame allocator 只暴露 stats，不承载 shrinker policy。
 - 阈值判断必须是严格大于：`used_pages * 100 > total_pages * threshold`。
 - 低于或等于阈值时，worker 必须让出调度器，避免低压 busy spin。
-- worker 应在 superblock 和 inode 循环边界检查 stop / park。
+- worker 应在 superblock 和 inode 循环边界检查 stop。
 - worker 不应扫描 kernel/persistent superblock。
 - worker 对 `Busy` / `NotFound` 静默跳过，对其他错误记录日志。
 

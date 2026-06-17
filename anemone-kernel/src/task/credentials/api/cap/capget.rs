@@ -18,6 +18,9 @@ fn target_cred_for_capget(pid: i32) -> Result<CredentialSet, SysError> {
         return Ok(get_current_task().cred());
     }
     let task = get_task(&Tid::new(pid as u32)).ok_or(SysError::NoSuchProcess)?;
+    if task.get_thread_group().ty() == ThreadGroupType::KThread {
+        return Err(SysError::NoSuchProcess);
+    }
     Ok(task.cred())
 }
 

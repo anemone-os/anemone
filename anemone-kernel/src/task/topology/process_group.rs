@@ -2,7 +2,10 @@
 
 use crate::{
     prelude::*,
-    task::{ProcessGroupInner, SessionInner, ThreadGroupInner, sig::Signal, topology::TOPOLOGY},
+    task::{
+        ProcessGroupInner, SessionInner, ThreadGroupInner, ThreadGroupType, sig::Signal,
+        topology::TOPOLOGY,
+    },
 };
 
 impl Session {
@@ -62,11 +65,27 @@ impl ProcessGroup {
 
 impl ThreadGroup {
     pub fn pgid(&self) -> Tid {
-        self.inner.read().pgid
+        let inner = self.inner.read();
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user process group",
+            self.tgid()
+        );
+        inner
+            .pgid
+            .expect("task topology: user thread group missing process group")
     }
 
     pub fn sid(&self) -> Tid {
-        self.inner.read().sid
+        let inner = self.inner.read();
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user session",
+            self.tgid()
+        );
+        inner
+            .sid
+            .expect("task topology: user thread group missing session")
     }
 
     pub fn has_executed(&self) -> bool {
@@ -108,6 +127,11 @@ impl ThreadGroup {
     where
         F: FnOnce(&ProcessGroupMoveContext) -> Result<(), SysError>,
     {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} cannot move process groups",
+            self.tgid()
+        );
         let target_tgid = self.tgid();
         let mut topology = TOPOLOGY.inner.write();
         if !topology.thread_groups.contains_key(&target_tgid) {
@@ -115,8 +139,12 @@ impl ThreadGroup {
         }
 
         let target_snapshot = self.inner.read();
-        let old_pgid = target_snapshot.pgid;
-        let target_sid = target_snapshot.sid;
+        let old_pgid = target_snapshot
+            .pgid
+            .expect("task topology: user thread group missing process group");
+        let target_sid = target_snapshot
+            .sid
+            .expect("task topology: user thread group missing session");
         let target_has_executed = target_snapshot.status.has_executed();
         drop(target_snapshot);
 
@@ -250,6 +278,11 @@ impl ThreadGroup {
     ///
     /// [TOPOLOGY] -> [Session] -> [ProcessGroup] -> [ThreadGroup]
     pub fn create_session(self: &Arc<Self>) -> Result<Tid, SysError> {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} cannot create a user session",
+            self.tgid()
+        );
         let target_tgid = self.tgid();
         let mut topology = TOPOLOGY.inner.write();
         if !topology.thread_groups.contains_key(&target_tgid) {
@@ -257,8 +290,12 @@ impl ThreadGroup {
         }
 
         let target_snapshot = self.inner.read();
-        let old_pgid = target_snapshot.pgid;
-        let old_sid = target_snapshot.sid;
+        let old_pgid = target_snapshot
+            .pgid
+            .expect("task topology: user thread group missing process group");
+        let old_sid = target_snapshot
+            .sid
+            .expect("task topology: user thread group missing session");
         drop(target_snapshot);
 
         if old_pgid == target_tgid || topology.process_groups.contains_key(&target_tgid) {
@@ -302,8 +339,8 @@ impl ThreadGroup {
             target_tgid,
             old_pgid
         );
-        target_inner.pgid = target_tgid;
-        target_inner.sid = target_tgid;
+        target_inner.pgid = Some(target_tgid);
+        target_inner.sid = Some(target_tgid);
         let old_pg_empty = old_pg_inner.members.is_empty();
 
         drop(target_inner);
@@ -367,6 +404,11 @@ pub struct ProcessGroupMoveContext {
 
 impl ProcessGroupMoveContext {
     pub fn target_is_child_of(&self, parent: &ThreadGroup) -> bool {
+        assert!(
+            parent.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user children",
+            parent.tgid()
+        );
         parent
             .inner
             .read()
@@ -407,7 +449,9 @@ fn move_thread_group_between_process_groups(
         old_pg_inner.members.remove(&tgid),
         "task topology: target {} not found in old process group {}",
         tgid,
-        target_inner.pgid
+        target_inner
+            .pgid
+            .expect("task topology: user thread group missing process group")
     );
     assert!(
         new_pg_inner.members.insert(tgid),
@@ -415,7 +459,7 @@ fn move_thread_group_between_process_groups(
         tgid,
         new_pgid
     );
-    target_inner.pgid = new_pgid;
-    target_inner.sid = new_sid;
+    target_inner.pgid = Some(new_pgid);
+    target_inner.sid = Some(new_sid);
     old_pg_inner.members.is_empty()
 }

@@ -1,10 +1,10 @@
 # KThread 不变量需求
 
-**状态：** Canonical
-**最后更新：** 2026-06-15
+**状态：** Superseded / historical baseline
+**最后更新：** 2026-06-16
 **父 RFC：** [RFC-20260614-kthread](./index.md)
 
-本文定义 `task::kthread` 的协议边界和证明义务。具体落地顺序与 commit 事实见 [KThread 迁移实施计划](./implementation.md) 和 [事务日志](../../devlog/transactions/2026-06-14-kthread.md)。
+本文保留既有 `task::kthread` 实现的协议边界和证明义务。后续 kthread core 纠偏的权威设计见 [RFC-20260616-kthread-core](../kthread-core/index.md)；具体历史落地顺序与 commit 事实见 [KThread 迁移实施计划](./implementation.md) 和 [事务日志](../../devlog/transactions/2026-06-14-kthread.md)。
 
 ## 闭合条件
 

@@ -5,10 +5,11 @@ use crate::{
 
 fn tgid_exe_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {
     let binding = validate_tgid_sub_inode(inode)?;
+    if binding.tg.ty() == ThreadGroupType::KThread {
+        return Err(SysError::NotFound);
+    }
     let leader = binding.tg.leader().ok_or(SysError::NoSuchProcess)?;
-    // Kernel tasks are visible in procfs, but they have no userspace image and
-    // therefore no /proc/<pid>/exe target. Linux reports ENOENT for that case.
-    let usp_handle = leader.try_clone_uspace_handle().ok_or(SysError::NotFound)?;
+    let usp_handle = leader.clone_uspace_handle();
     let exe = usp_handle.exe();
 
     // in leader's namespace.

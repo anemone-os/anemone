@@ -1,16 +1,54 @@
 //! Inter-thread group operations.
 
 use crate::{
+    fs,
     prelude::*,
-    task::{tid::Tid, topology::TOPOLOGY},
+    task::{ThreadGroupType, tid::Tid, topology::TOPOLOGY},
 };
+
+#[derive(Debug, Clone, Copy)]
+pub struct ProcThreadGroupDisplay {
+    pub ppid: Tid,
+    pub pgrp: Tid,
+    pub session: Tid,
+}
 
 impl ThreadGroup {
     /// Get the parent thread group ID of this thread group.
     ///
     /// For init and idle thread groups, this will return [None].
     pub fn parent_tgid(&self) -> Option<Tid> {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user parent",
+            self.tgid()
+        );
         self.inner.read().parent_tgid
+    }
+
+    /// Display-only parent/process-group/session values for procfs.
+    ///
+    /// These fields are not topology truth. User-process APIs must use
+    /// User-only accessors (`parent_tgid`, `pgid`, `sid`) after checking
+    /// `ThreadGroupType`; procfs is the only consumer allowed to show inert
+    /// kthread values.
+    pub fn proc_display_parentage(&self) -> ProcThreadGroupDisplay {
+        match self.ty() {
+            ThreadGroupType::User => ProcThreadGroupDisplay {
+                ppid: self.parent_tgid().unwrap_or(Tid::new(0)),
+                pgrp: self.pgid(),
+                session: self.sid(),
+            },
+            ThreadGroupType::KThread => ProcThreadGroupDisplay {
+                ppid: if self.tgid() == Tid::KTHREADD {
+                    Tid::new(0)
+                } else {
+                    Tid::KTHREADD
+                },
+                pgrp: Tid::new(0),
+                session: Tid::new(0),
+            },
+        }
     }
 
     /// Get the parent thread group.
@@ -26,6 +64,11 @@ impl ThreadGroup {
     /// - [TOPOLOGY]
     /// - self [ThreadGroup]
     pub fn get_parent(&self) -> Arc<ThreadGroup> {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user parent",
+            self.tgid()
+        );
         let parent_tgid = self
             .inner
             .read()
@@ -64,6 +107,11 @@ impl ThreadGroup {
     where
         F: FnOnce(&Arc<ThreadGroup>) -> R,
     {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user parent",
+            self.tgid()
+        );
         let topology = TOPOLOGY.inner.write();
 
         let parent_tgid = self
@@ -93,6 +141,11 @@ impl ThreadGroup {
     /// - [TOPOLOGY] -> [ThreadGroup]
     /// - [TOPOLOGY] -> ‵f‵
     pub fn for_each_child<F: FnMut(&Arc<ThreadGroup>)>(&self, mut f: F) {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user children",
+            self.tgid()
+        );
         let topology = TOPOLOGY.inner.read();
         for child_tgid in self.inner.read().children_tgids.iter() {
             let child_tg = topology
@@ -116,6 +169,11 @@ impl ThreadGroup {
     /// you really need such strong consistency guarantee before using this
     /// method.
     pub fn for_each_child_task<F: FnMut(&Arc<Task>)>(&self, mut f: F) {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user children",
+            self.tgid()
+        );
         let topology = TOPOLOGY.inner.read();
         for child_tgid in self.inner.read().children_tgids.iter() {
             let child_tg = topology
@@ -144,6 +202,11 @@ impl ThreadGroup {
     ///
     /// Useful when the lock chain is too deep.
     pub fn get_children(&self) -> Vec<Arc<ThreadGroup>> {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user children",
+            self.tgid()
+        );
         let child_tgids = self.inner.read().children_tgids.clone();
         let topology = TOPOLOGY.inner.read();
         child_tgids
@@ -155,6 +218,11 @@ impl ThreadGroup {
 
     /// Get the number of children thread groups of this thread group.
     pub fn nchildren(&self) -> usize {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user children",
+            self.tgid()
+        );
         self.inner.read().children_tgids.len()
     }
 
@@ -167,6 +235,11 @@ impl ThreadGroup {
         &self,
         mut prediction: P,
     ) -> Option<Arc<ThreadGroup>> {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user children",
+            self.tgid()
+        );
         let topology = TOPOLOGY.inner.read();
 
         for child_tgid in self.inner.read().children_tgids.iter() {
@@ -187,6 +260,11 @@ impl ThreadGroup {
     /// **Topology Consistency** is guaranteed natually due to the objective of
     /// this method.
     pub fn reparent_orphan_children(&self) {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} cannot reparent user children",
+            self.tgid()
+        );
         // we may need get_many_mut... but it's still a nightly feature.
         let topology = TOPOLOGY.inner.read();
         let mut child_tgids = vec![];
@@ -202,6 +280,11 @@ impl ThreadGroup {
         for child_tgid in &child_tgids {
             let child_tg = topology.thread_groups.get(child_tgid).expect(
                 "task topology: child thread group not found when reparenting orphan children",
+            );
+            assert!(
+                child_tg.ty() == ThreadGroupType::User,
+                "task topology: non-user child thread group {} in user child topology",
+                child_tgid
             );
             child_tg.inner.write().parent_tgid = Some(Tid::INIT);
         }
@@ -237,6 +320,11 @@ impl ThreadGroup {
     /// Result<Option<Arc<ThreadGroup>>, SomeError> to distinguish those two
     /// cases?
     pub fn try_reap_child(&self, child_tgid: Tid) -> Option<Arc<ThreadGroup>> {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} cannot reap user children",
+            self.tgid()
+        );
         let mut topology = TOPOLOGY.inner.write();
 
         // make sure this is indeed a child thread group of us.
@@ -274,6 +362,64 @@ impl ThreadGroup {
         );
 
         Some(child_tg)
+    }
+
+    /// Unpublish a singleton kthread from active topology and procfs.
+    ///
+    /// Kthreads do not enter ordinary children, process-group/session, or
+    /// wait/reap topology. This transaction is therefore the only lifecycle
+    /// owner for their procfs-visible identity, and procfs only receives a
+    /// narrow binding invalidation hook.
+    pub fn unpublish_kthread_topology(&self) {
+        assert!(
+            self.ty() == ThreadGroupType::KThread,
+            "task topology: user thread group {} cannot use kthread unpublish",
+            self.tgid()
+        );
+        let tgid = self.tgid();
+        let mut topology = TOPOLOGY.inner.write();
+        let tg = topology
+            .thread_groups
+            .get(&tgid)
+            .expect("task topology: kthread thread group not found during unpublish")
+            .clone();
+        assert!(
+            tg.ty() == ThreadGroupType::KThread,
+            "task topology: kthread unpublish found non-kthread thread group {}",
+            tgid
+        );
+
+        let mut inner = tg.inner.write();
+        assert!(
+            inner.members.len() == 1 && inner.members.contains(&tgid),
+            "task topology: kthread {} must be singleton during unpublish",
+            tgid
+        );
+        assert!(
+            inner.children_tgids.is_empty(),
+            "task topology: kthread {} must not own children during unpublish",
+            tgid
+        );
+        assert!(inner.members.remove(&tgid));
+        drop(inner);
+
+        // Topology owns the unpublish transaction and takes the locks in the
+        // documented order: topology first, procfs binding second. Marking the
+        // procfs binding dead before removing topology membership prevents
+        // operation-time revalidation from accepting a kthread that is already
+        // exiting, while lookup cannot rebuild a binding until this topology
+        // write lock is released.
+        fs::proc::invalidate_thread_group_binding(tgid);
+        assert!(
+            topology.tasks.remove(&tgid).is_some(),
+            "task topology: kthread task {} not found during unpublish",
+            tgid
+        );
+        assert!(
+            topology.thread_groups.remove(&tgid).is_some(),
+            "task topology: kthread thread group {} not found during unpublish",
+            tgid
+        );
     }
 }
 

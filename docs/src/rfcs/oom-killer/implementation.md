@@ -69,13 +69,13 @@ write set：
 - 新增 `anemone-kernel/src/mm/oom.rs` 或等价 mm-owned module。
 - 新增 `init_oom_killer()`，boot 后创建 `oom-killer-0` ordinary kthread。
 - 新增 `wake_oom_killer()`，只 publish wake event。
-- worker wait predicate 同时观察 stop/park 和当前 threshold。
+- worker wait predicate 同时观察 stop 和当前 threshold。
 
 审计：
 
 - worker 被唤醒后必须先重查 `FrameAllocatorStats`。
 - threshold 不满足时不选择 victim。
-- worker stop / park safe point 明确。
+- worker stop safe point 明确。
 - `wake_oom_killer()` 不分配 heap，不扫描 task。
 
 write set：

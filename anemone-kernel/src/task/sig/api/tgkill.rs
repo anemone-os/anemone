@@ -11,7 +11,10 @@ use crate::{
     },
 };
 
-use super::{KillSignal, check_send_kill_signal_permission};
+use super::{
+    KillSignal, check_send_kill_signal_permission, reject_kthread_signal_target,
+    reject_kthread_task_signal_target,
+};
 
 #[syscall(SYS_TGKILL)]
 fn sys_tgkill(tgid: i32, tid: i32, sig: KillSignal) -> Result<u64, SysError> {
@@ -28,9 +31,11 @@ fn sys_tgkill(tgid: i32, tid: i32, sig: KillSignal) -> Result<u64, SysError> {
     let tid = Tid::new(tid as u32);
 
     let tg = get_thread_group(&tgid).ok_or(SysError::NoSuchProcess)?;
+    reject_kthread_signal_target(&tg)?;
     let thread = tg
         .find_member(|member| member.tid() == tid)
         .ok_or(SysError::NoSuchProcess)?;
+    reject_kthread_task_signal_target(&thread)?;
     check_send_kill_signal_permission(&thread, sig)?;
     if let KillSignal::Armed(signo) = sig {
         thread.recv_signal(tkill_signal(signo));

@@ -1,7 +1,7 @@
 # OOM Killer 不变量需求
 
 **状态：** Active implementation
-**最后更新：** 2026-06-15
+**最后更新：** 2026-06-16
 **父 RFC：** [RFC-20260615-oom-killer](./index.md)
 
 本文定义第一版 OOM killer 的阈值、唤醒、victim selection、锁序和竞态边界。实施顺序见 [迁移实施计划](./implementation.md)。
@@ -50,7 +50,7 @@ OOM worker 是 OOM 策略 owner：
 
 要求：
 
-1. worker 每轮先检查 stop / park。
+1. worker 每轮先检查 stop。`kthread-core` 阶段 1 已移除 park/unpark，OOM policy 不再依赖 park 状态。
 2. worker 被唤醒后先读取 `frame_allocator_stats()` 并判断 `oom_kill_threshold`。
 3. active victim 已经 `Exited` 或不存在时才能清空并选择新 victim。
 4. active victim 仍 `Alive` / `Exiting` 时，worker 应让出调度器，而不是继续杀其它进程。
@@ -121,7 +121,7 @@ kill 线性化点是向 victim thread group 投递 `SIGKILL`。
 2. topology lock 只用于短 snapshot，不得包住 user-space lock。
 3. user-space lock 可以包住 VMO 独占物理页扫描，但不能在该窗口内反向获取 topology lock。
 4. OOM worker 不得在持有 active-victim state lock 时执行 signal delivery。
-5. worker stop / park safe point 必须位于 wait loop、active victim wait/yield 边界和每轮 kill 后。
+5. worker stop safe point 必须位于 wait loop、active victim wait/yield 边界和每轮 kill 后。
 6. victim 的地址空间释放仍由普通 exit path 和 `Drop`/RAII 资源释放负责。
 
 ## 禁止退化项

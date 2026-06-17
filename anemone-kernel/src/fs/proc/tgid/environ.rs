@@ -55,6 +55,9 @@ fn tgid_environ_read(
     _ctx: FileIoCtx,
 ) -> Result<usize, SysError> {
     let binding = validate_tgid_sub_inode(file.inode())?;
+    if binding.tg.ty() == ThreadGroupType::KThread {
+        return Ok(0);
+    }
     let leader = binding.tg.leader().ok_or(SysError::NoSuchProcess)?;
 
     let usp_handle = leader.clone_uspace_handle();
@@ -106,6 +109,9 @@ fn tgid_environ_read_at(
 
 fn tgid_environ_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
     let binding = validate_tgid_sub_inode(file.inode())?;
+    if binding.tg.ty() == ThreadGroupType::KThread {
+        return seek_with_bounded_size(file, pos, from, 0);
+    }
 
     let leader = binding.tg.leader().ok_or(SysError::NoSuchProcess)?;
     let usp_handle = leader.clone_uspace_handle();
