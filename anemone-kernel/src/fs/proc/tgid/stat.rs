@@ -112,18 +112,19 @@ fn build_stat_line(inode: &InodeRef) -> Result<String, SysError> {
     let binding = validate_tgid_sub_inode(inode)?;
     let tg = &binding.tg;
     let leader = tg.leader().ok_or(SysError::NoSuchProcess)?;
+    let is_kthread = tg.ty() == ThreadGroupType::KThread;
 
     let cpu_usage = tg.cpu_usage_snapshot();
-    let (cmdline_start, cmdline_len, env_start, env_len, vsize) =
-        if let Some(usp_handle) = leader.try_clone_uspace_handle() {
-            let usp = usp_handle.lock();
-            let (cmdline_start, cmdline_len) = usp.cmdline_range();
-            let (env_start, env_len) = usp.env_range();
-            let vsize = usp.vsize_bytes() as u64;
-            (cmdline_start, cmdline_len, env_start, env_len, vsize)
-        } else {
-            (VirtAddr::new(0), 0, VirtAddr::new(0), 0, 0)
-        };
+    let (cmdline_start, cmdline_len, env_start, env_len, vsize) = if is_kthread {
+        (VirtAddr::new(0), 0, VirtAddr::new(0), 0, 0)
+    } else {
+        let usp_handle = leader.clone_uspace_handle();
+        let usp = usp_handle.lock();
+        let (cmdline_start, cmdline_len) = usp.cmdline_range();
+        let (env_start, env_len) = usp.env_range();
+        let vsize = usp.vsize_bytes() as u64;
+        (cmdline_start, cmdline_len, env_start, env_len, vsize)
+    };
 
     let pid = tg.tgid().get();
     let comm = proc_comm(&leader);

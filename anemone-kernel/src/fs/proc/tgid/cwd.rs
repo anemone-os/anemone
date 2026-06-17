@@ -4,6 +4,9 @@ use super::*;
 
 fn tgid_cwd_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {
     let tg = validate_tgid_sub_inode(inode)?.tg.clone();
+    if tg.ty() == ThreadGroupType::KThread {
+        return Err(SysError::NotFound);
+    }
     let leader = tg.leader().ok_or(SysError::NoSuchProcess)?;
 
     Ok(leader.rel_cwd())

@@ -34,10 +34,6 @@ pub(super) fn kthread_entry_shim() -> ! {
     let (control, launch) = task.take_kthread_launch();
     let ctx = KThreadCtx::new(control.clone());
 
-    let code = if ctx.should_stop() {
-        -EINTR
-    } else {
-        (launch.entry)(ctx, launch.arg)
-    };
+    let code = (launch.entry)(ctx, launch.arg);
     kthread_exit(code)
 }
