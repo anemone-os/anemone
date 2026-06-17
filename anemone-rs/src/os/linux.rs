@@ -113,6 +113,17 @@ pub mod fs {
     }
 }
 
+pub mod time {
+    use anemone_abi::time::linux::TimeVal;
+
+    use crate::{prelude::*, sys::linux::time};
+
+    pub fn gettimeofday() -> Result<TimeVal, Errno> {
+        let mut tv = TimeVal::default();
+        time::gettimeofday(&mut tv as *mut TimeVal as u64, 0).map(|_| tv)
+    }
+}
+
 pub mod process {
     pub type Tid = u32;
 

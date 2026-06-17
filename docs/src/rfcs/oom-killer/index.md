@@ -2,7 +2,7 @@
 
 **状态：** Active implementation
 **负责人：** EDGW, Codex
-**最后更新：** 2026-06-15
+**最后更新：** 2026-06-16
 **领域：** mm / frame allocator / task / signal / user-test
 **事务日志：** [OOM Killer 事务日志](../../devlog/transactions/2026-06-15-oom-killer.md)
 **开放问题：** None；第一轮实现事务已启动，运行验证状态以事务日志为准。
@@ -65,6 +65,8 @@ used_pages * 100 > total_pages * threshold
 `alloc_frame()` / `alloc_frames()` 成功分配物理页后读取 `frame_allocator_stats()`。如果 stats 超过 `oom_kill_threshold`，调用 `wake_oom_killer()`。该路径不持有 frame allocator 内部锁，不扫描 task，不分配 heap，不发送 signal。
 
 OOM killer worker 使用 `Event` 或等价 wake capability 等待。worker 每次被唤醒后先重新读取 `FrameAllocatorStats`；如果阈值已经不满足，直接回到等待。若仍超过阈值，worker 执行 victim selection：先在 topology 锁下快速复制 thread group `Arc` 列表，释放 topology 锁后逐个读取 leader / user-space handle / 独占物理页 snapshot，选出独占物理页最多的用户地址空间。选中后向该 thread group 投递 `SIGKILL`，记录 active victim，并让出调度器，避免在同一个 victim 尚未进入退出清理前继续扩大杀伤面。
+
+`kthread-core` 阶段 1 已移除 park/unpark。OOM killer worker 只把 kthread wake 作为重查阈值的能力，生命周期 safe point 只检查 stop。
 
 worker 循环再次检查阈值。如果 victim 退出释放内存后阈值不再满足，回到等待；如果仍超过阈值，则继续选择下一个 eligible victim。已经 exiting/exited、kernel task、idle、init、kthreadd 和 OOM killer 自身都不是 eligible victim。
 

@@ -1,6 +1,9 @@
 //! Task ID management.
 
-use core::fmt::{Debug, Display};
+use core::{
+    fmt::{Debug, Display},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use idalloc::{Bijection, BitmapAlloc, IdAllocator};
 
@@ -22,8 +25,18 @@ impl Bijection for TidBijection {
     }
 }
 
-static ID_ALLOC: Lazy<SpinLock<IdAllocator<BitmapAlloc, TidBijection>>> =
-    Lazy::new(|| SpinLock::new(IdAllocator::new(BitmapAlloc::new(1, MAX_PROCESSES))));
+const ORDINARY_TID_START: u64 = 3;
+const ORDINARY_TID_CAPACITY: u64 = MAX_PROCESSES - ORDINARY_TID_START + 1;
+
+static ID_ALLOC: Lazy<SpinLock<IdAllocator<BitmapAlloc, TidBijection>>> = Lazy::new(|| {
+    SpinLock::new(IdAllocator::new(BitmapAlloc::new(
+        ORDINARY_TID_START,
+        ORDINARY_TID_CAPACITY,
+    )))
+});
+
+static INIT_TID_CONSUMED: AtomicBool = AtomicBool::new(false);
+static KTHREADD_TID_CONSUMED: AtomicBool = AtomicBool::new(false);
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -33,12 +46,17 @@ impl Tid {
     pub const IDLE: Self = Self(0);
     pub const INVALID: Self = {
         const_assert!(
+            MAX_PROCESSES >= ORDINARY_TID_START,
+            "wrong kconfig: MAX_PROCESSES must include fixed kernel TIDs"
+        );
+        const_assert!(
             MAX_PROCESSES < u32::MAX as u64,
             "wrong kconfig: MAX_PROCESSES is too large"
         );
         Self(u32::MAX)
     };
     pub const INIT: Self = Self(1);
+    pub const KTHREADD: Self = Self(2);
 
     #[inline(always)]
     pub fn new(id: u32) -> Self {
@@ -99,11 +117,15 @@ impl TidHandle {
 
 impl Drop for TidHandle {
     fn drop(&mut self) {
-        if self.0 != 0 {
-            ID_ALLOC.lock_irqsave().dealloc(Tid(self.0));
-        } else {
+        if self.0 == 0 {
             panic!("dropping idle task's TidHandle");
         }
+
+        if self.0 == Tid::INIT.get() || self.0 == Tid::KTHREADD.get() {
+            return;
+        }
+
+        ID_ALLOC.lock_irqsave().dealloc(Tid(self.0));
     }
 }
 
@@ -111,4 +133,29 @@ impl Drop for TidHandle {
 /// processes has been reached. (which is [`MAX_PROCESSES`])
 pub fn alloc_tid() -> Option<TidHandle> {
     ID_ALLOC.lock().alloc().map(|tid| TidHandle(tid.get()))
+}
+
+/// Allocate the boot init task's fixed TID.
+///
+/// TID 1 is outside the ordinary allocator. Only the BSP bootstrap path should
+/// consume this handle; secondary init-thread members use ordinary TIDs while
+/// joining TGID 1.
+pub(crate) fn alloc_init_tid() -> TidHandle {
+    assert!(
+        !INIT_TID_CONSUMED.swap(true, Ordering::AcqRel),
+        "init fixed TID handle consumed more than once"
+    );
+    TidHandle(Tid::INIT.get())
+}
+
+/// Allocate `kthreadd`'s fixed TID.
+///
+/// TID 2 is reserved for `kthreadd` and never enters the ordinary allocator.
+/// This deliberately does not generalize into `reserve_tid(Tid)`.
+pub(in crate::task) fn alloc_kthreadd_tid() -> TidHandle {
+    assert!(
+        !KTHREADD_TID_CONSUMED.swap(true, Ordering::AcqRel),
+        "kthreadd fixed TID handle consumed more than once"
+    );
+    TidHandle(Tid::KTHREADD.get())
 }

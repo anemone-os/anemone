@@ -1,7 +1,7 @@
 # Inode Shrinker 不变量需求
 
 **状态：** Canonical
-**最后更新：** 2026-06-15
+**最后更新：** 2026-06-16
 **父 RFC：** [RFC-20260614-inode-shrinker](./index.md)
 
 本文定义 inode shrinker 与 VFS resident inode cache 的协议边界。具体落地顺序与 commit 事实见 [Inode Shrinker 迁移实施计划](./implementation.md) 和 [事务日志](../../devlog/transactions/2026-06-14-inode-shrinker.md)。
@@ -68,7 +68,7 @@ inode shrinker 被视为闭合时，必须同时满足：
 要求：
 
 1. `INODE_SHRINKER` 只保存 worker weak handle，用于防止重复初始化；它不是 work queue。
-2. worker 每轮必须先检查 `KThreadContext::should_stop()` 和 `should_park()`。
+2. worker 每轮必须先检查 `KThreadContext::should_stop()`。`kthread-core` 阶段 1 已移除 park/unpark，shrink policy 不再依赖 park 状态。
 3. worker 不维护 pending request、exit hint 计数或 scan backlog。
 4. task exit path 不提交 shrink 请求。
 
@@ -157,7 +157,7 @@ ext4 的 `sync_inode` / `evict_inode` 共享 `ext4_sync_inode_inner()`：
 2. superblock cache lock 不得覆盖 filesystem `sync_inode` 或 `evict_inode`。
 3. ext4 backend I/O 由 ext4 自身 `tx_lock` 与 `fs_lock` 管理，VFS shrinker 不绕过它们。
 4. task exit path 不提交 shrink 请求，不直接读取 frame stats 或执行 inode scan。
-5. kthread worker 在每轮 loop、每个 superblock 和 inode 边界检查 stop / park。
+5. kthread worker 在每轮 loop、每个 superblock 和 inode 边界检查 stop。
 
 ## 禁止退化项
 

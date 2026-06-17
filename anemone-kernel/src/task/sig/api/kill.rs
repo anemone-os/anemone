@@ -7,7 +7,10 @@ use crate::{
     },
 };
 
-use super::{KillSignal, can_send_kill_signal_to, check_send_kill_signal_permission};
+use super::{
+    KillSignal, can_send_kill_signal_to, check_send_kill_signal_permission,
+    reject_kthread_signal_target,
+};
 
 #[derive(Debug)]
 enum KillTarget {
@@ -40,6 +43,7 @@ fn sys_kill(target: KillTarget, sig: KillSignal) -> Result<u64, SysError> {
     match target {
         KillTarget::ThreadGroup(tgid) => {
             let tg = get_thread_group(&tgid).ok_or(SysError::NoSuchProcess)?;
+            reject_kthread_signal_target(&tg)?;
             let leader = tg.leader().ok_or(SysError::NoSuchProcess)?;
             check_send_kill_signal_permission(&leader, sig)?;
             if let KillSignal::Armed(signo) = sig {
@@ -47,7 +51,8 @@ fn sys_kill(target: KillTarget, sig: KillSignal) -> Result<u64, SysError> {
             }
         },
         KillTarget::CurrentProcessGroup => {
-            let pgid = current.get_thread_group().pgid();
+            let current_tg = current.get_thread_group();
+            let pgid = current_tg.pgid();
             let pg = get_process_group(&pgid).ok_or(SysError::NoSuchProcess)?;
             let mut delivered = false;
             for tg in pg.get_members() {
@@ -88,7 +93,8 @@ fn sys_kill(target: KillTarget, sig: KillSignal) -> Result<u64, SysError> {
             for_each_thread_group_from(
                 |tg| {
                     let tgid = tg.tgid();
-                    if tgid != Tid::INIT && tgid != current_tgid {
+                    if tgid != Tid::INIT && tgid != current_tgid && tg.ty() == ThreadGroupType::User
+                    {
                         targets.push(tg.clone());
                     }
                 },

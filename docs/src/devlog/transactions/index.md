@@ -6,6 +6,7 @@
 
 ## Active
 
+- [KThread Core](./2026-06-16-kthread-core.md)
 - [OOM Killer](./2026-06-15-oom-killer.md)
 - [Fanotify](./2026-06-08-fanotify.md)
 - [Signal Temporary Mask Restore](./2026-06-06-signal-temp-mask-restore.md)

@@ -1,11 +1,11 @@
 # KThread 迁移实施计划
 
-**状态：** Completed
-**最后更新：** 2026-06-15
+**状态：** Completed / historical baseline
+**最后更新：** 2026-06-16
 **父 RFC：** [RFC-20260614-kthread](./index.md)
 **不变量：** [KThread 不变量需求](./invariants.md)
 
-本文追补记录 `2b0e3900279895c3d8eb604e463249a02c3bddc9` 中已经落地的 kthread 实施形状。后续如果继续扩展 kthread surface，应把新阶段追加到本文或另建 follow-up RFC。
+本文追补记录 `2b0e3900279895c3d8eb604e463249a02c3bddc9` 中已经落地的 kthread 实施形状。后续 kthread core 纠偏以 [RFC-20260616-kthread-core](../kthread-core/index.md) 为准；本文不再追加新的 core 扩展阶段。
 
 ## 迁移原则
 

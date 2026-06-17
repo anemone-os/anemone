@@ -30,50 +30,61 @@ fn proc_root_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
     if let Some(tgid) = u32::from_str_radix(name, 10).ok() {
         let tgid = Tid::new(tgid);
 
-        let inode = binding_tx(|bindings| {
-            if let Some(binding) = bindings.get(&tgid) {
-                debug_assert!(binding.alive());
-
-                let inode = dir
-                    .sb()
-                    .try_iget(binding.ino)
-                    .expect("binding exists, but inode does not exist");
+        let inode = {
+            let existing = binding_tx(|bindings| {
+                bindings.get(&tgid).map(|binding| {
+                    debug_assert!(binding.alive());
+                    dir.sb()
+                        .try_iget(binding.ino)
+                        .expect("binding exists, but inode does not exist")
+                })
+            });
+            if let Some(inode) = existing {
                 Ok(inode)
             } else {
-                // lazily set up binding.
-                if let Some(tg) = get_thread_group(&tgid) {
+                // Lazily set up binding under topology -> procfs-binding lock
+                // order. Kthread unpublish takes the topology write lock before
+                // invalidating procfs, so once that transaction starts this
+                // lookup cannot observe active topology and rebuild a binding.
+                with_active_thread_group(&tgid, |tg| {
                     let ino = alloc_ino();
                     // create binding
                     let binding = Arc::new(ThreadGroupBinding {
-                        tg,
+                        tg: tg.clone(),
                         ino,
                         alive: AtomicBool::new(true),
                     });
 
-                    assert!(
-                        bindings
-                            .insert(binding.tg.tgid(), binding.clone())
-                            .is_none(),
-                        "binding already exists for tgid {}",
-                        tgid
-                    );
+                    binding_tx(|bindings| {
+                        if let Some(existing) = bindings.get(&tgid) {
+                            debug_assert!(existing.alive());
+                            return dir
+                                .sb()
+                                .try_iget(existing.ino)
+                                .expect("binding exists, but inode does not exist");
+                        }
 
-                    kdebugln!(
-                        "proc_root_lookup: bound thread group with tgid {} to inode {}",
-                        binding.tg.tgid(),
-                        binding.ino
-                    );
+                        assert!(
+                            bindings
+                                .insert(binding.tg.tgid(), binding.clone())
+                                .is_none(),
+                            "binding already exists for tgid {}",
+                            tgid
+                        );
 
-                    let inode = Arc::new(new_tgid_dir_inode(dir.sb().clone(), ino, binding));
-                    let inode = dir.sb().seed_inode(inode);
+                        kdebugln!(
+                            "proc_root_lookup: bound thread group with tgid {} to inode {}",
+                            binding.tg.tgid(),
+                            binding.ino
+                        );
 
-                    Ok(inode)
-                } else {
-                    // tgid invalid.
-                    return Err(SysError::NotFound);
-                }
+                        let inode = Arc::new(new_tgid_dir_inode(dir.sb().clone(), ino, binding));
+                        dir.sb().seed_inode(inode)
+                    })
+                })
+                .ok_or(SysError::NotFound)
             }
-        })?;
+        }?;
 
         return Ok(inode);
     }

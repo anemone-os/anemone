@@ -40,6 +40,7 @@ use crate::{
     task::{
         cpu_usage::{TaskCpuUsage, ThreadGroupCpuUsage},
         files::FilesState,
+        kthread::KThreadTaskLocal,
         sig::{
             PendingSignals, SigNo, TaskSigMaskState, altstack::SigAltStack,
             disposition::SignalDisposition,
@@ -156,11 +157,12 @@ pub struct Task {
     /// This pointer is not guaranteed to be valid. It's user's responsibility.
     clear_child_tid: SpinLock<Option<VirtAddr>>,
 
-    /// Ordinary kthread state owned by this task.
+    /// Ordinary kthread task-local attachment owned by this task.
     ///
-    /// This is the strong owner, matching Linux's task-held `struct kthread`.
-    /// `KThread` only keeps a weak task pointer, so this does not form a cycle.
-    kthread: SpinLock<Option<Arc<kthread::KThread>>>,
+    /// The attachment is installed before the task is published. It is not an
+    /// external lifecycle owner; shared lifecycle state lives only in the
+    /// `Arc<KThreadControl>` stored inside this attachment.
+    kthread: SpinLock<Option<KThreadTaskLocal>>,
 }
 
 /// Observation-only compatibility state for status readers.
@@ -244,6 +246,7 @@ struct ProcessGroupInner {
 pub struct ThreadGroup {
     /// The thread group ID, which is the same as the leader thread's ID.
     tgid: TidHandle,
+    ty: ThreadGroupType,
     /// Event that will be published when a child thread group exits.
     child_exited: Event,
     /// Signal to send to parent when this thread group exits.
@@ -251,6 +254,12 @@ pub struct ThreadGroup {
     /// POSIX interval timers. Shared by all member threads.
     itimers: ITimers,
     inner: NoIrqRwLock<ThreadGroupInner>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadGroupType {
+    User,
+    KThread,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -320,9 +329,9 @@ struct ThreadGroupInner {
     /// Running status of this thread group.
     status: ThreadGroupStatus,
     /// Process group ID cached on the process identity.
-    pgid: Tid,
+    pgid: Option<Tid>,
     /// Session ID cached on the process identity.
-    sid: Tid,
+    sid: Option<Tid>,
     /// TIDs of all member threads, including the leader thread.
     members: BTreeSet<Tid>,
     /// Tgid of parent thread group. [None] for init/idle thread group.
@@ -384,6 +393,30 @@ impl Task {
         cpu: Option<CpuId>,
     ) -> Result<(Task, PublishGuard), SysError> {
         let tid = alloc_tid().ok_or(SysError::OutOfMemory)?;
+
+        unsafe {
+            Self::new_kernel_with_tid_handle(
+                name, entry, args, creator, tgid, sched, flags, cpu, tid,
+            )
+        }
+    }
+
+    /// Create a kernel task from a caller-owned TID handle.
+    ///
+    /// This exists for fixed kernel identities such as the boot init task and
+    /// `kthreadd`. Ordinary callers must use [`Task::new_kernel`] so fixed TID
+    /// ownership stays visible at the bootstrap/kthread call site.
+    pub(crate) unsafe fn new_kernel_with_tid_handle(
+        name: &str,
+        entry: *const (),
+        args: ParameterList,
+        creator: Option<Tid>,
+        tgid: Option<Tid>,
+        sched: SchedEntity,
+        flags: TaskFlags,
+        cpu: Option<CpuId>,
+        tid: TidHandle,
+    ) -> Result<(Task, PublishGuard), SysError> {
         let tid_value = tid.get_typed().get();
         let tgid = tgid.unwrap_or(tid.get_typed());
         let stack = KernelStack::new()?;
@@ -720,49 +753,6 @@ impl Task {
 
     pub fn set_no_new_privs(&self) {
         self.no_new_privs.store(true, Ordering::Release);
-    }
-
-    fn install_kthread(&self, kthread: Arc<kthread::KThread>) {
-        let mut slot = self.kthread.lock();
-        assert!(
-            slot.is_none(),
-            "kthread installed more than once for task {}",
-            self.tid()
-        );
-        *slot = Some(kthread);
-    }
-
-    fn kthread(&self) -> Option<Arc<kthread::KThread>> {
-        self.kthread.lock().clone()
-    }
-
-    fn clear_kthread(&self, kthread: &Arc<kthread::KThread>) {
-        let mut slot = self.kthread.lock();
-        if slot
-            .as_ref()
-            .map(|installed| Arc::ptr_eq(installed, kthread))
-            .unwrap_or(false)
-        {
-            *slot = None;
-        }
-    }
-
-    fn assert_kthread_exit_ready(&self) {
-        let kthread = self.kthread.lock();
-        if let Some(kthread) = kthread.as_ref() {
-            assert!(
-                kthread.has_exited(),
-                "kthread task {} exited without kthread finish path",
-                self.tid()
-            );
-        }
-    }
-
-    fn expect_kthread(&self) -> Arc<kthread::KThread> {
-        self.kthread
-            .lock()
-            .clone()
-            .expect("ordinary kthread is missing task-local state")
     }
 }
 

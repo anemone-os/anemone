@@ -21,8 +21,8 @@ use crate::{
     utils::any_opaque::NilOpaque,
 };
 
-// hook for wait-related syscalls.
-pub use tgid::binding::try_unbind_thread_group;
+// hooks for task-topology owned lifecycle transactions.
+pub use tgid::binding::{invalidate_thread_group_binding, try_unbind_thread_group};
 
 pub(super) fn read_snapshot_at(pos: usize, buf: &mut [u8], data: &[u8]) -> Result<usize, SysError> {
     if pos >= data.len() {

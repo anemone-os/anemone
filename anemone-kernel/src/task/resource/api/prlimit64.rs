@@ -48,6 +48,13 @@ fn sys_prlimit64(
     // limits. so this is quite simplt.
 
     let task = get_current_task();
+    if let PrLimitTarget::ThreadGroup(tgid) = target {
+        let target_tg = get_thread_group(&tgid).ok_or(SysError::NoSuchProcess)?;
+        if target_tg.ty() != ThreadGroupType::User {
+            return Err(SysError::NoSuchProcess);
+        }
+    }
+
     let usp_handle = task.clone_uspace_handle();
     let mut usp = usp_handle.lock();
 

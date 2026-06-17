@@ -29,10 +29,13 @@ static THREAD_GROUP_BINDINGS: Lazy<RwLock<HashMap<Tid, Arc<ThreadGroupBinding>>>
 /// TODO: make sure no sleeping operations are performed while holding the lock.
 static BINDING_TX_LOCK: SpinLock<()> = SpinLock::new(());
 
-/// Called by task management code when a thread group is reaped.
+/// Called by task topology when a thread group leaves procfs visibility.
 ///
-/// Order matters: unbind thread group first, then unindex inode.
-pub fn try_unbind_thread_group(tgid: Tid) {
+/// This hook only invalidates procfs binding state. Task topology owns the
+/// lifecycle decision and must remove or reap the thread group in the same
+/// higher-level transaction so later lookup can only rebuild from active
+/// topology.
+pub fn invalidate_thread_group_binding(tgid: Tid) {
     let _tx = BINDING_TX_LOCK.lock();
 
     if let Some(binding) = THREAD_GROUP_BINDINGS.write().remove(&tgid) {
@@ -57,7 +60,7 @@ pub fn try_unbind_thread_group(tgid: Tid) {
         });
 
         kdebugln!(
-            "try_unbind_thread_group: unbound thread group with tgid {}",
+            "invalidate_thread_group_binding: invalidated thread group with tgid {}",
             tgid
         );
     } else {
@@ -65,14 +68,23 @@ pub fn try_unbind_thread_group(tgid: Tid) {
         // lazily created.
 
         kdebugln!(
-            "try_unbind_thread_group: no binding found for tgid {}, maybe it was never accessed?",
+            "invalidate_thread_group_binding: no binding found for tgid {}, maybe it was never accessed?",
             tgid
         );
     }
 }
 
-/// [BINDING_TX_LOCK] must be held as first lock if multiple locks should be
-/// held.
+/// Called by ordinary wait/reap after a user thread group has already been
+/// removed from topology.
+pub fn try_unbind_thread_group(tgid: Tid) {
+    invalidate_thread_group_binding(tgid);
+}
+
+/// Serialize procfs `<tgid>` binding map updates.
+///
+/// Binding-only lookups may call this directly. When the operation also depends
+/// on task topology liveness, callers must already hold the topology lock and
+/// must not call back into topology from inside this closure.
 pub fn binding_tx<F: FnOnce(&mut HashMap<Tid, Arc<ThreadGroupBinding>>) -> R, R>(f: F) -> R {
     let _tx = BINDING_TX_LOCK.lock();
 

@@ -223,3 +223,21 @@
 
 **Severity:** High
 **Workaround:** 暂时保留 `core::hint::black_box(trapframe.sstatus())` 作为 release 稳定器；不要把该 workaround 当成 FPU 状态管理已经正确的证明，也不要用被它改变过的失败表面反向归类后续 `SIGIOT` / `SIGABRT` 等 LTP harness 失败。
+
+## ANE-20260616-LTP-POST-SUMMARY-HANG
+
+**Type:** Issue
+**Status:** Open
+**Area:** user-test / LTP / task exit / wait-core / timer / loop cleanup
+
+**Symptom / Trigger:** rv64 长 profile 运行 LTP 时，小概率在单个 case 已经打印完 LTP `Summary` 后卡住，runner 没有继续打印 `PASS LTP CASE ...` 或 `FAIL LTP CASE ...`，也不会进入下一个 case。当前已知例子是 `build/ltp-all-rv.log` 在 `ioctl05` 结束 summary 后停住；单独运行 `ioctl05` 暂未复现。
+
+**Impact:** 一个偶发 case 卡住会阻塞后续 profile，导致本轮 LTP 得分信号和失败矩阵都被截断。该现象目前不能简单归类为 `wait4` / `waitid` 错过唤醒：LTP harness 的 summary 输出发生在 testcase cleanup 和最终退出之前，仍需要确认 child 是否已经真正退出。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-16
+**Exit Condition:** 补充父/子进程状态与 cleanup 阶段观测，证明卡住时 child 是停在 LTP cleanup（例如 loop device detach、timer sleep 或退出路径）还是已经退出但父进程 wait/reap 状态没有收敛；随后按真实根因修复 loop cleanup / timer wait / task exit / wait-core 唤醒或 reaping 语义，并确认长 LTP profile 不再需要 runner timeout 才能推进。
+**Related:** [User-test LTP Pgrp Isolation](../devlog/changes/2026-06-07-user-test-ltp-pgrp-isolation.md), [RFC-20260601-sched-wait-refactor](../rfcs/sched-wait-refactor/index.md), [当前限制：IOCTL LTP stage-1 gaps](./current-limitations.md#ane-20260604-ioctl-ltp-stage1-gaps)
+
+**Severity:** High
+**Workaround:** `user-test` LTP runner 暂时使用 per-case timeout；超时后只对该 case 的独立进程组发 `SIGKILL`，把该 case 归为 runner 设施失败并继续执行后续 case。该绕过只保证 profile 能继续推进，不证明内核 wait / timer / cleanup 语义已修复。

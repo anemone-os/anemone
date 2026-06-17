@@ -4,15 +4,16 @@ use crate::{
     prelude::*,
     task::{
         for_each_thread_group_from, get_thread_group,
-        kthread::{KThreadBuilder, KThreadContext, KThreadRef},
+        kthread::{KThreadBuilder, KThreadCtx, KThreadHandle},
         sig::{
             SigNo, Signal,
             info::{SiCode, SigInfoFields, SigKill},
         },
     },
+    utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
-static OOM_KILLER: SpinLock<Option<KThreadRef>> = SpinLock::new(None);
+static OOM_KILLER: SpinLock<Option<KThreadHandle>> = SpinLock::new(None);
 
 #[derive(Debug)]
 struct OomVictim {
@@ -23,7 +24,7 @@ struct OomVictim {
 
 pub fn init_oom_killer() {
     let worker = KThreadBuilder::new("oom-killer-0")
-        .spawn(oom_killer_entry, ())
+        .spawn(oom_killer_entry, NilOpaque::new())
         .unwrap_or_else(|err| panic!("failed to spawn OOM killer: {:?}", err));
 
     let mut slot = OOM_KILLER.lock();
@@ -32,34 +33,23 @@ pub fn init_oom_killer() {
 }
 
 pub fn wake_oom_killer() {
-    if let Some(worker) = OOM_KILLER
-        .lock()
-        .as_ref()
-        .and_then(|worker| worker.upgrade())
-    {
+    if let Some(worker) = OOM_KILLER.lock().as_ref().cloned() {
         worker.wake();
     }
 }
 
-fn oom_killer_entry(ctx: KThreadContext, _: ()) -> i32 {
+fn oom_killer_entry(ctx: KThreadCtx, _: AnyOpaque) -> i32 {
     let mut active_victim = None;
 
     loop {
         if ctx.should_stop() {
             break;
         }
-        if ctx.should_park() {
-            ctx.parkme();
-            continue;
-        }
 
         ctx.wait_until_woken(|| frame_allocator_stats().exceeds_oom_kill_threshold());
 
         if ctx.should_stop() {
             break;
-        }
-        if ctx.should_park() {
-            continue;
         }
         if !frame_allocator_stats().exceeds_oom_kill_threshold() {
             continue;
@@ -89,7 +79,7 @@ fn run_oom_kill_round(active_victim: &mut Option<Tid>) {
         return;
     };
 
-    knoticeln!(
+    kalertln!(
         "oom killer: killing tgid {} with {} exclusive physical page(s); frame usage {}/{} pages",
         victim.tgid,
         victim.exclusive_pages,
@@ -158,6 +148,9 @@ fn thread_group_snapshot() -> Vec<Arc<ThreadGroup>> {
 
 fn score_thread_group(tg: &Arc<ThreadGroup>) -> Option<usize> {
     let tgid = tg.tgid();
+    if tg.ty() != ThreadGroupType::User {
+        return None;
+    }
     if tgid == Tid::IDLE || tgid == Tid::INIT {
         return None;
     }
@@ -167,6 +160,8 @@ fn score_thread_group(tg: &Arc<ThreadGroup>) -> Option<usize> {
 
     let leader = tg.leader()?;
     let flags = leader.flags();
+    // Victim eligibility is a user-process topology policy. The kernel flag is
+    // only a defensive cache check here, not the kthread classifier.
     if flags.is_idle() || flags.is_kernel() {
         return None;
     }

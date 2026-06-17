@@ -2,7 +2,7 @@
 
 **状态：** 已接受，代码已落地，文档追补完成
 **负责人：** EDGW, Codex
-**最后更新：** 2026-06-15
+**最后更新：** 2026-06-16
 **领域：** fs / VFS / inode cache / ext4 / kthread
 **事务日志：** [2026-06-14 - Inode Shrinker](../../devlog/transactions/2026-06-14-inode-shrinker.md)
 **开放问题：** None；本轮文档追补未重新运行构建、QEMU 或 LTP。
@@ -18,7 +18,7 @@
 
 VFS superblock 已经维护 resident inode cache，其中 `indexed` 保存仍可通过 inode number 发现的 inode，`ghosts` 保存已从 index 移除但仍因外部引用存活的 inode。过去 unmount 可以通过 `try_evict_all()` 做受控清理，但普通运行期间缺少后台回收入口，deleted/unhashed inode 和 backing file page cache 容易长期停留到更晚的生命周期点。
 
-本次提交同时引入 [kthread](../kthread/index.md) 基础设施，因此 inode shrinker 可以作为第一个后台 consumer 落地。当前 worker 由 `KThreadBuilder` 创建为长期普通 kthread，循环检查 stop / park 与物理页占用，并在低于阈值时通过 `yield_now()` 让出调度器。
+本次提交同时引入 [kthread](../kthread/index.md) 基础设施，因此 inode shrinker 可以作为第一个后台 consumer 落地。当前 worker 由 `KThreadBuilder` 创建为长期普通 kthread，循环检查 stop 与物理页占用，并在低于阈值时通过 `yield_now()` 让出调度器。`kthread-core` 阶段 1 已移除 park/unpark，因此 shrinker 不再检查 park 状态。
 
 ## 目标
 
@@ -56,7 +56,7 @@ Canonical：
 
 `INODE_SHRINKER` 是一个全局 `KThreadRef` slot，用于记录由 `KThreadBuilder` 创建的 `inode-shrink-0` worker，防止重复初始化。
 
-worker entry 循环执行三个步骤：先检查 `KThreadContext` 的 stop / park 请求；再读取 `frame_allocator_stats()`；只有 `used_pages * 100 > total_pages * io_shrink_threshold` 时才执行 `shrink_inodes()`。低于或等于阈值时调用 `yield_now()` 让出调度器后进入下一轮。默认阈值是 50。真正扫描时，worker 遍历 `mounted_superblocks()` 返回的 visible namespace superblock。每个 superblock 先按 flags 判断是否允许 shrink，再调用 `cached_inode_snapshot(include_indexed)` 获取候选列表。
+worker entry 循环执行三个步骤：先检查 `KThreadContext` 的 stop 请求；再读取 `frame_allocator_stats()`；只有 `used_pages * 100 > total_pages * io_shrink_threshold` 时才执行 `shrink_inodes()`。低于或等于阈值时调用 `yield_now()` 让出调度器后进入下一轮。默认阈值是 50。真正扫描时，worker 遍历 `mounted_superblocks()` 返回的 visible namespace superblock。每个 superblock 先按 flags 判断是否允许 shrink，再调用 `cached_inode_snapshot(include_indexed)` 获取候选列表。
 
 真正 eviction 由 `SuperBlock::try_evict_inode()` 负责。它先检查 inode active refs 和 mapping strong refs，确认不 busy 后调用 filesystem `sync_inode`，随后在 superblock cache write lock 下再次检查 busy 并从 `indexed` 或 `ghosts` 移除。之后调用 filesystem `evict_inode`。如果 eviction 返回错误，VFS 按原位置把 inode 插回 cache。
 

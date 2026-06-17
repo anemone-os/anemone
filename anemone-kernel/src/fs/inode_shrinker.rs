@@ -1,19 +1,16 @@
 use crate::{
     fs::inode::Inode,
     prelude::*,
-    task::kthread::{KThreadBuilder, KThreadContext, KThreadRef},
+    task::kthread::{KThreadBuilder, KThreadCtx, KThreadHandle},
+    utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
-static INODE_SHRINKER: SpinLock<Option<KThreadRef>> = SpinLock::new(None);
+static INODE_SHRINKER: SpinLock<Option<KThreadHandle>> = SpinLock::new(None);
 
-fn inode_shrinker_entry(ctx: KThreadContext, _: ()) -> i32 {
+fn inode_shrinker_entry(ctx: KThreadCtx, _: AnyOpaque) -> i32 {
     loop {
         if ctx.should_stop() {
             break;
-        }
-        if ctx.should_park() {
-            ctx.parkme();
-            continue;
         }
 
         if !frame_allocator_stats().exceeds_io_shrink_threshold() {
@@ -29,7 +26,7 @@ fn inode_shrinker_entry(ctx: KThreadContext, _: ()) -> i32 {
 
 pub fn init_inode_shrinker() {
     let worker = KThreadBuilder::new("inode-shrink-0")
-        .spawn(inode_shrinker_entry, ())
+        .spawn(inode_shrinker_entry, NilOpaque::new())
         .unwrap_or_else(|err| panic!("failed to spawn inode shrinker: {:?}", err));
 
     let mut slot = INODE_SHRINKER.lock();
@@ -37,11 +34,11 @@ pub fn init_inode_shrinker() {
     *slot = Some(worker);
 }
 
-fn shrink_inodes(ctx: &KThreadContext) {
+fn shrink_inodes(ctx: &KThreadCtx) {
     let mut evicted = 0;
 
     for sb in crate::fs::mounted_superblocks() {
-        if ctx.should_stop() || ctx.should_park() {
+        if ctx.should_stop() {
             break;
         }
         if !shrinkable_superblock(&sb) {
@@ -52,7 +49,7 @@ fn shrink_inodes(ctx: &KThreadContext) {
         let candidates = sb.cached_inode_snapshot(include_indexed);
 
         for inode in candidates {
-            if ctx.should_stop() || ctx.should_park() {
+            if ctx.should_stop() {
                 break;
             }
 
@@ -63,7 +60,7 @@ fn shrink_inodes(ctx: &KThreadContext) {
     }
 
     if evicted > 0 {
-        knoticeln!("inode shrinker: evicted {} inode(s)", evicted);
+        kerrln!("inode shrinker: evicted {} inode(s)", evicted);
     }
 }
 
@@ -89,52 +86,57 @@ fn try_shrink_inode(sb: &SuperBlock, inode: &Arc<Inode>) -> bool {
     }
 }
 
-#[kunit]
-fn memory_pressure_threshold_is_strictly_greater() {
-    assert!(
-        !FrameAllocatorStats {
-            total_pages: 100,
-            free_pages: 50,
-        }
-        .exceeds_io_shrink_threshold()
-    );
-    assert!(
-        FrameAllocatorStats {
-            total_pages: 100,
-            free_pages: 49,
-        }
-        .exceeds_io_shrink_threshold()
-    );
-    assert!(
-        !FrameAllocatorStats {
-            total_pages: 0,
-            free_pages: 0,
-        }
-        .exceeds_io_shrink_threshold()
-    );
-}
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
 
-#[kunit]
-fn oom_kill_threshold_is_strictly_greater() {
-    assert!(
-        !FrameAllocatorStats {
-            total_pages: 100,
-            free_pages: 10,
-        }
-        .exceeds_oom_kill_threshold()
-    );
-    assert!(
-        FrameAllocatorStats {
-            total_pages: 100,
-            free_pages: 9,
-        }
-        .exceeds_oom_kill_threshold()
-    );
-    assert!(
-        !FrameAllocatorStats {
-            total_pages: 0,
-            free_pages: 0,
-        }
-        .exceeds_oom_kill_threshold()
-    );
+    #[kunit]
+    fn memory_pressure_threshold_is_strictly_greater() {
+        assert!(
+            !FrameAllocatorStats {
+                total_pages: 100,
+                free_pages: 50,
+            }
+            .exceeds_io_shrink_threshold()
+        );
+        assert!(
+            FrameAllocatorStats {
+                total_pages: 100,
+                free_pages: 49,
+            }
+            .exceeds_io_shrink_threshold()
+        );
+        assert!(
+            !FrameAllocatorStats {
+                total_pages: 0,
+                free_pages: 0,
+            }
+            .exceeds_io_shrink_threshold()
+        );
+    }
+
+    #[kunit]
+    fn oom_kill_threshold_is_strictly_greater() {
+        assert!(
+            !FrameAllocatorStats {
+                total_pages: 100,
+                free_pages: 10,
+            }
+            .exceeds_oom_kill_threshold()
+        );
+        assert!(
+            FrameAllocatorStats {
+                total_pages: 100,
+                free_pages: 9,
+            }
+            .exceeds_oom_kill_threshold()
+        );
+        assert!(
+            !FrameAllocatorStats {
+                total_pages: 0,
+                free_pages: 0,
+            }
+            .exceeds_oom_kill_threshold()
+        );
+    }
 }

@@ -9,7 +9,7 @@ use crate::{
 
 use anemone_abi::process::linux::signal as linux_signal;
 
-use super::{KillSignal, check_send_kill_signal_permission};
+use super::{KillSignal, check_send_kill_signal_permission, reject_kthread_task_signal_target};
 
 /// Sends a queued signal with user-provided siginfo to a thread group.
 ///
@@ -44,6 +44,7 @@ fn sys_rt_sigqueueinfo(pid: i32, sig: KillSignal, uinfo: u64) -> Result<u64, Sys
     let signo = match sig {
         KillSignal::Probe => {
             let target = get_task(&pid).ok_or(SysError::NoSuchProcess)?;
+            reject_kthread_task_signal_target(&target)?;
             check_send_kill_signal_permission(&target, sig)?;
             return Ok(0);
         },
@@ -81,6 +82,7 @@ fn sys_rt_sigqueueinfo(pid: i32, sig: KillSignal, uinfo: u64) -> Result<u64, Sys
     // for callers that pass a non-leader gettid(): lookup must succeed even
     // though delivery remains on the shared pending queue.
     let target = get_task(&pid).ok_or(SysError::NoSuchProcess)?;
+    reject_kthread_task_signal_target(&target)?;
     check_send_kill_signal_permission(&target, sig)?;
     let signal = Signal::new_with_errno(signo, si_code, si_fields, si_errno);
     target.get_thread_group().recv_signal(signal);

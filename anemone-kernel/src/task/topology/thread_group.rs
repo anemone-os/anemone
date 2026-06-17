@@ -3,6 +3,7 @@
 use crate::{
     prelude::*,
     task::{
+        ThreadGroupType,
         sig::{
             SigNo, Signal,
             info::{SiCode, SigInfoFields, SigKill},
@@ -15,6 +16,10 @@ impl ThreadGroup {
     /// Get the thread group ID.
     pub fn tgid(&self) -> Tid {
         self.tgid.get_typed()
+    }
+
+    pub fn ty(&self) -> ThreadGroupType {
+        self.ty
     }
 
     /// How many members are in this thread group.
@@ -251,13 +256,22 @@ impl Task {
             .get(&self.tgid())
             .expect("task topology: thread group not found")
             .clone();
+        assert!(
+            tg.ty() == ThreadGroupType::User,
+            "task topology: kthread {} requires dedicated kthread unpublish",
+            self.tgid()
+        );
 
         // The topology write lock keeps the process-group/session links stable
         // while we collect the lock keys, then we take the canonical
         // Session -> ProcessGroup -> ThreadGroup chain for the mutation.
         let tg_snapshot = tg.inner.read();
-        let pgid = tg_snapshot.pgid;
-        let sid = tg_snapshot.sid;
+        let pgid = tg_snapshot
+            .pgid
+            .expect("task topology: user thread group missing process group");
+        let sid = tg_snapshot
+            .sid
+            .expect("task topology: user thread group missing session");
         drop(tg_snapshot);
 
         let session = topology
@@ -333,6 +347,11 @@ impl Task {
                 .get(&self.tgid())
                 .expect("task topology: thread group not found")
                 .clone();
+            assert!(
+                tg.ty() == ThreadGroupType::User,
+                "task topology: kthread {} cannot dethread",
+                self.tgid()
+            );
 
             // make sure no new thread can join this thread group.
             tg.inner.write().status.is_dethreading = true;

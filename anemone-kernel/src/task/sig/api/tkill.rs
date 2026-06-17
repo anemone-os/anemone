@@ -11,7 +11,7 @@ use crate::{
     },
 };
 
-use super::{KillSignal, check_send_kill_signal_permission};
+use super::{KillSignal, check_send_kill_signal_permission, reject_kthread_task_signal_target};
 
 /// Sends a signal to one specific task id.
 ///
@@ -32,6 +32,7 @@ fn sys_tkill(tid: i32, sig: KillSignal) -> Result<u64, SysError> {
     let tid = Tid::new(tid as u32);
 
     let target = get_task(&tid).ok_or(SysError::NoSuchProcess)?;
+    reject_kthread_task_signal_target(&target)?;
     check_send_kill_signal_permission(&target, sig)?;
 
     if let KillSignal::Armed(signo) = sig {
