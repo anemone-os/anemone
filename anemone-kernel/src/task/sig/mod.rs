@@ -1239,6 +1239,32 @@ fn perform_signal_action(
 
     match action {
         SignalAction::Default(default) => {
+            #[cfg(feature = "bench_local_test")]
+            if no == SigNo::SIGKILL {
+                match &signal.fields {
+                    SigInfoFields::Kill(killer) | SigInfoFields::TKill(killer) => {
+                        kerrln!(
+                            "[special_report] sigkill terminate target_tid={} target_tgid={} target_name=\"{}\" killer_tgid={} killer_uid={} si_code={:?}",
+                            task.tid(),
+                            task.tgid(),
+                            task.name(),
+                            killer.pid,
+                            killer.uid.get(),
+                            signal.code
+                        );
+                    },
+                    fields => {
+                        kerrln!(
+                            "[special_report] sigkill terminate target_tid={} target_tgid={} target_name=\"{}\" killer=unknown si_code={:?} fields={:?}",
+                            task.tid(),
+                            task.tgid(),
+                            task.name(),
+                            signal.code,
+                            fields
+                        );
+                    },
+                }
+            }
             drop(task);
             default(no);
             return false;

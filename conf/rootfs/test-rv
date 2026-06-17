@@ -36,3 +36,7 @@ installed_dir = "/bin"
 # [[apps]]
 # name = "args"
 # installed_dir = "/bin"
+
+[[files]]
+source = "anemone-apps/user-test/staged/riscv/mke2fs"
+installed_path = "/fixtures/user-test/tools/mke2fs"

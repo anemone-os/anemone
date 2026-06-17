@@ -193,6 +193,36 @@ fn wait_for_vfork_done(child: &Arc<Task>) {
     });
 }
 
+#[cfg(feature = "bench_local_test")]
+fn report_fork_memory(parent: &Arc<Task>, child: &Arc<Task>) {
+    let parent_name = parent.name();
+    let child_name = child.name();
+    let parent_report = parent.clone_uspace_handle().memory_report();
+    let child_report = child.clone_uspace_handle().memory_report();
+    let free_pages = frame_allocator_stats().free_pages as usize;
+    let file_cache_pages = resident_file_cache_pages();
+
+    kerrln!(
+        "[SPECIAL REPORT] fork memory\nparent name=\"{}\" pid={} tid={}\n{:?}\nchild name=\"{}\" pid={} tid={}\n{:?}\n",
+        parent_name.as_ref(),
+        parent.tgid().get(),
+        parent.tid().get(),
+        parent_report,
+        child_name.as_ref(),
+        child.tgid().get(),
+        child.tid().get(),
+        child_report
+    );
+    kerrln!(
+        "[SPECIAL REPORT] global frame allocator free=({:?})",
+        vmo::VmMemoryPageCount(free_pages)
+    );
+    kerrln!(
+        "[SPECIAL REPORT] resident file inode cache=({:?})",
+        vmo::VmMemoryPageCount(file_cache_pages)
+    );
+}
+
 /// TODO: rolling back is toooooooo tedious and complex! this function is really
 /// a mess now... we should refactor it into smaller pieces.
 pub fn kernel_clone(
@@ -207,6 +237,8 @@ pub fn kernel_clone(
 
     let current_task = get_current_task();
     let cur_uspace = current_task.clone_uspace_handle();
+    #[cfg(feature = "bench_local_test")]
+    let forked_uspace = !flags.contains(CloneFlags::VM);
 
     let mut boxed_frame = Box::new(trap_frame);
     boxed_frame.set_syscall_retval(0);
@@ -433,6 +465,10 @@ pub fn kernel_clone(
 
     match guard.publish(new_task, binding) {
         Ok(published) => {
+            #[cfg(feature = "bench_local_test")]
+            if forked_uspace {
+                report_fork_memory(&current_task, &published);
+            }
             task_enqueue(published.clone());
             if flags.contains(CloneFlags::VFORK) {
                 wait_for_vfork_done(&published);

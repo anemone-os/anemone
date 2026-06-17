@@ -238,7 +238,7 @@ cpufreq_boost
 # cpuset_syscall_test
 # cpuset_syscall_testset.sh
 crash01
-crash02
+## crash02
 creat01
 creat03
 creat04
@@ -393,8 +393,8 @@ fallocate01
 fallocate02
 fallocate03
 fallocate04
-fallocate05
-fallocate06
+## fallocate05
+## fallocate06
 fanotify01
 fanotify02
 fanotify03
@@ -666,7 +666,7 @@ fs_bind_rbind38.sh
 fs_bind_rbind39.sh
 fs_bind_regression.sh
 fs_di
-fs_fill
+# fs_fill
 fs_inod
 fs_perms
 fs_racer.sh

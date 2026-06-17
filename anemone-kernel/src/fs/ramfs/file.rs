@@ -4,7 +4,7 @@ use crate::{
         ramfs::{ramfs_dir, ramfs_reg},
     },
     prelude::{
-        vmo::{ResolvedFrame, VmObject},
+        vmo::{ResolvedFrame, VmMemoryReport, VmMemoryReportKind, VmObject},
         *,
     },
 };
@@ -194,6 +194,19 @@ impl RamfsRegMapping {
 }
 
 impl VmObject for RamfsRegMapping {
+    fn memory_report_kind(&self) -> Option<VmMemoryReportKind> {
+        Some(VmMemoryReportKind::File)
+    }
+
+    fn fill_memory_report(
+        &self,
+        range: core::ops::Range<usize>,
+        kind: VmMemoryReportKind,
+        report: &mut VmMemoryReport,
+    ) {
+        report.add_shared(kind, self.state.pages.read().range(range).count());
+    }
+
     fn resolve_frame(
         &self,
         pidx: usize,

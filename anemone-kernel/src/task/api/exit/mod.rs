@@ -27,6 +27,13 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             panic!("init task shall not exit");
         }
         kdebugln!("kernel_exit: task={} exit with code {:?}", task.tid(), code);
+        #[cfg(feature = "bench_local_test")]
+        kerrln!(
+            "[special_report] kernel_exit enter tid={} tgid={} code={:?}",
+            task.tid(),
+            task.tgid(),
+            code
+        );
         task.assert_kthread_exit_ready();
 
         if let Some(addr) = task.get_clear_child_tid() {
@@ -137,6 +144,13 @@ pub fn kernel_exit(code: ExitCode) -> ! {
 
             // 2. set status to Exited, so that wait4 can reap this thread group.
             tg_inner.status.life_cycle = ThreadGroupLifeCycle::Exited(xcode);
+            #[cfg(feature = "bench_local_test")]
+            kerrln!(
+                "[special_report] kernel_exit tg_exited tid={} tgid={} code={:?}",
+                task.tid(),
+                tg.tgid(),
+                xcode
+            );
 
             drop(tg_inner);
 
@@ -173,7 +187,17 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             }
 
             // 3. publish child_exited event.
+            #[cfg(feature = "bench_local_test")]
+            kerrln!(
+                "[special_report] kernel_exit child_exited_publish child_tgid={}",
+                tg.tgid()
+            );
             parent_tg.child_exited.publish(1, false);
+            #[cfg(feature = "bench_local_test")]
+            kerrln!(
+                "[special_report] kernel_exit child_exited_publish_done child_tgid={}",
+                tg.tgid()
+            );
 
             // 4. orphan children reparented to init may contain zombie thread groups. let's
             //    publish that to init as well.

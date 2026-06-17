@@ -28,6 +28,19 @@ impl AnonObject {
 }
 
 impl VmObject for AnonObject {
+    fn memory_report_kind(&self) -> Option<VmMemoryReportKind> {
+        Some(VmMemoryReportKind::Anonymous)
+    }
+
+    fn fill_memory_report(
+        &self,
+        range: core::ops::Range<usize>,
+        kind: VmMemoryReportKind,
+        report: &mut VmMemoryReport,
+    ) {
+        report.add_shared(kind, self.pages.read().range(range).count());
+    }
+
     fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError> {
         self.check_pidx(pidx)?;
 

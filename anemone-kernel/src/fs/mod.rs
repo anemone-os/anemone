@@ -346,6 +346,24 @@ mod vfs {
         mounted_superblocks_for(&VFS.visible.read())
     }
 
+    pub fn resident_file_cache_pages() -> usize {
+        let mut superblocks = mounted_superblocks_for(&VFS.anonymous.read());
+        superblocks.extend(mounted_superblocks_for(&VFS.visible.read()));
+
+        let mut unique = Vec::<Arc<SuperBlock>>::new();
+        for sb in superblocks {
+            if unique.iter().any(|existing| Arc::ptr_eq(existing, &sb)) {
+                continue;
+            }
+            unique.push(sb);
+        }
+
+        unique
+            .iter()
+            .map(|sb| sb.resident_file_cache_pages())
+            .sum()
+    }
+
     /// Called when the system is shutting down. This will flush all cached data
     /// to storage devices of file systems, if exist, and perform any necessary
     /// cleanup.

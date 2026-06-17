@@ -265,6 +265,17 @@ impl SuperBlock {
             .map(InodeRef::new)
     }
 
+    pub fn resident_file_cache_pages(&self) -> usize {
+        let inner = self.inner.read();
+        inner
+            .indexed
+            .values()
+            .chain(inner.ghosts.iter())
+            .filter_map(|inode| inode.mapping())
+            .map(|mapping| mapping.resident_pages())
+            .sum()
+    }
+
     /// Remove an inode from the inode-number index by its [Ino], while keeping
     /// the object resident.
     ///

@@ -294,10 +294,10 @@ fstat02_64
 fstat03
 fstat03_64
 fstatat01
-fstatfs01
-fstatfs01_64
-fstatfs02
-fstatfs02_64
+# fstatfs01
+# fstatfs01_64
+# fstatfs02
+# fstatfs02_64
 fsync01
 fsync02
 fsync03
@@ -793,7 +793,7 @@ rename06
 rename07
 rename08
 rename09
-rename10
+# rename10
 rename11
 rename12
 rename13

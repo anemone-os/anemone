@@ -7,6 +7,7 @@ edition = "2024"
 kunit = []
 fs_ext4 = []
 kernel_preempt = []
+bench_local_test = []
 
 [dependencies]
 anemone-abi = { path = "../anemone-abi" }

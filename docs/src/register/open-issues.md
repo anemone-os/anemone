@@ -223,3 +223,535 @@
 
 **Severity:** High
 **Workaround:** 暂时保留 `core::hint::black_box(trapframe.sstatus())` 作为 release 稳定器；不要把该 workaround 当成 FPU 状态管理已经正确的证明，也不要用被它改变过的失败表面反向归类后续 `SIGIOT` / `SIGABRT` 等 LTP harness 失败。
+
+## ANE-20260616-EXIT-WAIT-REAP-PARENT-TOPOLOGY-RACE
+
+**Type:** Issue
+**Status:** Open
+**Area:** task topology / exit / wait / scheduler
+
+**Symptom / Trigger:** 在线程组最后一个 task 退出时，`kernel_exit()` 先把当前 task 从 topology 中摘除，并在 child thread group 的 `members` 已为空后，把 thread-group 生命周期发布为 `ThreadGroupLifeCycle::Exited`。但同一段退出尾部在发布 `Exited` 之后，仍继续通过 `tg.get_parent()` 获取 parent `ThreadGroup`，并向 parent 递送终止信号、发布 parent 的 `child_exited` event，最后再唤醒 init reaper 和 `vfork_done`。这使 `Exited` 对 wait-family 可见的时间点早于退出发布协议真正完成的时间点。
+
+相关代码在 `anemone-kernel/src/task/api/exit/mod.rs`：
+
+```rust
+let is_last = task.detach_from_topology();
+
+// if we are the last thread in this thread group, we should do the cleanup
+// work.
+
+// a longer critical section must be held here to avoid races. TODO: explain
+// why.
+if is_last {
+    let mut tg_inner = tg.inner.write();
+
+    let xcode = match tg_inner.status.life_cycle {
+        ThreadGroupLifeCycle::Alive => {
+            // no one called exit_group before. all threads call exit... use our exit code.
+            code
+        },
+        ThreadGroupLifeCycle::Exiting(existing_code) => {
+            // someone already called exit_group before. use their exit code.
+            existing_code
+        },
+        ThreadGroupLifeCycle::Exited(existing_code) => {
+            panic!("thread group already exited with code {:?}", existing_code);
+        },
+    };
+
+    // 1. reparent orphan children.
+    // following operations are a bit tricky, but it's safe.
+    //
+    // TODO: but i think we'd better switch to a more reasonable and less
+    // error-prone design later.
+    drop(tg_inner);
+    tg.reparent_orphan_children();
+    tg_inner = tg.inner.write();
+
+    // 2. set status to Exited, so that wait4 can reap this thread group.
+    tg_inner.status.life_cycle = ThreadGroupLifeCycle::Exited(xcode);
+    kerrln!(
+        "[special_report] kernel_exit tg_exited tid={} tgid={} code={:?}",
+        task.tid(),
+        tg.tgid(),
+        xcode
+    );
+
+    drop(tg_inner);
+
+    let cpu_usage = tg.cpu_usage_snapshot();
+
+    if let Some(terminate_signal) = tg.terminate_signal() {
+        let uid = tg
+            .leader()
+            .map(|leader| leader.cred().uid.real)
+            .unwrap_or_else(|| task.cred().uid.real);
+        tg.get_parent().recv_signal(Signal::new(
+            terminate_signal,
+            SiCode::Kernel,
+            SigInfoFields::Chld(SigChld {
+                pid: tg.tgid(),
+                uid,
+                // TODO: this is false. we should look at si_code first.
+                status: match xcode {
+                    ExitCode::Exited(xcode) => xcode as i32,
+                    ExitCode::Signaled(signo) => signo.as_usize() as i32,
+                },
+                utime: duration_to_ticks(cpu_usage.self_user() + cpu_usage.reaped_user()),
+                stime: duration_to_ticks(
+                    cpu_usage.self_kernel() + cpu_usage.reaped_kernel(),
+                ),
+            }),
+        ));
+    }
+
+    // 3. publish child_exited event.
+    kerrln!(
+        "[special_report] kernel_exit child_exited_publish child_tgid={}",
+        tg.tgid()
+    );
+    tg.get_parent().child_exited.publish(1, false);
+    kerrln!(
+        "[special_report] kernel_exit child_exited_publish_done child_tgid={}",
+        tg.tgid()
+    );
+
+    // 4. orphan children reparented to init may contain zombie thread groups. let's
+    //    publish that to init as well.
+    // this hardcoding is a bit ugly. when we support subreapers, we should publish
+    // this to the actual reaper.
+    get_init_task()
+        .get_thread_group()
+        .child_exited
+        .publish(1, false);
+
+    task.vfork_done.publish(1, true);
+}
+```
+
+**Mechanism:** wait-family core 只用 `ThreadGroupLifeCycle::Exited` 判断 exited child 是否命中。`sys_wait4()` 和未设置 `WNOWAIT` 的 `sys_waitid()` 都会以 `WaitDisposition::Reap` 进入 `wait_for_exited_child()`；命中后会调用 `ThreadGroup::try_reap_child()`。也就是说，一旦 `kernel_exit()` 写入 `Exited` 并释放 `tg_inner` 锁，parent 的 wait 路径就可以把该 child 作为可 reap zombie 处理，而不会等待 child 退出尾部完成 parent signal、`child_exited` publish 或 reaper wake。
+
+相关代码在 `anemone-kernel/src/task/api/wait/mod.rs`：
+
+```rust
+fn scan_one(&mut self, tg: &Arc<ThreadGroup>) -> bool {
+    let matched = match self.target {
+        WaitTarget::AnyChild => true,
+        WaitTarget::ChildWithTgid(tgid) => tg.tgid() == tgid,
+        WaitTarget::AnyChildWithPgid(pgid) => tg.pgid() == pgid,
+        WaitTarget::AnyChildWithCurrentPgid => tg.pgid() == self.current_pgid,
+    };
+
+    if !matched {
+        return false;
+    }
+
+    self.matched_any = true;
+    matches!(tg.status().life_cycle(), ThreadGroupLifeCycle::Exited(_))
+}
+```
+
+```rust
+if let Some(child) = tg.find_child(|child| scanner.scan_one(child)) {
+    kdebugln!(
+        "wait: found a child {} that satisfies the wait condition",
+        child.tgid(),
+    );
+    let tgid = child.tgid();
+
+    match disposition {
+        WaitDisposition::Peek => {
+            return Ok(Some(wait_outcome_from_child(&child)));
+        },
+        WaitDisposition::Reap => {
+            drop(child);
+
+            // If multiple threads are waiting for the same child, only
+            // one of them can reap it, and the others will fail to find
+            // the child in topology. This is fine, since they will just
+            // loop and wait again.
+            if let Some(child) = tg.try_reap_child(tgid) {
+                fs::proc::try_unbind_thread_group(tgid);
+                let outcome = wait_outcome_from_child(&child);
+                kerrln!(
+                    "[special_report] wait4 reap parent_tgid={} child_tgid={} exit_code={:?}",
+                    tg.tgid(),
+                    outcome.tgid,
+                    outcome.exit_code
+                );
+                tg.on_reap(&child);
+
+                return Ok(Some(outcome));
+            }
+
+            continue;
+        },
+    }
+}
+```
+
+**Topology Removal:** `try_reap_child()` 会在持有 `TOPOLOGY` 写锁时直接从 `topology.thread_groups` 删除 child TG。它只要求 child 仍挂在 parent 的 `children_tgids` 中、生命周期已经是 `Exited`、`parent_tgid` 等于当前 wait caller 的 TGID，并且 `ntasks() == 0`。这些条件在 `kernel_exit()` 发布 `Exited` 后、退出尾部完成前都可能已经成立：`task.detach_from_topology()` 已经清空最后一个 member，`Exited` 已经写入，parent-child 链接也尚未被 reap 移除。
+
+相关代码在 `anemone-kernel/src/task/topology/parent_child.rs`：
+
+```rust
+pub fn try_reap_child(&self, child_tgid: Tid) -> Option<Arc<ThreadGroup>> {
+    let mut topology = TOPOLOGY.inner.write();
+
+    // make sure this is indeed a child thread group of us.
+    if !self.inner.read().children_tgids.contains(&child_tgid) {
+        return None;
+    }
+
+    let child_tg = topology.thread_groups.remove(&child_tgid)?;
+
+    assert!(
+        matches!(
+            child_tg.status().life_cycle(),
+            ThreadGroupLifeCycle::Exited(_)
+        ),
+        "task topology: child thread group {} is not exited yet when reaping",
+        child_tgid
+    );
+    assert!(
+        child_tg.parent_tgid() == Some(self.tgid()),
+        "task topology: child thread group {} has unexpected parent {:?} when reaping",
+        child_tgid,
+        child_tg.parent_tgid()
+    );
+    assert!(
+        child_tg.ntasks() == 0,
+        "task topology: child thread group {} is not empty when reaping",
+        child_tgid
+    );
+
+    assert!(
+        self.inner.write().children_tgids.remove(&child_tgid),
+        "task topology: child thread group {} disappeared from parent {} when reaping",
+        child_tgid,
+        self.tgid()
+    );
+
+    Some(child_tg)
+}
+```
+
+**Failure Mode:** 被 reap 的 child `ThreadGroup` 可能仍被正在执行 `kernel_exit()` 的栈帧持有，因此 child TG 对象尚未 drop，退出尾部仍会继续运行。此时 child TG 的 `inner.parent_tgid` 仍保存原 parent TGID；但 parent 可能已经在 reap child 后继续退出，并被自己的 parent 通过相同 wait/reap 路径从 `TOPOLOGY.thread_groups` 删除。于是 child 退出尾部再次调用 `get_parent()` 时，会先成功读到 `Some(parent_tgid)`，然后在全局 topology 中查不到该 parent TG 并 panic。
+
+相关代码在 `anemone-kernel/src/task/topology/parent_child.rs`：
+
+```rust
+pub fn get_parent(&self) -> Arc<ThreadGroup> {
+    let parent_tgid = self
+        .inner
+        .read()
+        .parent_tgid
+        .expect("task topology: parent thread group not found");
+
+    let topology = TOPOLOGY.inner.read();
+
+    let parent = topology
+        .thread_groups
+        .get(&parent_tgid)
+        .expect("task topology: parent thread group not found")
+        .clone();
+
+    parent
+}
+```
+
+**Impact:** 这是 `ThreadGroupLifeCycle::Exited` 的语义混合问题：它同时表示“exit code 已经确定”和“waiter 可以从 topology 删除该 thread group”，但 `kernel_exit()` 在发布这个状态后仍执行依赖 parent topology 的外部可见通知。该状态边界允许 wait/reap 观察并删除一个尚未完成退出发布协议的 child，破坏 parent-child topology ownership，并影响所有 fork/exit/wait 密集路径；一旦触发 panic，会遮蔽后续用户态 profile 和 syscall 语义判断。
+
+**Owner:** EDGW_
+**Last Verified:** 2026-06-16
+**Exit Condition:** 重定义 thread-group 退出状态机，使 wait/reap 只能删除已经完成父通知、`child_exited` 发布、init reaper wake 和必要退出尾部的 zombie；或者在任何可 reap 状态暴露前稳定持有后续退出尾部所需的 parent/reaper 能力对象，并保证退出尾部不再通过 stale `parent_tgid` 回查全局 topology。修复应明确 `Exiting`、exit code 可见、parent 通知完成、zombie 可 reap 四个阶段的 owner、锁顺序和引用规则，并用定向测试覆盖 last-thread exit、parent 同时 wait/reap、parent 快速退出并被祖先进程 reap、以及 child 退出尾部继续执行的交错。
+
+**Related:** [开发日志：2026-06-08 至 2026-06-21](../devlog/2026-06-08_to_2026-06-21.md), [当前限制：进程组与会话 stage-1](./current-limitations.md#ane-20260527-process-group-session-stage1)
+
+**Severity:** High
+**Workaround:** 在修复前，不要把这类 panic 归因到触发时正在运行的用户态 case 或单个 syscall；应按 task topology / exit-wait 生命周期竞态处理，并避免使用 panic 之后的测试结果判断后续功能语义。
+
+## ANE-20260616-SIGNAL-SIGFRAME-EXIT-USPACE-LOCK-RECURSION
+
+**Type:** Issue
+**Status:** Open
+**Area:** signal / exit / mm uspace / LTP
+
+**Symptom / Trigger:** `etc/log-la.log` 跑到 `RUN LTP CASE crash01` 后，child task #232 连续制造用户态 `InvalidInstruction`、execute fault 和 read fault。日志最后显示 `kernel_exit enter tid=task #232 tgid=task #232 code=Signaled(SigNo(11))`，随后内核 panic 于 `anemone-kernel/src/task/api/exit/mod.rs:41:37`，消息为 `Mutex cannot be locked recursively`。这里 `crash01` 的非法指令和缺页只是触发用户信号路径；真正让内核停止的是 signal sigframe 写失败分支在仍持有 `UserSpace` mutex 时进入 `kernel_exit_group()`，而 `kernel_exit()` 又为 `clear_child_tid` 重锁同一个 `UserSpace`。
+
+**Confirmed Evidence:** `etc/log-la.log` 末尾的 backtrace 地址符号化结果为：
+
+```text
+0xffffffff80324a24  Mutex<UserSpace>::lock
+0xffffffff802921a8  task::api::exit::kernel_exit
+0xffffffff80292b98  task::api::exit::kernel_exit_group
+0xffffffff80342fe0  task::sig::handle_signals
+0xffffffff8038e218  rust_utrap_entry
+```
+
+`0xffffffff802921a8` 对应 `kernel_exit()` 中 `clear_child_tid` 的 `usp.lock()` 之后；`0xffffffff80342fe0` 对应 `perform_signal_action()` 中 sigframe 写失败后调用 `kernel_exit_group(SIGSEGV)` 的下一条指令。也就是说，panic 时不是普通默认信号动作直接退出，而是走过了用户自定义 handler 的 sigframe 构造失败路径。
+
+**Full Failure Path:**
+
+1. LoongArch 用户异常入口识别异常。如果是未覆盖的异常，例如 `crash01` 里的非法指令，trap 代码先把 `SIGILL` pending 到当前 task；如果是用户页异常，则进入 `handle_user_page_fault()`，失败时也会转成用户信号。无论是哪一种，trap return 前都会调用 `handle_signals()`：
+
+```rust
+match reason {
+    LA64Exception::Syscall => {
+        restart_syscall = handle_syscall(trapframe);
+    },
+    LA64Exception::PageModified
+    | LA64Exception::PageNotReadable
+    | LA64Exception::PageNotExecutable
+    | LA64Exception::PagePrivilegeIllegal
+    | LA64Exception::PageInvalidFetch
+    | LA64Exception::PageInvalidLoad
+    | LA64Exception::PageInvalidStore => {
+        handle_user_page_fault(PageFaultInfo::new(
+            VirtAddr::new(trapframe.era),
+            VirtAddr::new(trapframe.badv as u64),
+            match reason {
+                LA64Exception::PageInvalidFetch | LA64Exception::PageNotExecutable => {
+                    PageFaultType::Execute
+                },
+                LA64Exception::PageInvalidLoad
+                | LA64Exception::PageNotReadable
+                | LA64Exception::PagePrivilegeIllegal => PageFaultType::Read,
+                LA64Exception::PageModified | LA64Exception::PageInvalidStore => {
+                    PageFaultType::Write
+                },
+                _ => unreachable!(),
+            },
+        ));
+    },
+    _ => {
+        kerrln!(
+            "({}) user {} aborted with unhandled exception: {:?}, pc: {:#x}, badv: {:#x}\n\ttask return value not implemented yet",
+            cur_cpu_id(),
+            current_task_id(),
+            reason,
+            trapframe.era,
+            trapframe.badv
+        );
+        get_current_task().recv_signal(Signal::new(
+            SigNo::SIGILL,
+            SiCode::Kernel,
+            SigInfoFields::Ill(SigFault {
+                addr: VirtAddr::new(trapframe.era),
+            }),
+        ));
+    },
+}
+
+assert!(IntrArch::local_intr_enabled());
+handle_signals(
+    trapframe,
+    restart_syscall.map(|restart| (restart, syscall_ctx)),
+);
+```
+
+2. `handle_signals()` 拉取 pending signal，并把每个 signal 交给 `perform_signal_action()`。只有用户自定义 handler 会返回 `true` 并停止循环；默认动作会直接调用默认终止函数。这次 backtrace 落在 `perform_signal_action()` 的 custom-handler 分支，所以问题集中在“准备用户态 signal frame”的失败处理：
+
+```rust
+pub fn handle_signals(
+    trapframe: &mut TrapFrame,
+    mut restart_syscall: Option<(RestartSyscall, SyscallCtx)>,
+) {
+    let mut committed_handler_frame = false;
+    loop {
+        if let Some(signal) = get_current_task().fetch_signal() {
+            if perform_signal_action(signal, trapframe, &mut restart_syscall) {
+                committed_handler_frame = true;
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    if !committed_handler_frame {
+        get_current_task().restore_temporary_sig_mask_if_pending();
+    }
+}
+```
+
+3. `perform_signal_action()` 的 custom-handler 分支会先修改当前 signal mask，选择普通用户栈或 altstack，编码 `ucontext`，然后算出 `sigframe_base` 并锁住当前 task 的 `UserSpace` 来写 `RtSigFrame`：
+
+```rust
+let frame = RtSigFrame {
+    siginfo: signal.to_linux_siginfo(),
+    ucontext,
+};
+
+let sigframe_base = VirtAddr::new(align_down_power_of_2!(
+    init_sp - size_of::<RtSigFrame>() as u64,
+    16
+) as u64);
+{
+    let usp = task.clone_uspace_handle();
+    let mut guard = usp.lock();
+    match UserWritePtr::<RtSigFrame>::try_new(sigframe_base, &mut guard) {
+        Err(e) => {
+            knoticeln!(
+                "perform_signal_action: failed to write sigframe to {} user stack: {:?}",
+                task.tid(),
+                e
+            );
+            kernel_exit_group(ExitCode::Signaled(SigNo::SIGSEGV))
+        },
+        Ok(mut uptr) => {
+            uptr.write(frame);
+        },
+    }
+}
+```
+
+这里的 bug 是作用域和发散调用的组合：`guard` 是 `MutexGuard<UserSpace>`，只会在这个 block 结束时 drop；但 `kernel_exit_group()` 返回类型是 `!`，它不会返回到当前 block。因此进入 `kernel_exit_group()` 前，`guard` 仍然活着，`UserSpace` mutex 的 owner 仍是当前 task。这个路径的意图是“用户栈不可写，给进程发 `SIGSEGV` 终止”，但实际执行成了“持有 `UserSpace` 锁进入完整退出协议”。
+
+4. `kernel_exit_group()` 更新 thread-group lifecycle 后，最终调用 `kernel_exit(code)`。它没有、也不应该知道调用方还握着 `UserSpace` 锁：
+
+```rust
+pub fn kernel_exit_group(code: ExitCode) -> ! {
+    {
+        let task = get_current_task();
+        if task.tid() == Tid::INIT {
+            panic!("init task shall not exit");
+        }
+        let tg = task.get_thread_group();
+        let is_exiting = tg.update_life_cycle_with(|prev| match prev {
+            ThreadGroupLifeCycle::Alive => (ThreadGroupLifeCycle::Exiting(code), false),
+            ThreadGroupLifeCycle::Exiting(existing_code) => {
+                (ThreadGroupLifeCycle::Exiting(*existing_code), true)
+            },
+            ThreadGroupLifeCycle::Exited(code) => {
+                panic!("thread group already exited with code {:?}", code);
+            },
+        });
+
+        if is_exiting {
+            drop(tg);
+            drop(task);
+
+            kernel_exit(code)
+        }
+
+        tg.for_each_member(|member| {
+            if member.tid() != task.tid() {
+                member.recv_signal(Signal::new(
+                    SigNo::SIGKILL,
+                    SiCode::Kernel,
+                    SigInfoFields::Kill(SigKill {
+                        pid: task.tgid(),
+                        uid: task.cred().uid.real,
+                    }),
+                ))
+            }
+        });
+    }
+    kernel_exit(code)
+}
+```
+
+5. `kernel_exit()` 的前段会处理 Linux `set_tid_address()` / `CLONE_CHILD_CLEARTID` 语义：如果当前 task 有 `clear_child_tid`，退出时要把该用户地址写 0，并对同地址 futex wake。写用户地址需要再次锁同一个 `UserSpace`：
+
+```rust
+if let Some(addr) = task.get_clear_child_tid() {
+    let usp = task.clone_uspace_handle();
+    let cleard = {
+        let mut guard = usp.lock();
+        match UserWritePtr::<Tid>::try_new(addr, &mut guard) {
+            Ok(mut uptr) => {
+                uptr.write(Tid::new(0));
+                true
+            },
+            Err(e) => {
+                knoticeln!(
+                    "failed to clear child tid for task {}: {:?} at address {:#x}",
+                    task.tid(),
+                    e,
+                    addr.get()
+                );
+                false
+            },
+        }
+    };
+    if cleard {
+        if let Err(e) = futex::wake_at(&task.clone_uspace_handle(), addr, 1) {
+            // ...
+        }
+    }
+}
+```
+
+因为第 3 步的 `guard` 还没释放，这里 `usp.lock()` 会在同一个 task 上递归锁同一个 mutex。
+
+6. `Mutex<UserSpace>::lock()` 显式禁止同 task 递归加锁。它用 `locker` 记录当前 locker 的 task pointer，并在锁入口处断言当前 task 不是已有 locker：
+
+```rust
+pub fn lock(&self) -> MutexGuard<'_, T> {
+    assert!(!in_hwirq(), "Mutex cannot be locked in hwirq context");
+    assert!(
+        IntrArch::local_intr_enabled(),
+        "Mutex cannot be locked when interrupts are disabled"
+    );
+    assert!(
+        allow_preempt(),
+        "Mutex cannot be locked when preemption is disabled"
+    );
+    assert!(
+        self.locker.load(Ordering::Acquire) != Arc::as_ptr(&get_current_task()) as usize,
+        "Mutex cannot be locked recursively"
+    );
+    // ...
+}
+```
+
+因此 panic 文本和源码完全吻合：不是死锁等待，也不是 page fault 本身损坏了内核状态，而是同一个 task 在 signal 错误路径持有 `UserSpace` guard 时进入 exit，exit 又重入需要 `UserSpace` 的清理动作。
+
+**Why `crash01` Exposes It:** `crash01` 会反复制造用户异常，并安装/使用 handler 来验证进程 crash 行为。只要某次 signal delivery 需要把 `RtSigFrame` 写到一个不可写、未映射、越界或已经被测试故意破坏的用户栈/altstack，`UserWritePtr::<RtSigFrame>::try_new()` 就会失败。正确行为应该是放弃继续投递 handler，并让进程以 `SIGSEGV` 终止；当前行为是在失败分支马上进入 `kernel_exit_group()`，但忘了先释放 signal frame 写入时持有的 `UserSpace` mutex。
+
+**Impact:** 这是 signal delivery failure path 与 exit cleanup 的锁生命周期 bug。它把一个用户态可恢复的测试失败表面升级成内核 panic，并截断整个 LTP profile。影响不局限于 `crash01`：任何会让 handler sigframe 写失败的路径都可能触发，包括损坏普通用户栈、损坏 altstack、handler 地址/栈组合异常、同步 fault 转 signal 后再次 fault，以及带 `clear_child_tid` 的线程在这些路径上退出。由于 `clear_child_tid` 是线程/clone 常见状态，这个 bug 会污染 signal、clone/futex exit、fault-to-signal 和 LTP crash 类用例的判断。
+
+**Fix Direction:** `perform_signal_action()` 不能在持有 `UserSpace` mutex、用户指针 guard 或其它 exit 路径可能重入的睡眠锁时调用 `kernel_exit_group()` / `kernel_exit()`。最小修复是把 sigframe 写入结果先保存到局部变量，让 `usp`/`guard` 的 block 明确结束，再在 block 外根据失败结果调用 `kernel_exit_group(SIGSEGV)`。更系统的修复应检查所有 signal / `rt_sigreturn` / fault-to-signal 的发散退出调用，确认没有同类“持锁进入 exit”路径。
+
+**Owner:** EDGW_
+**Last Verified:** 2026-06-16
+**Exit Condition:** sigframe 写失败、`rt_sigreturn` 坏 frame、fault-to-signal 失败等路径均不在持有 `UserSpace` mutex 或用户访问 guard 时进入 exit；`crash01` 不再以 `Mutex<UserSpace>::lock -> kernel_exit -> kernel_exit_group -> handle_signals` panic 截断；定向用例覆盖不可写 signal stack / altstack、带 `clear_child_tid` 的线程退出，以及用户异常风暴下 handler-frame 写失败的场景。
+
+**Related:** [SHMAT1 SIGILL revalidation](#ane-20260602-shmat1-sigill-masks-segv-hang-revalidation), [Signal LTP remaining semantics](#ane-20260607-signal-ltp-remaining-semantics), [当前限制：Signal LTP infra](./current-limitations.md#ane-20260607-signal-ltp-infra-stage1)
+
+**Severity:** High
+**Workaround:** 修复前，不要把 `crash01` 里的大量 `InvalidInstruction` / page fault 日志当成内核崩溃根因；真正停止点是 sigframe 写失败后的 exit lock recursion。需要继续跑长 profile 时，可以暂时隔离 `crash01` 或其它会破坏 signal stack 的用例，避免该 panic 截断后续测试结果。
+
+## ANE-20260616-RV64-FTEST-SHADOW-PARENT-CORRUPTION
+
+**Type:** Issue
+**Status:** Open / Unresolved
+**Area:** mm / uspace / VMO / fork COW / LTP
+
+**Symptom / Trigger:** `etc/log-rv-illegal-read02.log` 在 `ftest01` 失败结束后，刚打印 `RUN LTP CASE ftest02` 就触发 rv64 kernel page fault：`pc=VirtAddr(0xffffffff802bed48), addr=VirtAddr(0x10), type=Read`。这次定位必须以 `read02` 的地址为准；`etc/log-rv-illegal-read01.log` 也有同类 `addr=0x10` kernel read fault，但那份日志对应的内核已经和当前代码偏离，里面的 `pc=0xffffffff802bd970` 只能作为“同类形态”参考，不能再作为精确源码定位依据。
+
+**Confirmed Evidence:** `read02` 的 panic 发生在 fork memory diagnostic 路径，而不是 `ftest02` 自身执行路径。`task/api/clone/mod.rs` 的 `report_fork_memory()` 会在 fork publish 后调用 parent / child 的 `UserSpace::memory_report()`；`UserSpace::memory_report()` 遍历 VMA，先通过 `vma.backing().memory_report_kind()` 取得 report kind，再调用 backing 的 `fill_memory_report()`。`read02` 的 `0xffffffff802bed48` 对应当前源码中 `anemone-kernel/src/mm/uspace/vmo/shadow.rs` 的 `ShadowObject::memory_report_kind()` 等价位置，即：
+
+```rust
+fn memory_report_kind(&self) -> Option<VmMemoryReportKind> {
+    self.parent.memory_report_kind()
+}
+```
+
+fault 地址是 `0x10`，这符合对损坏的 trait object / fat pointer 做动态派发时读取 vtable 槽位的形态。外层 `vma.backing()` 已经成功派发到了 `ShadowObject`，说明 `VMA.backing` 本身还能被当作 `ShadowObject` 调用；真正异常集中在 `ShadowObject` 对象体内部，尤其是 `parent: Arc<dyn VmObject>` 的 data/vtable word 可能已经被写坏、清零，或者该 `ShadowObject` 所在内存已经被释放后复用。
+
+**LTP Context:** `read02` 中 `ftest01` 先启动并创建 5 个子进程。LTP 源码 `etc/testsuits-for-oskernel/ltp-full-20240524/testcases/kernel/fs/ftest/ftest01.c` 显示该用例默认让每个 child 操作不同文件，混合 `lseek`、`read`、`write`、`ftruncate`、`fsync`、`sync` 和 `fstat`。日志里的 `libftest.c:78: ft_dumpbits: Assertion '0 < (buf - bits)' failed` 是 `ft_dumpbits()` 诊断打印里的断言，说明测试已经检测到文件内容 bitmap / pattern 不一致后试图 dump bits；它不是当前已证明的内核对象损坏点。`ftest02` 源码会做目录和 inode 操作并 fork children，但本次 panic 在 `RUN LTP CASE ftest02` 之后立即发生，尚未看到 `ftest02` 自己的 child 操作日志，因此不能把根因归到 `ftest02` 的目录操作。
+
+**Current Analysis:** 当前只确认 `ShadowObject.parent` 已呈现损坏或 UAF 症状，尚未确认“为何损坏”。`ftest01` 可能只是让 user-test 长 fork 链、ramfs 文件 I/O、truncate/fsync/sync 和退出/reap 交错达到触发条件；它不直接说明普通文件 `read/write` 把文件页缓存零拷贝映射给用户并写坏内核对象。`read02` 的 fork memory 报告还显示 user-test 父进程已有很深的 COW shadow 链，例如 stack shared 达到 1929 pages；这会放大 memory-report 对 shadow parent 链的遍历深度，但仅靠“链很长”还不能解释 parent fat pointer 被破坏。仍需重点排查 VMA/VMO 生命周期、fork COW 链所有权、deferred unmap 与 backing drop 顺序、truncate/discard 对已安装 PTE 的处理，以及 `ShadowObject` drop / allocation reuse 是否存在 UAF 窗口。
+
+**Impact:** 该问题会把 LTP fs profile 截断在 `ftest01` / `ftest02` 附近，并且 panic 发生在内核诊断遍历 COW backing 时。由于表现是内核对象内部指针损坏，它比单个 LTP 用例失败更严重：后续任何 fork memory report、`/proc` memory accounting、OOM/debug 统计，或者其它遍历 VMA backing 链的路径都可能在同一类损坏后 panic。当前不能把 `ftest01` 的文件内容失败、`ftest02` 的启动点、或 `read01` 的旧地址单独作为根因。
+
+**Owner:** EDGW_
+**Last Verified:** 2026-06-16
+**Exit Condition:** 为 `ShadowObject` 和 `Arc<dyn VmObject>` backing 链补充足够诊断，能够区分“对象体被覆盖”和“对象已经 drop 后被复用”；定位并修复实际破坏来源；确认 VMA/VMO drop、discard/truncate、deferred PTE unmap、fork COW 链和 memory-report 遍历之间没有 stale backing 或 stale PTE 窗口；使用包含 `ftest01`、`ftest02` 以及 `read01` 同类 fsx/fs profile 的 rv64 回归复跑，证明不再出现 `ShadowObject::memory_report_kind()` / `addr=0x10` kernel read panic，并重新分类 `ftest01` 的文件内容失败。
+
+**Related:** [开发日志：2026-06-08 至 2026-06-21](../devlog/2026-06-08_to_2026-06-21.md), [当前限制：truncate mmap coherency](./current-limitations.md#ane-20260523-truncate-mmap-coherency), [当前限制：file-backed mmap fault stage-1](./current-limitations.md#ane-20260529-file-backed-mmap-fault-stage1), [当前限制：mremap anon-only](./current-limitations.md#ane-20260527-mremap-anon-only)
+
+**Severity:** High
+**Workaround:** 当前没有可信修复性绕过。为了继续跑长 profile，可以临时隔离 `ftest01` / `ftest02` 或关闭 fork memory diagnostic 来避免在 report 路径立即 panic，但这只会隐藏 `ShadowObject` backing 链损坏的观测点，不能证明内存生命周期问题已经消失。

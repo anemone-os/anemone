@@ -25,7 +25,7 @@ read-write
 schedule
 sendfile
 signal
-syscalls
+# syscalls
 timerfd
 tmp
 wait

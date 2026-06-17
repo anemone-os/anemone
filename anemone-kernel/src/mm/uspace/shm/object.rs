@@ -33,6 +33,19 @@ impl ShmObject {
 }
 
 impl VmObject for ShmObject {
+    fn memory_report_kind(&self) -> Option<VmMemoryReportKind> {
+        Some(VmMemoryReportKind::Shm)
+    }
+
+    fn fill_memory_report(
+        &self,
+        range: core::ops::Range<usize>,
+        kind: VmMemoryReportKind,
+        report: &mut VmMemoryReport,
+    ) {
+        report.add_shared(kind, self.pages.read().range(range).count());
+    }
+
     fn resolve_frame(
         &self,
         pidx: usize,
