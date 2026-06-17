@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** task / topology / procfs / kthread
 **权威计划：** [RFC-20260616-kthread-core](../../rfcs/kthread-core/index.md), [不变量需求](../../rfcs/kthread-core/invariants.md), [迁移实施计划](../../rfcs/kthread-core/implementation.md)
-**当前阶段：** 阶段 4 gate 已关闭，准备阶段 5 post-gate user-facing boundary closeout
+**当前阶段：** 阶段 5 source audit / policy closeout 已完成，runtime smoke 待批准
 
 ## 范围
 
@@ -724,11 +724,87 @@
 
 **未运行：** QEMU、boot smoke、LTP / user-test。阶段 4 当前关闭在 source/build gate；runtime smoke 与更广的 user-facing policy 复查进入阶段 5。
 
+### 2026-06-17 - 阶段 5 启动
+
+**阶段：** 阶段 5 - post-gate user-facing boundary closeout。
+
+**执行：** 总控重新阅读 RFC index、invariants、implementation、tracking issues、当前限制和本事务日志，确认阶段 5 只承担 post-gate source audit、errno / inert policy 记录和 focused smoke，不再承担让 ordinary kthread `TaskBinding::KThread` 变安全的职责。
+
+**当前工作树：**
+
+- 已有用户 / 其他 agent 改动：`anemone-apps/user-test/ltp/profile.txt`、`anemone-apps/user-test/src/ltp.rs`。阶段 5 不触碰这些文件。
+- 阶段 4 已关闭在 source/build gate；QEMU / procfs / job-control / signal smoke 尚未运行。
+
+**本轮审计分工：**
+
+- `phase5-user-facing-resolver-audit`：只读审计 direct pid/tid/tgid target、process-group/session/uid/broadcast 枚举、priority/resource/scheduler/futex/signal/jobctl/wait 等 user-facing resolver 的 kthread target policy。
+- `phase5-procfs-topology-wait-audit`：只读审计 procfs display helper、procfs binding lazy creation / invalidation、wait/reap 与 parent-child topology 边界。
+- 总控本地复核 worker 结果、维护事务日志，并只在阶段 5 write set 内做必要窄修。
+
+**阶段 5 write set：**
+
+- `anemone-kernel/src/fs/proc/root/file.rs`
+- `anemone-kernel/src/fs/proc/tgid/{binding.rs,cmdline.rs,mod.rs,stat.rs,status.rs}`
+- `anemone-kernel/src/task/api/wait/*`
+- `anemone-kernel/src/task/api/jobctl/{getpgid.rs,getsid.rs,setpgid.rs,setsid.rs}`
+- `anemone-kernel/src/task/sig/api/{mod.rs,kill.rs,tkill.rs,tgkill.rs,rt_sigqueueinfo.rs}`
+- `anemone-kernel/src/task/api/priority.rs`
+- `anemone-kernel/src/task/resource/api/prlimit64.rs`
+- `anemone-kernel/src/task/api/futex/get_robust_list.rs`
+- topology accessor / display helper 的窄修仅限阶段 5 审计发现与 user-facing boundary 直接相关时。
+- 本事务日志。
+
+**停止条件：**
+
+- 若审计发现阶段 4 遗漏任何能命中 kthread 的 user-facing path，必须回到阶段 4 gate 补修或回滚 ordinary kthread `TaskBinding::KThread` enablement；不得把它记录成普通阶段 5 后续项。
+- 若需要编辑上述 write set 之外的文件，必须先记录 write-set expansion request 并等待批准。
+- 若需要改变 direct user API 的 errno / inert policy 并影响 RFC contract，必须先更新 RFC / tracking issue。
+
+### 2026-06-17 - 阶段 5 source audit 与 policy closeout
+
+**阶段：** 阶段 5 - post-gate user-facing boundary closeout。
+
+**执行：** 启动两个只读审计 agent，并由总控本地复核 `get_task()` / `get_thread_group()` / `for_each_task()` / `for_each_thread_group_from()`、`pgid()` / `sid()` / `parent_tgid()`、procfs binding 和 user-facing syscall 调用点。两个审计 agent 均未修改文件，也未运行构建或 runtime smoke。
+
+**审计结论：**
+
+- `phase5-user-facing-resolver-audit` 未发现 Apollyon / Keter / Euclid；建议把 `capget(pid)`、direct target fail-closed、current/self selector by-construction 和 procfs inert 子项写入阶段 5 policy 记录。
+- `phase5-procfs-topology-wait-audit` 未发现 Apollyon / Keter / Euclid；确认 procfs root readdir / lookup、binding invalidation、display helper、wait/reap 和 `pgid()` / `sid()` / `parent_tgid()` 调用点分类符合 RFC。
+- 审计发现一个 Safe 注释问题：`fs/proc/tgid/binding.rs` 的 `binding_tx()` 注释仍写成多锁时 binding lock 优先。阶段 4 后真实协议是 topology -> procfs binding；总控已把该注释改为：binding-only lookup 可单独调用，涉及 topology liveness 的调用者必须已持有 topology lock，且闭包内不能反向进入 topology。
+
+**policy 记录：**
+
+- direct specified kthread target 统一 fail closed 为 `NoSuchProcess`：direct signal target、`getpgid(pid)`、`getsid(pid)`、`setpgid(pid, ...)`、priority `PRIO_PROCESS`、`prlimit64(pid, ...)`、`get_robust_list(tid)` 和 `capget(pid)`。
+- `pid == 0`、`who == 0`、current process group / session、`capset(pid == 0/current)`、`getrlimit`、`getrusage`、`getppid`、`clone`、`setsid` 和 `sched_yield` 属于 current/self selector；kthread 不触发 syscall，因此不新增 current-kthread 防御。
+- process-group / session / UID / broadcast 枚举在 materialize 前只收集 `ThreadGroupType::User`，或因 kthread 不加入 PG/session membership 无法观察 kthread。
+- wait/reap 不读取 procfs display parent；它只扫描当前 user parent 的 `children_tgids`，且 scanner 先跳过非 `ThreadGroupType::User`。
+- procfs 对 active kthread 可见：`status` / `stat` 通过 `proc_display_parentage()` 输出 inert parent / pgrp / session；`cmdline` / `environ` 为空读；`cwd` / `exe` 返回 `NotFound`；`fd` 非 self 访问为 `AccessDenied`；`root` / `mounts` 是当前 stage-1 inert / read-only 展示。这些展示字段不反向驱动 job-control、wait/reap、signal permission、priority/resource 或 lifecycle。
+- 当前 scheduler user API 只有 `sched_yield` current-only 入口；没有 target 型 scheduler API 需要按 kthread target 分流。
+
+**source evidence：**
+
+- `proc_display_parentage()` 全仓只被 `fs/proc/tgid/stat.rs` 和 `fs/proc/tgid/status.rs` 使用。
+- `/proc/<tgid>` lazy lookup 在缺少 existing binding 时通过 `with_active_thread_group()` 持 topology read lock 后创建 binding；kthread unpublish 持 topology write lock 后调用 `invalidate_thread_group_binding()`，随后移除 topology task / thread group。
+- `kernel_exit()` 对 kthread panic；`kthread_entry_shim()` 不再调用完整 `kernel_exit()`。
+- kthread core legacy `KThreadService` / park / weak handle / typed start pointer 查询无源码命中。
+
+**验证：**
+
+- source audit：`rg -n "proc_display_parentage\(" anemone-kernel/src` 确认 display helper 只服务 procfs `stat` / `status`。
+- source audit：`rg -n "binding_tx\(|with_active_thread_group\(|invalidate_thread_group_binding\(|try_unbind_thread_group\(" anemone-kernel/src/fs/proc anemone-kernel/src/task/topology anemone-kernel/src/task/api/wait` 确认 lookup / invalidation / wait unbind 路径仍按 topology / binding 边界分工。
+- source audit：`rg -n "kernel_exit\(" anemone-kernel/src/task/kthread anemone-kernel/src/task/api/exit` 确认 kthread entry 不调用完整 `kernel_exit()`。
+- source audit：`rg -n "KThreadService|service\.rs|should_park|parkme|start_parked|KThreadRef|KThreadStart|KThreadStartPointer|ParameterList::new\(\&\[start_arg" anemone-kernel/src/task/kthread anemone-kernel/src/fs/inode_shrinker.rs anemone-kernel/src/mm/oom.rs` 无输出，确认 legacy service / park / weak handle / typed start pointer 未回流。
+- source audit：direct target 与枚举路径复查覆盖 job-control、signal、priority、`prlimit64`、`get_robust_list` 和 `capget`；指定 kthread target policy 与上方 `NoSuchProcess` 记录一致，current/self selector 未新增 current-kthread 防御。
+- `git diff --check`：通过。
+- `just build`：通过；仅有既有 `anemone-kernel/src/sync/mono.rs` unused import warning。
+- `mdbook build docs`：通过。
+
+**未运行 runtime smoke：** 本阶段没有修改 `user-test` 或测试盘脚本。当前 `anemone-apps/user-test/ltp/profile.txt` 已由用户 / 其他 agent 改为 `timerfd`，不覆盖 `/proc/2/status`、ordinary kthread procfs、job-control / signal direct target 或短命 kthread unpublish smoke。阶段 5 runtime smoke 仍未运行；需要单独批准测试 write set 或由用户运行相应 profile / smoke。
+
 ## 开放事项
 
-- 准备阶段 5 post-gate user-facing boundary closeout：补齐更广的 source audit、errno / inert policy 记录和 focused smoke。
-- 阶段 5 若发现阶段 4 遗漏能命中 kthread 的 user-facing path，必须回到阶段 4 gate 补修并记录 correction，不能作为普通阶段 5 后续项处理。
-- QEMU / procfs / job-control / signal smoke 尚未运行。
+- 阶段 5 source audit、errno / inert policy 记录已完成，未发现需要回到阶段 4 gate 的漏口。
+- QEMU / procfs / job-control / signal smoke 尚未运行；需单独批准测试 write set 或由用户运行相应 smoke。
 
 ## 收口
 

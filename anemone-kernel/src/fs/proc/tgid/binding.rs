@@ -80,8 +80,11 @@ pub fn try_unbind_thread_group(tgid: Tid) {
     invalidate_thread_group_binding(tgid);
 }
 
-/// [BINDING_TX_LOCK] must be held as first lock if multiple locks should be
-/// held.
+/// Serialize procfs `<tgid>` binding map updates.
+///
+/// Binding-only lookups may call this directly. When the operation also depends
+/// on task topology liveness, callers must already hold the topology lock and
+/// must not call back into topology from inside this closure.
 pub fn binding_tx<F: FnOnce(&mut HashMap<Tid, Arc<ThreadGroupBinding>>) -> R, R>(f: F) -> R {
     let _tx = BINDING_TX_LOCK.lock();
 
