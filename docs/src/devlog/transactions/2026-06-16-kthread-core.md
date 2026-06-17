@@ -1,10 +1,10 @@
 # 2026-06-16 - KThread Core
 
-**状态：** 活动中
+**状态：** 已关闭
 **负责人：** doruche, Codex
 **领域：** task / topology / procfs / kthread
 **权威计划：** [RFC-20260616-kthread-core](../../rfcs/kthread-core/index.md), [不变量需求](../../rfcs/kthread-core/invariants.md), [迁移实施计划](../../rfcs/kthread-core/implementation.md)
-**当前阶段：** 阶段 5 source audit / policy closeout 已完成，runtime smoke 待批准
+**当前阶段：** 阶段 6 consumer closeout / source audit 已完成；runtime smoke 按用户指示未运行
 
 ## 范围
 
@@ -803,9 +803,49 @@
 
 ## 开放事项
 
-- 阶段 5 source audit、errno / inert policy 记录已完成，未发现需要回到阶段 4 gate 的漏口。
-- QEMU / procfs / job-control / signal smoke 尚未运行；需单独批准测试 write set 或由用户运行相应 smoke。
+- 无 active tracking gate。
+- QEMU / procfs / job-control / signal / SMP remote-wake smoke 按用户指示未运行；本事务不把这些记录为已验证。
+
+### 2026-06-17 - 阶段 6 consumer closeout 与 source audit
+
+**阶段：** 阶段 6 - consumer closeout 与完整 source audit。
+
+**执行：** 启动 `phase6-kthread-source-audit` 只读审计；该 agent 未发现 Apollyon / Keter / Euclid 问题。总控随后本地复核 consumer、kthread core、`Task::new_kernel()` 使用点、topology membership 和 exit path。按用户后续指示，本阶段不运行 build、QEMU、user-test、LTP 或 runtime smoke。
+
+**实际 write set：**
+
+- `anemone-kernel/src/mm/oom.rs`
+- 本事务日志
+- `docs/src/rfcs/kthread-core/index.md`
+- `docs/src/rfcs/kthread-core/implementation.md`
+- `docs/src/rfcs.md`
+- 双周 devlog
+
+**变更：**
+
+- OOM victim scoring 入口先按 `ThreadGroupType::User` 分流，确保 victim selection 跳过 kthread topology，而不是只依赖 `TaskFlags::KERNEL` 这类 defensive cache。
+- 保留 leader flags 的 `is_idle()` / `is_kernel()` 检查作为防御性缓存检查，并用注释说明它不是 kthread classifier。
+
+**consumer closeout：**
+
+- inode shrinker 持有 strong `KThreadHandle`；entry loop 只检查 `ctx.should_stop()`、frame pressure predicate 和 inode-cache shrink predicate，不依赖 service、park/unpark 或 raw `Task` handle。
+- OOM killer 持有 strong `KThreadHandle`；`wake_oom_killer()` 只发布 wake，worker 醒后重查 frame pressure 和 active-victim 状态；victim selection 按 user topology 过滤 kthread。
+
+**source audit：**
+
+- `task::kthread` public surface 只暴露 `KThreadBuilder`、`KThreadPlacement`、`KThreadEntry`、`KThreadCtx`、`KThreadHandle` 和 `init_kthreadd`；无 public `KThreadRef`。
+- 源码中无 `KThreadService`、park/unpark kthread state、independent registry、`KThreadId`、内部 `KThread` object 或 external `Arc<Task>` lifecycle handle。
+- `Task::new_kernel()` 使用点分类：BSP bootstrap 和 `kthreadd` 使用 fixed-TID `new_kernel_with_tid_handle()`；AP bootstrap 使用普通 allocator 加入 init thread group；clone path 使用 ordinary `Task::new_kernel()` 加入 user thread group；ordinary kthread create path 只在 `kthreadd::spawn()` 中使用 `Task::new_kernel()` 并在 publish 前安装 `KThreadTaskLocal`。
+- `kthread_entry_shim()` 调用专用 `kthread_exit(result)`；`kernel_exit()` 对 kthread 直接 panic，未发现 kthread entry 回到完整 user-process exit path。
+- ordinary kthread 通过 `TaskBinding::KThread` 发布；topology shape assertion 要求 singleton thread group、无 `pgid/sid`、空 `children_tgids`，不进入普通 process-group/session membership。
+
+**未运行验证：**
+
+- 用户明确要求“这里不用做验证了”，因此本阶段未运行 `git diff --check`、`just build`、mdBook、QEMU、user-test、LTP 或 focused smoke。
+- 未运行项包括 fixed `kthreadd` TID 2 runtime smoke、ordinary allocator runtime smoke、spawn / wake / request-stop / wait-exited runtime smoke、procfs visibility before/after exit runtime smoke，以及 SMP remote wake smoke。
+
+**结论：** 阶段 6 source / consumer gate 已按当前用户边界关闭。第一阶段 `kthread-core` implementation gates 在源码与文档层收口；runtime 验证未作为本轮完成条件。
 
 ## 收口
 
-尚未关闭。
+已关闭。

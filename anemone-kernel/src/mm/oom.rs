@@ -148,6 +148,9 @@ fn thread_group_snapshot() -> Vec<Arc<ThreadGroup>> {
 
 fn score_thread_group(tg: &Arc<ThreadGroup>) -> Option<usize> {
     let tgid = tg.tgid();
+    if tg.ty() != ThreadGroupType::User {
+        return None;
+    }
     if tgid == Tid::IDLE || tgid == Tid::INIT {
         return None;
     }
@@ -157,6 +160,8 @@ fn score_thread_group(tg: &Arc<ThreadGroup>) -> Option<usize> {
 
     let leader = tg.leader()?;
     let flags = leader.flags();
+    // Victim eligibility is a user-process topology policy. The kernel flag is
+    // only a defensive cache check here, not the kthread classifier.
     if flags.is_idle() || flags.is_kernel() {
         return None;
     }

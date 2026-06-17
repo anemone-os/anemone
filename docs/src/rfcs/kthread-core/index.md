@@ -1,12 +1,12 @@
 # RFC-20260616-kthread-core
 
-**状态：** 已接受，阶段 4 gate 已关闭
+**状态：** 已接受，阶段 6 implementation gate 已关闭
 **负责人：** doruche, Codex
 **最后更新：** 2026-06-17
 **领域：** task / topology / procfs / kthread
 **事务日志：** [2026-06-16-kthread-core](../../devlog/transactions/2026-06-16-kthread-core.md)
 **开放问题：** 当前无 active tracking gate；已关闭的 review findings 保留在 [Tracking Issues](./tracking-issues.md)。
-**下一步：** 按 [迁移实施计划](./implementation.md) 进入阶段 5 post-gate user-facing boundary closeout，补齐更广的 source audit、errno / inert policy 记录和 focused smoke。
+**下一步：** 第一阶段源码与文档 gate 已关闭；runtime smoke 按本轮用户指示未运行，后续 workqueue、closure API、Linux procfs 展示兼容、freezer/park 和 CPU hotplug 仍作为独立后续工作。
 
 ## 摘要
 
