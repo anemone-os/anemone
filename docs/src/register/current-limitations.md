@@ -398,6 +398,36 @@
 **Last Verified:** 2026-05-28
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
+## ANE-20260617-SPLICE-FAMILY-COPY-BACKED-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** VFS / pipe / splice / syscall ABI
+
+**Summary:** 当前 `splice` / `tee` / `vmsplice` 已有 generic syscall 入口。`splice` 是
+copy-backed stage-1：通过页大小内核 buffer 和现有 `FileDesc` read/write 路径覆盖基础
+file/pipe/pipe 搬运及 `splice03` / `splice07` 关注的 errno 矩阵，但不提供 Linux zero-copy pipe
+buffer sharing、socket splice、procfs target 特化或 `/dev/zero` / `/dev/full` 新版本 splice
+语义。`tee` 和 `vmsplice` 只注册错误语义入口：valid pipe functional path 返回
+`EOPNOTSUPP` 并打 notice，不伪造 pipe buffer duplication、用户 iovec 搬运、page pin/gift 或
+full-pipe 行为。`SPLICE_F_MOVE` / `SPLICE_F_MORE` / `SPLICE_F_GIFT` 在 copy-backed `splice` 中是可见
+no-op，`SPLICE_F_NONBLOCK` 在 functional path 上 fail closed 为 `EINVAL`。
+
+**Decision:** 本阶段只为高 ROI LTP errno 和小长度 copy-backed smoke 收口，不把 splice family
+作为完整 pipe buffer / MM / socket 协议引入。真实 `tee`、functional `vmsplice`、per-call
+nonblocking 和动态 pipe capacity 需要单独设计。
+
+**Exit Condition:** 为 pipe 引入可审查的 buffer duplication / sharing 或等价抽象，补齐
+`tee` 不消费 input pipe 的语义、`vmsplice` 用户 iovec 到 pipe 的 functional path、per-call
+`SPLICE_F_NONBLOCK` I/O context，以及需要的 socket/devfs/procfs target 支持；随后重新验证
+`splice01`、`splice02`、`splice03`、`splice04`、`splice05`、`splice06`、`splice07`、
+`splice08`、`splice09`、`tee01`、`tee02` 和 `vmsplice01..04`，并按实际通过面拆除或收窄本限制。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-17
+**Related:** [splice family copy-backed stage-1 小迭代记录](../devlog/changes/2026-06-17-splice-copy-stage1.md), [当前限制：pipe procfs knobs stage-1](#ane-20260528-pipe-procfs-knobs-stage1)
+
 ## ANE-20260528-RAMFS-RENAME-STAGE1
 
 **Type:** Limitation

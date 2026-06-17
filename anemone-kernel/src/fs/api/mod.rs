@@ -38,6 +38,7 @@ pub mod read_write;
 pub mod readlinkat;
 pub mod renameat2;
 pub mod sendfile;
+pub mod splice;
 pub mod stat;
 pub mod statfs;
 pub mod symlinkat;

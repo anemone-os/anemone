@@ -16,7 +16,7 @@ frame_section_shift_mb = 7
 qemu = "qemu-system-loongarch64"
 machine = "virt"
 smp = 4
-memory = "4G"
+memory = "1G"
 # cpu = default
 args = [
     "-nographic",
@@ -31,15 +31,15 @@ args = [
     "-device",
     "pcie-root-port,id=pcie.1,bus=pcie.0",
 
-    # "-drive",
-    # "file=build/rootfs/minimal-la/rootfs.img,format=raw,if=none,id=x0", # vda
-    # "-device",
-    # "virtio-blk-pci-transitional,drive=x0,bus=pcie.0",
+    "-drive",
+    "file=build/rootfs/minimal-la/rootfs.img,format=raw,if=none,id=x0", # vda
+    "-device",
+    "virtio-blk-pci-transitional,drive=x0,bus=pcie.0",
 
-    # "-drive",
-    # "file=sdcard-la.img,format=raw,if=none,id=x1",     # vdb
-    # "-device",
-    # "virtio-blk-pci-transitional,drive=x1,bus=pcie.0",
+    "-drive",
+    "file=sdcard-la.img,format=raw,if=none,id=x1",     # vdb
+    "-device",
+    "virtio-blk-pci-transitional,drive=x1,bus=pcie.0",
 ]
 
 [rootfs]

@@ -169,6 +169,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../ltp/groups/signal.txt"),
     },
     LtpGroup {
+        name: "splice",
+        cases: include_str!("../ltp/groups/splice.txt"),
+    },
+    LtpGroup {
         name: "schedule",
         cases: include_str!("../ltp/groups/schedule.txt"),
     },

@@ -329,6 +329,15 @@ pub mod linux {
         pub iov_len: u64,
     }
 
+    pub const IOV_MAX: usize = 1024;
+
+    pub mod splice {
+        pub const SPLICE_F_MOVE: u32 = 0x01;
+        pub const SPLICE_F_NONBLOCK: u32 = 0x02;
+        pub const SPLICE_F_MORE: u32 = 0x04;
+        pub const SPLICE_F_GIFT: u32 = 0x08;
+    }
+
     pub const STDIN_FILENO: usize = 0;
     pub const STDOUT_FILENO: usize = 1;
     pub const STDERR_FILENO: usize = 2;

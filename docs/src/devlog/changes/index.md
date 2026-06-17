@@ -32,6 +32,7 @@
 
 ## 当前记录
 
+- [2026-06-17 - splice family copy-backed stage-1](./2026-06-17-splice-copy-stage1.md)
 - [2026-06-15 - backend-aware fcntl pipe-size 分发](./2026-06-15-backend-aware-fcntl.md)
 - [2026-06-14 - SysV shm credentials permission hook](./2026-06-14-sysv-shm-cred-permissions.md)
 - [2026-06-14 - procfs sysctl PDE 静态树](./2026-06-14-procfs-sysctl-pde-tree.md)
