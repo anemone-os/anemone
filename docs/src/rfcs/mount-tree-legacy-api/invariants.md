@@ -1,6 +1,6 @@
 # mount tree legacy API 不变量需求
 
-**状态：** Draft
+**状态：** Canonical
 **最后更新：** 2026-06-18
 **父 RFC：** [RFC-20260604-mount-tree-legacy-api](./index.md)
 

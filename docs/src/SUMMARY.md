@@ -36,6 +36,7 @@
 		- [Inode Shrinker](./devlog/transactions/2026-06-14-inode-shrinker.md)
 		- [OOM Killer](./devlog/transactions/2026-06-15-oom-killer.md)
 		- [KThread Core](./devlog/transactions/2026-06-16-kthread-core.md)
+		- [Mount Tree Legacy API](./devlog/transactions/2026-06-18-mount-tree-legacy-api.md)
 - [初赛冲刺策略（2026-05 至 2026-06）](./preliminary-contest-sprint.md)
 - [已知问题与当前限制](./known-issues-and-limitations.md)
 	- [活动登记册](./register.md)

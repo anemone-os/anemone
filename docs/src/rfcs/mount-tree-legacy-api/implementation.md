@@ -1,6 +1,6 @@
 # mount tree legacy API 迁移实施计划
 
-**状态：** Draft
+**状态：** Active
 **最后更新：** 2026-06-18
 **父 RFC：** [RFC-20260604-mount-tree-legacy-api](./index.md)
 **不变量：** [不变量需求](./invariants.md)
@@ -569,7 +569,8 @@ write set：
 
 ## 实现期反馈记录
 
-- 2026-06-18：文档层反馈重分类；阶段 3/4 依赖环和 attach revalidation 已折回 canonical text，lazy-detach cleanup 与 detached-path namei 改为 Gate P1/P2；目标和不变量保持不变；事务日志尚未建立。
+- 2026-06-18：文档层反馈重分类；阶段 3/4 依赖环和 attach revalidation 已折回 canonical text，lazy-detach cleanup 与 detached-path namei 改为 Gate P1/P2；目标和不变量保持不变。
+- 2026-06-18：阶段 0 关闭，事务日志 [2026-06-18-mount-tree-legacy-api](../../devlog/transactions/2026-06-18-mount-tree-legacy-api.md) 已建立；阶段 1 尚未启动。
 
 ## Write Set 扩展记录
 
