@@ -25,3 +25,5 @@ kernel-la
 kernel-rv
 LOCAL.md
 .codex
+kernel-*
+disk*.img
