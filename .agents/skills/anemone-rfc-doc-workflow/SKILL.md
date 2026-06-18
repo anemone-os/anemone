@@ -28,12 +28,16 @@ If the task involves review findings or issue severity, also use `anemone-code-r
 - Small change tracking issues are local to the record. Do not create standalone `tracking-issues.md`, `invariants.md`, or `implementation.md` under `changes/`; if the work needs repository-level accepted contracts, non-trivial invariants, staged gates, multi-agent/checkpoint orchestration, or repeated document-layer review, upgrade to the RFC workflow.
 - Biweekly devlogs are timeline summaries and query entry points. Keep enough summary, area, validation status, and links for scanning; put longer small-change facts in `changes/` and long-running execution facts in `transactions/`.
 - Public RFCs live under `docs/src/rfcs/<short-slug>/` and become canonical immediately after promotion.
-- Large feature work should close the document protocol before code implementation unless the user explicitly narrows the task differently.
+- Large feature work should close the document protocol before code implementation unless the user explicitly narrows the task differently. Closing the protocol means the accepted contract, validation floor, stop conditions, and feedback routes are explicit; it does not mean every uncertainty has been eliminated before code starts.
 - RFCs record accepted contract, scope, invariants, and planned gates. Transaction devlogs record execution facts, checkpoints, review results, validation evidence, corrections, and handoff.
+- Probe / vertical-slice gates are allowed for high-risk design points when the RFC states the hypothesis, minimum write set, validation floor, failure signal, and RFC write-back path. Probe code must not become a permanent abstraction unless the evidence is recorded and the RFC accepts the resulting contract.
+- Do not create generic `feedback.md`, `probe.md`, or `experiments.md` files by default. Probe plans belong in RFC `implementation.md`; execution feedback belongs in transaction devlog entries. Use `backgrounds/<topic>-probe-YYYYMMDD.md` only for large evidence packets, and keep it factual rather than a plan or status layer.
+- Feedback can optimize the route, not rewrite the destination. If implementation shows a goal, invariant, ABI boundary, or acceptance condition is wrong, stop the current gate and return to RFC review. Do not weaken invariants, shrink goals, lower validation floors, hide failures, rename blockers as limitations, or land hacks just to pass a gate before canonical RFC text is updated.
 - When a feature spans multiple RFCs, use a lightweight navigation entry in an umbrella RFC or `docs/src/rfcs.md`; do not create a parallel feature-progress ledger or copy transaction-devlog facts into another status file.
 - Structural module splitting is allowed when it preserves behavior inside the same owner boundary and prevents more responsibility from accumulating in an already-mixed file. If the split changes owner surfaces, public APIs, shared contracts, or write sets, require the normal expansion report and record it before implementation continues.
 - If a small change starts needing repository-level accepted contract text, non-trivial invariants, staged implementation gates, standalone `tracking-issues.md`, or multi-agent/checkpoint orchestration, upgrade to the RFC workflow instead of expanding `changes/` into a small RFC.
 - Write sets are coordination contracts, not architecture constraints. A worker must not silently edit outside its assigned write set, but if the better design needs a different owning surface, it should stop and report the proposed expansion instead of forcing compatibility inside the old write set.
+- `tracking-issues.md` remains for design issues, not progress logs. A design issue may come from document-layer review or from implementation feedback that exposes a wrong invariant, owner boundary, ABI choice, stage order, or acceptance condition.
 
 ## Workflow
 
@@ -86,6 +90,12 @@ If the task involves review findings or issue severity, also use `anemone-code-r
    - Link RFC `index.md` to the transaction and transaction `Canonical Plan` back to the RFC.
    - Update `docs/src/devlog/transactions/index.md`, the current biweekly devlog, and `docs/src/SUMMARY.md`.
    - Transaction entries should be append-only. Add correction notes instead of silently rewriting completed stages.
+   - If the next stage is high risk, add or verify a probe / vertical-slice gate in `implementation.md` before feature code: hypothesis, protected goal/invariant, minimum write set, non-goals, validation floor, failure signal, write-back target, and exit path.
+   - Route implementation feedback by impact:
+     - execution facts, checkpoints, review results, and validation evidence stay in the transaction devlog;
+     - stage order, write set, validation floor, review gate, or stop-condition changes update `implementation.md` plus the transaction devlog;
+     - invariant, owner-boundary, ABI, visible-semantics, or acceptance-boundary changes update `index.md` / `invariants.md` and the relevant tracking issue;
+     - accepted gaps go to current limitations, while broken expected behavior goes to open issues.
    - For large or fast-growing modules, add a module-boundary preflight or split-only checkpoint before feature code if continuing in the same file would reinforce a wrong owner boundary.
    - If a worker needs a larger write set for architectural reasons, require an upward report with the reason, proposed files/modules, affected contract, and validation gate. After approval, record the updated write set in the transaction devlog or orchestration doc before continuing.
 

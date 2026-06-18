@@ -109,6 +109,18 @@ utils（工具）、misc（杂项）或某人的姓名首字母缩写
 
 明确的成功标准可以让你独立循环。模糊标准（“让它能工作”）则需要不断确认。
 
+### RFC / 大型实现反馈闭环
+
+对于走 RFC 或事务 devlog 的大型实现，文档层闭合不是要求实现前消除所有不确定性。可以带着受约束的不确定性进入实现，但每个不确定点必须有明确归属、验证方式、停止条件和回写路径。
+
+高风险设计点应优先安排 probe / vertical slice gate，验证真实接口、状态流转、错误路径、性能或模块集成风险。探针必须保持最小 write set，说明失败信号和删除/回写条件；除非 RFC 接受对应 contract 变化并在事务日志中记录证据，否则探针代码不得自然沉淀为长期抽象。
+
+不要为反馈机制默认新建通用 `feedback.md`、`probe.md` 或 `experiments.md`。probe 计划写在 RFC `implementation.md`，执行反馈写在 transaction devlog；只有证据包过长时，才在对应 RFC 的 `backgrounds/` 下增加具体命名的证据文件。
+
+反馈机制只能优化路线，不能篡改目标或私自削弱不变量。如果实现暴露出目标、不变量、ABI 边界或验收条件本身有问题，必须停止当前 gate 并回到 RFC review；在 canonical 文本更新前，不得为了通过 gate 缩小目标、调低验证集合、隐藏失败路径、把必须满足的不变量改成建议项，或写临时 hack 接受更弱语义。
+
+实现期发现的问题按影响归属：执行事实写 transaction devlog；阶段顺序、write set、验证 floor 或停止条件变化回写 `implementation.md`；不变量、状态所有权、ABI 边界或接受边界变化回写 RFC canonical 文本和 `tracking-issues.md`；接受限制或开放缺陷进入 register / current limitations。不要用临时兼容层绕过无法分类的设计反馈。
+
 ---
 
 **这些指南有效的表现：** diff 中不必要的改动减少；因过度复杂化而重写的次数减少；在实现前先提问澄清，而不是在犯错后再询问。

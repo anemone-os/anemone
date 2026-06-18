@@ -7,6 +7,7 @@
 	- [2026-05-25 至 2026-06-07](./devlog/2026-05-25_to_2026-06-07.md)
 	- [2026-06-08 至 2026-06-21](./devlog/2026-06-08_to_2026-06-21.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-06-18 - RFC workflow feedback loop](./devlog/changes/2026-06-18-rfc-feedback-loop.md)
 		- [2026-06-17 - splice family copy-backed stage-1](./devlog/changes/2026-06-17-splice-copy-stage1.md)
 		- [2026-06-15 - backend-aware fcntl pipe-size 分发](./devlog/changes/2026-06-15-backend-aware-fcntl.md)
 		- [2026-06-14 - SysV shm credentials permission hook](./devlog/changes/2026-06-14-sysv-shm-cred-permissions.md)
