@@ -76,7 +76,7 @@ impl Gpr {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct RiscV64TrapFrame {
     gpr: Gpr,
     sstatus: u64,
