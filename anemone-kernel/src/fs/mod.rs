@@ -47,7 +47,7 @@ pub use self::{
         InodeType, ModifType, OpenedFile,
     },
     iomux::{PollEvent, PollRegisterResult, PollRequest},
-    mount::{Mount, MountFlags, MountSource},
+    mount::{Mount, MountData, MountFlags, MountSource},
     namei::{
         ResolveFlags, resolve, resolve_from, resolve_from_with_root,
         resolve_from_with_root_checked, resolve_parent, resolve_parent_from,
@@ -88,6 +88,7 @@ mod namespace {
             fs: Arc<FileSystem>,
             source: MountSource,
             flags: MountFlags,
+            data: MountData,
             mountpoint: Option<&PathRef>,
         ) -> Result<Arc<Mount>, SysError> {
             let (parent, mp_dentry) = match mountpoint {
@@ -100,7 +101,7 @@ mod namespace {
                 return Err(SysError::AlreadyExists);
             }
 
-            let sb = fs.mount(source, flags)?;
+            let sb = fs.mount(source, flags, data)?;
 
             let root_inode = sb.root_inode().clone();
             let root_dentry = Arc::new(Dentry::new("/".to_string(), None, root_inode));
@@ -143,7 +144,7 @@ mod namespace {
             source: MountSource,
             flags: MountFlags,
         ) -> Result<Arc<Mount>, SysError> {
-            self.mount(fs, source, flags, None)
+            self.mount(fs, source, flags, MountData::Null, None)
         }
 
         pub(super) fn mount_at(
@@ -153,7 +154,18 @@ mod namespace {
             flags: MountFlags,
             mountpoint: &PathRef,
         ) -> Result<Arc<Mount>, SysError> {
-            self.mount(fs, source, flags, Some(mountpoint))
+            self.mount(fs, source, flags, MountData::Null, Some(mountpoint))
+        }
+
+        pub(super) fn mount_at_with_data(
+            &mut self,
+            fs: Arc<FileSystem>,
+            source: MountSource,
+            flags: MountFlags,
+            data: MountData,
+            mountpoint: &PathRef,
+        ) -> Result<Arc<Mount>, SysError> {
+            self.mount(fs, source, flags, data, Some(mountpoint))
         }
 
         /// Unmount a filesystem from this namespace.
@@ -277,6 +289,24 @@ mod vfs {
         let fs = get_filesystem(fs_name).ok_or(SysError::NotFound)?;
 
         VFS.visible.write().mount_at(fs, source, flags, mountpoint)
+    }
+
+    /// Mount a filesystem into visible namespace with legacy mount data.
+    ///
+    /// Only syscall adapters should call this entry. Internal callers use
+    /// `mount_at` so they cannot accidentally propagate legacy user ABI data.
+    pub fn mount_at_with_data(
+        fs_name: &str,
+        source: MountSource,
+        flags: MountFlags,
+        data: MountData,
+        mountpoint: &PathRef,
+    ) -> Result<Arc<Mount>, SysError> {
+        let fs = get_filesystem(fs_name).ok_or(SysError::NotFound)?;
+
+        VFS.visible
+            .write()
+            .mount_at_with_data(fs, source, flags, data, mountpoint)
     }
 
     /// Mount a filesystem into visible namespace as the root mount.

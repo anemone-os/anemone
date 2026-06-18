@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** fs / VFS / mount / LTP
 **权威计划：** [RFC-20260604-mount-tree-legacy-api](../../rfcs/mount-tree-legacy-api/index.md), [不变量需求](../../rfcs/mount-tree-legacy-api/invariants.md), [迁移实施计划](../../rfcs/mount-tree-legacy-api/implementation.md)
-**当前阶段：** 阶段 0 公开 RFC 协议关闭已完成；阶段 1 UAPI parser 尚未启动
+**当前阶段：** 阶段 1 UAPI parser 已关闭；阶段 2 尚未启动
 
 ## 范围
 
@@ -91,3 +91,90 @@
 - stale 状态搜索：首次发现本次修正前的 `invariants.md` Draft 标记；修正后复查无匹配。
 
 **下一步：** 阶段 0 关闭。下一次实现动作只能启动阶段 1 `phase1-mount-parser-worker`，并按本事务日志记录的 write set / 停止条件推进。
+
+### 2026-06-18 - 阶段 1 UAPI parser 本地实现
+
+**阶段：** 阶段 1 - UAPI parser、flag 分层、legacy data 和 syscall alias。
+
+**write set 扩展：**
+
+- 用户批准将 `anemone-kernel/src/fs/api/mount.rs` 和 `anemone-kernel/src/fs/api/umount.rs` 收归到 `anemone-kernel/src/fs/api/mount/` 目录，用于 legacy mount / umount syscall 和未来 mount-family syscall adapter。
+- `implementation.md` 已同步记录该扩展，并允许 `anemone-kernel/src/fs/api/mod.rs` 做模块声明调整。
+- 阶段 1 实现需要把 legacy `MountData` 从 syscall adapter 传到 filesystem backend，因此增加 `anemone-kernel/src/fs/mod.rs` 的 syscall-only `mount_at_with_data` call-through。该 helper 只透传 `MountData`，未改变当前 `NameSpace` / future `MountTree` topology owner、stack visibility、bind/move/remount 或 unmount transaction 语义。
+
+**源码变更：**
+
+- `anemone-abi/src/fs.rs` 补齐 legacy mount/umount 第一版需要识别的 Linux UAPI 常量，包括 `MS_BIND`、`MS_REC`、`MS_MOVE`、`MS_REMOUNT`、propagation bits、`MS_SILENT` / `MS_VERBOSE`、`MNT_DETACH`、`MNT_EXPIRE`、`MNT_FORCE` 和 `UMOUNT_NOFOLLOW`。
+- `anemone-kernel/src/fs/api/mount/{mod.rs,mount.rs,umount.rs}` 接管 mount-family syscall adapter。`sys_mount()` 现在在 syscall 边界完成 raw flag allowlist、operation bit stable reject、unsupported attr stable reject、harmless `MS_SILENT` 兼容日志、legacy `MountData` 读取、`loop` data option stable reject、fstype normalization 和 source policy。
+- `tmpfs -> ramfs` 作为 ramfs 兼容入口保留；`ext2` / `ext3` / `vfat -> ramfs` 只作为 LTP 临时 bridge，命中时记录 raw fstype、normalized fstype、兼容原因和退出条件。归一化后的内部请求只携带 normalized fstype。
+- `sys_umount2()` 现在识别 `MNT_FORCE`、`MNT_DETACH`、`MNT_EXPIRE`、`UMOUNT_NOFOLLOW`；未知 bit 和已知但未闭合语义的 flag 稳定返回 `EINVAL`，`MNT_EXPIRE | (MNT_FORCE | MNT_DETACH)` 也返回 `EINVAL`。
+- `MountAttrFlags` 与 legacy operation bits 分离；阶段 1 只把 `RDONLY` 转成现有 `MountFlags::RDONLY`。`MountData` 提供 `Null` / `Text` 对象、`loop` option 检测和 backend 非空 data 拒绝 helper。
+- `FileSystemOps::mount()` / `FileSystem::mount()` 接收 `MountData`。`ramfs`、`devfs`、`procfs`、`ext4` 目前只接受 `NULL` / 空 data，非空 data 记录 filesystem type、empty=false 和 contains_loop 后返回 `EINVAL`；anonymous fs 内部 mount 断言 data 为空。
+
+**审计结果：**
+
+- `rg -n "\\[NYI\\].*mount|ignoring unsupported.*mount|unsupported.*mount" anemone-kernel/src`：无输出；旧 unsupported flag silent-ignore 路径已移除。
+- `rg -n "tmpfs|ext2|ext3|vfat|mount_fs_name|FsAliasKind|normalize_fstype|ltp-temporary-bridge" ...`：alias 命中只在 RFC 文本和 `anemone-kernel/src/fs/api/mount/mount.rs` 中出现，未进入 VFS helper 或 backend。
+- `rg -n "MS_|MNT_|UMOUNT_NOFOLLOW" anemone-kernel/src/fs anemone-abi/src/fs.rs`：raw Linux mount / umount flag 只在 ABI 常量、syscall parser 和 `MountAttrFlags` 注释 / KUnit 中出现。
+- `rg -n "MountData|MountAttrFlags|mount_at_with_data|FileSystemOps|FileSystem::mount\\(|\\.mount\\(" anemone-kernel/src/fs anemone-abi/src/fs.rs`：`MountData` 只作为 syscall-to-backend parser input 透传；`mount_at_with_data` 只在 VFS syscall facade 和 mount syscall adapter 使用。
+- `find anemone-kernel/src/fs/api -maxdepth 3 -type f | sort`：确认旧 `fs/api/mount.rs` / `fs/api/umount.rs` 已目录化为 `fs/api/mount/{mod.rs,mount.rs,umount.rs}`。
+
+**本地验证：**
+
+- `just fmt kernel`：通过。
+- `just build`：通过；KUnit 编译进 kernel build，未运行 QEMU KUnit runner。构建仅保留既有 `anemone-kernel/src/sync/mono.rs` 的 `AtomicBool` / `Ordering` unused import warning。
+- `git diff --check`：通过。
+- `mdbook build docs`：通过，输出到 `docs/book`。
+- 新增 `anemone-kernel/src/fs/api/mount/{mod.rs,mount.rs,umount.rs}` 的 `git diff --no-index --check -- /dev/null <file>`：无 whitespace 诊断；退出码 1 是新增文件与 `/dev/null` 存在差异的正常结果。
+
+**review gate：** `phase1-reviewer`（Epicurus）已按只读任务启动，60 秒内尚未返回；未中止该 agent。阶段 1 closeout 等待 reviewer 结论或用户处理异常。
+
+**未运行验证：** 未运行 QEMU、user-test、LTP mount profile 或 runtime KUnit runner。
+
+**下一步：** 等待 `phase1-reviewer` 返回。若无 blocker，则补写阶段 1 closeout 并提交；若发现 raw flag / alias 泄漏、silent success 或 write set 越界，则先修正或停止上报。
+
+### 2026-06-18 - 阶段 1 review closeout
+
+**阶段：** 阶段 1 - review gate。
+
+**reviewer：** `phase1-reviewer` / Epicurus，只读审查。
+
+**结论：**
+
+- 代码层无 blocking finding。reviewer 未发现阶段 1 越界打开 `MountTree` topology、stack、remount、bind 或 move 语义。
+- reviewer 确认 `fs/mod.rs` 当前只是 `MountData` 透传 helper，没有改变 stack 可见性或 topology owner 行为。
+- reviewer 确认 raw `MS_*` / `MNT_*` 只停留在 ABI 与 syscall parser；fstype alias 表只在 `anemone-kernel/src/fs/api/mount/mount.rs`，未下沉到 `MountTree`、`MountFlags`、`FileSystemOps` 或 backend 长期状态。
+- reviewer 确认 unsupported mount flags、umount flags、non-empty data 和 `loop` data 都有 stable reject 路径。
+
+**review finding 处置：**
+
+- reviewer 提出一个 Keter：审查开始时 transaction devlog 顶部状态和阶段 1 默认 write set 仍停在阶段 0 记录，未反映用户批准的 `fs/api/mount/**`、`fs/api/mod.rs` 和 `fs/mod.rs` 扩展。
+- 处置：本事务日志已追加“阶段 1 UAPI parser 本地实现”条目，记录用户批准的 syscall adapter 目录化、`fs/mod.rs` 的 `MountData` call-through 扩展、当前实现结果、审计和验证；`implementation.md` 的阶段 1 write set / 结构维护记录也已同步更新。阶段 0 条目中的“默认 write set”保留为当时启动记录，不再作为当前边界。
+- 状态：Neutralized。
+
+**KUnit / 负例覆盖：**
+
+- mount parser KUnit 覆盖 `MS_RDONLY | MS_SILENT` 成功、`MS_BIND` / `MS_REMOUNT | MS_BIND | MS_RDONLY` operation bit 拒绝、`MS_NOEXEC` unsupported attr 拒绝和 unknown bit 拒绝。
+- fstype alias KUnit 覆盖 `tmpfs`、`ext2` 和真实 `ext4` normalization 边界。
+- mount data KUnit 覆盖 `loop`、`rw, loop`、`loop=/tmp/disk.img` 检测和普通 `rw` 非 loop option。
+- `MountData` KUnit 覆盖 backend 非空 data 拒绝为 `EINVAL`。
+- umount parser KUnit 覆盖 zero flags、unknown flags、known-but-unsupported `MNT_DETACH` / `UMOUNT_NOFOLLOW` 和 `MNT_EXPIRE` invalid combinations。
+- 这些 KUnit 随 `just build` 的 `--features kunit` 编译通过；本阶段未运行 runtime KUnit runner。
+
+**阶段 1 关闭判断：**
+
+- 不再存在 unsupported `MS_*` 被忽略后成功的路径。
+- `MS_RDONLY` 仍能作为 per-mount attr 转成现有 `MountFlags::RDONLY` 进入 new mount。
+- fstype alias bridge 只在 syscall adapter，且每个 alias 有日志和退出条件。
+- `loop` data option 不伪成功；普通非空 data 由 backend helper 稳定拒绝。
+- 没有启动阶段 2+ implementation worker；阶段 2 `MountTree` owner / stack 迁移仍未开始。
+
+**post-review 验证：**
+
+- `rg -n "MS_|MNT_|UMOUNT_|MountFlags|MountAttr|MountOp" anemone-abi/src anemone-kernel/src`：预期命中 ABI、mount syscall parser、`MountAttrFlags` / `MountFlags` 和既有 `msync` 常量；未发现 raw mount operation flag 下沉到 backend 或 topology owner。
+- `rg -n "tmpfs|ext2|ext3|vfat|mount_fs_name|MountData|loop" anemone-kernel/src/fs/api/mount anemone-kernel/src/fs`：预期命中 syscall alias、`MountData` 透传、loop option 检测和既有非 mount parser 的普通 `loop` 代码；未发现 alias 表进入 VFS helper 或 backend。
+- `git diff --check`：通过。
+- `mdbook build docs`：通过。
+- `just build`：通过；仍仅保留既有 `anemone-kernel/src/sync/mono.rs` unused import warning。
+
+**下一步：** 阶段 2 只能在阶段 1 commit 后启动；若启动，应先运行只读 `phase2-mounttree-explorer`，不得直接修改 topology owner。

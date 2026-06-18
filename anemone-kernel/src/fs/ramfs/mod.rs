@@ -51,10 +51,15 @@ fn ramfs_symlink(inode: &InodeRef) -> Result<&RamfsSymlink, SysError> {
         .ok_or(SysError::NotSymlink)
 }
 
-fn ramfs_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, SysError> {
+fn ramfs_mount(
+    source: MountSource,
+    _flags: MountFlags,
+    data: MountData,
+) -> Result<Arc<SuperBlock>, SysError> {
     if !matches!(source, MountSource::Pseudo) {
         return Err(SysError::InvalidArgument);
     }
+    data.reject_nonempty_for("ramfs")?;
 
     let sb_prv = AnyOpaque::new(RamfsSb::new());
 

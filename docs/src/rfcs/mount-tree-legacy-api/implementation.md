@@ -85,7 +85,7 @@ write set：
 
 - 搜索 `MS_`、`MountFlags`、`FileSystem::mount(`、`FileSystemOps`，确认不再把 operation bits 存成 mount attrs。
 - 搜索现有 `[NYI] mount: ignoring unsupported flags`，替换为严格 allowlist 语义。
-- 搜索 fstype alias 表，确认它只存在于 `fs/api/mount.rs` 或同级 syscall adapter，不被 VFS helper、backend 或 public docs 当作真实 filesystem support。
+- 搜索 fstype alias 表，确认它只存在于 `fs/api/mount/**` syscall adapter，不被 VFS helper、backend 或 public docs 当作真实 filesystem support。
 - 搜索 `loop` / mount `data` 处理，确认没有内核 mount parser 自动创建 loop 设备或把普通 file source 当 block source。
 
 反馈假设：
@@ -95,15 +95,17 @@ write set：
 
 模块边界预检：
 
-- `fs/api/mount.rs` 若同时堆积 copy-in、flag parser、fstype alias、source policy 和 backend dispatch，应先做同一 syscall owner 内的 split-only checkpoint。
+- `fs/api/mount/**` 若同时堆积 copy-in、flag parser、fstype alias、source policy 和 backend dispatch，应先做同一 syscall owner 内的 split-only checkpoint。
 - 拆分不得改变 public syscall behavior，不得把兼容 alias 移入 `fs/mount.rs`、`filesystem.rs` 或具体 backend。
 
 write set：
 
 - `anemone-abi/src/fs.rs`
-- `anemone-kernel/src/fs/api/mount.rs`
-- `anemone-kernel/src/fs/api/umount.rs`
+- `anemone-kernel/src/fs/api/mod.rs`
+- `anemone-kernel/src/fs/api/mount/**`
+- 旧 `anemone-kernel/src/fs/api/mount.rs` / `umount.rs` 的目录化删除
 - `anemone-kernel/src/fs/filesystem.rs`
+- `anemone-kernel/src/fs/mod.rs`，仅限 `MountData` syscall-only 透传 helper / call-through，不得改变 topology owner 或 stack 语义
 - `anemone-kernel/src/fs/mount.rs`
 - 必要的 filesystem backend mount signature 调整文件，如 `ramfs`、`devfs`、`procfs`、`ext4`。
 
@@ -222,7 +224,7 @@ write set：
 write set：
 
 - `anemone-kernel/src/fs/mount.rs`
-- `anemone-kernel/src/fs/api/mount.rs`
+- `anemone-kernel/src/fs/api/mount/**`
 - `anemone-kernel/src/fs/api/truncate/**`
 - `anemone-kernel/src/fs/api/openat.rs`
 - 现有直接写入口所在文件，仅限补齐 per-mount readonly 检查。
@@ -289,7 +291,7 @@ write set：
 
 - `anemone-kernel/src/fs/mount.rs`
 - `anemone-kernel/src/fs/mod.rs`
-- `anemone-kernel/src/fs/api/mount.rs`
+- `anemone-kernel/src/fs/api/mount/**`
 - `anemone-kernel/src/fs/namei.rs` 仅限必要 lookup/stack 辅助。
 
 可观测性：
@@ -348,7 +350,7 @@ write set：
 
 - `anemone-kernel/src/fs/mount.rs`
 - `anemone-kernel/src/fs/mod.rs`
-- `anemone-kernel/src/fs/api/mount.rs`
+- `anemone-kernel/src/fs/api/mount/**`
 
 可观测性：
 
@@ -402,13 +404,13 @@ write set：
 
 模块边界预检：
 
-- unmount flag parsing 留在 `fs/api/umount.rs`；detach、busy、cleanup queue 和 mount snapshot 属于 `MountTree` / VFS owner。
+- unmount flag parsing 留在 `fs/api/mount/umount.rs`；detach、busy、cleanup queue 和 mount snapshot 属于 `MountTree` / VFS owner。
 - 若 pre-unmount hook 需要触碰 fanotify owner surface，先提交 write set 扩展申请并在 transaction devlog 记录批准边界。
 - procfs mounts view 只消费 `MountTree` snapshot；不得让 procfs 后端拼接或修改 mount topology。
 
 write set：
 
-- `anemone-kernel/src/fs/api/umount.rs`
+- `anemone-kernel/src/fs/api/mount/umount.rs`
 - `anemone-kernel/src/fs/mod.rs`
 - `anemone-kernel/src/fs/mount.rs`
 - `anemone-kernel/src/fs/proc/mounts.rs`
@@ -491,7 +493,7 @@ write set：
 - `rg -n "ensure_writable|ReadOnlyFs|EROFS" anemone-kernel/src/fs anemone-kernel/src/task`
 - `rg -n "proc.*mount|/proc/mounts|mountinfo" anemone-kernel/src/fs/proc`
 - `rg -n "\\[NYI\\].*mount|ignoring unsupported.*mount|unsupported.*mount" anemone-kernel/src`
-- `rg -n "tmpfs|ext2|ext3|vfat|mount_fs_name|MountData|loop" anemone-kernel/src/fs/api/mount.rs anemone-kernel/src/fs`
+- `rg -n "tmpfs|ext2|ext3|vfat|mount_fs_name|MountData|loop" anemone-kernel/src/fs/api/mount anemone-kernel/src/fs`
 - `rg -n "FanTarget::Mount|FanTarget::Filesystem|pre-unmount|mark-dead|flush.*mount" anemone-kernel/src/fs/fanotify anemone-kernel/src/fs`
 - `rg -n "try_evict_inode|try_evict_all|PERSISTENT_SB|SHRINKABLE_ICACHE" anemone-kernel/src/fs`
 
@@ -547,7 +549,7 @@ write set：
 
 **Hypothesis:** `MNT_DETACH` 可以先由 `MountTree` 完成 topology detach；final superblock cleanup 由 VFS / `MountTree` owned cleanup queue 或等价 reaper 在 transaction lock 外重试 busy check、observer cleanup、inode eviction 和 `kill_sb`。
 **Protected Goal / Invariant:** lazy detach 成功后新 lookup 不再看到 detached subtree；mount 层不得在 `Drop`、任意引用释放路径或持 `MountTree` transaction lock 的长临界区内执行 filesystem sync / evict / kill；inode eviction 顺序仍服从 inode-shrinker RFC。
-**Minimum Write Set:** `anemone-kernel/src/fs/mount.rs`、`anemone-kernel/src/fs/mod.rs`、`anemone-kernel/src/fs/api/umount.rs`，以及必要时的 `anemone-kernel/src/fs/superblock.rs` narrow facade；若需要 fanotify hook，先申请 `anemone-kernel/src/fs/fanotify/**` write set 扩展。
+**Minimum Write Set:** `anemone-kernel/src/fs/mount.rs`、`anemone-kernel/src/fs/mod.rs`、`anemone-kernel/src/fs/api/mount/umount.rs`，以及必要时的 `anemone-kernel/src/fs/superblock.rs` narrow facade；若需要 fanotify hook，先申请 `anemone-kernel/src/fs/fanotify/**` write set 扩展。
 **Non-goals:** 不引入 new mount API detached mount fd，不改变 inode-shrinker contract，不把 final cleanup 放进 `Drop`，不把 fanotify mark lifecycle 静默降级成日志。
 **Validation Floor:** `just build`；source audit 证明 cleanup 不在 tree lock / `Drop` 中执行；KUnit 或 targeted smoke 证明 lazy detach hides from new lookup，旧引用只保持对象 lifetime；fanotify hook 若未实现，必须有 explicit limitation。
 **Failure Signals:** cleanup 只能依赖最后一个 `Arc<Mount>` drop、需要在 tree lock 内执行 filesystem I/O、busy recheck 无法和 inode eviction rollback 对齐，或 observer late enqueue 不能 fail closed。
@@ -571,11 +573,13 @@ write set：
 
 - 2026-06-18：文档层反馈重分类；阶段 3/4 依赖环和 attach revalidation 已折回 canonical text，lazy-detach cleanup 与 detached-path namei 改为 Gate P1/P2；目标和不变量保持不变。
 - 2026-06-18：阶段 0 关闭，事务日志 [2026-06-18-mount-tree-legacy-api](../../devlog/transactions/2026-06-18-mount-tree-legacy-api.md) 已建立；阶段 1 尚未启动。
+- 2026-06-18：阶段 1 write set 按用户批准扩展为 `fs/api/mount/**` syscall owner 目录；`fs/mod.rs` 仅允许用于 `MountData` syscall-only 透传 helper，不打开阶段 2 topology owner 迁移。
 
 ## Write Set 扩展记录
 
-- 暂无。
+- 2026-06-18：用户批准将 `anemone-kernel/src/fs/api/mount.rs` 和 `api/umount.rs` 收归到 `anemone-kernel/src/fs/api/mount/`，该目录作为 legacy mount / umount syscall adapter 和未来 mount-family syscall 入口 owner。阶段 1 同步允许 `anemone-kernel/src/fs/api/mod.rs` 做模块声明调整。
+- 2026-06-18：阶段 1 需要把 legacy `MountData` 从 syscall adapter 传到 filesystem backend，因此允许 `anemone-kernel/src/fs/mod.rs` 增加 syscall-only `mount_at_with_data` call-through；该扩展不允许改变 `NameSpace` / future `MountTree` topology、stack visibility、bind/move/remount 或 unmount transaction 语义。
 
 ## 结构维护记录
 
-- 暂无。
+- 2026-06-18：`fs/api/mount.rs` / `fs/api/umount.rs` 拆为 `fs/api/mount/{mod.rs,mount.rs,umount.rs}`，属于同一 syscall owner 内的 split-only checkpoint；compat alias 仍限制在 mount syscall adapter。

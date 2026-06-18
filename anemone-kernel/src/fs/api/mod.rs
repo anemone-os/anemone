@@ -46,7 +46,6 @@ pub mod sync;
 pub mod timerfd;
 pub mod truncate;
 pub mod umask;
-pub mod umount;
 pub mod unlinkat;
 pub mod utimensat;
 
