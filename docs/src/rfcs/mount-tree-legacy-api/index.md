@@ -20,7 +20,7 @@
 
 - `anemone-kernel/src/fs/api/mount.rs` 实现 `sys_mount()`，支持 pseudo source 和 block-device source。当前 syscall 边界还有临时 LTP 兼容桥：`tmpfs`、`ext2`、`ext3`、`vfat` 会归一化到 `ramfs`，且 `ramfs` 走 pseudo source；这不是 mount tree 或 filesystem backend 的长期框架语义。
 - `anemone-kernel/src/fs/api/umount.rs` 实现 `sys_umount2()`，但暂未解析 `MNT_DETACH`、`MNT_EXPIRE`、`UMOUNT_NOFOLLOW` 等 flag。
-- `anemone-kernel/src/fs/mount.rs` 的 `Mount` 记录 root、superblock、parent、children、mountpoint 和 `MountFlags`，但 `MountFlags` 目前只有 `RDONLY`。
+- `anemone-kernel/src/fs/mount.rs` 的 `Mount` 记录 root、superblock、parent、children、mountpoint 和 `MountFlags`，但 `MountFlags` 目前只有 `RDONLY`。本 RFC 收口后不保留这层并列 flag 类型；`RDONLY` 应归入 `Mount` 的 per-mount attrs 单一真相源。
 - `anemone-kernel/src/fs/mod.rs` 内部的 `NameSpace` 不是 Linux mount namespace；它只是 visible mount tree 的容器。后续应将其正名为 `MountTree`，由 namespace RFC 再引入真正的 per-task namespace / nsproxy 系统。
 - 当前同一 mountpoint 已允许多层挂载，但可见层是 first-mounted-visible；正式语义应改为 Linux-like topmost-visible stack。
 - `anemone-abi/src/fs.rs` 目前只导出 `MS_RDONLY`。
@@ -84,6 +84,7 @@ Canonical：
 - syscall mount flags 采用严格 allowlist；暂不支持的可观察语义稳定拒绝并打日志。
 - fstype compatibility alias 是 syscall 边界的临时兼容桥，不参与 mount tree 状态、不改变 backend source 语义，也不能作为 data parser fallback。
 - mount op flags、per-mount attrs、superblock state 和 filesystem type flags 必须类型分离。
+- 现有 `MountFlags` 只允许作为阶段迁移桥；阶段 3 attr plumbing 关闭后，`Mount` 直接持有 `MountAttrFlags` 或等价 attrs storage，`FileSystemOps::mount()` 不再接收 per-mount attrs。
 - 同一 mountpoint 支持 stack，lookup 进入 Linux-like topmost mount。
 - `MountTree` 写侧使用睡眠式 transaction lock；读侧 lookup 不应走长期全局树锁。
 - 第一版 topology 发布采用单一 placement lock 加 `placement_generation` retry：move 在同一 transaction 内修改旧 stack 与新 stack，lookup 通过短临界区读取 stack，并在 generation 变化时重试。
@@ -114,7 +115,9 @@ legacy `mount(2)` 的 raw flags 先解析成临时操作请求：
 
 legacy `data` 参数由 syscall 层读取为可选 `MountData`，VFS 不解释 filesystem 私有 option。filesystem 后端可以接受、拒绝或兼容具体 data；不支持且有可见语义的 option 必须稳定失败并打日志。
 
-fstype normalization 在 syscall adapter 内完成。`tmpfs -> ramfs` 这类 alias 可以作为明确的兼容入口；`ext2` / `ext3` / `vfat -> ramfs` 属于当前 LTP 兼容桥，必须有日志、文档化边界和退出条件。归一化后的内部请求不得让 `MountTree`、`MountFlags`、`FileSystemOps::mount()` 或具体 filesystem backend 知道原始 alias。
+阶段迁移期间可以短暂把 `MountAttrFlags::RDONLY` 映射到既有 `MountFlags::RDONLY` 以复用旧 call path，但这不是 accepted final state。阶段 3 关闭时必须删除 `MountFlags` 作为并列 per-mount flag 类型，且 filesystem backend 不得通过 `FileSystemOps::mount()` 观察 per-mount attrs；backend 只处理 source、legacy `MountData` 和未来明确属于 superblock / filesystem instance 的配置。
+
+fstype normalization 在 syscall adapter 内完成。`tmpfs -> ramfs` 这类 alias 可以作为明确的兼容入口；`ext2` / `ext3` / `vfat -> ramfs` 属于当前 LTP 兼容桥，必须有日志、文档化边界和退出条件。归一化后的内部请求不得让 `MountTree`、`MountAttrFlags`、`FileSystemOps::mount()` 或具体 filesystem backend 知道原始 alias；过渡期存在的 `MountFlags` 也不得观察原始 alias，并必须随阶段 3 attr plumbing 删除。
 
 `data` 中的 `loop`、普通 image file 自动绑定等 util-linux 行为不由内核 mount parser 伪造。用户态应先通过 loop ioctl 得到 `/dev/loopN`，再以 block-device source 调用普通 `mount(2)`。
 

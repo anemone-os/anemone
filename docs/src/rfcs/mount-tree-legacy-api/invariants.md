@@ -10,7 +10,7 @@
 - `MountTree` 是 mount topology 的唯一写侧 owner。
 - `Mount` 是 attached view；bind/rbind/move/remount/unmount 处理的是 mount view，不直接等同于 superblock 生命周期。
 - legacy `mount(2)`、`umount(2)`、`umount2(2)` 都通过同一套内部 mount transaction 修改拓扑或 per-mount attributes。
-- syscall raw flags 必须分为 operation flags、per-mount attributes、future superblock state 和 filesystem type flags；不得继续把所有 `MS_*` 混在 `MountFlags` 里。
+- syscall raw flags 必须分为 operation flags、per-mount attributes、future superblock state 和 filesystem type flags；不得继续把所有 `MS_*` 混在 `MountFlags` 里，也不得在 RFC 收口后保留与 `MountAttrFlags` 并列的 per-mount flag 真相源。
 - syscall fstype compatibility alias 只能存在于 syscall adapter；它不是 `MountTree`、`Mount`、`SuperBlock` 或 filesystem backend 的状态。
 - 暂不支持且有用户可观察语义的 flag、operation、data option 或组合必须稳定拒绝并打日志。
 - `RDONLY` 首批是 per-mount enforcement，不是 sb-wide readonly 或 filesystem reconfigure。
@@ -81,6 +81,7 @@ unmount 当前 mount view 不等于 kill superblock。只有当没有任何 moun
 
 - `MountOpFlags` 是 syscall parser 的临时操作位，不能存入 `Mount` 作为长期状态。
 - `MountAttrFlags` 是 per-mount view 状态，存在 `Mount` 上。第一版使用 atomic bitset / interior-mutable attrs 作为单一真相源；remount 以 release-store 或等价同步发布，所有用户可见写入口以 acquire-load 或等价同步从当前 `PathRef.mount()` 读取。
+- `MountFlags` 若在阶段迁移中临时存在，只能作为旧 call path 兼容壳，不能增长新语义，不能被 filesystem backend 当作 mount policy 输入，且必须在阶段 3 attr plumbing 关闭前由 `MountAttrFlags` 或等价 attrs storage 取代。
 - `SuperBlockState` / future `SuperBlockFlags` 是 superblock 实例状态，不能用来替代 per-mount attributes。
 - `FileSystemFlags` 是 filesystem type 属性，不得表达某次 mount 或某个 superblock 当前状态。
 - `FileStatusFlags` / `FileOpStatusFlags` 是 opened file description 与 per-operation I/O ctx 的状态，不得承载 mount readonly、noexec、nodev、nosuid 或 fstype alias 语义。
@@ -163,6 +164,7 @@ bind mount 场景下，同一 superblock 的 sibling mount 不应使当前 view 
 - 不得继续把 `MS_BIND`、`MS_MOVE`、`MS_REMOUNT`、propagation flags 当作 ignored flags 后返回成功。
 - 不得把 bind mount 实现为重新 mount 一个新 superblock。
 - 不得把 readonly bind remount 写入 superblock 或污染 sibling mount。
+- 不得把 per-mount attrs 同时保存在 `MountFlags` 和 `MountAttrFlags` 两套并列状态中。
 - 不得复用同一个 `Mount` object 挂到多个 parent/mountpoint。
 - 不得用 `parent == None` 同时表达 root 和 detached。
 - 不得把 move 拆成读侧可见的旧 stack 摘除和新 stack 插入两次发布。

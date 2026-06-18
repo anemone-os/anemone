@@ -178,3 +178,20 @@
 - `just build`：通过；仍仅保留既有 `anemone-kernel/src/sync/mono.rs` unused import warning。
 
 **下一步：** 阶段 2 只能在阶段 1 commit 后启动；若启动，应先运行只读 `phase2-mounttree-explorer`，不得直接修改 topology owner。
+
+### 2026-06-18 - `MountFlags` 迁移桥反馈回写
+
+**阶段：** 阶段 1 关闭后的 implementation feedback；阶段 2 尚未启动。
+
+**反馈：**
+
+- 当前源码中 `MountFlags` 已只剩 `RDONLY`，阶段 1 又引入了语义更准确的 `MountAttrFlags`。继续保留两者会在阶段 3 remount attr plumbing 时制造 per-mount attrs 双真相源风险。
+- 用户确认 RFC 应记录：`MountFlags` 在本 RFC 收口后应被删除，不作为长期抽象保留。
+
+**RFC 回写：**
+
+- `index.md` 已明确 `MountFlags` 只允许作为阶段迁移桥；阶段 3 关闭后 `Mount` 直接持有 `MountAttrFlags` 或等价 attrs storage，`FileSystemOps::mount()` 不再接收 per-mount attrs。
+- `invariants.md` 已新增禁止保留 `MountFlags` / `MountAttrFlags` 并列真相源的约束。
+- `implementation.md` 已把删除 `MountFlags` 纳入阶段 3 交付、审计和退出条件，并把阶段 3 write set 扩展到 `anemone-kernel/src/fs/filesystem.rs` 以及必要 backend mount signature 文件。该扩展只用于切断 backend 对 per-mount attrs 的观察，不打开 sb-wide remount reconfigure。
+
+**下一步：** 阶段 2 仍只能先启动只读 `phase2-mounttree-explorer`；阶段 3 worker 必须按更新后的 write set 删除 `MountFlags`，不得把该迁移桥延续到 RFC closeout。

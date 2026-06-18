@@ -74,6 +74,7 @@ write set：
 - 在 ABI 层补齐 legacy mount/umount 所需常量：`MS_BIND`、`MS_REC`、`MS_MOVE`、`MS_REMOUNT`、`MS_PRIVATE`、`MNT_DETACH`、`MNT_EXPIRE`、`MNT_FORCE`、`UMOUNT_NOFOLLOW` 等第一版需要识别的位。
 - 将 raw `mountflags` 解析为 operation request 和 per-mount attrs，不再直接生成单一 `MountFlags`。
 - 引入 `MountAttrFlags`，首批只闭合 `RDONLY`。
+- 阶段 1 若为复用旧 new-mount call path 暂时把 `MountAttrFlags::RDONLY` 映射到既有 `MountFlags::RDONLY`，该映射只属于迁移桥；不得增长新语义，阶段 3 attr plumbing 必须删除 `MountFlags`。
 - 预留 future `SuperBlockState` 边界，但不实现 sb-wide reconfigure。
 - 为 legacy `data` 引入 `MountData` 传递对象；filesystem 后端可选择接受 `NULL` / 空 data 或拒绝非空 data。
 - 将现有 `tmpfs`、`ext2`、`ext3`、`vfat` 到 `ramfs` 的 fstype normalization 显式收进 syscall adapter。`tmpfs` 可以作为 ramfs 兼容入口；`ext2` / `ext3` / `vfat` 是当前 LTP 兼容桥，必须记录日志、说明它不承诺真实 filesystem 语义，并给出退出条件。
@@ -195,6 +196,8 @@ write set：
 
 - 实现 `MS_REMOUNT` 的 per-mount `RDONLY` 切换。
 - `MountAttrFlags` 第一版由 `Mount` 上的 atomic bitset / interior-mutable attrs 承载，作为 per-mount attrs 的单一真相源。
+- 删除 `MountFlags` 作为并列 per-mount flag 类型；`Mount` 直接持有 `MountAttrFlags` 或等价 attrs storage，`ensure_writable()` 只读取该单一真相源。
+- `FileSystemOps::mount()` / `FileSystem::mount()` / filesystem backend mount vtable 不再接收 per-mount attrs。backend 只接收 source、legacy `MountData` 和未来明确属于 superblock / filesystem instance 的配置；`RDONLY` 不再作为 backend mount 参数传入。
 - `MS_REMOUNT | MS_BIND` 在本阶段只完成 parser 分类和稳定拒绝路径，不声明 bind view readonly 语义闭合；bind view 存在后由阶段 4 打开成功语义。
 - 普通 `MS_REMOUNT` 第一版只允许当前 mount view 的 `RDONLY` 切换作为 accepted
   limitation；代码注释必须说明这不是 sb-wide reconfigure。涉及 filesystem
@@ -208,6 +211,7 @@ write set：
 
 - 搜索所有直接写入口，确认仍按当前 `PathRef.mount()` enforcement，而不是 inode/superblock 全局 readonly。
 - 审计 remount target revalidation，确认旧 `PathRef` 指向 detached mount 时不会更新 attrs 后返回成功。
+- 搜索 `MountFlags`，确认该类型和 `MountAttrFlags -> MountFlags` 迁移桥已删除；保留命中只能是历史文档或本阶段前的事务记录。
 - 审计用户可见写入口矩阵：`write` / `writev` / `pwrite*`、`open(O_TRUNC)`、`truncate` / `ftruncate`、`fallocate` grow、目录项创建/删除/改名、metadata 修改、fanotify path-fd reopen 写入，以及 copy-backed `splice(pipe -> file)`。
 - 搜索 `ensure_writable` 调用点，分类尚未覆盖的 mmap/writeback 限制。
 
@@ -224,7 +228,9 @@ write set：
 write set：
 
 - `anemone-kernel/src/fs/mount.rs`
+- `anemone-kernel/src/fs/filesystem.rs`
 - `anemone-kernel/src/fs/api/mount/**`
+- 必要的 filesystem backend mount signature 调整文件，如 `ramfs`、`devfs`、`procfs`、`ext4` 和 anonymous fs。
 - `anemone-kernel/src/fs/api/truncate/**`
 - `anemone-kernel/src/fs/api/openat.rs`
 - 现有直接写入口所在文件，仅限补齐 per-mount readonly 检查。
@@ -245,6 +251,8 @@ write set：
 退出条件：
 
 - ordinary per-mount readonly 语义可验证；`fs_readonly` 的 bind-remount 场景等阶段 4 关闭。
+- `MountFlags` 不再作为源码类型存在；new mount、remount 和写入口均使用同一套 per-mount attrs 真相源。
+- filesystem backend 不再接收或保存 per-mount attrs；真实 sb-wide reconfigure 仍按 future `SuperBlockState` / follow-up gate 处理。
 - remount 成功返回前完成 target revalidation 和 attrs 发布；旧 fd 对同一 live mount view 的后续写能观察 remount 后 attrs。
 - detached 或已被 move/replaced 的旧 target view 不会被 remount 偶然修改后返回成功。
 - `MS_REMOUNT | MS_BIND` 尚不返回成功，或者只在阶段 4 bind view 语义闭合后打开。
@@ -456,6 +464,7 @@ write set：
 - 区分 semantic kernel bug、unsupported feature、procfs cleanup blocker 和测试环境问题。
 - 搜索所有 `[NYI] mount` / `mount:` log，确认每个都能归入已接受限制或后续 gate。
 - 区分真实 filesystem support 和 syscall alias bridge 命中；不得把 `ext2` / `ext3` / `vfat -> ramfs` 兼容成功计为对应 filesystem 语义通过。
+- 搜索 `MountFlags`，确认 RFC 收口后源码不再保留该迁移桥；若仍有源码命中，必须归类为 blocker，而不是 accepted limitation。
 
 反馈假设：
 
@@ -574,11 +583,13 @@ write set：
 - 2026-06-18：文档层反馈重分类；阶段 3/4 依赖环和 attach revalidation 已折回 canonical text，lazy-detach cleanup 与 detached-path namei 改为 Gate P1/P2；目标和不变量保持不变。
 - 2026-06-18：阶段 0 关闭，事务日志 [2026-06-18-mount-tree-legacy-api](../../devlog/transactions/2026-06-18-mount-tree-legacy-api.md) 已建立；阶段 1 尚未启动。
 - 2026-06-18：阶段 1 write set 按用户批准扩展为 `fs/api/mount/**` syscall owner 目录；`fs/mod.rs` 仅允许用于 `MountData` syscall-only 透传 helper，不打开阶段 2 topology owner 迁移。
+- 2026-06-18：阶段 1 实现反馈确认现有 `MountFlags` 只剩 `RDONLY`，且已被 `MountAttrFlags` 覆盖为更准确的 per-mount attrs 表达；RFC 接受 `MountFlags` 作为阶段 1 迁移桥，但要求阶段 3 attr plumbing 删除该类型，并让 `FileSystemOps::mount()` 不再接收 per-mount attrs。
 
 ## Write Set 扩展记录
 
 - 2026-06-18：用户批准将 `anemone-kernel/src/fs/api/mount.rs` 和 `api/umount.rs` 收归到 `anemone-kernel/src/fs/api/mount/`，该目录作为 legacy mount / umount syscall adapter 和未来 mount-family syscall 入口 owner。阶段 1 同步允许 `anemone-kernel/src/fs/api/mod.rs` 做模块声明调整。
 - 2026-06-18：阶段 1 需要把 legacy `MountData` 从 syscall adapter 传到 filesystem backend，因此允许 `anemone-kernel/src/fs/mod.rs` 增加 syscall-only `mount_at_with_data` call-through；该扩展不允许改变 `NameSpace` / future `MountTree` topology、stack visibility、bind/move/remount 或 unmount transaction 语义。
+- 2026-06-18：阶段 3 write set 扩展纳入 `anemone-kernel/src/fs/filesystem.rs` 和必要 backend mount signature 文件，用于删除 `MountFlags` 迁移桥并切断 filesystem backend 对 per-mount attrs 的观察；该扩展不允许打开 sb-wide remount reconfigure。
 
 ## 结构维护记录
 
