@@ -82,7 +82,7 @@ impl Gpr {
 
 /// Saved LoongArch64 trap context passed to the Rust trap handler.
 #[derive(Debug, Clone, Copy)]
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct LA64TrapFrame {
     gpr: Gpr,
     prmd: u64,
