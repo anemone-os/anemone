@@ -450,13 +450,58 @@ nonblocking 和动态 pipe capacity 需要单独设计。
 **Severity:** Medium
 **Area:** fs / mount / VFS / mmap
 
-**Summary:** 当前 `MS_RDONLY` 已能通过 mount flags 传播到 VFS，并覆盖直接写路径：目录项创建/删除/改名、普通文件 open-for-write / write / truncate、`chmod` / `chown` / `utimensat` / `fallocate` 会在只读挂载上返回 `EROFS`。这不是完整 Linux ROFS：shared writable mmap、dirty/writeback 与 `msync` 关系、remount/bind/move mount 语义，以及除 `MS_RDONLY` 外的 mount flags 仍未系统化。
+**Summary:** 当前 `MS_RDONLY` 已收敛为 per-mount view attribute，并覆盖直接写路径：目录项创建/删除/改名、普通文件 open-for-write / write / truncate、`chmod` / `chown` / `utimensat` / `fallocate` 会在只读挂载上返回 `EROFS`。`mount-tree-legacy-api` 已补齐 ordinary remount、bind-remount sibling isolation、bind/rbind/move 下的 mount-view readonly 语义，并由 KUnit 与 `mount03` 的直接 readonly 写入 TPASS 覆盖。剩余限制是 shared writable mmap、dirty/writeback 与 `msync` 的强一致性，以及 LTP `test_robind*` 依赖的 `LTP_BIG_DEV >= 500MB` 环境。
 
-**Exit Condition:** 为 file-backed shared writable mmap 和 writeback 引入明确的只读挂载约束；补齐或显式拒绝 remount、bind、move、propagation 等 mount flag 组合；用覆盖 open/write/truncate/metadata/mmap/remount 的回归矩阵验证 ROFS 语义。
+**Exit Condition:** 为 file-backed shared writable mmap 和 writeback 引入明确的只读挂载约束；准备满足 `test_robind*` 的大块设备测试环境；用覆盖 open/write/truncate/metadata/mmap/remount/bind sibling 的回归矩阵验证 ROFS 语义。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-28
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-06-19
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [Mount Tree Legacy API 事务日志](../devlog/transactions/2026-06-18-mount-tree-legacy-api.md), [mount-tree-legacy-api RFC](../rfcs/mount-tree-legacy-api/index.md)
+
+## ANE-20260619-MOUNT-PROPAGATION-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** fs / mount / propagation / LTP
+
+**Summary:** `mount-tree-legacy-api` 第一版只在当前 private-only mount tree 下接受 `MS_PRIVATE` / `MS_REC | MS_PRIVATE`，并完成 plain bind、recursive bind 和 private move 的核心语义。完整 Linux shared subtree propagation 仍未实现：`MS_SHARED`、`MS_SLAVE`、`MS_UNBINDABLE`、peer group / master-slave 传播、unbindable subtree 过滤、`CLONE_NEWNS` / mount namespace cloneNS 仍是后续范围。`mount-legacy` LTP group 刻意保留 `fs_bind*`、`fs_bind_move*` 和 `fs_bind_rbind*` 的宽矩阵来收集已有 TPASS 分数；这些 whole-case FAIL 不能整体归因为 bind/rbind/move 主语义回归。
+
+**Exit Condition:** 引入 shared subtree 的 peer group / master-slave 状态、propagation 传播规则、unbindable subtree 过滤和 mount namespace clone/unshare 边界；随后重新分类 `fs_bind01..24`、`fs_bind_move01..22`、`fs_bind_rbind01..39` 以及 cloneNS follow-up cases。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-19
+**Related:** [Mount Tree Legacy API 事务日志](../devlog/transactions/2026-06-18-mount-tree-legacy-api.md), [mount-tree-legacy-api RFC](../rfcs/mount-tree-legacy-api/index.md)
+
+## ANE-20260619-MOUNT-FLAG-MATRIX-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** fs / mount / statfs / namei / devfs / exec
+
+**Summary:** `mount-tree-legacy-api` 第一版只系统化 `MS_RDONLY`、bind/rbind/move、private propagation no-op、`MNT_DETACH` 和 `UMOUNT_NOFOLLOW` 的已闭合子集。LTP `mount03` 仍暴露 `statfs()` mount flag reporting 缺口，以及 `MS_NODEV`、`MS_NOEXEC`、`MS_NOSUID`、`MS_NOATIME`、`MS_NODIRATIME`、`MS_STRICTATIME` 的稳定拒绝；`mount07` 仍暴露 `MS_NOSYMFOLLOW` remount 与 `ST_NOSYMFOLLOW` reporting 缺口。这些 flag 需要接入 devfs/exec/namei/statfs 等对应 owner，不能只在 mount parser 中伪装成功。
+
+**Exit Condition:** 为 `statfs()` 暴露已支持 mount attrs；按 owner 分阶段接入或显式重新拒绝 `MS_NODEV`、`MS_NOEXEC`、`MS_NOSUID`、atime flags 和 `MS_NOSYMFOLLOW`，并用 `mount03` / `mount07` 重新验证 errno、flag reporting 和用户可见行为。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-19
+**Related:** [Mount Tree Legacy API 事务日志](../devlog/transactions/2026-06-18-mount-tree-legacy-api.md), [mount-tree-legacy-api RFC](../rfcs/mount-tree-legacy-api/index.md)
+
+## ANE-20260619-MOUNT-FSTYPE-ALIAS-BRIDGE
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** fs / mount / filesystem compatibility / LTP
+
+**Summary:** legacy `mount(2)` syscall adapter 仍保留临时 LTP 兼容桥：`tmpfs`、`ext2`、`ext3`、`vfat` 会在 syscall 边界归一化到 `ramfs`。该桥只服务当前 mount LTP setup 和评分观测，不代表 Anemone 已提供真实 tmpfs/ext2/ext3/vfat filesystem 语义，也不得下沉为 `MountTree`、`MountAttrFlags`、`FileSystemOps` 或 backend 状态。
+
+**Exit Condition:** 为需要支持的真实 filesystem 类型提供对应 backend 或测试环境替代路径；删除 `ext2` / `ext3` / `vfat -> ramfs` 兼容桥，保留或重新定义 `tmpfs` 的正式语义；重新验证 mount LTP 中依赖这些 fstype 名称的 setup 路径不会把 alias 成功误报为真实 filesystem coverage。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-19
+**Related:** [Mount Tree Legacy API 事务日志](../devlog/transactions/2026-06-18-mount-tree-legacy-api.md), [mount-tree-legacy-api RFC](../rfcs/mount-tree-legacy-api/index.md)
 
 ## ANE-20260619-MOUNT-UNMOUNT-CLEANUP-STAGE1
 

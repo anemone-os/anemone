@@ -1,10 +1,10 @@
 # 2026-06-18 - Mount Tree Legacy API
 
-**状态：** Active
+**状态：** Completed; accepted limitations tracked in register
 **负责人：** doruche, Codex
 **领域：** fs / VFS / mount / LTP
 **权威计划：** [RFC-20260604-mount-tree-legacy-api](../../rfcs/mount-tree-legacy-api/index.md), [不变量需求](../../rfcs/mount-tree-legacy-api/invariants.md), [迁移实施计划](../../rfcs/mount-tree-legacy-api/implementation.md)
-**当前阶段：** 阶段 6 `umount2` flags、topology-only lazy detach 和 mounts 视图已实现；下一阶段为阶段 7 LTP profile 收口和限制矩阵复核
+**当前阶段：** 阶段 7 LTP profile 收口和限制矩阵复核已完成；后续按 register/current limitations 分拆 follow-up gate
 
 ## 范围
 
@@ -569,3 +569,61 @@
 **未完成验证：**
 
 - 尚未运行 LTP mount profile；阶段 7 负责 profile 收口和结果分类。
+
+### 2026-06-19 - 阶段 7 LTP profile closeout 和限制矩阵
+
+**阶段：** 阶段 7 - LTP profile 收口和限制登记。
+
+**profile 策略：**
+
+- 用户明确要求保留当前 `mount-legacy` group 的宽覆盖：许多 whole-case FAIL 仍包含可计分 TPASS 子点，不能为了让 group 汇总更好看而删除 `fs_bind*`、`fs_bind_move*`、`fs_bind_rbind*` 或 `test_robind*`。
+- `mount-legacy` group 顶部注释已改为评分 / 观测 profile 定义。new mount API、`pivot_root` 和真实 mount namespace / cloneNS cases 继续只作为注释锚点，不纳入本 legacy profile。
+- `profile.txt=mount-legacy` 是本轮用户授权的本地验证 profile 状态；不把它解释成缩小比赛测例全集的长期策略。
+
+**runtime 证据：**
+
+- 证据来源为用户/本地阶段 6 日志 `build/mount-legacy-phase6-rv64.log`；本阶段未重新运行 QEMU / LTP。
+- rv64 runtime KUnit：`Running 95 tests...` / `All tests passed!`。
+- glibc `mount-legacy` profile 原始 runner 汇总：`attempted=155 passed=7 failed=148 infra_failed=0 skipped=0`。
+- whole-case PASS：`mount01`、`mount05`、`mount06`、`umount01`、`umount02`、`umount03`、`fs_bind_regression_sh`。其中 `fs_bind_regression_sh` 有 19 个 TPASS，覆盖 private/unshared bind、rbind 和 move 的主语义。
+- `mount03` 产生 8 个 TPASS 和 32 个 TFAIL：直接 readonly 写入 `EROFS` 和 remount 基础路径有证据，剩余失败归入 `statfs()` flag reporting 和 `MS_NODEV` / `MS_NOEXEC` / `MS_NOSUID` / atime flag matrix accepted limitation。
+- `mount07` 产生 48 个 TPASS 和 12 个 TFAIL：默认 symlink 行为通过，`MS_NOSYMFOLLOW` remount 与 `ST_NOSYMFOLLOW` reporting 归入 mount flag matrix follow-up。
+- `umount2_02` 通过 `MNT_EXPIRE | MNT_FORCE`、`MNT_EXPIRE | MNT_DETACH`、`UMOUNT_NOFOLLOW` symlink / mntpoint 子项；`MNT_EXPIRE` 两阶段 `EAGAIN` / second-success 协议仍归入 unmount cleanup limitation。
+- `umount2_01` 在 lazy detach / remount 后 `open(mntpoint/file)` 得到 `ENOENT` 并 TBROK；该证据不足以声明 lazy detach 后 final persistence / cleanup 完整闭合，继续归入阶段 6 cleanup follow-up。
+
+**失败分类：**
+
+- `mount02` 的 `mknod() failed: ENOSYS` 是 mknod / devfs setup 设施缺口，不是 mount transaction 主语义失败。
+- `mount04` 先证明 non-root `mount()` 返回 `EPERM`，随后在 `/proc/mounts` 非 root 读取 `EACCES` 和 testcase cleanup 中 SIGSEGV/TBROK；该结果归入 procfs permission / testcase cleanup 环境问题，不作为 mount permission 主语义回归。
+- `fs_bind01..24`、`fs_bind_move01..22`、`fs_bind_rbind01..39` 保持启用用于收集 TPASS；whole-case FAIL 主要来自 `--make-rshared`、`--make-rslave`、`--make-runbindable` 和 propagation matrix 检查，归入 shared/slave/unbindable propagation limitation。
+- `test_robind01..55` 当前全部 `TCONF: tests need a big block device(>=500MB)`，旧 runner 将纯 `TCONF` exit code `32` 计作 failed。`user-test` runner 已修正为纯 `32` 归入 skipped；若用同一日志条件重跑，预期会把 55 个 pure TCONF case 从 failed 移到 skipped，但这不是新的 runtime 结果。
+
+**源码 / profile 变更：**
+
+- `anemone-apps/user-test/src/ltp.rs` 增加 `LtpCaseOutcome::Skipped`，将纯 LTP `TCONF` 退出码 `32` 计入 `skipped`。LTP 退出码是 result bitmask，只有 pure `32` 是 skip；`TCONF | TFAIL` 或 `TCONF | TBROK` 仍按失败处理。
+- `anemone-apps/user-test/ltp/groups/mount-legacy.txt` 顶部说明已明确该 group 是评分 / 观测 profile，不能因部分子功能未实现而缩窄当前启用集合。
+
+**register / RFC closeout：**
+
+- `ANE-20260528-ROFS-DIRECT-WRITE-STAGE1` 已更新为当前 per-mount readonly 状态：ordinary remount、bind-remount sibling isolation 和 bind/rbind/move 下 readonly 主语义已实现；shared writable mmap / writeback 与 `test_robind*` 大块设备环境仍为限制。
+- 新增 `ANE-20260619-MOUNT-PROPAGATION-STAGE1` 记录 shared/slave/unbindable propagation、peer group / master-slave、unbindable subtree filtering 和 cloneNS 后续范围。
+- 新增 `ANE-20260619-MOUNT-FLAG-MATRIX-STAGE1` 记录 `statfs()` mount flag reporting、`MS_NODEV`、`MS_NOEXEC`、`MS_NOSUID`、atime flags 和 `MS_NOSYMFOLLOW`。
+- 新增 `ANE-20260619-MOUNT-FSTYPE-ALIAS-BRIDGE` 记录 `tmpfs` / `ext2` / `ext3` / `vfat -> ramfs` syscall-boundary LTP bridge 及退出条件。
+- 阶段 6 已登记的 `ANE-20260619-MOUNT-UNMOUNT-CLEANUP-STAGE1` 继续覆盖 final superblock cleanup / retry queue、fanotify observer cleanup 和 `MNT_EXPIRE` 协议。
+
+**阶段 7 关闭判断：**
+
+- 第一版 legacy mount API 的已支持矩阵、未支持矩阵、环境 blocker 和 runtime 证据均已在 RFC / transaction / register 中有归属。
+- `mount-legacy` group 保持宽覆盖以保留 TPASS 分数；后续优化应按 register 条目分拆 follow-up gate，而不是缩小该 group。
+
+**验证：**
+
+- `just fmt user-test`：通过；`main.rs` 的无关 import 排序 churn 已还原。
+- `just xtask app build user-test --arch riscv64`：通过。
+- `mdbook build docs`：通过，输出到 `docs/book`。
+- `git diff --check`：通过。
+- `just build`：通过。
+- source audit `rg -n "MountFlags" anemone-kernel/src anemone-abi/src`：无输出。
+- source audit `rg -n "\\[NYI\\].*mount|ignoring unsupported.*mount|unsupported.*mount" anemone-kernel/src`：无输出。
+- source audit `rg -n "tmpfs|ext2|ext3|vfat|mount_fs_name|FsAliasKind|normalize_fstype|ltp-temporary-bridge" anemone-kernel/src/fs/api/mount anemone-kernel/src/fs`：仅命中 syscall adapter / KUnit 中的 alias bridge。
+- `phase7-reviewer`（Galileo，只读）在用户澄清前建议缩小或拆分 profile，并要求分类矩阵 / register 一致性。处置：用户明确要求保持 broad group 以保留 TPASS 分数；phase 7 已把 group 定义改为评分 / 观测 profile，并完成分类矩阵与 register 更新。状态：Neutralized。

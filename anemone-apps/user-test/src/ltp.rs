@@ -24,6 +24,10 @@ const MICROS_PER_SECOND: i64 = 1_000_000;
 const LTP_CASE_TIMEOUT_SECONDS: i64 = 60;
 const LTP_CASE_KILL_GRACE_SECONDS: i64 = 5;
 const LTP_CASE_TIMEOUT_EXIT_CODE: i32 = 124;
+// LTP result bits use TCONF=32 for "unsupported configuration". Only a pure
+// TCONF exit is a skip; mixed TCONF|TFAIL/TBROK still represents a real
+// failure.
+const LTP_TCONF_EXIT_CODE: i32 = 32;
 const LTP_CASE_TIMEOUT_US: i64 = LTP_CASE_TIMEOUT_SECONDS * MICROS_PER_SECOND;
 const LTP_CASE_KILL_GRACE_US: i64 = LTP_CASE_KILL_GRACE_SECONDS * MICROS_PER_SECOND;
 
@@ -261,6 +265,7 @@ enum LtpCaseOutcome {
     Passed,
     Failed,
     InfraFailed,
+    Skipped,
 }
 
 enum LtpCaseWaitResult {
@@ -366,6 +371,7 @@ fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
             LtpCaseOutcome::Passed => summary.passed += 1,
             LtpCaseOutcome::Failed => summary.failed += 1,
             LtpCaseOutcome::InfraFailed => summary.infra_failed += 1,
+            LtpCaseOutcome::Skipped => summary.skipped += 1,
         }
     }
 
@@ -440,6 +446,9 @@ fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpC
                 if exit_code == 0 {
                     println!("PASS LTP CASE {} : {}", case.name, exit_code);
                     LtpCaseOutcome::Passed
+                } else if exit_code == LTP_TCONF_EXIT_CODE {
+                    println!("SKIP LTP CASE {} : {}", case.name, exit_code);
+                    LtpCaseOutcome::Skipped
                 } else {
                     println!("FAIL LTP CASE {} : {}", case.name, exit_code);
                     LtpCaseOutcome::Failed

@@ -98,7 +98,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 - [RFC-20260605-fileops-seek-char-ioctl](./rfcs/fileops-seek-char-ioctl/index.md)：`FileOps::seek`、positioned I/O 分层和字符设备 ioctl 默认分发计划。
 - [RFC-20260603-IOCTL-LOOP](./rfcs/ioctl-loop/index.md)：`ioctl(2)` VFS 分发、通用块设备 ioctl 和 loop 设备最小闭环计划。
 - [RFC-20260604-fanotify](./rfcs/fanotify/index.md)：fanotify path-fd 通知、group fd、mark registry 和 staged LTP 兼容计划。
-- [RFC-20260604-mount-tree-legacy-api](./rfcs/mount-tree-legacy-api/index.md)：已接受进入实现事务；legacy mount API、MountTree 拓扑 owner、per-mount readonly、unmount / proc mounts 和 staged LTP 兼容计划。
+- [RFC-20260604-mount-tree-legacy-api](./rfcs/mount-tree-legacy-api/index.md)：第一版已实现并完成阶段 7 收口；保留 shared/slave/unbindable propagation、mount flag matrix、fstype alias bridge、ROFS mmap/writeback 和 unmount cleanup 等 register limitations。
 - [RFC-20260604-proc-tgid-fd](./rfcs/proc-tgid-fd/index.md)：`/proc/<tgid>/fd` 目录枚举、fd symlink `readlink()` 和第一阶段 procfs/fd 兼容计划。
 - [RFC-20260603-sched-latch](./rfcs/sched-latch/index.md)：`poll` / `select` OR wait 所需的 wait-core latch 原语和 iomux 迁移计划。
 - [RFC-20260601-sched-wait-refactor](./rfcs/sched-wait-refactor/index.md)：已完成的 scheduler wait/wake 协议重构 RFC。

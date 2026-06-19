@@ -1,10 +1,15 @@
-# Legacy mount API coverage for RFC-20260604-mount-tree-legacy-api.
+# Legacy mount API scoring / observability profile for
+# RFC-20260604-mount-tree-legacy-api.
 #
-# Enabled cases stay inside the first-pass RFC boundary: legacy mount(2),
-# umount(2), umount2(2), bind/rbind/move via mount(2), and robind readonly.
+# Keep this group broad even when a whole LTP case currently fails: many cases
+# include TPASS subpoints that score and provide regression signal before the
+# full shared/slave/unbindable propagation or environment-dependent matrix is
+# implemented. Phase 7 classifies sub-results instead of trimming these entries
+# down to only whole-case PASS items.
+#
 # New mount API, pivot_root, and real mount namespace cases are listed below as
-# commented follow-up anchors so profile failures do not get misclassified as
-# regressions in the legacy mount RFC.
+# commented follow-up anchors. They remain out of this legacy profile so RFC
+# non-goals are not misclassified as regressions in the implemented legacy API.
 
 # mount(2) syscall coverage.
 mount01
