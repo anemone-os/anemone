@@ -5,8 +5,8 @@
 **最后更新：** 2026-06-19
 **领域：** fs / vfs / mount
 **事务日志：** [2026-06-18-mount-tree-legacy-api](../../devlog/transactions/2026-06-18-mount-tree-legacy-api.md)
-**开放问题：** 无 active design blocker；lazy-detach cleanup ownership 和 detached-path namei semantics 已作为受控反馈 gate 写入 [迁移实施计划](./implementation.md)。
-**下一步：** 阶段 5 private move mount 和有限 propagation 已按 [事务日志](../../devlog/transactions/2026-06-18-mount-tree-legacy-api.md) 关闭；下一实现动作是启动阶段 6 `umount2` flags、pre-unmount cleanup 和 mounts 视图。
+**开放问题：** 无 active design blocker；lazy-detach final cleanup / fanotify observer cleanup 已作为 accepted limitation 登记，detached-path namei boundary 已在阶段 6 验证。
+**下一步：** 阶段 6 `umount2` flags、topology-only lazy detach 和 mounts 视图已按 [事务日志](../../devlog/transactions/2026-06-18-mount-tree-legacy-api.md) 收口；下一实现动作是阶段 7 LTP profile 收口和限制矩阵复核。
 
 ## 摘要
 

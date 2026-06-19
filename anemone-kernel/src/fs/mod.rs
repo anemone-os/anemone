@@ -193,6 +193,16 @@ mod vfs {
         VFS.visible.unmount(&mount)
     }
 
+    /// Lazily detach a filesystem subtree from visible namespace.
+    pub fn lazy_unmount(mount: Arc<Mount>) -> Result<usize, SysError> {
+        VFS.visible.lazy_unmount(&mount)
+    }
+
+    /// Snapshot visible mount views in mount-tree attach order.
+    pub fn visible_mounts_snapshot() -> Vec<Arc<Mount>> {
+        VFS.visible.mounts()
+    }
+
     /// Get the root [PathRef] of the visible namespace.
     ///
     /// # Panics

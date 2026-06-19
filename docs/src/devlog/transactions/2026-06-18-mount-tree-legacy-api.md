@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** fs / VFS / mount / LTP
 **权威计划：** [RFC-20260604-mount-tree-legacy-api](../../rfcs/mount-tree-legacy-api/index.md), [不变量需求](../../rfcs/mount-tree-legacy-api/invariants.md), [迁移实施计划](../../rfcs/mount-tree-legacy-api/implementation.md)
-**当前阶段：** 阶段 5 private move / limited propagation 已关闭；下一阶段为阶段 6 `umount2` flags、pre-unmount cleanup 和 mounts 视图
+**当前阶段：** 阶段 6 `umount2` flags、topology-only lazy detach 和 mounts 视图已实现；下一阶段为阶段 7 LTP profile 收口和限制矩阵复核
 
 ## 范围
 
@@ -534,3 +534,38 @@
 - `MS_PRIVATE` / `MS_REC | MS_PRIVATE` 作为当前 private-only tree 的有限 no-op 成功语义闭合；target 仍通过 `MountTree` validation，非空 data 拒绝。
 - `MS_SHARED`、`MS_SLAVE`、`MS_UNBINDABLE`、file/source 非目录、非法 move / bind / remount / attrs / propagation 组合均稳定拒绝，不伪成功。
 - review gate 已关闭；阶段 6 尚未启动。
+
+### 2026-06-19 - 阶段 6 umount2 flags、lazy detach 和 mounts 视图 closeout
+
+**阶段：** 阶段 6 - `umount2` flags、pre-unmount cleanup 和 mounts 视图。
+
+**源码变更：**
+
+- `sys_umount2()` 将 raw flags 解析为 `{lazy, nofollow}`：`flags == 0` 走同步 unmount，`MNT_DETACH` 走 topology-only lazy detach，`UMOUNT_NOFOLLOW` 映射到 `ResolveFlags::UNFOLLOW_LAST_SYMLINK`。
+- `MNT_FORCE` 继续稳定拒绝并记录 `force-unmount-not-supported`；`MNT_EXPIRE | MNT_FORCE`、`MNT_EXPIRE | MNT_DETACH` 继续返回 `EINVAL`，`MNT_EXPIRE` 自身作为 deferred protocol 稳定拒绝并记录 `expire-deferred`。
+- `MountTree::lazy_unmount()` 在 writer transaction 中摘除目标 mount subtree，允许子 mount 随 subtree 一起从 visible tree 消失；旧 `PathRef` / fd 只保持对象 lifetime，不触发 final superblock cleanup。
+- VFS facade 增加 `lazy_unmount()` 和 `visible_mounts_snapshot()`；procfs 只消费 snapshot，不获得 `MountTreeInner` 或 topology 修改权。
+- `/proc/<tgid>/mounts` 从空 stub 改为 live 六列视图：`source target fstype options 0 0`。`/proc/mounts` 仍保持 `self/mounts` symlink。
+- mounts view 按绑定 task root 渲染 target；当前 tgid 读自身时使用当前 task，外部 tgid 使用绑定 leader。无法在该 root 下表达的 mountpoint 会跳过并打日志，不 fallback 泄露全局路径。kthread binding 返回空内容，避免对 hanging fs state 调用 `Task::root()`。
+
+**Gate P1 / P2 结果：**
+
+- P1 只关闭 lazy detach 的 topology detach；final superblock cleanup owner/reaper、fanotify mount/filesystem mark-dead hook 和 `MNT_EXPIRE` 两阶段协议未闭合，已登记为 [ANE-20260619-MOUNT-UNMOUNT-CLEANUP-STAGE1](../../register/current-limitations.md#ane-20260619-mount-unmount-cleanup-stage1)。
+- 同步 unmount 仍保留阶段 2 的实现形状：为了避免 last-view detach 后并发 `sget()` 复用同一 superblock，`try_evict_all()`、`remove_sb()` 和 `kill_sb()` 仍在 `MountTree` writer gate 内执行。本阶段不把该路径宣称为长期 P1 cleanup owner。
+- P2 通过新增 KUnit 覆盖：lazy-detached child mount root 的 `..` 保持在 detached root，不 fallback 到全局 root 或 stale parent；旧 `PathRef` 仍可访问 detached object lifetime 内的文件。
+
+**KUnit / 行为覆盖：**
+
+- umount parser KUnit 更新为接受 `MNT_DETACH`、`UMOUNT_NOFOLLOW` 和二者组合，继续拒绝 unknown、`MNT_FORCE` 与 `MNT_EXPIRE`。
+- VFS KUnit 增加 lazy detach subtree：新 lookup 看不到 detached subtree，旧 refs 仍可访问，generation bump 生效。
+- VFS KUnit 增加 final symlink nofollow：带 `UNFOLLOW_LAST_SYMLINK` 的 unmount 目标停在 symlink 自身并返回 `NotMounted`，普通路径仍可跟随 symlink 卸载 mountpoint。
+
+**验证：**
+
+- `just fmt kernel`：通过。
+- `just build`：通过；KUnit 编译进 kernel build。
+- 用户运行 KUnit：`All tests passed`。本条为用户回报的 runtime KUnit 结果，当前事务日志未记录独立日志路径。
+
+**未完成验证：**
+
+- 尚未运行 LTP mount profile；阶段 7 负责 profile 收口和结果分类。

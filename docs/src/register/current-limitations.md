@@ -458,6 +458,21 @@ nonblocking 和动态 pipe capacity 需要单独设计。
 **Last Verified:** 2026-05-28
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
+## ANE-20260619-MOUNT-UNMOUNT-CLEANUP-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** fs / mount / fanotify / inode cache
+
+**Summary:** `mount-tree-legacy-api` 阶段 6 已把 `MNT_DETACH` 收敛为 mount topology-only lazy detach，并提供 `UMOUNT_NOFOLLOW` 与最小 `/proc/<tgid>/mounts` live view。但 lazy detach 后的 final superblock cleanup/retry queue、fanotify mount/filesystem mark-dead hook，以及 Linux `MNT_EXPIRE` 的两阶段 expire 协议仍未闭合。同步 unmount 仍沿用当前实现：为了避免 last-view detach 后被并发 `sget()` 复用，`try_evict_all()`、`remove_sb()` 和 `kill_sb()` 仍在 `MountTree` writer gate 内编排；这不是 Gate P1 的长期 final cleanup owner。
+
+**Exit Condition:** 引入明确的 unmount cleanup owner/reaper，在不重新打开 `sget()` 复用竞态的前提下，把 busy recheck、inode-shrinker explicit eviction、observer pre-unmount/mark-dead 和 `kill_sb()` retry 放到 `MountTree` transaction lock 外，并补齐 `MNT_EXPIRE` 状态协议；随后用 KUnit/source audit 和 mount/fanotify targeted smoke 证明 lazy detach、sync unmount、late observer event 和 final cleanup 路径一致。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-19
+**Related:** [Mount Tree Legacy API 事务日志](../devlog/transactions/2026-06-18-mount-tree-legacy-api.md), [mount-tree-legacy-api RFC](../rfcs/mount-tree-legacy-api/index.md)
+
 ## ANE-20260604-IOCTL-LTP-STAGE1-GAPS
 
 **Type:** Limitation

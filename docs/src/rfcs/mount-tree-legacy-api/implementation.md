@@ -592,6 +592,7 @@ write set：
 - 2026-06-19：阶段 2 closeout 后的结构反馈确认 `fs/mod.rs` 已同时承担 VFS facade、mount tree owner、VFS ops 和 KUnit，继续在其中堆叠阶段 3 remount attrs 会固化错误 owner boundary；阶段 3 前允许做 behavior-preserving `fs/mount/` 目录化 checkpoint。
 - 2026-06-19：阶段 2 implementation feedback 确认 `can_sleep` / IRQ / preempt 状态推断不应作为 early-root publish 的分流条件。canonical 形状改为普通 root mount 永远走 `tx_lock`，anonymous initcall 通过显式 fs-private early pseudo-root API 发布 first root；panic 或其它 no-sleep context 不获得 mount-tree writer bypass。
 - 2026-06-19：阶段 5 review gate 要求用 KUnit 覆盖 move 与 lookup generation retry 边界。用户批准将 `anemone-kernel/src/fs/namei.rs` 纳入阶段 5 write set，仅用于 `#[cfg(feature = "kunit")]` forced retry hook；普通 namei path walk 语义不变。
+- 2026-06-19：阶段 6 Gate P1 只关闭 `MNT_DETACH` topology detach；final superblock cleanup owner、retry queue、fanotify mount/filesystem mark-dead hook 和 `MNT_EXPIRE` 两阶段协议登记为 [ANE-20260619-MOUNT-UNMOUNT-CLEANUP-STAGE1](../../register/current-limitations.md#ane-20260619-mount-unmount-cleanup-stage1)。同步 unmount 暂保留阶段 2 为避免 `sget()` 复用竞态而持有 writer gate 穿过 `try_evict_all()` / `remove_sb()` / `kill_sb()` 的实现，不把它声明为长期 P1 形态。Gate P2 通过 lazy-detach KUnit 验证 detached mount root 的 `..` 不 fallback 到全局 root 或 stale parent。
 
 ## Write Set 扩展记录
 

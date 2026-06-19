@@ -270,7 +270,7 @@ impl MountTree {
         let plan = self.inner.lock_irqsave().plan_unmount(mount)?;
 
         if plan.last_view && plan.sb.has_alive_inode() {
-            knoticeln!("cannot unmount filesystem: superblock still has alive inodes");
+            knoticeln!("mount detach: op=unmount reason=alive-inodes");
             return Err(SysError::Busy);
         }
 
@@ -296,6 +296,27 @@ impl MountTree {
         knoticeln!("mount detach: op=unmount target={:?}", plan.mountpoint);
 
         Ok(())
+    }
+
+    /// Lazily detach a mount subtree from this tree.
+    ///
+    /// This only closes the topology half of `MNT_DETACH`: new lookups stop
+    /// seeing the subtree, while old `PathRef` / fd references keep the mount
+    /// objects alive naturally. Final superblock cleanup and observer
+    /// mark-dead need a separate owner/reaper and are intentionally not hidden
+    /// in this fast path.
+    pub(in crate::fs) fn lazy_unmount(&self, mount: &Arc<Mount>) -> Result<usize, SysError> {
+        let target = PathRef::new(mount.clone(), mount.root().clone()).to_string();
+        let _tx = self.tx_lock.lock();
+        let subtree_size = self.inner.lock_irqsave().lazy_detach_subtree(mount)?;
+
+        knoticeln!(
+            "mount detach: op=lazy target={} subtree_size={} cleanup=topology-only",
+            target,
+            subtree_size
+        );
+
+        Ok(subtree_size)
     }
 
     pub(in crate::fs) fn top_child_at(
@@ -562,6 +583,13 @@ impl MountTreeInner {
             .sum::<usize>()
     }
 
+    fn collect_mount_subtree(mount: &Arc<Mount>, subtree: &mut Vec<Arc<Mount>>) {
+        subtree.push(mount.clone());
+        for child in mount.attached_children_snapshot() {
+            Self::collect_mount_subtree(&child, subtree);
+        }
+    }
+
     fn move_mount(
         &mut self,
         source: &PathRef,
@@ -673,7 +701,7 @@ impl MountTreeInner {
         };
 
         if mount.has_attached_children() {
-            knoticeln!("cannot unmount filesystem: mount has attached children");
+            knoticeln!("mount detach: op=unmount reason=child-mounts");
             return Err(SysError::Busy);
         }
 
@@ -698,7 +726,7 @@ impl MountTreeInner {
         let plan = self.plan_unmount(mount)?;
 
         if plan.last_view && plan.sb.has_alive_inode() {
-            knoticeln!("cannot unmount filesystem: superblock still has alive inodes");
+            knoticeln!("mount detach: op=unmount reason=alive-inodes");
             return Err(SysError::Busy);
         }
 
@@ -713,6 +741,32 @@ impl MountTreeInner {
         self.bump_generation();
 
         Ok(plan.last_view)
+    }
+
+    fn lazy_detach_subtree(&mut self, mount: &Arc<Mount>) -> Result<usize, SysError> {
+        if !self.contains_mount(mount) {
+            return Err(SysError::NotMounted);
+        }
+
+        let parent = mount.parent().ok_or(SysError::InvalidArgument)?;
+        parent
+            .remove_child(mount)
+            .expect("lazy-detached mount should be a child of its parent");
+
+        let mut subtree = Vec::new();
+        Self::collect_mount_subtree(mount, &mut subtree);
+        for subtree_mount in &subtree {
+            subtree_mount.mark_detached();
+        }
+
+        self.mounts.retain(|existing| {
+            !subtree
+                .iter()
+                .any(|detached| Arc::ptr_eq(existing, detached))
+        });
+        self.bump_generation();
+
+        Ok(subtree.len())
     }
 }
 
@@ -866,6 +920,91 @@ mod kunits {
         vfs_unmount(nested).unwrap();
         vfs_rmdir(nested).unwrap();
         vfs_unmount(mountpoint).unwrap();
+        vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_lazy_unmount_detaches_subtree_and_keeps_old_refs() {
+        let mountpoint = Path::new("/kunit-vfs-lazy");
+        let nested = Path::new("/kunit-vfs-lazy/nested");
+        let nested_file = Path::new("/kunit-vfs-lazy/nested/file");
+
+        let host_mountpoint = vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_mount_at(
+            "ramfs",
+            MountSource::Pseudo,
+            MountAttrFlags::empty(),
+            mountpoint,
+        )
+        .unwrap();
+        vfs_mkdir(nested, InodePerm::all_rwx()).unwrap();
+        vfs_mount_at(
+            "ramfs",
+            MountSource::Pseudo,
+            MountAttrFlags::empty(),
+            nested,
+        )
+        .unwrap();
+        let nested_file_ref = vfs_touch(nested_file, InodePerm::all_rwx()).unwrap();
+
+        let mount_root = vfs_lookup(mountpoint).unwrap();
+        let nested_root = vfs_lookup(nested).unwrap();
+        let before_detach = mount_placement_generation();
+        assert_eq!(lazy_unmount(mount_root.mount().clone()).unwrap(), 2);
+        let after_detach = mount_placement_generation();
+        assert_ne!(before_detach, after_detach);
+
+        assert!(
+            vfs_lookup(mountpoint)
+                .unwrap()
+                .location_eq(&host_mountpoint)
+        );
+        assert_eq!(vfs_lookup(nested_file).unwrap_err(), SysError::NotFound);
+
+        let old_parent = vfs_lookup_from(&nested_root, Path::new("..")).unwrap();
+        assert!(
+            old_parent.location_eq(&nested_root),
+            "detached mount root '..' must not fall back to global root or stale parent"
+        );
+
+        let old_file = nested_file_ref.open().unwrap();
+        assert_eq!(old_file.write(b"detached").unwrap(), 8);
+
+        drop(old_file);
+        drop(old_parent);
+        drop(nested_file_ref);
+        drop(nested_root);
+        drop(mount_root);
+        drop(host_mountpoint);
+        vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_unmount_nofollow_rejects_final_symlink() {
+        let mountpoint = Path::new("/kunit-vfs-umount-nofollow");
+        let symlink = Path::new("/kunit-vfs-umount-nofollow-link");
+
+        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_symlink(mountpoint, symlink).unwrap();
+        vfs_mount_at(
+            "ramfs",
+            MountSource::Pseudo,
+            MountAttrFlags::empty(),
+            mountpoint,
+        )
+        .unwrap();
+
+        assert_eq!(
+            vfs_unmount(PathResolution::new(
+                symlink,
+                ResolveFlags::UNFOLLOW_LAST_SYMLINK
+            ))
+            .unwrap_err(),
+            SysError::NotMounted
+        );
+
+        vfs_unmount(symlink).unwrap();
+        vfs_unlink(symlink).unwrap();
         vfs_rmdir(mountpoint).unwrap();
     }
 
