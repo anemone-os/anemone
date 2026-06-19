@@ -1,6 +1,6 @@
 use super::{
     data::MountData,
-    flags::MountFlags,
+    flags::MountAttrFlags,
     view::{Mount, MountSource},
 };
 use crate::prelude::*;
@@ -45,7 +45,7 @@ impl MountTree {
         &self,
         fs: Arc<FileSystem>,
         source: MountSource,
-        flags: MountFlags,
+        attrs: MountAttrFlags,
         data: MountData,
         mountpoint: Option<&PathRef>,
     ) -> Result<Arc<Mount>, SysError> {
@@ -66,10 +66,10 @@ impl MountTree {
             }
         }
 
-        let sb = fs.mount(source, flags, data)?;
+        let sb = fs.mount(source, data)?;
         let root_inode = sb.root_inode().clone();
         let root_dentry = Arc::new(Dentry::new("/".to_string(), None, root_inode));
-        let mnt = Arc::new(Mount::new(root_dentry, sb.clone(), flags));
+        let mnt = Arc::new(Mount::new(root_dentry, sb.clone(), attrs));
 
         let stack_depth = {
             let mut inner = self.inner.lock_irqsave();
@@ -84,7 +84,7 @@ impl MountTree {
             if mountpoint.is_some() { "new" } else { "root" },
             mountpoint.map_or("none".to_string(), |mp| mp.to_string()),
             fs.name(),
-            flags,
+            attrs,
             stack_depth
         );
 
@@ -100,11 +100,11 @@ impl MountTree {
         }
 
         let source = MountSource::Pseudo;
-        let flags = MountFlags::empty();
-        let sb = fs.mount(source, flags, MountData::Null)?;
+        let attrs = MountAttrFlags::empty();
+        let sb = fs.mount(source, MountData::Null)?;
         let root_inode = sb.root_inode().clone();
         let root_dentry = Arc::new(Dentry::new("/".to_string(), None, root_inode));
-        let mnt = Arc::new(Mount::new(root_dentry, sb, flags));
+        let mnt = Arc::new(Mount::new(root_dentry, sb, attrs));
 
         // Anonymous root setup happens during fs initcalls, before local
         // IRQ/preemption state satisfies `Mutex::lock()`. This is an explicit
@@ -118,7 +118,7 @@ impl MountTree {
         knoticeln!(
             "mount attach: op=early-root target=none fstype={} attrs={:?} stack_depth={}",
             fs.name(),
-            flags,
+            attrs,
             stack_depth
         );
 
@@ -129,30 +129,48 @@ impl MountTree {
         &self,
         fs: Arc<FileSystem>,
         source: MountSource,
-        flags: MountFlags,
+        attrs: MountAttrFlags,
     ) -> Result<Arc<Mount>, SysError> {
-        self.mount(fs, source, flags, MountData::Null, None)
+        self.mount(fs, source, attrs, MountData::Null, None)
     }
 
     pub(in crate::fs) fn mount_at(
         &self,
         fs: Arc<FileSystem>,
         source: MountSource,
-        flags: MountFlags,
+        attrs: MountAttrFlags,
         mountpoint: &PathRef,
     ) -> Result<Arc<Mount>, SysError> {
-        self.mount(fs, source, flags, MountData::Null, Some(mountpoint))
+        self.mount(fs, source, attrs, MountData::Null, Some(mountpoint))
     }
 
     pub(in crate::fs) fn mount_at_with_data(
         &self,
         fs: Arc<FileSystem>,
         source: MountSource,
-        flags: MountFlags,
+        attrs: MountAttrFlags,
         data: MountData,
         mountpoint: &PathRef,
     ) -> Result<Arc<Mount>, SysError> {
-        self.mount(fs, source, flags, data, Some(mountpoint))
+        self.mount(fs, source, attrs, data, Some(mountpoint))
+    }
+
+    pub(in crate::fs) fn remount_attrs(
+        &self,
+        target: &PathRef,
+        attrs: MountAttrFlags,
+    ) -> Result<(), SysError> {
+        let _tx = self.tx_lock.lock();
+        let old_attrs = self.inner.lock_irqsave().remount_attrs(target, attrs)?;
+
+        knoticeln!(
+            "mount remount: target={} old_attrs={:?} new_attrs={:?} scope=per-mount-view",
+            target,
+            old_attrs,
+            attrs
+        );
+
+        Ok(())
     }
 
     /// Unmount a filesystem from this tree.
@@ -229,6 +247,40 @@ impl MountTreeInner {
         self.contains_mount(target.mount())
             && target.mount().is_reachable()
             && target.mount().top_child_at(target.dentry()).is_none()
+    }
+
+    fn target_is_mount_root_current(&self, target: &PathRef) -> bool {
+        Arc::ptr_eq(target.dentry(), target.mount().root()) && self.target_is_current(target)
+    }
+
+    fn remount_attrs(
+        &mut self,
+        target: &PathRef,
+        attrs: MountAttrFlags,
+    ) -> Result<MountAttrFlags, SysError> {
+        if !Arc::ptr_eq(target.dentry(), target.mount().root()) {
+            knoticeln!(
+                "mount remount: target revalidation failed target={} reason=not-mount-root",
+                target
+            );
+            return Err(SysError::InvalidArgument);
+        }
+
+        if !self.target_is_mount_root_current(target) {
+            knoticeln!(
+                "mount remount: target revalidation failed target={} reason=not-current",
+                target
+            );
+            return Err(SysError::Busy);
+        }
+
+        let old_attrs = target.mount().attrs();
+        // `RDONLY` is a per-mount view attribute in this RFC stage, not a
+        // filesystem-instance reconfigure. Keep the release-store inside the
+        // placement transaction so a successful remount publishes attrs only
+        // for the revalidated live mount view.
+        target.mount().set_attrs(attrs);
+        Ok(old_attrs)
     }
 
     fn stack_depth_at(parent: &Arc<Mount>, mountpoint: &Arc<Dentry>) -> usize {
@@ -350,7 +402,7 @@ mod kunits {
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
-            MountFlags::empty(),
+            MountAttrFlags::empty(),
             mountpoint,
         )
         .unwrap();
@@ -406,10 +458,22 @@ mod kunits {
         let mountpoint = Path::new("/kunit-vfs-covered-target");
 
         let host_mp = vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        let first = mount_at("ramfs", MountSource::Pseudo, MountFlags::empty(), &host_mp).unwrap();
+        let first = mount_at(
+            "ramfs",
+            MountSource::Pseudo,
+            MountAttrFlags::empty(),
+            &host_mp,
+        )
+        .unwrap();
 
         assert_eq!(
-            mount_at("ramfs", MountSource::Pseudo, MountFlags::empty(), &host_mp).unwrap_err(),
+            mount_at(
+                "ramfs",
+                MountSource::Pseudo,
+                MountAttrFlags::empty(),
+                &host_mp
+            )
+            .unwrap_err(),
             SysError::Busy
         );
 
@@ -426,7 +490,7 @@ mod kunits {
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
-            MountFlags::empty(),
+            MountAttrFlags::empty(),
             mountpoint,
         )
         .unwrap();
@@ -449,13 +513,19 @@ mod kunits {
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
-            MountFlags::empty(),
+            MountAttrFlags::empty(),
             mountpoint,
         )
         .unwrap();
 
         vfs_mkdir(nested, InodePerm::all_rwx()).unwrap();
-        vfs_mount_at("ramfs", MountSource::Pseudo, MountFlags::empty(), nested).unwrap();
+        vfs_mount_at(
+            "ramfs",
+            MountSource::Pseudo,
+            MountAttrFlags::empty(),
+            nested,
+        )
+        .unwrap();
 
         assert_eq!(vfs_unmount(mountpoint).unwrap_err(), SysError::Busy);
 
@@ -477,7 +547,7 @@ mod kunits {
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
-            MountFlags::empty(),
+            MountAttrFlags::empty(),
             mountpoint,
         )
         .unwrap();
@@ -537,14 +607,14 @@ mod kunits {
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
-            MountFlags::empty(),
+            MountAttrFlags::empty(),
             left_mount,
         )
         .unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
-            MountFlags::empty(),
+            MountAttrFlags::empty(),
             right_mount,
         )
         .unwrap();
@@ -583,7 +653,7 @@ mod kunits {
             vfs_mount_at(
                 "ramfs",
                 MountSource::Pseudo,
-                MountFlags::empty(),
+                MountAttrFlags::empty(),
                 mountpoint,
             )
             .unwrap();
@@ -625,7 +695,7 @@ mod kunits {
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
-            MountFlags::empty(),
+            MountAttrFlags::empty(),
             mountpoint,
         )
         .unwrap();
@@ -685,7 +755,7 @@ mod kunits {
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
-            MountFlags::empty(),
+            MountAttrFlags::empty(),
             mountpoint,
         )
         .unwrap();
@@ -694,7 +764,7 @@ mod kunits {
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
-            MountFlags::empty(),
+            MountAttrFlags::empty(),
             mountpoint,
         )
         .unwrap();
@@ -726,12 +796,18 @@ mod kunits {
         let hidden_file = Path::new("/kunit-vfs-direct-stack/hidden");
 
         let host_mp = vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        let first = mount_at("ramfs", MountSource::Pseudo, MountFlags::empty(), &host_mp).unwrap();
+        let first = mount_at(
+            "ramfs",
+            MountSource::Pseudo,
+            MountAttrFlags::empty(),
+            &host_mp,
+        )
+        .unwrap();
         let first_root = PathRef::new(first.clone(), first.root().clone());
         let second = mount_at(
             "ramfs",
             MountSource::Pseudo,
-            MountFlags::empty(),
+            MountAttrFlags::empty(),
             &first_root,
         )
         .unwrap();
@@ -779,7 +855,7 @@ mod kunits {
             let mnt = mount_at(
                 "ramfs",
                 MountSource::Pseudo,
-                MountFlags::empty(),
+                MountAttrFlags::empty(),
                 &next_target,
             )
             .unwrap();
@@ -834,7 +910,13 @@ mod kunits {
         let host_mp = vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
 
         let before_mount = mount_placement_generation();
-        let mnt = mount_at("ramfs", MountSource::Pseudo, MountFlags::empty(), &host_mp).unwrap();
+        let mnt = mount_at(
+            "ramfs",
+            MountSource::Pseudo,
+            MountAttrFlags::empty(),
+            &host_mp,
+        )
+        .unwrap();
         let after_mount = mount_placement_generation();
         assert_ne!(before_mount, after_mount);
 
@@ -843,5 +925,55 @@ mod kunits {
         assert_ne!(after_mount, after_unmount);
 
         vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_remount_readonly_rechecks_existing_file_writes() {
+        let mountpoint = Path::new("/kunit-vfs-remount-ro");
+        let file_path = Path::new("/kunit-vfs-remount-ro/file");
+
+        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_mount_at(
+            "ramfs",
+            MountSource::Pseudo,
+            MountAttrFlags::empty(),
+            mountpoint,
+        )
+        .unwrap();
+
+        let file = vfs_touch(file_path, InodePerm::all_rwx()).unwrap();
+        let opened = vfs_open(file_path).unwrap();
+        assert_eq!(opened.write(b"rw").unwrap(), 2);
+
+        let mount_root = vfs_lookup(mountpoint).unwrap();
+        remount_attrs(&mount_root, MountAttrFlags::RDONLY).unwrap();
+        assert_eq!(opened.write(b"ro").unwrap_err(), SysError::ReadOnlyFs);
+        assert_eq!(
+            vfs_touch(Path::new("/kunit-vfs-remount-ro/new"), InodePerm::all_rwx()).unwrap_err(),
+            SysError::ReadOnlyFs
+        );
+
+        remount_attrs(&mount_root, MountAttrFlags::empty()).unwrap();
+        assert_eq!(opened.write(b"rw").unwrap(), 2);
+
+        drop(opened);
+        drop(file);
+
+        vfs_unlink(file_path).unwrap();
+        vfs_unmount(mountpoint).unwrap();
+        vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_remount_rejects_plain_directory_target() {
+        let dir = Path::new("/kunit-vfs-remount-dir");
+
+        let path = vfs_mkdir(dir, InodePerm::all_rwx()).unwrap();
+        assert_eq!(
+            remount_attrs(&path, MountAttrFlags::RDONLY).unwrap_err(),
+            SysError::InvalidArgument
+        );
+
+        vfs_rmdir(dir).unwrap();
     }
 }

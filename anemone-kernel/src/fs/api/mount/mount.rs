@@ -41,10 +41,11 @@ const MAX_MOUNT_DATA_LEN_BYTES: usize = MAX_PATH_LEN_BYTES;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MountOperation {
     NewMount,
+    Remount,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ParsedMountFlags {
+struct ParsedMountRequest {
     operation: MountOperation,
     attrs: MountAttrFlags,
 }
@@ -126,7 +127,7 @@ fn normalize_fstype(fstype: &str) -> NormalizedFsType<'_> {
     }
 }
 
-fn parse_mount_flags(raw: u64) -> Result<ParsedMountFlags, SysError> {
+fn parse_mount_flags(raw: u64) -> Result<ParsedMountRequest, SysError> {
     let unknown = raw & !KNOWN_MOUNT_FLAGS;
     if unknown != 0 {
         knoticeln!(
@@ -137,15 +138,19 @@ fn parse_mount_flags(raw: u64) -> Result<ParsedMountFlags, SysError> {
         return Err(SysError::InvalidArgument);
     }
 
-    let operation = raw & MOUNT_OPERATION_FLAGS;
-    if operation != 0 {
+    let operation_bits = raw & MOUNT_OPERATION_FLAGS;
+    let operation = if operation_bits == 0 {
+        MountOperation::NewMount
+    } else if operation_bits == MS_REMOUNT {
+        MountOperation::Remount
+    } else {
         knoticeln!(
             "mount: unsupported operation flags raw={:#x} operation={:#x}",
             raw,
-            operation
+            operation_bits
         );
         return Err(SysError::InvalidArgument);
-    }
+    };
 
     let unsupported_attrs = raw & UNSUPPORTED_MOUNT_ATTR_FLAGS;
     if unsupported_attrs != 0 {
@@ -171,10 +176,7 @@ fn parse_mount_flags(raw: u64) -> Result<ParsedMountFlags, SysError> {
         attrs |= MountAttrFlags::RDONLY;
     }
 
-    Ok(ParsedMountFlags {
-        operation: MountOperation::NewMount,
-        attrs,
-    })
+    Ok(ParsedMountRequest { operation, attrs })
 }
 
 fn read_mount_data(raw: u64) -> Result<MountData, SysError> {
@@ -187,25 +189,18 @@ fn read_mount_data(raw: u64) -> Result<MountData, SysError> {
     >(raw)?))
 }
 
-#[syscall(SYS_MOUNT)]
-fn sys_mount(
-    #[validate_with(c_readonly_path.nullable())] source: Option<Box<str>>,
-    #[validate_with(c_readonly_path)] target: Box<str>,
-    #[validate_with(c_readonly_string::<MAX_FILE_NAME_LEN_BYTES>)] fstype: Box<str>,
-    mountflags: u64,
-    data: u64,
-) -> Result<u64, SysError> {
-    if !get_current_task()
-        .cred()
-        .has_cap_effective(Capability::SYS_ADMIN)
-    {
-        return Err(SysError::PermissionDenied);
-    }
+fn do_new_mount(
+    source: Option<Box<str>>,
+    target: Box<str>,
+    fstype: Option<Box<str>>,
+    attrs: MountAttrFlags,
+    data: MountData,
+) -> Result<(), SysError> {
+    let Some(fstype) = fstype else {
+        knoticeln!("mount: rejecting new mount with null fstype");
+        return Err(SysError::InvalidArgument);
+    };
 
-    let parsed_flags = parse_mount_flags(mountflags)?;
-    assert!(matches!(parsed_flags.operation, MountOperation::NewMount));
-
-    let data = read_mount_data(data)?;
     let fstype = normalize_fstype(&fstype);
     fstype.log_alias();
 
@@ -233,13 +228,52 @@ fn sys_mount(
     let target =
         get_current_task().lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
 
-    mount_at_with_data(
-        fstype.normalized,
-        source,
-        MountFlags::from(parsed_flags.attrs),
-        data,
-        &target,
-    )?;
+    mount_at_with_data(fstype.normalized, source, attrs, data, &target)?;
+
+    Ok(())
+}
+
+fn do_remount(target: Box<str>, attrs: MountAttrFlags, data: MountData) -> Result<(), SysError> {
+    if !data.is_empty() {
+        knoticeln!(
+            "mount remount: rejecting filesystem reconfigure data empty=false contains_loop={} scope=per-mount-rdonly-only",
+            data.has_loop_option()
+        );
+        return Err(SysError::InvalidArgument);
+    }
+
+    let target =
+        get_current_task().lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
+    remount_attrs(&target, attrs)
+}
+
+#[syscall(SYS_MOUNT)]
+fn sys_mount(
+    #[validate_with(c_readonly_path.nullable())] source: Option<Box<str>>,
+    #[validate_with(c_readonly_path)] target: Box<str>,
+    #[validate_with(c_readonly_string::<MAX_FILE_NAME_LEN_BYTES>.nullable())] fstype: Option<
+        Box<str>,
+    >,
+    mountflags: u64,
+    data: u64,
+) -> Result<u64, SysError> {
+    if !get_current_task()
+        .cred()
+        .has_cap_effective(Capability::SYS_ADMIN)
+    {
+        return Err(SysError::PermissionDenied);
+    }
+
+    let parsed_flags = parse_mount_flags(mountflags)?;
+    let data = read_mount_data(data)?;
+    match parsed_flags.operation {
+        MountOperation::NewMount => {
+            do_new_mount(source, target, fstype, parsed_flags.attrs, data)?;
+        },
+        MountOperation::Remount => {
+            do_remount(target, parsed_flags.attrs, data)?;
+        },
+    }
 
     Ok(0)
 }
@@ -256,7 +290,14 @@ mod kunits {
     }
 
     #[kunit]
-    fn test_mount_flags_reject_operation_bits() {
+    fn test_mount_flags_accept_plain_remount() {
+        let parsed = parse_mount_flags(MS_REMOUNT | MS_RDONLY).unwrap();
+        assert_eq!(parsed.operation, MountOperation::Remount);
+        assert_eq!(parsed.attrs, MountAttrFlags::RDONLY);
+    }
+
+    #[kunit]
+    fn test_mount_flags_reject_unsupported_operation_bits() {
         assert_eq!(
             parse_mount_flags(MS_BIND).unwrap_err(),
             SysError::InvalidArgument

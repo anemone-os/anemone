@@ -12,9 +12,8 @@ use crate::{
 static ANONY_FS_OPS: FileSystemOps = FileSystemOps {
     name: "anonymous",
     flags: FileSystemFlags::KERNEL_FS,
-    mount: |source, flags, data| {
+    mount: |source, data| {
         assert!(matches!(source, MountSource::Pseudo));
-        assert!(flags.is_empty());
         assert!(data.is_empty());
 
         let fs = ANONY_FS.get().clone();

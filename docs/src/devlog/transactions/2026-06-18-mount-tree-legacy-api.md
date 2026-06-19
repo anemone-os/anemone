@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** fs / VFS / mount / LTP
 **权威计划：** [RFC-20260604-mount-tree-legacy-api](../../rfcs/mount-tree-legacy-api/index.md), [不变量需求](../../rfcs/mount-tree-legacy-api/invariants.md), [迁移实施计划](../../rfcs/mount-tree-legacy-api/implementation.md)
-**当前阶段：** 阶段 3 前结构维护 checkpoint 已完成；阶段 3 尚未启动
+**当前阶段：** 阶段 3 ordinary per-mount readonly remount 已关闭；阶段 4 尚未启动
 
 ## 范围
 
@@ -341,3 +341,44 @@
 - source audit `rg -n 'tx_lock_can_sleep|mount_anonymous_root|mount_early_root\(' anemone-kernel/src -S`：无输出。
 - source audit `rg -n 'mount_early_pseudo_root|mount_early_anonymous_root' anemone-kernel/src -S`：仅命中 `MountTree` fs-private early pseudo-root API、VFS fs-private anonymous wrapper 和 anonymous fs initcall 调用点。
 - `just fmt kernel --check`：未通过，失败只来自已知生成文件 `anemone-kernel/src/kconfig_defs.rs` 和 `anemone-kernel/src/platform_defs.rs` 的格式差异；本次编辑文件已由 `just fmt kernel` 格式化。
+
+### 2026-06-19 - 阶段 3 ordinary per-mount readonly remount closeout
+
+**阶段：** 阶段 3 - ordinary per-mount readonly remount 和 attr plumbing。
+
+**源码变更：**
+
+- 删除源码中的 `MountFlags` 类型和 `MountAttrFlags -> MountFlags` 迁移桥；`Mount` 现在用 `AtomicU32` 承载 `MountAttrFlags` bitset，`attrs()` 以 acquire-load 读取，`set_attrs()` 以 release-store 发布。
+- `Mount::ensure_writable()` 只读取当前 `PathRef.mount()` 上的 attrs；opened file description / `FileStatusFlags` / `FileOpStatusFlags` 不承载 mount readonly。
+- `FileSystemOps::mount()` / `FileSystem::mount()` / `ramfs`、`devfs`、`procfs`、`ext4`、anonymous fs 后端 mount vtable 不再接收 per-mount attrs，只接收 `MountSource` 和 legacy `MountData`。
+- `sys_mount()` 将 raw flags 分成 `NewMount` 和 ordinary `Remount`。普通 `MS_REMOUNT` 允许 `MS_RDONLY` 切换当前 live mount view 的 attrs；`MS_REMOUNT | MS_BIND`、其它 operation bits、unsupported attrs 和 unknown bits 继续稳定返回 `EINVAL`。
+- ordinary remount 路径拒绝非空 legacy `data`，不打开 filesystem instance reconfigure，也不声明 sb-wide readonly。
+- `MountTree::remount_attrs()` 在 writer transaction 内重验目标仍是当前 tree 中的 live mount root，且没有被更上层 mount 覆盖；重验失败不更新 attrs。
+- KUnit 增加 ordinary remount ro/rw 语义覆盖：已打开 fd 在 remount ro 后写入返回 `EROFS`，目录项创建也返回 `EROFS`，remount rw 后旧 fd 可再次写入；普通目录 remount 被拒绝。
+
+**review gate：**
+
+- `phase3-mount-readonly-reviewer`（Bohr，只读）未发现 kernel 阶段 3 实现 blocker。
+- reviewer 确认 `MountFlags` 已从源码类型删除，filesystem backend 不再接收 attrs，ordinary remount 只发布当前 mount-view attrs，`MS_REMOUNT | MS_BIND` 与非空 remount data 稳定拒绝，remount target revalidation 在 `MountTree` writer / inner transaction 下执行。
+- reviewer 提出一个 Keter：`anemone-apps/user-test/ltp/profile.txt` 当前从 `all` 改成 `fs`，在阶段 3 write set 外。处置：该文件视为本轮临时本地验证状态，不纳入阶段 3 implementation commit。
+- 残余测试缺口：未新增 detached / replaced old target view 的 targeted KUnit；未对所有 write-entry class 建立逐项 runtime matrix；mmap / writeback readonly coherence 仍按 RFC accepted limitation 处理。
+
+**验证：**
+
+- `just fmt kernel`：通过。
+- `just build`：通过；仍仅保留既有 `anemone-kernel/src/sync/mono.rs` 的 `AtomicBool` / `Ordering` unused import warning。
+- `git diff --check`：通过。
+- source audit `rg -n "MountFlags" anemone-kernel/src anemone-abi/src`：无输出，证明旧迁移桥不再作为源码类型存在。
+- source audit `rg -n "FileSystemOps.*MountAttr|fn\(MountSource, MountAttr|_flags: MountAttr|mount: \|source, flags|fs\.mount\([^\n]*attrs" anemone-kernel/src anemone-abi/src`：无 backend attrs leakage 命中。
+- source audit `rg -n "ensure_writable|ReadOnlyFs|EROFS|truncate\(|fallocate|write_at|append_at_current_end|O_TRUNC" anemone-kernel/src/fs anemone-kernel/src/task/files.rs`：确认普通 write / pwrite / append、`truncate` / `ftruncate`、`fallocate` grow、`open(O_TRUNC)`、目录项修改、metadata 修改和 copy-backed `splice(pipe -> file)` 仍经过当前 mount readonly gate 或 FileDesc write gate。
+- 首次 non-tty rv64 e2e 尝试在 rootfs `sudo virt-make-fs` 处失败，未进入 QEMU；随后使用 PTY 运行 `./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/mount-legacy-phase3-rv64.log`。
+- rv64 runtime KUnit：`Running 80 tests...` / `All tests passed!`。新增 `test_mount_flags_accept_plain_remount`、`test_vfs_remount_rejects_plain_directory_target`、`test_vfs_remount_readonly_rechecks_existing_file_writes` 均通过。
+- rv64 `fs` LTP profile 在当前本地 `profile.txt=fs` 下完整跑完：`attempted=46 passed=25 failed=21 infra_failed=0 skipped=0`。失败主要落在既有 tmpfs non-empty data / realpath / mknod / group lookup / path errno 等非阶段 3 主语义；本条只作为 boot + KUnit + broad fs smoke，不作为阶段 3 LTP closeout。
+
+**阶段 3 关闭判断：**
+
+- ordinary per-mount readonly remount 语义已可验证；`MS_REMOUNT | MS_BIND` 仍留给阶段 4 bind view 语义打开。
+- `MountFlags` 不再作为源码类型存在；new mount、remount 和写入口均使用 `MountAttrFlags` / `Mount` atomic attrs 单一真相源。
+- filesystem backend 不再接收或保存 per-mount attrs；真实 sb-wide reconfigure 仍按 future `SuperBlockState` / follow-up gate 处理。
+- remount 成功返回前完成 target revalidation 和 attrs 发布；旧 fd 对同一 live mount view 的后续写能观察 remount 后 attrs。
+- shared writable mmap / dirty writeback 未声明闭合，继续保留 RFC accepted limitation。

@@ -26,7 +26,7 @@ bitflags! {
 pub struct FileSystemOps {
     pub name: &'static str,
     pub flags: FileSystemFlags,
-    pub mount: fn(MountSource, MountFlags, MountData) -> Result<Arc<SuperBlock>, SysError>,
+    pub mount: fn(MountSource, MountData) -> Result<Arc<SuperBlock>, SysError>,
 
     /// Synchronize filesystem state associated with the given superblock to its
     /// backing store.
@@ -125,7 +125,7 @@ impl FileSystem {
         self.ops.flags
     }
 
-    /// Mount a file system from the given source with the given flags.
+    /// Mount a file system from the given source.
     ///
     /// The implementation must return a fully initialized [Arc<SuperBlock>].
     ///
@@ -145,13 +145,8 @@ impl FileSystem {
     /// This function itself does not guarantee any particular semantic; it's up
     /// to the file system implementation to decide how to manage superblocks
     /// and mounts.
-    pub fn mount(
-        &self,
-        source: MountSource,
-        flags: MountFlags,
-        data: MountData,
-    ) -> Result<Arc<SuperBlock>, SysError> {
-        (self.ops.mount)(source, flags, data)
+    pub fn mount(&self, source: MountSource, data: MountData) -> Result<Arc<SuperBlock>, SysError> {
+        (self.ops.mount)(source, data)
     }
 
     /// Kill a superblock, i.e. clean up all physical resources associated with

@@ -49,11 +49,7 @@ fn procfs_root_dentries() -> Vec<Arc<Dentry>> {
     dentries
 }
 
-fn procfs_mount(
-    source: MountSource,
-    _flags: MountFlags,
-    data: MountData,
-) -> Result<Arc<SuperBlock>, SysError> {
+fn procfs_mount(source: MountSource, data: MountData) -> Result<Arc<SuperBlock>, SysError> {
     if !matches!(source, MountSource::Pseudo) {
         return Err(SysError::InvalidArgument);
     }

@@ -47,7 +47,7 @@ pub use self::{
         InodeType, ModifType, OpenedFile,
     },
     iomux::{PollEvent, PollRegisterResult, PollRequest},
-    mount::{Mount, MountData, MountFlags, MountSource},
+    mount::{Mount, MountAttrFlags, MountData, MountSource},
     namei::{
         ResolveFlags, resolve, resolve_from, resolve_from_with_root,
         resolve_from_with_root_checked, resolve_parent, resolve_parent_from,
@@ -121,12 +121,12 @@ mod vfs {
     pub fn mount_at(
         fs_name: &str,
         source: MountSource,
-        flags: MountFlags,
+        attrs: MountAttrFlags,
         mountpoint: &PathRef,
     ) -> Result<Arc<Mount>, SysError> {
         let fs = get_filesystem(fs_name).ok_or(SysError::NotFound)?;
 
-        VFS.visible.mount_at(fs, source, flags, mountpoint)
+        VFS.visible.mount_at(fs, source, attrs, mountpoint)
     }
 
     /// Mount a filesystem into visible namespace with legacy mount data.
@@ -136,25 +136,30 @@ mod vfs {
     pub fn mount_at_with_data(
         fs_name: &str,
         source: MountSource,
-        flags: MountFlags,
+        attrs: MountAttrFlags,
         data: MountData,
         mountpoint: &PathRef,
     ) -> Result<Arc<Mount>, SysError> {
         let fs = get_filesystem(fs_name).ok_or(SysError::NotFound)?;
 
         VFS.visible
-            .mount_at_with_data(fs, source, flags, data, mountpoint)
+            .mount_at_with_data(fs, source, attrs, data, mountpoint)
     }
 
     /// Mount a filesystem into visible namespace as the root mount.
     pub fn mount_root(
         fs_name: &str,
         source: MountSource,
-        flags: MountFlags,
+        attrs: MountAttrFlags,
     ) -> Result<Arc<Mount>, SysError> {
         let fs = get_filesystem(fs_name).ok_or(SysError::NotFound)?;
 
-        VFS.visible.mount_root(fs, source, flags)
+        VFS.visible.mount_root(fs, source, attrs)
+    }
+
+    /// Update per-mount attributes for the currently visible mount view.
+    pub fn remount_attrs(target: &PathRef, attrs: MountAttrFlags) -> Result<(), SysError> {
+        VFS.visible.remount_attrs(target, attrs)
     }
 
     /// **Called by anonymous filesystem driver. DO NOT TOUCH THIS.**
@@ -345,7 +350,7 @@ mod vfs_ops {
         pub fn vfs_mount_at<'a, R: Into<PathResolution<'a>>>(
             fs_name: &str,
             source: MountSource,
-            flags: MountFlags,
+            attrs: MountAttrFlags,
             mountpoint: R,
         ) -> Result<Arc<Mount>, SysError> {
             let mountpoint = mountpoint.into();
@@ -355,7 +360,7 @@ mod vfs_ops {
                 return Err(SysError::NotDir);
             }
 
-            mount_at(fs_name, source, flags, &mountpoint)
+            mount_at(fs_name, source, attrs, &mountpoint)
         }
 
         /// Unmount a filesystem at the specified mountpoint.
@@ -959,7 +964,7 @@ mod kunits {
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
-            MountFlags::empty(),
+            MountAttrFlags::empty(),
             mountpoint,
         )
         .unwrap();

@@ -2,7 +2,7 @@ use core::fmt::Debug;
 
 use crate::{device::block::BlockDev, prelude::*};
 
-use super::flags::MountFlags;
+use super::flags::MountAttrFlags;
 
 /// Placement of a mount view in a mount tree.
 ///
@@ -53,8 +53,13 @@ pub struct Mount {
     /// the tree transaction lock; the spin lock only protects the local vector
     /// while readers take short snapshots.
     children: SpinLock<Vec<Weak<Mount>>>,
-    /// Mount flags.
-    flags: MountFlags,
+    /// Per-mount attributes.
+    ///
+    /// This atomic bitset is the single truth source for first-pass mount
+    /// readonly enforcement. Remount publishes with release ordering while the
+    /// `MountTree` transaction still holds placement state; write-side VFS
+    /// entries acquire-load the current bits from the live `PathRef.mount()`.
+    attrs: AtomicU32,
 }
 
 impl Debug for Mount {
@@ -63,7 +68,7 @@ impl Debug for Mount {
             .field("root", &self.root)
             .field("sb", &self.sb)
             .field("placement", &self.placement.lock())
-            .field("flags", &self.flags)
+            .field("attrs", &self.attrs())
             .finish()
     }
 }
@@ -75,12 +80,12 @@ pub enum MountSource {
 }
 
 impl Mount {
-    pub fn new(root: Arc<Dentry>, sb: Arc<SuperBlock>, flags: MountFlags) -> Self {
+    pub fn new(root: Arc<Dentry>, sb: Arc<SuperBlock>, attrs: MountAttrFlags) -> Self {
         Self {
             root,
             sb,
             placement: SpinLock::new(MountPlacement::Detached),
-            flags,
+            attrs: AtomicU32::new(attrs.bits()),
             children: SpinLock::new(Vec::new()),
         }
     }
@@ -111,16 +116,20 @@ impl Mount {
         }
     }
 
-    pub fn flags(&self) -> MountFlags {
-        self.flags
+    pub fn attrs(&self) -> MountAttrFlags {
+        MountAttrFlags::from_bits_truncate(self.attrs.load(Ordering::Acquire))
     }
 
     pub fn ensure_writable(&self) -> Result<(), SysError> {
-        if self.flags.contains(MountFlags::RDONLY) {
+        if self.attrs().contains(MountAttrFlags::RDONLY) {
             Err(SysError::ReadOnlyFs)
         } else {
             Ok(())
         }
+    }
+
+    pub(super) fn set_attrs(&self, attrs: MountAttrFlags) {
+        self.attrs.store(attrs.bits(), Ordering::Release);
     }
 
     pub(super) fn mark_root(&self) {

@@ -160,11 +160,7 @@ fn devfs_publish_static_dir(name: &str) -> Result<Ino, SysError> {
     )
 }
 
-fn devfs_mount(
-    source: MountSource,
-    _flags: MountFlags,
-    data: MountData,
-) -> Result<Arc<SuperBlock>, SysError> {
+fn devfs_mount(source: MountSource, data: MountData) -> Result<Arc<SuperBlock>, SysError> {
     if !matches!(source, MountSource::Pseudo) {
         return Err(SysError::InvalidArgument);
     }
@@ -251,7 +247,7 @@ mod kunits {
         vfs_mount_at(
             "devfs",
             MountSource::Pseudo,
-            MountFlags::empty(),
+            MountAttrFlags::empty(),
             mountpoint_path,
         )
         .unwrap();

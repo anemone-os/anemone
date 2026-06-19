@@ -193,11 +193,7 @@ pub(super) fn map_vfs_inode_type(ty: InodeType) -> Result<LwExt4InodeType, SysEr
     }
 }
 
-fn ext4_mount(
-    source: MountSource,
-    _flags: MountFlags,
-    data: MountData,
-) -> Result<Arc<SuperBlock>, SysError> {
+fn ext4_mount(source: MountSource, data: MountData) -> Result<Arc<SuperBlock>, SysError> {
     let MountSource::Block(dev) = source else {
         return Err(SysError::InvalidArgument);
     };
