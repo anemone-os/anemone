@@ -136,8 +136,9 @@ write set：
 交付：
 
 - 将当前内部 `NameSpace` 正名为 `MountTree`。
-- 引入睡眠式 `Mutex<MountTreeInner>` 作为写侧 transaction lock。
-- 在 `MountTreeInner` 中集中维护 mountpoint stack、attachment registry 和 `placement_generation`；第一版采用单一 placement lock 加 generation retry，不引入 COW / snapshot-style publish。
+- 引入睡眠式 `tx_lock: Mutex<()>` 串行化普通 topology writer；用 `inner: SpinLock<MountTreeInner>` 集中维护 root、mount list、mountpoint stack、attachment registry 和 `placement_generation`。
+- anonymous fs initcall 所需的 first-root publish 必须走显式 fs-private early-root API；不得用 `can_sleep`、IRQ/preempt 状态或 panic 状态推断进入特殊路径。普通 root mount 仍必须通过 `tx_lock`。
+- 第一版采用单一 placement lock 加 generation retry，不引入 COW / snapshot-style publish。
 - 将 `Mount` placement 拆成 root / attached / detached 三态，消除 `parent == None` 同时表示 root 和 detached 的二义性。
 - 收窄 `Mount::add_child/remove_child` 等拓扑修改接口，使其只能由 `MountTree` transaction 调用。
 - 将同一 mountpoint stack 改为 Linux-like topmost-visible。
@@ -161,6 +162,7 @@ write set：
 
 - 如果 `fs/mod.rs` 继续同时承担 `NameSpace`/`MountTree` owner、path walk glue 和 syscall-facing helper，应先做同一 fs owner 内的目录化或 split-only checkpoint。
 - `fs/namei.rs` 只允许通过窄 API 读取 mountpoint stack；不得获得 `MountTreeInner` 私有锁或直接改 placement。
+- early-root 特殊 API 只服务 anonymous fs initcall 的 pseudo root 发布，不得成为 syscall、panic 或其它 no-sleep context 的通用 mount 绕行。
 
 write set：
 
@@ -585,6 +587,7 @@ write set：
 - 2026-06-18：阶段 1 write set 按用户批准扩展为 `fs/api/mount/**` syscall owner 目录；`fs/mod.rs` 仅允许用于 `MountData` syscall-only 透传 helper，不打开阶段 2 topology owner 迁移。
 - 2026-06-18：阶段 1 实现反馈确认现有 `MountFlags` 只剩 `RDONLY`，且已被 `MountAttrFlags` 覆盖为更准确的 per-mount attrs 表达；RFC 接受 `MountFlags` 作为阶段 1 迁移桥，但要求阶段 3 attr plumbing 删除该类型，并让 `FileSystemOps::mount()` 不再接收 per-mount attrs。
 - 2026-06-19：阶段 2 closeout 后的结构反馈确认 `fs/mod.rs` 已同时承担 VFS facade、mount tree owner、VFS ops 和 KUnit，继续在其中堆叠阶段 3 remount attrs 会固化错误 owner boundary；阶段 3 前允许做 behavior-preserving `fs/mount/` 目录化 checkpoint。
+- 2026-06-19：阶段 2 implementation feedback 确认 `can_sleep` / IRQ / preempt 状态推断不应作为 early-root publish 的分流条件。canonical 形状改为普通 root mount 永远走 `tx_lock`，anonymous initcall 通过显式 fs-private early pseudo-root API 发布 first root；panic 或其它 no-sleep context 不获得 mount-tree writer bypass。
 
 ## Write Set 扩展记录
 

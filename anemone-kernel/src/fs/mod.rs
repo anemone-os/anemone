@@ -158,9 +158,10 @@ mod vfs {
     }
 
     /// **Called by anonymous filesystem driver. DO NOT TOUCH THIS.**
-    pub fn mount_anonymous_root(anony_fs: Arc<FileSystem>) -> Result<Arc<Mount>, SysError> {
-        VFS.anonymous
-            .mount_root(anony_fs, MountSource::Pseudo, MountFlags::empty())
+    pub(in crate::fs) fn mount_early_anonymous_root(
+        anony_fs: Arc<FileSystem>,
+    ) -> Result<Arc<Mount>, SysError> {
+        VFS.anonymous.mount_early_pseudo_root(anony_fs)
     }
 
     /// Unmount a filesystem from visible namespace.

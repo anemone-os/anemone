@@ -3,6 +3,7 @@
 use crate::{
     fs::{
         anonymous::ANONY_FS, filesystem::FileSystemFlags, inode::Inode, superblock::SuperBlockOps,
+        vfs::mount_early_anonymous_root,
     },
     prelude::*,
     utils::any_opaque::NilOpaque,
@@ -109,8 +110,10 @@ fn init() {
         Err(e) => panic!("failed to register anonymous filesystem: {:?}", e),
     }
 
-    // mount as anonymous namespace root immediately.
-    mount_anonymous_root(ANONY_FS.get().clone())
+    // Mount as anonymous namespace root immediately. This is the only caller of
+    // the explicit early-root publish capability; ordinary root mounts must use
+    // the regular MountTree transaction path.
+    mount_early_anonymous_root(ANONY_FS.get().clone())
         .expect("failed to mount anonymous root filesystem");
 
     knoticeln!("anonymous namespace initialized");

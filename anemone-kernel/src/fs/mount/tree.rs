@@ -3,7 +3,7 @@ use super::{
     flags::MountFlags,
     view::{Mount, MountSource},
 };
-use crate::{percpu::in_hwirq, prelude::*};
+use crate::prelude::*;
 
 pub(in crate::fs) struct MountTree {
     /// Sleeping gate for ordinary topology writers. Early root publication has
@@ -39,10 +39,6 @@ impl MountTree {
         self.inner.lock_irqsave().placement_generation
     }
 
-    fn tx_lock_can_sleep() -> bool {
-        !in_hwirq() && IntrArch::local_intr_enabled() && allow_preempt()
-    }
-
     /// Mount a filesystem into this tree. If `mountpoint` is `None`, the new
     /// mount becomes the root mount.
     fn mount(
@@ -53,10 +49,6 @@ impl MountTree {
         data: MountData,
         mountpoint: Option<&PathRef>,
     ) -> Result<Arc<Mount>, SysError> {
-        if mountpoint.is_none() && !Self::tx_lock_can_sleep() {
-            return self.mount_early_root(fs, source, flags, data);
-        }
-
         let _tx = self.tx_lock.lock();
 
         if mountpoint.is_none() && self.inner.lock_irqsave().root_path.is_some() {
@@ -99,27 +91,28 @@ impl MountTree {
         Ok(mnt)
     }
 
-    fn mount_early_root(
+    pub(in crate::fs) fn mount_early_pseudo_root(
         &self,
         fs: Arc<FileSystem>,
-        source: MountSource,
-        flags: MountFlags,
-        data: MountData,
     ) -> Result<Arc<Mount>, SysError> {
         if self.inner.lock_irqsave().root_path.is_some() {
             return Err(SysError::AlreadyExists);
         }
 
-        let sb = fs.mount(source, flags, data)?;
+        let source = MountSource::Pseudo;
+        let flags = MountFlags::empty();
+        let sb = fs.mount(source, flags, MountData::Null)?;
         let root_inode = sb.root_inode().clone();
         let root_dentry = Arc::new(Dentry::new("/".to_string(), None, root_inode));
         let mnt = Arc::new(Mount::new(root_dentry, sb, flags));
 
         // Anonymous root setup happens during fs initcalls, before local
-        // IRQ/preemption state satisfies `Mutex::lock()`. At that point no task
-        // can race an ordinary mount transaction, so publishing the first tree
-        // root under the inner spin lock is the only permitted writer bypass.
-        // Later attach/unmount paths must use `tx_lock`.
+        // IRQ/preemption state satisfies `Mutex::lock()`. This is an explicit
+        // boot-only capability, not a fallback for arbitrary no-sleep or panic
+        // contexts. At that point no task can race an ordinary mount
+        // transaction, so publishing the first tree root under the inner spin
+        // lock is the only permitted writer bypass. Later attach/unmount paths
+        // must use `tx_lock`.
         let stack_depth = self.inner.lock_irqsave().attach_root(&mnt)?;
 
         knoticeln!(

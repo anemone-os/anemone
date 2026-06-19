@@ -86,7 +86,7 @@ Canonical：
 - mount op flags、per-mount attrs、superblock state 和 filesystem type flags 必须类型分离。
 - 现有 `MountFlags` 只允许作为阶段迁移桥；阶段 3 attr plumbing 关闭后，`Mount` 直接持有 `MountAttrFlags` 或等价 attrs storage，`FileSystemOps::mount()` 不再接收 per-mount attrs。
 - 同一 mountpoint 支持 stack，lookup 进入 Linux-like topmost mount。
-- `MountTree` 写侧使用睡眠式 transaction lock；读侧 lookup 不应走长期全局树锁。
+- `MountTree` 普通 topology writer 使用 `tx_lock: Mutex<()>` 串行化；placement state 在 `inner: SpinLock<MountTreeInner>` 内短临界区发布/读取。early anonymous root 只能通过显式 fs-private boot API 发布，不得用 `can_sleep`、IRQ/preempt 状态或 panic 状态推断绕过 writer gate。
 - 第一版 topology 发布采用单一 placement lock 加 `placement_generation` retry：move 在同一 transaction 内修改旧 stack 与新 stack，lookup 通过短临界区读取 stack，并在 generation 变化时重试。
 - per-mount attrs 第一版由 `Mount` 上的 atomic bitset 作为单一真相源；remount 在确认目标 mount view 仍 attached 且仍是当前 `MountTree` 目标 view 后发布 attrs。
 - unmount 的 view detach、observer cleanup 和 superblock resident inode eviction 必须分层；inode cache 回收服从已接受的 inode-shrinker 显式 eviction 协议。

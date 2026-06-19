@@ -310,3 +310,34 @@
 - source audit `rg -n "MountAttrFlags|MountFlags|MountTree|MountPlacement|MountData" anemone-kernel/src/fs/mount anemone-kernel/src/fs/mod.rs anemone-kernel/src/fs/api/mount anemone-kernel/src/fs/filesystem.rs`：命中均为预期的 mount module split、syscall parser 使用和 filesystem mount signature。
 
 **未运行验证：** 本 checkpoint 未重新启动 QEMU / LTP；阶段 2 closeout 已记录用户中止前的 rv64 boot + runtime KUnit smoke。
+
+### 2026-06-19 - 阶段 2 early-root API 反馈回写
+
+**阶段：** 阶段 2 closeout 后的 implementation feedback；阶段 3 尚未启动。
+
+**反馈：**
+
+- 阶段 2 closeout 为绕过 anonymous fs initcall 早于 `Mutex::lock()` 合法窗口的问题，引入了 `mount_early_root` spin-only first-root publish path。
+- 用户指出旧实现用 `can_sleep` / IRQ / preempt 状态推断是否进入 early-root path，看似复用，实则会把 panic、hwirq 或任意 no-sleep context 误导成 mount-tree writer bypass。
+
+**源码更正：**
+
+- 删除 `MountTree::tx_lock_can_sleep()` 和 ordinary root mount 的自动分流。`MountTree::mount_root()` 现在始终走普通 `tx_lock` transaction。
+- early publish 收窄为 `MountTree::mount_early_pseudo_root()`，只固定发布 pseudo root、空 attrs 和空 `MountData`。
+- VFS facade 只保留 `pub(in crate::fs) mount_early_anonymous_root()`，并由 anonymous fs initcall 唯一调用；该能力不再通过 crate-wide prelude 暴露给 syscall、panic 或其它子系统。
+- 代码注释明确：early-root 是 anonymous root boot-only capability，不是 arbitrary no-sleep 或 panic context fallback。
+
+**RFC 回写：**
+
+- `index.md`、`invariants.md` 和 `implementation.md` 已把阶段 2 canonical 形状修正为普通 writer 使用 `tx_lock: Mutex<()>`，placement state 由 `inner: SpinLock<MountTreeInner>` 短临界区发布。
+- `invariants.md` 新增禁止退化项：不得用 `can_sleep`、IRQ/preempt 状态或 panic 状态推断来绕过 `MountTree` writer gate；early-root publish 必须是显式、fs-private、boot-only capability。
+
+**验证：**
+
+- `just fmt kernel`：通过。
+- `just build`：通过；仍仅保留既有 `anemone-kernel/src/sync/mono.rs` 的 `AtomicBool` / `Ordering` unused import warning。
+- `git diff --check`：通过。
+- `mdbook build docs`：通过，输出到 `docs/book`。
+- source audit `rg -n 'tx_lock_can_sleep|mount_anonymous_root|mount_early_root\(' anemone-kernel/src -S`：无输出。
+- source audit `rg -n 'mount_early_pseudo_root|mount_early_anonymous_root' anemone-kernel/src -S`：仅命中 `MountTree` fs-private early pseudo-root API、VFS fs-private anonymous wrapper 和 anonymous fs initcall 调用点。
+- `just fmt kernel --check`：未通过，失败只来自已知生成文件 `anemone-kernel/src/kconfig_defs.rs` 和 `anemone-kernel/src/platform_defs.rs` 的格式差异；本次编辑文件已由 `just fmt kernel` 格式化。
