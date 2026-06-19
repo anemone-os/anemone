@@ -1,10 +1,10 @@
 use anemone_rs::{
     os::linux::{
-        fs::{chdir, fstatat, AtFd},
+        fs::{AtFd, chdir, fstatat},
         process::{
-            execve, exit, fork, sched_yield, setpgid,
-            signal::{kill, SigNo},
-            wait4, WStatus, WStatusRaw, WaitFor, WaitOptions,
+            WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, sched_yield, setpgid,
+            signal::{SigNo, kill},
+            wait4,
         },
         time::gettimeofday,
     },
@@ -115,6 +115,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
         name: "fs",
         cases: include_str!("../ltp/groups/fs.txt"),
+    },
+    LtpGroup {
+        name: "mount-legacy",
+        cases: include_str!("../ltp/groups/mount-legacy.txt"),
     },
     // LtpGroup {
     //     name: "full",
@@ -606,7 +610,7 @@ fn parse_case_line(line: &str) -> Option<LtpCaseSpec<'_>> {
 
     let (header, args) = match line.split_once(':') {
         Some((header, args)) => {
-            let args = args.split_ascii_whitespace().collect::<Vec<_>>();
+            let args = parse_case_args(args, line);
             if args.is_empty() {
                 panic!("user-test: invalid LTP case line {line}: missing arguments");
             }
@@ -626,6 +630,64 @@ fn parse_case_line(line: &str) -> Option<LtpCaseSpec<'_>> {
         executable,
         args,
     })
+}
+
+fn parse_case_args<'a>(args: &'a str, line: &str) -> Vec<&'a str> {
+    let mut parsed = Vec::new();
+    let bytes = args.as_bytes();
+    let mut idx = 0;
+
+    while idx < bytes.len() {
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        }
+        if idx == bytes.len() {
+            break;
+        }
+
+        let start = idx;
+        let token = match bytes[idx] {
+            b'"' | b'\'' => {
+                let quote = bytes[idx];
+                idx += 1;
+                let token_start = idx;
+                while idx < bytes.len() && bytes[idx] != quote {
+                    idx += 1;
+                }
+                if idx == bytes.len() {
+                    panic!("user-test: invalid LTP case line {line}: unterminated quoted argument");
+                }
+                let token = &args[token_start..idx];
+                idx += 1;
+                if idx < bytes.len() && !bytes[idx].is_ascii_whitespace() {
+                    panic!(
+                        "user-test: invalid LTP case line {line}: quoted argument must end at token boundary",
+                    );
+                }
+                token
+            },
+            b => {
+                if b == b'\\' {
+                    panic!(
+                        "user-test: invalid LTP case line {line}: backslash escaping is unsupported",
+                    );
+                }
+                idx += 1;
+                while idx < bytes.len() && !bytes[idx].is_ascii_whitespace() {
+                    if matches!(bytes[idx], b'"' | b'\'' | b'\\') {
+                        panic!(
+                            "user-test: invalid LTP case line {line}: quotes are only supported around a whole argument",
+                        );
+                    }
+                    idx += 1;
+                }
+                &args[start..idx]
+            },
+        };
+        parsed.push(token);
+    }
+
+    parsed
 }
 
 fn ltp_exit_code(wstatus: WStatus) -> i32 {

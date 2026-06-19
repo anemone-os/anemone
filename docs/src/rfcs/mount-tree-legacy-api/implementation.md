@@ -483,6 +483,7 @@ write set：
 
 - mount RFC / transaction docs。
 - `docs/src/register/current-limitations.md` 如需登记公开限制。
+- `anemone-apps/user-test/ltp/groups/mount-legacy.txt` 和必要的 `anemone-apps/user-test/src/ltp.rs` group 注册 / case-argument parsing 支撑。
 - `anemone-apps/user-test/ltp/profile` 仅在需要调整本地验证 profile 且用户授权时触碰。
 
 可观测性：

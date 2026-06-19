@@ -440,3 +440,27 @@
 - file bind、propagation-dependent bind 和未闭合 operation 组合仍稳定拒绝并可观测。
 - recursive bind 失败路径不会留下部分 visible mount view。
 - 阶段 5 private move mount / limited propagation 尚未启动。
+
+### 2026-06-19 - mount-legacy LTP group 整理
+
+**阶段：** 阶段 7 验证入口预整理；不启动阶段 5 feature code。
+
+**变更：**
+
+- 新增 `anemone-apps/user-test/ltp/groups/mount-legacy.txt`，作为本 RFC 的专用 LTP group。启用集合覆盖 `mount01..07`、`umount01..03`、`umount2_01..02`、`fs_bind` 中不依赖真实 mount namespace 的 bind / move / rbind / regression 条目，以及 `fs_readonly` 的 `test_robind01..55`。
+- `mountns01..04`、`fs_bind_cloneNS01..07`、new mount API (`fsopen` / `fsmount` / `fspick` / `open_tree` / `move_mount` / `mount_setattr`) 和 `pivot_root01` 作为注释锚点保留，不纳入当前可运行 group，避免把 RFC 非目标误分类为 legacy mount regression。
+- `anemone-apps/user-test/src/ltp.rs` 注册 `mount-legacy` group，并给 case argument parser 增加最小 quote-aware 支撑：`fs_readonly` 的 `test_robind.sh -c "..."` 命令字符串会作为单个 argv 传入。该 parser 不做 shell 展开、不支持转义或混合拼接，避免把 runner 扩展成半个 shell。
+- `profile.txt` 未修改；后续运行该 group 时仍由本地 profile 或用户临时切换选择。
+
+**RFC 回写：**
+
+- `implementation.md` 阶段 7 write set 已补充 `mount-legacy.txt` 和必要的 runner group 注册 / case-argument parsing 支撑。该扩展只服务验证入口，不改变阶段 5/6 feature write set 或 accepted semantics。
+
+**验证：**
+
+- `just fmt user-test`：通过；命令曾格式化 `src/main.rs` 的无关 import，已还原该 churn。
+- `just xtask app build user-test --arch riscv64`：通过。
+- `git diff --check`：通过。
+- `mdbook build docs`：通过。
+- 静态 group 检查：`mount-legacy.txt` 启用 155 条 case，保留 38 条注释 follow-up；未发现未注释的 cloneNS、mountns、new mount API、`pivot_root` 条目；启用行双引号成对。
+- 未运行 QEMU / LTP；本条只整理 profile group 和 runner argv 支撑。
