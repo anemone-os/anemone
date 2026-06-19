@@ -375,12 +375,12 @@
 **Severity:** Low
 **Area:** VFS / openat / fcntl
 
-**Summary:** `openat` 已把 access mode、fd-local flags、file status flags 和 Linux-visible compat bits 分开保存，`F_GETFL` 能还原 open 时保存的持久 flag，`F_SETFL` 只动态修改 `O_APPEND`、`O_NONBLOCK` 和 `O_DIRECT`。opened file description 仍是 file status flags 的唯一真相源；`FileOps` data I/O 通过短生命周期 ctx 观察 normalized status snapshot，pipe 不再保存私有 `nonblock` 行为状态，block special file 的 `O_DIRECT` 拒绝由后端 status check 表达。`O_SYNC`、`O_DSYNC` 和 `O_NOATIME` 当前会保存并通过 `F_GETFL` 可见，但只记录兼容状态，不承诺真实同步写入或 atime 抑制语义；通过 `F_SETFL` 传入这些不可动态修改位会被忽略并打日志。
+**Summary:** `openat` 已把 access mode、fd-local flags、file status flags 和 Linux-visible compat bits 分开保存，`F_GETFL` 能还原 open 时保存的持久 flag，`F_SETFL` 只动态修改 `O_APPEND`、`O_NONBLOCK` 和 `O_DIRECT`。opened file description 仍是 file status flags 的唯一真相源；`FileOps` data I/O 通过短生命周期 ctx 观察 normalized status snapshot，pipe 不再保存私有 `nonblock` 行为状态，block special file 的 `O_DIRECT` 拒绝由后端 status check 表达。传统 `openat` 的 `O_PATH` 路径已按 Linux legacy 规则接受并丢弃 `O_NONBLOCK`、`O_APPEND`、`O_CREAT` 等已识别但不参与 path handle 语义的 flag，同时保留 `O_DIRECTORY`、`O_NOFOLLOW` 和 `O_CLOEXEC`。当前仍有两项 ABI 差异：传统 `openat` 会对未知 flag bit 返回 `EINVAL`，而 Linux legacy `open/openat` 会先静默清除未知位；`O_PATH` 打开时生效的 `O_DIRECTORY` / `O_NOFOLLOW` 只进入 lookup 决策，没有随 opened file description 保存，因此后续 `F_GETFL` 不会像 Linux 一样回显这两个 bit。另有 `O_SYNC`、`O_DSYNC` 和 `O_NOATIME` 当前会保存并通过 `F_GETFL` 可见，但只记录兼容状态，不承诺真实同步写入或 atime 抑制语义；通过 `F_SETFL` 传入这些不可动态修改位会被忽略并打日志。
 
-**Exit Condition:** 为同步写、direct I/O 和 atime 更新引入真实文件系统语义，或者逐项收敛为明确拒绝/兼容策略，并补齐 `openat`、`fcntl(F_GETFL/F_SETFL)` 与 IO 可见性的回归验证。
+**Exit Condition:** 为传统 `openat` 与未来严格 `openat2` 分别建立 Linux-compatible flag validation 边界，使 legacy 路径静默清除未知位，并让 opened file description 保存和回显 `O_PATH` 下生效的 `O_DIRECTORY` / `O_NOFOLLOW`；为同步写、direct I/O 和 atime 更新引入真实文件系统语义，或者逐项收敛为明确拒绝/兼容策略。补齐 `openat(O_PATH | ignored/unknown flags)`、`fcntl(F_GETFL/F_SETFL)` 与 IO 可见性的 syscall 回归验证。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-10
+**Last Verified:** 2026-06-19
 **Related:** [FileOps status ctx 边界清理小迭代记录](../devlog/changes/2026-06-10-fileops-status-ctx.md), [开发日志：2026-06-08 至 2026-06-21](../devlog/2026-06-08_to_2026-06-21.md), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
 ## ANE-20260528-PIPE-PROCFS-KNOBS-STAGE1
@@ -397,6 +397,36 @@
 **Owner:** doruche
 **Last Verified:** 2026-05-28
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260617-SPLICE-FAMILY-COPY-BACKED-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** VFS / pipe / splice / syscall ABI
+
+**Summary:** 当前 `splice` / `tee` / `vmsplice` 已有 generic syscall 入口。`splice` 是
+copy-backed stage-1：通过页大小内核 buffer 和现有 `FileDesc` read/write 路径覆盖基础
+file/pipe/pipe 搬运及 `splice03` / `splice07` 关注的 errno 矩阵，但不提供 Linux zero-copy pipe
+buffer sharing、socket splice、procfs target 特化或 `/dev/zero` / `/dev/full` 新版本 splice
+语义。`tee` 和 `vmsplice` 只注册错误语义入口：valid pipe functional path 返回
+`EOPNOTSUPP` 并打 notice，不伪造 pipe buffer duplication、用户 iovec 搬运、page pin/gift 或
+full-pipe 行为。`SPLICE_F_MOVE` / `SPLICE_F_MORE` / `SPLICE_F_GIFT` 在 copy-backed `splice` 中是可见
+no-op，`SPLICE_F_NONBLOCK` 在 functional path 上 fail closed 为 `EINVAL`。
+
+**Decision:** 本阶段只为高 ROI LTP errno 和小长度 copy-backed smoke 收口，不把 splice family
+作为完整 pipe buffer / MM / socket 协议引入。真实 `tee`、functional `vmsplice`、per-call
+nonblocking 和动态 pipe capacity 需要单独设计。
+
+**Exit Condition:** 为 pipe 引入可审查的 buffer duplication / sharing 或等价抽象，补齐
+`tee` 不消费 input pipe 的语义、`vmsplice` 用户 iovec 到 pipe 的 functional path、per-call
+`SPLICE_F_NONBLOCK` I/O context，以及需要的 socket/devfs/procfs target 支持；随后重新验证
+`splice01`、`splice02`、`splice03`、`splice04`、`splice05`、`splice06`、`splice07`、
+`splice08`、`splice09`、`tee01`、`tee02` 和 `vmsplice01..04`，并按实际通过面拆除或收窄本限制。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-17
+**Related:** [splice family copy-backed stage-1 小迭代记录](../devlog/changes/2026-06-17-splice-copy-stage1.md), [当前限制：pipe procfs knobs stage-1](#ane-20260528-pipe-procfs-knobs-stage1)
 
 ## ANE-20260528-RAMFS-RENAME-STAGE1
 
@@ -420,13 +450,73 @@
 **Severity:** Medium
 **Area:** fs / mount / VFS / mmap
 
-**Summary:** 当前 `MS_RDONLY` 已能通过 mount flags 传播到 VFS，并覆盖直接写路径：目录项创建/删除/改名、普通文件 open-for-write / write / truncate、`chmod` / `chown` / `utimensat` / `fallocate` 会在只读挂载上返回 `EROFS`。这不是完整 Linux ROFS：shared writable mmap、dirty/writeback 与 `msync` 关系、remount/bind/move mount 语义，以及除 `MS_RDONLY` 外的 mount flags 仍未系统化。
+**Summary:** 当前 `MS_RDONLY` 已收敛为 per-mount view attribute，并覆盖直接写路径：目录项创建/删除/改名、普通文件 open-for-write / write / truncate、`chmod` / `chown` / `utimensat` / `fallocate` 会在只读挂载上返回 `EROFS`。`mount-tree-legacy-api` 已补齐 ordinary remount、bind-remount sibling isolation、bind/rbind/move 下的 mount-view readonly 语义，并由 KUnit 与 `mount03` 的直接 readonly 写入 TPASS 覆盖。剩余限制是 shared writable mmap、dirty/writeback 与 `msync` 的强一致性，以及 LTP `test_robind*` 依赖的 `LTP_BIG_DEV >= 500MB` 环境。
 
-**Exit Condition:** 为 file-backed shared writable mmap 和 writeback 引入明确的只读挂载约束；补齐或显式拒绝 remount、bind、move、propagation 等 mount flag 组合；用覆盖 open/write/truncate/metadata/mmap/remount 的回归矩阵验证 ROFS 语义。
+**Exit Condition:** 为 file-backed shared writable mmap 和 writeback 引入明确的只读挂载约束；准备满足 `test_robind*` 的大块设备测试环境；用覆盖 open/write/truncate/metadata/mmap/remount/bind sibling 的回归矩阵验证 ROFS 语义。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-28
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-06-19
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [Mount Tree Legacy API 事务日志](../devlog/transactions/2026-06-18-mount-tree-legacy-api.md), [mount-tree-legacy-api RFC](../rfcs/mount-tree-legacy-api/index.md)
+
+## ANE-20260619-MOUNT-PROPAGATION-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** fs / mount / propagation / LTP
+
+**Summary:** `mount-tree-legacy-api` 第一版只在当前 private-only mount tree 下接受 `MS_PRIVATE` / `MS_REC | MS_PRIVATE`，并完成 plain bind、recursive bind 和 private move 的核心语义。完整 Linux shared subtree propagation 仍未实现：`MS_SHARED`、`MS_SLAVE`、`MS_UNBINDABLE`、peer group / master-slave 传播、unbindable subtree 过滤、`CLONE_NEWNS` / mount namespace cloneNS 仍是后续范围。`mount-legacy` LTP group 刻意保留 `fs_bind*`、`fs_bind_move*` 和 `fs_bind_rbind*` 的宽矩阵来收集已有 TPASS 分数；这些 whole-case FAIL 不能整体归因为 bind/rbind/move 主语义回归。
+
+**Exit Condition:** 引入 shared subtree 的 peer group / master-slave 状态、propagation 传播规则、unbindable subtree 过滤和 mount namespace clone/unshare 边界；随后重新分类 `fs_bind01..24`、`fs_bind_move01..22`、`fs_bind_rbind01..39` 以及 cloneNS follow-up cases。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-19
+**Related:** [Mount Tree Legacy API 事务日志](../devlog/transactions/2026-06-18-mount-tree-legacy-api.md), [mount-tree-legacy-api RFC](../rfcs/mount-tree-legacy-api/index.md)
+
+## ANE-20260619-MOUNT-FLAG-MATRIX-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** fs / mount / statfs / namei / devfs / exec
+
+**Summary:** `mount-tree-legacy-api` 第一版只系统化 `MS_RDONLY`、bind/rbind/move、private propagation no-op、`MNT_DETACH` 和 `UMOUNT_NOFOLLOW` 的已闭合子集。LTP `mount03` 仍暴露 `statfs()` mount flag reporting 缺口，以及 `MS_NODEV`、`MS_NOEXEC`、`MS_NOSUID`、`MS_NOATIME`、`MS_NODIRATIME`、`MS_STRICTATIME` 的稳定拒绝；`mount07` 仍暴露 `MS_NOSYMFOLLOW` remount 与 `ST_NOSYMFOLLOW` reporting 缺口。这些 flag 需要接入 devfs/exec/namei/statfs 等对应 owner，不能只在 mount parser 中伪装成功。
+
+**Exit Condition:** 为 `statfs()` 暴露已支持 mount attrs；按 owner 分阶段接入或显式重新拒绝 `MS_NODEV`、`MS_NOEXEC`、`MS_NOSUID`、atime flags 和 `MS_NOSYMFOLLOW`，并用 `mount03` / `mount07` 重新验证 errno、flag reporting 和用户可见行为。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-19
+**Related:** [Mount Tree Legacy API 事务日志](../devlog/transactions/2026-06-18-mount-tree-legacy-api.md), [mount-tree-legacy-api RFC](../rfcs/mount-tree-legacy-api/index.md)
+
+## ANE-20260619-MOUNT-FSTYPE-ALIAS-BRIDGE
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** fs / mount / filesystem compatibility / LTP
+
+**Summary:** legacy `mount(2)` syscall adapter 仍保留临时 LTP 兼容桥：`tmpfs`、`ext2`、`ext3`、`vfat` 会在 syscall 边界归一化到 `ramfs`。该桥只服务当前 mount LTP setup 和评分观测，不代表 Anemone 已提供真实 tmpfs/ext2/ext3/vfat filesystem 语义，也不得下沉为 `MountTree`、`MountAttrFlags`、`FileSystemOps` 或 backend 状态。
+
+**Exit Condition:** 为需要支持的真实 filesystem 类型提供对应 backend 或测试环境替代路径；删除 `ext2` / `ext3` / `vfat -> ramfs` 兼容桥，保留或重新定义 `tmpfs` 的正式语义；重新验证 mount LTP 中依赖这些 fstype 名称的 setup 路径不会把 alias 成功误报为真实 filesystem coverage。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-19
+**Related:** [Mount Tree Legacy API 事务日志](../devlog/transactions/2026-06-18-mount-tree-legacy-api.md), [mount-tree-legacy-api RFC](../rfcs/mount-tree-legacy-api/index.md)
+
+## ANE-20260619-MOUNT-UNMOUNT-CLEANUP-STAGE1
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** fs / mount / fanotify / inode cache
+
+**Summary:** `mount-tree-legacy-api` 阶段 6 已把 `MNT_DETACH` 收敛为 mount topology-only lazy detach，并提供 `UMOUNT_NOFOLLOW` 与最小 `/proc/<tgid>/mounts` live view。但 lazy detach 后的 final superblock cleanup/retry queue、fanotify mount/filesystem mark-dead hook，以及 Linux `MNT_EXPIRE` 的两阶段 expire 协议仍未闭合。同步 unmount 仍沿用当前实现：为了避免 last-view detach 后被并发 `sget()` 复用，`try_evict_all()`、`remove_sb()` 和 `kill_sb()` 仍在 `MountTree` writer gate 内编排；这不是 Gate P1 的长期 final cleanup owner。
+
+**Exit Condition:** 引入明确的 unmount cleanup owner/reaper，在不重新打开 `sget()` 复用竞态的前提下，把 busy recheck、inode-shrinker explicit eviction、observer pre-unmount/mark-dead 和 `kill_sb()` retry 放到 `MountTree` transaction lock 外，并补齐 `MNT_EXPIRE` 状态协议；随后用 KUnit/source audit 和 mount/fanotify targeted smoke 证明 lazy detach、sync unmount、late observer event 和 final cleanup 路径一致。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-19
+**Related:** [Mount Tree Legacy API 事务日志](../devlog/transactions/2026-06-18-mount-tree-legacy-api.md), [mount-tree-legacy-api RFC](../rfcs/mount-tree-legacy-api/index.md)
 
 ## ANE-20260604-IOCTL-LTP-STAGE1-GAPS
 

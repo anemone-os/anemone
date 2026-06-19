@@ -1,3 +1,5 @@
+use core::mem::offset_of;
+
 use crate::{
     arch::riscv64::exception::{
         intr::handle_intr,
@@ -58,13 +60,13 @@ core::arch::global_asm!(
     "   sd t0, 16(sp)",
     // csr
     "   csrr t0, sstatus",
-    "   sd t0, 256(sp)",
+    "   sd t0, {trapframe_sstatus_offset}(sp)",
     "   csrr t0, sepc",
-    "   sd t0, 264(sp)",
+    "   sd t0, {trapframe_sepc_offset}(sp)",
     "   csrr t0, stval",
-    "   sd t0, 272(sp)",
+    "   sd t0, {trapframe_stval_offset}(sp)",
     "   csrr t0, scause",
-    "   sd t0, 280(sp)",
+    "   sd t0, {trapframe_scause_offset}(sp)",
     // TODO: if this is a device interrupt (timer or external), an interrupt stack
     // should be used, instead of continuing execution on the current stack.
     "   mv t0, zero",
@@ -112,10 +114,10 @@ core::arch::global_asm!(
     "   ld x30, 240(a0)",
     "   ld x31, 248(a0)",
     // sstatus
-    "   ld t0, 256(a0)",
+    "   ld t0, {trapframe_sstatus_offset}(a0)",
     "   csrw sstatus, t0",
     // sepc
-    "   ld t0, 264(a0)",
+    "   ld t0, {trapframe_sepc_offset}(a0)",
     "   csrw sepc, t0",
     // t0/x5
     "   ld t0, 40(a0)",
@@ -124,6 +126,10 @@ core::arch::global_asm!(
     // all done.
     "   sret",
     trapframe_bytes = const size_of::<RiscV64TrapFrame>(),
+    trapframe_sstatus_offset = const offset_of!(RiscV64TrapFrame, sstatus),
+    trapframe_sepc_offset = const offset_of!(RiscV64TrapFrame, sepc),
+    trapframe_stval_offset = const offset_of!(RiscV64TrapFrame, stval),
+    trapframe_scause_offset = const offset_of!(RiscV64TrapFrame, scause),
     rust_ktrap_entry = sym rust_ktrap_entry,
 );
 

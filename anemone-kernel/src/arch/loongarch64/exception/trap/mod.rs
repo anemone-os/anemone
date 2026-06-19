@@ -1,4 +1,4 @@
-use core::arch::asm;
+use core::{arch::asm, mem::offset_of};
 
 use crate::{
     arch::loongarch64::fpu::FpuTaskContext,
@@ -94,6 +94,14 @@ pub struct LA64TrapFrame {
     ktp: u64,
     fpu_regs: FpuTaskContext,
 }
+
+// LoongArch trap entry stores this frame directly on the kernel stack before it
+// calls Rust trap handlers. Keep the frame size aligned to the ABI stack
+// boundary so future layout edits cannot silently skew `$sp` at that call.
+static_assert!(align_of::<LA64TrapFrame>() == 16);
+static_assert!(size_of::<LA64TrapFrame>() % 16 == 0);
+static_assert!(offset_of!(LA64TrapFrame, gpr) == 0);
+static_assert!(size_of::<Gpr>() == 32 * size_of::<u64>());
 
 impl LA64TrapFrame {
     pub fn kernel_init_frame(

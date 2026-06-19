@@ -193,10 +193,11 @@ pub(super) fn map_vfs_inode_type(ty: InodeType) -> Result<LwExt4InodeType, SysEr
     }
 }
 
-fn ext4_mount(source: MountSource, _flags: MountFlags) -> Result<Arc<SuperBlock>, SysError> {
+fn ext4_mount(source: MountSource, data: MountData) -> Result<Arc<SuperBlock>, SysError> {
     let MountSource::Block(dev) = source else {
         return Err(SysError::InvalidArgument);
     };
+    data.reject_nonempty_for("ext4")?;
 
     if dev.block_size().bytes() != lwext4_rust::EXT4_DEV_BSIZE {
         return Err(SysError::NotSupported);

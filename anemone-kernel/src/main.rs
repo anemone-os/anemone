@@ -70,7 +70,7 @@ static KUNIT_SYNC_COUNTER: CpuSync = CpuSync::new("kunit");
 fn mount_rootfs() {
     match ROOTFS_SOURCE_KIND {
         "pseudo" => {
-            mount_root("ramfs", MountSource::Pseudo, MountFlags::empty())
+            mount_root("ramfs", MountSource::Pseudo, MountAttrFlags::empty())
                 .expect("root mount failed");
         },
         "block" => {
@@ -81,7 +81,7 @@ fn mount_rootfs() {
             mount_root(
                 ROOTFS_FS_TYPE,
                 MountSource::Block(root_dev),
-                MountFlags::empty(),
+                MountAttrFlags::empty(),
             )
             .expect("root mount failed");
         },

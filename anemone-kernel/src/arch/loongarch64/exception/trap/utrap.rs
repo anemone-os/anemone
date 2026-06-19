@@ -1,3 +1,5 @@
+use core::mem::offset_of;
+
 use la_insc::reg::{
     csr::{CR_BADV, CR_EENTRY, CR_ERA, CR_ESTAT, CR_PRMD, CR_SAVE0, CR_SAVE1},
     exception::Estat,
@@ -82,13 +84,13 @@ core::arch::global_asm!(
     "   st.d $t0, $sp, 24",
     // csr
     "   csrrd $t0, {prmd}",
-    "   st.d $t0, $sp, 256",
+    "   st.d $t0, $sp, {trapframe_prmd_offset}",
     "   csrrd $t0, {era}",
-    "   st.d $t0, $sp, 264",
+    "   st.d $t0, $sp, {trapframe_era_offset}",
     "   csrrd $t0, {badv}",
-    "   st.d $t0, $sp, 272",
+    "   st.d $t0, $sp, {trapframe_badv_offset}",
     "   csrrd $t0, {estat}",
-    "   st.d $t0, $sp, 280",
+    "   st.d $t0, $sp, {trapframe_estat_offset}",
     // TODO: if this is a device interrupt (timer or external), an interrupt stack
     // should be used, instead of continuing execution on the current stack.
     "   la $t0, __ktrap_entry",
@@ -154,10 +156,10 @@ core::arch::global_asm!(
     "   ld.d $r30, $a0, 240",
     "   ld.d $r31, $a0, 248",
     // prmd
-    "   ld.d $t0, $a0, 256",
+    "   ld.d $t0, $a0, {trapframe_prmd_offset}",
     "   csrwr $t0, {prmd}",
     // era
-    "   ld.d $t0, $a0, 264",
+    "   ld.d $t0, $a0, {trapframe_era_offset}",
     "   csrwr $t0, {era}",
     // $t0/r12
     "   ld.d $t0, $a0, 96",
@@ -166,6 +168,10 @@ core::arch::global_asm!(
     // all done.
     "   ertn",
     trapframe_bytes = const size_of::<LA64TrapFrame>(),
+    trapframe_prmd_offset = const offset_of!(LA64TrapFrame, prmd),
+    trapframe_era_offset = const offset_of!(LA64TrapFrame, era),
+    trapframe_badv_offset = const offset_of!(LA64TrapFrame, badv),
+    trapframe_estat_offset = const offset_of!(LA64TrapFrame, estat),
     trapframe_ktp_offset = const core::mem::offset_of!(LA64TrapFrame, ktp),
     trapframe_scratch_offset = const core::mem::offset_of!(LA64TrapFrame, save0),
     rust_utrap_entry = sym rust_utrap_entry,
@@ -228,9 +234,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
             // leaving the hardware interrupt environment.
 
             assert!(allow_preempt(), "for utraps, this must hold");
-            if
-            /* cfg!(feature = "kernel_preempt") && */
-            fetch_clear_need_resched() {
+            if fetch_clear_need_resched() {
                 // if we need reschedule, we can't waste time on disposing deferred tasks.
                 unsafe {
                     schedule();

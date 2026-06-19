@@ -1,8 +1,13 @@
 //! Path resolution and name lookup.
 
 use super::permission::{FsAccess, FsPermChecker};
-use crate::{fs::root_pathref, prelude::*};
+use crate::{
+    fs::{mount_placement_generation, mount_stack_top_at, root_pathref},
+    prelude::*,
+};
 use typed_path::UnixComponent;
+
+const MOUNT_LOOKUP_RETRY_NOTICE_INTERVAL: usize = 8;
 
 bitflags! {
     /// Flags to control path resolution behavior.
@@ -73,7 +78,7 @@ pub(super) fn materialize_child_dentry(
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum PendingComponent {
     CurDir,
     ParentDir,
@@ -93,6 +98,24 @@ pub fn resolve(path: &Path, flags: ResolveFlags) -> Result<PathRef, SysError> {
 
     let root = root_pathref();
     resolve_from_with_root(&root, &root, path, flags)
+}
+
+#[cfg(feature = "kunit")]
+pub(in crate::fs) fn resolve_with_mount_retry_hook_for_kunit<F>(
+    path: &Path,
+    flags: ResolveFlags,
+    hook: F,
+) -> Result<PathRef, SysError>
+where
+    F: FnOnce(),
+{
+    if path.components().next().is_none() {
+        return Err(SysError::InvalidArgument);
+    }
+
+    let root = root_pathref();
+    let pending = collect_components(path)?;
+    resolve_components_with_mount_retry_hooked(root.clone(), root, pending, flags, None, Some(hook))
 }
 
 /// Resolve a path to a [PathRef], starting from a given [PathRef].
@@ -326,11 +349,11 @@ fn prepend_components(
 /// stack overflow.
 fn resolve_components(
     logical_root: PathRef,
-    mut cur_path: PathRef,
-    mut pending: VecDeque<PendingComponent>,
+    cur_path: PathRef,
+    pending: VecDeque<PendingComponent>,
     flags: ResolveFlags,
 ) -> Result<PathRef, SysError> {
-    do_resolve_components(logical_root, cur_path, pending, flags, None)
+    resolve_components_with_mount_retry(logical_root, cur_path, pending, flags, None)
 }
 
 fn resolve_components_checked(
@@ -340,7 +363,63 @@ fn resolve_components_checked(
     flags: ResolveFlags,
     checker: &FsPermChecker,
 ) -> Result<PathRef, SysError> {
-    do_resolve_components(logical_root, cur_path, pending, flags, Some(checker))
+    resolve_components_with_mount_retry(logical_root, cur_path, pending, flags, Some(checker))
+}
+
+fn resolve_components_with_mount_retry(
+    logical_root: PathRef,
+    cur_path: PathRef,
+    pending: VecDeque<PendingComponent>,
+    flags: ResolveFlags,
+    checker: Option<&FsPermChecker>,
+) -> Result<PathRef, SysError> {
+    resolve_components_with_mount_retry_hooked(
+        logical_root,
+        cur_path,
+        pending,
+        flags,
+        checker,
+        Option::<fn()>::None,
+    )
+}
+
+fn resolve_components_with_mount_retry_hooked<F>(
+    logical_root: PathRef,
+    cur_path: PathRef,
+    pending: VecDeque<PendingComponent>,
+    flags: ResolveFlags,
+    checker: Option<&FsPermChecker>,
+    mut after_first_walk: Option<F>,
+) -> Result<PathRef, SysError>
+where
+    F: FnOnce(),
+{
+    let mut retries = 0;
+
+    loop {
+        let start_generation = mount_placement_generation();
+        let result = do_resolve_components(
+            logical_root.clone(),
+            cur_path.clone(),
+            pending.clone(),
+            flags,
+            checker,
+        );
+        if let Some(hook) = after_first_walk.take() {
+            hook();
+        }
+        if start_generation == mount_placement_generation() {
+            return result;
+        }
+
+        retries += 1;
+        if retries % MOUNT_LOOKUP_RETRY_NOTICE_INTERVAL == 0 {
+            knoticeln!(
+                "namei: mount placement changed during lookup retries={}",
+                retries
+            );
+        }
+    }
 }
 
 fn do_resolve_components(
@@ -454,7 +533,7 @@ fn follow_mount(mut path: PathRef) -> PathRef {
     // here we use while loop instead of a single if statement to handle the case
     // where there are multiple mounts in a row (e.g. mount A on top of root, then
     // mount B on top of A, etc.)
-    while let Some(child_mount) = path.mount().child_at(path.dentry()) {
+    while let Some(child_mount) = mount_stack_top_at(path.mount(), path.dentry()) {
         path = PathRef::new(child_mount.clone(), child_mount.root().clone());
     }
 
@@ -466,18 +545,28 @@ fn walk_parent(path: &PathRef) -> PathRef {
     let mut dentry = path.dentry().clone();
 
     loop {
+        if Arc::ptr_eq(&dentry, mount.root()) {
+            let Some(parent_mount) = mount.parent() else {
+                // Detached mount roots retain their own root boundary. Falling
+                // back to the current global root would turn old PathRefs into
+                // a second topology lookup source.
+                return PathRef::new(mount, dentry);
+            };
+
+            // Bind mounts may use an arbitrary source directory as their root.
+            // A `..` at that root must cross to the bind target's mountpoint,
+            // not to the source directory's parent inside the original tree.
+            dentry = mount
+                .mountpoint()
+                .expect("non-root mount must have a mountpoint");
+            mount = parent_mount;
+            continue;
+        }
+
         if let Some(parent) = dentry.parent() {
             return PathRef::new(mount, parent);
         }
 
-        let Some(parent_mount) = mount.parent() else {
-            return root_pathref();
-        };
-
-        // see `follow_mount` for the rationale of using a loop here.
-        dentry = mount
-            .mountpoint()
-            .expect("non-root mount must have a mountpoint");
-        mount = parent_mount;
+        return PathRef::new(mount, dentry);
     }
 }
