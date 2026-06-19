@@ -180,6 +180,22 @@ impl Mount {
             .any(|w| w.upgrade().is_some_and(|child| child.is_reachable()))
     }
 
+    pub(super) fn attached_children_snapshot(&self) -> Vec<Arc<Mount>> {
+        let mut children = self.children.lock();
+
+        children.retain(|weak_child| weak_child.upgrade().is_some());
+
+        children
+            .iter()
+            .filter_map(|weak_child| {
+                let child = weak_child
+                    .upgrade()
+                    .expect("stale weak child should have been removed above");
+                child.is_reachable().then_some(child)
+            })
+            .collect()
+    }
+
     pub(super) fn remove_child(&self, child: &Arc<Mount>) -> Result<(), SysError> {
         let mut children = self.children.lock();
         let initial_len = children.len();

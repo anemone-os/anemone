@@ -40,6 +40,8 @@ const MAX_MOUNT_DATA_LEN_BYTES: usize = MAX_PATH_LEN_BYTES;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MountOperation {
+    Bind { recursive: bool },
+    BindRemount,
     NewMount,
     Remount,
 }
@@ -139,17 +141,20 @@ fn parse_mount_flags(raw: u64) -> Result<ParsedMountRequest, SysError> {
     }
 
     let operation_bits = raw & MOUNT_OPERATION_FLAGS;
-    let operation = if operation_bits == 0 {
-        MountOperation::NewMount
-    } else if operation_bits == MS_REMOUNT {
-        MountOperation::Remount
-    } else {
-        knoticeln!(
-            "mount: unsupported operation flags raw={:#x} operation={:#x}",
-            raw,
-            operation_bits
-        );
-        return Err(SysError::InvalidArgument);
+    let operation = match operation_bits {
+        0 => MountOperation::NewMount,
+        MS_BIND => MountOperation::Bind { recursive: false },
+        bits if bits == (MS_BIND | MS_REC) => MountOperation::Bind { recursive: true },
+        bits if bits == (MS_BIND | MS_REMOUNT) => MountOperation::BindRemount,
+        MS_REMOUNT => MountOperation::Remount,
+        _ => {
+            knoticeln!(
+                "mount: unsupported operation flags raw={:#x} operation={:#x}",
+                raw,
+                operation_bits
+            );
+            return Err(SysError::InvalidArgument);
+        },
     };
 
     let unsupported_attrs = raw & UNSUPPORTED_MOUNT_ATTR_FLAGS;
@@ -233,17 +238,90 @@ fn do_new_mount(
     Ok(())
 }
 
-fn do_remount(target: Box<str>, attrs: MountAttrFlags, data: MountData) -> Result<(), SysError> {
+fn do_bind_mount(
+    source: Option<Box<str>>,
+    target: Box<str>,
+    fstype: Option<Box<str>>,
+    recursive: bool,
+    data: MountData,
+) -> Result<(), SysError> {
     if !data.is_empty() {
         knoticeln!(
-            "mount remount: rejecting filesystem reconfigure data empty=false contains_loop={} scope=per-mount-rdonly-only",
-            data.has_loop_option()
+            "mount bind: rejecting legacy data empty=false contains_loop={} recursive={}",
+            data.has_loop_option(),
+            recursive
+        );
+        return Err(SysError::InvalidArgument);
+    }
+
+    if let Some(fstype) = fstype {
+        knoticeln!(
+            "mount bind: ignoring fstype raw={} reason=bind-operation recursive={}",
+            fstype,
+            recursive
+        );
+    }
+
+    let Some(source) = source else {
+        knoticeln!("mount bind: rejecting null source recursive={}", recursive);
+        return Err(SysError::InvalidArgument);
+    };
+
+    let task = get_current_task();
+    let source = task.lookup_path(Path::new(source.as_ref()), ResolveFlags::empty())?;
+    let target = task.lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
+
+    if source.inode().ty() != InodeType::Dir {
+        knoticeln!(
+            "mount bind: rejecting non-directory source source={} recursive={} errno=ENOTDIR",
+            source,
+            recursive
+        );
+        return Err(SysError::NotDir);
+    }
+
+    if target.inode().ty() != InodeType::Dir {
+        knoticeln!(
+            "mount bind: rejecting non-directory target target={} recursive={} errno=ENOTDIR",
+            target,
+            recursive
+        );
+        return Err(SysError::NotDir);
+    }
+
+    bind_mount(&source, &target, recursive)?;
+
+    Ok(())
+}
+
+fn do_remount(
+    target: Box<str>,
+    attrs: MountAttrFlags,
+    data: MountData,
+    bind_scope: bool,
+) -> Result<(), SysError> {
+    if !data.is_empty() {
+        knoticeln!(
+            "mount remount: rejecting filesystem reconfigure data empty=false contains_loop={} scope={}",
+            data.has_loop_option(),
+            if bind_scope {
+                "bind-per-mount-view"
+            } else {
+                "per-mount-rdonly-only"
+            }
         );
         return Err(SysError::InvalidArgument);
     }
 
     let target =
         get_current_task().lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
+    if bind_scope {
+        knoticeln!(
+            "mount remount: op=bind target={} new_attrs={:?} source_sibling=unchanged",
+            target,
+            attrs
+        );
+    }
     remount_attrs(&target, attrs)
 }
 
@@ -267,11 +345,17 @@ fn sys_mount(
     let parsed_flags = parse_mount_flags(mountflags)?;
     let data = read_mount_data(data)?;
     match parsed_flags.operation {
+        MountOperation::Bind { recursive } => {
+            do_bind_mount(source, target, fstype, recursive, data)?;
+        },
+        MountOperation::BindRemount => {
+            do_remount(target, parsed_flags.attrs, data, true)?;
+        },
         MountOperation::NewMount => {
             do_new_mount(source, target, fstype, parsed_flags.attrs, data)?;
         },
         MountOperation::Remount => {
-            do_remount(target, parsed_flags.attrs, data)?;
+            do_remount(target, parsed_flags.attrs, data, false)?;
         },
     }
 
@@ -298,12 +382,22 @@ mod kunits {
 
     #[kunit]
     fn test_mount_flags_reject_unsupported_operation_bits() {
+        let parsed = parse_mount_flags(MS_BIND).unwrap();
+        assert_eq!(parsed.operation, MountOperation::Bind { recursive: false });
+
+        let parsed = parse_mount_flags(MS_BIND | MS_REC).unwrap();
+        assert_eq!(parsed.operation, MountOperation::Bind { recursive: true });
+
+        let parsed = parse_mount_flags(MS_REMOUNT | MS_BIND | MS_RDONLY).unwrap();
+        assert_eq!(parsed.operation, MountOperation::BindRemount);
+        assert_eq!(parsed.attrs, MountAttrFlags::RDONLY);
+
         assert_eq!(
-            parse_mount_flags(MS_BIND).unwrap_err(),
+            parse_mount_flags(MS_BIND | MS_MOVE).unwrap_err(),
             SysError::InvalidArgument
         );
         assert_eq!(
-            parse_mount_flags(MS_REMOUNT | MS_BIND | MS_RDONLY).unwrap_err(),
+            parse_mount_flags(MS_REMOUNT | MS_BIND | MS_REC).unwrap_err(),
             SysError::InvalidArgument
         );
     }

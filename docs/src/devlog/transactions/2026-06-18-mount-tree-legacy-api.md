@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** fs / VFS / mount / LTP
 **权威计划：** [RFC-20260604-mount-tree-legacy-api](../../rfcs/mount-tree-legacy-api/index.md), [不变量需求](../../rfcs/mount-tree-legacy-api/invariants.md), [迁移实施计划](../../rfcs/mount-tree-legacy-api/implementation.md)
-**当前阶段：** 阶段 3 ordinary per-mount readonly remount 已关闭；阶段 4 尚未启动
+**当前阶段：** 阶段 4 plain / recursive bind 已关闭；阶段 5 尚未启动
 
 ## 范围
 
@@ -382,3 +382,61 @@
 - filesystem backend 不再接收或保存 per-mount attrs；真实 sb-wide reconfigure 仍按 future `SuperBlockState` / follow-up gate 处理。
 - remount 成功返回前完成 target revalidation 和 attrs 发布；旧 fd 对同一 live mount view 的后续写能观察 remount 后 attrs。
 - shared writable mmap / dirty writeback 未声明闭合，继续保留 RFC accepted limitation。
+
+### 2026-06-19 - 阶段 4 启动与 write set 扩展
+
+**阶段：** 阶段 4 - plain bind 和 recursive bind。
+
+**只读 explorer：**
+
+- `phase4-bind-explorer`（Averroes，只读）确认当前源码尚无 `MS_BIND` / `MS_REC | MS_BIND` / `MS_REMOUNT | MS_BIND` 成功语义；parser 仍把这些 operation bits 稳定拒绝。
+- explorer 建议阶段 4 最小落点为 `fs/api/mount/**` parser 分流、`fs/mod.rs` 窄 facade、`fs/mount/**` bind/rbind clone owner、`fs/namei.rs` mount-root boundary；并指出 `PathRef::to_pathbuf()` 若不使用 bind root boundary，会让 `getcwd`、`/proc/<pid>/cwd`、`/proc/<pid>/fd` 等用户可见路径带出 source 原路径前缀。
+
+**write set 扩展：**
+
+- 用户批准把 `anemone-kernel/src/fs/path.rs` 纳入阶段 4 write set。
+- 该扩展仅用于让 `PathRef::to_pathbuf()` 使用与 bind root 相同的 mount-root boundary；不得改变 `PathRef = Mount + Dentry` identity、task root/cwd owner、namei ownership 或公开 path API。
+- `implementation.md` 阶段 4 write set 已同步记录该扩展。
+
+**当前未提交外部改动：**
+
+- `anemone-apps/user-test/ltp/profile.txt` 仍为本地验证 profile 改动，不纳入阶段 4 implementation commit。
+- `anemone-kernel/src/sync/mono.rs` 已有与阶段 4 无关的 import 条件编译改动，不纳入阶段 4 implementation commit，除非后续用户明确要求。
+
+**下一步：** 在批准 write set 内实现目录 bind、recursive bind、bind-remount readonly 和 bind root boundary；随后启动只读 review gate。
+
+### 2026-06-19 - 阶段 4 plain / recursive bind closeout
+
+**阶段：** 阶段 4 - plain bind、recursive bind 和 bind-remount readonly。
+
+**源码变更：**
+
+- `sys_mount()` 现在接受 `MS_BIND`、`MS_BIND | MS_REC` 和 `MS_REMOUNT | MS_BIND | MS_RDONLY`，仍稳定拒绝 `MS_BIND | MS_MOVE`、`MS_REMOUNT | MS_BIND | MS_REC` 等未闭合组合。
+- bind syscall adapter 拒绝非空 legacy data、null source 和 file source / target；file bind 拒绝日志显式包含 `errno=ENOTDIR`，不声明 first-pass file bind 支持。
+- `MountTree::bind_mount()` 在 writer transaction 内重验 source / target，plain bind 创建新的 mount view 并共享 source dentry / superblock，recursive bind 在发布前准备 subtree clone 并批量 attach，避免部分 visible mount view。
+- bind-remount 复用 per-mount attrs 路径，只更新目标 bind view；source / sibling mount 不被污染。
+- `namei` 和 `PathRef::to_pathbuf()` 使用 mount-root boundary 处理 bind root，避免 `..` 或路径渲染越过 target boundary 泄漏 source parent。
+
+**review gate：**
+
+- `phase4-bind-reviewer`（Ohm，只读）未发现 Apollyon；核心 bind/rbind/remount/fanotify/namei/path 语义无 blocker。
+- reviewer 提出的 Keter 是当前工作树仍包含阶段 4 write set 外的 `anemone-apps/user-test/ltp/profile.txt` 和 `anemone-kernel/src/sync/mono.rs`。处置：这两处继续视为外部本地改动，不纳入阶段 4 implementation commit。
+- reviewer 提出的 Euclid：事务日志顶部状态仍写阶段 4 尚未启动。处置：顶部状态已更新为阶段 4 已关闭、阶段 5 尚未启动。
+- reviewer 提出的 Euclid：file bind 拒绝日志缺少稳定 errno。处置：non-directory source / target 日志均加入 `errno=ENOTDIR`，返回值仍为 `SysError::NotDir`。
+
+**验证：**
+
+- `just fmt kernel`：通过。
+- `just build`：通过。
+- `git diff --check`：通过。
+- `mdbook build docs`：通过，输出到 `docs/book`。
+- rv64 e2e `./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/mount-legacy-phase4-rv64.log`：此前已完整运行；runtime KUnit `Running 87 tests...` / `All tests passed!`。新增 bind KUnit 包括 plain bind view、plain bind 不 clone child、recursive bind clone child、bind-remount readonly sibling isolation、file source / target reject、stale source / target revalidation、bind root parent / path rendering target boundary。
+- rv64 `fs` LTP profile smoke：`attempted=46 passed=25 failed=21 infra_failed=0 skipped=0`；失败仍主要落在既有 tmpfs non-empty data、realpath、mknod、group lookup、path errno 等非阶段 4 主语义，本阶段不把它作为 bind/rbind 失败信号。
+- source audit 确认 `MountFlags` 未重新引入，fstype alias 仍停在 syscall adapter，filesystem backend 仍只接收 `MountSource` / `MountData`，fanotify key 仍按 `Arc<Mount>` / `Arc<SuperBlock>` 区分。
+
+**阶段 4 关闭判断：**
+
+- 目录 plain bind、recursive bind 和 bind-remount readonly 已有闭合成功语义与 KUnit 覆盖。
+- file bind、propagation-dependent bind 和未闭合 operation 组合仍稳定拒绝并可观测。
+- recursive bind 失败路径不会留下部分 visible mount view。
+- 阶段 5 private move mount / limited propagation 尚未启动。

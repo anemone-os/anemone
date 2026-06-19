@@ -162,6 +162,15 @@ mod vfs {
         VFS.visible.remount_attrs(target, attrs)
     }
 
+    /// Create a bind mount view inside the visible mount tree.
+    pub fn bind_mount(
+        source: &PathRef,
+        target: &PathRef,
+        recursive: bool,
+    ) -> Result<usize, SysError> {
+        VFS.visible.bind_mount(source, target, recursive)
+    }
+
     /// **Called by anonymous filesystem driver. DO NOT TOUCH THIS.**
     pub(in crate::fs) fn mount_early_anonymous_root(
         anony_fs: Arc<FileSystem>,

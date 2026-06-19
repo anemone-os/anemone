@@ -503,21 +503,28 @@ fn walk_parent(path: &PathRef) -> PathRef {
     let mut dentry = path.dentry().clone();
 
     loop {
+        if Arc::ptr_eq(&dentry, mount.root()) {
+            let Some(parent_mount) = mount.parent() else {
+                // Detached mount roots retain their own root boundary. Falling
+                // back to the current global root would turn old PathRefs into
+                // a second topology lookup source.
+                return PathRef::new(mount, dentry);
+            };
+
+            // Bind mounts may use an arbitrary source directory as their root.
+            // A `..` at that root must cross to the bind target's mountpoint,
+            // not to the source directory's parent inside the original tree.
+            dentry = mount
+                .mountpoint()
+                .expect("non-root mount must have a mountpoint");
+            mount = parent_mount;
+            continue;
+        }
+
         if let Some(parent) = dentry.parent() {
             return PathRef::new(mount, parent);
         }
 
-        let Some(parent_mount) = mount.parent() else {
-            // Detached mount roots retain their own root boundary. Falling
-            // back to the current global root would turn old PathRefs into a
-            // second topology lookup source.
-            return PathRef::new(mount, dentry);
-        };
-
-        // see `follow_mount` for the rationale of using a loop here.
-        dentry = mount
-            .mountpoint()
-            .expect("non-root mount must have a mountpoint");
-        mount = parent_mount;
+        return PathRef::new(mount, dentry);
     }
 }

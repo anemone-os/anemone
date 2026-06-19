@@ -303,6 +303,7 @@ write set：
 - `anemone-kernel/src/fs/mod.rs`
 - `anemone-kernel/src/fs/api/mount/**`
 - `anemone-kernel/src/fs/namei.rs` 仅限必要 lookup/stack 辅助。
+- `anemone-kernel/src/fs/path.rs` 仅限让 `PathRef::to_pathbuf()` 使用与 bind root 相同的 mount-root boundary，不改变 path identity 或 task root/cwd owner。
 
 可观测性：
 

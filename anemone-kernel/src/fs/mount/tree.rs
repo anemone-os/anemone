@@ -56,7 +56,7 @@ impl MountTree {
         }
 
         if let Some(target) = mountpoint {
-            let target_is_current = self.inner.lock_irqsave().target_is_current(target);
+            let target_is_current = self.inner.lock_irqsave().path_is_current(target);
             if !target_is_current {
                 knoticeln!(
                     "mount attach: target revalidation failed target={} reason=not-current",
@@ -173,6 +173,51 @@ impl MountTree {
         Ok(())
     }
 
+    pub(in crate::fs) fn bind_mount(
+        &self,
+        source: &PathRef,
+        target: &PathRef,
+        recursive: bool,
+    ) -> Result<usize, SysError> {
+        if source.inode().ty() != InodeType::Dir || target.inode().ty() != InodeType::Dir {
+            return Err(SysError::NotDir);
+        }
+
+        let _tx = self.tx_lock.lock();
+        let nodes = self
+            .inner
+            .lock_irqsave()
+            .snapshot_bind_subtree(source, target, recursive)?;
+        let clones = nodes
+            .iter()
+            .map(|node| {
+                // Bind views intentionally share the source dentry tree and
+                // superblock while receiving a fresh mount identity. Per-mount
+                // attrs are copied at clone time and can diverge by remounting
+                // the new view.
+                Arc::new(Mount::new(
+                    node.root.clone(),
+                    node.source.sb().clone(),
+                    node.source.attrs(),
+                ))
+            })
+            .collect::<Vec<_>>();
+        let clone_count = self
+            .inner
+            .lock_irqsave()
+            .attach_bind_subtree(source, target, &nodes, &clones)?;
+
+        knoticeln!(
+            "mount bind: source={} target={} recursive={} clone_count={}",
+            source,
+            target,
+            recursive,
+            clone_count
+        );
+
+        Ok(clone_count)
+    }
+
     /// Unmount a filesystem from this tree.
     ///
     /// Unmounting root filesystem will fail.
@@ -234,6 +279,13 @@ struct UnmountPlan {
     last_view: bool,
 }
 
+struct BindSourceNode {
+    source: Arc<Mount>,
+    root: Arc<Dentry>,
+    parent_index: Option<usize>,
+    mountpoint: Option<Arc<Dentry>>,
+}
+
 impl MountTreeInner {
     fn bump_generation(&mut self) {
         self.placement_generation = self.placement_generation.wrapping_add(1);
@@ -243,14 +295,14 @@ impl MountTreeInner {
         self.mounts.iter().any(|m| Arc::ptr_eq(m, mount))
     }
 
-    fn target_is_current(&self, target: &PathRef) -> bool {
-        self.contains_mount(target.mount())
-            && target.mount().is_reachable()
-            && target.mount().top_child_at(target.dentry()).is_none()
+    fn path_is_current(&self, path: &PathRef) -> bool {
+        self.contains_mount(path.mount())
+            && path.mount().is_reachable()
+            && path.mount().top_child_at(path.dentry()).is_none()
     }
 
     fn target_is_mount_root_current(&self, target: &PathRef) -> bool {
-        Arc::ptr_eq(target.dentry(), target.mount().root()) && self.target_is_current(target)
+        Arc::ptr_eq(target.dentry(), target.mount().root()) && self.path_is_current(target)
     }
 
     fn remount_attrs(
@@ -309,8 +361,146 @@ impl MountTreeInner {
         Ok(1)
     }
 
+    fn dentry_is_at_or_under(dentry: &Arc<Dentry>, ancestor: &Arc<Dentry>) -> bool {
+        let mut current = Some(dentry.clone());
+        while let Some(candidate) = current {
+            if Arc::ptr_eq(&candidate, ancestor) {
+                return true;
+            }
+            current = candidate.parent();
+        }
+        false
+    }
+
+    fn collect_recursive_bind_children(
+        nodes: &mut Vec<BindSourceNode>,
+        parent_index: usize,
+        parent_source: &Arc<Mount>,
+        root_boundary: Option<&Arc<Dentry>>,
+    ) {
+        for child in parent_source.attached_children_snapshot() {
+            let mountpoint = child
+                .mountpoint()
+                .expect("attached child mount must have a mountpoint");
+            if root_boundary
+                .is_some_and(|boundary| !Self::dentry_is_at_or_under(&mountpoint, boundary))
+            {
+                continue;
+            }
+
+            let child_index = nodes.len();
+            nodes.push(BindSourceNode {
+                source: child.clone(),
+                root: child.root().clone(),
+                parent_index: Some(parent_index),
+                mountpoint: Some(mountpoint),
+            });
+            Self::collect_recursive_bind_children(nodes, child_index, &child, None);
+        }
+    }
+
+    fn snapshot_bind_subtree(
+        &self,
+        source: &PathRef,
+        target: &PathRef,
+        recursive: bool,
+    ) -> Result<Vec<BindSourceNode>, SysError> {
+        if !self.path_is_current(source) {
+            knoticeln!(
+                "mount bind: source revalidation failed source={} reason=not-current recursive={}",
+                source,
+                recursive
+            );
+            return Err(SysError::Busy);
+        }
+
+        if !self.path_is_current(target) {
+            knoticeln!(
+                "mount bind: target revalidation failed target={} reason=not-current recursive={}",
+                target,
+                recursive
+            );
+            return Err(SysError::Busy);
+        }
+
+        let mut nodes = vec![BindSourceNode {
+            source: source.mount().clone(),
+            root: source.dentry().clone(),
+            parent_index: None,
+            mountpoint: None,
+        }];
+        if recursive {
+            Self::collect_recursive_bind_children(
+                &mut nodes,
+                0,
+                source.mount(),
+                Some(source.dentry()),
+            );
+        }
+
+        Ok(nodes)
+    }
+
+    fn attach_bind_clone(
+        &mut self,
+        mount: &Arc<Mount>,
+        parent: &Arc<Mount>,
+        mountpoint: &Arc<Dentry>,
+    ) {
+        mount.mark_attached(parent, mountpoint);
+        mount.sb().add_mount(mount);
+        self.mounts.push(mount.clone());
+        parent.push_child(mount);
+    }
+
+    fn attach_bind_subtree(
+        &mut self,
+        source: &PathRef,
+        target: &PathRef,
+        nodes: &[BindSourceNode],
+        clones: &[Arc<Mount>],
+    ) -> Result<usize, SysError> {
+        assert!(!nodes.is_empty(), "bind subtree must contain a root clone");
+        assert_eq!(
+            nodes.len(),
+            clones.len(),
+            "bind source snapshot and clone vector must stay aligned"
+        );
+
+        if !self.path_is_current(source) {
+            knoticeln!(
+                "mount bind: source revalidation failed source={} reason=not-current-before-publish",
+                source
+            );
+            return Err(SysError::Busy);
+        }
+
+        if !self.path_is_current(target) {
+            knoticeln!(
+                "mount bind: target revalidation failed target={} reason=not-current-before-publish",
+                target
+            );
+            return Err(SysError::Busy);
+        }
+
+        self.attach_bind_clone(&clones[0], target.mount(), target.dentry());
+        for (index, node) in nodes.iter().enumerate().skip(1) {
+            let parent_index = node
+                .parent_index
+                .expect("non-root bind clone must name a parent clone");
+            let mountpoint = node
+                .mountpoint
+                .as_ref()
+                .expect("non-root bind clone must name a mountpoint");
+            self.attach_bind_clone(&clones[index], &clones[parent_index], mountpoint);
+        }
+        self.bump_generation();
+
+        Ok(clones.len())
+    }
+
     fn attach_mount(&mut self, mount: &Arc<Mount>, target: &PathRef) -> Result<usize, SysError> {
-        if !self.target_is_current(target) {
+        if !self.path_is_current(target) {
             knoticeln!(
                 "mount attach: target revalidation failed target={} reason=not-current",
                 target
@@ -925,6 +1115,281 @@ mod kunits {
         assert_ne!(after_mount, after_unmount);
 
         vfs_rmdir(mountpoint).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_plain_bind_creates_independent_mount_view() {
+        let source_dir = Path::new("/kunit-vfs-bind-src");
+        let source_file = Path::new("/kunit-vfs-bind-src/file");
+        let target_dir = Path::new("/kunit-vfs-bind-target");
+        let target_file = Path::new("/kunit-vfs-bind-target/file");
+
+        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
+        let source_file_ref = vfs_touch(source_file, InodePerm::all_rwx()).unwrap();
+
+        let source = vfs_lookup(source_dir).unwrap();
+        let target = vfs_lookup(target_dir).unwrap();
+        assert_eq!(bind_mount(&source, &target, false).unwrap(), 1);
+
+        let bound_root = vfs_lookup(target_dir).unwrap();
+        assert!(!Arc::ptr_eq(bound_root.mount(), source.mount()));
+        assert!(Arc::ptr_eq(bound_root.mount().sb(), source.mount().sb()));
+        assert!(Arc::ptr_eq(bound_root.dentry(), source.dentry()));
+        assert_eq!(bound_root.to_string(), "/kunit-vfs-bind-target");
+        assert_eq!(
+            vfs_lookup(target_file).unwrap().inode(),
+            source_file_ref.inode()
+        );
+
+        vfs_unmount(target_dir).unwrap();
+        assert_eq!(
+            vfs_lookup(source_file).unwrap().inode(),
+            source_file_ref.inode()
+        );
+
+        drop(source_file_ref);
+        vfs_unlink(source_file).unwrap();
+        vfs_rmdir(source_dir).unwrap();
+        vfs_rmdir(target_dir).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_plain_bind_does_not_clone_child_mounts() {
+        let source_dir = Path::new("/kunit-vfs-bind-plain-src");
+        let nested = Path::new("/kunit-vfs-bind-plain-src/nested");
+        let nested_file = Path::new("/kunit-vfs-bind-plain-src/nested/child-file");
+        let target_dir = Path::new("/kunit-vfs-bind-plain-target");
+        let target_nested_file = Path::new("/kunit-vfs-bind-plain-target/nested/child-file");
+
+        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(nested, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mount_at(
+            "ramfs",
+            MountSource::Pseudo,
+            MountAttrFlags::empty(),
+            nested,
+        )
+        .unwrap();
+        let child_file = vfs_touch(nested_file, InodePerm::all_rwx()).unwrap();
+
+        let source = vfs_lookup(source_dir).unwrap();
+        let target = vfs_lookup(target_dir).unwrap();
+        assert_eq!(bind_mount(&source, &target, false).unwrap(), 1);
+
+        assert_eq!(
+            vfs_lookup(target_nested_file).unwrap_err(),
+            SysError::NotFound
+        );
+
+        vfs_unmount(target_dir).unwrap();
+        drop(child_file);
+        vfs_unlink(nested_file).unwrap();
+        vfs_unmount(nested).unwrap();
+        vfs_rmdir(nested).unwrap();
+        vfs_rmdir(source_dir).unwrap();
+        vfs_rmdir(target_dir).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_recursive_bind_clones_child_mounts() {
+        let source_dir = Path::new("/kunit-vfs-rbind-src");
+        let nested = Path::new("/kunit-vfs-rbind-src/nested");
+        let nested_file = Path::new("/kunit-vfs-rbind-src/nested/child-file");
+        let target_dir = Path::new("/kunit-vfs-rbind-target");
+        let target_nested = Path::new("/kunit-vfs-rbind-target/nested");
+        let target_nested_file = Path::new("/kunit-vfs-rbind-target/nested/child-file");
+
+        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(nested, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mount_at(
+            "ramfs",
+            MountSource::Pseudo,
+            MountAttrFlags::empty(),
+            nested,
+        )
+        .unwrap();
+        let child_file = vfs_touch(nested_file, InodePerm::all_rwx()).unwrap();
+
+        let source = vfs_lookup(source_dir).unwrap();
+        let source_child = vfs_lookup(nested).unwrap();
+        let target = vfs_lookup(target_dir).unwrap();
+        assert_eq!(bind_mount(&source, &target, true).unwrap(), 2);
+
+        let bound_child = vfs_lookup(target_nested).unwrap();
+        assert!(!Arc::ptr_eq(bound_child.mount(), source_child.mount()));
+        assert!(Arc::ptr_eq(
+            bound_child.mount().sb(),
+            source_child.mount().sb()
+        ));
+        assert_eq!(
+            vfs_lookup(target_nested_file).unwrap().inode(),
+            child_file.inode()
+        );
+
+        vfs_unmount(target_nested).unwrap();
+        vfs_unmount(target_dir).unwrap();
+        drop(bound_child);
+        drop(source_child);
+        drop(child_file);
+        vfs_unlink(nested_file).unwrap();
+        vfs_unmount(nested).unwrap();
+        vfs_rmdir(nested).unwrap();
+        vfs_rmdir(source_dir).unwrap();
+        vfs_rmdir(target_dir).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_bind_remount_readonly_does_not_pollute_siblings() {
+        let source_dir = Path::new("/kunit-vfs-bind-ro-src");
+        let source_file = Path::new("/kunit-vfs-bind-ro-src/file");
+        let ro_dir = Path::new("/kunit-vfs-bind-ro-target");
+        let ro_file = Path::new("/kunit-vfs-bind-ro-target/file");
+        let rw_dir = Path::new("/kunit-vfs-bind-rw-target");
+        let rw_file = Path::new("/kunit-vfs-bind-rw-target/file");
+
+        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(ro_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(rw_dir, InodePerm::all_rwx()).unwrap();
+        let file_ref = vfs_touch(source_file, InodePerm::all_rwx()).unwrap();
+
+        let source = vfs_lookup(source_dir).unwrap();
+        let ro_target = vfs_lookup(ro_dir).unwrap();
+        let rw_target = vfs_lookup(rw_dir).unwrap();
+        bind_mount(&source, &ro_target, false).unwrap();
+        bind_mount(&source, &rw_target, false).unwrap();
+
+        let ro_root = vfs_lookup(ro_dir).unwrap();
+        remount_attrs(&ro_root, MountAttrFlags::RDONLY).unwrap();
+
+        assert_eq!(
+            vfs_open(ro_file).unwrap().write(b"ro").unwrap_err(),
+            SysError::ReadOnlyFs
+        );
+        assert_eq!(vfs_open(source_file).unwrap().write(b"src").unwrap(), 3);
+        assert_eq!(vfs_open(rw_file).unwrap().write(b"rw").unwrap(), 2);
+
+        remount_attrs(&ro_root, MountAttrFlags::empty()).unwrap();
+        vfs_unmount(ro_dir).unwrap();
+        vfs_unmount(rw_dir).unwrap();
+        drop(file_ref);
+        vfs_unlink(source_file).unwrap();
+        vfs_rmdir(source_dir).unwrap();
+        vfs_rmdir(ro_dir).unwrap();
+        vfs_rmdir(rw_dir).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_bind_rejects_file_source_or_target() {
+        let source_dir = Path::new("/kunit-vfs-bind-file-src-dir");
+        let source_file = Path::new("/kunit-vfs-bind-file-src-dir/file");
+        let target_dir = Path::new("/kunit-vfs-bind-file-target-dir");
+        let target_file = Path::new("/kunit-vfs-bind-file-target-dir/file");
+
+        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
+        let source_file_ref = vfs_touch(source_file, InodePerm::all_rwx()).unwrap();
+        let target_file_ref = vfs_touch(target_file, InodePerm::all_rwx()).unwrap();
+
+        let source_file_path = vfs_lookup(source_file).unwrap();
+        let target = vfs_lookup(target_dir).unwrap();
+        assert_eq!(
+            bind_mount(&source_file_path, &target, false).unwrap_err(),
+            SysError::NotDir
+        );
+
+        let source = vfs_lookup(source_dir).unwrap();
+        let target_file_path = vfs_lookup(target_file).unwrap();
+        assert_eq!(
+            bind_mount(&source, &target_file_path, false).unwrap_err(),
+            SysError::NotDir
+        );
+
+        drop(source_file_ref);
+        drop(target_file_ref);
+        vfs_unlink(source_file).unwrap();
+        vfs_unlink(target_file).unwrap();
+        vfs_rmdir(source_dir).unwrap();
+        vfs_rmdir(target_dir).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_bind_revalidates_stale_source_and_target() {
+        let stale_source_dir = Path::new("/kunit-vfs-bind-stale-source");
+        let live_source_dir = Path::new("/kunit-vfs-bind-live-source");
+        let stale_target_dir = Path::new("/kunit-vfs-bind-stale-target");
+        let live_target_dir = Path::new("/kunit-vfs-bind-live-target");
+
+        let stale_source = vfs_mkdir(stale_source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(live_source_dir, InodePerm::all_rwx()).unwrap();
+        let stale_target = vfs_mkdir(stale_target_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(live_target_dir, InodePerm::all_rwx()).unwrap();
+
+        vfs_mount_at(
+            "ramfs",
+            MountSource::Pseudo,
+            MountAttrFlags::empty(),
+            stale_source_dir,
+        )
+        .unwrap();
+        vfs_mount_at(
+            "ramfs",
+            MountSource::Pseudo,
+            MountAttrFlags::empty(),
+            stale_target_dir,
+        )
+        .unwrap();
+
+        let live_source = vfs_lookup(live_source_dir).unwrap();
+        let live_target = vfs_lookup(live_target_dir).unwrap();
+        assert_eq!(
+            bind_mount(&stale_source, &live_target, false).unwrap_err(),
+            SysError::Busy
+        );
+        assert_eq!(
+            bind_mount(&live_source, &stale_target, true).unwrap_err(),
+            SysError::Busy
+        );
+
+        vfs_unmount(stale_source_dir).unwrap();
+        vfs_unmount(stale_target_dir).unwrap();
+        vfs_rmdir(stale_source_dir).unwrap();
+        vfs_rmdir(live_source_dir).unwrap();
+        vfs_rmdir(stale_target_dir).unwrap();
+        vfs_rmdir(live_target_dir).unwrap();
+    }
+
+    #[kunit]
+    fn test_vfs_bind_root_parent_and_path_rendering_use_target_boundary() {
+        let source_dir = Path::new("/kunit-vfs-bind-root-src");
+        let source_subdir = Path::new("/kunit-vfs-bind-root-src/sub");
+        let target_dir = Path::new("/kunit-vfs-bind-root-target");
+
+        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(source_subdir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
+
+        let source = vfs_lookup(source_subdir).unwrap();
+        let target = vfs_lookup(target_dir).unwrap();
+        bind_mount(&source, &target, false).unwrap();
+
+        assert_eq!(
+            vfs_lookup(target_dir).unwrap().to_string(),
+            "/kunit-vfs-bind-root-target"
+        );
+        assert_eq!(
+            vfs_lookup(Path::new("/kunit-vfs-bind-root-target/.."))
+                .unwrap()
+                .to_string(),
+            "/"
+        );
+
+        vfs_unmount(target_dir).unwrap();
+        vfs_rmdir(source_subdir).unwrap();
+        vfs_rmdir(source_dir).unwrap();
+        vfs_rmdir(target_dir).unwrap();
     }
 
     #[kunit]
