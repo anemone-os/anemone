@@ -13,19 +13,18 @@ fanotify
 fcntl
 fd
 fs
-# full
 futex
 ioctl
 iomux
 ipc
 memory
+mount-legacy
 open
 pipe
 read-write
 schedule
 sendfile
 signal
-# syscalls
+splice
 timerfd
-# tmp
 wait
