@@ -26,6 +26,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         }
         kdebugln!("kernel_exit: task={} exit with code {:?}", task.tid(), code);
         let clear_child_tid = task.get_clear_child_tid();
+        /*
         if let Some(addr) = clear_child_tid {
             kspecialln!(
                 "pthread exit begin tid={} tgid={} code={:?} clear_child_tid={:#x}",
@@ -35,6 +36,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
                 addr.get(),
             );
         }
+        */
         #[cfg(feature = "bench_local_test")]
         kerrln!(
             "[special_report] kernel_exit enter tid={} tgid={} code={:?}",
@@ -70,14 +72,17 @@ pub fn kernel_exit(code: ExitCode) -> ! {
                 }
             };
             if cleard {
+                /*
                 kspecialln!(
                     "pthread exit cleared_child_tid tid={} tgid={} addr={:#x}",
                     task.tid(),
                     task.tgid(),
                     addr.get(),
                 );
+                */
                 match futex::wake_at(&task.clone_uspace_handle(), addr, 1) {
-                    Ok(n_woken) => {
+                    Ok(_n_woken) => {
+                        /*
                         kspecialln!(
                             "pthread exit futex_wake_done tid={} tgid={} addr={:#x} n_woken={}",
                             task.tid(),
@@ -85,6 +90,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
                             addr.get(),
                             n_woken,
                         );
+                        */
                         kdebugln!(
                             "cleared child tid and woke futex for task {} at address {:#x}",
                             task.tid(),
@@ -92,6 +98,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
                         );
                     },
                     Err(e) => {
+                        /*
                         kspecialln!(
                             "pthread exit futex_wake_failed tid={} tgid={} addr={:#x} err={:?}",
                             task.tid(),
@@ -99,6 +106,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
                             addr.get(),
                             e,
                         );
+                        */
                         knoticeln!(
                             "failed to clear child tid for {}: {:?} at address {:#x}",
                             task.tid(),
@@ -147,12 +155,14 @@ pub fn kernel_exit(code: ExitCode) -> ! {
 
         let is_last = task.detach_from_topology();
         if clear_child_tid.is_some() {
+            /*
             kspecialln!(
                 "pthread exit detached tid={} tgid={} is_last={}",
                 task.tid(),
                 task.tgid(),
                 is_last,
             );
+            */
         }
 
         // if we are the last thread in this thread group, we should do the cleanup

@@ -388,6 +388,7 @@ pub fn wake_at(
         while n_woken < n_waiters {
             if let Some(waiter) = futex.waiters.pop_front() {
                 waiter.woken.store(true, Ordering::Release);
+                /*
                 kspecialln!(
                     "futex wake_at waiter addr={:#x} key={:?} waiter_task={} waiter={:#x} event={:#x}",
                     addr.get(),
@@ -396,12 +397,14 @@ pub fn wake_at(
                     Arc::as_ptr(&waiter) as usize,
                     &waiter.futex_available as *const Event as usize,
                 );
+                */
                 waiter.futex_available.publish(1, true);
                 n_woken += 1;
             } else {
                 break;
             }
         }
+        /*
         kspecialln!(
             "futex wake_at done addr={:#x} key={:?} requested={} woken={}",
             addr.get(),
@@ -409,16 +412,19 @@ pub fn wake_at(
             n_waiters,
             n_woken,
         );
+        */
         n_woken
     }) {
         Some(n) => Ok(n),
         None => {
+            /*
             kspecialln!(
                 "futex wake_at no_waiters addr={:#x} key={:?} requested={}",
                 addr.get(),
                 key,
                 n_waiters,
             );
+            */
             Ok(0)
         },
     }

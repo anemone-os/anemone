@@ -242,6 +242,7 @@ pub fn kernel_clone(
     let forked_uspace = !flags.contains(CloneFlags::VM);
 
     if is_thread_clone {
+        /*
         kspecialln!(
             "pthread clone begin parent_tid={} tgid={} flags={:#x} new_sp={:?} tls={:#x} parent_tid_ptr={:?} child_tid_ptr={:?}",
             current_task.tid(),
@@ -252,6 +253,7 @@ pub fn kernel_clone(
             parent_tid.map(|ptr| ptr.get()),
             child_tid.map(|ptr| ptr.get()),
         );
+        */
     }
 
     let mut boxed_frame = Box::new(trap_frame);
@@ -371,6 +373,7 @@ pub fn kernel_clone(
 
     let new_tid = new_task.tid();
     if is_thread_clone {
+        /*
         kspecialln!(
             "pthread clone allocated parent_tid={} child_tid={} tgid={} clear_child_tid={:?}",
             current_task.tid(),
@@ -378,6 +381,7 @@ pub fn kernel_clone(
             current_task.tgid(),
             child_tid.map(|ptr| ptr.get()),
         );
+        */
     }
 
     // this is not for argument validation, but rather to ensure the page containing
@@ -489,12 +493,14 @@ pub fn kernel_clone(
     match guard.publish(new_task, binding) {
         Ok(published) => {
             if is_thread_clone {
+                /*
                 kspecialln!(
                     "pthread clone published parent_tid={} child_tid={} tgid={}",
                     current_task.tid(),
                     published.tid(),
                     published.tgid(),
                 );
+                */
             }
             #[cfg(feature = "bench_local_test")]
             if forked_uspace {
@@ -502,12 +508,14 @@ pub fn kernel_clone(
             }
             task_enqueue(published.clone());
             if is_thread_clone {
+                /*
                 kspecialln!(
                     "pthread clone enqueued parent_tid={} child_tid={} tgid={}",
                     current_task.tid(),
                     published.tid(),
                     published.tgid(),
                 );
+                */
             }
             if flags.contains(CloneFlags::VFORK) {
                 wait_for_vfork_done(&published);
@@ -545,6 +553,7 @@ extern "C" fn enter_cloned_user_task(
     let is_thread_clone = clone_flags.contains(CloneFlags::THREAD);
 
     if is_thread_clone {
+        /*
         kspecialln!(
             "pthread child enter tid={} tgid={} flags={:#x} child_tid_ptr={:#x}",
             task.tid(),
@@ -552,6 +561,7 @@ extern "C" fn enter_cloned_user_task(
             clone_flags.bits(),
             child_tid as usize,
         );
+        */
     }
 
     unsafe {
@@ -559,11 +569,13 @@ extern "C" fn enter_cloned_user_task(
             if !child_tid.is_null() {
                 child_tid.write(current_task_id());
                 if is_thread_clone {
+                    /*
                     kspecialln!(
                         "pthread child set_tid tid={} child_tid_ptr={:#x}",
                         current_task_id(),
                         child_tid as usize,
                     );
+                    */
                 }
             } else {
                 kdebugln!(
@@ -585,7 +597,9 @@ extern "C" fn enter_cloned_user_task(
     drop(task);
 
     if is_thread_clone {
+        /*
         kspecialln!("pthread child user_return tid={}", current_task_id());
+        */
     }
     kdebugln!("entering cloned user task with tid {}", current_task_id());
     unsafe {
