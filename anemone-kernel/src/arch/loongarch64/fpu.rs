@@ -1,4 +1,4 @@
-use core::arch::naked_asm;
+use core::{arch::naked_asm, mem::offset_of};
 use la_insc::reg::{csr::euen, euen::Euen};
 
 use crate::prelude::*;
@@ -18,6 +18,13 @@ pub struct FpuTaskContext {
     /// FPU control and status register (`fcsr`).
     pub(super) fcsr: u64,
 }
+
+// The save/load assembly treats `f` as a dense 32 * u64 register file and uses
+// explicit offsets for the scalar trailing fields. Keep the layout pinned.
+static_assert!(offset_of!(FpuTaskContext, f) == 0);
+static_assert!(offset_of!(FpuTaskContext, fcc) == 256);
+static_assert!(offset_of!(FpuTaskContext, fcsr) == 264);
+static_assert!(size_of::<FpuTaskContext>() == 272);
 
 impl FpuTaskContext {
     /// Zeroed FPU context, used for lazy FPU initialization.
@@ -175,14 +182,16 @@ unsafe extern "C" fn __save_current_frs(cur: *mut FpuTaskContext) {
             movcf2gr $t0, $fcc7        # t0 = [0...0, fcc7]
             bstrins.d $t1, $t0, 7, 7
 
-            st.d $t1, $a0, 256
+            st.d $t1, $a0, {fpu_context_fcc_offset}
 
             # save fcsr
             movfcsr2gr $t1, $fcsr0
-            st.d $t1, $a0, 264
+            st.d $t1, $a0, {fpu_context_fcsr_offset}
 
             ret
-        "
+        ",
+        fpu_context_fcc_offset = const offset_of!(FpuTaskContext, fcc),
+        fpu_context_fcsr_offset = const offset_of!(FpuTaskContext, fcsr),
     )
 }
 
@@ -236,7 +245,7 @@ unsafe extern "C" fn __load_next_frs(next: *const FpuTaskContext) {
             fld.d $f31, $a0, 248
 
             # restore fcc0~fcc7
-            ld.d $t1, $a0, 256
+            ld.d $t1, $a0, {fpu_context_fcc_offset}
 
             movgr2cf $fcc0, $t1        # fcc0 = t1[0]
 
@@ -262,9 +271,11 @@ unsafe extern "C" fn __load_next_frs(next: *const FpuTaskContext) {
             movgr2cf $fcc7, $t1        # fcc7 = t1[0]
 
             # restore fcsr
-            ld.d $t1, $a0, 264
+            ld.d $t1, $a0, {fpu_context_fcsr_offset}
             movgr2fcsr $fcsr0, $t1
             ret
-    "
+        ",
+        fpu_context_fcc_offset = const offset_of!(FpuTaskContext, fcc),
+        fpu_context_fcsr_offset = const offset_of!(FpuTaskContext, fcsr),
     )
 }

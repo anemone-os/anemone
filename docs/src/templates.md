@@ -122,6 +122,7 @@ docs/src/devlog/changes/2026-05-22-short-slug/
 **Change:** 本阶段实际推进的内容。
 **Audit:** 旁路审计、关键命中分类或 review 结论。
 **Observability:** 新增或验证的 debug / trace / 断言 / 日志证据。
+**Feedback:** `None`，或说明实现期反馈写回了 transaction devlog / `implementation.md` / `invariants.md` / `tracking-issues.md` / register / current limitations；必须说明是否保持原目标和不变量，不能用反馈名义削弱它们。
 **Validation:** 实际运行的命令、测试或复现步骤。
 **Next:** 下一阶段入口条件。
 

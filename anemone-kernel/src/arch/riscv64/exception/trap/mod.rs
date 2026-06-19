@@ -1,4 +1,4 @@
-use core::arch::asm;
+use core::{arch::asm, mem::offset_of};
 
 use crate::{arch::riscv64::fpu::FpuTaskContext, prelude::*};
 
@@ -76,7 +76,7 @@ impl Gpr {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct RiscV64TrapFrame {
     gpr: Gpr,
     sstatus: u64,
@@ -98,6 +98,14 @@ pub struct RiscV64TrapFrame {
     ktp: u64,
     fpu_regs: FpuTaskContext,
 }
+
+// `__utrap_entry` stores this frame directly on the kernel stack and then calls
+// into Rust. RISC-V psABI requires the stack pointer to stay 16-byte aligned at
+// C ABI call boundaries, so the saved frame size must not skew stack alignment.
+static_assert!(align_of::<RiscV64TrapFrame>() == 16);
+static_assert!(size_of::<RiscV64TrapFrame>() % 16 == 0);
+static_assert!(offset_of!(RiscV64TrapFrame, gpr) == 0);
+static_assert!(size_of::<Gpr>() == 32 * size_of::<u64>());
 
 impl RiscV64TrapFrame {
     /// Create a new trap frame for a newly-created kernel thread.
