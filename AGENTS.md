@@ -75,6 +75,20 @@
 * **结构性拆分是设计维护，不是默认越界。** 简单小修不要为了整洁随手拆文件；但当一个文件已经混合 syscall ABI、核心状态机、设备/文件后端、测试兼容桥、锁/生命周期规则或多套 UAPI/internal 转换时，继续把新职责塞进去会固化错误 owner boundary。此时应先做模块边界判断：同一 owner 内、行为保持的目录化拆分（例如 `foo.rs` 拆成 `foo/{mod.rs, abi.rs, state.rs, ops.rs}`）是允许的结构维护；涉及 owner surface、public API、可见性策略或 shared contract 变化时，必须按 write set 扩展流程上报并记录。
 * **重要常量进入kconfig作为可配置项。**
 
+### 模块拆分不是默认越界
+
+当当前改动会继续向一个已经混合多类职责的文件中添加新职责时，agent 必须先做模块边界判断。若拆分满足以下条件，它属于结构
+维护，可以在当前任务中执行：
+
+- 行为保持不变；
+- 仍在同一 owner / subsystem 边界内；
+- 不扩大 public API、可见性策略或 shared contract；
+- 只是把已有或本次必需的职责按 ABI、state、ops、lifecycle、compat、tests 等稳定角色分文件；
+- 验证方式能证明调用路径和外部行为未改变。
+
+如果拆分会移动 owner surface、改变公共接口、扩大 write set、改变共享 contract 或引入新抽象层，必须先停止并上报扩展理
+由、范围和验证计划。
+
 ### 类型命名规范
 
 如非实体确实就是这样的名字或者具备业务属性或者承载明确领域含义，在类型名称中使用以下词语时需要认真考虑：
