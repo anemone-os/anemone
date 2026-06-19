@@ -237,8 +237,22 @@ pub fn kernel_clone(
 
     let current_task = get_current_task();
     let cur_uspace = current_task.clone_uspace_handle();
+    let is_thread_clone = flags.contains(CloneFlags::THREAD);
     #[cfg(feature = "bench_local_test")]
     let forked_uspace = !flags.contains(CloneFlags::VM);
+
+    if is_thread_clone {
+        kspecialln!(
+            "pthread clone begin parent_tid={} tgid={} flags={:#x} new_sp={:?} tls={:#x} parent_tid_ptr={:?} child_tid_ptr={:?}",
+            current_task.tid(),
+            current_task.tgid(),
+            flags.bits(),
+            new_sp,
+            tls.get(),
+            parent_tid.map(|ptr| ptr.get()),
+            child_tid.map(|ptr| ptr.get()),
+        );
+    }
 
     let mut boxed_frame = Box::new(trap_frame);
     boxed_frame.set_syscall_retval(0);
@@ -356,6 +370,15 @@ pub fn kernel_clone(
     }
 
     let new_tid = new_task.tid();
+    if is_thread_clone {
+        kspecialln!(
+            "pthread clone allocated parent_tid={} child_tid={} tgid={} clear_child_tid={:?}",
+            current_task.tid(),
+            new_tid,
+            current_task.tgid(),
+            child_tid.map(|ptr| ptr.get()),
+        );
+    }
 
     // this is not for argument validation, but rather to ensure the page containing
     // `child_tid` will be mapped.
@@ -465,11 +488,27 @@ pub fn kernel_clone(
 
     match guard.publish(new_task, binding) {
         Ok(published) => {
+            if is_thread_clone {
+                kspecialln!(
+                    "pthread clone published parent_tid={} child_tid={} tgid={}",
+                    current_task.tid(),
+                    published.tid(),
+                    published.tgid(),
+                );
+            }
             #[cfg(feature = "bench_local_test")]
             if forked_uspace {
                 report_fork_memory(&current_task, &published);
             }
             task_enqueue(published.clone());
+            if is_thread_clone {
+                kspecialln!(
+                    "pthread clone enqueued parent_tid={} child_tid={} tgid={}",
+                    current_task.tid(),
+                    published.tid(),
+                    published.tgid(),
+                );
+            }
             if flags.contains(CloneFlags::VFORK) {
                 wait_for_vfork_done(&published);
             }
@@ -503,11 +542,29 @@ extern "C" fn enter_cloned_user_task(
 
     let task = get_current_task();
     let frame = *unsafe { Box::from_raw(trap_frame) };
+    let is_thread_clone = clone_flags.contains(CloneFlags::THREAD);
+
+    if is_thread_clone {
+        kspecialln!(
+            "pthread child enter tid={} tgid={} flags={:#x} child_tid_ptr={:#x}",
+            task.tid(),
+            task.tgid(),
+            clone_flags.bits(),
+            child_tid as usize,
+        );
+    }
 
     unsafe {
         if clone_flags.contains(CloneFlags::CHILD_SETTID) {
             if !child_tid.is_null() {
                 child_tid.write(current_task_id());
+                if is_thread_clone {
+                    kspecialln!(
+                        "pthread child set_tid tid={} child_tid_ptr={:#x}",
+                        current_task_id(),
+                        child_tid as usize,
+                    );
+                }
             } else {
                 kdebugln!(
                     "enter_cloned_user_task: CHILD_SETTID flag is set, but child_tid pointer is null. ignoring..."
@@ -527,6 +584,9 @@ extern "C" fn enter_cloned_user_task(
 
     drop(task);
 
+    if is_thread_clone {
+        kspecialln!("pthread child user_return tid={}", current_task_id());
+    }
     kdebugln!("entering cloned user task with tid {}", current_task_id());
     unsafe {
         TrapArch::load_utrapframe(frame);
