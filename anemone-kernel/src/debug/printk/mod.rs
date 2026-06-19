@@ -160,6 +160,7 @@ mod klog {
     gen_printk_macros!(
         $,
         emerg, Emerg
+        special, Special
         alert, Alert
         crit, Crit
         err, Err
