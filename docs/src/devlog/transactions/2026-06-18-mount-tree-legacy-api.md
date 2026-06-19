@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** fs / VFS / mount / LTP
 **权威计划：** [RFC-20260604-mount-tree-legacy-api](../../rfcs/mount-tree-legacy-api/index.md), [不变量需求](../../rfcs/mount-tree-legacy-api/invariants.md), [迁移实施计划](../../rfcs/mount-tree-legacy-api/implementation.md)
-**当前阶段：** 阶段 4 plain / recursive bind 已关闭；阶段 5 尚未启动
+**当前阶段：** 阶段 5 private move / limited propagation 已关闭；下一阶段为阶段 6 `umount2` flags、pre-unmount cleanup 和 mounts 视图
 
 ## 范围
 
@@ -464,3 +464,73 @@
 - `mdbook build docs`：通过。
 - 静态 group 检查：`mount-legacy.txt` 启用 155 条 case，保留 38 条注释 follow-up；未发现未注释的 cloneNS、mountns、new mount API、`pivot_root` 条目；启用行双引号成对。
 - 未运行 QEMU / LTP；本条只整理 profile group 和 runner argv 支撑。
+
+### 2026-06-19 - 阶段 5 private move / limited propagation implementation checkpoint
+
+**阶段：** 阶段 5 - private move mount 和有限 propagation；未关闭。
+
+**源码变更：**
+
+- `sys_mount()` 接受 `MS_MOVE`、`MS_PRIVATE` 和 `MS_REC | MS_PRIVATE`。`MS_MOVE` 拒绝非空 legacy data、null source、非目录 source / target，以及与 attrs、bind、remount、recursive 或 propagation bit 的组合。
+- `MS_PRIVATE` / `MS_REC | MS_PRIVATE` 在当前 private-only tree 下作为 already-private no-op 接受，但仍通过 `MountTree` writer gate 验证 target 是当前 live path；非空 data 稳定拒绝。
+- `MS_SHARED`、`MS_SLAVE`、`MS_UNBINDABLE` 及其 `MS_REC` / mixed propagation 组合稳定返回 `EINVAL`，日志标明缺少 peer-group / master-slave support。
+- `MountTree::move_mount()` 在同一个 `tx_lock` 和 inner placement transaction 内重验 source 是当前 live mount root、target 是当前 live path、防止 target 落在 source subtree 内，随后从旧 parent stack 移除同一个 `Arc<Mount>` 并插入新 target stack，最后 bump `placement_generation`。
+- move 保留同一个 `Arc<Mount>` identity、per-mount attrs 和 child subtree；source 非 mount-root 返回 `EINVAL`，stale / covered source 或 target 返回 `EBUSY`。
+
+**review gate：**
+
+- `phase5-move-explorer`（Archimedes，只读）确认阶段 5 最小实现落点仍在 `fs/api/mount/**`、`fs/mount/**`、`fs/mod.rs`；建议补充 private no-op 的 `MountTree` validation、拆分 source non-root errno，以及增强 propagation reject 矩阵。处置：三项均已折回当前实现 / KUnit。
+- `phase5-move-reviewer`（Dalton，只读）确认核心 move transaction、identity / attrs / subtree 保留、limited private propagation 和 write set 边界基本满足阶段 5。
+- reviewer 提出一个 Keter：阶段 5 验证要求 KUnit 覆盖 “move 与 lookup generation retry 边界”，证明 successful lookup 只能返回 move 前或 move 后位置。当前测试只证明 move bump generation 和 move 后 lookup 正常；要制造 lookup 起止 generation 之间发生 move 的场景，需要在 `anemone-kernel/src/fs/namei.rs` 加 KUnit-only hook 或等价测试 seam，但阶段 5 write set 当前不包含 `fs/namei.rs`。
+- reviewer 提出一个 Euclid：move log 在 move 后格式化旧 `source`，`PathRef::to_pathbuf()` 会按新 placement 渲染，可能让日志缺少 old target。处置：`MountTree::move_mount()` 现在在线性化前捕获 old / new target 文本，成功日志包含 `old_target`、`new_target`、moved mount identity、subtree size 和 stack depth。状态：Neutralized。
+
+**验证：**
+
+- `just fmt kernel`：通过。
+- `just build`：通过；KUnit 编译进 kernel build。
+- `git diff --check`：通过。
+- source audit `rg -n "MountFlags" anemone-kernel/src anemone-abi/src`：无输出，旧迁移桥未复活。
+- source audit `rg -n "MS_MOVE|MS_PRIVATE|MS_SHARED|MS_SLAVE|MS_UNBINDABLE|move_mount|mount move|mount propagation" anemone-kernel/src/fs anemone-abi/src/fs.rs`：命中仅在 ABI 常量、mount syscall adapter、VFS facade、mount tree owner、KUnit 和注释；未进入 filesystem backend。
+- source audit `rg -n "tmpfs|ext2|ext3|vfat|mount_fs_name|FsAliasKind|normalize_fstype|ltp-temporary-bridge" anemone-kernel/src/fs/api/mount anemone-kernel/src/fs`：alias 表仍只在 syscall adapter / KUnit。
+- source audit `rg -n "FileSystemOps.*MountAttr|fn\\(MountSource, MountAttr|_flags: MountAttr|fs\\.mount\\([^\\n]*attrs|MS_MOVE|MS_PRIVATE|MS_SHARED|MS_SLAVE|MS_UNBINDABLE" ...backend paths...`：无输出，backend 未观察 per-mount attrs 或 move/private operation flags。
+
+**停止边界：**
+
+- 阶段 5 closeout 停在 review gate Keter：需要用户批准把 `anemone-kernel/src/fs/namei.rs` 纳入阶段 5 write set，仅用于 `#[cfg(feature = "kunit")]` 的 forced generation-retry test hook；或者明确接受以 source audit 替代该 KUnit 项。
+- 在该决定前，不提交阶段 5 commit，不宣称 private move / limited propagation 阶段关闭。
+
+### 2026-06-19 - 阶段 5 review gate closeout
+
+**阶段：** 阶段 5 - private move mount 和有限 propagation 关闭。
+
+**write set 扩展：**
+
+- 用户批准将 `anemone-kernel/src/fs/namei.rs` 纳入阶段 5 write set，仅用于 `#[cfg(feature = "kunit")]` forced generation-retry hook / test seam。
+- `implementation.md` 已同步记录该扩展边界：不得改变普通 namei 解析语义、mount-root crossing、task root/cwd owner 或 P2 detached-path accepted boundary。
+
+**review finding 处置：**
+
+- `phase5-move-reviewer` 的 Keter 要求证明 move 与 lookup generation retry 边界。处置：`namei.rs` 新增 KUnit-only `resolve_with_mount_retry_hook_for_kunit()`，在第一次 path walk 完成后、generation 比较前执行一次测试 hook；普通 `resolve*()` 路径只委托到同一 retry helper，不安装 hook。
+- `test_vfs_move_mount_lookup_generation_retry_returns_new_state` 使用该 hook 在 `/kunit-vfs-move-retry-target/file` 首次 lookup 返回前移动 source mount。第一次 path walk 的结果会因 generation 变化被丢弃，retry 后返回 moved mount 的新位置，并确认旧 mountpoint 下同一文件不可见。
+- move log Euclid 已在上一条 checkpoint 中 Neutralized：成功日志在线性化前捕获 old / new target 文本。
+- runtime KUnit 首次暴露新增测试 cleanup 仍持有 `PathRef` 导致 unmount busy；处置为在新增 move/private KUnit 的 unlink / unmount 前显式 drop 相关 `PathRef`、mount identity 和 file refs，保持测试遵守当前 busy 语义。
+
+**验证：**
+
+- `just fmt kernel`：通过。
+- `just build`：通过；KUnit 编译进 kernel build。
+- `git diff --check`：通过。
+- `mdbook build docs`：通过，输出到 `docs/book`。
+- rv64 runtime KUnit：`./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/mount-legacy-phase5-rv64-kunit.log` 启动 QEMU 后运行 `Running 92 tests...` / `All tests passed!`。阶段 5 新增 `test_vfs_private_propagation_validates_live_target` 和 `test_vfs_move_mount_lookup_generation_retry_returns_new_state` 均通过。随后进入 LTP，用户按本轮验证边界关闭 QEMU；本条不作为 LTP closeout。
+- source audit `rg -n "resolve_with_mount_retry_hook_for_kunit|after_first_walk" anemone-kernel/src/fs/namei.rs anemone-kernel/src/fs/mount/tree.rs`：只命中 KUnit-only hook、内部 one-shot hook 参数和对应阶段 5 KUnit。
+- source audit `rg -n "MountFlags" anemone-kernel/src anemone-abi/src`：无输出。
+- source audit `rg -n "MS_MOVE|MS_PRIVATE|MS_SHARED|MS_SLAVE|MS_UNBINDABLE|move_mount|mount move|mount propagation" anemone-kernel/src/fs anemone-abi/src/fs.rs`：命中 ABI、mount syscall adapter、VFS facade、mount tree owner、KUnit 和注释；未进入 filesystem backend。
+- source audit `rg -n "tmpfs|ext2|ext3|vfat|mount_fs_name|FsAliasKind|normalize_fstype|ltp-temporary-bridge" anemone-kernel/src/fs/api/mount anemone-kernel/src/fs`：alias 表仍只在 syscall adapter / KUnit。
+- source audit backend attrs / operation leakage pattern：无输出，backend 未观察 per-mount attrs 或 move/private operation flags。
+
+**阶段 5 关闭判断：**
+
+- private tree 下基础 `MS_MOVE` 可用，保留同一 `Arc<Mount>` identity、attrs 和 subtree，并在同一 transaction 中完成旧 stack 摘除、新 stack 插入和 generation bump。
+- `MS_PRIVATE` / `MS_REC | MS_PRIVATE` 作为当前 private-only tree 的有限 no-op 成功语义闭合；target 仍通过 `MountTree` validation，非空 data 拒绝。
+- `MS_SHARED`、`MS_SLAVE`、`MS_UNBINDABLE`、file/source 非目录、非法 move / bind / remount / attrs / propagation 组合均稳定拒绝，不伪成功。
+- review gate 已关闭；阶段 6 尚未启动。

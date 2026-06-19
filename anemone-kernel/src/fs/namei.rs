@@ -100,6 +100,24 @@ pub fn resolve(path: &Path, flags: ResolveFlags) -> Result<PathRef, SysError> {
     resolve_from_with_root(&root, &root, path, flags)
 }
 
+#[cfg(feature = "kunit")]
+pub(in crate::fs) fn resolve_with_mount_retry_hook_for_kunit<F>(
+    path: &Path,
+    flags: ResolveFlags,
+    hook: F,
+) -> Result<PathRef, SysError>
+where
+    F: FnOnce(),
+{
+    if path.components().next().is_none() {
+        return Err(SysError::InvalidArgument);
+    }
+
+    let root = root_pathref();
+    let pending = collect_components(path)?;
+    resolve_components_with_mount_retry_hooked(root.clone(), root, pending, flags, None, Some(hook))
+}
+
 /// Resolve a path to a [PathRef], starting from a given [PathRef].
 ///
 /// If `path` is absolute, `from` is ignored and resolution starts from the
@@ -355,6 +373,27 @@ fn resolve_components_with_mount_retry(
     flags: ResolveFlags,
     checker: Option<&FsPermChecker>,
 ) -> Result<PathRef, SysError> {
+    resolve_components_with_mount_retry_hooked(
+        logical_root,
+        cur_path,
+        pending,
+        flags,
+        checker,
+        Option::<fn()>::None,
+    )
+}
+
+fn resolve_components_with_mount_retry_hooked<F>(
+    logical_root: PathRef,
+    cur_path: PathRef,
+    pending: VecDeque<PendingComponent>,
+    flags: ResolveFlags,
+    checker: Option<&FsPermChecker>,
+    mut after_first_walk: Option<F>,
+) -> Result<PathRef, SysError>
+where
+    F: FnOnce(),
+{
     let mut retries = 0;
 
     loop {
@@ -366,6 +405,9 @@ fn resolve_components_with_mount_retry(
             flags,
             checker,
         );
+        if let Some(hook) = after_first_walk.take() {
+            hook();
+        }
         if start_generation == mount_placement_generation() {
             return result;
         }

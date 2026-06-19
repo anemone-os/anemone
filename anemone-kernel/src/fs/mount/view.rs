@@ -153,6 +153,18 @@ impl Mount {
         };
     }
 
+    pub(super) fn move_attached(&self, parent: &Arc<Mount>, mountpoint: &Arc<Dentry>) {
+        let mut placement = self.placement.lock();
+        assert!(
+            matches!(*placement, MountPlacement::Attached { .. }),
+            "only an attached mount can be moved"
+        );
+        *placement = MountPlacement::Attached {
+            parent: parent.clone(),
+            mountpoint: mountpoint.clone(),
+        };
+    }
+
     pub(super) fn mark_detached(&self) {
         let mut placement = self.placement.lock();
         assert!(

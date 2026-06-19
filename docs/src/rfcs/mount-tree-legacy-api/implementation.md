@@ -302,6 +302,7 @@ write set：
 - `anemone-kernel/src/fs/mount/**`
 - `anemone-kernel/src/fs/mod.rs`
 - `anemone-kernel/src/fs/api/mount/**`
+- `anemone-kernel/src/fs/namei.rs`，仅限 `#[cfg(feature = "kunit")]` forced generation-retry hook / test seam，不得改变普通 namei 解析语义或 task root/cwd owner。
 - `anemone-kernel/src/fs/namei.rs` 仅限必要 lookup/stack 辅助。
 - `anemone-kernel/src/fs/path.rs` 仅限让 `PathRef::to_pathbuf()` 使用与 bind root 相同的 mount-root boundary，不改变 path identity 或 task root/cwd owner。
 
@@ -590,6 +591,7 @@ write set：
 - 2026-06-18：阶段 1 实现反馈确认现有 `MountFlags` 只剩 `RDONLY`，且已被 `MountAttrFlags` 覆盖为更准确的 per-mount attrs 表达；RFC 接受 `MountFlags` 作为阶段 1 迁移桥，但要求阶段 3 attr plumbing 删除该类型，并让 `FileSystemOps::mount()` 不再接收 per-mount attrs。
 - 2026-06-19：阶段 2 closeout 后的结构反馈确认 `fs/mod.rs` 已同时承担 VFS facade、mount tree owner、VFS ops 和 KUnit，继续在其中堆叠阶段 3 remount attrs 会固化错误 owner boundary；阶段 3 前允许做 behavior-preserving `fs/mount/` 目录化 checkpoint。
 - 2026-06-19：阶段 2 implementation feedback 确认 `can_sleep` / IRQ / preempt 状态推断不应作为 early-root publish 的分流条件。canonical 形状改为普通 root mount 永远走 `tx_lock`，anonymous initcall 通过显式 fs-private early pseudo-root API 发布 first root；panic 或其它 no-sleep context 不获得 mount-tree writer bypass。
+- 2026-06-19：阶段 5 review gate 要求用 KUnit 覆盖 move 与 lookup generation retry 边界。用户批准将 `anemone-kernel/src/fs/namei.rs` 纳入阶段 5 write set，仅用于 `#[cfg(feature = "kunit")]` forced retry hook；普通 namei path walk 语义不变。
 
 ## Write Set 扩展记录
 
@@ -597,6 +599,7 @@ write set：
 - 2026-06-18：阶段 1 需要把 legacy `MountData` 从 syscall adapter 传到 filesystem backend，因此允许 `anemone-kernel/src/fs/mod.rs` 增加 syscall-only `mount_at_with_data` call-through；该扩展不允许改变 `NameSpace` / future `MountTree` topology、stack visibility、bind/move/remount 或 unmount transaction 语义。
 - 2026-06-18：阶段 3 write set 扩展纳入 `anemone-kernel/src/fs/filesystem.rs` 和必要 backend mount signature 文件，用于删除 `MountFlags` 迁移桥并切断 filesystem backend 对 per-mount attrs 的观察；该扩展不允许打开 sb-wide remount reconfigure。
 - 2026-06-19：用户批准阶段 3 前 `fs/mount/` split-only checkpoint。该结构维护只允许在同一 mount owner 内移动 `MountData`、`MountAttrFlags` / `MountFlags`、`Mount` view 和 `MountTree` owner，不改变 public VFS facade、syscall ABI、lookup 语义、superblock lifetime 或阶段 3 remount 成功边界。
+- 2026-06-19：用户批准阶段 5 将 `anemone-kernel/src/fs/namei.rs` 纳入 write set，仅用于 `#[cfg(feature = "kunit")]` 的 forced generation-retry hook / test seam，证明 move 期间 successful lookup 只能返回 move 前或 move 后稳态；不得改变普通 namei 解析、mount-root crossing、task root/cwd owner 或 P2 detached-path accepted boundary。
 
 ## 结构维护记录
 

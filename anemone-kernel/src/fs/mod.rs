@@ -171,6 +171,16 @@ mod vfs {
         VFS.visible.bind_mount(source, target, recursive)
     }
 
+    /// Move an attached mount view inside the visible mount tree.
+    pub fn move_mount(source: &PathRef, target: &PathRef) -> Result<usize, SysError> {
+        VFS.visible.move_mount(source, target)
+    }
+
+    /// Accept private propagation requests for the currently private tree.
+    pub fn make_mount_private(target: &PathRef, recursive: bool) -> Result<usize, SysError> {
+        VFS.visible.make_private(target, recursive)
+    }
+
     /// **Called by anonymous filesystem driver. DO NOT TOUCH THIS.**
     pub(in crate::fs) fn mount_early_anonymous_root(
         anony_fs: Arc<FileSystem>,

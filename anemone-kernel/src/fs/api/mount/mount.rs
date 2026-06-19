@@ -42,7 +42,9 @@ const MAX_MOUNT_DATA_LEN_BYTES: usize = MAX_PATH_LEN_BYTES;
 enum MountOperation {
     Bind { recursive: bool },
     BindRemount,
+    Move,
     NewMount,
+    Private { recursive: bool },
     Remount,
 }
 
@@ -141,11 +143,25 @@ fn parse_mount_flags(raw: u64) -> Result<ParsedMountRequest, SysError> {
     }
 
     let operation_bits = raw & MOUNT_OPERATION_FLAGS;
+    let propagation_bits = operation_bits & (MS_SHARED | MS_SLAVE | MS_UNBINDABLE);
+    if propagation_bits != 0 {
+        knoticeln!(
+            "mount propagation: rejecting unsupported propagation raw={:#x} operation={:#x} propagation={:#x} reason=missing-peer-group-support",
+            raw,
+            operation_bits,
+            propagation_bits
+        );
+        return Err(SysError::InvalidArgument);
+    }
+
     let operation = match operation_bits {
         0 => MountOperation::NewMount,
         MS_BIND => MountOperation::Bind { recursive: false },
         bits if bits == (MS_BIND | MS_REC) => MountOperation::Bind { recursive: true },
         bits if bits == (MS_BIND | MS_REMOUNT) => MountOperation::BindRemount,
+        MS_MOVE => MountOperation::Move,
+        MS_PRIVATE => MountOperation::Private { recursive: false },
+        bits if bits == (MS_PRIVATE | MS_REC) => MountOperation::Private { recursive: true },
         MS_REMOUNT => MountOperation::Remount,
         _ => {
             knoticeln!(
@@ -179,6 +195,21 @@ fn parse_mount_flags(raw: u64) -> Result<ParsedMountRequest, SysError> {
     let mut attrs = MountAttrFlags::empty();
     if raw & MS_RDONLY != 0 {
         attrs |= MountAttrFlags::RDONLY;
+    }
+
+    match operation {
+        MountOperation::Bind { .. } | MountOperation::Move | MountOperation::Private { .. }
+            if !attrs.is_empty() =>
+        {
+            knoticeln!(
+                "mount: rejecting attrs on operation raw={:#x} operation={:?} attrs={:?}",
+                raw,
+                operation,
+                attrs
+            );
+            return Err(SysError::InvalidArgument);
+        },
+        _ => {},
     }
 
     Ok(ParsedMountRequest { operation, attrs })
@@ -325,6 +356,87 @@ fn do_remount(
     remount_attrs(&target, attrs)
 }
 
+fn do_move_mount(
+    source: Option<Box<str>>,
+    target: Box<str>,
+    fstype: Option<Box<str>>,
+    data: MountData,
+) -> Result<(), SysError> {
+    if !data.is_empty() {
+        knoticeln!(
+            "mount move: rejecting legacy data empty=false contains_loop={}",
+            data.has_loop_option()
+        );
+        return Err(SysError::InvalidArgument);
+    }
+
+    if let Some(fstype) = fstype {
+        knoticeln!(
+            "mount move: ignoring fstype raw={} reason=move-operation",
+            fstype
+        );
+    }
+
+    let Some(source) = source else {
+        knoticeln!("mount move: rejecting null source");
+        return Err(SysError::InvalidArgument);
+    };
+
+    let task = get_current_task();
+    let source = task.lookup_path(Path::new(source.as_ref()), ResolveFlags::empty())?;
+    let target = task.lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
+
+    if source.inode().ty() != InodeType::Dir {
+        knoticeln!(
+            "mount move: rejecting non-directory source source={} errno=ENOTDIR",
+            source
+        );
+        return Err(SysError::NotDir);
+    }
+
+    if target.inode().ty() != InodeType::Dir {
+        knoticeln!(
+            "mount move: rejecting non-directory target target={} errno=ENOTDIR",
+            target
+        );
+        return Err(SysError::NotDir);
+    }
+
+    move_mount(&source, &target)?;
+
+    Ok(())
+}
+
+fn do_private_propagation(
+    target: Box<str>,
+    fstype: Option<Box<str>>,
+    recursive: bool,
+    data: MountData,
+) -> Result<(), SysError> {
+    if !data.is_empty() {
+        knoticeln!(
+            "mount propagation: rejecting private data empty=false contains_loop={} recursive={}",
+            data.has_loop_option(),
+            recursive
+        );
+        return Err(SysError::InvalidArgument);
+    }
+
+    if let Some(fstype) = fstype {
+        knoticeln!(
+            "mount propagation: ignoring fstype raw={} reason=private-operation recursive={}",
+            fstype,
+            recursive
+        );
+    }
+
+    let target =
+        get_current_task().lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
+    make_mount_private(&target, recursive)?;
+
+    Ok(())
+}
+
 #[syscall(SYS_MOUNT)]
 fn sys_mount(
     #[validate_with(c_readonly_path.nullable())] source: Option<Box<str>>,
@@ -351,8 +463,14 @@ fn sys_mount(
         MountOperation::BindRemount => {
             do_remount(target, parsed_flags.attrs, data, true)?;
         },
+        MountOperation::Move => {
+            do_move_mount(source, target, fstype, data)?;
+        },
         MountOperation::NewMount => {
             do_new_mount(source, target, fstype, parsed_flags.attrs, data)?;
+        },
+        MountOperation::Private { recursive } => {
+            do_private_propagation(target, fstype, recursive, data)?;
         },
         MountOperation::Remount => {
             do_remount(target, parsed_flags.attrs, data, false)?;
@@ -392,12 +510,55 @@ mod kunits {
         assert_eq!(parsed.operation, MountOperation::BindRemount);
         assert_eq!(parsed.attrs, MountAttrFlags::RDONLY);
 
+        let parsed = parse_mount_flags(MS_MOVE).unwrap();
+        assert_eq!(parsed.operation, MountOperation::Move);
+
+        let parsed = parse_mount_flags(MS_PRIVATE).unwrap();
+        assert_eq!(
+            parsed.operation,
+            MountOperation::Private { recursive: false }
+        );
+
+        let parsed = parse_mount_flags(MS_PRIVATE | MS_REC).unwrap();
+        assert_eq!(
+            parsed.operation,
+            MountOperation::Private { recursive: true }
+        );
+
         assert_eq!(
             parse_mount_flags(MS_BIND | MS_MOVE).unwrap_err(),
             SysError::InvalidArgument
         );
         assert_eq!(
             parse_mount_flags(MS_REMOUNT | MS_BIND | MS_REC).unwrap_err(),
+            SysError::InvalidArgument
+        );
+        assert_eq!(
+            parse_mount_flags(MS_MOVE | MS_RDONLY).unwrap_err(),
+            SysError::InvalidArgument
+        );
+        assert_eq!(
+            parse_mount_flags(MS_MOVE | MS_REC).unwrap_err(),
+            SysError::InvalidArgument
+        );
+        assert_eq!(
+            parse_mount_flags(MS_BIND | MS_RDONLY).unwrap_err(),
+            SysError::InvalidArgument
+        );
+        assert_eq!(
+            parse_mount_flags(MS_PRIVATE | MS_RDONLY).unwrap_err(),
+            SysError::InvalidArgument
+        );
+        assert_eq!(
+            parse_mount_flags(MS_SHARED).unwrap_err(),
+            SysError::InvalidArgument
+        );
+        assert_eq!(
+            parse_mount_flags(MS_SHARED | MS_REC).unwrap_err(),
+            SysError::InvalidArgument
+        );
+        assert_eq!(
+            parse_mount_flags(MS_SHARED | MS_SLAVE).unwrap_err(),
             SysError::InvalidArgument
         );
     }
