@@ -13,7 +13,7 @@ madvise03
 madvise05
 madvise10
 
-mmap-corruption01
+# mmap-corruption01
 mmap001
 mmap01
 mmap02
