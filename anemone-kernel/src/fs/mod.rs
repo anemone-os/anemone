@@ -246,8 +246,8 @@ mod vfs {
     }
 
     pub fn resident_file_cache_pages() -> usize {
-        let mut superblocks = mounted_superblocks_for(&VFS.anonymous.read());
-        superblocks.extend(mounted_superblocks_for(&VFS.visible.read()));
+        let mut superblocks = mounted_superblocks_for(&VFS.anonymous);
+        superblocks.extend(mounted_superblocks_for(&VFS.visible));
 
         let mut unique = Vec::<Arc<SuperBlock>>::new();
         for sb in superblocks {
