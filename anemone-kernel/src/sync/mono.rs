@@ -1,8 +1,6 @@
-use core::{
-    cell::UnsafeCell,
-    mem::MaybeUninit,
-    sync::atomic::{AtomicBool, Ordering},
-};
+#[cfg(debug_assertions)]
+use core::sync::atomic::{AtomicBool, Ordering};
+use core::{cell::UnsafeCell, mem::MaybeUninit};
 
 /// A container for data that relies on environment-guaranteed sequential
 /// access.
