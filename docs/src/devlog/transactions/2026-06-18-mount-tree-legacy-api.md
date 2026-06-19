@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** fs / VFS / mount / LTP
 **权威计划：** [RFC-20260604-mount-tree-legacy-api](../../rfcs/mount-tree-legacy-api/index.md), [不变量需求](../../rfcs/mount-tree-legacy-api/invariants.md), [迁移实施计划](../../rfcs/mount-tree-legacy-api/implementation.md)
-**当前阶段：** 阶段 2 已关闭；阶段 3 尚未启动
+**当前阶段：** 阶段 3 前结构维护 checkpoint 已完成；阶段 3 尚未启动
 
 ## 范围
 
@@ -275,3 +275,38 @@
 - same-mountpoint stack 改为 topmost-visible，并由 KUnit 固定 attach、lookup 和 unwind 行为。
 - attach target revalidation、lookup generation retry、root / attached / detached placement state 已落代码。
 - review gate blocker 已全部 Neutralized，验证 floor 已满足阶段 2 closeout；阶段 3 尚未启动。
+
+### 2026-06-19 - 阶段 3 前 `fs/mount/` split-only checkpoint
+
+**阶段：** 阶段 2 关闭后的结构维护；阶段 3 remount attrs 尚未启动。
+
+**反馈：**
+
+- 用户指出当前 `MountTree` owner 逻辑挤在 `fs/mod.rs`，继续把阶段 3 remount attrs 和后续 bind / move / unmount 逻辑堆进去会让 `fs/mod.rs` 同时承担 VFS facade、mount tree owner、VFS ops 和测试职责。
+- 用户批准按 split-only checkpoint 拆出 `fs/mount/` 模块，并补充测试不单独建 `tests.rs`；某个内容的 KUnit 应留在该内容所在文件的 `kunits` 模块下。
+
+**结构维护边界：**
+
+- 本 checkpoint 只做同一 mount owner 内的目录化拆分，不改变 public VFS facade、syscall ABI、mount lookup 语义、superblock lifetime、阶段顺序或阶段 3 remount 成功边界。
+- 后续阶段 write set 已在 `implementation.md` 中从 `anemone-kernel/src/fs/mount.rs` 更新为 `anemone-kernel/src/fs/mount/**`。
+
+**源码变更：**
+
+- `anemone-kernel/src/fs/mount.rs` 拆为 `fs/mount/{mod.rs,data.rs,flags.rs,view.rs,tree.rs}`。
+- `MountData` 和 legacy data KUnit 移入 `data.rs`。
+- `MountAttrFlags` / `MountFlags` 迁移桥移入 `flags.rs`；阶段 3 仍负责删除 `MountFlags`。
+- `Mount` / `MountPlacement` / `MountSource` 移入 `view.rs`。
+- `MountTree` / `MountTreeInner`、attach / detach / unmount transaction 和 mount-stack KUnit 移入 `tree.rs`。
+- `fs/mod.rs` 删除内联 `namespace` 模块，只保留 VFS singleton / facade、VFS ops 和非 mount-tree KUnit。
+
+**验证：**
+
+- `just fmt kernel`：通过。
+- `just build`：通过；仍仅保留既有 `anemone-kernel/src/sync/mono.rs` 的 `AtomicBool` / `Ordering` unused import warning。
+- `git diff --check`：通过。
+- `mdbook build docs`：通过，输出到 `docs/book`。
+- source audit `rg -n "mod namespace|namespace::MountTree|fs::namespace|NameSpace|RwLock<NameSpace>" anemone-kernel/src/fs anemone-kernel/src/main.rs`：无输出。
+- source audit `rg -n "tests\\.rs|mod tests|pub mod tests" anemone-kernel/src/fs/mount`：无输出。
+- source audit `rg -n "MountAttrFlags|MountFlags|MountTree|MountPlacement|MountData" anemone-kernel/src/fs/mount anemone-kernel/src/fs/mod.rs anemone-kernel/src/fs/api/mount anemone-kernel/src/fs/filesystem.rs`：命中均为预期的 mount module split、syscall parser 使用和 filesystem mount signature。
+
+**未运行验证：** 本 checkpoint 未重新启动 QEMU / LTP；阶段 2 closeout 已记录用户中止前的 rv64 boot + runtime KUnit smoke。

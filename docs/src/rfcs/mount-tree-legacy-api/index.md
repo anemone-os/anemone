@@ -2,11 +2,11 @@
 
 **状态：** Accepted for Implementation
 **负责人：** doruche
-**最后更新：** 2026-06-18
+**最后更新：** 2026-06-19
 **领域：** fs / vfs / mount
 **事务日志：** [2026-06-18-mount-tree-legacy-api](../../devlog/transactions/2026-06-18-mount-tree-legacy-api.md)
 **开放问题：** 无 active design blocker；lazy-detach cleanup ownership 和 detached-path namei semantics 已作为受控反馈 gate 写入 [迁移实施计划](./implementation.md)。
-**下一步：** 按 [事务日志](../../devlog/transactions/2026-06-18-mount-tree-legacy-api.md) 启动阶段 1：UAPI parser、flag 分层、legacy data 和 syscall alias。
+**下一步：** 按 [事务日志](../../devlog/transactions/2026-06-18-mount-tree-legacy-api.md) 完成阶段 3 前 `fs/mount/` split-only checkpoint 后，启动阶段 3 ordinary per-mount readonly remount 和 attr plumbing。
 
 ## 摘要
 
@@ -18,12 +18,12 @@
 
 当前内核已有基础挂载树，但其边界还没有成为正式 contract：
 
-- `anemone-kernel/src/fs/api/mount.rs` 实现 `sys_mount()`，支持 pseudo source 和 block-device source。当前 syscall 边界还有临时 LTP 兼容桥：`tmpfs`、`ext2`、`ext3`、`vfat` 会归一化到 `ramfs`，且 `ramfs` 走 pseudo source；这不是 mount tree 或 filesystem backend 的长期框架语义。
-- `anemone-kernel/src/fs/api/umount.rs` 实现 `sys_umount2()`，但暂未解析 `MNT_DETACH`、`MNT_EXPIRE`、`UMOUNT_NOFOLLOW` 等 flag。
-- `anemone-kernel/src/fs/mount.rs` 的 `Mount` 记录 root、superblock、parent、children、mountpoint 和 `MountFlags`，但 `MountFlags` 目前只有 `RDONLY`。本 RFC 收口后不保留这层并列 flag 类型；`RDONLY` 应归入 `Mount` 的 per-mount attrs 单一真相源。
-- `anemone-kernel/src/fs/mod.rs` 内部的 `NameSpace` 不是 Linux mount namespace；它只是 visible mount tree 的容器。后续应将其正名为 `MountTree`，由 namespace RFC 再引入真正的 per-task namespace / nsproxy 系统。
-- 当前同一 mountpoint 已允许多层挂载，但可见层是 first-mounted-visible；正式语义应改为 Linux-like topmost-visible stack。
-- `anemone-abi/src/fs.rs` 目前只导出 `MS_RDONLY`。
+- `anemone-kernel/src/fs/api/mount/mount.rs` 实现 `sys_mount()`，支持 pseudo source 和 block-device source。当前 syscall 边界还有临时 LTP 兼容桥：`tmpfs`、`ext2`、`ext3`、`vfat` 会归一化到 `ramfs`，且 `ramfs` 走 pseudo source；这不是 mount tree 或 filesystem backend 的长期框架语义。
+- `anemone-kernel/src/fs/api/mount/umount.rs` 实现 `sys_umount2()`，当前已识别 legacy umount flag 并稳定拒绝尚未闭合的成功语义。
+- `anemone-kernel/src/fs/mount/` 目录承载 mount view、legacy data、attrs flags 和 mount tree owner。`Mount` 目前仍持有迁移桥 `MountFlags`，但 `MountFlags` 只有 `RDONLY`；本 RFC 收口后不保留这层并列 flag 类型，`RDONLY` 应归入 `Mount` 的 per-mount attrs 单一真相源。
+- `anemone-kernel/src/fs/mod.rs` 的 VFS singleton 持有 visible / anonymous 两棵 `MountTree`；它们不是 Linux mount namespace，真正的 per-task namespace / nsproxy 系统仍由后续 namespace RFC 引入。
+- 当前同一 mountpoint 已允许多层挂载，并按 Linux-like topmost-visible stack 查找。
+- `anemone-abi/src/fs.rs` 已导出 legacy mount / umount parser 第一版需要识别的 flag 常量。
 - `anemone-kernel/src/fs/proc/mounts.rs` 已把 `/proc/mounts` 发布为 `self/mounts` symlink，但 `anemone-kernel/src/fs/proc/tgid/mounts.rs` 仍是空内容 stub。
 - `docs/src/rfcs/inode-shrinker/` 已把 resident inode cache 回收收敛为显式 `try_evict_inode()` / `try_evict_all()` 协议；mount unmount 只能编排最后一个 view 后的 superblock cleanup，不能重新定义 inode eviction 顺序。
 - `docs/src/rfcs/fanotify/` 已把 mount / filesystem mark 作为 `Arc<Mount>` / `Arc<SuperBlock>` identity consumer，并要求完整 umount 兼容接入 pre-unmount flush / mark-dead hook 后才能宣称闭合。
