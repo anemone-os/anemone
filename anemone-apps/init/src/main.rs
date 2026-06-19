@@ -61,12 +61,18 @@ pub fn main() -> Result<(), Errno> {
                             "init: wait4 returned None but no error, this should not happen, since we didn't specify WNOHANG"
                         );
                     },
+                    Err(EINTR) => {
+                        // wait4 may be interrupted by SIGCHLD or another signal
+                        // before the exited child is reaped. PID 1 must retry
+                        // instead of turning a recoverable Linux ABI result into
+                        // an init-exit panic.
+                        continue;
+                    },
+                    Err(ECHILD) => {
+                        sched_yield().expect("init: failed to yield");
+                    },
                     Err(e) => {
-                        if e != ECHILD {
-                            panic!("init: cannot recycle child tasks: {}", e);
-                        } else {
-                            sched_yield().expect("init: failed to yield");
-                        }
+                        panic!("init: cannot recycle child tasks: {}", e);
                     },
                 }
             }
