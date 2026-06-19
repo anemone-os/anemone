@@ -375,12 +375,12 @@
 **Severity:** Low
 **Area:** VFS / openat / fcntl
 
-**Summary:** `openat` 已把 access mode、fd-local flags、file status flags 和 Linux-visible compat bits 分开保存，`F_GETFL` 能还原 open 时保存的持久 flag，`F_SETFL` 只动态修改 `O_APPEND`、`O_NONBLOCK` 和 `O_DIRECT`。opened file description 仍是 file status flags 的唯一真相源；`FileOps` data I/O 通过短生命周期 ctx 观察 normalized status snapshot，pipe 不再保存私有 `nonblock` 行为状态，block special file 的 `O_DIRECT` 拒绝由后端 status check 表达。`O_SYNC`、`O_DSYNC` 和 `O_NOATIME` 当前会保存并通过 `F_GETFL` 可见，但只记录兼容状态，不承诺真实同步写入或 atime 抑制语义；通过 `F_SETFL` 传入这些不可动态修改位会被忽略并打日志。
+**Summary:** `openat` 已把 access mode、fd-local flags、file status flags 和 Linux-visible compat bits 分开保存，`F_GETFL` 能还原 open 时保存的持久 flag，`F_SETFL` 只动态修改 `O_APPEND`、`O_NONBLOCK` 和 `O_DIRECT`。opened file description 仍是 file status flags 的唯一真相源；`FileOps` data I/O 通过短生命周期 ctx 观察 normalized status snapshot，pipe 不再保存私有 `nonblock` 行为状态，block special file 的 `O_DIRECT` 拒绝由后端 status check 表达。传统 `openat` 的 `O_PATH` 路径已按 Linux legacy 规则接受并丢弃 `O_NONBLOCK`、`O_APPEND`、`O_CREAT` 等已识别但不参与 path handle 语义的 flag，同时保留 `O_DIRECTORY`、`O_NOFOLLOW` 和 `O_CLOEXEC`。当前仍有两项 ABI 差异：传统 `openat` 会对未知 flag bit 返回 `EINVAL`，而 Linux legacy `open/openat` 会先静默清除未知位；`O_PATH` 打开时生效的 `O_DIRECTORY` / `O_NOFOLLOW` 只进入 lookup 决策，没有随 opened file description 保存，因此后续 `F_GETFL` 不会像 Linux 一样回显这两个 bit。另有 `O_SYNC`、`O_DSYNC` 和 `O_NOATIME` 当前会保存并通过 `F_GETFL` 可见，但只记录兼容状态，不承诺真实同步写入或 atime 抑制语义；通过 `F_SETFL` 传入这些不可动态修改位会被忽略并打日志。
 
-**Exit Condition:** 为同步写、direct I/O 和 atime 更新引入真实文件系统语义，或者逐项收敛为明确拒绝/兼容策略，并补齐 `openat`、`fcntl(F_GETFL/F_SETFL)` 与 IO 可见性的回归验证。
+**Exit Condition:** 为传统 `openat` 与未来严格 `openat2` 分别建立 Linux-compatible flag validation 边界，使 legacy 路径静默清除未知位，并让 opened file description 保存和回显 `O_PATH` 下生效的 `O_DIRECTORY` / `O_NOFOLLOW`；为同步写、direct I/O 和 atime 更新引入真实文件系统语义，或者逐项收敛为明确拒绝/兼容策略。补齐 `openat(O_PATH | ignored/unknown flags)`、`fcntl(F_GETFL/F_SETFL)` 与 IO 可见性的 syscall 回归验证。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-10
+**Last Verified:** 2026-06-19
 **Related:** [FileOps status ctx 边界清理小迭代记录](../devlog/changes/2026-06-10-fileops-status-ctx.md), [开发日志：2026-06-08 至 2026-06-21](../devlog/2026-06-08_to_2026-06-21.md), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
 ## ANE-20260528-PIPE-PROCFS-KNOBS-STAGE1
