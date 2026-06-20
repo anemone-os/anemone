@@ -1,6 +1,6 @@
 # Threaded Timer Event 迁移实施计划
 
-**状态：** Active
+**状态：** Completed
 **最后更新：** 2026-06-20
 **父 RFC：** [RFC-20260620-threaded-timer-event](./index.md)
 **不变量：** [不变量需求](./invariants.md)

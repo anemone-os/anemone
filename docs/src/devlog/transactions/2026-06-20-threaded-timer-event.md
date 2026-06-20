@@ -1,10 +1,10 @@
 # 2026-06-20 - Threaded Timer Event
 
-**状态：** Active
+**状态：** Completed
 **负责人：** doruche, Codex
 **领域：** time / timer / scheduler / kthread / timerfd / signal
 **权威计划：** [RFC-20260620-threaded-timer-event](../../rfcs/threaded-timer-event/index.md), [不变量需求](../../rfcs/threaded-timer-event/invariants.md), [迁移实施计划](../../rfcs/threaded-timer-event/implementation.md)
-**当前阶段：** 阶段 4 - ITIMER_REAL 迁移已关闭；下一步阶段 5 - 旁路审计与收口
+**当前阶段：** 阶段 5 - 旁路审计与收口已关闭；第一版 threaded timer event 完成
 
 ## 范围
 
@@ -243,3 +243,30 @@
 - 定向 LTP summary：glibc `attempted=9 passed=7 failed=2 infra_failed=0 skipped=0`，musl `attempted=9 passed=7 failed=2 infra_failed=0 skipped=0`；总计 `attempted=18 passed=14 failed=4 infra_failed=0 skipped=0`。4 个 failed 是 `getitimer01` / `setitimer01` 在两套 runtime 的 VIRTUAL/PROF 非目标分支聚合失败，不作为 Gate P3 blocker。
 
 **结论：** 阶段 4 Gate P3 关闭。`ITIMER_REAL` 已迁移到 threaded completion；stale callback no-op、interval rearm、real-only 范围和锁外 `SIGALRM` 投递均有源码审计与定向运行证据。下一步进入阶段 5：旁路审计与收口。
+
+### 2026-06-20 - 阶段 5 旁路审计与收口
+
+**阶段：** 阶段 5 - 旁路审计与收口。
+
+**审计结果：**
+
+- `schedule_local_irq_timer_event()` 调用面只剩 `sched/mod.rs` 的 wait-core timeout、IRQ API 定义和 re-export；`timerfd` 与 `ITIMER_REAL` 不再使用 IRQ timer callback。
+- `schedule_threaded_timer_event()` 调用面只在第一版允许的 `fs/timerfd.rs`、`task/itimer.rs` 和 timer core KUnit。
+- `#[initcall(late)]` 调用面只有 `time::timer::threaded::init_threaded_timer_workers()`、`fs::inode_shrinker::init_inode_shrinker()` 和 `mm::oom::init_oom_killer()`；`kthreadd` 仍由 `bsp_kinit()` 手动初始化。
+- `on_timer_interrupt()` 仍是 deadline 到期检测中心。`TimerLane::Irq` 在 IRQ context 执行 callback；`TimerLane::Threaded` 只调用 `threaded::enqueue_expired_threaded()` 投递 ready queue 并唤醒本 CPU worker。
+- threaded ready queue 由 `NoIrqSpinLock` 保护；IRQ 投递路径只在 ready queue 中 `push_back()` callback、更新诊断 high-water、按 `cur_cpu_id()` 读取 timer core-owned worker slot，并在 `wake()` 前断言 `slot.cpu == cur_cpu_id()`。
+- `KThreadHandle::wake()` 仍是 pure wake capability：只调用 `KThreadControl::wake()`，后者发布 `Event` wake edge；业务请求真相仍在 timer ready queue。
+- timer worker 每次从 ready queue 弹出 callback 后释放 queue lock，再执行 callback；timer core 不持锁进入 `timerfd` 或 itimer 对象 callback。
+- `timerfd` 注释保留 bounded threaded completion、generation filtering、missed-tick accounting、trigger handoff 和 periodic rearm 约束；旧 IRQ bridge 注释已移除。
+- `ITIMER_REAL` 注释保留 bounded threaded completion、stale filtering、interval rearm 和 signal action commit point；`recv_signal()` 调用位于 itimer state lock block 之后。
+- wait-core timeout 仍留在 IRQ lane。理由与 RFC 一致：它绑定 `WakeToken`、timeout callback、signal/force/cancel/source trigger race 和 `finish()` outcome mapping；若后续要迁移，必须另走 wait-core contract review。
+- `ANE-20260616-LTP-POST-SUMMARY-HANG` 未被本 RFC 关闭。当前证据只能证明 `timerfd` / `ITIMER_REAL` threaded migration 闭合，不能证明 post-summary hang 根因属于本 RFC 范围。
+
+**验证：**
+
+- `git diff --check`：通过。
+- `mdbook build docs`：通过。
+- 未重新运行 `just build`、QEMU 或 LTP：阶段 5 只做源码审计和文档收口，未改内核代码；阶段 1-4 的 `just build`、KUnit、timerfd profile 与 itimer/alarm 定向 LTP 证据已在前文记录。
+- `just fmt kernel --check` 在阶段 1-4 均只因既有 generated `kconfig_defs.rs` / `platform_defs.rs` 格式问题失败；阶段 5 未改 Rust 源码，未重新运行。
+
+**结论：** 第一版 threaded timer event 完成。IRQ lane 与 threaded lane 调用面清晰，late initcall 调用面清晰，`timerfd` 与 `ITIMER_REAL` 已迁移到 bounded process-context completion，wait-core timeout 保持显式非目标；文档层没有发现需要回写 RFC accepted boundary 的实现反馈。

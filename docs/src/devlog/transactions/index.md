@@ -6,7 +6,6 @@
 
 ## Active
 
-- [Threaded Timer Event](./2026-06-20-threaded-timer-event.md)
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
 - [OOM Killer](./2026-06-15-oom-killer.md)
@@ -20,6 +19,7 @@
 
 ## Completed
 
+- [Threaded Timer Event](./2026-06-20-threaded-timer-event.md)
 - [KThread](./2026-06-14-kthread.md)
 - [Inode Shrinker](./2026-06-14-inode-shrinker.md)
 - [Sched Wait Refactor](./2026-06-01-sched-wait-refactor.md)

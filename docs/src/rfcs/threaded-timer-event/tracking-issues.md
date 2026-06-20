@@ -1,6 +1,6 @@
 # Threaded Timer Event Tracking Issues
 
-**状态：** Active
+**状态：** Closed for implementation; TTE-004 remains an active Safe non-closure note
 **最后更新：** 2026-06-20
 **父 RFC：** [RFC-20260620-threaded-timer-event](./index.md)
 **事务日志：** [2026-06-20-threaded-timer-event](../../devlog/transactions/2026-06-20-threaded-timer-event.md)
@@ -45,14 +45,14 @@
 
 ### TTE-005：probe gate runtime evidence and exit path
 
-**状态：** Neutralized / Awaiting Gate P1 Evidence
+**状态：** Neutralized / Gate P1 Evidence Recorded
 
 **修复落点：**
 
 - [迁移实施计划](./implementation.md) 阶段 2 和 Gate P1 要求 KUnit、boot smoke 或临时 self-check 中至少一种运行证据，证明 threaded callback 实际由 worker 执行且执行时不在 IRQ context。
 - Gate P1 / P2 / P3 均补充 `Exit` 字段，说明成功证据、失败回写和临时探针删除归属。
 
-**结论：** 原 proof gap 已转成 Gate P1 validation requirement，不再阻塞进入实现。Gate P1 关闭时必须把运行证据和任何临时 self-check 的删除记录写入 transaction devlog。
+**结论：** 原 proof gap 已转成 Gate P1 validation requirement，不再阻塞进入实现。Gate P1 已在事务日志中记录 KUnit 运行证据；未保留临时 self-check。
 
 **原问题：** Gate P1 的 validation floor 只有 `just build` 和源码审计，无法单独证明 callback 实际由 worker process context 执行；P1/P2/P3 也缺少显式 exit path。
 
@@ -84,7 +84,7 @@
 
 ### TTE-001：IRQ worker wake locality and placement proof
 
-**状态：** Neutralized / Awaiting Gate P1 Evidence
+**状态：** Neutralized / Gate P1 Evidence Recorded
 
 **修复落点：**
 
@@ -92,7 +92,7 @@
 - [不变量需求](./invariants.md) 要求 IRQ handler 按 `cur_cpu_id()` 选择 ready queue 和 timer core-owned worker slot，并在 `wake()` 前断言 `slot.cpu == cur_cpu_id()`。
 - [迁移实施计划](./implementation.md) 阶段 0、阶段 2 和 Gate P1 把 worker slot proof、`handle.wake()` 下游本地性审计、remote IPI / blocking placement 禁止项纳入验证。
 
-**结论：** 原先的 remote wake / blocking placement 风险已折回 canonical 文本。实现期仍必须在 Gate P1 证明 `on_timer_interrupt()` 投递 threaded event 后按本 CPU worker slot wake，存在 `slot.cpu == cur_cpu_id()` 断言或等价证明，且 wake path 不走 remote IPI、blocking wait、普通锁或复杂分配。
+**结论：** 原先的 remote wake / blocking placement 风险已折回 canonical 文本。Gate P1 事务日志已记录 `slot.cpu == cur_cpu_id()` 断言、`KThreadHandle::wake()` pure wake 审计和 KUnit worker-context 证据；阶段 5 旁路审计确认该边界仍成立。
 
 **原问题：** threaded timer worker 使用 per-CPU worker，但草案尚未证明 IRQ handler 唤醒 worker 时一定命中本 CPU worker，且不会通过 `KThreadHandle::wake()` / `Event::publish()` / wait-core placement 进入 remote IPI、阻塞等待或复杂分配路径。
 

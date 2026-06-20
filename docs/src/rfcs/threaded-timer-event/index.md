@@ -1,12 +1,12 @@
 # RFC-20260620-threaded-timer-event
 
-**状态：** Accepted for Implementation
+**状态：** Implemented
 **负责人：** doruche, Codex
 **最后更新：** 2026-06-20
 **领域：** time / timer / scheduler / kthread / timerfd / signal
 **事务日志：** [2026-06-20-threaded-timer-event](../../devlog/transactions/2026-06-20-threaded-timer-event.md)
-**开放问题：** 无实现 blocker；见 [Tracking Issues](./tracking-issues.md) 中的 Safe non-closure 和 Gate P1 证据项。
-**下一步：** 按 [迁移实施计划](./implementation.md) 推进阶段 0/1；阶段推进和验证证据写入事务日志。
+**开放问题：** 无实现 blocker；[TTE-004](./tracking-issues.md#tte-004register-non-closure-for-post-summary-ltp-hang) 继续记录 register non-closure 边界。
+**下一步：** 第一版 threaded timer event 已按 [迁移实施计划](./implementation.md) 闭合；后续若要迁移 wait-core timeout、引入取消/drain、worker pool 或扩大 itimer/timerfd 语义，必须另走 RFC review。
 
 ## 摘要
 
