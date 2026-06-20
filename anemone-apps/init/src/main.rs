@@ -50,11 +50,11 @@ pub fn main() -> Result<(), Errno> {
                 let mut wstatus = WStatusRaw::EMPTY;
                 match wait4(WaitFor::AnyChild, Some(&mut wstatus), WaitOptions::empty()) {
                     Ok(Some(tid)) => {
-                        println!(
+                        /*println!(
                             "init: child task #{} exited with code {:?}",
                             tid,
                             wstatus.read()
-                        )
+                        )；*/
                     },
                     Ok(None) => {
                         panic!(
