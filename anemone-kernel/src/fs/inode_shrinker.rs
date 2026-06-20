@@ -45,8 +45,10 @@ fn shrink_inodes(ctx: &KThreadCtx) {
         if !shrinkable_superblock(&sb) {
             continue;
         }
-
-        let include_indexed = sb.fs().flags().contains(FileSystemFlags::SHRINKABLE_ICACHE);
+        // Stopgap: background reclaim must not unpublish indexed filesystem
+        // entries until the ext4 reload/eviction identity race is fixed.
+        // Explicit unmount cleanup still goes through 'try_evict_all()"
+        let include_indexed = false; //sb.fs().flags().contains(FileSystemFlags::SHRINKABLE_ICACHE);
         let candidates = sb.cached_inode_snapshot(include_indexed);
 
         for inode in candidates {
