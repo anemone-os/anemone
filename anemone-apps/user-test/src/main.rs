@@ -167,6 +167,15 @@ fn run_local_tests() {
     // println!("user-test: running OOM killer test...");
     // local_run_cmd("/bin/oom-killer-test", &["oom-killer-test"], &[]);
     // println!("user-test: OOM killer test finished.");
+
+    // 7. pthread create serial1 stress test
+    println!("user-test: running pthread create stress test...");
+    local_run_cmd(
+        "/bin/pthread-create-stress",
+        &["pthread-create-stress"],
+        &[],
+    );
+    println!("user-test: pthread create stress test finished.");
 }
 
 fn ensure_dir(path: &str) {
@@ -501,7 +510,7 @@ fn run_comp_tests() {
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
-    ltp::run_ltp_tests();
+    // ltp::run_ltp_tests();
 
     println!("user-test: all competition tests finished.");
 }

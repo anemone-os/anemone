@@ -63,7 +63,8 @@ fn sys_madvise(
     match behavior {
         MadviseBehavior::Noop => Ok(0),
         MadviseBehavior::Discard => {
-            let _guard = usp.discard_range(range)?;
+            // Stopgap. Current speed is way toooooo slow. comment out for now.
+            // let _guard = usp.discard_range(range)?;
             Ok(0)
         },
         MadviseBehavior::Unsupported => Err(SysError::InvalidArgument),

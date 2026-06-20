@@ -138,6 +138,10 @@ pub(super) fn run() -> ! {
     loop {
         SPAWN_WAKE.listen_uninterruptible(false, || !SPAWN_QUEUE.lock().is_empty());
 
+        // `kthreadd` owns a synchronous create transaction, not arbitrary
+        // subsystem work. A voluntary yield here can let early-boot workers run
+        // before their initcall caller finishes publishing the owner-side
+        // handle; fairness for ordinary kthreads belongs in their entry loops.
         while let Some(request) = SPAWN_QUEUE.lock().pop_front() {
             spawn(request);
         }
