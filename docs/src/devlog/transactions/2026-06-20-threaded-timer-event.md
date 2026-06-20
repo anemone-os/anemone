@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** time / timer / scheduler / kthread / timerfd / signal
 **权威计划：** [RFC-20260620-threaded-timer-event](../../rfcs/threaded-timer-event/index.md), [不变量需求](../../rfcs/threaded-timer-event/invariants.md), [迁移实施计划](../../rfcs/threaded-timer-event/implementation.md)
-**当前阶段：** 阶段 3 - Timerfd 迁移已关闭；下一步阶段 4 - ITIMER_REAL 迁移
+**当前阶段：** 阶段 4 - ITIMER_REAL 迁移已关闭；下一步阶段 5 - 旁路审计与收口
 
 ## 范围
 
@@ -207,3 +207,39 @@
 - 同一复跑中 `timerfd_settime02` 不再因 `/proc/sys/kernel/tainted` 缺失在 setup 阶段 `TBROK`；case 进入 fuzzy race body。glibc / musl 两次均被 user-test 的 60s per-case timeout 杀掉，结果为 `FAIL LTP CASE timerfd_settime02 : 124`，最终 summary 为 `attempted=12 passed=10 failed=0 infra_failed=2 skipped=0`。
 
 **结论：** 阶段 3 Gate P2 按用户裁定关闭。`timerfd` 已迁移到 threaded completion；read/poll missed-tick 保护、generation stale filtering、trigger batch 锁外触发和 stage-1 `CLOCK_BOOTTIME` / `TFD_TIMER_CANCEL_ON_SET` 边界保持。`timerfd_settime02` 的剩余 60s timeout 记录为 runner/runtime 验证缺口，不作为本阶段 timerfd 语义 blocker。下一步进入阶段 4：`ITIMER_REAL` 迁移。
+
+### 2026-06-20 - 阶段 4 ITIMER_REAL threaded completion
+
+**阶段：** 阶段 4 - ITIMER_REAL 迁移；Gate P3 - ITIMER_REAL Migration。
+
+**变更：**
+
+- `anemone-kernel/src/task/itimer.rs` 将 `ThreadGroup::set_real_itimer()` 的 schedule path 从 `schedule_local_irq_timer_event()` 切换到 `schedule_threaded_timer_event()`；`ITIMER_REAL` 不再提交 IRQ timer callback。
+- 保留 thread-group itimer state 作为单一真相源：`expire_at`、`interval` 和 `validness` 仍由 `RealITimer` 拥有，timer core 不解释对象 identity、generation 或 rearm 语义。
+- `set_real_itimer()` 在 itimer state lock 下替换 state，并在解锁前提交 threaded event；普通路径不暴露 armed state 后再补交 timer-core event。
+- threaded callback 在 itimer state lock 下确认 `validness` token 与当前 state 匹配；one-shot timer 完成后 disarm，periodic timer 在 state lock 下更新下一次 `expire_at` 并提交 successor event。
+- callback 在 state lock 下只生成 `SIGALRM` action commit，释放 itimer state lock 后再调用 `ThreadGroup::recv_signal()`；`recv_signal()` 不再在 itimer state lock 内执行。
+- 替换旧 IRQ-lock 临时注释为 bounded threaded-completion 注释：`ITIMER_REAL` callback 不是后台任务，stale filtering、interval rearm 和 signal action commit point 仍归 thread-group itimer state。
+
+**边界确认：**
+
+- 本阶段未触碰 `time/itimer/api/setitimer.rs`；`setitimer()` errno / old-value 顺序未改变。
+- `ITIMER_VIRTUAL`、`ITIMER_PROF`、POSIX timer、timer overrun 和 alarm clock 仍为非目标；非 real 分支仍由 syscall adapter 返回当前 stage-1 unsupported 结果。
+- `NoIrqSpinLock` 暂时保留。迁移只改变 completion context，不在本阶段改 itimer state lock 类型或 owner boundary。
+- 本阶段没有引入物理取消、drain、periodic timer core、per-object merge、worker pool 或 wait-core timeout 迁移。
+- `schedule_local_irq_timer_event()` 全局搜索后只剩 wait-core timeout 和 IRQ API 定义；`timerfd` 与 `ITIMER_REAL` 均使用 threaded lane。
+
+**验证：**
+
+- `git diff --check`：通过。
+- `just build`：通过。首次运行曾因 `sdcard-rv.img` 被 QEMU 临时锁住而停在 DTB 生成；重试后完整构建通过，Rust 编译 `anemone-kernel` 成功。
+- `just fmt kernel --check`：未通过，但诊断仍限于既有 generated `anemone-kernel/src/kconfig_defs.rs` 和 `anemone-kernel/src/platform_defs.rs` 格式换行 / 尾随空白；本阶段修改文件无 formatter 诊断。
+- source audit：`rg -n "schedule_local_irq_timer_event|schedule_threaded_timer_event" anemone-kernel/src` 确认 `schedule_local_irq_timer_event()` 调用面只剩 `sched/mod.rs` 的 wait-core timeout、IRQ API 定义和 re-export；`timerfd`、`ITIMER_REAL` 和 threaded timer KUnit 使用 `schedule_threaded_timer_event()`。
+- source audit：`rg -n "Stage-1 bridge|IRQ callback|threaded timer|bounded threaded|background job|recv_signal\\(|validness" anemone-kernel/src/fs/timerfd.rs anemone-kernel/src/task/itimer.rs anemone-kernel/src/time/timer` 确认旧 `ITIMER_REAL` IRQ bridge 注释已移除，`recv_signal()` 调用位于 itimer state lock block 之后，stale token 和 bounded threaded completion 注释存在。
+- `./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/threaded-timer-phase4-itimer-rv64.log`：使用临时定向 profile 运行 RFC Gate P3 指定 cases，运行后已恢复 profile 文件；kernel KUnit `All tests passed!`。
+- 同一 LTP run 中 glibc / musl 的 `alarm02`、`alarm03`、`alarm05`、`alarm06`、`alarm07` 均 PASS。
+- 同一 LTP run 中 glibc / musl 的 `getitimer02`、`setitimer02` 均 PASS。
+- 同一 LTP run 中 `getitimer01` 和 `setitimer01` 的完整 case 在 glibc / musl 均报告 FAIL，但失败仅来自 `ITIMER_VIRTUAL` / `ITIMER_PROF` 非目标分支被 LTP 作为同一 case 的失败计入。`ITIMER_REAL` 分支证据通过：`getitimer01` 的 real 分支 `getitimer()`、`setitimer()`、interval snapshot 和 timer value range 均 TPASS；`setitimer01` 的 real 分支 `sys_setitimer()`、old-value interval snapshot 和 child `SIGALRM` 均 TPASS。
+- 定向 LTP summary：glibc `attempted=9 passed=7 failed=2 infra_failed=0 skipped=0`，musl `attempted=9 passed=7 failed=2 infra_failed=0 skipped=0`；总计 `attempted=18 passed=14 failed=4 infra_failed=0 skipped=0`。4 个 failed 是 `getitimer01` / `setitimer01` 在两套 runtime 的 VIRTUAL/PROF 非目标分支聚合失败，不作为 Gate P3 blocker。
+
+**结论：** 阶段 4 Gate P3 关闭。`ITIMER_REAL` 已迁移到 threaded completion；stale callback no-op、interval rearm、real-only 范围和锁外 `SIGALRM` 投递均有源码审计与定向运行证据。下一步进入阶段 5：旁路审计与收口。
