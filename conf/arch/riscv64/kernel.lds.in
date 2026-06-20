@@ -68,6 +68,10 @@ SECTIONS {
         *(.initcall.probe .initcall.probe.*)
         __einitcall_probe = .;
 
+        __sinitcall_late = .;
+        *(.initcall.late .initcall.late.*)
+        __einitcall_late = .;
+
         __edata = .;
     } > VIRT AT> RAM
 

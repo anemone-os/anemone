@@ -89,4 +89,9 @@ unsafe extern "C" {
     pub fn __sinitcall_probe();
     /// The end of the initcall section for probe initcalls.
     pub fn __einitcall_probe();
+
+    /// The start of the initcall section for late initcalls.
+    pub fn __sinitcall_late();
+    /// The end of the initcall section for late initcalls.
+    pub fn __einitcall_late();
 }

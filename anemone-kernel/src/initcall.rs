@@ -22,6 +22,10 @@ pub enum InitCallLevel {
     /// Additionally, those pseudo filesystems may also create their inodes in
     /// this stage.
     Probe = 2,
+    /// Late kernel services after filesystem / driver / probe init, kthreadd
+    /// bootstrap, and all CPU local init. This is a generic boot window, not a
+    /// kthread- or service-specific policy level.
+    Late = 3,
 }
 
 #[derive(Debug)]
@@ -47,6 +51,10 @@ fn collect_initcalls(level: InitCallLevel) -> &'static [InitCall] {
         InitCallLevel::Probe => (
             __sinitcall_probe as *const () as usize,
             __einitcall_probe as *const () as usize,
+        ),
+        InitCallLevel::Late => (
+            __sinitcall_late as *const () as usize,
+            __einitcall_late as *const () as usize,
         ),
     };
 
