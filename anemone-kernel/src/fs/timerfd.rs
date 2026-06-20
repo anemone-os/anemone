@@ -11,7 +11,7 @@ use anemone_abi::time::linux::{ITimerSpec, TimeSpec};
 use crate::{
     fs::FileMode,
     prelude::*,
-    time::{clock::get_clock, timer::schedule_local_irq_timer_event},
+    time::{clock::get_clock, timer::schedule_threaded_timer_event},
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
@@ -375,12 +375,15 @@ fn trigger_detached_triggers(triggers: TimerFdTriggerBatch, reason: &'static str
 
 fn schedule_timerfd_callback(core: &Arc<TimerFdCore>, generation: u64, timeout: Duration) {
     let weak = Arc::downgrade(core);
-    unsafe {
-        schedule_local_irq_timer_event(
-            timeout,
-            Box::new(move || timerfd_expire_callback(weak, generation)),
-        );
-    }
+    // Timerfd submits a bounded threaded completion, not a background job. The
+    // timerfd object still owns generation filtering, missed-tick accounting,
+    // trigger handoff and periodic rearm under its state lock. Callers may use
+    // this before unlocking because this RFC's threaded timer submit has no
+    // recoverable failure path; normal return is the queued-event publish point.
+    schedule_threaded_timer_event(
+        timeout,
+        Box::new(move || timerfd_expire_callback(weak, generation)),
+    );
 }
 
 fn timerfd_expire_callback(core: Weak<TimerFdCore>, generation: u64) {
@@ -388,7 +391,6 @@ fn timerfd_expire_callback(core: Weak<TimerFdCore>, generation: u64) {
         return;
     };
 
-    let mut next_timeout = None;
     let detached = {
         let mut state = core.state.lock();
         if state.generation != generation {
@@ -410,18 +412,48 @@ fn timerfd_expire_callback(core: Weak<TimerFdCore>, generation: u64) {
             interval_ns,
             "expire",
         );
-        next_timeout = timeout;
+        if let Some(timeout) = timeout {
+            // Submit the successor event before publishing the updated armed
+            // state by unlocking. This keeps the ordinary path from exposing an
+            // armed periodic timer without a matching queued timer-core event.
+            schedule_timerfd_callback(&core, generation, timeout);
+        }
         detached
     };
 
     trigger_detached_triggers(detached, "expire");
+}
 
-    if let Some(timeout) = next_timeout {
-        // Stage-1 bridge: the current timer core only offers IRQ callbacks, so
-        // a periodic timer rearms one successor event here. This must stay O(1)
-        // and move to threaded/cancellable timer infrastructure when it exists.
-        schedule_timerfd_callback(&core, generation, timeout);
+fn refresh_due_expiration_locked(
+    core: &Arc<TimerFdCore>,
+    state: &mut TimerFdState,
+    reason: &'static str,
+) -> TimerFdTriggerBatch {
+    let TimerFdSchedule::Armed {
+        next_expire_at_ns,
+        interval_ns,
+    } = state.schedule
+    else {
+        return TimerFdTriggerBatch::empty();
+    };
+
+    let now_ns = core.now_ns();
+    if now_ns < next_expire_at_ns {
+        return TimerFdTriggerBatch::empty();
     }
+
+    // Read/poll readiness is derived from the timerfd object's clock state, not
+    // solely from whether the threaded callback has already run. If a reader
+    // observes an overdue timer before the queued completion gets CPU time,
+    // advance the object state here and make that queued completion stale.
+    state.generation = state.generation.wrapping_add(1);
+    let generation = state.generation;
+    let (detached, timeout) =
+        account_due_expiration_locked(state, now_ns, next_expire_at_ns, interval_ns, reason);
+    if let Some(timeout) = timeout {
+        schedule_timerfd_callback(core, generation, timeout);
+    }
+    detached
 }
 
 fn account_due_expiration_locked(
@@ -467,19 +499,25 @@ fn timerfd_wait_for_readable(timerfd: &TimerFdFile) -> Result<(), SysError> {
         let trigger = latch.make_trigger();
 
         let mut stale = TimerFdTriggerBatch::empty();
-        let register_result = {
+        let (register_result, due, ready) = {
             let mut state = timerfd.core.state.lock();
+            let due = refresh_due_expiration_locked(&timerfd.core, &mut state, "read_refresh");
             if state.expirations > 0 {
-                latch.cancel(LatchCancelReason::PredicateReady);
-                let outcome = latch.finish();
-                kdebugln!(
-                    "timerfd: read wait found readable before sleep outcome={:?}",
-                    outcome,
-                );
-                return Ok(());
+                (Ok(()), due, true)
+            } else {
+                (state.register_read_wait(&trigger, &mut stale), due, false)
             }
-            state.register_read_wait(&trigger, &mut stale)
         };
+        trigger_detached_triggers(due, "read_refresh");
+        if ready {
+            latch.cancel(LatchCancelReason::PredicateReady);
+            let outcome = latch.finish();
+            kdebugln!(
+                "timerfd: read wait found readable before sleep outcome={:?}",
+                outcome,
+            );
+            return Ok(());
+        }
         drop_stale_triggers(stale, "read_register");
         if let Err(err) = register_result {
             latch.cancel(LatchCancelReason::RegisterError);
@@ -523,16 +561,19 @@ fn timerfd_read(
 
     let timerfd = TimerFdFile::from_file(file).expect("timerfd file without timerfd private data");
     loop {
-        let value = {
+        let (value, due) = {
             let mut state = timerfd.core.state.lock();
-            if state.expirations == 0 {
+            let due = refresh_due_expiration_locked(&timerfd.core, &mut state, "read_refresh");
+            let value = if state.expirations == 0 {
                 None
             } else {
                 let value = state.expirations;
                 state.expirations = 0;
                 Some(value)
-            }
+            };
+            (value, due)
         };
+        trigger_detached_triggers(due, "read_refresh");
 
         if let Some(value) = value {
             buf[..size_of::<u64>()].copy_from_slice(&value.to_le_bytes());
@@ -550,24 +591,27 @@ fn timerfd_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterRe
     let timerfd = TimerFdFile::from_file(file).expect("timerfd file without timerfd private data");
 
     let mut stale = TimerFdTriggerBatch::empty();
-    let result = {
+    let (result, due) = {
         let mut state = timerfd.core.state.lock();
+        let due = refresh_due_expiration_locked(&timerfd.core, &mut state, "poll_refresh");
         let revents = state.revents(request.interests());
-        if !revents.is_empty() || !request.is_register() {
-            return Ok(PollRegisterResult::Ready(revents));
-        }
-        if !request.interests().contains(PollEvent::READABLE) {
-            return Ok(PollRegisterResult::Unsupported);
-        }
-        let trigger = request
-            .trigger()
-            .expect("register request disappeared after is_register");
-        if state.register_poll_wait(trigger, request.interests(), &mut stale) {
-            PollRegisterResult::Armed
-        } else {
+        let result = if !revents.is_empty() || !request.is_register() {
+            PollRegisterResult::Ready(revents)
+        } else if !request.interests().contains(PollEvent::READABLE) {
             PollRegisterResult::Unsupported
-        }
+        } else {
+            let trigger = request
+                .trigger()
+                .expect("register request disappeared after is_register");
+            if state.register_poll_wait(trigger, request.interests(), &mut stale) {
+                PollRegisterResult::Armed
+            } else {
+                PollRegisterResult::Unsupported
+            }
+        };
+        (result, due)
     };
+    trigger_detached_triggers(due, "poll_refresh");
     drop_stale_triggers(stale, "poll_register");
     Ok(result)
 }
@@ -662,10 +706,9 @@ pub fn settime(
 ) -> Result<ITimerSpec, SysError> {
     let (value_ns, interval_ns) = validate_itimerspec(new_value)?;
     let core = TimerFdFile::core_from_file(file)?;
-    let mut schedule_timeout = None;
     let mut detached = TimerFdTriggerBatch::empty();
 
-    let (old_value, generation) = {
+    let old_value = {
         let mut state = core.state.lock();
         let old_value = snapshot_itimerspec(core.clockid, &state);
 
@@ -699,17 +742,18 @@ pub fn settime(
                 "settime",
             );
             detached = new_detached;
-            schedule_timeout = timeout;
+            if let Some(timeout) = timeout {
+                // Normal settime has no recoverable timer-core submit failure:
+                // return from schedule_threaded_timer_event() is the point that
+                // lets this armed generation become visible to readers.
+                schedule_timerfd_callback(&core, state.generation, timeout);
+            }
         }
 
-        (old_value, state.generation)
+        old_value
     };
 
     trigger_detached_triggers(detached, "settime");
-
-    if let Some(timeout) = schedule_timeout {
-        schedule_timerfd_callback(&core, generation, timeout);
-    }
 
     Ok(old_value)
 }

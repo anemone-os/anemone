@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** time / timer / scheduler / kthread / timerfd / signal
 **权威计划：** [RFC-20260620-threaded-timer-event](../../rfcs/threaded-timer-event/index.md), [不变量需求](../../rfcs/threaded-timer-event/invariants.md), [迁移实施计划](../../rfcs/threaded-timer-event/implementation.md)
-**当前阶段：** 阶段 0/1
+**当前阶段：** 阶段 3 - Timerfd 迁移已关闭；下一步阶段 4 - ITIMER_REAL 迁移
 
 ## 范围
 
@@ -140,3 +140,70 @@
 - source audit：`rg -n "schedule_local_irq_timer_event|schedule_threaded_timer_event|threaded timer|#\\[initcall\\(late\\)\\]" anemone-kernel/src/time anemone-kernel/src/task anemone-kernel/src/sched anemone-kernel/src/fs/timerfd.rs` 确认 threaded API 只有 timer core 与新增 KUnit 使用，`timerfd` / `ITIMER_REAL` / wait-core timeout 仍在 IRQ lane。
 
 **结论：** 阶段 2 Gate P1 已具备关闭证据。下一步进入阶段 3：迁移 `timerfd` 到 threaded schedule API，重点保持 generation stale filtering、missed-tick accounting、read / poll readiness 和普通路径不发布 armed-but-unscheduled 状态。
+
+### 2026-06-20 - 阶段 3 Timerfd threaded completion
+
+**阶段：** 阶段 3 - Timerfd 迁移；Gate P2 - Timerfd Vertical Slice。
+
+**变更：**
+
+- `anemone-kernel/src/fs/timerfd.rs` 将 `schedule_timerfd_callback()` 从 `schedule_local_irq_timer_event()` 切换到 `schedule_threaded_timer_event()`；`timerfd` 不再提交 IRQ timer callback。
+- `timerfd` 注释改为 bounded threaded completion 约束：callback 不是后台任务，generation stale filtering、missed-tick accounting、trigger handoff 和 periodic rearm 仍由 timerfd state 拥有。
+- `settime()` 和 periodic rearm 在释放 timerfd state lock 前提交对应 threaded event；普通路径不把 armed generation 暴露给 reader 后再补交 timer-core event。
+- `read()` / `poll()` 增加 `refresh_due_expiration_locked()`：如果 reader/poller 在 threaded callback 获得 CPU 前观察到 timer 已过期，就在 timerfd state lock 下按当前时间推进 missed-tick accounting，并递增 generation 让已排队的旧 callback stale no-op。该路径只使用 timerfd object-owned generation，不给 timer core 增加 per-object identity、cancel 或 merge 语义。
+
+**边界确认：**
+
+- `timerfd` 的单一真相源仍是 `TimerFdState`：`schedule`、`generation`、`expirations`、read/poll triggers 和 stage-1 `TFD_TIMER_CANCEL_ON_SET` no-op 状态都未下沉到 timer core。
+- `timerfd` callback 不持有 timer core ready queue lock；trigger batch 仍在对象锁下 detach、锁外 trigger/drop。
+- `CLOCK_BOOTTIME` 和 `TFD_TIMER_CANCEL_ON_SET` stage-1 限制不因本阶段扩大；`timerfd04` 仍不纳入第一版验收。
+- wait-core timeout 和 `ITIMER_REAL` 仍保留 `schedule_local_irq_timer_event()`，未被本阶段隐式迁移。
+
+**验证：**
+
+- `git diff --check`：通过。
+- `just build`：通过。
+- `just fmt kernel --check`：未通过，但诊断仍限于既有 generated `anemone-kernel/src/kconfig_defs.rs` 和 `anemone-kernel/src/platform_defs.rs` 格式换行 / 尾随空白；本阶段修改文件无 formatter 诊断。
+- source audit：`rg -n "schedule_local_irq_timer_event|schedule_threaded_timer_event" anemone-kernel/src` 确认 `timerfd` 只使用 threaded API；剩余 IRQ timer consumer 是 wait-core timeout 和 `ITIMER_REAL`，符合阶段 3 边界。
+- source audit：`rg -n "Stage-1 bridge|IRQ callback|threaded timer|background job|read_refresh|poll_refresh|armed generation" anemone-kernel/src/fs/timerfd.rs anemone-kernel/src/task/itimer.rs anemone-kernel/src/time/timer` 确认 `timerfd` 旧 IRQ bridge 注释已移除，新的 bounded threaded completion / lazy read-poll accounting 注释存在。
+- `./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/threaded-timer-phase3-timerfd-rv64.log`：脚本完成，kernel KUnit `All tests passed!`；timerfd LTP profile 中 glibc 和 musl 的 `timerfd01`、`timerfd02`、`timerfd_create01`、`timerfd_gettime01`、`timerfd_settime01` 均 PASS。`timerfd01` 的 50ms periodic sequential case 在两套 runtime / 两个 clock 上均返回 `got 3 tick(s)`。
+- 同一 LTP run 中 `timerfd_settime02` 仍在测试 setup 阶段 `TBROK`：`tst_taint.c` 打开 `/proc/sys/kernel/tainted` 得到 `ENOENT`，因此没有进入 timerfd CANCEL_ON_SET race body；本轮没有证据显示 timerfd race 语义失败。
+
+**实现期反馈：**
+
+- `timerfd01` 首次 threaded run 暴露 `got 2 tick(s) expected 3`：read/poll 可以先看到已有 `expirations > 0` 并返回，导致尚未执行的 threaded callback 没有机会把下一次已到期 interval 纳入 read 结果。修复没有改变 accepted contract；它把 overdue accounting 保持在 timerfd state owner 内，并用 generation 过滤旧 callback。
+- `timerfd_settime02` 的剩余失败属于 procfs/sysctl 观察面缺口，不是 timerfd code path。LTP 源码 `timerfd_settime02.c` 使用 `.taint_check = TST_TAINT_W | TST_TAINT_D`，LTP `lib/tst_taint.c` 固定读取 `/proc/sys/kernel/tainted`。
+
+**Write-set expansion request：**
+
+- 原阶段 3 write set 只允许 `anemone-kernel/src/fs/timerfd.rs`，必要时触碰 timer API；不包含 procfs。
+- 为完成 Gate P2 的 `timerfd_settime02` runtime validation，需要批准一个最小 procfs/sysctl 扩展：在 `anemone-kernel/src/fs/proc/sys/kernel/` 下新增只读 `tainted` PDE，内容为 `0\n`，并在 `kernel/mod.rs` 注册。
+- 该扩展不改变 threaded timer RFC accepted contract，不改变 timerfd ABI；它只补齐 LTP taint helper 所需的只读观察面。批准后验证 gate 为 `git diff --check`、`just build`、`./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/threaded-timer-phase3-timerfd-rv64.log` 复跑 timerfd profile，并把 `timerfd_settime02` 结果追加到本事务日志。
+
+**结论：** 阶段 3 timerfd 代码迁移和 `timerfd01` / read-poll missed-tick 保护项已通过验证；Gate P2 尚不能关闭，因为 `timerfd_settime02` 的 runtime evidence 被 `/proc/sys/kernel/tainted` 缺失阻断。下一步等待 write-set expansion 裁定：若批准，先补最小 procfs tainted 观察面并复跑 timerfd profile；若不批准，将 `timerfd_settime02` 记为 procfs infra validation gap，阶段 3 不能声明完整关闭。
+
+### 2026-06-20 - 阶段 3 write-set expansion 与 Gate P2 closeout
+
+**阶段：** 阶段 3 - Timerfd 迁移；Gate P2 - Timerfd Vertical Slice closeout。
+
+**裁定：**
+
+- 用户批准阶段 3 最小 write-set 扩展：引入只读 `/proc/sys/kernel/tainted`，当前固定返回 `0\n`。
+- 用户裁定 `timerfd_settime02` 当前被 user-test 60s per-case timeout 杀掉，暂时不是 Phase 3 主要问题，本阶段不用继续处理该 timeout。
+
+**变更：**
+
+- 新增 `anemone-kernel/src/fs/proc/sys/kernel/tainted.rs`，作为 procfs/sysctl stage-1 观察面返回 `0\n`。
+- 在 `anemone-kernel/src/fs/proc/sys/kernel/mod.rs` 注册 `tainted` PDE。
+- 该扩展不改变 threaded timer accepted contract，不改变 timerfd ABI；只解除 LTP taint helper 的 setup 阻断。
+
+**验证：**
+
+- `git diff --check`：通过。
+- `git diff --no-index --check -- /dev/null anemone-kernel/src/fs/proc/sys/kernel/tainted.rs`：无 whitespace 诊断；非零退出码是新增文件与 `/dev/null` 比较的正常 no-index difference 状态。
+- `just fmt kernel --check`：未通过，但诊断仍限于既有 generated `anemone-kernel/src/kconfig_defs.rs` 和 `anemone-kernel/src/platform_defs.rs` 格式换行 / 尾随空白；本阶段修改文件无 formatter 诊断。
+- `just build`：通过。
+- `./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/threaded-timer-phase3-timerfd-rv64.log`：复跑完成，kernel KUnit `All tests passed!`；glibc / musl 的 `timerfd01`、`timerfd02`、`timerfd_create01`、`timerfd_gettime01`、`timerfd_settime01` 均 PASS。`timerfd01` 的 sequential 50ms 分支在两套 runtime / 两个 clock 上均返回 `got 3 tick(s)`。
+- 同一复跑中 `timerfd_settime02` 不再因 `/proc/sys/kernel/tainted` 缺失在 setup 阶段 `TBROK`；case 进入 fuzzy race body。glibc / musl 两次均被 user-test 的 60s per-case timeout 杀掉，结果为 `FAIL LTP CASE timerfd_settime02 : 124`，最终 summary 为 `attempted=12 passed=10 failed=0 infra_failed=2 skipped=0`。
+
+**结论：** 阶段 3 Gate P2 按用户裁定关闭。`timerfd` 已迁移到 threaded completion；read/poll missed-tick 保护、generation stale filtering、trigger batch 锁外触发和 stage-1 `CLOCK_BOOTTIME` / `TFD_TIMER_CANCEL_ON_SET` 边界保持。`timerfd_settime02` 的剩余 60s timeout 记录为 runner/runtime 验证缺口，不作为本阶段 timerfd 语义 blocker。下一步进入阶段 4：`ITIMER_REAL` 迁移。
