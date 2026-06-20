@@ -206,7 +206,7 @@ fn threaded_timer_worker_entry(ctx: KThreadCtx, _: AnyOpaque) -> i32 {
             break;
         }
 
-        drain_ready_queue();
+        drain_ready_queue(&ctx);
     }
 
     0
@@ -216,7 +216,7 @@ fn ready_queue_not_empty() -> bool {
     THREADED_READY_QUEUE.with(|queue| !queue.lock().is_empty())
 }
 
-fn drain_ready_queue() {
+fn drain_ready_queue(ctx: &KThreadCtx) {
     loop {
         let Some(callback) = THREADED_READY_QUEUE.with(|queue| queue.lock().pop_front()) else {
             break;
@@ -227,6 +227,12 @@ fn drain_ready_queue() {
         THREADED_STATS
             .callbacks_executed
             .fetch_add(1, Ordering::Relaxed);
+        // Timer callbacks are bounded, but a callback burst can still keep this
+        // kthread on-CPU indefinitely when kernel preemption is disabled.
+        if ctx.should_stop() {
+            break;
+        }
+        yield_now();
     }
 }
 

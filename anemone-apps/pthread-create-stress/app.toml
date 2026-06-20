@@ -1,0 +1,9 @@
+name = "pthread-create-stress"
+
+[build]
+workdir = "."
+driver = "cargo"
+args = ["build"]
+
+[[artifacts]]
+path = "target/${TARGET_TRIPLE}/debug/pthread-create-stress"
