@@ -1,6 +1,6 @@
 # Threaded Timer Event 迁移实施计划
 
-**状态：** Draft / Public RFC Plan
+**状态：** Active
 **最后更新：** 2026-06-20
 **父 RFC：** [RFC-20260620-threaded-timer-event](./index.md)
 **不变量：** [不变量需求](./invariants.md)
@@ -98,6 +98,7 @@ write set：
 - `just fmt kernel --check`
 - `git diff --check`
 - `just build`
+- Gate P1 关闭前还必须提供至少一种运行证据：KUnit、boot smoke 或临时 self-check。临时 self-check 只能服务本 gate，证据进入 transaction devlog，收口前必须移除。
 
 退出条件：
 
@@ -253,7 +254,7 @@ write set：
 - `just fmt kernel --check`
 - `git diff --check`
 - `just build`
-- 复用 LTP / existing itimer 或 signal timer case；不新增专门用户态测试体系。
+- 复用本地 LTP itimer / alarm case：`alarm02`、`alarm03`、`alarm05`、`alarm06`、`alarm07`、`getitimer01`、`getitimer02`、`setitimer01`、`setitimer02`。若当前 profile 没有独立 itimer 组，使用定向 profile 或 smoke 覆盖这些 case，并补充源码审计确认 real-only、interval rearm、锁外 `recv_signal()` 和 stale no-op。
 
 退出条件：
 
@@ -354,11 +355,13 @@ rg -n "#\\[initcall\\(late\\)\\]|InitCallLevel::Late|init_inode_shrinker|init_oo
 
 **Non-goals:** 不迁移 timerfd / itimer；不实现取消；不新增 worker pool。
 
-**Validation Floor:** `just build`，加源码审计确认 `schedule_local_irq_timer_event()` 调用面未变，并确认 threaded worker wake 前有 `slot.cpu == cur_cpu_id()` 断言或等价证明。
+**Validation Floor:** `just build`，加源码审计确认 `schedule_local_irq_timer_event()` 调用面未变，并确认 threaded worker wake 前有 `slot.cpu == cur_cpu_id()` 断言或等价证明。还必须提供 KUnit、boot smoke 或临时 self-check 中至少一种运行证据，证明 threaded callback 实际由 worker 执行且执行时不在 IRQ context；临时 self-check 的证据写入 transaction devlog，收口前删除。
 
 **Failure Signal:** worker 无法常驻、IRQ 投递需要复杂/阻塞分配、`KThreadHandle::wake()` 不能从 IRQ 安全调用、timer core worker slot 无法证明本地性，或 wake path 可能走 remote IPI / blocking placement。
 
 **Write-back Target:** 若失败只影响 init / wake route，更新本 `implementation.md`；若失败推翻 per-CPU worker / simple IRQ allocation contract，更新 `index.md` 和 `invariants.md`。
+
+**Exit:** 成功后把运行证据、源码审计结论和任何临时 self-check 的删除记录追加到 transaction devlog，再进入 timerfd 迁移；失败时删除临时探针，按影响回写 `implementation.md`、`index.md` / `invariants.md` 或 `tracking-issues.md`，必要时登记 register / current limitations。
 
 ### Gate P2 - Timerfd Vertical Slice
 
@@ -376,6 +379,8 @@ rg -n "#\\[initcall\\(late\\)\\]|InitCallLevel::Late|init_inode_shrinker|init_oo
 
 **Write-back Target:** 调整阶段 3 或不变量；若改变 ABI，停止并回 RFC review。
 
+**Exit:** 成功后把 timerfd LTP / source-audit 证据追加到 transaction devlog，并确认没有遗留临时兼容桥；失败时回写阶段 3、相关不变量或 tracking issue，若涉及 ABI 改变则停止在 RFC review。
+
 ### Gate P3 - ITIMER_REAL Migration
 
 **Hypothesis:** `ITIMER_REAL` 可以只迁移 completion context，保留 real-only stage-1 语义。
@@ -386,8 +391,10 @@ rg -n "#\\[initcall\\(late\\)\\]|InitCallLevel::Late|init_inode_shrinker|init_oo
 
 **Non-goals:** 不实现 virtual/prof/POSIX timer，不补 overrun。
 
-**Validation Floor:** `just build` + 复用 itimer/signal timer LTP 或已有 profile。
+**Validation Floor:** `just build` + 定向复用本地 LTP `alarm02`、`alarm03`、`alarm05`、`alarm06`、`alarm07`、`getitimer01`、`getitimer02`、`setitimer01`、`setitimer02`，或用等价 smoke 覆盖 stale no-op、interval rearm、real-only 和锁外 `SIGALRM` 投递；不新增专门用户态测试体系。
 
 **Failure Signal:** 需要把 allocation failure 纳入 `setitimer()` 可见语义、signal path 需要 ABI 扩展、stale filtering 需要物理取消才能成立，或必须持 itimer state lock 投递 signal 且无法给出锁序证明。
 
 **Write-back Target:** 调整阶段 4；若需要扩大 itimer 功能或取消语义，停止并回 RFC review。
+
+**Exit:** 成功后把 itimer / signal 验证证据和锁序审计追加到 transaction devlog；失败时删除临时探针，回写阶段 4、`invariants.md` 或 tracking issue，若需要扩大 itimer 功能或取消语义则停止在 RFC review。

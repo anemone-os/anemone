@@ -1,12 +1,12 @@
 # RFC-20260620-threaded-timer-event
 
-**状态：** Draft / Public RFC
+**状态：** Accepted for Implementation
 **负责人：** doruche, Codex
 **最后更新：** 2026-06-20
 **领域：** time / timer / scheduler / kthread / timerfd / signal
-**事务日志：** None
-**开放问题：** 见 [Tracking Issues](./tracking-issues.md)；当前 active 项不阻止公开评审，但进入实现前必须关闭、接受或转成明确 gate。
-**下一步：** 处理 [Tracking Issues](./tracking-issues.md) 中的 active Euclid / Safe 项；若接受进入实现，再建立事务日志并把状态改为 Accepted for Implementation。
+**事务日志：** [2026-06-20-threaded-timer-event](../../devlog/transactions/2026-06-20-threaded-timer-event.md)
+**开放问题：** 无实现 blocker；见 [Tracking Issues](./tracking-issues.md) 中的 Safe non-closure 和 Gate P1 证据项。
+**下一步：** 按 [迁移实施计划](./implementation.md) 推进阶段 0/1；阶段推进和验证证据写入事务日志。
 
 ## 摘要
 

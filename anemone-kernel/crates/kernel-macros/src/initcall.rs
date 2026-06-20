@@ -41,6 +41,7 @@ pub fn initcall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         "fs" => quote!(crate::initcall::InitCallLevel::Fs),
         "driver" => quote!(crate::initcall::InitCallLevel::Driver),
         "probe" => quote!(crate::initcall::InitCallLevel::Probe),
+        "late" => quote!(crate::initcall::InitCallLevel::Late),
         _ => {
             return Error::new_spanned(
                 proc_macro2::TokenStream::from(attr),

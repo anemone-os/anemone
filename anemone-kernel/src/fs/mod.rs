@@ -58,7 +58,6 @@ pub use self::{
     superblock::SuperBlock,
 };
 pub use cache_stats::resident_file_inode_cache_pages;
-pub use inode_shrinker::init_inode_shrinker;
 
 // We prefer gathering all public APIs in this module, and keep the global state
 // hidden in a singleton struct, which helps a lot to ensure lock ordering.

@@ -24,7 +24,8 @@ fn inode_shrinker_entry(ctx: KThreadCtx, _: AnyOpaque) -> i32 {
     0
 }
 
-pub fn init_inode_shrinker() {
+#[initcall(late)]
+fn init_inode_shrinker() {
     let worker = KThreadBuilder::new("inode-shrink-0")
         .spawn(inode_shrinker_entry, NilOpaque::new())
         .unwrap_or_else(|err| panic!("failed to spawn inode shrinker: {:?}", err));

@@ -3,6 +3,7 @@
 **状态：** Active
 **最后更新：** 2026-06-20
 **父 RFC：** [RFC-20260620-threaded-timer-event](./index.md)
+**事务日志：** [2026-06-20-threaded-timer-event](../../devlog/transactions/2026-06-20-threaded-timer-event.md)
 **来源：** 2026-06-20 文档层审查 / 2026-06-20 用户裁定
 
 本文只跟踪 design review 后确认的 threaded timer event RFC 缺陷、证明缺口、边界冲突或需要回到 RFC 修改的设计问题。
@@ -26,35 +27,7 @@
 
 ## Euclid
 
-### TTE-005：probe gate runtime evidence and exit path
-
-**状态：** Active
-
-**观察：** Gate P1 的 hypothesis 是 worker 可以在 process context 执行 callback，但当前 validation floor 仍以 `just build` 和源码审计为主。它能证明接口形状和不走 IRQ callback，却不能单独证明 callback 实际由 worker 执行、且执行时不在 IRQ context。P1/P2/P3 也只有 `Write-back Target`，还没有显式 `Exit` 字段说明成功、失败和临时 self-check 的收口归属。
-
-**结论：** 这不阻塞 RFC 继续收口，但进入实现前需要决定 P1 是否要求 KUnit、boot smoke 或临时 self-check 之一作为最小运行证据，并为所有 probe gate 补齐 exit path。
-
-**处理方向：** 若选择加入运行证据，把 [迁移实施计划](./implementation.md) 的 Gate P1 `Validation Floor` 和阶段 2 验证更新为：KUnit、boot smoke 或临时 self-check 中至少一种；临时 self-check 必须在 transaction devlog 记录证据并在收口前移除。为 P1/P2/P3 增加 `Exit` 字段：成功后进入正式阶段或 transaction 记录，失败后删除临时探针、回写 RFC / tracker，或登记 limitation / open issue。若选择不加入运行证据，需在本 issue 记录接受理由。
-
-### TTE-006：ITIMER_REAL signal action commit point
-
-**状态：** Active
-
-**观察：** 草案要求 `SIGALRM` 投递不在 itimer state lock 内执行，但还没有定义 lock 内生成本地动作后，cancel / setitimer 与 expiry 竞争时哪个点算 signal action 已提交。
-
-**结论：** 若实现直接把当前持锁 `recv_signal()` 改成锁外执行，而不定义 commit point，可能改变 `ITIMER_REAL` 在 expiry 与 cancel / replace 竞争时的可见语义。
-
-**处理方向：** 在 [不变量需求](./invariants.md) 中补充 `ITIMER_REAL` action commit 线性化点：callback 在 itimer state lock 下确认 token 有效并生成 `SIGALRM`/rearm action 即 completion commit，释放锁后无条件执行该 action；若希望 cancel 仍可撤回已生成 action，则必须单独设计 pending-signal 撤销语义，不得混在 threaded timer 迁移中。
-
-### TTE-007：ITIMER_REAL validation floor too broad
-
-**状态：** Active
-
-**观察：** 阶段 4 / Gate P3 当前只写复用 itimer 或 signal timer 相关 LTP / existing case。该描述不足以约束验证必须覆盖 stale no-op、interval rearm、real-only 范围和锁外 `SIGALRM` 投递。
-
-**结论：** 泛化 signal profile 可能无法覆盖本 RFC 实际保护的不变量。
-
-**处理方向：** 在 [迁移实施计划](./implementation.md) 阶段 4 和 Gate P3 的 `Validation Floor` 中列出具体 LTP/profile/case；若无现成 case，要求定向 smoke + 源码审计覆盖 real-only、interval rearm、锁外 `recv_signal()` 和 stale no-op。
+- 暂无 active Euclid。TTE-005 / TTE-006 / TTE-007 已折回 canonical 文本；后续证据按对应 gate 写入 transaction devlog。
 
 ## Safe
 
@@ -69,6 +42,45 @@
 **处理方向：** 公开 RFC 文本已保留该非闭合边界；后续只有专门调查证据证明根因属于本 RFC 范围时，才可回写 register 后关闭。
 
 ## Neutralized
+
+### TTE-005：probe gate runtime evidence and exit path
+
+**状态：** Neutralized / Awaiting Gate P1 Evidence
+
+**修复落点：**
+
+- [迁移实施计划](./implementation.md) 阶段 2 和 Gate P1 要求 KUnit、boot smoke 或临时 self-check 中至少一种运行证据，证明 threaded callback 实际由 worker 执行且执行时不在 IRQ context。
+- Gate P1 / P2 / P3 均补充 `Exit` 字段，说明成功证据、失败回写和临时探针删除归属。
+
+**结论：** 原 proof gap 已转成 Gate P1 validation requirement，不再阻塞进入实现。Gate P1 关闭时必须把运行证据和任何临时 self-check 的删除记录写入 transaction devlog。
+
+**原问题：** Gate P1 的 validation floor 只有 `just build` 和源码审计，无法单独证明 callback 实际由 worker process context 执行；P1/P2/P3 也缺少显式 exit path。
+
+### TTE-006：ITIMER_REAL signal action commit point
+
+**状态：** Neutralized
+
+**修复落点：**
+
+- [不变量需求](./invariants.md) 的线性化点补充 `ITIMER_REAL` signal action commit：callback 在 itimer state lock 下确认 token 有效并生成 `SIGALRM` / rearm action 即 completion commit。
+- 同段要求释放锁后无条件执行已提交 action；cancel / replace 只能阻止尚未通过 token 检查的 stale callback。
+
+**结论：** 锁外投递 `SIGALRM` 的 commit boundary 已进入 canonical 文本。若后续需要撤回已生成 action，必须单独设计 pending-signal 撤销语义，不能混入 threaded timer 迁移。
+
+**原问题：** 草案要求 `SIGALRM` 投递不在 itimer state lock 内执行，但没有定义 lock 内生成本地动作后，cancel / setitimer 与 expiry 竞争时哪个点算 signal action 已提交。
+
+### TTE-007：ITIMER_REAL validation floor too broad
+
+**状态：** Neutralized
+
+**修复落点：**
+
+- [迁移实施计划](./implementation.md) 阶段 4 和 Gate P3 的 validation floor 明确列出本地 LTP case：`alarm02`、`alarm03`、`alarm05`、`alarm06`、`alarm07`、`getitimer01`、`getitimer02`、`setitimer01`、`setitimer02`。
+- 同一 validation floor 要求源码审计或等价 smoke 覆盖 real-only、interval rearm、锁外 `recv_signal()` 和 stale no-op。
+
+**结论：** ITIMER_REAL 迁移验收不再依赖泛化 signal profile 描述；实现期若缺少独立 itimer profile，必须使用定向 profile 或等价 smoke 形成证据。
+
+**原问题：** 阶段 4 / Gate P3 只写复用 itimer 或 signal timer 相关 LTP / existing case，无法约束验证覆盖本 RFC 保护的不变量。
 
 ### TTE-001：IRQ worker wake locality and placement proof
 
