@@ -4,11 +4,13 @@ use crate::{
         SigNo, Signal,
         info::{SiCode, SigInfoFields, SigTimer},
     },
-    time::timer::schedule_local_irq_timer_event,
+    time::timer::schedule_threaded_timer_event,
 };
 
-/// Each itimer must be accquired with irqsave to avoid deadlock with timer
-/// interrupt handler.
+/// Real itimer state still uses a no-IRQ lock because schedule/cancel/snapshot
+/// can race with stale timer completions. Threaded completions may take this
+/// lock, but signal delivery must be committed under the lock and executed
+/// after releasing it.
 #[derive(Debug)]
 pub struct ITimers {
     real: NoIrqSpinLock<Option<RealITimer>>,
@@ -20,8 +22,8 @@ pub struct RealITimer {
     expire_at: Instant,
     /// If [Some], then this is a periodic timer.
     interval: Option<Duration>,
-    /// If false, then the on-fly timer interrupt handler won't send a signal to
-    /// the thread group.
+    /// If false, then a stale timer completion will not send a signal to the
+    /// thread group.
     validness: Arc<AtomicBool>,
 }
 
@@ -42,52 +44,24 @@ impl ThreadGroup {
             "this should be checked by syscall handler"
         );
 
+        let new_validness = Arc::new(AtomicBool::new(true));
+        let callback_validness = new_validness.clone();
+        let tg = Arc::downgrade(self);
         let mut real = self.itimers.real.lock();
         if let Some(real) = real.as_mut() {
             // prevent stale timer from sending signals.
             real.validness.store(false, Ordering::SeqCst);
         }
-        let new_validness = Arc::new(AtomicBool::new(true));
         real.replace(RealITimer {
             expire_at: Instant::now() + timeout,
             interval,
             validness: new_validness.clone(),
         });
 
-        // NOTE: real's lock must not be dropped when schedule_local_irq_timer_event is
-        // called!
-        let tg = Arc::downgrade(self);
-        unsafe {
-            schedule_local_irq_timer_event(
-                timeout,
-                Box::new(move || {
-                    if let Some(tg) = tg.upgrade() {
-                        let mut real = tg.itimers.real.lock();
-                        // validness must be checked after acquiring the lock.
-                        if new_validness.load(Ordering::SeqCst) {
-                            // still valid.
-                            tg.recv_signal(Signal::new(
-                                SigNo::SIGALRM,
-                                SiCode::Timer,
-                                // stub values for now.
-                                SigInfoFields::Timer(SigTimer {
-                                    tid: 0,
-                                    overrun: 0,
-                                    sigval: 0,
-                                    sys_private: 0,
-                                }),
-                            ));
-
-                            // rearm if it's a periodic timer.
-                            drop(real); // avoid deadlock.
-                            if let Some(interval) = interval {
-                                tg.set_real_itimer(interval, Some(interval));
-                            }
-                        }
-                    }
-                }),
-            );
-        }
+        // Submit before unlocking so the armed state is not visible without a
+        // queued timer-core event. The threaded timer API has no recoverable
+        // allocation failure path in this RFC stage.
+        schedule_real_itimer_callback(tg, callback_validness, timeout);
     }
 
     pub fn cancel_real_itimer(&self) {
@@ -110,4 +84,65 @@ impl ThreadGroup {
             None
         }
     }
+}
+
+fn schedule_real_itimer_callback(
+    tg: Weak<ThreadGroup>,
+    validness: Arc<AtomicBool>,
+    timeout: Duration,
+) {
+    // ITIMER_REAL submits a bounded threaded completion, not a background job.
+    // The thread-group itimer state keeps ownership of stale filtering,
+    // interval rearm, and the signal action commit point.
+    schedule_threaded_timer_event(
+        timeout,
+        Box::new(move || {
+            if let Some(tg) = tg.upgrade() {
+                real_itimer_expire_callback(tg, validness);
+            }
+        }),
+    );
+}
+
+fn real_itimer_expire_callback(tg: Arc<ThreadGroup>, validness: Arc<AtomicBool>) {
+    let signal_committed = {
+        let mut real = tg.itimers.real.lock();
+        let Some(timer) = real.as_mut() else {
+            return;
+        };
+        if !Arc::ptr_eq(&timer.validness, &validness) || !validness.load(Ordering::SeqCst) {
+            return;
+        }
+
+        match timer.interval {
+            Some(interval) => {
+                timer.expire_at = Instant::now() + interval;
+                schedule_real_itimer_callback(Arc::downgrade(&tg), validness.clone(), interval);
+            },
+            None => {
+                timer.validness.store(false, Ordering::SeqCst);
+                *real = None;
+            },
+        }
+
+        true
+    };
+
+    if signal_committed {
+        tg.recv_signal(real_itimer_signal());
+    }
+}
+
+fn real_itimer_signal() -> Signal {
+    Signal::new(
+        SigNo::SIGALRM,
+        SiCode::Timer,
+        // Stub values for now; this stage only migrates completion context.
+        SigInfoFields::Timer(SigTimer {
+            tid: 0,
+            overrun: 0,
+            sigval: 0,
+            sys_private: 0,
+        }),
+    )
 }

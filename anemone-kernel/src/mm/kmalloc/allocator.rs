@@ -16,7 +16,7 @@ static mut BOOTSTRAP_HEAP: AlignedBytes<
 #[derive(Debug)]
 pub struct KernelAllocator {
     // TODO: switch to IrqSaveSpinLock to prevent deadlocks in OOM handler.
-    talc: SpinLock<Talc<HeapOomHandler>>,
+    talc: NoIrqSpinLock<Talc<HeapOomHandler>>,
 }
 
 struct HeapOomHandler {
@@ -109,7 +109,7 @@ impl OomHandler for HeapOomHandler {
 impl KernelAllocator {
     pub const fn new() -> Self {
         Self {
-            talc: SpinLock::new(Talc::new(HeapOomHandler {
+            talc: NoIrqSpinLock::new(Talc::new(HeapOomHandler {
                 bootstrap_heap_claimed: AtomicBool::new(false),
             })),
         }
@@ -118,7 +118,7 @@ impl KernelAllocator {
 
 unsafe impl GlobalAlloc for KernelAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        let mut talc = self.talc.lock_irqsave();
+        let mut talc = self.talc.lock();
         match unsafe { talc.malloc(layout) } {
             Ok(ptr) => {
                 let res = ptr.as_ptr();
@@ -131,7 +131,7 @@ unsafe impl GlobalAlloc for KernelAllocator {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-        let mut talc = self.talc.lock_irqsave();
+        let mut talc = self.talc.lock();
         unsafe {
             talc.free(NonNull::new_unchecked(ptr), layout);
         }

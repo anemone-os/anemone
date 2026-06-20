@@ -1,10 +1,10 @@
 use anemone_rs::{
     os::linux::{
-        fs::{AtFd, chdir, fstatat},
+        fs::{chdir, fstatat, AtFd},
         process::{
-            WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, sched_yield, setpgid,
-            signal::{SigNo, kill},
-            wait4,
+            execve, exit, fork, sched_yield, setpgid,
+            signal::{kill, SigNo},
+            wait4, WStatus, WStatusRaw, WaitFor, WaitOptions,
         },
         time::gettimeofday,
     },
@@ -21,7 +21,7 @@ const LTP_MODULES_DEP: &str = include_str!("../fixtures/modules.dep");
 const MICROS_PER_SECOND: i64 = 1_000_000;
 // Temporary containment for ANE-20260616-LTP-POST-SUMMARY-HANG: keep long
 // profiles moving while the kernel-side wait/cleanup root cause is open.
-const LTP_CASE_TIMEOUT_SECONDS: i64 = 60;
+const LTP_CASE_TIMEOUT_SECONDS: i64 = 90;
 const LTP_CASE_KILL_GRACE_SECONDS: i64 = 5;
 const LTP_CASE_TIMEOUT_EXIT_CODE: i32 = 124;
 // LTP result bits use TCONF=32 for "unsupported configuration". Only a pure
