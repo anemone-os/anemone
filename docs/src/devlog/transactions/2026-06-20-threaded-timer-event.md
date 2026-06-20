@@ -105,3 +105,38 @@
 - source audit：`rg -n "init_inode_shrinker|init_oom_killer|#\\[initcall\\(late\\)\\]|InitCallLevel::Late|__sinitcall_late|__einitcall_late" anemone-kernel/src anemone-kernel/crates/kernel-macros conf/arch` 确认 late section、macro、`bsp_kinit()` hook 和两个 late consumer；没有 `init_kthreadd` late initcall。
 
 **结论：** 阶段 1 gate 已关闭。下一步进入阶段 2 Gate P1：Timer Core 双 Lane 与 Per-CPU Worker 基础设施。阶段 2 开始前应重新检查 `time/timer.rs` 是否需要同 owner split-only checkpoint，并按 Gate P1 要求准备运行证据。
+
+### 2026-06-20 - 阶段 2 Timer Core 双 Lane 与 Per-CPU Worker
+
+**阶段：** 阶段 2 - Timer Core 双 Lane 与 Per-CPU Worker 基础设施；Gate P1 - Threaded Lane Skeleton。
+
+**变更：**
+
+- 将 `anemone-kernel/src/time/timer.rs` 按同一 timer owner 内职责拆分为 `time/timer/{mod.rs, irq.rs, threaded.rs}`。拆分不改变 public API 名称：`schedule_local_irq_timer_event()` 继续由 `time::timer` re-export。
+- `TimerEvent` 增加显式 lane：`Irq` 到期后仍在 timer interrupt 中执行 callback；`Threaded` 到期后只投递到本 CPU threaded-ready queue 并唤醒 worker。
+- 新增 `schedule_threaded_timer_event(expire, callback) -> ()`。第一版不返回 recoverable allocation failure；若本 CPU worker 未初始化，用 assertion 暴露内核初始化不变量破坏。
+- 新增 per-CPU `THREADED_READY_QUEUE` 和 `THREADED_WORKER` slot。ready queue 使用普通 `VecDeque<Box<dyn FnOnce() + Send + 'static>>`，外层由 `NoIrqSpinLock` 保护；根据用户裁定，本阶段允许 IRQ 到期投递路径执行该队列可能产生的普通内存分配，不采用 intrusive node。
+- `#[initcall(late)] init_threaded_timer_workers()` 为每个 `0..ncpus()` 创建 `timer-thread/<cpu>` kthread，使用 `KThreadBuilder::cpu(CpuId::new(cpu))` pin 到目标 CPU，并把创建请求 CPU 与返回的 `KThreadHandle` 发布到 timer core-owned per-CPU worker slot。
+- IRQ 到期投递 threaded event 时按 `cur_cpu_id()` 读取本 CPU worker slot，在 `wake()` 前执行 `slot.cpu == cur_cpu_id()` 断言；断言失败表示 timer worker 发布或 CPU 绑定不变量破坏，不做 remote fallback。
+- worker 使用 `KThreadCtx::wait_until(ready_queue_not_empty)`，predicate 只读取 timer core ready queue truth；`KThreadControl` 只提供 pure wake edge。worker 每次从 ready queue 弹出一个 callback，释放 ready queue lock 后执行 callback。
+- 新增诊断计数：threaded schedule submit、IRQ dispatched、worker wake、worker drain、callbacks executed、ready queue high-water、workers spawned。诊断字段不参与 timerfd / itimer 语义决策。
+- 新增 KUnit `threaded_timer_callback_runs_outside_hwirq`，通过真实 `schedule_threaded_timer_event()` 安排 1ms callback，callback 断言不在 hwirq、IRQ enabled、preemption allowed，并通过 `Event` 唤醒测试方。
+
+**边界确认：**
+
+- 本阶段未迁移 `timerfd`、`ITIMER_REAL` 或 wait-core timeout。`schedule_local_irq_timer_event()` 调用面仍只有 wait-core timeout、`timerfd` 和 `ITIMER_REAL`。
+- IRQ lane 行为保持：`TimerLane::Irq` 仍在 `on_timer_interrupt()` 中直接执行原 callback。
+- threaded lane 不提供取消、drain、periodic core、per-object merge、per-object serializing 或 worker pool。
+- timer core 不读取 worker `Task`、sched state 或 kthread control 内部状态；本地性 proof 只来自 timer core-owned slot CPU 字段和 `KThreadBuilder::cpu()` 创建请求。
+- `handle.wake()` 下游源码审计：`KThreadHandle::wake()` 只调用 `KThreadControl::wake()`，后者是 `Event::publish()`；对本 CPU pinned timer worker，wait-core `wake_enqueue()` 进入 local placement，不需要 remote IPI。若 worker placement contract 未来改变，本地性断言会在 timer core 边界暴露。
+- threaded-ready queue 使用普通 `VecDeque`，IRQ path 可能在 `push_back()` 时按 allocator 当前 noirq-capable contract 分配；这是本阶段按用户裁定接受的实现取舍，不引入 user-visible rollback、event drop 或 merge。
+
+**验证：**
+
+- `git diff --check`：通过。
+- `just build`：通过。
+- `just fmt kernel --check`：未通过，但诊断仍限于既有 generated `anemone-kernel/src/kconfig_defs.rs` 和 `anemone-kernel/src/platform_defs.rs` 格式换行 / 尾随空白；本阶段修改文件无 formatter 诊断。
+- Gate P1 运行证据：`timeout 20s just xtask qemu --platform qemu-virt-rv64 --image build/anemone.elf` 启动当前 KUnit kernel，新增 `anemone_kernel::time::timer::threaded::kunits::threaded_timer_callback_runs_outside_hwirq...ok`，随后全量 KUnit 打印 `All tests passed!`。命令最终由外层 `timeout` 在用户态 benchmark 继续运行时发送 SIGTERM，非 KUnit / boot 失败。
+- source audit：`rg -n "schedule_local_irq_timer_event|schedule_threaded_timer_event|threaded timer|#\\[initcall\\(late\\)\\]" anemone-kernel/src/time anemone-kernel/src/task anemone-kernel/src/sched anemone-kernel/src/fs/timerfd.rs` 确认 threaded API 只有 timer core 与新增 KUnit 使用，`timerfd` / `ITIMER_REAL` / wait-core timeout 仍在 IRQ lane。
+
+**结论：** 阶段 2 Gate P1 已具备关闭证据。下一步进入阶段 3：迁移 `timerfd` 到 threaded schedule API，重点保持 generation stale filtering、missed-tick accounting、read / poll readiness 和普通路径不发布 armed-but-unscheduled 状态。
