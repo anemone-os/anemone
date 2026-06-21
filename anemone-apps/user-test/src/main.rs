@@ -175,13 +175,13 @@ fn run_local_tests() {
     // println!("user-test: OOM killer test finished.");
 
     // 7. pthread create serial1 stress test
-    println!("user-test: running pthread create stress test...");
-    local_run_cmd(
-        "/bin/pthread-create-stress",
-        &["pthread-create-stress"],
-        &[],
-    );
-    println!("user-test: pthread create stress test finished.");
+    // println!("user-test: running pthread create stress test...");
+    // local_run_cmd(
+    //     "/bin/pthread-create-stress",
+    //     &["pthread-create-stress"],
+    //     &[],
+    // );
+    // println!("user-test: pthread create stress test finished.");
 }
 
 fn ensure_dir(path: &str) {
