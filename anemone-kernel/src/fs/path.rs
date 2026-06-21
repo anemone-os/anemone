@@ -56,22 +56,29 @@ impl PathRef {
         let mut cur_dentry = Some(self.dentry.clone());
 
         while let Some(dentry) = cur_dentry {
-            if let Some(parent) = dentry.parent() {
-                components.push(dentry.name());
-                cur_dentry = Some(parent);
-            } else {
-                // reached the root of current mount.
+            if Arc::ptr_eq(&dentry, cur_mount.root()) {
                 if let Some(parent_mount) = cur_mount.parent() {
                     let mountpoint = cur_mount
                         .mountpoint()
                         .expect("non-root mount must have a mountpoint");
                     cur_mount = parent_mount;
                     cur_dentry = Some(mountpoint);
-                } else {
-                    // reached the root of the entire namespace.
-                    components.push("/".to_string());
-                    break;
+                    continue;
                 }
+
+                // reached the root of the entire namespace.
+                components.push("/".to_string());
+                break;
+            }
+
+            if let Some(parent) = dentry.parent() {
+                components.push(dentry.name());
+                cur_dentry = Some(parent);
+            } else {
+                // Detached root-like dentries keep their own display boundary;
+                // do not walk a stale source parent for bind roots.
+                components.push("/".to_string());
+                break;
             }
         }
 

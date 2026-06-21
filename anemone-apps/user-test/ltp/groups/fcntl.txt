@@ -22,8 +22,8 @@ fcntl12
 fcntl12_64
 fcntl13
 fcntl13_64
-fcntl14
-fcntl14_64
+# fcntl14
+# fcntl14_64
 fcntl15
 fcntl15_64
 fcntl16

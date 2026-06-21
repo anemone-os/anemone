@@ -22,7 +22,8 @@ struct OomVictim {
     exclusive_pages: usize,
 }
 
-pub fn init_oom_killer() {
+#[initcall(late)]
+fn init_oom_killer() {
     let worker = KThreadBuilder::new("oom-killer-0")
         .spawn(oom_killer_entry, NilOpaque::new())
         .unwrap_or_else(|err| panic!("failed to spawn OOM killer: {:?}", err));

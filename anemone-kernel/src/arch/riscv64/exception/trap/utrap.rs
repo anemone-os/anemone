@@ -1,3 +1,5 @@
+use core::mem::offset_of;
+
 use riscv::register::sstatus::{FS, Sstatus};
 
 use crate::{
@@ -79,13 +81,13 @@ core::arch::global_asm!(
     "   sd t0, 16(sp)",
     // csr
     "   csrr t0, sstatus",
-    "   sd t0, 256(sp)",
+    "   sd t0, {trapframe_sstatus_offset}(sp)",
     "   csrr t0, sepc",
-    "   sd t0, 264(sp)",
+    "   sd t0, {trapframe_sepc_offset}(sp)",
     "   csrr t0, stval",
-    "   sd t0, 272(sp)",
+    "   sd t0, {trapframe_stval_offset}(sp)",
     "   csrr t0, scause",
-    "   sd t0, 280(sp)",
+    "   sd t0, {trapframe_scause_offset}(sp)",
     // TODO: if this is a device interrupt (timer or external), an interrupt stack
     // should be used, instead of continuing execution on the current stack.
 
@@ -156,10 +158,10 @@ core::arch::global_asm!(
     "   ld x30, 240(a0)",
     "   ld x31, 248(a0)",
     // sstatus
-    "   ld t0, 256(a0)",
+    "   ld t0, {trapframe_sstatus_offset}(a0)",
     "   csrw sstatus, t0",
     // sepc
-    "   ld t0, 264(a0)",
+    "   ld t0, {trapframe_sepc_offset}(a0)",
     "   csrw sepc, t0",
     // t0/x5
     "   ld t0, 40(a0)",
@@ -168,8 +170,12 @@ core::arch::global_asm!(
     // all done.
     "   sret",
     trapframe_bytes = const size_of::<RiscV64TrapFrame>(),
-    trapframe_ktp_offset = const core::mem::offset_of!(RiscV64TrapFrame, ktp),
-    trapframe_scratch_offset = const core::mem::offset_of!(RiscV64TrapFrame, sscratch),
+    trapframe_sstatus_offset = const offset_of!(RiscV64TrapFrame, sstatus),
+    trapframe_sepc_offset = const offset_of!(RiscV64TrapFrame, sepc),
+    trapframe_stval_offset = const offset_of!(RiscV64TrapFrame, stval),
+    trapframe_scause_offset = const offset_of!(RiscV64TrapFrame, scause),
+    trapframe_ktp_offset = const offset_of!(RiscV64TrapFrame, ktp),
+    trapframe_scratch_offset = const offset_of!(RiscV64TrapFrame, sscratch),
     rust_utrap_entry = sym rust_utrap_entry,
     stvec_mode = const riscv::register::stvec::TrapMode::Direct as usize,
 
@@ -244,7 +250,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             // leaving the hardware interrupt environment.
 
             assert!(allow_preempt(), "for utraps, this must hold");
-            if cfg!(feature = "kernel_preempt") && fetch_clear_need_resched() {
+            if fetch_clear_need_resched() {
                 // if we need reschedule, we can't waste time on disposing deferred tasks.
                 unsafe {
                     schedule();
@@ -305,9 +311,6 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                 let task = get_current_task();
                 if task.fpu_used() {
                     log_user_panic!(format_args!("illegal instruction at {:#x}", trapframe.sepc));
-
-                    // temporary workaround for current wrong unsafe code.
-                    core::hint::black_box(trapframe.sstatus());
 
                     get_current_task().recv_signal(Signal::new(
                         SigNo::SIGILL,

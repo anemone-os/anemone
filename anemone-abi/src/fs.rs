@@ -234,6 +234,34 @@ pub mod linux {
 
     pub mod mount {
         pub const MS_RDONLY: u64 = 1;
+        pub const MS_NOSUID: u64 = 2;
+        pub const MS_NODEV: u64 = 4;
+        pub const MS_NOEXEC: u64 = 8;
+        pub const MS_SYNCHRONOUS: u64 = 16;
+        pub const MS_REMOUNT: u64 = 32;
+        pub const MS_MANDLOCK: u64 = 64;
+        pub const MS_DIRSYNC: u64 = 128;
+        pub const MS_NOSYMFOLLOW: u64 = 256;
+        pub const MS_NOATIME: u64 = 1024;
+        pub const MS_NODIRATIME: u64 = 2048;
+        pub const MS_BIND: u64 = 4096;
+        pub const MS_MOVE: u64 = 8192;
+        pub const MS_REC: u64 = 16384;
+        pub const MS_SILENT: u64 = 32768;
+        pub const MS_VERBOSE: u64 = MS_SILENT;
+        pub const MS_POSIXACL: u64 = 1 << 16;
+        pub const MS_UNBINDABLE: u64 = 1 << 17;
+        pub const MS_PRIVATE: u64 = 1 << 18;
+        pub const MS_SLAVE: u64 = 1 << 19;
+        pub const MS_SHARED: u64 = 1 << 20;
+        pub const MS_RELATIME: u64 = 1 << 21;
+        pub const MS_STRICTATIME: u64 = 1 << 24;
+        pub const MS_LAZYTIME: u64 = 1 << 25;
+
+        pub const MNT_FORCE: u64 = 0x0000_0001;
+        pub const MNT_DETACH: u64 = 0x0000_0002;
+        pub const MNT_EXPIRE: u64 = 0x0000_0004;
+        pub const UMOUNT_NOFOLLOW: u64 = 0x0000_0008;
     }
 
     pub mod fanotify {
@@ -327,6 +355,15 @@ pub mod linux {
     pub struct IoVec {
         pub iov_base: *mut c_void,
         pub iov_len: u64,
+    }
+
+    pub const IOV_MAX: usize = 1024;
+
+    pub mod splice {
+        pub const SPLICE_F_MOVE: u32 = 0x01;
+        pub const SPLICE_F_NONBLOCK: u32 = 0x02;
+        pub const SPLICE_F_MORE: u32 = 0x04;
+        pub const SPLICE_F_GIFT: u32 = 0x08;
     }
 
     pub const STDIN_FILENO: usize = 0;

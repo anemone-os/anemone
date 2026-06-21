@@ -47,7 +47,7 @@ pub use self::{
         InodeType, ModifType, OpenedFile,
     },
     iomux::{PollEvent, PollRegisterResult, PollRequest},
-    mount::{Mount, MountFlags, MountSource},
+    mount::{Mount, MountAttrFlags, MountData, MountSource},
     namei::{
         ResolveFlags, resolve, resolve_from, resolve_from_with_root,
         resolve_from_with_root_checked, resolve_parent, resolve_parent_from,
@@ -58,182 +58,31 @@ pub use self::{
     superblock::SuperBlock,
 };
 pub use cache_stats::resident_file_inode_cache_pages;
-pub use inode_shrinker::init_inode_shrinker;
-
-mod namespace {
-    use crate::prelude::*;
-
-    pub(super) struct NameSpace {
-        root_path: Option<PathRef>,
-        mounts: Vec<Arc<Mount>>,
-        // tx_lock
-    }
-
-    impl NameSpace {
-        pub(super) fn new() -> Self {
-            Self {
-                root_path: None,
-                mounts: Vec::new(),
-            }
-        }
-
-        pub(super) fn root_path(&self) -> Option<PathRef> {
-            self.root_path.clone()
-        }
-
-        /// Mount a filesystem into this namespace. If `mountpoint` is `None`,
-        /// the new mount becomes the root mount.
-        fn mount(
-            &mut self,
-            fs: Arc<FileSystem>,
-            source: MountSource,
-            flags: MountFlags,
-            mountpoint: Option<&PathRef>,
-        ) -> Result<Arc<Mount>, SysError> {
-            let (parent, mp_dentry) = match mountpoint {
-                Some(pr) => (Some(pr.mount().clone()), Some(pr.dentry().clone())),
-                None => (None, None),
-            };
-
-            if parent.is_none() && self.root_path.is_some() {
-                // Mounting a new root when one already exists is not allowed.
-                return Err(SysError::AlreadyExists);
-            }
-
-            let sb = fs.mount(source, flags)?;
-
-            let root_inode = sb.root_inode().clone();
-            let root_dentry = Arc::new(Dentry::new("/".to_string(), None, root_inode));
-
-            let mnt = Arc::new(Mount::new(
-                root_dentry,
-                sb.clone(),
-                parent.as_ref(),
-                mp_dentry.as_ref(),
-                flags,
-            ));
-
-            self.mounts.push(mnt.clone());
-            sb.add_mount(&mnt);
-            drop(sb);
-
-            if let Some(parent) = parent {
-                parent.add_child(&mnt);
-            }
-
-            {
-                if self.root_path.is_none() {
-                    self.root_path = Some(PathRef::new(mnt.clone(), mnt.root().clone()));
-                }
-            }
-
-            knoticeln!(
-                "mounted filesystem: {} at {} with flags {:?}",
-                fs.name(),
-                mountpoint.map_or("none".to_string(), |mp| mp.to_string()),
-                flags
-            );
-
-            Ok(mnt)
-        }
-
-        pub(super) fn mount_root(
-            &mut self,
-            fs: Arc<FileSystem>,
-            source: MountSource,
-            flags: MountFlags,
-        ) -> Result<Arc<Mount>, SysError> {
-            self.mount(fs, source, flags, None)
-        }
-
-        pub(super) fn mount_at(
-            &mut self,
-            fs: Arc<FileSystem>,
-            source: MountSource,
-            flags: MountFlags,
-            mountpoint: &PathRef,
-        ) -> Result<Arc<Mount>, SysError> {
-            self.mount(fs, source, flags, Some(mountpoint))
-        }
-
-        /// Unmount a filesystem from this namespace.
-        ///
-        /// Unmounting root filesystem will fail.
-        pub(super) fn unmount(&mut self, mount: &Arc<Mount>) -> Result<(), SysError> {
-            // cannot unmount root
-            let Some(parent) = mount.parent() else {
-                return Err(SysError::InvalidArgument);
-            };
-
-            if mount.has_children() {
-                knoticeln!("cannot unmount filesystem: superblock still has alive inodes");
-                return Err(SysError::Busy);
-            }
-
-            let sb = mount.sb().clone();
-            let fs = sb.fs().clone();
-            let persistent_sb = fs.flags().contains(FileSystemFlags::PERSISTENT_SB);
-            let sb_still_used = self
-                .mounts
-                .iter()
-                .any(|m| !Arc::ptr_eq(m, mount) && Arc::ptr_eq(m.sb(), &sb));
-
-            if !sb_still_used {
-                if sb.has_alive_inode() {
-                    knoticeln!("cannot unmount filesystem: superblock still has alive inodes");
-                    return Err(SysError::Busy);
-                }
-            }
-
-            // tear down the superblock if no other mount is using it.
-            if !sb_still_used && !persistent_sb {
-                // we can not recover. it's too complex.
-                sb.try_evict_all()?;
-
-                fs.remove_sb(|s| Arc::ptr_eq(s, &sb));
-                fs.kill_sb(sb);
-            }
-
-            parent
-                .remove_child(&mount)
-                .expect("mount should be a child of its parent");
-
-            self.mounts.retain(|m| !Arc::ptr_eq(m, mount));
-
-            knoticeln!("unmounted filesystem at {:?}", mount.mountpoint().unwrap());
-
-            Ok(())
-        }
-
-        pub(super) fn mounts(&self) -> &[Arc<Mount>] {
-            &self.mounts
-        }
-    }
-}
 
 // We prefer gathering all public APIs in this module, and keep the global state
 // hidden in a singleton struct, which helps a lot to ensure lock ordering.
 mod vfs {
-    use crate::{fs::namespace::NameSpace, prelude::*};
+    use super::mount::MountTree;
+    use crate::prelude::*;
 
     /// Virtual file system. Singleton instance.
     ///
     /// **LOCK ORDERING:**
     /// **`visible` -> `anonymous` -> `fs_list` → `mounts` → `root_mount`**
     struct VfsSubSys {
-        /// Global namespace. Path resolution occurs here. For those filesystems
-        /// that should be exposed to user space. e.g. disk-backed filesystems,
-        /// devfs, sysfs, etc.
-        visible: RwLock<NameSpace>,
-        /// Anonymous namespace. For those kernel-internal pseudo file systems.
+        /// Global mount tree. Path resolution occurs here. For those
+        /// filesystems that should be exposed to user space. e.g. disk-backed
+        /// filesystems, devfs, sysfs, etc.
+        visible: MountTree,
+        /// Anonymous mount tree. For those kernel-internal pseudo file systems.
         /// e.g. pipefs, sockfs, etc.
-        anonymous: RwLock<NameSpace>,
+        anonymous: MountTree,
         fs_list: RwLock<Vec<Arc<FileSystem>>>,
     }
 
     static VFS: Lazy<VfsSubSys> = Lazy::new(|| VfsSubSys {
-        visible: RwLock::new(NameSpace::new()),
-        anonymous: RwLock::new(NameSpace::new()),
+        visible: MountTree::new(),
+        anonymous: MountTree::new(),
         fs_list: RwLock::new(Vec::new()),
     });
 
@@ -271,35 +120,86 @@ mod vfs {
     pub fn mount_at(
         fs_name: &str,
         source: MountSource,
-        flags: MountFlags,
+        attrs: MountAttrFlags,
         mountpoint: &PathRef,
     ) -> Result<Arc<Mount>, SysError> {
         let fs = get_filesystem(fs_name).ok_or(SysError::NotFound)?;
 
-        VFS.visible.write().mount_at(fs, source, flags, mountpoint)
+        VFS.visible.mount_at(fs, source, attrs, mountpoint)
+    }
+
+    /// Mount a filesystem into visible namespace with legacy mount data.
+    ///
+    /// Only syscall adapters should call this entry. Internal callers use
+    /// `mount_at` so they cannot accidentally propagate legacy user ABI data.
+    pub fn mount_at_with_data(
+        fs_name: &str,
+        source: MountSource,
+        attrs: MountAttrFlags,
+        data: MountData,
+        mountpoint: &PathRef,
+    ) -> Result<Arc<Mount>, SysError> {
+        let fs = get_filesystem(fs_name).ok_or(SysError::NotFound)?;
+
+        VFS.visible
+            .mount_at_with_data(fs, source, attrs, data, mountpoint)
     }
 
     /// Mount a filesystem into visible namespace as the root mount.
     pub fn mount_root(
         fs_name: &str,
         source: MountSource,
-        flags: MountFlags,
+        attrs: MountAttrFlags,
     ) -> Result<Arc<Mount>, SysError> {
         let fs = get_filesystem(fs_name).ok_or(SysError::NotFound)?;
 
-        VFS.visible.write().mount_root(fs, source, flags)
+        VFS.visible.mount_root(fs, source, attrs)
+    }
+
+    /// Update per-mount attributes for the currently visible mount view.
+    pub fn remount_attrs(target: &PathRef, attrs: MountAttrFlags) -> Result<(), SysError> {
+        VFS.visible.remount_attrs(target, attrs)
+    }
+
+    /// Create a bind mount view inside the visible mount tree.
+    pub fn bind_mount(
+        source: &PathRef,
+        target: &PathRef,
+        recursive: bool,
+    ) -> Result<usize, SysError> {
+        VFS.visible.bind_mount(source, target, recursive)
+    }
+
+    /// Move an attached mount view inside the visible mount tree.
+    pub fn move_mount(source: &PathRef, target: &PathRef) -> Result<usize, SysError> {
+        VFS.visible.move_mount(source, target)
+    }
+
+    /// Accept private propagation requests for the currently private tree.
+    pub fn make_mount_private(target: &PathRef, recursive: bool) -> Result<usize, SysError> {
+        VFS.visible.make_private(target, recursive)
     }
 
     /// **Called by anonymous filesystem driver. DO NOT TOUCH THIS.**
-    pub fn mount_anonymous_root(anony_fs: Arc<FileSystem>) -> Result<Arc<Mount>, SysError> {
-        VFS.anonymous
-            .write()
-            .mount_root(anony_fs, MountSource::Pseudo, MountFlags::empty())
+    pub(in crate::fs) fn mount_early_anonymous_root(
+        anony_fs: Arc<FileSystem>,
+    ) -> Result<Arc<Mount>, SysError> {
+        VFS.anonymous.mount_early_pseudo_root(anony_fs)
     }
 
     /// Unmount a filesystem from visible namespace.
     pub fn unmount(mount: Arc<Mount>) -> Result<(), SysError> {
-        VFS.visible.write().unmount(&mount)
+        VFS.visible.unmount(&mount)
+    }
+
+    /// Lazily detach a filesystem subtree from visible namespace.
+    pub fn lazy_unmount(mount: Arc<Mount>) -> Result<usize, SysError> {
+        VFS.visible.lazy_unmount(&mount)
+    }
+
+    /// Snapshot visible mount views in mount-tree attach order.
+    pub fn visible_mounts_snapshot() -> Vec<Arc<Mount>> {
+        VFS.visible.mounts()
     }
 
     /// Get the root [PathRef] of the visible namespace.
@@ -310,7 +210,6 @@ mod vfs {
     /// happen after the initial filesystem has been mounted during boot.
     pub fn root_pathref() -> PathRef {
         VFS.visible
-            .read()
             .root_path()
             .expect("root mount must be established")
     }
@@ -318,14 +217,13 @@ mod vfs {
     /// Get the root [PathRef] of the anonymous namespace.
     pub fn anonymous_root_pathref() -> PathRef {
         VFS.anonymous
-            .read()
             .root_path()
             .expect("anonymous root mount must be established")
     }
 
-    /// For visible namespace.
-    fn mounted_superblocks_for(namespace: &NameSpace) -> Vec<Arc<SuperBlock>> {
-        let mounts = namespace.mounts();
+    /// For visible mount tree.
+    fn mounted_superblocks_for(tree: &MountTree) -> Vec<Arc<SuperBlock>> {
+        let mounts = tree.mounts();
         let mut superblocks = Vec::new();
 
         for mount in mounts.iter() {
@@ -343,15 +241,15 @@ mod vfs {
     }
 
     pub fn mounted_superblocks() -> Vec<Arc<SuperBlock>> {
-        mounted_superblocks_for(&VFS.visible.read())
+        mounted_superblocks_for(&VFS.visible)
     }
 
     /// Called when the system is shutting down. This will flush all cached data
     /// to storage devices of file systems, if exist, and perform any necessary
     /// cleanup.
     pub unsafe fn on_shutdown() {
-        fn sync_superblocks(namespace: &NameSpace) {
-            for sb in mounted_superblocks_for(namespace) {
+        fn sync_superblocks(tree: &MountTree) {
+            for sb in mounted_superblocks_for(tree) {
                 if let Err(err) = sb.fs().sync_fs(&sb) {
                     kerrln!(
                         "failed to sync filesystem {} during shutdown: {:?}",
@@ -362,8 +260,21 @@ mod vfs {
             }
         }
 
-        sync_superblocks(&VFS.anonymous.read());
-        sync_superblocks(&VFS.visible.read());
+        sync_superblocks(&VFS.anonymous);
+        sync_superblocks(&VFS.visible);
+    }
+
+    pub fn mount_stack_top_at(parent: &Arc<Mount>, mountpoint: &Arc<Dentry>) -> Option<Arc<Mount>> {
+        VFS.visible
+            .top_child_at(parent, mountpoint)
+            .or_else(|| VFS.anonymous.top_child_at(parent, mountpoint))
+    }
+
+    pub fn mount_placement_generation() -> (u64, u64) {
+        (
+            VFS.visible.placement_generation(),
+            VFS.anonymous.placement_generation(),
+        )
     }
 }
 pub use vfs::*;
@@ -415,6 +326,7 @@ impl<'a> PathResolution<'a> {
 mod vfs_ops {
     use crate::{
         fs::{
+            mount_stack_top_at,
             namei::{materialize_child_dentry, resolve, resolve_parent},
             unmount,
         },
@@ -466,7 +378,7 @@ mod vfs_ops {
         pub fn vfs_mount_at<'a, R: Into<PathResolution<'a>>>(
             fs_name: &str,
             source: MountSource,
-            flags: MountFlags,
+            attrs: MountAttrFlags,
             mountpoint: R,
         ) -> Result<Arc<Mount>, SysError> {
             let mountpoint = mountpoint.into();
@@ -476,7 +388,7 @@ mod vfs_ops {
                 return Err(SysError::NotDir);
             }
 
-            mount_at(fs_name, source, flags, &mountpoint)
+            mount_at(fs_name, source, attrs, &mountpoint)
         }
 
         /// Unmount a filesystem at the specified mountpoint.
@@ -707,7 +619,7 @@ mod vfs_ops {
             old_path.mount().ensure_writable()?;
 
             if let Ok(existing) = new_dir.dentry().lookup_child(new_name) {
-                if new_dir.mount().child_at(&existing).is_some() {
+                if mount_stack_top_at(new_dir.mount(), &existing).is_some() {
                     return Err(SysError::Busy);
                 }
             }
@@ -1080,7 +992,7 @@ mod kunits {
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
-            MountFlags::empty(),
+            MountAttrFlags::empty(),
             mountpoint,
         )
         .unwrap();
@@ -1337,409 +1249,5 @@ mod kunits {
 
         drop(opened);
         vfs_unlink(path).unwrap();
-    }
-
-    #[kunit]
-    fn test_vfs_mount_overrides_mountpoint_and_restores_on_unmount() {
-        let mountpoint = Path::new("/kunit-vfs-mnt");
-        let lower = Path::new("/kunit-vfs-mnt/lower-file");
-        let upper = Path::new("/kunit-vfs-mnt/upper-file");
-
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        vfs_touch(lower, InodePerm::all_rwx()).unwrap();
-        assert_eq!(
-            vfs_lookup(lower).unwrap().to_string(),
-            "/kunit-vfs-mnt/lower-file"
-        );
-
-        vfs_mount_at(
-            "ramfs",
-            MountSource::Pseudo,
-            MountFlags::empty(),
-            mountpoint,
-        )
-        .unwrap();
-
-        assert_eq!(
-            vfs_lookup(mountpoint).unwrap().to_string(),
-            "/kunit-vfs-mnt"
-        );
-        assert_eq!(vfs_lookup(lower).unwrap_err(), SysError::NotFound);
-        assert_eq!(vfs_rmdir(mountpoint).unwrap_err(), SysError::IsMountPoint);
-
-        let file = vfs_touch(upper, InodePerm::all_rwx()).unwrap();
-        let reopened = vfs_open(upper).unwrap();
-        assert_eq!(reopened.write(b"mounted").unwrap(), 7);
-        reopened.seek_set_checked(0).unwrap();
-
-        let mut buf = [0u8; 7];
-        assert_eq!(reopened.read(&mut buf).unwrap(), 7);
-        assert_eq!(&buf, b"mounted");
-        assert_eq!(vfs_unmount(upper).unwrap_err(), SysError::NotMounted);
-
-        drop(reopened);
-        drop(file);
-
-        vfs_unmount(mountpoint).unwrap();
-
-        assert_eq!(
-            vfs_lookup(lower).unwrap().to_string(),
-            "/kunit-vfs-mnt/lower-file"
-        );
-        assert_eq!(vfs_lookup(upper).unwrap_err(), SysError::NotFound);
-
-        vfs_unlink(lower).unwrap();
-        vfs_rmdir(mountpoint).unwrap();
-    }
-
-    #[kunit]
-    fn test_vfs_unmount_busy_with_active_inode_ref() {
-        let mountpoint = Path::new("/kunit-vfs-busy");
-        let live = Path::new("/kunit-vfs-busy/live");
-
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        vfs_mount_at(
-            "ramfs",
-            MountSource::Pseudo,
-            MountFlags::empty(),
-            mountpoint,
-        )
-        .unwrap();
-
-        let live_ref = vfs_touch(live, InodePerm::all_rwx()).unwrap();
-        assert_eq!(vfs_unmount(mountpoint).unwrap_err(), SysError::Busy);
-
-        drop(live_ref);
-
-        vfs_unmount(mountpoint).unwrap();
-        vfs_rmdir(mountpoint).unwrap();
-    }
-
-    #[kunit]
-    fn test_vfs_unmount_busy_with_child_mount() {
-        let mountpoint = Path::new("/kunit-vfs-parent-mnt");
-        let nested = Path::new("/kunit-vfs-parent-mnt/nested");
-
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        vfs_mount_at(
-            "ramfs",
-            MountSource::Pseudo,
-            MountFlags::empty(),
-            mountpoint,
-        )
-        .unwrap();
-
-        vfs_mkdir(nested, InodePerm::all_rwx()).unwrap();
-        vfs_mount_at("ramfs", MountSource::Pseudo, MountFlags::empty(), nested).unwrap();
-
-        assert_eq!(vfs_unmount(mountpoint).unwrap_err(), SysError::Busy);
-
-        vfs_unmount(nested).unwrap();
-        vfs_rmdir(nested).unwrap();
-        vfs_unmount(mountpoint).unwrap();
-        vfs_rmdir(mountpoint).unwrap();
-    }
-
-    #[kunit]
-    fn test_vfs_mount_dot_and_dotdot_traversal() {
-        let mountpoint = Path::new("/kunit-vfs-walk");
-        let host_sibling = Path::new("/kunit-vfs-host-sibling");
-        let inner_dir = Path::new("/kunit-vfs-walk/sub");
-        let inner_file = Path::new("/kunit-vfs-walk/sub/file");
-
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        vfs_touch(host_sibling, InodePerm::all_rwx()).unwrap();
-        vfs_mount_at(
-            "ramfs",
-            MountSource::Pseudo,
-            MountFlags::empty(),
-            mountpoint,
-        )
-        .unwrap();
-
-        assert_eq!(
-            vfs_lookup(Path::new("/kunit-vfs-walk/."))
-                .unwrap()
-                .to_string(),
-            "/kunit-vfs-walk"
-        );
-
-        vfs_mkdir(inner_dir, InodePerm::all_rwx()).unwrap();
-        let inner = vfs_touch(inner_file, InodePerm::all_rwx()).unwrap();
-
-        assert_eq!(
-            vfs_lookup(Path::new("/kunit-vfs-walk/./sub/./file"))
-                .unwrap()
-                .inode(),
-            inner.inode()
-        );
-        assert_eq!(
-            vfs_lookup(Path::new("/kunit-vfs-walk/sub/.."))
-                .unwrap()
-                .to_string(),
-            "/kunit-vfs-walk"
-        );
-        assert_eq!(
-            vfs_lookup(Path::new("/kunit-vfs-walk/sub/../sub/file"))
-                .unwrap()
-                .inode(),
-            inner.inode()
-        );
-        assert_eq!(
-            vfs_lookup(Path::new("/kunit-vfs-walk/../kunit-vfs-host-sibling"))
-                .unwrap()
-                .to_string(),
-            "/kunit-vfs-host-sibling"
-        );
-
-        drop(inner);
-
-        vfs_unmount(mountpoint).unwrap();
-        vfs_unlink(host_sibling).unwrap();
-        vfs_rmdir(mountpoint).unwrap();
-    }
-
-    #[kunit]
-    fn test_vfs_multiple_mounts_are_isolated() {
-        let left_mount = Path::new("/kunit-vfs-left-mnt");
-        let right_mount = Path::new("/kunit-vfs-right-mnt");
-        let left_file = Path::new("/kunit-vfs-left-mnt/file");
-        let right_file = Path::new("/kunit-vfs-right-mnt/file");
-
-        vfs_mkdir(left_mount, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(right_mount, InodePerm::all_rwx()).unwrap();
-
-        vfs_mount_at(
-            "ramfs",
-            MountSource::Pseudo,
-            MountFlags::empty(),
-            left_mount,
-        )
-        .unwrap();
-        vfs_mount_at(
-            "ramfs",
-            MountSource::Pseudo,
-            MountFlags::empty(),
-            right_mount,
-        )
-        .unwrap();
-
-        let left = vfs_touch(left_file, InodePerm::all_rwx()).unwrap();
-        assert_eq!(vfs_lookup(right_file).unwrap_err(), SysError::NotFound);
-
-        let right = vfs_touch(right_file, InodePerm::all_rwx()).unwrap();
-        assert_eq!(vfs_lookup(left_file).unwrap().inode(), left.inode());
-        assert_eq!(vfs_lookup(right_file).unwrap().inode(), right.inode());
-
-        drop(left);
-        drop(right);
-
-        vfs_unmount(left_mount).unwrap();
-        assert_eq!(vfs_lookup(left_file).unwrap_err(), SysError::NotFound);
-        assert_eq!(
-            vfs_lookup(right_file).unwrap().to_string(),
-            "/kunit-vfs-right-mnt/file"
-        );
-
-        vfs_unmount(right_mount).unwrap();
-        vfs_rmdir(left_mount).unwrap();
-        vfs_rmdir(right_mount).unwrap();
-    }
-
-    #[kunit]
-    fn test_vfs_mount_cycle_stress() {
-        const NROUNDS: usize = 8;
-        const NFILES: usize = 8;
-
-        let mountpoint = Path::new("/kunit-vfs-cycle");
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-
-        for round in 0..NROUNDS {
-            vfs_mount_at(
-                "ramfs",
-                MountSource::Pseudo,
-                MountFlags::empty(),
-                mountpoint,
-            )
-            .unwrap();
-
-            for file_idx in 0..NFILES {
-                let path = format!("/kunit-vfs-cycle/file-{round}-{file_idx}");
-                let payload = format!("round-{round}-file-{file_idx}-payload");
-
-                vfs_touch(Path::new(&path), InodePerm::all_rwx()).unwrap();
-
-                let opened = vfs_open(Path::new(&path)).unwrap();
-                assert_eq!(opened.write(payload.as_bytes()).unwrap(), payload.len());
-                opened.seek_set_checked(0).unwrap();
-
-                let mut buf = vec![0u8; payload.len()];
-                assert_eq!(opened.read(buf.as_mut_slice()).unwrap(), payload.len());
-                assert_eq!(buf.as_slice(), payload.as_bytes());
-            }
-
-            vfs_unmount(mountpoint).unwrap();
-
-            let vanished = format!("/kunit-vfs-cycle/file-{round}-0");
-            assert_eq!(
-                vfs_lookup(Path::new(&vanished)).unwrap_err(),
-                SysError::NotFound
-            );
-        }
-
-        vfs_rmdir(mountpoint).unwrap();
-    }
-
-    #[kunit]
-    fn test_vfs_namespace_churn_stress_under_mount() {
-        const NDIRS: usize = 4;
-        const NFILES_PER_DIR: usize = 6;
-
-        let mountpoint = Path::new("/kunit-vfs-churn");
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        vfs_mount_at(
-            "ramfs",
-            MountSource::Pseudo,
-            MountFlags::empty(),
-            mountpoint,
-        )
-        .unwrap();
-
-        for dir_idx in 0..NDIRS {
-            let dir = format!("/kunit-vfs-churn/dir-{dir_idx}");
-            vfs_mkdir(Path::new(&dir), InodePerm::all_rwx()).unwrap();
-
-            for file_idx in 0..NFILES_PER_DIR {
-                let file = format!("{dir}/file-{file_idx}");
-                let alias = format!("/kunit-vfs-churn/alias-{dir_idx}-{file_idx}");
-                let payload = format!("dir-{dir_idx}-file-{file_idx}-payload");
-
-                let created = vfs_touch(Path::new(&file), InodePerm::all_rwx()).unwrap();
-                let opened = vfs_open(Path::new(&file)).unwrap();
-
-                assert_eq!(opened.write(payload.as_bytes()).unwrap(), payload.len());
-                opened.seek_set_checked(0).unwrap();
-
-                let mut buf = vec![0u8; payload.len()];
-                assert_eq!(opened.read(buf.as_mut_slice()).unwrap(), payload.len());
-                assert_eq!(buf.as_slice(), payload.as_bytes());
-
-                if file_idx % 2 == 0 {
-                    vfs_link(Path::new(&file), Path::new(&alias)).unwrap();
-                    assert_eq!(
-                        vfs_lookup(Path::new(&alias)).unwrap().inode(),
-                        created.inode()
-                    );
-                    vfs_unlink(Path::new(&alias)).unwrap();
-                }
-            }
-        }
-
-        for dir_idx in (0..NDIRS).rev() {
-            let dir = format!("/kunit-vfs-churn/dir-{dir_idx}");
-
-            for file_idx in (0..NFILES_PER_DIR).rev() {
-                let file = format!("{dir}/file-{file_idx}");
-                vfs_unlink(Path::new(&file)).unwrap();
-            }
-
-            vfs_rmdir(Path::new(&dir)).unwrap();
-        }
-
-        vfs_unmount(mountpoint).unwrap();
-        vfs_rmdir(mountpoint).unwrap();
-    }
-
-    #[kunit]
-    fn test_vfs_direct_multi_mount_same_mountpoint_visibility_switch() {
-        let mountpoint = Path::new("/kunit-vfs-direct-stack");
-        let visible_file = Path::new("/kunit-vfs-direct-stack/visible");
-        let hidden_file = Path::new("/kunit-vfs-direct-stack/hidden");
-
-        let host_mp = vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        let first = mount_at("ramfs", MountSource::Pseudo, MountFlags::empty(), &host_mp).unwrap();
-        let second = mount_at("ramfs", MountSource::Pseudo, MountFlags::empty(), &host_mp).unwrap();
-
-        assert!(!Arc::ptr_eq(&first, &second));
-        assert!(!Arc::ptr_eq(first.sb(), second.sb()));
-
-        vfs_touch(visible_file, InodePerm::all_rwx()).unwrap();
-
-        let second_root = PathRef::new(second.clone(), second.root().clone());
-        let hidden_inode = second_root
-            .inode()
-            .touch("hidden", InodePerm::all_rwx())
-            .unwrap();
-
-        assert_eq!(
-            vfs_lookup(visible_file).unwrap().to_string(),
-            "/kunit-vfs-direct-stack/visible"
-        );
-        assert_eq!(vfs_lookup(hidden_file).unwrap_err(), SysError::NotFound);
-
-        unmount(first).unwrap();
-
-        assert_eq!(vfs_lookup(visible_file).unwrap_err(), SysError::NotFound);
-        assert_eq!(vfs_lookup(hidden_file).unwrap().inode(), &hidden_inode);
-
-        drop(hidden_inode);
-        drop(second_root);
-
-        vfs_unmount(mountpoint).unwrap();
-        vfs_rmdir(mountpoint).unwrap();
-    }
-
-    #[kunit]
-    fn test_vfs_direct_multi_mount_stack_stress() {
-        const NLAYERS: usize = 6;
-
-        let mountpoint = Path::new("/kunit-vfs-direct-stack-stress");
-        let host_mp = vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        let mut mounts = Vec::new();
-
-        for layer in 0..NLAYERS {
-            let mnt =
-                mount_at("ramfs", MountSource::Pseudo, MountFlags::empty(), &host_mp).unwrap();
-            let root = PathRef::new(mnt.clone(), mnt.root().clone());
-            let name = format!("layer-{layer}");
-            root.inode().touch(&name, InodePerm::all_rwx()).unwrap();
-            mounts.push(mnt);
-        }
-
-        for layer in 0..NLAYERS {
-            let path = format!("/kunit-vfs-direct-stack-stress/layer-{layer}");
-            if layer == 0 {
-                assert_eq!(vfs_lookup(Path::new(&path)).unwrap().to_string(), path);
-            } else {
-                assert_eq!(
-                    vfs_lookup(Path::new(&path)).unwrap_err(),
-                    SysError::NotFound
-                );
-            }
-        }
-
-        for layer in 0..NLAYERS {
-            let current_name = format!("/kunit-vfs-direct-stack-stress/layer-{layer}");
-            unmount(mounts[layer].clone()).unwrap();
-
-            if layer + 1 < NLAYERS {
-                let next_name = format!("/kunit-vfs-direct-stack-stress/layer-{}", layer + 1);
-                assert_eq!(
-                    vfs_lookup(Path::new(&current_name)).unwrap_err(),
-                    SysError::NotFound
-                );
-                assert_eq!(
-                    vfs_lookup(Path::new(&next_name)).unwrap().to_string(),
-                    next_name
-                );
-            } else {
-                assert_eq!(
-                    vfs_lookup(Path::new(&current_name)).unwrap_err(),
-                    SysError::NotFound
-                );
-            }
-        }
-
-        vfs_rmdir(mountpoint).unwrap();
     }
 }

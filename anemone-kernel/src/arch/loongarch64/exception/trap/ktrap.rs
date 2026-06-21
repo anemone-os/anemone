@@ -1,3 +1,5 @@
+use core::mem::offset_of;
+
 use la_insc::reg::{
     crmd,
     csr::{CR_BADV, CR_ERA, CR_ESTAT, CR_PRMD, eentry},
@@ -56,13 +58,13 @@ core::arch::global_asm!(
     "   st.d $t0, $sp, 24",
     // csr
     "   csrrd $t0, {prmd}",
-    "   st.d $t0, $sp, 256",
+    "   st.d $t0, $sp, {trapframe_prmd_offset}",
     "   csrrd $t0, {era}",
-    "   st.d $t0, $sp, 264",
+    "   st.d $t0, $sp, {trapframe_era_offset}",
     "   csrrd $t0, {badv}",
-    "   st.d $t0, $sp, 272",
+    "   st.d $t0, $sp, {trapframe_badv_offset}",
     "   csrrd $t0, {estat}",
-    "   st.d $t0, $sp, 280",
+    "   st.d $t0, $sp, {trapframe_estat_offset}",
     // TODO: if this is a device interrupt (timer or external), an interrupt stack
     // should be used, instead of continuing execution on the current stack.
     "   move $t0, $zero",
@@ -108,10 +110,10 @@ core::arch::global_asm!(
     "   ld.d $r30, $a0, 240",
     "   ld.d $r31, $a0, 248",
     // prmd
-    "   ld.d $t0, $a0, 256",
+    "   ld.d $t0, $a0, {trapframe_prmd_offset}",
     "   csrwr $t0, {prmd}",
     // era
-    "   ld.d $t0, $a0, 264",
+    "   ld.d $t0, $a0, {trapframe_era_offset}",
     "   csrwr $t0, {era}",
     // $t0/r12
     "   ld.d $t0, $a0, 96",
@@ -120,6 +122,10 @@ core::arch::global_asm!(
     // all done.
     "   ertn",
     trapframe_bytes = const size_of::<LA64TrapFrame>(),
+    trapframe_prmd_offset = const offset_of!(LA64TrapFrame, prmd),
+    trapframe_era_offset = const offset_of!(LA64TrapFrame, era),
+    trapframe_badv_offset = const offset_of!(LA64TrapFrame, badv),
+    trapframe_estat_offset = const offset_of!(LA64TrapFrame, estat),
     rust_ktrap_entry = sym rust_ktrap_entry,
     prmd = const CR_PRMD,
     era = const CR_ERA,

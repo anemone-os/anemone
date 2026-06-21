@@ -43,6 +43,8 @@ const VALID_OPEN_FLAGS: u32 = O_ACCMODE
     | O_PATH
     | O_TMPFILE_FLAG;
 
+const O_PATH_FLAGS: u32 = O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC;
+
 fn has_tmpfile_flag(flags: u32) -> bool {
     flags & O_TMPFILE == O_TMPFILE
 }
@@ -85,14 +87,26 @@ struct OpenHow {
 }
 
 impl OpenHow {
-    fn from_linux(flags: u32, mode: u32) -> Result<Self, SysError> {
-        let is_path = flags & O_PATH != 0;
-        let is_tmpfile = has_tmpfile_flag(flags);
-
+    fn from_linux(mut flags: u32, mode: u32) -> Result<Self, SysError> {
         if flags & !VALID_OPEN_FLAGS != 0 {
             knoticeln!("openat: unsupported flags={:#x}", flags & !VALID_OPEN_FLAGS);
             return Err(SysError::InvalidArgument);
         }
+
+        if flags & O_PATH != 0 {
+            // Legacy open/openat makes O_PATH take precedence and silently
+            // discards every other recognized flag except these path-lookup
+            // and fd-local bits.
+            // A future openat2 parser must keep its stricter EINVAL behavior.
+            let ignored = flags & !O_PATH_FLAGS;
+            if ignored != 0 {
+                knoticeln!("openat: O_PATH ignoring flags={:#x}", ignored);
+                flags &= O_PATH_FLAGS;
+            }
+        }
+
+        let is_path = flags & O_PATH != 0;
+        let is_tmpfile = has_tmpfile_flag(flags);
 
         let access = if is_path {
             OpenAccessMode::Path
@@ -104,18 +118,6 @@ impl OpenHow {
                 _ => return Err(SysError::InvalidArgument),
             }
         };
-
-        if is_path {
-            let allowed = O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC | O_NOCTTY | O_LARGEFILE;
-            let ignored = flags & O_ACCMODE;
-            if flags & !(allowed | ignored) != 0 {
-                knoticeln!(
-                    "openat: unsupported O_PATH flag combination flags={:#x}",
-                    flags
-                );
-                return Err(SysError::InvalidArgument);
-            }
-        }
 
         if flags & O_TMPFILE_FLAG != 0 && !is_tmpfile {
             return Err(SysError::InvalidArgument);
@@ -471,6 +473,32 @@ mod kunits {
             OpenHow::from_linux(1 << 31, InodePerm::all_rwx().bits() as u32).unwrap_err(),
             SysError::InvalidArgument
         );
+    }
+
+    #[kunit]
+    fn test_open_how_path_ignores_other_legacy_open_flags() {
+        let ignored = VALID_OPEN_FLAGS & !O_PATH_FLAGS;
+        assert_ne!(ignored & O_NONBLOCK, 0);
+
+        let how = OpenHow::from_linux(O_PATH_FLAGS | ignored, InodePerm::all_rwx().bits() as u32)
+            .unwrap();
+
+        assert_eq!(how.access, OpenAccessMode::Path);
+        assert!(how.lookup.directory);
+        assert!(how.lookup.nofollow);
+        assert!(!how.create.creat);
+        assert!(!how.create.excl);
+        assert!(!how.create.trunc);
+        assert!(!how.create.tmpfile);
+        assert!(how.status.is_empty());
+        assert_eq!(how.fd, FdFlags::CLOSE_ON_EXEC);
+        assert_eq!(how.compat, LinuxOpenCompat::empty());
+        assert!(how.perm.is_empty());
+        let getfl_flags = how.access.to_linux_open_flags()
+            | how.status.to_linux_open_flags()
+            | how.compat.getfl_visible_flags();
+        assert_ne!(getfl_flags & O_PATH, 0);
+        assert_eq!(getfl_flags & ignored, 0);
     }
 
     #[kunit]

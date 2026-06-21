@@ -127,6 +127,8 @@ pub mod time {
 pub mod process {
     pub type Tid = u32;
 
+    #[cfg(any(target_arch = "loongarch64", target_arch = "riscv64"))]
+    use core::arch::naked_asm;
     use core::ptr::NonNull;
 
     use alloc::ffi::CString;
@@ -338,6 +340,104 @@ pub mod process {
         )
         .map(|x| x as Tid)?;
         Ok(if ret == 0 { None } else { Some(ret) })
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    #[unsafe(naked)]
+    unsafe extern "C" fn raw_clone_thread(
+        flags: u64,
+        stack_top: u64,
+        parent_tid: u64,
+        tls: u64,
+        child_tid: u64,
+        entry: usize,
+        arg: usize,
+    ) -> i64 {
+        naked_asm!(
+            "mv t0, a5",
+            "mv t1, a6",
+            "li a7, {sys_clone}",
+            "ecall",
+            "bnez a0, 2f",
+            "mv a0, t1",
+            "jalr t0",
+            "2:",
+            "ret",
+            sys_clone = const anemone_abi::syscall::linux::SYS_CLONE,
+        )
+    }
+
+    #[cfg(target_arch = "loongarch64")]
+    #[unsafe(naked)]
+    unsafe extern "C" fn raw_clone_thread(
+        flags: u64,
+        stack_top: u64,
+        parent_tid: u64,
+        tls: u64,
+        child_tid: u64,
+        entry: usize,
+        arg: usize,
+    ) -> i64 {
+        naked_asm!(
+            "move $t0, $a5",
+            "move $t1, $a6",
+            "move $t2, $a3",
+            "move $a3, $a4",
+            "move $a4, $t2",
+            "li.d $a7, {sys_clone}",
+            "syscall 0",
+            "bnez $a0, 2f",
+            "move $a0, $t1",
+            "jirl $ra, $t0, 0",
+            "2:",
+            "ret",
+            sys_clone = const anemone_abi::syscall::linux::SYS_CLONE,
+        )
+    }
+
+    #[cfg(not(any(target_arch = "loongarch64", target_arch = "riscv64")))]
+    unsafe extern "C" fn raw_clone_thread(
+        _flags: u64,
+        _stack_top: u64,
+        _parent_tid: u64,
+        _tls: u64,
+        _child_tid: u64,
+        _entry: usize,
+        _arg: usize,
+    ) -> i64 {
+        -(ENOSYS as i64)
+    }
+
+    /// Spawn a raw Linux-style thread and jump directly into `entry` in the
+    /// child. This is intentionally not a pthread abstraction: callers own the
+    /// stack, TLS pointer, child-tid storage, and any join/cleanup protocol.
+    pub unsafe fn spawn_raw_thread(
+        flags: CloneFlags,
+        stack_top: *mut u8,
+        parent_tid: Option<&mut Tid>,
+        tls_ptr: *mut u8,
+        child_tid: Option<&mut Tid>,
+        entry: extern "C" fn(usize) -> !,
+        arg: usize,
+    ) -> Result<Tid, Errno> {
+        let ret = unsafe {
+            raw_clone_thread(
+                flags.bits() as u64,
+                stack_top as u64,
+                parent_tid
+                    .map(|tid| tid as *mut Tid as u64)
+                    .unwrap_or(0),
+                tls_ptr as u64,
+                child_tid.map(|tid| tid as *mut Tid as u64).unwrap_or(0),
+                entry as usize,
+                arg,
+            )
+        };
+        if ret < 0 {
+            Err((-ret) as i32)
+        } else {
+            Ok(ret as Tid)
+        }
     }
 
     pub fn sched_yield() -> Result<(), Errno> {

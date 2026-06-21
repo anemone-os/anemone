@@ -102,18 +102,18 @@ pub use allocator_stats::*;
 
 #[derive(Debug)]
 pub struct LockedFrameAllocator<A: FrameAllocator> {
-    allocator: SpinLock<A>,
+    allocator: NoIrqSpinLock<A>,
 }
 
 impl<A: FrameAllocator> LockedFrameAllocator<A> {
     pub fn new(allocator: A) -> Self {
         Self {
-            allocator: SpinLock::new(allocator),
+            allocator: NoIrqSpinLock::new(allocator),
         }
     }
 
     pub fn alloc(&self, npages: usize) -> Option<OwnedFolio> {
-        let start_ppn = self.allocator.lock_irqsave().alloc(npages)?;
+        let start_ppn = self.allocator.lock().alloc(npages)?;
         unsafe {
             Some(OwnedFolio::new(PhysPageRange::new(
                 start_ppn,
@@ -123,26 +123,26 @@ impl<A: FrameAllocator> LockedFrameAllocator<A> {
     }
 
     pub fn alloc_one(&self) -> Option<OwnedFrameHandle> {
-        let start_ppn = self.allocator.lock_irqsave().alloc(1)?;
+        let start_ppn = self.allocator.lock().alloc(1)?;
         unsafe { Some(OwnedFrameHandle::new(start_ppn)) }
     }
 
     pub unsafe fn add_range(&self, range: PhysPageRange) {
-        let mut allocator = self.allocator.lock_irqsave();
+        let mut allocator = self.allocator.lock();
         unsafe {
             allocator.add_range(range);
         }
     }
 
     pub unsafe fn dealloc(&self, range: PhysPageRange) {
-        let mut allocator = self.allocator.lock_irqsave();
+        let mut allocator = self.allocator.lock();
         unsafe {
             allocator.dealloc(range);
         }
     }
 
     pub fn stats(&self) -> FrameAllocatorStats {
-        let allocator = self.allocator.lock_irqsave();
+        let allocator = self.allocator.lock();
         allocator.stats()
     }
 }

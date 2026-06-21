@@ -40,6 +40,7 @@ pub fn dispatch_execve(
     let mut ctx = ExecCtx {
         usp,
         exec_fn,
+        interp_fn: exec_fn.to_string(),
         path,
         old_cred,
         no_new_privs,
@@ -49,7 +50,8 @@ pub fn dispatch_execve(
         envp: envp.iter().map(|s| s.as_ref().to_string()).collect(),
     };
 
-    for _ in 0..MAX_BINFMT_REDIRECTS {
+    let mut redirects = 0;
+    loop {
         let mut redirected = false;
         check_exec_permission(&ctx.path)?;
         for &fmt in BINARY_FMTS {
@@ -60,6 +62,10 @@ pub fn dispatch_execve(
                 ExecResult::NotRecognized => continue,
                 ExecResult::Redirected => {
                     // break inner loop to try loading the new binary from the start of BINARY_FMTS.
+                    redirects += 1;
+                    if redirects > MAX_BINFMT_REDIRECTS {
+                        return Err(SysError::TooManyLinks);
+                    }
                     redirected = true;
                     break;
                 },
@@ -70,8 +76,6 @@ pub fn dispatch_execve(
             return Err(SysError::BinFmtUnrecognized);
         }
     }
-
-    Err(SysError::TooManyLinks)
 }
 
 pub fn check_exec_permission(path: &PathRef) -> Result<(), SysError> {
@@ -94,6 +98,13 @@ pub struct ExecCtx<'a> {
     ///
     /// **Relative to the current process's filesystem context.**
     pub exec_fn: &'a str,
+    /// Current script/interpreter name used by shebang argv rewriting.
+    ///
+    /// This mirrors Linux `bprm->interp`: it starts as the original exec
+    /// filename, then each shebang rewrite replaces it with the interpreter
+    /// name. `exec_fn` stays unchanged because it feeds AT_EXECFN and task
+    /// naming for the original exec request.
+    interp_fn: String,
     /// The resolved binary to execute. This may be different from `exec_fn` if
     /// there are redirections (e.g. shebang), or if current process has a
     /// custom filesystem context (e.g. with chroot).
@@ -111,6 +122,15 @@ pub struct ExecCtx<'a> {
 }
 
 impl ExecCtx<'_> {
+    fn interp_fn(&self) -> &str {
+        &self.interp_fn
+    }
+
+    fn set_interp_fn(&mut self, interp_fn: &str) {
+        self.interp_fn.clear();
+        self.interp_fn.push_str(interp_fn);
+    }
+
     pub fn prepare_credentials_for(&mut self, path: &PathRef) -> Result<(), SysError> {
         let attr = path.inode().get_attr()?;
         let file_caps = path.inode().get_file_cap()?;

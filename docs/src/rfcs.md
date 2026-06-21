@@ -22,14 +22,20 @@ docs/src/rfcs/<short-slug>/
   index.md
   implementation.md
   invariants.md          # 可选；协议、不变量或证明义务复杂时使用
-  tracking-issues.md     # 可选；实现期需要持续分级跟踪问题时使用
+  tracking-issues.md     # 可选；review 或实现反馈发现设计问题时使用
   backgrounds/           # 可选；保存历史背景、问题清单和被拒绝方案
     index.md
 ```
 
-`index.md` 是总入口，负责说明状态、范围、文档地图、接受边界和下一步。`implementation.md` 是实现计划，负责记录阶段、审查合同、验证和停止边界。`invariants.md` 只在正确性依赖明确协议、不变量或证明义务时创建；调度、等待、锁序、生命周期等子系统通常需要它。`tracking-issues.md` 只在实现期存在一组需要持续 review、分级和关闭的问题时创建。`backgrounds/` 只保存背景材料，不作为当前 canonical 结论的来源。
+`index.md` 是总入口，负责说明状态、范围、文档地图、接受边界和下一步。`implementation.md` 是实现计划，负责记录阶段、审查合同、验证、反馈 gate 和停止边界。`invariants.md` 只在正确性依赖明确协议、不变量或证明义务时创建；调度、等待、锁序、生命周期等子系统通常需要它。`tracking-issues.md` 只在存在一组需要持续 review、分级和关闭的设计问题时创建；这些问题可以来自文档层 review，也可以来自实现期反馈。`backgrounds/` 只保存背景材料，不作为当前 canonical 结论的来源。
 
 大型重构应把不变量、实现顺序、历史材料拆成同一目录下的子文档，避免 devlog 或 register 直接引用个人草稿。
+
+RFC 被接受进入实现阶段，不表示所有未知都已经消除。它表示当前 accepted contract、验证 floor、停止条件和反馈入口足够明确。只能通过真实接口、状态流转、错误路径或集成结果验证的风险，可以作为受控 probe / vertical slice gate 带入实现；如果证据改变 accepted contract，必须回写 RFC canonical 文本。
+
+不要为 probe / feedback 默认新建通用 `feedback.md`、`probe.md` 或 `experiments.md`。probe 计划写在 `implementation.md`，执行反馈写在 transaction devlog；只有证据包过长时，才在 `backgrounds/` 下增加具体命名的证据文件。
+
+反馈只能优化路线，不能篡改目标或私自削弱不变量。如果实现期证据说明目标、不变量、ABI 边界或验收条件需要改变，应先回到 RFC review 并更新 canonical 文本；在此之前，代码和事务日志都不能把更弱语义当作已接受结果。
 
 每个 RFC 入口都应在页首明确给出：
 
@@ -57,7 +63,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 - 当前双周 devlog，只追加该事务的入口摘要；
 - `docs/src/SUMMARY.md`，让 RFC 和事务日志都出现在 mdBook 导航中。
 
-事务日志记录实际执行、checkpoint、review 结论、验证证据、剩余限制和更正说明；RFC 记录计划、边界和 accepted contract。事务日志应链接回 RFC，RFC 也应链接到事务日志。
+事务日志记录实际执行、checkpoint、review 结论、验证证据、实现期反馈、剩余限制和更正说明；RFC 记录计划、边界和 accepted contract。事务日志应链接回 RFC，RFC 也应链接到事务日志。若实现期反馈只改变执行事实，追加事务日志即可；若它改变阶段计划、验证 floor、不变量、ABI 或接受边界，必须同步更新对应 RFC 文本。
 
 ## Tracking Issues
 
@@ -66,6 +72,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 `tracking-issues.md` 是当前问题跟踪页，不是历史归档：
 
 - 当前仍影响实现或验收的问题放在 `tracking-issues.md`；
+- 实现期暴露出的接口摩擦、状态机不闭合、边界错误或抽象过度，若会改变 accepted contract，也应作为设计问题进入 `tracking-issues.md`；
 - 已过期的旧问题清单、被否决方案和历史 review 材料放在 `backgrounds/`；
 - 实际阶段推进、checkpoint、验证证据和更正说明仍写入事务日志；
 - 不要用它替代 GitHub issue、PR 讨论或双周 devlog。
@@ -82,6 +89,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
+- [RFC-20260620-threaded-timer-event](./rfcs/threaded-timer-event/index.md)：已实现第一版；定义 soft timer 的 threaded completion lane、per-CPU timer worker、通用 `Late` initcall、`timerfd` / `ITIMER_REAL` 迁移边界，以及 wait-core timeout 非目标。
 - [RFC-20260616-kthread-core](./rfcs/kthread-core/index.md)：已接受、阶段 6 implementation gate 已关闭；纠偏 kthread core，定义 procfs-visible singleton thread group、固定 `kthreadd` TID 2、strong handle、专用 exit、user-facing API fail-closed，以及移除 service/park 的迁移 gate。
 - [RFC-20260614-kthread](./rfcs/kthread/index.md)：历史基线；记录已落地的轻量 kthread 创建代理、typed entry、stop/park 生命周期和 `KThreadService` 后台 worker 合同，已由 `kthread-core` supersede。
 - [RFC-20260614-inode-shrinker](./rfcs/inode-shrinker/index.md)：自循环 `io_shrink_threshold` gate 的 inode cache shrinker、superblock eviction path 和 ext4 backing file cache 计数合同。
@@ -91,6 +99,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 - [RFC-20260605-fileops-seek-char-ioctl](./rfcs/fileops-seek-char-ioctl/index.md)：`FileOps::seek`、positioned I/O 分层和字符设备 ioctl 默认分发计划。
 - [RFC-20260603-IOCTL-LOOP](./rfcs/ioctl-loop/index.md)：`ioctl(2)` VFS 分发、通用块设备 ioctl 和 loop 设备最小闭环计划。
 - [RFC-20260604-fanotify](./rfcs/fanotify/index.md)：fanotify path-fd 通知、group fd、mark registry 和 staged LTP 兼容计划。
+- [RFC-20260604-mount-tree-legacy-api](./rfcs/mount-tree-legacy-api/index.md)：第一版已实现并完成阶段 7 收口；保留 shared/slave/unbindable propagation、mount flag matrix、fstype alias bridge、ROFS mmap/writeback 和 unmount cleanup 等 register limitations。
 - [RFC-20260604-proc-tgid-fd](./rfcs/proc-tgid-fd/index.md)：`/proc/<tgid>/fd` 目录枚举、fd symlink `readlink()` 和第一阶段 procfs/fd 兼容计划。
 - [RFC-20260603-sched-latch](./rfcs/sched-latch/index.md)：`poll` / `select` OR wait 所需的 wait-core latch 原语和 iomux 迁移计划。
 - [RFC-20260601-sched-wait-refactor](./rfcs/sched-wait-refactor/index.md)：已完成的 scheduler wait/wake 协议重构 RFC。

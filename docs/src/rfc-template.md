@@ -22,7 +22,7 @@ docs/src/rfcs/<short-slug>/
     index.md
 ```
 
-`index.md` 与 `implementation.md` 必须存在。`invariants.md` 在协议、不变量、锁序、生命周期或证明义务复杂时创建。`tracking-issues.md` 在实现期需要持续分级跟踪问题时创建。`backgrounds/` 用于历史背景、旧问题清单、被拒绝方案和旧计划归档；背景材料不能覆盖 canonical 结论。
+`index.md` 与 `implementation.md` 必须存在。`invariants.md` 在协议、不变量、锁序、生命周期或证明义务复杂时创建。`tracking-issues.md` 在 design review 或实现反馈发现会影响实现顺序、review gate、停止边界或验收判断的设计问题时创建。`backgrounds/` 用于历史背景、旧问题清单、被拒绝方案和旧计划归档；背景材料不能覆盖 canonical 结论。
 
 RFC 一旦进入实现阶段，必须创建对应事务日志：
 
@@ -42,8 +42,8 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 **最后更新：** YYYY-MM-DD
 **领域：** scheduler / fs / mm / ...
 **事务日志：** Draft 阶段可写 `None`；进入实现阶段后必须链接对应 transaction。
-**开放问题：** 简短列出待决问题；没有则写 `None`。
-**下一步：** 下一次 review、原型、迁移阶段、验证或收口动作。
+**开放问题：** 简短列出当前 blocker、可带入实现的 gated item 或待决问题；没有则写 `None`。
+**下一步：** 下一次 review、probe / vertical slice、迁移阶段、验证或收口动作。
 
 ## 摘要
 
@@ -81,7 +81,7 @@ Canonical：
 
 ## 接受边界
 
-说明本 RFC 被接受意味着什么，哪些内容仍需审查，以及哪些变化必须回到本 RFC 或 follow-up RFC。
+说明本 RFC 被接受意味着什么，哪些内容仍需审查，以及哪些变化必须回到本 RFC 或 follow-up RFC。若允许带着不确定性进入实现，必须列出对应验证点、停止条件和回写路径。
 
 ## 备选方案
 
@@ -107,7 +107,7 @@ Canonical：
 **父 RFC：** [RFC-YYYYMMDD-short-slug](./index.md)
 **事务日志：** [YYYY-MM-DD-short-slug](../../devlog/transactions/YYYY-MM-DD-short-slug.md)
 
-本文只跟踪当前仍影响实现顺序、review gate、停止边界或验收判断的问题。历史问题清单和旧 review 材料放在 `backgrounds/`。
+本文只跟踪当前仍影响实现顺序、review gate、停止边界或验收判断的设计问题。问题可以来自文档层 review，也可以来自实现期反馈；普通实现进度、TODO、历史问题清单和旧 review 材料不放在这里，历史材料放在 `backgrounds/`。
 
 ## Apollyon
 
@@ -190,6 +190,7 @@ Canonical：
 
 - 原则 1。
 - 原则 2。
+- 允许带入实现的不确定性、验证方式、停止条件和 RFC 回写路径。
 
 ## 阶段 1：简短阶段名
 
@@ -205,6 +206,11 @@ Canonical：
 审计：
 
 - 本阶段需要执行的搜索、review 或分类。
+
+反馈假设：
+
+- 本阶段要用真实实现验证的假设。
+- 失败信号、停止条件，以及结果应写回 transaction devlog、`implementation.md`、`invariants.md`、`tracking-issues.md` 还是 register / current limitations。
 
 模块边界预检：
 
@@ -241,6 +247,26 @@ write set：
 ## 停止边界
 
 说明什么时候应继续追查 issue，什么时候应停止实现形状争论。
+
+## Probe / Vertical Slice Gates
+
+默认不要为 probe / feedback 新建通用 `feedback.md`、`probe.md` 或 `experiments.md`。计划写在本节；执行结果写入 transaction devlog。只有证据包过长时，才在 `backgrounds/` 下增加具体命名的证据文件，并从本节链接。
+
+### Gate P1 - 简短标题
+
+**Hypothesis:** 要验证的设计假设。
+**Protected Goal / Invariant:** 本 gate 不得削弱的目标、不变量、ABI 边界或验收条件。
+**Minimum Write Set:** 允许触碰的最小文件、模块或文档。
+**Non-goals:** 明确不沉淀的长期抽象、兼容层或 public API。
+**Validation Floor:** build / source audit / smoke / LTP 子集 / 用户运行证据。
+**Failure Signals:** 出现什么现象就停止当前 gate，并回到 RFC 或人工决策。
+**Write-back:** 结果应写回 transaction devlog、`implementation.md`、`invariants.md`、`tracking-issues.md` 还是 register / current limitations。
+**Exit:** 删除探针 / 升级为正式阶段 / 登记 limitation 或 open issue / 回到 RFC review。
+**Evidence:** 可选；只有证据包较长时链接 `backgrounds/<topic>-probe-YYYYMMDD.md`。
+
+## 实现期反馈记录
+
+- YYYY-MM-DD：反馈来源、影响分类、是否保持目标/不变量、更新位置、transaction devlog 链接。
 
 ## Write Set 扩展记录
 

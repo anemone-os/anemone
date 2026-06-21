@@ -185,6 +185,47 @@ impl Drop for PipeTx {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PipeEndpointSide {
+    Read,
+    Write,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PipeEndpointInfo {
+    side: PipeEndpointSide,
+}
+
+impl PipeEndpointInfo {
+    pub const fn side(self) -> PipeEndpointSide {
+        self.side
+    }
+}
+
+pub fn pipe_endpoint_info(file: &File) -> Option<PipeEndpointInfo> {
+    if file.prv().cast::<PipeRx>().is_some() {
+        Some(PipeEndpointInfo {
+            side: PipeEndpointSide::Read,
+        })
+    } else if file.prv().cast::<PipeTx>().is_some() {
+        Some(PipeEndpointInfo {
+            side: PipeEndpointSide::Write,
+        })
+    } else {
+        None
+    }
+}
+
+pub fn pipe_endpoints_same_pipe(lhs: &File, rhs: &File) -> Result<bool, SysError> {
+    let lhs = pipe_state(lhs).ok_or(SysError::InvalidArgument)?;
+    let rhs = pipe_state(rhs).ok_or(SysError::InvalidArgument)?;
+
+    // Equality is a one-shot owner-side behavior check for splice/tee errno
+    // routing. The syscall layer must not receive or cache the pipe object or a
+    // derived pipe id as protocol state.
+    Ok(Arc::ptr_eq(lhs, rhs))
+}
+
 fn prune_pipe_poll_triggers(queue: &mut Vec<PipePollTrigger>, side: &'static str) {
     let before = queue.len();
     queue.retain(|entry| !entry.trigger.is_prunable());

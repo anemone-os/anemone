@@ -28,6 +28,7 @@ fn load_binary(ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
         None => return Ok(ExecResult::NotRecognized),
     };
 
+    let script_name = ctx.interp_fn().to_string();
     let interp_argv0 = interp;
     let interp = get_current_task()
         .lookup_path(Path::new(&interp_argv0), ResolveFlags::empty())
@@ -42,19 +43,28 @@ fn load_binary(ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
         })?;
     check_exec_permission(&interp)?;
     ctx.path = interp;
+    ctx.set_interp_fn(&interp_argv0);
+    let old_argv = core::mem::take(&mut ctx.argv);
+    ctx.argv = rewrite_argv(interp_argv0, interp_arg, script_name, old_argv);
+
+    Ok(ExecResult::Redirected)
+}
+
+fn rewrite_argv(
+    interp_argv0: String,
+    interp_arg: Option<String>,
+    script_name: String,
+    old_argv: Vec<String>,
+) -> Vec<String> {
     let mut new_argv = vec![interp_argv0];
     if let Some(arg) = interp_arg {
         new_argv.push(arg);
     }
-    // TODO: exec_fn or path? im a bit confused...
-    new_argv.push(ctx.exec_fn.to_string());
-    let old_argv = core::mem::take(&mut ctx.argv);
+    new_argv.push(script_name);
     if old_argv.len() > 1 {
         new_argv.extend(old_argv.into_iter().skip(1));
     }
-    ctx.argv = new_argv;
-
-    Ok(ExecResult::Redirected)
+    new_argv
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -80,16 +90,16 @@ impl ShebangArgs {
                 {
                     return None;
                 }
-                buf.iter().position(|&b| b == 0).unwrap_or(buf.len())
+                buf.len()
             },
         };
         let mut line = &buf[SHEBANG_MAGIC.len()..end];
 
         // shebang's format is unexpectedly a bit tedious to parse...
 
-        // 1. remove trailing ' ', '\t', and '\r'.
+        // 1. remove trailing ' ' and '\t'.
         while let Some(&b) = line.last() {
-            if b == b' ' || b == b'\t' || b == b'\r' {
+            if b == b' ' || b == b'\t' {
                 line = &line[..line.len() - 1];
             } else {
                 break;
@@ -112,12 +122,15 @@ impl ShebangArgs {
         //    argument.
         let split_idx = line
             .iter()
-            .position(|&b| b == b' ' || b == b'\t')
+            .position(|&b| b == b' ' || b == b'\t' || b == 0)
             .unwrap_or(line.len());
 
         let interp = String::from_utf8(line[..split_idx].to_vec()).ok()?;
 
         let mut arg_bytes = &line[split_idx..];
+        if arg_bytes.first() == Some(&0) {
+            arg_bytes = &[];
+        }
         let mut arg_start = 0;
         while arg_start < arg_bytes.len()
             && (arg_bytes[arg_start] == b' ' || arg_bytes[arg_start] == b'\t')
@@ -125,6 +138,11 @@ impl ShebangArgs {
             arg_start += 1;
         }
         arg_bytes = &arg_bytes[arg_start..];
+        let arg_end = arg_bytes
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(arg_bytes.len());
+        arg_bytes = &arg_bytes[..arg_end];
 
         let interp_arg = if arg_bytes.is_empty() {
             None
@@ -175,6 +193,18 @@ mod kunits {
             ShebangArgs::parse(b"#!/usr/bin/env python3 -c\n"),
             Some(expected("/usr/bin/env", Some("python3 -c")))
         );
+        assert_eq!(
+            ShebangArgs::parse(b"#!/bin/sh\0ignored"),
+            Some(expected("/bin/sh", None))
+        );
+        assert_eq!(
+            ShebangArgs::parse(b"#!/usr/bin/env python3\0ignored"),
+            Some(expected("/usr/bin/env", Some("python3")))
+        );
+        assert_eq!(
+            ShebangArgs::parse(b"#!/bin/sh\r\n"),
+            Some(expected("/bin/sh\r", None))
+        );
     }
 
     #[kunit]
@@ -185,5 +215,40 @@ mod kunits {
         assert_eq!(ShebangArgs::parse(b"#!\n"), None);
         // only spaces after "#!".
         assert_eq!(ShebangArgs::parse(b"#!   \n"), None);
+    }
+
+    #[kunit]
+    fn test_nested_argv_rewrite() {
+        let first_argv = rewrite_argv(
+            "/interp-script".to_string(),
+            None,
+            "./outer".to_string(),
+            vec!["outer-argv0".to_string(), "arg".to_string()],
+        );
+        assert_eq!(
+            first_argv,
+            vec![
+                "/interp-script".to_string(),
+                "./outer".to_string(),
+                "arg".to_string()
+            ]
+        );
+
+        let nested_argv = rewrite_argv(
+            "/bin/sh".to_string(),
+            Some("-e".to_string()),
+            "/interp-script".to_string(),
+            first_argv,
+        );
+        assert_eq!(
+            nested_argv,
+            vec![
+                "/bin/sh".to_string(),
+                "-e".to_string(),
+                "/interp-script".to_string(),
+                "./outer".to_string(),
+                "arg".to_string()
+            ]
+        );
     }
 }

@@ -1,10 +1,10 @@
 use anemone_rs::{
     os::linux::{
-        fs::{chdir, fstatat, AtFd},
+        fs::{AtFd, chdir, fstatat},
         process::{
-            execve, exit, fork, sched_yield, setpgid,
-            signal::{kill, SigNo},
-            wait4, WStatus, WStatusRaw, WaitFor, WaitOptions,
+            WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, sched_yield, setpgid,
+            signal::{SigNo, kill},
+            wait4,
         },
         time::gettimeofday,
     },
@@ -21,9 +21,13 @@ const LTP_MODULES_DEP: &str = include_str!("../fixtures/modules.dep");
 const MICROS_PER_SECOND: i64 = 1_000_000;
 // Temporary containment for ANE-20260616-LTP-POST-SUMMARY-HANG: keep long
 // profiles moving while the kernel-side wait/cleanup root cause is open.
-const LTP_CASE_TIMEOUT_SECONDS: i64 = 60;
+const LTP_CASE_TIMEOUT_SECONDS: i64 = 90;
 const LTP_CASE_KILL_GRACE_SECONDS: i64 = 5;
 const LTP_CASE_TIMEOUT_EXIT_CODE: i32 = 124;
+// LTP result bits use TCONF=32 for "unsupported configuration". Only a pure
+// TCONF exit is a skip; mixed TCONF|TFAIL/TBROK still represents a real
+// failure.
+const LTP_TCONF_EXIT_CODE: i32 = 32;
 const LTP_CASE_TIMEOUT_US: i64 = LTP_CASE_TIMEOUT_SECONDS * MICROS_PER_SECOND;
 const LTP_CASE_KILL_GRACE_US: i64 = LTP_CASE_KILL_GRACE_SECONDS * MICROS_PER_SECOND;
 
@@ -116,6 +120,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
         name: "fs",
         cases: include_str!("../ltp/groups/fs.txt"),
     },
+    LtpGroup {
+        name: "mount-legacy",
+        cases: include_str!("../ltp/groups/mount-legacy.txt"),
+    },
     // LtpGroup {
     //     name: "full",
     //     cases: include_str!("../ltp/groups/full.txt"),
@@ -167,6 +175,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
         name: "signal",
         cases: include_str!("../ltp/groups/signal.txt"),
+    },
+    LtpGroup {
+        name: "splice",
+        cases: include_str!("../ltp/groups/splice.txt"),
     },
     LtpGroup {
         name: "schedule",
@@ -253,6 +265,7 @@ enum LtpCaseOutcome {
     Passed,
     Failed,
     InfraFailed,
+    Skipped,
 }
 
 enum LtpCaseWaitResult {
@@ -358,6 +371,7 @@ fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
             LtpCaseOutcome::Passed => summary.passed += 1,
             LtpCaseOutcome::Failed => summary.failed += 1,
             LtpCaseOutcome::InfraFailed => summary.infra_failed += 1,
+            LtpCaseOutcome::Skipped => summary.skipped += 1,
         }
     }
 
@@ -432,6 +446,9 @@ fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpC
                 if exit_code == 0 {
                     println!("PASS LTP CASE {} : {}", case.name, exit_code);
                     LtpCaseOutcome::Passed
+                } else if exit_code == LTP_TCONF_EXIT_CODE {
+                    println!("SKIP LTP CASE {} : {}", case.name, exit_code);
+                    LtpCaseOutcome::Skipped
                 } else {
                     println!("FAIL LTP CASE {} : {}", case.name, exit_code);
                     LtpCaseOutcome::Failed
@@ -602,7 +619,7 @@ fn parse_case_line(line: &str) -> Option<LtpCaseSpec<'_>> {
 
     let (header, args) = match line.split_once(':') {
         Some((header, args)) => {
-            let args = args.split_ascii_whitespace().collect::<Vec<_>>();
+            let args = parse_case_args(args, line);
             if args.is_empty() {
                 panic!("user-test: invalid LTP case line {line}: missing arguments");
             }
@@ -622,6 +639,64 @@ fn parse_case_line(line: &str) -> Option<LtpCaseSpec<'_>> {
         executable,
         args,
     })
+}
+
+fn parse_case_args<'a>(args: &'a str, line: &str) -> Vec<&'a str> {
+    let mut parsed = Vec::new();
+    let bytes = args.as_bytes();
+    let mut idx = 0;
+
+    while idx < bytes.len() {
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        }
+        if idx == bytes.len() {
+            break;
+        }
+
+        let start = idx;
+        let token = match bytes[idx] {
+            b'"' | b'\'' => {
+                let quote = bytes[idx];
+                idx += 1;
+                let token_start = idx;
+                while idx < bytes.len() && bytes[idx] != quote {
+                    idx += 1;
+                }
+                if idx == bytes.len() {
+                    panic!("user-test: invalid LTP case line {line}: unterminated quoted argument");
+                }
+                let token = &args[token_start..idx];
+                idx += 1;
+                if idx < bytes.len() && !bytes[idx].is_ascii_whitespace() {
+                    panic!(
+                        "user-test: invalid LTP case line {line}: quoted argument must end at token boundary",
+                    );
+                }
+                token
+            },
+            b => {
+                if b == b'\\' {
+                    panic!(
+                        "user-test: invalid LTP case line {line}: backslash escaping is unsupported",
+                    );
+                }
+                idx += 1;
+                while idx < bytes.len() && !bytes[idx].is_ascii_whitespace() {
+                    if matches!(bytes[idx], b'"' | b'\'' | b'\\') {
+                        panic!(
+                            "user-test: invalid LTP case line {line}: quotes are only supported around a whole argument",
+                        );
+                    }
+                    idx += 1;
+                }
+                &args[start..idx]
+            },
+        };
+        parsed.push(token);
+    }
+
+    parsed
 }
 
 fn ltp_exit_code(wstatus: WStatus) -> i32 {

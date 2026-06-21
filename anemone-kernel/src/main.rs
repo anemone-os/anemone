@@ -51,6 +51,7 @@ use crate::{
         },
         probe_virtual_devices,
     },
+    initcall::{InitCallLevel, run_initcalls},
     mm::layout::KernelLayoutTrait,
     percpu::percpu_login,
     prelude::*,
@@ -70,7 +71,7 @@ static KUNIT_SYNC_COUNTER: CpuSync = CpuSync::new("kunit");
 fn mount_rootfs() {
     match ROOTFS_SOURCE_KIND {
         "pseudo" => {
-            mount_root("ramfs", MountSource::Pseudo, MountFlags::empty())
+            mount_root("ramfs", MountSource::Pseudo, MountAttrFlags::empty())
                 .expect("root mount failed");
         },
         "block" => {
@@ -81,7 +82,7 @@ fn mount_rootfs() {
             mount_root(
                 ROOTFS_FS_TYPE,
                 MountSource::Block(root_dev),
-                MountFlags::empty(),
+                MountAttrFlags::empty(),
             )
             .expect("root mount failed");
         },
@@ -201,9 +202,9 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
 
         FINISH_SYNC_COUNTER.sync_with_counter();
         // Ordinary kthreads may round-robin onto any CPU, so wait until every CPU
-        // has completed local init and marked itself online before publishing one.
-        fs::init_inode_shrinker();
-        mm::oom::init_oom_killer();
+        // has completed local init and marked itself online before late services
+        // publish their workers. `kthreadd` remains a hand-built boot invariant.
+        run_initcalls(InitCallLevel::Late);
         kinfoln!("bsp #{} kinit finished", bsp_id);
     }
 

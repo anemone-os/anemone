@@ -3,6 +3,9 @@
 //! `kthreadd` owns only the create transaction. Ordinary kthread lifecycle is
 //! owned by `KThreadControl` and exposed to subsystem owners through a strong
 //! `KThreadHandle`; scheduler state remains owned by `TaskSchedState`.
+//! Long-running kthread entries must either block in a wait primitive or
+//! explicitly yield between bounded work batches; trap-exit kernel preemption
+//! is optional and cannot be the only fairness mechanism.
 
 use crate::prelude::*;
 
