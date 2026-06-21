@@ -25,7 +25,7 @@ bootstrap_heap_shift_kb = 10 # Size of bootstrap heap as a power of 2 in KB
 log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
 log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
 console_log_print_level = 7 # Maximum log level emitted to consoles: Emerg=0 ... Debug=7; capped by console_log_record_level.
-console_log_record_level = 2 # Maximum log level formatted and recorded in the kernel log buffer: Emerg=0 ... Debug=7
+console_log_record_level = 3 # Maximum log level formatted and recorded in the kernel log buffer: Emerg=0 ... Debug=7
 kstack_shift_kb = 9 # Kernel stack size as a power of 2 in KB
 remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
 max_ident_len_bytes = 255 # Maximum length of identity strings in bytes

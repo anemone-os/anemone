@@ -483,7 +483,7 @@ fn runtime_for_test_script<'a>(family: &'a str, script: &str) -> &'a str {
     }
 }
 
-fn set_kernel_preempt_for_iozone(enabled: bool, family: &str) {
+fn set_kernel_preempt_for_family(enabled: bool, family: &str) {
     set_kernel_preempt_enabled(enabled).unwrap_or_else(|errno| {
         panic!("user-test: failed to set kernel preemption for {family} iozone: {errno:?}")
     });
@@ -511,13 +511,15 @@ fn run_test_family(family: &str, scripts: &[&str]) {
         println!("user-test: running {family} {script}...");
         let is_iozone = *script == "iozone_testcode.sh";
         if is_iozone {
-            println!("user-test: disabling kernel preemption for {family} iozone...");
-            set_kernel_preempt_for_iozone(false, family);
+            // println!("user-test: disabling kernel preemption for {family}
+            // iozone..."); set_kernel_preempt_for_family(false,
+            // family);
         }
         run_busybox_in_dir(workdir.as_str(), &["busybox", "sh", script], script);
         if is_iozone {
-            set_kernel_preempt_for_iozone(true, family);
-            println!("user-test: re-enabled kernel preemption after {family} iozone.");
+            // set_kernel_preempt_for_family(true, family);
+            // println!("user-test: re-enabled kernel preemption after {family}
+            // iozone.");
         }
     }
     println!("user-test: {family} competition tests finished.");
