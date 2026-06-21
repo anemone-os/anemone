@@ -80,7 +80,7 @@ fn sys_fallocate(fd: Fd, mode: FallocateMode, offset: i64, len: i64) -> Result<u
 
     if mode.has_unsupported_flags() {
         // Only the basic allocation/KEEP_SIZE subset is modeled at this stage.
-        kerrln!(
+        knoticeln!(
             "sys_fallocate: unsupported mode flags {:#x}, fd={:?}, offset={}, len={}, ignored",
             mode.0,
             fd,
