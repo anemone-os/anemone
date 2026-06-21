@@ -20,3 +20,12 @@ pub mod power {
         power::shutdown(magic)
     }
 }
+
+pub mod kernel_preempt {
+    use super::*;
+    use sys::anemone::kernel_preempt;
+
+    pub fn set_enabled(enabled: bool) -> Result<(), Errno> {
+        kernel_preempt::set_enabled(enabled)
+    }
+}

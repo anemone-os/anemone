@@ -14,3 +14,11 @@ pub mod power {
         unsafe { syscall(SYS_POWER_SHUTDOWN, magic, 0, 0, 0, 0, 0).map(|_| ()) }
     }
 }
+
+pub mod kernel_preempt {
+    use super::*;
+
+    pub fn set_enabled(enabled: bool) -> Result<(), Errno> {
+        unsafe { syscall(SYS_SET_KERNEL_PREEMPT, enabled as u64, 0, 0, 0, 0, 0).map(|_| ()) }
+    }
+}

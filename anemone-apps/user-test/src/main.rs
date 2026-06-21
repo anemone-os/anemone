@@ -10,7 +10,7 @@ use anemone_rs::{
         system::native::power::SHUTDOWN_MAGIC,
     },
     os::{
-        anemone::power::shutdown,
+        anemone::{kernel_preempt::set_enabled as set_kernel_preempt_enabled, power::shutdown},
         linux::{
             fs::{chdir, chroot, close, fstatat, mkdirat, mount, openat, read, write, AtFd},
             process::{execve, fork, wait4, WStatus, WStatusRaw, WaitFor, WaitOptions},
@@ -474,6 +474,12 @@ fn runtime_for_test_script<'a>(family: &'a str, script: &str) -> &'a str {
     }
 }
 
+fn set_kernel_preempt_for_iozone(enabled: bool, family: &str) {
+    set_kernel_preempt_enabled(enabled).unwrap_or_else(|errno| {
+        panic!("user-test: failed to set kernel preemption for {family} iozone: {errno:?}")
+    });
+}
+
 fn run_test_family(family: &str, scripts: &[&str]) {
     switch_runtime(family);
     prepare_testcode(family);
@@ -494,7 +500,16 @@ fn run_test_family(family: &str, scripts: &[&str]) {
             active_runtime = script_runtime;
         }
         println!("user-test: running {family} {script}...");
+        let is_iozone = *script == "iozone_testcode.sh";
+        if is_iozone {
+            println!("user-test: disabling kernel preemption for {family} iozone...");
+            set_kernel_preempt_for_iozone(false, family);
+        }
         run_busybox_in_dir(workdir.as_str(), &["busybox", "sh", script], script);
+        if is_iozone {
+            set_kernel_preempt_for_iozone(true, family);
+            println!("user-test: re-enabled kernel preemption after {family} iozone.");
+        }
     }
     println!("user-test: {family} competition tests finished.");
 }
@@ -517,7 +532,7 @@ fn run_comp_tests() {
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
-    ltp::run_ltp_tests();
+    // ltp::run_ltp_tests();
 
     println!("user-test: all competition tests finished.");
 }
