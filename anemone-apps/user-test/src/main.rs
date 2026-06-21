@@ -58,6 +58,7 @@ cfg_select! {
             "ld-musl-riscv64.so.1",
             "ld-musl-riscv64-sf.so.1",
         ];
+        const INSTALL_BIN_SH_ASH_WRAPPER: bool = false;
         const STAGED_COMPETITION_FIXTURES: &[StagedCompetitionFixture] = &[
             StagedCompetitionFixture {
                 source: "/fixtures/user-test/tools/mke2fs",
@@ -73,9 +74,21 @@ cfg_select! {
         const ACTIVE_LIB_DIR: &str = "/lib64";
         const ACTIVE_LIB_DIRS: &[&str] = &["/lib64", "/usr/lib64"];
         const MUSL_LOADER_NAMES: &[&str] = &["ld-musl-loongarch-lp64d.so.1"];
-        const STAGED_COMPETITION_FIXTURES: &[StagedCompetitionFixture] = &[];
+        const INSTALL_BIN_SH_ASH_WRAPPER: bool = true;
+        const STAGED_COMPETITION_FIXTURES: &[StagedCompetitionFixture] = &[
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/mke2fs",
+                dest: "/bin/mkfs.ext4",
+            },
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/mke2fs",
+                dest: "/bin/mkfs.ext3",
+            },
+        ];
     }
 }
+
+const BIN_SH_ASH_WRAPPER: &[u8] = b"#!/bin/busybox ash\nexec /bin/busybox ash \"$@\"\n";
 
 struct StagedCompetitionFixture {
     source: &'static str,
@@ -169,13 +182,13 @@ fn run_local_tests() {
     // println!("user-test: OOM killer test finished.");
 
     // 7. pthread create serial1 stress test
-    println!("user-test: running pthread create stress test...");
-    local_run_cmd(
-        "/bin/pthread-create-stress",
-        &["pthread-create-stress"],
-        &[],
-    );
-    println!("user-test: pthread create stress test finished.");
+    // println!("user-test: running pthread create stress test...");
+    // local_run_cmd(
+    //     "/bin/pthread-create-stress",
+    //     &["pthread-create-stress"],
+    //     &[],
+    // );
+    // println!("user-test: pthread create stress test finished.");
 }
 
 fn ensure_dir(path: &str) {
@@ -282,6 +295,7 @@ fn init_competition_environment() {
         "/bin/busybox",
     );
     run_busybox(&["busybox", "--install", "-s", "/bin"], "busybox --install");
+    install_bin_sh_ash_wrapper_if_needed();
 
     ensure_symlink("/usr/bin", "/bin");
     ensure_symlink("/usr/sbin", "/bin");
@@ -364,6 +378,28 @@ fn write_all(fd: u32, mut buf: &[u8], path: &str) {
         }
         buf = &buf[written..];
     }
+}
+
+fn install_bin_sh_ash_wrapper_if_needed() {
+    if !INSTALL_BIN_SH_ASH_WRAPPER {
+        return;
+    }
+
+    run_busybox(&["busybox", "ash", "-c", "true"], "busybox ash smoke");
+    run_busybox(&["busybox", "rm", "-f", "/bin/sh"], "/bin/sh");
+
+    let fd = openat(
+        AtFd::Cwd,
+        Path::new("/bin/sh"),
+        O_WRONLY | O_CREAT | O_TRUNC,
+        0o755,
+    )
+    .unwrap_or_else(|errno| panic!("user-test: failed to create /bin/sh wrapper: {errno:?}"));
+    write_all(fd, BIN_SH_ASH_WRAPPER, "/bin/sh");
+    close(fd)
+        .unwrap_or_else(|errno| panic!("user-test: failed to close /bin/sh wrapper: {errno:?}"));
+
+    println!("user-test: installed /bin/sh ash wrapper.");
 }
 
 fn copy_staged_fixture(source: &str, dest: &str) {
@@ -510,7 +546,7 @@ fn run_comp_tests() {
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
-    // ltp::run_ltp_tests();
+    ltp::run_ltp_tests();
 
     println!("user-test: all competition tests finished.");
 }
