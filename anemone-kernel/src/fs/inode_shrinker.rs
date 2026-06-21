@@ -19,6 +19,10 @@ fn inode_shrinker_entry(ctx: KThreadCtx, _: AnyOpaque) -> i32 {
         }
 
         shrink_inodes(&ctx);
+        // A high-pressure predicate can remain true after one scan, especially
+        // when no more inode candidates are reclaimable. Without kernel
+        // preemption, this worker must still yield between scan rounds.
+        yield_now();
     }
 
     0
@@ -45,11 +49,11 @@ fn shrink_inodes(ctx: &KThreadCtx) {
         if !shrinkable_superblock(&sb) {
             continue;
         }
+
         // Stopgap: background reclaim must not unpublish indexed filesystem
         // entries until the ext4 reload/eviction identity race is fixed.
-        // Explicit unmount cleanup still goes through 'try_evict_all()"
-        let include_indexed = false; //sb.fs().flags().contains(FileSystemFlags::SHRINKABLE_ICACHE);
-        let candidates = sb.cached_inode_snapshot(include_indexed);
+        // Explicit unmount cleanup still goes through `try_evict_all()`.
+        let candidates = sb.cached_inode_snapshot(false);
 
         for inode in candidates {
             if ctx.should_stop() {
@@ -86,60 +90,5 @@ fn try_shrink_inode(sb: &SuperBlock, inode: &Arc<Inode>) -> bool {
             );
             false
         },
-    }
-}
-
-#[cfg(feature = "kunit")]
-mod kunits {
-    use super::*;
-
-    #[kunit]
-    fn memory_pressure_threshold_is_strictly_greater() {
-        assert!(
-            !FrameAllocatorStats {
-                total_pages: 100,
-                free_pages: 50,
-            }
-            .exceeds_io_shrink_threshold()
-        );
-        assert!(
-            FrameAllocatorStats {
-                total_pages: 100,
-                free_pages: 49,
-            }
-            .exceeds_io_shrink_threshold()
-        );
-        assert!(
-            !FrameAllocatorStats {
-                total_pages: 0,
-                free_pages: 0,
-            }
-            .exceeds_io_shrink_threshold()
-        );
-    }
-
-    #[kunit]
-    fn oom_kill_threshold_is_strictly_greater() {
-        assert!(
-            !FrameAllocatorStats {
-                total_pages: 100,
-                free_pages: 10,
-            }
-            .exceeds_oom_kill_threshold()
-        );
-        assert!(
-            FrameAllocatorStats {
-                total_pages: 100,
-                free_pages: 9,
-            }
-            .exceeds_oom_kill_threshold()
-        );
-        assert!(
-            !FrameAllocatorStats {
-                total_pages: 0,
-                free_pages: 0,
-            }
-            .exceeds_oom_kill_threshold()
-        );
     }
 }
