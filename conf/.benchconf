@@ -43,5 +43,5 @@ symlink_resolve_limit = 16 # Maximum number of symbolic links to resolve in a si
 max_fd_per_process = 1024 # Default maximum number of file descriptors per process. Might be overridden by certain syscalls.
 ramdisk_count = 16 # Number of static ramdisk block devices to publish at boot.
 loop_device_count = 8 # Number of static loop block devices to publish at boot.
-io_shrink_threshold = 80 # Physical memory usage percentage above which the inode shrinker worker runs a scan.
+io_shrink_threshold = 50 # Physical memory usage percentage above which the inode shrinker worker runs a scan.
 oom_kill_threshold = 90 # Physical memory usage percentage above which the OOM killer worker is woken.
