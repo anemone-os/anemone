@@ -67,7 +67,7 @@ fn shrink_inodes(ctx: &KThreadCtx) {
     }
 
     if evicted > 0 {
-        kerrln!("inode shrinker: evicted {} inode(s)", evicted);
+        knoticeln!("inode shrinker: evicted {} inode(s)", evicted);
     }
 }
 

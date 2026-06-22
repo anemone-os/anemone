@@ -369,6 +369,11 @@ mod preempt_counter {
 
     gen_counter_impl!(Preempt);
 
+    /// Runtime policy bit for trap-exit kernel preemption. This does not
+    /// replace `PreemptCounter`; it only gates the scheduler's interrupt-return
+    /// reschedule point for benchmark/test containment.
+    static KERNEL_PREEMPT_ENABLED: AtomicBool = AtomicBool::new(true);
+
     #[derive(Debug)]
     pub struct PreemptGuard;
 
@@ -399,9 +404,21 @@ mod preempt_counter {
     pub fn allow_preempt() -> bool {
         unsafe { with_intr_disabled(|| with_core_local(|c| c.preempt_counter.0 == 0)) }
     }
+
+    pub fn kernel_preempt_enabled() -> bool {
+        cfg!(feature = "kernel_preempt") && KERNEL_PREEMPT_ENABLED.load(Ordering::Acquire)
+    }
+
+    pub fn set_kernel_preempt_enabled(enabled: bool) {
+        if cfg!(feature = "kernel_preempt") {
+            KERNEL_PREEMPT_ENABLED.store(enabled, Ordering::Release);
+        }
+    }
 }
 use preempt_counter::PreemptCounter;
-pub use preempt_counter::{PreemptGuard, allow_preempt};
+pub use preempt_counter::{
+    PreemptGuard, allow_preempt, kernel_preempt_enabled, set_kernel_preempt_enabled,
+};
 
 /// This array is used for storing percpu base addresses for all CPUs.
 ///

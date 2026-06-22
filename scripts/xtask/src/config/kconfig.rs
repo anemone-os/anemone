@@ -38,7 +38,10 @@ pub struct Parameters {
     pub bootstrap_heap_shift_kb: Option<u64>,
     pub log_buffer_shift_kb: Option<u64>,
     pub log_record_shift_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub console_log_level: Option<u8>,
+    pub console_log_print_level: Option<u8>,
+    pub console_log_record_level: Option<u8>,
     pub kstack_shift_kb: Option<u64>,
     pub remap_shift_gb: Option<u64>,
     pub max_ident_len_bytes: Option<usize>,
@@ -82,6 +85,27 @@ impl Parameters {
             };
         }
 
+        let console_log_print_level = self
+            .console_log_print_level
+            .or(self.console_log_level)
+            .unwrap_or_else(|| {
+                defconfig
+                    .parameters
+                    .console_log_print_level
+                    .or(defconfig.parameters.console_log_level)
+                    .expect("Default value for console_log_print_level must be specified")
+            });
+        let console_log_record_level = self
+            .console_log_record_level
+            .or(self.console_log_level)
+            .unwrap_or_else(|| {
+                defconfig
+                    .parameters
+                    .console_log_record_level
+                    .or(defconfig.parameters.console_log_level)
+                    .expect("Default value for console_log_record_level must be specified")
+            });
+
         format!(
             r#"//! Auto-generated kernel parameters from kconfig, do not edit manually.
 #![allow(unused)]
@@ -96,8 +120,14 @@ pub const LOG_RECORD_SHIFT_BYTES: u64 = {};
 /// Maximum numeric log level that may be emitted to consoles.
 ///
 /// Log levels follow the kernel ordering: Emerg=0 ... Debug=7.
-/// Messages with a numerically larger level stay in the kernel log buffer only.
-pub const CONSOLE_LOG_LEVEL: u8 = {};
+/// Messages with a numerically larger level may still be recorded in the kernel log buffer.
+/// Console output is also capped by CONSOLE_LOG_RECORD_LEVEL.
+pub const CONSOLE_LOG_PRINT_LEVEL: u8 = {};
+/// Maximum numeric log level that may be formatted and recorded in the kernel log buffer.
+///
+/// Log macros with a numerically larger level are compiled down to a constant-false branch,
+/// so their format arguments are not evaluated at runtime.
+pub const CONSOLE_LOG_RECORD_LEVEL: u8 = {};
 /// Kernel stack size as a power of 2 in KB
 pub const KSTACK_SHIFT_KB: u64 = {};
 /// Remap region size as a power of 2 in GB
@@ -143,7 +173,8 @@ pub const LOOP_DEVICE_COUNT: usize = {};
             default_or!(bootstrap_heap_shift_kb),
             default_or!(log_buffer_shift_kb),
             default_or!(log_record_shift_bytes),
-            default_or!(console_log_level),
+            console_log_print_level,
+            console_log_record_level,
             default_or!(kstack_shift_kb),
             default_or!(remap_shift_gb),
             default_or!(max_ident_len_bytes),

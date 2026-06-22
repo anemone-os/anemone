@@ -22,3 +22,6 @@ sdcard-*
 /issues
 LOCAL.md
 .codex
+kernel-*
+disk*.img
+log-fetch*

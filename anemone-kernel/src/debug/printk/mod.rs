@@ -60,28 +60,34 @@ mod klog {
 
     #[macro_export]
     macro_rules! kprint {
-        (noprint, $level:ident, $($arg:tt)*) => {
-            $crate::debug::printk::__klog(
-                Some($crate::debug::printk::LogLevel::$level),
-                format_args!(
-                    "[{:>7}] {}",
-                    $crate::debug::printk::LogLevel::$level.as_painted(),
-                    format_args!($($arg)*),
-                ),
-                true,
-            );
-        };
-        ($level:ident, $($arg:tt)*) => {
-            $crate::debug::printk::__klog(
-                Some($crate::debug::printk::LogLevel::$level),
-                format_args!(
-                    "[{:>7}] {}",
-                    $crate::debug::printk::LogLevel::$level.as_painted(),
-                    format_args!($($arg)*),
-                ),
-                false,
-            );
-        };
+        (noprint, $level:ident, $($arg:tt)*) => {{
+            const SHOULD_RECORD: bool = $crate::debug::printk::LogLevel::$level.records();
+            if SHOULD_RECORD {
+                $crate::debug::printk::__klog(
+                    Some($crate::debug::printk::LogLevel::$level),
+                    format_args!(
+                        "[{:>7}] {}",
+                        $crate::debug::printk::LogLevel::$level.as_painted(),
+                        format_args!($($arg)*),
+                    ),
+                    true,
+                );
+            }
+        }};
+        ($level:ident, $($arg:tt)*) => {{
+            const SHOULD_RECORD: bool = $crate::debug::printk::LogLevel::$level.records();
+            if SHOULD_RECORD {
+                $crate::debug::printk::__klog(
+                    Some($crate::debug::printk::LogLevel::$level),
+                    format_args!(
+                        "[{:>7}] {}",
+                        $crate::debug::printk::LogLevel::$level.as_painted(),
+                        format_args!($($arg)*),
+                    ),
+                    false,
+                );
+            }
+        }};
         (noprint, $($arg:tt)*) => {
             $crate::debug::printk::__klog(None, format_args!($($arg)*), true);
         };
@@ -154,6 +160,7 @@ mod klog {
     gen_printk_macros!(
         $,
         emerg, Emerg
+        special, Special
         alert, Alert
         crit, Crit
         err, Err
