@@ -627,3 +627,43 @@
 - source audit `rg -n "\\[NYI\\].*mount|ignoring unsupported.*mount|unsupported.*mount" anemone-kernel/src`：无输出。
 - source audit `rg -n "tmpfs|ext2|ext3|vfat|mount_fs_name|FsAliasKind|normalize_fstype|ltp-temporary-bridge" anemone-kernel/src/fs/api/mount anemone-kernel/src/fs`：仅命中 syscall adapter / KUnit 中的 alias bridge。
 - `phase7-reviewer`（Galileo，只读）在用户澄清前建议缩小或拆分 profile，并要求分类矩阵 / register 一致性。处置：用户明确要求保持 broad group 以保留 TPASS 分数；phase 7 已把 group 定义改为评分 / 观测 profile，并完成分类矩阵与 register 更新。状态：Neutralized。
+
+### 2026-06-22 - post-closeout mount placement lifecycle repair
+
+**阶段：** post-closeout implementation feedback；不改变阶段 1-7 accepted contract。
+
+**问题：**
+
+- `MountPlacement::Attached` 保存 parent `Arc<Mount>` 和 mountpoint `Arc<Dentry>`。旧实现的 `mark_detached()` / `move_attached()` 在持有 `Mount.placement` spin lock 时直接替换 placement，旧 enum 的强引用会在锁内释放。
+- detach / lazy detach / move 又发生在 `MountTreeInner` 的 `lock_irqsave()` 临界区内；若旧 mountpoint dentry 的最后一个强引用在这里释放，`Dentry::drop()` 会拿 parent dentry lock，形成隐蔽锁序和生命周期副作用。
+- lazy detach 还会从 `MountTreeInner.mounts` 移除整棵 subtree。若被移出树的 `Arc<Mount>` 临时强引用在 inner 函数返回前释放，同样可能在 tree lock 内触发 `Mount` / root dentry destructor。
+
+**源码变更：**
+
+- `Mount::move_attached()` 和 `Mount::mark_detached()` 改为 `mem::replace()` 取出旧 placement，并返回 `OldPlacementRefs`；旧 parent / mountpoint 强引用不再在 `Mount.placement` 锁内 drop。
+- `MountTreeInner::move_mount()` 返回 old placement refs；外层 `MountTree::move_mount()` 在释放 ordinary writer gate 后再 drop。
+- `MountTreeInner::detach_mount()` 和 `lazy_detach_subtree()` 返回 `DetachedMountRefs`，把被移出 visible tree 的 mount 强引用与旧 placement refs 打包。外层 `unmount()` / `lazy_unmount()` 在释放 `tx_lock` 后再释放这些 refs。
+- `OldPlacementRefs` / `DetachedMountRefs` 带 `#[must_use]` 和锁序注释，明确它们是必须带出 placement/tree locks 后释放的生命周期包。
+
+**review gate：**
+
+- `placement-lifecycle-reviewer`（Epicurus，只读）审查 `anemone-kernel/src/fs/mount/{view.rs,tree.rs}` 当前 diff，未发现 Apollyon / Keter / Euclid blocker。
+- reviewer 确认 old placement refs 已从 `Mount.placement` 锁内外提，`move_mount()` / `unmount()` / `lazy_unmount()` 都绑定 carrier 并在 `tx_lock` 释放后显式 drop。
+- reviewer 确认 `self.mounts.retain()` 仍会在 inner 锁内减少 tree-held refs，但 detached subtree 和 old placement refs 已被 carrier 保住，不应在 inner 锁内触发 final `Mount` / `Dentry` destructor。
+- reviewer 残余建议：若后续需要更强 runtime 证据，可增加专门 KUnit；没有 lockdep 时，本次以结构性 review、source audit 和 build gate 作为主要证据。
+
+**验证：**
+
+- `just fmt kernel`：通过。
+- `just build`：通过；kernel release + KUnit feature 编译通过。
+- `git diff --check`：通过。
+- `mdbook build docs`：通过，输出到 `docs/book`。
+- source audit `rg -n "mark_detached\\(\\);|move_attached\\([^\\n]*\\);|lazy_detach_subtree\\(mount\\)\\?;|detach_mount\\(mount\\)\\?;|MountFlags" anemone-kernel/src/fs/mount anemone-kernel/src/fs/api/mount anemone-kernel/src/fs/namei.rs`：仅命中预期的新 carrier-return call sites；未发现旧 ignored return / `MountFlags` 复活。
+
+**未运行验证：**
+
+- 未运行 QEMU runtime KUnit、user-test 或 LTP mount profile。本修复不改变用户可见 mount semantics；重点验证是锁序 / 生命周期结构和 build gate。
+
+**归属：**
+
+- 这是 Gate P1 lifecycle feedback 下的实现缺陷修复，不改变 `MNT_DETACH` topology-only accepted contract，不关闭 final superblock cleanup owner / retry queue / fanotify mark-dead limitation。

@@ -595,6 +595,7 @@ write set：
 - 2026-06-19：阶段 6 Gate P1 只关闭 `MNT_DETACH` topology detach；final superblock cleanup owner、retry queue、fanotify mount/filesystem mark-dead hook 和 `MNT_EXPIRE` 两阶段协议登记为 [ANE-20260619-MOUNT-UNMOUNT-CLEANUP-STAGE1](../../register/current-limitations.md#ane-20260619-mount-unmount-cleanup-stage1)。同步 unmount 暂保留阶段 2 为避免 `sget()` 复用竞态而持有 writer gate 穿过 `try_evict_all()` / `remove_sb()` / `kill_sb()` 的实现，不把它声明为长期 P1 形态。Gate P2 通过 lazy-detach KUnit 验证 detached mount root 的 `..` 不 fallback 到全局 root 或 stale parent。
 - 2026-06-19：阶段 7 closeout 确认 `mount-legacy` group 是评分 / 观测 profile，而不是只保留 whole-case PASS 的 first-pass profile。`fs_bind*`、`fs_bind_move*`、`fs_bind_rbind*` 和 `test_robind*` 继续保留启用；阶段 7 按 TPASS/TFAIL/TCONF 子结果、accepted limitation 和环境 blocker 分类，不通过缩小 group 换取干净汇总。
 - 2026-06-19：阶段 7 把 shared/slave/unbindable propagation、mount flag/statfs matrix、fstype alias bridge、ROFS mmap/writeback 和 unmount cleanup residual 登记到 [current limitations](../../register/current-limitations.md)。`user-test` runner 现在把纯 LTP `TCONF` 退出码 `32` 计为 skipped；混合 `TCONF|TFAIL/TBROK` 仍按失败处理。
+- 2026-06-22：post-closeout lifecycle feedback 确认 `MountPlacement::Attached` 中的 parent / mountpoint 强引用不能在 `Mount.placement`、`MountTreeInner` 或 ordinary writer gate 内释放。实现修复改为由 placement mutator 返回旧 refs，并由 `MountTree` 外层在相关锁释放后 drop；这不改变 accepted contract，也不关闭 Gate P1 final cleanup owner limitation。
 
 ## Write Set 扩展记录
 

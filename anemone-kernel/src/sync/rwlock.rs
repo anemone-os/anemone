@@ -94,6 +94,7 @@ impl<T: ?Sized> RwLock<T> {
         }
     }
 
+    #[cfg(not(feature = "spin_lock_irqsave"))]
     #[track_caller]
     pub fn read(&self) -> ReadNoPreemptGuard<'_, T> {
         loop {
@@ -109,6 +110,13 @@ impl<T: ?Sized> RwLock<T> {
         }
     }
 
+    #[cfg(feature = "spin_lock_irqsave")]
+    #[track_caller]
+    pub fn read(&self) -> ReadIrqSaveGuard<'_, T> {
+        self.read_irqsave()
+    }
+
+    #[cfg(not(feature = "spin_lock_irqsave"))]
     #[track_caller]
     pub fn write(&self) -> WriteNoPreemptGuard<'_, T> {
         loop {
@@ -122,6 +130,12 @@ impl<T: ?Sized> RwLock<T> {
             _ = _preem_guard; // drop to restore preemption before spinning
             core::hint::spin_loop();
         }
+    }
+
+    #[cfg(feature = "spin_lock_irqsave")]
+    #[track_caller]
+    pub fn write(&self) -> WriteIrqSaveGuard<'_, T> {
+        self.write_irqsave()
     }
 }
 

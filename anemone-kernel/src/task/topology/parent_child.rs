@@ -133,9 +133,10 @@ impl ThreadGroup {
     /// This method provides **Topology Consistency** at the cost of locking the
     /// topology for a longer time. Caution should be taken to avoid deadlocks.
     ///
-    /// **To iterate over all tasks in the child thread groups, you should not
-    /// call [ThreadGroup::for_each_member]** in the closure, which will cause a
-    /// dead lock. Instead call [ThreadGroup::for_each_child_task]. **
+    /// **To iterate over all tasks in the child thread groups, do not call
+    /// [ThreadGroup::for_each_member] or take a member snapshot inside the
+    /// closure**, because that would try to reacquire topology locks. Instead call
+    /// [ThreadGroup::for_each_child_task].
     ///
     /// ## Locks
     /// - [TOPOLOGY] -> [ThreadGroup]

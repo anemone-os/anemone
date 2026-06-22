@@ -14,6 +14,7 @@ disasm = true # Whether to generate a disassembly file for kernel.
 kunit = true # Enable KUnit testing
 fs_ext4 = true # Enable ext4 filesystem support
 kernel_preempt = true # Enable trap-exit kernel preemption
+spin_lock_irqsave = false # Make ordinary spin locks disable local interrupts
 # virtio_gpu = true # Enable Virtio GPU support
 # smp = true # Enable Symmetric Multiprocessing support
 # intr_stack = true # Enable Interrupt Stack support

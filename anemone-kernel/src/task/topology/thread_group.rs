@@ -69,9 +69,16 @@ impl ThreadGroup {
             .map(|node| node.task.clone())
     }
 
-    /// Iterate over all members of this thread group.
+    /// Iterate over all members of this thread group while topology membership
+    /// stays stable.
     ///
     /// **Topology Consistency** is guaranteed.
+    ///
+    /// The closure must be short, non-blocking, and must not perform real work
+    /// such as signal delivery, wait-core wakeup, event publish, scheduling, or
+    /// any operation that can reacquire topology/thread-group locks. Use
+    /// [ThreadGroup::get_members] first when the caller needs to run work on
+    /// each member.
     ///
     /// ## Locks
     ///
@@ -88,21 +95,21 @@ impl ThreadGroup {
         }
     }
 
-    /// Collect all members of this task's thread group into a vector.
+    /// Collect all members of this thread group into a vector.
     ///
-    /// **Topology Consistency** is guaranteed.
+    /// Only **Object Consistency** is guaranteed.
     ///
     /// ## Locks
     /// [TOPOLOGY] -> [ThreadGroup]
     ///
-    /// Useful when the lock chain is too deep.
+    /// This intentionally does not re-resolve `self` from the global topology.
+    /// Callers may hold a stale `Arc<ThreadGroup>` after lookup/reap races; in
+    /// that case an already-empty group simply snapshots to an empty member
+    /// list. Signal delivery, wakeups, and other real work must run after this
+    /// short lock window returns.
     pub fn get_members(&self) -> Vec<Arc<Task>> {
         let topology = TOPOLOGY.inner.read();
-        let tg = topology
-            .thread_groups
-            .get(&self.tgid())
-            .expect("task topology: thread group not found");
-        tg.inner
+        self.inner
             .read()
             .members
             .iter()
@@ -122,27 +129,7 @@ impl ThreadGroup {
     ///
     /// Only **Object Consistency** is guaranteed.
     pub fn find_member<P: FnMut(&Arc<Task>) -> bool>(&self, prediction: P) -> Option<Arc<Task>> {
-        let children = {
-            let topology = TOPOLOGY.inner.read();
-            let tg = topology
-                .thread_groups
-                .get(&self.tgid())
-                .expect("task topology: thread group not found");
-            tg.inner
-                .read()
-                .members
-                .iter()
-                .map(|member_tid| {
-                    topology
-                        .tasks
-                        .get(member_tid)
-                        .expect("task topology: task not found")
-                        .task
-                        .clone()
-                })
-                .collect::<Vec<_>>()
-        };
-        children.into_iter().find(prediction)
+        self.get_members().into_iter().find(prediction)
     }
 
     /// Get the [SigNo] that should be sent to parent thread group when this
@@ -337,7 +324,7 @@ impl Task {
     ///
     /// The thread group itself stays alive.
     pub fn dethread(self: &Arc<Self>) {
-        let tg = {
+        let (tg, members_to_kill) = {
             let topology = TOPOLOGY.inner.read();
 
             // we can't call above encapsulated APIs here since that will cause deadlocks.
@@ -356,26 +343,35 @@ impl Task {
             // make sure no new thread can join this thread group.
             tg.inner.write().status.is_dethreading = true;
 
-            for member_tid in tg.inner.read().members.iter() {
-                if *member_tid != self.tid() {
-                    let member = &topology
+            let members_to_kill = tg
+                .inner
+                .read()
+                .members
+                .iter()
+                .filter(|member_tid| **member_tid != self.tid())
+                .map(|member_tid| {
+                    topology
                         .tasks
                         .get(member_tid)
                         .expect("task topology: task not found")
-                        .task;
-                    member.recv_signal(Signal::new(
-                        SigNo::SIGKILL,
-                        SiCode::Kernel,
-                        SigInfoFields::Kill(SigKill {
-                            pid: tg.tgid(),
-                            uid: self.cred().uid.real,
-                        }),
-                    ));
-                }
-            }
+                        .task
+                        .clone()
+                })
+                .collect::<Vec<_>>();
 
-            tg
+            (tg, members_to_kill)
         };
+
+        for member in members_to_kill {
+            member.recv_signal(Signal::new(
+                SigNo::SIGKILL,
+                SiCode::Kernel,
+                SigInfoFields::Kill(SigKill {
+                    pid: tg.tgid(),
+                    uid: self.cred().uid.real,
+                }),
+            ));
+        }
 
         // now busy wait until all other members have exited.
         loop {
