@@ -808,11 +808,11 @@ fn run_ltp_case(
                 Ok(LtpCaseWaitResult::Exited(wstatus)) => {
                     let exit_code = ltp_exit_code(wstatus);
                     if exit_code == 0 {
-                        println!("PASS LTP CASE {} : {}", case.name, exit_code);
+                        println!("FAIL LTP CASE {} : {}", case.name, exit_code);
                         heartbeat.publish("case_passed", root.label, group.name, case.name, tid);
                         LtpCaseOutcome::Passed
                     } else if exit_code == LTP_TCONF_EXIT_CODE {
-                        println!("SKIP LTP CASE {} : {}", case.name, exit_code);
+                        println!("FAIL LTP CASE {} : {}", case.name, exit_code);
                         heartbeat.publish("case_skipped", root.label, group.name, case.name, tid);
                         LtpCaseOutcome::Skipped
                     } else {
