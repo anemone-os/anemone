@@ -47,6 +47,7 @@ impl<T> SpinLock<T> {
 }
 
 impl<T: ?Sized> SpinLock<T> {
+    #[cfg(not(feature = "spin_lock_irqsave"))]
     #[track_caller]
     pub fn lock(&self) -> NoPreemptGuard<'_, T> {
         loop {
@@ -60,6 +61,12 @@ impl<T: ?Sized> SpinLock<T> {
             _ = _preem_guard; // drop to restore interrupts before spinning
             core::hint::spin_loop();
         }
+    }
+
+    #[cfg(feature = "spin_lock_irqsave")]
+    #[track_caller]
+    pub fn lock(&self) -> IrqSaveGuard<'_, T> {
+        self.lock_irqsave()
     }
 
     #[track_caller]
