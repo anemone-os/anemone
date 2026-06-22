@@ -9,25 +9,44 @@ use crate::{prelude::*, utils::circular_log::CircularLog};
 
 #[derive(Debug, Clone, Copy)]
 pub enum LogLevel {
-    Emerg = 0,
-    Alert = 1,
-    Crit = 2,
-    Err = 3,
-    Warning = 4,
-    Notice = 5,
-    Info = 6,
-    Debug = 7,
+    Emerg,
+    Special,
+    Alert,
+    Crit,
+    Err,
+    Warning,
+    Notice,
+    Info,
+    Debug,
 }
 
 impl LogLevel {
+    pub const fn level(self) -> u8 {
+        match self {
+            LogLevel::Emerg | LogLevel::Special => 0,
+            LogLevel::Alert => 1,
+            LogLevel::Crit => 2,
+            LogLevel::Err => 3,
+            LogLevel::Warning => 4,
+            LogLevel::Notice => 5,
+            LogLevel::Info => 6,
+            LogLevel::Debug => 7,
+        }
+    }
+
+    pub const fn records(self) -> bool {
+        self.level() <= CONSOLE_LOG_RECORD_LEVEL
+    }
+
     pub const fn emits_to_console(self) -> bool {
-        (self as u8) <= CONSOLE_LOG_LEVEL
+        self.level() <= CONSOLE_LOG_PRINT_LEVEL
     }
 
     /// Returns the string representation of the log level.
     pub fn as_str(&self) -> &'static str {
         match self {
             LogLevel::Emerg => "EMERG",
+            LogLevel::Special => "SPECIAL",
             LogLevel::Alert => "ALERT",
             LogLevel::Crit => "CRIT",
             LogLevel::Err => "ERR",
@@ -43,6 +62,7 @@ impl LogLevel {
     pub fn as_painted(&self) -> Painted<&'static str> {
         match self {
             LogLevel::Emerg => self.as_str().red().bold(),
+            LogLevel::Special => self.as_str().blue().bold(),
             LogLevel::Alert => self.as_str().red().bold(),
             LogLevel::Crit => self.as_str().red().bold(),
             LogLevel::Err => self.as_str().red(),

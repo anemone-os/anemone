@@ -7,7 +7,7 @@ use crate::{
         iomux::PollEvent,
     },
     prelude::{
-        vmo::{ResolvedFrame, VmObject},
+        vmo::{ResolvedFrame, VmMemoryReport, VmMemoryReportKind, VmObject},
         *,
     },
 };
@@ -337,6 +337,19 @@ impl Ext4RegMapping {
 }
 
 impl VmObject for Ext4RegMapping {
+    fn memory_report_kind(&self) -> Option<VmMemoryReportKind> {
+        Some(VmMemoryReportKind::File)
+    }
+
+    fn fill_memory_report(
+        &self,
+        range: core::ops::Range<usize>,
+        kind: VmMemoryReportKind,
+        report: &mut VmMemoryReport,
+    ) {
+        report.add_shared(kind, self.state.pages.read().range(range).count());
+    }
+
     fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError> {
         let page = self.load_page(pidx)?;
         if matches!(access, PageFaultType::Write) {

@@ -605,7 +605,7 @@ impl UserSpace {
                 range.end()
             };
             let cut_range = VirtPageRange::new(cut_start, cut_end - cut_start);
-            let obj_range = vma.vmo_pidx(cut_start)..vma.vmo_pidx(cut_end);
+            let obj_range = vma.vmo_pidx_range(cut_range);
             ops.push((vma.backing().clone(), obj_range, cut_range));
         }
 

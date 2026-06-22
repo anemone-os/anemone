@@ -138,6 +138,7 @@ pub(super) fn wait_for_exited_child(
     let task = get_current_task();
     let tg = task.get_thread_group();
     let current_pgid = tg.pgid();
+    let mut signal_interrupted = false;
 
     // TODO: optimize this. we did a double scan, which is not necessary.
     loop {
@@ -167,6 +168,13 @@ pub(super) fn wait_for_exited_child(
                     if let Some(child) = tg.try_reap_child(tgid) {
                         fs::proc::try_unbind_thread_group(tgid);
                         let outcome = wait_outcome_from_child(&child);
+                        #[cfg(feature = "bench_local_test")]
+                        kerrln!(
+                            "[special_report] wait4 reap parent_tgid={} child_tgid={} exit_code={:?}",
+                            tg.tgid(),
+                            outcome.tgid,
+                            outcome.exit_code
+                        );
                         tg.on_reap(&child);
 
                         return Ok(Some(outcome));
@@ -195,6 +203,13 @@ pub(super) fn wait_for_exited_child(
             // This is a bit weird, but it's what Linux does.
             return Ok(None);
         }
+        if signal_interrupted {
+            knoticeln!("wait: wait interrupted by signal");
+            // Linux wait-family syscalls re-scan children after a signal wake
+            // before exposing EINTR. Preserve that ordering so a waitable child
+            // wins over a concurrent SIGCHLD/handler interrupt.
+            return Err(SysError::RestartSyscall(RestartSyscall::Idempotent));
+        }
 
         kdebugln!(
             "wait: parent_tgid={} listening on child_exited event={:#x}",
@@ -218,11 +233,8 @@ pub(super) fn wait_for_exited_child(
         });
 
         if interrupted {
-            knoticeln!("wait: wait interrupted by signal");
-            // wait4/waitid on exited children are idempotent before a child is
-            // selected. If a child has been selected, this helper already
-            // returned.
-            return Err(SysError::RestartSyscall(RestartSyscall::Idempotent));
+            signal_interrupted = true;
+            continue;
         }
 
         kdebugln!(

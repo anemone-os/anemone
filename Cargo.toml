@@ -10,7 +10,7 @@ sbi-rt = { version = "0.0.3" }
 loongArch64 = { version = "0.2.5" }
 yansi = { version = "1.0.1", default-features = false }
 riscv = { version = "0.16.0" }
-bitflags = { version = "2.10.0" }
+bitflags = { version = "2.13.0" }
 fdt = { version = "0.2.0-alpha1", features = ["pretty-printing"] }
 spin = { version = "0.10.0", default-features = false, features = [
     "lazy",

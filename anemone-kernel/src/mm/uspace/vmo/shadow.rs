@@ -26,6 +26,25 @@ impl ShadowObject {
 }
 
 impl VmObject for ShadowObject {
+    fn memory_report_kind(&self) -> Option<VmMemoryReportKind> {
+        self.parent.memory_report_kind()
+    }
+
+    fn fill_memory_report(
+        &self,
+        range: core::ops::Range<usize>,
+        kind: VmMemoryReportKind,
+        report: &mut VmMemoryReport,
+    ) {
+        // This report measures backing ownership, not the currently visible
+        // page chosen by COW lookup. A shadow object holds both its parent
+        // chain and its local overlay, so long fork chains intentionally make
+        // `shared` grow beyond the current address-space `literal` size.
+        self.parent
+            .fill_memory_report(range.clone(), kind, report);
+        report.add_shared(kind, self.overlay.read().range(range).count());
+    }
+
     fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError> {
         if let Some(frame) = self.overlay.read().get(&pidx) {
             return Ok(ResolvedFrame {

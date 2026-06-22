@@ -10,7 +10,7 @@ use anemone_rs::{
         system::native::power::SHUTDOWN_MAGIC,
     },
     os::{
-        anemone::power::shutdown,
+        anemone::{kernel_preempt::set_enabled as set_kernel_preempt_enabled, power::shutdown},
         linux::{
             fs::{chdir, chroot, close, fstatat, mkdirat, mount, openat, read, write, AtFd},
             process::{execve, fork, wait4, WStatus, WStatusRaw, WaitFor, WaitOptions},
@@ -21,33 +21,39 @@ use anemone_rs::{
 
 const BOOTSTRAP_BUSYBOX_PRIMARY: &str = "/musl/busybox";
 const BOOTSTRAP_BUSYBOX_FALLBACK: &str = "/glibc/busybox";
+
+#[cfg(target_arch = "riscv64")]
 const COMPETITION_DISK: &str = "/dev/vdb";
+
+#[cfg(target_arch = "loongarch64")]
+const COMPETITION_DISK: &str = "/dev/vda";
+
 const COMP_PATH_ENV: &str = "PATH=/bin:/usr/bin:/usr/sbin:/sbin:/";
 const GLIBC_TEST_SCRIPTS: &[&str] = &[
-    // "basic_testcode.sh",
-    // "lua_testcode.sh",
-    // "busybox_testcode.sh",
+    "basic_testcode.sh",
+    "lua_testcode.sh",
+    "busybox_testcode.sh",
     // "libctest_testcode.sh",
-    // "cyclictest_testcode.sh",
+    // // "cyclictest_testcode.sh",
     "iozone_testcode.sh",
-    // "iperf_testcode.sh",
-    // "libcbench_testcode.sh",
-    // "lmbench_testcode.sh",
-    // "netperf_testcode.sh",
-    // "unixbench_testcode.sh",
+    // // "iperf_testcode.sh",
+    "libcbench_testcode.sh",
+    "lmbench_testcode.sh",
+    // // "netperf_testcode.sh",
+    // // "unixbench_testcode.sh",
 ];
 const MUSL_TEST_SCRIPTS: &[&str] = &[
-    // "basic_testcode.sh",
-    // "lua_testcode.sh",
-    // "busybox_testcode.sh",
-    // "libctest_testcode.sh",
-    // "cyclictest_testcode.sh",
-    // "iozone_testcode.sh",
-    // "iperf_testcode.sh",
-    // "libcbench_testcode.sh",
-    // "lmbench_testcode.sh",
-    // "netperf_testcode.sh",
-    // "unixbench_testcode.sh",
+    "basic_testcode.sh",
+    "lua_testcode.sh",
+    "busybox_testcode.sh",
+    "libctest_testcode.sh",
+    // // "cyclictest_testcode.sh",
+    "iozone_testcode.sh",
+    // // "iperf_testcode.sh",
+    "libcbench_testcode.sh",
+    "lmbench_testcode.sh",
+    // // "netperf_testcode.sh",
+    // // "unixbench_testcode.sh",
 ];
 
 cfg_select! {
@@ -513,6 +519,12 @@ fn runtime_for_test_script<'a>(family: &'a str, script: &str) -> &'a str {
     }
 }
 
+fn set_kernel_preempt_for_family(enabled: bool, family: &str) {
+    set_kernel_preempt_enabled(enabled).unwrap_or_else(|errno| {
+        panic!("user-test: failed to set kernel preemption for {family} iozone: {errno:?}")
+    });
+}
+
 fn run_test_family(family: &str, scripts: &[&str]) {
     switch_runtime(family);
     prepare_testcode(family);
@@ -533,7 +545,18 @@ fn run_test_family(family: &str, scripts: &[&str]) {
             active_runtime = script_runtime;
         }
         println!("user-test: running {family} {script}...");
+        let is_iozone = *script == "iozone_testcode.sh";
+        if is_iozone {
+            // println!("user-test: disabling kernel preemption for {family}
+            // iozone..."); set_kernel_preempt_for_family(false,
+            // family);
+        }
         run_busybox_in_dir(workdir.as_str(), &["busybox", "sh", script], script);
+        if is_iozone {
+            // set_kernel_preempt_for_family(true, family);
+            // println!("user-test: re-enabled kernel preemption after {family}
+            // iozone.");
+        }
     }
     println!("user-test: {family} competition tests finished.");
 }
@@ -543,10 +566,20 @@ fn run_comp_tests() {
     mount_competition_root();
     init_competition_environment();
     ltp::install_ltp_fixtures();
+    run_busybox(
+        &[
+            "busybox",
+            "chmod",
+            "a+x",
+            "/glibc/basic/run-all.sh",
+            "/musl/basic/run-all.sh",
+        ],
+        "basic run-all chmod",
+    );
 
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
-    // ltp::run_ltp_tests();
+    ltp::run_ltp_tests();
 
     println!("user-test: all competition tests finished.");
 }

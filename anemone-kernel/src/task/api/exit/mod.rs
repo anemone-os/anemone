@@ -25,6 +25,25 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             panic!("init task shall not exit");
         }
         kdebugln!("kernel_exit: task={} exit with code {:?}", task.tid(), code);
+        let clear_child_tid = task.get_clear_child_tid();
+        /*
+        if let Some(addr) = clear_child_tid {
+            kspecialln!(
+                "pthread exit begin tid={} tgid={} code={:?} clear_child_tid={:#x}",
+                task.tid(),
+                task.tgid(),
+                code,
+                addr.get(),
+            );
+        }
+        */
+        #[cfg(feature = "bench_local_test")]
+        kerrln!(
+            "[special_report] kernel_exit enter tid={} tgid={} code={:?}",
+            task.tid(),
+            task.tgid(),
+            code
+        );
         if task.kthread().is_some() {
             panic!(
                 "kthread task {} entered user-process kernel_exit path",
@@ -32,7 +51,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             );
         }
 
-        if let Some(addr) = task.get_clear_child_tid() {
+        if let Some(addr) = clear_child_tid {
             let usp = task.clone_uspace_handle();
             let cleard = {
                 let mut guard = usp.lock();
@@ -53,19 +72,48 @@ pub fn kernel_exit(code: ExitCode) -> ! {
                 }
             };
             if cleard {
-                if let Err(e) = futex::wake_at(&task.clone_uspace_handle(), addr, 1) {
-                    knoticeln!(
-                        "failed to clear child tid for {}: {:?} at address {:#x}",
-                        task.tid(),
-                        e,
-                        addr.get()
-                    );
-                } else {
-                    kdebugln!(
-                        "cleared child tid and woke futex for task {} at address {:#x}",
-                        task.tid(),
-                        addr.get()
-                    );
+                /*
+                kspecialln!(
+                    "pthread exit cleared_child_tid tid={} tgid={} addr={:#x}",
+                    task.tid(),
+                    task.tgid(),
+                    addr.get(),
+                );
+                */
+                match futex::wake_at(&task.clone_uspace_handle(), addr, 1) {
+                    Ok(_n_woken) => {
+                        /*
+                        kspecialln!(
+                            "pthread exit futex_wake_done tid={} tgid={} addr={:#x} n_woken={}",
+                            task.tid(),
+                            task.tgid(),
+                            addr.get(),
+                            n_woken,
+                        );
+                        */
+                        kdebugln!(
+                            "cleared child tid and woke futex for task {} at address {:#x}",
+                            task.tid(),
+                            addr.get()
+                        );
+                    },
+                    Err(e) => {
+                        /*
+                        kspecialln!(
+                            "pthread exit futex_wake_failed tid={} tgid={} addr={:#x} err={:?}",
+                            task.tid(),
+                            task.tgid(),
+                            addr.get(),
+                            e,
+                        );
+                        */
+                        knoticeln!(
+                            "failed to clear child tid for {}: {:?} at address {:#x}",
+                            task.tid(),
+                            e,
+                            addr.get()
+                        );
+                    },
                 }
             }
         }
@@ -106,6 +154,16 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         }
 
         let is_last = task.detach_from_topology();
+        if clear_child_tid.is_some() {
+            /*
+            kspecialln!(
+                "pthread exit detached tid={} tgid={} is_last={}",
+                task.tid(),
+                task.tgid(),
+                is_last,
+            );
+            */
+        }
 
         // if we are the last thread in this thread group, we should do the cleanup
         // work.
@@ -140,6 +198,13 @@ pub fn kernel_exit(code: ExitCode) -> ! {
 
             // 2. set status to Exited, so that wait4 can reap this thread group.
             tg_inner.status.life_cycle = ThreadGroupLifeCycle::Exited(xcode);
+            #[cfg(feature = "bench_local_test")]
+            kerrln!(
+                "[special_report] kernel_exit tg_exited tid={} tgid={} code={:?}",
+                task.tid(),
+                tg.tgid(),
+                xcode
+            );
 
             drop(tg_inner);
 
@@ -176,7 +241,17 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             }
 
             // 3. publish child_exited event.
+            #[cfg(feature = "bench_local_test")]
+            kerrln!(
+                "[special_report] kernel_exit child_exited_publish child_tgid={}",
+                tg.tgid()
+            );
             parent_tg.child_exited.publish(1, false);
+            #[cfg(feature = "bench_local_test")]
+            kerrln!(
+                "[special_report] kernel_exit child_exited_publish_done child_tgid={}",
+                tg.tgid()
+            );
 
             // 4. orphan children reparented to init may contain zombie thread groups. let's
             //    publish that to init as well.

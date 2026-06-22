@@ -23,6 +23,23 @@ impl FixedObject {
 }
 
 impl VmObject for FixedObject {
+    fn memory_report_kind(&self) -> Option<VmMemoryReportKind> {
+        Some(VmMemoryReportKind::Static)
+    }
+
+    fn fill_memory_report(
+        &self,
+        range: core::ops::Range<usize>,
+        kind: VmMemoryReportKind,
+        report: &mut VmMemoryReport,
+    ) {
+        let start = range.start.min(self.pages.len());
+        let end = range.end.min(self.pages.len());
+        if start < end {
+            report.add_shared(kind, end - start);
+        }
+    }
+
     fn resolve_frame(
         &self,
         pidx: usize,

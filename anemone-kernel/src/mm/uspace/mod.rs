@@ -14,7 +14,7 @@ use crate::{
     mm::kptable::KERNEL_PTABLE,
     prelude::{
         vma::{ForkPolicy, Protection, VmFlags},
-        vmo::{anon::AnonObject, empty::EmptyObject},
+        vmo::{VmMemoryReport, VmMemoryReportKind, anon::AnonObject, empty::EmptyObject},
         *,
     },
     sync::r#final::Final,
@@ -199,6 +199,10 @@ impl UserSpaceHandle {
     pub fn detach_all_sysv_shm_for(&self, tgid: Tid) {
         let mut usp = self.usp.lock();
         usp.detach_all_sysv_shm_for(tgid)
+    }
+
+    pub fn memory_report(&self) -> VmMemoryReport {
+        self.usp.lock().memory_report()
     }
 
     /// Clear user-owned mappings before an exiting task is finally disposed.
@@ -680,6 +684,74 @@ impl UserSpace {
             .filter(|vma| vma.reservation() != Some(VmReservation::Guard))
             .map(|vma| vma.range().npages() as usize * PagingArch::PAGE_SIZE_BYTES)
             .sum()
+    }
+
+    fn report_kind_for_vma(&self, vma: &VmArea) -> Option<VmMemoryReportKind> {
+        match vma.reservation() {
+            Some(VmReservation::Stack) => Some(VmMemoryReportKind::Stack),
+            Some(VmReservation::Heap) => Some(VmMemoryReportKind::Heap),
+            Some(VmReservation::Guard) => None,
+            None => match vma.backing().memory_report_kind()? {
+                VmMemoryReportKind::Anonymous if vma.range().end() <= self.heap.svpn => {
+                    Some(VmMemoryReportKind::Static)
+                },
+                kind => Some(kind),
+            },
+        }
+    }
+
+    fn literal_report_range_for_vma(&self, vma: &VmArea) -> Option<VirtPageRange> {
+        match vma.reservation() {
+            Some(VmReservation::Stack) => {
+                let end = vma.range().end();
+                if self.stack.committed_bottom >= end {
+                    None
+                } else {
+                    Some(VirtPageRange::new(
+                        self.stack.committed_bottom,
+                        end - self.stack.committed_bottom,
+                    ))
+                }
+            },
+            Some(VmReservation::Heap) => {
+                let start = self.heap.svpn;
+                let end = self.heap.brk.page_up();
+                if end <= start {
+                    None
+                } else {
+                    Some(VirtPageRange::new(start, end - start))
+                }
+            },
+            Some(VmReservation::Guard) => None,
+            None => Some(*vma.range()),
+        }
+    }
+
+    fn shared_report_range_for_vma(&self, vma: &VmArea) -> Option<VirtPageRange> {
+        if vma.reservation() == Some(VmReservation::Guard) {
+            None
+        } else {
+            Some(*vma.range())
+        }
+    }
+
+    pub fn memory_report(&self) -> VmMemoryReport {
+        let mut report = VmMemoryReport::default();
+
+        for vma in self.vmas.values() {
+            let Some(kind) = self.report_kind_for_vma(vma) else {
+                continue;
+            };
+            if let Some(range) = self.literal_report_range_for_vma(vma) {
+                report.add_literal(kind, range.npages() as usize);
+            }
+            if let Some(range) = self.shared_report_range_for_vma(vma) {
+                vma.backing()
+                    .fill_memory_report(vma.vmo_pidx_range(range), kind, &mut report);
+            }
+        }
+
+        report
     }
 
     /// Return a best-effort count of physical pages likely freed by dropping

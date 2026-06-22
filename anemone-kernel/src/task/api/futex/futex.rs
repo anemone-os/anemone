@@ -278,6 +278,19 @@ fn futex_wait(
         });
         futex.waiters.push_back(waiter.clone());
 
+        /*
+        kspecialln!(
+            "futex wait queued task={} word_addr={:#x} expected={} key={:?} waiter={:#x} event={:#x} bitset={:#x} waiters={}",
+            task.tid(),
+            word_addr.get(),
+            val,
+            key,
+            futex_waiter_id(&waiter),
+            futex_event_id(&waiter),
+            waiter.bitset,
+            futex.waiters.len(),
+        );
+        */
         kdebugln!(
             "futex: queued waiter={:#x} task={} word_addr={:#x} key={:?} event={:#x} bitset={:#x} waiters={}",
             futex_waiter_id(&waiter),
@@ -296,6 +309,14 @@ fn futex_wait(
     drop(usp);
 
     if val_mismatch {
+        /*
+        kspecialln!(
+            "futex wait value_mismatch task={} word_addr={:#x} expected={}",
+            task.tid(),
+            word_addr.get(),
+            val,
+        );
+        */
         return Err(SysError::Again);
     }
 
@@ -368,6 +389,16 @@ fn futex_wait(
         key,
         timeout,
     );
+    /*
+    kspecialln!(
+        "futex wait sleep task={} word_addr={:#x} waiter={:#x} event={:#x} timeout={:?}",
+        task.tid(),
+        word_addr.get(),
+        futex_waiter_id(&waiter),
+        futex_event_id(&waiter),
+        timeout,
+    );
+    */
     if let Some(timeout) = timeout {
         match waiter.futex_available.listen_with_timeout(
             true,
@@ -375,6 +406,15 @@ fn futex_wait(
             timeout,
         ) {
             None => {
+                /*
+                kspecialln!(
+                    "futex wait woke task={} word_addr={:#x} waiter={:#x} event={:#x}",
+                    waiter.task.tid(),
+                    word_addr.get(),
+                    futex_waiter_id(&waiter),
+                    futex_event_id(&waiter),
+                );
+                */
                 kdebugln!(
                     "futex: wait completed waiter={:#x} task={} event={:#x} via wake",
                     futex_waiter_id(&waiter),
@@ -384,10 +424,28 @@ fn futex_wait(
                 Ok(())
             },
             Some(TimeoutListenException::Signaled) => {
+                /*
+                kspecialln!(
+                    "futex wait signaled task={} word_addr={:#x} waiter={:#x} event={:#x}",
+                    waiter.task.tid(),
+                    word_addr.get(),
+                    futex_waiter_id(&waiter),
+                    futex_event_id(&waiter),
+                );
+                */
                 kdebugln!("futex: wait interrupted by signal");
                 handle_wait_exception(&waiter).map_err(|()| SysError::Interrupted)
             },
             Some(TimeoutListenException::Timeout) => {
+                /*
+                kspecialln!(
+                    "futex wait timeout task={} word_addr={:#x} waiter={:#x} event={:#x}",
+                    waiter.task.tid(),
+                    word_addr.get(),
+                    futex_waiter_id(&waiter),
+                    futex_event_id(&waiter),
+                );
+                */
                 kdebugln!("futex: wait timed out");
                 handle_wait_exception(&waiter).map_err(|()| SysError::Timeout)
             },
@@ -398,6 +456,15 @@ fn futex_wait(
             .listen(true, || waiter.woken.load(Ordering::SeqCst))
         {
             true => {
+                /*
+                kspecialln!(
+                    "futex wait woke task={} word_addr={:#x} waiter={:#x} event={:#x}",
+                    waiter.task.tid(),
+                    word_addr.get(),
+                    futex_waiter_id(&waiter),
+                    futex_event_id(&waiter),
+                );
+                */
                 kdebugln!(
                     "futex: wait completed waiter={:#x} task={} event={:#x} via wake",
                     futex_waiter_id(&waiter),
@@ -436,6 +503,16 @@ fn futex_wake(key: FutexKey, n_waiters: u32, bitset: Option<u32>) -> Result<u32,
                 }
 
                 waiter.woken.store(true, Ordering::SeqCst);
+                /*
+                kspecialln!(
+                    "futex wake waiter task={} key={:?} waiter={:#x} event={:#x} bitset_mask={:#x}",
+                    waiter.task.tid(),
+                    *waiter.key.lock(),
+                    futex_waiter_id(&waiter),
+                    futex_event_id(&waiter),
+                    bitset,
+                );
+                */
                 kdebugln!(
                     "futex: waking waiter={:#x} task={} key={:?} event={:#x} bitset_mask={:#x}",
                     futex_waiter_id(&waiter),
@@ -450,11 +527,30 @@ fn futex_wake(key: FutexKey, n_waiters: u32, bitset: Option<u32>) -> Result<u32,
                 break;
             }
         }
+        /*
+        kspecialln!(
+            "futex wake done key={:?} requested={} tested={} woken={} bitset_mask={:#x}",
+            key,
+            n_waiters,
+            tested,
+            woken,
+            bitset,
+        );
+        */
         woken
     }) {
         Some(n_woken) => Ok(n_woken),
         // no waiters. just return 0 to indicate a successful wake.
-        None => Ok(0),
+        None => {
+            /*
+            kspecialln!(
+                "futex wake no_waiters key={:?} requested={}",
+                key,
+                n_waiters
+            );
+            */
+            Ok(0)
+        },
     }
 }
 

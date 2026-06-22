@@ -19,6 +19,109 @@ use core::fmt::Debug;
 
 use crate::{prelude::*, utils::data::DataSource};
 
+#[derive(Debug, Clone, Copy)]
+pub enum VmMemoryReportKind {
+    Stack,
+    Heap,
+    Static,
+    File,
+    Anonymous,
+    Shm,
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct VmMemoryReportEntry {
+    pub literal: usize,
+    pub shared: usize,
+}
+
+impl VmMemoryReportEntry {
+    fn add_literal(&mut self, pages: usize) {
+        self.literal += pages;
+    }
+
+    fn add_shared(&mut self, pages: usize) {
+        self.shared += pages;
+    }
+}
+
+pub struct VmMemoryPageCount(pub usize);
+
+impl Debug for VmMemoryPageCount {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        const KIB: usize = 1024;
+        const MIB: usize = 1024 * KIB;
+        const GIB: usize = 1024 * MIB;
+
+        let bytes = self.0 * PagingArch::PAGE_SIZE_BYTES;
+        let gib = bytes / GIB;
+        let bytes = bytes % GIB;
+        let mib = bytes / MIB;
+        let bytes = bytes % MIB;
+        let kib = bytes / KIB;
+        write!(f, "{} pages, {} GiB {} MiB {} KiB", self.0, gib, mib, kib)
+    }
+}
+
+impl Debug for VmMemoryReportEntry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "literal=({:?}), shared=({:?})",
+            VmMemoryPageCount(self.literal),
+            VmMemoryPageCount(self.shared)
+        )
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct VmMemoryReport {
+    pub stack: VmMemoryReportEntry,
+    pub heap: VmMemoryReportEntry,
+    pub r#static: VmMemoryReportEntry,
+    pub file: VmMemoryReportEntry,
+    pub anonymous: VmMemoryReportEntry,
+    pub shm: VmMemoryReportEntry,
+    pub total: VmMemoryReportEntry,
+}
+
+impl VmMemoryReport {
+    pub fn add_literal(&mut self, kind: VmMemoryReportKind, pages: usize) {
+        self.entry_mut(kind).add_literal(pages);
+        self.total.add_literal(pages);
+    }
+
+    pub fn add_shared(&mut self, kind: VmMemoryReportKind, pages: usize) {
+        self.entry_mut(kind).add_shared(pages);
+        self.total.add_shared(pages);
+    }
+
+    fn entry_mut(&mut self, kind: VmMemoryReportKind) -> &mut VmMemoryReportEntry {
+        match kind {
+            VmMemoryReportKind::Stack => &mut self.stack,
+            VmMemoryReportKind::Heap => &mut self.heap,
+            VmMemoryReportKind::Static => &mut self.r#static,
+            VmMemoryReportKind::File => &mut self.file,
+            VmMemoryReportKind::Anonymous => &mut self.anonymous,
+            VmMemoryReportKind::Shm => &mut self.shm,
+        }
+    }
+}
+
+impl Debug for VmMemoryReport {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        writeln!(f, "VmMemoryReport {{")?;
+        writeln!(f, "  stack: {:?},", self.stack)?;
+        writeln!(f, "  heap: {:?},", self.heap)?;
+        writeln!(f, "  static: {:?},", self.r#static)?;
+        writeln!(f, "  file: {:?},", self.file)?;
+        writeln!(f, "  anonymous: {:?},", self.anonymous)?;
+        writeln!(f, "  shm: {:?},", self.shm)?;
+        writeln!(f, "  total: {:?},", self.total)?;
+        write!(f, "}}")
+    }
+}
+
 pub fn shared_zero_frame() -> ResolvedFrame {
     static ZERO_FRAME: Lazy<FrameHandle> = Lazy::new(|| unsafe {
         alloc_frame_zeroed()
@@ -44,6 +147,24 @@ pub struct ResolvedFrame {
 /// TODO: explain why such interior mutability is enforced by this trait, and
 /// why we don't just make those methods take `&mut self`.
 pub trait VmObject: Send + Sync {
+    fn memory_report_kind(&self) -> Option<VmMemoryReportKind> {
+        None
+    }
+
+    fn fill_memory_report(
+        &self,
+        _range: core::ops::Range<usize>,
+        _kind: VmMemoryReportKind,
+        _report: &mut VmMemoryReport,
+    ) {
+    }
+
+    fn resident_pages(&self) -> usize {
+        let mut report = VmMemoryReport::default();
+        self.fill_memory_report(0..usize::MAX, VmMemoryReportKind::File, &mut report);
+        report.file.shared
+    }
+
     /// Resolve the frame at `pidx` for the given access type.
     ///
     /// `VmObject` are allowed to create a local copy of the frame in this

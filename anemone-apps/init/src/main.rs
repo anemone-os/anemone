@@ -50,23 +50,29 @@ pub fn main() -> Result<(), Errno> {
                 let mut wstatus = WStatusRaw::EMPTY;
                 match wait4(WaitFor::AnyChild, Some(&mut wstatus), WaitOptions::empty()) {
                     Ok(Some(tid)) => {
-                        println!(
+                        /*println!(
                             "init: child task #{} exited with code {:?}",
                             tid,
                             wstatus.read()
-                        )
+                        )；*/
                     },
                     Ok(None) => {
                         panic!(
                             "init: wait4 returned None but no error, this should not happen, since we didn't specify WNOHANG"
                         );
                     },
+                    Err(EINTR) => {
+                        // wait4 may be interrupted by SIGCHLD or another signal
+                        // before the exited child is reaped. PID 1 must retry
+                        // instead of turning a recoverable Linux ABI result into
+                        // an init-exit panic.
+                        continue;
+                    },
+                    Err(ECHILD) => {
+                        sched_yield().expect("init: failed to yield");
+                    },
                     Err(e) => {
-                        if e != ECHILD {
-                            panic!("init: cannot recycle child tasks: {}", e);
-                        } else {
-                            sched_yield().expect("init: failed to yield");
-                        }
+                        panic!("init: cannot recycle child tasks: {}", e);
                     },
                 }
             }

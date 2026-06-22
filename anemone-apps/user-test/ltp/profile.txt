@@ -3,4 +3,28 @@
 # Edit this file and rebuild user-test to switch the selected LTP groups.
 # Use "all" to run every registered group.
 
-all
+chmod
+chown
+clone
+credentials
+eventfd
+exec
+fanotify
+fcntl
+fd
+fs
+futex
+ioctl
+iomux
+ipc
+memory
+mount-legacy
+open
+pipe
+read-write
+schedule
+sendfile
+signal
+splice
+timerfd
+wait

@@ -45,7 +45,8 @@ const GLIBC_LTP_ENV: &[&str] = &[
     "PATH=/glibc/ltp/testcases/bin:/glibc/bin:/glibc/usr/bin:/bin:/usr/bin:/sbin:/usr/sbin",
     "LTPROOT=/glibc/ltp",
     "LTP_VIRT_OVERRIDE=kvm",
-    "LTP_COLORIZE_OUTPUT=1",
+    // "LTP_COLORIZE_OUTPUT=1",
+    "ANSI_COLOR=0",
     "TMPDIR=/tmp",
     "KCONFIG_PATH=/etc/ltp/anemone-kconfig",
 ];
@@ -54,7 +55,8 @@ const MUSL_LTP_ENV: &[&str] = &[
     "PATH=/musl/ltp/testcases/bin:/musl/bin:/musl/usr/bin:/bin:/usr/bin:/sbin:/usr/sbin",
     "LTPROOT=/musl/ltp",
     "LTP_VIRT_OVERRIDE=kvm",
-    "LTP_COLORIZE_OUTPUT=1",
+    // "LTP_COLORIZE_OUTPUT=1",
+    "ANSI_COLOR=0",
     "TMPDIR=/tmp",
     "KCONFIG_PATH=/etc/ltp/anemone-kconfig",
 ];
@@ -197,6 +199,10 @@ const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
         name: "iomux",
         cases: include_str!("../ltp/groups/iomux.txt"),
+    },
+    LtpGroup {
+        name: "syscalls",
+        cases: include_str!("../ltp/groups/syscalls.txt"),
     },
 ];
 
@@ -667,6 +673,7 @@ fn run_ltp_root(
         let group_summary = run_ltp_group(root, group, heartbeat);
         summary.merge(group_summary);
     }
+    println!("#### OS COMP TEST GROUP END {} ####", root.label);
 
     heartbeat.publish("root_finished", root.label, "-", "-", 0);
     println!(
@@ -682,10 +689,10 @@ fn run_ltp_root(
 }
 
 fn run_ltp_group(root: &LtpRoot, group: &LtpGroup, heartbeat: &mut LtpHeartbeat) -> LtpSummary {
-    println!(
-        "#### OS COMP TEST GROUP START {}/{} ####",
-        root.label, group.name,
-    );
+    // println!(
+    //     "#### OS COMP TEST GROUP START {}/{} ####",
+    //     root.label, group.name,
+    // );
     heartbeat.publish("group_start", root.label, group.name, "-", 0);
 
     let mut summary = LtpSummary::default();
@@ -722,10 +729,10 @@ fn run_ltp_group(root: &LtpRoot, group: &LtpGroup, heartbeat: &mut LtpHeartbeat)
         }
     }
 
-    println!(
-        "#### OS COMP TEST GROUP END {}/{} ####",
-        root.label, group.name,
-    );
+    // println!(
+    //     "#### OS COMP TEST GROUP END {}/{} ####",
+    //     root.label, group.name,
+    // );
     heartbeat.publish("group_finished", root.label, group.name, "-", 0);
     println!(
         "user-test: {}/{} summary attempted={} passed={} failed={} infra_failed={} skipped={}",

@@ -1,0 +1,53 @@
+[build]
+name = "pre-test-la64"
+abbrs = []
+arch = "loongarch64"
+exec_env = "sbi"
+
+[constants]
+phys_ram_start = 0x80000000
+max_phys_ram_size = 0x80000000      # 2GB
+kernel_la_base = 0x80200000
+kernel_va_base = 0xffffffff80200000
+max_cpus = 4
+frame_section_shift_mb = 7
+
+[qemu]
+qemu = "qemu-system-loongarch64"
+machine = "virt"
+smp = 1
+memory = "1G"
+# cpu = default
+args = [
+    "-nographic",
+    "-serial",
+    "mon:stdio",
+
+    "-drive",
+    "file=sdcard-la.img,format=raw,if=none,id=x0", # vda
+    "-device",
+    "virtio-blk-pci,drive=x0",
+
+    "-no-reboot",
+    "-device",
+    "virtio-net-pci,netdev=net0",
+    "-netdev",
+    "user,id=net0",
+    "-rtc",
+    "base=utc",
+
+    "-drive",
+    "file=disk-la.img,format=raw,if=none,id=x1", # vdb
+    "-device",
+    "virtio-blk-pci,drive=x1",
+]
+
+[rootfs]
+fstype = "ext4"
+source = { type = "block", path = "vdb" }
+
+
+[dtb]
+path = "arch/loongarch64/generated.dtb"
+type = "file"
+source = "conf/platforms/pre-test-la64.dtb"

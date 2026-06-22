@@ -23,10 +23,17 @@ pub struct QemuArgs {
         default_value = "false"
     )]
     debug: bool,
+
+    #[arg(long)]
+    #[arg(help = "Path to the QEMU executable to use, defaults to the platform config")]
+    emulator: Option<String>,
 }
 
 pub fn gen_qemu_cmd(qemu: &Qemu, args: Option<&QemuArgs>) -> std::process::Command {
-    let mut cmd = std::process::Command::new(&qemu.qemu);
+    let emulator = args
+        .and_then(|args| args.emulator.as_deref())
+        .unwrap_or(&qemu.qemu);
+    let mut cmd = std::process::Command::new(emulator);
     cmd.arg("-machine")
         .arg(&qemu.machine)
         .arg("-smp")

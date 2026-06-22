@@ -786,6 +786,7 @@ impl Task {
     /// If the disposition of the signal satisfies [SignalAction::is_ignored],
     /// the signal won't be delivered, even if it is unmasked.
     pub fn recv_signal(self: &Arc<Self>, signal: Signal) {
+        // kspecialln!("{:?} -> {:?}", self.tid(), signal.no);
         kdebugln!("task {} recv_signal: {:?}", self.tid(), signal);
         let no = signal.no;
 
@@ -1120,6 +1121,7 @@ impl ThreadGroup {
     /// If the disposition of the signal satisfies [SignalAction::is_ignored],
     /// the signal won't be delivered.
     pub fn recv_signal(&self, signal: Signal) {
+        // kspecialln!("{} -> {:?}", self.tgid(), signal.no);
         let no = signal.no;
         let members = self.get_members();
 
@@ -1235,6 +1237,32 @@ fn perform_signal_action(
 
     match action {
         SignalAction::Default(default) => {
+            #[cfg(feature = "bench_local_test")]
+            if no == SigNo::SIGKILL {
+                match &signal.fields {
+                    SigInfoFields::Kill(killer) | SigInfoFields::TKill(killer) => {
+                        kerrln!(
+                            "[special_report] sigkill terminate target_tid={} target_tgid={} target_name=\"{}\" killer_tgid={} killer_uid={} si_code={:?}",
+                            task.tid(),
+                            task.tgid(),
+                            task.name(),
+                            killer.pid,
+                            killer.uid.get(),
+                            signal.code
+                        );
+                    },
+                    fields => {
+                        kerrln!(
+                            "[special_report] sigkill terminate target_tid={} target_tgid={} target_name=\"{}\" killer=unknown si_code={:?} fields={:?}",
+                            task.tid(),
+                            task.tgid(),
+                            task.name(),
+                            signal.code,
+                            fields
+                        );
+                    },
+                }
+            }
             drop(task);
             default(no);
             return false;
