@@ -13,6 +13,26 @@ use anemone_rs::{
     process::process_id,
 };
 
+const USER_TEST_PATH: &str = "/bin/user-test";
+const USER_TEST_ARGV: &[&str] = &["user-test"];
+const USER_TEST_ENVP: &[&str] = &[];
+
+fn log_execve_payload(path: &str, argv: &[&str], envp: &[&str]) {
+    println!("init: execve payload:");
+    println!("init:   path={path:?}");
+    println!("init:   argc={}", argv.len());
+    for (index, arg) in argv.iter().enumerate() {
+        println!("init:   argv[{index}]={arg:?}");
+    }
+    println!("init:   envc={}", envp.len());
+    for (index, env) in envp.iter().enumerate() {
+        println!("init:   envp[{index}]={env:?}");
+    }
+    if envp.is_empty() {
+        println!("init:   envp is empty");
+    }
+}
+
 #[anemone_rs::main]
 pub fn main() -> Result<(), Errno> {
     let cwd = current_dir()?;
@@ -79,7 +99,8 @@ pub fn main() -> Result<(), Errno> {
         },
         None => {
             // child
-            execve("/bin/user-test", &["user-test"], &[])
+            log_execve_payload(USER_TEST_PATH, USER_TEST_ARGV, USER_TEST_ENVP);
+            execve(USER_TEST_PATH, USER_TEST_ARGV, USER_TEST_ENVP)
                 .expect("init: failed to execve user-test");
             unreachable!();
         },

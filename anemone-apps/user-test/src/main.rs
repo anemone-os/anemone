@@ -9,6 +9,7 @@ use anemone_rs::{
         fs::linux::open::{O_CREAT, O_RDONLY, O_TRUNC, O_WRONLY},
         system::native::power::SHUTDOWN_MAGIC,
     },
+    env::{args as process_args, current_dir, envs as process_envs},
     os::{
         anemone::{kernel_preempt::set_enabled as set_kernel_preempt_enabled, power::shutdown},
         linux::{
@@ -17,6 +18,7 @@ use anemone_rs::{
         },
     },
     prelude::*,
+    process::process_id,
 };
 
 const BOOTSTRAP_BUSYBOX_PRIMARY: &str = "/musl/busybox";
@@ -153,6 +155,30 @@ fn run_execve(cmd: &str, args: &[&str], envs: &[&str], name: &str) {
 
 fn local_run_cmd(cmd: &str, args: &[&str], envs: &[&str]) {
     run_execve(cmd, args, envs, cmd);
+}
+
+fn log_user_test_main_start() {
+    println!("user-test: main start:");
+    println!("user-test:   pid={}", process_id());
+    match current_dir() {
+        Ok(cwd) => println!("user-test:   cwd={}", cwd.display()),
+        Err(errno) => println!("user-test:   cwd=<unavailable: {errno:?}>"),
+    }
+
+    let argv = process_args().collect::<Vec<_>>();
+    println!("user-test:   argc={}", argv.len());
+    for (index, arg) in argv.iter().enumerate() {
+        println!("user-test:   argv[{index}]={arg:?}");
+    }
+
+    let envp = process_envs().collect::<Vec<_>>();
+    println!("user-test:   envc={}", envp.len());
+    for (index, (key, value)) in envp.iter().enumerate() {
+        println!("user-test:   envp[{index}]={key}={value}");
+    }
+    if envp.is_empty() {
+        println!("user-test:   envp is empty");
+    }
 }
 
 /// local tests for development.
@@ -586,6 +612,8 @@ fn run_comp_tests() {
 
 #[anemone_rs::main]
 pub fn main() -> Result<(), Errno> {
+    log_user_test_main_start();
+
     run_local_tests();
 
     run_comp_tests();
