@@ -174,10 +174,10 @@ impl ThreadGroup {
     pub fn cpu_usage_snapshot(&self) -> ThreadGroupCpuUsage {
         let mut snapshot = self.inner.read().cpu_usage;
 
-        self.for_each_member(|member| {
+        for member in self.get_members() {
             let member_cpu_usage = member.cpu_usage_snapshot();
             snapshot.accumulate_member_usage(&member_cpu_usage);
-        });
+        }
 
         snapshot
     }

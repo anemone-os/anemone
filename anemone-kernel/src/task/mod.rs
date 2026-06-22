@@ -97,7 +97,7 @@ pub struct Task {
     /// stores the address range of the user command line on user's stack.
     ///
     /// So this field is almost purely for debugging and logging purpose.
-    name: RwLock<Box<str>>,
+    name: NoIrqRwLock<Box<str>>,
 
     /// Task attribute flags.
     ///
@@ -428,7 +428,7 @@ impl Task {
             tgid,
             create_instant,
             kstack: stack,
-            name: RwLock::new((String::from("@kernel/") + name).into_boxed_str()),
+            name: NoIrqRwLock::new((String::from("@kernel/") + name).into_boxed_str()),
             flags: NoIrqRwLock::new(flags | TaskFlags::KERNEL),
             usp: RwLock::new(None),
             cpuid: if let Some(cpu) = cpu {
@@ -491,7 +491,7 @@ impl Task {
                 tgid: Tid::IDLE,
                 create_instant: Instant::now(),
                 kstack: stack,
-                name: RwLock::new(Box::from("@idle")),
+                name: NoIrqRwLock::new(Box::from("@idle")),
                 flags: NoIrqRwLock::new(TaskFlags::IDLE | TaskFlags::KERNEL),
                 usp: RwLock::new(None),
                 cpuid: cur_cpu_id(),

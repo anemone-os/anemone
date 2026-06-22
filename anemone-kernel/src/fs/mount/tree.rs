@@ -1,7 +1,7 @@
 use super::{
     data::MountData,
     flags::MountAttrFlags,
-    view::{Mount, MountSource},
+    view::{Mount, MountSource, OldPlacementRefs},
 };
 use crate::prelude::*;
 
@@ -229,8 +229,9 @@ impl MountTree {
 
         let old_target = source.to_string();
         let new_target = target.to_string();
-        let _tx = self.tx_lock.lock();
-        let (subtree_size, stack_depth) = self.inner.lock_irqsave().move_mount(source, target)?;
+        let tx = self.tx_lock.lock();
+        let (subtree_size, stack_depth, old_refs) =
+            self.inner.lock_irqsave().move_mount(source, target)?;
 
         knoticeln!(
             "mount move: old_target={} new_target={} moved_mount={:?} subtree_size={} stack_depth={}",
@@ -240,6 +241,9 @@ impl MountTree {
             subtree_size,
             stack_depth
         );
+
+        drop(tx);
+        drop(old_refs);
 
         Ok(subtree_size)
     }
@@ -266,7 +270,7 @@ impl MountTree {
     ///
     /// Unmounting root filesystem will fail.
     pub(in crate::fs) fn unmount(&self, mount: &Arc<Mount>) -> Result<(), SysError> {
-        let _tx = self.tx_lock.lock();
+        let tx = self.tx_lock.lock();
         let plan = self.inner.lock_irqsave().plan_unmount(mount)?;
 
         if plan.last_view && plan.sb.has_alive_inode() {
@@ -278,7 +282,7 @@ impl MountTree {
             plan.sb.try_evict_all()?;
         }
 
-        let detached_last_view = self.inner.lock_irqsave().detach_mount(mount)?;
+        let (detached_last_view, detach_refs) = self.inner.lock_irqsave().detach_mount(mount)?;
         assert_eq!(
             plan.last_view, detached_last_view,
             "mount tree must not change under the writer transaction lock"
@@ -295,6 +299,9 @@ impl MountTree {
 
         knoticeln!("mount detach: op=unmount target={:?}", plan.mountpoint);
 
+        drop(tx);
+        drop(detach_refs);
+
         Ok(())
     }
 
@@ -307,14 +314,18 @@ impl MountTree {
     /// in this fast path.
     pub(in crate::fs) fn lazy_unmount(&self, mount: &Arc<Mount>) -> Result<usize, SysError> {
         let target = PathRef::new(mount.clone(), mount.root().clone()).to_string();
-        let _tx = self.tx_lock.lock();
-        let subtree_size = self.inner.lock_irqsave().lazy_detach_subtree(mount)?;
+        let tx = self.tx_lock.lock();
+        let detach_refs = self.inner.lock_irqsave().lazy_detach_subtree(mount)?;
+        let subtree_size = detach_refs.subtree_size();
+        drop(tx);
 
         knoticeln!(
             "mount detach: op=lazy target={} subtree_size={} cleanup=topology-only",
             target,
             subtree_size
         );
+
+        drop(detach_refs);
 
         Ok(subtree_size)
     }
@@ -349,6 +360,28 @@ struct BindSourceNode {
     root: Arc<Dentry>,
     parent_index: Option<usize>,
     mountpoint: Option<Arc<Dentry>>,
+}
+
+#[must_use = "detached mount refs must be dropped after MountTree locks are released"]
+struct DetachedMountRefs {
+    // These strong refs are no longer part of the visible tree, but releasing
+    // them can run Mount/Dentry destructors. Keep them bundled with the old
+    // placement refs so callers release both after the tree locks are gone.
+    mounts: Vec<Arc<Mount>>,
+    _placements: Vec<OldPlacementRefs>,
+}
+
+impl DetachedMountRefs {
+    fn single(mount: Arc<Mount>, placement: OldPlacementRefs) -> Self {
+        Self {
+            mounts: vec![mount],
+            _placements: vec![placement],
+        }
+    }
+
+    fn subtree_size(&self) -> usize {
+        self.mounts.len()
+    }
 }
 
 impl MountTreeInner {
@@ -594,7 +627,7 @@ impl MountTreeInner {
         &mut self,
         source: &PathRef,
         target: &PathRef,
-    ) -> Result<(usize, usize), SysError> {
+    ) -> Result<(usize, usize, OldPlacementRefs), SysError> {
         if !Arc::ptr_eq(source.dentry(), source.mount().root()) {
             knoticeln!(
                 "mount move: source revalidation failed source={} reason=not-mount-root",
@@ -642,7 +675,7 @@ impl MountTreeInner {
         old_parent
             .remove_child(source.mount())
             .expect("moved mount should be a child of its old parent");
-        source
+        let old_placement = source
             .mount()
             .move_attached(target.mount(), target.dentry());
         target.mount().push_child(source.mount());
@@ -651,6 +684,7 @@ impl MountTreeInner {
         Ok((
             subtree_size,
             Self::stack_depth_at(target.mount(), target.dentry()),
+            old_placement,
         ))
     }
 
@@ -722,7 +756,7 @@ impl MountTreeInner {
         })
     }
 
-    fn detach_mount(&mut self, mount: &Arc<Mount>) -> Result<bool, SysError> {
+    fn detach_mount(&mut self, mount: &Arc<Mount>) -> Result<(bool, DetachedMountRefs), SysError> {
         let plan = self.plan_unmount(mount)?;
 
         if plan.last_view && plan.sb.has_alive_inode() {
@@ -736,14 +770,15 @@ impl MountTreeInner {
         parent
             .remove_child(mount)
             .expect("mount should be a child of its parent");
-        mount.mark_detached();
+        let old_placement = mount.mark_detached();
+        let detached_refs = DetachedMountRefs::single(mount.clone(), old_placement);
         self.mounts.retain(|m| !Arc::ptr_eq(m, mount));
         self.bump_generation();
 
-        Ok(plan.last_view)
+        Ok((plan.last_view, detached_refs))
     }
 
-    fn lazy_detach_subtree(&mut self, mount: &Arc<Mount>) -> Result<usize, SysError> {
+    fn lazy_detach_subtree(&mut self, mount: &Arc<Mount>) -> Result<DetachedMountRefs, SysError> {
         if !self.contains_mount(mount) {
             return Err(SysError::NotMounted);
         }
@@ -755,8 +790,9 @@ impl MountTreeInner {
 
         let mut subtree = Vec::new();
         Self::collect_mount_subtree(mount, &mut subtree);
+        let mut old_placements = Vec::new();
         for subtree_mount in &subtree {
-            subtree_mount.mark_detached();
+            old_placements.push(subtree_mount.mark_detached());
         }
 
         self.mounts.retain(|existing| {
@@ -766,7 +802,10 @@ impl MountTreeInner {
         });
         self.bump_generation();
 
-        Ok(subtree.len())
+        Ok(DetachedMountRefs {
+            mounts: subtree,
+            _placements: old_placements,
+        })
     }
 }
 

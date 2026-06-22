@@ -1104,12 +1104,10 @@ impl ThreadGroup {
     /// Return `None` if this thread group has no members, (i.e. the thread
     /// group is waiting to be reaped).
     pub fn signal_disposition(&self) -> Option<Arc<NoIrqRwLock<SignalDisposition>>> {
-        let mut disp = None;
-        self.for_each_member(|member| {
-            disp = Some(member.sig_disposition.clone());
-            return;
-        });
-        disp
+        self.get_members()
+            .into_iter()
+            .next()
+            .map(|member| member.sig_disposition.clone())
     }
 
     /// Return a snapshot of this thread group's shared pending signal set.
@@ -1123,18 +1121,16 @@ impl ThreadGroup {
     /// the signal won't be delivered.
     pub fn recv_signal(&self, signal: Signal) {
         let no = signal.no;
+        let members = self.get_members();
 
-        let disp = {
-            let Some(disps) = self.signal_disposition() else {
-                knoticeln!(
-                    "trying to send signal {:?} to a thread group with no members",
-                    no
-                );
-
-                return;
-            };
-            disps.read().get_disposition(no)
+        let Some(first_member) = members.first() else {
+            knoticeln!(
+                "trying to send signal {:?} to a thread group with no members",
+                no
+            );
+            return;
         };
+        let disp = first_member.sig_disposition.read().get_disposition(no);
 
         if disp.action.is_ignored() {
             kdebugln!(
@@ -1145,11 +1141,11 @@ impl ThreadGroup {
         }
 
         {
-            let inner = self.inner.write();
+            let inner = self.inner.read();
             inner.sig_pending.lock().push_signal(signal);
         }
 
-        self.for_each_member(|member| {
+        for member in members {
             if member.is_current_sig_mask_blocking(no)
                 && !matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP)
             {
@@ -1157,7 +1153,7 @@ impl ThreadGroup {
                 // unmask it.
             } else {
                 notify(
-                    member,
+                    &member,
                     if matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
                         true
                     } else {
@@ -1165,7 +1161,7 @@ impl ThreadGroup {
                     },
                 );
             }
-        });
+        }
     }
 
     /// Flush pending signals in the given set.
@@ -1182,9 +1178,9 @@ impl ThreadGroup {
             let mut pending = inner.sig_pending.lock();
             pending.flush_specific(set);
         }
-        self.for_each_member(|member| {
+        for member in self.get_members() {
             member.sig_pending.lock().flush_specific(set);
-        });
+        }
     }
 }
 
