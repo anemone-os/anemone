@@ -367,7 +367,8 @@ pub fn kernel_exit_group(code: ExitCode) -> ! {
 
         // TODO: when signal is implemented, we should send SIGKILL to all other
         // threads in this thread group.
-        tg.for_each_member(|member| {
+        let members = tg.get_members();
+        for member in members {
             if member.tid() != task.tid() {
                 member.recv_signal(Signal::new(
                     SigNo::SIGKILL,
@@ -378,7 +379,7 @@ pub fn kernel_exit_group(code: ExitCode) -> ! {
                     }),
                 ))
             }
-        });
+        }
 
         // no need to wait anymore. the last thread that exits will do the
         // cleanup work.

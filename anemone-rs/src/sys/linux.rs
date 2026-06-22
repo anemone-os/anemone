@@ -44,6 +44,10 @@ pub mod fs {
         unsafe { syscall(SYS_WRITE, fd, buf_ptr, count, 0, 0, 0) }
     }
 
+    pub fn pipe2(pipefd_ptr: u64, flags: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_PIPE2, pipefd_ptr, flags, 0, 0, 0, 0) }
+    }
+
     pub fn close(fd: u64) -> Result<u64, Errno> {
         unsafe { syscall(SYS_CLOSE, fd, 0, 0, 0, 0, 0) }
     }
@@ -88,6 +92,10 @@ pub mod time {
 
     pub fn gettimeofday(tv_ptr: u64, tz_ptr: u64) -> Result<u64, Errno> {
         unsafe { syscall(SYS_GETTIMEOFDAY, tv_ptr, tz_ptr, 0, 0, 0, 0) }
+    }
+
+    pub fn nanosleep(duration_ptr: u64, rem_ptr: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_NANOSLEEP, duration_ptr, rem_ptr, 0, 0, 0, 0) }
     }
 }
 

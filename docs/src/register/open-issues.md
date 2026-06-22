@@ -773,3 +773,21 @@ fault 地址是 `0x10`，这符合对损坏的 trait object / fat pointer 做动
 
 **Severity:** High
 **Workaround:** `user-test` LTP runner 暂时使用 per-case timeout；超时后只对该 case 的独立进程组发 `SIGKILL`，把该 case 归为 runner 设施失败并继续执行后续 case。该绕过只保证 profile 能继续推进，不证明内核 wait / timer / cleanup 语义已修复。
+
+## ANE-20260622-IRQ-OFF-HEAP-ALLOCATION
+
+**Type:** Issue
+**Status:** Open
+**Area:** irq / scheduler / task lifecycle / timer / mm allocator
+
+**Symptom / Trigger:** 单核、关抢占的 LTP 长 profile 仍可能在 case summary 或 `PASS/FAIL LTP CASE ...` 附近卡死。2026-06-22 审查中发现若干 hard IRQ 或 IRQ-off return-tail 路径仍会执行可能扩容的堆分配或 allocator side effect：例如 trap interrupt return 在重新开中断前调用 deferred task disposal，disposal 扫描时用 `Vec` 临时收集 task 并可能在日志中 clone task name；threaded timer 的 IRQ 到 worker ready queue 交接使用 `VecDeque::push_back()`；kmalloc OOM handler 还可能向 frame allocator 要页，而 frame allocation 后会检查水位并唤醒 OOM killer。
+
+**Impact:** allocator 内部使用 noirq lock 只能降低 allocator 自身锁被硬中断重入的风险，不能证明这些路径适合在 hard IRQ 或 IRQ-off tail 中运行。堆扩容、OOM handler、日志格式化、对象析构、worker wake 或后续普通锁访问都可能把本应短小、不可睡眠、不可重入的上下文扩大成复杂工作；当前 `spin_lock_irqsave` 构建开关也不能作为设计闭合证据。
+
+**Owner:** doruche
+**Last Verified:** 2026-06-22
+**Exit Condition:** 对 hard IRQ handler、trap interrupt return tail、scheduler noirq path、timer IRQ lane 和 deferred task disposal 做一次 source audit；把这些路径改成 allocation-free，或只允许预分配/固定容量/显式 fallible 且无 OOM side effect 的最小入队；确认 IRQ-off tail 不再执行 task Drop、普通日志/name clone、OOM wake、sleepable lock 或其它可能进入 wait/scheduler 的工作。随后用定向 source audit 和长 LTP profile 复跑确认 post-summary hang 不再由 IRQ/off-tail allocation 类风险解释。
+**Related:** [LTP post-summary hang](#ane-20260616-ltp-post-summary-hang), [fanotify tracking issues](../rfcs/fanotify/tracking-issues.md)
+
+**Severity:** High
+**Workaround:** 当前只能把此类路径视为未收敛风险；不要用 noirq allocator、`spin_lock_irqsave` 或偶然通过的 LTP case 作为关闭依据。优先避免在 IRQ/off-tail 新增任何可能分配、格式化日志、drop 复杂对象或唤醒普通 worker 的代码。

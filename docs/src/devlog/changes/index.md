@@ -32,6 +32,7 @@
 
 ## 当前记录
 
+- [2026-06-22 - spin lock irqsave kconfig feature](./2026-06-22-spin-lock-irqsave-feature.md)
 - [2026-06-18 - RFC workflow feedback loop](./2026-06-18-rfc-feedback-loop.md)
 - [2026-06-17 - splice family copy-backed stage-1](./2026-06-17-splice-copy-stage1.md)
 - [2026-06-15 - backend-aware fcntl pipe-size 分发](./2026-06-15-backend-aware-fcntl.md)

@@ -1,6 +1,7 @@
 pub mod fs {
     use alloc::ffi::CString;
-    use anemone_abi::fs::linux::stat::Stat;
+    use anemone_abi::fs::linux::{open, stat::Stat};
+    use bitflags::bitflags;
 
     use crate::{prelude::*, sys::linux::fs};
 
@@ -20,6 +21,14 @@ pub mod fs {
                 AtFd::Cwd => anemone_abi::fs::linux::at::AT_FDCWD,
                 AtFd::Fd(fd) => fd as i32,
             }
+        }
+    }
+
+    bitflags! {
+        #[derive(Debug, Clone, Copy)]
+        pub struct PipeFlags: u32 {
+            const CLOEXEC = open::O_CLOEXEC;
+            const NONBLOCK = open::O_NONBLOCK;
         }
     }
 
@@ -87,6 +96,12 @@ pub mod fs {
         fs::write(fd as u64, buf.as_ptr() as u64, buf.len() as u64).map(|count| count as usize)
     }
 
+    pub fn pipe2(flags: PipeFlags) -> Result<(Fd, Fd), Errno> {
+        let mut pipefd = [0i32; 2];
+        fs::pipe2(pipefd.as_mut_ptr() as u64, flags.bits() as u64)
+            .map(|_| (pipefd[0] as Fd, pipefd[1] as Fd))
+    }
+
     /// flags and data are currently not supported.
     pub fn mount(source: Option<&Path>, target: &Path, fstype: &str) -> Result<(), Errno> {
         let source_cstr = source
@@ -114,13 +129,17 @@ pub mod fs {
 }
 
 pub mod time {
-    use anemone_abi::time::linux::TimeVal;
+    use anemone_abi::time::linux::{TimeSpec, TimeVal};
 
     use crate::{prelude::*, sys::linux::time};
 
     pub fn gettimeofday() -> Result<TimeVal, Errno> {
         let mut tv = TimeVal::default();
         time::gettimeofday(&mut tv as *mut TimeVal as u64, 0).map(|_| tv)
+    }
+
+    pub fn nanosleep(duration: TimeSpec) -> Result<(), Errno> {
+        time::nanosleep(&duration as *const TimeSpec as u64, 0).map(|_| ())
     }
 }
 

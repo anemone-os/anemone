@@ -20,6 +20,32 @@ enum MountPlacement {
     Detached,
 }
 
+/// Strong refs extracted from a previous placement.
+///
+/// Dropping these refs can run `Dentry` / `Mount` destructors. `MountTree`
+/// callers must carry this value out of placement and tree locks before it is
+/// allowed to fall out of scope.
+#[must_use = "old placement refs must be dropped after placement locks are released"]
+pub(super) struct OldPlacementRefs {
+    _parent: Option<Arc<Mount>>,
+    _mountpoint: Option<Arc<Dentry>>,
+}
+
+impl OldPlacementRefs {
+    fn from_placement(placement: MountPlacement) -> Self {
+        match placement {
+            MountPlacement::Attached { parent, mountpoint } => Self {
+                _parent: Some(parent),
+                _mountpoint: Some(mountpoint),
+            },
+            MountPlacement::Root | MountPlacement::Detached => Self {
+                _parent: None,
+                _mountpoint: None,
+            },
+        }
+    }
+}
+
 impl Debug for MountPlacement {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -153,25 +179,34 @@ impl Mount {
         };
     }
 
-    pub(super) fn move_attached(&self, parent: &Arc<Mount>, mountpoint: &Arc<Dentry>) {
+    pub(super) fn move_attached(
+        &self,
+        parent: &Arc<Mount>,
+        mountpoint: &Arc<Dentry>,
+    ) -> OldPlacementRefs {
         let mut placement = self.placement.lock();
         assert!(
             matches!(*placement, MountPlacement::Attached { .. }),
             "only an attached mount can be moved"
         );
-        *placement = MountPlacement::Attached {
-            parent: parent.clone(),
-            mountpoint: mountpoint.clone(),
-        };
+        let old = core::mem::replace(
+            &mut *placement,
+            MountPlacement::Attached {
+                parent: parent.clone(),
+                mountpoint: mountpoint.clone(),
+            },
+        );
+        OldPlacementRefs::from_placement(old)
     }
 
-    pub(super) fn mark_detached(&self) {
+    pub(super) fn mark_detached(&self) -> OldPlacementRefs {
         let mut placement = self.placement.lock();
         assert!(
             !matches!(*placement, MountPlacement::Root),
             "root mount must not be detached"
         );
-        *placement = MountPlacement::Detached;
+        let old = core::mem::replace(&mut *placement, MountPlacement::Detached);
+        OldPlacementRefs::from_placement(old)
     }
 
     pub(super) fn is_reachable(&self) -> bool {

@@ -1,9 +1,9 @@
 # fanotify tracking issues
 
 **状态：** Active
-**最后更新：** 2026-06-10
+**最后更新：** 2026-06-22
 **父 RFC：** [RFC-20260604-fanotify](./index.md)
-**来源：** 2026-06-04 system-design review；2026-06-05 software-engineering review；2026-06-05 ioctl-loop / fileops-seek freshness review；2026-06-09 Gate C runtime regression review；2026-06-10 D5 event source boundary review；2026-06-10 D7 bypass review
+**来源：** 2026-06-04 system-design review；2026-06-05 software-engineering review；2026-06-05 ioctl-loop / fileops-seek freshness review；2026-06-09 Gate C runtime regression review；2026-06-10 D5 event source boundary review；2026-06-10 D7 bypass review；2026-06-22 single-core IRQ-off hang audit
 
 本文只跟踪 design review 后确认的 fanotify 草案缺陷、证明缺口、边界冲突或需要回到草案修改的设计问题。
 
@@ -21,7 +21,33 @@
 
 ## Keter
 
-- 暂无。
+### FANOTIFY-044: fanotify poll/register 路径不得在 latch begin 后进入 sleepable group lock
+
+**状态：** Active
+
+**发现证据：** 2026-06-22 单核、关抢占、LTP case summary 后卡死审查中发现，`fs/api/iomux/wait.rs`
+在 `Latch::begin_current(true)` 之后执行 register scan；register scan 会调用 fd 的 `poll()`。
+当前 fanotify group fd 的 `poll()` 进入 `FanGroup::poll()`，后者直接获取 `FanGroup::state: Mutex`。
+该 `Mutex` 的慢路径会通过 `Event::listen_uninterruptible()` 等待锁释放。也就是说，一个已经发布
+wait-core latch 的 task 可能在 source register 阶段再次进入另一个 wait primitive。
+
+**违反的不变量：** latch / wait-core 模型要求每个 task 同一时刻只有一个 active wait round。
+`poll()` register path 必须是 non-sleeping source-registration transaction：它可以读取 readiness、
+保存 `LatchTrigger` 或返回 `Unsupported` / error，但不得在 latch begin 后阻塞等待另一个锁。
+fanotify group state 若继续使用 sleepable `Mutex`，就不能安全作为 iomux latch source 的 register lock。
+
+**影响：** 在单核、关抢占或 IRQ-off 尾部调度压力下，这类二次等待会把 task 的 wait-state 所有权打穿：
+外层 iomux latch 认为自己持有当前 wait round，内层 mutex/event 又尝试重新发布等待。症状可能表现为
+poll/select 路径、case teardown 或 post-summary wait/reap 阶段随机卡死，而不是稳定的 syscall errno。
+
+**修复方向：** fanotify 需要先 neutralize 该问题，再把 group fd poll/readiness 作为已闭合基础设施：
+要么把 `FanGroup::state` 中 poll/read/wakeup 可见部分迁移到 noirq/non-sleeping lock，并保证 register scan
+只在非阻塞临界区内完成；要么拆出专用 readiness/poll trigger state，使 `poll()` register 不会触碰
+可能 sleep 的 group lifecycle / mark cleanup 锁。无论选择哪条路径，`poll()` 不得在 latch begin 后调用
+`Mutex::lock()` 或任何可能进入 wait-core 的 primitive。
+
+**停止边界：** 在该问题 neutralized 之前，不得把 fanotify group fd 的 poll/register 与 iomux latch
+组合声明为稳定，也不得用当前 `spin_lock_irqsave` 构建开关或偶然 PASS 作为设计闭合证据。
 
 ## Euclid
 

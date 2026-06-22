@@ -1,12 +1,13 @@
 use anemone_rs::{
+    abi::time::linux::TimeSpec,
     os::linux::{
-        fs::{AtFd, chdir, fstatat},
+        fs::{AtFd, Fd, PipeFlags, chdir, close, fstatat, pipe2, read, write},
         process::{
             WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, sched_yield, setpgid,
             signal::{SigNo, kill},
             wait4,
         },
-        time::gettimeofday,
+        time::{gettimeofday, nanosleep},
     },
     prelude::*,
 };
@@ -21,15 +22,24 @@ const LTP_MODULES_DEP: &str = include_str!("../fixtures/modules.dep");
 const MICROS_PER_SECOND: i64 = 1_000_000;
 // Temporary containment for ANE-20260616-LTP-POST-SUMMARY-HANG: keep long
 // profiles moving while the kernel-side wait/cleanup root cause is open.
-const LTP_CASE_TIMEOUT_SECONDS: i64 = 90;
+const LTP_CASE_TIMEOUT_SECONDS: i64 = 60;
 const LTP_CASE_KILL_GRACE_SECONDS: i64 = 5;
 const LTP_CASE_TIMEOUT_EXIT_CODE: i32 = 124;
+const LTP_HEARTBEAT_PRINT_INTERVAL_SECONDS: i64 = 5;
+const LTP_HEARTBEAT_SLEEP_TICK_SECONDS: i64 = 1;
+const LTP_HEARTBEAT_STOP_GRACE_SECONDS: i64 = 2;
+const LTP_WAIT_LOOP_PROBE_INTERVAL_SECONDS: i64 = 5;
 // LTP result bits use TCONF=32 for "unsupported configuration". Only a pure
 // TCONF exit is a skip; mixed TCONF|TFAIL/TBROK still represents a real
 // failure.
 const LTP_TCONF_EXIT_CODE: i32 = 32;
 const LTP_CASE_TIMEOUT_US: i64 = LTP_CASE_TIMEOUT_SECONDS * MICROS_PER_SECOND;
 const LTP_CASE_KILL_GRACE_US: i64 = LTP_CASE_KILL_GRACE_SECONDS * MICROS_PER_SECOND;
+const LTP_HEARTBEAT_PRINT_INTERVAL_US: i64 =
+    LTP_HEARTBEAT_PRINT_INTERVAL_SECONDS * MICROS_PER_SECOND;
+const LTP_HEARTBEAT_STOP_GRACE_US: i64 = LTP_HEARTBEAT_STOP_GRACE_SECONDS * MICROS_PER_SECOND;
+const LTP_WAIT_LOOP_PROBE_INTERVAL_US: i64 =
+    LTP_WAIT_LOOP_PROBE_INTERVAL_SECONDS * MICROS_PER_SECOND;
 
 const GLIBC_LTP_ENV: &[&str] = &[
     "PATH=/glibc/ltp/testcases/bin:/glibc/bin:/glibc/usr/bin:/bin:/usr/bin:/sbin:/usr/sbin",
@@ -279,6 +289,331 @@ enum LtpCaseWaitResult {
     TimedOut,
 }
 
+struct LtpHeartbeat {
+    child: Option<u32>,
+    write_fd: Option<Fd>,
+    snapshot_seq: u64,
+}
+
+impl LtpHeartbeat {
+    fn start_or_disabled() -> Self {
+        match Self::start() {
+            Ok(heartbeat) => heartbeat,
+            Err(errno) => {
+                println!("user-test: LTP heartbeat disabled: {errno:?}");
+                Self::disabled()
+            },
+        }
+    }
+
+    fn start() -> Result<Self, Errno> {
+        let (read_fd, write_fd) = pipe2(PipeFlags::CLOEXEC | PipeFlags::NONBLOCK)?;
+        // The heartbeat channel is diagnostic-only. CLOEXEC keeps the long-lived
+        // LTP case image from inheriting the writer and hiding parent shutdown.
+        let fork_result = match fork() {
+            Ok(result) => result,
+            Err(errno) => {
+                let _ = close(read_fd);
+                let _ = close(write_fd);
+                return Err(errno);
+            },
+        };
+
+        match fork_result {
+            Some(child) => {
+                let _ = close(read_fd);
+                let mut heartbeat = Self {
+                    child: Some(child),
+                    write_fd: Some(write_fd),
+                    snapshot_seq: 0,
+                };
+                heartbeat.publish("started", "-", "-", "-", 0);
+                Ok(heartbeat)
+            },
+            None => {
+                let _ = close(write_fd);
+                run_ltp_heartbeat_child(read_fd);
+            },
+        }
+    }
+
+    fn disabled() -> Self {
+        Self {
+            child: None,
+            write_fd: None,
+            snapshot_seq: 0,
+        }
+    }
+
+    fn publish(&mut self, phase: &str, root: &str, group: &str, case: &str, case_pgrp: u32) {
+        let Some(fd) = self.write_fd else {
+            return;
+        };
+
+        self.snapshot_seq += 1;
+        let now = now_us().unwrap_or(-1);
+        let message = format!(
+            "snapshot_seq={} now_us={} phase={} root={} group={} case={} case_pgrp={}\n",
+            self.snapshot_seq, now, phase, root, group, case, case_pgrp,
+        );
+
+        match write(fd, message.as_bytes()) {
+            Ok(_) | Err(EAGAIN) | Err(EINTR) => {},
+            Err(EPIPE) => {
+                println!("user-test: LTP heartbeat pipe closed; disabling updates");
+                self.close_write_fd();
+            },
+            Err(errno) => {
+                println!("user-test: LTP heartbeat update failed: {errno:?}");
+                self.close_write_fd();
+            },
+        }
+    }
+
+    fn finish(mut self) {
+        self.publish("finished", "-", "-", "-", 0);
+        self.close_write_fd();
+        self.wait_child_exit();
+    }
+
+    fn close_write_fd(&mut self) {
+        if let Some(fd) = self.write_fd.take() {
+            let _ = close(fd);
+        }
+    }
+
+    fn wait_child_exit(&mut self) {
+        let Some(child) = self.child.take() else {
+            return;
+        };
+
+        let start_us = now_us().unwrap_or(0);
+        let mut killed = false;
+        loop {
+            let mut wstatus = WStatusRaw::EMPTY;
+            match wait4(
+                WaitFor::ChildWithTgid(child),
+                Some(&mut wstatus),
+                WaitOptions::NOHANG,
+            ) {
+                Ok(Some(_)) | Err(ECHILD) => return,
+                Ok(None) | Err(EINTR) => {},
+                Err(errno) => {
+                    println!("user-test: LTP heartbeat wait failed: {errno:?}");
+                    return;
+                },
+            }
+
+            let elapsed_us = elapsed_us_since(start_us).unwrap_or(LTP_HEARTBEAT_STOP_GRACE_US);
+            if !killed && elapsed_us >= LTP_HEARTBEAT_STOP_GRACE_US {
+                println!("user-test: LTP heartbeat did not exit after control pipe close; killing");
+                let _ = kill(child as i32, SigNo::SIGKILL);
+                killed = true;
+            }
+            if killed && elapsed_us >= LTP_HEARTBEAT_STOP_GRACE_US + MICROS_PER_SECOND {
+                println!("user-test: LTP heartbeat child not reaped after kill; continuing");
+                return;
+            }
+
+            let _ = sched_yield();
+        }
+    }
+}
+
+impl Drop for LtpHeartbeat {
+    fn drop(&mut self) {
+        self.close_write_fd();
+    }
+}
+
+struct LtpWaitLoopProbe<'a> {
+    root_label: &'a str,
+    group_name: &'a str,
+    case_name: &'a str,
+    tid: u32,
+    phase: &'static str,
+    seq: u64,
+    last_now_us: i64,
+    next_probe_us: i64,
+    log_iteration: bool,
+}
+
+impl<'a> LtpWaitLoopProbe<'a> {
+    fn new(root_label: &'a str, group_name: &'a str, case_name: &'a str, tid: u32) -> Self {
+        Self {
+            root_label,
+            group_name,
+            case_name,
+            tid,
+            phase: "wait",
+            seq: 0,
+            last_now_us: 0,
+            next_probe_us: 0,
+            log_iteration: true,
+        }
+    }
+
+    fn set_phase(&mut self, phase: &'static str) {
+        self.phase = phase;
+        self.next_probe_us = 0;
+        self.log_iteration = true;
+    }
+
+    fn begin_iteration(&mut self) {
+        self.log_iteration = self.next_probe_us == 0 || self.last_now_us >= self.next_probe_us;
+        if self.log_iteration {
+            self.seq += 1;
+        }
+    }
+
+    fn finish_iteration(&mut self) {
+        if !self.log_iteration {
+            return;
+        }
+
+        let mut next = if self.next_probe_us == 0 {
+            self.last_now_us
+                .saturating_add(LTP_WAIT_LOOP_PROBE_INTERVAL_US)
+        } else {
+            self.next_probe_us
+        };
+        while self.last_now_us >= next {
+            next = next.saturating_add(LTP_WAIT_LOOP_PROBE_INTERVAL_US);
+        }
+        self.next_probe_us = next;
+        self.log_iteration = false;
+    }
+
+    fn before(&self, op: &str) {
+        if self.log_iteration {
+            println!(
+                "user-test: LTP wait-loop probe seq={} phase={} root={} group={} case={} case_pgrp={} before {}",
+                self.seq,
+                self.phase,
+                self.root_label,
+                self.group_name,
+                self.case_name,
+                self.tid,
+                op,
+            );
+        }
+    }
+
+    fn after(&self, op: &str, detail: core::fmt::Arguments<'_>) {
+        if self.log_iteration {
+            println!(
+                "user-test: LTP wait-loop probe seq={} phase={} root={} group={} case={} case_pgrp={} after {} {}",
+                self.seq,
+                self.phase,
+                self.root_label,
+                self.group_name,
+                self.case_name,
+                self.tid,
+                op,
+                detail,
+            );
+        }
+    }
+
+    fn observe_now(&mut self, now_us: i64) {
+        self.last_now_us = now_us;
+    }
+}
+
+enum LtpHeartbeatPipe {
+    Open,
+    Closed,
+}
+
+fn run_ltp_heartbeat_child(read_fd: Fd) -> ! {
+    let mut heartbeat_seq = 0u64;
+    let mut snapshot =
+        String::from("snapshot_seq=0 now_us=-1 phase=starting root=- group=- case=- case_pgrp=0");
+    let mut pending = String::new();
+    let mut last_snapshot_us = now_us().unwrap_or(0);
+    let mut next_print_us = last_snapshot_us;
+
+    loop {
+        match drain_ltp_heartbeat_pipe(read_fd, &mut snapshot, &mut pending, &mut last_snapshot_us)
+        {
+            LtpHeartbeatPipe::Open => {},
+            LtpHeartbeatPipe::Closed => {
+                println!("user-test-heartbeat: control_pipe_closed");
+                let _ = close(read_fd);
+                exit(0);
+            },
+        }
+
+        let now = now_us().unwrap_or(last_snapshot_us);
+        if now >= next_print_us {
+            heartbeat_seq += 1;
+            println!(
+                "user-test-heartbeat: seq={} now_us={} {} stale_for_ms={}",
+                heartbeat_seq,
+                now,
+                snapshot,
+                now.saturating_sub(last_snapshot_us) / 1000,
+            );
+            next_print_us = now.saturating_add(LTP_HEARTBEAT_PRINT_INTERVAL_US);
+        }
+
+        sleep_ltp_heartbeat_tick();
+    }
+}
+
+fn drain_ltp_heartbeat_pipe(
+    fd: Fd,
+    snapshot: &mut String,
+    pending: &mut String,
+    last_snapshot_us: &mut i64,
+) -> LtpHeartbeatPipe {
+    let mut buf = [0u8; 256];
+    loop {
+        match read(fd, &mut buf) {
+            Ok(0) => return LtpHeartbeatPipe::Closed,
+            Ok(count) => {
+                for &byte in &buf[..count] {
+                    if byte == b'\n' {
+                        snapshot.clear();
+                        snapshot.push_str(pending.as_str());
+                        pending.clear();
+                        *last_snapshot_us = now_us().unwrap_or(*last_snapshot_us);
+                    } else if byte.is_ascii_graphic() || byte == b' ' {
+                        pending.push(byte as char);
+                    } else {
+                        pending.push('?');
+                    }
+                }
+            },
+            Err(EAGAIN) => return LtpHeartbeatPipe::Open,
+            Err(EINTR) => {},
+            Err(errno) => {
+                println!("user-test-heartbeat: read failed: {errno:?}");
+                return LtpHeartbeatPipe::Closed;
+            },
+        }
+    }
+}
+
+fn sleep_ltp_heartbeat_tick() {
+    let duration = TimeSpec {
+        tv_sec: LTP_HEARTBEAT_SLEEP_TICK_SECONDS,
+        tv_nsec: 0,
+    };
+
+    loop {
+        match nanosleep(duration) {
+            Ok(()) => return,
+            Err(EINTR) => {},
+            Err(errno) => {
+                println!("user-test-heartbeat: nanosleep failed: {errno:?}");
+                let _ = sched_yield();
+                return;
+            },
+        }
+    }
+}
+
 pub fn install_ltp_fixtures() {
     println!("user-test: installing LTP fixtures...");
 
@@ -290,46 +625,57 @@ pub fn install_ltp_fixtures() {
 
 pub fn run_ltp_tests() {
     let groups = select_ltp_groups();
+    let mut heartbeat = LtpHeartbeat::start_or_disabled();
 
     print!("user-test: running LTP profile groups:");
     for group in &groups {
         print!(" {}", group.name);
     }
     println!();
+    heartbeat.publish("profile_start", "-", "-", "-", 0);
 
     let mut overall = LtpSummary::default();
     for root in LTP_ROOTS {
-        let summary = run_ltp_root(root, groups.as_slice());
+        let summary = run_ltp_root(root, groups.as_slice(), &mut heartbeat);
         overall.merge(summary);
     }
 
+    heartbeat.publish("profile_finished", "-", "-", "-", 0);
     println!(
         "user-test: LTP whitelist finished: attempted={} passed={} failed={} infra_failed={} skipped={}",
         overall.attempted, overall.passed, overall.failed, overall.infra_failed, overall.skipped,
     );
+    heartbeat.finish();
 }
 
-fn run_ltp_root(root: &LtpRoot, groups: &[&'static LtpGroup]) -> LtpSummary {
+fn run_ltp_root(
+    root: &LtpRoot,
+    groups: &[&'static LtpGroup],
+    heartbeat: &mut LtpHeartbeat,
+) -> LtpSummary {
     crate::switch_runtime(root.family);
     crate::clear_tmp();
+    heartbeat.publish("root_start", root.label, "-", "-", 0);
 
     let mut summary = LtpSummary::default();
-    println!("#### OS COMP TEST GROUP START {} ####", root.label);
     if fstatat(AtFd::Cwd, Path::new(root.workdir)).is_err() {
+        println!("#### OS COMP TEST GROUP START {} ####", root.label);
         println!(
             "user-test: skipping {} because {} is missing",
             root.label, root.workdir,
         );
         println!("#### OS COMP TEST GROUP END {} ####", root.label);
+        heartbeat.publish("root_skipped", root.label, "-", "-", 0);
         return summary;
     }
 
     for group in groups {
-        let group_summary = run_ltp_group(root, group);
+        let group_summary = run_ltp_group(root, group, heartbeat);
         summary.merge(group_summary);
     }
     println!("#### OS COMP TEST GROUP END {} ####", root.label);
 
+    heartbeat.publish("root_finished", root.label, "-", "-", 0);
     println!(
         "user-test: {} summary attempted={} passed={} failed={} infra_failed={} skipped={}",
         root.label,
@@ -342,11 +688,12 @@ fn run_ltp_root(root: &LtpRoot, groups: &[&'static LtpGroup]) -> LtpSummary {
     summary
 }
 
-fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
+fn run_ltp_group(root: &LtpRoot, group: &LtpGroup, heartbeat: &mut LtpHeartbeat) -> LtpSummary {
     // println!(
     //     "#### OS COMP TEST GROUP START {}/{} ####",
     //     root.label, group.name,
     // );
+    heartbeat.publish("group_start", root.label, group.name, "-", 0);
 
     let mut summary = LtpSummary::default();
     for line in group.cases.lines() {
@@ -374,7 +721,7 @@ fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
         }
 
         summary.attempted += 1;
-        match run_ltp_case(root, &case, case_path.as_str()) {
+        match run_ltp_case(root, group, &case, case_path.as_str(), heartbeat) {
             LtpCaseOutcome::Passed => summary.passed += 1,
             LtpCaseOutcome::Failed => summary.failed += 1,
             LtpCaseOutcome::InfraFailed => summary.infra_failed += 1,
@@ -386,6 +733,7 @@ fn run_ltp_group(root: &LtpRoot, group: &LtpGroup) -> LtpSummary {
     //     "#### OS COMP TEST GROUP END {}/{} ####",
     //     root.label, group.name,
     // );
+    heartbeat.publish("group_finished", root.label, group.name, "-", 0);
     println!(
         "user-test: {}/{} summary attempted={} passed={} failed={} infra_failed={} skipped={}",
         root.label,
@@ -443,36 +791,51 @@ fn find_ltp_group(name: &str) -> Option<&'static LtpGroup> {
     LTP_GROUPS.iter().find(|group| group.name == name)
 }
 
-fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpCaseOutcome {
+fn run_ltp_case(
+    root: &LtpRoot,
+    group: &LtpGroup,
+    case: &LtpCaseSpec<'_>,
+    case_path: &str,
+    heartbeat: &mut LtpHeartbeat,
+) -> LtpCaseOutcome {
     println!("\nRUN LTP CASE {}", case.name);
+    heartbeat.publish("case_start", root.label, group.name, case.name, 0);
 
     match fork() {
-        Ok(Some(tid)) => match wait_ltp_case_status(tid, case.name) {
-            Ok(LtpCaseWaitResult::Exited(wstatus)) => {
-                let exit_code = ltp_exit_code(wstatus);
-                if exit_code == 0 {
-                    println!("FAIL LTP CASE {} : {}", case.name, exit_code);
-                    LtpCaseOutcome::Passed
-                } else if exit_code == LTP_TCONF_EXIT_CODE {
-                    println!("SKIP LTP CASE {} : {}", case.name, exit_code);
-                    LtpCaseOutcome::Skipped
-                } else {
-                    println!("FAIL LTP CASE {} : {}", case.name, exit_code);
-                    LtpCaseOutcome::Failed
-                }
-            },
-            Ok(LtpCaseWaitResult::TimedOut) => {
-                println!(
-                    "FAIL LTP CASE {} : {}",
-                    case.name, LTP_CASE_TIMEOUT_EXIT_CODE,
-                );
-                LtpCaseOutcome::InfraFailed
-            },
-            Err(errno) => {
-                println!("user-test: {} wait failed: {errno:?}", case.name);
-                println!("FAIL LTP CASE {} : 127", case.name);
-                LtpCaseOutcome::InfraFailed
-            },
+        Ok(Some(tid)) => {
+            heartbeat.publish("case_waiting", root.label, group.name, case.name, tid);
+            match wait_ltp_case_status(tid, case.name, root.label, group.name, heartbeat) {
+                Ok(LtpCaseWaitResult::Exited(wstatus)) => {
+                    let exit_code = ltp_exit_code(wstatus);
+                    if exit_code == 0 {
+                        println!("PASS LTP CASE {} : {}", case.name, exit_code);
+                        heartbeat.publish("case_passed", root.label, group.name, case.name, tid);
+                        LtpCaseOutcome::Passed
+                    } else if exit_code == LTP_TCONF_EXIT_CODE {
+                        println!("SKIP LTP CASE {} : {}", case.name, exit_code);
+                        heartbeat.publish("case_skipped", root.label, group.name, case.name, tid);
+                        LtpCaseOutcome::Skipped
+                    } else {
+                        println!("FAIL LTP CASE {} : {}", case.name, exit_code);
+                        heartbeat.publish("case_failed", root.label, group.name, case.name, tid);
+                        LtpCaseOutcome::Failed
+                    }
+                },
+                Ok(LtpCaseWaitResult::TimedOut) => {
+                    println!(
+                        "FAIL LTP CASE {} : {}",
+                        case.name, LTP_CASE_TIMEOUT_EXIT_CODE,
+                    );
+                    heartbeat.publish("case_timeout", root.label, group.name, case.name, tid);
+                    LtpCaseOutcome::InfraFailed
+                },
+                Err(errno) => {
+                    println!("user-test: {} wait failed: {errno:?}", case.name);
+                    println!("FAIL LTP CASE {} : 127", case.name);
+                    heartbeat.publish("case_wait_failed", root.label, group.name, case.name, tid);
+                    LtpCaseOutcome::InfraFailed
+                },
+            }
         },
         Ok(None) => {
             if let Err(errno) = setpgid(0, 0) {
@@ -506,64 +869,133 @@ fn run_ltp_case(root: &LtpRoot, case: &LtpCaseSpec<'_>, case_path: &str) -> LtpC
         Err(errno) => {
             println!("user-test: {} fork failed: {errno:?}", case.name);
             println!("FAIL LTP CASE {} : 127", case.name);
+            heartbeat.publish("case_fork_failed", root.label, group.name, case.name, 0);
             LtpCaseOutcome::InfraFailed
         },
     }
 }
 
-fn wait_ltp_case_status(tid: u32, name: &str) -> Result<LtpCaseWaitResult, Errno> {
-    let start_us = now_us()?;
+fn wait_ltp_case_status(
+    tid: u32,
+    name: &str,
+    root_label: &str,
+    group_name: &str,
+    heartbeat: &mut LtpHeartbeat,
+) -> Result<LtpCaseWaitResult, Errno> {
+    let mut probe = LtpWaitLoopProbe::new(root_label, group_name, name, tid);
+    probe.begin_iteration();
+    let start_us = now_us_with_probe(&mut probe)?;
+    probe.finish_iteration();
     loop {
-        if let Some(wstatus) = poll_ltp_case_status(tid, name)? {
+        probe.begin_iteration();
+        if let Some(wstatus) = poll_ltp_case_status(tid, name, &probe)? {
             return Ok(LtpCaseWaitResult::Exited(wstatus));
         }
 
-        if elapsed_us_since(start_us)? >= LTP_CASE_TIMEOUT_US {
+        if elapsed_us_since_with_probe(start_us, &mut probe)? >= LTP_CASE_TIMEOUT_US {
+            probe.finish_iteration();
             break;
         }
 
-        sched_yield()?;
+        sched_yield_with_probe(&probe)?;
+        probe.finish_iteration();
     }
 
     println!(
         "user-test: TIMEOUT LTP CASE {name}: exceeded {LTP_CASE_TIMEOUT_SECONDS}s; killing case process group",
     );
+    heartbeat.publish("case_timeout_kill", root_label, group_name, name, tid);
     kill_ltp_case(tid, name)?;
 
-    let kill_start_us = now_us()?;
+    probe.set_phase("kill_grace");
+    let kill_start_us = now_us_with_probe(&mut probe)?;
     loop {
-        if poll_ltp_case_status(tid, name)?.is_some() {
+        probe.begin_iteration();
+        if poll_ltp_case_status(tid, name, &probe)?.is_some() {
             return Ok(LtpCaseWaitResult::TimedOut);
         }
 
-        if elapsed_us_since(kill_start_us)? >= LTP_CASE_KILL_GRACE_US {
+        if elapsed_us_since_with_probe(kill_start_us, &mut probe)? >= LTP_CASE_KILL_GRACE_US {
             println!(
                 "user-test: TIMEOUT LTP CASE {name}: child not reaped after {LTP_CASE_KILL_GRACE_SECONDS}s kill grace; continuing",
             );
+            heartbeat.publish("case_timeout_unreaped", root_label, group_name, name, tid);
             return Ok(LtpCaseWaitResult::TimedOut);
         }
 
-        sched_yield()?;
+        sched_yield_with_probe(&probe)?;
+        probe.finish_iteration();
     }
 }
 
-fn poll_ltp_case_status(tid: u32, name: &str) -> Result<Option<WStatus>, Errno> {
+fn poll_ltp_case_status(
+    tid: u32,
+    name: &str,
+    probe: &LtpWaitLoopProbe<'_>,
+) -> Result<Option<WStatus>, Errno> {
     let mut wstatus = WStatusRaw::EMPTY;
+    probe.before("wait4");
     match wait4(
         WaitFor::ChildWithTgid(tid),
         Some(&mut wstatus),
         WaitOptions::NOHANG,
     ) {
         Ok(Some(waited)) => {
+            probe.after("wait4", format_args!("waited={}", waited));
             if waited != tid {
                 println!("user-test: {name} waited pid mismatch");
                 return Err(ECHILD);
             }
             Ok(Some(wstatus.read()))
         },
-        Ok(None) => Ok(None),
-        Err(EINTR) => Ok(None),
-        Err(errno) => Err(errno),
+        Ok(None) => {
+            probe.after("wait4", format_args!("none"));
+            Ok(None)
+        },
+        Err(EINTR) => {
+            probe.after("wait4", format_args!("eintr"));
+            Ok(None)
+        },
+        Err(errno) => {
+            probe.after("wait4", format_args!("err={errno:?}"));
+            Err(errno)
+        },
+    }
+}
+
+fn now_us_with_probe(probe: &mut LtpWaitLoopProbe<'_>) -> Result<i64, Errno> {
+    probe.before("gettimeofday");
+    match now_us() {
+        Ok(now) => {
+            probe.observe_now(now);
+            probe.after("gettimeofday", format_args!("now_us={}", now));
+            Ok(now)
+        },
+        Err(errno) => {
+            probe.after("gettimeofday", format_args!("err={errno:?}"));
+            Err(errno)
+        },
+    }
+}
+
+fn elapsed_us_since_with_probe(
+    start_us: i64,
+    probe: &mut LtpWaitLoopProbe<'_>,
+) -> Result<i64, Errno> {
+    Ok(now_us_with_probe(probe)?.saturating_sub(start_us))
+}
+
+fn sched_yield_with_probe(probe: &LtpWaitLoopProbe<'_>) -> Result<(), Errno> {
+    probe.before("sched_yield");
+    match sched_yield() {
+        Ok(()) => {
+            probe.after("sched_yield", format_args!("ok"));
+            Ok(())
+        },
+        Err(errno) => {
+            probe.after("sched_yield", format_args!("err={errno:?}"));
+            Err(errno)
+        },
     }
 }
 
