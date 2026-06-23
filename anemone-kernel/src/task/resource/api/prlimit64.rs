@@ -88,6 +88,10 @@ fn sys_prlimit64(
                 rlim_cur: 0, // no core dump
                 rlim_max: 0,
             },
+            RLimitResource::Nproc => RLimit {
+                rlim_cur: u64::MAX, // no process limit
+                rlim_max: u64::MAX,
+            },
             r => {
                 kerrln!("getrlimit: unimplemented resource {:?}", r);
                 return Err(SysError::NotYetImplemented);

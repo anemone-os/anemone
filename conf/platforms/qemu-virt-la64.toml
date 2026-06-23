@@ -15,7 +15,7 @@ frame_section_shift_mb = 7
 [qemu]
 qemu = "qemu-system-loongarch64"
 machine = "virt"
-smp = 4
+smp = 1
 memory = "1G"
 # cpu = default
 args = [

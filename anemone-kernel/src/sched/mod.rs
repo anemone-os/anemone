@@ -313,24 +313,37 @@ mod higher_level {
         );
         drop(current);
 
-        let cloned_task = task.clone();
-
         let start = with_intr_disabled(|| {
             if let Some(timeout) = timeout {
+                // Timer events are not cancellable. Keep only a weak task
+                // target so an early-finished long timeout does not pin the
+                // whole task until expiry; `WakeToken` remains the wait-round
+                // identity for stale/retired checks.
+                let timeout_task = Arc::downgrade(task);
+                let diagnostic_tid = task.tid();
                 unsafe {
                     schedule_local_irq_timer_event(
                         timeout,
                         Box::new(move || {
+                            let wait_id = token.wait_id();
+                            let Some(task) = timeout_task.upgrade() else {
+                                kdebugln!(
+                                    "schedule_wait_with_timeout: timeout task={} wait={:#x} result=task_gone",
+                                    diagnostic_tid,
+                                    wait_id,
+                                );
+                                return;
+                            };
                             let result = wait::wake_wait(
-                                &cloned_task,
+                                &task,
                                 &token,
                                 WaitReason::Timeout,
                                 WakeMode::AnyWait,
                             );
                             kdebugln!(
                                 "schedule_wait_with_timeout: timeout task={} wait={:#x} result={:?}",
-                                cloned_task.tid(),
-                                token.wait_id(),
+                                diagnostic_tid,
+                                wait_id,
                                 result,
                             );
                         }),

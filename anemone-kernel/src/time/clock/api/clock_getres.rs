@@ -7,14 +7,14 @@ use anemone_abi::time::linux::TimeSpec;
 
 use crate::{
     prelude::*,
-    syscall::user_access::{UserWritePtr, user_addr},
+    syscall::user_access::{SyscallArgValidatorExt, UserWritePtr, user_addr},
     time::clock::get_clock,
 };
 
 #[syscall(SYS_CLOCK_GETRES)]
 fn sys_clock_getres(
     which_clock: u32,
-    #[validate_with(user_addr)] tp: VirtAddr,
+    #[validate_with(user_addr.nullable())] tp: Option<VirtAddr>,
 ) -> Result<u64, SysError> {
     kdebugln!("clock_getres: which_clock={:#x}, tp={:?}", which_clock, tp);
 
@@ -32,7 +32,9 @@ fn sys_clock_getres(
         let usp_handle = get_current_task().clone_uspace_handle();
         {
             let mut usp = usp_handle.lock();
-            UserWritePtr::<TimeSpec>::try_new(tp, &mut usp)?.write(ts);
+            if let Some(tp) = tp {
+                UserWritePtr::<TimeSpec>::try_new(tp, &mut usp)?.write(ts);
+            }
         }
 
         Ok(0)

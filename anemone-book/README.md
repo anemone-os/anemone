@@ -1,7 +1,14 @@
 ## The Anemone Book
 
-**Single source of truth for Anemone.**
+`The Anemone Book` is a design narrative snapshot for Anemone. It is not the
+single source of truth for the kernel.
 
-**One for all, and all for one.**
+Canonical facts remain in code, RFCs, devlogs, register entries, and current
+limitations. This book organizes those facts into a readable design story.
 
-**T.B.D.**
+Build:
+
+```sh
+mkdir -p build
+typst compile main.typ build/anemone-book.pdf
+```
