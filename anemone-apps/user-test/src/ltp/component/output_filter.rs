@@ -14,6 +14,7 @@ use anemone_rs::{
 };
 
 use crate::ltp::{
+    component::selection,
     config::LtpRunPolicy,
     result::{
         LTP_JUDGE_TBROK, LTP_JUDGE_TCONF, LTP_JUDGE_TFAIL, LTP_JUDGE_TPASS, LTP_JUDGE_TWARN,
@@ -32,6 +33,10 @@ pub(in crate::ltp) struct LtpOutputFilter {
 
 impl LtpOutputFilter {
     pub(in crate::ltp) fn start_or_disabled(case_name: &str) -> Self {
+        if !selection::OUTPUT_FILTER {
+            return Self::disabled();
+        }
+
         match Self::start() {
             Ok(filter) => filter,
             Err(errno) => {

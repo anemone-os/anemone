@@ -6,7 +6,7 @@
 
 use anemone_rs::{os::linux::process::sched_yield, prelude::*};
 
-use crate::ltp::config::LtpRunPolicy;
+use crate::ltp::{component::selection, config::LtpRunPolicy};
 
 pub(in crate::ltp) struct LtpWaitLoopProbe<'a> {
     // Snapshot labels are diagnostic-only. They are copied from the caller at
@@ -46,12 +46,20 @@ impl<'a> LtpWaitLoopProbe<'a> {
     }
 
     pub(in crate::ltp) fn set_phase(&mut self, phase: &'static str) {
+        if !selection::WAIT_LOOP_PROBE {
+            return;
+        }
+
         self.phase = phase;
         self.next_probe_us = 0;
         self.log_iteration = true;
     }
 
     pub(in crate::ltp) fn begin_iteration(&mut self) {
+        if !selection::WAIT_LOOP_PROBE {
+            return;
+        }
+
         self.log_iteration = self.next_probe_us == 0 || self.last_now_us >= self.next_probe_us;
         if self.log_iteration {
             self.seq += 1;
@@ -59,6 +67,10 @@ impl<'a> LtpWaitLoopProbe<'a> {
     }
 
     pub(in crate::ltp) fn finish_iteration(&mut self) {
+        if !selection::WAIT_LOOP_PROBE {
+            return;
+        }
+
         if !self.log_iteration {
             return;
         }
@@ -76,7 +88,7 @@ impl<'a> LtpWaitLoopProbe<'a> {
     }
 
     pub(in crate::ltp) fn before(&self, op: &str) {
-        if self.log_iteration {
+        if selection::WAIT_LOOP_PROBE && self.log_iteration {
             println!(
                 "user-test: LTP wait-loop probe seq={} phase={} root={} group={} case={} case_pgrp={} before {}",
                 self.seq,
@@ -91,7 +103,7 @@ impl<'a> LtpWaitLoopProbe<'a> {
     }
 
     pub(in crate::ltp) fn after(&self, op: &str, detail: core::fmt::Arguments<'_>) {
-        if self.log_iteration {
+        if selection::WAIT_LOOP_PROBE && self.log_iteration {
             println!(
                 "user-test: LTP wait-loop probe seq={} phase={} root={} group={} case={} case_pgrp={} after {} {}",
                 self.seq,
@@ -112,6 +124,10 @@ impl<'a> LtpWaitLoopProbe<'a> {
 }
 
 pub(in crate::ltp) fn now_us_with_probe(probe: &mut LtpWaitLoopProbe<'_>) -> Result<i64, Errno> {
+    if !selection::WAIT_LOOP_PROBE {
+        return crate::ltp::time::now_us();
+    }
+
     probe.before("gettimeofday");
     match crate::ltp::time::now_us() {
         Ok(now) => {
@@ -130,10 +146,18 @@ pub(in crate::ltp) fn elapsed_us_since_with_probe(
     start_us: i64,
     probe: &mut LtpWaitLoopProbe<'_>,
 ) -> Result<i64, Errno> {
+    if !selection::WAIT_LOOP_PROBE {
+        return crate::ltp::time::elapsed_us_since(start_us);
+    }
+
     Ok(now_us_with_probe(probe)?.saturating_sub(start_us))
 }
 
 pub(in crate::ltp) fn sched_yield_with_probe(probe: &LtpWaitLoopProbe<'_>) -> Result<(), Errno> {
+    if !selection::WAIT_LOOP_PROBE {
+        return sched_yield();
+    }
+
     probe.before("sched_yield");
     match sched_yield() {
         Ok(()) => {

@@ -50,8 +50,8 @@ impl LtpRunner {
     }
 
     fn run_root(&mut self, root: &LtpRoot, groups: &[&'static LtpGroup]) -> LtpSummary {
-        crate::switch_runtime(root.family);
-        crate::clear_tmp();
+        crate::runtime::switch_runtime(root.family);
+        crate::runtime::clear_tmp();
         self.components.on_root_start(root);
 
         let mut summary = LtpSummary::default();

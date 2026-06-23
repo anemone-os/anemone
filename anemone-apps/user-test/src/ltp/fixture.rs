@@ -1,8 +1,9 @@
 //! LTP text fixtures installed into the test root.
 //!
 //! Keep this limited to files that LTP cases need to observe in the chroot.
-//! Staged tools, shell wrappers, loader links, and other competition/rootfs
-//! preparation stay in `main.rs` so LTP cleanup does not absorb non-LTP setup.
+//! Staged tools and guest-root preparation stay in `guest`, shell/runtime links
+//! stay in `runtime`, and BusyBox execution stays in `busybox` so LTP cleanup
+//! does not absorb non-LTP setup.
 
 use anemone_rs::prelude::*;
 
@@ -77,7 +78,7 @@ fn install_ltp_fixture(fixture: &LtpFixture) {
         content = fixture.content,
     );
 
-    crate::run_busybox(
+    crate::busybox::run_busybox(
         &["busybox", "sh", "-c", script.as_str()],
         "install LTP fixture",
     );

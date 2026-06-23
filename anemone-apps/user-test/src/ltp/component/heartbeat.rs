@@ -18,7 +18,7 @@ use anemone_rs::{
     prelude::*,
 };
 
-use crate::ltp::{config::LtpRunPolicy, time::now_us};
+use crate::ltp::{component::selection, config::LtpRunPolicy, time::now_us};
 
 pub(super) struct LtpHeartbeat {
     // Diagnostic-only child identity and control pipe. They are not protocol
@@ -31,6 +31,10 @@ pub(super) struct LtpHeartbeat {
 
 impl LtpHeartbeat {
     pub(super) fn start_or_disabled(policy: &LtpRunPolicy) -> Self {
+        if !selection::HEARTBEAT {
+            return Self::disabled();
+        }
+
         match Self::start(policy) {
             Ok(heartbeat) => heartbeat,
             Err(errno) => {

@@ -10,6 +10,7 @@ pub(super) mod wait_probe;
 
 mod heartbeat;
 mod output;
+mod selection;
 
 use crate::ltp::{
     config::{LtpGroup, LtpRoot, LtpRunPolicy},
