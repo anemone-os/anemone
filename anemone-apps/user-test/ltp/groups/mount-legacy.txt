@@ -180,14 +180,14 @@ test_robind53 test_robind.sh: -c "ftest08"
 test_robind54 test_robind.sh: -c "-- lftest -n 80"
 test_robind55 test_robind.sh: -c "writetest"
 
-# Follow-up / explicitly deferred by this first-pass RFC:
-# fs_bind_cloneNS01_sh fs_bind_cloneNS01.sh
-# fs_bind_cloneNS02_sh fs_bind_cloneNS02.sh
-# fs_bind_cloneNS03_sh fs_bind_cloneNS03.sh
-# fs_bind_cloneNS04_sh fs_bind_cloneNS04.sh
-# fs_bind_cloneNS05_sh fs_bind_cloneNS05.sh
-# fs_bind_cloneNS06_sh fs_bind_cloneNS06.sh
-# fs_bind_cloneNS07_sh fs_bind_cloneNS07.sh
+# Follow-up
+fs_bind_cloneNS01_sh fs_bind_cloneNS01.sh
+fs_bind_cloneNS02_sh fs_bind_cloneNS02.sh
+fs_bind_cloneNS03_sh fs_bind_cloneNS03.sh
+fs_bind_cloneNS04_sh fs_bind_cloneNS04.sh
+fs_bind_cloneNS05_sh fs_bind_cloneNS05.sh
+fs_bind_cloneNS06_sh fs_bind_cloneNS06.sh
+fs_bind_cloneNS07_sh fs_bind_cloneNS07.sh
 # mountns01
 # mountns02
 # mountns03

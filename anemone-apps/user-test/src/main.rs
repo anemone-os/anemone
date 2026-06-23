@@ -12,8 +12,8 @@ use anemone_rs::{
     os::{
         anemone::power::shutdown,
         linux::{
-            fs::{chdir, chroot, close, fstatat, mkdirat, mount, openat, read, write, AtFd},
-            process::{execve, fork, wait4, WStatus, WStatusRaw, WaitFor, WaitOptions},
+            fs::{AtFd, chdir, chroot, close, fstatat, mkdirat, mount, openat, read, write},
+            process::{WStatus, WStatusRaw, WaitFor, WaitOptions, execve, fork, wait4},
         },
     },
     prelude::*,
