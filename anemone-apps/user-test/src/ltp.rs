@@ -1,11 +1,11 @@
 use anemone_rs::{
     abi::time::linux::TimeSpec,
     os::linux::{
-        fs::{AtFd, Fd, PipeFlags, chdir, close, fstatat, pipe2, read, write},
+        fs::{chdir, close, fstatat, pipe2, read, write, AtFd, Fd, PipeFlags},
         process::{
-            WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, sched_yield, setpgid,
-            signal::{SigNo, kill},
-            wait4,
+            execve, exit, fork, sched_yield, setpgid,
+            signal::{kill, SigNo},
+            wait4, WStatus, WStatusRaw, WaitFor, WaitOptions,
         },
         time::{gettimeofday, nanosleep},
     },
@@ -657,9 +657,9 @@ fn run_ltp_root(
     crate::clear_tmp();
     heartbeat.publish("root_start", root.label, "-", "-", 0);
 
+    println!("#### OS COMP TEST GROUP START {} ####", root.label);
     let mut summary = LtpSummary::default();
     if fstatat(AtFd::Cwd, Path::new(root.workdir)).is_err() {
-        println!("#### OS COMP TEST GROUP START {} ####", root.label);
         println!(
             "user-test: skipping {} because {} is missing",
             root.label, root.workdir,
