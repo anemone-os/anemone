@@ -32,6 +32,7 @@
 
 ## 当前记录
 
+- [2026-06-23 - User-test LTP judge 输出兼容](./2026-06-23-user-test-ltp-judge-compat.md)
 - [2026-06-23 - User-test LTP runner 结构拆分](./2026-06-23-user-test-ltp-structure-cleanup.md)
 - [2026-06-22 - spin lock irqsave kconfig feature](./2026-06-22-spin-lock-irqsave-feature.md)
 - [2026-06-18 - RFC workflow feedback loop](./2026-06-18-rfc-feedback-loop.md)

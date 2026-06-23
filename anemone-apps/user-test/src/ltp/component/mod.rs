@@ -47,6 +47,7 @@ impl LtpComponents {
     }
 
     pub(super) fn on_root_start(&mut self, root: &LtpRoot) {
+        self.output.root_start(root);
         self.heartbeat
             .publish("root_start", root.label, "-", "-", 0);
     }
@@ -61,6 +62,7 @@ impl LtpComponents {
         self.heartbeat
             .publish("root_finished", root.label, "-", "-", 0);
         self.output.root_summary(root, summary);
+        self.output.root_end(root);
     }
 
     pub(super) fn on_group_start(&mut self, root: &LtpRoot, group: &LtpGroup) {
@@ -75,10 +77,9 @@ impl LtpComponents {
         group: &LtpGroup,
         summary: LtpSummary,
     ) {
-        self.output.group_end(root, group);
+        self.output.group_end(root, group, summary);
         self.heartbeat
             .publish("group_finished", root.label, group.name, "-", 0);
-        self.output.group_summary(root, group, summary);
     }
 
     pub(super) fn on_case_start(&mut self, root: &LtpRoot, group: &LtpGroup, case_name: &str) {

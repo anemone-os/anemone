@@ -34,11 +34,17 @@ impl LtpOutput {
     }
 
     pub(super) fn root_missing(&self, root: &LtpRoot) {
-        println!("#### OS COMP TEST GROUP START {} ####", root.label);
         println!(
             "user-test: skipping {} because {} is missing",
             root.label, root.workdir,
         );
+    }
+
+    pub(super) fn root_start(&self, root: &LtpRoot) {
+        println!("#### OS COMP TEST GROUP START {} ####", root.label);
+    }
+
+    pub(super) fn root_end(&self, root: &LtpRoot) {
         println!("#### OS COMP TEST GROUP END {} ####", root.label);
     }
 
@@ -55,22 +61,12 @@ impl LtpOutput {
     }
 
     pub(super) fn group_start(&self, root: &LtpRoot, group: &LtpGroup) {
-        println!(
-            "#### OS COMP TEST GROUP START {}/{} ####",
-            root.label, group.name,
-        );
+        println!("user-test: LTP group start {}/{}", root.label, group.name);
     }
 
-    pub(super) fn group_end(&self, root: &LtpRoot, group: &LtpGroup) {
+    pub(super) fn group_end(&self, root: &LtpRoot, group: &LtpGroup, summary: LtpSummary) {
         println!(
-            "#### OS COMP TEST GROUP END {}/{} ####",
-            root.label, group.name,
-        );
-    }
-
-    pub(super) fn group_summary(&self, root: &LtpRoot, group: &LtpGroup, summary: LtpSummary) {
-        println!(
-            "user-test: {}/{} summary attempted={} passed={} failed={} infra_failed={} skipped={}",
+            "user-test: LTP group end {}/{} attempted={} passed={} failed={} infra_failed={} skipped={}",
             root.label,
             group.name,
             summary.attempted,

@@ -57,6 +57,7 @@ impl LtpRunner {
         let mut summary = LtpSummary::default();
         if anemone_rs::os::linux::fs::fstatat(AtFd::Cwd, Path::new(root.workdir)).is_err() {
             self.components.on_root_missing(root);
+            self.components.on_root_finished(root, summary);
             return summary;
         }
 
