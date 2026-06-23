@@ -92,6 +92,7 @@ anemone-book/
 - `main.typ` 保持很薄，只导入模板并 include 章节。
 - 正文直接写 Typst；`meta/` 继续使用 Markdown。
 - 每章一个 `.typ` 文件，附录也拆文件，便于 review 和后续版本演进。
+- Typst 正文不要按源码列宽硬换行；中文自然段优先一段一行，必须换行时只能在标点或结构边界之后换行，避免编译产物出现句中空格。
 - `template/book.typ` 负责全局页面、字体、标题、目录、页眉页脚和参考文献设置。
 - `template/components.typ` 负责 epigraph、principle、boundary、tradeoff、note
   等克制 callout。
@@ -159,6 +160,8 @@ drawio -x -f png --width 2000 \
 - 章节 epigraph 如果是原话，也应尽量进入 `refs.bib` 或至少保留可核对来源。
 - 代码、RFC、devlog、register 和 current limitations 不进入 bibliography；
   正文按需要用路径、章节名或脚注说明。
+- 不使用精确到行号、日志偏移、临时 diff 位置这类会随正常维护漂移的引用方式；
+  需要指向代码或文档时，使用稳定路径、模块名、章节锚点、符号名或脚注说明可核对入口。
 - 出处不稳的社区梗和临时网页不进正式 bibliography；能转述就转述，不能核对就不用。
 - 术语表放附录；索引暂不优先，等术语和图表规模稳定后再决定是否增加。
 

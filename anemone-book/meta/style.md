@@ -68,9 +68,7 @@ register / current limitations 和外部原始来源为准。
 §7 内存管理
 ```
 
-正文标题中文为主，可保留必要英文关键词。英文标题和英文短语使用 Title Case：
-主要单词首字母大写，短介词、冠词、连词按常见英文标题规则小写。后续模板
-实现时固定一种样式，不在各章自由发挥。
+书稿可见目录项和图例说明中文为主，可保留必要英文关键词，例如 ABI、VFS、Rust、Trap、memory object、pseudo filesystem。固定英文栏目名或英文短语使用 Title Case：主要单词首字母大写，短介词、冠词、连词按常见英文标题规则小写。后续模板实现时固定一种样式，不在各章自由发挥。
 
 不要使用“第一章”“第二章”“本章小结”“注意事项”“小贴士”等课程报告式表达。
 章末若需要收束，优先使用：
@@ -83,6 +81,50 @@ Beyond Anemone
 ```
 
 这些栏目不是每章必需；只有确实能推动论证时才使用。
+
+## Typst 源码换行
+
+Typst 会把源码中的普通换行编译成空格。中文正文如果在句中硬换行，PDF 中会出现突兀的空格。
+
+规则：
+
+- `.typ` 正文自然段优先写成一行。
+- 如果必须换行，换行点必须放在中文标点或明显的结构边界之后。
+- 不要按 80 列习惯在中文句子中间换行。
+- 列表项、callout、caption、figure note 同样遵守这条规则。
+- raw code block、Typst 函数参数、import/include、数组或字典结构不受这条中文排版规则约束。
+
+可接受：
+
+```typst
+Anemone 不是 Linux 的 Rust 复刻，也不是一组 syscall patch 的合集。本书试图回答的问题更窄：一个面向 Linux ABI compatibility 的教学/竞赛内核，如何形成一套可以审查的设计叙事。
+```
+
+也可在标点后换行：
+
+```typst
+本书不是手册，也不是 RFC。
+代码、RFC、devlog、register 和 current limitations 仍然是事实来源。
+```
+
+不可接受：
+
+```typst
+本书试图
+回答的问题更窄
+```
+
+## 正文缩进
+
+正文普通段落使用两个汉字宽度的首行缩进，包含紧跟在章节标题、小标题、callout、figure 或 listing 后面的第一段。Typst 模板中应使用 `first-line-indent: (amount: 2em, all: true)`，不要只设置普通段落缩进。
+
+不缩进的例外：
+
+- 章节标题、小标题、页眉页脚和目录。
+- epigraph、thesis、callout 内部正文。
+- list item、figure caption、listing caption 和 raw code。
+
+如果某个块内需要恢复正文缩进，应显式说明原因，避免局部样式悄悄破坏全书节奏。
 
 ## Thesis Paragraph
 
@@ -238,6 +280,8 @@ draw.io 适合承载需要人工布局的结构图；特别小的示意图、排
 - 不放长函数实现。
 - 代码片段周围必须解释“为什么这段值得出现”。
 - 不展示宏展开后的长代码。
+- Listing/code block 靠左排版，不居中。
+- Code block 使用浅灰背景，保持足够 inset；背景服务可读性，不做装饰性大色块。
 
 示例：
 

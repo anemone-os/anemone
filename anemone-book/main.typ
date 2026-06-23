@@ -13,6 +13,7 @@
 
 #include "chapters/00-preface.typ"
 #include "chapters/01-design-map.typ"
+#include "chapters/02-abi-boundary.typ"
 
 #appendices[
   #include "appendices/glossary.typ"

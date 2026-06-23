@@ -191,6 +191,10 @@ Reviewer 审查章节草稿。最少检查：
 
 Review finding 应带章节位置、问题、影响和建议修复方向。不要只给泛泛评价。
 
+Editor 不得在 draft pass 后直接把章节交付给用户或外部读者；凡是进入正文的章节
+草稿，至少先经过一次 Reviewer pass。阻塞问题必须处理，或经 Reviewer 明确降级为
+非阻塞问题；非阻塞剩余风险由 Editor 记录后，章节才能进入 handoff。
+
 ### 6. Editorial Pass
 
 Editor 合稿并统一：

@@ -3,6 +3,7 @@
 #let anemone-muted = rgb("#5b6470")
 #let anemone-line = rgb("#d6dce3")
 #let anemone-bg = rgb("#f7f9fb")
+#let anemone-code-bg = rgb("#f3f4f6")
 
 #let chapter-numbering = num => {
   "§" + str(num - 1)
@@ -75,10 +76,11 @@
     lang: "zh",
     fill: anemone-ink,
   )
-  set par(justify: true, leading: 0.72em, first-line-indent: 1em)
+  set par(justify: true, leading: 0.72em, first-line-indent: (amount: 2em, all: true))
   set heading(numbering: anemone-heading-numbering)
   set list(indent: 1.2em)
   set enum(indent: 1.2em, numbering: "1.")
+  set figure.caption(separator: [ — ])
   set raw(block: true)
   show raw: set text(font: ("Noto Sans Mono CJK SC", "Noto Sans CJK SC"), size: 8.8pt)
   show link: set text(fill: anemone-blue)
@@ -114,7 +116,7 @@
     version: version,
     build-description: build-description,
   )
-  text(18pt, weight: "bold")[Contents]
+  text(18pt, weight: "bold")[目录]
   v(0.6em)
   outline(title: none, depth: 3, indent: auto)
   pagebreak()
