@@ -60,6 +60,10 @@ pub mod fs {
         unsafe { syscall(SYS_DUP3, oldfd, newfd, flags, 0, 0, 0) }
     }
 
+    pub fn fcntl(fd: u64, cmd: u64, arg: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_FCNTL, fd, cmd, arg, 0, 0, 0) }
+    }
+
     pub fn getcwd(buf_ptr: u64, size: u64) -> Result<u64, Errno> {
         unsafe { syscall(SYS_GETCWD, buf_ptr, size, 0, 0, 0, 0) }
     }

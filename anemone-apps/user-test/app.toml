@@ -3,7 +3,7 @@ name = "user-test"
 [build]
 workdir = "."
 driver = "cargo"
-args = ["build"]
+args = ["build", "--release"]
 
 [[artifacts]]
-path = "target/${TARGET_TRIPLE}/debug/user-test"
+path = "target/${TARGET_TRIPLE}/release/user-test"
