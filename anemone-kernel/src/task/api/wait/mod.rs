@@ -169,7 +169,7 @@ pub(super) fn wait_for_exited_child(
                         fs::proc::try_unbind_thread_group(tgid);
                         let outcome = wait_outcome_from_child(&child);
                         #[cfg(feature = "bench_local_test")]
-                        kerrln!(
+                        kspecialln!(
                             "[special_report] wait4 reap parent_tgid={} child_tgid={} exit_code={:?}",
                             tg.tgid(),
                             outcome.tgid,

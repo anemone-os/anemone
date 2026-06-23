@@ -202,7 +202,7 @@ fn report_fork_memory(parent: &Arc<Task>, child: &Arc<Task>) {
     let free_pages = frame_allocator_stats().free_pages as usize;
     let file_cache_pages = resident_file_cache_pages();
 
-    kerrln!(
+    kspecialln!(
         "[SPECIAL REPORT] fork memory\nparent name=\"{}\" pid={} tid={}\n{:?}\nchild name=\"{}\" pid={} tid={}\n{:?}\n",
         parent_name.as_ref(),
         parent.tgid().get(),
@@ -213,11 +213,11 @@ fn report_fork_memory(parent: &Arc<Task>, child: &Arc<Task>) {
         child.tid().get(),
         child_report
     );
-    kerrln!(
+    kspecialln!(
         "[SPECIAL REPORT] global frame allocator free=({:?})",
         vmo::VmMemoryPageCount(free_pages)
     );
-    kerrln!(
+    kspecialln!(
         "[SPECIAL REPORT] resident file inode cache=({:?})",
         vmo::VmMemoryPageCount(file_cache_pages)
     );

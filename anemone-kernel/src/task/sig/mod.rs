@@ -1241,7 +1241,7 @@ fn perform_signal_action(
             if no == SigNo::SIGKILL {
                 match &signal.fields {
                     SigInfoFields::Kill(killer) | SigInfoFields::TKill(killer) => {
-                        kerrln!(
+                        kspecialln!(
                             "[special_report] sigkill terminate target_tid={} target_tgid={} target_name=\"{}\" killer_tgid={} killer_uid={} si_code={:?}",
                             task.tid(),
                             task.tgid(),
@@ -1252,7 +1252,7 @@ fn perform_signal_action(
                         );
                     },
                     fields => {
-                        kerrln!(
+                        kspecialln!(
                             "[special_report] sigkill terminate target_tid={} target_tgid={} target_name=\"{}\" killer=unknown si_code={:?} fields={:?}",
                             task.tid(),
                             task.tgid(),
