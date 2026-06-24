@@ -7,8 +7,8 @@
   subtitle: [A Design Narrative Snapshot],
   logo: "../assets/images/anemone.png",
   logo-width: 50%,
-  version: [Preliminary Seed],
-  build-description: [Built From Commit 8cabaef38c6b],
+  version: [Preliminary Round Snapshot · 2026-06-24],
+  build-description: [Built From Commit 86cfec1cc13c],
 )
 
 #include "chapters/00-preface.typ"
