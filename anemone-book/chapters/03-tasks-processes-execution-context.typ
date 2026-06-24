@@ -3,8 +3,8 @@
 
 = 任务、进程与执行上下文
 
-#epigraph(attribution: [Butler Lampson])[
-  Hints are often better than algorithms.
+#epigraph(attribution: [Butler Lampson, @lampson1983hints])[
+  The interface between two programs consists of the set of assumptions that each programmer needs to make about the other program in order to demonstrate the correctness of his program.
 ]
 
 #thesis[

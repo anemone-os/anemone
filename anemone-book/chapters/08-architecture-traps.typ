@@ -3,7 +3,7 @@
 
 = 体系结构、Trap 与平台边界
 
-#epigraph(attribution: [C. A. R. Hoare])[
+#epigraph(attribution: [C. A. R. Hoare, @hoare1981emperor])[
   There are two ways of constructing a software design: make it so simple that there are obviously no deficiencies, or make it so complicated that there are no obvious deficiencies.
 ]
 

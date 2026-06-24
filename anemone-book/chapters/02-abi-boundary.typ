@@ -3,7 +3,7 @@
 
 = ABI 边界与系统调用层
 
-#epigraph(attribution: [Jon Postel])[
+#epigraph(attribution: [Jon Postel, @postel1980rfc761])[
   Be conservative in what you do, be liberal in what you accept from others.
 ]
 

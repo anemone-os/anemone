@@ -181,15 +181,16 @@ devlog 入口。
 
 ### 引语候选
 
-当前正文使用下列章首 epigraph。冻结前必须统一核对原文出处；无法核对稳定来源
-的候选应改为转述或删除。
+当前正文使用下列章首 epigraph。冻结前如果继续替换引语，必须先核对稳定出处并
+同步 `refs.bib` 和 `appendices/references.typ`。
 
-- §0 前言：Kent Beck, “Make it work, make it right, make it fast.”
-- §1 设计理念与系统地图：Fred Brooks, “Conceptual integrity is the most important consideration in system design.”
-- §2 ABI 边界与系统调用层：Jon Postel, “Be conservative in what you do, be liberal in what you accept from others.”
-- §3 任务、进程与执行上下文：Butler Lampson, “Hints are often better than algorithms.”
-- §4 调度、等待与时间：Edsger W. Dijkstra, “Simplicity is prerequisite for reliability.”
-- §5 VFS、命名空间与 Pseudo Filesystems：David Wheeler, “All problems in computer science can be solved by another level of indirection.”
-- §6 设备驱动模型与 I/O 对象：Rob Pike, “A little copying is better than a little dependency.”
-- §7 内存管理与 memory object：Alan Kay, “Simple things should be simple, complex things should be possible.”
-- §8 体系结构、Trap 与平台边界：C. A. R. Hoare, “There are two ways of constructing a software design: make it so simple that there are obviously no deficiencies, or make it so complicated that there are no obvious deficiencies.”
+- §0 前言：Harold Abelson and Gerald Jay Sussman, “Programs must be written for people to read, and only incidentally for machines to execute.” 来源：_Structure and Interpretation of Computer Programs_, Preface to the First Edition, MIT Press / MIT online PDF，`@abelson1996sicp`。
+- §1 设计理念与系统地图：Fred Brooks, “Conceptual integrity is the most important consideration in system design.” 来源：_The Mythical Man-Month_，`@brooks1995mythical`。
+- §2 ABI 边界与系统调用层：Jon Postel, “Be conservative in what you do, be liberal in what you accept from others.” 来源：RFC 761，`@postel1980rfc761`。
+- §3 任务、进程与执行上下文：Butler Lampson, “The interface between two programs consists of the set of assumptions that each programmer needs to make about the other program in order to demonstrate the correctness of his program.” 来源：“Hints for Computer System Design”，`@lampson1983hints`。
+- §4 调度、等待与时间：Butler Lampson, “Make actions atomic or restartable.” 来源：“Hints for Computer System Design”，`@lampson1983hints`。
+- §5 VFS、命名空间与 Pseudo Filesystems：David L. Parnas, “We propose instead that one begins with a list of difficult design decisions or design decisions which are likely to change.” 来源：“On the Criteria To Be Used in Decomposing Systems into Modules”，`@parnas1972criteria`。
+- §6 设备驱动模型与 I/O 对象：Butler Lampson, “An interface should capture the minimum essentials of an abstraction. Don't generalize; generalizations are generally wrong.” 来源：“Hints for Computer System Design”，`@lampson1983hints`。
+- §7 内存管理与 memory object：Butler Lampson, “The purpose of abstractions is to conceal undesirable properties; desirable ones should not be hidden.” 来源：“Hints for Computer System Design”，`@lampson1983hints`。
+- §8 体系结构、Trap 与平台边界：C. A. R. Hoare, “There are two ways of constructing a software design: make it so simple that there are obviously no deficiencies, or make it so complicated that there are no obvious deficiencies.” 来源：“The Emperor's Old Clothes”，`@hoare1981emperor`。
+- §9 结语：Anemone 的下一段路：Butler Lampson, “There probably isn't a best way to build the system, or even any major part of it; much more important is to avoid choosing a terrible way, and to have clear division of responsibilities among the parts.” 来源：“Hints for Computer System Design”，`@lampson1983hints`。

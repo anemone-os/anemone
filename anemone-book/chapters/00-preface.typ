@@ -2,8 +2,8 @@
 
 = 前言
 
-#epigraph(attribution: [Kent Beck])[
-  Make it work, make it right, make it fast.
+#epigraph(attribution: [Harold Abelson and Gerald Jay Sussman, @abelson1996sicp])[
+  Programs must be written for people to read, and only incidentally for machines to execute.
 ]
 
 #thesis[

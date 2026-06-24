@@ -20,6 +20,7 @@
 #include "chapters/06-device-driver-model-io-objects.typ"
 #include "chapters/07-memory-management.typ"
 #include "chapters/08-architecture-traps.typ"
+#include "chapters/09-next-road.typ"
 
 #appendices[
   #include "appendices/glossary.typ"

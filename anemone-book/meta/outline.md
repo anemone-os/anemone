@@ -423,15 +423,18 @@ cache 等术语，降低跨章节阅读成本。
 FileDesc、File、Inode、Mount、FileOps、wait-core、Latch、Task、ThreadGroup、
 VMA、page cache、backing object、VMO、trapframe、machine abstraction。
 
-### 附录 B：参考资料与致谢
+### 附录 B：参考资料与延伸阅读
 
 **核心论点：** Anemone 的设计参考了 Linux、Zircon / Fuchsia、Rust、OS 经典
-材料和开源社区，但不是任何单一系统的复刻。
+材料和开源社区，但不是任何单一系统的复刻；附录 B 只提供可核对资料入口，
+不承载致谢叙事。
 
 **内容边界：**
 
 - 正式 bibliography 由 `refs.bib` 生成。
-- 致谢可解释设计来源，但不替代技术论证。
+- 按 Linux / POSIX、Zircon / Fuchsia、Rust、OS 经典材料和 Anemone canonical
+  文档入口分类，服务核对和延伸阅读。
+- 致谢性文字放在前言；附录 B 不重复人味叙事，也不替代正文技术论证。
 
 ### 附录 C：Agentic Coding 与工程工作流
 
@@ -489,7 +492,8 @@ VMA、page cache、backing object、VMO、trapframe、machine abstraction。
 | RFC / devlog / register / workflow | 附录 C | 附录 | 工程工作流集中放附录，不抢内核设计主线。 |
 | agentic coding governance | 附录 C | 附录 | 讲 agent 使用披露、约束和人工责任。 |
 | glossary / terminology | 附录 A | 附录 | 降低跨章节阅读成本。 |
-| references / acknowledgements | 前言 / 附录 B | 自然提及 | 前言有致谢，附录 B 归档正式参考资料。 |
+| references / extended reading | 附录 B | 附录 | 归档正式参考资料和延伸阅读入口。 |
+| acknowledgements | 前言 | 自然提及 | 放在读者契约和设计影响的叙事中，不进入附录 B。 |
 | version snapshot | 附录 D | 附录 | 版本说明，不做进度账本。 |
 
 ## 开放写作问题

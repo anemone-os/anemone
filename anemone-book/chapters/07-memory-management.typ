@@ -3,8 +3,8 @@
 
 = 内存管理与 memory object
 
-#epigraph(attribution: [Alan Kay])[
-  Simple things should be simple, complex things should be possible.
+#epigraph(attribution: [Butler Lampson, @lampson1983hints])[
+  The purpose of abstractions is to conceal undesirable properties; desirable ones should not be hidden.
 ]
 
 #thesis[

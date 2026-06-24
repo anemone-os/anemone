@@ -3,8 +3,8 @@
 
 = 调度、等待与时间
 
-#epigraph(attribution: [Edsger W. Dijkstra])[
-  Simplicity is prerequisite for reliability.
+#epigraph(attribution: [Butler Lampson, @lampson1983hints])[
+  Make actions atomic or restartable.
 ]
 
 #thesis[

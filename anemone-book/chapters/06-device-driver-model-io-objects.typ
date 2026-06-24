@@ -3,8 +3,8 @@
 
 = 设备驱动模型与 I/O 对象
 
-#epigraph(attribution: [Rob Pike])[
-  A little copying is better than a little dependency.
+#epigraph(attribution: [Butler Lampson, @lampson1983hints])[
+  An interface should capture the minimum essentials of an abstraction. Don't generalize; generalizations are generally wrong.
 ]
 
 #thesis[

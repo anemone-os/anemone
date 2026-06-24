@@ -3,8 +3,8 @@
 
 = VFS、命名空间与 Pseudo Filesystems
 
-#epigraph(attribution: [David Wheeler])[
-  All problems in computer science can be solved by another level of indirection.
+#epigraph(attribution: [David L. Parnas, @parnas1972criteria])[
+  We propose instead that one begins with a list of difficult design decisions or design decisions which are likely to change.
 ]
 
 #thesis[
