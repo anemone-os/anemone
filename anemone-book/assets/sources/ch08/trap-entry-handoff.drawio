@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="30.2.4">
+  <diagram name="trap-entry-handoff">
+    <mxGraphModel dx="1280" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1390" pageHeight="1370" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="user" value="User Mode" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="30" y="1260" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="asm" value="__utrap_entry&#xa;__utrap_return_to_task" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#f8cecc;strokeColor=#b85450;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="250" y="930" width="270" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="tf" value="TrapFrame&#xa;layout ABI" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#fff2cc;strokeColor=#d6b656;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="270" y="530" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="rust" value="rust_utrap_entry()" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#ffe6cc;strokeColor=#d79b00;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="670" y="330" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="sys" value="handle_syscall()" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="130" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pf" value="handle_user_page_fault()" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="600" y="30" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="intr" value="handle_intr()" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="550" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="sig" value="handle_signals()" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="690" y="910" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="generic" value="Generic Task / Scheduler / MM" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#e1d5e7;strokeColor=#9673a6;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="810" y="470" width="310" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="trap" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="user" target="asm">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="130" y="1180" /><mxPoint x="130" y="990" /><mxPoint x="130" y="990" /><mxPoint x="130" y="990" /><mxPoint x="230" y="990" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="save regs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="asm" target="tf">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="380" y="940" /><mxPoint x="380" y="630" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="narrow ctx" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="tf" target="rust">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="570" y="550" /><mxPoint x="680" y="550" /><mxPoint x="680" y="550" /><mxPoint x="680" y="550" /><mxPoint x="680" y="420" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="syscall" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="rust" target="sys">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="880" y="270" /><mxPoint x="880" y="170" /><mxPoint x="880" y="170" /><mxPoint x="880" y="170" /><mxPoint x="1020" y="170" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="page fault" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="rust" target="pf">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="760" y="330" /><mxPoint x="760" y="120" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="interrupt" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="rust" target="intr">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1030" y="370" /><mxPoint x="1210" y="370" /><mxPoint x="1210" y="370" /><mxPoint x="1210" y="370" /><mxPoint x="1210" y="540" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="return path" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="sig" target="asm">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="690" y="960" /><mxPoint x="520" y="960" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="sys" target="generic">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1080" y="210" /><mxPoint x="1080" y="470" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="pf" target="generic">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="910" y="70" /><mxPoint x="970" y="70" /><mxPoint x="970" y="70" /><mxPoint x="970" y="70" /><mxPoint x="970" y="470" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="intr" target="generic">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1170" y="560" /><mxPoint x="1130" y="560" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e10" value="trap return" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="generic" target="sig">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="860" y="570" /><mxPoint x="860" y="900" /></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

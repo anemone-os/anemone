@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<mxfile host="drawio" version="26.0.0">
+<mxfile host="drawio" version="30.2.4">
   <diagram name="openat-flags">
     <mxGraphModel dx="1280" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1240" pageHeight="760" math="0" shadow="0">
       <root>
@@ -32,7 +32,7 @@
         <mxCell id="10" value="OpenHow::from_linux(flags, mode)" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#fff2cc;strokeColor=#d6b656;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="7">
           <mxGeometry x="40" y="270" width="240" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="11" value="unknown flags fail&#xa;compat noise logged here" style="shape=note;whiteSpace=wrap;html=1;size=18;sketch=1;hachureGap=4;fillColor=#fff2cc;strokeColor=#d6b656;fontFamily=Comic Sans MS;fontSize=12;" vertex="1" parent="7">
+        <mxCell id="11" value="unknown flags fail&#xa;compat noise logged here" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#fff2cc;strokeColor=#d6b656;fontFamily=Comic Sans MS;fontSize=12;" vertex="1" parent="7">
           <mxGeometry x="45" y="385" width="230" height="80" as="geometry" />
         </mxCell>
         <mxCell id="12" value="OpenHow" style="swimlane;startSize=34;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=16;fontStyle=1;" vertex="1" parent="1">

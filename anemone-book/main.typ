@@ -8,16 +8,22 @@
   logo: "../assets/images/anemone.png",
   logo-width: 50%,
   version: [Preliminary Seed],
-  build-description: [Built From Commit 54e7ec1dc44c],
+  build-description: [Built From Commit 8cabaef38c6b],
 )
 
 #include "chapters/00-preface.typ"
 #include "chapters/01-design-map.typ"
 #include "chapters/02-abi-boundary.typ"
+#include "chapters/03-tasks-processes-execution-context.typ"
+#include "chapters/04-scheduling-waiting-time.typ"
+#include "chapters/05-vfs-namespace-pseudo-fs.typ"
+#include "chapters/06-device-driver-model-io-objects.typ"
+#include "chapters/07-memory-management.typ"
+#include "chapters/08-architecture-traps.typ"
 
 #appendices[
   #include "appendices/glossary.typ"
   #include "appendices/references.typ"
-  #include "appendices/ai-usage.typ"
+  #include "appendices/agentic-coding-workflow.typ"
   #include "appendices/version-note.typ"
 ]
