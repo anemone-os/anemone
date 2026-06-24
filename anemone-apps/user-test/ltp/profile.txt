@@ -3,6 +3,8 @@
 # Edit this file and rebuild user-test to switch the selected LTP groups.
 # Use "all" to run every registered group.
 
+signal
+sys
 chmod
 chown
 clone
@@ -10,13 +12,11 @@ clock
 credentials
 eventfd
 exec
-fanotify
 fcntl
 fd
 fs
 futex
 ioctl
-iomux
 ipc
 memory
 mount-legacy
@@ -25,9 +25,9 @@ pipe
 read-write
 schedule
 sendfile
-signal
 splice
-sys
 timer
 timerfd
 wait
+iomux
+fanotify
