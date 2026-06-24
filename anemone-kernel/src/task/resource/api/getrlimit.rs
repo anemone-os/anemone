@@ -40,6 +40,14 @@ fn sys_getrlimit(
             rlim_cur: 1 << (USER_STACK_SHIFT_KB + 10),
             rlim_max: 1 << (USER_STACK_SHIFT_KB + 10),
         },
+        RLimitResource::Core => RLimit {
+            rlim_cur: 0, // no core dump
+            rlim_max: 0,
+        },
+        RLimitResource::Nproc => RLimit {
+            rlim_cur: u64::MAX, // no process limit
+            rlim_max: u64::MAX,
+        },
         r => {
             knoticeln!("getrlimit: unimplemented resource {:?}", r);
             return Err(SysError::NotYetImplemented);

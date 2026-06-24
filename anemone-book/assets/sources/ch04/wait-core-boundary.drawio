@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="30.2.4">
+  <diagram name="wait-core-boundary">
+    <mxGraphModel dx="1280" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1310" pageHeight="1050" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="waiter" value="Waiter" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="30" y="940" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="active" value="ActiveWait" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="190" y="670" width="210" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="state" value="WaitState&#xa;identity" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#e1d5e7;strokeColor=#9673a6;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="410" y="370" width="210" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="token" value="WakeToken" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#fff2cc;strokeColor=#d6b656;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="70" y="360" width="210" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="event" value="Event" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="450" y="30" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="latch" value="LatchTrigger" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="190" y="120" width="210" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="timer" value="Timer timeout" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="510" y="690" width="210" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="signal" value="Signal notify" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="670" y="150" width="210" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="wake" value="wake_enqueue()" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#ffe6cc;strokeColor=#d79b00;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="770" y="470" width="210" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="runq" value="RunQueue" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#ffe6cc;strokeColor=#d79b00;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="1090" y="570" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="begin" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="waiter" target="active">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="210" y="940" /><mxPoint x="210" y="760" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="publish" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="active" target="state">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="400" y="600" /><mxPoint x="400" y="450" /><mxPoint x="400" y="450" /><mxPoint x="400" y="450" /><mxPoint x="400" y="450" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="capability" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="state" target="token">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="410" y="410" /><mxPoint x="300" y="410" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="complete" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="event" target="state">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="530" y="110" /><mxPoint x="530" y="360" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="complete" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="latch" target="state">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="410" y="180" /><mxPoint x="430" y="180" /><mxPoint x="430" y="180" /><mxPoint x="430" y="180" /><mxPoint x="430" y="360" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="timeout" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="timer" target="state">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="550" y="680" /><mxPoint x="550" y="470" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="interrupt" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="signal" target="state">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="700" y="300" /><mxPoint x="700" y="420" /><mxPoint x="700" y="420" /><mxPoint x="700" y="420" /><mxPoint x="630" y="420" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="validated" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="state" target="wake">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="590" y="490" /><mxPoint x="590" y="510" /><mxPoint x="590" y="510" /><mxPoint x="590" y="510" /><mxPoint x="750" y="510" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="placement" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="wake" target="runq">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1060" y="510" /><mxPoint x="1180" y="510" /><mxPoint x="1180" y="510" /><mxPoint x="1180" y="510" /><mxPoint x="1180" y="560" /></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

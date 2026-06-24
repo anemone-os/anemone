@@ -19,5 +19,11 @@ openat04
 # openat202
 # openat203
 
+creat01
+creat03
+creat04
+creat05
+creat06
+creat07
 creat08
 creat09

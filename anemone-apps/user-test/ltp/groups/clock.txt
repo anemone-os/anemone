@@ -1,0 +1,15 @@
+clock_gettime01
+clock_gettime02
+clock_gettime03
+clock_gettime04
+
+clock_getres01
+
+clock_nanosleep01
+clock_nanosleep02
+clock_nanosleep03
+clock_nanosleep04
+
+nanosleep01
+nanosleep02
+nanosleep04

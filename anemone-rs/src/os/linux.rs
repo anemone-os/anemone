@@ -1,6 +1,6 @@
 pub mod fs {
     use alloc::ffi::CString;
-    use anemone_abi::fs::linux::{open, stat::Stat};
+    use anemone_abi::fs::linux::{fcntl, open, stat::Stat};
     use bitflags::bitflags;
 
     use crate::{prelude::*, sys::linux::fs};
@@ -77,6 +77,18 @@ pub mod fs {
 
     pub fn close(fd: Fd) -> Result<(), Errno> {
         fs::close(fd as u64).map(|_| ())
+    }
+
+    pub fn dup3(oldfd: Fd, newfd: Fd, flags: u32) -> Result<Fd, Errno> {
+        fs::dup3(oldfd as u64, newfd as u64, flags as u64).map(|fd| fd as Fd)
+    }
+
+    pub fn fcntl_getfl(fd: Fd) -> Result<u32, Errno> {
+        fs::fcntl(fd as u64, fcntl::F_GETFL as u64, 0).map(|flags| flags as u32)
+    }
+
+    pub fn fcntl_setfl(fd: Fd, flags: u32) -> Result<(), Errno> {
+        fs::fcntl(fd as u64, fcntl::F_SETFL as u64, flags as u64).map(|_| ())
     }
 
     pub fn unlinkat(dirfd: AtFd, path: &Path, flags: u32) -> Result<(), Errno> {

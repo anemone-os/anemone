@@ -28,3 +28,4 @@ LOCAL.md
 kernel-*
 disk*.img
 log-fetch*
+**/__pycache__
