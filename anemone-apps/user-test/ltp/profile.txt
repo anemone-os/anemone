@@ -6,6 +6,7 @@
 chmod
 chown
 clone
+clock
 credentials
 eventfd
 exec
@@ -26,5 +27,7 @@ schedule
 sendfile
 signal
 splice
+sys
+timer
 timerfd
 wait
