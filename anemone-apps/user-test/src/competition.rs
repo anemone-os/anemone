@@ -10,7 +10,7 @@ const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "busybox_testcode.sh",
     // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
-    // "iozone_testcode.sh",
+    "iozone_testcode.sh",
     // "iperf_testcode.sh",
     // "libcbench_testcode.sh",
     // "lmbench_testcode.sh",
@@ -32,6 +32,17 @@ const MUSL_TEST_SCRIPTS: &[&str] = &[
 ];
 
 pub(crate) fn run_competition_tests() {
+    crate::busybox::run_busybox(
+        &[
+            "busybox",
+            "chmod",
+            "a+x",
+            "/glibc/basic/run-all.sh",
+            "/musl/basic/run-all.sh",
+        ],
+        "basic run-all chmod",
+    );
+
     run_test_family("glibc", GLIBC_TEST_SCRIPTS);
     run_test_family("musl", MUSL_TEST_SCRIPTS);
 }

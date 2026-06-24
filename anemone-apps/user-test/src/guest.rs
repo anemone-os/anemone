@@ -4,10 +4,9 @@ use anemone_rs::{
     prelude::*,
 };
 
-const COMPETITION_DISK: &str = "/dev/vdb";
-
 cfg_select! {
     target_arch = "riscv64" => {
+        const COMPETITION_DISK: &str = "/dev/vdb";
         const STAGED_COMPETITION_FIXTURES: &[StagedCompetitionFixture] = &[
             StagedCompetitionFixture {
                 source: "/fixtures/user-test/tools/mke2fs",
@@ -20,6 +19,7 @@ cfg_select! {
         ];
     },
     target_arch = "loongarch64" => {
+        const COMPETITION_DISK: &str = "/dev/vda";
         const STAGED_COMPETITION_FIXTURES: &[StagedCompetitionFixture] = &[
             StagedCompetitionFixture {
                 source: "/fixtures/user-test/tools/mke2fs",
@@ -41,7 +41,7 @@ struct StagedCompetitionFixture {
 pub(crate) fn enter_competition_root() {
     mount(None, Path::new("/dev"), "devfs").expect("user-test: failed to mount devfs on /dev");
     mount(Some(Path::new(COMPETITION_DISK)), Path::new("/mnt"), "ext4")
-        .expect("user-test: failed to mount /dev/vdb on /mnt with ext4");
+        .unwrap_or_else(|_| panic!("user-test: failed to mount {COMPETITION_DISK} on /mnt with ext4"));
     // Staged tools live on the boot rootfs and disappear after chroot, so copy
     // them into the mounted competition image before entering it.
     install_staged_competition_fixtures("/mnt");
