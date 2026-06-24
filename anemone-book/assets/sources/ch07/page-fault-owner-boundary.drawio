@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="30.2.4">
+  <diagram name="page-fault-owner-boundary">
+    <mxGraphModel dx="1280" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1490" pageHeight="670" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="trap" value="arch trap&#xa;fault info" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#f8cecc;strokeColor=#b85450;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="30" y="530" width="190" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="handler" value="page fault handler" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="210" y="300" width="230" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="task" value="Task&#xa;UserSpaceHandle" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="30" y="30" width="230" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="uspace" value="UserSpace lock" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#e1d5e7;strokeColor=#9673a6;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="500" y="320" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="vma" value="VmArea&#xa;prot + object offset" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#fff2cc;strokeColor=#d6b656;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="730" y="140" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="vmo" value="VmObject::resolve_frame" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="930" y="360" width="280" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="frame" value="frame allocator" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#ffe6cc;strokeColor=#d79b00;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="410" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pte" value="page table&#xa;TLB shootdown" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#f5f5f5;strokeColor=#666666;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="690" y="550" width="260" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="trap" target="handler">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="260" y="540" /><mxPoint x="320" y="540" /><mxPoint x="320" y="540" /><mxPoint x="320" y="540" /><mxPoint x="320" y="390" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="current uspace" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="task" target="handler">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="230" y="120" /><mxPoint x="230" y="290" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="handler" target="uspace">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="420" y="350" /><mxPoint x="500" y="350" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="range check" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="uspace" target="vma">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="760" y="340" /><mxPoint x="810" y="340" /><mxPoint x="810" y="340" /><mxPoint x="810" y="340" /><mxPoint x="810" y="240" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="object index" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="vma" target="vmo">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="960" y="240" /><mxPoint x="960" y="350" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="needs page" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="vmo" target="frame">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1190" y="430" /><mxPoint x="1230" y="430" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="resolved frame" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="vmo" target="pte">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="900" y="430" /><mxPoint x="870" y="430" /><mxPoint x="870" y="430" /><mxPoint x="870" y="430" /><mxPoint x="870" y="540" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="install PTE" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="uspace" target="pte">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="720" y="380" /><mxPoint x="720" y="380" /><mxPoint x="720" y="380" /><mxPoint x="720" y="380" /><mxPoint x="720" y="540" /></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

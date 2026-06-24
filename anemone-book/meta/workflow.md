@@ -44,7 +44,7 @@ Anemone 仓库已有的 RFC、devlog、register 或 current limitations。
   确认没有明显 stale claim。
 - 版本冻结前做一次事实核对、限制边界核对、引用核对、Typst 编译和 PDF 检查。
 - 冻结后只修事实错误、错别字、引用错误和排版问题；新的设计进展进入下一版。
-- 决赛版在同一书稿源上继续演进，替换过时章节、加入新模块、新验证闭环和新架构
+- 决赛版在同一书稿源上继续演进，替换过时章节、加入新模块、新验证证据和新架构
   取舍，而不是复制初赛版后分叉维护。
 
 书稿不维护自己的进度账本。版本事实由 git tag、提交点、release artifact 和
@@ -71,7 +71,7 @@ anemone-book/
     ...
   appendices/
     glossary.typ
-    ai-usage.typ
+    agentic-coding-workflow.typ
   assets/
     figures/
     images/
@@ -125,24 +125,17 @@ typst compile main.typ build/anemone-book.pdf
 - 可编辑图源、生成脚本或说明放在 `assets/sources/`。
 - 小型装饰性或排版性图形可以用 Typst 原生能力；内核对象关系、owner boundary、
   数据路径、状态机、VFS / device bridge 等技术结构图优先用 draw.io 维护源文件。
-- draw.io 源文件放在 `assets/sources/`，导出的正式图默认用 SVG，放在
+- draw.io 源文件放在 `assets/sources/`，导出的正式图默认用 PNG，放在
   `assets/figures/`，由 Typst 正文引用。
-- PNG 只作为预览、截图或特殊 bitmap 交付格式；不要把 PNG 当作唯一图源。
+- SVG 暂不作为正文引用格式；Typst 对当前 draw.io SVG 的文字显示存在问题。
+- PNG 可以作为正式正文图，但必须保留对应 `.drawio` 源文件。
 - 截图、照片、运行界面等 bitmap 资产需要说明来源。
 - 不提交只有不可编辑导出物、没有源或说明的复杂图。
 - 文件命名应能看出章节和图意图，例如
   `assets/sources/ch05-vfs-object-model.drawio` 与
-  `assets/figures/ch05-vfs-object-model.svg`。
+  `assets/figures/ch05-vfs-object-model.png`。
 
 draw.io 导出命令默认形态：
-
-```sh
-drawio -x -f svg \
-  -o anemone-book/assets/figures/ch05-vfs-object-model.svg \
-  anemone-book/assets/sources/ch05-vfs-object-model.drawio
-```
-
-预览 PNG 可使用固定宽度，避免生成过大的临时图：
 
 ```sh
 drawio -x -f png --width 2000 \
@@ -151,7 +144,7 @@ drawio -x -f png --width 2000 \
 ```
 
 如果运行环境无法调用 draw.io CLI，可以先提交 `.drawio` 源文件和图题说明，再在可
-运行 CLI 的宿主环境导出 SVG。正式版本冻结前必须确保正文引用的是已导出的稳定图。
+运行 CLI 的宿主环境导出 PNG。正式版本冻结前必须确保正文引用的是已导出的稳定图。
 
 ## 引用与术语
 
@@ -179,7 +172,7 @@ drawio -x -f png --width 2000 \
 ## 章节写作
 
 每章优先写一个清晰论点，而不是罗列功能。一个功能只有在能解释设计原则、
-关键 trade-off、代表路径、ABI 分层或工程闭环时才进入正文。
+关键 trade-off、代表路径、ABI 分层或 accepted limitation 时才进入正文。
 
 每章至少在 outline 中明确：
 
@@ -198,7 +191,7 @@ drawio -x -f png --width 2000 \
 draw.io 图进入正文前至少需要满足：
 
 - `.drawio` 源文件存在于 `assets/sources/`。
-- SVG 导出物存在于 `assets/figures/`。
+- PNG 导出物存在于 `assets/figures/`。
 - 图题能表达技术结论。
 - 图中文字、箭头和分组与正文术语一致。
 - Typst 能成功引用导出的图。
@@ -220,11 +213,11 @@ Typst 正文或样式变更至少运行：
 typst compile anemone-book/main.typ anemone-book/build/anemone-book.pdf
 ```
 
-新增或修改 draw.io 图时，至少重新导出对应 SVG，并运行一次 Typst 编译。大图或
+新增或修改 draw.io 图时，至少重新导出对应 PNG，并运行一次 Typst 编译。大图或
 自动布局图还应检查是否有重叠、断线、文字截断、箭头穿过无关节点等问题。
 
 需要检查文本结构时，可使用 `pdftotext` 或 Typst HTML / text 导出。需要检查
-视觉布局时，再导出 PNG 或查看 PDF 页面。书稿变更默认不运行 QEMU、LTP 或
+视觉布局时，再查看导出的 PNG 或 PDF 页面。书稿变更默认不运行 QEMU、LTP 或
 内核 build，除非正文事实需要新验证。
 
 ## 收束规则

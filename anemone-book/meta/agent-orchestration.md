@@ -89,8 +89,8 @@ seed 稳定后，可以按依赖关系并行：
 - `§7 Memory Management and Memory Object` 可独立推进，但要回连 `§1` 的折中路线、
   `§2` 的 ABI 边界，以及 VFS / page cache 的相关叙述。
 - `§8 Architecture, Traps, and Platform Boundaries` 独立性较高，可以较早并行。
-- `§9 Engineering Feedback Loop` 后写，因为它应吸收前面章节的工程证据，而不是
-  反过来驱动内核设计叙事。
+- 附录 C `Agentic Coding 与工程工作流` 后写，集中说明 agentic coding、RFC 工作流、
+  review 等级和开发者文档事实层；正文不单开工程闭环章。
 
 ### Spine Rewrite Phase
 

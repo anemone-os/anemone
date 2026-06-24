@@ -1,4 +1,4 @@
-#import "book.typ": anemone-blue, anemone-ink, anemone-muted, anemone-line, anemone-bg
+#import "book.typ": anemone-blue, anemone-ink, anemone-muted, anemone-line, anemone-bg, anemone-code-bg
 
 #let epigraph(quote, attribution: none) = {
   block(
@@ -45,11 +45,26 @@
 #let thesis(body) = {
   block(
     width: 100%,
-    inset: (left: 0.9em, right: 0em, y: 0.2em),
-    stroke: (left: 2pt + anemone-blue),
-    below: 1.2em,
+    fill: anemone-code-bg,
+    radius: 2pt,
+    inset: (x: 0.85em, y: 0.65em),
+    below: 1.25em,
   )[
-    #set par(first-line-indent: 0em)
-    #text(fill: anemone-ink, body)
+    #set par(first-line-indent: 0em, justify: true)
+    #grid(
+      columns: (auto, 1fr),
+      gutter: 0.7em,
+      [
+        #text(
+          font: ("Noto Sans Mono CJK SC", "Noto Sans CJK SC"),
+          size: 10.5pt,
+          weight: "bold",
+          fill: rgb("#0077ff"),
+        )[\$]
+      ],
+      [
+        #text(size: 10pt, fill: anemone-ink, body)
+      ],
+    )
   ]
 }

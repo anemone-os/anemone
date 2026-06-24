@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="30.2.4">
+  <diagram name="device-driver-bus">
+    <mxGraphModel dx="1280" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="640" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="fw" value="firmware / PCIe config&#xa;virtio transport" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#f5f5f5;strokeColor=#666666;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="30" y="510" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="device" value="Device" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="350" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="bus" value="BusType&#xa;devices + drivers" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#e1d5e7;strokeColor=#9673a6;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="540" y="210" width="250" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="driver" value="Driver::probe()" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#ffe6cc;strokeColor=#d79b00;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="820" y="120" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="owner" value="concrete I/O owner&#xa;driver-private state" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="50" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="registry" value="char / block registry&#xa;optional publication" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#fff2cc;strokeColor=#d6b656;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1350" y="30" width="280" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="devfs" value="devfs bridge" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#f5f5f5;strokeColor=#666666;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1680" y="50" width="210" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="discovery" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="fw" target="device">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="340" y="560" /><mxPoint x="400" y="560" /><mxPoint x="400" y="560" /><mxPoint x="400" y="560" /><mxPoint x="400" y="440" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="register" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="device" target="bus">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="400" y="310" /><mxPoint x="400" y="260" /><mxPoint x="400" y="260" /><mxPoint x="400" y="260" /><mxPoint x="540" y="260" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="match + probe" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="bus" target="driver">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="850" y="260" /><mxPoint x="930" y="260" /><mxPoint x="930" y="260" /><mxPoint x="930" y="260" /><mxPoint x="930" y="210" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="creates" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="driver" target="owner">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1030" y="130" /><mxPoint x="1080" y="130" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="if user file API needed" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="owner" target="registry">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1330" y="80" /><mxPoint x="1360" y="80" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="publish" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="registry" target="devfs">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1620" y="80" /><mxPoint x="1680" y="80" /></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
