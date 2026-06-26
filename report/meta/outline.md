@@ -47,16 +47,16 @@
 - fd table、地址空间、credentials、工作目录和根目录继承边界。
 - `/proc/<pid>`、wait 返回值、进程组 / session 相关测例或 devlog。
 
-### 3. 调度与时间
+### 3. 调度
 
-目的：解释 scheduler 状态、runnable queue、wait-core、唤醒协议、timeout、timer
-interrupt 和时间对象。进程生命周期放在第二章，硬件时钟入口放在第八章。
+目的：解释 scheduler 状态、runnable queue、wait-core、唤醒协议、可中断等待、
+同步原语和多核负载分配。进程生命周期放在第二章，时间线、soft timer 和用户可见
+时间对象放在第八章，硬件时钟入口放在第九章。
 
 候选证据：
 
 - 调度队列或 runnable state 代码。
 - wait / latch / wake token 路径。
-- timer、itimer、timerfd 或 runtime accounting 路径。
 - 与 sleep、timeout、signal interruption、pipe blocking、poll / select 相关的
   LTP 或 libcbench 失败。
 
@@ -110,10 +110,25 @@ devfs。
 - loop / block / random / tty 实现。
 - ioctl routing 和代表性 command 处理。
 
-### 8. 架构硬件抽象层
+### 8. 时间
+
+目的：解释 clock、tick、timekeeper、soft timer、IRQ / threaded timer lane、
+`nanosleep` / timeout、`timerfd` 和 `ITIMER_REAL`。本章说明时间对象和等待协议、
+文件对象、信号机制之间的关系；硬件 timer interrupt 的架构入口放在第九章。
+
+候选证据：
+
+- `time` 模块的 clock、timekeeper、instant 和 timer 路径。
+- threaded timer event RFC / transaction devlog。
+- `timerfd` 小迭代 devlog。
+- `nanosleep`、`clock_nanosleep`、`timerfd`、`setitimer` / `getitimer` 对应路径。
+- 与 sleep timeout、timerfd、itimer、signal interruption 相关的 LTP 或本地日志。
+
+### 9. 架构硬件抽象层
 
 目的：解释 RISC-V 与 LoongArch 的架构差异，以及通用内核代码如何通过 HAL 保持
-共享。启动、Trap、中断、上下文切换、用户态返回和硬件时钟入口都归入本章。
+共享。启动、Trap、中断、上下文切换、用户态返回和硬件时钟入口都归入本章；clock、
+soft timer 和用户可见时间对象放在第八章。
 
 候选证据：
 
@@ -122,7 +137,7 @@ devfs。
 - timer / interrupt / platform 代码。
 - 各架构构建或运行验证。
 
-### 9. ABI 兼容设计
+### 10. ABI 兼容设计
 
 目的：解释 Linux ABI 兼容、syscall dispatch、UAPI 参数解析、flag / errno 语义
 和代表性 syscall 路径。本章后置到核心模块之后，避免一开篇进入抽象 ABI 叙事；
@@ -135,7 +150,7 @@ devfs。
 - Linux / LTP / man-pages 对应语义。
 - 相关 current limitations 或 devlog 记录。
 
-### 10. 总结与展望
+### 11. 总结与展望
 
 目的：总结已完成工作、开发经验、当前限制和未来计划。
 
