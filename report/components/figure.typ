@@ -22,6 +22,8 @@
       radius: 3pt,
       width: 100%,
     )[
+      #set align(left)
+      #set par(first-line-indent: 0em, justify: false)
       #set text(font: font.mono, size: size.five)
       #raw(body, block: true, lang: lang)
     ],

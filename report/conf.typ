@@ -23,6 +23,8 @@
     radius: 3pt,
     width: 100%,
   )
+  show raw.where(block: true): set align(left)
+  show raw.where(block: true): set par(first-line-indent: 0em, justify: false)
   show raw.where(block: true): set text(font: font.mono, size: size.five)
 
   content

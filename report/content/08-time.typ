@@ -6,7 +6,7 @@
 
 Anemone 的时间线以架构层提供的本地单调计数器为基础。架构层只暴露“读取当前单调计数”和“按绝对单调计数重新设置下一次时钟事件”这两个能力；通用时间子系统负责把硬件计数换算成 `Duration`、维护启动基线，并向上提供 `Instant`、`clock_gettime`、`clock_getres`、`gettimeofday`、`times` 等接口。
 
-目前 `CLOCK_MONOTONIC`、`CLOCK_REALTIME`、coarse clock、进程 CPU 时间和线程 CPU 时间都通过统一的 `Clock` 接口进入系统调用层。这里仍有阶段性限制：真实 RTC、NTP 校准、suspend/resume accounting 和 time namespace 尚未完成，因此 `CLOCK_REALTIME` 和 `CLOCK_BOOTTIME` 中的部分语义仍以单调时间线作为兼容基础。正式正文需要结合 current limitations 或 devlog 补齐这些限制的最终表述。
+目前 `CLOCK_MONOTONIC`、`CLOCK_REALTIME`、coarse clock、进程 CPU 时间和线程 CPU 时间都通过统一的 `Clock` 接口进入系统调用层。这里仍有阶段性限制：真实 RTC、NTP 校准、suspend/resume accounting 和 time namespace 尚未完成，因此 `CLOCK_REALTIME` 和 `CLOCK_BOOTTIME` 中的部分语义仍以单调时间线作为兼容基础。
 
 == Tick 与定时中断
 
