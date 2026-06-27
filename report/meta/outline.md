@@ -164,20 +164,7 @@ soft timer 和用户可见时间对象放在第八章。
 - timer / interrupt / platform 代码。
 - 各架构构建或运行验证。
 
-### 10. ABI 兼容设计
-
-目的：解释 Linux ABI 兼容、syscall dispatch、UAPI 参数解析、flag / errno 语义
-和代表性 syscall 路径。本章后置到核心模块之后，避免一开篇进入抽象 ABI 叙事；
-写作时应连接前文的 task、VFS、MM、device、wait 和 arch。
-
-候选证据：
-
-- syscall dispatch 和 syscall 注册路径。
-- 代表性 syscall，例如 `openat`、`clone`、`mmap`、`ioctl`、`pselect6`。
-- Linux / LTP / man-pages 对应语义。
-- 相关 current limitations 或 devlog 记录。
-
-### 11. 总结与展望
+### 10. 总结与展望
 
 目的：总结已完成工作、开发经验、当前限制和未来计划。
 

@@ -1,4 +1,4 @@
-#import "conf.typ": appendices, doc, cover, frontmatter, mainmatter
+#import "conf.typ": appendices, cover, doc, frontmatter, mainmatter
 #import "components/outline.typ": outline-page
 
 #show: doc
@@ -6,9 +6,9 @@
 #cover(
   project-name: [Anemone],
   team-name: [Anemone],
-  teammates: ([待补充],),
-  teachers: ([待补充],),
-  date: (2026, 6, 24),
+  teammates: ([张正翰], [陈函申]),
+  teachers: ([夏文], [仇洁婷]),
+  date: (2026, 6, 27),
   logo-path: "assets/school.jpg",
 )[
   #frontmatter(title: [Anemone])[
@@ -26,8 +26,7 @@
     #include "content/07-device-driver-model.typ"
     #include "content/08-time.typ"
     #include "content/09-arch-hal.typ"
-    #include "content/10-abi-compat.typ"
-    #include "content/11-summary.typ"
+    #include "content/10-summary.typ"
 
     #appendices[
       #include "content/a-engineering-ai.typ"

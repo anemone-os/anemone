@@ -32,7 +32,6 @@ Anemone 各个模块完成情况概览如下。
     [设备驱动模型], [实现设备发布、字符/块设备、devfs bridge、ioctl 分发和若干具体设备对象。],
     [时间], [围绕 clock、tick、IRQ / threaded soft timer、timerfd 和 itimer 组织时间线、超时与定时通知。],
     [架构硬件抽象层], [支持 RISC-V64 与 LoongArch64 的启动、trap、中断、上下文保存和平台差异收束。],
-    [ABI 兼容设计], [围绕 Linux syscall、UAPI 参数、flag、errno 和代表路径解释用户可见兼容语义。],
   ),
   caption: [Anemone 模块完成情况概览],
   kind: table,
