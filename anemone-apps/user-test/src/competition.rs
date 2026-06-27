@@ -33,7 +33,7 @@ const MUSL_TEST_SCRIPTS: &[&str] = &[
     // "cyclictest_testcode.sh",
     // "iozone_testcode.sh",
     // "iperf_testcode.sh",
-    // "libcbench_testcode.sh",
+    "libcbench_testcode.sh",
     // "lmbench_testcode.sh",
     // "netperf_testcode.sh",
     // "unixbench_testcode.sh",
