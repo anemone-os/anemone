@@ -1,4 +1,4 @@
-#import "../components/figure.typ": code-block
+#import "../components/figure.typ": code-block, report-figure
 
 = 文件系统
 
@@ -90,6 +90,11 @@ Anemone 的 VFS 对象采用接近 Linux VFS 的 operation table 形态：通用
 
 可以注意到这里的`attrs`是原子字段，这是为了保证挂载点属性修改的原子事务，以免用户态观测到竞态窗口。
 
+#report-figure(
+  image("../assets/vfs.png", width: 90%),
+  caption: [FileSystem，SuperBlock，Mount，层层叠加的关系],
+)
+
 === Inode
 
 `Inode` 是文件系统对象和元数据的核心抽象。VFS 在调用 `InodeOps` 前处理路径权限、挂载可写性和通用错误语义；后端则实现目录查找、创建、链接、删除、重命名、打开、截断、符号链接读取和属性查询等真正依赖文件系统格式的操作。
@@ -117,6 +122,11 @@ Anemone 的 VFS 对象采用接近 Linux VFS 的 operation table 形态：通用
 )
 
 我们还在`SuperBlock`中维护了一个icache，这样，已经被加载的Inode可以缓存在内存中，如果后续再次命中，就可以大大提高系统效率。而同时，我们还引入了Inode Shinker内核线程。当内核内存占用过多时，shrinker会遍历各个超级快，尝试驱逐*引用计数已经归零*的Inode。
+
+#report-figure(
+  image("../assets/inode-lifecycle.png", width: 90%),
+  caption: [一个Inode的生命周期],
+)
 
 === Dentry
 
@@ -178,6 +188,11 @@ Anemone 的 VFS 对象采用接近 Linux VFS 的 operation table 形态：通用
 == 挂载树
 
 Anemone 用全局 VFS 子系统维护可见挂载树和匿名挂载树。可见挂载树承载根文件系统、用户可见的磁盘文件系统、ramfs、procfs 和 devfs；匿名挂载树用于 pipe、eventfd、timerfd 等不需要路径查找的内核内部文件对象。路径查找后，得到 `PathRef`，其中同时包含当前挂载点和 dentry，因此同一个 inode 经由不同 bind mount 被访问时仍能保留路径视图差异。
+
+#report-figure(
+  image("../assets/path.png", width: 70%),
+  caption: [路径查询的例子],
+)
 
 挂载操作集中由 `MountTree` 处理。它支持根挂载、普通挂载、bind / recursive bind、move mount、remount 属性更新、private propagation 请求、普通卸载和 lazy detach。挂载树是 mount 位置的唯一写入者，`Dentry` 不反向记录挂载关系；路径查找遇到挂载点时查询当前 mount stack 的最上层视图。如果查找过程中挂载树发生变化，VFS 通过 placement generation 重试，避免返回过期路径视图。这样，我们就避免用户看到过期状态。
 

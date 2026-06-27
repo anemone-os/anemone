@@ -1,4 +1,4 @@
-#import "../components/figure.typ": code-block
+#import "../components/figure.typ": code-block, report-figure
 
 = 设备驱动模型
 
@@ -54,6 +54,11 @@ Anemone 的设备驱动模型参考了 Linux 的 device / driver / bus 分层，
 这三个对象的关系决定了 Anemone 的 probe 流程。内核启动时，会先注册内置驱动，随后解析固件描述并创建设备对象；总线在注册设备或注册驱动时都会尝试匹配未绑定对象。匹配成功后，driver 的 `probe` 初始化具体硬件或传输层，成功后设备记录对应 driver，driver 也记录自己已经管理的设备。
 
 `DeviceBase` 中的 `drv_state` 是这里的关键点。设备模型只负责保存一个类型擦除的私有状态槽，不解释状态内容；具体 driver 在 probe 成功后写入自己的状态对象，后续 shutdown、interrupt handler 或设备文件操作再按真实类型取回。这样，通用设备框架不需要知道 VirtIO block、串口、PCIe transport 等具体实现的数据结构，驱动私有状态也不会反向污染 VFS 或 syscall 层。
+
+#report-figure(
+  image("../assets/ddm.png", width: 90%),
+  caption: [设备，驱动通过总线相联结],
+)
 
 通过过这种机制，我们就漂亮地解耦了VFS和设备驱动系统。
 

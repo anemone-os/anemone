@@ -1,8 +1,16 @@
 use anemone_rs::{
-    abi::fs::linux::open::{O_RDONLY, O_TRUNC, O_WRONLY},
-    os::linux::fs::{AtFd, close, fstatat, openat, read},
+    abi::{
+        fs::linux::open::{O_RDONLY, O_TRUNC, O_WRONLY},
+        time::linux::TimeSpec,
+    },
+    os::linux::{
+        fs::{close, fstatat, openat, read, AtFd},
+        time::nanosleep,
+    },
     prelude::*,
 };
+
+const POST_SCRIPT_SLEEP_SECONDS: i64 = 3;
 
 const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "basic_testcode.sh",
@@ -18,10 +26,10 @@ const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "unixbench_testcode.sh",
 ];
 const MUSL_TEST_SCRIPTS: &[&str] = &[
-    // "basic_testcode.sh",
+    "basic_testcode.sh",
     // "lua_testcode.sh",
-    // "busybox_testcode.sh",
-    // "libctest_testcode.sh",
+    "busybox_testcode.sh",
+    "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
     // "iozone_testcode.sh",
     // "iperf_testcode.sh",
@@ -107,6 +115,24 @@ fn runtime_for_test_script<'a>(family: &'a str, script: &str) -> &'a str {
     }
 }
 
+fn sleep_after_test_script(family: &str, script: &str) {
+    let duration = TimeSpec {
+        tv_sec: POST_SCRIPT_SLEEP_SECONDS,
+        tv_nsec: 0,
+    };
+
+    loop {
+        match nanosleep(duration) {
+            Ok(()) => return,
+            Err(EINTR) => {},
+            Err(errno) => {
+                println!("user-test: post-test sleep after {family} {script} failed: {errno:?}");
+                return;
+            },
+        }
+    }
+}
+
 fn run_test_family(family: &str, scripts: &[&str]) {
     crate::runtime::switch_runtime(family);
     prepare_testcode(family);
@@ -128,6 +154,7 @@ fn run_test_family(family: &str, scripts: &[&str]) {
         }
         println!("user-test: running {family} {script}...");
         crate::busybox::run_busybox_in_dir(workdir.as_str(), &["busybox", "sh", script], script);
+        sleep_after_test_script(family, script);
     }
     println!("user-test: {family} competition tests finished.");
 }
