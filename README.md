@@ -107,7 +107,7 @@ just xtask qemu --platform qemu-virt-rv64 --image build/anemone.elf | tee build/
 ## 项目人员
 
 哈尔滨工业大学（深圳）：
-- 张正翰(doruche18@outlook.com)：进程管理，内存管理，文件系统，设备驱动，IPC，RISC-V架构适配，时间管理。
+- 张正翰(doruche18@outlook.com)：进程管理，内存管理，文件系统，设备驱动，IPC，RISC-V架构适配，时间管理，syscall实现，文档撰写，测例支持。
 - 陈函申(edgwunderline@outlook.com)：PCIe总线，进程管理，内存管理，LoongArch架构适配，测例支持。
 - 指导老师：夏文，仇洁婷
 
