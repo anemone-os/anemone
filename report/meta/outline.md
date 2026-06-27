@@ -4,10 +4,14 @@
 
 ## 全局写作粒度
 
-每章只需要讲出评委最需要判断的内容：完成了什么能力、关键机制怎么组织、为什么这样
-取舍、有什么代表性验证或问题、边界在哪里。不要把常规 OS 机制按源码路径拆成完整
-导览；除非细节能体现 Anemone 的区分度、解释复杂 bug、支撑 ABI 边界或评审判断，
-否则压缩成机制结论。
+每章只需要讲出评委最需要判断的内容：完成了什么能力、关键机制怎么组织、有什么代表性
+验证或问题。不要把常规 OS 机制按源码路径拆成完整导览；除非细节能体现 Anemone 的
+区分度、解释复杂 bug、支撑 ABI 边界或评审判断，否则压缩成机制结论。
+
+取舍 / 收益不是每章必备环节，默认不写。只有当用户大纲已经安排、机制本身确实需要
+解释选择理由，或该取舍能直接支撑竞赛表达时才写。写取舍时必须使用第一人称参赛者
+口吻，说明“我们为什么这么做”和“它给 Anemone 带来了什么好处”，不要写成旁观者替
+项目做价值评估。
 
 未来路线、项目价值和竞赛表达可以出现。不要把它们机械改写成“当前限制”，也不要删到
 只剩缺陷清单。agent 不得自行判断某句话是否“宣传”“空泛”或“不可验证”并据此删除；
@@ -110,15 +114,17 @@ Anemone 相对往届内核更有区分度的 memory object / VMO 设计。
 
 ### 6. 文件系统
 
-目的：解释 VFS 对象模型、路径查找、mount view、filesystem backend、procfs 和
-devfs。
+目的：解释 VFS 对象模型、路径查找、mount view、filesystem backend、VMO 形式的
+页缓存和 Ext4 后端。procfs 在进程管理章节已经展开，devfs 主要放到设备驱动模型章节；
+本章只在说明特殊文件系统接入 VFS 时轻提。
 
 候选证据：
 
-- `File`、`FileDesc`、`Inode`、`Dentry`、`PathRef`、`Mount` 代码路径。
+- `FileSystemOps`、`SuperBlockOps`、`InodeOps`、`FileOps`、`Mount`、`Dentry`、
+  `PathRef` 代码路径。
 - mount-tree RFC / devlog。
-- procfs task / status / fd / mounts 路径。
-- devfs bridge 路径。
+- Ext4 mount、inode ops、regular file mapping 和 VMO 页缓存路径。
+- procfs mounts 视图和 devfs bridge 路径只作为轻量补充，不作为本章重点。
 
 ### 7. 设备驱动模型
 
