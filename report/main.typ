@@ -5,7 +5,7 @@
 
 #cover(
   project-name: [Anemone],
-  team-name: [Anemone],
+  team-name: [ヰ世界电子开发部],
   teammates: ([张正翰], [陈函申]),
   teachers: ([夏文], [仇洁婷]),
   date: (2026, 6, 27),
