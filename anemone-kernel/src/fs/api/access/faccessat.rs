@@ -1,0 +1,30 @@
+use crate::{
+    fs::api::{
+        access::{
+            args::{AccessFlag, AccessMode},
+            kernel_faccess,
+        },
+        args::RawAtFd,
+    },
+    prelude::{user_access::c_readonly_path, *},
+};
+
+#[syscall(SYS_FACCESSAT)]
+fn sys_faccessat(
+    dirfd: RawAtFd,
+    #[validate_with(c_readonly_path)] pathname: Box<str>,
+    mode: AccessMode,
+) -> Result<u64, SysError> {
+    knoticeln!(
+        "faccessat: dirfd={:?}, pathname={:?}, mode={:?}",
+        dirfd,
+        pathname,
+        mode
+    );
+
+    let r = kernel_faccess(dirfd, pathname.as_ref(), mode, AccessFlag::empty()).map(|()| 0);
+
+    kdebugln!("faccessat: r={:?}", r);
+
+    r
+}

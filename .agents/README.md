@@ -1,0 +1,1 @@
+This repository contains shared configuration files and utility code for various Agents. Each Agent's configuration folder can be set as a symbolic link pointing to this folder, ensuring that all Agents use the same set of configuration files and utility code, making maintenance and updates easier.

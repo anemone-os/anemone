@@ -1,0 +1,30 @@
+use anemone_abi::fs::linux::stat::Stat;
+
+use crate::{
+    fs::api::{
+        args::AtFd,
+        stat::{args::StatAtFlag, kernel_fstatat},
+    },
+    prelude::{
+        user_access::{UserWritePtr, c_readonly_path, user_addr},
+        *,
+    },
+};
+
+#[syscall(SYS_NEWFSTATAT)]
+fn sys_newfstatat(
+    dirfd: AtFd,
+    #[validate_with(c_readonly_path)] filename: Box<str>,
+    #[validate_with(user_addr)] statbuf: VirtAddr,
+    flags: StatAtFlag,
+) -> Result<u64, SysError> {
+    let kbuf = kernel_fstatat(dirfd, &filename, flags)?.to_linux_stat();
+
+    let usp = get_current_task().clone_uspace_handle();
+    let mut guard = usp.lock();
+
+    let mut statbuf = UserWritePtr::<Stat>::try_new(statbuf, &mut guard)?;
+    statbuf.write(kbuf);
+
+    Ok(0)
+}

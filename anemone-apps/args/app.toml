@@ -1,0 +1,9 @@
+name = "args"
+
+[build]
+workdir = "."
+driver = "cargo"
+args = ["build"]
+
+[[artifacts]]
+path = "target/${TARGET_TRIPLE}/debug/args"

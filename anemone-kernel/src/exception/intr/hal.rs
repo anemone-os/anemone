@@ -1,0 +1,80 @@
+pub trait IntrArchTrait: Sized {
+    /// IRQ flags representing the state with interrupts enabled.
+    const ENABLED_IRQ_FLAGS: IrqFlags;
+
+    /// IRQ flags representing the state with interrupts disabled.
+    const DISABLED_IRQ_FLAGS: IrqFlags;
+
+    /// Get the current IRQ flags.
+    fn current_irq_flags() -> IrqFlags;
+
+    /// Restore local interrupt state from flags.
+    ///
+    /// This is a low-level primitive and must not change any software counter.
+    unsafe fn restore_local_intr(flags: IrqFlags);
+
+    /// Enable local interrupts.
+    ///
+    /// This is a low-level primitive and must not change any software counter.
+    unsafe fn local_intr_enable() {
+        unsafe {
+            Self::restore_local_intr(Self::ENABLED_IRQ_FLAGS);
+        }
+    }
+
+    /// Disable local interrupts.
+    ///
+    /// This is a low-level primitive and must not change any software counter.
+    unsafe fn local_intr_disable() {
+        unsafe {
+            Self::restore_local_intr(Self::DISABLED_IRQ_FLAGS);
+        }
+    }
+
+    /// Send an inter-processor interrupt (IPI) to the specified CPU.
+    ///
+    /// This function is expected not to fail, and should panic immediately if
+    /// the operation cannot be completed successfully.
+    ///
+    /// TODO: some architectures support an integer payload, we shall add that
+    /// in the future if needed.
+    fn send_ipi(cpu_id: usize);
+
+    unsafe fn claim_ipi();
+
+    /// Enable local interrupts for current core.
+    ///
+    /// **First timer interrupt is not programmed here. It should be set up
+    /// separately.**
+    unsafe fn init_local_irq();
+
+    /// Check if local interrupts are currently enabled.
+    fn local_intr_enabled() -> bool {
+        Self::current_irq_flags() == Self::ENABLED_IRQ_FLAGS
+    }
+
+    /// Check if local interrupts are currently disabled.
+    fn local_intr_disabled() -> bool {
+        Self::current_irq_flags() == Self::DISABLED_IRQ_FLAGS
+    }
+}
+
+/// Interrupt flags for the current CPU. The exact representation is
+/// architecture-specific.
+///
+/// This type should be treated as opaque, and users should not rely on its
+/// internal structure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IrqFlags(u64);
+
+impl IrqFlags {
+    /// Create a new IrqFlags with the given raw value.
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    /// Get the raw value of this IrqFlags.
+    pub const fn raw(&self) -> u64 {
+        self.0
+    }
+}

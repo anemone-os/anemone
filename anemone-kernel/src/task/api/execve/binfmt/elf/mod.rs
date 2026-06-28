@@ -1,0 +1,60 @@
+//! TODO: A kernel-specialized elf loader. those general elf crates are either
+//! too heavy (cost too much memory or binary size) or not intended for kernel
+//! use. We just needs a very simple and lightweight one, which is fairly enough
+//! for kernel's use case.
+
+use goblin::elf64::header::{Header, SIZEOF_EHDR};
+
+use crate::{
+    prelude::*,
+    task::execve::binfmt::{BinaryFmt, ExecCtx, ExecResult, LoadedBinaryMeta},
+};
+
+pub mod auxv;
+pub mod init_stack;
+pub mod parse;
+
+fn load_binary(ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
+    let file = ctx.path.open().map_err(|e| {
+        kwarningln!("elf: failed to open file '{}': {:?}", ctx.path, e);
+        e
+    })?;
+
+    let mut elf_hdr_bytes = [0; SIZEOF_EHDR];
+    file.read(&mut elf_hdr_bytes)?;
+    let elf_hdr = Header::from_bytes(&elf_hdr_bytes);
+    if elf_hdr.e_ident[0..4] != [0x7F, b'E', b'L', b'F'] {
+        return Ok(ExecResult::NotRecognized);
+    }
+    ctx.prepare_credentials_for(file.path())?;
+    file.seek_set_checked(0)?;
+
+    let meta = unsafe { parse::load_image(&file, ctx.usp)? };
+
+    let sp = init_stack::InitStackCtor::new(
+        ctx.usp,
+        &meta,
+        ctx.exec_fn,
+        &ctx.argv,
+        &ctx.envp,
+        &ctx.cred,
+        ctx.secure_exec,
+    )
+    .push()?;
+
+    Ok(ExecResult::Loaded(LoadedBinaryMeta {
+        exe: file.path().clone(),
+        cred: ctx.cred.clone(),
+        entry: if let Some(interp) = meta.interp {
+            interp.entry
+        } else {
+            meta.entry
+        },
+        sp,
+    }))
+}
+
+pub static ELF_FMT: BinaryFmt = BinaryFmt {
+    name: "elf",
+    load_binary,
+};

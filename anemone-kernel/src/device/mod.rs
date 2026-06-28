@@ -1,0 +1,190 @@
+//! Device module, containing code for initializing and managing devices.
+
+use core::{any::Any, fmt::Debug};
+
+use crate::{
+    device::{
+        bus::{pcie::PcieDevice, platform::PlatformDevice, virtio::VirtIODevice},
+        discovery::fwnode::FwNode,
+        kobject::{KObjIdent, KObject, KObjectBase},
+    },
+    prelude::*,
+    utils::any_opaque::AnyOpaque,
+};
+
+pub mod discovery;
+
+pub mod bus;
+mod cpu;
+pub use cpu::{CpuArchTrait, CpuId};
+pub mod kobject;
+pub mod resource;
+
+pub mod devnum;
+pub use devnum::{BlockDevNum, CharDevNum, MajorNum, MinorNum};
+
+// subsystems
+pub mod block;
+pub mod char;
+pub mod console;
+
+/// Common data shared by all devices.
+///
+/// **LOCK ORDERING**:
+/// `children` -> `driver`**
+#[derive(Debug)]
+pub struct DeviceBase {
+    /// Firmware node associated with this device.
+    ///
+    /// For most virtual or software-emulated devices, this will be `None`.
+    fwnode: Option<Arc<dyn FwNode>>,
+    children: RwLock<Vec<Arc<dyn Device>>>,
+    driver: RwLock<Option<Arc<dyn Driver>>>,
+    drv_state: MonoOnce<AnyOpaque>,
+}
+
+impl DeviceBase {
+    pub fn new(fwnode: Option<Arc<dyn FwNode>>) -> Self {
+        Self {
+            fwnode,
+            children: RwLock::new(Vec::new()),
+            driver: RwLock::new(None),
+            drv_state: unsafe { MonoOnce::new() },
+        }
+    }
+}
+
+pub trait DeviceData: KObject {
+    fn base(&self) -> &DeviceBase;
+}
+
+pub trait DeviceOps {}
+
+impl<T: DeviceData + DeviceOps> Device for T {}
+
+pub trait Device: DeviceData + DeviceOps {
+    fn driver(&self) -> Option<Arc<dyn Driver>> {
+        DeviceData::base(self).driver.read_irqsave().clone()
+    }
+
+    fn set_driver(&self, driver: Option<Arc<dyn Driver>>) {
+        *DeviceData::base(self).driver.write_irqsave() = driver;
+    }
+
+    fn set_drv_state(&self, state: AnyOpaque) {
+        DeviceData::base(self).drv_state.init(|s| {
+            s.write(state);
+        })
+    }
+
+    fn add_child(&self, child: Arc<dyn Device>) {
+        DeviceData::base(self).children.write_irqsave().push(child);
+    }
+
+    fn fwnode(&self) -> Option<&Arc<dyn FwNode>> {
+        DeviceData::base(self).fwnode.as_ref()
+    }
+}
+
+impl dyn Device {
+    pub fn drv_state(&self) -> &AnyOpaque {
+        DeviceData::base(self).drv_state.get()
+    }
+
+    pub fn for_each_child<F>(&self, mut f: F)
+    where
+        F: FnMut(&Arc<dyn Device>),
+    {
+        for child in DeviceData::base(self).children.read_irqsave().iter() {
+            f(child);
+        }
+    }
+
+    pub fn as_platform_device(&self) -> Option<&PlatformDevice> {
+        (self as &dyn Any).downcast_ref::<PlatformDevice>()
+    }
+
+    pub fn as_virtio_device(&self) -> Option<&VirtIODevice> {
+        (self as &dyn Any).downcast_ref::<VirtIODevice>()
+    }
+
+    pub fn as_pcie_device(&self) -> Option<&PcieDevice> {
+        (self as &dyn Any).downcast_ref::<PcieDevice>()
+    }
+}
+
+impl Debug for dyn Device {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("dyn Device")
+            .field("name", &self.name())
+            .finish()
+    }
+}
+
+/// /sys/devices
+pub static ROOT: Lazy<Arc<PlatformDevice>> = Lazy::new(|| {
+    Arc::new(PlatformDevice::new(
+        KObjectBase::new(KObjIdent::try_from("devices").unwrap()),
+        DeviceBase::new(None),
+    ))
+});
+
+/// Shutdown all devices. Called before powering off or rebooting the system.
+///
+/// Internally, this function will do a depth-first traversal of the device tree
+/// and call the shutdown method of each device's driver. This ensures that
+/// child devices are shut down before their parents, which is important for
+/// proper resource cleanup and to avoid potential issues with dependencies
+/// between devices.
+///
+/// This notifies all drivers to clean up their state.
+/// - For block devices, this will flush all pending writes to the storage
+///   device.
+/// - For network devices, this will close all network connections and release
+///   all buffers.
+/// - For USB devices, this will send USB reset signals to the devices, etc.
+pub unsafe fn shutdown() {
+    fn shutdown_from(parent: &dyn Device) {
+        parent.for_each_child(|child| {
+            shutdown_from(child.as_ref());
+        });
+        if let Some(driver) = parent.driver() {
+            driver.shutdown(parent);
+            knoticeln!("{}: shutdown", parent.name());
+        }
+    }
+    shutdown_from(ROOT.as_ref());
+}
+
+// TODO: implement /sys/bus/
+// currently we have no file system and can't create symlinks.
+// so only /sys/devices/ is available, and all dicovered devices are put under
+// /sys/devices/platform/. in the future when we have a more complete file
+// system, we can create /sys/bus/, /sys/class/, etc. and create symlinks to
+// devices and drivers accordingly.
+
+#[kunit]
+fn ls_devices() {
+    fn ls_devices_inner(device: &dyn Device, prefix: &str) {
+        kprintln!("{}{} : {} device", prefix, device.name(), {
+            if device.as_platform_device().is_some() {
+                "platform"
+            } else if device.as_virtio_device().is_some() {
+                "virtio"
+            } else if device.as_pcie_device().is_some() {
+                "pcie"
+            } else {
+                "other"
+            }
+        });
+        let new_prefix = format!("{}{}/", prefix, device.name());
+        if let Some(pdev) = (device as &dyn Any).downcast_ref::<PlatformDevice>() {
+            kprintln!("\tresources: {:x?}", pdev.resources());
+        }
+        device.for_each_child(|child| {
+            ls_devices_inner(child.as_ref(), &new_prefix);
+        });
+    }
+    kprintln!();
+    ls_devices_inner(ROOT.as_ref(), "");
+}

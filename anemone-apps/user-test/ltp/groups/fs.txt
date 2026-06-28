@@ -1,0 +1,79 @@
+getcwd01
+getcwd02
+getcwd03
+getcwd04
+
+chdir01
+chdir04
+
+fchdir01
+fchdir02
+fchdir03
+
+mkdir02
+mkdir03
+mkdir04
+mkdir05
+mkdir09
+mkdirat01
+mkdirat02
+
+utime01
+utime02
+utime03
+utime04
+utime05
+utime06
+utime07
+
+fstat02
+fstat02_64
+fstat03
+fstat03_64
+fstatat01
+
+fstatfs01
+fstatfs01_64
+fstatfs02
+fstatfs02_64
+
+lstat01
+lstat01_64
+lstat02
+lstat02_64
+
+stat01
+stat01_64
+stat02
+stat02_64
+stat03
+stat03_64
+
+statfs01
+statfs01_64
+statfs02
+statfs02_64
+statfs03
+statfs03_64
+
+# statvfs01
+# statvfs02
+
+# statx01
+statx02
+statx03
+# statx04
+# statx05
+# statx06
+# statx07
+# statx08
+# statx09
+# statx10
+# statx11
+# statx12
+
+getrandom01
+getrandom02
+getrandom03
+getrandom04
+getrandom05

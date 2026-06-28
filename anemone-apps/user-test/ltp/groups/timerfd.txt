@@ -1,0 +1,8 @@
+# timerfd syscall LTP cases for the stage-1 timerfd boundary.
+
+timerfd01
+timerfd02
+timerfd_create01
+timerfd_gettime01
+timerfd_settime01
+# timerfd_settime02

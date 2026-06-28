@@ -1,0 +1,1 @@
+Id allocator crate for Anemone kernel, providing infrastructure for implementing Id allocators with different Id types and allocation strategies. The former is achieved by implementing the `Bijection` trait, while the latter is achieved by implementing the `AllocStrategy` trait. 

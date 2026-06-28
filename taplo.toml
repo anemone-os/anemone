@@ -1,0 +1,6 @@
+[[rule]]
+include = ["conf/platforms/**/*.toml"]
+
+# [rule.schema]
+# path = "conf/platforms/schema.jsonc"
+# enabled = true

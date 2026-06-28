@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="30.2.4">
+  <diagram name="bootstrap-to-kinit">
+    <mxGraphModel dx="1280" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2190" pageHeight="1390" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="entry" value="Firmware / SBI / QEMU entry" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#f5f5f5;strokeColor=#666666;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="30" y="510" width="270" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="nun" value="__nun" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#f8cecc;strokeColor=#b85450;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="270" y="320" width="170" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="boot" value="Bootstrap stack&#xa;page table" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#f8cecc;strokeColor=#b85450;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="90" y="90" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="rusty" value="rusty_nun()" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#ffe6cc;strokeColor=#d79b00;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="530" y="330" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="setup" value="bsp_setup() / ap_setup()" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#ffe6cc;strokeColor=#d79b00;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="760" y="290" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="early" value="Per-CPU / PMM&#xa;Kernel mapping" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#fff2cc;strokeColor=#d6b656;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="870" y="30" width="250" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="task" value="Task::new_kernel*()" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="490" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="runq" value="RunQueue / Scheduler" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="640" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="kinit" value="bsp_kinit()" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1390" y="780" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="initcall" value="Initcall / Device discovery" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="1550" y="930" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="rootfs" value="Rootfs" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="1790" y="1100" width="170" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="exec" value="kernel_execve()" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#e1d5e7;strokeColor=#9673a6;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1940" y="1280" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="entry" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="entry" target="nun">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="290" y="500" /><mxPoint x="290" y="410" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="minimal env" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="boot" target="nun">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="290" y="190" /><mxPoint x="290" y="310" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="nun" target="rusty">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="440" y="370" /><mxPoint x="520" y="370" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="BSP / AP split" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="rusty" target="setup">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="720" y="360" /><mxPoint x="760" y="360" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="build kernel world" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="early" target="setup">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="940" y="130" /><mxPoint x="940" y="280" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="publish kinit" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="setup" target="task">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1000" y="390" /><mxPoint x="1000" y="480" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="handoff" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="task" target="runq">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1180" y="570" /><mxPoint x="1180" y="630" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="normal task" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="runq" target="kinit">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1400" y="720" /><mxPoint x="1400" y="770" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="late init" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="kinit" target="initcall">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1580" y="860" /><mxPoint x="1580" y="920" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="mount" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="initcall" target="rootfs">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1810" y="1010" /><mxPoint x="1810" y="1090" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e10" value="start init" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="rootfs" target="exec">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1950" y="1180" /><mxPoint x="1950" y="1270" /></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

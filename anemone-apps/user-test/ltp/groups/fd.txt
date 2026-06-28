@@ -1,0 +1,25 @@
+# Filesystem, fd, and basic file IO LTP cases.
+# Format: "case", "case: args...", or "case executable[: args...]".
+
+dup01
+dup02
+dup03
+dup04
+dup05
+dup06
+dup07
+dup201
+dup202
+dup203
+dup204
+dup205
+dup206
+dup207
+dup3_01
+dup3_02
+
+
+close01
+close02
+close_range01
+close_range02

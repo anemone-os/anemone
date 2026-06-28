@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="30.2.4">
+  <diagram name="latch-or-wait">
+    <mxGraphModel dx="1280" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1370" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="sys" value="sys_ppoll / sys_pselect6" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="390" y="810" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="snap1" value="Snapshot scan" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#fff2cc;strokeColor=#d6b656;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="310" y="1090" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="latch" value="Latch&#xa;one wait round" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#e1d5e7;strokeColor=#9673a6;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="540" y="530" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="register" value="PollRequest::register" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#ffe6cc;strokeColor=#d79b00;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="310" y="290" width="250" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="src1" value="Fd source A" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="170" y="30" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="src2" value="Fd source B" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="530" y="60" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="src3" value="Fd source C" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="30" y="360" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="trigger" value="LatchTrigger" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#e1d5e7;strokeColor=#9673a6;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="710" y="270" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="final" value="Final scan" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#fff2cc;strokeColor=#d6b656;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="830" y="650" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="outcome" value="Outcome mapping" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1090" y="730" width="250" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="ready?" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="sys" target="snap1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="460" y="900" /><mxPoint x="460" y="1080" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="not ready" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="sys" target="latch">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="600" y="810" /><mxPoint x="600" y="620" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="same trigger" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="latch" target="register">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="550" y="520" /><mxPoint x="550" y="380" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="register" target="src1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="330" y="290" /><mxPoint x="330" y="120" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="register" target="src2">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="540" y="290" /><mxPoint x="540" y="140" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="register" target="src3">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="300" y="360" /><mxPoint x="230" y="360" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="hint" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="src2" target="trigger">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="720" y="140" /><mxPoint x="720" y="260" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="complete" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="trigger" target="latch">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="740" y="350" /><mxPoint x="740" y="520" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="finish" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="latch" target="final">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="710" y="650" /><mxPoint x="710" y="690" /><mxPoint x="710" y="690" /><mxPoint x="710" y="690" /><mxPoint x="820" y="690" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="predicate wins" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;sketch=1;hachureGap=4;strokeWidth=2;endArrow=block;fontFamily=Comic Sans MS;fontSize=12;" edge="1" parent="1" source="final" target="outcome">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="940" y="750" /><mxPoint x="940" y="770" /><mxPoint x="940" y="770" /><mxPoint x="940" y="770" /><mxPoint x="1090" y="770" /></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,163 @@
+use core::fmt::Debug;
+
+use crate::prelude::*;
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct FileSystemFlags: u32 {
+        /// This file system is used for kernel-internal purposes,
+        /// and should not be mountable by user processes.
+        const KERNEL_FS = 1 << 0;
+
+        /// This file system keeps a prebuilt superblock alive even when the
+        /// last mount goes away.
+        ///
+        /// VFS must not evict its resident inode cache or call `kill_sb` on
+        /// last unmount. The filesystem implementation owns that lifetime.
+        const PERSISTENT_SB = 1 << 1;
+
+        /// Indexed resident inodes can be evicted and later rebuilt by
+        /// `load_inode`. Ghost eviction does not require this flag.
+        const SHRINKABLE_ICACHE = 1 << 2;
+    }
+}
+
+/// VTable a file system type must implement to be mountable.
+pub struct FileSystemOps {
+    pub name: &'static str,
+    pub flags: FileSystemFlags,
+    pub mount: fn(MountSource, MountData) -> Result<Arc<SuperBlock>, SysError>,
+
+    /// Synchronize filesystem state associated with the given superblock to its
+    /// backing store.
+    pub sync_fs: fn(&SuperBlock) -> Result<(), SysError>,
+
+    pub kill_sb: fn(Arc<SuperBlock>),
+}
+
+/// File system type.
+pub struct FileSystem {
+    ops: &'static FileSystemOps,
+    sb_list: RwLock<Vec<Weak<SuperBlock>>>,
+}
+
+impl Debug for FileSystem {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FileSystem")
+            .field("name", &self.name())
+            .finish()
+    }
+}
+
+impl FileSystem {
+    pub const fn new(ops: &'static FileSystemOps) -> Self {
+        Self {
+            ops,
+            sb_list: RwLock::new(Vec::new()),
+        }
+    }
+
+    /// Get an existing superblock matching the prediction, or create a new one
+    /// with the set function if not found.
+    ///
+    /// Both the prediction and set functions **must** not try to hold the
+    /// `sb_list` lock, or deadlock may occur.
+    ///
+    /// Intentionally, we do not provide a method called `add_sb` or something
+    /// like that. By forcing the caller to provide a prediction function when
+    /// adding a new superblock, we can ensure that the caller always checks for
+    /// existing superblocks before blindly adding a new one, thus avoiding
+    /// potential duplicates and ensuring better consistency in superblock
+    /// management.
+    pub fn sget<P, S>(&self, prediction: P, set: Option<S>) -> Option<Arc<SuperBlock>>
+    where
+        P: Fn(&Arc<SuperBlock>) -> bool,
+        S: FnOnce() -> Arc<SuperBlock>,
+    {
+        let mut sb_list = self.sb_list.write();
+
+        // first try to find an existing superblock that matches the prediction
+        for weak_sb in sb_list.iter() {
+            if let Some(sb) = weak_sb.upgrade() {
+                if prediction(&sb) {
+                    return Some(sb);
+                }
+            }
+        }
+
+        // oops. no existing superblock matches. if we have a set function, create a new
+        // one and return it.
+        if let Some(set) = set {
+            let sb = set();
+            sb_list.push(Arc::downgrade(&sb));
+            return Some(sb);
+        }
+
+        None
+    }
+
+    /// Remove superblocks matching the prediction from the list.
+    pub fn remove_sb<P>(&self, prediction: P)
+    where
+        P: Fn(&Arc<SuperBlock>) -> bool,
+    {
+        let mut sb_list = self.sb_list.write();
+        sb_list.retain(|weak_sb| {
+            if let Some(sb) = weak_sb.upgrade() {
+                !prediction(&sb)
+            } else {
+                // also remove dead weak references
+                false
+            }
+        });
+    }
+}
+
+// VTable operations reexported here.
+impl FileSystem {
+    /// Name of the file system, e.g. "btrfs", "xfs", "9p", etc.
+    pub fn name(&self) -> &str {
+        self.ops.name
+    }
+
+    /// Flags of the file system.
+    pub fn flags(&self) -> FileSystemFlags {
+        self.ops.flags
+    }
+
+    /// Mount a file system from the given source.
+    ///
+    /// The implementation must return a fully initialized [Arc<SuperBlock>].
+    ///
+    /// **NOTE**
+    ///
+    /// The semantic of this operation depends on the file system type.
+    /// For example, a file system backed with some kinds of physical
+    /// entity (e.g. block device, network, etc.) may try to find a existing
+    /// superblock instance associated with the entity and return it directly
+    /// (with [FileSystem::sget]) instead of creating a new one if found,
+    /// thus ensuring that all mounts of the same entity share the same
+    /// superblock and in-memory inode tree.
+    ///
+    /// On the other hand, a purely in-memory file system (e.g. ramfs) may
+    /// choose to always create a new superblock instance for each mount.
+    ///
+    /// This function itself does not guarantee any particular semantic; it's up
+    /// to the file system implementation to decide how to manage superblocks
+    /// and mounts.
+    pub fn mount(&self, source: MountSource, data: MountData) -> Result<Arc<SuperBlock>, SysError> {
+        (self.ops.mount)(source, data)
+    }
+
+    /// Kill a superblock, i.e. clean up all physical resources associated with
+    /// the superblock and prepare it for destruction.
+    pub fn kill_sb(&self, sb: Arc<SuperBlock>) {
+        (self.ops.kill_sb)(sb);
+    }
+
+    /// Synchronize filesystem state associated with a superblock to its
+    /// backing store.
+    pub fn sync_fs(&self, sb: &SuperBlock) -> Result<(), SysError> {
+        (self.ops.sync_fs)(sb)
+    }
+}

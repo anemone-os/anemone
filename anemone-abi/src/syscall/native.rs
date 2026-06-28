@@ -1,0 +1,5 @@
+use crate::syscall::SYS_ANEMONE_START;
+
+pub const SYS_DBG_PRINT: u64 = SYS_ANEMONE_START + 0;
+
+pub const SYS_POWER_SHUTDOWN: u64 = SYS_ANEMONE_START + 1;

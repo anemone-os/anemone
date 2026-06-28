@@ -1,0 +1,99 @@
+ENTRY(__nun)
+OUTPUT_ARCH(riscv)
+OUTPUT_FORMAT(
+    "elf64-littleriscv",
+    "elf64-littleriscv",
+	"elf64-littleriscv"
+)
+
+KERNEL_LA_BASE = {{KERNEL_LA_BASE}};
+KERNEL_VA_BASE = {{KERNEL_VA_BASE}};
+
+MEMORY {
+    # kernel image is quite small, 100M should be rather enough for now
+    RAM (wxa) : ORIGIN = KERNEL_LA_BASE, LENGTH = 100M
+    VIRT (wxa) : ORIGIN = KERNEL_VA_BASE, LENGTH = 100M
+}
+
+SECTIONS {
+    
+    .text : ALIGN(4K) {
+        __skernel = .;
+        __sbootstrap = .;
+        *(.text.bootstrap)
+        __ebootstrap = .;
+        . = ALIGN(4K);
+        __strampoline = .;
+        *(.text.trampoline)
+        __etrampoline = .;
+        . = ALIGN(4K);
+        __stext = .;
+        *(.text .text.*)
+        __etext = .;
+    } > VIRT AT> RAM
+
+    .rodata : ALIGN(4K) {
+        __srodata = .;
+        *(.rodata .rodata.*)
+        *(.srodata .srodata.*)
+        . = ALIGN(4K);
+        __skunit = .;
+        *(.kunit .kunit.*)
+        __ekunit = .;
+        . = ALIGN(4K);
+        __ssyscall = .;
+        *(.syscall .syscall.*)
+        __esyscall = .;
+        __erodata = .;
+    }  > VIRT AT> RAM
+
+    .data : ALIGN(4K) {
+        __sdata = .;
+        *(.data .data.*)
+        *(.sdata .sdata.*)
+        __spercpu = .;
+        *(.percpu.core_local)
+        *(.percpu)
+        __epercpu = .;
+        
+        __sinitcall_fs = .;
+        *(.initcall.fs .initcall.fs.*)
+        __einitcall_fs = .;
+
+        __sinitcall_driver = .;
+        *(.initcall.driver .initcall.driver.*)
+        __einitcall_driver = .;
+
+        __sinitcall_probe = .;
+        *(.initcall.probe .initcall.probe.*)
+        __einitcall_probe = .;
+
+        __sinitcall_late = .;
+        *(.initcall.late .initcall.late.*)
+        __einitcall_late = .;
+
+        __edata = .;
+    } > VIRT AT> RAM
+
+    .bss : ALIGN(4K) {
+        __sbss = .;
+        *(.bss.stack0 .bss.bootstrap_heap)
+        # other miscellaneous data in .bss section which should not be zero-initialized,
+        # even though they may be actually zero in the beginning.
+        *(.bss.nonzero_init .bss.nonzero_init.*) 
+        __bss_zero_start = .;
+        *(.bss .bss.*)
+        *(.sbss .sbss.*)
+        *(COMMON)
+        __ebss = .;
+    } > VIRT AT> RAM
+
+    __ekernel = .;
+
+    /DISCARD/ : {
+        *(.eh_frame)
+        *(.comment)
+        *(.riscv.attributes)
+        *(.note.GNU-stack)
+    }
+}

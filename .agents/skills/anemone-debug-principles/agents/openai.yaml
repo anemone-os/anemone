@@ -1,0 +1,4 @@
+interface:
+  display_name: "Anemone Debug Principles"
+  short_description: "Debug Anemone failures without premature root-cause grouping."
+  default_prompt: "Use the Anemone debug principles to triage this failure set."

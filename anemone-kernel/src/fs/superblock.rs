@@ -1,0 +1,444 @@
+use core::fmt::Debug;
+
+use crate::{fs::inode::Inode, prelude::*, utils::any_opaque::AnyOpaque};
+
+/// VTable a superblock must implement.
+///
+/// Implemented by concrete filesystem types to provide filesystem-specific
+/// behavior.
+pub(super) struct SuperBlockOps {
+    /// Load an inode from the filesystem by its inode number.
+    ///
+    /// This operation usually involves reading from disk and constructing a
+    /// fresh [Inode] instance. The VFS layer inserts the returned inode into
+    /// the superblock's resident cache, so subsequent accesses for the same
+    /// inode number hit the cache instead of calling this again.
+    pub load_inode: fn(&Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, SysError>,
+
+    /// Called when an inode is being evicted from the resident cache.
+    ///
+    /// Currently we don't have a page cache, so this method is almostly the
+    /// same as `sync_inode`.
+    ///
+    /// This callback runs from an explicit, controlled eviction path — never
+    /// from [Drop]. The cache-map lock is **not** held when this runs, so it
+    /// is safe to perform blocking I/O (e.g. writeback) here.
+    ///
+    /// If an [SysError] is returned, the eviction is cancelled and the inode is
+    /// re-inserted into the cache. The eviction will be retried later.
+    pub evict_inode: fn(Arc<Inode>) -> Result<(), SysError>,
+
+    /// Write back the inode to the backing store. This is used to synchronize
+    /// metadata updates that may have been made to the inode while it was
+    /// resident in the cache.
+    ///
+    /// **Note that this operation only writes back metadata, not file data.**
+    pub sync_inode: fn(&InodeRef) -> Result<(), SysError>,
+}
+
+/// A superblock represents a mounted file system instance.
+pub struct SuperBlock {
+    /// The file system type this superblock belongs to.
+    fs: Arc<FileSystem>,
+    /// Filesystem-specific operations for this superblock.
+    ops: &'static SuperBlockOps,
+    /// Private data for the superblock implementation.
+    prv: AnyOpaque,
+    /// Root inode number of this superblock.
+    root_ino: Ino,
+    /// Mount source of this superblock.
+    backing: MountSource,
+    /// Mutable state of superblock.
+    inner: RwLock<SuperBlockInner>,
+}
+
+impl Debug for SuperBlock {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SuperBlock").field("fs", &self.fs).finish()
+    }
+}
+
+pub struct SuperBlockInner {
+    /// Reverse weak references to [Mount]s. Just for convenience.
+    mounts: Vec<Weak<Mount>>,
+    /// Indexed inodes that are still discoverable by inode number.
+    indexed: HashMap<Ino, Arc<Inode>>,
+    /// Resident but unindexed inodes. These correspond to deleted/unhashed
+    /// objects that are still alive because someone still holds references.
+    ghosts: Vec<Arc<Inode>>,
+}
+
+impl SuperBlock {
+    /// Create a new superblock.
+    pub(super) fn new(
+        fs: Arc<FileSystem>,
+        ops: &'static SuperBlockOps,
+        prv: AnyOpaque,
+        root_ino: Ino,
+        backing: MountSource,
+    ) -> Self {
+        Self {
+            fs,
+            ops,
+            prv,
+            root_ino,
+            backing,
+            inner: RwLock::new(SuperBlockInner {
+                mounts: Vec::new(),
+                indexed: HashMap::new(),
+                ghosts: Vec::new(),
+            }),
+        }
+    }
+
+    /// Which file system type does this superblock belong to.
+    pub fn fs(&self) -> &Arc<FileSystem> {
+        &self.fs
+    }
+
+    /// Get the private data for this superblock, if any.
+    pub(super) fn prv(&self) -> &AnyOpaque {
+        &self.prv
+    }
+
+    /// Get the mount source for this superblock.
+    pub fn backing(&self) -> &MountSource {
+        &self.backing
+    }
+
+    /// Add a new [Mount]. Called when vfs mounts a new instance of this
+    /// superblock.
+    pub fn add_mount(&self, mount: &Arc<Mount>) {
+        let mut inner = self.inner.write();
+        let weak = Arc::downgrade(mount);
+        inner.mounts.push(weak);
+    }
+
+    /// Find a [Mount] that matches the given predicate.
+    ///
+    /// This is a first-fit search. But if your code are working correctly,
+    /// there should be at most one mount for a superblock.
+    pub fn find_mount<P>(&self, pred: P) -> Option<Arc<Mount>>
+    where
+        P: Fn(&Arc<Mount>) -> bool,
+    {
+        let mut inner = self.inner.write();
+        // clean up dead weak refs while we're at it.
+        inner.mounts.retain(|weak| weak.upgrade().is_some());
+
+        inner
+            .mounts
+            .iter()
+            .filter_map(|weak| weak.upgrade())
+            .find(pred)
+    }
+
+    /// Iterate over all mounts of this superblock.
+    pub fn for_each_mount<F>(&self, mut f: F)
+    where
+        F: FnMut(&Arc<Mount>),
+    {
+        let mut inner = self.inner.write();
+        // clean up dead weak refs while we're at it.
+        inner.mounts.retain(|weak| weak.upgrade().is_some());
+
+        for weak in &inner.mounts {
+            if let Some(mount) = weak.upgrade() {
+                f(&mount);
+            }
+        }
+    }
+
+    /// Get the root inode of this superblock.
+    pub fn root_inode(self: &Arc<Self>) -> InodeRef {
+        self.iget(self.root_ino)
+            .expect("failed to load root inode for superblock")
+    }
+}
+
+impl SuperBlock {
+    fn inode_is_busy(inode: &Arc<Inode>) -> bool {
+        inode.rc() > 0
+            || inode
+                .mapping()
+                .is_some_and(|mapping| Arc::strong_count(mapping) > 1)
+    }
+
+    /// Get or load an inode by inode number. This is the canonical way to
+    /// obtain inodes from a superblock.
+    ///
+    /// # Uniqueness invariant
+    ///
+    /// For a given superblock, two calls to `iget` with the same `ino` while
+    /// the inode is resident in the cache will return `Arc::ptr_eq` results.
+    ///
+    /// # Lock discipline
+    ///
+    /// This function **must not** be called while holding the superblock inner
+    /// lock or any lock that the backend's `load_inode` may itself acquire.
+    /// Doing so risks deadlock or re-entrant cache corruption.
+    pub(super) fn iget(self: &Arc<Self>, ino: Ino) -> Result<InodeRef, SysError> {
+        // fast path
+        {
+            let inner = self.inner.read();
+            if let Some(inode) = inner.indexed.get(&ino) {
+                return Ok(InodeRef::new(inode.clone()));
+            }
+        }
+
+        // slow path
+        let inode = (self.ops.load_inode)(self, ino)?;
+        debug_assert!(
+            !inode.indexed(),
+            "load_inode returned an already-indexed inode"
+        );
+
+        // re-check and insert. another thread may have loaded concurrently;
+        // if so, keep theirs and discard ours.
+        {
+            let mut inner = self.inner.write();
+            if let Some(existing) = inner.indexed.get(&ino) {
+                return Ok(InodeRef::new(existing.clone()));
+            }
+            inode.set_indexed(true);
+            inner.indexed.insert(ino, inode.clone());
+        }
+
+        Ok(InodeRef::new(inode))
+    }
+
+    /// Insert a pre-constructed inode directly into the resident cache.
+    ///
+    /// This is intended for filesystem `create` paths that build the inode
+    /// in-place rather than loading it from a backing store.
+    ///
+    /// After this operation, the active reference count of the inode will be 1,
+    /// for the returned [InodeRef].
+    ///
+    /// # Panics
+    ///
+    /// - A live entry for the same [Ino] already exists, as this would violate
+    ///   the cache uniqueness invariant.
+    /// - The reference count of the provided inode is not zero.
+    pub(super) fn seed_inode(&self, inode: Arc<Inode>) -> InodeRef {
+        debug_assert!(
+            !inode.indexed(),
+            "seed_inode: provided inode is already indexed"
+        );
+
+        let mut inner = self.inner.write();
+        let ino = inode.ino();
+
+        #[cfg(debug_assertions)]
+        {
+            if inode.rc() != 0 {
+                panic!(
+                    "seed_inode: provided inode has non-zero ref count {:?}",
+                    inode.rc()
+                );
+            }
+
+            if inner.indexed.contains_key(&ino) {
+                panic!(
+                    "seed_inode: cache already has a live entry for ino {:?}",
+                    ino
+                );
+            }
+        }
+
+        inode.set_indexed(true);
+        inner.indexed.insert(ino, inode.clone());
+
+        InodeRef::new(inode)
+    }
+
+    /// Look up a cached inode by [Ino] without triggering a load.
+    ///
+    /// Returns [None] if the inode is not resident in the cache.
+    /// Use [SuperBlock::iget] for the load-on-miss variant.
+    pub(super) fn try_iget(&self, ino: Ino) -> Option<InodeRef> {
+        self.inner
+            .read()
+            .indexed
+            .get(&ino)
+            .cloned()
+            .map(InodeRef::new)
+    }
+
+    /// Remove an inode from the inode-number index by its [Ino], while keeping
+    /// the object resident.
+    ///
+    /// Panics if the inode is not resident in the cache.
+    pub(super) fn unindex_inode_by_ino(&self, ino: Ino) {
+        let mut inner = self.inner.write();
+
+        let inode = inner
+            .indexed
+            .remove(&ino)
+            .expect("unindex_inode_by_ino: inode not found");
+        debug_assert!(inode.indexed());
+        inode.set_indexed(false);
+
+        debug_assert!(
+            inner.ghosts.iter().all(|ghost| !Arc::ptr_eq(ghost, &inode)),
+            "unindex_inode_by_ino: inode already in ghosts"
+        );
+        inner.ghosts.push(inode);
+    }
+
+    /// Remove an inode from the inode-number index while keeping the object
+    /// resident.
+    pub(super) fn unindex_inode(&self, inode: &Arc<Inode>) {
+        let mut inner = self.inner.write();
+        let ino = inode.ino();
+
+        if let Some(indexed) = inner.indexed.get(&ino) {
+            if Arc::ptr_eq(indexed, inode) {
+                inner.indexed.remove(&ino);
+            }
+        } else {
+            knoticeln!(
+                "suspicious case: this might be that multiple threads both observe the same inode with 0 nlink, and both try to unindex it concurrently."
+            );
+            return;
+        }
+
+        debug_assert!(inode.indexed());
+        inode.set_indexed(false);
+
+        debug_assert!(
+            inner.ghosts.iter().all(|ghost| !Arc::ptr_eq(ghost, inode)),
+            "unindex_inode: inode already in ghosts"
+        );
+        inner.ghosts.push(inode.clone());
+    }
+
+    /// Snapshot shrink candidates. Callers must recheck under eviction lock.
+    pub(super) fn cached_inode_snapshot(&self, include_indexed: bool) -> Vec<Arc<Inode>> {
+        let inner = self.inner.read();
+        let mut snapshot = Vec::new();
+
+        for inode in &inner.ghosts {
+            snapshot.push(inode.clone());
+        }
+
+        if include_indexed {
+            for inode in inner.indexed.values() {
+                snapshot.push(inode.clone());
+            }
+        }
+
+        snapshot
+    }
+
+    /// Try to evict a specific inode.
+    pub(super) fn try_evict_inode(&self, inode: &Arc<Inode>) -> Result<(), SysError> {
+        if Self::inode_is_busy(inode) {
+            return Err(SysError::Busy);
+        }
+
+        // Sync before cache removal. If a later opener misses this inode and
+        // reloads it from backing storage, it must not see stale dirty state.
+        {
+            let inode_ref = InodeRef::new(inode.clone());
+            (self.ops.sync_inode)(&inode_ref)?;
+        }
+
+        let ino = inode.ino();
+        let removed = {
+            let mut inner = self.inner.write();
+
+            // An inode can be reopened after a shrinker snapshot. Recheck under
+            // the cache write lock before removing it from indexed/ghosts.
+            if Self::inode_is_busy(inode) {
+                return Err(SysError::Busy);
+            }
+
+            if let Some(indexed) = inner.indexed.get(&ino) {
+                if Arc::ptr_eq(indexed, inode) {
+                    let removed = inner
+                        .indexed
+                        .remove(&ino)
+                        .expect("indexed inode disappeared");
+                    removed.set_indexed(false);
+                    Some((removed, true))
+                } else {
+                    None
+                }
+            } else if let Some(pos) = inner
+                .ghosts
+                .iter()
+                .position(|ghost| Arc::ptr_eq(ghost, inode))
+            {
+                Some((inner.ghosts.remove(pos), false))
+            } else {
+                None
+            }
+        };
+
+        // multiple threads can race to evict the same inode, but only ont can reach
+        // here, since in above `removed` block we hold the inner lock.
+
+        let (inode, was_indexed) = removed.ok_or(SysError::NotFound)?;
+        if let Err(e) = (self.ops.evict_inode)(inode.clone()) {
+            let mut inner = self.inner.write();
+            if was_indexed {
+                inode.set_indexed(true);
+                let old = inner.indexed.insert(ino, inode);
+                debug_assert!(
+                    old.is_none(),
+                    "try_evict_inode: cache already has a live entry for ino {:?}",
+                    ino
+                );
+            } else {
+                debug_assert!(
+                    inner.ghosts.iter().all(|ghost| !Arc::ptr_eq(ghost, &inode)),
+                    "try_evict_inode: inode already in ghosts"
+                );
+                inner.ghosts.push(inode);
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Check if any inodes in the resident cache have active references, except
+    /// for the root inode(s) owned by the mount's root dentry.
+    pub(super) fn has_alive_inode(&self) -> bool {
+        let inner = self.inner.read();
+        inner
+            .indexed
+            .values()
+            .chain(inner.ghosts.iter())
+            .any(|inode| inode.rc() > 0 && inode.ino() != self.root_ino)
+    }
+
+    /// Evict **all** inodes from the resident cache.
+    ///
+    /// This operation may fail on the first inode that cannot be evicted. In
+    /// this case, some inodes may have already been evicted while others
+    /// remain. Callers should be prepared to handle this partial eviction
+    /// state.
+    ///
+    /// **This operation will not evict the root inode, since it's pinned by the
+    /// mount's root dentry, so it's always referenced and cannot be evicted.**
+    pub(super) fn try_evict_all(&self) -> Result<(), SysError> {
+        debug_assert!(!self.has_alive_inode());
+
+        let victims: Vec<Arc<Inode>> = {
+            let inner = self.inner.read();
+            inner
+                .indexed
+                .values()
+                .chain(inner.ghosts.iter())
+                .filter(|inode| inode.ino() != self.root_ino)
+                .cloned()
+                .collect()
+        };
+        for inode in victims {
+            self.try_evict_inode(&inode)?;
+        }
+
+        Ok(())
+    }
+}

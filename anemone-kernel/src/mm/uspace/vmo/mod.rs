@@ -1,0 +1,186 @@
+//! Virtual memory object.
+//!
+//! TODO: currently we use shadow object, which comes from Mach microkernel. But
+//! actually Zircon adopts a more flexible approach - hidden object, as an
+//! advanced version of shadow object. We may want to switch to that in the
+//! future, but for now shadow object is good enough for our use cases.
+//!
+//! See [fs::addr_space] for inode page cache, which is a special kind of VMO.
+//!
+//! Reference:
+//! - https://fuchsia.dev/fuchsia-src/reference/kernel_objects/vm_object
+
+pub mod anon;
+pub mod empty;
+pub mod fixed;
+pub mod shadow;
+
+use core::fmt::Debug;
+
+use crate::{prelude::*, utils::data::DataSource};
+
+pub fn shared_zero_frame() -> ResolvedFrame {
+    static ZERO_FRAME: Lazy<FrameHandle> = Lazy::new(|| unsafe {
+        alloc_frame_zeroed()
+            .expect("failed to allocate zero frame")
+            .into_frame_handle()
+    });
+
+    ResolvedFrame {
+        frame: ZERO_FRAME.clone(),
+        writable: false,
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedFrame {
+    pub frame: FrameHandle,
+    /// Whether this frame can be mapped writable if the VMA allows write.
+    pub writable: bool,
+}
+
+/// Interior mutability should be used to implement some methods.
+///
+/// TODO: explain why such interior mutability is enforced by this trait, and
+/// why we don't just make those methods take `&mut self`.
+pub trait VmObject: Send + Sync {
+    /// Resolve the frame at `pidx` for the given access type.
+    ///
+    /// `VmObject` are allowed to create a local copy of the frame in this
+    /// method, which will be used for the current and future accesses to this
+    /// page. This is how copy-on-write is implemented in
+    /// [shadow::ShadowObject].
+    fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError>;
+
+    fn sync_range(&self, _range: core::ops::Range<usize>) -> Result<(), SysError> {
+        Ok(())
+    }
+
+    fn discard_range(&self, _range: core::ops::Range<usize>) -> Result<(), SysError> {
+        // `madvise(DONTNEED)` is a hint. Backings that do not support a
+        // dedicated discard path can safely ignore it and let the caller drop
+        // the current PTEs.
+        Ok(())
+    }
+
+    fn exclusive_physical_pages(&self, _range: core::ops::Range<usize>) -> usize {
+        0
+    }
+
+    fn read_frame(
+        &self,
+        pidx: usize,
+        buffer: &mut [u8; PagingArch::PAGE_SIZE_BYTES],
+    ) -> Result<(), SysError> {
+        let ResolvedFrame { frame, .. } = self.resolve_frame(pidx, PageFaultType::Read)?;
+        buffer.copy_from_slice(frame.as_bytes());
+
+        Ok(())
+    }
+
+    fn write_frame(
+        &self,
+        pidx: usize,
+        data: &[u8; PagingArch::PAGE_SIZE_BYTES],
+    ) -> Result<(), SysError> {
+        let resolved = self.resolve_frame(pidx, PageFaultType::Write)?;
+        if !resolved.writable {
+            return Err(SysError::PermissionDenied);
+        }
+
+        let dst = unsafe {
+            core::slice::from_raw_parts_mut(
+                resolved.frame.ppn().to_phys_addr().to_hhdm().as_ptr_mut(),
+                PagingArch::PAGE_SIZE_BYTES,
+            )
+        };
+        dst.copy_from_slice(data);
+
+        Ok(())
+    }
+
+    fn read(&self, offset: usize, buffer: &mut [u8]) -> Result<(), SysError> {
+        let mut remaining = buffer;
+        let mut cur_offset = offset;
+        while !remaining.is_empty() {
+            let pidx = cur_offset >> PagingArch::PAGE_SIZE_BITS;
+            let page_offset = cur_offset & (PagingArch::PAGE_SIZE_BYTES - 1);
+            let copy_len = remaining
+                .len()
+                .min(PagingArch::PAGE_SIZE_BYTES - page_offset);
+
+            let mut page = [0u8; PagingArch::PAGE_SIZE_BYTES];
+            self.read_frame(pidx, &mut page)?;
+            remaining[..copy_len].copy_from_slice(&page[page_offset..page_offset + copy_len]);
+
+            remaining = &mut remaining[copy_len..];
+            cur_offset = cur_offset
+                .checked_add(copy_len)
+                .ok_or(SysError::InvalidArgument)?;
+        }
+
+        Ok(())
+    }
+
+    fn write(&self, offset: usize, data: &[u8]) -> Result<(), SysError> {
+        let mut remaining = data;
+        let mut cur_offset = offset;
+
+        while !remaining.is_empty() {
+            let pidx = cur_offset >> PagingArch::PAGE_SIZE_BITS;
+            let page_offset = cur_offset & (PagingArch::PAGE_SIZE_BYTES - 1);
+            let copy_len = remaining
+                .len()
+                .min(PagingArch::PAGE_SIZE_BYTES - page_offset);
+
+            let mut page = [0u8; PagingArch::PAGE_SIZE_BYTES];
+            if page_offset != 0 || copy_len != PagingArch::PAGE_SIZE_BYTES {
+                self.read_frame(pidx, &mut page)?;
+            }
+            page[page_offset..page_offset + copy_len].copy_from_slice(&remaining[..copy_len]);
+            self.write_frame(pidx, &page)?;
+
+            remaining = &remaining[copy_len..];
+            cur_offset = cur_offset
+                .checked_add(copy_len)
+                .ok_or(SysError::InvalidArgument)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl dyn VmObject {
+    /// Copy data from the given [DataSource] to this [VmObject] at the given
+    /// offset.
+    pub fn write_from_data_source<S: DataSource<TError = impl Into<SysError>>>(
+        &self,
+        offset: usize,
+        source: &S,
+        len: usize,
+    ) -> Result<(), SysError> {
+        const BUF_SIZE: usize = PagingArch::PAGE_SIZE_BYTES;
+
+        let mut buffer = vec![0u8; BUF_SIZE];
+        let mut remaining = len;
+        let mut cur_vmo_offset = offset;
+        let mut cur_src_offset = 0;
+        while remaining > 0 {
+            let copy_len = remaining.min(BUF_SIZE);
+            source
+                .copy_to(cur_src_offset, &mut buffer[..copy_len])
+                .map_err(Into::into)?;
+            self.write(cur_vmo_offset, &buffer[..copy_len])?;
+            remaining -= copy_len;
+            cur_vmo_offset += copy_len;
+            cur_src_offset += copy_len;
+        }
+        Ok(())
+    }
+}
+
+impl Debug for dyn VmObject {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "VmObject {{ ... }}")
+    }
+}

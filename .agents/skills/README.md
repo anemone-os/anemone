@@ -1,0 +1,1 @@
+The `skill-creator` folder is borrowed from [Claude's repo](https://github.com/anthropics/skills) and contains the code for creating new skills. You can use this code as a starting point to create your own skills.

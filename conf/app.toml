@@ -1,0 +1,30 @@
+#! Template for anemone-apps/<app>/app.toml.
+#!
+#! This file is the contract between an app and Anemone's build orchestration.
+#! xtask should read this manifest, enter the declared working directory, run
+#! the declared command, and collect the declared artifacts. It should not need
+#! to understand whether the app is built by Cargo, Make, Meson, Bazel, or any
+#! other build system.
+
+# Stable logical app name used by rootfs manifests.
+# This name must match the folder name of the app, e.g., anemone-apps/<app>.
+name = "example"
+
+[build]
+# Working directory relative to this app.toml.
+workdir = "."
+# Build driver used by xtask. The driver owns how architecture-specific
+# context is translated into the underlying build system invocation.
+# Currently supported drivers:
+# - cargo
+driver = "cargo"
+# Arguments passed to driver. User-provided extra args will be appended after these default args.
+args = ["build"]
+
+# List of artifacts produced by this app. Each artifact should have a unique name.
+[[artifacts]]
+# Path to the built artifact relative to workdir.
+# Xtask will expand following variables in the path:
+# - {{ARCH}}: replaced by the architecture of the target platform, e.g., "riscv64".
+# - {{TARGET_TRIPLE}}: replaced by the Rust target triple for the target platform, e.g., "riscv64gc-unknown-anemone-elf".
+path = "target/${TARGET_TRIPLE}/debug/example"
