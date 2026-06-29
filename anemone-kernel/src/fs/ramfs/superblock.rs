@@ -1,7 +1,12 @@
 use crate::{
-    fs::{inode::Inode, superblock::SuperBlockOps},
+    fs::{
+        inode::Inode,
+        superblock::{FsMagic, FsStat, SuperBlockOps},
+    },
     prelude::*,
 };
+
+use anemone_abi::fs::linux::stat::RAMFS_MAGIC;
 
 #[derive(Opaque)]
 pub(super) struct RamfsSb {
@@ -50,8 +55,13 @@ fn ramfs_sync_inode(_inode: &InodeRef) -> Result<(), SysError> {
     Ok(())
 }
 
+fn ramfs_stat(_sb: &SuperBlock) -> Result<FsStat, SysError> {
+    Ok(FsStat::pseudo(FsMagic::new(RAMFS_MAGIC)))
+}
+
 pub(super) static RAMFS_SB_OPS: SuperBlockOps = SuperBlockOps {
     load_inode: ramfs_load_inode,
     evict_inode: ramfs_evict_inode,
     sync_inode: ramfs_sync_inode,
+    stat: ramfs_stat,
 };

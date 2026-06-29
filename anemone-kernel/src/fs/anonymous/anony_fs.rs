@@ -2,12 +2,17 @@
 
 use crate::{
     fs::{
-        anonymous::ANONY_FS, filesystem::FileSystemFlags, inode::Inode, superblock::SuperBlockOps,
+        anonymous::ANONY_FS,
+        filesystem::FileSystemFlags,
+        inode::Inode,
+        superblock::{FsMagic, FsStat, SuperBlockOps},
         vfs::mount_early_anonymous_root,
     },
     prelude::*,
     utils::any_opaque::NilOpaque,
 };
+
+use anemone_abi::fs::linux::stat::ANON_INODE_FS_MAGIC;
 
 static ANONY_FS_OPS: FileSystemOps = FileSystemOps {
     name: "anonymous",
@@ -65,6 +70,7 @@ static ANONY_SB_OPS: SuperBlockOps = SuperBlockOps {
     load_inode: |_, _| unreachable!(),
     evict_inode: |_| unreachable!(),
     sync_inode: |_| Ok(()),
+    stat: |_| Ok(FsStat::pseudo(FsMagic::new(ANON_INODE_FS_MAGIC))),
 };
 
 fn anony_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {

@@ -1,6 +1,6 @@
 use anemone_rs::{
     abi::fs::linux::open::{O_RDONLY, O_TRUNC, O_WRONLY},
-    os::linux::fs::{AtFd, close, fstatat, openat, read},
+    os::linux::fs::{close, fstatat, openat, read, AtFd},
     prelude::*,
 };
 
@@ -21,7 +21,7 @@ const MUSL_TEST_SCRIPTS: &[&str] = &[
     // "basic_testcode.sh",
     // "lua_testcode.sh",
     // "busybox_testcode.sh",
-    // "libctest_testcode.sh",
+    "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
     // "iozone_testcode.sh",
     // "iperf_testcode.sh",
