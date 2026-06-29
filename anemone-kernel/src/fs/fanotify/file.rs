@@ -1,12 +1,12 @@
 use anemone_abi::fs::linux::{fanotify as abi, ioctl::FIONREAD};
 
 use crate::{
-    fs::FileMode,
+    fs::{FileMode, UserBufferSink},
     prelude::*,
-    syscall::user_access::{UserWritePtr, UserWriteSlice},
+    syscall::user_access::UserWritePtr,
     task::files::{
         Fd, FdReservation, FileDesc, FileDescOps, FileStatusFlags, LinuxOpenCompat,
-        OpenedFileFinalReleaseCtx, OpenedFileReadUserCtx, OpenedFileReadUserSegment,
+        OpenedFileFinalReleaseCtx, OpenedFileReadUserCtx,
     },
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
@@ -60,24 +60,20 @@ pub(super) fn open_group_file(group: Arc<FanGroup>) -> Result<File, SysError> {
 
 pub(super) fn description_ops() -> FileDescOps {
     FileDescOps {
-        read_user: Some(fanotify_read_user),
+        read_user_transaction: Some(fanotify_read_user_transaction),
         notify_read_user_access: false,
         final_release: Some(fanotify_final_release),
         notification_suppressed: false,
     }
 }
 
-fn fanotify_read_user(ctx: OpenedFileReadUserCtx<'_>) -> Result<usize, SysError> {
+fn fanotify_read_user_transaction(ctx: OpenedFileReadUserCtx<'_, '_>) -> Result<usize, SysError> {
     assert!(
         !ctx.notification_suppressed,
         "fanotify group fd read must not be notification-suppressed"
     );
 
-    let total_len = ctx.segments.iter().try_fold(0usize, |acc, segment| {
-        acc.checked_add(segment.len)
-            .ok_or(SysError::InvalidArgument)
-    })?;
-    if total_len < abi::FAN_EVENT_METADATA_LEN as usize {
+    if ctx.dst.remaining() < abi::FAN_EVENT_METADATA_LEN as usize {
         return Err(SysError::InvalidArgument);
     }
 
@@ -98,7 +94,7 @@ fn fanotify_read_user(ctx: OpenedFileReadUserCtx<'_>) -> Result<usize, SysError>
     // removing it from the queue and releasing the group lock. From here on,
     // user copy, path open and fd-table work run lock-free with respect to the
     // group; notification events are consumed even if later copyout fails.
-    submit_event_record(&ctx, group, event)
+    submit_event_record(ctx, group, event)
 }
 
 /// A path-event fd that has a stable fd number but is not visible to userspace.
@@ -128,7 +124,7 @@ impl PendingEventFd {
 }
 
 fn submit_event_record(
-    ctx: &OpenedFileReadUserCtx<'_>,
+    ctx: OpenedFileReadUserCtx<'_, '_>,
     group: &FanGroup,
     event: FanEvent,
 ) -> Result<usize, SysError> {
@@ -149,7 +145,7 @@ fn submit_event_record(
         .unwrap_or(abi::FAN_NOFD);
     let metadata = event.to_metadata_with_fd(metadata_fd);
 
-    let copied = write_metadata_to_segments(ctx.uspace, ctx.segments, &metadata)?;
+    let copied = write_metadata_record(ctx.dst, &metadata)?;
 
     if let Some(pending_fd) = pending_fd {
         pending_fd.commit();
@@ -250,9 +246,8 @@ fn open_event_target(target: &PathRef, template: FanEventFdTemplate) -> Result<F
     Ok(file)
 }
 
-fn write_metadata_to_segments(
-    uspace: &UserSpaceHandle,
-    segments: &[OpenedFileReadUserSegment],
+fn write_metadata_record(
+    dst: &mut UserBufferSink<'_>,
     metadata: &abi::FanotifyEventMetadata,
 ) -> Result<usize, SysError> {
     let metadata_bytes = unsafe {
@@ -262,58 +257,14 @@ fn write_metadata_to_segments(
         )
     };
 
-    let mut copied = 0usize;
-    let mut guard = uspace.lock();
-    // Validate the complete metadata record before writing any byte. With the
-    // userspace lock held, later copy cannot observe a different mapping, so a
-    // bad second iovec rolls back the reserved event fd without leaving a
-    // partially visible fanotify record.
-    for segment in segments {
-        if segment.len == 0 {
-            continue;
-        }
-        let remaining = metadata_bytes.len() - copied;
-        let validate_len = remaining.min(segment.len);
-        if validate_len == 0 {
-            break;
-        }
-
-        let _ = UserWriteSlice::<u8>::try_new(segment.base, validate_len, &mut guard)?;
-        copied += validate_len;
-        if copied == metadata_bytes.len() {
-            break;
-        }
-    }
-
+    // Fanotify metadata is a transaction record: failure on a later iovec must
+    // roll back the reserved fd without exposing a half record to userspace.
+    dst.exact_record().write_exact(metadata_bytes)?;
     assert!(
-        copied == metadata_bytes.len(),
-        "fanotify metadata copy called without enough user segments"
+        metadata_bytes.len() == abi::FAN_EVENT_METADATA_LEN as usize,
+        "fanotify metadata ABI length drifted"
     );
-
-    copied = 0;
-    for segment in segments {
-        if segment.len == 0 {
-            continue;
-        }
-        let remaining = &metadata_bytes[copied..];
-        let copy_len = remaining.len().min(segment.len);
-        if copy_len == 0 {
-            break;
-        }
-
-        let mut dst = UserWriteSlice::<u8>::try_new(segment.base, copy_len, &mut guard)?;
-        dst.copy_from_slice(&remaining[..copy_len]);
-        copied += copy_len;
-        if copied == metadata_bytes.len() {
-            break;
-        }
-    }
-
-    assert!(
-        copied == metadata_bytes.len(),
-        "fanotify metadata copy called without enough user segments"
-    );
-    Ok(copied)
+    Ok(metadata_bytes.len())
 }
 
 fn fanotify_final_release(ctx: OpenedFileFinalReleaseCtx<'_>) {
@@ -339,9 +290,9 @@ fn fanotify_legacy_read(
     _ctx: FileIoCtx,
 ) -> Result<usize, SysError> {
     // Fanotify read must observe current opened-description status flags.
-    // Generic read/readv use `FileDescOps::read_user`; this
-    // vtable fallback deliberately fails closed so old kernel-buffer reads do
-    // not introduce a private nonblock mirror.
+    // Generic read/readv use `FileDescOps::read_user_transaction`; this vtable
+    // fallback deliberately fails closed so old kernel-buffer reads do not
+    // introduce a private nonblock mirror.
     Err(SysError::NotSupported)
 }
 

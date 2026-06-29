@@ -117,3 +117,54 @@ rg -n "read_user|OpenedFileReadUser|UserSpaceHandle|UserReadSlice|UserWriteSlice
 - 阶段 0 不运行 QEMU / LTP。
 
 **结论：** 阶段 0 已关闭。未发现需要回到 RFC review 的额外 shared-contract 问题；后续可启动阶段 1A，但不得越过阶段 1A write set。
+
+### 2026-06-29 - 阶段 1A user-buffer skeleton 与 fanotify adapter
+
+**阶段：** 阶段 1A - `fs/uio.rs` user-buffer skeleton 与 fanotify adapter。
+
+**变更：**
+
+- 新增 `anemone-kernel/src/fs/uio.rs`，提供 VFS-owned `UserBufferSegment`、`UserBufferSink`、`UserBufferSource`、mark / delta、ordinary sink/source copy helper、`keep_prefix_from()`，以及 fanotify metadata record 使用的 exact `UserRecordSink` helper。
+- `anemone-kernel/src/task/files.rs` 将 opened-description hook 从 `FileDescOps::read_user` 重命名为 `read_user_transaction`，并把 transaction ctx 从 `UserSpaceHandle + OpenedFileReadUserSegment[]` 改为 `&mut UserBufferSink`。
+- `anemone-kernel/src/fs/api/read_write/mod.rs` 在 sequential non-positioned `read` / `readv` transaction dispatch 前构造 `UserBufferSink`；hook 不存在时仍走原 kernel-buffer fallback。positioned read、普通 write/writev/pwrite/pwritev 路径未引入 direct-user dispatch。
+- `anemone-kernel/src/fs/fanotify/file.rs` 改用 `UserBufferSink::exact_record().write_exact()` 写 fanotify metadata，保留 event pop / wait、path-event fd reservation、copyout 成功后 commit、copyout 失败 rollback，以及 `notify_read_user_access: false`。
+- `anemone-kernel/src/fs/mod.rs` 只 re-export 阶段 1A 必需的 `UserBufferSegment` / `UserBufferSink`。
+
+**边界：**
+
+- 未添加 `FileOps::{read_user_at,write_user_at}` skeleton。
+- 未触碰 ramfs/ext4 direct hook。
+- 未接入 write direct-user path。
+- 未修改 RFC canonical contract 或 register/current-limitations。
+
+**Source audit：**
+
+执行：
+
+```sh
+rg -n "UserSpaceHandle|OpenedFileReadUserSegment|read_user_transaction|UserBufferSink|UserBufferSource|UserRecordSink|UserWriteSlice" anemone-kernel/src/fs anemone-kernel/src/task anemone-kernel/src/syscall
+```
+
+分类：
+
+- `OpenedFileReadUserSegment` 无命中，raw segment transaction ctx 已删除。
+- `read_user_transaction` 命中只在 `task/files.rs` hook 定义 / dispatch、`fs/api/read_write/mod.rs` sequential read/readv transaction dispatch、`fs/fanotify/file.rs` group fd transaction，以及 fanotify fail-closed legacy comment 中；该 hook 仍是 opened-description transaction，不是 ordinary `FileOps` fast path。
+- `UserBufferSink` 命中在 `fs/uio.rs` owner、`fs/mod.rs` crate-visible re-export、`task/files.rs` transaction ctx、`fs/api/read_write/mod.rs` construction、`fs/fanotify/file.rs` exact metadata copyout；没有 backend 保存 cursor。
+- `UserBufferSource` / `UserRecordSink` 只在 `fs/uio.rs` skeleton 内命中；source 未接入 write path，record helper只供 exact fanotify copyout。
+- `UserWriteSlice` 在 fanotify 中已无命中；剩余命中是 `syscall/user_access.rs` 定义、`fs/uio.rs` 集中 helper、`fs/api/read_write/mod.rs` 旧 kernel-buffer fallback、以及 getrandom/getcwd/getdents/readlink/pipe2 等非本阶段 syscall copyout。
+- `UserSpaceHandle` 命中仍包括 task/mm/futex 既有身份或 uspace handle 管理、`fs/api/read_write` syscall helper 持有当前 uspace、`fs/file.rs` ioctl ctx、以及 `fs/uio.rs` cursor owner；fanotify transaction 不再直接持有或裸 lock `UserSpaceHandle`。
+
+**Validation:**
+
+- `just fmt kernel`：通过。
+- `just build`：通过；构建过程仍有 build wrapper 的 cargo cache warning，无 Rust warning。
+- 阶段 1A 未运行 QEMU / LTP。
+
+**结论：** 阶段 1A implementation worker 的代码实现、格式化、构建和 source audit 已通过。未触发阶段 1A stop condition；后续仍需由总控决定是否进入阶段 1B。
+
+**Validation note:** `just fmt kernel` 运行通过，但全局 formatter 还尝试重排 `anemone-kernel/src/task/topology/parent_child.rs` 中一处阶段 1A write set 外的注释换行；该无关格式化变更已撤回，最终 write set 保持在阶段 1A 允许范围内。reviewer 补充 `fs/uio.rs` 注释后，总控修正了本阶段文件中的 formatter 换行；随后 `just fmt kernel --check` 仍因 generated `kconfig_defs.rs` / `platform_defs.rs` 和上述 write set 外旧注释返回非零，但不再报告阶段 1A 文件。最终 `just build`、`git diff --check`、`git diff --no-index --check -- /dev/null anemone-kernel/src/fs/uio.rs` 和上述 source audit 均通过。
+
+**Review gate：**
+
+- 阶段 1A reviewer 未发现 Apollyon / Keter / Euclid / Safe finding；确认 write set 只覆盖阶段 1A 允许文件和本事务日志，且未引入 `FileOps` direct-user hook、ramfs/ext4 hook、write direct-user path 或 RFC canonical contract 变更。
+- reviewer 额外在 `fs/uio.rs` 补充 comment-only 注释，记录 cursor 是短生命周期线性 userspace capability、ordinary copy 使用 partial-progress 语义、exact record helper 只服务 fanotify 这类事务 metadata、mark/delta 是 read progress 的唯一派生依据，以及 `UserBufferSource::keep_prefix_from()` 用 file-visible commit 丢弃 speculative user-copy suffix。

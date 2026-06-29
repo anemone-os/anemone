@@ -5,12 +5,15 @@ use alloc::vec::Vec;
 use anemone_abi::fs::linux::IoVec;
 
 use crate::{
-    fs::fanotify::{FanMask, notify_opened_file_event},
+    fs::{
+        UserBufferSegment, UserBufferSink,
+        fanotify::{FanMask, notify_opened_file_event},
+    },
     prelude::{
         user_access::{UserReadSlice, UserWriteSlice},
         *,
     },
-    task::files::{Fd, FileDesc, OpenedFileReadUserSegment},
+    task::files::{Fd, FileDesc},
 };
 
 pub mod pread64;
@@ -87,11 +90,9 @@ fn read_into_user_buffer(
     }
 
     if offset.is_none() {
-        let segment = OpenedFileReadUserSegment {
-            base: buf,
-            len: count,
-        };
-        if let Some(result) = file.read_user(uspace, core::slice::from_ref(&segment)) {
+        let segment = UserBufferSegment::new(buf, count);
+        let mut dst = UserBufferSink::new(uspace, core::slice::from_ref(&segment));
+        if let Some(result) = file.read_user_transaction(&mut dst) {
             let read = result?;
             notify_read_user_success(file, read as u64);
             return Ok(read);
@@ -212,12 +213,10 @@ fn read_iovecs(
     if offset.is_none() {
         let segments = iovecs
             .iter()
-            .map(|iov| OpenedFileReadUserSegment {
-                base: iov.base,
-                len: iov.len,
-            })
+            .map(|iov| UserBufferSegment::new(iov.base, iov.len))
             .collect::<Vec<_>>();
-        if let Some(result) = file.read_user(uspace, &segments) {
+        let mut dst = UserBufferSink::new(uspace, &segments);
+        if let Some(result) = file.read_user_transaction(&mut dst) {
             let read = result? as u64;
             notify_read_user_success(file, read);
             return Ok(read);

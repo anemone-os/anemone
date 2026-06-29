@@ -18,6 +18,7 @@ mod path;
 mod permission;
 mod superblock;
 pub mod timerfd;
+mod uio;
 
 // filesystem drivers
 pub mod devfs;
@@ -31,6 +32,7 @@ mod ramfs;
 
 pub mod api;
 
+pub(crate) use self::uio::{UserBufferSegment, UserBufferSink};
 pub use self::{
     anonymous::*,
     dentry::Dentry,
