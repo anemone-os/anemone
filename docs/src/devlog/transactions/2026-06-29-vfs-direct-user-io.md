@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** VFS / FileOps / FileDesc / syscall read-write / user access
 **权威计划：** [RFC-20260629-vfs-direct-user-io](../../rfcs/vfs-direct-user-io/index.md), [不变量需求](../../rfcs/vfs-direct-user-io/invariants.md), [迁移实施计划](../../rfcs/vfs-direct-user-io/implementation.md), [Tracking Issues](../../rfcs/vfs-direct-user-io/tracking-issues.md)
-**当前阶段：** 阶段 1C - read direct-user implementation / build / source audit complete；等待用户侧目标 smoke 或性能路径确认后才能进入阶段 2
+**当前阶段：** 阶段 1C - 已关闭；等待阶段 2 write direct-user gate 启动
 
 ## 范围
 
@@ -42,13 +42,13 @@
 
 **Canonical RFC:** [RFC-20260629-vfs-direct-user-io](../../rfcs/vfs-direct-user-io/index.md), [Invariants](../../rfcs/vfs-direct-user-io/invariants.md), [Implementation Plan](../../rfcs/vfs-direct-user-io/implementation.md), [Tracking Issues](../../rfcs/vfs-direct-user-io/tracking-issues.md)
 
-**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary；实施前审计、文档验证和 baseline build 已通过。阶段 1A 已提交 user-buffer cursor skeleton 与 fanotify transaction adapter。阶段 1B 已完成 `FileOps` optional hook skeleton、`None`-only fallback 和 repo 范围 static vtable closure。阶段 1C 已为 ramfs/ext4 regular file 安装 read direct-user hook，并通过 agent-side build 与 source audit。
+**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary；实施前审计、文档验证和 baseline build 已通过。阶段 1A 已提交 user-buffer cursor skeleton 与 fanotify transaction adapter。阶段 1B 已完成 `FileOps` optional hook skeleton、`None`-only fallback 和 repo 范围 static vtable closure。阶段 1C 已为 ramfs/ext4 regular file 安装 read direct-user hook，并通过 agent-side build、source audit 和用户侧 LTP read-write group 验证。
 
-**In Progress:** 阶段 1C 的用户侧目标 smoke / 性能路径验证尚未记录；阶段 2 write direct-user path 尚未启动。
+**In Progress:** 无。阶段 2 write direct-user path 尚未启动。
 
 **Open Blockers:** 无 active Apollyon / Keter tracking issue。若审计或 worker 反馈暴露 backend 需要保存 `UserSpaceHandle`、需要 errno fallback、需要 whole-vector prevalidation、需要改变 `File.pos` 语义、或 `RWF_*` / 完整 `O_DIRECT` 不可避免进入 direct-user ctx，必须停止当前 gate 并回到 RFC review。
 
-**Next Action:** 收集用户侧 regular file `read` / `readv` / `pread` / `preadv`、bad iovec、cross-page fault、EOF / short read、positioned cursor 和 fanotify `FAN_ACCESS` 目标验证，或用户认可的性能路径证据；证据闭合前不得启动阶段 2 write direct-user path。
+**Next Action:** 如继续本 RFC 实现，按 [迁移实施计划](../../rfcs/vfs-direct-user-io/implementation.md) 启动阶段 2 write direct-user gate；阶段 2 仍不得触碰 `RWF_*`、non-regular backend direct hooks 或完整 Linux `O_DIRECT` 语义。
 
 **Do Not Redo:** 不要把 `FileDescOps::read_user` 扩成 ordinary filesystem fast path；不要让 backend 直接接收 raw user memory capability；不要用 `SysError::NotSupported` 等 errno 表达 fallback；不要把本 RFC 当成 Linux `O_DIRECT` 或 `RWF_*` 实现；不要把 write path 抢在 read gate 闭合前落地。
 
@@ -266,10 +266,12 @@ rg -n "read_user_at: Some|write_user_at: Some|UserSpaceHandle|Fallback|NotSuppor
 - `git diff --check`：通过。
 - `just build`：通过；构建过程仍输出 cargo cache warning。
 - `just fmt kernel --check`：阶段 1C touched files 无 formatter diff；命令仍因既有 generated `anemone-kernel/src/kconfig_defs.rs` / `platform_defs.rs` 和阶段外 `task/topology/parent_child.rs` 注释换行返回非零。本阶段未运行写入式 formatter，最终 diff 不包含这些阶段外文件。
-- 阶段 1C 未由 agent 侧运行 QEMU / LTP；进入阶段 2 前仍需要用户侧目标 smoke 或性能路径证据。
+- 阶段 1C agent 侧未运行 QEMU / LTP；用户侧已验证 `ltp read-write group` 通过，作为 read direct-user gate 的目标测例证据。
 
 **Review gate：**
 
 - 总控复查未发现 Apollyon / Keter：实现只在阶段 1C write set 内安装 ramfs/ext4 read hooks；backend 均先取得 stable frame/cache page 后再执行 user copy；fanotify transaction 优先级、single notification rule、positioned read 不修改 `File.pos`、no-hook fallback 与 write path defer 均保持阶段 1B/RFC 约束。
 - 只读 explorer 复核未发现必须停止回 RFC review 的 Apollyon / Keter；其审计重点覆盖 1B dispatch 前提、ramfs/ext4 最小实现点、`File.pos -> UserBufferSink/UserSpace` 锁序、partial / EFAULT、notification 和 positioned read 边界。
-- 残余验证缺口：bad first / later iovec、cross-page fault、fanotify `FAN_ACCESS` single-submit 和性能路径仍需用户侧目标验证记录；该缺口阻止进入阶段 2，但不要求扩大阶段 1C 代码 write set。
+- 用户侧 `ltp read-write group` 通过，满足本阶段“用户侧目标测例 / 性能路径验证后才能进入 Phase 2”的 gate。更细粒度的 bad first / later iovec、cross-page fault 与 fanotify `FAN_ACCESS` single-submit 仍可作为后续定向回归补充，但不再阻塞阶段 1C 关闭。
+
+**结论：** 阶段 1C 已关闭。后续可按 RFC 阶段顺序启动阶段 2；本阶段没有扩大 write set、没有触发回 RFC review 的停止条件，也没有关闭 `RWF_*`、完整 Linux `O_DIRECT`、mmap coherency 或 splice/vmsplice 等独立 limitation。
