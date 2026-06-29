@@ -278,6 +278,8 @@ static BLOCK_DEV_FILE_OPS: FileOps = FileOps {
     write: block_write,
     read_at: block_read_at,
     write_at: block_write_at,
+    read_user_at: None,
+    write_user_at: None,
     check_status_flags: block_check_status_flags,
     seek: block_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),

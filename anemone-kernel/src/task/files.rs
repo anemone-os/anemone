@@ -371,6 +371,22 @@ impl FileDesc {
             .map_err(|e| e.into())
     }
 
+    pub(crate) fn read_user(
+        &self,
+        dst: &mut UserBufferSink<'_>,
+    ) -> Option<Result<usize, SysError>> {
+        let file = self.pfile.file.as_ref();
+        if !file.has_read_user_at() {
+            return None;
+        }
+        if !self.can_read() {
+            return Some(Err(SysError::BadFileDescriptor));
+        }
+
+        let ctx = FileIoCtx::new(self.file_flags().to_file_op_status_flags());
+        Some(file.read_user_with_ctx(dst, ctx).map_err(|e| e.into()))
+    }
+
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, SysError> {
         if !self.can_read() {
             return Err(SysError::BadFileDescriptor);
@@ -383,6 +399,26 @@ impl FileDesc {
             .file
             .read_at_with_ctx(offset, buf, ctx)
             .map_err(|e| e.into())
+    }
+
+    pub(crate) fn read_user_at(
+        &self,
+        offset: usize,
+        dst: &mut UserBufferSink<'_>,
+    ) -> Option<Result<usize, SysError>> {
+        let file = self.pfile.file.as_ref();
+        if !file.has_read_user_at() {
+            return None;
+        }
+        if !self.can_read() || self.is_path_only() {
+            return Some(Err(SysError::BadFileDescriptor));
+        }
+
+        let ctx = FileIoCtx::new(self.file_flags().to_file_op_status_flags());
+        Some(
+            file.read_user_at_with_ctx(offset, dst, ctx)
+                .map_err(|e| e.into()),
+        )
     }
 
     /// This applies to both write and append mode.

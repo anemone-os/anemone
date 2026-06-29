@@ -102,6 +102,8 @@ pub static PROC_ROOT_FILE_OPS: FileOps = FileOps {
     write: |_, _, _, _| Err(SysError::IsDir),
     read_at: |_, _, _, _| Err(SysError::IsDir),
     write_at: |_, _, _, _| Err(SysError::IsDir),
+    read_user_at: None,
+    write_user_at: None,
     check_status_flags: accept_file_op_status_flags,
     seek: seek_dir_rewind,
     read_dir: proc_root_read_dir,

@@ -336,6 +336,8 @@ static FANOTIFY_FILE_OPS: FileOps = FileOps {
     write: fanotify_write,
     read_at: |_, _, _, _| Err(SysError::IllegalSeek),
     write_at: |_, _, _, _| Err(SysError::IllegalSeek),
+    read_user_at: None,
+    write_user_at: None,
     check_status_flags: accept_file_op_status_flags,
     seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),

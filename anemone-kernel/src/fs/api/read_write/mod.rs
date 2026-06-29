@@ -89,12 +89,26 @@ fn read_into_user_buffer(
         return Ok(0);
     }
 
-    if offset.is_none() {
-        let segment = UserBufferSegment::new(buf, count);
-        let mut dst = UserBufferSink::new(uspace, core::slice::from_ref(&segment));
+    let segment = UserBufferSegment::new(buf, count);
+    let mut dst = UserBufferSink::new(uspace, core::slice::from_ref(&segment));
+    if let Some(offset) = offset {
+        if let Some(result) = file.read_user_at(offset, &mut dst) {
+            let read = result?;
+            notify_read_success(file, read as u64);
+            return Ok(read);
+        }
+    } else {
         if let Some(result) = file.read_user_transaction(&mut dst) {
             let read = result?;
             notify_read_user_success(file, read as u64);
+            return Ok(read);
+        }
+        // `None` is the only direct-user fallback signal. Once a backend
+        // installs `read_user_at`, its errors are user-visible results, not a
+        // request to retry through the kernel-buffer trampoline.
+        if let Some(result) = file.read_user(&mut dst) {
+            let read = result?;
+            notify_read_success(file, read as u64);
             return Ok(read);
         }
     }
@@ -210,16 +224,32 @@ fn read_iovecs(
         return Ok(0);
     }
 
-    if offset.is_none() {
+    if offset.is_none() || file.vfs_file().has_read_user_at() {
         let segments = iovecs
             .iter()
             .map(|iov| UserBufferSegment::new(iov.base, iov.len))
             .collect::<Vec<_>>();
         let mut dst = UserBufferSink::new(uspace, &segments);
-        if let Some(result) = file.read_user_transaction(&mut dst) {
-            let read = result? as u64;
-            notify_read_user_success(file, read);
-            return Ok(read);
+        if let Some(offset) = offset {
+            if let Some(result) = file.read_user_at(offset, &mut dst) {
+                let read = result? as u64;
+                notify_read_success(file, read);
+                return Ok(read);
+            }
+        } else {
+            if let Some(result) = file.read_user_transaction(&mut dst) {
+                let read = result? as u64;
+                notify_read_user_success(file, read);
+                return Ok(read);
+            }
+            // `None` is the only direct-user fallback signal. Once a backend
+            // installs `read_user_at`, its errors are user-visible results, not
+            // a request to retry through the kernel-buffer trampoline.
+            if let Some(result) = file.read_user(&mut dst) {
+                let read = result? as u64;
+                notify_read_success(file, read);
+                return Ok(read);
+            }
         }
     }
 

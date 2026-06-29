@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** VFS / FileOps / FileDesc / syscall read-write / user access
 **权威计划：** [RFC-20260629-vfs-direct-user-io](../../rfcs/vfs-direct-user-io/index.md), [不变量需求](../../rfcs/vfs-direct-user-io/invariants.md), [迁移实施计划](../../rfcs/vfs-direct-user-io/implementation.md), [Tracking Issues](../../rfcs/vfs-direct-user-io/tracking-issues.md)
-**当前阶段：** 阶段 1A - 待启动
+**当前阶段：** 阶段 1B - 已关闭；等待阶段 1C read direct-user gate 启动
 
 ## 范围
 
@@ -42,13 +42,13 @@
 
 **Canonical RFC:** [RFC-20260629-vfs-direct-user-io](../../rfcs/vfs-direct-user-io/index.md), [Invariants](../../rfcs/vfs-direct-user-io/invariants.md), [Implementation Plan](../../rfcs/vfs-direct-user-io/implementation.md), [Tracking Issues](../../rfcs/vfs-direct-user-io/tracking-issues.md)
 
-**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary；实施前审计、文档验证和 baseline build 已通过。
+**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary；实施前审计、文档验证和 baseline build 已通过。阶段 1A 已提交 user-buffer cursor skeleton 与 fanotify transaction adapter。阶段 1B 已完成 `FileOps` optional hook skeleton、`None`-only fallback 和 repo 范围 static vtable closure。
 
-**In Progress:** 无；尚未进入阶段 1A 代码实现。
+**In Progress:** 无。阶段 1C 尚未启动。
 
 **Open Blockers:** 无 active Apollyon / Keter tracking issue。若审计或 worker 反馈暴露 backend 需要保存 `UserSpaceHandle`、需要 errno fallback、需要 whole-vector prevalidation、需要改变 `File.pos` 语义、或 `RWF_*` / 完整 `O_DIRECT` 不可避免进入 direct-user ctx，必须停止当前 gate 并回到 RFC review。
 
-**Next Action:** 按阶段 1A write set 启动 `fs/uio.rs` user-buffer skeleton 与 fanotify adapter。不得提前实现 ordinary `FileOps` direct-user hooks、ramfs/ext4 direct hooks 或 write direct-user path。
+**Next Action:** 进入阶段 1C 前，按 RFC 要求由总控启动 read direct-user vertical slice gate，并确认用户接受 read path 作为第一批行为 gate。阶段 1C 才允许为 ramfs/ext4 regular file 安装 `read_user_at`；write direct-user path 仍不得提前落地。
 
 **Do Not Redo:** 不要把 `FileDescOps::read_user` 扩成 ordinary filesystem fast path；不要让 backend 直接接收 raw user memory capability；不要用 `SysError::NotSupported` 等 errno 表达 fallback；不要把本 RFC 当成 Linux `O_DIRECT` 或 `RWF_*` 实现；不要把 write path 抢在 read gate 闭合前落地。
 
@@ -168,3 +168,63 @@ rg -n "UserSpaceHandle|OpenedFileReadUserSegment|read_user_transaction|UserBuffe
 
 - 阶段 1A reviewer 未发现 Apollyon / Keter / Euclid / Safe finding；确认 write set 只覆盖阶段 1A 允许文件和本事务日志，且未引入 `FileOps` direct-user hook、ramfs/ext4 hook、write direct-user path 或 RFC canonical contract 变更。
 - reviewer 额外在 `fs/uio.rs` 补充 comment-only 注释，记录 cursor 是短生命周期线性 userspace capability、ordinary copy 使用 partial-progress 语义、exact record helper 只服务 fanotify 这类事务 metadata、mark/delta 是 read progress 的唯一派生依据，以及 `UserBufferSource::keep_prefix_from()` 用 file-visible commit 丢弃 speculative user-copy suffix。
+
+### 2026-06-29 - 阶段 1B FileOps optional hook skeleton 与 None-only fallback
+
+**阶段：** 阶段 1B - `FileOps` optional hook skeleton 与 `None`-only fallback。
+
+**Write Set expansion record：**
+
+- 初始阶段 1B write set 覆盖 `anemone-kernel/src/fs/file.rs`、`anemone-kernel/src/fs/uio.rs`、`anemone-kernel/src/fs/**` 下现有 `FileOps` initializer、`anemone-kernel/src/task/files.rs` 和 `anemone-kernel/src/fs/api/read_write/*`。
+- `just build` 首次编译发现 `FileOps` 还有 device 层静态 initializer：`anemone-kernel/src/device/block/devfs.rs`、`anemone-kernel/src/device/char/devfs.rs`、`anemone-kernel/src/device/console.rs`。这些 initializer 必须随新增字段显式补齐，否则 repo 范围 static vtable 无法构建。
+- worker 按 write set 规则停止并上报；用户/总控随后批准窄扩展，只允许在上述三个 device 文件的既有 `FileOps` initializer 中加入 `read_user_at: None` / `write_user_at: None`。
+- 本扩展不改变 accepted contract、阶段顺序或验证 floor；它只让所有既有 file-object vtable 显式 opt out direct-user hook。批准结果记录在本事务日志；canonical RFC 文本不需要修改。
+
+**变更：**
+
+- `anemone-kernel/src/fs/file.rs` 为 `FileOps` 增加 optional `read_user_at` / `write_user_at` 字段，并定义 crate-visible hook type：
+  - `read_user_at(&File, pos, &mut UserBufferSink, FileIoCtx) -> Result<(), SysError>`；
+  - `write_user_at(&File, pos, &mut UserBufferSource, FileIoCtx) -> Result<usize, SysError>`。
+- `File` 增加 read direct-user wrapper skeleton：read hook 存在时由 wrapper 采样 `UserBufferSink` mark / delta 派生成功字节数；hook 返回错误且已有 sink progress 时返回已完成字节，否则返回原始错误。sequential wrapper 仍持 `File.pos` guard，并只按派生 read 字节推进 offset。
+- `File` 增加 write direct-user positioned wrapper skeleton，但本阶段没有任何 caller 接入 write direct path；wrapper 只保留 API 形状和 `written <= src.bytes_since(mark)` / `keep_prefix_from()` 一致性护栏。
+- `anemone-kernel/src/task/files.rs` 增加 read-side `FileDesc` dispatch wrapper，继续由 fd layer 负责 read access、path-only positioned gate 和 `FileIoCtx` status snapshot。
+- `anemone-kernel/src/fs/api/read_write/mod.rs` 在普通 read / readv fallback 前尝试 read direct-user skeleton；hook 为 `None` 时继续走旧 kernel-buffer trampoline。fanotify `read_user_transaction` 仍优先处理 non-positioned transaction read，positioned read 不进入 transaction hook。
+- 所有既有 `FileOps` initializer 显式设置 `read_user_at: None` / `write_user_at: None`，包括获批扩展的三个 device vtable。未安装任何 `Some` hook。
+
+**边界：**
+
+- 未实现 ramfs/ext4 direct-user hook。
+- 未安装任何 non-`None` direct-user hook initializer。
+- 未接入 write direct-user syscall dispatch，也未改变 write path 语义。
+- 未启动阶段 1C read direct-user vertical slice或阶段 2 write path。
+- 未改变 `RWF_*` / `pwritev2(flags != 0)`、fanotify transaction behavior、public RFC contract、register/current-limitations 或非 regular backend capability。
+
+**Source audit：**
+
+执行：
+
+```sh
+rg -n "read_user_at|write_user_at|UserSpaceHandle|Fallback|NotSupported" anemone-kernel/src/fs anemone-kernel/src/task anemone-kernel/src/device
+```
+
+分类：
+
+- `read_user_at` / `write_user_at` 在 `fs/file.rs` 的 `FileOps` 字段、hook type、read/write skeleton wrapper 和 `fs/api/read_write/mod.rs` / `task/files.rs` read-side dispatch 中命中。
+- 所有 `FileOps` initializer 命中均为 `read_user_at: None` / `write_user_at: None`；搜索 `read_user_at: Some|write_user_at: Some` 无命中。
+- `UserSpaceHandle` 命中仍在既有 owner 边界：`fs/uio.rs` cursor owner、`fs/api/read_write` syscall helper、`fs/file.rs` ioctl ctx、device ioctl ctx、task/futex/mm ownership。`FileOps` direct-user hook signature 不接收 `UserSpaceHandle`、raw `VirtAddr` segment、`FileDesc`、fd number 或 task。
+- `Fallback` 无命中。direct-user dispatch 使用 `Option` presence only；没有 `SysError` / errno fallback 分支。
+- `NotSupported` 命中均为既有 unsupported operation errno、inode/file ops stubs、`pwritev2(flags != 0)` limitation、splice/vmsplice/tee stage-1 stubs、iomux unsupported source handling或设备/arch功能缺口；没有 direct-user fallback 语义。
+
+**Validation:**
+
+- `just fmt kernel`：通过。formatter 再次尝试重排阶段 1B write set 外的 `anemone-kernel/src/task/topology/parent_child.rs` 注释换行；该 formatter-only out-of-scope change 已撤回，最终 diff 不包含该文件。
+- `just build`：通过；构建过程仍输出 cargo cache warning。
+- `git diff --check`：通过。
+- Source audit 命令：通过并按上文分类；`rg -n "read_user_at: Some|write_user_at: Some|Fallback" anemone-kernel/src/fs anemone-kernel/src/task anemone-kernel/src/device` 无命中。
+
+**结论：** 阶段 1B implementation worker 的代码实现、格式化、构建、source audit 和 whitespace validation 已通过。repo 范围 static vtable 构建闭合，hook skeleton 存在但所有 backend 均为 `None` fallback，普通 read/write 行为保持旧 kernel-buffer path。后续进入阶段 1C 前仍需由总控启动 read direct-user vertical slice gate；本阶段不授权 ramfs/ext4 hook implementation 或 write direct path。
+
+**Review gate：**
+
+- 阶段 1B reviewer 未发现 Apollyon / Keter；代码范围符合阶段 1B，hook signature 只接收 `UserBufferSink` / `UserBufferSource` 与 `FileIoCtx`，`None` fallback 仍落回 kernel-buffer path，fanotify transaction 优先级不变，`write_user_at_with_ctx()` 仍无 syscall caller。
+- reviewer 提出一个 Euclid：事务日志顶部 handoff 仍停留在“阶段 1A 待启动”。总控已将 `当前阶段`、`Completed`、`In Progress` 和 `Next Action` 更新为阶段 1B 已关闭、阶段 1C 尚未启动，并明确阶段 1C 前需启动 read direct-user vertical slice gate。
