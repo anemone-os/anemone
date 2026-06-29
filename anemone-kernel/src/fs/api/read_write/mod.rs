@@ -6,7 +6,7 @@ use anemone_abi::fs::linux::IoVec;
 
 use crate::{
     fs::{
-        UserBufferSegment, UserBufferSink,
+        UserBufferSegment, UserBufferSink, UserBufferSource,
         fanotify::{FanMask, notify_opened_file_event},
     },
     prelude::{
@@ -144,6 +144,15 @@ fn write_from_user_buffer(
     count: usize,
     offset: Option<usize>,
 ) -> Result<usize, SysError> {
+    let count = clamp_rw_count(count);
+    let segment = UserBufferSegment::new(buf, count);
+    let mut src = UserBufferSource::new(uspace, core::slice::from_ref(&segment));
+    if let Some(result) = write_user_source(file, &mut src, offset) {
+        let written = result?;
+        notify_write_success(file, written as u64);
+        return Ok(written);
+    }
+
     let kbuf = copy_user_read_buffer(uspace, buf, count)?;
     do_write(file, &kbuf, offset)
 }
@@ -155,6 +164,13 @@ fn write_from_user_buffer_without_notify(
     count: usize,
     offset: Option<usize>,
 ) -> Result<usize, SysError> {
+    let count = clamp_rw_count(count);
+    let segment = UserBufferSegment::new(buf, count);
+    let mut src = UserBufferSource::new(uspace, core::slice::from_ref(&segment));
+    if let Some(result) = write_user_source(file, &mut src, offset) {
+        return result;
+    }
+
     let kbuf = copy_user_read_buffer(uspace, buf, count)?;
     do_write_without_notify(file, &kbuf, offset)
 }
@@ -293,6 +309,23 @@ fn write_iovecs(
     iovecs: &[CheckedIoVec],
     mut offset: Option<usize>,
 ) -> Result<u64, SysError> {
+    if iovecs.is_empty() {
+        return Ok(0);
+    }
+
+    if file.vfs_file().has_write_user_at() {
+        let segments = iovecs
+            .iter()
+            .map(|iov| UserBufferSegment::new(iov.base, iov.len))
+            .collect::<Vec<_>>();
+        let mut src = UserBufferSource::new(uspace, &segments);
+        if let Some(result) = write_user_source(file, &mut src, offset) {
+            let written = result? as u64;
+            notify_write_success(file, written);
+            return Ok(written);
+        }
+    }
+
     let mut total = 0u64;
 
     for iovec in iovecs {
@@ -325,6 +358,17 @@ fn write_iovecs(
 
     notify_write_success(file, total);
     Ok(total)
+}
+
+fn write_user_source(
+    file: &FileDesc,
+    src: &mut UserBufferSource<'_>,
+    offset: Option<usize>,
+) -> Option<Result<usize, SysError>> {
+    match offset {
+        Some(offset) => file.write_user_at(offset, src),
+        None => file.write_user(src),
+    }
 }
 
 fn alloc_zeroed_buffer(len: usize) -> Result<Vec<u8>, SysError> {

@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** VFS / FileOps / FileDesc / syscall read-write / user access
 **权威计划：** [RFC-20260629-vfs-direct-user-io](../../rfcs/vfs-direct-user-io/index.md), [不变量需求](../../rfcs/vfs-direct-user-io/invariants.md), [迁移实施计划](../../rfcs/vfs-direct-user-io/implementation.md), [Tracking Issues](../../rfcs/vfs-direct-user-io/tracking-issues.md)
-**当前阶段：** 阶段 1C - 已关闭；等待阶段 2 write direct-user gate 启动
+**当前阶段：** 阶段 2 - 已关闭；等待阶段 3 实现收口与 register 对齐
 
 ## 范围
 
@@ -42,13 +42,13 @@
 
 **Canonical RFC:** [RFC-20260629-vfs-direct-user-io](../../rfcs/vfs-direct-user-io/index.md), [Invariants](../../rfcs/vfs-direct-user-io/invariants.md), [Implementation Plan](../../rfcs/vfs-direct-user-io/implementation.md), [Tracking Issues](../../rfcs/vfs-direct-user-io/tracking-issues.md)
 
-**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary；实施前审计、文档验证和 baseline build 已通过。阶段 1A 已提交 user-buffer cursor skeleton 与 fanotify transaction adapter。阶段 1B 已完成 `FileOps` optional hook skeleton、`None`-only fallback 和 repo 范围 static vtable closure。阶段 1C 已为 ramfs/ext4 regular file 安装 read direct-user hook，并通过 agent-side build、source audit 和用户侧 LTP read-write group 验证。
+**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary；实施前审计、文档验证和 baseline build 已通过。阶段 1A 已提交 user-buffer cursor skeleton 与 fanotify transaction adapter。阶段 1B 已完成 `FileOps` optional hook skeleton、`None`-only fallback 和 repo 范围 static vtable closure。阶段 1C 已为 ramfs/ext4 regular file 安装 read direct-user hook，并通过 agent-side build、source audit 和用户侧 LTP read-write group 验证。阶段 2 已为 ramfs/ext4 regular file 安装 write direct-user hook，并通过 agent-side build、source audit 和 whitespace validation。
 
-**In Progress:** 无。阶段 2 write direct-user path 尚未启动。
+**In Progress:** 无。阶段 3 实现收口与 register 对齐尚未启动。
 
 **Open Blockers:** 无 active Apollyon / Keter tracking issue。若审计或 worker 反馈暴露 backend 需要保存 `UserSpaceHandle`、需要 errno fallback、需要 whole-vector prevalidation、需要改变 `File.pos` 语义、或 `RWF_*` / 完整 `O_DIRECT` 不可避免进入 direct-user ctx，必须停止当前 gate 并回到 RFC review。
 
-**Next Action:** 如继续本 RFC 实现，按 [迁移实施计划](../../rfcs/vfs-direct-user-io/implementation.md) 启动阶段 2 write direct-user gate；阶段 2 仍不得触碰 `RWF_*`、non-regular backend direct hooks 或完整 Linux `O_DIRECT` 语义。
+**Next Action:** 如继续本 RFC 实现，按 [迁移实施计划](../../rfcs/vfs-direct-user-io/implementation.md) 启动阶段 3 实现收口与 register 对齐；不得把本 RFC 误写成关闭 `RWF_*`、完整 Linux `O_DIRECT`、mmap coherency 或 splice/vmsplice 等独立 limitation。
 
 **Do Not Redo:** 不要把 `FileDescOps::read_user` 扩成 ordinary filesystem fast path；不要让 backend 直接接收 raw user memory capability；不要用 `SysError::NotSupported` 等 errno 表达 fallback；不要把本 RFC 当成 Linux `O_DIRECT` 或 `RWF_*` 实现；不要把 write path 抢在 read gate 闭合前落地。
 
@@ -275,3 +275,65 @@ rg -n "read_user_at: Some|write_user_at: Some|UserSpaceHandle|Fallback|NotSuppor
 - 用户侧 `ltp read-write group` 通过，满足本阶段“用户侧目标测例 / 性能路径验证后才能进入 Phase 2”的 gate。更细粒度的 bad first / later iovec、cross-page fault 与 fanotify `FAN_ACCESS` single-submit 仍可作为后续定向回归补充，但不再阻塞阶段 1C 关闭。
 
 **结论：** 阶段 1C 已关闭。后续可按 RFC 阶段顺序启动阶段 2；本阶段没有扩大 write set、没有触发回 RFC review 的停止条件，也没有关闭 `RWF_*`、完整 Linux `O_DIRECT`、mmap coherency 或 splice/vmsplice 等独立 limitation。
+
+### 2026-06-29 - 阶段 2 ramfs/ext4 write direct-user vertical slice
+
+**阶段：** 阶段 2 - ramfs/ext4 regular file write direct-user path。
+
+**Write Set expansion record：**
+
+- 阶段 2 默认 write set 覆盖 `anemone-kernel/src/fs/uio.rs`、`anemone-kernel/src/fs/api/read_write/*`、`anemone-kernel/src/fs/file.rs`、`anemone-kernel/src/task/files.rs`、`anemone-kernel/src/fs/ramfs/file.rs`、`anemone-kernel/src/fs/ext4/file.rs` 和本事务日志。
+- 实现过程中曾临时考虑用 `OpenedFileWriteUserDispatch` 表达 fd 层 write-side direct-user 决策。用户/总控指出该类型不自然，并批准窄扩展 `anemone-kernel/src/fs/mod.rs`，只用于 crate-local re-export `UserBufferSource`。
+- 扩展后删除了 dispatch enum，`FileDesc` 直接提供与 read-side 对称的 `write_user()` / `write_user_at()` wrapper。该扩展不改变 RFC contract、阶段顺序或验证 floor；它只让 `FileDesc` 继续直接拥有 access、path-only、status snapshot 和 `O_APPEND` 决策。
+
+**变更：**
+
+- `anemone-kernel/src/fs/api/read_write/mod.rs` 在 `write` / `pwrite` single-buffer path 和 `writev` / `pwritev` vectored path 构造 `UserBufferSource`，先尝试 direct-user write；hook 不存在时继续走旧 kernel-buffer fallback。
+- `FileDesc` 增加 write-side direct-user wrappers：无 offset 时按 opened-description `O_APPEND` 决定 `File::{write_user_with_ctx,append_user_with_ctx}`；positioned write 在 `O_APPEND` 下继续走 append-at-current-end 语义，否则走 `write_user_at_with_ctx()`。path-only gate 仍只由 positioned write wrapper 拒绝。
+- `File` 增加 sequential write direct-user wrapper、append direct-user wrapper 和 positioned direct-user wrapper。`File` 仍负责 readonly mount gate、sequential `File.pos` guard、`written <= source.bytes_since(mark)` assertion、`keep_prefix_from()` 和 successful write metadata update。
+- `anemone-kernel/src/fs/ramfs/file.rs` 为 ramfs regular file 安装 `write_user_at: Some(ramfs_write_user_at)`。backend 按页取得 stable `FrameHandle`，释放 ramfs page-map lock 后从 `UserBufferSource` copy 到 frame；只按已 copy bytes 更新 ramfs size 和 inode size。
+- `anemone-kernel/src/fs/ext4/file.rs` 为 ext4 regular file 安装 `write_user_at: Some(ext4_write_user_at)`。backend 通过 page cache 取得 stable frame，user copy 不在 ext4 transaction lock、filesystem lock 或 page-cache map lock中发生；copy 后用短 `pages.write()` 标 dirty，并只按 committed bytes 更新 size / inode size。direct path 对旧文件内页保守 preserve existing contents，避免 cross-page / partial user fault 把未提交后缀清零。
+- `anemone-kernel/src/fs/mod.rs` crate-local re-export `UserBufferSource`，用于让 `FileDesc` wrapper 直接接收 source cursor，而不是引入额外 dispatch 类型。
+
+**边界：**
+
+- 未触碰 `RWF_*` / `pwritev2(flags != 0)`、完整 Linux `O_DIRECT` direct I/O、public RFC contract、register/current-limitations。
+- 未安装 non-regular backend write direct hook；device、procfs、pipe、eventfd、timerfd、fanotify group fd 等仍保持 `write_user_at: None`。
+- direct-user fallback 仍只由 hook `None` 表达；`SysError` 没有被用于 fallback outcome。
+- ordinary backend hook 不接收或保存 `UserSpaceHandle`、raw segment、`FileDesc`、fd number 或 task。
+- sequential write direct-user path 保持 RFC 接受的 `File.pos -> UserBufferSource/UserSpace` 锁序，未引入 reserve-offset / commit-offset 或 `UserSpace -> File.pos` 反向路径。
+
+**Source audit：**
+
+执行：
+
+```sh
+rg -n "OpenedFileWriteUserDispatch|write_user_dispatch|read_user_at: Some|write_user_at: Some|read_user_at: None|write_user_at: None" anemone-kernel/src/fs/ramfs/file.rs anemone-kernel/src/fs/ext4/file.rs anemone-kernel/src/fs anemone-kernel/src/device anemone-kernel/src/task/files.rs
+rg -n "write_user_at: Some|UserSpaceHandle|Fallback|NotSupported|RWF_|O_DIRECT|UserBufferSource|FAN_MODIFY" anemone-kernel/src/fs anemone-kernel/src/task anemone-kernel/src/device
+```
+
+分类：
+
+- `OpenedFileWriteUserDispatch` / `write_user_dispatch` 无命中；fd 层 direct-user write 决策不再通过临时 dispatch 类型表达。
+- `write_user_at: Some(...)` 只有 ramfs/ext4 regular file 两处；目录、symlink、device、procfs、pipe、eventfd、timerfd、fanotify group fd 等仍保持 `None` fallback。
+- `UserBufferSource` 命中在 `fs/uio.rs` owner、`fs/mod.rs` crate-local re-export、`fs/api/read_write/mod.rs` source construction、`task/files.rs` fd wrappers、`fs/file.rs` VFS wrappers，以及 ramfs/ext4 regular-file hook；没有 backend 保存 cursor 或接收 raw user memory capability。
+- `UserSpaceHandle` 命中仍在 `fs/uio.rs` cursor owner、`fs/api/read_write` syscall helper、ioctl/device ctx、task/mm/futex 既有 owner；ramfs/ext4 ordinary hook 签名不接收 `UserSpaceHandle`。
+- `NotSupported` 命中均为既有 unsupported operation、`pwritev2(flags != 0)` limitation、splice/vmsplice/tee stage-1、fanotify non-content vtable、device/arch 能力缺口或 ext4 error mapping；没有 direct-user errno fallback。
+- `O_DIRECT` 命中仍是 status flag/open/status validation、pipe2/eventfd/timerfd/block-devfs 既有兼容边界；本阶段没有实现完整 Linux direct I/O。
+- `FAN_MODIFY` 命中仍由 `fs/api/read_write` 的 `notify_write_success()` 在最终 successful bytes > 0 时统一提交一次；backend hook 不提交 fanotify notification。
+
+**Validation:**
+
+- `just fmt kernel --check`：阶段 2 touched files 无 formatter diff；命令仍因既有 generated `anemone-kernel/src/kconfig_defs.rs` / `platform_defs.rs` 和阶段外 `task/topology/parent_child.rs` 注释换行返回非零。本阶段未运行写入式 formatter，最终 diff 不包含这些阶段外文件。
+- `just build`：通过；构建过程仍输出 cargo cache warning。
+- `git diff --check`：通过。
+- Source audit 命令：通过并按上文分类。
+- 阶段 2 agent 侧未运行 QEMU / LTP。
+
+**Review gate：**
+
+- 总控复查发现 single-buffer `write(..., count = 0)` / `pwrite(..., count = 0)` direct-user 入口曾在 `fs/api/read_write` 提前返回 `Ok(0)`，会绕过既有 `FileDesc` write access / path-only gate；已移除该提前返回。零长度请求现在仍构造 source 并进入 `FileDesc::{write_user,write_user_at}` 或 no-hook fallback，从而保持旧 kernel-buffer path 的 fd 层检查顺序。
+- 修正后总控重跑 `git diff --check`、`just build` 和阶段 2 source audit，结果仍通过；`just fmt kernel --check` 仍只报告既有 generated / 阶段外格式差异，阶段 2 touched files 无 formatter diff。
+- 未发现 Apollyon / Keter 阻塞项。阶段 2 write path 仍保持 `FileDesc` 决策、`File` readonly / `File.pos` gate、backend stable frame/page 后 user copy、single `FAN_MODIFY` notification 和 `None`-only fallback。
+
+**结论：** 阶段 2 已关闭。未触发回 RFC review 的停止条件；没有引入 `RWF_*`、完整 Linux `O_DIRECT`、non-regular backend direct hooks、errno fallback、raw user capability backend 参数、reserve-offset / commit-offset 或 `UserSpace -> File.pos` 反向锁序。后续应按阶段 3 做实现收口与 register/current-limitations 对齐。

@@ -3,6 +3,7 @@ use crate::{
         UserBufferSink,
         iomux::PollEvent,
         ramfs::{ramfs_dir, ramfs_reg},
+        uio::UserBufferSource,
     },
     prelude::{
         vmo::{ResolvedFrame, VmObject},
@@ -218,6 +219,65 @@ impl RamfsRegState {
 
         Ok(())
     }
+
+    fn copy_in_user(
+        &self,
+        offset: usize,
+        len: usize,
+        src: &mut UserBufferSource<'_>,
+    ) -> Result<usize, SysError> {
+        let mut written = 0usize;
+        let mut remaining = len;
+        let mut cur_offset = offset;
+
+        while remaining > 0 {
+            let pidx = cur_offset >> PagingArch::PAGE_SIZE_BITS;
+            let page_offset = cur_offset & (PagingArch::PAGE_SIZE_BYTES - 1);
+            let copy_len = remaining.min(PagingArch::PAGE_SIZE_BYTES - page_offset);
+
+            let frame = match self.ensure_page(pidx) {
+                Ok(frame) => frame,
+                Err(err) if written > 0 => break,
+                Err(err) => return Err(err),
+            };
+            let dst = unsafe {
+                core::slice::from_raw_parts_mut(
+                    frame.ppn().to_phys_addr().to_hhdm().as_ptr_mut(),
+                    PagingArch::PAGE_SIZE_BYTES,
+                )
+            };
+
+            let copied = match src.copy_into_slice(&mut dst[page_offset..page_offset + copy_len]) {
+                Ok(copied) => copied,
+                Err(err) if written > 0 => break,
+                Err(err) => return Err(err),
+            };
+            if copied == 0 {
+                break;
+            }
+
+            written = written
+                .checked_add(copied)
+                .ok_or(SysError::InvalidArgument)?;
+            cur_offset = cur_offset
+                .checked_add(copied)
+                .ok_or(SysError::InvalidArgument)?;
+            if copied < copy_len {
+                break;
+            }
+
+            remaining -= copied;
+        }
+
+        if written > 0 {
+            let new_end = offset
+                .checked_add(written)
+                .ok_or(SysError::InvalidArgument)?;
+            self.update_size_max(new_end);
+        }
+
+        Ok(written)
+    }
 }
 
 #[derive(Debug)]
@@ -339,6 +399,24 @@ fn ramfs_write_at(file: &File, pos: usize, buf: &[u8], ctx: FileIoCtx) -> Result
     ramfs_write(file, &mut local_pos, buf, ctx)
 }
 
+fn ramfs_write_user_at(
+    file: &File,
+    pos: usize,
+    src: &mut UserBufferSource<'_>,
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
+    let inode = file.inode();
+    let state = ramfs_reg_state(inode)?;
+    let len = src.remaining();
+    let _ = pos.checked_add(len).ok_or(SysError::InvalidArgument)?;
+    let written = state.copy_in_user(pos, len, src)?;
+    if written > 0 {
+        let new_end = pos.checked_add(written).ok_or(SysError::InvalidArgument)?;
+        inode.inode().update_size_max(new_end as u64);
+    }
+    Ok(written)
+}
+
 fn ramfs_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
     let base = match from {
         SeekFrom::End(_) => {
@@ -387,7 +465,7 @@ pub(super) static RAMFS_REG_FILE_OPS: FileOps = FileOps {
     read_at: ramfs_read_at,
     write_at: ramfs_write_at,
     read_user_at: Some(ramfs_read_user_at),
-    write_user_at: None,
+    write_user_at: Some(ramfs_write_user_at),
     check_status_flags: accept_file_op_status_flags,
     seek: ramfs_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),

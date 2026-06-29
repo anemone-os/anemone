@@ -2,10 +2,10 @@ use core::str;
 
 use crate::{
     fs::{
-        UserBufferSink,
         cache_stats::{backing_file_cache_page_inserted, backing_file_cache_pages_removed},
         ext4::{ext4_ino, ext4_reg, ext4_sb, map_ext4_error, map_lwext4_inode_type},
         iomux::PollEvent,
+        uio::{UserBufferSink, UserBufferSource},
     },
     prelude::{
         vmo::{ResolvedFrame, VmObject},
@@ -369,6 +369,72 @@ impl Ext4RegMapping {
             .checked_add(data.len())
             .ok_or(SysError::InvalidArgument)
     }
+
+    fn copy_in_user(
+        &self,
+        offset: usize,
+        len: usize,
+        src: &mut UserBufferSource<'_>,
+    ) -> Result<usize, SysError> {
+        let old_size = self.state.size();
+        let mut written = 0usize;
+        let mut remaining = len;
+        let mut cur_offset = offset;
+
+        while remaining > 0 {
+            let pidx = cur_offset >> PagingArch::PAGE_SIZE_BITS;
+            let page_offset = cur_offset & (PagingArch::PAGE_SIZE_BYTES - 1);
+            let copy_len = remaining.min(PagingArch::PAGE_SIZE_BYTES - page_offset);
+            let page_start = Ext4RegState::page_start(pidx)?;
+            // Direct userspace copy can fault after a prefix of a planned full
+            // page write. Preserve existing file-backed page contents whenever
+            // the page overlaps the old file size, then commit only copied
+            // bytes as dirty.
+            let preserve_existing = page_start < old_size;
+
+            let page = match self.page_for_write(pidx, preserve_existing) {
+                Ok(page) => page,
+                Err(err) if written > 0 => break,
+                Err(err) => return Err(err),
+            };
+            let dst = unsafe {
+                core::slice::from_raw_parts_mut(
+                    page.frame.ppn().to_phys_addr().to_hhdm().as_ptr_mut(),
+                    PagingArch::PAGE_SIZE_BYTES,
+                )
+            };
+
+            let copied = match src.copy_into_slice(&mut dst[page_offset..page_offset + copy_len]) {
+                Ok(copied) => copied,
+                Err(err) if written > 0 => break,
+                Err(err) => return Err(err),
+            };
+            if copied == 0 {
+                break;
+            }
+
+            self.state
+                .pages
+                .write()
+                .get_mut(&pidx)
+                .expect("ext4 direct-user written page must exist in cache")
+                .dirty = true;
+
+            written = written
+                .checked_add(copied)
+                .ok_or(SysError::InvalidArgument)?;
+            cur_offset = cur_offset
+                .checked_add(copied)
+                .ok_or(SysError::InvalidArgument)?;
+            if copied < copy_len {
+                break;
+            }
+
+            remaining -= copied;
+        }
+
+        Ok(written)
+    }
 }
 
 impl VmObject for Ext4RegMapping {
@@ -492,6 +558,30 @@ fn ext4_write_at(file: &File, pos: usize, buf: &[u8], ctx: FileIoCtx) -> Result<
     ext4_write(file, &mut local_pos, buf, ctx)
 }
 
+fn ext4_write_user_at(
+    file: &File,
+    pos: usize,
+    src: &mut UserBufferSource<'_>,
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
+    let inode = file.inode();
+    if inode.ty() != InodeType::Regular {
+        return Err(SysError::NotReg);
+    }
+
+    let state = ext4_reg_state(inode)?;
+    let mapping = Ext4RegMapping::new(state.clone());
+    let len = src.remaining();
+    let _ = pos.checked_add(len).ok_or(SysError::InvalidArgument)?;
+    let written = mapping.copy_in_user(pos, len, src)?;
+    if written > 0 {
+        let new_end = pos.checked_add(written).ok_or(SysError::InvalidArgument)?;
+        state.update_size_max(new_end);
+        inode.inode().update_size_max(new_end as u64);
+    }
+    Ok(written)
+}
+
 fn ext4_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
     seek_with_inode_size(file, pos, from)
 }
@@ -549,7 +639,7 @@ pub(super) static EXT4_REG_FILE_OPS: FileOps = FileOps {
     read_at: ext4_read_at,
     write_at: ext4_write_at,
     read_user_at: Some(ext4_read_user_at),
-    write_user_at: None,
+    write_user_at: Some(ext4_write_user_at),
     check_status_flags: accept_file_op_status_flags,
     seek: ext4_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),

@@ -32,7 +32,7 @@ mod ramfs;
 
 pub mod api;
 
-pub(crate) use self::uio::{UserBufferSegment, UserBufferSink};
+pub(crate) use self::uio::{UserBufferSegment, UserBufferSink, UserBufferSource};
 pub use self::{
     anonymous::*,
     dentry::Dentry,
