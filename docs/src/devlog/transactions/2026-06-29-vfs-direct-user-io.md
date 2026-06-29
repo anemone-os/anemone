@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** VFS / FileOps / FileDesc / syscall read-write / user access
 **权威计划：** [RFC-20260629-vfs-direct-user-io](../../rfcs/vfs-direct-user-io/index.md), [不变量需求](../../rfcs/vfs-direct-user-io/invariants.md), [迁移实施计划](../../rfcs/vfs-direct-user-io/implementation.md), [Tracking Issues](../../rfcs/vfs-direct-user-io/tracking-issues.md)
-**当前阶段：** 阶段 1B - 已关闭；等待阶段 1C read direct-user gate 启动
+**当前阶段：** 阶段 1C - read direct-user implementation / build / source audit complete；等待用户侧目标 smoke 或性能路径确认后才能进入阶段 2
 
 ## 范围
 
@@ -42,13 +42,13 @@
 
 **Canonical RFC:** [RFC-20260629-vfs-direct-user-io](../../rfcs/vfs-direct-user-io/index.md), [Invariants](../../rfcs/vfs-direct-user-io/invariants.md), [Implementation Plan](../../rfcs/vfs-direct-user-io/implementation.md), [Tracking Issues](../../rfcs/vfs-direct-user-io/tracking-issues.md)
 
-**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary；实施前审计、文档验证和 baseline build 已通过。阶段 1A 已提交 user-buffer cursor skeleton 与 fanotify transaction adapter。阶段 1B 已完成 `FileOps` optional hook skeleton、`None`-only fallback 和 repo 范围 static vtable closure。
+**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary；实施前审计、文档验证和 baseline build 已通过。阶段 1A 已提交 user-buffer cursor skeleton 与 fanotify transaction adapter。阶段 1B 已完成 `FileOps` optional hook skeleton、`None`-only fallback 和 repo 范围 static vtable closure。阶段 1C 已为 ramfs/ext4 regular file 安装 read direct-user hook，并通过 agent-side build 与 source audit。
 
-**In Progress:** 无。阶段 1C 尚未启动。
+**In Progress:** 阶段 1C 的用户侧目标 smoke / 性能路径验证尚未记录；阶段 2 write direct-user path 尚未启动。
 
 **Open Blockers:** 无 active Apollyon / Keter tracking issue。若审计或 worker 反馈暴露 backend 需要保存 `UserSpaceHandle`、需要 errno fallback、需要 whole-vector prevalidation、需要改变 `File.pos` 语义、或 `RWF_*` / 完整 `O_DIRECT` 不可避免进入 direct-user ctx，必须停止当前 gate 并回到 RFC review。
 
-**Next Action:** 进入阶段 1C 前，按 RFC 要求由总控启动 read direct-user vertical slice gate，并确认用户接受 read path 作为第一批行为 gate。阶段 1C 才允许为 ramfs/ext4 regular file 安装 `read_user_at`；write direct-user path 仍不得提前落地。
+**Next Action:** 收集用户侧 regular file `read` / `readv` / `pread` / `preadv`、bad iovec、cross-page fault、EOF / short read、positioned cursor 和 fanotify `FAN_ACCESS` 目标验证，或用户认可的性能路径证据；证据闭合前不得启动阶段 2 write direct-user path。
 
 **Do Not Redo:** 不要把 `FileDescOps::read_user` 扩成 ordinary filesystem fast path；不要让 backend 直接接收 raw user memory capability；不要用 `SysError::NotSupported` 等 errno 表达 fallback；不要把本 RFC 当成 Linux `O_DIRECT` 或 `RWF_*` 实现；不要把 write path 抢在 read gate 闭合前落地。
 
@@ -228,3 +228,48 @@ rg -n "read_user_at|write_user_at|UserSpaceHandle|Fallback|NotSupported" anemone
 
 - 阶段 1B reviewer 未发现 Apollyon / Keter；代码范围符合阶段 1B，hook signature 只接收 `UserBufferSink` / `UserBufferSource` 与 `FileIoCtx`，`None` fallback 仍落回 kernel-buffer path，fanotify transaction 优先级不变，`write_user_at_with_ctx()` 仍无 syscall caller。
 - reviewer 提出一个 Euclid：事务日志顶部 handoff 仍停留在“阶段 1A 待启动”。总控已将 `当前阶段`、`Completed`、`In Progress` 和 `Next Action` 更新为阶段 1B 已关闭、阶段 1C 尚未启动，并明确阶段 1C 前需启动 read direct-user vertical slice gate。
+
+### 2026-06-29 - 阶段 1C ramfs/ext4 read direct-user vertical slice
+
+**阶段：** 阶段 1C - ramfs/ext4 regular file read direct-user path。
+
+**变更：**
+
+- `anemone-kernel/src/fs/ramfs/file.rs` 为 ramfs regular file 安装 `read_user_at: Some(ramfs_read_user_at)`。hook 按 EOF 和 `UserBufferSink::remaining()` 限制本次 copy 长度，驻留页在 ramfs page map lock 下 clone `FrameHandle` 后释放锁再推进 user-buffer；稀疏洞页通过 `UserBufferSink::write_zeros()` 零填充，不因 read 分配新页。
+- `anemone-kernel/src/fs/ext4/file.rs` 为 ext4 regular file 安装 `read_user_at: Some(ext4_read_user_at)`。hook 复用 `Ext4RegMapping::load_page()` 取得 cloned cache page；user copy 在 ext4 read transaction、filesystem lock 和 page-cache map lock 之外执行。
+- 现有阶段 1B dispatch 继续负责 ordinary direct-user read 调度：fanotify `read_user_transaction` 优先于 ordinary hook；sequential read 仍由 `File` wrapper 持 `File.pos` guard 并按 sink delta 推进 offset；positioned read 走 `read_user_at_with_ctx()`，不修改 `File.pos`。
+
+**边界：**
+
+- 未接入任何 `write_user_at: Some(...)`；write direct-user path 仍未启动。
+- 未修改 non-regular backend direct hook、device/procfs/pipe/eventfd/timerfd/fanotify group fd hook、`RWF_*` / `pwritev2(flags != 0)` 或完整 Linux `O_DIRECT` 语义。
+- 未改变 public RFC contract、register/current-limitations 或 fanotify transaction commit / rollback 协议。
+
+**Source audit：**
+
+执行：
+
+```sh
+rg -n "read_user_at: Some|write_user_at: Some|read_user_at: None|write_user_at: None" anemone-kernel/src/fs/ramfs/file.rs anemone-kernel/src/fs/ext4/file.rs anemone-kernel/src/fs anemone-kernel/src/device
+rg -n "read_user_at: Some|write_user_at: Some|UserSpaceHandle|Fallback|NotSupported" anemone-kernel/src/fs anemone-kernel/src/task anemone-kernel/src/device
+```
+
+分类：
+
+- `read_user_at: Some(...)` 只有 ramfs/ext4 regular file 两处；目录、symlink、device、procfs、pipe、eventfd、timerfd、fanotify group fd 等仍保持 `None` fallback。
+- `write_user_at: Some(...)` 无命中。
+- 新增 ramfs/ext4 direct hook 不接收 `UserSpaceHandle`、raw user segment、`FileDesc`、fd number 或 task；user-buffer capability 仍由 `UserBufferSink` 集中表达。
+- `NotSupported` 命中均为既有 unsupported operation、`pwritev2(flags != 0)`、splice/vmsplice/tee stage-1、fanotify non-content vtable 或设备/arch能力缺口；没有 direct-user errno fallback。
+
+**Validation:**
+
+- `git diff --check`：通过。
+- `just build`：通过；构建过程仍输出 cargo cache warning。
+- `just fmt kernel --check`：阶段 1C touched files 无 formatter diff；命令仍因既有 generated `anemone-kernel/src/kconfig_defs.rs` / `platform_defs.rs` 和阶段外 `task/topology/parent_child.rs` 注释换行返回非零。本阶段未运行写入式 formatter，最终 diff 不包含这些阶段外文件。
+- 阶段 1C 未由 agent 侧运行 QEMU / LTP；进入阶段 2 前仍需要用户侧目标 smoke 或性能路径证据。
+
+**Review gate：**
+
+- 总控复查未发现 Apollyon / Keter：实现只在阶段 1C write set 内安装 ramfs/ext4 read hooks；backend 均先取得 stable frame/cache page 后再执行 user copy；fanotify transaction 优先级、single notification rule、positioned read 不修改 `File.pos`、no-hook fallback 与 write path defer 均保持阶段 1B/RFC 约束。
+- 只读 explorer 复核未发现必须停止回 RFC review 的 Apollyon / Keter；其审计重点覆盖 1B dispatch 前提、ramfs/ext4 最小实现点、`File.pos -> UserBufferSink/UserSpace` 锁序、partial / EFAULT、notification 和 positioned read 边界。
+- 残余验证缺口：bad first / later iovec、cross-page fault、fanotify `FAN_ACCESS` single-submit 和性能路径仍需用户侧目标验证记录；该缺口阻止进入阶段 2，但不要求扩大阶段 1C 代码 write set。

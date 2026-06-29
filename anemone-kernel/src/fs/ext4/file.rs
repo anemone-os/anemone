@@ -2,6 +2,7 @@ use core::str;
 
 use crate::{
     fs::{
+        UserBufferSink,
         cache_stats::{backing_file_cache_page_inserted, backing_file_cache_pages_removed},
         ext4::{ext4_ino, ext4_reg, ext4_sb, map_ext4_error, map_lwext4_inode_type},
         iomux::PollEvent,
@@ -289,6 +290,40 @@ impl Ext4RegMapping {
         Ok(())
     }
 
+    fn copy_out_user(
+        &self,
+        offset: usize,
+        len: usize,
+        dst: &mut UserBufferSink<'_>,
+    ) -> Result<(), SysError> {
+        let mut remaining = len;
+        let mut cur_offset = offset;
+
+        while remaining > 0 {
+            let pidx = cur_offset >> PagingArch::PAGE_SIZE_BITS;
+            let page_offset = cur_offset & (PagingArch::PAGE_SIZE_BYTES - 1);
+            let copy_len = remaining.min(PagingArch::PAGE_SIZE_BYTES - page_offset);
+
+            let page = self.load_page(pidx)?;
+            // load_page() returns a cloned cache page after dropping ext4
+            // transaction and page-map locks; user copy must stay outside
+            // those backend locks.
+            let copied =
+                dst.write_from_slice(&page.frame.as_bytes()[page_offset..page_offset + copy_len])?;
+
+            if copied < copy_len {
+                return Ok(());
+            }
+
+            remaining -= copy_len;
+            cur_offset = cur_offset
+                .checked_add(copy_len)
+                .ok_or(SysError::InvalidArgument)?;
+        }
+
+        Ok(())
+    }
+
     fn copy_in(&self, offset: usize, data: &[u8], allow_resize: bool) -> Result<usize, SysError> {
         if !allow_resize {
             self.state.validate_mmap_range(offset, data.len())?;
@@ -409,6 +444,28 @@ fn ext4_read_at(
     ext4_read(file, &mut local_pos, buf, ctx)
 }
 
+fn ext4_read_user_at(
+    file: &File,
+    pos: usize,
+    dst: &mut UserBufferSink<'_>,
+    _ctx: FileIoCtx,
+) -> Result<(), SysError> {
+    let inode = file.inode();
+    if inode.ty() != InodeType::Regular {
+        return Err(SysError::NotReg);
+    }
+
+    let state = ext4_reg_state(inode)?;
+    let mapping = Ext4RegMapping::new(state.clone());
+    let size = state.size();
+    if pos >= size {
+        return Ok(());
+    }
+
+    let len = dst.remaining().min(size - pos);
+    mapping.copy_out_user(pos, len, dst)
+}
+
 fn ext4_write(
     file: &File,
     pos: &mut usize,
@@ -491,7 +548,7 @@ pub(super) static EXT4_REG_FILE_OPS: FileOps = FileOps {
     write: ext4_write,
     read_at: ext4_read_at,
     write_at: ext4_write_at,
-    read_user_at: None,
+    read_user_at: Some(ext4_read_user_at),
     write_user_at: None,
     check_status_flags: accept_file_op_status_flags,
     seek: ext4_seek,
