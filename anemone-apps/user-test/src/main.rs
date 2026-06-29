@@ -66,8 +66,8 @@ fn run_comp_tests() {
     guest::init_competition_environment();
     ltp::install_ltp_fixtures();
 
-    competition::run_competition_tests();
-    // ltp::run_ltp_tests();
+    // competition::run_competition_tests();
+    ltp::run_ltp_tests();
 
     println!("user-test: all competition tests finished.");
 }
