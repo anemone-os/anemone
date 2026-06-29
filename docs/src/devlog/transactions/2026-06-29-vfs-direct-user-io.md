@@ -1,10 +1,10 @@
 # 2026-06-29 - VFS Direct User I/O
 
-**状态：** Active
+**状态：** Completed
 **负责人：** doruche, Codex
 **领域：** VFS / FileOps / FileDesc / syscall read-write / user access
 **权威计划：** [RFC-20260629-vfs-direct-user-io](../../rfcs/vfs-direct-user-io/index.md), [不变量需求](../../rfcs/vfs-direct-user-io/invariants.md), [迁移实施计划](../../rfcs/vfs-direct-user-io/implementation.md), [Tracking Issues](../../rfcs/vfs-direct-user-io/tracking-issues.md)
-**当前阶段：** 阶段 2 - 已关闭；等待阶段 3 实现收口与 register 对齐
+**当前阶段：** 阶段 3 - 已关闭；第一版 VFS Direct User I/O 完成
 
 ## 范围
 
@@ -42,13 +42,13 @@
 
 **Canonical RFC:** [RFC-20260629-vfs-direct-user-io](../../rfcs/vfs-direct-user-io/index.md), [Invariants](../../rfcs/vfs-direct-user-io/invariants.md), [Implementation Plan](../../rfcs/vfs-direct-user-io/implementation.md), [Tracking Issues](../../rfcs/vfs-direct-user-io/tracking-issues.md)
 
-**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary；实施前审计、文档验证和 baseline build 已通过。阶段 1A 已提交 user-buffer cursor skeleton 与 fanotify transaction adapter。阶段 1B 已完成 `FileOps` optional hook skeleton、`None`-only fallback 和 repo 范围 static vtable closure。阶段 1C 已为 ramfs/ext4 regular file 安装 read direct-user hook，并通过 agent-side build、source audit 和用户侧 LTP read-write group 验证。阶段 2 已为 ramfs/ext4 regular file 安装 write direct-user hook，并通过 agent-side build、source audit 和 whitespace validation。
+**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary；实施前审计、文档验证和 baseline build 已通过。阶段 1A 已提交 user-buffer cursor skeleton 与 fanotify transaction adapter。阶段 1B 已完成 `FileOps` optional hook skeleton、`None`-only fallback 和 repo 范围 static vtable closure。阶段 1C 已为 ramfs/ext4 regular file 安装 read direct-user hook，并通过 agent-side build、source audit 和用户侧 LTP read-write group 验证。阶段 2 已为 ramfs/ext4 regular file 安装 write direct-user hook，并通过 agent-side build、source audit 和 whitespace validation。阶段 3 已完成 RFC / transaction / register-current-limitations 对齐审计。
 
-**In Progress:** 无。阶段 3 实现收口与 register 对齐尚未启动。
+**In Progress:** 无。
 
-**Open Blockers:** 无 active Apollyon / Keter tracking issue。若审计或 worker 反馈暴露 backend 需要保存 `UserSpaceHandle`、需要 errno fallback、需要 whole-vector prevalidation、需要改变 `File.pos` 语义、或 `RWF_*` / 完整 `O_DIRECT` 不可避免进入 direct-user ctx，必须停止当前 gate 并回到 RFC review。
+**Open Blockers:** 无 active Apollyon / Keter tracking issue。后续若扩展 backend user-memory capability、fallback 表达、whole-vector prevalidation、`File.pos` 语义、`RWF_*`、完整 `O_DIRECT`、zero-copy/page pin 或 non-regular backend hook，必须另走 RFC review 或 register follow-up。
 
-**Next Action:** 如继续本 RFC 实现，按 [迁移实施计划](../../rfcs/vfs-direct-user-io/implementation.md) 启动阶段 3 实现收口与 register 对齐；不得把本 RFC 误写成关闭 `RWF_*`、完整 Linux `O_DIRECT`、mmap coherency 或 splice/vmsplice 等独立 limitation。
+**Next Action:** 第一版已收口。后续按 register/current limitations 或新 RFC 分拆 follow-up；不得把本 RFC 误写成关闭 `RWF_*`、完整 Linux `O_DIRECT`、mmap coherency、splice/vmsplice/sendfile zero-copy 或非 regular backend direct-user hook。
 
 **Do Not Redo:** 不要把 `FileDescOps::read_user` 扩成 ordinary filesystem fast path；不要让 backend 直接接收 raw user memory capability；不要用 `SysError::NotSupported` 等 errno 表达 fallback；不要把本 RFC 当成 Linux `O_DIRECT` 或 `RWF_*` 实现；不要把 write path 抢在 read gate 闭合前落地。
 
@@ -337,3 +337,30 @@ rg -n "write_user_at: Some|UserSpaceHandle|Fallback|NotSupported|RWF_|O_DIRECT|U
 - 未发现 Apollyon / Keter 阻塞项。阶段 2 write path 仍保持 `FileDesc` 决策、`File` readonly / `File.pos` gate、backend stable frame/page 后 user copy、single `FAN_MODIFY` notification 和 `None`-only fallback。
 
 **结论：** 阶段 2 已关闭。未触发回 RFC review 的停止条件；没有引入 `RWF_*`、完整 Linux `O_DIRECT`、non-regular backend direct hooks、errno fallback、raw user capability backend 参数、reserve-offset / commit-offset 或 `UserSpace -> File.pos` 反向锁序。后续应按阶段 3 做实现收口与 register/current-limitations 对齐。
+
+### 2026-06-29 - 阶段 3 实现收口与 register/current-limitations 对齐
+
+**阶段：** 阶段 3 - 实现收口与 register 对齐。
+
+**变更：**
+
+- 将 [RFC 主文档](../../rfcs/vfs-direct-user-io/index.md) 状态更新为 `Implemented`，将 [迁移实施计划](../../rfcs/vfs-direct-user-io/implementation.md) 状态更新为 `Completed`。
+- 将本事务日志状态更新为 `Completed`，并把 `docs/src/devlog/transactions/index.md` 中的 VFS Direct User I/O 入口从 Active 移到 Completed。
+- 更新 [公开草案与 RFC](../../rfcs.md) 中的聚合入口和当前双周 devlog，说明第一版已实现并完成 register 对齐审计。
+
+**Register / current-limitations audit：**
+
+- `ANE-20260527-PWRITEV2-FLAGS-STAGE1` 仍保持 Active。direct-user write path 没有实现 `RWF_HIPRI`、`RWF_DSYNC`、`RWF_SYNC`、`RWF_NOWAIT`、`RWF_APPEND` 或其它 nonzero `pwritev2` flags。
+- `ANE-20260528-OPEN-STATUS-FLAGS-STAGE1` 仍保持 Active。opened file description 仍是 status flags 真相源，direct-user path 只观察 `FileIoCtx` snapshot；本 RFC 没有补齐完整同步写、Linux direct I/O 或 atime 抑制语义。
+- `ANE-20260528-PIPE-PROCFS-KNOBS-STAGE1` 仍保持 Active。pipe `O_DIRECT` packet mode、pipe capacity 和 procfs knobs 不属于 ordinary regular-file direct-user hook 范围。
+- `ANE-20260523-TRUNCATE-MMAP-COHERENCY`、`ANE-20260523-EXT4-TRUNCATE-CACHE-INVALIDATION` 和 `ANE-20260529-FILE-BACKED-MMAP-FAULT-STAGE1` 仍保持 Active。ramfs/ext4 regular-file direct-user copy 不改变 file-backed mmap fault、truncate/mmap coherency 或 ext4 truncate cache limitation。
+- `ANE-20260528-ROFS-DIRECT-WRITE-STAGE1` 仍保持 Active。阶段 2 write direct-user path 仍经过 `File` readonly mount gate，但 shared writable mmap、dirty/writeback、`msync` 和大块设备测试环境限制没有被本 RFC 关闭。
+- `ANE-20260617-SPLICE-FAMILY-COPY-BACKED-STAGE1` 仍保持 Active。本 RFC 没有实现 zero-copy splice/tee/vmsplice/page pin；`sendfile` 的 fanotify fd I/O 边界仍归 fanotify RFC / transaction，不是本 RFC 的 current-limitations closure。
+
+**Validation:**
+
+- `git diff --check`：通过。
+- `mdbook build docs`：通过。
+- 阶段 3 是 docs-only 收口，未运行 QEMU / LTP。
+
+**结论：** 阶段 3 已关闭。第一版 VFS Direct User I/O 完成：普通 ramfs/ext4 regular file read/write family 已有 direct-user hook；fanotify transaction copyout 已收口到 user-buffer adapter；non-hook backend 仍走 kernel-buffer fallback；register/current-limitations 未被误关闭。

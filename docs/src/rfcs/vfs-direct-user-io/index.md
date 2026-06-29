@@ -1,12 +1,12 @@
 # RFC-20260629-vfs-direct-user-io
 
-**状态：** Accepted for Implementation
+**状态：** Implemented
 **负责人：** doruche, Codex
 **最后更新：** 2026-06-29
 **领域：** VFS / FileOps / FileDesc / syscall read-write / user access
 **事务日志：** [2026-06-29-vfs-direct-user-io](../../devlog/transactions/2026-06-29-vfs-direct-user-io.md)
-**开放问题：** 当前无 active tracking issue，见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** 启动 [迁移实施计划](./implementation.md) 的阶段 1A：`fs/uio.rs` user-buffer skeleton 与 fanotify adapter。
+**开放问题：** 当前无 active tracking issue，见 [Tracking Issues](./tracking-issues.md)；`RWF_*`、完整 Linux `O_DIRECT`、mmap coherency、splice family 和非 regular backend direct-user hook 仍按各自 register / follow-up 边界处理。
+**下一步：** 第一版 VFS Direct User I/O 已按 [迁移实施计划](./implementation.md) 完成；后续若要扩展 per-call flags、Linux direct I/O、zero-copy/page pin、non-regular backend hook 或 reserve-offset/commit-offset，必须另走 RFC review 或 register follow-up。
 
 ## 摘要
 
@@ -361,11 +361,11 @@ fanotify 不再裸调 `UserSpaceHandle::lock()` 或遍历 raw segments。metadat
 
 ## 收口
 
-完成后需要记录：
+第一版实现已完成并记录在 [事务日志](../../devlog/transactions/2026-06-29-vfs-direct-user-io.md)：
 
 - `UserBufferSink` / `UserBufferSource` 是 user buffer copy/progress 的唯一普通 VFS cursor，代码位于 `fs/uio.rs`；
 - `FileOps` direct-user hook 不接收 raw `UserSpaceHandle` 或 user segments；
 - `FileDescOps::read_user_transaction` 保留 fanotify transaction 边界，并通过 user-buffer adapter copyout；
-- ramfs/ext4 regular file read direct-user path 通过 offset、EOF、bad first iovec、bad later iovec、cross-page fault 和 `FAN_ACCESS` 验证；
-- write direct-user path 若进入实现，必须补齐 `O_APPEND`、`pwrite`、dirty/size/metadata、partial fault 和 `FAN_MODIFY` 验证；
-- 非零 `pwritev2` flags、完整 `O_DIRECT`、zero-copy、page pin 和非 regular file fast path 仍按各自 limitation / follow-up 处理。
+- ramfs/ext4 regular file read/write direct-user path 已安装 hook，并通过 agent-side build、source audit、whitespace validation；read gate 另有用户侧 `ltp read-write group` 通过证据；
+- write direct-user path 保留 `FileDesc` 的 access / path-only / status snapshot / `O_APPEND` 决策，`File` 的 readonly / `File.pos` / metadata update 责任，以及 backend stable frame/page 后 user copy 的锁序；
+- 非零 `pwritev2` flags、完整 `O_DIRECT`、zero-copy、page pin、mmap coherency、splice family 和非 regular file fast path 仍按各自 limitation / follow-up 处理；本 RFC 收口不关闭这些 register 条目。

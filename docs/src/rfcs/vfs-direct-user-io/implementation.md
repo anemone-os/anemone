@@ -1,6 +1,6 @@
 # VFS Direct User I/O 迁移实施计划
 
-**状态：** Accepted for Implementation
+**状态：** Completed
 **最后更新：** 2026-06-29
 **父 RFC：** [RFC-20260629-vfs-direct-user-io](./index.md)
 **不变量：** [不变量需求](./invariants.md)
