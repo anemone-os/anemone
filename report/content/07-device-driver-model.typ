@@ -157,4 +157,4 @@ Anemone 的平台发现以设备树为主要入口。启动早期，内核从固
 
 简单来说——driver probe 产生设备后端，char / block subsystem 注册设备号和名字，devfs 发布 inode，VFS open 得到设备子系统提供的 `FileOps`。之后 read、write、seek、ioctl 都沿着 `FileOps` 回到对应的 `CharDev` 或 `BlockDev`。因此，`/dev` 看起来是文件系统命名空间的一部分，但设备行为仍然由设备 owner 决定。
 
-这种设计让文件系统章节和设备驱动章节有清楚分工。VFS 负责路径、挂载、inode 和 opened file description；设备驱动模型负责硬件发现、驱动绑定和设备能力；`devfs` 只承担发布和分发，不把 VFS 变成驱动框架，也不把驱动框架变成路径查找系统。对于后续扩展 sysfs、更多字符设备、更多块设备或热插拔协议，这个边界也为我们保留了继续演进的空间。
+这种设计就把文件系统和设备驱动漂亮地解了耦。VFS 负责路径、挂载、inode 和 opened file description；设备驱动模型负责硬件发现、驱动绑定和设备能力；`devfs` 只承担发布和分发，不把 VFS 变成驱动框架，也不把驱动框架变成路径查找系统。对于后续扩展 sysfs、更多字符设备、更多块设备或热插拔协议，这个边界也为我们保留了继续演进的空间。

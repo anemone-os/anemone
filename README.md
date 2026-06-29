@@ -112,6 +112,6 @@ just xtask qemu --platform qemu-virt-rv64 --image build/anemone.elf | tee build/
 
 ## 参考
 
-- [Linux](https://kernel.org) 设备驱动模型，虚拟文件系统
+- [Linux](https://kernel.org) 设备驱动模型，MachineDesc，VFS，以及大量syscall
 - [Zircon](https://fuchsia.dev) VMO架构
-- [Chronix](https://github.com/PACTHEMAN123/Chronix) 用户态测例环境建立
+- [Chronix](https://github.com/PACTHEMAN123/Chronix) 用户态busybox安装
