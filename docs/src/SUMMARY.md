@@ -41,6 +41,7 @@
 		- [KThread Core](./devlog/transactions/2026-06-16-kthread-core.md)
 		- [Mount Tree Legacy API](./devlog/transactions/2026-06-18-mount-tree-legacy-api.md)
 		- [Threaded Timer Event](./devlog/transactions/2026-06-20-threaded-timer-event.md)
+		- [VFS Direct User I/O](./devlog/transactions/2026-06-29-vfs-direct-user-io.md)
 - [初赛冲刺策略（2026-05 至 2026-06）](./preliminary-contest-sprint.md)
 - [已知问题与当前限制](./known-issues-and-limitations.md)
 	- [活动登记册](./register.md)

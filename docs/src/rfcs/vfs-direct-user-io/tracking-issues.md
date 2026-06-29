@@ -3,7 +3,7 @@
 **状态：** No active issues
 **最后更新：** 2026-06-29
 **父 RFC：** [RFC-20260629-vfs-direct-user-io](./index.md)
-**事务日志：** None
+**事务日志：** [2026-06-29-vfs-direct-user-io](../../devlog/transactions/2026-06-29-vfs-direct-user-io.md)
 
 本文只跟踪当前仍影响实现顺序、review gate、停止边界或验收判断的问题。修复后必须把结论折回 `index.md`、`invariants.md` 或 `implementation.md`，本页只保留问题状态和 neutralize 依据。
 

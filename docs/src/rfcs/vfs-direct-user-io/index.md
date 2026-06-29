@@ -4,9 +4,9 @@
 **负责人：** doruche, Codex
 **最后更新：** 2026-06-29
 **领域：** VFS / FileOps / FileDesc / syscall read-write / user access
-**事务日志：** None
+**事务日志：** [2026-06-29-vfs-direct-user-io](../../devlog/transactions/2026-06-29-vfs-direct-user-io.md)
 **开放问题：** 当前无 active tracking issue，见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** 进入实现前创建 transaction devlog 并建立双向链接；随后执行 [迁移实施计划](./implementation.md) 的阶段 0 审计。
+**下一步：** 启动 [迁移实施计划](./implementation.md) 的阶段 1A：`fs/uio.rs` user-buffer skeleton 与 fanotify adapter。
 
 ## 摘要
 
