@@ -8,7 +8,7 @@
   team-name: [ヰ世界电子开发部],
   teammates: ([张正翰], [陈函申]),
   teachers: ([夏文], [仇洁婷]),
-  date: (2026, 6, 27),
+  date: (2026, 6, 30),
   logo-path: "assets/school.jpg",
 )[
   #frontmatter(title: [Anemone])[
