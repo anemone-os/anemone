@@ -249,7 +249,7 @@ fn scheduler_zombie_tail(task: &Task) {
 
 fn schedule_never_return() -> ! {
     with_intr_disabled(|| unsafe {
-        schedule();
+        schedule_zombie_never_return();
     });
 
     unreachable!("exited task should never be scheduled again");

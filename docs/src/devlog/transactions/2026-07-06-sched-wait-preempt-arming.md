@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** scheduler / wait core / kernel preempt / latch / iomux / timer / signal
 **权威计划：** [RFC-20260618-sched-wait-preempt-arming](../../rfcs/sched-wait-preempt-arming/index.md), [不变量需求](../../rfcs/sched-wait-preempt-arming/invariants.md), [迁移实施计划](../../rfcs/sched-wait-preempt-arming/implementation.md), [Tracking Issues](../../rfcs/sched-wait-preempt-arming/tracking-issues.md)
-**当前阶段：** 阶段 0 - 已关闭；下一步阶段 1
+**当前阶段：** 阶段 1 - 已关闭；下一步继续阶段 2 / 阶段 3 剩余 proof 与验证 gate
 
 ## 范围
 
@@ -38,13 +38,13 @@
 
 **Canonical RFC:** [RFC-20260618-sched-wait-preempt-arming](../../rfcs/sched-wait-preempt-arming/index.md), [Invariants](../../rfcs/sched-wait-preempt-arming/invariants.md), [Implementation Plan](../../rfcs/sched-wait-preempt-arming/implementation.md), [Tracking Issues](../../rfcs/sched-wait-preempt-arming/tracking-issues.md)
 
-**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志，并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary。阶段 0 code worker 已补 `WaitOrigin` caller-location origin、begin-side nested active wait assert、crate 内 no-nested-wait helper 和 `Mutex::lock()` nested-wait 诊断；review gate 初审发现的 direct wait adapter `#[track_caller]` 缺口已修复，`WaitOrigin` follow-up closure review 无 Apollyon / Keter / Euclid finding。
+**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志，并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary。阶段 0 code worker 已补 `WaitOrigin` caller-location origin、begin-side nested active wait assert、crate 内 no-nested-wait helper 和 `Mutex::lock()` nested-wait 诊断；review gate 初审发现的 direct wait adapter `#[track_caller]` 缺口已修复，`WaitOrigin` follow-up closure review 无 Apollyon / Keter / Euclid finding。阶段 0 checkpoint 已提交为 `61943888 sched-split: close wait-preempt phase zero`。阶段 1 已完成 scheduler-private mode、token-bound wait-sleep、preempt deferred 和语义化 schedule wrappers；经用户批准，原阶段 2 的裸 `schedule()` call-site 迁移子集也已并入本 checkpoint，避免保留兼容桥。
 
-**In Progress:** 无。等待阶段 0 checkpoint commit 后进入阶段 1。
+**In Progress:** 无。下一轮应处理阶段 2 / 阶段 3 剩余 proof、trace 和 runtime validation gate，而不是重做 wrapper split。
 
-**Open Blockers:** `KETER-001`、`KETER-004`、`KETER-005`、`KETER-006` 仍是 implementation feedback gates。阶段 0 若发现某个 shared wait caller 无法通过 entry split 表达，或 post-begin setup 依赖任意长 source scan，必须停止并回到 RFC review。
+**Open Blockers:** `KETER-001`、`KETER-004`、`KETER-005`、`KETER-006` 仍是 implementation feedback gates。后续若发现某个 shared wait caller 无法通过 entry split 表达，或 post-begin setup 依赖任意长 source scan，必须停止并回到 RFC review。
 
-**Next Action:** 阶段 1 `Scheduler-Private Mode 与 Wrapper 分流`。进入前继续保持阶段 write set 和 review gate 分工；代码实现与 review gate 仍由 subagent 执行。
+**Next Action:** 基于当前 checkpoint 推进剩余阶段 2 / 阶段 3：source-backed finite timeout proof、post-begin boundedness / deferred-count trace、iozone throughput 复核、nested active wait feedback routing，以及 register / limitation 更新边界。不要重新引入裸 `schedule()` 或无 token 的 wait-sleep helper。
 
 **Do Not Redo:** 不要把私有草稿路径写入公共 canonical 链接；不要把 caller origin 改成手写 operation 字符串；不要在阶段 0 顺手改 scheduler entry split；不要把 fanotify/source-owner nested wait panic 包装成本 RFC 内的 source-specific workaround。
 
@@ -172,3 +172,74 @@ just build
 结果：`git diff --check` clean；`mdbook build docs` 通过；`just build` 通过，只保留 build wrapper 的 cargo cache warning。`schedule()` / `Latch::begin_current()` / `Event::listen*()` 搜索结果与阶段 0 caller 分类一致。agent 未运行 QEMU / LTP。
 
 **结论：** 阶段 0 已关闭。未触发 write set expansion，也未发现需要回到 RFC review 的 accepted-contract 问题。后续可在阶段 0 checkpoint commit 后进入阶段 1。
+
+### 2026-07-06 - 阶段 1 Write Set 扩展批准
+
+**阶段：** 阶段 1 - Scheduler-Private Mode 与 Wrapper 分流。
+
+**触发：** Implementation worker `Chandrasekhar` 在代码修改前命中停止条件：`schedule_wait_sleep(...)` 必须证明传入 `WakeToken` 命名 current task 的当前 wait round，但原阶段 1 write set 只允许 `sched/mod.rs` 和必要时 `sched/processor.rs`。`sched/mod.rs` 能观察 `TaskSchedState::Waiting { state: Arc<WaitState>, .. }`，却没有可行为使用的 token/state identity 比较 API。
+
+**禁止路径：** 不使用 `WakeToken::wait_id()` / `WaitState::debug_id()` 驱动行为，因为这些是 diagnostic-only；不使用 `WakeToken::is_armed()` 证明 current wait identity 或 park-ready，因为 `Armed` 只表示 completion-open。
+
+**用户批准：** 用户已批准扩展。
+
+**扩展 write set：**
+
+- `anemone-kernel/src/sched/wait.rs`：仅允许增加 scheduler-private token/current-wait identity check，或等价 wait-core private permit。该接口不得暴露 `WaitState` 内部给 source owner，不得引入 source-local park-ready truth，不得新增 `WaitPrimitive`、operation 字符串、公开 `ScheduleCaller` 或第二套 wait identity。
+- `anemone-kernel/src/sched/mod.rs`：阶段 1 private mode、semantic wrappers、preempt deferred 和 runnable/wait-sleep/zombie 分流。
+- `anemone-kernel/src/sched/processor.rs`：仅在 `need_resched` 保存/恢复或 helper 暴露确实需要时触碰。
+
+**继续边界：** 若实现仍无法在不改变 wait identity、completion 线性化点、task sched-state owner 或 accepted contract 的前提下提供 token-bound wait-sleep，必须再次停止并回到 RFC review；不得退化成无 token 的泛用 `schedule_wait_sleep()`。
+
+### 2026-07-06 - 阶段 1 Scheduler Entry Split 实现与 Review Gate
+
+**阶段：** 阶段 1 - implementation / review。
+
+**Subagents：**
+
+- Implementation worker `Chandrasekhar` 执行代码修改。
+- Review worker `Kierkegaard` 执行只读 code review gate，使用 Anemone code review levels。
+
+**执行反馈 / write set：**
+
+- 首轮 implementation worker 停止并上报：仅用原阶段 1 write set 会迫使 `schedule_wait_sleep()` 走无 token helper 或 diagnostic id。用户批准最小扩展 `sched/wait.rs`，只提供 scheduler-private token/current-wait identity check。
+- 用户随后批准把原阶段 2 的 schedule-entry call-site 迁移子集并入当前 checkpoint，避免保留不自然的裸 `schedule()` 兼容桥。本反馈已同步回写 `implementation.md` 的阶段 1 执行反馈和 write set 扩展记录。
+- 未批准也未修改 fs source owner、iomux source register contract、signal delivery contract 或 source-local park-ready truth。
+
+**代码变更：**
+
+- `sched/wait.rs` 新增 `WakeToken::matches_wait_state()`，只用 `Arc::ptr_eq` 判断 token 是否命名当前 `TaskSchedState::Waiting` 中的 wait identity；该接口不证明 timeout 安装、source 注册或 park-ready。
+- `sched/mod.rs` 将裸 scheduler body 私有化为 `schedule_inner(mode)`，新增 scheduler-private `ScheduleMode::{WaitSleep, Preempt, Runnable, Zombie}` 和 `SchedulePreemptResult::{Scheduled, Deferred}`。
+- `schedule_wait_sleep(&WakeToken)` 是唯一消费 wait park intent 的 explicit sleep wrapper；token 已完成且 current 回到 `Runnable` 时走 no-park / abort-sleep，不切换；token mismatch、armed token 却无当前 wait、zombie 等路径均为 release invariant failure。
+- `schedule_preempt()` 在 `Waiting/PrePark` 下返回 `Deferred`，调用 `mark_need_resched()` 恢复已被 trap tail 清除的 resched 请求，不 park、不 requeue、不 `switch_out()`；`Waiting/Parked` 进入 preempt mode 是 release invariant failure。
+- `schedule_runnable()` / `schedule_idle()` / `schedule_zombie_never_return()` 分别表达 runnable、idle 和 zombie no-return 入口，不获得消费 `Waiting/PrePark` 的权限。
+- `schedule_wait_with_timeout()` 在安装 timeout callback 前 clone token 给 callback，随后用同一个 token 调 `schedule_wait_sleep()`；Event direct sleep、yield、idle、zombie exit 和四个 arch trap preempt 入口已迁移到对应 wrapper。裸 `schedule()` caller 已清零。
+
+**Review gate：**
+
+- `Kierkegaard` 未发现 Apollyon / Keter / Euclid finding。
+- reviewer 确认：无裸 `schedule()` caller；`schedule_wait_sleep()` token-bound 且用 pointer identity；`schedule_preempt()` deferred 路径在 `switch_out()` 前返回、恢复 `need_resched`、不 park、不 requeue；`Waiting/Parked` preempt 是 release panic；trap tail 在 `Deferred` 后运行 `dispose_deferred_tasks()`，真实 scheduled path 仍依赖 scheduler loop disposal；finite timeout helper 先安装 timeout callback，再 explicit wait sleep，already-completed wait 走 no-park / abort。
+
+**Validation:**
+
+```sh
+rg -n "schedule\(\)" anemone-kernel/src
+rg -n "WaitPrimitive|caller_tag|ScheduleCaller|operation:" anemone-kernel/src/sched anemone-kernel/src/arch anemone-kernel/src/task/api/exit/mod.rs
+rg -n "ScheduleMode|SchedulePreemptResult|schedule_inner|schedule_preempt|schedule_wait_sleep|schedule_runnable|schedule_idle|schedule_zombie|matches_wait_state" anemone-kernel/src/sched anemone-kernel/src/arch anemone-kernel/src/task/api/exit/mod.rs
+rg -n "local_requeue_current" anemone-kernel/src/sched/mod.rs anemone-kernel/src/sched/processor.rs
+git diff --check
+mdbook build docs
+just build
+```
+
+结果：
+
+- `rg -n "schedule\(\)" anemone-kernel/src` 无匹配。
+- `WaitPrimitive` / `caller_tag` / `ScheduleCaller` 无匹配；`operation:` 只命中 `sched/event.rs` 既有 unexpected-outcome diagnostic，不是本阶段新增 taxonomy。
+- wrapper / mode 搜索命中预期 scheduler、Event、idle、exit 和 arch trap call sites。
+- `local_requeue_current` 只保留在 runnable requeue、wait-sleep abort-park path 和函数定义处。
+- `git diff --check` clean。
+- `mdbook build docs` 通过。
+- controller 本地 `just build` 首次在 QEMU 生成 DTB 时失败：`sdcard-rv.img` 被外部 QEMU 占用，未进入代码编译阶段；用户确认该占用来自其本地 QEMU，并已在释放后完成一次 `just build` 验证通过。释放后 controller 复跑 `just build` 通过，只保留 build wrapper 的 cargo cache warning。agent 未运行 QEMU / LTP runtime profile。
+
+**结论：** 阶段 1 关闭。当前 checkpoint 完成 scheduler entry split 和裸 `schedule()` call-site 消除；仍不声明阶段 3 trace/runtime gate、iozone throughput 或 post-begin boundedness proof 已关闭。

@@ -44,8 +44,7 @@ impl TaskSchedState {
     }
 }
 
-/// Park latch state.  Phase 1 only creates the state container; `schedule()`
-/// starts consuming the latch when stale-safe wake placement lands.
+/// Park latch state consumed only through scheduler semantic entries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParkState {
     PrePark,
@@ -235,6 +234,14 @@ impl WakeToken {
 
     pub(super) fn is_armed(&self) -> bool {
         self.state.status() == WaitStateStatus::Armed
+    }
+
+    /// Scheduler-private identity check for the current task's sched-state.
+    ///
+    /// This is only a wait-round identity predicate. It does not prove timeout
+    /// installation, source registration, or park readiness.
+    pub(super) fn matches_wait_state(&self, state: &Arc<WaitState>) -> bool {
+        Arc::ptr_eq(&self.state, state)
     }
 }
 

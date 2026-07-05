@@ -9,6 +9,7 @@ use crate::prelude::*;
 
 use super::{
     higher_level::schedule_wait_with_timeout,
+    schedule_wait_sleep,
     wait::{self, ActiveWait, WaitOutcome, WaitReason, WakeMode, WakeResult, WakeToken},
 };
 
@@ -140,7 +141,7 @@ impl Event {
             unsafe {
                 drop(guard);
                 with_intr_disabled(|| {
-                    schedule();
+                    schedule_wait_sleep(listener.token());
                 });
                 guard = PreemptGuard::new();
             }
@@ -189,7 +190,7 @@ impl Event {
             unsafe {
                 drop(guard);
                 with_intr_disabled(|| {
-                    schedule();
+                    schedule_wait_sleep(listener.token());
                 });
                 guard = PreemptGuard::new();
             }

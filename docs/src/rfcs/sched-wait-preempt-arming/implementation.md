@@ -143,6 +143,11 @@ write set：
 
 - 阶段 0 caller 分类完成。
 
+执行反馈：
+
+- 2026-07-06 阶段 1 首轮实现发现：如果只在 `sched/mod.rs` 内拆出 `schedule_inner(mode)`，无法自然实现 token-bound `schedule_wait_sleep()`，因为 `sched/mod.rs` 能看到当前 `TaskSchedState::Waiting { state, .. }`，但 `WakeToken` 没有行为用的 current-wait identity 比较入口。用户批准把 `anemone-kernel/src/sched/wait.rs` 纳入阶段 1 最小扩展 write set，只允许提供 scheduler-private token/current-wait identity check 或等价 wait-core private permit；不得用 diagnostic `wait_id()` / `debug_id()` 或 completion-open `is_armed()` 代替 identity proof。
+- 同一轮反馈还批准阶段 1 直接迁移原阶段 2 中依赖裸 `schedule()` 的 schedule-entry call sites，避免为了保持阶段边界而保留不自然的兼容桥。该提前迁移只覆盖 trap preempt、Event explicit wait sleep、finite-timeout helper、yield、idle 和 zombie exit 的 wrapper 接入；不降低阶段 2 / 阶段 3 对 source-backed finite timeout proof、boundedness、trace 和 runtime validation 的要求。
+
 交付：
 
 - 将裸 `schedule()` 私有化为 `schedule_inner(mode)` 或等价函数。
@@ -192,6 +197,8 @@ write set：
 
 - `anemone-kernel/src/sched/mod.rs`
 - 如需返回值或 helper 暴露，允许同一 owner 内调整 `anemone-kernel/src/sched/processor.rs`
+- 经 2026-07-06 用户批准，允许最小调整 `anemone-kernel/src/sched/wait.rs`，只用于提供 scheduler-private token/current-wait identity check 或等价 wait-core private permit。
+- 经 2026-07-06 用户批准，允许提前迁移原阶段 2 的裸 `schedule()` call sites：`anemone-kernel/src/arch/riscv64/exception/trap/{utrap,ktrap}.rs`、`anemone-kernel/src/arch/loongarch64/exception/trap/{utrap,ktrap}.rs`、`anemone-kernel/src/sched/event.rs`、`anemone-kernel/src/sched/class/idle.rs`、`anemone-kernel/src/task/api/exit/mod.rs`。不得借此修改 fs source owner、iomux source register contract、signal delivery contract 或 source-local park-ready truth。
 
 验证：
 
@@ -334,11 +341,13 @@ rg -n "WaitStateStatus::Armed|WaitOutcome::Armed|WakeToken::is_armed|PollRegiste
 
 ## 实现期反馈记录
 
-- None。进入实现后按日期追加反馈来源、影响分类、是否保持目标/不变量、更新位置和 transaction devlog 链接。
+- 2026-07-06：阶段 1 implementation worker 命中 write-set stop condition。token-bound `schedule_wait_sleep()` 需要行为级 current-wait identity proof；用户批准把 `sched/wait.rs` 纳入最小扩展写集，并禁止使用 diagnostic id 或 `is_armed()` 作为行为依据。目标、不变量、状态所有权和 completion 线性化点不变；执行事实见 transaction devlog。
+- 2026-07-06：用户批准阶段 1 吸收原阶段 2 的 schedule-entry call-site 迁移子集，避免留下裸 `schedule()` 兼容桥。该反馈改变阶段 write set / 执行顺序，但不改变 accepted contract、验证 floor 或后续 trace/runtime gate；执行事实见 transaction devlog。
 
 ## Write Set 扩展记录
 
-- None。
+- 2026-07-06：阶段 1 新增 `anemone-kernel/src/sched/wait.rs`，范围限定为 scheduler-private wait identity check / private permit。
+- 2026-07-06：阶段 1 提前纳入原阶段 2 的 schedule-entry call sites：arch trap preempt、`sched/event.rs` explicit wait sleep、`sched/class/idle.rs` idle schedule、`task/api/exit/mod.rs` zombie no-return。未批准 fs source owner、iomux source register、signal delivery 或 source-local parkability 状态变更。
 
 ## 结构维护记录
 
