@@ -8,7 +8,10 @@ use crate::{
     task::files::Fd,
 };
 
-use super::{current_file_and_uspace, load_iovecs, read_iovecs};
+use super::{
+    current_file_and_uspace,
+    request::{ReadRequest, load_iovecs},
+};
 
 #[syscall(SYS_READV)]
 fn sys_readv(
@@ -18,5 +21,5 @@ fn sys_readv(
 ) -> Result<u64, SysError> {
     let (file, uspace) = current_file_and_uspace(fd)?;
     let iovecs = load_iovecs(&uspace, iov, iovcnt)?;
-    read_iovecs(&file, &uspace, &iovecs, None)
+    ReadRequest::vectored(&file, &uspace, &iovecs).execute()
 }

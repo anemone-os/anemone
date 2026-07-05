@@ -8,7 +8,10 @@ use crate::{
     task::files::Fd,
 };
 
-use super::{checked_nonnegative_offset, current_file_and_uspace, read_into_user_buffer};
+use super::{
+    current_file_and_uspace,
+    request::{ReadRequest, checked_nonnegative_offset},
+};
 
 #[syscall(SYS_PREAD64)]
 fn sys_pread64(
@@ -19,5 +22,7 @@ fn sys_pread64(
 ) -> Result<u64, SysError> {
     let offset = checked_nonnegative_offset(offset)?;
     let (file, uspace) = current_file_and_uspace(fd)?;
-    read_into_user_buffer(&file, &uspace, buf, count, Some(offset)).map(|n| n as u64)
+    ReadRequest::single(&file, &uspace, buf, count)
+        .at(offset)
+        .execute()
 }

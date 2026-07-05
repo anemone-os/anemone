@@ -8,6 +8,7 @@
 	- [2026-06-08 至 2026-06-21](./devlog/2026-06-08_to_2026-06-21.md)
 	- [2026-06-22 至 2026-07-05](./devlog/2026-06-22_to_2026-07-05.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-07-05 - read-write request 结构整理](./devlog/changes/2026-07-05-read-write-request-structure.md)
 		- [2026-06-23 - User-test LTP judge 输出兼容](./devlog/changes/2026-06-23-user-test-ltp-judge-compat.md)
 		- [2026-06-23 - User-test LTP runner 结构拆分](./devlog/changes/2026-06-23-user-test-ltp-structure-cleanup.md)
 		- [2026-06-18 - RFC workflow feedback loop](./devlog/changes/2026-06-18-rfc-feedback-loop.md)

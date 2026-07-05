@@ -8,7 +8,7 @@ use crate::{
     task::files::Fd,
 };
 
-use super::{current_file_and_uspace, write_from_user_buffer};
+use super::{current_file_and_uspace, request::WriteRequest};
 
 #[syscall(SYS_WRITE)]
 fn sys_write(
@@ -17,5 +17,5 @@ fn sys_write(
     count: usize,
 ) -> Result<u64, SysError> {
     let (file, uspace) = current_file_and_uspace(fd)?;
-    write_from_user_buffer(&file, &uspace, buf, count, None).map(|n| n as u64)
+    WriteRequest::single(&file, &uspace, buf, count).execute()
 }
