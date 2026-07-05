@@ -4,7 +4,10 @@
 //! - https://elixir.bootlin.com/linux/v6.6.32/source/include/linux/fdtable.h
 
 use crate::{
-    fs::{FcntlAccess, FcntlCtx, FileFcntlCmd, FileIoCtx, FileOpStatusFlags},
+    fs::{
+        FcntlAccess, FcntlCtx, FileFcntlCmd, FileIoCtx, FileOpStatusFlags, UserBufferSink,
+        UserBufferSource,
+    },
     prelude::{handler::TryFromSyscallArg, *},
     utils::bitmap::Bitmap,
 };
@@ -80,13 +83,14 @@ impl Clone for FileDesc {
 /// copyout, final published-fd release, or generic notification suppression.
 #[derive(Clone, Copy)]
 pub struct FileDescOps {
-    /// Optional direct userspace read operation for files whose read
-    /// transaction cannot be modeled as kernel-buffer fill followed by
-    /// generic copyout.
-    pub read_user: Option<for<'a> fn(OpenedFileReadUserCtx<'a>) -> Result<usize, SysError>>,
+    /// Optional opened-description read transaction for files whose read
+    /// operation cannot be modeled as kernel-buffer fill followed by generic
+    /// copyout. This is not an ordinary filesystem direct-user fast path.
+    pub read_user_transaction:
+        Option<for<'dst, 'buf> fn(OpenedFileReadUserCtx<'dst, 'buf>) -> Result<usize, SysError>>,
     /// Whether successful direct read-user dispatch is an ordinary access
-    /// event source. Protocol/control fds can use read_user for copyout while
-    /// remaining outside file-content access notification.
+    /// event source. Protocol/control fds can use read_user_transaction for
+    /// copyout while remaining outside file-content access notification.
     pub notify_read_user_access: bool,
     /// Runs when the last published fd-table slot for this opened file
     /// description is removed. Transient syscall refs do not delay it.
@@ -99,7 +103,7 @@ pub struct FileDescOps {
 impl Default for FileDescOps {
     fn default() -> Self {
         Self {
-            read_user: None,
+            read_user_transaction: None,
             notify_read_user_access: true,
             final_release: None,
             notification_suppressed: false,
@@ -110,7 +114,10 @@ impl Default for FileDescOps {
 impl core::fmt::Debug for FileDescOps {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("FileDescOps")
-            .field("read_user", &self.read_user.is_some())
+            .field(
+                "read_user_transaction",
+                &self.read_user_transaction.is_some(),
+            )
             .field("notify_read_user_access", &self.notify_read_user_access)
             .field("final_release", &self.final_release.is_some())
             .field("notification_suppressed", &self.notification_suppressed)
@@ -118,18 +125,11 @@ impl core::fmt::Debug for FileDescOps {
     }
 }
 
-pub struct OpenedFileReadUserCtx<'a> {
-    pub file: &'a File,
+pub struct OpenedFileReadUserCtx<'ctx, 'buf> {
+    pub file: &'ctx File,
     pub status_flags: FileStatusFlags,
-    pub uspace: &'a UserSpaceHandle,
-    pub segments: &'a [OpenedFileReadUserSegment],
+    pub dst: &'ctx mut UserBufferSink<'buf>,
     pub notification_suppressed: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct OpenedFileReadUserSegment {
-    pub base: VirtAddr,
-    pub len: usize,
 }
 
 pub struct OpenedFileFinalReleaseCtx<'a> {
@@ -346,21 +346,19 @@ impl FileDesc {
         self.pfile.description_ops.notify_read_user_access
     }
 
-    pub fn read_user(
+    pub fn read_user_transaction(
         &self,
-        uspace: &UserSpaceHandle,
-        segments: &[OpenedFileReadUserSegment],
+        dst: &mut UserBufferSink<'_>,
     ) -> Option<Result<usize, SysError>> {
         if !self.can_read() {
             return Some(Err(SysError::BadFileDescriptor));
         }
 
-        let read_user = self.pfile.description_ops.read_user?;
-        Some(read_user(OpenedFileReadUserCtx {
+        let read_user_transaction = self.pfile.description_ops.read_user_transaction?;
+        Some(read_user_transaction(OpenedFileReadUserCtx {
             file: self.pfile.file.as_ref(),
             status_flags: self.file_flags(),
-            uspace,
-            segments,
+            dst,
             notification_suppressed: self.notifications_suppressed(),
         }))
     }
@@ -376,6 +374,22 @@ impl FileDesc {
             .map_err(|e| e.into())
     }
 
+    pub(crate) fn read_user(
+        &self,
+        dst: &mut UserBufferSink<'_>,
+    ) -> Option<Result<usize, SysError>> {
+        let file = self.pfile.file.as_ref();
+        if !file.has_read_user_at() {
+            return None;
+        }
+        if !self.can_read() {
+            return Some(Err(SysError::BadFileDescriptor));
+        }
+
+        let ctx = FileIoCtx::new(self.file_flags().to_file_op_status_flags());
+        Some(file.read_user_with_ctx(dst, ctx).map_err(|e| e.into()))
+    }
+
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize, SysError> {
         if !self.can_read() {
             return Err(SysError::BadFileDescriptor);
@@ -388,6 +402,26 @@ impl FileDesc {
             .file
             .read_at_with_ctx(offset, buf, ctx)
             .map_err(|e| e.into())
+    }
+
+    pub(crate) fn read_user_at(
+        &self,
+        offset: usize,
+        dst: &mut UserBufferSink<'_>,
+    ) -> Option<Result<usize, SysError>> {
+        let file = self.pfile.file.as_ref();
+        if !file.has_read_user_at() {
+            return None;
+        }
+        if !self.can_read() || self.is_path_only() {
+            return Some(Err(SysError::BadFileDescriptor));
+        }
+
+        let ctx = FileIoCtx::new(self.file_flags().to_file_op_status_flags());
+        Some(
+            file.read_user_at_with_ctx(offset, dst, ctx)
+                .map_err(|e| e.into()),
+        )
     }
 
     /// This applies to both write and append mode.
@@ -434,6 +468,59 @@ impl FileDesc {
         }
         file.write_at_with_ctx(offset, buf, ctx)
             .map_err(|e| e.into())
+    }
+
+    pub(crate) fn write_user(
+        &self,
+        src: &mut UserBufferSource<'_>,
+    ) -> Option<Result<usize, SysError>> {
+        let file = self.pfile.file.as_ref();
+        if !file.has_write_user_at() {
+            return None;
+        }
+
+        let flags = self.file_flags();
+        if !self.can_write() {
+            return Some(Err(SysError::BadFileDescriptor));
+        }
+        if file.is_stream() {
+            return Some(Err(SysError::BadFileDescriptor));
+        }
+
+        let ctx = FileIoCtx::new(flags.to_file_op_status_flags());
+        Some(if flags.contains(FileStatusFlags::APPEND) {
+            file.append_user_with_ctx(src, ctx).map_err(|e| e.into())
+        } else {
+            file.write_user_with_ctx(src, ctx).map_err(|e| e.into())
+        })
+    }
+
+    pub(crate) fn write_user_at(
+        &self,
+        offset: usize,
+        src: &mut UserBufferSource<'_>,
+    ) -> Option<Result<usize, SysError>> {
+        let file = self.pfile.file.as_ref();
+        if !file.has_write_user_at() {
+            return None;
+        }
+
+        let flags = self.file_flags();
+        if !self.can_write() || self.is_path_only() {
+            return Some(Err(SysError::BadFileDescriptor));
+        }
+        if file.is_stream() {
+            return Some(Err(SysError::BadFileDescriptor));
+        }
+
+        let ctx = FileIoCtx::new(flags.to_file_op_status_flags());
+        Some(if flags.contains(FileStatusFlags::APPEND) {
+            file.append_user_at_current_end_with_ctx(src, ctx)
+                .map_err(|e| e.into())
+        } else {
+            file.write_user_at_with_ctx(offset, src, ctx)
+                .map_err(|e| e.into())
+        })
     }
 
     pub fn truncate(&self, len: u64, cred: &CredentialSet) -> Result<(), SysError> {

@@ -8,7 +8,10 @@ use crate::{
     task::files::Fd,
 };
 
-use super::{current_file_and_uspace, load_iovecs, write_iovecs};
+use super::{
+    current_file_and_uspace,
+    request::{WriteRequest, load_iovecs},
+};
 
 #[syscall(SYS_WRITEV)]
 fn sys_writev(
@@ -18,5 +21,5 @@ fn sys_writev(
 ) -> Result<u64, SysError> {
     let (file, uspace) = current_file_and_uspace(fd)?;
     let iovecs = load_iovecs(&uspace, iov, iovcnt)?;
-    write_iovecs(&file, &uspace, &iovecs, None)
+    WriteRequest::vectored(&file, &uspace, &iovecs).execute()
 }

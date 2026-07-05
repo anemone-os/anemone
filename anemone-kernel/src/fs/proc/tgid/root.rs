@@ -52,6 +52,8 @@ static TGID_ROOT_FILE_OPS: FileOps = FileOps {
     write: |_, _, _, _| Err(SysError::NotSupported),
     read_at: |_, _, _, _| Err(SysError::NotSupported),
     write_at: |_, _, _, _| Err(SysError::NotSupported),
+    read_user_at: None,
+    write_user_at: None,
     check_status_flags: accept_file_op_status_flags,
     seek: |_, _, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotSupported),

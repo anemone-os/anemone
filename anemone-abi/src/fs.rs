@@ -201,6 +201,14 @@ pub mod linux {
             pub f_flags: u64,
             pub __spare: [u64; 4],
         }
+
+        pub const EXT4_SUPER_MAGIC: u64 = 0xEF53;
+        pub const RAMFS_MAGIC: u64 = 0x8584_58f6;
+        pub const TMPFS_MAGIC: u64 = 0x0102_1994;
+        pub const PROC_SUPER_MAGIC: u64 = 0x9fa0;
+        pub const ANON_INODE_FS_MAGIC: u64 = 0x0904_1934;
+
+        pub const ST_RDONLY: u64 = 0x0001;
     }
 
     pub mod dirent {

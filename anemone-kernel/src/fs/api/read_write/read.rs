@@ -8,7 +8,7 @@ use crate::{
     task::files::Fd,
 };
 
-use super::{current_file_and_uspace, read_into_user_buffer};
+use super::{current_file_and_uspace, request::ReadRequest};
 
 #[syscall(SYS_READ)]
 fn sys_read(
@@ -17,5 +17,5 @@ fn sys_read(
     count: usize,
 ) -> Result<u64, SysError> {
     let (file, uspace) = current_file_and_uspace(fd)?;
-    read_into_user_buffer(&file, &uspace, buf, count, None).map(|n| n as u64)
+    ReadRequest::single(&file, &uspace, buf, count).execute()
 }

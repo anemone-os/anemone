@@ -1,5 +1,8 @@
 use crate::{
-    fs::iomux::{PollEvent, PollRegisterResult, PollRequest},
+    fs::{
+        iomux::{PollEvent, PollRegisterResult, PollRequest},
+        uio::{UserBufferSink, UserBufferSource},
+    },
     prelude::*,
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
@@ -335,6 +338,8 @@ pub struct FileOps {
     pub write: fn(&File, pos: &mut usize, buf: &[u8], ctx: FileIoCtx) -> Result<usize, SysError>,
     pub read_at: fn(&File, pos: usize, buf: &mut [u8], ctx: FileIoCtx) -> Result<usize, SysError>,
     pub write_at: fn(&File, pos: usize, buf: &[u8], ctx: FileIoCtx) -> Result<usize, SysError>,
+    pub(crate) read_user_at: Option<ReadUserAtHook>,
+    pub(crate) write_user_at: Option<WriteUserAtHook>,
     /// Validate a candidate opened-description status snapshot.
     ///
     /// This hook must be side-effect free: it may reject unsupported status
@@ -368,6 +373,20 @@ pub struct FileOps {
     pub fcntl: Option<FileFcntlHook>,
     pub ioctl: for<'a> fn(&File, IoctlCtx<'a>) -> Result<u64, SysError>,
 }
+
+pub(crate) type ReadUserAtHook = for<'a> fn(
+    &File,
+    pos: usize,
+    dst: &mut UserBufferSink<'a>,
+    ctx: FileIoCtx,
+) -> Result<(), SysError>;
+
+pub(crate) type WriteUserAtHook = for<'a> fn(
+    &File,
+    pos: usize,
+    src: &mut UserBufferSource<'a>,
+    ctx: FileIoCtx,
+) -> Result<usize, SysError>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileFcntlOutcome {
@@ -588,6 +607,8 @@ impl File {
             write: |_, _, _, _| Err(SysError::BadFileDescriptor),
             read_at: |_, _, _, _| Err(SysError::BadFileDescriptor),
             write_at: |_, _, _, _| Err(SysError::BadFileDescriptor),
+            read_user_at: None,
+            write_user_at: None,
             check_status_flags: accept_file_op_status_flags,
             seek: |_, _, _| Err(SysError::BadFileDescriptor),
             read_dir: |_, _, _| Err(SysError::BadFileDescriptor),
@@ -655,6 +676,60 @@ impl File {
         (self.ops.read)(self, &mut *pos, buf, ctx)
     }
 
+    pub(crate) fn has_read_user_at(&self) -> bool {
+        self.ops.read_user_at.is_some()
+    }
+
+    pub(crate) fn has_write_user_at(&self) -> bool {
+        self.ops.write_user_at.is_some()
+    }
+
+    fn call_read_user_at(
+        &self,
+        read_user_at: ReadUserAtHook,
+        pos: usize,
+        dst: &mut UserBufferSink<'_>,
+        ctx: FileIoCtx,
+    ) -> Result<usize, SysError> {
+        let mark = dst.mark();
+        let remaining = dst.remaining();
+        let result = read_user_at(self, pos, dst, ctx);
+        let copied = dst.bytes_since(mark);
+        assert!(
+            copied <= remaining,
+            "direct-user read advanced beyond requested user-buffer range"
+        );
+
+        match result {
+            Ok(()) => Ok(copied),
+            Err(err) if copied > 0 => Ok(copied),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub(crate) fn read_user_with_ctx(
+        &self,
+        dst: &mut UserBufferSink<'_>,
+        ctx: FileIoCtx,
+    ) -> Result<usize, SysError> {
+        if dst.remaining() == 0 {
+            return Ok(0);
+        }
+        assert!(
+            !self.is_stream(),
+            "stream file installed positioned direct-user read hook"
+        );
+        let read_user_at = self
+            .ops
+            .read_user_at
+            .expect("direct-user read wrapper called without hook");
+
+        let mut pos = self.pos.lock();
+        let read = self.call_read_user_at(read_user_at, *pos, dst, ctx)?;
+        *pos = pos.checked_add(read).ok_or(SysError::InvalidArgument)?;
+        Ok(read)
+    }
+
     /// Reading at specified offset without changing the file cursor.
     pub fn read_at(&self, pos: usize, buf: &mut [u8]) -> Result<usize, SysError> {
         self.read_at_with_ctx(pos, buf, FileIoCtx::blocking())
@@ -671,6 +746,22 @@ impl File {
         }
 
         (self.ops.read_at)(self, pos, buf, ctx)
+    }
+
+    pub(crate) fn read_user_at_with_ctx(
+        &self,
+        pos: usize,
+        dst: &mut UserBufferSink<'_>,
+        ctx: FileIoCtx,
+    ) -> Result<usize, SysError> {
+        if dst.remaining() == 0 {
+            return Ok(0);
+        }
+        let read_user_at = self
+            .ops
+            .read_user_at
+            .expect("direct-user read wrapper called without hook");
+        self.call_read_user_at(read_user_at, pos, dst, ctx)
     }
 
     pub fn read_exact(&self, mut buf: &mut [u8]) -> Result<(), SysError> {
@@ -733,6 +824,56 @@ impl File {
         Ok(written)
     }
 
+    fn call_write_user_at(
+        &self,
+        write_user_at: WriteUserAtHook,
+        pos: usize,
+        src: &mut UserBufferSource<'_>,
+        ctx: FileIoCtx,
+    ) -> Result<usize, SysError> {
+        let mark = src.mark();
+        let written = write_user_at(self, pos, src, ctx)?;
+        assert!(
+            written <= src.bytes_since(mark),
+            "direct-user write committed more bytes than it copied"
+        );
+        src.keep_prefix_from(mark, written);
+        Ok(written)
+    }
+
+    fn update_after_write(&self, written: usize) {
+        if written > 0 {
+            let cred = get_current_task().cred();
+            self.inode()
+                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+        }
+    }
+
+    pub(crate) fn write_user_with_ctx(
+        &self,
+        src: &mut UserBufferSource<'_>,
+        ctx: FileIoCtx,
+    ) -> Result<usize, SysError> {
+        if src.remaining() == 0 {
+            return Ok(0);
+        }
+        assert!(
+            !self.is_stream(),
+            "stream file installed positioned direct-user write hook"
+        );
+        self.ensure_regular_content_writable()?;
+
+        let write_user_at = self
+            .ops
+            .write_user_at
+            .expect("direct-user write wrapper called without hook");
+        let mut pos = self.pos.lock();
+        let written = self.call_write_user_at(write_user_at, *pos, src, ctx)?;
+        *pos = pos.checked_add(written).ok_or(SysError::InvalidArgument)?;
+        self.update_after_write(written);
+        Ok(written)
+    }
+
     /// Writing at specified offset without changing the file cursor.
     pub fn write_at(&self, pos: usize, buf: &[u8]) -> Result<usize, SysError> {
         self.write_at_with_ctx(pos, buf, FileIoCtx::blocking())
@@ -757,6 +898,26 @@ impl File {
                 .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
         }
 
+        Ok(written)
+    }
+
+    pub(crate) fn write_user_at_with_ctx(
+        &self,
+        pos: usize,
+        src: &mut UserBufferSource<'_>,
+        ctx: FileIoCtx,
+    ) -> Result<usize, SysError> {
+        if src.remaining() == 0 {
+            return Ok(0);
+        }
+        self.ensure_regular_content_writable()?;
+
+        let write_user_at = self
+            .ops
+            .write_user_at
+            .expect("direct-user write wrapper called without hook");
+        let written = self.call_write_user_at(write_user_at, pos, src, ctx)?;
+        self.update_after_write(written);
         Ok(written)
     }
 
@@ -787,6 +948,33 @@ impl File {
         Ok(written)
     }
 
+    pub(crate) fn append_user_with_ctx(
+        &self,
+        src: &mut UserBufferSource<'_>,
+        ctx: FileIoCtx,
+    ) -> Result<usize, SysError> {
+        if src.remaining() == 0 {
+            return Ok(0);
+        }
+        assert!(
+            !self.is_stream(),
+            "stream file installed positioned direct-user write hook"
+        );
+        self.ensure_regular_content_writable()?;
+
+        let sz = self.inode().get_attr()?.size as usize;
+        let write_user_at = self
+            .ops
+            .write_user_at
+            .expect("direct-user write wrapper called without hook");
+        let mut pos = self.pos.lock();
+        *pos = sz;
+        let written = self.call_write_user_at(write_user_at, *pos, src, ctx)?;
+        *pos = pos.checked_add(written).ok_or(SysError::InvalidArgument)?;
+        self.update_after_write(written);
+        Ok(written)
+    }
+
     /// Append without changing the file cursor.
     pub fn append_at_current_end(&self, buf: &[u8]) -> Result<usize, SysError> {
         self.append_at_current_end_with_ctx(buf, FileIoCtx::blocking())
@@ -813,6 +1001,29 @@ impl File {
             self.inode()
                 .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
         }
+        Ok(written)
+    }
+
+    pub(crate) fn append_user_at_current_end_with_ctx(
+        &self,
+        src: &mut UserBufferSource<'_>,
+        ctx: FileIoCtx,
+    ) -> Result<usize, SysError> {
+        if src.remaining() == 0 {
+            return Ok(0);
+        }
+        self.ensure_regular_content_writable()?;
+
+        let append_pos = self.inode().get_attr()?.size as usize;
+        let write_user_at = self
+            .ops
+            .write_user_at
+            .expect("direct-user write wrapper called without hook");
+        let written = {
+            let _pos = self.pos.lock();
+            self.call_write_user_at(write_user_at, append_pos, src, ctx)?
+        };
+        self.update_after_write(written);
         Ok(written)
     }
 

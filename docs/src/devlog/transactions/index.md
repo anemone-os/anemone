@@ -19,6 +19,7 @@
 
 ## Completed
 
+- [VFS Direct User I/O](./2026-06-29-vfs-direct-user-io.md)
 - [Threaded Timer Event](./2026-06-20-threaded-timer-event.md)
 - [KThread](./2026-06-14-kthread.md)
 - [Inode Shrinker](./2026-06-14-inode-shrinker.md)

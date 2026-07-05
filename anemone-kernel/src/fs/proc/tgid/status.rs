@@ -99,6 +99,8 @@ static TGID_STATUS_FILE_OPS: FileOps = FileOps {
     write: |_, _, _, _| Err(SysError::NotSupported),
     read_at: tgid_status_read_at,
     write_at: |_, _, _, _| Err(SysError::NotSupported),
+    read_user_at: None,
+    write_user_at: None,
     check_status_flags: accept_file_op_status_flags,
     seek: tgid_status_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),

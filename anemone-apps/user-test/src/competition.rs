@@ -6,7 +6,7 @@ use anemone_rs::{
 
 const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "basic_testcode.sh",
-    // "lua_testcode.sh",
+    "lua_testcode.sh",
     // "busybox_testcode.sh",
     // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
@@ -19,7 +19,7 @@ const GLIBC_TEST_SCRIPTS: &[&str] = &[
 ];
 const MUSL_TEST_SCRIPTS: &[&str] = &[
     // "basic_testcode.sh",
-    // "lua_testcode.sh",
+    "lua_testcode.sh",
     // "busybox_testcode.sh",
     // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
@@ -80,12 +80,15 @@ fn ensure_script_entrypoint_if_present(path: &str) {
 }
 
 fn prepare_testcode(family: &str) {
-    // The contest sdcard ships some helpers as bare shell command lists.  RV
-    // userland happens to fall back to a shell after execve(2) returns ENOEXEC,
-    // while the LA BusyBox/libc combination reports Exec format error.  Make
-    // the in-guest helper entrypoints explicit so testcase scripts do not
-    // depend on libc- or shell-specific ENOEXEC fallback behavior.
+    // The contest sdcard ships some helper scripts either without a shebang or
+    // without execute bits.  RV userland happens to fall back to a shell after
+    // execve(2) returns ENOEXEC, while the LA BusyBox/libc combination reports
+    // Exec format error; lua_testcode.sh also directly execs ./test.sh, so a
+    // missing execute bit becomes EACCES.  Normalize only these in-image helper
+    // entrypoints at runtime so testcase scripts do not depend on image mode
+    // drift or libc-/shell-specific ENOEXEC fallback behavior.
     for script in [
+        format!("/{family}/test.sh"),
         format!("/{family}/basic/run-all.sh"),
         format!("/{family}/run-static.sh"),
         format!("/{family}/run-dynamic.sh"),
