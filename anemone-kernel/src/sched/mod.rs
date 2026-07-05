@@ -31,6 +31,7 @@ pub use latch::{Latch, LatchCancelReason, LatchTrigger, LatchWaitOutcome};
 
 pub mod class;
 mod wait;
+pub(crate) use wait::assert_current_not_in_active_wait;
 pub use wait::{ParkState, TaskSchedState, WaitState, WakeEnqueueResult};
 
 /// Core scheduler loop. Called by bootstrap code.
@@ -373,6 +374,7 @@ mod higher_level {
     /// This is the narrow public adapter for non-Event syscall waits. Callers
     /// can provide a precheck that wins the round by cancellation, but they
     /// never receive the wait token or raw lifecycle operations.
+    #[track_caller]
     pub fn wait_current_with_timeout<F>(
         task: &Arc<Task>,
         interruptible: bool,

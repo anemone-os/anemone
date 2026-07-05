@@ -7,6 +7,7 @@
 use core::{
     fmt::{Debug, Formatter},
     marker::PhantomData,
+    panic::Location,
 };
 
 use crate::prelude::*;
@@ -88,23 +89,54 @@ pub(super) enum WaitStateStatus {
     Retired,
 }
 
-pub struct WaitState {
-    status: NoIrqRwLock<WaitStateStatus>,
-    /// Diagnostic creator tid captured for stale tokens and debug dumps. Wait
-    /// ownership is not keyed by this field; `Arc<WaitState>` identity is the
-    /// protocol truth source.
+/// Diagnostic-only origin metadata for one wait round.
+///
+/// This is not part of wait identity and must not drive behavior,
+/// wake/cancel/retire decisions, source registration truth, park permission,
+/// or scheduler mode. `Arc<WaitState>` identity and wait-core state
+/// transitions remain the protocol truth sources.
+struct WaitOrigin {
+    /// Diagnostic creator tid captured for stale tokens and debug dumps only.
     created_by: Tid,
     /// Diagnostic creation timestamp used to reason about stuck or stale waits.
-    /// It must not drive wake, cancel, or retirement decisions.
     created_at: Instant,
+    /// Diagnostic-only begin call site captured with `Location::caller()`.
+    begin_caller: &'static Location<'static>,
+}
+
+impl WaitOrigin {
+    fn new(task: &Task, begin_caller: &'static Location<'static>) -> Self {
+        Self {
+            created_by: task.tid(),
+            created_at: Instant::now(),
+            begin_caller,
+        }
+    }
+}
+
+impl Debug for WaitOrigin {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("WaitOrigin")
+            .field("created_by", &self.created_by)
+            .field("created_at", &self.created_at)
+            .field("begin_caller", &self.begin_caller)
+            .finish()
+    }
+}
+
+pub struct WaitState {
+    status: NoIrqRwLock<WaitStateStatus>,
+    /// Diagnostic-only metadata. It must not drive behavior, wait identity,
+    /// wake/cancel/retire decisions, source registration truth, park
+    /// permission, or scheduler mode.
+    origin: WaitOrigin,
 }
 
 impl WaitState {
-    fn new(task: &Task) -> Arc<Self> {
+    fn new(task: &Task, begin_caller: &'static Location<'static>) -> Arc<Self> {
         Arc::new(Self {
             status: NoIrqRwLock::new(WaitStateStatus::Armed),
-            created_by: task.tid(),
-            created_at: Instant::now(),
+            origin: WaitOrigin::new(task, begin_caller),
         })
     }
 
@@ -116,6 +148,10 @@ impl WaitState {
     /// equality key; use `Arc::ptr_eq` or `WakeToken::same_wait`.
     pub fn debug_id(&self) -> usize {
         self as *const Self as usize
+    }
+
+    fn begin_caller(&self) -> &'static Location<'static> {
+        self.origin.begin_caller
     }
 
     fn cancel_if_armed(&self, reason: WaitReason) -> WaitResult {
@@ -157,8 +193,7 @@ impl Debug for WaitState {
         f.debug_struct("WaitState")
             .field("id", &self.debug_id())
             .field("status", &self.status())
-            .field("created_by", &self.created_by)
-            .field("created_at", &self.created_at)
+            .field("origin", &self.origin)
             .finish()
     }
 }
@@ -227,6 +262,7 @@ pub(super) struct ActiveWait {
 }
 
 impl ActiveWait {
+    #[track_caller]
     pub fn begin(task: &Arc<Task>, interruptible: bool) -> Self {
         let begin = begin_wait(task, interruptible);
         let (guard, token) = begin.into_parts();
@@ -345,8 +381,10 @@ impl RequeuePermit<'_> {
 /// The linearization point is the task scheduling-state transaction.  This API
 /// stays private to the wait core.  Wait adapters should use [ActiveWait]
 /// instead of reaching for raw lifecycle primitives.
+#[track_caller]
 fn begin_wait(task: &Arc<Task>, interruptible: bool) -> BeginWait {
-    let state = WaitState::new(task);
+    let begin_caller = Location::caller();
+    let state = WaitState::new(task, begin_caller);
     let guard = WaitGuard {
         task: task.clone(),
         state: state.clone(),
@@ -356,19 +394,33 @@ fn begin_wait(task: &Arc<Task>, interruptible: bool) -> BeginWait {
     };
 
     task.update_sched_state_with(|prev| {
-        assert!(
-            matches!(prev, TaskSchedState::Runnable),
-            "begin_wait requires a runnable task, got {:?}",
-            prev
-        );
-        (
-            TaskSchedState::Waiting {
-                state: state.clone(),
-                interruptible,
-                park: ParkState::PrePark,
+        match prev {
+            TaskSchedState::Runnable => (
+                TaskSchedState::Waiting {
+                    state: state.clone(),
+                    interruptible,
+                    park: ParkState::PrePark,
+                },
+                (),
+            ),
+            TaskSchedState::Waiting { state: existing, .. } => {
+                panic!(
+                    "begin_wait nested active wait: task={} existing_wait={:#x} existing_begin={} new_begin={}",
+                    task.tid(),
+                    existing.debug_id(),
+                    existing.begin_caller(),
+                    begin_caller,
+                );
             },
-            (),
-        )
+            other => {
+                panic!(
+                    "begin_wait requires a runnable task: task={} state={:?} new_begin={}",
+                    task.tid(),
+                    other,
+                    begin_caller,
+                );
+            },
+        }
     });
 
     kdebugln!(
@@ -379,6 +431,21 @@ fn begin_wait(task: &Arc<Task>, interruptible: bool) -> BeginWait {
     );
 
     BeginWait { guard, token }
+}
+
+#[track_caller]
+pub(crate) fn assert_current_not_in_active_wait() {
+    let sleep_attempt = Location::caller();
+    let task = crate::sched::get_current_task();
+    if let TaskSchedState::Waiting { state, .. } = task.sched_state() {
+        panic!(
+            "nested scheduler wait attempt: task={} existing_wait={:#x} existing_begin={} sleep_attempt={}",
+            task.tid(),
+            state.debug_id(),
+            state.begin_caller(),
+            sleep_attempt,
+        );
+    }
 }
 
 /// Cancel a wait round owned by `guard`.

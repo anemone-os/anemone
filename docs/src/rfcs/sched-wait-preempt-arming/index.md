@@ -1,12 +1,12 @@
 # RFC-20260618-sched-wait-preempt-arming
 
-**状态：** Accepted
+**状态：** Active
 **负责人：** doruche, Codex
 **最后更新：** 2026-07-06
 **领域：** scheduler / wait core / kernel preempt / latch / iomux / timer / signal
-**事务日志：** None
+**事务日志：** [2026-07-06-sched-wait-preempt-arming](../../devlog/transactions/2026-07-06-sched-wait-preempt-arming.md)
 **开放问题：** 见 [Tracking Issues](./tracking-issues.md)
-**下一步：** 文档层 review 当前 open tracking issues；若进入实现，先建立事务日志，再按迁移实施计划推进阶段 0。
+**下一步：** 按 [迁移实施计划](./implementation.md) 推进阶段 0；代码实现和 review gate 均由 subagent 执行。
 
 ## 摘要
 

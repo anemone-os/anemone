@@ -1,11 +1,11 @@
 # Sched Wait Preempt Arming 迁移实施计划
 
-**状态：** Draft / Direction Selected
+**状态：** Active
 **最后更新：** 2026-07-06
 **父 RFC：** [RFC-20260618-sched-wait-preempt-arming](./index.md)
 **不变量：** [不变量需求](./invariants.md)
 
-本文选择 schedule entry split / scheduler-private narrow mode 作为第一阶段实现方向。核心目标是让 trap return 等 involuntary preempt 入口不能消费 wait-core `PrePark`，同时保留 explicit wait sleep 对 `PrePark -> Parked` 的正常语义。
+本文选择 schedule entry split / scheduler-private narrow mode 作为第一阶段实现方向。核心目标是让 trap return 等 involuntary preempt 入口不能消费 wait-core `PrePark`，同时保留 explicit wait sleep 对 `PrePark -> Parked` 的正常语义。实现期执行事实记录在 [2026-07-06-sched-wait-preempt-arming](../../devlog/transactions/2026-07-06-sched-wait-preempt-arming.md)。
 
 本计划同时要求补齐 single-active-wait 诊断：如果 `Latch::begin_current()` / `ActiveWait::begin()` 之后的 register scan、predicate precheck 或 source lock 慢路径进入另一个 scheduler wait，wait-core 必须用 release assert / 可定位诊断暴露。fanotify 等 source owner 的具体修复不属于本 RFC 默认 write set；这类 panic 是对应 owner 的 follow-up 反馈，除非违规发生在 scheduler/wait-core 自身新增路径内。
 

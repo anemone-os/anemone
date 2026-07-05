@@ -3,7 +3,7 @@
 **状态：** Active
 **最后更新：** 2026-07-06
 **父 RFC：** [RFC-20260618-sched-wait-preempt-arming](./index.md)
-**事务日志：** None
+**事务日志：** [2026-07-06-sched-wait-preempt-arming](../../devlog/transactions/2026-07-06-sched-wait-preempt-arming.md)
 
 本文只跟踪当前仍影响方案选择、review gate、停止边界或验收判断的 RFC 层问题。已被正文接受的问题陈述、单纯 implementation pending、已 neutralized 的备选方案和纯命名延期不在这里重复记录；若本 RFC 进入实现，应建立 transaction devlog。
 
