@@ -243,3 +243,18 @@ just build
 - controller 本地 `just build` 首次在 QEMU 生成 DTB 时失败：`sdcard-rv.img` 被外部 QEMU 占用，未进入代码编译阶段；用户确认该占用来自其本地 QEMU，并已在释放后完成一次 `just build` 验证通过。释放后 controller 复跑 `just build` 通过，只保留 build wrapper 的 cargo cache warning。agent 未运行 QEMU / LTP runtime profile。
 
 **结论：** 阶段 1 关闭。当前 checkpoint 完成 scheduler entry split 和裸 `schedule()` call-site 消除；仍不声明阶段 3 trace/runtime gate、iozone throughput 或 post-begin boundedness proof 已关闭。
+
+### 2026-07-06 - 阶段 1 Tracking Issues 反馈收口
+
+**阶段：** 阶段 1 - documentation correction / feedback reconciliation。
+
+**触发：** 阶段 1 closeout 后复核发现，implementation feedback 已经足以改变部分 tracking issue 状态，但 `tracking-issues.md` 仍保持四个 Keter 全部 Open，未区分已被代码结构中和的问题和仍需阶段 3 证据的 gate。
+
+**处理：**
+
+- `KETER-001` 移入 `Neutralized`：阶段 0 已有全量调用面清单，阶段 1 没有落成 no-source / iomux 局部修复；裸 `schedule()` caller 已清零，trap preempt、Event direct sleep、finite-timeout helper、yield、idle 和 zombie exit 均已迁移到语义化 wrapper，`Event::listen_with_timeout()`、source-backed latch、no-source timeout 和 `wait_current_with_timeout()` 均汇入 token-bound wait-sleep proof 点。
+- `KETER-004` 保持 Open，但状态更新为 `Core diagnostic implemented / Caller-source feedback pending`：core 侧 nested active wait assert、sleep-attempt helper 和 `Mutex::lock()` 两处检查已经实现；fanotify/source-owner 真实触发和 follow-up 归档仍需要后续反馈。
+- `KETER-005` 保持 Open，但状态更新为 `Implementation proof landed / Trace proof pending`：`schedule_wait_with_timeout()` 已成为统一 finite-timeout proof 点，先安装 timeout callback，再 token-bound explicit wait sleep；already-completed wait no-park / abort 已落地。剩余缺口是 Event timeout 和 source-backed finite-timeout iomux 的 trace / 字段级 proof。
+- `KETER-006` 保持 Open：`schedule_preempt()` deferred 语义已经实现，关闭 not-park-ready wait 被 involuntary preempt park 的 correctness 入口；但 post-begin setup boundedness、begin-to-explicit-sleep elapsed 和 deferred-count trace 仍未完成。
+
+**边界：** 本次仅更新 tracker 和事务日志，不改变 accepted contract、write set、验证 floor 或后续阶段停止条件；不声明阶段 3 trace/runtime gate、iozone throughput 或 post-begin boundedness proof 已关闭。
