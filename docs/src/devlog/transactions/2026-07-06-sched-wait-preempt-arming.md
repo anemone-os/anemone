@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** scheduler / wait core / kernel preempt / latch / iomux / timer / signal
 **权威计划：** [RFC-20260618-sched-wait-preempt-arming](../../rfcs/sched-wait-preempt-arming/index.md), [不变量需求](../../rfcs/sched-wait-preempt-arming/invariants.md), [迁移实施计划](../../rfcs/sched-wait-preempt-arming/implementation.md), [Tracking Issues](../../rfcs/sched-wait-preempt-arming/tracking-issues.md)
-**当前阶段：** 阶段 1 - 已关闭；下一步继续阶段 2 / 阶段 3 剩余 proof 与验证 gate
+**当前阶段：** 阶段 2 - 已关闭；下一步进入阶段 3 trace / runtime / feedback gate
 
 ## 范围
 
@@ -38,15 +38,15 @@
 
 **Canonical RFC:** [RFC-20260618-sched-wait-preempt-arming](../../rfcs/sched-wait-preempt-arming/index.md), [Invariants](../../rfcs/sched-wait-preempt-arming/invariants.md), [Implementation Plan](../../rfcs/sched-wait-preempt-arming/implementation.md), [Tracking Issues](../../rfcs/sched-wait-preempt-arming/tracking-issues.md)
 
-**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志，并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary。阶段 0 code worker 已补 `WaitOrigin` caller-location origin、begin-side nested active wait assert、crate 内 no-nested-wait helper 和 `Mutex::lock()` nested-wait 诊断；review gate 初审发现的 direct wait adapter `#[track_caller]` 缺口已修复，`WaitOrigin` follow-up closure review 无 Apollyon / Keter / Euclid finding。阶段 0 checkpoint 已提交为 `61943888 sched-split: close wait-preempt phase zero`。阶段 1 已完成 scheduler-private mode、token-bound wait-sleep、preempt deferred 和语义化 schedule wrappers；经用户批准，原阶段 2 的裸 `schedule()` call-site 迁移子集也已并入本 checkpoint，避免保留兼容桥。
+**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志，并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary。阶段 0 code worker 已补 `WaitOrigin` caller-location origin、begin-side nested active wait assert、crate 内 no-nested-wait helper 和 `Mutex::lock()` nested-wait 诊断；review gate 初审发现的 direct wait adapter `#[track_caller]` 缺口已修复，`WaitOrigin` follow-up closure review 无 Apollyon / Keter / Euclid finding。阶段 0 checkpoint 已提交为 `61943888 sched-split: close wait-preempt phase zero`。阶段 1 已完成 scheduler-private mode、token-bound wait-sleep、preempt deferred 和语义化 schedule wrappers；经用户批准，原阶段 2 的裸 `schedule()` call-site 迁移子集也已并入本 checkpoint，避免保留兼容桥。阶段 2 已补 finite-timeout no-park-before-timeout-install proof、timeout-installed / no-timeout 观测点、`WaitSleep` `PrePark -> Parked` trace，以及 source-backed iomux register scan 分类日志；独立 review gate 未发现 Apollyon / Keter / Euclid finding。
 
-**In Progress:** 无。下一轮应处理阶段 2 / 阶段 3 剩余 proof、trace 和 runtime validation gate，而不是重做 wrapper split。
+**In Progress:** 无。下一轮应处理阶段 3 trace、runtime validation 和 feedback routing gate，而不是重做 wrapper split 或阶段 2 proof 落点。
 
-**Open Blockers:** `KETER-001`、`KETER-004`、`KETER-005`、`KETER-006` 仍是 implementation feedback gates。后续若发现某个 shared wait caller 无法通过 entry split 表达，或 post-begin setup 依赖任意长 source scan，必须停止并回到 RFC review。
+**Open Blockers:** `KETER-004`、`KETER-005`、`KETER-006` 仍是 implementation feedback gates。后续若 fanotify/source-owner 触发 nested-wait 诊断，应按 owner follow-up 路由；若 Event timeout、source-backed finite-timeout iomux、deferred-count / boundedness trace 证明当前 entry split 不足，必须停止并回到 RFC review。
 
-**Next Action:** 基于当前 checkpoint 推进剩余阶段 2 / 阶段 3：source-backed finite timeout proof、post-begin boundedness / deferred-count trace、iozone throughput 复核、nested active wait feedback routing，以及 register / limitation 更新边界。不要重新引入裸 `schedule()` 或无 token 的 wait-sleep helper。
+**Next Action:** 基于当前 checkpoint 进入阶段 3：Event timeout 与 source-backed finite-timeout iomux trace、post-begin boundedness / deferred-count evidence、iozone throughput 复核、nested active wait feedback routing，以及 register / limitation 更新边界。不要重新引入裸 `schedule()` 或无 token 的 wait-sleep helper。
 
-**Do Not Redo:** 不要把私有草稿路径写入公共 canonical 链接；不要把 caller origin 改成手写 operation 字符串；不要在阶段 0 顺手改 scheduler entry split；不要把 fanotify/source-owner nested wait panic 包装成本 RFC 内的 source-specific workaround。
+**Do Not Redo:** 不要把私有草稿路径写入公共 canonical 链接；不要把 caller origin 改成手写 operation 字符串；不要重做阶段 0/1/2 的 wrapper split 和 source-register proof；不要把 fanotify/source-owner nested wait panic 包装成本 RFC 内的 source-specific workaround。
 
 ## Phase Log
 
@@ -258,3 +258,64 @@ just build
 - `KETER-006` 保持 Open：`schedule_preempt()` deferred 语义已经实现，关闭 not-park-ready wait 被 involuntary preempt park 的 correctness 入口；但 post-begin setup boundedness、begin-to-explicit-sleep elapsed 和 deferred-count trace 仍未完成。
 
 **边界：** 本次仅更新 tracker 和事务日志，不改变 accepted contract、write set、验证 floor 或后续阶段停止条件；不声明阶段 3 trace/runtime gate、iozone throughput 或 post-begin boundedness proof 已关闭。
+
+### 2026-07-06 - 阶段 2 Schedule Entries 与 Wait-Sleep Proof 收口
+
+**阶段：** 阶段 2 - Schedule Entries 与 Wait-Sleep Proof。
+
+**Subagents：**
+
+- Implementation worker `Locke` 执行阶段 2 代码修改。
+- Review worker `Boole` 执行只读 code review gate，使用 Anemone code review levels。
+
+**前置状态：**
+
+- 阶段 1 已经经用户批准提前迁移裸 `schedule()` call sites；阶段 2 不重做 wrapper split。
+- `rg -n "schedule\(\)" anemone-kernel/src` 无匹配。
+- `fetch_clear_need_resched` 只在四个 arch trap tail 命中，均调用 `schedule_preempt()` 并在 `Deferred` 分支执行 `dispose_deferred_tasks()`。
+
+**代码变更：**
+
+- `sched/mod.rs` 在 `WaitSleep` 消费 `Waiting/PrePark` 时记录 `PrePark -> Parked` trace，供阶段 3 复审 explicit wait-sleep entry。
+- `schedule_wait_with_timeout()` 在 timeout install 前先检查 token completion-open 状态；若 token 已经完成，记录 `no-park before timeout install` 并通过 token-bound `schedule_wait_sleep()` 的 no-park / abort-sleep path 返回，不安装 stale timeout callback。
+- `schedule_wait_with_timeout()` 在 active wait 场景记录 timeout callback installed point；无 timeout 场景记录 `no timeout requested`，避免阶段 3 把无限等待误归为缺失 timeout proof。
+- `fs/api/iomux/wait.rs` 为 source-backed register scan 增加 wait-id keyed 分类日志：ready before park、registered / not-ready / no-sources completion、unsupported 和 error path。日志不改变 `PollRegisterResult::Armed` 的 source-register 语义，也不把 source outcome 提升为 wait-core park-ready truth。
+
+**边界：**
+
+- 未修改 arch trap、Event direct sleep、Latch lifecycle、idle、exit、signal delivery、source owner、source register contract 或 source-local parkability 状态。
+- `WakeToken::is_armed()` 只作为 completion-open 检查使用：已完成 token 表示本 round 已由 source / signal / force / cancel 赢得，必须走 no-park / abort-sleep；它仍不证明 timeout-installed、source-registered 或 park-ready。
+- `schedule_wait_sleep(&WakeToken)` 仍是 token-bound wait-sleep wrapper；未暴露无 token 的泛用 wait-sleep helper。
+
+**Review gate：**
+
+- `Boole` 未发现 Apollyon / Keter / Euclid finding。
+- reviewer 确认 diff 只涉及 `sched/mod.rs` 和 `fs/api/iomux/wait.rs`；finite timeout proof 不把 `Armed` 当成 timeout-installed / park-ready；iomux register 分类只是诊断日志，未改变 source register semantics；裸 `schedule()` caller 仍不存在。
+
+**Validation:**
+
+```sh
+rg -n "schedule\(\)" anemone-kernel/src
+rg -n "fetch_clear_need_resched" anemone-kernel/src/arch
+rg -n "schedule_wait_with_timeout|listen_with_timeout|WaitOutcome::Armed|PollRegisterResult::Armed|WakeToken::is_armed|WaitStateStatus::Armed" anemone-kernel/src/sched anemone-kernel/src/fs
+rg -n "\.listen\(|\.listen_with_timeout\(" anemone-kernel/src
+rg -n "WaitPrimitive|caller_tag|ScheduleCaller|operation:" anemone-kernel/src/sched anemone-kernel/src/arch anemone-kernel/src/task/api/exit/mod.rs
+git diff --check
+mdbook build docs
+just fmt kernel
+just build
+```
+
+结果：
+
+- `rg -n "schedule\(\)" anemone-kernel/src` 无匹配。
+- `fetch_clear_need_resched` 只命中四个 trap-tail caller，均使用 `schedule_preempt()`。
+- finite timeout paths 仍汇入 `schedule_wait_with_timeout()`；`PollRegisterResult::Armed` 仍只作为 source-register terminology 出现在 fs source / iomux adapter；`WaitOutcome::Armed` / `WaitStateStatus::Armed` / `WakeToken::is_armed()` 仍只属于 wait-core completion-open 语义。
+- `Event::listen*()` user 清单仍为 futex wait、child-exit wait 和 threaded timer wait。
+- `WaitPrimitive` / `caller_tag` / `ScheduleCaller` 无匹配；`operation:` 只命中 `sched/event.rs` 既有 unexpected-outcome diagnostic。
+- `git diff --check` clean。
+- `mdbook build docs` 通过。
+- `just fmt kernel` 通过；formatter 尝试重排一处无关 `task/topology/parent_child.rs` 注释，controller 已恢复该噪声，最终 write set 仍只包含阶段 2 文件和事务日志。
+- `just build` 通过，只保留 build wrapper 的 cargo cache warning。
+
+**结论：** 阶段 2 已关闭。当前 checkpoint 不声明阶段 3 trace/runtime gate 已关闭，也不声明 iozone throughput、post-begin boundedness、deferred-count 或 source-owner nested-wait feedback routing 已验证。后续阶段 3 仍需至少覆盖一个 `Event::listen_with_timeout()` path、一个 source-backed finite-timeout iomux path、begin-to-explicit-sleep / deferred-count evidence、`kernel_preempt` 下 iozone throughput 复核，以及 fanotify/source-owner nested wait 反馈归档。

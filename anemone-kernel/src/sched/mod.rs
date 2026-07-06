@@ -99,8 +99,12 @@ mod kore {
             interruptible: bool,
         },
         Zombie,
-        AbortWaitSleep { wait_id: usize },
-        DeferredPreempt { wait_id: usize },
+        AbortWaitSleep {
+            wait_id: usize,
+        },
+        DeferredPreempt {
+            wait_id: usize,
+        },
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -215,6 +219,11 @@ mod kore {
                             state.debug_id(),
                         );
                     }
+                    kdebugln!(
+                        "schedule_wait_sleep: entry=WaitSleep task={} wait={:#x} transition=PrePark->Parked",
+                        task_id,
+                        state.debug_id(),
+                    );
                     let wait_state = state.clone();
                     (
                         TaskSchedState::Waiting {
@@ -523,6 +532,25 @@ mod higher_level {
         drop(current);
 
         let start = with_intr_disabled(|| {
+            let wait_id = token.wait_id();
+            // `is_armed()` is used here only as the completion-open check: if
+            // it is already false, some source/signal/force won before timer
+            // install, so explicit wait sleep must prove the no-park abort
+            // path instead of adding a stale timeout prerequisite.
+            if !token.is_armed() {
+                kdebugln!(
+                    "schedule_wait_with_timeout: no-park before timeout install task={} wait={:#x} timeout={:?}",
+                    task.tid(),
+                    wait_id,
+                    timeout,
+                );
+                let start = Instant::now();
+                unsafe {
+                    schedule_wait_sleep(&token);
+                }
+                return start;
+            }
+
             if let Some(timeout) = timeout {
                 // Timer events are not cancellable. Keep only a weak task
                 // target so an early-finished long timeout does not pin the
@@ -559,6 +587,18 @@ mod higher_level {
                         }),
                     );
                 }
+                kdebugln!(
+                    "schedule_wait_with_timeout: timeout installed task={} wait={:#x} timeout={:?}",
+                    task.tid(),
+                    wait_id,
+                    timeout,
+                );
+            } else {
+                kdebugln!(
+                    "schedule_wait_with_timeout: no timeout requested task={} wait={:#x}",
+                    task.tid(),
+                    wait_id,
+                );
             }
 
             let start = Instant::now();
