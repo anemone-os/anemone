@@ -1,6 +1,6 @@
 # Sched Wait Preempt Arming 迁移实施计划
 
-**状态：** Active
+**状态：** Completed
 **最后更新：** 2026-07-06
 **父 RFC：** [RFC-20260618-sched-wait-preempt-arming](./index.md)
 **不变量：** [不变量需求](./invariants.md)
@@ -275,6 +275,12 @@ rg -n "\.listen\(|\.listen_with_timeout\(" anemone-kernel/src
 前置条件：
 
 - 阶段 0 到 2 完成，且没有 open scheduler/wait-core Keter blocker。
+
+执行反馈：
+
+- 2026-07-06 阶段 3 收口采用 source-review first：不再为本阶段强行增加新的 debug instrumentation。阶段 3 可以用独立代码审查、用户侧 `kernel_preempt` 下 iozone throughput 复核、以及 transaction devlog 中明确记录的未跑 trace 边界关闭 scheduler/wait-core correctness gate。
+- 这只改变阶段 3 的验证执行方式，不改变 accepted contract：`Waiting/PrePark` 仍不能被 involuntary preempt park，wait identity / completion / placement 仍由 wait core 拥有，post-begin nested wait 仍由 core 诊断暴露并路由到 source owner。
+- 未运行的定向 preempt-window trace、Event timeout trace、source-backed finite-timeout iomux trace 和 deferred-count fairness trace 不得在收口时写成已通过。若后续 workload 或 trace 显示 `PrePark` setup 长时间反复 deferred，仍必须回到 RFC review 评估 publish split / park permit 或等价设计。
 
 阶段 3 消费前序阶段落下的最低可观测性：
 
