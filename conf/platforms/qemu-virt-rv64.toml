@@ -61,7 +61,3 @@ args = [
 [rootfs]
 fstype = "ext4"
 source = { type = "block", path = "vda" }
-
-[dtb]
-path = "arch/riscv64/generated.dtb"
-type = "qemu"
