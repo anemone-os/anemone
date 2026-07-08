@@ -1,0 +1,52 @@
+[build]
+name = "pretest-rv64"
+arch = "riscv64"
+
+[fs]
+fstype = "ext4"
+base = "conf/rootfs/pretest-rv64-base"
+
+[init]
+path = "/sbin/init"
+
+[[dirs]]
+path = "/dev"
+
+[[dirs]]
+path = "/mnt"
+
+[[apps]]
+name = "init"
+installed_dir = "/sbin"
+
+[[apps]]
+name = "user-test"
+installed_dir = "/bin"
+
+# [[apps]]
+# name = "float-test"
+# installed_dir = "/bin"
+#
+# [[apps]]
+# name = "shm-test"
+# installed_dir = "/bin"
+#
+# [[apps]]
+# name = "mmap-test"
+# installed_dir = "/bin"
+#
+# [[apps]]
+# name = "pg-test"
+# installed_dir = "/bin"
+#
+# [[apps]]
+# name = "oom-killer-test"
+# installed_dir = "/bin"
+#
+# [[apps]]
+# name = "pthread-create-stress"
+# installed_dir = "/bin"
+
+[[files]]
+source = "anemone-apps/user-test/staged/riscv/mke2fs"
+installed_path = "/fixtures/user-test/tools/mke2fs"

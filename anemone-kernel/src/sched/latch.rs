@@ -40,6 +40,7 @@ impl Latch {
     /// This is the only public constructor for the waiter side. It delegates
     /// wait identity and task state publication to wait core; `Latch` only
     /// narrows the lifecycle API for iomux-style OR waits.
+    #[track_caller]
     pub fn begin_current(interruptible: bool) -> Self {
         let task = get_current_task();
         let active_wait = wait::ActiveWait::begin(&task, interruptible);

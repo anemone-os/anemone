@@ -1,6 +1,3 @@
-# TODO
-# - Add fin_prod
-
 FROM ubuntu:24.04 AS build_qemu
 ARG QEMU_VERSION=10.0.5
 WORKDIR /build
@@ -69,6 +66,35 @@ COPY --from=build_qemu /opt/qemu /opt/qemu
 ENV PATH="/opt/qemu/bin:${PATH}"
 # Unset CARGO_HOME so users default to ~/.cargo for registry/cache (avoids permission issues)
 ENV CARGO_HOME=
+
+ARG USERNAME=user
+ARG USER_UID=1000
+ARG USER_GID=1000
+# Ubuntu development images may already reserve UID/GID 1000, for example for
+# an `ubuntu` account. Reuse and rename that account/group when present so the
+# dev container has a stable username while still matching the host UID/GID.
+RUN set -eux; \
+    if getent group "$USERNAME" >/dev/null; then \
+    groupmod --gid "$USER_GID" "$USERNAME"; \
+    elif getent group "$USER_GID" >/dev/null; then \
+    groupmod --new-name "$USERNAME" "$(getent group "$USER_GID" | cut -d: -f1)"; \
+    else \
+    groupadd --gid "$USER_GID" "$USERNAME"; \
+    fi; \
+    if id -u "$USERNAME" >/dev/null 2>&1; then \
+    usermod --uid "$USER_UID" --gid "$USER_GID" --home "/home/$USERNAME" --move-home "$USERNAME"; \
+    elif getent passwd "$USER_UID" >/dev/null; then \
+    usermod --login "$USERNAME" --gid "$USER_GID" --home "/home/$USERNAME" --move-home "$(getent passwd "$USER_UID" | cut -d: -f1)"; \
+    else \
+    useradd --uid "$USER_UID" --gid "$USER_GID" --create-home --shell /bin/bash "$USERNAME"; \
+    fi; \
+    usermod --shell /bin/bash "$USERNAME"; \
+    mkdir -p "/home/$USERNAME"; \
+    chown -R "$USER_UID:$USER_GID" "/home/$USERNAME"; \
+    echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$USERNAME" && \
+    chmod 0440 "/etc/sudoers.d/$USERNAME"
+USER $USERNAME
+WORKDIR /home/$USERNAME
 ENTRYPOINT [ "bash" ]
 
 FROM ubuntu:24.04 AS fin_ci

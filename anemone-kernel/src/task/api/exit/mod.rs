@@ -186,11 +186,11 @@ pub fn kernel_exit(code: ExitCode) -> ! {
 
             task.vfork_done.publish(1, true);
         }
-
-        scheduler_zombie_tail(&task);
     }
 
-    schedule_never_return()
+    with_intr_disabled(|| unsafe {
+        schedule_zombie_never_return();
+    })
 }
 
 /// Exit current kthread without entering ordinary user-process cleanup.
@@ -224,35 +224,11 @@ pub fn kthread_exit(result: i32) -> ! {
         defer_to_dispose(task.clone());
         tg.unpublish_kthread_topology();
         task.publish_kthread_external_exit(result);
-        scheduler_zombie_tail(&task);
     }
 
-    schedule_never_return()
-}
-
-fn scheduler_zombie_tail(task: &Task) {
-    // ORDER MATTERS.
-    // Setting status to Zombie must be the last thing before we drop the task.
-    // Otherwise if a preemption occurs after setting status to Zombie but
-    // before we, e.g., detach from thread group, we'll end up with a zombie
-    // task that still appears in the thread group.
-    task.update_sched_state_with(|prev| {
-        assert!(
-            matches!(prev, TaskSchedState::Runnable | TaskSchedState::Zombie),
-            "exiting task should not own an active wait-core state: task={} state={:?}",
-            task.tid(),
-            prev,
-        );
-        (TaskSchedState::Zombie, ())
-    });
-}
-
-fn schedule_never_return() -> ! {
     with_intr_disabled(|| unsafe {
-        schedule();
-    });
-
-    unreachable!("exited task should never be scheduled again");
+        schedule_zombie_never_return();
+    })
 }
 
 /// Exit current thread group.

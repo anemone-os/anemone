@@ -1,1 +1,3 @@
 anemone-kernel/src/device/bus/pcie/pci.ids binary
+conf/rootfs/pretest-rv64-base/lib/ld-linux-riscv64-lp64d.so.1 binary
+conf/rootfs/pretest-la64-base/lib64/ld-linux-loongarch-lp64d.so.1 binary

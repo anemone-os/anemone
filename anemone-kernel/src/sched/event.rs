@@ -9,6 +9,7 @@ use crate::prelude::*;
 
 use super::{
     higher_level::schedule_wait_with_timeout,
+    schedule_wait_sleep,
     wait::{self, ActiveWait, WaitOutcome, WaitReason, WakeMode, WakeResult, WakeToken},
 };
 
@@ -111,6 +112,7 @@ impl Event {
     /// satisfied, false if the listener wakes up because of a signal.
     ///
     /// **Ensure no lock or guard is held when calling this method.**
+    #[track_caller]
     pub fn listen<P>(&self, exclusive: bool, prediction: P) -> bool
     where
         P: Fn() -> bool,
@@ -139,7 +141,7 @@ impl Event {
             unsafe {
                 drop(guard);
                 with_intr_disabled(|| {
-                    schedule();
+                    schedule_wait_sleep(listener.token());
                 });
                 guard = PreemptGuard::new();
             }
@@ -167,6 +169,7 @@ impl Event {
     /// Block listening. Won't be woken up by signals.
     ///
     /// **Ensure no lock or guard is held when calling this method.**
+    #[track_caller]
     pub fn listen_uninterruptible<P>(&self, exclusive: bool, prediction: P)
     where
         P: Fn() -> bool,
@@ -187,7 +190,7 @@ impl Event {
             unsafe {
                 drop(guard);
                 with_intr_disabled(|| {
-                    schedule();
+                    schedule_wait_sleep(listener.token());
                 });
                 guard = PreemptGuard::new();
             }
@@ -225,6 +228,7 @@ impl Event {
     /// - [None] if condition is satisfied.
     /// - [TimeoutListenException::Timeout] if timeout expires.
     /// - [TimeoutListenException::Signaled] if woken up by signal.
+    #[track_caller]
     pub fn listen_with_timeout<P>(
         &self,
         exclusive: bool,
@@ -317,6 +321,7 @@ impl Event {
         self as *const Self as usize
     }
 
+    #[track_caller]
     fn prepare_listener(
         &self,
         task: &Arc<Task>,
