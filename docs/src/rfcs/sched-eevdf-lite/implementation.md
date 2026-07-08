@@ -1,6 +1,6 @@
 # Sched EEVDF-lite 迁移实施计划
 
-**状态：** Draft
+**状态：** Active
 **最后更新：** 2026-07-09
 **父 RFC：** [RFC-20260622-sched-eevdf-lite](./index.md)
 **不变量：** [不变量需求](./invariants.md)

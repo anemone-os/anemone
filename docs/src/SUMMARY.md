@@ -45,6 +45,7 @@
 		- [Threaded Timer Event](./devlog/transactions/2026-06-20-threaded-timer-event.md)
 		- [VFS Direct User I/O](./devlog/transactions/2026-06-29-vfs-direct-user-io.md)
 		- [Sched Wait Preempt Arming](./devlog/transactions/2026-07-06-sched-wait-preempt-arming.md)
+		- [Sched EEVDF-lite](./devlog/transactions/2026-07-09-sched-eevdf-lite.md)
 - [初赛冲刺策略（2026-05 至 2026-06）](./preliminary-contest-sprint.md)
 - [已知问题与当前限制](./known-issues-and-limitations.md)
 	- [活动登记册](./register.md)

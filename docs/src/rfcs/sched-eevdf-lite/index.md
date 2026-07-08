@@ -1,12 +1,12 @@
 # RFC-20260622-sched-eevdf-lite
 
-**状态：** Draft
+**状态：** Accepted for Implementation
 **负责人：** doruche, Codex
 **最后更新：** 2026-07-09
 **领域：** scheduler / fairness / runtime accounting / scheduler class
-**事务日志：** None
+**事务日志：** [2026-07-09-sched-eevdf-lite](../../devlog/transactions/2026-07-09-sched-eevdf-lite.md)
 **开放问题：** 见 [Tracking Issues](./tracking-issues.md)
-**下一步：** review 本 RFC 的 sched-split 接缝、method-first scheduler class transaction surface、runtime accounting、wake placement 和 staged gates；接受进入实现前建立事务级 devlog。
+**下一步：** 按事务日志推进 Checkpoint 1A：trait / `RunQueue` / entity split 与 RR / Idle 行为保持；不得提前切换 default normal class。
 
 ## 摘要
 

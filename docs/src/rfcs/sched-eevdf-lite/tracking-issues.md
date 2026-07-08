@@ -3,7 +3,7 @@
 **状态：** Active
 **最后更新：** 2026-07-09
 **父 RFC：** [RFC-20260622-sched-eevdf-lite](./index.md)
-**事务日志：** None
+**事务日志：** [2026-07-09-sched-eevdf-lite](../../devlog/transactions/2026-07-09-sched-eevdf-lite.md)
 **来源：** sched-split-aware v2 重写 / method-first scheduler class 纠偏 / 2026-07-07 文档层 review
 
 本文只跟踪 design review 后确认的 sched EEVDF-lite 草案缺陷、证明缺口、边界冲突或会影响实现顺序、review gate、停止边界和验收判断的设计问题。
