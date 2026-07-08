@@ -166,7 +166,12 @@ mod kore {
         assert_eq!(result, ScheduleInnerResult::Switched);
     }
 
-    /// Schedule away from a zombie current task. This path must never return.
+    /// Publish the current task as zombie and schedule away from it.
+    ///
+    /// The current task must have finished exit cleanup and still be runnable.
+    /// The Zombie state is published inside this noirq scheduler transaction so
+    /// involuntary preempt cannot observe a zombie current task before this
+    /// never-return entry consumes it.
     ///
     /// **Interrupts must be disabled when calling this function.**
     pub unsafe fn schedule_zombie_never_return() -> ! {
@@ -199,10 +204,12 @@ mod kore {
                     (TaskSchedState::Runnable, ScheduleDecision::Runnable)
                 },
                 ScheduleMode::Zombie => {
-                    panic!(
-                        "schedule_zombie_never_return requires zombie current task: task={} state=Runnable",
-                        task_id,
-                    );
+                    // The exit path owns task/thread-group cleanup, but the
+                    // scheduler owns publishing the final Zombie sched-state.
+                    // Publishing and switch-out must stay in this noirq
+                    // transaction so trap-tail preempt cannot observe a zombie
+                    // current before the never-return schedule entry consumes it.
+                    (TaskSchedState::Zombie, ScheduleDecision::Zombie)
                 },
             },
             TaskSchedState::Waiting {
@@ -312,7 +319,12 @@ mod kore {
                 },
             },
             TaskSchedState::Zombie => match mode {
-                ScheduleMode::Zombie => (TaskSchedState::Zombie, ScheduleDecision::Zombie),
+                ScheduleMode::Zombie => {
+                    panic!(
+                        "schedule_zombie_never_return cannot re-enter zombie current task: task={}",
+                        task_id,
+                    );
+                },
                 ScheduleMode::WaitSleep { token } => {
                     panic!(
                         "schedule_wait_sleep cannot schedule zombie current task: task={} token_wait={:#x}",

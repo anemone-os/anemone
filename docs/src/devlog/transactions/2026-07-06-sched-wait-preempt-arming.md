@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** scheduler / wait core / kernel preempt / latch / iomux / timer / signal
 **权威计划：** [RFC-20260618-sched-wait-preempt-arming](../../rfcs/sched-wait-preempt-arming/index.md), [不变量需求](../../rfcs/sched-wait-preempt-arming/invariants.md), [迁移实施计划](../../rfcs/sched-wait-preempt-arming/implementation.md), [Tracking Issues](../../rfcs/sched-wait-preempt-arming/tracking-issues.md)
-**当前阶段：** 阶段 3 - 已关闭；source review + 用户侧 iozone 复核收口，trace / fairness gate 明确未运行
+**当前阶段：** 阶段 3 - 已关闭；source review + 用户侧 iozone 复核收口，trace / fairness gate 明确未运行；2026-07-08 post-close zombie-tail feedback 已回写 RFC
 
 ## 范围
 
@@ -32,13 +32,13 @@
 
 ## Handoff
 
-**Last Updated:** 2026-07-06
+**Last Updated:** 2026-07-08
 
 **Current Branch:** `dev/drc/sched-split`
 
 **Canonical RFC:** [RFC-20260618-sched-wait-preempt-arming](../../rfcs/sched-wait-preempt-arming/index.md), [Invariants](../../rfcs/sched-wait-preempt-arming/invariants.md), [Implementation Plan](../../rfcs/sched-wait-preempt-arming/implementation.md), [Tracking Issues](../../rfcs/sched-wait-preempt-arming/tracking-issues.md)
 
-**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志，并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary。阶段 0 code worker 已补 `WaitOrigin` caller-location origin、begin-side nested active wait assert、crate 内 no-nested-wait helper 和 `Mutex::lock()` nested-wait 诊断；review gate 初审发现的 direct wait adapter `#[track_caller]` 缺口已修复，`WaitOrigin` follow-up closure review 无 Apollyon / Keter / Euclid finding。阶段 0 checkpoint 已提交为 `61943888 sched-split: close wait-preempt phase zero`。阶段 1 已完成 scheduler-private mode、token-bound wait-sleep、preempt deferred 和语义化 schedule wrappers；经用户批准，原阶段 2 的裸 `schedule()` call-site 迁移子集也已并入本 checkpoint，避免保留兼容桥。阶段 2 已补 finite-timeout no-park-before-timeout-install proof、timeout-installed / no-timeout 观测点、`WaitSleep` `PrePark -> Parked` trace，以及 source-backed iomux register scan 分类日志；独立 review gate 未发现 Apollyon / Keter / Euclid finding。阶段 3 已用 source-review first 路线关闭 scheduler/wait-core correctness gate：总控审计 source-backed / no-source iomux、direct latch users、Event timeout、clock/signal direct wait 和 `Armed` 术语上下文；独立 reviewer `Ptolemy` 审查 scheduler/trap/wait-core entry split 未发现 Apollyon / Keter / Euclid finding；用户报告 `kernel_preempt` 下多次 iozone throughput 复核未再复现 wait begin 后无 timeout/source/finish 的卡死。
+**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志，并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary。阶段 0 code worker 已补 `WaitOrigin` caller-location origin、begin-side nested active wait assert、crate 内 no-nested-wait helper 和 `Mutex::lock()` nested-wait 诊断；review gate 初审发现的 direct wait adapter `#[track_caller]` 缺口已修复，`WaitOrigin` follow-up closure review 无 Apollyon / Keter / Euclid finding。阶段 0 checkpoint 已提交为 `61943888 sched-split: close wait-preempt phase zero`。阶段 1 已完成 scheduler-private mode、token-bound wait-sleep、preempt deferred 和语义化 schedule wrappers；经用户批准，原阶段 2 的裸 `schedule()` call-site 迁移子集也已并入本 checkpoint，避免保留兼容桥。阶段 2 已补 finite-timeout no-park-before-timeout-install proof、timeout-installed / no-timeout 观测点、`WaitSleep` `PrePark -> Parked` trace，以及 source-backed iomux register scan 分类日志；独立 review gate 未发现 Apollyon / Keter / Euclid finding。阶段 3 已用 source-review first 路线关闭 scheduler/wait-core correctness gate：总控审计 source-backed / no-source iomux、direct latch users、Event timeout、clock/signal direct wait 和 `Armed` 术语上下文；独立 reviewer `Ptolemy` 审查 scheduler/trap/wait-core entry split 未发现 Apollyon / Keter / Euclid finding；用户报告 `kernel_preempt` 下多次 iozone throughput 复核未再复现 wait begin 后无 timeout/source/finish 的卡死。2026-07-08 post-close feedback 已修正 zombie no-return wrapper：最终 `Runnable -> Zombie` 发布改由 scheduler core 在 noirq no-return entry 内完成，并回写 RFC canonical 文本与 tracking issue。
 
 **In Progress:** 无。本事务实现阶段已关闭。
 
@@ -376,3 +376,43 @@ rg -n "\.listen\(|\.listen_with_timeout\(" anemone-kernel/src
 **Validation:** `git diff --check` 和 `mdbook build docs` 通过；本阶段不运行 QEMU / LTP。
 
 **结论：** 阶段 3 已关闭。scheduler/wait-core correctness gate 由 source review、独立 review 和用户侧 iozone 复核收口；未跑 trace / fairness gate 已明确保留为 residual evidence gap，而不是伪装成已验证通过。
+
+### 2026-07-08 - Post-close Zombie Tail Feedback
+
+**阶段：** post-close implementation feedback / RFC 回写。
+
+**触发：** 用户在单核、`kernel_preempt` 开启的试运行中观察到 panic：
+
+```text
+schedule_preempt cannot preempt zombie current task
+```
+
+panic 点位于 `sched/mod.rs` 的 `ScheduleMode::Preempt` 对 `TaskSchedState::Zombie` 的 release invariant。源码复核确认，当时旧 exit 尾部先由 `task/api/exit/mod.rs` 把 current 写成 `TaskSchedState::Zombie`，随后才调用 `schedule_zombie_never_return()`。如果这两个动作之间发生 timer interrupt，trap-tail preempt 会用 `schedule_preempt()` 观察到 zombie current。
+
+**归类：** 这是 zombie lifecycle / scheduler-state owner boundary 的 implementation feedback，不是 `schedule_preempt()` 应该接受 zombie current 的证据。非自愿 preempt 的输入域仍是 `Runnable`，以及需要 deferred 的 `Waiting/PrePark`；`Zombie` current 出现在 preempt entry 仍是强不变量异常。
+
+**处理：**
+
+- RFC canonical 文本已更新：exit 模块只负责 task / thread-group cleanup；最终 `Runnable -> Zombie` 发布归 scheduler core。
+- `schedule_zombie_never_return()` 仍保留原命名，并通过 scheduler-private `ScheduleMode::Zombie` 在 noirq no-return 事务内发布 `Zombie` 并立即切走。
+- `TaskSchedState::Zombie -> ScheduleMode::Zombie` 不再作为幂等路径接受；再次进入表示提前发布 `Zombie` 或重复 zombie entry，应 panic。
+- `tracking-issues.md` 新增 `KETER-007` 并标记 neutralized，记录该 owner-boundary feedback 和修正位置。
+
+**代码变更：**
+
+- `anemone-kernel/src/task/api/exit/mod.rs` 删除旧 `scheduler_zombie_tail()`，`kernel_exit()` / `kthread_exit()` 在 cleanup 块结束、局部 `task` 释放后进入 `schedule_zombie_never_return()`。
+- `anemone-kernel/src/sched/mod.rs` 的 `ScheduleMode::Zombie` 在 current 仍为 `Runnable` 时发布 `TaskSchedState::Zombie`；`Waiting/*` 与已是 `Zombie` 的 current 仍为强不变量异常。
+
+**验证：**
+
+```sh
+just fmt kernel
+just build
+git diff --check -- anemone-kernel/src/sched/mod.rs anemone-kernel/src/task/api/exit/mod.rs
+git diff --check
+mdbook build docs
+```
+
+结果：上述验证均通过。agent 未运行 QEMU / LTP / iozone runtime 复现；用户侧原始 panic 作为本次反馈触发证据。
+
+**边界：** 本反馈不改变 wait identity、completion 线性化点、`Waiting/PrePark` 的 preempt-defer contract、`need_resched` 恢复责任或 trace / fairness residual gap。若后续再次出现 `schedule_preempt cannot preempt zombie current task`，应优先查找新的提前 `Zombie` 发布或重复 zombie entry，而不是放宽 `schedule_preempt()`。

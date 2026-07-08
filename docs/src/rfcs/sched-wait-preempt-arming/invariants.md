@@ -1,7 +1,7 @@
 # Sched Wait Preempt Arming 不变量需求
 
 **状态：** Draft
-**最后更新：** 2026-07-06
+**最后更新：** 2026-07-08
 **父 RFC：** [RFC-20260618-sched-wait-preempt-arming](./index.md)
 
 本文定义内核抢占下 wait-core wake-prerequisite / parkability 必须满足的协议边界。当前 RFC 选择 schedule entry split / preempt-defer 作为第一阶段方向；如果后续实现引入新状态、新 capability 或 begin 拆分，必须回到本文确认是否仍满足这些边界。
@@ -48,7 +48,7 @@
 6. trap return、preempt-enable 或其它 involuntary preempt 入口如果观察到 `Waiting/PrePark`，必须返回 deferred 结果，或者以等价机制保持当前 task 继续执行。
 7. `Waiting/Parked` 出现在 current task 的 involuntary preempt schedule 入口是强不变量异常；实现应记录上下文并用 release-build assertion 暴露错误。
 8. `schedule_runnable()` 或等价 wrapper 只处理 current 仍为 `Runnable` 的 yield / idle reschedule 路径；它不得消费 `Waiting/PrePark`。
-9. `schedule_zombie_never_return()` 是 no-return 退出路径；它不得让 zombie schedule 与普通可返回 reschedule 混用语义。
+9. `schedule_zombie_never_return()` 是 no-return 退出路径；它不得让 zombie schedule 与普通可返回 reschedule 混用语义。退出清理完成后，`TaskSchedState::Zombie` 的最终发布属于 scheduler core：`Runnable -> Zombie` 必须和不可返回 `switch_out()` 位于同一 noirq scheduler 事务内，避免 trap-tail preempt 观察到已是 `Zombie` 但尚未切走的 current task。
 10. scheduler-private mode 是调用入口上下文，不是 wait round 的第二套状态。它不得被 source 保存，不得跨 wait round 缓存，也不得作为 producer trigger 的能力。
 
 ## 状态所有权

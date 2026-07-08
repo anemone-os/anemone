@@ -1,7 +1,7 @@
 # Sched Wait Preempt Arming Tracking Issues
 
 **状态：** Closed
-**最后更新：** 2026-07-06
+**最后更新：** 2026-07-08
 **父 RFC：** [RFC-20260618-sched-wait-preempt-arming](./index.md)
 **事务日志：** [2026-07-06-sched-wait-preempt-arming](../../devlog/transactions/2026-07-06-sched-wait-preempt-arming.md)
 
@@ -23,6 +23,14 @@ None。阶段 3 收口后没有仍会阻塞 scheduler/wait-core implementation c
 None。当前剩余 Euclid 已折入 implementation gate 或阶段验证清单，不作为独立 open tracker 保留。
 
 ## Neutralized
+
+### KETER-007：zombie sched-state 发布不能先于 no-return scheduler entry 暴露
+
+**状态：** Neutralized / Implementation feedback folded back / 2026-07-08
+
+**问题：** 阶段 1 迁移把 zombie exit 接到 `schedule_zombie_never_return()`，但旧形状仍由 exit 模块先写 `TaskSchedState::Zombie`，随后才进入 no-return schedule。单核 `kernel_preempt` 试运行证明这两个动作之间存在 trap-tail preempt 窗口：`schedule_preempt()` 可观察到 zombie current，并正确触发 release invariant panic。
+
+**处理：** 已折回 canonical 文本和实现计划：exit 模块只负责完成 task / thread-group cleanup；最终 `Runnable -> Zombie` 发布由 scheduler owner 在 `ScheduleMode::Zombie` 的 noirq no-return 事务内完成，并立即切走。`schedule_preempt()` 仍不接受 zombie current；若未来再次出现 `schedule_preempt cannot preempt zombie current task`，应视为某处提前发布 `Zombie` 或重复 zombie entry 的 owner-boundary 破坏，而不是放宽 preempt 入口语义。
 
 ### KETER-004：post-begin nested wait 必须诊断暴露，但 source owner 修复不默认属于本 RFC
 

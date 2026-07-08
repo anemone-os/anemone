@@ -6,7 +6,7 @@ use anemone_rs::{
 
 const GLIBC_TEST_SCRIPTS: &[&str] = &[
     // "basic_testcode.sh",
-    "lua_testcode.sh",
+    // "lua_testcode.sh",
     // "busybox_testcode.sh",
     // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
@@ -19,11 +19,11 @@ const GLIBC_TEST_SCRIPTS: &[&str] = &[
 ];
 const MUSL_TEST_SCRIPTS: &[&str] = &[
     // "basic_testcode.sh",
-    "lua_testcode.sh",
+    // "lua_testcode.sh",
     // "busybox_testcode.sh",
     // "libctest_testcode.sh",
     // "cyclictest_testcode.sh",
-    // "iozone_testcode.sh",
+    "iozone_testcode.sh",
     // "iperf_testcode.sh",
     // "libcbench_testcode.sh",
     // "lmbench_testcode.sh",

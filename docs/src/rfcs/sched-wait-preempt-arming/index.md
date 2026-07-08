@@ -2,7 +2,7 @@
 
 **状态：** Closed
 **负责人：** doruche, Codex
-**最后更新：** 2026-07-06
+**最后更新：** 2026-07-08
 **领域：** scheduler / wait core / kernel preempt / latch / iomux / timer / signal
 **事务日志：** [2026-07-06-sched-wait-preempt-arming](../../devlog/transactions/2026-07-06-sched-wait-preempt-arming.md)
 **开放问题：** None；未运行的 trace / fairness evidence gap 见 [Tracking Issues](./tracking-issues.md) 与事务日志。
@@ -91,8 +91,8 @@ Canonical：
 4. `schedule_preempt()` 不得吞掉 `need_resched`。由于 trap 入口通常先 `fetch_clear_need_resched()`，preempt wrapper 必须在 deferred 返回前重新标记 resched 或证明请求仍被保留。
 5. `schedule_preempt()` 返回 deferred 时没有发生 context switch；arch trap tail 必须执行原本 no-schedule 分支的 deferred-task disposal。真实 scheduled 路径仍由 scheduler loop tail 处理 disposal。
 6. `schedule_runnable()` 或等价 wrapper 覆盖 yield / idle 这类 current 仍应为 `Runnable` 的 reschedule 路径；它不能消费 `Waiting/PrePark`。
-7. `schedule_zombie_never_return()` 是单独 no-return wrapper；它不应和普通 runnable reschedule 共用“可返回”语义。
-8. scheduler-private `ScheduleMode` 第一阶段只需要表达 `WaitSleep`、`Preempt`、`Runnable` 这类底层状态机差异；zombie no-return 可以由 wrapper 内部单独处理。该 mode 不写入 `WaitState`，不暴露给 `LatchTrigger`，不由 fs source 保存。
+7. `schedule_zombie_never_return()` 是单独 no-return wrapper；它不应和普通 runnable reschedule 共用“可返回”语义。退出路径完成 task / thread-group cleanup 后，最终 `Runnable -> Zombie` 发布必须由 scheduler owner 在 noirq no-return 事务内完成，不能由 exit 模块先发布 `Zombie` 后再经过普通可抢占控制流。
+8. scheduler-private `ScheduleMode` 第一阶段只需要表达 `WaitSleep`、`Preempt`、`Runnable`、`Zombie` 这类底层状态机差异；`Zombie` mode 只服务 no-return exit entry，不是公开 caller taxonomy。该 mode 不写入 `WaitState`，不暴露给 `LatchTrigger`，不由 fs source 保存。
 9. wait identity、completion outcome、cancel、finish 和 wake placement 仍由 wait core / `TaskSchedState` 统一管理；schedule mode 是 scheduler owner 内部输入，不是第二套 wait truth。
 10. 第一阶段不引入通用机制阻止任意长 `PrePark` setup。`schedule_preempt()` deferred 只关闭 lost-wake correctness，不证明长 source scan 的调度公平性。每条 post-begin register / precheck 路径必须由字段级审计证明不会阻塞、不会嵌套 wait，且窗口短小可接受；如果 trace 或 workload 显示 deferred 长窗口造成可见饥饿，必须停止并回到 publish split / park permit 或等价更重设计。
 

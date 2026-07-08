@@ -1,7 +1,7 @@
 # Sched Wait Preempt Arming 迁移实施计划
 
 **状态：** Completed
-**最后更新：** 2026-07-06
+**最后更新：** 2026-07-08
 **父 RFC：** [RFC-20260618-sched-wait-preempt-arming](./index.md)
 **不变量：** [不变量需求](./invariants.md)
 
@@ -83,7 +83,7 @@ rg -n "\.listen\(|\.listen_with_timeout\(" anemone-kernel/src
 | `sched::event::Event::listen*()` | token-bound / permit-bound `schedule_wait_sleep()` | listener 已注册并完成 predicate/signal recheck 后进入 explicit sleep |
 | `sched::higher_level::yield_now()` | `schedule_runnable()` | 入口断言 current 为 `Runnable` |
 | `sched::class::idle` idle loop | `schedule_runnable()` 或 `schedule_idle()` wrapper | idle task 只应是 `Runnable`，wrapper 不得消费 wait state |
-| `task/api/exit::schedule_never_return()` | `schedule_zombie_never_return()` | exiting task 已转 `Zombie`，不得返回 |
+| `task/api/exit::schedule_never_return()` | `schedule_zombie_never_return()` | exiting task cleanup 已完成；scheduler 在 noirq no-return 事务内发布 `Zombie` 并切走 |
 
 当前最低 `Latch::begin_current()` direct users：
 
@@ -147,11 +147,12 @@ write set：
 
 - 2026-07-06 阶段 1 首轮实现发现：如果只在 `sched/mod.rs` 内拆出 `schedule_inner(mode)`，无法自然实现 token-bound `schedule_wait_sleep()`，因为 `sched/mod.rs` 能看到当前 `TaskSchedState::Waiting { state, .. }`，但 `WakeToken` 没有行为用的 current-wait identity 比较入口。用户批准把 `anemone-kernel/src/sched/wait.rs` 纳入阶段 1 最小扩展 write set，只允许提供 scheduler-private token/current-wait identity check 或等价 wait-core private permit；不得用 diagnostic `wait_id()` / `debug_id()` 或 completion-open `is_armed()` 代替 identity proof。
 - 同一轮反馈还批准阶段 1 直接迁移原阶段 2 中依赖裸 `schedule()` 的 schedule-entry call sites，避免为了保持阶段边界而保留不自然的兼容桥。该提前迁移只覆盖 trap preempt、Event explicit wait sleep、finite-timeout helper、yield、idle 和 zombie exit 的 wrapper 接入；不降低阶段 2 / 阶段 3 对 source-backed finite timeout proof、boundedness、trace 和 runtime validation 的要求。
+- 2026-07-08 post-close 反馈发现：原 `schedule_zombie_never_return()` 设计把 exit 模块先写 `TaskSchedState::Zombie`、随后再进入 no-return schedule，导致单核 `kernel_preempt` 下 trap-tail preempt 可在两者之间观察到 zombie current，并命中 `schedule_preempt()` 的 release invariant panic。修正后的 contract 是由 scheduler owner 在 `ScheduleMode::Zombie` 的 noirq no-return 事务内完成 `Runnable -> Zombie` 发布并立即切走；`Zombie` current 再次进入该入口是强不变量异常。
 
 交付：
 
 - 将裸 `schedule()` 私有化为 `schedule_inner(mode)` 或等价函数。
-- 引入 scheduler-private narrow mode，例如 `ScheduleMode::{WaitSleep, Preempt, Runnable}`。
+- 引入 scheduler-private narrow mode，例如 `ScheduleMode::{WaitSleep, Preempt, Runnable, Zombie}`。
 - 对 scheduler owner 外暴露语义化 wrapper：`schedule_wait_sleep()`、`schedule_preempt()`、`schedule_runnable()` / `schedule_idle()`、`schedule_zombie_never_return()` 或等价命名。
 - 引入能表达 preempt defer 的返回结果，例如 `SchedulePreemptResult::{Scheduled, Deferred}` 或等价机制。
 - 底层 `schedule_inner()` 状态机按 mode 区分是否允许消费 wait-core park state。
@@ -163,6 +164,7 @@ enum ScheduleMode {
     WaitSleep,
     Preempt,
     Runnable,
+    Zombie,
 }
 
 enum SchedulePreemptResult {
@@ -173,14 +175,14 @@ enum SchedulePreemptResult {
 
 语义表：
 
-| Current `TaskSchedState` | WaitSleep | Runnable | Preempt |
-| --- | --- | --- | --- |
-| `Runnable` | 仅当本 wait token 已经完成时走 no-park / abort-sleep 返回；否则强不变量异常 | requeue/yield 或 idle switch | requeue/yield 或正常抢占 |
-| `Waiting { park: PrePark }` | 推进为 `Parked`，再执行现有 abort-park recheck | 强不变量异常 | 返回 `Deferred`；恢复/保留 `need_resched`；不 park、不 requeue、不 context switch |
-| `Waiting { park: Parked }` | 维持 parked 并按现有 wait-core park 路径处理 | 强不变量异常 | 强不变量异常，记录 wait id 并 assert |
-| `Zombie` | 强不变量异常 | 强不变量异常 | 强不变量异常，trap preempt 不应抢占 zombie current |
+| Current `TaskSchedState` | WaitSleep | Runnable | Preempt | Zombie |
+| --- | --- | --- | --- | --- |
+| `Runnable` | 仅当本 wait token 已经完成时走 no-park / abort-sleep 返回；否则强不变量异常 | requeue/yield 或 idle switch | requeue/yield 或正常抢占 | 发布为 `Zombie` 并进入 no-return switch |
+| `Waiting { park: PrePark }` | 推进为 `Parked`，再执行现有 abort-park recheck | 强不变量异常 | 返回 `Deferred`；恢复/保留 `need_resched`；不 park、不 requeue、不 context switch | 强不变量异常 |
+| `Waiting { park: Parked }` | 维持 parked 并按现有 wait-core park 路径处理 | 强不变量异常 | 强不变量异常，记录 wait id 并 assert | 强不变量异常 |
+| `Zombie` | 强不变量异常 | 强不变量异常 | 强不变量异常，trap preempt 不应抢占 zombie current | 强不变量异常，重复 zombie entry 表示状态提前发布或重复 exit |
 
-`schedule_zombie_never_return()` 是独立 no-return wrapper：只允许 `Zombie` current task 进入退出调度路径，不通过可返回 `Runnable` / `WaitSleep` 语义表达。
+`schedule_zombie_never_return()` 是独立 no-return wrapper：只允许已完成 exit cleanup 且仍为 `Runnable` 的 current task 进入退出调度路径，由 scheduler core 在 noirq 事务内发布 `Zombie` 并切走；它不通过可返回 `Runnable` / `WaitSleep` 语义表达。
 
 实现要求：
 
@@ -189,7 +191,7 @@ enum SchedulePreemptResult {
 - `Deferred` 路径不能调用 `local_requeue_current()`，因为 current task 仍为 `Waiting/PrePark`，不是 `Runnable`。
 - 如果 caller 在进入 scheduler 前已经通过 `fetch_clear_need_resched()` 清掉 resched 请求，`schedule_preempt()` 必须在 `Deferred` 返回前调用 `mark_need_resched()` 或等价恢复。
 - `WaitSleep` 路径必须先用 wait token 区分 already-completed no-park 与 active wait：如果 token 命名的 wait round 已经完成且 current 已回到 `Runnable`，直接走 abort-sleep 返回，不能把它当作普通 runnable yield；如果 wait 仍为 `Waiting/PrePark`，先推进为 `Parked`，再执行现有 abort-park recheck；若 wait 在转换后完成为 `Runnable`，走 abort park / requeue。
-- `Runnable` / idle wrapper / zombie wrapper 不能获得消费 `Waiting/PrePark` 的权限。
+- `Runnable` / idle wrapper / zombie wrapper 不能获得消费 `Waiting/PrePark` 的权限。zombie wrapper 只能在 scheduler owner 内把 `Runnable` current 发布为 `Zombie`，不能接受已经可观察为 `Zombie` 的 current task 作为幂等输入。
 - scheduler-private mode 不写入 `WaitState`，不暴露给 `LatchTrigger`，不由 fs source 保存。
 - 不得对 scheduler owner 外暴露无 token / permit 的 `schedule_wait_sleep()`；否则 future caller 可以把普通 `Runnable` yield 或 stale wait 误解释成 wait-sleep abort。
 
@@ -236,7 +238,7 @@ rg -n "local_requeue_current" anemone-kernel/src/sched/mod.rs anemone-kernel/src
 - `Event::listen*()`：listener 注册和 predicate/signal recheck 完成后调用 token-bound / permit-bound `schedule_wait_sleep()`；`listen_with_timeout()` 必须通过同一个 finite-timeout proof 点区分 timer-installed park 与 already-completed no-park。现有 futex wait 作为 `Event::listen*()` 的 user-visible caller 必须纳入 proof。
 - `yield_now()`：只允许在 `Runnable` current task 上调用 `schedule_runnable()`。
 - idle loop：只允许 `Runnable` idle task 进入 runnable / idle wrapper。
-- `schedule_never_return()`：只允许 `Zombie` current task 进入 no-return wrapper。
+- exit no-return tail：只能在 task / thread-group cleanup 完成后进入 `schedule_zombie_never_return()`；最终 `Zombie` sched-state 由 scheduler wrapper 发布，不能由 exit 模块先写入后再调用 schedule。
 
 write set：
 
@@ -349,6 +351,7 @@ rg -n "WaitStateStatus::Armed|WaitOutcome::Armed|WakeToken::is_armed|PollRegiste
 
 - 2026-07-06：阶段 1 implementation worker 命中 write-set stop condition。token-bound `schedule_wait_sleep()` 需要行为级 current-wait identity proof；用户批准把 `sched/wait.rs` 纳入最小扩展写集，并禁止使用 diagnostic id 或 `is_armed()` 作为行为依据。目标、不变量、状态所有权和 completion 线性化点不变；执行事实见 transaction devlog。
 - 2026-07-06：用户批准阶段 1 吸收原阶段 2 的 schedule-entry call-site 迁移子集，避免留下裸 `schedule()` 兼容桥。该反馈改变阶段 write set / 执行顺序，但不改变 accepted contract、验证 floor 或后续 trace/runtime gate；执行事实见 transaction devlog。
+- 2026-07-08：`kernel_preempt` 单核试运行暴露 zombie exit 尾部窗口：exit 模块提前发布 `Zombie` 后、`schedule_zombie_never_return()` 前可能被 trap-tail involuntary preempt 打断。该反馈改变 zombie wrapper 的 accepted contract：`Runnable -> Zombie` 发布归 scheduler core 的 noirq no-return entry，`schedule_preempt()` 仍不接受 zombie current；执行事实见 transaction devlog。
 
 ## Write Set 扩展记录
 
