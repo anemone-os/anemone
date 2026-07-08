@@ -14,11 +14,8 @@
             "GNU_VERSION": "2026.01.09"
         }
     },
-    // Set your user ID here.
-    // If unfortunately your uid is not 1000, then you might
-    // need to login as root first and create a user with the same uid as your host user.
-    // If that's the case, you may better just develop locally...
-    "remoteUser": "1000",
+    "remoteUser": "user",
+    "updateRemoteUserUID": true,
     "customizations": {
         "vscode": {
             "extensions": [
