@@ -17,6 +17,13 @@ base = "etc/rootfs"
 [init]
 path = "/sbin/init"
 
+# Directories to create in the generated rootfs.
+[[dirs]]
+path = "/dev"
+
+[[dirs]]
+path = "/mnt"
+
 # List of apps to be installed into the rootfs.
 # The specified apps should be defined in `anemone-apps` workspace.
 [[apps]]

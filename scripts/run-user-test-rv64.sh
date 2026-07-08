@@ -1,32 +1,50 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+log_progress() {
+    local topic=$1
+    local msg=$2
+    printf '\033[1;35m%12s\033[0m %s\n' "$topic" "$msg"
+}
+
+warn() {
+    local msg=$1
+    printf '\033[1;33m%12s\033[0m %s\n' "WARNING" "$msg"
+}
+
+error() {
+    local msg=$1
+    printf '\033[1;31m%12s\033[0m %s\n' "ERROR" "$msg" >&2
+}
+
 usage() {
     cat <<'EOF'
-Usage: run-user-test-rv64.sh <rootfs-config> <sdcard-image> [log-file]
+Usage: run-user-test-rv64.sh <sdcard-image> [log-file]
 
 Runs the rv64 test chain:
-  1. switch kconfig to qemu-virt-rv64 if needed
+  1. switch kconfig to qemu-virt-rv64-pretest if needed
   2. build the rootfs with sudo
   3. stage the provided sdcard image as a temporary copy
   4. build the kernel
   5. launch QEMU and tee the output to a log file
+
+Uses conf/rootfs/pretest-rv64.toml as the public pretest rootfs manifest.
 EOF
 }
 
-if [[ $# -lt 2 || $# -gt 3 ]]; then
+if [[ $# -lt 1 || $# -gt 2 ]]; then
     usage >&2
     exit 1
 fi
 
-rootfs_config=$1
-sdcard_image=$2
-log_file=${3:-build/user-test-rv64.log}
+rootfs_config=conf/rootfs/pretest-rv64.toml
+sdcard_image=$1
+log_file=${2:-build/user-test-rv64.log}
 
-platform=qemu-virt-rv64
+platform=qemu-virt-rv64-pretest
 platform_arch=riscv64
 sdcard_target=sdcard-rv.img
-rootfs_target=build/rootfs/minimal-rv/rootfs.img
+rootfs_target=build/rootfs/pretest-rv64/rootfs.img
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/.." && pwd)
@@ -34,17 +52,17 @@ cd "$repo_root"
 
 
 if [[ ! -f "$rootfs_config" ]]; then
-    printf 'error: rootfs config not found: %s\n' "$rootfs_config" >&2
+    error "rootfs config not found: $rootfs_config"
     exit 1
 fi
 
 if [[ ! -f "$sdcard_image" ]]; then
-    printf 'error: sdcard image not found: %s\n' "$sdcard_image" >&2
+    error "sdcard image not found: $sdcard_image"
     exit 1
 fi
 
 if [[ -e "$sdcard_target" ]]; then
-    printf 'warning: %s already exists; will be overwritten\n' "$sdcard_target" >&2
+    warn "$sdcard_target already exists; will be overwritten"
 fi
 
 mkdir -p -- "$(dirname -- "$log_file")"
@@ -54,30 +72,32 @@ current_platform=$(
 )
 
 if [[ -z "$current_platform" ]]; then
-    printf 'error: could not read current platform from kconfig\n' >&2
+    error "could not read current platform from kconfig"
     exit 1
 fi
 
-printf 'test-chain: platform %s (%s)\n' "$platform" "$platform_arch"
-printf 'test-chain: rootfs config %s\n' "$rootfs_config"
-printf 'test-chain: sdcard image %s\n' "$sdcard_image"
-printf 'test-chain: log file %s\n' "$log_file"
+log_progress "PRETEST" "platform $platform ($platform_arch)"
+log_progress "PRETEST" "rootfs config $rootfs_config"
+log_progress "PRETEST" "sdcard image $sdcard_image"
+log_progress "PRETEST" "log file $log_file"
 
 if [[ "$current_platform" != "$platform" ]]; then
-    printf 'test-chain: switching kconfig from %s to %s\n' "$current_platform" "$platform"
+    log_progress "PRETEST" "switching kconfig from $current_platform to $platform"
     just conf switch "$platform"
 fi
 
-printf 'test-chain: rebuilding rootfs\n'
+log_progress "PRETEST" "rebuilding rootfs"
 rm -rf -- build/rootfs
 just rootfs mkfs -c "$rootfs_config" --sudo
 
 mapfile -t rootfs_images < <(find build/rootfs -mindepth 2 -maxdepth 2 -type f -name rootfs.img | sort)
 if [[ ${#rootfs_images[@]} -ne 1 ]]; then
-    printf 'error: expected exactly one rootfs image, found %d\n' "${#rootfs_images[@]}" >&2
+    error "expected exactly one rootfs image, found ${#rootfs_images[@]}"
     if [[ ${#rootfs_images[@]} -gt 0 ]]; then
-        printf 'error: candidates:\n' >&2
-        printf 'error:   %s\n' "${rootfs_images[@]}" >&2
+        error "candidates:"
+        for rootfs_candidate in "${rootfs_images[@]}"; do
+            error "  $rootfs_candidate"
+        done
     fi
     exit 1
 fi
@@ -88,11 +108,11 @@ if [[ "$rootfs_image" != "$rootfs_target" ]]; then
     ln -sf -- "$rootfs_image" "$rootfs_target"
 fi
 
-printf 'test-chain: staging sdcard image\n'
-cp -- "$sdcard_image" "sdcard-rv.img"
+log_progress "PRETEST" "staging sdcard image"
+cp -- "$sdcard_image" "$sdcard_target"
 
-printf 'test-chain: building kernel\n'
+log_progress "PRETEST" "building kernel"
 just build
 
-printf 'test-chain: running qemu\n'
+log_progress "PRETEST" "running qemu"
 just xtask qemu --platform "$platform" --image build/anemone.elf 2>&1 | tee "$log_file"
