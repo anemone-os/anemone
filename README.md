@@ -79,7 +79,29 @@ crates     # 独立 crate
 └── la-insc
 ```
 
+## 分支与复现方式
+
+Anemone 的主线开发希望保持中性的项目门面。`main` 分支长期保留内核、通用构建系统和通用文档；比赛报告、提交材料、比赛环境适配和评测复现入口不长期进入 `main`。
+
+本分支 `submit/prim` 是初赛提交和评审用的 orphan 快照分支。它保留了初赛报告、演示材料、公开的 pretest rootfs 配置和面向评委的运行说明。若只是希望在当前提交形态上测试 Anemone，不需要复现比赛平台日志，可以直接在 `submit/prim` 上按下面的开发方式准备镜像并运行。
+
+`kako/bench` 是按赛方提交协议整理的分支，用于复现比赛日志。该分支假定自己运行在赛方提供的 Docker 环境内：开发者需要自行准备赛方根文件系统/测试盘镜像，进入赛方 Docker，执行 `make`，再使用赛方给出的 QEMU 命令运行。这个路径尽量贴近比赛平台的构建和启动方式；它和 `submit/prim` 的开发容器/`xtask` 路径不是同一个入口。
+
 ## 开发与构建
+
+### 推荐开发环境
+
+推荐的开发方式是使用 VS Code Dev Containers 直接进入仓库开发容器。安装 VS Code 的 Dev Containers 扩展后，在仓库根目录选择 `Reopen in Container`；`.devcontainer/devcontainer.json` 会基于仓库 `Dockerfile` 的 `fin_dev` 阶段构建开发环境。
+
+`fin_dev` 阶段包含本项目需要的主要工具链和运行依赖，包括 Rust / cargo 工具、`just`、`cargo-binutils`、QEMU、`libguestfs-tools`、`libclang`、lwext4 交叉工具链等。Rust 具体版本和组件由仓库根目录的 `rust-toolchain.toml` 决定。
+
+如果不使用开发容器，需要在本机安装与 `Dockerfile` 的 `fin_dev` 阶段等价的依赖。至少需要确保以下内容可用：
+
+- `just` 与仓库 `rust-toolchain.toml` 指定的 Rust toolchain；
+- `rust-objdump` / `rust-objcopy` 等 `cargo-binutils` 工具；
+- `qemu-system-riscv64` 与 `qemu-system-loongarch64`；
+- `virt-make-fs` 及其所需的 libguestfs / supermin 环境；
+- `LWEXT4_TOOLCHAIN_RISCV64` 与 `LWEXT4_TOOLCHAIN_LOONGARCH64` 指向可用的 lwext4 交叉工具链。
 
 ### 构建入口与配置约定
 
@@ -95,80 +117,75 @@ just defconfig
 
 ```bash
 just conf list
-just conf switch qemu-virt-rv64
-just conf switch qemu-virt-la64
+just conf switch qemu-virt-rv64-pretest
+just conf switch qemu-virt-la64-pretest
 ```
 
-`kconfig` 还承载内核 feature 开关和重要参数，例如日志等级、内核栈大小、进程数量上限、系统 tick 频率、设备数量等。面向本地调试的配置、rootfs manifest、磁盘镜像和构建输出都应作为开发者本地材料维护，不应提交到公共仓库。
+`kconfig` 还承载内核 feature 开关和重要参数，例如日志等级、内核栈大小、进程数量上限、系统 tick 频率、设备数量等。重要常量一般都会放在 `kconfig`，而不是散落在源码中。面向开发者个人环境的 `kconfig`、本地 rootfs manifest、磁盘镜像和构建输出不应提交到公共仓库。
 
-### 开发环境
-
-推荐的开发方式是使用 VS Code Dev Containers 直接进入仓库开发容器。安装 VS Code 的 Dev Containers 扩展后，在仓库根目录选择 `Reopen in Container`；`.devcontainer/devcontainer.json` 会基于仓库 `Dockerfile` 的 `fin_dev` 阶段构建开发环境。
-
-`fin_dev` 阶段包含本项目需要的主要工具链和运行依赖，包括 Rust / cargo 工具、`just`、`cargo-binutils`、QEMU、`libguestfs-tools`、`libclang`、lwext4 交叉工具链等。Rust 具体版本和组件由仓库根目录的 `rust-toolchain.toml` 决定。
-
-如果不使用开发容器，需要在本机安装与 `Dockerfile` 的 `fin_dev` 阶段等价的依赖，并确保以下内容可用：
-
-- `just` 与 Rust nightly toolchain；
-- `rust-objdump` / `rust-objcopy` 等 `cargo-binutils` 工具；
-- `qemu-system-riscv64` 与 `qemu-system-loongarch64`；
-- `virt-make-fs` 及其所需的 libguestfs / supermin 环境；
-- `LWEXT4_TOOLCHAIN_RISCV64` 与 `LWEXT4_TOOLCHAIN_LOONGARCH64` 指向可用的 lwext4 交叉工具链。
-
-### 本地镜像与 rootfs 输入
+### rootfs manifest 与镜像输入
 
 Anemone 当前有两类磁盘输入：
 
 - 启动 rootfs 镜像：由 `just rootfs mkfs -c <rootfs-manifest>` 生成，输出位于 `build/rootfs/<name>/rootfs.img`。
-- 测试盘镜像：由开发者自行提供，用于 `user-test` 挂载测试环境。
+- 测试盘镜像：由使用者自行提供，用于 `user-test` 挂载测试环境，通常来自赛方根文件系统/测试盘。
 
-当前 QEMU 平台配置约定如下：
+`conf/rootfs/*.toml` 是 rootfs manifest。manifest 描述如何生成启动 rootfs：
 
-| 平台             | 启动 rootfs 输出                     | 测试盘路径      |
-| ---------------- | ------------------------------------ | --------------- |
-| `qemu-virt-rv64` | `build/rootfs/minimal-rv/rootfs.img` | `sdcard-rv.img` |
-| `qemu-virt-la64` | `build/rootfs/minimal-la/rootfs.img` | `sdcard-la.img` |
+- `[fs].base` 指向一个基础目录，构建时会先复制进 rootfs staging tree；
+- `[[dirs]]` 声明需要额外创建的目录，例如 `/dev` 和 `/mnt`；
+- `[[apps]]` 声明需要构建并安装进 rootfs 的 Anemone 用户态应用；
+- `[[files]]` 声明需要从宿主机复制进 rootfs 的文件，适合放置二进制 fixture。
 
-`sdcard-rv.img` 与 `sdcard-la.img` 需要位于仓库根目录，且不会由仓库自动生成。内核运行、`init` 和 `user-test` 都可能写入启动 rootfs 镜像和测试盘镜像；一次运行结束后，镜像内容不再保证是原始状态。建议把原版测试盘保存在仓库外或另一个文件名下，每次运行前复制成根目录的 `sdcard-rv.img` / `sdcard-la.img`。启动 rootfs 是 `build/` 下的生成物，需要恢复时重新执行 `just rootfs mkfs` 即可。
+`submit/prim` 提供了两套可直接使用的 pretest manifest 和基础目录：
 
-注意，`just build` 也会依赖两个镜像文件的存在，但不会修改它们。为了构建成功，开发者需要确保根目录已有 `sdcard-rv.img` / `sdcard-la.img`，以及构建好的启动 rootfs 镜像。
+| 架构        | rootfs manifest                 | 启动 rootfs 输出                       | 平台配置                 | 测试盘路径      |
+| ----------- | ------------------------------- | -------------------------------------- | ------------------------ | --------------- |
+| RISC-V64    | `conf/rootfs/pretest-rv64.toml` | `build/rootfs/pretest-rv64/rootfs.img` | `qemu-virt-rv64-pretest` | `sdcard-rv.img` |
+| LoongArch64 | `conf/rootfs/pretest-la64.toml` | `build/rootfs/pretest-la64/rootfs.img` | `qemu-virt-la64-pretest` | `sdcard-la.img` |
 
-`conf/rootfs/*.toml` 是 rootfs manifest。manifest 可以引用一个本地基础目录作为 rootfs 初始文件树；如果所选 manifest 的 `base` 字段存在，开发者需要确保该本地目录存在，或者按自己的环境维护一个不提交的本地 rootfs manifest。
+对应的公开基础目录位于 `conf/rootfs/pretest-rv64-base` 和 `conf/rootfs/pretest-la64-base`。它们当前只包含启动所需的少量 loader 文件，但保留为 rootfs base，是为了展示构建系统对基础文件树的支持。
+
+`sdcard-rv.img` 与 `sdcard-la.img` 不由仓库生成。若手动运行 QEMU，需要把对应测试盘镜像放在仓库根目录，并使用上表中的文件名。即使只是执行 `just build`，当前构建流程也会通过 QEMU 生成 DTB，因此平台 QEMU 参数引用的启动 rootfs 和测试盘路径可能需要提前存在；这是当前构建系统的一个已知粗糙点。
+
+内核运行、`init` 和 `user-test` 都可能写入启动 rootfs 镜像和测试盘镜像；一次运行结束后，镜像内容不再保证是原始状态。建议把原版测试盘保存在仓库外或另一个文件名下，每次运行前复制成根目录的 `sdcard-rv.img` / `sdcard-la.img`，或者直接使用下面的端到端脚本由脚本完成复制。启动 rootfs 是 `build/` 下的生成物，需要恢复时重新执行 `just rootfs mkfs` 即可。
 
 ### 构建与运行
 
-RISC-V64：
+开发者若只想在 `submit/prim` 上运行当前 pretest 路径，推荐使用端到端 `user-test` 脚本。脚本会切换平台、使用公开 pretest manifest 重建启动 rootfs、把给定测试盘复制到平台要求的根目录文件名、构建内核并启动 QEMU：
+
+```bash
+./scripts/run-user-test-rv64.sh <sdcard-source-image> [log-file]
+./scripts/run-user-test-la64.sh <sdcard-source-image> [log-file]
+```
+
+这里的 `<sdcard-source-image>` 建议指向仓库根目录之外的原版测试盘或副本，不要直接传根目录下的 `sdcard-rv.img` / `sdcard-la.img`；脚本会把它复制成平台要求的根目录文件名后运行。默认日志路径分别是 `build/user-test-rv64.log` 和 `build/user-test-la64.log`。
+
+也可以手动执行同一条链路。RISC-V64：
 
 ```bash
 just defconfig
-just conf switch qemu-virt-rv64
+just conf switch qemu-virt-rv64-pretest
 
-# 确保根目录已有 sdcard-rv.img，并且 rootfs manifest 的本地输入存在。
-just rootfs mkfs -c conf/rootfs/minimal-rv.toml --sudo
+cp <sdcard-source-image> sdcard-rv.img
+just rootfs mkfs -c conf/rootfs/pretest-rv64.toml --sudo
 just build
-just xtask qemu --platform qemu-virt-rv64 --image build/anemone.elf | tee build/tmp.log
+just xtask qemu --platform qemu-virt-rv64-pretest --image build/anemone.elf | tee build/user-test-rv64.log
 ```
 
 LoongArch64：
 
 ```bash
 just defconfig
-just conf switch qemu-virt-la64
+just conf switch qemu-virt-la64-pretest
 
-# 确保根目录已有 sdcard-la.img，并且 rootfs manifest 的本地输入存在。
-just rootfs mkfs -c conf/rootfs/minimal-la.toml --sudo
+cp <sdcard-source-image> sdcard-la.img
+just rootfs mkfs -c conf/rootfs/pretest-la64.toml --sudo
 just build
-just xtask qemu --platform qemu-virt-la64 --image build/anemone.elf | tee build/tmp.log
+just xtask qemu --platform qemu-virt-la64-pretest --image build/anemone.elf | tee build/user-test-la64.log
 ```
 
-也可以使用端到端 `user-test` 脚本。脚本会切换平台、重建 rootfs、把给定测试盘复制到平台要求的根目录文件名、构建内核并启动 QEMU：
-
-```bash
-./scripts/run-user-test-rv64.sh <rootfs-manifest> <sdcard-source-image> [log-file]
-./scripts/run-user-test-la64.sh <rootfs-manifest> <sdcard-source-image> [log-file]
-```
-
-这里的 `<sdcard-source-image>` 建议指向仓库根目录之外的原版测试盘或副本，不要直接传根目录下的 `sdcard-rv.img` / `sdcard-la.img`；脚本会把它复制成平台要求的根目录文件名后运行。
+`just rootfs mkfs ... --sudo` 会在宿主侧调用镜像构建工具。若当前环境的 libguestfs / supermin 不需要提权，也可以去掉 `--sudo`。
 
 ### 调整 user-test / LTP 测例集合
 
