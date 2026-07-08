@@ -89,6 +89,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
+- [RFC-20260622-sched-eevdf-lite](./rfcs/sched-eevdf-lite/index.md)：公开草案；定义默认 normal scheduler 从临时 `RoundRobin` 迁移到 `EEVDF-lite` 的方向，保留 fixed owner CPU / per-CPU runqueue 边界，并通过 method-first scheduler class transaction、typed pending resched、幂等 runtime accounting、`rq_vtime` eligibility、wake placement exactly-once 和 staged gates 约束实现。
 - [RFC-20260629-vfs-direct-user-io](./rfcs/vfs-direct-user-io/index.md)：已实现第一版；定义普通文件 `read` / `readv` / `pread*` 与 `write` / `writev` / `pwrite*` 的 direct userspace copy 边界、VFS-owned user-buffer cursor、fanotify transaction adapter，以及 ramfs/ext4 regular file read/write hook。`RWF_*`、完整 Linux `O_DIRECT`、mmap coherency、splice family 和 non-regular backend hook 仍按 register / follow-up 边界处理。
 - [RFC-20260620-threaded-timer-event](./rfcs/threaded-timer-event/index.md)：已实现第一版；定义 soft timer 的 threaded completion lane、per-CPU timer worker、通用 `Late` initcall、`timerfd` / `ITIMER_REAL` 迁移边界，以及 wait-core timeout 非目标。
 - [RFC-20260618-sched-wait-preempt-arming](./rfcs/sched-wait-preempt-arming/index.md)：阶段 3 已关闭；定义 wait-core 在 kernel preempt 下的 wake-prerequisite / parkability contract、scheduler entry split、preempt-defer、token-bound wait sleep、single-active-wait 诊断和 feedback routing 边界；未运行的 trace / fairness evidence gap 见事务日志。
