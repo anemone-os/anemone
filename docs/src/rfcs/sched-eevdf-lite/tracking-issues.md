@@ -281,7 +281,7 @@
 - [不变量需求](./invariants.md) 和 [迁移实施计划](./implementation.md) 决策为 processor / scheduler-core 私有 `PendingResched` flags。
 - 单次请求原因是 `ReschedCause::{Tick, RunnableArrival}`，pending request 合并而不是覆盖。
 
-**结论：** `DeferredPreempt` 必须恢复同一组 pending bits；scheduler class 不保存或 restore pending state，只在 `requeue_preempted_current(task, now, pending)` 中按值读取 flags。wake / new placement 语义不从 pending cause 推导，而由 `enqueue_woken()` / `enqueue_new()` 和 `decide_preempt_current()` 负责。
+**结论：** `DeferredPreempt` 必须让执行 `take_pending_resched()` 的 caller 恢复同一组 pending bits；scheduler class 不保存或 restore pending state，只在 `requeue_preempted_current(task, now, pending)` 中按值读取 flags。wake / new placement 语义不从 pending cause 推导，而由 `enqueue_woken()` / `enqueue_new()` 和 `decide_preempt_current()` 负责。
 
 ### EEVDF-021：bootstrap / kthread 进入 EEVDF 前必须证明 scheduler-critical progress
 

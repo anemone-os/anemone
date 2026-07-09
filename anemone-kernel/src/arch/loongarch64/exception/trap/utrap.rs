@@ -240,6 +240,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                 match unsafe { schedule_preempt(pending) } {
                     SchedulePreemptResult::Scheduled => {},
                     SchedulePreemptResult::Deferred => {
+                        restore_pending_resched(pending);
                         dispose_deferred_tasks();
                     },
                 }

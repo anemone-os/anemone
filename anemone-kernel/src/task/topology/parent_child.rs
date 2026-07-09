@@ -135,8 +135,8 @@ impl ThreadGroup {
     ///
     /// **To iterate over all tasks in the child thread groups, do not call
     /// [ThreadGroup::for_each_member] or take a member snapshot inside the
-    /// closure**, because that would try to reacquire topology locks. Instead call
-    /// [ThreadGroup::for_each_child_task].
+    /// closure**, because that would try to reacquire topology locks. Instead
+    /// call [ThreadGroup::for_each_child_task].
     ///
     /// ## Locks
     /// - [TOPOLOGY] -> [ThreadGroup]

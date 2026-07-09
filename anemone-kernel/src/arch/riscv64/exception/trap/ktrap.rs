@@ -165,6 +165,7 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
                     match unsafe { schedule_preempt(pending) } {
                         SchedulePreemptResult::Scheduled => {},
                         SchedulePreemptResult::Deferred => {
+                            restore_pending_resched(pending);
                             dispose_deferred_tasks();
                         },
                     }

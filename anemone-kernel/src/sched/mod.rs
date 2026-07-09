@@ -117,7 +117,6 @@ mod kore {
         },
         DeferredPreempt {
             wait_id: usize,
-            pending: PendingResched,
         },
     }
 
@@ -150,7 +149,9 @@ mod kore {
     ///
     /// `Waiting/PrePark` means the current task is still setting up a wait
     /// round, so preemption is deferred without parking, requeueing, or
-    /// switching out.
+    /// switching out. The caller owns the pending request snapshot passed into
+    /// this function; if this returns [SchedulePreemptResult::Deferred], the
+    /// caller must restore that snapshot to processor pending state.
     ///
     /// **Interrupts must be disabled when calling this function.**
     pub unsafe fn schedule_preempt(pending: PendingResched) -> SchedulePreemptResult {
@@ -277,7 +278,6 @@ mod kore {
                     },
                     ScheduleDecision::DeferredPreempt {
                         wait_id: state.debug_id(),
-                        pending,
                     },
                 ),
                 ScheduleMode::Yield => {
@@ -487,12 +487,7 @@ mod kore {
                 drop(curr);
                 return ScheduleInnerResult::DidNotSwitch;
             },
-            ScheduleDecision::DeferredPreempt { wait_id, pending } => {
-                // Trap-tail preempt callers consume pending flags before
-                // entering the scheduler. Restore the exact set so the
-                // PrePark window cannot swallow tick or runnable-arrival
-                // requests.
-                restore_pending_resched(pending);
+            ScheduleDecision::DeferredPreempt { wait_id } => {
                 kdebugln!(
                     "schedule_preempt: deferred for task={} wait={:#x}; current wait setup is still PrePark",
                     task_id,

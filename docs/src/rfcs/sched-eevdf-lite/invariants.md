@@ -51,7 +51,7 @@
 5. 普通任务公平调度字段由 `SchedClassPrv::Eevdf(EevdfEntity)` 或等价 class-specific payload 拥有。
 6. runqueue 公平时钟由 owner CPU 的 `Eevdf` class 拥有。
 7. scheduler-private `ScheduleMode` 只属于 core entry permission，不得由 scheduler class 保存、缓存或解释为算法状态。
-8. processor-private `PendingResched` 只属于 pending preempt request；class 可以按值读取它作为 `requeue_preempted_current()` 的 cause flags，但不得负责 restore 或驱动 processor pending state。
+8. processor-private `PendingResched` 只属于 pending preempt request；class 可以按值读取它作为 `requeue_preempted_current()` 的 cause flags，但不得负责 restore 或驱动 processor pending state。执行 destructive `take_pending_resched()` 的 scheduler-core caller 负责在 deferred preempt 时恢复同一组 flags。
 9. 用户态 scheduling ABI accounting 不是本 RFC 的行为真相源；未来 `sched_*` syscall 只能通过明确的后续 RFC 接入真实调度策略。
 
 clone inheritance 只能继承 nice 等对应 owner state，不能继承父 task 的 scheduler entity。新 task publication 必须从 fresh `SchedEntity::new_normal()` 或等价构造器进入 `enqueue_new()` placement，让 `vruntime` / `deadline` / `exec_start` 由 owner CPU EEVDF class 初始化。
@@ -85,7 +85,7 @@ clone inheritance 只能继承 nice 等对应 owner state，不能继承父 task
 2. `schedule_preempt(pending)` 对 `Waiting/PrePark` 的 `Deferred` 不代表一次 switch-out，不得触发 EEVDF switch-out accounting。
 3. yield entry、idle entry 和 zombie entry 只能通过对应 class transaction 或 core no-op 间接影响 EEVDF，不得把 `ScheduleMode` 作为 class API。
 4. `need_resched` 不能在 EEVDF 路径继续作为 untyped bool；tick 与 runnable-arrival request 必须合并到 `PendingResched`，而不是覆盖。
-5. `DeferredPreempt` 必须恢复同一组 `PendingResched` flags，不能把 deferred request 重新压成 generic bool。
+5. `DeferredPreempt` 必须由执行 `take_pending_resched()` 的 caller 恢复同一组 `PendingResched` flags，不能把 deferred request 重新压成 generic bool。
 6. `ReschedCause::RunnableArrival` 不代表 wake placement，不得触发 current 的 wake clamp；它只说明已有 runnable candidate 使 current 需要在 preempt tail 重新调度。
 7. `Yield`、tick preempt、runnable-arrival preempt、abort-park requeue 和 parked wake handoff 不能被合并为同一个 generic requeue transaction。
 8. `Scheduler` trait 不提供通用 `enqueue_runnable()` 默认底座；会改变 membership 的 transaction 必须由每个 class 显式实现。
@@ -124,7 +124,7 @@ clone inheritance 只能继承 nice 等对应 owner state，不能继承父 task
 3. `deadline` 更新必须基于已经推进后的 `vruntime`。
 4. `rq_vtime` 更新不能依赖会跨 CPU 读取的 task 状态。
 5. pick 不能选择非 runnable、waiting、zombie 或非当前 owner CPU 的 task。
-6. `DeferredPreempt` 不得结束当前执行段；它只恢复 / 保留 resched 请求并返回。
+6. `DeferredPreempt` 不得结束当前执行段；它只返回 deferred result，让执行 destructive take 的 caller 恢复 / 保留 resched 请求。
 7. no-switch abort 不调用 scheduler class transaction。
 8. 未真正切换到 next task 的路径不得调用 `set_next_task()`；bootstrap first task、idle fallback、block、yield 和 zombie 切换路径都必须能按同一顺序 source-audit。
 9. `exec_start` 从 `set_next_task()` 开始计入即将运行的 execution segment；如果实现期认为 mapping 准备时间必须排除在公平执行段外，必须回到 RFC review，而不是局部移动 `set_next_task()`。

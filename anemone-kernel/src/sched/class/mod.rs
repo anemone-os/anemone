@@ -97,9 +97,9 @@ impl ReschedCause {
 
 /// Value flags passed into class-local preempted-current transactions.
 ///
-/// This is not a processor-state capability. Scheduler core owns request
-/// restore and merging; scheduler classes only read a copied value while
-/// handling a preempted-current transaction.
+/// This is not a processor-state capability. The caller that destructively
+/// takes processor pending state owns deferred restore; scheduler classes only
+/// read a copied value while handling a preempted-current transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PendingResched {
     bits: u8,

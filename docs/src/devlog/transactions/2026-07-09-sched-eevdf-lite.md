@@ -167,7 +167,7 @@ Results:
 
 **Phase:** 阶段 1 - Checkpoint 1B。
 
-**Change:** 总控直接执行本 checkpoint，并启动只读 explorer `Gauss` 做 1B source map；无 worker 越界写代码。本轮 write set 限制在 1B 允许的 scheduler core / processor / class facade / IPI / trap / bootstrap enqueue rename / clone-kthreadd publication rename。processor `need_resched: bool` 替换为 `PendingResched` flags，并提供 `request_resched(ReschedCause)`、`take_pending_resched()` 和 `restore_pending_resched(PendingResched)`。`task_tick()` 请求 `ReschedCause::Tick`；owner CPU new / wake placement 后通过 `RunQueue::decide_preempt_current()` 决定是否插入 `ReschedCause::RunnableArrival`。trap tail、kernel trap tail 和 idle loop 只在 pending 非空时调用 `schedule_preempt(pending)`，deferred preempt 恢复同一组 pending bits。
+**Change:** 总控直接执行本 checkpoint，并启动只读 explorer `Gauss` 做 1B source map；无 worker 越界写代码。本轮 write set 限制在 1B 允许的 scheduler core / processor / class facade / IPI / trap / bootstrap enqueue rename / clone-kthreadd publication rename。processor `need_resched: bool` 替换为 `PendingResched` flags，并提供 `request_resched(ReschedCause)`、`take_pending_resched()` 和 `restore_pending_resched(PendingResched)`。`task_tick()` 请求 `ReschedCause::Tick`；owner CPU new / wake placement 后通过 `RunQueue::decide_preempt_current()` 决定是否插入 `ReschedCause::RunnableArrival`。trap tail、kernel trap tail 只在 pending 非空时调用 `schedule_preempt(pending)`；idle loop 只在 pending 非空时调用 `schedule_idle()`；deferred preempt 必须保留同一组 pending bits。
 
 **Schedule entry split:** `ScheduleMode::Runnable` 拆为 `Yield` 和 `Idle`；`schedule_runnable()` 更名为 `schedule_yield()`，idle task 只走 `schedule_idle()`。`local_requeue_current()` / `RunQueue::requeue_current_legacy()` 泛名入口删除，跨模块 current lifecycle 改为 `local_requeue_yielded_current()`、`local_requeue_preempted_current()`、`local_handoff_woken_current()`、`local_requeue_aborted_wait_current()`、`local_put_prev_blocked()` 和 `local_put_prev_exiting()`。`AbortWaitSleep` 是 no-switch abort，直接返回 `DidNotSwitch`，不调用 class transaction；`Parked` 后被 wake 的 current 归入 parked handoff，调用 `handoff_woken_current()`。`local_requeue_aborted_wait_current()` 作为已接入 facade 保留给后续确有 abort-park requeue 的路径，第一版 1B source audit 未发现需要调用它的 no-switch path。
 
@@ -185,7 +185,7 @@ rg -n "switch_mapping|local_pick_next|set_next_task|on_switch_in|set_current_tas
 
 Findings:
 
-- 旧 `mark_need_resched()` / `fetch_clear_need_resched()` / `need_resched` bool 不再存在；typed pending 覆盖 tick、runnable arrival 和 deferred-preempt restore。
+- 旧 `mark_need_resched()` / `fetch_clear_need_resched()` / `need_resched` bool 不再存在；typed pending 覆盖 tick、runnable arrival 和 caller-owned deferred-preempt restore。
 - `schedule_runnable()`、`ScheduleMode::Runnable`、`local_requeue_current()` 和 `requeue_current_legacy()` 无匹配；yield / preempt / idle / block / exit / parked handoff 已分流。
 - 旧 `task_enqueue(` / `local_enqueue(` / `remote_enqueue(` / `local_enqueue_first(` 无匹配；`WakeUpTaskStaleSafe` 仍是 wait-core stale-safe wake IPI，不属于 new-task publication rename。
 - scheduler implementation 没有引入 `SchedEvent` / `on_event` / `EnqueueReason` / `RequeueReason` / `SwitchOutReason`。
@@ -212,6 +212,8 @@ Results:
 - 用户明确要求不用测试 la 的 QEMU，本 checkpoint 未运行 loongarch64 QEMU。
 
 **Feedback:** Source audit 发现 `implementation.md` 的 1B bullets 容易把 no-switch abort、abort-park requeue 和 `ParkPending` handoff 混读，已回写澄清：`ParkPending` 由 `handoff_woken_current()` 收口，no-switch abort 不调用 class transaction，`requeue_aborted_wait_current()` 只保留给无 wake reward 的 abort-park requeue 路径。未发现需要改变 1B write set、stage order、review gate 或 accepted contract 的实现反馈；`EEVDF-005` 按 1B source-audit 关闭条件移入 Neutralized。
+
+**Feedback:** 用户反馈指出 `schedule_preempt(pending)` deferred 时内部 restore caller 传入的 `PendingResched` value，会把普通 Copy flags value 误表达成 processor pending slot capability。已接受并修正为 caller-owned restore：trap tail 执行 `take_pending_resched()` 后，若 `schedule_preempt(pending)` 返回 `Deferred`，由该 caller 显式调用 `restore_pending_resched(pending)`；scheduler core 不再在 `DeferredPreempt` 分支写 processor pending state。该反馈不改变 1B write set、阶段顺序或 `EEVDF-005` 关闭结论。
 
 **Review gate:** 只读 explorer `Gauss` 先行列出 1B 风险点：旧 bool pending、trap/idle/IPI producers、`ScheduleMode::Runnable`、`local_requeue_current`、block / exit `put_prev_*`、旧 enqueue names 和 `EEVDF-005` no-switch / deferred-preempt audit。总控按这些点完成 source audit；未发现 blocking finding。
 

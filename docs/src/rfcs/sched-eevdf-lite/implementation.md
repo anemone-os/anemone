@@ -14,7 +14,7 @@
 - `Scheduler` trait 方法是 class-local atomic transaction：一个方法可以包含 class-private accounting、placement、penalty、clamp 和统计更新，但 scheduler core 不能拆开组合这些步骤。
 - `RunQueue` / scheduler core 负责 owner CPU/noirq 事务、class dispatch、`ntasks`、`on_runq`、idle fallback 和 transaction 之间的全局线性化。
 - `ScheduleMode` 只属于 scheduler core entry permission；scheduler class 不能保存、匹配或暴露 wait-core private identity。
-- processor pending request 使用 `PendingResched` flags；`ReschedCause::{Tick, RunnableArrival}` 合并而不是覆盖。`PendingResched` 可按值传入 `requeue_preempted_current()`，但 restore pending request 只属于 scheduler core。
+- processor pending request 使用 `PendingResched` flags；`ReschedCause::{Tick, RunnableArrival}` 合并而不是覆盖。`PendingResched` 可按值传入 `requeue_preempted_current()`，但 restore pending request 只属于执行 `take_pending_resched()` 的 scheduler-core caller。
 - 默认 normal scheduler 最终为 `Eevdf`；除 idle task 外，ordinary user task、bootstrap task 和 kthread 第一版都进入 EEVDF normal class。
 - RR 只作为 transaction surface 行为保持对照、debug 或 bisect class；default switch 后不得仍是 production placement path。
 - `Task::cpuid()`、owner CPU runqueue 和 `SchedEntity::on_runq()` 的所有权不变。
@@ -235,8 +235,8 @@ write set：
   - `restore_pending_resched(PendingResched)`
 - `task_tick()` 返回 `TickAction::RequestResched` 时，processor/core 设置 `ReschedCause::Tick`。
 - `decide_preempt_current()` 返回 `PreemptDecision::RequestResched` 时，processor/core 设置 `ReschedCause::RunnableArrival`。
-- pending request 合并而不是 last-writer-wins；tick 和 runnable arrival 可同时存在。`DeferredPreempt` 必须恢复同一组 pending bits。
-- `schedule_preempt(pending: PendingResched)` 接收 typed pending flags；current runnable 时调用 `requeue_preempted_current(task, now, pending)`，`Waiting/PrePark` 时 deferred 并恢复 pending。
+- pending request 合并而不是 last-writer-wins；tick 和 runnable arrival 可同时存在。`DeferredPreempt` 必须让执行 `take_pending_resched()` 的 caller 恢复同一组 pending bits。
+- `schedule_preempt(pending: PendingResched)` 接收 typed pending flags；current runnable 时调用 `requeue_preempted_current(task, now, pending)`，`Waiting/PrePark` 时只返回 deferred，不在 scheduler 内部恢复 pending。
 - `schedule_runnable()` 改为 yield 语义命名，例如 `schedule_yield()` 或 `schedule_current_yield()`；`ScheduleMode::Runnable` 拆为 `Yield` 和 `Idle`。
 - `schedule_idle()` 保持 idle 专用入口。idle task 保持 fallback singleton，不进入 `requeue_*_current()`。
 - `task_enqueue()` / `local_enqueue()` / `remote_enqueue()` 命名族清理为 `enqueue_new_task` 语义，例如 `enqueue_new_task()`、`local_enqueue_new_task()`、`remote_enqueue_new_task()`。`init_routines::local_enqueue_first()` 同步改为 first/new task publication 语义命名。
@@ -297,7 +297,7 @@ write set：
 - Source audit：
   - class module 不引用 scheduler-private `ScheduleMode` 作为算法状态。
   - scheduler implementation 不引入 `SchedEvent` / `on_event` / `EnqueueReason` / `RequeueReason` / `SwitchOutReason`。
-  - `PendingResched` 覆盖 tick、IPI / runnable arrival 和 deferred-preempt restore。
+  - `PendingResched` 覆盖 tick、IPI / runnable arrival 和 caller-owned deferred-preempt restore。
   - remote runnable arrival 不在 source CPU 比较目标 current；owner CPU placement 后决策或显式 RR 保守 resched 路径可审计。
   - runnable current requeue 前存在 method-first class transaction。
   - `DeferredPreempt` 不触发 switch-out accounting。
@@ -312,7 +312,7 @@ Tracking issue 关闭审查：
 退出条件：
 
 - 所有 scheduler class 调用点都通过 method-first transaction / `RunQueue` facade。
-- 所有 resched request 调用点都传递 `PendingResched` flags，且 `DeferredPreempt` 恢复原 pending set。
+- trap-tail resched request 调用点都传递 `PendingResched` flags；idle loop 只把非空 pending 作为 `schedule_idle()` 触发；`DeferredPreempt` 由执行 `take_pending_resched()` 并进入 `schedule_preempt(pending)` 的 caller 恢复原 pending set。
 - 当前 task 的公平状态具备入队前 lifecycle transaction 位置；阶段 2 可以在这些位置接入 EEVDF `account_current(now)`、wake clamp 和 eligibility，而不改 wait-core。
 - `EEVDF-005` 的 switch-in 顺序已具备 source-audit 落点：所有真正切换到 next task 的路径都经过 `set_next_task(task, now)`，no-switch abort 和 deferred preempt 不会误开新的 execution segment。
 
@@ -933,6 +933,7 @@ write set：
 - 2026-07-09：阶段 1 保持一个概念阶段，但拆为 Checkpoint 1A / 1B：1A 关闭 trait / `RunQueue` / entity split 和 RR/Idle 机械适配，1B 关闭 typed pending、schedule entry、trap / IPI plumbing 与 `EEVDF-005` source audit。阶段 2 前置条件改为 1B 关闭，避免一个 gate 同时吞下所有 cross-layer plumbing。
 - 2026-07-09：阶段 2 保持一个概念阶段，但拆为 Checkpoint 2A / 2B / 2C / 2D：2A 只做 payload / class compile scaffold，2B 关闭 P1 accounting，2C 关闭 P2 `rq_vtime` / arithmetic / bounded yield，2D 关闭 P3 wake clamp / parked handoff。阶段 3 前置条件改为 2B / 2C / 2D 全部关闭，避免一次性算法落地。
 - 2026-07-09：Checkpoint 1B source audit 后澄清 wait abort / handoff wording：no-switch abort 不调用 class transaction，`ParkPending` 由 `handoff_woken_current()` 收口，`requeue_aborted_wait_current()` 只保留给无 wake reward 的 abort-park requeue 路径；目标、不变量、阶段顺序和 write set 不变。
+- 2026-07-09：Checkpoint 1B 后反馈指出 `schedule_preempt(pending)` 内部 restore caller 传入的 `PendingResched` value 会混淆 flags value 与 processor pending slot ownership。接受 caller-owned restore：执行 `take_pending_resched()` 的 trap tail caller 在 `SchedulePreemptResult::Deferred` 时恢复原 pending set；`schedule_preempt()` 只返回 deferred，不写 processor pending state。目标、不变量和阶段顺序不变。
 
 ## Write Set 扩展记录
 
