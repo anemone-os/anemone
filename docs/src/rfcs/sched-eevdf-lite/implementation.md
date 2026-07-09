@@ -1,7 +1,7 @@
 # Sched EEVDF-lite 迁移实施计划
 
 **状态：** Active
-**最后更新：** 2026-07-09
+**最后更新：** 2026-07-10
 **父 RFC：** [RFC-20260622-sched-eevdf-lite](./index.md)
 **不变量：** [不变量需求](./invariants.md)
 
@@ -482,36 +482,42 @@ Tracking issue 关闭审查：
 交付：
 
 - 实现 `rq_vtime`：
-  - 明确公式。
-  - 明确 enqueue/dequeue/pick/account_current 后的更新点。
-  - 明确 current task 被 pick 出 queue 后是否仍参与公平时钟。
-  - 明确与 runnable set 变化的关系。
-  - 明确何时允许 fallback anomaly。
+  - 公式为 monotonic min-vruntime floor：visible runnable set 包含 ready queue 和当前正在运行的 EEVDF task，`rq_vtime = max(rq_vtime, min_visible_vruntime)`；visible set 为空时保持不变。
+  - enqueue / dequeue / pick / `account_current(now)` 后通过 helper 用当前 visible set 推进 `rq_vtime`。
+  - current task 被 pick 出 queue 后仍参与公平时钟，但不参与 queue membership 或 pick scan。
+  - runnable set 变化不得让 `rq_vtime` 回退；new task placement 使用当前 `rq_vtime`。
+  - no-eligible fallback 只在 non-empty queue 中没有 eligible task 时允许，必须记录 anomaly，并把 `rq_vtime` 推进到 fallback task 的 `vruntime`。
 - 实现 virtual time arithmetic：
-  - 明确 `Vruntime` / `Deadline` 类型、单位和 fixed-point scaling。
-  - 明确 `delta_exec * NICE_0_WEIGHT / weight` 的精度边界。
-  - 明确 overflow / saturating / fail-closed 策略。
+  - `Vruntime` / `Deadline` / `rq_vtime` 长期存储为 normalized nanoseconds 的 `u64` scalar；nice 0 下 `1ns` actual runtime 对应 `1` virtual ns。
+  - 不引入额外 fixed-point fractional scale；`delta_exec_ns * NICE_0_WEIGHT / weight` 和 slice/deadline 乘除用 `u128` 中间值。
+  - 正 `delta_exec` 的 `delta_vruntime` 至少为 `1`。
+  - overflow / 超出 `u64::MAX` 时 saturate 到 `u64::MAX` 并记录 arithmetic anomaly；不 panic，不把 `Result` 扩散到 trait / `RunQueue` surface。
 - 实现 first-version eligible pick：
   - O(n) eligible pick 选择最小 deadline。
-  - no eligible fallback 到最小 `vruntime`，并记录 anomaly。
+  - eligibility 使用 `task.vruntime <= rq_vtime`。
+  - no eligible fallback 到最小 `vruntime`，记录 anomaly，并推进 `rq_vtime`。
   - pick 不退化为单个 deadline-only 结构。
 - 实现 tick preemption decision：
-  - 当前任务耗尽 virtual slice 时请求 resched。
-  - 存在更早 eligible deadline 的 runnable task 时请求 resched。
-  - 否则不每 tick 强制轮转。
+  - `account_current(now)` 后，当前任务 `vruntime >= deadline` 时请求 resched。
+  - 存在 eligible 且 deadline 严格早于 current deadline 的 queued runnable task 时请求 resched。
+  - deadline 相等时保持 current；non-eligible task 不得只凭更早 deadline 抢占 current；否则不每 tick 强制轮转。
 - 实现 `decide_preempt_current()`：
   - 在 owner CPU 的 `enqueue_new()` / `enqueue_woken()` placement 后比较 current 与 candidate。
   - 不接收 New/Wake source。
-  - 返回 `PreemptDecision`，由 processor/core 设置 `ReschedCause::RunnableArrival`。
-- 实现 new task placement：new task 无有效 `vruntime` 时通过 `enqueue_new()` 放到 `rq_vtime` 附近。
+  - 先 `account_current(current, now)`；只有 candidate eligible 且 deadline 严格早于 current deadline 时返回 `PreemptDecision::RequestResched`，由 processor/core 设置 `ReschedCause::RunnableArrival`。
+- 实现 new task placement：new task 无有效 `vruntime` 时通过 `enqueue_new()` 初始化为 `vruntime = rq_vtime`，并按当前 nice weight 与 base slice 计算 `deadline`。
+- 实现 deadline renewal：deadline 只在初始化或 `vruntime >= deadline` 时自然续期；普通 requeue 不无条件重算 deadline。
+- 保持 2C / 2D wake 边界：
+  - `enqueue_woken()` 在 2C 不执行 wake clamp；未初始化 entity 只做安全初始化，已初始化 entity 保留既有 virtual-time state。
+  - 真实 wake clamp / parked handoff 归属 Checkpoint 2D；2C 不消费 wake clamp window。
 - 实现 bounded yield penalty：
   - `requeue_yielded_current()` 先 `account_current(now)`。
-  - 后推 deadline 到保守窗口，例如 base-slice virtual delta 或当前 runqueue 较后的 eligible deadline 附近。
+  - 只后推 deadline 到至少 `rq_vtime + yield_penalty_window_vruntime(weight)`。
   - 不改 nice / weight。
-  - 不把 `vruntime` 推到不可恢复的最差位置。
+  - 不修改 `vruntime`，不把 task 推到不可恢复的最差位置。
 - 实现 nice-to-weight 语义消费：
-  - `setpriority()` / clone nice inheritance 后，下一次 owner CPU `account_current()` / enqueue / pick 读取最新 nice。
-  - 若当前 `setpriority()` 路径无法保证 runqueue 上 task 的 weight visibility，2C 必须在 `task/api/priority.rs` 或 owner-local helper 中补齐规则；该问题不能留到 default class switch 后再处理。
+  - `setpriority()` / clone nice inheritance 后，下一次 owner CPU `account_current()` / enqueue / pick / preempt decision 读取最新 nice。
+  - 已存在 deadline 不因 renice 立即重算；若当前 `setpriority()` 路径无法保证后续 owner CPU 可观察最新 nice，2C 必须在 `task/api/priority.rs` 或 owner-local helper 中补齐规则；该问题不能留到 default class switch 后再处理。
   - nice 是 task-owned weight truth 的例外，不等同 scheduler policy / class migration；2C 不得新增远端直接修改 `SchedEntity` class 或 EEVDF payload 的路径。
 - 消费 2A 已接入的 Kconfig constants：
   - base slice。
@@ -522,7 +528,7 @@ Tracking issue 关闭审查：
 审计：
 
 - 搜索 `deadline` 排序逻辑，确认 pick 不是单个 deadline-only 结构。
-- 搜索 anomaly 更新点，确认 fallback 不会被静默吞掉。
+- 搜索 anomaly 更新点，确认 fallback 和 arithmetic saturation 不会被静默吞掉；anomaly 字段必须标注为 EEVDF-lite 本地诊断概念，不参与调度决策。
 - 搜索 Kconfig defs 和生成使用点，确认 base slice、yield penalty window 和 anomaly threshold 不是散落在代码里的 magic number。
 - 搜索 `nice()` / `set_nice` / `setpriority()`，确认 nice 权重方向可被 owner CPU pick/accounting 观察。
 
@@ -532,7 +538,7 @@ Tracking issue 关闭审查：
 - 假设 nice 变化无需立即跨 CPU 重排 runqueue；下一次 owner CPU accounting / enqueue / pick 可以消费最新权重。
 - 假设 runtime scheduler policy / class switch 不属于本 RFC；若未来支持，必须另走 owner CPU `RunQueue` command / IPI 事务，而不是在 2C 权重可见性补丁中顺手加入 class migration。
 - 假设第一版 bounded yield penalty 可避免立即选回，同时不造成永久饥饿。
-- 失败信号：fallback anomaly 在稳定 CPU-bound workload 持续增长、出现 deadline-only 行为、nice 权重方向不可见、new placement 必须读取 wall-clock `now`、yield smoke 失败、或 virtual time arithmetic 无法 fail closed；此时停止阶段，回写 `invariants.md` / `tracking-issues.md`。
+- 失败信号：fallback anomaly 在稳定 CPU-bound workload 持续增长、出现 deadline-only 行为、nice 权重方向不可见、new placement 必须读取 wall-clock `now`、yield smoke 失败、2C 偷吃 wake clamp、或 virtual time arithmetic 无法 saturating fail closed；此时停止阶段，回写 `invariants.md` / `tracking-issues.md`。
 
 write set：
 
@@ -549,7 +555,7 @@ write set：
 
 可观测性：
 
-- fallback anomaly 至少提供受限计数或 rate-limited log；稳定 CPU-bound smoke 在 warm-up 后连续观察窗口仍增长时，必须停止 default class switch 并回写 `rq_vtime` / eligibility 公式。
+- anomaly 至少提供受限计数和 last reason，可选 rate-limited log；覆盖 no-eligible fallback 和 arithmetic saturation。稳定 CPU-bound smoke 在 warm-up 后连续观察窗口仍增长 fallback anomaly 时，必须停止 default class switch 并回写 `rq_vtime` / eligibility 公式。
 - 若日志在 hot path，必须受阈值限制，不能让 benchmark 结果主要反映日志成本。
 
 验证：
@@ -559,13 +565,13 @@ write set：
   - eligible pick 选择最小 deadline。
   - no eligible fallback 选择最小 vruntime 并记录 anomaly。
   - nice 权重方向影响 `vruntime` 推进。
-	  - bounded yield penalty 让其它 runnable task 获得运行机会，yielding task 不永久饿死。
+  - bounded yield penalty 让其它 runnable task 获得运行机会，yielding task 不永久饿死。
 - Source audit：无 deadline-only pick，Kconfig 常量接入 live root `kconfig`，clone path 不复制父 `SchedEntity`，阶段 3 前不得把普通 default normal constructor 偷偷切到 EEVDF。
 
 Tracking issue 关闭审查：
 
-- `EEVDF-001` 必须在本 checkpoint 结束时审查；只有 `rq_vtime` 公式、更新点、fallback 允许条件和 anomaly 语义已进入 canonical 文本或 Gate P2 证据时，才能移入 Neutralized。
-- `EEVDF-020` 必须与 `EEVDF-001` 同步审查；只有 virtual time 类型、单位、scale、overflow / saturating 规则和 fail-closed 行为已明确时，才能移入 Neutralized。
+- `EEVDF-001` 必须在本 checkpoint 结束时审查；只有已接受的 `rq_vtime` 公式、更新点、fallback 允许条件和 anomaly 语义由实现、source audit 和 focused smoke（若低成本可用）证明后，才能移入 Neutralized。
+- `EEVDF-020` 必须与 `EEVDF-001` 同步审查；只有已接受的 virtual time 类型、单位、scale、overflow / saturating 规则和 fail-closed 行为由实现、source audit 和 focused smoke（若低成本可用）证明后，才能移入 Neutralized。
 - 若公式或 arithmetic 反馈改变 fairness / eligibility contract，先回写 [RFC index](./index.md) / [不变量需求](./invariants.md)，再更新 tracking issue；不得只在 transaction devlog 中留下实现事实。
 
 退出条件：
@@ -885,7 +891,7 @@ write set：
 
 ### Gate P2 - `rq_vtime`、eligibility 与 bounded yield
 
-**假设：** 简化的 per-runqueue `rq_vtime` 足以在第一版 EEVDF-lite 中提供 eligibility gating，不需要 Linux 完整 lag/dequeue 模型；bounded yield penalty 可以避免 yielding task 立即选回，同时不造成 starvation。
+**假设：** 简化的 per-runqueue `rq_vtime` 足以在第一版 EEVDF-lite 中提供 eligibility gating，不需要 Linux 完整 lag/dequeue 模型；已接受的第一版公式是 monotonic min-vruntime floor，visible set 包含 ready queue 和 current；bounded yield penalty 可以避免 yielding task 立即选回，同时不造成 starvation。
 
 **保护目标 / 不变量：** 短 slice task 可以获得更好响应性，但不能绕过公平份额；yielding task 给其它 runnable task 运行机会，但不能被永久惩罚。
 
@@ -893,9 +899,9 @@ write set：
 
 **非目标：** 不在本 gate 实现 delayed dequeue、lag decay、cgroups、latency nice 或 tree indexes。
 
-**最低验证：** focused smoke 覆盖 eligible pick、no-eligible fallback、weighted vruntime progression、anomaly observation 和 yield progress。稳定 CPU-bound smoke 在 warm-up 后不应持续增长 fallback anomaly。
+**最低验证：** focused smoke 覆盖 eligible pick、no-eligible fallback、weighted vruntime progression、arithmetic saturation anomaly observation 和 yield progress。稳定 CPU-bound smoke 在 warm-up 后不应持续增长 fallback anomaly。
 
-**失败信号：** 稳定 CPU-bound workload 持续 fallback、出现 deadline-only 行为、nice weight 方向不可见、yield 长期立即选回自身，或 yielding task 饥饿。
+**失败信号：** 稳定 CPU-bound workload 持续 fallback、出现 deadline-only 行为、nice weight 方向不可见、yield 长期立即选回自身、yielding task 饥饿，或 2C 实现提前消费 2D wake clamp。
 
 **回写：** 公式和证据写 transaction devlog；若公式改变 eligibility contract，更新 `index.md` / `invariants.md` 并 neutralize 或修订 `EEVDF-001`。
 
@@ -936,6 +942,7 @@ write set：
 - 2026-07-09：阶段 2 保持一个概念阶段，但拆为 Checkpoint 2A / 2B / 2C / 2D：2A 只做 payload / class compile scaffold，2B 关闭 P1 accounting，2C 关闭 P2 `rq_vtime` / arithmetic / bounded yield，2D 关闭 P3 wake clamp / parked handoff。阶段 3 前置条件改为 2B / 2C / 2D 全部关闭，避免一次性算法落地。
 - 2026-07-09：Checkpoint 1B source audit 后澄清 wait abort / handoff wording：no-switch abort 不调用 class transaction，`ParkPending` 由 `handoff_woken_current()` 收口，`requeue_aborted_wait_current()` 只保留给无 wake reward 的 abort-park requeue 路径；目标、不变量、阶段顺序和 write set 不变。
 - 2026-07-09：Checkpoint 1B 后反馈指出 `schedule_preempt(pending)` 内部 restore caller 传入的 `PendingResched` value 会混淆 flags value 与 processor pending slot ownership。接受 caller-owned restore：执行 `take_pending_resched()` 的 trap tail caller 在 `SchedulePreemptResult::Deferred` 时恢复原 pending set；`schedule_preempt()` 只返回 deferred，不写 processor pending state。目标、不变量和阶段顺序不变。
+- 2026-07-10：Checkpoint 2C 前设计共识闭合：virtual-time state 以 normalized ns `u64` 存储、`u128` 中间计算、saturating helper 记录 anomaly；`rq_vtime` 使用 monotonic min-vruntime floor，visible set 包含 queue 和 current；eligibility 为 `vruntime <= rq_vtime`；new placement 使用 `vruntime = rq_vtime`；deadline 仅初始化或 `vruntime >= deadline` 时自然续期；tick / runnable-arrival preempt 只接受 eligible 且 deadline 更早的 candidate；yield 只后推 deadline，不改 `vruntime`；nice visibility 只保证后续 owner CPU 观察最新 `Task::nice()`；2C 不实现 wake clamp。
 
 ## Write Set 扩展记录
 

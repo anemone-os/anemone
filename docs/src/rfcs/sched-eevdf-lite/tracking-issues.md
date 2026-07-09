@@ -1,7 +1,7 @@
 # sched EEVDF-lite tracking issues
 
 **状态：** Active
-**最后更新：** 2026-07-09
+**最后更新：** 2026-07-10
 **父 RFC：** [RFC-20260622-sched-eevdf-lite](./index.md)
 **事务日志：** [2026-07-09-sched-eevdf-lite](../../devlog/transactions/2026-07-09-sched-eevdf-lite.md)
 **来源：** sched-split-aware v2 重写 / method-first scheduler class 纠偏 / 2026-07-07 文档层 review
@@ -27,7 +27,7 @@
 
 **状态：** Active
 
-**问题：** `rq_vtime` 不能只是最小 `vruntime` 或不可审查的临时统计；公式必须说明 current task 已被 pick 出 runqueue 后是否仍参与公平时钟、enqueue / dequeue / pick / `account_current(now)` 更新点、fallback 条件和异常观察面。
+**问题：** `rq_vtime` 不能只是可回退的最小 `vruntime` 或不可审查的临时统计；2C 必须实现已接受的 monotonic min-vruntime floor，说明 current task 已被 pick 出 runqueue 后仍参与公平时钟、enqueue / dequeue / pick / `account_current(now)` 更新点、fallback 条件和 anomaly 观察面。
 
 **修复落点：**
 
@@ -35,9 +35,9 @@
 - [不变量需求](./invariants.md) 的公平性与 `rq_vtime` 不变量。
 - [迁移实施计划](./implementation.md) Checkpoint 2C / Gate P2。
 
-**反馈相关：** Checkpoint 2C / Gate P2 的 focused smoke 需要覆盖 eligible pick、no-eligible fallback、weighted vruntime progression、anomaly observation 和 yield progress。稳定 CPU-bound workload 在 warm-up 后 fallback anomaly 持续增长时，视为公式未闭合；执行事实写 transaction devlog，若公式改变 eligibility contract，回写 `index.md` / `invariants.md` 并再 neutralize 本 issue。
+**反馈相关：** 2026-07-10 设计共识已把公式闭合为 `rq_vtime = max(rq_vtime, min_visible_vruntime)`，visible set 包含 ready queue 和 current，eligibility 为 `vruntime <= rq_vtime`；no-eligible fallback 选择最小 `vruntime`、记录 anomaly，并把 `rq_vtime` 推进到 fallback task 的 `vruntime`。Checkpoint 2C / Gate P2 的 focused smoke 需要覆盖 eligible pick、no-eligible fallback、weighted vruntime progression、anomaly observation 和 yield progress。稳定 CPU-bound workload 在 warm-up 后 fallback anomaly 持续增长时，视为公式未闭合；执行事实写 transaction devlog，若公式改变 eligibility contract，回写 `index.md` / `invariants.md` 并再 neutralize 本 issue。
 
-**关闭条件：** 公式、更新点、fallback 允许条件和 anomaly 语义已进入 canonical 文本或 Checkpoint 2C / Gate P2 证据，且默认 class 切换前该 checkpoint 已关闭。
+**关闭条件：** 已接受公式、更新点、fallback 允许条件和 anomaly 语义已由 Checkpoint 2C 实现与 source audit / focused smoke 证明，且默认 class 切换前该 checkpoint 已关闭。
 
 ### EEVDF-004：wake placement 必须 exactly-once 覆盖 parked handoff 分支
 
@@ -73,7 +73,7 @@
 
 **状态：** Active
 
-**问题：** Gate P2 不只需要 `rq_vtime` 公式，还必须确定 `Vruntime` / `Deadline` 的类型、单位、fixed-point scaling、overflow / saturating 策略、`delta_exec * NICE_0_WEIGHT / weight` 的精度边界，以及 deadline / slice 计算的 fail-closed 行为。
+**问题：** Gate P2 不只需要 `rq_vtime` 公式，还必须实现已接受的 virtual-time arithmetic：`Vruntime` / `Deadline` 使用 normalized ns `u64` 存储、`u128` 中间计算、无额外 fixed-point scale、overflow saturating 并记录 anomaly、正 `delta_exec` 至少推进 `1`，以及 deadline / slice 计算的 fail-closed 行为。
 
 **修复落点：**
 
@@ -81,9 +81,9 @@
 - [不变量需求](./invariants.md) 的 fairness 与 arithmetic fail-closed 要求。
 - [迁移实施计划](./implementation.md) Checkpoint 2C / Gate P2。
 
-**反馈相关：** Checkpoint 2C / Gate P2 的验证必须能观察 weighted vruntime progression 和 overflow / precision 边界；若 arithmetic 需要改变 formula contract，回写 `index.md` / `invariants.md` 并与 `EEVDF-001` 一起关闭。
+**反馈相关：** 2026-07-10 设计共识已确认 `u64` 存储、`u128` 中间计算、统一 private helper saturate 回 `u64`，overflow / saturation 记入 EEVDF-lite 本地 anomaly，不 panic，不把 `Result` 扩散出 EEVDF helper。Checkpoint 2C / Gate P2 的验证必须能观察 weighted vruntime progression 和 overflow / precision 边界；若 arithmetic 需要改变 formula contract，回写 `index.md` / `invariants.md` 并与 `EEVDF-001` 一起关闭。
 
-**关闭条件：** 类型、单位、scale、overflow / saturating 规则和 fail-closed 行为已明确；未关闭前不得进入默认 class 切换。
+**关闭条件：** 类型、单位、scale、overflow / saturating 规则和 fail-closed 行为已由 Checkpoint 2C 实现与 source audit / focused smoke 证明；未关闭前不得进入默认 class 切换。
 
 ## Euclid
 

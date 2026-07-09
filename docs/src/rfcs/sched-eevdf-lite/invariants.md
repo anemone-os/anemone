@@ -1,7 +1,7 @@
 # Sched EEVDF-lite 不变量需求
 
 **状态：** Draft
-**最后更新：** 2026-07-08
+**最后更新：** 2026-07-10
 **父 RFC：** [RFC-20260622-sched-eevdf-lite](./index.md)
 
 本文定义 `EEVDF-lite` 作为默认 normal scheduler 时必须保持的状态所有权、公平性和 scheduler/wait 边界。当前版本以 sched-split 为已接受前提；若后续实现需要改变 `TaskSchedState`、`PrePark/Parked`、token-bound wait sleep、preempt-defer 或 stale-safe wake placement，必须回到 `sched-wait-preempt-arming` RFC review，而不是在 EEVDF-lite 内局部绕过。
@@ -59,7 +59,7 @@ clone inheritance 只能继承 nice 等对应 owner state，不能继承父 task
 
 未来若支持 scheduler policy / class switch，source CPU 只能完成 ABI / permission / target identity 校验并向 target owner CPU 提交 command；queued、current、blocked 和 exiting task 的 class 迁移必须在 owner CPU `RunQueue` transaction 内线性化。本 RFC 不引入这项能力，只固定 future extension 不得绕过 owner boundary。
 
-允许诊断字段记录 anomaly count、last fallback reason、last class transaction 或 runtime snapshots。诊断字段不得反向驱动调度选择，除非它被提升为正式协议状态并进入本文。
+允许诊断字段记录 anomaly count、last anomaly reason、last class transaction 或 runtime snapshots。`anomaly` 是 EEVDF-lite 本地诊断概念，不是 Linux / EEVDF 标准状态；它用于记录 no-eligible fallback、virtual-time saturation 等不应在稳定 workload 中常态化的异常路径。诊断字段不得反向驱动调度选择，除非它被提升为正式协议状态并进入本文。
 
 ## 身份与能力模型
 
@@ -144,6 +144,9 @@ EEVDF-lite 必须使用唯一幂等 helper 推进当前执行段：
 5. 如果 `now <= exec_start`，入口必须 no-op 或 fail closed，不能让 `vruntime` 倒退。
 6. `Task::on_switch_out()` 仍是 task / CPU usage hook，不是 EEVDF fairness accounting truth。
 7. 第一版直接使用 `Instant`；`Instant::now()` 必须通过阶段审计证明适合 scheduler noirq / tick path，不预设新的 scheduler time abstraction。
+8. `Vruntime`、`Deadline` 和 `rq_vtime` 的长期存储使用 normalized nanoseconds 的 `u64` scalar；nice 0 下 `1ns` actual runtime 对应 `1` virtual ns。
+9. virtual-time 乘除使用 `u128` 中间值，并通过 EEVDF private helper saturate 回 `u64`；overflow / saturation 必须记录 anomaly，不得 panic，也不得把 `Result` 扩散到 `Scheduler` trait 或 `RunQueue` surface。
+10. 正 `delta_exec` 计算出的 `delta_vruntime` 若为 `0`，必须至少推进 `1`，保证持续运行最终推进公平账本。
 
 ## Wake Placement
 
@@ -164,13 +167,17 @@ wake clamp 必须 exactly once：
 EEVDF-lite 必须保持以下公平性边界：
 
 1. 权重越高，单位实际执行时间推进的 `vruntime` 越慢。
-2. `deadline = vruntime + slice / weight_normalized` 或等价形式。
-3. eligible 判断必须引用 `rq_vtime` 或等价公平时钟。
-4. `rq_vtime` 不能只是 `min(vruntime)` 的别名，也不能是不说明更新点的临时统计。
-5. 短 slice 可以带来更早 virtual deadline 和更好响应性，但不能绕过 eligibility 长期获得超过公平份额的 CPU。
-6. 如果没有 eligible task，fallback 只能作为 forward-progress 保护，不得隐藏 fairness clock 错误。
-7. wake clamp 窗口必须围绕 `rq_vtime`，不能直接把所有 wake task 重置到最有利位置。
-8. `sched_yield()` 必须使用 bounded penalty；不能等同普通 tick requeue，也不能把 yielding task 永久惩罚出公平队列。
+2. `deadline = vruntime + slice_ns * NICE_0_WEIGHT / weight` 或等价形式；deadline 只在初始化或 `vruntime >= deadline` 时自然续期，普通 requeue 不得无条件重算 deadline。
+3. `rq_vtime` 第一版使用 monotonic min-vruntime floor：visible runnable set 包含 ready queue 中的 runnable tasks 和当前正在运行的 EEVDF task，`rq_vtime = max(rq_vtime, min_visible_vruntime)`；visible set 为空时保持不变。
+4. current task 被 pick 出 queue 后仍参与 `rq_vtime` 更新，但不参与 queue membership 或 pick scan。
+5. eligible 判断使用 `task.vruntime <= rq_vtime`。
+6. `rq_vtime` 不能回退，也不能是不说明更新点的临时统计。
+7. 短 slice 可以带来更早 virtual deadline 和更好响应性，但不能绕过 eligibility 长期获得超过公平份额的 CPU。
+8. fresh new task placement 使用 `vruntime = rq_vtime`，并按当前 nice weight 与 base slice 计算 deadline；不得读取 wall-clock `now`。
+9. 如果没有 eligible task，fallback 只能作为 forward-progress 保护：选择最小 `vruntime` task，记录 anomaly，并把 `rq_vtime` 推进到 fallback task 的 `vruntime`。稳定 CPU-bound workload 在 warm-up 后不得持续增长 fallback anomaly。
+10. wake clamp 窗口必须围绕 `rq_vtime`，不能直接把所有 wake task 重置到最有利位置。
+11. `sched_yield()` 必须使用 bounded penalty：只把 yielding task 的 deadline 后推到至少 `rq_vtime + yield_penalty_window_vruntime(weight)`，不得修改 `vruntime`、nice 或 weight，也不能把 yielding task 永久惩罚出公平队列。
+12. `Task::nice()` 是唯一 weight truth；renice 后下一次 owner CPU accounting / enqueue / pick / preempt decision 必须读取最新 nice，但已存在 deadline 不要求立即重算，也不得为此引入远端 EEVDF payload 修改或 class migration。
 
 禁止退化为：
 
