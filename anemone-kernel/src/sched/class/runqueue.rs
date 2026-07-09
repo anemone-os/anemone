@@ -1,14 +1,15 @@
 use crate::{
     prelude::*,
     sched::class::{
-        PendingResched, PreemptDecision, SchedClassPrv, Scheduler, TickAction, idle::Idle,
-        rr::RoundRobin,
+        PendingResched, PreemptDecision, SchedClassKind, Scheduler, TickAction, eevdf::Eevdf,
+        idle::Idle, rr::RoundRobin,
     },
 };
 
 /// PerCpu run queue.
 ///
 /// Priority (top-down):
+/// - [Eevdf]
 /// - [RoundRobin]
 /// - [Idle]
 ///
@@ -17,6 +18,7 @@ use crate::{
 pub struct RunQueue {
     ntasks: usize,
 
+    eevdf: Eevdf,
     rr: RoundRobin,
     idle: Idle,
 }
@@ -25,6 +27,7 @@ impl RunQueue {
     pub const fn new() -> Self {
         Self {
             ntasks: 0,
+            eevdf: Eevdf::new(),
             rr: RoundRobin::new(),
             idle: Idle,
         }
@@ -39,20 +42,27 @@ impl RunQueue {
     }
 
     pub fn dequeue(&mut self, task: &Arc<Task>) {
+        let kind = task.sched_class_kind();
         task.with_sched_entity_mut(|se| {
-            match se.class() {
-                SchedClassPrv::RoundRobin(()) => {
-                    if self.rr.dequeue(task) {
-                        self.ntasks -= 1;
-                    } else {
-                        panic!("task not found in round-robin scheduler");
-                    }
-                },
-                SchedClassPrv::Idle(()) => panic!("idle task should not be dequeued"),
-            }
-            debug_assert!(se.on_runq, "task is not on run queue");
+            assert_eq!(se.class_kind(), kind);
+            assert!(se.on_runq, "task is not on run queue");
+        });
+
+        let removed = match kind {
+            SchedClassKind::Eevdf => self.eevdf.dequeue(task),
+            SchedClassKind::RoundRobin => self.rr.dequeue(task),
+            SchedClassKind::Idle => panic!("idle task should not be dequeued"),
+        };
+        if !removed {
+            panic!("task not found in scheduler class");
+        }
+
+        task.with_sched_entity_mut(|se| {
+            assert_eq!(se.class_kind(), kind);
+            assert!(se.on_runq, "task is not on run queue");
             se.on_runq = false;
         });
+        self.ntasks -= 1;
     }
 
     pub fn requeue_yielded_current(&mut self, task: Arc<Task>, now: Instant) {
@@ -77,24 +87,37 @@ impl RunQueue {
     }
 
     pub fn put_prev_blocked(&mut self, task: &Arc<Task>, now: Instant) {
-        match task.with_sched_entity_mut(|se| se.class()) {
-            SchedClassPrv::RoundRobin(()) => self.rr.put_prev_blocked(task, now),
-            SchedClassPrv::Idle(()) => self.idle.put_prev_blocked(task, now),
+        match task.sched_class_kind() {
+            SchedClassKind::Eevdf => self.eevdf.put_prev_blocked(task, now),
+            SchedClassKind::RoundRobin => self.rr.put_prev_blocked(task, now),
+            SchedClassKind::Idle => self.idle.put_prev_blocked(task, now),
         }
     }
 
     pub fn put_prev_exiting(&mut self, task: &Arc<Task>, now: Instant) {
-        match task.with_sched_entity_mut(|se| se.class()) {
-            SchedClassPrv::RoundRobin(()) => self.rr.put_prev_exiting(task, now),
-            SchedClassPrv::Idle(()) => self.idle.put_prev_exiting(task, now),
+        match task.sched_class_kind() {
+            SchedClassKind::Eevdf => self.eevdf.put_prev_exiting(task, now),
+            SchedClassKind::RoundRobin => self.rr.put_prev_exiting(task, now),
+            SchedClassKind::Idle => self.idle.put_prev_exiting(task, now),
         }
     }
 
     pub fn pick_next_task(&mut self) -> Arc<Task> {
+        if let Some(task) = self.eevdf.pick_next_task() {
+            self.ntasks -= 1;
+            task.with_sched_entity_mut(|se| {
+                assert_eq!(se.class_kind(), SchedClassKind::Eevdf);
+                assert!(se.on_runq, "task is not on run queue");
+                se.on_runq = false;
+            });
+            return task;
+        }
+
         // rr
         if let Some(task) = self.rr.pick_next_task() {
             self.ntasks -= 1;
             task.with_sched_entity_mut(|se| {
+                assert_eq!(se.class_kind(), SchedClassKind::RoundRobin);
                 assert!(se.on_runq, "task is not on run queue");
                 se.on_runq = false;
             });
@@ -108,16 +131,18 @@ impl RunQueue {
     }
 
     pub fn set_next_task(&mut self, task: &Arc<Task>, now: Instant) {
-        match task.with_sched_entity_mut(|se| se.class()) {
-            SchedClassPrv::RoundRobin(()) => self.rr.set_next_task(task, now),
-            SchedClassPrv::Idle(()) => self.idle.set_next_task(task, now),
+        match task.sched_class_kind() {
+            SchedClassKind::Eevdf => self.eevdf.set_next_task(task, now),
+            SchedClassKind::RoundRobin => self.rr.set_next_task(task, now),
+            SchedClassKind::Idle => self.idle.set_next_task(task, now),
         }
     }
 
     pub fn task_tick(&mut self, task: &Arc<Task>, now: Instant) -> TickAction {
-        match task.with_sched_entity_mut(|se| se.class()) {
-            SchedClassPrv::Idle(()) => self.idle.task_tick(task, now),
-            SchedClassPrv::RoundRobin(()) => self.rr.task_tick(task, now),
+        match task.sched_class_kind() {
+            SchedClassKind::Eevdf => self.eevdf.task_tick(task, now),
+            SchedClassKind::Idle => self.idle.task_tick(task, now),
+            SchedClassKind::RoundRobin => self.rr.task_tick(task, now),
         }
     }
 
@@ -127,55 +152,91 @@ impl RunQueue {
         candidate: &Arc<Task>,
         now: Instant,
     ) -> PreemptDecision {
-        match candidate.with_sched_entity_mut(|se| se.class()) {
-            SchedClassPrv::RoundRobin(()) => {
-                self.rr.decide_preempt_current(current, candidate, now)
-            },
-            SchedClassPrv::Idle(()) => self.idle.decide_preempt_current(current, candidate, now),
+        match candidate.sched_class_kind() {
+            SchedClassKind::Eevdf => self.eevdf.decide_preempt_current(current, candidate, now),
+            SchedClassKind::RoundRobin => self.rr.decide_preempt_current(current, candidate, now),
+            SchedClassKind::Idle => self.idle.decide_preempt_current(current, candidate, now),
         }
     }
 
     fn enqueue_with(&mut self, task: Arc<Task>, transaction: EnqueueTransaction) {
-        self.ntasks += 1;
+        let kind = task.sched_class_kind();
         task.with_sched_entity_mut(|se| {
-            match se.class() {
-                SchedClassPrv::RoundRobin(()) => match transaction {
-                    EnqueueTransaction::New => self.rr.enqueue_new(task.clone()),
-                    EnqueueTransaction::Woken => self.rr.enqueue_woken(task.clone()),
-                },
-                SchedClassPrv::Idle(()) => panic!("idle task should not be enqueued"),
-            }
+            assert_eq!(se.class_kind(), kind);
+            assert!(!se.on_runq, "task is already on run queue");
+        });
+
+        match kind {
+            SchedClassKind::Eevdf => match transaction {
+                EnqueueTransaction::New => self.eevdf.enqueue_new(task.clone()),
+                EnqueueTransaction::Woken => self.eevdf.enqueue_woken(task.clone()),
+            },
+            SchedClassKind::RoundRobin => match transaction {
+                EnqueueTransaction::New => self.rr.enqueue_new(task.clone()),
+                EnqueueTransaction::Woken => self.rr.enqueue_woken(task.clone()),
+            },
+            SchedClassKind::Idle => panic!("idle task should not be enqueued"),
+        }
+
+        task.with_sched_entity_mut(|se| {
+            assert_eq!(se.class_kind(), kind);
             assert!(!se.on_runq, "task is already on run queue");
             se.on_runq = true;
         });
+        self.ntasks += 1;
     }
 
     fn requeue_current_with(&mut self, task: Arc<Task>, transaction: CurrentRequeueTransaction) {
-        self.ntasks += 1;
+        let kind = task.sched_class_kind();
         task.with_sched_entity_mut(|se| {
-            match se.class() {
-                SchedClassPrv::RoundRobin(()) => match transaction {
-                    CurrentRequeueTransaction::Yielded { now } => {
-                        self.rr.requeue_yielded_current(task.clone(), now)
-                    },
-                    CurrentRequeueTransaction::Preempted { now, pending } => self
-                        .rr
-                        .requeue_preempted_current(task.clone(), now, pending),
-                    CurrentRequeueTransaction::WokenHandoff { now } => {
-                        self.rr.handoff_woken_current(task.clone(), now)
-                    },
-                    CurrentRequeueTransaction::AbortedWait { now } => {
-                        self.rr.requeue_aborted_wait_current(task.clone(), now)
-                    },
+            assert_eq!(se.class_kind(), kind);
+            assert!(
+                !se.on_runq,
+                "current running task should not already be on run queue"
+            );
+        });
+
+        match kind {
+            SchedClassKind::Eevdf => match transaction {
+                CurrentRequeueTransaction::Yielded { now } => {
+                    self.eevdf.requeue_yielded_current(task.clone(), now)
                 },
-                SchedClassPrv::Idle(()) => panic!("idle task should not be requeued"),
-            }
+                CurrentRequeueTransaction::Preempted { now, pending } => self
+                    .eevdf
+                    .requeue_preempted_current(task.clone(), now, pending),
+                CurrentRequeueTransaction::WokenHandoff { now } => {
+                    self.eevdf.handoff_woken_current(task.clone(), now)
+                },
+                CurrentRequeueTransaction::AbortedWait { now } => {
+                    self.eevdf.requeue_aborted_wait_current(task.clone(), now)
+                },
+            },
+            SchedClassKind::RoundRobin => match transaction {
+                CurrentRequeueTransaction::Yielded { now } => {
+                    self.rr.requeue_yielded_current(task.clone(), now)
+                },
+                CurrentRequeueTransaction::Preempted { now, pending } => self
+                    .rr
+                    .requeue_preempted_current(task.clone(), now, pending),
+                CurrentRequeueTransaction::WokenHandoff { now } => {
+                    self.rr.handoff_woken_current(task.clone(), now)
+                },
+                CurrentRequeueTransaction::AbortedWait { now } => {
+                    self.rr.requeue_aborted_wait_current(task.clone(), now)
+                },
+            },
+            SchedClassKind::Idle => panic!("idle task should not be requeued"),
+        }
+
+        task.with_sched_entity_mut(|se| {
+            assert_eq!(se.class_kind(), kind);
             assert!(
                 !se.on_runq,
                 "current running task should not already be on run queue"
             );
             se.on_runq = true;
         });
+        self.ntasks += 1;
     }
 }
 

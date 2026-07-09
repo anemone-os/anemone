@@ -1,6 +1,6 @@
 use crate::{
     prelude::*,
-    sched::class::{SchedClassPrv, SchedEntity},
+    sched::class::SchedEntity,
     task::{Tid, tid::alloc_kthreadd_tid},
 };
 
@@ -75,7 +75,7 @@ pub fn init_kthreadd() {
             ParameterList::empty(),
             Some(init.tid()),
             Some(Tid::KTHREADD),
-            SchedEntity::new(SchedClassPrv::RoundRobin(())),
+            SchedEntity::new_normal(),
             TaskFlags::empty(),
             Some(cur_cpu_id()),
             kthreadd_tid,
@@ -185,7 +185,7 @@ pub(super) fn spawn(request: SpawnRequest) {
             ParameterList::empty(),
             Some(kthreadd.tid()),
             None,
-            SchedEntity::new(SchedClassPrv::RoundRobin(())),
+            SchedEntity::new_normal(),
             TaskFlags::empty(),
             cpu,
         )

@@ -1,20 +1,23 @@
-use crate::{prelude::*, sched::class::SchedEntity};
+use crate::{
+    prelude::*,
+    sched::class::{SchedClassKind, SchedEntity},
+};
 
 impl Task {
-    /// Get a copy of the scheduling entity of this task.
-    ///
-    /// If you just want to read some fields of the scheduling entity, consider
-    /// using [Self::with_sched_entity_mut] instead to avoid unnecessary bytes
-    /// copying.
-    pub fn sched_entity(&self) -> SchedEntity {
-        *self.sched_entity.lock_irqsave()
-    }
-
     /// Run a closure with a mutable reference to the scheduling entity of this
     /// task.
     pub fn with_sched_entity_mut<F: FnOnce(&mut SchedEntity) -> R, R>(&self, f: F) -> R {
         let mut guard = self.sched_entity.lock_irqsave();
         f(&mut guard)
+    }
+
+    /// Return an observation-only scheduler class snapshot.
+    ///
+    /// This may be used for assertions and diagnostics. Code that changes queue
+    /// membership or class-owned state must use scheduler transactions instead
+    /// of driving behavior from this lossy class identity.
+    pub fn sched_class_kind(&self) -> SchedClassKind {
+        self.sched_entity.lock_irqsave().class_kind()
     }
 
     /// Return an observation-only compatibility snapshot.

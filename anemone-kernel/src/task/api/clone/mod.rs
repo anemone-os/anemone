@@ -15,6 +15,7 @@ use crate::{
         user_access::{UserWritePtr, user_addr},
         *,
     },
+    sched::class::SchedEntity,
     task::{cpu_usage::Privilege, sig::SigNo, tid::Tid},
 };
 
@@ -242,7 +243,7 @@ pub fn kernel_clone(
                 // new thread group
                 None
             },
-            current_task.sched_entity(),
+            SchedEntity::new_normal(),
             TaskFlags::empty(),
             None,
         )

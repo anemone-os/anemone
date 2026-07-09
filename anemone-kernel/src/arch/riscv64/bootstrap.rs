@@ -19,7 +19,7 @@ use crate::{
     },
     mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
-    sched::class::{SchedClassPrv, SchedEntity},
+    sched::class::SchedEntity,
 };
 
 #[unsafe(no_mangle)]
@@ -403,7 +403,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
                 ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
                 None,
                 Some(Tid::INIT),
-                SchedEntity::new(SchedClassPrv::RoundRobin(())),
+                SchedEntity::new_normal(),
                 TaskFlags::empty(),
                 Some(cur_cpu_id()),
                 crate::task::alloc_init_tid(),
@@ -456,7 +456,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
             ParameterList::new(&[ap_id as u64]),
             None,
             Some(Tid::INIT),
-            SchedEntity::new(SchedClassPrv::RoundRobin(())),
+            SchedEntity::new_normal(),
             TaskFlags::empty(),
             Some(cur_cpu_id()),
         )

@@ -35,7 +35,7 @@ use core::fmt::{Debug, Display};
 use crate::{
     mm::stack::KernelStack,
     prelude::*,
-    sched::class::{SchedClassPrv, SchedEntity},
+    sched::class::SchedEntity,
     sync::mono::MonoFlow,
     task::{
         cpu_usage::{TaskCpuUsage, ThreadGroupCpuUsage},
@@ -503,7 +503,7 @@ impl Task {
                         ParameterList::empty(),
                     ))
                 },
-                sched_entity: SpinLock::new(SchedEntity::new(SchedClassPrv::Idle(()))),
+                sched_entity: SpinLock::new(SchedEntity::new_idle()),
                 fpu_used: AtomicBool::new(false),
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
                 files_state: RwLock::new(Arc::new(RwLock::new(FilesState::new()))),

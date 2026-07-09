@@ -2,13 +2,14 @@
 
 use crate::prelude::*;
 
+pub mod eevdf;
 pub mod idle;
 pub mod rr;
 
 mod entity;
 mod runqueue;
 
-pub use entity::{SchedClassPrv, SchedEntity};
+pub use entity::{SchedClassKind, SchedClassPrv, SchedEntity};
 pub use runqueue::RunQueue;
 
 /// Scheduler-class local transaction surface.

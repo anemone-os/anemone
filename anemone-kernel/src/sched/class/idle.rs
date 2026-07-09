@@ -3,7 +3,7 @@
 
 use crate::{
     prelude::*,
-    sched::class::{PendingResched, PreemptDecision, SchedClassPrv, Scheduler, TickAction},
+    sched::class::{PendingResched, PreemptDecision, SchedClassKind, Scheduler, TickAction},
 };
 
 pub struct Idle;
@@ -55,14 +55,11 @@ impl Scheduler for Idle {
     }
 
     fn set_next_task(&mut self, task: &Arc<Task>, _now: Instant) {
-        assert!(matches!(task.sched_entity().class, SchedClassPrv::Idle(())));
+        assert!(matches!(task.sched_class_kind(), SchedClassKind::Idle));
     }
 
     fn task_tick(&mut self, cur_task: &Arc<Task>, _now: Instant) -> TickAction {
-        assert!(matches!(
-            cur_task.sched_entity().class,
-            SchedClassPrv::Idle(())
-        ));
+        assert!(matches!(cur_task.sched_class_kind(), SchedClassKind::Idle));
         TickAction::RequestResched
     }
 
@@ -72,10 +69,7 @@ impl Scheduler for Idle {
         candidate: &Arc<Task>,
         _now: Instant,
     ) -> PreemptDecision {
-        assert!(matches!(
-            candidate.sched_entity().class,
-            SchedClassPrv::Idle(())
-        ));
+        assert!(matches!(candidate.sched_class_kind(), SchedClassKind::Idle));
         PreemptDecision::KeepCurrent
     }
 }

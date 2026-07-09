@@ -58,6 +58,10 @@ pub struct Parameters {
     pub max_fd_per_process: Option<usize>,
     pub ramdisk_count: Option<usize>,
     pub loop_device_count: Option<usize>,
+    pub eevdf_base_slice_us: Option<u64>,
+    pub eevdf_wake_clamp_us: Option<u64>,
+    pub eevdf_yield_penalty_us: Option<u64>,
+    pub eevdf_anomaly_threshold: Option<u64>,
 }
 
 impl Parameters {
@@ -139,6 +143,14 @@ pub const MAX_FD_PER_PROCESS: usize = {};
 pub const RAMDISK_COUNT: usize = {};
 /// Number of static loop block devices to publish at boot.
 pub const LOOP_DEVICE_COUNT: usize = {};
+/// EEVDF-lite base slice in microseconds.
+pub const EEVDF_BASE_SLICE_US: u64 = {};
+/// EEVDF-lite wake placement clamp window in microseconds.
+pub const EEVDF_WAKE_CLAMP_US: u64 = {};
+/// EEVDF-lite bounded yield penalty window in microseconds.
+pub const EEVDF_YIELD_PENALTY_US: u64 = {};
+/// Consecutive EEVDF no-eligible fallback count that becomes anomalous.
+pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
         "#,
             default_or!(bootstrap_heap_shift_kb),
             default_or!(log_buffer_shift_kb),
@@ -163,6 +175,10 @@ pub const LOOP_DEVICE_COUNT: usize = {};
             default_or!(max_fd_per_process),
             default_or!(ramdisk_count),
             default_or!(loop_device_count),
+            default_or!(eevdf_base_slice_us),
+            default_or!(eevdf_wake_clamp_us),
+            default_or!(eevdf_yield_penalty_us),
+            default_or!(eevdf_anomaly_threshold),
         )
     }
 }

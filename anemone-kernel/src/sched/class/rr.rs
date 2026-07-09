@@ -4,7 +4,7 @@
 
 use crate::{
     prelude::*,
-    sched::class::{PendingResched, PreemptDecision, SchedClassPrv, Scheduler, TickAction},
+    sched::class::{PendingResched, PreemptDecision, SchedClassKind, Scheduler, TickAction},
 };
 
 pub struct RoundRobin {
@@ -61,15 +61,15 @@ impl Scheduler for RoundRobin {
 
     fn put_prev_blocked(&mut self, task: &Arc<Task>, _now: Instant) {
         assert!(matches!(
-            task.sched_entity().class,
-            SchedClassPrv::RoundRobin(())
+            task.sched_class_kind(),
+            SchedClassKind::RoundRobin
         ));
     }
 
     fn put_prev_exiting(&mut self, task: &Arc<Task>, _now: Instant) {
         assert!(matches!(
-            task.sched_entity().class,
-            SchedClassPrv::RoundRobin(())
+            task.sched_class_kind(),
+            SchedClassKind::RoundRobin
         ));
     }
 
@@ -79,16 +79,16 @@ impl Scheduler for RoundRobin {
 
     fn set_next_task(&mut self, task: &Arc<Task>, _now: Instant) {
         assert!(matches!(
-            task.sched_entity().class,
-            SchedClassPrv::RoundRobin(())
+            task.sched_class_kind(),
+            SchedClassKind::RoundRobin
         ));
     }
 
     fn task_tick(&mut self, cur_task: &Arc<Task>, _now: Instant) -> TickAction {
         // currently our round-robin scheduler does not support time-slicing.
         assert!(matches!(
-            cur_task.sched_entity().class,
-            SchedClassPrv::RoundRobin(())
+            cur_task.sched_class_kind(),
+            SchedClassKind::RoundRobin
         ));
         TickAction::RequestResched
     }
@@ -100,12 +100,12 @@ impl Scheduler for RoundRobin {
         _now: Instant,
     ) -> PreemptDecision {
         assert!(matches!(
-            current.sched_entity().class,
-            SchedClassPrv::RoundRobin(()) | SchedClassPrv::Idle(())
+            current.sched_class_kind(),
+            SchedClassKind::RoundRobin | SchedClassKind::Idle
         ));
         assert!(matches!(
-            candidate.sched_entity().class,
-            SchedClassPrv::RoundRobin(())
+            candidate.sched_class_kind(),
+            SchedClassKind::RoundRobin
         ));
         PreemptDecision::RequestResched
     }
