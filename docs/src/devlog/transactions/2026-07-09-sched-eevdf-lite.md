@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / fairness / runtime accounting / scheduler class
 **Canonical Plan:** [RFC-20260622-sched-eevdf-lite](../../rfcs/sched-eevdf-lite/index.md), [不变量需求](../../rfcs/sched-eevdf-lite/invariants.md), [迁移实施计划](../../rfcs/sched-eevdf-lite/implementation.md), [Tracking Issues](../../rfcs/sched-eevdf-lite/tracking-issues.md)
-**Current Phase:** Checkpoint 1A 已关闭；下一步是 Checkpoint 1B - Typed Pending、Schedule Entry、Trap / IPI Plumbing 与 `EEVDF-005`
+**Current Phase:** Checkpoint 1B 已关闭；下一步是 Checkpoint 2A - Payload / Class Compile Scaffold
 
 ## Scope
 
@@ -44,13 +44,13 @@
 
 **Current Branch:** `drc/eevdf`
 
-**Completed:** 公开 RFC 目录已存在，阶段 0 所需四份 RFC 文档已读取：`index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md`。register、current limitations、RFC workflow、RFC template、devlog workflow、templates、事务索引、当前双周 devlog、SUMMARY 和 RFC 列表已读取。阶段 0 建立本事务日志，并把 RFC、tracking issues、事务索引、当前双周 devlog、mdBook Summary 和 RFC 列表连接到同一实现记录。总控完成阶段 0 source audit；未启动 subagent，因为阶段 0 不需要 worker 写代码。Checkpoint 1A 已完成：`Scheduler` trait 改为 method-first transaction surface，`RunQueue` 与 `SchedEntity` 拆出同一 owner 内文件边界，RR / Idle 完成行为保持适配。
+**Completed:** 公开 RFC 目录已存在，阶段 0 所需四份 RFC 文档已读取：`index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md`。register、current limitations、RFC workflow、RFC template、devlog workflow、templates、事务索引、当前双周 devlog、SUMMARY 和 RFC 列表已读取。阶段 0 建立本事务日志，并把 RFC、tracking issues、事务索引、当前双周 devlog、mdBook Summary 和 RFC 列表连接到同一实现记录。总控完成阶段 0 source audit；未启动 subagent，因为阶段 0 不需要 worker 写代码。Checkpoint 1A 已完成：`Scheduler` trait 改为 method-first transaction surface，`RunQueue` 与 `SchedEntity` 拆出同一 owner 内文件边界，RR / Idle 完成行为保持适配。Checkpoint 1B 已完成：processor pending request 升级为 `PendingResched` flags，trap / idle / tick / IPI producer 接入 typed pending，schedule entry 拆分为 preempt / yield / idle，new-task enqueue 与 current requeue facade 改为语义化命名，owner CPU placement 后的 preempt decision 已接线，`EEVDF-005` 已通过 source audit neutralized。
 
-**In Progress:** 无 worker 正在运行。下一步是 Checkpoint 1B，必须限制在 1B write set 内处理 typed pending、schedule entry、trap / IPI plumbing 和 `EEVDF-005` source audit。
+**In Progress:** 无 worker 正在运行。下一步是 Checkpoint 2A，必须限制在 2A write set 内建立 `Eevdf` payload / class compile scaffold；不得提前切换 default normal class。
 
-**Open Blockers:** 无阶段 0 / 1A 停止条件。当前 active Keter `EEVDF-001`、`EEVDF-002`、`EEVDF-004`、`EEVDF-005`、`EEVDF-017`、`EEVDF-020` 都已有后续 checkpoint 或 gate 归属；`EEVDF-005` 仍等待 1B 完整 source audit，不能在 1A 关闭。
+**Open Blockers:** 无阶段 0 / 1A / 1B 停止条件。当前 active Keter `EEVDF-001`、`EEVDF-002`、`EEVDF-004`、`EEVDF-017`、`EEVDF-020` 都已有后续 checkpoint 或 gate 归属；`EEVDF-005` 已关闭。
 
-**Next Action:** 分派或执行 Checkpoint 1B：typed pending、schedule entry、trap / IPI plumbing 与 `EEVDF-005`。不得提前触碰 EEVDF payload、default normal switch、Kconfig constants 或 clone fresh entity 修复。
+**Next Action:** 分派或执行 Checkpoint 2A：`Eevdf` class / entity payload compile scaffold。不得提前触碰 default normal switch，也不得在 2A 外消费 runtime accounting、`rq_vtime`、wake clamp 或 Kconfig 常量语义。
 
 ## Phase Log
 
@@ -163,9 +163,62 @@ Results:
 
 **Next:** Checkpoint 1B。`EEVDF-005` 仍 active，必须在 1B 完成 pick / set-next / mapping 准备 / task switch-in hook / current-task 更新顺序 source audit 后再审查能否 neutralize。
 
+### 2026-07-09 - Checkpoint 1B Typed Pending、Schedule Entry、Trap / IPI Plumbing 与 `EEVDF-005`
+
+**Phase:** 阶段 1 - Checkpoint 1B。
+
+**Change:** 总控直接执行本 checkpoint，并启动只读 explorer `Gauss` 做 1B source map；无 worker 越界写代码。本轮 write set 限制在 1B 允许的 scheduler core / processor / class facade / IPI / trap / bootstrap enqueue rename / clone-kthreadd publication rename。processor `need_resched: bool` 替换为 `PendingResched` flags，并提供 `request_resched(ReschedCause)`、`take_pending_resched()` 和 `restore_pending_resched(PendingResched)`。`task_tick()` 请求 `ReschedCause::Tick`；owner CPU new / wake placement 后通过 `RunQueue::decide_preempt_current()` 决定是否插入 `ReschedCause::RunnableArrival`。trap tail、kernel trap tail 和 idle loop 只在 pending 非空时调用 `schedule_preempt(pending)`，deferred preempt 恢复同一组 pending bits。
+
+**Schedule entry split:** `ScheduleMode::Runnable` 拆为 `Yield` 和 `Idle`；`schedule_runnable()` 更名为 `schedule_yield()`，idle task 只走 `schedule_idle()`。`local_requeue_current()` / `RunQueue::requeue_current_legacy()` 泛名入口删除，跨模块 current lifecycle 改为 `local_requeue_yielded_current()`、`local_requeue_preempted_current()`、`local_handoff_woken_current()`、`local_requeue_aborted_wait_current()`、`local_put_prev_blocked()` 和 `local_put_prev_exiting()`。`AbortWaitSleep` 是 no-switch abort，直接返回 `DidNotSwitch`，不调用 class transaction；`Parked` 后被 wake 的 current 归入 parked handoff，调用 `handoff_woken_current()`。`local_requeue_aborted_wait_current()` 作为已接入 facade 保留给后续确有 abort-park requeue 的路径，第一版 1B source audit 未发现需要调用它的 no-switch path。
+
+**New-task enqueue split:** `task_enqueue()` / `local_enqueue()` / `remote_enqueue()` 清理为 `enqueue_new_task()` / `local_enqueue_new_task()` / `remote_enqueue_new_task()`；bootstrap first enqueue 同步改为 `local_enqueue_first_new_task()`；clone publish 和 `kthreadd` publish 只调用 new-task publication path。wait completion 仍只通过 stale-safe `wake_enqueue()`。
+
+**Source audit:**
+
+```sh
+rg -n "mark_need_resched|fetch_clear_need_resched|need_resched|PendingResched|request_resched|take_pending_resched|restore_pending_resched" anemone-kernel/src
+rg -n "schedule_runnable|schedule_yield|ScheduleMode::Runnable|ScheduleMode::Yield|ScheduleMode::Idle|local_requeue_current|requeue_current_legacy|local_requeue_|local_handoff_woken_current|local_put_prev_" anemone-kernel/src/sched
+rg -n "task_enqueue\\(|local_enqueue\\(|remote_enqueue\\(|enqueue_new_task|local_enqueue_new_task|remote_enqueue_new_task|local_enqueue_first\\(|local_enqueue_first_new_task" anemone-kernel/src
+rg -n "SchedEvent|on_event|EnqueueReason|RequeueReason|SwitchOutReason" anemone-kernel/src/sched
+rg -n "switch_mapping|local_pick_next|set_next_task|on_switch_in|set_current_task|switch_to\\(" anemone-kernel/src/sched anemone-kernel/src/task anemone-kernel/src/arch
+```
+
+Findings:
+
+- 旧 `mark_need_resched()` / `fetch_clear_need_resched()` / `need_resched` bool 不再存在；typed pending 覆盖 tick、runnable arrival 和 deferred-preempt restore。
+- `schedule_runnable()`、`ScheduleMode::Runnable`、`local_requeue_current()` 和 `requeue_current_legacy()` 无匹配；yield / preempt / idle / block / exit / parked handoff 已分流。
+- 旧 `task_enqueue(` / `local_enqueue(` / `remote_enqueue(` / `local_enqueue_first(` 无匹配；`WakeUpTaskStaleSafe` 仍是 wait-core stale-safe wake IPI，不属于 new-task publication rename。
+- scheduler implementation 没有引入 `SchedEvent` / `on_event` / `EnqueueReason` / `RequeueReason` / `SwitchOutReason`。
+- `local_pick_next()` 在 interrupt-disabled scheduler loop 中调用 `RunQueue::pick_next_task()` 后立即调用 `RunQueue::set_next_task(&task, Instant::now())`；scheduler loop 随后执行 `switch_mapping(prev, next)` 和 `switch_to(next)`；`switch_to()` 内执行 `Task::on_switch_in()`、`set_current_task(Some(task))` 和 architecture context switch。
+- `AbortWaitSleep` 和 `DeferredPreempt` 都在 `schedule_inner()` 中提前返回，不调用 `switch_out()`，也不会进入 `local_pick_next()` / `set_next_task()`；真正切换路径都复用同一 next selection 顺序。`EEVDF-005` 因此移入 Neutralized。
+
+**Stop-condition assessment:** 未命中 1B 停止条件。typed pending 可在 trap / idle / IPI / tick 路径间保持；remote runnable arrival 通过目标 CPU IPI/local placement 后决策，不在 source CPU 比较目标 current；current lifecycle 均有 method-first facade；wait-core private identity 未暴露给 scheduler class；deferred preempt 不触发 switch-out accounting；`EEVDF-005` source audit 具备关闭证据。
+
+**Validation:**
+
+```sh
+just build
+timeout 25s just xtask qemu --platform qemu-virt-rv64-pretest --image build/anemone.elf
+git diff --check
+just fmt kernel --check
+```
+
+Results:
+
+- `just build` 通过，最终 kernel release build 完成，无 Rust warning。
+- rv64 pretest QEMU smoke 已启动内核，KUnit `99` 项全通过，`/sbin/init` 启动 user-test，并进入 LTP read-write profile；该运行跑到 `pwritev03_64` 后在 25s timeout 到期时结束，不是 clean shutdown，不能作为完整 user-test 通过证据，只作为 boot / KUnit / early user-test sanity。
+- `git diff --check` clean。
+- `just fmt kernel --check` 仅报告本轮未触碰的既有格式漂移：generated `anemone-kernel/src/kconfig_defs.rs`、generated `anemone-kernel/src/platform_defs.rs` 和 `anemone-kernel/src/task/topology/parent_child.rs`；touched files 不在 fmt diff 中。
+- 用户明确要求不用测试 la 的 QEMU，本 checkpoint 未运行 loongarch64 QEMU。
+
+**Feedback:** Source audit 发现 `implementation.md` 的 1B bullets 容易把 no-switch abort、abort-park requeue 和 `ParkPending` handoff 混读，已回写澄清：`ParkPending` 由 `handoff_woken_current()` 收口，no-switch abort 不调用 class transaction，`requeue_aborted_wait_current()` 只保留给无 wake reward 的 abort-park requeue 路径。未发现需要改变 1B write set、stage order、review gate 或 accepted contract 的实现反馈；`EEVDF-005` 按 1B source-audit 关闭条件移入 Neutralized。
+
+**Review gate:** 只读 explorer `Gauss` 先行列出 1B 风险点：旧 bool pending、trap/idle/IPI producers、`ScheduleMode::Runnable`、`local_requeue_current`、block / exit `put_prev_*`、旧 enqueue names 和 `EEVDF-005` no-switch / deferred-preempt audit。总控按这些点完成 source audit；未发现 blocking finding。
+
+**Next:** Checkpoint 2A。不得在 2A 之前切换 default normal class；`EEVDF-001` / `EEVDF-002` / `EEVDF-004` / `EEVDF-017` / `EEVDF-020` 仍按阶段 2 / 3 gate 关闭。
+
 ## Open Items
 
-- `EEVDF-005` 仍 active：1A 提供 `set_next_task(task, now)` 落点，1B 完整 source-audit switch-in 顺序。
 - `EEVDF-001` / `EEVDF-020` 仍 active：Checkpoint 2C 关闭 `rq_vtime`、eligibility、arithmetic 与 anomaly 语义。
 - `EEVDF-002` 仍 active：Checkpoint 2B 关闭 EEVDF private `account_current(now)` 幂等边界。
 - `EEVDF-004` 仍 active：Checkpoint 2D 关闭 ordinary wake / parked handoff exactly-once wake clamp。

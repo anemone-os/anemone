@@ -76,13 +76,6 @@ impl RunQueue {
         self.requeue_current_with(task, CurrentRequeueTransaction::AbortedWait { now });
     }
 
-    /// Temporary Checkpoint 1A bridge for the old `local_requeue_current()`
-    /// schedule-entry shape. Checkpoint 1B must split the call sites into
-    /// yield, preempt, parked handoff, and abort-wait transactions.
-    pub fn requeue_current_legacy(&mut self, task: Arc<Task>) {
-        self.requeue_preempted_current(task, Instant::now(), PendingResched::empty());
-    }
-
     pub fn put_prev_blocked(&mut self, task: &Arc<Task>, now: Instant) {
         match task.with_sched_entity_mut(|se| se.class()) {
             SchedClassPrv::RoundRobin(()) => self.rr.put_prev_blocked(task, now),

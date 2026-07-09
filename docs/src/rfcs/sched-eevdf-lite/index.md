@@ -6,7 +6,7 @@
 **领域：** scheduler / fairness / runtime accounting / scheduler class
 **事务日志：** [2026-07-09-sched-eevdf-lite](../../devlog/transactions/2026-07-09-sched-eevdf-lite.md)
 **开放问题：** 见 [Tracking Issues](./tracking-issues.md)
-**下一步：** 按事务日志推进 Checkpoint 1A：trait / `RunQueue` / entity split 与 RR / Idle 行为保持；不得提前切换 default normal class。
+**下一步：** 按事务日志推进 Checkpoint 2A：建立 `Eevdf` payload / class compile scaffold；不得提前切换 default normal class。
 
 ## 摘要
 

@@ -4,8 +4,12 @@
 use crate::{
     prelude::*,
     sched::{
-        class::idle::clone_local_idle_task,
-        processor::{local_pick_next, local_requeue_current, set_current_task},
+        class::{PendingResched, idle::clone_local_idle_task},
+        processor::{
+            local_handoff_woken_current, local_pick_next, local_put_prev_blocked,
+            local_put_prev_exiting, local_requeue_preempted_current, local_requeue_yielded_current,
+            set_current_task,
+        },
         switch::{switch_mapping, switch_out, switch_to},
     },
 };
@@ -17,8 +21,9 @@ pub use api::*;
 
 mod processor;
 pub use processor::{
-    fetch_clear_need_resched, get_current_task, init_routines, local_enqueue, local_sched_tick,
-    mark_need_resched, pick_next_cpu, task_enqueue, wake_enqueue,
+    enqueue_new_task, get_current_task, init_routines, local_enqueue_new_task, local_sched_tick,
+    pick_next_cpu, remote_enqueue_new_task, request_resched, restore_pending_resched,
+    take_pending_resched, wake_enqueue,
 };
 mod switch;
 pub use switch::load_context;
@@ -60,6 +65,9 @@ pub unsafe fn scheduler() -> ! {
             let prev = get_current_task();
             let next = local_pick_next();
             unsafe {
+                // `local_pick_next()` has already called the class switch-in
+                // transaction. Mapping preparation must stay after that point
+                // and before `Task::on_switch_in()` in `switch_to()`.
                 switch_mapping(&prev, &next);
                 switch_to(next);
             }
@@ -86,14 +94,19 @@ mod kore {
     #[derive(Clone, Copy, Debug)]
     enum ScheduleMode<'a> {
         WaitSleep { token: &'a WakeToken },
-        Preempt,
-        Runnable,
+        Preempt { pending: PendingResched },
+        Yield,
+        Idle,
         Zombie,
     }
 
     #[derive(Debug)]
     enum ScheduleDecision {
-        Runnable,
+        Yielded,
+        Preempted {
+            pending: PendingResched,
+        },
+        Idle,
         WaitCoreParked {
             state: Arc<WaitState>,
             interruptible: bool,
@@ -104,6 +117,7 @@ mod kore {
         },
         DeferredPreempt {
             wait_id: usize,
+            pending: PendingResched,
         },
     }
 
@@ -139,8 +153,12 @@ mod kore {
     /// switching out.
     ///
     /// **Interrupts must be disabled when calling this function.**
-    pub unsafe fn schedule_preempt() -> SchedulePreemptResult {
-        match unsafe { schedule_inner(ScheduleMode::Preempt) } {
+    pub unsafe fn schedule_preempt(pending: PendingResched) -> SchedulePreemptResult {
+        assert!(
+            !pending.is_empty(),
+            "schedule_preempt requires a typed pending request"
+        );
+        match unsafe { schedule_inner(ScheduleMode::Preempt { pending }) } {
             ScheduleInnerResult::Switched => SchedulePreemptResult::Scheduled,
             ScheduleInnerResult::DeferredPreempt => SchedulePreemptResult::Deferred,
             ScheduleInnerResult::DidNotSwitch => {
@@ -149,11 +167,15 @@ mod kore {
         }
     }
 
-    /// Schedule a current task that must still be runnable.
+    /// Schedule a current task after an explicit yield.
     ///
     /// **Interrupts must be disabled when calling this function.**
-    pub unsafe fn schedule_runnable() {
-        let result = unsafe { schedule_inner(ScheduleMode::Runnable) };
+    pub unsafe fn schedule_yield() {
+        assert!(
+            !get_current_task().flags().is_idle(),
+            "idle task must use schedule_idle"
+        );
+        let result = unsafe { schedule_inner(ScheduleMode::Yield) };
         assert_eq!(result, ScheduleInnerResult::Switched);
     }
 
@@ -162,7 +184,7 @@ mod kore {
     /// **Interrupts must be disabled when calling this function.**
     pub unsafe fn schedule_idle() {
         assert!(get_current_task().flags().is_idle());
-        let result = unsafe { schedule_inner(ScheduleMode::Runnable) };
+        let result = unsafe { schedule_inner(ScheduleMode::Idle) };
         assert_eq!(result, ScheduleInnerResult::Switched);
     }
 
@@ -200,9 +222,12 @@ mod kore {
                         token.wait_id(),
                     );
                 },
-                ScheduleMode::Preempt | ScheduleMode::Runnable => {
-                    (TaskSchedState::Runnable, ScheduleDecision::Runnable)
-                },
+                ScheduleMode::Preempt { pending } => (
+                    TaskSchedState::Runnable,
+                    ScheduleDecision::Preempted { pending },
+                ),
+                ScheduleMode::Yield => (TaskSchedState::Runnable, ScheduleDecision::Yielded),
+                ScheduleMode::Idle => (TaskSchedState::Runnable, ScheduleDecision::Idle),
                 ScheduleMode::Zombie => {
                     // The exit path owns task/thread-group cleanup, but the
                     // scheduler owns publishing the final Zombie sched-state.
@@ -244,7 +269,7 @@ mod kore {
                         },
                     )
                 },
-                ScheduleMode::Preempt => (
+                ScheduleMode::Preempt { pending } => (
                     TaskSchedState::Waiting {
                         state: state.clone(),
                         interruptible,
@@ -252,11 +277,19 @@ mod kore {
                     },
                     ScheduleDecision::DeferredPreempt {
                         wait_id: state.debug_id(),
+                        pending,
                     },
                 ),
-                ScheduleMode::Runnable => {
+                ScheduleMode::Yield => {
                     panic!(
-                        "schedule_runnable cannot consume wait-core PrePark: task={} wait={:#x}",
+                        "schedule_yield cannot consume wait-core PrePark: task={} wait={:#x}",
+                        task_id,
+                        state.debug_id(),
+                    );
+                },
+                ScheduleMode::Idle => {
+                    panic!(
+                        "schedule_idle cannot consume wait-core PrePark: task={} wait={:#x}",
                         task_id,
                         state.debug_id(),
                     );
@@ -296,16 +329,23 @@ mod kore {
                         },
                     )
                 },
-                ScheduleMode::Preempt => {
+                ScheduleMode::Preempt { .. } => {
                     panic!(
                         "schedule_preempt observed parked wait current task: task={} wait={:#x}",
                         task_id,
                         state.debug_id(),
                     );
                 },
-                ScheduleMode::Runnable => {
+                ScheduleMode::Yield => {
                     panic!(
-                        "schedule_runnable cannot consume wait-core Parked state: task={} wait={:#x}",
+                        "schedule_yield cannot consume wait-core Parked state: task={} wait={:#x}",
+                        task_id,
+                        state.debug_id(),
+                    );
+                },
+                ScheduleMode::Idle => {
+                    panic!(
+                        "schedule_idle cannot consume wait-core Parked state: task={} wait={:#x}",
                         task_id,
                         state.debug_id(),
                     );
@@ -332,12 +372,18 @@ mod kore {
                         token.wait_id(),
                     );
                 },
-                ScheduleMode::Preempt => {
+                ScheduleMode::Preempt { .. } => {
                     panic!("schedule_preempt cannot preempt zombie current task: task={}", task_id);
                 },
-                ScheduleMode::Runnable => {
+                ScheduleMode::Yield => {
                     panic!(
-                        "schedule_runnable requires runnable current task: task={} state=Zombie",
+                        "schedule_yield requires runnable current task: task={} state=Zombie",
+                        task_id,
+                    );
+                },
+                ScheduleMode::Idle => {
+                    panic!(
+                        "schedule_idle requires runnable current task: task={} state=Zombie",
                         task_id,
                     );
                 },
@@ -345,12 +391,19 @@ mod kore {
         });
 
         match decision {
-            ScheduleDecision::Runnable => {
+            ScheduleDecision::Yielded => {
+                local_requeue_yielded_current(curr);
+            },
+            ScheduleDecision::Preempted { pending } => {
                 if !curr.flags().is_idle() {
-                    local_requeue_current(curr);
+                    local_requeue_preempted_current(curr, pending);
                 } else {
                     drop(curr);
                 }
+            },
+            ScheduleDecision::Idle => {
+                assert!(curr.flags().is_idle());
+                drop(curr);
             },
             ScheduleDecision::WaitCoreParked {
                 state,
@@ -365,7 +418,7 @@ mod kore {
                             wait_id,
                         );
                         if !curr.flags().is_idle() {
-                            local_requeue_current(curr);
+                            local_handoff_woken_current(curr);
                         } else {
                             drop(curr);
                         }
@@ -392,6 +445,7 @@ mod kore {
                             observed_interruptible,
                             park,
                         );
+                        local_put_prev_blocked(&curr);
                         drop(curr);
                     },
                     TaskSchedState::Waiting {
@@ -433,13 +487,12 @@ mod kore {
                 drop(curr);
                 return ScheduleInnerResult::DidNotSwitch;
             },
-            ScheduleDecision::DeferredPreempt { wait_id } => {
-                // Trap-tail preempt callers commonly clear `need_resched`
-                // before entering the scheduler. Restoring it here is
-                // idempotent for future callers that preserved the flag and
-                // prevents the deferred PrePark window from swallowing the
-                // preempt request.
-                mark_need_resched();
+            ScheduleDecision::DeferredPreempt { wait_id, pending } => {
+                // Trap-tail preempt callers consume pending flags before
+                // entering the scheduler. Restore the exact set so the
+                // PrePark window cannot swallow tick or runnable-arrival
+                // requests.
+                restore_pending_resched(pending);
                 kdebugln!(
                     "schedule_preempt: deferred for task={} wait={:#x}; current wait setup is still PrePark",
                     task_id,
@@ -453,6 +506,7 @@ mod kore {
                     "{} is zombie, not enqueuing it to run queue",
                     current_task_id(),
                 );
+                local_put_prev_exiting(&curr);
                 drop(curr);
             },
         }
@@ -703,7 +757,7 @@ mod higher_level {
     pub fn yield_now() {
         assert!(get_current_task().is_sched_runnable());
         with_intr_disabled(|| unsafe {
-            schedule_runnable();
+            schedule_yield();
         });
     }
 }

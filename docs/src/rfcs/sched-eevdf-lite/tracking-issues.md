@@ -71,21 +71,6 @@
 
 **关闭条件：** `enqueue_woken()` / `handoff_woken_current()` 的 exactly-once 边界已证明，abort/stale/already-current/already-queued 不会获得 wake reward；未关闭前不得进入默认 class 切换。
 
-### EEVDF-005：switch-in 记账线性化点必须明确
-
-**状态：** Active（文档契约已接受，等待实现与 source audit）
-
-**问题：** `exec_start` 依赖 pick 后、真正切入前的顺序。阶段 1A 必须先固定无 `now` 参数的 `pick_next_task()` 清 `on_runq`、无 bootstrap 特判参数的 class `set_next_task(task, now)` 作为单一落点；阶段 1B 必须 source-audit 地址空间切换准备、现有 `Task::on_switch_in()` 和 `set_current_task()` 的相对顺序，并覆盖 bootstrap first task、idle task、block / yield / zombie 路径。
-
-**修复落点：**
-
-- [不变量需求](./invariants.md) 的线性化点。
-- [迁移实施计划](./implementation.md) 阶段 1A / 1B review gate。
-
-**已接受修复方向：** switch-in 顺序固定为 `pick_next_task()` 选择并移出 class queue / 清 `on_runq`，scheduler core 调用 `set_next_task(task, now)`，随后执行地址空间切换准备，例如当前 `switch_mapping(prev, next)`，再进入 `Task::on_switch_in()`、`set_current_task()` 和 architecture switch。`exec_start` 从 `set_next_task()` 开始计入即将运行的 execution segment；如果实现期认为 mapping 准备时间必须排除在公平执行段外，必须回到 RFC review。bootstrap first task、idle fallback、block、yield 和 zombie 后的 next selection 都必须能按这条顺序 source-audit；no-switch abort 和 deferred preempt 不得调用 `set_next_task()`，也不得结束 current execution segment。
-
-**关闭条件：** pick / set-next / mapping 准备 / task switch-in hook / current-task 更新顺序已写入实现并通过 source audit；所有特殊入口不绕过 `set_next_task()` 语义。
-
 ### EEVDF-017：default class switch 必须被 blocker / gate 矩阵约束
 
 **状态：** Active
@@ -273,6 +258,19 @@
 **反馈相关：** 具体 wake reward / no-reward 验证归入 Checkpoint 2D / Gate P3；若 abort path 获得 wake reward，回写 `EEVDF-004`。
 
 **结论：** no-switch abort 不调用 scheduler class；`requeue_aborted_wait_current()` 不做 wake clamp / yield penalty；`handoff_woken_current()` 做 exactly-once wake clamp。
+
+### EEVDF-005：switch-in 记账线性化点必须明确
+
+**状态：** Neutralized
+
+**修复落点：**
+
+- 阶段 1A 在 `RunQueue::pick_next_task()` / `RunQueue::set_next_task(task, now)` 上建立 class switch-in transaction surface。
+- 阶段 1B 在 scheduler loop 和 processor facade 中固定顺序：`local_pick_next()` 先调用 `RunQueue::pick_next_task()` 清 `on_runq`，再调用 `RunQueue::set_next_task(task, Instant::now())`；scheduler loop 随后执行 `switch_mapping(prev, next)`，再进入 `switch_to(next)`；`switch_to()` 内执行 `Task::on_switch_in()`、`set_current_task(Some(task))` 和 architecture context switch。
+
+**Source audit:** `schedule_inner()` 只有需要真正切换的分支才走 `switch_out()`，随后回到 scheduler loop 选择 next task；`AbortWaitSleep` no-switch abort 和 `DeferredPreempt` 都提前返回，不调用 `switch_out()`、`local_pick_next()` 或 `set_next_task()`。idle fallback、yield、preempt、blocked 和 zombie 后的 next selection 都复用同一 `local_pick_next()` 路径。
+
+**结论：** 所有真正切换到 next task 的路径都经过 `set_next_task(task, now)`，且该落点位于 mapping 准备、`Task::on_switch_in()`、`set_current_task()` 和 architecture switch 之前。no-switch abort 和 deferred preempt 不开启新的 execution segment。
 
 ### EEVDF-019：preempt reason 不能被当前 `need_resched` bool 静默压扁
 

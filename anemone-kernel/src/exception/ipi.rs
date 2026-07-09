@@ -19,7 +19,7 @@ pub enum IpiPayload {
     TlbShootdown {
         vpn: Option<VirtPageNum>,
     },
-    WakeUpTask {
+    EnqueueNewTask {
         tid: Tid,
     },
     WakeUpTaskStaleSafe {
@@ -205,22 +205,18 @@ pub fn handle_ipi() {
                     crate::debug::kunit::handle_percpu_ipi_test(test_fn);
                     msg.is_accomplished.store(true, Ordering::Release);
                 },
-                WakeUpTask { tid } => {
+                EnqueueNewTask { tid } => {
                     let task = get_task(&tid).expect("internal error: no such task to wake up");
 
                     // SAFETY: all accesses to local runqueue already disabled interrupts, so we are
                     // safe to do this in hwirq context.
-                    local_enqueue(task);
-                    mark_need_resched();
+                    local_enqueue_new_task(task);
                     msg.is_accomplished.store(true, Ordering::Release);
                 },
                 WakeUpTaskStaleSafe { tid, park } => {
                     let task = get_task(&tid).expect("internal error: no such task to wake up");
                     let placement = wake_enqueue(task, park);
                     *msg.wake_result.lock() = Some(placement);
-                    if matches!(placement, WakeEnqueueResult::Enqueued) {
-                        mark_need_resched();
-                    }
                     kdebugln!(
                         "ipi wake placement: tid={} park={:?} placement={:?}",
                         tid,

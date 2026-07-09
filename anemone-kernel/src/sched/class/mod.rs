@@ -97,9 +97,9 @@ impl ReschedCause {
 
 /// Value flags passed into class-local preempted-current transactions.
 ///
-/// This is not a processor-state capability. Checkpoint 1A introduces the value
-/// type only to stabilize the trait shape; producer/consumer plumbing remains a
-/// Checkpoint 1B responsibility.
+/// This is not a processor-state capability. Scheduler core owns request
+/// restore and merging; scheduler classes only read a copied value while
+/// handling a preempted-current transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PendingResched {
     bits: u8,

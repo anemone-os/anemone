@@ -91,7 +91,7 @@ mod idle_task {
             // tasks can run.
             unsafe {
                 with_intr_disabled(|| {
-                    if fetch_clear_need_resched() {
+                    if !take_pending_resched().is_empty() {
                         schedule_idle();
                     }
                 })

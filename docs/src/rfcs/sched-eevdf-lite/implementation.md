@@ -242,8 +242,9 @@ write set：
 - `task_enqueue()` / `local_enqueue()` / `remote_enqueue()` 命名族清理为 `enqueue_new_task` 语义，例如 `enqueue_new_task()`、`local_enqueue_new_task()`、`remote_enqueue_new_task()`。`init_routines::local_enqueue_first()` 同步改为 first/new task publication 语义命名。
 - `local_requeue_current()` 泛名入口消失。若需要共享 owner/current/on_runq 检查，可保留私有 helper，但所有跨模块 call site 必须通过语义化 facade。
 - no-switch abort 不调用 class transaction。
-- wait park 后 scheduler 复查发现 current 已 runnable 时调用 `requeue_aborted_wait_current()`，不做 wake clamp / yield penalty。
+- wait sleep 进入 scheduler 前已经发现 wait round 完成时，走 no-switch abort，不调用 `requeue_aborted_wait_current()`。
 - `ParkPending` 后由 scheduler 收口时调用 `handoff_woken_current()`，做 exactly-once wake clamp。
+- `requeue_aborted_wait_current()` 只用于 park 已进入 requeue 收口但没有 wake reward 的 abort-park 路径；不得用于 `ParkPending` handoff。
 - `Instant::now()` 由 scheduler core / `RunQueue` 在一个调度事务中读取一次，并只传入需要 current execution accounting 或 preempt decision 的 class transaction。
 - local arrival 的 `decide_preempt_current()` 在本地 owner CPU/noirq placement transaction 内调用。remote new-task / wake arrival 的 placement 若通过 IPI 发生，`decide_preempt_current()` 也必须在目标 owner CPU 的 IPI/local placement transaction 内调用；source CPU 只发送请求或接收 stale-safe placement 结果，不读取目标 CPU current。
 - 为保持 RR 行为可以暂时在 owner CPU placement 后保守请求 `ReschedCause::RunnableArrival`，但该路径必须被标为 RR 适配期保守策略；进入 EEVDF placement 前必须改为 placement 后的 `decide_preempt_current()` 决策，不能让无条件 remote resched 成为长期 class contract。
@@ -931,6 +932,7 @@ write set：
 - 2026-07-08：阶段边界审查后修正实施计划：阶段 2 只引入 EEVDF-specific constructor 和算法 gate，不把 default normal constructor 提前翻到 EEVDF；阶段 3 才执行 default normal switch。`task/api/priority.rs` 的 weight visibility 修复归入阶段 2 条件 write set；阶段 3 的 scheduler core / EEVDF 文件改为 audit-only 或阶段 2 漏闭合时的停止信号。同时补充 `switch_mapping(prev, next)` 相对 `set_next_task()` 的 source-audit 位置，避免 switch-in execution segment 起点含义悬空。
 - 2026-07-09：阶段 1 保持一个概念阶段，但拆为 Checkpoint 1A / 1B：1A 关闭 trait / `RunQueue` / entity split 和 RR/Idle 机械适配，1B 关闭 typed pending、schedule entry、trap / IPI plumbing 与 `EEVDF-005` source audit。阶段 2 前置条件改为 1B 关闭，避免一个 gate 同时吞下所有 cross-layer plumbing。
 - 2026-07-09：阶段 2 保持一个概念阶段，但拆为 Checkpoint 2A / 2B / 2C / 2D：2A 只做 payload / class compile scaffold，2B 关闭 P1 accounting，2C 关闭 P2 `rq_vtime` / arithmetic / bounded yield，2D 关闭 P3 wake clamp / parked handoff。阶段 3 前置条件改为 2B / 2C / 2D 全部关闭，避免一次性算法落地。
+- 2026-07-09：Checkpoint 1B source audit 后澄清 wait abort / handoff wording：no-switch abort 不调用 class transaction，`ParkPending` 由 `handoff_woken_current()` 收口，`requeue_aborted_wait_current()` 只保留给无 wake reward 的 abort-park requeue 路径；目标、不变量、阶段顺序和 write set 不变。
 
 ## Write Set 扩展记录
 

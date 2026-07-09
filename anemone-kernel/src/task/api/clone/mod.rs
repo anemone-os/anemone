@@ -433,7 +433,7 @@ pub fn kernel_clone(
 
     match guard.publish(new_task, binding) {
         Ok(published) => {
-            task_enqueue(published.clone());
+            enqueue_new_task(published.clone());
             if flags.contains(CloneFlags::VFORK) {
                 wait_for_vfork_done(&published);
             }
