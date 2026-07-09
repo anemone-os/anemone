@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / fairness / runtime accounting / scheduler class
 **Canonical Plan:** [RFC-20260622-sched-eevdf-lite](../../rfcs/sched-eevdf-lite/index.md), [不变量需求](../../rfcs/sched-eevdf-lite/invariants.md), [迁移实施计划](../../rfcs/sched-eevdf-lite/implementation.md), [Tracking Issues](../../rfcs/sched-eevdf-lite/tracking-issues.md)
-**Current Phase:** Checkpoint 2A 已关闭；2B 前 typed entity / RunQueue transaction boundary feedback 已收口；下一步是 Checkpoint 2B - Gate P1 `account_current(now)` 与入队前执行段结算
+**Current Phase:** Checkpoint 2B / Gate P1 已关闭；下一步是 Checkpoint 2C - Gate P2 `rq_vtime`、virtual-time arithmetic、eligibility、bounded yield 与 nice-to-weight 可见性
 
 ## Scope
 
@@ -44,13 +44,13 @@
 
 **Current Branch:** `drc/eevdf`
 
-**Completed:** 公开 RFC 目录已存在，阶段 0 所需四份 RFC 文档已读取：`index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md`。register、current limitations、RFC workflow、RFC template、devlog workflow、templates、事务索引、当前双周 devlog、SUMMARY 和 RFC 列表已读取。阶段 0 建立本事务日志，并把 RFC、tracking issues、事务索引、当前双周 devlog、mdBook Summary 和 RFC 列表连接到同一实现记录。总控完成阶段 0 source audit；未启动 subagent，因为阶段 0 不需要 worker 写代码。Checkpoint 1A 已完成：`Scheduler` trait 改为 method-first transaction surface，`RunQueue` 与 `SchedEntity` 拆出同一 owner 内文件边界，RR / Idle 完成行为保持适配。Checkpoint 1B 已完成：processor pending request 升级为 `PendingResched` flags，trap / idle / tick / IPI producer 接入 typed pending，schedule entry 拆分为 preempt / yield / idle，new-task enqueue 与 current requeue facade 改为语义化命名，owner CPU placement 后的 preempt decision 已接线，`EEVDF-005` 已通过 source audit neutralized。Checkpoint 2A 已完成：`Eevdf` class scaffold、`EevdfEntity` payload 字段位置、非 `Copy` class-specific `SchedEntity`、显式 `new_eevdf()` constructor、fresh clone/default-normal entity 构造和 EEVDF scheduler constants 的 kconfig schema / live root config / generated defs plumbing 已接入；default normal constructor 仍保持 RR，未提前切换到 EEVDF。2B 前 feedback 已收口：`Eevdf` class 内部增加 typed entity accessor，后续 `account_current(now)` 可通过 class-private helper 短暂访问 `EevdfEntity`，不把 `SchedEntity` guard 或 typed payload 参数加入 `Scheduler` trait；RFC canonical 文本补充了 future scheduler policy / class switch 必须通过 owner CPU `RunQueue` command / IPI 线性化，远端不得直接修改 `SchedEntity` class 或 EEVDF payload。
+**Completed:** 公开 RFC 目录已存在，阶段 0 所需四份 RFC 文档已读取：`index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md`。register、current limitations、RFC workflow、RFC template、devlog workflow、templates、事务索引、当前双周 devlog、SUMMARY 和 RFC 列表已读取。阶段 0 建立本事务日志，并把 RFC、tracking issues、事务索引、当前双周 devlog、mdBook Summary 和 RFC 列表连接到同一实现记录。总控完成阶段 0 source audit；未启动 subagent，因为阶段 0 不需要 worker 写代码。Checkpoint 1A 已完成：`Scheduler` trait 改为 method-first transaction surface，`RunQueue` 与 `SchedEntity` 拆出同一 owner 内文件边界，RR / Idle 完成行为保持适配。Checkpoint 1B 已完成：processor pending request 升级为 `PendingResched` flags，trap / idle / tick / IPI producer 接入 typed pending，schedule entry 拆分为 preempt / yield / idle，new-task enqueue 与 current requeue facade 改为语义化命名，owner CPU placement 后的 preempt decision 已接线，`EEVDF-005` 已通过 source audit neutralized。Checkpoint 2A 已完成：`Eevdf` class scaffold、`EevdfEntity` payload 字段位置、非 `Copy` class-specific `SchedEntity`、显式 `new_eevdf()` constructor、fresh clone/default-normal entity 构造和 EEVDF scheduler constants 的 kconfig schema / live root config / generated defs plumbing 已接入；default normal constructor 仍保持 RR，未提前切换到 EEVDF。2B 前 feedback 已收口：`Eevdf` class 内部增加 typed entity accessor，后续 `account_current(now)` 可通过 class-private helper 短暂访问 `EevdfEntity`，不把 `SchedEntity` guard 或 typed payload 参数加入 `Scheduler` trait；RFC canonical 文本补充了 future scheduler policy / class switch 必须通过 owner CPU `RunQueue` command / IPI 线性化，远端不得直接修改 `SchedEntity` class 或 EEVDF payload。Checkpoint 2B 已完成：`Eevdf` private `account_current(now)` 成为唯一推进 current execution segment 的 helper；`set_next_task()` 记录 `exec_start`；tick、yield / preempt requeue、parked handoff、abort-park requeue、block 和 exit switch 都通过同一 helper 结算并刷新 `exec_start`；`Task::on_switch_out()` 保持 task / CPU usage bookkeeping，不成为 fair accounting truth；`EEVDF-002` 已移入 Neutralized。
 
-**In Progress:** 无 worker 正在运行。下一步是 Checkpoint 2B，必须限制在 2B write set 内实现 EEVDF private `account_current(now)` 与入队前执行段结算；不得消费 2C eligibility / yield、2D wake clamp 或阶段 3 default normal switch。
+**In Progress:** 无 implementation worker 正在运行。下一步是 Checkpoint 2C，必须限制在 2C write set 内实现 `rq_vtime`、virtual-time arithmetic、eligible pick、bounded yield 和 nice-to-weight 可见性；不得消费 2D wake clamp 或阶段 3 default normal switch。
 
-**Open Blockers:** 无阶段 0 / 1A / 1B / 2A 停止条件。当前 active Keter `EEVDF-001`、`EEVDF-002`、`EEVDF-004`、`EEVDF-017`、`EEVDF-020` 都已有后续 checkpoint 或 gate 归属；`EEVDF-005` 已关闭。下一项待关闭 blocker 是 `EEVDF-002`，归属 Checkpoint 2B / Gate P1。
+**Open Blockers:** 无阶段 0 / 1A / 1B / 2A / 2B 停止条件。当前 active Keter `EEVDF-001`、`EEVDF-004`、`EEVDF-017`、`EEVDF-020` 都已有后续 checkpoint 或 gate 归属；`EEVDF-005` 和 `EEVDF-002` 已关闭。下一项待关闭 blocker 是 `EEVDF-001` / `EEVDF-020`，归属 Checkpoint 2C / Gate P2。
 
-**Next Action:** 分派或执行 Checkpoint 2B：实现 EEVDF private `account_current(now)`，证明 tick / switch-out / requeue 不双记，且 `DeferredPreempt` 不触发 fair accounting。
+**Next Action:** 分派或执行 Checkpoint 2C：实现 `rq_vtime`、virtual-time arithmetic、eligibility、bounded yield 和 nice-to-weight 可见性，证明 first-version pick 不退化为 deadline-only。
 
 ## Phase Log
 
@@ -295,12 +295,60 @@ Findings:
 
 **Next:** 正式进入 Checkpoint 2B / Gate P1。
 
+### 2026-07-09 - Checkpoint 2B Gate P1 `account_current(now)` 与执行段结算
+
+**Phase:** 阶段 2 - Checkpoint 2B / Gate P1。
+
+**Change:** 总控直接执行本 checkpoint，未启动 implementation worker；启动只读 explorer `Newton` 做 2B source-map 审计。`Eevdf` class 新增 private `account_current(now)` helper，并把 current execution accounting 接入所有 2B 生命周期 transaction：`task_tick()`、`requeue_yielded_current()`、`requeue_preempted_current()`、`handoff_woken_current()`、`requeue_aborted_wait_current()`、`put_prev_blocked()` 和 `put_prev_exiting()`。`set_next_task(task, now)` 只记录下一段 `exec_start`。`account_current(now)` 在成功推进后刷新 `exec_start = now`，因此 tick 之后的 switch-out / requeue 只结算 tick 之后的新执行段。`switch.rs::switch_out()` 增加边界注释，明确 `Task::on_switch_out()` 仍只负责 task / CPU usage bookkeeping，不是 EEVDF fair accounting truth。
+
+**Boundary:** 2B 只证明 accounting transaction ordering 和 `exec_start` 刷新纪律。`runtime_delta_to_vruntime()` 暂用单调 actual-runtime scalar 作为 2B 证明载体；weighted virtual-time arithmetic、`rq_vtime` 更新、deadline / slice fail-closed 规则、bounded yield、nice-to-weight visibility 和 anomaly 语义仍归属 Checkpoint 2C / Gate P2。wake clamp 仍归属 Checkpoint 2D；default normal constructor 仍未切换到 EEVDF。
+
+**Source audit:**
+
+```sh
+rg -n "account_current|set_exec_start|runtime_delta_to_vruntime|on_switch_out|DeferredPreempt|local_requeue_|local_put_prev_|local_handoff" anemone-kernel/src/sched anemone-kernel/src/task -S
+```
+
+Findings:
+
+- `local_pick_next()` 在 `RunQueue::pick_next_task()` 后调用 `RunQueue::set_next_task(&task, Instant::now())`；`Eevdf::set_next_task()` 只设置 `exec_start`。scheduler loop 之后才执行 `switch_mapping(prev, next)` 和 `switch_to(next)`。
+- `task_tick()` 通过 `Eevdf::account_current()` 推进当前段并刷新 `exec_start`，随后仍保守返回 `TickAction::RequestResched`；真实 tick preemption policy 留给 2C。
+- `requeue_yielded_current()`、`requeue_preempted_current()`、`handoff_woken_current()` 和 `requeue_aborted_wait_current()` 都先调用同一个 helper 再入队。
+- `put_prev_blocked()` 和 `put_prev_exiting()` 只调用同一个 helper，不入队。
+- `DeferredPreempt` 在 `schedule_inner()` 中提前返回，不调用 `switch_out()`、`local_pick_next()`、`set_next_task()` 或任何 EEVDF class transaction；trap caller 仍拥有 restore pending flags。
+- `switch_out()` 只在 class transaction 之后调用；`Task::on_switch_out()` 仍通向 `task/cpu_usage.rs`，没有 EEVDF accounting 依赖。
+- 只读 explorer `Newton` 独立确认当前 write set 只包含 `sched/class/eevdf.rs` 与 `sched/switch.rs`，均在 2B 允许范围内；未发现需要越过 2B write set、进入 2C / 2D / 阶段 3，或改变 `Task::on_switch_out()` ownership 的停止信号。
+
+**Stop-condition assessment:** 未命中 2B 停止条件。没有发现某个 schedule path 在 class transaction 前重新入队；`account_current(now)` 能在 tick 与 switch-out / requeue 之间通过刷新 `exec_start` 避免双记；fair accounting 不依赖 `switch.rs::switch_out()` 的 task hook。
+
+**Validation:**
+
+```sh
+just build
+git diff --check
+mdbook build docs
+just fmt kernel --check
+```
+
+Results:
+
+- `just build` 通过，最终 kernel release build 完成，无 Rust warning。
+- `git diff --check` clean。
+- `mdbook build docs` 通过，HTML 输出到 `docs/book`。
+- `just fmt kernel --check` 仍失败，但只报告 generated `anemone-kernel/src/kconfig_defs.rs` 和 generated `anemone-kernel/src/platform_defs.rs` 的既有格式漂移；本 checkpoint touched Rust source 不再出现在 fmt diff 中。本 checkpoint 未运行全量 format，以免改动 generated / unrelated 文件。
+- 未运行 QEMU、LTP、iozone 或 directed EEVDF runtime smoke；2B 的最低验证是 build + source audit。tick/switch 不双记的 runtime smoke 若后续低成本可用，可作为 2C/2D 前额外证据，但不是 2B 关闭条件。
+
+**Review gate:** 只读 reviewer `Meitner` 审查 2B diff，未发现 Apollyon / Keter / Euclid；唯一 Safe note 是在接受本 review 后把本条 pending review 记录改为实际结论。总控已接受该 review 结论。
+
+**Tracking:** `EEVDF-002` 已移入 Neutralized。`EEVDF-001` / `EEVDF-020` 仍 active，归属 2C；`EEVDF-004` 仍 active，归属 2D；`EEVDF-017` 仍约束阶段 3 default switch。
+
+**Next:** Checkpoint 2C / Gate P2。不得在 2C 前消费 2D wake clamp 或切换 default normal class。
+
 ## Open Items
 
 - `EEVDF-001` / `EEVDF-020` 仍 active：Checkpoint 2C 关闭 `rq_vtime`、eligibility、arithmetic 与 anomaly 语义。
-- `EEVDF-002` 仍 active：Checkpoint 2B 关闭 EEVDF private `account_current(now)` 幂等边界。
 - `EEVDF-004` 仍 active：Checkpoint 2D 关闭 ordinary wake / parked handoff exactly-once wake clamp。
-- `EEVDF-017` 仍 active：阶段 3 default switch 前必须消费 1A / 1B / 2A / 2B / 2C / 2D 全部 gate；其中 1A / 1B / 2A 已关闭。
+- `EEVDF-017` 仍 active：阶段 3 default switch 前必须消费 1A / 1B / 2A / 2B / 2C / 2D 全部 gate；其中 1A / 1B / 2A / 2B 已关闭。
 
 ## Closure
 

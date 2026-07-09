@@ -1,9 +1,9 @@
 //! EEVDF-lite scheduler class scaffold.
 //!
-//! Checkpoint 2A only introduces the class payload and queue shape. Fair
-//! accounting, eligibility, yield penalty, and wake clamp semantics are closed
-//! by later phase-2 gates before this class can become the default normal
-//! scheduler.
+//! Checkpoint 2A introduced the class payload and queue shape. Checkpoint 2B
+//! closes the single EEVDF runtime-accounting boundary; eligibility, yield
+//! penalty, and wake clamp semantics are closed by later phase-2 gates before
+//! this class can become the default normal scheduler.
 
 use crate::{
     prelude::*,
@@ -111,6 +111,48 @@ impl Eevdf {
 
         self.ready_queue.push(task);
     }
+
+    fn set_exec_start(task: &Arc<Task>, now: Instant) {
+        Self::with_entity_mut(task, |entity| {
+            entity.exec_start = Some(now);
+        });
+    }
+
+    fn account_current(&mut self, task: &Arc<Task>, now: Instant) {
+        Self::with_entity_mut(task, |entity| {
+            let Some(exec_start) = entity.exec_start else {
+                entity.exec_start = Some(now);
+                return;
+            };
+            let Some(delta_exec) = now.checked_duration_since(exec_start) else {
+                return;
+            };
+            if delta_exec == Duration::ZERO {
+                return;
+            }
+
+            let delta_vruntime = Self::runtime_delta_to_vruntime(delta_exec);
+            entity.vruntime = entity.vruntime.saturating_add(delta_vruntime);
+            if entity.deadline <= entity.vruntime {
+                entity.deadline = entity
+                    .vruntime
+                    .saturating_add(Self::slice_to_vruntime(entity));
+            }
+            entity.exec_start = Some(now);
+        });
+    }
+
+    fn runtime_delta_to_vruntime(delta: Duration) -> Vruntime {
+        // Checkpoint 2B only needs a monotonic runtime scalar to prove the
+        // accounting boundary and `exec_start` refresh discipline. Checkpoint
+        // 2C replaces this with the accepted weighted virtual-time arithmetic
+        // before EEVDF can become the default normal class.
+        delta.as_nanos().min(u64::MAX as u128) as Vruntime
+    }
+
+    fn slice_to_vruntime(entity: &EevdfEntity) -> Vruntime {
+        Self::runtime_delta_to_vruntime(entity.slice)
+    }
 }
 
 impl Scheduler for Eevdf {
@@ -133,33 +175,37 @@ impl Scheduler for Eevdf {
             .unwrap_or(false)
     }
 
-    fn requeue_yielded_current(&mut self, task: Arc<Task>, _now: Instant) {
+    fn requeue_yielded_current(&mut self, task: Arc<Task>, now: Instant) {
+        self.account_current(&task, now);
         self.enqueue_back(task);
     }
 
     fn requeue_preempted_current(
         &mut self,
         task: Arc<Task>,
-        _now: Instant,
+        now: Instant,
         _pending: PendingResched,
     ) {
+        self.account_current(&task, now);
         self.enqueue_back(task);
     }
 
-    fn handoff_woken_current(&mut self, task: Arc<Task>, _now: Instant) {
+    fn handoff_woken_current(&mut self, task: Arc<Task>, now: Instant) {
+        self.account_current(&task, now);
         self.enqueue_back(task);
     }
 
-    fn requeue_aborted_wait_current(&mut self, task: Arc<Task>, _now: Instant) {
+    fn requeue_aborted_wait_current(&mut self, task: Arc<Task>, now: Instant) {
+        self.account_current(&task, now);
         self.enqueue_back(task);
     }
 
-    fn put_prev_blocked(&mut self, task: &Arc<Task>, _now: Instant) {
-        Self::assert_entity(task);
+    fn put_prev_blocked(&mut self, task: &Arc<Task>, now: Instant) {
+        self.account_current(task, now);
     }
 
-    fn put_prev_exiting(&mut self, task: &Arc<Task>, _now: Instant) {
-        Self::assert_entity(task);
+    fn put_prev_exiting(&mut self, task: &Arc<Task>, now: Instant) {
+        self.account_current(task, now);
     }
 
     fn pick_next_task(&mut self) -> Option<Arc<Task>> {
@@ -170,12 +216,12 @@ impl Scheduler for Eevdf {
         }
     }
 
-    fn set_next_task(&mut self, task: &Arc<Task>, _now: Instant) {
-        Self::assert_entity(task);
+    fn set_next_task(&mut self, task: &Arc<Task>, now: Instant) {
+        Self::set_exec_start(task, now);
     }
 
-    fn task_tick(&mut self, cur_task: &Arc<Task>, _now: Instant) -> TickAction {
-        Self::assert_entity(cur_task);
+    fn task_tick(&mut self, cur_task: &Arc<Task>, now: Instant) -> TickAction {
+        self.account_current(cur_task, now);
         // Checkpoint 2A has no EEVDF slice/eligibility decision yet. Keep the
         // directed scaffold preemptible with the same conservative behavior as
         // RR; 2C replaces this with virtual-time policy.

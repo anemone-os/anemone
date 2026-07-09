@@ -39,22 +39,6 @@
 
 **关闭条件：** 公式、更新点、fallback 允许条件和 anomaly 语义已进入 canonical 文本或 Checkpoint 2C / Gate P2 证据，且默认 class 切换前该 checkpoint 已关闭。
 
-### EEVDF-002：runtime accounting 必须有单一幂等边界
-
-**状态：** Active
-
-**问题：** tick 和 switch-out / requeue 都可能观察当前任务执行时间；实现必须定义 EEVDF private `account_current(now)` 或等价机制，并在每次推进后刷新 `exec_start`，避免同一执行段双记或漏记。`DeferredPreempt` 不结束执行段，不能触发 switch-out accounting。
-
-**修复落点：**
-
-- [RFC index](./index.md) 的 runtime accounting 章节。
-- [不变量需求](./invariants.md) 的 runtime accounting 与线性化点。
-- [迁移实施计划](./implementation.md) Checkpoint 2B / Gate P1。
-
-**反馈相关：** 阶段 1A 关闭 trait / `RunQueue` 的 lifecycle transaction 位置，阶段 1B 关闭这些位置在 schedule entry 上的分流；具体 EEVDF helper 和调用点由 Checkpoint 2B / Gate P1 证明。2B 的 source audit 需要证明 class accounting transaction 先于 runnable requeue，`DeferredPreempt` 不 accounting；若 hook ordering 或 task hook ownership 改变 accepted invariants，回写 `invariants.md` 和本计划。
-
-**关闭条件：** `account_current(now)` 的唯一入口、调用点、幂等规则和 `exec_start` 刷新规则已证明；未关闭前不得进入默认 class 切换。
-
 ### EEVDF-004：wake placement 必须 exactly-once 覆盖 parked handoff 分支
 
 **状态：** Active
@@ -110,6 +94,20 @@
 - 暂无 active Safe。
 
 ## Neutralized
+
+### EEVDF-002：runtime accounting 必须有单一幂等边界
+
+**状态：** Neutralized
+
+**修复落点：**
+
+- `anemone-kernel/src/sched/class/eevdf.rs` 中的 EEVDF private `account_current(now)` 是唯一推进当前执行段的 helper。
+- `set_next_task(task, now)` 只记录下一段 `exec_start`；`task_tick()`、`requeue_yielded_current()`、`requeue_preempted_current()`、`handoff_woken_current()`、`requeue_aborted_wait_current()`、`put_prev_blocked()` 和 `put_prev_exiting()` 均先调用同一个 helper。
+- `anemone-kernel/src/sched/switch.rs` 明确 `Task::on_switch_out()` 只保留 task / CPU usage bookkeeping，不作为 EEVDF fair accounting truth。
+
+**Source audit:** `DeferredPreempt` 在 `schedule_inner()` 中提前返回，不调用 `switch_out()`、`local_pick_next()`、`set_next_task()` 或任何 EEVDF class transaction；runnable requeue、parked handoff、abort-park requeue、wait park switch 和 exit switch 都在 `RunQueue` 设置 `on_runq = true` 或真正切走前完成 class transaction。`account_current(now)` 在成功推进后刷新 `exec_start = now`，tick 后的 switch-out / requeue 只结算 tick 之后的新执行段。
+
+**结论：** Checkpoint 2B / Gate P1 已关闭。2B 使用单调 actual-runtime scalar 证明 accounting 边界；weighted virtual-time arithmetic、`rq_vtime` 更新、deadline / slice fail-closed 规则和 bounded yield 仍归属 Checkpoint 2C / `EEVDF-001` / `EEVDF-020`，不因本条 neutralized 而提前关闭。
 
 ### EEVDF-003：schedule caller / pending resched reason 必须可传递
 
