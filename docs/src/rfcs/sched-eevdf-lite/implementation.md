@@ -512,6 +512,7 @@ Tracking issue 关闭审查：
 - 实现 nice-to-weight 语义消费：
   - `setpriority()` / clone nice inheritance 后，下一次 owner CPU `account_current()` / enqueue / pick 读取最新 nice。
   - 若当前 `setpriority()` 路径无法保证 runqueue 上 task 的 weight visibility，2C 必须在 `task/api/priority.rs` 或 owner-local helper 中补齐规则；该问题不能留到 default class switch 后再处理。
+  - nice 是 task-owned weight truth 的例外，不等同 scheduler policy / class migration；2C 不得新增远端直接修改 `SchedEntity` class 或 EEVDF payload 的路径。
 - 消费 2A 已接入的 Kconfig constants：
   - base slice。
   - yield penalty window。
@@ -529,6 +530,7 @@ Tracking issue 关闭审查：
 
 - 假设线性 scan 足以在第一版表达 eligibility、deadline pick 和 vruntime fallback，无需树索引。
 - 假设 nice 变化无需立即跨 CPU 重排 runqueue；下一次 owner CPU accounting / enqueue / pick 可以消费最新权重。
+- 假设 runtime scheduler policy / class switch 不属于本 RFC；若未来支持，必须另走 owner CPU `RunQueue` command / IPI 事务，而不是在 2C 权重可见性补丁中顺手加入 class migration。
 - 假设第一版 bounded yield penalty 可避免立即选回，同时不造成永久饥饿。
 - 失败信号：fallback anomaly 在稳定 CPU-bound workload 持续增长、出现 deadline-only 行为、nice 权重方向不可见、new placement 必须读取 wall-clock `now`、yield smoke 失败、或 virtual time arithmetic 无法 fail closed；此时停止阶段，回写 `invariants.md` / `tracking-issues.md`。
 

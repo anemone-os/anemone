@@ -50,11 +50,14 @@
 4. `Task::nice()` 是 nice / weight source 的唯一长期真相源。
 5. 普通任务公平调度字段由 `SchedClassPrv::Eevdf(EevdfEntity)` 或等价 class-specific payload 拥有。
 6. runqueue 公平时钟由 owner CPU 的 `Eevdf` class 拥有。
-7. scheduler-private `ScheduleMode` 只属于 core entry permission，不得由 scheduler class 保存、缓存或解释为算法状态。
-8. processor-private `PendingResched` 只属于 pending preempt request；class 可以按值读取它作为 `requeue_preempted_current()` 的 cause flags，但不得负责 restore 或驱动 processor pending state。执行 destructive `take_pending_resched()` 的 scheduler-core caller 负责在 deferred preempt 时恢复同一组 flags。
-9. 用户态 scheduling ABI accounting 不是本 RFC 的行为真相源；未来 `sched_*` syscall 只能通过明确的后续 RFC 接入真实调度策略。
+7. task 的 effective scheduler class、class-specific payload 和 queue membership 只能由 owner CPU 的 `RunQueue` transaction 修改；远端 task 不得直接拿 `sched_entity` 锁改 class 或 EEVDF payload。
+8. scheduler-private `ScheduleMode` 只属于 core entry permission，不得由 scheduler class 保存、缓存或解释为算法状态。
+9. processor-private `PendingResched` 只属于 pending preempt request；class 可以按值读取它作为 `requeue_preempted_current()` 的 cause flags，但不得负责 restore 或驱动 processor pending state。执行 destructive `take_pending_resched()` 的 scheduler-core caller 负责在 deferred preempt 时恢复同一组 flags。
+10. 用户态 scheduling ABI accounting 不是本 RFC 的行为真相源；未来 `sched_*` syscall 只能通过明确的后续 RFC 接入真实调度策略。
 
 clone inheritance 只能继承 nice 等对应 owner state，不能继承父 task 的 scheduler entity。新 task publication 必须从 fresh `SchedEntity::new_normal()` 或等价构造器进入 `enqueue_new()` placement，让 `vruntime` / `deadline` / `exec_start` 由 owner CPU EEVDF class 初始化。
+
+未来若支持 scheduler policy / class switch，source CPU 只能完成 ABI / permission / target identity 校验并向 target owner CPU 提交 command；queued、current、blocked 和 exiting task 的 class 迁移必须在 owner CPU `RunQueue` transaction 内线性化。本 RFC 不引入这项能力，只固定 future extension 不得绕过 owner boundary。
 
 允许诊断字段记录 anomaly count、last fallback reason、last class transaction 或 runtime snapshots。诊断字段不得反向驱动调度选择，除非它被提升为正式协议状态并进入本文。
 
@@ -67,9 +70,10 @@ clone inheritance 只能继承 nice 等对应 owner state，不能继承父 task
 1. enqueue/dequeue/pick 只能操作当前 CPU 拥有的 runqueue。
 2. remote wake 仍只能请求 owner CPU 做本地 stale-safe placement。
 3. producer / waker 不能直接修改目标 CPU runqueue 内部 EEVDF 字段。
-4. `Arc<Task>` 仍是队列元素身份；若后续引入 tree index，必须使用稳定 tie-breaker，例如 tid 或 task identity，处理重复 `deadline` / `vruntime`。
-5. scheduler class transaction 是本次调度路径的 class-visible 线性化动作，不是可跨事件缓存的 capability。
-6. scheduler class transaction 不得携带 `WakeToken`、`WaitState` pointer、`PrePark/Parked`、`WakeEnqueueResult` 或 source-local trigger。
+4. 未来 scheduler policy / class change producer 也不能直接修改目标 task 的 `SchedEntity`；它必须请求 owner CPU 执行本地 `RunQueue` command。
+5. `Arc<Task>` 仍是队列元素身份；若后续引入 tree index，必须使用稳定 tie-breaker，例如 tid 或 task identity，处理重复 `deadline` / `vruntime`。
+6. scheduler class transaction 是本次调度路径的 class-visible 线性化动作，不是可跨事件缓存的 capability。
+7. scheduler class transaction 不得携带 `WakeToken`、`WaitState` pointer、`PrePark/Parked`、`WakeEnqueueResult` 或 source-local trigger。
 
 ## Entry、Pending Resched 与 Class Transaction 边界
 
@@ -194,11 +198,13 @@ bootstrap task、`kthreadd` 和普通 kthread 第一版直接使用 normal EEVDF
 
 1. runqueue 修改仍在本地 interrupt-disabled 上下文中完成。
 2. `SchedEntity` 字段更新不得在没有 owner CPU 证明的远端路径执行。
-3. scheduler class 不得在 `task_tick()` 中访问当前 processor percpu 变量并制造重入。
-4. task exit / zombie 路径不得把已退出 task 留在 EEVDF queue。
-5. dequeue 失败仍应暴露 bug，不能为了兼容 tree/index 更新失败静默忽略。
-6. strategy constants 中的 base slice、wake clamp、yield penalty 和 anomaly threshold 必须来自 Kconfig。
-7. idle task 保持 fallback singleton；不通过 `requeue_*_current()` 物理入队。
+3. 不为第一版 EEVDF 引入额外 `RunQueue` transaction lock；本地 interrupt-disabled `RunQueue` transaction 是 scheduler class、queue membership、`on_runq` 和 future policy-change command 的线性化边界。
+4. `Task::nice()` 是 task-owned weight truth 的例外，可由 `setpriority()` 远端更新；EEVDF 只能在 owner CPU 的 accounting / enqueue / pick 中观察该值，不得把 nice 更新伪装成 class payload migration。
+5. scheduler class 不得在 `task_tick()` 中访问当前 processor percpu 变量并制造重入。
+6. task exit / zombie 路径不得把已退出 task 留在 EEVDF queue。
+7. dequeue 失败仍应暴露 bug，不能为了兼容 tree/index 更新失败静默忽略。
+8. strategy constants 中的 base slice、wake clamp、yield penalty 和 anomaly threshold 必须来自 Kconfig。
+9. idle task 保持 fallback singleton；不通过 `requeue_*_current()` 物理入队。
 
 阶段 1 可以主动做同一 scheduler owner 内的结构拆分，例如把 `RunQueue` facade 移到 `sched/class/runqueue.rs`，把 `SchedEntity` / `SchedClassPrv` 移到 `sched/class/entity.rs`，同时让 `Scheduler` trait 留在 `sched/class/mod.rs`。该拆分属于结构维护：行为保持、不扩大 public API、不改变 wait-core API、不改变 task topology。阶段 1 拆出 `entity.rs` 时，`SchedEntity` 的 RR/Idle 形状和 `Copy` 行为保持不变；阶段 2 再引入 EEVDF payload。
 

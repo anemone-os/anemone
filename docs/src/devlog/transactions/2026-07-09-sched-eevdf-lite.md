@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / fairness / runtime accounting / scheduler class
 **Canonical Plan:** [RFC-20260622-sched-eevdf-lite](../../rfcs/sched-eevdf-lite/index.md), [不变量需求](../../rfcs/sched-eevdf-lite/invariants.md), [迁移实施计划](../../rfcs/sched-eevdf-lite/implementation.md), [Tracking Issues](../../rfcs/sched-eevdf-lite/tracking-issues.md)
-**Current Phase:** Checkpoint 2A 已关闭；下一步是 Checkpoint 2B - Gate P1 `account_current(now)` 与入队前执行段结算
+**Current Phase:** Checkpoint 2A 已关闭；2B 前 typed entity / RunQueue transaction boundary feedback 已收口；下一步是 Checkpoint 2B - Gate P1 `account_current(now)` 与入队前执行段结算
 
 ## Scope
 
@@ -44,7 +44,7 @@
 
 **Current Branch:** `drc/eevdf`
 
-**Completed:** 公开 RFC 目录已存在，阶段 0 所需四份 RFC 文档已读取：`index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md`。register、current limitations、RFC workflow、RFC template、devlog workflow、templates、事务索引、当前双周 devlog、SUMMARY 和 RFC 列表已读取。阶段 0 建立本事务日志，并把 RFC、tracking issues、事务索引、当前双周 devlog、mdBook Summary 和 RFC 列表连接到同一实现记录。总控完成阶段 0 source audit；未启动 subagent，因为阶段 0 不需要 worker 写代码。Checkpoint 1A 已完成：`Scheduler` trait 改为 method-first transaction surface，`RunQueue` 与 `SchedEntity` 拆出同一 owner 内文件边界，RR / Idle 完成行为保持适配。Checkpoint 1B 已完成：processor pending request 升级为 `PendingResched` flags，trap / idle / tick / IPI producer 接入 typed pending，schedule entry 拆分为 preempt / yield / idle，new-task enqueue 与 current requeue facade 改为语义化命名，owner CPU placement 后的 preempt decision 已接线，`EEVDF-005` 已通过 source audit neutralized。Checkpoint 2A 已完成：`Eevdf` class scaffold、`EevdfEntity` payload 字段位置、非 `Copy` class-specific `SchedEntity`、显式 `new_eevdf()` constructor、fresh clone/default-normal entity 构造和 EEVDF scheduler constants 的 kconfig schema / live root config / generated defs plumbing 已接入；default normal constructor 仍保持 RR，未提前切换到 EEVDF。
+**Completed:** 公开 RFC 目录已存在，阶段 0 所需四份 RFC 文档已读取：`index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md`。register、current limitations、RFC workflow、RFC template、devlog workflow、templates、事务索引、当前双周 devlog、SUMMARY 和 RFC 列表已读取。阶段 0 建立本事务日志，并把 RFC、tracking issues、事务索引、当前双周 devlog、mdBook Summary 和 RFC 列表连接到同一实现记录。总控完成阶段 0 source audit；未启动 subagent，因为阶段 0 不需要 worker 写代码。Checkpoint 1A 已完成：`Scheduler` trait 改为 method-first transaction surface，`RunQueue` 与 `SchedEntity` 拆出同一 owner 内文件边界，RR / Idle 完成行为保持适配。Checkpoint 1B 已完成：processor pending request 升级为 `PendingResched` flags，trap / idle / tick / IPI producer 接入 typed pending，schedule entry 拆分为 preempt / yield / idle，new-task enqueue 与 current requeue facade 改为语义化命名，owner CPU placement 后的 preempt decision 已接线，`EEVDF-005` 已通过 source audit neutralized。Checkpoint 2A 已完成：`Eevdf` class scaffold、`EevdfEntity` payload 字段位置、非 `Copy` class-specific `SchedEntity`、显式 `new_eevdf()` constructor、fresh clone/default-normal entity 构造和 EEVDF scheduler constants 的 kconfig schema / live root config / generated defs plumbing 已接入；default normal constructor 仍保持 RR，未提前切换到 EEVDF。2B 前 feedback 已收口：`Eevdf` class 内部增加 typed entity accessor，后续 `account_current(now)` 可通过 class-private helper 短暂访问 `EevdfEntity`，不把 `SchedEntity` guard 或 typed payload 参数加入 `Scheduler` trait；RFC canonical 文本补充了 future scheduler policy / class switch 必须通过 owner CPU `RunQueue` command / IPI 线性化，远端不得直接修改 `SchedEntity` class 或 EEVDF payload。
 
 **In Progress:** 无 worker 正在运行。下一步是 Checkpoint 2B，必须限制在 2B write set 内实现 EEVDF private `account_current(now)` 与入队前执行段结算；不得消费 2C eligibility / yield、2D wake clamp 或阶段 3 default normal switch。
 
@@ -269,6 +269,31 @@ Results:
 **Review gate:** 只读 reviewer `Aquinas` 初审报告 `RunQueue` 持 entity lock 调 class transaction 的 Keter；总控修复后复审结论为 no blocking Checkpoint 2A findings。残余 gap 是尚无 explicit EEVDF entity runtime smoke，按 2A scaffold 边界可接受。
 
 **Next:** Checkpoint 2B / Gate P1。不得在 2B 中消费 2C `rq_vtime` / arithmetic / bounded yield、2D wake clamp 或阶段 3 default normal switch。
+
+### 2026-07-09 - 2B 前 feedback：EEVDF typed entity accessor
+
+**Phase:** Checkpoint 2B 前 implementation feedback。
+
+**Change:** 用户反馈确认 2A 为避免 self-lock 保留的短锁 snapshot 写法可以在 2B 前收口。总控将 `Eevdf` class 内部的 class-kind assertions 收敛为 class-private `with_entity_mut()` / `assert_entity()` helper。`Scheduler` trait surface 保持 method-first `Arc<Task>` transaction 形状，不增加 typed `SchedEntity` 或 entity guard 参数；`RunQueue` 仍负责 queue membership、`on_runq`、`ntasks` 和全局 scheduler 线性化。
+
+**Boundary:** 该反馈只清理 EEVDF class 内部 payload access 形状，不实现 `account_current(now)`、eligibility、yield penalty、wake clamp 或 default normal switch。`with_entity_mut()` 的锁生命周期保持在 class-private helper 内，避免把 task entity lock order 扩散到 trait API；未来 2B 的 accounting helper 可以复用该入口读写 `EevdfEntity`。
+
+**RFC update:** `invariants.md` 现在明确 effective scheduler class、class-specific payload 和 queue membership 只能由 owner CPU `RunQueue` transaction 修改；future scheduler policy / class switch 必须作为 owner CPU command / IPI 线性化。`index.md` 把 runtime policy / class switch 列为非目标和 follow-up RFC 事项；`implementation.md` 明确 2C 的 nice-to-weight visibility 不等同 class migration，nice 是 task-owned weight truth 的例外。
+
+**Source audit:**
+
+```sh
+rg -n "with_entity_mut|assert_entity|sched_class_kind\\(\\)" anemone-kernel/src/sched/class/eevdf.rs anemone-kernel/src/sched/class/runqueue.rs
+rg -n "fn .*SchedEntity|EevdfEntity" anemone-kernel/src/sched/class/mod.rs anemone-kernel/src/sched/class/eevdf.rs
+```
+
+Findings:
+
+- `Scheduler` trait 没有新增 typed entity 参数或 guard 参数。
+- `Eevdf` 内部不再直接调用 observation-only `sched_class_kind()` 断言自身任务类型，改由 class-private typed helper 验证 payload。
+- `RunQueue` 的短锁 snapshot / membership update 形状保持不变；本反馈没有回退到持 entity lock 调 class transaction。
+
+**Next:** 正式进入 Checkpoint 2B / Gate P1。
 
 ## Open Items
 

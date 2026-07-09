@@ -7,7 +7,7 @@
 
 use crate::{
     prelude::*,
-    sched::class::{PendingResched, PreemptDecision, SchedClassKind, Scheduler, TickAction},
+    sched::class::{PendingResched, PreemptDecision, SchedClassPrv, Scheduler, TickAction},
 };
 
 pub type Vruntime = u64;
@@ -86,7 +86,24 @@ impl Eevdf {
         }
     }
 
+    // Keep the entity lock out of the Scheduler trait: class transactions own
+    // when they need a short typed payload access, while RunQueue still owns
+    // queue membership and global scheduler linearization.
+    fn with_entity_mut<R>(task: &Arc<Task>, f: impl FnOnce(&mut EevdfEntity) -> R) -> R {
+        task.with_sched_entity_mut(|se| {
+            let SchedClassPrv::Eevdf(entity) = &mut se.class else {
+                panic!("expected EEVDF entity for task {}", task.tid());
+            };
+            f(entity)
+        })
+    }
+
+    fn assert_entity(task: &Arc<Task>) {
+        Self::with_entity_mut(task, |_| {});
+    }
+
     fn enqueue_back(&mut self, task: Arc<Task>) {
+        Self::assert_entity(&task);
         assert!(
             self.ready_queue.iter().all(|t| !Arc::ptr_eq(t, &task)),
             "task is already in the EEVDF ready queue"
@@ -138,11 +155,11 @@ impl Scheduler for Eevdf {
     }
 
     fn put_prev_blocked(&mut self, task: &Arc<Task>, _now: Instant) {
-        assert!(matches!(task.sched_class_kind(), SchedClassKind::Eevdf));
+        Self::assert_entity(task);
     }
 
     fn put_prev_exiting(&mut self, task: &Arc<Task>, _now: Instant) {
-        assert!(matches!(task.sched_class_kind(), SchedClassKind::Eevdf));
+        Self::assert_entity(task);
     }
 
     fn pick_next_task(&mut self) -> Option<Arc<Task>> {
@@ -154,11 +171,11 @@ impl Scheduler for Eevdf {
     }
 
     fn set_next_task(&mut self, task: &Arc<Task>, _now: Instant) {
-        assert!(matches!(task.sched_class_kind(), SchedClassKind::Eevdf));
+        Self::assert_entity(task);
     }
 
     fn task_tick(&mut self, cur_task: &Arc<Task>, _now: Instant) -> TickAction {
-        assert!(matches!(cur_task.sched_class_kind(), SchedClassKind::Eevdf));
+        Self::assert_entity(cur_task);
         // Checkpoint 2A has no EEVDF slice/eligibility decision yet. Keep the
         // directed scaffold preemptible with the same conservative behavior as
         // RR; 2C replaces this with virtual-time policy.
@@ -171,10 +188,7 @@ impl Scheduler for Eevdf {
         candidate: &Arc<Task>,
         _now: Instant,
     ) -> PreemptDecision {
-        assert!(matches!(
-            candidate.sched_class_kind(),
-            SchedClassKind::Eevdf
-        ));
+        Self::assert_entity(candidate);
         // This is a scaffold-only conservative request, not the final EEVDF
         // current-vs-candidate policy. Gate 2C owns the real decision.
         PreemptDecision::RequestResched
