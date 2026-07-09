@@ -8,7 +8,7 @@
 
 use crate::{
     prelude::*,
-    sched::class::{OnTickAction, RunQueue},
+    sched::class::{RunQueue, TickAction},
 };
 
 /// This struct must be accessed with interrupts disabled. it's a bit overkill,
@@ -57,7 +57,7 @@ pub unsafe fn get_local_sched_ctx_mut() -> *mut TaskContext {
 /// **This function can only be called by [scheduler], which should ensure that
 /// interrupts are disabled.**
 pub fn set_current_task(option: Option<Arc<Task>>) {
-    debug_assert!(IntrArch::local_intr_disabled());
+    assert!(IntrArch::local_intr_disabled());
     PROCESSOR.with_mut(|proc| {
         proc.running_task = option;
     });
@@ -88,7 +88,7 @@ pub fn get_current_task() -> Arc<Task> {
 }
 
 fn is_local_current_task(task: &Arc<Task>) -> bool {
-    debug_assert!(IntrArch::local_intr_disabled());
+    assert!(IntrArch::local_intr_disabled());
     PROCESSOR.with(|proc| {
         proc.running_task
             .as_ref()
@@ -160,7 +160,7 @@ pub fn local_enqueue(task: Arc<Task>) {
             }
 
             if !task.with_sched_entity_mut(|se| se.on_runq()) {
-                proc.runq.enqueue(task);
+                proc.runq.enqueue_new(task);
             } else {
                 knoticeln!(
                     "{} is already on run queue, not enqueuing it again",
@@ -211,7 +211,7 @@ pub fn local_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult
         }
 
         PROCESSOR.with_mut(|proc| {
-            proc.runq.enqueue(task.clone());
+            proc.runq.enqueue_woken(task.clone());
         });
         kdebugln!("wake_enqueue: task={} enqueued locally", task.tid());
         WakeEnqueueResult::Enqueued
@@ -234,7 +234,7 @@ pub fn local_requeue_current(task: Arc<Task>) {
 
     with_intr_disabled(|| {
         PROCESSOR.with_mut(|proc| {
-            debug_assert!(
+            assert!(
                 Arc::ptr_eq(
                     &task,
                     proc.running_task
@@ -243,11 +243,11 @@ pub fn local_requeue_current(task: Arc<Task>) {
                 ),
                 "only the current running task can be requeued through this path"
             );
-            debug_assert!(
+            assert!(
                 !task.with_sched_entity_mut(|se| se.on_runq()),
                 "current running task should not already be on run queue"
             );
-            proc.runq.enqueue(task);
+            proc.runq.requeue_current_legacy(task);
         });
     });
 }
@@ -259,9 +259,13 @@ pub fn local_requeue_current(task: Arc<Task>) {
 ///
 /// ** Interrupts must be disabled when calling this function.**
 pub fn local_pick_next() -> Arc<Task> {
-    debug_assert!(IntrArch::local_intr_disabled());
-    let task = PROCESSOR.with_mut(|proc| proc.runq.pick_next());
-    debug_assert!(task.is_sched_runnable());
+    assert!(IntrArch::local_intr_disabled());
+    let task = PROCESSOR.with_mut(|proc| {
+        let task = proc.runq.pick_next_task();
+        proc.runq.set_next_task(&task, Instant::now());
+        task
+    });
+    assert!(task.is_sched_runnable());
     task
 }
 
@@ -269,16 +273,16 @@ pub fn local_pick_next() -> Arc<Task> {
 ///
 /// **Only timer interrupt handler should call this function.**
 pub fn local_sched_tick() {
-    debug_assert!(IntrArch::local_intr_disabled());
+    assert!(IntrArch::local_intr_disabled());
 
     let action = PROCESSOR.with_mut(|proc| {
-        proc.runq
-            .on_tick(proc.running_task.as_ref().expect("no running task"))
+        proc.runq.task_tick(
+            proc.running_task.as_ref().expect("no running task"),
+            Instant::now(),
+        )
     });
-    if let Some(action) = action {
-        match action {
-            OnTickAction::Resched => mark_need_resched(),
-        }
+    if let TickAction::RequestResched = action {
+        mark_need_resched();
     }
 }
 
@@ -386,11 +390,11 @@ pub mod init_routines {
 
         with_intr_disabled(|| {
             PROCESSOR.with_mut(|proc| {
-                debug_assert!(
+                assert!(
                     !task.with_sched_entity_mut(|se| se.on_runq()),
                     "current running task should not already be on run queue"
                 );
-                proc.runq.enqueue(task);
+                proc.runq.enqueue_new(task);
             });
         });
     }

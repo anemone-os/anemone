@@ -3,30 +3,80 @@
 
 use crate::{
     prelude::*,
-    sched::class::{OnTickAction, SchedClassPrv, Scheduler},
+    sched::class::{PendingResched, PreemptDecision, SchedClassPrv, Scheduler, TickAction},
 };
 
 pub struct Idle;
 
 impl Scheduler for Idle {
-    fn enqueue(&mut self, task: Arc<Task>) {
+    fn enqueue_new(&mut self, _task: Arc<Task>) {
         panic!("idle scheduler should not be enqueued with any task");
     }
 
-    fn dequeue(&mut self, task: &Arc<Task>) -> bool {
+    fn enqueue_woken(&mut self, _task: Arc<Task>) {
+        panic!("idle scheduler should not be enqueued with any task");
+    }
+
+    fn dequeue(&mut self, _task: &Arc<Task>) -> bool {
         panic!("idle scheduler should not be dequeued with any task");
     }
 
-    fn pick_next(&mut self) -> Option<Arc<Task>> {
+    fn requeue_yielded_current(&mut self, _task: Arc<Task>, _now: Instant) {
+        panic!("idle scheduler should not requeue current task");
+    }
+
+    fn requeue_preempted_current(
+        &mut self,
+        _task: Arc<Task>,
+        _now: Instant,
+        _pending: PendingResched,
+    ) {
+        panic!("idle scheduler should not requeue current task");
+    }
+
+    fn handoff_woken_current(&mut self, _task: Arc<Task>, _now: Instant) {
+        panic!("idle scheduler should not requeue current task");
+    }
+
+    fn requeue_aborted_wait_current(&mut self, _task: Arc<Task>, _now: Instant) {
+        panic!("idle scheduler should not requeue current task");
+    }
+
+    fn put_prev_blocked(&mut self, _task: &Arc<Task>, _now: Instant) {
+        panic!("idle task should not block");
+    }
+
+    fn put_prev_exiting(&mut self, _task: &Arc<Task>, _now: Instant) {
+        panic!("idle task should not exit");
+    }
+
+    fn pick_next_task(&mut self) -> Option<Arc<Task>> {
         Some(IDLE_TASK.with(|task| (**task).clone()))
     }
 
-    fn on_tick(&mut self, cur_task: &Arc<Task>) -> Option<OnTickAction> {
-        debug_assert!(matches!(
+    fn set_next_task(&mut self, task: &Arc<Task>, _now: Instant) {
+        assert!(matches!(task.sched_entity().class, SchedClassPrv::Idle(())));
+    }
+
+    fn task_tick(&mut self, cur_task: &Arc<Task>, _now: Instant) -> TickAction {
+        assert!(matches!(
             cur_task.sched_entity().class,
             SchedClassPrv::Idle(())
         ));
-        Some(OnTickAction::Resched)
+        TickAction::RequestResched
+    }
+
+    fn decide_preempt_current(
+        &mut self,
+        _current: &Arc<Task>,
+        candidate: &Arc<Task>,
+        _now: Instant,
+    ) -> PreemptDecision {
+        assert!(matches!(
+            candidate.sched_entity().class,
+            SchedClassPrv::Idle(())
+        ));
+        PreemptDecision::KeepCurrent
     }
 }
 
