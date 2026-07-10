@@ -1,6 +1,6 @@
 # Sched EEVDF-lite 不变量需求
 
-**状态：** Draft
+**状态：** Canonical
 **最后更新：** 2026-07-10
 **父 RFC：** [RFC-20260622-sched-eevdf-lite](./index.md)
 

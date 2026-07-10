@@ -1,8 +1,8 @@
 //! EEVDF-lite scheduler class.
 //!
 //! Checkpoints 2C and 2D close weighted virtual-time arithmetic, eligibility,
-//! `rq_vtime`, bounded yield, and exactly-once wake clamp. The class remains an
-//! explicit directed class until the default-normal switch in stage 3.
+//! `rq_vtime`, bounded yield, and exactly-once wake clamp. Stage 3 makes this
+//! the default normal scheduler class.
 
 use crate::{
     prelude::*,

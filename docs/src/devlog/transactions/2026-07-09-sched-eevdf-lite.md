@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / fairness / runtime accounting / scheduler class
 **Canonical Plan:** [RFC-20260622-sched-eevdf-lite](../../rfcs/sched-eevdf-lite/index.md), [不变量需求](../../rfcs/sched-eevdf-lite/invariants.md), [迁移实施计划](../../rfcs/sched-eevdf-lite/implementation.md), [Tracking Issues](../../rfcs/sched-eevdf-lite/tracking-issues.md)
-**Current Phase:** 阶段 3 前 Nice / Priority 边界反馈纠正已关闭；下一步是阶段 3 default normal class 切换与中性验证
+**Current Phase:** 阶段 3 default normal class 切换与 agent-required source/build gate 已关闭；用户态 runtime smoke 待用户运行
 
 ## Scope
 
@@ -46,11 +46,11 @@
 
 **Completed:** 公开 RFC 目录已存在，阶段 0 所需四份 RFC 文档已读取：`index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md`。register、current limitations、RFC workflow、RFC template、devlog workflow、templates、事务索引、当前双周 devlog、SUMMARY 和 RFC 列表已读取。阶段 0 建立本事务日志，并把 RFC、tracking issues、事务索引、当前双周 devlog、mdBook Summary 和 RFC 列表连接到同一实现记录。总控完成阶段 0 source audit；未启动 subagent，因为阶段 0 不需要 worker 写代码。Checkpoint 1A 已完成：`Scheduler` trait 改为 method-first transaction surface，`RunQueue` 与 `SchedEntity` 拆出同一 owner 内文件边界，RR / Idle 完成行为保持适配。Checkpoint 1B 已完成：processor pending request 升级为 `PendingResched` flags，trap / idle / tick / IPI producer 接入 typed pending，schedule entry 拆分为 preempt / yield / idle，new-task enqueue 与 current requeue facade 改为语义化命名，owner CPU placement 后的 preempt decision 已接线，`EEVDF-005` 已通过 source audit neutralized。Checkpoint 2A 已完成：`Eevdf` class scaffold、`EevdfEntity` payload 字段位置、非 `Copy` class-specific `SchedEntity`、显式 `new_eevdf()` constructor、fresh clone/default-normal entity 构造和 EEVDF scheduler constants 的 kconfig schema / live root config / generated defs plumbing 已接入；default normal constructor 仍保持 RR，未提前切换到 EEVDF。2B 前 feedback 已收口：`Eevdf` class 内部增加 typed entity accessor，后续 `account_current(now)` 可通过 class-private helper 短暂访问 `EevdfEntity`，不把 `SchedEntity` guard 或 typed payload 参数加入 `Scheduler` trait；RFC canonical 文本补充了 future scheduler policy / class switch 必须通过 owner CPU `RunQueue` command / IPI 线性化，远端不得直接修改 `SchedEntity` class 或 EEVDF payload。Checkpoint 2B 已完成：`Eevdf` private `account_current(now)` 成为唯一推进 current execution segment 的 helper；`set_next_task()` 记录 `exec_start`；tick、yield / preempt requeue、parked handoff、abort-park requeue、block 和 exit switch 都通过同一 helper 结算并刷新 `exec_start`；`Task::on_switch_out()` 保持 task / CPU usage bookkeeping，不成为 fair scheduler accounting truth；`EEVDF-002` 已移入 Neutralized。Checkpoint 2C 已完成：weighted virtual-time arithmetic、monotonic `rq_vtime`、eligible / fallback pick、new placement、deadline renewal、tick / runnable-arrival preempt、bounded yield、nice visibility 和 anomaly observation 已实现；2C / 2D wake 边界与 default-normal RR 边界保持不变，`EEVDF-001` / `EEVDF-020` 已移入 Neutralized。2C 后 class-shape feedback correction 已完成：class precedence 集中为单一 high-to-low order，pick / preempt 共用；EEVDF payload 与通用 class constructor 可见面已收窄。Checkpoint 2D 已完成：ordinary wake 与 parked current handoff 通过同一个 bounded wake clamp transaction 收口，stale / already-current / already-queued / no-switch abort / abort-park 路径保持 no-reward，`EEVDF-004` 已移入 Neutralized；阶段 2 全部 checkpoint 关闭。阶段 3 前 Nice / Priority 边界反馈纠正也已关闭：typed nice、Task writer、clone inheritance、priority syscall 目录化和低代价 target-selection / ABI 修复均已落地，不新增 Checkpoint 2E。
 
-**In Progress:** 无 implementation worker 正在运行。下一步按阶段 3 gate 翻转 default normal constructor，并完成 ordinary / bootstrap / kthread direct EEVDF、无 production RR 特例和真实 EEVDF workload 的 source audit / smoke；完整动态 renice 事务仍延期，不在 default switch 中顺带处理。
+**In Progress:** 无 implementation worker 正在运行。阶段 3 default switch、用户态 app、source audit 和 agent-required build/docs gate 已完成；equal-weight、nice direction、bounded yield、sleep/wake 和 anomaly runtime 证据由用户运行，当前标记为 `user-run pending`。完整动态 renice 事务仍延期，不在 default switch 中顺带处理。
 
-**Open Blockers:** 无阶段 0 / 1A / 1B / 2A / 2B / 2C / 2D 停止条件。当前 active Keter 只剩 `EEVDF-017`，它要求阶段 3 source audit 证明 default switch 没有 ordinary / bootstrap / kthread production RR 特例；`EEVDF-001`、`EEVDF-002`、`EEVDF-004`、`EEVDF-005` 和 `EEVDF-020` 已关闭。
+**Open Blockers:** 无 agent-side implementation blocker。`EEVDF-001`、`EEVDF-002`、`EEVDF-004`、`EEVDF-005`、`EEVDF-017` 和 `EEVDF-020` 已关闭；用户态 runtime smoke 尚未运行，若出现 anomaly、nice 方向错误、yield / wake 饥饿或 service-kthread progress 失败，则按对应阶段 2 gate / RFC review 重新打开，不在阶段 3 内保留 RR 旁路。
 
-**Next Action:** 按阶段 3 write set 和 review gate 执行 default normal class 切换；不得在该阶段顺带修补 placement、accounting、wake clamp、virtual-time arithmetic 或 weight visibility contract。
+**Next Action:** 用户通过 rv64 端到端流程运行 `eevdf-test`，将 live `console_log_level` 保持为 `3`，并反馈四组 case 结果与测试区间内是否出现 `EEVDF anomaly`；通过或正确归类反馈后进入阶段 4 收口。
 
 ## Phase Log
 
@@ -550,9 +550,45 @@ git diff --check
 
 **Next:** 阶段 3 default normal class 切换与中性验证。
 
+### 2026-07-10 - 阶段 3 Default Switch 与用户态中性验证启动
+
+**Phase:** 阶段 3 default normal class 切换与中性验证，implementation in progress。
+
+**Approved write-set expansion:** 用户批准把阶段 3 从原 scheduler/default-initialization write set 扩展到独立 `anemone-apps/eevdf-test`、`anemone-apps/user-test/src/main.rs`、`conf/rootfs/{minimal,pretest-rv64,pretest-la64}.toml` 和对应 RFC / transaction 文档。扩张用于真实用户态黑盒 workload，不引入 scheduler debug ABI、procfs hook、test-only syscall、Kconfig policy 或 hot-path debug 日志。所有安装 `user-test` 的公共 rootfs manifest 都安装测试 app，避免共享 local-test 入口依赖未公开的 checkout-local rootfs 配置。用户随后进一步批准扩展到 `anemone-rs/src/{sys,os}/linux.rs`，用于 nice 相关 `getpriority` / `setpriority` syscall 封装；低层只转发 raw syscall，高层提供 typed selector 和 raw return 到 nice 的解码，不改变 kernel ABI、permission 或 renice owner boundary。
+
+**Metadata correction:** 公开 `invariants.md` 的状态从遗留 `Draft` 修正为 `Canonical`，与已接受进入实现的 RFC 生命周期一致；该修正不改变 scheduler contract、不变量或阶段 gate。
+
+**Implementation contract:** `SchedEntity::new_normal()` 是 default switch 的唯一语义翻转点；ordinary task、clone child、两种架构 bootstrap task、`kthreadd` 和 ordinary kthread 都必须继续通过该 constructor 获得 fresh EEVDF payload。idle task 继续只使用 `new_idle()`。无调用者的 directed `new_eevdf()` 在 default switch 后删除，避免两个等价 normal constructor；RR implementation 暂留给阶段 4 分类或删除，但不得保留 production entity constructor。
+
+**User-space smoke contract:** `eevdf-test` 使用 `anemone-rs` 的 `fork`、shared anonymous mapping、`sched_yield()`、`nanosleep()`、typed priority syscall、wait 和 wall-clock syscall，在单 CPU public pretest 上运行四组定向 workload：四个 equal-nice CPU-bound worker 均有进展且最大/最小计数不超过两倍；nice 0 worker 至少达到 nice 5 worker 的 1.5 倍；周期 yield worker 与 non-yield worker 均有进展；sleep/wake worker 与 CPU-bound worker 均有进展。测试只打印 case 边界和结果摘要；稳定 workload 中出现 `EEVDF anomaly` 由用户在 live `console_log_level = 3` 下观察并按 2C / 2D 路由，不通过 debug 日志或隐藏 anomaly 完成 gate。
+
+**Validation ownership:** agent 负责 rv64 / loongarch64 app build、当前平台 kernel build、source audit、format check、`git diff --check` 和 mdBook build；用户负责 rv64 端到端 runtime smoke。用户结果尚未提供前，runtime 项明确记录为 `user-run pending`，不伪称通过。
+
+**Stop conditions:** 若 default flip 需要修改 placement、accounting、wake clamp、preempt decision、virtual-time arithmetic、weight visibility、wait-core、IPI 或 task topology，停止并回到对应阶段 2 / RFC review；若某类 service kthread 必须保留 RR 或特殊 class 才能启动，停止并回到 RFC review；若用户 workload 持续产生 anomaly、nice 方向错误、yield / wake task 饥饿，则分别路由回 2C / 2D，不弱化阈值或可观测性。
+
+### 2026-07-10 - 阶段 3 Default Switch、Source Audit 与 Agent Gate 关闭
+
+**Phase:** 阶段 3 implementation / source-build gate closed；runtime user-run pending。
+
+**Change:** `SchedEntity::new_normal()` 现在直接创建 fresh EEVDF payload；阶段 2 的 directed `new_eevdf()` 因与 default constructor 重复且无调用者而删除。`eevdf.rs` 只同步阶段注释，placement、accounting、wake clamp、preempt decision、virtual-time arithmetic 和 class precedence 无语义 diff。RR implementation 暂留给阶段 4 分类或删除，但没有 production entity constructor。
+
+**User-space integration:** 新增独立 release app `anemone-apps/eevdf-test`，通过 shared anonymous mapping 与 fork barrier 运行四组约两秒 workload：4 个 equal-nice CPU-bound worker 的 max/min 不超过 2；nice 0 worker 至少获得 nice 5 worker 的 1.5 倍计数；周期 yield worker 与 non-yield peer 均有进展且 peer 计数更高；sleep/wake worker 至少完成 10 轮且 CPU-bound peer 有进展。`user-test` 在 competition chroot 前执行该 app，三份安装 `user-test` 的公共 rootfs manifest 都安装 app。case 只打印边界与结果摘要，不在 hot loop 打日志。
+
+**Anemone-rs boundary:** `anemone-rs::sys::linux::process` 新增 raw `getpriority` / `setpriority` 薄封装；`anemone-rs::os::linux::process` 新增 typed `PriorityWhich`、Linux raw `20 - nice` 返回解码和高层 `setpriority()`。测试 app 不含 raw syscall number 或 scheduler internal type。该扩张不改变 kernel priority ABI、permission、Task nice owner、renice transaction 或 EEVDF formula。
+
+**Source audit:** ordinary clone child、rv64 / loongarch64 bootstrap task、`kthreadd` 和 ordinary kthread 全部继续调用 `SchedEntity::new_normal()`；idle task 是唯一 `new_idle()` caller；全树没有 `new_eevdf()` 或 `SchedClassPrv::RoundRobin(...)` 构造调用。wake clamp 仍只有 EEVDF `enqueue_woken()` 与 `handoff_woken_current()` 调用 `apply_wake_clamp()`；abort requeue 不调用 clamp。`account_current()` 调用集合与 `DeferredPreempt` 提前返回路径未改变。所有包含 `user-test` 的公共 rootfs manifest 均包含 `eevdf-test`，TOML 解析通过。
+
+**Review:** 总控按 scheduler owner、single-source constructor、clone freshness、idle/RR classification、ABI containment、test lifetime 和 observability 审查最终 diff，未发现 Apollyon / Keter / Euclid。剩余验证缺口只有真实 EEVDF runtime 结果和 `anemone-rs` 无法由当前 root `just fmt <package>` 路由单独检查；后者的两架构 app build 已覆盖编译，新增 wrapper 形状人工复核符合仓库 rustfmt 风格。
+
+**Validation:** 当前 live `kconfig` 的 `console_log_level = 3`，`just build` 通过并生成 rv64 release kernel；`just app build --arch {riscv64,loongarch64} eevdf-test` 均通过；`just app build --arch {riscv64,loongarch64} user-test` 均通过；`just fmt eevdf-test --check` 与 `just fmt user-test --check` 通过；`just fmt kernel --check` 只报告既有 generated `kconfig_defs.rs` / `platform_defs.rs` whitespace drift，本次触碰的 kernel source 不在 diff 中；`just fmt anemone-rs` 因该 standalone workspace 不是 root workspace member 而无法由当前 wrapper 路由。`git diff --check`、rootfs TOML parse 和 `mdbook build docs` 通过。未运行 QEMU、LTP 或 `eevdf-test` runtime，按用户分工标记为 `user-run pending`。
+
+**Stop-condition assessment:** agent-side build / source audit 未命中阶段 3 停止条件；没有需要回写阶段 2 contract 或引入 RR / service-kthread 特例的实现事实。`EEVDF-017` 按 source-classification closure 条件移入 Neutralized。用户 runtime 若失败，必须按 anomaly / nice / yield / wake / service-kthread owner 路由，不能用降低阈值、隐藏日志或恢复 production RR 通过 gate。
+
+**Next:** 用户运行 rv64 端到端 smoke 并提供 `eevdf-test` case 摘要与测试区间内的 anomaly 输出；随后进入阶段 4 收口或按失败 owner 回退。
+
 ## Open Items
 
-- `EEVDF-017` 仍 active：阶段 1A / 1B 与 Checkpoint 2A / 2B / 2C / 2D 已全部关闭；阶段 3 仍需完成 default switch source audit，证明 ordinary / bootstrap / kthread 无 production RR 特例。
+- 阶段 3 runtime smoke 由用户运行：equal-weight、nice direction、bounded yield、sleep/wake progress，以及 `console_log_level = 3` 下测试区间内无 `EEVDF anomaly`。
 
 ## Closure
 

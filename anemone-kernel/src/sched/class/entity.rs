@@ -16,19 +16,7 @@ impl SchedEntity {
     }
 
     /// Create a fresh entity for the current default normal scheduler.
-    ///
-    /// Checkpoint 2A deliberately keeps the default normal class on RR. The
-    /// phase-3 default switch must flip this constructor instead of
-    /// hand-writing EEVDF payloads at task creation call sites.
     pub fn new_normal() -> Self {
-        Self::new(SchedClassPrv::RoundRobin(()))
-    }
-
-    /// Create a fresh entity for explicit EEVDF-directed tests or probes.
-    ///
-    /// This is not the default normal constructor until phase 3 closes the
-    /// accounting, eligibility, and wake-placement gates.
-    pub fn new_eevdf() -> Self {
         Self::new(SchedClassPrv::Eevdf(EevdfEntity::new()))
     }
 

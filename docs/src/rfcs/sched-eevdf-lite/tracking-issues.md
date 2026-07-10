@@ -23,19 +23,7 @@
 
 ## Keter
 
-### EEVDF-017：default class switch 必须被 blocker / gate 矩阵约束
-
-**状态：** Active
-
-**问题：** 阶段 3 切换默认 class 前，所有仍影响 accepted contract、实现顺序或验收边界的 Keter 必须已经 neutralized，不能只留下“停止条件”。
-
-**修复落点：**
-
-- [迁移实施计划](./implementation.md) 阶段 2 / 阶段 3 前置条件。
-
-**反馈相关：** 本 issue 不拥有独立 probe；它消费阶段 1A / 1B review gate，以及 Checkpoint 2A / 2B / 2C / 2D。上述 gate 截至 2026-07-10 已全部关闭，阶段 3 仍需完成 default switch source audit 后才能 neutralize 本 issue。`EEVDF-021` 已通过 canonical eventual-progress 证明 neutralized；阶段 3 只验证 direct normal 分类和无 production RR 特例。若 default switch 反馈要求改变目标、不变量或接受边界，必须先回写 canonical 文本，本 issue 保持 active。
-
-**关闭条件：** 最低矩阵全部关闭：阶段 1A 关闭 method-first surface、`RunQueue` / entity split 和 RR / Idle 行为保持；阶段 1B 关闭 typed pending、schedule entry plumbing 和 `EEVDF-005`；Checkpoint 2A 关闭 payload / class compile scaffold 且未提前切 default normal；Checkpoint 2B / Gate P1 关闭 `EEVDF-002`；Checkpoint 2C / Gate P2 关闭 `EEVDF-001` 与 `EEVDF-020`；Checkpoint 2D / Gate P3 关闭 `EEVDF-004`；阶段 3 source audit 证明 default switch 没有 ordinary / bootstrap / kthread production RR 特例。
+- 暂无 active Keter。
 
 ## Euclid
 
@@ -46,6 +34,19 @@
 - 暂无 active Safe。
 
 ## Neutralized
+
+### EEVDF-017：default class switch 必须被 blocker / gate 矩阵约束
+
+**状态：** Neutralized
+
+**修复落点：**
+
+- 阶段 1A / 1B 与 Checkpoint 2A / 2B / 2C / 2D 已分别关闭 method-first surface、typed pending、switch-in ordering、runtime accounting、`rq_vtime` / arithmetic / bounded yield 和 wake clamp / parked handoff gate。
+- `anemone-kernel/src/sched/class/entity.rs` 的唯一 default normal constructor 已在阶段 3 翻转为 fresh `EevdfEntity`，无调用者的 directed `new_eevdf()` 已删除；RR implementation 暂留，但不存在 production RR entity constructor。
+
+**Source audit / validation:** ordinary clone child、rv64 / loongarch64 bootstrap task、`kthreadd` 和 ordinary kthread 全部继续调用 `SchedEntity::new_normal()`；idle task 是唯一 `new_idle()` caller；全树没有 `new_eevdf()` 或 `SchedClassPrv::RoundRobin(...)` 构造调用。当前 rv64 `just build`、rv64 / loongarch64 `eevdf-test` 与 `user-test` app build 均通过。用户态 equal-weight、nice direction、bounded yield 和 sleep/wake runtime smoke 已接入公共 rootfs，但由用户运行，当前标记为 `user-run pending`，不作为本 issue 的 source-classification closure 证据。
+
+**结论：** default switch 前置 gate 与阶段 3 direct-normal source audit 均已关闭，ordinary / bootstrap / kthread 不存在 production RR 特例，本 issue neutralized。后续用户运行若暴露 placement、accounting、wake clamp、virtual-time arithmetic 或 service-kthread progress 问题，按对应阶段 2 gate或 RFC review 重新分类，不恢复隐式 RR 例外。
 
 ### EEVDF-004：wake placement 必须 exactly-once 覆盖 parked handoff 分支
 

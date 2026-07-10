@@ -661,6 +661,8 @@ Tracking issue 关闭审查：
   - yield 使用 bounded penalty。
   - block / wait / zombie 不入队，只结算 current。
 - 更新注释和内部文档，移除“EEVDF 是 TODO”的过期表述，保留后续 Linux-alignment / tree-index TODO。
+- 新增独立用户态 `eevdf-test` app，通过公开 syscall 和共享用户内存黑盒覆盖 equal-weight progress、nice 权重方向、bounded yield 和 sleep/wake progress；不为测试新增 scheduler debug ABI、procfs hook、test-only syscall 或 hot-path debug 日志。
+- `user-test` 在进入 competition root 前执行 `eevdf-test`；所有安装 `user-test` 的公共 rootfs manifest 同步安装该 app，避免共享测试入口依赖 checkout-local rootfs 配置。
 
 审计：
 
@@ -689,6 +691,7 @@ Tracking issue 关闭审查：
 - default class 初始化分散在 arch bootstrap、kthread 和 task creation 路径。修改时只做必要替换，不顺手重构 bootstrap / kthread ownership。
 - 本阶段应优先翻转 `SchedEntity::new_normal()` 或等价默认 normal constructor，并把调用点收敛到该 helper；不得在 bootstrap / kthread / clone call site 手写 EEVDF runtime 字段。
 - 若需要为 kthread 引入单独 scheduler class，超出本阶段默认目标，必须回到 RFC review。
+- 用户态 smoke 保持独立 app owner：测试进程只使用 `anemone-rs` 提供的 `fork`、shared anonymous mapping、`sched_yield()`、`nanosleep()`、typed priority syscall 和 wait 接口，不把测试状态或阈值下沉到 scheduler core。`anemone-rs` 只增加 syscall 薄封装和 typed `PriorityWhich` / nice 返回值解码，不拥有 kernel nice 状态或调度策略。
 
 write set：
 
@@ -700,21 +703,32 @@ write set：
 - `anemone-kernel/src/arch/riscv64/bootstrap.rs`
 - `anemone-kernel/src/arch/loongarch64/bootstrap.rs`
 - `anemone-kernel/src/sched/class/runqueue.rs`、`anemone-kernel/src/sched/class/eevdf.rs`、`anemone-kernel/src/sched/processor.rs`、`anemone-kernel/src/sched/mod.rs` 仅限 source audit、注释更新或发现 2B / 2C / 2D 漏闭合时的停阶段修复；若需要修改 placement、accounting、wake clamp、preempt decision 或 virtual-time contract，必须回到阶段 2 / RFC review，不能作为阶段 3 顺手修补。
+- `anemone-apps/eevdf-test/{Cargo.toml,Cargo.lock,app.toml,src/main.rs}`
+- `anemone-rs/src/sys/linux.rs` 仅限增加 raw `getpriority` / `setpriority` syscall wrapper。
+- `anemone-rs/src/os/linux.rs` 仅限增加 typed `PriorityWhich`、`getpriority()` 返回值解码和 `setpriority()` 高层 wrapper。
+- `anemone-apps/user-test/src/main.rs` 仅限在 competition root 之前执行 `eevdf-test`。
+- `conf/rootfs/{minimal,pretest-rv64,pretest-la64}.toml` 仅限安装 `eevdf-test` app。
+- `docs/src/rfcs/sched-eevdf-lite/{index,invariants,implementation,tracking-issues}.md` 与 `docs/src/devlog/transactions/2026-07-09-sched-eevdf-lite.md`，仅限记录获批扩张、阶段三证据、tracking closure 和 user-run / unrun 状态。
 
 可观测性：
 
 - default switch 后保留 anomaly 计数。
 - 记录 class 分类：ordinary task、bootstrap task、kthread、idle。
+- `eevdf-test` 只在 case 边界输出一次开始、结果和计数摘要，不在 worker 热循环打印；kernel anomaly 继续只通过既有 `kerrln!` 观察。用户运行时把 live `console_log_level` 设为 `3`，本阶段不修改 tracked 默认日志级别。
 - 用户侧 iozone / LTP / long fairness log 可在 transaction devlog 中标为 user-run feedback；agent 不伪称运行。
 
 验证：
 
 - `just build`
+- `just app build --arch riscv64 eevdf-test`
+- `just app build --arch loongarch64 eevdf-test`
+- `just fmt eevdf-test --check` 与 `just fmt user-test --check`；kernel formatter 若只命中既有 generated whitespace drift，必须单独标明，不把它伪称为本阶段 clean。
 - basic boot / focused scheduler smoke。
 - `sched_yield()` smoke。
 - 多 runnable CPU-bound fairness smoke（若低成本可用）。
 - nice 权重定向 smoke（若低成本可用）。
 - sleep/wake fairness smoke（若低成本可用）。
+- 上述 runtime smoke 由用户通过 rv64 端到端流程执行；agent 不伪称运行。用户结果尚未提供时，transaction 必须明确标为 `user-run pending` 或 `unrun`。
 - Source audit：
   - no RR default production placement。
   - `EEVDF-021` direct-normal proof：bootstrap / kthread / ordinary task 均无 production RR 特例。
@@ -950,6 +964,8 @@ write set：
 
 - 2026-07-10：用户批准 Checkpoint 2C 后 class-shape correction 扩展到 `sched/class/{mod,entity,runqueue,eevdf,rr,idle}.rs`、本 implementation feedback 和 transaction devlog。扩展只用于 class precedence metadata 与 class-private entity visibility；不触碰 task / priority owner、nice / weight 架构、wait-core、2D wake clamp 或 default normal constructor。
 - 2026-07-10：用户批准阶段 3 前 Nice / priority feedback correction 扩展到 `sched/{mod,nice}.rs`、`sched/class/eevdf.rs`、`task/{mod,sched}.rs`、`task/api/clone/mod.rs`、`task/api/priority/{mod,target,getpriority,setpriority}.rs`、本 RFC canonical 文本和 transaction devlog。扩展不触碰 runqueue、processor、IPI payload、deadline / placement / accounting formula、Kconfig 或 default normal constructor；若实现要求这些边界，停止并回到 RFC review。
+- 2026-07-10：用户批准阶段 3 default switch 扩展到独立 `anemone-apps/eevdf-test`、`anemone-apps/user-test/src/main.rs`、安装 `user-test` 的三份公共 rootfs manifest，以及本 RFC / transaction 文档。扩展只建立用户态黑盒 smoke 和公共 pretest 接入，不新增 scheduler debug ABI、procfs hook、test-only syscall、Kconfig policy 或 hot-path debug 日志；runtime smoke 由用户运行，agent 负责 app/kernel build、source audit、格式和文档验证。
+- 2026-07-10：用户进一步批准阶段 3 用户态 smoke 扩展到 `anemone-rs/src/{sys,os}/linux.rs`，用于增加 nice 相关 `getpriority` / `setpriority` syscall 封装。低层保持 raw syscall 转发，高层拥有 typed selector 和 Linux raw return 到 nice 的解码；该扩张不改变 kernel ABI、priority permission、nice owner、renice transaction、EEVDF formula 或测试日志边界。
 
 ## 结构维护记录
 

@@ -192,6 +192,34 @@ pub mod process {
         unsafe { syscall(SYS_SCHED_YIELD, 0, 0, 0, 0, 0, 0) }
     }
 
+    pub fn getpriority(which: i32, who: i32) -> Result<u64, Errno> {
+        unsafe {
+            syscall(
+                SYS_GETPRIORITY,
+                which as i64 as u64,
+                who as i64 as u64,
+                0,
+                0,
+                0,
+                0,
+            )
+        }
+    }
+
+    pub fn setpriority(which: i32, who: i32, nice: i32) -> Result<u64, Errno> {
+        unsafe {
+            syscall(
+                SYS_SETPRIORITY,
+                which as i64 as u64,
+                who as i64 as u64,
+                nice as i64 as u64,
+                0,
+                0,
+                0,
+            )
+        }
+    }
+
     pub fn gettid() -> Result<u64, Errno> {
         unsafe { syscall(SYS_GETTID, 0, 0, 0, 0, 0, 0) }
     }

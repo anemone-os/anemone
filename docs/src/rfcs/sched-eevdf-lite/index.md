@@ -6,7 +6,7 @@
 **领域：** scheduler / fairness / runtime accounting / scheduler class
 **事务日志：** [2026-07-09-sched-eevdf-lite](../../devlog/transactions/2026-07-09-sched-eevdf-lite.md)
 **开放问题：** 见 [Tracking Issues](./tracking-issues.md)
-**下一步：** 按事务日志推进阶段 3 default class 切换：先确认阶段 1A / 1B 与 Checkpoint 2A / 2B / 2C / 2D gate 全部关闭，再把 ordinary task、bootstrap task 和 kthread 的 fresh normal entity 统一翻转到 EEVDF；不得在 default switch 中补写阶段 2 算法 contract 或保留 production RR 特例。
+**下一步：** 阶段 3 default normal class 翻转、source audit、两架构用户态 app build 和当前 rv64 kernel build 已完成；用户按事务日志运行 `eevdf-test`，在 live `console_log_level = 3` 下确认 equal-weight、nice direction、bounded yield、sleep/wake progress 和无 EEVDF anomaly，再进入阶段 4 收口。若 runtime 反馈命中阶段 2 contract 或 service-kthread progress 问题，必须按对应 gate / RFC review 路由，不保留 production RR 特例。
 
 ## 摘要
 

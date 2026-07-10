@@ -475,6 +475,27 @@ pub mod process {
         process::sched_yield().map(|_| ())
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[repr(i32)]
+    pub enum PriorityWhich {
+        Process = 0,
+        ProcessGroup = 1,
+        User = 2,
+    }
+
+    /// Return the selected task set's highest priority as a nice value.
+    ///
+    /// The raw Linux syscall encodes success as `20 - nice` so negative nice
+    /// values cannot be mistaken for a negated errno. This wrapper exposes the
+    /// decoded nice domain expected by ordinary userspace callers.
+    pub fn getpriority(which: PriorityWhich, who: i32) -> Result<i32, Errno> {
+        process::getpriority(which as i32, who).map(|raw| 20 - raw as i32)
+    }
+
+    pub fn setpriority(which: PriorityWhich, who: i32, nice: i32) -> Result<(), Errno> {
+        process::setpriority(which as i32, who, nice).map(|_| ())
+    }
+
     pub fn exit(xcode: i8) -> ! {
         process::exit(xcode as u64).expect("failed to invoke exit syscall");
         unreachable!("exit should never return")
