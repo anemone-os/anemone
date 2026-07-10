@@ -6,7 +6,7 @@
 **领域：** scheduler / fairness / runtime accounting / scheduler class
 **事务日志：** [2026-07-09-sched-eevdf-lite](../../devlog/transactions/2026-07-09-sched-eevdf-lite.md)
 **开放问题：** 见 [Tracking Issues](./tracking-issues.md)
-**下一步：** 按事务日志推进 Checkpoint 2C / Gate P2：按已闭合的设计共识实现 `rq_vtime`、virtual-time arithmetic、eligibility、bounded yield 和 nice-to-weight 可见性；不得提前消费 2D 或切换 default normal class。
+**下一步：** 按事务日志推进 Checkpoint 2D / Gate P3：实现 ordinary wake / parked handoff exactly-once wake clamp，并证明 stale、already-current、already-queued 和 abort path 不会获得重复或错误 reward；不得提前切换 default normal class。
 
 ## 摘要
 

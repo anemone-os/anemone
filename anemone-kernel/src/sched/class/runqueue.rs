@@ -152,10 +152,28 @@ impl RunQueue {
         candidate: &Arc<Task>,
         now: Instant,
     ) -> PreemptDecision {
-        match candidate.sched_class_kind() {
+        let current_kind = current.sched_class_kind();
+        let candidate_kind = candidate.sched_class_kind();
+        if current_kind != candidate_kind {
+            return if Self::class_rank(candidate_kind) > Self::class_rank(current_kind) {
+                PreemptDecision::RequestResched
+            } else {
+                PreemptDecision::KeepCurrent
+            };
+        }
+
+        match candidate_kind {
             SchedClassKind::Eevdf => self.eevdf.decide_preempt_current(current, candidate, now),
             SchedClassKind::RoundRobin => self.rr.decide_preempt_current(current, candidate, now),
             SchedClassKind::Idle => self.idle.decide_preempt_current(current, candidate, now),
+        }
+    }
+
+    fn class_rank(kind: SchedClassKind) -> u8 {
+        match kind {
+            SchedClassKind::Eevdf => 2,
+            SchedClassKind::RoundRobin => 1,
+            SchedClassKind::Idle => 0,
         }
     }
 

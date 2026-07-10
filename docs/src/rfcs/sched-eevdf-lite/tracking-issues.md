@@ -23,22 +23,6 @@
 
 ## Keter
 
-### EEVDF-001：`rq_vtime` / eligibility 公式必须闭合
-
-**状态：** Active
-
-**问题：** `rq_vtime` 不能只是可回退的最小 `vruntime` 或不可审查的临时统计；2C 必须实现已接受的 monotonic min-vruntime floor，说明 current task 已被 pick 出 runqueue 后仍参与公平时钟、enqueue / dequeue / pick / `account_current(now)` 更新点、fallback 条件和 anomaly 观察面。
-
-**修复落点：**
-
-- [RFC index](./index.md) 的 fairness / eligibility 接受边界。
-- [不变量需求](./invariants.md) 的公平性与 `rq_vtime` 不变量。
-- [迁移实施计划](./implementation.md) Checkpoint 2C / Gate P2。
-
-**反馈相关：** 2026-07-10 设计共识已把公式闭合为 `rq_vtime = max(rq_vtime, min_visible_vruntime)`，visible set 包含 ready queue 和 current，eligibility 为 `vruntime <= rq_vtime`；no-eligible fallback 选择最小 `vruntime`、记录 anomaly，并把 `rq_vtime` 推进到 fallback task 的 `vruntime`。Checkpoint 2C / Gate P2 的 focused smoke 需要覆盖 eligible pick、no-eligible fallback、weighted vruntime progression、anomaly observation 和 yield progress。稳定 CPU-bound workload 在 warm-up 后 fallback anomaly 持续增长时，视为公式未闭合；执行事实写 transaction devlog，若公式改变 eligibility contract，回写 `index.md` / `invariants.md` 并再 neutralize 本 issue。
-
-**关闭条件：** 已接受公式、更新点、fallback 允许条件和 anomaly 语义已由 Checkpoint 2C 实现与 source audit / focused smoke 证明，且默认 class 切换前该 checkpoint 已关闭。
-
 ### EEVDF-004：wake placement 必须 exactly-once 覆盖 parked handoff 分支
 
 **状态：** Active
@@ -69,22 +53,6 @@
 
 **关闭条件：** 最低矩阵全部关闭：阶段 1A 关闭 method-first surface、`RunQueue` / entity split 和 RR / Idle 行为保持；阶段 1B 关闭 typed pending、schedule entry plumbing 和 `EEVDF-005`；Checkpoint 2A 关闭 payload / class compile scaffold 且未提前切 default normal；Checkpoint 2B / Gate P1 关闭 `EEVDF-002`；Checkpoint 2C / Gate P2 关闭 `EEVDF-001` 与 `EEVDF-020`；Checkpoint 2D / Gate P3 关闭 `EEVDF-004`；阶段 3 source audit 证明 default switch 没有 ordinary / bootstrap / kthread production RR 特例。
 
-### EEVDF-020：virtual time arithmetic 表示必须闭合
-
-**状态：** Active
-
-**问题：** Gate P2 不只需要 `rq_vtime` 公式，还必须实现已接受的 virtual-time arithmetic：`Vruntime` / `Deadline` 使用 normalized ns `u64` 存储、`u128` 中间计算、无额外 fixed-point scale、overflow saturating 并记录 anomaly、正 `delta_exec` 至少推进 `1`，以及 deadline / slice 计算的 fail-closed 行为。
-
-**修复落点：**
-
-- [RFC index](./index.md) 的 runtime / deadline 公式描述。
-- [不变量需求](./invariants.md) 的 fairness 与 arithmetic fail-closed 要求。
-- [迁移实施计划](./implementation.md) Checkpoint 2C / Gate P2。
-
-**反馈相关：** 2026-07-10 设计共识已确认 `u64` 存储、`u128` 中间计算、统一 private helper saturate 回 `u64`，overflow / saturation 记入 EEVDF-lite 本地 anomaly，不 panic，不把 `Result` 扩散出 EEVDF helper。Checkpoint 2C / Gate P2 的验证必须能观察 weighted vruntime progression 和 overflow / precision 边界；若 arithmetic 需要改变 formula contract，回写 `index.md` / `invariants.md` 并与 `EEVDF-001` 一起关闭。
-
-**关闭条件：** 类型、单位、scale、overflow / saturating 规则和 fail-closed 行为已由 Checkpoint 2C 实现与 source audit / focused smoke 证明；未关闭前不得进入默认 class 切换。
-
 ## Euclid
 
 - 暂无 active Euclid。
@@ -94,6 +62,34 @@
 - 暂无 active Safe。
 
 ## Neutralized
+
+### EEVDF-001：`rq_vtime` / eligibility 公式必须闭合
+
+**状态：** Neutralized
+
+**修复落点：**
+
+- `anemone-kernel/src/sched/class/eevdf.rs` 通过 class-owned weak current handle 保持已离开 ready queue 的运行任务仍在 visible set 中，并以 monotonic floor helper 在 enqueue、dequeue、pick 和 accounting 后推进 `rq_vtime`。
+- eligible pick 在线性 scan 中选择最小 deadline；non-empty queue 无 eligible task 时 fallback 到最小 `vruntime`，推进 `rq_vtime` 并记录 `NoEligibleTask` anomaly。
+- new placement 使用当前 `rq_vtime`；deadline 只在 fresh 初始化或 `vruntime >= deadline` 时续期；tick / runnable-arrival 只接受 slice 到期或严格更早的 eligible deadline。
+
+**Source audit / validation:** 两个独立只读 reviewer 确认 visible set、更新点、eligible / fallback 分流、bounded yield、2C / 2D 边界和 default-normal RR 边界均符合 Gate P2；KUnit 覆盖 eligible pick、no-eligible fallback、anomaly observation、monotonic `rq_vtime` 和 bounded yield，rv64 pretest 的 105 项 KUnit 全部通过。
+
+**结论：** Checkpoint 2C / Gate P2 已关闭。当前没有真实 EEVDF CPU-bound workload 证据，因为 default normal class 仍是 RR；该非阻塞验证缺口不得被现有 read-write LTP 结果替代，后续 default switch gate 仍需运行真实 EEVDF workload 并观察 fallback anomaly。
+
+### EEVDF-020：virtual time arithmetic 表示必须闭合
+
+**状态：** Neutralized
+
+**修复落点：**
+
+- `anemone-kernel/src/sched/class/eevdf.rs` 使用固定 Linux 40 项 nice weight 表，`Task::nice()` 保持唯一 weight truth，不缓存第二份 nice / weight 状态。
+- virtual runtime、slice、deadline 和 yield 计算统一使用 `u128` 中间值并 saturate 到 `u64`；正 runtime delta 至少推进 `1`，saturation 记录 `ArithmeticSaturation` anomaly。
+- base slice、yield penalty window 和 anomaly threshold 消费 live Kconfig 定义；wake clamp window 仍留给 Checkpoint 2D。
+
+**Source audit / validation:** 独立 review 未发现 arithmetic contract、状态所有权或观察面 blocker；KUnit 验证 Linux nice 权重方向、nice 0 单位、最小推进、conversion / add saturation 和 anomaly observation，rv64 pretest 集成通过。
+
+**结论：** 类型、单位、scale、overflow / saturation 和 fail-closed 规则已由实现、source audit 与 focused KUnit 证明，Checkpoint 2C / Gate P2 关闭本 issue。
 
 ### EEVDF-002：runtime accounting 必须有单一幂等边界
 
