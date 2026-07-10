@@ -6,7 +6,7 @@
 **领域：** scheduler / fairness / runtime accounting / scheduler class
 **事务日志：** [2026-07-09-sched-eevdf-lite](../../devlog/transactions/2026-07-09-sched-eevdf-lite.md)
 **开放问题：** 见 [Tracking Issues](./tracking-issues.md)
-**下一步：** 阶段 3 default normal class 翻转、source audit、两架构用户态 app build 和当前 rv64 kernel build 已完成；用户按事务日志运行 `eevdf-test`，在 live `console_log_level = 3` 下确认 equal-weight、nice direction、bounded yield、sleep/wake progress 和无 EEVDF anomaly，再进入阶段 4 收口。若 runtime 反馈命中阶段 2 contract 或 service-kthread progress 问题，必须按对应 gate / RFC review 路由，不保留 production RR 特例。
+**下一步：** `EEVDF-022` 的 class-private accounting outcome、tick / runnable-arrival resched、saturation sequencing、focused KUnit 与独立 review 已关闭。本次修复只恢复 Checkpoint 2C 的 request-completion contract；阶段 3 仍处于修复状态，继续处理阶段 3 的 source / runtime feedback。在阶段 3 整体闭合前不得进入阶段 4。
 
 ## 摘要
 
@@ -221,15 +221,18 @@ runtime accounting 的生命周期点由 trait transaction 暴露；EEVDF 的具
 
 ```text
 account_current(now):
+    request_completed = false
     delta_exec = now - exec_start
     curr.vruntime += delta_exec_ns * NICE_0_WEIGHT / curr.weight
     curr.exec_start = now
     if curr.vruntime >= curr.deadline:
         curr.deadline = curr.vruntime + slice_ns * NICE_0_WEIGHT / curr.weight
+        request_completed = true
     update rq_vtime
+    return request_completed
 ```
 
-`account_current(now)` 不是 shared trait 方法。其它调度类可以在同一生命周期 transaction 内维护自己的 private accounting，例如 future RR slice、RT budget 或 deadline runtime。EEVDF 必须保证所有调用路径都经过同一个 private helper，并在每次推进后刷新 `exec_start = now`，避免 tick 与 switch-out / requeue 双记。
+`account_current(now)` 不是 shared trait 方法。其它调度类可以在同一生命周期 transaction 内维护自己的 private accounting，例如 future RR slice、RT budget 或 deadline runtime。EEVDF 必须保证所有调用路径都经过同一个 private helper，并在每次推进后刷新 `exec_start = now`，避免 tick 与 switch-out / requeue 双记。deadline 续期会把 `vruntime >= deadline` 重新归一化为假，因此 helper 必须把“本次 request 已耗尽并续期”作为 class-private outcome 显式返回；decision transaction 不能在续期后从 entity snapshot 反推该瞬时事实，也不能为此增加 entity 持久 flag 或 processor-global 第二真相源。
 
 `Vruntime`、`Deadline` 和 `rq_vtime` 第一版长期存储为 normalized nanoseconds 的 `u64` scalar；nice 0 下 `1ns` actual runtime 对应 `1` virtual ns。不引入额外 fixed-point fractional scale。所有 `delta_exec_ns * NICE_0_WEIGHT / weight` 与 slice/deadline 乘除都在 EEVDF private helper 内使用 `u128` 中间值，落回 `u64` 时统一 saturate 并记录 arithmetic anomaly；正 `delta_exec` 计算结果为 `0` 时必须至少推进 `1`，保证持续运行最终推进 `vruntime`。这些 helper 不向 `Scheduler` trait 或 `RunQueue` surface 扩散 `Result`。
 
@@ -250,7 +253,7 @@ EEVDF runtime accounting 必须发生在 runnable current requeue、wake handoff
 - `put_prev_blocked()` / `put_prev_exiting()`：只结算 current，不入队。
 - no-switch abort：不调用 scheduler class transaction。
 
-`decide_preempt_current()` 与 enqueue 分离，并且在 owner CPU placement 完成后调用。new task 和 wake task 的 placement 差异已分别由 `enqueue_new()` / `enqueue_woken()` 写入 candidate 的 class state，preempt decision 第一版不接收 `NewTask` / `Wake` source。`decide_preempt_current()` 先结算 current，再仅在 candidate eligible 且 candidate deadline 严格早于 current deadline 时返回 `PreemptDecision::RequestResched`；processor/core 随后设置 `request_resched(ReschedCause::RunnableArrival)`。`task_tick()` 返回 `TickAction::RequestResched` 时，processor/core 设置 `request_resched(ReschedCause::Tick)`。
+`decide_preempt_current()` 与 enqueue 分离，并且在 owner CPU placement 完成后调用。new task 和 wake task 的 placement 差异已分别由 `enqueue_new()` / `enqueue_woken()` 写入 candidate 的 class state，preempt decision 第一版不接收 `NewTask` / `Wake` source。`decide_preempt_current()` 先结算 current；若 accounting outcome 表示 current request 已耗尽，或 candidate eligible 且 candidate deadline 严格早于续期后的 current deadline，则返回 `PreemptDecision::RequestResched`。processor/core 随后设置 `request_resched(ReschedCause::RunnableArrival)`；该 cause 表示 core entry 来源，不替代 class-private request-completion outcome。`task_tick()` 返回 `TickAction::RequestResched` 时，processor/core 设置 `request_resched(ReschedCause::Tick)`。
 
 `deadline = vruntime + slice / weight_normalized` 或等价形式。低 nice / 高权重 task 的 virtual runtime 推进更慢，deadline 间距也随权重归一化。
 
@@ -268,12 +271,12 @@ stale-safe wake placement 的结果只由 scheduler core / `RunQueue` facade 用
 
 ### Tick 与 Yield
 
-tick 不再等价于“每 tick 强制轮转”。`task_tick(current, now)` 可以更新 class-local state；EEVDF 在其中可调用 private `account_current(now)`，然后只在以下情况返回 `TickAction::RequestResched`：
+tick 不再等价于“每 tick 强制轮转”。`task_tick(current, now)` 调用 private `account_current(now)` 后，只在以下情况返回 `TickAction::RequestResched`：
 
-- 当前任务耗尽 virtual slice，即 `current.vruntime >= current.deadline`。
+- accounting outcome 表示当前任务刚耗尽并续期一个 virtual request，且 EEVDF queue 中存在其它 runnable peer。
 - 存在 eligible 且 deadline 严格早于 current deadline 的 queued runnable task。
 
-deadline 相等时保持 current，避免无意义抖动；non-eligible task 不得只凭更早 deadline 抢占 current。
+只有 current 时，request 续期不制造无意义 resched。deadline 相等时保持 current，避免无意义抖动；non-eligible task 不得只凭更早 deadline 抢占 current。禁止在续期后重新检查 `current.vruntime >= current.deadline` 作为 request-completion 判断，因为正常非 saturation 状态下该条件已经被续期归一化为假。
 
 `sched_yield()` 使用 bounded penalty。第一版只后推 yielding task 的 deadline，不修改 `vruntime`、nice 或 weight：
 

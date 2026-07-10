@@ -35,6 +35,18 @@
 
 ## Neutralized
 
+### EEVDF-022：deadline 续期不得吞掉 current request completion
+
+**状态：** Neutralized
+
+**问题：** `account_current(now)` 在推进 `vruntime` 后立即把 expired deadline 续为 `vruntime + slice`，但原实现只把 arithmetic saturation 带出 helper；`task_tick()` 随后重新检查 `vruntime >= deadline` 时，正常非 saturation 路径已经必然为假。`decide_preempt_current()` 也会在 runnable-arrival accounting 中吞掉同一 completion。renewal 还位于短路 `||` 的末项，前序 arithmetic saturation 为真时会跳过续期副作用。
+
+**修复落点：** deadline renewal 返回正交的 `renewed` / `saturated`，`account_current(now)` 返回 class-private `AccountOutcome`。tick 在 completion 且存在其它 EEVDF runnable peer 时请求 resched；runnable-arrival 在 completion 或 candidate eligible 且 deadline 更早时请求 resched。已经承诺 switch / requeue / block / exit 的 transaction 显式丢弃 outcome；wake normalization 只返回 arithmetic saturation，不制造 running completion。实现没有新增 entity pending flag、processor-global 副本、shared trait 方法或新 `ReschedCause`。
+
+**Source audit / validation:** `task_tick()` 与 `decide_preempt_current()` 分别经过可直接 KUnit 的 class-private production decision helper；所有 `account_current()` caller 都显式消费或丢弃 outcome，arithmetic 与 renewal 不再通过 effectful short-circuit 组合。rv64 端到端日志中 113 项 KUnit 全部通过，包含 completion + peer、completion + no peer、runnable-arrival completion、saturation renewal 和 wake normalization 分层；equal-weight、nice direction、bounded yield、sleep/wake 四组阶段 3 workload 均通过，测试区间无 `EEVDF anomaly`。read-write LTP 的 nonzero failure multiset 与修复前基线完全一致。
+
+**Review / 结论：** 首轮独立 review 的唯一 Euclid 是测试未锁住 production decision consumer；修正后复审无 Apollyon / Keter / Euclid。本 issue neutralized，只恢复 Checkpoint 2C 的 request-completion contract；阶段 3 仍处于修复状态，不因本条关闭而进入阶段 4。
+
 ### EEVDF-017：default class switch 必须被 blocker / gate 矩阵约束
 
 **状态：** Neutralized

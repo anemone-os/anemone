@@ -92,6 +92,40 @@ struct VirtualTimeCalc {
     saturated: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use = "deadline renewal and saturation are independent outcomes"]
+struct DeadlineRenewal {
+    renewed: bool,
+    saturated: bool,
+}
+
+impl DeadlineRenewal {
+    const NONE: Self = Self {
+        renewed: false,
+        saturated: false,
+    };
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use = "request completion must be consumed by the class transaction"]
+struct AccountOutcome {
+    // This transition result is consumed immediately. It is never stored in the
+    // entity or processor as a second source of request state.
+    request_completed: bool,
+    saturated: bool,
+}
+
+impl AccountOutcome {
+    const NONE: Self = Self {
+        request_completed: false,
+        saturated: false,
+    };
+
+    const fn request_completed_with_peer(self, has_runnable_peer: bool) -> bool {
+        self.request_completed && has_runnable_peer
+    }
+}
+
 impl Eevdf {
     pub const fn new() -> Self {
         Self {
@@ -202,15 +236,66 @@ impl Eevdf {
         vruntime.max(rq_vtime.saturating_sub(wake_window))
     }
 
-    fn renew_deadline_if_expired(entity: &mut EevdfEntity, weight: u64) -> bool {
+    fn renew_deadline_if_expired(entity: &mut EevdfEntity, weight: u64) -> DeadlineRenewal {
         if entity.vruntime < entity.deadline {
-            return false;
+            return DeadlineRenewal::NONE;
         }
 
         let slice = Self::duration_to_vruntime(entity.slice, weight);
         let deadline = Self::add_vtime(entity.vruntime, slice.value);
         entity.deadline = deadline.value;
-        slice.saturated || deadline.saturated
+        DeadlineRenewal {
+            renewed: true,
+            saturated: slice.saturated || deadline.saturated,
+        }
+    }
+
+    fn account_entity(
+        entity: &mut EevdfEntity,
+        delta_exec: Duration,
+        weight: u64,
+    ) -> AccountOutcome {
+        let delta_vruntime = Self::duration_to_vruntime(delta_exec, weight);
+        let vruntime = Self::add_vtime(entity.vruntime, delta_vruntime.value);
+        entity.vruntime = vruntime.value;
+
+        // Renewal is effectful and must run even if either preceding arithmetic
+        // step saturated. Its `renewed` bit preserves request completion after
+        // the deadline itself has moved past the updated vruntime.
+        let renewal = Self::renew_deadline_if_expired(entity, weight);
+        AccountOutcome {
+            request_completed: renewal.renewed,
+            saturated: delta_vruntime.saturated || vruntime.saturated || renewal.saturated,
+        }
+    }
+
+    fn decide_tick_action(
+        accounting: AccountOutcome,
+        has_runnable_peer: bool,
+        has_earlier_eligible_deadline: bool,
+    ) -> TickAction {
+        if accounting.request_completed_with_peer(has_runnable_peer)
+            || has_earlier_eligible_deadline
+        {
+            TickAction::RequestResched
+        } else {
+            TickAction::None
+        }
+    }
+
+    fn decide_arrival_preemption(
+        accounting: AccountOutcome,
+        current: EntitySnapshot,
+        candidate: EntitySnapshot,
+        rq_vtime: Vruntime,
+    ) -> PreemptDecision {
+        if accounting.request_completed
+            || candidate.vruntime <= rq_vtime && candidate.deadline < current.deadline
+        {
+            PreemptDecision::RequestResched
+        } else {
+            PreemptDecision::KeepCurrent
+        }
     }
 
     fn initialize_entity(entity: &mut EevdfEntity, rq_vtime: Vruntime, weight: u64) -> bool {
@@ -269,34 +354,30 @@ impl Eevdf {
         });
     }
 
-    fn account_current(&mut self, task: &Arc<Task>, now: Instant) {
+    fn account_current(&mut self, task: &Arc<Task>, now: Instant) -> AccountOutcome {
         self.assert_current(task);
         let weight = Self::task_weight(task);
-        let saturated = Self::with_entity_mut(task, |entity| {
+        let outcome = Self::with_entity_mut(task, |entity| {
             let Some(exec_start) = entity.exec_start else {
                 entity.exec_start = Some(now);
-                return false;
+                return AccountOutcome::NONE;
             };
             let Some(delta_exec) = now.checked_duration_since(exec_start) else {
-                return false;
+                return AccountOutcome::NONE;
             };
             if delta_exec == Duration::ZERO {
-                return false;
+                return AccountOutcome::NONE;
             }
 
-            let delta_vruntime = Self::duration_to_vruntime(delta_exec, weight);
-            let vruntime = Self::add_vtime(entity.vruntime, delta_vruntime.value);
-            entity.vruntime = vruntime.value;
-            let saturated = delta_vruntime.saturated
-                || vruntime.saturated
-                || Self::renew_deadline_if_expired(entity, weight);
+            let outcome = Self::account_entity(entity, delta_exec, weight);
             entity.exec_start = Some(now);
-            saturated
+            outcome
         });
         self.update_rq_vtime(None);
-        if saturated {
+        if outcome.saturated {
             self.record_anomaly(EevdfAnomaly::ArithmeticSaturation);
         }
+        outcome
     }
 
     fn apply_yield_penalty(&mut self, task: &Arc<Task>) {
@@ -315,6 +396,18 @@ impl Eevdf {
         }
     }
 
+    fn normalize_woken_entity(
+        entity: &mut EevdfEntity,
+        rq_vtime: Vruntime,
+        wake_window: Vruntime,
+        weight: u64,
+    ) -> bool {
+        entity.vruntime = Self::clamp_woken_vruntime(entity.vruntime, rq_vtime, wake_window);
+        // Wake normalization may renew placement state, but it did not consume
+        // CPU and therefore returns only the arithmetic-anomaly outcome.
+        Self::renew_deadline_if_expired(entity, weight).saturated
+    }
+
     fn apply_wake_clamp(&mut self, task: &Arc<Task>) {
         let weight = Self::task_weight(task);
         let wake_window =
@@ -322,9 +415,7 @@ impl Eevdf {
         let rq_vtime = self.rq_vtime;
         let deadline_saturated = Self::with_entity_mut(task, |entity| {
             assert!(entity.initialized, "EEVDF entity is not initialized");
-            entity.vruntime =
-                Self::clamp_woken_vruntime(entity.vruntime, rq_vtime, wake_window.value);
-            Self::renew_deadline_if_expired(entity, weight)
+            Self::normalize_woken_entity(entity, rq_vtime, wake_window.value, weight)
         });
         if wake_window.saturated || deadline_saturated {
             self.record_anomaly(EevdfAnomaly::ArithmeticSaturation);
@@ -492,7 +583,7 @@ impl Scheduler for Eevdf {
     }
 
     fn requeue_yielded_current(&mut self, task: Arc<Task>, now: Instant) {
-        self.account_current(&task, now);
+        let _accounting = self.account_current(&task, now);
         self.clear_current(&task);
         self.apply_yield_penalty(&task);
         self.enqueue_back(task);
@@ -504,32 +595,32 @@ impl Scheduler for Eevdf {
         now: Instant,
         _pending: PendingResched,
     ) {
-        self.account_current(&task, now);
+        let _accounting = self.account_current(&task, now);
         self.clear_current(&task);
         self.enqueue_back(task);
     }
 
     fn handoff_woken_current(&mut self, task: Arc<Task>, now: Instant) {
-        self.account_current(&task, now);
+        let _accounting = self.account_current(&task, now);
         self.clear_current(&task);
         self.apply_wake_clamp(&task);
         self.enqueue_back(task);
     }
 
     fn requeue_aborted_wait_current(&mut self, task: Arc<Task>, now: Instant) {
-        self.account_current(&task, now);
+        let _accounting = self.account_current(&task, now);
         self.clear_current(&task);
         self.enqueue_back(task);
     }
 
     fn put_prev_blocked(&mut self, task: &Arc<Task>, now: Instant) {
-        self.account_current(task, now);
+        let _accounting = self.account_current(task, now);
         self.clear_current(task);
         self.update_rq_vtime(None);
     }
 
     fn put_prev_exiting(&mut self, task: &Arc<Task>, now: Instant) {
-        self.account_current(task, now);
+        let _accounting = self.account_current(task, now);
         self.clear_current(task);
         self.update_rq_vtime(None);
     }
@@ -570,15 +661,13 @@ impl Scheduler for Eevdf {
     }
 
     fn task_tick(&mut self, cur_task: &Arc<Task>, now: Instant) -> TickAction {
-        self.account_current(cur_task, now);
+        let accounting = self.account_current(cur_task, now);
         let current = Self::entity_snapshot(cur_task);
-        if current.vruntime >= current.deadline
-            || self.has_earlier_eligible_deadline(current.deadline)
-        {
-            TickAction::RequestResched
-        } else {
-            TickAction::None
-        }
+        Self::decide_tick_action(
+            accounting,
+            !self.ready_queue.is_empty(),
+            self.has_earlier_eligible_deadline(current.deadline),
+        )
     }
 
     fn decide_preempt_current(
@@ -587,14 +676,10 @@ impl Scheduler for Eevdf {
         candidate: &Arc<Task>,
         now: Instant,
     ) -> PreemptDecision {
-        self.account_current(current, now);
+        let accounting = self.account_current(current, now);
         let current = Self::entity_snapshot(current);
         let candidate = Self::entity_snapshot(candidate);
-        if candidate.vruntime <= self.rq_vtime && candidate.deadline < current.deadline {
-            PreemptDecision::RequestResched
-        } else {
-            PreemptDecision::KeepCurrent
-        }
+        Self::decide_arrival_preemption(accounting, current, candidate, self.rq_vtime)
     }
 }
 
@@ -646,6 +731,67 @@ mod kunits {
             eevdf.last_anomaly(),
             Some(EevdfAnomaly::ArithmeticSaturation)
         );
+    }
+
+    #[kunit]
+    fn test_accounting_preserves_request_completion_after_deadline_renewal() {
+        let mut entity = EevdfEntity::new();
+        entity.initialized = true;
+        entity.vruntime = 190;
+        entity.deadline = 200;
+        entity.slice = Duration::from_nanos(100);
+
+        let accounting =
+            Eevdf::account_entity(&mut entity, Duration::from_nanos(20), NICE_0_WEIGHT);
+
+        assert_eq!(entity.vruntime, 210);
+        assert_eq!(entity.deadline, 310);
+        assert!(accounting.request_completed);
+        assert!(!accounting.saturated);
+        assert_eq!(
+            Eevdf::decide_tick_action(accounting, true, false),
+            TickAction::RequestResched
+        );
+        assert_eq!(
+            Eevdf::decide_tick_action(accounting, false, false),
+            TickAction::None
+        );
+    }
+
+    #[kunit]
+    fn test_arrival_consumes_request_completion_before_deadline_comparison() {
+        let completed = AccountOutcome {
+            request_completed: true,
+            saturated: false,
+        };
+        let current = entity(210, 310);
+        let later_candidate = entity(200, 400);
+
+        assert_eq!(
+            Eevdf::decide_arrival_preemption(completed, current, later_candidate, 210),
+            PreemptDecision::RequestResched
+        );
+        assert_eq!(
+            Eevdf::decide_arrival_preemption(AccountOutcome::NONE, current, later_candidate, 210,),
+            PreemptDecision::KeepCurrent
+        );
+    }
+
+    #[kunit]
+    fn test_saturated_accounting_still_renews_deadline() {
+        let mut entity = EevdfEntity::new();
+        entity.initialized = true;
+        entity.vruntime = 1;
+        entity.deadline = 2;
+        entity.slice = Duration::from_nanos(20);
+
+        let accounting =
+            Eevdf::account_entity(&mut entity, Duration::from_secs(u64::MAX), NICE_0_WEIGHT);
+
+        assert_eq!(entity.vruntime, u64::MAX);
+        assert_eq!(entity.deadline, u64::MAX);
+        assert!(accounting.request_completed);
+        assert!(accounting.saturated);
     }
 
     #[kunit]
@@ -716,17 +862,16 @@ mod kunits {
     }
 
     #[kunit]
-    fn test_wake_clamp_renews_expired_deadline_from_clamped_vruntime() {
+    fn test_wake_normalization_renews_deadline_without_running_completion() {
         let mut entity = EevdfEntity::new();
         entity.initialized = true;
-        entity.vruntime = Eevdf::clamp_woken_vruntime(10, 100, 20);
+        entity.vruntime = 10;
         entity.deadline = 50;
         entity.slice = Duration::from_nanos(20);
 
-        assert!(!Eevdf::renew_deadline_if_expired(
-            &mut entity,
-            NICE_0_WEIGHT
-        ));
+        let saturated = Eevdf::normalize_woken_entity(&mut entity, 100, 20, NICE_0_WEIGHT);
+
+        assert!(!saturated);
         assert_eq!(entity.vruntime, 80);
         assert_eq!(entity.deadline, 100);
     }

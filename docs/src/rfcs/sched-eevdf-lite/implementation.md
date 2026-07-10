@@ -21,6 +21,7 @@
 - `Nice` newtype 统一约束 nice 值域和 weight-table index；`Task::nice()` 返回唯一 nice truth，EEVDF entity 不保存另一份 nice，也不在第一版保存 `cached_weight`。
 - clone 只能继承 nice；新 task 必须创建 fresh normal `SchedEntity`，不得复制父 task 的 EEVDF runtime state。
 - EEVDF 的 `account_current(now)` 是 class-private helper。trait 只暴露 current execution accounting 的生命周期点。
+- `account_current(now)` 必须以 class-private outcome 保存 deadline 续期前确认的 request completion；decision transaction 立即消费，已经进入 switch 的 transaction 显式丢弃，不新增 entity flag、processor-global truth 或 shared trait 方法。
 - `switch.rs::switch_out()` 中现有 `Task::on_switch_out()` hook 只保留 task / CPU usage 等 context-switch bookkeeping，不作为 fair scheduler accounting truth。
 - wake placement 必须复用现有 stale-safe wake 路径，不允许为公平调度绕过 wait-core revalidation。
 - wake clamp exactly-once：普通 wake 只在 `WakeEnqueueResult::Enqueued` 后通过 `enqueue_woken()` 执行；`ParkPending` 后的 scheduler 收口使用 `handoff_woken_current()` 执行；no-switch abort 和 `requeue_aborted_wait_current()` 不走 wake clamp。
@@ -498,15 +499,16 @@ Tracking issue 关闭审查：
   - no eligible fallback 到最小 `vruntime`，记录 anomaly，并推进 `rq_vtime`。
   - pick 不退化为单个 deadline-only 结构。
 - 实现 tick preemption decision：
-  - `account_current(now)` 后，当前任务 `vruntime >= deadline` 时请求 resched。
+  - `account_current(now)` 显式返回 deadline renewal 是否完成了 current request；续期后不得重新读取 `vruntime >= deadline` 反推旧状态。
+  - request completed 且 EEVDF queue 中存在其它 runnable peer 时请求 resched；只有 current 时只续期，不制造空转调度。
   - 存在 eligible 且 deadline 严格早于 current deadline 的 queued runnable task 时请求 resched。
   - deadline 相等时保持 current；non-eligible task 不得只凭更早 deadline 抢占 current；否则不每 tick 强制轮转。
 - 实现 `decide_preempt_current()`：
   - 在 owner CPU 的 `enqueue_new()` / `enqueue_woken()` placement 后比较 current 与 candidate。
   - 不接收 New/Wake source。
-  - 先 `account_current(current, now)`；只有 candidate eligible 且 deadline 严格早于 current deadline 时返回 `PreemptDecision::RequestResched`，由 processor/core 设置 `ReschedCause::RunnableArrival`。
+  - 先 `account_current(current, now)`；accounting outcome 表示 request completed，或 candidate eligible 且 deadline 严格早于续期后的 current deadline 时，返回 `PreemptDecision::RequestResched`，由 processor/core 设置 `ReschedCause::RunnableArrival`。
 - 实现 new task placement：new task 无有效 `vruntime` 时通过 `enqueue_new()` 初始化为 `vruntime = rq_vtime`，并按当前 nice weight 与 base slice 计算 `deadline`。
-- 实现 deadline renewal：deadline 只在初始化或 `vruntime >= deadline` 时自然续期；普通 requeue 不无条件重算 deadline。
+- 实现 deadline renewal：deadline 只在初始化或 `vruntime >= deadline` 时自然续期；renewal 返回独立的 `renewed` / `saturated` 结果，所有 arithmetic 与 renewal 步骤显式顺序执行，不能把有副作用的 renewal 放入短路 `||`；普通 requeue 不无条件重算 deadline。
 - 保持 2C / 2D wake 边界：
   - `enqueue_woken()` 在 2C 不执行 wake clamp；未初始化 entity 只做安全初始化，已初始化 entity 保留既有 virtual-time state。
   - 真实 wake clamp / parked handoff 归属 Checkpoint 2D；2C 不消费 wake clamp window。
@@ -528,6 +530,7 @@ Tracking issue 关闭审查：
 审计：
 
 - 搜索 `deadline` 排序逻辑，确认 pick 不是单个 deadline-only 结构。
+- 搜索 `account_current()`、deadline renewal、tick 与 runnable-arrival decision，确认 request completion 只通过立即返回的 class-private outcome 传播；不存在续期后重查旧 predicate、entity pending flag、processor-global 副本或 effectful short-circuit。
 - 搜索 anomaly 更新点，确认 fallback 和 arithmetic saturation 每次都通过 `kerrln!` 输出 reason / 累计次数且不会被静默吞掉；anomaly 字段必须标注为 EEVDF-lite 本地诊断概念，不参与调度决策。
 - 搜索 Kconfig defs 和生成使用点，确认 base slice、yield penalty window 和 anomaly threshold 不是散落在代码里的 magic number。
 - 搜索 `nice()` / `set_nice` / `setpriority()`，确认 nice 权重方向可被 owner CPU pick/accounting 观察。
@@ -565,12 +568,16 @@ write set：
   - eligible pick 选择最小 deadline。
   - no eligible fallback 选择最小 vruntime 并记录 anomaly。
   - nice 权重方向影响 `vruntime` 推进。
+  - current accounting 跨越旧 deadline 后，即使 peer deadline 不早于续期后的 current deadline，也能保留 request completion 并请求一次重新选择；没有 peer 时不请求空转调度。
+  - runnable-arrival accounting 跨越旧 deadline 时不会吞掉 completion；arithmetic saturation 不会短路 deadline renewal。
+  - wake clamp renewal 只归一化 placement，不制造 running request completion。
   - bounded yield penalty 让其它 runnable task 获得运行机会，yielding task 不永久饿死。
 - Source audit：无 deadline-only pick，Kconfig 常量接入 live root `kconfig`，clone path 不复制父 `SchedEntity`，阶段 3 前不得把普通 default normal constructor 偷偷切到 EEVDF。
 
 Tracking issue 关闭审查：
 
 - `EEVDF-001` 必须在本 checkpoint 结束时审查；只有已接受的 `rq_vtime` 公式、更新点、fallback 允许条件和 anomaly 语义由实现、source audit 和 focused smoke（若低成本可用）证明后，才能移入 Neutralized。
+- `EEVDF-022` 必须在阶段 3 反馈纠正结束时审查；只有 request completion outcome、tick / runnable-arrival 消费、switch-boundary 显式丢弃、wake normalization 分层和 saturation sequencing 均由实现、focused KUnit、source audit 与独立 review 证明后，才能移入 Neutralized。
 - `EEVDF-020` 必须与 `EEVDF-001` 同步审查；只有已接受的 virtual time 类型、单位、scale、overflow / saturating 规则和 fail-closed 行为由实现、source audit 和 focused smoke（若低成本可用）证明后，才能移入 Neutralized。
 - 若公式或 arithmetic 反馈改变 fairness / eligibility contract，先回写 [RFC index](./index.md) / [不变量需求](./invariants.md)，再更新 tracking issue；不得只在 transaction devlog 中留下实现事实。
 
@@ -638,7 +645,7 @@ Tracking issue 关闭审查：
 - Checkpoint 2A 的 `Eevdf` class scaffold 与 EEVDF-specific constructor 已完成，且 default normal constructor 尚未提前翻转。
 - Checkpoint 2B / Gate P1、2C / Gate P2 和 2D / Gate P3 均已关闭；`Eevdf` class 已通过对应 source proof / focused smoke（若低成本可用）。
 - fallback anomaly 观察面已由 2C 建立。
-- `EEVDF-001`、`EEVDF-002`、`EEVDF-004`、`EEVDF-017` 和 `EEVDF-020` 的 default switch 前置条件已关闭；任一问题只剩停止条件而非已关闭时，本阶段不得切换默认 class。
+- `EEVDF-001`、`EEVDF-002`、`EEVDF-004`、`EEVDF-017`、`EEVDF-020` 和 `EEVDF-022` 的 default switch / validation 前置条件已关闭；任一问题只剩停止条件而非已关闭时，本阶段不得宣称验证 gate 闭合。
 - `EEVDF-021` 已由 canonical eventual-progress 证明 neutralized；阶段 3 只验证初始化分类和无 production RR 特例。
 - default class 切换的写入点已经审计完毕。
 - 本阶段只负责把 default normal constructor / 初始化点翻转到 EEVDF，不再新增 placement、accounting、wake clamp 或 virtual-time contract。
@@ -959,6 +966,8 @@ write set：
 - 2026-07-10：Checkpoint 2C 前设计共识闭合：virtual-time state 以 normalized ns `u64` 存储、`u128` 中间计算、saturating helper 记录 anomaly；`rq_vtime` 使用 monotonic min-vruntime floor，visible set 包含 queue 和 current；eligibility 为 `vruntime <= rq_vtime`；new placement 使用 `vruntime = rq_vtime`；deadline 仅初始化或 `vruntime >= deadline` 时自然续期；tick / runnable-arrival preempt 只接受 eligible 且 deadline 更早的 candidate；yield 只后推 deadline，不改 `vruntime`；nice visibility 只保证后续 owner CPU 观察最新 `Task::nice()`；2C 不实现 wake clamp。
 - 2026-07-10：Checkpoint 2C 关闭后接受 class shape 反馈：跨 class precedence 在 `sched/class/mod.rs` 以 high-to-low class order 集中保存为唯一真相，各 `Scheduler` implementation 只关联自己的 class identity；`RunQueue` 的 pick 与 preempt comparison 都消费该 class-domain order，不再保存 `class_rank()` 或独立 pick 顺序。`EevdfEntity`、`SchedClassPrv` 和通用 payload constructor 收窄到 scheduler class owner，删除没有模块外消费者的 EEVDF entity accessor。该纠正保持 `Eevdf > RoundRobin > Idle` 行为、EEVDF 算法和 ABI 不变；nice 值域、nice-to-weight 表及其 owner boundary 明确延期，不在本反馈中修改。
 - 2026-07-10：阶段 3 前接受 Nice / priority 边界反馈纠正，不新增 Checkpoint 2E：引入 `Nice` / 受约束原子存储，拆分 `task/api/priority` syscall 模块，修复低代价且已确认的 target-selection / errno 语义，并把已发布 task 的临时非事务性 nice 写入集中到 `Task::set_nice(Nice)`。动态 renice 的 owner-CPU `RunQueue` command / IPI、立即 deadline/requeue 更新、`RLIMIT_NICE`、user namespace / LSM 强一致性仍延期；方法注释记录 deferred-accounting 边界及 owner-CPU transaction 对直接原子写入的替换条件，不为该临时边界增加逐次 renice 日志。该 feedback correction 关闭前不开始阶段 3，但不改变阶段编号、EEVDF 算法 gate 或 default-switch contract。
+- 2026-07-10：阶段 3 source review 发现 `account_current(now)` 在续 deadline 后丢失 current request completion，tick 与 runnable-arrival decision 无法从归一化后的 snapshot 恢复该事实；同时 effectful renewal 位于短路 `||` 中，arithmetic saturation 可跳过续期。按阶段 3 停止条件回到 Checkpoint 2C，新增 `EEVDF-022` correction gate；accepted EEVDF formula、owner boundary 和 default constructor 不变。
+- 2026-07-10：`EEVDF-022` correction 关闭：deadline renewal 与 accounting 分别返回正交的瞬时 outcome，tick / runnable-arrival 通过 class-private production decision helper 消费 completion，wake normalization 只返回 arithmetic saturation；113 项 KUnit、阶段 3 四组 workload、source audit 与独立复审均通过。该关闭只恢复 Checkpoint 2C contract，阶段 3 仍保持修复状态，不触发阶段 4 转换。
 
 ## Write Set 扩展记录
 

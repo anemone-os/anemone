@@ -25,6 +25,7 @@
 13. RR 行为保持适配阶段不得改变现有 wait/wake stale-safe placement 语义。
 14. sched-split 的 `ScheduleMode` 和 processor-private `PendingResched` 不能泄漏为 scheduler class 所有的状态；class 层只在 preempted-current transaction 中按值读取 `PendingResched` flags。
 15. bootstrap task、`kthreadd` 和普通 kthread 的第一版进展证明只要求 normal EEVDF eventual progress；不得用隐式 RR 例外、特殊优先级或单独 class 补齐该证明。
+16. deadline 续期不得吞掉 current request completion；该瞬时事实必须由 EEVDF private accounting outcome 传给当前 class transaction，不能在续期后的 entity snapshot 中反推，也不能缓存为长期 entity / processor 状态。
 
 如果任一条件不成立，当前实现只能视为迁移中间态，不能声明 EEVDF-lite 默认调度器闭合。
 
@@ -106,7 +107,7 @@ clone inheritance 只能在 child 发布前通过 `&mut Task` 继承 typed nice 
 4. `enqueue_new()` / `enqueue_woken()` 只做 placement，不做 preempt decision，也不接收 wall-clock `now`；new / wake placement 若需要当前时间，说明 accepted placement contract 不足，必须回到 RFC review。
 5. `decide_preempt_current()` 只做 current-vs-candidate decision，不做 enqueue。它可以把 current accounting 推进到 `now`，但不得改变 candidate 的 queue membership。
 6. remote runnable arrival 的 preempt decision 必须在目标 task 的 owner CPU placement transaction 内执行；source CPU 不能读取或比较目标 CPU current。
-7. `task_tick()` 可以更新 class-local state，但只能返回 `TickAction`，不能直接调用 scheduler core。
+7. `task_tick()` 可以更新 class-local state，但只能消费 class-private accounting outcome 并返回 `TickAction`，不能直接调用 scheduler core。
 8. `pick_next_task()` 与 `set_next_task()` 必须分离；前者选择并移出队列，后者记录 next 开始运行。
 9. 简单 class 若忽略路径差异，应在自己的 impl 内用私有 helper 复用逻辑，而不是依赖 trait 默认 generic enqueue。
 
@@ -149,6 +150,9 @@ EEVDF-lite 必须使用唯一幂等 helper 推进当前执行段：
 8. `Vruntime`、`Deadline` 和 `rq_vtime` 的长期存储使用 normalized nanoseconds 的 `u64` scalar；nice 0 下 `1ns` actual runtime 对应 `1` virtual ns。
 9. virtual-time 乘除使用 `u128` 中间值，并通过 EEVDF private helper saturate 回 `u64`；overflow / saturation 必须记录 anomaly，不得 panic，也不得把 `Result` 扩散到 `Scheduler` trait 或 `RunQueue` surface。
 10. 正 `delta_exec` 计算出的 `delta_vruntime` 若为 `0`，必须至少推进 `1`，保证持续运行最终推进公平账本。
+11. deadline renewal 必须显式返回 `renewed` 与 `saturated` 两个正交事实；有副作用的 renewal 不能放入会被 arithmetic anomaly 短路的布尔表达式。
+12. `account_current(now)` 必须返回本次 accounting 是否完成并续期 current request。tick / runnable-arrival decision 在同一 class transaction 内立即消费该 outcome；已经承诺 switch / requeue / block / exit 的 transaction 可以显式丢弃，因为调度边界已经成立。
+13. wake clamp 后的 deadline renewal 只做 placement normalization，不得被解释为 running request completion 或额外 resched 请求。
 
 ## Wake Placement
 
@@ -169,7 +173,7 @@ wake clamp 必须 exactly once：
 EEVDF-lite 必须保持以下公平性边界：
 
 1. 权重越高，单位实际执行时间推进的 `vruntime` 越慢。
-2. `deadline = vruntime + slice_ns * NICE_0_WEIGHT / weight` 或等价形式；deadline 只在初始化或 `vruntime >= deadline` 时自然续期，普通 requeue 不得无条件重算 deadline。
+2. `deadline = vruntime + slice_ns * NICE_0_WEIGHT / weight` 或等价形式；deadline 只在初始化或 `vruntime >= deadline` 时自然续期，普通 requeue 不得无条件重算 deadline。current accounting 触发自然续期时必须同时产生 request-completion outcome，不能让续期后的 deadline 覆盖调度原因。
 3. `rq_vtime` 第一版使用 monotonic min-vruntime floor：visible runnable set 包含 ready queue 中的 runnable tasks 和当前正在运行的 EEVDF task，`rq_vtime = max(rq_vtime, min_visible_vruntime)`；visible set 为空时保持不变。
 4. current task 被 pick 出 queue 后仍参与 `rq_vtime` 更新，但不参与 queue membership 或 pick scan。
 5. eligible 判断使用 `task.vruntime <= rq_vtime`。
