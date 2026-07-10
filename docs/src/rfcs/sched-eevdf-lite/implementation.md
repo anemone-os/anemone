@@ -528,7 +528,7 @@ Tracking issue 关闭审查：
 审计：
 
 - 搜索 `deadline` 排序逻辑，确认 pick 不是单个 deadline-only 结构。
-- 搜索 anomaly 更新点，确认 fallback 和 arithmetic saturation 不会被静默吞掉；anomaly 字段必须标注为 EEVDF-lite 本地诊断概念，不参与调度决策。
+- 搜索 anomaly 更新点，确认 fallback 和 arithmetic saturation 每次都通过 `kerrln!` 输出 reason / 累计次数且不会被静默吞掉；anomaly 字段必须标注为 EEVDF-lite 本地诊断概念，不参与调度决策。
 - 搜索 Kconfig defs 和生成使用点，确认 base slice、yield penalty window 和 anomaly threshold 不是散落在代码里的 magic number。
 - 搜索 `nice()` / `set_nice` / `setpriority()`，确认 nice 权重方向可被 owner CPU pick/accounting 观察。
 
@@ -555,8 +555,8 @@ write set：
 
 可观测性：
 
-- anomaly 至少提供受限计数和 last reason，可选 rate-limited log；覆盖 no-eligible fallback 和 arithmetic saturation。稳定 CPU-bound smoke 在 warm-up 后连续观察窗口仍增长 fallback anomaly 时，必须停止 default class switch 并回写 `rq_vtime` / eligibility 公式。
-- 若日志在 hot path，必须受阈值限制，不能让 benchmark 结果主要反映日志成本。
+- anomaly 提供 saturating count 和 last reason；每次 no-eligible fallback 或 arithmetic saturation 都通过 `kerrln!` 输出 reason 和累计次数，连续 fallback 达到 Kconfig threshold 时额外输出 streak 摘要。稳定 CPU-bound smoke 在 warm-up 后连续观察窗口仍增长 fallback anomaly 时，必须停止 default class switch 并回写 `rq_vtime` / eligibility 公式。
+- 普通调度路径不得打印该错误；如果 anomaly error 频繁到主导 benchmark，必须按算法失败停止并追查，不能通过降级、限流或隐藏日志继续 gate。
 
 验证：
 
@@ -774,7 +774,7 @@ Tracking issue 关闭审查：
 
 - 搜索 `RoundRobin` / `SchedClassPrv::RoundRobin`，确认每个保留点都有理由。
 - 搜索 `TODO.*eevdf` / `deadline-only` / anomaly log，确认过期 TODO 已更新。
-- 搜索 hot-path logs，确认 anomaly 或 debug 日志不会长期污染 benchmark。
+- 搜索 hot-path logs，确认普通路径无日志；若 anomaly error 持续出现并污染 benchmark，按停止条件处理，不能隐藏报告。
 - 对照 `tracking-issues.md`，把已关闭项移到 Neutralized，未关闭项保留为后续 gate。
 
 反馈假设：
@@ -826,7 +826,7 @@ write set：
 
 ## 可观测性清单
 
-- fallback anomaly：count、last reason、可选 rate-limited log。
+- anomaly：saturating count、last reason、每次记录的 `kerrln!`，以及 consecutive-fallback threshold 摘要。
 - scheduler constants：base slice、wake clamp、yield penalty、weight table 来源、system HZ。
 - runtime accounting：可在 debug build 或 smoke 中观察 `delta_exec`、`vruntime`、`deadline`、`exec_start` 更新。
 - default class switch：ordinary task、bootstrap task、kthread、idle 的 class 分类。
@@ -851,7 +851,7 @@ write set：
 - no-switch abort 或 `requeue_aborted_wait_current()` 错走 wake clamp 或 yield penalty。
 - production default 仍创建 RR task。
 - nice 变化长期不影响 fair accounting。
-- hot-path anomaly logging 主导 benchmark 结果。
+- anomaly error 持续出现并主导 benchmark 结果。
 
 停止并记录为后续 gate：
 

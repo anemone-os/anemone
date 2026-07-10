@@ -59,7 +59,7 @@ clone inheritance 只能继承 nice 等对应 owner state，不能继承父 task
 
 未来若支持 scheduler policy / class switch，source CPU 只能完成 ABI / permission / target identity 校验并向 target owner CPU 提交 command；queued、current、blocked 和 exiting task 的 class 迁移必须在 owner CPU `RunQueue` transaction 内线性化。本 RFC 不引入这项能力，只固定 future extension 不得绕过 owner boundary。
 
-允许诊断字段记录 anomaly count、last anomaly reason、last class transaction 或 runtime snapshots。`anomaly` 是 EEVDF-lite 本地诊断概念，不是 Linux / EEVDF 标准状态；它用于记录 no-eligible fallback、virtual-time saturation 等不应在稳定 workload 中常态化的异常路径。诊断字段不得反向驱动调度选择，除非它被提升为正式协议状态并进入本文。
+允许诊断字段记录 anomaly count、last anomaly reason、last class transaction 或 runtime snapshots。`anomaly` 是 EEVDF-lite 本地诊断概念，不是 Linux / EEVDF 标准状态；它用于记录 no-eligible fallback、virtual-time saturation 等不应在稳定 workload 中常态化的异常路径。每次 anomaly 记录必须通过 `kerrln!` 输出 reason 和累计次数，连续 fallback 达到 Kconfig threshold 时额外输出 streak 摘要；诊断字段和日志不得反向驱动调度选择，除非它们被提升为正式协议状态并进入本文。
 
 ## 身份与能力模型
 
@@ -223,7 +223,7 @@ bootstrap task、`kthreadd` 和普通 kthread 第一版直接使用 normal EEVDF
 
 1. 用 benchmark 特化逻辑处理 `iozone` worker。
 2. 为了让 `iozone` 数字好看关闭 eligibility。
-3. 隐藏或禁用 fallback anomaly 记录。
+3. 隐藏、降级或禁用 fallback anomaly 的 `kerrln!` 报告和诊断记录。
 4. 把 RR 保留为 production normal class，只把 EEVDF 作为未使用实验类。
 5. 在 `sched_setaffinity()`、`sched_setscheduler()` 或 future syscall 中绕过本 RFC 的 owner CPU 不变量。
 6. 为避免 starvation 放宽 wait-core stale-safe wake assertions。

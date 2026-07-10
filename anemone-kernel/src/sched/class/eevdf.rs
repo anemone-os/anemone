@@ -448,13 +448,18 @@ impl Eevdf {
     fn record_anomaly(&mut self, anomaly: EevdfAnomaly) {
         self.anomaly_count = self.anomaly_count.saturating_add(1);
         self.last_anomaly = Some(anomaly);
+        kerrln!(
+            "EEVDF anomaly: reason={:?}, count={}",
+            anomaly,
+            self.anomaly_count
+        );
     }
 
     fn record_no_eligible_fallback(&mut self) {
         self.record_anomaly(EevdfAnomaly::NoEligibleTask);
         self.consecutive_fallbacks = self.consecutive_fallbacks.saturating_add(1);
         if EEVDF_ANOMALY_THRESHOLD != 0 && self.consecutive_fallbacks == EEVDF_ANOMALY_THRESHOLD {
-            knoticeln!(
+            kerrln!(
                 "EEVDF no-eligible fallback reached {} consecutive picks",
                 EEVDF_ANOMALY_THRESHOLD
             );

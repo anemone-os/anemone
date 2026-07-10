@@ -159,7 +159,7 @@ pub const EEVDF_BASE_SLICE_US: u64 = {};
 pub const EEVDF_WAKE_CLAMP_US: u64 = {};
 /// EEVDF-lite bounded yield penalty window in microseconds.
 pub const EEVDF_YIELD_PENALTY_US: u64 = {};
-/// Consecutive EEVDF no-eligible fallback count that becomes anomalous.
+/// Consecutive EEVDF no-eligible fallback count before an extra error summary.
 pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
         "#,
             default_or!(bootstrap_heap_shift_kb),

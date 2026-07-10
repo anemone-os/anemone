@@ -170,7 +170,7 @@
 
 **反馈相关：** 稳定 CPU-bound smoke 在 warm-up 后连续观察窗口仍增长 anomaly 时，反馈归入 Checkpoint 2C / Gate P2，视为 eligibility 公式未闭合，必须停止默认 class 切换。
 
-**结论：** anomaly threshold 不再作为独立 active issue；它是 `EEVDF-001` / Checkpoint 2C / Gate P2 的观察面。
+**结论：** 每次 anomaly 记录通过 `kerrln!` 输出 reason 和累计次数；anomaly threshold 不再作为独立 active issue，只控制连续 fallback 的额外 streak 摘要，并继续作为 `EEVDF-001` / Checkpoint 2C / Gate P2 的观察面。
 
 ### EEVDF-011：O(n) runqueue 性能
 

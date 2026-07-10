@@ -47,4 +47,4 @@ loop_device_count = 8 # Number of static loop block devices to publish at boot.
 eevdf_base_slice_us = 3000 # EEVDF-lite base slice in microseconds.
 eevdf_wake_clamp_us = 3000 # EEVDF-lite wake placement clamp window in microseconds.
 eevdf_yield_penalty_us = 3000 # EEVDF-lite bounded yield penalty window in microseconds.
-eevdf_anomaly_threshold = 8 # Consecutive EEVDF no-eligible fallbacks before anomaly reporting.
+eevdf_anomaly_threshold = 8 # Consecutive EEVDF no-eligible fallbacks before an extra error summary.

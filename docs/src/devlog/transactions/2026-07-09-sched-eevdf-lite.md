@@ -494,6 +494,30 @@ git diff --check
 
 **Next:** 阶段 3 default normal class 切换与中性验证。
 
+### 2026-07-10 - 阶段 3 前 Anomaly Error 可观测性反馈启动
+
+**Phase:** Checkpoint 2C closed 后、阶段 3 default switch 前的 implementation feedback correction，in progress。
+
+**Accepted feedback:** 现有 `Eevdf` 会为 no-eligible fallback 和 arithmetic saturation 更新 `anomaly_count` / `last_anomaly`，但 arithmetic anomaly 没有日志，fallback 也只在连续次数达到 threshold 时使用 `knoticeln!` 输出摘要。用户要求每次 anomaly 发生时都通过 `kerrln!` 报告；这改变 RFC 中“可选 rate-limited log”的可观测性约定，必须先回写 canonical 文本，不能只改实现。
+
+**Write set:** `anemone-kernel/src/sched/class/eevdf.rs`；同步 existing anomaly threshold 注释的 `kconfig`、`conf/.defconfig`、`scripts/xtask/src/config/kconfig.rs` 和由 xtask 再生成的 `anemone-kernel/src/kconfig_defs.rs`；RFC `index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md` 与本事务日志。此次反馈不修改 placement、accounting、wake clamp、virtual-time arithmetic、default normal constructor、scheduler method boundary 或全局 console log level。
+
+**Implementation contract:** `record_anomaly()` 每次更新 saturating count / last reason 后立即用 `kerrln!` 输出 reason 和累计次数，因此 `NoEligibleTask` 与 `ArithmeticSaturation` 的所有现有更新点共享同一报告入口。连续 fallback 达到 live `EEVDF_ANOMALY_THRESHOLD` 时保留额外 streak 摘要，并把该摘要从 NOTICE 升为 ERR；threshold 不再决定单次 anomaly 是否报告。普通非 anomaly 调度路径不打印。若真实 EEVDF workload 让错误日志持续出现并主导 benchmark，视为公式或 arithmetic 失败，不能通过降级、限流或隐藏日志继续阶段 3。
+
+**Validation floor:** `git diff --check`、`just fmt kernel --check`、`just build`、`mdbook build docs`，source audit 确认所有 anomaly 更新点仍集中经过 `record_anomaly()`、旧 `knoticeln!` 报告消失、default normal 仍为 RR；随后按用户既有指示直接运行 rv64 端到端脚本。当前 `console_log_level = 0` 会过滤 Err=3 的控制台输出，本反馈不擅自扩大到全局日志策略；错误记录仍进入 kernel log buffer。
+
+### 2026-07-10 - 阶段 3 前 Anomaly Error 可观测性反馈关闭
+
+**Phase:** Checkpoint 2C closed 后、阶段 3 default switch 前的 implementation feedback correction，closed。
+
+**Change:** `Eevdf::record_anomaly()` 在更新 saturating `anomaly_count` 和 `last_anomaly` 后立即通过 `kerrln!` 输出 reason 与累计次数；五个 arithmetic saturation 更新点和 no-eligible fallback 由同一个 helper 报告。连续 fallback 达到 `EEVDF_ANOMALY_THRESHOLD` 时保留额外 streak 摘要，并从 `knoticeln!` 升为 `kerrln!`。Kconfig schema 未改变，threshold 注释同步为“额外 error summary”，default normal constructor 仍返回 RR。
+
+**Source audit:** 全树搜索确认 `EevdfAnomaly::ArithmeticSaturation` 和 `NoEligibleTask` 的运行时更新仍全部汇入 `record_anomaly()`；`eevdf.rs` 中不再存在 `knoticeln!`，普通非 anomaly transaction 没有新增日志。placement、accounting、wake clamp、virtual-time arithmetic、class precedence、method boundary 和全局 console log level 均无语义改动。
+
+**Validation:** `just build` 通过，证明新的 `kerrln!` 路径与 Kconfig 生成链可编译；`mdbook build docs` 与 `git diff --check` 通过。`just fmt kernel --check` 仍只报告既有 generated `kconfig_defs.rs` / `platform_defs.rs` whitespace 漂移，未报告本次修改的 `eevdf.rs`。rv64 端到端脚本开始重建 rootfs 后，用户明确指出本次日志级别修正不会改变测试语义并要求停止；运行已立即中止，不计为失败，也不作为本反馈的验证证据。
+
+**Boundary:** `kerrln!` 使用 Err=3；live `console_log_level = 0` 仍会把该级别保留在 kernel log buffer 而不输出到 console。本反馈严格按用户要求修改 anomaly 报告宏，不顺带改变全局日志策略。阶段 3 仍按既有 handoff 继续 default normal class switch。
+
 ## Open Items
 
 - `EEVDF-017` 仍 active：阶段 1A / 1B 与 Checkpoint 2A / 2B / 2C / 2D 已全部关闭；阶段 3 仍需完成 default switch source audit，证明 ordinary / bootstrap / kthread 无 production RR 特例。
