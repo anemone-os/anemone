@@ -35,7 +35,7 @@ use core::fmt::{Debug, Display};
 use crate::{
     mm::stack::KernelStack,
     prelude::*,
-    sched::class::SchedEntity,
+    sched::{AtomicNice, Nice, class::SchedEntity},
     sync::mono::MonoFlow,
     task::{
         cpu_usage::{TaskCpuUsage, ThreadGroupCpuUsage},
@@ -111,8 +111,10 @@ pub struct Task {
     /// Which cpu this task is scheduled to run on.
     cpuid: CpuId,
 
-    /// stub.
-    nice: AtomicIsize,
+    /// Nice is task-lifetime state; its valid domain is enforced by
+    /// [`AtomicNice`], while scheduler classes own how it affects placement
+    /// and accounting.
+    nice: AtomicNice,
     /// Scheduling context. Used for context switching.
     sched_ctx: MonoFlow<TaskContext>,
     /// Scheduling entity. Used for scheduling.
@@ -444,7 +446,7 @@ impl Task {
 
                 cpu
             },
-            nice: AtomicIsize::new(0),
+            nice: AtomicNice::new(Nice::ZERO),
             sched_ctx: unsafe {
                 MonoFlow::new(TaskContext::from_kernel_fn(
                     VirtAddr::new(entry as u64),
@@ -495,7 +497,7 @@ impl Task {
                 flags: NoIrqRwLock::new(TaskFlags::IDLE | TaskFlags::KERNEL),
                 usp: RwLock::new(None),
                 cpuid: cur_cpu_id(),
-                nice: AtomicIsize::new(0),
+                nice: AtomicNice::new(Nice::ZERO),
                 sched_ctx: unsafe {
                     MonoFlow::new(TaskContext::from_kernel_fn(
                         VirtAddr::new(entry as u64),
@@ -704,14 +706,6 @@ impl Task {
 
     pub fn set_fpu_used(&self) {
         self.fpu_used.store(true, Ordering::Release);
-    }
-
-    pub fn nice(&self) -> isize {
-        self.nice.load(Ordering::Acquire)
-    }
-
-    pub fn set_nice(&self, nice: isize) {
-        self.nice.store(nice, Ordering::Release);
     }
 
     /// Return a credential snapshot.

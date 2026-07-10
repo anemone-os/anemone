@@ -81,7 +81,7 @@
 
 **修复落点：**
 
-- `anemone-kernel/src/sched/class/eevdf.rs` 使用固定 Linux 40 项 nice weight 表，`Task::nice()` 保持唯一 weight truth，不缓存第二份 nice / weight 状态。
+- `anemone-kernel/src/sched/class/eevdf.rs` 使用固定 Linux 40 项 nice weight 表，受约束的 `Nice` newtype / Task 原子存储保持唯一 weight truth，不缓存第二份 nice / weight 状态。
 - virtual runtime、slice、deadline 和 yield 计算统一使用 `u128` 中间值并 saturate 到 `u64`；正 runtime delta 至少推进 `1`，saturation 记录 `ArithmeticSaturation` anomaly。
 - base slice、yield penalty window 和 anomaly threshold 消费 live Kconfig 定义；wake clamp window 仍留给 Checkpoint 2D。
 
@@ -120,7 +120,7 @@
 
 **修复落点：**
 
-- [RFC index](./index.md) 和 [不变量需求](./invariants.md) 明确 `Task::nice()` / `set_nice()` 是唯一 nice truth。
+- [RFC index](./index.md) 和 [不变量需求](./invariants.md) 明确 `Nice` newtype 约束值域，Task 内部受约束的原子 nice 表示是唯一长期 truth；`Task::set_nice(Nice)` 是已发布 task 唯一带明确退出条件的写入方法。
 - EEVDF entity 不保存另一份 nice，也不在第一版保存 `cached_weight`。
 
 **结论：** 第一版消费固定 Linux nice weight 表，但不承诺完整 priority syscall ABI 即时性。

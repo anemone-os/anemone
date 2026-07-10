@@ -19,6 +19,10 @@ pub use hal::*;
 mod api;
 pub use api::*;
 
+mod nice;
+pub(crate) use nice::AtomicNice;
+pub use nice::Nice;
+
 mod processor;
 pub use processor::{
     enqueue_new_task, get_current_task, init_routines, local_enqueue_new_task, local_sched_tick,

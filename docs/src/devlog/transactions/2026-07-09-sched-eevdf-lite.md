@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / fairness / runtime accounting / scheduler class
 **Canonical Plan:** [RFC-20260622-sched-eevdf-lite](../../rfcs/sched-eevdf-lite/index.md), [不变量需求](../../rfcs/sched-eevdf-lite/invariants.md), [迁移实施计划](../../rfcs/sched-eevdf-lite/implementation.md), [Tracking Issues](../../rfcs/sched-eevdf-lite/tracking-issues.md)
-**Current Phase:** Checkpoint 2D / Gate P3 已关闭，阶段 2 完成；下一步是阶段 3 default normal class 切换与中性验证
+**Current Phase:** 阶段 3 前 Nice / Priority 边界反馈纠正已关闭；下一步是阶段 3 default normal class 切换与中性验证
 
 ## Scope
 
@@ -31,7 +31,7 @@
 - `TaskSchedState` 继续拥有 task runnable / waiting / zombie 逻辑状态。
 - `SchedEntity::on_runq()` 继续只表示 owner CPU runqueue 上的物理排队事实。
 - `Task::cpuid()` 继续是 task 的 owner CPU 真相源；第一版不做跨核迁移。
-- `Task::nice()` / `set_nice()` 是 nice / weight 的唯一长期真相源。
+- `Nice` newtype 约束值域；Task 内部原子 nice 表示是 nice / weight 的唯一长期真相源。
 - `ScheduleMode` 属于 scheduler core entry permission，不得泄漏到 scheduler class。
 - `PendingResched` 只能作为 processor / scheduler-core private pending request；class 最多按值读取 preempted-current transaction 参数。
 - scheduler class contract 必须是 method-first class-local atomic transaction surface。
@@ -44,9 +44,9 @@
 
 **Current Branch:** `dev/drc/eevdf`
 
-**Completed:** 公开 RFC 目录已存在，阶段 0 所需四份 RFC 文档已读取：`index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md`。register、current limitations、RFC workflow、RFC template、devlog workflow、templates、事务索引、当前双周 devlog、SUMMARY 和 RFC 列表已读取。阶段 0 建立本事务日志，并把 RFC、tracking issues、事务索引、当前双周 devlog、mdBook Summary 和 RFC 列表连接到同一实现记录。总控完成阶段 0 source audit；未启动 subagent，因为阶段 0 不需要 worker 写代码。Checkpoint 1A 已完成：`Scheduler` trait 改为 method-first transaction surface，`RunQueue` 与 `SchedEntity` 拆出同一 owner 内文件边界，RR / Idle 完成行为保持适配。Checkpoint 1B 已完成：processor pending request 升级为 `PendingResched` flags，trap / idle / tick / IPI producer 接入 typed pending，schedule entry 拆分为 preempt / yield / idle，new-task enqueue 与 current requeue facade 改为语义化命名，owner CPU placement 后的 preempt decision 已接线，`EEVDF-005` 已通过 source audit neutralized。Checkpoint 2A 已完成：`Eevdf` class scaffold、`EevdfEntity` payload 字段位置、非 `Copy` class-specific `SchedEntity`、显式 `new_eevdf()` constructor、fresh clone/default-normal entity 构造和 EEVDF scheduler constants 的 kconfig schema / live root config / generated defs plumbing 已接入；default normal constructor 仍保持 RR，未提前切换到 EEVDF。2B 前 feedback 已收口：`Eevdf` class 内部增加 typed entity accessor，后续 `account_current(now)` 可通过 class-private helper 短暂访问 `EevdfEntity`，不把 `SchedEntity` guard 或 typed payload 参数加入 `Scheduler` trait；RFC canonical 文本补充了 future scheduler policy / class switch 必须通过 owner CPU `RunQueue` command / IPI 线性化，远端不得直接修改 `SchedEntity` class 或 EEVDF payload。Checkpoint 2B 已完成：`Eevdf` private `account_current(now)` 成为唯一推进 current execution segment 的 helper；`set_next_task()` 记录 `exec_start`；tick、yield / preempt requeue、parked handoff、abort-park requeue、block 和 exit switch 都通过同一 helper 结算并刷新 `exec_start`；`Task::on_switch_out()` 保持 task / CPU usage bookkeeping，不成为 fair accounting truth；`EEVDF-002` 已移入 Neutralized。Checkpoint 2C 已完成：weighted virtual-time arithmetic、monotonic `rq_vtime`、eligible / fallback pick、new placement、deadline renewal、tick / runnable-arrival preempt、bounded yield、nice visibility 和 anomaly observation 已实现；2C / 2D wake 边界与 default-normal RR 边界保持不变，`EEVDF-001` / `EEVDF-020` 已移入 Neutralized。2C 后 class-shape feedback correction 已完成：class precedence 集中为单一 high-to-low order，pick / preempt 共用；EEVDF payload 与通用 class constructor 可见面已收窄。Checkpoint 2D 已完成：ordinary wake 与 parked current handoff 通过同一个 bounded wake clamp transaction 收口，stale / already-current / already-queued / no-switch abort / abort-park 路径保持 no-reward，`EEVDF-004` 已移入 Neutralized；阶段 2 全部 checkpoint 关闭。
+**Completed:** 公开 RFC 目录已存在，阶段 0 所需四份 RFC 文档已读取：`index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md`。register、current limitations、RFC workflow、RFC template、devlog workflow、templates、事务索引、当前双周 devlog、SUMMARY 和 RFC 列表已读取。阶段 0 建立本事务日志，并把 RFC、tracking issues、事务索引、当前双周 devlog、mdBook Summary 和 RFC 列表连接到同一实现记录。总控完成阶段 0 source audit；未启动 subagent，因为阶段 0 不需要 worker 写代码。Checkpoint 1A 已完成：`Scheduler` trait 改为 method-first transaction surface，`RunQueue` 与 `SchedEntity` 拆出同一 owner 内文件边界，RR / Idle 完成行为保持适配。Checkpoint 1B 已完成：processor pending request 升级为 `PendingResched` flags，trap / idle / tick / IPI producer 接入 typed pending，schedule entry 拆分为 preempt / yield / idle，new-task enqueue 与 current requeue facade 改为语义化命名，owner CPU placement 后的 preempt decision 已接线，`EEVDF-005` 已通过 source audit neutralized。Checkpoint 2A 已完成：`Eevdf` class scaffold、`EevdfEntity` payload 字段位置、非 `Copy` class-specific `SchedEntity`、显式 `new_eevdf()` constructor、fresh clone/default-normal entity 构造和 EEVDF scheduler constants 的 kconfig schema / live root config / generated defs plumbing 已接入；default normal constructor 仍保持 RR，未提前切换到 EEVDF。2B 前 feedback 已收口：`Eevdf` class 内部增加 typed entity accessor，后续 `account_current(now)` 可通过 class-private helper 短暂访问 `EevdfEntity`，不把 `SchedEntity` guard 或 typed payload 参数加入 `Scheduler` trait；RFC canonical 文本补充了 future scheduler policy / class switch 必须通过 owner CPU `RunQueue` command / IPI 线性化，远端不得直接修改 `SchedEntity` class 或 EEVDF payload。Checkpoint 2B 已完成：`Eevdf` private `account_current(now)` 成为唯一推进 current execution segment 的 helper；`set_next_task()` 记录 `exec_start`；tick、yield / preempt requeue、parked handoff、abort-park requeue、block 和 exit switch 都通过同一 helper 结算并刷新 `exec_start`；`Task::on_switch_out()` 保持 task / CPU usage bookkeeping，不成为 fair scheduler accounting truth；`EEVDF-002` 已移入 Neutralized。Checkpoint 2C 已完成：weighted virtual-time arithmetic、monotonic `rq_vtime`、eligible / fallback pick、new placement、deadline renewal、tick / runnable-arrival preempt、bounded yield、nice visibility 和 anomaly observation 已实现；2C / 2D wake 边界与 default-normal RR 边界保持不变，`EEVDF-001` / `EEVDF-020` 已移入 Neutralized。2C 后 class-shape feedback correction 已完成：class precedence 集中为单一 high-to-low order，pick / preempt 共用；EEVDF payload 与通用 class constructor 可见面已收窄。Checkpoint 2D 已完成：ordinary wake 与 parked current handoff 通过同一个 bounded wake clamp transaction 收口，stale / already-current / already-queued / no-switch abort / abort-park 路径保持 no-reward，`EEVDF-004` 已移入 Neutralized；阶段 2 全部 checkpoint 关闭。阶段 3 前 Nice / Priority 边界反馈纠正也已关闭：typed nice、Task writer、clone inheritance、priority syscall 目录化和低代价 target-selection / ABI 修复均已落地，不新增 Checkpoint 2E。
 
-**In Progress:** 无 implementation worker 正在运行。下一步按阶段 3 gate 翻转 default normal constructor，并完成 ordinary / bootstrap / kthread direct EEVDF、无 production RR 特例和真实 EEVDF workload 的 source audit / smoke；nice / weight 架构反馈仍延期，不在 default switch 中顺带处理。
+**In Progress:** 无 implementation worker 正在运行。下一步按阶段 3 gate 翻转 default normal constructor，并完成 ordinary / bootstrap / kthread direct EEVDF、无 production RR 特例和真实 EEVDF workload 的 source audit / smoke；完整动态 renice 事务仍延期，不在 default switch 中顺带处理。
 
 **Open Blockers:** 无阶段 0 / 1A / 1B / 2A / 2B / 2C / 2D 停止条件。当前 active Keter 只剩 `EEVDF-017`，它要求阶段 3 source audit 证明 default switch 没有 ordinary / bootstrap / kthread production RR 特例；`EEVDF-001`、`EEVDF-002`、`EEVDF-004`、`EEVDF-005` 和 `EEVDF-020` 已关闭。
 
@@ -517,6 +517,38 @@ git diff --check
 **Validation:** `just build` 通过，证明新的 `kerrln!` 路径与 Kconfig 生成链可编译；`mdbook build docs` 与 `git diff --check` 通过。`just fmt kernel --check` 仍只报告既有 generated `kconfig_defs.rs` / `platform_defs.rs` whitespace 漂移，未报告本次修改的 `eevdf.rs`。rv64 端到端脚本开始重建 rootfs 后，用户明确指出本次日志级别修正不会改变测试语义并要求停止；运行已立即中止，不计为失败，也不作为本反馈的验证证据。
 
 **Boundary:** `kerrln!` 使用 Err=3；live `console_log_level = 0` 仍会把该级别保留在 kernel log buffer 而不输出到 console。本反馈严格按用户要求修改 anomaly 报告宏，不顺带改变全局日志策略。阶段 3 仍按既有 handoff 继续 default normal class switch。
+
+### 2026-07-10 - 阶段 3 前 Nice / Priority 边界反馈纠正启动
+
+**Phase:** 阶段 3 default switch 前的 implementation feedback correction，in progress；不新增 Checkpoint 2E。
+
+**Accepted feedback:** 当前 nice 以裸 `AtomicIsize` 保存，`task/api/priority.rs` 与 EEVDF 各自维护 `MIN_NICE` / `MAX_NICE`，syscall 可通过公开 raw setter 直接写 task；这使值域、writer 和未来 owner-CPU renice 退出边界不自然。用户接受第一版非事务性 renice 的短暂 accounting 偏移，不要求本轮引入 owner-CPU IPI；若 syscall topology / permission 强一致性代价过高，保持 snapshot 语义并在注释与 RFC 中明确边界，不以长锁或临时 hack 假装完整 Linux 语义。
+
+**Implementation contract:** `Nice` newtype 唯一约束 `[-20, 19]`、ABI clamp 和 weight-table index；内部 `Nice::new()` 对非法值直接 panic，不用 `Option` 隐藏内核 bug。Task 使用受约束的原子 nice 表示，clone 只在发布前通过 `&mut Task` 继承；`Task::set_nice(Nice)` 是已发布 task 的唯一写入方法，方法注释说明 deferred-accounting 边界，并注明 owner-CPU `RunQueue` command / IPI 落地后替换直接原子写入，不为该临时路径额外打印逐次 renice 日志。`task/api/priority` 拆成 `getpriority.rs` / `setpriority.rs` 与共享 target selector；修复 Linux 明确要求且不需要扩大事务边界的语义，包括 `PRIO_PGRP` 覆盖全部线程。`RLIMIT_NICE`、user namespace / LSM、topology-wide 原子快照、立即 deadline/requeue 和完整动态 renice 仍为非目标。
+
+**Write set:** `anemone-kernel/src/sched/mod.rs`、新建 `sched/nice.rs`、`sched/class/eevdf.rs`、`task/mod.rs`、`task/sched.rs`、`task/api/clone/mod.rs`、将 `task/api/priority.rs` 目录化为 `task/api/priority/{mod,target,getpriority,setpriority}.rs`；RFC `index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md` 与本事务日志。禁止修改 `RunQueue` / processor / IPI payload、EEVDF placement/accounting formula/deadline、Kconfig 和 default normal constructor。
+
+**Validation floor:** focused KUnit 覆盖 `Nice` 内核构造、ABI clamp boundary、table index 和 Linux weight 方向；source audit 确认裸 nice atomic、重复 range 常量、published-task raw setter、单文件 priority syscall 和 `PRIO_PGRP` leader-only 路径消失，default normal 仍为 RR。运行 `git diff --check`、`just fmt kernel --check`、`just build`、`mdbook build docs`，形成 diff 后做独立架构/ABI review。该纠正不要求单独运行 broad LTP / QEMU；阶段 3 的 nice-direction / fairness smoke 继续承担集成验证。
+
+**Stop conditions:** 若 typed nice 需要第二份长期 weight truth，syscall 修复要求持 topology / credential lock 进入 scheduler，或正确实现被迫新增 owner-CPU IPI、远端 runqueue observation、立即 deadline/requeue 或修改 default constructor，则停止本 feedback correction 并回到 RFC review，不在现有 write set 内绕过。
+
+### 2026-07-10 - 阶段 3 前 Nice / Priority 边界反馈纠正关闭
+
+**Phase:** 阶段 3 default switch 前的 implementation feedback correction，closed；未新增 Checkpoint 2E。
+
+**Change:** `sched/nice.rs` 集中定义 `Nice` 值域、Linux ABI clamp、weight-table index 和受约束的原子存储；内部 `Nice::new()` 对非法值直接断言失败。Task 持有唯一 nice 状态，已发布 task 只允许 `Task::set_nice(Nice)` 写入，clone 则在发布前通过 `&mut Task` 继承。EEVDF 删除重复 range 常量并直接消费 typed nice。`task/api/priority.rs` 拆为 `priority/{mod,target,getpriority,setpriority}.rs`；get / set syscall 分文件，shared selector 明确 snapshot 语义，`PRIO_PGRP` 覆盖选中 thread group 的全部线程，getpriority 保持 raw `20 - nice` 返回编码，setpriority 在 ABI 边界 clamp。
+
+**Owner boundary:** sched 层拥有 `Nice` 调度属性 domain 与 weight 映射；Task 拥有每个任务的存储、读取和唯一 published-task writer；priority syscall 只负责 ABI、选择与权限。`Task::set_nice` 没有带 `compat` 的名字，没有 scheduler free-function wrapper，也不为临时非事务性边界逐次打印日志；方法注释记录 deferred-accounting 限制和 owner-CPU transaction 的替换条件。
+
+**Source audit:** task / sched 范围内不再存在裸 `AtomicIsize` nice、重复 `MIN_NICE` / `MAX_NICE`、`kernel_setpriority`、`set_task_nice`、`swap_nice` 或方法名中的 `compat`。已发布 task 的 nice 只有 priority set syscall 调用 `Task::set_nice`；clone 是 `inherit_nice_before_publish` 的唯一 caller。`PRIO_PGRP` 使用每个 thread group 的 `get_members()`，不再只选 leader。`SchedEntity::new_normal()` 仍返回 RR，阶段 3 default switch 未提前发生。
+
+**ABI / consistency boundary:** target collection 先取得稳定 `Arc<Task>` snapshot，再释放 topology / group lock并检查 credentials 或写 nice；membership 在 snapshot 后可以变化，本轮不承诺 topology-wide linearizability。第一版仍不实现 `RLIMIT_NICE`、user namespace / LSM、renice 时立即结算 execution segment、重算 deadline 或 owner-CPU IPI command。这些是明确接受限制，不以长锁、额外 wrapper 或日志伪装强一致性。
+
+**Validation:** `just build` 通过，typed nice、priority module split 和 focused KUnit 均完成编译。`just fmt kernel --check` 只报告既有 generated `kconfig_defs.rs` / `platform_defs.rs` whitespace 漂移，未报告本次触碰的 Rust 文件。`mdbook build docs`、`git diff --check` 和新文件 whitespace 检查通过。focused KUnit 本轮只完成编译、未在 QEMU 中执行；按 feedback correction 的验证边界未重复 broad QEMU / LTP，阶段 3 smoke 继续承担 nice direction 与集成验证。
+
+**Review:** 总控完成最终只读架构 / ABI 审查，未发现 Apollyon / Keter / Euclid。保留的 Safe 是 snapshot membership、缺失 `RLIMIT_NICE` / namespace / LSM，以及 renice 到 owner CPU 后续 accounting / placement 之间的短暂偏移；它们均已进入 canonical 边界，且没有改变 EEVDF formula、runqueue owner、IPI contract 或 default constructor。
+
+**Next:** 阶段 3 default normal class 切换与中性验证。
 
 ## Open Items
 

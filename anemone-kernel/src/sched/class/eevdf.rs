@@ -16,13 +16,11 @@ type Vruntime = u64;
 type Deadline = u64;
 
 const NICE_0_WEIGHT: u64 = 1024;
-const MIN_NICE: isize = -20;
-const MAX_NICE: isize = 19;
 
 // Linux v6.6 sched_prio_to_weight[]. Task::nice() remains the only stored nice
 // truth; this table is only the class-local conversion used at each
 // transaction.
-const NICE_WEIGHTS: [u64; 40] = [
+const NICE_WEIGHTS: [u64; Nice::WIDTH] = [
     88761, 71755, 56483, 46273, 36291, 29154, 23254, 18705, 14949, 11916, 9548, 7620, 6100, 4904,
     3906, 3121, 2501, 1991, 1586, 1277, 1024, 820, 655, 526, 423, 335, 272, 215, 172, 137, 110, 87,
     70, 56, 45, 36, 29, 23, 18, 15,
@@ -144,12 +142,8 @@ impl Eevdf {
         Self::nice_to_weight(task.nice())
     }
 
-    fn nice_to_weight(nice: isize) -> u64 {
-        assert!(
-            (MIN_NICE..=MAX_NICE).contains(&nice),
-            "task nice value {nice} is outside [{MIN_NICE}, {MAX_NICE}]"
-        );
-        NICE_WEIGHTS[(nice - MIN_NICE) as usize]
+    fn nice_to_weight(nice: Nice) -> u64 {
+        NICE_WEIGHTS[nice.table_index()]
     }
 
     fn duration_to_vruntime(duration: Duration, weight: u64) -> VirtualTimeCalc {
@@ -615,23 +609,26 @@ mod kunits {
     #[kunit]
     fn test_weighted_vruntime_uses_linux_nice_direction() {
         let delta = Duration::from_millis(1);
-        let high_weight = Eevdf::duration_to_vruntime(delta, Eevdf::nice_to_weight(-20));
-        let nice_zero = Eevdf::duration_to_vruntime(delta, Eevdf::nice_to_weight(0));
-        let low_weight = Eevdf::duration_to_vruntime(delta, Eevdf::nice_to_weight(19));
+        let high_weight = Eevdf::duration_to_vruntime(delta, Eevdf::nice_to_weight(Nice::MIN));
+        let nice_zero = Eevdf::duration_to_vruntime(delta, Eevdf::nice_to_weight(Nice::ZERO));
+        let low_weight = Eevdf::duration_to_vruntime(delta, Eevdf::nice_to_weight(Nice::MAX));
 
         assert!(high_weight.value < nice_zero.value);
         assert_eq!(nice_zero.value, 1_000_000);
         assert!(nice_zero.value < low_weight.value);
         assert_eq!(
-            Eevdf::duration_to_vruntime(Duration::from_nanos(1), Eevdf::nice_to_weight(-20)).value,
+            Eevdf::duration_to_vruntime(Duration::from_nanos(1), Eevdf::nice_to_weight(Nice::MIN),)
+                .value,
             1
         );
     }
 
     #[kunit]
     fn test_virtual_time_arithmetic_saturates_and_is_observable() {
-        let calc =
-            Eevdf::duration_to_vruntime(Duration::from_secs(u64::MAX), Eevdf::nice_to_weight(19));
+        let calc = Eevdf::duration_to_vruntime(
+            Duration::from_secs(u64::MAX),
+            Eevdf::nice_to_weight(Nice::MAX),
+        );
         assert_eq!(calc.value, u64::MAX);
         assert!(calc.saturated);
         assert_eq!(

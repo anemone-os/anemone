@@ -19,7 +19,7 @@
 7. 如果没有 eligible task，fallback 必须可观测，并且不能成为稳定 workload 的常态路径。
 8. runtime accounting 对每段实际执行时间只记一次，不重复推进 `vruntime`。
 9. wake placement 必须 exactly-once 地避免陈旧 `vruntime` 造成无限奖励或长期惩罚。
-10. `Task::nice()` / `set_nice()` 是唯一 nice truth；EEVDF entity 不得保存另一份长期 nice state。
+10. `Nice` newtype 必须排除 `[-20, 19]` 外的内部状态；`Task::nice()` 返回唯一长期 nice truth，EEVDF entity 不得保存另一份长期 nice state。
 11. pending resched request 必须用 `PendingResched` flags 区分 tick 与 runnable arrival，不得继续用 bool 静默压扁抢占来源。
 12. scheduler class contract 必须是 method-first class-local atomic transaction surface；不得使用 `SchedEvent` / `on_event` / catch-all event bus 承载路径语义。
 13. RR 行为保持适配阶段不得改变现有 wait/wake stale-safe placement 语义。
@@ -47,7 +47,7 @@
 1. task 是否 runnable / waiting / zombie 由 `TaskSchedState` 拥有。
 2. task 是否物理在 runqueue 上由 `SchedEntity::on_runq()` 拥有。
 3. task 属于哪个 CPU 由 `Task::cpuid()` 拥有。
-4. `Task::nice()` 是 nice / weight source 的唯一长期真相源。
+4. `Nice` newtype 拥有 nice 值域和 weight-table index 不变量；Task 内部受约束的原子 nice 表示是 nice / weight source 的唯一长期真相源。
 5. 普通任务公平调度字段由 `SchedClassPrv::Eevdf(EevdfEntity)` 或等价 class-specific payload 拥有。
 6. runqueue 公平时钟由 owner CPU 的 `Eevdf` class 拥有。
 7. task 的 effective scheduler class、class-specific payload 和 queue membership 只能由 owner CPU 的 `RunQueue` transaction 修改；远端 task 不得直接拿 `sched_entity` 锁改 class 或 EEVDF payload。
@@ -55,7 +55,9 @@
 9. processor-private `PendingResched` 只属于 pending preempt request；class 可以按值读取它作为 `requeue_preempted_current()` 的 cause flags，但不得负责 restore 或驱动 processor pending state。执行 destructive `take_pending_resched()` 的 scheduler-core caller 负责在 deferred preempt 时恢复同一组 flags。
 10. 用户态 scheduling ABI accounting 不是本 RFC 的行为真相源；未来 `sched_*` syscall 只能通过明确的后续 RFC 接入真实调度策略。
 
-clone inheritance 只能继承 nice 等对应 owner state，不能继承父 task 的 scheduler entity。新 task publication 必须从 fresh `SchedEntity::new_normal()` 或等价构造器进入 `enqueue_new()` placement，让 `vruntime` / `deadline` / `exec_start` 由 owner CPU EEVDF class 初始化。
+clone inheritance 只能在 child 发布前通过 `&mut Task` 继承 typed nice 等对应 owner state，不能继承父 task 的 scheduler entity。新 task publication 必须从 fresh `SchedEntity::new_normal()` 或等价构造器进入 `enqueue_new()` placement，让 `vruntime` / `deadline` / `exec_start` 由 owner CPU EEVDF class 初始化。
+
+第一版允许 `Task::set_nice(Nice)` 对已发布 task 做非事务性原子更新；syscall 和其它 caller 不得直接访问 raw atomic storage。方法注释必须说明它不提供 runqueue / deadline 强一致性，以及后续 owner CPU transaction 对直接原子写入的替换条件；无需为这一临时边界额外打印 renice 日志。未来动态 renice 必须像 remote enqueue 一样提交给 target owner CPU，在 `RunQueue` transaction 内按旧 nice 结算 current segment、发布新 nice 并完成 class-local update。
 
 未来若支持 scheduler policy / class switch，source CPU 只能完成 ABI / permission / target identity 校验并向 target owner CPU 提交 command；queued、current、blocked 和 exiting task 的 class 迁移必须在 owner CPU `RunQueue` transaction 内线性化。本 RFC 不引入这项能力，只固定 future extension 不得绕过 owner boundary。
 

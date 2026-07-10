@@ -18,7 +18,7 @@
 - 默认 normal scheduler 最终为 `Eevdf`；除 idle task 外，ordinary user task、bootstrap task 和 kthread 第一版都进入 EEVDF normal class。
 - RR 只作为 transaction surface 行为保持对照、debug 或 bisect class；default switch 后不得仍是 production placement path。
 - `Task::cpuid()`、owner CPU runqueue 和 `SchedEntity::on_runq()` 的所有权不变。
-- `Task::nice()` 是唯一 nice truth；EEVDF entity 不保存另一份 nice，也不在第一版保存 `cached_weight`。
+- `Nice` newtype 统一约束 nice 值域和 weight-table index；`Task::nice()` 返回唯一 nice truth，EEVDF entity 不保存另一份 nice，也不在第一版保存 `cached_weight`。
 - clone 只能继承 nice；新 task 必须创建 fresh normal `SchedEntity`，不得复制父 task 的 EEVDF runtime state。
 - EEVDF 的 `account_current(now)` 是 class-private helper。trait 只暴露 current execution accounting 的生命周期点。
 - `switch.rs::switch_out()` 中现有 `Task::on_switch_out()` hook 只保留 task / CPU usage 等 context-switch bookkeeping，不作为 fair scheduler accounting truth。
@@ -76,7 +76,7 @@
   - `anemone-kernel/src/sched/class/idle.rs`
   - `anemone-kernel/src/task/sched.rs`
   - `anemone-kernel/src/task/mod.rs`
-  - `anemone-kernel/src/task/api/priority.rs`
+  - `anemone-kernel/src/task/api/priority/`
 - 审计当前 sched-split wrapper：
   - `schedule_preempt()`
   - `schedule_wait_sleep()`
@@ -88,7 +88,7 @@
 - 审计 `task_enqueue()` / `local_enqueue()` / `remote_enqueue()` 调用点，确认它们都是 new task publication；若发现非 fresh task publication，停止并重新分类。
 - 审计 `wake_enqueue()` / `local_wake_enqueue()` / `remote_wake_enqueue()` 的 `WakeEnqueueResult` 分支。
 - 审计所有 `SchedClassPrv::RoundRobin(())` 初始化点，区分 ordinary task、bootstrap task、kthread 和 debug/bisect 保留点。
-- 审计 `Task::nice()` / `set_nice()` 写入路径，包括 `setpriority()` 和 clone inheritance；clone 只能继承 nice，不能复制父 task 的 `SchedEntity`。
+- 审计 `Task::nice()` / published-task writer，包括 `setpriority()` 和 clone inheritance；clone 只能在发布前继承 nice，不能复制父 task 的 `SchedEntity`。
 - 审计 `Instant::now()` 在 scheduler noirq / tick path 的可用性；若时间读取可能分配、睡眠、触发复杂锁或重入 scheduler，停止并回到 RFC review。
 
 反馈假设：
@@ -517,7 +517,7 @@ Tracking issue 关闭审查：
   - 不修改 `vruntime`，不把 task 推到不可恢复的最差位置。
 - 实现 nice-to-weight 语义消费：
   - `setpriority()` / clone nice inheritance 后，下一次 owner CPU `account_current()` / enqueue / pick / preempt decision 读取最新 nice。
-  - 已存在 deadline 不因 renice 立即重算；若当前 `setpriority()` 路径无法保证后续 owner CPU 可观察最新 nice，2C 必须在 `task/api/priority.rs` 或 owner-local helper 中补齐规则；该问题不能留到 default class switch 后再处理。
+  - 已存在 deadline 不因 renice 立即重算；若当前 `setpriority()` 路径无法保证后续 owner CPU 可观察最新 nice，2C 必须在 `task/api/priority/` 或 owner-local helper 中补齐规则；该问题不能留到 default class switch 后再处理。
   - nice 是 task-owned weight truth 的例外，不等同 scheduler policy / class migration；2C 不得新增远端直接修改 `SchedEntity` class 或 EEVDF payload 的路径。
 - 消费 2A 已接入的 Kconfig constants：
   - base slice。
@@ -547,7 +547,7 @@ write set：
 - `anemone-kernel/src/sched/class/mod.rs`
 - `anemone-kernel/src/sched/processor.rs`
 - `anemone-kernel/src/sched/mod.rs`
-- `anemone-kernel/src/task/api/priority.rs` 仅在 weight visibility helper 或 `setpriority()` owner-local update 规则需要时触碰。
+- `anemone-kernel/src/task/api/priority/` 仅在 weight visibility helper 或 `setpriority()` owner-local update 规则需要时触碰。
 - `conf/.defconfig`
 - `kconfig`
 - `scripts/xtask/src/config/kconfig.rs`
@@ -814,7 +814,7 @@ write set：
 - `rg -n "PendingResched|ReschedCause|request_resched|take_pending_resched|restore_pending_resched|mark_need_resched|fetch_clear_need_resched" anemone-kernel/src`
 - `rg -n "switch_out\\(|on_switch_out|on_switch_in|account_current|local_sched_tick" anemone-kernel/src/sched anemone-kernel/src/task`
 - `rg -n "TaskSchedState|ParkState|WakeEnqueueResult|is_sched_runnable|on_runq" anemone-kernel/src/sched anemone-kernel/src/task`
-- `rg -n "nice\\(|set_nice|setpriority|getpriority|kernel_setpriority" anemone-kernel/src/task anemone-kernel/src/sched`
+- `rg -n "nice\\(|inherit_nice_before_publish|set_nice|setpriority|getpriority" anemone-kernel/src/task anemone-kernel/src/sched`
 - `rg -n "Instant::now|Duration|SYSTEM_HZ|kconfig_defs" anemone-kernel/src/sched anemone-kernel/src/time scripts/xtask/src/config conf/.defconfig`
 - `rg -n "deadline|vruntime|rq_vtime|anomaly|wake_clamp|yield_penalty|base_slice" anemone-kernel/src/sched`
 
@@ -895,7 +895,7 @@ write set：
 
 **保护目标 / 不变量：** 短 slice task 可以获得更好响应性，但不能绕过公平份额；yielding task 给其它 runnable task 运行机会，但不能被永久惩罚。
 
-**最小 write set：** `anemone-kernel/src/sched/class/eevdf.rs`、`anemone-kernel/src/sched/class/mod.rs`、`anemone-kernel/src/sched/class/runqueue.rs`，以及 `task/api/priority.rs`、Kconfig 生成路径和可用的 focused scheduler smoke tests / debug-only test hooks。
+**最小 write set：** `anemone-kernel/src/sched/class/eevdf.rs`、`anemone-kernel/src/sched/class/mod.rs`、`anemone-kernel/src/sched/class/runqueue.rs`，以及 `task/api/priority/`、Kconfig 生成路径和可用的 focused scheduler smoke tests / debug-only test hooks。
 
 **非目标：** 不在本 gate 实现 delayed dequeue、lag decay、cgroups、latency nice 或 tree indexes。
 
@@ -937,17 +937,19 @@ write set：
 - 2026-07-07：纠正 v2 草案中的 event-first 偏差；删除 `SchedEvent` / `EnqueueReason` / `RequeueReason` / `SwitchOutReason` 作为 accepted contract 的设计，改为 method-first 的 scheduler class lifecycle transaction surface。`PendingResched` 保持 processor / scheduler-core 私有 pending request；EEVDF 的 `account_current(now)` 收归为 class-private helper；wake handoff / abort wait 边界改由 `enqueue_woken()`、`handoff_woken_current()` 和 `requeue_aborted_wait_current()` 等方法名表达。
 - 2026-07-07：文档层 review 后修正 gate 顺序：当时将阶段 1 整体职责收窄为 method-first surface、typed pending 和 lifecycle transaction 位置；`rq_vtime`、EEVDF private accounting、wake placement exactly-once 和 virtual-time arithmetic 由阶段 2 / Gate P1-P3 在 default switch 前关闭。同时补充 remote runnable arrival 的 owner CPU placement 后 preempt decision 线性化要求，避免 source CPU 读取目标 CPU current。
 - 2026-07-08：收窄 scheduler class surface：`pick_next_task()` 不接收 `now`，`set_next_task(task, now)` 不接收 bootstrap `first` 参数，`enqueue_new()` / `enqueue_woken()` 不接收 wall-clock `now`；若实现期发现 new / wake placement 必须依赖当前时间，停止并回到 RFC review。`EEVDF-005` 接受的 switch-in 顺序固定为 pick / set-next / mapping 准备 / task switch-in hook / current publication / architecture switch，no-switch abort 和 deferred preempt 不得调用 `set_next_task()`。
-- 2026-07-08：阶段边界审查后修正实施计划：阶段 2 只引入 EEVDF-specific constructor 和算法 gate，不把 default normal constructor 提前翻到 EEVDF；阶段 3 才执行 default normal switch。`task/api/priority.rs` 的 weight visibility 修复归入阶段 2 条件 write set；阶段 3 的 scheduler core / EEVDF 文件改为 audit-only 或阶段 2 漏闭合时的停止信号。同时补充 `switch_mapping(prev, next)` 相对 `set_next_task()` 的 source-audit 位置，避免 switch-in execution segment 起点含义悬空。
+- 2026-07-08：阶段边界审查后修正实施计划：阶段 2 只引入 EEVDF-specific constructor 和算法 gate，不把 default normal constructor 提前翻到 EEVDF；阶段 3 才执行 default normal switch。`task/api/priority/` 的 weight visibility 修复归入阶段 2 条件 write set；阶段 3 的 scheduler core / EEVDF 文件改为 audit-only 或阶段 2 漏闭合时的停止信号。同时补充 `switch_mapping(prev, next)` 相对 `set_next_task()` 的 source-audit 位置，避免 switch-in execution segment 起点含义悬空。
 - 2026-07-09：阶段 1 保持一个概念阶段，但拆为 Checkpoint 1A / 1B：1A 关闭 trait / `RunQueue` / entity split 和 RR/Idle 机械适配，1B 关闭 typed pending、schedule entry、trap / IPI plumbing 与 `EEVDF-005` source audit。阶段 2 前置条件改为 1B 关闭，避免一个 gate 同时吞下所有 cross-layer plumbing。
 - 2026-07-09：阶段 2 保持一个概念阶段，但拆为 Checkpoint 2A / 2B / 2C / 2D：2A 只做 payload / class compile scaffold，2B 关闭 P1 accounting，2C 关闭 P2 `rq_vtime` / arithmetic / bounded yield，2D 关闭 P3 wake clamp / parked handoff。阶段 3 前置条件改为 2B / 2C / 2D 全部关闭，避免一次性算法落地。
 - 2026-07-09：Checkpoint 1B source audit 后澄清 wait abort / handoff wording：no-switch abort 不调用 class transaction，`ParkPending` 由 `handoff_woken_current()` 收口，`requeue_aborted_wait_current()` 只保留给无 wake reward 的 abort-park requeue 路径；目标、不变量、阶段顺序和 write set 不变。
 - 2026-07-09：Checkpoint 1B 后反馈指出 `schedule_preempt(pending)` 内部 restore caller 传入的 `PendingResched` value 会混淆 flags value 与 processor pending slot ownership。接受 caller-owned restore：执行 `take_pending_resched()` 的 trap tail caller 在 `SchedulePreemptResult::Deferred` 时恢复原 pending set；`schedule_preempt()` 只返回 deferred，不写 processor pending state。目标、不变量和阶段顺序不变。
 - 2026-07-10：Checkpoint 2C 前设计共识闭合：virtual-time state 以 normalized ns `u64` 存储、`u128` 中间计算、saturating helper 记录 anomaly；`rq_vtime` 使用 monotonic min-vruntime floor，visible set 包含 queue 和 current；eligibility 为 `vruntime <= rq_vtime`；new placement 使用 `vruntime = rq_vtime`；deadline 仅初始化或 `vruntime >= deadline` 时自然续期；tick / runnable-arrival preempt 只接受 eligible 且 deadline 更早的 candidate；yield 只后推 deadline，不改 `vruntime`；nice visibility 只保证后续 owner CPU 观察最新 `Task::nice()`；2C 不实现 wake clamp。
 - 2026-07-10：Checkpoint 2C 关闭后接受 class shape 反馈：跨 class precedence 在 `sched/class/mod.rs` 以 high-to-low class order 集中保存为唯一真相，各 `Scheduler` implementation 只关联自己的 class identity；`RunQueue` 的 pick 与 preempt comparison 都消费该 class-domain order，不再保存 `class_rank()` 或独立 pick 顺序。`EevdfEntity`、`SchedClassPrv` 和通用 payload constructor 收窄到 scheduler class owner，删除没有模块外消费者的 EEVDF entity accessor。该纠正保持 `Eevdf > RoundRobin > Idle` 行为、EEVDF 算法和 ABI 不变；nice 值域、nice-to-weight 表及其 owner boundary 明确延期，不在本反馈中修改。
+- 2026-07-10：阶段 3 前接受 Nice / priority 边界反馈纠正，不新增 Checkpoint 2E：引入 `Nice` / 受约束原子存储，拆分 `task/api/priority` syscall 模块，修复低代价且已确认的 target-selection / errno 语义，并把已发布 task 的临时非事务性 nice 写入集中到 `Task::set_nice(Nice)`。动态 renice 的 owner-CPU `RunQueue` command / IPI、立即 deadline/requeue 更新、`RLIMIT_NICE`、user namespace / LSM 强一致性仍延期；方法注释记录 deferred-accounting 边界及 owner-CPU transaction 对直接原子写入的替换条件，不为该临时边界增加逐次 renice 日志。该 feedback correction 关闭前不开始阶段 3，但不改变阶段编号、EEVDF 算法 gate 或 default-switch contract。
 
 ## Write Set 扩展记录
 
 - 2026-07-10：用户批准 Checkpoint 2C 后 class-shape correction 扩展到 `sched/class/{mod,entity,runqueue,eevdf,rr,idle}.rs`、本 implementation feedback 和 transaction devlog。扩展只用于 class precedence metadata 与 class-private entity visibility；不触碰 task / priority owner、nice / weight 架构、wait-core、2D wake clamp 或 default normal constructor。
+- 2026-07-10：用户批准阶段 3 前 Nice / priority feedback correction 扩展到 `sched/{mod,nice}.rs`、`sched/class/eevdf.rs`、`task/{mod,sched}.rs`、`task/api/clone/mod.rs`、`task/api/priority/{mod,target,getpriority,setpriority}.rs`、本 RFC canonical 文本和 transaction devlog。扩展不触碰 runqueue、processor、IPI payload、deadline / placement / accounting formula、Kconfig 或 default normal constructor；若实现要求这些边界，停止并回到 RFC review。
 
 ## 结构维护记录
 
