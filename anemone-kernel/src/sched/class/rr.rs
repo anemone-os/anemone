@@ -22,6 +22,8 @@ impl RoundRobin {
 }
 
 impl Scheduler for RoundRobin {
+    const KIND: SchedClassKind = SchedClassKind::RoundRobin;
+
     fn enqueue_new(&mut self, task: Arc<Task>) {
         self.enqueue_back(task);
     }

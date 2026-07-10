@@ -1,4 +1,4 @@
-use crate::sched::class::eevdf::EevdfEntity;
+use super::eevdf::EevdfEntity;
 
 #[derive(Debug, Clone)]
 pub struct SchedEntity {
@@ -8,7 +8,7 @@ pub struct SchedEntity {
 
 impl SchedEntity {
     /// Create a new scheduling entity with the given scheduling class.
-    pub fn new(class: SchedClassPrv) -> Self {
+    fn new(class: SchedClassPrv) -> Self {
         Self {
             on_runq: false,
             class,
@@ -45,14 +45,10 @@ impl SchedEntity {
     pub fn class_kind(&self) -> SchedClassKind {
         self.class.kind()
     }
-
-    pub(super) fn class(&self) -> &SchedClassPrv {
-        &self.class
-    }
 }
 
 #[derive(Debug, Clone)]
-pub enum SchedClassPrv {
+pub(super) enum SchedClassPrv {
     Eevdf(EevdfEntity),
     // TODO: time slice.
     RoundRobin(()),
@@ -60,7 +56,7 @@ pub enum SchedClassPrv {
 }
 
 impl SchedClassPrv {
-    pub const fn kind(&self) -> SchedClassKind {
+    const fn kind(&self) -> SchedClassKind {
         match self {
             Self::Eevdf(_) => SchedClassKind::Eevdf,
             Self::RoundRobin(()) => SchedClassKind::RoundRobin,

@@ -2,6 +2,8 @@
 
 use crate::prelude::*;
 
+use self::{eevdf::Eevdf, idle::Idle, rr::RoundRobin};
+
 pub mod eevdf;
 pub mod idle;
 pub mod rr;
@@ -9,8 +11,44 @@ pub mod rr;
 mod entity;
 mod runqueue;
 
-pub use entity::{SchedClassKind, SchedClassPrv, SchedEntity};
+pub use entity::{SchedClassKind, SchedEntity};
 pub use runqueue::RunQueue;
+
+/// Internal scheduler-class selection precedence, ordered from high to low.
+///
+/// This is the single source of truth for cross-class selection. The order has
+/// no ABI meaning and must not be translated to or from Linux `SCHED_*` policy
+/// values. Syscall policy translation belongs at the ABI boundary.
+const CLASS_PRECEDENCE: [SchedClassKind; 3] = [
+    <Eevdf as Scheduler>::KIND,
+    <RoundRobin as Scheduler>::KIND,
+    <Idle as Scheduler>::KIND,
+];
+
+impl SchedClassKind {
+    pub(super) fn in_precedence_order() -> [Self; CLASS_PRECEDENCE.len()] {
+        assert!(
+            CLASS_PRECEDENCE[0] != CLASS_PRECEDENCE[1]
+                && CLASS_PRECEDENCE[0] != CLASS_PRECEDENCE[2]
+                && CLASS_PRECEDENCE[1] != CLASS_PRECEDENCE[2],
+            "scheduler class precedence contains duplicate classes"
+        );
+        CLASS_PRECEDENCE
+    }
+
+    fn precedence_index(self) -> usize {
+        for (index, kind) in CLASS_PRECEDENCE.into_iter().enumerate() {
+            if kind == self {
+                return index;
+            }
+        }
+        panic!("scheduler class is missing from class precedence");
+    }
+
+    pub(super) fn outranks(self, other: Self) -> bool {
+        self.precedence_index() < other.precedence_index()
+    }
+}
 
 /// Scheduler-class local transaction surface.
 ///
@@ -18,7 +56,11 @@ pub use runqueue::RunQueue;
 /// [`RunQueue`] choose which transaction happens and maintain global owner CPU
 /// state; class implementations keep their own queue/accounting details behind
 /// these path-specific methods.
-pub trait Scheduler: Send + Sync {
+pub(super) trait Scheduler: Send + Sync {
+    /// Static identity used to associate this implementation with class-wide
+    /// metadata such as [`CLASS_PRECEDENCE`].
+    const KIND: SchedClassKind;
+
     /// Place a freshly published runnable task.
     fn enqueue_new(&mut self, task: Arc<Task>);
 

@@ -8,10 +8,8 @@ use crate::{
 
 /// PerCpu run queue.
 ///
-/// Priority (top-down):
-/// - [Eevdf]
-/// - [RoundRobin]
-/// - [Idle]
+/// Cross-class selection follows the single precedence order owned by the
+/// scheduler class domain; this facade does not duplicate that order.
 ///
 /// Reference:
 /// - https://elixir.bootlin.com/linux/v6.6.32/source/kernel/sched/sched.h#L964
@@ -103,31 +101,28 @@ impl RunQueue {
     }
 
     pub fn pick_next_task(&mut self) -> Arc<Task> {
-        if let Some(task) = self.eevdf.pick_next_task() {
-            self.ntasks -= 1;
-            task.with_sched_entity_mut(|se| {
-                assert_eq!(se.class_kind(), SchedClassKind::Eevdf);
-                assert!(se.on_runq, "task is not on run queue");
-                se.on_runq = false;
-            });
+        for kind in SchedClassKind::in_precedence_order() {
+            let task = match kind {
+                SchedClassKind::Eevdf => self.eevdf.pick_next_task(),
+                SchedClassKind::RoundRobin => self.rr.pick_next_task(),
+                SchedClassKind::Idle => self.idle.pick_next_task(),
+            };
+            let Some(task) = task else {
+                continue;
+            };
+
+            if kind != SchedClassKind::Idle {
+                self.ntasks -= 1;
+                task.with_sched_entity_mut(|se| {
+                    assert_eq!(se.class_kind(), kind);
+                    assert!(se.on_runq, "task is not on run queue");
+                    se.on_runq = false;
+                });
+            }
             return task;
         }
 
-        // rr
-        if let Some(task) = self.rr.pick_next_task() {
-            self.ntasks -= 1;
-            task.with_sched_entity_mut(|se| {
-                assert_eq!(se.class_kind(), SchedClassKind::RoundRobin);
-                assert!(se.on_runq, "task is not on run queue");
-                se.on_runq = false;
-            });
-            return task;
-        }
-
-        // idle
-        self.idle
-            .pick_next_task()
-            .expect("idle scheduler should always have a task to run")
+        panic!("idle scheduler should always have a task to run")
     }
 
     pub fn set_next_task(&mut self, task: &Arc<Task>, now: Instant) {
@@ -155,7 +150,7 @@ impl RunQueue {
         let current_kind = current.sched_class_kind();
         let candidate_kind = candidate.sched_class_kind();
         if current_kind != candidate_kind {
-            return if Self::class_rank(candidate_kind) > Self::class_rank(current_kind) {
+            return if candidate_kind.outranks(current_kind) {
                 PreemptDecision::RequestResched
             } else {
                 PreemptDecision::KeepCurrent
@@ -166,14 +161,6 @@ impl RunQueue {
             SchedClassKind::Eevdf => self.eevdf.decide_preempt_current(current, candidate, now),
             SchedClassKind::RoundRobin => self.rr.decide_preempt_current(current, candidate, now),
             SchedClassKind::Idle => self.idle.decide_preempt_current(current, candidate, now),
-        }
-    }
-
-    fn class_rank(kind: SchedClassKind) -> u8 {
-        match kind {
-            SchedClassKind::Eevdf => 2,
-            SchedClassKind::RoundRobin => 1,
-            SchedClassKind::Idle => 0,
         }
     }
 

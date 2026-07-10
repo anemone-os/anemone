@@ -9,6 +9,8 @@ use crate::{
 pub struct Idle;
 
 impl Scheduler for Idle {
+    const KIND: SchedClassKind = SchedClassKind::Idle;
+
     fn enqueue_new(&mut self, _task: Arc<Task>) {
         panic!("idle scheduler should not be enqueued with any task");
     }

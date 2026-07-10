@@ -6,11 +6,14 @@
 
 use crate::{
     prelude::*,
-    sched::class::{PendingResched, PreemptDecision, SchedClassPrv, Scheduler, TickAction},
+    sched::class::{
+        PendingResched, PreemptDecision, SchedClassKind, Scheduler, TickAction,
+        entity::SchedClassPrv,
+    },
 };
 
-pub type Vruntime = u64;
-pub type Deadline = u64;
+type Vruntime = u64;
+type Deadline = u64;
 
 const NICE_0_WEIGHT: u64 = 1024;
 const MIN_NICE: isize = -20;
@@ -26,7 +29,7 @@ const NICE_WEIGHTS: [u64; 40] = [
 ];
 
 #[derive(Debug, Clone)]
-pub struct EevdfEntity {
+pub(super) struct EevdfEntity {
     vruntime: Vruntime,
     deadline: Deadline,
     slice: Duration,
@@ -35,7 +38,7 @@ pub struct EevdfEntity {
 }
 
 impl EevdfEntity {
-    pub const fn new() -> Self {
+    pub(super) const fn new() -> Self {
         Self {
             vruntime: 0,
             deadline: 0,
@@ -43,26 +46,6 @@ impl EevdfEntity {
             exec_start: None,
             initialized: false,
         }
-    }
-
-    pub const fn vruntime(&self) -> Vruntime {
-        self.vruntime
-    }
-
-    pub const fn deadline(&self) -> Deadline {
-        self.deadline
-    }
-
-    pub const fn slice(&self) -> Duration {
-        self.slice
-    }
-
-    pub const fn exec_start(&self) -> Option<Instant> {
-        self.exec_start
-    }
-
-    pub const fn initialized(&self) -> bool {
-        self.initialized
     }
 }
 
@@ -446,6 +429,8 @@ impl Eevdf {
 }
 
 impl Scheduler for Eevdf {
+    const KIND: SchedClassKind = SchedClassKind::Eevdf;
+
     fn enqueue_new(&mut self, task: Arc<Task>) {
         self.initialize_fresh_entity(&task);
         self.enqueue_back(task);

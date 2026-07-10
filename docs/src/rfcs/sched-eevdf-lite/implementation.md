@@ -943,12 +943,14 @@ write set：
 - 2026-07-09：Checkpoint 1B source audit 后澄清 wait abort / handoff wording：no-switch abort 不调用 class transaction，`ParkPending` 由 `handoff_woken_current()` 收口，`requeue_aborted_wait_current()` 只保留给无 wake reward 的 abort-park requeue 路径；目标、不变量、阶段顺序和 write set 不变。
 - 2026-07-09：Checkpoint 1B 后反馈指出 `schedule_preempt(pending)` 内部 restore caller 传入的 `PendingResched` value 会混淆 flags value 与 processor pending slot ownership。接受 caller-owned restore：执行 `take_pending_resched()` 的 trap tail caller 在 `SchedulePreemptResult::Deferred` 时恢复原 pending set；`schedule_preempt()` 只返回 deferred，不写 processor pending state。目标、不变量和阶段顺序不变。
 - 2026-07-10：Checkpoint 2C 前设计共识闭合：virtual-time state 以 normalized ns `u64` 存储、`u128` 中间计算、saturating helper 记录 anomaly；`rq_vtime` 使用 monotonic min-vruntime floor，visible set 包含 queue 和 current；eligibility 为 `vruntime <= rq_vtime`；new placement 使用 `vruntime = rq_vtime`；deadline 仅初始化或 `vruntime >= deadline` 时自然续期；tick / runnable-arrival preempt 只接受 eligible 且 deadline 更早的 candidate；yield 只后推 deadline，不改 `vruntime`；nice visibility 只保证后续 owner CPU 观察最新 `Task::nice()`；2C 不实现 wake clamp。
+- 2026-07-10：Checkpoint 2C 关闭后接受 class shape 反馈：跨 class precedence 在 `sched/class/mod.rs` 以 high-to-low class order 集中保存为唯一真相，各 `Scheduler` implementation 只关联自己的 class identity；`RunQueue` 的 pick 与 preempt comparison 都消费该 class-domain order，不再保存 `class_rank()` 或独立 pick 顺序。`EevdfEntity`、`SchedClassPrv` 和通用 payload constructor 收窄到 scheduler class owner，删除没有模块外消费者的 EEVDF entity accessor。该纠正保持 `Eevdf > RoundRobin > Idle` 行为、EEVDF 算法和 ABI 不变；nice 值域、nice-to-weight 表及其 owner boundary 明确延期，不在本反馈中修改。
 
 ## Write Set 扩展记录
 
-- 暂无。
+- 2026-07-10：用户批准 Checkpoint 2C 后 class-shape correction 扩展到 `sched/class/{mod,entity,runqueue,eevdf,rr,idle}.rs`、本 implementation feedback 和 transaction devlog。扩展只用于 class precedence metadata 与 class-private entity visibility；不触碰 task / priority owner、nice / weight 架构、wait-core、2D wake clamp 或 default normal constructor。
 
 ## 结构维护记录
 
 - 2026-07-07：阶段 1 建议主动做同一 scheduler owner 内 split-only checkpoint：`sched/class/runqueue.rs` 承载 `RunQueue` facade，`sched/class/entity.rs` 承载 `SchedEntity` / `SchedClassPrv`，`Scheduler` trait 留在 `sched/class/mod.rs`。拆分依据是 scheduler 业务职责，而不是 `api.rs` 这类抽象层命名。
 - 2026-07-09：上述 split-only checkpoint 收归为阶段 1A；trap / IPI、typed pending producer/consumer 和 schedule entry plumbing 收归为阶段 1B。
+- 2026-07-10：2C 后结构反馈要求 class precedence truth 归还 scheduler class metadata，并收窄 EEVDF payload / class-private enum 的可见面；该维护不改变 lifecycle transaction surface、class 顺序或调度语义。
