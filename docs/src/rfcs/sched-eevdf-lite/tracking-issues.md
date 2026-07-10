@@ -23,22 +23,6 @@
 
 ## Keter
 
-### EEVDF-004：wake placement 必须 exactly-once 覆盖 parked handoff 分支
-
-**状态：** Active
-
-**问题：** 普通 wake 只有 `WakeEnqueueResult::Enqueued` 后才通过 `enqueue_woken()` 执行 wake clamp；`ParkPending` 不能立即 clamp，必须在 scheduler 收口 requeue 时通过 `handoff_woken_current()` exactly once clamp；`Stale`、`AlreadyCurrent`、`AlreadyQueued`、no-switch abort 和 `requeue_aborted_wait_current()` 都不得重复或错误 clamp。
-
-**修复落点：**
-
-- [RFC index](./index.md) 的 wake placement exactly-once 章节。
-- [不变量需求](./invariants.md) 的 wake placement 不变量。
-- [迁移实施计划](./implementation.md) Checkpoint 2D / Gate P3。
-
-**反馈相关：** 阶段 1A 关闭 method surface，阶段 1B 关闭 schedule entry / wake placement 分流位置；具体 EEVDF wake clamp 由 Checkpoint 2D / Gate P3 关闭。2D 的 source audit 需要覆盖普通 wake `Enqueued`、parked handoff、no-switch abort、abort-park requeue、stale、already queued、already current。若失败是方法边界错误，按 1A / 1B 归属回写本计划和本 issue；若失败是 wait-core contract 变化，停止并路由回 sched-wait 相关 RFC。
-
-**关闭条件：** `enqueue_woken()` / `handoff_woken_current()` 的 exactly-once 边界已证明，abort/stale/already-current/already-queued 不会获得 wake reward；未关闭前不得进入默认 class 切换。
-
 ### EEVDF-017：default class switch 必须被 blocker / gate 矩阵约束
 
 **状态：** Active
@@ -49,7 +33,7 @@
 
 - [迁移实施计划](./implementation.md) 阶段 2 / 阶段 3 前置条件。
 
-**反馈相关：** 本 issue 不拥有独立 probe；它消费阶段 1A / 1B review gate，以及 Checkpoint 2A / 2B / 2C / 2D。`EEVDF-021` 已通过 canonical eventual-progress 证明 neutralized；阶段 3 只验证 direct normal 分类和无 production RR 特例。若任一 checkpoint 的反馈要求改变目标、不变量或默认 class 接受边界，必须先回写 canonical 文本，本 issue 保持 active。
+**反馈相关：** 本 issue 不拥有独立 probe；它消费阶段 1A / 1B review gate，以及 Checkpoint 2A / 2B / 2C / 2D。上述 gate 截至 2026-07-10 已全部关闭，阶段 3 仍需完成 default switch source audit 后才能 neutralize 本 issue。`EEVDF-021` 已通过 canonical eventual-progress 证明 neutralized；阶段 3 只验证 direct normal 分类和无 production RR 特例。若 default switch 反馈要求改变目标、不变量或接受边界，必须先回写 canonical 文本，本 issue 保持 active。
 
 **关闭条件：** 最低矩阵全部关闭：阶段 1A 关闭 method-first surface、`RunQueue` / entity split 和 RR / Idle 行为保持；阶段 1B 关闭 typed pending、schedule entry plumbing 和 `EEVDF-005`；Checkpoint 2A 关闭 payload / class compile scaffold 且未提前切 default normal；Checkpoint 2B / Gate P1 关闭 `EEVDF-002`；Checkpoint 2C / Gate P2 关闭 `EEVDF-001` 与 `EEVDF-020`；Checkpoint 2D / Gate P3 关闭 `EEVDF-004`；阶段 3 source audit 证明 default switch 没有 ordinary / bootstrap / kthread production RR 特例。
 
@@ -62,6 +46,20 @@
 - 暂无 active Safe。
 
 ## Neutralized
+
+### EEVDF-004：wake placement 必须 exactly-once 覆盖 parked handoff 分支
+
+**状态：** Neutralized
+
+**修复落点：**
+
+- `anemone-kernel/src/sched/class/eevdf.rs` 只在 `enqueue_woken()` 与 `handoff_woken_current()` 调用 class-private wake clamp；clamp 将过度落后的 `vruntime` 提升到 `rq_vtime - wake_window_vruntime(weight)` 下界，不降低窗口内或领先 entity 的 `vruntime`，并在 clamp 后按既有自然续期规则处理 expired deadline。
+- ordinary wake 只在 owner CPU stale-safe placement 返回 `Enqueued` 时进入 `enqueue_woken()`；parked current 只在 scheduler 收口时进入 `handoff_woken_current()`，并先通过唯一 `account_current(now)` 结算执行段。
+- `Stale`、`AlreadyCurrent`、`AlreadyQueued` 和 no-switch abort 都在 class transaction 前返回；`requeue_aborted_wait_current()` 不调用 clamp 或 yield penalty。
+
+**Source audit / validation:** 两个独立只读 reviewer 均确认 ordinary / remote wake、parked handoff、abort 和 class owner boundary 无 Apollyon / Keter / Euclid。focused KUnit 覆盖 bounded floor、领先 entity 不回退、重复应用幂等、underflow 和 clamp 后 deadline renewal；rv64 端到端脚本重建 rootfs 后运行 107 项 KUnit 全部通过，并正常完成现有 read-write profile 和关机。
+
+**结论：** Checkpoint 2D / Gate P3 已关闭，ordinary wake / parked handoff exactly-once 边界已由实现、source audit、独立 review 和 focused KUnit 证明。default normal 仍是 RR，因此真实 EEVDF wake-heavy / wait-abort smoke 保留给阶段 3，现有 RR 下 LTP 结果不作为该 runtime 语义的替代证据。
 
 ### EEVDF-001：`rq_vtime` / eligibility 公式必须闭合
 

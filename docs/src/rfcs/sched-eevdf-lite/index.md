@@ -6,7 +6,7 @@
 **领域：** scheduler / fairness / runtime accounting / scheduler class
 **事务日志：** [2026-07-09-sched-eevdf-lite](../../devlog/transactions/2026-07-09-sched-eevdf-lite.md)
 **开放问题：** 见 [Tracking Issues](./tracking-issues.md)
-**下一步：** 按事务日志推进 Checkpoint 2D / Gate P3：实现 ordinary wake / parked handoff exactly-once wake clamp，并证明 stale、already-current、already-queued 和 abort path 不会获得重复或错误 reward；不得提前切换 default normal class。
+**下一步：** 按事务日志推进阶段 3 default class 切换：先确认阶段 1A / 1B 与 Checkpoint 2A / 2B / 2C / 2D gate 全部关闭，再把 ordinary task、bootstrap task 和 kthread 的 fresh normal entity 统一翻转到 EEVDF；不得在 default switch 中补写阶段 2 算法 contract 或保留 production RR 特例。
 
 ## 摘要
 

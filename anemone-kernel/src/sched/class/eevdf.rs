@@ -1,8 +1,8 @@
 //! EEVDF-lite scheduler class.
 //!
-//! Checkpoint 2C closes weighted virtual-time arithmetic, eligibility,
-//! `rq_vtime`, and bounded yield. Wake clamp remains a separate checkpoint
-//! before this class can become the default normal scheduler.
+//! Checkpoints 2C and 2D close weighted virtual-time arithmetic, eligibility,
+//! `rq_vtime`, bounded yield, and exactly-once wake clamp. The class remains an
+//! explicit directed class until the default-normal switch in stage 3.
 
 use crate::{
     prelude::*,
@@ -197,6 +197,28 @@ impl Eevdf {
         }
     }
 
+    fn clamp_woken_vruntime(
+        vruntime: Vruntime,
+        rq_vtime: Vruntime,
+        wake_window: Vruntime,
+    ) -> Vruntime {
+        // A sleeper may keep bounded positive lag, but stale service history
+        // must not place it arbitrarily far behind the current fairness clock.
+        // Never lower vruntime here: doing so would manufacture wake reward.
+        vruntime.max(rq_vtime.saturating_sub(wake_window))
+    }
+
+    fn renew_deadline_if_expired(entity: &mut EevdfEntity, weight: u64) -> bool {
+        if entity.vruntime < entity.deadline {
+            return false;
+        }
+
+        let slice = Self::duration_to_vruntime(entity.slice, weight);
+        let deadline = Self::add_vtime(entity.vruntime, slice.value);
+        entity.deadline = deadline.value;
+        slice.saturated || deadline.saturated
+    }
+
     fn initialize_entity(entity: &mut EevdfEntity, rq_vtime: Vruntime, weight: u64) -> bool {
         let slice = Self::duration_to_vruntime(entity.slice, weight);
         let deadline = Self::add_vtime(rq_vtime, slice.value);
@@ -271,13 +293,9 @@ impl Eevdf {
             let delta_vruntime = Self::duration_to_vruntime(delta_exec, weight);
             let vruntime = Self::add_vtime(entity.vruntime, delta_vruntime.value);
             entity.vruntime = vruntime.value;
-            let mut saturated = delta_vruntime.saturated || vruntime.saturated;
-            if entity.deadline <= entity.vruntime {
-                let slice = Self::duration_to_vruntime(entity.slice, weight);
-                let deadline = Self::add_vtime(entity.vruntime, slice.value);
-                entity.deadline = deadline.value;
-                saturated |= slice.saturated || deadline.saturated;
-            }
+            let saturated = delta_vruntime.saturated
+                || vruntime.saturated
+                || Self::renew_deadline_if_expired(entity, weight);
             entity.exec_start = Some(now);
             saturated
         });
@@ -299,6 +317,22 @@ impl Eevdf {
             deadline
         });
         if penalty.saturated || deadline.saturated {
+            self.record_anomaly(EevdfAnomaly::ArithmeticSaturation);
+        }
+    }
+
+    fn apply_wake_clamp(&mut self, task: &Arc<Task>) {
+        let weight = Self::task_weight(task);
+        let wake_window =
+            Self::duration_to_vruntime(Duration::from_micros(EEVDF_WAKE_CLAMP_US), weight);
+        let rq_vtime = self.rq_vtime;
+        let deadline_saturated = Self::with_entity_mut(task, |entity| {
+            assert!(entity.initialized, "EEVDF entity is not initialized");
+            entity.vruntime =
+                Self::clamp_woken_vruntime(entity.vruntime, rq_vtime, wake_window.value);
+            Self::renew_deadline_if_expired(entity, weight)
+        });
+        if wake_window.saturated || deadline_saturated {
             self.record_anomaly(EevdfAnomaly::ArithmeticSaturation);
         }
     }
@@ -437,9 +471,8 @@ impl Scheduler for Eevdf {
     }
 
     fn enqueue_woken(&mut self, task: Arc<Task>) {
-        // Checkpoint 2C only makes an uninitialized directed entity safe. Wake
-        // clamp remains exclusively owned by Checkpoint 2D.
         self.initialize_woken_entity_if_needed(&task);
+        self.apply_wake_clamp(&task);
         self.enqueue_back(task);
     }
 
@@ -480,6 +513,7 @@ impl Scheduler for Eevdf {
     fn handoff_woken_current(&mut self, task: Arc<Task>, now: Instant) {
         self.account_current(&task, now);
         self.clear_current(&task);
+        self.apply_wake_clamp(&task);
         self.enqueue_back(task);
     }
 
@@ -659,5 +693,39 @@ mod kunits {
         let selected = Eevdf::select_candidate(yielding_only.into_iter().enumerate(), 0).unwrap();
         assert_eq!(selected.index, 0);
         assert_eq!(selected.kind, PickKind::Eligible);
+    }
+
+    #[kunit]
+    fn test_wake_clamp_bounds_reward_without_moving_entities_backwards() {
+        let rq_vtime = 100;
+        let wake_window = 20;
+
+        let clamped = Eevdf::clamp_woken_vruntime(10, rq_vtime, wake_window);
+        assert_eq!(clamped, 80);
+        assert_eq!(rq_vtime - clamped, wake_window);
+        assert_eq!(
+            Eevdf::clamp_woken_vruntime(clamped, rq_vtime, wake_window),
+            clamped
+        );
+
+        assert_eq!(Eevdf::clamp_woken_vruntime(90, rq_vtime, wake_window), 90);
+        assert_eq!(Eevdf::clamp_woken_vruntime(120, rq_vtime, wake_window), 120);
+        assert_eq!(Eevdf::clamp_woken_vruntime(0, 10, 20), 0);
+    }
+
+    #[kunit]
+    fn test_wake_clamp_renews_expired_deadline_from_clamped_vruntime() {
+        let mut entity = EevdfEntity::new();
+        entity.initialized = true;
+        entity.vruntime = Eevdf::clamp_woken_vruntime(10, 100, 20);
+        entity.deadline = 50;
+        entity.slice = Duration::from_nanos(20);
+
+        assert!(!Eevdf::renew_deadline_if_expired(
+            &mut entity,
+            NICE_0_WEIGHT
+        ));
+        assert_eq!(entity.vruntime, 80);
+        assert_eq!(entity.deadline, 100);
     }
 }
