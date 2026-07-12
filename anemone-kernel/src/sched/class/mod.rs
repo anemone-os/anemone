@@ -79,10 +79,6 @@ pub(super) trait Scheduler: Send + Sync {
     /// Requeue the current task after a parked wait was woken in place.
     fn handoff_woken_current(&mut self, task: Arc<Task>, now: Instant);
 
-    /// Requeue the current task after wait parking aborted without a wake
-    /// reward.
-    fn requeue_aborted_wait_current(&mut self, task: Arc<Task>, now: Instant);
-
     /// Observe that the previous current task blocked and will not be requeued.
     fn put_prev_blocked(&mut self, task: &Arc<Task>, now: Instant);
 

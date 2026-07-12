@@ -283,13 +283,6 @@ pub fn local_handoff_woken_current(task: Arc<Task>) {
     });
 }
 
-/// Requeue the current task after wait parking aborted without wake reward.
-pub fn local_requeue_aborted_wait_current(task: Arc<Task>) {
-    requeue_current_with(task, |runq, task, now| {
-        runq.requeue_aborted_wait_current(task, now);
-    });
-}
-
 fn put_prev_current_with<F>(task: &Arc<Task>, f: F)
 where
     F: FnOnce(&mut RunQueue, &Arc<Task>, Instant),

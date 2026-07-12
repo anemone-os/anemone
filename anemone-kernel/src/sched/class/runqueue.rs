@@ -80,10 +80,6 @@ impl RunQueue {
         self.requeue_current_with(task, CurrentRequeueTransaction::WokenHandoff { now });
     }
 
-    pub fn requeue_aborted_wait_current(&mut self, task: Arc<Task>, now: Instant) {
-        self.requeue_current_with(task, CurrentRequeueTransaction::AbortedWait { now });
-    }
-
     pub fn put_prev_blocked(&mut self, task: &Arc<Task>, now: Instant) {
         match task.sched_class_kind() {
             SchedClassKind::Eevdf => self.eevdf.put_prev_blocked(task, now),
@@ -212,9 +208,6 @@ impl RunQueue {
                 CurrentRequeueTransaction::WokenHandoff { now } => {
                     self.eevdf.handoff_woken_current(task.clone(), now)
                 },
-                CurrentRequeueTransaction::AbortedWait { now } => {
-                    self.eevdf.requeue_aborted_wait_current(task.clone(), now)
-                },
             },
             SchedClassKind::RoundRobin => match transaction {
                 CurrentRequeueTransaction::Yielded { now } => {
@@ -225,9 +218,6 @@ impl RunQueue {
                     .requeue_preempted_current(task.clone(), now, pending),
                 CurrentRequeueTransaction::WokenHandoff { now } => {
                     self.rr.handoff_woken_current(task.clone(), now)
-                },
-                CurrentRequeueTransaction::AbortedWait { now } => {
-                    self.rr.requeue_aborted_wait_current(task.clone(), now)
                 },
             },
             SchedClassKind::Idle => panic!("idle task should not be requeued"),
@@ -261,9 +251,6 @@ enum CurrentRequeueTransaction {
         pending: PendingResched,
     },
     WokenHandoff {
-        now: Instant,
-    },
-    AbortedWait {
         now: Instant,
     },
 }

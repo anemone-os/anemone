@@ -24,7 +24,7 @@
 - `account_current(now)` 必须以 class-private outcome 保存 deadline 续期前确认的 request completion；decision transaction 立即消费，已经进入 switch 的 transaction 显式丢弃，不新增 entity flag、processor-global truth 或 shared trait 方法。
 - `switch.rs::switch_out()` 中现有 `Task::on_switch_out()` hook 只保留 task / CPU usage 等 context-switch bookkeeping，不作为 fair scheduler accounting truth。
 - wake placement 必须复用现有 stale-safe wake 路径，不允许为公平调度绕过 wait-core revalidation。
-- competition set 为 ready queue 与 class-active current 的互斥并集；yield、preempt、`ParkPending` handoff 和 abort-wait requeue 保持 continuous membership，true block / wake 才执行 leave / join。
+- competition set 为 ready queue 与 class-active current 的互斥并集；yield、preempt 和 `ParkPending` handoff 保持 continuous membership，true block / wake 才执行 leave / join。
 - ordinary true wake 只在 `WakeEnqueueResult::Enqueued` 后通过 `enqueue_woken()` 消费 saved service lag；`ParkPending` 后的 scheduler 收口使用 `handoff_woken_current()` 做 active-to-ready transfer，不执行 wake reward。
 - eligibility 使用 weighted FairClock，不再接受 monotonic minimum-`vruntime` floor。R1 的 `legacy_placement_floor` 只允许作为旧 placement 的临时 bridge，并在 R2 删除。
 - `sched_yield()` 第一版使用 bounded yield penalty；没有 eligible peer 时允许合法 self-pick，不用 forced handoff / skip-current 修补 FairClock。
@@ -48,7 +48,7 @@
 - 本文件成为 implementation canonical source。
 - `tracking-issues.md` 按本轮纠偏收口：
   - `EEVDF-016` 改为 method-first transaction surface blocker，并在文档纠偏完成后 neutralized。
-  - `EEVDF-018` 通过 no-switch abort、`requeue_aborted_wait_current()` 和 `handoff_woken_current()` 三分法 neutralized。
+  - `EEVDF-018` 通过 no-switch abort 与 `handoff_woken_current()` 的 scheduler-core 分流 neutralized。
   - `EEVDF-019` 保持 neutralized，但改为 `PendingResched` flags，不再写事件映射。
   - `EEVDF-013` 保持 neutralized，但表述改为 method-first transaction surface。
 - 保留真正阻塞实现顺序的 open Keter：
@@ -151,7 +151,6 @@ write set：
   - `requeue_yielded_current(task, now)`
   - `requeue_preempted_current(task, now, pending)`
   - `handoff_woken_current(task, now)`
-  - `requeue_aborted_wait_current(task, now)`
   - `put_prev_blocked(task, now)`
   - `put_prev_exiting(task, now)`
   - `pick_next_task()`
@@ -249,9 +248,8 @@ write set：
 - `task_enqueue()` / `local_enqueue()` / `remote_enqueue()` 命名族清理为 `enqueue_new_task` 语义，例如 `enqueue_new_task()`、`local_enqueue_new_task()`、`remote_enqueue_new_task()`。`init_routines::local_enqueue_first()` 同步改为 first/new task publication 语义命名。
 - `local_requeue_current()` 泛名入口消失。若需要共享 owner/current/on_runq 检查，可保留私有 helper，但所有跨模块 call site 必须通过语义化 facade。
 - no-switch abort 不调用 class transaction。
-- wait sleep 进入 scheduler 前已经发现 wait round 完成时，走 no-switch abort，不调用 `requeue_aborted_wait_current()`。
+- wait sleep 进入 scheduler 前已经发现 wait round 完成时，走 no-switch abort，保持 current 继续执行且不改变 physical membership。
 - 历史阶段 1B 曾在 `ParkPending` 收口时由 scheduler 调用 `handoff_woken_current()`，并把该路径视为 exactly-once wake clamp；2026-07-11 correction 已撤销这一 reward 语义，当前 R2 要求它只做 continuous active-to-ready transfer。
-- `requeue_aborted_wait_current()` 只用于 park 已进入 requeue 收口但没有 wake reward 的 abort-park 路径；不得用于 `ParkPending` handoff。
 - `Instant::now()` 由 scheduler core / `RunQueue` 在一个调度事务中读取一次，并只传入需要 current execution accounting 或 preempt decision 的 class transaction。
 - local arrival 的 `decide_preempt_current()` 在本地 owner CPU/noirq placement transaction 内调用。remote new-task / wake arrival 的 placement 若通过 IPI 发生，`decide_preempt_current()` 也必须在目标 owner CPU 的 IPI/local placement transaction 内调用；source CPU 只发送请求或接收 stale-safe placement 结果，不读取目标 CPU current。
 - 为保持 RR 行为可以暂时在 owner CPU placement 后保守请求 `ReschedCause::RunnableArrival`，但该路径必须被标为 RR 适配期保守策略；进入 EEVDF placement 前必须改为 placement 后的 `decide_preempt_current()` 决策，不能让无条件 remote resched 成为长期 class contract。
@@ -268,7 +266,7 @@ write set：
 
 反馈假设：
 
-- 假设 sched-split 的 `schedule_inner()` decision 加 `PendingResched` flags 足以区分 yield、tick preempt、runnable-arrival preempt、abort-park requeue、parked handoff、block / wait park、zombie exit 和 deferred preempt。
+- 假设 sched-split 的 `schedule_inner()` decision 加 `PendingResched` flags 足以区分 yield、tick preempt、runnable-arrival preempt、parked handoff、block / wait park、zombie exit、no-switch abort 和 deferred preempt。
 - 假设 Checkpoint 1A 的 final trait shape 不需要因 trap/IPI producer 接入而二次重写。
 - 失败信号：`PendingResched` 无法在 trap / idle / IPI / tick 路径间保持，remote arrival 必须在 source CPU 比较目标 CPU current，某条 current switch-out 路径无法映射到 method-first transaction、wait-core park path 被迫暴露 private identity 给 class、`DeferredPreempt` 被错误当成 switch-out、或 `EEVDF-005` switch-in 顺序无法 source-audit；此时停止阶段，回写 `implementation.md` / `invariants.md`。
 
@@ -329,7 +327,7 @@ Tracking issue 关闭审查：
 
 - Checkpoint 1A 的 method-first trait / `RunQueue` facade / `SchedEntity` split 已完成，RR / Idle 行为保持。
 - Checkpoint 1B 的 typed pending、schedule entry、trap / IPI plumbing 与 `EEVDF-005` source audit 已关闭；Checkpoint 1A 单独完成不足以进入阶段 2。
-- 阶段 1B 已经提供 current accounting、wake handoff、abort-park requeue、tick decision 和 placement 后 preempt decision 的 lifecycle transaction 位置。
+- 阶段 1B 已经提供 current accounting、wake handoff、tick decision 和 placement 后 preempt decision 的 lifecycle transaction 位置；no-switch abort 不进入 class transaction。
 - `EEVDF-001`、`EEVDF-002`、`EEVDF-004` 和 `EEVDF-020` 不要求在进入阶段 2 前关闭；阶段 2 的职责就是用最小 EEVDF 实现和 Gate P1/P2/P3 闭合这些问题。任一 gate 不能关闭时，阶段必须停在 default class switch 之前。
 
 阶段 2 保持一个概念阶段，但实现拆成四个 checkpoint。Checkpoint 2A 建立 payload / class scaffold；2B 关闭 Gate P1 accounting owner；2C / 2D 的原 P2 / P3 曾被关闭并允许 default switch，但 2026-07-11 runtime feedback 已撤销算法 closure。当前 2C correction 由 R1 / R2 / R3a / R3b 承担，其中 R2 同时纠正 2C 的 competition membership / full-set arrival 与 2D 的 true leave / join / handoff；这些 gate 全部关闭前，阶段 3 只能保持 stopped 状态。
@@ -444,7 +442,7 @@ write set：
   - `set_next_task()` 记录 `exec_start`。
   - `account_current(now)` 是唯一推进当前执行段的 EEVDF helper。
   - `task_tick()` 可调用 `account_current(now)`，但必须刷新 `exec_start`，避免 switch-out / requeue 双记。
-  - `requeue_yielded_current()`、`requeue_preempted_current()`、`handoff_woken_current()`、`requeue_aborted_wait_current()`、`put_prev_blocked()`、`put_prev_exiting()` 通过同一个 helper 结算当前执行段。
+  - `requeue_yielded_current()`、`requeue_preempted_current()`、`handoff_woken_current()`、`put_prev_blocked()`、`put_prev_exiting()` 通过同一个 helper 结算当前执行段。
   - `deadline` 更新基于推进后的 `vruntime`，但具体 eligibility / yield 公式由 2C 关闭。
 - `DeferredPreempt` 不结束 current execution segment，不触发 `account_current(now)`。
 - `switch.rs::switch_out()` 中现有 `Task::on_switch_out()` hook 继续只负责 task / CPU usage bookkeeping，不成为 fair scheduler accounting truth。
@@ -453,11 +451,11 @@ write set：
 
 - 审计 `account_current(now)` call sites，确认同一 `delta_exec` 不会双记，`DeferredPreempt` 不会提前结算。
 - 搜索 `switch_out()` 和 `Task::on_switch_out()`，确认 EEVDF 公平状态不依赖该 task hook 才更新。
-- 审计 runnable requeue、parked handoff requeue、abort-park requeue、wait park switch 和 exit switch，确认 class accounting transaction 先于需要入队或切走的路径。
+- 审计 runnable requeue、parked handoff requeue、wait park switch 和 exit switch，确认 class accounting transaction 先于需要入队或切走的路径；no-switch abort 不结算或重建 execution segment。
 
 反馈假设：
 
-- 假设 EEVDF runtime accounting 可以表达为一个 class-private 幂等 helper，并由 method-first transaction 在 runnable requeue、parked handoff requeue、abort-park requeue、wait park switch 或 exit switch 前调用。
+- 假设 EEVDF runtime accounting 可以表达为一个 class-private 幂等 helper，并由 method-first transaction 在 runnable requeue、parked handoff requeue、wait park switch 或 exit switch 前调用。
 - 失败信号：某个 schedule path 在 class transaction 前重新入队，`account_current(now)` 无法幂等，或 class accounting 必须从 `switch.rs::switch_out()` 中的 task hook 才能正确运行。
 
 write set：
@@ -607,7 +605,7 @@ Tracking issue 关闭审查：
 - 实现 competition membership 与 true leave / join：
   - `C = ready queue union class-active current`，两部分互斥；pick 在 class 内完成 ready-to-active transfer。
   - true block 在 final accounting 后、leave 前保存 bounded exact-rational service lag；ordinary true wake 只在 `WakeEnqueueResult::Enqueued` 后通过 `enqueue_woken()` 消费一次并 join。
-  - `ParkPending` handoff、preempt、yield 和 abort-wait requeue 保持 continuous membership，不保存 / 恢复 lag，不执行 wake reward。
+  - `ParkPending` handoff、preempt 和 yield 保持 continuous membership，不保存 / 恢复 lag，不执行 wake reward。
   - `AlreadyQueued` / `AlreadyCurrent` / `Stale` 不消费 saved lag；no-switch abort 不调用 class。
   - exit 丢弃 lag；fresh 以 zero lag join。
 - 将现有 wake clamp window 改义为 true-sleep maximum positive service credit，定义对应 negative debt bound；R2 删除 `legacy_placement_floor` 及旧 clamp 语义。
@@ -639,7 +637,7 @@ write set：
 
 - `just build`
 - focused KUnit：ready / active 互斥；continuous requeue；raw rational lag 与 FairClock aggregate 精确相等；saved lag 等于 exact-rational clamp；unequal-weight non-integer round trip 只含声明的 placement error；`W0 == 0` 消费 saved lag 并归零；positive credit / negative debt 不越界。
-- Source audit 覆盖 ordinary wake `Enqueued`、parked handoff、no-switch abort、abort-park requeue、stale、already queued、already current，以及 `legacy_placement_floor` 完整删除。
+- Source audit 覆盖 ordinary wake `Enqueued`、parked handoff、no-switch abort、stale、already queued、already current，以及 `legacy_placement_floor` 完整删除。
 - focused runtime 覆盖 wake-heavy 与 wait-abort 路径，且不新增 arithmetic / membership anomaly。
 
 Tracking issue 关闭审查：
@@ -681,7 +679,6 @@ Tracking issue 关闭审查：
   - `ParkPending` handoff 保持 continuous membership，不执行 wake reward。
   - `AlreadyQueued` / `AlreadyCurrent` / `Stale` 不消费 saved lag。
   - no-switch abort 不调用 class。
-  - `requeue_aborted_wait_current()` 不走 true join，不套 yield penalty。
   - yield 使用 weighted FairClock 上的 bounded penalty。
   - true block 保存 lag，exit 丢弃调度状态。
 - 更新注释和内部文档，移除“EEVDF 是 TODO”的过期表述，保留后续 Linux-alignment / tree-index TODO。
@@ -699,7 +696,7 @@ Tracking issue 关闭审查：
   - idle task 是唯一 production `Idle` class；RR 只允许作为 debug / bisect 对照。
   - timer worker、OOM worker、`kthreadd` 等 service kthread 不通过名称、handle 或 lifecycle state 获得 EEVDF 外的特殊 placement。
   - wait-core progress 不依赖隐藏 scheduler-critical kthread；deferred disposal、IRQ-off allocation 和 long non-preemptible path 风险按原 owner / register 路由。
-- 复核只有 true wake `enqueue_woken()` 消费 saved lag；`handoff_woken_current()`、stale wake、remote precheck failure、already-current、already-queued、no-switch abort 和 `requeue_aborted_wait_current()` 都不执行 true join placement。
+- 复核只有 true wake `enqueue_woken()` 消费 saved lag；`handoff_woken_current()`、stale wake、remote precheck failure、already-current、already-queued 和 no-switch abort 都不执行 true join placement。
 - 审计 Checkpoint 2C 的 `setpriority()` / weight visibility 证据：若目标 task 当前在 runqueue 上，必须已经证明下一次 owner CPU pick/accounting 能观察最新 weight，或 2C 已补 owner-local requeue/update 规则。若该证据缺失，本阶段停止，不能在 default switch 中临时补算法语义。
 
 证明边界与反馈路由：
@@ -879,7 +876,7 @@ write set：
 - FairClock：R1 validation branch 观察 actual weighted eligibility、old-floor counterfactual、yield / dispatch 关联和自校验；production 不保留热路径计数。
 - default class switch：ordinary task、bootstrap task、kthread、idle 的 class 分类。
 - bootstrap / kthread progress proof：记录 direct normal EEVDF 分类、无 production RR 特例，以及 bounded latency 不属于本 RFC。
-- membership / placement：ready / active transfer、true `enqueue_woken()` lag restore、`handoff_woken_current()` continuous transfer 和 `requeue_aborted_wait_current()` no-join 的 source proof 或定向计数。
+- membership / placement：ready / active transfer、true `enqueue_woken()` lag restore、`handoff_woken_current()` continuous transfer，以及 no-switch abort 不进入 class 的 source proof 或定向计数。
 - fairness smoke：每个 worker 的实际运行计数或时间份额。
 - nice smoke：不同 nice task 的相对份额。
 - yield smoke：yielding task 与 non-yielding task 都有进展。
@@ -898,7 +895,7 @@ write set：
 - `DeferredPreempt` 被错误当作 switch-out。
 - wake placement 绕过 stale-safe wait-core revalidation。
 - ready / active membership 出现空洞或重复。
-- parked handoff、no-switch abort 或 `requeue_aborted_wait_current()` 错走 true join / lag restore / yield penalty。
+- parked handoff 或 no-switch abort 错走 true join / lag restore / yield penalty。
 - checked arithmetic / rational representation 在真实 workload 命中，或坐标进入 saturation。
 - production default 仍创建 RR task。
 - nice 变化长期不影响 fair accounting。
@@ -922,7 +919,7 @@ P1 仍是已关闭的 accounting-owner gate。原 P2 / P3 已被 2026-07-11 runt
 
 ### Gate P1 - `account_current(now)` 与入队前执行段结算
 
-**假设：** EEVDF runtime accounting 可以表达为一个 class-private 幂等 `account_current(now)` helper，并由 method-first transaction 在 runnable requeue、parked handoff requeue、abort-park requeue、wait park switch 或 exit switch 前调用；`switch.rs::switch_out()` 的 task hook 仍只负责 context-switch bookkeeping。
+**假设：** EEVDF runtime accounting 可以表达为一个 class-private 幂等 `account_current(now)` helper，并由 method-first transaction 在 runnable requeue、parked handoff requeue、wait park switch 或 exit switch 前调用；`switch.rs::switch_out()` 的 task hook 仍只负责 context-switch bookkeeping。
 
 **保护目标 / 不变量：** runnable current task 不得以 stale `vruntime` / `deadline` 重新入队；tick 和 switch-out / requeue 不得重复计算同一段执行时间。
 
@@ -976,7 +973,7 @@ P1 仍是已关闭的 accounting-owner gate。原 P2 / P3 已被 2026-07-11 runt
 
 **Current preflight:** 现有 `Processor` 路径先调用 `RunQueue::enqueue_new()` / `enqueue_woken()`，再调用 `decide_preempt_current()`；后者才推进 current accounting。因此当前 surface 已知不能满足“accounting 后再 placement、enqueue 与 full-set decision 同一 snapshot”的最终合同，R2 必须先完成 method-contract review，而不是把该扩展留作未证实的条件分支。
 
-**Protected Goal / Invariant:** `C = ready union class-active current` 无空洞、无重复；true block / wake 才是 leave / join；yield、preempt、`ParkPending` handoff 和 abort-wait requeue 保持 continuous membership；generic `dequeue()` 不得默认等于 true block；saved lag 不缓存 current nice truth，wait-core private identity 不进入 scheduler algorithm。
+**Protected Goal / Invariant:** `C = ready union class-active current` 无空洞、无重复；true block / wake 才是 leave / join；yield、preempt 和 `ParkPending` handoff 保持 continuous membership；no-switch abort 不进入 class；generic `dequeue()` 不得默认等于 true block；saved lag 不缓存 current nice truth，wait-core private identity 不进入 scheduler algorithm。
 
 **Minimum Write Set:** `anemone-kernel/src/sched/class/{mod,eevdf,entity,runqueue}.rs`、`anemone-kernel/src/sched/processor.rs` 及其对应 owner-CPU caller、focused KUnit、本 RFC / tracking issue 与 transaction devlog。若 method-contract review 证明还需要 `sched/mod.rs` 或其它 owner surface，必须先记录扩展原因、批准点和验证影响；不得在旧 surface 间制造第二套 snapshot。Kconfig / generated path 仅在 service-credit / debt bound 改名或改义时进入。wait-core 不在 write set。
 
@@ -1051,6 +1048,7 @@ P1 仍是已关闭的 accounting-owner gate。原 P2 / P3 已被 2026-07-11 runt
 - 2026-07-10：阶段 3 source review 发现 `account_current(now)` 在续 deadline 后丢失 current request completion，tick 与 runnable-arrival decision 无法从归一化后的 snapshot 恢复该事实；同时 effectful renewal 位于短路 `||` 中，arithmetic saturation 可跳过续期。按阶段 3 停止条件回到 Checkpoint 2C，新增 `EEVDF-022` correction gate；accepted EEVDF formula、owner boundary 和 default constructor 不变。
 - 2026-07-10：`EEVDF-022` correction 关闭：deadline renewal 与 accounting 分别返回正交的瞬时 outcome，tick / runnable-arrival 通过 class-private production decision helper 消费 completion，wake normalization 只返回 arithmetic saturation；113 项 KUnit、阶段 3 四组 workload、source audit 与独立复审均通过。该关闭只恢复 Checkpoint 2C contract，阶段 3 仍保持修复状态，不触发阶段 4 转换。
 - 2026-07-12：Stage 3 runtime feedback 触发 canonical reopening。用户运行的 read-write 对照显示相同 case / failure multiset 下 EEVDF profile 约为 RR 的 3.3 至 3.5 倍；exact-yield probe 将额外 dispatch 收敛到 min-floor `self_only_eligible` feedback，weighted-FairClock counterfactual 证明其中 `552,494 / 1,338,814` 个 snapshots 已有 eligible peer，同时 `786,320` 个 snapshots 仍无 eligible peer。由此撤销原 P2 min-floor 与 P3 parked-handoff clamp closure，重开 `EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020`，并建立严格顺序 R1 -> R2 -> R3a -> R3b。目标和 default EEVDF 不变；forced handoff、penalty tuning、case-specific bypass 与 probe commit 合并均不接受。
+- 2026-07-12：scheduler-core post-close source audit 纠正历史 abort-wait 分类。already-completed wait 在进入 scheduler 时由 `AbortWaitSleep` 直接返回，不切换、不重入队、不调用 class；wait 已进入 parked 收口后变为 runnable 的唯一 production 路径是 `handoff_woken_current()`。此前为假设中的第三条 abort-park 路径保留的 `requeue_aborted_wait_current()` 从 processor facade、`RunQueue` transaction、`Scheduler` trait 与全部 class implementation 删除；R1-R3b 顺序和 EEVDF 算法目标不变。
 
 ## Write Set 扩展记录
 

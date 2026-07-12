@@ -7,7 +7,7 @@
 
 本文只跟踪当前仍影响方案选择、review gate、停止边界或验收判断的 RFC 层问题。已被正文接受的问题陈述、单纯 implementation pending、已 neutralized 的备选方案和纯命名延期不在这里重复记录；若本 RFC 进入实现，应建立 transaction devlog。
 
-阶段 3 反馈对 tracker 做过一次收口：`KETER-004`、`KETER-005` 和 `KETER-006` 已由 source review、用户侧 iozone 复核和明确的 trace 未运行边界路由，不再作为 open scheduler/wait-core blocker。2026-07-12 post-close correction 已把 `KETER-008` 的 processor pending-resched lifecycle 收口到 successful full pick。未运行的定向 trace 与 deferred-count fairness trace 仍是 residual evidence gap；后续若 workload 或 trace 显示 `PrePark` setup 长时间反复 deferred，必须回到 RFC review。
+阶段 3 反馈对 tracker 做过一次收口：`KETER-004`、`KETER-005` 和 `KETER-006` 已由 source review、用户侧 iozone 复核和明确的 trace 未运行边界路由，不再作为 open scheduler/wait-core blocker。2026-07-12 post-close correction 已把 `KETER-008` 的 processor pending-resched lifecycle 收口到 successful full pick，并通过 `KETER-009` 删除不可达的 aborted-wait requeue surface。未运行的定向 trace 与 deferred-count fairness trace 仍是 residual evidence gap；后续若 workload 或 trace 显示 `PrePark` setup 长时间反复 deferred，必须回到 RFC review。
 
 状态后缀说明：
 
@@ -23,6 +23,16 @@ None。当前没有仍会阻塞 scheduler/wait-core implementation closeout 的 
 None。当前剩余 Euclid 已折入 implementation gate 或阶段验证清单，不作为独立 open tracker 保留。
 
 ## Neutralized
+
+### KETER-009：wait abort 不能保留不可达的第三条 class transaction
+
+**状态：** Neutralized / Post-close correction / 2026-07-12
+
+**问题：** scheduler class surface 曾保留 `requeue_aborted_wait_current()`，假设 wait park 后可能存在一条既非 no-switch abort、也非 parked handoff 的“无 wake reward requeue”路径。真实 `schedule_inner()` 状态机没有该 transition：already-completed wait 直接返回并保持 current，park 后完成只走 handoff。保留无 caller 的第三条 transaction 会把不存在的 scheduler-core 状态迁移固化进所有 class，并让后续 EEVDF / RT 设计错误消费它。
+
+**处理：** 删除 processor facade、`RunQueue` transaction variant、`Scheduler` trait method 和 EEVDF / RR / Idle 实现。EEVDF RFC 的当前 contract、invariant、R2 gate 与 source-audit 清单同步只保留 no-switch abort 和 parked handoff；历史 transaction 记录不改写，由 2026-07-12 correction 条目 supersede。未修改 `schedule_inner()`、wait-core state、wake placement、pending-resched 或任何 reachable scheduling behavior。
+
+**证据：** source audit 证明 `AbortWaitSleep` 在 `switch_out()` 前返回 `DidNotSwitch`，`WaitCoreParked` 复查到 `Runnable` 时调用 `local_handoff_woken_current()`，全树 production source 不存在 `requeue_aborted_wait_current` / `AbortedWait` 代码符号。`just build`、`mdbook build docs` 与 `git diff --check` 通过；`just fmt kernel --check` 只报告未触碰的 generated `kconfig_defs.rs` / `platform_defs.rs` whitespace drift，未命中本次 scheduler 源文件。未运行 QEMU / LTP；详细 host-build 前置边界见同日 scheduler-core transaction closure。
 
 ### KETER-008：processor pending-resched 必须由 successful full pick 统一确认
 

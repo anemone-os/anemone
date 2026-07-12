@@ -607,12 +607,6 @@ impl Scheduler for Eevdf {
         self.enqueue_back(task);
     }
 
-    fn requeue_aborted_wait_current(&mut self, task: Arc<Task>, now: Instant) {
-        let _accounting = self.account_current(&task, now);
-        self.clear_current(&task);
-        self.enqueue_back(task);
-    }
-
     fn put_prev_blocked(&mut self, task: &Arc<Task>, now: Instant) {
         let _accounting = self.account_current(task, now);
         self.clear_current(task);

@@ -20,6 +20,7 @@
 - post-begin register scan / precheck 不得进入 nested scheduler wait；本 RFC 负责诊断暴露和反馈路由，不默认修复所有 source owner。
 - preempt-deferred 不能吞掉已经被 caller 清除的 `need_resched`。
 - processor pending-resched 是面向下一次 owner-CPU full pick 的合并 latch：successful pick 统一确认，no-pick path 保留或恢复；不升级为跨 context switch 的事件协议。
+- already-completed wait 走 no-switch abort，不进入 class transaction；`PrePark -> Parked` 后复查为 `Runnable` 时只走 parked handoff。不得为不存在的第三条 abort-requeue transition 保留 class surface。
 - `schedule_preempt()` deferred 返回后没有发生 context switch；trap tail 必须执行 deferred-task disposal。
 - preempt-defer 只关闭 not-park-ready wait 被误 park 的 correctness 缺口；它不是任意长 `PrePark` setup 的公平性机制。post-begin setup 必须通过字段级审计和 trace gate 证明短小、不可阻塞、不可嵌套 wait。
 - 不把 `PreemptGuard`、irq guard 或等价 guard 跨过 context switch。
@@ -32,7 +33,7 @@
 
 1. 调用面反馈：阶段 0 的源码审计可以发现新增或遗漏的裸 `schedule()` caller、`Latch::begin_current()` direct user、`Event::listen*()` user、direct wait helper、finite timeout wrapper、signal wait 或 clock sleep 调用面。发现结果回写本文件的阶段清单；如果出现无法通过 entry split 表达的 caller，停止并回到 `index.md` / `invariants.md` 补边界。
 2. source sleepability / boundedness 反馈：阶段 0 / 阶段 3 可以按真实锁路径和扫描规模把 post-begin register scan / precheck 分为“已证明短小且不会阻塞”、“会触发 single-active-wait 诊断并归属 source owner follow-up”、“需要 write set 扩展”或“必须回到 publish split / park permit 设计”。任何分类都不得让 wait-core 支持 nested active wait，也不得引入 source-local park-ready truth；若 trace 显示 `PrePark` setup 过长或 deferred 过多，必须回到 RFC review。
-3. finite timeout 反馈：`Event::listen_with_timeout()`、source-backed finite timeout latch、no-source timeout 和 `wait_current_with_timeout()` 的 timer-installed / source-registered / already-completed no-park / explicit-schedule 关系必须在阶段 2 成为 wait-sleep proof，并由阶段 3 trace 复核。若证据显示 active finite-timeout wait 不能在 explicit wait sleep 前建立 timeout prerequisite，或 already-completed wait 会被误 park / 误 requeue，停止并回到 RFC review。
+3. finite timeout 反馈：`Event::listen_with_timeout()`、source-backed finite timeout latch、no-source timeout 和 `wait_current_with_timeout()` 的 timer-installed / source-registered / already-completed no-park / explicit-schedule 关系必须在阶段 2 成为 wait-sleep proof，并由阶段 3 trace 复核。若证据显示 active finite-timeout wait 不能在 explicit wait sleep 前建立 timeout prerequisite，already-completed wait 会被误 park，或 parked completion 不能通过 handoff 收口，停止并回到 RFC review。
 4. preempt-defer 落点反馈：`schedule_preempt()` deferred 后 `need_resched` 恢复、deferred-task disposal、begin-to-explicit-sleep 窗口长度 / deferred count trace 字段和最小验证 floor 的具体实现点可以由阶段 1 / 阶段 2 代码形状决定；若实现需要改变 entry split、wait identity、completion 线性化点或 signal delivery contract，停止并回到 RFC 文档层。
 
 反馈归属：
@@ -179,7 +180,7 @@ enum SchedulePreemptResult {
 | Current `TaskSchedState` | WaitSleep | Runnable | Preempt | Zombie |
 | --- | --- | --- | --- | --- |
 | `Runnable` | 仅当本 wait token 已经完成时走 no-park / abort-sleep 返回；否则强不变量异常 | requeue/yield 或 idle switch | requeue/yield 或正常抢占 | 发布为 `Zombie` 并进入 no-return switch |
-| `Waiting { park: PrePark }` | 推进为 `Parked`，再执行现有 abort-park recheck | 强不变量异常 | 返回 `Deferred`；恢复/保留 `need_resched`；不 park、不 requeue、不 context switch | 强不变量异常 |
+| `Waiting { park: PrePark }` | 推进为 `Parked` 后复查：仍 waiting 则 block，已为 `Runnable` 则 parked handoff | 强不变量异常 | 返回 `Deferred`；恢复/保留 `need_resched`；不 park、不 requeue、不 context switch | 强不变量异常 |
 | `Waiting { park: Parked }` | 维持 parked 并按现有 wait-core park 路径处理 | 强不变量异常 | 强不变量异常，记录 wait id 并 assert | 强不变量异常 |
 | `Zombie` | 强不变量异常 | 强不变量异常 | 强不变量异常，trap preempt 不应抢占 zombie current | 强不变量异常，重复 zombie entry 表示状态提前发布或重复 exit |
 
@@ -189,9 +190,9 @@ enum SchedulePreemptResult {
 
 - 上表中的 `WaitSleep` 不是无参泛用 schedule mode。实现必须让 wait-sleep wrapper 携带 `WakeToken`、`WaitSleepPermit` 或等价 wait-core 私有身份；如果 `ScheduleMode` enum 本身不携带 token，wrapper 也必须在进入 `schedule_inner()` 前后用同一 wait identity 完成 active / already-completed / stale 校验。
 - `Deferred` 路径必须在 `switch_out()` 之前返回。
-- `Deferred` 路径不能调用 `local_requeue_current()`，因为 current task 仍为 `Waiting/PrePark`，不是 `Runnable`。
+- `Deferred` 路径不能调用任何 current requeue transaction，因为 current task 仍为 `Waiting/PrePark`，不是 `Runnable`。
 - 如果 caller 在进入 scheduler 前已经通过 `fetch_clear_need_resched()` 清掉 resched 请求，`schedule_preempt()` 必须在 `Deferred` 返回前调用 `mark_need_resched()` 或等价恢复。
-- `WaitSleep` 路径必须先用 wait token 区分 already-completed no-park 与 active wait：如果 token 命名的 wait round 已经完成且 current 已回到 `Runnable`，直接走 abort-sleep 返回，不能把它当作普通 runnable yield；如果 wait 仍为 `Waiting/PrePark`，先推进为 `Parked`，再执行现有 abort-park recheck；若 wait 在转换后完成为 `Runnable`，走 abort park / requeue。
+- `WaitSleep` 路径必须先用 wait token 区分 already-completed no-park 与 active wait：如果 token 命名的 wait round 已经完成且 current 已回到 `Runnable`，直接走 abort-sleep 返回，不能把它当作普通 runnable yield；如果 wait 仍为 `Waiting/PrePark`，先推进为 `Parked`，再复查 current sched-state。复查仍为 matching wait 时执行 block transaction；复查已为 `Runnable` 时只调用 `handoff_woken_current()`。不得增加第三条 aborted-wait requeue transaction。
 - `Runnable` / idle wrapper / zombie wrapper 不能获得消费 `Waiting/PrePark` 的权限。zombie wrapper 只能在 scheduler owner 内把 `Runnable` current 发布为 `Zombie`，不能接受已经可观察为 `Zombie` 的 current task 作为幂等输入。
 - scheduler-private mode 不写入 `WaitState`，不暴露给 `LatchTrigger`，不由 fs source 保存。
 - 不得对 scheduler owner 外暴露无 token / permit 的 `schedule_wait_sleep()`；否则 future caller 可以把普通 `Runnable` yield 或 stale wait 误解释成 wait-sleep abort。
@@ -208,6 +209,7 @@ write set：
 ```sh
 rg -n "ScheduleMode|SchedulePreemptResult|schedule_inner|schedule_preempt|schedule_wait_sleep|schedule_runnable|schedule_idle|schedule_zombie" anemone-kernel/src/sched anemone-kernel/src/arch
 rg -n "local_requeue_current" anemone-kernel/src/sched/mod.rs anemone-kernel/src/sched/processor.rs
+rg -n "requeue_aborted_wait_current|AbortedWait" anemone-kernel/src/sched
 ```
 
 退出条件：
@@ -215,6 +217,7 @@ rg -n "local_requeue_current" anemone-kernel/src/sched/mod.rs anemone-kernel/src
 - scheduler core 中 `Waiting/PrePark` 在 preempt mode 下没有任何 `Parked` 转换或 requeue 路径。
 - `Waiting/Parked` 在 preempt mode 下不是 silently accepted。
 - preempt-deferred 的 resched request 不会被静默吞掉。
+- already-completed no-switch abort 与 parked handoff 之外不存在 aborted-wait class transaction。
 - `schedule_inner(mode)` 是 scheduler-private；scheduler owner 外无裸 `schedule()` 入口。
 
 ## 阶段 2：迁移 Schedule Entries 与 Wait-Sleep Proof
@@ -367,6 +370,18 @@ rg -n "WaitStateStatus::Armed|WaitOutcome::Armed|WakeToken::is_armed|PollRegiste
 
 **Exit:** processor pick-time clear、source audit 和 validation floor 均有可复核结果；没有为直接赋值保留过度封装或同义反复测试；本 gate 源码格式通过，任何生成文件限定的全仓 formatter drift 已在 transaction 中单独记录；tracking issue neutralized，transaction 与双周 devlog 记录 agent-run / unrun 边界。
 
+## Post-close correction gate：Aborted-wait Class Surface Removal
+
+**触发：** source audit 发现 scheduler class surface 中的 `requeue_aborted_wait_current()` 全树没有 caller。真实状态机已经由 no-switch abort 和 parked handoff 完整覆盖，第三条 transaction 只把假设迁移固化到 processor、`RunQueue` 和每个 class。
+
+**Protected Goal / Invariant:** wait identity、completion 与 park transition 仍由 wait core / task sched-state 拥有；already-completed wait 保持 current 继续执行，park 后 completion 只通过 parked handoff 完成 physical requeue。删除死 surface 不能改变 reachable scheduling behavior，也不能并入 EEVDF R[x] correction。
+
+**Minimum Write Set:** scheduler processor facade、`RunQueue` transaction、`Scheduler` trait 和对应 class implementation；本 RFC implementation / tracking issue / transaction、EEVDF canonical RFC / transaction 与当前双周 devlog。wait-core state、`schedule_inner()`、IPI、trap 与用户 ABI 为 audit-only。
+
+**Validation Floor:** 全树 production source 中 `requeue_aborted_wait_current|AbortedWait` 零匹配；source audit 证明 `AbortWaitSleep` 在 `switch_out()` 前返回、park 后 `Runnable` 复查只调用 `local_handoff_woken_current()`；运行 `just build`、`git diff --check` 与 `mdbook build docs`。格式检查若只命中未触碰的 generated drift，必须记录精确文件，不扩大 write set。
+
+**Exit:** processor / `RunQueue` / trait / class 死 surface 完整删除，EEVDF current contract 不再引用第三条 transition，dated 历史记录由 correction 条目 supersede，`KETER-009` neutralized；不把本 gate 记作 R1 进展，不新增 register / current limitation。
+
 ## 旁路审计清单
 
 - 直接调用裸 `schedule()` 并可能消费 wait-core state 的路径。
@@ -393,6 +408,7 @@ rg -n "WaitStateStatus::Armed|WaitOutcome::Armed|WakeToken::is_armed|PollRegiste
 - 2026-07-06：用户批准阶段 1 吸收原阶段 2 的 schedule-entry call-site 迁移子集，避免留下裸 `schedule()` 兼容桥。该反馈改变阶段 write set / 执行顺序，但不改变 accepted contract、验证 floor 或后续 trace/runtime gate；执行事实见 transaction devlog。
 - 2026-07-08：`kernel_preempt` 单核试运行暴露 zombie exit 尾部窗口：exit 模块提前发布 `Zombie` 后、`schedule_zombie_never_return()` 前可能被 trap-tail involuntary preempt 打断。该反馈改变 zombie wrapper 的 accepted contract：`Runnable -> Zombie` 发布归 scheduler core 的 noirq no-return entry，`schedule_preempt()` 仍不接受 zombie current；执行事实见 transaction devlog。
 - 2026-07-12：post-close source audit 发现 processor pending-resched 缺少 successful-pick acknowledgement；block / yield 等未执行 destructive take 的路径完成 full pick 后仍可能留下旧 cause。该反馈补充 scheduler-core latch 生命周期：full pick 确认，no-pick 保留或恢复，pick 后新 cause 进入下一轮；不引入事件协议。执行 gate 与证据见 transaction devlog。
+- 2026-07-12：post-close source audit 证明 `requeue_aborted_wait_current()` 是无 caller 的假设 surface。already-completed wait 直接 no-switch 返回，park 后 completion 只走 `handoff_woken_current()`；processor / `RunQueue` / trait / class 死接口已删除，EEVDF RFC 只同步移除错误 contract，不改变 R1-R3b。执行事实见 transaction devlog，`KETER-009` 已 neutralized。
 
 ## Write Set 扩展记录
 

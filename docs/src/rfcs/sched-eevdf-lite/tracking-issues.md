@@ -41,7 +41,7 @@
 
 **触发证据：** weighted FairClock 需要一个没有 pick / set-next 空洞的完整 competition set；现有实现直到 `set_next_task()` 才安装 class current，且原 2D 把 `ParkPending` handoff 当成 wake placement。此前 Neutralized 只证明了 method 名称分流，没有证明 FairClock membership 或 service-lag lifecycle。
 
-**问题：** yield、preempt、`ParkPending` handoff 和 abort-wait requeue 都没有离开 competition set；把其中任一路径当成 true leave / join 会保存或恢复不存在的 lag，并使 ready / active snapshot 出现双重或缺失 truth。
+**问题：** yield、preempt 和 `ParkPending` handoff 都没有离开 competition set；把其中任一路径当成 true leave / join 会保存或恢复不存在的 lag，并使 ready / active snapshot 出现双重或缺失 truth。
 
 **修复落点：** R2 建立 ready / active 互斥 membership，`pick_next_task()` 在 class 内完成 ready-to-active transfer，true block / wake 才执行 leave / join。当前 `Processor` 已知先 enqueue、后在 `decide_preempt_current()` accounting，不能满足最终同 snapshot 合同；R2 必须先做 1A / 1B method-contract review，并记录已批准的 write-set 扩展，不能在旧 surface 间制造第二套状态。
 
@@ -110,10 +110,10 @@
 **修复落点：**
 
 - `anemone-kernel/src/sched/class/eevdf.rs` 中的 EEVDF private `account_current(now)` 是唯一推进当前执行段的 helper。
-- `set_next_task(task, now)` 只记录下一段 `exec_start`；`task_tick()`、`requeue_yielded_current()`、`requeue_preempted_current()`、`handoff_woken_current()`、`requeue_aborted_wait_current()`、`put_prev_blocked()` 和 `put_prev_exiting()` 均先调用同一个 helper。
+- `set_next_task(task, now)` 只记录下一段 `exec_start`；`task_tick()`、`requeue_yielded_current()`、`requeue_preempted_current()`、`handoff_woken_current()`、`put_prev_blocked()` 和 `put_prev_exiting()` 均先调用同一个 helper。
 - `anemone-kernel/src/sched/switch.rs` 明确 `Task::on_switch_out()` 只保留 task / CPU usage bookkeeping，不作为 EEVDF fair accounting truth。
 
-**Source audit:** `DeferredPreempt` 在 `schedule_inner()` 中提前返回，不调用 `switch_out()`、`local_pick_next()`、`set_next_task()` 或任何 EEVDF class transaction；runnable requeue、parked handoff、abort-park requeue、wait park switch 和 exit switch 都在 `RunQueue` 设置 `on_runq = true` 或真正切走前完成 class transaction。`account_current(now)` 在成功推进后刷新 `exec_start = now`，tick 后的 switch-out / requeue 只结算 tick 之后的新执行段。
+**Source audit:** `DeferredPreempt` 与 wait no-switch abort 都在 `schedule_inner()` 中提前返回，不调用 `switch_out()`、`local_pick_next()`、`set_next_task()` 或任何 EEVDF class transaction；runnable requeue、parked handoff、wait park switch 和 exit switch 都在 `RunQueue` 设置 `on_runq = true` 或真正切走前完成 class transaction。`account_current(now)` 在成功推进后刷新 `exec_start = now`，tick 后的 switch-out / requeue 只结算 tick 之后的新执行段。
 
 **结论：** Checkpoint 2B / Gate P1 的单一 accounting owner、call-site ordering 和 `exec_start` 刷新仍成立，本 issue 保持 Neutralized。fixed-weight remainder、block/wake continuity、deadline catch-up 和 coordinate representation 属于 active `EEVDF-020` / R2 / R3a / R3b；不得用本 issue 的 owner closure 代替这些 arithmetic evidence。
 
@@ -249,7 +249,7 @@
 **修复落点：**
 
 - [RFC index](./index.md)、[不变量需求](./invariants.md) 和 [迁移实施计划](./implementation.md) 明确 `SchedEvent` / `on_event` / catch-all event bus 不再是 accepted contract。
-- class-visible 语义通过 `enqueue_new()`、`enqueue_woken()`、`requeue_yielded_current()`、`requeue_preempted_current()`、`handoff_woken_current()`、`requeue_aborted_wait_current()`、`put_prev_blocked()`、`put_prev_exiting()`、`pick_next_task()`、`set_next_task()`、`task_tick()` 和 `decide_preempt_current()` 等 method-first transaction 表达。
+- class-visible 语义通过 `enqueue_new()`、`enqueue_woken()`、`requeue_yielded_current()`、`requeue_preempted_current()`、`handoff_woken_current()`、`put_prev_blocked()`、`put_prev_exiting()`、`pick_next_task()`、`set_next_task()`、`task_tick()` 和 `decide_preempt_current()` 等 method-first transaction 表达。
 
 **结论：** 阶段 1 source audit 禁止 scheduler implementation 引入 `SchedEvent` / `on_event` / event bus。
 

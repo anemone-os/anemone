@@ -40,10 +40,6 @@ impl Scheduler for Idle {
         panic!("idle scheduler should not requeue current task");
     }
 
-    fn requeue_aborted_wait_current(&mut self, _task: Arc<Task>, _now: Instant) {
-        panic!("idle scheduler should not requeue current task");
-    }
-
     fn put_prev_blocked(&mut self, _task: &Arc<Task>, _now: Instant) {
         panic!("idle task should not block");
     }

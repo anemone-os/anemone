@@ -18,7 +18,7 @@
 6. EEVDF pick 不是 deadline-only；eligible 约束必须来自当前 competition set 的 weighted FairClock，而不是 monotonic minimum-`vruntime` floor。
 7. valid non-empty FairClock 必须至少有一个 eligible entity；no-eligible 是 membership / snapshot correctness bug，checked aggregate failure 才允许可观测的 fail-forward fallback。
 8. runtime accounting 对每段实际执行时间只记一次，不重复推进 `vruntime`。
-9. true block 必须在 final accounting 后保存有界 service lag，ordinary true wake 只消费一次；yield、preempt、`ParkPending` handoff 和 abort-wait requeue 保持 continuous membership，不得获得 wake reward。
+9. true block 必须在 final accounting 后保存有界 service lag，ordinary true wake 只消费一次；yield、preempt 和 `ParkPending` handoff 保持 continuous membership，不得获得 wake reward。
 10. `Nice` newtype 必须排除 `[-20, 19]` 外的内部状态；`Task::nice()` 返回唯一长期 nice truth，EEVDF entity 不得保存另一份长期 nice state。
 11. pending resched request 必须用 `PendingResched` flags 区分 tick 与 runnable arrival，不得继续用 bool 静默压扁抢占来源。
 12. scheduler class contract 必须是 method-first class-local atomic transaction surface；不得使用 `SchedEvent` / `on_event` / catch-all event bus 承载路径语义。
@@ -97,7 +97,7 @@ clone inheritance 只能在 child 发布前通过 `&mut Task` 继承 typed nice 
 
 1. scheduler core entry permission：`ScheduleMode::{WaitSleep, Preempt, Yield, Idle, Zombie}` 或等价私有 mode。
 2. processor / scheduler core pending request：`PendingResched` flags，至少包含 `ReschedCause::{Tick, RunnableArrival}`。
-3. scheduler class transaction：`enqueue_new()`、`enqueue_woken()`、`requeue_yielded_current()`、`requeue_preempted_current()`、`handoff_woken_current()`、`requeue_aborted_wait_current()`、`put_prev_blocked()`、`put_prev_exiting()`、`pick_next_task()`、`set_next_task()`、`task_tick()` 和 `decide_preempt_current()` 等 method-first surface。
+3. scheduler class transaction：`enqueue_new()`、`enqueue_woken()`、`requeue_yielded_current()`、`requeue_preempted_current()`、`handoff_woken_current()`、`put_prev_blocked()`、`put_prev_exiting()`、`pick_next_task()`、`set_next_task()`、`task_tick()` 和 `decide_preempt_current()` 等 method-first surface。
 
 硬性要求：
 
@@ -107,7 +107,7 @@ clone inheritance 只能在 child 发布前通过 `&mut Task` 继承 typed nice 
 4. `need_resched` 不能在 EEVDF 路径继续作为 untyped bool；tick 与 runnable-arrival request 必须合并到 `PendingResched`，而不是覆盖。
 5. `DeferredPreempt` 必须由执行 `take_pending_resched()` 的 caller 恢复同一组 `PendingResched` flags，不能把 deferred request 重新压成 generic bool。
 6. `ReschedCause::RunnableArrival` 不代表 true join placement，不得触发 current 的 lag restore；它只说明 runnable-set change 使 current 需要在 preempt tail 重新调度。
-7. `Yield`、tick preempt、runnable-arrival preempt、abort-park requeue 和 parked wake handoff 不能被合并为同一个 generic requeue transaction。
+7. `Yield`、tick preempt、runnable-arrival preempt 和 parked wake handoff 不能被合并为同一个 generic requeue transaction。
 8. `Scheduler` trait 不提供通用 `enqueue_runnable()` 默认底座；会改变 membership 的 transaction 必须由每个 class 显式实现。
 
 ## Class-Local Atomic Transaction
@@ -134,7 +134,7 @@ clone inheritance 只能在 child 发布前通过 `&mut Task` 继承 typed nice 
 4. true join placement：current accounting、join 前 `W0/V0` snapshot、saved lag 恢复、deadline 重建、enqueue、`on_runq = true` 和 full-set preferred decision 的顺序。
 5. wake placement：wait-core 已经把 task 逻辑状态转为 runnable 后，物理 placement 如何进入 owner CPU runqueue。
 6. parked handoff：`ParkPending` 由 scheduler 收口为 physical requeue 时，如何在不离开 `C` 的前提下完成 active-to-ready transfer，且不保存 / 恢复 lag 或执行 wake reward。
-7. true leave / abort-park requeue：true block 在 final accounting 后、离开 `C` 前保存 service lag；wait park 后 scheduler 复查发现 current 已 runnable 时保持 continuous membership、不带 wake reward 地重新入队。
+7. true leave：true block 在 final accounting 后、离开 `C` 前保存 service lag。
 8. FairClock failure：checked aggregate 无法构造时记录 arithmetic anomaly、选择最小 `vruntime` fail-forward task 的顺序；valid FairClock 下 no-eligible 直接暴露 correctness bug。
 
 硬性要求：
@@ -177,7 +177,7 @@ EEVDF-lite 必须使用唯一幂等 helper 推进当前执行段：
 competition set 为 `C = ready queue union class-active current`，两部分互斥：
 
 1. fresh entity 与 true wake 是 join；true block 与 exit 是 leave。
-2. yield、preempt、`ParkPending` handoff 和 abort-wait requeue 是 continuous membership，只在 ready / active 两个物理位置间移动。
+2. yield、preempt 和 `ParkPending` handoff 是 continuous membership，只在 ready / active 两个物理位置间移动。
 3. `pick_next_task()` 必须完成 ready-to-active transfer；`set_next_task()` 只确认 active identity 并建立 `exec_start`。
 4. `put_prev_blocked()` 必须在 final accounting 后、移出 `C` 前保存 service lag；`put_prev_exiting()` 直接丢弃离开后的调度状态。
 5. 无路径语义的 generic `dequeue(task)` 不能默认解释为 true block；最终实现必须删除无调用者入口，或拆为明确的 leave / transfer / exit transaction。
@@ -212,7 +212,7 @@ stale-safe wake 结果只选择 transaction：
 1. `WakeEnqueueResult::Enqueued` 调用 `enqueue_woken()`，消费一次 sleeping phase 的 saved lag 并完成 true join。
 2. `WakeEnqueueResult::{Stale, AlreadyCurrent, AlreadyQueued}` 不消费 saved lag，不修改 EEVDF placement。
 3. `WakeEnqueueResult::ParkPending` 不消费 saved lag；后续 `handoff_woken_current()` 只完成 continuous active-to-ready transfer。
-4. no-switch abort 不调用 class；`requeue_aborted_wait_current()` 保持 continuous membership，不走 wake placement，也不套 yield penalty。
+4. no-switch abort 不调用 class，不改变 physical membership，也不结束或重建 current execution segment。
 
 禁止用 source-local flag、diagnostic wait id、`WakeToken::is_armed()`、`PollRegisterResult::Armed` 或 `WakeEnqueueResult` 作为 EEVDF lag / eligibility truth。
 

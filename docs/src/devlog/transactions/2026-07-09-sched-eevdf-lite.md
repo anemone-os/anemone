@@ -47,6 +47,8 @@
 
 **Completed:** 公开 RFC 目录已存在，阶段 0 所需四份 RFC 文档已读取：`index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md`。register、current limitations、RFC workflow、RFC template、devlog workflow、templates、事务索引、当前双周 devlog、SUMMARY 和 RFC 列表已读取。阶段 0 建立本事务日志，并把 RFC、tracking issues、事务索引、当前双周 devlog、mdBook Summary 和 RFC 列表连接到同一实现记录。总控完成阶段 0 source audit；未启动 subagent，因为阶段 0 不需要 worker 写代码。Checkpoint 1A 已完成：`Scheduler` trait 改为 method-first transaction surface，`RunQueue` 与 `SchedEntity` 拆出同一 owner 内文件边界，RR / Idle 完成行为保持适配。Checkpoint 1B 已完成：processor pending request 升级为 `PendingResched` flags，trap / idle / tick / IPI producer 接入 typed pending，schedule entry 拆分为 preempt / yield / idle，new-task enqueue 与 current requeue facade 改为语义化命名，owner CPU placement 后的 preempt decision 已接线，`EEVDF-005` 已通过 source audit neutralized。Checkpoint 2A 已完成：`Eevdf` class scaffold、`EevdfEntity` payload 字段位置、非 `Copy` class-specific `SchedEntity`、显式 `new_eevdf()` constructor、fresh clone/default-normal entity 构造和 EEVDF scheduler constants 的 kconfig schema / live root config / generated defs plumbing 已接入；default normal constructor 仍保持 RR，未提前切换到 EEVDF。2B 前 feedback 已收口：`Eevdf` class 内部增加 typed entity accessor，后续 `account_current(now)` 可通过 class-private helper 短暂访问 `EevdfEntity`，不把 `SchedEntity` guard 或 typed payload 参数加入 `Scheduler` trait；RFC canonical 文本补充了 future scheduler policy / class switch 必须通过 owner CPU `RunQueue` command / IPI 线性化，远端不得直接修改 `SchedEntity` class 或 EEVDF payload。Checkpoint 2B 已完成：`Eevdf` private `account_current(now)` 成为唯一推进 current execution segment 的 helper；`set_next_task()` 记录 `exec_start`；tick、yield / preempt requeue、parked handoff、abort-park requeue、block 和 exit switch 都通过同一 helper 结算并刷新 `exec_start`；`Task::on_switch_out()` 保持 task / CPU usage bookkeeping，不成为 fair scheduler accounting truth；`EEVDF-002` 已移入 Neutralized。Checkpoint 2C 已完成：weighted virtual-time arithmetic、monotonic `rq_vtime`、eligible / fallback pick、new placement、deadline renewal、tick / runnable-arrival preempt、bounded yield、nice visibility 和 anomaly observation 已实现；2C / 2D wake 边界与 default-normal RR 边界保持不变，`EEVDF-001` / `EEVDF-020` 已移入 Neutralized。2C 后 class-shape feedback correction 已完成：class precedence 集中为单一 high-to-low order，pick / preempt 共用；EEVDF payload 与通用 class constructor 可见面已收窄。Checkpoint 2D 已完成：ordinary wake 与 parked current handoff 通过同一个 bounded wake clamp transaction 收口，stale / already-current / already-queued / no-switch abort / abort-park 路径保持 no-reward，`EEVDF-004` 已移入 Neutralized；阶段 2 全部 checkpoint 关闭。阶段 3 前 Nice / Priority 边界反馈纠正也已关闭：typed nice、Task writer、clone inheritance、priority syscall 目录化和低代价 target-selection / ABI 修复均已落地，不新增 Checkpoint 2E。
 
+**Scheduler-core correction:** 上述阶段 1B / 2B / 2D 对 abort-park requeue 的记录只描述当时保留的假设性 surface。2026-07-12 source audit 已证明 production 状态机只有 already-completed no-switch abort 与 parked handoff 两条路径，并删除无调用者的 `requeue_aborted_wait_current()`；后文同日 correction 条目 supersede 这些历史表述，不改变 R1-R3b 状态。
+
 **Correction:** 2026-07-11 user-run evidence 已撤销上述 Checkpoint 2C min-floor / arithmetic 与 Checkpoint 2D parked-handoff clamp 的算法 closure。default constructor、typed pending、single accounting owner 和 `EEVDF-022` outcome propagation 仍有效；`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 已重开。当前 canonical 顺序为 R1 -> R2 -> R3a -> R3b -> Stage 3 clean-tree runtime。
 
 **In Progress:** 文档层 reopening 已建立 factual evidence packet、weighted FairClock / competition membership / service-lag / arithmetic invariants 和 correction gates。尚未开始 R1 生产代码；evidence-only probe commit `d0d4196f` 与公共实现基线 `a76a00ac` 保持分离。
@@ -656,6 +658,18 @@ git diff --check
 **Final docs validation:** `git diff HEAD --check`、新增 background whitespace check、`mdbook build docs`、Gate R1 / tracking / background anchor 检查和新增内容公开边界扫描通过。未运行 kernel build、QEMU、LTP 或用户 runtime；本轮只关闭 RFC 草案校正，不关闭 R1 或 Stage 3。
 
 **Next:** Gate R1 production correction；R1 failure signal 命中时停止并重新分类，不自动继续 R2。
+
+### 2026-07-12 - Scheduler-core Aborted-wait Surface Correction
+
+**Phase:** scheduler-core post-close correction；与 R1-R3b EEVDF algorithm correction 独立。
+
+**Trigger / source proof:** `schedule_inner()` 的 already-completed wait 在 current 已为 `Runnable` 且 token 已完成时产生 `AbortWaitSleep`，随后直接返回 `DidNotSwitch`；该路径不调用 `switch_out()`、不改变 `on_runq`，也不结束 current execution segment。wait 已进入 `Parked` 收口后变为 runnable 时，production 路径只调用 `local_handoff_woken_current()`。全树没有第三条需要“无 wake reward 地重新入队”的 caller；此前保留的 `local_requeue_aborted_wait_current()` 只是未被真实状态机消费的假设 surface。
+
+**Correction:** 删除 processor facade、`RunQueue::requeue_aborted_wait_current()`、`CurrentRequeueTransaction::AbortedWait`、`Scheduler::requeue_aborted_wait_current()`，以及 EEVDF / RR / Idle 的对应实现。公开 EEVDF canonical 文本同步删除 abort-park requeue contract；dated 历史记录保留并由本条 supersede。scheduler-core 的 no-switch abort / parked handoff 所有权、wait identity、pending-resched lifecycle 和 R1-R3b 顺序均不改变。
+
+**Validation:** scheduler-core transaction 的 `KETER-009` closure 已记录 `just build`、`mdbook build docs`、`git diff --check` 与全树零符号审计通过；kernel format check 只命中未触碰的 generated whitespace drift。未运行 QEMU / LTP。本条只引用该证据，不把它计作 R1 进展或验收。
+
+**Boundary:** 本 correction 不关闭或推进 R1，不改 weighted FairClock、competition membership、service lag、accounting remainder、deadline catch-up、coordinate rebase、wait-core state、IPI、trap entry 或用户 ABI。
 
 ## Open Items
 

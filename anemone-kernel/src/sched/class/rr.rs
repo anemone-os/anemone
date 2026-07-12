@@ -57,10 +57,6 @@ impl Scheduler for RoundRobin {
         self.enqueue_back(task);
     }
 
-    fn requeue_aborted_wait_current(&mut self, task: Arc<Task>, _now: Instant) {
-        self.enqueue_back(task);
-    }
-
     fn put_prev_blocked(&mut self, task: &Arc<Task>, _now: Instant) {
         assert!(matches!(
             task.sched_class_kind(),
