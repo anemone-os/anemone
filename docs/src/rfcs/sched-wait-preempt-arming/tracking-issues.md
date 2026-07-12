@@ -1,13 +1,13 @@
 # Sched Wait Preempt Arming Tracking Issues
 
 **状态：** Closed
-**最后更新：** 2026-07-08
+**最后更新：** 2026-07-12
 **父 RFC：** [RFC-20260618-sched-wait-preempt-arming](./index.md)
 **事务日志：** [2026-07-06-sched-wait-preempt-arming](../../devlog/transactions/2026-07-06-sched-wait-preempt-arming.md)
 
 本文只跟踪当前仍影响方案选择、review gate、停止边界或验收判断的 RFC 层问题。已被正文接受的问题陈述、单纯 implementation pending、已 neutralized 的备选方案和纯命名延期不在这里重复记录；若本 RFC 进入实现，应建立 transaction devlog。
 
-阶段 3 反馈对 tracker 做过一次收口：`KETER-004`、`KETER-005` 和 `KETER-006` 已由 source review、用户侧 iozone 复核和明确的 trace 未运行边界路由，不再作为 open scheduler/wait-core blocker。未运行的定向 trace 与 deferred-count fairness trace 仍是 residual evidence gap；后续若 workload 或 trace 显示 `PrePark` setup 长时间反复 deferred，必须回到 RFC review。
+阶段 3 反馈对 tracker 做过一次收口：`KETER-004`、`KETER-005` 和 `KETER-006` 已由 source review、用户侧 iozone 复核和明确的 trace 未运行边界路由，不再作为 open scheduler/wait-core blocker。2026-07-12 post-close correction 已把 `KETER-008` 的 processor pending-resched lifecycle 收口到 successful full pick。未运行的定向 trace 与 deferred-count fairness trace 仍是 residual evidence gap；后续若 workload 或 trace 显示 `PrePark` setup 长时间反复 deferred，必须回到 RFC review。
 
 状态后缀说明：
 
@@ -16,13 +16,23 @@
 
 ## Keter
 
-None。阶段 3 收口后没有仍会阻塞 scheduler/wait-core implementation closeout 的 Apollyon / Keter；剩余 trace 与 workload 证据缺口已记录为 residual risk 和后续重开条件。
+None。当前没有仍会阻塞 scheduler/wait-core implementation closeout 的 Apollyon / Keter；剩余 trace 与 workload 证据缺口已记录为 residual risk 和后续重开条件。
 
 ## Euclid
 
 None。当前剩余 Euclid 已折入 implementation gate 或阶段验证清单，不作为独立 open tracker 保留。
 
 ## Neutralized
+
+### KETER-008：processor pending-resched 必须由 successful full pick 统一确认
+
+**状态：** Neutralized / Post-close correction / 2026-07-12
+
+**问题：** `take_pending_resched()` 只由 trap tail 与 idle loop 显式调用；block、yield、zombie 等路径可以直接 switch out 并完成下一任务选择，却不会清 processor slot。旧 `Tick` / `RunnableArrival` 因而可能跨一次已经完成的 runqueue 重新选择继续滞留，之后被误当成新一轮 preempt trigger。
+
+**处理：** `Processor` 现在把 pending slot 明确定义为面向下一次 owner-CPU full pick 的合并 latch；`local_pick_next()` 在 `pick_next_task()` 成功后、`set_next_task()` 前直接把 slot 置空，并用就地注释解释 full-pick satisfaction、IRQ serialization 和后续请求保留。full pick 即使重新选中同一 task 也确认；`DeferredPreempt` 与 wait no-switch abort 不到达该点，caller-owned restore 与 call-local preempt snapshot 保持不变。未引入具名 clear helper、同义反复 KUnit、epoch、token、事件队列或 task-owned cause history。
+
+**证据：** source audit 确认 production clear 只有 `local_pick_next()` 中紧跟 `pick_next_task()` 的直接赋值；`switch_out()` 只有 `schedule_inner()` 一个 caller，两个 no-switch return 都位于 `switch_out()` 前，四个 trap tail 仍在 deferred 时 restore。当前代码的 `just build` 通过；有时限的 rv64 pretest 启动完成 113 项既有 KUnit 并打印 `All tests passed!`，随后进入 init / user-test，主机 timeout 只用于终止超出本 gate 的 signal LTP。`git diff --check` 与 `mdbook build docs` 通过；`just fmt kernel --check` 只被既有生成文件 `kconfig_defs.rs` / `platform_defs.rs` whitespace drift 阻塞，输出不包含本次 `processor.rs`。
 
 ### KETER-007：zombie sched-state 发布不能先于 no-return scheduler entry 暴露
 

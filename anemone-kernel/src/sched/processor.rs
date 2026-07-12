@@ -23,6 +23,8 @@ struct Processor {
     // TODO: ipi wakeup list.
     runq: RunQueue,
     sched_ctx: TaskContext,
+    /// Coalesced request latch for the next owner-CPU full pick. A completed
+    /// pick acknowledges all prior causes; no-pick paths keep or restore them.
     pending_resched: PendingResched,
 }
 
@@ -338,6 +340,10 @@ pub fn local_pick_next() -> Arc<Task> {
     assert!(IntrArch::local_intr_disabled());
     let task = PROCESSOR.with_mut(|proc| {
         let task = proc.runq.pick_next_task();
+        // A full owner-CPU pick satisfies every request pending before
+        // selection. Interrupts are disabled here, so this clear cannot race
+        // with a new local request; requests raised later remain pending.
+        proc.pending_resched = PendingResched::empty();
         proc.runq.set_next_task(&task, Instant::now());
         task
     });

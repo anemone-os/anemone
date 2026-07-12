@@ -1,7 +1,7 @@
 # Sched Wait Preempt Arming 迁移实施计划
 
 **状态：** Completed
-**最后更新：** 2026-07-08
+**最后更新：** 2026-07-12
 **父 RFC：** [RFC-20260618-sched-wait-preempt-arming](./index.md)
 **不变量：** [不变量需求](./invariants.md)
 
@@ -19,6 +19,7 @@
 - explicit wait sleep 是 wait round 消费 park intent 的入口；它必须绑定 wait token 或 wait-core 私有 park permit，在 wake prerequisites 安装完成或可证明安全后调用。
 - post-begin register scan / precheck 不得进入 nested scheduler wait；本 RFC 负责诊断暴露和反馈路由，不默认修复所有 source owner。
 - preempt-deferred 不能吞掉已经被 caller 清除的 `need_resched`。
+- processor pending-resched 是面向下一次 owner-CPU full pick 的合并 latch：successful pick 统一确认，no-pick path 保留或恢复；不升级为跨 context switch 的事件协议。
 - `schedule_preempt()` deferred 返回后没有发生 context switch；trap tail 必须执行 deferred-task disposal。
 - preempt-defer 只关闭 not-park-ready wait 被误 park 的 correctness 缺口；它不是任意长 `PrePark` setup 的公平性机制。post-begin setup 必须通过字段级审计和 trace gate 证明短小、不可阻塞、不可嵌套 wait。
 - 不把 `PreemptGuard`、irq guard 或等价 guard 跨过 context switch。
@@ -327,6 +328,45 @@ rg -n "WaitStateStatus::Armed|WaitOutcome::Armed|WakeToken::is_armed|PollRegiste
 - fanotify/source-owner nested wait 触发时已有反馈路由，不阻塞本 RFC 的 scheduler/wait-core closeout。
 - RFC / transaction devlog / register 更新边界明确；公开文档不依赖 `etc/` 草案路径作为 canonical source。
 
+## Post-close correction gate：Pending Resched Pick Acknowledgement
+
+**触发：** typed `PendingResched` 落地后，trap tail 与 idle loop 会通过 `take_pending_resched()` 显式消费 slot，但 block、yield、zombie 和其它直接进入 `switch_out()` 的路径不会先清 slot。修正前的 `local_pick_next()` 完成 full pick 后也没有统一 acknowledgement，旧 `Tick` / `RunnableArrival` 因而可能跨已完成的重新选择继续滞留。
+
+**Hypothesis:** `PendingResched` 是请求 owner CPU 重新选择的合并 latch；只要 scheduler loop 成功完成一次 `pick_next_task()`，此前 cause 已被满足，不论最终是否换成不同 task。没有 pick 的 schedule path 不满足请求，必须保留或恢复。
+
+**Protected Goal / Invariant:** 保持 caller-owned deferred restore、wait no-switch abort、scheduler-class preempt transaction snapshot 和 owner-CPU runqueue selection 边界不变。pick 后新产生的 cause 必须属于下一轮，不能被旧事务尾部清除。
+
+**Minimum Write Set:**
+
+- `anemone-kernel/src/sched/processor.rs`：在 `local_pick_next()` 的 owner 边界直接清 processor slot。
+- 本 RFC 的 `index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md`，既有 transaction devlog 与当前双周 devlog。
+
+**Non-goals:**
+
+- 不修改 EEVDF / RR class policy 或 `PendingResched` cause 集合。
+- 不修改 trap / idle 的 destructive take 和 caller-owned restore 协议。
+- 不引入 epoch、token、序列号、事件队列或跨 context-switch cause history。
+- 不把 acknowledgement 分散到 yield / block / zombie / preempt wrapper，也不让 task-owned state 保存 processor pending truth。
+- 不为单次字段赋值增加具名 clear / acknowledgement helper，也不增加只验证该赋值本身的同义反复测试。
+
+**实现形状：**
+
+- `local_pick_next()` 在 `RunQueue::pick_next_task()` 成功返回后直接把 `proc.pending_resched` 置空，再执行 `set_next_task(task, now)`；该顺序让 selection 确认此前请求，同时把 clear 限定在 next-task switch-in transaction 之前。
+- `DeferredPreempt` 与 wait no-switch abort 在 `switch_out()` 前返回，不进入 scheduler loop，因此不执行此 clear。执行 `take_pending_resched()` 的 trap caller 仍只在 deferred 时 union restore snapshot。
+- full pick 即使得到同一 task 也完成 acknowledgement；当前调度事务已经按值捕获的 `PendingResched` snapshot 不受 processor slot 清除影响。
+
+**Validation Floor:**
+
+- Source audit：确认 `pending_resched = PendingResched::empty()` 紧跟 production `pick_next_task()`，枚举 `take_pending_resched()` / `restore_pending_resched()` 的全部 caller；确认两个 no-switch return 不调用 `switch_out()` / `local_pick_next()`，所有真实 switch-out 最终只经 scheduler loop full pick。
+- 不用抽出的 helper 或 test-only wrapper 制造定向单元测试；当前直接赋值的正确性证据是 owner-boundary placement audit。构建与启动 smoke 负责发现编译、链接和启动回归。
+- `just fmt kernel --check`、`just build`、`git diff --check`、`mdbook build docs`。formatter 必须不再报告本 gate 的 `processor.rs`；若仅剩仓库生成文件 drift，记录精确文件与边界，不扩大 write set 修改生成物。
+
+**Failure Signals:** acknowledgement 必须移出 `Processor` owner；某条 no-pick path 仍进入 `local_pick_next()`；pick 与 acknowledgement 之间允许异步插入并被误删的新 cause；或 class 必须依赖旧 processor slot 而不是 call-local snapshot。出现任一情况即停止代码 gate，回到 RFC review，不用新事件协议掩盖边界错误。
+
+**Write-back:** accepted lifecycle 写回 `index.md` / `invariants.md`；gate 形状写在本节；执行事实与验证写入既有 transaction devlog；`KETER-008` 在验证完成后移入 Neutralized。若修复后没有残余缺口，不新增 register / current limitation。
+
+**Exit:** processor pick-time clear、source audit 和 validation floor 均有可复核结果；没有为直接赋值保留过度封装或同义反复测试；本 gate 源码格式通过，任何生成文件限定的全仓 formatter drift 已在 transaction 中单独记录；tracking issue neutralized，transaction 与双周 devlog 记录 agent-run / unrun 边界。
+
 ## 旁路审计清单
 
 - 直接调用裸 `schedule()` 并可能消费 wait-core state 的路径。
@@ -352,6 +392,7 @@ rg -n "WaitStateStatus::Armed|WaitOutcome::Armed|WakeToken::is_armed|PollRegiste
 - 2026-07-06：阶段 1 implementation worker 命中 write-set stop condition。token-bound `schedule_wait_sleep()` 需要行为级 current-wait identity proof；用户批准把 `sched/wait.rs` 纳入最小扩展写集，并禁止使用 diagnostic id 或 `is_armed()` 作为行为依据。目标、不变量、状态所有权和 completion 线性化点不变；执行事实见 transaction devlog。
 - 2026-07-06：用户批准阶段 1 吸收原阶段 2 的 schedule-entry call-site 迁移子集，避免留下裸 `schedule()` 兼容桥。该反馈改变阶段 write set / 执行顺序，但不改变 accepted contract、验证 floor 或后续 trace/runtime gate；执行事实见 transaction devlog。
 - 2026-07-08：`kernel_preempt` 单核试运行暴露 zombie exit 尾部窗口：exit 模块提前发布 `Zombie` 后、`schedule_zombie_never_return()` 前可能被 trap-tail involuntary preempt 打断。该反馈改变 zombie wrapper 的 accepted contract：`Runnable -> Zombie` 发布归 scheduler core 的 noirq no-return entry，`schedule_preempt()` 仍不接受 zombie current；执行事实见 transaction devlog。
+- 2026-07-12：post-close source audit 发现 processor pending-resched 缺少 successful-pick acknowledgement；block / yield 等未执行 destructive take 的路径完成 full pick 后仍可能留下旧 cause。该反馈补充 scheduler-core latch 生命周期：full pick 确认，no-pick 保留或恢复，pick 后新 cause 进入下一轮；不引入事件协议。执行 gate 与证据见 transaction devlog。
 
 ## Write Set 扩展记录
 

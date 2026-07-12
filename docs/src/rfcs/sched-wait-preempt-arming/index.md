@@ -2,7 +2,7 @@
 
 **状态：** Closed
 **负责人：** doruche, Codex
-**最后更新：** 2026-07-08
+**最后更新：** 2026-07-12
 **领域：** scheduler / wait core / kernel preempt / latch / iomux / timer / signal
 **事务日志：** [2026-07-06-sched-wait-preempt-arming](../../devlog/transactions/2026-07-06-sched-wait-preempt-arming.md)
 **开放问题：** None；未运行的 trace / fairness evidence gap 见 [Tracking Issues](./tracking-issues.md) 与事务日志。
@@ -95,6 +95,8 @@ Canonical：
 8. scheduler-private `ScheduleMode` 第一阶段只需要表达 `WaitSleep`、`Preempt`、`Runnable`、`Zombie` 这类底层状态机差异；`Zombie` mode 只服务 no-return exit entry，不是公开 caller taxonomy。该 mode 不写入 `WaitState`，不暴露给 `LatchTrigger`，不由 fs source 保存。
 9. wait identity、completion outcome、cancel、finish 和 wake placement 仍由 wait core / `TaskSchedState` 统一管理；schedule mode 是 scheduler owner 内部输入，不是第二套 wait truth。
 10. 第一阶段不引入通用机制阻止任意长 `PrePark` setup。`schedule_preempt()` deferred 只关闭 lost-wake correctness，不证明长 source scan 的调度公平性。每条 post-begin register / precheck 路径必须由字段级审计证明不会阻塞、不会嵌套 wait，且窗口短小可接受；如果 trace 或 workload 显示 deferred 长窗口造成可见饥饿，必须停止并回到 publish split / park permit 或等价更重设计。
+11. processor `PendingResched` 是面向下一次 owner-CPU 完整选择的合并 latch，不是跨 context switch 保存事件顺序的日志。一次成功完成的 `pick_next_task()` 确认此前所有 pending cause；即使最终仍选中原 task，也已经完成重新选择，必须清除旧 slot。
+12. 未发生完整 pick 的路径不得确认 pending：`DeferredPreempt` 仍由执行 destructive take 的 caller 恢复 snapshot，wait no-switch abort 保持 processor slot 原样。pick 后新产生的 cause 属于下一轮请求，不能由旧调度事务的尾部清除。
 
 ## 非首选方向
 
@@ -119,6 +121,8 @@ Canonical：
 - 可以把 fanotify/source-owner nested-wait panic 当作 wait-core 需要支持 nested wait 的理由。
 - 可以把 preempt-defer 当作任意长 `PrePark` setup 的公平性证明。
 - 可以提供不携带 wait identity 的泛用 `schedule_wait_sleep()`，让 caller 以 `Runnable` 或 stale wait round 误入 wait-sleep 语义。
+- 可以把 `PendingResched` 当成必须跨完整 pick 保留的事件记录，或在没有 pick 的 schedule entry 中清除它。
+- 可以把 successful-pick acknowledgement 分散到 yield / block / zombie / preempt 等 wrapper，或在旧 task 恢复执行后再清除，从而误删 pick 后新产生的 cause。
 
 进入实现前，必须先把会改变 accepted contract、状态所有权、ABI / 可见语义或验收边界的 blocker 收口，并按正式 RFC workflow 建立 transaction devlog。只依赖真实调用面、锁路径或 trace 证据才能确认的不确定性，可以作为 implementation feedback gate 带入实现，但每项都必须在 [迁移实施计划](./implementation.md) 中写明受保护目标、验证方式、停止条件和 RFC 回写路径。
 
@@ -175,3 +179,5 @@ Canonical：
 2. 在 [Tracking Issues](./tracking-issues.md) 中关闭已被选型中和的问题，保留实现阶段 gate。
 3. 若进入实现，按 [迁移实施计划](./implementation.md) 建立事务日志。
 4. 完成后再更新旧 RFC 的 follow-up 链接、register 和双周 devlog。
+
+2026-07-12 post-close feedback 进一步补充 scheduler-core resched 生命周期：processor pending slot 只在 owner CPU 成功完成一次 full pick 后统一确认；no-pick path 保留或恢复，且不引入 epoch、token 或事件队列。执行 gate 与证据写入既有 transaction devlog。
