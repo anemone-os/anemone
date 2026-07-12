@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / fairness / runtime accounting / scheduler class
 **Canonical Plan:** [RFC-20260622-sched-eevdf-lite](../../rfcs/sched-eevdf-lite/index.md), [不变量需求](../../rfcs/sched-eevdf-lite/invariants.md), [迁移实施计划](../../rfcs/sched-eevdf-lite/implementation.md), [Tracking Issues](../../rfcs/sched-eevdf-lite/tracking-issues.md)
-**Current Phase:** 阶段 3 default switch 后修复中；`EEVDF-022` request-completion correction 已关闭，阶段 3 仍未关闭
+**Current Phase:** 阶段 3 runtime stop；RFC correction gates 已重开，下一门为 R1 weighted FairClock
 
 ## Scope
 
@@ -17,6 +17,7 @@
 - 阶段 1B 再接 typed pending resched、schedule entry、trap / IPI plumbing 和 `EEVDF-005` switch-in source audit；
 - 阶段 2A / 2B / 2C / 2D 分别关闭 EEVDF payload scaffold、runtime accounting、`rq_vtime` / arithmetic / bounded yield、wake clamp / parked handoff；
 - 阶段 3 才翻转 default normal class；
+- 阶段 3 runtime feedback 命中停止条件时，按 R1 / R2 / R3a / R3b 纠正 2C / 2D contract，再恢复 clean-tree runtime 验收；
 - 阶段 4 收口事务、register / current limitations 和后续优化队列。
 
 非目标：
@@ -35,22 +36,24 @@
 - `ScheduleMode` 属于 scheduler core entry permission，不得泄漏到 scheduler class。
 - `PendingResched` 只能作为 processor / scheduler-core private pending request；class 最多按值读取 preempted-current transaction 参数。
 - scheduler class contract 必须是 method-first class-local atomic transaction surface。
-- wake clamp 只能由 `enqueue_woken()` 与 `handoff_woken_current()` 这类 class transaction 表达；wait-core private identity 不进入 class 算法状态。
+- true wake lag restore 只由 `enqueue_woken()` 表达；`handoff_woken_current()` 是 continuous active-to-ready transfer，不执行 wake reward；wait-core private identity 不进入 class 算法状态。
 - worker 未经总控和用户批准不得越过当前阶段 write set；若更好的架构需要扩大 write set，先上报 expansion request，并把批准结果写入本事务日志。
 
 ## Handoff
 
-**Last Updated:** 2026-07-10
+**Last Updated:** 2026-07-12
 
 **Current Branch:** `dev/drc/eevdf`
 
 **Completed:** 公开 RFC 目录已存在，阶段 0 所需四份 RFC 文档已读取：`index.md`、`invariants.md`、`implementation.md`、`tracking-issues.md`。register、current limitations、RFC workflow、RFC template、devlog workflow、templates、事务索引、当前双周 devlog、SUMMARY 和 RFC 列表已读取。阶段 0 建立本事务日志，并把 RFC、tracking issues、事务索引、当前双周 devlog、mdBook Summary 和 RFC 列表连接到同一实现记录。总控完成阶段 0 source audit；未启动 subagent，因为阶段 0 不需要 worker 写代码。Checkpoint 1A 已完成：`Scheduler` trait 改为 method-first transaction surface，`RunQueue` 与 `SchedEntity` 拆出同一 owner 内文件边界，RR / Idle 完成行为保持适配。Checkpoint 1B 已完成：processor pending request 升级为 `PendingResched` flags，trap / idle / tick / IPI producer 接入 typed pending，schedule entry 拆分为 preempt / yield / idle，new-task enqueue 与 current requeue facade 改为语义化命名，owner CPU placement 后的 preempt decision 已接线，`EEVDF-005` 已通过 source audit neutralized。Checkpoint 2A 已完成：`Eevdf` class scaffold、`EevdfEntity` payload 字段位置、非 `Copy` class-specific `SchedEntity`、显式 `new_eevdf()` constructor、fresh clone/default-normal entity 构造和 EEVDF scheduler constants 的 kconfig schema / live root config / generated defs plumbing 已接入；default normal constructor 仍保持 RR，未提前切换到 EEVDF。2B 前 feedback 已收口：`Eevdf` class 内部增加 typed entity accessor，后续 `account_current(now)` 可通过 class-private helper 短暂访问 `EevdfEntity`，不把 `SchedEntity` guard 或 typed payload 参数加入 `Scheduler` trait；RFC canonical 文本补充了 future scheduler policy / class switch 必须通过 owner CPU `RunQueue` command / IPI 线性化，远端不得直接修改 `SchedEntity` class 或 EEVDF payload。Checkpoint 2B 已完成：`Eevdf` private `account_current(now)` 成为唯一推进 current execution segment 的 helper；`set_next_task()` 记录 `exec_start`；tick、yield / preempt requeue、parked handoff、abort-park requeue、block 和 exit switch 都通过同一 helper 结算并刷新 `exec_start`；`Task::on_switch_out()` 保持 task / CPU usage bookkeeping，不成为 fair scheduler accounting truth；`EEVDF-002` 已移入 Neutralized。Checkpoint 2C 已完成：weighted virtual-time arithmetic、monotonic `rq_vtime`、eligible / fallback pick、new placement、deadline renewal、tick / runnable-arrival preempt、bounded yield、nice visibility 和 anomaly observation 已实现；2C / 2D wake 边界与 default-normal RR 边界保持不变，`EEVDF-001` / `EEVDF-020` 已移入 Neutralized。2C 后 class-shape feedback correction 已完成：class precedence 集中为单一 high-to-low order，pick / preempt 共用；EEVDF payload 与通用 class constructor 可见面已收窄。Checkpoint 2D 已完成：ordinary wake 与 parked current handoff 通过同一个 bounded wake clamp transaction 收口，stale / already-current / already-queued / no-switch abort / abort-park 路径保持 no-reward，`EEVDF-004` 已移入 Neutralized；阶段 2 全部 checkpoint 关闭。阶段 3 前 Nice / Priority 边界反馈纠正也已关闭：typed nice、Task writer、clone inheritance、priority syscall 目录化和低代价 target-selection / ABI 修复均已落地，不新增 Checkpoint 2E。
 
-**In Progress:** 阶段 3 default switch 后的修复与复核仍在继续。本次 `EEVDF-022` 已恢复 Checkpoint 2C 的 request-completion propagation，并完成 focused KUnit、runtime smoke 与独立复审；它只关闭一个阶段 3 子修复，不代表阶段 3 整体结束。完整动态 renice 事务仍延期，不在本修复中顺带处理。
+**Correction:** 2026-07-11 user-run evidence 已撤销上述 Checkpoint 2C min-floor / arithmetic 与 Checkpoint 2D parked-handoff clamp 的算法 closure。default constructor、typed pending、single accounting owner 和 `EEVDF-022` outcome propagation 仍有效；`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 已重开。当前 canonical 顺序为 R1 -> R2 -> R3a -> R3b -> Stage 3 clean-tree runtime。
 
-**Open Blockers:** 本次 `EEVDF-022` correction 无剩余 blocker；阶段 3 整体仍未关闭，后续 source / runtime feedback 继续按对应 checkpoint 或 RFC 停止条件处理，不能把本条 neutralized 等同于阶段 3 closure。
+**In Progress:** 文档层 reopening 已建立 factual evidence packet、weighted FairClock / competition membership / service-lag / arithmetic invariants 和 correction gates。尚未开始 R1 生产代码；evidence-only probe commit `d0d4196f` 与公共实现基线 `a76a00ac` 保持分离。
 
-**Next Action:** 继续阶段 3 修复与复核；若出现新的 placement、accounting、wake、virtual-time 或 owner-boundary feedback，按对应 checkpoint 回写。阶段 3 整体闭合前不进入阶段 4。
+**Open Blockers:** `EEVDF-001` / R1 是当前首个 blocker；R1 未证明 actual weighted eligibility 与 direct-causality intervention 前不开始 R2。`EEVDF-018` / `EEVDF-004` 等待 R2，`EEVDF-020` 等待 R2 / R3a / R3b。
+
+**Next Action:** 按 Gate R1 在 clean product branch 实现 weighted FairClock 单变量修复；若需要 runtime probe，在独立 validation branch 复用同一观察语义，不整体 cherry-pick `d0d4196f`。先完成 build / KUnit / source audit，再由用户运行 instrumented signal profile。
 
 ## Phase Log
 
@@ -618,11 +621,48 @@ git diff --check
 
 **Boundary:** 本条关闭只恢复阶段 3 期间暴露的 Checkpoint 2C request-completion contract。阶段 3 仍处于修复状态，本次 correction 不关闭阶段 3，也不触发阶段 4。
 
+### 2026-07-12 - 阶段 3 Runtime Stop 与 RFC Correction Reopening
+
+**Phase:** 阶段 3 stopped；文档层 correction protocol closed，R1 implementation 尚未开始。
+
+**User-run evidence:** rv64 单核 QEMU TCG 的 read-write 对照在相同 118-case result multiset 下，RR profile 区间为 `56.855s` / `58.260s`，多数 EEVDF 对照为 `192.038s` 至 `201.960s`，约慢 3.3 至 3.5 倍。移除用户态 `eevdf-test`、禁用本轮标注的 set-nice、把三个 slice / window 改为 `30000us` 均未改善；单次 `500Hz` 运行也未改善。详细 factual packet 见 [Stage 3 eligibility 与整体吞吐回归证据](../../rfcs/sched-eevdf-lite/backgrounds/stage3-eligibility-regression-20260711.md)。
+
+**Exact mechanism evidence:** 相同 signal profile 中，EEVDF / RR 均为 `attempted=74 passed=60 failed=10 infra_failed=0 skipped=4`。EEVDF probe 关联 `1,494,290` 次 explicit yield，其中 `1,339,030` 次 self-pick；`1,338,814` 次属于 min-floor `self_only_eligible`。同一 snapshot 的 weighted-FairClock counterfactual 显示 `552,494` 次已有 eligible peer，`786,320` 次仍无 eligible peer。probe 的 `invalid`、`mismatch`、`pending_overwrite`、`missing_yielding`、`missing_pick` 均为 `0`。
+
+**Conclusion strength:** 证据已关闭“monotonic minimum-`vruntime` floor 是正确 eligibility clock”这一假设，也关闭 forced-handoff / penalty-tuning 作为根修复的方向；它尚未在 intervention 前证明该 mechanism 对全部端到端差值的因果贡献。R1 必须用单变量 actual FairClock repair 关闭后者，不能把 counterfactual count 直接写成性能预测。
+
+**RFC routing:** `index.md` / `invariants.md` 已改为 weighted FairClock、ready / active competition membership、true leave / join exact-rational service lag、full-set arrival decision、segmentation-invariant accounting、strict deadline catch-up 和 proactive rebase。`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 重开为 Keter；原 P2 / P3 仅保留为失效历史 gate。
+
+**Correction order:** R1 只替换 actual FairClock，并允许带退出条件的 `legacy_placement_floor` 暂时服务旧 placement；R2 删除 bridge 并关闭 membership / lag / arrival；R3a 关闭 remainder / request catch-up；R3b 关闭 coordinate rebase。每门均有独立 hypothesis、protected invariant、minimum write set、validation floor、failure signals、write-back 和 exit，前门未退出不得启动后门。
+
+**Branch / probe boundary:** 公共实现基线仍为 `a76a00ac`；`d0d4196f` 是 evidence-only probe commit，包含 instrumentation、profile 选择和关机汇总，不是 feature commit。后续若需要修复后计数，在独立 validation branch 复用观察语义与自校验，不整体 cherry-pick probe commit，不把 hot-path counter / dump 留在 production tree。
+
+**Validation ownership:** 本轮只修订公开文档，未运行 build / QEMU / LTP。后续 agent 负责每门 gate 的 build、focused KUnit、source audit、diff / docs validation；用户负责 R1 instrumented signal 和最终 clean signal / read-write runtime。未提供 user-run evidence 时不能关闭对应 gate。
+
+**Docs validation:** `git diff --check` 通过；两份新增 background 文件分别通过 `git diff --no-index --check`；`mdbook build docs` 通过，生成页面中的 Gate R1 anchor 与 tracking link 一致。本轮新增和修改段落的公开边界扫描未发现开发者私有目录、本机绝对路径或私有日志链接；历史 transaction 条目未在本次更正中重写。
+
+**Next:** Gate R1 production correction；R1 failure signal 命中时停止并重新分类，不自动继续 R2。
+
+### 2026-07-12 - RFC Correction 独立审查与草案校正
+
+**Phase:** docs-only correction review closed；未开始 R1 implementation。
+
+**Independent review findings:** 第一轮只读审查报告 3 个 Keter 与 1 个 Euclid：R1 缺 validation-only write set 和公开 signal timing 基线；canonical 文本仍把当前修复路由到失效 P2 / P3；未定义的 `R4` 与阶段 4 收口混淆；accounting 伪代码没有保存并换基解释 remainder 的 historical weight。第二轮复核确认主体修复后，继续报告 1 个 Keter 与 2 个 Euclid：R1 validation write set 误纳入旧 evidence commit 中与 signal 无关的 `pipe2_04` testcase bypass / RR constructor 注释；factual background 承载了 gate 计划；R1 同时要求 result multiset 完全相等和记录 failure-set diff。第三轮复核未发现 Apollyon / Keter，报告 3 个 Euclid：R3a / Stage 3 runtime 仍残留严格 multiset-equality 口径；P2 correction 入口遗漏 R2 的 competition membership / full-set arrival；deadline-tie keep-current 没有限定 request-completion outcome。
+
+**Accepted corrections:** R1 production 与 validation-only write set 已分离，`groups/pipe.txt` / `class/entity.rs` 明确排除，signal `78s` / `57s` 只作为各一份公开样本；P2 / P3 只保留为 historical gate，当前顺序固定为 R1 -> R2 -> R3a -> R3b -> clean Stage 3，完整 reweight 另走独立 follow-up RFC / gate。R3a 与最终 runtime 统一为 same case set、no regression、所有 result diff 先分类，结果改善不自动失败；R2 同时纠正 2C membership / full-set arrival 与 2D leave / join / handoff；deadline tie 只约束 preferred-entity comparison，存在 peer 的 request-completion outcome 仍可独立请求重新选择。remainder historical-weight 换基、yield penalty 暂态、legacy-floor consumer / update 区分、R2 enqueue-before-accounting preflight、`W0 == 0` interior anchor 与双向 common rebase 已折回 canonical 文本。
+
+**Review integrity boundary:** 第三轮 reviewer 违反只读合同，曾临时修改 `index.md`、`invariants.md`、`implementation.md` 后再恢复，且没有保存写前 hash。因此本条不把 reviewer 的“未保留 tracked edit”声明当作最终 delta 完整性证明；总控基于当前完整 diff 重新应用并复核 accepted corrections。按用户要求不再延长 subagent review 链，最终 delta 没有再次交给独立 reviewer。
+
+**Final docs validation:** `git diff HEAD --check`、新增 background whitespace check、`mdbook build docs`、Gate R1 / tracking / background anchor 检查和新增内容公开边界扫描通过。未运行 kernel build、QEMU、LTP 或用户 runtime；本轮只关闭 RFC 草案校正，不关闭 R1 或 Stage 3。
+
+**Next:** Gate R1 production correction；R1 failure signal 命中时停止并重新分类，不自动继续 R2。
+
 ## Open Items
 
-- 阶段 3 修复与复核仍在继续；`EEVDF-022` 已关闭，不再是 active blocker。
-- 阶段 3 整体 closure 尚未执行；不得因为本次 correction 的 KUnit / runtime / review 通过而进入阶段 4。
+- R1 weighted FairClock 是当前 active blocker；R1 exit 前不开始 R2。
+- R2 / R3a / R3b 与 Stage 3 clean runtime 尚未执行。
+- `EEVDF-022` 保持 Neutralized，但不能替代 strict deadline catch-up / arithmetic closure。
 
 ## Closure
 
-事务仍在进行中。`EEVDF-022` 子修复已关闭，阶段 3 未关闭。
+事务仍在进行中。Stage 3 已停止并重开 correction protocol；R1-R3b 和 clean runtime 未完成，不得进入阶段 4。

@@ -62,6 +62,8 @@
 		- [不变量需求](./rfcs/sched-eevdf-lite/invariants.md)
 		- [迁移实施计划](./rfcs/sched-eevdf-lite/implementation.md)
 		- [Tracking Issues](./rfcs/sched-eevdf-lite/tracking-issues.md)
+		- [背景材料](./rfcs/sched-eevdf-lite/backgrounds/index.md)
+			- [Stage 3 Eligibility 回归证据](./rfcs/sched-eevdf-lite/backgrounds/stage3-eligibility-regression-20260711.md)
 	- [VFS Direct User I/O](./rfcs/vfs-direct-user-io/index.md)
 		- [不变量需求](./rfcs/vfs-direct-user-io/invariants.md)
 		- [迁移实施计划](./rfcs/vfs-direct-user-io/implementation.md)

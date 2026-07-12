@@ -1,10 +1,10 @@
 # sched EEVDF-lite tracking issues
 
 **状态：** Active
-**最后更新：** 2026-07-10
+**最后更新：** 2026-07-12
 **父 RFC：** [RFC-20260622-sched-eevdf-lite](./index.md)
 **事务日志：** [2026-07-09-sched-eevdf-lite](../../devlog/transactions/2026-07-09-sched-eevdf-lite.md)
-**来源：** sched-split-aware v2 重写 / method-first scheduler class 纠偏 / 2026-07-07 文档层 review
+**来源：** sched-split-aware v2 重写 / method-first scheduler class 纠偏 / 2026-07-07 文档层 review / 2026-07-11 Stage 3 runtime feedback
 
 本文只跟踪 design review 后确认的 sched EEVDF-lite 草案缺陷、证明缺口、边界冲突或会影响实现顺序、review gate、停止边界和验收判断的设计问题。
 
@@ -23,7 +23,53 @@
 
 ## Keter
 
-- 暂无 active Keter。
+### EEVDF-001：eligibility 必须使用 weighted FairClock
+
+**状态：** Keter
+
+**触发证据：** [Stage 3 eligibility 与整体吞吐回归证据](./backgrounds/stage3-eligibility-regression-20260711.md) 记录了相同 signal profile 中 `1,338,814` 次 min-floor `self_only_eligible` self-pick；同一 snapshot 的 weighted-fair-clock counterfactual 显示 `552,494` 次已有 eligible peer。此前基于 source audit / focused KUnit 的 Neutralized 结论没有覆盖 default EEVDF 下的这一 runtime failure mode，现已撤销。
+
+**问题：** monotonic minimum-`vruntime` floor 把本应参与竞争的 peer 排除在 eligible set 外，并形成 same-task yield feedback。现有 `NoEligibleTask` anomaly 不会触发，因为 yielding task 本身仍 eligible。继续把该 floor 当作公平时钟会把核心算法和后续 lag / placement 设计带到错误方向。
+
+**修复落点：** [RFC index](./index.md) / [不变量需求](./invariants.md) 已改为从 `C = ready union class-active current` 派生 weighted FairClock；[Gate R1](./implementation.md#gate-r1---direct-weighted-fairclock-repair) 先做单变量 eligibility intervention。禁止 forced handoff、skip-current、penalty tuning 或 testcase-specific yield 旁路。
+
+**关闭条件：** R1 的公式 KUnit、FairClock snapshot / legacy-floor source audit、instrumented signal conservation / mirror check 与同观察语义下的计数 / interval 判定全部满足；若 yield / same-task dispatch 仍在修复前数量级，必须保留 Stage 3 blocker 并重新分类，而不是只凭公式替换关闭吞吐因果。最终 clean-tree signal / read-write 验收仍属于 Stage 3 closure。
+
+### EEVDF-018：competition membership 必须区分 continuous transfer 与 true leave / join
+
+**状态：** Keter
+
+**触发证据：** weighted FairClock 需要一个没有 pick / set-next 空洞的完整 competition set；现有实现直到 `set_next_task()` 才安装 class current，且原 2D 把 `ParkPending` handoff 当成 wake placement。此前 Neutralized 只证明了 method 名称分流，没有证明 FairClock membership 或 service-lag lifecycle。
+
+**问题：** yield、preempt、`ParkPending` handoff 和 abort-wait requeue 都没有离开 competition set；把其中任一路径当成 true leave / join 会保存或恢复不存在的 lag，并使 ready / active snapshot 出现双重或缺失 truth。
+
+**修复落点：** R2 建立 ready / active 互斥 membership，`pick_next_task()` 在 class 内完成 ready-to-active transfer，true block / wake 才执行 leave / join。当前 `Processor` 已知先 enqueue、后在 `decide_preempt_current()` accounting，不能满足最终同 snapshot 合同；R2 必须先做 1A / 1B method-contract review，并记录已批准的 write-set 扩展，不能在旧 surface 间制造第二套状态。
+
+**关闭条件：** R2 source audit 与 focused KUnit 证明 ready / active 互斥、continuous paths 不保存 / 恢复 lag、true leave / join exactly once，generic `dequeue()` 已删除或分类为窄 transaction，且没有依赖 wait-core private identity 的第二真相源。
+
+### EEVDF-004：true wake placement 必须恢复 service lag，`ParkPending` 不得获得 wake reward
+
+**状态：** Keter
+
+**触发证据：** 原 Neutralized 结论把 ordinary wake 与 parked-current handoff 都收敛为围绕 monotonic floor 的 bounded clamp。Stage 3 feedback 已否定该 floor；competition membership 分析进一步证明 parked current 从未离开 `C`，因此 handoff clamp 本身就是错误 lifecycle 分类。
+
+**问题：** true block / wake 需要保存并恢复 weight-scaled service lag；`ParkPending`、abort、preempt 和 yield 是 continuous membership。继续复用同一个 wake clamp 会让 continuous path 获得凭空 credit，也无法证明 unequal-weight sleep/wake 的债权守恒。
+
+**修复落点：** R2 使用 bounded exact-rational saved service lag、带 `W0` 补偿的 join placement 和有方向约束的整数误差；ordinary `WakeEnqueueResult::Enqueued` 消费 saved lag 一次，`ParkPending` handoff 只做 active-to-ready transfer。R1 的 `legacy_placement_floor` 仅为隔离变量的临时 bridge，R2 必须删除。
+
+**关闭条件：** exact-rational leave / join、unequal-weight non-integer round trip、`W0 == 0`、credit / debt clamp、ParkPending no-reward 和 stale / already-* 不消费 saved lag 均有 KUnit / source proof；任何 checked representation fallback 命中都会让 gate 失败。
+
+### EEVDF-020：virtual-time arithmetic、accounting 与坐标表示必须闭合
+
+**状态：** Keter
+
+**触发证据：** 原 Neutralized 只证明 `u128` 中间计算、每段最小推进和 `u64` saturation 可观测。新的 FairClock / lag contract 暴露出三项未闭合边界：每段 `max(1, floor(...))` 不具备 accounting 分段不变性；deadline 重置不保留跨多个 request 的 phase；`u64` saturation 后无法继续证明 deadline、lag 或 progress。
+
+**问题：** transaction 频率不能改变公平账本，arithmetic anomaly 也不能成为长期算法状态。saved lag 还需要 checked exact-rational 表示，不能先量化或把 `u128` magnitude 强转为 `i128`。
+
+**修复落点：** R2 关闭 exact-rational saved lag 与 representation failure；R3a 关闭 fixed-weight remainder、strict request catch-up 和 block / wake accounting continuity；R3b 关闭 proactive common coordinate rebase。dynamic renice 的 strong lag conservation 仍是独立 follow-up RFC / gate，不属于本次 R1-R3b 或阶段 4 收口，也不阻塞 R1-R3b。
+
+**关闭条件：** R2 / R3a / R3b 三门证据全部满足，真实 workload 不命中 arithmetic fallback，common rebase 前后 eligibility、lag、deadline 差和 pick 结果等价。任一子门未关闭时，本 issue 保持 active，阶段 3 不得收口。
 
 ## Euclid
 
@@ -45,62 +91,17 @@
 
 **Source audit / validation:** `task_tick()` 与 `decide_preempt_current()` 分别经过可直接 KUnit 的 class-private production decision helper；所有 `account_current()` caller 都显式消费或丢弃 outcome，arithmetic 与 renewal 不再通过 effectful short-circuit 组合。rv64 端到端日志中 113 项 KUnit 全部通过，包含 completion + peer、completion + no peer、runnable-arrival completion、saturation renewal 和 wake normalization 分层；equal-weight、nice direction、bounded yield、sleep/wake 四组阶段 3 workload 均通过，测试区间无 `EEVDF anomaly`。read-write LTP 的 nonzero failure multiset 与修复前基线完全一致。
 
-**Review / 结论：** 首轮独立 review 的唯一 Euclid 是测试未锁住 production decision consumer；修正后复审无 Apollyon / Keter / Euclid。本 issue neutralized，只恢复 Checkpoint 2C 的 request-completion contract；阶段 3 仍处于修复状态，不因本条关闭而进入阶段 4。
+**Review / 结论：** 首轮独立 review 的唯一 Euclid 是测试未锁住 production decision consumer；修正后复审无 Apollyon / Keter / Euclid。本 issue neutralized，只证明 request-completion outcome 不会被续期吞掉。R3a 新增的 strict multi-request catch-up / phase preservation 属于 active `EEVDF-020` arithmetic gate，不把本 issue 的历史修复反向解释为完整 deadline closure。
 
 ### EEVDF-017：default class switch 必须被 blocker / gate 矩阵约束
 
 **状态：** Neutralized
 
-**修复落点：**
+**修复落点：** `anemone-kernel/src/sched/class/entity.rs` 的唯一 default normal constructor 已在阶段 3 翻转为 fresh `EevdfEntity`，无调用者的 directed `new_eevdf()` 已删除；RR implementation 暂留，但不存在 production RR entity constructor。
 
-- 阶段 1A / 1B 与 Checkpoint 2A / 2B / 2C / 2D 已分别关闭 method-first surface、typed pending、switch-in ordering、runtime accounting、`rq_vtime` / arithmetic / bounded yield 和 wake clamp / parked handoff gate。
-- `anemone-kernel/src/sched/class/entity.rs` 的唯一 default normal constructor 已在阶段 3 翻转为 fresh `EevdfEntity`，无调用者的 directed `new_eevdf()` 已删除；RR implementation 暂留，但不存在 production RR entity constructor。
+**Source audit / validation:** ordinary clone child、rv64 / loongarch64 bootstrap task、`kthreadd` 和 ordinary kthread 全部继续调用 `SchedEntity::new_normal()`；idle task 是唯一 `new_idle()` caller；全树没有 `new_eevdf()` 或 `SchedClassPrv::RoundRobin(...)` 构造调用。rv64 `just build`、rv64 / loongarch64 `eevdf-test` 与 `user-test` app build 已通过。
 
-**Source audit / validation:** ordinary clone child、rv64 / loongarch64 bootstrap task、`kthreadd` 和 ordinary kthread 全部继续调用 `SchedEntity::new_normal()`；idle task 是唯一 `new_idle()` caller；全树没有 `new_eevdf()` 或 `SchedClassPrv::RoundRobin(...)` 构造调用。当前 rv64 `just build`、rv64 / loongarch64 `eevdf-test` 与 `user-test` app build 均通过。用户态 equal-weight、nice direction、bounded yield 和 sleep/wake runtime smoke 已接入公共 rootfs，但由用户运行，当前标记为 `user-run pending`，不作为本 issue 的 source-classification closure 证据。
-
-**结论：** default switch 前置 gate 与阶段 3 direct-normal source audit 均已关闭，ordinary / bootstrap / kthread 不存在 production RR 特例，本 issue neutralized。后续用户运行若暴露 placement、accounting、wake clamp、virtual-time arithmetic 或 service-kthread progress 问题，按对应阶段 2 gate或 RFC review 重新分类，不恢复隐式 RR 例外。
-
-### EEVDF-004：wake placement 必须 exactly-once 覆盖 parked handoff 分支
-
-**状态：** Neutralized
-
-**修复落点：**
-
-- `anemone-kernel/src/sched/class/eevdf.rs` 只在 `enqueue_woken()` 与 `handoff_woken_current()` 调用 class-private wake clamp；clamp 将过度落后的 `vruntime` 提升到 `rq_vtime - wake_window_vruntime(weight)` 下界，不降低窗口内或领先 entity 的 `vruntime`，并在 clamp 后按既有自然续期规则处理 expired deadline。
-- ordinary wake 只在 owner CPU stale-safe placement 返回 `Enqueued` 时进入 `enqueue_woken()`；parked current 只在 scheduler 收口时进入 `handoff_woken_current()`，并先通过唯一 `account_current(now)` 结算执行段。
-- `Stale`、`AlreadyCurrent`、`AlreadyQueued` 和 no-switch abort 都在 class transaction 前返回；`requeue_aborted_wait_current()` 不调用 clamp 或 yield penalty。
-
-**Source audit / validation:** 两个独立只读 reviewer 均确认 ordinary / remote wake、parked handoff、abort 和 class owner boundary 无 Apollyon / Keter / Euclid。focused KUnit 覆盖 bounded floor、领先 entity 不回退、重复应用幂等、underflow 和 clamp 后 deadline renewal；rv64 端到端脚本重建 rootfs 后运行 107 项 KUnit 全部通过，并正常完成现有 read-write profile 和关机。
-
-**结论：** Checkpoint 2D / Gate P3 已关闭，ordinary wake / parked handoff exactly-once 边界已由实现、source audit、独立 review 和 focused KUnit 证明。default normal 仍是 RR，因此真实 EEVDF wake-heavy / wait-abort smoke 保留给阶段 3，现有 RR 下 LTP 结果不作为该 runtime 语义的替代证据。
-
-### EEVDF-001：`rq_vtime` / eligibility 公式必须闭合
-
-**状态：** Neutralized
-
-**修复落点：**
-
-- `anemone-kernel/src/sched/class/eevdf.rs` 通过 class-owned weak current handle 保持已离开 ready queue 的运行任务仍在 visible set 中，并以 monotonic floor helper 在 enqueue、dequeue、pick 和 accounting 后推进 `rq_vtime`。
-- eligible pick 在线性 scan 中选择最小 deadline；non-empty queue 无 eligible task 时 fallback 到最小 `vruntime`，推进 `rq_vtime` 并记录 `NoEligibleTask` anomaly。
-- new placement 使用当前 `rq_vtime`；deadline 只在 fresh 初始化或 `vruntime >= deadline` 时续期；tick / runnable-arrival 只接受 slice 到期或严格更早的 eligible deadline。
-
-**Source audit / validation:** 两个独立只读 reviewer 确认 visible set、更新点、eligible / fallback 分流、bounded yield、2C / 2D 边界和 default-normal RR 边界均符合 Gate P2；KUnit 覆盖 eligible pick、no-eligible fallback、anomaly observation、monotonic `rq_vtime` 和 bounded yield，rv64 pretest 的 105 项 KUnit 全部通过。
-
-**结论：** Checkpoint 2C / Gate P2 已关闭。当前没有真实 EEVDF CPU-bound workload 证据，因为 default normal class 仍是 RR；该非阻塞验证缺口不得被现有 read-write LTP 结果替代，后续 default switch gate 仍需运行真实 EEVDF workload 并观察 fallback anomaly。
-
-### EEVDF-020：virtual time arithmetic 表示必须闭合
-
-**状态：** Neutralized
-
-**修复落点：**
-
-- `anemone-kernel/src/sched/class/eevdf.rs` 使用固定 Linux 40 项 nice weight 表，受约束的 `Nice` newtype / Task 原子存储保持唯一 weight truth，不缓存第二份 nice / weight 状态。
-- virtual runtime、slice、deadline 和 yield 计算统一使用 `u128` 中间值并 saturate 到 `u64`；正 runtime delta 至少推进 `1`，saturation 记录 `ArithmeticSaturation` anomaly。
-- base slice、yield penalty window 和 anomaly threshold 消费 live Kconfig 定义；wake clamp window 仍留给 Checkpoint 2D。
-
-**Source audit / validation:** 独立 review 未发现 arithmetic contract、状态所有权或观察面 blocker；KUnit 验证 Linux nice 权重方向、nice 0 单位、最小推进、conversion / add saturation 和 anomaly observation，rv64 pretest 集成通过。
-
-**结论：** 类型、单位、scale、overflow / saturation 和 fail-closed 规则已由实现、source audit 与 focused KUnit 证明，Checkpoint 2C / Gate P2 关闭本 issue。
+**结论：** 本 issue 只跟踪 default constructor / production RR 特例，source-classification closure 仍成立。2026-07-11 runtime feedback 已把 eligibility、membership / wake 和 arithmetic 分别重开为 `EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020`；这些 active Keter 阻止阶段 3 / 4 收口，但不恢复 production RR，也不需要把本 issue 重开。
 
 ### EEVDF-002：runtime accounting 必须有单一幂等边界
 
@@ -114,7 +115,7 @@
 
 **Source audit:** `DeferredPreempt` 在 `schedule_inner()` 中提前返回，不调用 `switch_out()`、`local_pick_next()`、`set_next_task()` 或任何 EEVDF class transaction；runnable requeue、parked handoff、abort-park requeue、wait park switch 和 exit switch 都在 `RunQueue` 设置 `on_runq = true` 或真正切走前完成 class transaction。`account_current(now)` 在成功推进后刷新 `exec_start = now`，tick 后的 switch-out / requeue 只结算 tick 之后的新执行段。
 
-**结论：** Checkpoint 2B / Gate P1 已关闭。2B 使用单调 actual-runtime scalar 证明 accounting 边界；weighted virtual-time arithmetic、`rq_vtime` 更新、deadline / slice fail-closed 规则和 bounded yield 仍归属 Checkpoint 2C / `EEVDF-001` / `EEVDF-020`，不因本条 neutralized 而提前关闭。
+**结论：** Checkpoint 2B / Gate P1 的单一 accounting owner、call-site ordering 和 `exec_start` 刷新仍成立，本 issue 保持 Neutralized。fixed-weight remainder、block/wake continuity、deadline catch-up 和 coordinate representation 属于 active `EEVDF-020` / R2 / R3a / R3b；不得用本 issue 的 owner closure 代替这些 arithmetic evidence。
 
 ### EEVDF-003：schedule caller / pending resched reason 必须可传递
 
@@ -146,7 +147,7 @@
 
 - [RFC index](./index.md) / [不变量需求](./invariants.md) 决策为 bounded yield penalty。
 
-**反馈相关：** 具体 yield penalty 公式和 smoke 归入 Checkpoint 2C / Gate P2；若 yield 反馈显示长期立即选回或饥饿，回写 2C，而不是重新打开 event taxonomy。若异常实际来自 wake reward / no-reward 边界，路由到 Checkpoint 2D / Gate P3。
+**反馈相关：** 具体 yield penalty 公式和 smoke 先归入 Gate R1 的 weighted-FairClock intervention；若 yield 反馈显示长期立即选回或饥饿，按 R1 failure signal 停止并回写 correction gate，而不是重新打开 event taxonomy。若异常实际来自 wake reward / no-reward 边界，路由到 Gate R2。
 
 **结论：** yield 不再与 tick preempt 或 generic runnable requeue 混用。
 
@@ -169,7 +170,7 @@
 
 - [迁移实施计划](./implementation.md) 要求 base slice、wake clamp window、yield penalty window 和 anomaly threshold 进入 Kconfig。
 - 实现必须同步 `conf/.defconfig`、live root `kconfig`、`scripts/xtask/src/config/kconfig.rs` 与 generated defs 使用点。
-- Checkpoint 2A 建立 schema / generated plumbing；base slice、yield penalty window 和 anomaly threshold 的语义消费由 2C 关闭，wake clamp window 的语义消费由 2D 关闭。
+- Checkpoint 2A 建立 schema / generated plumbing；base slice、yield penalty window 和 anomaly threshold 的历史语义消费曾由 2C 覆盖，当前 correction 由 R1 / R3a 分别验证；wake clamp window 的旧语义由 2D 覆盖，当前由 R2 改义为 true-sleep service-credit bound。
 
 **结论：** nice weight table 第一版固定 Linux 表，不提供 selector；未来替换权重表另走 follow-up。
 
@@ -181,9 +182,9 @@
 
 - [RFC index](./index.md) 和 [迁移实施计划](./implementation.md) 明确 fallback anomaly 必须可观测。
 
-**反馈相关：** 稳定 CPU-bound smoke 在 warm-up 后连续观察窗口仍增长 anomaly 时，反馈归入 Checkpoint 2C / Gate P2，视为 eligibility 公式未闭合，必须停止默认 class 切换。
+**反馈相关：** 稳定 CPU-bound smoke 在 warm-up 后连续观察窗口仍增长 anomaly 时，按 anomaly 来源路由到 R1 的 FairClock / eligibility、R2/R3a 的 membership / representation / accounting 或 R3b 的 coordinate gate；在归类前必须停止推进，不得恢复默认 class 收口。
 
-**结论：** 每次 anomaly 记录通过 `kerrln!` 输出 reason 和累计次数；anomaly threshold 不再作为独立 active issue，只控制连续 fallback 的额外 streak 摘要，并继续作为 `EEVDF-001` / Checkpoint 2C / Gate P2 的观察面。
+**结论：** 每次 anomaly 记录通过 `kerrln!` 输出 reason 和累计次数；anomaly threshold 不再作为独立 active issue，只控制连续 fallback 的额外 streak 摘要，并继续作为 `EEVDF-001` / R1-R3b correction gates 的观察面。
 
 ### EEVDF-011：O(n) runqueue 性能
 
@@ -251,18 +252,6 @@
 - class-visible 语义通过 `enqueue_new()`、`enqueue_woken()`、`requeue_yielded_current()`、`requeue_preempted_current()`、`handoff_woken_current()`、`requeue_aborted_wait_current()`、`put_prev_blocked()`、`put_prev_exiting()`、`pick_next_task()`、`set_next_task()`、`task_tick()` 和 `decide_preempt_current()` 等 method-first transaction 表达。
 
 **结论：** 阶段 1 source audit 禁止 scheduler implementation 引入 `SchedEvent` / `on_event` / event bus。
-
-### EEVDF-018：`AbortWaitSleep` 不是一个单一 requeue event
-
-**状态：** Neutralized
-
-**修复落点：**
-
-- [RFC index](./index.md)、[不变量需求](./invariants.md) 和 [迁移实施计划](./implementation.md) 把 no-switch abort、abort-park requeue 和 parked wake handoff 拆成不同 method-first path。
-
-**反馈相关：** 具体 wake reward / no-reward 验证归入 Checkpoint 2D / Gate P3；若 abort path 获得 wake reward，回写 `EEVDF-004`。
-
-**结论：** no-switch abort 不调用 scheduler class；`requeue_aborted_wait_current()` 不做 wake clamp / yield penalty；`handoff_woken_current()` 做 exactly-once wake clamp。
 
 ### EEVDF-005：switch-in 记账线性化点必须明确
 
