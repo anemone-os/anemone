@@ -1,12 +1,12 @@
 # RFC-20260711-sched-rt-class
 
-**状态：** Draft
+**状态：** Accepted for Implementation
 **负责人：** doruche, Codex
 **最后更新：** 2026-07-12
 **领域：** scheduler / realtime / FIFO / RR / scheduler class
-**事务日志：** None
+**事务日志：** [2026-07-12-sched-rt-class](../../devlog/transactions/2026-07-12-sched-rt-class.md)
 **开放问题：** 见 [Tracking Issues](./tracking-issues.md)
-**下一步：** 执行 [迁移实施计划](./implementation.md) 的 Scheduler-Core 前置 Gate；通过后按 checkpoint 开始 RT class 实现。
+**下一步：** 按事务日志执行 Checkpoint 1 的 RT class 原子切换；前置 Scheduler-Core Gate 已完成，后续以独立 review gate 和验证证据为准。
 
 ## 摘要
 
@@ -237,7 +237,7 @@ priority correctness 通过理论、source audit 与 focused KUnit 闭合：
 - published task 可以非事务性地修改 class、policy 或 priority。
 - FIFO/RR 具有 hard realtime guarantee。
 - 不同 priority 的用户态 runtime 测试已经完成。
-- 具体实现阶段、write set 和 review gate 已经关闭。
+- Checkpoint 1 已经实现或验证；其原子 write set、review gate 和停止条件只表示允许进入实现的合同。
 
 ## 备选方案
 
@@ -271,6 +271,7 @@ priority correctness 通过理论、source audit 与 focused KUnit 闭合：
 - 反之，如果 tick 导致 FIFO peer 自动轮转，则属于明确算法错误。
 - RR quantum 只能达到 tick 分辨率；`SYSTEM_HZ` 很低时 effective quantum 会明显量化。
 - 99 个 empty bucket 增加每 CPU 固定容器元数据，但避免更复杂的线性插入与选择逻辑。
+- bucket 的 `VecDeque` 首次 materialize 或扩容可能在 owner-CPU noirq transaction 中触发堆分配；这与 legacy `RoundRobin` 已有的 ready-queue 风险相同，本 RFC 暂接受并沿用该限制，不把它描述为 allocation-free。对应风险由 [ANE-20260622-IRQ-OFF-HEAP-ALLOCATION](../../register/open-issues.md#ane-20260622-irq-off-heap-allocation) 跟踪；未来若改成预分配或 intrusive queue，必须另开 gate。
 - 编译期 selector 要求所有非 idle task creation 收敛到 `new_default()`；若仍保留并列 default constructor，会重新制造默认 policy 的多重入口。
 - 在没有 ABI syscall 的阶段，procfs 或其它观察面可能仍显示旧的普通调度字段；本 RFC 不以伪造 read-back 掩盖该缺口。
 
@@ -284,4 +285,4 @@ priority correctness 通过理论、source audit 与 focused KUnit 闭合：
 - 用户态已运行和未运行的同 priority smoke；
 - 明确延期的 ABI、动态 policy transaction、bandwidth control 与 priority runtime validation。
 
-具体阶段和证据记录格式待后续 `implementation.md` 收敛后确定。
+具体阶段、证据记录和 handoff 以 [迁移实施计划](./implementation.md) 与事务日志为准；实现期不得把阶段事实复制回本页。

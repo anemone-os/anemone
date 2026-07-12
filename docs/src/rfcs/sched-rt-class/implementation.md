@@ -1,13 +1,13 @@
 # Sched RT Class 迁移实施计划
 
-**状态：** Draft；实施阶段已收敛，尚未开始
+**状态：** Active；Scheduler-Core 前置 Gate 已关闭
 **最后更新：** 2026-07-12
 **父 RFC：** [RFC-20260711-sched-rt-class](./index.md)
 **不变量：** [不变量需求](./invariants.md)
 
 本计划把 RT class 实现限制在现有 scheduler-class owner boundary 内。算法只增加一个共享的 `Realtime` class、99 个 priority bucket 和 FIFO/RR 两种 policy；不新增 scheduler-core event、task-local pending state、wait-specific transaction 或运行期属性 mutation API。
 
-实现顺序按“前置合同、class-local 算法、RunQueue 接线、默认构造与配置、集成验证”推进。每个 checkpoint 都有独立的 write set 和停止条件；前一个 gate 未通过时，不继续扩大后续写集。
+实现顺序按“前置合同、RT class 原子切换、集成验证”推进。每个 checkpoint 都有独立的 write set 和停止条件；前一个 gate 未通过时，不继续扩大后续写集。
 
 ## 实施目标
 
@@ -49,23 +49,41 @@
 
 如果上述合同不能由当前 scheduler core 证明，停止 RT 实现，先更新 scheduler-core 计划及其 transaction 记录。本 RFC 不通过复制状态来绕过该 gate。
 
-## Checkpoint 1：RT Entity 与 Class-Local 算法
+## Checkpoint 1：RT Class 原子切换
+
+### 调整理由
+
+文档层 review 证明 class payload、class identity、`RunQueue` exhaustive dispatch、legacy owner 删除、default constructor 和 RR full quantum 不能拆成彼此不可编译的 checkpoint。用户已批准在不削弱功能或不变量的前提下调整文件切分，因此本 checkpoint 把这些同一 scheduler-class owner 的表面合并为一个原子切换；不保留 `RoundRobin -> Realtime` identity 伪装、双 queue fallback 或临时 hard-coded quantum。
 
 ### 写集
 
 - `anemone-kernel/src/sched/class/entity.rs`
 - `anemone-kernel/src/sched/class/rt.rs`（新增）
-- `anemone-kernel/src/sched/class/mod.rs`（仅声明新 module，不改变 production dispatch）
+- `anemone-kernel/src/sched/class/mod.rs`
+- `anemone-kernel/src/sched/class/runqueue.rs`
+- 删除 `anemone-kernel/src/sched/class/rr.rs`
+- `anemone-kernel/src/arch/riscv64/bootstrap.rs`
+- `anemone-kernel/src/arch/loongarch64/bootstrap.rs`
+- `anemone-kernel/src/task/api/clone/mod.rs`
+- `anemone-kernel/src/task/kthread/kthreadd.rs`
+- `conf/.defconfig`
+- 根 `kconfig`（gitignored live build input；只同步/切换本 checkpoint 新增的 selector 与 timeslice，保留其它开发者本地选项，不提交）
+- `scripts/xtask/src/config/kconfig.rs`
+- 构建生成的 `anemone-kernel/src/kconfig_defs.rs`（只由 repository build flow 生成）
+
+本 checkpoint 不修改 `processor.rs`、wait-core、trap/IPI pending plumbing、task topology、调度属性 syscall 或其它 scheduler class 算法。若实际编译要求越过上述文件，worker 必须先提交 expansion request；不得在已批准写集内制造 adapter 绕过。
 
 ### 实现内容
 
 - 增加 `RtPriority`，严格校验 `1..=99`，提供无歧义的 bucket index 映射；
-- 增加 `RtPolicy::Fifo` 与 `RtPolicy::RoundRobin { remaining_ticks }`；
-- 增加 `RtEntity`，使 policy、priority 和 RR budget 只有一个行为真相源；
-- 增加 `Realtime` class 的 99 个 `VecDeque<Arc<Task>>` bucket；
-- 实现 enqueue、dequeue、pick 和各类 current requeue 的 placement 规则；
-- 实现 FIFO/RR tick decision、strict higher-priority arrival preemption 和同 priority no-preempt；
-- 本 checkpoint 不改变 production class identity 或 RunQueue dispatch；`Realtime` identity 与 trait 接线留到 Checkpoint 2，避免中间态出现 class identity 与 dispatch 不匹配。
+- 增加 `RtPolicy::Fifo`、`RtPolicy::RoundRobin { remaining_ticks }` 与 `RtEntity`，使 policy、priority 和 RR budget 只有一个行为真相源；
+- 增加单一 `Realtime` identity 和 99 个 priority bucket，删除 legacy `RoundRobin` identity、queue owner 与实现；
+- 将集中 precedence 固定为 `Realtime > Idle`，把全部 method-first lifecycle dispatch 接到 `Realtime`；
+- 实现 enqueue、dequeue、pick、current placement、FIFO/RR tick 和 strict higher-priority arrival decision；
+- 增加 `SchedEntity::new_realtime(...)` 与 `new_default()`，删除 `new_normal()`，并原子迁移所有非 idle production constructor；
+- 在 `conf/.defconfig` / xtask 配置 owner 中增加受约束的 `sched_default_policy = "rt_rr" | "rt_fifo"` 和 `rt_rr_timeslice_ms = 100`；同步 live 根 `kconfig` 的新增键但不覆盖其它本地配置；selector 解析为 enum，并生成 kernel 可直接消费的 typed constant；
+- full quantum 使用 `max(1, ceil(rt_rr_timeslice_ms * SYSTEM_HZ / 1000))`，使用足够宽的中间类型并拒绝零值/溢出；不在 entity 中复制 full quantum；
+- 默认 priority 固定为代码内 `RtPriority::MIN`；selector 只影响 fresh construction。
 
 ### Placement 规则
 
@@ -76,90 +94,50 @@
 - `PendingResched` 同时包含 Tick 与 RunnableArrival 时，已到期 RR current 使用队尾 placement；
 - block、exit 和 no-switch abort 不在 class 内重新入队，也不重置 RR budget。
 
-### 验证
+### 已接受的 noirq 分配限制
 
-- `RtPriority` 边界、排序和 bucket mapping 的 focused KUnit；
-- RR budget decrement/refill、FIFO no-budget 和 peer/no-peer decision 的 focused KUnit；
-- source audit 确认 pending snapshot 不写回 `RtEntity`，queue node 不复制 priority；
-- `git diff --check`。
+fixed bucket 可以 lazy materialize `VecDeque`，其首次 `push_back()` 或扩容仍可能在 owner-CPU noirq transaction 中分配。legacy `RoundRobin` 已有同一风险；本 checkpoint 不把它误写为 RT 新引入的能力，也不宣称 allocation-free。实现必须在 queue 字段或 materialization helper 旁说明该限制并链接删除条件；现状由 [ANE-20260622-IRQ-OFF-HEAP-ALLOCATION](../../register/open-issues.md#ane-20260622-irq-off-heap-allocation) 跟踪。若出现简单、同 owner 且无需新 shared contract 的 allocation-free 修复，可先上报后纳入；否则不扩大本 checkpoint。
 
-### 停止条件
+### 验证 Floor
 
-如果算法需要 task-local pending state、第二份 effective priority，或修改 `Scheduler` trait 才能表达上述 placement，停止并回到 RFC review；不得在本 checkpoint 扩展成 catch-all event。
+- `RtPriority` 边界、排序和 bucket mapping focused KUnit；
+- highest-bucket FIFO pick、mixed FIFO/RR ordering、strict higher-priority preempt、arrival head requeue 与 Tick tail requeue focused KUnit 或等价可审查 source proof；
+- `Realtime > Idle` 的集中 precedence 与 Idle 只在 RT queue 为空时选择的 focused KUnit 或等价 source proof；
+- RR budget decrement/refill、FIFO no-budget 和 peer/no-peer decision focused KUnit；
+- RT/RR 与 RT/FIFO 两个 selector 都通过 repository-owned kernel build；
+- source audit 确认 pending snapshot 不写回 `RtEntity`，queue node 不复制 priority，production tree 无 `SchedClassKind::RoundRobin`、`new_normal()`、legacy queue owner、published-task policy/priority/class setter 或 direct entity mutation bridge；
+- `git diff --check`、`mdbook build docs`、`just build`；KUnit runtime 通过 repository QEMU entrypoint 执行并在 transaction 记录命令与结果。
 
-## Checkpoint 2：RunQueue 接线与 Legacy Class 替换
+### 独立 Review Gate
 
-### 写集
-
-- `anemone-kernel/src/sched/class/runqueue.rs`
-- `anemone-kernel/src/sched/class/mod.rs`
-- `anemone-kernel/src/sched/class/rt.rs`
-- 删除 `anemone-kernel/src/sched/class/rr.rs`
-
-### 实现内容
-
-- 将 `RunQueue` 的 `RoundRobin` owner 替换为 `Realtime`；
-- 将集中 class precedence 固定为 `Realtime > Idle`；
-- 把 enqueue、dequeue、yield、preempt、wake handoff、block、exit、pick、tick 和 preempt dispatch 全部接到 `Realtime`；
-- 保持 `RunQueue` 对跨 class precedence 的单一消费，不在 `Realtime` 内复制 class rank；
-- 删除 legacy `RoundRobin` class identity、queue owner 和行为实现，不保留并列 fallback；
-- 保持 `processor.rs`、wait-core 和 pending-resched 的 owner 与调用协议不变。
-
-### 验证
-
-- RunQueue lifecycle 的 focused KUnit 或等价 source-level coverage；
-- 验证最高非空 priority bucket pick、同 priority FIFO/RR 混排和 higher-priority head requeue；
-- 验证 `Realtime > Idle`，以及 Idle 只在 RT queue 为空时被选择；
-- source audit 确认无 `SchedClassKind::RoundRobin`、无独立 FIFO class、无 legacy queue owner；
-- `git diff --check`。
+实现 worker 完成后，必须由未参与写入的 reviewer 按 Anemone review 等级检查完整 checkpoint diff。pass 要求没有未关闭的 Apollyon / Keter / Euclid，且 reviewer 明确确认：单一 RT state truth、identity/dispatch/constructor 原子切换、priority-first placement、Tick + RunnableArrival precedence、`Realtime > Idle` 与 idle fallback、full quantum 配置来源、noirq allocation 注释边界、无 wait/pending owner 越界、`new_realtime()` 只服务 fresh entity、无 published-task setter / direct mutation / test-only bridge。finding 修复仍受同一 write set 约束；需要新 owner surface 时先停止并上报。
 
 ### 停止条件
 
-如果 RunQueue 接线要求修改 pending acknowledgement、wait transaction 或跨 CPU ownership，停止并提交 write-set expansion；不得把 core 改动隐含在 class 替换中。
+如果实现需要修改 `Scheduler` trait、pending acknowledgement、wait transaction、跨 CPU ownership、task-local pending state、第二份 effective priority/full quantum、published-task setter，或配置生成链无法提供受约束 selector，停止并回到 RFC/write-set review；不得用 catch-all event、任意字符串、多个互斥 boolean、legacy identity alias 或 hard-coded fallback 通过 gate。
 
-## Checkpoint 3：Default Constructor 与 Kconfig 接线
+## Checkpoint 2：集成与用户态 Smoke
 
-### 写集
+Checkpoint 1 关闭前不启动。本阶段默认只记录 source/KUnit/build 之外的真实用户态 lifecycle 证据，不再重复修改 class identity、queue owner、constructor 或配置 contract。
 
-- `anemone-kernel/src/sched/class/entity.rs`
-- `anemone-kernel/src/arch/riscv64/bootstrap.rs`
-- `anemone-kernel/src/arch/loongarch64/bootstrap.rs`
-- `anemone-kernel/src/task/api/clone/mod.rs`
-- `anemone-kernel/src/task/kthread/kthreadd.rs`
-- `kconfig`
-- `scripts/xtask/src/config/kconfig.rs`
-- 构建生成的 `anemone-kernel/src/kconfig_defs.rs`（只由构建流程生成）
+### 默认写集
 
-### 实现内容
+- `docs/src/devlog/transactions/2026-07-12-sched-rt-class.md`，只追加 user-run / unrun 证据和分类；
+- RFC canonical 文档只在 runtime evidence 证明 accepted contract、阶段 gate 或接受边界错误时，按 workflow 停止后回写。
 
-- 增加 `SchedEntity::new_realtime(...)` 和 `SchedEntity::new_default()`；
-- 删除与 `new_default()` 重叠的 `new_normal()`；
-- 将 bootstrap、clone、`kthreadd` 和普通 kthread 的非 idle 创建路径迁移到 `new_default()`；
-- 在配置层增加受约束的 default policy selector：`rt_rr | rt_fifo`；
-- 增加 RR 时间目标 `rt_rr_timeslice_ms`，由 `SYSTEM_HZ` 换算为 tick budget；
-- 默认 RT priority 固定为代码内 `RtPriority::MIN`，不增加 priority Kconfig 镜像；
-- selector 只影响 fresh construction，不重新解释已经发布的 entity。
+默认不批准 smoke app、rootfs、runner 或 kernel code 写集。若现有 workload 不足，需要新增 harness、rootfs 路由或 runner 入口，必须先停止本 checkpoint，在 transaction 中记录最小文件集合、watchdog/退出条件、失败信号和独立 review gate，再由用户或总控批准后继续。
 
-建议的配置形状为：
+### 验证 Floor
 
-```toml
-sched_default_policy = "rt_rr" # rt_rr | rt_fifo
-rt_rr_timeslice_ms = 100
-```
+验证目标为 RT/RR 同 priority CPU-bound progress，以及 RT/FIFO no automatic rotation、explicit yield、block/wake。不同 priority runtime ordering、动态 policy syscall、bandwidth control 和 procfs read-back 仍不纳入。
 
-selector 应在 xtask 配置层解析为受约束 enum，并生成 kernel 可消费的 typed constant；不使用多个互斥 boolean，也不让 `new_default()` 依赖运行期字符串解析或隐藏 fallback。
+- 分别记录 RT/RR 与 RT/FIFO build provenance、workload、watchdog、退出条件和结果；
+- 区分合法 FIFO starvation、harness timeout、kernel panic、错误 tick rotation 与普通环境失败；
+- 不以 broad LTP、精确 quantum、吞吐比例或 latency bound 替代上述 lifecycle proof。
 
-### 验证
+### Review Gate 与停止条件
 
-- 两个 selector 值都能生成有效 kernel configuration；
-- `new_default()` 在 RT/RR 下产生完整 fresh quantum，在 RT/FIFO 下不携带 quantum state；
-- source audit 确认所有非 idle production constructor 都已收敛到 `new_default()`；
-- source audit 确认没有 published-task policy/priority setter 或 test-only mutation bridge；
-- `git diff --check`。
-
-### 停止条件
-
-如果配置生成链无法提供受约束 selector，停止并先修复 build/config owner；不得在 kernel 内部接受任意字符串、多个互斥 flag 或默认值旁路。
+总控在收口前必须独立复核 user-run 证据是否确实覆盖目标 lifecycle，且没有把未运行项写成通过。若结果要求隐式 tick rotation、service-task 特例、较弱 starvation 语义、test-only setter，或显示 class/policy/priority owner、placement、不变量或接受边界错误，立即停止并回到 RFC review；不得把失败降级成 limitation。若只缺少 harness/runner 文件，走上述 write-set review，不修改调度语义。
 
 ## 最终验证 Gate
 
@@ -197,4 +175,4 @@ selector 应在 xtask 配置层解析为受约束 enum，并生成 kernel 可消
 
 实现期事实、checkpoint 结果和验证证据写入 transaction devlog；只有当阶段顺序、write set、验证 floor、不变量或接受边界发生变化时，才回写本计划或 `index.md` / `invariants.md`。
 
-transaction 建立和后续导航更新留待本计划对应实现 gate 通过后进行；本 RFC 已完成文档层提升。
+transaction 与导航已在 Scheduler-Core 前置 Gate 建立；后续 checkpoint 结果只追加到事务日志。本 RFC 已完成文档层提升和实施协议收敛。

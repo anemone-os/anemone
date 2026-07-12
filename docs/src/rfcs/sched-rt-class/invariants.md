@@ -1,6 +1,6 @@
 # Sched RT Class 不变量需求
 
-**状态：** Draft
+**状态：** Canonical
 **最后更新：** 2026-07-12
 **父 RFC：** [RFC-20260711-sched-rt-class](./index.md)
 
@@ -100,6 +100,7 @@ Realtime > Idle
 - priority 在本 RFC 内不可变，因此 class transaction 可以短暂读取 typed priority、释放 entity lock，再操作对应 bucket。
 - pick 只能从最高 non-empty bucket 的队头移除 task。
 - 第一版不维护 bitmap、cached highest priority 或第二份 runnable count truth。
+- bucket 的 materialization / growth allocation 继承 legacy `RoundRobin` ready queue 的既有 noirq 限制；本 RFC 不新增 allocator/OOM 语义，也不把该路径宣称为 allocation-free。该接受限制必须在实现注释和事务日志中明确，若要消除需另开结构 gate。
 
 ## Arrival 与 Preempt
 
