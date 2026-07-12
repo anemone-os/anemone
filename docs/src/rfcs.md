@@ -89,7 +89,6 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
-- [RFC-20260622-sched-eevdf-lite](./rfcs/sched-eevdf-lite/index.md)：已接受进入实现，事务日志见 [2026-07-09-sched-eevdf-lite](./devlog/transactions/2026-07-09-sched-eevdf-lite.md)；default EEVDF 已落地，但 Stage 3 因 min-floor singleton-eligibility 与整体吞吐回归停止。当前以 weighted FairClock、ready / active membership、true leave / join service lag、segmentation-invariant accounting 和 R1 / R2 / R3a / R3b correction gates 约束修复；证据见 [Stage 3 eligibility 回归背景](./rfcs/sched-eevdf-lite/backgrounds/stage3-eligibility-regression-20260711.md)。
 - [RFC-20260629-vfs-direct-user-io](./rfcs/vfs-direct-user-io/index.md)：已实现第一版；定义普通文件 `read` / `readv` / `pread*` 与 `write` / `writev` / `pwrite*` 的 direct userspace copy 边界、VFS-owned user-buffer cursor、fanotify transaction adapter，以及 ramfs/ext4 regular file read/write hook。`RWF_*`、完整 Linux `O_DIRECT`、mmap coherency、splice family 和 non-regular backend hook 仍按 register / follow-up 边界处理。
 - [RFC-20260620-threaded-timer-event](./rfcs/threaded-timer-event/index.md)：已实现第一版；定义 soft timer 的 threaded completion lane、per-CPU timer worker、通用 `Late` initcall、`timerfd` / `ITIMER_REAL` 迁移边界，以及 wait-core timeout 非目标。
 - [RFC-20260618-sched-wait-preempt-arming](./rfcs/sched-wait-preempt-arming/index.md)：阶段 3 已关闭；定义 wait-core 在 kernel preempt 下的 wake-prerequisite / parkability contract、scheduler entry split、preempt-defer、token-bound wait sleep、single-active-wait 诊断和 feedback routing 边界；未运行的 trace / fairness evidence gap 见事务日志。
@@ -106,6 +105,10 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 - [RFC-20260604-proc-tgid-fd](./rfcs/proc-tgid-fd/index.md)：`/proc/<tgid>/fd` 目录枚举、fd symlink `readlink()` 和第一阶段 procfs/fd 兼容计划。
 - [RFC-20260603-sched-latch](./rfcs/sched-latch/index.md)：`poll` / `select` OR wait 所需的 wait-core latch 原语和 iomux 迁移计划。
 - [RFC-20260601-sched-wait-refactor](./rfcs/sched-wait-refactor/index.md)：已完成的 scheduler wait/wake 协议重构 RFC。
+
+## 已关闭或延期 RFC
+
+- [RFC-20260622-sched-eevdf-lite](./rfcs/sched-eevdf-lite/index.md)：Stage 3/R1 runtime acceptance 失败后延期关闭，不是 Completed；默认 normal scheduler 已恢复为 RR。EEVDF 保留为可运行实验原型，但显著吞吐回归与百万级 yield self-pick 仍存在，`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 保持未解决 Keter。事务日志见 [2026-07-09-sched-eevdf-lite](./devlog/transactions/2026-07-09-sched-eevdf-lite.md)，证据见 [Stage 3 eligibility 回归背景](./rfcs/sched-eevdf-lite/backgrounds/stage3-eligibility-regression-20260711.md)。
 
 当一个 feature 被多个 RFC 分段覆盖时，本页可以作为轻量聚合入口，或由其中一个 umbrella RFC 在 `index.md` 中聚合链接。聚合入口只列出相关 RFC、事务日志、register / current limitations 及其覆盖范围；不要在这里复制阶段完成度、验证证据或问题状态。跨 RFC 功能的当前事实仍以各自 RFC、transaction devlog 和 register / current limitations 为准。
 

@@ -1,8 +1,8 @@
 use crate::{
     prelude::*,
     sched::class::{
-        PendingResched, PreemptDecision, SchedClassKind, Scheduler, TickAction, eevdf::Eevdf,
-        idle::Idle, rr::RoundRobin,
+        PendingResched, PreemptDecision, SchedClassKind, Scheduler, TickAction, idle::Idle,
+        rr::RoundRobin,
     },
 };
 
@@ -16,7 +16,6 @@ use crate::{
 pub struct RunQueue {
     ntasks: usize,
 
-    eevdf: Eevdf,
     rr: RoundRobin,
     idle: Idle,
 }
@@ -25,7 +24,6 @@ impl RunQueue {
     pub const fn new() -> Self {
         Self {
             ntasks: 0,
-            eevdf: Eevdf::new(),
             rr: RoundRobin::new(),
             idle: Idle,
         }
@@ -47,7 +45,6 @@ impl RunQueue {
         });
 
         let removed = match kind {
-            SchedClassKind::Eevdf => self.eevdf.dequeue(task),
             SchedClassKind::RoundRobin => self.rr.dequeue(task),
             SchedClassKind::Idle => panic!("idle task should not be dequeued"),
         };
@@ -82,7 +79,6 @@ impl RunQueue {
 
     pub fn put_prev_blocked(&mut self, task: &Arc<Task>, now: Instant) {
         match task.sched_class_kind() {
-            SchedClassKind::Eevdf => self.eevdf.put_prev_blocked(task, now),
             SchedClassKind::RoundRobin => self.rr.put_prev_blocked(task, now),
             SchedClassKind::Idle => self.idle.put_prev_blocked(task, now),
         }
@@ -90,7 +86,6 @@ impl RunQueue {
 
     pub fn put_prev_exiting(&mut self, task: &Arc<Task>, now: Instant) {
         match task.sched_class_kind() {
-            SchedClassKind::Eevdf => self.eevdf.put_prev_exiting(task, now),
             SchedClassKind::RoundRobin => self.rr.put_prev_exiting(task, now),
             SchedClassKind::Idle => self.idle.put_prev_exiting(task, now),
         }
@@ -99,7 +94,6 @@ impl RunQueue {
     pub fn pick_next_task(&mut self) -> Arc<Task> {
         for kind in SchedClassKind::in_precedence_order() {
             let task = match kind {
-                SchedClassKind::Eevdf => self.eevdf.pick_next_task(),
                 SchedClassKind::RoundRobin => self.rr.pick_next_task(),
                 SchedClassKind::Idle => self.idle.pick_next_task(),
             };
@@ -123,7 +117,6 @@ impl RunQueue {
 
     pub fn set_next_task(&mut self, task: &Arc<Task>, now: Instant) {
         match task.sched_class_kind() {
-            SchedClassKind::Eevdf => self.eevdf.set_next_task(task, now),
             SchedClassKind::RoundRobin => self.rr.set_next_task(task, now),
             SchedClassKind::Idle => self.idle.set_next_task(task, now),
         }
@@ -131,7 +124,6 @@ impl RunQueue {
 
     pub fn task_tick(&mut self, task: &Arc<Task>, now: Instant) -> TickAction {
         match task.sched_class_kind() {
-            SchedClassKind::Eevdf => self.eevdf.task_tick(task, now),
             SchedClassKind::Idle => self.idle.task_tick(task, now),
             SchedClassKind::RoundRobin => self.rr.task_tick(task, now),
         }
@@ -154,7 +146,6 @@ impl RunQueue {
         }
 
         match candidate_kind {
-            SchedClassKind::Eevdf => self.eevdf.decide_preempt_current(current, candidate, now),
             SchedClassKind::RoundRobin => self.rr.decide_preempt_current(current, candidate, now),
             SchedClassKind::Idle => self.idle.decide_preempt_current(current, candidate, now),
         }
@@ -168,10 +159,6 @@ impl RunQueue {
         });
 
         match kind {
-            SchedClassKind::Eevdf => match transaction {
-                EnqueueTransaction::New => self.eevdf.enqueue_new(task.clone()),
-                EnqueueTransaction::Woken => self.eevdf.enqueue_woken(task.clone()),
-            },
             SchedClassKind::RoundRobin => match transaction {
                 EnqueueTransaction::New => self.rr.enqueue_new(task.clone()),
                 EnqueueTransaction::Woken => self.rr.enqueue_woken(task.clone()),
@@ -198,17 +185,6 @@ impl RunQueue {
         });
 
         match kind {
-            SchedClassKind::Eevdf => match transaction {
-                CurrentRequeueTransaction::Yielded { now } => {
-                    self.eevdf.requeue_yielded_current(task.clone(), now)
-                },
-                CurrentRequeueTransaction::Preempted { now, pending } => self
-                    .eevdf
-                    .requeue_preempted_current(task.clone(), now, pending),
-                CurrentRequeueTransaction::WokenHandoff { now } => {
-                    self.eevdf.handoff_woken_current(task.clone(), now)
-                },
-            },
             SchedClassKind::RoundRobin => match transaction {
                 CurrentRequeueTransaction::Yielded { now } => {
                     self.rr.requeue_yielded_current(task.clone(), now)

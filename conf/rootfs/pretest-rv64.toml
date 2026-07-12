@@ -23,10 +23,6 @@ installed_dir = "/sbin"
 name = "user-test"
 installed_dir = "/bin"
 
-[[apps]]
-name = "eevdf-test"
-installed_dir = "/bin"
-
 # [[apps]]
 # name = "float-test"
 # installed_dir = "/bin"

@@ -6,7 +6,6 @@
 
 ## Active
 
-- [Sched EEVDF-lite](./2026-07-09-sched-eevdf-lite.md)
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
 - [OOM Killer](./2026-06-15-oom-killer.md)
@@ -17,6 +16,10 @@
 - [PROC TGID FD](./2026-06-04-proc-tgid-fd.md)
 - [Cred Merge](./2026-06-02-cred-merge.md)
 - [Sched Latch](./2026-06-03-sched-latch.md)
+
+## Closed / Deferred
+
+- [Sched EEVDF-lite](./2026-07-09-sched-eevdf-lite.md)：Stage 3/R1 runtime acceptance 失败后延期关闭；RR 已恢复为默认调度器，四个 Keter 保持未解决。此项不是 Completed。
 
 ## Completed
 

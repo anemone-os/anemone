@@ -1,16 +1,16 @@
 # RFC-20260622-sched-eevdf-lite
 
-**状态：** Accepted for Implementation
+**状态：** Closed - deferred after Stage 3/R1 runtime acceptance failure
 **负责人：** doruche, Codex
 **最后更新：** 2026-07-12
 **领域：** scheduler / fairness / runtime accounting / scheduler class
 **事务日志：** [2026-07-09-sched-eevdf-lite](../../devlog/transactions/2026-07-09-sched-eevdf-lite.md)
 **开放问题：** 见 [Tracking Issues](./tracking-issues.md)
-**下一步：** 阶段 3 已因整体吞吐与 singleton-eligibility 反馈命中停止条件。先按 [correction gates](./implementation.md#probe--vertical-slice-gates) 完成 R1 weighted FairClock 单变量修复；R1 未关闭 min-floor 公式缺陷及其吞吐因果归属前，不得开始 R2，也不得进入阶段 4。
+**下一步：** 无 active gate。默认 normal scheduler 已恢复为 RR；若未来继续 EEVDF，必须先重新打开 RFC review，重新分类 R1 失败并批准新的实施顺序，不能直接从 R2 续跑。
 
 ## 摘要
 
-本 RFC 定义 Anemone 的默认普通任务调度器从临时 `RoundRobin` 迁移到 `EEVDF-lite` 的方向。第一版目标不是完整复刻 Linux EEVDF，而是在当前 fixed owner CPU、per-CPU runqueue、无迁移、无 load balance 的边界内，引入带权重的 virtual runtime、virtual deadline、weighted fair clock、eligibility / service-lag 约束、true leave / join placement、bounded yield penalty 和幂等 runtime accounting。
+本 RFC 记录 Anemone 将默认普通任务调度器从 `RoundRobin` 迁移到 `EEVDF-lite` 的一次未完成尝试。第一版原目标不是完整复刻 Linux EEVDF，而是在当前 fixed owner CPU、per-CPU runqueue、无迁移、无 load balance 的边界内，引入带权重的 virtual runtime、virtual deadline、weighted fair clock、eligibility / service-lag 约束、true leave / join placement、bounded yield penalty 和幂等 runtime accounting。Stage 3/R1 runtime acceptance 失败后，本 RFC 已延期关闭，RR 恢复为默认 normal scheduler；下文算法合同保留为未来重开时必须重新审查的设计义务，不代表当前生产实现已经满足。
 
 本 RFC 以 `sched-wait-preempt-arming` / sched-split 为已接受的下层前提。scheduler core 已经通过 scheduler-private `ScheduleMode` 和语义化 wrapper 区分 `schedule_preempt()`、token-bound `schedule_wait_sleep()`、yield entry、idle entry 和 `schedule_zombie_never_return()`；EEVDF-lite 不重新设计 wait-core `PrePark/Parked`、token-bound wait sleep、stale-safe wake placement 或 preempt-defer contract。EEVDF-lite 只在这些入口之后补齐 method-first scheduler class lifecycle transaction、runtime accounting、placement 和 default normal class 语义。
 
@@ -18,11 +18,11 @@
 
 ## 背景
 
-阶段 1 至阶段 3 已经落地 method-first scheduler class surface、typed pending、EEVDF payload、default normal constructor 和用户态 smoke。当前公共实现基线 `a76a00ac` 已让 ordinary task、bootstrap task 和 kthread 默认进入 EEVDF；RR 只保留实现体，不再有 production entity constructor。
+阶段 1 至阶段 3 曾落地 method-first scheduler class surface、typed pending、EEVDF payload、EEVDF default normal constructor 和用户态 smoke。R1 runtime acceptance 失败后，唯一 default normal constructor 已恢复为 RR；EEVDF class 与 payload 作为实验实现保留，不再由 production entity constructor 默认创建。
 
 2026-07-11 的用户运行与 exact-yield probe 证明原 Checkpoint 2C 的 monotonic minimum-`vruntime` floor 不是有效 eligibility clock。相同 `read-write` case / failure multiset 下，EEVDF profile 约为 RR 的 3.3 至 3.5 倍；signal profile 中 EEVDF 出现 `1,338,814` 次 min-floor `self_only_eligible` self-pick。对同一 entity snapshot 的 weighted-fair-clock counterfactual 显示，其中 `552,494` 次已有 eligible peer，`786,320` 次仍无 eligible peer。该证据同时否定 min-floor contract 和“每次 yield 强制 handoff”的窄修；完整证据见 [Stage 3 eligibility 与整体吞吐回归证据](./backgrounds/stage3-eligibility-regression-20260711.md)。
 
-因此阶段 3 已停止并回到 RFC review。weighted FairClock、competition membership、true leave / join service lag、full-set arrival decision、分段不变 accounting 和坐标 rebase 进入 correction gates；在相应 gate 关闭前，旧 2C / 2D 的 neutralized 结论不再构成进入阶段 4 的依据。
+因此阶段 3 已停止。R1 虽完成 weighted FairClock 公式替换，但 instrumented signal 仍产生 `1,233,143` 次 yield self-pick 与 `1,232,735` 次 `self_only_eligible`，明确命中 gate failure signal。R2 / R3a / R3b 未执行，旧 2C / 2D 的 neutralized 结论不构成完成依据；本 RFC 现以 Closed/deferred 收口，而不是进入阶段 4 或标记 Completed。
 
 scheduler class 仍使用 method-first class-local atomic transaction surface。路径语义由方法名和 `RunQueue` facade 的调用点表达；只有同一 transaction 内确实需要算法复用时，才允许窄参数或返回类型，例如 `PendingResched`、`TickAction` 和 `PreemptDecision`。若 R2 证明现有 enqueue / preempt surface 不能线性化 current accounting、join placement、enqueue 和 full-set preferred decision，必须先回到 method contract review 并记录 write-set 扩展，不能在旧接口间制造第二套状态。
 
@@ -38,6 +38,8 @@ scheduler class 仍使用 method-first class-local atomic transaction surface。
 EEVDF-lite 要解决的是 normal runnable task 到达调度点后的公平选择和响应性，而不是 wait-core、IRQ-off、long non-preemptible kernel path 或 source-owner sleepability 的独立缺陷。用户侧保存和分析的 baseline / 实作后 runtime log 可作为 implementation feedback；agent 不把 iozone、长日志、LTP profile 或 deferred-count trace 作为本 RFC 的必跑验证。
 
 ## 目标
+
+以下是本 RFC 的历史目标，当前关闭不宣称已经达成；未来重开时必须逐项重新确认。
 
 - 将 `EEVDF-lite` 作为默认 normal scheduler，替换临时 RR；除 idle task 外，ordinary user task、bootstrap task 和 kthread 第一版都进入 EEVDF normal class。
 - bootstrap task、`kthreadd` 和普通 kthread 第一版直接使用 normal EEVDF；本 RFC 只承诺它们在有限 runnable 集合中的 eventual scheduler progress，不承诺 bounded latency 或特殊服务优先级。
@@ -343,9 +345,9 @@ nice-to-weight 第一版采用固定 Linux 表，不提供 selector。`Task::nic
 
 ## 接受边界
 
-接受本 RFC 意味着 Anemone 默认 normal scheduler 继续按 `EEVDF-lite` 方向修复，并且 method-first scheduler class transaction surface、class-specific entity、weighted FairClock、continuous competition membership、true leave / join service lag、分段不变 accounting 和线性 EEVDF pick 语义可以进入 correction review。
+本 RFC 当前不再授权继续实现。历史接受边界曾允许 method-first scheduler class transaction surface、class-specific entity、weighted FairClock、continuous competition membership、true leave / join service lag、分段不变 accounting 和线性 EEVDF pick 语义进入 correction review；R1 失败后，该授权已关闭。
 
-当前接受边界同时包含一个硬停止：Stage 3 的 default constructor 已落地，但 runtime closure 已被撤回。R1 / R2 / R3a / R3b 必须按 [迁移实施计划](./implementation.md#probe--vertical-slice-gates) 逐门关闭；任一 gate 的 hypothesis、write set、validation floor、failure signal 或 write-back 未满足时，不得把原 2C / 2D 证据重新解释为阶段 3 完成。
+最终处置为：RR 恢复为 production default；EEVDF 保留为非默认实验实现；R2 / R3a / R3b 不再是 active gate。未来若继续这条线，必须先重新打开 RFC review，处理 `EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020`，并重新批准 gate 顺序、write set、验证边界和默认切换条件。
 
 接受本 RFC 不表示：
 
@@ -374,7 +376,7 @@ nice-to-weight 第一版采用固定 Linux 表，不提供 selector。`Task::nic
 
 ### 继续使用 RR 并调大/调小 tick 行为
 
-拒绝作为长期方向。RR 可以作为过渡和对照，但它缺少权重、runtime accounting、sleep/wake placement 和公平时钟。继续调 tick 只能改变轮转频率，不能解决普通任务公平份额与响应性之间的结构问题。
+当前选定为延期期间的 production default。RR 不提供本 RFC 原计划中的权重、service lag 或 weighted FairClock 语义，但其现有行为与吞吐基线可接受；恢复 RR 是失败后的安全处置，不等于仅靠调整 tick 已解决长期公平性目标。
 
 ### 引入完整 Linux EEVDF
 
@@ -382,7 +384,7 @@ nice-to-weight 第一版采用固定 Linux 表，不提供 selector。`Task::nic
 
 ### 先做可插拔调度框架，EEVDF 以后再接
 
-拒绝作为本 RFC 主线。method-first transaction surface 和 EEVDF default constructor 已经落地；退回空框架或 production RR 只会绕开已确认的 fairness contract 缺陷，不能替代 correction gates。
+未选择另建空框架。已经落地且独立正确的 method-first transaction surface、`RunQueue` facade、typed pending 与 class payload 继续保留；production default 恢复 RR，EEVDF 是否继续由未来 RFC review 决定。
 
 ### 使用 catch-all scheduler event bus
 
@@ -410,23 +412,12 @@ nice-to-weight 第一版采用固定 Linux 表，不提供 selector。`Task::nic
 
 ## 收口
 
-文档层收口标准：
+本 RFC 以 **Closed - deferred after Stage 3/R1 runtime acceptance failure** 收口，明确不是 Completed。当前实现能够启动、运行普通 workload，并维持既有 LTP result set，但其 eligibility、competition membership、sleep/wake lag 和 accounting contract 尚未闭合，且存在显著吞吐回归与百万级 yield self-pick feedback。因此它是可运行的实验原型，不是可接受的 EEVDF 实现，也不适合作为默认调度器。
 
-1. weighted FairClock、competition membership、true leave / join service lag、full-set preferred decision、segmentation-invariant accounting、deadline catch-up、coordinate rebase、bounded yield 和 anomaly 语义已写入 canonical 文档与 R1 / R2 / R3a / R3b gate。
-2. `PendingResched` 已覆盖 tick 与 runnable-arrival 抢占来源，deferred preempt 由执行 `take_pending_resched()` 的 caller 恢复同一组 pending bits，且 scheduler class 不接收 `ScheduleMode` 或 wait-core private identity。
-3. method-first scheduler class transaction surface 覆盖现有 schedule / requeue / wake path；accepted contract 中不存在 `SchedEvent` / `on_event` / catch-all event bus。
-4. implementation plan 明确保留已完成的 RR-to-EEVDF migration 历史，同时把阶段 3 correction 拆为可独立验证、失败即停止的 R1 / R2 / R3a / R3b。
-5. bootstrap / kthread 直接进入 normal EEVDF 的 eventual-progress 证明已经进入 canonical 文本，且不再依赖 focused smoke 作为 accepted contract 决策。
-6. `tracking-issues.md` 中影响实现顺序和验收边界的问题已有处理结论。
+最终处置：
 
-实现层收口标准：
-
-1. RR 适配阶段行为保持。
-2. 除 idle task 外，ordinary task、bootstrap task 和 kthread 默认进入 EEVDF class，且无 production RR 特例。
-3. 多 runnable task 不稳定饿死，CPU 时间份额随 nice 权重方向变化。
-4. true block / wake 保存和恢复有界 service lag；`ParkPending`、abort、preempt 与 yield 保持 continuous membership，不获得 wake reward。
-5. bounded yield penalty 在正确 FairClock 上表达 relinquish；没有 eligible peer 时允许合法 self-pick，有 eligible peer 时不形成百万级 same-task feedback，也不让 yielding task 永久饿死。
-6. valid non-empty FairClock 必有 eligible entity；arithmetic / representation anomaly 有观察面且在真实 workload 中不命中。
-7. fixed-weight accounting 分段不改变总 `vruntime`，deadline catch-up 保留当前 request phase（yield penalty 的有界暂态除外），coordinate rebase 前后 eligibility / lag / pick 等价。
-8. user-run instrumented signal 证明 min-floor singleton feedback 不再驱动 actual pick；clean tree 的 signal / read-write 对照不再保留修复前约 3.3 至 3.5 倍整体回归，或残余回归已按 R1 failure signal 重新分类并回到 RFC review。
-9. 用户侧 iozone / LTP / long fairness log 若提供反馈，能被正确归类到 EEVDF、sched-wait-preempt-arming 或其它 owner。
+1. production default 恢复为 RR；`eevdf.rs` 归档源与其中的 focused tests、历史证据保留，但不再接入 production class graph，避免把实验实现误当作已验收策略。
+2. 不整体回滚 EEVDF 历史。保留 method-first `Scheduler` trait、`RunQueue` transaction facade、typed `PendingResched`、`SchedEntity` class payload、fresh clone / constructor，以及 `Nice` 与 priority syscall 整理。
+3. R1 只证明 actual min-floor 已替换为 weighted FairClock，没有证明主要吞吐因果已经关闭；R2 / R3a / R3b 均未执行。
+4. `EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 保持未解决 Keter，不得因 RFC 关闭而 Neutralized。
+5. 未来继续 EEVDF 时不得从 R2 直接续跑；必须重新打开 RFC review，根据 R1 failure 重新分类假设、gate 顺序和验收条件。

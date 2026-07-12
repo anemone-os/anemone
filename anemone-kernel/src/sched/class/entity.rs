@@ -1,5 +1,3 @@
-use super::eevdf::EevdfEntity;
-
 #[derive(Debug, Clone)]
 pub struct SchedEntity {
     pub(super) on_runq: bool,
@@ -17,7 +15,7 @@ impl SchedEntity {
 
     /// Create a fresh entity for the current default normal scheduler.
     pub fn new_normal() -> Self {
-        Self::new(SchedClassPrv::Eevdf(EevdfEntity::new()))
+        Self::new(SchedClassPrv::RoundRobin(()))
     }
 
     pub fn new_idle() -> Self {
@@ -37,7 +35,6 @@ impl SchedEntity {
 
 #[derive(Debug, Clone)]
 pub(super) enum SchedClassPrv {
-    Eevdf(EevdfEntity),
     // TODO: time slice.
     RoundRobin(()),
     Idle(()),
@@ -46,7 +43,6 @@ pub(super) enum SchedClassPrv {
 impl SchedClassPrv {
     const fn kind(&self) -> SchedClassKind {
         match self {
-            Self::Eevdf(_) => SchedClassKind::Eevdf,
             Self::RoundRobin(()) => SchedClassKind::RoundRobin,
             Self::Idle(()) => SchedClassKind::Idle,
         }
@@ -55,7 +51,6 @@ impl SchedClassPrv {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchedClassKind {
-    Eevdf,
     RoundRobin,
     Idle,
 }

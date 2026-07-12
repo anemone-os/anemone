@@ -58,11 +58,6 @@ fn run_local_tests() {
     //     &[],
     // );
     // println!("user-test: pthread create stress test finished.");
-
-    // 8. EEVDF scheduler test
-    println!("user-test: running EEVDF scheduler test...");
-    local_run_cmd("/bin/eevdf-test", &["eevdf-test"], &[]);
-    println!("user-test: EEVDF scheduler test finished.");
 }
 
 /// competition tests.

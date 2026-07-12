@@ -1,10 +1,10 @@
 # 2026-07-09 - Sched EEVDF-lite
 
-**Status:** Active
+**Status:** Closed - deferred after Stage 3/R1 runtime acceptance failure
 **Owners:** doruche, Codex
 **Area:** scheduler / fairness / runtime accounting / scheduler class
 **Canonical Plan:** [RFC-20260622-sched-eevdf-lite](../../rfcs/sched-eevdf-lite/index.md), [不变量需求](../../rfcs/sched-eevdf-lite/invariants.md), [迁移实施计划](../../rfcs/sched-eevdf-lite/implementation.md), [Tracking Issues](../../rfcs/sched-eevdf-lite/tracking-issues.md)
-**Current Phase:** 阶段 3 runtime stop；RFC correction gates 已重开，下一门为 R1 weighted FairClock
+**Current Phase:** RFC Closed/deferred；production default restored to RR；无 active gate
 
 ## Scope
 
@@ -49,13 +49,13 @@
 
 **Scheduler-core correction:** 上述阶段 1B / 2B / 2D 对 abort-park requeue 的记录只描述当时保留的假设性 surface。2026-07-12 source audit 已证明 production 状态机只有 already-completed no-switch abort 与 parked handoff 两条路径，并删除无调用者的 `requeue_aborted_wait_current()`；后文同日 correction 条目 supersede 这些历史表述，不改变 R1-R3b 状态。
 
-**Correction:** 2026-07-11 user-run evidence 已撤销上述 Checkpoint 2C min-floor / arithmetic 与 Checkpoint 2D parked-handoff clamp 的算法 closure。default constructor、typed pending、single accounting owner 和 `EEVDF-022` outcome propagation 仍有效；`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 已重开。当前 canonical 顺序为 R1 -> R2 -> R3a -> R3b -> Stage 3 clean-tree runtime。
+**Correction:** 2026-07-11 user-run evidence 已撤销上述 Checkpoint 2C min-floor / arithmetic 与 Checkpoint 2D parked-handoff clamp 的算法 closure。typed pending、single accounting owner 和 `EEVDF-022` outcome propagation 仍有效；`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 已重开。当时的 correction 顺序为 R1 -> R2 -> R3a -> R3b -> Stage 3 clean-tree runtime；R1 失败与 RFC closeout 已 supersede 该 active 顺序。
 
-**In Progress:** 文档层 reopening 已建立 factual evidence packet、weighted FairClock / competition membership / service-lag / arithmetic invariants 和 correction gates。尚未开始 R1 生产代码；evidence-only probe commit `d0d4196f` 与公共实现基线 `a76a00ac` 保持分离。
+**In Progress:** 无。R1 在独立 validation line 完成公式替换后命中 runtime failure signal；该 line 由用户单独保留，未合入本 dev 分支。production default 已恢复为 RR。
 
-**Open Blockers:** `EEVDF-001` / R1 是当前首个 blocker；R1 未证明 actual weighted eligibility 与 direct-causality intervention 前不开始 R2。`EEVDF-018` / `EEVDF-004` 等待 R2，`EEVDF-020` 等待 R2 / R3a / R3b。
+**Open Blockers:** 父 RFC 已关闭，不再有 active implementation blocker。`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 作为未解决 Keter 保留；未来重新打开 RFC 前不得继续 R2。
 
-**Next Action:** 按 Gate R1 在 clean product branch 实现 weighted FairClock 单变量修复；若需要 runtime probe，在独立 validation branch 复用同一观察语义，不整体 cherry-pick `d0d4196f`。先完成 build / KUnit / source audit，再由用户运行 instrumented signal profile。
+**Next Action:** 无。回到 RR 主线；未来若继续 EEVDF，先重新打开 RFC review，不从 R2 直接续跑。
 
 ## Phase Log
 
@@ -671,12 +671,34 @@ git diff --check
 
 **Boundary:** 本 correction 不关闭或推进 R1，不改 weighted FairClock、competition membership、service lag、accounting remainder、deadline catch-up、coordinate rebase、wait-core state、IPI、trap entry 或用户 ABI。
 
+### 2026-07-12 - Gate R1 Weighted FairClock Runtime Failure
+
+**Phase:** R1 stopped on declared runtime failure signal；R2 未开始。
+
+**Intervention:** R1 在独立 validation line 中把 actual eligibility / pick / yield / preempt 从 monotonic min-floor 替换为 owner-CPU competition snapshot 派生的 weighted FairClock，并保留旧 floor 仅作受限 placement bridge / mirror。该 line 的实现、focused KUnit、source audit 与 instrumentation 由其独立 commit 保存，不合入本 dev 分支。
+
+**User-run evidence:** signal case set / result 保持 `attempted=74 passed=60 failed=10 infra_failed=0 skipped=4`。candidate 记录 `yield=1,393,625`、`yield self-pick=1,233,143`、weighted actual `self_only_eligible=1,232,735`、`handoff=160,482`；`invalid`、`mismatch`、`pending_overwrite`、`missing_yielding`、`missing_pick` 均为 `0`。修复前分别为 `yield=1,494,290`、`yield self-pick=1,339,030`、min-floor `self_only_eligible=1,338,814`。
+
+**Decision:** actual min-floor 公式已被替换，但计数只有限下降，trajectory 仍由约 123 万次 singleton eligibility / same-task feedback 主导，明确命中 Gate R1 failure signal。R1 未 Exit，不能关闭主要吞吐因果归属，也不得自动进入 R2。
+
+### 2026-07-12 - RR Default Restore 与 RFC 延期关闭
+
+**Phase:** Closed - deferred after Stage 3/R1 runtime acceptance failure；不是 Completed。
+
+**Change:** `SchedEntity::new_normal()` 恢复创建 RR；默认 `user-test` 不再自动运行 `eevdf-test`，rv64 / la64 pretest rootfs 不再自动安装或暗示该 smoke。`eevdf.rs` 归档源、app 源码和历史证据保留，但 `mod eevdf`、EEVDF payload variant、RunQueue field/dispatch 与 precedence 已从 production graph 移除，不整体回滚历史。
+
+**Preserved foundations:** method-first `Scheduler` trait、`RunQueue` transaction facade、typed `PendingResched`、`SchedEntity` class payload、fresh clone / constructor，以及 `Nice` 与 priority syscall 整理继续作为通用调度基础。
+
+**Assessment:** 当前实现能够启动、运行普通 workload，并维持既有 LTP result set，但其 eligibility、competition membership、sleep/wake lag 和 accounting contract 尚未闭合，且存在显著吞吐回归与百万级 yield self-pick feedback。因此它是可运行的实验原型，不是可接受的 EEVDF 实现，也不适合作为默认调度器。
+
+**Tracking:** `EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 保持未解决 Keter，不得 Neutralized。R2 / R3a / R3b 未执行；未来继续时必须重新打开 RFC review并重新批准 gate 顺序与验收边界。
+
 ## Open Items
 
-- R1 weighted FairClock 是当前 active blocker；R1 exit 前不开始 R2。
-- R2 / R3a / R3b 与 Stage 3 clean runtime 尚未执行。
+- 无 active implementation item；RFC 已延期关闭，production default 为 RR。
+- R2 / R3a / R3b 与 Stage 3 clean runtime 未执行，只作为未来重开时的历史计划保留。
 - `EEVDF-022` 保持 Neutralized，但不能替代 strict deadline catch-up / arithmetic closure。
 
 ## Closure
 
-事务仍在进行中。Stage 3 已停止并重开 correction protocol；R1-R3b 和 clean runtime 未完成，不得进入阶段 4。
+事务以 **Closed - deferred after Stage 3/R1 runtime acceptance failure** 收口，明确不是 Completed。默认调度器已恢复 RR；EEVDF 保留为实验原型，四个 Keter 保持未解决。

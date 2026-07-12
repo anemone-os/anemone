@@ -1,11 +1,11 @@
 # Sched EEVDF-lite 迁移实施计划
 
-**状态：** Active
+**状态：** Closed - deferred after Stage 3/R1 runtime acceptance failure
 **最后更新：** 2026-07-12
 **父 RFC：** [RFC-20260622-sched-eevdf-lite](./index.md)
 **不变量：** [不变量需求](./invariants.md)
 
-本文按可提交、可验证的 gate 拆分。当前版本以 sched-split 为实现前提：scheduler core 已经拥有 scheduler-private `ScheduleMode` 和语义化 wrapper；本计划只在这些入口之后维护 method-first scheduler class transaction surface、typed pending resched request、runtime accounting、EEVDF placement 和 default class 切换。Stage 3 default switch 已落地，但 2026-07-11 runtime evidence 命中停止条件；当前执行入口是 R1 / R2 / R3a / R3b correction gates，不是阶段 4。实现事实进入 transaction devlog；本 RFC 记录 accepted contract、计划 gate 和停止边界。
+本文保留本次迁移的历史阶段与未执行 gate。Stage 3 default switch 曾落地；R1 随后完成 weighted FairClock 公式替换，但用户运行仍观察到 `1,233,143` 次 yield self-pick 与 `1,232,735` 次 `self_only_eligible`，命中声明的 runtime failure signal。RFC 因此延期关闭，production default 已恢复为 RR，R2 / R3a / R3b 均未执行，当前没有 active gate。未来不得沿本文从 R2 直接续跑；必须先重新打开 RFC review并重新批准假设、顺序、write set、验证与停止条件。
 
 ## 迁移原则
 
@@ -15,8 +15,8 @@
 - `RunQueue` / scheduler core 负责 owner CPU/noirq 事务、class dispatch、`ntasks`、`on_runq`、idle fallback 和 transaction 之间的全局线性化。
 - `ScheduleMode` 只属于 scheduler core entry permission；scheduler class 不能保存、匹配或暴露 wait-core private identity。
 - processor pending request 使用 `PendingResched` flags；`ReschedCause::{Tick, RunnableArrival}` 合并而不是覆盖。`PendingResched` 可按值传入 `requeue_preempted_current()`，但 restore pending request 只属于执行 `take_pending_resched()` 的 scheduler-core caller。
-- 默认 normal scheduler 最终为 `Eevdf`；除 idle task 外，ordinary user task、bootstrap task 和 kthread 第一版都进入 EEVDF normal class。
-- RR 只作为 transaction surface 行为保持对照、debug 或 bisect class；default switch 后不得仍是 production placement path。
+- 本次迁移的历史目标是让默认 normal scheduler 最终成为 `Eevdf`；该目标未达成。当前 ordinary user task、bootstrap task 和 kthread 通过 fresh normal constructor 进入 RR。
+- RR 是 Closed/deferred 期间的 production default；EEVDF 保留为实验 class。未来若重新申请 default switch，必须先满足重新批准的 runtime acceptance gates。
 - `Task::cpuid()`、owner CPU runqueue 和 `SchedEntity::on_runq()` 的所有权不变。
 - `Nice` newtype 统一约束 nice 值域和 weight-table index；`Task::nice()` 返回唯一 nice truth，EEVDF entity 不保存另一份 nice，也不在第一版保存 `cached_weight`。
 - clone 只能继承 nice；新 task 必须创建 fresh normal `SchedEntity`，不得复制父 task 的 EEVDF runtime state。
@@ -35,7 +35,7 @@
 
 ## 阶段 0：文档协议关闭与 sched-split 接缝审计
 
-本节记录 2026-07-09 阶段 0 的历史入口，不重写当时的 issue / gate 列表。2026-07-11 runtime feedback 已否定并撤销其中关于 `EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 的旧 closure；当前状态以 [Tracking Issues](./tracking-issues.md) 和 R1-R3b 为准。
+本节及后续阶段记录 2026-07-09 起的历史执行入口，不重写当时的 issue / gate 列表。2026-07-11 runtime feedback 已否定并撤销其中关于 `EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 的旧 closure；R1 又在 2026-07-12 命中 runtime failure。当前状态以 [Tracking Issues](./tracking-issues.md) 与 transaction closeout 为准，下面所有未执行 gate 均处于 deferred/inactive 状态。
 
 前置条件：
 
@@ -484,7 +484,7 @@ Tracking issue 关闭审查：
 
 ### Historical Checkpoint 2C：Gate P2 - `rq_vtime`、Arithmetic、Eligibility 与 Bounded Yield（已失效）
 
-**状态：** 2026-07-11 runtime feedback 已重开。原 P2 的 min-floor / saturating-arithmetic closure 只保留在 transaction devlog 作为历史；当前交付由 R1、R2、R3a、R3b 分别关闭，不得继续按旧 P2 直接进入阶段 4。
+**历史状态：** 2026-07-11 runtime feedback 曾重开本 checkpoint。原 P2 的 min-floor / saturating-arithmetic closure 只保留在 transaction devlog 作为历史；R1 后续失败，R2 / R3a / R3b 未执行且已 inactive，不得按旧 P2 或旧 correction 顺序进入阶段 4。
 
 交付：
 
@@ -586,19 +586,19 @@ write set：
 
 Tracking issue 关闭审查：
 
-- `EEVDF-001` 只有在 R1 的 weighted FairClock 公式、actual pick、instrumented signal intervention 和 failure classification 全部有证据后才能移入 Neutralized。
+- `EEVDF-001` 原计划只有在 R1 的 weighted FairClock 公式、actual pick、instrumented signal intervention 和 failure classification 全部有证据后才能移入 Neutralized；R1 已失败，该项保持 Keter。
 - `EEVDF-022` 必须在阶段 3 反馈纠正结束时审查；只有 request completion outcome、tick / runnable-arrival 消费、switch-boundary 显式丢弃、wake normalization 分层和 saturation sequencing 均由实现、focused KUnit、source audit 与独立 review 证明后，才能移入 Neutralized。
-- `EEVDF-020` 保持 active，直到 R2 exact-rational lag、R3a remainder / deadline catch-up 和 R3b coordinate rebase 全部关闭；R1 不关闭 arithmetic issue。
+- `EEVDF-020` 保持未解决 Keter；R2 exact-rational lag、R3a remainder / deadline catch-up 和 R3b coordinate rebase 均未执行，R1 不关闭 arithmetic issue。
 - 若公式或 arithmetic 反馈改变 fairness / eligibility contract，先回写 [RFC index](./index.md) / [不变量需求](./invariants.md)，再更新 tracking issue；不得只在 transaction devlog 中留下实现事实。
 
 退出条件：
 
-- R1 只关闭 `EEVDF-001` 的 FairClock / direct-causality 子门；R2 / R3a / R3b 未完成前，Checkpoint 2C correction 和阶段 3 均保持 active。
+- R1 原计划只关闭 `EEVDF-001` 的 FairClock / direct-causality 子门；R1 已失败，R2 / R3a / R3b 未执行，Checkpoint 2C correction 与阶段 3 已随 RFC 延期关闭而 inactive。
 - 线性 queue 语义正确，树索引优化不阻塞第一版。
 
 ### Historical Checkpoint 2D：Gate P3 - Wake Clamp 与 Parked Handoff（已失效）
 
-**状态：** 2026-07-11 membership feedback 已重开，并由 Gate R2 取代。原 P3 证明了 stale-safe transaction 分流，却错误地把 `ParkPending` continuous handoff 当成 wake reward 点。
+**历史状态：** 2026-07-11 membership feedback 曾重开本 checkpoint，并计划由 Gate R2 取代。R2 未执行且已 inactive。原 P3 证明了 stale-safe transaction 分流，却错误地把 `ParkPending` continuous handoff 当成 wake reward 点。
 
 交付：
 
@@ -653,19 +653,19 @@ Tracking issue 关闭审查：
 
 ## 阶段 3：Default Class 切换与中性验证
 
-**当前状态：** default constructor / source-classification 子阶段已经落地；2026-07-11 用户 runtime 证明算法 gate 未闭合，阶段 3 已停止。R1 / R2 / R3a / R3b 全部退出后，才能恢复本节的 clean-tree runtime 验收并判断是否进入阶段 4。
+**历史状态：** default constructor / source-classification 子阶段曾经落地；2026-07-11 用户 runtime 证明算法 gate 未闭合，R1 又在 2026-07-12 命中 runtime failure signal。default constructor 现已恢复 RR，阶段 3 不再等待自动恢复，且不会进入阶段 4。本节只保留历史目标与未来重新 review 时可参考的验证清单。
 
-前置条件：
+历史前置条件：
 
-- Checkpoint 2A scaffold、Checkpoint 2B accounting owner、default constructor flip 和 `EEVDF-017` source-classification closure 已完成，不回退 production RR。
-- 原 P2 / P3 closure 已被 runtime evidence 撤销；`EEVDF-001`、`EEVDF-018`、`EEVDF-004`、`EEVDF-020` 当前为 active Keter。
-- R1 先关闭 weighted FairClock 公式与 direct-causality intervention；R1 失败时停止并重新分类，不自动继续 R2。
+- Checkpoint 2A scaffold、Checkpoint 2B accounting owner、default constructor flip 和 `EEVDF-017` source-classification closure 曾完成；R1 failure closeout 已明确恢复 production RR。
+- 原 P2 / P3 closure 已被 runtime evidence 撤销；`EEVDF-001`、`EEVDF-018`、`EEVDF-004`、`EEVDF-020` 当前为 Closed RFC 中未解决的 Keter。
+- R1 先关闭 weighted FairClock 公式与 direct-causality intervention；R1 已失败并停止，未自动继续 R2。
 - R2 关闭 ready / active membership、true leave / join service lag 和 full-set arrival transaction；R3a / R3b 再关闭 accounting / request 与 coordinate arithmetic。
 - correction runtime / arithmetic anomaly 观察面必须在每门 gate 中成立；不得靠隐藏日志、降低阈值或保留旧 floor 通过。
-- `EEVDF-021` 已由 canonical eventual-progress 证明 neutralized；阶段 3 只验证初始化分类和无 production RR 特例。
-- R1-R3b 完成前，本阶段不执行收口、不删除 correction 证据、不进入阶段 4。
+- `EEVDF-021` 的 historical canonical eventual-progress 决策保持 Neutralized，但不再描述当前 RR 分类。
+- R2 / R3a / R3b 未执行；RFC 已延期关闭，不进入阶段 4。
 
-交付：
+历史交付目标：
 
 - 除 idle task 外，ordinary task、bootstrap task 和 kthread 的默认 normal entity 从 RR 翻转到 `Eevdf`：`SchedEntity::new_normal()` 或等价默认 normal constructor 在本阶段开始返回 fresh EEVDF entity，不保留隐式 RR 例外、特殊优先级或单独 kthread class。
 - idle task 保持 `Idle` class 和 fallback singleton 模型。
@@ -766,7 +766,7 @@ write set：
 Tracking issue 关闭审查：
 
 - `EEVDF-017` 的 default-constructor source classification 保持 Neutralized，不作为 R1-R3b 算法 closure 的替代证据。
-- `EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 必须在各自 R1 / R2 / R3a / R3b 的 agent-run / user-run 证据齐全后，分别移入 Neutralized；当前四项仍为 active Keter，不能用阶段 3 source-classification closure 替代。
+- `EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 必须在未来重新批准的 agent-run / user-run 证据齐全后才能分别移入 Neutralized；当前四项仍为未解决 Keter，不能用阶段 3 source-classification closure 替代。
 - 若阶段 3 仍发现 placement、accounting、lag、virtual-time 或 weight visibility 漏闭合，停止并回到对应 correction gate；不得顺手补算法 contract。
 
 退出条件：
@@ -779,6 +779,8 @@ Tracking issue 关闭审查：
 - 用户侧反馈已正确归类；残余异常不能被自动归咎、自动排除或改名为 limitation。
 
 ## 阶段 4：实现收口、限制登记和后续优化排队
+
+**状态：** 未执行且不再 active。本次收口是 Stage 3/R1 runtime acceptance 失败后的 Closed/deferred 处置，不是本阶段原计划的 Completed closeout；以下内容仅保留为历史计划。
 
 前置条件：
 
@@ -850,6 +852,8 @@ write set：
 
 ## 旁路审计清单
 
+以下清单服务历史实现与未来重开审查；当前 RR default 本身不是旁路或停止信号。
+
 - `rg -n "SchedClassPrv|SchedEntity::new|RoundRobin|Idle|Eevdf|eevdf" anemone-kernel/src`
 - `rg -n "ScheduleMode|schedule_preempt|schedule_wait_sleep|schedule_yield|schedule_current_yield|schedule_idle|schedule_zombie" anemone-kernel/src/sched`
 - `rg -n "SchedEvent|on_event|EnqueueReason|RequeueReason|SwitchOutReason" anemone-kernel/src/sched`
@@ -862,13 +866,15 @@ write set：
 - `rg -n "deadline|vruntime|rq_vtime|anomaly|wake_clamp|yield_penalty|base_slice" anemone-kernel/src/sched`
 - `rg -n "legacy_placement_floor|remainder|saved.*lag|class.active|current" anemone-kernel/src/sched/class`
 
-允许保留的旁路必须满足三点：
+未来 EEVDF 实现允许保留的旁路必须满足三点：
 
 - 不改变 EEVDF normal default 目标。
 - 有日志、计数、断言或文档说明边界。
 - 有明确后续 gate 或 current limitation。
 
 ## 可观测性清单
+
+以下为未来重新打开 EEVDF runtime acceptance 时的观察面；当前不要求 RR 主线继续运行这些 gate。
 
 - anomaly：checked FairClock / arithmetic / representation failure count、last reason 和每次记录的 `kerrln!`；valid FairClock no-eligible 由 release assertion 暴露。
 - scheduler constants：base slice、true-sleep service-credit / debt bound、yield penalty、weight table 来源、system HZ。
@@ -884,7 +890,7 @@ write set：
 
 ## 停止边界
 
-继续追查：
+未来重新打开 RFC 后继续追查：
 
 - EEVDF pick 退化为 deadline-only。
 - actual eligibility 仍读取 min-floor，或 valid FairClock 出现 no-eligible。
@@ -897,7 +903,7 @@ write set：
 - ready / active membership 出现空洞或重复。
 - parked handoff 或 no-switch abort 错走 true join / lag restore / yield penalty。
 - checked arithmetic / rational representation 在真实 workload 命中，或坐标进入 saturation。
-- production default 仍创建 RR task。
+- 未获重新批准或未通过 runtime acceptance 就把 production default 切回 EEVDF。
 - nice 变化长期不影响 fair accounting。
 - anomaly error 出现并主导 benchmark，或 probe 自校验不守恒。
 
@@ -913,9 +919,11 @@ write set：
 
 ## Probe / Vertical Slice Gates
 
+本节为历史计划。R1 已执行并失败；R2、R3a、R3b 未执行且当前不具备启动授权。未来继续时必须先重新打开 RFC review，不能把本节文字直接当作 active work order。
+
 默认不要为 probe / feedback 新建通用 `feedback.md`、`probe.md` 或 `experiments.md`。计划写在本节；执行结果写入 transaction devlog。只有证据包过长时，才在 `backgrounds/` 下增加具体命名的证据文件，并从本节链接。
 
-P1 仍是已关闭的 accounting-owner gate。原 P2 / P3 已被 2026-07-11 runtime feedback 证伪，只保留历史说明；当前严格顺序为 R1 -> R2 -> R3a -> R3b -> Stage 3 clean-tree runtime。前一 gate 未满足 Exit 时不得启动下一 gate；若本节与阶段 2 / 3 主段冲突，以本 correction 顺序为准并立即回写主段。
+P1 仍是已关闭的 accounting-owner gate。原 P2 / P3 已被 2026-07-11 runtime feedback 证伪，只保留历史说明；历史 correction 顺序原定为 R1 -> R2 -> R3a -> R3b -> Stage 3 clean-tree runtime。R1 未满足 Exit，后续 gate 因 RFC 关闭而 inactive；未来必须先重新 review 顺序，不能直接套用。
 
 ### Gate P1 - `account_current(now)` 与入队前执行段结算
 
@@ -949,7 +957,7 @@ P1 仍是已关闭的 accounting-owner gate。原 P2 / P3 已被 2026-07-11 runt
 
 **Hypothesis:** 只把 actual eligibility / pick / yield 的时钟从 monotonic min-floor 替换为当前 `C` 的 weighted FairClock，就会让 min-floor 人工制造的 singleton eligible set 消失，并使同一 signal profile 的 yield、same-task dispatch 和 yield self-pick 脱离修复前数量级。该 intervention 同时验证 min-floor mechanism 对整体失速的主要因果贡献。
 
-**Protected Goal / Invariant:** eligibility 必须来自 weighted FairClock；default normal 仍是 EEVDF；测试 case set 不得缩小，现有 PASS 不得退化，也不得新增 FAIL / BROK / infra failure / timeout；nice direction、request-completion outcome、bounded yield 与 owner-CPU 边界不得削弱。不得用 forced handoff、skip-current、penalty / HZ / slice tuning、case-specific yield 旁路或隐藏 anomaly 让 gate 通过。
+**Protected Goal / Invariant:** R1 执行时 eligibility 必须来自 weighted FairClock，且 intervention 期间 default normal 保持 EEVDF；测试 case set 不得缩小，现有 PASS 不得退化，也不得新增 FAIL / BROK / infra failure / timeout；nice direction、request-completion outcome、bounded yield 与 owner-CPU 边界不得削弱。不得用 forced handoff、skip-current、penalty / HZ / slice tuning、case-specific yield 旁路或隐藏 anomaly 让 gate 通过。
 
 **Minimum Write Set:** production correction 默认只写 `anemone-kernel/src/sched/class/eevdf.rs` 及其 focused KUnit、本 RFC / tracking issue 与 transaction devlog。若 existing class-active association 不足以构造无空洞 snapshot，停止并上报 R2-style method / write-set expansion，不在 R1 偷改 membership。validation instrumentation 必须在独立临时分支 / commit 中维护；pre-fix evidence commit `d0d4196f` 不整体 cherry-pick 到产品分支。
 
@@ -965,7 +973,7 @@ P1 仍是已关闭的 accounting-owner gate。原 P2 / P3 已被 2026-07-11 runt
 
 **Exit:** production actual path 的 eligibility / pick / yield / preempt 不再读取 min-floor，R1 runtime intervention 满足计数、自校验和同口径 signal 因果判定要求，`legacy_placement_floor` 的行为消费只剩白名单三类 placement 且维护 update 不驱动算法决策，`EEVDF-001` 才可按证据 Neutralized。随后才进入 R2；validation branch 的 probe/profile/power hook 必须删除，并以 `rg` source audit 确认 `sched_probe`、`EevdfProbe`、`dump_debug_probe` 等临时符号不在 production tree，不能进入产品提交。
 
-**Evidence:** [Stage 3 eligibility 与整体吞吐回归证据（2026-07-11）](./backgrounds/stage3-eligibility-regression-20260711.md)。
+**Outcome:** R1 实现与公式验证通过，但用户运行仍有 `1,393,625` 次 yield、`1,233,143` 次 yield self-pick 和 `1,232,735` 次 weighted `self_only_eligible`；百万级反馈仍主导，明确命中本 gate 的 Failure Signals。R1 未 Exit，`EEVDF-001` 保持 Keter，后续 gate 未获启动授权。详见 [Stage 3 eligibility 与整体吞吐回归证据（2026-07-11）](./backgrounds/stage3-eligibility-regression-20260711.md) 与 transaction closeout。
 
 ### Gate R2 - Competition Membership、Service Lag 与 Full-set Arrival
 

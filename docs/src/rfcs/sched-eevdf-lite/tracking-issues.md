@@ -1,12 +1,12 @@
 # sched EEVDF-lite tracking issues
 
-**状态：** Active
+**状态：** Closed with unresolved Keter
 **最后更新：** 2026-07-12
 **父 RFC：** [RFC-20260622-sched-eevdf-lite](./index.md)
 **事务日志：** [2026-07-09-sched-eevdf-lite](../../devlog/transactions/2026-07-09-sched-eevdf-lite.md)
-**来源：** sched-split-aware v2 重写 / method-first scheduler class 纠偏 / 2026-07-07 文档层 review / 2026-07-11 Stage 3 runtime feedback
+**来源：** sched-split-aware v2 重写 / method-first scheduler class 纠偏 / 2026-07-07 文档层 review / 2026-07-11 Stage 3 runtime feedback / 2026-07-12 R1 runtime failure
 
-本文只跟踪 design review 后确认的 sched EEVDF-lite 草案缺陷、证明缺口、边界冲突或会影响实现顺序、review gate、停止边界和验收判断的设计问题。
+本文保留 design review 后确认的 sched EEVDF-lite 草案缺陷、证明缺口、边界冲突或会影响未来实现顺序、review gate、停止边界和验收判断的设计问题。父 RFC 已延期关闭，但未解决问题不会随之 Neutralized；`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 继续保持 Keter，直到未来重新打开 RFC 并以新批准的证据关闭。
 
 普通实现进度、TODO、benchmark 数字、用户侧长日志和阶段性交付项不写入本文；它们属于 [RFC index](./index.md) 的背景、非目标、风险，或 [迁移实施计划](./implementation.md) 的阶段内容。受控实现反馈不新建通用 feedback 文件；计划写在 [迁移实施计划](./implementation.md#probe--vertical-slice-gates)，执行结果进入 transaction devlog。若反馈暴露目标、不变量、owner boundary 或接受边界需要改变，必须回写 RFC canonical 文本和本文对应 issue。
 
@@ -27,13 +27,13 @@
 
 **状态：** Keter
 
-**触发证据：** [Stage 3 eligibility 与整体吞吐回归证据](./backgrounds/stage3-eligibility-regression-20260711.md) 记录了相同 signal profile 中 `1,338,814` 次 min-floor `self_only_eligible` self-pick；同一 snapshot 的 weighted-fair-clock counterfactual 显示 `552,494` 次已有 eligible peer。此前基于 source audit / focused KUnit 的 Neutralized 结论没有覆盖 default EEVDF 下的这一 runtime failure mode，现已撤销。
+**触发证据：** [Stage 3 eligibility 与整体吞吐回归证据](./backgrounds/stage3-eligibility-regression-20260711.md) 记录了相同 signal profile 中 `1,338,814` 次 min-floor `self_only_eligible` self-pick；同一 snapshot 的 weighted-fair-clock counterfactual 显示 `552,494` 次已有 eligible peer。R1 随后把 actual path 替换为 weighted FairClock，但用户运行仍有 `1,233,143` 次 yield self-pick 与 `1,232,735` 次 weighted `self_only_eligible`。此前基于 source audit / focused KUnit 的 Neutralized 结论没有覆盖 default EEVDF 下的 runtime failure，R1 也未关闭主要吞吐因果归属。
 
 **问题：** monotonic minimum-`vruntime` floor 把本应参与竞争的 peer 排除在 eligible set 外，并形成 same-task yield feedback。现有 `NoEligibleTask` anomaly 不会触发，因为 yielding task 本身仍 eligible。继续把该 floor 当作公平时钟会把核心算法和后续 lag / placement 设计带到错误方向。
 
 **修复落点：** [RFC index](./index.md) / [不变量需求](./invariants.md) 已改为从 `C = ready union class-active current` 派生 weighted FairClock；[Gate R1](./implementation.md#gate-r1---direct-weighted-fairclock-repair) 先做单变量 eligibility intervention。禁止 forced handoff、skip-current、penalty tuning 或 testcase-specific yield 旁路。
 
-**关闭条件：** R1 的公式 KUnit、FairClock snapshot / legacy-floor source audit、instrumented signal conservation / mirror check 与同观察语义下的计数 / interval 判定全部满足；若 yield / same-task dispatch 仍在修复前数量级，必须保留 Stage 3 blocker 并重新分类，而不是只凭公式替换关闭吞吐因果。最终 clean-tree signal / read-write 验收仍属于 Stage 3 closure。
+**关闭条件：** R1 已命中“百万级重复 self-pick 仍主导”的失败信号，因此本 issue 在 Closed RFC 中保持未解决。未来只有先重新打开 RFC review、重新分类该 trajectory、批准新的 intervention 与 runtime acceptance，并用证据证明 eligibility 与主要失速反馈闭合后才可 Neutralized；不能只凭公式替换关闭。
 
 ### EEVDF-018：competition membership 必须区分 continuous transfer 与 true leave / join
 
@@ -45,7 +45,7 @@
 
 **修复落点：** R2 建立 ready / active 互斥 membership，`pick_next_task()` 在 class 内完成 ready-to-active transfer，true block / wake 才执行 leave / join。当前 `Processor` 已知先 enqueue、后在 `decide_preempt_current()` accounting，不能满足最终同 snapshot 合同；R2 必须先做 1A / 1B method-contract review，并记录已批准的 write-set 扩展，不能在旧 surface 间制造第二套状态。
 
-**关闭条件：** R2 source audit 与 focused KUnit 证明 ready / active 互斥、continuous paths 不保存 / 恢复 lag、true leave / join exactly once，generic `dequeue()` 已删除或分类为窄 transaction，且没有依赖 wait-core private identity 的第二真相源。
+**关闭条件：** 本 RFC 关闭时 R2 未执行。未来重新打开后，须由重新批准的 source audit 与 focused KUnit 证明 ready / active 互斥、continuous paths 不保存 / 恢复 lag、true leave / join exactly once，generic `dequeue()` 已删除或分类为窄 transaction，且没有依赖 wait-core private identity 的第二真相源。
 
 ### EEVDF-004：true wake placement 必须恢复 service lag，`ParkPending` 不得获得 wake reward
 
@@ -57,7 +57,7 @@
 
 **修复落点：** R2 使用 bounded exact-rational saved service lag、带 `W0` 补偿的 join placement 和有方向约束的整数误差；ordinary `WakeEnqueueResult::Enqueued` 消费 saved lag 一次，`ParkPending` handoff 只做 active-to-ready transfer。R1 的 `legacy_placement_floor` 仅为隔离变量的临时 bridge，R2 必须删除。
 
-**关闭条件：** exact-rational leave / join、unequal-weight non-integer round trip、`W0 == 0`、credit / debt clamp、ParkPending no-reward 和 stale / already-* 不消费 saved lag 均有 KUnit / source proof；任何 checked representation fallback 命中都会让 gate 失败。
+**关闭条件：** 本 RFC 关闭时 R2 未执行。未来重新打开后，exact-rational leave / join、unequal-weight non-integer round trip、`W0 == 0`、credit / debt clamp、ParkPending no-reward 和 stale / already-* 不消费 saved lag 均须有 KUnit / source proof；任何 checked representation fallback 命中都会让 gate 失败。
 
 ### EEVDF-020：virtual-time arithmetic、accounting 与坐标表示必须闭合
 
@@ -69,7 +69,7 @@
 
 **修复落点：** R2 关闭 exact-rational saved lag 与 representation failure；R3a 关闭 fixed-weight remainder、strict request catch-up 和 block / wake accounting continuity；R3b 关闭 proactive common coordinate rebase。dynamic renice 的 strong lag conservation 仍是独立 follow-up RFC / gate，不属于本次 R1-R3b 或阶段 4 收口，也不阻塞 R1-R3b。
 
-**关闭条件：** R2 / R3a / R3b 三门证据全部满足，真实 workload 不命中 arithmetic fallback，common rebase 前后 eligibility、lag、deadline 差和 pick 结果等价。任一子门未关闭时，本 issue 保持 active，阶段 3 不得收口。
+**关闭条件：** 本 RFC 关闭时 R2 / R3a / R3b 均未执行，本 issue 保持未解决 Keter。未来重新打开后，三门或其替代 gate 的证据须全部满足，真实 workload 不命中 arithmetic fallback，common rebase 前后 eligibility、lag、deadline 差和 pick 结果等价。
 
 ## Euclid
 
@@ -97,11 +97,11 @@
 
 **状态：** Neutralized
 
-**修复落点：** `anemone-kernel/src/sched/class/entity.rs` 的唯一 default normal constructor 已在阶段 3 翻转为 fresh `EevdfEntity`，无调用者的 directed `new_eevdf()` 已删除；RR implementation 暂留，但不存在 production RR entity constructor。
+**历史修复落点：** `anemone-kernel/src/sched/class/entity.rs` 的唯一 default normal constructor 曾在阶段 3 翻转为 fresh `EevdfEntity`，无调用者的 directed `new_eevdf()` 已删除。R1 runtime acceptance 失败后，该 constructor 已恢复为 fresh RR entity；EEVDF implementation 保留为实验代码。
 
-**Source audit / validation:** ordinary clone child、rv64 / loongarch64 bootstrap task、`kthreadd` 和 ordinary kthread 全部继续调用 `SchedEntity::new_normal()`；idle task 是唯一 `new_idle()` caller；全树没有 `new_eevdf()` 或 `SchedClassPrv::RoundRobin(...)` 构造调用。rv64 `just build`、rv64 / loongarch64 `eevdf-test` 与 `user-test` app build 已通过。
+**Source audit / validation:** ordinary clone child、rv64 / loongarch64 bootstrap task、`kthreadd` 和 ordinary kthread 继续调用 `SchedEntity::new_normal()`；idle task 仍使用 `new_idle()`。当前 `new_normal()` 创建 RR，且默认 `user-test` / pretest rootfs 不再自动运行或安装 `eevdf-test`。
 
-**结论：** 本 issue 只跟踪 default constructor / production RR 特例，source-classification closure 仍成立。2026-07-11 runtime feedback 已把 eligibility、membership / wake 和 arithmetic 分别重开为 `EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020`；这些 active Keter 阻止阶段 3 / 4 收口，但不恢复 production RR，也不需要把本 issue 重开。
+**结论：** 本 issue 的 Neutralized 只记录阶段 3 default switch 曾按 single-constructor contract 完成；它不再表示当前 production default 是 EEVDF。恢复 RR 是 RFC runtime failure 后的显式 closeout，不把四个未解决 Keter 伪装为已修复。
 
 ### EEVDF-002：runtime accounting 必须有单一幂等边界
 
@@ -182,7 +182,7 @@
 
 - [RFC index](./index.md) 和 [迁移实施计划](./implementation.md) 明确 fallback anomaly 必须可观测。
 
-**反馈相关：** 稳定 CPU-bound smoke 在 warm-up 后连续观察窗口仍增长 anomaly 时，按 anomaly 来源路由到 R1 的 FairClock / eligibility、R2/R3a 的 membership / representation / accounting 或 R3b 的 coordinate gate；在归类前必须停止推进，不得恢复默认 class 收口。
+**反馈相关：** 未来若重新打开 RFC，稳定 CPU-bound smoke 在 warm-up 后连续观察窗口仍增长 anomaly 时，必须按 anomaly 来源路由到新批准的 FairClock / membership / representation / accounting / coordinate gate；在归类前停止推进，不得执行 default switch。
 
 **结论：** 每次 anomaly 记录通过 `kerrln!` 输出 reason 和累计次数；anomaly threshold 不再作为独立 active issue，只控制连续 fallback 的额外 streak 摘要，并继续作为 `EEVDF-001` / R1-R3b correction gates 的观察面。
 
@@ -214,11 +214,9 @@
 
 **状态：** Neutralized
 
-**修复落点：**
+**历史修复落点：** [RFC index](./index.md) 和 [迁移实施计划](./implementation.md) 曾决策直接以 EEVDF-lite 作为默认 normal scheduler 为目标。
 
-- [RFC index](./index.md) 和 [迁移实施计划](./implementation.md) 决策为直接以 EEVDF-lite 作为默认 normal scheduler 为目标。
-
-**结论：** method-first scheduler class transaction surface 只服务 EEVDF-lite 和 RR 行为保持适配，不做空框架优先。
+**结论：** 未另建空调度框架；method-first scheduler class transaction surface 与 RR 行为保持适配作为通用基础保留。EEVDF default 目标已随 RFC 延期关闭，未来是否恢复必须重新 review。
 
 ### EEVDF-014：是否第一版使用树结构
 
@@ -281,12 +279,8 @@
 
 **状态：** Neutralized
 
-**修复落点：**
+**历史修复落点：** RFC 曾要求 bootstrap task、`kthreadd` 和普通 kthread 直接使用 normal EEVDF，并只承诺有限 runnable 集合中的 eventual scheduler progress；阶段 3 曾验证 fresh normal entity 分类和无 production RR 特例。
 
-- [RFC index](./index.md) 明确 bootstrap task、`kthreadd` 和普通 kthread 第一版直接使用 normal EEVDF，只承诺有限 runnable 集合中的 eventual scheduler progress。
-- [不变量需求](./invariants.md) 增加 bootstrap / kthread progress 边界：不通过隐式 RR 例外、特殊优先级或单独 class 补齐证明。
-- [迁移实施计划](./implementation.md) 阶段 3 只验证 fresh normal entity 分类和无 production RR 特例；basic boot / focused smoke 是 sanity validation，不是本 issue 的契约决策入口。
+**反馈相关：** 未来若重新打开 RFC，且 source audit 或实现事实证明 timer worker、OOM worker、`kthreadd` 或其它 service kthread 需要 bounded latency、emergency priority 或单独 scheduler class，必须停止 default switch 并回到 RFC review。
 
-**反馈相关：** 若 source audit 或实现事实证明 timer worker、OOM worker、`kthreadd` 或其它 service kthread 需要 bounded latency、emergency priority 或单独 scheduler class，必须停止阶段 3 并回到 RFC review；不能在 default switch 中保留隐式 RR 例外。
-
-**结论：** 这些内核线程第一版直接进入 EEVDF 已足够；本 RFC 的证明目标是 normal EEVDF eventual progress，不承诺 service-thread bounded latency。wait-core progress、deferred disposal、IRQ-off allocation 和 long non-preemptible path 风险按对应 owner / register 路由。
+**结论：** 该 Neutralized 只保留历史 contract 决策，不描述当前分类。当前这些内核线程通过 `new_normal()` 进入 RR；未来若再次切换到 EEVDF，eventual-progress 与 service-thread latency 边界必须随重新打开的 RFC 一并复审。

@@ -1,14 +1,14 @@
 # Sched EEVDF-lite 不变量需求
 
-**状态：** Canonical
+**状态：** Closed / deferred design obligations
 **最后更新：** 2026-07-12
 **父 RFC：** [RFC-20260622-sched-eevdf-lite](./index.md)
 
-本文定义 `EEVDF-lite` 作为默认 normal scheduler 时必须保持的状态所有权、公平性和 scheduler/wait 边界。当前版本以 sched-split 为已接受前提，并吸收 2026-07-11 Stage 3 runtime feedback：monotonic minimum-`vruntime` floor 已被证据否定，原 Checkpoint 2C / 2D closure 不再是完成依据。若后续实现需要改变 `TaskSchedState`、`PrePark/Parked`、token-bound wait sleep、preempt-defer 或 stale-safe wake placement，必须回到 `sched-wait-preempt-arming` RFC review，而不是在 EEVDF-lite 内局部绕过。
+本文保留 `EEVDF-lite` 若未来再次尝试成为默认 normal scheduler 时必须满足的状态所有权、公平性和 scheduler/wait 边界。当前 production default 已恢复为 RR；这些条目是未完成 EEVDF 的未来设计义务，不是当前 RR 的 production contract，也不表示现有实验实现已经闭合。monotonic minimum-`vruntime` floor 已被证据否定，R1 weighted FairClock intervention 又命中 runtime failure signal，原 Checkpoint 2C / 2D closure 不再是完成依据。若未来实现需要改变 `TaskSchedState`、`PrePark/Parked`、token-bound wait sleep、preempt-defer 或 stale-safe wake placement，必须先重新打开 RFC review，并回到 `sched-wait-preempt-arming` 边界审查，而不是在 EEVDF-lite 内局部绕过。
 
 ## 闭合条件
 
-迁移完成后必须同时满足：
+未来迁移若重开并声称完成，必须同时满足：
 
 1. 除 idle task 外，ordinary user task、bootstrap task 和 kthread 默认使用 `EEVDF-lite`，不再依赖临时 RR 作为 production normal class。
 2. task 的真实执行归属仍由 `Task::cpuid()` 表示，第一版不做跨核迁移。
@@ -283,7 +283,7 @@ bootstrap task、`kthreadd` 和普通 kthread 第一版直接使用 normal EEVDF
 
 ## 禁止退化项
 
-以下做法不能作为最终关闭条件：
+以下做法不能作为未来 EEVDF 完成条件。第 4 项不禁止当前 Closed/deferred 状态下把 RR 作为 production default；它禁止未来把“EEVDF 已完成”建立在 EEVDF 仍未接入 production 的基础上。
 
 1. 用 benchmark 特化逻辑处理 `iozone` worker。
 2. 为了让 `iozone` 数字好看关闭 eligibility。
@@ -306,6 +306,8 @@ bootstrap task、`kthreadd` 和普通 kthread 第一版直接使用 normal EEVDF
 19. 在 placement 后只比较 current 与 new candidate，忽略既有 ready peer 可能成为 full-set winner。
 
 ## 完成标准
+
+以下标准均未达成，仅作为未来重新打开 RFC 后的验收义务；本次 Closed/deferred 不以这些条目声称 Completed。
 
 文档层完成标准：
 
