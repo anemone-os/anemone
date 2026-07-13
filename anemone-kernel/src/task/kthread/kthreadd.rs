@@ -1,6 +1,6 @@
 use crate::{
     prelude::*,
-    sched::class::{SchedClassPrv, SchedEntity},
+    sched::class::SchedEntity,
     task::{Tid, tid::alloc_kthreadd_tid},
 };
 
@@ -75,7 +75,7 @@ pub fn init_kthreadd() {
             ParameterList::empty(),
             Some(init.tid()),
             Some(Tid::KTHREADD),
-            SchedEntity::new(SchedClassPrv::RoundRobin(())),
+            SchedEntity::new_default(),
             TaskFlags::empty(),
             Some(cur_cpu_id()),
             kthreadd_tid,
@@ -117,7 +117,7 @@ pub fn init_kthreadd() {
         *kthreadd = Some(task.clone());
     }
 
-    task_enqueue(task);
+    enqueue_new_task(task);
 }
 
 pub(super) fn submit(
@@ -185,7 +185,7 @@ pub(super) fn spawn(request: SpawnRequest) {
             ParameterList::empty(),
             Some(kthreadd.tid()),
             None,
-            SchedEntity::new(SchedClassPrv::RoundRobin(())),
+            SchedEntity::new_default(),
             TaskFlags::empty(),
             cpu,
         )
@@ -217,6 +217,6 @@ pub(super) fn spawn(request: SpawnRequest) {
         task.has_kthread_attachment(),
         "published kthread must keep task-local control link"
     );
-    task_enqueue(task);
+    enqueue_new_task(task);
     reply.complete(SpawnOutcome::Spawned(handle));
 }

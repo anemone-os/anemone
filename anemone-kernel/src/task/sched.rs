@@ -1,20 +1,63 @@
-use crate::{prelude::*, sched::class::SchedEntity};
+use crate::{
+    prelude::*,
+    sched::{
+        AtomicNice, Nice,
+        class::{SchedClassKind, SchedEntity, SchedEntityMutToken},
+    },
+};
 
 impl Task {
-    /// Get a copy of the scheduling entity of this task.
-    ///
-    /// If you just want to read some fields of the scheduling entity, consider
-    /// using [Self::with_sched_entity_mut] instead to avoid unnecessary bytes
-    /// copying.
-    pub fn sched_entity(&self) -> SchedEntity {
-        *self.sched_entity.lock_irqsave()
+    /// Return this task's validated nice value.
+    pub fn nice(&self) -> Nice {
+        self.nice.load()
     }
 
-    /// Run a closure with a mutable reference to the scheduling entity of this
-    /// task.
-    pub fn with_sched_entity_mut<F: FnOnce(&mut SchedEntity) -> R, R>(&self, f: F) -> R {
+    /// Inherit nice while a child task is still caller-owned and unpublished.
+    pub(crate) fn inherit_nice_before_publish(&mut self, nice: Nice) {
+        self.nice = AtomicNice::new(nice);
+    }
+
+    /// Set the nice value of a published task.
+    ///
+    /// The first version deliberately does not update the owner CPU runqueue or
+    /// split a current execution segment at this call. A later owner-CPU
+    /// accounting or placement transaction consumes the new value. Replace
+    /// this direct update when dynamic renice is routed as a `RunQueue`
+    /// command/IPI.
+    pub(crate) fn set_nice(&self, nice: Nice) {
+        self.nice.store(nice);
+    }
+
+    /// Run a scheduler-class transaction under this task's entity lock.
+    ///
+    /// The token is constructible only inside the scheduler-class owner. In
+    /// particular, ordinary crate callers cannot use this lock bridge to
+    /// replace the class, policy, priority, or run-queue membership of a
+    /// published task.
+    pub(crate) fn with_sched_entity_mut<F: FnOnce(&mut SchedEntity) -> R, R>(
+        &self,
+        _token: SchedEntityMutToken,
+        f: F,
+    ) -> R {
         let mut guard = self.sched_entity.lock_irqsave();
         f(&mut guard)
+    }
+
+    /// Return an owner-CPU observation of physical run-queue membership.
+    ///
+    /// This snapshot is only for scheduler-core placement checks. Membership
+    /// transitions remain owned by `RunQueue` transactions.
+    pub(crate) fn sched_on_runq(&self) -> bool {
+        self.sched_entity.lock_irqsave().on_runq()
+    }
+
+    /// Return an observation-only scheduler class snapshot.
+    ///
+    /// This may be used for assertions and diagnostics. Code that changes queue
+    /// membership or class-owned state must use scheduler transactions instead
+    /// of driving behavior from this lossy class identity.
+    pub fn sched_class_kind(&self) -> SchedClassKind {
+        self.sched_entity.lock_irqsave().class_kind()
     }
 
     /// Return an observation-only compatibility snapshot.

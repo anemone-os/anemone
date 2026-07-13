@@ -25,6 +25,23 @@ impl Profile {
     }
 }
 
+#[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum SchedDefaultPolicy {
+    #[serde(rename = "rt_rr")]
+    RtRr,
+    #[serde(rename = "rt_fifo")]
+    RtFifo,
+}
+
+impl SchedDefaultPolicy {
+    fn kernel_variant(self) -> &'static str {
+        match self {
+            Self::RtRr => "RtRr",
+            Self::RtFifo => "RtFifo",
+        }
+    }
+}
+
 #[derive(Deserialize, Debug, Serialize)]
 pub struct Build {
     pub platform: String,
@@ -45,6 +62,8 @@ pub struct Parameters {
     pub max_path_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
     pub system_hz: Option<u16>,
+    pub sched_default_policy: Option<SchedDefaultPolicy>,
+    pub rt_rr_timeslice_ms: Option<u64>,
     pub backtrace_depth: Option<usize>,
     pub user_stack_shift_kb: Option<u64>,
     pub user_init_stack_shift_kb: Option<u64>,
@@ -58,6 +77,10 @@ pub struct Parameters {
     pub max_fd_per_process: Option<usize>,
     pub ramdisk_count: Option<usize>,
     pub loop_device_count: Option<usize>,
+    pub eevdf_base_slice_us: Option<u64>,
+    pub eevdf_wake_clamp_us: Option<u64>,
+    pub eevdf_yield_penalty_us: Option<u64>,
+    pub eevdf_anomaly_threshold: Option<u64>,
 }
 
 impl Parameters {
@@ -91,12 +114,14 @@ pub const BOOTSTRAP_HEAP_SHIFT_KB: u64 = {};
 /// Log buffer size as a power of 2 in KB, excluding metadata overhead
 pub const LOG_BUFFER_SHIFT_KB: u64 = {};
 /// Log record size as a power of 2 in bytes
-/// Note that the actual log record size will be 2^LOG_RECORD_SHIFT_BYTES + some metadata overhead.
+/// Note that the actual log record size will be 
+/// 2^LOG_RECORD_SHIFT_BYTES + some metadata overhead.
 pub const LOG_RECORD_SHIFT_BYTES: u64 = {};
 /// Maximum numeric log level that may be emitted to consoles.
 ///
 /// Log levels follow the kernel ordering: Emerg=0 ... Debug=7.
-/// Messages with a numerically larger level stay in the kernel log buffer only.
+/// Messages with a numerically larger level stay in the kernel log 
+/// buffer only.
 pub const CONSOLE_LOG_LEVEL: u8 = {};
 /// Kernel stack size as a power of 2 in KB
 pub const KSTACK_SHIFT_KB: u64 = {};
@@ -104,15 +129,28 @@ pub const KSTACK_SHIFT_KB: u64 = {};
 pub const REMAP_SHIFT_GB: u64 = {};
 /// Maximum length of identity strings in bytes
 pub const MAX_IDENT_LEN_BYTES: usize = {};
-/// Maximum length of file names in bytes. This is always equal to MAX_IDENT_LEN_BYTES,
-/// since file names are commonly used as identity strings in kernel objects.
+/// Maximum length of file names in bytes. This is always equal to 
+/// MAX_IDENT_LEN_BYTES,
+/// since file names are commonly used as identity strings in kernel 
+/// objects.
 pub const MAX_FILE_NAME_LEN_BYTES: usize = MAX_IDENT_LEN_BYTES;
 /// Maximum length of file paths in bytes
 pub const MAX_PATH_LEN_BYTES: usize = {};
 /// Maximum number of processes
 pub const MAX_PROCESSES: u64 = {};
-/// System timer frequency in hertz, i.e. number of timer interrupts per second
+/// System timer frequency in hertz, i.e. number of timer interrupts 
+/// per second
 pub const SYSTEM_HZ: u16 = {};
+/// Compile-time scheduler policy for fresh non-idle tasks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SchedDefaultPolicy {{
+    RtRr,
+    RtFifo,
+}}
+/// Selected compile-time scheduler policy for fresh non-idle tasks.
+pub const SCHED_DEFAULT_POLICY: SchedDefaultPolicy = SchedDefaultPolicy::{};
+/// RT/RR timeslice target in milliseconds.
+pub const RT_RR_TIMESLICE_MS: u64 = {};
 /// Maximum depth of captured backtrace
 pub const BACKTRACE_DEPTH: usize = {};
 /// Max user stack size as a power of 2 in KB
@@ -121,24 +159,37 @@ pub const USER_STACK_SHIFT_KB: u64 = {};
 pub const USER_INIT_STACK_SHIFT_KB: u64 = {};
 /// Max user heap size as a power of 2 in MB
 pub const USER_HEAP_SHIFT_MB: u64 = {};
-/// Default maximum size in bytes for a single System V shared memory segment.
+/// Default maximum size in bytes for a single System V shared memory 
+/// segment.
 pub const SHMMAX: usize = {};
-/// Default maximum number of pages that may be allocated to System V shared memory.
+/// Default maximum number of pages that may be allocated to System V 
+/// shared memory.
 pub const SHMALL: usize = {};
 /// Default maximum number of System V shared memory segments.
 pub const SHMMNI: usize = {};
-/// Physical memory usage percentage above which the inode shrinker worker runs a scan.
+/// Physical memory usage percentage above which the inode shrinker worker 
+/// runs a scan.
 pub const IO_SHRINK_THRESHOLD: u8 = {};
-/// Physical memory usage percentage above which the OOM killer worker is woken.
+/// Physical memory usage percentage above which the OOM killer worker 
+/// is woken.
 pub const OOM_KILL_THRESHOLD: u8 = {};
 /// Maximum number of symbolic links to resolve in a single path resolution
 pub const SYMLINK_RESOLVE_LIMIT: usize = {};
-/// Default maximum number of file descriptors per process. Might be overridden by certain syscalls.
+/// Default maximum number of file descriptors per process. 
+/// Might be overridden by certain syscalls.
 pub const MAX_FD_PER_PROCESS: usize = {};
 /// Number of static ramdisk block devices to publish at boot.
 pub const RAMDISK_COUNT: usize = {};
 /// Number of static loop block devices to publish at boot.
 pub const LOOP_DEVICE_COUNT: usize = {};
+/// EEVDF-lite base slice in microseconds.
+pub const EEVDF_BASE_SLICE_US: u64 = {};
+/// EEVDF-lite wake placement clamp window in microseconds.
+pub const EEVDF_WAKE_CLAMP_US: u64 = {};
+/// EEVDF-lite bounded yield penalty window in microseconds.
+pub const EEVDF_YIELD_PENALTY_US: u64 = {};
+/// Consecutive EEVDF no-eligible fallback count before an extra error summary.
+pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
         "#,
             default_or!(bootstrap_heap_shift_kb),
             default_or!(log_buffer_shift_kb),
@@ -150,6 +201,8 @@ pub const LOOP_DEVICE_COUNT: usize = {};
             default_or!(max_path_len_bytes),
             default_or!(max_processes),
             default_or!(system_hz),
+            default_or!(sched_default_policy).kernel_variant(),
+            default_or!(rt_rr_timeslice_ms),
             default_or!(backtrace_depth),
             default_or!(user_stack_shift_kb),
             default_or!(user_init_stack_shift_kb),
@@ -163,6 +216,10 @@ pub const LOOP_DEVICE_COUNT: usize = {};
             default_or!(max_fd_per_process),
             default_or!(ramdisk_count),
             default_or!(loop_device_count),
+            default_or!(eevdf_base_slice_us),
+            default_or!(eevdf_wake_clamp_us),
+            default_or!(eevdf_yield_penalty_us),
+            default_or!(eevdf_anomaly_threshold),
         )
     }
 }
@@ -177,6 +234,9 @@ pub struct Config {
 impl Config {
     pub fn from_str(content: &str) -> anyhow::Result<Self> {
         let config: Config = toml::from_str(&content)?;
+        if config.parameters.rt_rr_timeslice_ms == Some(0) {
+            anyhow::bail!("rt_rr_timeslice_ms must be non-zero");
+        }
         Ok(config)
     }
 }
@@ -190,5 +250,49 @@ mod tests {
         let content = std::fs::read_to_string("../../conf/.defconfig").unwrap();
         let config = Config::from_str(&content).unwrap();
         println!("{:#x?}", config);
+    }
+
+    #[test]
+    fn test_sched_parameters_are_constrained() {
+        let content = std::fs::read_to_string("../../conf/.defconfig").unwrap();
+        let replace_parameter = |name: &str, replacement: &str| {
+            content
+                .lines()
+                .map(|line| {
+                    if line.trim_start().starts_with(name) {
+                        replacement
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        assert!(
+            Config::from_str(
+                &replace_parameter("sched_default_policy", "sched_default_policy = \"rt_rr\"")
+            )
+            .is_ok()
+        );
+        assert!(
+            Config::from_str(
+                &replace_parameter("sched_default_policy", "sched_default_policy = \"rt_fifo\"")
+            )
+            .is_ok()
+        );
+        assert!(
+            Config::from_str(
+                &replace_parameter("sched_default_policy", "sched_default_policy = \"invalid\"")
+            )
+            .is_err()
+        );
+        assert!(
+            Config::from_str(&replace_parameter(
+                "rt_rr_timeslice_ms",
+                "rt_rr_timeslice_ms = 0"
+            ))
+            .is_err()
+        );
     }
 }

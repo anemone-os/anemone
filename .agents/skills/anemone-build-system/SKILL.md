@@ -1,67 +1,57 @@
 ---
 name: anemone-build-system
-description: Use when building, cleaning, configuring, formatting, packaging rootfs images, building apps, or running QEMU for the Anemone repository. Route all build-facing work through Justfile and scripts/xtask, inspect outputs under build/, and avoid invoking bare cargo or ad-hoc target commands directly because xtask owns generated files, target specs, rustfmt configuration, linker scripts, DTB generation, and platform-specific wiring.
+description: Use when building, cleaning, configuring, formatting, packaging rootfs images, building apps, running QEMU, auditing Anemone build configuration, handling DTB generation, or using repository pretest/end-to-end flows. Route build-facing work through the Justfile, scripts/xtask, and existing repository wrappers; inspect live owners before acting and avoid bare cargo or ad-hoc target commands that bypass repository orchestration.
 ---
 
 # Anemone Build System
 
-## Overview
+## Preserve The Build Contract
 
-Route all Anemone build, app, rootfs, configuration, formatting, and QEMU tasks through `just` or `just xtask`. Avoid bare `cargo`, `rustc`, `cargo clean`, `cargo fmt`, and hand-written linker or target invocations because `xtask` injects target specs, generated Rust definitions, the repository `rustfmt.toml`, linker scripts, DTB generation, and staged outputs under `build/`.
+1. Work from the repository root.
+2. Use `just ...` for common flows, `just xtask ...` for specific xtask interfaces, and existing repository wrappers for their complete end-to-end flows.
+3. Do not substitute bare `cargo`, `rustc`, formatter, linker, target, or cleanup commands for repository-owned orchestration. Xtask owns generated inputs, target selection, artifact export, and platform wiring.
+4. Inspect user-facing exports under `build/` first. Treat cargo `target/` trees as internal unless diagnosis requires them.
+5. Change the Justfile or `scripts/xtask/` when orchestration is the owner. Do not add a parallel build entrypoint or one-off wrapper.
 
-## Follow These Rules
+## Follow The Live Workflow
 
-1. Start from the repository root. Prefer `just ...` for common flows and `just xtask ...` when you need a specific subcommand.
-2. Initialize `kconfig` with `just defconfig` when `kconfig` is missing or when the user explicitly wants to reset to the default configuration.
-3. Treat `anemone-kernel/src/kconfig_defs.rs`, `anemone-kernel/src/platform_defs.rs`, and `build/generated/kernel.lds` as generated outputs. Regenerate them via `just build` or `just xtask build`; do not edit them manually.
-4. Inspect results under `build/`. Treat `target/` as cargo cache or intermediate state unless a task explicitly requires looking there.
-5. Read `kconfig`, `conf/.defconfig`, `conf/platforms/*.toml`, `conf/rootfs/*.toml`, and `anemone-apps/*/app.toml` before changing build behavior.
-6. Use `just clean` or `just mrproper` for cleanup. Do not run bare `cargo clean`.
-7. Use `just fmt`, `just fmt kernel`, `just fmt <app>`, or `just fmt <package> --check` for Rust formatting. The formatter path is wired to the repository `rustfmt.toml`.
-8. Let `xtask` invoke cargo internally when needed. Do not bypass it by running `cargo build`, `cargo run`, `cargo test`, or `cargo fmt` directly from the workspace or from `anemone-kernel` or `anemone-apps`.
+For every build-facing task:
 
-## Choose The Workflow
+1. Classify it as configuration, kernel build, app build, rootfs, formatting, QEMU, cleanup, or end-to-end validation.
+2. Discover the current interface with `just --list` or `just xtask <command> --help`.
+3. Read the active configuration and the owning code under `scripts/xtask/src/config/` and `scripts/xtask/src/tasks/`.
+4. Identify prerequisites, outputs, overwritten state, and deletion scope before executing.
+5. Choose the narrowest repository entrypoint that satisfies the request.
+6. Verify the outputs promised by the active configuration and command; do not infer success from unrelated or stale files.
 
-1. Determine the task category.
-	- Build the kernel or regenerate generated files -> use `just build` or `just xtask build`.
-	- Switch or inspect platform configuration -> use `just conf list` or `just conf switch <platform>`.
-	- Format Rust sources -> use `just fmt` for kernel plus all apps, `just fmt kernel` for the kernel workspace, `just fmt <app>` for one app, or add `--check` to verify without writing.
-	- Build one userspace app -> use `just xtask app build <app> --arch <arch>`.
-	- Build a rootfs image -> use `just xtask rootfs mkfs -c <manifest>`.
-	- Run QEMU -> use `just xtask qemu --platform <platform> --image build/anemone.elf`.
-	- Clean outputs -> use `just clean` or `just mrproper`.
-2. Verify prerequisites before executing.
-	- Ensure `kconfig` selects the intended platform and profile.
-	- Ensure the platform file under `conf/platforms/` matches the requested architecture and QEMU wiring.
-	- Ensure the rootfs manifest's `[build].name` matches any hard-coded image path in the selected platform's QEMU args when booting from disk.
-3. Verify outputs after executing.
-	- Check `build/anemone.elf`, `build/anemone.disasm`, and `build/kernel.map` for kernel builds.
-	- Check `build/apps/<app>/` for app exports.
-	- Check `build/rootfs/<name>/root/` and `build/rootfs/<name>/rootfs.img` for rootfs generation.
-4. Read [references/build-playbook.md](references/build-playbook.md) when you need the exact command matrix, output locations, or repo-specific caveats.
+Read [references/build-playbook.md](references/build-playbook.md) for task routing and staged diagnosis. Read [references/config-model.md](references/config-model.md) when changing or auditing configuration relationships.
 
-## Respect Repo Boundaries
+## Respect Configuration Owners
 
-Keep build logic in `Justfile` and `scripts/xtask/`. If a task requires changing build orchestration, edit those files instead of adding parallel shell scripts.
+Keep each concern in its owning layer:
 
-Keep platform constants in `conf/platforms/*.toml` and architecture templates in `conf/arch/`. Do not duplicate those constants in Rust code.
+- root `kconfig` and `conf/.defconfig`: kernel build selection, features, and parameters;
+- `conf/platforms/` and `conf/arch/`: platform identity, architecture, hardware constants, boot environment, QEMU, DTB, and linker inputs;
+- `anemone-apps/<app>/app.toml`: app driver and exported artifacts;
+- `conf/rootfs/`: rootfs composition and installed apps/files;
+- Justfile and `scripts/xtask/src/tasks/`: orchestration and command behavior.
 
-Expect `xtask build` to generate or overwrite files before compiling. Plan edits around that behavior.
+When prose, examples, schemas, active configuration, and Rust code disagree, treat live deserialization and task code as authoritative. Re-read them instead of preserving a possibly stale fact in this skill.
 
-Remember that `conf/platforms/qemu-virt-rv64.toml` currently points QEMU at `build/rootfs/minimal/rootfs.img`. If you change the rootfs manifest name or output layout, update the platform config or use a matching manifest.
+## Protect Generated State
 
-## Diagnose Failures
+Do not hand-edit generated kernel definitions, linker outputs, DTB outputs, or exported artifacts. Regenerate them through their owning command.
 
-1. Read the failing `just` or `xtask` command first. Do not replace it with ad-hoc cargo commands.
-2. Check configuration inputs before touching code:
-	- `kconfig`
-	- `conf/.defconfig`
-	- `conf/platforms/*.toml`
-	- `conf/rootfs/*.toml`
-	- `anemone-apps/<app>/app.toml`
-3. Check generated outputs under `build/` next.
-4. Modify `Justfile` or `scripts/xtask/src/**/*.rs` when the failure comes from orchestration, target selection, artifact export, or QEMU or rootfs wiring.
+Before cleanup, configuration reset, disk creation, rootfs materialization, or an end-to-end wrapper, inspect the live recipe or script and report any relevant state it overwrites or deletes. Do not run a broad flow as a substitute for a narrower validation.
 
-## Keep The Scope Tight
+Generated outputs can be conditional and old files can survive a later command. Verify both provenance and freshness when a result is used as evidence.
 
-Use this skill to drive repo-local builds and build-system edits. Do not introduce a second build entrypoint, a parallel wrapper script, or cargo-only instructions that contradict the repository workflow.
+## Diagnose In Ownership Order
+
+1. Preserve the exact repository command and read its first actionable failure.
+2. Check the selected configuration and cross-layer relationships.
+3. Check expected exports under `build/`, including freshness when applicable.
+4. Inspect the owning config type and task implementation.
+5. Fix the owning layer only; do not hide configuration mismatches with manual copies or ad-hoc shell commands.
+
+Keep the skill durable: record stable owner boundaries and verification procedures here, while deriving checkout-specific paths, flags, defaults, and platform wiring from current source.

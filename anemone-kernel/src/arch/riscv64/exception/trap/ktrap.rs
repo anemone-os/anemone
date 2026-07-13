@@ -158,13 +158,19 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
             // leaving the hardware interrupt environment.
 
             // note the short-circuit behavior of && operator.
-            if cfg!(feature = "kernel_preempt") && allow_preempt() && fetch_clear_need_resched() {
-                // if we need reschedule, we can't waste time on disposing deferred tasks.
-                match unsafe { schedule_preempt() } {
-                    SchedulePreemptResult::Scheduled => {},
-                    SchedulePreemptResult::Deferred => {
-                        dispose_deferred_tasks();
-                    },
+            if cfg!(feature = "kernel_preempt") && allow_preempt() {
+                let pending = take_pending_resched();
+                if !pending.is_empty() {
+                    // if we need reschedule, we can't waste time on disposing deferred tasks.
+                    match unsafe { schedule_preempt(pending) } {
+                        SchedulePreemptResult::Scheduled => {},
+                        SchedulePreemptResult::Deferred => {
+                            restore_pending_resched(pending);
+                            dispose_deferred_tasks();
+                        },
+                    }
+                } else {
+                    dispose_deferred_tasks();
                 }
             } else {
                 dispose_deferred_tasks();

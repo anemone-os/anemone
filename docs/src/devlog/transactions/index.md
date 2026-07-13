@@ -17,8 +17,13 @@
 - [Cred Merge](./2026-06-02-cred-merge.md)
 - [Sched Latch](./2026-06-03-sched-latch.md)
 
+## Closed / Deferred
+
+- [Sched EEVDF-lite](./2026-07-09-sched-eevdf-lite.md)：Stage 3/R1 runtime acceptance 失败后延期关闭；RR 已恢复为默认调度器，四个 Keter 保持未解决。此项不是 Completed。
+
 ## Completed
 
+- [Sched RT Class](./2026-07-12-sched-rt-class.md)
 - [Sched Wait Preempt Arming](./2026-07-06-sched-wait-preempt-arming.md)
 - [VFS Direct User I/O](./2026-06-29-vfs-direct-user-io.md)
 - [Threaded Timer Event](./2026-06-20-threaded-timer-event.md)
