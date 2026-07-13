@@ -75,7 +75,7 @@ pub fn init_kthreadd() {
             ParameterList::empty(),
             Some(init.tid()),
             Some(Tid::KTHREADD),
-            SchedEntity::new_normal(),
+            SchedEntity::new_default(),
             TaskFlags::empty(),
             Some(cur_cpu_id()),
             kthreadd_tid,
@@ -185,7 +185,7 @@ pub(super) fn spawn(request: SpawnRequest) {
             ParameterList::empty(),
             Some(kthreadd.tid()),
             None,
-            SchedEntity::new_normal(),
+            SchedEntity::new_default(),
             TaskFlags::empty(),
             cpu,
         )

@@ -2,6 +2,21 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260713-SCHED-RT-NOIRQ-BUCKET-ALLOCATION
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** scheduler / realtime / irq / allocator
+
+**Summary:** 第一版 `Realtime` class 使用固定 99 个 priority bucket，但每个 bucket 仍是 lazy `VecDeque`。empty bucket 不分配 backing storage；首次 `push_back()` 或后续扩容仍可能在 owner-CPU noirq scheduler transaction 中触发堆分配。该风险继承自被替换的 legacy `RoundRobin` queue，不是 RT class 新引入的 allocation-free 退化；当前 checkpoint 明确接受它，但不把 fixed bucket 误述为 noirq-safe allocation contract。
+
+**Exit Condition:** 将 RT ready queue 改为在 noirq enqueue 中保证不触发 allocator side effect 的表示，例如经过独立 RFC/review 的预分配或 intrusive queue，并证明 duplicate/missing dequeue、priority bucket 一致性、task lifetime 与 OOM 路径不退化；随后用 source audit 和 scheduler smoke 关闭此限制。
+
+**Owner:** doruche
+**Last Verified:** 2026-07-13
+**Related:** [Sched RT Class RFC](../rfcs/sched-rt-class/index.md), [Sched RT Class 事务日志](../devlog/transactions/2026-07-12-sched-rt-class.md), [开放问题：IRQ-off heap allocation](./open-issues.md#ane-20260622-irq-off-heap-allocation)
+
 ## ANE-20260522-OTMPFILE-STAGE1
 
 **Type:** Limitation

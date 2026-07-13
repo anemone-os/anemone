@@ -282,7 +282,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
             ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
             None,
             Some(Tid::INIT),
-            SchedEntity::new_normal(),
+            SchedEntity::new_default(),
             TaskFlags::empty(),
             Some(cur_cpu_id()),
             crate::task::alloc_init_tid(),
@@ -317,7 +317,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
             ParameterList::new(&[ap_id as u64]),
             None,
             Some(Tid::INIT),
-            SchedEntity::new_normal(),
+            SchedEntity::new_default(),
             TaskFlags::empty(),
             Some(cur_cpu_id()),
         )

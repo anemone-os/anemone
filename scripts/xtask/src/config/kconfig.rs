@@ -25,6 +25,23 @@ impl Profile {
     }
 }
 
+#[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum SchedDefaultPolicy {
+    #[serde(rename = "rt_rr")]
+    RtRr,
+    #[serde(rename = "rt_fifo")]
+    RtFifo,
+}
+
+impl SchedDefaultPolicy {
+    fn kernel_variant(self) -> &'static str {
+        match self {
+            Self::RtRr => "RtRr",
+            Self::RtFifo => "RtFifo",
+        }
+    }
+}
+
 #[derive(Deserialize, Debug, Serialize)]
 pub struct Build {
     pub platform: String,
@@ -45,6 +62,8 @@ pub struct Parameters {
     pub max_path_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
     pub system_hz: Option<u16>,
+    pub sched_default_policy: Option<SchedDefaultPolicy>,
+    pub rt_rr_timeslice_ms: Option<u64>,
     pub backtrace_depth: Option<usize>,
     pub user_stack_shift_kb: Option<u64>,
     pub user_init_stack_shift_kb: Option<u64>,
@@ -122,6 +141,16 @@ pub const MAX_PROCESSES: u64 = {};
 /// System timer frequency in hertz, i.e. number of timer interrupts 
 /// per second
 pub const SYSTEM_HZ: u16 = {};
+/// Compile-time scheduler policy for fresh non-idle tasks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SchedDefaultPolicy {{
+    RtRr,
+    RtFifo,
+}}
+/// Selected compile-time scheduler policy for fresh non-idle tasks.
+pub const SCHED_DEFAULT_POLICY: SchedDefaultPolicy = SchedDefaultPolicy::{};
+/// RT/RR timeslice target in milliseconds.
+pub const RT_RR_TIMESLICE_MS: u64 = {};
 /// Maximum depth of captured backtrace
 pub const BACKTRACE_DEPTH: usize = {};
 /// Max user stack size as a power of 2 in KB
@@ -172,6 +201,8 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             default_or!(max_path_len_bytes),
             default_or!(max_processes),
             default_or!(system_hz),
+            default_or!(sched_default_policy).kernel_variant(),
+            default_or!(rt_rr_timeslice_ms),
             default_or!(backtrace_depth),
             default_or!(user_stack_shift_kb),
             default_or!(user_init_stack_shift_kb),
@@ -203,6 +234,9 @@ pub struct Config {
 impl Config {
     pub fn from_str(content: &str) -> anyhow::Result<Self> {
         let config: Config = toml::from_str(&content)?;
+        if config.parameters.rt_rr_timeslice_ms == Some(0) {
+            anyhow::bail!("rt_rr_timeslice_ms must be non-zero");
+        }
         Ok(config)
     }
 }
@@ -216,5 +250,49 @@ mod tests {
         let content = std::fs::read_to_string("../../conf/.defconfig").unwrap();
         let config = Config::from_str(&content).unwrap();
         println!("{:#x?}", config);
+    }
+
+    #[test]
+    fn test_sched_parameters_are_constrained() {
+        let content = std::fs::read_to_string("../../conf/.defconfig").unwrap();
+        let replace_parameter = |name: &str, replacement: &str| {
+            content
+                .lines()
+                .map(|line| {
+                    if line.trim_start().starts_with(name) {
+                        replacement
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        assert!(
+            Config::from_str(
+                &replace_parameter("sched_default_policy", "sched_default_policy = \"rt_rr\"")
+            )
+            .is_ok()
+        );
+        assert!(
+            Config::from_str(
+                &replace_parameter("sched_default_policy", "sched_default_policy = \"rt_fifo\"")
+            )
+            .is_ok()
+        );
+        assert!(
+            Config::from_str(
+                &replace_parameter("sched_default_policy", "sched_default_policy = \"invalid\"")
+            )
+            .is_err()
+        );
+        assert!(
+            Config::from_str(&replace_parameter(
+                "rt_rr_timeslice_ms",
+                "rt_rr_timeslice_ms = 0"
+            ))
+            .is_err()
+        );
     }
 }

@@ -1,7 +1,7 @@
 # Sched RT Class 迁移实施计划
 
-**状态：** Active；Scheduler-Core 前置 Gate 已关闭
-**最后更新：** 2026-07-12
+**状态：** Active；Scheduler-Core 前置 Gate 与 Checkpoint 1 已关闭
+**最后更新：** 2026-07-13
 **父 RFC：** [RFC-20260711-sched-rt-class](./index.md)
 **不变量：** [不变量需求](./invariants.md)
 
@@ -66,21 +66,31 @@
 - `anemone-kernel/src/arch/loongarch64/bootstrap.rs`
 - `anemone-kernel/src/task/api/clone/mod.rs`
 - `anemone-kernel/src/task/kthread/kthreadd.rs`
+- `anemone-kernel/src/task/sched.rs`
+- `anemone-kernel/src/sched/processor.rs`
 - `conf/.defconfig`
 - 根 `kconfig`（gitignored live build input；只同步/切换本 checkpoint 新增的 selector 与 timeslice，保留其它开发者本地选项，不提交）
 - `scripts/xtask/src/config/kconfig.rs`
 - 构建生成的 `anemone-kernel/src/kconfig_defs.rs`（只由 repository build flow 生成）
 
-本 checkpoint 不修改 `processor.rs`、wait-core、trap/IPI pending plumbing、task topology、调度属性 syscall 或其它 scheduler class 算法。若实际编译要求越过上述文件，worker 必须先提交 expansion request；不得在已批准写集内制造 adapter 绕过。
+`task/sched.rs` 与 `processor.rs` 的扩展只用于关闭 whole-entity mutable bridge：`Task` 保留 entity lock owner，scheduler-core caller 改用只读 membership observation，只有 scheduler-class owner 能构造 mutation capability。该扩展不修改 wait-core、trap/IPI pending plumbing、task topology、调度属性 syscall 或其它 scheduler class 算法。若实际编译要求继续越过上述文件，worker 必须先提交 expansion request；不得在已批准写集内制造 adapter 绕过。
+
+模块 owner 必须保持以下边界：
+
+- `rt.rs` 单独拥有 `RtPriority`、`RtPolicy`、`RtEntity`、full-quantum 派生、RT payload accessor / fresh-payload factory、class-private custom fresh construction、bucket/placement/tick 算法和 RT-focused KUnit；
+- `entity.rs` 负责 `SchedEntity` storage、公开 facade constructors (`new_default`、`new_idle`)、class payload union、class identity 映射和不可由 class owner 外构造的 entity-mutation capability；它只调用 `rt.rs` 的窄 default-payload factory，不实现 RT budget、priority、policy 或配置逻辑；
+- `mod.rs` 只保留 module / narrow re-export、共享 `Scheduler` trait、typed pending contract 和集中 class precedence；不得公开 re-export RT runtime representation，也不得承载 RT policy/quantum/entity 算法或 RT-focused test logic；
+- `task/sched.rs` 只持有 entity lock 与 capability-gated mutation bridge，并提供 scheduler-core 所需的只读 membership observation；`processor.rs` 不取得 class payload mutation capability。
 
 ### 实现内容
 
 - 增加 `RtPriority`，严格校验 `1..=99`，提供无歧义的 bucket index 映射；
 - 增加 `RtPolicy::Fifo`、`RtPolicy::RoundRobin { remaining_ticks }` 与 `RtEntity`，使 policy、priority 和 RR budget 只有一个行为真相源；
+- 为 fresh policy 提供对称的 `RtPolicy::fifo()` 与 `RtPolicy::round_robin()` 构造入口；
 - 增加单一 `Realtime` identity 和 99 个 priority bucket，删除 legacy `RoundRobin` identity、queue owner 与实现；
 - 将集中 precedence 固定为 `Realtime > Idle`，把全部 method-first lifecycle dispatch 接到 `Realtime`；
 - 实现 enqueue、dequeue、pick、current placement、FIFO/RR tick 和 strict higher-priority arrival decision；
-- 增加 `SchedEntity::new_realtime(...)` 与 `new_default()`，删除 `new_normal()`，并原子迁移所有非 idle production constructor；
+- 增加 `SchedEntity::new_default()`，删除 `new_normal()`，并原子迁移所有非 idle production constructor；custom priority/policy 的 fresh construction 只留在 `rt.rs` 的 class/test-private helper，不形成共享 public facade；
 - 在 `conf/.defconfig` / xtask 配置 owner 中增加受约束的 `sched_default_policy = "rt_rr" | "rt_fifo"` 和 `rt_rr_timeslice_ms = 100`；同步 live 根 `kconfig` 的新增键但不覆盖其它本地配置；selector 解析为 enum，并生成 kernel 可直接消费的 typed constant；
 - full quantum 使用 `max(1, ceil(rt_rr_timeslice_ms * SYSTEM_HZ / 1000))`，使用足够宽的中间类型并拒绝零值/溢出；不在 entity 中复制 full quantum；
 - 默认 priority 固定为代码内 `RtPriority::MIN`；selector 只影响 fresh construction。
@@ -104,13 +114,14 @@ fixed bucket 可以 lazy materialize `VecDeque`，其首次 `push_back()` 或扩
 - highest-bucket FIFO pick、mixed FIFO/RR ordering、strict higher-priority preempt、arrival head requeue 与 Tick tail requeue focused KUnit 或等价可审查 source proof；
 - `Realtime > Idle` 的集中 precedence 与 Idle 只在 RT queue 为空时选择的 focused KUnit 或等价 source proof；
 - RR budget decrement/refill、FIFO no-budget 和 peer/no-peer decision focused KUnit；
+- delayed Tick consumption：RR expiry 后在 pending full pick 前再经过 timer tick，requeue 不 panic 且保留新 quantum 的当前 remainder；
 - RT/RR 与 RT/FIFO 两个 selector 都通过 repository-owned kernel build；
-- source audit 确认 pending snapshot 不写回 `RtEntity`，queue node 不复制 priority，production tree 无 `SchedClassKind::RoundRobin`、`new_normal()`、legacy queue owner、published-task policy/priority/class setter 或 direct entity mutation bridge；
+- source audit 确认 pending snapshot 不写回 `RtEntity`，queue node 不复制 priority，`SchedEntity`/RT payload 不提供 published-state `Clone`，production tree 无 `SchedClassKind::RoundRobin`、`new_normal()`、public `new_realtime()`、RT runtime type re-export、legacy queue owner、published-task policy/priority/class setter 或 class owner 外可构造的 direct entity mutation bridge；
 - `git diff --check`、`mdbook build docs`、`just build`；KUnit runtime 通过 repository QEMU entrypoint 执行并在 transaction 记录命令与结果。
 
 ### 独立 Review Gate
 
-实现 worker 完成后，必须由未参与写入的 reviewer 按 Anemone review 等级检查完整 checkpoint diff。pass 要求没有未关闭的 Apollyon / Keter / Euclid，且 reviewer 明确确认：单一 RT state truth、identity/dispatch/constructor 原子切换、priority-first placement、Tick + RunnableArrival precedence、`Realtime > Idle` 与 idle fallback、full quantum 配置来源、noirq allocation 注释边界、无 wait/pending owner 越界、`new_realtime()` 只服务 fresh entity、无 published-task setter / direct mutation / test-only bridge。finding 修复仍受同一 write set 约束；需要新 owner surface 时先停止并上报。
+实现 worker 完成后，必须由未参与写入的 reviewer 按 Anemone review 等级检查完整 checkpoint diff。pass 要求没有未关闭的 Apollyon / Keter / Euclid，且 reviewer 明确确认：RT types/state/quantum/算法只由 `rt.rs` 拥有，`SchedEntity` public facade constructors 只由 `entity.rs` 拥有，custom RT fresh construction 与 RT runtime types 不离开 `rt.rs`，`entity.rs` / `mod.rs` 只暴露窄 wiring，单一 RT state truth、无 published-state `Clone`、identity/dispatch/constructor 原子切换、priority-first placement、Tick + RunnableArrival precedence、`Realtime > Idle` 与 idle fallback、full quantum 配置来源、noirq allocation 注释边界、无 wait/pending owner 越界、无 published-task setter / class-owner 外 whole-entity mutation / test-only bridge。finding 修复仍受同一 write set 约束；需要新 owner surface 时先停止并上报。
 
 ### 停止条件
 

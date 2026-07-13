@@ -1,7 +1,7 @@
 # Sched RT Class 不变量需求
 
 **状态：** Canonical
-**最后更新：** 2026-07-12
+**最后更新：** 2026-07-13
 **父 RFC：** [RFC-20260711-sched-rt-class](./index.md)
 
 ## 闭合条件
@@ -37,6 +37,7 @@
 - `Task::cpuid()` 继续是 owner CPU 真相源。
 - `Processor::pending_resched` 继续是面向下一次 owner-CPU full pick 的 scheduler-core 合并 latch；successful pick 确认此前 slot，no-pick 路径保留或由 destructive-take caller 恢复。
 - `SchedClassKind` 是从 class payload 派生的 immutable class identity，供 `RunQueue` 执行 dispatch 与集中 precedence；它不是独立可变的 policy 真相源。
+- `SchedEntity::{new_default,new_idle}` 的公开构造 facade 位于 `entity.rs`；custom RT fresh construction、RT policy、quantum 和 payload factory 由 `rt.rs` 单独拥有，RT runtime types 不从共享 `mod.rs` 公开 re-export。
 
 ### RT Entity
 
@@ -63,16 +64,19 @@ RtPriority::WIDTH = 99
 - priority comparison 使用领域语义“数值越大越高”，不得把 Linux 内部反向 `prio` 编码泄漏进 class。
 - `RtPolicy::Fifo` 不携带 budget。
 - `RtPolicy::RoundRobin` 直接携带 `remaining_ticks`，不得把 remaining 拆成 sibling field。
+- fresh policy 通过对称的 `RtPolicy::fifo()` / `RtPolicy::round_robin()` 入口构造。
 
 ## Fresh Construction
 
 - `new_default()` 是所有非 idle production task 的唯一默认构造入口。
-- `new_realtime(...)` 只允许构造 caller-owned、尚未发布且尚未入队的 fresh entity。
+- custom priority/policy 的 fresh RT entity 只允许由 `rt.rs` 的 class/test-private helper 构造，不形成共享 `SchedEntity::new_realtime(...)` surface。
 - 不保留与 `new_default()` 重叠的 `new_normal()`。
 - `new_idle()` 只创建 Idle entity。
 - RT/FIFO 或 RT/RR default build 中，`new_default()` 根据 selector 创建 fresh RT entity，并使用 `RtPriority::MIN`。
 - fresh RR entity 的 `remaining_ticks` 必须等于 full quantum。
 - clone 不复制 parent 的 on-runq、policy runtime state 或 RR remaining；它调用 `new_default()` 获得 fresh entity。
+- `SchedEntity` 及其 class payload 不实现 `Clone`；published entity 不能通过复制形状伪装成 fresh entity。
+- `Task` 不向普通 crate caller 暴露可用的完整 `&mut SchedEntity`。entity lock bridge 必须消费不可由 scheduler-class owner 外构造的 capability；scheduler core 只使用只读 class/membership observation。
 
 任何 published-task class/policy/priority 修改都超出本 RFC。未来设计必须以 owner-CPU transaction 同时处理旧 queue removal、entity replacement、new queue placement、current state 与 preempt decision。
 
@@ -156,6 +160,8 @@ RR tick transaction：
 1. `remaining_ticks > 1` 时减一并返回 `TickAction::None`。
 2. `remaining_ticks == 1` 时补满。
 3. 同 priority bucket 有 peer 时返回 `RequestResched`；无 peer 时返回 `None` 并继续运行。
+
+Tick pending 是 scheduler-core 合并 latch，不是“RR budget 当前仍为 full”的证明。若 full pick 被延迟，后续 timer tick 可以在 pending 未消费时继续递减 refill 后的新 quantum；preempted-current transaction 必须保留届时仍位于合法范围内的 current remainder。
 
 低 priority peer 不触发 rotation。FIFO tick 永远返回 `None`，且不能通过伪造 RR budget 复用该分支。
 

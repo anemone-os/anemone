@@ -2,17 +2,18 @@
 
 use crate::prelude::*;
 
-use self::{idle::Idle, rr::RoundRobin};
+use self::{idle::Idle, rt::Realtime};
 
 // EEVDF remains archived as `eevdf.rs`, but is not part of the production
 // scheduler class graph while the RFC is closed/deferred.
 // pub mod eevdf;
 pub mod idle;
-pub mod rr;
+mod rt;
 
 mod entity;
 mod runqueue;
 
+pub(crate) use entity::SchedEntityMutToken;
 pub use entity::{SchedClassKind, SchedEntity};
 pub use runqueue::RunQueue;
 
@@ -22,7 +23,7 @@ pub use runqueue::RunQueue;
 /// no ABI meaning and must not be translated to or from Linux `SCHED_*` policy
 /// values. Syscall policy translation belongs at the ABI boundary.
 const CLASS_PRECEDENCE: [SchedClassKind; 2] =
-    [<RoundRobin as Scheduler>::KIND, <Idle as Scheduler>::KIND];
+    [<Realtime as Scheduler>::KIND, <Idle as Scheduler>::KIND];
 
 impl SchedClassKind {
     pub(super) fn in_precedence_order() -> [Self; CLASS_PRECEDENCE.len()] {

@@ -2,7 +2,7 @@ use crate::{
     prelude::*,
     sched::{
         AtomicNice, Nice,
-        class::{SchedClassKind, SchedEntity},
+        class::{SchedClassKind, SchedEntity, SchedEntityMutToken},
     },
 };
 
@@ -28,11 +28,27 @@ impl Task {
         self.nice.store(nice);
     }
 
-    /// Run a closure with a mutable reference to the scheduling entity of this
-    /// task.
-    pub fn with_sched_entity_mut<F: FnOnce(&mut SchedEntity) -> R, R>(&self, f: F) -> R {
+    /// Run a scheduler-class transaction under this task's entity lock.
+    ///
+    /// The token is constructible only inside the scheduler-class owner. In
+    /// particular, ordinary crate callers cannot use this lock bridge to
+    /// replace the class, policy, priority, or run-queue membership of a
+    /// published task.
+    pub(crate) fn with_sched_entity_mut<F: FnOnce(&mut SchedEntity) -> R, R>(
+        &self,
+        _token: SchedEntityMutToken,
+        f: F,
+    ) -> R {
         let mut guard = self.sched_entity.lock_irqsave();
         f(&mut guard)
+    }
+
+    /// Return an owner-CPU observation of physical run-queue membership.
+    ///
+    /// This snapshot is only for scheduler-core placement checks. Membership
+    /// transitions remain owned by `RunQueue` transactions.
+    pub(crate) fn sched_on_runq(&self) -> bool {
+        self.sched_entity.lock_irqsave().on_runq()
     }
 
     /// Return an observation-only scheduler class snapshot.

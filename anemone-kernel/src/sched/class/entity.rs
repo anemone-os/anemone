@@ -1,23 +1,42 @@
-#[derive(Debug, Clone)]
+use super::rt::RtEntity;
+
+#[derive(Debug)]
 pub struct SchedEntity {
     pub(super) on_runq: bool,
     pub(super) class: SchedClassPrv,
 }
 
+/// Capability for scheduler-class code that must mutate entity storage.
+///
+/// The type is visible to the task lock owner, but only scheduler-class
+/// modules can construct it. This keeps ordinary crate callers from replacing
+/// a published entity while still letting class transactions update membership
+/// and class-owned accounting under the entity lock.
+pub(crate) struct SchedEntityMutToken(());
+
+impl SchedEntityMutToken {
+    pub(super) const fn new() -> Self {
+        Self(())
+    }
+}
+
 impl SchedEntity {
-    /// Create a new scheduling entity with the given scheduling class.
-    fn new(class: SchedClassPrv) -> Self {
+    pub(super) fn new(class: SchedClassPrv) -> Self {
         Self {
             on_runq: false,
             class,
         }
     }
 
-    /// Create a fresh entity for the current default normal scheduler.
-    pub fn new_normal() -> Self {
-        Self::new(SchedClassPrv::RoundRobin(()))
+    /// Construct a fresh non-idle entity using the compile-time RT selector.
+    ///
+    /// The RT module owns policy selection and payload validation; this method
+    /// is only the public `SchedEntity` facade that wraps that opaque payload.
+    pub fn new_default() -> Self {
+        Self::new(SchedClassPrv::Realtime(RtEntity::new_default()))
     }
 
+    /// Construct the special idle entity.
     pub fn new_idle() -> Self {
         Self::new(SchedClassPrv::Idle(()))
     }
@@ -33,17 +52,18 @@ impl SchedEntity {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) enum SchedClassPrv {
-    // TODO: time slice.
-    RoundRobin(()),
+    // The payload's policy and accounting invariants belong to its class
+    // module; this enum only stores the opaque class-owned value.
+    Realtime(RtEntity),
     Idle(()),
 }
 
 impl SchedClassPrv {
     const fn kind(&self) -> SchedClassKind {
         match self {
-            Self::RoundRobin(()) => SchedClassKind::RoundRobin,
+            Self::Realtime(_) => SchedClassKind::Realtime,
             Self::Idle(()) => SchedClassKind::Idle,
         }
     }
@@ -51,6 +71,6 @@ impl SchedClassPrv {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchedClassKind {
-    RoundRobin,
+    Realtime,
     Idle,
 }

@@ -173,7 +173,7 @@ pub fn local_enqueue_new_task(task: Arc<Task>) {
                 return;
             }
 
-            if !task.with_sched_entity_mut(|se| se.on_runq()) {
+            if !task.sched_on_runq() {
                 proc.runq.enqueue_new(task.clone());
                 proc.request_runnable_arrival_if_needed(&task);
             } else {
@@ -220,7 +220,7 @@ pub fn local_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult
             return result;
         }
 
-        if task.with_sched_entity_mut(|se| se.on_runq()) {
+        if task.sched_on_runq() {
             kdebugln!("wake_enqueue: task={} already queued", task.tid());
             return WakeEnqueueResult::AlreadyQueued;
         }
@@ -253,7 +253,7 @@ where
                 "only the current running task can be requeued through this path"
             );
             assert!(
-                !task.with_sched_entity_mut(|se| se.on_runq()),
+                !task.sched_on_runq(),
                 "current running task should not already be on run queue"
             );
             f(&mut proc.runq, task, Instant::now());
@@ -301,7 +301,7 @@ where
                 "only the current running task can be put through this path"
             );
             assert!(
-                !task.with_sched_entity_mut(|se| se.on_runq()),
+                !task.sched_on_runq(),
                 "current running task should not already be on run queue"
             );
             f(&mut proc.runq, task, Instant::now());
@@ -466,7 +466,7 @@ pub mod init_routines {
         with_intr_disabled(|| {
             PROCESSOR.with_mut(|proc| {
                 assert!(
-                    !task.with_sched_entity_mut(|se| se.on_runq()),
+                    !task.sched_on_runq(),
                     "current running task should not already be on run queue"
                 );
                 proc.runq.enqueue_new(task);

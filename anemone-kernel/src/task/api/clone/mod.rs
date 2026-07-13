@@ -243,7 +243,7 @@ pub fn kernel_clone(
                 // new thread group
                 None
             },
-            SchedEntity::new_normal(),
+            SchedEntity::new_default(),
             TaskFlags::empty(),
             None,
         )

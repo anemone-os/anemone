@@ -2,11 +2,11 @@
 
 **状态：** Accepted for Implementation
 **负责人：** doruche, Codex
-**最后更新：** 2026-07-12
+**最后更新：** 2026-07-13
 **领域：** scheduler / realtime / FIFO / RR / scheduler class
 **事务日志：** [2026-07-12-sched-rt-class](../../devlog/transactions/2026-07-12-sched-rt-class.md)
 **开放问题：** 见 [Tracking Issues](./tracking-issues.md)
-**下一步：** 按事务日志执行 Checkpoint 1 的 RT class 原子切换；前置 Scheduler-Core Gate 已完成，后续以独立 review gate 和验证证据为准。
+**下一步：** Checkpoint 1 已关闭；按事务日志进入 Checkpoint 2 的 RT/RR 与 RT/FIFO 用户态 lifecycle smoke，新增 harness/write set 前必须先 review。
 
 ## 摘要
 
@@ -41,7 +41,7 @@
 - 固定跨 class precedence 为 `Realtime > Idle`。
 - 实现严格高 priority arrival preemption、同 priority 不抢占、FIFO no-timeslice 和 RR quantum rotation。
 - 复用 `Scheduler` trait 的 method-first class transaction，不新增 catch-all event 或调度 reason bus。
-- 增加 `SchedEntity::new_realtime(...)` 与 `SchedEntity::new_default()`；所有非 idle production 创建路径统一使用 `new_default()`。
+- 增加 `SchedEntity::new_default()`；所有非 idle production 创建路径统一使用该 facade，custom priority/policy 的 fresh construction 留在 RT class owner 内。
 - 通过单一 Kconfig selector 选择 `rt_fifo` 或 `rt_rr`；默认值沿用当前 legacy RoundRobin 行为。
 - 默认 RT 构造使用代码内固定的 `RtPriority::MIN`，不增加 default RT priority Kconfig。
 - RR timeslice 以 Kconfig 时间目标表示，再根据 `SYSTEM_HZ` 换算为 tick budget。
@@ -97,11 +97,10 @@ enum RtPolicy {
 
 ### Fresh Constructor 与编译期 Default
 
-`SchedEntity` 对本 RFC 暴露三个语义构造入口：
+`SchedEntity` 对共享调用者只暴露两个语义构造入口：
 
 ```text
 new_default()      -> 根据 Kconfig 创建 fresh RT/FIFO 或 RT/RR
-new_realtime(...) -> 创建显式 typed priority / policy 的 fresh RT entity
 new_idle()         -> 创建 idle entity
 ```
 
@@ -115,7 +114,9 @@ sched_default_policy = "rt_rr" # rt_rr | rt_fifo
 
 不得用多个互斥 boolean 表达 selector。选择 RT/FIFO 或 RT/RR 时，所有非 idle task 都以 `RtPriority::MIN`，即 priority 1，创建 fresh RT entity；该值没有 ABI default 含义，也不进入 Kconfig。
 
-`new_realtime()` 只构造未发布的 fresh entity，不是 published-task mutation API。未来运行期 policy change 必须另开 RFC，并由 owner CPU 同时修改 class payload、queue membership 与 preempt decision。
+显式 typed priority / policy 的 fresh RT entity 只由 `rt.rs` 的 class/test-private helper 构造；共享 `SchedEntity` facade 不公开 `new_realtime()`，也不 re-export RT runtime policy representation。未来 production custom construction 或运行期 policy change 必须另开 RFC；后者必须由 owner CPU 同时修改 class payload、queue membership 与 preempt decision。
+
+`SchedEntity::{new_default,new_idle}` 的公开 facade constructors 位于共享 `entity.rs`；`rt.rs` 提供窄的 RT payload factory、custom fresh helper、policy/quantum 校验与 class 算法。`SchedEntity` 和其 class payload 不提供 `Clone`，Task 的 entity lock 也不向 scheduler-class owner 外提供可构造的 whole-entity mutation capability，避免把 published runtime state 复制或替换成另一个 entity。
 
 clone 在本 RFC 中仍创建 fresh default entity。RT/RR 默认构建下，child 获得完整的新 quantum，而不是复制 parent 的剩余 budget。
 
