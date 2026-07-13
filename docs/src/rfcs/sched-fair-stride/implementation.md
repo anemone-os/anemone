@@ -1,6 +1,6 @@
 # Sched Fair / Stride 迁移实施计划
 
-**状态：** Active；阶段 0 已关闭，Checkpoint 1 待启动
+**状态：** Active；Checkpoint 1 已关闭，Checkpoint 2 待启动
 **最后更新：** 2026-07-13
 **父 RFC：** [RFC-20260713-sched-fair-stride](./index.md)
 **事务日志：** [2026-07-13-sched-fair-stride](../../devlog/transactions/2026-07-13-sched-fair-stride.md)
@@ -106,7 +106,7 @@
 - `SchedClassPrv` 增加 opaque `Fair(FairEntity)`；`SchedClassKind` 增加稳定 `Fair`。
 - `RunQueue` 增加 `fair: Fair` 和所有 exhaustive method-first dispatch。
 - centralized precedence 扩展为 `Realtime > Fair > Idle`。
-- 删除 `rt.rs` 中只断言“Realtime 是 Idle 上方唯一 class”的无意义 KUnit，不迁移等价的 exact-array 测试。`class/mod.rs` 继续是 precedence 唯一代码真相，实际跨 class pick/arrival 行为由本 checkpoint 的集成 KUnit 覆盖。
+- 删除 `rt.rs` 中只断言“Realtime 是 Idle 上方唯一 class”的无意义 KUnit，不迁移等价的 exact-array 测试。为避免跨 class 集成 KUnit 依赖当前全局 default selector，RT owner 同时提供仅在 `cfg(kunit)` 下可见的显式 fresh RT entity factory；它固定构造测试所需的 RT payload，不解释 `SchedDefaultPolicy`，也不进入 production constructor surface。`class/mod.rs` 继续是 precedence 唯一代码真相，实际跨 class pick/arrival 行为由本 checkpoint 的集成 KUnit 覆盖。
 - 实现 fixed-tick pass arithmetic、heap order、floor、yield、preempt、handoff、block、exit、pick、set-next 和 same-Fair arrival semantics。
 - production `new_default()` 和 Kconfig 仍使用 RT/RR；Fair task 只由 class-local KUnit 的 fresh helper 构造。
 - 不创建 `SchedClassKind::Stride`、backend enum、runtime wrapper、heap index 或 Fair selector。
@@ -118,7 +118,7 @@
 - `anemone-kernel/src/sched/class/mod.rs`
 - `anemone-kernel/src/sched/class/entity.rs`
 - `anemone-kernel/src/sched/class/runqueue.rs`
-- `anemone-kernel/src/sched/class/rt.rs`，仅删除错误归属的全局 precedence KUnit；不修改 RT queue/policy/runtime semantics
+- `anemone-kernel/src/sched/class/rt.rs`，仅删除错误归属的全局 precedence KUnit，并增加 `cfg(kunit)` 的显式 fresh RT entity factory 供跨 class 集成测试使用；不修改 RT queue/policy/runtime semantics，不让该 factory 匹配全局 default selector
 - canonical RFC 与 transaction devlog 的本 checkpoint write-back
 
 明确不修改：
@@ -157,6 +157,7 @@
 
 - production class graph 无 `SchedClassKind::Stride` / backend tag。
 - `FairEntity` 只有一个 alias；production graph 无 EEVDF payload。
+- 跨 class KUnit 的 RT task 由 RT owner 的 test-only explicit factory 构造，不调用 `SchedEntity::new_default()`，因此不依赖当前或 Checkpoint 2 之后的 global default selector。
 - `Task::nice()` 之外无长期 nice/weight truth。
 - queued entity pass 只有 snapshot entry，queued lifetime无 pass mutation。
 - `enqueue_new()` 是唯一 `None -> Some(pass)` 转换；production graph 无 `initialized` 双状态或 `Some -> None`。

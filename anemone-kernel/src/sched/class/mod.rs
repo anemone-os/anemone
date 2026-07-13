@@ -2,11 +2,12 @@
 
 use crate::prelude::*;
 
-use self::{idle::Idle, rt::Realtime};
+use self::{fair::Fair, idle::Idle, rt::Realtime};
 
 // EEVDF remains archived as `eevdf.rs`, but is not part of the production
 // scheduler class graph while the RFC is closed/deferred.
 // pub mod eevdf;
+mod fair;
 pub mod idle;
 mod rt;
 
@@ -22,15 +23,20 @@ pub use runqueue::RunQueue;
 /// This is the single source of truth for cross-class selection. The order has
 /// no ABI meaning and must not be translated to or from Linux `SCHED_*` policy
 /// values. Syscall policy translation belongs at the ABI boundary.
-const CLASS_PRECEDENCE: [SchedClassKind; 2] =
-    [<Realtime as Scheduler>::KIND, <Idle as Scheduler>::KIND];
+const CLASS_PRECEDENCE: [SchedClassKind; 3] = [
+    <Realtime as Scheduler>::KIND,
+    <Fair as Scheduler>::KIND,
+    <Idle as Scheduler>::KIND,
+];
 
 impl SchedClassKind {
     pub(super) fn in_precedence_order() -> [Self; CLASS_PRECEDENCE.len()] {
-        assert!(
-            CLASS_PRECEDENCE[0] != CLASS_PRECEDENCE[1],
-            "scheduler class precedence contains duplicate classes"
-        );
+        for (index, kind) in CLASS_PRECEDENCE.into_iter().enumerate() {
+            assert!(
+                !CLASS_PRECEDENCE[..index].contains(&kind),
+                "scheduler class precedence contains duplicate classes"
+            );
+        }
         CLASS_PRECEDENCE
     }
 

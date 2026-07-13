@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / fair class / stride / nice / runqueue
 **Canonical Plan:** [RFC-20260713-sched-fair-stride](../../rfcs/sched-fair-stride/index.md), [不变量需求](../../rfcs/sched-fair-stride/invariants.md), [迁移实施计划](../../rfcs/sched-fair-stride/implementation.md)
-**Current Phase:** Checkpoint 1 待启动
+**Current Phase:** Checkpoint 2 待启动
 
 ## Scope
 
@@ -56,9 +56,39 @@
 **Validation:** `just app build --arch riscv64 fair-test`、`just app build --arch loongarch64 fair-test` 与 `just fmt fair-test --check` 通过。target 产物分别识别为 RISC-V 与 LoongArch 静态 ELF；最终 exported artifact 与 LoongArch source artifact hash 一致。rootfs/source/private-link audit 通过。修复 `SUMMARY.md` transaction 同级缩进后，`git diff --check` 与 `mdbook build docs` 复跑通过；新建 transaction/app 文件的 `git diff --no-index --check` 无 whitespace 报告。
 **Next:** 阶段 0 退出条件关闭；Checkpoint 1 必须按 canonical write set 实现非默认 graph 中的 Fair identity、Stride state、heap/lifecycle 与 focused KUnit，并在提交前完成独立 review gate。
 
+### 2026-07-13 - Checkpoint 1 只读 Preflight 与 Worker 边界
+
+**Phase:** Checkpoint 1 - Fair Identity、Stride State 与 Heap Algorithm。
+**Change:** 尚无 scheduler class 代码变化；总控与独立只读 reviewer 已按 canonical Checkpoint 1 合同复核 live class/core transaction surface，并将实现 worker 限定在 `fair/{mod,stride}.rs`、`class/{mod,entity,runqueue}.rs` 以及 `rt.rs` 的单个错误归属 precedence KUnit 删除。worker 不得修改 scheduler core、task、idle/EEVDF、Kconfig、architecture 或 ABI；若真实 owner boundary 需要扩张，必须停止并上报文件、理由、contract 与验证影响。
+**Audit:** `local_pick_next()` 仍是唯一 production pick/set-next caller，二者在同一 owner-CPU IRQ-off closure 内连续执行；Tick 先调用 class `task_tick()`，再写入合并 pending latch；yield requeue 后必经 full pick；`RunQueue` 的 class-local physical mutation与 `on_runq` 发布顺序符合完整 transaction 边界合同。两轮审计均结论为 NO STOP，未发现 Checkpoint 1 write-set 扩张需求。
+**Observability:** focused KUnit 必须分别覆盖 weight/arithmetic、heap/tie-break、floor 反例、tick/yield、current/lifecycle、fixed-set progress、transaction-boundary membership 与实际跨 class pick/arrival；当前 KUnit 不支持 unwind，非法输入与 snapshot mismatch 的常开断言继续由 source audit 关闭。
+**Feedback:** None；原目标、不变量、阶段顺序、write set、验证 floor 与停止条件均保持不变。accepted IRQ-off `BinaryHeap` allocation 风险继续由 register 跟踪，本 checkpoint 不宣称修复。
+**Validation:** 本条只记录实现前 preflight；build、focused KUnit runtime、format、docs 与独立 code review 尚未运行。
+**Next:** 在上述 write set 内实现 Checkpoint 1；任何 canonical 停止条件出现时立即停止，不用兼容层绕过。
+
+### 2026-07-13 - Checkpoint 1 Review Feedback：Cross-class KUnit RT Factory
+
+**Phase:** Checkpoint 1 - independent review correction。
+**Change:** 独立 review 发现 `runqueue.rs` 的跨 class KUnit 通过 `SchedEntity::new_default()` 构造所谓 RT task；该 helper 只在当前 `rt_rr` default 下成立，Checkpoint 2 切换到 `fair` 后会构造 Fair payload并使测试失败。批准在既有 `rt.rs` 文件 write set 内扩大 test-only action scope：由 RT owner 增加 `cfg(kunit)` explicit fresh RT entity factory，`runqueue` 测试改用该 factory；production constructor、selector、RT queue/policy/runtime 均不变。
+**Audit:** 该问题定级为 Keter，因为它把 global default selector重新耦合进 RT identity 测试，并会在后续 checkpoint 产生必然失败。它不是 canonical production 停止条件，不需要扩大文件集合或改变目标/不变量；canonical `implementation.md` 已先回写修正后的 worker action scope 与 source-audit gate。
+**Observability:** cross-class pick/arrival KUnit 将显式验证 RT payload，不再借当前默认配置偶然通过。
+**Feedback:** Checkpoint 1 的 `rt.rs` action scope 与 source audit 已更新；原阶段顺序、production write set、验证 floor、Fair/Stride 合同和停止条件保持不变。
+**Validation:** 修正尚未实现；完成后必须重跑 build、focused KUnit 与独立 review。
+**Next:** 只允许 worker 修改 `rt.rs` 的 test-only factory 与 `runqueue.rs` 的测试 helper，然后返回 review gate。
+
+### 2026-07-13 - Checkpoint 1 实现、验证与 Review Gate 收口
+
+**Phase:** Checkpoint 1 - Fair Identity、Stride State 与 Heap Algorithm。
+**Change:** 新增稳定 `fair` module 与当前唯一 `Fair = Stride` / `FairEntity = StrideEntity` alias；接入 opaque Fair payload、`Realtime > Fair > Idle` 集中 precedence 和 `RunQueue` 全生命周期 dispatch。Stride class 以 `Option<u128>` pass、反序 `(pass_snapshot, enqueue_seq)` `BinaryHeap`、Weak current、placement floor 和 checked sequence 实现 fresh/wake、tick、yield、preempt、handoff、block、exit、pick/set-next 与 same-Fair arrival。production `new_default()`、Kconfig 和 RT runtime 均保持 RT/RR；Fair 只由 class-local KUnit fresh helper 构造。
+**Audit:** source audit 确认 production graph 无 `SchedClassKind::Stride`、runtime backend tag、EEVDF payload、cached nice/weight、`initialized` 双状态或第二份 membership truth；`enqueue_new()` 是唯一 `None -> Some(pass)` 转换，queued pass只保留不可变排序 snapshot。floor 只在完整 lifecycle post-state 刷新，pick 不刷新；Tick transaction 当场且仅收费一次，preempt requeue不补记；yield 有 peer 时按单次 nice observation charge并至少抬到最小 peer pass。独立 review 初次发现 cross-class KUnit 依赖 global default selector 的 Keter；按上一条 canonical correction 改为 RT-owner test-only explicit factory 后复核 PASS，无未关闭 Apollyon、Keter 或 Euclid，也未命中 canonical STOP。
+**Observability:** 新增 13 项 Stride focused KUnit 与 3 项 RunQueue 集成 KUnit，覆盖 Linux weight / arithmetic、heap/tie-break、fresh/wake/floor、`0, 100` pick/set gap、preempt/handoff最终态、placed lifecycle、weak nice observation、equal/unequal progress、delayed Tick、yield handoff、current lifecycle、transaction-boundary membership和实际 cross-class pick/arrival。`BinaryHeap::push()` 处明确保留 IRQ-off allocation limitation 与独立移除 gate。
+**Feedback:** 仅扩大既有 `rt.rs` 的 test-only action scope并同步 `implementation.md` / `tracking-issues.md`；文件 write set、production owner boundary、目标、不变量、验证 floor 与停止条件未改变。
+**Validation:** `just build` 通过。`./scripts/run-user-test-rv64.sh etc/sdcard-rv.img build/stride-ckpt1-pretest-rerun.log` 重新生成 clean pretest rootfs、构建当前 rv64 kernel并运行 127 项 KUnit；16 项新增 scheduler 测试逐项 `ok`，最终打印 `All tests passed!`。KUnit 后已进入 init/user-test，总控通过 QEMU monitor 退出；随后只发生的 partial LTP 输出不作为本 checkpoint evidence，full LTP / Fair runtime 明确 Not Run。一次直接复用已被前序 KUnit 修改的 rootfs 因既有 openat fixture `AlreadyExists` 提前 panic，该次运行判为脏 guest 无效证据，不是 Stride failure。`git diff --check`、两个新增 Rust 文件的 `git diff --no-index --check` 与 `mdbook build docs` 通过；`just fmt kernel --check` 只报告 build flow 重新生成的 ignored `kconfig_defs.rs` / `platform_defs.rs` whitespace drift，未报告本 checkpoint 触碰文件，生成文件未手工修改或提交。
+**Next:** Checkpoint 1 退出条件关闭；Checkpoint 2 才能修改 global default selector、constructor facade、Kconfig default并运行三 selector build / Fair default pretest gate。
+
 ## Open Items
 
-- Checkpoint 1-3 尚未开始。
+- Checkpoint 1 已关闭；Checkpoint 2-3 尚未开始。
 - 用户侧 `fair-test` 与同 checkout RT/RR A/B runtime evidence 属于 Checkpoint 3，本阶段不运行。
 
 ## Closure

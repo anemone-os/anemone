@@ -122,6 +122,16 @@ impl RtEntity {
     }
 }
 
+/// Construct an explicit fresh RT payload for scheduler-class integration
+/// tests without coupling those tests to the global default-policy selector.
+#[cfg(feature = "kunit")]
+pub(super) fn new_test_entity() -> SchedEntity {
+    SchedEntity::new(SchedClassPrv::Realtime(RtEntity::new_fresh(
+        RtPriority::MIN,
+        RtPolicy::fifo(),
+    )))
+}
+
 impl SchedEntity {
     fn realtime(&self) -> &RtEntity {
         let SchedClassPrv::Realtime(entity) = &self.class else {
@@ -624,16 +634,6 @@ mod kunits {
             exhaust_quantum(&mut rt, &with_peer),
             TickAction::RequestResched
         );
-    }
-
-    #[kunit]
-    fn test_realtime_is_the_only_class_above_idle() {
-        assert_eq!(
-            SchedClassKind::in_precedence_order(),
-            [SchedClassKind::Realtime, SchedClassKind::Idle]
-        );
-        assert!(SchedClassKind::Realtime.outranks(SchedClassKind::Idle));
-        assert!(!SchedClassKind::Idle.outranks(SchedClassKind::Realtime));
     }
 
     #[kunit]

@@ -57,12 +57,16 @@ global compile-time selector 解释留在 RT module。
 
 **关闭依据：** implementation 已把 `rt.rs` 纳入 Checkpoint 1 的 test-only write set，直接删除该
 无意义 precedence KUnit 且不迁移等价 exact-array 测试；`class/mod.rs` 继续持有 centralized code truth，
-实际跨 class pick/arrival 行为由 Fair/RunQueue 集成 KUnit 验证；
+实际跨 class pick/arrival 行为由 Fair/RunQueue 集成 KUnit 验证。独立实现 review 进一步确认集成
+KUnit 不能用 `SchedEntity::new_default()` 偶然构造当前 RT default，否则 Checkpoint 2 切换到 `fair`
+后会重新耦合 global selector；因此 RT owner 提供仅在 `cfg(kunit)` 下可见的 explicit fresh RT entity
+factory，测试固定构造 RT payload，不进入 production constructor surface；
 Checkpoint 2 明确删除 `RtEntity::new_default()` 和 RT-local default assumption，把 selector dispatch
 及对应 constructor KUnit 移到 `entity.rs`。不借机修改 RT queue、policy 或 runtime semantics。
 
 **验证 gate：** source audit 确认 `rt.rs` 不再复制 global precedence 或匹配
-`SchedDefaultPolicy`，三种 selector build 与 owner-local KUnit 共同验证 facade。
+`SchedDefaultPolicy`；跨 class KUnit 的 RT helper 不调用 `SchedEntity::new_default()`；三种 selector build
+与 owner-local KUnit 共同验证 facade。
 
 ### KETER-STRIDE-003：`on_runq` 只能在完整 RunQueue transaction 边界一致
 

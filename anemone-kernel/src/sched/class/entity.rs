@@ -1,4 +1,4 @@
-use super::rt::RtEntity;
+use super::{fair::FairEntity, rt::RtEntity};
 
 #[derive(Debug)]
 pub struct SchedEntity {
@@ -57,6 +57,7 @@ pub(super) enum SchedClassPrv {
     // The payload's policy and accounting invariants belong to its class
     // module; this enum only stores the opaque class-owned value.
     Realtime(RtEntity),
+    Fair(FairEntity),
     Idle(()),
 }
 
@@ -64,6 +65,7 @@ impl SchedClassPrv {
     const fn kind(&self) -> SchedClassKind {
         match self {
             Self::Realtime(_) => SchedClassKind::Realtime,
+            Self::Fair(_) => SchedClassKind::Fair,
             Self::Idle(()) => SchedClassKind::Idle,
         }
     }
@@ -72,5 +74,6 @@ impl SchedClassPrv {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchedClassKind {
     Realtime,
+    Fair,
     Idle,
 }
