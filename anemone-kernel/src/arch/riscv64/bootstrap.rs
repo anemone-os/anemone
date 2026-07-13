@@ -279,12 +279,10 @@ fn register_basic_power_handlers() {
 extern "C" fn rusty_nun(hart_id: usize, fdt_pa: PhysAddr) -> ! {
     #[unsafe(link_section = ".data")]
     static mut BSP_ARRIVED: bool = false;
-    sbi_rt::legacy::console_putchar('R' as usize);
     unsafe {
         sstatus::set_sum();
         sstatus::set_fs(sstatus::FS::Off);
     }
-    sbi_rt::legacy::console_putchar('S' as usize);
     unsafe {
         if !BSP_ARRIVED {
             // bsp
@@ -452,6 +450,10 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
 
         let bsp_kinit = PublishGuard::register_root(guard, bsp_kinit);
         INIT_SYNC_COUNTER.sync_with_counter();
+        kdebugln!(
+            "bsp #{} synchronized with aps, switching to scheduler...",
+            bsp_id
+        );
 
         sched::init_routines::local_enqueue_first(bsp_kinit);
         switch_to_guarded(VirtAddr::new(scheduler as *const () as u64))
@@ -488,6 +490,10 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         set_boot_mono(false);
 
         INIT_SYNC_COUNTER.sync_with_counter();
+        kdebugln!(
+            "ap #{} synchronized with bsp, switching to scheduler...",
+            ap_id
+        );
         // now init task has been registered.
         let (ap_kinit, guard) = Task::new_kernel(
             "kinit-ap",

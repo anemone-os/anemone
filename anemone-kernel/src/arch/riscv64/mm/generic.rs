@@ -82,6 +82,12 @@ impl From<PteFlags> for RiscV64PteFlags {
         if flags.contains(PteFlags::GLOBAL) {
             result |= RiscV64PteFlags::GLOBAL;
         }
+        // The generic MM does not track A/D state. Pre-setting both bits on
+        // leaf PTEs avoids Svade page faults when hardware A/D updates are
+        // disabled, while keeping these reserved bits clear on branch PTEs.
+        if flags.is_leaf() {
+            result |= RiscV64PteFlags::ACCESSED | RiscV64PteFlags::DIRTY;
+        }
         // Ignore CACHED and STRONG bits.
 
         result
