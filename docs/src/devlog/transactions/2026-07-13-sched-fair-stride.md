@@ -1,10 +1,10 @@
 # 2026-07-13 - Sched Fair / Stride
 
-**Status:** Active
+**Status:** Completed
 **Owners:** doruche, Codex
 **Area:** scheduler / fair class / stride / nice / runqueue
 **Canonical Plan:** [RFC-20260713-sched-fair-stride](../../rfcs/sched-fair-stride/index.md), [不变量需求](../../rfcs/sched-fair-stride/invariants.md), [迁移实施计划](../../rfcs/sched-fair-stride/implementation.md)
-**Current Phase:** Checkpoint 3 待启动
+**Current Phase:** Completed；Checkpoint 3 runtime acceptance 已关闭
 
 ## Scope
 
@@ -108,9 +108,23 @@
 
 ## Open Items
 
-- Checkpoint 1-2 已关闭；Checkpoint 3 尚未开始。
-- 用户侧 `fair-test` 与同 checkout RT/RR A/B runtime evidence 属于 Checkpoint 3，本阶段不运行。
+- 无 RFC blocker。
+- 动态调度属性、第二个 Fair backend、actual-runtime accounting 与 noirq allocation-free ready queue 仍在本 RFC 非目标或既有 register 边界外；如需继续，另开 follow-up。
 
 ## Closure
 
-事务尚未收口。
+### 2026-07-14 - Checkpoint 3 用户验证与 RFC 收口
+
+**用户侧正确性证据：** Fair default 的 `build/user-test-rv64.log` 完整运行当前 `all` profile。启动时 127 项 KUnit 全部通过并打印 `All tests passed!`，default-constructor、13 项 Stride focused KUnit 与 3 项 RunQueue 集成 KUnit均为 `ok`。随后 `fair-test` 的 equal-progress、nice-direction、bounded-yield 与 sleep-wake-progress 四组 workload全部通过。
+
+**用户侧 LTP 证据：** 当前 validation case-set 的 glibc 侧汇总为 attempted 832、passed 475、failed 253、infra_failed 0、skipped 104；musl 侧汇总为 attempted 831、passed 457、failed 263、infra_failed 2、skipped 110。整体汇总为 attempted 1663、passed 932、failed 516、infra_failed 2、skipped 214，并正常打印 `all competition tests finished` 与关机结束标记。这里的“完整运行”表示 `all` profile覆盖的全部 registered group 已跑到末尾，不表示每个 LTP case 都通过，也不把 validation-only case exclusions写成 production contract。
+
+**性能裁定：** 用户报告 Fair 相比 RT/RR baseline 整体约慢 13–14%，并明确接受该结果、要求收口。该差距仍属于同一量级，没有命中“重复、稳定的多倍 whole-profile 退化”停止条件。事务只记录用户提供的比例与接受结论；RT/RR baseline 的绝对耗时、独立日志路径和更细 measurement interval未提供给 agent，因此不补造精确数字或宣称 agent复现了 A/B。
+
+**证据裁定：** 阶段 0 与 Checkpoint 1-2 已用双架构 `fair-test` build、三 selector build、非法 selector拒绝、focused KUnit、Fair default pretest、source audit和 review关闭算法、owner与配置合同；本次用户运行补齐真实 Fair default、yield、block/wake、process/thread lifecycle及长链路 LTP集成证据，不替代上述理论/KUnit proof。未发现 starvation、稳定 yield self-pick、pass/snapshot/current assertion、wake catch-up或 resched storm停止信号。
+
+**验证接线边界：** `fair-test` 临时调用和少量 LTP case exclusions仍是用户工作树中的 validation-only改动，agent未修改、恢复或提交这些文件；production kernel无临时 instrumentation或 probe。当前 IRQ-off `BinaryHeap` allocation风险继续由 `ANE-20260622-IRQ-OFF-HEAP-ALLOCATION` 跟踪，本 RFC不宣称修复。
+
+**结论：** Checkpoint 3关闭，transaction更新为 Completed，RFC第一版收口。Fair/Stride作为已验收 compile-time default；RT/RR与RT/FIFO selector build证据继续有效。动态调度属性、第二 Fair backend、actual-runtime accounting、跨 CPU fairness和 allocation-free ready queue均留给独立 follow-up。
+
+**Agent-run 收口验证：** Fair live config的最终 `just build`、`git diff --check`、`mdbook build docs` 与 default/alias/precedence/constructor source audit均通过。agent不重复运行 QEMU或LTP；运行时证据使用上述用户侧完整运行结果以及 Checkpoint 1-2 已记录的 pretest证据。build flow只更新 ignored generated definitions，未手工修改或提交它们。

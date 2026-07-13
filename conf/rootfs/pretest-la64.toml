@@ -23,9 +23,9 @@ installed_dir = "/sbin"
 name = "user-test"
 installed_dir = "/bin"
 
-[[apps]]
-name = "fair-test"
-installed_dir = "/bin"
+# [[apps]]
+# name = "fair-test"
+# installed_dir = "/bin"
 
 # [[apps]]
 # name = "float-test"

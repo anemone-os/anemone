@@ -1,12 +1,12 @@
 # RFC-20260713-sched-fair-stride
 
-**状态：** Accepted / Implementing
+**状态：** Closed
 **负责人：** doruche, Codex
-**最后更新：** 2026-07-13
+**最后更新：** 2026-07-14
 **领域：** scheduler / fair class / stride / nice / runqueue
 **事务日志：** [2026-07-13-sched-fair-stride](../../devlog/transactions/2026-07-13-sched-fair-stride.md)
 **开放问题：** None；已关闭问题与依据见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** Checkpoint 2 已关闭；按事务日志进入 Checkpoint 3 的 runtime acceptance 与最终收口 gate。
+**下一步：** 第一版已收口；动态调度属性、第二个 Fair backend、actual-runtime accounting或性能优化如需继续，另开 follow-up。
 
 ## 摘要
 
@@ -347,4 +347,8 @@ runtime 验证负责确认：
 
 ## 收口
 
-本节在实现完成后填写。RFC 已接受进入实现并建立 transaction devlog；阶段 0 与 Checkpoint 1-2 已按 canonical gate 关闭，Fair 已成为 repository compile-time default，三种 selector build、非法 selector拒绝和 Fair default pretest证据见事务日志。Checkpoint 3 的用户侧 runtime acceptance与最终收口尚未完成，不在本节提前写成 RFC 完成。
+第一版已经收口：稳定 `Fair` class、当前唯一 `Stride` backend、Linux nice weight、pass/heap/placement/yield/tick/lifecycle transaction、`Realtime > Fair > Idle` precedence与 compile-time default selector均已实现。三种 selector build、非法 selector拒绝、focused KUnit、Fair default pretest、source audit与 review均已通过。
+
+用户在 Fair default 下完整运行当前 `all` LTP profile；同一运行中的 127 项 KUnit和 `fair-test` 四组 workload全部通过，LTP整体汇总为 attempted 1663、passed 932、failed 516、infra_failed 2、skipped 214并正常运行到关机。该证据表示全部 registered group完成，不表示每个 LTP case均通过。用户报告 Fair 相比 RT/RR约慢 13–14%，并接受其仍属同一量级、没有稳定多倍退化，Checkpoint 3据此关闭；精确 A/B绝对耗时未提供给 agent，不在文档中补造。
+
+IRQ-off `BinaryHeap` allocation仍由既有 register issue跟踪。动态调度属性、第二 Fair backend、actual-runtime accounting、跨 CPU fairness与 allocation-free ready queue均不在本次收口内；完整阶段和证据边界见[事务日志](../../devlog/transactions/2026-07-13-sched-fair-stride.md)。

@@ -1,7 +1,7 @@
 # Sched Fair / Stride Tracking Issues
 
 **状态：** Closed
-**最后更新：** 2026-07-13
+**最后更新：** 2026-07-14
 **父 RFC：** [RFC-20260713-sched-fair-stride](./index.md)
 **事务日志：** [2026-07-13-sched-fair-stride](../../devlog/transactions/2026-07-13-sched-fair-stride.md)
 

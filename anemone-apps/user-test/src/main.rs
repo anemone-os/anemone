@@ -58,6 +58,11 @@ fn run_local_tests() {
     //     &[],
     // );
     // println!("user-test: pthread create stress test finished.");
+
+    // 8. fair-test
+    println!("user-test: running fair test...");
+    local_run_cmd("/bin/fair-test", &["fair-test"], &[]);
+    println!("user-test: fair test finished.");
 }
 
 /// competition tests.
