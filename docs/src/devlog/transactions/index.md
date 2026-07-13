@@ -6,6 +6,7 @@
 
 ## Active
 
+- [Sched Fair / Stride](./2026-07-13-sched-fair-stride.md)
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
 - [OOM Killer](./2026-06-15-oom-killer.md)

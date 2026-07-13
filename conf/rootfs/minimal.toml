@@ -33,6 +33,10 @@ name = "user-test"
 installed_dir = "/bin"
 
 [[apps]]
+name = "fair-test"
+installed_dir = "/bin"
+
+[[apps]]
 name = "init"
 installed_dir = "/sbin"
 

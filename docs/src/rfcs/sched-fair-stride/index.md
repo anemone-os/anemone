@@ -1,12 +1,12 @@
 # RFC-20260713-sched-fair-stride
 
-**状态：** Draft，已提升为公开 RFC 草案
+**状态：** Accepted / Implementing
 **负责人：** doruche, Codex
 **最后更新：** 2026-07-13
 **领域：** scheduler / fair class / stride / nice / runqueue
-**事务日志：** None；RFC 接受进入实现后创建。
+**事务日志：** [2026-07-13-sched-fair-stride](../../devlog/transactions/2026-07-13-sched-fair-stride.md)
 **开放问题：** None；已关闭问题与依据见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** 完成公开 RFC review；接受进入实现后建立 transaction devlog，再执行迁移实施计划的阶段 0。
+**下一步：** 阶段 0 已关闭；按事务日志进入 Checkpoint 1 的 Fair identity、Stride state 与 heap algorithm gate。
 
 ## 摘要
 
@@ -347,4 +347,4 @@ runtime 验证负责确认：
 
 ## 收口
 
-本节在实现完成后填写。当前仅完成公开 RFC 提升，尚未开始实现，也未创建 transaction devlog；实现期事实必须在 RFC 接受后写入新建 transaction，不得回写为本次 promotion 已完成事项。
+本节在实现完成后填写。RFC 已接受进入实现并建立 transaction devlog；阶段 0 已按 canonical gate 关闭，执行与验证事实见事务日志。Checkpoint 1-3 尚未完成，不在本节提前写成实现收口。

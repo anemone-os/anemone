@@ -1,6 +1,6 @@
 # Sched Fair / Stride 不变量需求
 
-**状态：** Draft
+**状态：** Accepted
 **最后更新：** 2026-07-13
 **父 RFC：** [RFC-20260713-sched-fair-stride](./index.md)
 

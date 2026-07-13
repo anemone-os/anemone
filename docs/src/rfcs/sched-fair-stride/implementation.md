@@ -1,9 +1,9 @@
 # Sched Fair / Stride 迁移实施计划
 
-**状态：** Draft；公开 RFC 已提升，尚未开始实现
+**状态：** Active；阶段 0 已关闭，Checkpoint 1 待启动
 **最后更新：** 2026-07-13
 **父 RFC：** [RFC-20260713-sched-fair-stride](./index.md)
-**事务日志：** None；RFC 接受进入实现时创建。
+**事务日志：** [2026-07-13-sched-fair-stride](../../devlog/transactions/2026-07-13-sched-fair-stride.md)
 
 ## 实施原则
 

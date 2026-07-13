@@ -3,7 +3,7 @@
 **状态：** Closed
 **最后更新：** 2026-07-13
 **父 RFC：** [RFC-20260713-sched-fair-stride](./index.md)
-**事务日志：** None；RFC 接受进入实现时创建。
+**事务日志：** [2026-07-13-sched-fair-stride](../../devlog/transactions/2026-07-13-sched-fair-stride.md)
 
 本文只跟踪 confirmed design issue。accepted contract 必须修回 [RFC 入口](./index.md)、
 [不变量需求](./invariants.md) 或 [迁移实施计划](./implementation.md)；本文不替代 canonical
