@@ -85,6 +85,10 @@ static BOOTSTRAP_PGDIR: RiscV64PgDir = {
     unsafe { core::mem::transmute(raw_ptes) }
 };
 
+/// This static keeps the entry point referenced.
+#[used]
+static __NUN_KEEPER: unsafe extern "C" fn() -> ! = __nun;
+
 /// Nun. The primordial watery abyss in Egyptian myth, where all things were
 /// born.
 ///
@@ -95,7 +99,6 @@ static BOOTSTRAP_PGDIR: RiscV64PgDir = {
 #[unsafe(link_section = ".text.bootstrap")]
 pub unsafe extern "C" fn __nun() -> ! {
     naked_asm!(
-
         // We don't want to use gp-relative addressing, so we clear gp
         // to ensure gp-relative accesses will fault.
         "mv  gp, zero",
@@ -139,8 +142,25 @@ pub unsafe extern "C" fn __nun() -> ! {
         "slli    t1, t1, 60",
         "srli    t0, t0, 12",
         "or      t0, t0, t1",
+
+
+        "
+        li a7, 1
+        li a0, 65   # 'A'
+        ecall
+        ",
+
         "csrw    satp, t0",
         "sfence.vma",
+
+
+        "
+        li a7, 1
+        li a0, 66   # 'B'
+        ecall
+        1:
+        j 1b
+        ",
 
         // Clear used temporaries.
         "li  t0, 0",
@@ -241,6 +261,7 @@ fn register_basic_power_handlers() {
 /// The 'fdt_pa' argument is only valid for BSP, and APs should ignore it.
 #[unsafe(no_mangle)]
 extern "C" fn rusty_nun(hart_id: usize, fdt_pa: PhysAddr) -> ! {
+    sbi_rt::console_write_byte('A' as u8);
     #[unsafe(link_section = ".bss.nonzero_init")]
     static mut BSP_ARRIVED: bool = false;
     unsafe {

@@ -1,0 +1,67 @@
+[build]
+name = "qemu-virt-rv64"
+abbrs = ["rv", "rv64", "riscv", "riscv64"]
+arch = "riscv64"
+exec_env = "sbi"
+
+[constants]
+phys_ram_start = 0x40000000
+max_phys_ram_size = 0x80000000      # 2GB
+kernel_la_base = 0x80200000
+kernel_va_base = 0xffffffff80200000
+max_cpus = 16
+frame_section_shift_mb = 7
+
+
+[qemu]
+qemu = "qemu-system-riscv64"
+machine = "virt"
+cpu = "rv64"
+smp = 1
+memory = "1G"
+bios = "default"
+args = [
+    "-nographic",
+    "-serial",
+    "mon:stdio",
+    "-rtc",
+    "base=utc",
+    "-device",
+    "virtio-net-device,netdev=net",
+    "-netdev",
+    "user,id=net",
+    "-accel",
+    "tcg,thread=multi",
+
+    # "-drive",
+    # "file=sdcard-rv.img,format=raw,if=none,id=x0",
+    # "-device",
+    # "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",                 # vdb
+    # "-no-reboot",
+    # "-drive",
+    # "file=build/rootfs/minimal-rv/rootfs.img,format=raw,if=none,id=x1",
+    # "-device",
+    # "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",                 # vda
+
+    # pci
+    # "-drive",
+    # "file=build/rootfs/minimal-rv/rootfs.img,format=raw,if=none,id=x2",
+    # "-device",
+    # "virtio-blk-pci-transitional,drive=x2",
+
+    # "-device",
+    # "pcie-root-port,id=pcie.1,bus=pcie.0",
+
+    # "-drive",
+    # "file=sdcard-rv.img,format=raw,if=none,id=x0",
+    # "-device",
+    # "virtio-blk-pci-transitional,drive=x0,bus=pcie.1",
+]
+
+[rootfs]
+fstype = "ext4"
+source = { type = "block", path = "vda" }
+
+[dtb]
+path = "arch/riscv64/generated.dtb"
+type = "qemu"
