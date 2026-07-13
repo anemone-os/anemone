@@ -2,6 +2,55 @@ use core::fmt::Debug;
 
 use crate::{fs::inode::Inode, prelude::*, utils::any_opaque::AnyOpaque};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FsMagic(u64);
+
+impl FsMagic {
+    pub(crate) const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub(crate) const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FsStat {
+    pub magic: FsMagic,
+    pub block_size: u64,
+    pub fragment_size: u64,
+    pub blocks: u64,
+    pub blocks_free: u64,
+    pub blocks_available: u64,
+    pub files: u64,
+    pub files_free: u64,
+    pub name_max: u64,
+}
+
+impl FsStat {
+    pub(crate) fn pseudo(magic: FsMagic) -> Self {
+        const PSEUDO_BLOCKS: u64 = 1 << 20;
+        const PSEUDO_FILES: u64 = 1 << 20;
+        const PSEUDO_NAME_MAX: u64 = 255;
+
+        // Pseudo filesystems do not enforce capacity through block/inode
+        // accounting. These stable nonzero values are only for Linux statfs
+        // compatibility and user-visible diagnostics.
+        Self {
+            magic,
+            block_size: PagingArch::PAGE_SIZE_BYTES as u64,
+            fragment_size: PagingArch::PAGE_SIZE_BYTES as u64,
+            blocks: PSEUDO_BLOCKS,
+            blocks_free: PSEUDO_BLOCKS,
+            blocks_available: PSEUDO_BLOCKS,
+            files: PSEUDO_FILES,
+            files_free: PSEUDO_FILES,
+            name_max: PSEUDO_NAME_MAX,
+        }
+    }
+}
+
 /// VTable a superblock must implement.
 ///
 /// Implemented by concrete filesystem types to provide filesystem-specific
@@ -34,6 +83,9 @@ pub(super) struct SuperBlockOps {
     ///
     /// **Note that this operation only writes back metadata, not file data.**
     pub sync_inode: fn(&InodeRef) -> Result<(), SysError>,
+
+    /// Report filesystem-wide statistics for statfs/statvfs.
+    pub stat: fn(&SuperBlock) -> Result<FsStat, SysError>,
 }
 
 /// A superblock represents a mounted file system instance.
@@ -153,6 +205,10 @@ impl SuperBlock {
     pub fn root_inode(self: &Arc<Self>) -> InodeRef {
         self.iget(self.root_ino)
             .expect("failed to load root inode for superblock")
+    }
+
+    pub(crate) fn stat(&self) -> Result<FsStat, SysError> {
+        (self.ops.stat)(self)
     }
 }
 

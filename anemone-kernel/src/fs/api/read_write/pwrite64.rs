@@ -8,7 +8,10 @@ use crate::{
     task::files::Fd,
 };
 
-use super::{checked_nonnegative_offset, current_file_and_uspace, write_from_user_buffer};
+use super::{
+    current_file_and_uspace,
+    request::{WriteRequest, checked_nonnegative_offset},
+};
 
 #[syscall(SYS_PWRITE64)]
 fn sys_pwrite64(
@@ -19,5 +22,7 @@ fn sys_pwrite64(
 ) -> Result<u64, SysError> {
     let offset = checked_nonnegative_offset(offset)?;
     let (file, uspace) = current_file_and_uspace(fd)?;
-    write_from_user_buffer(&file, &uspace, buf, count, Some(offset)).map(|n| n as u64)
+    WriteRequest::single(&file, &uspace, buf, count)
+        .at(offset)
+        .execute()
 }

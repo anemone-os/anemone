@@ -1,7 +1,9 @@
 use crate::{
     fs::{
+        UserBufferSink,
         iomux::PollEvent,
         ramfs::{ramfs_dir, ramfs_reg},
+        uio::UserBufferSource,
     },
     prelude::{
         vmo::{ResolvedFrame, VmObject},
@@ -180,6 +182,102 @@ impl RamfsRegState {
 
         Ok(())
     }
+
+    fn copy_out_user(
+        &self,
+        offset: usize,
+        len: usize,
+        dst: &mut UserBufferSink<'_>,
+    ) -> Result<(), SysError> {
+        let mut remaining = len;
+        let mut cur_offset = offset;
+
+        while remaining > 0 {
+            let pidx = cur_offset >> PagingArch::PAGE_SIZE_BITS;
+            let page_offset = cur_offset & (PagingArch::PAGE_SIZE_BYTES - 1);
+            let copy_len = remaining.min(PagingArch::PAGE_SIZE_BYTES - page_offset);
+
+            let frame = self.pages.read().get(&pidx).cloned();
+            // Clone the stable frame under the ramfs page-map lock, then drop
+            // the lock before touching userspace. Missing sparse pages are
+            // zero-filled without allocating a page on read.
+            let copied = if let Some(frame) = frame {
+                dst.write_from_slice(&frame.as_bytes()[page_offset..page_offset + copy_len])?
+            } else {
+                dst.write_zeros(copy_len)?
+            };
+
+            if copied < copy_len {
+                return Ok(());
+            }
+
+            remaining -= copy_len;
+            cur_offset = cur_offset
+                .checked_add(copy_len)
+                .ok_or(SysError::InvalidArgument)?;
+        }
+
+        Ok(())
+    }
+
+    fn copy_in_user(
+        &self,
+        offset: usize,
+        len: usize,
+        src: &mut UserBufferSource<'_>,
+    ) -> Result<usize, SysError> {
+        let mut written = 0usize;
+        let mut remaining = len;
+        let mut cur_offset = offset;
+
+        while remaining > 0 {
+            let pidx = cur_offset >> PagingArch::PAGE_SIZE_BITS;
+            let page_offset = cur_offset & (PagingArch::PAGE_SIZE_BYTES - 1);
+            let copy_len = remaining.min(PagingArch::PAGE_SIZE_BYTES - page_offset);
+
+            let frame = match self.ensure_page(pidx) {
+                Ok(frame) => frame,
+                Err(err) if written > 0 => break,
+                Err(err) => return Err(err),
+            };
+            let dst = unsafe {
+                core::slice::from_raw_parts_mut(
+                    frame.ppn().to_phys_addr().to_hhdm().as_ptr_mut(),
+                    PagingArch::PAGE_SIZE_BYTES,
+                )
+            };
+
+            let copied = match src.copy_into_slice(&mut dst[page_offset..page_offset + copy_len]) {
+                Ok(copied) => copied,
+                Err(err) if written > 0 => break,
+                Err(err) => return Err(err),
+            };
+            if copied == 0 {
+                break;
+            }
+
+            written = written
+                .checked_add(copied)
+                .ok_or(SysError::InvalidArgument)?;
+            cur_offset = cur_offset
+                .checked_add(copied)
+                .ok_or(SysError::InvalidArgument)?;
+            if copied < copy_len {
+                break;
+            }
+
+            remaining -= copied;
+        }
+
+        if written > 0 {
+            let new_end = offset
+                .checked_add(written)
+                .ok_or(SysError::InvalidArgument)?;
+            self.update_size_max(new_end);
+        }
+
+        Ok(written)
+    }
 }
 
 #[derive(Debug)]
@@ -257,6 +355,24 @@ fn ramfs_read_at(
     ramfs_read(file, &mut local_pos, buf, ctx)
 }
 
+fn ramfs_read_user_at(
+    file: &File,
+    pos: usize,
+    dst: &mut UserBufferSink<'_>,
+    _ctx: FileIoCtx,
+) -> Result<(), SysError> {
+    let inode = file.inode();
+    let state = ramfs_reg_state(inode)?;
+
+    let size = state.size();
+    if pos >= size {
+        return Ok(());
+    }
+
+    let len = dst.remaining().min(size - pos);
+    state.copy_out_user(pos, len, dst)
+}
+
 fn ramfs_write(
     file: &File,
     pos: &mut usize,
@@ -281,6 +397,24 @@ fn ramfs_write(
 fn ramfs_write_at(file: &File, pos: usize, buf: &[u8], ctx: FileIoCtx) -> Result<usize, SysError> {
     let mut local_pos = pos;
     ramfs_write(file, &mut local_pos, buf, ctx)
+}
+
+fn ramfs_write_user_at(
+    file: &File,
+    pos: usize,
+    src: &mut UserBufferSource<'_>,
+    _ctx: FileIoCtx,
+) -> Result<usize, SysError> {
+    let inode = file.inode();
+    let state = ramfs_reg_state(inode)?;
+    let len = src.remaining();
+    let _ = pos.checked_add(len).ok_or(SysError::InvalidArgument)?;
+    let written = state.copy_in_user(pos, len, src)?;
+    if written > 0 {
+        let new_end = pos.checked_add(written).ok_or(SysError::InvalidArgument)?;
+        inode.inode().update_size_max(new_end as u64);
+    }
+    Ok(written)
 }
 
 fn ramfs_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize, SysError> {
@@ -330,6 +464,8 @@ pub(super) static RAMFS_REG_FILE_OPS: FileOps = FileOps {
     write: ramfs_write,
     read_at: ramfs_read_at,
     write_at: ramfs_write_at,
+    read_user_at: Some(ramfs_read_user_at),
+    write_user_at: Some(ramfs_write_user_at),
     check_status_flags: accept_file_op_status_flags,
     seek: ramfs_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
@@ -345,6 +481,8 @@ pub(super) static RAMFS_DIR_FILE_OPS: FileOps = FileOps {
     write: |_, _, _, _| Err(SysError::IsDir),
     read_at: |_, _, _, _| Err(SysError::IsDir),
     write_at: |_, _, _, _| Err(SysError::IsDir),
+    read_user_at: None,
+    write_user_at: None,
     check_status_flags: accept_file_op_status_flags,
     seek: seek_dir_rewind,
     read_dir: ramfs_read_dir,
@@ -358,6 +496,8 @@ pub(super) static RAMFS_SYMLINK_FILE_OPS: FileOps = FileOps {
     write: |_, _, _, _| Err(SysError::NotSupported),
     read_at: |_, _, _, _| Err(SysError::NotSupported),
     write_at: |_, _, _, _| Err(SysError::NotSupported),
+    read_user_at: None,
+    write_user_at: None,
     check_status_flags: accept_file_op_status_flags,
     seek: |_, _, _| Err(SysError::NotSupported),
     read_dir: |_, _, _| Err(SysError::NotDir),

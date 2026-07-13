@@ -8,7 +8,10 @@ use crate::{
     task::files::Fd,
 };
 
-use super::{checked_hilo_offset, current_file_and_uspace, load_iovecs, read_iovecs};
+use super::{
+    current_file_and_uspace,
+    request::{ReadRequest, checked_hilo_offset, load_iovecs},
+};
 
 #[syscall(SYS_PREADV)]
 fn sys_preadv(
@@ -21,5 +24,7 @@ fn sys_preadv(
     let offset = checked_hilo_offset(pos_l, pos_h)?;
     let (file, uspace) = current_file_and_uspace(fd)?;
     let iovecs = load_iovecs(&uspace, iov, iovcnt)?;
-    read_iovecs(&file, &uspace, &iovecs, Some(offset))
+    ReadRequest::vectored(&file, &uspace, &iovecs)
+        .at(offset)
+        .execute()
 }

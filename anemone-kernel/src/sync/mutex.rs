@@ -36,6 +36,7 @@ impl<T: ?Sized> Mutex<T> {
             IntrArch::local_intr_enabled(),
             "Mutex cannot be locked when interrupts are disabled"
         );
+        crate::sched::assert_current_not_in_active_wait();
         assert!(
             allow_preempt(),
             "Mutex cannot be locked when preemption is disabled"
@@ -74,6 +75,7 @@ impl<T: ?Sized> Mutex<T> {
         //
         // we don't need a loop here. since we use atomic compare_exchange.
 
+        crate::sched::assert_current_not_in_active_wait();
         self.lock_released.listen_uninterruptible(true, || {
             self.locked
                 .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)

@@ -9,11 +9,13 @@ use crate::{
             map_ext4_error, map_lwext4_inode_type,
         },
         inode::{Inode, InodeMeta},
-        superblock::SuperBlockOps,
+        superblock::{FsMagic, FsStat, SuperBlockOps},
     },
     prelude::{vmo::VmObject, *},
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
+
+use anemone_abi::fs::linux::stat::EXT4_SUPER_MAGIC;
 
 fn ext4_inode_ops(ty: InodeType) -> &'static InodeOps {
     match ty {
@@ -120,8 +122,30 @@ fn ext4_sync_inode(inode: &InodeRef) -> Result<(), SysError> {
     ext4_sync_inode_inner(&inode.inode())
 }
 
+fn ext4_stat(sb: &SuperBlock) -> Result<FsStat, SysError> {
+    let stat =
+        ext4_sb(sb).read_tx(|| ext4_sb(sb).with_fs(|fs| fs.stat().map_err(map_ext4_error)))?;
+
+    let blocks_free = stat.free_blocks_count.min(stat.blocks_count);
+    let files = stat.inodes_count as u64;
+    let files_free = (stat.free_inodes_count as u64).min(files);
+
+    Ok(FsStat {
+        magic: FsMagic::new(EXT4_SUPER_MAGIC),
+        block_size: stat.block_size as u64,
+        fragment_size: stat.block_size as u64,
+        blocks: stat.blocks_count,
+        blocks_free,
+        blocks_available: blocks_free,
+        files,
+        files_free,
+        name_max: 255,
+    })
+}
+
 pub(super) static EXT4_SB_OPS: SuperBlockOps = SuperBlockOps {
     load_inode: ext4_load_inode,
     evict_inode: ext4_evict_inode,
     sync_inode: ext4_sync_inode,
+    stat: ext4_stat,
 };

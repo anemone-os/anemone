@@ -8,7 +8,10 @@ use crate::{
     task::files::Fd,
 };
 
-use super::{checked_hilo_offset, current_file_and_uspace, load_iovecs, write_iovecs};
+use super::{
+    current_file_and_uspace,
+    request::{WriteRequest, checked_hilo_offset, load_iovecs},
+};
 
 #[syscall(SYS_PWRITEV)]
 fn sys_pwritev(
@@ -21,5 +24,7 @@ fn sys_pwritev(
     let offset = checked_hilo_offset(pos_l, pos_h)?;
     let (file, uspace) = current_file_and_uspace(fd)?;
     let iovecs = load_iovecs(&uspace, iov, iovcnt)?;
-    write_iovecs(&file, &uspace, &iovecs, Some(offset))
+    WriteRequest::vectored(&file, &uspace, &iovecs)
+        .at(offset)
+        .execute()
 }

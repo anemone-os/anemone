@@ -3,14 +3,14 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use clap::Args;
 use serde::Serialize;
 
 use crate::{
     config::{app::App as AppManifest, rootfs::Rootfs},
     log_progress,
-    tasks::app::build::{build_app, BuildCtx, BuiltArtifactInfo},
+    tasks::app::build::{BuildCtx, BuiltArtifactInfo, build_app},
 };
 
 #[derive(Args)]
@@ -77,6 +77,7 @@ impl<'a> RootfsCtx<'a> {
 
     fn mkfs(&self) -> anyhow::Result<()> {
         self.stage_base_tree()?;
+        self.stage_dirs()?;
         self.stage_apps()?;
         self.stage_files()?;
         self.gen_init_config()?;
@@ -120,19 +121,22 @@ impl<'a> RootfsCtx<'a> {
         state_base_dir(&self.staging_dir, Path::new(base), true)
     }
 
+    fn stage_dirs(&self) -> anyhow::Result<()> {
+        for dir in &self.rootfs.dirs {
+            log_progress!("ROOTFS", &format!("Creating directory '{}'", dir.path));
+            fs::create_dir_all(self.rootfs_path(&dir.path))?;
+        }
+
+        Ok(())
+    }
+
     fn stage_apps(&self) -> anyhow::Result<()> {
         let build_ctx = BuildCtx::new(self.rootfs.build.arch.clone())?;
 
         for app in &self.rootfs.apps {
             log_progress!("ROOTFS", &format!("Staging app '{}'", app.name));
 
-            // skip "/" otherwise join will replace the whole path
-            let installed_dir = self.staging_dir.join(
-                Path::new(&app.installed_dir)
-                    .components()
-                    .skip_while(|c| matches!(c, Component::RootDir))
-                    .collect::<PathBuf>(),
-            );
+            let installed_dir = self.rootfs_path(&app.installed_dir);
 
             std::fs::create_dir_all(&installed_dir)?;
 
@@ -157,12 +161,7 @@ impl<'a> RootfsCtx<'a> {
             if !src.is_file() {
                 bail!("rootfs file source '{}' is not a file", src.display());
             }
-            let dest = self.staging_dir.join(
-                Path::new(&file.installed_path)
-                    .components()
-                    .skip_while(|c| matches!(c, Component::RootDir))
-                    .collect::<PathBuf>(),
-            );
+            let dest = self.rootfs_path(&file.installed_path);
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -170,6 +169,17 @@ impl<'a> RootfsCtx<'a> {
         }
 
         Ok(())
+    }
+
+    fn rootfs_path(&self, path: &str) -> PathBuf {
+        // Skip "/" otherwise joining an absolute manifest path would discard
+        // the staging root and write to the host path.
+        self.staging_dir.join(
+            Path::new(path)
+                .components()
+                .skip_while(|c| matches!(c, Component::RootDir))
+                .collect::<PathBuf>(),
+        )
     }
 
     fn gen_init_config(&self) -> anyhow::Result<()> {
@@ -183,5 +193,54 @@ impl<'a> RootfsCtx<'a> {
         std::fs::write(&init_config, &self.rootfs.init.path)?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{
+        platform::Arch,
+        rootfs::{Build, Dir, Fs, FsType, Init, Rootfs},
+    };
+
+    #[test]
+    fn stage_dirs_creates_manifest_paths_under_staging_root() {
+        let staging_dir =
+            std::env::temp_dir().join(format!("anemone-xtask-rootfs-dirs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&staging_dir);
+        fs::create_dir_all(&staging_dir).unwrap();
+
+        let rootfs = Rootfs {
+            build: Build {
+                name: "dir-test".to_string(),
+                arch: Arch::RiscV64,
+            },
+            fs: Fs {
+                fstype: FsType::Ext4,
+                base: None,
+            },
+            init: Init {
+                path: "/sbin/init".to_string(),
+            },
+            apps: Vec::new(),
+            dirs: vec![
+                Dir {
+                    path: "/dev".to_string(),
+                },
+                Dir {
+                    path: "mnt/nested".to_string(),
+                },
+            ],
+            files: Vec::new(),
+        };
+
+        let ctx = RootfsCtx::new(&rootfs, &staging_dir);
+        ctx.stage_dirs().unwrap();
+
+        assert!(staging_dir.join("dev").is_dir());
+        assert!(staging_dir.join("mnt/nested").is_dir());
+
+        fs::remove_dir_all(&staging_dir).unwrap();
     }
 }

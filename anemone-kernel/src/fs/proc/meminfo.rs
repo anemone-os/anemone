@@ -114,6 +114,8 @@ static PROC_MEMINFO_FILE_OPS: FileOps = FileOps {
     write: |_, _, _, _| Err(SysError::NotSupported),
     read_at: proc_meminfo_read_at,
     write_at: |_, _, _, _| Err(SysError::NotSupported),
+    read_user_at: None,
+    write_user_at: None,
     check_status_flags: accept_file_op_status_flags,
     seek: proc_meminfo_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),

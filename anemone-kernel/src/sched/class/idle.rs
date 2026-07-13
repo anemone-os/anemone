@@ -42,7 +42,7 @@ mod idle_task {
             unsafe {
                 with_intr_disabled(|| {
                     if fetch_clear_need_resched() {
-                        schedule();
+                        schedule_idle();
                     }
                 })
             }

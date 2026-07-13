@@ -179,27 +179,41 @@ where
 
         let latch = Latch::begin_current(true);
         let trigger = latch.make_trigger();
+        let wait_id = trigger.wait_id();
 
         match scan(IomuxScanMode::Register(&trigger)) {
             Ok(IomuxScanOutcome::Ready(nready)) if nready > 0 => {
                 latch.cancel(LatchCancelReason::PredicateReady);
                 let outcome = latch.finish();
                 kdebugln!(
-                    "{}: register scan found ready wait outcome={:?}",
+                    "{}: register scan found ready wait={:#x} nready={} wait outcome={:?}",
                     context,
+                    wait_id,
+                    nready,
                     outcome,
                 );
                 return IomuxWaitOutcome::Ready(nready);
             },
-            Ok(IomuxScanOutcome::Ready(_))
-            | Ok(IomuxScanOutcome::NotReady)
-            | Ok(IomuxScanOutcome::NoSources) => {},
+            Ok(
+                register_outcome @ (IomuxScanOutcome::Ready(_)
+                | IomuxScanOutcome::NotReady
+                | IomuxScanOutcome::NoSources),
+            ) => {
+                kdebugln!(
+                    "{}: register scan completed wait={:#x} outcome={:?} remaining={:?}",
+                    context,
+                    wait_id,
+                    register_outcome,
+                    remaining,
+                );
+            },
             Ok(IomuxScanOutcome::Unsupported) => {
                 latch.cancel(LatchCancelReason::RegisterError);
                 let outcome = latch.finish();
                 kwarningln!(
-                    "{}: unsupported poll source during register scan, outcome={:?}",
+                    "{}: unsupported poll source during register scan wait={:#x} outcome={:?}",
                     context,
+                    wait_id,
                     outcome,
                 );
                 match final_scan_after_register_abort(context, &mut scan) {
@@ -212,8 +226,9 @@ where
                 latch.cancel(LatchCancelReason::SyscallError);
                 let outcome = latch.finish();
                 kwarningln!(
-                    "{}: register scan failed err={:?} outcome={:?}",
+                    "{}: register scan failed wait={:#x} err={:?} outcome={:?}",
                     context,
+                    wait_id,
                     err,
                     outcome,
                 );

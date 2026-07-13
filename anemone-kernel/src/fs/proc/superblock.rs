@@ -1,7 +1,13 @@
 use crate::{
-    fs::{inode::Inode, proc::root::PROC_ROOT_INO, superblock::SuperBlockOps},
+    fs::{
+        inode::Inode,
+        proc::root::PROC_ROOT_INO,
+        superblock::{FsMagic, FsStat, SuperBlockOps},
+    },
     prelude::*,
 };
+
+use anemone_abi::fs::linux::stat::PROC_SUPER_MAGIC;
 
 fn proc_load_inode(sn: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, SysError> {
     unreachable!("proc_load_inode should never be called.")
@@ -41,8 +47,13 @@ pub fn alloc_ino() -> Ino {
     }
 }
 
+fn proc_stat(_sb: &SuperBlock) -> Result<FsStat, SysError> {
+    Ok(FsStat::pseudo(FsMagic::new(PROC_SUPER_MAGIC)))
+}
+
 pub static PROC_SB_OPS: SuperBlockOps = SuperBlockOps {
     load_inode: proc_load_inode,
     evict_inode: proc_evict_inode,
     sync_inode: proc_sync_inode,
+    stat: proc_stat,
 };
