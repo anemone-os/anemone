@@ -2,6 +2,7 @@
 
 use crate::prelude::*;
 
+#[cfg(feature = "kunit")]
 use super::entity::{SchedClassPrv, SchedEntity};
 
 mod stride;
@@ -21,9 +22,13 @@ fn nice_weight(nice: Nice) -> u32 {
     weight
 }
 
-/// Construct a fresh Fair payload without widening the production constructor
-/// surface before the compile-time default cutover checkpoint.
+pub(super) fn new_fresh_entity() -> FairEntity {
+    FairEntity::new_fresh()
+}
+
+/// Construct a Fair integration-test entity through the same owner factory as
+/// the production default facade, without depending on the global selector.
 #[cfg(feature = "kunit")]
 pub(super) fn new_test_entity() -> SchedEntity {
-    SchedEntity::new(SchedClassPrv::Fair(FairEntity::new_fresh()))
+    SchedEntity::new(SchedClassPrv::Fair(new_fresh_entity()))
 }

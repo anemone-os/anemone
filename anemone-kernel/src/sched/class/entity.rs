@@ -1,4 +1,9 @@
-use super::{fair::FairEntity, rt::RtEntity};
+use crate::prelude::*;
+
+use super::{
+    fair::{self, FairEntity},
+    rt::{self, RtEntity},
+};
 
 #[derive(Debug)]
 pub struct SchedEntity {
@@ -28,12 +33,17 @@ impl SchedEntity {
         }
     }
 
-    /// Construct a fresh non-idle entity using the compile-time RT selector.
+    /// Construct a fresh non-idle entity using the compile-time default policy.
     ///
-    /// The RT module owns policy selection and payload validation; this method
-    /// is only the public `SchedEntity` facade that wraps that opaque payload.
+    /// This facade selects only the class/policy. Fair and RT owners construct
+    /// and validate their opaque fresh payloads.
     pub fn new_default() -> Self {
-        Self::new(SchedClassPrv::Realtime(RtEntity::new_default()))
+        let class = match SCHED_DEFAULT_POLICY {
+            SchedDefaultPolicy::Fair => SchedClassPrv::Fair(fair::new_fresh_entity()),
+            SchedDefaultPolicy::RtRr => SchedClassPrv::Realtime(rt::new_round_robin_entity()),
+            SchedDefaultPolicy::RtFifo => SchedClassPrv::Realtime(rt::new_fifo_entity()),
+        };
+        Self::new(class)
     }
 
     /// Construct the special idle entity.
@@ -76,4 +86,27 @@ pub enum SchedClassKind {
     Realtime,
     Fair,
     Idle,
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn test_default_constructor_uses_typed_selector_and_fresh_payload() {
+        let entity = SchedEntity::new_default();
+        match SCHED_DEFAULT_POLICY {
+            SchedDefaultPolicy::Fair => {
+                assert_eq!(entity.class_kind(), SchedClassKind::Fair);
+            },
+            SchedDefaultPolicy::RtRr => {
+                assert_eq!(entity.class_kind(), SchedClassKind::Realtime);
+                rt::assert_test_round_robin(&entity);
+            },
+            SchedDefaultPolicy::RtFifo => {
+                assert_eq!(entity.class_kind(), SchedClassKind::Realtime);
+                rt::assert_test_fifo(&entity);
+            },
+        }
+    }
 }

@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / fair class / stride / nice / runqueue
 **Canonical Plan:** [RFC-20260713-sched-fair-stride](../../rfcs/sched-fair-stride/index.md), [不变量需求](../../rfcs/sched-fair-stride/invariants.md), [迁移实施计划](../../rfcs/sched-fair-stride/implementation.md)
-**Current Phase:** Checkpoint 2 待启动
+**Current Phase:** Checkpoint 3 待启动
 
 ## Scope
 
@@ -86,9 +86,29 @@
 **Validation:** `just build` 通过。`./scripts/run-user-test-rv64.sh etc/sdcard-rv.img build/stride-ckpt1-pretest-rerun.log` 重新生成 clean pretest rootfs、构建当前 rv64 kernel并运行 127 项 KUnit；16 项新增 scheduler 测试逐项 `ok`，最终打印 `All tests passed!`。KUnit 后已进入 init/user-test，总控通过 QEMU monitor 退出；随后只发生的 partial LTP 输出不作为本 checkpoint evidence，full LTP / Fair runtime 明确 Not Run。一次直接复用已被前序 KUnit 修改的 rootfs 因既有 openat fixture `AlreadyExists` 提前 panic，该次运行判为脏 guest 无效证据，不是 Stride failure。`git diff --check`、两个新增 Rust 文件的 `git diff --no-index --check` 与 `mdbook build docs` 通过；`just fmt kernel --check` 只报告 build flow 重新生成的 ignored `kconfig_defs.rs` / `platform_defs.rs` whitespace drift，未报告本 checkpoint 触碰文件，生成文件未手工修改或提交。
 **Next:** Checkpoint 1 退出条件关闭；Checkpoint 2 才能修改 global default selector、constructor facade、Kconfig default并运行三 selector build / Fair default pretest gate。
 
+### 2026-07-13 - Checkpoint 2 启动与 Owner Audit
+
+**Phase:** Checkpoint 2 - Compile-time Fair Default Cutover。
+**Change:** 尚无代码或配置变化；总控复核 global selector、generated kernel enum、default constructor facade、Fair/RT fresh payload owner、tracked default、ignored live config 和全部 production constructor caller，锁定 Checkpoint 2 write set。实现由总控直接完成，只另起一个独立 reviewer；不再分派 implementation worker。
+**Audit:** xtask `SchedDefaultPolicy` 仍只接受 `rt_rr | rt_fifo` 并生成同名 kernel enum；`SchedEntity::new_default()` 仍把 global selector解释委托给 `RtEntity::new_default()`。Fair owner 已有唯一 `FairEntity` alias和 class-local fresh constructor，RT owner已有显式 FIFO/RR fresh state。ordinary task、clone、bootstrap、`kthreadd` 与普通 kthread 仍统一调用 `new_default()`，idle 只调用 `new_idle()`；clone 只在发布前继承 typed nice，不复制 parent entity。现有 owner surface 足以完成三分支 facade，无需 runtime policy tag、published migration、双 payload或 write-set 扩张，未命中 Checkpoint 2 停止条件。
+**Observability:** selector branch 由 `entity.rs` owner-local KUnit 与 `fair` / `rt_rr` / `rt_fifo` 三次 repository build共同覆盖；cross-class KUnit继续使用 Checkpoint 1 建立的 selector-independent explicit RT factory。
+**Feedback:** None；原目标、不变量、stage order、write set、验证 floor 与停止条件保持不变。
+**Validation:** 本条只记录实现前 owner audit；三 selector build、invalid selector parse、Fair default build/pretest、format、docs 与独立 review尚未运行。
+**Next:** 只在 canonical Checkpoint 2 write set 内实现 compile-time Fair default cutover；若 shared facade被迫拥有 class-private算法/state，立即停止并回到 RFC review。
+
+### 2026-07-13 - Checkpoint 2 实现、验证与 Review Gate 收口
+
+**Phase:** Checkpoint 2 - Compile-time Fair Default Cutover。
+**Change:** xtask 受约束 selector与 generated kernel enum增加稳定 `Fair` 分支，repository tracked default和 ignored live selector切换为 `fair`。`SchedEntity::new_default()` 成为 global selector唯一解释点，只在 `Fair | RtRr | RtFifo` 间选择 owner-local opaque fresh payload factory；Fair owner构造 fresh Stride payload，RT owner只保留显式 RR/FIFO payload construction，不再解释 global default。default-constructor KUnit从 RT module迁到 entity facade owner；ordinary task、clone、bootstrap与 kthread caller保持不变。
+**Audit:** source audit确认只有 `entity.rs` 匹配 `SCHED_DEFAULT_POLICY`，RT/Fair owner均不解释对方 selector；production fresh non-idle caller继续统一使用 `new_default()`，idle只使用 `new_idle()`。clone在发布前继承 typed nice但不复制 parent entity/pass。production graph没有 `sched_fair_policy`、runtime policy tag、published migration API、双 payload或 `stride` selector值，archived EEVDF仍不进入 production module graph；未命中 canonical停止条件。
+**Observability:** entity-owner KUnit按当前 build selector验证 class identity，并由 RT owner test-only assertions检查 RR/FIFO fresh policy；三种 selector repository build共同覆盖全部 constructor branch。Fair default clean pretest运行 127 项 KUnit，其中 default-constructor与全部 16 项 Fair/RunQueue focused gate通过并打印 `All tests passed!`，随后正常进入 init/user-test。
+**Feedback:** 用户直接审查本 checkpoint diff，结论为改动合理、可以接受，并明确无需 subagent复审；总控据此取消尚未产出结论的 reviewer任务。review gate无未关闭 Apollyon、Keter或 Euclid；原目标、不变量、stage order、write set、验证 floor与停止条件不变。
+**Validation:** live Fair `just build`通过；从同一配置仅改变 selector的临时 `fair`、`rt_rr`、`rt_fifo` 配置分别通过 `just xtask build -k <temporary-kconfig>`。非法 selector在 prebuild前按 serde enum contract拒绝，错误列出 `fair, rt_rr, rt_fifo`。恢复 live Fair后最终 `just build`通过，generated selector确认为 `SchedDefaultPolicy::Fair`。`./scripts/run-user-test-rv64.sh etc/sdcard-rv.img build/stride-ckpt2-fair-pretest.log`通过上述 pretest gate；QEMU由 monitor主动退出，随后 partial LTP不作为本 checkpoint evidence，full LTP与用户侧 Fair/RT-RR A/B仍为 Not Run。`git diff --check`与 `mdbook build docs`通过；`just fmt kernel --check`只报告 build flow生成的 ignored `kconfig_defs.rs` / `platform_defs.rs` whitespace drift，未报告 authored文件，生成文件未手工修改或提交。
+**Next:** Checkpoint 2退出条件关闭；Checkpoint 3只执行 canonical runtime acceptance与最终收口，用户侧 `fair-test` 和同 checkout RT/RR A/B结果不得提前推定为通过。
+
 ## Open Items
 
-- Checkpoint 1 已关闭；Checkpoint 2-3 尚未开始。
+- Checkpoint 1-2 已关闭；Checkpoint 3 尚未开始。
 - 用户侧 `fair-test` 与同 checkout RT/RR A/B runtime evidence 属于 Checkpoint 3，本阶段不运行。
 
 ## Closure

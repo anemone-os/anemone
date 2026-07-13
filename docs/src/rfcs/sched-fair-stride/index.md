@@ -6,7 +6,7 @@
 **领域：** scheduler / fair class / stride / nice / runqueue
 **事务日志：** [2026-07-13-sched-fair-stride](../../devlog/transactions/2026-07-13-sched-fair-stride.md)
 **开放问题：** None；已关闭问题与依据见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** Checkpoint 1 已关闭；按事务日志进入 Checkpoint 2 的 compile-time Fair default cutover gate。
+**下一步：** Checkpoint 2 已关闭；按事务日志进入 Checkpoint 3 的 runtime acceptance 与最终收口 gate。
 
 ## 摘要
 
@@ -347,4 +347,4 @@ runtime 验证负责确认：
 
 ## 收口
 
-本节在实现完成后填写。RFC 已接受进入实现并建立 transaction devlog；阶段 0 与 Checkpoint 1 已按 canonical gate 关闭，执行与验证事实见事务日志。Checkpoint 2-3 尚未完成，不在本节提前写成实现收口。
+本节在实现完成后填写。RFC 已接受进入实现并建立 transaction devlog；阶段 0 与 Checkpoint 1-2 已按 canonical gate 关闭，Fair 已成为 repository compile-time default，三种 selector build、非法 selector拒绝和 Fair default pretest证据见事务日志。Checkpoint 3 的用户侧 runtime acceptance与最终收口尚未完成，不在本节提前写成 RFC 完成。

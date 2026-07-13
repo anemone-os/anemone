@@ -105,14 +105,6 @@ impl RtEntity {
         Self { priority, policy }
     }
 
-    pub(super) fn new_default() -> Self {
-        let policy = match SCHED_DEFAULT_POLICY {
-            SchedDefaultPolicy::RtRr => RtPolicy::round_robin(),
-            SchedDefaultPolicy::RtFifo => RtPolicy::fifo(),
-        };
-        Self::new_fresh(RtPriority::MIN, policy)
-    }
-
     fn assert_valid(&self) {
         assert!(
             self.priority >= RtPriority::MIN && self.priority <= RtPriority::MAX,
@@ -122,14 +114,33 @@ impl RtEntity {
     }
 }
 
+pub(super) fn new_round_robin_entity() -> RtEntity {
+    RtEntity::new_fresh(RtPriority::MIN, RtPolicy::round_robin())
+}
+
+pub(super) fn new_fifo_entity() -> RtEntity {
+    RtEntity::new_fresh(RtPriority::MIN, RtPolicy::fifo())
+}
+
 /// Construct an explicit fresh RT payload for scheduler-class integration
 /// tests without coupling those tests to the global default-policy selector.
 #[cfg(feature = "kunit")]
 pub(super) fn new_test_entity() -> SchedEntity {
-    SchedEntity::new(SchedClassPrv::Realtime(RtEntity::new_fresh(
-        RtPriority::MIN,
-        RtPolicy::fifo(),
-    )))
+    SchedEntity::new(SchedClassPrv::Realtime(new_fifo_entity()))
+}
+
+#[cfg(feature = "kunit")]
+pub(super) fn assert_test_round_robin(entity: &SchedEntity) {
+    let rt = entity.realtime();
+    assert_eq!(rt.priority, RtPriority::MIN);
+    assert_eq!(rt.policy, RtPolicy::round_robin());
+}
+
+#[cfg(feature = "kunit")]
+pub(super) fn assert_test_fifo(entity: &SchedEntity) {
+    let rt = entity.realtime();
+    assert_eq!(rt.priority, RtPriority::MIN);
+    assert_eq!(rt.policy, RtPolicy::fifo());
 }
 
 impl SchedEntity {
@@ -634,22 +645,5 @@ mod kunits {
             exhaust_quantum(&mut rt, &with_peer),
             TickAction::RequestResched
         );
-    }
-
-    #[kunit]
-    fn test_default_constructor_uses_typed_selector_and_fresh_budget() {
-        let entity = SchedEntity::new_default();
-        assert_eq!(entity.class_kind(), SchedClassKind::Realtime);
-        let rt = entity.realtime();
-        assert_eq!(rt.priority, RtPriority::MIN);
-        match SCHED_DEFAULT_POLICY {
-            SchedDefaultPolicy::RtRr => assert_eq!(
-                rt.policy,
-                RtPolicy::RoundRobin {
-                    remaining_ticks: RT_RR_FULL_QUANTUM_TICKS
-                }
-            ),
-            SchedDefaultPolicy::RtFifo => assert_eq!(rt.policy, RtPolicy::Fifo),
-        }
     }
 }
