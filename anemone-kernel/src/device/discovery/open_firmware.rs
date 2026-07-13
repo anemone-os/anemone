@@ -131,11 +131,13 @@ mod early {
 
                 // add kernel image as a mappable reserved memory region.
                 let __skernel = align_down_power_of_2!(
-                    link_symbols::__skernel as *const () as u64 - KERNEL_VA_BASE + KERNEL_LA_BASE,
+                    link_symbols::__skernel as *const () as u64 - KERNEL_VA_BASE.get()
+                        + KERNEL_LA_BASE.get(),
                     PagingArch::PAGE_SIZE_BYTES
                 ) as u64;
                 let __ekernel = align_up_power_of_2!(
-                    link_symbols::__ekernel as *const () as u64 - KERNEL_VA_BASE + KERNEL_LA_BASE,
+                    link_symbols::__ekernel as *const () as u64 - KERNEL_VA_BASE.get()
+                        + KERNEL_LA_BASE.get(),
                     PagingArch::PAGE_SIZE_BYTES
                 ) as u64;
 

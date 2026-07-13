@@ -6,7 +6,8 @@
 use std::{
     fs::{self, File},
     io::{BufRead, BufReader},
-    path::Path,
+    path::{Path, PathBuf},
+    process::Command,
 };
 
 use clap::Args;
@@ -214,6 +215,8 @@ impl<'a> BuildContext<'a> {
         let built_kernel_path = format!("{}/anemone-kernel", self.cargo_build_dir());
         std::fs::copy(built_kernel_path, "build/anemone.elf")?;
 
+        self.build_uboot_image()?;
+
         if self.kconfig.build.disasm {
             log_progress!("DISASM", "Generating kernel disassembly");
 
@@ -226,6 +229,65 @@ impl<'a> BuildContext<'a> {
                 .read()?;
             sh.write_file("build/anemone.disasm", disasm)?;
         }
+        Ok(())
+    }
+
+    fn build_uboot_image(&self) -> anyhow::Result<()> {
+        let Some(uboot) = &self.platform.uboot else {
+            return Ok(());
+        };
+
+        let output_path = Path::new("build").join(&uboot.filename);
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let bin_path = PathBuf::from(format!("{}.bin", output_path.display()));
+
+        log_progress!(
+            "UBOOT",
+            &format!("Generating raw kernel binary '{}'", bin_path.display())
+        );
+        let mut objcopy = Command::new(self.platform.build.arch.target_triple().objcopy());
+        objcopy
+            .arg("-O")
+            .arg("binary")
+            .arg("build/anemone.elf")
+            .arg(&bin_path);
+        cmd_echo(&objcopy);
+        let status = objcopy.status()?;
+        if !status.success() {
+            anyhow::bail!("rust-objcopy failed with status: {}", status);
+        }
+
+        log_progress!(
+            "UBOOT",
+            &format!("Generating U-Boot image '{}'", output_path.display())
+        );
+        let mut mkimage = Command::new("mkimage");
+        mkimage
+            .arg("-A")
+            .arg(&uboot.arch)
+            .arg("-O")
+            .arg(&uboot.os_type)
+            .arg("-T")
+            .arg(&uboot.image_type)
+            .arg("-C")
+            .arg(&uboot.compression)
+            .arg("-a")
+            .arg(format!("0x{:x}", uboot.load_addr))
+            .arg("-e")
+            .arg(format!("0x{:x}", uboot.entry))
+            .arg("-n")
+            .arg(&uboot.name)
+            .arg("-d")
+            .arg(&bin_path)
+            .arg(&output_path);
+        cmd_echo(&mkimage);
+        let status = mkimage.status()?;
+        if !status.success() {
+            anyhow::bail!("mkimage failed with status: {}", status);
+        }
+
         Ok(())
     }
 

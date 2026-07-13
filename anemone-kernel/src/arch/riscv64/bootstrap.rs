@@ -37,9 +37,9 @@ static BOOTSTRAP_PGDIR: RiscV64PgDir = {
 
     let mut raw_ptes: [RiscV64Pte; 512] = [RiscV64Pte::ZEROED; 512];
 
-    let k_phys_align_down = align_down_power_of_2!(KERNEL_LA_BASE, 1 << 30);
+    let k_phys_align_down = align_down_power_of_2!(KERNEL_LA_BASE.get(), 1 << 30);
     let k_phys_ppn = k_phys_align_down as u64 >> 12;
-    let k_virt_idx = (KERNEL_VA_BASE >> 30) as usize & 0x1ff;
+    let k_virt_idx = (KERNEL_VA_BASE.get() >> 30) as usize & 0x1ff;
 
     // 1. map kernel image to -2gb ~ 0
     assert!(k_virt_idx == 510);
@@ -67,7 +67,7 @@ static BOOTSTRAP_PGDIR: RiscV64PgDir = {
     //    initialization. We probably map more physical memory than actually exists,
     //    but it's fine because the kernel will only access the physical memory that
     //    actually exists, and the extra mappings won't cause any harm.
-    let s_ram_ppn = align_down_power_of_2!(PHYS_RAM_START, 1 << 30) as u64 >> 12;
+    let s_ram_ppn = align_down_power_of_2!(PHYS_RAM_START.get(), 1 << 30) as u64 >> 12;
     let hhdm_start_idx =
         (((<sv39::Sv39KernelLayout as KernelLayoutTrait<sv39::Sv39PagingArch>>::DIRECT_MAPPING_ADDR
             as usize)
@@ -143,24 +143,34 @@ pub unsafe extern "C" fn __nun() -> ! {
         "srli    t0, t0, 12",
         "or      t0, t0, t1",
 
+        // Temporary firmware probe: distinguish legacy console_putchar from
+        // SBI DBCN before paging can affect execution. Remove this probe once
+        // the VisionFive 2 console extension is identified; it intentionally
+        // prevents entry into rusty_nun.
+        // "li      a7, 1",
+        // "li      a0, 76", // 'L'
+        // "ecall",
+        // "li      a7, 0x4442434e",
+        // "li      a6, 2",
+        // "li      a0, 68", // 'D'
+        // "ecall",
 
-        "
-        li a7, 1
-        li a0, 65   # 'A'
-        ecall
-        ",
+        // // Encode the DBCN SBI error through legacy console_putchar so the
+        // // probe remains observable even when DBCN is unavailable. 'A' means
+        // // success, 'B' means -1, 'C' means SBI_ERR_NOT_SUPPORTED (-2), etc.
+        // "mv      t3, a0",
+        // "li      t4, 65", // 'A'
+        // "sub     a0, t4, t3",
+        // "li      a7, 1",
+        // "ecall",
+        // "li      a0, 10", // '\n'
+        // "li      a7, 1",
+        // "ecall",
+        // "1:",
+        // "j       1b",
 
         "csrw    satp, t0",
         "sfence.vma",
-
-
-        "
-        li a7, 1
-        li a0, 66   # 'B'
-        ecall
-        1:
-        j 1b
-        ",
 
         // Clear used temporaries.
         "li  t0, 0",
@@ -187,12 +197,17 @@ fn register_earlycon() {
 
     impl Console for SbiEarlyCon {
         fn output(&self, s: &str) {
+            for c in s.chars() {
+                let _ = sbi_rt::legacy::console_putchar(c as usize);
+            }
             // After bsp_primary remaps the boot stack into the REMAP region and
             // switches to it, any stack-allocated data (e.g. LogRecord.msg) has
-            // a virtual address in the REMAP region, not the kernel-image region.
-            // kvirt_to_phys() only subtracts KERNEL_MAPPING_OFFSET, so it gives
-            // a garbage physical address for REMAP-region pointers, causing SBI
+            // a virtual address in the REMAP region, not the kernel-image
+            // region. kvirt_to_phys() only subtracts
+            // KERNEL_MAPPING_OFFSET, so it gives a garbage physical
+            // address for REMAP-region pointers, causing SBI
             // to read from invalid memory and hang.
+            /*
             #[unsafe(link_section = ".bss.nonzero_init")]
             static mut SBI_EARLYCON_BUF: [u8; 512] = [0u8; 512];
 
@@ -208,16 +223,17 @@ fn register_earlycon() {
                 let chunk_len = remaining.len().min(buf.len());
                 buf[..chunk_len].copy_from_slice(&remaining[..chunk_len]);
 
-                let buf_pa = unsafe { VirtAddr::new(buf.as_ptr() as u64).kvirt_to_phys() };
-                let pa = sbi_rt::Physical::new(
-                    chunk_len,
-                    buf_pa.lower_32_bits() as usize,
-                    buf_pa.upper_32_bits() as usize,
-                );
-                let _ = sbi_rt::console_write(pa);
+                // let buf_pa = unsafe { VirtAddr::new(buf.as_ptr() as u64).kvirt_to_phys() };
+                // let pa = sbi_rt::Physical::new(
+                //     chunk_len,
+                //     buf_pa.lower_32_bits() as usize,
+                //     buf_pa.upper_32_bits() as usize,
+                // );
+                // let _ = sbi_rt::console_write(pa);
 
                 remaining = &remaining[chunk_len..];
             }
+             */
         }
     }
 
@@ -261,13 +277,14 @@ fn register_basic_power_handlers() {
 /// The 'fdt_pa' argument is only valid for BSP, and APs should ignore it.
 #[unsafe(no_mangle)]
 extern "C" fn rusty_nun(hart_id: usize, fdt_pa: PhysAddr) -> ! {
-    sbi_rt::console_write_byte('A' as u8);
-    #[unsafe(link_section = ".bss.nonzero_init")]
+    #[unsafe(link_section = ".data")]
     static mut BSP_ARRIVED: bool = false;
+    sbi_rt::legacy::console_putchar('R' as usize);
     unsafe {
         sstatus::set_sum();
         sstatus::set_fs(sstatus::FS::Off);
     }
+    sbi_rt::legacy::console_putchar('S' as usize);
     unsafe {
         if !BSP_ARRIVED {
             // bsp
@@ -368,6 +385,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_pa: PhysAddr) -> ! {
     install_ktrap_handler();
 
     register_earlycon();
+    kdebugln!("anemone kernel booting on bsp #{}", bsp_id);
 
     let fdt_va = sv39::Sv39KernelLayout::phys_to_dm(fdt_pa);
 
