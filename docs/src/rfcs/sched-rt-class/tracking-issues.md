@@ -1,6 +1,6 @@
 # Sched RT Class Tracking Issues
 
-**状态：** Active
+**状态：** Closed
 **最后更新：** 2026-07-13
 **父 RFC：** [RFC-20260711-sched-rt-class](./index.md)
 **事务日志：** [2026-07-12-sched-rt-class](../../devlog/transactions/2026-07-12-sched-rt-class.md)

@@ -1,10 +1,10 @@
 # 2026-07-12 - Sched RT Class
 
-**状态：** Active
+**状态：** Completed
 **负责人：** doruche, Codex
 **领域：** scheduler / realtime / FIFO / RR / scheduler class
 **权威计划：** [RFC-20260711-sched-rt-class](../../rfcs/sched-rt-class/index.md), [不变量需求](../../rfcs/sched-rt-class/invariants.md), [迁移实施计划](../../rfcs/sched-rt-class/implementation.md), [Tracking Issues](../../rfcs/sched-rt-class/tracking-issues.md)
-**当前阶段：** Checkpoint 2 - 集成与用户态 Smoke（尚未启动）
+**当前阶段：** Completed；Checkpoint 2 用户态集成验证已关闭
 
 ## 范围
 
@@ -34,13 +34,13 @@
 
 **Canonical RFC:** [RFC](../../rfcs/sched-rt-class/index.md), [Invariants](../../rfcs/sched-rt-class/invariants.md), [Implementation Plan](../../rfcs/sched-rt-class/implementation.md), [Tracking Issues](../../rfcs/sched-rt-class/tracking-issues.md)
 
-**Completed:** 公共 RFC 已提升。Scheduler-Core 前置 Gate source audit 已证明 full-pick acknowledgement、deferred restore、wait no-switch abort、parked handoff 和 removed abort-park surface。Checkpoint 1 已完成共享 `Realtime` class 原子切换、owner-boundary correction、两个 selector build、112 项 KUnit runtime、source/doc validation 与独立 review；`APOLLYON-RT-001`、`KETER-RT-005`、`KETER-RT-006` 已 neutralize。noirq bucket allocation 风险按用户裁定记录为 accepted limitation。
+**Completed:** 公共 RFC 已提升。Scheduler-Core 前置 Gate source audit 已证明 full-pick acknowledgement、deferred restore、wait no-switch abort、parked handoff 和 removed abort-park surface。Checkpoint 1 已完成共享 `Realtime` class 原子切换、owner-boundary correction、两个 selector build、112 项 KUnit runtime、source/doc validation 与独立 review；`APOLLYON-RT-001`、`KETER-RT-005`、`KETER-RT-006` 已 neutralize。Checkpoint 2 由用户在 RT/RR 默认配置下完整运行整套 LTP 测例关闭。noirq bucket allocation 风险按用户裁定记录为 accepted limitation。
 
-**In Progress:** 无。Checkpoint 2 尚未启动，RT/RR 与 RT/FIFO 用户态 smoke 仍明确记为 unrun。
+**In Progress:** 无。事务已完成。
 
-**Open Blockers:** Checkpoint 1 无 blocker。Checkpoint 2 若需要新增 smoke app、rootfs、runner 或 kernel write set，必须按 implementation plan 停止并提交 expansion request。
+**Open Blockers:** 无。FIFO 用户态专项验证未运行，但按用户裁定不属于本 RFC 的关闭 blocker。
 
-**Next Action:** 进入 Checkpoint 2 前先确认现有 workload 是否足以分别证明 RT/RR progress 与 RT/FIFO no-timeslice、explicit-yield、block/wake；不足时先走 write-set review，不直接修改调度语义。
+**Next Action:** 无。若后续需要 FIFO 用户态专项证据、运行期 policy transaction 或不同 priority 验证，另开 follow-up。
 
 **Do Not Redo:** 不重新设计 wait-core / pending acknowledgement；不把 RT payload 暂时伪装成 `RoundRobin`；不硬编码临时 quantum；不保留双 queue fallback；不通过 task-local state 或隐藏 setter 制造测试入口。
 
@@ -203,8 +203,18 @@ worker 不修改 transaction/RFC；总控负责 execution facts。ignored 根 `k
 
 ## Open Items
 
-- RT/RR 与 RT/FIFO 用户态 smoke 属于 Checkpoint 2，当前未运行。
+- 无 RFC blocker。FIFO 用户态 no-timeslice、explicit-yield 与 block/wake 专项 smoke 未运行；这不是已知缺陷，也不在本 RFC 的关闭条件内。
 
 ## Closure
 
-事务仍 Active。只有 Checkpoint 1 原子 cutover、后续集成验证和 user-run / unrun 状态明确后，才按 RFC 收口。
+### 2026-07-13 - Checkpoint 2 用户验证与事务收口
+
+**用户侧证据：** 用户确认在 RT/RR 调度类作为 compile-time default 的配置下完整运行了整套 LTP 测例。该结果作为真实用户态 workload、yield、block/wake 和长链路调度集成证据；这里只记录整套运行完成，不宣称每个 LTP case 都通过。
+
+**证据裁定：** Checkpoint 1 已有 RT/RR 与 RT/FIFO selector build、focused KUnit、source audit 和独立 review，分别覆盖 priority、bucket、FIFO no-timeslice、RR quantum、placement 和 owner boundary。用户的整套 RT/RR LTP 运行补齐 runtime integration 证据，不作为上述算法 proof 的替代。
+
+**FIFO 边界：** 用户裁定本轮不要求 FIFO 用户态专项验证。RT/FIFO build 与 focused KUnit 证据保留；no-timeslice、explicit-yield 和 block/wake 专项 smoke 明确记为 `Not Run`，不写成 PASS，也不作为第一版收口 blocker。未来若需要该运行证据，另开 follow-up，不重开已关闭的 Checkpoint 2。
+
+**结论：** Checkpoint 2 关闭，事务状态更新为 Completed，RFC 第一版收口。已登记的 noirq `VecDeque` allocation limitation 保持有效；ABI policy syscall、动态 policy transaction、bandwidth control、不同 priority runtime ordering 和 procfs observation 仍在 RFC 非目标边界外。
+
+**Agent-run 文档验证：** 本次仅修改收口文档；`git diff --check` 与 `mdbook build docs` 均通过。未重复运行 kernel build、QEMU 或 LTP，运行时证据使用上述用户侧整套 RT/RR LTP 结果。

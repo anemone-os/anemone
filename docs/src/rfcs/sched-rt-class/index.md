@@ -1,12 +1,12 @@
 # RFC-20260711-sched-rt-class
 
-**状态：** Accepted for Implementation
+**状态：** Closed
 **负责人：** doruche, Codex
 **最后更新：** 2026-07-13
 **领域：** scheduler / realtime / FIFO / RR / scheduler class
 **事务日志：** [2026-07-12-sched-rt-class](../../devlog/transactions/2026-07-12-sched-rt-class.md)
 **开放问题：** 见 [Tracking Issues](./tracking-issues.md)
-**下一步：** Checkpoint 1 已关闭；按事务日志进入 Checkpoint 2 的 RT/RR 与 RT/FIFO 用户态 lifecycle smoke，新增 harness/write set 前必须先 review。
+**下一步：** 第一版已收口；运行期调度属性、不同 priority 验证或 FIFO 用户态专项验证如需继续，另开 follow-up。
 
 ## 摘要
 
@@ -211,15 +211,12 @@ priority correctness 通过理论、source audit 与 focused KUnit 闭合：
 - FIFO policy 无 quantum state。
 - RR decrement、补满、无 peer continuation 与有 peer rotation。
 
-用户态只验证同 priority lifecycle：
+用户态验证边界为默认 RT/RR 下的整体集成与 lifecycle 稳定性：
 
-- RT/RR build：多个 CPU-bound worker 不主动 yield，仍都获得进展。
-- RT/FIFO build：受控 worker 在显式 yield 前证明同 priority peer 不会因 tick 自动运行；yield 后 peer 获得执行。
-- 受控 yield 与 block/wake workload 证明真实 class transaction 接线。
+- RT/RR build 已由用户完整运行整套 LTP 测例，作为真实用户态 workload、yield、block/wake 与长链路调度集成证据；该记录不表示每个 LTP case 都通过。
+- RT/FIFO selector 已通过 build，FIFO no-timeslice 与 shared-class lifecycle 由 source audit 和 focused KUnit 覆盖；本 RFC 不再要求 FIFO 用户态专项 smoke 才能收口。
 - 不要求用户态制造不同 priority，不增加 test-only syscall、隐藏 setter 或临时 service-kthread priority。
 - 不以精确 quantum、吞吐比例或 latency bound 作为第一版 gate。
-
-具体 test app、rootfs 路由、运行顺序和 agent/user 分工留待 `implementation.md` 后续收敛。
 
 ## 接受边界
 
@@ -229,6 +226,7 @@ priority correctness 通过理论、source audit 与 focused KUnit 闭合：
 - effective RT policy、priority 与 RR remaining budget 由 `RtEntity` 单独拥有。
 - 编译期 default selector 是没有属性 syscall 时的正式验证入口。
 - compile-time default selector 只在 RT/FIFO 与 RT/RR 之间选择；默认值沿用当前 legacy RoundRobin 行为。
+- 第一版运行时集成以用户完成的 RT/RR 整套 LTP 运行为关闭证据；FIFO 用户态专项验证明确未运行且不阻塞本 RFC。
 - 第一版明确接受无 bandwidth control 导致的 RT starvation。
 - `Scheduler` trait surface 足够，不因 RT 引入 catch-all event 或新的 core policy state。
 
@@ -278,12 +276,6 @@ priority correctness 通过理论、source audit 与 focused KUnit 闭合：
 
 ## 收口
 
-本 RFC 的第一版收口应区分：
+第一版已经收口：共享 `Realtime` class、FIFO/RR policy、priority bucket、RR quantum、class dispatch 与 capability-gated entity mutation 均已实现；RT/RR 与 RT/FIFO selector build、focused KUnit、source audit 和独立 review 已通过。用户在 RT/RR 默认配置下完整运行了整套 LTP 测例，作为用户态集成证据；这不表示所有 LTP case 均通过。FIFO 用户态专项验证未运行，并按用户裁定不作为第一版关闭条件。
 
-- class 算法和 transaction 接线已实现；
-- RT/RR 与 RT/FIFO 两种 compile-time default 构建状态；
-- source/KUnit 已证明的 priority 语义；
-- 用户态已运行和未运行的同 priority smoke；
-- 明确延期的 ABI、动态 policy transaction、bandwidth control 与 priority runtime validation。
-
-具体阶段、证据记录和 handoff 以 [迁移实施计划](./implementation.md) 与事务日志为准；实现期不得把阶段事实复制回本页。
+noirq `VecDeque` allocation 仍是已登记限制。ABI 调度属性、动态 policy transaction、bandwidth control、不同 priority runtime validation 与未来 FIFO 专项验证均不在本次收口内；阶段证据见 [事务日志](../../devlog/transactions/2026-07-12-sched-rt-class.md)。

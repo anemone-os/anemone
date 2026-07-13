@@ -16,7 +16,7 @@
 - arrival 只在 candidate priority 严格高于 current 时请求抢占。
 - FIFO 不因 tick 轮转；RR 只在 quantum 到期且存在同 priority peer 时轮转。
 - `Realtime > Idle` 是唯一跨 class precedence。
-- RT/FIFO 与 RT/RR 可以通过 Kconfig 构建并运行用户态 smoke；默认值沿用当前 legacy RoundRobin 行为。
+- RT/FIFO 与 RT/RR 都可以通过 Kconfig 构建；默认值沿用当前 legacy RoundRobin 行为。第一版用户态集成由 RT/RR 整套 LTP 运行关闭，FIFO 用户态专项验证不作为闭合条件。
 - 没有任何调度属性 syscall、测试入口或普通 task setter 能修改已发布 task 的 effective RT state。
 
 ## 非目标
