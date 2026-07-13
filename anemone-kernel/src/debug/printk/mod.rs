@@ -134,16 +134,16 @@ mod klog {
                     #[macro_export]
                     macro_rules! [<k $name ln>] {
                         () => {
-                            $crate::kprint!($level, "\n");
+                            $crate::kprint!($level, "\r\n");
                         };
                         (noprint) => {
-                            $crate::kprint!(noprint, $level, "\n");
+                            $crate::kprint!(noprint, $level, "\r\n");
                         };
                         (noprint, $dollar($args:tt)*) => {
-                            $crate::kprint!(noprint, $level, "{}\n", format_args!($dollar($args)*));
+                            $crate::kprint!(noprint, $level, "{}\r\n", format_args!($dollar($args)*));
                         };
                         ($dollar($args:tt)*) => {
-                            $crate::kprint!($level, "{}\n", format_args!($dollar($args)*));
+                            $crate::kprint!($level, "{}\r\n", format_args!($dollar($args)*));
                         }
                     }
                 )*
