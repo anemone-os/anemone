@@ -69,22 +69,32 @@ fn parse_riscv_isa(isa: &str) -> Option<Vec<&str>> {
 /// # Safety
 ///
 /// - Caller must ensure that the provided `fdt` is valid.
-pub unsafe fn early_scan_cpu_count(fdt: VirtAddr) -> usize {
+pub unsafe fn early_scan_cpu_count(fdt: VirtAddr, bsp_physical_id: PhysCpuId) -> usize {
     let fdt = unsafe { fdt::Fdt::from_ptr(fdt.as_ptr()) }.expect("failed to parse device tree");
 
-    let mut ncpus = 0;
+    let mut ignored_cpu_count = 0;
 
-    for cpu in fdt.root().cpus().iter() {
+    for (slot, cpu) in fdt.root().cpus().iter().enumerate() {
         let cpuid = cpu.clone().reg::<u32>().first().unwrap_or_else(|e| {
-            panic!("error finding cpu id for cpu in slot #{:}: {:?}", ncpus, e)
+            panic!("error finding cpu id for cpu in slot #{:}: {:?}", slot, e)
         });
+        let physical_id = PhysCpuId::new(cpuid as usize);
+        if !physical_id.is_within_platform_bound() {
+            kwarningln!(
+                "ignoring {} from CPU node #{} because it exceeds MAX_PHYS_CPU_ID ({})",
+                physical_id,
+                slot,
+                MAX_PHYS_CPU_ID
+            );
+            continue;
+        }
         if validate_cpu_node(cpu) {
-            register_cpu(PhysCpuId::new(cpuid as usize));
-            ncpus += 1;
+            if unsafe { register_cpu(physical_id, bsp_physical_id) }.is_none() {
+                ignored_cpu_count += 1;
+            }
         }
     }
-    finish_cpu_registration();
-    ncpus
+    unsafe { finish_cpu_registration(bsp_physical_id, ignored_cpu_count) }
 }
 
 fn validate_cpu_node(cpu_node: fdt::nodes::cpus::Cpu) -> bool {

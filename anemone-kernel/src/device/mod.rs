@@ -16,7 +16,10 @@ pub mod discovery;
 
 pub mod bus;
 mod cpu;
-pub use cpu::{CpuArchTrait, CpuId, PhysCpuId, cpu_count, finish_cpu_registration, register_cpu};
+pub use cpu::{
+    CpuArchTrait, CpuId, CpuTable, PhysCpuId, PhysCpuTable, cpu_count, finish_cpu_registration,
+    register_cpu,
+};
 pub mod kobject;
 pub mod resource;
 

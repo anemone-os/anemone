@@ -173,7 +173,7 @@ impl<T> PerCpu<T> {
         let current_cpu_id = cur_cpu_id();
         assert_ne!(cpu_id, current_cpu_id);
 
-        unsafe { f(self.get(PERCPU_BASES[cpu_id.logical_id()]).inner()) }
+        unsafe { f(self.get(PERCPU_BASES[cpu_id]).inner()) }
     }
 }
 
@@ -281,7 +281,7 @@ mod primitives {
         let current_cpu_id = cur_cpu_id();
         assert_ne!(cpu_id, current_cpu_id);
         unsafe {
-            let instance = CORE_LOCAL.get(PERCPU_BASES[cpu_id.logical_id()]);
+            let instance = CORE_LOCAL.get(PERCPU_BASES[cpu_id]);
             f(instance.inner())
         }
     }
@@ -405,20 +405,15 @@ pub use preempt_counter::{PreemptGuard, allow_preempt};
 /// This array is used for storing percpu base addresses for all CPUs.
 ///
 /// When we want to access a not local percpu variable, we'll use this.
-static mut PERCPU_BASES: [usize; MAX_CPUS] = [0; MAX_CPUS];
+static mut PERCPU_BASES: CpuTable<usize> = CpuTable::new([0; MAX_LOGICAL_CPUS]);
 
 /// Most of the time you should not call this function. This is only used for
 /// constructing a trapframe on a remote CPU.
 pub fn percpu_base(cpu_id: CpuId) -> usize {
     let ncpus = ncpus();
     assert!(cpu_id.logical_id() < ncpus);
-    let base = unsafe { PERCPU_BASES[cpu_id.logical_id()] };
-    assert_ne!(
-        base,
-        0,
-        "percpu base for {} is not initialized yet",
-        cpu_id
-    );
+    let base = unsafe { PERCPU_BASES[cpu_id] };
+    assert_ne!(base, 0, "percpu base for {} is not initialized yet", cpu_id);
     base
 }
 
@@ -477,7 +472,7 @@ mod init_routines {
                 );
                 percpu_slice.copy_from_slice(stub_slice);
 
-                PERCPU_BASES[logical_id] = cur_vpn.to_virt_addr().get() as usize;
+                PERCPU_BASES[cpu_id] = cur_vpn.to_virt_addr().get() as usize;
 
                 let core_local = {
                     let core_local_ptr = {
@@ -500,7 +495,7 @@ mod init_routines {
 
     pub unsafe fn ap_init(ap_id: CpuId) {
         unsafe {
-            let base = PERCPU_BASES[ap_id.logical_id()];
+            let base = PERCPU_BASES[ap_id];
             CpuArch::set_percpu_base(core::ptr::with_exposed_provenance_mut(base));
         }
     }

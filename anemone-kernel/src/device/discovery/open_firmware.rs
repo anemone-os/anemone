@@ -263,9 +263,8 @@ mod early {
         fdt.root().cpus().common_timebase_frequency()
     }
 
-    // `pub unsafe fn early_scan_cpu_count(fdt: VirtAddr) -> usize`
-    // We moved this function to every specific architecture, because different
-    // architectures have different ways to validate the CPU node.
+    // CPU count scanning lives in each architecture because CPU-node
+    // validation is architecture-specific.
 }
 use device_tree::{DeviceNodeHandle, DeviceStatus, PHandle};
 pub use early::*;

@@ -36,7 +36,8 @@ use crate::{
 /// Per-CPU bootstrap stacks used before the regular per-CPU stack remap is in
 /// place.
 /// Unlike other per-CPU stacks, this one is indexed by [PhysCpuId], so that it can be used before the CPU topology is fully initialized.
-static mut STACK0: [RawKernelStack; MAX_CPUS] = [RawKernelStack::ZEROED; MAX_CPUS];
+static mut STACK0: PhysCpuTable<RawKernelStack> =
+    PhysCpuTable::new([RawKernelStack::ZEROED; MAX_PHYS_CPU_ID + 1]);
 
 /// Temporary I/O space base address used during early boot before the full
 /// memory manager is online.
@@ -238,7 +239,7 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
 
     unsafe {
         // needed by percpu initialization.
-        early_scan_cpu_count(fdt_va);
+        early_scan_cpu_count(fdt_va, bsp_physical_id);
         let bsp_id = CpuId::from_physical_id(bsp_physical_id).unwrap_or_else(|| {
             panic!(
                 "bootstrap {} was not registered",
@@ -372,7 +373,7 @@ pub fn wake_up_aps(bsp_id: CpuId) {
 
 #[inline(always)]
 unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
-    let physical_id = cur_cpu_id().physical_id().get();
+    let physical_id = cur_cpu_id().physical_id();
     let new_stack_top = GUARDED_STACK_TOPS.get()[physical_id];
 
     // This is the last ID-based scheduler stack lookup. The first context
@@ -391,7 +392,7 @@ unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
 
 /// Physical-CPU-indexed guarded scheduler stack tops, filled by
 /// [remap_boot_stack].
-static GUARDED_STACK_TOPS: MonoOnce<[VirtAddr; MAX_CPUS]> = unsafe { MonoOnce::new() };
+static GUARDED_STACK_TOPS: MonoOnce<PhysCpuTable<VirtAddr>> = unsafe { MonoOnce::new() };
 
 /// Remap every CPU's bootstrap stack ([`STACK0`]) into the remap region with a
 /// guard page at the bottom.
@@ -407,7 +408,8 @@ unsafe fn remap_boot_stack() {
     let stack0_sppn =
         unsafe { VirtAddr::new(core::ptr::addr_of!(STACK0) as u64).kvirt_to_phys() }.page_down();
 
-    let mut tops: [VirtAddr; MAX_CPUS] = [VirtAddr::new(0); MAX_CPUS];
+    let mut tops: PhysCpuTable<VirtAddr> =
+        PhysCpuTable::new([VirtAddr::new(0); MAX_PHYS_CPU_ID + 1]);
 
     for logical_id in 0..ncpus() {
         let cpu_id = CpuId::new(logical_id);
@@ -435,7 +437,7 @@ unsafe fn remap_boot_stack() {
 
         let stack_top = (stack_vpn + KSTACK_PAGES as u64).to_virt_addr();
 
-        tops[physical_slot] = stack_top;
+        tops[physical_id] = stack_top;
 
         kinfoln!(
             "{} ({}): scheduler stack remapped with guard page at [{:#x}, {:#x}), stack [{:#x}, {:#x}), from [{:#x}, {:#x}]",

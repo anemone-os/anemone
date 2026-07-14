@@ -1,10 +1,10 @@
 # 2026-07-14 - CPU Logical / Physical ID
 
-**Status:** Completed
+**Status:** Validation Pending
 **Owners:** EDGW_, Codex
 **Area:** CPU discovery / bootstrap / per-CPU / scheduler / interrupt / architecture
 **Canonical Plan:** [RFC-20260714-cpu-logical-physical-id](../../rfcs/cpu-logical-physical-id/index.md)
-**Current Phase:** Closed
+**Current Phase:** Post-close correction / user validation
 
 ## Scope
 
@@ -14,9 +14,11 @@
 
 ## Invariants
 
-- registry Vec 下标是连续逻辑 ID，元素是对应物理 ID。
+- registry 的逻辑索引前缀是连续逻辑 ID 到物理 ID 的唯一映射。
 - registry 是 mapping 和 CPU count 的唯一真相源，AP 启动前永久封存。
 - 软件 owner 使用 `CpuId`，最终硬件边界使用 `PhysCpuId`。
+- platform `MAX_PHYS_CPU_ID` 与 kconfig `MAX_LOGICAL_CPUS` 分别拥有物理 ID backing 和逻辑启用容量。
+- 固定 per-CPU backing 通过 `CpuTable` / `PhysCpuTable` 限制索引身份。
 - 反向映射是 bootstrap-only 的 O(CPU 数量) 操作。
 - `STACK0` 和 guarded scheduler stack 按物理槽位归属；进入 scheduler 后由 `sched_ctx.sp` 维持。
 
@@ -63,3 +65,40 @@
 ## Closure
 
 逻辑/物理 CPU identity 拆分已实现并通过 RISC-V、LoongArch 构建；用户确认 RISC-V 实机运行通过。RFC 状态改为 `Implemented / Closed`。CPU hotplug、超出静态 scheduler stack 槽位范围的物理 ID 和完整 PLIC DT context 不在本设计范围内。
+
+### 2026-07-14 - 更正：PLIC follow-up 文档层级
+
+前文 `Next` 将后续 PLIC DT context 解析预设为 follow-up RFC。实际改动局限于 PLIC
+device-tree 解析和同一设备 owner 内的运行时映射，不需要跨子系统 contract 或阶段 gate，
+因此按 [PLIC device-tree context 小迭代记录](../changes/2026-07-14-plic-dt-context.md)
+归档，不建立独立 RFC 或事务日志。CPU identity 本身的范围和不变量不变。
+
+### 2026-07-14 - Post-close 静态无锁 Registry 与逻辑容量语义
+
+**Phase:** post-close implementation feedback
+
+**Change:** 用户要求用固定 cache-padded 槽位替换带锁 `Vec`，并进一步明确 registry 不应加锁。最终 registry 使用 `[CachePadded<MonoOnce<PhysCpuId>>; MAX_CPUS]`；BSP 是 AP 启动前的唯一 writer，槽位先初始化、逻辑计数后推进，`registration_complete` 以 Release/Acquire 发布整个前缀。两架构 early scan 把 BSP 物理 ID 传给 registry：`MAX_CPUS` 只限制逻辑 CPU 数，超限时保留 BSP 和前 `MAX_CPUS - 1` 个 AP，统一打印 `kwarningln!` 并忽略剩余可用 CPU。
+
+**Audit:** registry 不再持有 `Vec` 或 `NoIrqRwLock`；容量判断只使用已注册逻辑 CPU/AP 数，不比较 `PhysCpuId` 数值。BSP 槽位在扫描 BSP 节点前即通过 AP 上限预留，因此不依赖设备树把 BSP 排在前部。
+
+**Validation:** Pending dual-architecture build and source audit.
+
+### 2026-07-14 - 更正：物理 ID 上界与逻辑 CPU 容量拆分
+
+**Phase:** post-close runtime feedback correction
+
+**Symptom:** 用户运行在 VisionFive 2 上完成 `PhysCpuId(1)`、`PhysCpuId(2)` 的 scheduler stack remap 后，于 RISC-V `remap_boot_stack()` 处理下一 CPU 时 panic：长度 3 的数组被索引 3。该证据由用户在对话中提供，agent 未持有完整原始日志。
+
+**Root Cause:** 单一 platform `MAX_CPUS=3` 同时充当最大启用逻辑 CPU 数和物理 ID 索引数组长度。逻辑数量 3 的合法拓扑可以包含物理 ID 1、2、3，但物理 ID 3 不能索引长度 3 的 `GUARDED_STACK_TOPS`。这不是 registry 截断顺序问题，而是配置 owner 与数组索引域混用。
+
+**Change:** platform config 改为含端点的 `max_phys_cpu_id` / `MAX_PHYS_CPU_ID`，kconfig 新增 `max_logical_cpus` / `MAX_LOGICAL_CPUS`。early scan 遇到物理 ID 越界时逐个 `kwarningln!` 并跳过，随后仍按逻辑上限保留 BSP 和前 N-1 个 AP。新增全内联 `CpuTable` / `PhysCpuTable`：registry 与 `PERCPU_BASES` 使用逻辑索引，`STACK0` 与 guarded tops 使用物理索引；`PhysCpuTable` 保持 transparent layout 供入口汇编访问。
+
+**Validation:** Agent 在用户要求停止测试前完成当前 `visionfive2-rv64` 的 `just build`，生成值为 `MAX_LOGICAL_CPUS=3`、`MAX_PHYS_CPU_ID=4`；`git diff --check` 和 split-bound source audit 通过。`just fmt kernel --check` 仍被 write set 外既有 `lwext4`、PLIC、generated defs 和 kthread 格式差异阻塞，本轮命中的文件已按 formatter 输出修正但未按用户要求复跑。LoongArch 构建与 VisionFive 2 运行时复验未运行，由用户接手。
+
+### 2026-07-15 - Typed Array 默认容量与 VisionFive 2 复验
+
+**Phase:** post-close runtime validation
+
+**Change:** typed container 最终命名为 `CpuTable` / `PhysCpuTable`，并增加可覆盖的 const 泛型容量；默认值分别为 `MAX_LOGICAL_CPUS` 和 `MAX_PHYS_CPU_ID + 1`。现有 registry、per-CPU base 与 bootstrap stack 调用均使用默认容量，索引类型边界保持不变。
+
+**Validation:** 用户确认修正后的 VisionFive 2 运行测试成功，原 `PhysCpuId(3)` guarded-stack 越界未再出现。该证据由用户提供，agent 未持有原始运行日志。LoongArch 构建仍未运行，事务保持 validation pending。

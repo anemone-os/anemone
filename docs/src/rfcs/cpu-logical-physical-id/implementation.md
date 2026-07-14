@@ -1,6 +1,6 @@
 # CPU Logical / Physical ID 迁移实施计划
 
-**状态：** Completed
+**状态：** Active
 **最后更新：** 2026-07-14
 **父 RFC：** [RFC-20260714-cpu-logical-physical-id](./index.md)
 **不变量：** [CPU Logical / Physical ID 不变量](./invariants.md)
@@ -11,6 +11,7 @@
 - 软件内部默认传 `CpuId`，只在最终硬件边界转换成 `PhysCpuId`。
 - scheduler stack 保留物理槽位，不把固件前置条件伪装成逻辑数组语义。
 - registry 只支持 early registration 和永久封存，不提前设计 hotplug。
+- registry 利用 BSP 单写者和 AP 启动前封存实现静态无锁发布；platform `MAX_PHYS_CPU_ID` 与 kconfig `MAX_LOGICAL_CPUS` 分别拥有物理和逻辑容量。
 - 实现事实写事务日志；若硬件证据推翻 accepted boundary，先回写 RFC 再改代码。
 
 ## 阶段 1：Registry 与架构发现
@@ -19,8 +20,8 @@
 
 交付：
 
-- 在 `device/cpu.rs` 定义 `CpuId`、`PhysCpuId` 和锁保护的 `Vec<PhysCpuId>` registry。
-- `register_cpu()` 以 Vec 下标分配逻辑 ID，`finish_cpu_registration()` 封存拓扑。
+- 在 `device/cpu.rs` 定义 `CpuId`、`PhysCpuId` 和静态固定容量 registry。
+- `register_cpu()` 以静态槽位下标分配逻辑 ID，`finish_cpu_registration()` 通过 Release/Acquire 协议封存拓扑。
 - RISC-V 与 LoongArch 各自的 `early_scan_cpu_count()` 注册通过架构检查的 CPU。
 - 从 `open_firmware` 删除通用 CPU count scanner。
 
@@ -64,7 +65,7 @@
 
 交付：
 
-- 两架构入口汇编保持物理 ID 索引 `STACK0`，不增加检查。
+- 两架构入口汇编保持物理 ID 索引 `STACK0`；platform 物理 ID 上界决定 backing 长度。
 - `remap_boot_stack()` 只映射已注册 CPU，但 backing 和 guarded top 均按物理槽位归属。
 - `switch_to_guarded()` 注释说明这是最后一次 ID-based scheduler stack lookup。
 
@@ -96,6 +97,27 @@
 
 后续若出现任一失败，必须重新打开事务日志并回到 RFC review，不能用重新假设物理 ID 连续来绕过。
 
+## Post-close Gate C1：静态 Registry、拆分容量与 Typed Tables
+
+**状态：** Active
+
+交付：
+
+- registry 使用 `CpuTable<CachePadded<MonoOnce<PhysCpuId>>>`，不分配 `Vec`，运行期查询不加锁。
+- BSP 是 early scan 唯一 writer；槽位初始化和逻辑计数在封存前完成，由 Release/Acquire 标志发布。
+- platform `max_phys_cpu_id` 生成含端点的 `MAX_PHYS_CPU_ID`；扫描越界 CPU 时逐个 warning 并跳过。
+- kconfig `max_logical_cpus` 生成 `MAX_LOGICAL_CPUS`；超限时保留 BSP 和前 `MAX_LOGICAL_CPUS - 1` 个 AP，统一 warning 后忽略其余 CPU。
+- `PERCPU_BASES` 与 registry 使用默认容量的 `CpuTable`；`STACK0` 与 guarded tops 使用默认容量的 `PhysCpuTable`，所有 table 函数内联。
+
+审计：
+
+- 两架构扫描都把 BSP 物理 ID 传给统一 registry owner，不能各自实现不同的截断策略。
+- 搜索确认没有遗留生产用 `MAX_CPUS`，没有 registry 读写锁或启动期 `Vec`，CPU-indexed 固定数组不再接受裸 `usize`。
+
+验证：agent 已完成 VisionFive 2 `just build`、`git diff --check` 和 CPU identity source audit；用户已确认容量拆分后的 VisionFive 2 运行测试通过。LoongArch 构建仍由用户执行。
+
+退出条件：LoongArch 构建通过；VisionFive 2 的 physical-ID-indexed stack 表越界已由用户复验 neutralize。
+
 ## 旁路审计清单
 
 - 搜索 `cur_cpu_id().get()`、`cpuid().get()` 和 CPU-facing `usize` 参数。
@@ -111,9 +133,13 @@
 - 2026-07-14：用户要求 Vec 显式上锁，移除 `UnsafeCell` 方案；反向查询补充全 CPU 线性扫描成本注释。
 - 2026-07-14：用户要求副作用与断言分离；registry publish、CPU 查询和范围检查均先求值再断言。
 - 2026-07-14：用户要求日志直接格式化逻辑 `CpuId`；保留 `logical_id()` 仅用于索引、范围判断、ABI 和 procfs 数值。
+- 2026-07-14：用户要求 registry 改为固定 cache-padded 槽位，并明确 `MAX_CPUS` 是逻辑 CPU 数上限；超限策略改为保留 BSP 和前 `MAX_CPUS - 1` 个 AP。
+- 2026-07-14：用户进一步要求 registry 不加锁；利用既有 BSP 单写者阶段，把槽位改为 `MonoOnce<PhysCpuId>`，由封存标志 Release/Acquire 发布完整前缀。
+- 2026-07-14：用户运行在 `PhysCpuId(3)` 索引长度 3 的 guarded-stack 表时 panic，证明旧 `MAX_CPUS` 同时表示逻辑数量与物理 ID backing 是错误 contract；容量拆为 platform `MAX_PHYS_CPU_ID` 和 kconfig `MAX_LOGICAL_CPUS`，固定 per-CPU 数组改用 typed wrappers。
+- 2026-07-15：用户要求 typed tables 使用默认 const 容量并缩短名称；最终类型为 `CpuTable<T, N = MAX_LOGICAL_CPUS>` 与 `PhysCpuTable<T, N = MAX_PHYS_CPU_ID + 1>`，VisionFive 2 运行复验通过。
 
 以上反馈均保持 RFC 的逻辑/物理身份目标，只收紧实现形状，没有削弱不变量。
 
 ## Write Set
 
-实现涉及：CPU registry、两架构 CPU discovery/bootstrap/IPI、per-CPU、IPI core、scheduler/kthread/timer、PLIC、procfs 和依赖清理。未改变 syscall ABI、CPU hotplug、PLIC DT 解析或入口汇编协议。
+实现涉及：CPU registry、两架构 CPU discovery/bootstrap/IPI、per-CPU、IPI core、scheduler/kthread/timer、PLIC、procfs、platform/kconfig 常量 owner 和依赖清理。未改变 syscall ABI、CPU hotplug、PLIC DT 解析或入口汇编协议。

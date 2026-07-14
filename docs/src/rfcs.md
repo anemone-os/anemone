@@ -89,7 +89,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
-- [RFC-20260714-cpu-logical-physical-id](./rfcs/cpu-logical-physical-id/index.md)：已实现并关闭；把连续逻辑 `CpuId` 与固件/硬件可见 `PhysCpuId` 分离，以锁保护的 registry 作为映射和 CPU 数量的唯一真相源，并明确 scheduler stack 保留物理槽位索引的 bootstrap 边界。
+- [RFC-20260714-cpu-logical-physical-id](./rfcs/cpu-logical-physical-id/index.md)：物理/逻辑 identity 与 typed array 修正已实现、用户验证待完成；platform `MAX_PHYS_CPU_ID` 与 kconfig `MAX_LOGICAL_CPUS` 分开约束物理 ID backing 和最大启用逻辑 CPU 数，固定 per-CPU 数组使用 typed index wrappers。
 - [RFC-20260629-vfs-direct-user-io](./rfcs/vfs-direct-user-io/index.md)：已实现第一版；定义普通文件 `read` / `readv` / `pread*` 与 `write` / `writev` / `pwrite*` 的 direct userspace copy 边界、VFS-owned user-buffer cursor、fanotify transaction adapter，以及 ramfs/ext4 regular file read/write hook。`RWF_*`、完整 Linux `O_DIRECT`、mmap coherency、splice family 和 non-regular backend hook 仍按 register / follow-up 边界处理。
 - [RFC-20260620-threaded-timer-event](./rfcs/threaded-timer-event/index.md)：已实现第一版；定义 soft timer 的 threaded completion lane、per-CPU timer worker、通用 `Late` initcall、`timerfd` / `ITIMER_REAL` 迁移边界，以及 wait-core timeout 非目标。
 - [RFC-20260618-sched-wait-preempt-arming](./rfcs/sched-wait-preempt-arming/index.md)：阶段 3 已关闭；定义 wait-core 在 kernel preempt 下的 wake-prerequisite / parkability contract、scheduler entry split、preempt-defer、token-bound wait sleep、single-active-wait 诊断和 feedback routing 边界；未运行的 trace / fairness evidence gap 见事务日志。

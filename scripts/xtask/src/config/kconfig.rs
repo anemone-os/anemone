@@ -58,6 +58,7 @@ pub struct Parameters {
     pub console_log_level: Option<u8>,
     pub kstack_shift_kb: Option<u64>,
     pub remap_shift_gb: Option<u64>,
+    pub max_logical_cpus: Option<usize>,
     pub max_ident_len_bytes: Option<usize>,
     pub max_path_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
@@ -128,6 +129,8 @@ pub const CONSOLE_LOG_LEVEL: u8 = {};
 pub const KSTACK_SHIFT_KB: u64 = {};
 /// Remap region size as a power of 2 in GB
 pub const REMAP_SHIFT_GB: u64 = {};
+/// Maximum number of logical CPUs enabled by this kernel
+pub const MAX_LOGICAL_CPUS: usize = {};
 /// Maximum length of identity strings in bytes
 pub const MAX_IDENT_LEN_BYTES: usize = {};
 /// Maximum length of file names in bytes. This is always equal to 
@@ -200,6 +203,7 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             default_or!(console_log_level),
             default_or!(kstack_shift_kb),
             default_or!(remap_shift_gb),
+            default_or!(max_logical_cpus),
             default_or!(max_ident_len_bytes),
             default_or!(max_path_len_bytes),
             default_or!(max_processes),
