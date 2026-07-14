@@ -23,7 +23,6 @@
 
 ## Completed
 
-- [PLIC DT Context](./2026-07-14-plic-dt-context.md)
 - [CPU Logical / Physical ID](./2026-07-14-cpu-logical-physical-id.md)
 - [Sched RT Class](./2026-07-12-sched-rt-class.md)
 - [Sched Wait Preempt Arming](./2026-07-06-sched-wait-preempt-arming.md)
