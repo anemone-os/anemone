@@ -24,6 +24,8 @@ docs/src/rfcs/<short-slug>/
 
 `index.md` 与 `implementation.md` 必须存在。`invariants.md` 在协议、不变量、锁序、生命周期或证明义务复杂时创建。`tracking-issues.md` 在 design review 或实现反馈发现会影响实现顺序、review gate、停止边界或验收判断的设计问题时创建。`backgrounds/` 用于历史背景、旧问题清单、被拒绝方案和旧计划归档；背景材料不能覆盖 canonical 结论。
 
+RFC 的历史版本由整个仓库的 Git 保存，不创建独立仓库或 `index-v1.md` 一类并列副本。页首 `修订` 使用单调的 `R0`、`R1`、`R2`：Draft 写 `Draft`，第一次 accepted contract 记为 `R0`，之后只有 accepted semantics 变化才递增。拼写、链接、措辞、证据补充和不改变 contract 的实现计划调整不递增修订。
+
 RFC 一旦进入实现阶段，必须创建对应事务日志：
 
 ```text
@@ -38,10 +40,11 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 # RFC-YYYYMMDD-short-slug
 
 **状态：** Draft / Accepted for Implementation / Superseded / Closed
+**修订：** Draft / R0 / R1 / ...
 **负责人：** name1, name2
 **最后更新：** YYYY-MM-DD
 **领域：** scheduler / fs / mm / ...
-**事务日志：** Draft 阶段可写 `None`；进入实现阶段后必须链接对应 transaction。
+**事务日志：** Draft 阶段可写 `None`；进入实现阶段后必须链接对应 transaction；存在后续修订时列出各修订事务。
 **开放问题：** 简短列出当前 blocker、可带入实现的 gated item 或待决问题；没有则写 `None`。
 **下一步：** 下一次 review、probe / vertical slice、迁移阶段、验证或收口动作。
 
@@ -74,6 +77,17 @@ Canonical：
 背景材料：
 
 - [背景材料索引](./backgrounds/index.md)
+
+## 修订记录
+
+只记录已经接受的语义版本。普通文字修正和未接受的提案不增加一行；旧文本通过 Git 历史恢复，不在 RFC 目录复制快照。
+
+| 修订 | 日期 | 状态 | 语义变化 | Review / 事务 |
+| --- | --- | --- | --- | --- |
+| R0 | YYYY-MM-DD | Closed | 初始 accepted contract。 | [初始事务](../../devlog/transactions/YYYY-MM-DD-short-slug.md) |
+| R1 | YYYY-MM-DD | Accepted for Implementation / Closed | accepted contract / invariant / owner / ABI / 接受边界变化摘要。 | [R1 事务](../../devlog/transactions/YYYY-MM-DD-short-slug-r1.md)，或 docs-only review / 小迭代记录。 |
+
+页首 `状态` 始终描述当前修订。后续修订已接受但仍需实现时，状态写 `Accepted for Implementation`；该修订验证收口后再写 `Closed`。旧修订的状态保留在本表和对应事务中。
 
 ## 方案
 
@@ -138,6 +152,7 @@ Canonical：
 **状态：** Draft / Canonical / Superseded
 **最后更新：** YYYY-MM-DD
 **父 RFC：** [RFC-YYYYMMDD-short-slug](./index.md)
+**适用修订：** Draft / R0 / R1 / ...
 
 ## 闭合条件
 
@@ -185,6 +200,7 @@ Canonical：
 **最后更新：** YYYY-MM-DD
 **父 RFC：** [RFC-YYYYMMDD-short-slug](./index.md)
 **不变量：** [不变量需求](./invariants.md)
+**当前修订：** Draft / R0 / R1 / ...
 
 ## 迁移原则
 
@@ -267,6 +283,18 @@ write set：
 ## 实现期反馈记录
 
 - YYYY-MM-DD：反馈来源、影响分类、是否保持目标/不变量、更新位置、transaction devlog 链接。
+
+## 修订实施记录
+
+已完成阶段保留原结论；后续修订追加独立段落。若新修订使旧计划不再成立，在旧段标记 superseded 关系，不能让冲突计划同时表现为当前有效。
+
+### R1 - 简短修订标题
+
+**Trigger:** 触发修订的框架、证据或约束变化。
+**Semantic Delta:** 受影响的 accepted contract / invariant / owner / ABI / 接受边界；具体结论已折回 canonical `index.md` / `invariants.md`。
+**Write Set / Gates:** 本修订的实施范围、review gate 和停止条件。
+**Validation Floor:** 本修订必须完成的验证。
+**Transaction:** [R1 事务](../../devlog/transactions/YYYY-MM-DD-short-slug-r1.md)；纯文档修订写 `None` 并链接 review / 小迭代证据。
 
 ## Write Set 扩展记录
 

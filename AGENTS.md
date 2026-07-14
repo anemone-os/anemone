@@ -135,6 +135,10 @@ utils（工具）、misc（杂项）或某人的姓名首字母缩写
 
 实现期发现的问题按影响归属：执行事实写 transaction devlog；阶段顺序、write set、验证 floor 或停止条件变化回写 `implementation.md`；不变量、状态所有权、ABI 边界或接受边界变化回写 RFC canonical 文本和 `tracking-issues.md`；接受限制或开放缺陷进入 register / current limitations。不要用临时兼容层绕过无法分类的设计反馈。
 
+RFC 的文本历史统一由整个仓库的 Git 保存，不为单个 RFC 建仓库，也不创建 `index-v1.md`、默认 amendment 文件或并列 canonical 副本。RFC 页首的 `R0`、`R1` 只标记已接受的语义修订：目标、非目标、accepted contract、不变量、状态所有权、ABI / 可见语义或接受边界变化时递增；措辞、证据和保持 contract 的实现计划调整不递增。
+
+语义修订接受后，`index.md` / `invariants.md` 原地维护 consolidated contract，`implementation.md` / `tracking-issues.md` 保留增量实施和问题历史。RFC 页首状态描述当前修订：新修订已接受但待实现时回到 `Accepted for Implementation`，收口后再回到 `Closed`。Closed RFC 的新修订需要代码实现时建立引用该修订的新 transaction，不重新打开或继续延长旧的 Completed transaction。若核心目标、主要 owner、整体方案或大部分证明边界已经改变，应新建 follow-up RFC 并标明 supersede 关系。
+
 ---
 
 **这些指南有效的表现：** diff 中不必要的改动减少；因过度复杂化而重写的次数减少；在实现前先提问澄清，而不是在犯错后再询问。

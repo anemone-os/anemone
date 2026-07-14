@@ -103,6 +103,7 @@ docs/src/devlog/changes/2026-05-22-short-slug/
 **Owners:** name1, name2
 **Area:** scheduler / futex / timer
 **Canonical Plan:** 计划、不变量文档或 RFC 链接。
+**Canonical Revision:** `R0` / `R1` / ...；非 RFC 事务写 `N/A`。
 **Current Phase:** 阶段名或阶段编号。
 
 ## Scope
