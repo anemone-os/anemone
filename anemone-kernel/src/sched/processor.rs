@@ -8,8 +8,46 @@
 
 use crate::{
     prelude::*,
-    sched::class::{PendingResched, PreemptDecision, ReschedCause, RunQueue, TickAction},
+    sched::class::{PreemptDecision, RunQueue, TickAction},
 };
+
+/// Scheduler-core snapshot proving that an owner-CPU full pick is pending.
+///
+/// The snapshot deliberately carries no request cause. Class-local policy
+/// obligations must be committed in the owning entity before requesting the
+/// pick; the caller that destructively takes this value owns deferred restore.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PendingResched {
+    pending_pick: bool,
+}
+
+impl PendingResched {
+    const fn empty() -> Self {
+        Self {
+            pending_pick: false,
+        }
+    }
+
+    pub const fn is_empty(self) -> bool {
+        !self.pending_pick
+    }
+
+    fn request(&mut self) {
+        self.pending_pick = true;
+    }
+
+    fn take(&mut self) -> Self {
+        let pending = *self;
+        *self = Self::empty();
+        pending
+    }
+
+    const fn union(self, other: Self) -> Self {
+        Self {
+            pending_pick: self.pending_pick || other.pending_pick,
+        }
+    }
+}
 
 /// This struct must be accessed with interrupts disabled. it's a bit overkill,
 /// but it's the simplest way to guarantee that there won't be any race
@@ -24,7 +62,7 @@ struct Processor {
     runq: RunQueue,
     sched_ctx: TaskContext,
     /// Coalesced request latch for the next owner-CPU full pick. A completed
-    /// pick acknowledges all prior causes; no-pick paths keep or restore them.
+    /// pick acknowledges the latch; no-pick paths keep or restore it.
     pending_resched: PendingResched,
 }
 
@@ -99,13 +137,13 @@ fn is_local_current_task(task: &Arc<Task>) -> bool {
     })
 }
 
-/// Add one typed scheduler-core reschedule request.
+/// Request one owner-CPU full pick.
 ///
 /// This function will disable interrupts, since pending requests are also
 /// accessed by IPI and timer handlers.
-pub fn request_resched(cause: ReschedCause) {
+pub fn request_resched() {
     with_intr_disabled(|| {
-        PROCESSOR.with_mut(|proc| proc.pending_resched.insert(cause));
+        PROCESSOR.with_mut(|proc| proc.pending_resched.request());
     })
 }
 
@@ -114,17 +152,11 @@ pub fn request_resched(cause: ReschedCause) {
 /// This function will disable interrupts, since pending requests are also
 /// accessed by IPI and timer handlers.
 pub fn take_pending_resched() -> PendingResched {
-    with_intr_disabled(|| {
-        PROCESSOR.with_mut(|proc| {
-            let pending = proc.pending_resched;
-            proc.pending_resched = PendingResched::empty();
-            pending
-        })
-    })
+    with_intr_disabled(|| PROCESSOR.with_mut(|proc| proc.pending_resched.take()))
 }
 
-/// Restore a deferred preemption request without losing concurrently added
-/// causes.
+/// Restore a deferred preemption request without losing a request added after
+/// the destructive take.
 pub fn restore_pending_resched(pending: PendingResched) {
     if pending.is_empty() {
         return;
@@ -269,9 +301,9 @@ pub fn local_requeue_yielded_current(task: Arc<Task>) {
 }
 
 /// Requeue the current task after involuntary preemption.
-pub fn local_requeue_preempted_current(task: Arc<Task>, pending: PendingResched) {
+pub fn local_requeue_preempted_current(task: Arc<Task>) {
     requeue_current_with(task, |runq, task, now| {
-        runq.requeue_preempted_current(task, now, pending);
+        runq.requeue_preempted_current(task, now);
     });
 }
 
@@ -357,7 +389,7 @@ pub fn local_sched_tick() {
         )
     });
     if let TickAction::RequestResched = action {
-        request_resched(ReschedCause::Tick);
+        request_resched();
     }
 }
 
@@ -484,7 +516,29 @@ impl Processor {
         if self.runq.decide_preempt_current(current, candidate, now)
             == PreemptDecision::RequestResched
         {
-            self.pending_resched.insert(ReschedCause::RunnableArrival);
+            self.pending_resched.request();
         }
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn test_pending_resched_take_restore_and_union() {
+        let mut slot = PendingResched::empty();
+        assert!(slot.is_empty());
+
+        slot.request();
+        let taken = slot.take();
+        assert!(!taken.is_empty());
+        assert!(slot.is_empty());
+
+        // Model a new request racing after the destructive take. Restoring the
+        // old snapshot is a union and cannot erase the new request.
+        slot.request();
+        slot = slot.union(taken);
+        assert!(!slot.is_empty());
     }
 }

@@ -78,7 +78,7 @@ pub(super) trait Scheduler: Send + Sync {
     fn requeue_yielded_current(&mut self, task: Arc<Task>, now: Instant);
 
     /// Requeue the current task after involuntary preemption.
-    fn requeue_preempted_current(&mut self, task: Arc<Task>, now: Instant, pending: PendingResched);
+    fn requeue_preempted_current(&mut self, task: Arc<Task>, now: Instant);
 
     /// Requeue the current task after a parked wait was woken in place.
     fn handoff_woken_current(&mut self, task: Arc<Task>, now: Instant);
@@ -120,64 +120,4 @@ pub enum TickAction {
 pub enum PreemptDecision {
     KeepCurrent,
     RequestResched,
-}
-
-/// Source of a pending scheduler-core reschedule request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReschedCause {
-    Tick,
-    RunnableArrival,
-}
-
-impl ReschedCause {
-    const fn bit(self) -> u8 {
-        match self {
-            Self::Tick => 1 << 0,
-            Self::RunnableArrival => 1 << 1,
-        }
-    }
-}
-
-/// Value flags passed into class-local preempted-current transactions.
-///
-/// This is not a processor-state capability. The caller that destructively
-/// takes processor pending state owns deferred restore; scheduler classes only
-/// read a copied value while handling a preempted-current transaction.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PendingResched {
-    bits: u8,
-}
-
-impl PendingResched {
-    pub const fn empty() -> Self {
-        Self { bits: 0 }
-    }
-
-    pub const fn from_cause(cause: ReschedCause) -> Self {
-        Self { bits: cause.bit() }
-    }
-
-    pub const fn is_empty(self) -> bool {
-        self.bits == 0
-    }
-
-    pub const fn contains(self, cause: ReschedCause) -> bool {
-        self.bits & cause.bit() != 0
-    }
-
-    pub fn insert(&mut self, cause: ReschedCause) {
-        self.bits |= cause.bit();
-    }
-
-    pub const fn union(self, other: Self) -> Self {
-        Self {
-            bits: self.bits | other.bits,
-        }
-    }
-}
-
-impl Default for PendingResched {
-    fn default() -> Self {
-        Self::empty()
-    }
 }

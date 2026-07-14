@@ -1,8 +1,8 @@
 use crate::{
     prelude::*,
     sched::class::{
-        PendingResched, PreemptDecision, SchedClassKind, Scheduler, TickAction,
-        entity::SchedEntityMutToken, fair::Fair, idle::Idle, rt::Realtime,
+        PreemptDecision, SchedClassKind, Scheduler, TickAction, entity::SchedEntityMutToken,
+        fair::Fair, idle::Idle, rt::Realtime,
     },
 };
 
@@ -67,13 +67,8 @@ impl RunQueue {
         self.requeue_current_with(task, CurrentRequeueTransaction::Yielded { now });
     }
 
-    pub fn requeue_preempted_current(
-        &mut self,
-        task: Arc<Task>,
-        now: Instant,
-        pending: PendingResched,
-    ) {
-        self.requeue_current_with(task, CurrentRequeueTransaction::Preempted { now, pending });
+    pub fn requeue_preempted_current(&mut self, task: Arc<Task>, now: Instant) {
+        self.requeue_current_with(task, CurrentRequeueTransaction::Preempted { now });
     }
 
     pub fn handoff_woken_current(&mut self, task: Arc<Task>, now: Instant) {
@@ -204,9 +199,9 @@ impl RunQueue {
                 CurrentRequeueTransaction::Yielded { now } => {
                     self.realtime.requeue_yielded_current(task.clone(), now)
                 },
-                CurrentRequeueTransaction::Preempted { now, pending } => self
-                    .realtime
-                    .requeue_preempted_current(task.clone(), now, pending),
+                CurrentRequeueTransaction::Preempted { now } => {
+                    self.realtime.requeue_preempted_current(task.clone(), now)
+                },
                 CurrentRequeueTransaction::WokenHandoff { now } => {
                     self.realtime.handoff_woken_current(task.clone(), now)
                 },
@@ -215,9 +210,9 @@ impl RunQueue {
                 CurrentRequeueTransaction::Yielded { now } => {
                     self.fair.requeue_yielded_current(task.clone(), now)
                 },
-                CurrentRequeueTransaction::Preempted { now, pending } => self
-                    .fair
-                    .requeue_preempted_current(task.clone(), now, pending),
+                CurrentRequeueTransaction::Preempted { now } => {
+                    self.fair.requeue_preempted_current(task.clone(), now)
+                },
                 CurrentRequeueTransaction::WokenHandoff { now } => {
                     self.fair.handoff_woken_current(task.clone(), now)
                 },
@@ -245,16 +240,9 @@ enum EnqueueTransaction {
 
 #[derive(Clone, Copy)]
 enum CurrentRequeueTransaction {
-    Yielded {
-        now: Instant,
-    },
-    Preempted {
-        now: Instant,
-        pending: PendingResched,
-    },
-    WokenHandoff {
-        now: Instant,
-    },
+    Yielded { now: Instant },
+    Preempted { now: Instant },
+    WokenHandoff { now: Instant },
 }
 
 #[cfg(feature = "kunit")]
@@ -309,7 +297,7 @@ mod kunits {
         assert!(!task.sched_on_runq());
         runq.set_next_task(&selected, Instant::now());
 
-        runq.requeue_preempted_current(task.clone(), Instant::now(), PendingResched::empty());
+        runq.requeue_preempted_current(task.clone(), Instant::now());
         assert!(task.sched_on_runq());
 
         let selected = runq.pick_next_task();

@@ -7,7 +7,7 @@ use crate::prelude::*;
 
 use super::nice_weight;
 use crate::sched::class::{
-    PendingResched, PreemptDecision, SchedClassKind, Scheduler, TickAction,
+    PreemptDecision, SchedClassKind, Scheduler, TickAction,
     entity::{SchedClassPrv, SchedEntity, SchedEntityMutToken},
 };
 
@@ -352,12 +352,7 @@ impl Scheduler for Stride {
         self.refresh_placement_floor();
     }
 
-    fn requeue_preempted_current(
-        &mut self,
-        task: Arc<Task>,
-        _now: Instant,
-        _pending: PendingResched,
-    ) {
+    fn requeue_preempted_current(&mut self, task: Arc<Task>, _now: Instant) {
         let pass = self.assert_current(&task);
         self.clear_current(&task);
         self.enqueue_ready(task, pass);
@@ -505,7 +500,7 @@ mod kunits {
     }
 
     fn publish_preempted(stride: &mut Stride, task: Arc<Task>) {
-        stride.requeue_preempted_current(task.clone(), Instant::now(), PendingResched::empty());
+        stride.requeue_preempted_current(task.clone(), Instant::now());
         set_on_runq(&task, true);
     }
 

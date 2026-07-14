@@ -3,7 +3,7 @@
 use crate::prelude::*;
 
 use super::{
-    PendingResched, PreemptDecision, ReschedCause, SchedClassKind, Scheduler, TickAction,
+    PreemptDecision, SchedClassKind, Scheduler, TickAction,
     entity::{SchedClassPrv, SchedEntity, SchedEntityMutToken},
 };
 
@@ -57,7 +57,13 @@ impl RtPriority {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RtPolicy {
     Fifo,
-    RoundRobin { remaining_ticks: u32 },
+    RoundRobin {
+        remaining_ticks: u32,
+        /// Committed tail-placement obligation for the active execution
+        /// segment. It never describes queued or blocked state and remains
+        /// true until a class lifecycle transaction consumes or clears it.
+        rotation_due: bool,
+    },
 }
 
 impl RtPolicy {
@@ -70,11 +76,15 @@ impl RtPolicy {
     const fn round_robin() -> Self {
         Self::RoundRobin {
             remaining_ticks: RT_RR_FULL_QUANTUM_TICKS,
+            rotation_due: false,
         }
     }
 
     fn assert_valid(&self) {
-        if let Self::RoundRobin { remaining_ticks } = self {
+        if let Self::RoundRobin {
+            remaining_ticks, ..
+        } = self
+        {
             assert!(
                 (1..=RT_RR_FULL_QUANTUM_TICKS).contains(remaining_ticks),
                 "RT/RR remaining budget is outside the configured quantum"
@@ -84,11 +94,40 @@ impl RtPolicy {
 
     fn assert_fresh(&self) {
         self.assert_valid();
-        if let Self::RoundRobin { remaining_ticks } = self {
+        if let Self::RoundRobin {
+            remaining_ticks,
+            rotation_due,
+        } = self
+        {
             assert_eq!(
                 *remaining_ticks, RT_RR_FULL_QUANTUM_TICKS,
                 "fresh RT/RR entity must start with a full quantum"
             );
+            assert!(
+                !rotation_due,
+                "fresh RT/RR entity cannot carry a rotation obligation"
+            );
+        }
+    }
+
+    const fn rotation_due(&self) -> bool {
+        match self {
+            Self::Fifo => false,
+            Self::RoundRobin { rotation_due, .. } => *rotation_due,
+        }
+    }
+
+    fn commit_rotation(&mut self) {
+        let Self::RoundRobin { rotation_due, .. } = self else {
+            panic!("RT/FIFO cannot commit an RR rotation obligation");
+        };
+        *rotation_due = true;
+    }
+
+    fn take_rotation_due(&mut self) -> bool {
+        match self {
+            Self::Fifo => false,
+            Self::RoundRobin { rotation_due, .. } => core::mem::replace(rotation_due, false),
         }
     }
 }
@@ -192,6 +231,7 @@ impl Realtime {
     fn enqueue_at(&mut self, task: Arc<Task>, placement: QueuePlacement) {
         let (priority, on_runq) = Self::entity_snapshot(&task);
         assert!(!on_runq, "task is already marked on the run queue");
+        Self::assert_rotation_clear(&task);
         debug_assert!(
             self.queues
                 .iter()
@@ -217,20 +257,6 @@ impl Realtime {
         !self.queues[priority.bucket_index()].is_empty()
     }
 
-    fn has_higher_priority_task(&self, priority: RtPriority) -> bool {
-        self.queues[(priority.bucket_index() + 1)..]
-            .iter()
-            .any(|queue| !queue.is_empty())
-    }
-
-    fn preempted_placement(pending: PendingResched) -> QueuePlacement {
-        if pending.contains(ReschedCause::Tick) {
-            QueuePlacement::Back
-        } else {
-            QueuePlacement::Front
-        }
-    }
-
     fn decide_priority_preemption(current: RtPriority, candidate: RtPriority) -> PreemptDecision {
         if candidate > current {
             PreemptDecision::RequestResched
@@ -239,15 +265,46 @@ impl Realtime {
         }
     }
 
-    fn assert_tick_source_is_rr(task: &Arc<Task>) {
+    fn assert_rotation_clear(task: &Arc<Task>) {
         task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
             let rt = entity.realtime();
             rt.assert_valid();
             assert!(
-                matches!(rt.policy, RtPolicy::RoundRobin { .. }),
-                "only an RT/RR task may carry a Tick reschedule cause"
+                !rt.policy.rotation_due(),
+                "queued or inactive RT task cannot carry a rotation obligation"
             );
         });
+    }
+
+    fn clear_rotation(task: &Arc<Task>) {
+        task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
+            assert!(
+                !entity.on_runq,
+                "only an active RT task can clear a rotation obligation"
+            );
+            let rt = entity.realtime_mut();
+            rt.assert_valid();
+            let _ = rt.policy.take_rotation_due();
+            rt.assert_valid();
+        });
+    }
+
+    fn consume_preempted_placement(task: &Arc<Task>) -> QueuePlacement {
+        task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
+            assert!(
+                !entity.on_runq,
+                "preempted RT current must not be marked on the run queue"
+            );
+            let rt = entity.realtime_mut();
+            rt.assert_valid();
+            let placement = if rt.policy.take_rotation_due() {
+                QueuePlacement::Back
+            } else {
+                QueuePlacement::Front
+            };
+            rt.assert_valid();
+            placement
+        })
     }
 }
 
@@ -279,9 +336,9 @@ impl RtPolicy {
         self.assert_valid();
         let expired = match self {
             Self::Fifo => false,
-            Self::RoundRobin { remaining_ticks } => {
-                consume_rr_tick(remaining_ticks, RT_RR_FULL_QUANTUM_TICKS)
-            },
+            Self::RoundRobin {
+                remaining_ticks, ..
+            } => consume_rr_tick(remaining_ticks, RT_RR_FULL_QUANTUM_TICKS),
         };
         self.assert_valid();
         expired
@@ -318,39 +375,17 @@ impl Scheduler for Realtime {
     }
 
     fn requeue_yielded_current(&mut self, task: Arc<Task>, _now: Instant) {
+        Self::clear_rotation(&task);
         self.enqueue_at(task, QueuePlacement::Back);
     }
 
-    fn requeue_preempted_current(
-        &mut self,
-        task: Arc<Task>,
-        _now: Instant,
-        pending: PendingResched,
-    ) {
-        let priority = Self::priority(&task);
-        if pending.contains(ReschedCause::RunnableArrival) {
-            assert!(
-                self.has_higher_priority_task(priority),
-                "RunnableArrival must come from a strictly higher RT priority"
-            );
-        }
-        if pending.contains(ReschedCause::Tick) {
-            assert!(
-                self.has_peer_at(priority),
-                "RT/RR Tick rotation requires a same-priority peer"
-            );
-            // A Tick request is a coalesced scheduler-core latch, not proof
-            // that this task was switched out immediately at expiry. With
-            // deferred kernel preemption, later timer ticks can consume the
-            // newly refilled quantum before the pending request reaches this
-            // transaction. Preserve that valid remainder while rotating.
-            Self::assert_tick_source_is_rr(&task);
-        }
-
-        self.enqueue_at(task, Self::preempted_placement(pending));
+    fn requeue_preempted_current(&mut self, task: Arc<Task>, _now: Instant) {
+        let placement = Self::consume_preempted_placement(&task);
+        self.enqueue_at(task, placement);
     }
 
     fn handoff_woken_current(&mut self, task: Arc<Task>, _now: Instant) {
+        Self::clear_rotation(&task);
         self.enqueue_at(task, QueuePlacement::Back);
     }
 
@@ -360,6 +395,7 @@ impl Scheduler for Realtime {
             !on_runq,
             "blocked RT current must not be marked on the run queue"
         );
+        Self::clear_rotation(task);
     }
 
     fn put_prev_exiting(&mut self, task: &Arc<Task>, _now: Instant) {
@@ -368,6 +404,7 @@ impl Scheduler for Realtime {
             !on_runq,
             "exiting RT current must not be marked on the run queue"
         );
+        Self::clear_rotation(task);
     }
 
     fn pick_next_task(&mut self) -> Option<Arc<Task>> {
@@ -386,22 +423,31 @@ impl Scheduler for Realtime {
     fn set_next_task(&mut self, task: &Arc<Task>, _now: Instant) {
         let (_, on_runq) = Self::entity_snapshot(task);
         assert!(!on_runq, "next RT task must not be marked on the run queue");
+        Self::assert_rotation_clear(task);
     }
 
     fn task_tick(&mut self, task: &Arc<Task>, _now: Instant) -> TickAction {
-        let (priority, expired) =
-            task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
-                assert!(
-                    !entity.on_runq,
-                    "running RT task must not be marked on the run queue during tick"
-                );
-                let rt = entity.realtime_mut();
-                rt.assert_valid();
-                let expired = rt.policy.consume_tick();
-                (rt.priority, expired)
-            });
+        let priority = Self::priority(task);
+        let has_peer = self.has_peer_at(priority);
+        let committed = task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
+            assert!(
+                !entity.on_runq,
+                "running RT task must not be marked on the run queue during tick"
+            );
+            let rt = entity.realtime_mut();
+            rt.assert_valid();
+            assert_eq!(rt.priority, priority, "RT priority changed during tick");
+            let expired = rt.policy.consume_tick();
+            if expired && has_peer {
+                // Commit class policy before asking scheduler core for a pick.
+                // Later queue changes cannot revoke this active-segment debt.
+                rt.policy.commit_rotation();
+            }
+            rt.assert_valid();
+            expired && has_peer
+        });
 
-        if expired && self.has_peer_at(priority) {
+        if committed {
             TickAction::RequestResched
         } else {
             TickAction::None
@@ -470,6 +516,45 @@ mod kunits {
         action
     }
 
+    fn policy(task: &Arc<Task>) -> RtPolicy {
+        task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
+            entity.realtime().policy
+        })
+    }
+
+    fn tick_after_committed_rotation(rt: &mut Realtime, current: &Arc<Task>) -> u32 {
+        let action = rt.task_tick(current, Instant::now());
+        let expected_remaining = if RT_RR_FULL_QUANTUM_TICKS == 1 {
+            assert_eq!(action, TickAction::RequestResched);
+            RT_RR_FULL_QUANTUM_TICKS
+        } else {
+            assert_eq!(action, TickAction::None);
+            RT_RR_FULL_QUANTUM_TICKS - 1
+        };
+        assert_eq!(
+            policy(current),
+            RtPolicy::RoundRobin {
+                remaining_ticks: expected_remaining,
+                rotation_due: true,
+            }
+        );
+        expected_remaining
+    }
+
+    fn setup_committed_rotation() -> (Realtime, Arc<Task>, Arc<Task>) {
+        let priority = RtPriority::new(50);
+        let current = fresh_task(priority, RtPolicy::round_robin());
+        let peer = fresh_task(priority, RtPolicy::fifo());
+        let mut rt = Realtime::new();
+        rt.enqueue_new(peer.clone());
+        assert_eq!(
+            exhaust_quantum(&mut rt, &current),
+            TickAction::RequestResched
+        );
+        assert!(policy(&current).rotation_due());
+        (rt, current, peer)
+    }
+
     #[kunit]
     fn test_rt_priority_bounds_order_and_bucket_mapping() {
         assert_eq!(RtPriority::MIN.get(), 1);
@@ -521,18 +606,14 @@ mod kunits {
     #[kunit]
     fn test_higher_priority_arrival_requeues_current_at_head() {
         let priority = RtPriority::new(50);
-        let current = fresh_task(priority, RtPolicy::fifo());
+        let current = fresh_task(priority, RtPolicy::round_robin());
         let peer = fresh_task(priority, RtPolicy::round_robin());
         let higher = fresh_task(RtPriority::new(51), RtPolicy::fifo());
         let mut rt = Realtime::new();
 
         rt.enqueue_woken(peer.clone());
         rt.enqueue_new(higher.clone());
-        rt.requeue_preempted_current(
-            current.clone(),
-            Instant::now(),
-            PendingResched::from_cause(ReschedCause::RunnableArrival),
-        );
+        rt.requeue_preempted_current(current.clone(), Instant::now());
 
         assert_next_is(&mut rt, &higher);
         assert_next_is(&mut rt, &current);
@@ -540,7 +621,7 @@ mod kunits {
     }
 
     #[kunit]
-    fn test_tick_and_arrival_requeue_expired_rr_at_tail() {
+    fn test_committed_rotation_requeues_rr_at_tail_before_higher_priority_pick() {
         let priority = RtPriority::new(50);
         let current = fresh_task(priority, RtPolicy::round_robin());
         let peer = fresh_task(priority, RtPolicy::fifo());
@@ -553,12 +634,9 @@ mod kunits {
             exhaust_quantum(&mut rt, &current),
             TickAction::RequestResched
         );
-        rt.requeue_preempted_current(
-            current.clone(),
-            Instant::now(),
-            PendingResched::from_cause(ReschedCause::Tick)
-                .union(PendingResched::from_cause(ReschedCause::RunnableArrival)),
-        );
+        assert!(policy(&current).rotation_due());
+        rt.requeue_preempted_current(current.clone(), Instant::now());
+        assert!(!policy(&current).rotation_due());
 
         assert_next_is(&mut rt, &higher);
         assert_next_is(&mut rt, &peer);
@@ -577,20 +655,10 @@ mod kunits {
             exhaust_quantum(&mut rt, &current),
             TickAction::RequestResched
         );
-        let delayed_action = rt.task_tick(&current, Instant::now());
-        let expected_remaining = if RT_RR_FULL_QUANTUM_TICKS == 1 {
-            assert_eq!(delayed_action, TickAction::RequestResched);
-            RT_RR_FULL_QUANTUM_TICKS
-        } else {
-            assert_eq!(delayed_action, TickAction::None);
-            RT_RR_FULL_QUANTUM_TICKS - 1
-        };
+        let expected_remaining = tick_after_committed_rotation(&mut rt, &current);
 
-        rt.requeue_preempted_current(
-            current.clone(),
-            Instant::now(),
-            PendingResched::from_cause(ReschedCause::Tick),
-        );
+        assert!(policy(&current).rotation_due());
+        rt.requeue_preempted_current(current.clone(), Instant::now());
 
         assert_next_is(&mut rt, &peer);
         assert_next_is(&mut rt, &current);
@@ -598,10 +666,92 @@ mod kunits {
             assert_eq!(
                 entity.realtime().policy,
                 RtPolicy::RoundRobin {
-                    remaining_ticks: expected_remaining
+                    remaining_ticks: expected_remaining,
+                    rotation_due: false,
                 }
             );
         });
+    }
+
+    #[kunit]
+    fn test_repeated_expiry_coalesces_one_rotation_obligation() {
+        let (mut rt, current, _) = setup_committed_rotation();
+
+        assert_eq!(
+            exhaust_quantum(&mut rt, &current),
+            TickAction::RequestResched
+        );
+        assert!(policy(&current).rotation_due());
+
+        rt.requeue_preempted_current(current.clone(), Instant::now());
+        assert!(!policy(&current).rotation_due());
+    }
+
+    #[kunit]
+    fn test_peer_disappearance_does_not_revoke_committed_rotation() {
+        let (mut rt, current, peer) = setup_committed_rotation();
+
+        assert_next_is(&mut rt, &peer);
+        assert!(rt.pick_next_task().is_none());
+        rt.requeue_preempted_current(current.clone(), Instant::now());
+
+        assert!(!policy(&current).rotation_due());
+        assert_next_is(&mut rt, &current);
+    }
+
+    #[kunit]
+    fn test_yield_handoff_block_and_exit_clear_rotation_obligation() {
+        let (mut yielded_rt, yielded, _) = setup_committed_rotation();
+        let yielded_remaining = tick_after_committed_rotation(&mut yielded_rt, &yielded);
+        yielded_rt.requeue_yielded_current(yielded.clone(), Instant::now());
+        assert_eq!(
+            policy(&yielded),
+            RtPolicy::RoundRobin {
+                remaining_ticks: yielded_remaining,
+                rotation_due: false,
+            }
+        );
+
+        let (mut handoff_rt, handoff, _) = setup_committed_rotation();
+        let handoff_remaining = tick_after_committed_rotation(&mut handoff_rt, &handoff);
+        handoff_rt.handoff_woken_current(handoff.clone(), Instant::now());
+        assert_eq!(
+            policy(&handoff),
+            RtPolicy::RoundRobin {
+                remaining_ticks: handoff_remaining,
+                rotation_due: false,
+            }
+        );
+
+        let (mut blocked_rt, blocked, _) = setup_committed_rotation();
+        let blocked_remaining = tick_after_committed_rotation(&mut blocked_rt, &blocked);
+        blocked_rt.put_prev_blocked(&blocked, Instant::now());
+        assert_eq!(
+            policy(&blocked),
+            RtPolicy::RoundRobin {
+                remaining_ticks: blocked_remaining,
+                rotation_due: false,
+            }
+        );
+        blocked_rt.enqueue_woken(blocked.clone());
+        assert_eq!(
+            policy(&blocked),
+            RtPolicy::RoundRobin {
+                remaining_ticks: blocked_remaining,
+                rotation_due: false,
+            }
+        );
+
+        let (mut exiting_rt, exiting, _) = setup_committed_rotation();
+        let exiting_remaining = tick_after_committed_rotation(&mut exiting_rt, &exiting);
+        exiting_rt.put_prev_exiting(&exiting, Instant::now());
+        assert_eq!(
+            policy(&exiting),
+            RtPolicy::RoundRobin {
+                remaining_ticks: exiting_remaining,
+                rotation_due: false,
+            }
+        );
     }
 
     #[kunit]
@@ -634,7 +784,8 @@ mod kunits {
             assert_eq!(
                 entity.realtime().policy,
                 RtPolicy::RoundRobin {
-                    remaining_ticks: RT_RR_FULL_QUANTUM_TICKS
+                    remaining_ticks: RT_RR_FULL_QUANTUM_TICKS,
+                    rotation_due: false,
                 }
             );
         });
@@ -645,5 +796,6 @@ mod kunits {
             exhaust_quantum(&mut rt, &with_peer),
             TickAction::RequestResched
         );
+        assert!(policy(&with_peer).rotation_due());
     }
 }
