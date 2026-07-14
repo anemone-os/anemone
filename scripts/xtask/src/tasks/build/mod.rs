@@ -256,7 +256,11 @@ impl<'a> BuildContext<'a> {
         cmd_echo(&objcopy);
         let status = objcopy.status()?;
         if !status.success() {
-            anyhow::bail!("rust-objcopy failed with status: {}", status);
+            anyhow::bail!(
+                "objcopy ({:?}) failed with status: {}",
+                objcopy.get_program(),
+                status
+            );
         }
 
         log_progress!(
