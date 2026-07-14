@@ -3,7 +3,10 @@
 
 use core::any::Any;
 
-use crate::device::{bus::pcie::domain::PcieIntrInfo, discovery::fwnode::FwNode};
+use crate::device::{
+    bus::pcie::domain::PcieIntrInfo,
+    discovery::fwnode::{FwNode, StdoutConfig},
+};
 
 /// Firmware node for a PCIe device, carrying optional interrupt routing info.
 #[derive(Debug)]
@@ -56,7 +59,7 @@ impl FwNode for PcieFwNode {
             .map(|intr| (&intr.parent_intr_spec).as_ref())
     }
 
-    fn is_stdout(&self) -> bool {
-        false
+    fn stdout_config(&self) -> Option<StdoutConfig<'_>> {
+        None
     }
 }

@@ -20,6 +20,106 @@ use crate::{
     utils::any_opaque::AnyOpaque,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UartParity {
+    None,
+    Odd,
+    Even,
+}
+
+impl UartParity {
+    fn as_char(self) -> char {
+        match self {
+            Self::None => 'n',
+            Self::Odd => 'o',
+            Self::Even => 'e',
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct UartLineConfig {
+    baud: u32,
+    parity: UartParity,
+    data_bits: u8,
+}
+
+impl Default for UartLineConfig {
+    fn default() -> Self {
+        Self {
+            baud: NS16550A_DEFAULT_BAUD,
+            parity: UartParity::None,
+            data_bits: 8,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UartOptionError {
+    MissingBaud,
+    InvalidBaud,
+    UnsupportedParity,
+    UnsupportedDataBits,
+    UnsupportedFlowControl,
+    TrailingCharacters,
+}
+
+fn parse_stdout_options(options: Option<&str>) -> Result<UartLineConfig, UartOptionError> {
+    let Some(options) = options else {
+        return Ok(UartLineConfig::default());
+    };
+    if options.is_empty() {
+        return Ok(UartLineConfig::default());
+    }
+
+    let baud_end = options
+        .bytes()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if baud_end == 0 {
+        return Err(UartOptionError::MissingBaud);
+    }
+    let baud = options[..baud_end]
+        .parse::<u32>()
+        .map_err(|_| UartOptionError::InvalidBaud)?;
+    if baud == 0 {
+        return Err(UartOptionError::InvalidBaud);
+    }
+
+    let mut suffix = options[baud_end..].chars();
+    let parity = match suffix.next() {
+        None => UartParity::None,
+        Some('n') => UartParity::None,
+        Some('o') => UartParity::Odd,
+        Some('e') => UartParity::Even,
+        Some(_) => return Err(UartOptionError::UnsupportedParity),
+    };
+    let data_bits = match suffix.next() {
+        None => 8,
+        Some('7') => 7,
+        Some('8') => 8,
+        Some(_) => return Err(UartOptionError::UnsupportedDataBits),
+    };
+
+    match suffix.next() {
+        None => {},
+        Some('r') => return Err(UartOptionError::UnsupportedFlowControl),
+        Some(_) => return Err(UartOptionError::TrailingCharacters),
+    }
+
+    Ok(UartLineConfig {
+        baud,
+        parity,
+        data_bits,
+    })
+}
+
+fn calculate_divisor(uartclk: u32, baud: u32) -> Option<u16> {
+    let denom = baud.checked_mul(16)?;
+    let divisor = ((uartclk as u64 + denom as u64 / 2) / denom as u64).max(1);
+    u16::try_from(divisor).ok()
+}
+
 #[derive(Debug, Opaque, Clone)]
 struct Ns16550AState {
     rc: Arc<Ns16550AStateInner>,
@@ -84,6 +184,8 @@ impl CharDev for Ns16550AState {
 mod driver_core {
     use core::fmt::Write;
 
+    use super::{UartLineConfig, UartParity};
+
     pub struct Ns16550ARegisters {
         base: *mut u8,
         reg_shift: usize,
@@ -101,7 +203,10 @@ mod driver_core {
     const LSR_DR: u8 = 1 << 0;
     const LSR_THRE: u8 = 1 << 5;
 
+    const LCR_WORD_SIZE_7: u8 = 0b10;
     const LCR_WORD_SIZE_8: u8 = 0b11;
+    const LCR_PARITY_ENABLE: u8 = 1 << 3;
+    const LCR_EVEN_PARITY: u8 = 1 << 4;
     const LCR_DLAB: u8 = 1 << 7;
 
     const FCR_ENABLE_FIFO: u8 = 1 << 0;
@@ -177,10 +282,10 @@ mod driver_core {
             self.set_dlab(false);
         }
 
-        pub fn init_8n1(&self, divisor: u16) {
+        pub(super) fn init_line(&self, divisor: u16, line: UartLineConfig) {
             self.write_reg(REG_IER_DLM, 0);
             self.write_reg(REG_IIR_FCR, FCR_ENABLE_FIFO | FCR_CLEAR_RX | FCR_CLEAR_TX);
-            self.write_reg(REG_LCR, LCR_WORD_SIZE_8);
+            self.write_reg(REG_LCR, line_control_bits(line));
             self.set_divisor(divisor);
             self.write_reg(REG_MCR, MCR_DTR | MCR_RTS | MCR_OUT2);
             self.write_reg(REG_IER_DLM, IER_RX_AVAILABLE);
@@ -233,6 +338,20 @@ mod driver_core {
         }
     }
 
+    pub(super) fn line_control_bits(line: UartLineConfig) -> u8 {
+        let mut lcr = match line.data_bits {
+            7 => LCR_WORD_SIZE_7,
+            8 => LCR_WORD_SIZE_8,
+            _ => unreachable!("UART data bits were validated while parsing console options"),
+        };
+        match line.parity {
+            UartParity::None => {},
+            UartParity::Odd => lcr |= LCR_PARITY_ENABLE,
+            UartParity::Even => lcr |= LCR_PARITY_ENABLE | LCR_EVEN_PARITY,
+        }
+        lcr
+    }
+
     impl Write for Ns16550ARegisters {
         fn write_str(&mut self, s: &str) -> core::fmt::Result {
             for byte in s.bytes() {
@@ -261,6 +380,39 @@ impl DriverOps for Ns16550ADriver {
             .expect("platform driver should only be probed with platform device");
 
         let fwnode = pdev.fwnode().ok_or(SysError::MissingFwNode)?;
+        let stdout = fwnode.stdout_config();
+        let line = match stdout {
+            Some(config) => {
+                let options = parse_stdout_options(config.options()).unwrap_or_else(|error| {
+                    // The platform bus currently logs and swallows ordinary probe
+                    // failures. An explicitly selected boot console must instead
+                    // fail closed: silently falling back can leave the system on a
+                    // different baud/parity without an observable diagnostic. Move
+                    // this policy to the boot coordinator once required-device
+                    // probe failures can propagate through the bus.
+                    panic!(
+                        "{}: invalid stdout UART options {:?}: {:?}",
+                        pdev.name(),
+                        config.options(),
+                        error
+                    )
+                });
+                kdebugln!(
+                    "{}: read stdout UART options {:?} -> {:?}",
+                    pdev.name(),
+                    config.options(),
+                    options
+                );
+                options
+            },
+            None => {
+                kdebugln!(
+                    "{}: no stdout UART options found, using default",
+                    pdev.name()
+                );
+                UartLineConfig::default()
+            },
+        };
         let uartclk = fwnode
             .prop_read_u32("clock-frequency")
             .ok_or(SysError::FwNodeLookupFailed)?;
@@ -276,18 +428,18 @@ impl DriverOps for Ns16550ADriver {
             return Err(SysError::FwNodeLookupFailed);
         }
 
-        let baud: u32 = 115200;
-        let denom = baud.saturating_mul(16);
-        if denom == 0 {
-            return Err(SysError::FwNodeLookupFailed);
-        }
-        let mut divisor = ((uartclk as u64 + (denom as u64 / 2)) / denom as u64) as u32;
-        if divisor == 0 {
-            divisor = 1;
-        }
-        if divisor > u16::MAX as u32 {
-            return Err(SysError::FwNodeLookupFailed);
-        }
+        let divisor = match calculate_divisor(uartclk, line.baud) {
+            Some(divisor) => divisor,
+            None if stdout.is_some() => {
+                panic!(
+                    "{}: stdout baud {} cannot be derived from UART clock {}",
+                    pdev.name(),
+                    line.baud,
+                    uartclk
+                );
+            },
+            None => return Err(SysError::FwNodeLookupFailed),
+        };
 
         let (base, len) = pdev
             .resources()
@@ -302,7 +454,7 @@ impl DriverOps for Ns16550ADriver {
             Ns16550ARegisters::from_raw(remap.as_ptr().as_ptr().cast(), reg_shift, reg_io_width)
         };
 
-        regs.init_8n1(divisor as u16);
+        regs.init_line(divisor, line);
 
         let state = Ns16550AState {
             rc: Arc::new(Ns16550AStateInner {
@@ -356,9 +508,15 @@ impl DriverOps for Ns16550ADriver {
         )?;
 
         let mut flags = ConsoleFlags::empty();
-        if fwnode.is_stdout() {
+        if stdout.is_some() {
             flags |= ConsoleFlags::ENABLE_ON_BOOT;
-            kinfoln!("{}: registered as stdout console", pdev.name());
+            kinfoln!(
+                "{}: registered as stdout console ({}{}{})",
+                pdev.name(),
+                line.baud,
+                line.parity.as_char(),
+                line.data_bits
+            );
         }
         register_console(Arc::new(state), flags);
 
@@ -421,6 +579,81 @@ fn handle_irq(prv_data: &AnyOpaque) {
     }
 
     kdebugln!("ns16550a: handled irq at {:#x}", inner.base.get());
+}
+
+#[kunit]
+fn stdout_options_parser() {
+    let default = UartLineConfig::default();
+    assert_eq!(parse_stdout_options(None), Ok(default));
+    assert_eq!(parse_stdout_options(Some("")), Ok(default));
+    assert_eq!(
+        parse_stdout_options(Some("115200")),
+        Ok(UartLineConfig {
+            baud: 115200,
+            parity: UartParity::None,
+            data_bits: 8,
+        })
+    );
+    assert_eq!(
+        parse_stdout_options(Some("9600e7")),
+        Ok(UartLineConfig {
+            baud: 9600,
+            parity: UartParity::Even,
+            data_bits: 7,
+        })
+    );
+    assert_eq!(
+        parse_stdout_options(Some("9600o8")),
+        Ok(UartLineConfig {
+            baud: 9600,
+            parity: UartParity::Odd,
+            data_bits: 8,
+        })
+    );
+    assert_eq!(
+        parse_stdout_options(Some("0")),
+        Err(UartOptionError::InvalidBaud)
+    );
+    assert_eq!(
+        parse_stdout_options(Some("115200x8")),
+        Err(UartOptionError::UnsupportedParity)
+    );
+    assert_eq!(
+        parse_stdout_options(Some("115200n9")),
+        Err(UartOptionError::UnsupportedDataBits)
+    );
+    assert_eq!(
+        parse_stdout_options(Some("115200n8r")),
+        Err(UartOptionError::UnsupportedFlowControl)
+    );
+}
+
+#[kunit]
+fn stdout_line_control_bits() {
+    assert_eq!(
+        driver_core::line_control_bits(UartLineConfig {
+            baud: 115200,
+            parity: UartParity::None,
+            data_bits: 8,
+        }),
+        0b0000_0011
+    );
+    assert_eq!(
+        driver_core::line_control_bits(UartLineConfig {
+            baud: 9600,
+            parity: UartParity::Odd,
+            data_bits: 7,
+        }),
+        0b0000_1010
+    );
+    assert_eq!(
+        driver_core::line_control_bits(UartLineConfig {
+            baud: 9600,
+            parity: UartParity::Even,
+            data_bits: 7,
+        }),
+        0b0001_1010
+    );
 }
 
 static MAJOR: MonoOnce<MajorNum> = unsafe { MonoOnce::new() };

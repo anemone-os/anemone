@@ -58,6 +58,7 @@ pub struct Parameters {
     pub max_fd_per_process: Option<usize>,
     pub ramdisk_count: Option<usize>,
     pub loop_device_count: Option<usize>,
+    pub ns16550a_default_baud: Option<u32>,
 }
 
 impl Parameters {
@@ -139,6 +140,8 @@ pub const MAX_FD_PER_PROCESS: usize = {};
 pub const RAMDISK_COUNT: usize = {};
 /// Number of static loop block devices to publish at boot.
 pub const LOOP_DEVICE_COUNT: usize = {};
+/// Default NS16550A baud used when stdout-path has no device-specific options.
+pub const NS16550A_DEFAULT_BAUD: u32 = {};
         "#,
             default_or!(bootstrap_heap_shift_kb),
             default_or!(log_buffer_shift_kb),
@@ -163,6 +166,7 @@ pub const LOOP_DEVICE_COUNT: usize = {};
             default_or!(max_fd_per_process),
             default_or!(ramdisk_count),
             default_or!(loop_device_count),
+            default_or!(ns16550a_default_baud),
         )
     }
 }

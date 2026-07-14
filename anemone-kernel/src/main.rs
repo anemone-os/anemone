@@ -45,10 +45,7 @@ pub mod uts;
 
 use crate::{
     device::discovery::{
-        open_firmware::{
-            get_of_node, of_platform_discovery, of_with_node_by_full_name_path, of_with_root,
-            unflatten_device_tree,
-        },
+        open_firmware::{of_init_stdout, of_platform_discovery, unflatten_device_tree},
         probe_virtual_devices,
     },
     initcall::{InitCallLevel, run_initcalls},
@@ -222,6 +219,11 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     exec_init_proc();
 }
 
+fn parse_bootargs() {
+    of_init_stdout()
+        .unwrap_or_else(|error| panic!("failed to initialize stdout-path: {:?}", error));
+}
+
 /// **System Invariant**
 ///
 /// - When application processors reach [ap_kinit], interrupts are disabled in
@@ -254,29 +256,4 @@ unsafe extern "C" fn ap_kinit(ap_id: usize) {
         KUNIT_SYNC_COUNTER.sync_with_counter();
     }
     // exit
-}
-
-fn parse_bootargs() {
-    of_with_root(|root| {
-        root.children().for_each(|child| {
-            if child.name() == "chosen" {
-                if let Some(stdout_path) = child.property("stdout-path") {
-                    if let Some(stdout_path) = stdout_path.value_as_string() {
-                        kinfoln!("stdout-path: {}", stdout_path);
-
-                        if of_with_node_by_full_name_path(stdout_path, |node| {
-                            get_of_node(node.handle()).mark_as_stdout();
-                        })
-                        .is_err()
-                        {
-                            panic!(
-                                "device tree node specified by stdout-path not found: {}",
-                                stdout_path
-                            );
-                        }
-                    }
-                }
-            }
-        })
-    });
 }

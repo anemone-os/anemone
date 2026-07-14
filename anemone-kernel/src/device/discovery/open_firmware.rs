@@ -12,13 +12,16 @@ use core::ptr::NonNull;
 use crate::{
     device::{
         bus::platform::{self, PlatformDevice},
-        discovery::fwnode::FwNode,
+        discovery::fwnode::{FwNode, StdoutConfig},
         kobject::{KObjIdent, KObject, KObjectBase},
         resource::Resource,
     },
     prelude::*,
     sync::mono::MonoOnce,
 };
+
+mod chosen;
+pub use chosen::{StdoutPathError, of_init_stdout};
 
 mod early {
 
@@ -488,10 +491,6 @@ bitflags! {
         /// so kernel won't create a PlatformDevice for
         /// it in of_platform_discovery().
         const POPULATED = 1 << 0;
-
-        /// Device with this flag set will be registered as a system console with
-        /// ConsoleFlags::ENABLED bit set.
-        const STDOUT = 1 << 1;
     }
 }
 
@@ -526,18 +525,6 @@ impl OpenFirmwareNode {
     pub fn populated(&self) -> bool {
         OfNodeFlags::from_bits_truncate(self.flags.load(Ordering::SeqCst))
             .contains(OfNodeFlags::POPULATED)
-    }
-
-    /// Mark this node as a system console with ConsoleFlags::ENABLED bit set.
-    pub fn mark_as_stdout(&self) {
-        self.flags
-            .fetch_or(OfNodeFlags::STDOUT.bits(), Ordering::SeqCst);
-    }
-
-    /// Check if this node is marked as a system console.
-    pub fn is_stdout(&self) -> bool {
-        OfNodeFlags::from_bits_truncate(self.flags.load(Ordering::SeqCst))
-            .contains(OfNodeFlags::STDOUT)
     }
 }
 
@@ -603,8 +590,8 @@ impl FwNode for OpenFirmwareNode {
         }
     }
 
-    fn is_stdout(&self) -> bool {
-        self.is_stdout()
+    fn stdout_config(&self) -> Option<StdoutConfig<'_>> {
+        chosen::stdout_config(self.handle)
     }
 }
 

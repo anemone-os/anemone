@@ -2,6 +2,21 @@ use core::{any::Any, fmt::Debug};
 
 use crate::{device::discovery::open_firmware::OpenFirmwareNode, prelude::*};
 
+#[derive(Debug, Clone, Copy)]
+pub struct StdoutConfig<'a> {
+    options: Option<&'a str>,
+}
+
+impl<'a> StdoutConfig<'a> {
+    pub(crate) fn new(options: Option<&'a str>) -> Self {
+        Self { options }
+    }
+
+    pub fn options(&self) -> Option<&'a str> {
+        self.options
+    }
+}
+
 /// Firmware node, used by drivers to read device information based on their own
 /// needs.
 ///
@@ -32,7 +47,7 @@ pub trait FwNode: Sync + Send + Any {
     fn interrupt_parent(&self) -> Option<Arc<dyn FwNode>>;
     fn interrupt_info(&self) -> Option<&[u8]>;
 
-    fn is_stdout(&self) -> bool;
+    fn stdout_config(&self) -> Option<StdoutConfig<'_>>;
 
     // TODO: add more methods for retrieving information about the hardware, on
     // demand.
