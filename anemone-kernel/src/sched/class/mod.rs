@@ -1,153 +1,177 @@
 //! Scheduler class.
 
-use crate::{
-    prelude::*,
-    sched::class::{idle::Idle, rr::RoundRobin},
-};
+use crate::prelude::*;
 
-/// TODO: list those system invariants that must be maintained by the scheduling
-/// class. e.g. [TaskStatus].
-pub trait Scheduler: Send + Sync {
-    /// Enqueue a task to the ready queue of this scheduling class.
-    fn enqueue(&mut self, task: Arc<Task>);
+use self::{idle::Idle, rt::Realtime};
 
-    /// Dequeue a task from the ready queue of this scheduling class.
-    ///
-    /// Used when:
-    /// - a task is killed, so it should be removed from the ready queue,
-    /// - a task changed its scheduling policy, so it should be removed from the
-    ///   old scheduling class's ready queue.
-    ///
-    /// etc.
+// EEVDF remains archived as `eevdf.rs`, but is not part of the production
+// scheduler class graph while the RFC is closed/deferred.
+// pub mod eevdf;
+pub mod idle;
+mod rt;
+
+mod entity;
+mod runqueue;
+
+pub(crate) use entity::SchedEntityMutToken;
+pub use entity::{SchedClassKind, SchedEntity};
+pub use runqueue::RunQueue;
+
+/// Internal scheduler-class selection precedence, ordered from high to low.
+///
+/// This is the single source of truth for cross-class selection. The order has
+/// no ABI meaning and must not be translated to or from Linux `SCHED_*` policy
+/// values. Syscall policy translation belongs at the ABI boundary.
+const CLASS_PRECEDENCE: [SchedClassKind; 2] =
+    [<Realtime as Scheduler>::KIND, <Idle as Scheduler>::KIND];
+
+impl SchedClassKind {
+    pub(super) fn in_precedence_order() -> [Self; CLASS_PRECEDENCE.len()] {
+        assert!(
+            CLASS_PRECEDENCE[0] != CLASS_PRECEDENCE[1],
+            "scheduler class precedence contains duplicate classes"
+        );
+        CLASS_PRECEDENCE
+    }
+
+    fn precedence_index(self) -> usize {
+        for (index, kind) in CLASS_PRECEDENCE.into_iter().enumerate() {
+            if kind == self {
+                return index;
+            }
+        }
+        panic!("scheduler class is missing from class precedence");
+    }
+
+    pub(super) fn outranks(self, other: Self) -> bool {
+        self.precedence_index() < other.precedence_index()
+    }
+}
+
+/// Scheduler-class local transaction surface.
+///
+/// Each method is one class-owned lifecycle transaction. Scheduler core and
+/// [`RunQueue`] choose which transaction happens and maintain global owner CPU
+/// state; class implementations keep their own queue/accounting details behind
+/// these path-specific methods.
+pub(super) trait Scheduler: Send + Sync {
+    /// Static identity used to associate this implementation with class-wide
+    /// metadata such as [`CLASS_PRECEDENCE`].
+    const KIND: SchedClassKind;
+
+    /// Place a freshly published runnable task.
+    fn enqueue_new(&mut self, task: Arc<Task>);
+
+    /// Place a task after stale-safe wake completion produced an enqueue.
+    fn enqueue_woken(&mut self, task: Arc<Task>);
+
+    /// Remove a queued task from this class.
     fn dequeue(&mut self, task: &Arc<Task>) -> bool;
 
-    /// Pick the next task to run from the ready queue of this scheduling class.
-    fn pick_next(&mut self) -> Option<Arc<Task>>;
+    /// Requeue the current task after an explicit yield.
+    fn requeue_yielded_current(&mut self, task: Arc<Task>, now: Instant);
 
-    /// Called on each timer tick. This may be used to update the scheduling
-    /// class's internal state, e.g. for time-slice based scheduling classes.
-    ///
-    /// **This method should never access current processor's percpu variable,
-    /// otherwise a reentrancy will occur and lead to panic.**
-    ///
-    /// The `cur_task` is guaranteed to have the same scheduling class as this
-    /// scheduler.
-    fn on_tick(&mut self, cur_task: &Arc<Task>) -> Option<OnTickAction>;
+    /// Requeue the current task after involuntary preemption.
+    fn requeue_preempted_current(&mut self, task: Arc<Task>, now: Instant, pending: PendingResched);
+
+    /// Requeue the current task after a parked wait was woken in place.
+    fn handoff_woken_current(&mut self, task: Arc<Task>, now: Instant);
+
+    /// Observe that the previous current task blocked and will not be requeued.
+    fn put_prev_blocked(&mut self, task: &Arc<Task>, now: Instant);
+
+    /// Observe that the previous current task is exiting and will not be
+    /// requeued.
+    fn put_prev_exiting(&mut self, task: &Arc<Task>, now: Instant);
+
+    /// Pick and remove the next runnable task from this class.
+    fn pick_next_task(&mut self) -> Option<Arc<Task>>;
+
+    /// Mark a picked task as the next execution segment.
+    fn set_next_task(&mut self, task: &Arc<Task>, now: Instant);
+
+    /// Timer-tick lifecycle transaction for the running task.
+    fn task_tick(&mut self, task: &Arc<Task>, now: Instant) -> TickAction;
+
+    /// Decide whether a newly placed candidate should preempt current.
+    fn decide_preempt_current(
+        &mut self,
+        current: &Arc<Task>,
+        candidate: &Arc<Task>,
+        now: Instant,
+    ) -> PreemptDecision;
 }
 
-/// Action to be taken on certain timer tick.
-pub enum OnTickAction {
-    Resched,
+/// Action requested by a scheduler class on timer tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TickAction {
+    None,
+    RequestResched,
 }
 
-pub mod idle;
-pub mod rr;
-// TODO: realtime, eevdf.
+/// Preemption decision requested by a scheduler class after placement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreemptDecision {
+    KeepCurrent,
+    RequestResched,
+}
 
-/// PerCpu run queue.
+/// Source of a pending scheduler-core reschedule request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReschedCause {
+    Tick,
+    RunnableArrival,
+}
+
+impl ReschedCause {
+    const fn bit(self) -> u8 {
+        match self {
+            Self::Tick => 1 << 0,
+            Self::RunnableArrival => 1 << 1,
+        }
+    }
+}
+
+/// Value flags passed into class-local preempted-current transactions.
 ///
-/// Priority (top-down):
-/// - [RoundRobin]
-/// - [Idle]
-///
-/// Reference:
-/// - https://elixir.bootlin.com/linux/v6.6.32/source/kernel/sched/sched.h#L964
-pub struct RunQueue {
-    ntasks: usize,
-
-    rr: RoundRobin,
-    idle: Idle,
+/// This is not a processor-state capability. The caller that destructively
+/// takes processor pending state owns deferred restore; scheduler classes only
+/// read a copied value while handling a preempted-current transaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PendingResched {
+    bits: u8,
 }
 
-impl RunQueue {
-    pub const fn new() -> Self {
+impl PendingResched {
+    pub const fn empty() -> Self {
+        Self { bits: 0 }
+    }
+
+    pub const fn from_cause(cause: ReschedCause) -> Self {
+        Self { bits: cause.bit() }
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.bits == 0
+    }
+
+    pub const fn contains(self, cause: ReschedCause) -> bool {
+        self.bits & cause.bit() != 0
+    }
+
+    pub fn insert(&mut self, cause: ReschedCause) {
+        self.bits |= cause.bit();
+    }
+
+    pub const fn union(self, other: Self) -> Self {
         Self {
-            ntasks: 0,
-            rr: RoundRobin::new(),
-            idle: Idle,
-        }
-    }
-
-    pub fn enqueue(&mut self, task: Arc<Task>) {
-        self.ntasks += 1;
-        task.with_sched_entity_mut(|se| {
-            match se.class {
-                SchedClassPrv::RoundRobin(()) => self.rr.enqueue(task.clone()),
-                SchedClassPrv::Idle(()) => panic!("idle task should not be enqueued"),
-            }
-            debug_assert!(!se.on_runq, "task is already on run queue");
-            se.on_runq = true;
-        });
-    }
-
-    pub fn dequeue(&mut self, task: &Arc<Task>) {
-        task.with_sched_entity_mut(|se| {
-            match se.class {
-                SchedClassPrv::RoundRobin(()) => {
-                    if self.rr.dequeue(task) {
-                        self.ntasks -= 1;
-                    } else {
-                        panic!("task not found in round-robin scheduler");
-                    }
-                },
-                SchedClassPrv::Idle(()) => panic!("idle task should not be dequeued"),
-            }
-            debug_assert!(se.on_runq, "task is not on run queue");
-            se.on_runq = false;
-        });
-    }
-
-    pub fn pick_next(&mut self) -> Arc<Task> {
-        // rr
-        if let Some(task) = self.rr.pick_next() {
-            self.ntasks -= 1;
-            task.with_sched_entity_mut(|se| {
-                debug_assert!(se.on_runq, "task is not on run queue");
-                se.on_runq = false;
-            });
-            return task;
-        }
-
-        // idle
-        self.idle
-            .pick_next()
-            .expect("idle scheduler should always have a task to run")
-    }
-
-    pub fn on_tick(&mut self, task: &Arc<Task>) -> Option<OnTickAction> {
-        match task.with_sched_entity_mut(|se| se.class) {
-            SchedClassPrv::Idle(()) => self.idle.on_tick(task),
-            SchedClassPrv::RoundRobin(()) => self.rr.on_tick(task),
+            bits: self.bits | other.bits,
         }
     }
 }
 
-/// [Copy] is implemented cz we expect this struct should be a POD type.
-#[derive(Debug, Clone, Copy)]
-pub struct SchedEntity {
-    on_runq: bool,
-    class: SchedClassPrv,
-}
-
-impl SchedEntity {
-    /// Create a new scheduling entity with the given scheduling class.
-    pub fn new(class: SchedClassPrv) -> Self {
-        Self {
-            on_runq: false,
-            class,
-        }
+impl Default for PendingResched {
+    fn default() -> Self {
+        Self::empty()
     }
-
-    /// **`on_runq` should never be accessed on a cpu which does not own the
-    /// task. Correctness of scheduling system relies on this invariant.**
-    pub fn on_runq(&self) -> bool {
-        self.on_runq
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum SchedClassPrv {
-    // TODO: time slice.
-    RoundRobin(()),
-    Idle(()),
 }

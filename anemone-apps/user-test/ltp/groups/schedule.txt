@@ -1,8 +1,10 @@
 setpriority01
 setpriority02
+getpriority01
+getpriority02
 
-sched_setparam05
+# sched_setparam05
 
-sched_setscheduler02
-sched_setscheduler03
+# sched_setscheduler02
+# sched_setscheduler03
 

@@ -1,39 +1,83 @@
 # Build Playbook
 
-## Use This Command Matrix
+Use this reference to route a task without freezing checkout-specific configuration into the skill.
 
-| Task                                | Command                                                               | Primary outputs                                                 | Notes                                                                                                                     |
-| ----------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Initialize config                   | `just defconfig`                                                      | `kconfig`                                                       | Copy `conf/.defconfig` to the repository root.                                                                            |
-| List platforms                      | `just conf list`                                                      | none                                                            | Read `conf/platforms/*.toml`.                                                                                             |
-| Switch platform                     | `just conf switch qemu-virt-rv64`                                     | updated `kconfig`                                               | Update only `[build].platform` inside `kconfig`.                                                                          |
-| Build kernel                        | `just build`                                                          | `build/anemone.elf`, `build/anemone.disasm`, `build/kernel.map` | Regenerate `anemone-kernel/src/kconfig_defs.rs`, `anemone-kernel/src/platform_defs.rs`, and `build/generated/kernel.lds`. |
-| Build one app                       | `just xtask app build init --arch riscv64`                            | `build/apps/init/`                                              | Let xtask choose the target spec and copy artifacts out of the app-local `target/` tree.                                  |
-| Build one app with extra cargo args | `just xtask app build init --arch riscv64 -- --release`               | `build/apps/init/`                                              | Pass extra driver args after `--`. Keep using xtask as the outer entrypoint.                                              |
-| Build rootfs                        | `just xtask rootfs mkfs -c conf/rootfs/minimal.toml`                  | `build/rootfs/minimal/root/`, `build/rootfs/minimal/rootfs.img` | Stage files, build listed apps, and create an ext4 image.                                                                 |
-| Run QEMU                            | `just xtask qemu --platform qemu-virt-rv64 --image build/anemone.elf` | runtime only                                                    | Ensure every image path referenced by the selected platform config already exists.                                        |
-| Clean build outputs                 | `just clean`                                                          | none                                                            | Remove `build/` and run the repo-approved cargo cleanup path.                                                             |
-| Reset generated config              | `just mrproper`                                                       | none                                                            | Remove `build/`, cargo outputs, generated defs, `kconfig`, and `disk.img`.                                                |
+## Discover Before Executing
 
-## Inspect These Files First
+Start with the live interface:
 
-- `Justfile`
-- `scripts/xtask/src/tasks/build/mod.rs`
-- `scripts/xtask/src/tasks/app/build.rs`
-- `scripts/xtask/src/tasks/app/driver/cargo.rs`
-- `scripts/xtask/src/tasks/rootfs/mkfs.rs`
-- `scripts/xtask/src/tasks/qemu.rs`
-- `scripts/xtask/src/tasks/conf.rs`
-- `conf/.defconfig`
-- `conf/platforms/*.toml`
-- `conf/rootfs/*.toml`
-- `anemone-apps/*/app.toml`
+```text
+just --list
+just xtask <command> --help
+```
 
-## Apply These Repo-Specific Caveats
+Then read the corresponding Justfile recipe and xtask task. Help output defines the current CLI; task code defines side effects and outputs.
 
-1. Treat `target/` as implementation detail. Read `build/` for user-facing outputs first.
-2. Remember that `just build` does not create a rootfs image. Run `just xtask rootfs mkfs ...` separately when QEMU or disk boot depends on one.
-3. Remember that app manifests define exported artifacts. Adjust `anemone-apps/<app>/app.toml` instead of copying files manually from `target/`.
-4. Remember that app artifact paths expand `${ARCH}` and `${TARGET_TRIPLE}`. Preserve those placeholders unless you are intentionally changing the driver contract.
-5. Remember that rootfs generation is currently ext4-only. Change `scripts/xtask/src/config/rootfs.rs` and `scripts/xtask/src/config/build.rs` before documenting another filesystem.
-6. Remember that `conf/platforms/qemu-virt-rv64.toml` currently hard-codes `build/rootfs/minimal/rootfs.img` in QEMU args. Keep rootfs naming and QEMU wiring aligned.
+## Route The Task
+
+| Task | Preferred entrypoint | Inspect before use |
+| --- | --- | --- |
+| Initialize or reset local build configuration | `just defconfig` | Justfile, `conf/.defconfig`, existing root `kconfig` |
+| List or switch platforms | `just conf ...` | conf task, root `kconfig`, platform files |
+| Build the kernel | `just build` or the build xtask interface | selected kconfig, platform, build task |
+| Format Rust | `just fmt ...` | fmt help and fmt task |
+| Build an app | `just app ...` or the app xtask interface | app manifest, app task, selected architecture |
+| Materialize a rootfs | `just rootfs ...` or the rootfs xtask interface | rootfs manifest, host inputs, app manifests, rootfs task |
+| Run QEMU | qemu xtask interface | platform, kernel provenance, firmware/device/image inputs |
+| Clean outputs | `just clean`, `just mrproper`, or `just xtask-clean` | live recipe and cleanup task |
+| Run pretest/end-to-end validation | existing architecture-specific repository wrapper | the entire wrapper, local prerequisites, requested validation scope |
+
+Use `--help` to obtain current arguments instead of copying detailed invocations from this reference.
+
+## Verify By Task
+
+### Configuration
+
+- Confirm whether the command creates, overwrites, or edits root `kconfig`.
+- Re-read the selected platform after a switch.
+- Separate local configuration from tracked defaults.
+
+### Kernel Build
+
+- Confirm which kconfig and platform were selected.
+- Check generated inputs before interpreting compiler failures.
+- Verify only outputs enabled by the active configuration.
+- Treat an existing artifact as evidence only when its timestamp and provenance match the invocation.
+
+### App Build
+
+- Confirm the CLI app name locates the intended manifest.
+- Confirm requested architecture, driver profile, and declared artifact path agree.
+- Inspect exported artifacts under `build/`; use app-local target output only for diagnosis.
+
+### Rootfs
+
+- Validate the manifest's base tree, declared host files, and app inputs before execution.
+- Confirm architecture and installed artifacts agree with the intended kernel/platform.
+- Determine the exact output directory that will be replaced.
+- Separate staging failures from host image-tool or privilege failures.
+
+### QEMU
+
+- Confirm the kernel was built for the selected platform.
+- Validate firmware, device, disk, and image inputs from the live platform file.
+- Distinguish launch/configuration failures from guest boot failures.
+- When DTB is involved, inspect both the build-time generator and runtime QEMU path rather than assuming they use identical inputs.
+
+### Cleanup And End-To-End Wrappers
+
+- Read the live recipe or wrapper completely before running it.
+- Summarize configuration changes, deletions, overwritten staging files, privilege use, runtime launch, and log destinations relevant to the user.
+- Do not use an end-to-end wrapper when a build, format check, rootfs-only check, or command inspection is sufficient.
+
+## Diagnose By Stage
+
+1. **Interface:** verify command family and arguments from live help.
+2. **Configuration:** verify parsing, selection, and cross-layer consistency.
+3. **Generation:** verify generated definitions, linker inputs, and DTB handling.
+4. **Compilation/export:** separate compilation from artifact export.
+5. **Rootfs:** separate input staging from image materialization.
+6. **QEMU:** separate host launch from guest behavior.
+7. **Wrapper:** use its progress/log boundary to isolate the failed inner stage before rerunning the whole chain.
+
+Keep fixes at the first failing owner boundary. Do not bypass the repository flow merely to make a later stage run.

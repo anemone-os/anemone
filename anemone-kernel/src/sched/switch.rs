@@ -23,6 +23,8 @@ pub unsafe fn switch_out() {
         let curr_task = get_current_task();
         let cur_ctx = curr_task.get_sched_ctx_mut();
         let sched_ctx = get_local_sched_ctx();
+        // Scheduler-class fairness accounting is closed before this point by
+        // class transactions. This hook remains task/CPU usage bookkeeping.
         curr_task.on_switch_out();
         drop(curr_task);
         SchedArch::switch(cur_ctx, sched_ctx);

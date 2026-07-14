@@ -27,7 +27,7 @@ use crate::{
     device::discovery::open_firmware::{EarlyMemoryScanner, early_scan_clock_freq},
     mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
-    sched::class::{SchedClassPrv, SchedEntity},
+    sched::class::SchedEntity,
     sync::counter::CpuSync,
 };
 
@@ -295,7 +295,7 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
             ParameterList::new(&[bsp_id.logical_id() as u64, fdt_va.get()]),
             None,
             Some(Tid::INIT),
-            SchedEntity::new(SchedClassPrv::RoundRobin(())),
+            SchedEntity::new_default(),
             TaskFlags::empty(),
             Some(cur_cpu_id()),
             crate::task::alloc_init_tid(),
@@ -305,7 +305,7 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
         let bsp_kinit = PublishGuard::register_root(guard, bsp_kinit);
         INIT_SYNC_COUNTER.sync_with_counter();
 
-        sched::init_routines::local_enqueue_first(bsp_kinit);
+        sched::init_routines::local_enqueue_first_new_task(bsp_kinit);
         switch_to_guarded(VirtAddr::new(scheduler as *const () as u64))
     }
 }
@@ -337,7 +337,7 @@ unsafe fn ap_setup(ap_physical_id: PhysCpuId) -> ! {
             ParameterList::new(&[ap_id.logical_id() as u64]),
             None,
             Some(Tid::INIT),
-            SchedEntity::new(SchedClassPrv::RoundRobin(())),
+            SchedEntity::new_default(),
             TaskFlags::empty(),
             Some(cur_cpu_id()),
         )
@@ -346,7 +346,7 @@ unsafe fn ap_setup(ap_physical_id: PhysCpuId) -> ! {
         let ap_kinit = guard.publish(ap_kinit, TaskBinding::Member)
         .expect("failed to publish ap kinit task. this indicates a critical bug in task topology management, please investigate.");
 
-        sched::init_routines::local_enqueue_first(ap_kinit);
+        sched::init_routines::local_enqueue_first_new_task(ap_kinit);
         switch_to_guarded(VirtAddr::new(scheduler as *const () as u64));
     }
 }

@@ -8,7 +8,7 @@
 
 use crate::{
     prelude::*,
-    sched::class::{OnTickAction, RunQueue},
+    sched::class::{PendingResched, PreemptDecision, ReschedCause, RunQueue, TickAction},
 };
 
 /// This struct must be accessed with interrupts disabled. it's a bit overkill,
@@ -23,7 +23,9 @@ struct Processor {
     // TODO: ipi wakeup list.
     runq: RunQueue,
     sched_ctx: TaskContext,
-    need_resched: bool,
+    /// Coalesced request latch for the next owner-CPU full pick. A completed
+    /// pick acknowledges all prior causes; no-pick paths keep or restore them.
+    pending_resched: PendingResched,
 }
 
 #[percpu]
@@ -31,7 +33,7 @@ static PROCESSOR: Processor = Processor {
     running_task: None,
     runq: RunQueue::new(),
     sched_ctx: TaskContext::ZEROED,
-    need_resched: false,
+    pending_resched: PendingResched::empty(),
 };
 
 /// Get the scheduler context of this processor.
@@ -57,7 +59,7 @@ pub unsafe fn get_local_sched_ctx_mut() -> *mut TaskContext {
 /// **This function can only be called by [scheduler], which should ensure that
 /// interrupts are disabled.**
 pub fn set_current_task(option: Option<Arc<Task>>) {
-    debug_assert!(IntrArch::local_intr_disabled());
+    assert!(IntrArch::local_intr_disabled());
     PROCESSOR.with_mut(|proc| {
         proc.running_task = option;
     });
@@ -88,7 +90,7 @@ pub fn get_current_task() -> Arc<Task> {
 }
 
 fn is_local_current_task(task: &Arc<Task>) -> bool {
-    debug_assert!(IntrArch::local_intr_disabled());
+    assert!(IntrArch::local_intr_disabled());
     PROCESSOR.with(|proc| {
         proc.running_task
             .as_ref()
@@ -97,32 +99,44 @@ fn is_local_current_task(task: &Arc<Task>) -> bool {
     })
 }
 
-/// Mark the current running task of this processor as needing a reschedule.
+/// Add one typed scheduler-core reschedule request.
 ///
-/// This function will disable interrupts, since need_resched flag will also be
-/// accessed by ipi handler.
-pub fn mark_need_resched() {
+/// This function will disable interrupts, since pending requests are also
+/// accessed by IPI and timer handlers.
+pub fn request_resched(cause: ReschedCause) {
     with_intr_disabled(|| {
-        PROCESSOR.with_mut(|proc| proc.need_resched = true);
+        PROCESSOR.with_mut(|proc| proc.pending_resched.insert(cause));
     })
 }
 
-/// Fetch whether the current running task of this processor needs a reschedule,
-/// and clear the flag.
+/// Fetch and clear pending scheduler-core reschedule requests.
 ///
-/// This function will disable interrupts, since need_resched flag will also be
-/// accessed by ipi handler.
-pub fn fetch_clear_need_resched() -> bool {
+/// This function will disable interrupts, since pending requests are also
+/// accessed by IPI and timer handlers.
+pub fn take_pending_resched() -> PendingResched {
     with_intr_disabled(|| {
         PROCESSOR.with_mut(|proc| {
-            let need = proc.need_resched;
-            proc.need_resched = false;
-            need
+            let pending = proc.pending_resched;
+            proc.pending_resched = PendingResched::empty();
+            pending
         })
     })
 }
 
-/// Enqueue a task to the run queue of this processor.
+/// Restore a deferred preemption request without losing concurrently added
+/// causes.
+pub fn restore_pending_resched(pending: PendingResched) {
+    if pending.is_empty() {
+        return;
+    }
+    with_intr_disabled(|| {
+        PROCESSOR.with_mut(|proc| {
+            proc.pending_resched = proc.pending_resched.union(pending);
+        });
+    });
+}
+
+/// Enqueue a newly published task to the run queue of this processor.
 ///
 /// [class::SchedEntity] of the task will determine which queue it will be
 /// enqueued to.
@@ -137,7 +151,7 @@ pub fn fetch_clear_need_resched() -> bool {
 /// # Panics
 ///
 /// This function will panic if the task is not internally runnable.
-pub fn local_enqueue(task: Arc<Task>) {
+pub fn local_enqueue_new_task(task: Arc<Task>) {
     assert!(task.cpuid() == cur_cpu_id());
     assert!(task.is_sched_runnable());
 
@@ -159,8 +173,9 @@ pub fn local_enqueue(task: Arc<Task>) {
                 return;
             }
 
-            if !task.with_sched_entity_mut(|se| se.on_runq()) {
-                proc.runq.enqueue(task);
+            if !task.sched_on_runq() {
+                proc.runq.enqueue_new(task.clone());
+                proc.request_runnable_arrival_if_needed(&task);
             } else {
                 knoticeln!(
                     "{} is already on run queue, not enqueuing it again",
@@ -205,36 +220,30 @@ pub fn local_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult
             return result;
         }
 
-        if task.with_sched_entity_mut(|se| se.on_runq()) {
+        if task.sched_on_runq() {
             kdebugln!("wake_enqueue: task={} already queued", task.tid());
             return WakeEnqueueResult::AlreadyQueued;
         }
 
         PROCESSOR.with_mut(|proc| {
-            proc.runq.enqueue(task.clone());
+            proc.runq.enqueue_woken(task.clone());
+            proc.request_runnable_arrival_if_needed(&task);
         });
         kdebugln!("wake_enqueue: task={} enqueued locally", task.tid());
         WakeEnqueueResult::Enqueued
     })
 }
 
-/// Requeue the current running task back to its local run queue.
-///
-/// This is used by [schedule] when the current task remains runnable across a
-/// context switch.
-///
-/// This function will disable interrupts.
-///
-/// # Panics
-///
-/// This function will panic if the task is not internally runnable.
-pub fn local_requeue_current(task: Arc<Task>) {
+fn requeue_current_with<F>(task: Arc<Task>, f: F)
+where
+    F: FnOnce(&mut RunQueue, Arc<Task>, Instant),
+{
     assert!(task.cpuid() == cur_cpu_id());
     assert!(task.is_sched_runnable());
 
     with_intr_disabled(|| {
         PROCESSOR.with_mut(|proc| {
-            debug_assert!(
+            assert!(
                 Arc::ptr_eq(
                     &task,
                     proc.running_task
@@ -243,12 +252,74 @@ pub fn local_requeue_current(task: Arc<Task>) {
                 ),
                 "only the current running task can be requeued through this path"
             );
-            debug_assert!(
-                !task.with_sched_entity_mut(|se| se.on_runq()),
+            assert!(
+                !task.sched_on_runq(),
                 "current running task should not already be on run queue"
             );
-            proc.runq.enqueue(task);
+            f(&mut proc.runq, task, Instant::now());
         });
+    });
+}
+
+/// Requeue the current task after an explicit yield.
+pub fn local_requeue_yielded_current(task: Arc<Task>) {
+    requeue_current_with(task, |runq, task, now| {
+        runq.requeue_yielded_current(task, now);
+    });
+}
+
+/// Requeue the current task after involuntary preemption.
+pub fn local_requeue_preempted_current(task: Arc<Task>, pending: PendingResched) {
+    requeue_current_with(task, |runq, task, now| {
+        runq.requeue_preempted_current(task, now, pending);
+    });
+}
+
+/// Requeue the current task after a parked wait completed while current was
+/// still running.
+pub fn local_handoff_woken_current(task: Arc<Task>) {
+    requeue_current_with(task, |runq, task, now| {
+        runq.handoff_woken_current(task, now);
+    });
+}
+
+fn put_prev_current_with<F>(task: &Arc<Task>, f: F)
+where
+    F: FnOnce(&mut RunQueue, &Arc<Task>, Instant),
+{
+    assert!(task.cpuid() == cur_cpu_id());
+
+    with_intr_disabled(|| {
+        PROCESSOR.with_mut(|proc| {
+            assert!(
+                Arc::ptr_eq(
+                    task,
+                    proc.running_task
+                        .as_ref()
+                        .expect("see comments on Processor::running_task for details"),
+                ),
+                "only the current running task can be put through this path"
+            );
+            assert!(
+                !task.sched_on_runq(),
+                "current running task should not already be on run queue"
+            );
+            f(&mut proc.runq, task, Instant::now());
+        });
+    });
+}
+
+/// Observe that current blocked and will not be requeued.
+pub fn local_put_prev_blocked(task: &Arc<Task>) {
+    put_prev_current_with(task, |runq, task, now| {
+        runq.put_prev_blocked(task, now);
+    });
+}
+
+/// Observe that current is exiting and will not be requeued.
+pub fn local_put_prev_exiting(task: &Arc<Task>) {
+    put_prev_current_with(task, |runq, task, now| {
+        runq.put_prev_exiting(task, now);
     });
 }
 
@@ -259,9 +330,17 @@ pub fn local_requeue_current(task: Arc<Task>) {
 ///
 /// ** Interrupts must be disabled when calling this function.**
 pub fn local_pick_next() -> Arc<Task> {
-    debug_assert!(IntrArch::local_intr_disabled());
-    let task = PROCESSOR.with_mut(|proc| proc.runq.pick_next());
-    debug_assert!(task.is_sched_runnable());
+    assert!(IntrArch::local_intr_disabled());
+    let task = PROCESSOR.with_mut(|proc| {
+        let task = proc.runq.pick_next_task();
+        // A full owner-CPU pick satisfies every request pending before
+        // selection. Interrupts are disabled here, so this clear cannot race
+        // with a new local request; requests raised later remain pending.
+        proc.pending_resched = PendingResched::empty();
+        proc.runq.set_next_task(&task, Instant::now());
+        task
+    });
+    assert!(task.is_sched_runnable());
     task
 }
 
@@ -269,16 +348,16 @@ pub fn local_pick_next() -> Arc<Task> {
 ///
 /// **Only timer interrupt handler should call this function.**
 pub fn local_sched_tick() {
-    debug_assert!(IntrArch::local_intr_disabled());
+    assert!(IntrArch::local_intr_disabled());
 
     let action = PROCESSOR.with_mut(|proc| {
-        proc.runq
-            .on_tick(proc.running_task.as_ref().expect("no running task"))
+        proc.runq.task_tick(
+            proc.running_task.as_ref().expect("no running task"),
+            Instant::now(),
+        )
     });
-    if let Some(action) = action {
-        match action {
-            OnTickAction::Resched => mark_need_resched(),
-        }
+    if let TickAction::RequestResched = action {
+        request_resched(ReschedCause::Tick);
     }
 }
 
@@ -301,9 +380,9 @@ pub fn pick_next_cpu() -> CpuId {
 ///
 /// This is a strict non-wait-tail placement path. Wait completion tails must
 /// use [wake_enqueue].
-pub fn remote_enqueue(task: Arc<Task>) {
+pub fn remote_enqueue_new_task(task: Arc<Task>) {
     assert!(task.is_sched_runnable());
-    send_ipi(task.cpuid(), IpiPayload::WakeUpTask { tid: task.tid() })
+    send_ipi(task.cpuid(), IpiPayload::EnqueueNewTask { tid: task.tid() })
         .expect("failed to enqueue task to another cpu");
 }
 
@@ -332,17 +411,17 @@ pub fn remote_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResul
     placement
 }
 
-/// Strict non-wait-tail placement wrapper around [local_enqueue] and
-/// [remote_enqueue].
+/// Strict non-wait-tail placement wrapper around [local_enqueue_new_task] and
+/// [remote_enqueue_new_task].
 ///
 /// New task publication can use this path because the task is already known
 /// runnable and has no late wake tail. Wait completion must use [wake_enqueue].
-pub fn task_enqueue(task: Arc<Task>) {
+pub fn enqueue_new_task(task: Arc<Task>) {
     assert!(task.is_sched_runnable());
     if task.cpuid() == cur_cpu_id() {
-        local_enqueue(task);
+        local_enqueue_new_task(task);
     } else {
-        remote_enqueue(task);
+        remote_enqueue_new_task(task);
     }
 }
 
@@ -370,23 +449,37 @@ pub mod init_routines {
     use super::*;
 
     /// First task to be scheduled on each cpu must be treated specially, since
-    /// there is no running task on the cpu at that time. But [local_enqueue]
-    /// assumes that there is always a running task.
+    /// there is no running task on the cpu at that time. But
+    /// [local_enqueue_new_task] assumes that there is always a running task.
     ///
     /// This function should be called by bootstrap code path to spawn
     /// [bsp_kinit]/[ap_kinit] tasks.
-    pub fn local_enqueue_first(task: Arc<Task>) {
+    pub fn local_enqueue_first_new_task(task: Arc<Task>) {
         assert!(task.cpuid() == cur_cpu_id());
         assert!(task.is_sched_runnable());
 
         with_intr_disabled(|| {
             PROCESSOR.with_mut(|proc| {
-                debug_assert!(
-                    !task.with_sched_entity_mut(|se| se.on_runq()),
+                assert!(
+                    !task.sched_on_runq(),
                     "current running task should not already be on run queue"
                 );
-                proc.runq.enqueue(task);
+                proc.runq.enqueue_new(task);
             });
         });
+    }
+}
+
+impl Processor {
+    fn request_runnable_arrival_if_needed(&mut self, candidate: &Arc<Task>) {
+        let Some(current) = self.running_task.as_ref() else {
+            return;
+        };
+        let now = Instant::now();
+        if self.runq.decide_preempt_current(current, candidate, now)
+            == PreemptDecision::RequestResched
+        {
+            self.pending_resched.insert(ReschedCause::RunnableArrival);
+        }
     }
 }

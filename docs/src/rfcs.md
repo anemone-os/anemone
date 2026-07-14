@@ -94,6 +94,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 - [RFC-20260629-vfs-direct-user-io](./rfcs/vfs-direct-user-io/index.md)：已实现第一版；定义普通文件 `read` / `readv` / `pread*` 与 `write` / `writev` / `pwrite*` 的 direct userspace copy 边界、VFS-owned user-buffer cursor、fanotify transaction adapter，以及 ramfs/ext4 regular file read/write hook。`RWF_*`、完整 Linux `O_DIRECT`、mmap coherency、splice family 和 non-regular backend hook 仍按 register / follow-up 边界处理。
 - [RFC-20260620-threaded-timer-event](./rfcs/threaded-timer-event/index.md)：已实现第一版；定义 soft timer 的 threaded completion lane、per-CPU timer worker、通用 `Late` initcall、`timerfd` / `ITIMER_REAL` 迁移边界，以及 wait-core timeout 非目标。
 - [RFC-20260618-sched-wait-preempt-arming](./rfcs/sched-wait-preempt-arming/index.md)：阶段 3 已关闭；定义 wait-core 在 kernel preempt 下的 wake-prerequisite / parkability contract、scheduler entry split、preempt-defer、token-bound wait sleep、single-active-wait 诊断和 feedback routing 边界；未运行的 trace / fairness evidence gap 见事务日志。
+- [RFC-20260711-sched-rt-class](./rfcs/sched-rt-class/index.md)：已完成第一版；共享 `Realtime` class、FIFO/RR policy、typed priority、99 个 priority bucket 和 pending-resched 接线已经落地，RT/RR 下的整套 LTP 用户运行完成；FIFO 用户态专项验证未运行且不阻塞本次收口。事务日志见 [2026-07-12-sched-rt-class](./devlog/transactions/2026-07-12-sched-rt-class.md)。
 - [RFC-20260616-kthread-core](./rfcs/kthread-core/index.md)：已接受、阶段 6 implementation gate 已关闭；纠偏 kthread core，定义 procfs-visible singleton thread group、固定 `kthreadd` TID 2、strong handle、专用 exit、user-facing API fail-closed，以及移除 service/park 的迁移 gate。
 - [RFC-20260614-kthread](./rfcs/kthread/index.md)：历史基线；记录已落地的轻量 kthread 创建代理、typed entry、stop/park 生命周期和 `KThreadService` 后台 worker 合同，已由 `kthread-core` supersede。
 - [RFC-20260614-inode-shrinker](./rfcs/inode-shrinker/index.md)：自循环 `io_shrink_threshold` gate 的 inode cache shrinker、superblock eviction path 和 ext4 backing file cache 计数合同。
@@ -107,6 +108,10 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 - [RFC-20260604-proc-tgid-fd](./rfcs/proc-tgid-fd/index.md)：`/proc/<tgid>/fd` 目录枚举、fd symlink `readlink()` 和第一阶段 procfs/fd 兼容计划。
 - [RFC-20260603-sched-latch](./rfcs/sched-latch/index.md)：`poll` / `select` OR wait 所需的 wait-core latch 原语和 iomux 迁移计划。
 - [RFC-20260601-sched-wait-refactor](./rfcs/sched-wait-refactor/index.md)：已完成的 scheduler wait/wake 协议重构 RFC。
+
+## 已关闭或延期 RFC
+
+- [RFC-20260622-sched-eevdf-lite](./rfcs/sched-eevdf-lite/index.md)：Stage 3/R1 runtime acceptance 失败后延期关闭，不是 Completed；默认 normal scheduler 已恢复为 RR。EEVDF 保留为可运行实验原型，但显著吞吐回归与百万级 yield self-pick 仍存在，`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 保持未解决 Keter。事务日志见 [2026-07-09-sched-eevdf-lite](./devlog/transactions/2026-07-09-sched-eevdf-lite.md)，证据见 [Stage 3 eligibility 回归背景](./rfcs/sched-eevdf-lite/backgrounds/stage3-eligibility-regression-20260711.md)。
 
 当一个 feature 被多个 RFC 分段覆盖时，本页可以作为轻量聚合入口，或由其中一个 umbrella RFC 在 `index.md` 中聚合链接。聚合入口只列出相关 RFC、事务日志、register / current limitations 及其覆盖范围；不要在这里复制阶段完成度、验证证据或问题状态。跨 RFC 功能的当前事实仍以各自 RFC、transaction devlog 和 register / current limitations 为准。
 

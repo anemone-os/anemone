@@ -250,11 +250,13 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
             // leaving the hardware interrupt environment.
 
             assert!(allow_preempt(), "for utraps, this must hold");
-            if fetch_clear_need_resched() {
+            let pending = take_pending_resched();
+            if !pending.is_empty() {
                 // if we need reschedule, we can't waste time on disposing deferred tasks.
-                match unsafe { schedule_preempt() } {
+                match unsafe { schedule_preempt(pending) } {
                     SchedulePreemptResult::Scheduled => {},
                     SchedulePreemptResult::Deferred => {
+                        restore_pending_resched(pending);
                         dispose_deferred_tasks();
                     },
                 }

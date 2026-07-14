@@ -4,7 +4,7 @@
 **负责人：** doruche, Codex
 **领域：** scheduler / wait core / kernel preempt / latch / iomux / timer / signal
 **权威计划：** [RFC-20260618-sched-wait-preempt-arming](../../rfcs/sched-wait-preempt-arming/index.md), [不变量需求](../../rfcs/sched-wait-preempt-arming/invariants.md), [迁移实施计划](../../rfcs/sched-wait-preempt-arming/implementation.md), [Tracking Issues](../../rfcs/sched-wait-preempt-arming/tracking-issues.md)
-**当前阶段：** 阶段 3 - 已关闭；source review + 用户侧 iozone 复核收口，trace / fairness gate 明确未运行；2026-07-08 post-close zombie-tail feedback 已回写 RFC
+**当前阶段：** 原阶段 3 已关闭；2026-07-12 post-close pending-resched successful-pick acknowledgement correction 已关闭
 
 ## 范围
 
@@ -28,23 +28,24 @@
 - wait identity、completion、cancel、finish 和 physical placement 仍由 wait core / task sched-state 统一管理。
 - post-begin nested scheduler wait 是 caller/source owner 边界错误，wait core 只诊断暴露，不支持同一 task 的 nested active waits。
 - worker 未经总控/用户批准不得越过阶段 write set；需要扩大时先提交 expansion request，并把批准结果写入本事务日志。
-- 代码实现和 review gate 必须由不同 subagent 完成；总控只负责分工、集成、事务日志和提交。
+- 原阶段代码实现和 review gate 必须由不同 subagent 完成；2026-07-12 post-close correction 按用户终止耗时审查链的要求由总控直接实现和复核，不再启动 subagent。
+- processor `PendingResched` 是面向下一次 owner-CPU full pick 的合并 latch；successful pick 统一确认，no-pick path 保留或由 destructive-take caller 恢复。
 
 ## Handoff
 
-**Last Updated:** 2026-07-08
+**Last Updated:** 2026-07-12
 
-**Current Branch:** `dev/drc/sched-split`
+**Current Branch:** `dev/drc/eevdf`
 
 **Canonical RFC:** [RFC-20260618-sched-wait-preempt-arming](../../rfcs/sched-wait-preempt-arming/index.md), [Invariants](../../rfcs/sched-wait-preempt-arming/invariants.md), [Implementation Plan](../../rfcs/sched-wait-preempt-arming/implementation.md), [Tracking Issues](../../rfcs/sched-wait-preempt-arming/tracking-issues.md)
 
-**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志，并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary。阶段 0 code worker 已补 `WaitOrigin` caller-location origin、begin-side nested active wait assert、crate 内 no-nested-wait helper 和 `Mutex::lock()` nested-wait 诊断；review gate 初审发现的 direct wait adapter `#[track_caller]` 缺口已修复，`WaitOrigin` follow-up closure review 无 Apollyon / Keter / Euclid finding。阶段 0 checkpoint 已提交为 `61943888 sched-split: close wait-preempt phase zero`。阶段 1 已完成 scheduler-private mode、token-bound wait-sleep、preempt deferred 和语义化 schedule wrappers；经用户批准，原阶段 2 的裸 `schedule()` call-site 迁移子集也已并入本 checkpoint，避免保留兼容桥。阶段 2 已补 finite-timeout no-park-before-timeout-install proof、timeout-installed / no-timeout 观测点、`WaitSleep` `PrePark -> Parked` trace，以及 source-backed iomux register scan 分类日志；独立 review gate 未发现 Apollyon / Keter / Euclid finding。阶段 3 已用 source-review first 路线关闭 scheduler/wait-core correctness gate：总控审计 source-backed / no-source iomux、direct latch users、Event timeout、clock/signal direct wait 和 `Armed` 术语上下文；独立 reviewer `Ptolemy` 审查 scheduler/trap/wait-core entry split 未发现 Apollyon / Keter / Euclid finding；用户报告 `kernel_preempt` 下多次 iozone throughput 复核未再复现 wait begin 后无 timeout/source/finish 的卡死。2026-07-08 post-close feedback 已修正 zombie no-return wrapper：最终 `Runnable -> Zombie` 发布改由 scheduler core 在 noirq no-return entry 内完成，并回写 RFC canonical 文本与 tracking issue。
+**Completed:** 公共 RFC、invariants、implementation 和 tracking issues 已存在。阶段 0 已建立本事务日志，并连接 RFC、事务索引、当前双周 devlog 和 mdBook Summary。阶段 0 code worker 已补 `WaitOrigin` caller-location origin、begin-side nested active wait assert、crate 内 no-nested-wait helper 和 `Mutex::lock()` nested-wait 诊断；review gate 初审发现的 direct wait adapter `#[track_caller]` 缺口已修复，`WaitOrigin` follow-up closure review 无 Apollyon / Keter / Euclid finding。阶段 0 checkpoint 已提交为 `61943888 sched-split: close wait-preempt phase zero`。阶段 1 已完成 scheduler-private mode、token-bound wait-sleep、preempt deferred 和语义化 schedule wrappers；经用户批准，原阶段 2 的裸 `schedule()` call-site 迁移子集也已并入本 checkpoint，避免保留兼容桥。阶段 2 已补 finite-timeout no-park-before-timeout-install proof、timeout-installed / no-timeout 观测点、`WaitSleep` `PrePark -> Parked` trace，以及 source-backed iomux register scan 分类日志；独立 review gate 未发现 Apollyon / Keter / Euclid finding。阶段 3 已用 source-review first 路线关闭 scheduler/wait-core correctness gate：总控审计 source-backed / no-source iomux、direct latch users、Event timeout、clock/signal direct wait 和 `Armed` 术语上下文；独立 reviewer `Ptolemy` 审查 scheduler/trap/wait-core entry split 未发现 Apollyon / Keter / Euclid finding；用户报告 `kernel_preempt` 下多次 iozone throughput 复核未再复现 wait begin 后无 timeout/source/finish 的卡死。2026-07-08 post-close feedback 已修正 zombie no-return wrapper：最终 `Runnable -> Zombie` 发布改由 scheduler core 在 noirq no-return entry 内完成，并回写 RFC canonical 文本与 tracking issue。2026-07-12 post-close correction 已把 processor pending-resched 收口为 successful-full-pick acknowledgement latch；最终代码采用带解释注释的直接赋值，不保留具名 helper 或同义反复测试，并由 source audit、构建和当前 KUnit / boot smoke 关闭 `KETER-008`。同日 `KETER-009` 删除了真实状态机不可达的 aborted-wait requeue class surface，保留 no-switch abort 与 parked handoff 两条 production 路径。
 
-**In Progress:** 无。本事务实现阶段已关闭。
+**In Progress:** 无。本事务及 post-close correction 已关闭。
 
-**Open Blockers:** 无 scheduler/wait-core closeout blocker。`KETER-004`、`KETER-005`、`KETER-006` 已在 tracking issues 中 neutralized / routed：fanotify/source-owner nested wait 触发时按 owner follow-up；未运行的 Event timeout trace、source-backed finite-timeout iomux trace 和 deferred-count fairness trace 作为 residual evidence gap 记录，不声明 trace gate 已通过。若后续 trace 或 workload 显示当前 entry split 不足，必须停止并回到 RFC review。
+**Open Blockers:** 无 scheduler/wait-core closeout blocker。`KETER-008` 已由 processor pick-time direct clear、owner-boundary source audit、构建与启动 smoke neutralized；`KETER-009` 已由状态机 source proof 与死 surface 删除 neutralized；`KETER-004`、`KETER-005`、`KETER-006` 已在 tracking issues 中 neutralized / routed。fanotify/source-owner nested wait 触发时按 owner follow-up；未运行的 Event timeout trace、source-backed finite-timeout iomux trace 和 deferred-count fairness trace 仍作为 residual evidence gap 记录，不声明 trace gate 已通过。若后续 trace 或 workload 显示当前 entry split 不足，必须停止并回到 RFC review。
 
-**Next Action:** 后续只在新证据出现时重开：source-owner nested wait 真实触发、Event timeout / finite-timeout iomux trace 发现 timer-installed / no-park 误判，或 deferred-count / workload 显示 `PrePark` setup 公平性风险。不要重新引入裸 `schedule()` 或无 token 的 wait-sleep helper。
+**Next Action:** 后续只在新证据出现时重开 wait-core 设计：source-owner nested wait 真实触发、Event timeout / finite-timeout iomux trace 发现 timer-installed / no-park 误判，或 deferred-count / workload 显示 `PrePark` setup 公平性风险。不要重新引入裸 `schedule()`、无 token 的 wait-sleep helper 或 pending-resched 事件协议。
 
 **Do Not Redo:** 不要把私有草稿路径写入公共 canonical 链接；不要把 caller origin 改成手写 operation 字符串；不要重做阶段 0/1/2 的 wrapper split 和 source-register proof；不要把 fanotify/source-owner nested wait panic 包装成本 RFC 内的 source-specific workaround。
 
@@ -416,3 +417,72 @@ mdbook build docs
 结果：上述验证均通过。agent 未运行 QEMU / LTP / iozone runtime 复现；用户侧原始 panic 作为本次反馈触发证据。
 
 **边界：** 本反馈不改变 wait identity、completion 线性化点、`Waiting/PrePark` 的 preempt-defer contract、`need_resched` 恢复责任或 trace / fairness residual gap。若后续再次出现 `schedule_preempt cannot preempt zombie current task`，应优先查找新的提前 `Zombie` 发布或重复 zombie entry，而不是放宽 `schedule_preempt()`。
+
+### 2026-07-12 - Post-close Pending Resched Acknowledgement Gate 启动
+
+**阶段：** post-close scheduler-core lifecycle feedback / RFC correction gate。
+
+**触发：** source audit 发现 processor `pending_resched` 只在 trap tail 与 idle loop 的 `take_pending_resched()` 中显式清除；block、yield、zombie 等 schedule path 可以不执行 take 就 switch out。scheduler loop 的 `local_pick_next()` 完成 runqueue 重新选择后没有统一 acknowledgement，旧 `Tick` / `RunnableArrival` 因而可能继续留在 slot。
+
+**归类：** 这是 sched-split / scheduler-core 的 pending-request lifecycle 缺口，不是 EEVDF policy 问题。cause 的语义是“请求 owner CPU 完成一次重新选择”的合并 latch，不是必须跨 context switch 保存顺序与来源的事件日志。
+
+**Accepted contract：**
+
+- successful full pick 确认选择前已经存在的全部 pending cause；即使最终 `prev == next`，也已经满足重新选择请求。
+- `DeferredPreempt` 与 wait no-switch abort 没有 full pick，不得确认；destructive take 仍由 caller 在 deferred 后 union restore。
+- preempt transaction 已经按值捕获的 `PendingResched` snapshot 仍可交给旧 current 的 class transaction；pick-time acknowledgement 只清 processor slot。
+- acknowledgement 必须紧跟 `pick_next_task()`、位于 `set_next_task()` / switch-in 前；ack 后新 cause 保留给下一轮。
+
+**Write set：** `anemone-kernel/src/sched/processor.rs`、sched-wait-preempt-arming canonical RFC 四页、既有 transaction devlog 与当前双周 devlog。不修改 scheduler class policy、arch trap、wait core、IPI protocol 或 EEVDF RFC。
+
+**计划验证：** 同文件 KUnit 覆盖旧 cause 清除与 ack 后新 cause 保留；source audit 枚举 take / restore / acknowledgement caller，并证明 no-switch path 不进入 scheduler loop full pick；运行 `just fmt kernel --check`、`just build`、`git diff --check` 和 `mdbook build docs`。root `kconfig` 当前 `kunit = true`，因此 `just build` 必须编译本次 KUnit。
+
+**协作边界：** 用户已终止此前耗时过长的 subagent 审查链；本 gate 不再启动 subagent，由总控直接实现、验证和记录结果。
+
+### 2026-07-12 - Post-close Pending Resched Acknowledgement Gate 关闭
+
+**代码变更：** `Processor::pending_resched` 现在带有合并 latch 生命周期注释；新增 private `acknowledge_pending_resched_after_pick()`。`local_pick_next()` 在 `RunQueue::pick_next_task()` 返回后立即调用 acknowledgement，再进入 `set_next_task(task, now)`。该位置统一覆盖 block、yield、zombie、preempt、idle 和 same-task full pick，而 no-switch path 不会到达。
+
+**定向测试：** `processor.rs` 新增两项 KUnit：第一项组合 `Tick | RunnableArrival` 并确认 acknowledgement 后为空；第二项先 acknowledgement 旧 `Tick`，再插入 `RunnableArrival`，确认旧 cause 不在、新 cause 保持 pending。
+
+**Source audit：**
+
+- acknowledgement 的生产调用点只有 `local_pick_next()`；另外两处匹配来自同文件 KUnit。
+- `switch_out()` 的生产 caller 只有 `schedule_inner()`，scheduler loop 在返回后只通过 `local_pick_next()` 选择 next。
+- `AbortWaitSleep` 与 `DeferredPreempt` 都在 `switch_out()` 前返回，因此不确认 pending。
+- destructive take caller 仍只有 riscv64 / loongarch64 的四个 trap tail 和 idle loop；四个 trap tail 均在 `SchedulePreemptResult::Deferred` 时 union restore snapshot，idle take 后只进入必须 switch 的 `schedule_idle()`。
+- 当前 preempt transaction 的 `PendingResched` 仍按值交给 `local_requeue_preempted_current()` / class transaction；processor slot acknowledgement 不修改该 snapshot。
+
+**Agent-run validation：**
+
+- `just build` 通过；实际命令以 `--features kunit` 编译 kernel。
+- `just xtask qemu --platform qemu-virt-rv64-pretest --image build/anemone.elf` 启动成功；新增两项 scheduler processor KUnit 均为 `ok`，共 115 项 KUnit 最终打印 `All tests passed!`。runner 随后进入现有 signal LTP profile，其结果不属于本 correction 的验收范围。
+- `mdbook build docs` 通过。
+- `git diff --check` 通过。
+- `just fmt kernel --check` 未全局通过，但差异只来自生成文件 `anemone-kernel/src/kconfig_defs.rs` 与 `platform_defs.rs` 的既有 trailing whitespace / 末尾空行；输出不再包含 `sched/processor.rs`。本 gate 未修改这些生成文件，也不把该全仓 drift 记作本次源码格式失败。
+
+**Register / limitation：** 修复后没有残余 pending-resched 能力缺口或 accepted limitation；不新增 register / current-limitations 条目。原 RFC 的 trace / fairness residual evidence gap 保持原样。
+
+**结论：** `KETER-008` 已 neutralized。processor pending-resched 现在以 successful full pick 为统一 acknowledgement 边界；no-pick preserve / caller restore 与 pick 后新 cause 保留均有 canonical contract、源码落点和测试证据。
+
+### 2026-07-12 - Pending Resched Code-shape Review Correction
+
+**触发：** 用户复核指出 `acknowledge_pending_resched_after_pick()` 只有一行和一个生产调用点，既是过度封装，也把通用 slot clear 固化成具备特定原因的操作名；除非能够证明所有未来 clear 都必须只有该语义，否则该 API shape 不自然。相应两项 KUnit 只验证 helper 会把字段赋空，不能证明 clear 的 owner-boundary placement。
+
+**纠正：** 删除具名 helper 和两项同义反复 KUnit。`local_pick_next()` 现在在 `pick_next_task()` 后直接执行 `proc.pending_resched = PendingResched::empty()`；就地注释解释 full pick 已满足选择前请求、IRQ-disabled owner serialization，以及 clear 后产生的新请求仍留给下一次 pick。RFC 保留 successful-pick acknowledgement 作为协议概念，但不把它物化为独立操作接口。
+
+**证据边界：** 上一条 closure 中 115 项 KUnit 与两项新增测试记录只描述 review 前的中间形状，不作为最终代码的定向测试证据。最终直接赋值没有保留 test-only wrapper；正确性由 clear 与 `pick_next_task()` 的邻接、no-switch 路径不可达、take / restore caller 审计证明。
+
+**最终验证：** 当前代码的 `just build` 通过。`timeout 15s just xtask qemu --platform qemu-virt-rv64-pretest --image build/anemone.elf` 完成 113 项既有 KUnit 并打印 `All tests passed!`，随后成功进入 init / user-test；主机 timeout 用于终止超出本 gate 的 signal LTP，不把退出码 124 或 LTP 结果算作 correction 失败。`just fmt kernel --check` 仍只报告生成文件 `kconfig_defs.rs` / `platform_defs.rs` 的既有 whitespace drift，不包含 `sched/processor.rs`。
+
+**结论：** `KETER-008` 的协议与落点不变，代码 shape 收窄为直接、局部、无额外抽象的 owner-field update；此前 helper / KUnit 形状由本条显式 supersede。
+
+### 2026-07-12 - Post-close Aborted-wait Class Surface Correction
+
+**触发 / 归类：** source audit 发现 `local_requeue_aborted_wait_current()` 与贯穿 `RunQueue` / `Scheduler` / 三个 class 的对应 transaction 全树没有 caller。真实 scheduler-core 状态机中，wait 在进入 scheduler 前已完成时由 `AbortWaitSleep` 直接返回；wait 已 park 并在 scheduler 收口时变为 runnable，则只走 `handoff_woken_current()`。这是 scheduler-core surface 与状态所有权不一致，不属于 EEVDF R[x] 算法修复。
+
+**代码纠正：** 删除 processor facade、`CurrentRequeueTransaction::AbortedWait`、`RunQueue::requeue_aborted_wait_current()`、`Scheduler::requeue_aborted_wait_current()`，以及 EEVDF / RR / Idle 的实现。没有修改 `schedule_inner()` 或任何 reachable caller；no-switch abort 仍不切换、不重新入队，parked handoff 仍是唯一 park 后 runnable 收口。
+
+**文档回写：** `KETER-009` 记录本次 post-close correction；EEVDF canonical RFC 删除虚构的第三条 transaction，并在其 transaction 中追加 superseding 记录。R1-R3b correction 顺序、wait-core contract、pending-resched、IPI / trap 和用户 ABI 均不改变。不新增 register / current limitation。
+
+**最终验证：** `just build` 在当前 `qemu-virt-rv64-pretest` / release / KUnit / ext4 配置下重新编译 `anemone-kernel` 并通过。首次构建在 QEMU `dumpdtb` 前因 pretest rootfs image 缺失停止；仓库 `rootfs mkfs` 又被已知 libguestfs appliance host failure 阻塞，因此只为 `dumpdtb` 的文件存在性检查临时提供 ignored sparse raw 占位，编译完成后立即删除，未用于 QEMU runtime。`mdbook build docs` 与 `git diff --check` 通过；`just fmt kernel --check` 仍只报告未触碰的 generated `kconfig_defs.rs` / `platform_defs.rs` whitespace drift，不包含本次六个 scheduler 源文件。全树 production source 中 `requeue_aborted_wait_current` / `AbortedWait` 零匹配；未运行 QEMU / LTP，因本 correction 删除不可达 surface，不改变 reachable runtime 行为。
