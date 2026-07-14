@@ -92,6 +92,8 @@ pub struct SiFivePlic {
     ndev: usize,
 }
 
+pub static COMPATIBLE_STRS: &[&str] = &["sifive,plic-1.0.0", "riscv,plic0", "starfive,jh7110-plic"];
+
 impl IrqChip for SiFivePlic {
     fn mask(&self, irq: HwIrq) {
         let hwirq = irq.get();
