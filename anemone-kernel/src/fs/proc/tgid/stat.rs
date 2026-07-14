@@ -141,7 +141,7 @@ fn build_stat_line(inode: &InodeRef) -> Result<String, SysError> {
     let cutime = duration_to_ticks(cpu_usage.reaped_user());
     let cstime = duration_to_ticks(cpu_usage.reaped_kernel());
     let starttime = leader.create_instant().to_ticks();
-    let processor = leader.cpuid().get();
+    let processor = leader.cpuid().logical_id();
     let exit_signal = tg
         .terminate_signal()
         .map(|sig| sig.as_usize() as i32)

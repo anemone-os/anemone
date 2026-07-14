@@ -303,11 +303,8 @@ pub fn pick_next_cpu() -> CpuId {
 /// use [wake_enqueue].
 pub fn remote_enqueue(task: Arc<Task>) {
     assert!(task.is_sched_runnable());
-    send_ipi(
-        task.cpuid().get(),
-        IpiPayload::WakeUpTask { tid: task.tid() },
-    )
-    .expect("failed to enqueue task to another cpu");
+    send_ipi(task.cpuid(), IpiPayload::WakeUpTask { tid: task.tid() })
+        .expect("failed to enqueue task to another cpu");
 }
 
 pub fn remote_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
@@ -323,11 +320,9 @@ pub fn remote_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResul
     }
 
     let tid = task.tid();
-    let placement = send_ipi_wait_result(
-        task.cpuid().get(),
-        IpiPayload::WakeUpTaskStaleSafe { tid, park },
-    )
-    .expect("failed to enqueue task to another cpu");
+    let placement =
+        send_ipi_wait_result(task.cpuid(), IpiPayload::WakeUpTaskStaleSafe { tid, park })
+            .expect("failed to enqueue task to another cpu");
 
     kdebugln!(
         "wake_enqueue: task={} remote placement requested park={:?}",

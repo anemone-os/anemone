@@ -30,10 +30,11 @@ impl KThreadBuilder {
 
     pub fn placement(mut self, placement: KThreadPlacement) -> Self {
         if let KThreadPlacement::OnCpu(cpu) = placement {
+            let ncpus = ncpus();
             assert!(
-                cpu.get() < ncpus(),
-                "kthread spawn: invalid cpu id {}",
-                cpu.get()
+                cpu.logical_id() < ncpus,
+                "kthread spawn: invalid {}",
+                cpu
             );
         }
         self.placement = placement;

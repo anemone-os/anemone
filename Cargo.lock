@@ -31,7 +31,6 @@ dependencies = [
  "anemone-abi",
  "bimap",
  "bitflags",
- "boxcar",
  "buddy-system",
  "device-tree",
  "fast_radix_trie",
@@ -158,12 +157,6 @@ name = "bitflags"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
-
-[[package]]
-name = "boxcar"
-version = "0.2.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
 
 [[package]]
 name = "buddy-system"

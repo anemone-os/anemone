@@ -202,8 +202,9 @@ impl CoreIrqChip for SiFivePlic {
 
                 let regs = plic.regs();
 
-                for i in 0..ncpus() {
-                    let ctx = SiFivePlic::s_ctx_for(i);
+                for logical_id in 0..ncpus() {
+                    let cpu_id = CpuId::new(logical_id);
+                    let ctx = SiFivePlic::s_ctx_for(cpu_id.physical_id());
 
                     // keep all sources masked by default, individual lines are unmasked by
                     // request path later.
@@ -226,7 +227,9 @@ impl CoreIrqChip for SiFivePlic {
     }
 
     fn claim(&self) -> Option<HwIrq> {
-        let claimed = self.regs().claim(SiFivePlic::s_ctx_for(cur_cpu_id().get())) as usize;
+        let claimed =
+            self.regs()
+                .claim(SiFivePlic::s_ctx_for(cur_cpu_id().physical_id())) as usize;
         if claimed == 0 {
             return None;
         }
@@ -253,11 +256,11 @@ impl SiFivePlic {
         (self.ndev + 32) / 32
     }
 
-    fn s_ctx_for(cpuid: usize) -> usize {
-        cpuid * 2 + 1
+    fn s_ctx_for(cpu_id: PhysCpuId) -> usize {
+        cpu_id.get() * 2 + 1
     }
 
     fn current_s_context(&self) -> usize {
-        Self::s_ctx_for(cur_cpu_id().get())
+        Self::s_ctx_for(cur_cpu_id().physical_id())
     }
 }

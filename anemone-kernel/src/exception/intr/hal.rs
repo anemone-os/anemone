@@ -1,3 +1,5 @@
+use crate::device::PhysCpuId;
+
 pub trait IntrArchTrait: Sized {
     /// IRQ flags representing the state with interrupts enabled.
     const ENABLED_IRQ_FLAGS: IrqFlags;
@@ -38,7 +40,7 @@ pub trait IntrArchTrait: Sized {
     ///
     /// TODO: some architectures support an integer payload, we shall add that
     /// in the future if needed.
-    fn send_ipi(cpu_id: usize);
+    fn send_ipi(cpu_id: PhysCpuId);
 
     unsafe fn claim_ipi();
 

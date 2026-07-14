@@ -181,8 +181,9 @@ fn exec_init_proc() {
 ///   terms of effect. (e.g. on RiscV, sstatus::sie can be set, but sie::ssoft,
 ///   sie::stimer and sie::sext interrupts should be disabled.)
 unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
+    let bsp_id = CpuId::new(bsp_id);
     unsafe {
-        kinfoln!("bsp #{} kinit running on {}...", bsp_id, current_task_id());
+        kinfoln!("BSP {} kinit running on {}...", bsp_id, current_task_id());
         syscall::register_syscall_handlers();
         fs::register_filesystem_drivers();
         driver::register_builtin_drivers();
@@ -205,7 +206,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         // has completed local init and marked itself online before late services
         // publish their workers. `kthreadd` remains a hand-built boot invariant.
         run_initcalls(InitCallLevel::Late);
-        kinfoln!("bsp #{} kinit finished", bsp_id);
+        kinfoln!("BSP {} kinit finished", bsp_id);
     }
 
     mount_rootfs();
@@ -230,9 +231,10 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
 /// TODO: do we really need a separate kinit function for APs? maybe a single
 /// bsp_kinit is enough.
 unsafe extern "C" fn ap_kinit(ap_id: usize) {
+    let ap_id = CpuId::new(ap_id);
     unsafe {
         INIT_SYNC_COUNTER.sync_with_counter();
-        kinfoln!("ap #{} kinit running on {}...", ap_id, current_task_id());
+        kinfoln!("AP {} kinit running on {}...", ap_id, current_task_id());
 
         program_first_timer();
         percpu_login();
@@ -246,7 +248,7 @@ unsafe extern "C" fn ap_kinit(ap_id: usize) {
         // synchronize with BSP
 
         FINISH_SYNC_COUNTER.sync_with_counter();
-        kinfoln!("ap #{} kinit finished", ap_id);
+        kinfoln!("AP {} kinit finished", ap_id);
 
         #[cfg(feature = "kunit")]
         KUNIT_SYNC_COUNTER.sync_with_counter();

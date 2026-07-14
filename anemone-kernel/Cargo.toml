@@ -17,7 +17,6 @@ spin = { workspace = true }
 talc = { workspace = true }
 paste = { workspace = true }
 yansi = { workspace = true }
-boxcar = { workspace = true }
 rangemap = { workspace = true }
 intrusive-collections = { workspace = true }
 heapless = { workspace = true }

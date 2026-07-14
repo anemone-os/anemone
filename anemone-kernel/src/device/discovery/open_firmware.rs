@@ -22,8 +22,6 @@ use crate::{
 
 mod early {
 
-    use fdt::nodes::cpus::CpuStatus;
-
     use super::*;
 
     #[derive(Debug)]
@@ -262,39 +260,9 @@ mod early {
         fdt.root().cpus().common_timebase_frequency()
     }
 
-    /// Scan the CPU count from the device tree.
-    ///
-    /// Mostly used for waking up APs in SMP initialization.
-    ///
-    /// # Safety
-    ///
-    /// - Caller must ensure that the provided `fdt` is valid.
-    pub unsafe fn early_scan_cpu_count(fdt: VirtAddr) -> usize {
-        let fdt = unsafe { fdt::Fdt::from_ptr(fdt.as_ptr()) }.expect("failed to parse device tree");
-
-        let mut ncpus = 0;
-
-        for cpu in fdt.root().cpus().iter() {
-            let cpuid = cpu.clone().reg::<u32>().first().unwrap_or_else(|e| {
-                panic!("error finding cpu id for cpu in slot #{:}: {:?}", ncpus, e)
-            });
-
-            match cpu.status() {
-                Some(CpuStatus::OKAY) => ncpus += 1,
-                Some(_) => panic!(
-                    "unsupported CPU status of cpu #{:}: {:?}",
-                    cpuid,
-                    cpu.status()
-                ),
-                None => {
-                    kwarningln!("no status property found for cpu #{:}.", cpuid);
-                    ncpus += 1;
-                },
-            }
-        }
-
-        ncpus
-    }
+    // `pub unsafe fn early_scan_cpu_count(fdt: VirtAddr) -> usize`
+    // We moved this function to every specific architecture, because different
+    // architectures have different ways to validate the CPU node.
 }
 use device_tree::{DeviceNodeHandle, DeviceStatus, PHandle};
 pub use early::*;
