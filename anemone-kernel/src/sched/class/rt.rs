@@ -257,14 +257,6 @@ impl Realtime {
         !self.queues[priority.bucket_index()].is_empty()
     }
 
-    fn decide_priority_preemption(current: RtPriority, candidate: RtPriority) -> PreemptDecision {
-        if candidate > current {
-            PreemptDecision::RequestResched
-        } else {
-            PreemptDecision::KeepCurrent
-        }
-    }
-
     fn assert_rotation_clear(task: &Arc<Task>) {
         task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
             let rt = entity.realtime();
@@ -470,7 +462,11 @@ impl Scheduler for Realtime {
             candidate_on_runq,
             "arrival candidate must be marked on the run queue before the preempt decision"
         );
-        Self::decide_priority_preemption(current_priority, candidate_priority)
+        if candidate_priority > current_priority {
+            PreemptDecision::RequestResched
+        } else {
+            PreemptDecision::KeepCurrent
+        }
     }
 }
 
@@ -588,19 +584,27 @@ mod kunits {
 
     #[kunit]
     fn test_arrival_preemption_is_strictly_higher_priority() {
-        let mid = RtPriority::new(50);
-        assert_eq!(
-            Realtime::decide_priority_preemption(mid, RtPriority::MAX),
-            PreemptDecision::RequestResched
-        );
-        assert_eq!(
-            Realtime::decide_priority_preemption(mid, mid),
-            PreemptDecision::KeepCurrent
-        );
-        assert_eq!(
-            Realtime::decide_priority_preemption(mid, RtPriority::MIN),
-            PreemptDecision::KeepCurrent
-        );
+        let current = fresh_task(RtPriority::new(50), RtPolicy::fifo());
+        let higher = fresh_task(RtPriority::MAX, RtPolicy::fifo());
+        let equal = fresh_task(RtPriority::new(50), RtPolicy::fifo());
+        let lower = fresh_task(RtPriority::MIN, RtPolicy::fifo());
+        let mut rt = Realtime::new();
+
+        for (candidate, expected) in [
+            (&higher, PreemptDecision::RequestResched),
+            (&equal, PreemptDecision::KeepCurrent),
+            (&lower, PreemptDecision::KeepCurrent),
+        ] {
+            rt.enqueue_new(candidate.clone());
+            candidate.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
+                assert!(!entity.on_runq);
+                entity.on_runq = true;
+            });
+            assert_eq!(
+                rt.decide_preempt_current(&current, candidate, Instant::now()),
+                expected
+            );
+        }
     }
 
     #[kunit]

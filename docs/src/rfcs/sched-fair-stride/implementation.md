@@ -143,7 +143,7 @@
 - `pass: Option<u128>` 的合法初始化与 placed lifecycle：正向测试只允许 `enqueue_new()` 完成 `None -> Some(floor)`，后续 transaction 保持 `Some(pass)`。
 - queued weak nice update 不修改 pass/snapshot；pick/set 后下一次 tick 与有 peer yield 分别从单次 nice observation 使用新 delta。
 - equal-weight 多任务 round order。
-- unequal-weight deterministic service count 和 eventual progress；测试使用足够小的 synthetic weight/scale helper避免长循环，同时生产 weight mapping 单独锁定。
+- 不为 unequal-weight ratio 重写一份独立 selector / pass loop；production-path KUnit 只覆盖真实 Stride heap、charge 与 lifecycle，比例语义和 eventual progress 由 canonical fixed-set argument 关闭，`fair-test` 补充真实 fixed-nice direction 证据。
 - Tick 有 peer时 charge + resched、无 peer时 charge + continue。
 - delayed full pick 前多个 Tick 各自收费且 requeue 不重复收费。
 - Yield 有 peer时至少 peer first、无 peer时 pass 不变并允许 self-pick。

@@ -721,34 +721,6 @@ mod kunits {
     }
 
     #[kunit]
-    fn test_synthetic_unequal_service_ratio_and_progress() {
-        let weights = [3u128, 1u128];
-        let deltas = [
-            checked_ceil_mul_div(12, 1, weights[0]).unwrap(),
-            checked_ceil_mul_div(12, 1, weights[1]).unwrap(),
-        ];
-        let mut passes = [0u128; 2];
-        let mut sequences = [0u128, 1u128];
-        let mut next_sequence = 2u128;
-        let mut service = [0usize; 2];
-
-        for _ in 0..40 {
-            let selected = if (passes[0], sequences[0]) <= (passes[1], sequences[1]) {
-                0
-            } else {
-                1
-            };
-            service[selected] += 1;
-            passes[selected] = checked_add_pass(passes[selected], deltas[selected]).unwrap();
-            sequences[selected] = next_sequence;
-            next_sequence = next_sequence.checked_add(1).unwrap();
-        }
-
-        assert_eq!(service, [30, 10]);
-        assert!(service.iter().all(|count| *count > 0));
-    }
-
-    #[kunit]
     fn test_tick_peer_continue_and_delayed_pick_accounting() {
         let mut alone = Stride::new();
         let only = fresh_task(Nice::ZERO);

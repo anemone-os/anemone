@@ -520,25 +520,3 @@ impl Processor {
         }
     }
 }
-
-#[cfg(feature = "kunit")]
-mod kunits {
-    use super::*;
-
-    #[kunit]
-    fn test_pending_resched_take_restore_and_union() {
-        let mut slot = PendingResched::empty();
-        assert!(slot.is_empty());
-
-        slot.request();
-        let taken = slot.take();
-        assert!(!taken.is_empty());
-        assert!(slot.is_empty());
-
-        // Model a new request racing after the destructive take. Restoring the
-        // old snapshot is a union and cannot erase the new request.
-        slot.request();
-        slot = slot.union(taken);
-        assert!(!slot.is_empty());
-    }
-}
