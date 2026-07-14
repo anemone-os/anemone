@@ -37,7 +37,7 @@
 - `TaskSchedState` 继续唯一拥有 runnable / waiting / zombie 逻辑状态。
 - `SchedEntity::on_runq` 继续由 `RunQueue` 唯一发布 owner CPU runqueue membership；它在完整 transaction 边界与 class-local physical membership 一致，不要求 class dispatch 的中间步骤同步翻转。
 - `Task::cpuid()` 继续是 owner CPU 真相源。
-- `Processor::pending_resched` 继续是等待下一次 full pick 的合并 latch；Stride 不保存 pending snapshot。
+- `Processor::pending_resched` 继续是等待下一次 full pick 的 core-only 单 bit 合并 latch；Stride 不保存或读取 pending snapshot。
 - `Task::nice()` 是 Fair weight 的唯一长期来源。现有 weak setter 不构成本 RFC 的调度属性 transaction；只有推进 pass 的 tick/charged-yield transaction 消费其单次 observation。
 - `SchedClassKind` 从 opaque class payload 派生，只提供稳定 class identity；它不是可独立修改的 policy slot。
 
@@ -202,7 +202,7 @@ ready heap union class-active current
 4. 刷新 placement floor；
 5. 若 ready heap 非空，返回 `RequestResched`；否则返回 `None`。
 
-不得把 pass charge 延迟到 `requeue_preempted_current()`，否则 deferred preempt 或合并 Tick 会丢失 service units。`PendingResched::Tick` 只说明存在未消费的 full-pick request；每次实际 timer tick 已经在 class transaction 中独立收费。
+不得把 pass charge 延迟到 `requeue_preempted_current()`，否则 deferred preempt 或合并 request 会丢失 service units。每次实际 timer tick 已经在 class transaction 中独立收费；core pending slot 不区分或传播 Tick cause。
 
 ## Lifecycle Placement Matrix
 
@@ -222,7 +222,7 @@ ready heap union class-active current
 | `set_next_task()` | require `Some`, unchanged | establish current | refresh after current establishment |
 | same-Fair `decide_preempt_current()` | require current/candidate `Some` | verify active current and queued candidate | unchanged |
 
-Tick path只能收费一次。`requeue_preempted_current()` 即使收到 Tick pending，也不得再次推进 pass。
+Tick path 只能收费一次。`requeue_preempted_current()` 不接收 pending，也不得再次推进 pass。
 
 ## Yield Handoff
 
@@ -299,7 +299,7 @@ explicit yield 可以主动放弃 credit，因此不属于“不调用 yield 的
 - queued 时直接修改 entity pass，却不重建 heap key。
 - 从 heap snapshot 反向覆盖 entity pass。
 - 缓存 nice/weight 并允许与 `Task::nice()` 冲突。
-- 在 tick charge 后又因 Tick pending 在 requeue 时重复收费。
+- 在 tick charge 后又因后续 preempt requeue 重复收费。
 - 有 peer 的 yield 只做普通 `pass += delta`，从而允许高 weight task立即 self-pick。
 - 用 forced pick、skip flag 或 task-type 特例替代 yield pass/order contract。
 - 为 block/wake 加入实际 runtime、sleep credit 或 lag state。

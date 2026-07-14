@@ -1,9 +1,11 @@
 # Sched Wait Preempt Arming 迁移实施计划
 
 **状态：** Completed
-**最后更新：** 2026-07-12
+**最后更新：** 2026-07-14
 **父 RFC：** [RFC-20260618-sched-wait-preempt-arming](./index.md)
 **不变量：** [不变量需求](./invariants.md)
+
+> **共享接口更正（2026-07-14）：** 本计划下方已完成阶段中关于 `ReschedCause`、多 bit pending 或把 pending snapshot 交给 scheduler class 的表述属于当时的历史实现合同，已由 [Sched RT Class R1](../sched-rt-class/index.md) 取代。当前 shared contract 保留 core take / caller restore / successful full-pick acknowledgement，但 `PendingResched` 是 core-only single bit，不进入 `ScheduleMode`、`ScheduleDecision`、`RunQueue` 或 class transaction。本 RFC 的 wait/preempt 语义与完成事实不变。
 
 本文选择 schedule entry split / scheduler-private narrow mode 作为第一阶段实现方向。核心目标是让 trap return 等 involuntary preempt 入口不能消费 wait-core `PrePark`，同时保留 explicit wait sleep 对 `PrePark -> Parked` 的正常语义。实现期执行事实记录在 [2026-07-06-sched-wait-preempt-arming](../../devlog/transactions/2026-07-06-sched-wait-preempt-arming.md)。
 

@@ -37,12 +37,12 @@
 
 ### Source audit
 
-- 审计 `sched/class/mod.rs` 的 `Scheduler` trait、centralized precedence、`TickAction`、`PreemptDecision` 和 `PendingResched`。
+- 审计 `sched/class/mod.rs` 的 `Scheduler` trait、centralized precedence、`TickAction`、`PreemptDecision`，以及 scheduler core 独立拥有的 `PendingResched`。
 - 审计 `sched/class/{entity,runqueue,rt,idle}.rs` 的 payload owner、capability token、dispatch、`on_runq` / `ntasks` 更新顺序和 idle fallback；确认 `on_runq` 只在完整 `RunQueue` transaction 边界与 class-local physical membership 一致。
 - 审计 `rt.rs` 中跨 class precedence 与全局 default constructor 测试，确认前者不应继续由 RT owner 保留，后者必须在 Checkpoint 2 随 selector owner 一起迁出 RT module。
 - 审计 `sched/mod.rs`、`sched/processor.rs` 和 `sched/api/sched_yield.rs`，确认用户 `sched_yield()` 与内核 `yield_now()` 统一进入 `requeue_yielded_current()`，且 requeue 后执行 full pick。
 - 审计 `local_pick_next()` 是 `pick_next_task()` / `set_next_task()` 的唯一 production scheduler-core caller，且两者在同一 owner-CPU IRQ-off full-pick transaction 中无 admission、无 callback 地成对执行。
-- 审计 Tick pending 的 producer/consumer，确认 `task_tick()` 可以在 request 产生时完成 pass charge，requeue 不需要补记。
+- 审计 tick full-pick request 的 producer/consumer，确认 `task_tick()` 可以在 request 产生时完成 pass charge，requeue 不需要补记。
 - 审计 `SchedEntity::new_default()` 的所有 production callers，确认 ordinary task、clone、bootstrap 和 kthread 不绕过 facade。
 - 审计 `Task::nice()`、clone inheritance 和现有 weak setter，确认 tick 与 charged yield 每个 transaction 只读一次 typed nice，queued pass/key 不被追溯修改，且不需要新增调度属性 transaction。
 - 审计 `scripts/xtask/src/config/kconfig.rs`、`conf/.defconfig`、live root `kconfig` 和 generated `kconfig_defs.rs`，确认 selector 是受约束 enum 而不是多个 boolean；generated `kconfig_defs.rs` / `platform_defs.rs` 只作为 build output，不属于手工 authored write set。
@@ -55,7 +55,7 @@
 
 - 现有 method-first `Scheduler` trait 足以表达 Stride 全部生命周期 transaction。
 - `Task::with_sched_entity_mut(SchedEntityMutToken)` 足以让 Fair owner 访问 payload，同时阻止普通 crate caller 替换 published entity。
-- same-class arrival 可以保持 current；下一 tick 只需产生已有 Tick resched request，不需要新 resched cause，也不声称 full pick 具备 one-tick 上界。
+- same-class arrival 可以保持 current；下一 tick 只需产生已有 full-pick request，不需要 resched cause，也不声称 full pick 具备 one-tick 上界。
 - yield guarantee 可以完全在 `requeue_yielded_current()` 内通过 pass/sequence 表达。
 - heap queued key 在 owner-CPU transaction 间保持 immutable，不需要 scheduler core 支持。
 
@@ -166,7 +166,7 @@
 - heap sequence/pass 使用 checked `u128`。
 - `placement_floor` 只在 fresh/wake placement 被消费，不出现在 pick eligibility；所有刷新只读取完整 transaction 的最终 post-state，pick 不刷新。
 - `local_pick_next()` 唯一且连续地成对调用 pick/set-next，不存在中间 admission/callback。
-- `requeue_preempted_current()` 不因 Tick pending 再次收费。
+- `requeue_preempted_current()` 不读取 core pending，也不重复 tick 收费。
 - `yield_now()` 无 task-type 特例。
 
 ### 验证 floor

@@ -1,12 +1,14 @@
 # sched EEVDF-lite tracking issues
 
 **状态：** Closed with unresolved Keter
-**最后更新：** 2026-07-12
+**最后更新：** 2026-07-14
 **父 RFC：** [RFC-20260622-sched-eevdf-lite](./index.md)
 **事务日志：** [2026-07-09-sched-eevdf-lite](../../devlog/transactions/2026-07-09-sched-eevdf-lite.md)
 **来源：** sched-split-aware v2 重写 / method-first scheduler class 纠偏 / 2026-07-07 文档层 review / 2026-07-11 Stage 3 runtime feedback / 2026-07-12 R1 runtime failure
 
 本文保留 design review 后确认的 sched EEVDF-lite 草案缺陷、证明缺口、边界冲突或会影响未来实现顺序、review gate、停止边界和验收判断的设计问题。父 RFC 已延期关闭，但未解决问题不会随之 Neutralized；`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 继续保持 Keter，直到未来重新打开 RFC 并以新批准的证据关闭。
+
+2026-07-14 shared contract 更正：下方关于 `ReschedCause`、多 bit pending 或 class 读取 pending snapshot 的 issue 历史保持原状态与证据，但该 trait contract 已由 [Sched RT Class R1](../sched-rt-class/index.md) supersede。未来重开 EEVDF 必须使用 core-only single-bit pending；需要延续的 EEVDF accounting / placement outcome 由 EEVDF owner 重新 review，不能恢复 core cause continuation。
 
 普通实现进度、TODO、benchmark 数字、用户侧长日志和阶段性交付项不写入本文；它们属于 [RFC index](./index.md) 的背景、非目标、风险，或 [迁移实施计划](./implementation.md) 的阶段内容。受控实现反馈不新建通用 feedback 文件；计划写在 [迁移实施计划](./implementation.md#probe--vertical-slice-gates)，执行结果进入 transaction devlog。若反馈暴露目标、不变量、owner boundary 或接受边界需要改变，必须回写 RFC canonical 文本和本文对应 issue。
 
@@ -99,7 +101,7 @@
 
 **历史修复落点：** `anemone-kernel/src/sched/class/entity.rs` 的唯一 default normal constructor 曾在阶段 3 翻转为 fresh `EevdfEntity`，无调用者的 directed `new_eevdf()` 已删除。R1 runtime acceptance 失败后，该 constructor 已恢复为 fresh RR entity；EEVDF implementation 保留为实验代码。
 
-**Source audit / validation:** ordinary clone child、rv64 / loongarch64 bootstrap task、`kthreadd` 和 ordinary kthread 继续调用 `SchedEntity::new_normal()`；idle task 仍使用 `new_idle()`。当前 `new_normal()` 创建 RR，且默认 `user-test` / pretest rootfs 不再自动运行或安装 `eevdf-test`。
+**Source audit / validation:** EEVDF 关闭时 ordinary clone child、rv64 / loongarch64 bootstrap task、`kthreadd` 和 ordinary kthread 继续调用当时的 `SchedEntity::new_normal()`，该 constructor 创建 RR；idle task 仍使用 `new_idle()`，默认 `user-test` / pretest rootfs 不再自动运行或安装 `eevdf-test`。后续 Fair / Stride 已把 shared constructor 迁移为 `new_default()` 并将 repository default 切换为 Fair；这不改变本 issue 的历史 closure。
 
 **结论：** 本 issue 的 Neutralized 只记录阶段 3 default switch 曾按 single-constructor contract 完成；它不再表示当前 production default 是 EEVDF。恢复 RR 是 RFC runtime failure 后的显式 closeout，不把四个未解决 Keter 伪装为已修复。
 
@@ -283,4 +285,4 @@
 
 **反馈相关：** 未来若重新打开 RFC，且 source audit 或实现事实证明 timer worker、OOM worker、`kthreadd` 或其它 service kthread 需要 bounded latency、emergency priority 或单独 scheduler class，必须停止 default switch 并回到 RFC review。
 
-**结论：** 该 Neutralized 只保留历史 contract 决策，不描述当前分类。当前这些内核线程通过 `new_normal()` 进入 RR；未来若再次切换到 EEVDF，eventual-progress 与 service-thread latency 边界必须随重新打开的 RFC 一并复审。
+**结论：** 该 Neutralized 只保留历史 contract 决策，不描述当前分类。当前这些内核线程通过 shared `new_default()` 进入 Fair；未来若再次切换到 EEVDF，eventual-progress 与 service-thread latency 边界必须随重新打开的 RFC 一并复审。

@@ -1,7 +1,7 @@
 # Sched Wait Preempt Arming 不变量需求
 
 **状态：** Canonical
-**最后更新：** 2026-07-12
+**最后更新：** 2026-07-14
 **父 RFC：** [RFC-20260618-sched-wait-preempt-arming](./index.md)
 
 本文定义内核抢占下 wait-core wake-prerequisite / parkability 必须满足的协议边界。当前 RFC 选择 schedule entry split / preempt-defer 作为第一阶段方向；如果后续实现引入新状态、新 capability 或 begin 拆分，必须回到本文确认是否仍满足这些边界。
@@ -67,7 +67,7 @@
 
 允许保留诊断字段，例如 wait id、begin caller location、timeout-installed point、source-registered count、park-ready point、schedule entry/mode 和 timeout id。诊断字段不能反向驱动状态机。若 origin 字段只用于 panic、review 或排障，字段旁必须说明它不参与行为决策。第一阶段 wait origin 只保存 `core::panic::Location::caller()`，不增加 primitive / operation taxonomy；如果后续日志证明 caller location 不够读，再回到本文审查是否需要新的诊断维度。
 
-processor pending-resched 的行为真相只保存在本地 `Processor` slot。`take_pending_resched()` 返回的 `PendingResched` 是当前调用事务的值 snapshot：它可以交给 preempted-current class transaction 读取，也可以由 destructive-take caller 在 deferred 后 union restore，但不是 slot capability 或第二份长期真相。successful-pick acknowledgement 只清 processor slot，不抹除当前调度事务已经捕获的 snapshot。
+processor pending-resched 的行为真相只保存在本地 `Processor` slot。`take_pending_resched()` 返回 typed single-bit snapshot 并清 slot；`schedule_preempt(pending)` 只用非空值证明 entry 合法，destructive-take caller 在 deferred 后以 union restore 同一 snapshot。pending 不进入 preempted-current class transaction，也不是 slot capability 或第二份长期真相。successful-pick acknowledgement 清除此前 slot，take 后新产生的 request 仍属于下一轮。
 
 `WaitStateStatus::Armed`、`WaitOutcome::Armed` 和 `WakeToken::is_armed()` 只能被解释为 completion-open identity state：本轮 wait 仍允许 timeout、source trigger、signal/force/cancel 竞争 completion。任何实现或审查不得把它们当作 timeout callback 已安装、source trigger 已注册，或 task 可被 scheduler park 的证明。
 
