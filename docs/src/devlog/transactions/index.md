@@ -19,6 +19,7 @@
 
 ## Completed
 
+- [PLIC DT Context](./2026-07-14-plic-dt-context.md)
 - [CPU Logical / Physical ID](./2026-07-14-cpu-logical-physical-id.md)
 - [Sched Wait Preempt Arming](./2026-07-06-sched-wait-preempt-arming.md)
 - [VFS Direct User I/O](./2026-06-29-vfs-direct-user-io.md)

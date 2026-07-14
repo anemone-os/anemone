@@ -89,6 +89,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
+- [RFC-20260714-plic-dt-context](./rfcs/plic-dt-context/index.md)：已实现 PLIC `interrupts-extended` 按 parent `#interrupt-cells` 解析、S-mode context 映射与错误可观测性。
 - [RFC-20260714-cpu-logical-physical-id](./rfcs/cpu-logical-physical-id/index.md)：已实现并关闭；把连续逻辑 `CpuId` 与固件/硬件可见 `PhysCpuId` 分离，以锁保护的 registry 作为映射和 CPU 数量的唯一真相源，并明确 scheduler stack 保留物理槽位索引的 bootstrap 边界。
 - [RFC-20260629-vfs-direct-user-io](./rfcs/vfs-direct-user-io/index.md)：已实现第一版；定义普通文件 `read` / `readv` / `pread*` 与 `write` / `writev` / `pwrite*` 的 direct userspace copy 边界、VFS-owned user-buffer cursor、fanotify transaction adapter，以及 ramfs/ext4 regular file read/write hook。`RWF_*`、完整 Linux `O_DIRECT`、mmap coherency、splice family 和 non-regular backend hook 仍按 register / follow-up 边界处理。
 - [RFC-20260620-threaded-timer-event](./rfcs/threaded-timer-event/index.md)：已实现第一版；定义 soft timer 的 threaded completion lane、per-CPU timer worker、通用 `Late` initcall、`timerfd` / `ITIMER_REAL` 迁移边界，以及 wait-core timeout 非目标。
