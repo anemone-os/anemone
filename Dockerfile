@@ -49,6 +49,7 @@ RUN apt update && apt install -y \
     linux-image-kvm \
     libglib2.0-0 \
     libslirp0 \
+    u-boot-tools \
     sudo
 COPY --from=build_lwext4_toolchains /opt/toolchains /opt/toolchains
 ENV LWEXT4_TOOLCHAIN_RISCV64=/opt/toolchains/riscv64-linux-musl-cross \
@@ -60,6 +61,7 @@ ENV RUSTUP_HOME=/opt/rust/rustup \
     PATH="/opt/rust/cargo/bin:${PATH}"
 RUN mkdir -p /opt/rust/cargo /opt/rust/rustup && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path && \
+    rustup component add llvm-tools-preview && \
     cargo install cargo-fuzz just just-lsp cargo-binutils && \
     chmod -R a+rwX /opt/rust
 COPY --from=build_qemu /opt/qemu /opt/qemu
@@ -110,6 +112,7 @@ RUN apt update && apt install -y \
     linux-image-kvm \
     libglib2.0-0 \
     libslirp0 \
+    u-boot-tools \
     sudo
 
 COPY --from=build_lwext4_toolchains /opt/toolchains /opt/toolchains
@@ -125,6 +128,7 @@ ENV RUSTUP_HOME=/opt/rust/rustup \
     PATH="/opt/rust/cargo/bin:${PATH}"
 RUN mkdir -p /opt/rust/cargo /opt/rust/rustup && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --no-modify-path && \
+    rustup component add llvm-tools-preview && \
     cargo install just cargo-binutils && \
     chmod -R a+rwX /opt/rust
 ENV CARGO_HOME=

@@ -57,10 +57,9 @@ pub struct FdtReserveEntry {
 mod tests {
     use std::{alloc::Layout, ptr::NonNull};
 
-    use crate::parser::FdtParser;
+    use crate::{DevicePathError, DeviceTreeHandle, parser::FdtParser};
 
-    #[test]
-    fn parse_dtb() {
+    fn with_test_tree(f: impl FnOnce(&DeviceTreeHandle)) {
         let fdt_blob: &[u8] = include_bytes!("../testfiles/qemu-virt-rv64.dtb");
         let word_aligned_fdt = unsafe {
             let layout = core::alloc::Layout::from_size_align(fdt_blob.len(), 8).unwrap();
@@ -76,10 +75,7 @@ mod tests {
             NonNull::new(core::ptr::slice_from_raw_parts_mut(ptr, layout.size()))
         });
 
-        // print some info to verify the parsing result
-        for node in dt_handle.all_nodes() {
-            eprintln!("name: {} unit: {:?}", node.name(), node.unit_addr());
-        }
+        f(&dt_handle);
 
         unsafe {
             std::alloc::dealloc(
@@ -88,5 +84,56 @@ mod tests {
             );
             std::alloc::dealloc(dt_handle.arena.as_ptr().cast::<u8>(), unflattened_layout);
         }
+    }
+
+    #[test]
+    fn parse_dtb() {
+        with_test_tree(|dt_handle| {
+            for node in dt_handle.all_nodes() {
+                eprintln!("name: {} unit: {:?}", node.name(), node.unit_addr());
+            }
+        });
+    }
+
+    #[test]
+    fn resolve_device_paths() {
+        with_test_tree(|dt_handle| {
+            let absolute = dt_handle
+                .resolve_device_path("/soc/serial@10000000:115200")
+                .unwrap();
+            assert_eq!(absolute.node().full_name(), "serial@10000000");
+            assert_eq!(absolute.options(), Some("115200"));
+
+            let alias = dt_handle.resolve_device_path("serial0:115200n8").unwrap();
+            assert_eq!(alias.node().handle(), absolute.node().handle());
+            assert_eq!(alias.options(), Some("115200n8"));
+
+            let without_options = dt_handle.resolve_device_path("serial0").unwrap();
+            assert_eq!(without_options.node().handle(), absolute.node().handle());
+            assert_eq!(without_options.options(), None);
+
+            let opaque_options = dt_handle
+                .resolve_device_path("serial0:vendor:specific:value")
+                .unwrap();
+            assert_eq!(opaque_options.node().handle(), absolute.node().handle());
+            assert_eq!(opaque_options.options(), Some("vendor:specific:value"));
+
+            assert_eq!(
+                dt_handle.resolve_device_path(":115200").unwrap_err(),
+                DevicePathError::EmptyPath
+            );
+            assert_eq!(
+                dt_handle
+                    .resolve_device_path("unknown-alias:115200")
+                    .unwrap_err(),
+                DevicePathError::AliasNotFound
+            );
+            assert_eq!(
+                dt_handle
+                    .resolve_device_path("/soc/missing:115200")
+                    .unwrap_err(),
+                DevicePathError::NodeNotFound
+            );
+        });
     }
 }

@@ -104,15 +104,15 @@ impl KernelLayoutTrait<Sv39PagingArch> for Sv39KernelLayout {
         VirtPageNum::new(1 << (Sv39PagingArch::PAGE_LEVELS * Sv39PagingArch::PGDIR_IDX_BITS) >> 1);
 
     const FREE_SPACE_VPN: VirtPageNum = VirtPageNum::new(
-        (Self::KSPACE_VPN.to_virt_addr().get() + PHYS_RAM_START + MAX_PHYS_RAM_SIZE)
+        (Self::KSPACE_VPN.to_virt_addr().get() + PHYS_RAM_START.get() + MAX_PHYS_RAM_SIZE)
             >> Sv39PagingArch::PAGE_SIZE_BITS,
     );
 
     const KERNEL_VA_BASE_VPN: VirtPageNum =
-        VirtPageNum::new(KERNEL_VA_BASE >> Sv39PagingArch::PAGE_SIZE_BITS);
+        VirtPageNum::new(KERNEL_VA_BASE.get() >> Sv39PagingArch::PAGE_SIZE_BITS);
 
     const KERNEL_LA_BASE_VPN: PhysPageNum =
-        PhysPageNum::new(KERNEL_LA_BASE >> Sv39PagingArch::PAGE_SIZE_BITS);
+        PhysPageNum::new(KERNEL_LA_BASE.get() >> Sv39PagingArch::PAGE_SIZE_BITS);
 
     const DIRECT_MAPPING_VPN: VirtPageNum = Self::KSPACE_VPN;
 }

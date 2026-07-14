@@ -79,9 +79,9 @@ pub const fn create_bootstrap_ptable() -> LA64PageDirectory {
     let mut pdir = LA64PageDirectory::ZEROED;
 
     // align to GB
-    let k_phys_align_down = align_down_power_of_2!(KERNEL_LA_BASE, 1 << 30);
+    let k_phys_align_down = align_down_power_of_2!(KERNEL_LA_BASE.get(), 1 << 30);
     let k_phys_ppn = k_phys_align_down as u64 >> 12;
-    let k_virt_idx = (KERNEL_VA_BASE >> 30) as usize & 0x1ff;
+    let k_virt_idx = (KERNEL_VA_BASE.get() >> 30) as usize & 0x1ff;
 
     // 1. map kernel image to -2gb ~ 0
     assert!(k_virt_idx == 510);

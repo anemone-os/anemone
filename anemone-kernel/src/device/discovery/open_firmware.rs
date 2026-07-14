@@ -12,7 +12,7 @@ use core::ptr::NonNull;
 use crate::{
     device::{
         bus::platform::{self, PlatformDevice},
-        discovery::fwnode::FwNode,
+        discovery::fwnode::{FwNode, StdoutConfig},
         kobject::{KObjIdent, KObject, KObjectBase},
         resource::Resource,
     },
@@ -20,9 +20,10 @@ use crate::{
     sync::mono::MonoOnce,
 };
 
-mod early {
+mod chosen;
+pub use chosen::{StdoutPathError, of_init_stdout};
 
-    use fdt::nodes::cpus::CpuStatus;
+mod early {
 
     use super::*;
 
@@ -131,11 +132,13 @@ mod early {
 
                 // add kernel image as a mappable reserved memory region.
                 let __skernel = align_down_power_of_2!(
-                    link_symbols::__skernel as *const () as u64 - KERNEL_VA_BASE + KERNEL_LA_BASE,
+                    link_symbols::__skernel as *const () as u64 - KERNEL_VA_BASE.get()
+                        + KERNEL_LA_BASE.get(),
                     PagingArch::PAGE_SIZE_BYTES
                 ) as u64;
                 let __ekernel = align_up_power_of_2!(
-                    link_symbols::__ekernel as *const () as u64 - KERNEL_VA_BASE + KERNEL_LA_BASE,
+                    link_symbols::__ekernel as *const () as u64 - KERNEL_VA_BASE.get()
+                        + KERNEL_LA_BASE.get(),
                     PagingArch::PAGE_SIZE_BYTES
                 ) as u64;
 
@@ -260,39 +263,9 @@ mod early {
         fdt.root().cpus().common_timebase_frequency()
     }
 
-    /// Scan the CPU count from the device tree.
-    ///
-    /// Mostly used for waking up APs in SMP initialization.
-    ///
-    /// # Safety
-    ///
-    /// - Caller must ensure that the provided `fdt` is valid.
-    pub unsafe fn early_scan_cpu_count(fdt: VirtAddr) -> usize {
-        let fdt = unsafe { fdt::Fdt::from_ptr(fdt.as_ptr()) }.expect("failed to parse device tree");
-
-        let mut ncpus = 0;
-
-        for cpu in fdt.root().cpus().iter() {
-            let cpuid = cpu.clone().reg::<u32>().first().unwrap_or_else(|e| {
-                panic!("error finding cpu id for cpu in slot #{:}: {:?}", ncpus, e)
-            });
-
-            match cpu.status() {
-                Some(CpuStatus::OKAY) => ncpus += 1,
-                Some(_) => panic!(
-                    "unsupported CPU status of cpu #{:}: {:?}",
-                    cpuid,
-                    cpu.status()
-                ),
-                None => {
-                    kwarningln!("no status property found for cpu #{:}.", cpuid);
-                    ncpus += 1;
-                },
-            }
-        }
-
-        ncpus
-    }
+    // `pub unsafe fn early_scan_cpu_count(fdt: VirtAddr) -> usize`
+    // We moved this function to every specific architecture, because different
+    // architectures have different ways to validate the CPU node.
 }
 use device_tree::{DeviceNodeHandle, DeviceStatus, PHandle};
 pub use early::*;
@@ -518,10 +491,6 @@ bitflags! {
         /// so kernel won't create a PlatformDevice for
         /// it in of_platform_discovery().
         const POPULATED = 1 << 0;
-
-        /// Device with this flag set will be registered as a system console with
-        /// ConsoleFlags::ENABLED bit set.
-        const STDOUT = 1 << 1;
     }
 }
 
@@ -556,18 +525,6 @@ impl OpenFirmwareNode {
     pub fn populated(&self) -> bool {
         OfNodeFlags::from_bits_truncate(self.flags.load(Ordering::SeqCst))
             .contains(OfNodeFlags::POPULATED)
-    }
-
-    /// Mark this node as a system console with ConsoleFlags::ENABLED bit set.
-    pub fn mark_as_stdout(&self) {
-        self.flags
-            .fetch_or(OfNodeFlags::STDOUT.bits(), Ordering::SeqCst);
-    }
-
-    /// Check if this node is marked as a system console.
-    pub fn is_stdout(&self) -> bool {
-        OfNodeFlags::from_bits_truncate(self.flags.load(Ordering::SeqCst))
-            .contains(OfNodeFlags::STDOUT)
     }
 }
 
@@ -633,8 +590,8 @@ impl FwNode for OpenFirmwareNode {
         }
     }
 
-    fn is_stdout(&self) -> bool {
-        self.is_stdout()
+    fn stdout_config(&self) -> Option<StdoutConfig<'_>> {
+        chosen::stdout_config(self.handle)
     }
 }
 

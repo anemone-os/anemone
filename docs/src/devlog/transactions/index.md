@@ -23,6 +23,7 @@
 
 ## Completed
 
+- [CPU Logical / Physical ID](./2026-07-14-cpu-logical-physical-id.md)
 - [Sched RT Class](./2026-07-12-sched-rt-class.md)
 - [Sched Wait Preempt Arming](./2026-07-06-sched-wait-preempt-arming.md)
 - [VFS Direct User I/O](./2026-06-29-vfs-direct-user-io.md)

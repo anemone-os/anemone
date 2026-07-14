@@ -32,6 +32,8 @@
 
 ## 当前记录
 
+- [2026-07-14 - PLIC device-tree context 解析](./2026-07-14-plic-dt-context.md)
+- [2026-07-13 - RISC-V Svade A/D 位兼容](./2026-07-13-riscv-ad-bits-svade.md)
 - [2026-07-05 - read-write request 结构整理](./2026-07-05-read-write-request-structure.md)
 - [2026-06-23 - User-test LTP judge 输出兼容](./2026-06-23-user-test-ltp-judge-compat.md)
 - [2026-06-23 - User-test LTP runner 结构拆分](./2026-06-23-user-test-ltp-structure-cleanup.md)
