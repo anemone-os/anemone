@@ -6,7 +6,10 @@
 //! - https://starfivetech.com/uploads/sifive-interrupt-cookbook-v1p2.pdf
 
 use crate::{
-    device::discovery::fwnode::FwNode,
+    device::discovery::{
+        fwnode::FwNode,
+        open_firmware::of_with_node_by_phandle,
+    },
     mm::remap::{IoRemap, ioremap},
     prelude::*,
 };
@@ -90,6 +93,10 @@ use driver_core::*;
 pub struct SiFivePlic {
     remap: IoRemap,
     ndev: usize,
+    /// S-mode contexts parsed from `interrupts-extended`, indexed by logical
+    /// CPU ID. The immutable device tree is the source of truth; this snapshot
+    /// avoids phandle traversal in the interrupt path and must never go stale.
+    s_contexts: Vec<usize>,
 }
 
 pub static COMPATIBLE_STRS: &[&str] = &["sifive,plic-1.0.0", "riscv,plic0", "starfive,jh7110-plic"];
@@ -195,19 +202,18 @@ impl CoreIrqChip for SiFivePlic {
 
             let remap =
                 unsafe { ioremap(base, len as usize) }.expect("failed to remap plic registers");
-            let plic = Self { remap, ndev };
+            let s_contexts = Self::parse_s_contexts(fwnode)
+                .unwrap_or_else(|error| panic!("failed to parse PLIC contexts: {error:?}"));
+            let plic = Self {
+                remap,
+                ndev,
+                s_contexts,
+            };
 
             {
-                // following are a temporary initialization. proper initialization should be
-                // resolve "interrupts-extended" property and set up contexts accordingly, which
-                // is left for future work.
-
                 let regs = plic.regs();
 
-                for logical_id in 0..ncpus() {
-                    let cpu_id = CpuId::new(logical_id);
-                    let ctx = SiFivePlic::s_ctx_for(cpu_id.physical_id());
-
+                for &ctx in &plic.s_contexts {
                     // keep all sources masked by default, individual lines are unmasked by
                     // request path later.
                     regs.clear_enable_words(ctx, plic.enable_words());
@@ -229,9 +235,7 @@ impl CoreIrqChip for SiFivePlic {
     }
 
     fn claim(&self) -> Option<HwIrq> {
-        let claimed =
-            self.regs()
-                .claim(SiFivePlic::s_ctx_for(cur_cpu_id().physical_id())) as usize;
+        let claimed = self.regs().claim(self.current_s_context()) as usize;
         if claimed == 0 {
             return None;
         }
@@ -250,6 +254,219 @@ impl SiFivePlic {
         unsafe { SiFivePlicRegisters::from_raw(self.remap.as_ptr().as_ptr().cast()) }
     }
 
+    fn parse_s_contexts(fwnode: &dyn FwNode) -> Result<Vec<usize>, SysError> {
+        // `riscv,cpu-intc` uses the RISC-V interrupt cause encoding; source 9
+        // is the supervisor external interrupt chained to the PLIC.
+        const SUPERVISOR_EXTERNAL: u32 = 9;
+
+        macro_rules! parse_fail {
+            ($error:expr, $($args:tt)*) => {{
+                kerrln!($($args)*);
+                return Err($error);
+            }};
+        }
+
+        let raw = match fwnode.prop_read_raw("interrupts-extended") {
+            Some(raw) => raw,
+            None => parse_fail!(
+                SysError::FwNodeLookupFailed,
+                "plic: missing interrupts-extended property"
+            ),
+        };
+        if raw.is_empty() {
+            parse_fail!(
+                SysError::InvalidInterruptInfo,
+                "plic: interrupts-extended property is empty"
+            );
+        }
+
+        let mut offset = 0;
+        let mut context = 0;
+        let mut parsed_s_contexts = Vec::new();
+
+        while offset < raw.len() {
+            let phandle_end = match offset.checked_add(4) {
+                Some(end) => end,
+                None => parse_fail!(
+                    SysError::InvalidInterruptInfo,
+                    "plic: interrupts-extended phandle offset overflow at {}",
+                    offset
+                ),
+            };
+            let phandle_raw = match raw.get(offset..phandle_end) {
+                Some(raw) => raw,
+                None => parse_fail!(
+                    SysError::InvalidInterruptInfo,
+                    "plic: truncated parent phandle at interrupts-extended offset {}",
+                    offset
+                ),
+            };
+            let phandle = u32::from_be_bytes(phandle_raw.try_into().unwrap());
+            offset = phandle_end;
+
+            let parent = of_with_node_by_phandle(phandle, |node| {
+                let is_cpu_intc = node.compatible().map_or(false, |mut compatibles| {
+                    compatibles.any(|compatible| compatible == "riscv,cpu-intc")
+                });
+                if !is_cpu_intc {
+                    parse_fail!(
+                        SysError::InvalidInterruptInfo,
+                        "plic: context phandle {:#x} does not refer to riscv,cpu-intc",
+                        phandle
+                    );
+                }
+
+                let interrupt_cells = match node.interrupt_cells() {
+                    Some(cells) => cells as usize,
+                    None => parse_fail!(
+                        SysError::FwNodeLookupFailed,
+                        "plic: context phandle {:#x} has no #interrupt-cells",
+                        phandle
+                    ),
+                };
+                let cpu = match node.parent() {
+                    Some(cpu) => cpu,
+                    None => parse_fail!(
+                        SysError::FwNodeLookupFailed,
+                        "plic: context phandle {:#x} has no parent CPU node",
+                        phandle
+                    ),
+                };
+                let reg = match cpu.reg() {
+                    Some(reg) => reg,
+                    None => parse_fail!(
+                        SysError::FwNodeLookupFailed,
+                        "plic: CPU parent of context phandle {:#x} has no reg",
+                        phandle
+                    ),
+                };
+                let mut reg = reg.iter();
+                let (hart, _) = match reg.next() {
+                    Some(hart) => hart,
+                    None => parse_fail!(
+                        SysError::FwNodeLookupFailed,
+                        "plic: CPU parent of context phandle {:#x} has an empty reg",
+                        phandle
+                    ),
+                };
+                if reg.next().is_some() {
+                    parse_fail!(
+                        SysError::InvalidInterruptInfo,
+                        "plic: CPU parent of context phandle {:#x} has multiple reg entries",
+                        phandle
+                    );
+                }
+                let physical_id = match usize::try_from(hart) {
+                    Ok(hart) => PhysCpuId::new(hart),
+                    Err(_) => parse_fail!(
+                        SysError::InvalidInterruptInfo,
+                        "plic: hart id {} from context phandle {:#x} does not fit usize",
+                        hart,
+                        phandle
+                    ),
+                };
+                Ok((physical_id, interrupt_cells))
+            })
+            .ok()
+            .unwrap_or_else(|| {
+                parse_fail!(
+                    SysError::FwNodeLookupFailed,
+                    "plic: context phandle {:#x} was not found",
+                    phandle
+                )
+            });
+            let (physical_id, interrupt_cells) = match parent {
+                Ok(parent) => parent,
+                Err(error) => parse_fail!(
+                    error,
+                    "plic: failed to read context phandle {:#x}: {:?}",
+                    phandle,
+                    error
+                ),
+            };
+
+            let specifier_len = match interrupt_cells.checked_mul(4) {
+                Some(len) => len,
+                None => parse_fail!(
+                    SysError::InvalidInterruptInfo,
+                    "plic: context {} specifier length overflows for #interrupt-cells={}",
+                    context,
+                    interrupt_cells
+                ),
+            };
+            let specifier_end = match offset.checked_add(specifier_len) {
+                Some(end) => end,
+                None => parse_fail!(
+                    SysError::InvalidInterruptInfo,
+                    "plic: context {} specifier offset overflows at {}",
+                    context,
+                    offset
+                ),
+            };
+            let specifier = match raw.get(offset..specifier_end) {
+                Some(specifier) => specifier,
+                None => parse_fail!(
+                    SysError::InvalidInterruptInfo,
+                    "plic: truncated specifier for context {} at offset {} ({} cells)",
+                    context,
+                    offset,
+                    interrupt_cells
+                ),
+            };
+            offset = specifier_end;
+
+            // The PLIC binding requires each context parent to be a
+            // riscv,cpu-intc, whose binding defines a one-cell interrupt cause.
+            // The entry boundary above still comes from the parent's
+            // #interrupt-cells as required by the generic DT specification.
+            if interrupt_cells != 1 {
+                parse_fail!(
+                    SysError::InvalidInterruptInfo,
+                    "plic: context {} uses unsupported riscv,cpu-intc #interrupt-cells={}",
+                    context,
+                    interrupt_cells
+                );
+            }
+            let interrupt = u32::from_be_bytes(specifier.try_into().unwrap());
+
+            if interrupt == SUPERVISOR_EXTERNAL {
+                if parsed_s_contexts
+                    .iter()
+                    .any(|&(existing, _)| existing == physical_id)
+                {
+                    parse_fail!(
+                        SysError::InvalidInterruptInfo,
+                        "plic: duplicate S-mode context for physical CPU {} at context {}",
+                        physical_id,
+                        context
+                    );
+                }
+                parsed_s_contexts.push((physical_id, context));
+            }
+
+            context += 1;
+        }
+
+        let mut s_contexts = Vec::with_capacity(ncpus());
+        for logical_id in 0..ncpus() {
+            let physical_id = CpuId::new(logical_id).physical_id();
+            let context = match parsed_s_contexts
+                .iter()
+                .find_map(|&(candidate, context)| (candidate == physical_id).then_some(context))
+            {
+                Some(context) => context,
+                None => parse_fail!(
+                    SysError::InvalidInterruptInfo,
+                    "plic: no S-mode context found for active physical CPU {}",
+                    physical_id
+                ),
+            };
+            kinfoln!("plic: {} uses S-mode context {}", physical_id, context);
+            s_contexts.push(context);
+        }
+        Ok(s_contexts)
+    }
+
     fn valid_hwirq(&self, hwirq: usize) -> bool {
         hwirq != 0 && hwirq <= self.ndev
     }
@@ -258,11 +475,7 @@ impl SiFivePlic {
         (self.ndev + 32) / 32
     }
 
-    fn s_ctx_for(cpu_id: PhysCpuId) -> usize {
-        cpu_id.get() * 2 + 1
-    }
-
     fn current_s_context(&self) -> usize {
-        Self::s_ctx_for(cur_cpu_id().physical_id())
+        self.s_contexts[cur_cpu_id().logical_id()]
     }
 }
