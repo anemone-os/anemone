@@ -200,9 +200,9 @@ fn register_earlycon() {
 
     impl Console for SbiEarlyCon {
         fn output(&self, s: &str) {
-            for c in s.chars() {
-                let _ = sbi_rt::legacy::console_putchar(c as usize);
-            }
+            // for c in s.chars() {
+            //     let _ = sbi_rt::legacy::console_putchar(c as usize);
+            // }
             // After bsp_primary remaps the boot stack into the REMAP region and
             // switches to it, any stack-allocated data (e.g. LogRecord.msg) has
             // a virtual address in the REMAP region, not the kernel-image
@@ -210,7 +210,7 @@ fn register_earlycon() {
             // KERNEL_MAPPING_OFFSET, so it gives a garbage physical
             // address for REMAP-region pointers, causing SBI
             // to read from invalid memory and hang.
-            /*
+
             #[unsafe(link_section = ".bss.nonzero_init")]
             static mut SBI_EARLYCON_BUF: [u8; 512] = [0u8; 512];
 
@@ -226,17 +226,16 @@ fn register_earlycon() {
                 let chunk_len = remaining.len().min(buf.len());
                 buf[..chunk_len].copy_from_slice(&remaining[..chunk_len]);
 
-                // let buf_pa = unsafe { VirtAddr::new(buf.as_ptr() as u64).kvirt_to_phys() };
-                // let pa = sbi_rt::Physical::new(
-                //     chunk_len,
-                //     buf_pa.lower_32_bits() as usize,
-                //     buf_pa.upper_32_bits() as usize,
-                // );
-                // let _ = sbi_rt::console_write(pa);
+                let buf_pa = unsafe { VirtAddr::new(buf.as_ptr() as u64).kvirt_to_phys() };
+                let pa = sbi_rt::Physical::new(
+                    chunk_len,
+                    buf_pa.lower_32_bits() as usize,
+                    buf_pa.upper_32_bits() as usize,
+                );
+                let _ = sbi_rt::console_write(pa);
 
                 remaining = &remaining[chunk_len..];
             }
-             */
         }
     }
 
@@ -401,18 +400,10 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_pa: PhysAddr) -> ! {
     unsafe {
         // needed by percpu initialization.
         early_scan_cpu_count(fdt_va);
-        let bsp_id = CpuId::from_physical_id(bsp_physical_id).unwrap_or_else(|| {
-            panic!(
-                "bootstrap {} was not registered",
-                bsp_physical_id
-            )
-        });
+        let bsp_id = CpuId::from_physical_id(bsp_physical_id)
+            .unwrap_or_else(|| panic!("bootstrap {} was not registered", bsp_physical_id));
 
-        kinfoln!(
-            "anemone kernel booting on {} ({})",
-            bsp_id,
-            bsp_physical_id
-        );
+        kinfoln!("anemone kernel booting on {} ({})", bsp_id, bsp_physical_id);
 
         // needed by timer initialization.
         if let Some(freq_hz) = early_scan_clock_freq(fdt_va) {
@@ -512,11 +503,7 @@ unsafe fn ap_setup(ap_physical_id: PhysCpuId) -> ! {
         install_ktrap_handler();
         percpu::ap_init(ap_id);
         mm::kptable::activate_kernel_mapping();
-        kdebugln!(
-            "anemone kernel booting on {} ({})",
-            ap_id,
-            ap_physical_id
-        );
+        kdebugln!("anemone kernel booting on {} ({})", ap_id, ap_physical_id);
         set_boot_mono(false);
 
         INIT_SYNC_COUNTER.sync_with_counter();
