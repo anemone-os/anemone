@@ -1,13 +1,13 @@
 # RFC-20260711-sched-rt-class
 
-**状态：** Accepted for Implementation
+**状态：** Closed
 **修订：** R1
 **负责人：** doruche, Codex
 **最后更新：** 2026-07-14
 **领域：** scheduler / realtime / FIFO / RR / scheduler class
 **事务日志：** [2026-07-12-sched-rt-class (R0)](../../devlog/transactions/2026-07-12-sched-rt-class.md)、[2026-07-14-sched-rt-class-r1 (R1)](../../devlog/transactions/2026-07-14-sched-rt-class-r1.md)
-**开放问题：** [KETER-RT-007](./tracking-issues.md#keter)
-**下一步：** 完成 R1 的 Scheduler-Core / class contract 收敛与 RT rotation implementation；R0 的关闭事实保留在旧事务中。
+**开放问题：** 无；`KETER-RT-007` 已 neutralize
+**下一步：** R1 已关闭；动态调度属性、bandwidth control 与 archived EEVDF 迁移继续按独立 RFC 边界处理。
 
 ## 摘要
 
@@ -77,7 +77,7 @@
 | 修订 | 接受日期 | 状态 / 证据 | 语义摘要 |
 | --- | --- | --- | --- |
 | R0 | 2026-07-12 | `e7db92d7` accepted；`83ff742d` closed；[R0 事务](../../devlog/transactions/2026-07-12-sched-rt-class.md) | 建立共享 `Realtime` class、FIFO/RR policy、typed priority、priority bucket、RR quantum 与 compile-time selector。 |
-| R1 | 2026-07-14 | Accepted for Implementation；[R1 事务](../../devlog/transactions/2026-07-14-sched-rt-class-r1.md) | 删除 class-visible resched cause continuation；RR entity 显式拥有 committed rotation obligation，core pending 收窄为单 bit pending-pick snapshot。 |
+| R1 | 2026-07-14 | `39ba07a9` implemented；[R1 事务](../../devlog/transactions/2026-07-14-sched-rt-class-r1.md) Completed | 删除 class-visible resched cause continuation；RR entity 显式拥有 committed rotation obligation，core pending 收窄为单 bit pending-pick snapshot。 |
 
 ## 方案
 
@@ -245,7 +245,7 @@ priority correctness 通过理论、source audit 与 focused KUnit 闭合：
 - published task 可以非事务性地修改 class、policy 或 priority。
 - FIFO/RR 具有 hard realtime guarantee。
 - 不同 priority 的用户态 runtime 测试已经完成。
-- R1 C1/C2 已经实现或验证；当前只完成 R1 文档合同与 transaction 建立。
+- R1 的关闭不表示调度属性 syscall、RT bandwidth、跨 CPU migration 或 archived EEVDF 已经实现；这些仍属于独立后续边界。
 
 ## 备选方案
 

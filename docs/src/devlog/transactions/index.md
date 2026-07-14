@@ -6,7 +6,6 @@
 
 ## Active
 
-- [Sched RT Class R1](./2026-07-14-sched-rt-class-r1.md)
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
 - [OOM Killer](./2026-06-15-oom-killer.md)
@@ -24,6 +23,7 @@
 
 ## Completed
 
+- [Sched RT Class R1](./2026-07-14-sched-rt-class-r1.md)
 - [Sched Fair / Stride](./2026-07-13-sched-fair-stride.md)
 - [Sched RT Class R0](./2026-07-12-sched-rt-class.md)
 - [Sched Wait Preempt Arming](./2026-07-06-sched-wait-preempt-arming.md)

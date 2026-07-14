@@ -1,11 +1,11 @@
 # 2026-07-14 - Sched RT Class R1
 
-**Status:** Active
+**Status:** Completed
 **Owners:** doruche, Codex
 **Area:** scheduler / realtime / RR rotation / scheduler core contract
 **Target Revision:** R1
 **Canonical Plan:** [RFC-20260711-sched-rt-class](../../rfcs/sched-rt-class/index.md), [不变量需求](../../rfcs/sched-rt-class/invariants.md), [R1 增量实施计划](../../rfcs/sched-rt-class/implementation.md), [Tracking Issues](../../rfcs/sched-rt-class/tracking-issues.md)
-**Current Phase:** C1 ready / not started
+**Current Phase:** R1 closed
 
 ## Scope
 
@@ -28,15 +28,15 @@ R1 修复 scheduler core 与 RT class 之间的跨事务 cause continuation：co
 
 **Last Updated:** 2026-07-14
 
-**Current Branch:** `dev/drc/sched-params`
+**Current Branch:** `dev/drc/rt`
 
-**Completed:** R1 repair contract 已由主审与独立 reviewer 交叉校对；R0 accepted / closure Git evidence 已确认。D0 canonical R1 docs、cross-RFC alignment、transaction、navigation、whitespace / mdBook validation 与独立 review 已关闭。
+**Completed:** D0 canonical contract、C1 `39ba07a9` implementation、三个 selector build、clean-rootfs RT/RR QEMU `131/131` KUnit、source audit、独立 review 与 R1 canonical closeout 均已关闭。
 
-**In Progress:** 无。C1 kernel implementation 尚未开始。
+**In Progress:** 无。
 
-**Open Blockers:** `KETER-RT-007` 在 C1/C2 实现、验证和独立 review 前保持 Active。
+**Open Blockers:** 无；`KETER-RT-007` 已 neutralize。
 
-**Next Action:** 用户启动实现后，仅按 RFC C1 原子 write set 修改 scheduler core / trait / RT，并对 Fair / Idle 做机械适配。
+**Next Action:** R1 无剩余动作；动态调度属性、RT bandwidth 或 archived EEVDF 重开必须进入独立 RFC / transaction。
 
 **Do Not Redo:** 不恢复 `ReschedCause`；不把 rotation 放入 core pending、Task sibling field或 queue node；不为 RT 复制 current identity；不改 pending acknowledgement；不借 trait 适配修改 Fair 算法。
 
@@ -72,10 +72,38 @@ R1 修复 scheduler core 与 RT class 之间的跨事务 cause continuation：co
 
 **Next:** 仅在用户启动实现后进入 C1 原子 code gate；先按 canonical write set 删除 class-visible pending cause 并实现 RT-owned `rotation_due`，不得自动推进 C2 或扩大范围。
 
+### 2026-07-14 - C1 Core-Only Pending 与 RT Rotation 实现
+
+**Phase:** C1 - 原子 code gate。
+
+**Change:** `39ba07a9` 删除 production `ReschedCause` 和 class-visible pending continuation。`PendingResched` 移入 `processor.rs`，收窄为 scheduler-core-owned single-bit pending-pick snapshot；`schedule_preempt(pending)` 仍只用 snapshot 证明 entry 合法，pending 不再进入 `ScheduleMode`、`ScheduleDecision`、`local_requeue_preempted_current()`、`RunQueue` 或 class trait。`request_resched()` 不再接收 cause。
+
+RT/RR 的 `rotation_due` 与 `remaining_ticks` 一起由 `RtPolicy::RoundRobin` 单独拥有。quantum expiry 且存在 same-priority peer 时先提交 obligation，再向 core 请求 full pick；delayed / repeated expiry 保持或合并该 bool。preempt 原子消费并决定 head / tail，yield 与 handoff 消费后入队尾，block / exit 清除但不 refill remainder；消费时不重新要求 request-time peer 仍存在。fresh、queued、woken 与 selected state 均要求 obligation clear。
+
+**Boundary:** Fair / Stride 只删除 trait 参数与对应 KUnit 调用，pass、placement floor、heap、yield、nice 与 tick charge 均未变化；Idle 只做机械适配。archived `eevdf.rs` 继续不在 production graph，等待未来重开时按 R1 contract 迁移。未修改 architecture trap、wait-core、Task owner、ABI、跨 CPU 或配置 owner；没有扩大 C1 write set，也没有触发 R1 停止条件。
+
+**Focused Tests:** RT KUnit 增加 committed rotation 的 clear/set head/tail、延迟和重复 expiry、peer 消失、yield/handoff/block/exit/wake 清除及合法 remainder 保留；processor KUnit 直接覆盖 empty/request/destructive take/union restore state。full-pick acknowledgement 与四个 architecture trap-tail 的 caller-owned deferred restore 由 source audit 证明，没有用 KUnit 修改全局 processor / trap 状态来模拟。
+
+### 2026-07-14 - C2 验证、独立 Review 与收口
+
+**Phase:** C2 - validation / review / closeout。
+
+**Build:** 在被忽略的根 `kconfig` 中临时切换 selector，最新 C1 代码的 `fair`、`rt_rr`、`rt_fifo` 三次 `just build` 均通过；完成 RT selector 验证后由 `just defconfig` 恢复 repository default，最终 `fair` build 再次通过。tracked default 未修改。
+
+**Runtime:** RT/RR build 通过 `just xtask qemu -p qemu-virt-rv64-pretest -i build/anemone.elf` 运行。首轮复跑因可变 pretest 镜像残留 fixture 在既有 openat KUnit 触发 `AlreadyExists`；按 rootfs owner 使用 `just rootfs mkfs -c conf/rootfs/pretest-rv64.toml --sudo` 重建镜像后，最新工作树 `Running 131 tests... All tests passed!`，新增 processor / RT KUnit 全部为 `ok`。
+
+KUnit 完成后 pretest 固定继续启动 `/bin/fair-test`；RT/RR compile-time selector 会把该 workload 的普通 task 全部构造成 RT/RR，因而 Fair nice-share 专项前提不成立并失败。该 workload 不属于 R1 focused KUnit gate，也不反证 scheduler KUnit；确认结果后终止 QEMU，未扩大 rootfs / user-test write set，也未把该段写成用户态 integration pass。R0 已有的用户 RT/RR 整套 LTP 证据仍由 R0 事务拥有，R1 不重复要求 LTP。
+
+**Source / Format:** production graph 无 `ReschedCause`；`request_resched()` 无 cause；`PendingResched` 不进入 class、RunQueue、ScheduleMode 或 ScheduleDecision；`rotation_due` 只位于 `rt.rs` 的 RR entity；四个 RV64/LoongArch kernel/user trap caller 仍只在 `SchedulePreemptResult::Deferred` 后 restore；successful full pick 仍在 `pick_next_task()` 与 `set_next_task()` 之间直接清空 slot。`git diff --check` 通过；`just fmt kernel` 后 `just fmt kernel --check` 通过，且只规范化被忽略的生成产物，没有产生 tracked 源码 diff；`mdbook build docs` 通过，只输出既有 large search-index warning。
+
+**Review:** 未参与写入的独立 reviewer 检查完整七文件 diff。首轮唯一 Euclid 是为 full-pick clear 增加单次使用的 `acknowledge_full_pick()` helper，既弱化 owner-local 邻接，也让 KUnit 只测试脱离真实路径的包装；提交前已删除 helper，恢复直接 clear，并把 KUnit / source proof 边界写实。最终复审确认无剩余 Apollyon、Keter 或 Euclid，并明确确认 rotation 单一 owner、lifecycle clear/consume、peer disappearance、core-only pending、caller-owned restore、acknowledgement 线性化、Fair 算法不变和 archived EEVDF 边界。
+
+**Result:** `KETER-RT-007` neutralized；C1/C2 关闭，RFC R1 返回 Closed。
+
 ## Open Items
 
-- `KETER-RT-007`：accepted repair pending C1/C2 implementation。
+- 无。
 
 ## Closure
 
-Active；R1 尚未实现或关闭。
+Completed；R1 由 `39ba07a9` 实现并完成 C2 validation / review，canonical RFC 已返回 Closed。

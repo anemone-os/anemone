@@ -1,6 +1,6 @@
 # Sched RT Class Tracking Issues
 
-**状态：** Active
+**状态：** Closed
 **适用修订：** R1
 **最后更新：** 2026-07-14
 **父 RFC：** [RFC-20260711-sched-rt-class](./index.md)
@@ -14,11 +14,7 @@
 
 ## Keter
 
-- `KETER-RT-007`：R0 让 scheduler core 把 Tick / RunnableArrival cause snapshot 传到 `requeue_preempted_current()`，RT 再在 request 产生后的另一个 transaction 中据此决定队头/队尾。这把 core request cause 变成 class-policy continuation，却没有编码 request-time current segment、peer/higher-candidate condition 与 consumption-time lifecycle 的跨事务合同；full pick 延迟或 queue condition 变化时，class 只能依赖隐式调用顺序和过期前提。
-
-  R1 已接受的 canonical 修正是：删除 `ReschedCause`，把 `PendingResched` 收窄为 core-only single-bit pending-pick snapshot；RR entity 增加 `rotation_due`，在 expiry 且存在 same-priority peer 时提交，并在 preempt/yield/handoff/block/exit lifecycle 中消费或清除。消费阶段不重新证明 request-time peer / candidate condition，多个 expiry 合并为一个 bool。Fair/Idle 只做 trait 机械适配。
-
-  **状态：** Active / accepted repair pending implementation。关闭要求见 [R1 增量实施计划](./implementation.md)：focused KUnit、三个 selector build、RT/RR QEMU KUnit、source audit 和独立 review 全部通过后才可移入 Neutralized。C1 只允许修复该 Keter；若需要 core generation/token、改变 pending acknowledgement、把 rotation 移出 RT owner、重做 current/runqueue membership 或修改 Fair 算法，立即停止并回到 RFC review。
+- 暂无。
 
 ## Euclid
 
@@ -30,6 +26,7 @@
 
 ## Neutralized
 
+- `KETER-RT-007`：R0 把 Tick / RunnableArrival cause snapshot 跨 transaction 传入 RT placement，缺少 request-time current segment、peer condition 与 consumption-time lifecycle 合同。R1 `39ba07a9` 删除 `ReschedCause`，把 `PendingResched` 收窄为 processor-owned single-bit pending-pick snapshot，并由 RR entity 的 `rotation_due` 在 expiry 时提交、在 preempt/yield/handoff/block/exit 中消费或清除。三个 selector build、clean-rootfs RT/RR QEMU `131/131` KUnit、source audit 与独立 review 已通过；review 中唯一 Euclid 已在提交前修复，最终无剩余 Apollyon / Keter / Euclid。证据见 [R1 事务](../../devlog/transactions/2026-07-14-sched-rt-class-r1.md)。
 - `APOLLYON-RT-001`：首轮 RT requeue 把 Tick pending 错当成“刚到期且 budget 仍为 full”的证明，会在 deferred consumption 后对合法 remainder panic。现实现只验证 Tick source 为有效 RT/RR policy 并保留当前 remainder，delayed Tick focused KUnit 已通过；独立 review 确认关闭。
 - `KETER-RT-005`：首轮 owner split 曾把 RT state/config 与 focused tests 放入共享文件，并把 `SchedEntity` facade 放错 owner。现 RT type/state/quantum/payload factory/算法/KUnit 全部限制在 `rt.rs`，`SchedEntity::{new_default,new_idle}` facade 位于 `entity.rs`，共享文件只保留 opaque storage、identity、contract 与 wiring；独立 review 确认关闭。
 - `KETER-RT-006`：首轮 published entity 仍可通过 broad mutable closure 被普通 crate caller 替换。现 `SchedEntity` / class payload 不实现 `Clone`，mutable bridge 必须按值消费只可由 scheduler-class owner 构造的 token，scheduler core 只使用窄只读 membership observation；source audit 与独立 review 确认关闭。
