@@ -1,11 +1,11 @@
 # Dynamic Scheduler Attributes 迁移实施计划
 
-**状态：** Draft
+**状态：** Active
 **最后更新：** 2026-07-15
 **父 RFC：** [RFC-20260714-sched-dynamic-attributes](./index.md)
 **不变量：** [不变量需求](./invariants.md)
-**当前修订：** Draft
-**事务日志：** None；R0 接受并启动实现时创建
+**当前修订：** R0
+**事务日志：** [2026-07-15-sched-dynamic-attributes](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md)
 
 本文只定义 planned gates、write set、review、验证与停止条件，不记录已经执行的 checkpoint 事实。实现开始后，执行结果只追加到对应 transaction devlog；只有阶段顺序、write set、验证 floor 或停止条件变化才回写本文，contract / owner / ABI / 接受边界变化必须先回写 `index.md`、`invariants.md` 与 tracking issue。
 
@@ -17,7 +17,7 @@
 - `AtomicNice` 删除、新 `SchedConfig` storage 安装、existing `getpriority()` / `setpriority()`切到owner transaction、clone/procfs切到新snapshot与remote submission接线必须在Phase 2B同一个原子checkpoint完成。Phase 2A只能准备不驱动production behavior的typed model、behavior-preserving module move与IPI `Copy -> Clone` mechanical变化；不得提前安装第二份nice/config truth或发布request path。
 - local、remote、single-target 与 multi-target setter 最终只调用同一个 owner-CPU `ApplyConfigPatch` transaction；syscall adapter 不读取 stale snapshot 拼完整 config。
 - one-shot 只复用公开 `Latch` capability，不修改 wait identity、completion、parkability 或 placement contract。若现有 `Latch` 无法支撑 accepted one-shot 协议，停止并回到 RFC review，不越过 wait-core visibility。
-- one-shot 不使用 `Event`：当前 Event uninterruptible API吞掉Force并重试predicate，且携带本channel不需要的reusable listener/quota policy；阶段1不得为one-shot扩展Event outcome contract。
+- one-shot 不使用 `Event`：Event的Force predicate retry方向可复用为语义参考，但其API要求调用时不持guard，且listener `VecDeque`会为single-consumer channel增加独立同步域和潜在IRQ-off扩容；阶段1只在channel phase lock内保存bounded trigger slot，不扩展Event contract或allocation面。
 - `REMOTE_SCHED_REQUEST_GATE` 明确复用现有 `Mutex<()>`，不新增自定义 `AtomicBool + Event` gate。它是临时 syscall-domain 约束；实现必须保留退出条件和 KETER-WAIT-001 链接，不能把 stress 通过写成 wait-core 已修复。
 - 现有 IPI message、Fair heap与 RT bucket 的 IRQ-off allocation继续服从 fatal OOM / register 接受边界。本 RFC 不增加预留、rollback、fallible queue或 allocation-free transport，也不能扩大 IRQ-off allocator side effect。
 - raw Linux layout、flag、selector、errno mapping 和 pointer ordering只存在于 `sched/api`。scheduler core只接收 typed config、patch、permit、mask和 target identity。
@@ -80,7 +80,7 @@ sched/
 
 ### 前置条件
 
-- 本 RFC Draft 的 `index.md`、`invariants.md`、UAPI matrix和 tracking issues 已完成一轮文档层 review。
+- 本 RFC R0 的 `index.md`、`invariants.md`、UAPI matrix和 tracking issues 已完成文档层 review。
 - 当前只有 KETER-WAIT-001 作为下层开放问题，KETER-DYNATTR-001 已由本 RFC 的 gate neutralize。
 
 ### 交付
@@ -113,7 +113,7 @@ sched/
 
 ### 验证
 
-- 公开Draft与R0 acceptance阶段：`git diff --check`、`mdbook build docs`；
+- 公开 Draft 与 R0 acceptance 阶段：`git diff --check`、`mdbook build docs`；
 - source audit结果写入transaction，不把假设写成已验证实现事实。
 
 ### 停止条件
@@ -139,9 +139,10 @@ sched/
 - `Sender<T>` single-use、non-clone、可跨CPU；`send(self, T) -> Result<(), T>`在channel lock内Release发布terminal phase并detach trigger，锁外触发。
 - `Receiver<T>` non-clone、receive前可移动；`recv_uninterruptible(self)`先走terminal fast path，empty时才begin Latch并执行recheck/register。
 - shared phase明确覆盖empty、value、sender closed、receiver closed和consumed；payload exactly-once publish/consume/drop。
-- `RecvError`至少区分`SenderClosed`与`Forced`；普通signal不能完成receive。
-- force winner关闭receiver，并与late send / close竞争完成payload exactly-once drop。
-- receive wait adapter只使用receive-local `Latch`；不得使用`Event`或扩展Event API来暴露Force outcome。
+- `RecvError`在v1只包含`SenderClosed`；普通signal和wait-core Force都不能成为channel terminal error。
+- registered wake后固定执行`channel lock内take旧trigger -> 锁外drop -> finish Latch -> 重查persistent phase`；terminal决定返回，empty只允许outcome为Force并loop rearm。
+- Force不写channel phase、不关闭receiver、不drop payload；不增加generation、pending-Force或request cancellation state。
+- receive wait adapter只使用receive-local `Latch`；不得直接调用要求无guard的`Event` wait，也不得扩展Event API或listener storage。
 - channel state使用hardirq-safe bounded lock；任何`LatchTrigger`调用或drop都发生在释放channel lock之后。
 - unsafe payload cell、`Send` / `Sync`证明和drop顺序如果需要，只能局限在`oneshot.rs`。
 
@@ -161,7 +162,7 @@ sched/
 
 ### 可观测性
 
-- terminal fast path、begin、recheck/register、trigger detach、send/close、force、consume/drop与phase violation可关联channel debug identity；
+- terminal fast path、begin、recheck/register、trigger detach、Force round finish/rearm、send/close、consume/drop与phase violation可关联channel debug identity；
 - debug identity只用于日志/assertion，不驱动phase或wait决策；
 - 普通trigger后phase仍empty、double send/consume、drop漏回收为常开断言级bug。
 
@@ -169,19 +170,20 @@ sched/
 
 - focused phase tests覆盖send-before-receive、send-between-begin-and-register、send-after-registration；
 - sender-drop-before-receive、receiver-drop-before-send、send-after-receiver-close返回原value；
-- value / sender-close / force winner与payload exactly-once drop；
+- Force在begin、register、pre-park与park窗口内部retry，repeated Force后最终value/sender-close，Force与terminal竞争时persistent phase决定返回；
+- 每轮旧trigger在新Latch begin前清空且锁外drop，payload exactly-once publish/consume/drop；
 - trigger在channel lock外执行的source audit；
 - pretest运行全部enabled KUnit并在log中点名本阶段新增的one-shot case。
 
 ### Review Gate
 
-独立review必须确认：无constructor scheduler side effect、无第二wait truth、无payload/Latch outcome互相推导、无锁内trigger/drop、无clone sender、每条receive slow path都finish自身Latch。存在未关闭Apollyon/Keter不得进入阶段2。
+独立review必须确认：无constructor scheduler side effect、无第二wait truth、无payload/Latch outcome互相推导、无锁内trigger/drop、无clone sender、每条receive slow path都finish自身Latch、Force不关闭receiver且empty只会rearm。存在未关闭Apollyon/Keter不得进入阶段2。
 
 ### 停止条件
 
 - 必须扩展wait-core token/placement public surface；
 - hardirq sender需要sleepable lock、unbounded scan或锁内allocation；
-- force/close无法在单一phase owner下证明exactly-once drop；
+- Force round cleanup无法在单一phase owner下证明旧trigger已清空，或terminal/empty分支需要额外generation、pending-Force或cancellation truth；
 - `channel()`必须返回可恢复allocation error才能继续。
 
 最后一项超出已接受API与OOM边界，应回到RFC，不在实现中改签名。
@@ -256,8 +258,8 @@ sched/
 
 - 新增`SchedRequest`与single-use`Option<SchedRequestBody>`；body拥有target、patch、permit与non-clone sender。
 - local target直接调用同一owner transaction，不建channel、不拿gate、不发self-IPI。
-- remote target在task context取得全局`Mutex<()>` `REMOTE_SCHED_REQUEST_GATE`，创建request并async publish，随后`recv_uninterruptible()`；Mutex guard持有到receive返回。现有Mutex的CAS fast path与Event slow path就是完整gate实现，不增加第二套atomic/event状态；内部Event只发生在publish/Latch之前的lock acquisition，不承担one-shot Force outcome。
-- request transport failure发生在receive前，drop dormant endpoints后释放gate；sender-close/force由receive内部finish Latch后返回。force还必须先关闭receiver并detach trigger，保证guard释放后旧request的late send不能进入wait-core placement。
+- remote target在task context取得全局`Mutex<()>` `REMOTE_SCHED_REQUEST_GATE`，创建request并async publish，随后`recv_uninterruptible()`；Mutex guard持有到channel terminal返回。现有Mutex的CAS fast path与Event slow path就是完整gate实现，不增加第二套atomic/event状态；内部Event只发生在publish/Latch之前的lock acquisition，不承担one-shot completion。
+- request transport failure发生在receive前，drop dormant endpoints后释放gate；进入receive后，Force只由oneshot内部finish当前Latch并rearm，不能关闭receiver或释放gate。`SenderClosed`只有在唯一sender连同未来mutation/complete capability都已消失时才是确定失败；handler不能在仍可能提交mutation时提前drop sender。
 - 在2A已经是`Clone`的`IpiPayload`中增加`SchedulerRequest(Arc<SchedRequest>)`；broadcast入口显式拒绝该variant，clone envelope不得复制body capability。
 - IPI handler pop后释放queue lock，只转发`sched::handle_request()`；handler不取credential、gate或user lock。
 - handler第二次execute、empty body或double completion由常开断言暴露。
@@ -375,7 +377,7 @@ focused app至少执行：
 
 ### Review Gate
 
-独立review必须同时检查ABI ordering和KETER-DYNATTR-001 neutralization：具体gate是现有`Mutex<()>`，在request发布前获取并持有到receive返回；handler不取gate；stress没有依赖per-target/per-CPU锁、第二completion channel或自定义CAS/Event gate。Force路径不在本阶段做不稳定的user-space smoke；其close receiver、detach trigger、finish Latch、release guard顺序由阶段1决定性KUnit与本阶段source review证明。
+独立review必须同时检查ABI ordering和KETER-DYNATTR-001 neutralization：具体gate是现有`Mutex<()>`，在request发布前获取并持有到terminal receive返回；handler不取gate；stress没有依赖per-target/per-CPU锁、第二completion channel或自定义CAS/Event gate。Force路径不在本阶段做不稳定的user-space smoke；其`detach旧trigger -> 锁外drop -> finish Latch -> phase empty则rearm`顺序、receiver保持开放和guard不释放由阶段1决定性KUnit与本阶段source review证明。
 
 ### 停止条件
 
@@ -511,7 +513,7 @@ rg -n "SCHED_BATCH|SCHED_IDLE|SCHED_DEADLINE|KEEP_PARAMS|UTIL_CLAMP" anemone-ker
 - raw ABI不进入core/class；
 - no-op、generic-only、active dimension change与discipline replacement按矩阵执行；
 - request、sender和body exactly-once；scheduler request不可broadcast；
-- gate是现有`Mutex<()>`且只覆盖remote request publish-to-receive-return窗口，local/getter/handler不依赖gate；force释放后旧closed-receiver envelope的late completion不能触发placement；
+- gate是现有`Mutex<()>`且只覆盖remote request publish-to-terminal-receive窗口，local/getter/handler不依赖gate；Force不释放gate，channel返回时request已提交结果或确定失去未来mutation capability；
 - clone、procfs、priority getter与affinity getter读取同一truth；
 - wait-core KETER仍Open，temporary gate删除条件仍在；
 - IRQ-off allocation register和RT bucket limitation未被误写为修复。
@@ -567,7 +569,7 @@ review覆盖完整RFC diff而非只看最后阶段。pass要求无未关闭Apoll
 4. detach/attach使用哪个old/new class、RT bucket placement或Fair pass初始化；
 5. config publication、post-state assertion与completion的先后；
 6. one-shot走terminal fast path、begin-to-register recheck还是registered trigger；
-7. sender-close、receiver-close、force与payload drop由谁赢得；
+7. sender-close、receiver-close、Force round cleanup/rearm与payload drop由谁拥有；
 8. `Mutex<()>` gate acquire/release、contention，以及仍有开放receiver并可能触发placement的request count；
 9. request body take、duplicate execute/double complete异常；
 10. ABI failure属于parse/copy/lookup/permission/owner validation/transport/transaction哪一阶段。
@@ -596,13 +598,13 @@ review覆盖完整RFC diff而非只看最后阶段。pass要求无未关闭Apoll
 
 **Hypothesis:** 全局task-context `Mutex<()>` gate足以让scheduler remote request一次只保留一个仍有开放receiver、completion仍可能触发wait-core placement的请求，从而在wait-core修复前排除双向IPI handler completion环。
 
-**Protected Goal / Invariant:** wait-core继续拥有placement；IPI handler不取gate；one-shot使用Latch保留Force outcome；gate复用现有Mutex而不复制AtomicBool/Event状态；不复制wait state、不增加第二mailbox、不改变fatal OOM边界。
+**Protected Goal / Invariant:** wait-core继续拥有placement；IPI handler不取gate；one-shot使用Latch内部消费Force outcome并只按persistent phase返回；gate复用现有Mutex而不复制AtomicBool/Event状态；不复制wait state、不增加第二mailbox、不改变fatal OOM边界。
 
 **Minimum Write Set:** 阶段3 affinity adapter、focused app、rv64 pretest rootfs入口、validation-only SMP平台与profile选择；不修改wait-core或IPI remote wake。
 
-**Validation Floor:** SMP=2多轮A -> B / B -> A同步stress、wake-capable request count assertion、request/read-back一致性与正常shutdown。Force/closed-receiver late-send由阶段1决定性KUnit和阶段3 source review覆盖，不要求本阶段user-space Force smoke。
+**Validation Floor:** SMP=2多轮A -> B / B -> A同步stress、wake-capable request count assertion、request/read-back一致性与正常shutdown。Force内部retry、terminal竞争与gate保持由阶段1/2B决定性KUnit和阶段3 source review覆盖，不要求本阶段user-space Force smoke。
 
-**Failure Signals:** 两条published request同时保有开放receiver并可触发placement、source/KUnit证明显示closed receiver仍可被late send触发、handler互等、active-wait lock assertion、lost completion、gate未释放或必须用per-target lock补救。
+**Failure Signals:** 两条published request同时保有开放receiver并可触发placement、Force导致receiver关闭或gate提前释放、terminal phase之后request仍能提交新mutation、handler互等、active-wait lock assertion、lost completion、gate未释放或必须用per-target lock补救。
 
 **Write-back:** 结果进transaction；若gate不能neutralize，重开KETER-DYNATTR-001并停止后续remote setter；共享placement问题仍写回wait-core tracker。
 
@@ -635,7 +637,7 @@ review覆盖完整RFC diff而非只看最后阶段。pass要求无未关闭Apoll
 - 需要为了LTP支持Deadline/BATCH/IDLE、KEEP_PARAMS、util clamp、migration或bandwidth control；
 - 需要把current reconfigure伪装成yield/block/wake/preempt或直接在handler切换；
 - 需要通过per-target/per-CPU gate、第二mailbox、busy-spin flag或broadcast request替代accepted remote protocol；
-- 需要修改`Event`暴露Force outcome，或绕开现有`Mutex<()>`另建`AtomicBool + Event` gate；
+- 需要把Force暴露成one-shot terminal error、跨remote gate直接调用Event wait、修改Event listener/allocation contract，或绕开现有`Mutex<()>`另建`AtomicBool + Event` gate；
 - 需要把fatal OOM改成syscall error或新增侵入式allocation recovery；
 - 需要修改shared public API、owner surface或write set但尚未批准。
 

@@ -50,6 +50,7 @@
 		- [Sched RT Class R0](./devlog/transactions/2026-07-12-sched-rt-class.md)
 		- [Sched Fair / Stride](./devlog/transactions/2026-07-13-sched-fair-stride.md)
 		- [Sched RT Class R1](./devlog/transactions/2026-07-14-sched-rt-class-r1.md)
+		- [Sched Dynamic Attributes](./devlog/transactions/2026-07-15-sched-dynamic-attributes.md)
 - [初赛冲刺策略（2026-05 至 2026-06）](./preliminary-contest-sprint.md)
 - [已知问题与当前限制](./known-issues-and-limitations.md)
 	- [活动登记册](./register.md)

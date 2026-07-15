@@ -1,8 +1,8 @@
 # Dynamic Scheduler Attributes 背景材料
 
-本目录保存 [RFC-20260714-sched-dynamic-attributes](../index.md) 的来源证据。背景材料不定义 scheduler core state、实施阶段或 write set，也不覆盖 canonical proposal。
+本目录保存 [RFC-20260714-sched-dynamic-attributes](../index.md) 的来源证据。背景材料不定义 scheduler core state、实施阶段或 write set，也不覆盖 canonical R0 contract。
 
-Canonical proposal：
+Canonical R0 contract：
 
 - [RFC 入口](../index.md)
 - [不变量需求](../invariants.md)

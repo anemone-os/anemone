@@ -1,30 +1,30 @@
 # RFC-20260714-sched-dynamic-attributes
 
-**状态：** Draft
-**修订：** Draft
+**状态：** Accepted for Implementation
+**修订：** R0
 **负责人：** doruche, Codex
 **最后更新：** 2026-07-15
 **领域：** scheduler / dynamic attributes / syscall ABI / IPI / affinity
-**事务日志：** None；公开 Draft 尚未进入实现
+**事务日志：** [2026-07-15-sched-dynamic-attributes](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md)
 **开放问题：** None；已关闭问题见 [Tracking Issues](./tracking-issues.md)
 **下层问题：** [KETER-WAIT-001：synchronous remote placement 不能组合进 cross-CPU IPI completion](../sched-wait-refactor/tracking-issues.md#keter-wait-001synchronous-remote-placement-不能组合进-cross-cpu-ipi-completion)
-**下一步：** 对本文、[不变量需求](./invariants.md) 与 [迁移实施计划](./implementation.md) 做公开文档层 review；接受为 R0 并启动实现时建立 transaction
+**下一步：** 按 [迁移实施计划](./implementation.md) 进入阶段 1 Dormant `sched::oneshot`；开始前继续服从 transaction 的 write set 与独立 review gate
 
 ## 摘要
 
-本 RFC Draft 定义 Anemone 第一版动态调度配置事务和对应 Linux syscall 观察面。已发布 task 的 policy、policy parameters、nice、`reset_on_fork` 与 affinity 不再允许通过 TCB 字段旁路修改；所有会影响调度行为的修改都转换为 scheduler-owned `SchedConfigPatch`，并在 task 的固定 owner CPU 上由 `RunQueue` transaction 串行提交。
+本 RFC R0 定义 Anemone 第一版动态调度配置事务和对应 Linux syscall 观察面。已发布 task 的 policy、policy parameters、nice、`reset_on_fork` 与 affinity 不再允许通过 TCB 字段旁路修改；所有会影响调度行为的修改都转换为 scheduler-owned `SchedConfigPatch`，并在 task 的固定 owner CPU 上由 `RunQueue` transaction 串行提交。
 
-远端 setter 使用现有 per-CPU IPI queue 传递 `Arc<SchedRequest>`。IPI transport 是异步的，但 syscall 对用户态保持同步：调用 task 创建新的 dormant `sched::oneshot::channel::<T>()`，只有结果尚未发布时，`recv_uninterruptible()` 才建立 wait 并 park；owner CPU 写入结果并完成 one-shot 后 syscall 再返回。所有 remote setter 在 request 发布前获取 `sched/api` 私有的全局 `Mutex<()>` `REMOTE_SCHED_REQUEST_GATE`，并持有到 `recv_uninterruptible()` 返回，使任意时刻最多只有一个仍持有开放 receiver、其 completion 仍可能进入 wait-core placement 的 remote scheduler request；该 gate 只约束 syscall producer graph，不是 RunQueue transaction lock，也不建立 multi-target 原子性。
+远端 setter 使用现有 per-CPU IPI queue 传递 `Arc<SchedRequest>`。IPI transport 是异步的，但 syscall 对用户态保持同步：调用 task 创建新的 dormant `sched::oneshot::channel::<T>()`，只有结果尚未发布时，`recv_uninterruptible()` 才建立 wait 并 park；owner CPU 写入结果并完成 one-shot 后 syscall 再返回。wait-core `Force` 只结束当前 receive-local Latch round；receiver 在 channel 仍 empty 时内部 rearm，不把 Force 暴露成 channel error。所有 remote setter 在 request 发布前获取 `sched/api` 私有的全局 `Mutex<()>` `REMOTE_SCHED_REQUEST_GATE`，并持有到 `recv_uninterruptible()` 观察真正 terminal phase 后返回，使任意时刻最多只有一个仍持有开放 receiver、其 completion 仍可能进入 wait-core placement 的 remote scheduler request；该 gate 只约束 syscall producer graph，不是 RunQueue transaction lock，也不建立 multi-target 原子性。
 
 getter 不发送 IPI。它们在 `SchedEntity` 的一致性域内获取 coherent `SchedConfig` snapshot，再投影为对应 Linux ABI；snapshot 可以在返回后立即变旧，不承诺与并发 setter 建立全局读屏障。
 
-本 RFC Draft 还定义 fixed-CPU 架构下的 affinity 兼容语义：真实保存 allowed CPU mask，但只有包含 task 当前固定 `cpuid` 的 mask 才能成功；需要迁移的请求返回 `EINVAL`。主动迁移、load balancing 和 CPU hotplug 不在第一版范围内。
+本 RFC R0 还定义 fixed-CPU 架构下的 affinity 兼容语义：真实保存 allowed CPU mask，但只有包含 task 当前固定 `cpuid` 的 mask 才能成功；需要迁移的请求返回 `EINVAL`。主动迁移、load balancing 和 CPU hotplug 不在第一版范围内。
 
 ## 文档权威与下层合同
 
-本目录是 dynamic scheduler attributes proposal 的公开 canonical source。它当前仍是 Draft；在 R0 接受并由对应 transaction 实现前，live code、已关闭的下层 RFC 与 register 继续拥有当前实现事实。本 RFC 不引用或依赖任何私有草案。
+本目录是 dynamic scheduler attributes R0 的公开 canonical source。R0 已接受进入实现；在对应 transaction 完成前，live code、已关闭的下层 RFC 与 register 继续拥有当前实现事实。本 RFC 不引用或依赖任何私有草案。
 
-本 RFC Draft 建立在以下当前合同上：
+本 RFC R0 建立在以下当前合同上：
 
 - `RunQueue`、Fair、Realtime 与 Idle 的状态变化只在固定 owner CPU 的 IRQ-off transaction 中发生。
 - Fair / Stride 使用 `pass`、`placement_floor` 与 `(pass, enqueue_seq)` 作为 service history 和 ready order。
@@ -33,9 +33,9 @@ getter 不发送 IPI。它们在 `SchedEntity` 的一致性域内获取 coherent
 - wait core 拥有 wait identity、completion、parkability 与 stale-safe physical placement；现有 `Latch` 是其单轮 OR-wait adapter。
 - wait core 当前 synchronous remote placement 不能组合进双向 cross-CPU IPI completion；根问题由 [KETER-WAIT-001](../sched-wait-refactor/tracking-issues.md#keter-wait-001synchronous-remote-placement-不能组合进-cross-cpu-ipi-completion) 跟踪，本 RFC 只以 remote request 全局串行 gate 限制自己的 producer graph。
 - `Task::cpuid()` 在 task 发布后不可改变，是 owner CPU 的唯一真相源。
-- owner-CPU noirq heap allocation 的风险由 [ANE-20260622-IRQ-OFF-HEAP-ALLOCATION](../../register/open-issues.md#ane-20260622-irq-off-heap-allocation) 跟踪；本 RFC Draft 将其保持为 accepted limitation，不宣称 allocation-free。
+- owner-CPU noirq heap allocation 的风险由 [ANE-20260622-IRQ-OFF-HEAP-ALLOCATION](../../register/open-issues.md#ane-20260622-irq-off-heap-allocation) 跟踪；本 RFC R0 将其保持为 accepted limitation，不宣称 allocation-free。
 
-本 RFC 是 [Sched Fair / Stride](../sched-fair-stride/index.md)、[Sched RT Class](../sched-rt-class/index.md) 与 [Sched Latch](../sched-latch/index.md) 的 follow-up proposal：它计划以 owner-CPU transaction 替代现有 weak nice setter，开放已发布 task 的动态 Fair/RT policy transaction，并复用 Latch 表达 remote request completion。R0 接受并实现后，它在这些动态属性边界上成为新 contract；在此之前不得据此改写已关闭 RFC 的 current facts。
+本 RFC 是 [Sched Fair / Stride](../sched-fair-stride/index.md)、[Sched RT Class](../sched-rt-class/index.md) 与 [Sched Latch](../sched-latch/index.md) 的 accepted follow-up：它以 owner-CPU transaction 替代现有 weak nice setter，开放已发布 task 的动态 Fair/RT policy transaction，并复用 Latch 表达 remote request completion。R0 是这些动态属性边界的 accepted successor contract；在 transaction 完成前，已关闭 RFC 与 live code 仍拥有当前实现事实。
 
 ## 目标
 
@@ -62,11 +62,11 @@ getter 不发送 IPI。它们在 `SchedEntity` 的一致性域内获取 coherent
 - 不重算 Fair 历史 pass，不为离开 Fair 的 task 保存 dormant Fair payload。
 - 不保存离开 RR 后的 dormant RR budget 或 rotation state。
 - 不修复 register 中已有的 IRQ-off heap allocation风险，也不把现有 IPI allocation 的 fatal OOM 改造成可恢复错误、预留消息或 rollback 协议。
-- 本次公开提升不执行 implementation stages、不创建 transaction devlog、不修改 kernel code，也不运行 runtime 测试；`implementation.md` 只定义 planned gates。
+- 阶段 0 只完成文档接受、live-source audit、transaction 与导航，不修改 kernel code，也不运行 runtime 测试；阶段 1 及后续实现严格服从 `implementation.md` 的 planned gates。
 
 ## 文档地图
 
-Canonical proposal：
+Canonical R0 contract：
 
 - [不变量需求](./invariants.md)
 - [迁移实施计划](./implementation.md)
@@ -74,6 +74,12 @@ Canonical proposal：
 - [背景材料索引](./backgrounds/index.md)
 
 `tracking-issues.md` 只保留当前 RFC 自己拥有的设计问题和已经 neutralize 的 review 记录；共享 wait-core 根问题以公开 RFC tracker 为 canonical owner。Linux/LTP 的逐项证据由背景材料保存，不覆盖本页和不变量页的 proposed contract。
+
+## 修订记录
+
+| 修订 | 日期 | 状态 | 语义变化 | Review / 事务 |
+| --- | --- | --- | --- | --- |
+| R0 | 2026-07-15 | Accepted for Implementation | 初始 accepted contract：统一 `SchedConfig` / patch、owner-CPU reconfigure、persistent-phase one-shot、remote request gate、fixed affinity 与 Linux scheduler UAPI 子集。 | [R0 事务](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md) |
 
 ## 子系统 owner
 
@@ -184,7 +190,7 @@ policy mapping 固定为：
 | `SCHED_IDLE` | 无 | 明确拒绝 |
 | `SCHED_DEADLINE` | 无 | 明确拒绝 |
 
-未知 policy、非法 policy/parameter 组合和不支持的 `sched_attr` feature 不得静默映射到 Fair 或 RT。逐 syscall layout、size、pointer ordering、errno precedence 与 LTP/POSIX evidence 见 [Linux 6.6 Scheduler UAPI Matrix](./backgrounds/linux-6.6-sched-uapi-matrix.md)；下列规则是本 RFC Draft 提议的 R0 binding ABI boundary。
+未知 policy、非法 policy/parameter 组合和不支持的 `sched_attr` feature 不得静默映射到 Fair 或 RT。逐 syscall layout、size、pointer ordering、errno precedence 与 LTP/POSIX evidence 见 [Linux 6.6 Scheduler UAPI Matrix](./backgrounds/linux-6.6-sched-uapi-matrix.md)；下列规则是 R0 binding ABI boundary。
 
 ### R0 UAPI boundary
 
@@ -296,16 +302,18 @@ v1 contract：
 - receive 不可被普通 signal 中断，无 timeout。
 - `send(self, value)` 不等待；receiver 已关闭时返回 `Err(value)`，成功只证明 value 已发布，不保证 receiver 最终消费。
 - channel phase 持久保存 payload/closed/consumed truth，因此 send-before-recv 不需要预先注册 waiter；receiver 后来以 Acquire 直接取得 value 或 closed。
-- `recv_uninterruptible()` 先做 terminal fast path；仍 empty 时才 begin `Latch`，随后在 channel 的 hardirq-safe state lock 下重查 phase并安装唯一 trigger。若 send/close 已在 begin 与注册之间发生，receiver cancel + finish 本轮 latch并走 no-switch terminal path。
+- `RecvError` 在 v1 只包含 `SenderClosed`；wait-core outcome 不进入 channel error surface。
+- `recv_uninterruptible()` 先做 terminal fast path；仍 empty 时才 begin `Latch`，随后在 channel 的 hardirq-safe state lock 下重查 phase并安装唯一 trigger。若 send/close 已在 begin 与注册之间发生，receiver 在锁外 drop 未安装的 trigger，cancel + finish 本轮 latch，再由 persistent terminal phase 决定 no-switch 返回；即使 Force 已抢先完成该 round，也不能覆盖 terminal result。
 - sender 在同一个 channel state transaction 中写 payload或closed、Release 发布 phase并 detach 已注册 trigger；释放 channel lock 后才能 trigger，不能持 channel lock 进入 wait core。
 - channel phase 只拥有 value、endpoint lifecycle和当前 receiver registration；wait core拥有 wait identity、completion、park/wake与stale-safe placement。registration 不是第二份 task wait truth。
-- receiver 在 receive 前 drop 只关闭 endpoint并exactly-once drop pending payload，不存在要cancel的active wait；receive内部的normal、closed与force路径必须在返回前finish自己创建的latch。
+- registered wait 返回后，receiver 在 channel lock 下 take 仍存在的旧 trigger，锁外 drop，再 finish 当前 Latch并重查 phase。terminal phase 直接返回；phase 仍 empty 时只允许 Latch outcome 为 `Force`，随后建立下一轮 Latch。其它 empty outcome 是常开断言级 bug。
+- receiver 在 receive 前 drop 只关闭 endpoint并exactly-once drop pending payload，不存在要cancel的active wait；`recv_uninterruptible()` 内部创建的每一轮 Latch 都必须在 rearm 或返回前显式 finish。
 - sender drop without send 持久发布closed；已注册waiter会被trigger，尚未receive的receiver稍后直接观察closed。
 - 不提供多 producer、OR wait、timeout、interruptible receive、cross-round permit 或 channel reuse。
 
 现有 cloneable `LatchTrigger` 继续服务 multi-producer readiness hint；`oneshot` 只在 receive-time registration 内保存一个 trigger，并通过不向外暴露它建立 single-producer value-transfer contract，不改变 `Latch` 的 OR-wait API。
 
-one-shot 的阻塞 adapter 明确选择 receive-local `Latch`，不使用 `Event`。当前 `Event::listen_uninterruptible()` 在 wait-core `Force` 后继续重试，直到 predicate 成立，不能表达本 channel 已接受的 `RecvError::Forced`；让 `Event` 暴露 wait outcome 会扩大通用 Event contract。`Event` 还携带可复用 listener queue、exclusive/non-exclusive 与 quota policy，而 one-shot 只需要一个 receive-local trigger slot。dormant constructor 本身不是选择 `Latch` 的理由：两种原语都可以把注册延迟到 receive；决定因素是 Force 可见性与单轮 capability 边界。
+one-shot 的阻塞 adapter 明确选择 receive-local `Latch`，不使用 `Event`。`Event::listen_uninterruptible()` 在 Force 后重试 predicate 的方向与本 channel 一致，但其 API 要求调用时不持有 lock/guard，而 remote setter 刻意跨 receive 持有唯一的 `REMOTE_SCHED_REQUEST_GATE`。`Event` 还维护独立的可复用 listener `VecDeque`、exclusive/non-exclusive 与 quota policy；首次 listener 注册可能在 `NoIrqSpinLock` 临界区扩容，并为只有一个 receiver 的 channel 增加第二个同步域。one-shot 已有 hardirq-safe phase lock，只需要同锁保存一个 bounded `Option<LatchTrigger>`，因此直接复用 Latch 更窄，也不扩大 Event 或 IRQ-off allocation contract。dormant constructor 本身不是选择 Latch 的理由；决定因素是单轮 capability、固定 registration slot 与 audited gate lock order。
 
 ## Scheduler request 与 IPI transport
 
@@ -315,9 +323,9 @@ one-shot 的阻塞 adapter 明确选择 receive-local `Latch`，不使用 `Event
 static REMOTE_SCHED_REQUEST_GATE: Mutex<()> = Mutex::new(());
 ```
 
-现有 `Mutex` 的 fast path 已使用 `AtomicBool` CAS，contended slow path 已由内部 `Event::listen_uninterruptible()` 等待并在 unlock 时唤醒一个 waiter；本 RFC 不重复实现一套 `AtomicBool + Event` gate。Mutex内部使用Event与one-shot拒绝Event并不矛盾：前者只发生在request发布和Latch建立之前，`Mutex::lock()`本来就是不返回Force outcome的不可中断lock acquisition；取得guard后不再进入该Event wait。该 `Mutex<()>` 是 `sched/api` 私有的全局、sleepable transaction permit，只覆盖一个 remote request 从发布到 `recv_uninterruptible()` 返回的窗口；local setter、getter、unpublished child construction、IPI handler 与 `RunQueue` transaction 都不获取它。持有者在建立 one-shot `Latch` 前取得 guard，并刻意跨越 receive park 持有；receive 内不再获取 sleepable lock，handler/completion path 不获取 gate，且 receive 必须 finish 自己的 Latch 后才返回并 drop guard，因此不会形成 Event/Latch nested wait。
+现有 `Mutex` 的 fast path 已使用 `AtomicBool` CAS，contended slow path 已由内部 `Event::listen_uninterruptible()` 等待并在 unlock 时唤醒一个 waiter；本 RFC 不重复实现一套 `AtomicBool + Event` gate。Mutex内部 Event 只发生在 request 发布和 Latch 建立之前的 lock acquisition；它与 one-shot 都不把 Force 暴露成普通返回，但取得 guard 后不再进入该 Event wait。该 `Mutex<()>` 是 `sched/api` 私有的全局、sleepable transaction permit，只覆盖一个 remote request 从发布到 `recv_uninterruptible()` 观察 terminal phase并返回的窗口；local setter、getter、unpublished child construction、IPI handler 与 `RunQueue` transaction 都不获取它。持有者在建立 one-shot `Latch` 前取得 guard，并刻意跨越全部 receive rounds 持有；receive 内不再获取 sleepable lock，handler/completion path 不获取 gate，且 receive 必须 finish 当前 Latch 后才返回并 drop guard，因此不会形成 Event/Latch nested wait。
 
-gate 的精确协议作用是：全系统任意时刻最多存在一个仍持有开放 receiver、其 completion 仍可能调用 `LatchTrigger` 并进入 wait-core placement 的 remote scheduler request，从而排除两个 scheduler request handler 同时完成对方 wait 的双向边。正常 value/close completion 后 request 已 terminal；若 wait-core `Force` 先赢，receiver 必须先关闭 channel、detach trigger并 finish Latch，再允许 receive 返回和 guard 释放。此时旧 request envelope 仍可能留在 IPI queue 或 handler 中，但 late send 只能观察 receiver closed，不能再触发 remote placement；文档和测试不得把该 gate 误述为所有时序下“物理上最多一个 request envelope in flight”。它不保护 `SchedConfig`，不替代 owner CPU serialization，也不把 multi-target `setpriority()` 变成全局 transaction。
+gate 的精确协议作用是：全系统任意时刻最多存在一个仍持有开放 receiver、其 completion 仍可能调用 `LatchTrigger` 并进入 wait-core placement 的 remote scheduler request，从而排除两个 scheduler request handler 同时完成对方 wait 的双向边。正常 value/close completion 后 request 已 terminal；若 wait-core `Force` 先完成当前 round，receiver 只 detach旧 trigger、finish Latch、重查 phase并在 empty 时 rearm，不关闭 channel或释放 guard。因此 gate release 证明 channel 已经 terminal：value 对应 transaction result，`SenderClosed` 则必须同时证明唯一 sender及其未来 mutation/complete capability 已消失。request envelope 的 transport引用可以在 terminal 后短暂存在，但不能再拥有未消费的 execution body；文档和测试不得把该 gate 误述为所有时序下“物理上最多一个 request envelope in flight”。它不保护 `SchedConfig`，不替代 owner CPU serialization，也不把 multi-target `setpriority()` 变成全局 transaction。
 
 remote setter 流程：
 
@@ -367,7 +375,7 @@ IPI queue pop
 - 现有 per-CPU IPI queue 就是唯一 pending transport，不新增 scheduler mailbox。
 - `IpiPayload::SchedulerRequest(Arc<SchedRequest>)` 不允许 broadcast。
 - `Arc` 只解决 transport/request/task lifetime；single-use body slot 才是 execute/complete capability 的唯一真相源。
-- 所有 remote scheduler request 共用一个 module-private `Mutex<()>` submission gate；gate 只在 task context、request 发布前获取，并持有到 `recv_uninterruptible()` 返回。任意时刻最多一个 published request 仍有开放 receiver并可能触发wait-core placement；IPI handler 和 owner transaction不得获取它。
+- 所有 remote scheduler request 共用一个 module-private `Mutex<()>` submission gate；gate 只在 task context、request 发布前获取，并持有到 `recv_uninterruptible()` 观察 terminal phase后返回。Force 不能关闭 receiver或释放 gate；任意时刻最多一个 published request 仍有开放 receiver并可能触发wait-core placement，IPI handler 和 owner transaction不得获取它。
 - multi-target setter可以按每个remote target独立持有gate；不同target之间仍允许partial progress，gate不形成cross-target atomicity。
 - exception layer 不解析 patch、permit、target state 或 transaction result。
 - local owner request 直接调用同一个 transaction，不发送 self-IPI，也不创建无意义的 wait。
@@ -518,7 +526,7 @@ mask 中可以包含多个 CPU。允许集合不要求 scheduler 实际轮转 ta
 
 configured-view publication 之前必须完成所有可恢复、会返回普通 transaction error 的检查。publication 之后只允许 owner CPU 在 IRQ-off 下执行不可失败的 physical attach tail；该 CPU 在 tail 完成前不能运行 scheduler，one-shot completion 也只能在 tail 完成后发送。其它 CPU 的 getter 可以在 publication 后看到完整 new config，但 snapshot 不包含 transaction 中间 membership。既有 remote wake allocation 的 fatal OOM 不属于普通 transaction error。
 
-R0 proposal 将 IRQ-off path 上的现有内存分配保持为 accepted limitation，但不把它描述为安全证明。既有 IPI message / queue allocation 在 remote wake completion 中失败时继续服从内核的 fatal OOM 边界，不转译为 syscall error，也不要求本 RFC 增加预留消息、rollback 或 allocation-free transport。Fair heap、RT bucket 与其它既有 allocation 风险继续由 register 跟踪；实现不能借本 RFC 扩大为任意日志格式化、task drop、sleepable lock 或无界工作。
+R0 将 IRQ-off path 上的现有内存分配保持为 accepted limitation，但不把它描述为安全证明。既有 IPI message / queue allocation 在 remote wake completion 中失败时继续服从内核的 fatal OOM 边界，不转译为 syscall error，也不要求本 RFC 增加预留消息、rollback 或 allocation-free transport。Fair heap、RT bucket 与其它既有 allocation 风险继续由 register 跟踪；实现不能借本 RFC 扩大为任意日志格式化、task drop、sleepable lock 或无界工作。
 
 ## 可观测性
 
@@ -529,7 +537,7 @@ R0 proposal 将 IRQ-off path 上的现有内存分配保持为 accepted limitati
 - target physical role与 old/new discipline；
 - queued detach/attach class、RT bucket placement 或 Fair pass initialization；
 - current reconfigure 是否请求 full pick；
-- one-shot send、closed、force、consume与endpoint close时的exactly-once payload drop；
+- one-shot send、closed、Force round cleanup/rearm、consume与endpoint close时的exactly-once payload drop；
 - receive terminal fast path、send-before-receive、send-between-begin-and-register与send-after-registration路径；
 - remote request gate 的 acquire、release、owner task、target CPU 与 contention；
 - request transport failure、zombie rejection 与 migration-required affinity rejection；
@@ -539,13 +547,13 @@ R0 proposal 将 IRQ-off path 上的现有内存分配保持为 accepted limitati
 
 ## 接受边界
 
-本 RFC 从 Draft 接受为 R0 `Accepted for Implementation` 的最低条件：
+R0 已按以下边界接受为 `Accepted for Implementation`：
 
 1. `index.md` 与 `invariants.md` 对 owner、配置模型、oneshot、IPI、snapshot、permission、role matrix、runtime、placement、affinity 与 fork 语义一致。
 2. [Linux 6.6 Scheduler UAPI Matrix](./backgrounds/linux-6.6-sched-uapi-matrix.md) 已补齐对应 syscall 的 flag、size、errno、copy ordering、read-back 与 testcase分类，且没有把 unsupported policy/flag 静默伪装为成功。
 3. 文档层 review 没有未关闭的 Apollyon 或 Keter；Euclid 有明确 owner、验证与回写位置。
-4. [迁移实施计划](./implementation.md) 给出阶段、write set、probe、验证 floor 与 register 回写路径；计划通过 review、R0 接受并建立 transaction 前不得开始实现。
-5. 本页保持对 Fair dynamic nice/fresh placement、RT dynamic policy 与 Latch completion 的明确 follow-up 关系；接受时确认这些边界是否由 R0 supersede。
+4. [迁移实施计划](./implementation.md) 给出阶段、write set、probe、验证 floor 与 register 回写路径；R0 transaction 已建立，后续 checkpoint 不得越过其 canonical gate。
+5. 本页保持对 Fair dynamic nice/fresh placement、RT dynamic policy 与 Latch completion 的明确 follow-up 关系；R0 已成为这些动态边界的 accepted successor，live 行为仍以 implementation checkpoint 为准。
 
 ## 备选方案
 
@@ -571,7 +579,7 @@ R0 proposal 将 IRQ-off path 上的现有内存分配保持为 accepted limitati
 
 ### 使用 `Event` 作为 one-shot receive adapter
 
-拒绝。当前 `Event::listen_uninterruptible()` 会吞掉 wait-core `Force` 并继续重试predicate，无法返回已接受的 `RecvError::Forced`；为此扩展 `Event` outcome API会改变通用可复用等待原语的contract。one-shot只需要receive-local单轮wait和一个bounded trigger slot，不需要Event的listener queue、exclusive/non-exclusive与quota policy。constructor dormancy不依赖这项选择，仍由channel persistent phase与receive-time registration保证。
+拒绝。`Event::listen_uninterruptible()` 在 Force 后重试 predicate 的语义可以作为 one-shot rearm 的参考，但直接调用要求不持有 lock/guard，与 remote setter 跨 receive 持有唯一 submission gate 的 audited exception冲突。Event还维护独立的可复用 listener `VecDeque`、exclusive/non-exclusive 与 quota policy；注册会把潜在扩容带入 `NoIrqSpinLock` 临界区，并为single-consumer channel增加第二同步域。one-shot使用已有phase lock内的bounded trigger slot和receive-local Latch即可完成同样的terminal recheck，不修改Event contract，也不扩大IRQ-off allocation面。
 
 ### 自定义 `AtomicBool + Event` remote gate
 
@@ -609,4 +617,4 @@ R0 proposal 将 IRQ-off path 上的现有内存分配保持为 accepted limitati
 
 ## 当前状态
 
-当前只完成公开 RFC Draft 与公共导航；transaction devlog、kernel code 与 runtime 测试均尚未开始。公开文档层 review 若接受本页 contract 与实施 gates，再原地更新为 R0、建立 transaction 并开始阶段 0。
+阶段 0 已完成文档层 review、live-source audit、R0 acceptance、transaction 与导航建立；四项阶段 0 停止条件均未命中。kernel code、build、KUnit、QEMU 与 LTP 均未在本阶段运行；下一步只能按 transaction 进入阶段 1。

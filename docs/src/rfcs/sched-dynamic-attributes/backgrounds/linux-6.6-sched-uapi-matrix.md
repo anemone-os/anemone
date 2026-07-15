@@ -1,11 +1,11 @@
 # Linux 6.6 Scheduler UAPI Matrix
 
-**状态：** Reviewed evidence for Draft R0 proposal
+**状态：** Reviewed evidence for accepted R0
 **最后更新：** 2026-07-15
 **父 RFC：** [RFC-20260714-sched-dynamic-attributes](../index.md)
 **对应问题：** [KETER-DYNATTR-002](../tracking-issues.md#keter-dynattr-002调度-uapi-的精确-abi-matrix-尚未闭合)
 
-本文记录 R0 scheduler UAPI proposal 的 Linux 6.6 与 LTP 依据、逐 syscall 行为和验证映射。binding boundary 仍由 [RFC 入口](../index.md) 与 [不变量需求](../invariants.md) 拥有；本文不定义 scheduler core state、implementation stage 或 write set。
+本文记录 R0 scheduler UAPI contract 的 Linux 6.6 与 LTP 依据、逐 syscall 行为和验证映射。binding boundary 仍由 [RFC 入口](../index.md) 与 [不变量需求](../invariants.md) 拥有；本文不定义 scheduler core state、implementation stage 或 write set。
 
 ## 权威与取舍
 
