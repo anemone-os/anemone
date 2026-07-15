@@ -2,11 +2,11 @@
 
 **状态：** 已完成
 **负责人：** doruche, Codex
-**最后更新：** 2026-06-03
+**最后更新：** 2026-07-15
 **领域：** scheduler / event / timer / signal / wait core
 **事务日志：** [2026-06-01 - Sched Wait Refactor](../../devlog/transactions/2026-06-01-sched-wait-refactor.md)
-**开放问题：** None
-**下一步：** None
+**开放问题：** [KETER-WAIT-001：synchronous remote placement 不能组合进 cross-CPU IPI completion](./tracking-issues.md#keter-wait-001synchronous-remote-placement-不能组合进-cross-cpu-ipi-completion)
+**下一步：** R0 保持已完成；为 KETER-WAIT-001 做 post-close 文档 review，接受修复后按语义修订建立新 transaction
 
 ## 摘要
 
@@ -16,6 +16,7 @@
 
 - [不变量需求](./invariants.md)：必须保持的协议边界和证明义务。
 - [迁移实施计划](./implementation.md)：落地顺序、审计范围、可观测性、验证和停止边界。
+- [Tracking Issues](./tracking-issues.md)：R0 收口后发现的共享 wait-core 问题。
 
 历史 review 材料保存在 [背景材料](./backgrounds/index.md) 下。它们解释原始 race、被否决的窄化方案和 issue 收口过程，但不覆盖 canonical 不变量和实施计划。
 
@@ -51,6 +52,7 @@ Canonical：
 
 - [不变量需求](./invariants.md)
 - [迁移实施计划](./implementation.md)
+- [Tracking Issues](./tracking-issues.md)
 
 背景材料：
 
