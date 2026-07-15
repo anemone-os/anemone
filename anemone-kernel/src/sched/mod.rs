@@ -38,6 +38,8 @@ pub use event::{Event, TimeoutListenException};
 mod latch;
 pub use latch::{Latch, LatchCancelReason, LatchTrigger, LatchWaitOutcome};
 
+pub mod oneshot;
+
 pub mod class;
 mod wait;
 pub(crate) use wait::assert_current_not_in_active_wait;
