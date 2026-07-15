@@ -79,6 +79,7 @@ pub struct Parameters {
     pub ramdisk_count: Option<usize>,
     pub loop_device_count: Option<usize>,
     pub ns16550a_default_baud: Option<u32>,
+    pub dw_mshc_poll_timeout_ms: Option<u64>,
     pub eevdf_base_slice_us: Option<u64>,
     pub eevdf_wake_clamp_us: Option<u64>,
     pub eevdf_yield_penalty_us: Option<u64>,
@@ -188,6 +189,8 @@ pub const RAMDISK_COUNT: usize = {};
 pub const LOOP_DEVICE_COUNT: usize = {};
 /// Default NS16550A baud used when stdout-path has no device-specific options.
 pub const NS16550A_DEFAULT_BAUD: u32 = {};
+/// Bounded DW-MSHC register polling timeout in milliseconds.
+pub const DW_MSHC_POLL_TIMEOUT_MS: u64 = {};
 /// EEVDF-lite base slice in microseconds.
 pub const EEVDF_BASE_SLICE_US: u64 = {};
 /// EEVDF-lite wake placement clamp window in microseconds.
@@ -224,6 +227,7 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             default_or!(ramdisk_count),
             default_or!(loop_device_count),
             default_or!(ns16550a_default_baud),
+            default_or!(dw_mshc_poll_timeout_ms),
             default_or!(eevdf_base_slice_us),
             default_or!(eevdf_wake_clamp_us),
             default_or!(eevdf_yield_penalty_us),

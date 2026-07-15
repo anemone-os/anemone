@@ -23,6 +23,7 @@ pub mod intc;
 
 mod block;
 mod clock_source;
+mod mmc;
 mod power;
 mod rtc;
 mod serial;

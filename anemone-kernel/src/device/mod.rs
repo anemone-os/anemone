@@ -30,6 +30,7 @@ pub use devnum::{BlockDevNum, CharDevNum, MajorNum, MinorNum};
 pub mod block;
 pub mod char;
 pub mod console;
+pub mod mmc;
 
 /// Common data shared by all devices.
 ///
