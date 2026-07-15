@@ -8,7 +8,7 @@
 **事务日志：** [2026-07-15-sched-dynamic-attributes](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md)
 **开放问题：** None；已关闭问题见 [Tracking Issues](./tracking-issues.md)
 **下层问题：** [KETER-WAIT-001：synchronous remote placement 不能组合进 cross-CPU IPI completion](../sched-wait-refactor/tracking-issues.md#keter-wait-001synchronous-remote-placement-不能组合进-cross-cpu-ipi-completion)
-**下一步：** 按 [迁移实施计划](./implementation.md) 进入阶段 1 Dormant `sched::oneshot`；开始前继续服从 transaction 的 write set 与独立 review gate
+**下一步：** 由 [R0 事务日志](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md) 记录当前 handoff；后续 checkpoint 继续服从 [迁移实施计划](./implementation.md) 的阶段顺序、write set 与独立 review gate
 
 ## 摘要
 
@@ -617,4 +617,4 @@ R0 已按以下边界接受为 `Accepted for Implementation`：
 
 ## 当前状态
 
-阶段 0 已完成文档层 review、live-source audit、R0 acceptance、transaction 与导航建立；四项阶段 0 停止条件均未命中。kernel code、build、KUnit、QEMU 与 LTP 均未在本阶段运行；下一步只能按 transaction 进入阶段 1。
+R0 已接受并由对应 transaction 按 checkpoint 推进。阶段执行事实、review、验证、Not Run 项与当前 handoff 只由 [R0 事务日志](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md) 记录；本页不维护并列进度账本。

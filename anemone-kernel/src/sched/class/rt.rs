@@ -1,6 +1,9 @@
 //! Priority-first realtime scheduler class shared by FIFO and RoundRobin.
 
-use crate::prelude::*;
+use crate::{
+    prelude::*,
+    sched::config::{RtMode, RtPriority},
+};
 
 use super::{
     PreemptDecision, SchedClassKind, Scheduler, TickAction,
@@ -28,32 +31,6 @@ const fn rt_rr_full_quantum_ticks() -> u32 {
 
 const RT_RR_FULL_QUANTUM_TICKS: u32 = rt_rr_full_quantum_ticks();
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(transparent)]
-struct RtPriority(u8);
-
-impl RtPriority {
-    const MIN: Self = Self(1);
-    const MAX: Self = Self(99);
-    const WIDTH: usize = (Self::MAX.0 - Self::MIN.0 + 1) as usize;
-
-    const fn new(value: u8) -> Self {
-        assert!(
-            value >= Self::MIN.0 && value <= Self::MAX.0,
-            "RT priority is outside [1, 99]"
-        );
-        Self(value)
-    }
-
-    const fn get(self) -> u8 {
-        self.0
-    }
-
-    const fn bucket_index(self) -> usize {
-        (self.0 - Self::MIN.0) as usize
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RtPolicy {
     Fifo,
@@ -67,6 +44,13 @@ enum RtPolicy {
 }
 
 impl RtPolicy {
+    const fn new_fresh(mode: RtMode) -> Self {
+        match mode {
+            RtMode::Fifo => Self::fifo(),
+            RtMode::RoundRobin => Self::round_robin(),
+        }
+    }
+
     /// Construct fresh RT/FIFO policy state before task publication.
     const fn fifo() -> Self {
         Self::Fifo
@@ -154,11 +138,23 @@ impl RtEntity {
 }
 
 pub(super) fn new_round_robin_entity() -> RtEntity {
-    RtEntity::new_fresh(RtPriority::MIN, RtPolicy::round_robin())
+    new_transition_entity(RtMode::RoundRobin, RtPriority::MIN)
 }
 
 pub(super) fn new_fifo_entity() -> RtEntity {
-    RtEntity::new_fresh(RtPriority::MIN, RtPolicy::fifo())
+    new_transition_entity(RtMode::Fifo, RtPriority::MIN)
+}
+
+/// Construct a fresh class-private payload for a validated RT discipline.
+///
+/// Existing unpublished default constructors reuse this factory mechanically.
+/// Phase 2B may also call it for a published discipline transition, but only
+/// after the owner transaction has detached the old physical membership.
+pub(in crate::sched::class) fn new_transition_entity(
+    mode: RtMode,
+    priority: RtPriority,
+) -> RtEntity {
+    RtEntity::new_fresh(priority, RtPolicy::new_fresh(mode))
 }
 
 /// Construct an explicit fresh RT payload for scheduler-class integration
@@ -560,6 +556,18 @@ mod kunits {
         assert_eq!(RtPriority::new(50).bucket_index(), 49);
         assert_eq!(RtPriority::MAX.bucket_index(), RtPriority::WIDTH - 1);
         assert!(RtPriority::MAX > RtPriority::new(50));
+    }
+
+    #[kunit]
+    fn test_rt_transition_factory_builds_fresh_typed_payload() {
+        let priority = RtPriority::new(50);
+        let fifo = new_transition_entity(RtMode::Fifo, priority);
+        assert_eq!(fifo.priority, priority);
+        assert_eq!(fifo.policy, RtPolicy::Fifo);
+
+        let rr = new_transition_entity(RtMode::RoundRobin, priority);
+        assert_eq!(rr.priority, priority);
+        assert_eq!(rr.policy, RtPolicy::round_robin());
     }
 
     #[kunit]

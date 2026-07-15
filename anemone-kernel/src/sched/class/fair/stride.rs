@@ -23,6 +23,10 @@ impl StrideEntity {
     pub(super) const fn new_fresh() -> Self {
         Self { pass: None }
     }
+
+    const fn new_placed(pass: u128) -> Self {
+        Self { pass: Some(pass) }
+    }
 }
 
 impl SchedEntity {
@@ -92,6 +96,14 @@ impl Stride {
             placement_floor: 0,
             next_enqueue_seq: 0,
         }
+    }
+
+    /// Construct the placed Fair payload required by a discipline transition.
+    ///
+    /// This does not publish or install the payload. Phase 2B will call it only
+    /// after the old physical role has been detached in the owner transaction.
+    pub(in crate::sched::class) fn new_transition_entity(&self) -> StrideEntity {
+        StrideEntity::new_placed(self.placement_floor)
     }
 
     fn entity_pass(task: &Arc<Task>) -> (u128, bool) {
@@ -540,6 +552,14 @@ mod kunits {
         for pair in super::super::NICE_WEIGHTS.windows(2) {
             assert!(pair[0] > pair[1]);
         }
+    }
+
+    #[kunit]
+    fn test_fair_transition_factory_uses_current_placement_floor() {
+        let mut stride = Stride::new();
+        stride.placement_floor = PASS_SCALE * 3;
+        let entity = stride.new_transition_entity();
+        assert_eq!(entity.pass, Some(PASS_SCALE * 3));
     }
 
     #[kunit]

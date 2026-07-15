@@ -14,7 +14,7 @@ use alloc::{alloc::AllocError, collections::LinkedList};
 
 use crate::prelude::*;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum IpiPayload {
     TlbShootdown {
         vpn: Option<VirtPageNum>,
@@ -127,7 +127,7 @@ pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
     let mut pending = LinkedList::new();
     for id in 0..ncpus {
         if id != cur_cpuid {
-            let msg = alloc_ipi_msg(payload)?;
+            let msg = alloc_ipi_msg(payload.clone())?;
             pending.push_back(Arc::clone(&msg));
             enqueue_ipi(id, msg);
         }
@@ -172,7 +172,7 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
     let mut pending = LinkedList::new();
     for id in 0..ncpus {
         if id != cur_cpuid {
-            pending.push_back((id, alloc_ipi_msg(payload)?));
+            pending.push_back((id, alloc_ipi_msg(payload.clone())?));
         }
     }
 
@@ -191,7 +191,7 @@ pub fn handle_ipi() {
             let Some(msg) = queue.lock_irqsave().pop_front() else {
                 break;
             };
-            match msg.payload {
+            match msg.payload.clone() {
                 TlbShootdown { vpn } => {
                     if let Some(vpn) = vpn {
                         PagingArch::tlb_shootdown(vpn);

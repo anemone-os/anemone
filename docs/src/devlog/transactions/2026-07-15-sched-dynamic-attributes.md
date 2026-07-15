@@ -5,7 +5,7 @@
 **Area:** scheduler / dynamic attributes / syscall ABI / IPI / affinity
 **Canonical Plan:** [RFC-20260714-sched-dynamic-attributes](../../rfcs/sched-dynamic-attributes/index.md), [不变量需求](../../rfcs/sched-dynamic-attributes/invariants.md), [迁移实施计划](../../rfcs/sched-dynamic-attributes/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** 阶段 1 已完成；Checkpoint 2A 尚未开始
+**Current Phase:** Checkpoint 2A 已完成；Checkpoint 2B 尚未开始
 
 ## Scope
 
@@ -85,11 +85,37 @@
 
 **Stop Conditions:** 阶段一四项停止条件最终均未命中；实现不需要扩展wait-core surface、不引入hardirq非bounded工作、不需要第二Force/cancellation truth，也不改变infallible channel API或accepted fatal OOM边界。阶段一Implementation、runtime KUnit与独立review gate关闭；Checkpoint 2A仍为Not Started。
 
+### 2026-07-15 - Checkpoint 2A Mechanical / Dormant Foundation 启动
+
+**Phase:** 阶段 2 / Checkpoint 2A；Implementation In Progress，review/runtime Not Run。
+
+**Preflight:** 阶段一的实现、全部enabled KUnit与独立review gate已由前序提交关闭；阶段0 source audit确认class lifecycle可增加dedicated reconfigure。当前tracking issues没有未neutralize的Apollyon或Keter阻塞本checkpoint。
+
+**Write Set Lock:** kernel write set严格限于`implementation.md`的Checkpoint 2A列表：新增`sched/config.rs`，窄改`sched/mod.rs`、class typed foundation、priority目录机械搬迁、`sched/api/mod.rs`与`exception/ipi.rs` Clone适配，以及对应owner内KUnit。不得修改Task storage、`AtomicNice`、RunQueue transaction、clone、procfs、wait-core、rootfs、LTP profile或user ABI；worker不得提交，发现真实owner需要扩张时必须停止上报。
+
+**Behavior Boundary:** typed config、patch、mask、permit与class transition factory保持dormant，不安装进Task或published `SchedEntity` storage，不增加production request/reconfigure caller。priority只做behavior-preserving owner move并继续读取当前唯一`AtomicNice` truth；IPI只做`Copy -> Clone`机械收窄，不增加scheduler request variant。
+
+**Planned Gate:** 完成后运行`just fmt kernel --check`、`just build`、`git diff --check`与rv64 pretest全部enabled KUnit，并在log中点名2A新增case；随后由未参与写入的独立reviewer分别检查priority move、IPI Clone与dormant typed model。existing priority用户态runtime未单独授权时记为Not Run，不用source proof替代。
+
+### 2026-07-15 - Checkpoint 2A 实现、审查与 Gate 关闭
+
+**Change:** 新增`sched/config.rs`中的typed `SchedConfig`、discipline/parameter、semantic patch、`CpuMask`、non-clone narrow permit与typed error；它们只提供纯projection、online normalization和latest old/new permit检查，没有安装进Task或published `SchedEntity` storage。将四个priority文件从`task/api`逐字节搬到`sched/api`，继续使用唯一`AtomicNice` truth与原selector/result folding。`IpiPayload`只从`Copy`收窄为`Clone`并机械适配broadcast/handler。Fair新增从owner placement floor构造placed payload的方法，RT复用typed priority/mode构造fresh FIFO/RR payload；均未增加published reconfigure caller、RunQueue入口或request path。
+
+**Review:** 未参与写入的独立reviewer分别审查typed model、class factory、priority move与IPI Clone，并按补充要求单独检查模块边界和代码范式。最终无Apollyon或Keter。唯一Euclid是早期注释把整个typed value/RT factory称为dormant，但`RtPriority`和fresh factory已经由existing unpublished default constructor机械复用；修正后的注释只把完整`SchedConfig`/patch/mask/permit与published transition call site标为dormant。state-owning操作保持为owner type方法，跨两个snapshot的纯permit relation、priority target orchestration与IPI dispatch保持为私有/module自由函数；visibility没有扩大mutation capability或class-private payload surface。RFC入口的阶段一进度文案同时改为稳定指向本事务，不再维护第二份checkpoint进度。
+
+**Validation:** 总控重跑`just build`通过，rv64 release使用`fs_ext4`、`spin_lock_irqsave`与`kunit`且无compiler warning。`./scripts/run-user-test-rv64.sh etc/sdcard-rv.img`重建pretest rootfs、kernel并启动QEMU；`build/user-test-rv64.log`记录`Running 142 tests...`，5项config/permit/mask、RT/Fair各1项transition factory及搬迁后的priority KUnit全部`ok`，最终`All tests passed!`。KUnit结束后QEMU进入常规fair-test/LTP，随后由总控结束；这些post-KUnit输出不作为2A LTP证据。四个priority文件与HEAD旧路径逐文件SHA-256一致。`git diff --check`及新文件no-index whitespace检查无告警；`just fmt kernel --check`只报告未触碰generated `kconfig_defs.rs` / `platform_defs.rs`既有漂移。公开RFC进度措辞调整后`mdbook build docs`通过，仅报告既有large search-index warning。
+
+**Source / Write-set Audit:** `SchedConfig`、patch与permit production引用只存在于其owner测试；没有`SchedulerRequest`、`ApplyConfigPatch`或remote gate。`AtomicNice`、direct setter、Task storage、RunQueue、clone、procfs、wait-core、rootfs、profile与user ABI均未修改。工作树中的`AGENTS.md`改动继续属于用户，不进入本checkpoint。
+
+**Not Run:** existing priority独立用户态runtime、targeted priority LTP、la64 build/runtime、SMP=2与后续ABI验证均未运行；2A只要求behavior-preserving move与rv64全部enabled KUnit。运行脚本后附带开始的普通LTP输出没有完整运行或分类，不作为PASS/FAIL证据。
+
+**Stop Conditions:** 2A未安装第二config truth、未改变production mutation行为、未提前发布request path，也不需要write-set扩张；本checkpoint停止条件均未命中。Implementation、独立review与runtime KUnit gate关闭；2B仍为Not Started。
+
 ## Open Items
 
 - 本 RFC owner内当前无开放 Apollyon、Keter或 Euclid。
 - wait-core [KETER-WAIT-001](../../rfcs/sched-wait-refactor/tracking-issues.md#keter-wait-001synchronous-remote-placement-不能组合进-cross-cpu-ipi-completion) 继续 Open；R0 remote gate只neutralize scheduler request producer graph。
-- Checkpoint 2A及后续实现、review与runtime项保持 Not Started / Not Run，直到对应 checkpoint 明确启动。
+- Checkpoint 2A已关闭；Checkpoint 2B及后续阶段保持Not Started / Not Run。
 
 ## Closure
 

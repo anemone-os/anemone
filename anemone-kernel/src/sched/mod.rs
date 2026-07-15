@@ -23,6 +23,8 @@ mod nice;
 pub(crate) use nice::AtomicNice;
 pub use nice::Nice;
 
+pub(crate) mod config;
+
 mod processor;
 pub use processor::{
     PendingResched, enqueue_new_task, get_current_task, init_routines, local_enqueue_new_task,
