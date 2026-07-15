@@ -1,6 +1,6 @@
 # Dynamic Scheduler Attributes 迁移实施计划
 
-**状态：** Active
+**状态：** Completed；Stage 1-6 已关闭
 **最后更新：** 2026-07-16
 **父 RFC：** [RFC-20260714-sched-dynamic-attributes](./index.md)
 **不变量：** [不变量需求](./invariants.md)
@@ -20,7 +20,7 @@
 - one-shot 不使用 `Event`：Event的Force predicate retry方向可复用为语义参考，但其API要求调用时不持guard，且listener `VecDeque`会为single-consumer channel增加独立同步域和潜在IRQ-off扩容；阶段1只在channel phase lock内保存bounded trigger slot，不扩展Event contract或allocation面。
 - `REMOTE_SCHED_REQUEST_GATE` 明确复用现有 `Mutex<()>`，不新增自定义 `AtomicBool + Event` gate。它是临时 syscall-domain 约束；实现必须保留退出条件和 KETER-WAIT-001 链接，不能把 stress 通过写成 wait-core 已修复。
 - 现有 IPI message、Fair heap与 RT bucket 的 IRQ-off allocation继续服从 fatal OOM / register 接受边界。本 RFC 不增加预留、rollback、fallible queue或 allocation-free transport，也不能扩大 IRQ-off allocator side effect。
-- raw Linux layout、flag、selector、errno mapping 和 pointer ordering只存在于 `sched/api`。scheduler core只接收 typed config、patch、permit、mask和 target identity。
+- Linux userspace representation、layout与共享常量由`anemone-abi::process::linux::sched`统一拥有；kernel raw copy、flag/selector解释、errno mapping、pointer ordering与semantic conversion只存在于`sched/api`。scheduler core只接收typed config、patch、permit、mask和target identity。
 - write set 是协调合同。需要新增 owner surface 时先记录原因、文件、contract / gate / 验证影响并等待批准；不得在原 write set 内制造长期 adapter。
 - agent-run、user-run 与 Not Run 证据必须分开。build、KUnit 与 source audit不能替代双 CPU stress或用户侧 LTP。
 

@@ -42,6 +42,15 @@ const WAIT_RETRIES: usize = 1_000_000;
 const NO_TARGET: usize = usize::MAX;
 const ABI_PAGE_SIZE: usize = 4096;
 
+#[derive(Clone, Copy)]
+struct SchedExpectation {
+    policy: i32,
+    priority: i32,
+    nice: i32,
+    reset_on_fork: bool,
+    affinity: CpuSet,
+}
+
 #[repr(C)]
 struct SharedStress {
     ready: AtomicUsize,
@@ -366,6 +375,53 @@ fn wait_child_exit(pid: u32) -> Result<(), Errno> {
             Err(EINTR) => {},
             Err(errno) => return Err(errno),
         }
+    }
+}
+
+fn assert_sched_expectation(expected: SchedExpectation) -> Result<(), Errno> {
+    let reset = if expected.reset_on_fork {
+        SCHED_RESET_ON_FORK
+    } else {
+        0
+    };
+    assert_eq!(sched_getscheduler(0)?, expected.policy | reset);
+    assert_eq!(sched_getparam(0)?.sched_priority, expected.priority);
+
+    let attr = sched_getattr(0, SCHED_ATTR_SIZE_VER1)?;
+    assert_eq!(attr.sched_policy, expected.policy as u32);
+    assert_eq!(attr.sched_priority, expected.priority as u32);
+    assert_eq!(
+        attr.sched_flags,
+        if expected.reset_on_fork {
+            SCHED_FLAG_RESET_ON_FORK
+        } else {
+            0
+        }
+    );
+    assert_eq!(
+        attr.sched_nice,
+        if expected.policy == SCHED_OTHER {
+            expected.nice
+        } else {
+            0
+        }
+    );
+    assert_eq!(getpriority(PriorityWhich::Process, 0)?, expected.nice);
+
+    let (affinity, copied) = sched_getaffinity(0)?;
+    assert_eq!(copied, CPU_SET_WORD_BYTES);
+    assert_eq!(affinity, expected.affinity);
+    Ok(())
+}
+
+fn fork_and_assert_child(expected: SchedExpectation) -> Result<(), Errno> {
+    match fork()? {
+        Some(child) => wait_child_exit(child),
+        None => {
+            assert_sched_expectation(expected)
+                .expect("sched-attr-test: child scheduler inheritance mismatch");
+            exit(0)
+        },
     }
 }
 
@@ -1073,6 +1129,98 @@ fn test_attr_permission_ordering() -> Result<(), Errno> {
     Ok(())
 }
 
+fn test_clone_reset_matrix(affinity: CpuSet) -> Result<(), Errno> {
+    println!("sched-attr-test: CASE clone-reset start");
+    sched_setaffinity(0, &affinity)?;
+
+    let mut fair = fair_attr(7, 0);
+    sched_setattr(0, &mut fair)?;
+    fork_and_assert_child(SchedExpectation {
+        policy: SCHED_OTHER,
+        priority: 0,
+        nice: 7,
+        reset_on_fork: false,
+        affinity,
+    })?;
+
+    let mut reset_negative_fair = fair_attr(-7, SCHED_FLAG_RESET_ON_FORK);
+    sched_setattr(0, &mut reset_negative_fair)?;
+    fork_and_assert_child(SchedExpectation {
+        policy: SCHED_OTHER,
+        priority: 0,
+        nice: 0,
+        reset_on_fork: false,
+        affinity,
+    })?;
+    assert_sched_expectation(SchedExpectation {
+        policy: SCHED_OTHER,
+        priority: 0,
+        nice: -7,
+        reset_on_fork: true,
+        affinity,
+    })?;
+
+    let mut reset_positive_fair = fair_attr(7, SCHED_FLAG_RESET_ON_FORK);
+    sched_setattr(0, &mut reset_positive_fair)?;
+    fork_and_assert_child(SchedExpectation {
+        policy: SCHED_OTHER,
+        priority: 0,
+        nice: 7,
+        reset_on_fork: false,
+        affinity,
+    })?;
+    assert_sched_expectation(SchedExpectation {
+        policy: SCHED_OTHER,
+        priority: 0,
+        nice: 7,
+        reset_on_fork: true,
+        affinity,
+    })?;
+
+    let mut dormant_nice = fair_attr(6, 0);
+    sched_setattr(0, &mut dormant_nice)?;
+    let mut inherited_rr = rt_attr(SCHED_RR, 23, i32::MIN, 0);
+    sched_setattr(0, &mut inherited_rr)?;
+    fork_and_assert_child(SchedExpectation {
+        policy: SCHED_RR,
+        priority: 23,
+        nice: 6,
+        reset_on_fork: false,
+        affinity,
+    })?;
+
+    let mut reset_dormant_nice = fair_attr(-4, 0);
+    sched_setattr(0, &mut reset_dormant_nice)?;
+    let mut reset_rr = rt_attr(SCHED_RR, 23, i32::MAX, SCHED_FLAG_RESET_ON_FORK);
+    sched_setattr(0, &mut reset_rr)?;
+    fork_and_assert_child(SchedExpectation {
+        policy: SCHED_OTHER,
+        priority: 0,
+        nice: 0,
+        reset_on_fork: false,
+        affinity,
+    })?;
+    assert_sched_expectation(SchedExpectation {
+        policy: SCHED_RR,
+        priority: 23,
+        nice: -4,
+        reset_on_fork: true,
+        affinity,
+    })?;
+
+    let mut cleanup = fair_attr(0, 0);
+    sched_setattr(0, &mut cleanup)?;
+    assert_sched_expectation(SchedExpectation {
+        policy: SCHED_OTHER,
+        priority: 0,
+        nice: 0,
+        reset_on_fork: false,
+        affinity,
+    })?;
+    println!("sched-attr-test: CASE clone-reset ok");
+    Ok(())
+}
+
 fn test_external_runnable_policy_target() -> Result<(), Errno> {
     println!("sched-attr-test: CASE runnable-policy-target start");
     let mapping = mmap(
@@ -1334,6 +1482,7 @@ pub fn main() -> Result<(), Errno> {
     test_attr_errno_ordering_and_failure_atomicity()?;
     test_attr_projection_and_full_output_range()?;
     test_attr_permission_ordering()?;
+    test_clone_reset_matrix(initial_mask)?;
     test_external_runnable_policy_target()?;
     test_pipe_blocked_policy_target()?;
     test_remote_gate_stress(initial_mask)?;

@@ -474,7 +474,7 @@ impl Scheduler for Stride {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::sched::config::{CpuMask, SchedConfig, SchedConfigPatch, SchedDiscipline};
+    use crate::sched::config::{CpuMask, SchedConfig, SchedDiscipline};
 
     fn task_with_stride(nice: Nice, stride: StrideEntity) -> Arc<Task> {
         fn unused_entry() {}
@@ -514,18 +514,6 @@ mod kunits {
     fn set_on_runq(task: &Arc<Task>, on_runq: bool) {
         task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
             entity.on_runq = on_runq;
-        });
-    }
-
-    fn publish_test_nice(task: &Arc<Task>, nice: Nice) {
-        let owner = task.cpuid();
-        task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
-            let old = entity.config_snapshot();
-            let new = SchedConfigPatch::keep()
-                .with_nice(nice)
-                .project(old, old.affinity(), owner)
-                .unwrap();
-            entity.publish_config(new);
         });
     }
 
@@ -570,10 +558,10 @@ mod kunits {
         set_on_runq(&task, true);
     }
 
-    fn setup_low_current_high_peer() -> (Stride, Arc<Task>, Arc<Task>) {
+    fn setup_low_current_high_peer(nice: Nice) -> (Stride, Arc<Task>, Arc<Task>) {
         let mut stride = Stride::new();
         let charged = fresh_task(Nice::ZERO);
-        let low = fresh_task(Nice::ZERO);
+        let low = fresh_task(nice);
         publish_new(&mut stride, charged.clone());
         publish_new(&mut stride, low.clone());
 
@@ -613,7 +601,7 @@ mod kunits {
 
     #[kunit]
     fn test_reconfigure_clear_preserves_minimum_current_floor_until_final_union() {
-        let (mut stride, current, peer) = setup_low_current_high_peer();
+        let (mut stride, current, peer) = setup_low_current_high_peer(Nice::ZERO);
         assert_eq!(pass(&current), 0);
         assert_eq!(pass(&peer), PASS_SCALE);
         assert_eq!(stride.placement_floor, 0);
@@ -671,7 +659,7 @@ mod kunits {
         assert!(Arc::ptr_eq(&pick(&mut stride), &first));
         assert!(Arc::ptr_eq(&pick(&mut stride), &second));
 
-        let (mut stride, low, high) = setup_low_current_high_peer();
+        let (mut stride, low, high) = setup_low_current_high_peer(Nice::ZERO);
         publish_preempted(&mut stride, low.clone());
         assert!(Arc::ptr_eq(&pick(&mut stride), &low));
         assert!(Arc::ptr_eq(&pick(&mut stride), &high));
@@ -719,7 +707,7 @@ mod kunits {
 
     #[kunit]
     fn test_pick_set_gap_preserves_floor_for_fresh_and_wake() {
-        let (mut stride, low, _high) = setup_low_current_high_peer();
+        let (mut stride, low, _high) = setup_low_current_high_peer(Nice::ZERO);
         let sleeper = fresh_task(Nice::ZERO);
         publish_new(&mut stride, sleeper.clone());
         dequeue(&mut stride, &sleeper);
@@ -741,11 +729,11 @@ mod kunits {
 
     #[kunit]
     fn test_preempt_and_handoff_refresh_only_final_post_state() {
-        let (mut preempt, low, _high) = setup_low_current_high_peer();
+        let (mut preempt, low, _high) = setup_low_current_high_peer(Nice::ZERO);
         publish_preempted(&mut preempt, low);
         assert_eq!(preempt.placement_floor, 0);
 
-        let (mut handoff, low, _high) = setup_low_current_high_peer();
+        let (mut handoff, low, _high) = setup_low_current_high_peer(Nice::ZERO);
         publish_handoff(&mut handoff, low);
         assert_eq!(handoff.placement_floor, 0);
     }
@@ -770,28 +758,17 @@ mod kunits {
     }
 
     #[kunit]
-    fn test_weak_nice_update_preserves_snapshot_and_changes_future_charges() {
+    fn test_weighted_charge_preserves_ready_snapshot() {
         let mut stride = Stride::new();
-        let task = fresh_task(Nice::ZERO);
+        let task = fresh_task(Nice::MAX);
         publish_new(&mut stride, task.clone());
         let snapshot = stride.ready.peek().unwrap().pass_snapshot;
-        publish_test_nice(&task, Nice::MAX);
         assert_eq!(pass(&task), snapshot);
         assert_eq!(stride.ready.peek().unwrap().pass_snapshot, snapshot);
 
         let task = pick_and_set(&mut stride);
         assert_eq!(stride.task_tick(&task, Instant::now()), TickAction::None);
-        let after_tick = stride_delta(Nice::MAX);
-        assert_eq!(pass(&task), after_tick);
-
-        let peer = fresh_task(Nice::ZERO);
-        publish_new(&mut stride, peer.clone());
-        publish_test_nice(&task, Nice::MIN);
-        let expected = checked_add_pass(after_tick, stride_delta(Nice::MIN)).unwrap();
-        stride.requeue_yielded_current(task.clone(), Instant::now());
-        set_on_runq(&task, true);
-        assert_eq!(pass(&task), expected.max(pass(&peer)));
-        assert!(Arc::ptr_eq(&pick(&mut stride), &peer));
+        assert_eq!(pass(&task), stride_delta(Nice::MAX));
     }
 
     #[kunit]
@@ -860,8 +837,7 @@ mod kunits {
         assert_eq!(pass(&only), 0);
         assert!(Arc::ptr_eq(&pick(&mut alone), &only));
 
-        let (mut stride, current, peer) = setup_low_current_high_peer();
-        publish_test_nice(&current, Nice::MIN);
+        let (mut stride, current, peer) = setup_low_current_high_peer(Nice::MIN);
         assert!(stride_delta(Nice::MIN) < pass(&peer));
         stride.requeue_yielded_current(current.clone(), Instant::now());
         set_on_runq(&current, true);

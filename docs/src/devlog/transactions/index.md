@@ -6,7 +6,6 @@
 
 ## Active
 
-- [Sched Dynamic Attributes](./2026-07-15-sched-dynamic-attributes.md)
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
 - [OOM Killer](./2026-06-15-oom-killer.md)
@@ -24,6 +23,7 @@
 
 ## Completed
 
+- [Sched Dynamic Attributes](./2026-07-15-sched-dynamic-attributes.md)
 - [Sched RT Class R1](./2026-07-14-sched-rt-class-r1.md)
 - [Sched Fair / Stride](./2026-07-13-sched-fair-stride.md)
 - [Sched RT Class R0](./2026-07-12-sched-rt-class.md)

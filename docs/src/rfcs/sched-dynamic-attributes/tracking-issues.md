@@ -1,11 +1,13 @@
 # Dynamic Scheduler Attributes Tracking Issues
 
-**状态：** Active
-**最后更新：** 2026-07-15
+**状态：** Closed
+**最后更新：** 2026-07-16
 **父 RFC：** [RFC-20260714-sched-dynamic-attributes](./index.md)
 **事务日志：** [2026-07-15-sched-dynamic-attributes](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md)
 
 本文只跟踪 confirmed design issue。implementation checkpoint、write set或验证尚未执行本身不作为design issue；只有阶段边界暴露出错误owner、contract、停止条件或无法完成的验证义务时才进入本页。accepted contract 必须修回 [RFC 入口](./index.md)、[不变量需求](./invariants.md) 或[迁移实施计划](./implementation.md)；本文不替代canonical正文。
+
+R1收口时本RFC owner内没有开放finding；下层wait-core `KETER-WAIT-001`继续由其公开tracker保持Open，不改变本页Closed状态。
 
 ## Apollyon
 
@@ -85,9 +87,9 @@
 
 **接受取舍：** R0只支持`SCHED_FLAG_RESET_ON_FORK`。KEEP_POLICY、KEEP_PARAMS、reclaim、deadline overrun、util clamp和unknown flags返回`EINVAL`；BATCH、IDLE与DEADLINE setter继续是明确非目标。拒绝KEEP_PARAMS避免为未要求feature新增owner-side patch，也避免syscall snapshot read-modify-write。`sched_attr`仍advertise Linux 6.6 size 56，feature支持不通过缩短struct伪装。
 
-**ABI结论：** raw structs/flags只在`sched/api`；setter最终仍只生成既有semantic patch；permission denial是typed internal result，由`setpriority()`映射`EACCES`、其它scheduler setter映射`EPERM`；getter只从一个`SchedConfig` snapshot投影。Fair interval为一个effective tick，FIFO为zero，RR为full configured effective quantum。
+**ABI结论：** userspace structs/layout/constants由`anemone-abi::process::linux::sched`统一拥有；kernel raw copy、flags解释、ordering与semantic conversion只在`sched/api`。setter最终仍只生成既有semantic patch；permission denial是typed internal result，由`setpriority()`映射`EACCES`、其它scheduler setter映射`EPERM`；getter只从一个`SchedConfig` snapshot投影。Fair interval为一个effective tick，FIFO为zero，RR为full configured effective quantum。
 
-**验证边界：** stock LTP的`sched_setattr01`/`sched_getattr01` Deadline success和`sched_setscheduler03` BATCH/IDLE success与R0非目标冲突，已分类为expected unsupported coverage，不能作为整case completion gate。supported branches与size/zero-tail、cross-error precedence、raw affinity length和Fair interval由focused syscall tests在未来implementation plan中列gate。
+**验证边界：** stock LTP的`sched_setattr01`/`sched_getattr01` Deadline success和`sched_setscheduler03` BATCH/IDLE success与R0非目标冲突，已分类为expected unsupported coverage，不能作为整case completion gate。supported branches与size/zero-tail、cross-error precedence、raw affinity length和Fair interval已由implementation gates中的focused syscall tests覆盖；执行结果见 [Completed事务](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md)。
 
 **关闭理由：** 文档修复没有要求新增configured field、permission state、transaction owner或新的core patch维度；Keter要求的field、flag、errno、copy ordering和observable interval均已有canonical proposal与source evidence，R0 acceptance不再被该问题阻塞。
 

@@ -1,7 +1,7 @@
 # Dynamic Scheduler Attributes 不变量需求
 
 **状态：** Canonical
-**最后更新：** 2026-07-15
+**最后更新：** 2026-07-16
 **父 RFC：** [RFC-20260714-sched-dynamic-attributes](./index.md)
 **适用修订：** R1
 **事务日志：** [2026-07-15-sched-dynamic-attributes](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md)
@@ -26,7 +26,7 @@
 12. fork/clone 不继承 runtime，并完整实现 reset-on-fork contract。
 13. 全局 `Mutex<()>` remote request submission gate 保证任意时刻最多一个 published remote scheduler request 仍持有开放 receiver、其 completion 仍可能进入 wait-core placement，且不被误述为配置锁或 multi-target transaction。
 14. `Box<SchedRequest>` 是唯一transport owner，`IpiPayload`不提供包含request的通用clone能力；request仍只有一个可`take()`的body，duplicate execute不能复制mutation或completion capability。
-15. Linux UAPI layout、size negotiation、field projection、copy ordering、errno precedence 与 unsupported-feature boundary 在 `sched/api` 内闭合，不改变 core patch shape。
+15. Linux UAPI representation、layout与共享常量由`anemone-abi::process::linux::sched`统一拥有；kernel size negotiation、field projection、copy ordering、errno precedence与unsupported-feature boundary在`sched/api`内闭合，不改变core patch shape。
 
 任一条件缺失时，只能称为 draft 或 migration intermediate，不能声明动态调度属性实现闭合。
 
@@ -117,7 +117,7 @@ Fair nice update：
 
 ### Boundary representation
 
-- raw `sched_param`、`sched_attr`、policy、flag、selector、native timespec与CPU mask layout只能存在于 `sched/api`。
+- Linux userspace representation、layout与共享常量由 `anemone-abi::process::linux::sched` 统一拥有；kernel 对 raw `sched_param`、`sched_attr`、policy、flag、selector、native timespec与CPU mask的解释、copy ordering和semantic conversion只能存在于`sched/api`，raw类型不得进入config、request或class。
 - advertised `sched_attr` known size固定为56；VER0 48、VER1 56、zero future tail、short-copy zero-fill和`E2BIG` size write-back都在进入semantic patch前完成。
 - syscall-level `flags`只接受0；attr flags只接受`SCHED_FLAG_RESET_ON_FORK`。
 - unsupported policy/flag、invalid parameter和permission failure必须可区分，不能静默映射到Fair/RT或成功no-op。

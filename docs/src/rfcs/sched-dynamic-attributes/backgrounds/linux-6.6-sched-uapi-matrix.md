@@ -292,7 +292,7 @@ Stock LTP 中以下 success expectation 与 R0 非目标冲突，必须记录为
 
 该 matrix 不要求新增 configured field、permission state或 transaction owner：
 
-- raw structs、flags、size negotiation与 errno mapping都留在 `sched/api`；
+- userspace structs、layout与共享常量由`anemone-abi::process::linux::sched`统一拥有；kernel raw copy、flags解释、size negotiation、errno mapping与semantic conversion都留在`sched/api`；
 - `sched_setscheduler`、`sched_setparam`、`sched_setattr`、`setpriority` 与 affinity只生成既有 semantic patch维度；
 - permission denial保持typed internal result，由每个ABI入口映射；
 - getter从一个 `SchedConfig` snapshot投影，不读取RunQueue或class-private runtime；

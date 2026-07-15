@@ -1,14 +1,14 @@
 # RFC-20260714-sched-dynamic-attributes
 
-**状态：** Accepted for Implementation
+**状态：** Closed
 **修订：** R1
 **负责人：** doruche, Codex
-**最后更新：** 2026-07-15
+**最后更新：** 2026-07-16
 **领域：** scheduler / dynamic attributes / syscall ABI / IPI / affinity
 **事务日志：** [2026-07-15-sched-dynamic-attributes](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md)
 **开放问题：** None；已关闭问题见 [Tracking Issues](./tracking-issues.md)
 **下层问题：** [KETER-WAIT-001：synchronous remote placement 不能组合进 cross-CPU IPI completion](../sched-wait-refactor/tracking-issues.md#keter-wait-001synchronous-remote-placement-不能组合进-cross-cpu-ipi-completion)
-**下一步：** 由 [当前事务日志](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md) 记录 R1 handoff；后续 checkpoint 继续服从 [迁移实施计划](./implementation.md) 的阶段顺序、write set 与独立 review gate
+**下一步：** R1 已关闭；后续只做独立维护或 follow-up RFC。wait-core `KETER-WAIT-001` 关闭后可按本页退出条件移除临时 remote submission gate
 
 ## 摘要
 
@@ -22,7 +22,7 @@ getter 不发送 IPI。它们在 `SchedEntity` 的一致性域内获取 coherent
 
 ## 文档权威与下层合同
 
-本目录是 dynamic scheduler attributes R1 的公开 canonical source。R1 已接受进入实现；在对应 transaction 完成前，live code、已关闭的下层 RFC 与 register 继续拥有当前实现事实。本 RFC 不引用或依赖任何私有草案。
+本目录是 dynamic scheduler attributes R1 的公开 canonical source。R1 已由对应 transaction 完成并关闭，live code实现本页contract；register继续拥有未改变的allocation风险与限制事实。本 RFC 不引用或依赖任何私有草案。
 
 本 RFC R1 建立在以下当前合同上：
 
@@ -35,7 +35,7 @@ getter 不发送 IPI。它们在 `SchedEntity` 的一致性域内获取 coherent
 - `Task::cpuid()` 在 task 发布后不可改变，是 owner CPU 的唯一真相源。
 - owner-CPU noirq heap allocation 的风险由 [ANE-20260622-IRQ-OFF-HEAP-ALLOCATION](../../register/open-issues.md#ane-20260622-irq-off-heap-allocation) 跟踪；本 RFC R1 继续将其保持为 accepted limitation，不宣称 allocation-free。
 
-本 RFC 是 [Sched Fair / Stride](../sched-fair-stride/index.md)、[Sched RT Class](../sched-rt-class/index.md) 与 [Sched Latch](../sched-latch/index.md) 的 accepted follow-up：它以 owner-CPU transaction 替代现有 weak nice setter，开放已发布 task 的动态 Fair/RT policy transaction，并复用 Latch 表达 remote request completion。R1 是这些动态属性边界的当前 accepted successor contract；在 transaction 完成前，已关闭 RFC 与 live code 仍拥有当前实现事实。
+本 RFC 是 [Sched Fair / Stride](../sched-fair-stride/index.md)、[Sched RT Class](../sched-rt-class/index.md) 与 [Sched Latch](../sched-latch/index.md) 的 completed follow-up：它以 owner-CPU transaction 替代原weak nice setter，开放已发布task的动态Fair/RT policy transaction，并复用Latch表达remote request completion。R1是这些动态属性边界的当前implemented successor contract；执行证据与未运行项由Completed transaction保存。
 
 ## 目标
 
@@ -73,14 +73,14 @@ Canonical R1 contract：
 - [Tracking Issues](./tracking-issues.md)
 - [背景材料索引](./backgrounds/index.md)
 
-`tracking-issues.md` 只保留当前 RFC 自己拥有的设计问题和已经 neutralize 的 review 记录；共享 wait-core 根问题以公开 RFC tracker 为 canonical owner。Linux/LTP 的逐项证据由背景材料保存，不覆盖本页和不变量页的 proposed contract。
+`tracking-issues.md` 只保留当前 RFC 自己拥有的设计问题和已经 neutralize 的 review 记录；共享 wait-core 根问题以公开 RFC tracker 为 canonical owner。Linux/LTP 的逐项证据由背景材料保存，不覆盖本页和不变量页的canonical contract。
 
 ## 修订记录
 
 | 修订 | 日期 | 状态 | 语义变化 | Review / 事务 |
 | --- | --- | --- | --- | --- |
-| R0 | 2026-07-15 | Accepted for Implementation | 初始 accepted contract：统一 `SchedConfig` / patch、owner-CPU reconfigure、persistent-phase one-shot、remote request gate、fixed affinity 与 Linux scheduler UAPI 子集。 | [R0 事务](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md) |
-| R1 | 2026-07-15 | Accepted for Implementation | scheduler request transport 从共享 `Arc` 收窄为 single-owner `Box`；移除 `IpiPayload` 通用 clone，broadcast 仅显式复制 eligible payload，scheduler request 误用在任何发送副作用前 panic，不再伪装成可恢复 transport error。目标、owner、UAPI、gate、completion 与 exactly-once 边界不变。 | [R1 实现反馈与复审](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md) |
+| R0 | 2026-07-15 | Accepted；由R1 supersede | 初始 accepted contract：统一 `SchedConfig` / patch、owner-CPU reconfigure、persistent-phase one-shot、remote request gate、fixed affinity 与 Linux scheduler UAPI 子集。 | [R0 事务](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md) |
+| R1 | 2026-07-15 | Closed | scheduler request transport 从共享 `Arc` 收窄为 single-owner `Box`；移除 `IpiPayload` 通用 clone，broadcast 仅显式复制 eligible payload，scheduler request 误用在任何发送副作用前 panic，不再伪装成可恢复 transport error。目标、owner、UAPI、gate、completion 与 exactly-once 边界不变。 | [R1 实现、验证与最终复审](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md) |
 
 ## 子系统 owner
 
@@ -550,13 +550,13 @@ R1 继承 R0 对 IRQ-off path 现有内存分配的 accepted limitation，但不
 
 ## 接受边界
 
-R1 已按以下边界接受为 `Accepted for Implementation`：
+R1 已按以下边界完成实现并关闭：
 
 1. `index.md` 与 `invariants.md` 对 owner、配置模型、oneshot、IPI、snapshot、permission、role matrix、runtime、placement、affinity 与 fork 语义一致。
 2. [Linux 6.6 Scheduler UAPI Matrix](./backgrounds/linux-6.6-sched-uapi-matrix.md) 已补齐对应 syscall 的 flag、size、errno、copy ordering、read-back 与 testcase分类，且没有把 unsupported policy/flag 静默伪装为成功。
-3. 文档层 review 没有未关闭的 Apollyon 或 Keter；Euclid 有明确 owner、验证与回写位置。
-4. [迁移实施计划](./implementation.md) 给出阶段、write set、probe、验证 floor 与 register 回写路径；active transaction 已记录 R1 修正，后续 checkpoint 不得越过其 canonical gate。
-5. 本页保持对 Fair dynamic nice/fresh placement、RT dynamic policy 与 Latch completion 的明确 follow-up 关系；R1 是这些动态边界的当前 accepted successor，live 行为仍以 implementation checkpoint 为准。
+3. 最终独立review覆盖完整R1实现线、Stage 6 source audit、runtime分类、register边界和closure文档，没有未关闭的Apollyon、Keter或Euclid属于本RFC owner。
+4. [迁移实施计划](./implementation.md) 的全部阶段、write set、probe与验证floor已执行或明确记录Not Run；Completed transaction保存R1修正和证据。
+5. 本页保持对Fair dynamic nice/fresh placement、RT dynamic policy与Latch completion的明确follow-up关系；R1是这些动态边界的当前implemented successor，live实现与本页一致。
 
 ## 备选方案
 
@@ -620,4 +620,4 @@ R1 已按以下边界接受为 `Accepted for Implementation`：
 
 ## 当前状态
 
-R1 已接受并由当前 transaction 按 checkpoint 推进。阶段执行事实、review、验证、Not Run 项与当前 handoff 只由 [事务日志](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md) 记录；本页不维护并列进度账本。
+R1 已完成并关闭。阶段执行事实、review、验证、Not Run项与长期资产边界只由 [Completed事务日志](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md) 保存；本页不维护并列进度账本。
