@@ -30,6 +30,9 @@ If the task involves review findings or issue severity, also use `anemone-code-r
 - Public RFCs live under `docs/src/rfcs/<short-slug>/` and become canonical immediately after promotion.
 - Large feature work should close the document protocol before code implementation unless the user explicitly narrows the task differently. Closing the protocol means the accepted contract, validation floor, stop conditions, and feedback routes are explicit; it does not mean every uncertainty has been eliminated before code starts.
 - RFCs record accepted contract, scope, invariants, and planned gates. Transaction devlogs record execution facts, checkpoints, review results, validation evidence, corrections, and handoff.
+- The repository Git history owns RFC text versions; do not create per-RFC repositories, versioned canonical file copies, or default amendment documents. RFC `R0`, `R1`, ... identifies accepted semantic revisions, not every text edit. Bump it only for accepted goal, contract, invariant, owner, ABI / visible-semantics, or acceptance-boundary changes.
+- Keep `index.md` and `invariants.md` as the in-place consolidated current contract. Preserve completed-stage and issue history incrementally in `implementation.md` and `tracking-issues.md`, with explicit supersession or neutralization instead of leaving contradictory current rules.
+- RFC status describes the current revision: move an accepted revision that still needs implementation to `Accepted for Implementation`, and return it to `Closed` only after that revision closes. When a Closed RFC semantic revision needs code work, create a new transaction linked to that revision; do not reopen or indefinitely append to the previous Completed transaction. Use a follow-up RFC when the core goal, primary owner, overall solution, or most proof boundaries have changed.
 - Probe / vertical-slice gates are allowed for high-risk design points when the RFC states the hypothesis, minimum write set, validation floor, failure signal, and RFC write-back path. Probe code must not become a permanent abstraction unless the evidence is recorded and the RFC accepts the resulting contract.
 - Do not create generic `feedback.md`, `probe.md`, or `experiments.md` files by default. Probe plans belong in RFC `implementation.md`; execution feedback belongs in transaction devlog entries. Use `backgrounds/<topic>-probe-YYYYMMDD.md` only for large evidence packets, and keep it factual rather than a plan or status layer.
 - Feedback can optimize the route, not rewrite the destination. If implementation shows a goal, invariant, ABI boundary, or acceptance condition is wrong, stop the current gate and return to RFC review. Do not weaken invariants, shrink goals, lower validation floors, hide failures, rename blockers as limitations, or land hacks just to pass a gate before canonical RFC text is updated.
@@ -77,6 +80,7 @@ If the task involves review findings or issue severity, also use `anemone-code-r
    - Fold fixes into canonical RFC text: `index.md`, `invariants.md`, or `implementation.md`.
    - Keep `tracking-issues.md` as status and evidence only; do not use it as the only repair location.
    - When closing issues, preserve the reason, repair location, and transaction/devlog link when one exists.
+   - If the accepted repair changes RFC semantics, increment the RFC revision and add a concise revision-record row. Preserve the current revision for wording, evidence, or implementation-plan-only changes.
 
 6. Promote a draft to public RFC.
    - Create or update `docs/src/rfcs/<short-slug>/`.
@@ -87,6 +91,7 @@ If the task involves review findings or issue severity, also use `anemone-code-r
 
 7. Start implementation tracking.
    - When implementation begins, create `docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md`.
+   - Record the target RFC revision in the transaction. For post-close semantic revisions, create a new transaction instead of appending to the completed original transaction.
    - Link RFC `index.md` to the transaction and transaction `Canonical Plan` back to the RFC.
    - Update `docs/src/devlog/transactions/index.md`, the current biweekly devlog, and `docs/src/SUMMARY.md`.
    - Transaction entries should be append-only. Add correction notes instead of silently rewriting completed stages.

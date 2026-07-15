@@ -170,11 +170,7 @@ pub(super) fn spawn(request: SpawnRequest) {
         KThreadPlacement::Any => None,
         KThreadPlacement::OnCpu(cpu) => {
             let ncpus = ncpus();
-            assert!(
-                cpu.logical_id() < ncpus,
-                "kthread spawn: invalid {}",
-                cpu
-            );
+            assert!(cpu.logical_id() < ncpus, "kthread spawn: invalid {}", cpu);
             Some(cpu)
         },
     };

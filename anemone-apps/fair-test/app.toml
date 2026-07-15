@@ -1,4 +1,4 @@
-name = "eevdf-test"
+name = "fair-test"
 
 [build]
 workdir = "."
@@ -6,4 +6,4 @@ driver = "cargo"
 args = ["build", "--release"]
 
 [[artifacts]]
-path = "target/${TARGET_TRIPLE}/release/eevdf-test"
+path = "target/${TARGET_TRIPLE}/release/fair-test"

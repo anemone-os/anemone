@@ -1,9 +1,14 @@
 //! Priority-first realtime scheduler class shared by FIFO and RoundRobin.
 
-use crate::prelude::*;
+#[cfg(feature = "kunit")]
+use crate::sched::config::{CpuMask, SchedConfig};
+use crate::{
+    prelude::*,
+    sched::config::{RtMode, RtPriority, SchedDiscipline},
+};
 
 use super::{
-    PendingResched, PreemptDecision, ReschedCause, SchedClassKind, Scheduler, TickAction,
+    PreemptDecision, SchedClassKind, Scheduler, TickAction,
     entity::{SchedClassPrv, SchedEntity, SchedEntityMutToken},
 };
 
@@ -28,53 +33,55 @@ const fn rt_rr_full_quantum_ticks() -> u32 {
 
 const RT_RR_FULL_QUANTUM_TICKS: u32 = rt_rr_full_quantum_ticks();
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(transparent)]
-struct RtPriority(u8);
-
-impl RtPriority {
-    const MIN: Self = Self(1);
-    const MAX: Self = Self(99);
-    const WIDTH: usize = (Self::MAX.0 - Self::MIN.0 + 1) as usize;
-
-    const fn new(value: u8) -> Self {
-        assert!(
-            value >= Self::MIN.0 && value <= Self::MAX.0,
-            "RT priority is outside [1, 99]"
-        );
-        Self(value)
-    }
-
-    const fn get(self) -> u8 {
-        self.0
-    }
-
-    const fn bucket_index(self) -> usize {
-        (self.0 - Self::MIN.0) as usize
-    }
+pub(super) const fn configured_full_quantum_ticks() -> u32 {
+    RT_RR_FULL_QUANTUM_TICKS
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RtPolicy {
+enum RtRuntime {
     Fifo,
-    RoundRobin { remaining_ticks: u32 },
+    RoundRobin {
+        remaining_ticks: u32,
+        /// Committed tail-placement obligation for the active execution
+        /// segment. It never describes queued or blocked state and remains
+        /// true until a class lifecycle transaction consumes or clears it.
+        rotation_due: bool,
+    },
 }
 
-impl RtPolicy {
-    /// Construct fresh RT/FIFO policy state before task publication.
+impl RtRuntime {
+    const fn new_fresh(mode: RtMode) -> Self {
+        match mode {
+            RtMode::Fifo => Self::fifo(),
+            RtMode::RoundRobin => Self::round_robin(),
+        }
+    }
+
+    const fn mode(&self) -> RtMode {
+        match self {
+            Self::Fifo => RtMode::Fifo,
+            Self::RoundRobin { .. } => RtMode::RoundRobin,
+        }
+    }
+
+    /// Construct fresh RT/FIFO runtime before task publication.
     const fn fifo() -> Self {
         Self::Fifo
     }
 
-    /// Construct the fresh RT/RR policy state used before task publication.
+    /// Construct the fresh RT/RR runtime used before task publication.
     const fn round_robin() -> Self {
         Self::RoundRobin {
             remaining_ticks: RT_RR_FULL_QUANTUM_TICKS,
+            rotation_due: false,
         }
     }
 
     fn assert_valid(&self) {
-        if let Self::RoundRobin { remaining_ticks } = self {
+        if let Self::RoundRobin {
+            remaining_ticks, ..
+        } = self
+        {
             assert!(
                 (1..=RT_RR_FULL_QUANTUM_TICKS).contains(remaining_ticks),
                 "RT/RR remaining budget is outside the configured quantum"
@@ -84,42 +91,103 @@ impl RtPolicy {
 
     fn assert_fresh(&self) {
         self.assert_valid();
-        if let Self::RoundRobin { remaining_ticks } = self {
+        if let Self::RoundRobin {
+            remaining_ticks,
+            rotation_due,
+        } = self
+        {
             assert_eq!(
                 *remaining_ticks, RT_RR_FULL_QUANTUM_TICKS,
                 "fresh RT/RR entity must start with a full quantum"
             );
+            assert!(
+                !rotation_due,
+                "fresh RT/RR entity cannot carry a rotation obligation"
+            );
+        }
+    }
+
+    const fn rotation_due(&self) -> bool {
+        match self {
+            Self::Fifo => false,
+            Self::RoundRobin { rotation_due, .. } => *rotation_due,
+        }
+    }
+
+    fn commit_rotation(&mut self) {
+        let Self::RoundRobin { rotation_due, .. } = self else {
+            panic!("RT/FIFO cannot commit an RR rotation obligation");
+        };
+        *rotation_due = true;
+    }
+
+    fn take_rotation_due(&mut self) -> bool {
+        match self {
+            Self::Fifo => false,
+            Self::RoundRobin { rotation_due, .. } => core::mem::replace(rotation_due, false),
         }
     }
 }
 
 #[derive(Debug)]
 pub(super) struct RtEntity {
-    priority: RtPriority,
-    policy: RtPolicy,
+    runtime: RtRuntime,
 }
 
 impl RtEntity {
-    fn new_fresh(priority: RtPriority, policy: RtPolicy) -> Self {
-        policy.assert_fresh();
-        Self { priority, policy }
+    /// Construct a fresh class-private payload for a validated RT discipline.
+    ///
+    /// The owner transaction may construct this payload before detaching the
+    /// old physical membership, but publishes it only after that detach
+    /// completes.
+    pub(super) fn new_fresh(mode: RtMode) -> Self {
+        Self::from_fresh_runtime(RtRuntime::new_fresh(mode))
     }
 
-    pub(super) fn new_default() -> Self {
-        let policy = match SCHED_DEFAULT_POLICY {
-            SchedDefaultPolicy::RtRr => RtPolicy::round_robin(),
-            SchedDefaultPolicy::RtFifo => RtPolicy::fifo(),
-        };
-        Self::new_fresh(RtPriority::MIN, policy)
+    fn from_fresh_runtime(runtime: RtRuntime) -> Self {
+        runtime.assert_fresh();
+        Self { runtime }
     }
 
-    fn assert_valid(&self) {
-        assert!(
-            self.priority >= RtPriority::MIN && self.priority <= RtPriority::MAX,
-            "RT entity has an invalid priority"
+    pub(super) fn assert_matches(&self, mode: RtMode) {
+        self.runtime.assert_valid();
+        assert_eq!(
+            self.runtime.mode(),
+            mode,
+            "configured RT mode does not match private runtime shape"
         );
-        self.policy.assert_valid();
     }
+}
+
+/// Construct an explicit fresh RT payload for scheduler-class integration
+/// tests without coupling those tests to the global default-policy selector.
+#[cfg(feature = "kunit")]
+pub(super) fn new_test_entity() -> SchedEntity {
+    SchedEntity::new_task(
+        SchedConfig::new(
+            SchedDiscipline::Realtime {
+                mode: RtMode::Fifo,
+                priority: RtPriority::MIN,
+            },
+            Nice::ZERO,
+            false,
+            CpuMask::online(),
+            cur_cpu_id(),
+        ),
+        SchedClassPrv::Realtime(RtEntity::new_fresh(RtMode::Fifo)),
+    )
+}
+
+#[cfg(feature = "kunit")]
+pub(super) fn assert_test_round_robin(entity: &SchedEntity) {
+    let rt = entity.realtime();
+    assert_eq!(rt.runtime, RtRuntime::round_robin());
+}
+
+#[cfg(feature = "kunit")]
+pub(super) fn assert_test_fifo(entity: &SchedEntity) {
+    let rt = entity.realtime();
+    assert_eq!(rt.runtime, RtRuntime::fifo());
 }
 
 impl SchedEntity {
@@ -139,7 +207,7 @@ impl SchedEntity {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum QueuePlacement {
+pub(super) enum QueuePlacement {
     Front,
     Back,
 }
@@ -155,22 +223,28 @@ impl Realtime {
         }
     }
 
-    fn entity_snapshot(task: &Arc<Task>) -> (RtPriority, bool) {
+    fn entity_snapshot(task: &Arc<Task>) -> (RtMode, RtPriority, bool) {
         task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
             assert_eq!(entity.class_kind(), SchedClassKind::Realtime);
+            let SchedDiscipline::Realtime { mode, priority } =
+                entity.config_snapshot().discipline()
+            else {
+                unreachable!("RT class kind must have realtime config");
+            };
             let rt = entity.realtime();
-            rt.assert_valid();
-            (rt.priority, entity.on_runq)
+            rt.assert_matches(mode);
+            (mode, priority, entity.on_runq)
         })
     }
 
     fn priority(task: &Arc<Task>) -> RtPriority {
-        Self::entity_snapshot(task).0
+        Self::entity_snapshot(task).1
     }
 
-    fn enqueue_at(&mut self, task: Arc<Task>, placement: QueuePlacement) {
-        let (priority, on_runq) = Self::entity_snapshot(&task);
+    pub(super) fn enqueue_at(&mut self, task: Arc<Task>, placement: QueuePlacement) {
+        let (_, priority, on_runq) = Self::entity_snapshot(&task);
         assert!(!on_runq, "task is already marked on the run queue");
+        Self::assert_rotation_clear(&task);
         debug_assert!(
             self.queues
                 .iter()
@@ -196,37 +270,58 @@ impl Realtime {
         !self.queues[priority.bucket_index()].is_empty()
     }
 
-    fn has_higher_priority_task(&self, priority: RtPriority) -> bool {
-        self.queues[(priority.bucket_index() + 1)..]
-            .iter()
-            .any(|queue| !queue.is_empty())
-    }
-
-    fn preempted_placement(pending: PendingResched) -> QueuePlacement {
-        if pending.contains(ReschedCause::Tick) {
-            QueuePlacement::Back
-        } else {
-            QueuePlacement::Front
-        }
-    }
-
-    fn decide_priority_preemption(current: RtPriority, candidate: RtPriority) -> PreemptDecision {
-        if candidate > current {
-            PreemptDecision::RequestResched
-        } else {
-            PreemptDecision::KeepCurrent
-        }
-    }
-
-    fn assert_tick_source_is_rr(task: &Arc<Task>) {
+    pub(super) fn assert_rotation_clear(task: &Arc<Task>) {
         task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
+            let SchedDiscipline::Realtime { mode, .. } = entity.config_snapshot().discipline()
+            else {
+                unreachable!("RT payload requires realtime config");
+            };
             let rt = entity.realtime();
-            rt.assert_valid();
+            rt.assert_matches(mode);
             assert!(
-                matches!(rt.policy, RtPolicy::RoundRobin { .. }),
-                "only an RT/RR task may carry a Tick reschedule cause"
+                !rt.runtime.rotation_due(),
+                "queued or inactive RT task cannot carry a rotation obligation"
             );
         });
+    }
+
+    pub(super) fn clear_current_rotation(task: &Arc<Task>) {
+        task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
+            assert!(
+                !entity.on_runq,
+                "only an active RT task can clear a rotation obligation"
+            );
+            let SchedDiscipline::Realtime { mode, .. } = entity.config_snapshot().discipline()
+            else {
+                unreachable!("RT payload requires realtime config");
+            };
+            let rt = entity.realtime_mut();
+            rt.assert_matches(mode);
+            let _ = rt.runtime.take_rotation_due();
+            rt.assert_matches(mode);
+        });
+    }
+
+    fn consume_preempted_placement(task: &Arc<Task>) -> QueuePlacement {
+        task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
+            assert!(
+                !entity.on_runq,
+                "preempted RT current must not be marked on the run queue"
+            );
+            let SchedDiscipline::Realtime { mode, .. } = entity.config_snapshot().discipline()
+            else {
+                unreachable!("RT payload requires realtime config");
+            };
+            let rt = entity.realtime_mut();
+            rt.assert_matches(mode);
+            let placement = if rt.runtime.take_rotation_due() {
+                QueuePlacement::Back
+            } else {
+                QueuePlacement::Front
+            };
+            rt.assert_matches(mode);
+            placement
+        })
     }
 }
 
@@ -253,14 +348,14 @@ fn consume_rr_tick(remaining_ticks: &mut u32, full_quantum_ticks: u32) -> bool {
     }
 }
 
-impl RtPolicy {
+impl RtRuntime {
     fn consume_tick(&mut self) -> bool {
         self.assert_valid();
         let expired = match self {
             Self::Fifo => false,
-            Self::RoundRobin { remaining_ticks } => {
-                consume_rr_tick(remaining_ticks, RT_RR_FULL_QUANTUM_TICKS)
-            },
+            Self::RoundRobin {
+                remaining_ticks, ..
+            } => consume_rr_tick(remaining_ticks, RT_RR_FULL_QUANTUM_TICKS),
         };
         self.assert_valid();
         expired
@@ -279,7 +374,7 @@ impl Scheduler for Realtime {
     }
 
     fn dequeue(&mut self, task: &Arc<Task>) -> bool {
-        let (priority, on_runq) = Self::entity_snapshot(task);
+        let (_, priority, on_runq) = Self::entity_snapshot(task);
         assert!(on_runq, "dequeued RT task is not marked on the run queue");
         let expected_bucket = priority.bucket_index();
         let queue = &mut self.queues[expected_bucket];
@@ -297,56 +392,36 @@ impl Scheduler for Realtime {
     }
 
     fn requeue_yielded_current(&mut self, task: Arc<Task>, _now: Instant) {
+        Self::clear_current_rotation(&task);
         self.enqueue_at(task, QueuePlacement::Back);
     }
 
-    fn requeue_preempted_current(
-        &mut self,
-        task: Arc<Task>,
-        _now: Instant,
-        pending: PendingResched,
-    ) {
-        let priority = Self::priority(&task);
-        if pending.contains(ReschedCause::RunnableArrival) {
-            assert!(
-                self.has_higher_priority_task(priority),
-                "RunnableArrival must come from a strictly higher RT priority"
-            );
-        }
-        if pending.contains(ReschedCause::Tick) {
-            assert!(
-                self.has_peer_at(priority),
-                "RT/RR Tick rotation requires a same-priority peer"
-            );
-            // A Tick request is a coalesced scheduler-core latch, not proof
-            // that this task was switched out immediately at expiry. With
-            // deferred kernel preemption, later timer ticks can consume the
-            // newly refilled quantum before the pending request reaches this
-            // transaction. Preserve that valid remainder while rotating.
-            Self::assert_tick_source_is_rr(&task);
-        }
-
-        self.enqueue_at(task, Self::preempted_placement(pending));
+    fn requeue_preempted_current(&mut self, task: Arc<Task>, _now: Instant) {
+        let placement = Self::consume_preempted_placement(&task);
+        self.enqueue_at(task, placement);
     }
 
     fn handoff_woken_current(&mut self, task: Arc<Task>, _now: Instant) {
+        Self::clear_current_rotation(&task);
         self.enqueue_at(task, QueuePlacement::Back);
     }
 
     fn put_prev_blocked(&mut self, task: &Arc<Task>, _now: Instant) {
-        let (_, on_runq) = Self::entity_snapshot(task);
+        let (_, _, on_runq) = Self::entity_snapshot(task);
         assert!(
             !on_runq,
             "blocked RT current must not be marked on the run queue"
         );
+        Self::clear_current_rotation(task);
     }
 
     fn put_prev_exiting(&mut self, task: &Arc<Task>, _now: Instant) {
-        let (_, on_runq) = Self::entity_snapshot(task);
+        let (_, _, on_runq) = Self::entity_snapshot(task);
         assert!(
             !on_runq,
             "exiting RT current must not be marked on the run queue"
         );
+        Self::clear_current_rotation(task);
     }
 
     fn pick_next_task(&mut self) -> Option<Arc<Task>> {
@@ -363,24 +438,44 @@ impl Scheduler for Realtime {
     }
 
     fn set_next_task(&mut self, task: &Arc<Task>, _now: Instant) {
-        let (_, on_runq) = Self::entity_snapshot(task);
+        let (_, _, on_runq) = Self::entity_snapshot(task);
         assert!(!on_runq, "next RT task must not be marked on the run queue");
+        Self::assert_rotation_clear(task);
     }
 
     fn task_tick(&mut self, task: &Arc<Task>, _now: Instant) -> TickAction {
-        let (priority, expired) =
-            task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
-                assert!(
-                    !entity.on_runq,
-                    "running RT task must not be marked on the run queue during tick"
-                );
-                let rt = entity.realtime_mut();
-                rt.assert_valid();
-                let expired = rt.policy.consume_tick();
-                (rt.priority, expired)
-            });
+        let (mode, priority, _) = Self::entity_snapshot(task);
+        let has_peer = self.has_peer_at(priority);
+        let committed = task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
+            assert!(
+                !entity.on_runq,
+                "running RT task must not be marked on the run queue during tick"
+            );
+            let SchedDiscipline::Realtime {
+                mode: current_mode,
+                priority: current_priority,
+            } = entity.config_snapshot().discipline()
+            else {
+                unreachable!("RT payload requires realtime config");
+            };
+            assert_eq!(current_mode, mode, "RT mode changed during tick");
+            assert_eq!(
+                current_priority, priority,
+                "RT priority changed during tick"
+            );
+            let rt = entity.realtime_mut();
+            rt.assert_matches(mode);
+            let expired = rt.runtime.consume_tick();
+            if expired && has_peer {
+                // Commit class policy before asking scheduler core for a pick.
+                // Later queue changes cannot revoke this active-segment debt.
+                rt.runtime.commit_rotation();
+            }
+            rt.assert_matches(mode);
+            expired && has_peer
+        });
 
-        if expired && self.has_peer_at(priority) {
+        if committed {
             TickAction::RequestResched
         } else {
             TickAction::None
@@ -393,8 +488,8 @@ impl Scheduler for Realtime {
         candidate: &Arc<Task>,
         _now: Instant,
     ) -> PreemptDecision {
-        let (current_priority, current_on_runq) = Self::entity_snapshot(current);
-        let (candidate_priority, candidate_on_runq) = Self::entity_snapshot(candidate);
+        let (_, current_priority, current_on_runq) = Self::entity_snapshot(current);
+        let (_, candidate_priority, candidate_on_runq) = Self::entity_snapshot(candidate);
         assert!(
             !current_on_runq,
             "current RT task must not be marked on the run queue during arrival decision"
@@ -403,17 +498,26 @@ impl Scheduler for Realtime {
             candidate_on_runq,
             "arrival candidate must be marked on the run queue before the preempt decision"
         );
-        Self::decide_priority_preemption(current_priority, candidate_priority)
+        if candidate_priority > current_priority {
+            PreemptDecision::RequestResched
+        } else {
+            PreemptDecision::KeepCurrent
+        }
     }
 }
 
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::sched::class::SchedEntity;
+    use crate::sched::{
+        class::{RunQueue, SchedEntity},
+        config::{DisciplineChange, SchedChangePermit, SchedConfigPatch, SchedParameters},
+    };
 
-    fn fresh_task(priority: RtPriority, policy: RtPolicy) -> Arc<Task> {
+    fn fresh_task(priority: RtPriority, runtime: RtRuntime) -> Arc<Task> {
         fn unused_entry() {}
+
+        let mode = runtime.mode();
 
         let (task, guard) = unsafe {
             Task::new_kernel(
@@ -422,9 +526,16 @@ mod kunits {
                 ParameterList::empty(),
                 None,
                 None,
-                SchedEntity::new(SchedClassPrv::Realtime(RtEntity::new_fresh(
-                    priority, policy,
-                ))),
+                SchedEntity::new_task(
+                    SchedConfig::new(
+                        SchedDiscipline::Realtime { mode, priority },
+                        Nice::ZERO,
+                        false,
+                        CpuMask::online(),
+                        cur_cpu_id(),
+                    ),
+                    SchedClassPrv::Realtime(RtEntity::from_fresh_runtime(runtime)),
+                ),
                 TaskFlags::empty(),
                 Some(cur_cpu_id()),
             )
@@ -449,6 +560,45 @@ mod kunits {
         action
     }
 
+    fn runtime(task: &Arc<Task>) -> RtRuntime {
+        task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
+            entity.realtime().runtime
+        })
+    }
+
+    fn tick_after_committed_rotation(rt: &mut Realtime, current: &Arc<Task>) -> u32 {
+        let action = rt.task_tick(current, Instant::now());
+        let expected_remaining = if RT_RR_FULL_QUANTUM_TICKS == 1 {
+            assert_eq!(action, TickAction::RequestResched);
+            RT_RR_FULL_QUANTUM_TICKS
+        } else {
+            assert_eq!(action, TickAction::None);
+            RT_RR_FULL_QUANTUM_TICKS - 1
+        };
+        assert_eq!(
+            runtime(current),
+            RtRuntime::RoundRobin {
+                remaining_ticks: expected_remaining,
+                rotation_due: true,
+            }
+        );
+        expected_remaining
+    }
+
+    fn setup_committed_rotation() -> (Realtime, Arc<Task>, Arc<Task>) {
+        let priority = RtPriority::new(50);
+        let current = fresh_task(priority, RtRuntime::round_robin());
+        let peer = fresh_task(priority, RtRuntime::fifo());
+        let mut rt = Realtime::new();
+        rt.enqueue_new(peer.clone());
+        assert_eq!(
+            exhaust_quantum(&mut rt, &current),
+            TickAction::RequestResched
+        );
+        assert!(runtime(&current).rotation_due());
+        (rt, current, peer)
+    }
+
     #[kunit]
     fn test_rt_priority_bounds_order_and_bucket_mapping() {
         assert_eq!(RtPriority::MIN.get(), 1);
@@ -461,11 +611,22 @@ mod kunits {
     }
 
     #[kunit]
+    fn test_rt_entity_constructor_builds_fresh_typed_payload() {
+        let priority = RtPriority::new(50);
+        let fifo = RtEntity::new_fresh(RtMode::Fifo);
+        assert_eq!(fifo.runtime, RtRuntime::Fifo);
+
+        let rr = RtEntity::new_fresh(RtMode::RoundRobin);
+        assert_eq!(rr.runtime, RtRuntime::round_robin());
+        assert_eq!(priority.get(), 50);
+    }
+
+    #[kunit]
     fn test_highest_priority_pick_preserves_mixed_policy_fifo_order() {
-        let low = fresh_task(RtPriority::MIN, RtPolicy::fifo());
-        let first_mid = fresh_task(RtPriority::new(50), RtPolicy::fifo());
-        let second_mid = fresh_task(RtPriority::new(50), RtPolicy::round_robin());
-        let high = fresh_task(RtPriority::MAX, RtPolicy::fifo());
+        let low = fresh_task(RtPriority::MIN, RtRuntime::fifo());
+        let first_mid = fresh_task(RtPriority::new(50), RtRuntime::fifo());
+        let second_mid = fresh_task(RtPriority::new(50), RtRuntime::round_robin());
+        let high = fresh_task(RtPriority::MAX, RtRuntime::fifo());
         let mut rt = Realtime::new();
 
         rt.enqueue_new(low.clone());
@@ -482,36 +643,40 @@ mod kunits {
 
     #[kunit]
     fn test_arrival_preemption_is_strictly_higher_priority() {
-        let mid = RtPriority::new(50);
-        assert_eq!(
-            Realtime::decide_priority_preemption(mid, RtPriority::MAX),
-            PreemptDecision::RequestResched
-        );
-        assert_eq!(
-            Realtime::decide_priority_preemption(mid, mid),
-            PreemptDecision::KeepCurrent
-        );
-        assert_eq!(
-            Realtime::decide_priority_preemption(mid, RtPriority::MIN),
-            PreemptDecision::KeepCurrent
-        );
+        let current = fresh_task(RtPriority::new(50), RtRuntime::fifo());
+        let higher = fresh_task(RtPriority::MAX, RtRuntime::fifo());
+        let equal = fresh_task(RtPriority::new(50), RtRuntime::fifo());
+        let lower = fresh_task(RtPriority::MIN, RtRuntime::fifo());
+        let mut rt = Realtime::new();
+
+        for (candidate, expected) in [
+            (&higher, PreemptDecision::RequestResched),
+            (&equal, PreemptDecision::KeepCurrent),
+            (&lower, PreemptDecision::KeepCurrent),
+        ] {
+            rt.enqueue_new(candidate.clone());
+            candidate.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
+                assert!(!entity.on_runq);
+                entity.on_runq = true;
+            });
+            assert_eq!(
+                rt.decide_preempt_current(&current, candidate, Instant::now()),
+                expected
+            );
+        }
     }
 
     #[kunit]
     fn test_higher_priority_arrival_requeues_current_at_head() {
         let priority = RtPriority::new(50);
-        let current = fresh_task(priority, RtPolicy::fifo());
-        let peer = fresh_task(priority, RtPolicy::round_robin());
-        let higher = fresh_task(RtPriority::new(51), RtPolicy::fifo());
+        let current = fresh_task(priority, RtRuntime::round_robin());
+        let peer = fresh_task(priority, RtRuntime::round_robin());
+        let higher = fresh_task(RtPriority::new(51), RtRuntime::fifo());
         let mut rt = Realtime::new();
 
         rt.enqueue_woken(peer.clone());
         rt.enqueue_new(higher.clone());
-        rt.requeue_preempted_current(
-            current.clone(),
-            Instant::now(),
-            PendingResched::from_cause(ReschedCause::RunnableArrival),
-        );
+        rt.requeue_preempted_current(current.clone(), Instant::now());
 
         assert_next_is(&mut rt, &higher);
         assert_next_is(&mut rt, &current);
@@ -519,11 +684,11 @@ mod kunits {
     }
 
     #[kunit]
-    fn test_tick_and_arrival_requeue_expired_rr_at_tail() {
+    fn test_committed_rotation_requeues_rr_at_tail_before_higher_priority_pick() {
         let priority = RtPriority::new(50);
-        let current = fresh_task(priority, RtPolicy::round_robin());
-        let peer = fresh_task(priority, RtPolicy::fifo());
-        let higher = fresh_task(RtPriority::new(51), RtPolicy::fifo());
+        let current = fresh_task(priority, RtRuntime::round_robin());
+        let peer = fresh_task(priority, RtRuntime::fifo());
+        let higher = fresh_task(RtPriority::new(51), RtRuntime::fifo());
         let mut rt = Realtime::new();
 
         rt.enqueue_woken(peer.clone());
@@ -532,12 +697,9 @@ mod kunits {
             exhaust_quantum(&mut rt, &current),
             TickAction::RequestResched
         );
-        rt.requeue_preempted_current(
-            current.clone(),
-            Instant::now(),
-            PendingResched::from_cause(ReschedCause::Tick)
-                .union(PendingResched::from_cause(ReschedCause::RunnableArrival)),
-        );
+        assert!(runtime(&current).rotation_due());
+        rt.requeue_preempted_current(current.clone(), Instant::now());
+        assert!(!runtime(&current).rotation_due());
 
         assert_next_is(&mut rt, &higher);
         assert_next_is(&mut rt, &peer);
@@ -547,8 +709,8 @@ mod kunits {
     #[kunit]
     fn test_delayed_tick_requeue_preserves_new_rr_remainder() {
         let priority = RtPriority::new(50);
-        let current = fresh_task(priority, RtPolicy::round_robin());
-        let peer = fresh_task(priority, RtPolicy::fifo());
+        let current = fresh_task(priority, RtRuntime::round_robin());
+        let peer = fresh_task(priority, RtRuntime::fifo());
         let mut rt = Realtime::new();
         rt.enqueue_new(peer.clone());
 
@@ -556,44 +718,116 @@ mod kunits {
             exhaust_quantum(&mut rt, &current),
             TickAction::RequestResched
         );
-        let delayed_action = rt.task_tick(&current, Instant::now());
-        let expected_remaining = if RT_RR_FULL_QUANTUM_TICKS == 1 {
-            assert_eq!(delayed_action, TickAction::RequestResched);
-            RT_RR_FULL_QUANTUM_TICKS
-        } else {
-            assert_eq!(delayed_action, TickAction::None);
-            RT_RR_FULL_QUANTUM_TICKS - 1
-        };
+        let expected_remaining = tick_after_committed_rotation(&mut rt, &current);
 
-        rt.requeue_preempted_current(
-            current.clone(),
-            Instant::now(),
-            PendingResched::from_cause(ReschedCause::Tick),
-        );
+        assert!(runtime(&current).rotation_due());
+        rt.requeue_preempted_current(current.clone(), Instant::now());
 
         assert_next_is(&mut rt, &peer);
         assert_next_is(&mut rt, &current);
         current.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
             assert_eq!(
-                entity.realtime().policy,
-                RtPolicy::RoundRobin {
-                    remaining_ticks: expected_remaining
+                entity.realtime().runtime,
+                RtRuntime::RoundRobin {
+                    remaining_ticks: expected_remaining,
+                    rotation_due: false,
                 }
             );
         });
     }
 
     #[kunit]
+    fn test_repeated_expiry_coalesces_one_rotation_obligation() {
+        let (mut rt, current, _) = setup_committed_rotation();
+
+        assert_eq!(
+            exhaust_quantum(&mut rt, &current),
+            TickAction::RequestResched
+        );
+        assert!(runtime(&current).rotation_due());
+
+        rt.requeue_preempted_current(current.clone(), Instant::now());
+        assert!(!runtime(&current).rotation_due());
+    }
+
+    #[kunit]
+    fn test_peer_disappearance_does_not_revoke_committed_rotation() {
+        let (mut rt, current, peer) = setup_committed_rotation();
+
+        assert_next_is(&mut rt, &peer);
+        assert!(rt.pick_next_task().is_none());
+        rt.requeue_preempted_current(current.clone(), Instant::now());
+
+        assert!(!runtime(&current).rotation_due());
+        assert_next_is(&mut rt, &current);
+    }
+
+    #[kunit]
+    fn test_yield_handoff_block_and_exit_clear_rotation_obligation() {
+        let (mut yielded_rt, yielded, _) = setup_committed_rotation();
+        let yielded_remaining = tick_after_committed_rotation(&mut yielded_rt, &yielded);
+        yielded_rt.requeue_yielded_current(yielded.clone(), Instant::now());
+        assert_eq!(
+            runtime(&yielded),
+            RtRuntime::RoundRobin {
+                remaining_ticks: yielded_remaining,
+                rotation_due: false,
+            }
+        );
+
+        let (mut handoff_rt, handoff, _) = setup_committed_rotation();
+        let handoff_remaining = tick_after_committed_rotation(&mut handoff_rt, &handoff);
+        handoff_rt.handoff_woken_current(handoff.clone(), Instant::now());
+        assert_eq!(
+            runtime(&handoff),
+            RtRuntime::RoundRobin {
+                remaining_ticks: handoff_remaining,
+                rotation_due: false,
+            }
+        );
+
+        let (mut blocked_rt, blocked, _) = setup_committed_rotation();
+        let blocked_remaining = tick_after_committed_rotation(&mut blocked_rt, &blocked);
+        blocked_rt.put_prev_blocked(&blocked, Instant::now());
+        assert_eq!(
+            runtime(&blocked),
+            RtRuntime::RoundRobin {
+                remaining_ticks: blocked_remaining,
+                rotation_due: false,
+            }
+        );
+        blocked_rt.enqueue_woken(blocked.clone());
+        assert_eq!(
+            runtime(&blocked),
+            RtRuntime::RoundRobin {
+                remaining_ticks: blocked_remaining,
+                rotation_due: false,
+            }
+        );
+
+        let (mut exiting_rt, exiting, _) = setup_committed_rotation();
+        let exiting_remaining = tick_after_committed_rotation(&mut exiting_rt, &exiting);
+        exiting_rt.put_prev_exiting(&exiting, Instant::now());
+        assert_eq!(
+            runtime(&exiting),
+            RtRuntime::RoundRobin {
+                remaining_ticks: exiting_remaining,
+                rotation_due: false,
+            }
+        );
+    }
+
+    #[kunit]
     fn test_fifo_tick_does_not_rotate_with_peer() {
         let priority = RtPriority::new(50);
-        let current = fresh_task(priority, RtPolicy::fifo());
-        let peer = fresh_task(priority, RtPolicy::round_robin());
+        let current = fresh_task(priority, RtRuntime::fifo());
+        let peer = fresh_task(priority, RtRuntime::round_robin());
         let mut rt = Realtime::new();
         rt.enqueue_new(peer);
 
         assert_eq!(rt.task_tick(&current, Instant::now()), TickAction::None);
         current.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
-            assert_eq!(entity.realtime().policy, RtPolicy::Fifo);
+            assert_eq!(entity.realtime().runtime, RtRuntime::Fifo);
         });
     }
 
@@ -606,50 +840,159 @@ mod kunits {
         assert_eq!(remaining, 4);
 
         let priority = RtPriority::new(50);
-        let alone = fresh_task(priority, RtPolicy::round_robin());
+        let alone = fresh_task(priority, RtRuntime::round_robin());
         let mut rt = Realtime::new();
         assert_eq!(exhaust_quantum(&mut rt, &alone), TickAction::None);
         alone.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
             assert_eq!(
-                entity.realtime().policy,
-                RtPolicy::RoundRobin {
-                    remaining_ticks: RT_RR_FULL_QUANTUM_TICKS
+                entity.realtime().runtime,
+                RtRuntime::RoundRobin {
+                    remaining_ticks: RT_RR_FULL_QUANTUM_TICKS,
+                    rotation_due: false,
                 }
             );
         });
 
-        let with_peer = fresh_task(priority, RtPolicy::round_robin());
-        rt.enqueue_new(fresh_task(priority, RtPolicy::fifo()));
+        let with_peer = fresh_task(priority, RtRuntime::round_robin());
+        rt.enqueue_new(fresh_task(priority, RtRuntime::fifo()));
         assert_eq!(
             exhaust_quantum(&mut rt, &with_peer),
             TickAction::RequestResched
         );
+        assert!(runtime(&with_peer).rotation_due());
     }
 
     #[kunit]
-    fn test_realtime_is_the_only_class_above_idle() {
-        assert_eq!(
-            SchedClassKind::in_precedence_order(),
-            [SchedClassKind::Realtime, SchedClassKind::Idle]
-        );
-        assert!(SchedClassKind::Realtime.outranks(SchedClassKind::Idle));
-        assert!(!SchedClassKind::Idle.outranks(SchedClassKind::Realtime));
-    }
-
-    #[kunit]
-    fn test_default_constructor_uses_typed_selector_and_fresh_budget() {
-        let entity = SchedEntity::new_default();
-        assert_eq!(entity.class_kind(), SchedClassKind::Realtime);
-        let rt = entity.realtime();
-        assert_eq!(rt.priority, RtPriority::MIN);
-        match SCHED_DEFAULT_POLICY {
-            SchedDefaultPolicy::RtRr => assert_eq!(
-                rt.policy,
-                RtPolicy::RoundRobin {
-                    remaining_ticks: RT_RR_FULL_QUANTUM_TICKS
-                }
-            ),
-            SchedDefaultPolicy::RtFifo => assert_eq!(rt.policy, RtPolicy::Fifo),
+    fn test_current_generic_patch_preserves_rr_rotation_and_normal_tail_placement() {
+        let priority = RtPriority::new(50);
+        let current = fresh_task(priority, RtRuntime::round_robin());
+        let peer = fresh_task(priority, RtRuntime::round_robin());
+        let mut runq = RunQueue::new();
+        runq.enqueue_new(current.clone());
+        let current = runq.pick_next_task();
+        runq.set_next_task(&current, Instant::now());
+        runq.enqueue_new(peer.clone());
+        for _ in 0..RT_RR_FULL_QUANTUM_TICKS {
+            let _ = runq.task_tick(&current, Instant::now());
         }
+        let committed = runtime(&current);
+        assert!(committed.rotation_due());
+
+        assert_eq!(
+            runq.apply_config_patch(
+                &current,
+                SchedConfigPatch::keep(),
+                SchedChangePermit::unrestricted(),
+                CpuMask::online(),
+                true,
+            ),
+            Ok(false)
+        );
+        assert_eq!(runtime(&current), committed);
+        assert_eq!(
+            runq.apply_config_patch(
+                &current,
+                SchedConfigPatch::keep()
+                    .with_nice(Nice::MAX)
+                    .with_reset_on_fork(true),
+                SchedChangePermit::unrestricted(),
+                CpuMask::online(),
+                true,
+            ),
+            Ok(false)
+        );
+        assert_eq!(runtime(&current), committed);
+
+        runq.requeue_preempted_current(current.clone(), Instant::now());
+        assert!(Arc::ptr_eq(&runq.pick_next_task(), &peer));
+        assert!(Arc::ptr_eq(&runq.pick_next_task(), &current));
+    }
+
+    #[kunit]
+    fn test_current_rt_priority_change_preserves_budget_and_clears_rotation() {
+        let old_priority = RtPriority::new(50);
+        let new_priority = RtPriority::new(40);
+        let current = fresh_task(old_priority, RtRuntime::round_robin());
+        let old_peer = fresh_task(old_priority, RtRuntime::round_robin());
+        let new_peer = fresh_task(new_priority, RtRuntime::round_robin());
+        let mut runq = RunQueue::new();
+        runq.enqueue_new(current.clone());
+        let current = runq.pick_next_task();
+        runq.set_next_task(&current, Instant::now());
+        runq.enqueue_new(old_peer.clone());
+        runq.enqueue_new(new_peer.clone());
+        for _ in 0..RT_RR_FULL_QUANTUM_TICKS {
+            let _ = runq.task_tick(&current, Instant::now());
+        }
+        let RtRuntime::RoundRobin {
+            remaining_ticks,
+            rotation_due: true,
+        } = runtime(&current)
+        else {
+            panic!("RR current did not commit a rotation obligation");
+        };
+
+        assert_eq!(
+            runq.apply_config_patch(
+                &current,
+                SchedConfigPatch::keep().with_discipline(DisciplineChange::ReconfigureParameters(
+                    SchedParameters::Realtime {
+                        priority: new_priority,
+                    }
+                ),),
+                SchedChangePermit::unrestricted(),
+                CpuMask::online(),
+                true,
+            ),
+            Ok(true)
+        );
+        assert_eq!(
+            runtime(&current),
+            RtRuntime::RoundRobin {
+                remaining_ticks,
+                rotation_due: false,
+            }
+        );
+
+        runq.requeue_preempted_current(current.clone(), Instant::now());
+        assert!(Arc::ptr_eq(&runq.pick_next_task(), &old_peer));
+        assert!(Arc::ptr_eq(&runq.pick_next_task(), &current));
+        assert!(Arc::ptr_eq(&runq.pick_next_task(), &new_peer));
+    }
+
+    #[kunit]
+    fn test_current_rt_mode_change_installs_fresh_runtime_before_preempt_tail() {
+        let priority = RtPriority::new(50);
+        let current = fresh_task(priority, RtRuntime::round_robin());
+        let peer = fresh_task(priority, RtRuntime::fifo());
+        let mut runq = RunQueue::new();
+        runq.enqueue_new(current.clone());
+        let current = runq.pick_next_task();
+        runq.set_next_task(&current, Instant::now());
+        runq.enqueue_new(peer.clone());
+        for _ in 0..RT_RR_FULL_QUANTUM_TICKS {
+            let _ = runq.task_tick(&current, Instant::now());
+        }
+        assert!(runtime(&current).rotation_due());
+
+        assert_eq!(
+            runq.apply_config_patch(
+                &current,
+                SchedConfigPatch::keep().with_discipline(DisciplineChange::Replace(
+                    SchedDiscipline::Realtime {
+                        mode: RtMode::Fifo,
+                        priority,
+                    },
+                )),
+                SchedChangePermit::unrestricted(),
+                CpuMask::online(),
+                true,
+            ),
+            Ok(true)
+        );
+        assert_eq!(runtime(&current), RtRuntime::Fifo);
+        runq.requeue_preempted_current(current.clone(), Instant::now());
+        assert!(Arc::ptr_eq(&runq.pick_next_task(), &current));
+        assert!(Arc::ptr_eq(&runq.pick_next_task(), &peer));
     }
 }

@@ -2,7 +2,7 @@
 
 **状态：** Closed
 **负责人：** doruche, Codex
-**最后更新：** 2026-07-12
+**最后更新：** 2026-07-14
 **领域：** scheduler / wait core / kernel preempt / latch / iomux / timer / signal
 **事务日志：** [2026-07-06-sched-wait-preempt-arming](../../devlog/transactions/2026-07-06-sched-wait-preempt-arming.md)
 **开放问题：** None；未运行的 trace / fairness evidence gap 见 [Tracking Issues](./tracking-issues.md) 与事务日志。
@@ -95,8 +95,8 @@ Canonical：
 8. scheduler-private `ScheduleMode` 第一阶段只需要表达 `WaitSleep`、`Preempt`、`Runnable`、`Zombie` 这类底层状态机差异；`Zombie` mode 只服务 no-return exit entry，不是公开 caller taxonomy。该 mode 不写入 `WaitState`，不暴露给 `LatchTrigger`，不由 fs source 保存。
 9. wait identity、completion outcome、cancel、finish 和 wake placement 仍由 wait core / `TaskSchedState` 统一管理；schedule mode 是 scheduler owner 内部输入，不是第二套 wait truth。
 10. 第一阶段不引入通用机制阻止任意长 `PrePark` setup。`schedule_preempt()` deferred 只关闭 lost-wake correctness，不证明长 source scan 的调度公平性。每条 post-begin register / precheck 路径必须由字段级审计证明不会阻塞、不会嵌套 wait，且窗口短小可接受；如果 trace 或 workload 显示 deferred 长窗口造成可见饥饿，必须停止并回到 publish split / park permit 或等价更重设计。
-11. processor `PendingResched` 是面向下一次 owner-CPU 完整选择的合并 latch，不是跨 context switch 保存事件顺序的日志。一次成功完成的 `pick_next_task()` 确认此前所有 pending cause；即使最终仍选中原 task，也已经完成重新选择，必须清除旧 slot。
-12. 未发生完整 pick 的路径不得确认 pending：`DeferredPreempt` 仍由执行 destructive take 的 caller 恢复 snapshot，wait no-switch abort 保持 processor slot 原样。pick 后新产生的 cause 属于下一轮请求，不能由旧调度事务的尾部清除。
+11. processor `PendingResched` 是面向下一次 owner-CPU 完整选择的 core-only 单 bit 合并 latch，不是跨 context switch 保存事件顺序的日志。一次成功完成的 `pick_next_task()` 确认此前所有 pending request；即使最终仍选中原 task，也已经完成重新选择，必须清除旧 slot。
+12. 未发生完整 pick 的路径不得确认 pending：`DeferredPreempt` 仍由执行 destructive take 的 caller 恢复 snapshot，wait no-switch abort 保持 processor slot 原样。pick 后新产生的 request 属于下一轮，不能由旧调度事务的尾部清除。pending 不进入 `ScheduleMode`、`ScheduleDecision` 或 scheduler-class transaction。
 
 ## 非首选方向
 

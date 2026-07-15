@@ -1,10 +1,10 @@
 # Sched EEVDF-lite 不变量需求
 
 **状态：** Closed / deferred design obligations
-**最后更新：** 2026-07-12
+**最后更新：** 2026-07-14
 **父 RFC：** [RFC-20260622-sched-eevdf-lite](./index.md)
 
-本文保留 `EEVDF-lite` 若未来再次尝试成为默认 normal scheduler 时必须满足的状态所有权、公平性和 scheduler/wait 边界。当前 production default 已恢复为 RR；这些条目是未完成 EEVDF 的未来设计义务，不是当前 RR 的 production contract，也不表示现有实验实现已经闭合。monotonic minimum-`vruntime` floor 已被证据否定，R1 weighted FairClock intervention 又命中 runtime failure signal，原 Checkpoint 2C / 2D closure 不再是完成依据。若未来实现需要改变 `TaskSchedState`、`PrePark/Parked`、token-bound wait sleep、preempt-defer 或 stale-safe wake placement，必须先重新打开 RFC review，并回到 `sched-wait-preempt-arming` 边界审查，而不是在 EEVDF-lite 内局部绕过。
+本文保留 `EEVDF-lite` 若未来再次尝试成为默认 normal scheduler 时必须满足的状态所有权、公平性和 scheduler/wait 边界。EEVDF 关闭时 production default 曾恢复为 RR，随后已由 [Fair / Stride RFC](../sched-fair-stride/index.md) 切换为 Fair；这些条目是未完成 EEVDF 的未来设计义务，不是当前 production Fair 的合同，也不表示现有实验实现已经闭合。monotonic minimum-`vruntime` floor 已被证据否定，R1 weighted FairClock intervention 又命中 runtime failure signal，原 Checkpoint 2C / 2D closure 不再是完成依据。若未来实现需要改变 `TaskSchedState`、`PrePark/Parked`、token-bound wait sleep、preempt-defer 或 stale-safe wake placement，必须先重新打开 RFC review，并回到 `sched-wait-preempt-arming` 边界审查，而不是在 EEVDF-lite 内局部绕过。
 
 ## 闭合条件
 
@@ -20,10 +20,10 @@
 8. runtime accounting 对每段实际执行时间只记一次，不重复推进 `vruntime`。
 9. true block 必须在 final accounting 后保存有界 service lag，ordinary true wake 只消费一次；yield、preempt 和 `ParkPending` handoff 保持 continuous membership，不得获得 wake reward。
 10. `Nice` newtype 必须排除 `[-20, 19]` 外的内部状态；`Task::nice()` 返回唯一长期 nice truth，EEVDF entity 不得保存另一份长期 nice state。
-11. pending resched request 必须用 `PendingResched` flags 区分 tick 与 runnable arrival，不得继续用 bool 静默压扁抢占来源。
+11. pending resched request 必须是 scheduler-core-owned typed single bit，只表示一次 full pick 尚未完成；EEVDF accounting / placement outcome 不得借 core cause taxonomy 延续。
 12. scheduler class contract 必须是 method-first class-local atomic transaction surface；不得使用 `SchedEvent` / `on_event` / catch-all event bus 承载路径语义。
 13. RR 行为保持适配阶段不得改变现有 wait/wake stale-safe placement 语义。
-14. sched-split 的 `ScheduleMode` 和 processor-private `PendingResched` 不能泄漏为 scheduler class 所有的状态；class 层只在 preempted-current transaction 中按值读取 `PendingResched` flags。
+14. sched-split 的 `ScheduleMode` 和 processor-private `PendingResched` 不能泄漏到 scheduler class；preempted-current transaction 不接收 pending snapshot。
 15. bootstrap task、`kthreadd` 和普通 kthread 的第一版进展证明只要求 normal EEVDF eventual progress；不得用隐式 RR 例外、特殊优先级或单独 class 补齐该证明。
 16. deadline 续期不得吞掉 current request completion；该瞬时事实必须由 EEVDF private accounting outcome 传给当前 class transaction，不能在续期后的 entity snapshot 中反推，也不能缓存为长期 entity / processor 状态。
 17. ready queue 与 class-active current 必须互斥组成完整 competition set；pick / set-next 之间不得让 selected entity 从抽象集合中消失。
@@ -58,7 +58,7 @@
 6. ready queue、class-active current association、competition membership 事务和公平算法由 owner CPU 的 `Eevdf` class 拥有；`Processor::running_task` 仍是执行上下文 truth，两者只允许在 scheduler handoff 的受控顺序内短暂不同。
 7. task 的 effective scheduler class、class-specific payload 和 queue membership 只能由 owner CPU 的 `RunQueue` transaction 修改；远端 task 不得直接拿 `sched_entity` 锁改 class 或 EEVDF payload。
 8. scheduler-private `ScheduleMode` 只属于 core entry permission，不得由 scheduler class 保存、缓存或解释为算法状态。
-9. processor-private `PendingResched` 只属于 pending preempt request；class 可以按值读取它作为 `requeue_preempted_current()` 的 cause flags，但不得负责 restore 或驱动 processor pending state。执行 destructive `take_pending_resched()` 的 scheduler-core caller 负责在 deferred preempt 时恢复同一组 flags。
+9. processor-private `PendingResched` 只属于 pending-pick request；class 不读取它，也不得负责 restore 或驱动 processor pending state。执行 destructive `take_pending_resched()` 的 scheduler-core caller 负责在 deferred preempt 时 union restore 同一 snapshot。
 10. 用户态 scheduling ABI accounting 不是本 RFC 的行为真相源；未来 `sched_*` syscall 只能通过明确的后续 RFC 接入真实调度策略。
 
 FairClock 的 `v0/A/W/V/V_floor` 是 owner-CPU transaction 派生 snapshot，不长期存储。R1 为隔离单变量 intervention，可以临时保留 `legacy_placement_floor`；该字段是只服务旧 fresh / ordinary wake / `ParkPending` placement 的 behavioral compatibility bridge，不是 eligibility、lag、pick、yield、preempt 或诊断 truth。字段声明必须写明允许的行为消费读点和 R2 删除条件；为维持旧坐标而执行的 update 站点不得成为算法决策读点，R2 source audit 必须证明 bridge 及其旧语义已完全删除。
@@ -96,7 +96,7 @@ clone inheritance 只能在 child 发布前通过 `&mut Task` 继承 typed nice 
 必须显式区分三层语义：
 
 1. scheduler core entry permission：`ScheduleMode::{WaitSleep, Preempt, Yield, Idle, Zombie}` 或等价私有 mode。
-2. processor / scheduler core pending request：`PendingResched` flags，至少包含 `ReschedCause::{Tick, RunnableArrival}`。
+2. processor / scheduler core pending request：typed single-bit `PendingResched` snapshot。
 3. scheduler class transaction：`enqueue_new()`、`enqueue_woken()`、`requeue_yielded_current()`、`requeue_preempted_current()`、`handoff_woken_current()`、`put_prev_blocked()`、`put_prev_exiting()`、`pick_next_task()`、`set_next_task()`、`task_tick()` 和 `decide_preempt_current()` 等 method-first surface。
 
 硬性要求：
@@ -104,9 +104,9 @@ clone inheritance 只能在 child 发布前通过 `&mut Task` 继承 typed nice 
 1. `schedule_wait_sleep()` 是 token-bound explicit wait sleep；EEVDF class 不得取得 token，也不得自行判断 wait identity。
 2. `schedule_preempt(pending)` 对 `Waiting/PrePark` 的 `Deferred` 不代表一次 switch-out，不得触发 EEVDF switch-out accounting。
 3. yield entry、idle entry 和 zombie entry 只能通过对应 class transaction 或 core no-op 间接影响 EEVDF，不得把 `ScheduleMode` 作为 class API。
-4. `need_resched` 不能在 EEVDF 路径继续作为 untyped bool；tick 与 runnable-arrival request 必须合并到 `PendingResched`，而不是覆盖。
-5. `DeferredPreempt` 必须由执行 `take_pending_resched()` 的 caller 恢复同一组 `PendingResched` flags，不能把 deferred request 重新压成 generic bool。
-6. `ReschedCause::RunnableArrival` 不代表 true join placement，不得触发 current 的 lag restore；它只说明 runnable-set change 使 current 需要在 preempt tail 重新调度。
+4. producer request 必须合并到 typed `PendingResched`，但 pending 不区分 tick 与 runnable arrival，也不承担 EEVDF accounting truth。
+5. `DeferredPreempt` 必须由执行 `take_pending_resched()` 的 caller union restore 同一 `PendingResched` snapshot。
+6. runnable arrival 的 true join placement 与 preferred-entity decision 由 EEVDF owner transaction 表达，不得从 core pending snapshot 反推。
 7. `Yield`、tick preempt、runnable-arrival preempt 和 parked wake handoff 不能被合并为同一个 generic requeue transaction。
 8. `Scheduler` trait 不提供通用 `enqueue_runnable()` 默认底座；会改变 membership 的 transaction 必须由每个 class 显式实现。
 
@@ -283,7 +283,7 @@ bootstrap task、`kthreadd` 和普通 kthread 第一版直接使用 normal EEVDF
 
 ## 禁止退化项
 
-以下做法不能作为未来 EEVDF 完成条件。第 4 项不禁止当前 Closed/deferred 状态下把 RR 作为 production default；它禁止未来把“EEVDF 已完成”建立在 EEVDF 仍未接入 production 的基础上。
+以下做法不能作为未来 EEVDF 完成条件。第 4 项不否定 EEVDF 关闭时恢复 RR 或当前 Fair 作为 production default；它禁止未来把“EEVDF 已完成”建立在 EEVDF 仍未接入 production 的基础上。
 
 1. 用 benchmark 特化逻辑处理 `iozone` worker。
 2. 为了让 `iozone` 数字好看关闭 eligibility。

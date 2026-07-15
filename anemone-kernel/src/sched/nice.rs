@@ -1,6 +1,4 @@
-//! Task nice-value domain and the temporary published-task update boundary.
-
-use crate::prelude::*;
+//! Task nice-value domain.
 
 /// A valid task nice value.
 ///
@@ -45,27 +43,10 @@ impl Nice {
     }
 }
 
-/// Atomic storage that only accepts validated [`Nice`] values.
-pub(crate) struct AtomicNice(AtomicI8);
-
-impl AtomicNice {
-    pub const fn new(nice: Nice) -> Self {
-        Self(AtomicI8::new(nice.get()))
-    }
-
-    pub fn load(&self) -> Nice {
-        let value = self.0.load(Ordering::Acquire);
-        Nice::new(value as i32)
-    }
-
-    pub fn store(&self, nice: Nice) {
-        self.0.store(nice.get(), Ordering::Release);
-    }
-}
-
 #[cfg(feature = "kunit")]
 mod kunits {
-    use super::*;
+    use super::Nice;
+    use crate::prelude::*;
 
     #[kunit]
     fn test_nice_internal_constructor_and_index() {

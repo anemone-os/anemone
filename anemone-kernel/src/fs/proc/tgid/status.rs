@@ -13,6 +13,7 @@ use crate::{
         },
     },
     prelude::*,
+    sched::config::CpuMask,
     task::sig::set::SigSet,
     utils::any_opaque::NilOpaque,
 };
@@ -145,8 +146,9 @@ fn build_status_text(inode: &InodeRef) -> Result<String, SysError> {
         })
         .unwrap_or((SigSet::new(), SigSet::new()));
     let pending_count = sig_pnd.union(&shd_pnd).as_u64().count_ones();
-    let cpu_list = cpus_allowed_list();
-    let cpu_mask = cpus_allowed_mask();
+    let affinity = leader.sched_config().affinity();
+    let cpu_list = cpus_allowed_list(affinity);
+    let cpu_mask = cpus_allowed_mask(affinity);
     let kthread = is_kthread as u8;
 
     // Stage-1 placeholders:
@@ -237,7 +239,7 @@ fn build_status_text(inode: &InodeRef) -> Result<String, SysError> {
     writeln!(out, "NoNewPrivs:\t{}", leader.no_new_privs() as u8).unwrap();
     writeln!(out, "Seccomp:\t0").unwrap();
     writeln!(out, "Seccomp_filters:\t0").unwrap();
-    writeln!(out, "Cpus_allowed:\t{:016x}", cpu_mask).unwrap();
+    writeln!(out, "Cpus_allowed:\t{}", cpu_mask).unwrap();
     writeln!(out, "Cpus_allowed_list:\t{}", cpu_list).unwrap();
     writeln!(out, "Mems_allowed:\t1").unwrap();
     writeln!(out, "Mems_allowed_list:\t0").unwrap();
@@ -278,20 +280,101 @@ fn bytes_to_kb(bytes: usize) -> usize {
     bytes / 1024
 }
 
-fn cpus_allowed_mask() -> u64 {
-    let cpu_count = usize::min(ncpus(), 64);
-    if cpu_count == 64 {
-        u64::MAX
+fn cpus_allowed_mask(affinity: CpuMask) -> String {
+    let mut nibbles = vec![0u8; usize::max(16, (MAX_LOGICAL_CPUS + 3) / 4)];
+    for cpu in affinity.iter() {
+        let cpu = cpu.logical_id();
+        nibbles[cpu / 4] |= 1 << (cpu % 4);
+    }
+
+    let mut out = String::with_capacity(nibbles.len());
+    for nibble in nibbles.into_iter().rev() {
+        out.push(char::from_digit(nibble.into(), 16).unwrap());
+    }
+    out
+}
+
+fn cpus_allowed_list(affinity: CpuMask) -> String {
+    let cpus: Vec<_> = affinity.iter().map(|cpu| cpu.logical_id()).collect();
+    assert!(!cpus.is_empty(), "effective affinity must not be empty");
+    let mut out = String::new();
+    let mut start = cpus[0];
+    let mut end = start;
+    for cpu in cpus.into_iter().skip(1) {
+        if cpu == end + 1 {
+            end = cpu;
+            continue;
+        }
+        append_cpu_range(&mut out, start, end);
+        start = cpu;
+        end = cpu;
+    }
+    append_cpu_range(&mut out, start, end);
+    out
+}
+
+fn append_cpu_range(out: &mut String, start: usize, end: usize) {
+    if !out.is_empty() {
+        out.push(',');
+    }
+    if start == end {
+        write!(out, "{}", start).unwrap();
     } else {
-        (1u64 << cpu_count) - 1
+        write!(out, "{}-{}", start, end).unwrap();
     }
 }
 
-fn cpus_allowed_list() -> String {
-    let cpu_count = ncpus();
-    if cpu_count <= 1 {
-        "0".to_string()
-    } else {
-        format!("0-{}", cpu_count - 1)
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    fn mask(cpus: impl IntoIterator<Item = usize>) -> CpuMask {
+        let mut mask = CpuMask::empty();
+        for cpu in cpus {
+            mask.insert(CpuId::new(cpu));
+        }
+        mask
+    }
+
+    fn bit(text: &str, cpu: usize) -> bool {
+        let digit = text.as_bytes()[text.len() - 1 - cpu / 4];
+        let value = char::from(digit).to_digit(16).unwrap() as u8;
+        value & (1 << (cpu % 4)) != 0
+    }
+
+    #[kunit]
+    fn test_cpus_allowed_mask_formats_sparse_and_full_compile_time_domain() {
+        let width = usize::max(16, (MAX_LOGICAL_CPUS + 3) / 4);
+        let sparse = mask([0, MAX_LOGICAL_CPUS - 1]);
+        let sparse_text = cpus_allowed_mask(sparse);
+        assert_eq!(sparse_text.len(), width);
+        for cpu in 0..width * 4 {
+            assert_eq!(
+                bit(&sparse_text, cpu),
+                cpu == 0 || cpu == MAX_LOGICAL_CPUS - 1
+            );
+        }
+
+        let full = cpus_allowed_mask(CpuMask::all());
+        assert_eq!(full.len(), width);
+        for cpu in 0..width * 4 {
+            assert_eq!(bit(&full, cpu), cpu < MAX_LOGICAL_CPUS);
+        }
+    }
+
+    #[kunit]
+    fn test_cpus_allowed_list_formats_sparse_ranges_and_full_domain() {
+        assert_eq!(cpus_allowed_list(mask([0])), "0");
+        if MAX_LOGICAL_CPUS >= 4 {
+            assert_eq!(cpus_allowed_list(mask([0, 1, 3])), "0-1,3");
+        }
+        assert_eq!(
+            cpus_allowed_list(CpuMask::all()),
+            if MAX_LOGICAL_CPUS == 1 {
+                "0".into()
+            } else {
+                format!("0-{}", MAX_LOGICAL_CPUS - 1)
+            }
+        );
     }
 }

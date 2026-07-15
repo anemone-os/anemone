@@ -61,7 +61,7 @@ fn now_us() -> Result<u64, Errno> {
     let now = gettimeofday()?;
     assert!(
         now.tv_sec >= 0 && (0..1_000_000).contains(&now.tv_usec),
-        "eevdf-test: gettimeofday returned an invalid timestamp"
+        "fair-test: gettimeofday returned an invalid timestamp"
     );
     Ok(now.tv_sec as u64 * 1_000_000 + now.tv_usec as u64)
 }
@@ -109,28 +109,28 @@ fn configure_worker(kind: WorkerKind) -> Result<(), Errno> {
     assert_eq!(
         getpriority(PriorityWhich::Process, 0)?,
         nice,
-        "eevdf-test: setpriority result is not observable"
+        "fair-test: setpriority result is not observable"
     );
     Ok(())
 }
 
 fn worker(shared: &SharedRun, index: usize, kind: WorkerKind) -> ! {
-    configure_worker(kind).expect("eevdf-test: failed to configure worker priority");
-    let end_us = wait_for_start(shared).expect("eevdf-test: worker start barrier failed");
+    configure_worker(kind).expect("fair-test: failed to configure worker priority");
+    let end_us = wait_for_start(shared).expect("fair-test: worker start barrier failed");
     let mut batches = 0u64;
     let mut value = index as u64 + 1;
 
-    while now_us().expect("eevdf-test: worker gettimeofday failed") < end_us {
+    while now_us().expect("fair-test: worker gettimeofday failed") < end_us {
         match kind {
             WorkerKind::Busy | WorkerKind::Nice(_) => {
                 value = burn_batch(value);
             },
             WorkerKind::Yielding => {
                 value = burn_batch(value);
-                sched_yield().expect("eevdf-test: worker sched_yield failed");
+                sched_yield().expect("fair-test: worker sched_yield failed");
             },
             WorkerKind::Sleeper => {
-                sleep_tick().expect("eevdf-test: worker nanosleep failed");
+                sleep_tick().expect("fair-test: worker nanosleep failed");
                 value = burn_batch(value);
             },
         }
@@ -151,13 +151,13 @@ fn wait_child_exit(pid: u32) -> Result<(), Errno> {
             WaitOptions::empty(),
         ) {
             Ok(Some(waited)) => {
-                assert_eq!(waited, pid, "eevdf-test: waited pid mismatch");
+                assert_eq!(waited, pid, "fair-test: waited pid mismatch");
                 match status.read() {
                     WStatus::Exited(0) => return Ok(()),
-                    other => panic!("eevdf-test: worker {pid} exited unexpectedly: {other:?}"),
+                    other => panic!("fair-test: worker {pid} exited unexpectedly: {other:?}"),
                 }
             },
-            Ok(None) => panic!("eevdf-test: wait4 returned None without WNOHANG"),
+            Ok(None) => panic!("fair-test: wait4 returned None without WNOHANG"),
             Err(EINTR) => {},
             Err(errno) => return Err(errno),
         }
@@ -190,7 +190,7 @@ fn run_workers(kinds: &[WorkerKind]) -> Result<Vec<u64>, Errno> {
     while shared.ready.load(Ordering::Acquire) != kinds.len() {
         assert!(
             now_us()? < ready_deadline,
-            "eevdf-test: timed out waiting for workers to reach the start barrier"
+            "fair-test: timed out waiting for workers to reach the start barrier"
         );
         sched_yield()?;
     }
@@ -213,7 +213,7 @@ fn run_workers(kinds: &[WorkerKind]) -> Result<Vec<u64>, Errno> {
 }
 
 fn test_equal_progress() -> Result<(), Errno> {
-    println!("eevdf-test: CASE equal-progress start");
+    println!("fair-test: CASE equal-progress start");
     let counts = run_workers(&[
         WorkerKind::Busy,
         WorkerKind::Busy,
@@ -222,64 +222,64 @@ fn test_equal_progress() -> Result<(), Errno> {
     ])?;
     let min = *counts.iter().min().unwrap();
     let max = *counts.iter().max().unwrap();
-    assert!(min > 0, "eevdf-test: equal worker made no progress");
+    assert!(min > 0, "fair-test: equal worker made no progress");
     assert!(
         max <= min.saturating_mul(2),
-        "eevdf-test: equal worker spread exceeds 2x: {counts:?}"
+        "fair-test: equal worker spread exceeds 2x: {counts:?}"
     );
-    println!("eevdf-test: CASE equal-progress ok counts={counts:?}");
+    println!("fair-test: CASE equal-progress ok counts={counts:?}");
     Ok(())
 }
 
 fn test_nice_direction() -> Result<(), Errno> {
-    println!("eevdf-test: CASE nice-direction start");
+    println!("fair-test: CASE nice-direction start");
     let counts = run_workers(&[WorkerKind::Busy, WorkerKind::Nice(5)])?;
     let normal = counts[0];
     let nice_five = counts[1];
     assert!(normal > 0 && nice_five > 0);
     assert!(
         normal.saturating_mul(2) >= nice_five.saturating_mul(3),
-        "eevdf-test: nice 0 worker did not receive at least 1.5x nice 5 share: {counts:?}"
+        "fair-test: nice 0 worker did not receive at least 1.5x nice 5 share: {counts:?}"
     );
-    println!("eevdf-test: CASE nice-direction ok counts={counts:?}");
+    println!("fair-test: CASE nice-direction ok counts={counts:?}");
     Ok(())
 }
 
 fn test_bounded_yield() -> Result<(), Errno> {
-    println!("eevdf-test: CASE bounded-yield start");
+    println!("fair-test: CASE bounded-yield start");
     let counts = run_workers(&[WorkerKind::Yielding, WorkerKind::Busy])?;
     let yielding = counts[0];
     let peer = counts[1];
-    assert!(yielding > 0, "eevdf-test: yielding worker was starved");
+    assert!(yielding > 0, "fair-test: yielding worker was starved");
     assert!(
         peer > yielding,
-        "eevdf-test: yield did not favor the runnable peer"
+        "fair-test: yield did not favor the runnable peer"
     );
-    println!("eevdf-test: CASE bounded-yield ok counts={counts:?}");
+    println!("fair-test: CASE bounded-yield ok counts={counts:?}");
     Ok(())
 }
 
 fn test_sleep_wake_progress() -> Result<(), Errno> {
-    println!("eevdf-test: CASE sleep-wake-progress start");
+    println!("fair-test: CASE sleep-wake-progress start");
     let counts = run_workers(&[WorkerKind::Sleeper, WorkerKind::Busy])?;
     let sleeper = counts[0];
     let peer = counts[1];
     assert!(
         sleeper >= 10,
-        "eevdf-test: sleep/wake worker made insufficient progress: {counts:?}"
+        "fair-test: sleep/wake worker made insufficient progress: {counts:?}"
     );
-    assert!(peer > 0, "eevdf-test: CPU-bound wake peer was starved");
-    println!("eevdf-test: CASE sleep-wake-progress ok counts={counts:?}");
+    assert!(peer > 0, "fair-test: CPU-bound wake peer was starved");
+    println!("fair-test: CASE sleep-wake-progress ok counts={counts:?}");
     Ok(())
 }
 
 #[anemone_rs::main]
 pub fn main() -> Result<(), Errno> {
-    println!("eevdf-test: BEGIN; kernel EEVDF anomalies must remain absent");
+    println!("fair-test: BEGIN");
     test_equal_progress()?;
     test_nice_direction()?;
     test_bounded_yield()?;
     test_sleep_wake_progress()?;
-    println!("eevdf-test: END all cases passed");
+    println!("fair-test: END all cases passed");
     Ok(())
 }

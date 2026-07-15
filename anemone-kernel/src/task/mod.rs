@@ -35,7 +35,7 @@ use core::fmt::{Debug, Display};
 use crate::{
     mm::stack::KernelStack,
     prelude::*,
-    sched::{AtomicNice, Nice, class::SchedEntity},
+    sched::class::SchedEntity,
     sync::mono::MonoFlow,
     task::{
         cpu_usage::{TaskCpuUsage, ThreadGroupCpuUsage},
@@ -111,10 +111,6 @@ pub struct Task {
     /// Which cpu this task is scheduled to run on.
     cpuid: CpuId,
 
-    /// Nice is task-lifetime state; its valid domain is enforced by
-    /// [`AtomicNice`], while scheduler classes own how it affects placement
-    /// and accounting.
-    nice: AtomicNice,
     /// Scheduling context. Used for context switching.
     sched_ctx: MonoFlow<TaskContext>,
     /// Scheduling entity. Used for scheduling.
@@ -419,11 +415,12 @@ impl Task {
         cpu: Option<CpuId>,
         tid: TidHandle,
     ) -> Result<(Task, PublishGuard), SysError> {
-        let tid_value = tid.get_typed().get();
         let tgid = tgid.unwrap_or(tid.get_typed());
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
         let create_instant = Instant::now();
+        let cpuid = cpu.unwrap_or_else(|| pick_next_cpu_in(sched.config_snapshot().affinity()));
+        sched.assert_owner_cpu(cpuid);
         let task = Self {
             tid: NoIrqRwLock::new(TidRef::Owned(tid)),
             creator,
@@ -433,20 +430,7 @@ impl Task {
             name: NoIrqRwLock::new((String::from("@kernel/") + name).into_boxed_str()),
             flags: NoIrqRwLock::new(flags | TaskFlags::KERNEL),
             usp: RwLock::new(None),
-            cpuid: if let Some(cpu) = cpu {
-                cpu
-            } else {
-                let cpu = pick_next_cpu();
-                kdebugln!(
-                    "{}:{}: no cpu specified, picked cpu {}",
-                    tid_value,
-                    name,
-                    cpu
-                );
-
-                cpu
-            },
-            nice: AtomicNice::new(Nice::ZERO),
+            cpuid,
             sched_ctx: unsafe {
                 MonoFlow::new(TaskContext::from_kernel_fn(
                     VirtAddr::new(entry as u64),
@@ -497,7 +481,6 @@ impl Task {
                 flags: NoIrqRwLock::new(TaskFlags::IDLE | TaskFlags::KERNEL),
                 usp: RwLock::new(None),
                 cpuid: cur_cpu_id(),
-                nice: AtomicNice::new(Nice::ZERO),
                 sched_ctx: unsafe {
                     MonoFlow::new(TaskContext::from_kernel_fn(
                         VirtAddr::new(entry as u64),
