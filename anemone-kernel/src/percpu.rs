@@ -1,5 +1,5 @@
 /// Per Cpu data management.
-use crate::prelude::*;
+use crate::{device::cpu_count, prelude::*, utils::cacheline::CachePadded};
 use core::cell::{Cell, UnsafeCell};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,12 +165,13 @@ impl<T> PerCpu<T> {
     ///
     /// This function disables preemption during its execution, so cpu_id is
     /// stable.
-    pub unsafe fn with_remote<F, R>(&self, cpu_id: usize, f: F) -> R
+    pub unsafe fn with_remote<F, R>(&self, cpu_id: CpuId, f: F) -> R
     where
         F: FnOnce(&T) -> R,
     {
         let _preemt_guard = PreemptGuard::new();
-        assert_ne!(cpu_id, cur_cpu_id().get());
+        let current_cpu_id = cur_cpu_id();
+        assert_ne!(cpu_id, current_cpu_id);
 
         unsafe { f(self.get(PERCPU_BASES[cpu_id]).inner()) }
     }
@@ -183,21 +184,18 @@ static CORE_LOCAL: CoreLocal = CoreLocal::ZEROED;
 // management, so we put them here for better organization.
 
 /// Initialized during [bsp_init].
-static NCPUS: MonoOnce<usize> = unsafe { MonoOnce::new() };
-/// Initialized during [bsp_init].
-static BSP_CPU_ID: MonoOnce<usize> = unsafe { MonoOnce::new() };
+static BSP_CPU_ID: MonoOnce<CpuId> = unsafe { MonoOnce::new() };
 
 /// Get the number of CPUs in the system.
 pub fn ncpus() -> usize {
-    let ncpus = *NCPUS.get();
+    let ncpus = cpu_count();
     assert_ne!(ncpus, 0);
     ncpus
 }
 
 /// Get the ID of the bootstrap processor.
 pub fn bsp_cpu_id() -> CpuId {
-    let bsp_id = *BSP_CPU_ID.get();
-    CpuId::new(bsp_id)
+    *BSP_CPU_ID.get()
 }
 
 /// Located at the beginning of each CPU's per-CPU area, used to store most
@@ -219,7 +217,7 @@ pub fn bsp_cpu_id() -> CpuId {
 pub struct CoreLocal {
     /// This one does not need to be atomic since it's initialized during boot
     /// process when scheduling is not enabled yet. See [bsp_init] for details.
-    cpu_id: usize,
+    cpu_id: CpuId,
     /// Initialized after scheduling is enabled. That's why it's atomic.
     ///
     /// P.S. Actually in current implementation this can be `usize` as well, but
@@ -233,7 +231,7 @@ pub struct CoreLocal {
 
 impl CoreLocal {
     const ZEROED: Self = Self {
-        cpu_id: 0,
+        cpu_id: CpuId::new(0),
         online: AtomicBool::new(false),
         preempt_counter: PreemptCounter::ZEROED,
         in_hwirq: false,
@@ -279,8 +277,9 @@ mod primitives {
     /// the execution of this function, otherwise the passed-in `cpu_id` might
     /// accidentally become current cpu id due to a cross-cpu migration, which
     /// will cause an immediate panic.
-    pub unsafe fn with_core_local_remote<F: FnOnce(&CoreLocal) -> R, R>(cpu_id: usize, f: F) -> R {
-        assert_ne!(cpu_id, cur_cpu_id().get());
+    pub unsafe fn with_core_local_remote<F: FnOnce(&CoreLocal) -> R, R>(cpu_id: CpuId, f: F) -> R {
+        let current_cpu_id = cur_cpu_id();
+        assert_ne!(cpu_id, current_cpu_id);
         unsafe {
             let instance = CORE_LOCAL.get(PERCPU_BASES[cpu_id]);
             f(instance.inner())
@@ -299,14 +298,14 @@ mod core_local_accessors {
     /// We don't support cross-core scheduling, so the returned [CpuId] is
     /// stable.
     pub fn cur_cpu_id() -> CpuId {
-        unsafe { with_intr_disabled(|| with_core_local(|c| CpuId::new(c.cpu_id))) }
+        unsafe { with_intr_disabled(|| with_core_local(|c| c.cpu_id)) }
     }
 
     /// Check if the target CPU is online.
     ///
     /// If the target CPU is the current CPU, it is considered online always.
-    pub fn target_online(cpu_id: usize) -> bool {
-        if cpu_id == cur_cpu_id().get() {
+    pub fn target_online(cpu_id: CpuId) -> bool {
+        if cpu_id == cur_cpu_id() {
             true
         } else {
             unsafe { with_intr_disabled(|| with_core_local_remote(cpu_id, |c| c.online())) }
@@ -406,18 +405,16 @@ pub use preempt_counter::{PreemptGuard, allow_preempt};
 /// This array is used for storing percpu base addresses for all CPUs.
 ///
 /// When we want to access a not local percpu variable, we'll use this.
-static mut PERCPU_BASES: [usize; MAX_CPUS] = [0; MAX_CPUS];
+static mut PERCPU_BASES: CpuTable<usize> =
+    CpuTable::new([const { CachePadded::new(0) }; MAX_LOGICAL_CPUS]);
 
 /// Most of the time you should not call this function. This is only used for
 /// constructing a trapframe on a remote CPU.
-pub fn percpu_base(cpu_id: usize) -> usize {
-    assert!(cpu_id < ncpus());
+pub fn percpu_base(cpu_id: CpuId) -> usize {
+    let ncpus = ncpus();
+    assert!(cpu_id.logical_id() < ncpus);
     let base = unsafe { PERCPU_BASES[cpu_id] };
-    assert_ne!(
-        base, 0,
-        "percpu base for cpu {} is not initialized yet",
-        cpu_id
-    );
+    assert_ne!(base, 0, "percpu base for {} is not initialized yet", cpu_id);
     base
 }
 
@@ -435,20 +432,14 @@ mod init_routines {
     ///
     /// This function should only be called once by BSP during the early boot
     /// process.
-    pub unsafe fn bsp_init<A: FnOnce(usize) -> PhysPageNum>(
-        bsp_id: usize,
-        ncpus: usize,
-        alloc_folio: A,
-    ) {
+    pub unsafe fn bsp_init<A: FnOnce(usize) -> PhysPageNum>(bsp_id: CpuId, alloc_folio: A) {
         use link_symbols::{__epercpu, __spercpu};
+
+        let ncpus = ncpus();
 
         BSP_CPU_ID.init(|s| {
             s.write(bsp_id);
         });
-        NCPUS.init(|s| {
-            s.write(ncpus);
-        });
-
         unsafe {
             let stub_base = __spercpu as *const () as usize;
             let stub_end = __epercpu as *const () as usize;
@@ -474,7 +465,8 @@ mod init_routines {
             );
 
             let mut cur_vpn = sppn.to_hhdm();
-            for cpu_id in 0..ncpus {
+            for logical_id in 0..ncpus {
+                let cpu_id = CpuId::new(logical_id);
                 let percpu_slice = core::slice::from_raw_parts_mut(
                     cur_vpn.to_virt_addr().as_ptr_mut::<u8>(),
                     percpu_size,
@@ -502,7 +494,7 @@ mod init_routines {
         }
     }
 
-    pub unsafe fn ap_init(ap_id: usize) {
+    pub unsafe fn ap_init(ap_id: CpuId) {
         unsafe {
             let base = PERCPU_BASES[ap_id];
             CpuArch::set_percpu_base(core::ptr::with_exposed_provenance_mut(base));

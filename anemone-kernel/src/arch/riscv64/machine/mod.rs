@@ -27,7 +27,7 @@ impl dyn MachineDesc {
     }
 }
 
-static MACHINES: &[&dyn MachineDesc] = &[&qemu_virt::QemuVirt];
+static MACHINES: &[&dyn MachineDesc] = &[&qemu_virt::QemuVirt, &starfive::StarFive];
 
 /// Machine-specific initialization. This function should be called right after
 /// unflattening the device tree, and before any other initialization.
@@ -61,5 +61,6 @@ pub unsafe fn machine_init() {
 
 mod descs {
     pub mod qemu_virt;
+    pub mod starfive;
 }
 use descs::*;

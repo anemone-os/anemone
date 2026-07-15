@@ -611,6 +611,35 @@ pub struct DeviceTreeHandle {
     pub(crate) arena: NonNull<[u8]>,
 }
 
+/// A resolved DeviceTree device path and its optional device-specific options.
+///
+/// The first `:` in the input terminates the device path. The suffix is kept
+/// opaque so that only the target device binding interprets it.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedDevicePath<'tree, 'raw> {
+    node: &'tree DeviceNode,
+    options: Option<&'raw str>,
+}
+
+impl<'tree, 'raw> ResolvedDevicePath<'tree, 'raw> {
+    pub fn node(&self) -> &'tree DeviceNode {
+        self.node
+    }
+
+    pub fn options(&self) -> Option<&'raw str> {
+        self.options
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DevicePathError {
+    EmptyPath,
+    MissingAliasesNode,
+    AliasNotFound,
+    InvalidAliasTarget,
+    NodeNotFound,
+}
+
 // SAFETY: `DeviceTreeHandle` is an owning handle to an arena allocated during
 // parsing, and the public API only provides shared references to immutable tree
 // data. Besides, the unflattened tree will last for the entire lifetime of the
@@ -619,6 +648,21 @@ unsafe impl Send for DeviceTreeHandle {}
 unsafe impl Sync for DeviceTreeHandle {}
 
 impl DeviceTreeHandle {
+    fn find_node_by_full_name_from<'tree>(
+        mut current_node: &'tree DeviceNode,
+        path: &str,
+    ) -> Option<&'tree DeviceNode> {
+        for component in path.split('/') {
+            if component.is_empty() {
+                continue;
+            }
+            current_node = current_node
+                .children()
+                .find(|child| child.full_name() == component)?;
+        }
+        Some(current_node)
+    }
+
     fn device_tree(&self) -> &DeviceTree {
         let start = self.arena.as_ptr().cast::<u8>() as usize;
         let hdr_addr = align_up(start, align_of::<DeviceTree>());
@@ -672,24 +716,45 @@ impl DeviceTreeHandle {
     /// Find a node by its path, starting from the root, with each component
     /// separated by a '/'.
     pub fn find_node_by_full_name_path(&self, path: &str) -> Option<&DeviceNode> {
-        let mut current_node = self.root();
-        for component in path.split('/') {
-            if component.is_empty() {
-                continue;
-            }
-            let mut found = false;
-            for child in current_node.children() {
-                if child.full_name() == component {
-                    current_node = child;
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                return None;
-            }
+        Self::find_node_by_full_name_from(self.root(), path)
+    }
+
+    /// Resolve a DeviceTree device path, including an optional `/aliases`
+    /// prefix and opaque options following the first `:`.
+    pub fn resolve_device_path<'tree, 'raw>(
+        &'tree self,
+        raw: &'raw str,
+    ) -> Result<ResolvedDevicePath<'tree, 'raw>, DevicePathError> {
+        let (path, options) = match raw.split_once(':') {
+            Some((path, options)) => (path, Some(options)),
+            None => (raw, None),
+        };
+        if path.is_empty() {
+            return Err(DevicePathError::EmptyPath);
         }
-        Some(current_node)
+
+        let node = if path.starts_with('/') {
+            self.find_node_by_full_name_path(path)
+                .ok_or(DevicePathError::NodeNotFound)?
+        } else {
+            let (alias, relative_path) = path.split_once('/').unwrap_or((path, ""));
+            let aliases = self
+                .find_node_by_full_name_path("/aliases")
+                .ok_or(DevicePathError::MissingAliasesNode)?;
+            let alias_target = aliases
+                .property(alias)
+                .ok_or(DevicePathError::AliasNotFound)?
+                .value_as_string()
+                .filter(|target| target.starts_with('/') && !target.contains(':'))
+                .ok_or(DevicePathError::InvalidAliasTarget)?;
+            let alias_node = self
+                .find_node_by_full_name_path(alias_target)
+                .ok_or(DevicePathError::NodeNotFound)?;
+            Self::find_node_by_full_name_from(alias_node, relative_path)
+                .ok_or(DevicePathError::NodeNotFound)?
+        };
+
+        Ok(ResolvedDevicePath { node, options })
     }
 
     /// Find a node by its phandle value.

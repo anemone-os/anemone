@@ -61,6 +61,7 @@ pub struct Parameters {
     pub console_log_level: Option<u8>,
     pub kstack_shift_kb: Option<u64>,
     pub remap_shift_gb: Option<u64>,
+    pub max_logical_cpus: Option<usize>,
     pub max_ident_len_bytes: Option<usize>,
     pub max_path_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
@@ -80,6 +81,7 @@ pub struct Parameters {
     pub max_fd_per_process: Option<usize>,
     pub ramdisk_count: Option<usize>,
     pub loop_device_count: Option<usize>,
+    pub ns16550a_default_baud: Option<u32>,
     pub eevdf_base_slice_us: Option<u64>,
     pub eevdf_wake_clamp_us: Option<u64>,
     pub eevdf_yield_penalty_us: Option<u64>,
@@ -130,6 +132,8 @@ pub const CONSOLE_LOG_LEVEL: u8 = {};
 pub const KSTACK_SHIFT_KB: u64 = {};
 /// Remap region size as a power of 2 in GB
 pub const REMAP_SHIFT_GB: u64 = {};
+/// Maximum number of logical CPUs enabled by this kernel
+pub const MAX_LOGICAL_CPUS: usize = {};
 /// Maximum length of identity strings in bytes
 pub const MAX_IDENT_LEN_BYTES: usize = {};
 /// Maximum length of file names in bytes. This is always equal to 
@@ -186,6 +190,8 @@ pub const MAX_FD_PER_PROCESS: usize = {};
 pub const RAMDISK_COUNT: usize = {};
 /// Number of static loop block devices to publish at boot.
 pub const LOOP_DEVICE_COUNT: usize = {};
+/// Default NS16550A baud used when stdout-path has no device-specific options.
+pub const NS16550A_DEFAULT_BAUD: u32 = {};
 /// EEVDF-lite base slice in microseconds.
 pub const EEVDF_BASE_SLICE_US: u64 = {};
 /// EEVDF-lite wake placement clamp window in microseconds.
@@ -201,6 +207,7 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             default_or!(console_log_level),
             default_or!(kstack_shift_kb),
             default_or!(remap_shift_gb),
+            default_or!(max_logical_cpus),
             default_or!(max_ident_len_bytes),
             default_or!(max_path_len_bytes),
             default_or!(max_processes),
@@ -220,6 +227,7 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             default_or!(max_fd_per_process),
             default_or!(ramdisk_count),
             default_or!(loop_device_count),
+            default_or!(ns16550a_default_baud),
             default_or!(eevdf_base_slice_us),
             default_or!(eevdf_wake_clamp_us),
             default_or!(eevdf_yield_penalty_us),

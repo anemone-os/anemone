@@ -12,14 +12,9 @@ rootfs*.img
 sdcard*.img
 *.bak
 .venv
-rootfs-rv*
-rootfs-la*
-la-base
-rv-base
 Dockerfile_*
 rcopy.sh
-sdcard-*
-/issues
+local_docker.toml
 LOCAL.md
 .codex
 **/__pycache__

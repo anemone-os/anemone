@@ -59,9 +59,10 @@
                     "type": "integer",
                     "description": "Virtual address where the kernel is mapped during runtime."
                 },
-                "max_cpus": {
+                "max_phys_cpu_id": {
                     "type": "integer",
-                    "description": "The maximum number of CPUs supported by the platform."
+                    "minimum": 0,
+                    "description": "Inclusive upper bound of firmware-visible physical CPU IDs supported by the platform."
                 }
             },
             "required": [
@@ -69,7 +70,7 @@
                 "max_phys_ram_size",
                 "kernel_la_base",
                 "kernel_va_base",
-                "max_cpus"
+                "max_phys_cpu_id"
             ]
         },
         "rootfs": {

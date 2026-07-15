@@ -66,7 +66,7 @@ pub unsafe fn scheduler() -> ! {
     // the second invariant is not satisfied, but its fine. since we're now
     // in kernel's mapping.
 
-    knoticeln!("scheduler started");
+    kinfoln!("scheduler of {} started", cur_cpu_id());
 
     // System Invariants on entering this loop:
     // - current task is the task that right switched out.

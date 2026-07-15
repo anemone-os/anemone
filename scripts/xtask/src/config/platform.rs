@@ -72,7 +72,7 @@ pub struct Constants {
     pub max_phys_ram_size: u64,
     pub kernel_la_base: u64,
     pub kernel_va_base: u64,
-    pub max_cpus: usize,
+    pub max_phys_cpu_id: usize,
     pub frame_section_shift_mb: usize,
 }
 
@@ -93,6 +93,18 @@ pub struct Dtb {
     #[serde(rename = "type")]
     pub typ: DtbType,
     pub source: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+pub struct Uboot {
+    pub arch: String,
+    pub os_type: String,
+    pub image_type: String,
+    pub compression: String,
+    pub load_addr: u64,
+    pub entry: u64,
+    pub name: String,
+    pub filename: String,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -140,6 +152,7 @@ pub struct Config {
     pub rootfs: Option<RootFs>,
     pub qemu: Option<Qemu>,
     pub dtb: Option<Dtb>,
+    pub uboot: Option<Uboot>,
 }
 
 impl Config {
@@ -169,16 +182,18 @@ impl Config {
             r#"//! Auto-generated platform constants, do not edit manually.
 #![allow(unused)]
 
+use crate::mm::addr::{{PhysAddr, VirtAddr}};
+
 /// Physical RAM start address
-pub const PHYS_RAM_START: u64 = {:#x};
+pub const PHYS_RAM_START: PhysAddr = PhysAddr::new({:#x});
 /// Maximum physical RAM size supported by this platform
 pub const MAX_PHYS_RAM_SIZE: u64 = {:#x};
 /// Kernel load address
-pub const KERNEL_LA_BASE: u64 = {:#x};
+pub const KERNEL_LA_BASE: PhysAddr = PhysAddr::new({:#x});
 /// Kernel virtual address base
-pub const KERNEL_VA_BASE: u64 = {:#x};
-/// Maximum number of CPUs supported
-pub const MAX_CPUS: usize = {};
+pub const KERNEL_VA_BASE: VirtAddr = VirtAddr::new({:#x});
+/// Inclusive upper bound of firmware-visible physical CPU IDs
+pub const MAX_PHYS_CPU_ID: usize = {};
 /// Frame section size shift in megabytes
 pub const FRAME_SECTION_SHIFT_MB: usize = {};
 /// Root filesystem type
@@ -193,7 +208,7 @@ pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
             self.constants.max_phys_ram_size,
             self.constants.kernel_la_base,
             self.constants.kernel_va_base,
-            self.constants.max_cpus,
+            self.constants.max_phys_cpu_id,
             self.constants.frame_section_shift_mb,
             rootfs_fstype,
             rootfs_source_kind,

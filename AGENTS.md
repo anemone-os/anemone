@@ -73,6 +73,7 @@
 * **断言策略要按 correctness 区分。** 轻量、局部、表示正确性不变量的检查使用 `assert!`，不要用 `debug_assert!`。`debug_assert!` 只用于昂贵扫描、统计诊断，或 release 路径不能承受的检查。cleanup / `Drop` 路径应先退订、释放或撤销发布状态，再用断言暴露 bug，避免 panic 放大泄漏或悬挂状态。
 * **临时桥和兼容层必须带退出条件。** 为阶段迁移、LTP 兼容或 ABI 缺口引入的临时字段、fallback、双路径分发和兼容 wrapper，必须说明保留原因、行为边界和移除条件，不能让后续开发者误以为它是长期抽象。
 * **结构性拆分是设计维护，不是默认越界。** 简单小修不要为了整洁随手拆文件；但当一个文件已经混合 syscall ABI、核心状态机、设备/文件后端、测试兼容桥、锁/生命周期规则或多套 UAPI/internal 转换时，继续把新职责塞进去会固化错误 owner boundary。此时应先做模块边界判断：同一 owner 内、行为保持的目录化拆分（例如 `foo.rs` 拆成 `foo/{mod.rs, abi.rs, state.rs, ops.rs}`）是允许的结构维护；涉及 owner surface、public API、可见性策略或 shared contract 变化时，必须按 write set 扩展流程上报并记录。
+* **禁止 `String`。** 此约束仅适用于内核运行时代码：新增或修改时不得使用 `String`，需要拥有不可变字符串时使用 `Box<str>`。host-side 构建与开发工具（例如 `build.rs`、xtask 和 scripts）不受此限制，应使用与输入和所有权语义匹配的类型。内核代码如果确实需要可变字符串缓冲，必须先说明理由并取得确认。不要借此批量迁移与当前任务无关的既有代码。
 * **重要常量进入kconfig作为可配置项。**
 
 ### 模块拆分不是默认越界

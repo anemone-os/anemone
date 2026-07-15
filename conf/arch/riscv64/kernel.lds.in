@@ -1,4 +1,4 @@
-ENTRY(__nun)
+ENTRY({{KERNEL_LA_BASE}})
 OUTPUT_ARCH(riscv)
 OUTPUT_FORMAT(
     "elf64-littleriscv",

@@ -49,8 +49,9 @@ fn encode_affinity(mask: CpuMask) -> [u8; KERNEL_CPU_MASK_BYTES] {
     let mut raw = [0u8; KERNEL_CPU_MASK_BYTES];
     let mut words = [0 as CpuSetWord; KERNEL_CPU_MASK_WORDS];
     for cpu in mask.iter() {
-        words[cpu.get() / CPU_SET_WORD_BITS] |=
-            (1 as CpuSetWord) << (cpu.get() % CPU_SET_WORD_BITS);
+        let logical_id = cpu.logical_id();
+        words[logical_id / CPU_SET_WORD_BITS] |=
+            (1 as CpuSetWord) << (logical_id % CPU_SET_WORD_BITS);
     }
     for (word_index, word) in words.iter().enumerate() {
         let start = word_index * CPU_SET_WORD_BYTES;
@@ -94,9 +95,12 @@ mod kunits {
 
     #[kunit]
     fn test_affinity_native_word_encoding() {
-        let affinity = mask(&[0, 1, MAX_CPUS - 1]);
+        let affinity = mask(&[0, 1, MAX_LOGICAL_CPUS - 1]);
         let raw = encode_affinity(affinity);
         assert_eq!(raw[0] & 0b11, 0b11);
-        assert_ne!(raw[(MAX_CPUS - 1) / 8] & (1 << ((MAX_CPUS - 1) % 8)), 0);
+        assert_ne!(
+            raw[(MAX_LOGICAL_CPUS - 1) / 8] & (1 << ((MAX_LOGICAL_CPUS - 1) % 8)),
+            0
+        );
     }
 }

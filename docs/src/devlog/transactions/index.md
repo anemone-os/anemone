@@ -24,6 +24,7 @@
 ## Completed
 
 - [Sched Dynamic Attributes](./2026-07-15-sched-dynamic-attributes.md)
+- [CPU Logical / Physical ID](./2026-07-14-cpu-logical-physical-id.md)：物理 ID 上界/逻辑 CPU 容量拆分、无锁 registry 和内建 cache padding 的 typed table 已完成；VisionFive 2 由用户复验通过，最终 table 布局与 LoongArch correction build 未由 agent 运行。
 - [Sched RT Class R1](./2026-07-14-sched-rt-class-r1.md)
 - [Sched Fair / Stride](./2026-07-13-sched-fair-stride.md)
 - [Sched RT Class R0](./2026-07-12-sched-rt-class.md)

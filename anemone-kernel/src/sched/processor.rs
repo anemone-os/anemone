@@ -443,7 +443,7 @@ pub(crate) fn pick_next_cpu_in(affinity: CpuMask) -> CpuId {
     let start = NEXT_CPU.fetch_add(1, Ordering::Relaxed) % cpu_count;
     for offset in 0..cpu_count {
         let cpu = CpuId::new((start + offset) % cpu_count);
-        if affinity.contains(cpu) && target_online(cpu.get()) {
+        if affinity.contains(cpu) && target_online(cpu) {
             return cpu;
         }
     }
@@ -459,11 +459,8 @@ pub(crate) fn pick_next_cpu_in(affinity: CpuMask) -> CpuId {
 /// use [wake_enqueue].
 pub fn remote_enqueue_new_task(task: Arc<Task>) {
     assert!(task.is_sched_runnable());
-    send_ipi(
-        task.cpuid().get(),
-        IpiPayload::EnqueueNewTask { tid: task.tid() },
-    )
-    .expect("failed to enqueue task to another cpu");
+    send_ipi(task.cpuid(), IpiPayload::EnqueueNewTask { tid: task.tid() })
+        .expect("failed to enqueue task to another cpu");
 }
 
 pub fn remote_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
@@ -479,11 +476,9 @@ pub fn remote_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResul
     }
 
     let tid = task.tid();
-    let placement = send_ipi_wait_result(
-        task.cpuid().get(),
-        IpiPayload::WakeUpTaskStaleSafe { tid, park },
-    )
-    .expect("failed to enqueue task to another cpu");
+    let placement =
+        send_ipi_wait_result(task.cpuid(), IpiPayload::WakeUpTaskStaleSafe { tid, park })
+            .expect("failed to enqueue task to another cpu");
 
     kdebugln!(
         "wake_enqueue: task={} remote placement requested park={:?}",
@@ -577,6 +572,6 @@ mod kunits {
         let selected = pick_next_cpu_in(affinity);
         assert_eq!(selected, cur_cpu_id());
         assert!(affinity.contains(selected));
-        assert!(target_online(selected.get()));
+        assert!(target_online(selected));
     }
 }

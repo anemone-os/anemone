@@ -16,7 +16,10 @@ use crate::{
             },
             platform::{self, PlatformDriver},
         },
-        discovery::{fwnode::FwNode, open_firmware::of_with_node_by_phandle},
+        discovery::{
+            fwnode::FwNode,
+            open_firmware::{get_of_node, of_with_node_by_phandle},
+        },
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
         resource::Resource,
     },

@@ -72,7 +72,7 @@ pub(in crate::sched) fn submit_config_patch(
     let (sender, receiver) = oneshot::channel();
     let request = SchedRequest::new(target.clone(), patch, permit, sender);
     let request_addr = request.as_ref() as *const SchedRequest as usize;
-    let result = match send_ipi_async(target.cpuid().get(), IpiPayload::SchedulerRequest(request)) {
+    let result = match send_ipi_async(target.cpuid(), IpiPayload::SchedulerRequest(request)) {
         Err(error) => {
             kdebugln!(
                 "remote scheduler request: transport failure request={:#x} target={} owner={} error={:?}",

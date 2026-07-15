@@ -32,8 +32,8 @@ impl IntrArchTrait for LA64IntrArch {
     }
 
     /// Send an inter-processor interrupt to the target CPU.
-    fn send_ipi(cpu_id: usize) {
-        send_ipi_single(cpu_id, 1);
+    fn send_ipi(cpu_id: PhysCpuId) {
+        send_ipi_single(cpu_id.get(), 1);
     }
 
     /// Claim a pending IPI by clearing the platform IOCSR state.

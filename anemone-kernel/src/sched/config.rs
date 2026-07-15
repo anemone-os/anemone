@@ -49,19 +49,19 @@ pub(crate) enum SchedDiscipline {
 /// later checkpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CpuMask {
-    cpus: [bool; MAX_CPUS],
+    cpus: [bool; MAX_LOGICAL_CPUS],
 }
 
 impl CpuMask {
     pub(crate) const fn empty() -> Self {
         Self {
-            cpus: [false; MAX_CPUS],
+            cpus: [false; MAX_LOGICAL_CPUS],
         }
     }
 
     pub(crate) const fn all() -> Self {
         Self {
-            cpus: [true; MAX_CPUS],
+            cpus: [true; MAX_LOGICAL_CPUS],
         }
     }
 
@@ -73,13 +73,14 @@ impl CpuMask {
     pub(crate) fn online() -> Self {
         let cpu_count = ncpus();
         assert!(
-            cpu_count <= MAX_CPUS,
+            cpu_count <= MAX_LOGICAL_CPUS,
             "runtime CPU count exceeds the compile-time CPU domain"
         );
         let mut mask = Self::empty();
         for cpu in 0..cpu_count {
-            if target_online(cpu) {
-                mask.insert(CpuId::new(cpu));
+            let cpu_id = CpuId::new(cpu);
+            if target_online(cpu_id) {
+                mask.insert(cpu_id);
             }
         }
         assert!(!mask.is_empty(), "online CPU mask must not be empty");
@@ -87,14 +88,20 @@ impl CpuMask {
     }
 
     pub(crate) fn insert(&mut self, cpu: CpuId) {
-        let index = cpu.get();
-        assert!(index < MAX_CPUS, "CPU is outside the compile-time domain");
+        let index = cpu.logical_id();
+        assert!(
+            index < MAX_LOGICAL_CPUS,
+            "CPU is outside the compile-time domain"
+        );
         self.cpus[index] = true;
     }
 
     pub(crate) fn contains(&self, cpu: CpuId) -> bool {
-        let index = cpu.get();
-        assert!(index < MAX_CPUS, "CPU is outside the compile-time domain");
+        let index = cpu.logical_id();
+        assert!(
+            index < MAX_LOGICAL_CPUS,
+            "CPU is outside the compile-time domain"
+        );
         self.cpus[index]
     }
 
@@ -103,7 +110,7 @@ impl CpuMask {
     }
 
     pub(crate) fn intersection(self, other: Self) -> Self {
-        let mut cpus = [false; MAX_CPUS];
+        let mut cpus = [false; MAX_LOGICAL_CPUS];
         for (index, present) in cpus.iter_mut().enumerate() {
             *present = self.cpus[index] && other.cpus[index];
         }
@@ -568,7 +575,7 @@ mod kunits {
             mask(&[2]).normalize_online(online, owner),
             Err(SchedError::InvalidAffinity)
         );
-        assert!(CpuMask::all().contains(CpuId::new(MAX_CPUS - 1)));
+        assert!(CpuMask::all().contains(CpuId::new(MAX_LOGICAL_CPUS - 1)));
     }
 
     #[kunit]

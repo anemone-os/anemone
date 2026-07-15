@@ -107,7 +107,7 @@ fn decode_affinity(raw: &[u8]) -> CpuMask {
         let word = CpuSetWord::from_ne_bytes(word_bytes);
         for bit in 0..CPU_SET_WORD_BITS {
             let cpu = word_index * CPU_SET_WORD_BITS + bit;
-            if cpu < MAX_CPUS && word & ((1 as CpuSetWord) << bit) != 0 {
+            if cpu < MAX_LOGICAL_CPUS && word & ((1 as CpuSetWord) << bit) != 0 {
                 mask.insert(CpuId::new(cpu));
             }
         }
@@ -163,8 +163,8 @@ mod kunits {
 
         let mut exact = [0u8; KERNEL_CPU_MASK_BYTES];
         exact[0] = 1;
-        exact[(MAX_CPUS - 1) / 8] |= 1 << ((MAX_CPUS - 1) % 8);
-        assert_eq!(decode_affinity(&exact), mask(&[0, MAX_CPUS - 1]));
+        exact[(MAX_LOGICAL_CPUS - 1) / 8] |= 1 << ((MAX_LOGICAL_CPUS - 1) % 8);
+        assert_eq!(decode_affinity(&exact), mask(&[0, MAX_LOGICAL_CPUS - 1]));
 
         let mut long = vec![0u8; KERNEL_CPU_MASK_BYTES + CPU_SET_WORD_BYTES];
         long[0] = 1;
@@ -176,7 +176,7 @@ mod kunits {
     fn test_affinity_online_normalization() {
         let owner = CpuId::new(0);
         let online = mask(&[0, 1]);
-        let requested = mask(&[0, 1, MAX_CPUS - 1]);
+        let requested = mask(&[0, 1, MAX_LOGICAL_CPUS - 1]);
         assert_eq!(requested.normalize_online(online, owner), Ok(online));
         assert_eq!(
             mask(&[1]).normalize_online(online, owner),

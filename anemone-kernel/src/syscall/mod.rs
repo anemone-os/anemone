@@ -59,7 +59,7 @@ pub fn register_syscall_handlers() {
                     );
                 }
 
-                knoticeln!(
+                kdebugln!(
                     "registering syscall handler {} for syscall number {}",
                     handler.name,
                     handler.sysno

@@ -57,6 +57,7 @@ struct SharedStress {
     start: AtomicBool,
     stress_ready: AtomicUsize,
     stress_start: AtomicBool,
+    stress_done: AtomicUsize,
     pids: [AtomicUsize; MAX_WORKERS],
     cpus: [AtomicUsize; MAX_WORKERS],
     target_pids: [AtomicUsize; MAX_WORKERS],
@@ -85,6 +86,7 @@ impl SharedStress {
             start: AtomicBool::new(false),
             stress_ready: AtomicUsize::new(0),
             stress_start: AtomicBool::new(false),
+            stress_done: AtomicUsize::new(0),
             pids: [
                 AtomicUsize::new(0),
                 AtomicUsize::new(0),
@@ -1395,6 +1397,15 @@ fn stress_worker(shared: &SharedStress, index: usize) -> ! {
             "sched-attr-test: remote affinity read-back mismatch"
         );
     }
+    // Keep both mutual targets registered until every final read-back has
+    // completed; otherwise the faster worker can exit and turn the peer's
+    // last getter into an unrelated ESRCH lifetime race.
+    shared.stress_done.fetch_add(1, Ordering::AcqRel);
+    wait_until(
+        || shared.stress_done.load(Ordering::Acquire) == 2,
+        "mutual remote stress completion",
+    )
+    .expect("sched-attr-test: stress completion wait failed");
     exit(0)
 }
 

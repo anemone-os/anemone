@@ -169,11 +169,8 @@ pub(super) fn spawn(request: SpawnRequest) {
     let cpu = match placement {
         KThreadPlacement::Any => None,
         KThreadPlacement::OnCpu(cpu) => {
-            assert!(
-                cpu.get() < ncpus(),
-                "kthread spawn: invalid cpu id {}",
-                cpu.get()
-            );
+            let ncpus = ncpus();
+            assert!(cpu.logical_id() < ncpus, "kthread spawn: invalid {}", cpu);
             Some(cpu)
         },
     };

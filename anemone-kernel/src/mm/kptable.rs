@@ -51,7 +51,8 @@ impl KPTable {
                     );
                     let npages = evpn - svpn;
 
-                    let pstart = vstart - KERNEL_VA_BASE as usize + KERNEL_LA_BASE as usize;
+                    let pstart =
+                        vstart - KERNEL_VA_BASE.get() as usize + KERNEL_LA_BASE.get() as usize;
                     let sppn = PhysPageNum::new((align_down_power_of_2!(
                         pstart as u64,
                         PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES) as u64

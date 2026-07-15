@@ -20,7 +20,7 @@ impl CpuSync {
     pub unsafe fn sync_with_counter(&self) {
         let ncpus = ncpus();
         if self.inner.fetch_add(1, Ordering::SeqCst) + 1 == ncpus {
-            knoticeln!("Counter '{}' synchronized", self.name);
+            kdebugln!("Counter '{}' synchronized", self.name);
         }
 
         while self.inner.load(Ordering::SeqCst) < ncpus {

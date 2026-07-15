@@ -6,7 +6,7 @@ members = ["anemone-kernel", "anemone-kernel/crates/*"]
 exclude = ["scripts/xtask", "anemone-apps", "anemone-rs", "anemone-abi"]
 
 [workspace.dependencies]
-sbi-rt = { version = "0.0.3" }
+sbi-rt = { version = "0.0.3", features = ["legacy"] }
 loongArch64 = { version = "0.2.5" }
 yansi = { version = "1.0.1", default-features = false }
 riscv = { version = "0.16.0" }
@@ -23,7 +23,6 @@ paste = { version = "1.0.15" }
 #     "alloc",
 #     "nightly",
 # ] }
-boxcar = { version = "0.2.14" }
 rangemap = { version = "1.7.1" }
 intrusive-collections = { version = "0.10", default-features = false, features = [
     "nightly",

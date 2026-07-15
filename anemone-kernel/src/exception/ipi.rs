@@ -91,20 +91,20 @@ fn wait_ipi_accomplished(msg: &Arc<IpiMsg>) -> Option<WakeEnqueueResult> {
 }
 
 #[inline(always)]
-fn enqueue_ipi(cpu_id: usize, msg: Arc<IpiMsg>) {
+fn enqueue_ipi(cpu_id: CpuId, msg: Arc<IpiMsg>) {
     unsafe {
         IPI_QUEUE.with_remote(cpu_id, move |queue| {
             let mut queue = queue.lock_irqsave();
             queue.push_back(msg);
         })
     }
-    IntrArch::send_ipi(cpu_id);
+    IntrArch::send_ipi(cpu_id.physical_id());
 }
 
 /// Send an IPI to the target CPU, synchronously waiting for the IPI to be
 /// handled before returning.
-pub fn send_ipi(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
-    if cpu_id == cur_cpu_id().get() {
+pub fn send_ipi(cpu_id: CpuId, payload: IpiPayload) -> Result<(), IpiError> {
+    if cpu_id == cur_cpu_id() {
         panic!("cannot send ipi to self");
     }
     if !target_online(cpu_id) {
@@ -119,10 +119,10 @@ pub fn send_ipi(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
 }
 
 pub fn send_ipi_wait_result(
-    cpu_id: usize,
+    cpu_id: CpuId,
     payload: IpiPayload,
 ) -> Result<WakeEnqueueResult, IpiError> {
-    if cpu_id == cur_cpu_id().get() {
+    if cpu_id == cur_cpu_id() {
         panic!("cannot send ipi to self");
     }
     if !target_online(cpu_id) {
@@ -141,15 +141,17 @@ pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
         !matches!(&payload, IpiPayload::SchedulerRequest(_)),
         "scheduler request cannot be broadcast"
     );
-    let cur_cpuid = cur_cpu_id().get();
+    let cur_cpuid = cur_cpu_id();
     let ncpus = ncpus();
-    for id in 0..ncpus {
+    for logical_id in 0..ncpus {
+        let id = CpuId::new(logical_id);
         if !target_online(id) {
             return Err(IpiError::TargetOffline);
         }
     }
     let mut pending = LinkedList::new();
-    for id in 0..ncpus {
+    for logical_id in 0..ncpus {
+        let id = CpuId::new(logical_id);
         if id != cur_cpuid {
             let msg = alloc_ipi_msg(payload.copy_for_broadcast())?;
             pending.push_back(Arc::clone(&msg));
@@ -170,8 +172,8 @@ pub enum IpiError {
 }
 
 /// Send an IPI to the target CPU asynchronously.
-pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError> {
-    if cpu_id == cur_cpu_id().get() {
+pub fn send_ipi_async(cpu_id: CpuId, payload: IpiPayload) -> Result<(), IpiError> {
+    if cpu_id == cur_cpu_id() {
         panic!("cannot send ipi to self");
     }
 
@@ -189,16 +191,18 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
         !matches!(&payload, IpiPayload::SchedulerRequest(_)),
         "scheduler request cannot be broadcast"
     );
-    let cur_cpuid = cur_cpu_id().get();
+    let cur_cpuid = cur_cpu_id();
     let ncpus = ncpus();
-    for id in 0..ncpus {
+    for logical_id in 0..ncpus {
+        let id = CpuId::new(logical_id);
         if id != cur_cpuid && !target_online(id) {
             return Err(IpiError::TargetOffline);
         }
     }
 
     let mut pending = LinkedList::new();
-    for id in 0..ncpus {
+    for logical_id in 0..ncpus {
+        let id = CpuId::new(logical_id);
         if id != cur_cpuid {
             pending.push_back((id, alloc_ipi_msg(payload.copy_for_broadcast())?));
         }

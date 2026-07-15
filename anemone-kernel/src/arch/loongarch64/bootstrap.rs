@@ -19,24 +19,42 @@ use crate::{
     arch::{
         clear_bss,
         loongarch64::{
+            cpu::early_scan_cpu_count,
             exception::install_ktrap_handler,
             mm::{BOOT_DMW0_DM, BOOTSTRAP_PTABLE, PWCH, PWCL, refill::__tlb_rfill},
         },
     },
-    device::discovery::open_firmware::{
-        EarlyMemoryScanner, early_scan_clock_freq, early_scan_cpu_count,
-    },
+    device::discovery::open_firmware::{EarlyMemoryScanner, early_scan_clock_freq},
     mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
     sched::class::SchedEntity,
     sync::counter::CpuSync,
+    utils::cacheline::CachePadded,
 };
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bss.stack0")]
 /// Per-CPU bootstrap stacks used before the regular per-CPU stack remap is in
 /// place.
-static mut STACK0: [RawKernelStack; MAX_CPUS] = [RawKernelStack::ZEROED; MAX_CPUS];
+/// Unlike other per-CPU stacks, this one is indexed by [PhysCpuId], so that it can be used before the CPU topology is fully initialized.
+static mut STACK0: PhysCpuTable<RawKernelStack> =
+    PhysCpuTable::new(
+        [const { CachePadded::new(RawKernelStack::ZEROED) }; MAX_PHYS_CPU_ID + 1],
+    );
+
+// Entry assembly uses the raw KSTACK_SIZE as its slot stride. Keep both
+// assertions so future stack or cache alignment changes cannot add padding
+// and silently change the STACK0 layout seen by assembly.
+static_assert!(
+    core::mem::size_of::<RawKernelStack>()
+        == (1 << KSTACK_SHIFT_KB) as usize * 1024,
+    "RawKernelStack size must match the bootstrap assembly stride"
+);
+static_assert!(
+    core::mem::size_of::<CachePadded<RawKernelStack>>()
+        == core::mem::size_of::<RawKernelStack>(),
+    "cache padding must not change the bootstrap stack stride"
+);
 
 /// Temporary I/O space base address used during early boot before the full
 /// memory manager is online.
@@ -170,10 +188,13 @@ extern "C" fn rusty_nun(hart_id: usize) -> ! {
 
         if !BSP_ARRIVED {
             BSP_ARRIVED = true;
-            bsp_setup(hart_id, VirtAddr::new(DTB_BYTES.as_ptr() as u64))
+            bsp_setup(
+                PhysCpuId::new(hart_id),
+                VirtAddr::new(DTB_BYTES.as_ptr() as u64),
+            )
         } else {
             // ap
-            ap_setup(hart_id)
+            ap_setup(PhysCpuId::new(hart_id))
         }
     }
 }
@@ -223,7 +244,7 @@ pub fn register_debugcon() {
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("registering init task");
 
-unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
+unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
     unsafe {
         clear_bss();
     }
@@ -235,8 +256,18 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
 
     unsafe {
         // needed by percpu initialization.
-        let ncpus = early_scan_cpu_count(fdt_va);
-        kinfoln!("anemone kernel booting on bsp #{}", bsp_id);
+        early_scan_cpu_count(fdt_va, bsp_physical_id);
+        let bsp_id = CpuId::from_physical_id(bsp_physical_id).unwrap_or_else(|| {
+            panic!(
+                "bootstrap {} was not registered",
+                bsp_physical_id
+            )
+        });
+        kinfoln!(
+            "anemone kernel booting on {} ({})",
+            bsp_id,
+            bsp_physical_id
+        );
 
         // needed by timer initialization.
         if let Some(freq_hz) = early_scan_clock_freq(fdt_va) {
@@ -247,12 +278,12 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
 
         let mut scanner = EarlyMemoryScanner::new(fdt_va);
 
-        percpu::bsp_init(bsp_id, ncpus, |npages| {
+        percpu::bsp_init(bsp_id, |npages| {
             scanner.early_alloc_folio(npages as u64)
         });
         kinfoln!("percpu data initialized");
 
-        wake_up_aps(bsp_id, ncpus);
+        wake_up_aps(bsp_id);
 
         scanner.commit_to_pmm();
         mm::frame::memmap_init(|npages| {
@@ -265,7 +296,7 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
         kinfoln!("physical memory management initialized");
 
         mm::kptable::init_kernel_mapping();
-        kinfoln!("kernel mapping initialized");
+        kdebugln!("kernel mapping initialized");
         mm::kptable::activate_kernel_mapping();
         kinfoln!("kernel mapping activated");
 
@@ -274,12 +305,12 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
         remap_boot_stack();
         BOOT_SYNC_COUNTER.sync_with_counter();
 
-        knoticeln!("stage 1 bootstrap finished, switching to stage 2...");
+        kinfoln!("stage 1 bootstrap finished, switching to stage 2...");
         set_boot_mono(true);
         let (bsp_kinit, guard) = Task::new_kernel_with_tid_handle(
             "bsp-kinit",
             bsp_kinit as *const (),
-            ParameterList::new(&[bsp_id as u64, fdt_va.get()]),
+            ParameterList::new(&[bsp_id.logical_id() as u64, fdt_va.get()]),
             None,
             Some(Tid::INIT),
             SchedEntity::new_default(),
@@ -300,10 +331,17 @@ unsafe fn bsp_setup(bsp_id: usize, fdt_va: VirtAddr) -> ! {
 /// Synchronization point that keeps all CPUs aligned during bootstrap.
 static BOOT_SYNC_COUNTER: CpuSync = CpuSync::new("boot");
 
-unsafe fn ap_setup(ap_id: usize) -> ! {
+unsafe fn ap_setup(ap_physical_id: PhysCpuId) -> ! {
     unsafe {
+        let ap_id = CpuId::from_physical_id(ap_physical_id).unwrap_or_else(|| {
+            panic!("unregistered {} started", ap_physical_id)
+        });
         BOOT_SYNC_COUNTER.sync_with_counter();
-        kdebugln!("anemone kernel booting on ap #{}", ap_id);
+        kdebugln!(
+            "anemone kernel booting on {} ({})",
+            ap_id,
+            ap_physical_id
+        );
         install_ktrap_handler();
         percpu::ap_init(ap_id);
         mm::kptable::activate_kernel_mapping();
@@ -314,7 +352,7 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
         let (ap_kinit, guard) = Task::new_kernel(
             "ap-kinit",
             ap_kinit as *const (),
-            ParameterList::new(&[ap_id as u64]),
+            ParameterList::new(&[ap_id.logical_id() as u64]),
             None,
             Some(Tid::INIT),
             SchedEntity::new_default(),
@@ -333,26 +371,31 @@ unsafe fn ap_setup(ap_id: usize) -> ! {
 
 /// Send the bootstrap entry address to every secondary CPU and trigger its
 /// IPI.
-pub fn wake_up_aps(bsp_id: usize, ncpus: usize) {
+pub fn wake_up_aps(bsp_id: CpuId) {
     unsafe {
-        let cur_cpu = bsp_id;
         let st_addr = VirtAddr::new(__nun as *const () as u64)
             .kvirt_to_phys()
             .get();
-        for cpu in 0..ncpus {
-            if cpu == cur_cpu {
+        for logical_id in 0..ncpus() {
+            let cpu_id = CpuId::new(logical_id);
+            if cpu_id == bsp_id {
                 continue;
             }
-            csr_mail_send(st_addr, cpu, 0);
-            IntrArch::send_ipi(cpu);
+            let physical_id = cpu_id.physical_id();
+            csr_mail_send(st_addr, physical_id.get(), 0);
+            IntrArch::send_ipi(physical_id);
         }
     }
 }
 
 #[inline(always)]
 unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
-    let cpu_id = cur_cpu_id().get();
-    let new_stack_top = GUARDED_STACK_TOPS.get()[cpu_id];
+    let physical_id = cur_cpu_id().physical_id();
+    let new_stack_top = GUARDED_STACK_TOPS.get()[physical_id];
+
+    // This is the last ID-based scheduler stack lookup. The first context
+    // switch saves this stack pointer in the per-CPU scheduler context, and all
+    // later scheduler entries restore it directly from there.
     unsafe {
         core::arch::asm!(
             "move  $sp, {new_top}",
@@ -364,8 +407,9 @@ unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
     }
 }
 
-/// Per-CPU guarded stack tops, filled by [remap_boot_stack].
-static GUARDED_STACK_TOPS: MonoOnce<[VirtAddr; MAX_CPUS]> = unsafe { MonoOnce::new() };
+/// Physical-CPU-indexed guarded scheduler stack tops, filled by
+/// [remap_boot_stack].
+static GUARDED_STACK_TOPS: MonoOnce<PhysCpuTable<VirtAddr>> = unsafe { MonoOnce::new() };
 
 /// Remap every CPU's bootstrap stack ([`STACK0`]) into the remap region with a
 /// guard page at the bottom.
@@ -381,10 +425,15 @@ unsafe fn remap_boot_stack() {
     let stack0_sppn =
         unsafe { VirtAddr::new(core::ptr::addr_of!(STACK0) as u64).kvirt_to_phys() }.page_down();
 
-    let mut tops: [VirtAddr; MAX_CPUS] = [VirtAddr::new(0); MAX_CPUS];
+    let mut tops: PhysCpuTable<VirtAddr> = PhysCpuTable::new(
+        [const { CachePadded::new(VirtAddr::new(0)) }; MAX_PHYS_CPU_ID + 1],
+    );
 
-    for cpu in 0..MAX_CPUS {
-        let cpu_stack_ppn = stack0_sppn + (cpu as u64 * KSTACK_PAGES as u64);
+    for logical_id in 0..ncpus() {
+        let cpu_id = CpuId::new(logical_id);
+        let physical_id = cpu_id.physical_id();
+        let physical_slot = physical_id.get();
+        let cpu_stack_ppn = stack0_sppn + (physical_slot as u64 * KSTACK_PAGES as u64);
 
         let vrange = unsafe { mm::remap::alloc_virt_range(total_vpages) }
             .expect("failed to allocate virtual range for boot stack guard page");
@@ -406,11 +455,12 @@ unsafe fn remap_boot_stack() {
 
         let stack_top = (stack_vpn + KSTACK_PAGES as u64).to_virt_addr();
 
-        tops[cpu] = stack_top;
+        tops[physical_id] = stack_top;
 
         kinfoln!(
-            "cpu #{}: boot stack remapped with guard page at [{:#x}, {:#x}), stack [{:#x}, {:#x}), from [{:#x}, {:#x}]",
-            cpu,
+            "{} ({}): scheduler stack remapped with guard page at [{:#x}, {:#x}), stack [{:#x}, {:#x}), from [{:#x}, {:#x}]",
+            cpu_id,
+            physical_id,
             vrange.start().to_virt_addr().get(),
             stack_vpn.to_virt_addr().get(),
             stack_vpn.to_virt_addr().get(),

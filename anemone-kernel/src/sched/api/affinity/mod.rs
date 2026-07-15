@@ -7,7 +7,7 @@ use crate::prelude::*;
 mod sched_getaffinity;
 mod sched_setaffinity;
 
-const KERNEL_CPU_MASK_WORDS: usize = (MAX_CPUS + CPU_SET_WORD_BITS - 1) / CPU_SET_WORD_BITS;
+const KERNEL_CPU_MASK_WORDS: usize = (MAX_LOGICAL_CPUS + CPU_SET_WORD_BITS - 1) / CPU_SET_WORD_BITS;
 const KERNEL_CPU_MASK_BYTES: usize = KERNEL_CPU_MASK_WORDS * CPU_SET_WORD_BYTES;
 
 fn resolve_affinity_target(pid: i32) -> Result<Arc<Task>, SysError> {

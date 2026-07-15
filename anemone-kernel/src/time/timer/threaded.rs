@@ -186,7 +186,7 @@ fn publish_worker_slot(cpu: CpuId, handle: KThreadHandle) {
     }
 
     unsafe {
-        THREADED_WORKER.with_remote(cpu.get(), |slot| {
+        THREADED_WORKER.with_remote(cpu, |slot| {
             let mut slot = slot.lock();
             assert!(slot.is_none(), "threaded timer worker initialized twice");
             *slot = Some(WorkerSlot { cpu, handle });

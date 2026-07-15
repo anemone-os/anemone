@@ -281,9 +281,9 @@ fn bytes_to_kb(bytes: usize) -> usize {
 }
 
 fn cpus_allowed_mask(affinity: CpuMask) -> String {
-    let mut nibbles = vec![0u8; usize::max(16, (MAX_CPUS + 3) / 4)];
+    let mut nibbles = vec![0u8; usize::max(16, (MAX_LOGICAL_CPUS + 3) / 4)];
     for cpu in affinity.iter() {
-        let cpu = cpu.get();
+        let cpu = cpu.logical_id();
         nibbles[cpu / 4] |= 1 << (cpu % 4);
     }
 
@@ -295,7 +295,7 @@ fn cpus_allowed_mask(affinity: CpuMask) -> String {
 }
 
 fn cpus_allowed_list(affinity: CpuMask) -> String {
-    let cpus: Vec<_> = affinity.iter().map(|cpu| cpu.get()).collect();
+    let cpus: Vec<_> = affinity.iter().map(|cpu| cpu.logical_id()).collect();
     assert!(!cpus.is_empty(), "effective affinity must not be empty");
     let mut out = String::new();
     let mut start = cpus[0];
@@ -344,33 +344,36 @@ mod kunits {
 
     #[kunit]
     fn test_cpus_allowed_mask_formats_sparse_and_full_compile_time_domain() {
-        let width = usize::max(16, (MAX_CPUS + 3) / 4);
-        let sparse = mask([0, MAX_CPUS - 1]);
+        let width = usize::max(16, (MAX_LOGICAL_CPUS + 3) / 4);
+        let sparse = mask([0, MAX_LOGICAL_CPUS - 1]);
         let sparse_text = cpus_allowed_mask(sparse);
         assert_eq!(sparse_text.len(), width);
         for cpu in 0..width * 4 {
-            assert_eq!(bit(&sparse_text, cpu), cpu == 0 || cpu == MAX_CPUS - 1);
+            assert_eq!(
+                bit(&sparse_text, cpu),
+                cpu == 0 || cpu == MAX_LOGICAL_CPUS - 1
+            );
         }
 
         let full = cpus_allowed_mask(CpuMask::all());
         assert_eq!(full.len(), width);
         for cpu in 0..width * 4 {
-            assert_eq!(bit(&full, cpu), cpu < MAX_CPUS);
+            assert_eq!(bit(&full, cpu), cpu < MAX_LOGICAL_CPUS);
         }
     }
 
     #[kunit]
     fn test_cpus_allowed_list_formats_sparse_ranges_and_full_domain() {
         assert_eq!(cpus_allowed_list(mask([0])), "0");
-        if MAX_CPUS >= 4 {
+        if MAX_LOGICAL_CPUS >= 4 {
             assert_eq!(cpus_allowed_list(mask([0, 1, 3])), "0-1,3");
         }
         assert_eq!(
             cpus_allowed_list(CpuMask::all()),
-            if MAX_CPUS == 1 {
+            if MAX_LOGICAL_CPUS == 1 {
                 "0".into()
             } else {
-                format!("0-{}", MAX_CPUS - 1)
+                format!("0-{}", MAX_LOGICAL_CPUS - 1)
             }
         );
     }
