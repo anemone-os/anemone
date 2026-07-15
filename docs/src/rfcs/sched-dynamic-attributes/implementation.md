@@ -59,7 +59,10 @@ sched/
     mod.rs
     sched_yield.rs
     priority/            # getpriority/setpriority 与 selector snapshot
-    affinity.rs
+    affinity/
+      mod.rs              # cross-entry native-word constants与target lookup
+      sched_setaffinity.rs
+      sched_getaffinity.rs
     policy.rs            # legacy policy/param/static query/rr interval
     attr.rs              # sched_attr layout、size negotiation与投影
 ```
@@ -334,7 +337,7 @@ Phase 2B以existing`setpriority()`作为final-shape vertical slice：不增加te
 ### 交付
 
 - 在rv64 / la64 syscall number owner中增加`sched_setaffinity`与`sched_getaffinity`常量。
-- `sched/api/affinity.rs`实现raw native-word mask copy、short-input zero extension、long-input high-tail ignore、online normalization、permission、migration-required rejection与raw copied-byte return。
+- `sched/api/affinity/{mod,sched_setaffinity,sched_getaffinity}.rs`实现raw native-word mask copy、short-input zero extension、long-input high-tail ignore、online normalization、permission、migration-required rejection与raw copied-byte return；一个syscall一个实现文件，共享项才进入`mod.rs`。
 - setter严格保持copy-in -> lookup -> permission -> mask semantics -> patch ordering；getter保持len validation -> lookup -> snapshot -> copy-out ordering。
 - fixed owner `cpuid`不在normalized mask时返回`EINVAL`并记录诊断，不排队migration。
 - 增加`anemone-apps/sched-attr-test`作为本RFC focused user-space资产；首阶段只覆盖priority/affinity、errno ordering、snapshot read-back和双CPU remote submission。
@@ -356,7 +359,8 @@ focused app至少执行：
 
 ### Write set
 
-- `anemone-kernel/src/sched/api/{mod,affinity}.rs`；
+- `anemone-kernel/src/sched/api/mod.rs`与`sched/api/affinity/{mod,sched_setaffinity,sched_getaffinity}.rs`；一个syscall一个实现文件，`affinity/mod.rs`只保留两个入口真实共享的native-word常量与target lookup，copy/permission/mask conversion/errno mapping归各自syscall文件；
+- `anemone-abi/src/process.rs`，只在`process::linux::sched`定义Linux userspace `cpu_set_t`对应的`CpuSet` layout、native-word常量与无syscall副作用的位操作；raw syscall仍按caller提供的`cpusetsize`处理kernel-domain前缀；
 - `anemone-abi/src/syscall/{riscv,loongarch}.rs`；
 - 新增`anemone-apps/sched-attr-test/**`；
 - `conf/rootfs/pretest-rv64.toml`；
@@ -672,6 +676,8 @@ review覆盖完整RFC diff而非只看最后阶段。pass要求无未关闭Apoll
 
 - 文档层review已批准Phase 2A / 2B使用`sched/class/mod.rs`；`idle.rs`只在shared lifecycle trait exhaustiveness要求时作behavior-preserving同步。
 - 文档层review已批准Phase 3把`conf/platforms/qemu-virt-rv64-pretest.toml`和`anemone-apps/user-test/ltp/profile.txt`列为validation-only write set；两者不得进入最终提交，runtime后必须恢复并验证无diff。
+- 2026-07-15 Stage 3 implementation review要求affinity ABI遵守`sched/api`现有的one-syscall-per-file模块形状。批准把原单文件`affinity.rs`细化为同owner目录`affinity/{mod,sched_setaffinity,sched_getaffinity}.rs`；该结构维护不改变UAPI、owner、visibility、验证floor或停止条件，`mod.rs`只保留两个入口真实共享的native-word常量与target lookup，不吸收setter/getter各自的copy、permission、mask conversion、errno mapping或ordering逻辑。
+- 2026-07-15 Stage 3 implementation review进一步指出，focused app和kernel adapter直接各自以`usize`/byte array猜测Linux CPU-set layout会让ABI truth分裂。批准把`anemone-abi/src/process.rs`加入write set，在`process::linux::sched`定义1024-bit Linux userspace`CpuSet`及native-word常量；kernel只复用word layout并继续按`cpusetsize`复制最小kernel-domain前缀，不能把raw syscall错误收窄为必须传完整`CpuSet`。focused app必须改用该类型，不再自建mask layout。该扩张不改变fixed-owner、normalization、raw copied-byte return或migration rejection contract。
 - 2026-07-15 Checkpoint 2B compile integration证明`sched/api`需要按transport error variant完成typed mapping。批准把`anemone-kernel/src/exception/mod.rs`加入2B最小write set，仅re-export`ipi.rs`中已经公开且由`send_ipi_async()`返回的`IpiError`；同时删除为绕过不可命名返回类型而添加的单用途predicate wrapper。该扩展不改变IPI error、transport、ABI或scheduler contract；review需确认scheduler只匹配现有variant，且`exception/ipi.rs`不保留语义重复的薄wrapper。
 
 ## 结构维护记录

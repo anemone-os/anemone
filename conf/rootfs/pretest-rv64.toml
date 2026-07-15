@@ -27,6 +27,10 @@ installed_dir = "/bin"
 name = "fair-test"
 installed_dir = "/bin"
 
+[[apps]]
+name = "sched-attr-test"
+installed_dir = "/bin"
+
 # [[apps]]
 # name = "float-test"
 # installed_dir = "/bin"

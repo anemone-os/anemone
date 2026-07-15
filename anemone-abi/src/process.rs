@@ -113,6 +113,71 @@ pub mod linux {
         pub const RLIMIT_RTTIME: u32 = 15;
     }
 
+    pub mod sched {
+        use core::mem::size_of;
+
+        /// CPU capacity of the fixed-size Linux userspace `cpu_set_t`.
+        pub const CPU_SETSIZE: usize = 1024;
+
+        /// Native `unsigned long` word used by the Linux CPU-set ABI.
+        pub type CpuSetWord = usize;
+
+        pub const CPU_SET_WORD_BYTES: usize = size_of::<CpuSetWord>();
+        pub const CPU_SET_WORD_BITS: usize = CPU_SET_WORD_BYTES * 8;
+        pub const CPU_SET_WORDS: usize = CPU_SETSIZE / CPU_SET_WORD_BITS;
+
+        /// Linux libc's fixed-size `cpu_set_t` layout.
+        ///
+        /// The raw affinity syscalls also accept shorter or longer buffers;
+        /// this type owns the userspace layout, not their `cpusetsize` policy.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct CpuSet {
+            bits: [CpuSetWord; CPU_SET_WORDS],
+        }
+
+        impl CpuSet {
+            pub const fn empty() -> Self {
+                Self {
+                    bits: [0; CPU_SET_WORDS],
+                }
+            }
+
+            pub const fn full() -> Self {
+                Self {
+                    bits: [CpuSetWord::MAX; CPU_SET_WORDS],
+                }
+            }
+
+            pub fn set(&mut self, cpu: usize) {
+                assert!(cpu < CPU_SETSIZE);
+                self.bits[cpu / CPU_SET_WORD_BITS] |= 1 << (cpu % CPU_SET_WORD_BITS);
+            }
+
+            pub fn contains(&self, cpu: usize) -> bool {
+                assert!(cpu < CPU_SETSIZE);
+                self.bits[cpu / CPU_SET_WORD_BITS] & (1 << (cpu % CPU_SET_WORD_BITS)) != 0
+            }
+
+            pub fn count(&self) -> usize {
+                self.bits
+                    .iter()
+                    .map(|word| word.count_ones() as usize)
+                    .sum()
+            }
+
+            pub fn is_empty(&self) -> bool {
+                self.bits.iter().all(|word| *word == 0)
+            }
+        }
+
+        impl Default for CpuSet {
+            fn default() -> Self {
+                Self::empty()
+            }
+        }
+    }
+
     pub mod clone {
         #![allow(unused)]
         // /// Signal sent to parent when child process changes state

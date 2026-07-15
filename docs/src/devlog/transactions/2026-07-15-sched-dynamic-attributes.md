@@ -5,7 +5,7 @@
 **Area:** scheduler / dynamic attributes / syscall ABI / IPI / affinity
 **Canonical Plan:** [RFC-20260714-sched-dynamic-attributes](../../rfcs/sched-dynamic-attributes/index.md), [不变量需求](../../rfcs/sched-dynamic-attributes/invariants.md), [迁移实施计划](../../rfcs/sched-dynamic-attributes/implementation.md)
 **Canonical Revision:** R1
-**Current Phase:** Checkpoint 2B Closed；Stage 3 Not Started / Not Run
+**Current Phase:** Checkpoint 2B Closed；Stage 3 Closed；Stage 4 Not Started / Not Run
 
 ## Scope
 
@@ -167,12 +167,52 @@
 
 **Stop Conditions:** 最终未命中第二config truth、wrong-owner mutation、detach后ordinary failure、request broadcast、handler获取gate/credential、completion早于commit、owner/write-set不闭合或review blocker。Checkpoint 2B Implementation、独立review与rv64 KUnit/local fair-test gate关闭；Stage 3保持Not Started / Not Run。
 
+### 2026-07-15 - Stage 3 Affinity ABI / Remote Gate Vertical Slice 启动
+
+**Phase:** 阶段 3；Implementation In Progress，independent review / runtime Not Run。Checkpoint 2A和2B已经由提交`7616b39b`与`1b5f2eb8`关闭，Stage 3不重新打开core storage、owner transaction或request/gate设计。
+
+**Preflight:** live `sched/config.rs`已经提供UAPI-independent `CpuMask`、online normalization、fixed-owner validation与affinity-only patch，`Task::sched_config()`提供coherent snapshot，`sched/request.rs`提供local/remote同入口、typed transport/transaction result与现有全局`Mutex<()>` gate。`sched/api`可以新增独立affinity adapter而无需读取class runtime、RunQueue guard或credential lock跨wait；rv64/la64 syscall number owner、raw user-slice helper、focused app manifest、rv64 pretest rootfs与local-test入口均在canonical write set内。当前tracker没有未neutralize的Apollyon或Keter，preflight未发现需要migration、第二affinity truth、wait-core/IPI修改或write-set扩张的停止信号。
+
+**Write Set Lock:** implementation严格限于新增`anemone-kernel/src/sched/api/affinity/{mod,sched_setaffinity,sched_getaffinity}.rs`，窄改`sched/api/mod.rs`、`anemone-abi/src/process.rs`中的`process::linux::sched` CPU-set ABI，以及`anemone-abi/src/syscall/{riscv,loongarch}.rs`，新增`anemone-apps/sched-attr-test/**`，并修改`conf/rootfs/pretest-rv64.toml`和`anemone-apps/user-test/src/main.rs`完成focused app接线。affinity ABI遵守one-syscall-per-file；`mod.rs`只保留两个入口真实共享的native-word常量与target lookup，copy、permission、mask conversion、errno mapping和phase ordering归各自syscall文件。`CpuSet`是Linux userspace `cpu_set_t`的1024-bit layout；kernel raw syscall仍按caller `cpusetsize`处理最小kernel-domain前缀，不能要求完整struct。`conf/platforms/qemu-virt-rv64-pretest.toml`只允许临时把`smp`改为2，`anemone-apps/user-test/ltp/profile.txt`只允许临时选择schedule group；两者runtime后必须恢复并确认最终无diff。不得修改core transaction/request/IPI/wait-core、Task storage、procfs、minimal或la64 rootfs；用户已明确允许必要时扩张`anemone-rs`，但当前raw ABI focused probes无需公共wrapper，若后续出现真实owner需求仍须先记录扩张影响。
+
+**ABI / Stop Boundary:** setter保持copy-in、lookup、permission、online-mask semantics、patch submit顺序；getter保持len/alignment validation、lookup、snapshot、copy-out顺序。fixed owner不在normalized mask时返回`EINVAL`并保留诊断，不排队migration。若实现要求修改`Task::cpuid`、跨CPU RunQueue lock、raw mask进入core、procfs/clone/getter产生不同truth，或为了LTP静默接受migration-required mask，立即停止并回到RFC/write-set review。
+
+**Planned Gate:** 完成后执行affinity conversion/ordering KUnit、`just build`、双架构focused app build、rv64 pretest全部enabled KUnit与单CPUfocused app。SMP=2双向remote setter stress和targeted affinity LTP按canonical runtime gate执行；无法稳定触发的Force、开放receiver计数或transport-offline窗口不以user-space smoke伪造，继续由阶段一/二决定性KUnit与request/gate source review承担，并在Stage 3证据中记为Not Run。随后由未参与实现的独立reviewer同时检查ABI ordering和remote-gate neutralization；所有validation-only文件在提交前恢复。
+
+### 2026-07-15 - Stage 3 Affinity 模块形状修正
+
+**Review Feedback:** 实现中间态把两个affinity syscall与共享helper合并进单个`sched/api/affinity.rs`，不符合当前`sched/api`一个syscall一个实现文件的模块规范，也会让setter与getter不同的copy/lookup/permission ordering难以独立review。
+
+**Approved Correction:** 同一scheduler ABI owner内改为`affinity/{mod.rs,sched_setaffinity.rs,sched_getaffinity.rs}`；`mod.rs`只保存两个入口真实共享的native-word常量与target resolution，setter拥有copy-in、permission、decode、normalization、submit与errno mapping，getter拥有len validation、encode与copy-out。各syscall的phase order和ABI注释留在自己的文件。canonical implementation write set已同步；该结构修正不扩大core/public API，不改变R1 contract、验证floor或停止条件，旧单文件中间态不得进入冻结diff。
+
+### 2026-07-15 - Stage 3 `cpu_set_t` ABI Owner 扩张批准
+
+**Review Feedback:** kernel affinity adapter与focused app虽然按native-word raw syscall工作，但都直接自建`usize`/byte mask，`anemone-abi`没有Linux userspace `cpu_set_t`对应类型。继续保留会让ABI layout、容量和后续wrapper各自猜测，违反单一ABI truth。
+
+**Approved Expansion:** 将`anemone-abi/src/process.rs`加入Stage 3 write set，只在`process::linux::sched`定义1024-bit `CpuSet`、native-word layout常量和纯位操作。kernel adapter复用word常量，但仍按caller `cpusetsize`接受zero/short/exact/long输入并只复制kernel domain所需前缀；focused app改用`CpuSet`存取mask。该扩张不修改`SchedConfig`、core owner、syscall集合、fixed-owner affinity contract或LTP接受边界，也不要求此阶段新增`anemone-rs`公共wrapper。
+
+### 2026-07-15 - Stage 3 实现、审查与 Gate 关闭
+
+**Change:** 在`anemone-abi::process::linux::sched`建立1024-bit、native `unsigned long` word布局的`CpuSet`及当前focused调用需要的纯位操作；kernel affinity adapter只复用word layout，raw syscall继续按caller `cpusetsize`复制kernel-domain前缀，不把固定struct或raw mask带入scheduler core。affinity按目录拆为`mod.rs`、`sched_setaffinity.rs`和`sched_getaffinity.rs`，分别保持setter的copy-in、lookup、kernel-task拒绝、permission、normalization、patch顺序与getter的len/alignment、lookup、coherent snapshot、copy-out顺序。rv64/la64增加asm-generic syscall 122/123，focused app、rv64 pretest rootfs和local-test入口完成接线；没有新增`anemone-rs`公共wrapper。
+
+**Independent Review:** 未参与实现的独立reviewer检查最终冻结diff、request/gate owner和两份runtime log。首轮Apollyon 0、Keter 0；两个Euclid仅为implementation旧单文件路径和transaction阶段记录位置/Closure不一致，均在本次状态同步中修正，窄复核后最终Apollyon 0、Keter 0、Euclid 0。review确认一个syscall一个文件、`CpuSet` ABI owner、raw zero/short/exact/long语义、errno ordering、fixed-owner migration rejection、single affinity truth、publish前到terminal receive的既有全局gate、handler不取gate以及focused stress均符合R1；本RFC producer graph对KETER-DYNATTR-001的neutralization成立，wait-core KETER-WAIT-001仍保持Open。
+
+**Agent-run Validation:** `just build`通过；`just app build --arch riscv64 sched-attr-test`与loongarch64对应构建均通过。单CPU`build/stage3-singlecpu-cpuset.log`记录167项enabled KUnit全部通过，4项affinity KUnit、fair-test以及focused app的local、errno和permission case通过，remote stress明确`SKIP single CPU`；取得本阶段证据后在无关full-profile LTP期间结束QEMU，该profile不记为完整运行。SMP=2 targeted日志`build/stage3-smp2-cpuset-schedule.log`同样记录167项KUnit全部通过，focused app在CPU `(1,0)`间完成128轮双向remote priority/affinity submission；glibc和musl的`sched_setaffinity01`、`sched_getaffinity01`各4项TPASS且case exit为0，运行最终正常shutdown。schedule group中Stage 4/5尚未实现的policy/attr syscall产生的TCONF/TFAIL不归为Stage 3回归，也不把整个schedule profile写成PASS。
+
+**Static / Docs Validation:** `just fmt sched-attr-test --check`通过；`just fmt kernel --check`只报告未手工维护的generated `kconfig_defs.rs`和`platform_defs.rs`既有whitespace drift，未报告本阶段authored source。`git diff --check`与新文件no-index whitespace检查无告警。runtime后`conf/platforms/qemu-virt-rv64-pretest.toml`和`anemone-apps/user-test/ltp/profile.txt`均精确恢复并确认零diff。状态同步后`mdbook build docs`通过，仅报告既有large search-index warning。
+
+**Not Run:** la64 runtime、完整all-profile LTP、Force/open-receiver计数以及IPI allocation/target-offline窗口的用户态触发未运行；前两项不属于Stage 3最低runtime gate，后两类不以不稳定smoke或test-only hook伪造，继续由阶段1/2决定性KUnit和本阶段request/gate source review承担。Stage 4及后续ABI均保持Not Started / Not Run。
+
+**Source / Worktree Boundary:** 最终实现只落在Stage 3批准write set；没有修改`SchedConfig`、request/IPI/wait-core、Task storage、procfs、clone、minimal/la64 rootfs、Kconfig或competition testcase。validation-only platform/profile不进入提交；工作树中的`AGENTS.md`属于用户改动，继续保持unstaged。
+
+**Stop Conditions:** 最终没有task migration、`Task::cpuid`修改、跨CPU RunQueue lock、raw mask进入core、第二affinity truth、handler互等、gate泄漏、lost completion或为LTP静默接受migration-required mask。Stage 3 Implementation、独立review、双架构build、rv64单CPU/SMP=2 runtime与targeted affinity LTP gate关闭；RFC整体保持Active，Stage 4尚未开始。
+
 ## Open Items
 
 - 本 RFC owner内当前无开放 Apollyon、Keter或 Euclid。
 - wait-core [KETER-WAIT-001](../../rfcs/sched-wait-refactor/tracking-issues.md#keter-wait-001synchronous-remote-placement-不能组合进-cross-cpu-ipi-completion) 继续 Open；R1 remote gate只neutralize scheduler request producer graph。
-- Checkpoint 2A和2B已关闭；Stage 3及后续阶段保持Not Started / Not Run。
+- Checkpoint 2A、2B与Stage 3已关闭；Stage 4及后续保持Not Started / Not Run。
 
 ## Closure
 
-事务 Active；R1的Stage 2已关闭，Stage 3及后续实现尚未开始，RFC整体尚未关闭。
+事务 Active；R1的Stage 1至3已关闭，Stage 4及后续实现尚未开始，RFC整体尚未关闭。

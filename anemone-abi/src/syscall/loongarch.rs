@@ -140,6 +140,8 @@ pub mod linux {
 
     pub const SYS_SYSLOG: u64 = 116;
 
+    pub const SYS_SCHED_SETAFFINITY: u64 = 122;
+    pub const SYS_SCHED_GETAFFINITY: u64 = 123;
     pub const SYS_SCHED_YIELD: u64 = 124;
 
     pub const SYS_KILL: u64 = 129;
