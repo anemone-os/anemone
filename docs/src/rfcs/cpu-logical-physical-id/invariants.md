@@ -1,7 +1,7 @@
 # CPU Logical / Physical ID 不变量
 
 **状态：** Canonical
-**最后更新：** 2026-07-14
+**最后更新：** 2026-07-15
 **父 RFC：** [RFC-20260714-cpu-logical-physical-id](./index.md)
 
 ## 闭合条件
@@ -15,7 +15,7 @@
 7. 第一次进入 scheduler 后，scheduler stack 由 per-CPU `sched_ctx.sp` 持有，不再依赖运行期 ID 查表。
 8. `MAX_PHYS_CPU_ID` 是 platform-owned、含端点的物理 ID 上界；超出上界的 CPU 不进入 registry。
 9. `MAX_LOGICAL_CPUS` 是 kconfig-owned 的最大启用逻辑 CPU 数；超限时 registry 包含 BSP 和按发现顺序排在前面的 `MAX_LOGICAL_CPUS - 1` 个 AP。
-10. 所有固定 per-CPU 表的索引域由 `CpuTable` 或 `PhysCpuTable` 的类型边界表达。
+10. 所有固定 per-CPU 表的索引域由 `CpuTable` 或 `PhysCpuTable` 的类型边界表达，两种 table 的槽位都内建 `CachePadded<T>`。
 
 任一条件不成立时，改造只能视为中间态，不能声明 CPU identity 边界闭合。
 
@@ -23,7 +23,7 @@
 
 `device/cpu.rs` 的 CPU registry 是 CPU identity mapping 的唯一 owner：
 
-- `physical_ids: CpuTable<CachePadded<MonoOnce<PhysCpuId>>>` 的已初始化前缀保存逻辑到物理映射；
+- `physical_ids: CpuTable<MonoOnce<PhysCpuId>>` 的已初始化前缀保存逻辑到物理映射；
 - 静态槽位下标定义逻辑 ID，`logical_cpu_count` 定义已初始化前缀长度；
 - `registration_complete` 定义 registry 是否已经封存，并以 Release/Acquire 发布整个前缀；
 - early scan 期间只有 BSP 写 registry；注册 API 的 safety contract 禁止并发 writer，封存后所有调用者只读；
@@ -69,8 +69,8 @@
 
 - `CpuTable<T, const N: usize = MAX_LOGICAL_CPUS>` 只接受 `CpuId`，默认容量为 `MAX_LOGICAL_CPUS`；registry 和 `PERCPU_BASES` 属于该域。
 - `PhysCpuTable<T, const N: usize = { MAX_PHYS_CPU_ID + 1 }>` 只接受 `PhysCpuId`，默认容量覆盖含端点的物理 ID 空间；`STACK0` 和 `GUARDED_STACK_TOPS` 属于该域。
-- 两种 table 都允许调用者显式覆盖 `N`，但索引身份不随容量改变；构造、`Index` 和 `IndexMut` 必须 `inline(always)`。
-- `PhysCpuTable` 必须保持 transparent layout，不能破坏入口汇编对 `STACK0` 连续 backing 的假设。
+- 两种 table 的 backing 都是 `[CachePadded<T>; N]`，索引返回 `T`；都允许调用者显式覆盖 `N`，但索引身份不随容量改变；构造、`Index` 和 `IndexMut` 必须 `inline(always)`。
+- `PhysCpuTable` 必须保持 transparent layout；两架构必须编译期证明 `RawKernelStack` 与汇编栈步长相同，且 `CachePadded<RawKernelStack>` 不改变元素大小。
 
 ## 软件与硬件边界
 

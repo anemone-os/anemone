@@ -21,6 +21,7 @@ use crate::{
     mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
     sched::class::SchedEntity,
+    utils::cacheline::CachePadded,
 };
 
 /// Unlike other per-CPU stacks, this one is indexed by [PhysCpuId], so that it
@@ -28,7 +29,23 @@ use crate::{
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bss.stack0")]
 static mut STACK0: PhysCpuTable<RawKernelStack> =
-    PhysCpuTable::new([RawKernelStack::ZEROED; MAX_PHYS_CPU_ID + 1]);
+    PhysCpuTable::new(
+        [const { CachePadded::new(RawKernelStack::ZEROED) }; MAX_PHYS_CPU_ID + 1],
+    );
+
+// Entry assembly uses the raw KSTACK_SIZE as its slot stride. Keep both
+// assertions so future stack or cache alignment changes cannot add padding
+// and silently change the STACK0 layout seen by assembly.
+static_assert!(
+    core::mem::size_of::<RawKernelStack>()
+        == (1 << KSTACK_SHIFT_KB) as usize * 1024,
+    "RawKernelStack size must match the bootstrap assembly stride"
+);
+static_assert!(
+    core::mem::size_of::<CachePadded<RawKernelStack>>()
+        == core::mem::size_of::<RawKernelStack>(),
+    "cache padding must not change the bootstrap stack stride"
+);
 
 #[unsafe(no_mangle)]
 static BOOTSTRAP_PGDIR: RiscV64PgDir = {
@@ -316,8 +333,9 @@ unsafe fn remap_boot_stack() {
     let stack0_sppn =
         unsafe { VirtAddr::new(core::ptr::addr_of!(STACK0) as u64).kvirt_to_phys() }.page_down();
 
-    let mut tops: PhysCpuTable<VirtAddr> =
-        PhysCpuTable::new([VirtAddr::new(0); MAX_PHYS_CPU_ID + 1]);
+    let mut tops: PhysCpuTable<VirtAddr> = PhysCpuTable::new(
+        [const { CachePadded::new(VirtAddr::new(0)) }; MAX_PHYS_CPU_ID + 1],
+    );
 
     for logical_id in 0..ncpus() {
         let cpu_id = CpuId::new(logical_id);

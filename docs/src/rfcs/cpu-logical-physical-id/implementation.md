@@ -1,7 +1,7 @@
 # CPU Logical / Physical ID 迁移实施计划
 
-**状态：** Active
-**最后更新：** 2026-07-14
+**状态：** Completed
+**最后更新：** 2026-07-15
 **父 RFC：** [RFC-20260714-cpu-logical-physical-id](./index.md)
 **不变量：** [CPU Logical / Physical ID 不变量](./invariants.md)
 
@@ -99,24 +99,25 @@
 
 ## Post-close Gate C1：静态 Registry、拆分容量与 Typed Tables
 
-**状态：** Active
+**状态：** Completed
 
 交付：
 
-- registry 使用 `CpuTable<CachePadded<MonoOnce<PhysCpuId>>>`，不分配 `Vec`，运行期查询不加锁。
+- registry 使用槽位内建 padding 的 `CpuTable<MonoOnce<PhysCpuId>>`，不分配 `Vec`，运行期查询不加锁。
 - BSP 是 early scan 唯一 writer；槽位初始化和逻辑计数在封存前完成，由 Release/Acquire 标志发布。
 - platform `max_phys_cpu_id` 生成含端点的 `MAX_PHYS_CPU_ID`；扫描越界 CPU 时逐个 warning 并跳过。
 - kconfig `max_logical_cpus` 生成 `MAX_LOGICAL_CPUS`；超限时保留 BSP 和前 `MAX_LOGICAL_CPUS - 1` 个 AP，统一 warning 后忽略其余 CPU。
-- `PERCPU_BASES` 与 registry 使用默认容量的 `CpuTable`；`STACK0` 与 guarded tops 使用默认容量的 `PhysCpuTable`，所有 table 函数内联。
+- `CpuTable` 与 `PhysCpuTable` 的 backing 统一为 `[CachePadded<T>; N]`，索引仍返回 `T`；registry、`PERCPU_BASES`、`STACK0` 与 guarded tops 均使用默认容量，所有 table 函数内联。
+- `CachePadded` 使用 `repr(C, align(64))` 保证 inner field 位于 wrapper 起始地址；两架构以编译期尺寸断言保护 `STACK0` 的裸栈大小和汇编步长不因 padding 改变。
 
 审计：
 
 - 两架构扫描都把 BSP 物理 ID 传给统一 registry owner，不能各自实现不同的截断策略。
 - 搜索确认没有遗留生产用 `MAX_CPUS`，没有 registry 读写锁或启动期 `Vec`，CPU-indexed 固定数组不再接受裸 `usize`。
 
-验证：agent 已完成 VisionFive 2 `just build`、`git diff --check` 和 CPU identity source audit；用户已确认容量拆分后的 VisionFive 2 运行测试通过。LoongArch 构建仍由用户执行。
+验证：agent 在最终 table 布局调整前已完成 VisionFive 2 `just build`、`git diff --check` 和 CPU identity source audit；用户已确认容量拆分后的 VisionFive 2 运行测试通过。最终统一 cache-padded table 布局与 LoongArch correction build 按用户要求未由 agent 运行测试。
 
-退出条件：LoongArch 构建通过；VisionFive 2 的 physical-ID-indexed stack 表越界已由用户复验 neutralize。
+收口：VisionFive 2 的 physical-ID-indexed stack 表越界已由用户复验 neutralize；用户要求直接将本 gate 标记为 Completed，未运行的最终布局验证与 LoongArch correction build 作为证据缺口记录，不继续保持 active gate。
 
 ## 旁路审计清单
 
@@ -137,6 +138,8 @@
 - 2026-07-14：用户进一步要求 registry 不加锁；利用既有 BSP 单写者阶段，把槽位改为 `MonoOnce<PhysCpuId>`，由封存标志 Release/Acquire 发布完整前缀。
 - 2026-07-14：用户运行在 `PhysCpuId(3)` 索引长度 3 的 guarded-stack 表时 panic，证明旧 `MAX_CPUS` 同时表示逻辑数量与物理 ID backing 是错误 contract；容量拆为 platform `MAX_PHYS_CPU_ID` 和 kconfig `MAX_LOGICAL_CPUS`，固定 per-CPU 数组改用 typed wrappers。
 - 2026-07-15：用户要求 typed tables 使用默认 const 容量并缩短名称；最终类型为 `CpuTable<T, N = MAX_LOGICAL_CPUS>` 与 `PhysCpuTable<T, N = MAX_PHYS_CPU_ID + 1>`，VisionFive 2 运行复验通过。
+- 2026-07-15：用户要求 cache-padded 与普通逻辑/物理表显式拆分；最终 registry 和 `PERCPU_BASES` 使用 `CpuTablePadded<T>`，普通连续布局保留 `CpuTable<T>`；`STACK0` 使用 `PhysCpuTable<T>`，guarded tops 使用 `PhysCpuTablePadded<T>`。
+- 2026-07-15：用户最终取消 padded/普通类型拆分，要求所有 `CpuTable` / `PhysCpuTable` 槽位直接使用 `CachePadded<T>`；`STACK0` 通过 representation strengthening 和编译期尺寸断言保持汇编步长。
 
 以上反馈均保持 RFC 的逻辑/物理身份目标，只收紧实现形状，没有削弱不变量。
 

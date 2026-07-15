@@ -1,5 +1,5 @@
 /// Per Cpu data management.
-use crate::{device::cpu_count, prelude::*};
+use crate::{device::cpu_count, prelude::*, utils::cacheline::CachePadded};
 use core::cell::{Cell, UnsafeCell};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -405,7 +405,9 @@ pub use preempt_counter::{PreemptGuard, allow_preempt};
 /// This array is used for storing percpu base addresses for all CPUs.
 ///
 /// When we want to access a not local percpu variable, we'll use this.
-static mut PERCPU_BASES: CpuTable<usize> = CpuTable::new([0; MAX_LOGICAL_CPUS]);
+static mut PERCPU_BASES: CpuTable<usize> = CpuTable::new(
+    [const { CachePadded::new(0) }; MAX_LOGICAL_CPUS],
+);
 
 /// Most of the time you should not call this function. This is only used for
 /// constructing a trapframe on a remote CPU.

@@ -6,7 +6,6 @@
 
 ## Active
 
-- [CPU Logical / Physical ID](./2026-07-14-cpu-logical-physical-id.md)：物理 ID 上界/逻辑 CPU 容量拆分已实现，等待用户侧 VisionFive 2 复跑和 LoongArch 构建。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
 - [OOM Killer](./2026-06-15-oom-killer.md)
@@ -24,6 +23,7 @@
 
 ## Completed
 
+- [CPU Logical / Physical ID](./2026-07-14-cpu-logical-physical-id.md)：物理 ID 上界/逻辑 CPU 容量拆分、无锁 registry 和内建 cache padding 的 typed table 已完成；VisionFive 2 由用户复验通过，最终 table 布局与 LoongArch correction build 未由 agent 运行。
 - [Sched RT Class](./2026-07-12-sched-rt-class.md)
 - [Sched Wait Preempt Arming](./2026-07-06-sched-wait-preempt-arming.md)
 - [VFS Direct User I/O](./2026-06-29-vfs-direct-user-io.md)

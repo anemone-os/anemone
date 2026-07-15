@@ -19,13 +19,14 @@ pub trait CpuArchTrait {
     fn percpu_base() -> usize;
 }
 
-/// Fixed table whose index domain is the dense logical [`CpuId`] space.
+/// Cache-line-padded fixed table whose index domain is the dense logical
+/// [`CpuId`] space.
 #[repr(transparent)]
-pub struct CpuTable<T, const N: usize = MAX_LOGICAL_CPUS>([T; N]);
+pub struct CpuTable<T, const N: usize = MAX_LOGICAL_CPUS>([CachePadded<T>; N]);
 
 impl<T, const N: usize> CpuTable<T, N> {
     #[inline(always)]
-    pub const fn new(values: [T; N]) -> Self {
+    pub const fn new(values: [CachePadded<T>; N]) -> Self {
         Self(values)
     }
 }
@@ -35,29 +36,29 @@ impl<T, const N: usize> Index<CpuId> for CpuTable<T, N> {
 
     #[inline(always)]
     fn index(&self, cpu_id: CpuId) -> &Self::Output {
-        &self.0[cpu_id.logical_id()]
+        &*self.0[cpu_id.logical_id()]
     }
 }
 
 impl<T, const N: usize> IndexMut<CpuId> for CpuTable<T, N> {
     #[inline(always)]
     fn index_mut(&mut self, cpu_id: CpuId) -> &mut Self::Output {
-        &mut self.0[cpu_id.logical_id()]
+        &mut *self.0[cpu_id.logical_id()]
     }
 }
 
-/// Fixed table whose index domain is the firmware-visible [`PhysCpuId`]
-/// space. The platform bound is inclusive, so the backing array has one slot
-/// more than `MAX_PHYS_CPU_ID`.
+/// Cache-line-padded fixed table whose index domain is the firmware-visible
+/// [`PhysCpuId`] space. The platform bound is inclusive, so the backing array
+/// has one slot more than `MAX_PHYS_CPU_ID`.
 ///
 /// The transparent layout is required for bootstrap assembly that indexes the
 /// physical-CPU stack array before Rust can establish the CPU registry.
 #[repr(transparent)]
-pub struct PhysCpuTable<T, const N: usize = { MAX_PHYS_CPU_ID + 1 }>([T; N]);
+pub struct PhysCpuTable<T, const N: usize = { MAX_PHYS_CPU_ID + 1 }>([CachePadded<T>; N]);
 
 impl<T, const N: usize> PhysCpuTable<T, N> {
     #[inline(always)]
-    pub const fn new(values: [T; N]) -> Self {
+    pub const fn new(values: [CachePadded<T>; N]) -> Self {
         Self(values)
     }
 }
@@ -67,14 +68,14 @@ impl<T, const N: usize> Index<PhysCpuId> for PhysCpuTable<T, N> {
 
     #[inline(always)]
     fn index(&self, cpu_id: PhysCpuId) -> &Self::Output {
-        &self.0[cpu_id.get()]
+        &*self.0[cpu_id.get()]
     }
 }
 
 impl<T, const N: usize> IndexMut<PhysCpuId> for PhysCpuTable<T, N> {
     #[inline(always)]
     fn index_mut(&mut self, cpu_id: PhysCpuId) -> &mut Self::Output {
-        &mut self.0[cpu_id.get()]
+        &mut *self.0[cpu_id.get()]
     }
 }
 
@@ -82,7 +83,7 @@ struct CpuRegistry {
     /// The initialized prefix is the sole logical-to-physical CPU mapping.
     /// Only the BSP writes it, and `registration_complete` publishes the whole
     /// prefix before any AP starts or runtime reader can access it.
-    physical_ids: CpuTable<CachePadded<MonoOnce<PhysCpuId>>>,
+    physical_ids: CpuTable<MonoOnce<PhysCpuId>>,
     logical_cpu_count: AtomicUsize,
     registration_complete: AtomicBool,
 }

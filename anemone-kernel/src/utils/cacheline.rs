@@ -9,7 +9,7 @@ cfg_select! {
         ///
         /// Reference:
         /// - https://elixir.bootlin.com/linux/v6.6.32/source/arch/riscv/include/asm/cache.h#L12
-        #[repr(align(64))]
+        #[repr(C, align(64))]
         pub struct CachePadded<T>(T);
     }
     target_arch = "loongarch64" => {
@@ -21,7 +21,7 @@ cfg_select! {
         ///
         /// Reference:
         /// - https://elixir.bootlin.com/linux/v6.6.32/source/arch/loongarch/include/asm/cache.h#L8
-        #[repr(align(64))]
+        #[repr(C, align(64))]
         pub struct CachePadded<T>(T);
     }
     _ => {
