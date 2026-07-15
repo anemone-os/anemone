@@ -116,6 +116,21 @@ pub mod linux {
     pub mod sched {
         use core::mem::size_of;
 
+        pub const SCHED_OTHER: i32 = 0;
+        pub const SCHED_FIFO: i32 = 1;
+        pub const SCHED_RR: i32 = 2;
+        pub const SCHED_BATCH: i32 = 3;
+        pub const SCHED_IDLE: i32 = 5;
+        pub const SCHED_DEADLINE: i32 = 6;
+        pub const SCHED_RESET_ON_FORK: i32 = 0x4000_0000;
+
+        /// Linux legacy scheduler parameter layout.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[repr(C)]
+        pub struct SchedParam {
+            pub sched_priority: i32,
+        }
+
         /// CPU capacity of the fixed-size Linux userspace `cpu_set_t`.
         pub const CPU_SETSIZE: usize = 1024;
 

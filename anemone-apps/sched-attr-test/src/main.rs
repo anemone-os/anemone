@@ -8,15 +8,27 @@ use core::{
 
 use anemone_rs::{
     abi::{
-        process::linux::sched::{CPU_SET_WORD_BITS, CPU_SET_WORD_BYTES, CPU_SETSIZE, CpuSet},
+        process::linux::sched::{
+            CPU_SET_WORD_BITS, CPU_SET_WORD_BYTES, CPU_SETSIZE, CpuSet, SCHED_BATCH,
+            SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,
+            SchedParam,
+        },
         syscall::{
-            linux::{SYS_SCHED_GETAFFINITY, SYS_SCHED_SETAFFINITY, SYS_SETUID},
+            linux::{
+                SYS_SCHED_GET_PRIORITY_MAX, SYS_SCHED_GET_PRIORITY_MIN, SYS_SCHED_GETAFFINITY,
+                SYS_SCHED_GETPARAM, SYS_SCHED_GETSCHEDULER, SYS_SCHED_RR_GET_INTERVAL,
+                SYS_SCHED_SETAFFINITY, SYS_SCHED_SETPARAM, SYS_SCHED_SETSCHEDULER, SYS_SETUID,
+            },
             syscall,
         },
+        time::linux::TimeSpec,
     },
-    os::linux::process::{
-        MmapFlags, MmapProt, PriorityWhich, WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork,
-        getpid, getpriority, mmap, munmap, sched_yield, setpriority, wait4,
+    os::linux::{
+        fs::{PipeFlags, close, pipe2, read, write},
+        process::{
+            MmapFlags, MmapProt, PriorityWhich, WStatus, WStatusRaw, WaitFor, WaitOptions, exit,
+            fork, getpid, getpriority, mmap, munmap, sched_yield, setpriority, wait4,
+        },
     },
     prelude::*,
 };
@@ -36,6 +48,21 @@ struct SharedStress {
     cpus: [AtomicUsize; MAX_WORKERS],
     target_pids: [AtomicUsize; MAX_WORKERS],
     target_cpus: [AtomicUsize; MAX_WORKERS],
+}
+
+#[repr(C)]
+struct SharedTargetScenario {
+    ready: AtomicBool,
+    release: AtomicBool,
+}
+
+impl SharedTargetScenario {
+    const fn new() -> Self {
+        Self {
+            ready: AtomicBool::new(false),
+            release: AtomicBool::new(false),
+        }
+    }
 }
 
 impl SharedStress {
@@ -75,6 +102,109 @@ impl SharedStress {
 
 fn pid_arg(pid: i32) -> u64 {
     pid as i64 as u64
+}
+
+fn policy_arg(policy: i32) -> u64 {
+    policy as i64 as u64
+}
+
+fn sched_setscheduler_raw(pid: i32, policy: i32, param: u64) -> Result<(), Errno> {
+    unsafe {
+        syscall(
+            SYS_SCHED_SETSCHEDULER,
+            pid_arg(pid),
+            policy_arg(policy),
+            param,
+            0,
+            0,
+            0,
+        )
+    }
+    .map(|_| ())
+}
+
+fn sched_setscheduler(pid: i32, policy: i32, priority: i32) -> Result<(), Errno> {
+    let param = SchedParam {
+        sched_priority: priority,
+    };
+    sched_setscheduler_raw(pid, policy, &param as *const SchedParam as u64)
+}
+
+fn sched_getscheduler(pid: i32) -> Result<i32, Errno> {
+    unsafe { syscall(SYS_SCHED_GETSCHEDULER, pid_arg(pid), 0, 0, 0, 0, 0) }
+        .map(|policy| policy as i32)
+}
+
+fn sched_setparam_raw(pid: i32, param: u64) -> Result<(), Errno> {
+    unsafe { syscall(SYS_SCHED_SETPARAM, pid_arg(pid), param, 0, 0, 0, 0) }.map(|_| ())
+}
+
+fn sched_setparam(pid: i32, priority: i32) -> Result<(), Errno> {
+    let param = SchedParam {
+        sched_priority: priority,
+    };
+    sched_setparam_raw(pid, &param as *const SchedParam as u64)
+}
+
+fn sched_getparam_raw(pid: i32, param: u64) -> Result<(), Errno> {
+    unsafe { syscall(SYS_SCHED_GETPARAM, pid_arg(pid), param, 0, 0, 0, 0) }.map(|_| ())
+}
+
+fn sched_getparam(pid: i32) -> Result<SchedParam, Errno> {
+    let mut param = SchedParam::default();
+    sched_getparam_raw(pid, &mut param as *mut SchedParam as u64)?;
+    Ok(param)
+}
+
+fn sched_get_priority_min(policy: i32) -> Result<i32, Errno> {
+    unsafe {
+        syscall(
+            SYS_SCHED_GET_PRIORITY_MIN,
+            policy_arg(policy),
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+    }
+    .map(|priority| priority as i32)
+}
+
+fn sched_get_priority_max(policy: i32) -> Result<i32, Errno> {
+    unsafe {
+        syscall(
+            SYS_SCHED_GET_PRIORITY_MAX,
+            policy_arg(policy),
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+    }
+    .map(|priority| priority as i32)
+}
+
+fn sched_rr_get_interval_raw(pid: i32, interval: u64) -> Result<(), Errno> {
+    unsafe {
+        syscall(
+            SYS_SCHED_RR_GET_INTERVAL,
+            pid_arg(pid),
+            interval,
+            0,
+            0,
+            0,
+            0,
+        )
+    }
+    .map(|_| ())
+}
+
+fn sched_rr_get_interval(pid: i32) -> Result<TimeSpec, Errno> {
+    let mut interval = TimeSpec::default();
+    sched_rr_get_interval_raw(pid, &mut interval as *mut TimeSpec as u64)?;
+    Ok(interval)
 }
 
 fn sched_setaffinity_raw(pid: i32, len: usize, mask: u64) -> Result<(), Errno> {
@@ -271,6 +401,300 @@ fn test_errno_ordering() -> Result<(), Errno> {
     Ok(())
 }
 
+fn test_legacy_policy_matrix() -> Result<(), Errno> {
+    println!("sched-attr-test: CASE legacy-policy start");
+
+    for policy in [SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_DEADLINE] {
+        assert_eq!(sched_get_priority_min(policy)?, 0);
+        assert_eq!(sched_get_priority_max(policy)?, 0);
+    }
+    for policy in [SCHED_FIFO, SCHED_RR] {
+        assert_eq!(sched_get_priority_min(policy)?, 1);
+        assert_eq!(sched_get_priority_max(policy)?, 99);
+    }
+    expect_errno(
+        sched_get_priority_min(SCHED_FIFO | SCHED_RESET_ON_FORK),
+        EINVAL,
+        "priority query rejects reset encoding",
+    );
+
+    sched_setscheduler(0, SCHED_OTHER, 0)?;
+    for policy in [SCHED_BATCH, SCHED_IDLE, SCHED_DEADLINE] {
+        expect_errno(
+            sched_setscheduler(0, policy, 0),
+            EINVAL,
+            "unsupported policy setter",
+        );
+    }
+    assert_eq!(sched_getscheduler(0)?, SCHED_OTHER);
+    assert_eq!(sched_getparam(0)?.sched_priority, 0);
+    let fair_interval = sched_rr_get_interval(0)?;
+    assert!(
+        fair_interval.tv_sec > 0 || fair_interval.tv_nsec > 0,
+        "sched-attr-test: Fair interval must be one effective tick"
+    );
+
+    sched_setscheduler(0, SCHED_FIFO | SCHED_RESET_ON_FORK, 20)?;
+    assert_eq!(sched_getscheduler(0)?, SCHED_FIFO | SCHED_RESET_ON_FORK);
+    assert_eq!(sched_getparam(0)?.sched_priority, 20);
+    assert_eq!(sched_rr_get_interval(0)?, TimeSpec::default());
+
+    sched_setparam(0, 10)?;
+    assert_eq!(sched_getparam(0)?.sched_priority, 10);
+    sched_setparam(0, 30)?;
+    assert_eq!(sched_getparam(0)?.sched_priority, 30);
+
+    sched_setscheduler(0, SCHED_RR, 40)?;
+    assert_eq!(sched_getscheduler(0)?, SCHED_RR);
+    assert_eq!(sched_getparam(0)?.sched_priority, 40);
+    let rr_interval = sched_rr_get_interval(0)?;
+    assert!(
+        rr_interval.tv_sec > 0 || rr_interval.tv_nsec > 0,
+        "sched-attr-test: RR full quantum must be non-zero"
+    );
+    assert!(
+        (rr_interval.tv_sec, rr_interval.tv_nsec) >= (fair_interval.tv_sec, fair_interval.tv_nsec),
+        "sched-attr-test: RR full quantum must cover at least one Fair tick"
+    );
+
+    sched_setscheduler(0, SCHED_FIFO, 35)?;
+    assert_eq!(sched_getscheduler(0)?, SCHED_FIFO);
+    sched_setscheduler(0, SCHED_RR, 35)?;
+    assert_eq!(sched_getscheduler(0)?, SCHED_RR);
+    sched_setscheduler(0, SCHED_OTHER, 0)?;
+    assert_eq!(sched_getscheduler(0)?, SCHED_OTHER);
+
+    println!("sched-attr-test: CASE legacy-policy ok");
+    Ok(())
+}
+
+fn test_legacy_policy_errno_ordering() -> Result<(), Errno> {
+    println!("sched-attr-test: CASE legacy-errno start");
+    let missing = i32::MAX;
+    let invalid = SchedParam {
+        sched_priority: 100,
+    };
+
+    expect_errno(
+        sched_setscheduler_raw(missing, -1, u64::MAX),
+        EINVAL,
+        "setscheduler negative policy before pointer and target",
+    );
+    expect_errno(
+        sched_setscheduler_raw(missing, SCHED_OTHER, u64::MAX),
+        EFAULT,
+        "setscheduler copy before missing target",
+    );
+    expect_errno(
+        sched_setscheduler(missing, SCHED_BATCH, 0),
+        ESRCH,
+        "setscheduler missing target before unsupported policy",
+    );
+    expect_errno(
+        sched_setparam_raw(missing, &invalid as *const SchedParam as u64),
+        ESRCH,
+        "setparam missing target before bad range",
+    );
+    expect_errno(
+        sched_getparam_raw(missing, 0),
+        EINVAL,
+        "getparam null output before target",
+    );
+    expect_errno(
+        sched_getparam_raw(missing, u64::MAX),
+        ESRCH,
+        "getparam missing target before output access",
+    );
+    expect_errno(
+        sched_rr_get_interval_raw(missing, u64::MAX),
+        ESRCH,
+        "RR interval missing target before bad output",
+    );
+
+    let mut unaligned_param = [0u8; size_of::<SchedParam>() + 1];
+    unaligned_param[1..].copy_from_slice(&0i32.to_ne_bytes());
+    sched_setscheduler_raw(0, SCHED_OTHER, unsafe { unaligned_param.as_ptr().add(1) }
+        as u64)?;
+    unaligned_param[1..].fill(u8::MAX);
+    sched_getparam_raw(0, unsafe { unaligned_param.as_mut_ptr().add(1) } as u64)?;
+    assert_eq!(
+        i32::from_ne_bytes(unaligned_param[1..].try_into().unwrap()),
+        0
+    );
+
+    let mut unaligned_interval = [0u8; size_of::<TimeSpec>() + 1];
+    sched_rr_get_interval_raw(0, unsafe { unaligned_interval.as_mut_ptr().add(1) } as u64)?;
+    let seconds = i64::from_ne_bytes(unaligned_interval[1..9].try_into().unwrap());
+    let nanos = i64::from_ne_bytes(unaligned_interval[9..17].try_into().unwrap());
+    assert!(seconds > 0 || nanos > 0);
+
+    println!("sched-attr-test: CASE legacy-errno ok");
+    Ok(())
+}
+
+fn test_legacy_policy_permission_ordering() -> Result<(), Errno> {
+    println!("sched-attr-test: CASE legacy-permission start");
+    let parent = getpid()?;
+    sched_setscheduler(0, SCHED_OTHER, 0)?;
+    match fork()? {
+        Some(child) => wait_child_exit(child)?,
+        None => {
+            sched_setscheduler(0, SCHED_OTHER | SCHED_RESET_ON_FORK, 0)
+                .expect("sched-attr-test: failed to arm reset before dropping privilege");
+            setuid(1000).expect("sched-attr-test: setuid failed in Fair permission child");
+            expect_errno(
+                sched_setscheduler(0, SCHED_OTHER, 0),
+                EPERM,
+                "unprivileged caller cannot clear armed reset",
+            );
+            expect_errno(
+                sched_setparam(parent as i32, 1),
+                EINVAL,
+                "Fair family mismatch before permission",
+            );
+            expect_errno(
+                sched_setparam(parent as i32, 0),
+                EPERM,
+                "Fair family match permission denial",
+            );
+            expect_errno(
+                sched_setscheduler(parent as i32, SCHED_OTHER, 0),
+                EPERM,
+                "setscheduler permission denial",
+            );
+            exit(0)
+        },
+    }
+
+    sched_setscheduler(0, SCHED_FIFO, 20)?;
+    match fork()? {
+        Some(child) => wait_child_exit(child)?,
+        None => {
+            setuid(1000).expect("sched-attr-test: setuid failed in RT permission child");
+            expect_errno(
+                sched_setparam(parent as i32, 0),
+                EINVAL,
+                "RT family mismatch before permission",
+            );
+            expect_errno(
+                sched_setparam(parent as i32, 10),
+                EPERM,
+                "RT family match permission denial",
+            );
+            exit(0)
+        },
+    }
+    sched_setscheduler(0, SCHED_OTHER, 0)?;
+    println!("sched-attr-test: CASE legacy-permission ok");
+    Ok(())
+}
+
+fn test_external_runnable_policy_target() -> Result<(), Errno> {
+    println!("sched-attr-test: CASE runnable-policy-target start");
+    let mapping = mmap(
+        0,
+        size_of::<SharedTargetScenario>(),
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+        MmapFlags::MAP_SHARED | MmapFlags::MAP_ANONYMOUS,
+        None,
+        None,
+    )?;
+    let shared_ptr = mapping.as_ptr().cast::<SharedTargetScenario>();
+    unsafe { shared_ptr.write(SharedTargetScenario::new()) };
+    let shared = unsafe { &*shared_ptr };
+
+    match fork()? {
+        Some(child) => {
+            wait_until(
+                || shared.ready.load(Ordering::Acquire),
+                "runnable policy target",
+            )?;
+            sched_setscheduler(child as i32, SCHED_OTHER | SCHED_RESET_ON_FORK, 0)?;
+            assert_eq!(
+                sched_getscheduler(child as i32)?,
+                SCHED_OTHER | SCHED_RESET_ON_FORK
+            );
+            sched_setparam(child as i32, 0)?;
+            assert_eq!(sched_getparam(child as i32)?.sched_priority, 0);
+            shared.release.store(true, Ordering::Release);
+            wait_child_exit(child)?;
+        },
+        None => {
+            shared.ready.store(true, Ordering::Release);
+            wait_until(
+                || shared.release.load(Ordering::Acquire),
+                "runnable target release",
+            )
+            .expect("sched-attr-test: runnable child wait failed");
+            assert_eq!(
+                sched_getscheduler(0).unwrap(),
+                SCHED_OTHER | SCHED_RESET_ON_FORK
+            );
+            assert_eq!(sched_getparam(0).unwrap().sched_priority, 0);
+            exit(0)
+        },
+    }
+    munmap(mapping.as_ptr(), size_of::<SharedTargetScenario>())?;
+    println!(
+        "sched-attr-test: CASE runnable-policy-target ok (functional external target scenario)"
+    );
+    Ok(())
+}
+
+fn test_pipe_blocked_policy_target() -> Result<(), Errno> {
+    println!("sched-attr-test: CASE pipe-blocked-policy-target start");
+    let (read_fd, write_fd) = pipe2(PipeFlags::empty())?;
+    let mapping = mmap(
+        0,
+        size_of::<SharedTargetScenario>(),
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+        MmapFlags::MAP_SHARED | MmapFlags::MAP_ANONYMOUS,
+        None,
+        None,
+    )?;
+    let shared_ptr = mapping.as_ptr().cast::<SharedTargetScenario>();
+    unsafe { shared_ptr.write(SharedTargetScenario::new()) };
+    let shared = unsafe { &*shared_ptr };
+
+    match fork()? {
+        Some(child) => {
+            close(read_fd)?;
+            wait_until(
+                || shared.ready.load(Ordering::Acquire),
+                "pipe-blocked policy target",
+            )?;
+            for _ in 0..32 {
+                sched_yield()?;
+            }
+            sched_setscheduler(child as i32, SCHED_RR, 30)?;
+            assert_eq!(sched_getscheduler(child as i32)?, SCHED_RR);
+            sched_setparam(child as i32, 15)?;
+            assert_eq!(sched_getparam(child as i32)?.sched_priority, 15);
+            assert_eq!(write(write_fd, &[1])?, 1);
+            close(write_fd)?;
+            wait_child_exit(child)?;
+        },
+        None => {
+            close(write_fd).expect("sched-attr-test: blocked child close writer failed");
+            shared.ready.store(true, Ordering::Release);
+            let mut byte = [0u8; 1];
+            assert_eq!(
+                read(read_fd, &mut byte).expect("sched-attr-test: blocked child read failed"),
+                1
+            );
+            assert_eq!(sched_getscheduler(0).unwrap(), SCHED_RR);
+            assert_eq!(sched_getparam(0).unwrap().sched_priority, 15);
+            close(read_fd).expect("sched-attr-test: blocked child close reader failed");
+            exit(0)
+        },
+    }
+    munmap(mapping.as_ptr(), size_of::<SharedTargetScenario>())?;
+    println!(
+        "sched-attr-test: CASE pipe-blocked-policy-target ok (functional blocked target scenario)"
+    );
+    Ok(())
+}
+
 fn test_permission_precedes_mask_semantics() -> Result<(), Errno> {
     println!("sched-attr-test: CASE permission-ordering start");
     let parent = getpid()?;
@@ -419,6 +843,11 @@ pub fn main() -> Result<(), Errno> {
     let initial_mask = test_local_affinity()?;
     test_errno_ordering()?;
     test_permission_precedes_mask_semantics()?;
+    test_legacy_policy_matrix()?;
+    test_legacy_policy_errno_ordering()?;
+    test_legacy_policy_permission_ordering()?;
+    test_external_runnable_policy_target()?;
+    test_pipe_blocked_policy_target()?;
     test_remote_gate_stress(initial_mask)?;
     println!("sched-attr-test: END all available cases passed");
     Ok(())

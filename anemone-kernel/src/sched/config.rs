@@ -185,6 +185,24 @@ impl SchedConfig {
         self.affinity
     }
 
+    /// Project the configured discipline to its stable observable interval.
+    ///
+    /// This reads no class-private budget, rotation, membership, or runqueue
+    /// state. RR's full-quantum tick count remains owned by the RT class.
+    pub(crate) fn configured_interval(&self) -> Duration {
+        let ticks = match self.discipline {
+            SchedDiscipline::Fair => 1,
+            SchedDiscipline::Realtime {
+                mode: RtMode::Fifo, ..
+            } => return Duration::ZERO,
+            SchedDiscipline::Realtime {
+                mode: RtMode::RoundRobin,
+                ..
+            } => crate::sched::class::configured_rr_full_quantum_ticks(),
+        };
+        configured_ticks_duration(ticks)
+    }
+
     /// Derive a child's configured attributes before the child is published.
     ///
     /// Class-private runtime is deliberately absent from this projection and
@@ -204,6 +222,16 @@ impl SchedConfig {
 
         Self::new(discipline, nice, false, self.affinity, owner)
     }
+}
+
+fn configured_ticks_duration(ticks: u32) -> Duration {
+    assert!(SYSTEM_HZ > 0, "SYSTEM_HZ must be non-zero");
+    let nanos = (ticks as u128) * 1_000_000_000u128 / (SYSTEM_HZ as u128);
+    assert!(
+        nanos <= u64::MAX as u128,
+        "configured scheduler interval does not fit Duration"
+    );
+    Duration::from_nanos(nanos as u64)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -623,6 +651,24 @@ mod kunits {
         assert_eq!(
             no_reset.for_child(owner),
             realtime(RtMode::Fifo, 60, Nice::new(-3), false)
+        );
+    }
+
+    #[kunit]
+    fn test_configured_interval_uses_only_discipline_and_configured_quantum() {
+        let affinity = mask(&[0, 1]);
+        let tick = configured_ticks_duration(1);
+        assert_eq!(
+            fair(Nice::ZERO, false, affinity).configured_interval(),
+            tick
+        );
+        assert_eq!(
+            realtime(RtMode::Fifo, 50, Nice::ZERO, false).configured_interval(),
+            Duration::ZERO
+        );
+        assert_eq!(
+            realtime(RtMode::RoundRobin, 50, Nice::ZERO, false).configured_interval(),
+            configured_ticks_duration(crate::sched::class::configured_rr_full_quantum_ticks())
         );
     }
 }

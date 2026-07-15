@@ -18,6 +18,11 @@ pub(crate) use entity::SchedEntityMutToken;
 pub use entity::{SchedClassKind, SchedEntity};
 pub use runqueue::RunQueue;
 
+/// Return the class-owned full configured RR quantum without exposing runtime.
+pub(in crate::sched) const fn configured_rr_full_quantum_ticks() -> u32 {
+    rt::configured_full_quantum_ticks()
+}
+
 /// Internal scheduler-class selection precedence, ordered from high to low.
 ///
 /// This is the single source of truth for cross-class selection. The order has

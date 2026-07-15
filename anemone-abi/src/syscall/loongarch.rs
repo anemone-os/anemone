@@ -140,9 +140,16 @@ pub mod linux {
 
     pub const SYS_SYSLOG: u64 = 116;
 
+    pub const SYS_SCHED_SETPARAM: u64 = 118;
+    pub const SYS_SCHED_SETSCHEDULER: u64 = 119;
+    pub const SYS_SCHED_GETSCHEDULER: u64 = 120;
+    pub const SYS_SCHED_GETPARAM: u64 = 121;
     pub const SYS_SCHED_SETAFFINITY: u64 = 122;
     pub const SYS_SCHED_GETAFFINITY: u64 = 123;
     pub const SYS_SCHED_YIELD: u64 = 124;
+    pub const SYS_SCHED_GET_PRIORITY_MAX: u64 = 125;
+    pub const SYS_SCHED_GET_PRIORITY_MIN: u64 = 126;
+    pub const SYS_SCHED_RR_GET_INTERVAL: u64 = 127;
 
     pub const SYS_KILL: u64 = 129;
     pub const SYS_TKILL: u64 = 130;

@@ -5,7 +5,7 @@
 **Area:** scheduler / dynamic attributes / syscall ABI / IPI / affinity
 **Canonical Plan:** [RFC-20260714-sched-dynamic-attributes](../../rfcs/sched-dynamic-attributes/index.md), [不变量需求](../../rfcs/sched-dynamic-attributes/invariants.md), [迁移实施计划](../../rfcs/sched-dynamic-attributes/implementation.md)
 **Canonical Revision:** R1
-**Current Phase:** Checkpoint 2B Closed；Stage 3 Closed；Stage 4 Not Started / Not Run
+**Current Phase:** Checkpoint 2B Closed；Stage 3 Closed；Stage 4 Closed；Stage 5 Not Started / Not Run
 
 ## Scope
 
@@ -207,12 +207,44 @@
 
 **Stop Conditions:** 最终没有task migration、`Task::cpuid`修改、跨CPU RunQueue lock、raw mask进入core、第二affinity truth、handler互等、gate泄漏、lost completion或为LTP静默接受migration-required mask。Stage 3 Implementation、独立review、双架构build、rv64单CPU/SMP=2 runtime与targeted affinity LTP gate关闭；RFC整体保持Active，Stage 4尚未开始。
 
+### 2026-07-15 - Stage 4 Legacy Policy / Parameter / Query ABI 启动
+
+**Phase:** 阶段 4；Implementation In Progress，independent review / runtime Not Run。Stage 3已经由双CPUremote gate stress、targeted affinity LTP与独立review关闭；本阶段不重新打开core transaction、request/gate、affinity或wait-core contract。
+
+**Preflight:** 当前tracker没有未neutralize的Apollyon或Keter。live `SchedConfig` snapshot、semantic discipline patch、latest-config permit与local/remote `submit_config_patch()`能够承载legacy policy/parameter setter和getter；RR interval只允许通过class/config owner提供full configured quantum的窄只读投影，不能读取`RtEntity` remaining budget、rotation或RunQueue。若实现需要credential进入owner handler、class-private runtime进入ABI、current新schedule entry、wait-core变化或write-set外owner surface，立即停止并回写RFC/write-set review。
+
+**Write Set Lock:** kernel实现严格限于`sched/api/mod.rs`与新增`sched/api/policy/{mod,sched_setscheduler,sched_getscheduler,sched_setparam,sched_getparam,sched_get_priority_min,sched_get_priority_max,sched_rr_get_interval}.rs`，仅在需要窄configured interval投影时修改`sched/config.rs`和`sched/class/{mod,rt,fair/mod}.rs`；`class/mod.rs`只能转发RT owner的configured full-quantum ticks，不能暴露`RtEntity`或runtime。ABI允许修改`anemone-abi/src/process.rs`中既有`process::linux::sched` owner的shared `SchedParam`/policy/reset常量，以及`anemone-abi/src/syscall/{riscv,loongarch}.rs`；focused runtime只修改`anemone-apps/sched-attr-test/**`并复用同一ABI定义。`anemone-apps/user-test/ltp/profile.txt`仅允许targeted schedule验证时临时选择，运行后必须恢复并确认无diff。按用户明确要求，一个syscall独占一个`.rs`文件；`policy/mod.rs`只承载legacy family真实共享的byte-copy、target/permission helper与typed errno映射，各入口独有的copy/lookup/validation/projection顺序不得上提。该同owner目录化和两项最小owner扩张不改变R1 contract或syscall语义。
+
+**Validation / Review Plan:** focused KUnit覆盖field-to-patch、reset encoding、policy/range和Fair/FIFO/RR interval；focused app覆盖Fair、FIFO、RR transition、priority raise/lower、reset read-back、errno/permission和coherent getter projection。按global floor执行`just build`、双架构app build、全部enabled KUnit、focused app与targeted Stage 4 LTP supported subset；profile恢复后由未参与实现的独立reviewer检查ABI ordering、permission/latest-config、reset owner、interval projection、一个syscall一个文件和write-set。上述实现、验证与review当前均未完成，不预记为通过。
+
+**Approved Preflight Expansions:** 独立reviewer指出，若kernel和focused app各自定义`sched_param`/policy常量会形成ABI并列truth，因此总控批准`anemone-abi/src/process.rs`最小扩张；同理，RR quantum继续由`class/rt.rs`唯一拥有，批准`class/mod.rs`只转发窄configured ticks accessor，禁止adapter/config重复计算或暴露runtime。两项扩张已先同步canonical implementation write set，worker随后才获准写入；R1 accepted contract、阶段顺序、停止条件和验证floor不变。
+
+**Ordering Preflight:** `sched_setparam()`的family validation与submit-side permission并不构成停止条件。入口在copy与lookup后只把raw priority分类为`Fair`或`Realtime`参数，并用一次coherent snapshot做family mismatch早拒绝；该snapshot不复制mode、旧priority、nice、reset或affinity，也不生成complete replacement。permission随后产生窄permit，owner transaction仍以`ReconfigureParameters`对latest config重复family validation并在permit check前返回typed `InvalidParameters`。focused probes必须区分missing target + bad range、unauthorized family mismatch与family-matching permission denial。
+
+### 2026-07-16 - Stage 4 实现、审查与 Gate 关闭
+
+**Change:** 在`anemone-abi::process::linux::sched`增加shared `SchedParam`以及Linux policy/reset常量，rv64/la64接入asm-generic syscall 118至121和125至127。kernel legacy family按`policy/`目录拆为七个syscall独占文件；shared module只保留byte-oriented `sched_param` copy、target/credential permit和typed errno映射。setter保持top-level scalar/null、copy-in、lookup、positive semantic validation、permission、owner latest-config validation与commit顺序；`sched_setscheduler()`提交discipline replacement并独占reset，`sched_setparam()`只提交`ReconfigureParameters`并保持nice/reset/mode。getter从单个`SchedConfig` snapshot投影。Fair interval为一个effective tick、FIFO为zero、RR经class-owned窄facade读取full configured quantum，不读取remaining budget、rotation、membership或RunQueue。
+
+**Independent Review:** 未参与实现的独立reviewer对最终冻结diff完成只读审查，覆盖ABI ordering/errno precedence、unaligned byte copy、kernel-task fail-closed、credential到窄permit的边界、owner latest-config重验、reset clear denial、coherent getter、interval owner、一个syscall一个文件、focused app前向进展和write set。最终结论Apollyon 0、Keter 0、Euclid 0；没有Stage 4停止条件。runnable external target保持Fair，blocked target只在父进程完成RR/priority mutation后由pipe唤醒，测试握手不会让RT child饿死producer。
+
+**Agent-run Validation:** rv64 `just build`通过；随后`./scripts/run-user-test-rv64.sh etc/sdcard-rv.img build/stage4-schedule-rv64.log`重建rootfs/kernel并正常运行至guest shutdown。日志记录`Running 174 tests...`与`All tests passed!`；新增policy projection/range/reset、`sched_setparam()` family以及configured interval KUnit均为`ok`。focused `sched-attr-test`的Fair/FIFO/RR、priority raise/lower、reset read-back/clear denial、errno/permission、unaligned copy、queued runnable和pipe-blocked detached target case全部通过；既有remote-gate stress在本次单CPU运行明确`SKIP single CPU`，其双CPUtransport/gate证据仍由已关闭Stage 3拥有。
+
+**Targeted LTP:** 同一日志中的glibc与musl schedule group各自运行Stage 4指定的`sched_setscheduler01/02/04`、`sched_setparam01..05`、`sched_getscheduler01/02`、`sched_getparam01/03`、priority min/max和`sched_rr_get_interval01..03`；这些supported case均为zero failed / zero broken，RR interval 03各有一个libc variant TCONF而raw syscall variant通过。整组summary为attempted 62、passed 52、failed 9、infra_failed 0、skipped 1，不能写成全组PASS：未列入Stage 4 target的`sched_setscheduler03`因缺少`getrlimit()`而TBROK，`getcpu01`因未实现`getcpu()`失败，Stage 5才实现的`sched_setattr/getattr`因ENOSYS失败。这些结果不通过legacy兼容映射隐藏，也不归为Stage 4回归。
+
+**Cross-architecture / Static / Docs Validation:** `just app build --arch riscv64 sched-attr-test`与loongarch64对应构建通过；临时切换`qemu-virt-la64-pretest`、用`conf/rootfs/pretest-la64.toml`生成rootfs后，la64 `just build`通过，再恢复`qemu-virt-rv64-pretest`。`just fmt sched-attr-test --check`、`git diff --check`和`mdbook build docs`通过；kernel format check只报告未手工维护的generated `kconfig_defs.rs` / `platform_defs.rs`既有whitespace drift，未报告Stage 4 authored source。runtime后`anemone-apps/user-test/ltp/profile.txt`逐字节恢复并确认零diff。
+
+**Not Run:** la64 runtime、完整`all` profile和独立Stage 4 SMP=2 policy stress未运行；它们不属于本阶段最低runtime gate。Stage 3已经用SMP=2双向remote priority/affinity stress关闭shared request/gate vertical slice，本阶段没有用单CPUapp冒充新的跨CPU证据。
+
+**Source / Worktree Boundary:** 最终实现只落在批准后的Stage 4 write set；没有修改core transaction、request/IPI、wait-core、Task storage、clone、procfs、rootfs manifest、runner、Kconfig或competition testcase。validation-only profile和platform选择均已恢复；工作树中的`AGENTS.md`属于用户改动，提交时继续保持unstaged。
+
+**Stop Conditions:** 最终不需要读取class-private runtime、直接操作queue、为unsupported policy做静默映射、把credential带入owner handler、增加current schedule entry或修改wait-core。Stage 4 Implementation、双架构build、rv64全部enabled KUnit、focused app、targeted supported LTP与独立review gate关闭；Stage 5保持Not Started / Not Run。
+
 ## Open Items
 
 - 本 RFC owner内当前无开放 Apollyon、Keter或 Euclid。
 - wait-core [KETER-WAIT-001](../../rfcs/sched-wait-refactor/tracking-issues.md#keter-wait-001synchronous-remote-placement-不能组合进-cross-cpu-ipi-completion) 继续 Open；R1 remote gate只neutralize scheduler request producer graph。
-- Checkpoint 2A、2B与Stage 3已关闭；Stage 4及后续保持Not Started / Not Run。
+- Checkpoint 2A、2B、Stage 3与Stage 4已关闭；Stage 5及后续保持Not Started / Not Run。
 
 ## Closure
 
-事务 Active；R1的Stage 1至3已关闭，Stage 4及后续实现尚未开始，RFC整体尚未关闭。
+事务 Active；R1的Stage 1至4已关闭，Stage 5及后续实现尚未开始，RFC整体尚未关闭。

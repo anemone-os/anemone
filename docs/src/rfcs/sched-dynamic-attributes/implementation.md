@@ -63,7 +63,15 @@ sched/
       mod.rs              # cross-entry native-word constants与target lookup
       sched_setaffinity.rs
       sched_getaffinity.rs
-    policy.rs            # legacy policy/param/static query/rr interval
+    policy/
+      mod.rs              # legacy family shared constants/layout/target helpers
+      sched_setscheduler.rs
+      sched_getscheduler.rs
+      sched_setparam.rs
+      sched_getparam.rs
+      sched_get_priority_min.rs
+      sched_get_priority_max.rs
+      sched_rr_get_interval.rs
     attr.rs              # sched_attr layout、size negotiation与投影
 ```
 
@@ -400,7 +408,7 @@ focused app至少执行：
 ### 交付
 
 - 增加`sched_setscheduler`、`sched_getscheduler`、`sched_setparam`、`sched_getparam`、`sched_get_priority_min/max`和`sched_rr_get_interval` syscall number与handler。
-- raw`sched_param`与legacy reset bit只存在于`sched/api/policy.rs`。
+- Linux `sched_param` layout与policy/reset常量由`anemone-abi::process::linux::sched`作为userspace ABI单一真相源；kernel侧raw copy、parse与legacy reset解释只存在于`sched/api/policy/`。
 - setter按UAPI matrix完成scalar/null、copy-in、lookup、positive policy/parameter、permission、owner latest-config validation与patch提交顺序。
 - `sched_setscheduler()`独占legacy reset bit；`sched_setparam()`保持reset。
 - getter从一个coherent snapshot投影；`sched_rr_get_interval()`只读configured discipline和class/config常量，不读remaining budget、rotation或runqueue。
@@ -415,9 +423,10 @@ focused app至少执行：
 
 ### Write set
 
-- `anemone-kernel/src/sched/api/{mod,policy}.rs`及必要同owner子文件；
+- `anemone-kernel/src/sched/api/mod.rs`与`sched/api/policy/{mod,sched_setscheduler,sched_getscheduler,sched_setparam,sched_getparam,sched_get_priority_min,sched_get_priority_max,sched_rr_get_interval}.rs`；每个syscall独占一个实现文件，`policy/mod.rs`只保留本legacy family真实共享的byte-copy helper、target/permission helper与typed errno映射，不吸收各入口不同的copy、lookup、validation或projection顺序；
 - `anemone-kernel/src/sched/config.rs`，仅在需要窄readonly interval投影时；
-- `anemone-kernel/src/sched/class/{rt,fair/mod}.rs`，仅窄configured interval accessor与focused test；
+- `anemone-kernel/src/sched/class/{mod,rt,fair/mod}.rs`，仅窄configured interval accessor/facade与focused test；`class/mod.rs`不得暴露`RtEntity`或class-private runtime；
+- `anemone-abi/src/process.rs`，仅在`process::linux::sched`增加shared `SchedParam` layout与Linux policy/reset常量，不增加syscall wrapper或scheduler行为；
 - `anemone-abi/src/syscall/{riscv,loongarch}.rs`；
 - `anemone-apps/sched-attr-test/**`；
 - `anemone-apps/user-test/ltp/profile.txt`，仅作targeted schedule profile的validation-only选择，提交前恢复。
@@ -679,7 +688,10 @@ review覆盖完整RFC diff而非只看最后阶段。pass要求无未关闭Apoll
 - 2026-07-15 Stage 3 implementation review要求affinity ABI遵守`sched/api`现有的one-syscall-per-file模块形状。批准把原单文件`affinity.rs`细化为同owner目录`affinity/{mod,sched_setaffinity,sched_getaffinity}.rs`；该结构维护不改变UAPI、owner、visibility、验证floor或停止条件，`mod.rs`只保留两个入口真实共享的native-word常量与target lookup，不吸收setter/getter各自的copy、permission、mask conversion、errno mapping或ordering逻辑。
 - 2026-07-15 Stage 3 implementation review进一步指出，focused app和kernel adapter直接各自以`usize`/byte array猜测Linux CPU-set layout会让ABI truth分裂。批准把`anemone-abi/src/process.rs`加入write set，在`process::linux::sched`定义1024-bit Linux userspace`CpuSet`及native-word常量；kernel只复用word layout并继续按`cpusetsize`复制最小kernel-domain前缀，不能把raw syscall错误收窄为必须传完整`CpuSet`。focused app必须改用该类型，不再自建mask layout。该扩张不改变fixed-owner、normalization、raw copied-byte return或migration rejection contract。
 - 2026-07-15 Checkpoint 2B compile integration证明`sched/api`需要按transport error variant完成typed mapping。批准把`anemone-kernel/src/exception/mod.rs`加入2B最小write set，仅re-export`ipi.rs`中已经公开且由`send_ipi_async()`返回的`IpiError`；同时删除为绕过不可命名返回类型而添加的单用途predicate wrapper。该扩展不改变IPI error、transport、ABI或scheduler contract；review需确认scheduler只匹配现有variant，且`exception/ipi.rs`不保留语义重复的薄wrapper。
+- 2026-07-15 Stage 4只读preflight确认kernel policy adapter与focused app都需要Linux `sched_param` layout和policy/reset常量。批准把`anemone-abi/src/process.rs`加入Stage 4 write set，在既有`process::linux::sched` ABI owner内定义shared `SchedParam`与常量；kernel继续只在`sched/api/policy/`解释raw bytes、ordering和semantic patch，app不得复制layout/常量。该扩张不改变R1 syscall集合、ABI值、core patch、owner或验证floor。
+- 2026-07-15 Stage 4只读preflight确认RR full quantum当前由`class/rt.rs`私有常量唯一拥有，而`sched/api`不能绕过private sibling边界读取。批准把`anemone-kernel/src/sched/class/mod.rs`加入Stage 4 write set，只允许转发`rt.rs`提供的窄configured full-quantum ticks accessor；不得暴露`RtEntity`、remaining budget、rotation或queue state。该扩张避免在config/API重复quantum truth，不改变R1 interval语义、class owner或停止条件。
 
 ## 结构维护记录
 
 - 计划：Checkpoint 2A将空壳`sched/api`扩为按priority/affinity/policy/attr划分的同owner目录，并behavior-preserving搬迁existing priority handler；Checkpoint 2B再把它切到final config/request path。两者保持syscall ABI不变，不建立shared generic syscall framework。执行证据写入R0 transaction。
+- 2026-07-15：Stage 4按用户明确要求把原计划中的单文件`policy.rs`具体化为同一`sched/api` owner内的`policy/`目录，并保持一个syscall一个`.rs`文件。`mod.rs`只承载legacy family真实共享的layout、常量和窄helper；各syscall独有的ABI ordering、copy、validation和projection留在对应文件。该结构维护不改变R1 contract、public API、owner、验证floor或停止条件。

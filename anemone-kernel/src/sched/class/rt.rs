@@ -33,6 +33,10 @@ const fn rt_rr_full_quantum_ticks() -> u32 {
 
 const RT_RR_FULL_QUANTUM_TICKS: u32 = rt_rr_full_quantum_ticks();
 
+pub(super) const fn configured_full_quantum_ticks() -> u32 {
+    RT_RR_FULL_QUANTUM_TICKS
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RtRuntime {
     Fifo,
