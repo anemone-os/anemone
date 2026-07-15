@@ -208,6 +208,9 @@ pub fn kernel_clone(
 
     let current_task = get_current_task();
     let cur_uspace = current_task.clone_uspace_handle();
+    let parent_sched = current_task.sched_config();
+    let child_cpu = pick_next_cpu_in(parent_sched.affinity());
+    let child_sched = SchedEntity::new_child(parent_sched, child_cpu);
 
     let mut boxed_frame = Box::new(trap_frame);
     boxed_frame.set_syscall_retval(0);
@@ -243,9 +246,9 @@ pub fn kernel_clone(
                 // new thread group
                 None
             },
-            SchedEntity::new_default(),
+            child_sched,
             TaskFlags::empty(),
-            None,
+            Some(child_cpu),
         )
         .map_err(|e| {
             let _ = Box::from_raw(frame_ptr);
@@ -295,14 +298,13 @@ pub fn kernel_clone(
         new_task.set_files_state(current_task.files_state().read().fork());
     }
 
-    // Credential and nice state are inherited before the task is published.
-    // These accessors do not take sched locks.
+    // Credential state is inherited before the task is published. Scheduler
+    // config, reset-on-fork, fresh runtime and fixed CPU were already built as
+    // one unpublished child entity before Task construction.
     new_task.replace_cred(current_task.cred());
     if current_task.no_new_privs() {
         new_task.set_no_new_privs();
     }
-    new_task.inherit_nice_before_publish(current_task.nice());
-
     // The child is not published yet, so no other task can observe or lock its
     // signal mask. Snapshot only the parent's current mask and do not copy the
     // task-local pending temporary restore slot.

@@ -1,9 +1,4 @@
-//! Typed scheduler configuration and dormant patch validation.
-//!
-//! Checkpoint 2A keeps `SchedConfig`, patches, masks, and permits detached from
-//! published task storage. `RtPriority` is mechanically reused by the existing
-//! RT payload, but the full configured-state model becomes the truth only when
-//! the Phase 2B atomic cutover removes the existing `AtomicNice` path.
+//! Typed scheduler configuration, patch validation, and snapshots.
 
 use crate::prelude::*;
 
@@ -70,6 +65,27 @@ impl CpuMask {
         }
     }
 
+    /// Snapshot the CPUs that are online in the compile-time domain.
+    ///
+    /// The current CPU is treated as online by `target_online()` during early
+    /// boot, so pre-publication bootstrap task construction always has at least
+    /// one legal owner without inventing a second all-CPU truth.
+    pub(crate) fn online() -> Self {
+        let cpu_count = ncpus();
+        assert!(
+            cpu_count <= MAX_CPUS,
+            "runtime CPU count exceeds the compile-time CPU domain"
+        );
+        let mut mask = Self::empty();
+        for cpu in 0..cpu_count {
+            if target_online(cpu) {
+                mask.insert(CpuId::new(cpu));
+            }
+        }
+        assert!(!mask.is_empty(), "online CPU mask must not be empty");
+        mask
+    }
+
     pub(crate) fn insert(&mut self, cpu: CpuId) {
         let index = cpu.get();
         assert!(index < MAX_CPUS, "CPU is outside the compile-time domain");
@@ -94,6 +110,13 @@ impl CpuMask {
         Self { cpus }
     }
 
+    pub(crate) fn iter(&self) -> impl Iterator<Item = CpuId> + '_ {
+        self.cpus
+            .iter()
+            .enumerate()
+            .filter_map(|(cpu, present)| present.then_some(CpuId::new(cpu)))
+    }
+
     /// Normalize a requested set to a typed online domain and fixed owner.
     ///
     /// `online` is supplied explicitly so validation remains a pure operation;
@@ -111,7 +134,7 @@ impl CpuMask {
         }
     }
 
-    fn assert_valid_for_owner(&self, owner: CpuId) {
+    pub(in crate::sched) fn assert_valid_for_owner(&self, owner: CpuId) {
         assert!(!self.is_empty(), "effective CPU mask must not be empty");
         assert!(
             self.contains(owner),
@@ -121,9 +144,6 @@ impl CpuMask {
 }
 
 /// A coherent configured scheduler snapshot.
-///
-/// This type is dormant during Checkpoint 2A and must not be installed beside
-/// the current `AtomicNice` truth.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SchedConfig {
     discipline: SchedDiscipline,
@@ -163,6 +183,26 @@ impl SchedConfig {
 
     pub(crate) const fn affinity(&self) -> CpuMask {
         self.affinity
+    }
+
+    /// Derive a child's configured attributes before the child is published.
+    ///
+    /// Class-private runtime is deliberately absent from this projection and
+    /// must be freshly constructed by the target class owner.
+    pub(in crate::sched) fn for_child(self, owner: CpuId) -> Self {
+        let (discipline, nice) = if self.reset_on_fork {
+            match self.discipline {
+                SchedDiscipline::Realtime { .. } => (SchedDiscipline::Fair, Nice::ZERO),
+                SchedDiscipline::Fair if self.nice < Nice::ZERO => {
+                    (SchedDiscipline::Fair, Nice::ZERO)
+                },
+                SchedDiscipline::Fair => (SchedDiscipline::Fair, self.nice),
+            }
+        } else {
+            (self.discipline, self.nice)
+        };
+
+        Self::new(discipline, nice, false, self.affinity, owner)
     }
 }
 
@@ -442,6 +482,49 @@ mod kunits {
     }
 
     #[kunit]
+    fn test_sched_config_patch_supports_all_discipline_replacements() {
+        let owner = CpuId::new(0);
+        let online = mask(&[0, 1]);
+        let fair = fair(Nice::new(3), false, online);
+        let fifo = realtime(RtMode::Fifo, 40, Nice::new(3), false);
+        let rr = realtime(RtMode::RoundRobin, 50, Nice::new(3), false);
+
+        for (old, discipline) in [
+            (
+                fair,
+                SchedDiscipline::Realtime {
+                    mode: RtMode::Fifo,
+                    priority: RtPriority::new(40),
+                },
+            ),
+            (
+                fifo,
+                SchedDiscipline::Realtime {
+                    mode: RtMode::RoundRobin,
+                    priority: RtPriority::new(50),
+                },
+            ),
+            (
+                rr,
+                SchedDiscipline::Realtime {
+                    mode: RtMode::Fifo,
+                    priority: RtPriority::new(40),
+                },
+            ),
+            (rr, SchedDiscipline::Fair),
+        ] {
+            let new = SchedConfigPatch::keep()
+                .with_discipline(DisciplineChange::Replace(discipline))
+                .project(old, online, owner)
+                .unwrap();
+            assert_eq!(new.discipline(), discipline);
+            assert_eq!(new.nice(), old.nice());
+            assert_eq!(new.reset_on_fork(), old.reset_on_fork());
+            assert_eq!(new.affinity(), old.affinity());
+        }
+    }
+
+    #[kunit]
     fn test_cpu_mask_compile_time_domain_and_online_normalization() {
         let owner = CpuId::new(0);
         let online = mask(&[0, 1]);
@@ -514,6 +597,32 @@ mod kunits {
         assert_eq!(
             SchedChangePermit::non_escalating().check(&latest, &latest_new),
             Err(SchedError::TransitionDenied)
+        );
+    }
+
+    #[kunit]
+    fn test_reset_on_fork_config_matrix() {
+        let owner = CpuId::new(0);
+        let affinity = mask(&[0, 1]);
+        let rr = realtime(RtMode::RoundRobin, 50, Nice::new(-5), true);
+        assert_eq!(rr.for_child(owner), fair(Nice::ZERO, false, affinity));
+
+        let negative_fair = fair(Nice::new(-5), true, affinity);
+        assert_eq!(
+            negative_fair.for_child(owner),
+            fair(Nice::ZERO, false, affinity)
+        );
+
+        let positive_fair = fair(Nice::new(5), true, affinity);
+        assert_eq!(
+            positive_fair.for_child(owner),
+            fair(Nice::new(5), false, affinity)
+        );
+
+        let no_reset = realtime(RtMode::Fifo, 60, Nice::new(-3), false);
+        assert_eq!(
+            no_reset.for_child(owner),
+            realtime(RtMode::Fifo, 60, Nice::new(-3), false)
         );
     }
 }

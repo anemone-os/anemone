@@ -20,12 +20,12 @@ mod api;
 pub use api::*;
 
 mod nice;
-pub(crate) use nice::AtomicNice;
 pub use nice::Nice;
 
 pub(crate) mod config;
 
 mod processor;
+pub(crate) use processor::pick_next_cpu_in;
 pub use processor::{
     PendingResched, enqueue_new_task, get_current_task, init_routines, local_enqueue_new_task,
     local_sched_tick, pick_next_cpu, remote_enqueue_new_task, request_resched,
@@ -41,6 +41,9 @@ mod latch;
 pub use latch::{Latch, LatchCancelReason, LatchTrigger, LatchWaitOutcome};
 
 pub mod oneshot;
+
+mod request;
+pub(crate) use request::SchedRequest;
 
 pub mod class;
 mod wait;

@@ -1,4 +1,10 @@
-use crate::prelude::*;
+use crate::{
+    prelude::*,
+    sched::{
+        config::{SchedChangePermit, SchedConfigPatch, SchedError},
+        request::{SubmitError, submit_config_patch},
+    },
+};
 
 use super::target::{PriorityWhich, collect_priority_targets};
 
@@ -21,7 +27,7 @@ fn sys_setpriority(which: PriorityWhich, who: i32, niceval: i32) -> Result<u64, 
 
     let mut result = Err(SysError::NoSuchProcess);
     for target in targets {
-        result = set_one_priority(&current_cred, &target, nice, result);
+        result = set_one_priority(&current_cred, target, nice, result);
     }
 
     result.map(|()| 0)
@@ -29,7 +35,7 @@ fn sys_setpriority(which: PriorityWhich, who: i32, niceval: i32) -> Result<u64, 
 
 fn set_one_priority(
     current_cred: &CredentialSet,
-    target: &Task,
+    target: Arc<Task>,
     nice: Nice,
     previous: Result<(), SysError>,
 ) -> Result<(), SysError> {
@@ -42,20 +48,80 @@ fn set_one_priority(
         return Err(SysError::PermissionDenied);
     }
 
-    if nice < target.nice() && !current_cred.has_cap_effective(Capability::SYS_NICE) {
-        knoticeln!(
-            "setpriority: denying task={} nice {} -> {} because RLIMIT_NICE is not implemented and caller lacks CAP_SYS_NICE",
-            target.tid(),
-            target.nice().get(),
-            nice.get(),
-        );
-        return Err(SysError::AccessDenied);
-    }
-
-    target.set_nice(nice);
+    let permit = if current_cred.has_cap_effective(Capability::SYS_NICE) {
+        SchedChangePermit::unrestricted()
+    } else {
+        SchedChangePermit::non_escalating()
+    };
+    let patch = SchedConfigPatch::keep().with_nice(nice);
+    submit_config_patch(target, patch, permit).map_err(map_submit_error)?;
     if previous == Err(SysError::NoSuchProcess) {
         Ok(())
     } else {
         previous
+    }
+}
+
+fn map_submit_error(error: SubmitError) -> SysError {
+    match error {
+        SubmitError::Transaction(SchedError::TransitionDenied) => SysError::AccessDenied,
+        SubmitError::Transaction(SchedError::TargetExited) => SysError::NoSuchProcess,
+        SubmitError::Transaction(SchedError::InvalidParameters | SchedError::InvalidAffinity) => {
+            SysError::InvalidArgument
+        },
+        SubmitError::Transport(IpiError::Alloc(_)) => SysError::OutOfMemory,
+        SubmitError::Transport(IpiError::TargetOffline) => SysError::NoSuchProcess,
+        SubmitError::CompletionClosed => SysError::IO,
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use crate::sched::class::SchedEntity;
+
+    fn target() -> Arc<Task> {
+        fn unused_entry() {}
+
+        let (task, guard) = unsafe {
+            Task::new_kernel(
+                "kunit-setpriority",
+                unused_entry as *const (),
+                ParameterList::empty(),
+                None,
+                None,
+                SchedEntity::new_default(),
+                TaskFlags::empty(),
+                Some(cur_cpu_id()),
+            )
+        }
+        .expect("failed to construct setpriority KUnit task");
+        unsafe {
+            guard.forget();
+        }
+        Arc::new(task)
+    }
+
+    #[kunit]
+    fn test_setpriority_local_path_and_partial_progress_folding() {
+        let root = CredentialSet::new_root();
+        let first = target();
+        assert_eq!(
+            set_one_priority(
+                &root,
+                first.clone(),
+                Nice::new(5),
+                Err(SysError::NoSuchProcess),
+            ),
+            Ok(())
+        );
+        assert_eq!(first.nice(), Nice::new(5));
+
+        let later = target();
+        assert_eq!(
+            set_one_priority(&root, later.clone(), Nice::new(10), Err(SysError::IO),),
+            Err(SysError::IO)
+        );
+        assert_eq!(later.nice(), Nice::new(10));
     }
 }

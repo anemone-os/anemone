@@ -4,7 +4,7 @@
 **最后更新：** 2026-07-15
 **父 RFC：** [RFC-20260714-sched-dynamic-attributes](./index.md)
 **不变量：** [不变量需求](./invariants.md)
-**当前修订：** R0
+**当前修订：** R1
 **事务日志：** [2026-07-15-sched-dynamic-attributes](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md)
 
 本文只定义 planned gates、write set、review、验证与停止条件，不记录已经执行的 checkpoint 事实。实现开始后，执行结果只追加到对应 transaction devlog；只有阶段顺序、write set、验证 floor 或停止条件变化才回写本文，contract / owner / ABI / 接受边界变化必须先回写 `index.md`、`invariants.md` 与 tracking issue。
@@ -97,7 +97,7 @@ sched/
 - `Processor` 能否在同一 local IRQ-off transaction中以 current identity、membership与`TaskSchedState`完成role classification，并在current active dimension变化后只请求full pick。
 - `SchedEntity::new_default()` 的调用时刻是否已经能取得online CPU domain；若 boot ordering不能证明，unpublished constructor必须显式接收由caller提供的typed initial affinity，不能读取未初始化`NCPUS`。
 - clone在task publish前是否能先取得parent coherent config snapshot、按reset规则构造fresh entity并从继承mask选择fixed CPU。
-- `IpiPayload` 当前是`Clone + Copy`；增加`Arc<SchedRequest>`后必须降为`Clone`，同步审计所有match/broadcast caller，并禁止scheduler request broadcast。
+- 阶段0 source audit时`IpiPayload`仍是`Clone + Copy`，R0最初计划增加`Arc<SchedRequest>`后降为`Clone`；该所有权计划已由R1 supersede。Checkpoint 2B改为single-owner`Box<SchedRequest>`、无通用payload clone，并继续审计全部match/broadcast caller和禁止scheduler request broadcast。
 - IPI handler pop message后是否已经释放queue lock；业务transaction和one-shot trigger不得在queue lock内执行。
 - `Mutex::lock()` 已拒绝hwirq、IRQ-off、preemption-disabled和active-wait context；gate acquire顺序必须直接复用这些断言。
 - `/proc/<pid>/status` 当前从`ncpus()`重建allowed mask；阶段 2 必须切到同一config snapshot，不能保留第二观察truth。
@@ -260,8 +260,9 @@ sched/
 - local target直接调用同一owner transaction，不建channel、不拿gate、不发self-IPI。
 - remote target在task context取得全局`Mutex<()>` `REMOTE_SCHED_REQUEST_GATE`，创建request并async publish，随后`recv_uninterruptible()`；Mutex guard持有到channel terminal返回。现有Mutex的CAS fast path与Event slow path就是完整gate实现，不增加第二套atomic/event状态；内部Event只发生在publish/Latch之前的lock acquisition，不承担one-shot completion。
 - request transport failure发生在receive前，drop dormant endpoints后释放gate；进入receive后，Force只由oneshot内部finish当前Latch并rearm，不能关闭receiver或释放gate。`SenderClosed`只有在唯一sender连同未来mutation/complete capability都已消失时才是确定失败；handler不能在仍可能提交mutation时提前drop sender。
-- 在2A已经是`Clone`的`IpiPayload`中增加`SchedulerRequest(Arc<SchedRequest>)`；broadcast入口显式拒绝该variant，clone envelope不得复制body capability。
-- IPI handler pop后释放queue lock，只转发`sched::handle_request()`；handler不取credential、gate或user lock。
+- 在2A已从`Copy`收窄的`IpiPayload`中增加`SchedulerRequest(Box<SchedRequest>)`，并移除payload的通用`Clone`；`Box`是唯一request owner，single-use body继续防御duplicate execute。
+- broadcast只显式复制eligible variant；scheduler request进入broadcast时在任何allocation/enqueue前断言失败，不增加可恢复`NotBroadcastable`错误。
+- IPI handler pop后释放queue lock，借用payload并直接执行request method，不clone request、不经过一层语义转发函数，也不取credential、gate或user lock。
 - handler第二次execute、empty body或double completion由常开断言暴露。
 
 #### 交付：既有Priority与unpublished child
@@ -279,7 +280,7 @@ sched/
 - `class/runqueue.rs`若因role transaction继续增长到同时承载config type、UAPI或request lifecycle，应先把config/request放到独立owner文件；不把核心transaction移到syscall helper。
 - `rt.rs`与`fair/stride.rs`只新增runtime transition hook和focused tests；raw policy number、permission、request id不得进入class。
 - `task/sched.rs`只做private storage access和unpublished handoff；普通crate caller不能构造mutation token或replace published entity。
-- `exception/ipi.rs`因`Copy -> Clone`产生的mechanical变化必须单独review，确认TLB、wake、KUnit与stop payload语义未改变。
+- `exception/ipi.rs`必须单独review：确认2A的`Copy -> Clone`机械结果在2B只按request唯一所有权所需进一步收窄为显式broadcast复制，TLB、wake、KUnit与stop payload语义未改变，handler不再无条件clone payload。
 
 #### Checkpoint 2B Write set
 
@@ -293,7 +294,7 @@ sched/
 - `anemone-kernel/src/task/api/{mod,clone/mod}.rs`；
 - `anemone-kernel/src/sched/api/mod.rs`；
 - `anemone-kernel/src/sched/api/priority/**`；
-- `anemone-kernel/src/exception/ipi.rs`；
+- `anemone-kernel/src/exception/{mod,ipi}.rs`；`mod.rs`仅允许re-export既有`IpiError`，不改变IPI transport、completion或error contract；
 - `anemone-kernel/src/fs/proc/tgid/status.rs`；
 - 对应owner文件内focused KUnit。
 
@@ -307,7 +308,7 @@ sched/
 - local/remote priority path、multi-target partial progress、request exactly-once与completion-after-commit；
 - clone reset矩阵、fresh runtime、affinity-contained CPU选择；
 - source audit确认无`AtomicNice`、`Task::set_nice`、published entity replace、第二policy/priority/affinity truth；
-- source audit确认scheduler request不可broadcast、IPI queue lock不跨业务handler、gate不进入handler；
+- source audit确认scheduler request不可broadcast且误用只会在发送前panic、payload无通用clone、IPI queue lock不跨业务handler、gate不进入handler；
 - pretest运行全部enabled KUnit并点名2B新增role/config/request case；existing priority LTP验证local用户态路径；remote runtime留给阶段3的SMP=2 gate，不在2B用source proof写成runtime PASS。
 
 #### Checkpoint 2B Probe / Review Gate
@@ -651,12 +652,27 @@ review覆盖完整RFC diff而非只看最后阶段。pass要求无未关闭Apoll
 
 ## 实现期反馈记录
 
-- 尚无；执行反馈在R0 transaction建立后追加。
+- 2026-07-15 Checkpoint 2B review反馈指出：`NotBroadcastable`不是可恢复transport failure，因为broadcast caller全部是内核；同时以`Arc<SchedRequest>`满足全payload `Clone`会把broadcast需求反向泄漏为request共享所有权。R1改为single-owner`Box<SchedRequest>`、无通用`IpiPayload::Clone`、handler借用payload、broadcast仅显式复制eligible variant，并在任何发送副作用前断言scheduler request误用。目标、owner、UAPI、completion、gate与exactly-once目标保持不变，但明确的request ownership invariant和broadcast failure contract发生变化，因此递增R1；执行与复审证据追加当前transaction。
+
+## 修订实施记录
+
+### R1 - Scheduler request 单所有权与 broadcast fail-fast
+
+**Trigger:** Checkpoint 2B pre-commit review确认scheduler request进入broadcast只能来自内核调用方误用，且为了通用payload clone而把request包装为`Arc`错误表达了共享所有权。
+
+**Semantic Delta:** canonical request ownership从`Arc<SchedRequest>`改为single-owner`Box<SchedRequest>`；`IpiPayload`不再通用`Clone`，broadcast只显式复制eligible variant；scheduler request误用在任何allocation/enqueue前panic，不进入可恢复`IpiError`。R0的目标、owner、UAPI、remote gate、completion和exactly-once接受边界不变。
+
+**Write Set / Gates:** 保持Checkpoint 2B kernel write set；docs同步`index.md`、`invariants.md`、本文、tracker、transaction与RFC导航。旧Arc diff的review结论作废，Box冻结diff重新完成独立review。
+
+**Validation Floor:** `just build`、全部enabled KUnit、fair-test local priority vertical slice、IPI/request source audit、`git diff --check`、kernel format check与`mdbook build docs`。
+
+**Transaction:** [当前R1实施事务](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md)。R0事务尚未Completed，因此本修订在同一活动事务内独立记录，不创建post-close事务。
 
 ## Write Set 扩展记录
 
 - 文档层review已批准Phase 2A / 2B使用`sched/class/mod.rs`；`idle.rs`只在shared lifecycle trait exhaustiveness要求时作behavior-preserving同步。
 - 文档层review已批准Phase 3把`conf/platforms/qemu-virt-rv64-pretest.toml`和`anemone-apps/user-test/ltp/profile.txt`列为validation-only write set；两者不得进入最终提交，runtime后必须恢复并验证无diff。
+- 2026-07-15 Checkpoint 2B compile integration证明`sched/api`需要按transport error variant完成typed mapping。批准把`anemone-kernel/src/exception/mod.rs`加入2B最小write set，仅re-export`ipi.rs`中已经公开且由`send_ipi_async()`返回的`IpiError`；同时删除为绕过不可命名返回类型而添加的单用途predicate wrapper。该扩展不改变IPI error、transport、ABI或scheduler contract；review需确认scheduler只匹配现有variant，且`exception/ipi.rs`不保留语义重复的薄wrapper。
 
 ## 结构维护记录
 

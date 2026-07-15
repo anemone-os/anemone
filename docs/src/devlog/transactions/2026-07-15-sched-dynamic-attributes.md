@@ -4,12 +4,12 @@
 **Owners:** doruche, Codex
 **Area:** scheduler / dynamic attributes / syscall ABI / IPI / affinity
 **Canonical Plan:** [RFC-20260714-sched-dynamic-attributes](../../rfcs/sched-dynamic-attributes/index.md), [不变量需求](../../rfcs/sched-dynamic-attributes/invariants.md), [迁移实施计划](../../rfcs/sched-dynamic-attributes/implementation.md)
-**Canonical Revision:** R0
-**Current Phase:** Checkpoint 2A 已完成；Checkpoint 2B 尚未开始
+**Canonical Revision:** R1
+**Current Phase:** Checkpoint 2B Closed；Stage 3 Not Started / Not Run
 
 ## Scope
 
-本事务按 R0 的阶段顺序实现第一版 dynamic scheduler attributes：先建立 dormant value-carrying one-shot，再完成 typed config、owner-CPU reconfigure、existing priority 原子切换、affinity remote vertical slice、legacy scheduler ABI、`sched_attr` ABI 与最终旁路审计。
+本事务从 R0 启动并在 Checkpoint 2B 接受 R1 ownership/failure-contract 修订，继续按同一阶段顺序实现第一版 dynamic scheduler attributes：先建立 dormant value-carrying one-shot，再完成 typed config、owner-CPU reconfigure、existing priority 原子切换、affinity remote vertical slice、legacy scheduler ABI、`sched_attr` ABI 与最终旁路审计。
 
 阶段之间严格执行 canonical write set、停止条件、验证 floor 与独立 review gate。worker 不得未经批准越界修改；真实 owner boundary 需要扩张时，先在本事务和 implementation plan 记录批准结果。本事务不修复 wait-core synchronous remote placement，也不把 IRQ-off allocation 风险误写为已关闭。
 
@@ -35,7 +35,7 @@
 | 阶段 3 | affinity adapter、rv64/la64 syscall numbers、`sched-attr-test`、rv64 pretest routing；SMP/profile仅validation-only | Codex 总控或一个受限 worker | 独立 ABI 与 remote-gate reviewer | agent：双架构 build、pretest、单CPU app；用户或明确授权的 agent：SMP=2 stress / targeted LTP | Implementation Not Started；review/runtime Not Run |
 | 阶段 4 | policy adapter、窄 interval accessor、syscall numbers、focused app；profile仅validation-only | Codex 总控或一个受限 worker | 独立 policy/permission/interval reviewer | agent：build / pretest / focused app；用户或明确授权的 agent：targeted LTP | Implementation Not Started；review/runtime Not Run |
 | 阶段 5 | attr adapter、syscall numbers、focused app；profile仅validation-only | Codex 总控或一个受限 worker | 独立 Linux 6.6 size/copy/errno reviewer | agent：build / focused probes；用户或明确授权的 agent：targeted LTP | Implementation Not Started；review/runtime Not Run |
-| 阶段 6 | 既有 owner 文件中的审计修正、focused asset、R0 docs/devlog/nav；register仅真实状态变化时更新 | Codex 总控 | 独立最终 reviewer | agent：build / source / format / docs；用户或明确授权的 agent：SMP=2、ABI matrix、schedule profile、必要的 la64 smoke | Implementation Not Started；review/runtime Not Run |
+| 阶段 6 | 既有 owner 文件中的审计修正、focused asset、current-revision docs/devlog/nav；register仅真实状态变化时更新 | Codex 总控 | 独立最终 reviewer | agent：build / source / format / docs；用户或明确授权的 agent：SMP=2、ABI matrix、schedule profile、必要的 la64 smoke | Implementation Not Started；review/runtime Not Run |
 
 ## Phase Log
 
@@ -111,12 +111,68 @@
 
 **Stop Conditions:** 2A未安装第二config truth、未改变production mutation行为、未提前发布request path，也不需要write-set扩张；本checkpoint停止条件均未命中。Implementation、独立review与runtime KUnit gate关闭；2B仍为Not Started。
 
+### 2026-07-15 - Checkpoint 2B Final-shape Atomic Cutover 启动
+
+**Phase:** 阶段 2 / Checkpoint 2B；Implementation In Progress，review/runtime Not Run。Checkpoint 2A已由提交`7616b39b`关闭，机械搬迁不再混入本diff。
+
+**Preflight:** 独立只读preflight逐项核对AtomicNice/Task storage、RunQueue role、Processor current/pending、Fair/RT lifecycle、clone、priority、procfs、IPI与request接线；canonical 2B write set足以完成final shape，当前未命中停止条件或扩张需求。实现保持零参数`SchedEntity::new_default()`，由scheduler owner构造online default affinity，避免把owner参数传播到write set外的architecture/kthreadd caller。
+
+**Write Set Lock:** kernel write set严格限于新增`sched/request.rs`，以及`sched/config.rs`、`sched/{mod,processor,nice}.rs`、`sched/class/{mod,entity,runqueue,rt}.rs`、必要时仅作trait exhaustiveness同步的`class/idle.rs`、`sched/class/fair/{mod,stride}.rs`、`task/{mod,sched}.rs`、`task/api/{mod,clone/mod}.rs`、`sched/api/mod.rs`、`sched/api/priority/**`、`exception/{mod,ipi}.rs`、`fs/proc/tgid/status.rs`与对应owner KUnit。`exception/mod.rs`仅允许re-export既有`IpiError`。不得修改wait-core、`sync::Mutex`、Event、architecture trap、Kconfig、default policy、user ABI、rootfs或LTP profile；worker不得提交或修改文档，任何额外constructor/caller文件先停止上报。
+
+**Atomic Cutover Boundary:** 本checkpoint必须同时安装唯一`SchedConfig` storage、删除`AtomicNice`与published direct setter、完成class role transaction、local/remote request/gate/IPI接线，并切priority、clone与procfs；不得按storage/request/ABI再拆提交，也不得保留第二nice/policy/priority/affinity truth或临时adapter。所有可恢复错误在detach前结束，publication后只允许不可失败attach tail。
+
+**Review Dimensions:** 独立review除single truth、role/placement、current resched、request/gate、clone inheritance与2A隔离外，单独检查模块边界和代码范式：对象不变量逻辑应成为owner type方法，跨对象编排/纯关系才保留自由函数；visibility必须阻止syscall/request越过RunQueue和class owner，不得新增manager式泛化、shared mutation token或public payload构造面。
+
+**Planned Gate:** 完成后运行`just fmt kernel --check`、`just build`、`git diff --check`与rv64 pretest全部enabled KUnit，并点名config/role/request/clone/priority case；source audit确认无`AtomicNice`、`Task::set_nice`、published entity replace、第二config truth、request broadcast或IPI queue-lock跨业务handler。existing priority local用户态runtime若没有独立focused资产则如实记录验证边界；remote SMP=2留到阶段3，不以source proof写成runtime PASS。
+
+### 2026-07-15 - Checkpoint 2B Write Set 扩展批准
+
+**Trigger:** 首次compile integration中，`sched/api`需要把`send_ipi_async()`的typed transport failure映射为`TransportAllocation`或`TargetOffline`。`IpiError`及其variants已经在`exception/ipi.rs`中公开，但private `ipi` module没有从`exception` facade re-export该返回类型；在原write set内绕行会迫使IPI owner增加两个只包一层`matches!`的单用途predicate方法。
+
+**Approval:** 将`anemone-kernel/src/exception/mod.rs`加入Checkpoint 2B write set，只允许从现有IPI facade re-export既有`IpiError`。删除临时`is_allocation_failure()` / `is_target_offline()`薄wrapper，让scheduler caller直接匹配现有error variants。该变更不新增error variant，不改变transport、completion、ABI或accepted scheduler contract，也不修改architecture trap。
+
+**Review / Validation Impact:** 最终独立review必须确认新增surface只暴露现有函数签名已经返回的transport error、scheduler没有解释transport之外的policy，并完成全树薄wrapper审计。原build、全部enabled KUnit、priority local runtime与source-audit floor保持不变。
+
+### 2026-07-15 - Checkpoint 2B IPI Ownership 修正
+
+**Feedback:** 用户在pre-commit review指出，scheduler request进入broadcast是内核调用错误，不应新增可恢复`IpiError::NotBroadcastable`；既然request不可broadcast，以`Arc<SchedRequest>`满足整个`IpiPayload: Clone`也错误暗示共享所有权。总控暂停旧final review并退回同一checkpoint修正。
+
+**Accepted Correction:** `IpiPayload::SchedulerRequest`改为single-owner`Box<SchedRequest>`；payload删除通用`Clone`，IPI handler借用而不clone payload，broadcast只显式复制eligible variant，并在任何allocation/enqueue前对scheduler request误用常开断言失败。`SchedRequestBody`的`Some -> None`继续防御duplicate execute与double completion；Box保持payload尺寸和诊断地址稳定。删除`NotBroadcastable` variant及errno mapping，保留`IpiError` facade re-export供真实`Alloc` / `TargetOffline` typed mapping。
+
+**Contract / Gate Impact:** canonical index、invariants、implementation与tracker同步为`sched/request` owner和single-owner payload。该反馈不改变R0目标、owner、UAPI、gate、completion或exactly-once语义，保持R0；2B write set、验证floor与停止条件不变。旧Arc diff上的review结论作废，新冻结diff必须重新完成独立review、build与全部enabled KUnit。
+
+### 2026-07-15 - Checkpoint 2B RFC Revision Classification Correction
+
+**Correction:** 上一条把ownership/failure-path修正归类为“保持R0”不符合仓库修订规则。R0 canonical已经明确接受`Arc<SchedRequest>` ownership invariant，而本次反馈把它改为single-owner `Box`，并把broadcast误用从可恢复transport rejection改为任何发送副作用前panic；即使目标、owner、UAPI、gate、completion与exactly-once高层边界不变，这仍是已接受的不变量和failure contract变化，因此当前canonical修订递增为R1。
+
+**Transaction / Write Set:** R0事务仍为Active且从未Completed，本次R1继续由同一事务实现和验证，不创建post-close transaction。为保持当前RFC导航不漂移，批准把`docs/src/rfcs.md`加入本checkpoint的docs write set；kernel write set、stage order、review gate、验证floor与停止条件均不变。
+
+### 2026-07-15 - Checkpoint 2B 实现、R1 修正与 Gate 关闭
+
+**Change:** 原子安装`SchedEntity`唯一`SchedConfig` truth，删除`AtomicNice`和published direct setter；`RunQueue::apply_config_patch()`覆盖current、queued、detached和Zombie role，按Fair/RT owner处理payload replacement、placement、RR budget/rotation与current full-pick。priority local/remote submission、global remote gate、one-shot completion、clone reset/fresh runtime/affinity-contained CPU及procfs affinity projection全部切到同一truth。request/gate lifecycle位于`sched/request.rs`，`sched/api`只保留ABI selector、result folding和errno映射。
+
+**R1 Ownership Correction:** 用户pre-commit反馈后，scheduler request从`Arc<SchedRequest>`改为single-owner`Box<SchedRequest>`；`IpiPayload`删除通用`Clone`，handler借用payload，broadcast只显式复制eligible variant，并在任何allocation/enqueue前对scheduler request误用panic。删除`IpiError::NotBroadcastable`，只保留真实`Alloc` / `TargetOffline` transport failure。canonical RFC按明确ownership invariant和broadcast failure contract变化递增R1；R0目标、owner、UAPI、gate、completion与exactly-once接受边界不变。
+
+**Module / Paradigm Review:** 删除临时transport-error predicate wrapper以及Fair reconfigure的一行语义wrapper，调用点直接执行owner操作并在非显然顺序处保留inline invariant comment。最终复审又删除无收窄/校验价值的`new_round_robin_entity()` / `new_fifo_entity()`；fresh runtime构造归属`RtEntity::new_fresh(mode)` associated constructor，test-only显式runtime注入保持`rt.rs`私有。最终owner-type方法承载entity/class不变量，跨对象submission、纯config关系与ABI target编排保留module自由函数，没有新增manager式抽象、共享mutation token或public payload构造面。
+
+**Independent Review:** 未参与写入的独立reviewer在旧Arc diff作废后重新审查最终冻结diff，覆盖config/state owner、role/placement、Fair/RT transition、current pending、request/gate/Box lifetime、broadcast pre-side-effect panic、handler borrow、transport failure cleanup、clone、priority、procfs、模块边界、OOP/free-function选择与薄wrapper。最终结论为Apollyon 0、Keter 0、Euclid 0，Checkpoint 2B source-review PASS。
+
+**Agent-run Validation:** 最终`just build`通过且无compiler warning。`./scripts/run-user-test-rv64.sh etc/sdcard-rv.img`重建rootfs和kernel并启动rv64 pretest；`build/user-test-rv64.log`记录`Running 163 tests...`、新的broadcast-copy、`RtEntity` fresh constructor、request exactly-once、local setpriority以及config/role/clone/procfs focused KUnit全部`ok`，最终`All tests passed!`。随后`fair-test`的equal-progress、nice-direction、bounded-yield和sleep-wake-progress全部通过；其nice-direction路径实际调用并read-back `setpriority()` / `getpriority()`，因此只作为existing priority local userspace vertical slice，不升级为targeted priority LTP证据。KUnit/fair-test后启动的普通LTP输出是incidental且未完整运行或分类，不作为本checkpoint PASS/FAIL证据。
+
+**Static / Docs Validation:** `git diff --check 7616b39b`通过；source audit对`AtomicNice`、direct nice setter、旧reconfigure wrapper、固定mode RT wrapper、`Arc<SchedRequest>`、`NotBroadcastable`、通用payload clone与handler `payload.clone()`均为零production命中。`just fmt kernel --check`只报告未手工维护的generated `anemone-kernel/src/kconfig_defs.rs`和`platform_defs.rs`既有whitespace drift，未报告authored 2B source。R1 canonical/navigation更新后`mdbook build docs`通过，仅有既有large search-index warning。
+
+**Not Run:** targeted priority LTP、SMP=2 remote setter runtime、remote gate contention/dual-CPU stress、la64 build/runtime以及Stage 3 affinity ABI/runtime均未运行；SMP=2与affinity验证继续由Stage 3 canonical gate拥有，不能由2B source proof或单CPU KUnit替代。
+
+**Source / Worktree Boundary:** kernel diff只落在Checkpoint 2B批准的owner文件；`exception/mod.rs`仅re-export既有`IpiError`，`docs/src/rfcs.md`仅因R1 current-revision导航同步进入批准的docs扩展。`AGENTS.md`仍是用户改动，未由本checkpoint修改并在提交时保持unstaged。没有wait-core、Mutex/Event、architecture trap、Kconfig、default policy、rootfs/profile或user ABI tracked修改。
+
+**Stop Conditions:** 最终未命中第二config truth、wrong-owner mutation、detach后ordinary failure、request broadcast、handler获取gate/credential、completion早于commit、owner/write-set不闭合或review blocker。Checkpoint 2B Implementation、独立review与rv64 KUnit/local fair-test gate关闭；Stage 3保持Not Started / Not Run。
+
 ## Open Items
 
 - 本 RFC owner内当前无开放 Apollyon、Keter或 Euclid。
-- wait-core [KETER-WAIT-001](../../rfcs/sched-wait-refactor/tracking-issues.md#keter-wait-001synchronous-remote-placement-不能组合进-cross-cpu-ipi-completion) 继续 Open；R0 remote gate只neutralize scheduler request producer graph。
-- Checkpoint 2A已关闭；Checkpoint 2B及后续阶段保持Not Started / Not Run。
+- wait-core [KETER-WAIT-001](../../rfcs/sched-wait-refactor/tracking-issues.md#keter-wait-001synchronous-remote-placement-不能组合进-cross-cpu-ipi-completion) 继续 Open；R1 remote gate只neutralize scheduler request producer graph。
+- Checkpoint 2A和2B已关闭；Stage 3及后续阶段保持Not Started / Not Run。
 
 ## Closure
 
-事务 Active；R0 尚未实现或关闭。
+事务 Active；R1的Stage 2已关闭，Stage 3及后续实现尚未开始，RFC整体尚未关闭。

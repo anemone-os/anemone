@@ -14,7 +14,7 @@ use alloc::{alloc::AllocError, collections::LinkedList};
 
 use crate::prelude::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum IpiPayload {
     TlbShootdown {
         vpn: Option<VirtPageNum>,
@@ -26,11 +26,31 @@ pub enum IpiPayload {
         tid: Tid,
         park: ParkState,
     },
+    SchedulerRequest(Box<SchedRequest>),
     #[cfg(feature = "kunit")]
     RunKUnitPerCpu {
         test_fn: fn(),
     },
     StopExecution,
+}
+
+impl IpiPayload {
+    fn copy_for_broadcast(&self) -> Self {
+        match self {
+            Self::TlbShootdown { vpn } => Self::TlbShootdown { vpn: *vpn },
+            Self::EnqueueNewTask { tid } => Self::EnqueueNewTask { tid: *tid },
+            Self::WakeUpTaskStaleSafe { tid, park } => Self::WakeUpTaskStaleSafe {
+                tid: *tid,
+                park: *park,
+            },
+            Self::SchedulerRequest(_) => {
+                panic!("scheduler request cannot be copied for IPI broadcast")
+            },
+            #[cfg(feature = "kunit")]
+            Self::RunKUnitPerCpu { test_fn } => Self::RunKUnitPerCpu { test_fn: *test_fn },
+            Self::StopExecution => Self::StopExecution,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -117,6 +137,10 @@ pub fn send_ipi_wait_result(
 /// Broadcast an IPI to all other CPUs, synchronously waiting for all of them to
 /// handle the IPI before returning.
 pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
+    assert!(
+        !matches!(&payload, IpiPayload::SchedulerRequest(_)),
+        "scheduler request cannot be broadcast"
+    );
     let cur_cpuid = cur_cpu_id().get();
     let ncpus = ncpus();
     for id in 0..ncpus {
@@ -127,7 +151,7 @@ pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
     let mut pending = LinkedList::new();
     for id in 0..ncpus {
         if id != cur_cpuid {
-            let msg = alloc_ipi_msg(payload.clone())?;
+            let msg = alloc_ipi_msg(payload.copy_for_broadcast())?;
             pending.push_back(Arc::clone(&msg));
             enqueue_ipi(id, msg);
         }
@@ -161,6 +185,10 @@ pub fn send_ipi_async(cpu_id: usize, payload: IpiPayload) -> Result<(), IpiError
 
 /// Broadcast an IPI to all other CPUs asynchronously.
 pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
+    assert!(
+        !matches!(&payload, IpiPayload::SchedulerRequest(_)),
+        "scheduler request cannot be broadcast"
+    );
     let cur_cpuid = cur_cpu_id().get();
     let ncpus = ncpus();
     for id in 0..ncpus {
@@ -172,7 +200,7 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
     let mut pending = LinkedList::new();
     for id in 0..ncpus {
         if id != cur_cpuid {
-            pending.push_back((id, alloc_ipi_msg(payload.clone())?));
+            pending.push_back((id, alloc_ipi_msg(payload.copy_for_broadcast())?));
         }
     }
 
@@ -188,12 +216,19 @@ pub fn handle_ipi() {
 
     IPI_QUEUE.with(|queue| {
         loop {
-            let Some(msg) = queue.lock_irqsave().pop_front() else {
+            // The queue lock protects transport ownership only. Business
+            // handlers, including scheduler transactions, run after this
+            // guard is unambiguously released.
+            let msg = {
+                let mut queue = queue.lock_irqsave();
+                queue.pop_front()
+            };
+            let Some(msg) = msg else {
                 break;
             };
-            match msg.payload.clone() {
+            match &msg.payload {
                 TlbShootdown { vpn } => {
-                    if let Some(vpn) = vpn {
+                    if let Some(vpn) = *vpn {
                         PagingArch::tlb_shootdown(vpn);
                     } else {
                         PagingArch::tlb_shootdown_all();
@@ -202,10 +237,11 @@ pub fn handle_ipi() {
                 },
                 #[cfg(feature = "kunit")]
                 RunKUnitPerCpu { test_fn } => {
-                    crate::debug::kunit::handle_percpu_ipi_test(test_fn);
+                    crate::debug::kunit::handle_percpu_ipi_test(*test_fn);
                     msg.is_accomplished.store(true, Ordering::Release);
                 },
                 EnqueueNewTask { tid } => {
+                    let tid = *tid;
                     let task = get_task(&tid).expect("internal error: no such task to wake up");
 
                     // SAFETY: all accesses to local runqueue already disabled interrupts, so we are
@@ -214,8 +250,9 @@ pub fn handle_ipi() {
                     msg.is_accomplished.store(true, Ordering::Release);
                 },
                 WakeUpTaskStaleSafe { tid, park } => {
+                    let tid = *tid;
                     let task = get_task(&tid).expect("internal error: no such task to wake up");
-                    let placement = wake_enqueue(task, park);
+                    let placement = wake_enqueue(task, *park);
                     *msg.wake_result.lock() = Some(placement);
                     kdebugln!(
                         "ipi wake placement: tid={} park={:?} placement={:?}",
@@ -223,6 +260,10 @@ pub fn handle_ipi() {
                         park,
                         placement
                     );
+                    msg.is_accomplished.store(true, Ordering::Release);
+                },
+                SchedulerRequest(request) => {
+                    request.execute();
                     msg.is_accomplished.store(true, Ordering::Release);
                 },
                 StopExecution => {
@@ -234,6 +275,55 @@ pub fn handle_ipi() {
             }
         }
     })
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    fn unused_test() {}
+
+    #[kunit]
+    fn test_broadcast_copy_reconstructs_only_eligible_payloads() {
+        let tid = Tid::new(7);
+        let copies = [
+            IpiPayload::TlbShootdown { vpn: None }.copy_for_broadcast(),
+            IpiPayload::EnqueueNewTask { tid }.copy_for_broadcast(),
+            IpiPayload::WakeUpTaskStaleSafe {
+                tid,
+                park: ParkState::Parked,
+            }
+            .copy_for_broadcast(),
+            IpiPayload::RunKUnitPerCpu {
+                test_fn: unused_test,
+            }
+            .copy_for_broadcast(),
+            IpiPayload::StopExecution.copy_for_broadcast(),
+        ];
+
+        let mut copies = copies.into_iter();
+        assert!(matches!(
+            copies.next().unwrap(),
+            IpiPayload::TlbShootdown { vpn: None }
+        ));
+        assert!(matches!(
+            copies.next().unwrap(),
+            IpiPayload::EnqueueNewTask { tid: copied } if copied == tid
+        ));
+        assert!(matches!(
+            copies.next().unwrap(),
+            IpiPayload::WakeUpTaskStaleSafe {
+                tid: copied,
+                park: ParkState::Parked,
+            } if copied == tid
+        ));
+        assert!(matches!(
+            copies.next().unwrap(),
+            IpiPayload::RunKUnitPerCpu { .. }
+        ));
+        assert!(matches!(copies.next().unwrap(), IpiPayload::StopExecution));
+        assert!(copies.next().is_none());
+    }
 }
 
 pub struct TlbShootdownGuard {

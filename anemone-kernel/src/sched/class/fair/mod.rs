@@ -4,9 +4,13 @@ use crate::prelude::*;
 
 #[cfg(feature = "kunit")]
 use super::entity::{SchedClassPrv, SchedEntity};
+#[cfg(feature = "kunit")]
+use crate::sched::config::{CpuMask, SchedConfig, SchedDiscipline};
 
 mod stride;
 
+#[cfg(feature = "kunit")]
+pub(super) use stride::assert_test_fresh;
 pub(super) use stride::{Stride as Fair, StrideEntity as FairEntity};
 
 /// Linux `sched_prio_to_weight[]` for the complete `Nice[-20, 19]` domain.
@@ -30,5 +34,14 @@ pub(super) fn new_fresh_entity() -> FairEntity {
 /// the production default facade, without depending on the global selector.
 #[cfg(feature = "kunit")]
 pub(super) fn new_test_entity() -> SchedEntity {
-    SchedEntity::new(SchedClassPrv::Fair(new_fresh_entity()))
+    SchedEntity::new_task(
+        SchedConfig::new(
+            SchedDiscipline::Fair,
+            Nice::ZERO,
+            false,
+            CpuMask::online(),
+            cur_cpu_id(),
+        ),
+        SchedClassPrv::Fair(new_fresh_entity()),
+    )
 }

@@ -8,8 +8,13 @@
 
 use crate::{
     prelude::*,
-    sched::class::{PreemptDecision, RunQueue, TickAction},
+    sched::{
+        class::{PreemptDecision, RunQueue, TickAction},
+        config::{CpuMask, SchedChangePermit, SchedConfigPatch, SchedError},
+    },
 };
+
+static NEXT_CPU: AtomicUsize = AtomicUsize::new(0);
 
 /// Scheduler-core snapshot proving that an owner-CPU full pick is pending.
 ///
@@ -144,6 +149,36 @@ fn is_local_current_task(task: &Arc<Task>) -> bool {
 pub fn request_resched() {
     with_intr_disabled(|| {
         PROCESSOR.with_mut(|proc| proc.pending_resched.request());
+    })
+}
+
+/// Apply a scheduler configuration patch on this CPU's processor transaction.
+pub(in crate::sched) fn apply_config_patch(
+    target: &Arc<Task>,
+    patch: SchedConfigPatch,
+    permit: SchedChangePermit,
+) -> Result<(), SchedError> {
+    assert_eq!(
+        target.cpuid(),
+        cur_cpu_id(),
+        "config request reached wrong CPU"
+    );
+    let online = CpuMask::online();
+    with_intr_disabled(|| {
+        PROCESSOR.with_mut(|proc| {
+            let is_current = proc
+                .running_task
+                .as_ref()
+                .map(|current| Arc::ptr_eq(current, target))
+                .unwrap_or(false);
+            let request_full_pick = proc
+                .runq
+                .apply_config_patch(target, patch, permit, online, is_current)?;
+            if request_full_pick {
+                proc.pending_resched.request();
+            }
+            Ok(())
+        })
     })
 }
 
@@ -398,11 +433,21 @@ pub fn local_sched_tick() {
 ///
 /// TODO: better strategy for load balancing.
 pub fn pick_next_cpu() -> CpuId {
-    // currently a simple round-robin strategy is used.
-    static NEXT_CPU: AtomicUsize = AtomicUsize::new(0);
-    let ncpus = ncpus();
-    let cpu = NEXT_CPU.fetch_add(1, Ordering::Relaxed) % ncpus;
-    CpuId::new(cpu)
+    pick_next_cpu_in(CpuMask::online())
+}
+
+/// Pick an online CPU from an already normalized scheduler affinity mask.
+pub(crate) fn pick_next_cpu_in(affinity: CpuMask) -> CpuId {
+    let cpu_count = ncpus();
+    assert!(cpu_count > 0);
+    let start = NEXT_CPU.fetch_add(1, Ordering::Relaxed) % cpu_count;
+    for offset in 0..cpu_count {
+        let cpu = CpuId::new((start + offset) % cpu_count);
+        if affinity.contains(cpu) && target_online(cpu.get()) {
+            return cpu;
+        }
+    }
+    panic!("scheduler affinity has no online CPU for task construction")
 }
 
 /// Enqueue a task to the run queue of another processor.
@@ -518,5 +563,20 @@ impl Processor {
         {
             self.pending_resched.request();
         }
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn test_task_construction_cpu_selection_stays_inside_affinity() {
+        let mut affinity = CpuMask::empty();
+        affinity.insert(cur_cpu_id());
+        let selected = pick_next_cpu_in(affinity);
+        assert_eq!(selected, cur_cpu_id());
+        assert!(affinity.contains(selected));
+        assert!(target_online(selected.get()));
     }
 }

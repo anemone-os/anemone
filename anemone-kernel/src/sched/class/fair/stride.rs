@@ -45,6 +45,11 @@ impl SchedEntity {
     }
 }
 
+#[cfg(feature = "kunit")]
+pub(in crate::sched::class) fn assert_test_fresh(entity: &SchedEntity) {
+    assert_eq!(entity.stride().pass, None);
+}
+
 struct ReadyEntry {
     // This immutable snapshot exists only to give BinaryHeap a stable key.
     // StrideEntity::pass remains the accounting truth and is asserted at each
@@ -100,10 +105,26 @@ impl Stride {
 
     /// Construct the placed Fair payload required by a discipline transition.
     ///
-    /// This does not publish or install the payload. Phase 2B will call it only
-    /// after the old physical role has been detached in the owner transaction.
+    /// This only prepares an infallible payload before detach; the owner
+    /// transaction cannot publish or install it until the old physical role
+    /// has been detached.
     pub(in crate::sched::class) fn new_transition_entity(&self) -> StrideEntity {
         StrideEntity::new_placed(self.placement_floor)
+    }
+
+    pub(in crate::sched::class) fn attach_reconfigured_current(&mut self, task: &Arc<Task>) {
+        assert!(
+            self.current.is_none(),
+            "Fair reconfigure would replace an active current identity"
+        );
+        let (pass, on_runq) = Self::entity_pass(task);
+        assert!(!on_runq, "reconfigured Fair current cannot be queued");
+        assert!(
+            pass >= self.placement_floor,
+            "reconfigured Fair current pass is below placement floor"
+        );
+        self.current = Some(Arc::downgrade(task));
+        self.refresh_placement_floor();
     }
 
     fn entity_pass(task: &Arc<Task>) -> (u128, bool) {
@@ -134,7 +155,7 @@ impl Stride {
         })
     }
 
-    fn assert_current(&self, task: &Arc<Task>) -> u128 {
+    pub(in crate::sched::class) fn assert_current(&self, task: &Arc<Task>) -> u128 {
         let current = self
             .current_task()
             .expect("Fair lifecycle transaction has no active current");
@@ -150,7 +171,7 @@ impl Stride {
         pass
     }
 
-    fn clear_current(&mut self, task: &Arc<Task>) {
+    pub(in crate::sched::class) fn clear_current(&mut self, task: &Arc<Task>) {
         let _ = self.assert_current(task);
         self.current = None;
     }
@@ -180,7 +201,7 @@ impl Stride {
         });
     }
 
-    fn refresh_placement_floor(&mut self) {
+    pub(in crate::sched::class) fn refresh_placement_floor(&mut self) {
         let ready_min = self.ready.peek().map(|entry| {
             let _ = Self::assert_entry_snapshot(entry);
             entry.pass_snapshot
@@ -212,7 +233,7 @@ impl Stride {
         }
     }
 
-    fn set_fresh_pass(&self, task: &Arc<Task>) -> u128 {
+    fn place_new_or_transitioned(&self, task: &Arc<Task>) -> u128 {
         task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
             assert_eq!(entity.class_kind(), SchedClassKind::Fair);
             assert!(
@@ -220,12 +241,16 @@ impl Stride {
                 "fresh Fair task is already marked on the run queue"
             );
             let stride = entity.stride_mut();
-            assert!(
-                stride.pass.is_none(),
-                "enqueue_new is the only Fair pass initialization transition"
-            );
-            stride.pass = Some(self.placement_floor);
-            self.placement_floor
+            let pass = match stride.pass {
+                None => self.placement_floor,
+                // A detached RT->Fair transaction preplaces the task so a
+                // later logical-runnable enqueue never observes a fresh Fair
+                // payload. Clamp again because the class floor may advance
+                // between the owner transaction and physical enqueue.
+                Some(pass) => pass.max(self.placement_floor),
+            };
+            stride.pass = Some(pass);
+            pass
         })
     }
 
@@ -309,7 +334,7 @@ impl Scheduler for Stride {
     const KIND: SchedClassKind = SchedClassKind::Fair;
 
     fn enqueue_new(&mut self, task: Arc<Task>) {
-        let pass = self.set_fresh_pass(&task);
+        let pass = self.place_new_or_transitioned(&task);
         self.enqueue_ready(task, pass);
         self.refresh_placement_floor();
     }
@@ -449,8 +474,9 @@ impl Scheduler for Stride {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
+    use crate::sched::config::{CpuMask, SchedConfig, SchedConfigPatch, SchedDiscipline};
 
-    fn fresh_task(nice: Nice) -> Arc<Task> {
+    fn task_with_stride(nice: Nice, stride: StrideEntity) -> Arc<Task> {
         fn unused_entry() {}
 
         let (task, guard) = unsafe {
@@ -460,7 +486,16 @@ mod kunits {
                 ParameterList::empty(),
                 None,
                 None,
-                SchedEntity::new(SchedClassPrv::Fair(StrideEntity::new_fresh())),
+                SchedEntity::new_task(
+                    SchedConfig::new(
+                        SchedDiscipline::Fair,
+                        nice,
+                        false,
+                        CpuMask::online(),
+                        cur_cpu_id(),
+                    ),
+                    SchedClassPrv::Fair(stride),
+                ),
                 TaskFlags::empty(),
                 Some(cur_cpu_id()),
             )
@@ -469,14 +504,28 @@ mod kunits {
         unsafe {
             guard.forget();
         }
-        let task = Arc::new(task);
-        task.set_nice(nice);
-        task
+        Arc::new(task)
+    }
+
+    fn fresh_task(nice: Nice) -> Arc<Task> {
+        task_with_stride(nice, StrideEntity::new_fresh())
     }
 
     fn set_on_runq(task: &Arc<Task>, on_runq: bool) {
         task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
             entity.on_runq = on_runq;
+        });
+    }
+
+    fn publish_test_nice(task: &Arc<Task>, nice: Nice) {
+        let owner = task.cpuid();
+        task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
+            let old = entity.config_snapshot();
+            let new = SchedConfigPatch::keep()
+                .with_nice(nice)
+                .project(old, old.affinity(), owner)
+                .unwrap();
+            entity.publish_config(new);
         });
     }
 
@@ -560,6 +609,38 @@ mod kunits {
         stride.placement_floor = PASS_SCALE * 3;
         let entity = stride.new_transition_entity();
         assert_eq!(entity.pass, Some(PASS_SCALE * 3));
+    }
+
+    #[kunit]
+    fn test_reconfigure_clear_preserves_minimum_current_floor_until_final_union() {
+        let (mut stride, current, peer) = setup_low_current_high_peer();
+        assert_eq!(pass(&current), 0);
+        assert_eq!(pass(&peer), PASS_SCALE);
+        assert_eq!(stride.placement_floor, 0);
+
+        stride.clear_current(&current);
+        assert!(stride.current.is_none());
+        assert_eq!(stride.placement_floor, 0);
+
+        stride.refresh_placement_floor();
+        assert_eq!(stride.placement_floor, PASS_SCALE);
+    }
+
+    #[kunit]
+    fn test_preplaced_transition_enqueue_reclamps_and_gets_new_sequence() {
+        let mut stride = Stride::new();
+        stride.placement_floor = PASS_SCALE * 2;
+        let peer = fresh_task(Nice::ZERO);
+        publish_new(&mut stride, peer.clone());
+
+        let transitioned = task_with_stride(Nice::ZERO, StrideEntity::new_placed(PASS_SCALE));
+        let sequence_before = stride.next_enqueue_seq;
+        publish_new(&mut stride, transitioned.clone());
+
+        assert_eq!(pass(&transitioned), PASS_SCALE * 2);
+        assert_eq!(stride.next_enqueue_seq, sequence_before + 1);
+        assert!(Arc::ptr_eq(&pick(&mut stride), &peer));
+        assert!(Arc::ptr_eq(&pick(&mut stride), &transitioned));
     }
 
     #[kunit]
@@ -694,7 +775,7 @@ mod kunits {
         let task = fresh_task(Nice::ZERO);
         publish_new(&mut stride, task.clone());
         let snapshot = stride.ready.peek().unwrap().pass_snapshot;
-        task.set_nice(Nice::MAX);
+        publish_test_nice(&task, Nice::MAX);
         assert_eq!(pass(&task), snapshot);
         assert_eq!(stride.ready.peek().unwrap().pass_snapshot, snapshot);
 
@@ -705,7 +786,7 @@ mod kunits {
 
         let peer = fresh_task(Nice::ZERO);
         publish_new(&mut stride, peer.clone());
-        task.set_nice(Nice::MIN);
+        publish_test_nice(&task, Nice::MIN);
         let expected = checked_add_pass(after_tick, stride_delta(Nice::MIN)).unwrap();
         stride.requeue_yielded_current(task.clone(), Instant::now());
         set_on_runq(&task, true);
@@ -780,7 +861,7 @@ mod kunits {
         assert!(Arc::ptr_eq(&pick(&mut alone), &only));
 
         let (mut stride, current, peer) = setup_low_current_high_peer();
-        current.set_nice(Nice::MIN);
+        publish_test_nice(&current, Nice::MIN);
         assert!(stride_delta(Nice::MIN) < pass(&peer));
         stride.requeue_yielded_current(current.clone(), Instant::now());
         set_on_runq(&current, true);
