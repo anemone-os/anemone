@@ -23,7 +23,7 @@
 
 ## Completed
 
-- [CPU Logical / Physical ID](./2026-07-14-cpu-logical-physical-id.md)
+- [CPU Logical / Physical ID](./2026-07-14-cpu-logical-physical-id.md)：物理 ID 上界/逻辑 CPU 容量拆分、无锁 registry 和内建 cache padding 的 typed table 已完成；VisionFive 2 由用户复验通过，最终 table 布局与 LoongArch correction build 未由 agent 运行。
 - [Sched RT Class](./2026-07-12-sched-rt-class.md)
 - [Sched Wait Preempt Arming](./2026-07-06-sched-wait-preempt-arming.md)
 - [VFS Direct User I/O](./2026-06-29-vfs-direct-user-io.md)

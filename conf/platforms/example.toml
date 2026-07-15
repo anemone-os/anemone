@@ -31,8 +31,8 @@ max_user_stack_size = 0x800000      # 8MB
 init_user_stack_size = 0x4000       # 16KB
 # Maximum size of the user heap
 max_heap_size = 0x2000000000        # 128GB
-# Maximum number of CPUs supported by this platform
-max_cpus = 4
+# Inclusive upper bound of firmware-visible physical CPU IDs
+max_phys_cpu_id = 3
 # Page frame section size as a power of 2 in megabytes.
 frame_section_shift_mb = 7
 

@@ -14,9 +14,11 @@
 
 ## Invariants
 
-- registry Vec 下标是连续逻辑 ID，元素是对应物理 ID。
+- registry 的逻辑索引前缀是连续逻辑 ID 到物理 ID 的唯一映射。
 - registry 是 mapping 和 CPU count 的唯一真相源，AP 启动前永久封存。
 - 软件 owner 使用 `CpuId`，最终硬件边界使用 `PhysCpuId`。
+- platform `MAX_PHYS_CPU_ID` 与 kconfig `MAX_LOGICAL_CPUS` 分别拥有物理 ID backing 和逻辑启用容量。
+- 固定 per-CPU backing 通过槽位内建 `CachePadded<T>` 的 `CpuTable` / `PhysCpuTable` 限制索引身份和缓存布局。
 - 反向映射是 bootstrap-only 的 O(CPU 数量) 操作。
 - `STACK0` 和 guarded scheduler stack 按物理槽位归属；进入 scheduler 后由 `sched_ctx.sp` 维持。
 
@@ -63,3 +65,62 @@
 ## Closure
 
 逻辑/物理 CPU identity 拆分已实现并通过 RISC-V、LoongArch 构建；用户确认 RISC-V 实机运行通过。RFC 状态改为 `Implemented / Closed`。CPU hotplug、超出静态 scheduler stack 槽位范围的物理 ID 和完整 PLIC DT context 不在本设计范围内。
+
+### 2026-07-14 - 更正：PLIC follow-up 文档层级
+
+前文 `Next` 将后续 PLIC DT context 解析预设为 follow-up RFC。实际改动局限于 PLIC
+device-tree 解析和同一设备 owner 内的运行时映射，不需要跨子系统 contract 或阶段 gate，
+因此按 [PLIC device-tree context 小迭代记录](../changes/2026-07-14-plic-dt-context.md)
+归档，不建立独立 RFC 或事务日志。CPU identity 本身的范围和不变量不变。
+
+### 2026-07-14 - Post-close 静态无锁 Registry 与逻辑容量语义
+
+**Phase:** post-close implementation feedback
+
+**Change:** 用户要求用固定 cache-padded 槽位替换带锁 `Vec`，并进一步明确 registry 不应加锁。最终 registry 使用 `[CachePadded<MonoOnce<PhysCpuId>>; MAX_CPUS]`；BSP 是 AP 启动前的唯一 writer，槽位先初始化、逻辑计数后推进，`registration_complete` 以 Release/Acquire 发布整个前缀。两架构 early scan 把 BSP 物理 ID 传给 registry：`MAX_CPUS` 只限制逻辑 CPU 数，超限时保留 BSP 和前 `MAX_CPUS - 1` 个 AP，统一打印 `kwarningln!` 并忽略剩余可用 CPU。
+
+**Audit:** registry 不再持有 `Vec` 或 `NoIrqRwLock`；容量判断只使用已注册逻辑 CPU/AP 数，不比较 `PhysCpuId` 数值。BSP 槽位在扫描 BSP 节点前即通过 AP 上限预留，因此不依赖设备树把 BSP 排在前部。
+
+**Validation:** Pending dual-architecture build and source audit.
+
+### 2026-07-14 - 更正：物理 ID 上界与逻辑 CPU 容量拆分
+
+**Phase:** post-close runtime feedback correction
+
+**Symptom:** 用户运行在 VisionFive 2 上完成 `PhysCpuId(1)`、`PhysCpuId(2)` 的 scheduler stack remap 后，于 RISC-V `remap_boot_stack()` 处理下一 CPU 时 panic：长度 3 的数组被索引 3。该证据由用户在对话中提供，agent 未持有完整原始日志。
+
+**Root Cause:** 单一 platform `MAX_CPUS=3` 同时充当最大启用逻辑 CPU 数和物理 ID 索引数组长度。逻辑数量 3 的合法拓扑可以包含物理 ID 1、2、3，但物理 ID 3 不能索引长度 3 的 `GUARDED_STACK_TOPS`。这不是 registry 截断顺序问题，而是配置 owner 与数组索引域混用。
+
+**Change:** platform config 改为含端点的 `max_phys_cpu_id` / `MAX_PHYS_CPU_ID`，kconfig 新增 `max_logical_cpus` / `MAX_LOGICAL_CPUS`。early scan 遇到物理 ID 越界时逐个 `kwarningln!` 并跳过，随后仍按逻辑上限保留 BSP 和前 N-1 个 AP。新增全内联 `CpuTable` / `PhysCpuTable`：registry 与 `PERCPU_BASES` 使用逻辑索引，`STACK0` 与 guarded tops 使用物理索引；`PhysCpuTable` 保持 transparent layout 供入口汇编访问。
+
+**Validation:** Agent 在用户要求停止测试前完成当前 `visionfive2-rv64` 的 `just build`，生成值为 `MAX_LOGICAL_CPUS=3`、`MAX_PHYS_CPU_ID=4`；`git diff --check` 和 split-bound source audit 通过。`just fmt kernel --check` 仍被 write set 外既有 `lwext4`、PLIC、generated defs 和 kthread 格式差异阻塞，本轮命中的文件已按 formatter 输出修正但未按用户要求复跑。LoongArch 构建与 VisionFive 2 运行时复验未运行，由用户接手。
+
+### 2026-07-15 - Typed Array 默认容量与 VisionFive 2 复验
+
+**Phase:** post-close runtime validation
+
+**Change:** typed container 最终命名为 `CpuTable` / `PhysCpuTable`，并增加可覆盖的 const 泛型容量；默认值分别为 `MAX_LOGICAL_CPUS` 和 `MAX_PHYS_CPU_ID + 1`。现有 registry、per-CPU base 与 bootstrap stack 调用均使用默认容量，索引类型边界保持不变。
+
+**Validation:** 用户确认修正后的 VisionFive 2 运行测试成功，原 `PhysCpuId(3)` guarded-stack 越界未再出现。该证据由用户提供，agent 未持有原始运行日志。LoongArch 构建仍未运行，事务保持 validation pending。
+
+### 2026-07-15 - Cache-padded Table 类型拆分与最终收口
+
+**Phase:** Closed
+
+**Change:** 逻辑 CPU 索引表最终拆为普通连续布局的 `CpuTable<T>` 与内部直接保存 `CachePadded<T>` 的 `CpuTablePadded<T>`；物理 CPU 索引表同样拆为 `PhysCpuTable<T>` 与 `PhysCpuTablePadded<T>`。registry 和 `PERCPU_BASES` 使用 padded 逻辑表，guarded tops 使用 padded 物理表，调用点索引仍直接得到 `T`；`STACK0` 保持普通 `PhysCpuTable<T>`，不改变入口汇编依赖的连续 bootstrap stack backing。
+
+**Audit:** 类型名现在同时表达逻辑索引域与 cache-padding 布局；registry 不再通过 `CpuTable<CachePadded<T>>` 嵌套泛型暴露 backing 细节。所有 table 构造和索引函数保持 `inline(always)`。
+
+**Validation:** 用户此前确认容量拆分后的 VisionFive 2 运行成功。最终 `CpuTablePadded` / `PhysCpuTablePadded` 类型拆分与 LoongArch correction build 按用户要求未由 agent 运行测试或构建，不把未运行项记录为通过。
+
+**Closure:** 用户要求直接关闭 RFC/docs；Gate C1、RFC 和本事务标记为 Completed/Closed。上述未运行验证作为证据缺口保留，但不继续维持 active transaction。
+
+### 2026-07-15 - 更正：统一 Cache-padded Table
+
+**Phase:** Closed correction
+
+**Change:** 用户取消上一条记录中的 padded/普通类型拆分。最终只保留 `CpuTable<T>` 与 `PhysCpuTable<T>`，两者 backing 均为 `[CachePadded<T>; N]`，索引仍直接返回 `T`。registry、`PERCPU_BASES`、`STACK0` 与 guarded tops 全部使用这两个统一类型。
+
+**Assembly Boundary:** `CachePadded` 强化为 `repr(C, align(64))`，保证唯一 inner field 从 wrapper 起始地址开始。`RawKernelStack` 当前为 4 KiB 对齐的整页倍数，外层 64-byte alignment 不增加大小；RISC-V 与 LoongArch bootstrap 均以编译期断言确认裸栈大小等于汇编使用的 `KSTACK_SIZE`，且 `CachePadded<RawKernelStack>` 大小等于裸栈大小。任一未来配置破坏步长时会在编译期失败。
+
+**Validation:** 本条只记录源码布局审计与编译期约束；按用户要求未运行格式化、构建或测试。事务状态保持 Completed。

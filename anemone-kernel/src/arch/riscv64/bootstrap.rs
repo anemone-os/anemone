@@ -21,13 +21,31 @@ use crate::{
     mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
     sched::class::SchedEntity,
+    utils::cacheline::CachePadded,
 };
 
 /// Unlike other per-CPU stacks, this one is indexed by [PhysCpuId], so that it
 /// can be used before the CPU topology is fully initialized.
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bss.stack0")]
-static mut STACK0: [RawKernelStack; MAX_CPUS] = [RawKernelStack::ZEROED; MAX_CPUS];
+static mut STACK0: PhysCpuTable<RawKernelStack> =
+    PhysCpuTable::new(
+        [const { CachePadded::new(RawKernelStack::ZEROED) }; MAX_PHYS_CPU_ID + 1],
+    );
+
+// Entry assembly uses the raw KSTACK_SIZE as its slot stride. Keep both
+// assertions so future stack or cache alignment changes cannot add padding
+// and silently change the STACK0 layout seen by assembly.
+static_assert!(
+    core::mem::size_of::<RawKernelStack>()
+        == (1 << KSTACK_SHIFT_KB) as usize * 1024,
+    "RawKernelStack size must match the bootstrap assembly stride"
+);
+static_assert!(
+    core::mem::size_of::<CachePadded<RawKernelStack>>()
+        == core::mem::size_of::<RawKernelStack>(),
+    "cache padding must not change the bootstrap stack stride"
+);
 
 #[unsafe(no_mangle)]
 static BOOTSTRAP_PGDIR: RiscV64PgDir = {
@@ -299,7 +317,7 @@ extern "C" fn rusty_nun(hart_id: usize, fdt_pa: PhysAddr) -> ! {
 
 /// Physical-CPU-indexed guarded scheduler stack tops, filled by
 /// [`remap_boot_stack`].
-static GUARDED_STACK_TOPS: MonoOnce<[VirtAddr; MAX_CPUS]> = unsafe { MonoOnce::new() };
+static GUARDED_STACK_TOPS: MonoOnce<PhysCpuTable<VirtAddr>> = unsafe { MonoOnce::new() };
 
 /// Remap every CPU's boot stack ([`STACK0`]) into the remap region with a
 /// guard page at the bottom.
@@ -315,7 +333,9 @@ unsafe fn remap_boot_stack() {
     let stack0_sppn =
         unsafe { VirtAddr::new(core::ptr::addr_of!(STACK0) as u64).kvirt_to_phys() }.page_down();
 
-    let mut tops: [VirtAddr; MAX_CPUS] = [VirtAddr::new(0); MAX_CPUS];
+    let mut tops: PhysCpuTable<VirtAddr> = PhysCpuTable::new(
+        [const { CachePadded::new(VirtAddr::new(0)) }; MAX_PHYS_CPU_ID + 1],
+    );
 
     for logical_id in 0..ncpus() {
         let cpu_id = CpuId::new(logical_id);
@@ -344,7 +364,7 @@ unsafe fn remap_boot_stack() {
 
         let stack_top = (stack_vpn + KSTACK_PAGES as u64).to_virt_addr();
 
-        tops[physical_slot] = stack_top;
+        tops[physical_id] = stack_top;
 
         kinfoln!(
             "{} ({}): scheduler stack remapped with guard page at [{:#x}, {:#x}), stack [{:#x}, {:#x})",
@@ -364,7 +384,7 @@ unsafe fn remap_boot_stack() {
 
 #[inline(always)]
 unsafe fn switch_to_guarded(dest_entry: VirtAddr) -> ! {
-    let physical_id = cur_cpu_id().physical_id().get();
+    let physical_id = cur_cpu_id().physical_id();
     let new_stack_top = GUARDED_STACK_TOPS.get()[physical_id];
 
     // This is the last ID-based scheduler stack lookup. The first context
@@ -399,7 +419,7 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_pa: PhysAddr) -> ! {
 
     unsafe {
         // needed by percpu initialization.
-        early_scan_cpu_count(fdt_va);
+        early_scan_cpu_count(fdt_va, bsp_physical_id);
         let bsp_id = CpuId::from_physical_id(bsp_physical_id)
             .unwrap_or_else(|| panic!("bootstrap {} was not registered", bsp_physical_id));
 
