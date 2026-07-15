@@ -15,6 +15,7 @@ use crate::{
     },
 };
 
+mod attr;
 mod sched_get_priority_max;
 mod sched_get_priority_min;
 mod sched_getparam;

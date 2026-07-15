@@ -5,7 +5,7 @@
 **Area:** scheduler / dynamic attributes / syscall ABI / IPI / affinity
 **Canonical Plan:** [RFC-20260714-sched-dynamic-attributes](../../rfcs/sched-dynamic-attributes/index.md), [不变量需求](../../rfcs/sched-dynamic-attributes/invariants.md), [迁移实施计划](../../rfcs/sched-dynamic-attributes/implementation.md)
 **Canonical Revision:** R1
-**Current Phase:** Checkpoint 2B Closed；Stage 3 Closed；Stage 4 Closed；Stage 5 Not Started / Not Run
+**Current Phase:** Checkpoint 2B Closed；Stage 3 Closed；Stage 4 Closed；Stage 5 Closed；Stage 6 Not Started
 
 ## Scope
 
@@ -34,7 +34,7 @@
 | Checkpoint 2B | request/config/processor/class/task/clone/priority/IPI/procfs final cutover 与同 owner KUnit | Codex 总控或一个受限 worker；不得拆分唯一 truth 切换 | 独立 reviewer 覆盖 config、role、request/gate、clone 与 2A 隔离 | agent：build / pretest KUnit；priority LTP由用户或明确授权的 agent | Implementation Not Started；review/runtime Not Run |
 | 阶段 3 | affinity adapter、rv64/la64 syscall numbers、`sched-attr-test`、rv64 pretest routing；SMP/profile仅validation-only | Codex 总控或一个受限 worker | 独立 ABI 与 remote-gate reviewer | agent：双架构 build、pretest、单CPU app；用户或明确授权的 agent：SMP=2 stress / targeted LTP | Implementation Not Started；review/runtime Not Run |
 | 阶段 4 | policy adapter、窄 interval accessor、syscall numbers、focused app；profile仅validation-only | Codex 总控或一个受限 worker | 独立 policy/permission/interval reviewer | agent：build / pretest / focused app；用户或明确授权的 agent：targeted LTP | Implementation Not Started；review/runtime Not Run |
-| 阶段 5 | attr adapter、syscall numbers、focused app；profile仅validation-only | Codex 总控或一个受限 worker | 独立 Linux 6.6 size/copy/errno reviewer | agent：build / focused probes；用户或明确授权的 agent：targeted LTP | Implementation Not Started；review/runtime Not Run |
+| 阶段 5 | shared `SchedAttr` ABI、`policy/attr/{mod,sched_setattr,sched_getattr}` adapter、syscall numbers、focused app；profile仅validation-only | Codex 总控或一个受限 worker | 独立 Linux 6.6 size/copy/errno reviewer | agent：build / focused probes；用户或明确授权的 agent：targeted LTP | Closed |
 | 阶段 6 | 既有 owner 文件中的审计修正、focused asset、current-revision docs/devlog/nav；register仅真实状态变化时更新 | Codex 总控 | 独立最终 reviewer | agent：build / source / format / docs；用户或明确授权的 agent：SMP=2、ABI matrix、schedule profile、必要的 la64 smoke | Implementation Not Started；review/runtime Not Run |
 
 ## Phase Log
@@ -239,12 +239,44 @@
 
 **Stop Conditions:** 最终不需要读取class-private runtime、直接操作queue、为unsupported policy做静默映射、把credential带入owner handler、增加current schedule entry或修改wait-core。Stage 4 Implementation、双架构build、rv64全部enabled KUnit、focused app、targeted supported LTP与独立review gate关闭；Stage 5保持Not Started / Not Run。
 
+### 2026-07-16 - Stage 5 `sched_attr` ABI / Size-Ordering Gate 启动
+
+**Phase:** 阶段 5；Implementation In Progress，independent review / runtime Not Run。Stage 4已经证明supported policy transition、latest-config permission和coherent snapshot projection；本阶段只增加attr ABI adapter，不重新打开core transaction、request/gate、class runtime或legacy policy contract。
+
+**Preflight:** 当前tracker没有未neutralize的Apollyon或Keter。live `UserReadSlice<u8>`能够按size分别验证/复制known prefix与future tail，`UserWriteSlice<u8>`能够先验证getter完整`usize`范围再只写`min(usize, 56)`，setter的best-effort size write-back也能局限在attr adapter；因此当前不需要修改global user-copy contract，P3停止条件未命中。既有`policy` target、credential-to-permit与typed submit helper可以复用，但setter/getter不同的top-level、copy、lookup与projection顺序不能上提成通用wrapper。
+
+**Approved Write Set Correction:** 用户明确指出原Stage 5单文件`sched/api/attr.rs`布局不合适，随后进一步把最终形状收窄为现有`sched/api/policy/`下的独立`attr/`子目录。canonical kernel write set现为`sched/api/mod.rs`、`policy/mod.rs`与`policy/attr/{mod,sched_setattr,sched_getattr}.rs`：`attr/mod.rs`只拥有共享纯size/copy helper，setter拥有size/tail/version/policy/permission/patch顺序，getter拥有usize/lookup/snapshot/full-range/copy-out顺序；两个syscall各自独占一个文件，不与legacy sibling平铺共享helper。该同scheduler ABI owner目录化不改变R1 contract、syscall集合、验证floor或停止条件，也不授权修改core patch、global user access、wait-core或class runtime。
+
+**Approved ABI Owner Expansion:** 用户进一步明确批准Stage 5必要时扩张到`anemone-abi`定义`sched_attr` Rust结构。总控确认kernel adapter与focused app都需要同一Linux 6.6 layout、known sizes和attr flags，批准将`anemone-abi/src/process.rs`加入write set，只在`process::linux::sched`定义shared `SchedAttr`、VER0/VER1 known-size与flag常量；不得加入syscall wrapper或scheduler行为。kernel `policy/attr/mod.rs`继续独占copy/tail/size negotiation，raw ABI不得进入config/request/class。该扩张避免并列ABI truth，不改变R1可见语义、验证floor或停止条件。
+
+**Remaining Write Set Lock:** rv64/la64 syscall number owner可增加asm-generic 274/275；focused runtime只修改`anemone-apps/sched-attr-test/**`并复用shared `SchedAttr`，`anemone-apps/user-test/ltp/profile.txt`只允许targeted schedule验证时临时选择并必须恢复。不得修改core config/request、IPI、Task storage、clone、procfs、global user access、rootfs/runner、Kconfig或competition testcase；出现其它owner surface真实需求时必须先上报并同步canonical write set。
+
+**Validation / Review Plan:** focused KUnit与app覆盖size 0/47/48/55/56/future/PAGE_SIZE边界、zero/nonzero tail、size write-back attempt、tail fault、util field-presence、missing-target cross-error、Fair/FIFO/RR projection、reset、inactive fields、dormant nice与failure-no-mutation。按global floor执行`just build`、双架构focused app build、全部enabled KUnit、focused app和targeted LTP supported branches；profile恢复后由未参与实现的独立reviewer逐行对照Linux 6.6 matrix审查ABI ordering、raw containment、permission/latest-config与publication前failure。上述实现、验证和review当前不预记为通过。
+
+### 2026-07-16 - Stage 5 实现、审查与 Gate 关闭
+
+**Change:** 在`anemone-abi::process::linux::sched`增加Linux 6.6 `SchedAttr`、VER0/VER1 known size和attr flag常量，rv64/la64接入asm-generic syscall 274/275。kernel沿既有policy owner增加`policy/attr/`子目录：`mod.rs`只承担两个入口共享的byte-oriented size读取、known-prefix copy、future-tail检查、getter range validation与best-effort size write-back；`sched_setattr.rs`独占copy-in、tail/version、lookup、util field-presence、policy/range、permission和patch submit顺序，`sched_getattr.rs`独占unsigned `usize`、lookup、snapshot、完整range validation和projection/copy-out顺序。Fair nice按Linux范围归一，FIFO/RR保持dormant nice；inactive deadline fields不进入core，unsupported deadline policy和util flags保持显式`EINVAL`。
+
+**Independent Review:** 未参与实现的独立reviewer逐行检查最终source形状、Linux 6.6 size/copy/errno matrix、raw containment、permission/latest-config、projection与publication前failure。首轮发现getter把Linux `unsigned int usize`误建模为Rust `usize`，以及若干预期失败probe没有证明config不变；修正为入口接收`u32`后再扩为host `usize`，增加高32位caller值被ABI截断的probe，并在47/PAGE_SIZE/read-only write-back/nonzero tail/tail fault等整组失败完成后统一核对snapshot。同步修正implementation中的旧单文件路径。窄复核后Apollyon 0、Keter 0、Euclid 0，未命中Stage 5停止条件，允许进入runtime gate。
+
+**Agent-run Validation:** rv64 `just build`通过；`./scripts/run-user-test-rv64.sh etc/sdcard-rv.img build/stage5-schedule-rv64.log`重建rootfs/kernel并正常运行至guest shutdown。日志记录`Running 180 tests...`与`All tests passed!`；三项新增setter semantic/field-presence、两项共享size/prefix及一项getter projection KUnit均为`ok`。focused `sched-attr-test`的attr size/tail、errno、Fair/FIFO/RR projection、permission及failure-no-mutation case全部通过，完整focused suite打印`END all available cases passed`；既有remote-gate stress在本次单CPU运行明确`SKIP single CPU`，其SMP=2证据继续由已关闭Stage 3拥有。
+
+**Targeted LTP:** 同一日志中glibc与musl的`sched_getattr02`各4项全部TPASS；`sched_setattr01`各有missing pid、null attr和nonzero flags三个supported subtest TPASS，唯一TFAIL是用`SCHED_DEADLINE`要求成功，而deadline明确不在R1支持集合，因此该case整体仍计为failed；`sched_getattr01`也只因setup先请求unsupported deadline而TFAIL。runner整组case summary为attempted 62、passed 54、failed 7、infra_failed 0、skipped 1，不能写成全组PASS；其余失败还包含既有`getcpu()`/`getrlimit()`缺口。相对Stage 4同profile的group-level passed case count 52，本阶段glibc与musl两侧的`sched_getattr02`从failed变为passed，使该计数增加到54；没有把`sched_setattr01`的三个supported subtest误算成完整case通过，也没有用静默deadline映射隐藏失败。
+
+**Cross-architecture / Static / Docs Validation:** `just app build --arch riscv64 sched-attr-test`与loongarch64对应构建通过；临时切换`qemu-virt-la64-pretest`、用`conf/rootfs/pretest-la64.toml`生成rootfs后，la64 `just build`通过，再恢复`qemu-virt-rv64-pretest`并重跑`just build`通过。`just fmt sched-attr-test --check`与`git diff --check`通过；kernel format check只报告未手工维护的generated `kconfig_defs.rs` / `platform_defs.rs`既有whitespace drift，未报告Stage 5 authored source。runtime后`anemone-apps/user-test/ltp/profile.txt`与platform选择均精确恢复并确认零diff。状态同步后`mdbook build docs`通过，仅报告既有large search-index warning。
+
+**Not Run:** la64 runtime、完整`all` profile和独立Stage 5 SMP=2 attr setter stress未运行；它们不属于本阶段最低runtime gate。Stage 3已经用SMP=2双向remote priority/affinity stress关闭shared request/gate vertical slice，本阶段没有用单CPUapp冒充新的跨CPU证据。
+
+**Source / Worktree Boundary:** 最终实现只落在批准后的Stage 5 write set；没有修改core config/transaction、request/IPI、wait-core、Task storage、clone、procfs、global user access、rootfs/runner、Kconfig或competition testcase。validation-only profile和platform选择均已恢复；工作树中的`AGENTS.md`属于用户改动，提交时继续保持unstaged。
+
+**Stop Conditions:** 最终不需要改变global user-copy contract、把raw `SchedAttr`带入scheduler core、增加第二config truth、读取class-private runtime、绕过latest-config permission或为LTP静默接受deadline/util。Stage 5 Implementation、双架构build、rv64全部enabled KUnit、focused app、targeted supported LTP与独立review gate关闭；Stage 6保持Not Started / Not Run，RFC整体仍为Active。
+
 ## Open Items
 
 - 本 RFC owner内当前无开放 Apollyon、Keter或 Euclid。
 - wait-core [KETER-WAIT-001](../../rfcs/sched-wait-refactor/tracking-issues.md#keter-wait-001synchronous-remote-placement-不能组合进-cross-cpu-ipi-completion) 继续 Open；R1 remote gate只neutralize scheduler request producer graph。
-- Checkpoint 2A、2B、Stage 3与Stage 4已关闭；Stage 5及后续保持Not Started / Not Run。
+- Checkpoint 2A、2B、Stage 3、Stage 4与Stage 5已关闭；Stage 6尚未开始。
 
 ## Closure
 
-事务 Active；R1的Stage 1至4已关闭，Stage 5及后续实现尚未开始，RFC整体尚未关闭。
+事务 Active；R1的Stage 1至5已关闭，Stage 6尚未开始，RFC整体尚未关闭。

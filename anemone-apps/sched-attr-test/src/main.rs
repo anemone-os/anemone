@@ -9,15 +9,18 @@ use core::{
 use anemone_rs::{
     abi::{
         process::linux::sched::{
-            CPU_SET_WORD_BITS, CPU_SET_WORD_BYTES, CPU_SETSIZE, CpuSet, SCHED_BATCH,
-            SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,
-            SchedParam,
+            CPU_SET_WORD_BITS, CPU_SET_WORD_BYTES, CPU_SETSIZE, CpuSet, SCHED_ATTR_SIZE_VER0,
+            SCHED_ATTR_SIZE_VER1, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_FLAG_DL_OVERRUN,
+            SCHED_FLAG_KEEP_PARAMS, SCHED_FLAG_KEEP_POLICY, SCHED_FLAG_RECLAIM,
+            SCHED_FLAG_RESET_ON_FORK, SCHED_FLAG_UTIL_CLAMP_MAX, SCHED_FLAG_UTIL_CLAMP_MIN,
+            SCHED_IDLE, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR, SchedAttr, SchedParam,
         },
         syscall::{
             linux::{
                 SYS_SCHED_GET_PRIORITY_MAX, SYS_SCHED_GET_PRIORITY_MIN, SYS_SCHED_GETAFFINITY,
-                SYS_SCHED_GETPARAM, SYS_SCHED_GETSCHEDULER, SYS_SCHED_RR_GET_INTERVAL,
-                SYS_SCHED_SETAFFINITY, SYS_SCHED_SETPARAM, SYS_SCHED_SETSCHEDULER, SYS_SETUID,
+                SYS_SCHED_GETATTR, SYS_SCHED_GETPARAM, SYS_SCHED_GETSCHEDULER,
+                SYS_SCHED_RR_GET_INTERVAL, SYS_SCHED_SETAFFINITY, SYS_SCHED_SETATTR,
+                SYS_SCHED_SETPARAM, SYS_SCHED_SETSCHEDULER, SYS_SETUID,
             },
             syscall,
         },
@@ -27,7 +30,7 @@ use anemone_rs::{
         fs::{PipeFlags, close, pipe2, read, write},
         process::{
             MmapFlags, MmapProt, PriorityWhich, WStatus, WStatusRaw, WaitFor, WaitOptions, exit,
-            fork, getpid, getpriority, mmap, munmap, sched_yield, setpriority, wait4,
+            fork, getpid, getpriority, mmap, mprotect, munmap, sched_yield, setpriority, wait4,
         },
     },
     prelude::*,
@@ -37,6 +40,7 @@ const MAX_WORKERS: usize = 4;
 const STRESS_ROUNDS: usize = 128;
 const WAIT_RETRIES: usize = 1_000_000;
 const NO_TARGET: usize = usize::MAX;
+const ABI_PAGE_SIZE: usize = 4096;
 
 #[repr(C)]
 struct SharedStress {
@@ -205,6 +209,72 @@ fn sched_rr_get_interval(pid: i32) -> Result<TimeSpec, Errno> {
     let mut interval = TimeSpec::default();
     sched_rr_get_interval_raw(pid, &mut interval as *mut TimeSpec as u64)?;
     Ok(interval)
+}
+
+fn sched_setattr_raw(pid: i32, attr: u64, flags: u32) -> Result<(), Errno> {
+    unsafe { syscall(SYS_SCHED_SETATTR, pid_arg(pid), attr, flags as u64, 0, 0, 0) }.map(|_| ())
+}
+
+fn sched_setattr(pid: i32, attr: &mut SchedAttr) -> Result<(), Errno> {
+    sched_setattr_raw(pid, attr as *mut SchedAttr as u64, 0)
+}
+
+fn sched_getattr_raw(pid: i32, attr: u64, usize: usize, flags: u32) -> Result<(), Errno> {
+    unsafe {
+        syscall(
+            SYS_SCHED_GETATTR,
+            pid_arg(pid),
+            attr,
+            usize as u64,
+            flags as u64,
+            0,
+            0,
+        )
+    }
+    .map(|_| ())
+}
+
+fn sched_getattr(pid: i32, usize: usize) -> Result<SchedAttr, Errno> {
+    let mut attr = SchedAttr::default();
+    sched_getattr_raw(pid, &mut attr as *mut SchedAttr as u64, usize, 0)?;
+    Ok(attr)
+}
+
+fn fair_attr(nice: i32, flags: u64) -> SchedAttr {
+    SchedAttr {
+        size: SCHED_ATTR_SIZE_VER1 as u32,
+        sched_policy: SCHED_OTHER as u32,
+        sched_flags: flags,
+        sched_nice: nice,
+        ..SchedAttr::default()
+    }
+}
+
+fn rt_attr(policy: i32, priority: u32, nice: i32, flags: u64) -> SchedAttr {
+    SchedAttr {
+        size: SCHED_ATTR_SIZE_VER1 as u32,
+        sched_policy: policy as u32,
+        sched_flags: flags,
+        sched_nice: nice,
+        sched_priority: priority,
+        ..SchedAttr::default()
+    }
+}
+
+fn write_attr_prefix(buffer: &mut [u8], attr: SchedAttr) {
+    assert!(buffer.len() >= SCHED_ATTR_SIZE_VER1);
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            (&attr as *const SchedAttr).cast::<u8>(),
+            buffer.as_mut_ptr(),
+            SCHED_ATTR_SIZE_VER1,
+        );
+    }
+}
+
+fn read_attr_prefix(buffer: &[u8]) -> SchedAttr {
+    assert!(buffer.len() >= SCHED_ATTR_SIZE_VER1);
+    unsafe { (buffer.as_ptr() as *const SchedAttr).read_unaligned() }
 }
 
 fn sched_setaffinity_raw(pid: i32, len: usize, mask: u64) -> Result<(), Errno> {
@@ -589,6 +659,420 @@ fn test_legacy_policy_permission_ordering() -> Result<(), Errno> {
     Ok(())
 }
 
+fn test_attr_size_and_tail_matrix() -> Result<(), Errno> {
+    println!("sched-attr-test: CASE attr-size-tail start");
+    sched_setscheduler(0, SCHED_OTHER, 0)?;
+
+    let mut size_zero = fair_attr(-3, 0);
+    size_zero.size = 0;
+    sched_setattr(0, &mut size_zero)?;
+    assert_eq!(sched_getattr(0, SCHED_ATTR_SIZE_VER1)?.sched_nice, -3);
+
+    for size in [
+        SCHED_ATTR_SIZE_VER0,
+        SCHED_ATTR_SIZE_VER1 - 1,
+        SCHED_ATTR_SIZE_VER1,
+    ] {
+        let mut attr = fair_attr(size as i32 - 60, 0);
+        attr.size = size as u32;
+        sched_setattr(0, &mut attr)?;
+        assert_eq!(
+            sched_getattr(0, SCHED_ATTR_SIZE_VER1)?.sched_nice,
+            (size as i32 - 60).clamp(-20, 19),
+        );
+    }
+
+    for size in [SCHED_ATTR_SIZE_VER1 + 1, ABI_PAGE_SIZE] {
+        let mut attr = fair_attr(4, 0);
+        attr.size = size as u32;
+        let mut future = vec![0u8; size];
+        write_attr_prefix(&mut future, attr);
+        sched_setattr_raw(0, future.as_mut_ptr() as u64, 0)?;
+        assert_eq!(sched_getattr(0, SCHED_ATTR_SIZE_VER1)?.sched_nice, 4);
+    }
+    let before_failures = sched_getattr(0, SCHED_ATTR_SIZE_VER1)?;
+
+    let missing = i32::MAX;
+    let mut too_short = fair_attr(0, 0);
+    too_short.size = (SCHED_ATTR_SIZE_VER0 - 1) as u32;
+    expect_errno(
+        sched_setattr(missing, &mut too_short),
+        E2BIG,
+        "setattr invalid size before missing target",
+    );
+    assert_eq!(too_short.size, SCHED_ATTR_SIZE_VER1 as u32);
+
+    let mut too_long = fair_attr(0, 0);
+    too_long.size = (ABI_PAGE_SIZE + 1) as u32;
+    expect_errno(
+        sched_setattr(0, &mut too_long),
+        E2BIG,
+        "setattr size above PAGE_SIZE",
+    );
+    assert_eq!(too_long.size, SCHED_ATTR_SIZE_VER1 as u32);
+
+    let read_only = mmap(
+        0,
+        ABI_PAGE_SIZE,
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+        MmapFlags::MAP_PRIVATE | MmapFlags::MAP_ANONYMOUS,
+        None,
+        None,
+    )?;
+    let mut invalid = fair_attr(0, 0);
+    invalid.size = (SCHED_ATTR_SIZE_VER0 - 1) as u32;
+    unsafe { read_only.as_ptr().cast::<SchedAttr>().write(invalid) };
+    mprotect(read_only.as_ptr(), ABI_PAGE_SIZE, MmapProt::PROT_READ)?;
+    expect_errno(
+        sched_setattr_raw(0, read_only.as_ptr() as u64, 0),
+        E2BIG,
+        "setattr failed size write-back preserves E2BIG",
+    );
+    mprotect(
+        read_only.as_ptr(),
+        ABI_PAGE_SIZE,
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+    )?;
+    assert_eq!(
+        unsafe { read_only.as_ptr().cast::<SchedAttr>().read() }.size,
+        (SCHED_ATTR_SIZE_VER0 - 1) as u32,
+    );
+    munmap(read_only.as_ptr(), ABI_PAGE_SIZE)?;
+
+    let mut attr = fair_attr(0, 0);
+    attr.size = (SCHED_ATTR_SIZE_VER1 + 1) as u32;
+    let mut nonzero_tail = vec![0u8; SCHED_ATTR_SIZE_VER1 + 1];
+    write_attr_prefix(&mut nonzero_tail, attr);
+    nonzero_tail[SCHED_ATTR_SIZE_VER1] = 1;
+    expect_errno(
+        sched_setattr_raw(0, nonzero_tail.as_mut_ptr() as u64, 0),
+        E2BIG,
+        "setattr nonzero future tail",
+    );
+    assert_eq!(
+        read_attr_prefix(&nonzero_tail).size,
+        SCHED_ATTR_SIZE_VER1 as u32,
+        "setattr E2BIG must advertise known size",
+    );
+
+    let mapping = mmap(
+        0,
+        ABI_PAGE_SIZE * 2,
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+        MmapFlags::MAP_PRIVATE | MmapFlags::MAP_ANONYMOUS,
+        None,
+        None,
+    )?;
+    let base = mapping.as_ptr();
+    let tail_fault_ptr = unsafe { base.add(ABI_PAGE_SIZE - SCHED_ATTR_SIZE_VER1) };
+    let mut tail_fault = fair_attr(0, 0);
+    tail_fault.size = (SCHED_ATTR_SIZE_VER1 + 1) as u32;
+    unsafe {
+        tail_fault_ptr
+            .cast::<SchedAttr>()
+            .write_unaligned(tail_fault)
+    };
+    munmap(unsafe { base.add(ABI_PAGE_SIZE) }, ABI_PAGE_SIZE)?;
+    expect_errno(
+        sched_setattr_raw(0, tail_fault_ptr as u64, 0),
+        EFAULT,
+        "setattr inaccessible future tail",
+    );
+    munmap(base, ABI_PAGE_SIZE)?;
+
+    assert_eq!(
+        sched_getattr(0, SCHED_ATTR_SIZE_VER1)?,
+        before_failures,
+        "setattr size/tail failures must not publish partial config",
+    );
+
+    println!("sched-attr-test: CASE attr-size-tail ok");
+    Ok(())
+}
+
+fn test_attr_errno_ordering_and_failure_atomicity() -> Result<(), Errno> {
+    println!("sched-attr-test: CASE attr-errno start");
+    let missing = i32::MAX;
+    let mut baseline = fair_attr(-6, SCHED_FLAG_RESET_ON_FORK);
+    sched_setattr(0, &mut baseline)?;
+    let before = sched_getattr(0, SCHED_ATTR_SIZE_VER1)?;
+
+    expect_errno(
+        sched_setattr_raw(missing, 0, 0),
+        EINVAL,
+        "setattr null before target",
+    );
+    let mut valid = fair_attr(0, 0);
+    expect_errno(
+        sched_setattr_raw(missing, &mut valid as *mut SchedAttr as u64, 1),
+        EINVAL,
+        "setattr syscall flags before copy and target",
+    );
+    expect_errno(
+        sched_setattr_raw(-1, &mut valid as *mut SchedAttr as u64, 0),
+        EINVAL,
+        "setattr negative pid before copy",
+    );
+    expect_errno(
+        sched_setattr_raw(missing, u64::MAX, 0),
+        EFAULT,
+        "setattr size read before target",
+    );
+
+    let mut short_util = fair_attr(0, SCHED_FLAG_UTIL_CLAMP_MIN);
+    short_util.size = SCHED_ATTR_SIZE_VER0 as u32;
+    expect_errno(
+        sched_setattr(missing, &mut short_util),
+        EINVAL,
+        "setattr util field presence before target",
+    );
+
+    let mut negative_policy = fair_attr(0, 0);
+    negative_policy.sched_policy = u32::MAX;
+    expect_errno(
+        sched_setattr(missing, &mut negative_policy),
+        EINVAL,
+        "setattr signed policy sanity before target",
+    );
+
+    let mut unsupported_policy = fair_attr(0, 0);
+    unsupported_policy.sched_policy = SCHED_DEADLINE as u32;
+    expect_errno(
+        sched_setattr(missing, &mut unsupported_policy),
+        ESRCH,
+        "setattr missing target before unsupported policy",
+    );
+    let mut unsupported_flag = fair_attr(0, SCHED_FLAG_KEEP_PARAMS);
+    expect_errno(
+        sched_setattr(missing, &mut unsupported_flag),
+        ESRCH,
+        "setattr missing target before unsupported attr flag",
+    );
+
+    expect_errno(
+        sched_getattr_raw(missing, 0, SCHED_ATTR_SIZE_VER1, 0),
+        EINVAL,
+        "getattr null before target",
+    );
+    expect_errno(
+        sched_getattr_raw(missing, u64::MAX, SCHED_ATTR_SIZE_VER0 - 1, 0),
+        EINVAL,
+        "getattr invalid usize before target",
+    );
+    expect_errno(
+        sched_getattr_raw(missing, u64::MAX, ABI_PAGE_SIZE + 1, 0),
+        EINVAL,
+        "getattr usize above PAGE_SIZE before target",
+    );
+    expect_errno(
+        sched_getattr_raw(-1, u64::MAX, SCHED_ATTR_SIZE_VER1, 0),
+        EINVAL,
+        "getattr negative pid before target",
+    );
+    expect_errno(
+        sched_getattr_raw(missing, u64::MAX, SCHED_ATTR_SIZE_VER1, 0),
+        ESRCH,
+        "getattr missing target before output access",
+    );
+    expect_errno(
+        sched_getattr_raw(0, u64::MAX, SCHED_ATTR_SIZE_VER1, 0),
+        EFAULT,
+        "getattr existing target bad output",
+    );
+    expect_errno(
+        sched_getattr_raw(0, u64::MAX, SCHED_ATTR_SIZE_VER1, 1),
+        EINVAL,
+        "getattr syscall flags before output access",
+    );
+    let mut truncated = SchedAttr::default();
+    sched_getattr_raw(
+        0,
+        &mut truncated as *mut SchedAttr as u64,
+        (1usize << 32) | SCHED_ATTR_SIZE_VER1,
+        0,
+    )?;
+    assert_eq!(
+        truncated.size, SCHED_ATTR_SIZE_VER1 as u32,
+        "getattr unsigned-int size must ignore register high bits",
+    );
+
+    for flag in [
+        SCHED_FLAG_RECLAIM,
+        SCHED_FLAG_DL_OVERRUN,
+        SCHED_FLAG_KEEP_POLICY,
+        SCHED_FLAG_KEEP_PARAMS,
+        SCHED_FLAG_UTIL_CLAMP_MIN,
+        SCHED_FLAG_UTIL_CLAMP_MAX,
+        1 << 63,
+    ] {
+        let mut attr = fair_attr(0, flag);
+        expect_errno(
+            sched_setattr(0, &mut attr),
+            EINVAL,
+            "setattr unsupported feature flag",
+        );
+    }
+    for policy in [SCHED_BATCH, SCHED_IDLE, SCHED_DEADLINE, 99] {
+        let mut attr = fair_attr(0, 0);
+        attr.sched_policy = policy as u32;
+        expect_errno(
+            sched_setattr(0, &mut attr),
+            EINVAL,
+            "setattr unsupported policy",
+        );
+    }
+    let mut bad_priority = fair_attr(0, 0);
+    bad_priority.sched_priority = 1;
+    expect_errno(
+        sched_setattr(0, &mut bad_priority),
+        EINVAL,
+        "setattr invalid Fair priority",
+    );
+
+    assert_eq!(
+        sched_getattr(0, SCHED_ATTR_SIZE_VER1)?,
+        before,
+        "setattr failures must not publish partial config",
+    );
+    println!("sched-attr-test: CASE attr-errno ok");
+    Ok(())
+}
+
+fn test_attr_projection_and_full_output_range() -> Result<(), Errno> {
+    println!("sched-attr-test: CASE attr-projection start");
+    let mut fair = fair_attr(-7, SCHED_FLAG_RESET_ON_FORK);
+    fair.sched_runtime = 1;
+    fair.sched_deadline = 2;
+    fair.sched_period = 3;
+    fair.sched_util_min = 4;
+    fair.sched_util_max = 5;
+    sched_setattr(0, &mut fair)?;
+
+    for usize in [
+        SCHED_ATTR_SIZE_VER0,
+        SCHED_ATTR_SIZE_VER1 - 1,
+        SCHED_ATTR_SIZE_VER1,
+    ] {
+        let output = sched_getattr(0, usize)?;
+        assert_eq!(output.size, usize as u32);
+        assert_eq!(output.sched_policy, SCHED_OTHER as u32);
+        assert_eq!(output.sched_flags, SCHED_FLAG_RESET_ON_FORK);
+        assert_eq!(output.sched_nice, -7);
+        assert_eq!(output.sched_priority, 0);
+        assert_eq!(
+            (
+                output.sched_runtime,
+                output.sched_deadline,
+                output.sched_period,
+                output.sched_util_min,
+                output.sched_util_max,
+            ),
+            (0, 0, 0, 0, 0),
+        );
+    }
+
+    let mut future_output = vec![0xa5u8; ABI_PAGE_SIZE];
+    sched_getattr_raw(0, future_output.as_mut_ptr() as u64, ABI_PAGE_SIZE, 0)?;
+    let projected = read_attr_prefix(&future_output);
+    assert_eq!(projected.size, SCHED_ATTR_SIZE_VER1 as u32);
+    assert_eq!(projected.sched_nice, -7);
+    assert!(
+        future_output[SCHED_ATTR_SIZE_VER1..]
+            .iter()
+            .all(|byte| *byte == 0xa5),
+        "getattr must preserve a future userspace tail",
+    );
+
+    let mapping = mmap(
+        0,
+        ABI_PAGE_SIZE * 2,
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+        MmapFlags::MAP_PRIVATE | MmapFlags::MAP_ANONYMOUS,
+        None,
+        None,
+    )?;
+    let base = mapping.as_ptr();
+    let output_ptr = unsafe { base.add(ABI_PAGE_SIZE - SCHED_ATTR_SIZE_VER1) };
+    unsafe { core::ptr::write_bytes(output_ptr, 0xa5, SCHED_ATTR_SIZE_VER1) };
+    munmap(unsafe { base.add(ABI_PAGE_SIZE) }, ABI_PAGE_SIZE)?;
+    expect_errno(
+        sched_getattr_raw(0, output_ptr as u64, SCHED_ATTR_SIZE_VER1 + 1, 0),
+        EFAULT,
+        "getattr validates full future output range",
+    );
+    assert!(
+        unsafe { core::slice::from_raw_parts(output_ptr, SCHED_ATTR_SIZE_VER1) }
+            .iter()
+            .all(|byte| *byte == 0xa5),
+        "getattr full-range failure must not partially overwrite the prefix",
+    );
+    munmap(base, ABI_PAGE_SIZE)?;
+
+    assert_eq!(getpriority(PriorityWhich::Process, 0)?, -7);
+    let mut fifo = rt_attr(SCHED_FIFO, 42, 19, SCHED_FLAG_RESET_ON_FORK);
+    fifo.sched_runtime = 11;
+    fifo.sched_deadline = 12;
+    fifo.sched_period = 13;
+    sched_setattr(0, &mut fifo)?;
+    let output = sched_getattr(0, SCHED_ATTR_SIZE_VER1)?;
+    assert_eq!(output.sched_policy, SCHED_FIFO as u32);
+    assert_eq!(output.sched_flags, SCHED_FLAG_RESET_ON_FORK);
+    assert_eq!(output.sched_nice, 0);
+    assert_eq!(output.sched_priority, 42);
+    assert_eq!(getpriority(PriorityWhich::Process, 0)?, -7);
+
+    let mut rr = rt_attr(SCHED_RR, 31, 19, 0);
+    sched_setattr(0, &mut rr)?;
+    let output = sched_getattr(0, SCHED_ATTR_SIZE_VER1)?;
+    assert_eq!(output.sched_policy, SCHED_RR as u32);
+    assert_eq!(output.sched_nice, 0);
+    assert_eq!(output.sched_priority, 31);
+    assert_eq!(getpriority(PriorityWhich::Process, 0)?, -7);
+
+    let mut fair = fair_attr(3, 0);
+    sched_setattr(0, &mut fair)?;
+    assert_eq!(sched_getattr(0, SCHED_ATTR_SIZE_VER1)?.sched_nice, 3);
+    println!("sched-attr-test: CASE attr-projection ok");
+    Ok(())
+}
+
+fn test_attr_permission_ordering() -> Result<(), Errno> {
+    println!("sched-attr-test: CASE attr-permission start");
+    let parent = getpid()?;
+    match fork()? {
+        Some(child) => wait_child_exit(child)?,
+        None => {
+            let mut armed = fair_attr(0, SCHED_FLAG_RESET_ON_FORK);
+            sched_setattr(0, &mut armed)
+                .expect("sched-attr-test: failed to arm attr reset before setuid");
+            setuid(1000).expect("sched-attr-test: setuid failed in attr permission child");
+
+            let mut clear = fair_attr(0, 0);
+            expect_errno(
+                sched_setattr(0, &mut clear),
+                EPERM,
+                "unprivileged setattr cannot clear armed reset",
+            );
+            let mut invalid = fair_attr(0, 0);
+            invalid.sched_priority = 1;
+            expect_errno(
+                sched_setattr(parent as i32, &mut invalid),
+                EINVAL,
+                "setattr policy validation before permission",
+            );
+            let mut valid = fair_attr(0, 0);
+            expect_errno(
+                sched_setattr(parent as i32, &mut valid),
+                EPERM,
+                "setattr permission denial for existing target",
+            );
+            exit(0)
+        },
+    }
+    println!("sched-attr-test: CASE attr-permission ok");
+    Ok(())
+}
+
 fn test_external_runnable_policy_target() -> Result<(), Errno> {
     println!("sched-attr-test: CASE runnable-policy-target start");
     let mapping = mmap(
@@ -846,6 +1330,10 @@ pub fn main() -> Result<(), Errno> {
     test_legacy_policy_matrix()?;
     test_legacy_policy_errno_ordering()?;
     test_legacy_policy_permission_ordering()?;
+    test_attr_size_and_tail_matrix()?;
+    test_attr_errno_ordering_and_failure_atomicity()?;
+    test_attr_projection_and_full_output_range()?;
+    test_attr_permission_ordering()?;
     test_external_runnable_policy_target()?;
     test_pipe_blocked_policy_target()?;
     test_remote_gate_stress(initial_mask)?;

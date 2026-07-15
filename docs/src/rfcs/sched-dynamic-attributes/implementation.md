@@ -1,7 +1,7 @@
 # Dynamic Scheduler Attributes 迁移实施计划
 
 **状态：** Active
-**最后更新：** 2026-07-15
+**最后更新：** 2026-07-16
 **父 RFC：** [RFC-20260714-sched-dynamic-attributes](./index.md)
 **不变量：** [不变量需求](./invariants.md)
 **当前修订：** R1
@@ -64,7 +64,7 @@ sched/
       sched_setaffinity.rs
       sched_getaffinity.rs
     policy/
-      mod.rs              # legacy family shared constants/layout/target helpers
+      mod.rs              # policy family shared target/permission helpers
       sched_setscheduler.rs
       sched_getscheduler.rs
       sched_setparam.rs
@@ -72,7 +72,10 @@ sched/
       sched_get_priority_min.rs
       sched_get_priority_max.rs
       sched_rr_get_interval.rs
-    attr.rs              # sched_attr layout、size negotiation与投影
+      attr/
+        mod.rs            # shared sched_attr size/copy helper
+        sched_setattr.rs
+        sched_getattr.rs
 ```
 
 具体文件可在同一 owner 内收窄，但必须保持：
@@ -460,7 +463,7 @@ focused app至少执行：
 ### 交付
 
 - 增加`sched_setattr`与`sched_getattr` syscall number和handler。
-- `sched/api/attr.rs`定义private raw Linux 6.6 layout、VER0/VER1 size常量、copy/tail helper与projection；raw struct不离开adapter。
+- Linux `sched_attr` layout、VER0/VER1 size与flag常量由`anemone-abi::process::linux::sched`作为userspace ABI单一真相源；`sched/api/policy/attr/mod.rs`只定义两个attr入口共享的纯size/copy/tail helper，`attr/sched_setattr.rs`与`attr/sched_getattr.rs`各自拥有本入口的phase ordering、semantic conversion或projection。raw struct只在ABI crate、kernel adapter与focused userspace调用边界出现，不进入scheduler core。
 - setter实现size 0、48/56、future zero tail、nonzero tail + size write-back、util field-presence、signed-policy sanity、lookup后flag/policy validation与semantic patch。
 - getter验证完整user range，只复制`min(usize, 56)`，保持future tail不变，并把output size设为实际known copy size。
 - R0只接受reset flag；KEEP_POLICY、KEEP_PARAMS、reclaim、deadline overrun、util clamp和unknown bits返回`EINVAL`。
@@ -469,7 +472,8 @@ focused app至少执行：
 
 ### Write set
 
-- `anemone-kernel/src/sched/api/{mod,attr}.rs`；
+- `anemone-kernel/src/sched/api/mod.rs`、`sched/api/policy/mod.rs`与`sched/api/policy/attr/{mod,sched_setattr,sched_getattr}.rs`；两个syscall各自独占一个实现文件，`attr/mod.rs`只保留两者真实共享的纯size/copy helper，不吸收setter/getter不同的lookup、validation、permission、projection或publication顺序；
+- `anemone-abi/src/process.rs`，只在`process::linux::sched`定义shared Linux 6.6 `SchedAttr` layout、VER0/VER1 known-size与attr flag常量，不增加syscall wrapper或scheduler行为；kernel和focused app不得复制该layout/常量；
 - `anemone-abi/src/syscall/{riscv,loongarch}.rs`；
 - `anemone-apps/sched-attr-test/**`；
 - `anemone-apps/user-test/ltp/profile.txt`，仅作targeted schedule profile的validation-only选择，提交前恢复。
@@ -626,11 +630,11 @@ review覆盖完整RFC diff而非只看最后阶段。pass要求无未关闭Apoll
 
 ### Gate P3 - `sched_attr` Size/Error Ordering
 
-**Hypothesis:** current user-access primitives足以在`sched/api/attr.rs`局部表达Linux 6.6 known-prefix、future-tail与cross-error ordering，不需改变全局copy contract。
+**Hypothesis:** current user-access primitives足以在`sched/api/policy/attr/{mod,sched_setattr,sched_getattr}.rs`局部表达Linux 6.6 known-prefix、future-tail与cross-error ordering，不需改变全局copy contract。
 
 **Protected Goal / Invariant:** raw ABI containment、failure-before-publication、known size 56与R0 unsupported feature boundary不得削弱。
 
-**Minimum Write Set:** 阶段5 attr adapter、syscall numbers和focused app；默认不修改global user-access。
+**Minimum Write Set:** `anemone-abi`中的shared attr representation、policy目录内的size/copy helper与两个独立syscall文件、syscall numbers和focused app；默认不修改global user-access。
 
 **Validation Floor:** background matrix全部focused probes、supported LTP branches、build与ABI review。
 
@@ -690,8 +694,11 @@ review覆盖完整RFC diff而非只看最后阶段。pass要求无未关闭Apoll
 - 2026-07-15 Checkpoint 2B compile integration证明`sched/api`需要按transport error variant完成typed mapping。批准把`anemone-kernel/src/exception/mod.rs`加入2B最小write set，仅re-export`ipi.rs`中已经公开且由`send_ipi_async()`返回的`IpiError`；同时删除为绕过不可命名返回类型而添加的单用途predicate wrapper。该扩展不改变IPI error、transport、ABI或scheduler contract；review需确认scheduler只匹配现有variant，且`exception/ipi.rs`不保留语义重复的薄wrapper。
 - 2026-07-15 Stage 4只读preflight确认kernel policy adapter与focused app都需要Linux `sched_param` layout和policy/reset常量。批准把`anemone-abi/src/process.rs`加入Stage 4 write set，在既有`process::linux::sched` ABI owner内定义shared `SchedParam`与常量；kernel继续只在`sched/api/policy/`解释raw bytes、ordering和semantic patch，app不得复制layout/常量。该扩张不改变R1 syscall集合、ABI值、core patch、owner或验证floor。
 - 2026-07-15 Stage 4只读preflight确认RR full quantum当前由`class/rt.rs`私有常量唯一拥有，而`sched/api`不能绕过private sibling边界读取。批准把`anemone-kernel/src/sched/class/mod.rs`加入Stage 4 write set，只允许转发`rt.rs`提供的窄configured full-quantum ticks accessor；不得暴露`RtEntity`、remaining budget、rotation或queue state。该扩张避免在config/API重复quantum truth，不改变R1 interval语义、class owner或停止条件。
+- 2026-07-16 Stage 5启动前确认原单文件`sched/api/attr.rs`会把setter与getter不同的size/copy/lookup/permission ordering混在一起，并把attr policy family放在legacy `policy/` sibling之外。按用户批准，Stage 5归入`sched/api/policy/attr/{mod,sched_setattr,sched_getattr}.rs`：两个syscall各自独占一个实现文件，`attr/mod.rs`只保存共享纯size/copy helper，`policy/mod.rs`只增加子模块声明并继续拥有跨policy family共享的target/permit/submit边界。该同owner目录化不改变R1 UAPI、core patch、public API、验证floor或停止条件。
+- 2026-07-16 用户进一步明确批准Stage 5在需要时扩张到`anemone-abi`定义`sched_attr` Rust结构。为避免kernel adapter与focused app复制Linux layout、size和flag truth，批准把`anemone-abi/src/process.rs`加入write set，只在既有`process::linux::sched` owner内定义shared `SchedAttr`、VER0/VER1 known-size和attr flag常量；kernel继续在`policy/attr/mod.rs`解释copy/tail/size negotiation，各syscall文件拥有ordering与semantic conversion，ABI type不得进入config/request/class。该扩张不改变R1可见ABI、core patch、验证floor或停止条件。
 
 ## 结构维护记录
 
 - 计划：Checkpoint 2A将空壳`sched/api`扩为按priority/affinity/policy/attr划分的同owner目录，并behavior-preserving搬迁existing priority handler；Checkpoint 2B再把它切到final config/request path。两者保持syscall ABI不变，不建立shared generic syscall framework。执行证据写入R0 transaction。
 - 2026-07-15：Stage 4按用户明确要求把原计划中的单文件`policy.rs`具体化为同一`sched/api` owner内的`policy/`目录，并保持一个syscall一个`.rs`文件。`mod.rs`只承载legacy family真实共享的layout、常量和窄helper；各syscall独有的ABI ordering、copy、validation和projection留在对应文件。该结构维护不改变R1 contract、public API、owner、验证floor或停止条件。
+- 2026-07-16：Stage 5继续使用现有`policy/` owner，并增加`attr/`子目录；`attr/mod.rs`保存共享copy/tail helper，`sched_setattr.rs`与`sched_getattr.rs`作为独立syscall实现文件，Linux raw layout由`anemone-abi`单独拥有。该布局让legacy与attr入口共同复用policy target/permit/submit边界，同时让attr family内部共享项不与其余legacy syscall平铺，不建立新的syscall framework。

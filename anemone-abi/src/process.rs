@@ -131,6 +131,40 @@ pub mod linux {
             pub sched_priority: i32,
         }
 
+        pub const SCHED_ATTR_SIZE_VER0: usize = 48;
+        pub const SCHED_ATTR_SIZE_VER1: usize = 56;
+
+        pub const SCHED_FLAG_RESET_ON_FORK: u64 = 0x01;
+        pub const SCHED_FLAG_RECLAIM: u64 = 0x02;
+        pub const SCHED_FLAG_DL_OVERRUN: u64 = 0x04;
+        pub const SCHED_FLAG_KEEP_POLICY: u64 = 0x08;
+        pub const SCHED_FLAG_KEEP_PARAMS: u64 = 0x10;
+        pub const SCHED_FLAG_UTIL_CLAMP_MIN: u64 = 0x20;
+        pub const SCHED_FLAG_UTIL_CLAMP_MAX: u64 = 0x40;
+        pub const SCHED_FLAG_UTIL_CLAMP: u64 =
+            SCHED_FLAG_UTIL_CLAMP_MIN | SCHED_FLAG_UTIL_CLAMP_MAX;
+
+        /// Linux 6.6 extended scheduler attribute layout.
+        ///
+        /// Size negotiation and feature support remain syscall behavior; this
+        /// type owns only the shared userspace representation.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[repr(C)]
+        pub struct SchedAttr {
+            pub size: u32,
+            pub sched_policy: u32,
+            pub sched_flags: u64,
+            pub sched_nice: i32,
+            pub sched_priority: u32,
+            pub sched_runtime: u64,
+            pub sched_deadline: u64,
+            pub sched_period: u64,
+            pub sched_util_min: u32,
+            pub sched_util_max: u32,
+        }
+
+        const _: () = assert!(size_of::<SchedAttr>() == SCHED_ATTR_SIZE_VER1);
+
         /// CPU capacity of the fixed-size Linux userspace `cpu_set_t`.
         pub const CPU_SETSIZE: usize = 1024;
 
