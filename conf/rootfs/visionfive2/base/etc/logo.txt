@@ -1,0 +1,12 @@
+    ___                                        
+   /   |  ____  ___  ____ ___  ____  ____  ___ 
+  / /| | / __ \/ _ \/ __ `__ \/ __ \/ __ \/ _ \
+ / ___ |/ / / /  __/ / / / / / /_/ / / / /  __/
+/_/  |_/_/ /_/\___/_/ /_/ /_/\____/_/ /_/\___/ 
+                                               
+================== Anemone OS ==================
+
+Anemone OS - dev (riscv64)
+Architecture: RISC-V 64-bit (RV64GC)
+Platform:     StarFive VisionFive 2 - JH7110 SoC
+Toolchain:    musl-libc / BusyBox

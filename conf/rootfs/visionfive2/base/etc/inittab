@@ -1,0 +1,6 @@
+# Install the userspace environment once, then keep an interactive shell alive.
+::sysinit:/install_sys.sh
+# This direct root shell is the temporary login boundary while Anemone has no
+# TTY/getty path. Login mode loads /etc/profile; remove it when getty/login owns
+# session setup and the controlling terminal.
+::respawn:/bin/sh -il

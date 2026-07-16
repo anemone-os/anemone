@@ -1,0 +1,34 @@
+# System-wide login environment for BusyBox ash.
+export PATH="/bin:/sbin:/usr/bin:/usr/sbin"
+export SHELL="${SHELL:-/bin/sh}"
+export TERM="${TERM:-linux}"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-/lib:/usr/lib}"
+
+# BusyBox init supplies HOME=/ for its actions. Until getty/login owns session
+# setup, make the directly spawned root shell match root's passwd entry.
+if [ "$(id -u)" -eq 0 ]; then
+    HOME=/root
+    USER=root
+    LOGNAME=root
+else
+    USER="${USER:-$(id -un)}"
+    LOGNAME="${LOGNAME:-$USER}"
+    HOME="${HOME:-/}"
+fi
+export HOME USER LOGNAME
+
+umask 022
+
+# A real login process normally enters the account's home before starting the
+# shell. The direct init shell has no login/getty layer until TTY support lands.
+if [ "$PWD" = "/" ] && [ -d "$HOME" ]; then
+    cd "$HOME"
+fi
+
+case "$-" in
+    *i*)
+        # BusyBox ash expands these escapes for user, hostname, cwd and uid.
+        PS1='\u@\h:\w\$ '
+        export PS1
+        ;;
+esac
