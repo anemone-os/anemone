@@ -161,7 +161,7 @@ fn exec_init_proc() {
 
     kernel_execve(
         &init_path,
-        &[&init_path, &"1".to_string()],
+        &[&init_path],
         &["OS=anemone", "one=1", "two=2", "three=3", "MIKU=39"],
     )
     .unwrap_or_else(|e| {

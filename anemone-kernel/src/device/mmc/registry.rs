@@ -19,8 +19,8 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 /// Monotonic kernel-local identity assigned when a host is published.
 ///
-/// IDs are not reused in stage 1 and must not be confused with firmware
-/// aliases such as `mmc0` or future `mmcblkN` device numbers.
+/// IDs are not reused by the cold-boot implementation and must not be confused
+/// with firmware aliases such as `mmc0` or `mmcblkN` device numbers.
 pub struct MmcHostId(u32);
 
 impl MmcHostId {
@@ -146,7 +146,7 @@ fn host_device_parent_identity_and_lookup() {
             Err(MmcHostError::InvalidRequest)
         }
 
-        fn recover(&self) -> Result<(), MmcHostError> {
+        fn recover_transport(&self) -> Result<(), MmcHostError> {
             Ok(())
         }
     }

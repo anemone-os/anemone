@@ -8,7 +8,7 @@ use crate::{mm::remap::IoRemap, prelude::*};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(usize)]
-/// Register offsets used by the stage-1 polling/PIO implementation.
+/// Register offsets used by the synchronous polling/PIO implementation.
 ///
 /// Keeping offsets in a typed enum prevents arbitrary integer offsets from
 /// spreading into controller logic.
@@ -41,7 +41,7 @@ pub(super) enum Register {
 }
 
 bitflags! {
-    /// CTRL bits whose write behavior is used by stage 1. Reset bits are
+    /// CTRL bits whose write behavior is used by polling/PIO. Reset bits are
     /// self-clearing and therefore must be polled after assertion.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub(super) struct Control: u32 {
@@ -123,6 +123,7 @@ impl RawInterrupt {
         .union(Self::DATA_TIMEOUT)
         .union(Self::HOST_TIMEOUT)
         .union(Self::FIFO_RUN)
+        .union(Self::HARDWARE_LOCKED)
         .union(Self::START_BIT)
         .union(Self::END_BIT);
 }
@@ -164,6 +165,7 @@ impl FifoWidth {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Probe-time layout failures kept separate from runtime command errors.
 pub(super) enum LayoutError {
+    RegisterWindowOutsideMapping,
     MissingVersion,
     UnsupportedVersion,
     UnsupportedFifoWidth,
@@ -243,8 +245,20 @@ pub(super) struct DwMshcRegs {
 }
 
 impl DwMshcRegs {
-    pub fn new(remap: IoRemap) -> Self {
-        Self { remap }
+    pub const BASELINE_MAPPING_LEN: usize =
+        Register::IdmacBusMode as usize + core::mem::size_of::<u32>();
+
+    pub fn new(remap: IoRemap) -> Result<Self, LayoutError> {
+        Self::validate_mapping_len(remap.size() as usize)?;
+        Ok(Self { remap })
+    }
+
+    const fn validate_mapping_len(mmio_len: usize) -> Result<(), LayoutError> {
+        if mmio_len < Self::BASELINE_MAPPING_LEN {
+            Err(LayoutError::RegisterWindowOutsideMapping)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn phys_base(&self) -> PhysAddr {
@@ -262,9 +276,9 @@ impl DwMshcRegs {
         assert!(end <= self.size(), "DW-MSHC MMIO access outside mapping");
         assert!(offset.is_multiple_of(core::mem::align_of::<T>()));
         // The mapping is owned by this register block and behavioral accesses
-        // are serialized by the temporary controller SpinLock (later by the
-        // controller worker). Bounds and typed alignment are checked above
-        // before deriving the transient pointer.
+        // are serialized by the Stage-2 synchronous controller SpinLock.
+        // Bounds and typed alignment are checked above before deriving the
+        // transient pointer. The lock contract must change before IRQ/DMA.
         unsafe { self.remap.as_ptr().as_ptr().cast::<u8>().add(offset).cast() }
     }
 
@@ -325,6 +339,18 @@ impl DwMshcRegs {
             },
         }
     }
+}
+
+#[kunit]
+fn register_window_accepts_exact_and_rejects_short_mapping() {
+    assert_eq!(
+        DwMshcRegs::validate_mapping_len(DwMshcRegs::BASELINE_MAPPING_LEN),
+        Ok(())
+    );
+    assert_eq!(
+        DwMshcRegs::validate_mapping_len(DwMshcRegs::BASELINE_MAPPING_LEN - 1),
+        Err(LayoutError::RegisterWindowOutsideMapping)
+    );
 }
 
 #[kunit]

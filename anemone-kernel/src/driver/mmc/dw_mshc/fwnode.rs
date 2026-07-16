@@ -1,8 +1,8 @@
 //! Translation from firmware-node properties into effective DW-MSHC limits.
 //!
 //! These values describe controller integration and permitted probe families;
-//! they do not identify a card. The future MMC core must still issue protocol
-//! commands before creating a card device.
+//! they do not identify a card. The MMC discovery owner must still issue
+//! protocol commands before creating a card device.
 
 use crate::{
     device::{bus::platform::PlatformDevice, kobject::KObject, mmc::*},
@@ -11,7 +11,7 @@ use crate::{
 
 /// Fallback used only when firmware omits the optional standard delay.
 const DEFAULT_POST_POWER_ON_DELAY_MS: u32 = 10;
-/// The legacy DW-MSHC divider field accepted by the stage-1 clock model.
+/// The legacy DW-MSHC divider field accepted by the synchronous clock model.
 const MAX_DIVIDER: u32 = 255;
 
 /// Immutable firmware snapshot consumed while constructing one host.
@@ -24,9 +24,9 @@ pub(super) struct DwMshcFwConfig {
 }
 
 impl DwMshcFwConfig {
-    /// Parse and validate the subset of common/DW-MSHC properties stage 1 can
-    /// honor. Missing optional exclusion properties leave that protocol family
-    /// eligible; they never assert that a corresponding card is present.
+    /// Parse and validate the common/DW-MSHC properties honored by the current
+    /// polling/PIO implementation. Missing optional exclusion properties leave
+    /// that protocol family eligible; they never assert card presence.
     pub fn parse(device: &PlatformDevice) -> Result<Self, SysError> {
         let fwnode = device.fwnode().ok_or(SysError::MissingFwNode)?;
 
@@ -38,7 +38,7 @@ impl DwMshcFwConfig {
             },
             None => {
                 kerrln!(
-                    "dw-mshc {}: TODO(stage 1): FIFO-depth inference is currently not supported",
+                    "dw-mshc {}: TODO(stage 3+): FIFO-depth inference is currently not supported",
                     device.name()
                 );
                 return Err(SysError::NotYetImplemented);
@@ -50,15 +50,17 @@ impl DwMshcFwConfig {
         let data_addr = fwnode
             .prop_read_u32("data-addr")
             .map(|value| value as usize);
-        // Clock/reset owners do not exist yet. Firmware must therefore leave a
-        // usable CIU rate through either the generic or assigned-rate property.
+        // Firmware is the clock/reset/pinctrl owner for this polling driver.
+        // It must leave a usable CIU rate through either the generic or
+        // assigned-rate property. Replace this handoff only when those resource
+        // providers can be acquired and sequenced by the driver itself.
         let ciu_clock_hz = fwnode
             .prop_read_u32("clock-frequency")
             .or_else(|| fwnode.prop_read_u32("assigned-clock-rates"))
             .filter(|rate| *rate != 0)
             .ok_or_else(|| {
                 kerrln!(
-                    "dw-mshc {}: TODO(stage 1): clock ownership without a firmware handoff rate is currently not supported",
+                    "dw-mshc {}: TODO(stage 3+): clock ownership without a firmware handoff rate is currently not supported",
                     device.name()
                 );
                 SysError::NotYetImplemented
@@ -84,12 +86,17 @@ impl DwMshcFwConfig {
             return Err(SysError::InvalidArgument);
         }
 
-        let max_clock_hz = fwnode
-            .prop_read_u32("max-frequency")
-            .filter(|rate| *rate != 0)
-            .unwrap_or(ciu_clock_hz)
-            .min(ciu_clock_hz);
-        let min_clock_hz = (ciu_clock_hz / (2 * MAX_DIVIDER)).max(1);
+        let max_frequency = fwnode.prop_read_u32("max-frequency");
+        let (min_clock_hz, max_clock_hz) =
+            clock_limits(ciu_clock_hz, max_frequency).ok_or_else(|| {
+                kerrln!(
+                    "dw-mshc {}: invalid clock range: ciu={}Hz max-frequency={:?}",
+                    device.name(),
+                    ciu_clock_hz,
+                    max_frequency
+                );
+                SysError::InvalidArgument
+            })?;
         let post_power_on_delay = Duration::from_millis(
             fwnode
                 .prop_read_u32("post-power-on-delay-ms")
@@ -106,10 +113,10 @@ impl DwMshcFwConfig {
                 min_clock_hz,
                 max_clock_hz,
                 signal_voltages: MmcSignalVoltages::V3_3,
-                // BLKSIZ and BYTCNT are modeled with their stage-1 field limits;
+                // BLKSIZ and BYTCNT use the current polling/PIO field limits;
                 // later DMA/block layers may advertise a smaller intersection.
                 max_block_size: u16::MAX as u32,
-                // A stop-command transaction is not part of stage 1. The
+                // A stop-command transaction is not part of synchronous PIO. The
                 // advertised limit prevents callers from assuming otherwise.
                 max_block_count: 1,
                 max_request_bytes: u16::MAX as usize,
@@ -143,6 +150,18 @@ fn allowed_card_kinds(no_sd: bool, no_mmc: bool, no_sdio: bool) -> MmcCardKinds 
     kinds
 }
 
+fn clock_limits(ciu_clock_hz: u32, max_frequency: Option<u32>) -> Option<(u32, u32)> {
+    if ciu_clock_hz == 0 || max_frequency == Some(0) {
+        return None;
+    }
+    let min_clock_hz = (ciu_clock_hz / (2 * MAX_DIVIDER)).max(1);
+    let max_clock_hz = max_frequency.unwrap_or(ciu_clock_hz).min(ciu_clock_hz);
+    if max_clock_hz < min_clock_hz {
+        return None;
+    }
+    Some((min_clock_hz, max_clock_hz))
+}
+
 #[kunit]
 fn bus_width_capabilities_are_cumulative() {
     assert_eq!(decode_bus_width(1), Some(MmcBusWidths::ONE));
@@ -164,4 +183,15 @@ fn no_properties_project_to_allowed_kinds() {
         MmcCardKinds::SD_MEMORY
     );
     assert!(allowed_card_kinds(true, true, true).is_empty());
+}
+
+#[kunit]
+fn firmware_clock_range_is_validated_before_capability_publication() {
+    assert_eq!(clock_limits(50_000_000, None), Some((98_039, 50_000_000)));
+    assert_eq!(
+        clock_limits(50_000_000, Some(25_000_000)),
+        Some((98_039, 25_000_000))
+    );
+    assert_eq!(clock_limits(50_000_000, Some(98_038)), None);
+    assert_eq!(clock_limits(50_000_000, Some(0)), None);
 }

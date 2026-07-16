@@ -5,7 +5,7 @@ use crate::{
 };
 
 bitflags! {
-    /// Card protocol families firmware permits a future MMC core to probe.
+    /// Card protocol families firmware permits the discovery owner to probe.
     ///
     /// These bits are capabilities, not detected card identity.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,7 +41,7 @@ bitflags! {
 /// synthesized controller capability, and implemented driver behavior.
 ///
 /// This is not a detected-card description. In particular, `allowed_kinds`
-/// only constrains which protocol families a future discovery owner may try.
+/// only constrains which protocol families the discovery owner may try.
 pub struct MmcHostCaps {
     pub allowed_kinds: MmcCardKinds,
     pub bus_widths: MmcBusWidths,
@@ -52,7 +52,7 @@ pub struct MmcHostCaps {
     pub max_block_count: u32,
     pub max_request_bytes: usize,
     pub removable: bool,
-    /// A future protocol owner must wait this long after `PowerMode::Up`
+    /// The protocol owner must wait this long after `PowerMode::Up`
     /// before issuing card commands. `set_ios` only applies host registers;
     /// the caller performs the delay after the controller operation returns.
     pub post_power_on_delay: Duration,
@@ -102,8 +102,8 @@ impl MmcSignalVoltage {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-/// Host timing mode. Stage 1 exposes future variants in the contract but the
-/// DW-MSHC implementation accepts only `Legacy` until switching is implemented.
+/// Host timing mode. The synchronous DW-MSHC implementation accepts only
+/// `Legacy` until card-side timing negotiation is implemented.
 pub enum MmcTiming {
     Legacy,
     SdHighSpeed,
@@ -230,11 +230,19 @@ pub struct MmcRequest<'a> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Errors at the host-controller boundary. Card-session policy such as retry,
-/// power cycling, or re-enumeration belongs to the future MMC core.
+/// power cycling, or re-enumeration belongs to the MMC protocol owner.
 pub enum MmcHostError {
     UnsupportedIos,
     UnsupportedRequest,
     InvalidRequest,
+    /// A submitted transaction left controller state ambiguous. The host
+    /// rejects further IOS/request operations until `recover_transport`.
+    RecoveryRequired,
+    /// The command was issued correctly, but no card response arrived. A
+    /// protocol discovery owner may treat this as a non-matching candidate.
+    ResponseTimeout,
+    /// The controller's own command transaction failed to complete before its
+    /// hard deadline. This is a transport failure, never evidence of no card.
     CommandTimeout,
     ResponseCrc,
     ResponseFraming,
@@ -250,7 +258,8 @@ pub enum MmcHostError {
 ///
 /// Implementations serialize access to their underlying controller. The
 /// request and its borrowed data buffers may not be retained after `execute`
-/// returns.
+/// returns. A future worker/async implementation must replace this borrowed
+/// contract before moving requests across task boundaries.
 pub trait MmcHost: Send + Sync {
     fn caps(&self) -> MmcHostCaps;
 
@@ -260,16 +269,20 @@ pub trait MmcHost: Send + Sync {
 
     fn execute(&self, request: &mut MmcRequest<'_>) -> Result<(), MmcHostError>;
 
-    /// Restore the host controller to a state that can accept another
-    /// request. Card-session recovery remains a future MMC-core decision.
-    fn recover(&self) -> Result<(), MmcHostError>;
+    /// Restore transport state after a submitted transaction failed.
+    ///
+    /// Recovery may reset the controller and cycle card power, so it never
+    /// preserves an identified/selected card session. The protocol owner must
+    /// restart that session before issuing normal card commands. Calling this
+    /// without a preceding transport failure is invalid.
+    fn recover_transport(&self) -> Result<(), MmcHostError>;
 }
 
 /// Device-model representation of one published MMC host/slot.
 ///
 /// The concrete host implementation owns controller-facing behavior. This
 /// wrapper owns the stable device identity and parent relationship used by
-/// future card devices.
+/// published card devices.
 #[derive(KObject, Device)]
 pub struct MmcHostDevice {
     #[kobject]
@@ -277,7 +290,7 @@ pub struct MmcHostDevice {
     #[device]
     dev_base: DeviceBase,
     /// Stable kernel-local identity; it is neither a firmware alias nor a
-    /// future block-device number.
+    /// block-device number.
     id: MmcHostId,
     /// Concrete controller facade. The device wrapper owns identity and
     /// hierarchy only; it does not duplicate controller state.
@@ -321,7 +334,7 @@ impl MmcHost for MmcHostDevice {
         self.ops.execute(request)
     }
 
-    fn recover(&self) -> Result<(), MmcHostError> {
-        self.ops.recover()
+    fn recover_transport(&self) -> Result<(), MmcHostError> {
+        self.ops.recover_transport()
     }
 }

@@ -1,11 +1,17 @@
-//! Protocol-neutral MMC host infrastructure.
+//! MMC host, cold-discovery, and published-card infrastructure.
 //!
-//! This module models host-controller capabilities and requests. Card
-//! discovery and SD/eMMC/SDIO protocol policy intentionally live above this
-//! layer and are not part of the infrastructure stage.
+//! Host-controller MMIO remains behind the protocol-neutral `MmcHost`
+//! contract. Protocol discovery constructs immutable card identity, and the
+//! card bus dispatches concrete endpoint drivers from that committed identity.
 
+mod bus;
+mod card;
+mod discovery;
 mod host;
 mod registry;
 
+pub use bus::*;
+pub use card::*;
+pub use discovery::*;
 pub use host::*;
 pub use registry::*;
