@@ -1,11 +1,13 @@
 # Sched EEVDF-lite 迁移实施计划
 
 **状态：** Closed - deferred after Stage 3/R1 runtime acceptance failure
-**最后更新：** 2026-07-12
+**最后更新：** 2026-07-14
 **父 RFC：** [RFC-20260622-sched-eevdf-lite](./index.md)
 **不变量：** [不变量需求](./invariants.md)
 
-本文保留本次迁移的历史阶段与未执行 gate。Stage 3 default switch 曾落地；R1 随后完成 weighted FairClock 公式替换，但用户运行仍观察到 `1,233,143` 次 yield self-pick 与 `1,232,735` 次 `self_only_eligible`，命中声明的 runtime failure signal。RFC 因此延期关闭，production default 已恢复为 RR，R2 / R3a / R3b 均未执行，当前没有 active gate。未来不得沿本文从 R2 直接续跑；必须先重新打开 RFC review并重新批准假设、顺序、write set、验证与停止条件。
+> **共享接口更正（2026-07-14）：** 下方已完成阶段与历史 revision log 中关于 `ReschedCause`、多 bit pending 和 `requeue_preempted_current(..., pending)` 的内容保留为当时执行证据，但已由 [Sched RT Class R1](../sched-rt-class/index.md) supersede。未来重开 EEVDF 时，必须使用 core-only single-bit pending；pending 不进入 `ScheduleMode`、`ScheduleDecision`、`RunQueue` 或 class transaction。EEVDF 算法需要延续的 accounting / placement outcome 必须由 EEVDF owner 重新 review，不能恢复 core cause continuation。
+
+本文保留本次迁移的历史阶段与未执行 gate。Stage 3 default switch 曾落地；R1 随后完成 weighted FairClock 公式替换，但用户运行仍观察到 `1,233,143` 次 yield self-pick 与 `1,232,735` 次 `self_only_eligible`，命中声明的 runtime failure signal。RFC 因此延期关闭并把当时的 production default 恢复为 RR，后续 [Fair / Stride RFC](../sched-fair-stride/index.md) 已将 shared default 切换为 Fair。R2 / R3a / R3b 均未执行，当前没有 active gate。未来不得沿本文从 R2 直接续跑；必须先重新打开 RFC review 并重新批准假设、顺序、write set、验证与停止条件。
 
 ## 迁移原则
 
@@ -14,9 +16,9 @@
 - `Scheduler` trait 方法是 class-local atomic transaction：一个方法可以包含 class-private accounting、placement、penalty、clamp 和统计更新，但 scheduler core 不能拆开组合这些步骤。
 - `RunQueue` / scheduler core 负责 owner CPU/noirq 事务、class dispatch、`ntasks`、`on_runq`、idle fallback 和 transaction 之间的全局线性化。
 - `ScheduleMode` 只属于 scheduler core entry permission；scheduler class 不能保存、匹配或暴露 wait-core private identity。
-- processor pending request 使用 `PendingResched` flags；`ReschedCause::{Tick, RunnableArrival}` 合并而不是覆盖。`PendingResched` 可按值传入 `requeue_preempted_current()`，但 restore pending request 只属于执行 `take_pending_resched()` 的 scheduler-core caller。
-- 本次迁移的历史目标是让默认 normal scheduler 最终成为 `Eevdf`；该目标未达成。当前 ordinary user task、bootstrap task 和 kthread 通过 fresh normal constructor 进入 RR。
-- RR 是 Closed/deferred 期间的 production default；EEVDF 保留为实验 class。未来若重新申请 default switch，必须先满足重新批准的 runtime acceptance gates。
+- processor pending request 使用 core-only single-bit `PendingResched`；多 producer request 合并。`schedule_preempt(pending)` 只消费 non-empty entry proof，`PendingResched` 不进入 `ScheduleMode`、`ScheduleDecision`、`RunQueue` 或 `requeue_preempted_current()`；restore 只属于执行 `take_pending_resched()` 的 scheduler-core caller。
+- 本次迁移的历史目标是让默认 normal scheduler 最终成为 `Eevdf`；该目标未达成。EEVDF 关闭时 ordinary user task、bootstrap task 和 kthread 回到 RR，当前则由 shared fresh constructor 进入 Fair。
+- RR 是 EEVDF 刚进入 Closed/deferred 时的 production default，随后由 Fair / Stride supersede；EEVDF 保留为实验 class。未来若重新申请 default switch，必须先满足重新批准的 runtime acceptance gates。
 - `Task::cpuid()`、owner CPU runqueue 和 `SchedEntity::on_runq()` 的所有权不变。
 - `Nice` newtype 统一约束 nice 值域和 weight-table index；`Task::nice()` 返回唯一 nice truth，EEVDF entity 不保存另一份 nice，也不在第一版保存 `cached_weight`。
 - clone 只能继承 nice；新 task 必须创建 fresh normal `SchedEntity`，不得复制父 task 的 EEVDF runtime state。
@@ -662,7 +664,7 @@ Tracking issue 关闭审查：
 - R1 先关闭 weighted FairClock 公式与 direct-causality intervention；R1 已失败并停止，未自动继续 R2。
 - R2 关闭 ready / active membership、true leave / join service lag 和 full-set arrival transaction；R3a / R3b 再关闭 accounting / request 与 coordinate arithmetic。
 - correction runtime / arithmetic anomaly 观察面必须在每门 gate 中成立；不得靠隐藏日志、降低阈值或保留旧 floor 通过。
-- `EEVDF-021` 的 historical canonical eventual-progress 决策保持 Neutralized，但不再描述当前 RR 分类。
+- `EEVDF-021` 的 historical canonical eventual-progress 决策保持 Neutralized，但不再描述当前 Fair 分类。
 - R2 / R3a / R3b 未执行；RFC 已延期关闭，不进入阶段 4。
 
 历史交付目标：
@@ -852,7 +854,7 @@ write set：
 
 ## 旁路审计清单
 
-以下清单服务历史实现与未来重开审查；当前 RR default 本身不是旁路或停止信号。
+以下清单服务历史实现与未来重开审查；EEVDF 关闭时恢复 RR 以及后来切换到 Fair 都不是本 RFC 的旁路或停止信号。
 
 - `rg -n "SchedClassPrv|SchedEntity::new|RoundRobin|Idle|Eevdf|eevdf" anemone-kernel/src`
 - `rg -n "ScheduleMode|schedule_preempt|schedule_wait_sleep|schedule_yield|schedule_current_yield|schedule_idle|schedule_zombie" anemone-kernel/src/sched`
@@ -874,7 +876,7 @@ write set：
 
 ## 可观测性清单
 
-以下为未来重新打开 EEVDF runtime acceptance 时的观察面；当前不要求 RR 主线继续运行这些 gate。
+以下为未来重新打开 EEVDF runtime acceptance 时的观察面；当前不要求 production Fair 主线继续运行这些 EEVDF gate。
 
 - anomaly：checked FairClock / arithmetic / representation failure count、last reason 和每次记录的 `kerrln!`；valid FairClock no-eligible 由 release assertion 暴露。
 - scheduler constants：base slice、true-sleep service-credit / debt bound、yield penalty、weight table 来源、system HZ。

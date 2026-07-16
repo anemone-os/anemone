@@ -2,11 +2,12 @@
 
 use crate::prelude::*;
 
-use self::{idle::Idle, rt::Realtime};
+use self::{fair::Fair, idle::Idle, rt::Realtime};
 
 // EEVDF remains archived as `eevdf.rs`, but is not part of the production
 // scheduler class graph while the RFC is closed/deferred.
 // pub mod eevdf;
+mod fair;
 pub mod idle;
 mod rt;
 
@@ -17,20 +18,30 @@ pub(crate) use entity::SchedEntityMutToken;
 pub use entity::{SchedClassKind, SchedEntity};
 pub use runqueue::RunQueue;
 
+/// Return the class-owned full configured RR quantum without exposing runtime.
+pub(in crate::sched) const fn configured_rr_full_quantum_ticks() -> u32 {
+    rt::configured_full_quantum_ticks()
+}
+
 /// Internal scheduler-class selection precedence, ordered from high to low.
 ///
 /// This is the single source of truth for cross-class selection. The order has
 /// no ABI meaning and must not be translated to or from Linux `SCHED_*` policy
 /// values. Syscall policy translation belongs at the ABI boundary.
-const CLASS_PRECEDENCE: [SchedClassKind; 2] =
-    [<Realtime as Scheduler>::KIND, <Idle as Scheduler>::KIND];
+const CLASS_PRECEDENCE: [SchedClassKind; 3] = [
+    <Realtime as Scheduler>::KIND,
+    <Fair as Scheduler>::KIND,
+    <Idle as Scheduler>::KIND,
+];
 
 impl SchedClassKind {
     pub(super) fn in_precedence_order() -> [Self; CLASS_PRECEDENCE.len()] {
-        assert!(
-            CLASS_PRECEDENCE[0] != CLASS_PRECEDENCE[1],
-            "scheduler class precedence contains duplicate classes"
-        );
+        for (index, kind) in CLASS_PRECEDENCE.into_iter().enumerate() {
+            assert!(
+                !CLASS_PRECEDENCE[..index].contains(&kind),
+                "scheduler class precedence contains duplicate classes"
+            );
+        }
         CLASS_PRECEDENCE
     }
 
@@ -72,7 +83,7 @@ pub(super) trait Scheduler: Send + Sync {
     fn requeue_yielded_current(&mut self, task: Arc<Task>, now: Instant);
 
     /// Requeue the current task after involuntary preemption.
-    fn requeue_preempted_current(&mut self, task: Arc<Task>, now: Instant, pending: PendingResched);
+    fn requeue_preempted_current(&mut self, task: Arc<Task>, now: Instant);
 
     /// Requeue the current task after a parked wait was woken in place.
     fn handoff_woken_current(&mut self, task: Arc<Task>, now: Instant);
@@ -114,64 +125,4 @@ pub enum TickAction {
 pub enum PreemptDecision {
     KeepCurrent,
     RequestResched,
-}
-
-/// Source of a pending scheduler-core reschedule request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReschedCause {
-    Tick,
-    RunnableArrival,
-}
-
-impl ReschedCause {
-    const fn bit(self) -> u8 {
-        match self {
-            Self::Tick => 1 << 0,
-            Self::RunnableArrival => 1 << 1,
-        }
-    }
-}
-
-/// Value flags passed into class-local preempted-current transactions.
-///
-/// This is not a processor-state capability. The caller that destructively
-/// takes processor pending state owns deferred restore; scheduler classes only
-/// read a copied value while handling a preempted-current transaction.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PendingResched {
-    bits: u8,
-}
-
-impl PendingResched {
-    pub const fn empty() -> Self {
-        Self { bits: 0 }
-    }
-
-    pub const fn from_cause(cause: ReschedCause) -> Self {
-        Self { bits: cause.bit() }
-    }
-
-    pub const fn is_empty(self) -> bool {
-        self.bits == 0
-    }
-
-    pub const fn contains(self, cause: ReschedCause) -> bool {
-        self.bits & cause.bit() != 0
-    }
-
-    pub fn insert(&mut self, cause: ReschedCause) {
-        self.bits |= cause.bit();
-    }
-
-    pub const fn union(self, other: Self) -> Self {
-        Self {
-            bits: self.bits | other.bits,
-        }
-    }
-}
-
-impl Default for PendingResched {
-    fn default() -> Self {
-        Self::empty()
-    }
 }

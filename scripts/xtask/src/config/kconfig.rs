@@ -27,6 +27,8 @@ impl Profile {
 
 #[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq)]
 pub enum SchedDefaultPolicy {
+    #[serde(rename = "fair")]
+    Fair,
     #[serde(rename = "rt_rr")]
     RtRr,
     #[serde(rename = "rt_fifo")]
@@ -36,6 +38,7 @@ pub enum SchedDefaultPolicy {
 impl SchedDefaultPolicy {
     fn kernel_variant(self) -> &'static str {
         match self {
+            Self::Fair => "Fair",
             Self::RtRr => "RtRr",
             Self::RtFifo => "RtFifo",
         }
@@ -159,6 +162,7 @@ pub const SYSTEM_HZ: u16 = {};
 /// Compile-time scheduler policy for fresh non-idle tasks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SchedDefaultPolicy {{
+    Fair,
     RtRr,
     RtFifo,
 }}
@@ -309,6 +313,12 @@ mod tests {
                 .join("\n")
         };
 
+        assert!(
+            Config::from_str(
+                &replace_parameter("sched_default_policy", "sched_default_policy = \"fair\"")
+            )
+            .is_ok()
+        );
         assert!(
             Config::from_str(
                 &replace_parameter("sched_default_policy", "sched_default_policy = \"rt_rr\"")

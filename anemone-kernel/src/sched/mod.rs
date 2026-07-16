@@ -4,7 +4,7 @@
 use crate::{
     prelude::*,
     sched::{
-        class::{PendingResched, idle::clone_local_idle_task},
+        class::idle::clone_local_idle_task,
         processor::{
             local_handoff_woken_current, local_pick_next, local_put_prev_blocked,
             local_put_prev_exiting, local_requeue_preempted_current, local_requeue_yielded_current,
@@ -20,14 +20,16 @@ mod api;
 pub use api::*;
 
 mod nice;
-pub(crate) use nice::AtomicNice;
 pub use nice::Nice;
 
+pub(crate) mod config;
+
 mod processor;
+pub(crate) use processor::pick_next_cpu_in;
 pub use processor::{
-    enqueue_new_task, get_current_task, init_routines, local_enqueue_new_task, local_sched_tick,
-    pick_next_cpu, remote_enqueue_new_task, request_resched, restore_pending_resched,
-    take_pending_resched, wake_enqueue,
+    PendingResched, enqueue_new_task, get_current_task, init_routines, local_enqueue_new_task,
+    local_sched_tick, pick_next_cpu, remote_enqueue_new_task, request_resched,
+    restore_pending_resched, take_pending_resched, wake_enqueue,
 };
 mod switch;
 pub use switch::load_context;
@@ -37,6 +39,11 @@ pub use event::{Event, TimeoutListenException};
 
 mod latch;
 pub use latch::{Latch, LatchCancelReason, LatchTrigger, LatchWaitOutcome};
+
+pub mod oneshot;
+
+mod request;
+pub(crate) use request::SchedRequest;
 
 pub mod class;
 mod wait;
@@ -98,7 +105,7 @@ mod kore {
     #[derive(Clone, Copy, Debug)]
     enum ScheduleMode<'a> {
         WaitSleep { token: &'a WakeToken },
-        Preempt { pending: PendingResched },
+        Preempt,
         Yield,
         Idle,
         Zombie,
@@ -107,9 +114,7 @@ mod kore {
     #[derive(Debug)]
     enum ScheduleDecision {
         Yielded,
-        Preempted {
-            pending: PendingResched,
-        },
+        Preempted,
         Idle,
         WaitCoreParked {
             state: Arc<WaitState>,
@@ -163,7 +168,7 @@ mod kore {
             !pending.is_empty(),
             "schedule_preempt requires a typed pending request"
         );
-        match unsafe { schedule_inner(ScheduleMode::Preempt { pending }) } {
+        match unsafe { schedule_inner(ScheduleMode::Preempt) } {
             ScheduleInnerResult::Switched => SchedulePreemptResult::Scheduled,
             ScheduleInnerResult::DeferredPreempt => SchedulePreemptResult::Deferred,
             ScheduleInnerResult::DidNotSwitch => {
@@ -227,10 +232,7 @@ mod kore {
                         token.wait_id(),
                     );
                 },
-                ScheduleMode::Preempt { pending } => (
-                    TaskSchedState::Runnable,
-                    ScheduleDecision::Preempted { pending },
-                ),
+                ScheduleMode::Preempt => (TaskSchedState::Runnable, ScheduleDecision::Preempted),
                 ScheduleMode::Yield => (TaskSchedState::Runnable, ScheduleDecision::Yielded),
                 ScheduleMode::Idle => (TaskSchedState::Runnable, ScheduleDecision::Idle),
                 ScheduleMode::Zombie => {
@@ -274,7 +276,7 @@ mod kore {
                         },
                     )
                 },
-                ScheduleMode::Preempt { pending } => (
+                ScheduleMode::Preempt => (
                     TaskSchedState::Waiting {
                         state: state.clone(),
                         interruptible,
@@ -333,7 +335,7 @@ mod kore {
                         },
                     )
                 },
-                ScheduleMode::Preempt { .. } => {
+                ScheduleMode::Preempt => {
                     panic!(
                         "schedule_preempt observed parked wait current task: task={} wait={:#x}",
                         task_id,
@@ -376,7 +378,7 @@ mod kore {
                         token.wait_id(),
                     );
                 },
-                ScheduleMode::Preempt { .. } => {
+                ScheduleMode::Preempt => {
                     panic!("schedule_preempt cannot preempt zombie current task: task={}", task_id);
                 },
                 ScheduleMode::Yield => {
@@ -398,9 +400,9 @@ mod kore {
             ScheduleDecision::Yielded => {
                 local_requeue_yielded_current(curr);
             },
-            ScheduleDecision::Preempted { pending } => {
+            ScheduleDecision::Preempted => {
                 if !curr.flags().is_idle() {
-                    local_requeue_preempted_current(curr, pending);
+                    local_requeue_preempted_current(curr);
                 } else {
                     drop(curr);
                 }

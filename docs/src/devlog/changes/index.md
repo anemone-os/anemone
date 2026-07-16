@@ -32,6 +32,7 @@
 
 ## 当前记录
 
+- [2026-07-14 - RFC semantic revision workflow](./2026-07-14-rfc-semantic-revisions.md)
 - [2026-07-14 - PLIC device-tree context 解析](./2026-07-14-plic-dt-context.md)
 - [2026-07-13 - RISC-V Svade A/D 位兼容](./2026-07-13-riscv-ad-bits-svade.md)
 - [2026-07-05 - read-write request 结构整理](./2026-07-05-read-write-request-structure.md)

@@ -113,6 +113,120 @@ pub mod linux {
         pub const RLIMIT_RTTIME: u32 = 15;
     }
 
+    pub mod sched {
+        use core::mem::size_of;
+
+        pub const SCHED_OTHER: i32 = 0;
+        pub const SCHED_FIFO: i32 = 1;
+        pub const SCHED_RR: i32 = 2;
+        pub const SCHED_BATCH: i32 = 3;
+        pub const SCHED_IDLE: i32 = 5;
+        pub const SCHED_DEADLINE: i32 = 6;
+        pub const SCHED_RESET_ON_FORK: i32 = 0x4000_0000;
+
+        /// Linux legacy scheduler parameter layout.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[repr(C)]
+        pub struct SchedParam {
+            pub sched_priority: i32,
+        }
+
+        pub const SCHED_ATTR_SIZE_VER0: usize = 48;
+        pub const SCHED_ATTR_SIZE_VER1: usize = 56;
+
+        pub const SCHED_FLAG_RESET_ON_FORK: u64 = 0x01;
+        pub const SCHED_FLAG_RECLAIM: u64 = 0x02;
+        pub const SCHED_FLAG_DL_OVERRUN: u64 = 0x04;
+        pub const SCHED_FLAG_KEEP_POLICY: u64 = 0x08;
+        pub const SCHED_FLAG_KEEP_PARAMS: u64 = 0x10;
+        pub const SCHED_FLAG_UTIL_CLAMP_MIN: u64 = 0x20;
+        pub const SCHED_FLAG_UTIL_CLAMP_MAX: u64 = 0x40;
+        pub const SCHED_FLAG_UTIL_CLAMP: u64 =
+            SCHED_FLAG_UTIL_CLAMP_MIN | SCHED_FLAG_UTIL_CLAMP_MAX;
+
+        /// Linux 6.6 extended scheduler attribute layout.
+        ///
+        /// Size negotiation and feature support remain syscall behavior; this
+        /// type owns only the shared userspace representation.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[repr(C)]
+        pub struct SchedAttr {
+            pub size: u32,
+            pub sched_policy: u32,
+            pub sched_flags: u64,
+            pub sched_nice: i32,
+            pub sched_priority: u32,
+            pub sched_runtime: u64,
+            pub sched_deadline: u64,
+            pub sched_period: u64,
+            pub sched_util_min: u32,
+            pub sched_util_max: u32,
+        }
+
+        const _: () = assert!(size_of::<SchedAttr>() == SCHED_ATTR_SIZE_VER1);
+
+        /// CPU capacity of the fixed-size Linux userspace `cpu_set_t`.
+        pub const CPU_SETSIZE: usize = 1024;
+
+        /// Native `unsigned long` word used by the Linux CPU-set ABI.
+        pub type CpuSetWord = usize;
+
+        pub const CPU_SET_WORD_BYTES: usize = size_of::<CpuSetWord>();
+        pub const CPU_SET_WORD_BITS: usize = CPU_SET_WORD_BYTES * 8;
+        pub const CPU_SET_WORDS: usize = CPU_SETSIZE / CPU_SET_WORD_BITS;
+
+        /// Linux libc's fixed-size `cpu_set_t` layout.
+        ///
+        /// The raw affinity syscalls also accept shorter or longer buffers;
+        /// this type owns the userspace layout, not their `cpusetsize` policy.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct CpuSet {
+            bits: [CpuSetWord; CPU_SET_WORDS],
+        }
+
+        impl CpuSet {
+            pub const fn empty() -> Self {
+                Self {
+                    bits: [0; CPU_SET_WORDS],
+                }
+            }
+
+            pub const fn full() -> Self {
+                Self {
+                    bits: [CpuSetWord::MAX; CPU_SET_WORDS],
+                }
+            }
+
+            pub fn set(&mut self, cpu: usize) {
+                assert!(cpu < CPU_SETSIZE);
+                self.bits[cpu / CPU_SET_WORD_BITS] |= 1 << (cpu % CPU_SET_WORD_BITS);
+            }
+
+            pub fn contains(&self, cpu: usize) -> bool {
+                assert!(cpu < CPU_SETSIZE);
+                self.bits[cpu / CPU_SET_WORD_BITS] & (1 << (cpu % CPU_SET_WORD_BITS)) != 0
+            }
+
+            pub fn count(&self) -> usize {
+                self.bits
+                    .iter()
+                    .map(|word| word.count_ones() as usize)
+                    .sum()
+            }
+
+            pub fn is_empty(&self) -> bool {
+                self.bits.iter().all(|word| *word == 0)
+            }
+        }
+
+        impl Default for CpuSet {
+            fn default() -> Self {
+                Self::empty()
+            }
+        }
+    }
+
     pub mod clone {
         #![allow(unused)]
         // /// Signal sent to parent when child process changes state

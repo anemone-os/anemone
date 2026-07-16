@@ -8,8 +8,51 @@
 
 use crate::{
     prelude::*,
-    sched::class::{PendingResched, PreemptDecision, ReschedCause, RunQueue, TickAction},
+    sched::{
+        class::{PreemptDecision, RunQueue, TickAction},
+        config::{CpuMask, SchedChangePermit, SchedConfigPatch, SchedError},
+    },
 };
+
+static NEXT_CPU: AtomicUsize = AtomicUsize::new(0);
+
+/// Scheduler-core snapshot proving that an owner-CPU full pick is pending.
+///
+/// The snapshot deliberately carries no request cause. Class-local policy
+/// obligations must be committed in the owning entity before requesting the
+/// pick; the caller that destructively takes this value owns deferred restore.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PendingResched {
+    pending_pick: bool,
+}
+
+impl PendingResched {
+    const fn empty() -> Self {
+        Self {
+            pending_pick: false,
+        }
+    }
+
+    pub const fn is_empty(self) -> bool {
+        !self.pending_pick
+    }
+
+    fn request(&mut self) {
+        self.pending_pick = true;
+    }
+
+    fn take(&mut self) -> Self {
+        let pending = *self;
+        *self = Self::empty();
+        pending
+    }
+
+    const fn union(self, other: Self) -> Self {
+        Self {
+            pending_pick: self.pending_pick || other.pending_pick,
+        }
+    }
+}
 
 /// This struct must be accessed with interrupts disabled. it's a bit overkill,
 /// but it's the simplest way to guarantee that there won't be any race
@@ -24,7 +67,7 @@ struct Processor {
     runq: RunQueue,
     sched_ctx: TaskContext,
     /// Coalesced request latch for the next owner-CPU full pick. A completed
-    /// pick acknowledges all prior causes; no-pick paths keep or restore them.
+    /// pick acknowledges the latch; no-pick paths keep or restore it.
     pending_resched: PendingResched,
 }
 
@@ -99,13 +142,43 @@ fn is_local_current_task(task: &Arc<Task>) -> bool {
     })
 }
 
-/// Add one typed scheduler-core reschedule request.
+/// Request one owner-CPU full pick.
 ///
 /// This function will disable interrupts, since pending requests are also
 /// accessed by IPI and timer handlers.
-pub fn request_resched(cause: ReschedCause) {
+pub fn request_resched() {
     with_intr_disabled(|| {
-        PROCESSOR.with_mut(|proc| proc.pending_resched.insert(cause));
+        PROCESSOR.with_mut(|proc| proc.pending_resched.request());
+    })
+}
+
+/// Apply a scheduler configuration patch on this CPU's processor transaction.
+pub(in crate::sched) fn apply_config_patch(
+    target: &Arc<Task>,
+    patch: SchedConfigPatch,
+    permit: SchedChangePermit,
+) -> Result<(), SchedError> {
+    assert_eq!(
+        target.cpuid(),
+        cur_cpu_id(),
+        "config request reached wrong CPU"
+    );
+    let online = CpuMask::online();
+    with_intr_disabled(|| {
+        PROCESSOR.with_mut(|proc| {
+            let is_current = proc
+                .running_task
+                .as_ref()
+                .map(|current| Arc::ptr_eq(current, target))
+                .unwrap_or(false);
+            let request_full_pick = proc
+                .runq
+                .apply_config_patch(target, patch, permit, online, is_current)?;
+            if request_full_pick {
+                proc.pending_resched.request();
+            }
+            Ok(())
+        })
     })
 }
 
@@ -114,17 +187,11 @@ pub fn request_resched(cause: ReschedCause) {
 /// This function will disable interrupts, since pending requests are also
 /// accessed by IPI and timer handlers.
 pub fn take_pending_resched() -> PendingResched {
-    with_intr_disabled(|| {
-        PROCESSOR.with_mut(|proc| {
-            let pending = proc.pending_resched;
-            proc.pending_resched = PendingResched::empty();
-            pending
-        })
-    })
+    with_intr_disabled(|| PROCESSOR.with_mut(|proc| proc.pending_resched.take()))
 }
 
-/// Restore a deferred preemption request without losing concurrently added
-/// causes.
+/// Restore a deferred preemption request without losing a request added after
+/// the destructive take.
 pub fn restore_pending_resched(pending: PendingResched) {
     if pending.is_empty() {
         return;
@@ -269,9 +336,9 @@ pub fn local_requeue_yielded_current(task: Arc<Task>) {
 }
 
 /// Requeue the current task after involuntary preemption.
-pub fn local_requeue_preempted_current(task: Arc<Task>, pending: PendingResched) {
+pub fn local_requeue_preempted_current(task: Arc<Task>) {
     requeue_current_with(task, |runq, task, now| {
-        runq.requeue_preempted_current(task, now, pending);
+        runq.requeue_preempted_current(task, now);
     });
 }
 
@@ -357,7 +424,7 @@ pub fn local_sched_tick() {
         )
     });
     if let TickAction::RequestResched = action {
-        request_resched(ReschedCause::Tick);
+        request_resched();
     }
 }
 
@@ -366,11 +433,21 @@ pub fn local_sched_tick() {
 ///
 /// TODO: better strategy for load balancing.
 pub fn pick_next_cpu() -> CpuId {
-    // currently a simple round-robin strategy is used.
-    static NEXT_CPU: AtomicUsize = AtomicUsize::new(0);
-    let ncpus = ncpus();
-    let cpu = NEXT_CPU.fetch_add(1, Ordering::Relaxed) % ncpus;
-    CpuId::new(cpu)
+    pick_next_cpu_in(CpuMask::online())
+}
+
+/// Pick an online CPU from an already normalized scheduler affinity mask.
+pub(crate) fn pick_next_cpu_in(affinity: CpuMask) -> CpuId {
+    let cpu_count = ncpus();
+    assert!(cpu_count > 0);
+    let start = NEXT_CPU.fetch_add(1, Ordering::Relaxed) % cpu_count;
+    for offset in 0..cpu_count {
+        let cpu = CpuId::new((start + offset) % cpu_count);
+        if affinity.contains(cpu) && target_online(cpu) {
+            return cpu;
+        }
+    }
+    panic!("scheduler affinity has no online CPU for task construction")
 }
 
 /// Enqueue a task to the run queue of another processor.
@@ -479,7 +556,22 @@ impl Processor {
         if self.runq.decide_preempt_current(current, candidate, now)
             == PreemptDecision::RequestResched
         {
-            self.pending_resched.insert(ReschedCause::RunnableArrival);
+            self.pending_resched.request();
         }
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn test_task_construction_cpu_selection_stays_inside_affinity() {
+        let mut affinity = CpuMask::empty();
+        affinity.insert(cur_cpu_id());
+        let selected = pick_next_cpu_in(affinity);
+        assert_eq!(selected, cur_cpu_id());
+        assert!(affinity.contains(selected));
+        assert!(target_online(selected));
     }
 }

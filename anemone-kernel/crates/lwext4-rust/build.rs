@@ -1,6 +1,5 @@
 use std::{
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -367,11 +366,14 @@ impl Toolchain {
         let normalized_target = normalize_target(target);
         let normalized_arch = arch.to_ascii_uppercase();
         let clang_target = clang_target_for(arch);
-        let toolchain_root = env_value(executor, [
-            format!("LWEXT4_TOOLCHAIN_{normalized_arch}"),
-            format!("LWEXT4_TOOLCHAIN_{normalized_target}"),
-            "LWEXT4_TOOLCHAIN".to_string(),
-        ]);
+        let toolchain_root = env_value(
+            executor,
+            [
+                format!("LWEXT4_TOOLCHAIN_{normalized_arch}"),
+                format!("LWEXT4_TOOLCHAIN_{normalized_target}"),
+                "LWEXT4_TOOLCHAIN".to_string(),
+            ],
+        );
         let cc = resolve_compiler_path(
             executor,
             toolchain_root.as_deref(),

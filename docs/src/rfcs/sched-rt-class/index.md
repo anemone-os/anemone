@@ -1,20 +1,21 @@
 # RFC-20260711-sched-rt-class
 
 **状态：** Closed
+**修订：** R1
 **负责人：** doruche, Codex
-**最后更新：** 2026-07-13
+**最后更新：** 2026-07-14
 **领域：** scheduler / realtime / FIFO / RR / scheduler class
-**事务日志：** [2026-07-12-sched-rt-class](../../devlog/transactions/2026-07-12-sched-rt-class.md)
-**开放问题：** 见 [Tracking Issues](./tracking-issues.md)
-**下一步：** 第一版已收口；运行期调度属性、不同 priority 验证或 FIFO 用户态专项验证如需继续，另开 follow-up。
+**事务日志：** [2026-07-12-sched-rt-class (R0)](../../devlog/transactions/2026-07-12-sched-rt-class.md)、[2026-07-14-sched-rt-class-r1 (R1)](../../devlog/transactions/2026-07-14-sched-rt-class-r1.md)
+**开放问题：** 无；`KETER-RT-007` 已 neutralize
+**下一步：** R1 已关闭；动态调度属性、bandwidth control 与 archived EEVDF 迁移继续按独立 RFC 边界处理。
 
 ## 摘要
 
 本 RFC 定义 Anemone 第一版 realtime scheduler class。`SCHED_FIFO` 与 `SCHED_RR` 不实现为两个具有固定先后顺序的 scheduler class，而是同一个 `Realtime` class 下的两种 task policy。二者共享 `1..=99` 的 typed RT priority domain 和同一组按 priority 分桶的 FIFO ready queue；RR 只在 FIFO 语义之上增加 tick-based quantum。
 
-本 RFC 只把 method-first `Scheduler` trait、`RunQueue` dispatch、`SchedEntity` class payload 和 typed `PendingResched` 视为下层接口合同。
+本 RFC 只把 method-first `Scheduler` trait、`RunQueue` dispatch、`SchedEntity` class payload 和 scheduler-core-owned typed `PendingResched` 视为下层接口合同。R1 明确：pending 只表示“需要一次 full pick”，不向 scheduler class 传播 request cause。
 
-第一版不实现调度属性 syscall，也不允许运行期修改已发布 task 的 class、RT policy 或 priority。为了在没有 `sched_setscheduler()` 的情况下进行真实用户态验证，Kconfig 可以在编译期选择所有非 idle task 的默认 policy：RT/FIFO 或 RT/RR。默认值沿用当前 legacy RoundRobin 行为。
+第一版不实现调度属性 syscall，也不允许运行期修改已发布 task 的 class、RT policy 或 priority。为了在没有 `sched_setscheduler()` 的情况下进行真实用户态验证，Kconfig 可以在编译期选择所有非 idle task 的默认 class / policy；当前 shared selector 为 `fair | rt_fifo | rt_rr`，repository default 已由 Fair RFC 设为 `fair`。选择任一 RT 分支时，本 RFC 仍完整拥有对应 fresh entity 与算法语义。
 
 ## 背景
 
@@ -24,7 +25,7 @@
 - `SchedEntity` 保存 `on_runq` 与 class-specific payload。
 - `SchedClassKind` 只提供 class identity snapshot；跨 class precedence 集中定义。
 - current requeue 已区分 yield、involuntary preempt 与 parked wake handoff；wait no-switch abort 不调用 class transaction。
-- `PendingResched` 区分 Tick 与 RunnableArrival，是面向下一次 owner-CPU full pick 的 scheduler-core 合并 latch，不是 class policy state。successful pick 确认此前 slot，no-pick 路径保留或恢复。
+- R1 的 `PendingResched` 是 scheduler-core / processor-owned 单 bit 合并 latch，只表示下一次 owner-CPU full pick 尚未完成；successful pick 确认此前 slot，no-pick 路径保留或恢复。Tick 与 arrival 的产生路径不再形成 class-visible cause taxonomy。
 - owner CPU、noirq transaction、wait-core logical state 与 physical runqueue membership 的所有权已经闭合。
 
 待替换的 legacy `RoundRobin` class 只有单个 `VecDeque`，没有 RT priority，也没有独立 quantum state；其 tick 路径每个 tick 都请求 resched。第一版 RT 工作应替换这份遗留 class，而不是在其旁边再增加独立 FIFO class。
@@ -36,13 +37,13 @@
 - 引入单一 `Realtime` scheduler class，并删除遗留的独立 `RoundRobin` class identity。
 - 在 `RtEntity` 中保存 effective RT priority 与 policy，作为真实调度行为的唯一真相源。
 - 使用 typed `RtPriority` 约束 `1..=99`；数值越大，调度优先级越高。
-- 使用 `RtPolicy::Fifo` 与 `RtPolicy::RoundRobin { remaining_ticks }` 表达 policy；FIFO 的类型形态中不存在无效 quantum state。
+- 使用 `RtPolicy::Fifo` 与 `RtPolicy::RoundRobin { remaining_ticks, rotation_due }` 表达 policy；FIFO 的类型形态中不存在无效 quantum 或 rotation state。
 - 为每个 RT priority 提供一个共享 FIFO/RR ready queue；第一版固定 99 个 bucket，不引入 bitmap。
-- 固定跨 class precedence 为 `Realtime > Idle`。
+- 固定跨 class precedence 为 `Realtime > Fair > Idle`；该顺序只由 scheduler-class domain 集中拥有。
 - 实现严格高 priority arrival preemption、同 priority 不抢占、FIFO no-timeslice 和 RR quantum rotation。
 - 复用 `Scheduler` trait 的 method-first class transaction，不新增 catch-all event 或调度 reason bus。
 - 增加 `SchedEntity::new_default()`；所有非 idle production 创建路径统一使用该 facade，custom priority/policy 的 fresh construction 留在 RT class owner 内。
-- 通过单一 Kconfig selector 选择 `rt_fifo` 或 `rt_rr`；默认值沿用当前 legacy RoundRobin 行为。
+- 在 shared Kconfig selector 中提供 `rt_fifo` 与 `rt_rr` 两个 RT 分支；不复制 default policy truth。
 - 默认 RT 构造使用代码内固定的 `RtPriority::MIN`，不增加 default RT priority Kconfig。
 - RR timeslice 以 Kconfig 时间目标表示，再根据 `SYSTEM_HZ` 换算为 tick budget。
 - 用 source proof / KUnit 关闭 priority correctness，用用户态 smoke 验证同 priority FIFO/RR lifecycle。
@@ -71,6 +72,13 @@
 
 - None
 
+## 修订记录
+
+| 修订 | 接受日期 | 状态 / 证据 | 语义摘要 |
+| --- | --- | --- | --- |
+| R0 | 2026-07-12 | `e7db92d7` accepted；`83ff742d` closed；[R0 事务](../../devlog/transactions/2026-07-12-sched-rt-class.md) | 建立共享 `Realtime` class、FIFO/RR policy、typed priority、priority bucket、RR quantum 与 compile-time selector。 |
+| R1 | 2026-07-14 | `39ba07a9` implemented；[R1 事务](../../devlog/transactions/2026-07-14-sched-rt-class-r1.md) Completed | 删除 class-visible resched cause continuation；RR entity 显式拥有 committed rotation obligation，core pending 收窄为单 bit pending-pick snapshot。 |
+
 ## 方案
 
 ### Class、Policy 与 Priority
@@ -87,20 +95,21 @@ enum RtPolicy {
     Fifo,
     RoundRobin {
         remaining_ticks: u32,
+        rotation_due: bool,
     },
 }
 ```
 
 `RtPriority` 的合法范围固定为 `1..=99`，数值越大优先级越高。`0` 不是 RT priority。ABI 编码、权限和用户指针不进入该类型；未来 syscall RFC 只能在 ABI 边界完成解析，再把 typed priority 交给 owner-CPU scheduler transaction。
 
-`RtEntity` 位于 `SchedEntity` 的 class-specific payload 中。不得再在 `Task`、ABI accounting 或 runqueue node 中缓存一份 effective policy / priority。`remaining_ticks` 是 RR 当前 budget 的唯一真相源，并直接位于 `RoundRobin` 变体内。
+`RtEntity` 位于 `SchedEntity` 的 class-specific payload 中。不得再在 `Task`、ABI accounting 或 runqueue node 中缓存一份 effective policy / priority。`remaining_ticks` 是 RR 当前 budget 的唯一真相源；`rotation_due` 是只属于 active current 的已提交队尾放置义务，不是 processor pending state。
 
 ### Fresh Constructor 与编译期 Default
 
 `SchedEntity` 对共享调用者只暴露两个语义构造入口：
 
 ```text
-new_default()      -> 根据 Kconfig 创建 fresh RT/FIFO 或 RT/RR
+new_default()      -> 根据 Kconfig 创建 fresh Fair、RT/FIFO 或 RT/RR
 new_idle()         -> 创建 idle entity
 ```
 
@@ -109,7 +118,7 @@ new_idle()         -> 创建 idle entity
 Kconfig 使用单一受约束 selector：
 
 ```toml
-sched_default_policy = "rt_rr" # rt_rr | rt_fifo
+sched_default_policy = "fair" # fair | rt_rr | rt_fifo
 ```
 
 不得用多个互斥 boolean 表达 selector。选择 RT/FIFO 或 RT/RR 时，所有非 idle task 都以 `RtPriority::MIN`，即 priority 1，创建 fresh RT entity；该值没有 ABI default 含义，也不进入 Kconfig。
@@ -125,10 +134,10 @@ clone 在本 RFC 中仍创建 fresh default entity。RT/RR 默认构建下，chi
 跨 class precedence 固定为：
 
 ```text
-Realtime > Idle
+Realtime > Fair > Idle
 ```
 
-只要 owner CPU 上存在 runnable RT task，idle task 就不会被选择。第一版没有 RT bandwidth controller，因此一个永不阻塞、永不 yield 的 FIFO task 可以无限期饿死该 CPU 上较低优先级的 RT task，以及同优先级但依赖 cooperative yield 的 peer。这是接受的第一版语义，不是 fallback 或 anomaly。
+只要 owner CPU 上存在 runnable RT task，Fair 和 Idle task 就不会被选择；没有 RT task 时，Fair 高于 Idle。第一版没有 RT bandwidth controller，因此一个永不阻塞、永不 yield 的 FIFO task 可以无限期饿死该 CPU 上较低优先级的 RT task、同优先级但依赖 cooperative yield 的 peer，以及 Fair task。这是接受的第一版语义，不是 fallback 或 anomaly。
 
 编译期默认 RT/FIFO 测试必须使用受控 workload；不得依靠降低 class precedence、插入隐式 tick rotation 或给 service kthread 增加未记录的特例来避免合法 starvation。
 
@@ -154,13 +163,13 @@ struct Realtime {
 - candidate 与 current priority 相等或更低时不因 arrival 抢占。
 - new task 与普通 wake 进入各自 priority bucket 的队尾。
 - 显式 `sched_yield()` 进入同 priority 队尾。
-- current 被更高 priority task 抢占时回到自身 priority 队头，保留原执行次序。
+- current 被更高 priority task 抢占时，若没有已提交 rotation obligation，则回到自身 priority 队头，保留原执行次序；若 `rotation_due` 已为真，则该义务优先，回到队尾。
 - FIFO 不因 tick 请求 resched。
-- RR quantum 到期时，只有同 priority bucket 存在 peer 才请求 resched并进入队尾；低 priority peer 不触发 rotation。
+- RR quantum 到期时，只有同 priority bucket 存在 peer 才提交 rotation obligation 并请求 resched；该义务使 current 在后续离开 active segment 时进入队尾。低 priority peer 不触发新的 rotation。
 
-若 Tick 与 RunnableArrival 同时 pending，RR 已到期的队尾语义优先；arrival 不能把已经耗尽 quantum 的 current 放回队头。FIFO 不产生 Tick request，因此其 arrival preempt 始终回队头。
+RR quantum 到期且存在同 priority peer 时，先在 RR entity 中提交 `rotation_due = true`，再请求一次 full pick；arrival 不能把已经提交队尾义务的 current 放回队头。FIFO 不产生 tick rotation。preempt transaction 只消费 entity obligation，不重新判断 request cause、peer 或 pending slot。
 
-这里读取的 `PendingResched` 是进入 preempted-current transaction 时捕获的 pre-pick 值 snapshot。snapshot 捕获后到本次 full pick 前 current 不会更换；successful pick 只确认 processor slot，RT class 不保存 snapshot 或任何 task-local resched state。
+`rotation_due` 是 RT-owned placement obligation。只有 active current 可以置真；fresh、queued、blocked、exiting task 必须为假。延迟 tick 保持该义务；preempt / yield / handoff / block / exit 分别按 lifecycle 合同消费或清除它。多个 expiry 合并为一个 bool，不累计 processor 事件。
 
 ### RR Quantum
 
@@ -183,9 +192,9 @@ RR lifecycle：
 
 - fresh RR entity 以 full budget 开始。
 - 每个 scheduler tick 消耗一个 tick。
-- 到期时立即补满；有同 priority peer 则请求 resched，无 peer 则继续运行。
+- 到期时立即补满；有同 priority peer 则提交 rotation obligation 并请求 resched，无 peer 则不新增 obligation / request 并继续运行。已有 obligation 始终保留到 lifecycle transaction 消费。
 - higher-priority preempt、显式 yield、正常 block/wake 和 `handoff_woken_current()` 都不重置剩余 budget。
-- `remaining_ticks` 在持久状态中保持 `1..=full_quantum_ticks`；到期路径不留下零值。
+- `remaining_ticks` 在持久状态中保持 `1..=full_quantum_ticks`；到期路径不留下零值。`rotation_due` 不改变 budget，也不是 budget 是否 full 的证明。
 
 ### Wait-Tail 语义
 
@@ -205,9 +214,9 @@ priority correctness 通过理论、source audit 与 focused KUnit 闭合：
 - `RtPriority` 边界与 queue index。
 - 99 个 bucket 的降序选择。
 - 严格高 priority preemption 与同 priority no-preempt。
-- higher-priority preempt 回队头。
-- Tick / RunnableArrival 同时 pending 时的到期队尾规则。
-- `Realtime > Idle`。
+- higher-priority preempt 在无 rotation obligation 时回队头。
+- expiry 后延迟 full pick、preempt tail/head、yield/handoff clear、block/exit clear 以及 peer 消失后的已提交 rotation。
+- `Realtime > Fair > Idle`。
 - FIFO policy 无 quantum state。
 - RR decrement、补满、无 peer continuation 与有 peer rotation。
 
@@ -223,12 +232,12 @@ priority correctness 通过理论、source audit 与 focused KUnit 闭合：
 接受本 RFC 意味着：
 
 - FIFO/RR 共享一个 priority-first `Realtime` class。
-- effective RT policy、priority 与 RR remaining budget 由 `RtEntity` 单独拥有。
+- effective RT policy、priority、RR remaining budget 与 committed rotation obligation 由 `RtEntity` 单独拥有。
 - 编译期 default selector 是没有属性 syscall 时的正式验证入口。
-- compile-time default selector 只在 RT/FIFO 与 RT/RR 之间选择；默认值沿用当前 legacy RoundRobin 行为。
+- compile-time default selector 由 shared class domain 拥有；本 RFC 只定义其中 `rt_fifo` / `rt_rr` 的构造与行为。
 - 第一版运行时集成以用户完成的 RT/RR 整套 LTP 运行为关闭证据；FIFO 用户态专项验证明确未运行且不阻塞本 RFC。
 - 第一版明确接受无 bandwidth control 导致的 RT starvation。
-- `Scheduler` trait surface 足够，不因 RT 引入 catch-all event 或新的 core policy state。
+- `Scheduler` trait surface 足够；preempted-current transaction 不读取 core pending cause，RT rotation 由 RR entity 自己提交和消费。
 
 接受本 RFC 不表示：
 
@@ -236,7 +245,7 @@ priority correctness 通过理论、source audit 与 focused KUnit 闭合：
 - published task 可以非事务性地修改 class、policy 或 priority。
 - FIFO/RR 具有 hard realtime guarantee。
 - 不同 priority 的用户态 runtime 测试已经完成。
-- Checkpoint 1 已经实现或验证；其原子 write set、review gate 和停止条件只表示允许进入实现的合同。
+- R1 的关闭不表示调度属性 syscall、RT bandwidth、跨 CPU migration 或 archived EEVDF 已经实现；这些仍属于独立后续边界。
 
 ## 备选方案
 
@@ -276,6 +285,8 @@ priority correctness 通过理论、source audit 与 focused KUnit 闭合：
 
 ## 收口
 
-第一版已经收口：共享 `Realtime` class、FIFO/RR policy、priority bucket、RR quantum、class dispatch 与 capability-gated entity mutation 均已实现；RT/RR 与 RT/FIFO selector build、focused KUnit、source audit 和独立 review 已通过。用户在 RT/RR 默认配置下完整运行了整套 LTP 测例，作为用户态集成证据；这不表示所有 LTP case 均通过。FIFO 用户态专项验证未运行，并按用户裁定不作为第一版关闭条件。
+R0 已收口：共享 `Realtime` class、FIFO/RR policy、priority bucket、RR quantum、class dispatch 与 capability-gated entity mutation 均已实现；RT/RR 与 RT/FIFO selector build、focused KUnit、source audit 和独立 review 已通过。用户在 RT/RR 默认配置下完整运行了整套 LTP 测例，作为用户态集成证据；这不表示所有 LTP case 均通过。FIFO 用户态专项验证未运行，并按用户裁定不作为第一版关闭条件。
 
-noirq `VecDeque` allocation 仍是已登记限制。ABI 调度属性、动态 policy transaction、bandwidth control、不同 priority runtime validation 与未来 FIFO 专项验证均不在本次收口内；阶段证据见 [事务日志](../../devlog/transactions/2026-07-12-sched-rt-class.md)。
+R1 接受的修正是：将 rotation obligation 归属 RR entity，并把 pending 收窄为 core-only full-pick snapshot；Fair/Idle 只做 trait 机械适配，算法不变。实现证据见 [R1 事务日志](../../devlog/transactions/2026-07-14-sched-rt-class-r1.md)。
+
+noirq `VecDeque` allocation 仍是已登记限制。ABI 调度属性、动态 policy transaction、bandwidth control、不同 priority runtime validation 与未来 FIFO 专项验证均不在 R1 内。

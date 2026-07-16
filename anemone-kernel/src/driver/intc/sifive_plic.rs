@@ -6,10 +6,7 @@
 //! - https://starfivetech.com/uploads/sifive-interrupt-cookbook-v1p2.pdf
 
 use crate::{
-    device::discovery::{
-        fwnode::FwNode,
-        open_firmware::of_with_node_by_phandle,
-    },
+    device::discovery::{fwnode::FwNode, open_firmware::of_with_node_by_phandle},
     mm::remap::{IoRemap, ioremap},
     prelude::*,
 };

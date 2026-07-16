@@ -17,7 +17,7 @@ shmat01
 shmat02
 shmat03
 shmat04
-shmat1
+# shmat1
 
 shmdt01
 shmdt02

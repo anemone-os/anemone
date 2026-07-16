@@ -86,6 +86,7 @@
 - 文件名使用 `YYYY-MM-DD-short-slug.md`，放在 `docs/src/devlog/transactions/`。
 - 双周 devlog 只追加入口记录，后续阶段推进优先更新事务日志。
 - RFC 驱动的事务日志必须链接回对应 RFC；对应 RFC 的 `事务日志` 字段也必须反向链接到该事务日志。
+- RFC 驱动的事务日志必须注明目标修订。Closed RFC 的后续语义修订需要代码工作时建立新事务，不重新打开或继续延长旧的 Completed 事务。
 - 每次更新只追加新的事务条目，不静默改写已经完成的阶段结论；确需更正时追加更正说明。
 - 实现期反馈先写入事务日志。若反馈改变阶段顺序、write set、验证 floor 或停止条件，同步更新 RFC `implementation.md`；若反馈改变 accepted contract、不变量、ABI 边界或验收判断，同步更新 RFC canonical 文本和必要的 `tracking-issues.md`。
 - 事务日志收口后，保留最终状态、验证证据和剩余限制链接。

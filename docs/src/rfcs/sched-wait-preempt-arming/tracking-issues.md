@@ -1,11 +1,13 @@
 # Sched Wait Preempt Arming Tracking Issues
 
 **状态：** Closed
-**最后更新：** 2026-07-12
+**最后更新：** 2026-07-14
 **父 RFC：** [RFC-20260618-sched-wait-preempt-arming](./index.md)
 **事务日志：** [2026-07-06-sched-wait-preempt-arming](../../devlog/transactions/2026-07-06-sched-wait-preempt-arming.md)
 
 本文只跟踪当前仍影响方案选择、review gate、停止边界或验收判断的 RFC 层问题。已被正文接受的问题陈述、单纯 implementation pending、已 neutralized 的备选方案和纯命名延期不在这里重复记录；若本 RFC 进入实现，应建立 transaction devlog。
+
+2026-07-14 shared contract 更正：下方关于 Tick / RunnableArrival cause 集合或 class 读取 pending snapshot 的历史问题记录保持原状态与证据，但该接口已由 [Sched RT Class R1](../sched-rt-class/index.md) supersede。当前 wait-preempt contract 只保留 core take、caller-owned union restore 和 successful full-pick acknowledgement；pending 是 core-only single bit，不进入 class transaction。
 
 阶段 3 反馈对 tracker 做过一次收口：`KETER-004`、`KETER-005` 和 `KETER-006` 已由 source review、用户侧 iozone 复核和明确的 trace 未运行边界路由，不再作为 open scheduler/wait-core blocker。2026-07-12 post-close correction 已把 `KETER-008` 的 processor pending-resched lifecycle 收口到 successful full pick，并通过 `KETER-009` 删除不可达的 aborted-wait requeue surface。未运行的定向 trace 与 deferred-count fairness trace 仍是 residual evidence gap；后续若 workload 或 trace 显示 `PrePark` setup 长时间反复 deferred，必须回到 RFC review。
 

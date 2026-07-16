@@ -3,7 +3,7 @@
 
 use crate::{
     prelude::*,
-    sched::class::{PendingResched, PreemptDecision, SchedClassKind, Scheduler, TickAction},
+    sched::class::{PreemptDecision, SchedClassKind, Scheduler, TickAction},
 };
 
 pub struct Idle;
@@ -27,12 +27,7 @@ impl Scheduler for Idle {
         panic!("idle scheduler should not requeue current task");
     }
 
-    fn requeue_preempted_current(
-        &mut self,
-        _task: Arc<Task>,
-        _now: Instant,
-        _pending: PendingResched,
-    ) {
+    fn requeue_preempted_current(&mut self, _task: Arc<Task>, _now: Instant) {
         panic!("idle scheduler should not requeue current task");
     }
 
