@@ -128,17 +128,21 @@ utils（工具）、misc（杂项）或某人的姓名首字母缩写
 
 对于走 RFC 或事务 devlog 的大型实现，文档层闭合不是要求实现前消除所有不确定性。可以带着受约束的不确定性进入实现，但每个不确定点必须有明确归属、验证方式、停止条件和回写路径。
 
-高风险设计点应优先安排 probe / vertical slice gate，验证真实接口、状态流转、错误路径、性能或模块集成风险。探针必须保持最小 write set，说明失败信号和删除/回写条件；除非 RFC 接受对应 contract 变化并在事务日志中记录证据，否则探针代码不得自然沉淀为长期抽象。
+高风险设计点应优先安排 probe / vertical slice gate，验证真实接口、状态流转、错误路径、性能或模块集成风险。探针必须保持最小 write set，说明失败信号和删除/回写条件；除非 RFC 接受对应 target delta、长期共享规则完成 contract cutover，并在事务日志中记录证据，否则探针代码不得自然沉淀为长期抽象。
 
 不要为反馈机制默认新建通用 `feedback.md`、`probe.md` 或 `experiments.md`。probe 计划写在 RFC `implementation.md`，执行反馈写在 transaction devlog；只有证据包过长时，才在对应 RFC 的 `backgrounds/` 下增加具体命名的证据文件。
 
-反馈机制只能优化路线，不能篡改目标或私自削弱不变量。如果实现暴露出目标、不变量、ABI 边界或验收条件本身有问题，必须停止当前 gate 并回到 RFC review；在 canonical 文本更新前，不得为了通过 gate 缩小目标、调低验证集合、隐藏失败路径、把必须满足的不变量改成建议项，或写临时 hack 接受更弱语义。
+反馈机制只能优化路线，不能篡改目标或私自削弱不变量。如果实现暴露出目标、target invariant、current contract、ABI 边界或验收条件本身有问题，必须停止当前 gate 并回到 RFC review；在 RFC target / `Contract Impact` 更新并完成批准的 contract cutover 前，不得为了通过 gate 缩小目标、调低验证集合、隐藏失败路径、把必须满足的不变量改成建议项，或写临时 hack 接受更弱语义。
 
-实现期发现的问题按影响归属：执行事实写 transaction devlog；阶段顺序、write set、验证 floor 或停止条件变化回写 `implementation.md`；不变量、状态所有权、ABI 边界或接受边界变化回写 RFC canonical 文本和 `tracking-issues.md`；接受限制或开放缺陷进入 register / current limitations。不要用临时兼容层绕过无法分类的设计反馈。
+实现期发现的问题按影响归属：执行事实写 transaction devlog；阶段顺序、write set、验证 floor 或停止条件变化回写 `implementation.md`；target invariant、状态所有权、ABI 边界或接受边界变化回写 RFC target / `Contract Impact` 和 `tracking-issues.md`；已经生效的共享规则只在批准的 cutover gate 更新 current contract；接受限制或开放缺陷进入 register / current limitations。不要用临时兼容层绕过无法分类的设计反馈。
 
-RFC 的文本历史统一由整个仓库的 Git 保存，不为单个 RFC 建仓库，也不创建 `index-v1.md`、默认 amendment 文件或并列 canonical 副本。RFC 页首的 `R0`、`R1` 只标记已接受的语义修订：目标、非目标、accepted contract、不变量、状态所有权、ABI / 可见语义或接受边界变化时递增；措辞、证据和保持 contract 的实现计划调整不递增。
+RFC 的文本历史统一由整个仓库的 Git 保存，不为单个 RFC 建仓库，也不创建 `index-v1.md`、默认 amendment 文件或并列 canonical 副本。RFC 页首的 `R0`、`R1` 只标记已接受的 target 语义修订：目标、非目标、target invariant、状态所有权、ABI / 可见语义或接受边界变化时递增；措辞、证据和保持 target 的实现计划调整不递增。
 
-语义修订接受后，`index.md` / `invariants.md` 原地维护 consolidated contract，`implementation.md` / `tracking-issues.md` 保留增量实施和问题历史。RFC 页首状态描述当前修订：新修订已接受但待实现时回到 `Accepted for Implementation`，收口后再回到 `Closed`。Closed RFC 的新修订需要代码实现时建立引用该修订的新 transaction，不重新打开或继续延长旧的 Completed transaction。若核心目标、主要 owner、整体方案或大部分证明边界已经改变，应新建 follow-up RFC 并标明 supersede 关系。
+RFC `index.md` / `invariants.md` 原地维护当前修订的 accepted target、contract delta 和 RFC-local proof obligations，`implementation.md` / `tracking-issues.md` 保留增量实施和问题历史；跨 RFC 已经生效的共享规则由 `docs/src/contracts/` 按稳定 owner / contract surface 维护。RFC 页首状态描述当前修订：新修订已接受但待实现时回到 `Accepted for Implementation`，收口后再回到 `Closed`。Closed RFC 的新修订需要代码实现时建立引用该修订的新 transaction，不重新打开或继续延长旧的 Completed transaction。若核心目标、主要 owner、整体方案或大部分证明边界已经改变，应新建 follow-up RFC。
+
+不批量把既有 RFC 整理成全领域不变量目录。后续 RFC 第一次跨文档复用、扩展或替换既有共享规则时，只提取本次变化所需的最小 contract 闭包：受影响规则、唯一 owner 和必要直接依赖。RFC 用稳定 ID 声明 `Contract Impact` 与生效 gate；Draft / Accepted target 不得提前覆盖 effective contract，只有 transaction cutover 达到验证和停止条件后才更新 current contract。旧 RFC 正文不要求逐份反向改写。
+
+Contract 文档按 owner 和共同变化/共同证明的协议边界组织，不机械镜像源文件，不为每条小规则单独建页，也不建立 `misc` / `small-invariants` 容器。局部实现约束留在 assertion、关键注释和测试；只服务单个 RFC 的规则留在 RFC；跨 RFC / 模块共享规则才进入 contract。跨领域 contract 必须区分普通依赖与真实 handoff：后者必须声明唯一协议 owner、每份状态的唯一 owner、局部义务、线性化点和 cleanup，不能用“共同 owner”掩盖双重真相源。
 
 ---
 

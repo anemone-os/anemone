@@ -77,6 +77,7 @@
 ## Links
 
 - Biweekly devlog:
+- Current contract:
 - Register / limitations:
 - RFC / transaction:
 - Issue / PR / commit:
@@ -102,8 +103,9 @@ docs/src/devlog/changes/2026-05-22-short-slug/
 **Status:** Active / Blocked / Completed
 **Owners:** name1, name2
 **Area:** scheduler / futex / timer
-**Canonical Plan:** 计划、不变量文档或 RFC 链接。
+**Canonical Plan:** RFC 或计划链接。
 **Canonical Revision:** `R0` / `R1` / ...；非 RFC 事务写 `N/A`。
+**Contract Impact:** contract IDs、变化类型和计划 cutover gate；没有则写 `None`。
 **Current Phase:** 阶段名或阶段编号。
 
 ## Scope
@@ -123,7 +125,8 @@ docs/src/devlog/changes/2026-05-22-short-slug/
 **Change:** 本阶段实际推进的内容。
 **Audit:** 旁路审计、关键命中分类或 review 结论。
 **Observability:** 新增或验证的 debug / trace / 断言 / 日志证据。
-**Feedback:** `None`，或说明实现期反馈写回了 transaction devlog / `implementation.md` / `invariants.md` / `tracking-issues.md` / register / current limitations；必须说明是否保持原目标和不变量，不能用反馈名义削弱它们。
+**Feedback:** `None`，或说明实现期反馈写回了 transaction devlog / RFC target / `Contract Impact` / current contract / `implementation.md` / `tracking-issues.md` / register / current limitations；必须说明是否保持原目标和不变量，不能用反馈名义削弱它们。
+**Contract Cutover:** 本阶段切换的 contract IDs、旧/新 effective 规则、生效范围和证据；未切换写 `None`。
 **Validation:** 实际运行的命令、测试或复现步骤。
 **Next:** 下一阶段入口条件。
 
@@ -133,7 +136,7 @@ docs/src/devlog/changes/2026-05-22-short-slug/
 
 ## Closure
 
-事务完成时记录最终验证、剩余限制和相关 register / devlog 链接。
+事务完成时记录最终验证、每个受影响 contract ID 的 cutover / pending / Not Cut Over 结果、剩余限制和相关 register / devlog 链接。
 ```
 
 ## 问题条目
@@ -235,3 +238,7 @@ docs/src/devlog/changes/2026-05-22-short-slug/
 ## RFC 模板
 
 RFC 使用单独页面模板，见 [RFC 模板](./rfc-template.md)。
+
+## 当前契约模板
+
+跨 RFC 已生效规则使用单独页面模板，见 [当前契约模板](./contract-template.md)。不要在小迭代或 transaction 中复制 current contract 正文。

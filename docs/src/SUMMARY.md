@@ -1,6 +1,8 @@
 # Summary
 
 - [文档框架](./framework.md)
+- [当前契约](./contracts.md)
+	- [当前契约模板](./contract-template.md)
 - [代码库地图](./codebase-map.md)
 - [开发日志](./development-log.md)
 	- [2026-05-11 至 2026-05-24](./devlog/2026-05-11_to_2026-05-24.md)
@@ -9,6 +11,7 @@
 	- [2026-06-22 至 2026-07-05](./devlog/2026-06-22_to_2026-07-05.md)
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-07-16 - Current contract layer](./devlog/changes/2026-07-16-current-contract-layer.md)
 		- [2026-07-14 - RFC semantic revision workflow](./devlog/changes/2026-07-14-rfc-semantic-revisions.md)
 		- [2026-07-14 - PLIC device-tree context 解析](./devlog/changes/2026-07-14-plic-dt-context.md)
 		- [2026-07-05 - read-write request 结构整理](./devlog/changes/2026-07-05-read-write-request-structure.md)
