@@ -442,7 +442,7 @@ mod kore {
                             );
                             assert_eq!(observed_interruptible, interruptible);
                         }
-                        knoticeln!(
+                        kdebugln!(
                             "{} is wait-core parked (wait={:#x}, interruptible: {}, park: {:?}), not enqueuing it to run queue",
                             task_id,
                             wait_id,
@@ -501,7 +501,7 @@ mod kore {
                 return ScheduleInnerResult::DeferredPreempt;
             },
             ScheduleDecision::Zombie => {
-                knoticeln!(
+                kdebugln!(
                     "{} is zombie, not enqueuing it to run queue",
                     current_task_id(),
                 );

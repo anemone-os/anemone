@@ -563,7 +563,7 @@ impl UserSpace {
             None
         };
         self.heap.brk = brk;
-        kinfoln!("brk of {} set to {}", current_task_id(), brk);
+        kdebugln!("brk of {} set to {}", current_task_id(), brk);
 
         Ok(guard)
     }

@@ -31,7 +31,7 @@ fn sys_rt_sigaction(
     }
 
     if matches!(sig, SigNo::SIGKILL | SigNo::SIGSTOP) {
-        knoticeln!("sys_rt_sigaction: cannot change action of SIGKILL or SIGSTOP");
+        kdebugln!("sys_rt_sigaction: cannot change action of SIGKILL or SIGSTOP");
         return Err(SysError::InvalidArgument);
     }
 

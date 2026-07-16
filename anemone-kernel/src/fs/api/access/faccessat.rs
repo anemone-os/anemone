@@ -15,7 +15,7 @@ fn sys_faccessat(
     #[validate_with(c_readonly_path)] pathname: Box<str>,
     mode: AccessMode,
 ) -> Result<u64, SysError> {
-    knoticeln!(
+    kdebugln!(
         "faccessat: dirfd={:?}, pathname={:?}, mode={:?}",
         dirfd,
         pathname,

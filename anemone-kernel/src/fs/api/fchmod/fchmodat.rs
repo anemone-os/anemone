@@ -12,7 +12,7 @@ fn sys_fchmodat(
     #[validate_with(c_readonly_path)] pathname: Box<str>,
     linux_perm: LinuxInodePerm,
 ) -> Result<u64, SysError> {
-    knoticeln!(
+    kdebugln!(
         "fchmodat: dirfd={:?}, pathname={:?}, perm={:#o}",
         dirfd,
         pathname,
