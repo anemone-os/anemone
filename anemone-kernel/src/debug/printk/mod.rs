@@ -25,6 +25,12 @@ mod klog {
     pub fn __klog(level: Option<LogLevel>, msg: Arguments, noprint: bool) {
         match level {
             Some(level) => {
+                // Macros reject disabled records before evaluating their
+                // formatting arguments; keep this guard for direct callers.
+                if !level.should_record() {
+                    return;
+                }
+
                 let mut record = LogRecord::empty(level);
                 let mut writer =
                     BufferWriter::<{ OverflowBehavior::TRUNCATE }>::new(&mut record.msg);
@@ -33,7 +39,7 @@ mod klog {
                 let full_msg_str =
                     core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
 
-                if !noprint && level.emits_to_console() {
+                if !noprint && level.should_print() {
                     device::console::output(full_msg_str);
                 }
 
@@ -61,26 +67,40 @@ mod klog {
     #[macro_export]
     macro_rules! kprint {
         (noprint, $level:ident, $($arg:tt)*) => {
-            $crate::debug::printk::__klog(
-                Some($crate::debug::printk::LogLevel::$level),
-                format_args!(
-                    "[{:>7}] {}",
-                    $crate::debug::printk::LogLevel::$level.as_painted(),
-                    format_args!($($arg)*),
-                ),
-                true,
-            );
+            {
+                let level = $crate::debug::printk::LogLevel::$level;
+                // Keep the gate outside `format_args!`: disabled records must
+                // not evaluate log arguments or touch the record buffer.
+                if level.should_record() {
+                    $crate::debug::printk::__klog(
+                        Some(level),
+                        format_args!(
+                            "[{:>7}] {}",
+                            level.as_painted(),
+                            format_args!($($arg)*),
+                        ),
+                        true,
+                    );
+                }
+            }
         };
         ($level:ident, $($arg:tt)*) => {
-            $crate::debug::printk::__klog(
-                Some($crate::debug::printk::LogLevel::$level),
-                format_args!(
-                    "[{:>7}] {}",
-                    $crate::debug::printk::LogLevel::$level.as_painted(),
-                    format_args!($($arg)*),
-                ),
-                false,
-            );
+            {
+                let level = $crate::debug::printk::LogLevel::$level;
+                // Keep the gate outside `format_args!`: disabled records must
+                // not evaluate log arguments or touch the record buffer.
+                if level.should_record() {
+                    $crate::debug::printk::__klog(
+                        Some(level),
+                        format_args!(
+                            "[{:>7}] {}",
+                            level.as_painted(),
+                            format_args!($($arg)*),
+                        ),
+                        false,
+                    );
+                }
+            }
         };
         (noprint, $($arg:tt)*) => {
             $crate::debug::printk::__klog(None, format_args!($($arg)*), true);

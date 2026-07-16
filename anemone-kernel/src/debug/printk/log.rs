@@ -20,8 +20,12 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-    pub const fn emits_to_console(self) -> bool {
-        (self as u8) <= CONSOLE_LOG_LEVEL
+    pub const fn should_record(self) -> bool {
+        (self as u8) <= RECORD_LOG_LEVEL
+    }
+
+    pub const fn should_print(self) -> bool {
+        self.should_record() && (self as u8) <= PRINT_LOG_LEVEL
     }
 
     /// Returns the string representation of the log level.
