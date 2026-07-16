@@ -249,6 +249,9 @@ impl Config {
         if config.parameters.rt_rr_timeslice_ms == Some(0) {
             anyhow::bail!("rt_rr_timeslice_ms must be non-zero");
         }
+        if config.parameters.dw_mshc_poll_timeout_ms == Some(0) {
+            anyhow::bail!("dw_mshc_poll_timeout_ms must be non-zero");
+        }
         Ok(config)
     }
 }
@@ -303,6 +306,32 @@ mod tests {
             Config::from_str(&replace_parameter(
                 "rt_rr_timeslice_ms",
                 "rt_rr_timeslice_ms = 0"
+            ))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_dw_mshc_parameter_is_constrained() {
+        let content = std::fs::read_to_string("../../conf/.defconfig").unwrap();
+        let replace_parameter = |name: &str, replacement: &str| {
+            content
+                .lines()
+                .map(|line| {
+                    if line.trim_start().starts_with(name) {
+                        replacement
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        assert!(
+            Config::from_str(&replace_parameter(
+                "dw_mshc_poll_timeout_ms",
+                "dw_mshc_poll_timeout_ms = 0"
             ))
             .is_err()
         );

@@ -57,7 +57,12 @@ pub fn run(args: MkfsArgs) -> anyhow::Result<()> {
     rootfs
         .fs
         .fstype
-        .mkfs(&staging_dir, &image_path, args.sudo)?;
+        .mkfs(
+            &staging_dir,
+            &image_path,
+            rootfs.fs.size.as_deref(),
+            args.sudo,
+        )?;
 
     Ok(())
 }
@@ -219,6 +224,7 @@ mod tests {
             fs: Fs {
                 fstype: FsType::Ext4,
                 base: None,
+                size: None,
             },
             init: Init {
                 path: "/sbin/init".to_string(),

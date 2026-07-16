@@ -15,7 +15,7 @@ frame_section_shift_mb = 7
 
 [rootfs]
 fstype = "ext4"
-source = { type = "block", path = "vda" }
+source = { type = "block", path = "mmcblk0" }
 
 [uboot]
 arch = "riscv"

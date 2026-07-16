@@ -35,6 +35,8 @@ pub struct Build {
 pub struct Fs {
     pub fstype: FsType,
     pub base: Option<String>,
+    #[serde(default)]
+    pub size: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
