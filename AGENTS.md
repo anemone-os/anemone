@@ -70,7 +70,7 @@
 * **诊断字段要显式标注。** `owner`、`wait_id`、token id、debug label 等如果只用于日志、panic、review 或排障，字段旁必须说明它们不参与行为决策。纯诊断字段不得反向驱动状态机；一旦参与行为，它就是协议状态，必须进入类型设计、不变量说明或 RFC 文档。
 * **状态所有权只能有一个中心。** 一个状态转换只能由一个 owner 负责。其它结构应持有能力对象、弱引用、token、handle 或 snapshot，不能制造并列真相源。`Latch`、`WaitState`、`Event::Listener`、fd/file/device state 等结构尤其要避免“task 里一份，辅助对象里又一份”的双重语义。
 * **窄接口优先。** 下层只需要唤醒能力、文件能力、任务身份或上下文窗口时，不要传完整 `Task`、`File`、`FileDesc`、私有锁或内部容器。优先定义窄的 ctx、token、handle 或 owner API，让调用者无法依赖不属于它的内部状态。
-* **断言策略要按 correctness 区分。** 轻量、局部、表示正确性不变量的检查使用 `assert!`，不要用 `debug_assert!`。`debug_assert!` 只用于昂贵扫描、统计诊断，或 release 路径不能承受的检查。cleanup / `Drop` 路径应先退订、释放或撤销发布状态，再用断言暴露 bug，避免 panic 放大泄漏或悬挂状态。
+* **断言策略要按 correctness 区分。** 轻量、局部、表示正确性不变量的检查使用 `assert!`，不要用 `debug_assert!`。`debug_assert!` 只用于昂贵扫描、统计诊断，或 release 路径不能承受的检查。cleanup / `Drop` 路径应先退订、释放或撤销发布状态，再用断言暴露 bug，避免 panic 放大泄漏或悬挂状态。如果fail-close会反过来要求内核实现新的功能或者代价很高，可以在注释中说明为什么不 fail-close，并做注释标记，便于后续 review。
 * **临时桥和兼容层必须带退出条件。** 为阶段迁移、LTP 兼容或 ABI 缺口引入的临时字段、fallback、双路径分发和兼容 wrapper，必须说明保留原因、行为边界和移除条件，不能让后续开发者误以为它是长期抽象。
 * **结构性拆分是设计维护，不是默认越界。** 简单小修不要为了整洁随手拆文件；但当一个文件已经混合 syscall ABI、核心状态机、设备/文件后端、测试兼容桥、锁/生命周期规则或多套 UAPI/internal 转换时，继续把新职责塞进去会固化错误 owner boundary。此时应先做模块边界判断：同一 owner 内、行为保持的目录化拆分（例如 `foo.rs` 拆成 `foo/{mod.rs, abi.rs, state.rs, ops.rs}`）是允许的结构维护；涉及 owner surface、public API、可见性策略或 shared contract 变化时，必须按 write set 扩展流程上报并记录。
 * **禁止 `String`。** 此约束仅适用于内核运行时代码：新增或修改时不得使用 `String`，需要拥有不可变字符串时使用 `Box<str>`。host-side 构建与开发工具（例如 `build.rs`、xtask 和 scripts）不受此限制，应使用与输入和所有权语义匹配的类型。内核代码如果确实需要可变字符串缓冲，必须先说明理由并取得确认。不要借此批量迁移与当前任务无关的既有代码。
