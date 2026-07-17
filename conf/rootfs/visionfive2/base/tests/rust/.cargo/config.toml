@@ -1,0 +1,12 @@
+[build]
+# Alpine installs the riscv64gc standard library under its host target name.
+target = "riscv64-alpine-linux-musl"
+
+[net]
+offline = true
+
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"

@@ -1,0 +1,9 @@
+name = "shutdown"
+
+[build]
+workdir = "."
+driver = "cargo"
+args = ["build", "--release"]
+
+[[artifacts]]
+path = "target/${TARGET_TRIPLE}/release/shutdown"
