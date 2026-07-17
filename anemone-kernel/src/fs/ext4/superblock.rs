@@ -66,7 +66,7 @@ fn ext4_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, SysErro
         ctime: attr.ctime,
     });
 
-    knoticeln!("ext4: loaded inode {:?} into icache", ino);
+    kdebugln!("ext4: loaded inode {:?} into icache", ino);
     Ok(Arc::new(inode))
 }
 

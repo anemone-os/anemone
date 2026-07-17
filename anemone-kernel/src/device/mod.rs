@@ -7,6 +7,7 @@ use crate::{
         bus::{pcie::PcieDevice, platform::PlatformDevice, virtio::VirtIODevice},
         discovery::fwnode::FwNode,
         kobject::{KObjIdent, KObject, KObjectBase},
+        mmc::MmcCardDevice,
     },
     prelude::*,
     utils::any_opaque::AnyOpaque,
@@ -30,6 +31,7 @@ pub use devnum::{BlockDevNum, CharDevNum, MajorNum, MinorNum};
 pub mod block;
 pub mod char;
 pub mod console;
+pub mod mmc;
 
 /// Common data shared by all devices.
 ///
@@ -113,6 +115,10 @@ impl dyn Device {
 
     pub fn as_pcie_device(&self) -> Option<&PcieDevice> {
         (self as &dyn Any).downcast_ref::<PcieDevice>()
+    }
+
+    pub fn as_mmc_card_device(&self) -> Option<&MmcCardDevice> {
+        (self as &dyn Any).downcast_ref::<MmcCardDevice>()
     }
 }
 

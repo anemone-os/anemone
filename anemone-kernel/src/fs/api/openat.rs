@@ -167,7 +167,7 @@ impl OpenHow {
             accepted_noop_flags |= O_ASYNC;
         }
         if accepted_noop_flags != 0 {
-            knoticeln!(
+            kdebugln!(
                 "openat: accepting no-op flags in current VFS model: {:#x}",
                 accepted_noop_flags
             );

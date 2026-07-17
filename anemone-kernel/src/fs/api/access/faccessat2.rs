@@ -16,7 +16,7 @@ fn sys_faccessat2(
     mode: AccessMode,
     flags: AccessFlag,
 ) -> Result<u64, SysError> {
-    knoticeln!(
+    kdebugln!(
         "faccessat2: dirfd={:?}, pathname={:?}, mode={:?}, flags={:?}",
         dirfd,
         pathname,

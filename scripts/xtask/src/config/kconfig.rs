@@ -58,7 +58,8 @@ pub struct Parameters {
     pub bootstrap_heap_shift_kb: Option<u64>,
     pub log_buffer_shift_kb: Option<u64>,
     pub log_record_shift_bytes: Option<u64>,
-    pub console_log_level: Option<u8>,
+    pub print_log_level: Option<u8>,
+    pub record_log_level: Option<u8>,
     pub kstack_shift_kb: Option<u64>,
     pub remap_shift_gb: Option<u64>,
     pub max_logical_cpus: Option<usize>,
@@ -82,6 +83,7 @@ pub struct Parameters {
     pub ramdisk_count: Option<usize>,
     pub loop_device_count: Option<usize>,
     pub ns16550a_default_baud: Option<u32>,
+    pub dw_mshc_poll_timeout_ms: Option<u64>,
     pub eevdf_base_slice_us: Option<u64>,
     pub eevdf_wake_clamp_us: Option<u64>,
     pub eevdf_yield_penalty_us: Option<u64>,
@@ -110,6 +112,11 @@ impl Parameters {
             };
         }
 
+        let record_log_level = default_or!(record_log_level);
+        // Printing is downstream of recording, so it cannot admit a level that
+        // the record gate has already turned into a no-op.
+        let print_log_level = default_or!(print_log_level).min(record_log_level);
+
         format!(
             r#"//! Auto-generated kernel parameters from kconfig, do not edit manually.
 #![allow(unused)]
@@ -122,12 +129,16 @@ pub const LOG_BUFFER_SHIFT_KB: u64 = {};
 /// Note that the actual log record size will be 
 /// 2^LOG_RECORD_SHIFT_BYTES + some metadata overhead.
 pub const LOG_RECORD_SHIFT_BYTES: u64 = {};
-/// Maximum numeric log level that may be emitted to consoles.
+/// Maximum numeric log level that may be printed to consoles.
 ///
 /// Log levels follow the kernel ordering: Emerg=0 ... Debug=7.
-/// Messages with a numerically larger level stay in the kernel log 
-/// buffer only.
-pub const CONSOLE_LOG_LEVEL: u8 = {};
+/// This value is capped by `RECORD_LOG_LEVEL` because an unrecorded
+/// message is a no-op and cannot be printed.
+pub const PRINT_LOG_LEVEL: u8 = {};
+/// Maximum numeric log level that may enter the kernel log buffer.
+///
+/// Messages with a numerically larger level are complete no-ops.
+pub const RECORD_LOG_LEVEL: u8 = {};
 /// Kernel stack size as a power of 2 in KB
 pub const KSTACK_SHIFT_KB: u64 = {};
 /// Remap region size as a power of 2 in GB
@@ -192,6 +203,8 @@ pub const RAMDISK_COUNT: usize = {};
 pub const LOOP_DEVICE_COUNT: usize = {};
 /// Default NS16550A baud used when stdout-path has no device-specific options.
 pub const NS16550A_DEFAULT_BAUD: u32 = {};
+/// Bounded DW-MSHC register polling timeout in milliseconds.
+pub const DW_MSHC_POLL_TIMEOUT_MS: u64 = {};
 /// EEVDF-lite base slice in microseconds.
 pub const EEVDF_BASE_SLICE_US: u64 = {};
 /// EEVDF-lite wake placement clamp window in microseconds.
@@ -204,7 +217,8 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             default_or!(bootstrap_heap_shift_kb),
             default_or!(log_buffer_shift_kb),
             default_or!(log_record_shift_bytes),
-            default_or!(console_log_level),
+            print_log_level,
+            record_log_level,
             default_or!(kstack_shift_kb),
             default_or!(remap_shift_gb),
             default_or!(max_logical_cpus),
@@ -228,6 +242,7 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             default_or!(ramdisk_count),
             default_or!(loop_device_count),
             default_or!(ns16550a_default_baud),
+            default_or!(dw_mshc_poll_timeout_ms),
             default_or!(eevdf_base_slice_us),
             default_or!(eevdf_wake_clamp_us),
             default_or!(eevdf_yield_penalty_us),
@@ -248,6 +263,23 @@ impl Config {
         let config: Config = toml::from_str(&content)?;
         if config.parameters.rt_rr_timeslice_ms == Some(0) {
             anyhow::bail!("rt_rr_timeslice_ms must be non-zero");
+        }
+        if config.parameters.dw_mshc_poll_timeout_ms == Some(0) {
+            anyhow::bail!("dw_mshc_poll_timeout_ms must be non-zero");
+        }
+        if config
+            .parameters
+            .print_log_level
+            .is_some_and(|level| level > 7)
+        {
+            anyhow::bail!("print_log_level must be in the range 0..=7");
+        }
+        if config
+            .parameters
+            .record_log_level
+            .is_some_and(|level| level > 7)
+        {
+            anyhow::bail!("record_log_level must be in the range 0..=7");
         }
         Ok(config)
     }
@@ -311,6 +343,59 @@ mod tests {
                 "rt_rr_timeslice_ms = 0"
             ))
             .is_err()
+        );
+    }
+
+    #[test]
+    fn test_dw_mshc_parameter_is_constrained() {
+        let content = std::fs::read_to_string("../../conf/.defconfig").unwrap();
+        let replace_parameter = |name: &str, replacement: &str| {
+            content
+                .lines()
+                .map(|line| {
+                    if line.trim_start().starts_with(name) {
+                        replacement
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        assert!(
+            Config::from_str(&replace_parameter(
+                "dw_mshc_poll_timeout_ms",
+                "dw_mshc_poll_timeout_ms = 0"
+            ))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_log_levels_are_constrained() {
+        let content = std::fs::read_to_string("../../conf/.defconfig").unwrap();
+        let replace_parameter = |name: &str, replacement: &str| {
+            content
+                .lines()
+                .map(|line| {
+                    if line.trim_start().starts_with(name) {
+                        replacement
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        assert!(
+            Config::from_str(&replace_parameter("print_log_level", "print_log_level = 8"))
+                .is_err()
+        );
+        assert!(
+            Config::from_str(&replace_parameter("record_log_level", "record_log_level = 8"))
+                .is_err()
         );
     }
 }

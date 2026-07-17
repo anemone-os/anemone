@@ -185,7 +185,7 @@ fn parse_mount_flags(raw: u64) -> Result<ParsedMountRequest, SysError> {
 
     let ignored = raw & HARMLESS_COMPAT_FLAGS;
     if ignored != 0 {
-        knoticeln!(
+        kdebugln!(
             "mount: ignoring harmless compat flags raw={:#x} ignored={:#x} reason=MS_SILENT",
             raw,
             ignored

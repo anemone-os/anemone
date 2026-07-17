@@ -94,7 +94,7 @@ pub fn register_console(ops: Arc<dyn Console>, mut flags: ConsoleFlags) {
     if flags.contains(ConsoleFlags::REPLAY) {
         let it = KERNEL_LOG.iter_weak();
         for record in it {
-            if !record.level.emits_to_console() {
+            if !record.level.should_print() {
                 continue;
             }
 

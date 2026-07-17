@@ -25,7 +25,7 @@ pub fn register_device(device: Arc<VirtIODevice>) {
 
 /// Register a VirtIO driver to the VirtIO bus.
 pub fn register_driver(driver: Arc<dyn VirtIODriver>) {
-    kinfoln!("driver {} registered on virtio bus", driver.name());
+    kdebugln!("driver {} registered on virtio bus", driver.name());
     VIRTIO_BUS_TYPE.write_irqsave().register_driver(driver);
 }
 

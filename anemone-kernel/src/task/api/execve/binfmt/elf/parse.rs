@@ -446,7 +446,7 @@ pub unsafe fn load_image(file: &File, usp: &mut UserSpace) -> Result<ElfMeta, Sy
                 .to_str()
                 .map_err(|_| SysError::InvalidArgument)?
                 .to_string();
-            knoticeln!("dynamic linker found: {}", interp);
+            kdebugln!("dynamic linker found: {}", interp);
             dyn_interp = Some(interp);
 
             // actually PT_INTERP is not loadable, so this continue is unnecessary, but just

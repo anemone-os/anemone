@@ -58,7 +58,7 @@ impl MountTree {
         if let Some(target) = mountpoint {
             let target_is_current = self.inner.lock_irqsave().path_is_current(target);
             if !target_is_current {
-                knoticeln!(
+                kdebugln!(
                     "mount attach: target revalidation failed target={} reason=not-current",
                     target
                 );
@@ -79,7 +79,7 @@ impl MountTree {
             }
         };
 
-        knoticeln!(
+        kdebugln!(
             "mount attach: op={} target={} fstype={} attrs={:?} stack_depth={}",
             if mountpoint.is_some() { "new" } else { "root" },
             mountpoint.map_or("none".to_string(), |mp| mp.to_string()),
@@ -115,7 +115,7 @@ impl MountTree {
         // must use `tx_lock`.
         let stack_depth = self.inner.lock_irqsave().attach_root(&mnt)?;
 
-        knoticeln!(
+        kdebugln!(
             "mount attach: op=early-root target=none fstype={} attrs={:?} stack_depth={}",
             fs.name(),
             attrs,
@@ -707,7 +707,7 @@ impl MountTreeInner {
 
     fn attach_mount(&mut self, mount: &Arc<Mount>, target: &PathRef) -> Result<usize, SysError> {
         if !self.path_is_current(target) {
-            knoticeln!(
+            kdebugln!(
                 "mount attach: target revalidation failed target={} reason=not-current",
                 target
             );

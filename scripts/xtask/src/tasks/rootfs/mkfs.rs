@@ -8,7 +8,10 @@ use clap::Args;
 use serde::Serialize;
 
 use crate::{
-    config::{app::App as AppManifest, rootfs::Rootfs},
+    config::{
+        app::App as AppManifest,
+        rootfs::{BaseType, Rootfs},
+    },
     log_progress,
     tasks::app::build::{BuildCtx, BuiltArtifactInfo, build_app},
 };
@@ -30,6 +33,30 @@ pub fn run(args: MkfsArgs) -> anyhow::Result<()> {
     let content = std::fs::read_to_string(&args.config)
         .with_context(|| format!("Failed to read rootfs manifest from '{}'", args.config))?;
     let rootfs = Rootfs::from_str(&content)?;
+
+    let base_image = if rootfs.fs.base_type == BaseType::Image {
+        let base = rootfs
+            .fs
+            .base
+            .as_deref()
+            .context("fs.type = 'image' requires fs.base")?;
+        let base = Path::new(base);
+        if !base.is_file() {
+            bail!("rootfs base image '{}' does not exist", base.display());
+        }
+        Some(base)
+    } else {
+        None
+    };
+    let override_tree = rootfs.fs.override_dir.as_deref().map(Path::new);
+    if let Some(override_tree) = override_tree
+        && !override_tree.is_dir()
+    {
+        bail!(
+            "rootfs override '{}' does not exist or is not a directory",
+            override_tree.display()
+        );
+    }
 
     let output_dir = Path::new("build/rootfs").join(&rootfs.build.name);
     let staging_dir = output_dir.join("root");
@@ -54,10 +81,22 @@ pub fn run(args: MkfsArgs) -> anyhow::Result<()> {
             "Using sudo for host-side image materialization; you may be prompted for your password"
         );
     }
-    rootfs
-        .fs
-        .fstype
-        .mkfs(&staging_dir, &image_path, args.sudo)?;
+    if let Some(base_image) = base_image {
+        rootfs.fs.fstype.mkfs_from_image(
+            base_image,
+            override_tree,
+            &staging_dir,
+            &image_path,
+            args.sudo,
+        )?;
+    } else {
+        rootfs.fs.fstype.mkfs(
+            &staging_dir,
+            &image_path,
+            rootfs.fs.size.as_deref(),
+            args.sudo,
+        )?;
+    }
 
     Ok(())
 }
@@ -77,6 +116,7 @@ impl<'a> RootfsCtx<'a> {
 
     fn mkfs(&self) -> anyhow::Result<()> {
         self.stage_base_tree()?;
+        self.stage_override_tree()?;
         self.stage_dirs()?;
         self.stage_apps()?;
         self.stage_files()?;
@@ -88,6 +128,10 @@ impl<'a> RootfsCtx<'a> {
     }
 
     fn stage_base_tree(&self) -> anyhow::Result<()> {
+        if self.rootfs.fs.base_type == BaseType::Image {
+            return Ok(());
+        }
+
         let Some(base) = &self.rootfs.fs.base else {
             return Ok(());
         };
@@ -119,6 +163,37 @@ impl<'a> RootfsCtx<'a> {
 
         log_progress!("ROOTFS", &format!("Copying base tree from '{}'", base));
         state_base_dir(&self.staging_dir, Path::new(base), true)
+    }
+
+    fn stage_override_tree(&self) -> anyhow::Result<()> {
+        if self.rootfs.fs.base_type == BaseType::Image {
+            return Ok(());
+        }
+
+        let Some(override_dir) = &self.rootfs.fs.override_dir else {
+            return Ok(());
+        };
+
+        fn stage_dir(staging_dir: &Path, dir: &Path) -> anyhow::Result<()> {
+            fs::create_dir_all(staging_dir)?;
+            for entry in fs::read_dir(dir)? {
+                let entry = entry?;
+                let source = entry.path();
+                let destination = staging_dir.join(entry.file_name());
+                if entry.metadata()?.is_file() {
+                    fs::copy(source, destination)?;
+                } else if entry.metadata()?.is_dir() {
+                    stage_dir(&destination, &source)?;
+                }
+            }
+            Ok(())
+        }
+
+        log_progress!(
+            "ROOTFS",
+            &format!("Applying override from '{}'", override_dir)
+        );
+        stage_dir(self.staging_dir, Path::new(override_dir))
     }
 
     fn stage_dirs(&self) -> anyhow::Result<()> {
@@ -219,6 +294,9 @@ mod tests {
             fs: Fs {
                 fstype: FsType::Ext4,
                 base: None,
+                override_dir: None,
+                base_type: BaseType::Folder,
+                size: None,
             },
             init: Init {
                 path: "/sbin/init".to_string(),

@@ -1,0 +1,31 @@
+#! This manifest describes the minimal rootfs configuration for Anemone.
+
+[build]
+# Generated image name.
+name = "visionfive2"
+# Target architecture for the generated image. This determines how user-space binaries are built.
+arch = "riscv64"
+
+[fs]
+# Filesystem type to use.
+fstype = "ext4"
+# Start from the pre-sized Alpine ext4 image and recursively copy the Anemone
+# override tree into it. Image bases own their capacity and reject `size`.
+base = "conf/rootfs/visionfive2/rootfs-alpine.img"
+override = "conf/rootfs/visionfive2/base"
+type = "image"
+
+# Init process configuration. This will be written into /.anemone/init and used by kernel to launch the init process.
+[init]
+path = "/sbin/init"
+
+# Directories to create in the generated rootfs.
+[[dirs]]
+path = "/dev"
+
+[[dirs]]
+path = "/mnt"
+
+[[files]]
+source = "build/anemoneImage-rv64"
+installed_path = "/boot/anemoneImage"
