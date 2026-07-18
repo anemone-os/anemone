@@ -1,0 +1,28 @@
+[build]
+name = "2k1000-la64"
+abbrs = ["2k1000", "2k1"]
+arch = "loongarch64"
+exec_env = "sbi"
+
+[constants]
+phys_ram_start = 0x00000000
+max_phys_ram_size = 0x200000000     # 8GB
+kernel_la_base = 0xc0200000
+kernel_va_base = 0xffffffff80200000
+earlycon_reg = 0x1fe20000
+max_phys_cpu_id = 4
+frame_section_shift_mb = 7
+
+
+[rootfs]
+fstype = "ext4"
+source = { type = "block", path = "mmcblk0" }
+
+[dtb]
+type = "file"
+path = "arch/loongarch64/generated.dtb"
+source = "conf/platforms/2k1000-board.dtb"
+
+[uboot]
+type = "raw"
+filename = "anemoneImage-la64-raw"

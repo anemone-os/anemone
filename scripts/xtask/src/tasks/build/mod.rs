@@ -14,7 +14,11 @@ use clap::Args;
 use xshell::Shell;
 
 use crate::{
-    config::{KConfig, PlatformConfig, kconfig::Profile, platform::DtbType},
+    config::{
+        KConfig, PlatformConfig,
+        kconfig::Profile,
+        platform::{DtbType, Uboot},
+    },
     log_progress,
     tasks::{app::build::build_app, qemu::gen_qemu_cmd, utils::cmd_echo},
     warn,
@@ -131,7 +135,12 @@ impl<'a> BuildContext<'a> {
                     }
                 },
                 DtbType::File => {
-                    todo!();
+                    let Some(source) = dtb.source.as_deref() else {
+                        anyhow::bail!("DTB source is required when DTB type is 'file'");
+                    };
+                    let destination = Path::new("anemone-kernel/src").join(&dtb.path);
+                    log_progress!("DTB", "Copying DTB from file");
+                    fs::copy(source, destination)?;
                 },
             }
         }
@@ -215,7 +224,7 @@ impl<'a> BuildContext<'a> {
         let built_kernel_path = format!("{}/anemone-kernel", self.cargo_build_dir());
         std::fs::copy(built_kernel_path, "build/anemone.elf")?;
 
-        self.build_uboot_image()?;
+        self.build_uboot_artifact()?;
 
         if self.kconfig.build.disasm {
             log_progress!("DISASM", "Generating kernel disassembly");
@@ -232,16 +241,22 @@ impl<'a> BuildContext<'a> {
         Ok(())
     }
 
-    fn build_uboot_image(&self) -> anyhow::Result<()> {
+    fn build_uboot_artifact(&self) -> anyhow::Result<()> {
         let Some(uboot) = &self.platform.uboot else {
             return Ok(());
         };
 
-        let output_path = Path::new("build").join(&uboot.filename);
+        let filename = match uboot {
+            Uboot::Image { filename, .. } | Uboot::Raw { filename } => filename,
+        };
+        let output_path = Path::new("build").join(filename);
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let bin_path = PathBuf::from(format!("{}.bin", output_path.display()));
+        let bin_path = match uboot {
+            Uboot::Image { .. } => PathBuf::from(format!("{}.bin", output_path.display())),
+            Uboot::Raw { .. } => output_path.clone(),
+        };
 
         log_progress!(
             "UBOOT",
@@ -263,6 +278,20 @@ impl<'a> BuildContext<'a> {
             );
         }
 
+        let Uboot::Image {
+            arch,
+            os_type,
+            image_type,
+            compression,
+            load_addr,
+            entry,
+            name,
+            ..
+        } = uboot
+        else {
+            return Ok(());
+        };
+
         log_progress!(
             "UBOOT",
             &format!("Generating U-Boot image '{}'", output_path.display())
@@ -270,19 +299,19 @@ impl<'a> BuildContext<'a> {
         let mut mkimage = Command::new("mkimage");
         mkimage
             .arg("-A")
-            .arg(&uboot.arch)
+            .arg(arch)
             .arg("-O")
-            .arg(&uboot.os_type)
+            .arg(os_type)
             .arg("-T")
-            .arg(&uboot.image_type)
+            .arg(image_type)
             .arg("-C")
-            .arg(&uboot.compression)
+            .arg(compression)
             .arg("-a")
-            .arg(format!("0x{:x}", uboot.load_addr))
+            .arg(format!("0x{:x}", load_addr))
             .arg("-e")
-            .arg(format!("0x{:x}", uboot.entry))
+            .arg(format!("0x{:x}", entry))
             .arg("-n")
-            .arg(&uboot.name)
+            .arg(name)
             .arg("-d")
             .arg(&bin_path)
             .arg(&output_path);

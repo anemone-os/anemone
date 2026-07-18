@@ -18,6 +18,7 @@ fstype = "ext4"
 source = { type = "block", path = "mmcblk0" }
 
 [uboot]
+type = "image"
 arch = "riscv"
 os_type = "linux"
 image_type = "kernel"

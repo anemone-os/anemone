@@ -1,0 +1,6 @@
+# Put your lib files in this directory.
+base/*
+!base/etc
+!base/tests
+!base/install_sys.sh
+!.gitignore
