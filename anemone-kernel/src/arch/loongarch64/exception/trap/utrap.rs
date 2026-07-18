@@ -29,9 +29,11 @@ use crate::{
 
 // User trap entry point. The kernel does not save or restore floating-point
 // registers here because user-mode traps currently do not use them.
+// Hidden trap entries and local PC-relative loads avoid preemptible address references that require a GOT.
 core::arch::global_asm!(
     "   .section .text",
     "   .global __utrap_entry",
+    "   .hidden __utrap_entry",
 
     "   .balign 4",
     "__utrap_entry:",
@@ -93,7 +95,7 @@ core::arch::global_asm!(
     "   st.d $t0, $sp, {trapframe_estat_offset}",
     // TODO: if this is a device interrupt (timer or external), an interrupt stack
     // should be used, instead of continuing execution on the current stack.
-    "   la $t0, __ktrap_entry",
+    "   la.local $t0, __ktrap_entry",
     "   csrwr $t0, {eentry}",
 
     "   move $t0, $zero",
@@ -109,7 +111,7 @@ core::arch::global_asm!(
     "__utrap_return_to_task:",
     // all done. restore registers now.
 
-    "   la $t0, __utrap_entry",
+    "   la.local $t0, __utrap_entry",
     "   csrwr $t0, {eentry}",
 
     // load back save0

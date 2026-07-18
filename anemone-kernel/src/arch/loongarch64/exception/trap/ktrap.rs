@@ -7,16 +7,21 @@ use la_insc::reg::{
 };
 
 use crate::{
-    arch::loongarch64::exception::{
-        intr::handle_intr,
-        trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
+    arch::loongarch64::{
+        exception::{
+            intr::handle_intr,
+            trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
+        },
+        mm::load_addr_local,
     },
     prelude::*,
 };
 
+// The static kernel has no GOT; hidden keeps cross-object linkage while making the entry non-preemptible for PC-relative addressing.
 core::arch::global_asm!(
     "   .section .text",
     "   .global __ktrap_entry",
+    "   .hidden __ktrap_entry",
 
     "__ktrap_entry:",
     "   .align 12",
@@ -234,6 +239,6 @@ unsafe extern "C" {
 pub fn install_ktrap_handler() {
     unsafe {
         crmd::set_ie(false);
-        eentry::csr_write(VirtAddr::new(__ktrap_entry as *const () as usize as u64).get());
+        eentry::csr_write(load_addr_local!(__ktrap_entry));
     }
 }
