@@ -13,15 +13,17 @@ use la_insc::{
     },
     utils::{mem::MemAccessType, privl::PrivilegeFlags},
 };
-use loongArch64::ipi::csr_mail_send;
-
 use crate::{
     arch::{
         clear_bss,
         loongarch64::{
             cpu::early_scan_cpu_count,
             exception::install_ktrap_handler,
-            mm::{BOOT_DMW0_DM, BOOTSTRAP_PTABLE, PWCH, PWCL, refill::__tlb_rfill},
+            machine::{select_machine, wake_secondary},
+            mm::{
+                BOOT_DMW0_DM, BOOTSTRAP_PTABLE, LA64KernelLayout, PWCH, PWCL,
+                refill::__tlb_rfill,
+            },
         },
     },
     device::discovery::open_firmware::{EarlyMemoryScanner, early_scan_clock_freq},
@@ -52,10 +54,6 @@ static_assert!(
     core::mem::size_of::<CachePadded<RawKernelStack>>() == core::mem::size_of::<RawKernelStack>(),
     "cache padding must not change the bootstrap stack stride"
 );
-
-/// Temporary I/O space base address used during early boot before the full
-/// memory manager is online.
-const TEMP_IO_SPACE: u64 = 0x8000_0000_0000_0000;
 
 /// Flattened device tree blob embedded by the build.
 static DTB_BYTES: &[u8] = include_bytes_aligned_as!(PhantomAligned8, "generated.dtb");
@@ -164,7 +162,7 @@ pub unsafe extern "C" fn __nun() -> ! {
         boot_dmw2 = const Dmw::new(
                 PrivilegeFlags::PLV0,
                 MemAccessType::StrongNonCache,
-                Dmw::vseg_from_addr(TEMP_IO_SPACE),
+                Dmw::vseg_from_addr(LA64KernelLayout::TEMPORARY_IO_ADDR),
             ).to_u64(),
         cr_dmw0 = const CR_DMW0,
         cr_dmw1 = const CR_DMW1,
@@ -230,7 +228,7 @@ pub fn register_debugcon() {
 
     let con = unsafe {
         Ns16550ARegisters::from_raw(
-            (TEMP_IO_SPACE + EARLYCON_REG.get()) as *const u8 as *mut u8,
+            (LA64KernelLayout::TEMPORARY_IO_ADDR + EARLYCON_REG.get()) as *const u8 as *mut u8,
             0,
             1,
         )
@@ -283,6 +281,9 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
     );
 
     unsafe {
+        // sending ipi is machine-specific, so we need to select the machine before sending ipi.
+        select_machine(fdt_va);
+
         // needed by percpu initialization.
         early_scan_cpu_count(fdt_va, bsp_physical_id);
         let bsp_id = CpuId::from_physical_id(bsp_physical_id)
@@ -395,8 +396,7 @@ pub fn wake_up_aps(bsp_id: CpuId) {
                 continue;
             }
             let physical_id = cpu_id.physical_id();
-            csr_mail_send(st_addr, physical_id.get(), 0);
-            IntrArch::send_ipi(physical_id);
+            wake_secondary(physical_id, PhysAddr::new(st_addr));
         }
     }
 }

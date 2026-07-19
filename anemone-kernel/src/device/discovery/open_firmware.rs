@@ -326,6 +326,22 @@ where
     }
 }
 
+/// Find the first node advertising the given compatible string.
+pub fn of_with_node_by_compatible<F, R>(compatible: &str, f: F) -> Result<R, F>
+where
+    F: FnOnce(&device_tree::DeviceNode) -> R,
+{
+    let device_tree = DEVICE_TREE.get();
+    let node = device_tree.handle.all_nodes().find(|node| {
+        node.compatible()
+            .is_some_and(|mut entries| entries.any(|entry| entry == compatible))
+    });
+    match node {
+        Some(node) => Ok(f(node)),
+        None => Err(f),
+    }
+}
+
 /// Unflatten the device tree from the given FDT blob, and initialize the global
 /// `DEVICE_TREE` instance.
 pub unsafe fn unflatten_device_tree(fdt_va: VirtAddr) {

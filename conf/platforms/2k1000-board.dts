@@ -2,7 +2,7 @@
 
 / {
 	model = "loongson-2k1000";
-	compatible = "loongson,loongson3";
+	compatible = "loongson,2k1000", "loongson,loongson3";
 	#address-cells = <0x02>;
 	#size-cells = <0x02>;
 
@@ -43,7 +43,7 @@
 		compatible = "loongson,2k1000-icu";
 		interrupt-controller;
 		#interrupt-cells = <0x01>;
-		reg = <0x00 0x1fe01400 0x00 0x40 0x00 0x1fe01040 0x00 0x10>;
+		reg = <0x00 0x1fe01400 0x00 0x100 0x00 0x1fe01040 0x00 0x110>;
 		interrupt-parent = <0x01>;
 		interrupt-names = "cascade";
 		interrupts = <0x03>;
@@ -280,6 +280,7 @@
 		serial@1fe20000 {
 			compatible = "ns16550a";
 			reg = <0x00 0x1fe20000 0x00 0x10>;
+			clock-frequency = <0x7735940>;
 			clocks = <0x02>;
 			clock-names = "clk";
 			interrupt-parent = <0x03>;
