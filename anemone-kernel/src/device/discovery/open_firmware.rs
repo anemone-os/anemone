@@ -441,50 +441,57 @@ pub fn of_platform_discovery() {
                 platform::register_device(pdev.clone());
 
                 if compatible.any(|s| s == "simple-bus") {
+                    // A missing `ranges` property declares no parent address
+                    // mapping. Start empty so address-less children remain
+                    // discoverable; a child with `reg` will take the existing
+                    // failed-resource-translation path.
                     let mut subbus_ranges = vec![];
 
-                    let ranges = child.ranges().expect(&format!(
-                        "no ranges property found for simple-bus compatible node {}",
-                        child.path()
-                    ));
-                    let mut is_empty = true;
+                    if let Some(ranges) = child.ranges() {
+                        let mut is_empty = true;
 
-                    for (subbus_addr, on_simple_bus_addr, length) in ranges.iter() {
-                        is_empty = false;
+                        for (subbus_addr, on_simple_bus_addr, length) in ranges.iter() {
+                            is_empty = false;
 
-                        if length == 0 {
-                            continue;
-                        }
+                            if length == 0 {
+                                continue;
+                            }
 
-                        let mut translated = false;
-                        for &(simple_bus_addr, simple_bus_cpu_addr, range_len) in
-                            translated_ranges.iter()
-                        {
-                            if range_contains(
-                                simple_bus_addr,
-                                range_len,
-                                on_simple_bus_addr,
-                                length,
-                            ) {
-                                let translated_subbus_addr =
-                                    simple_bus_cpu_addr + (on_simple_bus_addr - simple_bus_addr);
-                                subbus_ranges.push((subbus_addr, translated_subbus_addr, length));
-                                translated = true;
-                                break;
+                            let mut translated = false;
+                            for &(simple_bus_addr, simple_bus_cpu_addr, range_len) in
+                                translated_ranges.iter()
+                            {
+                                if range_contains(
+                                    simple_bus_addr,
+                                    range_len,
+                                    on_simple_bus_addr,
+                                    length,
+                                ) {
+                                    let translated_subbus_addr = simple_bus_cpu_addr
+                                        + (on_simple_bus_addr - simple_bus_addr);
+                                    subbus_ranges.push((
+                                        subbus_addr,
+                                        translated_subbus_addr,
+                                        length,
+                                    ));
+                                    translated = true;
+                                    break;
+                                }
+                            }
+
+                            if !translated {
+                                kerrln!(
+                                    "of_platform_discovery: failed to parse sub bus range for simple-bus node {}",
+                                    child.path()
+                                );
                             }
                         }
 
-                        if !translated {
-                            kerrln!(
-                                "of_platform_discovery: failed to parse sub bus range for simple-bus node {}",
-                                child.path()
-                            );
+                        if is_empty {
+                            // An empty `ranges` property explicitly declares
+                            // identity mapping in DT semantics.
+                            subbus_ranges = translated_ranges.clone();
                         }
-                    }
-
-                    if is_empty {
-                        // empty ranges means identity mapping in DT semantics.
-                        subbus_ranges = translated_ranges.clone();
                     }
 
                     // sub platform bus
