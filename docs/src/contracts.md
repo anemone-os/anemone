@@ -48,7 +48,7 @@ docs/src/contracts/
 
 新 RFC 不需要整理整个领域，只需要闭合它的实际影响面：
 
-1. 找出本 RFC 直接 Preserve、Refine、Replace、Remove 或 Scoped Exception 的共享规则。
+1. 找出本 RFC 直接 Introduce、Preserve、Refine、Replace、Remove 或 Scoped Exception 的共享规则。
 2. 确认每条规则的 owner，以及描述它所必需的直接依赖：状态来源、能力、线性化点、生命周期、ABI 或失败边界。
 3. 把这些规则和直接依赖提取到窄 contract surface；明确写出不覆盖的相邻领域。
 4. 在 RFC 中用稳定 ID 声明 `Contract Impact`，未触及的领域不做顺手整理。
@@ -81,9 +81,11 @@ docs/src/contracts/
 
 RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 current consolidated contract：
 
-1. `Contract Impact`：按稳定 ID 声明 Preserve / Refine / Replace / Remove、目标摘要和生效 gate；Preserve 项只链接，不复制正文。
+1. `Contract Impact`：按稳定 ID 声明 Introduce / Preserve / Refine / Replace / Remove / Scoped Exception、目标摘要和生效 gate；Preserve 项只链接，不复制正文。
 2. `Target Invariants`：精确定义尚未生效的新规则。
 3. `RFC-local Invariants`：只服务当前方案、probe、迁移桥、阶段原子性或验收的规则；它们不会自动进入长期 contract。
+
+`Introduce` 表示 RFC 新增此前不存在的 effective contract ID。该 ID 在 cutover 前只存在于 RFC target，current rule 为 `None（尚未生效）`；达到 cutover gate 后才在契约层创建 Active 条目。若规则已经由 live code 或 Closed RFC 生效、只是尚未迁入契约层，应先提取最小 baseline，再按真实 delta 分类，不能使用 `Introduce` 把既有行为伪装成新增语义。
 
 生命周期如下：
 

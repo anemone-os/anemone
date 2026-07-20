@@ -165,10 +165,11 @@ Current contracts：
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | 生效 Gate |
 | --- | --- | --- | --- | --- |
+| JOBCTL-STATE-001 | Introduce | None（尚未生效） | 新增 ThreadGroup job-control phase | Gate 3 |
 | SCHED-PICK-001 | Replace | [当前规则](../../contracts/scheduler/pick-request.md#sched-pick-001) | 新规则摘要 | Gate 3 |
 | WAIT-WAKE-004 | Preserve | [当前规则](../../contracts/wait-core/wake-publication.md#wait-wake-004) | 不变 | 全程 |
 
-变化类型只使用 `Preserve`、`Refine`、`Replace`、`Remove` 或 `Scoped Exception`。Preserve 项不复制 contract 正文；Draft 与 accepted-but-not-effective 阶段不能把 target 写成当前规则。
+变化类型只使用 `Introduce`、`Preserve`、`Refine`、`Replace`、`Remove` 或 `Scoped Exception`。`Introduce` 只用于此前没有 effective 规则的新 ID，当前规则栏写 `None（尚未生效）`，cutover 时才创建 current contract；已有行为尚未文档化时，应先提取 baseline，不能借 `Introduce` 跳过。Preserve 项不复制 contract 正文；Draft 与 accepted-but-not-effective 阶段不能把 target 写成当前规则。
 
 如果本 RFC 第一次跨 RFC 触及尚未提取的既有不变量，先从 live owner、Closed RFC 和执行证据提取最小 contract 闭包；不批量整理整个领域，也不逐份回改旧 RFC。
 

@@ -75,7 +75,8 @@ If the task involves review findings or issue severity, also use `anemone-code-r
 3. Align RFC draft shape.
    - Ensure `index.md` and `implementation.md` exist for directory-level RFCs.
    - Add `invariants.md` when the RFC changes a shared contract or when protocol, identity, lock order, lifecycle, or proof obligations are non-trivial.
-   - When contracts are affected, require `Contract Impact` with stable IDs, Preserve / Refine / Replace / Remove / Scoped Exception classification, current links, target summaries, and cutover gates.
+   - When contracts are affected, require `Contract Impact` with stable IDs, Introduce / Preserve / Refine / Replace / Remove / Scoped Exception classification, current links where an effective rule exists, target summaries, and cutover gates.
+   - Use `Introduce` only for a new stable ID with no effective rule. If behavior already exists but has not been extracted into `docs/src/contracts/`, extract the minimum current baseline first and classify the actual semantic delta instead of calling the documentation migration `Introduce`.
    - Keep unchanged effective rules in current contracts and link them; put proposed target rules and RFC-local migration/proof obligations in the RFC.
    - Add `tracking-issues.md` only when confirmed design-review issues affect implementation order, review gate, stop boundary, or acceptance.
    - Use `backgrounds/` for old plans, rejected alternatives, historic issue lists, and evidence indexes.

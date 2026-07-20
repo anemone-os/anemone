@@ -114,10 +114,11 @@ RFC `invariants.md` 在涉及共享 contract 时加入：
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | 生效 Gate |
 | --- | --- | --- | --- | --- |
+| JOBCTL-STATE-001 | Introduce | None（尚未生效） | 新增 ThreadGroup job-control phase | Gate 3 |
 | SCHED-PICK-001 | Replace | [当前规则](../../contracts/scheduler/pick-request.md#sched-pick-001) | pending 改为 core-only full-pick request | Gate 3 |
 | WAIT-WAKE-004 | Preserve | [当前规则](../../contracts/wait-core/wake-publication.md#wait-wake-004) | 不变 | 全程 |
 
-变化类型只使用 `Preserve`、`Refine`、`Replace`、`Remove` 或 `Scoped Exception`。Draft 和 accepted-but-not-effective 阶段不能把 target 写成当前 effective 规则。
+变化类型只使用 `Introduce`、`Preserve`、`Refine`、`Replace`、`Remove` 或 `Scoped Exception`。`Introduce` 只用于此前没有 effective 规则的新 ID，current rule 写 `None（尚未生效）`，并在 cutover 时创建 Active 条目；已有行为只是尚未提取时，应先建立 minimum effective baseline。Draft 和 accepted-but-not-effective 阶段不能把 target 写成当前 effective 规则。
 
 ## Target Invariants
 
