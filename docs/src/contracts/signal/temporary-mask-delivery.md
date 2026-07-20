@@ -8,7 +8,7 @@
 **不覆盖：** `rt_sigtimedwait` 的 syscall-body-only mask、job-control control-signal cleanup、fresh / clone / exec user entry
 **实现位置：** `anemone-kernel/src/task/sig/`、`anemone-kernel/src/task/sig/api/{rt_sigsuspend,rt_sigreturn}.rs`、`anemone-kernel/src/fs/api/iomux/`
 **依赖：** `SIGNAL-PENDING-001`、`SIGNAL-ACTION-002`
-**Pending Successor：** None
+**Pending Successor：** [RFC-20260720-unix-jobctl R0](../../rfcs/unix-jobctl/index.md)；`UJ-CUTOVER` 前不生效
 **最后核验：** 2026-07-20
 
 ## 状态与能力所有权

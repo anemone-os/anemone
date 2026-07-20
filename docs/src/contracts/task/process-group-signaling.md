@@ -8,7 +8,7 @@
 **不覆盖：** controlling TTY、foreground process group、orphaned-process-group policy、process-group-wide stop transaction
 **实现位置：** `anemone-kernel/src/task/topology/process_group.rs`、`anemone-kernel/src/task/sig/api/kill.rs`
 **依赖：** `SIGNAL-PENDING-001`、`SIGNAL-PENDING-002`
-**Pending Successor：** None
+**Pending Successor：** [RFC-20260720-unix-jobctl R0](../../rfcs/unix-jobctl/index.md)；`UJ-CUTOVER` 前不生效
 **最后核验：** 2026-07-20
 
 ## PGRP-SIGNAL-001 — ProcessGroup 只拥有成员选择

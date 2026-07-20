@@ -8,7 +8,7 @@
 **不覆盖：** stopped / continued report、ptrace status、pidfd wait、core-dump reporting、完整 rusage
 **实现位置：** `anemone-kernel/src/task/api/wait/`、`anemone-kernel/src/task/topology/parent_child.rs`、`anemone-kernel/src/task/api/exit/mod.rs`
 **依赖：** `TASK-LIFE-001`、`TASK-LIFE-002`、`TASK-LIFE-003`、`PGRP-SIGNAL-001`
-**Pending Successor：** None
+**Pending Successor：** [RFC-20260720-unix-jobctl R0](../../rfcs/unix-jobctl/index.md)；`UJ-CUTOVER` 前不生效
 **最后核验：** 2026-07-20
 
 ## CHILD-WAIT-001 — 当前 wait truth 只有 Exited child

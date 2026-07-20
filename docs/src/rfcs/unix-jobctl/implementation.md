@@ -1,11 +1,11 @@
 # Unix Job Control 迁移实施计划
 
-**状态：** Draft / Not Active
+**状态：** Active / R0
 **最后更新：** 2026-07-20
 **父 RFC：** [RFC-20260720-unix-jobctl](./index.md)
 **目标与不变量：** [Unix Job Control 目标与不变量](./invariants.md)
-**当前修订：** Draft
-**事务日志：** None；本文件是公开 RFC 的 planned implementation source，尚未接受或进入实现。RFC review 与 promotion 不是 implementation stage。
+**当前修订：** R0
+**事务日志：** [2026-07-20-unix-jobctl](../../devlog/transactions/2026-07-20-unix-jobctl.md)；Stage 0 checkpoint 已关闭，Stage 1 尚未开始。
 **Contract Cutover：** `UJ-CUTOVER`；全部 `Introduce / Refine / Replace / Scoped Exception` delta 只在 Stage 5 原子生效。
 
 当前 effective contract：
@@ -27,13 +27,13 @@
 3. 本文只决定如何验证并迁移到该 target；
 4. transaction 在实现开始后记录执行事实、review、证据、修正和 cutover 结果。
 
-本 RFC 已公开 promotion，但 implementation plan 仍未接受。公开本文不表示：
+R0 已接受并建立实现事务。接受与 transaction 创建不表示：
 
-- RFC target 已经接受；
-- transaction 已经创建；
 - current contract 已加入 pending successor；
 - 任何代码、测试配置或 runtime 语义已经获准修改；
 - 任一 `JOBCTL-*` 或 `USER-ENTRY-002` 已经生效。
+
+Stage 0 仅是行为保持型 Signal module split checkpoint；Stage 1 及之后仍未授权。
 
 ### 1.1 废弃来源隔离
 
@@ -139,7 +139,7 @@ task::wait / lifecycle / procfs
 
 | Stage | 目标 | 当前状态 | Contract Cutover | 发布边界 |
 | --- | --- | --- | --- | --- |
-| Stage 0 | Signal module split-only | Not Started | None | 行为保持型 checkpoint |
+| Stage 0 | Signal module split-only | Closed | None | 行为保持型 checkpoint |
 | Stage 1 | ThreadGroup owner 与 mandatory-entry dormant foundation | Not Started | None | target readiness；无 stop ingress |
 | Stage 2 | 单线程 integrated production vertical slice | Not Started | None | non-publishable candidate train 开始 |
 | Stage 3A | conditional control signal、reservation 与 temporary-mask closure | Not Started | None | non-publishable candidate checkpoint |
@@ -234,6 +234,15 @@ just build
 - review 确认每一行改动都属于移动、module declaration、import、visibility 收窄或必要路径修正。
 - Signal module root 不再混合四类行为职责。
 - Stage 0 transaction checkpoint 关闭后才可冻结 Stage 1 manifest。
+
+### 当前结果（2026-07-20）
+
+Stage 0 已按冻结 manifest 完成并关闭：`mask.rs`、`pending.rs`、`generation.rs` 与
+`delivery.rs` 已建立，`mod.rs` 保留根领域名词与声明，既有调用面、visibility、pending /
+reservation、temporary-mask cleanup、handler-frame loop 与锁序保持不变。`just build`、
+format、whitespace、diff 和 source audit 均通过；首次 sandbox build 的 `lwext4` `Bad
+system call` 已通过同一仓库入口的批准 escalation 重试并通过。QEMU/LTP/LA64 按本阶段
+边界未运行。未发现需要回写 RFC target、contract 或 register 的问题。
 
 ### Contract Cutover
 
@@ -751,7 +760,9 @@ Stage 5开始前，以上默认范围必须展开成逐文件`Resolved Write Set
 
 ## 15. 实现期反馈记录
 
-- None；实现尚未开始。
+- 2026-07-20：Stage 0 source split 与验证完成；未产生 target、owner、ABI、停止条件或
+  write set 扩展反馈。sandbox build 的 `Bad system call` 是环境限制，已记录于 transaction
+  并通过批准的 repository build 重试解决。
 
 ## 16. Write Set 扩展记录
 

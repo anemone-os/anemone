@@ -8,7 +8,7 @@
 **不覆盖：** fresh task、clone child、exec new image 的直接 entry，job-control gate，scheduler stop state
 **实现位置：** `anemone-kernel/src/arch/{riscv64,loongarch64}/exception/trap/utrap.rs`、`anemone-kernel/src/task/sig/mod.rs`
 **依赖：** `SIGNAL-ACTION-002`、`TASK-LIFE-001`
-**Pending Successor：** None
+**Pending Successor：** [RFC-20260720-unix-jobctl R0](../../rfcs/unix-jobctl/index.md)；`UJ-CUTOVER` 前不生效
 **最后核验：** 2026-07-20
 
 ## USER-ENTRY-001 — Ordinary trap-return 先完成 Signal arbitration

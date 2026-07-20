@@ -44,6 +44,7 @@
 		- [2026-06-07 - Signal LTP Tgkill Sigqueueinfo](./devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md)
 		- [2026-06-05 - Block Byte I/O Loop Mkfs](./devlog/changes/2026-06-05-block-byte-io-loop-mkfs.md)
 	- [事务日志](./devlog/transactions/index.md)
+		- [Unix Job Control](./devlog/transactions/2026-07-20-unix-jobctl.md)
 		- [CPU Logical / Physical ID](./devlog/transactions/2026-07-14-cpu-logical-physical-id.md)
 		- [Sched Wait Refactor](./devlog/transactions/2026-06-01-sched-wait-refactor.md)
 		- [Cred Merge](./devlog/transactions/2026-06-02-cred-merge.md)

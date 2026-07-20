@@ -1,9 +1,9 @@
 # Unix Job Control 目标与不变量
 
-**状态：** Draft，已提升为公开 RFC 草案 / Not effective
+**状态：** R0 / Accepted for Implementation / Not effective
 **最后更新：** 2026-07-20
 **父 RFC：** [RFC-20260720-unix-jobctl](./index.md)
-**适用修订：** Draft
+**适用修订：** R0
 
 本文定义 unix-jobctl 的 contract delta、尚未 cutover 的 target rules 和只服务本方案的 proof obligations。当前已经生效的共享规则以仓库 `docs/src/contracts/` 为准；本页所有 `JOBCTL-*` 与新增 `USER-ENTRY-*` 都是 proposed stable ID，不是 current authority。
 

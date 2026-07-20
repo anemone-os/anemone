@@ -8,7 +8,7 @@
 **不覆盖：** procfs binding lifetime、leader-missing error、ThreadGroup terminal publication、job-control / ptrace state、其它 stat / status 字段
 **实现位置：** `anemone-kernel/src/fs/proc/tgid/{stat,status}.rs`
 **依赖：** None
-**Pending Successor：** None
+**Pending Successor：** [RFC-20260720-unix-jobctl R0](../../rfcs/unix-jobctl/index.md)；`UJ-CUTOVER` 前不生效
 **最后核验：** 2026-07-20
 
 ## PROCFS-TASK-STATE-001 — 当前 TGID state 只投影 leader TaskStatus

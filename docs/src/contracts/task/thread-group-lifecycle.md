@@ -8,7 +8,7 @@
 **不覆盖：** job-control stop phase、ptrace stop、kernel-thread lifecycle、subreaper policy
 **实现位置：** `anemone-kernel/src/task/mod.rs`、`anemone-kernel/src/task/api/exit/`、`anemone-kernel/src/task/topology/`
 **依赖：** None
-**Pending Successor：** None
+**Pending Successor：** [RFC-20260720-unix-jobctl R0](../../rfcs/unix-jobctl/index.md)；`UJ-CUTOVER` 前不生效
 **最后核验：** 2026-07-20
 
 ## 状态与所有权
