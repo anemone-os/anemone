@@ -9,7 +9,7 @@
 
 ## Contract Impact
 
-`UJ-CUTOVER` 是本 Draft 定义的语义 cutover unit，不单独充当 implementation stage 名称。`implementation.md` 将 Stage 5 映射到整个 `UJ-CUTOVER`；在此之前不能逐项宣称生效。
+`UJ-CUTOVER` 是本 R0 target 定义的语义 cutover unit，不单独充当 implementation stage 名称。`implementation.md` 将 Stage 5 映射到整个 `UJ-CUTOVER`；在此之前不能逐项宣称生效。
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | 生效边界 |
 | --- | --- | --- | --- | --- |
@@ -363,4 +363,4 @@ RFC target review完成需要同时证明：
 7. accepted limitation、工程降级边界与后续RFC范围已明确；
 8. 未来 implementation为全部 `Introduce / Refine / Replace` ID建立同一个 `UJ-CUTOVER` 映射、验证floor与停止条件。
 
-`UJ-CUTOVER` 前，新增 ID全部保持 Not effective，现有 current contract不变；本 Draft 不创建 transitional contract。
+`UJ-CUTOVER` 前，新增 ID全部保持 Not effective，现有 current contract不变；本 R0 不创建 transitional contract。

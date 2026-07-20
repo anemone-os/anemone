@@ -100,3 +100,9 @@ plan / RFC review，不通过兼容桥或额外 manager/carrier 继续。
 
 Stage 0 关闭后，下一 gate 只能是 Stage 1 manifest 冻结与 dormant ThreadGroup/user-entry
 foundation preflight。Stage 1 不在本事务当前变更中执行，也不因本 checkpoint 自动开始。
+
+## Correction note - 2026-07-21
+
+收口复核发现总 RFC 索引、双周 devlog 和 invariants 页仍保留 Stage 0 启动期措辞；本条
+补充后已同步为 Stage 0 closed、Stage 1 Not Started。该修正只澄清文档状态，不改变 R0
+target、current contract、register、write set 或 validation floor。
