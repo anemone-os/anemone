@@ -108,3 +108,14 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
 ## 当前登记
 
 契约层从本规则生效后按触达迁移。当前不批量把既有 RFC 的不变量搬入 `docs/src/contracts/`；首个需要跨 RFC 修改或复用既有共享规则的 RFC，应按本页提取最小 contract 闭包，并把新入口加入本节和 `docs/src/SUMMARY.md`。
+
+- [Signal 当前契约](./contracts/signal/index.md)
+  - [Pending routing 与 ordinary action selection](./contracts/signal/pending-routing.md)
+  - [Temporary-mask delivery handoff](./contracts/signal/temporary-mask-delivery.md)
+- [Procfs 当前契约](./contracts/procfs/index.md)
+  - [TGID task-state projection](./contracts/procfs/task-state-projection.md)
+- [Task 当前契约](./contracts/task/index.md)
+  - [Process-group signal targeting](./contracts/task/process-group-signaling.md)
+  - [ThreadGroup lifecycle](./contracts/task/thread-group-lifecycle.md)
+  - [Child wait](./contracts/task/child-wait.md)
+  - [Ordinary user entry](./contracts/task/user-entry.md)
