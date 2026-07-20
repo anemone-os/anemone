@@ -16,7 +16,7 @@ use crate::{
         *,
     },
     sched::class::SchedEntity,
-    task::{cpu_usage::Privilege, sig::SigNo, tid::Tid},
+    task::{sig::SigNo, tid::Tid},
 };
 
 bitflags! {
@@ -482,15 +482,11 @@ extern "C" fn enter_cloned_user_task(
             }
         }
 
-        // we must disable interrupts before calling `on_prv_change`, otherwise
-        // we could leave a window where the task is accounted as
-        // returning to user while the CPU can still take a kernel-mode
-        // timer trap, which, in turn, will cause a panic
-        // due to inconsistent task state.
+        // The architecture facade performs the final jobctl/user-entry gate and
+        // privilege accounting. Disable interrupts before entering that common
+        // path so no kernel timer trap can observe a half-committed transition.
         IntrArch::local_intr_disable();
     }
-
-    task.on_prv_change(Privilege::User);
 
     drop(task);
 

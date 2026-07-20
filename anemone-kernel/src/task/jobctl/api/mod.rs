@@ -1,4 +1,4 @@
-//! Unix job control.
+//! Unix job-control syscall adapters.
 
 pub mod getpgid;
 pub mod getsid;

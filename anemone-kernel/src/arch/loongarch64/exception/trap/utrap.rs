@@ -204,7 +204,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
     // Fpu are disabled in kernel mode
     set_fpu_status(false);
 
-    get_current_task().on_prv_change(Privilege::Kernel);
+    get_current_task().on_user_trap_entry();
 
     let (mut restart_syscall, syscall_ctx) = (None, TrapArch::syscall_ctx_snapshot(trapframe));
 
@@ -350,13 +350,15 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         IntrArch::local_intr_disable();
         // cpu usage tracking relies on interrupt being disabled.
     }
+
+    get_current_task().before_user_entry();
+
     if get_current_task().fpu_used() {
         load_next_frs(trapframe.fpu_regs());
         set_fpu_status(true);
     } else {
         set_fpu_status(false);
     }
-
     get_current_task().on_prv_change(Privilege::User);
 }
 unsafe extern "C" {
@@ -365,11 +367,13 @@ unsafe extern "C" {
 }
 
 pub unsafe fn utrap_return_to_task(trapframe: &mut LA64TrapFrame) -> ! {
+    get_current_task().before_user_entry();
     if get_current_task().fpu_used() {
         load_next_frs(trapframe.fpu_regs());
         set_fpu_status(true);
     } else {
         set_fpu_status(false);
     }
+    get_current_task().on_prv_change(Privilege::User);
     unsafe { __utrap_return_to_task(trapframe) }
 }

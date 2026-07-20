@@ -228,7 +228,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
     // Fpu are disabled in kernel mode
     set_fpu_status(FS::Off, None);
 
-    get_current_task().on_prv_change(Privilege::Kernel);
+    get_current_task().on_user_trap_entry();
 
     let (mut restart_syscall, syscall_ctx) = (None, TrapArch::syscall_ctx_snapshot(trapframe));
 
@@ -361,13 +361,14 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
         // cpu usage tracking relies on interrupt being disabled.
     }
 
+    get_current_task().before_user_entry();
+
     if get_current_task().fpu_used() {
         fpu::load_next_frs(trapframe.fpu_regs());
         set_fpu_status(FS::Clean, Some(trapframe));
     } else {
         set_fpu_status(FS::Off, Some(trapframe));
     }
-
     get_current_task().on_prv_change(Privilege::User);
 }
 
@@ -388,11 +389,13 @@ unsafe extern "C" {
 /// **Make sure `sscratch` points to the kernel stack top before calling
 /// this function**, and the trapframe is valid.
 pub unsafe fn utrap_return_to_task(trapframe: &mut RiscV64TrapFrame) -> ! {
+    get_current_task().before_user_entry();
     if get_current_task().fpu_used() {
         fpu::load_next_frs(trapframe.fpu_regs());
         set_fpu_status(FS::Clean, Some(trapframe));
     } else {
         set_fpu_status(FS::Off, Some(trapframe));
     }
+    get_current_task().on_prv_change(Privilege::User);
     unsafe { __utrap_return_to_task(trapframe) }
 }

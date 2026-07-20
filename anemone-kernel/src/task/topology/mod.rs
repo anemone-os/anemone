@@ -156,13 +156,15 @@ impl PublishGuard {
             tgid: handle,
             ty: ThreadGroupType::User,
             child_exited: Event::new(),
+            jobctl_unblocked: Event::new(),
             terminate_signal: None,
             itimers: ITimers::new(),
             inner: NoIrqRwLock::new(ThreadGroupInner {
                 status: ThreadGroupStatus::new_alive_executed(),
                 pgid: Some(Tid::INIT),
                 sid: Some(Tid::INIT),
-                members: BTreeSet::from([Tid::INIT]),
+                members: ThreadGroupMembers::new_user(Tid::INIT),
+                job_control: Some(UserJobControl::new_running()),
                 parent_tgid: None,
                 children_tgids: BTreeSet::new(),
                 cpu_usage: ThreadGroupCpuUsage::ZERO,
@@ -215,7 +217,8 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                 status: ThreadGroupStatus::new_alive(),
                 pgid: Some(pgid),
                 sid: Some(sid),
-                members: BTreeSet::from([node.task.tid()]),
+                members: ThreadGroupMembers::new_user(node.task.tid()),
+                job_control: Some(UserJobControl::new_running()),
                 parent_tgid: Some(parent_tgid),
                 children_tgids: BTreeSet::new(),
                 cpu_usage: ThreadGroupCpuUsage::ZERO,
@@ -286,6 +289,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                                 tgid: handle,
                                 ty: ThreadGroupType::User,
                                 child_exited: Event::new(),
+                                jobctl_unblocked: Event::new(),
                                 terminate_signal,
                                 itimers: ITimers::new(),
                                 inner: NoIrqRwLock::new(inner),
@@ -329,13 +333,15 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                 tgid: handle,
                 ty: ThreadGroupType::KThread,
                 child_exited: Event::new(),
+                jobctl_unblocked: Event::new(),
                 terminate_signal: None,
                 itimers: ITimers::new(),
                 inner: NoIrqRwLock::new(ThreadGroupInner {
                     status: ThreadGroupStatus::new_alive(),
                     pgid: None,
                     sid: None,
-                    members: BTreeSet::from([node.task.tid()]),
+                    members: ThreadGroupMembers::new_kthread(node.task.tid()),
+                    job_control: None,
                     parent_tgid: None,
                     children_tgids: BTreeSet::new(),
                     cpu_usage: ThreadGroupCpuUsage::ZERO,
@@ -379,7 +385,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
             let task = Arc::new(task);
 
             assert!(
-                tg.inner.write().members.insert(task.tid()),
+                tg.inner.write().members.insert_user(task.tid()),
                 "task topology: duplicate member TID {} when publishing task",
                 tid
             );
@@ -409,6 +415,11 @@ fn assert_thread_group_shape(tgid: Tid, tg: &ThreadGroup) {
                 "task topology: user thread group {} missing session",
                 tgid
             );
+            assert!(
+                inner.job_control.is_some() && inner.members.all_user(),
+                "task topology: user thread group {} missing user job-control shape",
+                tgid
+            );
         },
         ThreadGroupType::KThread => {
             assert!(
@@ -424,6 +435,11 @@ fn assert_thread_group_shape(tgid: Tid, tg: &ThreadGroup) {
             assert!(
                 inner.members.len() == 1 && inner.members.contains(&tgid),
                 "task topology: kthread {} must be a singleton thread group",
+                tgid
+            );
+            assert!(
+                inner.job_control.is_none() && inner.members.all_kthread(),
+                "task topology: kthread {} must not carry user job-control state",
                 tgid
             );
         },

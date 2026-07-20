@@ -16,6 +16,7 @@ pub use credentials::{
     cap::{Capability, CredCapabilities, FileCapabilities, SecureBits},
 };
 pub mod files;
+pub mod jobctl;
 pub mod kthread;
 pub mod sig;
 #[path = "fs.rs"]
@@ -40,6 +41,7 @@ use crate::{
     task::{
         cpu_usage::{TaskCpuUsage, ThreadGroupCpuUsage},
         files::FilesState,
+        jobctl::group::{ThreadGroupMembers, UserJobControl},
         kthread::KThreadTaskLocal,
         sig::{
             PendingSignals, SigNo, TaskSigMaskState, altstack::SigAltStack,
@@ -247,6 +249,11 @@ pub struct ThreadGroup {
     ty: ThreadGroupType,
     /// Event that will be published when a child thread group exits.
     child_exited: Event,
+    /// Wake capability for members parked at the mandatory user-entry gate.
+    ///
+    /// The event carries no phase or permit truth. Waiters always recheck the
+    /// ThreadGroup-owned job-control state after publication.
+    jobctl_unblocked: Event,
     /// Signal to send to parent when this thread group exits.
     terminate_signal: Option<SigNo>,
     /// POSIX interval timers. Shared by all member threads.
@@ -330,8 +337,12 @@ struct ThreadGroupInner {
     pgid: Option<Tid>,
     /// Session ID cached on the process identity.
     sid: Option<Tid>,
-    /// TIDs of all member threads, including the leader thread.
-    members: BTreeSet<Tid>,
+    /// Live members and their owner-local user-exposure state.
+    members: ThreadGroupMembers,
+    /// Job-control state exists exactly for user ThreadGroups. `ty` remains
+    /// the construction truth; topology shape assertions keep this presence
+    /// from becoming an independently mutable type discriminator.
+    job_control: Option<UserJobControl>,
     /// Tgid of parent thread group. [None] for init/idle thread group.
     parent_tgid: Option<Tid>,
     /// Tgids of all child thread groups.
