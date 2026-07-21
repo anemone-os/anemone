@@ -43,9 +43,14 @@ If the task involves review findings or issue severity, also use `anemone-code-r
 - Do not create generic `feedback.md`, `probe.md`, or `experiments.md` files by default. Probe plans belong in RFC `implementation.md`; execution feedback belongs in transaction devlog entries. Use `backgrounds/<topic>-probe-YYYYMMDD.md` only for large evidence packets, and keep it factual rather than a plan or status layer.
 - Feedback can optimize the route, not rewrite the destination. If implementation shows a goal, target invariant, effective contract, ABI boundary, or acceptance condition is wrong, stop the current gate and return to RFC review. Do not weaken invariants, shrink goals, lower validation floors, hide failures, rename blockers as limitations, or land hacks just to pass a gate before the RFC target / `Contract Impact` is updated and an approved cutover is reached.
 - When a feature spans multiple RFCs, use a lightweight navigation entry in an umbrella RFC or `docs/src/rfcs.md`; do not create a parallel feature-progress ledger or copy transaction-devlog facts into another status file.
-- Structural module splitting is allowed when it preserves behavior inside the same owner boundary and prevents more responsibility from accumulating in an already-mixed file. If the split changes owner surfaces, public APIs, shared contracts, or write sets, require the normal expansion report and record it before implementation continues.
+- Structural module splitting is allowed when it preserves behavior inside the same owner boundary and prevents more responsibility from accumulating in an already-mixed file. If the split changes owner surfaces, public APIs, shared contracts, or the current frozen manifest, require the normal expansion report and record it before implementation continues.
 - If a small change starts needing repository-level accepted targets/current contracts, non-trivial invariants, staged implementation gates, standalone `tracking-issues.md`, or multi-agent/checkpoint orchestration, upgrade to the RFC workflow instead of expanding `changes/` into a small RFC.
-- Write sets are coordination contracts, not architecture constraints. A worker must not silently edit outside its assigned write set, but if the better design needs a different owning surface, it should stop and report the proposed expansion instead of forcing compatibility inside the old write set.
+- Write sets are coordination contracts, not architecture constraints. A worker must not silently edit outside the current frozen manifest, but if the better design needs a different owning surface, it should stop and report the proposed expansion instead of forcing compatibility inside the old manifest.
+- Multi-stage RFCs use rolling write-set resolution by default. Freeze an exact `Resolved Write Set Manifest` only for the next executable stage; later stages retain owner/subsystem/contract scope envelopes whose file lists are estimates, not write authorization.
+- Close Stage N independently before resolving Stage N+1. Run a separate read-only transition preflight against live source, the completed diff, review findings, module boundaries, and validation evidence; freezing Stage N+1 makes it Ready but does not authorize execution or auto-enter the stage.
+- Keep the authoritative resolved manifest in `implementation.md`. Transaction devlogs record preflight evidence, approval, activation point, and a link; do not copy a second authoritative manifest or create generic manifest/write-set files.
+- Only edits outside a frozen manifest are write-set expansions. Changes to an unresolved future scope estimate are normal resolution, while target, owner, public API, shared-contract, ABI, visible-semantics, or acceptance-boundary changes still require RFC review.
+- Do not batch-rewrite completed stages or historical transaction manifests. Apply rolling resolution to the next unresolved stage of an active RFC; retain existing transaction copies as historical execution facts.
 - `tracking-issues.md` remains for design issues, not progress logs. A design issue may come from document-layer review or from implementation feedback that exposes a wrong invariant, owner boundary, ABI choice, stage order, or acceptance condition.
 
 ## Workflow
@@ -78,6 +83,7 @@ If the task involves review findings or issue severity, also use `anemone-code-r
    - When contracts are affected, require `Contract Impact` with stable IDs, Introduce / Preserve / Refine / Replace / Remove / Scoped Exception classification, current links where an effective rule exists, target summaries, and cutover gates.
    - Use `Introduce` only for a new stable ID with no effective rule. If behavior already exists but has not been extracted into `docs/src/contracts/`, extract the minimum current baseline first and classify the actual semantic delta instead of calling the documentation migration `Introduce`.
    - Keep unchanged effective rules in current contracts and link them; put proposed target rules and RFC-local migration/proof obligations in the RFC.
+   - For multi-stage plans, require exact write authorization only for the first executable stage. Give later stages scope envelopes with goals, owners/subsystems, contract IDs, hard semantic boundaries, validation floors, review gates, and stop conditions; any listed paths remain estimates until their transition gate freezes a resolved manifest.
    - Add `tracking-issues.md` only when confirmed design-review issues affect implementation order, review gate, stop boundary, or acceptance.
    - Use `backgrounds/` for old plans, rejected alternatives, historic issue lists, and evidence indexes.
 
@@ -109,6 +115,9 @@ If the task involves review findings or issue severity, also use `anemone-code-r
    - Link RFC `index.md` to the transaction and transaction `Canonical Plan` back to the RFC.
    - Update `docs/src/devlog/transactions/index.md`, the current biweekly devlog, and `docs/src/SUMMARY.md`.
    - Transaction entries should be append-only. Add correction notes instead of silently rewriting completed stages.
+   - Before the first executable stage, freeze its exact resolved manifest in `implementation.md`. For later stages, close the current stage first, then run a separate read-only transition preflight and freeze only the next stage; do not make next-stage resolution part of the current stage's closure.
+   - The transition preflight must inspect live owners, the completed stage diff, review findings, module-boundary pressure, validation-only inputs, and documentation write-back surfaces. Record evidence and approval in the transaction, but link to the authoritative manifest instead of duplicating it.
+   - A frozen manifest makes the next stage Ready, not Active. Preserve any explicit user/orchestrator authorization gate and never auto-enter the next stage.
    - If the next stage is high risk, add or verify a probe / vertical-slice gate in `implementation.md` before feature code: hypothesis, protected goal/invariant, minimum write set, non-goals, validation floor, failure signal, write-back target, and exit path.
    - Route implementation feedback by impact:
      - execution facts, checkpoints, review results, and validation evidence stay in the transaction devlog;
@@ -117,7 +126,7 @@ If the task involves review findings or issue severity, also use `anemone-code-r
      - effective contract changes occur only at the approved cutover gate and update the contract plus transaction evidence atomically;
      - accepted gaps go to current limitations, while broken expected behavior goes to open issues.
    - For large or fast-growing modules, add a module-boundary preflight or split-only checkpoint before feature code if continuing in the same file would reinforce a wrong owner boundary.
-   - If a worker needs a larger write set for architectural reasons, require an upward report with the reason, proposed files/modules, affected contract, and validation gate. After approval, record the updated write set in the transaction devlog or orchestration doc before continuing.
+   - If a worker needs to exceed the current frozen manifest for architectural reasons, require an upward report with the reason, proposed files/modules, affected contract, and validation gate. After approval, update the authoritative manifest in `implementation.md`, then record the approval and link in the transaction before continuing. Do not classify changes to an unresolved future scope estimate as expansion.
 
 8. Close the workflow.
    - Update RFC status, transaction status, each affected contract ID's effective/pending/not-cut-over result, tracking issues, current limitations/register, and final validation notes.

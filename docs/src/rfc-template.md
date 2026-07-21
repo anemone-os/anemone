@@ -242,8 +242,22 @@ Current contracts：
 - 原则 1。
 - 原则 2。
 - 允许带入实现的不确定性、验证方式、停止条件和 RFC 回写路径。
+- 多阶段 RFC 默认只冻结下一个可执行阶段的 `Resolved Write Set Manifest`；更远阶段只保留 scope envelope，不把预估文件清单当作写入授权。
+
+## 滚动式 Write Set
+
+- 第一个可执行阶段在实现开始前解析并冻结精确 manifest。
+- 后续阶段在前一阶段独立关闭后，通过单独的 `N -> N+1 Write-set Resolution Gate` 读取 live source、实际 diff、review finding、模块边界和验证证据，再冻结下一阶段 manifest。
+- `implementation.md` 是 resolved manifest 的唯一权威；transaction devlog 只记录 preflight 证据、批准事实、生效点和本节链接，不复制第二份权威清单。
+- manifest 冻结只让阶段达到 Ready，不自动授权开始实现。
+- 只有冻结后的越界才是 write set 扩展；尚未冻结的 scope estimate 发生变化不进入扩展记录。
+- 不新建通用 `manifest.md`、`write-set.md` 或并列计划文件。
 
 ## 阶段 1：简短阶段名
+
+write-set 状态：
+
+- Scope Only / Ready / Active / Closed；Ready 表示 resolved manifest 已冻结但尚未自动获得执行授权。
 
 前置条件：
 
@@ -273,13 +287,20 @@ contract cutover：
 
 - 当前文件/模块是否已经混合 syscall ABI、核心状态机、后端实现、兼容桥、锁/生命周期规则或 UAPI/internal 转换。
 - 继续实现前是否需要同一 owner 内的行为保持型拆分；如果需要，列出 split-only checkpoint、预期移动的文件和应保持不变的 public API。
-- 若拆分会改变 owner surface、public API、shared contract 或 write set，先走扩展申请，不在本阶段静默完成。
+- 若 Ready / Active 阶段的拆分会改变 owner surface、public API、shared contract 或 resolved manifest，先走扩展申请，不在本阶段静默完成。
 
-write set：
+scope envelope：
 
-- 默认允许修改的文件、模块或文档。
-- 不应触碰的边界。
-- 如果更合适的架构需要扩大 write set，应停止并上报扩展申请；申请需说明原因、拟新增范围、contract/gate/验证影响和批准后的记录位置。
+- 预计参与的 owner、subsystem、contract IDs。
+- 预计涉及的目录、模块或已知文件；这些预估在 manifest 冻结前不构成写入授权。
+- 不得跨越的语义、owner、public API、shared contract、ABI 和 acceptance boundary。
+
+Resolved Write Set Manifest：
+
+- 如果本阶段尚未进入执行窗口，写 `Pending；前一阶段关闭后解析`。
+- 如果本阶段是下一个可执行阶段，精确列出允许修改的现有文件、计划新建的文件或目录、文档回写面和 validation-only 输入。
+- 列出不应触碰的物理边界，以及 integrator / reviewer 责任。
+- 如果更合适的架构需要扩大已冻结 manifest，应停止并上报扩展申请；申请需说明原因、拟新增范围、contract/gate/验证影响和批准后的记录位置。
 
 可观测性：
 
@@ -291,7 +312,28 @@ write set：
 
 退出条件：
 
-- 进入下一阶段的标准。
+- 本阶段独立关闭的标准；不得把“下一阶段 manifest 已冻结”作为本阶段完成事实的一部分。
+
+## Stage 1 -> Stage 2 Write-set Resolution Gate
+
+前置条件：
+
+- Stage 1 已按自身 review、验证和退出条件独立关闭。
+
+只读 preflight：
+
+- 读取 live source、Stage 1 实际 diff、review finding、模块边界和验证证据。
+- 核对 Stage 2 scope envelope、owner、contract IDs、public API / ABI 边界和 validation floor。
+
+解析输出：
+
+- 在 Stage 2 的 `Resolved Write Set Manifest` 中精确列出文件、新建路径、文档回写面、validation-only 输入、不应触碰边界和集成责任。
+- 若只改变物理范围、stage order、validation floor、review gate 或停止条件，更新本文并在 transaction 记录原因和生效点。
+- 若改变 target invariant、owner boundary、public API、shared contract、ABI、visible semantics 或 acceptance boundary，停止并回到 RFC review。
+
+授权边界：
+
+- manifest 冻结后 Stage 2 只达到 Ready；按当前 RFC / transaction 的授权协议另行启动，不自动进入实现。
 
 ## 旁路审计清单
 
@@ -340,7 +382,8 @@ write set：
 
 ## Write Set 扩展记录
 
-- YYYY-MM-DD：原 write set、申请原因、批准后的新增范围、对应 review/验证 gate、transaction devlog 链接。
+- 只记录 Active / Ready 阶段已冻结 manifest 的扩展；未来阶段 scope estimate 的变化不记录为扩展。
+- YYYY-MM-DD：原 resolved manifest、申请原因、批准后的新增范围、对应 review/验证 gate、transaction devlog 链接。
 
 ## 结构维护记录
 
