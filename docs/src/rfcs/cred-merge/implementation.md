@@ -462,13 +462,13 @@ just build
 建议用户执行的 rv64 user-test 主路径：
 
 ```bash
-./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/ltp-cred-merge-rv64.log
+./scripts/run-user-test-rv64.sh <preliminary-rv64-image> build/ltp-cred-merge-rv64.log
 ```
 
 建议用户执行的可选 la64 user-test：
 
 ```bash
-./scripts/run-user-test-la64.sh rootfsconfig-la etc/sdcard-la.img build/ltp-cred-merge-la64.log
+./scripts/run-user-test-la64.sh <preliminary-la64-image> build/ltp-cred-merge-la64.log
 ```
 
 ### LTP 分层建议
@@ -490,7 +490,7 @@ shm
 
 ```bash
 just xtask app build user-test --arch riscv64
-./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/ltp-profile-smoke-rv64.log
+./scripts/run-user-test-rv64.sh <preliminary-rv64-image> build/ltp-profile-smoke-rv64.log
 ```
 
 2. cred-core 窄集合，优先使用 `tmp`：
@@ -520,7 +520,7 @@ shmget04
 ```
 
 ```bash
-./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/ltp-cred-core-rv64.log
+./scripts/run-user-test-rv64.sh <preliminary-rv64-image> build/ltp-cred-core-rv64.log
 ```
 
 3. group 拆分：
@@ -530,7 +530,7 @@ credentials
 ```
 
 ```bash
-./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/ltp-credentials-rv64.log
+./scripts/run-user-test-rv64.sh <preliminary-rv64-image> build/ltp-credentials-rv64.log
 ```
 
 ```text
@@ -539,7 +539,7 @@ chown
 ```
 
 ```bash
-./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/ltp-mode-owner-rv64.log
+./scripts/run-user-test-rv64.sh <preliminary-rv64-image> build/ltp-mode-owner-rv64.log
 ```
 
 ```text
@@ -548,7 +548,7 @@ exec
 ```
 
 ```bash
-./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/ltp-open-exec-rv64.log
+./scripts/run-user-test-rv64.sh <preliminary-rv64-image> build/ltp-open-exec-rv64.log
 ```
 
 ```text
@@ -556,7 +556,7 @@ shm
 ```
 
 ```bash
-./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/ltp-shm-rv64.log
+./scripts/run-user-test-rv64.sh <preliminary-rv64-image> build/ltp-shm-rv64.log
 ```
 
 ```text
@@ -564,7 +564,7 @@ memory
 ```
 
 ```bash
-./scripts/run-user-test-rv64.sh rootfsconfig-rv etc/sdcard-rv.img build/ltp-memory-rv64.log
+./scripts/run-user-test-rv64.sh <preliminary-rv64-image> build/ltp-memory-rv64.log
 ```
 
 当前本地没有的 `credentials`、`chmod`、`chown` 可以单独成组；本地已经存在的 group

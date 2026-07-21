@@ -16,11 +16,10 @@ RFC 入口、[不变量需求](../invariants.md) 和 [迁移实施计划](../imp
 - `ioctl_sg01`
 - `sockioctl01` 在该分组中被注释，不计入本 RFC 的当前 ioctl 分组背景。
 
-测例说明和源码来自 vendored LTP：
+当前可复核的测例说明和源码来自初赛 testsuite 中的 vendored LTP：
 
-- `etc/ltp-rv/metadata/ltp.json`
-- `etc/testsuits-for-oskernel/ltp-full-20240524/runtest/syscalls`
-- `etc/testsuits-for-oskernel/ltp-full-20240524/testcases/kernel/syscalls/ioctl/`
+- `<preliminary-testsuite>/ltp-full-20240524/runtest/syscalls`
+- `<preliminary-testsuite>/ltp-full-20240524/testcases/kernel/syscalls/ioctl/`
 
 ## 总体判断
 
