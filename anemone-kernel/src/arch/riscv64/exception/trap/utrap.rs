@@ -327,7 +327,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
                 } else {
                     unsafe {
                         init_fpu_for_current_task(trapframe);
-                        knoticeln!(
+                        kdebugln!(
                             "({}) enabled fpu for {} ({})",
                             cur_cpu_id(),
                             task.tid(),

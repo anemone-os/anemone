@@ -21,13 +21,17 @@ static PLATFORM_BUS_TYPE: Lazy<PlatformBusType> =
 
 /// Register a platform device to the platform bus.
 pub fn register_device(device: Arc<PlatformDevice>) {
-    kinfoln!("device {} registered on platform bus", device.name());
+    kinfoln!(
+        "device {} registered on platform bus (compatible strings: {:?})",
+        device.name(),
+        device.compatibles().collect::<Vec<_>>()
+    );
     PLATFORM_BUS_TYPE.register_device(device);
 }
 
 /// Register a platform driver to the platform bus.
 pub fn register_driver(driver: Arc<dyn PlatformDriver>) {
-    kinfoln!("driver {} registered on platform bus", driver.name());
+    kdebugln!("driver {} registered on platform bus", driver.name());
     PLATFORM_BUS_TYPE.register_driver(driver);
 }
 

@@ -93,7 +93,7 @@ fn sys_prlimit64(
                 rlim_max: u64::MAX,
             },
             r => {
-                kerrln!("getrlimit: unimplemented resource {:?}", r);
+                kwarningln!("getrlimit: unimplemented resource {:?}", r);
                 return Err(SysError::NotYetImplemented);
             },
         };

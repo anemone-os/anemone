@@ -227,6 +227,7 @@ impl Debug for dyn BlockDev {
 pub enum BlockDevClass {
     Virtio,
     Scsi,
+    Mmc,
     Loop,
     RamDisk,
 }
@@ -237,6 +238,10 @@ impl BlockDevClass {
         match self {
             Self::Virtio => format_alpha_disk_name("vd", index),
             Self::Scsi => format_alpha_disk_name("sd", index),
+            // The block registry currently owns names as `String`; keep this
+            // compatibility at the existing owner boundary rather than
+            // introducing another mutable string into the MMC driver.
+            Self::Mmc => format!("mmcblk{}", index),
             Self::Loop => format!("loop{}", index),
             Self::RamDisk => format!("ram{}", index),
         }
@@ -502,5 +507,6 @@ mod kunits {
         assert_eq!(format_alpha_disk_name("vd", 25), "vdz");
         assert_eq!(format_alpha_disk_name("vd", 26), "vdaa");
         assert_eq!(format_alpha_disk_name("sd", 27), "sdab");
+        assert_eq!(BlockDevClass::Mmc.format_name(0), "mmcblk0");
     }
 }

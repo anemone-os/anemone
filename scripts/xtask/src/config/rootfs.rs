@@ -20,7 +20,17 @@ pub struct Rootfs {
 
 impl Rootfs {
     pub fn from_str(s: &str) -> anyhow::Result<Self> {
-        let rootfs = toml::from_str(s).context("Failed to parse rootfs manifest")?;
+        let rootfs: Self = toml::from_str(s).context("Failed to parse rootfs manifest")?;
+        if rootfs.fs.base_type == BaseType::Image {
+            if rootfs.fs.base.is_none() {
+                anyhow::bail!("fs.type = 'image' requires fs.base");
+            }
+            if rootfs.fs.size.is_some() {
+                anyhow::bail!(
+                    "fs.size is not supported with fs.type = 'image'; resize the base image before running rootfs mkfs"
+                );
+            }
+        }
         Ok(rootfs)
     }
 }
@@ -35,6 +45,21 @@ pub struct Build {
 pub struct Fs {
     pub fstype: FsType,
     pub base: Option<String>,
+    #[serde(rename = "override", default)]
+    pub override_dir: Option<String>,
+    #[serde(rename = "type", default)]
+    pub base_type: BaseType,
+    #[serde(default)]
+    pub size: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BaseType {
+    #[default]
+    #[serde(rename = "folder")]
+    Folder,
+    #[serde(rename = "image")]
+    Image,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,9 +98,58 @@ mod tests {
     #[test]
     fn test_parsing() {
         let rootfs = parse_manifest("../../conf/rootfs/minimal.toml");
+        assert_eq!(rootfs.fs.base_type, BaseType::Folder);
         assert!(rootfs.dirs.iter().any(|dir| dir.path == "/dev"));
         assert!(rootfs.dirs.iter().any(|dir| dir.path == "/mnt"));
         println!("{:#?}", rootfs);
+    }
+
+    #[test]
+    fn image_base_type_is_explicit() {
+        let rootfs = Rootfs::from_str(
+            r#"
+[build]
+name = "image-base"
+arch = "riscv64"
+
+[fs]
+fstype = "ext4"
+base = "rootfs.img"
+override = "root-overlay"
+type = "image"
+
+[init]
+path = "/sbin/init"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(rootfs.fs.base_type, BaseType::Image);
+        assert_eq!(rootfs.fs.base.as_deref(), Some("rootfs.img"));
+        assert_eq!(rootfs.fs.override_dir.as_deref(), Some("root-overlay"));
+        assert_eq!(rootfs.fs.size, None);
+    }
+
+    #[test]
+    fn image_base_rejects_size() {
+        let result = Rootfs::from_str(
+            r#"
+[build]
+name = "image-base"
+arch = "riscv64"
+
+[fs]
+fstype = "ext4"
+base = "rootfs.img"
+type = "image"
+size = "1G"
+
+[init]
+path = "/sbin/init"
+"#,
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]
@@ -101,6 +175,12 @@ mod tests {
     fn assert_manifest_inputs_exist(rootfs: &Rootfs) {
         if let Some(base) = &rootfs.fs.base {
             assert!(workspace_path(base).is_dir(), "missing rootfs base: {base}");
+        }
+        if let Some(override_dir) = &rootfs.fs.override_dir {
+            assert!(
+                workspace_path(override_dir).is_dir(),
+                "missing rootfs override: {override_dir}"
+            );
         }
 
         for file in &rootfs.files {

@@ -12,6 +12,7 @@ use crate::{
     device::{
         bus::{pcie::PcieDriver, platform::PlatformDriver, virtio::VirtIODriver},
         kobject::KObject,
+        mmc::MmcCardDriver,
     },
     initcall::{InitCallLevel, run_initcalls},
     prelude::*,
@@ -23,6 +24,11 @@ pub mod intc;
 
 mod block;
 mod clock_source;
+mod mmc;
+pub use mmc::consts::{
+    MMC_CARD_INIT_POLL_INTERVAL_MS, MMC_CARD_INIT_TIMEOUT_MS, MMC_IDENTIFICATION_CLOCK_HZ,
+    MMC_SD_DATA_CLOCK_HZ,
+};
 mod power;
 mod rtc;
 mod serial;
@@ -91,6 +97,10 @@ pub trait DriverOps {
     }
 
     fn as_pcie_driver(&self) -> Option<&dyn PcieDriver> {
+        None
+    }
+
+    fn as_mmc_card_driver(&self) -> Option<&dyn MmcCardDriver> {
         None
     }
 }

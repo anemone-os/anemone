@@ -24,7 +24,8 @@ spin_lock_irqsave = true # Make ordinary spin locks disable local interrupts
 bootstrap_heap_shift_kb = 10 # Size of bootstrap heap as a power of 2 in KB
 log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
 log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
-console_log_level = 0 # Maximum log level emitted to consoles: Emerg=0 ... Debug=7
+print_log_level = 0 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; capped by record_log_level
+record_log_level = 7 # Maximum log level recorded: Emerg=0 ... Debug=7; higher levels are no-ops
 kstack_shift_kb = 9 # Kernel stack size as a power of 2 in KB
 remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
 max_logical_cpus = 16 # Maximum number of logical CPUs enabled by this kernel
@@ -48,6 +49,7 @@ max_fd_per_process = 1024 # Default maximum number of file descriptors per proce
 ramdisk_count = 16 # Number of static ramdisk block devices to publish at boot.
 loop_device_count = 8 # Number of static loop block devices to publish at boot.
 ns16550a_default_baud = 115200 # Default baud when stdout-path has no serial options.
+dw_mshc_poll_timeout_ms = 500 # Bounded DW-MSHC register polling timeout in milliseconds.
 eevdf_base_slice_us = 3000 # EEVDF-lite base slice in microseconds.
 eevdf_wake_clamp_us = 3000 # EEVDF-lite wake placement clamp window in microseconds.
 eevdf_yield_penalty_us = 3000 # EEVDF-lite bounded yield penalty window in microseconds.

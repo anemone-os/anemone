@@ -49,7 +49,7 @@ fn sys_getrlimit(
             rlim_max: u64::MAX,
         },
         r => {
-            knoticeln!("getrlimit: unimplemented resource {:?}", r);
+            kwarningln!("getrlimit: unimplemented resource {:?}", r);
             return Err(SysError::NotYetImplemented);
         },
     };

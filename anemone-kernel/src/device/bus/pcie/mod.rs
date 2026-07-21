@@ -52,7 +52,7 @@ pub fn register_device(device: Arc<PcieDevice>) {
 
 /// Register a PCIe driver on the PCIe bus.
 pub fn register_driver(driver: Arc<dyn PcieDriver>) {
-    kinfoln!("driver {} registered on pcie bus", driver.name());
+    kdebugln!("driver {} registered on pcie bus", driver.name());
     PCIE_BUS_TYPE.register_driver(driver);
 }
 
