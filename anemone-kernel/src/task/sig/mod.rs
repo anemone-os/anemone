@@ -123,6 +123,17 @@ pub struct Signal {
     /// Narrow stale-candidate authority for conditional default-stop signals.
     /// This ordering token never identifies an occurrence, report, or phase.
     default_stop_epoch: Option<ContinueEpoch>,
+    /// Kernel-private delivery purpose. It never changes siginfo serialization
+    /// or userspace-visible disposition semantics.
+    purpose: SignalPurpose,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SignalPurpose {
+    Ordinary,
+    /// `execve()` uses task-private SIGKILL to retire sibling threads without
+    /// committing a process-wide terminal lifecycle.
+    DethreadVictim,
 }
 
 impl Signal {
@@ -138,6 +149,18 @@ impl Signal {
             code,
             fields,
             default_stop_epoch: None,
+            purpose: SignalPurpose::Ordinary,
+        }
+    }
+
+    pub(in crate::task) fn new_dethread_victim_kill(pid: Tid, uid: Uid) -> Self {
+        Self {
+            no: SigNo::SIGKILL,
+            errno: 0,
+            code: SiCode::Kernel,
+            fields: SigInfoFields::Kill(info::SigKill { pid, uid }),
+            default_stop_epoch: None,
+            purpose: SignalPurpose::DethreadVictim,
         }
     }
 
@@ -156,7 +179,12 @@ impl Signal {
             code,
             fields,
             default_stop_epoch: None,
+            purpose: SignalPurpose::Ordinary,
         }
+    }
+
+    fn is_dethread_victim_kill(&self) -> bool {
+        matches!(self.purpose, SignalPurpose::DethreadVictim)
     }
 
     fn set_default_stop_epoch(&mut self, epoch: ContinueEpoch) {

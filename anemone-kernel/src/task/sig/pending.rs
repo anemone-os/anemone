@@ -58,7 +58,29 @@ impl PendingSignals {
         } else {
             debug_assert!(signal.no.is_unreliable());
             let no = signal.no.as_usize();
+            if signal.is_dethread_victim_kill()
+                && self.unreliable[no]
+                    .as_ref()
+                    .is_some_and(|pending| !pending.is_dethread_victim_kill())
+            {
+                // The exec sibling-teardown occurrence is kernel-private and
+                // must never coalesce away an external task-directed SIGKILL.
+                return;
+            }
             self.unreliable[no] = Some(signal);
+        }
+    }
+
+    pub(super) fn take_ordinary_sigkill(&mut self) -> bool {
+        let slot = &mut self.unreliable[SigNo::SIGKILL.as_usize()];
+        if slot
+            .as_ref()
+            .is_some_and(|signal| !signal.is_dethread_victim_kill())
+        {
+            slot.take();
+            true
+        } else {
+            false
         }
     }
 

@@ -457,6 +457,20 @@ fn perform_signal_action(
     trapframe: &mut TrapFrame,
     restart_syscall: &mut Option<(RestartSyscall, SyscallCtx)>,
 ) -> SignalActionResult {
+    if signal.is_dethread_victim_kill() {
+        assert_eq!(signal.no, SigNo::SIGKILL);
+        let task = get_current_task();
+        let ordinary_sigkill_pending = task.sig_pending.lock().take_ordinary_sigkill();
+        // A temporary-mask force wake may have reserved this internal kill.
+        // No signal frame or rt_sigreturn path remains after victim teardown.
+        task.restore_temporary_sig_mask_if_pending();
+        drop(task);
+        if ordinary_sigkill_pending {
+            kernel_exit_group(ExitCode::Signaled(SigNo::SIGKILL))
+        }
+        kernel_exit(ExitCode::Exited(0))
+    }
+
     let no = signal.no;
     let task = get_current_task();
     let KSigAction {

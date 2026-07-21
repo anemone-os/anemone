@@ -1,15 +1,15 @@
 # Unix Job Control 目标与不变量
 
-**状态：** R0 / Accepted for Implementation / Not effective
-**最后更新：** 2026-07-20
+**状态：** R1 / Accepted for Implementation / Not effective
+**最后更新：** 2026-07-21
 **父 RFC：** [RFC-20260720-unix-jobctl](./index.md)
-**适用修订：** R0
+**适用修订：** R1
 
 本文定义 unix-jobctl 的 contract delta、尚未 cutover 的 target rules 和只服务本方案的 proof obligations。当前已经生效的共享规则以仓库 `docs/src/contracts/` 为准；本页所有 `JOBCTL-*` 与新增 `USER-ENTRY-*` 都是 proposed stable ID，不是 current authority。
 
 ## Contract Impact
 
-`UJ-CUTOVER` 是本 R0 target 定义的语义 cutover unit，不单独充当 implementation stage 名称。`implementation.md` 将 Stage 5 映射到整个 `UJ-CUTOVER`；在此之前不能逐项宣称生效。
+`UJ-CUTOVER` 是本 R1 target 定义的语义 cutover unit，不单独充当 implementation stage 名称。`implementation.md` 将 Stage 5 映射到整个 `UJ-CUTOVER`；在此之前不能逐项宣称生效。
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | 生效边界 |
 | --- | --- | --- | --- | --- |
@@ -18,7 +18,7 @@
 | [`SIGNAL-ACTION-001`](../../contracts/signal/pending-routing.md#signal-action-001--ignored-disposition-在-pending-publication-前生效) | Preserve | ignored occurrence 不进入普通 pending | control side effect 先独立线性化，occurrence 仍服从现有 ignored admission | 全程 |
 | [`SIGNAL-ACTION-002`](../../contracts/signal/pending-routing.md#signal-action-002--ordinary-trap-return-才提交异步-action) | Refine | ordinary trap-return fetch 后选择 action | 普通user ThreadGroup的`SIGSTOP`在generation transaction直接stop；另外三种信号最终选择DefaultStop后用窄epoch authority提交同一ThreadGroup stop request；global init不接受stop authority；Stopped期间已经reserved的`SIGCONT`可以收口action但不能取得user-entry permit | `UJ-CUTOVER` |
 | [`SIGNAL-TEMP-MASK-001`](../../contracts/signal/temporary-mask-delivery.md#signal-temp-mask-001--current-mask-与-restore-slot-只有一个-task-owner) | Preserve | current mask / restore slot 由 current task Signal state 唯一持有 | jobctl 不复制或终结 temporary-mask token state | 全程 |
-| [`SIGNAL-TEMP-MASK-002`](../../contracts/signal/temporary-mask-delivery.md#signal-temp-mask-002--defer-必须先建立-task-private-delivery-handoff) | Refine | reserved target 优先于 ordinary pending delivery，但尚未提交action | reservation提交task-local occurrence claim并退出ordinary queue competition；control cleanup不撤销它，live action仍在后续选择 | `UJ-CUTOVER` |
+| [`SIGNAL-TEMP-MASK-002`](../../contracts/signal/temporary-mask-delivery.md#signal-temp-mask-002--defer-必须先建立-task-private-delivery-handoff) | Refine | reserved target 优先于后来pending delivery，但尚未提交action | reservation提交task-local occurrence claim并退出ordinary queue competition；control cleanup不撤销它，live action仍在后续选择，且保留相对后来pending `SIGKILL`的既有优先级 | `UJ-CUTOVER` |
 | [`SIGNAL-TEMP-MASK-003`](../../contracts/signal/temporary-mask-delivery.md#signal-temp-mask-003--handler-commit-或-signal-no-frame-cleanup-终结-restore-responsibility) | Preserve | handler commit或Signal no-frame cleanup终结restore responsibility | jobctl不删除、复制或终结reservation；Signal owner仍通过handler frame、no-frame cleanup或no-return terminal teardown收口 | 全程 |
 | [`PROCFS-TASK-STATE-001`](../../contracts/procfs/task-state-projection.md#procfs-task-state-001--当前-tgid-state-只投影-leader-taskstatus) | Refine | 成功读取时投影 leader `TaskStatus` 的 R / Z / S / D；status pair非原子 | 单次 derived snapshot保证character/name一致；Z优先，committed Stopped投影T | `UJ-CUTOVER` |
 | [`PGRP-SIGNAL-001`](../../contracts/task/process-group-signaling.md#pgrp-signal-001--processgroup-只拥有成员选择) | Preserve | ProcessGroup 只拥有 membership selection | 不建立 process-group-wide jobctl phase | 全程 |
@@ -30,7 +30,7 @@
 | [`CHILD-WAIT-004`](../../contracts/task/child-wait.md#child-wait-004--peek-与-reap-使用同一-truth不同-claim) | Refine | exited child 支持 peek / reap | report 支持 WNOWAIT peek / exact-once consume，exit 仍 reap | `UJ-CUTOVER` |
 | [`CHILD-WAIT-005`](../../contracts/task/child-wait.md#child-wait-005--non-exit-wait-abi-当前-fail-closed-或保持-exit-only) | Replace | stopped / continued 不支持 | wait4 / waitid 提供 stopped / continued ABI | `UJ-CUTOVER` |
 | [`USER-ENTRY-001`](../../contracts/task/user-entry.md#user-entry-001--ordinary-trap-return-先完成-signal-arbitration) | Refine | ordinary trap-return 先做 Signal arbitration | ordinary path 增加 lifecycle / jobctl gate并登记 exposure | `UJ-CUTOVER` |
-| `USER-ENTRY-002` | Introduce | None（尚未生效） | fresh / clone / exec 与 ordinary return 共享 mandatory arbitration contract | `UJ-CUTOVER` |
+| `USER-ENTRY-002` | Introduce | None（尚未生效） | fresh / clone / exec 与 ordinary return 共享 mandatory arbitration contract；保留Signal-owned reservation-first顺序 | `UJ-CUTOVER` |
 | `JOBCTL-STATE-001` | Introduce | None（尚未生效） | ThreadGroup 唯一拥有 phase、reason、continue epoch、exposure 与 report；procfs snapshot只读派生 | `UJ-CUTOVER` |
 | `JOBCTL-STOP-001` | Introduce | None（尚未生效） | 不存在 exposed live member 时才提交 Stopped | `UJ-CUTOVER` |
 | `JOBCTL-SIGNAL-001` | Introduce | None（尚未生效） | ordinary pending cleanup、reserved claim finality、global-init immunity、`SIGSTOP`直接stop、generation-only `SIGCONT` resume与条件性DefaultStop epoch同序 | `UJ-CUTOVER` |
@@ -105,7 +105,7 @@ reservation是task-local occurrence dequeue / claim的finality，不是dispositi
 
 条件性`DefaultStop` commit必须结束当前ordinary signal scan并把控制权交给before-user-entry gate，不能在同一pass继续消费普通asynchronous signal。`Stopping / Stopped`上的ordinary asynchronous signal和非`SIGCONT` reserved delivery保持pending；只有`SIGKILL`、已提交的terminal lifecycle、kernel-generated synchronous signal的no-return terminal action、可合并当前stop的条件性DefaultStop control action，以及此前已经完成occurrence claim的reserved `SIGCONT`可以在重新进入jobctl gate前收口。
 
-reserved `SIGCONT`仍按live disposition选择action：custom action可以提交handler frame，ignore或default no-frame consume可以完成no-frame cleanup。无论哪条路径，reserved retirement只终结该occurrence和temporary-mask responsibility，不授予user entry；一次retirement结束当前ordinary scan，随后只能继续检查支配性terminal / control truth并进入live jobctl gate。handler frame构造失败服从既有no-return terminal path；frame已提交也不能阻止后来`SIGKILL`或committed terminal lifecycle在architecture transition前取得支配。jobctl不删除reservation，也不接管restore slot；Signal owner仍按`SIGNAL-TEMP-MASK-003`通过committed handler frame、no-frame cleanup或no-return terminal teardown收口。
+reserved `SIGCONT`仍按live disposition选择action：custom action可以提交handler frame，ignore或default no-frame consume可以完成no-frame cleanup。无论哪条路径，reserved retirement只终结该occurrence和temporary-mask responsibility，不授予user entry；一次retirement结束当前ordinary scan并进入live jobctl gate。handler frame构造失败服从既有no-return terminal path；committed terminal lifecycle仍在architecture transition前取得支配，later pending `SIGKILL`则服从R1在`USER-ENTRY-002`明确的reservation-first边界。jobctl不删除reservation，也不接管restore slot；Signal owner仍按`SIGNAL-TEMP-MASK-003`通过committed handler frame、no-frame cleanup或no-return terminal teardown收口。
 
 cleanup与`SIGCONT` resume side effect不受mask、explicit ignore或custom handler影响。task-directed与ThreadGroup-directed control signal都遵守相同group side effect。每个concrete `SIGCONT`只在generation transaction中执行一次resume；reserved delivery、ordinary fetch、同步消费和default-action consume都不得重放，default `SIGCONT` action因此只是ordinary no-frame consume。`SIGSTOP` admission直接消费为control input；其它stop-class和`SIGCONT`的ordinary occurrence仍进入原本的private / shared owner。当前RFC延后orphaned-pgrp suppression，因此它作为明确scoped limitation保留；未来只能在条件性DefaultStop admission前抑制，不能进入或分叉ThreadGroup stop engine。
 
@@ -195,7 +195,9 @@ stopped / continued typed status只承诺真实child identity、status kind与st
 2. 进入 ThreadGroup before-user-entry gate；Running 时登记 exposure并允许，Stopping / Stopped 时保持 unexposed并 park；
 3. gate允许后才执行 architecture transition。
 
-jobctl park必须是对 live phase的 predicate wait：wait publication前后重验 phase，使 `SIGCONT` / terminal transition不能在 gate-check 与 park之间丢 wake。park被 `SIGCONT`、`SIGKILL` 或 terminal lifecycle唤醒后必须回到第 1 步，不能从 park直接进入用户态。普通 asynchronous signal和非`SIGCONT` reserved delivery只保持pending，不得释放jobctl park；ordinary wait即使因普通signal返回，也必须在phase-aware arbitration中保持该signal pending并重新park。reserved target尚未retire时不能阻塞对`SIGKILL`等支配性action的发现；已经提交的handler frame只改变后续user context与mask responsibility，不授权跳过重新仲裁或live gate。各架构可以有不同物理入口，但policy只定义一次。
+jobctl park必须是对 live phase的 predicate wait：wait publication前后重验 phase，使 `SIGCONT` / terminal transition不能在 gate-check 与 park之间丢 wake。park被 `SIGCONT`、`SIGKILL` 或 terminal lifecycle唤醒后必须回到第 1 步，不能从 park直接进入用户态。普通 asynchronous signal和非`SIGCONT` reserved delivery只保持pending，不得释放jobctl park；ordinary wait即使因普通signal返回，也必须在phase-aware arbitration中保持该signal pending并重新park。已经提交的handler frame只改变后续user context与mask responsibility，不授权跳过live gate；已经提交的terminal lifecycle仍在该gate支配。
+
+R1保留Signal owner的current reservation-first顺序，不要求jobctl gate越过尚未retire的reserved target另行发现后来pending的`SIGKILL`。旧reserved `SIGCONT`只有在真实的新`SIGCONT`已恢复`Running`后，才可能先提交并执行custom handler frame；pending `SIGKILL`保持原owner且在下一次mandatory kernel entry重新仲裁。该窗口允许有限用户态执行并原则上可以产生可观察副作用，不承诺固定延迟上界；它不得使task在`Stopping / Stopped`或已经提交terminal lifecycle后取得user-entry permit。各架构可以有不同物理入口，但policy只定义一次。
 
 **Owner：** user-task transition protocol。
 
@@ -271,7 +273,7 @@ all guards out
 - global init的合法stop-class generation必须完成ordinary opposite cleanup，但`SIGSTOP`不得取得unconditional authority，三个条件性stop signal的live default action不得取得conditional authority；caught / masked ordinary occurrence与`SIGCONT`仍服从本invariant定义的普通路径。
 - global init之外的`SIGSTOP`必须在generation transaction内直接取得unconditional authority并调用共享stop engine；不得发布pending、建立reserved delivery、等待member fetch或触发generic active-wait completion。
 - opposite-class cleanup不得撤销已经claimed的reserved delivery；reservation仍须通过live action selection与handler-frame / no-frame / no-return terminal路径恰好一次收口temporary-mask responsibility。
-- stopped-phase arbitration必须允许reserved `SIGCONT`收口而不授予user entry，并且在retirement前后都能找到`SIGKILL`、eligible default-stop或明确的synchronous no-return terminal action；非`SIGCONT` reservation保持reserved，不得继续消费其它ordinary asynchronous signal。
+- stopped-phase arbitration必须允许reserved `SIGCONT`收口而不授予user entry；reservation retirement结束当前ordinary scan，later pending `SIGKILL`保持Signal owner并在下一次mandatory kernel entry重新仲裁，eligible default-stop或明确的synchronous no-return terminal action仍按各自已有authority收口；非`SIGCONT` reservation保持reserved，不得继续消费其它ordinary asynchronous signal。
 - `SIGCONT`在occurrence ignored、masked、caught、同步消费或异步消费时都只由generation完成一次group side effect，后续action不得重放。
 - `SIGTSTP` / `SIGTTIN` / `SIGTTOU`只有在最终action selection得到`DefaultStop`、目标不是global init后才能形成conditional authority；captured epoch已stale时不得重新发布、补偿或重排为另一个signal，只取消jobctl effect。
 - shared stop engine只接受unconditional `SIGSTOP` authority或已验证的conditional `DefaultStop` authority；从该边界开始四种信号复用相同phase、exposure、report、continue、lifecycle和user-entry逻辑。
@@ -311,7 +313,7 @@ all guards out
 - caught / ignored / masked条件性stop signal与 ignored / custom / masked SIGCONT；包括generation后改变disposition再解除mask时按live action执行，而不是按generation snapshot提前stop；
 - ordinary opposite-class pending被generation清理，而pre-existing reserved occurrence保持claim finality；覆盖reserved `SIGCONT`在Stopped期间的handler-frame、ignore / default no-frame与temporary-mask restore，以及reserved conditional-stop在后续Running阶段的live action / stale default-stop；
 - `SIGCONT` resume side effect不完成ordinary wait且在delivery时绝不重放；custom `SIGCONT` occurrence仍可按普通Signal notification影响其可中断wait；
-- reserved旧`SIGCONT`、随后`SIGSTOP`和真正恢复用的新`SIGCONT`的确定性竞态；覆盖额外handler观察、普通mask串行化、`SA_NODEFER`嵌套、`SA_RESETHAND`以及frame failure / `SIGKILL` terminal dominance；
+- reserved旧`SIGCONT`、随后`SIGSTOP`和真正恢复用的新`SIGCONT`的确定性竞态；覆盖额外handler观察、普通mask串行化、`SA_NODEFER`嵌套、`SA_RESETHAND`、frame failure、普通`SIGKILL` no-return路径以及R1接受的reservation-first递送延迟边界；
 - clone / fork / exec / dethread / member exit / SIGKILL / exit_group；
 - RV64 production runtime，以及 RV64 / LA64 user-entry source closure；
 - procfs `stat` / `status` Stopped、Stopping与terminal precedence；
@@ -363,4 +365,4 @@ RFC target review完成需要同时证明：
 7. accepted limitation、工程降级边界与后续RFC范围已明确；
 8. 未来 implementation为全部 `Introduce / Refine / Replace` ID建立同一个 `UJ-CUTOVER` 映射、验证floor与停止条件。
 
-`UJ-CUTOVER` 前，新增 ID全部保持 Not effective，现有 current contract不变；本 R0 不创建 transitional contract。
+`UJ-CUTOVER` 前，新增 ID全部保持 Not effective，现有 current contract不变；本 R1 不创建 transitional contract。

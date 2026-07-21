@@ -2,7 +2,9 @@
 #![no_main]
 
 use core::{
+    hint::spin_loop,
     mem::size_of,
+    ptr::null_mut,
     str,
     sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering},
 };
@@ -15,15 +17,16 @@ use anemone_rs::{
         },
         syscall::{SYS_RT_SIGSUSPEND, SYS_WAITID, syscall},
     },
+    env,
     fs::OpenOptions,
     io::Read,
     os::linux::{
         fs::{Fd, PipeFlags, close, pipe2, read, write},
         process::{
-            self, MmapFlags, MmapProt, WStatus, WStatusRaw, WaitFor, WaitOptions, mmap, munmap,
-            sched_yield,
+            self, CloneFlags, MmapFlags, MmapProt, Tid, WStatus, WStatusRaw, WaitFor, WaitOptions,
+            mmap, munmap, sched_yield,
             signal::{self, SigNo, SigProcMaskHow},
-            wait4,
+            spawn_raw_thread, wait4,
         },
     },
     prelude::*,
@@ -31,6 +34,10 @@ use anemone_rs::{
 
 const WAIT_RETRIES: usize = 100_000;
 const PROC_INIT_STATUS: &str = "/proc/1/status";
+const RAW_THREAD_STACK_SIZE: usize = 16 * 1024;
+const MIXED_SPINNER_READY: usize = 1 << 0;
+const MIXED_WAITER_READY: usize = 1 << 1;
+const MIXED_ALL_READY: usize = MIXED_SPINNER_READY | MIXED_WAITER_READY;
 
 static SIGCHLD_COUNT: AtomicUsize = AtomicUsize::new(0);
 static SIGCHLD_CODE: AtomicI32 = AtomicI32::new(0);
@@ -162,6 +169,37 @@ struct ChildSync {
     control: Fd,
 }
 
+#[repr(C)]
+struct MultiMemberShared {
+    ready: AtomicUsize,
+    spinner_tid: AtomicUsize,
+    waiter_done: AtomicBool,
+    waiter_failed: AtomicBool,
+    finish: AtomicBool,
+    wait_fd: AtomicU32,
+}
+
+impl MultiMemberShared {
+    const fn new(wait_fd: Fd) -> Self {
+        Self {
+            ready: AtomicUsize::new(0),
+            spinner_tid: AtomicUsize::new(0),
+            waiter_done: AtomicBool::new(false),
+            waiter_failed: AtomicBool::new(false),
+            finish: AtomicBool::new(false),
+            wait_fd: AtomicU32::new(wait_fd),
+        }
+    }
+}
+
+struct MultiMemberChild {
+    pid: u32,
+    wait_release: Fd,
+    shared: &'static MultiMemberShared,
+}
+
+static EXEC_SIBLING_READY: AtomicBool = AtomicBool::new(false);
+
 #[derive(Clone, Copy)]
 enum ChildScenario {
     Yield,
@@ -176,6 +214,157 @@ enum ChildScenario {
     Resethand,
     FrameFailure,
     CloneExitSignal,
+}
+
+fn wait_until(mut predicate: impl FnMut() -> bool, what: &str) -> Result<(), Errno> {
+    for _ in 0..WAIT_RETRIES {
+        if predicate() {
+            return Ok(());
+        }
+        sched_yield()?;
+    }
+    eprintln!("jobctl-test: timed out waiting for {what}");
+    Err(ETIMEDOUT)
+}
+
+fn thread_clone_flags() -> CloneFlags {
+    CloneFlags::VM
+        | CloneFlags::FS
+        | CloneFlags::FILES
+        | CloneFlags::SIGHAND
+        | CloneFlags::THREAD
+        | CloneFlags::SYSVSEM
+}
+
+fn spawn_test_thread(entry: extern "C" fn(usize) -> !, arg: usize) -> Result<Tid, Errno> {
+    let stack = mmap(
+        0,
+        RAW_THREAD_STACK_SIZE,
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+        MmapFlags::MAP_PRIVATE | MmapFlags::MAP_ANONYMOUS,
+        None,
+        None,
+    )?;
+    let stack_top = unsafe { stack.as_ptr().add(RAW_THREAD_STACK_SIZE) };
+
+    // These focused threads intentionally live until task or process exit. The
+    // raw helper has no pthread-style join ownership, so their stacks remain
+    // mapped until the child address space is torn down.
+    unsafe {
+        spawn_raw_thread(
+            thread_clone_flags(),
+            stack_top,
+            None,
+            null_mut(),
+            None,
+            entry,
+            arg,
+        )
+    }
+}
+
+extern "C" fn mixed_spinner(arg: usize) -> ! {
+    let shared = unsafe { &*(arg as *const MultiMemberShared) };
+    let tid = process::gettid().expect("jobctl-test: spinner gettid failed");
+    shared.spinner_tid.store(tid as usize, Ordering::SeqCst);
+    shared.ready.fetch_or(MIXED_SPINNER_READY, Ordering::SeqCst);
+    while !shared.finish.load(Ordering::SeqCst) {
+        spin_loop();
+    }
+    process::exit(0)
+}
+
+extern "C" fn mixed_waiter(arg: usize) -> ! {
+    let shared = unsafe { &*(arg as *const MultiMemberShared) };
+    shared.ready.fetch_or(MIXED_WAITER_READY, Ordering::SeqCst);
+
+    let mut byte = [0u8; 1];
+    let result = read(shared.wait_fd.load(Ordering::SeqCst), &mut byte);
+    if !matches!(result, Ok(1)) {
+        shared.waiter_failed.store(true, Ordering::SeqCst);
+    }
+    // This store is deliberately the first userspace instruction after the
+    // ordinary pipe wait returns. While the group remains stopped, the common
+    // user-entry gate must prevent the parent from observing it.
+    shared.waiter_done.store(true, Ordering::SeqCst);
+    process::exit(0)
+}
+
+extern "C" fn exec_sibling(_: usize) -> ! {
+    EXEC_SIBLING_READY.store(true, Ordering::SeqCst);
+    loop {
+        spin_loop();
+    }
+}
+
+fn map_multimember_shared(wait_fd: Fd) -> Result<&'static MultiMemberShared, Errno> {
+    let ptr = mmap(
+        0,
+        size_of::<MultiMemberShared>(),
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+        MmapFlags::MAP_SHARED | MmapFlags::MAP_ANONYMOUS,
+        None,
+        None,
+    )?
+    .as_ptr() as *mut MultiMemberShared;
+
+    unsafe {
+        ptr.write(MultiMemberShared::new(wait_fd));
+        Ok(&*ptr)
+    }
+}
+
+fn spawn_multimember_child() -> Result<MultiMemberChild, Errno> {
+    let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
+    let (wait_read, wait_write) = pipe2(PipeFlags::empty())?;
+    let shared = map_multimember_shared(wait_read)?;
+
+    match process::fork()? {
+        Some(pid) => {
+            close(ready_write)?;
+            close(wait_read)?;
+            let mut byte = [0u8; 1];
+            if read(ready_read, &mut byte)? != 1 {
+                return Err(EIO);
+            }
+            close(ready_read)?;
+            Ok(MultiMemberChild {
+                pid,
+                wait_release: wait_write,
+                shared,
+            })
+        },
+        None => {
+            close(ready_read).expect("jobctl-test: mixed child close ready reader failed");
+            close(wait_write).expect("jobctl-test: mixed child close wait writer failed");
+
+            let arg = shared as *const MultiMemberShared as usize;
+            let setup = (|| {
+                spawn_test_thread(mixed_spinner, arg)?;
+                spawn_test_thread(mixed_waiter, arg)?;
+                wait_until(
+                    || shared.ready.load(Ordering::SeqCst) == MIXED_ALL_READY,
+                    "mixed raw-thread readiness",
+                )?;
+                // Give the waiter repeated scheduling opportunities to enter
+                // its blocking read before publishing child readiness.
+                for _ in 0..64 {
+                    sched_yield()?;
+                }
+                child_ready(ready_write)
+            })();
+            if setup.is_err() {
+                process::exit_group(1);
+            }
+
+            while !shared.finish.load(Ordering::SeqCst) {
+                spin_loop();
+            }
+            let ok = shared.waiter_done.load(Ordering::SeqCst)
+                && !shared.waiter_failed.load(Ordering::SeqCst);
+            process::exit_group(if ok { 0 } else { 1 })
+        },
+    }
 }
 
 fn child_ready(fd: Fd) -> Result<(), Errno> {
@@ -1094,6 +1283,138 @@ fn test_frame_failure_and_sigkill_dominance() -> Result<(), Errno> {
     Ok(())
 }
 
+fn test_multimember_mixed_execution() -> Result<(), Errno> {
+    println!("jobctl-test: CASE multimember-mixed-execution start");
+    let child = spawn_multimember_child()?;
+    let result = (|| {
+        let spinner_tid = child.shared.spinner_tid.load(Ordering::SeqCst) as u32;
+        if spinner_tid == 0 {
+            return Err(EIO);
+        }
+
+        // A task-directed SIGSTOP still controls the entire ThreadGroup. The
+        // leader and spinner are executing userspace while the waiter is in an
+        // ordinary pipe read, so Stopped proves exposure closure without a
+        // participant acknowledgement protocol.
+        signal::tgkill(child.pid, spinner_tid, SigNo::SIGSTOP)?;
+        expect_child_status(child.pid, WStatus::Stopped(SigNo::SIGSTOP.as_usize() as i8))?;
+
+        if write(child.wait_release, &[1])? != 1 {
+            return Err(EIO);
+        }
+        for _ in 0..128 {
+            sched_yield()?;
+        }
+        if child.shared.waiter_done.load(Ordering::SeqCst) {
+            eprintln!("jobctl-test: ordinary waiter executed userspace while group was stopped");
+            return Err(EIO);
+        }
+
+        signal::kill(child.pid as i32, SigNo::SIGCONT)?;
+        expect_child_status(child.pid, WStatus::Continued)?;
+        wait_until(
+            || child.shared.waiter_done.load(Ordering::SeqCst),
+            "mixed ordinary waiter completion after SIGCONT",
+        )?;
+        if child.shared.waiter_failed.load(Ordering::SeqCst) {
+            return Err(EIO);
+        }
+
+        // Repeat with a ThreadGroup-directed conditional stop after one member
+        // has exited. The remaining userspace members must form the next
+        // exposure closure naturally.
+        signal::kill(child.pid as i32, SigNo::SIGTSTP)?;
+        expect_child_status(child.pid, WStatus::Stopped(SigNo::SIGTSTP.as_usize() as i8))?;
+        signal::kill(child.pid as i32, SigNo::SIGCONT)?;
+        expect_child_status(child.pid, WStatus::Continued)?;
+
+        child.shared.finish.store(true, Ordering::SeqCst);
+        expect_child_status(child.pid, WStatus::Exited(0))
+    })();
+    let _ = close(child.wait_release);
+    let cleanup = cleanup_child(child.pid);
+    result?;
+    cleanup?;
+    println!("jobctl-test: CASE multimember-mixed-execution ok");
+    Ok(())
+}
+
+fn test_process_group_stop_broadcast() -> Result<(), Errno> {
+    println!("jobctl-test: CASE process-group-stop-broadcast start");
+    let leader = spawn_child_scenario(ChildScenario::Yield)?;
+    let member = spawn_child_scenario(ChildScenario::Yield)?;
+    let result: Result<(), Errno> = (|| {
+        process::setpgid(leader.pid as i32, leader.pid as i32)?;
+        process::setpgid(member.pid as i32, leader.pid as i32)?;
+
+        for signo in [
+            SigNo::SIGSTOP,
+            SigNo::SIGTSTP,
+            SigNo::SIGTTIN,
+            SigNo::SIGTTOU,
+        ] {
+            signal::kill(-(leader.pid as i32), signo)?;
+            expect_child_status(leader.pid, WStatus::Stopped(signo.as_usize() as i8))?;
+            expect_child_status(member.pid, WStatus::Stopped(signo.as_usize() as i8))?;
+
+            signal::kill(-(leader.pid as i32), SigNo::SIGCONT)?;
+            expect_child_status(leader.pid, WStatus::Continued)?;
+            expect_child_status(member.pid, WStatus::Continued)?;
+        }
+        Ok(())
+    })();
+    let _ = close(leader.control);
+    let _ = close(member.control);
+    let leader_cleanup = cleanup_child(leader.pid);
+    let member_cleanup = cleanup_child(member.pid);
+    result?;
+    leader_cleanup?;
+    member_cleanup?;
+    println!("jobctl-test: CASE process-group-stop-broadcast ok");
+    Ok(())
+}
+
+fn test_multithread_exec_dethread() -> Result<(), Errno> {
+    println!("jobctl-test: CASE multithread-exec-dethread start");
+    let child = match process::fork()? {
+        Some(pid) => pid,
+        None => {
+            EXEC_SIBLING_READY.store(false, Ordering::SeqCst);
+            spawn_test_thread(exec_sibling, 0).expect("jobctl-test: failed to spawn exec sibling");
+            wait_until(
+                || EXEC_SIBLING_READY.load(Ordering::SeqCst),
+                "exec sibling userspace entry",
+            )
+            .expect("jobctl-test: exec sibling did not start");
+            process::execve("/bin/jobctl-test", &["jobctl-test", "--exec-child"], &[])
+                .expect("jobctl-test: multithread execve failed");
+            unreachable!("jobctl-test: execve returned success")
+        },
+    };
+
+    let result = expect_child_status(child, WStatus::Exited(0));
+    let cleanup = cleanup_child(child);
+    result?;
+    cleanup?;
+    println!("jobctl-test: CASE multithread-exec-dethread ok");
+    Ok(())
+}
+
+fn test_multimember_sigkill() -> Result<(), Errno> {
+    println!("jobctl-test: CASE multimember-sigkill start");
+    let child = spawn_multimember_child()?;
+    let result = (|| {
+        signal::kill(child.pid as i32, SigNo::SIGKILL)?;
+        expect_child_status(child.pid, WStatus::Signal(SigNo::SIGKILL.as_usize() as i8))
+    })();
+    let _ = close(child.wait_release);
+    let cleanup = cleanup_child(child.pid);
+    result?;
+    cleanup?;
+    println!("jobctl-test: CASE multimember-sigkill ok");
+    Ok(())
+}
+
 fn require_procfs() -> Result<(), Errno> {
     read_text(PROC_INIT_STATUS).map(|_| ()).map_err(|errno| {
         eprintln!("jobctl-test: the harness must provide the single mounted /proc: {errno:?}");
@@ -1116,11 +1437,22 @@ fn run_tests() -> Result<(), Errno> {
     install_sigchld_handler()?;
     test_waitid_wnowait_sigchld()?;
     test_global_init_immunity()?;
+    test_multimember_mixed_execution()?;
+    test_process_group_stop_broadcast()?;
+    test_multithread_exec_dethread()?;
+    test_multimember_sigkill()?;
     Ok(())
 }
 
 #[anemone_rs::main]
 pub fn main() -> Result<(), Errno> {
+    let mut args = env::args();
+    let _ = args.next();
+    if args.next() == Some("--exec-child") {
+        println!("jobctl-test: exec child entered userspace");
+        return Ok(());
+    }
+
     require_procfs()?;
     run_tests()?;
     println!("jobctl-test: all cases passed");

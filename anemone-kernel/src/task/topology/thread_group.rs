@@ -4,10 +4,7 @@ use crate::{
     prelude::*,
     task::{
         ThreadGroupType,
-        sig::{
-            SigNo, Signal,
-            info::{SiCode, SigInfoFields, SigKill},
-        },
+        sig::{SigNo, Signal},
         topology::{TOPOLOGY, TaskNode, ThreadGroup},
     },
 };
@@ -363,13 +360,9 @@ impl Task {
         };
 
         for member in members_to_kill {
-            member.recv_signal(Signal::new(
-                SigNo::SIGKILL,
-                SiCode::Kernel,
-                SigInfoFields::Kill(SigKill {
-                    pid: tg.tgid(),
-                    uid: self.cred().uid.real,
-                }),
+            member.recv_signal(Signal::new_dethread_victim_kill(
+                tg.tgid(),
+                self.cred().uid.real,
             ));
         }
 
