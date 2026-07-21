@@ -1,12 +1,12 @@
 # Unix Job Control 迁移实施计划
 
-**状态：** Active / R1
+**状态：** Completed / R1
 **最后更新：** 2026-07-21
 **父 RFC：** [RFC-20260720-unix-jobctl](./index.md)
 **目标与不变量：** [Unix Job Control 目标与不变量](./invariants.md)
 **当前修订：** R1
-**事务日志：** [2026-07-20-unix-jobctl](../../devlog/transactions/2026-07-20-unix-jobctl.md)；Stage 0、Stage 1、Stage 2、Stage 3A、Stage 3B、Stage 4A repair 与 Stage 4B validation checkpoint 已关闭，Stage 5 Not Started。
-**Contract Cutover：** `UJ-CUTOVER`；全部 `Introduce / Refine / Replace / Scoped Exception` delta 只在 Stage 5 原子生效。
+**事务日志：** [2026-07-20-unix-jobctl](../../devlog/transactions/2026-07-20-unix-jobctl.md)；Stage 0至Stage 5全部关闭。
+**Contract Cutover：** `UJ-CUTOVER`已在Stage 5原子生效。
 
 当前 effective contract：
 
@@ -15,8 +15,9 @@
 - [Procfs TGID task-state projection](../../contracts/procfs/task-state-projection.md)
 - [Process-group signal targeting](../../contracts/task/process-group-signaling.md)
 - [ThreadGroup lifecycle](../../contracts/task/thread-group-lifecycle.md)
+- [Unix job control](../../contracts/task/job-control.md)
 - [Child wait](../../contracts/task/child-wait.md)
-- [Ordinary user entry](../../contracts/task/user-entry.md)
+- [User entry](../../contracts/task/user-entry.md)
 
 ## 1. 计划角色与当前边界
 
@@ -27,16 +28,15 @@
 3. 本文只决定如何验证并迁移到该 target；
 4. transaction 在实现开始后记录执行事实、review、证据、修正和 cutover 结果。
 
-R1 已在当前活动事务中接受。接受与 transaction 创建不表示：
+R1在当前事务中接受时，接受与transaction创建本身不表示：
 
-- current contract 已加入 pending successor；
+- current contract 已完成cutover；
 - 任何代码、测试配置或 runtime 语义已经获准修改；
-- 任一 `JOBCTL-*` 或 `USER-ENTRY-002` 已经生效。
+- 任一`JOBCTL-*`或`USER-ENTRY-002`已经生效。这些边界后来只由Stage 5 `UJ-CUTOVER`关闭。
 
-Stage 0 仅是行为保持型 Signal module split checkpoint；Stage 1、Stage 2 与 Stage 3 已由
-2026-07-21 的明确授权完成并关闭。Stage 4 transition preflight发现terminal transaction没有
-同事务清除全组exposure，已按本节完成Stage 4A repair和Stage 4B validation closure；candidate仍
-non-publishable，Stage 5 / `UJ-CUTOVER`保持Not Started。
+Stage 0仅是行为保持型Signal module split checkpoint；Stage 1至Stage 4完成candidate实现与验证，
+Stage 5冻结docs-only resolved manifest并将全部target delta作为`UJ-CUTOVER`原子切换。所有Stage
+已经关闭，后续TTY、orphaned-pgrp或ptrace工作不属于本计划的自动下一gate。
 
 ### 1.1 废弃来源隔离
 
@@ -149,7 +149,7 @@ task::wait / lifecycle / procfs
 | Stage 3B | 多成员 exposure、lifecycle 与 topology closure | Closed | None | non-publishable candidate checkpoint |
 | Stage 4A | terminal exposure / observability owner-local repair | Closed | None | repair checkpoint；candidate仍不可发布 |
 | Stage 4B | ABI、竞态、旁路与 production validation closure | Closed | None | verified candidate；仍不可发布 |
-| Stage 5 | current contract 与完整实现原子生效 | Not Started | `UJ-CUTOVER` 全部 target delta | integrated publishable unit |
+| Stage 5 | current contract 与完整实现原子生效 | Closed | `UJ-CUTOVER` Effective | integrated publishable unit |
 
 Stage 只能按表中顺序进入；Stage 3A 与 Stage 3B 各自冻结 manifest、执行 review、记录
 checkpoint 并满足退出条件，3A 未关闭时不得进入 3B。某个 Stage / checkpoint 的 build、
@@ -1018,15 +1018,57 @@ Stage 5开始前，以上默认范围必须展开成逐文件`Resolved Write Set
 代码面只读；若自然的contract owner落点不同，先走write-set扩展申请，不能为了服从默认
 路径建立错误contract分类。
 
+### Stage 5 Resolved Write Set Manifest（2026-07-21）
+
+Stage 5 transition preflight重新读取最终Stage 4 candidate commit `9d0308a7`、R1 target、Contract
+Impact、Stage 4 proof/evidence index、current contracts、register与public navigation。candidate
+production code和validation assets相对该commit无变化；未发现old/new双路径、feature flag、
+singleton fallback、temporary bridge或probe hook。用户已明确授权完成Stage 5并免除重复final
+runtime；本manifest只授权下列21个公共文档文件：
+
+- `docs/src/rfcs/unix-jobctl/index.md`
+- `docs/src/rfcs/unix-jobctl/invariants.md`
+- `docs/src/rfcs/unix-jobctl/implementation.md`
+- `docs/src/contracts/signal/index.md`
+- `docs/src/contracts/signal/pending-routing.md`
+- `docs/src/contracts/signal/temporary-mask-delivery.md`
+- `docs/src/contracts/procfs/index.md`
+- `docs/src/contracts/procfs/task-state-projection.md`
+- `docs/src/contracts/task/index.md`
+- `docs/src/contracts/task/process-group-signaling.md`
+- `docs/src/contracts/task/thread-group-lifecycle.md`
+- `docs/src/contracts/task/child-wait.md`
+- `docs/src/contracts/task/user-entry.md`
+- `docs/src/contracts/task/job-control.md`（新增；`ThreadGroup` job-control owner）
+- `docs/src/contracts.md`
+- `docs/src/devlog/transactions/2026-07-20-unix-jobctl.md`
+- `docs/src/devlog/transactions/index.md`
+- `docs/src/devlog/2026-07-06_to_2026-07-19.md`
+- `docs/src/register/current-limitations.md`
+- `docs/src/rfcs.md`
+- `docs/src/SUMMARY.md`
+
+全部kernel、apps、LTP profile/group、rootfs/harness、private draft、RFC backgrounds、open issues及
+其它公共文档保持只读。新`JOBCTL-*`落在`contracts/task/job-control.md`，因为唯一协议owner是user
+`ThreadGroup`；不新建并列top-level owner目录。若contract review要求修改任何代码/测试资产，或
+发现target/owner/ABI/visible semantics/acceptance变化，Stage 5立即停止并保持Not Cut Over。
+
+在manifest冻结前曾提前形成Signal/procfs/task contract未提交草稿；这些文本不构成已授权执行或
+partial cutover。发现该流程Keter后已停止继续写contract，先完成本manifest与transaction activation
+记录；随后只把manifest内草稿作为候选diff重新review、修正和验证。最终commit之前任何current
+contract仍以HEAD旧文本为effective authority。
+
 ### 验证
 
 - 复核 Stage 4 evidence来自最终candidate commit；代码变化后必须重跑受影响floor。
 - `git diff --check`
 - `mdbook build docs`
 - final `just fmt kernel --check`、`just fmt jobctl-test --check`、`just build`。
-- final runtime使用
-  `./scripts/run-user-test-rv64.sh etc/sdcard-rv.img build/unix-jobctl-stage5-rv64.log`；
-  wrapper日志与candidate hash / artifact provenance一致。
+- final runtime原计划使用
+  `./scripts/run-user-test-rv64.sh etc/sdcard-rv.img build/unix-jobctl-stage5-rv64.log`。用户因
+  Stage 5不改代码、Stage 4已经从最终candidate重新构建并跑完整floor而明确豁免本次重复runtime；
+  本Stage复用`build/unix-jobctl-stage4-rv64.log`并核对candidate `9d0308a7` / artifact provenance，
+  Stage 5 runtime明确记为user-waived / Not Run，不伪装成新运行证据。
 
 ### 退出条件
 
@@ -1037,6 +1079,23 @@ Stage 5开始前，以上默认范围必须展开成逐文件`Resolved Write Set
 ### Contract Cutover
 
 整个`UJ-CUTOVER`原子生效。任一参与domain失败则全部保持Not Cut Over，不允许部分ID先行effective。
+
+### Stage 5结果（2026-07-21）
+
+21文件resolved manifest已完成，current contract、RFC、transaction、register、双周devlog与导航在
+同一个`jobctl: complete Stage 5 atomic cutover`提交中发布。全部`Introduce / Refine / Replace /
+Scoped Exception` ID均有Active current-contract落点；Preserve ID的owner与语义保持。最终review为
+Apollyon 0、Keter 0、Euclid 0，没有代码/测试资产、owner、public API、ABI、visible semantics、
+acceptance或write-set扩张。
+
+`git diff --check`、`mdbook build docs`、stale wording/link/anchor audit、
+`just fmt kernel --check`、`just fmt jobctl-test --check`与final `just build`通过。首次sandbox build的
+lwext4 C compiler `Bad system call`属于seccomp环境阻断；用户明确批准后在沙箱外重跑同一`just build`成功。
+Stage 5没有修改production code，runtime按用户明确豁免记为user-waived / Not Run；最终runtime证据仍
+由Stage 4 candidate `9d0308a7`及`build/unix-jobctl-stage4-rv64.log`拥有。
+
+Stage 5与整个R1计划关闭，`UJ-CUTOVER` Effective。TTY、orphaned-pgrp、ptrace、credential
+`si_uid`与SIGCHLD publication ordering只作为register/follow-up边界保留，不自动进入下一gate。
 
 ## 12. 旁路审计清单
 

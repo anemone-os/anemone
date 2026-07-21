@@ -6,8 +6,6 @@
 
 ## Active
 
-- [Unix Job Control](./2026-07-20-unix-jobctl.md)
-
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
 - [OOM Killer](./2026-06-15-oom-killer.md)
@@ -25,6 +23,7 @@
 
 ## Completed
 
+- [Unix Job Control](./2026-07-20-unix-jobctl.md)
 - [Sched Dynamic Attributes](./2026-07-15-sched-dynamic-attributes.md)
 - [CPU Logical / Physical ID](./2026-07-14-cpu-logical-physical-id.md)：物理 ID 上界/逻辑 CPU 容量拆分、无锁 registry 和内建 cache padding 的 typed table 已完成；VisionFive 2 由用户复验通过，最终 table 布局与 LoongArch correction build 未由 agent 运行。
 - [Sched RT Class R1](./2026-07-14-sched-rt-class-r1.md)

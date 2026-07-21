@@ -1,32 +1,28 @@
 # 2026-07-20 - Unix Job Control
 
-**Status:** Active
+**Status:** Completed
 **Owners:** doruche, Codex
 **Area:** signal / task / process group / user entry / wait ABI / procfs
 **Canonical Plan:** [RFC-20260720-unix-jobctl](../../rfcs/unix-jobctl/index.md), [目标与不变量](../../rfcs/unix-jobctl/invariants.md), [迁移实施计划](../../rfcs/unix-jobctl/implementation.md)
 **Canonical Revision:** R1
-**Current Phase:** Stage 4 Closed / Stage 5 Not Started
+**Current Phase:** Stage 5 Closed / `UJ-CUTOVER` Effective
 
 ## Scope
 
-本事务按授权执行 RFC R0 的 Stage 0、Stage 1与Stage 2 checkpoint。Stage 0 只把现有 `task::sig`
-根模块按既有职责做行为保持型目录化拆分；Stage 1 建立 ThreadGroup-owned dormant
-job-control state、membership exposure与统一 user-entry gate，但没有 production stop /
-continue ingress。Stage 2贯通generation-time `SIGSTOP / SIGCONT`、child report、wait ABI、
-SIGCHLD、procfs projection与单线程production runtime；Stage 3A随后完成conditional control、
-reservation与temporary-mask closure；Stage 3B随后完成multi-member exposure、lifecycle与
-topology closure。candidate在后续closure与`UJ-CUTOVER`前保持non-publishable。
-`UJ-CUTOVER`为None；全部current contract保持effective，pending successor仅作导航，Stage 4
-尚未开始。
+本事务执行RFC R0/R1的完整Stage 0至Stage 5。Stage 0完成Signal行为保持型目录化拆分；Stage 1建立
+ThreadGroup-owned dormant job-control与统一user-entry gate；Stage 2贯通generation-time control、
+child report、wait ABI、SIGCHLD、procfs与单线程production slice；Stage 3A/3B关闭conditional
+control、reservation、temporary-mask、多成员、lifecycle与topology；Stage 4完成owner-local repair、
+完整production validation与review；Stage 5将current contracts、RFC、register与导航作为同一个
+`UJ-CUTOVER`原子切换。当前全部Stage关闭，candidate已成为integrated effective implementation。
 
 ## Contract and register boundary
 
-受影响 current contract IDs 的 pending successor 已加入对应 contract 页，但没有修改
-effective rule：`SIGNAL-PENDING-*`、`SIGNAL-ACTION-*`、`SIGNAL-TEMP-MASK-*`、
-`PROCFS-TASK-STATE-001`、`PGRP-SIGNAL-*`、`TASK-LIFE-*`、`CHILD-WAIT-*`、
-`USER-ENTRY-001`。Stage 2只新增已批准的
-`ANE-20260721-JOBCTL-SIGCHLD-PUBLICATION-ORDER` limitation；现有
-`ANE-20260527-PROCESS-GROUP-SESSION-STAGE1`继续描述尚未cutover的effective job-control缺口。
+`UJ-CUTOVER`已经更新`SIGNAL-PENDING-*`、`SIGNAL-ACTION-*`、`SIGNAL-TEMP-MASK-*`、
+`PROCFS-TASK-STATE-001`、`PGRP-SIGNAL-*`、`TASK-LIFE-*`、`CHILD-WAIT-*`与`USER-ENTRY-*`，并在
+`contracts/task/job-control.md`创建全部`JOBCTL-*` Active规则。register中的process-group stage-1
+限制只保留TTY/foreground/orphaned边界；ptrace、stopped/continued `si_uid = 0`与guards-out
+SIGCHLD publication ordering分别保持Active limitation，不伪装成已实现或已修复。
 
 ## Stage 0 preflight and resolved write-set manifest
 
@@ -724,3 +720,85 @@ coalescing掩盖；修复后已按上述oracle顺序重跑完整RV64 floor，独
 public API / shared contract扩张或stop-condition触发；`anemone-rs`只增加现有`tkill` syscall的窄调用
 wrapper。Stage 4B与整个Stage 4关闭；candidate保持non-publishable，`UJ-CUTOVER=None`，current
 contracts与register不变，Stage 5 Not Started，且整个Stage 4只形成一个最终`jobctl:`提交。
+
+## Stage 5 transition preflight and activation - 2026-07-21
+
+**Authority and preconditions:** 用户本轮明确授权完成Stage 5 / `UJ-CUTOVER`，并因本轮不改代码且
+Stage 4已经完成最终runtime而免除重复Stage 5 wrapper。Stage 0至Stage 4均已关闭；HEAD
+`9d0308a7`就是最终Stage 4 candidate commit，工作树开始本Stage时clean，Stage 4 evidence log仍对应
+该candidate。preflight复核R1 Contract Impact、proof obligations、Stage 4逐ID evidence index、current
+contracts、register和public navigation，没有发现old/new双路径、feature flag、singleton fallback、
+temporary bridge、probe hook、target defect或未分类失败。
+
+**Resolved manifest and activation:** authoritative逐文件清单冻结在
+[Stage 5 Resolved Write Set Manifest](../../rfcs/unix-jobctl/implementation.md#stage-5-resolved-write-set-manifest2026-07-21)，
+共21个公共文档文件。新增`contracts/task/job-control.md`承载`ThreadGroup`唯一owner下的全部
+`JOBCTL-*` stable IDs；代码、测试资产、private draft、backgrounds与open issues保持只读。Stage 5
+由此进入Active，`UJ-CUTOVER`在全部文档、review与validation退出条件通过前仍为None。
+
+**Process correction:** manifest冻结前曾提前形成Signal/procfs/task current-contract未提交草稿。
+独立流程审计将其定级Keter：rolling write-set workflow不允许用事后manifest追认执行。发现后立即
+停止继续编辑contract；这些文本只按未授权draft处理，不代表effective change或partial cutover。
+本preflight先独立冻结manifest并记录activation，后续再把manifest内draft作为candidate diff从头
+review、修正和验证。最终cutover commit之前，HEAD中的旧current contract仍是唯一effective authority。
+
+**Review / validation floor:** contract review逐项核对全部`Introduce / Refine / Replace / Scoped
+Exception`落点、R1 reservation-first边界、terminal precedence、report/wait/procfs单一truth、
+`si_uid = 0`与ptrace/TTY/orphaned follow-up；最终要求Apollyon/Keter/Euclid为0。执行
+`git diff --check`、stale wording/link/anchor audit、`mdbook build docs`、
+`just fmt kernel --check`、`just fmt jobctl-test --check`和`just build`。按用户明确豁免不重复QEMU /
+LTP runtime；Stage 4日志与candidate hash/provenance必须继续一致。任何代码或测试资产变化、
+owner/target/ABI/visible semantics/acceptance变化立即停止并保持Not Cut Over。
+
+## Stage 5 `UJ-CUTOVER`与事务收口 - 2026-07-21
+
+**Atomic cutover:** Stage 5按[authoritative resolved manifest](../../rfcs/unix-jobctl/implementation.md#stage-5-resolved-write-set-manifest2026-07-21)
+只修改21个公共文档文件；kernel、apps、LTP profile/group、rootfs/harness、private draft、backgrounds与
+open issues均保持只读。cutover commit是承载本条及全部contract diff的
+`jobctl: complete Stage 5 atomic cutover`提交；其直接parent `9d0308a7`是最终Stage 4 candidate。
+Git中的该单一提交同时发布current contract、RFC Closed、transaction Completed、register与导航，
+不存在只能看到core或wait/procfs的partial effective状态。
+
+**Contract result and evidence:** 下表的“旧规则”是R1 Contract Impact记录的切换前baseline；“Effective
+规则”由对应current contract唯一拥有。runtime/source证据均来自最终candidate `9d0308a7`的Stage 4
+proof index与`build/unix-jobctl-stage4-rv64.log`。
+
+| Contract ID | 变化 | 旧规则 | Effective规则 / 落点 | Evidence |
+| --- | --- | --- | --- | --- |
+| `SIGNAL-PENDING-001` | Scoped Exception | private/shared pending拥有全部ordinary occurrence | ordinary owner不变；`SIGSTOP`直接作为jobctl control input消费 | pending/generation source；四stop matrix与opposite cleanup |
+| `SIGNAL-PENDING-002` | Refine | group occurrence先publish pending；`SIGSTOP` force notification | ordinary publication不变；`SIGSTOP`不进pending、不完成active wait | producer/source与ordinary pipe-wait runtime |
+| `SIGNAL-ACTION-001` | Preserve | ignored admission在pending publication前生效 | 保持；control generation side effect与ordinary occurrence admission分离 | generation/action source与conditional disposition cases |
+| `SIGNAL-ACTION-002` | Refine | ordinary trap-return提交异步action | `SIGSTOP` generation direct stop；conditional DefaultStop使用epoch authority；Stopped-phase closure受限 | action/delivery source、stale-epoch与temporary-mask cases |
+| `SIGNAL-TEMP-MASK-001` | Preserve | task唯一拥有mask/restore slot | 保持；jobctl不复制restore truth | mask owner source与temporary-mask regression |
+| `SIGNAL-TEMP-MASK-002` | Refine | reserved target优先later pending但尚未提交action | claim finality保留；control cleanup不撤销reservation；R1 reservation-first顺序有效 | reservation source、SIGCONT custom/default与SIGKILL dominance |
+| `SIGNAL-TEMP-MASK-003` | Preserve | handler/no-frame cleanup收口restore responsibility | 保持并明确no-return terminal前仍由Signal owner清理 | frame/no-frame/terminal source与frame-failure runtime |
+| `PROCFS-TASK-STATE-001` | Refine | leader TaskStatus映射R/Z/S/D；status pair非原子 | read-local enum，Zombie优先，committed Stopped为T，单次status pair一致 | procfs source与focused T/status pair runtime |
+| `PGRP-SIGNAL-001/002` | Preserve | ProcessGroup只选member；每个TG独立接受 | 保持；每个TG独立stop/continue/report，无pgrp-wide phase | selector source与双TG四stop broadcast |
+| `TASK-LIFE-001..003` | Preserve | terminal owner、last detach与notification ordering | terminal owner不变；jobctl只承担exposure/report/parker cleanup | exit/topology source、terminal KUnit与SIGKILL/exec runtime |
+| `CHILD-WAIT-001..005` | Replace / Refine | exit-only truth与claim；non-exit ABI缺失 | typed terminal/report selection，relation+selector重验，predicate-only Event，WNOWAIT peek/exact-once consume，stopped/continued ABI | wait/report source、WNOWAIT、waitid07/08、waitpid08/13 |
+| `USER-ENTRY-001` | Refine | ordinary return只做Signal arbitration | ordinary path加入lifecycle/jobctl gate与exposure登记 | RV64/LA64 source与multi-member/ordinary-wait runtime |
+| `USER-ENTRY-002` | Introduce | None | fresh/clone/exec与ordinary return共享mandatory gate；R1 reservation-first边界有效 | entry source、exec new image与temporary-mask/SIGKILL cases |
+| `JOBCTL-STATE/STOP/SIGNAL/CONT/LIFE/REPORT-001` | Introduce | None | [ThreadGroup-owned Unix job control当前契约](../../contracts/task/job-control.md)全部Active | Stage 4逐ID proof index、186 KUnit、19 focused cases与wait LTP |
+
+**Register result:** `ANE-20260527-PROCESS-GROUP-SESSION-STAGE1`已移除stopped/continued wait缺口，
+继续保留TTY、foreground/background pgrp、terminal-generated signal与orphaned-pgrp policy。
+`ANE-20260721-JOBCTL-PTRACE-DEFERRED`、`ANE-20260721-JOBCTL-SI-UID-ZERO`与
+`ANE-20260721-JOBCTL-SIGCHLD-PUBLICATION-ORDER`均保持Active；没有broken expected behavior需要新增
+open issue。
+
+**Review:** 两路独立review核对current-contract owner/ID、cross-domain handoff、reparent no-lost-wake、
+temporary-mask terminal cleanup、R1 reservation-first可见延迟、procfs read-local snapshot与全部public
+anchor。manifest冻结前提前形成未提交contract草稿的流程Keter已通过先冻结manifest、再从头review
+candidate diff而neutralize；其余finding逐项修正后最终Apollyon 0、Keter 0、Euclid 0。没有owner、
+public API、ABI、visible semantics、acceptance或write-set扩张，也没有触发repair/target stop condition。
+
+**Validation:** `git diff --check`、`mdbook build docs`、stale wording/link/anchor audit、
+`just fmt kernel --check`与`just fmt jobctl-test --check`通过。用户明确批准后，final `just build`在沙箱外
+通过，release kernel成功编译并导出；tracked code/test资产仍与`9d0308a7`一致。首次沙箱内build只因
+lwext4 C compiler被seccomp以`Bad system call`阻断，不是源码失败。按用户明确豁免，本Stage没有重复
+QEMU/LTP runtime；Stage 5 runtime记录为user-waived / Not Run，复用Stage 4最终candidate的完整日志与
+artifact provenance，不把它写成新运行证据。
+
+**Result:** 全部target contract ID为Effective，无Transitional、pending或Not Cut Over残留。
+RFC R1 Closed，transaction Completed，`UJ-CUTOVER`原子生效。下一步只有TTY、orphaned-pgrp、ptrace、
+credential `si_uid`与SIGCHLD ordering等独立follow-up；本事务不进入或授权其中任何一项。

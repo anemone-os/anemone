@@ -208,13 +208,52 @@
 **Severity:** Medium
 **Area:** task topology / process group / session / job control
 
-**Summary:** 当前进程组与会话实现是从 `69bff4b` 之后引入的 stage-1 主干，已经覆盖 PGID/SID 拓扑、`setpgid` / `getpgid` / `setsid` / `getsid`、process-group `kill`、`wait4` 的基础选择语义，以及 `waitid` 的 P_ALL / P_PID / P_PGID exited-child 基础语义，但还不是完整 job-control 实现；尚未接入 controlling tty、foreground/background process group、terminal job-control 信号、orphaned process group 的 `SIGHUP` / `SIGCONT` 规则，也尚未提供 stopped / continued child wait reporting。
+**Summary:** 当前进程组与会话实现是从`69bff4b`之后引入的stage-1主干，已经覆盖PGID/SID拓扑、`setpgid / getpgid / setsid / getsid`、process-group `kill`，并由Unix Job Control R1补齐ThreadGroup stop/continue、stopped/continued child wait、SIGCHLD与procfs投影。它仍不是完整terminal job-control实现：尚未接入controlling TTY、foreground/background process group、terminal-generated job-control signal与orphaned process group的`SIGHUP / SIGCONT`规则。
 
-**Exit Condition:** 接入 controlling tty 和 foreground process-group 管理，补齐 stopped / continued child wait reporting，并为 background terminal access、session leader 退出、newly orphaned stopped process group 等路径补齐 Linux/POSIX 对齐的回归测试。
+**Exit Condition:** 接入controlling TTY和foreground process-group管理，并为background terminal access、session leader退出、newly orphaned stopped process group等路径补齐Linux/POSIX对齐的回归测试。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-14
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [开发日志：2026-06-08 至 2026-06-21](../devlog/2026-06-08_to_2026-06-21.md#2026-06-14---waitid-exited-child-syscall-bridge), [waitid 小迭代记录](../devlog/changes/2026-06-14-waitid.md)
+**Last Verified:** 2026-07-21
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [waitid 小迭代记录](../devlog/changes/2026-06-14-waitid.md), [Unix Job Control RFC](../rfcs/unix-jobctl/index.md), [Unix Job Control事务日志](../devlog/transactions/2026-07-20-unix-jobctl.md)
+
+## ANE-20260721-JOBCTL-PTRACE-DEFERRED
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** task / signal / ptrace / wait / procfs / job control
+
+**Summary:** Unix Job Control R1只实现ordinary job stop，不实现ptrace stop、tracer wait status或
+`PTRACE_CONT / PTRACE_LISTEN`。ptrace不能复用child job-control report slot，也不能把procfs
+committed-Stopped的`T`投影当成tracing truth；当前也没有tracer-ownedstop lifecycle或对应wait
+selection。
+
+**Exit Condition:** 后续ptrace RFC定义唯一tracing owner、job-control与ptrace state的组合优先级、
+tracer/real-parent wait selection、continue/listen cleanup和procfs显示边界，并通过定向ABI、并发与
+lifecycle验证；不得把ptrace phase塞入`JOBCTL-*` report或建立第二份ThreadGroup phase truth。
+
+**Owner:** doruche
+**Last Verified:** 2026-07-21
+**Related:** [Unix Job Control RFC](../rfcs/unix-jobctl/index.md), [Unix Job Control当前契约](../contracts/task/job-control.md), [Unix Job Control事务日志](../devlog/transactions/2026-07-20-unix-jobctl.md)
+
+## ANE-20260721-JOBCTL-SI-UID-ZERO
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** credentials / signal / wait / job control
+
+**Summary:** `waitid` stopped/continued结果与对应job-control SIGCHLD当前沿用既有exited-child
+bridge，`si_uid`固定为`0`。实现没有跨leader exit与report生命周期稳定的child credential identity
+snapshot；本阶段明确不从任意live member猜测UID，也不在ThreadGroup缓存第二份credential truth。
+
+**Exit Condition:** credential owner提供跨leader exit、reparent与report/wait生命周期稳定的child
+identity snapshot，并由后续contract统一修正exited、stopped与continued `waitid` / SIGCHLD的
+`si_uid`；完成source audit与对应ABI/lifecycle回归后关闭。
+
+**Owner:** doruche
+**Last Verified:** 2026-07-21
+**Related:** [Unix Job Control RFC](../rfcs/unix-jobctl/index.md), [Unix Job Control当前契约](../contracts/task/job-control.md), [Unix Job Control事务日志](../devlog/transactions/2026-07-20-unix-jobctl.md)
 
 ## ANE-20260721-JOBCTL-SIGCHLD-PUBLICATION-ORDER
 

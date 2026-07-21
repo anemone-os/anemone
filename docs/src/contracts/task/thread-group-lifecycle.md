@@ -3,13 +3,13 @@
 **Contract ID：** `TASK-LIFE`
 **状态：** Active
 **Owner：** `ThreadGroup` terminal lifecycle
-**参与领域：** task / topology / signal terminal action / child wait / procfs
+**参与领域：** task / topology / signal terminal action / job control / child wait / procfs
 **覆盖范围：** user ThreadGroup 的 `Alive / Exiting / Exited` truth、exit-code 选择、member detach 与 waitable publication
-**不覆盖：** job-control stop phase、ptrace stop、kernel-thread lifecycle、subreaper policy
+**不覆盖：** job-control phase/report的内部规则、ptrace stop、kernel-thread lifecycle、subreaper policy
 **实现位置：** `anemone-kernel/src/task/mod.rs`、`anemone-kernel/src/task/api/exit/`、`anemone-kernel/src/task/topology/`
 **依赖：** None
-**Pending Successor：** [RFC-20260720-unix-jobctl R0](../../rfcs/unix-jobctl/index.md)；`UJ-CUTOVER` 前不生效
-**最后核验：** 2026-07-20
+**Pending Successor：** None
+**最后核验：** 2026-07-21
 
 ## 状态与所有权
 
@@ -23,7 +23,7 @@ task-local exit code、scheduler Zombie 和 procfs binding 不得反向驱动 Th
 
 ## TASK-LIFE-001 — ThreadGroup lifecycle 是 terminal truth
 
-**规则：** user ThreadGroup 的 terminal phase 与 group exit code 只由 `ThreadGroupInner::status.life_cycle` 持有。`exit_group` 的第一个 `Alive -> Exiting(code)` 决定 group terminal code；后续 exit-group 请求沿用该 code，不能建立第二份 terminal decision。
+**规则：** user ThreadGroup的terminal phase与group exit code只由`ThreadGroupInner::status.life_cycle`持有。`exit_group`的第一个`Alive -> Exiting(code)`决定group terminal code；后续exit-group请求沿用该code，不能建立第二份terminal decision。job-control cleanup必须服从该transition，不能让phase/report覆盖、推迟或重新解释first terminal code。
 
 **违反表现：** task-local exit code覆盖已发布的 group code、Signal 或 scheduler 自行发布 `Exited`，或多个 terminal owner 并行推进 phase。
 
@@ -31,7 +31,7 @@ task-local exit code、scheduler Zombie 和 procfs binding 不得反向驱动 Th
 
 **最初来源：** 现有 ThreadGroup / exit 实现。
 
-**当前来源：** live ThreadGroup lifecycle owner，2026-07-20 源码核验。
+**当前来源：** live ThreadGroup lifecycle owner；[RFC-20260720-unix-jobctl R1](../../rfcs/unix-jobctl/index.md)保持terminal owner并增加[`JOBCTL-LIFE-001`](./job-control.md#jobctl-life-001--membership与terminal不遗留exposure或parker)局部cleanup义务；[Stage 5 cutover事务](../../devlog/transactions/2026-07-20-unix-jobctl.md#stage-5-uj-cutover与事务收口---2026-07-21)。
 
 ## TASK-LIFE-002 — 最后 member detach 后才能发布 Exited
 
@@ -47,12 +47,12 @@ task-local exit code、scheduler Zombie 和 procfs binding 不得反向驱动 Th
 
 ## TASK-LIFE-003 — Terminal publication 先于 parent notification
 
-**规则：** last-member exit 先发布 `ThreadGroupLifeCycle::Exited`，再按 child 的 configured terminate signal决定是否发送 signal，并发布 `child_exited` Event。通知只是要求 parent 重扫；它不能先于 lifecycle truth 创建 waitable child。本条不承诺并发 reparent 下 signal 与 Event 的 parent-selection 原子性。
+**规则：** last-member exit先发布`ThreadGroupLifeCycle::Exited`，再按child的configured terminate signal决定是否发送signal，并guards-out发布`child_status_changed` Event。通知只是要求parent重扫；它不能先于lifecycle truth创建waitable child。本条不承诺并发reparent下signal与Event的parent-selection原子性。
 
 **违反表现：** parent notification 先于已经承诺的 terminal predicate，或 notification 成为 exit truth。
 
-**验证 / Enforcement：** `kernel_exit()` publication 顺序源码审计；wait / exit race 回归。
+**验证 / Enforcement：** `kernel_exit()`的terminal publication、optional terminate signal与`child_status_changed` guards-out顺序源码审计；wait / exit race回归。
 
 **最初来源：** 现有 task exit 实现。
 
-**当前来源：** live ThreadGroup lifecycle owner，2026-07-20 源码核验。
+**当前来源：** live task exit实现；[RFC-20260720-unix-jobctl R1](../../rfcs/unix-jobctl/index.md)将predicate notification扩展为child status；[Stage 5 cutover事务](../../devlog/transactions/2026-07-20-unix-jobctl.md#stage-5-uj-cutover与事务收口---2026-07-21)。

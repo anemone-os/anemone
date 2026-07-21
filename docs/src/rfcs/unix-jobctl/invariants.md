@@ -1,17 +1,17 @@
 # Unix Job Control 目标与不变量
 
-**状态：** R1 / Accepted for Implementation / Not effective
+**状态：** R1 / Closed / Effective via `UJ-CUTOVER`
 **最后更新：** 2026-07-21
 **父 RFC：** [RFC-20260720-unix-jobctl](./index.md)
 **适用修订：** R1
 
-本文定义 unix-jobctl 的 contract delta、尚未 cutover 的 target rules 和只服务本方案的 proof obligations。当前已经生效的共享规则以仓库 `docs/src/contracts/` 为准；本页所有 `JOBCTL-*` 与新增 `USER-ENTRY-*` 都是 proposed stable ID，不是 current authority。
+本文保留unix-jobctl R1的accepted target、切换前contract delta和RFC-local proof obligations。Stage 5已经完成`UJ-CUTOVER`；当前生效规则以仓库`docs/src/contracts/`为唯一权威，本页不成为并列current contract。
 
 ## Contract Impact
 
-`UJ-CUTOVER` 是本 R1 target 定义的语义 cutover unit，不单独充当 implementation stage 名称。`implementation.md` 将 Stage 5 映射到整个 `UJ-CUTOVER`；在此之前不能逐项宣称生效。
+`UJ-CUTOVER`是本R1定义的语义cutover unit，不单独充当implementation stage名称。下表保留切换前baseline与target delta；Stage 5已经将全部`Introduce / Refine / Replace / Scoped Exception`作为一个integrated unit原子生效。
 
-| Contract ID | 变化 | 当前规则 | Target 摘要 | 生效边界 |
+| Contract ID | 变化 | 切换前baseline / 同ID current落点 | Target 摘要 | 生效边界 |
 | --- | --- | --- | --- | --- |
 | [`SIGNAL-PENDING-001`](../../contracts/signal/pending-routing.md#signal-pending-001--directed-occurrence-只进入对应-pending-owner) | Scoped Exception | private / shared pending 各自持有 occurrence | ordinary occurrence仍由原owner持有；`SIGSTOP` admission直接消费为jobctl control input，不进入pending | `UJ-CUTOVER` |
 | [`SIGNAL-PENDING-002`](../../contracts/signal/pending-routing.md#signal-pending-002--group-directed-publication-与-member-notification-分离) | Refine | shared publication先于advisory member notification；`SIGSTOP`使用强制notification | ordinary group occurrence保持publication / notification分离；`SIGSTOP`不发布pending且不force-complete active wait，可选user-execution kick必须guards-out且stale-safe | `UJ-CUTOVER` |
@@ -20,16 +20,16 @@
 | [`SIGNAL-TEMP-MASK-001`](../../contracts/signal/temporary-mask-delivery.md#signal-temp-mask-001--current-mask-与-restore-slot-只有一个-task-owner) | Preserve | current mask / restore slot 由 current task Signal state 唯一持有 | jobctl 不复制或终结 temporary-mask token state | 全程 |
 | [`SIGNAL-TEMP-MASK-002`](../../contracts/signal/temporary-mask-delivery.md#signal-temp-mask-002--defer-必须先建立-task-private-delivery-handoff) | Refine | reserved target 优先于后来pending delivery，但尚未提交action | reservation提交task-local occurrence claim并退出ordinary queue competition；control cleanup不撤销它，live action仍在后续选择，且保留相对后来pending `SIGKILL`的既有优先级 | `UJ-CUTOVER` |
 | [`SIGNAL-TEMP-MASK-003`](../../contracts/signal/temporary-mask-delivery.md#signal-temp-mask-003--handler-commit-或-signal-no-frame-cleanup-终结-restore-responsibility) | Preserve | handler commit或Signal no-frame cleanup终结restore responsibility | jobctl不删除、复制或终结reservation；Signal owner仍通过handler frame、no-frame cleanup或no-return terminal teardown收口 | 全程 |
-| [`PROCFS-TASK-STATE-001`](../../contracts/procfs/task-state-projection.md#procfs-task-state-001--当前-tgid-state-只投影-leader-taskstatus) | Refine | 成功读取时投影 leader `TaskStatus` 的 R / Z / S / D；status pair非原子 | 单次 derived snapshot保证character/name一致；Z优先，committed Stopped投影T | `UJ-CUTOVER` |
+| [`PROCFS-TASK-STATE-001`](../../contracts/procfs/task-state-projection.md#procfs-task-state-001--tgid-state投影read-local-derived-snapshot) | Refine | 成功读取时投影 leader `TaskStatus` 的 R / Z / S / D；status pair非原子 | read-local derived enum保证单次`/status` character/name一致；Z优先，committed Stopped投影T | `UJ-CUTOVER` |
 | [`PGRP-SIGNAL-001`](../../contracts/task/process-group-signaling.md#pgrp-signal-001--processgroup-只拥有成员选择) | Preserve | ProcessGroup 只拥有 membership selection | 不建立 process-group-wide jobctl phase | 全程 |
 | [`PGRP-SIGNAL-002`](../../contracts/task/process-group-signaling.md#pgrp-signal-002--每个-threadgroup-独立接受-occurrence) | Preserve | 每个 ThreadGroup 独立接受 signal | 每个 ThreadGroup 独立 stop / continue / report | 全程 |
 | [`TASK-LIFE-001..003`](../../contracts/task/thread-group-lifecycle.md) | Preserve | terminal lifecycle / last-member exit / notification ordering | terminal owner不变；jobctl 只承担自身exposure、report与parker cleanup | 全程 |
-| [`CHILD-WAIT-001`](../../contracts/task/child-wait.md#child-wait-001--当前-wait-truth-只有-exited-child) | Replace | wait truth 只有 `Exited` | typed selection 同时观察 terminal 与 job-control report，exit 最高优先 | `UJ-CUTOVER` |
+| [`CHILD-WAIT-001`](../../contracts/task/child-wait.md#child-wait-001--wait-truth来自terminal或job-control-owner) | Replace | wait truth 只有 `Exited` | typed selection 同时观察 terminal 与 job-control report，exit 最高优先 | `UJ-CUTOVER` |
 | [`CHILD-WAIT-002`](../../contracts/task/child-wait.md#child-wait-002--target-selection-每轮重读-child-relation) | Refine | scan 每轮读取 selector；reap claim只重验 relation与Exited | terminal / report claim都重验 relation、selector与 selected state | `UJ-CUTOVER` |
 | [`CHILD-WAIT-003`](../../contracts/task/child-wait.md#child-wait-003--event-只触发-predicate-rescan) | Refine | `child_exited` 只触发 exited predicate rescan | 扩展为 child-status predicate，仍不携带 truth | `UJ-CUTOVER` |
-| [`CHILD-WAIT-004`](../../contracts/task/child-wait.md#child-wait-004--peek-与-reap-使用同一-truth不同-claim) | Refine | exited child 支持 peek / reap | report 支持 WNOWAIT peek / exact-once consume，exit 仍 reap | `UJ-CUTOVER` |
-| [`CHILD-WAIT-005`](../../contracts/task/child-wait.md#child-wait-005--non-exit-wait-abi-当前-fail-closed-或保持-exit-only) | Replace | stopped / continued 不支持 | wait4 / waitid 提供 stopped / continued ABI | `UJ-CUTOVER` |
-| [`USER-ENTRY-001`](../../contracts/task/user-entry.md#user-entry-001--ordinary-trap-return-先完成-signal-arbitration) | Refine | ordinary trap-return 先做 Signal arbitration | ordinary path 增加 lifecycle / jobctl gate并登记 exposure | `UJ-CUTOVER` |
+| [`CHILD-WAIT-004`](../../contracts/task/child-wait.md#child-wait-004--peekreport-consume与terminal-reap使用同一truth) | Refine | exited child 支持 peek / reap | report 支持 WNOWAIT peek / exact-once consume，exit 仍 reap | `UJ-CUTOVER` |
+| [`CHILD-WAIT-005`](../../contracts/task/child-wait.md#child-wait-005--wait4--waitid提供stopped与continued-abi) | Replace | stopped / continued 不支持 | wait4 / waitid 提供 stopped / continued ABI | `UJ-CUTOVER` |
+| [`USER-ENTRY-001`](../../contracts/task/user-entry.md#user-entry-001--ordinary-trap-return完成统一arbitration) | Refine | ordinary trap-return 先做 Signal arbitration | ordinary path 增加 lifecycle / jobctl gate并登记 exposure | `UJ-CUTOVER` |
 | `USER-ENTRY-002` | Introduce | None（尚未生效） | fresh / clone / exec 与 ordinary return 共享 mandatory arbitration contract；保留Signal-owned reservation-first顺序 | `UJ-CUTOVER` |
 | `JOBCTL-STATE-001` | Introduce | None（尚未生效） | ThreadGroup 唯一拥有 phase、reason、continue epoch、exposure 与 report；procfs snapshot只读派生 | `UJ-CUTOVER` |
 | `JOBCTL-STOP-001` | Introduce | None（尚未生效） | 不存在 exposed live member 时才提交 Stopped | `UJ-CUTOVER` |
@@ -37,6 +37,16 @@
 | `JOBCTL-CONT-001` | Introduce | None（尚未生效） | incomplete cancellation 无 report；Stopped 才产生 Continued | `UJ-CUTOVER` |
 | `JOBCTL-LIFE-001` | Introduce | None（尚未生效） | join / detach / exec / terminal 对 exposure 和 park 的局部义务 | `UJ-CUTOVER` |
 | `JOBCTL-REPORT-001` | Introduce | None（尚未生效） | child-attached coalesced report、SIGCHLD、wait 与 procfs projection；stopped / continued `si_uid`保持stage-1 `0` | `UJ-CUTOVER` |
+
+### `UJ-CUTOVER`结果
+
+- `SIGNAL-PENDING-001/002`与`SIGNAL-ACTION-002`的effective规则见[Signal pending/action](../../contracts/signal/pending-routing.md)；`SIGNAL-ACTION-001`保持原语义。
+- `SIGNAL-TEMP-MASK-002`的refine与`SIGNAL-TEMP-MASK-001/003` preserve见[temporary-mask delivery handoff](../../contracts/signal/temporary-mask-delivery.md)。
+- `PROCFS-TASK-STATE-001`见[procfs task-state projection](../../contracts/procfs/task-state-projection.md)。
+- `PGRP-SIGNAL-001/002`与`TASK-LIFE-001..003`保持现有owner，并在[process-group signaling](../../contracts/task/process-group-signaling.md)和[ThreadGroup lifecycle](../../contracts/task/thread-group-lifecycle.md)记录R1验证与局部义务。
+- `CHILD-WAIT-001..005`见[child wait](../../contracts/task/child-wait.md)，`USER-ENTRY-001/002`见[user entry](../../contracts/task/user-entry.md)。
+- `JOBCTL-STATE-001`、`JOBCTL-STOP-001`、`JOBCTL-SIGNAL-001`、`JOBCTL-CONT-001`、`JOBCTL-LIFE-001`与`JOBCTL-REPORT-001`均在[Unix job control当前契约](../../contracts/task/job-control.md)Active。
+- cutover evidence、validation provenance与register结果见[Stage 5 transaction](../../devlog/transactions/2026-07-20-unix-jobctl.md#stage-5-uj-cutover与事务收口---2026-07-21)。不存在Transitional或部分生效ID。
 
 ## Target 数据模型与实现余地
 
@@ -365,4 +375,4 @@ RFC target review完成需要同时证明：
 7. accepted limitation、工程降级边界与后续RFC范围已明确；
 8. 未来 implementation为全部 `Introduce / Refine / Replace` ID建立同一个 `UJ-CUTOVER` 映射、验证floor与停止条件。
 
-`UJ-CUTOVER` 前，新增 ID全部保持 Not effective，现有 current contract不变；本 R1 不创建 transitional contract。
+`UJ-CUTOVER`已在Stage 5原子生效；全部target ID均有Active current-contract落点，R1没有创建transitional contract。后续current语义变化必须走新的RFC/change与contract cutover，不能只改本页历史target。

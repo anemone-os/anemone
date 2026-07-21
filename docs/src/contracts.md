@@ -117,5 +117,6 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
 - [Task 当前契约](./contracts/task/index.md)
   - [Process-group signal targeting](./contracts/task/process-group-signaling.md)
   - [ThreadGroup lifecycle](./contracts/task/thread-group-lifecycle.md)
+  - [Unix job control](./contracts/task/job-control.md)
   - [Child wait](./contracts/task/child-wait.md)
-  - [Ordinary user entry](./contracts/task/user-entry.md)
+  - [User entry](./contracts/task/user-entry.md)
