@@ -8,6 +8,8 @@ use crate::prelude::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SiCode {
     Kernel,
+    ChldStopped,
+    ChldContinued,
     User,
     Queue,
     Timer,
@@ -36,6 +38,8 @@ impl SiCode {
         use anemone_abi::process::linux::signal::*;
         match self {
             Self::Kernel => SI_KERNEL,
+            Self::ChldStopped => CLD_STOPPED,
+            Self::ChldContinued => CLD_CONTINUED,
             Self::User => SI_USER,
             Self::Queue => SI_QUEUE,
             Self::Timer => SI_TIMER,
@@ -103,7 +107,7 @@ pub struct SigChld {
     pub pid: Tid,
     /// Sender's user ID.
     pub uid: Uid,
-    /// Exit code
+    /// Exit code, terminating/stopping signal, or `SIGCONT`.
     pub status: i32,
     /// User time consumed by the child.
     pub utime: u64,
@@ -187,7 +191,7 @@ impl SigInfoFields {
             (Self::Kill(_), SiCode::User | SiCode::Kernel) => true,
             (Self::Rt(_), SiCode::Queue) => true,
             (Self::Timer(_), SiCode::Timer) => true,
-            (Self::Chld(_), SiCode::Kernel) => true,
+            (Self::Chld(_), SiCode::Kernel | SiCode::ChldStopped | SiCode::ChldContinued) => true,
             (Self::Fault(_), SiCode::Kernel) => true,
             (Self::Ill(_), SiCode::Kernel) => true,
             (Self::TKill(_), SiCode::TKill) => true,

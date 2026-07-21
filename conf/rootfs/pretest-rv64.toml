@@ -31,6 +31,10 @@ installed_dir = "/bin"
 name = "sched-attr-test"
 installed_dir = "/bin"
 
+[[apps]]
+name = "jobctl-test"
+installed_dir = "/bin"
+
 # [[apps]]
 # name = "float-test"
 # installed_dir = "/bin"

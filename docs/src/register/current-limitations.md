@@ -216,6 +216,35 @@
 **Last Verified:** 2026-06-14
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [开发日志：2026-06-08 至 2026-06-21](../devlog/2026-06-08_to_2026-06-21.md#2026-06-14---waitid-exited-child-syscall-bridge), [waitid 小迭代记录](../devlog/changes/2026-06-14-waitid.md)
 
+## ANE-20260721-JOBCTL-SIGCHLD-PUBLICATION-ORDER
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** signal / task / job control / SIGCHLD
+
+**Summary:** `unix-jobctl` Stage 2 在child-owned phase/report commit时原子固定current-parent
+snapshot，并在全部topology与ThreadGroup guard释放后发布parent Event和可选SIGCHLD。相邻的
+Stopped / Continued或terminal transition可以在不同CPU上交错，使较早transition的guards-out
+SIGCHLD occurrence晚于较晚transition入队；standard signal slot还可能据此保留较旧的
+`si_code / si_status`。
+该窗口只影响可合并的SIGCHLD occurrence顺序，不改变child-owned current report、wait4 / waitid
+claim、procfs projection或predicate-only Event；reparent不会把旧transition的SIGCHLD重新定向给
+new parent。
+
+**Decision:** 当前不为罕见的optional notification交错引入ReportId、generation ID、第二通知队列
+或跨Event / Signal publication持有的spin guard。数值TID / PGID复用也继续属于既有identity边界；
+本阶段只使用廉价的live `Arc` / owner重验，不建立稳定身份表。
+
+**Exit Condition:** 若后续ABI需求要求job-control SIGCHLD严格按child-owner commit顺序发布，先为
+guards-out effect设计有界sequencer：不得让notification成为report truth，不得在topology / child
+owner guard内进入parent Signal或Event，并须同时证明Stopped / Continued / terminal transition与
+reparent下的顺序、cleanup和no-lost-wake；完成独立并发review及定向多CPU stress后关闭本限制。
+
+**Owner:** doruche
+**Last Verified:** 2026-07-21
+**Related:** [Unix Job Control RFC](../rfcs/unix-jobctl/index.md), [Unix Job Control事务日志](../devlog/transactions/2026-07-20-unix-jobctl.md)
+
 ## ANE-20260602-CLONE3-STAGE1-ADAPTER
 
 **Type:** Limitation

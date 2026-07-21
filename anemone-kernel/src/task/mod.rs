@@ -247,8 +247,9 @@ pub struct ThreadGroup {
     /// The thread group ID, which is the same as the leader thread's ID.
     tgid: TidHandle,
     ty: ThreadGroupType,
-    /// Event that will be published when a child thread group exits.
-    child_exited: Event,
+    /// Predicate-only wake capability for exited and job-control child status.
+    /// The Event never carries the selected status or report identity.
+    child_status_changed: Event,
     /// Wake capability for members parked at the mandatory user-entry gate.
     ///
     /// The event carries no phase or permit truth. Waiters always recheck the

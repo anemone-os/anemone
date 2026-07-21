@@ -5,23 +5,26 @@
 **Area:** signal / task / process group / user entry / wait ABI / procfs
 **Canonical Plan:** [RFC-20260720-unix-jobctl](../../rfcs/unix-jobctl/index.md), [目标与不变量](../../rfcs/unix-jobctl/invariants.md), [迁移实施计划](../../rfcs/unix-jobctl/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 1 closed; Stage 2 Not Started
+**Current Phase:** Stage 2 closed; Stage 3A Not Started
 
 ## Scope
 
-本事务按授权执行 RFC R0 的 Stage 0 与 Stage 1 checkpoint。Stage 0 只把现有 `task::sig`
+本事务按授权执行 RFC R0 的 Stage 0、Stage 1与Stage 2 checkpoint。Stage 0 只把现有 `task::sig`
 根模块按既有职责做行为保持型目录化拆分；Stage 1 建立 ThreadGroup-owned dormant
 job-control state、membership exposure与统一 user-entry gate，但没有 production stop /
-continue ingress。child report、wait ABI、procfs projection 与 control-signal semantics仍未实现。
-`UJ-CUTOVER` 为 None；全部 current contract 保持 effective，pending successor 仅作导航。
+continue ingress。Stage 2贯通generation-time `SIGSTOP / SIGCONT`、child report、wait ABI、
+SIGCHLD、procfs projection与单线程production runtime，但candidate在后续closure与`UJ-CUTOVER`
+前保持non-publishable。`UJ-CUTOVER`为None；全部current contract保持effective，pending
+successor仅作导航，Stage 3A未开始。
 
 ## Contract and register boundary
 
 受影响 current contract IDs 的 pending successor 已加入对应 contract 页，但没有修改
 effective rule：`SIGNAL-PENDING-*`、`SIGNAL-ACTION-*`、`SIGNAL-TEMP-MASK-*`、
 `PROCFS-TASK-STATE-001`、`PGRP-SIGNAL-*`、`TASK-LIFE-*`、`CHILD-WAIT-*`、
-`USER-ENTRY-001`。本阶段不更新 register / current limitations；现有
-`ANE-20260527-PROCESS-GROUP-SESSION-STAGE1` 仍记录 job-control 缺口。
+`USER-ENTRY-001`。Stage 2只新增已批准的
+`ANE-20260721-JOBCTL-SIGCHLD-PUBLICATION-ORDER` limitation；现有
+`ANE-20260527-PROCESS-GROUP-SESSION-STAGE1`继续描述尚未cutover的effective job-control缺口。
 
 ## Stage 0 preflight and resolved write-set manifest
 
@@ -211,3 +214,182 @@ register、ABI、visible semantics或 `UJ-CUTOVER=None`；验证为 stale wordin
 **Result:** Stage 1 checkpoint closed。所有 production user ThreadGroup仍为 `Running`，没有
 signal可触发 stop / continue。Stage 2 manifest未冻结、未获授权且未进入实现；下一步只能在
 新的明确授权下执行 Stage 2 preflight。
+
+## Stage 2 preflight and resolved write-set manifest - 2026-07-21
+
+**Authority:** 用户明确授权完成 Stage 2，并在preflight发现typed child siginfo owner越出默认
+write set后，批准纳入`anemone-kernel/src/task/sig/info.rs`；若现有枚举或`CLD_*`表示不足，
+同时允许纳入`anemone-abi`。live ABI已定义`CLD_STOPPED = 5`、`CLD_CONTINUED = 6`与
+`SA_NOCLDSTOP`，所以本checkpoint只需要扩展typed kernel representation，不修改ABI crate。
+该批准不改变R0 target、owner、visible semantics、acceptance、current contract或
+`UJ-CUTOVER=None`。
+
+**Lock / call graph probe:** kill / tkill / tgkill / rt_sigqueueinfo 与process-group broadcast在
+signal-0、target和permission检查成功后都可汇入统一generation入口。控制事务按
+`exact identity / topology -> ThreadGroup owner -> at most one private/shared Signal leaf`顺序闭合；
+process-group只提供ThreadGroup snapshot selector，每个ThreadGroup独立接受generation，不需要
+ProcessGroup-wide phase或rollback。phase/report commit在ThreadGroup owner内完成，notify、
+`jobctl_unblocked`、parent child-status Event与SIGCHLD publish全部在释放owner guard后执行。
+wait consuming path按`topology / parent relation -> child ThreadGroup owner`重新验证selector和当前
+report slot；scan snapshot不携带claim authority。因此probe未发现反向锁、guards-in wake / user
+copy、post-commit recoverable failure、ReportId、第二truth或singleton分流需求。
+
+**Resolved Write Set Manifest:** Stage 2逐文件manifest冻结为：
+
+- `anemone-kernel/src/task/sig/{generation,delivery,pending,mod,disposition,info}.rs`
+- `anemone-kernel/src/task/sig/api/{kill,tkill,tgkill,rt_sigqueueinfo}.rs`
+- `anemone-kernel/src/task/jobctl/{mod,group,user_entry,report}.rs`
+- `anemone-kernel/src/task/mod.rs`
+- `anemone-kernel/src/task/topology/{mod,thread_group,parent_child}.rs`
+- `anemone-kernel/src/task/topology/process_group.rs`（2026-07-21 review扩展批准；仅control
+  generation的expected-PGID重验）
+- `anemone-kernel/src/task/api/wait/{mod,wait4,waitid}.rs`
+- `anemone-kernel/src/task/api/exit/mod.rs`
+- `anemone-kernel/src/arch/{riscv64,loongarch64}/exception/trap/utrap.rs`（2026-07-21 final
+  owner review扩展批准；仅统一final user-entry重新仲裁）
+- `anemone-kernel/src/fs/proc/tgid/{stat,status}.rs`
+- `anemone-apps/jobctl-test/{Cargo.toml,Cargo.lock,app.toml,src/main.rs}`
+- `anemone-apps/user-test/src/{main,guest}.rs`
+- `conf/rootfs/pretest-rv64.toml`
+- `docs/src/rfcs/unix-jobctl/{index,implementation}.md`
+- `docs/src/register/current-limitations.md`
+- `docs/src/rfcs.md`
+- `docs/src/devlog/2026-07-06_to_2026-07-19.md`
+- 本transaction文件
+
+`anemone-abi`已获条件授权但不在当前resolved manifest，因为现有常量足以表示target；只有后续
+实现证明确有ABI representation缺口时才停止并记录实际扩展。`task/sig/api/mod.rs`、
+Signal syscall以外API、LA64 runtime、scheduler/wait-core、
+generic active-wait machinery、LTP profile/groups、TTY、orphaned-pgrp、ptrace与current
+contract正文保持只读。
+
+**Frozen validation floor:** `just fmt kernel --check`、`just fmt jobctl-test --check`、
+`just build`、`./scripts/run-user-test-rv64.sh etc/sdcard-rv.img
+build/unix-jobctl-stage2-rv64.log`与`git diff --check`。focused app必须覆盖wait4 stop/continue、
+waitid `WSTOPPED / WCONTINUED / WNOWAIT`、job-control SIGCHLD、procfs committed `T`、SIGSTOP
+no-pending与global-init immunity；冻结的signal/wait profile相对Stage 1不得新增回退。源码审计
+必须确认没有group-size runtime分流、scheduler hold、generic wait completion、credential truth或
+Event-carried report identity。Stage 2关闭前须完成独立review并清零Apollyon、Keter与Euclid；
+本checkpoint不进入Stage 3A。
+
+## Stage 2 runtime harness correction - 2026-07-21
+
+**Evidence:** 首次integrated RV64日志中`wait4-stop-continue-procfs`、
+`waitid-wnowait-sigchld`与`global-init-immunity`全部通过；focused app退出并开始进入competition
+root后，内核在`proc_root_lookup: pde exists but its inode does not exist`处panic。用户确认当前
+procfs虽然设计上允许多次挂载，但实现只可靠支持单次挂载；focused app在boot root自行建立
+procfs mount、competition environment随后再次mount的route触发了该已知限制。这不是job-control
+producer、wait ABI或procfs stopped projection失败，也不授权修改procfs。
+
+**Approved write-set expansion:** 用户批准把`anemone-apps/user-test/src/guest.rs`纳入Stage 2
+resolved manifest。该文件只在chroot前把boot root的`/bin/jobctl-test`复制到competition image；
+`user-test/src/main.rs`改为先chroot并由既有environment建立系统唯一procfs mount，再运行focused
+app，随后进入LTP。`jobctl-test`删除自行mount fallback，只要求harness已经提供`/proc`。原manifest
+其余边界不变；不修改procfs、R0 target、owner、ABI、visible semantics、acceptance、register、
+current contract或`UJ-CUTOVER=None`。
+
+**Validation plan:** 重新执行`just fmt user-test --check`、`just fmt jobctl-test --check`、
+`just build`与RV64 wrapper；focused三组case必须再次通过，competition environment只能建立一次
+procfs mount，LTP完成后必须走到user-test normal shutdown。最终Stage 2 validation floor与独立
+Apollyon / Keter / Euclid review仍保持不变。
+
+## Stage 2 control-target revalidation correction - 2026-07-21
+
+**Finding:** 独立owner review确认两个Apollyon。第一，`kill(0, ...)` / `kill(-pgid, ...)`从
+ProcessGroup取得snapshot后，目标可能并发`setpgid`离组；原generation未重验snapshot PGID，
+因此仍会清pending并误停/误续目标。第二，`rt_sigqueueinfo`按exact PID/TID解析Task后只保留
+shared occurrence route，若该Task并发detach / dethread，control side effect可能落到不再包含该
+identity的ThreadGroup。另有last-member已detach而lifecycle尚未terminal的短窗口，空group上的
+SIGCONT会panic、SIGSTOP会伪造report。
+
+**Approved expansion and repair:** 用户批准把`task/topology/process_group.rs`纳入Stage 2
+manifest。control generation现在分别携带whole-ThreadGroup、exact private member、exact member +
+shared occurrence或expected PGID route，并在任何opposite cleanup、epoch、phase或pending副作用前
+重验live nonempty membership及source-specific identity。`ProcessGroup::recv_signal()`与kill的PGID
+branches使用同一路径；ordinary signal仍保持existing snapshot semantics。`rt_sigqueueinfo`保留
+shared pending publication，同时携带exact resolved member用于generation revalidation。该修复不
+改变PGRP-SIGNAL owner、process-group-wide atomicity、public API、R0 target、ABI、acceptance、
+current contract或`UJ-CUTOVER=None`。
+
+## Stage 2 parent-effect ordering review - 2026-07-21
+
+**Finding and bounded repair:** 独立并发review确认，原实现先在child owner内提交report，释放guard
+后才重新解析parent；若旧parent在两步之间退出并把child adopt给init，历史Stopped / Continued
+transition会把SIGCHLD错误发送给new parent。当前实现改为`topology -> child ThreadGroup owner`窄事务：
+在phase/report commit的同一snapshot中固定current-parent `Arc`，释放全部guard后再向该Arc发布
+predicate Event与可选SIGCHLD。该Arc只服务一次guards-out effect，不标识report、不参与wait claim或
+child状态机。last-exposure closure使用两段式重验，只在可能完成Stopping时进入topology transaction；
+并发SIGCONT / terminal transition会在report commit前fail closed。live ThreadGroup / exact member继续
+使用廉价`Arc` identity重验；用户明确裁决数值TID / PGID复用属于既有边界，本RFC不引入generation ID、
+稳定身份表或第二truth。
+
+**Accepted limitation:** 同一child的Stopped / Continued / terminal真实transition可以在owner guard
+释放后交错，使较早transition的optional SIGCHLD occurrence晚于较晚transition入队。child-owned
+current status、wait4 / waitid、procfs与predicate Event不受影响；严格串行化则需要跨guards-out
+effect的bounded sequencer或持锁publication，前者会引入新persistent notification protocol，后者
+违反R0 guards-out边界。用户接受该
+罕见窗口不阻塞Stage 2，并授权只作记录；已新增
+[`ANE-20260721-JOBCTL-SIGCHLD-PUBLICATION-ORDER`](../../register/current-limitations.md#ane-20260721-jobctl-sigchld-publication-order)。
+这不削弱`JOBCTL-REPORT-001`的child-owned durable truth，也不向R0添加SIGCHLD total-order承诺。
+
+**Approved write-set expansion:** `docs/src/register/current-limitations.md`只允许记录上述SIGCHLD
+guards-out ordering窗口、影响范围与退出条件；RFC target/current contract仍不修改，
+`UJ-CUTOVER=None`。
+
+## Stage 2 user-entry arbitration correction - 2026-07-21
+
+**Finding:** final owner review确认一个Apollyon：原gate在`jobctl_unblocked` Event或force wake后
+直接用live `Running` phase登记exposure并返回，不重新执行Signal / lifecycle arbitration。
+因此Stopped task收到custom `SIGCONT`后可以先返回用户态、延迟handler到下一次trap；`SIGKILL`
+force wake会被uninterruptible Event loop吞掉；`kernel_exit_group`已经提交`Exiting`但尚未完成
+member SIGKILL publication时，parker也可能在terminal truth之后取得user-entry permit。
+
+**Approved expansion and repair:** 用户批准把RV64 / LA64的
+`arch/*/exception/trap/utrap.rs`纳入Stage 2 manifest。两个架构的ordinary return与共同fresh /
+clone / exec return facade只调用一个Signal-owned arbitration loop：Signal pass完成后在关中断下
+检查lifecycle与jobctl gate；park wake只返回重新仲裁，只有`Alive + Running`才登记exposure。
+`Exiting`直接进入既有`kernel_exit` no-return路径。该修复不增加task flag、
+permit token、scheduler state或architecture policy分叉，不改变target、ABI、owner、visible
+semantics、acceptance、current contract或`UJ-CUTOVER=None`。
+
+**Validation plan:** 双架构source / format closure、`just build`、focused RV64 cases与冻结的
+signal / wait profile；不运行LA64 runtime，不进入Stage 3A。
+
+## Stage 2 closure - 2026-07-21
+
+**Change:** Stage 2最终通用路径已经贯通generation-time direct `SIGSTOP`、generation-time
+`SIGCONT` resume/opposite cleanup、global-init immunity、ThreadGroup-owned phase/exposure/report、
+wait4 / waitid / WNOWAIT、job-control SIGCHLD、procfs committed `T`与统一final user-entry
+arbitration。`SIGSTOP`不进入ordinary pending或完成active wait；masked default `SIGCONT`
+occurrence保持pending并在unblock时按live action选择。focused app复制到competition root后复用
+其唯一procfs mount，不再触发已知multi-mount冲突。
+
+**Final review:** 独立owner与ABI reviewer最终均为Apollyon 0、Keter 0、Euclid 0。source audit
+确认没有group-size runtime分流、scheduler hold、generic active-wait completion、credential truth、
+Event-carried report identity或ordinary SIGSTOP pending；RV64 / LA64 ordinary与fresh / clone / exec
+return均在FPU restore和`Privilege::User` publication前使用统一arbitration。explicit `SIG_IGN`与
+`SA_NOCLDSTOP`没有独立focused runtime case，LA64只完成source/build closure；这些是Safe证据缺口，
+不追加临时实现。guards-out SIGCHLD publication ordering、数值TID / PGID复用与既有final-gate到
+hardware return窗口按已接受边界保留记录。
+
+**Validation:**
+
+- `just fmt kernel --check`、`just fmt user-test --check`、`just fmt jobctl-test --check`与
+  `git diff --check`通过。
+- `just build`通过；`just app build user-test --arch loongarch64`通过，LA64 runtime按Stage 2边界未运行。
+- `./scripts/run-user-test-rv64.sh etc/sdcard-rv.img build/unix-jobctl-stage2-rv64.log`完整运行并
+  正常关机；182项KUnit全部通过。
+- `masked-default-sigcont-live-action`、`wait4-stop-continue-procfs`、
+  `waitid-wnowait-sigchld`与`global-init-immunity`全部通过，`jobctl-test: all cases passed`。
+- glibc与musl的`signal`各为
+  `attempted=37 passed=30 failed=5 infra_failed=0 skipped=2`，`wait`各为
+  `attempted=19 passed=19 failed=0 infra_failed=0 skipped=0`；总计
+  `attempted=112 passed=98 failed=10 infra_failed=0 skipped=4`，与Stage 1冻结baseline一致。
+
+**Docs-only closure expansion:** 用户批准补齐`docs/src/rfcs/unix-jobctl/index.md`；为保持唯一状态
+入口一致，同时更新`docs/src/rfcs.md`与当前双周devlog。只写Stage 2 closed、Stage 3A Not Started、
+已有validation/review证据与non-publishable边界，不修改R0 target、invariants、current contract、
+ABI、visible semantics、acceptance或`UJ-CUTOVER=None`。
+
+**Result:** Stage 2 checkpoint closed。candidate train保持non-publishable，current contracts仍为
+effective，`UJ-CUTOVER=None`。Stage 3A未获授权且未进入。

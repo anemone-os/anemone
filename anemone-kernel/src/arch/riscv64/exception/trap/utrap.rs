@@ -14,7 +14,7 @@ use crate::{
     task::{
         cpu_usage::Privilege,
         sig::{
-            SigNo, Signal, handle_signals,
+            SigNo, Signal, arbitrate_user_entry,
             info::{SiCode, SigFault, SigInfoFields},
         },
     },
@@ -351,17 +351,10 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut RiscV64TrapFrame) {
 
     assert!(IntrArch::local_intr_enabled());
 
-    handle_signals(
+    arbitrate_user_entry(
         trapframe,
         restart_syscall.map(|restart| (restart, syscall_ctx)),
     );
-
-    unsafe {
-        IntrArch::local_intr_disable();
-        // cpu usage tracking relies on interrupt being disabled.
-    }
-
-    get_current_task().before_user_entry();
 
     if get_current_task().fpu_used() {
         fpu::load_next_frs(trapframe.fpu_regs());
@@ -389,7 +382,7 @@ unsafe extern "C" {
 /// **Make sure `sscratch` points to the kernel stack top before calling
 /// this function**, and the trapframe is valid.
 pub unsafe fn utrap_return_to_task(trapframe: &mut RiscV64TrapFrame) -> ! {
-    get_current_task().before_user_entry();
+    arbitrate_user_entry(trapframe, None);
     if get_current_task().fpu_used() {
         fpu::load_next_frs(trapframe.fpu_regs());
         set_fpu_status(FS::Clean, Some(trapframe));

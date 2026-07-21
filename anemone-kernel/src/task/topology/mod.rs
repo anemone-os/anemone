@@ -155,7 +155,7 @@ impl PublishGuard {
         let tg = ThreadGroup {
             tgid: handle,
             ty: ThreadGroupType::User,
-            child_exited: Event::new(),
+            child_status_changed: Event::new(),
             jobctl_unblocked: Event::new(),
             terminate_signal: None,
             itimers: ITimers::new(),
@@ -288,7 +288,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                             let tg = ThreadGroup {
                                 tgid: handle,
                                 ty: ThreadGroupType::User,
-                                child_exited: Event::new(),
+                                child_status_changed: Event::new(),
                                 jobctl_unblocked: Event::new(),
                                 terminate_signal,
                                 itimers: ITimers::new(),
@@ -332,7 +332,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
             let tg = ThreadGroup {
                 tgid: handle,
                 ty: ThreadGroupType::KThread,
-                child_exited: Event::new(),
+                child_status_changed: Event::new(),
                 jobctl_unblocked: Event::new(),
                 terminate_signal: None,
                 itimers: ITimers::new(),

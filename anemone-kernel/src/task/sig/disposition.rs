@@ -36,8 +36,12 @@ impl SigNo {
             SIGQUIT | SIGILL | SIGTRAP | SIGABRT | SIGFPE | SIGSEGV | SIGBUS | SIGXCPU
             | SIGXFSZ | SIGSYS => core_dump,
             SIGCHLD | SIGURG | SIGWINCH => ignore,
+            // The group-resume side effect is committed at generation time.
+            // An unblocked default SIGCONT occurrence is Linux-style ignored
+            // without a frame; a blocked occurrence remains pending because
+            // userspace may install a handler before unblocking it.
+            SIGCONT => ignore,
             SIGSTOP | SIGTSTP | SIGTTIN | SIGTTOU => stop,
-            SIGCONT => cont,
             1..31 => unreachable!(
                 "default action for signal {} is not defined",
                 self.as_usize()
@@ -57,6 +61,7 @@ bitflags! {
     /// Almost all of these flags are only meaningful for userspace-defined handlers.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct SaFlags: u64 {
+        const NOCLDSTOP = SA_NOCLDSTOP as u64;
         const SIGINFO = SA_SIGINFO as u64;
         const RESTORER = SA_RESTORER as u64;
         const ONESHOT = SA_ONESHOT as u64;
@@ -157,12 +162,13 @@ impl SignalDisposition {
         }
     }
 
-    /// Return a [SigSet] of all signals whose disposition
-    /// [SignalAction::is_ignored].
+    /// Return signals explicitly configured with `SIG_IGN` for procfs.
+    /// Default-ignore actions are behaviorally ignored but are not user-set
+    /// dispositions and must not appear in `/proc/<pid>/status` `SigIgn`.
     pub fn ignored_signals(&self) -> SigSet {
         let mut ignored = SigSet::new();
         for sig in 1..NSIG {
-            if self.actions[sig].is_ignored() {
+            if matches!(self.actions[sig], SignalAction::Ignore) {
                 ignored.set(SigNo::new(sig));
             }
         }
@@ -208,10 +214,6 @@ mod default_actions {
 
     pub fn stop(_sig: SigNo) {
         unimplemented!("stop signal is not supported yet");
-    }
-
-    pub fn cont(_sig: SigNo) {
-        unimplemented!("cont signal is not supported yet");
     }
 }
 pub use default_actions::*;

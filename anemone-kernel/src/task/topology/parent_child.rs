@@ -3,7 +3,10 @@
 use crate::{
     fs,
     prelude::*,
-    task::{ThreadGroupType, tid::Tid, topology::TOPOLOGY},
+    task::{
+        ThreadGroupInner, ThreadGroupType, jobctl::group::JobControlTransition, tid::Tid,
+        topology::TOPOLOGY,
+    },
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -84,6 +87,56 @@ impl ThreadGroup {
             .clone();
 
         parent
+    }
+
+    /// Commit a child-status transition and capture its current parent in one
+    /// topology -> child-owner transaction.
+    ///
+    /// The returned parent Arc is an immutable guards-out effect target, not a
+    /// report identity. No Event or signal operation runs in this transaction.
+    pub(in crate::task) fn with_child_status_transaction<R>(
+        &self,
+        f: impl FnOnce(&[Arc<Task>], &mut ThreadGroupInner) -> (R, JobControlTransition),
+    ) -> Option<(R, JobControlTransition)> {
+        assert!(
+            self.ty() == ThreadGroupType::User,
+            "task topology: kthread {} has no user parent",
+            self.tgid()
+        );
+        let topology = TOPOLOGY.inner.read();
+        let active = topology.thread_groups.get(&self.tgid())?;
+        if !core::ptr::eq(Arc::as_ptr(active), self) {
+            // A stale ThreadGroup Arc must not borrow a numeric TGID that has
+            // already been reused by a different live object.
+            return None;
+        }
+        let mut inner = self.inner.write();
+        let members = inner
+            .members
+            .iter()
+            .map(|tid| {
+                topology
+                    .tasks
+                    .get(tid)
+                    .expect("jobctl: live member task missing from topology")
+                    .task
+                    .clone()
+            })
+            .collect::<Vec<_>>();
+        let (result, mut transition) = f(&members, &mut inner);
+        if transition.parent_status.is_some() {
+            let parent_tgid = inner
+                .parent_tgid
+                .expect("jobctl: parent-visible transition has no parent relation");
+            transition.parent = Some(
+                topology
+                    .thread_groups
+                    .get(&parent_tgid)
+                    .expect("jobctl: current parent thread group not found")
+                    .clone(),
+            );
+        }
+        Some((result, transition))
     }
 
     /// Run a closure with the parent thread group of this thread group.
@@ -287,20 +340,32 @@ impl ThreadGroup {
                 "task topology: non-user child thread group {} in user child topology",
                 child_tgid
             );
-            child_tg.inner.write().parent_tgid = Some(Tid::INIT);
+            let mut child_inner = child_tg.inner.write();
+            child_inner.parent_tgid = Some(Tid::INIT);
         }
 
         let init_tg = topology
             .thread_groups
             .get(&Tid::INIT)
-            .expect("task topology: init thread group not found");
+            .expect("task topology: init thread group not found")
+            .clone();
 
+        let reparented_any = !child_tgids.is_empty();
         for child_tgid in child_tgids {
             assert!(
                 init_tg.inner.write().children_tgids.insert(child_tgid),
                 "task topology: duplicate child TGID {} when reparenting orphan children",
                 child_tgid
             );
+        }
+
+        drop(topology);
+        if reparented_any {
+            // Publish only after both sides of every adopted relation are
+            // visible. The unconditional predicate rescan closes a report
+            // commit between parent_tgid update and init.children publication
+            // without copying report truth or replaying historical SIGCHLD.
+            init_tg.child_status_changed.publish(usize::MAX, false);
         }
     }
 
@@ -321,6 +386,19 @@ impl ThreadGroup {
     /// Result<Option<Arc<ThreadGroup>>, SomeError> to distinguish those two
     /// cases?
     pub fn try_reap_child(&self, child_tgid: Tid) -> Option<Arc<ThreadGroup>> {
+        self.try_reap_child_if(child_tgid, |_| true)
+    }
+
+    /// Reap a child only after revalidating a syscall-local selector in the
+    /// same topology transaction as the relation and terminal claim.
+    pub(in crate::task) fn try_reap_child_if<P>(
+        &self,
+        child_tgid: Tid,
+        predicate: P,
+    ) -> Option<Arc<ThreadGroup>>
+    where
+        P: FnOnce(&ThreadGroup) -> bool,
+    {
         assert!(
             self.ty() == ThreadGroupType::User,
             "task topology: kthread {} cannot reap user children",
@@ -333,22 +411,18 @@ impl ThreadGroup {
             return None;
         }
 
-        let child_tg = topology.thread_groups.remove(&child_tgid)?;
+        let child_tg = topology.thread_groups.get(&child_tgid)?.clone();
 
-        assert!(
-            matches!(
-                child_tg.status().life_cycle(),
-                ThreadGroupLifeCycle::Exited(_)
-            ),
-            "task topology: child thread group {} is not exited yet when reaping",
-            child_tgid
-        );
-        assert!(
-            child_tg.parent_tgid() == Some(self.tgid()),
-            "task topology: child thread group {} has unexpected parent {:?} when reaping",
-            child_tgid,
-            child_tg.parent_tgid()
-        );
+        if child_tg.parent_tgid() != Some(self.tgid()) || !predicate(&child_tg) {
+            return None;
+        }
+
+        if !matches!(
+            child_tg.status().life_cycle(),
+            ThreadGroupLifeCycle::Exited(_)
+        ) {
+            return None;
+        }
         assert!(
             child_tg.ntasks() == 0,
             "task topology: child thread group {} is not empty when reaping",
@@ -362,7 +436,13 @@ impl ThreadGroup {
             self.tgid()
         );
 
-        Some(child_tg)
+        let removed = topology
+            .thread_groups
+            .remove(&child_tgid)
+            .expect("task topology: validated child disappeared during reap");
+        assert!(Arc::ptr_eq(&removed, &child_tg));
+
+        Some(removed)
     }
 
     /// Unpublish a singleton kthread from active topology and procfs.

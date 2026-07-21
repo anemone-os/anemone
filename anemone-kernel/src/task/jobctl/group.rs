@@ -1,6 +1,11 @@
-//! ThreadGroup-owned dormant job-control state.
+//! ThreadGroup-owned job-control phase and exposure state.
 
-use crate::{prelude::*, task::sig::SigNo};
+use crate::{
+    prelude::*,
+    task::{ThreadGroup, sig::SigNo},
+};
+
+use super::report::{ChildJobControlStatus, JobControlReport};
 
 /// Whether a live user member may currently be executing user instructions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,37 +181,35 @@ impl ThreadGroupMembers {
     }
 }
 
-/// Ordering identity advanced by each future admitted `SIGCONT` generation.
-/// Stage 1 constructs the identity but has no production control-signal
-/// ingress.
+/// Ordering identity advanced by each admitted `SIGCONT` generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub(super) struct ContinueEpoch(u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct StopEpisode {
-    reason: SigNo,
+pub(super) struct StopEpisode {
+    pub(super) reason: SigNo,
     /// Diagnostic timestamp only; it never participates in phase decisions.
     started_at: Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum JobControlPhase {
+pub(super) enum JobControlPhase {
     Running {
         /// Diagnostic timestamp only; it never participates in phase decisions.
         started_at: Instant,
     },
-    #[allow(dead_code)]
     Stopping(StopEpisode),
-    #[allow(dead_code)]
     Stopped(StopEpisode),
 }
 
 #[derive(Debug)]
 pub(in crate::task) struct UserJobControl {
-    phase: JobControlPhase,
-    #[allow(dead_code)]
+    pub(super) phase: JobControlPhase,
     continue_epoch: ContinueEpoch,
+    /// Coalesced parent-visible report truth. A stopped reason is deliberately
+    /// not copied here; it is derived from the live `Stopped` phase.
+    pub(super) report: Option<JobControlReport>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,6 +228,23 @@ pub(super) struct JobControlDiagnostic {
     pub(super) phase_age: Duration,
 }
 
+#[derive(Debug, Clone)]
+pub(in crate::task) struct JobControlTransition {
+    pub(super) wake_entry_gate: bool,
+    pub(in crate::task) parent_status: Option<ChildJobControlStatus>,
+    /// Immutable current-parent snapshot for this guards-out effect only. It
+    /// does not identify the report and never drives child-owned state.
+    pub(in crate::task) parent: Option<Arc<ThreadGroup>>,
+}
+
+impl JobControlTransition {
+    pub(in crate::task) const NONE: Self = Self {
+        wake_entry_gate: false,
+        parent_status: None,
+        parent: None,
+    };
+}
+
 impl UserJobControl {
     pub(in crate::task) fn new_running() -> Self {
         Self {
@@ -232,11 +252,140 @@ impl UserJobControl {
                 started_at: Instant::now(),
             },
             continue_epoch: ContinueEpoch(0),
+            report: None,
         }
     }
 
     pub(super) fn is_running(&self) -> bool {
         matches!(self.phase, JobControlPhase::Running { .. })
+    }
+
+    pub(in crate::task) fn request_unconditional_stop(
+        &mut self,
+        members: &ThreadGroupMembers,
+        tgid: Tid,
+        reason: SigNo,
+    ) -> JobControlTransition {
+        match self.phase {
+            JobControlPhase::Running { .. } => {
+                let episode = StopEpisode {
+                    reason,
+                    started_at: Instant::now(),
+                };
+                if members.exposed_count() == 0 {
+                    self.phase = JobControlPhase::Stopped(episode);
+                    self.report = Some(JobControlReport::Stopped);
+                    kdebugln!(
+                        "jobctl: tgid={} phase Running -> Stopped reason={:?} exposed=0",
+                        tgid,
+                        reason
+                    );
+                    JobControlTransition {
+                        wake_entry_gate: false,
+                        parent_status: Some(ChildJobControlStatus::Stopped(reason)),
+                        parent: None,
+                    }
+                } else {
+                    self.phase = JobControlPhase::Stopping(episode);
+                    kdebugln!(
+                        "jobctl: tgid={} phase Running -> Stopping reason={:?} exposed={}",
+                        tgid,
+                        reason,
+                        members.exposed_count()
+                    );
+                    JobControlTransition::NONE
+                }
+            },
+            JobControlPhase::Stopping(_) | JobControlPhase::Stopped(_) => {
+                // Later stop requests merge into the first live episode and
+                // never replace its externally visible reason.
+                JobControlTransition::NONE
+            },
+        }
+    }
+
+    pub(super) fn on_user_exposure_closed(
+        &mut self,
+        members: &ThreadGroupMembers,
+        tgid: Tid,
+    ) -> JobControlTransition {
+        let JobControlPhase::Stopping(episode) = self.phase else {
+            return JobControlTransition::NONE;
+        };
+        if members.exposed_count() != 0 {
+            return JobControlTransition::NONE;
+        }
+
+        self.phase = JobControlPhase::Stopped(episode);
+        self.report = Some(JobControlReport::Stopped);
+        kdebugln!(
+            "jobctl: tgid={} phase Stopping -> Stopped reason={:?} exposed=0",
+            tgid,
+            episode.reason
+        );
+        JobControlTransition {
+            wake_entry_gate: false,
+            parent_status: Some(ChildJobControlStatus::Stopped(episode.reason)),
+            parent: None,
+        }
+    }
+
+    pub(in crate::task) fn continue_generation(&mut self, tgid: Tid) -> JobControlTransition {
+        self.continue_epoch.0 = self
+            .continue_epoch
+            .0
+            .checked_add(1)
+            .expect("jobctl: ContinueEpoch exhausted");
+
+        match self.phase {
+            JobControlPhase::Running { .. } => JobControlTransition::NONE,
+            JobControlPhase::Stopping(episode) => {
+                self.phase = JobControlPhase::Running {
+                    started_at: Instant::now(),
+                };
+                kdebugln!(
+                    "jobctl: tgid={} phase Stopping -> Running reason={:?} without report",
+                    tgid,
+                    episode.reason
+                );
+                JobControlTransition {
+                    wake_entry_gate: true,
+                    parent_status: None,
+                    parent: None,
+                }
+            },
+            JobControlPhase::Stopped(episode) => {
+                self.phase = JobControlPhase::Running {
+                    started_at: Instant::now(),
+                };
+                self.report = Some(JobControlReport::Continued);
+                kdebugln!(
+                    "jobctl: tgid={} phase Stopped -> Running reason={:?} with Continued report",
+                    tgid,
+                    episode.reason
+                );
+                JobControlTransition {
+                    wake_entry_gate: true,
+                    parent_status: Some(ChildJobControlStatus::Continued),
+                    parent: None,
+                }
+            },
+        }
+    }
+
+    /// Invalidate job-control authority before terminal lifecycle becomes
+    /// externally visible. Terminal status remains owned by lifecycle code.
+    pub(in crate::task) fn prepare_terminal(&mut self) -> JobControlTransition {
+        let wake_entry_gate = !self.is_running();
+        self.phase = JobControlPhase::Running {
+            started_at: Instant::now(),
+        };
+        self.report = None;
+        JobControlTransition {
+            wake_entry_gate,
+            parent_status: None,
+            parent: None,
+        }
     }
 
     pub(super) fn diagnostic(&self, members: &ThreadGroupMembers) -> JobControlDiagnostic {

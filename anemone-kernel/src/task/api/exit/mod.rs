@@ -139,13 +139,19 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             tg_inner = tg.inner.write();
 
             // 2. set status to Exited, so that wait4 can reap this thread group.
+            let terminal_transition = tg_inner
+                .job_control
+                .as_mut()
+                .expect("jobctl: exiting user ThreadGroup lacks control state")
+                .prepare_terminal();
             tg_inner.status.life_cycle = ThreadGroupLifeCycle::Exited(xcode);
 
             drop(tg_inner);
+            tg.finish_job_control_transition(terminal_transition);
 
             // Parent/reaper selection must be a single snapshot for this exit
             // notification round. A concurrent parent exit may reparent this
-            // zombie to init, but SIGCHLD and child_exited must not observe
+            // zombie to init, but SIGCHLD and child-status Event must not observe
             // different parents within the same thread-group exit.
             let parent_tg = tg.get_parent();
             let init_tg = get_init_task().get_thread_group();
@@ -156,7 +162,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
                     .leader()
                     .map(|leader| leader.cred().uid.real)
                     .unwrap_or_else(|| task.cred().uid.real);
-                tg.get_parent().recv_signal(Signal::new(
+                parent_tg.recv_signal(Signal::new(
                     terminate_signal,
                     SiCode::Kernel,
                     SigInfoFields::Chld(SigChld {
@@ -175,14 +181,14 @@ pub fn kernel_exit(code: ExitCode) -> ! {
                 ));
             }
 
-            // 3. publish child_exited event.
-            parent_tg.child_exited.publish(1, false);
+            // 3. publish the predicate-only child status event.
+            parent_tg.child_status_changed.publish(usize::MAX, false);
 
             // 4. orphan children reparented to init may contain zombie thread groups. let's
             //    publish that to init as well.
             // this hardcoding is a bit ugly. when we support subreapers, we should publish
             // this to the actual reaper.
-            init_tg.child_exited.publish(1, false);
+            init_tg.child_status_changed.publish(usize::MAX, false);
 
             task.vfork_done.publish(1, true);
         }
@@ -245,15 +251,27 @@ pub fn kernel_exit_group(code: ExitCode) -> ! {
             panic!("init task shall not exit");
         }
         let tg = task.get_thread_group();
-        let is_exiting = tg.update_life_cycle_with(|prev| match prev {
-            ThreadGroupLifeCycle::Alive => (ThreadGroupLifeCycle::Exiting(code), false),
-            ThreadGroupLifeCycle::Exiting(existing_code) => {
-                (ThreadGroupLifeCycle::Exiting(*existing_code), true)
-            },
-            ThreadGroupLifeCycle::Exited(code) => {
-                panic!("thread group already exited with code {:?}", code);
-            },
-        });
+        let (is_exiting, terminal_transition) = {
+            let mut inner = tg.inner.write();
+            match inner.status.life_cycle {
+                ThreadGroupLifeCycle::Alive => {
+                    inner.status.life_cycle = ThreadGroupLifeCycle::Exiting(code);
+                    let transition = inner
+                        .job_control
+                        .as_mut()
+                        .expect("jobctl: exiting user ThreadGroup lacks control state")
+                        .prepare_terminal();
+                    (false, transition)
+                },
+                ThreadGroupLifeCycle::Exiting(_) => {
+                    (true, crate::task::jobctl::group::JobControlTransition::NONE)
+                },
+                ThreadGroupLifeCycle::Exited(code) => {
+                    panic!("thread group already exited with code {:?}", code);
+                },
+            }
+        };
+        tg.finish_job_control_transition(terminal_transition);
 
         if is_exiting {
             // someone already started exiting this thread group. we can just exit this

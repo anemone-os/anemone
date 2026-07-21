@@ -1,20 +1,82 @@
 //! Mandatory user-entry arbitration for dormant job control.
 
-use crate::{prelude::*, task::cpu_usage::Privilege};
+use crate::{
+    prelude::*,
+    task::{
+        ThreadGroupInner,
+        cpu_usage::Privilege,
+        sig::{SigNo, set::SigSet},
+    },
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::task) enum UserEntryOutcome {
+    Admitted,
+    Recheck,
+    Park,
+    Exit(ExitCode),
+}
 
 impl ThreadGroup {
     fn clear_user_exposure(&self, tid: Tid) {
-        let mut inner = self.inner.write();
-        assert!(
-            inner.job_control.is_some(),
-            "jobctl: user trap entry reached non-user ThreadGroup {}",
-            self.tgid()
-        );
-        inner.members.clear_user_exposure(tid);
+        let needs_stop_completion = {
+            let mut inner = self.inner.write();
+            let ThreadGroupInner {
+                members,
+                job_control,
+                ..
+            } = &mut *inner;
+            members.clear_user_exposure(tid);
+            let job_control = job_control.as_ref().unwrap_or_else(|| {
+                panic!(
+                    "jobctl: user trap entry reached non-user ThreadGroup {}",
+                    self.tgid()
+                )
+            });
+            matches!(
+                job_control.phase,
+                super::group::JobControlPhase::Stopping(_)
+            ) && members.exposed_count() == 0
+        };
+        if !needs_stop_completion {
+            return;
+        }
+
+        // Only the last exposure closure enters topology. Recheck the live
+        // phase and exposure set there so a concurrent SIGCONT or terminal
+        // transition fails closed before any Stopped report is committed.
+        let Some(((), transition)) = self.with_child_status_transaction(|_, inner| {
+            let ThreadGroupInner {
+                members,
+                job_control,
+                ..
+            } = inner;
+            let transition = job_control
+                .as_mut()
+                .expect("jobctl: user ThreadGroup lacks control state")
+                .on_user_exposure_closed(members, self.tgid());
+            ((), transition)
+        }) else {
+            return;
+        };
+        self.finish_job_control_transition(transition);
     }
 
-    fn try_admit_user_entry(&self, tid: Tid) -> bool {
+    fn try_admit_user_entry(&self, task: &Task) -> UserEntryOutcome {
         let mut inner = self.inner.write();
+        match inner.status.life_cycle() {
+            ThreadGroupLifeCycle::Alive => {},
+            ThreadGroupLifeCycle::Exiting(code) => return UserEntryOutcome::Exit(code),
+            ThreadGroupLifeCycle::Exited(code) => {
+                panic!(
+                    "jobctl: task {} reached user entry after ThreadGroup {} exited with {:?}",
+                    task.tid(),
+                    self.tgid(),
+                    code
+                )
+            },
+        }
+
         let running = inner
             .job_control
             .as_ref()
@@ -25,23 +87,45 @@ impl ThreadGroup {
                 )
             })
             .is_running();
-        if running {
-            inner.members.expose_user(tid);
+        if !running {
+            return UserEntryOutcome::Park;
         }
-        running
+
+        inner.members.expose_user(task.tid());
+        UserEntryOutcome::Admitted
     }
 
-    fn before_user_entry(&self, tid: Tid) {
-        if self.try_admit_user_entry(tid) {
-            return;
+    fn should_leave_entry_park(&self, task: &Task) -> bool {
+        let phase_or_lifecycle_changed = {
+            let inner = self.inner.read();
+            !matches!(inner.status.life_cycle(), ThreadGroupLifeCycle::Alive)
+                || inner
+                    .job_control
+                    .as_ref()
+                    .expect("jobctl: user ThreadGroup lacks control state")
+                    .is_running()
+        };
+        if phase_or_lifecycle_changed {
+            return true;
         }
 
-        // Event only publishes a rescan opportunity. The predicate reacquires
-        // the ThreadGroup owner and atomically registers exposure with the live
-        // Running phase, closing both publication-before-wait and stale-permit
-        // races without carrying a token across the park.
+        // SIGKILL is the only force wake that must leave a stopped-phase park
+        // before the phase changes. Ordinary asynchronous signals remain
+        // pending and cannot release the mandatory gate.
+        task.has_specific_signal(SigSet::new_with_signos(&[SigNo::SIGKILL]))
+    }
+
+    fn before_user_entry(&self, task: &Task) -> UserEntryOutcome {
+        let decision = self.try_admit_user_entry(task);
+        if decision != UserEntryOutcome::Park {
+            return decision;
+        }
+
+        // Event and force wake only request a fresh outer arbitration pass;
+        // neither carries phase truth or a user-entry permit.
         self.jobctl_unblocked
-            .listen_uninterruptible(false, || self.try_admit_user_entry(tid));
+            .listen_uninterruptible(false, || self.should_leave_entry_park(task));
+        UserEntryOutcome::Recheck
     }
 }
 
@@ -59,11 +143,16 @@ impl Task {
 
     /// Perform the final ThreadGroup gate before executing user instructions.
     #[track_caller]
-    pub(crate) fn before_user_entry(&self) {
+    pub(in crate::task) fn before_user_entry(&self) -> UserEntryOutcome {
         assert!(
             IntrArch::local_intr_disabled(),
             "jobctl: final user-entry gate must run with interrupts disabled"
         );
-        self.get_thread_group().before_user_entry(self.tid());
+        let outcome = self.get_thread_group().before_user_entry(self);
+        assert!(
+            outcome != UserEntryOutcome::Park,
+            "jobctl park must resolve before returning"
+        );
+        outcome
     }
 }

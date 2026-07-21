@@ -5,7 +5,7 @@
 **父 RFC：** [RFC-20260720-unix-jobctl](./index.md)
 **目标与不变量：** [Unix Job Control 目标与不变量](./invariants.md)
 **当前修订：** R0
-**事务日志：** [2026-07-20-unix-jobctl](../../devlog/transactions/2026-07-20-unix-jobctl.md)；Stage 0 与 Stage 1 checkpoint 已关闭，Stage 2 未开始。
+**事务日志：** [2026-07-20-unix-jobctl](../../devlog/transactions/2026-07-20-unix-jobctl.md)；Stage 0、Stage 1 与 Stage 2 checkpoint 已关闭，Stage 3A 未开始。
 **Contract Cutover：** `UJ-CUTOVER`；全部 `Introduce / Refine / Replace / Scoped Exception` delta 只在 Stage 5 原子生效。
 
 当前 effective contract：
@@ -33,8 +33,8 @@ R0 已接受并建立实现事务。接受与 transaction 创建不表示：
 - 任何代码、测试配置或 runtime 语义已经获准修改；
 - 任一 `JOBCTL-*` 或 `USER-ENTRY-002` 已经生效。
 
-Stage 0 仅是行为保持型 Signal module split checkpoint；Stage 1 已由 2026-07-21 的
-明确授权完成并关闭，Stage 2 及之后仍未授权。
+Stage 0 仅是行为保持型 Signal module split checkpoint；Stage 1 与 Stage 2 已由
+2026-07-21 的明确授权完成并关闭，Stage 3A 及之后仍未授权。
 
 ### 1.1 废弃来源隔离
 
@@ -142,7 +142,7 @@ task::wait / lifecycle / procfs
 | --- | --- | --- | --- | --- |
 | Stage 0 | Signal module split-only | Closed | None | 行为保持型 checkpoint |
 | Stage 1 | ThreadGroup owner 与 mandatory-entry dormant foundation | Closed | None | target readiness；无 stop ingress |
-| Stage 2 | 单线程 integrated production vertical slice | Not Started | None | non-publishable candidate train 开始 |
+| Stage 2 | 单线程 integrated production vertical slice | Closed | None | non-publishable candidate train 开始 |
 | Stage 3A | conditional control signal、reservation 与 temporary-mask closure | Not Started | None | non-publishable candidate checkpoint |
 | Stage 3B | 多成员 exposure、lifecycle 与 topology closure | Not Started | None | non-publishable candidate checkpoint |
 | Stage 4 | ABI、竞态、旁路与 production validation closure | Not Started | None | verified candidate；仍不可发布 |
@@ -419,16 +419,26 @@ None；`USER-ENTRY-002`、`JOBCTL-STATE-001` 与 `JOBCTL-STOP-001` 仅达到 dor
 
 - `anemone-kernel/src/task/sig/{generation,delivery,pending,mod}.rs`
 - 需要识别control signal的`task/sig/disposition.rs`
+- `anemone-kernel/src/task/sig/info.rs`，只允许补齐job-control `SIGCHLD`所需的typed
+  `CLD_STOPPED / CLD_CONTINUED` child code、Linux映射与字段一致性校验
 - `anemone-kernel/src/task/jobctl/{mod,group,user_entry,report}.rs`
 - `anemone-kernel/src/task/mod.rs`
 - `anemone-kernel/src/task/topology/{mod,thread_group,parent_child}.rs`
+- `anemone-kernel/src/task/topology/process_group.rs`只允许让control signal携带并重验
+  snapshot选择时的PGID；不得把phase、rollback或全组完成点移入ProcessGroup
 - `anemone-kernel/src/task/api/wait/{mod,wait4,waitid}.rs`
 - `anemone-kernel/src/task/api/exit/mod.rs`
+- `anemone-kernel/src/arch/{riscv64,loongarch64}/exception/trap/utrap.rs`只允许把最终
+  user transition接入统一Signal / lifecycle / jobctl重新仲裁循环；不得修改trap ABI、
+  exception policy或architecture-local FPU owner
 - `anemone-kernel/src/fs/proc/tgid/{stat,status}.rs`及窄derived snapshot入口
 - `anemone-kernel/src/task/sig/api/{kill,tkill,tgkill,rt_sigqueueinfo}.rs`只允许接入统一generation入口，不复制control policy
 - `anemone-apps/jobctl-test/`
-- `anemone-apps/user-test/src/main.rs`只允许在competition root之前调用focused `jobctl-test`
+- `anemone-apps/user-test/src/{main,guest}.rs`只允许在chroot前把focused `jobctl-test`复制进
+  competition root，并在既有environment完成唯一一次procfs挂载后、LTP开始前调用它
 - `conf/rootfs/pretest-rv64.toml`只允许安装`jobctl-test`
+- `docs/src/register/current-limitations.md`只允许记录用户在2026-07-21接受的job-control SIGCHLD
+  guards-out publication ordering窗口、影响范围与退出条件
 - LA64 runtime、orphaned-pgrp、TTY、ptrace与current contracts只读。
 
 ### 可观测性
@@ -455,7 +465,27 @@ just build
 
 - SIGSTOP / SIGCONT、gate、wait4、waitid、WNOWAIT、SIGCHLD与procfs在同一通用路径上贯通。
 - 单线程production runtime通过，report / Event / wait claim顺序review通过。
-- candidate train明确标记non-publishable并直接进入 Stage 3A。
+- candidate train明确标记non-publishable；只有新的明确授权才能进入 Stage 3A。
+
+### 执行结果
+
+Stage 2 已按最终通用 ThreadGroup 路径关闭。generation-time `SIGSTOP / SIGCONT`、global-init
+immunity、owner-local phase/report、统一 user-entry arbitration、wait4 / waitid / WNOWAIT、
+job-control SIGCHLD与procfs committed `T`已贯通；focused harness复用competition root唯一一次
+procfs mount，没有引入singleton分流、scheduler hold、generic wait completion、credential truth或
+Event-carried report identity。
+
+最终RV64 wrapper完成正常关机：182项KUnit全部通过，四个`jobctl-test` case全部通过；glibc与
+musl的`signal`各为`attempted=37 passed=30 failed=5 infra_failed=0 skipped=2`，`wait`各为
+`attempted=19 passed=19 failed=0 infra_failed=0 skipped=0`，总计
+`attempted=112 passed=98 failed=10 infra_failed=0 skipped=4`，与冻结baseline一致。kernel、
+user-test与jobctl-test format check、kernel build、LA64 user-test app build及diff whitespace检查通过；
+LA64 runtime按本Stage边界未运行。
+
+独立owner与ABI final review均未留下Apollyon、Keter或Euclid。explicit `SIG_IGN`、
+`SA_NOCLDSTOP`未增加focused runtime case，LA64仅完成source/build closure；guards-out SIGCHLD
+publication ordering与数值TID / PGID复用按已批准边界记录，不在本Stage引入临时协议。Stage 2
+candidate继续保持non-publishable，`UJ-CUTOVER=None`，Stage 3A Not Started。
 
 ### Contract Cutover
 
@@ -823,6 +853,39 @@ Stage 5开始前，以上默认范围必须展开成逐文件`Resolved Write Set
   状态和验证摘要。该 docs-only 扩展不修改 R0 target、invariants、current contract、register、
   ABI、visible semantics或 `UJ-CUTOVER=None`；通过 stale wording / link audit 与
   `mdbook build docs` 验证。
+- 2026-07-21：Stage 2 preflight确认typed siginfo owner位于
+  `anemone-kernel/src/task/sig/info.rs`。用户批准将该文件纳入write set，并允许在表示能力确有
+  缺口时纳入`anemone-abi`。live ABI已定义`CLD_STOPPED = 5`、`CLD_CONTINUED = 6`与
+  `SA_NOCLDSTOP`，因此resolved manifest只扩展`info.rs`，不产生`anemone-abi` diff。该扩展只
+  补齐既定R0 ABI结果的typed internal representation，不改变target、owner、visible semantics、
+  acceptance、current contract或`UJ-CUTOVER=None`。
+- 2026-07-21：首次RV64 integrated run中focused `jobctl-test`全部通过，但它在boot root自行挂载
+  procfs后，competition environment再次建立procfs mount，触发当前procfs只可靠支持单次挂载的
+  已知限制。用户批准把`anemone-apps/user-test/src/guest.rs`纳入write set：只在chroot前复制
+  `jobctl-test`，随后复用competition environment的唯一procfs mount并在LTP前运行；test app不再
+  自行挂载。该route correction不修改procfs、target、owner、ABI、visible semantics、acceptance、
+  current contract或`UJ-CUTOVER=None`；验证要求RV64 wrapper运行至正常关机。
+- 2026-07-21：独立Stage 2 review发现process-group snapshot与control generation之间并发
+  `setpgid`时，已经离组的ThreadGroup仍可能收到cleanup与stop / continue side effect；公开
+  `ProcessGroup::recv_signal()`也保留同类旁路。用户批准把
+  `anemone-kernel/src/task/topology/process_group.rs`纳入write set，只让control occurrence携带
+  snapshot PGID并在ThreadGroup owner下、任何副作用前重验。ordinary signal继续使用既有snapshot
+  语义，ProcessGroup仍只拥有selector；不改变public API、target、owner、ABI、visible semantics、
+  acceptance、current contract或`UJ-CUTOVER=None`。同轮review确认`rt_sigqueueinfo`必须把“共享
+  ordinary occurrence route”与“exact resolved member authority”分开保存，修复位于既有manifest。
+- 2026-07-21：Stage 2 final owner review确认，原jobctl gate在park wake后直接登记exposure，
+  没有回到Signal / lifecycle arbitration；这会让custom `SIGCONT` handler延迟到下一次trap，
+  也会让`SIGKILL`或已经提交的terminal lifecycle无法支配user entry。用户批准把
+  `anemone-kernel/src/arch/{riscv64,loongarch64}/exception/trap/utrap.rs`纳入write set，只将
+  ordinary return与fresh / clone / exec共同final transition接入同一个Signal-owned重新仲裁
+  loop。该扩展不修改trap ABI、exception policy、FPU owner、scheduler、target、visible
+  semantics、acceptance或`UJ-CUTOVER=None`；LA64只做source / format closure，runtime floor仍
+  仅为RV64 wrapper。
+- 2026-07-21：Stage 2 closure增加`docs/src/rfcs/unix-jobctl/index.md`、`docs/src/rfcs.md`与
+  `docs/src/devlog/2026-07-06_to_2026-07-19.md`，只同步Stage 2 closed、Stage 3A Not Started、
+  已有验证/review证据和non-publishable边界。该docs-only扩展不修改R0、invariants、current
+  contract、ABI、visible semantics、acceptance或`UJ-CUTOVER=None`；验证为stale wording / link
+  audit、`git diff --check`与`mdbook build docs`。
 
 ## 17. 结构维护记录
 

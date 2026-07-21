@@ -12,7 +12,9 @@ use anemone_abi::{
 use core::mem::offset_of;
 use kernel_macros::syscall;
 
-use super::{WaitDisposition, WaitOptions, WaitOutcome, WaitTarget, wait_for_exited_child};
+use super::{
+    ChildWaitStatus, WaitDisposition, WaitOptions, WaitOutcome, WaitTarget, wait_for_child_status,
+};
 use crate::{
     prelude::{
         user_access::{SyscallArgValidatorExt, UserWritePtr, user_addr},
@@ -38,7 +40,7 @@ fn sys_waitid(
         WaitDisposition::Reap
     };
 
-    let outcome = wait_for_exited_child(target, options, disposition)?;
+    let outcome = wait_for_child_status(target, options, disposition)?;
 
     if let Some(outcome) = outcome.as_ref() {
         write_rusage(rusage, outcome.cpu_usage)?;
@@ -53,14 +55,6 @@ fn sys_waitid(
 fn validate_waitid_options(options: WaitOptions) -> Result<(), SysError> {
     if !options.intersects(WaitOptions::EXITED | WaitOptions::STOPPED | WaitOptions::CONTINUED) {
         return Err(SysError::InvalidArgument);
-    }
-
-    if options.intersects(WaitOptions::STOPPED | WaitOptions::CONTINUED) {
-        knoticeln!(
-            "waitid: WSTOPPED/WCONTINUED requested but stopped/continued child states are not implemented yet: {:?}",
-            options
-        );
-        return Err(SysError::NotSupported);
     }
 
     Ok(())
@@ -158,7 +152,7 @@ struct WaitidSigInfo {
 }
 
 fn waitid_siginfo(outcome: &WaitOutcome) -> WaitidSigInfo {
-    let (si_code, status) = waitid_status(outcome.exit_code);
+    let (si_code, status) = waitid_status(outcome.status);
 
     WaitidSigInfo {
         signo: linux_signal::SIGCHLD as i32,
@@ -206,12 +200,18 @@ fn write_u32_field(
     Ok(())
 }
 
-fn waitid_status(exit_code: ExitCode) -> (i32, i32) {
-    match exit_code {
-        ExitCode::Exited(code) => (linux_signal::CLD_EXITED, code as u8 as i32),
+fn waitid_status(status: ChildWaitStatus) -> (i32, i32) {
+    match status {
+        ChildWaitStatus::Exited(ExitCode::Exited(code)) => {
+            (linux_signal::CLD_EXITED, code as u8 as i32)
+        },
         // Core-dump state is not tracked yet, so signal exits are reported as
         // killed rather than guessed as dumped.
-        ExitCode::Signaled(signo) => (linux_signal::CLD_KILLED, signo.as_usize() as i32),
+        ChildWaitStatus::Exited(ExitCode::Signaled(signo)) => {
+            (linux_signal::CLD_KILLED, signo.as_usize() as i32)
+        },
+        ChildWaitStatus::Stopped(signo) => (linux_signal::CLD_STOPPED, signo.as_usize() as i32),
+        ChildWaitStatus::Continued => (linux_signal::CLD_CONTINUED, linux_signal::SIGCONT as i32),
     }
 }
 

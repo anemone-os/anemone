@@ -30,6 +30,7 @@ pub use hal::*;
 
 pub mod altstack;
 mod delivery;
+pub(crate) use delivery::arbitrate_user_entry;
 pub use delivery::{
     TemporaryMaskWaitCandidate, TemporaryMaskWaitContext, TemporaryMaskWaitDecision,
     TemporaryMaskWaitReturn, handle_signals,

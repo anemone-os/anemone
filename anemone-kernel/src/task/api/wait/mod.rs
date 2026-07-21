@@ -16,7 +16,7 @@ use crate::{
     },
     task::{
         ExitCode, ThreadGroup, ThreadGroupLifeCycle, ThreadGroupType,
-        cpu_usage::ThreadGroupCpuUsage, tid::Tid,
+        cpu_usage::ThreadGroupCpuUsage, jobctl::ChildJobControlStatus, sig::SigNo, tid::Tid,
     },
 };
 
@@ -52,9 +52,16 @@ pub(super) enum WaitDisposition {
     Peek,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) enum ChildWaitStatus {
+    Exited(ExitCode),
+    Stopped(SigNo),
+    Continued,
+}
+
 pub(super) struct WaitOutcome {
     pub tgid: Tid,
-    pub exit_code: ExitCode,
+    pub status: ChildWaitStatus,
     pub cpu_usage: ThreadGroupCpuUsage,
 }
 
@@ -110,7 +117,7 @@ impl WaitScanner {
         self.matched_any
     }
 
-    fn scan_one(&mut self, tg: &Arc<ThreadGroup>) -> bool {
+    fn matches_target(&mut self, tg: &Arc<ThreadGroup>) -> bool {
         if tg.ty() != ThreadGroupType::User {
             return false;
         }
@@ -126,11 +133,46 @@ impl WaitScanner {
         }
 
         self.matched_any = true;
-        matches!(tg.status().life_cycle(), ThreadGroupLifeCycle::Exited(_))
+        true
+    }
+
+    fn select_one(
+        &mut self,
+        tg: &Arc<ThreadGroup>,
+        options: WaitOptions,
+        disposition: WaitDisposition,
+    ) -> Option<ChildWaitStatus> {
+        if !self.matches_target(tg) {
+            return None;
+        }
+
+        {
+            let mut inner = tg.inner.write();
+            match inner.status.life_cycle() {
+                ThreadGroupLifeCycle::Exited(code) if options.contains(WaitOptions::EXITED) => {
+                    Some(ChildWaitStatus::Exited(code))
+                },
+                ThreadGroupLifeCycle::Alive => inner.job_control.as_mut().and_then(|job_control| {
+                    job_control
+                        .select_report(
+                            options.contains(WaitOptions::STOPPED),
+                            options.contains(WaitOptions::CONTINUED),
+                            matches!(disposition, WaitDisposition::Reap),
+                        )
+                        .map(|status| match status {
+                            ChildJobControlStatus::Stopped(reason) => {
+                                ChildWaitStatus::Stopped(reason)
+                            },
+                            ChildJobControlStatus::Continued => ChildWaitStatus::Continued,
+                        })
+                }),
+                ThreadGroupLifeCycle::Exiting(_) | ThreadGroupLifeCycle::Exited(_) => None,
+            }
+        }
     }
 }
 
-pub(super) fn wait_for_exited_child(
+pub(super) fn wait_for_child_status(
     target: WaitTarget,
     options: WaitOptions,
     disposition: WaitDisposition,
@@ -142,31 +184,46 @@ pub(super) fn wait_for_exited_child(
     // TODO: optimize this. we did a double scan, which is not necessary.
     loop {
         let mut scanner = WaitScanner::new(target, current_pgid);
-        // Scanning does not need topology consistency. It's a best effort to
-        // find a child that satisfies the wait condition. If such child is
-        // found and the caller wants to reap, we then lock topology and do the
-        // heavy lifting.
-        if let Some(child) = tg.find_child(|child| scanner.scan_one(child)) {
+        // `find_child` keeps the parent relation and selector current while a
+        // job-control report is claimed under the child owner. CPU accounting
+        // is deliberately collected only after that topology transaction is
+        // released because it takes its own member snapshot.
+        let mut selected_status = None;
+        if let Some(child) = tg.find_child(|child| {
+            selected_status = scanner.select_one(child, options, disposition);
+            selected_status.is_some()
+        }) {
             kdebugln!(
                 "wait: found a child {} that satisfies the wait condition",
                 child.tgid(),
             );
             let tgid = child.tgid();
 
-            match disposition {
-                WaitDisposition::Peek => {
-                    return Ok(Some(wait_outcome_from_child(&child)));
+            let status = selected_status.expect("wait: selected child has no typed status");
+            match (disposition, status) {
+                (WaitDisposition::Peek, _)
+                | (
+                    WaitDisposition::Reap,
+                    ChildWaitStatus::Stopped(_) | ChildWaitStatus::Continued,
+                ) => {
+                    return Ok(Some(WaitOutcome {
+                        tgid,
+                        status,
+                        cpu_usage: child.cpu_usage_snapshot(),
+                    }));
                 },
-                WaitDisposition::Reap => {
+                (WaitDisposition::Reap, ChildWaitStatus::Exited(_)) => {
                     drop(child);
 
                     // If multiple threads are waiting for the same child, only
                     // one of them can reap it, and the others will fail to find
                     // the child in topology. This is fine, since they will just
                     // loop and wait again.
-                    if let Some(child) = tg.try_reap_child(tgid) {
+                    if let Some(child) = tg.try_reap_child_if(tgid, |child| {
+                        wait_target_matches(target, current_pgid, child)
+                    }) {
                         fs::proc::try_unbind_thread_group(tgid);
-                        let outcome = wait_outcome_from_child(&child);
+                        let outcome = wait_outcome_from_exited_child(&child);
                         tg.on_reap(&child);
 
                         return Ok(Some(outcome));
@@ -197,16 +254,22 @@ pub(super) fn wait_for_exited_child(
         }
 
         kdebugln!(
-            "wait: parent_tgid={} listening on child_exited event={:#x}",
+            "wait: parent_tgid={} listening on child_status_changed event={:#x}",
             tg.tgid(),
-            &tg.child_exited as *const _ as usize,
+            &tg.child_status_changed as *const _ as usize,
         );
 
-        let interrupted = !tg.child_exited.listen(false, || {
+        let interrupted = !tg.child_status_changed.listen(false, || {
             let mut scanner = WaitScanner::new(target, current_pgid);
             // Note the latter condition.
-            let res =
-                tg.find_child(|child| scanner.scan_one(child)).is_some() || !scanner.matched_any();
+            let res = tg
+                .find_child(|child| {
+                    scanner
+                        .select_one(child, options, WaitDisposition::Peek)
+                        .is_some()
+                })
+                .is_some()
+                || !scanner.matched_any();
 
             kdebugln!(
                 "wait: check wait condition: res={}, matched_any={}",
@@ -226,19 +289,30 @@ pub(super) fn wait_for_exited_child(
         }
 
         kdebugln!(
-            "wait: parent_tgid={} woke on child_exited event={:#x}, rechecking wait condition",
+            "wait: parent_tgid={} woke on child_status_changed event={:#x}, rechecking wait condition",
             tg.tgid(),
-            &tg.child_exited as *const _ as usize,
+            &tg.child_status_changed as *const _ as usize,
         );
     }
 }
 
-fn wait_outcome_from_child(child: &ThreadGroup) -> WaitOutcome {
+fn wait_target_matches(target: WaitTarget, current_pgid: Tid, child: &ThreadGroup) -> bool {
+    match target {
+        WaitTarget::AnyChild => true,
+        WaitTarget::ChildWithTgid(tgid) => child.tgid() == tgid,
+        WaitTarget::AnyChildWithPgid(pgid) => child.pgid() == pgid,
+        WaitTarget::AnyChildWithCurrentPgid => child.pgid() == current_pgid,
+    }
+}
+
+fn wait_outcome_from_exited_child(child: &ThreadGroup) -> WaitOutcome {
     WaitOutcome {
         tgid: child.tgid(),
-        exit_code: child
-            .exit_code()
-            .expect("wait: selected exited child has no exit code"),
+        status: ChildWaitStatus::Exited(
+            child
+                .exit_code()
+                .expect("wait: selected exited child has no exit code"),
+        ),
         cpu_usage: child.cpu_usage_snapshot(),
     }
 }

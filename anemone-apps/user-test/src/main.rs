@@ -74,6 +74,14 @@ fn run_local_tests() {
 fn run_comp_tests() {
     guest::enter_competition_root();
     guest::init_competition_environment();
+
+    #[cfg(target_arch = "riscv64")]
+    {
+        println!("user-test: running jobctl test...");
+        local_run_cmd("/bin/jobctl-test", &["jobctl-test"], &[]);
+        println!("user-test: jobctl test finished.");
+    }
+
     ltp::install_ltp_fixtures();
 
     // competition::run_competition_tests();

@@ -1,7 +1,7 @@
 use crate::{
     prelude::*,
     task::{
-        Task, ThreadGroup,
+        Task, ThreadGroup, ThreadGroupInner,
         sig::{SigNo, Signal, disposition::SignalDisposition, set::SigSet},
     },
 };
@@ -22,6 +22,16 @@ impl Task {
     pub fn recv_signal(self: &Arc<Self>, signal: Signal) {
         kdebugln!("task {} recv_signal: {:?}", self.tid(), signal);
         let no = signal.no;
+
+        if matches!(no, SigNo::SIGSTOP | SigNo::SIGCONT) {
+            let Some(tg) = get_thread_group(&self.tgid()) else {
+                // A sender can retain a Task Arc after topology detach. The
+                // concrete task identity is no longer a signal target then.
+                return;
+            };
+            tg.recv_job_control_signal(signal, JobControlSignalRoute::Private(self));
+            return;
+        }
 
         let disp = self.sig_disposition.read().get_disposition(no);
         if disp.action.is_ignored() {
@@ -71,6 +81,12 @@ impl ThreadGroup {
     /// the signal won't be delivered.
     pub fn recv_signal(&self, signal: Signal) {
         let no = signal.no;
+
+        if matches!(no, SigNo::SIGSTOP | SigNo::SIGCONT) {
+            self.recv_job_control_signal(signal, JobControlSignalRoute::Shared);
+            return;
+        }
+
         let members = self.get_members();
 
         let Some(first_member) = members.first() else {
@@ -130,6 +146,207 @@ impl ThreadGroup {
         }
         for member in self.get_members() {
             member.sig_pending.lock().flush_specific(set);
+        }
+    }
+
+    /// Deliver a process-directed occurrence after revalidating the exact task
+    /// identity originally resolved by the syscall. The ordinary occurrence
+    /// remains shared; only its generation authority is task-specific.
+    pub(in crate::task) fn recv_signal_for_exact_member(&self, signal: Signal, target: &Arc<Task>) {
+        if matches!(signal.no, SigNo::SIGSTOP | SigNo::SIGCONT) {
+            self.recv_job_control_signal(
+                signal,
+                JobControlSignalRoute::SharedForExactMember(target),
+            );
+        } else {
+            self.recv_signal(signal);
+        }
+    }
+
+    /// Deliver one process-group-selected occurrence. Control signals recheck
+    /// the selector under the ThreadGroup owner before any cleanup or phase
+    /// effect; ordinary signals retain the current snapshot semantics.
+    pub(in crate::task) fn recv_signal_from_process_group(
+        &self,
+        signal: Signal,
+        expected_pgid: Tid,
+    ) {
+        if matches!(signal.no, SigNo::SIGSTOP | SigNo::SIGCONT) {
+            self.recv_job_control_signal(
+                signal,
+                JobControlSignalRoute::SharedForProcessGroup(expected_pgid),
+            );
+        } else {
+            self.recv_signal(signal);
+        }
+    }
+
+    /// Commit SIGSTOP/SIGCONT generation in the ThreadGroup control-ordering
+    /// domain. A task-directed occurrence still has a group-wide side effect,
+    /// while its ordinary SIGCONT occurrence remains task-private.
+    fn recv_job_control_signal(&self, signal: Signal, route: JobControlSignalRoute<'_>) {
+        let no = signal.no;
+        assert!(matches!(no, SigNo::SIGSTOP | SigNo::SIGCONT));
+
+        // Topology selects the exact live member objects before the child owner
+        // admits any cleanup, phase mutation, or parent-visible report. The
+        // helper releases every guard before the effects below.
+        let Some((notify_targets, transition)) =
+            self.with_child_status_transaction(|members, inner| {
+                if !matches!(inner.status.life_cycle(), ThreadGroupLifeCycle::Alive)
+                    || members.is_empty()
+                {
+                    // The last task is detached from topology before kernel_exit
+                    // publishes terminal lifecycle. A sender may still hold this
+                    // stale ThreadGroup Arc during that gap, but an empty group
+                    // cannot admit cleanup, a control transition, or an ordinary
+                    // SIGCONT occurrence.
+                    return (
+                        Vec::new(),
+                        crate::task::jobctl::group::JobControlTransition::NONE,
+                    );
+                }
+
+                if let Some(target) = route.exact_member() {
+                    let exact_member = target.tgid() == self.tgid()
+                        && members.iter().any(|member| Arc::ptr_eq(member, target));
+                    if !exact_member {
+                        // The sender resolved a task that no longer belongs to
+                        // this exact ThreadGroup. No cleanup or phase effect is
+                        // allowed after that relation becomes stale.
+                        return (
+                            Vec::new(),
+                            crate::task::jobctl::group::JobControlTransition::NONE,
+                        );
+                    }
+                }
+                if let Some(expected_pgid) = route.expected_pgid()
+                    && inner.pgid != Some(expected_pgid)
+                {
+                    // Process-group membership may change after the sender's
+                    // snapshot. A departed ThreadGroup must not receive any
+                    // control cleanup, occurrence, or phase side effect.
+                    return (
+                        Vec::new(),
+                        crate::task::jobctl::group::JobControlTransition::NONE,
+                    );
+                }
+
+                let opposite = if no == SigNo::SIGSTOP {
+                    SigSet::new_with_signos(&[SigNo::SIGCONT])
+                } else {
+                    SigSet::new_with_signos(&[
+                        SigNo::SIGSTOP,
+                        SigNo::SIGTSTP,
+                        SigNo::SIGTTIN,
+                        SigNo::SIGTTOU,
+                    ])
+                };
+                inner.sig_pending.lock().flush_specific(opposite);
+                for member in members {
+                    // Reserved delivery is deliberately outside ordinary pending
+                    // cleanup and remains owned by the target task.
+                    member.sig_pending.lock().flush_specific(opposite);
+                }
+
+                let transition = if no == SigNo::SIGSTOP {
+                    if self.tgid() == Tid::INIT {
+                        // Global init admits the concrete generation and cleanup,
+                        // but can never obtain stop authority.
+                        crate::task::jobctl::group::JobControlTransition::NONE
+                    } else {
+                        let ThreadGroupInner {
+                            members,
+                            job_control,
+                            ..
+                        } = &mut *inner;
+                        job_control
+                            .as_mut()
+                            .expect("jobctl: user ThreadGroup lacks control state")
+                            .request_unconditional_stop(members, self.tgid(), no)
+                    }
+                } else {
+                    inner
+                        .job_control
+                        .as_mut()
+                        .expect("jobctl: user ThreadGroup lacks control state")
+                        .continue_generation(self.tgid())
+                };
+
+                let notify_targets = if no == SigNo::SIGCONT {
+                    let private_target = route.private_target();
+                    let occurrence_owner = private_target
+                        .cloned()
+                        .or_else(|| members.first().cloned())
+                        .expect("jobctl: live ThreadGroup has no signal disposition owner");
+                    let disposition = occurrence_owner.sig_disposition.read().get_disposition(no);
+                    // Linux preserves a blocked occurrence even when its live
+                    // action currently defaults to ignore: userspace may
+                    // install a handler before unblocking it. The group-resume
+                    // side effect above remains generation-only either way.
+                    if disposition.action.is_ignored()
+                        && !occurrence_owner.is_current_sig_mask_blocking(no)
+                    {
+                        Vec::new()
+                    } else if let Some(target) = private_target {
+                        target.sig_pending.lock().push_signal(signal);
+                        vec![target.clone()]
+                    } else {
+                        inner.sig_pending.lock().push_signal(signal);
+                        members.to_vec()
+                    }
+                } else {
+                    // SIGSTOP is consumed as control input and never enters an
+                    // ordinary pending queue or force-completes an active wait.
+                    Vec::new()
+                };
+                (notify_targets, transition)
+            })
+        else {
+            return;
+        };
+        self.finish_job_control_transition(transition);
+
+        for member in notify_targets {
+            if !member.is_current_sig_mask_blocking(no) {
+                notify(&member, false);
+            }
+        }
+    }
+}
+
+/// Sender-specific control-generation authority and ordinary occurrence route.
+///
+/// Exact-member and process-group identities only validate the syscall target;
+/// they are not job-control state. `SharedForExactMember` intentionally keeps
+/// rt_sigqueueinfo's ordinary occurrence on the shared pending queue.
+#[derive(Clone, Copy)]
+enum JobControlSignalRoute<'a> {
+    Shared,
+    Private(&'a Arc<Task>),
+    SharedForExactMember(&'a Arc<Task>),
+    SharedForProcessGroup(Tid),
+}
+
+impl<'a> JobControlSignalRoute<'a> {
+    fn exact_member(self) -> Option<&'a Arc<Task>> {
+        match self {
+            Self::Private(target) | Self::SharedForExactMember(target) => Some(target),
+            Self::Shared | Self::SharedForProcessGroup(_) => None,
+        }
+    }
+
+    fn expected_pgid(self) -> Option<Tid> {
+        match self {
+            Self::SharedForProcessGroup(pgid) => Some(pgid),
+            Self::Shared | Self::Private(_) | Self::SharedForExactMember(_) => None,
+        }
+    }
+
+    fn private_target(self) -> Option<&'a Arc<Task>> {
+        match self {
+            Self::Private(target) => Some(target),
+            Self::Shared | Self::SharedForExactMember(_) | Self::SharedForProcessGroup(_) => None,
         }
     }
 }

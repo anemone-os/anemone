@@ -6,7 +6,8 @@ use crate::{
     syscall::user_access::UserWritePtr,
     task::{
         Task,
-        exit::kernel_exit_group,
+        exit::{kernel_exit, kernel_exit_group},
+        jobctl::UserEntryOutcome,
         sig::{
             disposition::{KSigAction, SaFlags, SignalAction},
             set::SigSet,
@@ -308,6 +309,49 @@ impl Task {
 
 fn force_signal_set() -> SigSet {
     SigSet::new_with_signos(&[SigNo::SIGKILL, SigNo::SIGSTOP])
+}
+
+/// Complete Signal/lifecycle/jobctl arbitration immediately before a user
+/// transition. Returns with interrupts disabled and exposure registered.
+pub(crate) fn arbitrate_user_entry(
+    trapframe: &mut TrapFrame,
+    mut restart_syscall: Option<(RestartSyscall, SyscallCtx)>,
+) {
+    loop {
+        if !IntrArch::local_intr_enabled() {
+            // Fresh, clone, and exec entries arrive from the scheduler with
+            // interrupts disabled. They still need the same first Signal pass
+            // as an ordinary trap return before the final noirq gate.
+            unsafe {
+                IntrArch::local_intr_enable();
+            }
+        }
+        handle_signals(trapframe, restart_syscall.take());
+        unsafe {
+            IntrArch::local_intr_disable();
+        }
+
+        match get_current_task().before_user_entry() {
+            UserEntryOutcome::Admitted => return,
+            UserEntryOutcome::Recheck => {},
+            UserEntryOutcome::Exit(code) => {
+                // User-entry exclusion is decided atomically under the owner
+                // with interrupts disabled, but lifecycle teardown may close
+                // files and wake waiters and therefore must remain sleepable.
+                unsafe {
+                    IntrArch::local_intr_enable();
+                }
+                kernel_exit(code)
+            },
+            UserEntryOutcome::Park => {
+                unreachable!("jobctl park must resolve before returning")
+            },
+        }
+
+        // A park wake is only a rescan opportunity. Signal handling owns the
+        // next interrupt-enabled pass; the final gate always runs with
+        // interrupts disabled before FPU ownership is restored.
+    }
 }
 
 /// **Called by trap handling code when returning to user-space.**
