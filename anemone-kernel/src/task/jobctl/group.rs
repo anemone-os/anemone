@@ -2,7 +2,7 @@
 
 use crate::{
     prelude::*,
-    task::{ThreadGroup, sig::SigNo},
+    task::{ThreadGroup, ThreadGroupInner, sig::SigNo},
 };
 
 use super::report::{ChildJobControlStatus, JobControlReport};
@@ -139,6 +139,50 @@ impl ThreadGroupMembers {
                 panic!("jobctl: kthread member {} reached user trap entry", tid)
             },
         }
+    }
+
+    /// Verify the terminal transaction already cleared this member's
+    /// exposure before a later forced trap reached the kernel.
+    pub(super) fn assert_user_unexposed(&self, tid: Tid) {
+        match self.inner.get(&tid) {
+            Some(ThreadGroupMember::User(UserExposure::Unexposed)) => {},
+            Some(ThreadGroupMember::User(UserExposure::Exposed)) => {
+                panic!(
+                    "jobctl: terminal user member {} remained exposed at trap entry",
+                    tid
+                )
+            },
+            Some(ThreadGroupMember::KThread) => {
+                panic!("jobctl: kthread member {} reached user trap entry", tid)
+            },
+            None => panic!(
+                "jobctl: terminal user member {} not found at trap entry",
+                tid
+            ),
+        }
+    }
+
+    /// Clear the live exposure relation as part of terminal publication.
+    ///
+    /// Terminal lifecycle, rather than this diagnostic count, controls the
+    /// subsequent no-return path. Later trap entry only verifies this owner
+    /// transaction already removed every user-entry permit.
+    fn clear_all_user_exposure(&mut self) -> usize {
+        let mut cleared = 0;
+        for member in self.inner.values_mut() {
+            match member {
+                ThreadGroupMember::User(exposure) => {
+                    if *exposure == UserExposure::Exposed {
+                        *exposure = UserExposure::Unexposed;
+                        cleared += 1;
+                    }
+                },
+                ThreadGroupMember::KThread => {
+                    panic!("jobctl: user terminal transaction found kthread member")
+                },
+            }
+        }
+        cleared
     }
 
     pub(super) fn expose_user(&mut self, tid: Tid) {
@@ -349,9 +393,10 @@ impl UserJobControl {
         self.phase = JobControlPhase::Stopped(episode);
         self.report = Some(JobControlReport::Stopped);
         kdebugln!(
-            "jobctl: tgid={} phase Stopping -> Stopped reason={:?} exposed=0",
+            "jobctl: tgid={} phase Stopping -> Stopped reason={:?} exposed=0 age={:?}",
             tgid,
-            episode.reason
+            episode.reason,
+            episode_age(episode.started_at),
         );
         JobControlTransition {
             wake_entry_gate: false,
@@ -374,9 +419,10 @@ impl UserJobControl {
                     started_at: Instant::now(),
                 };
                 kdebugln!(
-                    "jobctl: tgid={} phase Stopping -> Running reason={:?} without report",
+                    "jobctl: tgid={} phase Stopping -> Running reason={:?} age={:?} without report",
                     tgid,
-                    episode.reason
+                    episode.reason,
+                    episode_age(episode.started_at),
                 );
                 JobControlTransition {
                     wake_entry_gate: true,
@@ -390,9 +436,10 @@ impl UserJobControl {
                 };
                 self.report = Some(JobControlReport::Continued);
                 kdebugln!(
-                    "jobctl: tgid={} phase Stopped -> Running reason={:?} with Continued report",
+                    "jobctl: tgid={} phase Stopped -> Running reason={:?} age={:?} with Continued report",
                     tgid,
-                    episode.reason
+                    episode.reason,
+                    episode_age(episode.started_at),
                 );
                 JobControlTransition {
                     wake_entry_gate: true,
@@ -405,12 +452,31 @@ impl UserJobControl {
 
     /// Invalidate job-control authority before terminal lifecycle becomes
     /// externally visible. Terminal status remains owned by lifecycle code.
-    pub(in crate::task) fn prepare_terminal(&mut self) -> JobControlTransition {
+    fn prepare_terminal(
+        &mut self,
+        members: &mut ThreadGroupMembers,
+        tgid: Tid,
+    ) -> JobControlTransition {
+        let diagnostic = self.diagnostic(members);
         let wake_entry_gate = !self.is_running();
+        let cleared_exposure = members.clear_all_user_exposure();
+        assert!(
+            members.exposed_count() == 0,
+            "jobctl: terminal transaction left exposed user members"
+        );
         self.phase = JobControlPhase::Running {
             started_at: Instant::now(),
         };
         self.report = None;
+        kdebugln!(
+            "jobctl: tgid={} terminal phase={:?} reason={:?} exposed={} cleared={} age={:?}",
+            tgid,
+            diagnostic.phase,
+            diagnostic.first_reason,
+            diagnostic.exposed_count,
+            cleared_exposure,
+            diagnostic.phase_age,
+        );
         JobControlTransition {
             wake_entry_gate,
             parent_status: None,
@@ -440,6 +506,41 @@ impl UserJobControl {
             exposed_count: members.exposed_count(),
             phase_age: episode_age(started_at),
         }
+    }
+
+    pub(super) fn log_stopping_progress(&self, members: &ThreadGroupMembers, tgid: Tid) {
+        let diagnostic = self.diagnostic(members);
+        assert!(
+            diagnostic.phase == JobControlPhaseSnapshot::Stopping,
+            "jobctl: non-Stopping phase used Stopping progress log"
+        );
+        kdebugln!(
+            "jobctl: tgid={} phase={:?} reason={:?} exposed={} age={:?}",
+            tgid,
+            diagnostic.phase,
+            diagnostic.first_reason,
+            diagnostic.exposed_count,
+            diagnostic.phase_age,
+        );
+    }
+}
+
+impl ThreadGroupInner {
+    /// Make job-control state inert in the same owner transaction that
+    /// publishes terminal lifecycle.
+    pub(in crate::task) fn prepare_job_control_terminal(
+        &mut self,
+        tgid: Tid,
+    ) -> JobControlTransition {
+        let Self {
+            members,
+            job_control,
+            ..
+        } = self;
+        job_control
+            .as_mut()
+            .expect("jobctl: exiting user ThreadGroup lacks control state")
+            .prepare_terminal(members, tgid)
     }
 }
 
@@ -478,5 +579,47 @@ mod kunits {
             Some(ChildJobControlStatus::Stopped(SigNo::SIGTSTP))
         );
         assert!(matches!(job_control.phase, JobControlPhase::Stopped(_)));
+    }
+
+    #[kunit]
+    fn test_continue_cancels_stopping_without_report() {
+        let tgid = Tid::new(60);
+        let mut members = ThreadGroupMembers::new_user(tgid);
+        members.expose_user(tgid);
+        let mut job_control = UserJobControl::new_running();
+
+        let stop = job_control.request_unconditional_stop(&members, tgid, SigNo::SIGSTOP);
+        assert!(stop.parent_status.is_none());
+        assert!(matches!(job_control.phase, JobControlPhase::Stopping(_)));
+        assert!(job_control.report.is_none());
+
+        let resume = job_control.continue_generation(tgid);
+        assert!(resume.wake_entry_gate);
+        assert!(resume.parent_status.is_none());
+        assert!(job_control.is_running());
+        assert!(job_control.report.is_none());
+    }
+
+    #[kunit]
+    fn test_terminal_transaction_clears_all_exposure() {
+        let tgid = Tid::new(70);
+        let sibling = Tid::new(71);
+        let mut members = ThreadGroupMembers::new_user(tgid);
+        assert!(members.insert_user(sibling));
+        members.expose_user(tgid);
+        members.expose_user(sibling);
+
+        let mut job_control = UserJobControl::new_running();
+        let stop = job_control.request_unconditional_stop(&members, tgid, SigNo::SIGSTOP);
+        assert!(stop.parent_status.is_none());
+        assert!(matches!(job_control.phase, JobControlPhase::Stopping(_)));
+
+        let terminal = job_control.prepare_terminal(&mut members, tgid);
+        assert!(terminal.wake_entry_gate);
+        assert!(job_control.is_running());
+        assert!(job_control.report.is_none());
+        assert_eq!(members.exposed_count(), 0);
+        members.assert_user_unexposed(tgid);
+        members.assert_user_unexposed(sibling);
     }
 }

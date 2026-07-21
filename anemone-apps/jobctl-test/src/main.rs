@@ -96,9 +96,13 @@ fn sigchld_handler(
 }
 
 fn install_sigchld_handler() -> Result<(), Errno> {
+    install_sigchld_handler_with_flags(linux_signal::SA_RESTART)
+}
+
+fn install_sigchld_handler_with_flags(flags: u64) -> Result<(), Errno> {
     let action = SigAction {
         sighandler: sigchld_handler as *const (),
-        sa_flags: linux_signal::SA_SIGINFO | linux_signal::SA_RESTART,
+        sa_flags: linux_signal::SA_SIGINFO | flags,
         sa_restorer: core::ptr::null(),
         sa_mask: SigSet { bits: 0 },
     };
@@ -136,6 +140,23 @@ fn install_default(signo: SigNo) -> Result<(), Errno> {
 fn signal_set(signo: SigNo) -> SigSet {
     SigSet {
         bits: 1u64 << (signo.as_usize() - 1),
+    }
+}
+
+fn queued_siginfo(signo: SigNo) -> SigInfoWrapper {
+    SigInfoWrapper {
+        info: SigInfo {
+            si_signo: signo.as_usize() as i32,
+            si_errno: 0,
+            si_code: linux_signal::SI_QUEUE,
+            fields: linux_signal::sifields::SigInfoFields {
+                rt: linux_signal::sifields::Rt {
+                    pid: 0,
+                    uid: 0,
+                    sigval: linux_signal::sifields::SigVal { sival_int: 0 },
+                },
+            },
+        },
     }
 }
 
@@ -599,6 +620,18 @@ fn wait_for_sigchld(
     Err(ETIMEDOUT)
 }
 
+fn assert_sigchld_unchanged(old_count: usize, what: &str) -> Result<(), Errno> {
+    for _ in 0..128 {
+        sched_yield()?;
+    }
+    let count = SIGCHLD_COUNT.load(Ordering::SeqCst);
+    if count != old_count {
+        eprintln!("jobctl-test: SIGCHLD occurred during {what}: old={old_count}, current={count}");
+        return Err(EIO);
+    }
+    Ok(())
+}
+
 fn spawn_yielding_child() -> Result<u32, Errno> {
     match process::fork()? {
         Some(pid) => Ok(pid),
@@ -700,6 +733,27 @@ fn proc_state_from_status(status: &str) -> Result<u8, Errno> {
         .first()
         .copied()
         .ok_or(EIO)
+}
+
+fn assert_proc_status_state(status: &str, expected: Option<(u8, &str)>) -> Result<(), Errno> {
+    let state = status_field(status, "State:")?;
+    let valid = match expected {
+        Some((character, name)) => {
+            let expected_name = format!("({name})");
+            state.as_bytes().first().copied() == Some(character)
+                && state.strip_prefix(character as char).map(str::trim)
+                    == Some(expected_name.as_str())
+        },
+        None => matches!(
+            state,
+            "R (running)" | "S (sleeping)" | "D (disk sleep)" | "T (stopped)" | "Z (zombie)"
+        ),
+    };
+    if !valid {
+        eprintln!("jobctl-test: unexpected proc status State pair: {state:?}");
+        return Err(EIO);
+    }
+    Ok(())
 }
 
 fn proc_state_from_stat(stat: &str) -> Result<u8, Errno> {
@@ -806,6 +860,7 @@ fn test_wait4_stop_continue_procfs() -> Result<(), Errno> {
             eprintln!("jobctl-test: stopped child is not T in stat/status");
             return Err(EIO);
         }
+        assert_proc_status_state(&status, Some((b'T', "stopped")))?;
         assert_sigstop_not_pending(&status)?;
 
         signal::kill(child as i32, SigNo::SIGCONT)?;
@@ -823,7 +878,7 @@ fn test_wait4_stop_continue_procfs() -> Result<(), Errno> {
             eprintln!("jobctl-test: continued child remained T in stat/status");
             return Err(EIO);
         }
-        Ok(())
+        assert_proc_status_state(&status, None)
     })();
     let cleanup = cleanup_child(child);
     result?;
@@ -976,19 +1031,82 @@ fn test_waitid_wnowait_sigchld() -> Result<(), Errno> {
     Ok(())
 }
 
-fn test_global_init_immunity() -> Result<(), Errno> {
-    println!("jobctl-test: CASE global-init-immunity start");
-    signal::kill(1, SigNo::SIGSTOP)?;
+fn test_sigchld_suppression_preserves_report() -> Result<(), Errno> {
+    println!("jobctl-test: CASE sigchld-suppression-report start");
+
+    install_sigchld_handler_with_flags(linux_signal::SA_RESTART | linux_signal::SA_NOCLDSTOP)?;
+    let no_cldstop = spawn_yielding_child()?;
+    let no_cldstop_result = (|| {
+        let before = reset_sigchld_observation();
+        signal::kill(no_cldstop as i32, SigNo::SIGSTOP)?;
+        let info = poll_waitid(no_cldstop, wait::WSTOPPED)?;
+        assert_waitid_info(
+            &info,
+            linux_signal::CLD_STOPPED,
+            no_cldstop,
+            linux_signal::SIGSTOP as i32,
+        )?;
+        assert_sigchld_unchanged(before, "SA_NOCLDSTOP stopped report")
+    })();
+    let no_cldstop_cleanup = cleanup_child(no_cldstop);
+    no_cldstop_result?;
+    no_cldstop_cleanup?;
+
+    install_ignore(SigNo::SIGCHLD)?;
+    let ignored = spawn_yielding_child()?;
+    let ignored_result = (|| {
+        let before = SIGCHLD_COUNT.load(Ordering::SeqCst);
+        signal::kill(ignored as i32, SigNo::SIGSTOP)?;
+        let info = poll_waitid(ignored, wait::WSTOPPED)?;
+        assert_waitid_info(
+            &info,
+            linux_signal::CLD_STOPPED,
+            ignored,
+            linux_signal::SIGSTOP as i32,
+        )?;
+        assert_sigchld_unchanged(before, "ignored SIGCHLD stopped report")
+    })();
+    let restore = install_sigchld_handler();
+    let ignored_cleanup = cleanup_child(ignored);
+    ignored_result?;
+    restore?;
+    ignored_cleanup?;
+
+    println!("jobctl-test: CASE sigchld-suppression-report ok");
+    Ok(())
+}
+
+fn assert_global_init_not_stopped(producer: &str) -> Result<(), Errno> {
     for _ in 0..128 {
         sched_yield()?;
     }
     let status = read_text(PROC_INIT_STATUS)?;
 
     if proc_state_from_status(&status)? == b'T' {
-        eprintln!("jobctl-test: global init became stopped");
+        eprintln!("jobctl-test: global init became stopped after {producer}");
         return Err(EIO);
     }
+    assert_proc_status_state(&status, None)?;
     assert_sigstop_not_pending(&status)?;
+    Ok(())
+}
+
+fn test_global_init_immunity() -> Result<(), Errno> {
+    println!("jobctl-test: CASE global-init-immunity start");
+
+    signal::kill(1, SigNo::SIGSTOP)?;
+    assert_global_init_not_stopped("kill(SIGSTOP)")?;
+
+    signal::tkill(1, SigNo::SIGSTOP)?;
+    assert_global_init_not_stopped("tkill(SIGSTOP)")?;
+
+    signal::tgkill(1, 1, SigNo::SIGSTOP)?;
+    assert_global_init_not_stopped("tgkill(SIGSTOP)")?;
+
+    let info = queued_siginfo(SigNo::SIGSTOP);
+    signal::sigqueueinfo(1, SigNo::SIGSTOP, &info)?;
+    assert_global_init_not_stopped("rt_sigqueueinfo(SIGSTOP)")?;
+
     println!("jobctl-test: CASE global-init-immunity ok");
     Ok(())
 }
@@ -1017,6 +1135,43 @@ fn assert_no_wait4_status(pid: u32, options: WaitOptions) -> Result<(), Errno> {
     Ok(())
 }
 
+fn test_repeat_continue() -> Result<(), Errno> {
+    println!("jobctl-test: CASE repeat-continue start");
+    let stopped = spawn_yielding_child()?;
+    let stopped_result = (|| {
+        let before_stop = reset_sigchld_observation();
+        signal::kill(stopped as i32, SigNo::SIGSTOP)?;
+        wait_for_sigchld(
+            before_stop,
+            linux_signal::CLD_STOPPED,
+            stopped,
+            linux_signal::SIGSTOP as i32,
+        )?;
+        expect_child_status(stopped, WStatus::Stopped(SigNo::SIGSTOP.as_usize() as i8))?;
+
+        let before_continue = reset_sigchld_observation();
+        signal::kill(stopped as i32, SigNo::SIGCONT)?;
+        wait_for_sigchld(
+            before_continue,
+            linux_signal::CLD_CONTINUED,
+            stopped,
+            linux_signal::SIGCONT as i32,
+        )?;
+        expect_child_status(stopped, WStatus::Continued)?;
+
+        let after_first_continue = SIGCHLD_COUNT.load(Ordering::SeqCst);
+        signal::kill(stopped as i32, SigNo::SIGCONT)?;
+        assert_no_wait4_status(stopped, WaitOptions::CONTINUED)?;
+        assert_sigchld_unchanged(after_first_continue, "repeated SIGCONT")
+    })();
+    let stopped_cleanup = cleanup_child(stopped);
+    stopped_result?;
+    stopped_cleanup?;
+
+    println!("jobctl-test: CASE repeat-continue ok");
+    Ok(())
+}
+
 fn expect_child_status(pid: u32, expected: WStatus) -> Result<(), Errno> {
     let options = match expected {
         WStatus::Stopped(_) => WaitOptions::UNTRACED,
@@ -1040,12 +1195,17 @@ fn expect_child_status(pid: u32, expected: WStatus) -> Result<(), Errno> {
     Ok(())
 }
 
-fn test_conditional_default_stop_signals() -> Result<(), Errno> {
-    println!("jobctl-test: CASE conditional-default-stop-signals start");
-    for signo in [SigNo::SIGTSTP, SigNo::SIGTTIN, SigNo::SIGTTOU] {
+fn test_task_directed_default_stop_signals() -> Result<(), Errno> {
+    println!("jobctl-test: CASE task-directed-default-stop-signals start");
+    for signo in [
+        SigNo::SIGSTOP,
+        SigNo::SIGTSTP,
+        SigNo::SIGTTIN,
+        SigNo::SIGTTOU,
+    ] {
         let child = spawn_child_scenario(ChildScenario::Yield)?;
         let result = (|| {
-            signal::kill(child.pid as i32, signo)?;
+            signal::tgkill(child.pid, child.pid, signo)?;
             expect_child_status(child.pid, WStatus::Stopped(signo.as_usize() as i8))
         })();
         let _ = close(child.control);
@@ -1053,7 +1213,7 @@ fn test_conditional_default_stop_signals() -> Result<(), Errno> {
         result?;
         cleanup?;
     }
-    println!("jobctl-test: CASE conditional-default-stop-signals ok");
+    println!("jobctl-test: CASE task-directed-default-stop-signals ok");
     Ok(())
 }
 
@@ -1299,6 +1459,21 @@ fn test_multimember_mixed_execution() -> Result<(), Errno> {
         signal::tgkill(child.pid, spinner_tid, SigNo::SIGSTOP)?;
         expect_child_status(child.pid, WStatus::Stopped(SigNo::SIGSTOP.as_usize() as i8))?;
 
+        // Resume only releases the job-control gate. It must not force the
+        // unsatisfied ordinary pipe wait to return.
+        signal::kill(child.pid as i32, SigNo::SIGCONT)?;
+        expect_child_status(child.pid, WStatus::Continued)?;
+        for _ in 0..128 {
+            sched_yield()?;
+        }
+        if child.shared.waiter_done.load(Ordering::SeqCst) {
+            eprintln!("jobctl-test: SIGCONT completed an unsatisfied ordinary pipe wait");
+            return Err(EIO);
+        }
+
+        signal::kill(child.pid as i32, SigNo::SIGTSTP)?;
+        expect_child_status(child.pid, WStatus::Stopped(SigNo::SIGTSTP.as_usize() as i8))?;
+
         if write(child.wait_release, &[1])? != 1 {
             return Err(EIO);
         }
@@ -1423,7 +1598,7 @@ fn require_procfs() -> Result<(), Errno> {
 }
 
 fn run_tests() -> Result<(), Errno> {
-    test_conditional_default_stop_signals()?;
+    test_task_directed_default_stop_signals()?;
     test_conditional_caught_ignored_masked()?;
     test_private_shared_opposite_cleanup()?;
     test_temporary_mask_default_stop_cleanup()?;
@@ -1436,7 +1611,9 @@ fn run_tests() -> Result<(), Errno> {
     test_wait4_stop_continue_procfs()?;
     install_sigchld_handler()?;
     test_waitid_wnowait_sigchld()?;
+    test_sigchld_suppression_preserves_report()?;
     test_global_init_immunity()?;
+    test_repeat_continue()?;
     test_multimember_mixed_execution()?;
     test_process_group_stop_broadcast()?;
     test_multithread_exec_dethread()?;

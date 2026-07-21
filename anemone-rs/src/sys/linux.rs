@@ -301,6 +301,10 @@ pub mod process {
             unsafe { syscall(SYS_RT_SIGQUEUEINFO, pid, sig, siginfo_ptr, 0, 0, 0) }
         }
 
+        pub fn tkill(tid: u64, sig: u64) -> Result<u64, Errno> {
+            unsafe { syscall(SYS_TKILL, tid, sig, 0, 0, 0, 0) }
+        }
+
         pub fn tgkill(tgid: u64, tid: u64, sig: u64) -> Result<u64, Errno> {
             unsafe { syscall(SYS_TGKILL, tgid, tid, sig, 0, 0, 0) }
         }

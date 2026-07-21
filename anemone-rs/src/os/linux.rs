@@ -717,6 +717,10 @@ pub mod process {
             signal::tgkill(tgid as u64, tid as u64, sig.as_usize() as u64).map(|_| ())
         }
 
+        pub fn tkill(tid: Tid, sig: SigNo) -> Result<(), Errno> {
+            signal::tkill(tid as u64, sig.as_usize() as u64).map(|_| ())
+        }
+
         pub fn sigqueueinfo(pid: Tid, sig: SigNo, siginfo: &SigInfoWrapper) -> Result<(), Errno> {
             signal::rt_sigqueueinfo(
                 pid as u64,

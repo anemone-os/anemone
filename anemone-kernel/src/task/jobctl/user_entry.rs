@@ -21,22 +21,40 @@ impl ThreadGroup {
     fn clear_user_exposure(&self, tid: Tid) {
         let needs_stop_completion = {
             let mut inner = self.inner.write();
+            let life_cycle = inner.status.life_cycle();
             let ThreadGroupInner {
                 members,
                 job_control,
                 ..
             } = &mut *inner;
-            members.clear_user_exposure(tid);
+            match life_cycle {
+                ThreadGroupLifeCycle::Alive => members.clear_user_exposure(tid),
+                ThreadGroupLifeCycle::Exiting(_) => members.assert_user_unexposed(tid),
+                ThreadGroupLifeCycle::Exited(code) => {
+                    panic!(
+                        "jobctl: task {} trapped after ThreadGroup {} exited with {:?}",
+                        tid,
+                        self.tgid(),
+                        code
+                    )
+                },
+            }
             let job_control = job_control.as_ref().unwrap_or_else(|| {
                 panic!(
                     "jobctl: user trap entry reached non-user ThreadGroup {}",
                     self.tgid()
                 )
             });
-            matches!(
+            let stopping = matches!(
                 job_control.phase,
                 super::group::JobControlPhase::Stopping(_)
-            ) && members.exposed_count() == 0
+            );
+            if stopping && members.exposed_count() != 0 {
+                job_control.log_stopping_progress(members, self.tgid());
+            }
+            matches!(life_cycle, ThreadGroupLifeCycle::Alive)
+                && stopping
+                && members.exposed_count() == 0
         };
         if !needs_stop_completion {
             return;
@@ -121,10 +139,21 @@ impl ThreadGroup {
             return decision;
         }
 
+        kdebugln!(
+            "jobctl: tgid={} tid={} parked at user-entry gate",
+            self.tgid(),
+            task.tid(),
+        );
+
         // Event and force wake only request a fresh outer arbitration pass;
         // neither carries phase truth or a user-entry permit.
         self.jobctl_unblocked
             .listen_uninterruptible(false, || self.should_leave_entry_park(task));
+        kdebugln!(
+            "jobctl: tgid={} tid={} left user-entry park for re-arbitration",
+            self.tgid(),
+            task.tid(),
+        );
         UserEntryOutcome::Recheck
     }
 }

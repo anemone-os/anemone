@@ -48,6 +48,7 @@ impl UserJobControl {
 
         if consume {
             self.report = None;
+            kdebugln!("jobctl: report {:?} consumed", status);
         }
         Some(status)
     }
@@ -56,12 +57,19 @@ impl UserJobControl {
 impl ThreadGroup {
     pub(in crate::task) fn finish_job_control_transition(&self, transition: JobControlTransition) {
         if transition.wake_entry_gate {
+            kdebugln!("jobctl: tgid={} publishing entry-gate rescan", self.tgid());
             self.jobctl_unblocked.publish(usize::MAX, true);
         }
         if let Some(status) = transition.parent_status {
             let parent = transition
                 .parent
                 .expect("jobctl: parent-visible transition lacks parent snapshot");
+            kdebugln!(
+                "jobctl: tgid={} publishing {:?} to parent_tgid={}",
+                self.tgid(),
+                status,
+                parent.tgid(),
+            );
             self.publish_job_control_status(&parent, status);
         }
     }

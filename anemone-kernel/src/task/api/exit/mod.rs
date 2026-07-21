@@ -139,11 +139,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             tg_inner = tg.inner.write();
 
             // 2. set status to Exited, so that wait4 can reap this thread group.
-            let terminal_transition = tg_inner
-                .job_control
-                .as_mut()
-                .expect("jobctl: exiting user ThreadGroup lacks control state")
-                .prepare_terminal();
+            let terminal_transition = tg_inner.prepare_job_control_terminal(tg.tgid());
             tg_inner.status.life_cycle = ThreadGroupLifeCycle::Exited(xcode);
 
             drop(tg_inner);
@@ -260,11 +256,7 @@ pub fn kernel_exit_group(code: ExitCode) -> ! {
             match inner.status.life_cycle {
                 ThreadGroupLifeCycle::Alive => {
                     inner.status.life_cycle = ThreadGroupLifeCycle::Exiting(code);
-                    let transition = inner
-                        .job_control
-                        .as_mut()
-                        .expect("jobctl: exiting user ThreadGroup lacks control state")
-                        .prepare_terminal();
+                    let transition = inner.prepare_job_control_terminal(tg.tgid());
                     (false, transition)
                 },
                 ThreadGroupLifeCycle::Exiting(_) => {
