@@ -22,6 +22,27 @@ impl SignalAction {
             Self::Custom(_) => false,
         }
     }
+
+    pub(super) fn is_explicit_ignore(&self) -> bool {
+        matches!(self, Self::Ignore)
+    }
+
+    pub(super) fn is_default_ignore(&self) -> bool {
+        matches!(self, Self::Default(fp) if *fp as usize == ignore as *const () as usize)
+    }
+
+    pub(super) fn is_default_stop(&self) -> bool {
+        matches!(self, Self::Default(fp) if *fp as usize == stop as *const () as usize)
+    }
+
+    pub(super) fn is_default_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Default(fp)
+                if *fp as usize == terminate as *const () as usize
+                    || *fp as usize == core_dump as *const () as usize
+        )
+    }
 }
 
 impl SigNo {

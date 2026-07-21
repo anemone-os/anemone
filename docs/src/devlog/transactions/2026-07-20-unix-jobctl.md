@@ -5,7 +5,7 @@
 **Area:** signal / task / process group / user entry / wait ABI / procfs
 **Canonical Plan:** [RFC-20260720-unix-jobctl](../../rfcs/unix-jobctl/index.md), [目标与不变量](../../rfcs/unix-jobctl/invariants.md), [迁移实施计划](../../rfcs/unix-jobctl/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 2 closed; Stage 3A Not Started
+**Current Phase:** Stage 3A closed; Stage 3B Not Started
 
 ## Scope
 
@@ -13,9 +13,10 @@
 根模块按既有职责做行为保持型目录化拆分；Stage 1 建立 ThreadGroup-owned dormant
 job-control state、membership exposure与统一 user-entry gate，但没有 production stop /
 continue ingress。Stage 2贯通generation-time `SIGSTOP / SIGCONT`、child report、wait ABI、
-SIGCHLD、procfs projection与单线程production runtime，但candidate在后续closure与`UJ-CUTOVER`
-前保持non-publishable。`UJ-CUTOVER`为None；全部current contract保持effective，pending
-successor仅作导航，Stage 3A未开始。
+SIGCHLD、procfs projection与单线程production runtime；Stage 3A随后完成conditional control、
+reservation与temporary-mask closure。candidate在后续closure与`UJ-CUTOVER`前保持non-publishable。
+`UJ-CUTOVER`为None；全部current contract保持effective，pending successor仅作导航，Stage 3B
+尚未开始。
 
 ## Contract and register boundary
 
@@ -393,3 +394,90 @@ ABI、visible semantics、acceptance或`UJ-CUTOVER=None`。
 
 **Result:** Stage 2 checkpoint closed。candidate train保持non-publishable，current contracts仍为
 effective，`UJ-CUTOVER=None`。Stage 3A未获授权且未进入。
+
+## Stage 3A preflight and resolved write-set manifest - 2026-07-21
+
+**Authority:** 用户本轮明确授权完成Stage 3；本checkpoint只激活3A，不提前进入3B。Stage 2已经
+关闭且candidate保持non-publishable，current contracts继续effective，`UJ-CUTOVER=None`。
+
+**Producer / owner inventory:** `kill / tkill / tgkill / rt_sigqueueinfo`、普通
+`Task::recv_signal()`、`ThreadGroup::recv_signal()`与`ProcessGroup::recv_signal()`最终都经过
+`generation.rs`的private、shared、exact-member或expected-PGID route。private/shared pending、
+unreliable/realtime occurrence与task-private reservation由`PendingSignals`拥有；temporary-mask
+linear token由`TaskSigMaskState`拥有，只有Signal classifier可以把一个已claim occurrence移入
+reservation。live disposition、handler-frame commit、no-frame restore与no-return terminal action
+仍由Signal delivery owner负责。ThreadGroup只拥有continue epoch、phase、exposure与report；wait、
+procfs、Event与architecture entry不保存epoch或reservation truth。
+clone / clone3还允许保存任意合法terminate signal；child exit在`task/api/exit/mod.rs`把该signal
+交给parent `ThreadGroup::recv_signal()`，所以该链同样作为只读producer纳入审计，统一generation
+facade已经覆盖它，不需要producer-local改动。
+
+**Lock / call graph probe:** control generation保持`exact identity / topology -> ThreadGroup owner ->
+at most one private/shared Signal leaf`；conditional occurrence在同一owner transaction捕获窄
+`ContinueEpoch`后才进入ordinary pending。delivery claim在ThreadGroup phase read guard下进入
+Signal leaf，避免已经处于Stopping / Stopped时claim普通async occurrence；claimed signal释放guard
+后执行live action，最终user-entry gate仍重验terminal与phase。没有发现需要反向锁、second queue、
+persistent carrier、generic final-consumption framework、wait-core或scheduler状态的证据。
+
+**Resolved Write Set Manifest:** authoritative manifest已冻结在
+[Stage 3A实施段](../../rfcs/unix-jobctl/implementation.md#当前-resolved-write-set-manifest2026-07-21-1)：
+
+- `anemone-kernel/src/task/sig/{mod,info,pending,generation,delivery,disposition}.rs`
+- `anemone-kernel/src/task/jobctl/group.rs`
+- `anemone-kernel/src/task/api/exit/mod.rs`（仅纠正既有child-exit siginfo code）
+- `anemone-apps/jobctl-test/src/main.rs`
+- `docs/src/rfcs/unix-jobctl/{index,implementation}.md`
+- `docs/src/rfcs.md`
+- `docs/src/devlog/2026-07-06_to_2026-07-19.md`
+- 本transaction文件
+
+`task/sig/mask.rs`、control syscall producer文件、`rt_sigaction / rt_sigsuspend`、`ppoll /
+pselect6`、topology/lifecycle、wait/report、procfs、architecture、scheduler、rootfs与current contract
+正文只读。任何真实owner修复若需越界，必须先按停止合同报告并扩展manifest。
+
+**Frozen validation / review floor:** `just fmt kernel --check`、`just fmt jobctl-test --check`、
+`just build`、RV64 wrapper与`git diff --check`；focused case覆盖caught / ignored / masked conditional
+stop、private/shared competition、opposite-class cleanup、reserved old SIGCONT、temporary-mask
+handler/no-frame cleanup、SA_NODEFER、SA_RESETHAND、frame failure与SIGKILL dominance。冻结的signal /
+wait profile相对Stage 2不得新增回退；LA64只做source/build closure。3A关闭前独立review必须为
+Apollyon 0、Keter 0、Euclid 0。
+
+## Stage 3A synchronous-fault authority correction - 2026-07-21
+
+**Finding:** 独立代码review确认一个Apollyon：Stopped-phase fetch原先只检查
+`SiCode::Kernel + default terminal`，但该code还被child exit signal、SIGPIPE、OOM与group-exit
+producer使用。于是普通可屏蔽异步terminal signal可能在Stopped期间提前执行default action，违反
+只允许kernel-generated synchronous fault no-return action支配jobctl gate的target。
+
+**Approved write-set expansion and repair:** 用户批准把`task/sig/info.rs`加入3A exact manifest，
+并允许必要时扩到`anemone-rs`。当前typed `SigInfoFields::Fault / Ill`已经完整标识现有同步fault
+producer，因此修复只在Signal owner内组合`SiCode::Kernel`与typed fields形成窄判定；异步
+`Kill / Chld`不再取得同步authority。`anemone-rs`无需修改，不进入实际write set。Linux 6.6的
+child-exit siginfo使用`CLD_EXITED / CLD_KILLED / CLD_DUMPED`，而当前Anemone exit producer使用
+`SiCode::Kernel + Chld`是既有ABI缺口；本checkpoint不修改exit producer，也不把该旧问题改写成
+R0 target或3A责任。
+
+**Validation:** 新增focused runtime case，使Stopped child只在收到`SIGCONT`后才处理grandchild
+产生的异步clone exit signal；重新执行3A完整format、双架构build、RV64 wrapper、profile与独立
+review floor。
+
+## Stage 3A child-exit siginfo correction - 2026-07-21
+
+**Correction to the prior boundary:** 用户随后明确批准修改exit producer，只要改动局限于它产生的
+signal。3A exact manifest因此加入`task/api/exit/mod.rs`；该producer现有child-layout fields保持
+不变，只按`ExitCode`选择Linux 6.6对应的`CLD_EXITED`或`CLD_KILLED`，不再错误使用
+`SI_KERNEL`。这项既有ABI纠正不改变exit lifecycle、parent选择、notification ordering、R0 target、
+current contract或`UJ-CUTOVER=None`；`anemone-rs`仍无实际修改需求。
+
+## Stage 3A closeout - 2026-07-21
+
+**Stage 3A result:** frozen manifest implementation is complete. The current candidate passes 184
+KUnit tests and all 13 focused `jobctl-test` cases. The same RV64 wrapper input records glibc/musl
+`wait=19/19` and aggregate `attempted=112 passed=98 failed=10 infra_failed=0 skipped=4`, followed by
+normal shutdown. Independent review is Apollyon 0, Keter 0, Euclid 0. The generated-file-only
+kernel formatting drift remains pre-existing and is not authored source. No current contract or
+register effective rule changes; `UJ-CUTOVER=None`.
+
+**Stage 3A closure:** `INV-CONTROL-TXN` is evidenced by generation-time opposite cleanup and epoch
+capture, phase-aware delivery, reserved-delivery ownership, and the focused stale-epoch / reserved
+SIGCONT / temporary-mask cases. The candidate remains non-publishable.

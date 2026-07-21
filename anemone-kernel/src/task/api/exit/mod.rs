@@ -162,9 +162,13 @@ pub fn kernel_exit(code: ExitCode) -> ! {
                     .leader()
                     .map(|leader| leader.cred().uid.real)
                     .unwrap_or_else(|| task.cred().uid.real);
+                let code = match xcode {
+                    ExitCode::Exited(_) => SiCode::ChldExited,
+                    ExitCode::Signaled(_) => SiCode::ChldKilled,
+                };
                 parent_tg.recv_signal(Signal::new(
                     terminate_signal,
-                    SiCode::Kernel,
+                    code,
                     SigInfoFields::Chld(SigChld {
                         pid: tg.tgid(),
                         uid,

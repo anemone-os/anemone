@@ -20,7 +20,10 @@ use anemone_abi::process::linux::{signal as linux_signal, signal::NSIG};
 use crate::{
     prelude::*,
     syscall::handler::TryFromSyscallArg,
-    task::sig::info::{SiCode, SigInfoFields},
+    task::{
+        jobctl::group::ContinueEpoch,
+        sig::info::{SiCode, SigInfoFields},
+    },
 };
 
 mod api;
@@ -117,6 +120,9 @@ pub struct Signal {
     code: SiCode,
     /// Various information about the signal, depends on `code`.
     fields: SigInfoFields,
+    /// Narrow stale-candidate authority for conditional default-stop signals.
+    /// This ordering token never identifies an occurrence, report, or phase.
+    default_stop_epoch: Option<ContinueEpoch>,
 }
 
 impl Signal {
@@ -131,6 +137,7 @@ impl Signal {
             errno: 0,
             code,
             fields,
+            default_stop_epoch: None,
         }
     }
 
@@ -148,7 +155,30 @@ impl Signal {
             errno,
             code,
             fields,
+            default_stop_epoch: None,
         }
+    }
+
+    fn set_default_stop_epoch(&mut self, epoch: ContinueEpoch) {
+        assert!(
+            matches!(self.no, SigNo::SIGTSTP | SigNo::SIGTTIN | SigNo::SIGTTOU),
+            "only conditional default-stop signals may carry ContinueEpoch"
+        );
+        assert!(
+            self.default_stop_epoch.replace(epoch).is_none(),
+            "conditional default-stop occurrence already carries ContinueEpoch"
+        );
+    }
+
+    fn default_stop_epoch(&self) -> Option<ContinueEpoch> {
+        self.default_stop_epoch
+    }
+
+    fn is_kernel_synchronous_fault(&self) -> bool {
+        // SI_KERNEL also describes asynchronous producers such as SIGPIPE and
+        // internal SIGKILL. Only typed fault/illegal-instruction fields prove
+        // that an occurrence arose from the current user exception.
+        matches!(self.code, SiCode::Kernel) && self.fields.is_synchronous_fault()
     }
 
     pub fn to_linux_siginfo(self) -> SigInfoWrapper {

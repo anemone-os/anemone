@@ -15,7 +15,10 @@ use crate::{
     },
 };
 
-use super::{RtSigFrame, SigNo, Signal, SignalArchTrait};
+use super::{
+    RtSigFrame, SigNo, Signal, SignalArchTrait, disposition::SignalDisposition,
+    pending::FetchedSignal,
+};
 
 /// Typed wait outcome candidate for delayed temporary-mask classification.
 ///
@@ -131,28 +134,46 @@ impl Task {
     /// Masked signals won't be fetched.
     ///
     /// See [PendingSignals::fetch_any] for the order of fetching signals.
-    pub fn fetch_signal(&self) -> Option<Signal> {
-        // first private pending
+    fn fetch_signal(&self) -> Option<FetchedSignal> {
+        let tg = self.get_thread_group();
+        let tg_inner = tg.inner.read();
+        let phase = match tg_inner.status.life_cycle() {
+            ThreadGroupLifeCycle::Alive => {
+                if tg_inner
+                    .job_control
+                    .as_ref()
+                    .expect("jobctl: user ThreadGroup lacks control state")
+                    .is_running()
+                {
+                    SignalFetchPhase::Running
+                } else {
+                    SignalFetchPhase::Stopped
+                }
+            },
+            ThreadGroupLifeCycle::Exiting(_) | ThreadGroupLifeCycle::Exited(_) => return None,
+        };
+
+        // The ThreadGroup owner read guard serializes phase selection with
+        // control generation. Pending claim then follows the established
+        // ThreadGroup -> Signal-leaf direction.
         {
             let mut pending = self.sig_pending.lock();
             let mask = self.snapshot_current_sig_mask();
-            if let Some(signal) = pending.fetch_any(mask) {
+            let dispositions = self.sig_disposition.read();
+            if let Some(signal) = pending.fetch_matching(mask, |signal, reserved| {
+                phase.allows(signal, reserved, &dispositions)
+            }) {
                 return Some(signal);
             }
         }
 
-        // no private signals satisfied the criteria. check shared pending signals.
-        {
-            let tg = self.get_thread_group();
-            let tg_inner = tg.inner.read();
-            let mut pending = tg_inner.sig_pending.lock();
-            let mask = self.snapshot_current_sig_mask();
-            if let Some(signal) = pending.fetch_any(mask) {
-                return Some(signal);
-            }
-        }
-
-        None
+        let mut pending = tg_inner.sig_pending.lock();
+        let mask = self.snapshot_current_sig_mask();
+        let dispositions = self.sig_disposition.read();
+        pending.fetch_matching(mask, |signal, reserved| {
+            assert!(!reserved, "shared pending cannot contain a reservation");
+            phase.allows(signal, false, &dispositions)
+        })
     }
 
     /// See [PendingSignals::fetch_specific] for more details.
@@ -307,6 +328,33 @@ impl Task {
     }
 }
 
+#[derive(Clone, Copy)]
+enum SignalFetchPhase {
+    Running,
+    Stopped,
+}
+
+impl SignalFetchPhase {
+    fn allows(self, signal: &Signal, reserved: bool, dispositions: &SignalDisposition) -> bool {
+        if matches!(self, Self::Running) {
+            return true;
+        }
+        if signal.no == SigNo::SIGKILL || reserved && signal.no == SigNo::SIGCONT {
+            return true;
+        }
+
+        let action = dispositions.get_disposition(signal.no).action;
+        if matches!(signal.no, SigNo::SIGTSTP | SigNo::SIGTTIN | SigNo::SIGTTOU)
+            && signal.default_stop_epoch().is_some()
+            && action.is_default_stop()
+        {
+            return true;
+        }
+
+        signal.is_kernel_synchronous_fault() && action.is_default_terminal()
+    }
+}
+
 fn force_signal_set() -> SigSet {
     SigSet::new_with_signos(&[SigNo::SIGKILL, SigNo::SIGSTOP])
 }
@@ -366,10 +414,22 @@ pub fn handle_signals(
 ) {
     let mut committed_handler_frame = false;
     loop {
-        if let Some(signal) = get_current_task().fetch_signal() {
-            if perform_signal_action(signal, trapframe, &mut restart_syscall) {
-                committed_handler_frame = true;
-                break;
+        if let Some(FetchedSignal { signal, reserved }) = get_current_task().fetch_signal() {
+            match perform_signal_action(signal, trapframe, &mut restart_syscall) {
+                SignalActionResult::Continue => {
+                    if reserved {
+                        // Reservation retirement ends this ordinary scan even
+                        // when live action selection produced no handler frame.
+                        // Signal remains the sole owner of temporary-mask
+                        // cleanup below.
+                        break;
+                    }
+                },
+                SignalActionResult::HandlerFrame => {
+                    committed_handler_frame = true;
+                    break;
+                },
+                SignalActionResult::EndScanNoFrame => break,
             }
         } else {
             break;
@@ -384,16 +444,19 @@ pub fn handle_signals(
     }
 }
 
-/// Return `true` if the signal handler is a user-defined handler and we just
-/// prepare the signal frame, then get into the handler in the common
-/// trap-return path.
+/// Report whether action selection may continue scanning, committed a handler
+/// frame, or consumed an action that must hand control back to the entry gate.
+enum SignalActionResult {
+    Continue,
+    HandlerFrame,
+    EndScanNoFrame,
+}
+
 fn perform_signal_action(
     signal: Signal,
     trapframe: &mut TrapFrame,
     restart_syscall: &mut Option<(RestartSyscall, SyscallCtx)>,
-) -> bool {
-    let mut break_loop = false;
-
+) -> SignalActionResult {
     let no = signal.no;
     let task = get_current_task();
     let KSigAction {
@@ -405,12 +468,31 @@ fn perform_signal_action(
 
     match action {
         SignalAction::Default(default) => {
-            drop(task);
-            default(no);
-            return false;
+            if action.is_default_stop() {
+                let expected_continue_epoch = signal.default_stop_epoch().unwrap_or_else(|| {
+                    panic!(
+                        "jobctl: default-stop signal {:?} lacks conditional authority",
+                        no
+                    )
+                });
+                task.get_thread_group()
+                    .request_conditional_job_control_stop(&task, no, expected_continue_epoch);
+                return SignalActionResult::EndScanNoFrame;
+            } else {
+                if action.is_default_terminal() {
+                    // A reserved occurrence may select a terminal action after
+                    // temporary-mask defer. No trap-return cleanup will run on
+                    // this path, so Signal must retire the restore slot before
+                    // handing control to lifecycle teardown.
+                    task.restore_temporary_sig_mask_if_pending();
+                }
+                drop(task);
+                default(no);
+            }
+            return SignalActionResult::Continue;
         },
         SignalAction::Ignore => {
-            // do nothing.
+            return SignalActionResult::Continue;
         },
         SignalAction::Custom(handler_addr) => {
             let mask_to_save = task.sigmask_to_save_for_signal_frame();
@@ -521,6 +603,10 @@ fn perform_signal_action(
                     task.tid(),
                     e
                 );
+                // Frame construction failed after Signal took ownership of a
+                // possible deferred restore. The terminal path never reaches
+                // handle_signals() no-frame cleanup or rt_sigreturn().
+                task.restore_temporary_sig_mask_if_pending();
                 kernel_exit_group(ExitCode::Signaled(SigNo::SIGSEGV))
             }
 
@@ -538,7 +624,6 @@ fn perform_signal_action(
             }
 
             task.signal_frame_committed_restore_mask();
-            break_loop = true;
         },
     }
 
@@ -546,5 +631,5 @@ fn perform_signal_action(
         task.sig_disposition.write().set_to_default(no);
     }
 
-    break_loop
+    SignalActionResult::HandlerFrame
 }

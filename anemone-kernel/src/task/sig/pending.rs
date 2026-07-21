@@ -33,6 +33,11 @@ pub struct PendingSignals {
     realtime: [VecDeque<Signal>; NRTSIG],
 }
 
+pub(super) struct FetchedSignal {
+    pub(super) signal: Signal,
+    pub(super) reserved: bool,
+}
+
 impl PendingSignals {
     pub fn new() -> Self {
         Self {
@@ -89,11 +94,82 @@ impl PendingSignals {
     ///
     /// TODO: fetch_any_with() for custom order.
     pub fn fetch_any(&mut self, mask: SigSet) -> Option<Signal> {
-        if let Some(signal) = self.reserved_delivery.take() {
-            return Some(signal);
+        self.fetch_matching(mask, |_, _| true)
+            .map(|fetched| fetched.signal)
+    }
+
+    /// Claim the first signal permitted by the current user-entry phase.
+    ///
+    /// A disallowed reservation stays task-private and final. Unreserved
+    /// occurrences stay in their original pending owner; this helper never
+    /// dequeues and republishes a rejected candidate.
+    pub(super) fn fetch_matching(
+        &mut self,
+        mask: SigSet,
+        mut allowed: impl FnMut(&Signal, bool) -> bool,
+    ) -> Option<FetchedSignal> {
+        if self
+            .reserved_delivery
+            .as_ref()
+            .is_some_and(|signal| allowed(signal, true))
+        {
+            return self.reserved_delivery.take().map(|signal| FetchedSignal {
+                signal,
+                reserved: true,
+            });
         }
 
-        self.fetch_unreserved_any(mask)
+        debug_assert!(
+            !mask.intersects_with(&SigSet::new_with_signos(&[SigNo::SIGKILL, SigNo::SIGSTOP])),
+            "SIGKILL and SIGSTOP cannot be masked"
+        );
+
+        for no in [SigNo::SIGKILL, SigNo::SIGSTOP] {
+            if self.unreliable[no.as_usize()]
+                .as_ref()
+                .is_some_and(|signal| allowed(signal, false))
+            {
+                return self.unreliable[no.as_usize()]
+                    .take()
+                    .map(|signal| FetchedSignal {
+                        signal,
+                        reserved: false,
+                    });
+            }
+        }
+
+        for (idx, queue) in self.realtime.iter_mut().enumerate() {
+            let no = SigNo::new(SIGRTMIN as usize + idx);
+            if mask.get(no) {
+                continue;
+            }
+            if queue.front().is_some_and(|signal| allowed(signal, false)) {
+                return queue.pop_front().map(|signal| FetchedSignal {
+                    signal,
+                    reserved: false,
+                });
+            }
+        }
+
+        for no in 1..SIGRTMIN as usize {
+            let no = SigNo::new(no);
+            if mask.get(no) {
+                continue;
+            }
+            if self.unreliable[no.as_usize()]
+                .as_ref()
+                .is_some_and(|signal| allowed(signal, false))
+            {
+                return self.unreliable[no.as_usize()]
+                    .take()
+                    .map(|signal| FetchedSignal {
+                        signal,
+                        reserved: false,
+                    });
+            }
+        }
+
+        None
     }
 
     pub(super) fn fetch_unreserved_any(&mut self, mask: SigSet) -> Option<Signal> {
@@ -280,5 +356,42 @@ impl ThreadGroup {
     /// Return a snapshot of this thread group's shared pending signal set.
     pub fn shared_pending_signal_set(&self) -> SigSet {
         self.inner.read().sig_pending.lock().to_sigset()
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use crate::task::sig::info::{SiCode, SigInfoFields, SigKill};
+
+    fn user_signal(no: SigNo) -> Signal {
+        Signal::new(
+            no,
+            SiCode::User,
+            SigInfoFields::Kill(SigKill {
+                pid: Tid::new(2),
+                uid: Uid::new(0),
+            }),
+        )
+    }
+
+    #[kunit]
+    fn test_reserved_sigcont_survives_stop_class_cleanup() {
+        let mut pending = PendingSignals::new();
+        pending.push_signal(user_signal(SigNo::SIGCONT));
+        assert!(pending.reserve_any_for_delivery(SigSet::new()));
+        pending.push_signal(user_signal(SigNo::SIGCONT));
+
+        pending.flush_specific(SigSet::new_with_signos(&[SigNo::SIGCONT]));
+        assert_eq!(pending.reserved_delivery_signo(), Some(SigNo::SIGCONT));
+
+        let fetched = pending
+            .fetch_matching(SigSet::new(), |signal, reserved| {
+                reserved && signal.no == SigNo::SIGCONT
+            })
+            .expect("reserved SIGCONT must remain claimable");
+        assert!(fetched.reserved);
+        assert_eq!(fetched.signal.no, SigNo::SIGCONT);
+        assert!(!pending.has_specific(SigSet::new_with_signos(&[SigNo::SIGCONT])));
     }
 }

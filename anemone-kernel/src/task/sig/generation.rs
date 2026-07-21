@@ -2,9 +2,21 @@ use crate::{
     prelude::*,
     task::{
         Task, ThreadGroup, ThreadGroupInner,
+        jobctl::group::ContinueEpoch,
         sig::{SigNo, Signal, disposition::SignalDisposition, set::SigSet},
     },
 };
+
+fn is_job_control_signal(no: SigNo) -> bool {
+    matches!(
+        no,
+        SigNo::SIGSTOP | SigNo::SIGTSTP | SigNo::SIGTTIN | SigNo::SIGTTOU | SigNo::SIGCONT
+    )
+}
+
+fn is_conditional_stop_signal(no: SigNo) -> bool {
+    matches!(no, SigNo::SIGTSTP | SigNo::SIGTTIN | SigNo::SIGTTOU)
+}
 
 impl Task {
     /// Send a signal to this task (I.e. let this task receive a signal).
@@ -23,7 +35,7 @@ impl Task {
         kdebugln!("task {} recv_signal: {:?}", self.tid(), signal);
         let no = signal.no;
 
-        if matches!(no, SigNo::SIGSTOP | SigNo::SIGCONT) {
+        if is_job_control_signal(no) {
             let Some(tg) = get_thread_group(&self.tgid()) else {
                 // A sender can retain a Task Arc after topology detach. The
                 // concrete task identity is no longer a signal target then.
@@ -82,7 +94,7 @@ impl ThreadGroup {
     pub fn recv_signal(&self, signal: Signal) {
         let no = signal.no;
 
-        if matches!(no, SigNo::SIGSTOP | SigNo::SIGCONT) {
+        if is_job_control_signal(no) {
             self.recv_job_control_signal(signal, JobControlSignalRoute::Shared);
             return;
         }
@@ -153,7 +165,7 @@ impl ThreadGroup {
     /// identity originally resolved by the syscall. The ordinary occurrence
     /// remains shared; only its generation authority is task-specific.
     pub(in crate::task) fn recv_signal_for_exact_member(&self, signal: Signal, target: &Arc<Task>) {
-        if matches!(signal.no, SigNo::SIGSTOP | SigNo::SIGCONT) {
+        if is_job_control_signal(signal.no) {
             self.recv_job_control_signal(
                 signal,
                 JobControlSignalRoute::SharedForExactMember(target),
@@ -171,7 +183,7 @@ impl ThreadGroup {
         signal: Signal,
         expected_pgid: Tid,
     ) {
-        if matches!(signal.no, SigNo::SIGSTOP | SigNo::SIGCONT) {
+        if is_job_control_signal(signal.no) {
             self.recv_job_control_signal(
                 signal,
                 JobControlSignalRoute::SharedForProcessGroup(expected_pgid),
@@ -181,12 +193,12 @@ impl ThreadGroup {
         }
     }
 
-    /// Commit SIGSTOP/SIGCONT generation in the ThreadGroup control-ordering
-    /// domain. A task-directed occurrence still has a group-wide side effect,
-    /// while its ordinary SIGCONT occurrence remains task-private.
-    fn recv_job_control_signal(&self, signal: Signal, route: JobControlSignalRoute<'_>) {
+    /// Commit control-signal generation in the ThreadGroup ordering domain.
+    /// A task-directed occurrence still has a group-wide control effect, while
+    /// its ordinary mask/disposition occurrence remains task-private.
+    fn recv_job_control_signal(&self, mut signal: Signal, route: JobControlSignalRoute<'_>) {
         let no = signal.no;
-        assert!(matches!(no, SigNo::SIGSTOP | SigNo::SIGCONT));
+        assert!(is_job_control_signal(no));
 
         // Topology selects the exact live member objects before the child owner
         // admits any cleanup, phase mutation, or parent-visible report. The
@@ -232,7 +244,7 @@ impl ThreadGroup {
                     );
                 }
 
-                let opposite = if no == SigNo::SIGSTOP {
+                let opposite = if no != SigNo::SIGCONT {
                     SigSet::new_with_signos(&[SigNo::SIGCONT])
                 } else {
                     SigSet::new_with_signos(&[
@@ -249,44 +261,65 @@ impl ThreadGroup {
                     member.sig_pending.lock().flush_specific(opposite);
                 }
 
-                let transition = if no == SigNo::SIGSTOP {
-                    if self.tgid() == Tid::INIT {
-                        // Global init admits the concrete generation and cleanup,
-                        // but can never obtain stop authority.
-                        crate::task::jobctl::group::JobControlTransition::NONE
-                    } else {
-                        let ThreadGroupInner {
-                            members,
-                            job_control,
-                            ..
-                        } = &mut *inner;
-                        job_control
-                            .as_mut()
-                            .expect("jobctl: user ThreadGroup lacks control state")
-                            .request_unconditional_stop(members, self.tgid(), no)
-                    }
-                } else {
-                    inner
+                let transition = match no {
+                    SigNo::SIGSTOP => {
+                        if self.tgid() == Tid::INIT {
+                            // Global init admits the concrete generation and
+                            // cleanup, but can never obtain stop authority.
+                            crate::task::jobctl::group::JobControlTransition::NONE
+                        } else {
+                            let ThreadGroupInner {
+                                members,
+                                job_control,
+                                ..
+                            } = &mut *inner;
+                            job_control
+                                .as_mut()
+                                .expect("jobctl: user ThreadGroup lacks control state")
+                                .request_unconditional_stop(members, self.tgid(), no)
+                        }
+                    },
+                    SigNo::SIGCONT => inner
                         .job_control
                         .as_mut()
                         .expect("jobctl: user ThreadGroup lacks control state")
-                        .continue_generation(self.tgid())
+                        .continue_generation(self.tgid()),
+                    _ => {
+                        assert!(is_conditional_stop_signal(no));
+                        let epoch = inner
+                            .job_control
+                            .as_ref()
+                            .expect("jobctl: user ThreadGroup lacks control state")
+                            .continue_epoch();
+                        signal.set_default_stop_epoch(epoch);
+                        crate::task::jobctl::group::JobControlTransition::NONE
+                    },
                 };
 
-                let notify_targets = if no == SigNo::SIGCONT {
+                let notify_targets = if no == SigNo::SIGSTOP {
+                    // SIGSTOP is consumed as control input and never enters an
+                    // ordinary pending queue or force-completes an active wait.
+                    Vec::new()
+                } else {
                     let private_target = route.private_target();
                     let occurrence_owner = private_target
                         .cloned()
                         .or_else(|| members.first().cloned())
                         .expect("jobctl: live ThreadGroup has no signal disposition owner");
                     let disposition = occurrence_owner.sig_disposition.read().get_disposition(no);
-                    // Linux preserves a blocked occurrence even when its live
-                    // action currently defaults to ignore: userspace may
-                    // install a handler before unblocking it. The group-resume
-                    // side effect above remains generation-only either way.
-                    if disposition.action.is_ignored()
-                        && !occurrence_owner.is_current_sig_mask_blocking(no)
-                    {
+                    // Linux preserves a blocked default SIGCONT occurrence so
+                    // userspace can install a handler before unblocking it. A
+                    // conditional stop with explicit SIG_IGN follows ordinary
+                    // generation semantics and is discarded after cleanup.
+                    let discard = if no == SigNo::SIGCONT {
+                        disposition.action.is_explicit_ignore()
+                            || disposition.action.is_default_ignore()
+                                && !occurrence_owner.is_current_sig_mask_blocking(no)
+                    } else {
+                        assert!(is_conditional_stop_signal(no));
+                        disposition.action.is_ignored()
+                    };
+                    if discard {
                         Vec::new()
                     } else if let Some(target) = private_target {
                         target.sig_pending.lock().push_signal(signal);
@@ -295,10 +328,6 @@ impl ThreadGroup {
                         inner.sig_pending.lock().push_signal(signal);
                         members.to_vec()
                     }
-                } else {
-                    // SIGSTOP is consumed as control input and never enters an
-                    // ordinary pending queue or force-completes an active wait.
-                    Vec::new()
                 };
                 (notify_targets, transition)
             })
@@ -312,6 +341,39 @@ impl ThreadGroup {
                 notify(&member, false);
             }
         }
+    }
+
+    /// Consume one live conditional default-stop occurrence. The occurrence
+    /// was already claimed by Signal; this transaction only validates its
+    /// narrow epoch authority and commits owner-local job-control effects.
+    pub(in crate::task) fn request_conditional_job_control_stop(
+        &self,
+        task: &Arc<Task>,
+        no: SigNo,
+        expected_continue_epoch: ContinueEpoch,
+    ) {
+        assert!(is_conditional_stop_signal(no));
+        let Some(((), transition)) = self.with_child_status_transaction(|members, inner| {
+            let live_member = task.tgid() == self.tgid()
+                && members.iter().any(|member| Arc::ptr_eq(member, task));
+            if !matches!(inner.status.life_cycle(), ThreadGroupLifeCycle::Alive) || !live_member {
+                return ((), crate::task::jobctl::group::JobControlTransition::NONE);
+            }
+
+            let ThreadGroupInner {
+                members,
+                job_control,
+                ..
+            } = inner;
+            let transition = job_control
+                .as_mut()
+                .expect("jobctl: user ThreadGroup lacks control state")
+                .request_conditional_stop(members, self.tgid(), no, expected_continue_epoch);
+            ((), transition)
+        }) else {
+            return;
+        };
+        self.finish_job_control_transition(transition);
     }
 }
 

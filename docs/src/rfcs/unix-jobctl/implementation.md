@@ -5,7 +5,7 @@
 **父 RFC：** [RFC-20260720-unix-jobctl](./index.md)
 **目标与不变量：** [Unix Job Control 目标与不变量](./invariants.md)
 **当前修订：** R0
-**事务日志：** [2026-07-20-unix-jobctl](../../devlog/transactions/2026-07-20-unix-jobctl.md)；Stage 0、Stage 1 与 Stage 2 checkpoint 已关闭，Stage 3A 未开始。
+**事务日志：** [2026-07-20-unix-jobctl](../../devlog/transactions/2026-07-20-unix-jobctl.md)；Stage 0、Stage 1、Stage 2 与 Stage 3A checkpoint 已关闭，Stage 3B 尚未开始。
 **Contract Cutover：** `UJ-CUTOVER`；全部 `Introduce / Refine / Replace / Scoped Exception` delta 只在 Stage 5 原子生效。
 
 当前 effective contract：
@@ -34,7 +34,7 @@ R0 已接受并建立实现事务。接受与 transaction 创建不表示：
 - 任一 `JOBCTL-*` 或 `USER-ENTRY-002` 已经生效。
 
 Stage 0 仅是行为保持型 Signal module split checkpoint；Stage 1 与 Stage 2 已由
-2026-07-21 的明确授权完成并关闭，Stage 3A 及之后仍未授权。
+2026-07-21 的明确授权完成并关闭，Stage 3B 尚未开始。
 
 ### 1.1 废弃来源隔离
 
@@ -143,7 +143,7 @@ task::wait / lifecycle / procfs
 | Stage 0 | Signal module split-only | Closed | None | 行为保持型 checkpoint |
 | Stage 1 | ThreadGroup owner 与 mandatory-entry dormant foundation | Closed | None | target readiness；无 stop ingress |
 | Stage 2 | 单线程 integrated production vertical slice | Closed | None | non-publishable candidate train 开始 |
-| Stage 3A | conditional control signal、reservation 与 temporary-mask closure | Not Started | None | non-publishable candidate checkpoint |
+| Stage 3A | conditional control signal、reservation 与 temporary-mask closure | Closed | None | non-publishable candidate checkpoint |
 | Stage 3B | 多成员 exposure、lifecycle 与 topology closure | Not Started | None | non-publishable candidate checkpoint |
 | Stage 4 | ABI、竞态、旁路与 production validation closure | Not Started | None | verified candidate；仍不可发布 |
 | Stage 5 | current contract 与完整实现原子生效 | Not Started | `UJ-CUTOVER` 全部 target delta | integrated publishable unit |
@@ -542,6 +542,43 @@ transaction；若改变owner、target或ABI则回RFC review：
 - `anemone-apps/jobctl-test/`中的conditional stop、reservation、temporary-mask与SIGCONT ordering case。
 - 其它topology/lifecycle、wait/report、procfs、architecture、scheduler、rootfs和current contract正文只读。
 
+#### 当前 Resolved Write Set Manifest（2026-07-21）
+
+Stage 2关闭后已经完成独立只读transition preflight；用户本轮明确授权完成整个Stage 3，因此3A在
+以下manifest冻结后进入Active：
+
+- `anemone-kernel/src/task/sig/{mod,info,pending,generation,delivery,disposition}.rs`
+- `anemone-kernel/src/task/jobctl/group.rs`
+- `anemone-kernel/src/task/api/exit/mod.rs`（仅纠正既有child-exit siginfo code）
+- `anemone-apps/jobctl-test/src/main.rs`
+- `docs/src/rfcs/unix-jobctl/{index,implementation}.md`
+- `docs/src/rfcs.md`
+- `docs/src/devlog/2026-07-06_to_2026-07-19.md`
+- `docs/src/devlog/transactions/2026-07-20-unix-jobctl.md`
+
+全部control-generation producer已经闭合到`Task::recv_signal()`、`ThreadGroup::recv_signal()`、
+exact-member与expected-PGID generation route；`kill / tkill / tgkill / rt_sigqueueinfo`和
+`ProcessGroup::recv_signal()`保持只读，不需要producer-local policy。clone / clone3保存的任意合法
+exit signal会在`task/api/exit/mod.rs`经parent `ThreadGroup::recv_signal()`生成，因此
+`task/api/clone/`与`task/api/exit/mod.rs`也纳入只读producer审计，但不需要修改。
+`task/sig/mask.rs`、
+`rt_sigaction / rt_sigsuspend`与`ppoll / pselect6`只作为现有temporary-mask owner和调用者审计面，
+不需要修改。Stage 2 wait/report、procfs、topology/lifecycle、architecture与rootfs wiring保持只读。
+
+冻结的lock/call方向为`exact identity / topology -> ThreadGroup owner -> at most one private/shared
+Signal leaf`。conditional occurrence只携带窄`ContinueEpoch`；reservation仍是task-private Signal
+truth，live action selection与temporary-mask cleanup仍由Signal delivery owner收口。若实现要求
+修改上述只读owner、引入second queue / persistent carrier / wait-core状态或改变target语义，立即
+触发3A停止合同。
+
+独立review发现`SiCode::Kernel`同时覆盖同步fault与child exit signal、SIGPIPE等异步kernel
+producer，不能单独作为Stopped期间no-return同步action的authority。用户批准把
+`task/sig/info.rs`加入本manifest；修复只从现有typed siginfo fields判定同步fault，不改producer
+API或R0 target。用户随后批准对child-exit producer作窄ABI纠正，因此`task/api/exit/mod.rs`只把
+现有child-layout siginfo从错误的`SI_KERNEL`改为对应`CLD_EXITED / CLD_KILLED`；不改变exit
+状态机、通知时序或jobctl owner。`anemone-rs`虽获条件扩展授权，但当前不需要修改，仍不进入
+exact manifest。
+
 #### 可观测性
 
 - temporary-mask / reserved SIGCONT case可以区分occurrence claim、live action selection、retirement、handler-frame commit与最终user-entry permit。
@@ -569,6 +606,27 @@ just build
 #### Contract Cutover
 
 None。
+
+#### Stage 3A closeout (2026-07-21)
+
+Stage 3A 已完成并关闭。`ContinueEpoch`、phase-aware pending fetch、task-private reserved
+delivery、opposite-class cleanup、temporary-mask handler/no-frame/no-return cleanup、live
+disposition、`SA_NODEFER` / `SA_ONESHOT`、frame failure 与 `SIGKILL` dominance 均已在冻结
+manifest 内收口；当前 contracts 保持 effective，`UJ-CUTOVER=None`。
+
+独立 review 清零 Apollyon、Keter、Euclid。review 期间确认并修复两项窄问题：Stopped-phase
+fetch 只能把 typed synchronous fault 作为 no-return terminal authority，child-exit siginfo
+改用 `CLD_EXITED` / `CLD_KILLED`；conditional `DefaultStop` action 结束当前 ordinary scan
+后回到 user-entry gate。两项修复均不改变 R0 target、owner、ABI acceptance boundary 或
+current contract。
+
+验证证据来自当前 candidate 的
+`build/unix-jobctl-stage3a-rv64.log`：184 项 KUnit、全部 13 个 `jobctl-test` focused case
+通过，glibc/musl `wait` 各 `19/19`，signal/wait profile 合计
+`attempted=112 passed=98 failed=10 infra_failed=0 skipped=4`，正常关机；相对 Stage 2
+没有新增 signal/wait 回退。`just fmt jobctl-test --check`、RV64 app build 与
+`git diff --check` 通过；`just fmt kernel --check` 仅报告未手工维护的 generated
+`kconfig_defs.rs` / `platform_defs.rs` whitespace。
 
 ### Checkpoint 3B：多成员 exposure、lifecycle 与 topology closure
 

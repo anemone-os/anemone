@@ -184,7 +184,7 @@ impl ThreadGroupMembers {
 /// Ordering identity advanced by each admitted `SIGCONT` generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
-pub(super) struct ContinueEpoch(u64);
+pub(in crate::task) struct ContinueEpoch(u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct StopEpisode {
@@ -256,8 +256,12 @@ impl UserJobControl {
         }
     }
 
-    pub(super) fn is_running(&self) -> bool {
+    pub(in crate::task) fn is_running(&self) -> bool {
         matches!(self.phase, JobControlPhase::Running { .. })
+    }
+
+    pub(in crate::task) fn continue_epoch(&self) -> ContinueEpoch {
+        self.continue_epoch
     }
 
     pub(in crate::task) fn request_unconditional_stop(
@@ -302,6 +306,32 @@ impl UserJobControl {
                 JobControlTransition::NONE
             },
         }
+    }
+
+    pub(in crate::task) fn request_conditional_stop(
+        &mut self,
+        members: &ThreadGroupMembers,
+        tgid: Tid,
+        reason: SigNo,
+        expected_continue_epoch: ContinueEpoch,
+    ) -> JobControlTransition {
+        if tgid == Tid::INIT {
+            // Global init consumes a live default-stop occurrence but can never
+            // obtain job-control stop authority.
+            return JobControlTransition::NONE;
+        }
+        if self.continue_epoch != expected_continue_epoch {
+            kdebugln!(
+                "jobctl: tgid={} rejected stale {:?} candidate epoch={:?} current={:?}",
+                tgid,
+                reason,
+                expected_continue_epoch,
+                self.continue_epoch,
+            );
+            return JobControlTransition::NONE;
+        }
+
+        self.request_unconditional_stop(members, tgid, reason)
     }
 
     pub(super) fn on_user_exposure_closed(
@@ -415,4 +445,38 @@ impl UserJobControl {
 
 fn episode_age(started_at: Instant) -> Duration {
     started_at.elapsed()
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn test_conditional_stop_rejects_stale_continue_epoch() {
+        let tgid = Tid::new(2);
+        let members = ThreadGroupMembers::new_user(tgid);
+        let mut job_control = UserJobControl::new_running();
+        let stale_epoch = job_control.continue_epoch();
+
+        assert!(
+            job_control
+                .continue_generation(tgid)
+                .parent_status
+                .is_none()
+        );
+        let rejected =
+            job_control.request_conditional_stop(&members, tgid, SigNo::SIGTSTP, stale_epoch);
+        assert!(rejected.parent_status.is_none());
+        assert!(job_control.is_running());
+        assert!(job_control.report.is_none());
+
+        let current_epoch = job_control.continue_epoch();
+        let accepted =
+            job_control.request_conditional_stop(&members, tgid, SigNo::SIGTSTP, current_epoch);
+        assert_eq!(
+            accepted.parent_status,
+            Some(ChildJobControlStatus::Stopped(SigNo::SIGTSTP))
+        );
+        assert!(matches!(job_control.phase, JobControlPhase::Stopped(_)));
+    }
 }

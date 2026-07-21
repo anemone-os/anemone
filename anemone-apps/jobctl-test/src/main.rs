@@ -2,8 +2,9 @@
 #![no_main]
 
 use core::{
+    mem::size_of,
     str,
-    sync::atomic::{AtomicI32, AtomicU32, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering},
 };
 
 use anemone_rs::{
@@ -12,14 +13,18 @@ use anemone_rs::{
             signal::{self as linux_signal, SigAction, SigInfo, SigInfoWrapper, SigSet},
             wait,
         },
-        syscall::{SYS_WAITID, syscall},
+        syscall::{SYS_RT_SIGSUSPEND, SYS_WAITID, syscall},
     },
     fs::OpenOptions,
     io::Read,
-    os::linux::process::{
-        self, WStatus, WStatusRaw, WaitFor, WaitOptions, sched_yield,
-        signal::{self, SigNo, SigProcMaskHow},
-        wait4,
+    os::linux::{
+        fs::{Fd, PipeFlags, close, pipe2, read, write},
+        process::{
+            self, MmapFlags, MmapProt, WStatus, WStatusRaw, WaitFor, WaitOptions, mmap, munmap,
+            sched_yield,
+            signal::{self, SigNo, SigProcMaskHow},
+            wait4,
+        },
     },
     prelude::*,
 };
@@ -33,12 +38,35 @@ static SIGCHLD_PID: AtomicI32 = AtomicI32::new(0);
 static SIGCHLD_UID: AtomicU32 = AtomicU32::new(0);
 static SIGCHLD_STATUS: AtomicI32 = AtomicI32::new(0);
 static SIGCONT_COUNT: AtomicUsize = AtomicUsize::new(0);
+static CONDITIONAL_COUNT: AtomicUsize = AtomicUsize::new(0);
+static NODEFER_IN_HANDLER: AtomicBool = AtomicBool::new(false);
+static NODEFER_REENTERED: AtomicBool = AtomicBool::new(false);
 
 #[anemone_rs::signal_handler]
 fn sigcont_handler(signo: SigNo) {
     if signo == SigNo::SIGCONT {
         SIGCONT_COUNT.fetch_add(1, Ordering::SeqCst);
     }
+}
+
+#[anemone_rs::signal_handler]
+fn conditional_handler(signo: SigNo) {
+    if matches!(signo, SigNo::SIGTSTP | SigNo::SIGTTIN | SigNo::SIGTTOU) {
+        CONDITIONAL_COUNT.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[anemone_rs::signal_handler]
+fn nodefer_handler(signo: SigNo) {
+    if signo != SigNo::SIGTSTP {
+        return;
+    }
+    if NODEFER_IN_HANDLER.swap(true, Ordering::SeqCst) {
+        NODEFER_REENTERED.store(true, Ordering::SeqCst);
+        return;
+    }
+    signal::raise(SigNo::SIGTSTP).expect("jobctl-test: nested SIGTSTP raise failed");
+    NODEFER_IN_HANDLER.store(false, Ordering::SeqCst);
 }
 
 #[anemone_rs::signal_handler(siginfo)]
@@ -78,6 +106,272 @@ fn install_sigcont_handler() -> Result<(), Errno> {
         sa_mask: SigSet { bits: 0 },
     };
     signal::sigaction(SigNo::SIGCONT, Some(&action), None)
+}
+
+fn install_handler(signo: SigNo, handler: *const (), flags: u64) -> Result<(), Errno> {
+    let action = SigAction {
+        sighandler: handler,
+        sa_flags: flags,
+        sa_restorer: core::ptr::null(),
+        sa_mask: SigSet { bits: 0 },
+    };
+    signal::sigaction(signo, Some(&action), None)
+}
+
+fn install_ignore(signo: SigNo) -> Result<(), Errno> {
+    install_handler(signo, linux_signal::SIG_IGN as *const (), 0)
+}
+
+fn install_default(signo: SigNo) -> Result<(), Errno> {
+    install_handler(signo, linux_signal::SIG_DFL as *const (), 0)
+}
+
+fn signal_set(signo: SigNo) -> SigSet {
+    SigSet {
+        bits: 1u64 << (signo.as_usize() - 1),
+    }
+}
+
+fn current_signal_mask() -> Result<SigSet, Errno> {
+    let mut mask = SigSet { bits: 0 };
+    signal::sigprocmask(SigProcMaskHow::Block, None, Some(&mut mask))?;
+    Ok(mask)
+}
+
+fn rt_sigsuspend(mask: &SigSet) -> Result<(), Errno> {
+    let result = unsafe {
+        syscall(
+            SYS_RT_SIGSUSPEND,
+            mask as *const SigSet as u64,
+            size_of::<SigSet>() as u64,
+            0,
+            0,
+            0,
+            0,
+        )
+    };
+    match result {
+        Err(EINTR) => Ok(()),
+        Err(errno) => Err(errno),
+        Ok(_) => Err(EIO),
+    }
+}
+
+struct ChildSync {
+    pid: u32,
+    control: Fd,
+}
+
+#[derive(Clone, Copy)]
+enum ChildScenario {
+    Yield,
+    Ignore(SigNo),
+    Catch(SigNo),
+    MaskedDefault(SigNo),
+    BlockedControlPair,
+    TemporaryDefaultStop(SigNo),
+    TemporarySigcontCustom,
+    TemporarySigcontDefault,
+    Nodefer,
+    Resethand,
+    FrameFailure,
+    CloneExitSignal,
+}
+
+fn child_ready(fd: Fd) -> Result<(), Errno> {
+    if write(fd, &[1])? != 1 {
+        return Err(EIO);
+    }
+    Ok(())
+}
+
+fn wait_release(fd: Fd) -> Result<(), Errno> {
+    let mut byte = [0u8; 1];
+    if read(fd, &mut byte)? != 1 {
+        return Err(EIO);
+    }
+    Ok(())
+}
+
+fn run_child_scenario(scenario: ChildScenario, ready: Fd, release: Fd) -> Result<(), Errno> {
+    match scenario {
+        ChildScenario::Yield => {
+            child_ready(ready)?;
+            loop {
+                sched_yield()?;
+            }
+        },
+        ChildScenario::Ignore(signo) => {
+            install_ignore(signo)?;
+            child_ready(ready)?;
+            wait_release(release)
+        },
+        ChildScenario::Catch(signo) => {
+            CONDITIONAL_COUNT.store(0, Ordering::SeqCst);
+            install_handler(signo, conditional_handler as *const (), 0)?;
+            child_ready(ready)?;
+            while CONDITIONAL_COUNT.load(Ordering::SeqCst) == 0 {
+                sched_yield()?;
+            }
+            Ok(())
+        },
+        ChildScenario::MaskedDefault(signo) => {
+            let set = signal_set(signo);
+            signal::sigprocmask(SigProcMaskHow::Block, Some(&set), None)?;
+            child_ready(ready)?;
+            wait_release(release)?;
+            signal::sigprocmask(SigProcMaskHow::Unblock, Some(&set), None)?;
+            loop {
+                sched_yield()?;
+            }
+        },
+        ChildScenario::BlockedControlPair => {
+            let mut set = signal_set(SigNo::SIGTSTP);
+            set.bits |= signal_set(SigNo::SIGCONT).bits;
+            signal::sigprocmask(SigProcMaskHow::Block, Some(&set), None)?;
+            child_ready(ready)?;
+            wait_release(release)?;
+            loop {
+                sched_yield()?;
+            }
+        },
+        ChildScenario::TemporaryDefaultStop(signo) => {
+            let set = signal_set(signo);
+            signal::sigprocmask(SigProcMaskHow::Block, Some(&set), None)?;
+            child_ready(ready)?;
+            rt_sigsuspend(&SigSet { bits: 0 })?;
+            if current_signal_mask()?.bits & set.bits == 0 {
+                return Err(EIO);
+            }
+            Ok(())
+        },
+        ChildScenario::TemporarySigcontCustom | ChildScenario::TemporarySigcontDefault => {
+            let custom = matches!(scenario, ChildScenario::TemporarySigcontCustom);
+            let set = signal_set(SigNo::SIGCONT);
+            signal::sigprocmask(SigProcMaskHow::Block, Some(&set), None)?;
+            if custom {
+                SIGCONT_COUNT.store(0, Ordering::SeqCst);
+                install_sigcont_handler()?;
+            }
+            child_ready(ready)?;
+            wait_release(release)?;
+            rt_sigsuspend(&SigSet { bits: 0 })?;
+            if current_signal_mask()?.bits & set.bits == 0 {
+                return Err(EIO);
+            }
+            if custom && SIGCONT_COUNT.load(Ordering::SeqCst) != 1 {
+                return Err(EIO);
+            }
+            Ok(())
+        },
+        ChildScenario::Nodefer => {
+            NODEFER_IN_HANDLER.store(false, Ordering::SeqCst);
+            NODEFER_REENTERED.store(false, Ordering::SeqCst);
+            install_handler(
+                SigNo::SIGTSTP,
+                nodefer_handler as *const (),
+                linux_signal::SA_NODEFER,
+            )?;
+            child_ready(ready)?;
+            while !NODEFER_REENTERED.load(Ordering::SeqCst) {
+                sched_yield()?;
+            }
+            Ok(())
+        },
+        ChildScenario::Resethand => {
+            CONDITIONAL_COUNT.store(0, Ordering::SeqCst);
+            install_handler(
+                SigNo::SIGTSTP,
+                conditional_handler as *const (),
+                linux_signal::SA_ONESHOT,
+            )?;
+            child_ready(ready)?;
+            while CONDITIONAL_COUNT.load(Ordering::SeqCst) == 0 {
+                sched_yield()?;
+            }
+            signal::raise(SigNo::SIGTSTP)?;
+            loop {
+                sched_yield()?;
+            }
+        },
+        ChildScenario::FrameFailure => {
+            const ALTSTACK_SIZE: usize = 16 * 1024;
+            let stack = mmap(
+                0,
+                ALTSTACK_SIZE,
+                MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+                MmapFlags::MAP_PRIVATE | MmapFlags::MAP_ANONYMOUS,
+                None,
+                None,
+            )?;
+            let altstack = linux_signal::SigStack {
+                ss_sp: stack.as_ptr(),
+                ss_flags: 0,
+                ss_size: ALTSTACK_SIZE,
+            };
+            signal::sigaltstack(Some(&altstack), None)?;
+            install_handler(
+                SigNo::SIGTSTP,
+                conditional_handler as *const (),
+                linux_signal::SA_ONSTACK,
+            )?;
+            munmap(stack.as_ptr(), ALTSTACK_SIZE)?;
+            child_ready(ready)?;
+            loop {
+                sched_yield()?;
+            }
+        },
+        ChildScenario::CloneExitSignal => {
+            match process::clone(
+                process::CloneFlags::empty(),
+                Some(SigNo::SIGTERM.as_usize() as u32),
+                None,
+                None,
+                core::ptr::null_mut(),
+                None,
+            )? {
+                Some(_) => {
+                    child_ready(ready)?;
+                    loop {
+                        sched_yield()?;
+                    }
+                },
+                None => {
+                    wait_release(release)?;
+                    process::exit(0)
+                },
+            }
+        },
+    }
+}
+
+fn spawn_child_scenario(scenario: ChildScenario) -> Result<ChildSync, Errno> {
+    let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
+    let (release_read, release_write) = pipe2(PipeFlags::empty())?;
+
+    match process::fork()? {
+        Some(pid) => {
+            close(ready_write)?;
+            close(release_read)?;
+            let mut byte = [0u8; 1];
+            if read(ready_read, &mut byte)? != 1 {
+                return Err(EIO);
+            }
+            close(ready_read)?;
+            Ok(ChildSync {
+                pid,
+                control: release_write,
+            })
+        },
+        None => {
+            close(ready_read).expect("jobctl-test: child close ready reader failed");
+            close(release_write).expect("jobctl-test: child close release writer failed");
+            let result = run_child_scenario(scenario, ready_write, release_read);
+            let _ = close(ready_write);
+            let _ = close(release_read);
+            process::exit(if result.is_ok() { 0 } else { 1 })
+        },
+    }
 }
 
 fn reset_sigchld_observation() -> usize {
@@ -282,6 +576,26 @@ fn test_masked_default_sigcont_live_action() -> Result<(), Errno> {
 
     eprintln!("jobctl-test: blocked default SIGCONT was lost before live handler selection");
     Err(ETIMEDOUT)
+}
+
+fn test_masked_explicit_ignore_sigcont() -> Result<(), Errno> {
+    println!("jobctl-test: CASE masked-explicit-ignore-sigcont start");
+    let set = signal_set(SigNo::SIGCONT);
+    signal::sigprocmask(SigProcMaskHow::Block, Some(&set), None)?;
+    let result = (|| {
+        install_ignore(SigNo::SIGCONT)?;
+        signal::raise(SigNo::SIGCONT)?;
+        let status = proc_status(process::getpid()? as u32)?;
+        assert_pending(&status, "SigPnd:", SigNo::SIGCONT, false)?;
+        assert_pending(&status, "ShdPnd:", SigNo::SIGCONT, false)
+    })();
+    let restore_action = install_default(SigNo::SIGCONT);
+    let restore_mask = signal::sigprocmask(SigProcMaskHow::Unblock, Some(&set), None);
+    result?;
+    restore_action?;
+    restore_mask?;
+    println!("jobctl-test: CASE masked-explicit-ignore-sigcont ok");
+    Ok(())
 }
 
 fn test_wait4_stop_continue_procfs() -> Result<(), Errno> {
@@ -490,6 +804,296 @@ fn test_global_init_immunity() -> Result<(), Errno> {
     Ok(())
 }
 
+fn assert_no_wait4_status(pid: u32, options: WaitOptions) -> Result<(), Errno> {
+    let option_bits = options.bits() | WaitOptions::NOHANG.bits();
+    for _ in 0..64 {
+        let mut status = WStatusRaw::EMPTY;
+        match wait4(
+            WaitFor::ChildWithTgid(pid),
+            Some(&mut status),
+            WaitOptions::from_bits(option_bits).expect("jobctl-test: valid wait4 options"),
+        ) {
+            Ok(None) => sched_yield()?,
+            Ok(Some(_)) => {
+                eprintln!(
+                    "jobctl-test: child {pid} unexpectedly became waitable: {:?}",
+                    status.read()
+                );
+                return Err(EIO);
+            },
+            Err(EINTR) => {},
+            Err(errno) => return Err(errno),
+        }
+    }
+    Ok(())
+}
+
+fn expect_child_status(pid: u32, expected: WStatus) -> Result<(), Errno> {
+    let options = match expected {
+        WStatus::Stopped(_) => WaitOptions::UNTRACED,
+        WStatus::Continued => WaitOptions::CONTINUED,
+        WStatus::Exited(_) | WStatus::Signal(_) => WaitOptions::empty(),
+    };
+    let actual = poll_wait4(pid, options)?;
+    let matches = match (&actual, &expected) {
+        (WStatus::Exited(lhs), WStatus::Exited(rhs))
+        | (WStatus::Signal(lhs), WStatus::Signal(rhs))
+        | (WStatus::Stopped(lhs), WStatus::Stopped(rhs)) => lhs == rhs,
+        (WStatus::Continued, WStatus::Continued) => true,
+        _ => false,
+    };
+    if !matches {
+        eprintln!(
+            "jobctl-test: child {pid} status mismatch: actual={actual:?}, expected={expected:?}"
+        );
+        return Err(EIO);
+    }
+    Ok(())
+}
+
+fn test_conditional_default_stop_signals() -> Result<(), Errno> {
+    println!("jobctl-test: CASE conditional-default-stop-signals start");
+    for signo in [SigNo::SIGTSTP, SigNo::SIGTTIN, SigNo::SIGTTOU] {
+        let child = spawn_child_scenario(ChildScenario::Yield)?;
+        let result = (|| {
+            signal::kill(child.pid as i32, signo)?;
+            expect_child_status(child.pid, WStatus::Stopped(signo.as_usize() as i8))
+        })();
+        let _ = close(child.control);
+        let cleanup = cleanup_child(child.pid);
+        result?;
+        cleanup?;
+    }
+    println!("jobctl-test: CASE conditional-default-stop-signals ok");
+    Ok(())
+}
+
+fn test_conditional_caught_ignored_masked() -> Result<(), Errno> {
+    println!("jobctl-test: CASE conditional-caught-ignored-masked start");
+
+    let ignored = spawn_child_scenario(ChildScenario::Ignore(SigNo::SIGTSTP))?;
+    let ignored_result = (|| {
+        signal::kill(ignored.pid as i32, SigNo::SIGTSTP)?;
+        assert_no_wait4_status(ignored.pid, WaitOptions::UNTRACED)?;
+        if write(ignored.control, &[1])? != 1 {
+            return Err(EIO);
+        }
+        expect_child_status(ignored.pid, WStatus::Exited(0))
+    })();
+    let _ = close(ignored.control);
+    let ignored_cleanup = cleanup_child(ignored.pid);
+    ignored_result?;
+    ignored_cleanup?;
+
+    let caught = spawn_child_scenario(ChildScenario::Catch(SigNo::SIGTTIN))?;
+    let caught_result = (|| {
+        signal::tgkill(caught.pid, caught.pid, SigNo::SIGTTIN)?;
+        expect_child_status(caught.pid, WStatus::Exited(0))
+    })();
+    let _ = close(caught.control);
+    let caught_cleanup = cleanup_child(caught.pid);
+    caught_result?;
+    caught_cleanup?;
+
+    let masked = spawn_child_scenario(ChildScenario::MaskedDefault(SigNo::SIGTTOU))?;
+    let masked_result = (|| {
+        signal::kill(masked.pid as i32, SigNo::SIGTTOU)?;
+        assert_no_wait4_status(masked.pid, WaitOptions::UNTRACED)?;
+        if write(masked.control, &[1])? != 1 {
+            return Err(EIO);
+        }
+        expect_child_status(
+            masked.pid,
+            WStatus::Stopped(SigNo::SIGTTOU.as_usize() as i8),
+        )
+    })();
+    let _ = close(masked.control);
+    let masked_cleanup = cleanup_child(masked.pid);
+    masked_result?;
+    masked_cleanup?;
+
+    println!("jobctl-test: CASE conditional-caught-ignored-masked ok");
+    Ok(())
+}
+
+fn assert_pending(status: &str, field: &str, signo: SigNo, expected: bool) -> Result<(), Errno> {
+    let present = proc_pending_mask(status, field)? & signal_set(signo).bits != 0;
+    if present != expected {
+        eprintln!(
+            "jobctl-test: {field} {:?} pending mismatch: present={present}, expected={expected}",
+            signo
+        );
+        return Err(EIO);
+    }
+    Ok(())
+}
+
+fn wait_for_pending(pid: u32, field: &str, signo: SigNo) -> Result<(), Errno> {
+    for _ in 0..WAIT_RETRIES {
+        let status = proc_status(pid)?;
+        if proc_pending_mask(&status, field)? & signal_set(signo).bits != 0 {
+            return Ok(());
+        }
+        sched_yield()?;
+    }
+    eprintln!(
+        "jobctl-test: timed out waiting for {field} {:?} on child {pid}",
+        signo
+    );
+    Err(ETIMEDOUT)
+}
+
+fn test_private_shared_opposite_cleanup() -> Result<(), Errno> {
+    println!("jobctl-test: CASE private-shared-opposite-cleanup start");
+    let child = spawn_child_scenario(ChildScenario::BlockedControlPair)?;
+    let result = (|| {
+        signal::tgkill(child.pid, child.pid, SigNo::SIGTSTP)?;
+        let status = proc_status(child.pid)?;
+        assert_pending(&status, "SigPnd:", SigNo::SIGTSTP, true)?;
+
+        signal::kill(child.pid as i32, SigNo::SIGCONT)?;
+        let status = proc_status(child.pid)?;
+        assert_pending(&status, "SigPnd:", SigNo::SIGTSTP, false)?;
+        assert_pending(&status, "ShdPnd:", SigNo::SIGCONT, true)?;
+
+        signal::tgkill(child.pid, child.pid, SigNo::SIGTSTP)?;
+        let status = proc_status(child.pid)?;
+        assert_pending(&status, "ShdPnd:", SigNo::SIGCONT, false)?;
+        assert_pending(&status, "SigPnd:", SigNo::SIGTSTP, true)
+    })();
+    let _ = close(child.control);
+    let cleanup = cleanup_child(child.pid);
+    result?;
+    cleanup?;
+    println!("jobctl-test: CASE private-shared-opposite-cleanup ok");
+    Ok(())
+}
+
+fn test_temporary_mask_default_stop_cleanup() -> Result<(), Errno> {
+    println!("jobctl-test: CASE temporary-mask-default-stop-cleanup start");
+    let child = spawn_child_scenario(ChildScenario::TemporaryDefaultStop(SigNo::SIGTSTP))?;
+    let result = (|| {
+        signal::tgkill(child.pid, child.pid, SigNo::SIGTSTP)?;
+        expect_child_status(child.pid, WStatus::Stopped(SigNo::SIGTSTP.as_usize() as i8))?;
+        signal::kill(child.pid as i32, SigNo::SIGCONT)?;
+        expect_child_status(child.pid, WStatus::Exited(0))
+    })();
+    let _ = close(child.control);
+    let cleanup = cleanup_child(child.pid);
+    result?;
+    cleanup?;
+    println!("jobctl-test: CASE temporary-mask-default-stop-cleanup ok");
+    Ok(())
+}
+
+fn test_temporary_mask_sigcont_actions() -> Result<(), Errno> {
+    println!("jobctl-test: CASE temporary-mask-sigcont-actions start");
+    for scenario in [
+        ChildScenario::TemporarySigcontCustom,
+        ChildScenario::TemporarySigcontDefault,
+    ] {
+        let child = spawn_child_scenario(scenario)?;
+        let result = (|| {
+            signal::kill(child.pid as i32, SigNo::SIGCONT)?;
+            wait_for_pending(child.pid, "ShdPnd:", SigNo::SIGCONT)?;
+            if write(child.control, &[1])? != 1 {
+                return Err(EIO);
+            }
+            expect_child_status(child.pid, WStatus::Exited(0))
+        })();
+        let _ = close(child.control);
+        let cleanup = cleanup_child(child.pid);
+        result?;
+        cleanup?;
+    }
+    println!("jobctl-test: CASE temporary-mask-sigcont-actions ok");
+    Ok(())
+}
+
+fn test_stopped_async_kernel_signal_pending() -> Result<(), Errno> {
+    println!("jobctl-test: CASE stopped-async-kernel-signal-pending start");
+    let child = spawn_child_scenario(ChildScenario::CloneExitSignal)?;
+    let result = (|| {
+        signal::kill(child.pid as i32, SigNo::SIGSTOP)?;
+        expect_child_status(child.pid, WStatus::Stopped(SigNo::SIGSTOP.as_usize() as i8))?;
+        if write(child.control, &[1])? != 1 {
+            return Err(EIO);
+        }
+        wait_for_pending(child.pid, "ShdPnd:", SigNo::SIGTERM)?;
+        assert_no_wait4_status(child.pid, WaitOptions::empty())?;
+        signal::kill(child.pid as i32, SigNo::SIGCONT)?;
+        expect_child_status(child.pid, WStatus::Signal(SigNo::SIGTERM.as_usize() as i8))
+    })();
+    let _ = close(child.control);
+    let cleanup = cleanup_child(child.pid);
+    result?;
+    cleanup?;
+    println!("jobctl-test: CASE stopped-async-kernel-signal-pending ok");
+    Ok(())
+}
+
+fn test_conditional_action_flags() -> Result<(), Errno> {
+    println!("jobctl-test: CASE conditional-action-flags start");
+
+    let nodefer = spawn_child_scenario(ChildScenario::Nodefer)?;
+    let nodefer_result = (|| {
+        signal::kill(nodefer.pid as i32, SigNo::SIGTSTP)?;
+        expect_child_status(nodefer.pid, WStatus::Exited(0))
+    })();
+    let _ = close(nodefer.control);
+    let nodefer_cleanup = cleanup_child(nodefer.pid);
+    nodefer_result?;
+    nodefer_cleanup?;
+
+    let resethand = spawn_child_scenario(ChildScenario::Resethand)?;
+    let resethand_result = (|| {
+        signal::kill(resethand.pid as i32, SigNo::SIGTSTP)?;
+        expect_child_status(
+            resethand.pid,
+            WStatus::Stopped(SigNo::SIGTSTP.as_usize() as i8),
+        )
+    })();
+    let _ = close(resethand.control);
+    let resethand_cleanup = cleanup_child(resethand.pid);
+    resethand_result?;
+    resethand_cleanup?;
+
+    println!("jobctl-test: CASE conditional-action-flags ok");
+    Ok(())
+}
+
+fn test_frame_failure_and_sigkill_dominance() -> Result<(), Errno> {
+    println!("jobctl-test: CASE frame-failure-sigkill-dominance start");
+
+    let frame = spawn_child_scenario(ChildScenario::FrameFailure)?;
+    let frame_result = (|| {
+        signal::kill(frame.pid as i32, SigNo::SIGTSTP)?;
+        expect_child_status(frame.pid, WStatus::Signal(SigNo::SIGSEGV.as_usize() as i8))
+    })();
+    let _ = close(frame.control);
+    let frame_cleanup = cleanup_child(frame.pid);
+    frame_result?;
+    frame_cleanup?;
+
+    let killed = spawn_child_scenario(ChildScenario::Yield)?;
+    let killed_result = (|| {
+        signal::kill(killed.pid as i32, SigNo::SIGSTOP)?;
+        expect_child_status(
+            killed.pid,
+            WStatus::Stopped(SigNo::SIGSTOP.as_usize() as i8),
+        )?;
+        signal::kill(killed.pid as i32, SigNo::SIGKILL)?;
+        expect_child_status(killed.pid, WStatus::Signal(SigNo::SIGKILL.as_usize() as i8))
+    })();
+    let _ = close(killed.control);
+    let killed_cleanup = cleanup_child(killed.pid);
+    killed_result?;
+    killed_cleanup?;
+
+    println!("jobctl-test: CASE frame-failure-sigkill-dominance ok");
+    Ok(())
+}
+
 fn require_procfs() -> Result<(), Errno> {
     read_text(PROC_INIT_STATUS).map(|_| ()).map_err(|errno| {
         eprintln!("jobctl-test: the harness must provide the single mounted /proc: {errno:?}");
@@ -498,6 +1102,15 @@ fn require_procfs() -> Result<(), Errno> {
 }
 
 fn run_tests() -> Result<(), Errno> {
+    test_conditional_default_stop_signals()?;
+    test_conditional_caught_ignored_masked()?;
+    test_private_shared_opposite_cleanup()?;
+    test_temporary_mask_default_stop_cleanup()?;
+    test_temporary_mask_sigcont_actions()?;
+    test_conditional_action_flags()?;
+    test_frame_failure_and_sigkill_dominance()?;
+    test_stopped_async_kernel_signal_pending()?;
+    test_masked_explicit_ignore_sigcont()?;
     test_masked_default_sigcont_live_action()?;
     test_wait4_stop_continue_procfs()?;
     install_sigchld_handler()?;
