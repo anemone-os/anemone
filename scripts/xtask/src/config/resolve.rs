@@ -2,12 +2,17 @@ use std::{fs, path::Path};
 
 use anyhow::Context;
 
-use crate::workspace::{DEF_KCONFIG_PATH, PLATFORM_CONFIGS_PATH, SYSTEM_TARGET_CONFIGS_PATH};
+use crate::workspace::{
+    BUILD_PRESET_CONFIGS_PATH, DEF_KCONFIG_PATH, DEFAULT_SELECTION_PATH, LOCAL_SELECTION_PATH,
+    PLATFORM_CONFIGS_PATH, SYSTEM_TARGET_CONFIGS_PATH,
+};
 
 use super::{
     KConfig, PlatformConfig,
-    kconfig::{KernelConfig, Profile},
-    reference::{KernelConfigRef, PlatformRef, SystemTargetRef},
+    build_preset::{BuildPreset, CargoProfile},
+    kconfig::KernelConfig,
+    reference::{BuildPresetRef, KernelConfigRef, PlatformRef, SystemTargetRef},
+    selection::{SelectionChoice, SelectionFile, SelectionRequest},
     system_target::Config as SystemTargetConfig,
 };
 
@@ -49,23 +54,43 @@ impl<'a> ConfigLoader<'a> {
         let presentation = BuildPresentation {
             disasm: config.build.disasm,
         };
-        let target = self.load_target(&target_ref)?;
-        let platform_ref = target.platform.clone();
-        let platform = self.load_platform(&platform_ref)?;
+        let system = self.resolve_owned_system(
+            target_ref,
+            kernel_config_ref,
+            config.into_kernel_config(),
+            profile,
+        )?;
 
         Ok(ResolvedBuildAction {
             selection_source: SelectionSource::LegacyKconfig,
-            system: ResolvedSystemBuild {
-                target_ref,
-                target,
-                platform_ref,
-                platform,
-                kernel_config_ref,
-                kernel_config: config.into_kernel_config(),
-                profile,
-            },
+            system,
             presentation,
         })
+    }
+
+    pub fn resolve_selection(
+        &self,
+        request: SelectionRequest,
+    ) -> anyhow::Result<ResolvedSelection> {
+        match request.classify()? {
+            SelectionChoice::Preset(preset_ref) => {
+                self.resolve_preset(preset_ref, SelectionSource::ExplicitPreset)
+            },
+            SelectionChoice::Tuple {
+                target,
+                kernel_config,
+                profile,
+            } => self.resolve_references(
+                target,
+                kernel_config,
+                profile,
+                SelectionSource::ExplicitTuple,
+            ),
+            SelectionChoice::Implicit => {
+                let (selection, source) = self.load_implicit_selection()?;
+                self.resolve_preset(selection.preset, source)
+            },
+        }
     }
 
     pub fn load_target(&self, target_ref: &SystemTargetRef) -> anyhow::Result<SystemTargetConfig> {
@@ -73,8 +98,12 @@ impl<'a> ConfigLoader<'a> {
             .workspace_root
             .join(SYSTEM_TARGET_CONFIGS_PATH)
             .join(format!("{target_ref}.toml"));
-        let content = fs::read_to_string(&path)
-            .with_context(|| format!("failed to read system target `{target_ref}` at {}", path.display()))?;
+        let content = fs::read_to_string(&path).with_context(|| {
+            format!(
+                "failed to read system target `{target_ref}` at {}",
+                path.display()
+            )
+        })?;
         SystemTargetConfig::from_str(&content)
             .with_context(|| format!("failed to parse system target `{target_ref}`"))
     }
@@ -84,20 +113,129 @@ impl<'a> ConfigLoader<'a> {
             .workspace_root
             .join(PLATFORM_CONFIGS_PATH)
             .join(format!("{platform_ref}.toml"));
-        let content = fs::read_to_string(&path)
-            .with_context(|| format!("failed to read platform `{platform_ref}` at {}", path.display()))?;
+        let content = fs::read_to_string(&path).with_context(|| {
+            format!(
+                "failed to read platform `{platform_ref}` at {}",
+                path.display()
+            )
+        })?;
         let platform = PlatformConfig::from_str(&content)
             .with_context(|| format!("failed to parse platform `{platform_ref}`"))?;
         ensure_platform_identity(platform_ref, &platform)?;
         Ok(platform)
     }
 
-    pub fn load_kernel_config(
-        &self,
-        reference: &KernelConfigRef,
-    ) -> anyhow::Result<KernelConfig> {
+    pub fn load_kernel_config(&self, reference: &KernelConfigRef) -> anyhow::Result<KernelConfig> {
         self.load_resolved_kconfig(reference)
             .map(KConfig::into_kernel_config)
+    }
+
+    pub fn load_preset(&self, preset_ref: &BuildPresetRef) -> anyhow::Result<BuildPreset> {
+        let path = self
+            .workspace_root
+            .join(BUILD_PRESET_CONFIGS_PATH)
+            .join(format!("{preset_ref}.toml"));
+        let content = fs::read_to_string(&path).with_context(|| {
+            format!(
+                "failed to read build preset `{preset_ref}` at {}",
+                path.display()
+            )
+        })?;
+        BuildPreset::from_str(&content)
+            .with_context(|| format!("failed to parse build preset `{preset_ref}`"))
+    }
+
+    fn resolve_preset(
+        &self,
+        preset_ref: BuildPresetRef,
+        source: SelectionSource,
+    ) -> anyhow::Result<ResolvedSelection> {
+        let preset = self.load_preset(&preset_ref)?;
+        self.resolve_references(preset.target, preset.kernel_config, preset.profile, source)
+    }
+
+    fn resolve_references(
+        &self,
+        target_ref: SystemTargetRef,
+        kernel_config_ref: KernelConfigRef,
+        profile: CargoProfile,
+        source: SelectionSource,
+    ) -> anyhow::Result<ResolvedSelection> {
+        let kernel_config = self.load_kernel_config(&kernel_config_ref)?;
+        let system =
+            self.resolve_owned_system(target_ref, kernel_config_ref, kernel_config, profile)?;
+        Ok(ResolvedSelection {
+            selection_source: source,
+            system,
+        })
+    }
+
+    fn resolve_owned_system(
+        &self,
+        target_ref: SystemTargetRef,
+        kernel_config_ref: KernelConfigRef,
+        kernel_config: KernelConfig,
+        profile: CargoProfile,
+    ) -> anyhow::Result<ResolvedSystemBuild> {
+        let target = self.load_target(&target_ref)?;
+        let platform_ref = target.platform.clone();
+        let platform = self.load_platform(&platform_ref)?;
+        Ok(ResolvedSystemBuild {
+            target_ref,
+            target,
+            platform_ref,
+            platform,
+            kernel_config_ref,
+            kernel_config,
+            profile,
+        })
+    }
+
+    fn load_implicit_selection(&self) -> anyhow::Result<(SelectionFile, SelectionSource)> {
+        let local_path = self.workspace_root.join(LOCAL_SELECTION_PATH);
+        match fs::symlink_metadata(&local_path) {
+            Ok(_) => {
+                // Presence is decided from the directory entry, not the link
+                // target. A dangling or unreadable local selection is invalid
+                // state and must not silently select the tracked default.
+                let content = fs::read_to_string(&local_path).with_context(|| {
+                    format!("failed to read local selection at {}", local_path.display())
+                })?;
+                Ok((
+                    SelectionFile::from_str(&content).with_context(|| {
+                        format!(
+                            "failed to parse local selection at {}",
+                            local_path.display()
+                        )
+                    })?,
+                    SelectionSource::LocalPreset,
+                ))
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let default_path = self.workspace_root.join(DEFAULT_SELECTION_PATH);
+                let content = fs::read_to_string(&default_path).with_context(|| {
+                    format!(
+                        "failed to read default selection at {}",
+                        default_path.display()
+                    )
+                })?;
+                Ok((
+                    SelectionFile::from_str(&content).with_context(|| {
+                        format!(
+                            "failed to parse default selection at {}",
+                            default_path.display()
+                        )
+                    })?,
+                    SelectionSource::DefaultPreset,
+                ))
+            },
+            Err(error) => Err(error).with_context(|| {
+                format!(
+                    "failed to inspect local selection at {}",
+                    local_path.display()
+                )
+            }),
+        }
     }
 
     fn load_resolved_kconfig(&self, reference: &KernelConfigRef) -> anyhow::Result<KConfig> {
@@ -153,6 +291,11 @@ pub struct ResolvedBuildAction {
     pub presentation: BuildPresentation,
 }
 
+pub struct ResolvedSelection {
+    pub selection_source: SelectionSource,
+    pub system: ResolvedSystemBuild,
+}
+
 pub struct ResolvedSystemBuild {
     pub target_ref: SystemTargetRef,
     pub target: SystemTargetConfig,
@@ -160,7 +303,7 @@ pub struct ResolvedSystemBuild {
     pub platform: PlatformConfig,
     pub kernel_config_ref: KernelConfigRef,
     pub kernel_config: KernelConfig,
-    pub profile: Profile,
+    pub profile: CargoProfile,
 }
 
 pub struct BuildPresentation {
@@ -170,12 +313,20 @@ pub struct BuildPresentation {
 #[derive(Clone, Copy)]
 pub enum SelectionSource {
     LegacyKconfig,
+    ExplicitPreset,
+    ExplicitTuple,
+    LocalPreset,
+    DefaultPreset,
 }
 
 impl SelectionSource {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LegacyKconfig => "legacy-kconfig",
+            Self::ExplicitPreset => "explicit-preset",
+            Self::ExplicitTuple => "explicit-tuple",
+            Self::LocalPreset => "local-preset",
+            Self::DefaultPreset => "default-preset",
         }
     }
 }
@@ -205,6 +356,39 @@ mod tests {
         ("visionfive2-rv64", "mmcblk0"),
     ];
 
+    const PRESETS: [(&str, &str, CargoProfile); 6] = [
+        (
+            "qemu-virt-rv64-release",
+            "qemu-virt-rv64",
+            CargoProfile::Release,
+        ),
+        (
+            "qemu-virt-rv64-pretest-release",
+            "qemu-virt-rv64-pretest",
+            CargoProfile::Release,
+        ),
+        (
+            "qemu-virt-rv64-pretest-dev",
+            "qemu-virt-rv64-pretest",
+            CargoProfile::Dev,
+        ),
+        (
+            "qemu-virt-la64-release",
+            "qemu-virt-la64",
+            CargoProfile::Release,
+        ),
+        (
+            "qemu-virt-la64-pretest-release",
+            "qemu-virt-la64-pretest",
+            CargoProfile::Release,
+        ),
+        (
+            "visionfive2-rv64-release",
+            "visionfive2-rv64",
+            CargoProfile::Release,
+        ),
+    ];
+
     #[test]
     fn loads_all_supported_system_targets() {
         let loader = ConfigLoader::new(workspace_root());
@@ -231,10 +415,10 @@ mod tests {
             match &inputs.target.root.source {
                 super::super::system_target::RootSource::Block { path } => {
                     assert_eq!(path, expected_root_path);
-                }
+                },
                 super::super::system_target::RootSource::Pseudo => {
                     panic!("tracked target {target} unexpectedly uses pseudo root")
-                }
+                },
             }
         }
     }
@@ -261,6 +445,182 @@ mod tests {
             loader
                 .load_kernel_config(&KernelConfigRef::new("conf").unwrap())
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn resolves_all_concrete_presets_without_changing_production_entry() {
+        let loader = ConfigLoader::new(workspace_root());
+        for (preset, target, profile) in PRESETS {
+            let action = loader
+                .resolve_selection(SelectionRequest::explicit_preset(
+                    BuildPresetRef::new(preset).unwrap(),
+                ))
+                .unwrap_or_else(|error| panic!("failed to resolve preset {preset}: {error:#}"));
+            assert_eq!(action.selection_source.as_str(), "explicit-preset");
+            assert_eq!(action.system.target_ref.as_str(), target);
+            assert_eq!(action.system.profile, profile);
+            assert_eq!(
+                action.system.kernel_config_ref.to_string(),
+                "conf/.defconfig"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_selection_does_not_read_invalid_local_state() {
+        let workspace = TestWorkspace::new();
+        fs::write(workspace.0.join(LOCAL_SELECTION_PATH), "not = [valid").unwrap();
+        let loader = ConfigLoader::new(&workspace.0);
+
+        let preset = loader
+            .resolve_selection(SelectionRequest::explicit_preset(
+                BuildPresetRef::new("test-release").unwrap(),
+            ))
+            .unwrap();
+        assert_eq!(preset.selection_source.as_str(), "explicit-preset");
+
+        let tuple = loader
+            .resolve_selection(SelectionRequest::explicit_tuple(
+                SystemTargetRef::new("qemu-virt-rv64-pretest").unwrap(),
+                KernelConfigRef::new("kconfig").unwrap(),
+                CargoProfile::Dev,
+            ))
+            .unwrap();
+        assert_eq!(tuple.selection_source.as_str(), "explicit-tuple");
+        assert_eq!(tuple.system.profile, CargoProfile::Dev);
+    }
+
+    #[test]
+    fn implicit_selection_uses_local_or_absent_fallback_only() {
+        let workspace = TestWorkspace::new();
+        let loader = ConfigLoader::new(&workspace.0);
+
+        let fallback = loader
+            .resolve_selection(SelectionRequest::implicit())
+            .unwrap();
+        assert_eq!(fallback.selection_source.as_str(), "default-preset");
+        assert_eq!(fallback.system.profile, CargoProfile::Release);
+
+        fs::write(
+            workspace.0.join(LOCAL_SELECTION_PATH),
+            "preset = \"test-dev\"\n",
+        )
+        .unwrap();
+        let local = loader
+            .resolve_selection(SelectionRequest::implicit())
+            .unwrap();
+        assert_eq!(local.selection_source.as_str(), "local-preset");
+        assert_eq!(local.system.profile, CargoProfile::Dev);
+
+        fs::write(workspace.0.join(LOCAL_SELECTION_PATH), "invalid = true\n").unwrap();
+        assert!(
+            loader
+                .resolve_selection(SelectionRequest::implicit())
+                .is_err()
+        );
+        fs::write(
+            workspace.0.join(LOCAL_SELECTION_PATH),
+            "preset = \"missing-preset\"\n",
+        )
+        .unwrap();
+        assert!(
+            loader
+                .resolve_selection(SelectionRequest::implicit())
+                .is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_local_selection_does_not_fall_back_to_default() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = TestWorkspace::new();
+        symlink(
+            workspace.0.join("missing-selection-target"),
+            workspace.0.join(LOCAL_SELECTION_PATH),
+        )
+        .unwrap();
+
+        assert!(
+            ConfigLoader::new(&workspace.0)
+                .resolve_selection(SelectionRequest::implicit())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn preset_rejects_missing_kernel_config() {
+        let workspace = TestWorkspace::new();
+        fs::write(
+            workspace.0.join("conf/build-presets/missing-kconfig.toml"),
+            "target = \"qemu-virt-rv64-pretest\"\nkernel-config = \"missing\"\nprofile = \"release\"\n",
+        )
+        .unwrap();
+        let loader = ConfigLoader::new(&workspace.0);
+        assert!(
+            loader
+                .resolve_selection(SelectionRequest::explicit_preset(
+                    BuildPresetRef::new("missing-kconfig").unwrap(),
+                ))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn resolved_selection_owns_all_snapshot_inputs() {
+        let workspace = TestWorkspace::new();
+        let loader = ConfigLoader::new(&workspace.0);
+        let action = loader
+            .resolve_selection(SelectionRequest::implicit())
+            .unwrap();
+        let before = action.system.kernel_config.parameters.gen_kconfig_defs();
+
+        fs::write(workspace.0.join(DEFAULT_SELECTION_PATH), "invalid = true\n").unwrap();
+        fs::write(
+            workspace.0.join(LOCAL_SELECTION_PATH),
+            "preset = \"missing\"\n",
+        )
+        .unwrap();
+        fs::write(
+            workspace.0.join("conf/build-presets/test-release.toml"),
+            "invalid = true\n",
+        )
+        .unwrap();
+        replace_file_text(
+            workspace.0.join("kconfig"),
+            "system_hz = 100",
+            "system_hz = 999",
+        );
+        replace_file_text(
+            workspace.0.join("conf/.defconfig"),
+            "max_logical_cpus = 16",
+            "max_logical_cpus = 99",
+        );
+        replace_file_text(
+            workspace
+                .0
+                .join("conf/system-targets/qemu-virt-rv64-pretest.toml"),
+            "fstype = \"ext4\"",
+            "fstype = \"ramfs\"",
+        );
+        replace_file_text(
+            workspace
+                .0
+                .join("conf/platforms/qemu-virt-rv64-pretest.toml"),
+            "name = \"qemu-virt-rv64-pretest\"",
+            "name = \"mutated-platform\"",
+        );
+
+        assert_eq!(action.system.target.root.fstype, "ext4");
+        assert_eq!(action.system.platform.build.name, "qemu-virt-rv64-pretest");
+        assert_eq!(action.system.profile, CargoProfile::Release);
+        assert!(before.contains("pub const MAX_LOGICAL_CPUS: usize = 16;"));
+        assert!(before.contains("pub const SYSTEM_HZ: u16 = 100;"));
+        assert_eq!(
+            before,
+            action.system.kernel_config.parameters.gen_kconfig_defs()
         );
     }
 
@@ -321,8 +681,11 @@ frame_section_shift_mb = 7
             action.system.platform_ref.as_str(),
             "qemu-virt-rv64-pretest"
         );
-        assert_eq!(action.system.kernel_config_ref.to_string(), "conf/.defconfig");
-        assert_eq!(action.system.profile, Profile::Release);
+        assert_eq!(
+            action.system.kernel_config_ref.to_string(),
+            "conf/.defconfig"
+        );
+        assert_eq!(action.system.profile, CargoProfile::Release);
         assert!(!action.presentation.disasm);
         assert!(action.system.platform.uboot.is_none());
     }
@@ -333,26 +696,27 @@ frame_section_shift_mb = 7
         let release = loader
             .resolve_legacy_build(KernelConfigRef::new("conf/.defconfig").unwrap())
             .unwrap();
-        let release_content =
-            fs::read_to_string(workspace_root().join("conf/.defconfig")).unwrap();
-        let dev_path = workspace_root()
-            .join("build")
-            .join(format!("xtask-test-dev-kconfig-{}.toml", std::process::id()));
+        let release_content = fs::read_to_string(workspace_root().join("conf/.defconfig")).unwrap();
+        let dev_path = workspace_root().join("build").join(format!(
+            "xtask-test-dev-kconfig-{}.toml",
+            std::process::id()
+        ));
         fs::create_dir_all(dev_path.parent().unwrap()).unwrap();
         fs::write(
             &dev_path,
             release_content.replace("profile = \"release\"", "profile = \"dev\""),
         )
         .unwrap();
-        let dev_ref = KernelConfigRef::new(dev_path.strip_prefix(workspace_root()).unwrap()).unwrap();
+        let dev_ref =
+            KernelConfigRef::new(dev_path.strip_prefix(workspace_root()).unwrap()).unwrap();
         let dev = loader.resolve_legacy_build(dev_ref);
         fs::remove_file(dev_path).unwrap();
         let dev = dev.unwrap();
 
         assert_eq!(release.system.target_ref, dev.system.target_ref);
         assert_eq!(release.system.platform_ref, dev.system.platform_ref);
-        assert_eq!(release.system.profile, Profile::Release);
-        assert_eq!(dev.system.profile, Profile::Dev);
+        assert_eq!(release.system.profile, CargoProfile::Release);
+        assert_eq!(dev.system.profile, CargoProfile::Dev);
         assert_eq!(release.system.kernel_config, dev.system.kernel_config);
     }
 
@@ -391,10 +755,7 @@ frame_section_shift_mb = 7
         );
 
         assert_eq!(action.system.target.root.fstype, "ext4");
-        assert_eq!(
-            action.system.platform.build.name,
-            "qemu-virt-rv64-pretest"
-        );
+        assert_eq!(action.system.platform.build.name, "qemu-virt-rv64-pretest");
         assert!(before.contains("pub const MAX_LOGICAL_CPUS: usize = 16;"));
         assert!(before.contains("pub const SYSTEM_HZ: u16 = 100;"));
         assert_eq!(
@@ -417,6 +778,7 @@ frame_section_shift_mb = 7
             ));
             fs::create_dir_all(root.join("conf/system-targets")).unwrap();
             fs::create_dir_all(root.join("conf/platforms")).unwrap();
+            fs::create_dir_all(root.join("conf/build-presets")).unwrap();
 
             let default_content =
                 fs::read_to_string(workspace_root().join("conf/.defconfig")).unwrap();
@@ -437,6 +799,20 @@ frame_section_shift_mb = 7
             ] {
                 fs::copy(workspace_root().join(relative), root.join(relative)).unwrap();
             }
+            for (name, profile) in [("test-release", "release"), ("test-dev", "dev")] {
+                fs::write(
+                    root.join(format!("conf/build-presets/{name}.toml")),
+                    format!(
+                        "target = \"qemu-virt-rv64-pretest\"\nkernel-config = \"kconfig\"\nprofile = \"{profile}\"\n"
+                    ),
+                )
+                .unwrap();
+            }
+            fs::write(
+                root.join(DEFAULT_SELECTION_PATH),
+                "preset = \"test-release\"\n",
+            )
+            .unwrap();
             Self(root)
         }
     }

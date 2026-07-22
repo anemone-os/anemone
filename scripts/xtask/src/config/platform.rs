@@ -1,11 +1,14 @@
 //! This module is used to resolve platform configurations
 //! under the `conf/platforms/` directory.
 
-use std::path::{Component, Path};
+use std::{
+    collections::HashSet,
+    path::{Component, Path},
+};
 
 use serde::{Deserialize, Serialize};
 
-use super::system_target::Root;
+use super::{reference::validate_slug, system_target::Root};
 
 #[derive(Deserialize, Debug, Serialize, Clone)]
 pub enum Arch {
@@ -89,6 +92,15 @@ pub struct Qemu {
     pub memory: String,
     pub bios: Option<String>,
     pub args: Option<Vec<String>>,
+    #[serde(default)]
+    pub bind: Vec<QemuBind>,
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct QemuBind {
+    pub name: String,
+    pub template: Vec<String>,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -147,6 +159,9 @@ impl Config {
         if let Some(dtb) = &config.dtb {
             dtb.validate()?;
         }
+        if let Some(qemu) = &config.qemu {
+            validate_qemu_bindings(&qemu.bind)?;
+        }
         Ok(config)
     }
     pub fn gen_platform_defs(&self, root: &Root) -> String {
@@ -195,6 +210,31 @@ pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
     }
 }
 
+pub fn validate_qemu_bindings(bindings: &[QemuBind]) -> anyhow::Result<()> {
+    let mut names = HashSet::new();
+    for binding in bindings {
+        validate_slug("QEMU bind", &binding.name)?;
+        if !names.insert(binding.name.as_str()) {
+            anyhow::bail!("duplicate QEMU bind `{}`", binding.name);
+        }
+        let mut placeholders = 0;
+        for token in &binding.template {
+            placeholders += token.matches("{{}}").count();
+            let literal = token.replace("{{}}", "");
+            if literal.contains("{{") || literal.contains("}}") {
+                anyhow::bail!(
+                    "QEMU bind `{}` contains an unsupported placeholder",
+                    binding.name
+                );
+            }
+        }
+        if placeholders == 0 {
+            anyhow::bail!("QEMU bind `{}` has no `{{{{}}}}` placeholder", binding.name);
+        }
+    }
+    Ok(())
+}
+
 impl Dtb {
     fn validate(&self) -> anyhow::Result<()> {
         let source = Path::new(&self.source);
@@ -239,10 +279,8 @@ mod tests {
 
     #[test]
     fn accepts_supported_dtb_contracts() {
-        let firmware =
-            std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
-        let embedded =
-            std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
+        let firmware = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
+        let embedded = std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
 
         assert!(Config::from_str(&firmware).is_ok());
         assert!(Config::from_str(&embedded).is_ok());
@@ -250,13 +288,15 @@ mod tests {
 
     #[test]
     fn rejects_incoherent_dtb_contracts() {
-        let valid =
-            std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
+        let valid = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
 
         for invalid in [
             valid.replace("provider = \"qemu\"\n", ""),
             valid.replace("delivery = \"firmware\"", "delivery = \"embedded\""),
-            valid.replace("authority = \"provider-derived\"", "authority = \"normative\""),
+            valid.replace(
+                "authority = \"provider-derived\"",
+                "authority = \"normative\"",
+            ),
             valid.replace("provider = \"qemu\"", "provider = \"other\""),
             valid.replace(
                 "source = \"conf/platforms/qemu-virt-rv64.dts\"",
@@ -270,8 +310,33 @@ mod tests {
             assert!(Config::from_str(&invalid).is_err(), "{invalid}");
         }
 
-        let embedded =
-            std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
+        let embedded = std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
         assert!(Config::from_str(&format!("{embedded}\nprovider = \"qemu\"\n")).is_err());
+    }
+
+    #[test]
+    fn validates_dormant_qemu_bind_declarations() {
+        let valid = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap()
+            + r#"
+
+[[qemu.bind]]
+name = "disk-x0"
+template = ["-drive", "file={{}},backup={{}},format=raw"]
+"#;
+        let config = Config::from_str(&valid).unwrap();
+        assert_eq!(config.qemu.unwrap().bind.len(), 1);
+
+        for invalid in [
+            valid.replace("name = \"disk-x0\"", "name = \"Disk_X0\""),
+            valid.replace(
+                "template = [\"-drive\", \"file={{}},backup={{}},format=raw\"]",
+                "template = [\"-drive\", \"file=fixed,format=raw\"]",
+            ),
+            valid.replace("file={{}}", "file={{path}}"),
+            format!("{valid}\n[[qemu.bind]]\nname = \"disk-x0\"\ntemplate = [\"file={{}}\"]\n"),
+            format!("{valid}\nunknown = true\n"),
+        ] {
+            assert!(Config::from_str(&invalid).is_err(), "{invalid}");
+        }
     }
 }

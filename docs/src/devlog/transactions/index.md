@@ -6,7 +6,7 @@
 
 ## Active
 
-- [System Target Model](./2026-07-22-system-target-model.md)：R0 Stage 1的Checkpoint 1A-1D与Stage 2 Checkpoint 2A已关闭；2B保持Ready / Not Activated，`BOOT-PROTOCOL-001`保持effective baseline。
+- [System Target Model](./2026-07-22-system-target-model.md)：R0 Stage 1的Checkpoint 1A-1D与Stage 2 Checkpoint 2A-2B已关闭；2C保持Ready / Not Activated，`BOOT-PROTOCOL-001`保持effective baseline。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)

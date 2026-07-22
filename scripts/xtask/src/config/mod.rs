@@ -2,11 +2,13 @@
 //! configuration files for the Anemone build system.
 
 pub mod app;
+pub mod build_preset;
 pub mod kconfig;
 pub mod platform;
 pub mod reference;
 pub mod resolve;
 pub mod rootfs;
+pub mod selection;
 pub mod system_target;
 
 pub mod build;

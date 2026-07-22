@@ -5,6 +5,7 @@ build
 kconfig
 rootfsconfig*
 /etc
+/conf/.selection.toml
 disk.img
 .DS_Store
 rootfs*.img

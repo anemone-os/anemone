@@ -7,30 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::workspace::*;
 
-#[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq)]
-pub enum Profile {
-    // debug with some minor customizations
-    #[serde(rename = "dev")]
-    Dev,
-    #[serde(rename = "release")]
-    Release,
-}
-
-impl Profile {
-    pub fn as_cargo_arg(&self) -> &'static [&'static str] {
-        match self {
-            Profile::Dev => &["--profile", "dev"],
-            Profile::Release => &["--release"],
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Profile::Dev => "dev",
-            Profile::Release => "release",
-        }
-    }
-}
+// The legacy production build keeps this owner-local name until the atomic 2C
+// cutover removes `[build]`; it aliases the sole profile enum and is not a
+// second source of profile state.
+pub use crate::config::build_preset::CargoProfile as Profile;
 
 #[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq)]
 pub enum SchedDefaultPolicy {

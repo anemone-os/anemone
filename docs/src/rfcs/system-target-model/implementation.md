@@ -1,6 +1,6 @@
 # System Target Model 迁移实施计划
 
-**状态：** R0（Stage 1 Closed；Stage 2 Ready）
+**状态：** R0（Stage 1 Closed；Stage 2 Active；2A-2B Closed；2C Ready / Not Activated）
 **最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
@@ -11,8 +11,8 @@
 本文定义后续实施的 stage envelope、resolution/feedback gate、停止条件与回写路径。当前
 RFC 已完成 public promotion、初始 `Implementation Resolution Gate` 与 R0 acceptance；transaction
 已建立，Stage 1 已按用户授权完成全部 checkpoint 并独立关闭。独立的
-`Stage 1 -> Stage 2 Implementation Resolution Gate`已完成，只把Stage 2解析为Ready；Stage 2尚未
-获得activation授权。本文冻结的 Stage 2 `Resolved Write Set Manifest` 不授权自动进入实现。
+`Stage 1 -> Stage 2 Implementation Resolution Gate`已完成；Stage 2的2A与2B已分别激活、review、验证并
+关闭。2C只达到Ready / Not Activated；本文冻结的 Stage 2 `Resolved Write Set Manifest` 不授权自动进入。
 
 ## 迁移原则
 
@@ -60,8 +60,9 @@ RFC 已完成 public promotion、初始 `Implementation Resolution Gate` 与 R0 
 - `Active` 表示已经通过 RFC / transaction / 用户或编排协议要求的启动授权；`Closed` 表示已经
   按本阶段自己的 review、验证和退出条件独立关闭。
 - Stage 1 已由 `0B - Initial Implementation Resolution Gate` 完整解析为 `Ready`，在R0接受与
-  transaction建立后按用户授权进入`Active`，并已完成全部checkpoint后关闭；Stage 2现已通过独立
-  resolution gate达到`Ready`但尚未激活，Stage 3至Stage 6仍为`Outline`。
+  transaction建立后按用户授权进入`Active`，并已完成全部checkpoint后关闭；Stage 2已通过独立
+  resolution gate并进入`Active`，2A-2B已关闭，2C仍为`Ready / Not Activated`；Stage 3至Stage 6仍为
+  `Outline`。
 - RFC acceptance、transaction creation 与 Stage 1 activation 是后续独立 gate。实现开始时建立的
   transaction 记录 accepted revision、preflight/批准证据、生效点和本文链接，不复制第二份计划或
   manifest；Stage 1从Ready进入Active所需的显式启动授权已经取得，其closure不激活Stage 2。
@@ -97,7 +98,7 @@ RFC 已完成 public promotion、初始 `Implementation Resolution Gate` 与 R0 
 | 阶段 | 当前成熟度 | 概括目的 | 前置依赖 | 解析触发点 |
 | --- | --- | --- | --- | --- |
 | Stage 1 | Closed | Resolver 与 Platform kernel-output vertical slice | Promotion preflight、public Draft review、0B resolution、R0 acceptance、transaction activation、1A-1D Closed | Closed；Stage 2 resolution gate已独立完成 |
-| Stage 2 | Ready | QEMU normal-build DT前置、Selection、action scope与workflow surface cutover | Stage 1 Closed；Stage 1 -> Stage 2 resolution完成 | 等待独立activation授权；只开放2A |
+| Stage 2 | Active | QEMU normal-build DT前置、Selection、action scope与workflow surface cutover | Stage 1 Closed；Stage 1 -> Stage 2 resolution完成 | 2A-2B Closed；2C等待独立activation授权 |
 | Stage 3 | Outline | QEMU DT refresh与剩余逐platform authority/delivery closure | Stage 2 Closed；2A baseline与Stage 2实际证据可审计 | Stage 2关闭后的Stage 3 Resolution Gate；无法整阶段解析时在gate中拆成独立滚动Stage |
 | Stage 4 | Outline | Source app driver、app/rootfs workflow 与 physical-board closure | 相关 build foundation Closed | 前置实现证据足以解析 owner-local closure 后 |
 | Stage 5 | Outline | EmbeddedApp vertical slice 与 Boot Protocol cutover | Resolver、app build 与 runtime input 稳定 | 前置阶段关闭后的独立 Implementation Resolution Gate |
@@ -448,9 +449,9 @@ Stage/RFC状态。Ready只冻结范围，不向任何角色授予activation。
 ## Stage 2：Selection、action scope 与 workflow surface cutover
 
 **阶段成熟度：** Active；`Stage 1 -> Stage 2 Implementation Resolution Gate`已于2026-07-23
-独立完成，随后按用户对前两个checkpoint的明确授权激活2A。Checkpoint 2A已独立关闭；2B保持
-Ready / Not Activated，须在2A提交后通过独立activation记录开放。后一个checkpoint仍需前一个独立
-review、关闭和提交，不因Stage整体授权自动进入。
+独立完成，随后按用户对前两个checkpoint的明确授权依次激活2A、2B。两个checkpoint均已独立review、
+验证、关闭并分别提交；2C只达到Ready / Not Activated。后一个checkpoint仍需新的明确授权，不因Stage
+整体授权自动进入。
 
 ### Stage 1 -> Stage 2 Resolution 结论（2026-07-23）
 
@@ -525,7 +526,7 @@ review、关闭和提交，不因Stage整体授权自动进入。
 
 ### Checkpoint 2A - QEMU normal-build DT prerequisite
 
-**状态：** Closed；2B Ready / Not Activated。
+**状态：** Closed；2B Closed；2C Ready / Not Activated。
 
 **交付：** 在Platform `[dtb]`中固定`source`、typed `delivery = "firmware" | "embedded"`、
 `authority = "provider-derived" | "normative"`与provider-derived时必需的`provider = "qemu"`；output
@@ -558,7 +559,7 @@ normal-build行为。2A关闭只允许进入2B，不激活selection cutover。
 
 ### Checkpoint 2B - Dormant preset、selection 与 bind foundation
 
-**状态：** Ready / Not Activated。
+**状态：** Closed；2C Ready / Not Activated。
 
 **交付：** 增加strict `BuildPresetRef`、closed `BuildPreset`/`CargoProfile`、local/default selection parser、
 shared selection resolver与QEMU bind declaration/map expansion单元测试；新增tracked preset/default/schema/

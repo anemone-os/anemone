@@ -7,6 +7,36 @@ use anyhow::Context;
 use serde::{Deserialize, Deserializer};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct BuildPresetRef(String);
+
+impl BuildPresetRef {
+    pub fn new(value: &str) -> anyhow::Result<Self> {
+        validate_slug("build preset", value)?;
+        Ok(Self(value.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for BuildPresetRef {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl<'de> Deserialize<'de> for BuildPresetRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(&value).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct SystemTargetRef(String);
 
 impl SystemTargetRef {
@@ -80,7 +110,7 @@ impl KernelConfigRef {
         for component in value.components() {
             match component {
                 Component::Normal(segment) => normalized.push(segment),
-                Component::CurDir => {}
+                Component::CurDir => {},
                 Component::ParentDir => {
                     if !normalized.pop() {
                         anyhow::bail!(
@@ -88,13 +118,13 @@ impl KernelConfigRef {
                             value.display()
                         );
                     }
-                }
+                },
                 Component::RootDir | Component::Prefix(_) => {
                     anyhow::bail!(
                         "kernel config reference must be workspace-relative: {}",
                         value.display()
                     )
-                }
+                },
             }
         }
 
@@ -118,7 +148,17 @@ impl fmt::Display for KernelConfigRef {
     }
 }
 
-fn validate_slug(kind: &str, value: &str) -> anyhow::Result<()> {
+impl<'de> Deserialize<'de> for KernelConfigRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = PathBuf::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+pub(super) fn validate_slug(kind: &str, value: &str) -> anyhow::Result<()> {
     let mut bytes = value.bytes();
     let Some(first) = bytes.next() else {
         anyhow::bail!("{kind} reference must not be empty");
@@ -139,6 +179,7 @@ mod tests {
     #[test]
     fn slug_references_are_strict() {
         for valid in ["qemu-virt-rv64", "visionfive2-rv64", "0-test", "a-"] {
+            assert!(BuildPresetRef::new(valid).is_ok(), "{valid}");
             assert!(SystemTargetRef::new(valid).is_ok(), "{valid}");
             assert!(PlatformRef::new(valid).is_ok(), "{valid}");
         }
@@ -152,6 +193,7 @@ mod tests {
             "../target",
             "/target",
         ] {
+            assert!(BuildPresetRef::new(invalid).is_err(), "{invalid}");
             assert!(SystemTargetRef::new(invalid).is_err(), "{invalid}");
             assert!(PlatformRef::new(invalid).is_err(), "{invalid}");
         }

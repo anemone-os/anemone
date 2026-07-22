@@ -1,0 +1,3 @@
+target = "qemu-virt-la64"
+kernel-config = "conf/.defconfig"
+profile = "release"
