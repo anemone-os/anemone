@@ -1,26 +1,26 @@
 # RFC-20260722-system-target-model
 
-**状态：** Draft / Public Review（Stage 1 Ready；待 acceptance）
-**修订：** Draft
+**状态：** Accepted for Implementation（Stage 1 Active；Checkpoint 1A）
+**修订：** R0
 **负责人：** doruche
-**最后更新：** 2026-07-22
+**最后更新：** 2026-07-23
 **领域：** build system / configuration / platform / repository workflow
-**事务日志：** None
-**影响契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--rootfs-metadata选择初始用户程序)（Refine；当前仍由 effective baseline 生效，本 Draft 不执行 target cutover）。
+**事务日志：** [2026-07-22-system-target-model](../../devlog/transactions/2026-07-22-system-target-model.md)
+**影响契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--rootfs-metadata选择初始用户程序)（Refine；当前仍由 effective baseline 生效，R0 target 尚未 cut over）。
 **开放问题：** None；已确认问题已折回 target 或分流到
 [迁移实施计划](./implementation.md) 的 feedback/preflight gate。
-**下一步：** 初始 Implementation Resolution Gate 已把 Stage 1 解析为 Ready；下一独立 gate 是
-RFC acceptance。Transaction creation、Stage 1 activation 与代码实现授权均未发生。
+**下一步：** R0 已接受并建立 transaction；Stage 1 已按用户授权进入 Active，当前只执行
+Checkpoint 1A。Checkpoint 1B 仍未开始，也不会由 1A 收口自动进入。
 
 ## 文档状态
 
-本文是公开 RFC Draft，是本提案与 target 的 canonical source；它不是 current contract、
-resolved write set 或实现授权。本文把已经形成的 system-target 定位共识展开为可评审的
-target，并取代历史 positioning 文档作为本 RFC 的 Draft authority。
+本文是 R0 accepted target 的 canonical source；它不是 current contract 或 resolved write set。
+本文把已经形成的 system-target 定位共识展开为实施目标，并取代历史 positioning 文档作为
+本 RFC 的 target authority。
 
-本目录同时提供 Draft [迁移实施计划](./implementation.md)，用于约束后续 stage
-envelope、feedback gate、停止条件与回写路径。Stage 1 的 resolved manifest 已冻结为 Ready；
-transaction devlog、代码实现与 contract cutover 仍未开始。
+本目录同时提供 [迁移实施计划](./implementation.md)，用于约束后续 stage envelope、feedback
+gate、停止条件与回写路径。Stage 1 的 resolved manifest 已冻结并进入 Active；实际 checkpoint
+证据由 transaction 记录。`BOOT-PROTOCOL-001` contract cutover 仍未发生。
 
 ## 摘要
 
@@ -146,7 +146,7 @@ live build path 当前具有以下事实：
 
 ## 文档地图
 
-当前 public Draft target：
+当前 R0 accepted target：
 
 - [目标与不变量](./invariants.md)：target rules、唯一 owner、resolved snapshot、action scope、
   platform kernel outputs、DT 与 workflow 同步边界。
@@ -166,8 +166,8 @@ Review 状态：
 - [Final Harness 调查记录](./backgrounds/final-harness-investigation-20260722.md)
 
 `implementation.md` 只描述后续实施边界。Public promotion与初始Implementation Resolution Gate
-已完成；Stage 1 Ready definition/manifest已冻结。RFC acceptance、transaction creation 与
-Stage 1 activation 分别完成前，不授权修改构建或kernel代码。
+已完成；Stage 1 Ready definition/manifest已冻结。R0 acceptance、transaction creation 与
+Stage 1 activation 已在 2026-07-23 独立闭合，当前代码授权只覆盖 Checkpoint 1A。
 
 ## 术语与 owner
 
@@ -539,8 +539,7 @@ binding提升为通用build model或跨provider schema。
 
 ## 接受边界
 
-本文当前仍是 Draft，不表示已经 Accepted for Implementation。接受本 RFC Draft 前至少必须
-确认：
+R0 acceptance gate 已于 2026-07-23 核对并确认：
 
 - [目标与不变量](./invariants.md) 中的 owner、resolved snapshot、action scope、platform kernel output、
   DT authority 和 workflow sync rules 形成无双重真相源的闭包；
@@ -567,9 +566,9 @@ binding提升为通用build model或跨provider schema。
   的交付、实现路线或 probe、审计、可观测性、验证、停止/退出条件、contract cutover 与
   `Resolved Write Set Manifest` 完整解析为 Ready；Stage 2 及更远阶段保持 Outline。
 
-[迁移实施计划](./implementation.md) 已记录允许带入实现的不确定性。Public promotion 与首个
-Implementation Resolution Gate 已完成；RFC acceptance、transaction creation 与 Stage 1 activation
-继续保持后续独立 gate。本 Draft 本身不授权修改构建或 kernel 代码。若 feedback 需要改变 target
+[迁移实施计划](./implementation.md) 已记录允许带入实现的不确定性。Public promotion、首个
+Implementation Resolution Gate、R0 acceptance、transaction creation 与 Stage 1 activation 已按独立
+gate 完成；当前只授权 Checkpoint 1A。若 feedback 需要改变 target
 invariant、owner、ABI、`Contract Impact` 或 acceptance boundary，当前 gate 必须停止并回到
 RFC review。
 
@@ -648,8 +647,14 @@ repackage 或 ELF-only 高频工作流来证明抽象价值。内部 post-link s
 
 ## 收口
 
-已经提升为 public RFC Draft，Stage 1也已解析为Ready，但尚未进入acceptance或实现阶段。当前 Draft 已删除独立 package/output graph，并把 U-Boot
+R0 已接受进入实现，Stage 1 已按用户授权进入 Active，当前只执行 Checkpoint 1A。R0 已删除独立 package/output graph，并把 U-Boot
 固定为 Platform-owned build post-link output；目录命名、live-owner inventory 与逐平台迁移
 分流到 `implementation.md` 的 probe、preflight 或工程选择。Promotion preflight 已提取当前
-Boot Protocol baseline，初始Implementation Resolution Gate已冻结Stage 1 manifest；下一步是RFC acceptance。完成RFC acceptance前不创建
-transaction，transaction 建立且 Stage 1 单独获得启动授权前不开始 build-system implementation。
+Boot Protocol baseline，初始Implementation Resolution Gate已冻结Stage 1 manifest；transaction
+记录实际 checkpoint 证据。Checkpoint 1B 不由 1A 自动启动。
+
+## 修订记录
+
+| 修订 | 日期 | 状态 | 语义变化 | Review / 事务 |
+| --- | --- | --- | --- | --- |
+| R0 | 2026-07-23 | Accepted for Implementation | 初始 accepted target；定义 system target、Platform、KernelConfig、BuildPreset、single resolved snapshot、Platform output 与 staged Boot Protocol Refine。 | [2026-07-22-system-target-model](../../devlog/transactions/2026-07-22-system-target-model.md) |

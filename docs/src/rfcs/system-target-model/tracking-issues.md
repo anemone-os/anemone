@@ -4,7 +4,7 @@
 **最后更新：** 2026-07-22
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **迁移计划：** [迁移实施计划](./implementation.md)
-**事务日志：** None
+**事务日志：** [2026-07-22-system-target-model](../../devlog/transactions/2026-07-22-system-target-model.md)
 
 本文只跟踪会改变 RFC target、owner、contract delta、实现顺序、review gate、停止边界或
 验收判断的 confirmed design issues。普通实现选择、live-owner inventory、逐 platform

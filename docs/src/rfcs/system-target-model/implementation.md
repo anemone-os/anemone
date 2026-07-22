@@ -1,17 +1,17 @@
 # System Target Model 迁移实施计划
 
-**状态：** Draft（Stage 1 Ready；尚未 acceptance / activation）
-**最后更新：** 2026-07-22
+**状态：** R0（Stage 1 Active；Checkpoint 1A）
+**最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
 **当前契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--rootfs-metadata选择初始用户程序)；Refine target 尚未 cut over
-**当前修订：** Draft
-**事务日志：** None
+**当前修订：** R0
+**事务日志：** [2026-07-22-system-target-model](../../devlog/transactions/2026-07-22-system-target-model.md)
 
 本文定义后续实施的 stage envelope、resolution/feedback gate、停止条件与回写路径。当前
-RFC 已完成 public promotion 与初始 `Implementation Resolution Gate`，Stage 1 已达到 Ready；RFC
-尚未 acceptance，没有 transaction，Stage 1 也未 Active。本文冻结的 Stage 1
-`Resolved Write Set Manifest` 不构成 build system 或 kernel 代码写入授权。
+RFC 已完成 public promotion、初始 `Implementation Resolution Gate` 与 R0 acceptance；transaction
+已建立，Stage 1 已按用户授权进入 Active，当前只执行 Checkpoint 1A。本文冻结的 Stage 1
+`Resolved Write Set Manifest` 仍不授权自动进入后续 checkpoint。
 
 ## 迁移原则
 
@@ -58,8 +58,8 @@ RFC 已完成 public promotion 与初始 `Implementation Resolution Gate`，Stag
   与 `Resolved Write Set Manifest` 已完整解析，但尚未自动获得执行授权。
 - `Active` 表示已经通过 RFC / transaction / 用户或编排协议要求的启动授权；`Closed` 表示已经
   按本阶段自己的 review、验证和退出条件独立关闭。
-- 当前 public Draft 中 Stage 1 已由 `0B - Initial Implementation Resolution Gate` 完整解析为
-  `Ready`；Stage 2 至 Stage 6 仍为 `Outline`，没有 `Active` 阶段，也没有代码写入授权。
+- Stage 1 已由 `0B - Initial Implementation Resolution Gate` 完整解析为 `Ready`，并在R0接受与
+  transaction建立后按用户授权进入`Active`；Stage 2至Stage 6仍为`Outline`，没有写入授权。
 - RFC acceptance、transaction creation 与 Stage 1 activation 是后续独立 gate。实现开始时建立的
   transaction 记录 accepted revision、preflight/批准证据、生效点和本文链接，不复制第二份计划或
   manifest；Stage 1 仍需显式启动授权才从 Ready 进入 Active。
@@ -94,7 +94,7 @@ RFC 已完成 public promotion 与初始 `Implementation Resolution Gate`，Stag
 
 | 阶段 | 当前成熟度 | 概括目的 | 前置依赖 | 解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 1 | Ready | Resolver 与 Platform kernel-output vertical slice | Promotion preflight、public Draft review、0B resolution | 等待 RFC acceptance、transaction creation 与独立 activation |
+| Stage 1 | Active（Checkpoint 1A） | Resolver 与 Platform kernel-output vertical slice | Promotion preflight、public Draft review、0B resolution、R0 acceptance、transaction activation | 1A 按自身 review / validation / exit 独立关闭；不自动进入 1B |
 | Stage 2 | Outline | Selection、action scope 与 workflow surface cutover | Stage 1 Closed | `Stage 1 -> Stage 2 Implementation Resolution Gate` |
 | Stage 3 | Outline | 逐 platform DT authority/delivery 迁移 | Stage 2 Closed；对应 platform baseline 可审计 | Stage 2 关闭后的 Stage 3 Resolution Gate；无法整阶段解析时在 gate 中拆成独立滚动 Stage |
 | Stage 4 | Outline | Source app driver、app/rootfs workflow 与 physical-board closure | 相关 build foundation Closed | 前置实现证据足以解析 owner-local closure 后 |
@@ -115,7 +115,8 @@ RFC 已完成 public promotion 与初始 `Implementation Resolution Gate`，Stag
 
 ## 首阶段前置 Gate：Live-owner inventory 与 Stage 1 解析
 
-**Gate 状态：** `0A` Completed；`0B` Completed，Stage 1 为 Ready 但未 Active。
+**Gate 状态：** `0A` Completed；`0B` Completed。该gate只把Stage 1解析为Ready；后续R0
+acceptance、transaction creation与activation已独立完成。
 
 本前置 Gate 分成两个顺序步骤；它们不是 Stage 1 的执行 checkpoint：
 
@@ -188,10 +189,10 @@ RFC 已完成 public promotion 与初始 `Implementation Resolution Gate`，Stag
 
 ### 0B Initial Implementation Resolution 结论（2026-07-22）
 
-- Preflight 重新读取了 live `Justfile` / xtask help、config deserialization、build/conf/QEMU/app/
+- Preflight 当时重新读取了 live `Justfile` / xtask help、config deserialization、build/conf/QEMU/app/
   rootfs tasks、全部 tracked Platform、root `kconfig` / `.defconfig`、RV64/LA64 pretest wrapper、
   VisionFive rootfs 固定路径，以及 kernel `mount_rootfs()` / `exec_init_proc()`。Register 没有与本
-  stage 冲突的 active build/boot issue；本 RFC 当前也没有 transaction，符合 acceptance 前边界。
+  stage 冲突的 active build/boot issue；RFC在0B执行时还没有transaction，符合acceptance前边界。
 - Live delta 仍是 0A 已分类的同一组 owner migration：root `kconfig` 混合 selection 与
   KernelConfig，Platform 混入 root/QEMU host path，build/QEMU/conf/wrapper 分别重读 mutable
   selection，以及 QEMU DT prebuild 复用 runtime argv。没有发现新的 shared runtime contract、
@@ -222,7 +223,7 @@ Kernel build、xtask test、QEMU、rootfs、physical board、LTP与runtime均Not
 
 ## Stage 1：Resolver 与 Platform kernel-output vertical slice
 
-**阶段成熟度：** Ready；尚未 RFC acceptance、transaction creation 或 Stage 1 activation。
+**阶段成熟度：** Active；R0 acceptance、transaction creation 与 Stage 1 activation 已完成，当前只授权 Checkpoint 1A。
 
 ### 受保护目标与 scope envelope
 

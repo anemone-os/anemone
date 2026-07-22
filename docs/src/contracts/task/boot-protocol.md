@@ -8,8 +8,8 @@
 **不覆盖：** system target、embedded app、Linux init discovery、PID 1 supervision或root device选择
 **实现位置：** `scripts/xtask/src/{config/rootfs.rs,tasks/rootfs/mkfs.rs}`、`anemone-kernel/src/main.rs`
 **依赖：** `USER-ENTRY-002` 与现有 VFS / exec-binfmt contract
-**Pending Successor：** None；[RFC-20260722-system-target-model](../../rfcs/system-target-model/index.md)仍为 Draft，其 Refine target 尚未接受
-**最后核验：** 2026-07-22
+**Pending Successor：** [RFC-20260722-system-target-model R0](../../rfcs/system-target-model/index.md) 已接受；其 Refine target 尚未 cut over，当前规则继续生效
+**最后核验：** 2026-07-23
 
 ## BOOT-PROTOCOL-001 — rootfs metadata选择初始用户程序
 
