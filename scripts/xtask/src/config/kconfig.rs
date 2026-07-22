@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::workspace::*;
 
-#[derive(Deserialize, Debug, Serialize)]
+#[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq)]
 pub enum Profile {
     // debug with some minor customizations
     #[serde(rename = "dev")]
@@ -21,6 +21,13 @@ impl Profile {
         match self {
             Profile::Dev => &["--profile", "dev"],
             Profile::Release => &["--release"],
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Profile::Dev => "dev",
+            Profile::Release => "release",
         }
     }
 }
@@ -47,7 +54,7 @@ impl SchedDefaultPolicy {
 
 #[derive(Deserialize, Debug, Serialize)]
 pub struct Build {
-    pub platform: String,
+    pub target: String,
     pub profile: Profile,
 
     pub disasm: bool,
@@ -91,31 +98,82 @@ pub struct Parameters {
 }
 
 impl Parameters {
+    /// Materialize the optional parameter syntax into the complete value owned
+    /// by a resolved KernelConfig. Build consumers must not consult `.defconfig`
+    /// after this boundary.
+    pub(super) fn materialize_defaults(
+        &mut self,
+        defaults: Option<&Self>,
+    ) -> anyhow::Result<()> {
+        macro_rules! materialize {
+            ($field:ident) => {
+                if self.$field.is_none() {
+                    self.$field = Some(defaults.and_then(|value| value.$field).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "default value for {} must be specified in {}",
+                            stringify!($field),
+                            DEF_KCONFIG_PATH
+                        )
+                    })?);
+                }
+            };
+        }
+
+        materialize!(bootstrap_heap_shift_kb);
+        materialize!(log_buffer_shift_kb);
+        materialize!(log_record_shift_bytes);
+        materialize!(print_log_level);
+        materialize!(record_log_level);
+        materialize!(kstack_shift_kb);
+        materialize!(remap_shift_gb);
+        materialize!(max_logical_cpus);
+        materialize!(max_ident_len_bytes);
+        materialize!(max_path_len_bytes);
+        materialize!(max_processes);
+        materialize!(system_hz);
+        materialize!(sched_default_policy);
+        materialize!(rt_rr_timeslice_ms);
+        materialize!(backtrace_depth);
+        materialize!(user_stack_shift_kb);
+        materialize!(user_init_stack_shift_kb);
+        materialize!(user_heap_shift_mb);
+        materialize!(shmmax_bytes);
+        materialize!(shmall_pages);
+        materialize!(shmmni);
+        materialize!(io_shrink_threshold);
+        materialize!(oom_kill_threshold);
+        materialize!(symlink_resolve_limit);
+        materialize!(max_fd_per_process);
+        materialize!(ramdisk_count);
+        materialize!(loop_device_count);
+        materialize!(ns16550a_default_baud);
+        materialize!(dw_mshc_poll_timeout_ms);
+        materialize!(eevdf_base_slice_us);
+        materialize!(eevdf_wake_clamp_us);
+        materialize!(eevdf_yield_penalty_us);
+        materialize!(eevdf_anomaly_threshold);
+        Ok(())
+    }
+
     /// Generate Rust definitions for kernel parameters
     /// to be included in the kernel build.
     ///
     /// P.S. Can we do some metaprogramming here to avoid manual updates?
     pub fn gen_kconfig_defs(&self) -> String {
-        let defconfig_content =
-            std::fs::read_to_string(DEF_KCONFIG_PATH).expect("Failed to read default kconfig");
-        let defconfig =
-            Config::from_str(&defconfig_content).expect("Failed to parse default kconfig");
-
-        macro_rules! default_or {
+        macro_rules! resolved {
             ($field:ident) => {
                 self.$field
-                    .unwrap_or(defconfig.parameters.$field.expect(&format!(
-                        "Default value for {} must be specified in {}",
+                    .unwrap_or_else(|| panic!(
+                        "resolved KernelConfig is missing parameter {}",
                         stringify!($field),
-                        DEF_KCONFIG_PATH
-                    )))
+                    ))
             };
         }
 
-        let record_log_level = default_or!(record_log_level);
+        let record_log_level = resolved!(record_log_level);
         // Printing is downstream of recording, so it cannot admit a level that
         // the record gate has already turned into a no-op.
-        let print_log_level = default_or!(print_log_level).min(record_log_level);
+        let print_log_level = resolved!(print_log_level).min(record_log_level);
 
         format!(
             r#"//! Auto-generated kernel parameters from kconfig, do not edit manually.
@@ -214,39 +272,39 @@ pub const EEVDF_YIELD_PENALTY_US: u64 = {};
 /// Consecutive EEVDF no-eligible fallback count before an extra error summary.
 pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
         "#,
-            default_or!(bootstrap_heap_shift_kb),
-            default_or!(log_buffer_shift_kb),
-            default_or!(log_record_shift_bytes),
+            resolved!(bootstrap_heap_shift_kb),
+            resolved!(log_buffer_shift_kb),
+            resolved!(log_record_shift_bytes),
             print_log_level,
             record_log_level,
-            default_or!(kstack_shift_kb),
-            default_or!(remap_shift_gb),
-            default_or!(max_logical_cpus),
-            default_or!(max_ident_len_bytes),
-            default_or!(max_path_len_bytes),
-            default_or!(max_processes),
-            default_or!(system_hz),
-            default_or!(sched_default_policy).kernel_variant(),
-            default_or!(rt_rr_timeslice_ms),
-            default_or!(backtrace_depth),
-            default_or!(user_stack_shift_kb),
-            default_or!(user_init_stack_shift_kb),
-            default_or!(user_heap_shift_mb),
-            default_or!(shmmax_bytes),
-            default_or!(shmall_pages),
-            default_or!(shmmni),
-            default_or!(io_shrink_threshold),
-            default_or!(oom_kill_threshold),
-            default_or!(symlink_resolve_limit),
-            default_or!(max_fd_per_process),
-            default_or!(ramdisk_count),
-            default_or!(loop_device_count),
-            default_or!(ns16550a_default_baud),
-            default_or!(dw_mshc_poll_timeout_ms),
-            default_or!(eevdf_base_slice_us),
-            default_or!(eevdf_wake_clamp_us),
-            default_or!(eevdf_yield_penalty_us),
-            default_or!(eevdf_anomaly_threshold),
+            resolved!(kstack_shift_kb),
+            resolved!(remap_shift_gb),
+            resolved!(max_logical_cpus),
+            resolved!(max_ident_len_bytes),
+            resolved!(max_path_len_bytes),
+            resolved!(max_processes),
+            resolved!(system_hz),
+            resolved!(sched_default_policy).kernel_variant(),
+            resolved!(rt_rr_timeslice_ms),
+            resolved!(backtrace_depth),
+            resolved!(user_stack_shift_kb),
+            resolved!(user_init_stack_shift_kb),
+            resolved!(user_heap_shift_mb),
+            resolved!(shmmax_bytes),
+            resolved!(shmall_pages),
+            resolved!(shmmni),
+            resolved!(io_shrink_threshold),
+            resolved!(oom_kill_threshold),
+            resolved!(symlink_resolve_limit),
+            resolved!(max_fd_per_process),
+            resolved!(ramdisk_count),
+            resolved!(loop_device_count),
+            resolved!(ns16550a_default_baud),
+            resolved!(dw_mshc_poll_timeout_ms),
+            resolved!(eevdf_base_slice_us),
+            resolved!(eevdf_wake_clamp_us),
+            resolved!(eevdf_yield_penalty_us),
+            resolved!(eevdf_anomaly_threshold),
         )
     }
 }

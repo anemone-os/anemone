@@ -4,7 +4,7 @@
 
 # This section specifies how to build kernel
 [build]
-platform = "qemu-virt-rv64-pretest" # Target platform. The same name as in conf/platforms/*.toml
+target = "qemu-virt-rv64-pretest" # Legacy SystemTarget selection; removed by the Stage 2 CLI cutover.
 profile = "release" # Build profile: "dev" or "release". We may add more profiles later.
 
 disasm = false # Whether to generate a disassembly file for kernel.

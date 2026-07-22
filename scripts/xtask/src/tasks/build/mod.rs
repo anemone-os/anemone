@@ -14,7 +14,12 @@ use clap::Args;
 use xshell::Shell;
 
 use crate::{
-    config::{KConfig, PlatformConfig, kconfig::Profile, platform::DtbType},
+    config::{
+        kconfig::Profile,
+        platform::{DtbType, Uboot},
+        reference::KernelConfigRef,
+        resolve::{BuildPresentation, ConfigLoader, ResolvedSystemBuild},
+    },
     log_progress,
     tasks::{app::build::build_app, qemu::gen_qemu_cmd, utils::cmd_echo},
     warn,
@@ -33,33 +38,50 @@ pub struct BuildArgs {
 pub fn run(args: BuildArgs) -> anyhow::Result<()> {
     log_progress!("BUILD", "Starting build process");
 
-    log_progress!("PARSE", "Parsing configuration files");
-    let kconfig_content = match std::fs::read_to_string(args.kconfig) {
-        Ok(content) => content,
-        Err(e) => {
-            log_progress!("ERROR", &format!("Failed to read kconfig file: {}", e));
-            return Err(e.into());
-        },
-    };
-    let kconfig = KConfig::from_str(&kconfig_content)?;
-    let platform_config_path = format!("{}/{}.toml", PLATFORM_CONFIGS_PATH, kconfig.build.platform);
-    let platform_config_content = std::fs::read_to_string(platform_config_path)?;
-    let platform_config = PlatformConfig::from_str(&platform_config_content)?;
+    log_progress!("RESOLVE", "Resolving legacy build selection");
+    let kernel_config_ref = KernelConfigRef::new(args.kconfig)?;
+    let action = ConfigLoader::new(Path::new(".")).resolve_legacy_build(kernel_config_ref)?;
+    log_progress!(
+        "RESOLVE",
+        &format!(
+            "selection source={} target={} platform={} kernel-config={} profile={} platform-output={}",
+            action.selection_source.as_str(),
+            action.system.target_ref,
+            action.system.platform_ref,
+            action.system.kernel_config_ref,
+            action.system.profile.as_str(),
+            action
+                .system
+                .platform
+                .uboot
+                .as_ref()
+                .map(|uboot| uboot.filename.as_str())
+                .unwrap_or("elf-only")
+        )
+    );
 
-    let context = BuildContext::new(&kconfig, &platform_config)?;
+    let context = BuildContext::new(action.system, action.presentation);
     context.build()?;
 
     Ok(())
 }
 
-struct BuildContext<'a> {
-    kconfig: &'a KConfig,
-    platform: &'a PlatformConfig,
+struct BuildContext {
+    resolved: ResolvedSystemBuild,
+    presentation: BuildPresentation,
 }
 
-impl<'a> BuildContext<'a> {
-    fn new(kconfig: &'a KConfig, platform: &'a PlatformConfig) -> anyhow::Result<Self> {
-        Ok(Self { kconfig, platform })
+enum UbootPlan<'a> {
+    Skip,
+    Build(&'a Uboot),
+}
+
+impl BuildContext {
+    fn new(resolved: ResolvedSystemBuild, presentation: BuildPresentation) -> Self {
+        Self {
+            resolved,
+            presentation,
+        }
     }
 
     fn build(&self) -> anyhow::Result<()> {
@@ -98,11 +120,11 @@ impl<'a> BuildContext<'a> {
         self.gen_rust_defs()?;
         self.gen_kernel_lds()?;
 
-        if let Some(dtb) = &self.platform.dtb {
+        if let Some(dtb) = &self.resolved.platform.dtb {
             match dtb.typ {
                 DtbType::Qemu => {
                     log_progress!("DTB", "Generating DTB from qemu");
-                    if let Some(qemu) = &self.platform.qemu {
+                    if let Some(qemu) = &self.resolved.platform.qemu {
                         let mut cmd = gen_qemu_cmd(qemu, None);
                         cmd.arg("-machine")
                             .arg(String::from("dumpdtb=anemone-kernel/src/") + dtb.path.as_str());
@@ -140,8 +162,11 @@ impl<'a> BuildContext<'a> {
     }
 
     fn gen_rust_defs(&self) -> anyhow::Result<()> {
-        let kconfig_defs = self.kconfig.parameters.gen_kconfig_defs();
-        let platform_defs = self.platform.gen_platform_defs();
+        let kconfig_defs = self.resolved.kernel_config.parameters.gen_kconfig_defs();
+        let platform_defs = self
+            .resolved
+            .platform
+            .gen_platform_defs(&self.resolved.target.root);
         // write to both loader and kernel src directories
         let kconfig_defs_path = format!("anemone-kernel/src/kconfig_defs.rs",);
         let platform_defs_path = format!("anemone-kernel/src/platform_defs.rs",);
@@ -156,17 +181,17 @@ impl<'a> BuildContext<'a> {
         let lds_template_path = format!(
             "{}/{}/kernel.lds.in",
             ARCH_CONFIGS_PATH,
-            self.platform.build.arch.as_str()
+            self.resolved.platform.build.arch.as_str()
         );
         let lds_template = std::fs::read_to_string(lds_template_path)?;
         let lds_content = lds_template
             .replace(
                 "{{KERNEL_LA_BASE}}",
-                &format!("0x{:x}", self.platform.constants.kernel_la_base),
+                &format!("0x{:x}", self.resolved.platform.constants.kernel_la_base),
             )
             .replace(
                 "{{KERNEL_VA_BASE}}",
-                &format!("0x{:x}", self.platform.constants.kernel_va_base),
+                &format!("0x{:x}", self.resolved.platform.constants.kernel_va_base),
             );
         let lds_output_path = format!("build/generated/kernel.lds");
         let sh = Shell::new()?;
@@ -198,14 +223,14 @@ impl<'a> BuildContext<'a> {
             .arg("--target")
             .arg(&format!(
                 "../conf/arch/{}/{}.json",
-                self.platform.build.arch.as_str(),
-                self.platform.build.arch.target_triple().as_str()
+                self.resolved.platform.build.arch.as_str(),
+                self.resolved.platform.build.arch.target_triple().as_str()
             ))
             .env("RUSTFLAGS", rustflags);
-        for arg in self.kconfig.build.profile.as_cargo_arg() {
+        for arg in self.resolved.profile.as_cargo_arg() {
             build = build.arg(arg);
         }
-        for (feature, enabled) in &self.kconfig.features {
+        for (feature, enabled) in &self.resolved.kernel_config.features {
             if *enabled {
                 build = build.arg("--features").arg(feature);
             }
@@ -217,11 +242,11 @@ impl<'a> BuildContext<'a> {
 
         self.build_uboot_image()?;
 
-        if self.kconfig.build.disasm {
+        if self.presentation.disasm {
             log_progress!("DISASM", "Generating kernel disassembly");
 
             let disasm = sh
-                .cmd(&self.platform.build.arch.target_triple().objdump())
+                .cmd(&self.resolved.platform.build.arch.target_triple().objdump())
                 .arg("-d")
                 .arg("-S")
                 .arg("build/anemone.elf")
@@ -233,8 +258,9 @@ impl<'a> BuildContext<'a> {
     }
 
     fn build_uboot_image(&self) -> anyhow::Result<()> {
-        let Some(uboot) = &self.platform.uboot else {
-            return Ok(());
+        let uboot = match self.uboot_plan() {
+            UbootPlan::Skip => return Ok(()),
+            UbootPlan::Build(uboot) => uboot,
         };
 
         let output_path = Path::new("build").join(&uboot.filename);
@@ -247,7 +273,8 @@ impl<'a> BuildContext<'a> {
             "UBOOT",
             &format!("Generating raw kernel binary '{}'", bin_path.display())
         );
-        let mut objcopy = Command::new(self.platform.build.arch.target_triple().objcopy());
+        let mut objcopy =
+            Command::new(self.resolved.platform.build.arch.target_triple().objcopy());
         objcopy
             .arg("-O")
             .arg("binary")
@@ -295,20 +322,27 @@ impl<'a> BuildContext<'a> {
         Ok(())
     }
 
+    fn uboot_plan(&self) -> UbootPlan<'_> {
+        match &self.resolved.platform.uboot {
+            Some(uboot) => UbootPlan::Build(uboot),
+            None => UbootPlan::Skip,
+        }
+    }
+
     fn postbuild(&self) -> anyhow::Result<()> {
         // currently no-op
         Ok(())
     }
 }
 
-impl<'a> BuildContext<'a> {
+impl BuildContext {
     const GENERAL_RUSTFLAGS: &'static [&'static str] =
         &["-C", "force-frame-pointers", "-C", "link-arg=--no-relax"];
     fn cargo_build_dir(&self) -> String {
         format!(
             "target/{}/{}",
-            self.platform.build.arch.target_triple().as_str(),
-            match self.kconfig.build.profile {
+            self.resolved.platform.build.arch.target_triple().as_str(),
+            match self.resolved.profile {
                 Profile::Dev => "debug", // dev builds go to debug/
                 Profile::Release => "release",
             },
@@ -319,5 +353,20 @@ impl<'a> BuildContext<'a> {
         let mut all_flags = Self::GENERAL_RUSTFLAGS.to_vec();
         all_flags.extend_from_slice(flags);
         all_flags.join(" ")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{config::reference::KernelConfigRef, config::resolve::ConfigLoader};
+
+    #[test]
+    fn no_uboot_build_plan_skips_post_link_commands() {
+        let action = ConfigLoader::new(Path::new("../.."))
+            .resolve_legacy_build(KernelConfigRef::new("conf/.defconfig").unwrap())
+            .unwrap();
+        let context = BuildContext::new(action.system, action.presentation);
+        assert!(matches!(context.uboot_plan(), UbootPlan::Skip));
     }
 }

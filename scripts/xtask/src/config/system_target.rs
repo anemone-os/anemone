@@ -1,7 +1,7 @@
-//! Dormant SystemTarget schema for the Stage 1A loader.
+//! SystemTarget-owned boot and root selection.
 //!
-//! Platform root fields remain the production behavior source until the Stage 1B
-//! atomic cutover removes them. These values must not drive a build before then.
+//! The Stage 1B cutover removed the legacy Platform root fields. Production
+//! build resolution must use this value and must not recreate a Platform fallback.
 
 use serde::Deserialize;
 
@@ -52,6 +52,22 @@ pub enum RootSource {
     Pseudo,
 }
 
+impl RootSource {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Block { .. } => "block",
+            Self::Pseudo => "pseudo",
+        }
+    }
+
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            Self::Block { path } => Some(path),
+            Self::Pseudo => None,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum InitialProgramSource {
@@ -89,6 +105,15 @@ type = "rootfs-entry"
     fn rejects_unsupported_initial_program_tag() {
         let content = VALID_TARGET.replace("rootfs-entry", "embedded-app");
         assert!(Config::from_str(&content).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_root_source() {
+        let empty_fstype = VALID_TARGET.replace("fstype = \"ext4\"", "fstype = \"\"");
+        assert!(Config::from_str(&empty_fstype).is_err());
+
+        let empty_block_path = VALID_TARGET.replace("path = \"vda\"", "path = \"\"");
+        assert!(Config::from_str(&empty_block_path).is_err());
     }
 
     #[test]

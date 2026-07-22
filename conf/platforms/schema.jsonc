@@ -23,10 +23,6 @@
                         "loongarch64"
                     ]
                 },
-                "target": {
-                    "type": "string",
-                    "description": "The target triple for the platform. This should correspond to the architecture and environment."
-                },
                 "exec_env": {
                     "type": "string",
                     "description": "Execution environment for the target platform (e.g., BIOS, UEFI, SBI, UBoot). "
@@ -35,7 +31,6 @@
             "required": [
                 "name",
                 "arch",
-                "target",
                 "exec_env"
             ]
         },
@@ -71,39 +66,6 @@
                 "kernel_la_base",
                 "kernel_va_base",
                 "max_phys_cpu_id"
-            ]
-        },
-        "rootfs": {
-            "type": "object",
-            "description": "Root filesystem configuration.",
-            "properties": {
-                "fstype": {
-                    "type": "string",
-                    "description": "Filesystem type used for the initial root mount."
-                },
-                "source": {
-                    "type": "object",
-                    "properties": {
-                        "type": {
-                            "type": "string",
-                            "enum": [
-                                "block",
-                                "pseudo"
-                            ]
-                        },
-                        "path": {
-                            "type": "string",
-                            "description": "Device-tree full-name path used to identify the root block device."
-                        }
-                    },
-                    "required": [
-                        "type"
-                    ]
-                }
-            },
-            "required": [
-                "fstype",
-                "source"
             ]
         },
         "qemu": {

@@ -1,6 +1,6 @@
 # RFC-20260722-system-target-model
 
-**状态：** Accepted for Implementation（Stage 1 Active；Checkpoint 1A Closed）
+**状态：** Accepted for Implementation（Stage 1 Active；Checkpoint 1B Closed；1C Not Started）
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-23
@@ -9,8 +9,7 @@
 **影响契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--rootfs-metadata选择初始用户程序)（Refine；当前仍由 effective baseline 生效，R0 target 尚未 cut over）。
 **开放问题：** None；已确认问题已折回 target 或分流到
 [迁移实施计划](./implementation.md) 的 feedback/preflight gate。
-**下一步：** Checkpoint 1A 已独立关闭并提交；Checkpoint 1B 仍为 Not Started，必须按本轮用户
-授权单独记录 activation 后才能执行。Stage 1 不进入 1C。
+**下一步：** Checkpoint 1A/1B 已独立关闭；Checkpoint 1C仍为Not Started且未获activation授权。
 
 ## 文档状态
 
@@ -167,7 +166,8 @@ Review 状态：
 
 `implementation.md` 只描述后续实施边界。Public promotion与初始Implementation Resolution Gate
 已完成；Stage 1 Ready definition/manifest已冻结。R0 acceptance、transaction creation 与
-Stage 1 activation 已在 2026-07-23 独立闭合，当前代码授权只覆盖 Checkpoint 1A。
+Stage 1 activation 已在 2026-07-23 独立闭合；Checkpoint 1A/1B已关闭，当前没有进入1C的
+代码授权。
 
 ## 术语与 owner
 
@@ -568,7 +568,7 @@ R0 acceptance gate 已于 2026-07-23 核对并确认：
 
 [迁移实施计划](./implementation.md) 已记录允许带入实现的不确定性。Public promotion、首个
 Implementation Resolution Gate、R0 acceptance、transaction creation 与 Stage 1 activation 已按独立
-gate 完成；当前只授权 Checkpoint 1A。若 feedback 需要改变 target
+gate 完成；Checkpoint 1A/1B已独立关闭，1C未获activation授权。若 feedback 需要改变 target
 invariant、owner、ABI、`Contract Impact` 或 acceptance boundary，当前 gate 必须停止并回到
 RFC review。
 
@@ -647,11 +647,11 @@ repackage 或 ELF-only 高频工作流来证明抽象价值。内部 post-link s
 
 ## 收口
 
-R0 已接受进入实现，Stage 1 已按用户授权进入 Active，当前只执行 Checkpoint 1A。R0 已删除独立 package/output graph，并把 U-Boot
+R0 已接受进入实现，Stage 1 已按用户授权进入 Active，Checkpoint 1A/1B已独立关闭且未自动进入1C。R0 已删除独立 package/output graph，并把 U-Boot
 固定为 Platform-owned build post-link output；目录命名、live-owner inventory 与逐平台迁移
 分流到 `implementation.md` 的 probe、preflight 或工程选择。Promotion preflight 已提取当前
 Boot Protocol baseline，初始Implementation Resolution Gate已冻结Stage 1 manifest；transaction
-记录实际 checkpoint 证据。Checkpoint 1B 不由 1A 自动启动。
+记录实际 checkpoint 证据。Checkpoint 1C仍为Not Started且未获activation授权。
 
 ## 修订记录
 

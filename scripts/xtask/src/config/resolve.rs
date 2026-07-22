@@ -2,11 +2,11 @@ use std::{fs, path::Path};
 
 use anyhow::Context;
 
-use crate::workspace::{PLATFORM_CONFIGS_PATH, SYSTEM_TARGET_CONFIGS_PATH};
+use crate::workspace::{DEF_KCONFIG_PATH, PLATFORM_CONFIGS_PATH, SYSTEM_TARGET_CONFIGS_PATH};
 
 use super::{
     KConfig, PlatformConfig,
-    kconfig::KernelConfig,
+    kconfig::{KernelConfig, Profile},
     reference::{KernelConfigRef, PlatformRef, SystemTargetRef},
     system_target::Config as SystemTargetConfig,
 };
@@ -39,6 +39,35 @@ impl<'a> ConfigLoader<'a> {
         })
     }
 
+    pub fn resolve_legacy_build(
+        &self,
+        kernel_config_ref: KernelConfigRef,
+    ) -> anyhow::Result<ResolvedBuildAction> {
+        let config = self.load_resolved_kconfig(&kernel_config_ref)?;
+        let target_ref = SystemTargetRef::new(&config.build.target)?;
+        let profile = config.build.profile;
+        let presentation = BuildPresentation {
+            disasm: config.build.disasm,
+        };
+        let target = self.load_target(&target_ref)?;
+        let platform_ref = target.platform.clone();
+        let platform = self.load_platform(&platform_ref)?;
+
+        Ok(ResolvedBuildAction {
+            selection_source: SelectionSource::LegacyKconfig,
+            system: ResolvedSystemBuild {
+                target_ref,
+                target,
+                platform_ref,
+                platform,
+                kernel_config_ref,
+                kernel_config: config.into_kernel_config(),
+                profile,
+            },
+            presentation,
+        })
+    }
+
     pub fn load_target(&self, target_ref: &SystemTargetRef) -> anyhow::Result<SystemTargetConfig> {
         let path = self
             .workspace_root
@@ -67,6 +96,25 @@ impl<'a> ConfigLoader<'a> {
         &self,
         reference: &KernelConfigRef,
     ) -> anyhow::Result<KernelConfig> {
+        self.load_resolved_kconfig(reference)
+            .map(KConfig::into_kernel_config)
+    }
+
+    fn load_resolved_kconfig(&self, reference: &KernelConfigRef) -> anyhow::Result<KConfig> {
+        let mut config = self.load_kconfig(reference)?;
+        if reference.as_path() == Path::new(DEF_KCONFIG_PATH) {
+            config.parameters.materialize_defaults(None)?;
+        } else {
+            let default_ref = KernelConfigRef::new(DEF_KCONFIG_PATH)?;
+            let defaults = self.load_kconfig(&default_ref)?;
+            config
+                .parameters
+                .materialize_defaults(Some(&defaults.parameters))?;
+        }
+        Ok(config)
+    }
+
+    fn load_kconfig(&self, reference: &KernelConfigRef) -> anyhow::Result<KConfig> {
         let workspace_root = self
             .workspace_root
             .canonicalize()
@@ -87,7 +135,6 @@ impl<'a> ConfigLoader<'a> {
             .with_context(|| format!("failed to read kernel config `{reference}`"))?;
         KConfig::from_str(&content)
             .with_context(|| format!("failed to parse kernel config `{reference}`"))
-            .map(KConfig::into_kernel_config)
     }
 }
 
@@ -98,6 +145,39 @@ pub struct LoadedSystemBuildInputs {
     pub platform: PlatformConfig,
     pub kernel_config_ref: KernelConfigRef,
     pub kernel_config: KernelConfig,
+}
+
+pub struct ResolvedBuildAction {
+    pub selection_source: SelectionSource,
+    pub system: ResolvedSystemBuild,
+    pub presentation: BuildPresentation,
+}
+
+pub struct ResolvedSystemBuild {
+    pub target_ref: SystemTargetRef,
+    pub target: SystemTargetConfig,
+    pub platform_ref: PlatformRef,
+    pub platform: PlatformConfig,
+    pub kernel_config_ref: KernelConfigRef,
+    pub kernel_config: KernelConfig,
+    pub profile: Profile,
+}
+
+pub struct BuildPresentation {
+    pub disasm: bool,
+}
+
+#[derive(Clone, Copy)]
+pub enum SelectionSource {
+    LegacyKconfig,
+}
+
+impl SelectionSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LegacyKconfig => "legacy-kconfig",
+        }
+    }
 }
 
 fn ensure_platform_identity(
@@ -147,12 +227,10 @@ mod tests {
                 super::super::system_target::InitialProgramSource::RootfsEntry
             ));
             assert!(!inputs.kernel_config.features.is_empty());
-            let legacy_root = inputs.platform.rootfs.as_ref().unwrap();
-            assert_eq!(inputs.target.root.fstype, legacy_root.fstype);
+            assert_eq!(inputs.target.root.fstype, "ext4");
             match &inputs.target.root.source {
                 super::super::system_target::RootSource::Block { path } => {
                     assert_eq!(path, expected_root_path);
-                    assert_eq!(legacy_root.source.path.as_deref(), Some(path.as_str()));
                 }
                 super::super::system_target::RootSource::Pseudo => {
                     panic!("tracked target {target} unexpectedly uses pseudo root")
@@ -217,8 +295,8 @@ frame_section_shift_mb = 7
         let content = fs::read_to_string(workspace_root().join("conf/.defconfig")).unwrap();
         let changed_selection = content
             .replace(
-                "platform = \"qemu-virt-rv64-pretest\"",
-                "platform = \"visionfive2-rv64\"",
+                "target = \"qemu-virt-rv64-pretest\"",
+                "target = \"visionfive2-rv64\"",
             )
             .replace("profile = \"release\"", "profile = \"dev\"")
             .replace("disasm = false", "disasm = true");
@@ -228,6 +306,152 @@ frame_section_shift_mb = 7
             .unwrap()
             .into_kernel_config();
         assert_eq!(original, changed);
+    }
+
+    #[test]
+    fn legacy_build_resolves_owned_snapshot() {
+        let loader = ConfigLoader::new(workspace_root());
+        let action = loader
+            .resolve_legacy_build(KernelConfigRef::new("conf/.defconfig").unwrap())
+            .unwrap();
+
+        assert_eq!(action.selection_source.as_str(), "legacy-kconfig");
+        assert_eq!(action.system.target_ref.as_str(), "qemu-virt-rv64-pretest");
+        assert_eq!(
+            action.system.platform_ref.as_str(),
+            "qemu-virt-rv64-pretest"
+        );
+        assert_eq!(action.system.kernel_config_ref.to_string(), "conf/.defconfig");
+        assert_eq!(action.system.profile, Profile::Release);
+        assert!(!action.presentation.disasm);
+        assert!(action.system.platform.uboot.is_none());
+    }
+
+    #[test]
+    fn legacy_build_resolves_same_target_with_dev_and_release_profiles() {
+        let loader = ConfigLoader::new(workspace_root());
+        let release = loader
+            .resolve_legacy_build(KernelConfigRef::new("conf/.defconfig").unwrap())
+            .unwrap();
+        let release_content =
+            fs::read_to_string(workspace_root().join("conf/.defconfig")).unwrap();
+        let dev_path = workspace_root()
+            .join("build")
+            .join(format!("xtask-test-dev-kconfig-{}.toml", std::process::id()));
+        fs::create_dir_all(dev_path.parent().unwrap()).unwrap();
+        fs::write(
+            &dev_path,
+            release_content.replace("profile = \"release\"", "profile = \"dev\""),
+        )
+        .unwrap();
+        let dev_ref = KernelConfigRef::new(dev_path.strip_prefix(workspace_root()).unwrap()).unwrap();
+        let dev = loader.resolve_legacy_build(dev_ref);
+        fs::remove_file(dev_path).unwrap();
+        let dev = dev.unwrap();
+
+        assert_eq!(release.system.target_ref, dev.system.target_ref);
+        assert_eq!(release.system.platform_ref, dev.system.platform_ref);
+        assert_eq!(release.system.profile, Profile::Release);
+        assert_eq!(dev.system.profile, Profile::Dev);
+        assert_eq!(release.system.kernel_config, dev.system.kernel_config);
+    }
+
+    #[test]
+    fn resolved_snapshot_does_not_borrow_later_loader_values() {
+        let workspace = TestWorkspace::new();
+        let loader = ConfigLoader::new(&workspace.0);
+        let action = loader
+            .resolve_legacy_build(KernelConfigRef::new("kconfig").unwrap())
+            .unwrap();
+        let before = action.system.kernel_config.parameters.gen_kconfig_defs();
+
+        replace_file_text(
+            workspace.0.join("kconfig"),
+            "system_hz = 100",
+            "system_hz = 999",
+        );
+        replace_file_text(
+            workspace.0.join("conf/.defconfig"),
+            "max_logical_cpus = 16",
+            "max_logical_cpus = 99",
+        );
+        replace_file_text(
+            workspace
+                .0
+                .join("conf/system-targets/qemu-virt-rv64-pretest.toml"),
+            "fstype = \"ext4\"",
+            "fstype = \"ramfs\"",
+        );
+        replace_file_text(
+            workspace
+                .0
+                .join("conf/platforms/qemu-virt-rv64-pretest.toml"),
+            "name = \"qemu-virt-rv64-pretest\"",
+            "name = \"mutated-platform\"",
+        );
+
+        assert_eq!(action.system.target.root.fstype, "ext4");
+        assert_eq!(
+            action.system.platform.build.name,
+            "qemu-virt-rv64-pretest"
+        );
+        assert!(before.contains("pub const MAX_LOGICAL_CPUS: usize = 16;"));
+        assert!(before.contains("pub const SYSTEM_HZ: u16 = 100;"));
+        assert_eq!(
+            before,
+            action.system.kernel_config.parameters.gen_kconfig_defs()
+        );
+    }
+
+    struct TestWorkspace(std::path::PathBuf);
+
+    impl TestWorkspace {
+        fn new() -> Self {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "anemone-xtask-resolve-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir_all(root.join("conf/system-targets")).unwrap();
+            fs::create_dir_all(root.join("conf/platforms")).unwrap();
+
+            let default_content =
+                fs::read_to_string(workspace_root().join("conf/.defconfig")).unwrap();
+            fs::write(root.join("conf/.defconfig"), &default_content).unwrap();
+            let selected_content = default_content
+                .lines()
+                .filter(|line| {
+                    !line.trim_start().starts_with("max_logical_cpus")
+                        && !line.trim_start().starts_with("ns16550a_default_baud")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            fs::write(root.join("kconfig"), selected_content).unwrap();
+
+            for relative in [
+                "conf/system-targets/qemu-virt-rv64-pretest.toml",
+                "conf/platforms/qemu-virt-rv64-pretest.toml",
+            ] {
+                fs::copy(workspace_root().join(relative), root.join(relative)).unwrap();
+            }
+            Self(root)
+        }
+    }
+
+    impl Drop for TestWorkspace {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn replace_file_text(path: impl AsRef<Path>, old: &str, new: &str) {
+        let path = path.as_ref();
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains(old));
+        fs::write(path, content.replace(old, new)).unwrap();
     }
 
     fn workspace_root() -> &'static Path {

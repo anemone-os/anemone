@@ -22,7 +22,7 @@ usage() {
 Usage: run-user-test-la64.sh <sdcard-image> [log-file]
 
 Runs the la64 test chain:
-  1. switch kconfig to qemu-virt-la64-pretest if needed
+  1. switch the legacy target selection to qemu-virt-la64-pretest if needed
   2. build the rootfs with sudo
   3. stage the provided sdcard image as a temporary copy
   4. build the kernel
@@ -41,8 +41,11 @@ rootfs_config=conf/rootfs/pretest-la64.toml
 sdcard_image=$1
 log_file=${2:-build/user-test-la64.log}
 
-platform=qemu-virt-la64-pretest
-platform_arch=loongarch64
+system_target=qemu-virt-la64-pretest
+# Stage 2 removes both this mutable target bridge and the direct legacy QEMU
+# Platform selection. Keep the identities separate even while their slugs match.
+legacy_qemu_platform=qemu-virt-la64-pretest
+target_arch=loongarch64
 sdcard_target=sdcard-la.img
 rootfs_target=build/rootfs/pretest-la64/rootfs.img
 
@@ -67,23 +70,24 @@ fi
 
 mkdir -p -- "$(dirname -- "$log_file")"
 
-current_platform=$(
-    awk -F'"' '/^[[:space:]]*platform[[:space:]]*=/ { print $2; exit }' kconfig
+current_target=$(
+    awk -F'"' '/^[[:space:]]*target[[:space:]]*=/ { print $2; exit }' kconfig
 )
 
-if [[ -z "$current_platform" ]]; then
-    error "could not read current platform from kconfig"
+if [[ -z "$current_target" ]]; then
+    error "could not read current target from kconfig"
     exit 1
 fi
 
-log_progress "PRETEST" "platform $platform ($platform_arch)"
+log_progress "PRETEST" "target $system_target ($target_arch)"
+log_progress "PRETEST" "legacy qemu platform $legacy_qemu_platform"
 log_progress "PRETEST" "rootfs config $rootfs_config"
 log_progress "PRETEST" "sdcard image $sdcard_image"
 log_progress "PRETEST" "log file $log_file"
 
-if [[ "$current_platform" != "$platform" ]]; then
-    log_progress "PRETEST" "switching kconfig from $current_platform to $platform"
-    just conf switch "$platform"
+if [[ "$current_target" != "$system_target" ]]; then
+    log_progress "PRETEST" "switching kconfig from $current_target to $system_target"
+    just conf switch "$system_target"
 fi
 
 log_progress "PRETEST" "rebuilding rootfs"
@@ -115,4 +119,4 @@ log_progress "PRETEST" "building kernel"
 just build
 
 log_progress "PRETEST" "running qemu"
-just xtask qemu --platform "$platform" --image build/anemone.elf 2>&1 | tee "$log_file"
+just xtask qemu --platform "$legacy_qemu_platform" --image build/anemone.elf 2>&1 | tee "$log_file"

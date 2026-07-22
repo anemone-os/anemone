@@ -58,10 +58,6 @@ args = [
     # "virtio-blk-pci-transitional,drive=x0,bus=pcie.1",
 ]
 
-[rootfs]
-fstype = "ext4"
-source = { type = "block", path = "vda" }
-
 [dtb]
 path = "arch/riscv64/generated.dtb"
 type = "qemu"

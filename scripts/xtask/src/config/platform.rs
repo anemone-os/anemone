@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::system_target::Root;
+
 #[derive(Deserialize, Debug, Serialize, Clone)]
 pub enum Arch {
     #[serde(rename = "riscv64")]
@@ -108,36 +110,6 @@ pub struct Uboot {
 }
 
 #[derive(Deserialize, Debug, Serialize)]
-pub struct RootFs {
-    pub fstype: String,
-    pub source: RootFsSource,
-}
-
-#[derive(Deserialize, Debug, Serialize)]
-pub struct RootFsSource {
-    #[serde(rename = "type")]
-    pub ty: RootFsSourceType,
-    pub path: Option<String>,
-}
-
-#[derive(Deserialize, Debug, Serialize)]
-pub enum RootFsSourceType {
-    #[serde(rename = "block")]
-    Block,
-    #[serde(rename = "pseudo")]
-    Pseudo,
-}
-
-impl RootFsSourceType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            RootFsSourceType::Block => "block",
-            RootFsSourceType::Pseudo => "pseudo",
-        }
-    }
-}
-
-#[derive(Deserialize, Debug, Serialize)]
 pub enum DtbType {
     #[serde(rename = "qemu")]
     Qemu,
@@ -149,7 +121,6 @@ pub enum DtbType {
 pub struct Config {
     pub build: Build,
     pub constants: Constants,
-    pub rootfs: Option<RootFs>,
     pub qemu: Option<Qemu>,
     pub dtb: Option<Dtb>,
     pub uboot: Option<Uboot>,
@@ -160,21 +131,10 @@ impl Config {
         let config: Config = toml::from_str(&content)?;
         Ok(config)
     }
-    pub fn gen_platform_defs(&self) -> String {
-        let rootfs_fstype = self
-            .rootfs
-            .as_ref()
-            .map(|rootfs| rootfs.fstype.as_str())
-            .unwrap_or("ramfs");
-        let rootfs_source_kind = self
-            .rootfs
-            .as_ref()
-            .map(|rootfs| rootfs.source.ty.as_str())
-            .unwrap_or("pseudo");
-        let rootfs_source_path = self
-            .rootfs
-            .as_ref()
-            .and_then(|rootfs| rootfs.source.path.as_deref())
+    pub fn gen_platform_defs(&self, root: &Root) -> String {
+        let rootfs_source_path = root
+            .source
+            .path()
             .map(|path| format!("Some({path:?})"))
             .unwrap_or_else(|| "None".to_string());
 
@@ -210,8 +170,8 @@ pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
             self.constants.kernel_va_base,
             self.constants.max_phys_cpu_id,
             self.constants.frame_section_shift_mb,
-            rootfs_fstype,
-            rootfs_source_kind,
+            root.fstype,
+            root.source.kind(),
             rootfs_source_path,
         )
     }
@@ -226,5 +186,13 @@ mod tests {
         let content = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
         let config = Config::from_str(&content).unwrap();
         println!("{:#x?}", config);
+    }
+
+    #[test]
+    fn rejects_unsupported_architecture() {
+        let content = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml")
+            .unwrap()
+            .replace("arch = \"riscv64\"", "arch = \"x86_64\"");
+        assert!(Config::from_str(&content).is_err());
     }
 }
