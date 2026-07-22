@@ -6,6 +6,7 @@
 
 ## Active
 
+- [TTY Subsystem](./2026-07-23-tty-subsystem.md)：R0 已接受，Stage 0 source/config/oracle route审计已关闭；deferred carrier选用现有`KThreadHandle::wake()`，其底层IRQ-off allocation债务保留给wait-core/scheduler owner。Stage 1仍为Outline / Not Started。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)

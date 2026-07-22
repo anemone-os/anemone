@@ -1,19 +1,19 @@
 # TTY Subsystem 迁移实施计划
 
-**状态：** Draft
-**最后更新：** 2026-07-22
+**状态：** Active / Stage 0 Closed
+**最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-tty-subsystem](./index.md)
 **目标与不变量：** [TTY Subsystem 目标与不变量](./invariants.md)
 **当前契约：** Preserve 项及链接见 [Contract Impact](./invariants.md#contract-impact)；`TTY-*` 均未 cut over。
-**当前修订：** Draft
-**事务日志：** None（Draft；R0 接受后建立）
+**当前修订：** R0
+**事务日志：** [2026-07-23 - TTY Subsystem](../../devlog/transactions/2026-07-23-tty-subsystem.md)
 **Contract Cutover：** prospective `TTY-DATA-CUTOVER` 与 `TTY-JOBCTL-CUTOVER`；当前均为 Not Cut Over
 
 本文把 TTY target 解析为可滚动实施的阶段、probe、验证和 cutover 边界，不重新定义
 [`index.md`](./index.md) 与 [`invariants.md`](./invariants.md) 已经拥有的 target、owner、ABI
-或 proof obligations。当前公开 RFC 仍是 Draft：Stage 0 的计划已经完整解析为 `Ready`，但 R0
-尚未接受、transaction 尚未建立，因此没有任何 stage 获得执行授权，也没有 current contract
-因本文生效。
+或 proof obligations。R0 已接受并建立 transaction；Stage 0 获得本轮单独授权后完成只读审计并
+关闭。Stage 1 仍为 `Outline`，没有执行
+Stage 0 -> Stage 1 Resolution Gate，也没有 current contract 因本文生效。
 
 ## 1. 计划角色与 authority
 
@@ -36,7 +36,7 @@
 
 - 文档层 review 接受首个 target revision 为 R0，同步 RFC 状态、修订记录、Contract Impact 与仍有效的
   tracking-issue 结论；
-- 建立 `docs/src/devlog/transactions/2026-07-22-tty-subsystem.md`，记录 R0、全部 prospective
+- 建立 `docs/src/devlog/transactions/2026-07-23-tty-subsystem.md`，记录 R0、全部 prospective
   contract IDs、两个 cutover unit 和 Stage 0 的 Ready 链接；
 - 建立 RFC 与 transaction 的双向链接，并同步 transaction index、当前双周 devlog 与
   `docs/src/SUMMARY.md`；current contract只允许增加获准的pending-successor导航，不提前改写effective rules；
@@ -149,7 +149,7 @@ transaction 中临时切块。
 
 | Stage | 成熟度 | 概括目的 | Contract Cutover | 解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 0 | Ready | 只读闭合 live interface、oracle、carrier 候选与模块边界 | None | R0 接受、transaction 建立后另行授权 |
+| Stage 0 | Closed | 只读闭合 live interface、oracle、carrier 候选与模块边界 | None | 已关闭；Stage 1仍需独立resolution gate与授权 |
 | Stage 1 | Outline | 建立 unpublished port/Terminal transport vertical slice，闭合 IRQ、RX、TX 与 pre-publish transaction | None | Stage 0 独立关闭后 |
 | Stage 2 | Outline | 交付 line discipline、termios、read/write/poll、`/dev/ttyS<N>` 与 real boot stdio | `TTY-DATA-CUTOVER` | Stage 1 独立关闭后 |
 | Stage 3 | Outline | 建立 controlling relation、`/dev/tty`、caller/topology handoff、foreground ioctls 与 cleanup | None | Stage 2 独立关闭后 |
@@ -401,6 +401,9 @@ Contract cutover：
 - live UART/allocator/deferred接口至少有一条路线满足bounded raw handoff、no-lost-work、IRQ约束、
   pre-publish rollback和port-owned IRQ-safe TX serialization，且固定console + `TtyPort`共存不需要
   claim、lease或mode state。
+- 现有`KThreadHandle::wake()`是TTY使用的repository-owned窄notification carrier；其底层
+  scheduler IRQ-off allocation风险继续由`ANE-20260622-IRQ-OFF-HEAP-ALLOCATION`的owner修复，
+  不要求TTY新建workqueue、softirq或专用scheduler路径，也不把该共享实现债务当作Stage 0路线失败。
 - live firmware/device identity可以形成不依赖probe完成顺序的稳定`ttyS<N>` mapping，并把chosen
   stdout映射为TTY可重验的endpoint identity。
 - live topology/Signal接口可以用窄query/decision/revalidation闭合relation和`TIOCSPGRP`，不复制
@@ -412,7 +415,9 @@ Contract cutover：
 以下任一情况立即停止Stage 0并写入transaction：
 
 - caller handoff只能通过所有FileOps保存完整`Task`、fd table、topology guard或Signal state实现；
-- 所有RX carrier/storage候选都会在hard IRQ进入不可控allocator/OOM/复杂drop，或需要周期poll保证进展；
+- TTY-owning RX storage/IRQ路径本身只能进入不可控allocator/OOM/复杂drop，或只能依赖周期poll、
+  TTY-private deferred infrastructure保证进展；调用现有`KThreadHandle::wake()`本身不触发此项，但
+  不得以TTY局部patch掩盖其register中已记录的scheduler/wait-core风险；
 - port identity只能依赖并发probe偶然顺序，chosen stdout无法映射到同一immutable endpoint；
 - relation正确性要求Session与Terminal各保存一份mutable binding/foreground，或cleanup无唯一owner；
 - 固定console + `TtyPort`共存只能通过runtime claim、lease、mode state或raw `CharDev`并行消费RX实现；
@@ -447,7 +452,7 @@ Resolved Write Set Manifest：
 
 允许写入：
 
-- `docs/src/devlog/transactions/2026-07-22-tty-subsystem.md`：只追加Stage 0 preflight、evidence matrix、
+- `docs/src/devlog/transactions/2026-07-23-tty-subsystem.md`：只追加Stage 0 preflight、evidence matrix、
   finding、review与closure事实。
 
 Stage 0 -> Stage 1 Resolution Gate另行允许写入：
@@ -662,9 +667,18 @@ cutover，否则保持Not Cut Over并按target范围分类open issue、limitatio
 如果剩余差异只属于已明确延期且ABI诚实的corner、future Outline内部类型选择或不影响owner/contract/
 acceptance的代码风格，停止扩大本RFC；把有真实consumer/oracle的扩展留给follow-up revision/RFC。
 
+调用repository-owned `KThreadHandle::wake()`属于本RFC允许的窄deferred notification，不要求TTY
+穿透scheduler实现或为开放的IRQ-off allocation问题发明替代设施。TTY仍必须保证自身IRQ handler、
+raw storage、counter与notification调用前后不新增allocation、复杂drop、普通日志或sleepable lock；
+wait-core/scheduler对wake placement的后续修复由其现有owner与register流程闭合。
+
 ## 16. 实现期反馈与记录
 
-当前没有implementation feedback、Target Renegotiation、Ready-manifest扩展或结构维护记录。
+2026-07-23 Stage 0 carrier审计确认现有`KThreadHandle::wake()`底层仍受register中的scheduler
+IRQ-off allocation问题影响。用户按owner边界决定：TTY直接使用现有wake capability，不因此停摆或
+发明workqueue/softirq/专用scheduler路径；该共享问题继续由wait-core/scheduler owner修复。本文已把
+这项处置折回Stage 0反馈假设、停止条件和全局边界；它不改变R0 target、owner、ABI、cutover或
+acceptance，不产生revision bump或Ready-manifest扩展。
 
 - Execution Fact、checkpoint、review与验证只追加到transaction。
 - Route Correction若保持target，只更新本文future Outline/Ready和transaction，不增加RFC修订。

@@ -1,9 +1,9 @@
 # TTY Subsystem Tracking Issues
 
 **状态：** Closed（0 个 Keter 开放，11 个 Keter 已中和）
-**最后更新：** 2026-07-22
+**最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-tty-subsystem](./index.md)
-**事务日志：** None
+**事务日志：** [2026-07-23 - TTY Subsystem](../../devlog/transactions/2026-07-23-tty-subsystem.md)
 
 本文只跟踪已经确认、会影响 target、状态所有权、ABI 边界、实现顺序、review gate、停止边界或验收判断的 design issue。普通 TODO、尚未冻结的工程参数和背景材料中已经被正文吸收的现状缺口不在这里重复登记。
 
@@ -145,9 +145,11 @@ None.
 
 **决策：** target 只固定 hard IRQ 有界 drain、raw handoff 的单一 owner/顺序/overflow observability、notification-plus-predicate、deferred policy execution 与 no-lost-work。每 port 专用 RX kthread + `KThreadHandle::wake()` + bounded fallible IRQ growth 保留为明确候选；预分配 fixed ring 或满足同一 proof boundary 的其它现有 deferred facility 同样允许。implementation gate 根据 live 接口和证据选择最简单的路径；若选择候选方案，仍须证明 allocation failure、empty-to-nonempty notification、worker publication、drain budget 和 pre-publish rollback。
 
+**Stage 0 implementation evidence（2026-07-23）：** live source确认预分配fixed ring可以让TTY-owned raw storage在IRQ中不分配；deferred carrier选用现有`KThreadHandle::wake()`。该API底层当前会进入register已记录的scheduler IRQ-off runqueue growth风险，但用户明确将其保留为wait-core/scheduler owner的既有问题：TTY不得因此停摆、发明workqueue/softirq或增加专用scheduler路径，也不得声称自己修复了该问题。TTY仍以ring predicate作为durable work truth，只在empty-to-nonempty边界调用窄wake，并保证自身IRQ/storage路径不新增allocation、复杂drop、普通日志或sleepable lock。
+
 **修复位置：** [目标](./index.md#目标)、[RX、line discipline 与 deferred effects](./index.md#3-rxline-discipline-与-deferred-effects)、[并发与锁边界](./index.md#10-并发与锁边界)、[保留的工程余地](./index.md#保留的工程余地)和[迁移实施原则](./implementation.md#3-迁移原则)。
 
-**重新打开条件：** live source 证明现有 deferred facility 无法保持所需 predicate/owner boundary，专用 kthread 或 IRQ allocation 的选择会改变 owner、lifecycle、failure semantics 或 acceptance boundary，或 implementation probe 发现所有候选都无法满足 no-lost-work 与有界 overflow。
+**重新打开条件：** TTY使用现有`KThreadHandle::wake()`仍无法保持所需predicate/owner boundary，必须由TTY新建deferred infrastructure或改变owner/lifecycle/failure semantics/acceptance boundary，或implementation probe发现预分配storage + kthread consumer无法满足no-lost-work与有界overflow。wait-core/scheduler自身已登记的IRQ-off placement风险不单独重新打开本条。
 
 ### KETER-009 — 首版提前承诺 runtime line configuration 与 backend hangup lifecycle
 

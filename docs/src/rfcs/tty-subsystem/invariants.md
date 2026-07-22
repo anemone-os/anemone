@@ -1,11 +1,11 @@
 # TTY Subsystem 目标与不变量
 
-**状态：** Draft
-**最后更新：** 2026-07-22
+**状态：** Accepted Target
+**最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-tty-subsystem](./index.md)
-**适用修订：** Draft
+**适用修订：** R0
 
-本文定义本 RFC预计引入的 contract delta、尚未 cutover 的 target invariants，以及只服务本次迁移、checkpoint 和验收的 RFC-local proof obligations。当前已经生效的共享规则仍以 `docs/src/contracts/` 中的稳定 ID 为唯一权威；本页中的 `TTY-*` ID 在 R0 接受前只是 prospective target，不表示 Anemone 已经具备对应能力。
+本文定义本 RFC 已接受但尚未 cutover 的 contract delta、target invariants，以及只服务本次迁移、checkpoint 和验收的 RFC-local proof obligations。当前已经生效的共享规则仍以 `docs/src/contracts/` 中的稳定 ID 为唯一权威；本页中的 `TTY-*` ID 是 R0 accepted target，不表示 Anemone 已经具备对应能力。
 
 ## 规则分类
 
