@@ -319,3 +319,53 @@ owner、ABI、visible semantics、acceptance boundary和resolved source manifest
 
 **Result / Next:** Checkpoint 1 **Closed**，Stage 1保持Active。Checkpoint 2仍为Not Started，未建立
 `device::tty`、unpublished attachment、worker或任何Stage 1 bridge；后续必须单独激活Checkpoint 2。
+
+## Stage 1 / Checkpoint 2 activation - 2026-07-23
+
+**Authorization and entry:** 用户明确授权完成Stage 1剩余两个checkpoint；依照一次只激活一个checkpoint的
+合同，本节只激活Checkpoint 2。入口为`dev/drc/omega@0b3d5da6`，worktree clean；active `kconfig`为
+`qemu-virt-rv64-pretest`、release、KUnit、ext4和irqsave enabled。
+
+**Preflight:** canonical Stage 1第6.3节仍将本checkpoint冻结为dormant TTY port/attachment core；允许写集
+只有`device/mod.rs`、新建`device/tty/{mod.rs,port.rs}`和本文。现有`KThreadHandle::wake()`是纯notification，
+`KThreadCtx::wait_until()`提供register-plus-recheck，`request_stop()`加`wait_exited()`是同步join边界；因此
+registry只需拥有unpublished identity索引，attachment拥有撤索引、stop和join，worker只依赖port RX
+predicate/dequeue，notifier不携带business truth。production NS16550A继续走Checkpoint 1 raw路径。
+
+**Contract Cutover:** None。全部`TTY-*`保持Not Cut Over；current contracts与register不修改。
+
+**Next:** 在上述C2写集内实现crate-private capability、unpublished registry、Stage 1-only drain sink和fake-port
+KUnit。若需要观察Task/scheduler内部、扩大kthread/Event/shared API、引入polling watchdog或修改production
+driver，立即停止；Checkpoint 2关闭后不自动激活Checkpoint 3。
+
+## Stage 1 / Checkpoint 2 dormant attachment closure - 2026-07-23
+
+**Change:** 新增crate-private `device::tty::{TtyPortId,TtyPort}`窄capability、按immutable identity索引的
+unpublished registry、`TtyPortAttachment`、`TtyRxNotifier`与每attachment kthread。worker只以
+`rx_pending()`为durable truth，向固定64-byte栈上batch按序dequeue；Stage 1 sink仅用Relaxed diagnostic
+counter记录并丢弃，Stage 2 consumer replacement前不得发布。attachment abort先撤registry visibility，
+释放guard后再request-stop/join；notifier只封装`KThreadHandle::wake()`。
+
+**KUnit:** owner-local fake port使用固定容量`RingBuffer`，覆盖duplicate identity直到abort、notification在
+worker wait前后、drain期间追加RX、predicate持续为true时跨batch FIFO drain，以及abort撤registry并确认worker
+exit。fake guard内不分配，不新增通用test framework、callback、polling watchdog或Task/scheduler观察面。
+
+**Review:** source/lock/lifecycle review未发现Apollyon、Keter或Euclid。registry guard只覆盖duplicate
+validation/insert/remove，不跨worker spawn、wait、port drain、stop或join；worker不持registry guard，port
+capability不暴露register/lock/container；diagnostic counters明确不参与predicate、ordering或state transition。
+`Drop`完成cleanup后才assert removal/exit invariant。production NS16550A、raw endpoint、boot行为、kthread/Event
+owner与shared API均无diff，未命中C2 bridge/stop条件。
+
+**Validation:** 两个新文件的no-index whitespace check无诊断，`git diff --check`通过；串行
+`just fmt kernel`后`just fmt kernel --check`通过。沙箱内首次`just build`在lwext4 C编译被seccomp以
+`Bad system call`阻断，获批沙箱外同命令以RV64 release、KUnit、ext4和irqsave编译/link通过且无告警。
+`./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/tty-stage1-c2-rv64.log`
+重建rootfs、本地测试盘副本和kernel后启动QEMU；6项新增TTY KUnit全部`ok`，全量218项打印
+`All tests passed!`，未见panic。达到KUnit证据点后经QEMU monitor `quit`正常退出；其后已开始的userspace/LTP
+输出不计入本checkpoint证据。没有运行LA64 build/runtime、BusyBox、硬件或C3 production RX probe。
+
+**Contract Cutover:** None。全部`TTY-*`保持Not Cut Over，current contracts、register和RFC target未修改。
+
+**Result / Next:** Checkpoint 2 **Closed**，Stage 1保持Active。Checkpoint 3仍为Not Started；production
+NS16550A仍走Checkpoint 1保留的raw CharDev路径。后续必须单独执行C3 preflight/activation，不得把C2 closure
+视为production transport授权。

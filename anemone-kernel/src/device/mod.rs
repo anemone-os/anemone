@@ -32,6 +32,7 @@ pub mod block;
 pub mod char;
 pub mod console;
 pub mod mmc;
+pub(crate) mod tty;
 
 /// Common data shared by all devices.
 ///
