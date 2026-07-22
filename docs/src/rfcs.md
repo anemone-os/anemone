@@ -119,7 +119,6 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 - [RFC-20260602-cred-merge](./rfcs/cred-merge/index.md)：credentials feature merge 的 canonical 执行计划和审查合同。
 - [RFC-20260606-signal-temp-mask-restore](./rfcs/signal-temp-mask-restore/index.md)：`rt_sigsuspend`、`ppoll`、`pselect6` 临时 signal mask delayed restore 协议、trap-return delivery handoff 和 staged 实施计划。
 - [RFC-20260605-fileops-seek-char-ioctl](./rfcs/fileops-seek-char-ioctl/index.md)：`FileOps::seek`、positioned I/O 分层和字符设备 ioctl 默认分发计划。
-- [RFC-20260603-IOCTL-LOOP](./rfcs/ioctl-loop/index.md)：`ioctl(2)` VFS 分发、通用块设备 ioctl 和 loop 设备最小闭环计划。
 - [RFC-20260604-fanotify](./rfcs/fanotify/index.md)：fanotify path-fd 通知、group fd、mark registry 和 staged LTP 兼容计划。
 - [RFC-20260604-mount-tree-legacy-api](./rfcs/mount-tree-legacy-api/index.md)：第一版已实现并完成阶段 7 收口；保留 shared/slave/unbindable propagation、mount flag matrix、fstype alias bridge、ROFS mmap/writeback 和 unmount cleanup 等 register limitations。
 - [RFC-20260604-proc-tgid-fd](./rfcs/proc-tgid-fd/index.md)：`/proc/<tgid>/fd` 目录枚举、fd symlink `readlink()` 和第一阶段 procfs/fd 兼容计划。
@@ -128,6 +127,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 已关闭或延期 RFC
 
+- [RFC-20260603-IOCTL-LOOP](./rfcs/ioctl-loop/index.md)：已实现并关闭；完成 `ioctl(2)` VFS 分发、统一 block ioctl、静态 loop 设备池与第一阶段 loop ioctl。扩展 loop sysfs、partscan、direct I/O、autoclear 和 ioctl LTP 缺口继续由 register 跟踪。
 - [RFC-20260622-sched-eevdf-lite](./rfcs/sched-eevdf-lite/index.md)：Stage 3/R1 runtime acceptance 失败后延期关闭，不是 Completed；关闭时 default 曾恢复为 RR，后续已由 Fair / Stride 切换为 Fair。EEVDF 保留为可运行实验原型，但显著吞吐回归与百万级 yield self-pick 仍存在，`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 保持未解决 Keter。事务日志见 [2026-07-09-sched-eevdf-lite](./devlog/transactions/2026-07-09-sched-eevdf-lite.md)，证据见 [Stage 3 eligibility 回归背景](./rfcs/sched-eevdf-lite/backgrounds/stage3-eligibility-regression-20260711.md)。
 
 当一个 feature 被多个 RFC 分段覆盖时，本页可以作为轻量聚合入口，或由其中一个 umbrella RFC 在 `index.md` 中聚合链接。聚合入口只列出相关 current contracts、RFC、事务日志、register / current limitations 及其覆盖范围；不要在这里复制规则正文、阶段完成度、验证证据或问题状态。跨 RFC 已生效的共享规则以提取后的 current contract 为准，accepted target 以对应 RFC 为准，执行事实以 transaction devlog 为准。

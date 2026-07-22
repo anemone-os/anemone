@@ -13,7 +13,6 @@
 - [Fanotify](./2026-06-08-fanotify.md)
 - [Signal Temporary Mask Restore](./2026-06-06-signal-temp-mask-restore.md)
 - [FileOps Seek and Char Device ioctl](./2026-06-05-fileops-seek-char-ioctl.md)
-- [IOCTL Loop](./2026-06-04-ioctl-loop.md)
 - [PROC TGID FD](./2026-06-04-proc-tgid-fd.md)
 - [Cred Merge](./2026-06-02-cred-merge.md)
 - [Sched Latch](./2026-06-03-sched-latch.md)
@@ -24,6 +23,7 @@
 
 ## Completed
 
+- [IOCTL Loop](./2026-06-04-ioctl-loop.md)：VFS ioctl 分发、统一 block ioctl、静态 loop 设备池与第一阶段 loop ioctl 已完成；扩展 LTP 缺口由 register 跟踪。
 - [Unix Job Control](./2026-07-20-unix-jobctl.md)
 - [Sched Dynamic Attributes](./2026-07-15-sched-dynamic-attributes.md)
 - [CPU Logical / Physical ID](./2026-07-14-cpu-logical-physical-id.md)：物理 ID 上界/逻辑 CPU 容量拆分、无锁 registry 和内建 cache padding 的 typed table 已完成；VisionFive 2 由用户复验通过，最终 table 布局与 LoongArch correction build 未由 agent 运行。

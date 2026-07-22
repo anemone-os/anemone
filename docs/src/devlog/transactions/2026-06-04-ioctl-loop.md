@@ -1,10 +1,10 @@
 # 2026-06-04 - IOCTL Loop
 
-**Status:** Active
+**Status:** Completed
 **Owners:** doruche, Codex
 **Area:** syscall ABI / VFS / devfs / block device / loop / mount / LTP
 **RFC:** [RFC-20260603-IOCTL-LOOP](../../rfcs/ioctl-loop/index.md)
-**Current Phase:** Agent 5 verification handoff; runtime evidence pending
+**Current Phase:** Closed
 
 ## Scope
 
@@ -39,21 +39,21 @@
 
 ## Handoff
 
-**Last Updated:** 2026-06-04
+**Last Updated:** 2026-07-22
 
-**Current Branch:** `dev/drc/ioctl`
+**Implementation Branch:** `dev/drc/ioctl`（历史）
 
-**Current HEAD:** `5b314b7` (`ioctl-loop: add ioctl07 to the test group`); LTP ioctl direct fixups are currently in the working tree.
+**Integration:** `22653c52` 合并 `dev/drc/ioctl`；后续 `fileops-seek` 收紧 `BackingFileHandle`，未改变本事务的 block/loop owner boundary。
 
 **Canonical RFC:** [RFC-20260603-IOCTL-LOOP](../../rfcs/ioctl-loop/index.md), [Invariants](../../rfcs/ioctl-loop/invariants.md), [Implementation Plan](../../rfcs/ioctl-loop/implementation.md), [Tracking Issues](../../rfcs/ioctl-loop/tracking-issues.md)
 
-**Completed:** RFC 已提升到公开文档；design review 发现的 Keter / Euclid 项已经吸收到 RFC、不变量需求和迁移实施计划；本事务日志、事务索引、双周 devlog 和 mdBook Summary 已建立链接。总控前置检查确认当前分支为 `dev/drc/ioctl`。Agent 0 只读前置审计已完成，未发现 Apollyon / Keter blocker，停止条件未触发。Agent 1 已完成 UAPI 常量与 loop ABI 结构、语义化 `UnsupportedIoctl -> ENOTTY` errno 映射、`IoctlCtx` / `FileOps::ioctl` VFS 分发和默认 unsupported ioctl 行为。Gate 1 review 发现的 `FIONREAD` / `O_PATH` Keter 已修复，复审后未保留 Apollyon / Keter blocker。Agent 2 已完成统一 block devfs `BLKGETSIZE64` / `BLKGETSIZE` / `BLKSSZGET` 和 block private ioctl hook；Gate 2 review 通过，未保留 Apollyon / Keter blocker。Agent 3 已完成 kconfig 控制的静态 loop block device pool，并保留统一 block devfs file ops 与默认 private ioctl unsupported 行为。Agent 4 已完成第一阶段 loop 私有 ioctl 本地实现：`LOOP_GET_STATUS*`、`LOOP_SET_FD`、`LOOP_SET_STATUS*`、`LOOP_CLR_FD`、暂缓命令 stable unsupported 和空闲 loop `ENXIO` errno 映射。Gate 3 review 未发现 Apollyon / Keter blocker；reviewer 提出的 `LOOP_SET_STATUS*` 空名称提交 Euclid 已修复，`LOOP_CLR_FD` strong-count busy 判定记录为后续 Safe 维护项。
+**Completed:** VFS ioctl 分发、`IoctlCtx` capability boundary、默认 `ENOTTY`、统一 block `BLK*` ioctl 与 private hook、kconfig 控制的静态 loop pool，以及第一阶段 `LOOP_GET_STATUS*` / `LOOP_SET_FD` / `LOOP_SET_STATUS*` / `LOOP_CLR_FD` 均已实现。三轮 gate review 没有遗留 Apollyon / Keter blocker；后续 block byte-I/O 小迭代修复了 mkfs setup 与 `LOOP_CLR_FD` transient-ref 误判，`fileops-seek` 又把长期 backing capability 收紧为 `BackingFileHandle`，两者都保持本 RFC 的 owner boundary。LTP fixture 已解除 built-in loop driver false-negative并确认 discovery 找到 `/dev/loop0`。实现由 `22653c52` 合入，第一阶段外缺口已登记到 register。
 
-**In Progress:** Agent 5 只读验证准备与 handoff 已完成；QEMU / LTP / BusyBox 运行态证据仍待用户日志或后续明确授权运行。
+**In Progress:** None。
 
 **Open Blockers:** 暂无已确认 blocker。
 
-**Next Action:** 由用户或后续授权运行最小闭环：确认 `/dev/loop0` 可见、`LOOP_GET_STATUS* == ENXIO` discovery、`LOOP_SET_FD + LOOP_SET_STATUS` bind、`BLKGETSIZE64`、`mount -t ext4 /dev/loopN <mnt>`、umount 后 `LOOP_CLR_FD` release；失败按 ioctl/loop、filesystem type、mount flags、sysfs、partscan、direct I/O、procfs/statfs 或测试环境分类。
+**Next Action:** None。扩展 loop ioctl、sysfs、partscan、direct I/O、autoclear 和完整 ioctl LTP 覆盖由 register / follow-up 承接。
 
 **Do Not Redo:** 不要把 loop 或 block 私有 ioctl 塞回 `sys_ioctl()`；不要把 `FileDesc` / `ProcFile` / `FilesState` / 当前 task 传进 VFS 或设备层；不要为 `/dev/loopN` 发布绕过统一 block devfs file ops 的专属 file ops；不要发布半成品 `/dev/loop-control`；不要改 mount 层直接解析普通 image 文件或 `-o loop`。
 
@@ -236,3 +236,17 @@
 **Boundary:** 按用户要求未修改 `ioctl02` 本地 group entry。未发布 `/dev/loop-control`，未新增 loop 专属 file ops，未实现 `LOOP_CHANGE_FD`、`LOOP_SET_CAPACITY`、`LOOP_SET_BLOCK_SIZE`、`LOOP_CONFIGURE`、partscan、direct I/O、loop sysfs 或 random procfs/ioctl 面。
 
 **Validation:** `git diff --check` 通过。`just build` 通过；仅保留既有 `anemone-kernel/src/sync/mono.rs` unused import warning。未运行 QEMU / LTP，因此本条只声明编译和静态 diff 检查通过。
+
+### 2026-07-22 - RFC 与事务状态收口
+
+**Phase:** closure
+
+**Change:** 按用户确认同步长期滞后的文档状态：RFC 从 Draft 改为 Implemented / Closed，本事务从 Active 改为 Completed，实施计划阶段 0-5 标记为完成。该收口不修改代码、不改变 accepted target，也不新增 RFC 语义修订。
+
+**Evidence:** `dev/drc/ioctl` 已由 `22653c52` 合入；原事务记录了阶段 0-4 实现、三轮 gate review、LTP 直接修补与 `just build` 结果。rv64 LTP 证据和后续用户复跑确认 built-in loop discovery 找到 `/dev/loop0`，失败点已推进到 sysfs / partscan 与测试工具等非目标范围。后续 `fileops-seek` 事务审计确认 loop 仍通过 block private ioctl hook，并把长期 backing capability 收紧为 `BackingFileHandle`。
+
+**Validation:** 本次为 docs-only closeout；未重跑 QEMU / LTP。原事务没有保存完整手工 mkfs/mount/umount/release smoke 的原始日志，关闭依据包含既有实现/合并证据、已保存的 rv64 LTP discovery 证据和 2026-07-22 用户对第一阶段完成状态的确认，不把未归档日志伪写为 agent-run passed。
+
+**Residual:** `ANE-20260604-IOCTL-LTP-STAGE1-GAPS` 继续跟踪 loop sysfs、partscan、partition nodes、扩展 `LOOP_*`、direct I/O、完整 autoclear、random ioctl/procfs 与其它 ioctl 组前置条件。这些均不阻塞第一阶段 RFC 关闭。
+
+**Next:** 事务关闭。后续工作不得继续追加到本事务；按子域建立小迭代或 follow-up RFC。

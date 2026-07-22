@@ -1,11 +1,11 @@
 # IOCTL 与 Loop 设备迁移实施计划
 
-**状态：** Draft
-**最后更新：** 2026-06-04
+**状态：** Completed；阶段 0-5 已关闭，阶段 6 属于 RFC 外 follow-up
+**最后更新：** 2026-07-22
 **父 RFC：** [RFC-20260603-IOCTL-LOOP](./index.md)
 **不变量：** [不变量需求](./invariants.md)
 
-本文按可提交、可验证的阶段拆分。每个阶段完成后应能独立构建，并给出最小验证证据。
+本文保留第一阶段实现时采用的分阶段计划。阶段 0-5 已完成；执行事实、review 与验证边界以 [Completed 事务日志](../../devlog/transactions/2026-06-04-ioctl-loop.md) 为准。阶段 6 从未属于本 RFC 的关闭条件，后续 mount option 工作由独立迭代承接。
 
 ## 迁移原则
 
@@ -20,6 +20,8 @@
 - loop 第一阶段不修改 mount 层来解析 `-o loop`，只提供用户态 mount 工具所需的 loop 设备协议。
 
 ## 阶段 0：UAPI 常量与结构准备
+
+**状态：** Completed
 
 目标：把 Linux ioctl 需要的常量和结构体放在 ABI 边界，不把 magic number 散落到驱动实现里。
 
@@ -53,6 +55,8 @@
 - 还不要求任何新 ioctl 成功。
 
 ## 阶段 1：VFS ioctl 分发
+
+**状态：** Completed
 
 目标：让 ioctl 从 syscall 层进入打开文件对象，而不是继续在 `sys_ioctl()` 中写全局分支。
 
@@ -90,6 +94,8 @@
 
 ## 阶段 2：通用块设备 ioctl
 
+**状态：** Completed
+
 目标：让 `/dev/vda`、`/dev/ram0` 这类现有块设备具备最小 Linux 块设备查询能力。
 
 实现内容：
@@ -111,6 +117,8 @@
 - `/dev/vda`、`/dev/ram0`、`/dev/loopN` 不出现彼此分叉的 devfs file-op 行为；未知私有 ioctl 经 block hook 默认返回 `ENOTTY`。
 
 ## 阶段 3：loop 块设备池
+
+**状态：** Completed
 
 目标：创建静态 loop 设备池，让 `/dev/loop0..loopN` 成为可注册、可 stat、可打开的块设备。
 
@@ -154,6 +162,8 @@
 - backing file lifetime 必须独立于用户态传入 fd 的关闭。
 
 ## 阶段 4：loop ioctl 第一阶段
+
+**状态：** Completed
 
 目标：覆盖 LTP `tst_device acquire` 和常见 `mount -o loop` 路径所需的最小 loop ioctl。
 
@@ -203,6 +213,8 @@
 
 ## 阶段 5：loop mount 闭环验证
 
+**状态：** Completed；原事务保留构建、静态审计与 rv64 LTP discovery 证据，完整手工 smoke 原始日志未归档；2026-07-22 用户确认第一阶段已完成。
+
 目标：证明 loop 设备已经能服务 mount/mkfs 类测试设备需求。
 
 最小验证：
@@ -222,7 +234,9 @@ LTP 验证建议：
 - 再引入 `mount01`、`umount01`、`ioctl04` 这类基础用例。
 - 最后再评估 `ioctl_loop01..07`，其中 sysfs、partscan、direct_io、configure 相关分支可以作为后续项。
 
-## 阶段 6：mount option 后续分支
+## 阶段 6：mount option 后续分支（RFC 外）
+
+**状态：** Not part of this RFC；不阻塞关闭。
 
 目标：在 loop 闭环稳定后，单独推进 mount option 语义。
 
