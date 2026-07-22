@@ -1,6 +1,6 @@
 # TTY Subsystem 迁移实施计划
 
-**状态：** Active / Stage 0 Closed
+**状态：** Active / Stage 0 Closed / Stage 1 Ready
 **最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-tty-subsystem](./index.md)
 **目标与不变量：** [TTY Subsystem 目标与不变量](./invariants.md)
@@ -11,9 +11,9 @@
 
 本文把 TTY target 解析为可滚动实施的阶段、probe、验证和 cutover 边界，不重新定义
 [`index.md`](./index.md) 与 [`invariants.md`](./invariants.md) 已经拥有的 target、owner、ABI
-或 proof obligations。R0 已接受并建立 transaction；Stage 0 获得本轮单独授权后完成只读审计并
-关闭。Stage 1 仍为 `Outline`，没有执行
-Stage 0 -> Stage 1 Resolution Gate，也没有 current contract 因本文生效。
+或 proof obligations。R0 已接受并建立 transaction；Stage 0 获得单独授权后完成只读审计并关闭，
+Stage 0 -> Stage 1 Resolution Gate 随后在新的明确授权下完成。Stage 1 已完整解析为 `Ready`，但尚未
+获得实现授权，也没有 current contract 因本文生效。
 
 ## 1. 计划角色与 authority
 
@@ -149,8 +149,8 @@ transaction 中临时切块。
 
 | Stage | 成熟度 | 概括目的 | Contract Cutover | 解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 0 | Closed | 只读闭合 live interface、oracle、carrier 候选与模块边界 | None | 已关闭；Stage 1仍需独立resolution gate与授权 |
-| Stage 1 | Outline | 建立 unpublished port/Terminal transport vertical slice，闭合 IRQ、RX、TX 与 pre-publish transaction | None | Stage 0 独立关闭后 |
+| Stage 0 | Closed | 只读闭合 live interface、oracle、carrier 候选与模块边界 | None | 已关闭；后续Stage 1 resolution亦已独立完成 |
+| Stage 1 | Ready | 建立 unpublished port/Terminal transport vertical slice，闭合 IRQ、RX、TX 与 pre-publish transaction | None | 已解析；仍需单独实现授权 |
 | Stage 2 | Outline | 交付 line discipline、termios、read/write/poll、`/dev/ttyS<N>` 与 real boot stdio | `TTY-DATA-CUTOVER` | Stage 1 独立关闭后 |
 | Stage 3 | Outline | 建立 controlling relation、`/dev/tty`、caller/topology handoff、foreground ioctls 与 cleanup | None | Stage 2 独立关闭后 |
 | Stage 4 | Outline | 闭合 terminal signals、background access、ash job control、register 与 current contract | `TTY-JOBCTL-CUTOVER` | Stage 3 独立关闭后 |
@@ -164,45 +164,225 @@ relation-ioctl / lifecycle cleanup，以及 terminal signal-access / ash-vi acce
 cutover unit 不变时收窄、合并或改画切面；不得为了缩短 checkpoint 发布半初始化 endpoint、提前执行
 cutover，或把跨 checkpoint bridge 留成长期抽象。
 
-## 6. Stage 1 Outline：unpublished transport vertical slice
+## 6. Stage 1 Ready：unpublished transport vertical slice
 
-概括目的：
+阶段成熟度：
 
-- 在 UART physical owner 与 `device::tty` terminal owner 之间建立最小窄 capability；选择 raw RX
-  storage、deferred carrier、TX serialization 与 boot-applied line snapshot 的实现路线。
-- 让 NS16550A 从同一 physical state 固定构造 console backend 与 `TtyPort`，删除 raw `CharDev`
-  implementation/registration；console 不参与 RX 或运行期线路配置，pre-publish `TtyPort` consumer
-  binding 是 RX 的唯一去向，不建立 claim/lease/mode state。
-- 建立完整但尚未 devfs-published 的 endpoint create transaction，验证 attach、IRQ publication、
-  notification-plus-predicate、consumer drain 与 publish 前 rollback。
-- 将 NS16550A RX 从“IRQ 中读取后丢弃”迁移为单 owner raw handoff；清除 RX IRQ 中递归 printk，
-  并让 console/TTY 普通 TX 经过 port-owned IRQ-safe serialization；polling 路线使用有界 batch，
-  或由有界 TX queue保持唯一 owner，不把任意长度用户 write 变成无界 IRQ-off 临界区。
+- `Ready`。本节已冻结完整路线、checkpoint map、验证与 manifest；它不自动授权任何代码修改。
+- Stage 1 只验证 Gate P1 candidate，不执行 `TTY-DATA-CUTOVER` 或其它 contract cutover。全部
+  `TTY-*` 在本阶段关闭后仍是 Not Cut Over。
 
-前置依赖：
+### 6.1 前置条件与受保护边界
 
-- Stage 0 Closed；Stage 0 -> Stage 1 Resolution Gate 已冻结完整 Stage 1 与 exact manifest。
-- `ANE-20260622-IRQ-OFF-HEAP-ALLOCATION` 的约束已经进入 carrier/storage 选择，不以 noirq allocator
-  或偶然 smoke 作为安全证明。
+- Stage 0 已独立关闭；本轮 resolution preflight 已读取其六类 evidence matrix、R0 target、register、
+  current contracts、live source、`9fd95821` Stage 0 diff 与 clean worktree。
+- 实现激活前重新记录 branch、HEAD、dirty state、active `kconfig` platform/features 和本节 manifest；
+  用户对 resolution gate 的授权不构成 Stage 1、Checkpoint 1 或连续 checkpoint 的实现授权。
+- 保护 `TTY-PORT-001`、`TTY-OUTPUT-001`、`TTY-ENDPOINT-001`、`TTY-LOCAL-003/004`。UART 唯一拥有
+  MMIO、IRQ、FIFO、boot-applied line、raw queue 与最终 TX serialization；TTY 只持有窄 capability，
+  console 只有 output projection，TTY 是唯一 RX consumer。
+- 本阶段不得发布 `/dev/ttyS<N>` 或 `/dev/console`、替换 boot fd、修改 generic `CharDev` contract、
+  建立 termios/line discipline/FileOps/controlling relation、生成 terminal signal、触碰 jobctl/topology/
+  Signal/wait-core/scheduler，或实现 runtime line change、detach/hangup、PTY、generic workqueue/softirq。
+- `ANE-20260622-IRQ-OFF-HEAP-ALLOCATION` 保持 Open。TTY 使用现有 `KThreadHandle::wake()`；不修改、
+  包装或替代其 scheduler/wait-core 路径，不把该问题算作 Stage 1 failure 或 closure proof。
 
-受保护边界：
+### 6.2 冻结路线与 capability 边界
 
-- `TTY-PORT-001`、`TTY-OUTPUT-001`、`TTY-ENDPOINT-001`、`TTY-LOCAL-003/004`。
-- UART 唯一拥有 MMIO/IRQ/FIFO/applied line/raw handoff/TX serialization；TTY 不访问 registers。
-  console只有output capability，TTY独占RX，capability注册/enable/open/close不改变personality。
-- 本阶段不得发布 `/dev/ttyS<N>`、替换 boot fd、修改通用 `CharDev` 语义、建立 controlling relation、
-  生成 terminal signal或执行任何 contract cutover。
-- 不预建 runtime line reconfiguration、post-publish detach/hangup、generic workqueue 或 PTY transport。
+1. **模块形状。** 先把当前单文件 `driver/serial/ns16550a.rs` 在同一 driver owner 内拆成
+   `ns16550a/{mod.rs,regs.rs,port.rs}`。`mod.rs` 只保留 option parsing、probe/commit 与现有 KUnit；
+   `regs.rs` 拥有 register constants/access、line programming 和 LoongArch early-console 继续使用的
+   `Ns16550ARegisters`；`port.rs` 拥有 physical port、console/TTY projection、raw RX、TX 和 IRQ。
+   `crate::driver::Ns16550ARegisters` 的现有可见路径和语义必须保持不变。
+2. **窄 `TtyPort`。** 新建 `device::tty::{mod.rs,port.rs}`。`port.rs` 定义 crate-private
+   `TtyPortId` 与 `TtyPort`；capability 只允许读取 immutable identity、检查 raw-RX predicate、按序
+   dequeue 到 caller 提供的 bounded slice，以及提交 TX slice并返回实际接受 bytes。它不暴露 register、
+   lock、raw container、`Task`、FileOps、termios、Signal或 lifecycle mutation。
+3. **Unpublished attachment。** `device::tty::attach_unpublished_port()` 按 immutable `TtyPortId`
+   拒绝重复 attach，建立尚不可由 devfs/VFS取得的 endpoint和每 port kthread。它返回
+   `TtyPortAttachment` 与窄 `TtyRxNotifier`：attachment拥有pre-publish abort/stop/join责任；notifier只
+   封装现有 `KThreadHandle::wake()`，不携带byte、count或request truth。Stage 1 worker用
+   `rx_pending()`作为`KThreadCtx::wait_until()` predicate，反复从port dequeue固定栈上batch。
+4. **Stage 1-only sink。** 本阶段尚无 Terminal/discipline，worker只对dequeue batch计数并丢弃；这条
+   unpublished diagnostic sink是明确的Stage 1 bridge，不驱动readability或user-visible input。
+   Stage 2必须在任何devfs publish前把它替换为同一endpoint的Terminal discipline提交路径；它不得越过
+   `TTY-DATA-CUTOVER`，也不得扩展成generic callback/workqueue framework。
+5. **Raw handoff。** NS16550A physical port在probe中用`Box::try_new`预分配
+   `RingBuffer<u8, TTY_RAW_RX_CAPACITY_BYTES>`，以port-owned IRQ-safe lock保护单一FIFO。IRQ最多读取
+   `NS16550A_IRQ_RX_BUDGET_BYTES`，保持顺序；满时drop-new并累计overflow，绝不覆盖旧byte。RX、drop、
+   line-error、budget-exhaustion和notification计数只用于诊断，不参与predicate或状态转换。
+6. **Notification publication。** IRQ在raw lock内先发布byte/counter，并只记录是否发生
+   empty-to-nonempty；释放raw lock后才调用`TtyRxNotifier::wake()`。worker持续drain到predicate为false，
+   然后用现有Event的register-plus-recheck wait。wake只促使重验，ring nonempty始终是durable work truth。
+7. **Fixed projections与raw删除。** 同一`Arc<Ns16550APort>`固定构造output-only
+   `Ns16550AConsole`和`Ns16550ATtyPort`；没有claim、lease、mode或open/close switch。删除NS16550A
+   `CharDev` impl、`register_char_device()`、dynamic minor/bookkeeper，以及仅剩该consumer的
+   `devnum::char::major::RAW_SERIAL`和对应devnum KUnit数组项；generic CharDev代码保持不变。
+8. **Bounded TX。** console与TTY projection都调用physical port的同一TX入口。该入口用独立
+   IRQ-safe TX lock，最多在一个临界区处理`NS16550A_TX_BATCH_BYTES`，每个byte最多轮询
+   `NS16550A_TX_POLL_ITERATIONS`次；timeout释放lock并返回partial progress，console另累计未提交byte，
+   不递归printk。任意长度caller buffer因此被拆成有界临界区；RX IRQ不取得TX lock且不打印。
+9. **Immutable identity与line truth。** `TtyPortId`从platform device对应OF node的canonical full path
+   构造并拷入固定容量identity；路径超长或不是OF node时在attach前失败，不回退到probe顺序、dynamic
+   minor或局部KObject basename。validated stdout options与divisor保存在physical port的immutable
+   applied-line snapshot；runtime不从register反推，也不提供apply/rollback API。
+10. **Pre-publish transaction。** 先完成所有可失败的state/ring/opaque allocation、TTY duplicate
+    validation、kthread spawn与consumer binding；随后关闭UART RX enable，准备line/config和IRQ private
+    `Arc`，最后调用`request_irq()`。request失败时必须从unpublished registry移除attachment、同步
+    request-stop/join worker并drop本地对象。仓库没有`free_irq`，因此`request_irq()`成功是driver-side
+    irreversible commit起点；其后只执行不可返回失败的line/FIFO apply、RX enable、drv-state install和
+    console registration。不得在其后增加fallible publication，也不得声称支持runtime rollback。
 
-解析触发点：
+### 6.3 Checkpoint map
 
-- Stage 0 关闭后的只读 preflight；根据实际 source matrix 决定 capability 方向、storage、carrier、
-  TX route、immutable port identity 和 rollback shape，并精确列出 driver/TTY/kconfig/KUnit write set。
+#### Checkpoint 1 — NS16550A same-owner split-only
 
-预计范围（不是写入授权）：
+**目的与交付：** 只完成`ns16550a.rs`到`ns16550a/{mod.rs,regs.rs,port.rs}`的物理移动；保留当前raw
+`CharDev`、minor/bookkeeper、probe/IRQ/console行为、option parser、所有KUnit和public re-export。不得顺手
+引入TTY、改锁、改日志、改register顺序或修复既有rollback TODO。
 
-- `anemone-kernel/src/device/tty/`、`anemone-kernel/src/driver/serial/ns16550a.rs`、
-  `anemone-kernel/src/device/{console,devnum}.rs`、必要的 kconfig/KUnit surface。
+**允许写集：** Stage manifest中的旧`ns16550a.rs`删除和三个新driver-local文件；transaction只追加
+activation、diff/review/validation与closure。其它stage文件仍不可写。
+
+**Review / validation floor：** `git diff --check`与`just fmt kernel --check`；记录入口platform后依次执行
+`just conf switch qemu-virt-rv64-pretest`、`just build`、`just conf switch qemu-virt-la64-pretest`、
+`just build`，最后切回入口platform并再次`just build`。确认两种架构均编译KUnit且LoongArch bootstrap仍
+通过原re-export构造registers；用diff/source audit证明函数体、visibility、KUnit assertions和probe调用
+顺序只发生必要的路径/`use`调整。
+
+**停止条件：** 若保持early-console路径需要改变public trait、register API、owner或行为，停止并上报；
+不得把该变化伪装为split-only。Checkpoint 1关闭不自动激活Checkpoint 2。
+
+#### Checkpoint 2 — Dormant TTY port/attachment core
+
+**目的与交付：** 新建`device::tty` module、crate-private `TtyPortId`/`TtyPort`、unpublished registry、
+`TtyPortAttachment`/`TtyRxNotifier`和Stage 1-only drain sink；用fake port KUnit闭合duplicate identity、
+notification-before-wait、notification-after-wait、concurrent drain、predicate-stays-true、FIFO batch与
+pre-publish abort/worker exit。production NS16550A仍走Checkpoint 1保留的raw路径，本checkpoint不改变
+boot行为。
+
+**允许写集：** `device/mod.rs`与计划新建的`device/tty/{mod.rs,port.rs}`，以及transaction。KUnit留在
+对应owner文件的`kunits` module，不新建通用test framework或`tests.rs`。
+
+**Review / validation floor：** `git diff --check`、`just fmt kernel --check`与`just build`；运行
+`./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/tty-stage1-c2-rv64.log`，在新增
+fake-port/attachment cases全部为`ok`且全量KUnit打印`All tests passed!`后用QEMU monitor正常退出；已经
+开始的post-KUnit LTP不作为证据。source/lock review确认registry guard不进入worker wait/port drain，
+stop/join不持registry或port guard，diagnostic字段不驱动行为。
+
+**Bridge / stop：** Stage 1-only sink保留到Stage 2 consumer replacement gate；除此之外不得新增
+callback、polling watchdog或generic worker。如果attachment必须观察Task/scheduler内部、扩大
+`KThreadHandle`或用周期poll保证进展，停止Stage并回写route evidence。Checkpoint 2关闭不自动激活
+Checkpoint 3。
+
+#### Checkpoint 3 — NS16550A production transport wiring
+
+**目的与交付：** 按6.2单一路线把NS16550A接入unpublished attachment；加入四个non-zero kconfig参数
+`tty_raw_rx_capacity_bytes = 4096`、`ns16550a_irq_rx_budget_bytes = 256`、
+`ns16550a_tx_batch_bytes = 16`、`ns16550a_tx_poll_iterations = 65536`及parser/default/generation tests；
+完成fixed console + TTY projections、raw 234删除、immutable identity/applied-line snapshot、RX FIFO/
+counter/empty-to-nonempty notification、有界TX和request-IRQ commit/rollback。IRQ路径不保留普通日志；
+worker只在首次成功drain输出一条明确标为Stage 1 diagnostic的process-context摘要，Stage 2 consumer接线时删除。
+
+**允许写集：** 本checkpoint取得Stage manifest内除Checkpoint 1/2已关闭文件之外的`device/devnum.rs`、
+`conf/.defconfig`和`scripts/xtask/src/config/kconfig.rs`；可继续修改`ns16550a/{mod.rs,regs.rs,port.rs}`、
+`device/tty/{mod.rs,port.rs}`与`device/mod.rs`。`kconfig`、`anemone-kernel/src/kconfig_defs.rs`和
+`platform_defs.rs`只能由repository config/build入口生成，是validation output，不得手改或提交为source。
+
+**KUnit / source proof：** 覆盖kconfig zero rejection/default generation、ring FIFO/drop-new、只在首次
+empty-to-nonempty通知、budget边界与剩余work、line-error计数、TX batch/poll timeout/partial progress、
+duplicate attach和request前abort。source audit必须证明IRQ private data直接持有预分配port `Arc`，不再
+查dynamic bookkeeper；consumer/ring在RX enable前可达；所有wake在raw guard外；IRQ无format/log、Vec/
+VecDeque growth、complex drop、sleepable lock、Event/Signal/topology调用；TX lock内工作受两个参数约束。
+
+**Runtime floor：** 运行`./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img
+build/tty-stage1-rv64.log`；在PTY中等待NS16550A attach完成后注入超过一个RX budget、包含可识别顺序的
+ASCII burst，再用QEMU monitor退出。日志必须包含全量enabled KUnit的`All tests passed!`、一次且仅一次
+Stage 1 process-context drain摘要、无IRQ递归printk/死锁/panic；post-KUnit LTP若已开始不属于本阶段证据。
+随后切换到`qemu-virt-la64-pretest`执行`just build`，再恢复入口platform并重跑`just build`；LA64只形成
+compile/link proof，不冒充runtime或hardware RX proof。
+
+**停止条件：** request-IRQ后仍存在可返回失败步骤却无unwind；raw endpoint/major/bookkeeper仍可达；
+console消费RX；TTY访问register；overflow覆盖旧byte或静默；worker只能靠poll前进；wake发生在raw guard内；
+TX可能在一个临界区处理任意长度buffer；IRQ新增allocation/log/complex drop；或必须修改console、IRQ core、
+kthread/wait/scheduler/shared contract才能继续。以上任一命中即停止，不用局部bridge绕过。
+
+### 6.4 Stage-wide审计、可观测性与验证
+
+- 审计全树`RAW_SERIAL`、NS16550A `CharDev`/`register_char_device`/minor bookkeeper、RX byte discard、IRQ
+  printk、console RX、TX register bypass、claim/lease/mode、TTY polling timer/watchdog和devfs `/dev/tty*`
+  publication；除历史docs外，前五类production旁路必须为零，devfs publication必须仍不存在。
+- 审计所有新增allocation：ring/Arc/opaque/worker/registry只允许在probe/attach process context；TTY-owned
+  IRQ/storage/counter/notifier调用前后不得新增allocation、OOM side effect、format、普通日志或复杂drop。
+- per-port production counters至少包括RX accepted、drop-new overflow、line error、IRQ budget exhaustion、
+  empty-to-nonempty notification、TX accepted/timeout和console unsubmitted bytes。它们使用relaxed
+  diagnostic atomics或等价snapshot，字段旁明确“不参与predicate、ordering或state transition”。
+- correctness assertion至少覆盖duplicate attach不可提交、notification只对应已发布nonempty transition、
+  worker dequeue后不保留replay copy、abort先撤registry再stop/join，以及request IRQ前consumer/notifier已绑定。
+  不在cleanup中先panic再撤销资源。
+- 每个checkpoint执行`git diff --check`、`just fmt kernel --check`和其定向floor；Stage最终另执行
+  `just build`、上述RV64 wrapper/KUnit/RX burst、LA64 build/restore、`mdbook build docs`和manifest/source
+  audit。不得把build、KUnit、RV64 QEMU、LA64 build或source audit互相升级为未运行层级的证明。
+
+### 6.5 Stage contract、退出与授权
+
+Contract cutover：
+
+- None。Stage 1 candidate不更新`docs/src/contracts/`、register或任何`TTY-*` effective状态；
+  `TTY-DATA-CUTOVER`只属于Stage 2。
+
+Stage-wide停止条件：
+
+- 任一checkpoint需要扩大下列resolved manifest，先记录扩展理由、拟新增owner/files、contract与验证影响，
+  获得批准并更新本文/transaction后再继续。
+- owner、public API、ABI、visible semantics、cutover unit、accepted limitation或acceptance boundary变化，
+  进入RFC review / Target Renegotiation Gate；不得以Stage 1路线修正自行接受。
+- 不因现有`KThreadHandle::wake()`底层scheduler风险停止TTY；只有TTY自身违反本节IRQ/storage/notification
+  边界，或实现试图修改/替代wait-core/scheduler，才命中Stage 1停止合同。
+
+退出条件：
+
+- 三个checkpoint都已独立review、验证、关闭，所有临时状态与bridge disposition写入transaction；
+- production NS16550A只保留fixed console + `TtyPort`，raw major 234路径为零，RX/TX/identity/applied-line
+  owner与6.2一致；request失败没有unpublished registry/worker残留，request成功后无fallible half-commit；
+- focused KUnit、RV64 runtime burst、LA64 build、source/lock/manifest audit达到本节floor，且结论按证据层级记录；
+- transaction把Stage 1记为Closed并明确Stage 2 resolution输入；Stage 2是否Ready不是Stage 1关闭条件。
+
+Resolved Write Set Manifest：
+
+允许tracked source写入：
+
+- 删除`anemone-kernel/src/driver/serial/ns16550a.rs`；新建
+  `anemone-kernel/src/driver/serial/ns16550a/{mod.rs,regs.rs,port.rs}`；
+- `anemone-kernel/src/device/mod.rs`；新建`anemone-kernel/src/device/tty/{mod.rs,port.rs}`；
+- `anemone-kernel/src/device/devnum.rs`，仅删除raw serial major及更新同页devnum KUnit；
+- `conf/.defconfig`与`scripts/xtask/src/config/kconfig.rs`，仅加入上述四项参数、non-zero validation、
+  generated definitions和定向parser/default tests；
+- 本文只用于获准的Ready-manifest route correction/expansion；
+- `docs/src/devlog/transactions/2026-07-23-tty-subsystem.md`只追加checkpoint activation、diff、review、
+  validation、stop/correction、closure与Stage 1 handoff事实。
+
+Validation-only inputs：
+
+- `anemone-kernel/src/{utils/ring_buffer.rs,task/kthread/,sched/event.rs,exception/intr/irq.rs,sync/spinlock.rs}`；
+- `anemone-kernel/src/{driver/mod.rs,driver/serial/mod.rs,arch/loongarch64/bootstrap.rs}`；
+- `anemone-kernel/src/device/{console.rs,char/,discovery/,bus/platform/}`、`anemone-kernel/src/fs/devfs/`、
+  `anemone-kernel/src/main.rs`；
+- `Justfile`、`scripts/xtask/src/tasks/{build/,conf.rs,qemu.rs}`、RV64/LA64 wrappers、active `kconfig`、
+  platform/rootfs configs、generated defs与build/QEMU logs；
+- 本RFC、transaction、current contracts、register和Stage 0 commit/diff。
+
+不允许触碰：
+
+- `device/console.rs`、generic `device/char/`、IRQ core、ring-buffer utility、kthread/Event/wait/scheduler、
+  VFS/devfs/main、task topology/Signal/jobctl、apps/rootfs manifests/test profiles、current contracts/register；
+- alpha worktree、共享`etc/{preliminary,final,xref}`资源、测试盘master和用户BusyBox artifact。
+
+实现责任：
+
+- implementer一次只激活一个checkpoint，保持diff在该checkpoint子集内并追加transaction事实；reviewer按
+  C1行为保持、C2 owner/lifecycle/no-lost-work、C3 IRQ/TX/rollback/raw-removal分别审查；integrator在Stage
+  closure前执行全manifest、旁路、双架构和证据分层审计。任何角色都不能把Ready当作执行授权。
 
 ## 7. Stage 2 Outline：terminal data plane 与 `TTY-DATA-CUTOVER`
 
@@ -459,6 +639,8 @@ Stage 0 -> Stage 1 Resolution Gate另行允许写入：
 
 - `docs/src/rfcs/tty-subsystem/implementation.md`：把Stage 1从Outline解析为Ready并冻结exact manifest；
 - 上述transaction：记录resolution evidence、批准事实、生效点和实现计划链接。
+- `docs/src/rfcs/tty-subsystem/index.md`、`docs/src/rfcs.md`与当前双周devlog：只同步Stage 1
+  `Ready / Not Started`和下一步授权边界，不修改target、contract impact或历史Stage 0证据。
 
 validation-only输入：
 
@@ -502,7 +684,7 @@ validation-only输入：
 - transaction追加Stage 0 Closed结论，并明确Stage 1 resolution所需输入。Stage 1是否已经Ready不是
   Stage 0关闭条件。
 
-## 11. Stage 0 -> Stage 1 Implementation Resolution Gate
+## 11. Stage 0 -> Stage 1 Implementation Resolution Gate（Completed 2026-07-23）
 
 前置条件：
 
@@ -532,7 +714,9 @@ validation-only输入：
 
 授权边界：
 
-- 完整Stage 1与manifest冻结后才达到`Ready`；仍需另行用户授权，不自动开始代码实现。
+- 本轮preflight确认Stage 0 evidence与live source未漂移，R0 target/owner/ABI/contract/cutover/acceptance
+  boundary无需更改。第6节已经冻结单一路线、三个checkpoint与exact manifest，Stage 1达到`Ready`。
+- 用户只授权完成本resolution gate；仍需另行用户授权Stage 1或Checkpoint 1，不自动开始代码实现。
 
 后续`1 -> 2`、`2 -> 3`与`3 -> 4` resolution gate遵循同一协议，并额外读取前一Stage实际diff、
 runtime evidence、bridge状态、module pressure与cutover结果。每次只解析下一个Stage，并按第4节为

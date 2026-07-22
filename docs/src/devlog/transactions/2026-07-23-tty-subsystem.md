@@ -1,11 +1,11 @@
 # 2026-07-23 - TTY Subsystem
 
-**Status:** Active / Stage 0 Closed
+**Status:** Active / Stage 0 Closed / Stage 1 Ready
 **Owners:** doruche, Codex
 **Area:** device / TTY / serial / VFS / signal / task topology / job control
 **Canonical Plan:** [RFC-20260722-tty-subsystem](../../rfcs/tty-subsystem/index.md), [目标与不变量](../../rfcs/tty-subsystem/invariants.md), [迁移实施计划](../../rfcs/tty-subsystem/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 0 Closed / Stage 1 Outline / Not Started
+**Current Phase:** Stage 0 Closed / Stage 1 Ready / Not Started
 
 ## Scope and contract boundary
 
@@ -217,3 +217,57 @@ Not Started，未执行Stage 0 -> Stage 1 Resolution Gate。
 现有`KThreadHandle::wake()` consumer、driver-owned bounded TX serialization、NS16550A same-owner
 split-only checkpoint、pre-publish rollback与本次oracle输入解析为完整Stage 1 Ready和exact manifest；
 不得把Stage 0 closure或用户carrier处置当作Stage 1授权。
+
+## Stage 0 -> Stage 1 Implementation Resolution Gate
+
+**Authorization and entry:** 用户在Stage 0独立关闭后明确授权解析Stage 1并完成resolution gate；没有
+授权Stage 1代码实现。入口为`dev/drc/omega@9fd95821`，worktree clean；Stage 0 commit只修改RFC/devlog
+文档，没有kernel/apps/rootfs/test/build/register/current-contract diff。
+
+**Preflight evidence:** 重新读取R0 target/invariants、Stage 0六类矩阵、`KETER-008`处置、
+`ANE-20260622-IRQ-OFF-HEAP-ALLOCATION`、current contracts和live source。当前仍不存在`device::tty`；
+NS16550A单文件继续混合register/probe/raw CharDev/console/IRQ，raw major 234只由该driver与devnum KUnit
+引用；`RingBuffer<T,N>`固定容量但不自带并发；`KThreadHandle::wake()`/`KThreadCtx::wait_until()`提供既定
+notification-plus-predicate边界；`request_irq()`没有对应free/unregister surface并在成功时直接unmask。
+build owner仍由`just`/xtask、tracked`conf/.defconfig`和ignored generated defs组成，active config启用KUnit。
+
+**Resolved decisions:**
+
+| 项目 | Stage 1单一路线 | 边界 / 失败信号 |
+| --- | --- | --- |
+| Module pressure | 先将`ns16550a.rs`同owner拆为`mod/regs/port`，保持`crate::driver::Ns16550ARegisters`路径 | early console或public trait必须变化则split checkpoint停止 |
+| `TtyPort` | crate-private identity/predicate/dequeue/TX-progress capability；`device::tty`拥有unpublished attachment与consumer worker | 不暴露register/lock/container/Task/FileOps/termios/Signal |
+| RX storage | probe-time `Box::try_new`固定ring，port IRQ-safe lock，FIFO/drop-new，capacity 4096；IRQ budget 256 | overwrite、silent drop、IRQ growth/OOM side effect停止 |
+| Carrier | 每port现有kthread；只在empty-to-nonempty后、raw guard外调用`KThreadHandle::wake()`；ring predicate是durable truth | 不修改wait-core/scheduler，不使用poll/timer/workqueue替代 |
+| TX | physical port唯一IRQ-safe lock；16-byte batch、每byte 65536次poll上限、partial progress/counter | 任意长度IRQ-off section、递归printk或console/TTY旁路停止 |
+| Identity / line | OF node canonical full path拷入固定容量identity；driver保存immutable applied-line snapshot | 超长/非OF在attach前失败；不使用probe-order minor或局部basename |
+| Raw projection | 删除NS16550A CharDev/registration/minor bookkeeper与仅剩consumer的major 234 | generic CharDev保持不变，任何raw endpoint残留阻止Stage关闭 |
+| Rollback | 全部fallible allocation/attach/spawn在request IRQ前；失败撤unpublished registry并stop/join；request成功后只做infallible commit | 无free_irq，因此request后新增fallible步骤立即停止 |
+
+**Checkpoint and manifest result:** canonical plan的
+[Stage 1 Ready](../../rfcs/tty-subsystem/implementation.md#6-stage-1-readyunpublished-transport-vertical-slice)
+已经冻结三个checkpoint：C1 same-owner split-only；C2 dormant TTY port/attachment core与fake-port KUnit；
+C3 NS16550A production wiring、四项Kconfig、raw 234删除、IRQ/TX/rollback及RV64 burst/LA64 build。完整逐文件
+manifest、validation-only inputs、review责任、bridge删除点、精确验证、停止和退出条件只由该节拥有，
+本文不复制第二份计划。
+
+**Contract/review result:** 未发现Apollyon、开放Keter或Euclid；resolution不改变R0 target、owner、ABI、
+visible semantics、contract delta、两个cutover unit或acceptance boundary，因此不增加RFC修订，不更新
+tracking issue或current contracts。`KETER-008`保持Neutralized；scheduler/wait-core的IRQ-off allocation
+问题继续Open且不进入Stage 1 manifest。Stage 1 contract cutover为None，全部`TTY-*`仍Not Cut Over。
+
+**Validation boundary:** 本gate修改canonical implementation plan与本transaction，并只在RFC入口、RFC
+总索引和当前双周devlog同步Stage 1 Ready / Not Started导航；这些状态写回不改变target或source manifest。完成
+`git diff --check`、`mdbook build docs`和定向heading/link/status/manifest/source-path审计后才可关闭；不运行
+kernel build、KUnit、QEMU、BusyBox、LTP、LA64 runtime或hardware test，这些是Ready Stage 1的未来floor。
+
+**Resolution validation:** `git diff --check`通过；`mdbook build docs`通过，只报告既有large search-index
+warning。生成HTML中的Stage 1 heading与RFC/transaction两条anchor link一致；当前RFC入口、RFC总索引、
+双周devlog、implementation和transaction均显示Stage 1 Ready / Not Started。四项Kconfig owner、现有
+ring/kthread/IRQ/LoongArch/bootstrap/wrapper validation-only路径与五个docs write-set路径完成定向存在性审计；
+最终`git diff --name-only`确认没有kernel、apps、rootfs、test profile、build config、register或current
+contract diff。没有运行任何Ready Stage 1代码验证，docs build与source audit不冒充build/runtime proof。
+
+**Result:** Stage 0 -> Stage 1 Resolution Gate完成，Stage 1为**Ready / Not Started**。用户本轮授权到此
+结束；Checkpoint 1、整个Stage 1或连续checkpoint均未激活。下一步只能在新的明确授权下进入Stage 1
+实现，并在transaction记录实际activation point。
