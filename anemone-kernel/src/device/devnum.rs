@@ -19,7 +19,6 @@ pub mod char {
         pub const MEMORY: usize = 1;
         pub const TTY: usize = 4;
         pub const MISC: usize = 10;
-        pub const RAW_SERIAL: usize = 234;
     }
     pub mod minor {
         pub const NULL: usize = 3;
@@ -173,12 +172,7 @@ mod kunits {
 
     #[kunit]
     fn static_major_namespaces_do_not_overlap() {
-        let char_majors = [
-            char::major::MEMORY,
-            char::major::TTY,
-            char::major::MISC,
-            char::major::RAW_SERIAL,
-        ];
+        let char_majors = [char::major::MEMORY, char::major::TTY, char::major::MISC];
         let block_majors = [
             block::major::RAMDISK,
             block::major::LOOP,

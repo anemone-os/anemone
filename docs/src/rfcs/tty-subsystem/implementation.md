@@ -1,6 +1,6 @@
 # TTY Subsystem 迁移实施计划
 
-**状态：** Active / Stage 0 Closed / Stage 1 Active / Checkpoint 2 Closed / Checkpoint 3 Active
+**状态：** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Outline / Not Resolved
 **最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-tty-subsystem](./index.md)
 **目标与不变量：** [TTY Subsystem 目标与不变量](./invariants.md)
@@ -12,9 +12,10 @@
 本文把 TTY target 解析为可滚动实施的阶段、probe、验证和 cutover 边界，不重新定义
 [`index.md`](./index.md) 与 [`invariants.md`](./invariants.md) 已经拥有的 target、owner、ABI
 或 proof obligations。R0 已接受并建立 transaction；Stage 0 获得单独授权后完成只读审计并关闭，
-Stage 0 -> Stage 1 Resolution Gate 随后在新的明确授权下完成。Stage 1 已获得实现授权；Checkpoint 1/2
-独立关闭后，Checkpoint 3 因同步probe早于`kthreadd`命中停止条件，现已按获准的driver-local quiescent
-probe / Late activation路线重新解析并激活。没有current contract因本文生效。
+Stage 0 -> Stage 1 Resolution Gate 随后在新的明确授权下完成。Stage 1的三个checkpoint现已独立关闭；
+Checkpoint 3采用获准的driver-local quiescent probe / Late activation路线完成production transport
+candidate。Stage 2仍为Outline且尚未执行Stage 1 -> Stage 2 Resolution Gate。没有current contract因
+Stage 1生效。
 
 ## 1. 计划角色与 authority
 
@@ -151,8 +152,8 @@ transaction 中临时切块。
 | Stage | 成熟度 | 概括目的 | Contract Cutover | 解析触发点 |
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 只读闭合 live interface、oracle、carrier 候选与模块边界 | None | 已关闭；后续Stage 1 resolution亦已独立完成 |
-| Stage 1 | Active | 建立 unpublished port/Terminal transport vertical slice，闭合 IRQ、RX、TX 与 pre-publish transaction | None | Checkpoint 1/2已关闭；Checkpoint 3按修正路线Active |
-| Stage 2 | Outline | 交付 line discipline、termios、read/write/poll、`/dev/ttyS<N>` 与 real boot stdio | `TTY-DATA-CUTOVER` | Stage 1 独立关闭后 |
+| Stage 1 | Closed | 建立 unpublished port/Terminal transport vertical slice，闭合 IRQ、RX、TX 与 pre-publish transaction | None | 三个checkpoint已独立关闭；RV64 candidate验证完成，LA64未验证 |
+| Stage 2 | Outline | 交付 line discipline、termios、read/write/poll、`/dev/ttyS<N>` 与 real boot stdio | `TTY-DATA-CUTOVER` | 另行授权Stage 1 -> Stage 2 Resolution Gate后 |
 | Stage 3 | Outline | 建立 controlling relation、`/dev/tty`、caller/topology handoff、foreground ioctls 与 cleanup | None | Stage 2 独立关闭后 |
 | Stage 4 | Outline | 闭合 terminal signals、background access、ash job control、register 与 current contract | `TTY-JOBCTL-CUTOVER` | Stage 3 独立关闭后 |
 

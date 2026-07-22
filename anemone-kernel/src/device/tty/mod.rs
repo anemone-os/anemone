@@ -21,14 +21,18 @@ struct TtyRxEndpoint {
     /// Stage 1 diagnostic only. This counter is test/review evidence and never
     /// participates in the worker predicate or ordering.
     discarded_rx_batches: AtomicUsize,
+    /// Stage 1 diagnostic one-shot only. It controls only the required first
+    /// drain report and never drives work, ordering, or lifecycle state.
+    first_drain_reported: AtomicBool,
 }
 
 impl TtyRxEndpoint {
-    fn new(port: Arc<dyn TtyPort>) -> Self {
+    fn new(port: Arc<dyn TtyPort>, report_first_drain: bool) -> Self {
         Self {
             port,
             discarded_rx_bytes: AtomicUsize::new(0),
             discarded_rx_batches: AtomicUsize::new(0),
+            first_drain_reported: AtomicBool::new(!report_first_drain),
         }
     }
 }
@@ -94,7 +98,15 @@ impl TtyRxNotifier {
 pub(crate) fn attach_unpublished_port(
     port: Arc<dyn TtyPort>,
 ) -> Result<(TtyPortAttachment, TtyRxNotifier), SysError> {
-    let endpoint = Arc::try_new(TtyRxEndpoint::new(port)).map_err(|_| SysError::OutOfMemory)?;
+    attach_unpublished_port_inner(port, true)
+}
+
+fn attach_unpublished_port_inner(
+    port: Arc<dyn TtyPort>,
+    report_first_drain: bool,
+) -> Result<(TtyPortAttachment, TtyRxNotifier), SysError> {
+    let endpoint = Arc::try_new(TtyRxEndpoint::new(port, report_first_drain))
+        .map_err(|_| SysError::OutOfMemory)?;
     let id = endpoint.port.id().clone();
 
     {
@@ -185,6 +197,19 @@ fn tty_rx_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
             endpoint
                 .discarded_rx_batches
                 .fetch_add(1, Ordering::Relaxed);
+            if endpoint
+                .first_drain_reported
+                .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
+                // This temporary process-context diagnostic is removed when
+                // Stage 2 replaces the discard sink with the line discipline.
+                kprintln!(
+                    "TTY Stage 1 diagnostic: first RX drain on {} accepted {} byte(s)",
+                    endpoint.port.id(),
+                    drained
+                );
+            }
 
             if ctx.should_stop() {
                 break;
@@ -289,7 +314,9 @@ mod kunits {
     }
 
     fn attach(port: &Arc<FakePort>) -> (TtyPortAttachment, TtyRxNotifier) {
-        attach_unpublished_port(port.clone()).unwrap()
+        // Fake-port drains exercise worker ordering but must not consume or
+        // duplicate the production Stage 1 first-drain diagnostic.
+        attach_unpublished_port_inner(port.clone(), false).unwrap()
     }
 
     #[kunit]

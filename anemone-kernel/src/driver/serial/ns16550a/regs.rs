@@ -17,7 +17,13 @@ const REG_LSR: usize = 5;
 const REG_MSR: usize = 6;
 
 const LSR_DR: u8 = 1 << 0;
+const LSR_OVERRUN_ERROR: u8 = 1 << 1;
+const LSR_PARITY_ERROR: u8 = 1 << 2;
+const LSR_FRAMING_ERROR: u8 = 1 << 3;
+const LSR_BREAK_INTERRUPT: u8 = 1 << 4;
 const LSR_THRE: u8 = 1 << 5;
+const LSR_RX_ERROR_MASK: u8 =
+    LSR_OVERRUN_ERROR | LSR_PARITY_ERROR | LSR_FRAMING_ERROR | LSR_BREAK_INTERRUPT;
 
 const LCR_WORD_SIZE_7: u8 = 0b10;
 const LCR_WORD_SIZE_8: u8 = 0b11;
@@ -42,6 +48,29 @@ const IIR_ID_THRE: u8 = 0b0010;
 const IIR_ID_RX_AVAILABLE: u8 = 0b0100;
 const IIR_ID_RX_LINE_STATUS: u8 = 0b0110;
 const IIR_ID_RX_TIMEOUT: u8 = 0b1100;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum InterruptReason {
+    None,
+    ModemStatus,
+    TxHoldingEmpty,
+    RxAvailable,
+    RxLineStatus,
+    RxTimeout,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RxStatus {
+    pub(super) data_ready: bool,
+    pub(super) line_error: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RxSample {
+    pub(super) byte: Option<u8>,
+    pub(super) line_error: bool,
+}
 
 impl Ns16550ARegisters {
     pub unsafe fn from_raw(base: *mut u8, reg_shift: usize, reg_io_width: usize) -> Self {
@@ -98,12 +127,23 @@ impl Ns16550ARegisters {
         self.set_dlab(false);
     }
 
-    pub(super) fn init_line(&self, divisor: u16, line: UartLineConfig) {
+    /// Apply the boot line configuration while leaving RX interrupts disabled.
+    ///
+    /// The normal console may transmit after this point, but the driver-local
+    /// Late activation transaction must bind the TTY consumer and request the
+    /// IRQ before calling [`Self::enable_rx_irq`].
+    pub(super) fn init_line_quiescent(&self, divisor: u16, line: UartLineConfig) {
         self.write_reg(REG_IER_DLM, 0);
         self.write_reg(REG_IIR_FCR, FCR_ENABLE_FIFO | FCR_CLEAR_RX | FCR_CLEAR_TX);
         self.write_reg(REG_LCR, line_control_bits(line));
         self.set_divisor(divisor);
         self.write_reg(REG_MCR, MCR_DTR | MCR_RTS | MCR_OUT2);
+        self.write_reg(REG_IER_DLM, 0);
+    }
+
+    /// Irreversibly enable the Stage 1 RX path after IRQ registration and
+    /// attachment publication have completed.
+    pub(super) fn enable_rx_irq(&self) {
         self.write_reg(REG_IER_DLM, IER_RX_AVAILABLE);
     }
 
@@ -115,42 +155,44 @@ impl Ns16550ARegisters {
         Some(byte)
     }
 
-    pub fn try_drain_irq(&self) -> bool {
-        let mut handled = false;
-
-        loop {
-            let iir = self.read_reg(REG_IIR_FCR);
-            if iir & IIR_NO_PENDING != 0 {
-                break;
-            }
-
-            handled = true;
-            match iir & IIR_ID_MASK {
-                IIR_ID_RX_AVAILABLE | IIR_ID_RX_TIMEOUT => {
-                    while self.read_reg(REG_LSR) & LSR_DR != 0 {
-                        let _ = self.read_reg(REG_RBR_THR_DLL);
-                    }
-                },
-                IIR_ID_RX_LINE_STATUS => {
-                    let lsr = self.read_reg(REG_LSR);
-                    if lsr & LSR_DR != 0 {
-                        let _ = self.read_reg(REG_RBR_THR_DLL);
-                    }
-                },
-                IIR_ID_MODEM_STATUS => {
-                    let _ = self.read_reg(REG_MSR);
-                },
-                IIR_ID_THRE => {
-                    // THRE interrupt is normally disabled; nothing to drain
-                    // here.
-                },
-                _ => {
-                    break;
-                },
-            }
+    pub(super) fn interrupt_reason(&self) -> InterruptReason {
+        let iir = self.read_reg(REG_IIR_FCR);
+        if iir & IIR_NO_PENDING != 0 {
+            return InterruptReason::None;
         }
+        match iir & IIR_ID_MASK {
+            IIR_ID_MODEM_STATUS => InterruptReason::ModemStatus,
+            IIR_ID_THRE => InterruptReason::TxHoldingEmpty,
+            IIR_ID_RX_AVAILABLE => InterruptReason::RxAvailable,
+            IIR_ID_RX_LINE_STATUS => InterruptReason::RxLineStatus,
+            IIR_ID_RX_TIMEOUT => InterruptReason::RxTimeout,
+            _ => InterruptReason::Unknown,
+        }
+    }
 
-        handled
+    pub(super) fn interrupt_pending(&self) -> bool {
+        !matches!(self.interrupt_reason(), InterruptReason::None)
+    }
+
+    pub(super) fn rx_status(&self) -> RxStatus {
+        let lsr = self.read_reg(REG_LSR);
+        RxStatus {
+            data_ready: lsr & LSR_DR != 0,
+            line_error: lsr & LSR_RX_ERROR_MASK != 0,
+        }
+    }
+
+    pub(super) fn read_rx_sample(&self) -> RxSample {
+        let status = self.rx_status();
+        let byte = status.data_ready.then(|| self.read_reg(REG_RBR_THR_DLL));
+        RxSample {
+            byte,
+            line_error: status.line_error,
+        }
+    }
+
+    pub(super) fn clear_modem_status(&self) {
+        let _ = self.read_reg(REG_MSR);
     }
 }
 

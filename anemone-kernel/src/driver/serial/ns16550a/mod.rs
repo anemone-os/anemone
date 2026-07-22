@@ -4,15 +4,13 @@
 //! - https://datasheet4u.com/datasheets/National-Semiconductor/NS16550A/605590
 //! - https://www.kernel.org/doc/Documentation/devicetree/bindings/serial/8250.yaml
 
-use core::ops::DerefMut;
-
 use crate::{
     device::{
         bus::platform::{self, PlatformDriver},
-        char::register_char_device,
         console::{ConsoleFlags, register_console},
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
         resource::Resource,
+        tty::TtyPortId,
     },
     mm::remap::ioremap,
     prelude::*,
@@ -22,7 +20,7 @@ use crate::{
 mod port;
 mod regs;
 
-use port::{BOOKKEEPER, IRQ_HANDLER, Ns16550AState, Ns16550AStateInner};
+use port::{AppliedLine, Ns16550ADevice};
 pub use regs::Ns16550ARegisters;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +131,13 @@ struct Ns16550ADriver {
     drv_base: DriverBase,
 }
 
+static NS16550A_DRIVER: Lazy<Arc<Ns16550ADriver>> = Lazy::new(|| {
+    Arc::new(Ns16550ADriver {
+        kobj_base: KObjectBase::new(KObjIdent::try_from("ns16550a").unwrap()),
+        drv_base: DriverBase::new(),
+    })
+});
+
 impl KObjectOps for Ns16550ADriver {}
 
 impl DriverOps for Ns16550ADriver {
@@ -142,6 +147,12 @@ impl DriverOps for Ns16550ADriver {
             .expect("platform driver should only be probed with platform device");
 
         let fwnode = pdev.fwnode().ok_or(SysError::MissingFwNode)?;
+        let of_path = fwnode
+            .as_of_node()
+            .ok_or(SysError::MissingFwNode)?
+            .node()
+            .path();
+        let port_id = TtyPortId::try_from(of_path.as_str())?;
         let stdout = fwnode.stdout_config();
         let line = match stdout {
             Some(config) => {
@@ -216,49 +227,17 @@ impl DriverOps for Ns16550ADriver {
             Ns16550ARegisters::from_raw(remap.as_ptr().as_ptr().cast(), reg_shift, reg_io_width)
         };
 
-        regs.init_line(divisor, line);
+        regs.init_line_quiescent(divisor, line);
 
-        // TODO: if one of following operation fails, how can we elegantly unwind the
-        // previous successful operations (e.g. free the allocated minor, unmap the MMIO
-        // region, etc.)? we probably need some sort of "transaction" mechanism for
-        // driver probing, just like what we did in memory management when unmapping
-        // mapped pages.
-        //
-        // We should implement something that might be called `ProbeTransaction` or
-        // `ProbeCtx`, which can keep track of the resources allocated during probing
-        // and automatically free them when dropped.
-
-        let minor = {
-            let mut guard = BOOKKEEPER.lock_irqsave();
-            let (minor_alloc, _) = guard.deref_mut();
-            let minor = minor_alloc.alloc().ok_or(SysError::NoMinorAvailable)?;
-            minor
-        };
-
-        let state = Ns16550AState {
-            rc: Arc::new(Ns16550AStateInner {
-                devnum: CharDevNum::new(MajorNum::new(devnum::char::major::RAW_SERIAL), minor),
-                base,
-                reg_shift,
-                reg_io_width,
-                remap,
-            }),
-        };
-
-        let prev = BOOKKEEPER
-            .lock_irqsave()
-            .deref_mut()
-            .1
-            .insert(minor, state.clone());
-        assert!(
-            prev.is_none(),
-            "minor number {} is already taken",
-            minor.get()
-        );
-
-        pdev.set_drv_state(AnyOpaque::new(state.clone()));
-
-        register_char_device(format!("{}", pdev.name()), Arc::new(state.clone()))?;
+        let (state, console) = Ns16550ADevice::new(
+            port_id,
+            base,
+            reg_shift,
+            reg_io_width,
+            remap,
+            AppliedLine::new(line, divisor),
+        )?;
+        pdev.set_drv_state(AnyOpaque::new(state));
 
         let mut flags = ConsoleFlags::empty();
         if stdout.is_some() {
@@ -271,16 +250,9 @@ impl DriverOps for Ns16550ADriver {
                 line.data_bits
             );
         }
-        register_console(Arc::new(state), flags);
+        register_console(console, flags);
 
-        // indeed we should pass state as private data here to save time in irq
-        // handling.
-        //
-        // following code is just a diliberate demonstration of how to use minor number
-        // as a key to retrieve device state.
-        request_irq(pdev, &IRQ_HANDLER, Some(AnyOpaque::new(minor)))?;
-
-        kinfoln!("{}: probed", pdev.name());
+        kinfoln!("{}: probed with RX quiescent", pdev.name());
 
         Ok(())
     }
@@ -375,12 +347,62 @@ fn stdout_line_control_bits() {
 
 #[initcall(driver)]
 fn init() {
-    let kobj_base = KObjectBase::new(KObjIdent::try_from("ns16550a").unwrap());
-    let drv_base = DriverBase::new();
-    let driver = Arc::new(Ns16550ADriver {
-        kobj_base,
-        drv_base,
+    platform::register_driver(NS16550A_DRIVER.clone());
+}
+
+#[initcall(late)]
+fn activate_tty_ports() {
+    let driver: &dyn Driver = NS16550A_DRIVER.as_ref();
+    let mut device_count = 0_usize;
+    driver.for_each_device(|_| {
+        device_count = device_count
+            .checked_add(1)
+            .expect("NS16550A device count overflow");
     });
 
-    platform::register_driver(driver);
+    let mut devices = Vec::new();
+    if devices.try_reserve_exact(device_count).is_err() {
+        kerrln!(
+            "NS16550A: failed to reserve activation snapshot for {} device(s)",
+            device_count
+        );
+        return;
+    }
+
+    driver.for_each_device(|device| {
+        assert!(
+            devices.len() < devices.capacity(),
+            "NS16550A devices changed while taking the boot-time activation snapshot"
+        );
+        devices.push(device.clone());
+    });
+    assert_eq!(
+        devices.len(),
+        device_count,
+        "NS16550A devices changed while taking the boot-time activation snapshot"
+    );
+
+    for device in devices {
+        let state = device
+            .drv_state()
+            .cast::<Ns16550ADevice>()
+            .expect("NS16550A device has invalid driver state");
+        match state.activate(device.as_ref()) {
+            Ok(()) => {
+                kinfoln!(
+                    "{}: activated Stage 1 TTY transport at {}",
+                    device.name(),
+                    state.port().id()
+                );
+            },
+            Err(error) => {
+                kerrln!(
+                    "{}: failed to activate Stage 1 TTY transport at {}: {:?}",
+                    device.name(),
+                    state.port().id(),
+                    error
+                );
+            },
+        }
+    }
 }

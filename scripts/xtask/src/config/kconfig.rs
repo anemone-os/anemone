@@ -83,6 +83,10 @@ pub struct Parameters {
     pub ramdisk_count: Option<usize>,
     pub loop_device_count: Option<usize>,
     pub ns16550a_default_baud: Option<u32>,
+    pub tty_raw_rx_capacity_bytes: Option<usize>,
+    pub ns16550a_irq_rx_budget_bytes: Option<usize>,
+    pub ns16550a_tx_batch_bytes: Option<usize>,
+    pub ns16550a_tx_poll_iterations: Option<usize>,
     pub dw_mshc_poll_timeout_ms: Option<u64>,
     pub eevdf_base_slice_us: Option<u64>,
     pub eevdf_wake_clamp_us: Option<u64>,
@@ -100,6 +104,11 @@ impl Parameters {
             std::fs::read_to_string(DEF_KCONFIG_PATH).expect("Failed to read default kconfig");
         let defconfig =
             Config::from_str(&defconfig_content).expect("Failed to parse default kconfig");
+
+        self.gen_kconfig_defs_with_defaults(&defconfig)
+    }
+
+    fn gen_kconfig_defs_with_defaults(&self, defconfig: &Config) -> String {
 
         macro_rules! default_or {
             ($field:ident) => {
@@ -203,6 +212,14 @@ pub const RAMDISK_COUNT: usize = {};
 pub const LOOP_DEVICE_COUNT: usize = {};
 /// Default NS16550A baud used when stdout-path has no device-specific options.
 pub const NS16550A_DEFAULT_BAUD: u32 = {};
+/// Per-port fixed raw TTY RX FIFO capacity in bytes.
+pub const TTY_RAW_RX_CAPACITY_BYTES: usize = {};
+/// Maximum RX bytes drained by one NS16550A IRQ handler invocation.
+pub const NS16550A_IRQ_RX_BUDGET_BYTES: usize = {};
+/// Maximum bytes submitted while holding the NS16550A TX lock.
+pub const NS16550A_TX_BATCH_BYTES: usize = {};
+/// Maximum readiness polls for each NS16550A TX byte.
+pub const NS16550A_TX_POLL_ITERATIONS: usize = {};
 /// Bounded DW-MSHC register polling timeout in milliseconds.
 pub const DW_MSHC_POLL_TIMEOUT_MS: u64 = {};
 /// EEVDF-lite base slice in microseconds.
@@ -242,6 +259,10 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             default_or!(ramdisk_count),
             default_or!(loop_device_count),
             default_or!(ns16550a_default_baud),
+            default_or!(tty_raw_rx_capacity_bytes),
+            default_or!(ns16550a_irq_rx_budget_bytes),
+            default_or!(ns16550a_tx_batch_bytes),
+            default_or!(ns16550a_tx_poll_iterations),
             default_or!(dw_mshc_poll_timeout_ms),
             default_or!(eevdf_base_slice_us),
             default_or!(eevdf_wake_clamp_us),
@@ -266,6 +287,28 @@ impl Config {
         }
         if config.parameters.dw_mshc_poll_timeout_ms == Some(0) {
             anyhow::bail!("dw_mshc_poll_timeout_ms must be non-zero");
+        }
+        for (name, value) in [
+            (
+                "tty_raw_rx_capacity_bytes",
+                config.parameters.tty_raw_rx_capacity_bytes,
+            ),
+            (
+                "ns16550a_irq_rx_budget_bytes",
+                config.parameters.ns16550a_irq_rx_budget_bytes,
+            ),
+            (
+                "ns16550a_tx_batch_bytes",
+                config.parameters.ns16550a_tx_batch_bytes,
+            ),
+            (
+                "ns16550a_tx_poll_iterations",
+                config.parameters.ns16550a_tx_poll_iterations,
+            ),
+        ] {
+            if value == Some(0) {
+                anyhow::bail!("{name} must be non-zero");
+            }
         }
         if config
             .parameters
@@ -370,6 +413,50 @@ mod tests {
             ))
             .is_err()
         );
+    }
+
+    #[test]
+    fn test_tty_transport_parameters_are_constrained_and_defaulted() {
+        let content = std::fs::read_to_string("../../conf/.defconfig").unwrap();
+        let replace_parameter = |name: &str, replacement: &str| {
+            content
+                .lines()
+                .map(|line| {
+                    if line.trim_start().starts_with(name) {
+                        replacement
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        for name in [
+            "tty_raw_rx_capacity_bytes",
+            "ns16550a_irq_rx_budget_bytes",
+            "ns16550a_tx_batch_bytes",
+            "ns16550a_tx_poll_iterations",
+        ] {
+            assert!(
+                Config::from_str(&replace_parameter(name, &format!("{name} = 0"))).is_err(),
+                "{name} accepted zero"
+            );
+        }
+
+        let mut config = Config::from_str(&content).unwrap();
+        config.parameters.tty_raw_rx_capacity_bytes = None;
+        config.parameters.ns16550a_irq_rx_budget_bytes = None;
+        config.parameters.ns16550a_tx_batch_bytes = None;
+        config.parameters.ns16550a_tx_poll_iterations = None;
+        let defaults = Config::from_str(&content).unwrap();
+        let defs = config
+            .parameters
+            .gen_kconfig_defs_with_defaults(&defaults);
+        assert!(defs.contains("pub const TTY_RAW_RX_CAPACITY_BYTES: usize = 4096;"));
+        assert!(defs.contains("pub const NS16550A_IRQ_RX_BUDGET_BYTES: usize = 256;"));
+        assert!(defs.contains("pub const NS16550A_TX_BATCH_BYTES: usize = 16;"));
+        assert!(defs.contains("pub const NS16550A_TX_POLL_ITERATIONS: usize = 65536;"));
     }
 
     #[test]

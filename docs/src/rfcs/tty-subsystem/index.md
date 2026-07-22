@@ -8,7 +8,7 @@
 **事务日志：** [2026-07-23 - TTY Subsystem](../../devlog/transactions/2026-07-23-tty-subsystem.md)
 **影响契约：** [目标与不变量](./invariants.md)接受引入 `TTY-PORT-001`、`TTY-TERM-001`、`TTY-INPUT-001`、`TTY-OUTPUT-001`、`TTY-ENDPOINT-001`、`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001` 的 R0 target，并 Preserve 现有 Signal、process-group、job-control、task-lifecycle 与 user-entry contract；R0 接受不改变 current contract，全部 `TTY-*` 仍为 Not Cut Over。
 **开放问题：** None；已关闭的设计 finding 及重新打开条件见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** [Stage 1](./implementation.md#6-stage-1-readyunpublished-transport-vertical-slice) 已Active；Checkpoint 1/2关闭，Checkpoint 3按获准的driver-local quiescent probe / Late activation路线执行。Stage 1完成后不得自动进入Stage 2。
+**下一步：** [Stage 1](./implementation.md#6-stage-1-readyunpublished-transport-vertical-slice) 已关闭；Stage 2仍为Outline。只有在新的明确授权下才能执行Stage 1 -> Stage 2 Resolution Gate，不得直接进入Stage 2实现。
 
 ## 摘要
 
@@ -228,8 +228,8 @@ foreground group消失只使 selector失效，不拆 relation；newly orphaned s
 ## 收口
 
 R0 已接受并建立 transaction，Stage 0 的 live interface、oracle、route 与模块边界审计已经关闭；
-Stage 0 -> Stage 1 Resolution Gate已经完成，Stage 1为Active；Checkpoint 1/2已经关闭，Checkpoint 3按
-driver-local quiescent probe / Late activation修正路线执行。全部`TTY-*`仍为Not Cut Over，
-current contracts 与 register 未因本次入口或审计改变。已完成的设计 finding 保存在
+Stage 0 -> Stage 1 Resolution Gate与Stage 1三个checkpoint已经完成，Stage 1现已关闭。Stage 2仍为
+Outline且尚未执行独立resolution gate。全部`TTY-*`仍为Not Cut Over，current contracts 与 register
+未因Stage 1 candidate改变。已完成的设计 finding 保存在
 [Tracking Issues](./tracking-issues.md)，本次执行证据与carrier owner处置见[事务日志](../../devlog/transactions/2026-07-23-tty-subsystem.md)，
 历史调查保存在[背景材料](./backgrounds/index.md)。

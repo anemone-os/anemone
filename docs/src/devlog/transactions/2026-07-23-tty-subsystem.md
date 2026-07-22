@@ -1,11 +1,11 @@
 # 2026-07-23 - TTY Subsystem
 
-**Status:** Active / Stage 0 Closed / Stage 1 Active / Checkpoint 2 Closed / Checkpoint 3 Active
+**Status:** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Outline / Not Resolved
 **Owners:** doruche, Codex
 **Area:** device / TTY / serial / VFS / signal / task topology / job control
 **Canonical Plan:** [RFC-20260722-tty-subsystem](../../rfcs/tty-subsystem/index.md), [目标与不变量](../../rfcs/tty-subsystem/invariants.md), [迁移实施计划](../../rfcs/tty-subsystem/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 1 Active / Checkpoint 2 Closed / Checkpoint 3 Active on Corrected Route
+**Current Phase:** Stage 1 Closed / Stage 2 Outline / Resolution Not Authorized
 
 ## Scope and contract boundary
 
@@ -469,3 +469,69 @@ latency，必须独立申报。
 
 **Result:** 三项finding已写回canonical Stage 1 route与source proof，R0 target、owner、ABI、visible semantics、
 acceptance和代码manifest不变。Checkpoint 3恢复**Active**，可以进入源码实现。
+
+## Stage 1 / Checkpoint 3 production transport closure - 2026-07-23
+
+**Change:** NS16550A early probe现在从OF canonical full path构造`TtyPortId`，应用并保存immutable line
+snapshot，预分配4096-byte raw RX ring、physical port和fixed console/TTY projections，在IER/RX关闭时只安装
+driver state与output-only console；它不再注册raw `CharDev`、分配dynamic minor或request IRQ。static driver
+owner的Late initcall用count/reserve/snapshot两遍遍历取得锁外device list，再逐个执行unpublished attach、worker/
+notifier binding、IRQ private context构造与`request_irq()`；成功后只提交
+`SpinLock<Option<TtyPortAttachment>> = Some`并启RX，失败则abort attachment、撤registry并stop/join worker。
+
+physical port以单一IRQ-safe fixed ring保存RX，IRQ每次最多读取256 bytes，FIFO满时drop-new并累计diagnostic
+counter，只在empty-to-nonempty且释放raw guard后wake；IRQ不分配、不format、不打印，也不访问TTY policy。
+console与TTY共用同一TX入口，每个port-owned lock section最多16 bytes、每byte最多65536次poll，timeout返回partial
+progress并计数。Stage 1 worker继续以ring nonempty为durable predicate；production port首次成功drain后只输出一条
+process-context摘要，fake-port KUnit不消费或复制该production诊断。`RAW_SERIAL` major 234、NS16550A
+`CharDev`、minor allocator/bookkeeper和IRQ lookup旁路已经删除；generic char/device/console/IRQ框架不变。
+
+四项non-zero kconfig参数由`conf/.defconfig`与xtask config owner生成；显式零值被拒绝，active kconfig缺省字段
+从defconfig解析。generated `kconfig_defs.rs`与platform/DTB输出只作为ignored validation output，没有手工修改或
+提交。
+
+**Review:** 最终source/lock/lifecycle review未发现Apollyon、Keter或Euclid。两遍driver snapshot的callback只
+计数或clone到已预留Vec，allocation、attach、spawn、request、abort和join均在`DriverBase.devices` guard外；
+boot期device集合漂移由常开assert暴露。device attachment slot是唯一Quiescent/Active truth，physical port不持有
+attachment，因此不存在`port -> attachment -> endpoint -> port`环。成功顺序为attach -> IRQ context ->
+request -> slot commit -> RX enable；request成功后没有可返回失败的步骤，IRQ也不读取optional slot/notifier。
+request失败路径在RX仍关闭时同步abort。
+
+审计确认production tree中没有`RAW_SERIAL`、NS16550A raw `CharDev`/registration/minor bookkeeper、IRQ printk、
+console RX、claim/lease/mode、polling watchdog或devfs TTY publication。IRQ private data直接持有port与notifier；
+raw guard只覆盖fixed-ring publish/dequeue，wake发生在guard外。TX证明范围仅限port-owned lock的batch/poll上界，
+不把generic console registry的既有外层IRQ-save guard宣称为本阶段证明。所有tracked source/config diff均位于
+corrected C3 manifest；没有修改boot、bus、console、IRQ core、kthread/Event/wait/scheduler、apps、rootfs manifest、
+test profile、current contracts或register。
+
+**Validation:** `git diff --check`与`just fmt kernel --check`通过。xtask kconfig定向单元测试共5项通过，包含
+四项TTY transport参数的零值拒绝与4096/256/16/65536 default generation。沙箱内首次`just build`仍在lwext4
+C编译被seccomp以`Bad system call`阻断；沙箱外同一repository入口随后以RV64 release、KUnit、ext4和irqsave
+features编译/link通过，端到端wrapper又从重建rootfs与本地测试盘副本完成一次同配置build。`mdbook build
+docs`通过，只报告既有large search-index warning。
+
+`./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/tty-stage1-rv64.log`成功启动QEMU；
+全量222项enabled KUnit打印`All tests passed!`。6项`device::tty` attachment/worker KUnit与4项NS16550A
+FIFO/drop-new、RX budget/error和TX partial-timeout KUnit全部为`ok`。KUnit后向guest serial注入371-byte可识别
+ASCII burst，日志恰有一条`TTY Stage 1 diagnostic: first RX drain on /soc/serial@10000000 accepted 64 byte(s)`；
+未见panic、deadlock、recursive IRQ printk或`kthread spawn before kthreadd initialization`。达到证据点后经QEMU
+monitor `quit`正常退出，wrapper返回0；已经开始的jobctl/signal/wait LTP输出及其既有成败不属于Stage 1证据。
+本轮没有运行LA64 build/runtime、hardware RX、BusyBox交互TTY或Stage 2 ABI验证，RV64结果不外推到这些层级。
+
+**Checkpoint result:** Checkpoint 3 **Closed**。driver-local quiescent/Late bridge只为当前bus缺少dependency-aware
+deferred probe服务；未来generic deferred probe/retry具备`kthreadd` dependency表达后，必须删除Late initcall与
+Quiescent -> Active迁移，并复用同一activation transaction，不能把本bridge扩展为generic lifecycle。
+
+## Stage 1 closure audit - 2026-07-23
+
+**Exit audit:** Checkpoint 1 same-owner split、Checkpoint 2 dormant attachment和Checkpoint 3 production wiring均已
+独立review、验证和关闭。production NS16550A只保留fixed output console + unpublished `TtyPort`，RX/TX/identity/
+applied-line owner与canonical 6.2一致；raw major 234路径为零，request失败cleanup与request后不可失败commit边界
+闭合。focused KUnit、RV64 build/QEMU/RX burst、source/lock/manifest audit达到Stage 1 floor；LA64未验证按用户处置
+明确保留，不冒充closure proof。
+
+**Contract / lifecycle:** Stage 1 contract cutover为None；`TTY-DATA-CUTOVER`与`TTY-JOBCTL-CUTOVER`仍为Not Cut
+Over，全部`TTY-*`仍不是current contract，register/current limitations无需变化。Stage 1现为**Closed**；Stage 2
+仍为Outline且未解析、未授权、未激活。下一步只能在新的明确授权下执行独立的Stage 1 -> Stage 2 Implementation
+Resolution Gate，读取live Stage 1 capability、实际diff/review/validation与current contracts后解析完整Stage 2
+Ready；本次不进入Stage 2。
