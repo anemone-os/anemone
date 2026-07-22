@@ -1,11 +1,11 @@
 # 2026-07-23 - TTY Subsystem
 
-**Status:** Active / Stage 0 Closed / Stage 1 Active / Checkpoint 1 Closed
+**Status:** Active / Stage 0 Closed / Stage 1 Active / Checkpoint 2 Closed / Checkpoint 3 Stopped
 **Owners:** doruche, Codex
 **Area:** device / TTY / serial / VFS / signal / task topology / job control
 **Canonical Plan:** [RFC-20260722-tty-subsystem](../../rfcs/tty-subsystem/index.md), [目标与不变量](../../rfcs/tty-subsystem/invariants.md), [迁移实施计划](../../rfcs/tty-subsystem/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 1 Active / Checkpoint 1 Closed / Checkpoint 2 Not Started
+**Current Phase:** Stage 1 Active / Checkpoint 2 Closed / Checkpoint 3 Stopped at Preflight
 
 ## Scope and contract boundary
 
@@ -369,3 +369,39 @@ owner与shared API均无diff，未命中C2 bridge/stop条件。
 **Result / Next:** Checkpoint 2 **Closed**，Stage 1保持Active。Checkpoint 3仍为Not Started；production
 NS16550A仍走Checkpoint 1保留的raw CharDev路径。后续必须单独执行C3 preflight/activation，不得把C2 closure
 视为production transport授权。
+
+## Stage 1 / Checkpoint 3 preflight stop - 2026-07-23
+
+**Entry:** 入口为`dev/drc/omega@ec0c9945`，worktree clean。依照一次只激活一个checkpoint的合同，本节先
+执行只读C3 preflight；没有激活production source修改。
+
+**Blocking evidence:** live boot顺序在`bsp_kinit()`中先执行`of_platform_discovery()`和
+`probe_virtual_devices()`，随后才完成timer/percpu/local-IRQ初始化并调用`init_kthreadd()`。platform bus在
+`register_device()`中同步调用匹配driver的`probe()`，因此NS16550A `probe()`确定发生在kthreadd初始化前。
+C3 canonical route要求NS16550A在`request_irq()`前调用`attach_unpublished_port()`，而C2 attachment同步使用
+`KThreadBuilder::spawn()`；live `kthreadd::submit()`对未初始化`KTHREADD`执行correctness assertion
+`kthread spawn before kthreadd initialization`。按现状接线会在boot中panic，不能形成C3 candidate。
+
+**Stop audit:** 不能把worker简单延后到late initcall：若early probe先request IRQ，late worker spawn仍是
+irreversible IRQ commit后的fallible步骤，直接命中C3 stop；若early probe先安装driver state/register console而
+late阶段再spawn/request IRQ，worker或IRQ失败时没有console/driver unpublish/unbind rollback，probe却已经向bus
+返回成功，同样破坏pre-publish transaction。周期poll、IRQ-tail sink、optional notifier或raw CharDev并行消费都被
+R0/Stage 1拒绝。解决该冲突必须修改`main.rs`的boot ordering、platform bus/driver probe coordination、kthread
+early-publication contract或等价shared owner；这些文件与owner均在C3 resolved manifest之外，并命中
+“必须修改kthread/shared contract才能继续”的checkpoint停止条件。
+
+**Expansion report:** 尚未批准或实施任何扩展。候选方向只有：(A)由boot/kthread owner重新排序physical discovery、
+CPU/local-IRQ readiness与kthreadd publication，并证明不会让其它platform/virtual driver或console初始化退化；
+(B)由device/driver owner增加可回滚的deferred-probe/finalize协议，使NS16550A直到kthreadd ready后才向bus提交probe
+成功；(C)重新解析C3 pre-publish route，但必须仍保证worker/consumer在RX enable前可达、request IRQ后没有
+fallible half-commit、request失败无registry/worker/console/driver残留。A/B跨owner和shared surface；C若无法保持
+这些边界则进入Target Renegotiation Gate，不能由implementation自行接受。
+
+**Contract and validation impact:** 当前无contract cutover，全部`TTY-*`仍Not Cut Over；production raw major
+234、console和IRQ行为保持`ec0c9945`入口状态。若批准A/B扩展，至少需要boot-order/source-lock审计、kthread
+creation/stop KUnit、全部C3 focused KUnit、RV64 release build和规定的QEMU boot/KUnit/RX burst，并证明所有受影响
+driver仍在合法ready phase probe；依用户本轮处置不运行LA64 build，不能把RV64证据外推为LA64 proof。若批准C，
+需先在canonical `implementation.md`更新route、manifest、rollback/stop和验证，再重新激活C3。
+
+**Result:** Checkpoint 3保持**Not Started / Stopped at Preflight**，没有C3 source diff、bridge、Kconfig或
+contract变化。Stage 1保持Active，等待owner/write-set扩展或C3 route correction的明确批准；不得自动进入Stage 2。
