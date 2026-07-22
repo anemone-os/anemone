@@ -2,8 +2,6 @@
 
 use core::fmt::{Debug, Write};
 
-use idalloc::{IdAllocator, IdentityBijection, OneShotAlloc};
-
 use crate::{prelude::*, utils::iter_ctx::IterCtx};
 
 pub struct CharSeekCtx<'a> {
@@ -73,6 +71,8 @@ impl<'a> CharIoctlCtx<'a> {
 /// making them suitable for a wide range of applications where data is not
 /// naturally organized into blocks.
 pub trait CharDev: Send + Sync {
+    /// Immutable endpoint identity. The char registry derives its key from this
+    /// value during registration; it must not change afterward.
     fn devnum(&self) -> CharDevNum;
 
     /// Read data from the device into the provided buffer. Returns the number
@@ -114,10 +114,6 @@ impl Write for CharDevWriter<'_> {
     }
 }
 
-pub trait CharDriver: Driver {
-    fn major(&self) -> MajorNum;
-}
-
 struct CharDevDesc {
     name: String,
     ops: Arc<dyn CharDev>,
@@ -153,80 +149,43 @@ impl CharDevRegistry {
             ordered: Vec::new(),
         }
     }
+
+    fn register(&mut self, name: String, device: Arc<dyn CharDev>) -> Result<(), SysError> {
+        let devnum = device.devnum();
+        if self.devices.contains_key(&devnum) || self.names.contains_key(name.as_str()) {
+            return Err(SysError::DevAlreadyRegistered);
+        }
+
+        let desc = CharDevDesc { name, ops: device };
+
+        kinfoln!("register {:?} as char device with devnum {}", desc, devnum);
+
+        self.names.insert(String::from(desc.name.as_str()), devnum);
+        self.devices.insert(devnum, desc);
+        self.ordered.push(devnum);
+
+        Ok(())
+    }
 }
 
 /// Character device subsystem state. Singleton instance.
-///
-/// **LOCK ORDERING**:
-/// **`registry` -> `drivers` -> `major_alloc`**
 struct CharDevSubSys {
     registry: RwLock<CharDevRegistry>,
-    drivers: RwLock<HashMap<MajorNum, Arc<dyn CharDriver>>>,
-    major_alloc: SpinLock<IdAllocator<OneShotAlloc, IdentityBijection<MajorNum>>>,
 }
 
 impl CharDevSubSys {
     fn new() -> Self {
-        use devnum::char::major::*;
         Self {
             registry: RwLock::new(CharDevRegistry::new()),
-            drivers: RwLock::new(HashMap::new()),
-            major_alloc: SpinLock::new(IdAllocator::new(OneShotAlloc::new(
-                DYNAMIC_ALLOC.0 as u64,
-                DYNAMIC_ALLOC.1 as u64,
-            ))),
         }
     }
 }
 
 static SUBSYS: Lazy<CharDevSubSys> = Lazy::new(|| CharDevSubSys::new());
 
-/// Register a character driver and return the allocated major number for it.
-pub fn register_char_driver(driver: Arc<dyn CharDriver>) -> Result<MajorNum, SysError> {
-    let major = SUBSYS
-        .major_alloc
-        .lock_irqsave()
-        .alloc()
-        .expect("this panic indicates that we should increase the dynamic major number range");
-
-    kinfoln!(
-        "register {} as char driver with major number {}",
-        driver.name(),
-        major.get()
-    );
-
-    let prev = SUBSYS.drivers.write_irqsave().insert(major, driver);
-    debug_assert!(prev.is_none());
-
-    Ok(major)
-}
-
-/// Register a character device with the given device number.
-pub fn register_char_device(
-    devnum: CharDevNum,
-    name: String,
-    device: Arc<dyn CharDev>,
-) -> Result<(), SysError> {
-    let mut registry = SUBSYS.registry.write_irqsave();
-    if registry.devices.contains_key(&devnum) {
-        return Err(SysError::DevAlreadyRegistered);
-    }
-
-    if registry.names.contains_key(name.as_str()) {
-        return Err(SysError::DevAlreadyRegistered);
-    }
-
-    let desc = CharDevDesc { name, ops: device };
-
-    kinfoln!("register {:?} as char device with devnum {}", desc, devnum);
-
-    registry
-        .names
-        .insert(String::from(desc.name.as_str()), devnum);
-    registry.devices.insert(devnum, desc);
-    registry.ordered.push(devnum);
-
-    Ok(())
+/// Register a named character endpoint. The capability owns its device number.
+pub fn register_char_device(name: String, device: Arc<dyn CharDev>) -> Result<(), SysError> {
+    SUBSYS.registry.write_irqsave().register(name, device)
 }
 
 /// Get the character device corresponding to the given device number, if it
@@ -283,3 +242,49 @@ mod null;
 mod urandom;
 mod zero;
 // TODO: implement kernel entropy source and use it for urandom.
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    struct TestCharDev(CharDevNum);
+
+    impl CharDev for TestCharDev {
+        fn devnum(&self) -> CharDevNum {
+            self.0
+        }
+
+        fn read(&self, _buf: &mut [u8]) -> Result<usize, SysError> {
+            Ok(0)
+        }
+
+        fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
+            Ok(buf.len())
+        }
+    }
+
+    fn test_devnum(minor: usize) -> CharDevNum {
+        CharDevNum::new(
+            MajorNum::new(devnum::char::major::MEMORY),
+            MinorNum::new(minor),
+        )
+    }
+
+    #[kunit]
+    fn registry_derives_devnum_and_rejects_duplicate_keys() {
+        let mut registry = CharDevRegistry::new();
+        registry
+            .register("first".to_string(), Arc::new(TestCharDev(test_devnum(1))))
+            .unwrap();
+        assert_eq!(registry.names.get("first"), Some(&test_devnum(1)));
+
+        assert_eq!(
+            registry.register("second".to_string(), Arc::new(TestCharDev(test_devnum(1))),),
+            Err(SysError::DevAlreadyRegistered)
+        );
+        assert_eq!(
+            registry.register("first".to_string(), Arc::new(TestCharDev(test_devnum(2))),),
+            Err(SysError::DevAlreadyRegistered)
+        );
+    }
+}

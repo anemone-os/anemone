@@ -9,7 +9,7 @@ use core::ops::{Deref, DerefMut};
 use crate::{
     device::{
         bus::platform::{self, PlatformDriver},
-        char::{CharDev, CharDriver, register_char_device, register_char_driver},
+        char::{CharDev, register_char_device},
         console::{Console, ConsoleFlags, register_console},
         devnum::GeneralMinorAllocator,
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
@@ -135,7 +135,7 @@ impl Deref for Ns16550AState {
 
 #[derive(Debug)]
 struct Ns16550AStateInner {
-    devnum: MonoOnce<CharDevNum>,
+    devnum: CharDevNum,
     base: PhysAddr,
     reg_shift: usize,
     reg_io_width: usize,
@@ -159,7 +159,7 @@ impl Console for Ns16550AState {
 
 impl CharDev for Ns16550AState {
     fn devnum(&self) -> CharDevNum {
-        *self.devnum.get()
+        self.devnum
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
@@ -456,21 +456,6 @@ impl DriverOps for Ns16550ADriver {
 
         regs.init_line(divisor, line);
 
-        let state = Ns16550AState {
-            rc: Arc::new(Ns16550AStateInner {
-                devnum: unsafe {
-                    MonoOnce::from_partial_initialized(CharDevNum::new(
-                        MajorNum::new(0),
-                        MinorNum::new(0),
-                    ))
-                },
-                base,
-                reg_shift,
-                reg_io_width,
-                remap,
-            }),
-        };
-
         // TODO: if one of following operation fails, how can we elegantly unwind the
         // previous successful operations (e.g. free the allocated minor, unmap the MMIO
         // region, etc.)? we probably need some sort of "transaction" mechanism for
@@ -483,29 +468,35 @@ impl DriverOps for Ns16550ADriver {
 
         let minor = {
             let mut guard = BOOKKEEPER.lock_irqsave();
-            let (minor_alloc, devices) = guard.deref_mut();
+            let (minor_alloc, _) = guard.deref_mut();
             let minor = minor_alloc.alloc().ok_or(SysError::NoMinorAvailable)?;
-
-            let prev = devices.insert(minor, state.clone());
-            debug_assert!(
-                prev.is_none(),
-                "minor number {} is already taken",
-                minor.get()
-            );
             minor
         };
 
-        state.devnum.init(|n| {
-            n.write(CharDevNum::new(*MAJOR.get(), minor));
-        });
+        let state = Ns16550AState {
+            rc: Arc::new(Ns16550AStateInner {
+                devnum: CharDevNum::new(MajorNum::new(devnum::char::major::RAW_SERIAL), minor),
+                base,
+                reg_shift,
+                reg_io_width,
+                remap,
+            }),
+        };
+
+        let prev = BOOKKEEPER
+            .lock_irqsave()
+            .deref_mut()
+            .1
+            .insert(minor, state.clone());
+        assert!(
+            prev.is_none(),
+            "minor number {} is already taken",
+            minor.get()
+        );
 
         pdev.set_drv_state(AnyOpaque::new(state.clone()));
 
-        register_char_device(
-            CharDevNum::new(*MAJOR.get(), minor),
-            format!("{}", pdev.name()),
-            Arc::new(state.clone()),
-        )?;
+        register_char_device(format!("{}", pdev.name()), Arc::new(state.clone()))?;
 
         let mut flags = ConsoleFlags::empty();
         if stdout.is_some() {
@@ -542,12 +533,6 @@ impl DriverOps for Ns16550ADriver {
 impl PlatformDriver for Ns16550ADriver {
     fn match_table(&self) -> &[&str] {
         &["ns16550a"]
-    }
-}
-
-impl CharDriver for Ns16550ADriver {
-    fn major(&self) -> MajorNum {
-        *MAJOR.get()
     }
 }
 
@@ -656,7 +641,6 @@ fn stdout_line_control_bits() {
     );
 }
 
-static MAJOR: MonoOnce<MajorNum> = unsafe { MonoOnce::new() };
 static BOOKKEEPER: Lazy<SpinLock<(GeneralMinorAllocator, HashMap<MinorNum, Ns16550AState>)>> =
     Lazy::new(|| SpinLock::new((GeneralMinorAllocator::new(), HashMap::new())));
 
@@ -669,13 +653,5 @@ fn init() {
         drv_base,
     });
 
-    platform::register_driver(driver.clone());
-    match register_char_driver(driver) {
-        Ok(m) => MAJOR.init(|major| {
-            major.write(m);
-        }),
-        Err(e) => {
-            kerrln!("failed to register ns16550a as a char driver: {:?}", e);
-        },
-    }
+    platform::register_driver(driver);
 }

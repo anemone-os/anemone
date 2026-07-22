@@ -32,6 +32,7 @@
 
 ## 当前记录
 
+- [2026-07-22 - device devnum ownership](./2026-07-22-device-devnum-ownership.md)
 - [2026-07-16 - Current contract layer](./2026-07-16-current-contract-layer.md)
 - [2026-07-14 - RFC semantic revision workflow](./2026-07-14-rfc-semantic-revisions.md)
 - [2026-07-14 - PLIC device-tree context 解析](./2026-07-14-plic-dt-context.md)

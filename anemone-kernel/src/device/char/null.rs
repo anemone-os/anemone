@@ -35,7 +35,7 @@ impl CharDev for Null {
 
 #[initcall(probe)]
 fn init() {
-    match register_char_device(NULL_DEVNUM, "null".to_string(), Arc::new(Null)) {
+    match register_char_device("null".to_string(), Arc::new(Null)) {
         Ok(()) => {
             if let Err(err) = publish_char_device(NULL_DEVNUM) {
                 knoticeln!(

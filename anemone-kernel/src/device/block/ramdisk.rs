@@ -1,6 +1,6 @@
 use crate::{
     device::block::{
-        BlockDev, BlockDevClass, BlockDevRegistration, BlockSize, devfs::publish_block_device,
+        BlockDev, BlockDevRegistration, BlockSize, devfs::publish_block_device,
         register_block_device,
     },
     prelude::*,
@@ -12,6 +12,10 @@ const fn devnum_for(id: usize) -> BlockDevNum {
         MajorNum::new(devnum::block::major::RAMDISK),
         MinorNum::new(id),
     )
+}
+
+fn name_for(id: usize) -> String {
+    format!("ram{}", id)
 }
 
 const RAMDISK_SECTOR_SIZE: usize = 4096;
@@ -106,12 +110,12 @@ fn init() {
 
     for id in 0..RAMDISK_COUNT {
         let dev = RamDisk::new(id);
+        let name = name_for(id);
         match register_block_device(BlockDevRegistration {
-            devnum: dev.devnum(),
-            class: BlockDevClass::RamDisk,
+            name: name.clone(),
             device: Arc::new(dev),
         }) {
-            Ok(name) => {
+            Ok(()) => {
                 if let Err(err) = publish_block_device(devnum_for(id)) {
                     knoticeln!("{} registered, but devfs publish failed: {:?}", name, err);
                 } else {
@@ -123,4 +127,10 @@ fn init() {
             },
         }
     }
+}
+
+#[kunit]
+fn endpoint_identity_uses_one_local_id() {
+    assert_eq!(devnum_for(0).minor(), MinorNum::new(0));
+    assert_eq!(name_for(0), "ram0");
 }

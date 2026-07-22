@@ -1,4 +1,4 @@
-//! Device ID allocator.
+//! Device number namespace and minor-number allocation helpers.
 //!
 //! Reference:
 //! - https://www.kernel.org/doc/Documentation/admin-guide/devices.txt
@@ -19,9 +19,7 @@ pub mod char {
         pub const MEMORY: usize = 1;
         pub const TTY: usize = 4;
         pub const MISC: usize = 10;
-
-        /// [start, end)
-        pub const DYNAMIC_ALLOC: (usize, usize) = (234, 255);
+        pub const RAW_SERIAL: usize = 234;
     }
     pub mod minor {
         pub const NULL: usize = 3;
@@ -38,12 +36,7 @@ pub mod block {
         pub const LOOP: usize = 7;
         pub const SCSI: usize = 8;
         pub const MMC: usize = 179;
-
-        /// [start, end)
-        ///
-        /// LANANA doen't specify this region as a dynamic allocation pool,
-        /// but for convenience we use this.
-        pub const DYNAMIC_ALLOC: (usize, usize) = (2048, 2048 + 32);
+        pub const VIRTIO: usize = 2048;
     }
     pub mod minor {
         pub const INITRD: usize = 0;
@@ -171,5 +164,44 @@ impl GeneralMinorAllocator {
 
     pub fn try_reserve(&mut self, minor: MinorNum) -> Result<(), ()> {
         self.0.try_reserve(minor)
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn static_major_namespaces_do_not_overlap() {
+        let char_majors = [
+            char::major::MEMORY,
+            char::major::TTY,
+            char::major::MISC,
+            char::major::RAW_SERIAL,
+        ];
+        let block_majors = [
+            block::major::RAMDISK,
+            block::major::LOOP,
+            block::major::SCSI,
+            block::major::MMC,
+            block::major::VIRTIO,
+        ];
+
+        for (idx, major) in char_majors.iter().enumerate() {
+            assert!(!char_majors[idx + 1..].contains(major));
+        }
+        for (idx, major) in block_majors.iter().enumerate() {
+            assert!(!block_majors[idx + 1..].contains(major));
+        }
+    }
+
+    #[kunit]
+    fn internal_device_key_remains_16_bit_major_and_minor() {
+        let devnum = BlockDevNum::new(MajorNum::new(2048), MinorNum::new(0x1234));
+        assert_eq!(devnum.raw(), 0x0800_1234);
+        assert_eq!(
+            devnum.decompose(),
+            (MajorNum::new(2048), MinorNum::new(0x1234))
+        );
     }
 }

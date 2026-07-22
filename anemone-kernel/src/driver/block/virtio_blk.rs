@@ -10,8 +10,8 @@ use virtio_drivers::{device::blk::VirtIOBlk, transport::SomeTransport};
 use crate::{
     device::{
         block::{
-            BlockDev, BlockDevClass, BlockDevRegistration, BlockDriver, BlockSize,
-            devfs::publish_block_device, register_block_device, register_block_driver,
+            BlockDev, BlockDevRegistration, BlockSize, devfs::publish_block_device,
+            register_block_device,
         },
         bus::virtio::VirtIODriver,
         devnum::GeneralMinorAllocator,
@@ -22,14 +22,42 @@ use crate::{
     utils::any_opaque::AnyOpaque,
 };
 
+const fn devnum_for(id: usize) -> BlockDevNum {
+    BlockDevNum::new(
+        MajorNum::new(devnum::block::major::VIRTIO),
+        MinorNum::new(id),
+    )
+}
+
+/// Generate names like `vda`, `vdz`, `vdaa`, ... from the endpoint id.
+fn name_for(id: usize) -> String {
+    let mut suffix = Vec::new();
+    let mut value = id;
+
+    loop {
+        suffix.push((b'a' + (value % 26) as u8) as char);
+        if value < 26 {
+            break;
+        }
+        value = value / 26 - 1;
+    }
+
+    let mut name = String::with_capacity(2 + suffix.len());
+    name.push_str("vd");
+    for ch in suffix.iter().rev() {
+        name.push(*ch);
+    }
+    name
+}
+
 #[derive(Opaque)]
 struct VirtIOBlkState {
-    rc: Arc<SpinLock<VirtIOBlkStateInner>>,
+    rc: Arc<VirtIOBlkStateInner>,
 }
 
 struct VirtIOBlkStateInner {
     devnum: BlockDevNum,
-    blk: VirtIOBlk<VirtIOHalImpl, SomeTransport<'static>>,
+    blk: SpinLock<VirtIOBlk<VirtIOHalImpl, SomeTransport<'static>>>,
 }
 
 impl Clone for VirtIOBlkState {
@@ -41,7 +69,7 @@ impl Clone for VirtIOBlkState {
 }
 
 impl Deref for VirtIOBlkState {
-    type Target = SpinLock<VirtIOBlkStateInner>;
+    type Target = VirtIOBlkStateInner;
 
     fn deref(&self) -> &Self::Target {
         &self.rc
@@ -50,7 +78,7 @@ impl Deref for VirtIOBlkState {
 
 impl BlockDev for VirtIOBlkState {
     fn devnum(&self) -> BlockDevNum {
-        self.lock_irqsave().devnum
+        self.devnum
     }
 
     fn block_size(&self) -> BlockSize {
@@ -59,12 +87,12 @@ impl BlockDev for VirtIOBlkState {
     }
 
     fn total_blocks(&self) -> usize {
-        self.lock_irqsave().blk.capacity() as usize
+        self.blk.lock_irqsave().capacity() as usize
     }
 
     fn read_blocks(&self, block_idx: usize, buf: &mut [u8]) -> Result<(), SysError> {
-        self.lock_irqsave()
-            .blk
+        self.blk
+            .lock_irqsave()
             .read_blocks(block_idx, buf)
             .map_err(|e| {
                 kerrln!("failed to read blocks from virtio block device: {e}");
@@ -73,8 +101,8 @@ impl BlockDev for VirtIOBlkState {
     }
 
     fn write_blocks(&self, block_idx: usize, buf: &[u8]) -> Result<(), SysError> {
-        self.lock_irqsave()
-            .blk
+        self.blk
+            .lock_irqsave()
             .write_blocks(block_idx, buf)
             .map_err(|e| {
                 kerrln!("failed to write blocks to virtio block device: {e}");
@@ -107,51 +135,43 @@ impl DriverOps for VirtIOBlkDriver {
             SysError::ProbeFailed
         })?;
 
-        let state = VirtIOBlkState {
-            rc: Arc::new(SpinLock::new(VirtIOBlkStateInner {
-                devnum: BlockDevNum::new(*MAJOR.get(), MinorNum::new(0)), /* placeholder, will be updated after minor number is allocated */
-                blk: drv,
-            })),
-        };
-
-        let minor = {
+        let (minor, state) = {
             let mut guard = BOOKKEEPER.lock_irqsave();
             let (minor_alloc, devices) = guard.deref_mut();
             let minor = minor_alloc.alloc().ok_or(SysError::NoMinorAvailable)?;
+            let state = VirtIOBlkState {
+                rc: Arc::new(VirtIOBlkStateInner {
+                    devnum: devnum_for(minor.get()),
+                    blk: SpinLock::new(drv),
+                }),
+            };
 
             let prev = devices.insert(minor, state.clone());
-            debug_assert!(
+            assert!(
                 prev.is_none(),
                 "minor number {} is already taken",
                 minor.get()
             );
 
-            minor
+            (minor, state)
         };
 
-        let devnum = BlockDevNum::new(*MAJOR.get(), minor);
-
-        state.lock_irqsave().devnum = devnum;
+        let devnum = devnum_for(minor.get());
 
         vdev.request_irq(&IRQ_HANDLER, Some(AnyOpaque::new(state.clone())))?;
 
-        let node_name = register_block_device(BlockDevRegistration {
-            devnum,
-            class: BlockDevClass::Virtio,
+        register_block_device(BlockDevRegistration {
+            name: name_for(minor.get()),
             device: Arc::new(state.clone()),
         })?;
 
-        kinfoln!(
-            "virtio-blk device {} registered as {}",
-            vdev.name(),
-            node_name
-        );
+        kinfoln!("virtio-blk device {} registered as {}", vdev.name(), devnum);
 
         if let Err(err) = publish_block_device(devnum) {
             knoticeln!(
                 "virtio-blk device {} registered as {}, but devfs publish failed: {:?}",
                 vdev.name(),
-                node_name,
+                devnum,
                 err
             );
         }
@@ -167,8 +187,8 @@ impl DriverOps for VirtIOBlkDriver {
             .cast::<VirtIOBlkState>()
             .expect("virtio block device should have VirtIOBlkState as driver state");
         state
-            .lock_irqsave()
             .blk
+            .lock_irqsave()
             .flush()
             .map_err(|e| {
                 kerrln!("failed to flush virtio block device during shutdown: {e}");
@@ -187,17 +207,10 @@ impl VirtIODriver for VirtIOBlkDriver {
     }
 }
 
-impl BlockDriver for VirtIOBlkDriver {
-    fn major(&self) -> MajorNum {
-        *MAJOR.get()
-    }
-}
-
 static IRQ_HANDLER: IrqHandler = IrqHandler::new(irq_handler);
 
 fn irq_handler(_prv_data: &AnyOpaque) {}
 
-static MAJOR: MonoOnce<MajorNum> = unsafe { MonoOnce::new() };
 static BOOKKEEPER: Lazy<SpinLock<(GeneralMinorAllocator, HashMap<MinorNum, VirtIOBlkState>)>> =
     Lazy::new(|| SpinLock::new((GeneralMinorAllocator::new(), HashMap::new())));
 
@@ -209,16 +222,13 @@ fn init() {
         kobj_base,
         drv_base,
     });
-    bus::virtio::register_driver(driver.clone());
+    bus::virtio::register_driver(driver);
+}
 
-    match register_block_driver(driver) {
-        Ok(major) => {
-            MAJOR.init(|m| {
-                m.write(major);
-            });
-        },
-        Err(e) => {
-            kerrln!("failed to register virtio block driver as a block driver: {e:?}");
-        },
-    }
+#[kunit]
+fn endpoint_identity_uses_one_local_id() {
+    assert_eq!(devnum_for(0).minor(), MinorNum::new(0));
+    assert_eq!(name_for(0), "vda");
+    assert_eq!(name_for(25), "vdz");
+    assert_eq!(name_for(26), "vdaa");
 }

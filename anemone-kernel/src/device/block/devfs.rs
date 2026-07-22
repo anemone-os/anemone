@@ -367,7 +367,7 @@ mod kunits {
     impl BlockDev for TestBlockDev {
         fn devnum(&self) -> BlockDevNum {
             BlockDevNum::new(
-                MajorNum::new(devnum::block::major::DYNAMIC_ALLOC.0),
+                MajorNum::new(devnum::block::major::VIRTIO),
                 MinorNum::new(0),
             )
         }
