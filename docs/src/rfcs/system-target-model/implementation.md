@@ -1,6 +1,6 @@
 # System Target Model 迁移实施计划
 
-**状态：** Draft（Scope Only）
+**状态：** Draft（Stage 1 Ready；尚未 acceptance / activation）
 **最后更新：** 2026-07-22
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
@@ -8,9 +8,10 @@
 **当前修订：** Draft
 **事务日志：** None
 
-本文只定义后续实施的 stage envelope、resolution/feedback gate、停止条件与回写路径。当前
-RFC 已完成 public promotion，但尚未 acceptance，没有 transaction，也没有任何 `Resolved Write Set
-Manifest`；本文不授权修改 build system 或 kernel 代码。
+本文定义后续实施的 stage envelope、resolution/feedback gate、停止条件与回写路径。当前
+RFC 已完成 public promotion 与初始 `Implementation Resolution Gate`，Stage 1 已达到 Ready；RFC
+尚未 acceptance，没有 transaction，Stage 1 也未 Active。本文冻结的 Stage 1
+`Resolved Write Set Manifest` 不构成 build system 或 kernel 代码写入授权。
 
 ## 迁移原则
 
@@ -57,10 +58,8 @@ Manifest`；本文不授权修改 build system 或 kernel 代码。
   与 `Resolved Write Set Manifest` 已完整解析，但尚未自动获得执行授权。
 - `Active` 表示已经通过 RFC / transaction / 用户或编排协议要求的启动授权；`Closed` 表示已经
   按本阶段自己的 review、验证和退出条件独立关闭。
-- 当前 public Draft 中 Stage 1 至 Stage 6 均为 `Outline`，没有 `Ready` 或 `Active` 阶段，也没有
-  写入授权。在 RFC 被接受为
-  `Accepted for Implementation` 前，必须先运行初始 `Implementation Resolution Gate`，把 Stage 1
-  完整解析为 Ready 并在本文冻结精确 manifest。
+- 当前 public Draft 中 Stage 1 已由 `0B - Initial Implementation Resolution Gate` 完整解析为
+  `Ready`；Stage 2 至 Stage 6 仍为 `Outline`，没有 `Active` 阶段，也没有代码写入授权。
 - RFC acceptance、transaction creation 与 Stage 1 activation 是后续独立 gate。实现开始时建立的
   transaction 记录 accepted revision、preflight/批准证据、生效点和本文链接，不复制第二份计划或
   manifest；Stage 1 仍需显式启动授权才从 Ready 进入 Active。
@@ -95,7 +94,7 @@ Manifest`；本文不授权修改 build system 或 kernel 代码。
 
 | 阶段 | 当前成熟度 | 概括目的 | 前置依赖 | 解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 1 | Outline | Resolver 与 Platform kernel-output vertical slice | Promotion preflight、public Draft review | RFC acceptance 前的初始 Implementation Resolution Gate |
+| Stage 1 | Ready | Resolver 与 Platform kernel-output vertical slice | Promotion preflight、public Draft review、0B resolution | 等待 RFC acceptance、transaction creation 与独立 activation |
 | Stage 2 | Outline | Selection、action scope 与 workflow surface cutover | Stage 1 Closed | `Stage 1 -> Stage 2 Implementation Resolution Gate` |
 | Stage 3 | Outline | 逐 platform DT authority/delivery 迁移 | Stage 2 Closed；对应 platform baseline 可审计 | Stage 2 关闭后的 Stage 3 Resolution Gate；无法整阶段解析时在 gate 中拆成独立滚动 Stage |
 | Stage 4 | Outline | Source app driver、app/rootfs workflow 与 physical-board closure | 相关 build foundation Closed | 前置实现证据足以解析 owner-local closure 后 |
@@ -116,7 +115,7 @@ Manifest`；本文不授权修改 build system 或 kernel 代码。
 
 ## 首阶段前置 Gate：Live-owner inventory 与 Stage 1 解析
 
-**Gate 状态：** `0A` Completed；`0B` 尚未执行，Stage 1 仍为 Outline。
+**Gate 状态：** `0A` Completed；`0B` Completed，Stage 1 为 Ready 但未 Active。
 
 本前置 Gate 分成两个顺序步骤；它们不是 Stage 1 的执行 checkpoint：
 
@@ -187,60 +186,244 @@ Manifest`；本文不授权修改 build system 或 kernel 代码。
   build resolver 与 repository workflow 继续作为 RFC-local target/proof boundary。若 0B 或后续
   platform audit 发现额外 ABI/current-contract delta，必须按停止条件回到 RFC review。
 
+### 0B Initial Implementation Resolution 结论（2026-07-22）
+
+- Preflight 重新读取了 live `Justfile` / xtask help、config deserialization、build/conf/QEMU/app/
+  rootfs tasks、全部 tracked Platform、root `kconfig` / `.defconfig`、RV64/LA64 pretest wrapper、
+  VisionFive rootfs 固定路径，以及 kernel `mount_rootfs()` / `exec_init_proc()`。Register 没有与本
+  stage 冲突的 active build/boot issue；本 RFC 当前也没有 transaction，符合 acceptance 前边界。
+- Live delta 仍是 0A 已分类的同一组 owner migration：root `kconfig` 混合 selection 与
+  KernelConfig，Platform 混入 root/QEMU host path，build/QEMU/conf/wrapper 分别重读 mutable
+  selection，以及 QEMU DT prebuild 复用 runtime argv。没有发现新的 shared runtime contract、
+  第二项 `Contract Impact`、target 未覆盖的 public ABI，`BOOT-PROTOCOL-001` baseline 也仍与 live
+  producer/kernel handoff 一致；0B 停止条件未命中。
+- Stage 1 选择 VisionFive 2 作为 Platform kernel-output vertical slice。它能同时验证
+  SystemTarget -> Platform -> KernelConfig -> kernel-only `CargoProfile` reference closure、single
+  resolver snapshot 与 Platform-owned U-Boot post-link，而不需要先迁移 QEMU bind、DT authority、
+  app driver 或 EmbeddedApp。QEMU-backed Platform 只参与 resolver/config 回归，不作为 Stage 1
+  “normal build 不依赖 runtime backend”的 closure evidence；其 DT build delta继续受 Stage 3保护，
+  Stage 1 不得为通过验证而改写 QEMU DT recipe。
+- Live tree 没有 VisionFive wrapper。为避免新建第二编排面，Stage 1 validation 把 Outline 中的
+  “wrapper smoke”解析为仓库入口的显式 `build -> rootfs` 顺序、失败即停止的命令序列检查和最终镜像
+  内容检查；永久顺序说明由相邻 README / recipe owner 保存。该调整只解析 validation route，
+  不改变 `STM-WORKFLOW-ORDER-001` 或 acceptance boundary。
+- Public Draft review 与本次 owner audit 未形成新的 Apollyon / Keter / Euclid；现有
+  `tracking-issues.md` 可保持 Closed。以下 Stage 1 定义、checkpoint、review gate、validation floor、
+  stop/exit condition 与 manifest 是 0B 的唯一 authoritative output。
+
+0B 本身是docs-only resolution gate，实际write set只有本文件、RFC `index.md`与`docs/src/rfcs.md`
+生命周期导航；没有创建transaction、修改current contract、读取backgrounds或授权production写入。
+Review逐项核对了Ready完整性、checkpoint write subset/recovery、single-owner/reference边界、Stage 2/3
+protected surface与manifest精确性；首轮发现的“checkpoint缺少独立write subset/recovery”和“条件性
+new-file范围”已在本文修复，复核后无live finding。`git diff --check`、public相对链接审计、旧
+Outline/0B状态残留搜索与`mdbook build docs`通过；mdBook只报告既有large search-index warning。
+Kernel build、xtask test、QEMU、rootfs、physical board、LTP与runtime均Not Run，因为0B只关闭Stage 1
+解析前置条件，不把Stage 1 validation floor误算为已执行。
+
 ## Stage 1：Resolver 与 Platform kernel-output vertical slice
 
-**阶段成熟度：** Outline；由初始 `Implementation Resolution Gate` 在 RFC acceptance 前解析。
+**阶段成熟度：** Ready；尚未 RFC acceptance、transaction creation 或 Stage 1 activation。
 
-以下受保护目标、反馈假设、validation floor 与失败信号是 Stage 1 resolution input，不是已经冻结的
-Ready 定义、精确测试命令或写入授权。
+### 受保护目标与 scope envelope
 
-受保护目标：
+- 建立能够自然表达 SystemTarget -> Platform、KernelConfig 与 kernel-only `CargoProfile` 组合的
+  最小 canonical schema，并在本阶段冻结 reference identity；Stage 2 只能增加 selection source，
+  不得重命名、并列实现或按 display/output name 重建这些 reference。
+- 一次 build 只允许 loader/resolver 解析一次 canonical inputs并形成一个拥有完整值的 immutable
+  `ResolvedSystemBuild`。Build consumer只接收 snapshot与 action-local presentation，不保留
+  `KConfig`/Platform路径后再重读。
+- SystemTarget 成为 root mount 与 `RootfsEntry` selection owner；Platform 保持 machine、DT、QEMU与
+  kernel-output owner；KernelConfig只包含feature/policy/capacity。Stage 1 不改变kernel生成常量的值、
+  root-mount runtime ABI或`BOOT-PROTOCOL-001`。
+- VisionFive 2 是本阶段 production vertical slice：normal build按
+  `kernel ELF -> rust-objcopy -> mkimage`生成现有`build/anemoneImage-rv64`，不读取rootfs/runtime
+  backend，也不增加package CLI/backend/`[[outputs]]`。
+- App/rootfs继续是直接action；VisionFive固定路径只由README/recipe与实际验证保存
+  `build -> rootfs`顺序，不增加publication、freshness、artifact graph或history检查。
+- QEMU bind/CLI、DT authority/delivery、Source driver与EmbeddedApp分别受Stage 2/3/4/5保护。
+  Stage 1不得修改它们的owner、public surface或acceptance boundary，也不得把QEMU-backed build
+  误报为本vertical slice已关闭的action-scope证据。
 
-- 建立能够自然表达至少一个target/platform/KernelConfig/kernel-only `CargoProfile`组合的
-  最小canonical object schema，并冻结stable reference identity；
-- canonical config 只产生一个 immutable `ResolvedSystemBuild` snapshot；
-- build只读取自己的selection/config，生成kernel ELF及Platform声明的post-link outputs，不要求
-  rootfs/runtime backend；
-- VisionFive `[uboot]` 保持Platform owner，正常build按`ELF -> objcopy -> mkimage`顺序生成既有
-  legacy image；不增加package CLI/backend/`[[outputs]]`；
-- app/rootfs固定路径组合保持直接action，由recipe/docs/wrapper声明命令顺序，不建立跨action
-  typed publication或freshness checker；
-- 底层driver拥有自己的incremental decision；未跟踪的host build environment变化要求clean，
-  `dtc`/`mkimage`按对应action直接执行，不建立通用tool fingerprint；
-- QEMU bind value保持action-scoped；host tool不进入config，xtask按仓库固定
-  程序名直接调用并依赖开发者`PATH`。
+### Canonical schema 与 reference identity
 
-反馈假设：
+- `SystemTargetRef` 是严格的仓库slug：`[a-z0-9][a-z0-9-]*`，唯一解析到
+  `conf/system-targets/<slug>.toml`；不接受alias、display name、绝对路径、`..`或输出文件名。
+  文件名就是identity，manifest不再保存第二个name字段。
+- 第一版SystemTarget schema只包含`platform = "<PlatformRef>"`、`[root]`中的现有
+  `fstype`/typed source，以及`[initial-program] type = "rootfs-entry"`。它不包含preset、QEMU
+  bind、Cargo profile、rootfs recipe、artifact output或presentation字段。
+- `PlatformRef`沿用`conf/platforms/<slug>.toml`的严格slug。现有`[build].name`在Stage 1只允许与
+  文件slug相等并由assert/test校验；`abbrs`只服务尚未删除的legacy `conf`输入，不进入snapshot
+  identity。Stage 2可以删除冗余name/alias surface，但不得改变slug identity。
+- `KernelConfigRef`冻结为规范化的workspace-relative TOML路径；拒绝绝对路径、逃逸workspace的
+  `..`和非普通文件。Root `kconfig`与tracked `conf/.defconfig`继续使用现有`[features]`/
+  `[parameters]` schema；`[build]`由单独的legacy-selection parser消费，不属于KernelConfig值。
+  Stage 2 public `--kernel-config`必须沿用同一规范路径identity，不能改成另一套slug registry。
+- Stage 1把legacy `[build].platform`改名为`target`，并把它、kernel-only`profile`与`disasm`解析为
+  `LegacyBuildSelection`/action presentation。该桥只让现有`just build`、`-k`与pretest wrapper在
+  Stage 2原子CLI cutover前继续工作；它必须带诊断`selection source = legacy-kconfig`，不得被
+  preset/local selection复用，并在Stage 2删除。
+- `ResolvedSystemBuild`至少拥有target/platform/architecture、exact KernelConfig、kernel-only
+  `CargoProfile`、`RootfsEntry`、root specification与本action所需Platform output/DT requirement。
+  它不保存QEMU bind、disasm、host tool path、artifact digest/freshness或手写provenance。
 
-- 一个最小 schema/loader + resolver + kernel build slice 足以证明统一 snapshot与Platform
-  output，无需先建立完整 public CLI、package/cache framework或local selection workflow。
-- VisionFive的单一路径只需要Platform post-link与文档化`build -> rootfs`顺序；不值得为防止
-  用户跳步而建立通用artifact graph。
+### Checkpoint 1A - Schema、typed reference 与 dormant loader
 
-Validation floor：
+**交付：** 新增SystemTarget parser/typed refs与五个对应当前supported Platform/root组合的tracked
+manifest；新增纯loader/resolver单元测试。此checkpoint不切换production build，Platform中的legacy
+root字段仍是唯一behavior source；新target文件保持dormant，避免中间态双写驱动行为。
 
-- config/parser/resolver 定向测试覆盖 canonical reference、unknown/missing input 与 snapshot
-  immutability；
-- build测试覆盖有/无`[uboot]`的Platform，证明VisionFive按顺序生成ELF与legacy image，普通
-  Platform不调用`mkimage`；
-- VisionFive rootfs recipe或相邻文档明确前置命令，wrapper smoke在build失败时不继续，并在完整
-  顺序成功后检查rootfs内的`/boot/anemoneImage`；
-- vertical-slice action在执行前打印selection source、canonical refs与resolved snapshot摘要；
-  第一版不建立独立inspect命令或JSON resolution view；
-- 通过仓库入口执行受影响的 build check；CLI/help/docs明确host build environment变化后的clean责任。
+**Write subset：** `Justfile`的private xtask test入口；新`conf/system-targets/**`；
+`scripts/xtask/src/config/{mod.rs,reference.rs,system_target.rs,resolve.rs}`、`workspace.rs`，以及只为
+parser/reference test需要的`config/{kconfig.rs,platform.rs}`。不修改build/conf/wrapper的production path。
 
-失败信号与退出：
+**定向验证：** 通过repository-owned xtask test入口覆盖合法slug、path规范化、unknown/missing
+target/platform/KernelConfig、filename/name不一致、unsupported initial-program tag和完整五target
+load matrix；source audit确认production build尚未消费dormant target。
 
-- 实现开始比较跨resolution artifact identity、引入typed publication、content-addressed cache、
-  `[[outputs]]`或通用host-tool fingerprint：删除该路径并回到直接action与明确命令顺序；
-- U-Boot必须迁入target/package或需要第二个用户命令才能生成板级必需镜像：停止并修正Platform/
-  build owner；
-- canonical reference必须等到Stage 2 public CLI才能成立，或Stage 2需要重写已经进入resolver
-  snapshot的identity：停止并重新收窄Stage 1 schema/manifest；
-- hypothesis 成立时，把最小resolver与post-link实现保留在正式stage，证据进入transaction，
-  不把单一转换提升为package framework。
+**Review / Exit：** reviewer确认schema没有preset/QEMU bind/output overlay，reference不依赖display
+name；所有测试通过后才能进入1B。任何identity必须依赖Stage 2 CLI才能成立时停止整个Stage 1。
+1A失败时删除dormant manifest/loader或在同一subset修复，production behavior保持当前状态后再恢复。
 
-Contract cutover：None。
+### Checkpoint 1B - Single resolver snapshot 与 build consumer cutover
+
+**交付：** legacy kconfig selection只调用一次resolver；build context改为消费owned
+`ResolvedSystemBuild`。同一checkpoint把root生成输入切到SystemTarget并删除全部tracked Platform的
+legacy root字段，防止cutover后双重truth；`conf switch`/pretest wrapper只更新legacy target ref，
+不再把它描述为Platform owner。
+
+**Write subset：** `conf/.defconfig`、`conf/README.md`、全部manifest中列明的Platform与SystemTarget；
+`scripts/xtask/src/{workspace.rs,config/{mod.rs,kconfig.rs,platform.rs,reference.rs,system_target.rs,
+resolve.rs},tasks/{build/mod.rs,conf.rs}}`；两个pretest wrapper。Root `kconfig`只作validation-only
+迁移输入，不提交。
+
+**定向验证：** resolver测试覆盖同一target的dev/release profile、mutation-after-resolve不会改变
+snapshot、target/platform architecture与root-source错误；source audit列出所有`KConfig::from_str`、
+`PlatformConfig::from_str`与`read_to_string(...platform...)`production caller，证明kernel build在
+resolver后不重读。Action开始日志必须包含selection source、target/platform/KernelConfig refs、
+profile和Platform output摘要，不打印整份配置或让diagnostic反向驱动行为。
+
+**Review / Exit：** reviewer确认root只有SystemTarget owner、snapshot不是borrowed live config、legacy
+bridge有Stage 2删除条件；repository xtask tests与无U-Boot build-plan test通过后才能进入1C。
+Cutover后失败只能在同一subset中修复或整体恢复到1A dormant状态；不得保留target/platform双读来恢复。
+
+### Checkpoint 1C - VisionFive Platform output production slice
+
+**交付：** 在build owner内保留窄的U-Boot post-link实现，按ELF导出、`rust-objcopy`、`mkimage`顺序
+生成Platform现有filename/header/load/entry/name。无`[uboot]`的Platform直接结束，不创建或声明本轮
+U-Boot output；不增加backend、output registry、package命令或跨actionresult对象。
+
+**Write subset：** `scripts/xtask/src/tasks/build/{mod.rs,kernel_output.rs}`与
+`conf/platforms/visionfive2-rv64.toml`。本checkpoint不修改SystemTarget schema、QEMU task、rootfs task
+或其它Platform behavior。
+
+**定向验证：** 定向test检查有/无`[uboot]`的命令构造、顺序、参数与失败短路；在
+`visionfive2-rv64` selection下通过仓库入口实际build并检查ELF、raw binary和legacy image均来自本轮。
+`mkimage`缺失或失败必须指向程序名/action并使build非零。
+
+**Owner review：** 复核U-Boot字段仍由Platform拥有，任何字段删除都有同owner派生证明，physical
+header/load/entry/name/filename未改变。出现第二用户命令、target/package owner或generic transform
+abstraction时停止Stage 1并删除该路线。失败恢复必须删除本checkpoint产生的partial raw/legacy
+output并保留已关闭的resolver cutover；不能通过跳过Platform required output宣称build成功。
+
+### Checkpoint 1D - Workflow、验证与文档同步
+
+**交付：** VisionFive rootfs README/recipe明确同一selection的`build -> rootfs`顺序与host environment
+变化后的clean责任；不创建VisionFive专用wrapper。同步受影响的Justfile/help、config example/schema、
+pretest wrapper术语、build docs与`anemone-build-system` skill；transaction只记录实际证据并链接本文。
+
+**Write subset：** `conf/rootfs/visionfive2/{rootfs.toml,README.md}`、Justfile/config example/schema、
+两个pretest wrapper、`anemone-build-system` skill及其两份reference，以及本manifest列明的RFC/
+transaction/navigation write-back。验证失败时保留已关闭code checkpoint但Stage 1不得Closed；修复只进入
+失败owner的既有subset，越界则先扩展manifest。
+
+**Validation floor：**
+
+1. `just xtask-test`（Stage 1新增的private repository test recipe）通过全部config/reference/resolver/
+   build-plan测试；不得用裸Cargo命令替代该入口。
+2. `just xtask build -k kconfig`在本轮VisionFive legacy selection上成功，并检查
+   `build/anemone.elf`、`build/anemoneImage-rv64.bin`、`build/anemoneImage-rv64`的freshness与顺序；
+   构造失败的`mkimage` PATH fixture时build非零且后续rootfs命令不执行。
+3. 使用开发者提供的只读/本地VisionFive base image，按文档完整执行build后再运行
+   `just rootfs mkfs -c conf/rootfs/visionfive2/rootfs.toml --sudo`，通过`virt-ls`/等价只读检查确认
+   `/boot/anemoneImage`存在且内容等于本轮Platform output。Base image、`mkimage`或sudo不可用时本
+   checkpoint保持未关闭，不得用既有固定路径降级验证。
+4. 再以一个无`[uboot]`的resolved fixture运行build-plan测试，证明不构造/调用`mkimage`；QEMU-backed
+   production build、QEMU runtime、DT authority/refresh、kernel boot、LTP与final harness明确Not Run，
+   不计入Stage 1 closure。
+5. `git diff --check`、`mdbook build docs`、Stage 1 manifest边界审计、旧`build.platform`/Platform
+   root owner/production direct-config-read残留搜索通过；live help、schema/example、wrapper/docs/skill
+   与parser/task一致。
+
+**Final review gate：** 独立只读review按owner、single snapshot、legacy bridge退出、U-Boot Preserve、
+failure short-circuit、observability与write set逐项复核。Apollyon/Keter必须在Stage 1内neutralize或触发
+停止；Euclid/Safe只有在不影响owner/acceptance且已写明归属时才可带入后续stage。
+
+### Stage 1 停止条件、contract 与退出
+
+- 实现需要重命名上述canonical reference、等待Stage 2才确定identity，或让Stage 2重写已进入
+  snapshot的identity：停止并回0B/RFC review，不能保留双resolver。
+- Live实现显示新的shared runtime contract、第二mutable owner、未登记public ABI，或root owner迁移
+  会改变kernel生成值、root-mount/Boot Protocol可见语义：停止并扩大`Contract Impact`/review。
+- 为让QEMU-backed build通过而必须修改DT authority、QEMU topology recipe/bind或runtime FDT边界：
+  停止并保持该Platform current behavior，交给Stage 3 resolution，不把它塞入Stage 1 manifest。
+- 开始比较跨resolution artifact identity，或引入typed publication、content-addressed cache、
+  `[[outputs]]`、通用tool fingerprint/transform/backend：删除该路径并回到direct action/order模型。
+- U-Boot必须迁入target/package、需要第二个用户命令，或physical Preserve无法证明：停止Stage 1并
+  回owner review；不得用accepted limitation降低板级输出要求。
+- 验证缺少base image、host tool、sudo或本轮fresh output时保持checkpoint未关闭并记录Not Run；不得
+  以旧artifact、unit test或QEMU配置存在替代physical rootfs sequence floor。
+
+**Contract cutover：** None。`BOOT-PROTOCOL-001` current baseline保持effective，Stage 1不得修改current
+contract或Pending Successor状态。
+
+**Stage Exit：** 1A -> 1B -> 1C -> 1D按序关闭，全部validation floor与final review满足，transaction
+记录实际diff/证据/Not Run并完成RFC/implementation/durable-surface write-back后，Stage 1才可标记
+Closed。Stage 1关闭不自动运行`Stage 1 -> Stage 2 Implementation Resolution Gate`。
+
+### Resolved Write Set Manifest
+
+**允许修改的现有production/config/workflow文件：**
+
+- `Justfile`、`conf/.defconfig`、`conf/README.md`；
+- `conf/platforms/{example.toml,schema.jsonc,qemu-virt-rv64.toml,qemu-virt-rv64-pretest.toml,
+  qemu-virt-la64.toml,qemu-virt-la64-pretest.toml,visionfive2-rv64.toml}`；
+- `scripts/xtask/src/{workspace.rs,config/mod.rs,config/kconfig.rs,config/platform.rs}`；
+- `scripts/xtask/src/tasks/{conf.rs,build/mod.rs}`；
+- `scripts/run-user-test-rv64.sh`、`scripts/run-user-test-la64.sh`；
+- `conf/rootfs/visionfive2/{rootfs.toml,README.md}`；
+- `.agents/skills/anemone-build-system/{SKILL.md,references/build-playbook.md,
+  references/config-model.md}`。
+
+**计划新建：**
+
+- `conf/system-targets/{example.toml,schema.jsonc,qemu-virt-rv64.toml,
+  qemu-virt-rv64-pretest.toml,qemu-virt-la64.toml,qemu-virt-la64-pretest.toml,
+  visionfive2-rv64.toml}`；
+- `scripts/xtask/src/config/{reference.rs,system_target.rs,resolve.rs}`；
+- `scripts/xtask/src/tasks/build/kernel_output.rs`；它只承载现有U-Boot post-link，不得建立generic
+  output/backend层。
+
+**文档与execution write-back：**
+
+- `docs/src/rfcs/system-target-model/{implementation.md,index.md,tracking-issues.md}`；
+- activation时新建`docs/src/devlog/transactions/2026-07-22-system-target-model.md`，并同步
+  `docs/src/devlog/transactions/index.md`、`docs/src/SUMMARY.md`与当期biweekly devlog；
+- `docs/src/rfcs.md`只同步生命周期导航。只有命中stop/feedback分类时，才按批准结论修改
+  `invariants.md`、register/current limitations或current contract；它们不在默认Stage 1写集。
+
+**Validation-only inputs（不得提交或手工修补）：** root `kconfig`、ignored generated
+`anemone-kernel/src/{kconfig_defs.rs,platform_defs.rs,arch/*/generated.dtb}`、VisionFive base image、
+host `PATH`中的Rust toolchain/`rust-objcopy`/`mkimage`、libguestfs工具、sudo授权，以及`build/` outputs。
+
+**禁止触碰：** `anemone-kernel/**`手写源码、`scripts/xtask/src/tasks/{qemu.rs,rootfs/**,app/**}`、
+app/rootfs通用schema、DTS/DTB authority文件、QEMU bind/CLI、其它RFC/current contract、final harness与
+competition资源。更合适的实现若要求越界，必须先报告新增文件、owner/contract影响、review与验证
+计划并更新本manifest；不得先改后追认。
+
+**责任：** implementer按checkpoint维护single writer与transaction证据；build/config owner复核schema、
+resolver与U-Boot Preserve；independent reviewer只读执行final gate；integrator在所有证据满足后同步
+Stage/RFC状态。Ready只冻结范围，不向任何角色授予activation。
 
 ## Stage 2：Selection、action scope 与 workflow surface cutover
 
