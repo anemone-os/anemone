@@ -1,6 +1,6 @@
 # System Target Model 迁移实施计划
 
-**状态：** R0（Stage 1 Active；Checkpoint 1A）
+**状态：** R0（Stage 1 Active；Checkpoint 1A Closed）
 **最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
@@ -10,7 +10,7 @@
 
 本文定义后续实施的 stage envelope、resolution/feedback gate、停止条件与回写路径。当前
 RFC 已完成 public promotion、初始 `Implementation Resolution Gate` 与 R0 acceptance；transaction
-已建立，Stage 1 已按用户授权进入 Active，当前只执行 Checkpoint 1A。本文冻结的 Stage 1
+已建立，Stage 1 已按用户授权进入 Active，Checkpoint 1A 已独立关闭。本文冻结的 Stage 1
 `Resolved Write Set Manifest` 仍不授权自动进入后续 checkpoint。
 
 ## 迁移原则
@@ -94,7 +94,7 @@ RFC 已完成 public promotion、初始 `Implementation Resolution Gate` 与 R0 
 
 | 阶段 | 当前成熟度 | 概括目的 | 前置依赖 | 解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 1 | Active（Checkpoint 1A） | Resolver 与 Platform kernel-output vertical slice | Promotion preflight、public Draft review、0B resolution、R0 acceptance、transaction activation | 1A 按自身 review / validation / exit 独立关闭；不自动进入 1B |
+| Stage 1 | Active（Checkpoint 1A Closed） | Resolver 与 Platform kernel-output vertical slice | Promotion preflight、public Draft review、0B resolution、R0 acceptance、transaction activation | 1B仍为Not Started；按用户原始授权单独记录activation后执行 |
 | Stage 2 | Outline | Selection、action scope 与 workflow surface cutover | Stage 1 Closed | `Stage 1 -> Stage 2 Implementation Resolution Gate` |
 | Stage 3 | Outline | 逐 platform DT authority/delivery 迁移 | Stage 2 Closed；对应 platform baseline 可审计 | Stage 2 关闭后的 Stage 3 Resolution Gate；无法整阶段解析时在 gate 中拆成独立滚动 Stage |
 | Stage 4 | Outline | Source app driver、app/rootfs workflow 与 physical-board closure | 相关 build foundation Closed | 前置实现证据足以解析 owner-local closure 后 |
@@ -270,6 +270,9 @@ Kernel build、xtask test、QEMU、rootfs、physical board、LTP与runtime均Not
 
 ### Checkpoint 1A - Schema、typed reference 与 dormant loader
 
+**状态：** Closed（2026-07-23）；执行、review与验证证据见
+[transaction](../../devlog/transactions/2026-07-22-system-target-model.md#checkpoint-1a-execution-log)。
+
 **交付：** 新增SystemTarget parser/typed refs与五个对应当前supported Platform/root组合的tracked
 manifest；新增纯loader/resolver单元测试。此checkpoint不切换production build，Platform中的legacy
 root字段仍是唯一behavior source；新target文件保持dormant，避免中间态双写驱动行为。
@@ -287,6 +290,8 @@ name；所有测试通过后才能进入1B。任何identity必须依赖Stage 2 C
 1A失败时删除dormant manifest/loader或在同一subset修复，production behavior保持当前状态后再恢复。
 
 ### Checkpoint 1B - Single resolver snapshot 与 build consumer cutover
+
+**状态：** Not Started；不因1A关闭自动进入。
 
 **交付：** legacy kconfig selection只调用一次resolver；build context改为消费owned
 `ResolvedSystemBuild`。同一checkpoint把root生成输入切到SystemTarget并删除全部tracked Platform的

@@ -53,7 +53,7 @@ pub struct Build {
     pub disasm: bool,
 }
 
-#[derive(Deserialize, Debug, Serialize)]
+#[derive(Deserialize, Debug, Serialize, PartialEq, Eq)]
 pub struct Parameters {
     pub bootstrap_heap_shift_kb: Option<u64>,
     pub log_buffer_shift_kb: Option<u64>,
@@ -283,6 +283,19 @@ impl Config {
         }
         Ok(config)
     }
+
+    pub fn into_kernel_config(self) -> KernelConfig {
+        KernelConfig {
+            features: self.features,
+            parameters: self.parameters,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct KernelConfig {
+    pub features: HashMap<String, bool>,
+    pub parameters: Parameters,
 }
 
 #[cfg(test)]

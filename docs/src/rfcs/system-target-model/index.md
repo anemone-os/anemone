@@ -1,6 +1,6 @@
 # RFC-20260722-system-target-model
 
-**状态：** Accepted for Implementation（Stage 1 Active；Checkpoint 1A）
+**状态：** Accepted for Implementation（Stage 1 Active；Checkpoint 1A Closed）
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-23
@@ -9,8 +9,8 @@
 **影响契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--rootfs-metadata选择初始用户程序)（Refine；当前仍由 effective baseline 生效，R0 target 尚未 cut over）。
 **开放问题：** None；已确认问题已折回 target 或分流到
 [迁移实施计划](./implementation.md) 的 feedback/preflight gate。
-**下一步：** R0 已接受并建立 transaction；Stage 1 已按用户授权进入 Active，当前只执行
-Checkpoint 1A。Checkpoint 1B 仍未开始，也不会由 1A 收口自动进入。
+**下一步：** Checkpoint 1A 已独立关闭并提交；Checkpoint 1B 仍为 Not Started，必须按本轮用户
+授权单独记录 activation 后才能执行。Stage 1 不进入 1C。
 
 ## 文档状态
 

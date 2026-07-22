@@ -10,6 +10,10 @@ xtask-clean:
 xtask *args:
     @cd scripts/xtask && cargo run -q -- {{ args }}
 
+[private]
+xtask-test:
+    @cd scripts/xtask && cargo test
+
 [doc("clean the build artifacts of Anemone kernel")]
 clean:
     @just xtask clean
