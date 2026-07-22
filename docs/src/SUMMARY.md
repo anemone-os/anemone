@@ -22,6 +22,7 @@
 	- [2026-06-22 至 2026-07-05](./devlog/2026-06-22_to_2026-07-05.md)
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-07-22 - RFC rolling stage resolution 与 target renegotiation](./devlog/changes/2026-07-22-rfc-stage-resolution-renegotiation.md)
 		- [2026-07-22 - device devnum ownership](./devlog/changes/2026-07-22-device-devnum-ownership.md)
 		- [2026-07-16 - Current contract layer](./devlog/changes/2026-07-16-current-contract-layer.md)
 		- [2026-07-14 - RFC semantic revision workflow](./devlog/changes/2026-07-14-rfc-semantic-revisions.md)

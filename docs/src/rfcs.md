@@ -27,7 +27,7 @@ docs/src/rfcs/<short-slug>/
     index.md
 ```
 
-`index.md` 是总入口，负责说明状态、范围、文档地图、accepted target、contract delta、接受边界和下一步。`implementation.md` 是实现计划，负责记录阶段、审查合同、验证、contract cutover、反馈 gate 和停止边界。`invariants.md` 在 RFC 改变共享 contract，或正确性依赖明确协议、不变量或证明义务时创建；它保存 `Contract Impact`、target invariants 和 RFC-local proof obligations，不维护整个领域的 current contract。`tracking-issues.md` 只在存在一组需要持续 review、分级和关闭的设计问题时创建；这些问题可以来自文档层 review，也可以来自实现期反馈。`backgrounds/` 只保存背景材料，不覆盖 accepted target 或 [当前契约](./contracts.md)。
+`index.md` 是总入口，负责说明状态、范围、文档地图、accepted target、contract delta、接受边界和下一步。`implementation.md` 是实现计划，负责记录 future Outline、下一个 Ready 阶段、滚动解析、验证、contract cutover、反馈 gate 和停止边界。`invariants.md` 在 RFC 改变共享 contract，或正确性依赖明确协议、不变量或证明义务时创建；它保存 `Contract Impact`、target invariants 和 RFC-local proof obligations，不维护整个领域的 current contract。`tracking-issues.md` 只在存在一组需要持续 review、分级和关闭的设计问题时创建；这些问题可以来自文档层 review，也可以来自实现期反馈。`backgrounds/` 只保存背景材料，不覆盖 accepted target 或 [当前契约](./contracts.md)。
 
 ## RFC 修订与 Git 历史
 
@@ -41,11 +41,11 @@ RFC 页首 `状态` 描述当前修订：后续修订已接受但仍需实现时
 
 大型重构应把不变量、实现顺序、历史材料拆成同一目录下的子文档，避免 devlog 或 register 直接引用个人草稿。
 
-RFC 被接受进入实现阶段，不表示所有未知都已经消除。它表示 accepted target、contract delta、验证 floor、停止条件和反馈入口足够明确。只能通过真实接口、状态流转、错误路径或集成结果验证的风险，可以作为受控 probe / vertical slice gate 带入实现；如果证据改变 target 或 current contract，必须先回写 RFC target / `Contract Impact`，并只在批准的 cutover gate 更新 effective contract。
+RFC 被接受进入实现阶段，不表示所有未来阶段都已经精确设计。它表示 accepted target、contract delta、correctness boundaries、最终证明义务和反馈入口足够明确，第一个可执行阶段已经完整解析为 Ready；更远阶段可以保持 Outline，只说明目的、依赖、受保护边界和解析触发点。只能通过真实接口、状态流转、错误路径或集成结果验证的风险，可以作为受控 probe / vertical slice gate 带入实现。
 
 不要为 probe / feedback 默认新建通用 `feedback.md`、`probe.md` 或 `experiments.md`。probe 计划写在 `implementation.md`，执行反馈写在 transaction devlog；只有证据包过长时，才在 `backgrounds/` 下增加具体命名的证据文件。
 
-反馈只能优化路线，不能篡改目标或私自削弱不变量。如果实现期证据说明目标、target invariant、current contract、ABI 边界或验收条件需要改变，应先回到 RFC review 并更新 target / `Contract Impact`；在 contract cutover 前，代码和事务日志都不能把更弱语义当作当前有效结果。
+实现反馈不能自行改写 accepted target，但可以触发 `Target Renegotiation Gate`。如果工程证据说明原 target 代价过高或只能形成较弱能力，当前 gate 在 cutover 前停止，由 RFC review 决定 Route Correction、Accepted Reduced Target、Follow-up RFC 或 Not Cut Over。correctness invariant 不能作为工程妥协项；较弱 target 只有在 RFC revision / `Contract Impact` 更新、重新接受并完成对应 cutover 后才成为当前有效结果。
 
 每个 RFC 入口都应在页首明确给出：
 
@@ -75,7 +75,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 - 当前双周 devlog，只追加该事务的入口摘要；
 - `docs/src/SUMMARY.md`，让 RFC 和事务日志都出现在 mdBook 导航中。
 
-事务日志记录实际执行、checkpoint、review 结论、验证证据、contract cutover、实现期反馈、剩余限制和更正说明；RFC 记录 accepted target、delta、边界和计划；current contract 记录 effective shared rule。事务日志应链接回 RFC，RFC 也应链接到事务日志。若实现期反馈只改变执行事实，追加事务日志即可；若它改变阶段计划或验证 floor，更新 `implementation.md`；若它改变 target invariant、ABI 或接受边界，更新 RFC target / `Contract Impact`，并在实际 cutover 时更新对应 contract IDs。
+事务日志记录实际执行、checkpoint、review 结论、验证证据、contract cutover、实现期反馈、target renegotiation 证据/决定、剩余限制和更正说明；RFC 记录 accepted target、delta、边界和计划；current contract 记录 effective shared rule。事务日志应链接回 RFC，RFC 也应链接到事务日志。若实现期反馈只改变执行事实，追加事务日志即可；若它在保持 target 时解析或改变阶段计划，更新 `implementation.md`；若它需要改变 target invariant、ABI 或接受边界，先停止 cutover 并进入 RFC review / `Target Renegotiation Gate`，接受后再更新 RFC target / `Contract Impact`，并在实际 cutover 时更新对应 contract IDs。
 
 事务日志还应标明实现的 RFC 修订、受影响 contract IDs 和各自 cutover gate。首次实现通常对应 `R0`；Closed RFC 的后续 `R1`、`R2` 如果需要代码工作，应分别建立可独立收口的新事务。旧事务继续作为原修订的执行证据，不重新打开。
 

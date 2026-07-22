@@ -60,6 +60,10 @@ None.
 
 已有 RFC 不在本轮批量改写。后续只有在具体 RFC 被继续推进、review 或收口时，才按新规则补充 probe gate、反馈分流或 tracking issue 状态。
 
+## Supersession
+
+2026-07-22 的 [RFC rolling stage resolution 与 target renegotiation](./2026-07-22-rfc-stage-resolution-renegotiation.md) 保留本记录的 anti-hacking 目的，但细化了“反馈只能优化路线”的表述：反馈不能由实现者或 agent 单方面降低 accepted target；真实工程证据可以触发显式 `Target Renegotiation Gate`，由 RFC review 决定保持目标、接受 reduced target、拆 follow-up RFC 或 Not Cut Over。重新接受和对应 cutover 前，更弱实现仍不得冒充原 target closure。
+
 ## Links
 
 - Biweekly devlog: [2026-06-08 至 2026-06-21](../2026-06-08_to_2026-06-21.md)

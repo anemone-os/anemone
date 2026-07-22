@@ -89,7 +89,7 @@
 - RFC 驱动的事务日志必须注明目标修订。Closed RFC 的后续语义修订需要代码工作时建立新事务，不重新打开或继续延长旧的 Completed 事务。
 - RFC 驱动的事务日志必须列出受影响 contract IDs、变化类型和计划 cutover gate；没有则明确写 `None`。
 - 每次更新只追加新的事务条目，不静默改写已经完成的阶段结论；确需更正时追加更正说明。
-- 实现期反馈先写入事务日志。若反馈改变阶段顺序、write set、验证 floor 或停止条件，同步更新 RFC `implementation.md`；若反馈改变 accepted target、不变量、ABI 边界或验收判断，同步更新 RFC target / `Contract Impact` 和必要的 `tracking-issues.md`。只有达到批准的 cutover gate 后才更新 effective contract，并在同一事务条目记录证据。
+- 实现期反馈先写入事务日志。若反馈保持 accepted target，只解析或改变阶段顺序、write set、验证安排、review gate 或停止条件，同步更新 RFC `implementation.md`。若工程证据要求改变 accepted target、不变量、ABI 边界或验收判断，当前阶段先保持未 cut over，并记录成本来源、已完成 slice、受影响语义、备选处置和代码去向；随后由 RFC review / `Target Renegotiation Gate` 决定 Route Correction、Accepted Reduced Target、Follow-up RFC 或 Not Cut Over。只有新 target 重新接受且达到对应 cutover gate 后才更新 effective contract，并在同一事务条目记录证据。
 - 事务日志收口后，保留最终状态、验证证据和剩余限制链接。
 
 ## 双周记录的常用字段

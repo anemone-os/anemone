@@ -15,6 +15,18 @@ Also check the repository-level coding rules in `AGENTS.md`, especially the kern
 
 For an RFC-driven or cross-subsystem change, read `docs/src/contracts.md`, the relevant effective contract IDs, the RFC `Contract Impact` / target invariants, and the transaction cutover record before treating a rule as current. Existing RFC text may be historical or proposal-local; it must not override an extracted current contract. If no contract has been extracted yet and the change is the first cross-RFC reuse or replacement, require the minimum contract closure rather than a repository-wide invariant inventory.
 
+## RFC Plan Maturity and Engineering Compromise
+
+For an RFC document or RFC-driven implementation review, read each stage's maturity before judging precision:
+
+- A future `Outline` needs a coherent purpose, prerequisites, protected target / contract / correctness boundaries, and a resolution trigger. Do not emit a finding merely because it omits concrete types, function signatures, algorithms, per-file paths, a complete corner-case matrix, or exact test commands.
+- The next `Ready` stage must be directly executable and reviewable: deliverables, implementation route or explicit probe, audit, observability, validation, stop/exit conditions, cutover, and resolved write set are all required. Ready does not imply authorization to become Active.
+- An Outline becomes a finding only when a missing dependency or protected boundary breaks target reachability, or when a possible protocol/state owner, public API, shared-contract, ABI, visible-semantics, or acceptance change is deferred without a resolution or renegotiation gate.
+
+Engineering cost may justify proposing a weaker target, but never silent degradation. Review a `Target Renegotiation Gate` for concrete cost evidence, the original target impact, non-negotiable correctness invariants, completed-slice/code disposition, comparable options, candidate reduced-target semantics, revision/contract impact, validation, decision authority, and remaining-gap routing. A coherent reduced target must be independently useful, ABI-honest, explicitly reject unsupported behavior, preserve ownership/lifetime/concurrency safety, and avoid cementing the wrong abstraction. The agent proposing it cannot approve it.
+
+Do not treat correctness invariants as negotiable scope. Shared mutable truth, unowned cleanup, memory-safety holes, lost wakeups, concurrency races, or user-visible success that hides unsupported semantics remain blockers. Target capabilities and coverage may change only after RFC acceptance; limitations belong outside the revised target, while defects inside it remain open issues.
+
 ## Issue Levels
 
 Use explicit issue levels to keep reviews bounded by real risk. Always use the current level names below. Older notes may map these to P0/P1/P2/P3 in the same order, but review output should not use the old names.

@@ -100,7 +100,7 @@ Current contracts：
 
 ## 接受边界
 
-说明本 RFC 被接受意味着什么，哪些内容仍需审查，以及哪些变化必须回到本 RFC 或 follow-up RFC。明确 acceptance 只形成 target 还是同时完成 docs-only cutover；若允许带着不确定性进入实现，必须列出对应验证点、停止条件和 RFC / contract 回写路径。
+说明本 RFC 被接受意味着什么，哪些内容仍需审查，以及哪些变化必须回到本 RFC、`Target Renegotiation Gate` 或 follow-up RFC。明确 acceptance 只形成 target 还是同时完成 docs-only cutover；区分 correctness invariant、target guarantee / capability 和 implementation preference。若允许带着不确定性进入实现，必须列出对应验证点、停止条件和 RFC / contract 回写路径。
 
 ## 备选方案
 
@@ -160,6 +160,12 @@ Current contracts：
 **适用修订：** Draft / R0 / R1 / ...
 
 本文定义本 RFC 的 contract delta、尚未 cutover 的 target invariants，以及只服务本方案或迁移的 proof obligations。当前已经生效的共享规则以 `docs/src/contracts/` 中的稳定 ID 为准。
+
+## 规则分类
+
+- **Correctness Invariant：** 状态唯一 owner、并发、生命周期、cleanup、内存安全和 ABI 诚实性等“违反即不正确”的规则；不得作为工程降级项接受。
+- **Target Guarantee / Capability：** 当前修订承诺的功能范围、兼容覆盖、原子性或性能边界；在新修订接受前保持约束力，只能通过 `Target Renegotiation Gate` 调整。
+- **Implementation Preference：** 类型、helper、内部模块、算法或数据结构偏好；不写成 invariant，在保持 target 时由滚动阶段解析决定。
 
 ## Contract Impact
 
@@ -242,22 +248,54 @@ Current contracts：
 - 原则 1。
 - 原则 2。
 - 允许带入实现的不确定性、验证方式、停止条件和 RFC 回写路径。
-- 多阶段 RFC 默认只冻结下一个可执行阶段的 `Resolved Write Set Manifest`；更远阶段只保留 scope envelope，不把预估文件清单当作写入授权。
+- 多阶段 RFC 默认只把下一个可执行阶段完整解析为 Ready；更远阶段保持 Outline，不伪造尚无实现证据支持的精确设计。
+- 实现反馈不得自行降低 accepted target；工程代价需要改变目标时，先停止 cutover 并进入 `Target Renegotiation Gate`。
 
-## 滚动式 Write Set
+## 阶段成熟度与滚动解析
 
-- 第一个可执行阶段在实现开始前解析并冻结精确 manifest。
-- 后续阶段在前一阶段独立关闭后，通过单独的 `N -> N+1 Write-set Resolution Gate` 读取 live source、实际 diff、review finding、模块边界和验证证据，再冻结下一阶段 manifest。
-- `implementation.md` 是 resolved manifest 的唯一权威；transaction devlog 只记录 preflight 证据、批准事实、生效点和本节链接，不复制第二份权威清单。
-- manifest 冻结只让阶段达到 Ready，不自动授权开始实现。
-- 只有冻结后的越界才是 write set 扩展；尚未冻结的 scope estimate 发生变化不进入扩展记录。
-- 不新建通用 `manifest.md`、`write-set.md` 或并列计划文件。
+- `Outline`：未来阶段；只有概括目的、依赖、受保护边界和解析触发点。
+- `Ready`：交付、实现策略或 probe、审计、可观测性、验证、停止/退出条件、contract cutover 与 `Resolved Write Set Manifest` 已完整解析，但尚未自动获得执行授权。
+- `Active`：已经通过当前授权协议并开始执行。
+- `Closed`：已经按本阶段自身条件独立关闭。
+- 第一个可执行阶段在实现开始前达到 Ready；后续阶段在前一阶段关闭后通过独立的 `N -> N+1 Implementation Resolution Gate` 从 Outline 解析为 Ready。
+- `implementation.md` 是 Ready 阶段与 resolved manifest 的唯一权威；transaction devlog 只记录 preflight 证据、批准事实、生效点和本节链接。
+- 只有 Ready / Active 阶段冻结后的 manifest 越界才是 write set 扩展；future Outline 的自然收窄、扩大、拆分、合并或重排属于滚动解析。
+- 不新建通用 `stage-plan.md`、`manifest.md`、`write-set.md` 或并列计划文件。
 
-## 阶段 1：简短阶段名
+## 阶段路线图
 
-write-set 状态：
+| 阶段 | 成熟度 | 概括目的 | 前置依赖 | 受保护边界 | 解析触发点 |
+| --- | --- | --- | --- | --- | --- |
+| Stage 0 | Ready | 第一个可执行阶段目的 | RFC acceptance | target / contract IDs | 实现开始前 |
+| Stage 1 | Outline | 后续阶段目的 | Stage 0 Closed | target / contract IDs | Stage 0 独立关闭后 |
 
-- Scope Only / Ready / Active / Closed；Ready 表示 resolved manifest 已冻结但尚未自动获得执行授权。
+## Stage 1 Outline：简短阶段名
+
+概括目的：
+
+- 本阶段最终要贡献什么能力或证明。
+
+前置依赖：
+
+- 哪些阶段、contract 或外部条件必须先成立。
+
+受保护边界：
+
+- 不得改变的 correctness invariant、target guarantee、owner、ABI、contract IDs 和 acceptance boundary。
+
+解析触发点：
+
+- 前一阶段关闭后的只读 preflight；具体类型、函数、算法、逐文件路径和精确测试命令在该 gate 解析，当前缺失不构成 finding。
+
+预计范围（可选）：
+
+- 预计参与的 owner、subsystem、目录、模块或验证类别；这些内容不是写入授权。
+
+## Stage 0 Ready：简短阶段名
+
+阶段成熟度：
+
+- Ready / Active / Closed；Ready 表示整个阶段已经解析完成，但尚未自动获得执行授权。
 
 前置条件：
 
@@ -291,14 +329,13 @@ contract cutover：
 
 scope envelope：
 
-- 预计参与的 owner、subsystem、contract IDs。
-- 预计涉及的目录、模块或已知文件；这些预估在 manifest 冻结前不构成写入授权。
+- 参与的 protocol/state owner、subsystem、contract IDs。
+- 已解析的内部模块/API 边界及其与 RFC target 的关系。
 - 不得跨越的语义、owner、public API、shared contract、ABI 和 acceptance boundary。
 
 Resolved Write Set Manifest：
 
-- 如果本阶段尚未进入执行窗口，写 `Pending；前一阶段关闭后解析`。
-- 如果本阶段是下一个可执行阶段，精确列出允许修改的现有文件、计划新建的文件或目录、文档回写面和 validation-only 输入。
+- 精确列出允许修改的现有文件、计划新建的文件或目录、文档回写面和 validation-only 输入。
 - 列出不应触碰的物理边界，以及 integrator / reviewer 责任。
 - 如果更合适的架构需要扩大已冻结 manifest，应停止并上报扩展申请；申请需说明原因、拟新增范围、contract/gate/验证影响和批准后的记录位置。
 
@@ -312,28 +349,29 @@ Resolved Write Set Manifest：
 
 退出条件：
 
-- 本阶段独立关闭的标准；不得把“下一阶段 manifest 已冻结”作为本阶段完成事实的一部分。
+- 本阶段独立关闭的标准；不得把“下一阶段已达到 Ready”作为本阶段完成事实的一部分。
 
-## Stage 1 -> Stage 2 Write-set Resolution Gate
+## Stage 0 -> Stage 1 Implementation Resolution Gate
 
 前置条件：
 
-- Stage 1 已按自身 review、验证和退出条件独立关闭。
+- Stage 0 已按自身 review、验证和退出条件独立关闭。
 
 只读 preflight：
 
-- 读取 live source、Stage 1 实际 diff、review finding、模块边界和验证证据。
-- 核对 Stage 2 scope envelope、owner、contract IDs、public API / ABI 边界和 validation floor。
+- 读取 live source、Stage 0 实际 diff、review finding、模块边界、验证证据、RFC target 和 current contracts。
+- 核对 Stage 1 Outline 的目的、依赖、受保护边界和 target 可达性。
 
 解析输出：
 
-- 在 Stage 2 的 `Resolved Write Set Manifest` 中精确列出文件、新建路径、文档回写面、validation-only 输入、不应触碰边界和集成责任。
-- 若只改变物理范围、stage order、validation floor、review gate 或停止条件，更新本文并在 transaction 记录原因和生效点。
-- 若改变 target invariant、owner boundary、public API、shared contract、ABI、visible semantics 或 acceptance boundary，停止并回到 RFC review。
+- 把 Stage 1 从 Outline 展开为完整阶段：精确交付、实现路径或 probe、审计、可观测性、验证、停止/退出条件、兼容桥删除点和 contract cutover。
+- 在 Stage 1 的 `Resolved Write Set Manifest` 中精确列出文件、新建路径、文档回写面、validation-only 输入、不应触碰边界和集成责任。
+- 若只改变 future Outline、物理范围、stage order、validation 安排、review gate 或停止条件，更新本文并在 transaction 记录原因和生效点。
+- 若改变 target invariant、protocol/state owner、public API、shared contract、ABI、visible semantics 或 acceptance boundary，停止并进入 RFC review / `Target Renegotiation Gate`。
 
 授权边界：
 
-- manifest 冻结后 Stage 2 只达到 Ready；按当前 RFC / transaction 的授权协议另行启动，不自动进入实现。
+- 完整阶段和 manifest 冻结后 Stage 1 才达到 Ready；按当前 RFC / transaction 的授权协议另行启动，不自动进入实现。
 
 ## 旁路审计清单
 
@@ -366,7 +404,25 @@ Resolved Write Set Manifest：
 
 ## 实现期反馈记录
 
-- YYYY-MM-DD：反馈来源、影响分类、是否保持目标/不变量、更新位置、transaction devlog 链接。
+- YYYY-MM-DD：反馈来源、影响分类（Execution Fact / Route Correction / Target Renegotiation）、是否保持 accepted target、更新位置、transaction devlog 链接。
+
+## Target Renegotiation Gates
+
+只有工程证据表明 accepted target 的代价或可行性需要重新判断时才增加本节条目。提案不等于批准；决定前当前阶段保持停止且不得 cutover。
+
+### YYYY-MM-DD - 简短标题
+
+**Status:** Proposed / Accepted / Rejected / Superseded。
+**Trigger / Cost Evidence:** 真实接口、实现、测试或集成暴露的成本与失败信号；不能只写“实现太难”。
+**Original Target:** 受影响的目标、target guarantees、contract IDs、ABI / acceptance boundary 和原验证要求。
+**Correctness Invariants:** 无论采用何种 reduced target 都不得违反的 owner、并发、生命周期、cleanup、内存安全和 ABI 诚实性边界。
+**Completed Slice / Code Disposition:** 已完成能力，以及现有代码应保留、保持 dormant、删除还是拆入独立阶段。
+**Options:** Route Correction / Accepted Reduced Target / Follow-up RFC / Not Cut Over，以及各自成本和架构影响。
+**Candidate Reduced Target:** 若提出降级，说明它为何独立有用、ABI 诚实、可验证且不固化错误 owner / abstraction；未支持输入如何稳定拒绝，临时桥如何观测和退出。
+**Revision / Contract Impact:** 保持当前修订，或更新的 RFC revision、`Contract Impact` 和后续 cutover gate；决定前 effective contract 不变。
+**Validation:** reduced target 自己必须满足的验证，不得复用原目标的部分通过结果冒充 closure。
+**Decision / Authority:** reviewer / owner 的明确结论和证据链接；agent 提案不能自行批准。
+**Remaining Gap:** 进入 follow-up RFC、current limitations 或 open issues 的事项；新 target 范围内的错误不能登记为 limitation。
 
 ## 修订实施记录
 
@@ -382,7 +438,7 @@ Resolved Write Set Manifest：
 
 ## Write Set 扩展记录
 
-- 只记录 Active / Ready 阶段已冻结 manifest 的扩展；未来阶段 scope estimate 的变化不记录为扩展。
+- 只记录 Active / Ready 阶段已冻结 manifest 的扩展；future Outline 的 scope estimate 变化不记录为扩展。
 - YYYY-MM-DD：原 resolved manifest、申请原因、批准后的新增范围、对应 review/验证 gate、transaction devlog 链接。
 
 ## 结构维护记录

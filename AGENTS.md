@@ -129,15 +129,19 @@ utils（工具）、misc（杂项）或某人的姓名首字母缩写
 
 ### RFC / 大型实现反馈闭环
 
-对于走 RFC 或事务 devlog 的大型实现，文档层闭合不是要求实现前消除所有不确定性。可以带着受约束的不确定性进入实现，但每个不确定点必须有明确归属、验证方式、停止条件和回写路径。
+对于走 RFC 或事务 devlog 的大型实现，文档层闭合不是要求实现前消除所有不确定性。多阶段 RFC 接受时只要求第一个可执行阶段完整解析为 `Ready`；更远阶段保持 `Outline`，只说明概括目的、依赖、受保护边界和解析触发点。前一阶段关闭后，通过独立的 `N -> N+1 Implementation Resolution Gate` 读取 live source、实际 diff、review 与验证证据，再精确解析下一阶段的交付、实现路径、审计、验证、停止/退出条件、contract cutover 和 resolved write set。`Ready` 表示整个阶段已解析但尚未自动获得执行授权。
+
+Review 不得仅因 future `Outline` 缺少具体类型、函数、算法、逐文件路径、完整 corner-case 矩阵或精确测试命令而形成 finding。只有 Outline 缺少必要依赖/受保护边界、无法说明 target 可达路径，或把可能改变 owner、ABI、contract / acceptance boundary 的决定无 gate 地推迟时，才属于文档层问题。
 
 高风险设计点应优先安排 probe / vertical slice gate，验证真实接口、状态流转、错误路径、性能或模块集成风险。探针必须保持最小 write set，说明失败信号和删除/回写条件；除非 RFC 接受对应 target delta、长期共享规则完成 contract cutover，并在事务日志中记录证据，否则探针代码不得自然沉淀为长期抽象。
 
 不要为反馈机制默认新建通用 `feedback.md`、`probe.md` 或 `experiments.md`。probe 计划写在 RFC `implementation.md`，执行反馈写在 transaction devlog；只有证据包过长时，才在对应 RFC 的 `backgrounds/` 下增加具体命名的证据文件。
 
-反馈机制只能优化路线，不能篡改目标或私自削弱不变量。如果实现暴露出目标、target invariant、current contract、ABI 边界或验收条件本身有问题，必须停止当前 gate 并回到 RFC review；在 RFC target / `Contract Impact` 更新并完成批准的 contract cutover 前，不得为了通过 gate 缩小目标、调低验证集合、隐藏失败路径、把必须满足的不变量改成建议项，或写临时 hack 接受更弱语义。
+实现反馈不得自行改写 accepted target，但可以触发 `Target Renegotiation Gate`。如果真实工程证据表明原目标代价过高或只能形成较弱能力，当前 gate 必须在 cutover 前停止，由 RFC review 决定保持原目标、接受较弱但自洽的新修订、拆 follow-up RFC，或保持 Not Cut Over。agent 可以提交证据与 reduced-target 提案，但无权自行批准；新 target 重新接受并完成对应 contract cutover 前，不得把更弱实现写成当前事实或原 target closure。
 
-实现期发现的问题按影响归属：执行事实写 transaction devlog；阶段顺序、write set、验证 floor 或停止条件变化回写 `implementation.md`；target invariant、状态所有权、ABI 边界或接受边界变化回写 RFC target / `Contract Impact` 和 `tracking-issues.md`；已经生效的共享规则只在批准的 cutover gate 更新 current contract；接受限制或开放缺陷进入 register / current limitations。不要用临时兼容层绕过无法分类的设计反馈。
+不要把所有期望都写成不变量。correctness invariant 约束状态唯一 owner、并发、生命周期、cleanup、内存安全和 ABI 诚实性，不能作为工程妥协项；target guarantee / capability 在当前修订中具有约束力，但可以经过 target renegotiation 形成新修订；类型、helper、内部模块和数据结构等 implementation preference 由滚动阶段解析决定。accepted limitation 必须位于新 target 之外，新 target 范围内的错误仍进入 open issues。
+
+实现期发现的问题按影响归属：执行事实写 transaction devlog；保持 target 的阶段 Outline/Ready 解析、顺序、write set、验证安排或停止条件变化回写 `implementation.md`；target invariant、状态所有权、ABI 边界或接受边界变化先进入 RFC review / `Target Renegotiation Gate`，接受后回写 RFC target / `Contract Impact` 和必要的 `tracking-issues.md`；已经生效的共享规则只在批准的 cutover gate 更新 current contract；接受限制或开放缺陷进入 register / current limitations。不要用临时兼容层绕过无法分类的设计反馈。
 
 RFC 的文本历史统一由整个仓库的 Git 保存，不为单个 RFC 建仓库，也不创建 `index-v1.md`、默认 amendment 文件或并列 canonical 副本。RFC 页首的 `R0`、`R1` 只标记已接受的 target 语义修订：目标、非目标、target invariant、状态所有权、ABI / 可见语义或接受边界变化时递增；措辞、证据和保持 target 的实现计划调整不递增。
 
