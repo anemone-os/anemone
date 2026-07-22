@@ -30,8 +30,9 @@ Read [references/build-playbook.md](references/build-playbook.md) for task routi
 
 Keep each concern in its owning layer:
 
-- root `kconfig` and `conf/.defconfig`: kernel build selection, features, and parameters;
-- `conf/platforms/` and `conf/arch/`: platform identity, architecture, hardware constants, boot environment, QEMU, DTB, and linker inputs;
+- root `kconfig` and `conf/.defconfig`: kernel features and parameters plus the current legacy build-selection bridge;
+- `conf/system-targets/`: selected Platform reference, root mount/source, and initial-program source;
+- `conf/platforms/` and `conf/arch/`: platform identity, architecture, hardware constants, boot environment, QEMU, DTB, linker inputs, and Platform-required kernel outputs;
 - `anemone-apps/<app>/app.toml`: app driver and exported artifacts;
 - `conf/rootfs/`: rootfs composition and installed apps/files;
 - Justfile and `scripts/xtask/src/tasks/`: orchestration and command behavior.

@@ -1,6 +1,6 @@
 # System Target Model 迁移实施计划
 
-**状态：** R0（Stage 1 Active；Checkpoint 1C Closed；1D Not Started）
+**状态：** R0（Stage 1 Closed；Stage 2 Outline）
 **最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
@@ -10,8 +10,9 @@
 
 本文定义后续实施的 stage envelope、resolution/feedback gate、停止条件与回写路径。当前
 RFC 已完成 public promotion、初始 `Implementation Resolution Gate` 与 R0 acceptance；transaction
-已建立，Stage 1 已按用户授权进入 Active，Checkpoint 1A 已独立关闭。本文冻结的 Stage 1
-`Resolved Write Set Manifest` 仍不授权自动进入后续 checkpoint。
+已建立，Stage 1 已按用户授权完成全部 checkpoint 并独立关闭。Stage 1关闭不自动进入
+`Stage 1 -> Stage 2 Implementation Resolution Gate`；Stage 2仍为Outline。本文冻结的 Stage 1
+`Resolved Write Set Manifest` 不授权自动进入后续stage。
 
 ## 迁移原则
 
@@ -58,11 +59,12 @@ RFC 已完成 public promotion、初始 `Implementation Resolution Gate` 与 R0 
   与 `Resolved Write Set Manifest` 已完整解析，但尚未自动获得执行授权。
 - `Active` 表示已经通过 RFC / transaction / 用户或编排协议要求的启动授权；`Closed` 表示已经
   按本阶段自己的 review、验证和退出条件独立关闭。
-- Stage 1 已由 `0B - Initial Implementation Resolution Gate` 完整解析为 `Ready`，并在R0接受与
-  transaction建立后按用户授权进入`Active`；Stage 2至Stage 6仍为`Outline`，没有写入授权。
+- Stage 1 已由 `0B - Initial Implementation Resolution Gate` 完整解析为 `Ready`，在R0接受与
+  transaction建立后按用户授权进入`Active`，并已完成全部checkpoint后关闭；Stage 2至Stage 6仍为
+  `Outline`，没有写入授权。
 - RFC acceptance、transaction creation 与 Stage 1 activation 是后续独立 gate。实现开始时建立的
   transaction 记录 accepted revision、preflight/批准证据、生效点和本文链接，不复制第二份计划或
-  manifest；Stage 1 仍需显式启动授权才从 Ready 进入 Active。
+  manifest；Stage 1从Ready进入Active所需的显式启动授权已经取得，其closure不激活Stage 2。
 - 后续 Stage N 先独立关闭，再运行 `N -> N+1 Implementation Resolution Gate`。Preflight 必须读取
   live source、Stage N 实际 diff、review findings、模块边界压力、validation evidence、仍有效的
   RFC target/current contracts 与文档回写面，并把下一阶段的完整定义和 manifest 一起冻结。
@@ -94,7 +96,7 @@ RFC 已完成 public promotion、初始 `Implementation Resolution Gate` 与 R0 
 
 | 阶段 | 当前成熟度 | 概括目的 | 前置依赖 | 解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 1 | Active（Checkpoint 1C Closed；1D Not Started） | Resolver 与 Platform kernel-output vertical slice | Promotion preflight、public Draft review、0B resolution、R0 acceptance、transaction activation、1A-1C Closed | 本轮用户授权完成Stage 1；1D仍需独立activation |
+| Stage 1 | Closed | Resolver 与 Platform kernel-output vertical slice | Promotion preflight、public Draft review、0B resolution、R0 acceptance、transaction activation、1A-1D Closed | Closed；Stage 2 resolution gate尚未进入 |
 | Stage 2 | Outline | Selection、action scope 与 workflow surface cutover | Stage 1 Closed | `Stage 1 -> Stage 2 Implementation Resolution Gate` |
 | Stage 3 | Outline | 逐 platform DT authority/delivery 迁移 | Stage 2 Closed；对应 platform baseline 可审计 | Stage 2 关闭后的 Stage 3 Resolution Gate；无法整阶段解析时在 gate 中拆成独立滚动 Stage |
 | Stage 4 | Outline | Source app driver、app/rootfs workflow 与 physical-board closure | 相关 build foundation Closed | 前置实现证据足以解析 owner-local closure 后 |
@@ -223,8 +225,8 @@ Kernel build、xtask test、QEMU、rootfs、physical board、LTP与runtime均Not
 
 ## Stage 1：Resolver 与 Platform kernel-output vertical slice
 
-**阶段成熟度：** Active；R0 acceptance、transaction creation 与 Stage 1 activation 已完成，Checkpoint
-1A-1C已独立关闭；Checkpoint 1D仍为Not Started且未独立activation。
+**阶段成熟度：** Closed；R0 acceptance、transaction creation、Stage 1 activation及Checkpoint
+1A-1D的独立review、验证与关闭均已完成。Stage 2仍为Outline，其resolution gate尚未进入。
 
 ### 受保护目标与 scope envelope
 
@@ -339,6 +341,9 @@ abstraction时停止Stage 1并删除该路线。失败恢复必须删除本check
 output并保留已关闭的resolver cutover；不能通过跳过Platform required output宣称build成功。
 
 ### Checkpoint 1D - Workflow、验证与文档同步
+
+**状态：** Closed（2026-07-23）；activation、base-image preflight、执行、review与验证证据见
+[transaction](../../devlog/transactions/2026-07-22-system-target-model.md#checkpoint-1d-closure---2026-07-23)。
 
 **交付：** VisionFive rootfs README/recipe明确同一selection的`build -> rootfs`顺序与host environment
 变化后的clean责任；不创建VisionFive专用wrapper。同步受影响的Justfile/help、config example/schema、

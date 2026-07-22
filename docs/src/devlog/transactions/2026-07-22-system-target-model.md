@@ -5,7 +5,7 @@
 **Area:** build system / configuration / platform / repository workflow
 **Canonical Plan:** [RFC-20260722-system-target-model](../../rfcs/system-target-model/index.md), [目标与不变量](../../rfcs/system-target-model/invariants.md), [迁移实施计划](../../rfcs/system-target-model/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 1 Active / Checkpoint 1A-1C Closed / Checkpoint 1D Not Started
+**Current Phase:** Stage 1 Closed / Stage 2 Outline / Stage 1 -> Stage 2 Resolution Gate Not Entered
 
 ## Scope
 
@@ -150,3 +150,77 @@ LTP与final harness均Not Run，不计入1C证据。
 **Result:** Checkpoint 1C Closed。没有命中owner/API/shared-contract/ABI/visible-semantics/
 target-invariant/write-set停止条件；`BOOT-PROTOCOL-001`继续由effective baseline生效且无contract
 cutover。Checkpoint 1D保持Not Started，不由本closure自动进入。
+
+## Checkpoint 1D activation - 2026-07-23
+
+本轮用户授权要求完成Stage 1。Checkpoint 1C已独立关闭并以`61b4179c`提交后，本事务单独记录1D
+activation；该activation不来自1C closure自动推进。1D只同步Stage 1已经改变的schema/example、
+VisionFive固定路径workflow、build skill与lifecycle/navigation，并执行完整Stage validation floor；
+不进入Stage 2 resolution或修改current contract。
+
+Preflight确认host `rust-objcopy`、`mkimage`、`virt-ls`与`mdbook`可用，但developer-local
+`conf/rootfs/visionfive2/rootfs-alpine.img`在alpha、omega、旧checkout与共享树中均不存在。按Stage 1
+停止条件，1D可以继续完成其它交付和验证，但在提供真实base image并完成physical rootfs sequence前
+必须保持Active，不能用competition image、旧rootfs或unit test替代。
+
+## Checkpoint 1D progress - 2026-07-23
+
+**Status:** Active；physical rootfs validation pending。
+
+**Change:** 新增与live closed SystemTarget parser一致的`example.toml`/`schema.jsonc`；修正Platform
+example的filename identity、移除已迁出的stack/heap字段并使RV64 DT示例自洽，Platform schema补齐
+live required/optional字段与U-Boot post-link section。VisionFive recipe/README现在明确同一selection的
+`build -> rootfs`顺序、失败短路及host environment变化后的build前clean责任。Build skill及两份
+reference已同步SystemTarget、Platform kernel-output与fixed-path order owner；transaction index、RFC
+navigation和biweekly entry已从旧1A状态更新为1D Active。Justfile/live help、两份pretest wrapper、
+`conf/README.md`与SUMMARY经审计可Preserve，未制造无行为变化的编辑。
+
+**Validation completed:** `just xtask-test` 30 passed / 0 failed；`jq empty`验证两份JSON schema，
+`just xtask conf list`与validation-only `conf switch example -> qemu-virt-rv64-pretest`证明example
+reference可由live parser/discovery消费且selection已恢复。`just --list`、build/rootfs live help、两份
+wrapper `bash -n`、`git diff --check`、lifecycle/residual owner搜索通过；`mdbook build docs`通过，仅报告
+既有large search-index warning。使用PATH前置的失败`mkimage`执行真实VisionFive build，build以23非零
+退出，错误包含`build U-Boot legacy image`与`mkimage`，`&&`后的sentinel未创建，raw/legacy partial均被
+清理；随后validation-only selection已恢复。该build在获批的非沙箱环境运行，避免cross-compiler
+受沙箱`SIGSYS`影响。
+
+**Pending floor:** developer-local `conf/rootfs/visionfive2/rootfs-alpine.img`仍不存在，因此尚未重新
+运行成功VisionFive build及`just rootfs mkfs -c conf/rootfs/visionfive2/rootfs.toml --sudo`完整顺序，
+也未用`virt-ls`/`virt-cat`证明`/boot/anemoneImage`与本轮Platform output相等。按停止条件1D/Stage 1
+保持Active，不提交checkpoint closure。QEMU-backed production build、QEMU runtime、DT authority/
+refresh、kernel boot、physical board boot、LTP与final harness均Not Run，不计入Stage 1证据。
+
+## Checkpoint 1D closure - 2026-07-23
+
+**Status:** Closed；Stage 1 Closed；Stage 2 resolution gate Not Entered。
+
+**Base-image resolution:** 开发者确认本地决赛Debian raw ext4镜像可作为本次只验证image copy与
+fixed-path注入的只读base。验证通过ignored local入口把既有tracked recipe解析到该master；rootfs task
+先复制base，再只修改`build/rootfs/visionfive2/rootfs.img`。Master与生成镜像的device/inode不同，
+master时间戳保持不变。该替代只满足本checkpoint packaging floor；未把Debian userspace记为Alpine
+musl/native-tool环境、kernel runtime或physical-board证据。
+
+**Physical rootfs sequence:** Validation-only selection切到`visionfive2-rv64`，紧接同一文档顺序运行
+`just xtask build -k kconfig`与
+`just rootfs mkfs -c conf/rootfs/visionfive2/rootfs.toml --sudo`，两步均成功；随后selection恢复为
+`qemu-virt-rv64-pretest`。ELF、raw与legacy image均晚于本轮marker，大小分别为10124632、3474704、
+3474768 bytes。`mkimage -l`确认`Anemone OS for RISC-V`、RISC-V Linux kernel/uncompressed、
+`0x80200000` load/entry；`dumpimage` payload与raw逐字节相等。等价只读`debugfs`检查确认生成rootfs的
+`/boot/anemoneImage`为3474768 bytes，抽取文件与本轮`build/anemoneImage-rv64`逐字节相等，SHA-256
+均为`c98358afe1a33943f3cefd1888a79bdbfb16acf0fc6e9b5673fc173037dc2f53`；`/.anemone/init`为`/sbin/init`。
+
+**Review and final validation:** Final review preaudit无Apollyon/Keter，唯一Euclid是RFC implementation
+导言仍只写1A Closed；已修正为当时的1A-1C Closed / 1D Active，再同步本closure。Latest-byte独立
+复核为Apollyon 0 / Keter 0 / Euclid 0；SystemTarget与Platform schema/example、single snapshot/
+legacy bridge、U-Boot owner与失败短路、workflow/skill、write set及contract边界均无阻塞finding。
+最终字节`just xtask-test`为30 passed / 0 failed；两份schema
+通过`jq empty`，live `conf list`、`example -> qemu-virt-rv64-pretest` switch、build/rootfs help、两份
+wrapper语法、residual owner/lifecycle/write-set/whitespace审计与`git diff --check`均通过，selection已
+恢复。`mdbook build docs`通过，仅报告既有large search-index warning。QEMU-backed production build、
+QEMU runtime、DT authority/refresh、kernel boot、physical board boot、LTP与final harness仍Not Run，
+不计入Stage 1 closure。
+
+**Result:** Checkpoint 1D与Stage 1 Closed。Stage 1没有命中target/owner/API/shared-contract/ABI/
+visible-semantics/write-set停止条件，contract cutover仍为None；`BOOT-PROTOCOL-001` effective baseline
+不变。按Stage Exit，本closure不运行或解析`Stage 1 -> Stage 2 Implementation Resolution Gate`，Stage 2
+保持Outline。

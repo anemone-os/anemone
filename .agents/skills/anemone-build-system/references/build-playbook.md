@@ -39,9 +39,9 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 
 ### Kernel Build
 
-- Confirm which kconfig and platform were selected.
+- Confirm which selection source, SystemTarget, platform, KernelConfig, and kernel Cargo profile were resolved.
 - Check generated inputs before interpreting compiler failures.
-- Verify only outputs enabled by the active configuration.
+- Verify the kernel ELF and every post-link output required by the selected Platform.
 - Treat an existing artifact as evidence only when its timestamp and provenance match the invocation.
 
 ### App Build
@@ -54,6 +54,7 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 
 - Validate the manifest's base tree, declared host files, and app inputs before execution.
 - Confirm architecture and installed artifacts agree with the intended kernel/platform.
+- When a recipe consumes a fixed repository output, run the documented producer action first and stop if it fails; path existence alone is not freshness evidence.
 - Determine the exact output directory that will be replaced.
 - Separate staging failures from host image-tool or privilege failures.
 

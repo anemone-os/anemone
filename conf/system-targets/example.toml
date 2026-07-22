@@ -1,0 +1,13 @@
+#! Example SystemTarget configuration.
+
+# Canonical Platform reference. The filename slug is the Platform identity.
+platform = "example"
+
+# SystemTarget owns root mount and root source selection.
+[root]
+fstype = "ext4"
+source = { type = "block", path = "vda" }
+
+# Stage 1 supports the existing rootfs metadata boot path only.
+[initial-program]
+type = "rootfs-entry"

@@ -1,0 +1,77 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Anemone SystemTarget Configuration",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+        "platform": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Canonical Platform filename slug."
+        },
+        "root": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "fstype": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "source": {
+                    "oneOf": [
+                        {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "type": {
+                                    "const": "block"
+                                },
+                                "path": {
+                                    "type": "string",
+                                    "minLength": 1
+                                }
+                            },
+                            "required": [
+                                "type",
+                                "path"
+                            ]
+                        },
+                        {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "type": {
+                                    "const": "pseudo"
+                                }
+                            },
+                            "required": [
+                                "type"
+                            ]
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "fstype",
+                "source"
+            ]
+        },
+        "initial-program": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "type": {
+                    "const": "rootfs-entry"
+                }
+            },
+            "required": [
+                "type"
+            ]
+        }
+    },
+    "required": [
+        "platform",
+        "root",
+        "initial-program"
+    ]
+}

@@ -17,11 +17,15 @@ Do not copy a current configuration snapshot into the skill. Point to its owner 
 
 ### Kernel Configuration
 
-Root `kconfig` selects kernel build policy and a platform. `conf/.defconfig` owns tracked defaults. Before changing either, inspect how the build task parses the selected file, which values may fall back, and which generated definitions it writes.
+Root `kconfig` and `conf/.defconfig` own kernel feature, policy, and capacity values. Until the selection CLI cutover, root `kconfig` also carries a legacy SystemTarget/profile/presentation selection bridge; the resolver must keep that bridge outside the owned KernelConfig value. Before changing either file, inspect which values may fall back and which generated definitions the build writes.
+
+### System Target
+
+`conf/system-targets/` owns the selected Platform reference, root mount/source, and initial-program source. A SystemTarget does not own machine constants, kernel parameters, kernel Cargo profile, QEMU invocation values, or Platform kernel-output formats.
 
 ### Platform And Architecture
 
-`conf/platforms/` owns a platform's architecture-facing and launch-facing configuration. `conf/arch/` owns architecture templates and target specifications. The build, configuration, QEMU, and DTB tasks may consume different parts of this layer; inspect every consumer affected by a change.
+`conf/platforms/` owns a platform's architecture-facing and launch-facing configuration plus boot-ABI-required kernel output formats. `conf/arch/` owns architecture templates and target specifications. The build, configuration, QEMU, and DTB tasks may consume different parts of this layer; inspect every consumer affected by a change.
 
 ### App Manifest
 
@@ -29,17 +33,20 @@ Root `kconfig` selects kernel build policy and a platform. `conf/.defconfig` own
 
 ### Rootfs Manifest
 
-`conf/rootfs/` owns filesystem composition: architecture, base tree, init, apps, directories, and host files. Rootfs construction consumes app manifests and produces an image used by some platform/QEMU flows. Keep composition inputs and the consuming platform aligned.
+`conf/rootfs/` owns filesystem composition: architecture, base tree, init, apps, directories, and host files. Rootfs construction consumes app manifests and may consume fixed-path outputs from a prior repository action. The recipe or adjacent documentation owns that command order; the rootfs task does not infer invocation history or freshness from path existence.
 
 ## Cross-Layer Invariants
 
 Before executing or accepting a configuration change, verify:
 
-- kconfig platform selection resolves to the intended platform;
+- the selected SystemTarget resolves to the intended Platform;
+- the legacy kconfig bridge, while present, resolves the intended SystemTarget and does not leak into the owned KernelConfig value;
 - platform architecture agrees with target, linker, DTB, firmware, and QEMU choices;
+- the build produces every kernel output required by the selected Platform;
 - app architecture, driver output, and declared export agree;
 - rootfs architecture and installed apps agree with the intended kernel;
 - rootfs output and QEMU device/image wiring agree when the platform uses that image;
+- fixed-path consumers run after their documented producer and stop when it fails;
 - cleanup and wrapper behavior does not invalidate another layer's required input;
 - validation observes outputs from the current invocation, not stale conditional artifacts.
 

@@ -4,8 +4,8 @@
 # This section defines how to build Anemone kernel for the target platform.
 
 [build]
-# Name of the target platform, used for identification and will be embedded into kernel
-name = "example-platform"
+# Platform filename slug; `example.toml` therefore has identity `example`.
+name = "example"
 # Abbreviations for the platform, used for command line arguments and such.
 abbrs = ["eg", "example"]
 # Architecture of the target platform
@@ -25,12 +25,6 @@ max_phys_ram_size = 0x80000000
 kernel_la_base = 0x80200000
 # Virtual address where the kernel is mapped during runtime
 kernel_va_base = 0xffffffff80200000
-# Maximum size of the user stack
-max_user_stack_size = 0x800000      # 8MB
-# Initial size of the user stack, which will be pre-allocated during process creation.
-init_user_stack_size = 0x4000       # 16KB
-# Maximum size of the user heap
-max_heap_size = 0x2000000000        # 128GB
 # Inclusive upper bound of firmware-visible physical CPU IDs
 max_phys_cpu_id = 3
 # Page frame section size as a power of 2 in megabytes.
@@ -65,8 +59,6 @@ args = [
 # Device Tree Blob configuration for the platform, optional
 [dtb]
 # Path to the generated DTB file
-path = "arch/loongarch64/generated.dtb"
+path = "arch/riscv64/generated.dtb"
 # Type of the DTB source, can be "file" or "qemu"
-type = "file"
-# Source of the DTB, ignored if type is not "file".
-source = "arch/loongarch64/dtb/virt-la64.dts"
+type = "qemu"
