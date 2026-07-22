@@ -1,11 +1,11 @@
 # 2026-07-23 - TTY Subsystem
 
-**Status:** Active / Stage 0 Closed / Stage 1 Ready
+**Status:** Active / Stage 0 Closed / Stage 1 Active / Checkpoint 1 Closed
 **Owners:** doruche, Codex
 **Area:** device / TTY / serial / VFS / signal / task topology / job control
 **Canonical Plan:** [RFC-20260722-tty-subsystem](../../rfcs/tty-subsystem/index.md), [目标与不变量](../../rfcs/tty-subsystem/invariants.md), [迁移实施计划](../../rfcs/tty-subsystem/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 0 Closed / Stage 1 Ready / Not Started
+**Current Phase:** Stage 1 Active / Checkpoint 1 Closed / Checkpoint 2 Not Started
 
 ## Scope and contract boundary
 
@@ -271,3 +271,51 @@ contract diff。没有运行任何Ready Stage 1代码验证，docs build与sourc
 **Result:** Stage 0 -> Stage 1 Resolution Gate完成，Stage 1为**Ready / Not Started**。用户本轮授权到此
 结束；Checkpoint 1、整个Stage 1或连续checkpoint均未激活。下一步只能在新的明确授权下进入Stage 1
 实现，并在transaction记录实际activation point。
+
+## Stage 1 / Checkpoint 1 activation - 2026-07-23
+
+**Authorization and entry:** 用户明确授权建立transaction设施并完成Stage 1第一个checkpoint。入口为
+`dev/drc/omega@0b5186a8`，worktree clean；active `kconfig`为`qemu-virt-rv64-pretest`、release、KUnit
+enabled。Checkpoint 1按canonical plan第6.3节单独激活，不授权Checkpoint 2或连续checkpoint执行。
+
+**Preflight:** live source仍为657行`driver/serial/ns16550a.rs`；
+`crate::driver::Ns16550ARegisters`只由LoongArch bootstrap经既有re-export使用。实现只允许删除该旧文件、
+新建`ns16550a/{mod.rs,regs.rs,port.rs}`并追加本文：`mod.rs`保留option parsing、probe/commit和KUnit，
+`regs.rs`拥有register access与line programming，`port.rs`拥有现有physical state、console/raw CharDev、
+IRQ和minor bookkeeper。除子模块路径、`use`与必需的`pub(super)`可见性外，不改变函数体、assertion、日志、
+probe/registration/request-IRQ顺序、public re-export、owner或行为。
+
+**Contract Cutover:** None。全部`TTY-*`保持Not Cut Over。
+
+**Next:** 在上述split-only子集内完成机械拆分、source/diff review与Checkpoint 1 validation floor；命中
+public trait、register API、owner或行为变化时立即停止。Checkpoint 1关闭后不自动激活Checkpoint 2。
+
+## Stage 1 / Checkpoint 1 split-only closure - 2026-07-23
+
+**Change:** `driver/serial/ns16550a.rs`机械拆为`ns16550a/{mod.rs,regs.rs,port.rs}`。`mod.rs`保留
+option parser、probe/commit、driver registration和原有KUnit；`regs.rs`保留register access、line
+programming与公开`Ns16550ARegisters`；`port.rs`保留physical state、raw CharDev、console、IRQ和minor
+bookkeeper。没有引入TTY、改动raw endpoint、锁、日志、registration/request-IRQ顺序或既有rollback TODO。
+
+**Review:** diff/source review未发现Apollyon、Keter或Euclid。option/parser、register实现、
+`DriverOps`/`PlatformDriver`、两项KUnit、Console/CharDev、IRQ handler与init均逐段和入口`HEAD`一致；
+KUnit数量与assertion不变。唯一非路径差异是子模块间必需的`pub(super)`，其可见范围仍限制在同一
+`ns16550a` owner；`crate::driver::Ns16550ARegisters`继续经原路径re-export，public API未扩大。
+
+**Validation:** `git diff --check`与三个新文件的no-index whitespace check通过；
+`just fmt kernel --check`通过。入口`qemu-virt-rv64-pretest`下`just build`以release、KUnit、ext4和
+irqsave features编译/link通过；首次沙箱内build在lwext4 C编译阶段被seccomp以`Bad system call`终止，
+获批沙箱外同命令通过。切换LA64后，`just build`在kernel compile前因缺少
+`build/rootfs/pretest-la64/rootfs.img`停止；非sudo rootfs materialization完成app staging后由supermin
+权限失败，sudo重试停在密码提示时，用户明确裁定本次只要求RV64并取消LA64构建，因此未提供密码并终止。
+随后恢复入口RV64配置，最终`just build`再次通过。LA64 compile/link、LA64 runtime、QEMU boot、KUnit
+runtime、BusyBox与LTP均未运行；RV64 build不冒充这些层级的证明。
+
+**Feedback:** Execution Fact。用户对本checkpoint作出一次性validation disposition：本次split未修改
+LoongArch source，接受不运行LA64 build；canonical Stage 1后续checkpoint floor未被本文改写。target、
+owner、ABI、visible semantics、acceptance boundary和resolved source manifest均未变化。
+
+**Contract Cutover:** None。全部`TTY-*`保持Not Cut Over，current contracts与register未修改。
+
+**Result / Next:** Checkpoint 1 **Closed**，Stage 1保持Active。Checkpoint 2仍为Not Started，未建立
+`device::tty`、unpublished attachment、worker或任何Stage 1 bridge；后续必须单独激活Checkpoint 2。
