@@ -119,4 +119,5 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
   - [ThreadGroup lifecycle](./contracts/task/thread-group-lifecycle.md)
   - [Unix job control](./contracts/task/job-control.md)
   - [Child wait](./contracts/task/child-wait.md)
+  - [Anemone Boot Protocol](./contracts/task/boot-protocol.md)
   - [User entry](./contracts/task/user-entry.md)
