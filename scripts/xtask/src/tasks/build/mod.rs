@@ -15,16 +15,16 @@ use xshell::Shell;
 use crate::{
     config::{
         kconfig::Profile,
-        platform::DtbType,
         reference::KernelConfigRef,
         resolve::{BuildPresentation, ConfigLoader, ResolvedSystemBuild},
     },
     log_progress,
-    tasks::{app::build::build_app, qemu::gen_qemu_cmd, utils::cmd_echo},
+    tasks::app::build::build_app,
     warn,
     workspace::*,
 };
 
+mod device_tree;
 mod kernel_output;
 pub mod symtab;
 
@@ -114,43 +114,10 @@ impl BuildContext {
         self.gen_rust_defs()?;
         self.gen_kernel_lds()?;
 
-        if let Some(dtb) = &self.resolved.platform.dtb {
-            match dtb.typ {
-                DtbType::Qemu => {
-                    log_progress!("DTB", "Generating DTB from qemu");
-                    if let Some(qemu) = &self.resolved.platform.qemu {
-                        let mut cmd = gen_qemu_cmd(qemu, None);
-                        cmd.arg("-machine")
-                            .arg(String::from("dumpdtb=anemone-kernel/src/") + dtb.path.as_str());
-                        cmd_echo(&cmd);
-                        match cmd.status() {
-                            Ok(status) => {
-                                if !status.success() {
-                                    anyhow::bail!("QEMU exited with status: {}", status);
-                                }
-                                log_progress!("DTB", "Successfully generated DTB from qemu");
-                            },
-                            Err(e) => {
-                                log_progress!(
-                                    "ERROR",
-                                    &format!("Failed to generate DTB from QEMU: {}", e)
-                                );
-                                anyhow::bail!("Failed to generate DTB from QEMU: {}", e);
-                            },
-                        }
-                    } else {
-                        log_progress!(
-                            "ERROR",
-                            "QEMU configuration is required to generate DTB from QEMU"
-                        );
-                        anyhow::bail!("QEMU configuration is required to generate DTB from QEMU")
-                    }
-                },
-                DtbType::File => {
-                    todo!();
-                },
-            }
+        if self.resolved.platform.dtb.is_some() {
+            log_progress!("DTB", "Compiling committed platform DTS");
         }
+        device_tree::materialize(self.resolved.platform.dtb.as_ref())?;
 
         Ok(())
     }

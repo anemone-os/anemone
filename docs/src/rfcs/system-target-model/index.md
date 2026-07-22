@@ -1,6 +1,6 @@
 # RFC-20260722-system-target-model
 
-**状态：** Accepted for Implementation（Stage 1 Closed；Stage 2 Outline）
+**状态：** Accepted for Implementation（Stage 1 Closed；Stage 2 Active；2A Closed）
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-23
@@ -9,7 +9,7 @@
 **影响契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--rootfs-metadata选择初始用户程序)（Refine；当前仍由 effective baseline 生效，R0 target 尚未 cut over）。
 **开放问题：** None；已确认问题已折回 target 或分流到
 [迁移实施计划](./implementation.md) 的 feedback/preflight gate。
-**下一步：** Stage 1已关闭；`Stage 1 -> Stage 2 Implementation Resolution Gate`尚未进入。
+**下一步：** Checkpoint 2A已独立关闭；2B保持Ready / Not Activated，等待2A提交后的独立activation记录。
 
 ## 文档状态
 
@@ -18,9 +18,9 @@
 本 RFC 的 target authority。
 
 本目录同时提供 [迁移实施计划](./implementation.md)，用于约束后续 stage envelope、feedback
-gate、停止条件与回写路径。Stage 1 的 resolved manifest 已完成，全部checkpoint已独立关闭；实际
-证据由transaction记录。Stage 2仍为Outline且resolution gate尚未进入；`BOOT-PROTOCOL-001`
-contract cutover仍未发生。
+gate、停止条件与回写路径。Stage 1的全部checkpoint已独立关闭；Stage 2已通过独立resolution
+gate完整解析并激活，2A已独立关闭，2B仍为Ready / Not Activated。实际执行证据由transaction记录；
+`BOOT-PROTOCOL-001` contract cutover仍未发生。
 
 ## 摘要
 
@@ -151,7 +151,8 @@ live build path 当前具有以下事实：
 - [目标与不变量](./invariants.md)：target rules、唯一 owner、resolved snapshot、action scope、
   platform kernel outputs、DT 与 workflow 同步边界。
 - [迁移实施计划](./implementation.md)：rolling stage envelope、feedback/preflight gate、
-  validation floor、停止条件与回写路径；Stage 1 Ready 定义与 resolved manifest 的唯一权威。
+  validation floor、停止条件与回写路径；Stage 1历史定义及当前Stage 2 Active定义/resolved manifest的
+  唯一权威。
 - 本文：范围、方案、接受边界、备选与风险。
 
 Review 状态：
@@ -168,7 +169,7 @@ Review 状态：
 `implementation.md` 只描述后续实施边界。Public promotion与初始Implementation Resolution Gate
 已完成；Stage 1 Ready definition/manifest已冻结。R0 acceptance、transaction creation 与
 Stage 1 activation 已在 2026-07-23 独立闭合；Checkpoint 1A-1D已依次独立关闭，Stage 1 Closed。
-Stage 2仍为Outline，其resolution gate尚未进入。
+后续独立resolution gate已把Stage 2解析为Ready；2A随后独立激活并关闭，2B没有激活。
 
 ## 术语与 owner
 
@@ -565,14 +566,14 @@ R0 acceptance gate 已于 2026-07-23 核对并确认：
   compatibility；对应 build/export 与 Boot Protocol 验证分别进入 Stage 4 和 Stage 5。
 - [迁移实施计划](./implementation.md) 已通过初始 `Implementation Resolution Gate` 把 Stage 1
   的交付、实现路线或 probe、审计、可观测性、验证、停止/退出条件、contract cutover 与
-  `Resolved Write Set Manifest` 完整解析为 Ready，Stage 1现已完成并关闭；Stage 2及更远阶段保持
-  Outline。
+  `Resolved Write Set Manifest` 完整解析为 Ready，Stage 1现已完成并关闭；后续独立resolution gate
+  已把Stage 2完整解析为Ready，2A随后独立关闭而2B未激活，Stage 3及更远阶段保持Outline。
 
 [迁移实施计划](./implementation.md) 已记录允许带入实现的不确定性。Public promotion、首个
 Implementation Resolution Gate、R0 acceptance、transaction creation 与 Stage 1 activation 已按独立
-gate 完成；Checkpoint 1A-1D已独立关闭，Stage 2 resolution gate尚未进入。若 feedback 需要改变 target
-invariant、owner、ABI、`Contract Impact` 或 acceptance boundary，当前 gate 必须停止并回到
-RFC review。
+gate 完成；Checkpoint 1A-1D与2A已独立关闭，2B仍为Ready / Not Activated。若
+feedback需要改变target invariant、owner、ABI、`Contract Impact`或acceptance boundary，当前gate必须
+停止并回到RFC review。
 
 ## 备选方案
 
@@ -649,12 +650,12 @@ repackage 或 ELF-only 高频工作流来证明抽象价值。内部 post-link s
 
 ## 收口
 
-R0 已接受进入实现，Stage 1 已按用户授权完成，Checkpoint 1A-1D已依次独立关闭；Stage 2仍为Outline，
-`Stage 1 -> Stage 2 Implementation Resolution Gate`尚未进入。R0 已删除独立 package/output graph，并把 U-Boot
-固定为 Platform-owned build post-link output；目录命名、live-owner inventory 与逐平台迁移
-分流到 `implementation.md` 的 probe、preflight 或工程选择。Promotion preflight 已提取当前
-Boot Protocol baseline，初始Implementation Resolution Gate已冻结Stage 1 manifest；transaction
-记录实际 checkpoint 证据。
+R0 已接受进入实现，Stage 1 已按用户授权完成，Checkpoint 1A-1D已依次独立关闭；独立的
+`Stage 1 -> Stage 2 Implementation Resolution Gate`已把Stage 2解析为Ready，2A随后独立激活并关闭。该gate
+确认ignored source-tree DTB使原Stage 2/3顺序无法直接成立，并在不改变R0 target的前提下把最小
+normal-build DT输入前移为2A；QEMU refresh和剩余per-platform closure仍留在Stage 3。R0 已删除独立
+package/output graph，并把 U-Boot固定为Platform-owned build post-link output；2B仍未激活，transaction记录
+实际checkpoint与resolution证据。
 
 ## 修订记录
 

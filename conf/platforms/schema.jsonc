@@ -114,24 +114,63 @@
         },
         "dtb": {
             "type": "object",
-            "description": "Optional current DTB generation input.",
+            "description": "Committed DTS input and its Platform-owned authority/delivery contract.",
             "properties": {
-                "path": {
-                    "type": "string"
+                "source": {
+                    "type": "string",
+                    "minLength": 1
                 },
-                "type": {
+                "delivery": {
                     "enum": [
-                        "qemu",
-                        "file"
+                        "firmware",
+                        "embedded"
                     ]
                 },
-                "source": {
-                    "type": "string"
+                "authority": {
+                    "enum": [
+                        "provider-derived",
+                        "normative"
+                    ]
+                },
+                "provider": {
+                    "const": "qemu"
                 }
             },
             "required": [
-                "path",
-                "type"
+                "source",
+                "delivery",
+                "authority"
+            ],
+            "additionalProperties": false,
+            "oneOf": [
+                {
+                    "properties": {
+                        "delivery": {
+                            "const": "firmware"
+                        },
+                        "authority": {
+                            "const": "provider-derived"
+                        }
+                    },
+                    "required": [
+                        "provider"
+                    ]
+                },
+                {
+                    "properties": {
+                        "delivery": {
+                            "const": "embedded"
+                        },
+                        "authority": {
+                            "const": "normative"
+                        }
+                    },
+                    "not": {
+                        "required": [
+                            "provider"
+                        ]
+                    }
+                }
             ]
         },
         "uboot": {

@@ -41,9 +41,9 @@ machine = "virt"
 # CPU type, optional
 cpu = "rv64"
 # number of CPUs
-smp = 4
+smp = 1
 # Amount of memory
-memory = "512M"
+memory = "1G"
 # Platform firmware to use, optional
 bios = "default"
 # Additional QEMU arguments
@@ -58,7 +58,9 @@ args = [
 
 # Device Tree Blob configuration for the platform, optional
 [dtb]
-# Path to the generated DTB file
-path = "arch/riscv64/generated.dtb"
-# Type of the DTB source, can be "file" or "qemu"
-type = "qemu"
+# Workspace-relative committed DTS input for normal build.
+source = "conf/platforms/qemu-virt-rv64.dts"
+# Firmware receives the runtime FDT; this file is a provider conformance baseline.
+delivery = "firmware"
+authority = "provider-derived"
+provider = "qemu"

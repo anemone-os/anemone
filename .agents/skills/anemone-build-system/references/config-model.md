@@ -58,6 +58,11 @@ Treat DTB generation as a cross-cutting build concern. Before modifying it, read
 
 Do not describe a proposed DTB workflow as an existing capability. Keep future design in the appropriate plan or RFC until code and commands implement it.
 
+Normal kernel build compiles the selected Platform's committed DTS into a build-local DTB and does
+not launch QEMU or consume runtime disks. A firmware-delivered DTB may use the committed DTS as a
+provider conformance baseline; an embedded DTB consumes the committed normative source. Derive
+refresh/check capabilities from live QEMU task code instead of assuming they exist.
+
 ## Staleness Check
 
 When updating this skill later:

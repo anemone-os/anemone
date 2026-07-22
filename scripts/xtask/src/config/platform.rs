@@ -1,6 +1,8 @@
 //! This module is used to resolve platform configurations
 //! under the `conf/platforms/` directory.
 
+use std::path::{Component, Path};
+
 use serde::{Deserialize, Serialize};
 
 use super::system_target::Root;
@@ -90,11 +92,12 @@ pub struct Qemu {
 }
 
 #[derive(Deserialize, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Dtb {
-    pub path: String,
-    #[serde(rename = "type")]
-    pub typ: DtbType,
-    pub source: Option<String>,
+    pub source: String,
+    pub delivery: DtbDelivery,
+    pub authority: DtsAuthority,
+    pub provider: Option<DtbProvider>,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -109,12 +112,24 @@ pub struct Uboot {
     pub filename: String,
 }
 
-#[derive(Deserialize, Debug, Serialize)]
-pub enum DtbType {
-    #[serde(rename = "qemu")]
+#[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DtbDelivery {
+    Firmware,
+    Embedded,
+}
+
+#[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DtsAuthority {
+    ProviderDerived,
+    Normative,
+}
+
+#[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DtbProvider {
     Qemu,
-    #[serde(rename = "file")]
-    File,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -129,6 +144,9 @@ pub struct Config {
 impl Config {
     pub fn from_str(content: &str) -> anyhow::Result<Self> {
         let config: Config = toml::from_str(&content)?;
+        if let Some(dtb) = &config.dtb {
+            dtb.validate()?;
+        }
         Ok(config)
     }
     pub fn gen_platform_defs(&self, root: &Root) -> String {
@@ -177,6 +195,29 @@ pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
     }
 }
 
+impl Dtb {
+    fn validate(&self) -> anyhow::Result<()> {
+        let source = Path::new(&self.source);
+        if self.source.is_empty()
+            || source.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+        {
+            anyhow::bail!("DT source must be a workspace-relative path");
+        }
+        match (self.delivery, self.authority, self.provider) {
+            (DtbDelivery::Firmware, DtsAuthority::ProviderDerived, Some(DtbProvider::Qemu))
+            | (DtbDelivery::Embedded, DtsAuthority::Normative, None) => Ok(()),
+            _ => anyhow::bail!(
+                "invalid DT contract: firmware delivery requires provider-derived authority and provider=qemu; embedded delivery requires normative authority and no provider"
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,5 +235,43 @@ mod tests {
             .unwrap()
             .replace("arch = \"riscv64\"", "arch = \"x86_64\"");
         assert!(Config::from_str(&content).is_err());
+    }
+
+    #[test]
+    fn accepts_supported_dtb_contracts() {
+        let firmware =
+            std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
+        let embedded =
+            std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
+
+        assert!(Config::from_str(&firmware).is_ok());
+        assert!(Config::from_str(&embedded).is_ok());
+    }
+
+    #[test]
+    fn rejects_incoherent_dtb_contracts() {
+        let valid =
+            std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
+
+        for invalid in [
+            valid.replace("provider = \"qemu\"\n", ""),
+            valid.replace("delivery = \"firmware\"", "delivery = \"embedded\""),
+            valid.replace("authority = \"provider-derived\"", "authority = \"normative\""),
+            valid.replace("provider = \"qemu\"", "provider = \"other\""),
+            valid.replace(
+                "source = \"conf/platforms/qemu-virt-rv64.dts\"",
+                "source = \"\"",
+            ),
+            valid.replace(
+                "source = \"conf/platforms/qemu-virt-rv64.dts\"",
+                "source = \"../qemu-virt-rv64.dts\"",
+            ),
+        ] {
+            assert!(Config::from_str(&invalid).is_err(), "{invalid}");
+        }
+
+        let embedded =
+            std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
+        assert!(Config::from_str(&format!("{embedded}\nprovider = \"qemu\"\n")).is_err());
     }
 }

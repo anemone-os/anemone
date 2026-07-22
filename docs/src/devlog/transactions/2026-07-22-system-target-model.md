@@ -5,14 +5,14 @@
 **Area:** build system / configuration / platform / repository workflow
 **Canonical Plan:** [RFC-20260722-system-target-model](../../rfcs/system-target-model/index.md), [目标与不变量](../../rfcs/system-target-model/invariants.md), [迁移实施计划](../../rfcs/system-target-model/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 1 Closed / Stage 2 Outline / Stage 1 -> Stage 2 Resolution Gate Not Entered
+**Current Phase:** Stage 1 Closed / Stage 2 Active / Checkpoint 2A Closed / 2B Ready, Not Activated
 
 ## Scope
 
 本事务执行R0的滚动实施。初始授权覆盖Stage 1前两个checkpoint：1A建立dormant SystemTarget
-schema、typed reference与loader，1B完成single resolver snapshot和build consumer cutover；本轮授权
-已扩展为完成整个Stage 1。每个checkpoint仍须按canonical implementation plan独立review、验证、回写
-和提交；前一个checkpoint关闭不自动启动后一个checkpoint。
+schema、typed reference与loader，1B完成single resolver snapshot和build consumer cutover；后续授权
+已完成整个Stage 1。本轮授权覆盖Stage 2前两个checkpoint，但仍按2A、2B分别activation、review、验证、
+回写和提交；前一个checkpoint关闭不自动启动后一个checkpoint。
 
 ## Contract and register boundary
 
@@ -224,3 +224,95 @@ QEMU runtime、DT authority/refresh、kernel boot、physical board boot、LTP与
 visible-semantics/write-set停止条件，contract cutover仍为None；`BOOT-PROTOCOL-001` effective baseline
 不变。按Stage Exit，本closure不运行或解析`Stage 1 -> Stage 2 Implementation Resolution Gate`，Stage 2
 保持Outline。
+
+## Stage 1 -> Stage 2 Implementation Resolution - 2026-07-23
+
+**Status:** Completed；Stage 2 Ready / Not Activated。
+
+本gate在Stage 1独立关闭后只读执行，重新读取Stage 1最终diff、transaction review/validation、live
+Justfile与xtask help、config/resolver/build/QEMU/conf/clean task、全部tracked target/platform、两份pretest
+wrapper、register/current limitations、R0 target/invariants与current contract。Stage 1的single snapshot、
+SystemTarget root owner、Platform output和`BOOT-PROTOCOL-001`边界保持成立；没有新shared runtime contract
+或live design issue。
+
+Preflight确认Stage 2需要收口的live delta仍是legacy `kconfig [build]`、`conf switch`、独立QEMU
+selection、Platform host executable/runtime path、wrapper semantic mutation与重叠cleanup surface。另发现
+两个本地`anemone-kernel/src/arch/*/generated.dtb`均被kernel `.gitignore`排除；clean checkout不能在删除
+normal-build QEMU `dumpdtb`后继续完成LA64 `include_bytes!`。提交generated DTB违反`STM-DT-001`，保留
+QEMU又违反Stage 2 action-scope exit，因此原Stage 2/3顺序必须在保持target的范围内修正。
+
+Gate把最小normal-build DT prerequisite解析为Checkpoint 2A：RV64 committed DTS是firmware-delivered、
+provider-derived baseline；LA64补齐committed normative DTS并保持embedded delivery；normal build只用固定
+`dtc`产生`build/` DTB。QEMU refresh、baseline mutating/check与剩余per-platform provenance/authority closure
+仍留在Stage 3。随后依次冻结2B dormant preset/selection/bind foundation、2C atomic CLI/config/QEMU/
+wrapper/cleanup cutover、2D integration/production validation与closure。该变更属于stage order/write-set
+解析，不改变R0 target、owner、ABI、visible semantics、acceptance boundary或Contract Impact。
+
+Stage 2的authoritative checkpoint定义、validation floor、stop/recovery、contract cutover与完整manifest只
+位于[迁移实施计划](../../rfcs/system-target-model/implementation.md#stage-2selectionaction-scope-与-workflow-surface-cutover)。
+本事务不复制第二份计划authority。Resolution review没有Apollyon、Keter或Euclid；Stage 2达到Ready，
+但没有获得activation授权，2A也未开始。Contract cutover仍为None，`BOOT-PROTOCOL-001` effective baseline
+及pending-successor状态不变。
+
+**Resolution validation:** `git diff --check`、lifecycle/residual-state审计、public relative-link检查与
+`mdbook build docs`。Kernel/xtask tests、DT dump/compile、build、QEMU、wrapper、rootfs、LTP、physical board
+和final harness均Not Run；它们是Ready定义中的未来execution floor，不是本docs-only gate证据。
+
+## Checkpoint 2A activation - 2026-07-23
+
+**Status:** Activated；Checkpoint 2B保持Ready / Not Activated。
+
+用户明确授权完成Stage 2前两个checkpoint；本记录只激活2A的frozen subset，不把Stage整体授权解释为
+自动进入2B。Activation preflight重新读取R0 target/invariants、Ready definition、live Platform/build/QEMU/
+bootstrap owner与两个ignored legacy DTB。QEMU 10.0.50 topology-only dump证明LA64 legacy blob与current
+1-CPU/1-GiB provider除`/chosen/rng-seed`外一致；现有RV64 committed DTS则是可复现的旧4-CPU/128-MiB
+provider snapshot，与current manifest drift。
+
+Review将“保留现有RV64 DTS”解析并回写为保留文件identity及firmware-delivered/provider-derived baseline
+角色，同时在2A一次性对齐current provider bytes；它不改变RV64 runtime FDT、QEMU execution、target、owner、
+ABI、visible semantics或acceptance boundary。另在2B预审中发现Ready文本把R0的`template`/至少一次且可
+多次placeholder误写为`args`/恰好一次；已在`implementation.md`按accepted target纠正，不递增R0，也不
+激活2B。
+
+## Checkpoint 2A execution and closure - 2026-07-23
+
+**Status:** Closed；Stage 2 Active；Checkpoint 2B Ready / Not Activated。
+
+**Change:** Platform `[dtb]`现在只保存workspace-relative committed `source`、typed delivery/authority与
+provider-derived时必需的`provider = "qemu"`；parser和schema只接受当前两种闭合组合。RV64 committed
+DTS已对齐current topology-only provider并保持firmware conformance-baseline角色；新增LA64 normative
+DTS并保持embedded delivery。两份source都记录capture命令/QEMU版本并删除易变`rng-seed`。Normal build
+不再调用`gen_qemu_cmd()`或`dumpdtb`，只用固定`dtc`把selected DTS原子发布到
+`build/generated/device-tree/platform.dtb`；LA64 bootstrap只嵌入该build output。每次prebuild会先删除
+上一snapshot的final/tmp，即使selected Platform无DT或source/dtc失败也不保留stale output。两个ignored
+source-tree legacy DTB已删除；ordinary QEMU latest bytes未改变，refresh/bind/selection均未提前实现。
+
+**Provider and build validation:** `qemu-system-riscv64`与`qemu-system-loongarch64`均为10.0.50
+（v10.0.0-2143-gdf6fe2abf2），`dtc`为1.7.0。两个topology-only dump删除`/chosen/rng-seed`后，与本轮
+committed/build DTB的sorted decompile逐字节相等。`dtc`仍报告RV64 numeric phandle与LA64
+interrupt-provider warnings；它们来自provider snapshot且不阻塞compile，但本证据不声明完整DT correctness。
+在临时隐藏root-level RV/LA test disk与RV rootfs、PATH前置exit-97 fake QEMU的环境中，非sandbox
+`just build`分别完成RV64与LA64 release kernel build；fake QEMU未执行，两个build都生成build-local DTB。
+随后无DT的VisionFive build成功，并确认fixed DTB/tmp均被清除。三次validation-only selection后原
+`kconfig`逐字节恢复，SHA-256前后均为
+`afc5faf697f2d7ef095c83d7412b7f2e7bb16db5b29afb30977ce6852c2a569f`；临时隐藏的runtime inputs全部恢复。
+首次sandbox内RV64 build在DT compile后因lwext4 C build的`Bad system call`失败，不计为build通过证据；
+随后按环境规则在非sandbox重跑成功。
+
+**Static/schema/docs validation:** Latest bytes运行`just xtask-test`为32 passed / 0 failed；Python
+`tomllib + jsonschema`验证全部6份Platform TOML，`jq empty conf/platforms/schema.jsonc`通过；normal-build
+residual search只剩两份DTS provenance注释。`git diff --check`、public relative-link检查和
+`mdbook build docs`通过，mdBook仅报告既有large search-index warning。两个DTS compile/decompile仍产生
+上述provider warning；kernel guest boot、ordinary QEMU runtime、DT refresh、LTP、physical board和final
+harness均Not Run。
+
+**Review:** Independent latest-byte review为Apollyon 0。发现的新`device_tree.rs`命中根级无锚定
+`build` ignore pattern；该Keter不通过越界修改`.gitignore`修复，而按2A frozen planned-new manifest用
+`git add -f`纳入tracked commit，并以staged name-status复核。另一个Euclid是missing source或无DT Platform
+可能留下上一snapshot；已改为每次prebuild先清除final/tmp，并由VisionFive build neutralize。RV64 baseline
+alignment、DT owner/delivery、LA64 include、failure cleanup、普通QEMU不变与2B未激活均通过复核；dtc warning
+为Safe并按实际边界记录。
+
+**Result:** Checkpoint 2A Closed，没有命中Stage 2 target/owner/API/shared-contract/ABI/visible-semantics/
+acceptance停止条件；Contract cutover仍为None，`BOOT-PROTOCOL-001` effective baseline与pending successor
+不变。2B保持Ready / Not Activated，须在本checkpoint提交后单独记录activation。

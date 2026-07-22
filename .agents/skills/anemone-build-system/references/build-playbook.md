@@ -41,6 +41,8 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 
 - Confirm which selection source, SystemTarget, platform, KernelConfig, and kernel Cargo profile were resolved.
 - Check generated inputs before interpreting compiler failures.
+- When the selected Platform declares a DTS, verify that normal build compiled the committed source
+  to `build/generated/device-tree/platform.dtb`; normal build must not launch QEMU to obtain it.
 - Verify the kernel ELF and every post-link output required by the selected Platform.
 - Treat an existing artifact as evidence only when its timestamp and provenance match the invocation.
 
