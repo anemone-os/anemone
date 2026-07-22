@@ -443,3 +443,29 @@ validation floor据此记录为RV64-only，最终报告不得把RV64证据外推
 activation、fixed console + TTY projections、四项Kconfig、RX/TX/IRQ transaction与raw 234删除；若Late
 activation需要其它Late consumer顺序、shared framework/API、request成功后的fallible步骤或任何RX-before-
 consumer窗口，立即重新停止。Checkpoint 3关闭后只审计Stage 1退出条件，不自动进入Stage 2。
+
+## Checkpoint 3 corrected-route review - 2026-07-23
+
+**Review pause:** 在source修改前暂停C3 activation并对修正路线做独立owner/lock/lifecycle review。发现两个
+Keter和一个证据边界缺口，均可在既有C3 owner/write set内关闭，不需要main、driver framework、console、IRQ
+core、kthread或shared/public API扩展。
+
+**Keter 1 / driver snapshot:** `Driver::for_each_device()`在callback期间持有`DriverBase.devices`的IRQ-save
+read guard，不能直接在callback内allocation、attach、spawn、request IRQ或join。修正为static driver owner的
+two-pass snapshot：第一遍锁内只计数，锁外fallible reserve，第二遍锁内只clone device `Arc`并push到已预留
+capacity；释放guard后逐个activation。boot期无并发NS16550A device registration是本路线的source invariant，
+push前用assert暴露容量漂移；不修改`DriverBase`。
+
+**Keter 2 / activation owner:** `Ns16550ADevice`中的`SpinLock<Option<TtyPortAttachment>>`是唯一
+Quiescent/Active truth；`None`与`Some`分别表示未激活和已提交，不增加独立phase字段。attachment留在
+device state，不能放进physical port，以避免`port -> attachment -> endpoint -> port`强引用环。成功顺序冻结为
+attach、构造IRQ context、request IRQ、slot提交`Some`、enable RX；IRQ不读取slot。失败保持slot `None`，先撤
+registry再stop/join。
+
+**Evidence correction:** bounded TX只证明port-owned TX lock按batch/poll参数有界；generic
+`console::output()`持有外层console registry IRQ-save guard的既有行为不属于C3证明。当前target只要求physical
+port serialization与TTY write分批，故无需扩展console owner；若未来要求任意console record端到端IRQ-off
+latency，必须独立申报。
+
+**Result:** 三项finding已写回canonical Stage 1 route与source proof，R0 target、owner、ABI、visible semantics、
+acceptance和代码manifest不变。Checkpoint 3恢复**Active**，可以进入源码实现。

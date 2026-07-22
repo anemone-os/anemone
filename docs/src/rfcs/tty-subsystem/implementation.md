@@ -223,6 +223,10 @@ cutover，或把跨 checkpoint bridge 留成长期抽象。
    IRQ-safe TX lock，最多在一个临界区处理`NS16550A_TX_BATCH_BYTES`，每个byte最多轮询
    `NS16550A_TX_POLL_ITERATIONS`次；timeout释放lock并返回partial progress，console另累计未提交byte，
    不递归printk。任意长度caller buffer因此被拆成有界临界区；RX IRQ不取得TX lock且不打印。
+   本checkpoint只证明port-owned TX serialization的临界区受这两个参数约束；generic
+   `console::output()`在backend call外层持有console registry IRQ-save guard是既有console-owner边界，
+   不得把本阶段证据扩大为任意console record的端到端IRQ-off latency proof。若后续验收要求后者，必须
+   另行扩展console owner/write set，而不是在NS16550A内伪造证明。
 9. **Immutable identity与line truth。** `TtyPortId`从platform device对应OF node的canonical full path
    构造并拷入固定容量identity；路径超长或不是OF node时在attach前失败，不回退到probe顺序、dynamic
    minor或局部KObject basename。validated stdout options与divisor保存在physical port的immutable
@@ -232,11 +236,17 @@ cutover，或把跨 checkpoint bridge 留成长期抽象。
     RX interrupt，安装driver-local `Quiescent` port并注册output-only console；它不调用`request_irq()`、
     不启用RX、不进入TTY unpublished registry。platform bus的driver binding不是TTY endpoint/capability
     publication，`Quiescent`也不得被IRQ或TTY当作active truth。`Late` initcall在`kthreadd`与全部CPU local
-    init完成后遍历本driver的quiescent ports，对每个port依次执行TTY duplicate validation、kthread spawn、
+    init完成后先通过driver device list取得锁外snapshot：第一次`for_each_device()`只计数，锁外fallible
+    reserve精确容量，第二次在同一IRQ-save read guard内只clone device `Arc`并push到已经预留的Vec，且push前
+    assert容量未漂移；释放driver guard后才逐个activation。该two-pass snapshot依赖boot期不再并发注册本driver
+    device的source proof，不扩大`DriverBase` API。每个port依次执行TTY duplicate validation、kthread spawn、
     notifier/consumer binding和IRQ private `Arc`准备，最后调用`request_irq()`。attach或request失败必须
     abort attachment、撤unpublished registry并同步stop/join worker；只允许保留有界boot-lifetime MMIO、
-    port、driver binding与TX-only console，port继续为`Quiescent`且RX保持关闭。request成功是不可逆commit，
-    其后只执行不可失败的attachment install、RX enable和`Active` phase提交。IRQ永远不观察optional notifier，
+    port、driver binding与TX-only console，device state的attachment slot继续为`None`且RX保持关闭。
+    `Ns16550ADevice`中的`SpinLock<Option<TtyPortAttachment>>`是唯一activation truth：`None`为Quiescent，
+    `Some`为Active，不另设phase字段；attachment不得存入physical port，否则会形成
+    `port -> attachment -> endpoint -> port`强引用环。request成功是不可逆commit，其后只执行不可失败的
+    attachment slot `None -> Some`提交和RX enable；先存slot再启RX，IRQ handler不读取该slot。IRQ永远不观察optional notifier，
     因为notifier绑定前不存在已注册IRQ。该two-window生命周期是未来generic deferred-probe能力到来前的
     driver-local bridge；当bus能在`kthreadd` dependency未满足时defer并重试probe，必须删除Late initcall和
     `Quiescent -> Active`迁移桥，把同一activation transaction收回单次成功probe。Late activation失败是
@@ -302,7 +312,9 @@ worker只在首次成功drain输出一条明确标为Stage 1 diagnostic的proces
 **KUnit / source proof：** 覆盖kconfig zero rejection/default generation、ring FIFO/drop-new、只在首次
 empty-to-nonempty通知、budget边界与剩余work、line-error计数、TX batch/poll timeout/partial progress、
 duplicate attach和request前abort。source audit必须证明early probe只发布`Quiescent` port/console且RX关闭，
-Late activation不依赖其它Late consumer的顺序；IRQ private data直接持有预分配port `Arc`，不再
+Late activation不依赖其它Late consumer的顺序；driver device snapshot只在IRQ-save guard内计数/clone到
+预留Vec，spawn/attach/request/join全部在guard外；device-state attachment slot是唯一activation truth且port
+不反向拥有attachment；IRQ private data直接持有预分配port `Arc`，不再
 查dynamic bookkeeper；consumer/ring在RX enable前可达；所有wake在raw guard外；IRQ无format/log、Vec/
 VecDeque growth、complex drop、sleepable lock、Event/Signal/topology调用；TX lock内工作受两个参数约束；
 attach/request失败没有registry/worker/IRQ/RX残留，request成功后没有fallible步骤。
