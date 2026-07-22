@@ -1,6 +1,6 @@
 # System Target Model 迁移实施计划
 
-**状态：** R0（Stage 1 Active；Checkpoint 1B Closed；1C Not Started）
+**状态：** R0（Stage 1 Active；Checkpoint 1C Closed；1D Not Started）
 **最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
@@ -94,7 +94,7 @@ RFC 已完成 public promotion、初始 `Implementation Resolution Gate` 与 R0 
 
 | 阶段 | 当前成熟度 | 概括目的 | 前置依赖 | 解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 1 | Active（Checkpoint 1B Closed；1C Not Started） | Resolver 与 Platform kernel-output vertical slice | Promotion preflight、public Draft review、0B resolution、R0 acceptance、transaction activation、1A/1B Closed | 1C没有activation授权，不自动进入 |
+| Stage 1 | Active（Checkpoint 1C Closed；1D Not Started） | Resolver 与 Platform kernel-output vertical slice | Promotion preflight、public Draft review、0B resolution、R0 acceptance、transaction activation、1A-1C Closed | 本轮用户授权完成Stage 1；1D仍需独立activation |
 | Stage 2 | Outline | Selection、action scope 与 workflow surface cutover | Stage 1 Closed | `Stage 1 -> Stage 2 Implementation Resolution Gate` |
 | Stage 3 | Outline | 逐 platform DT authority/delivery 迁移 | Stage 2 Closed；对应 platform baseline 可审计 | Stage 2 关闭后的 Stage 3 Resolution Gate；无法整阶段解析时在 gate 中拆成独立滚动 Stage |
 | Stage 4 | Outline | Source app driver、app/rootfs workflow 与 physical-board closure | 相关 build foundation Closed | 前置实现证据足以解析 owner-local closure 后 |
@@ -224,7 +224,7 @@ Kernel build、xtask test、QEMU、rootfs、physical board、LTP与runtime均Not
 ## Stage 1：Resolver 与 Platform kernel-output vertical slice
 
 **阶段成熟度：** Active；R0 acceptance、transaction creation 与 Stage 1 activation 已完成，Checkpoint
-1A/1B已独立关闭；Checkpoint 1C仍为Not Started且未获activation授权。
+1A-1C已独立关闭；Checkpoint 1D仍为Not Started且未独立activation。
 
 ### 受保护目标与 scope envelope
 
@@ -317,6 +317,9 @@ bridge有Stage 2删除条件；repository xtask tests与无U-Boot build-plan tes
 Cutover后失败只能在同一subset中修复或整体恢复到1A dormant状态；不得保留target/platform双读来恢复。
 
 ### Checkpoint 1C - VisionFive Platform output production slice
+
+**状态：** Closed（2026-07-23）；activation、执行、review与验证证据见
+[transaction](../../devlog/transactions/2026-07-22-system-target-model.md#checkpoint-1c-execution-log)。
 
 **交付：** 在build owner内保留窄的U-Boot post-link实现，按ELF导出、`rust-objcopy`、`mkimage`顺序
 生成Platform现有filename/header/load/entry/name。无`[uboot]`的Platform直接结束，不创建或声明本轮

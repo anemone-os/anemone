@@ -5,14 +5,14 @@
 **Area:** build system / configuration / platform / repository workflow
 **Canonical Plan:** [RFC-20260722-system-target-model](../../rfcs/system-target-model/index.md), [目标与不变量](../../rfcs/system-target-model/invariants.md), [迁移实施计划](../../rfcs/system-target-model/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 1 Active / Checkpoint 1A Closed / Checkpoint 1B Closed / Checkpoint 1C Not Started
+**Current Phase:** Stage 1 Active / Checkpoint 1A-1C Closed / Checkpoint 1D Not Started
 
 ## Scope
 
-本事务执行R0的滚动实施。当前授权只覆盖Stage 1前两个checkpoint：1A建立dormant SystemTarget
-schema、typed reference与loader，1B完成single resolver snapshot和build consumer cutover。每个
-checkpoint必须按canonical implementation plan独立review、验证、回写和提交；1A关闭不自动启动1B，
-1B关闭也不进入1C。
+本事务执行R0的滚动实施。初始授权覆盖Stage 1前两个checkpoint：1A建立dormant SystemTarget
+schema、typed reference与loader，1B完成single resolver snapshot和build consumer cutover；本轮授权
+已扩展为完成整个Stage 1。每个checkpoint仍须按canonical implementation plan独立review、验证、回写
+和提交；前一个checkpoint关闭不自动启动后一个checkpoint。
 
 ## Contract and register boundary
 
@@ -109,3 +109,44 @@ QEMU、rootfs、physical board、LTP与runtime均Not Run，不计入1B证据。
 **Result:** Checkpoint 1B Closed。没有命中owner/API/shared-contract/ABI/visible-semantics/
 target-invariant/write-set停止条件；Stage 1仍为Active，Checkpoint 1C保持Not Started且未获授权。
 `BOOT-PROTOCOL-001`继续由effective baseline生效，本checkpoint没有contract cutover。
+
+## Checkpoint 1C activation - 2026-07-23
+
+用户本轮授权扩展为完成整个Stage 1。Checkpoint 1B已独立关闭并以`f2a0af4a`提交后，本事务
+单独记录1C activation；该activation来自新的Stage 1目标，不来自1B closure自动推进。
+
+Checkpoint 1C只在build owner内收窄现有U-Boot post-link并补齐其定向测试与真实VisionFive
+build证据。Platform字段和physical output contract保持不变；SystemTarget schema、QEMU/DT、rootfs、
+Source driver、package/output registry与Boot Protocol均不进入本checkpoint。
+
+## Checkpoint 1C execution log
+
+**Status:** Closed
+
+**Change:** 现有U-Boot post-link从`build/mod.rs`收窄到build-owner私有`kernel_output.rs`；
+normal build在导出`build/anemone.elf`后按固定`rust-objcopy -> mkimage`顺序生成raw与legacy image。
+参数继续全部来自Platform `[uboot]`，VisionFive的header/load/entry/name/filename未改变；无`[uboot]`
+直接结束。Post-link开始前清除旧raw/legacy output，任一步spawn或非零失败后再次清理partial output，
+错误同时报告U-Boot action与程序名；主构建失败也不再继续`postbuild`。
+
+**Review:** 独立只读review按Platform owner、窄模块边界、固定命令顺序、无U-Boot skip、失败清理、
+诊断和write subset复核。首轮指出失败后仍运行no-op `postbuild`的Euclid，以及transaction Scope把初始
+1A/1B授权误写为当前授权的lifecycle Euclid；两项均在本checkpoint修复。Final-byte复核无Apollyon、
+Keter或Euclid finding；没有出现package/backend/output registry、target-owned U-Boot或shared-contract
+delta。
+
+**Validation:** 最终字节运行`just xtask-test`，30 passed / 0 failed；新增5项测试覆盖完整
+objcopy/mkimage argv与顺序、无U-Boot skip、objcopy失败短路、mkimage失败、partial cleanup及缺失工具
+诊断。Validation-only root `kconfig`临时从`qemu-virt-rv64-pretest`切到`visionfive2-rv64`并在验证后
+恢复；`just xtask build -k kconfig`成功，生成的ELF、raw与legacy image时间戳均晚于本轮marker。
+`mkimage -l`确认名称、RISC-V Linux kernel/uncompressed类型、`0x80200000` load/entry保持不变；
+`dumpimage`提取payload与本轮raw binary逐字节相等。首次沙箱内build因cross-compiler收到`SIGSYS`
+失败，获批后在非沙箱环境用同一仓库命令重跑成功，不将环境失败记录为代码通过或失败。
+`git diff --check`和ignored新文件no-index whitespace检查无诊断；`mdbook build docs`通过，仅报告既有
+large search-index warning。`just fmt xtask --check`仍在rustfmt前因既有root workspace不包含standalone
+xtask而失败，未形成format validation。Rootfs sequence、physical board、QEMU/runtime、DT、kernel boot、
+LTP与final harness均Not Run，不计入1C证据。
+
+**Result:** Checkpoint 1C Closed。没有命中owner/API/shared-contract/ABI/visible-semantics/
+target-invariant/write-set停止条件；`BOOT-PROTOCOL-001`继续由effective baseline生效且无contract
+cutover。Checkpoint 1D保持Not Started，不由本closure自动进入。

@@ -4,10 +4,9 @@
 //! (e.g., QEMU, or real hardware), and produce bootable images.
 
 use std::{
-    fs::{self, File},
+    fs::File,
     io::{BufRead, BufReader},
-    path::{Path, PathBuf},
-    process::Command,
+    path::Path,
 };
 
 use clap::Args;
@@ -16,7 +15,7 @@ use xshell::Shell;
 use crate::{
     config::{
         kconfig::Profile,
-        platform::{DtbType, Uboot},
+        platform::DtbType,
         reference::KernelConfigRef,
         resolve::{BuildPresentation, ConfigLoader, ResolvedSystemBuild},
     },
@@ -26,6 +25,7 @@ use crate::{
     workspace::*,
 };
 
+mod kernel_output;
 pub mod symtab;
 
 #[derive(Args)]
@@ -71,11 +71,6 @@ struct BuildContext {
     presentation: BuildPresentation,
 }
 
-enum UbootPlan<'a> {
-    Skip,
-    Build(&'a Uboot),
-}
-
 impl BuildContext {
     fn new(resolved: ResolvedSystemBuild, presentation: BuildPresentation) -> Self {
         Self {
@@ -88,10 +83,9 @@ impl BuildContext {
         log_progress!("PREBUILD", "Preparing build environment");
         self.prebuild()?;
         log_progress!("BUILD", "Building kernel");
-        let ret = self.build_main();
+        self.build_main()?;
         log_progress!("POSTBUILD", "Finalizing build process");
-        self.postbuild().expect("postbuild failed");
-        ret
+        self.postbuild()
     }
 
     fn build_main(&self) -> anyhow::Result<()> {
@@ -240,7 +234,10 @@ impl BuildContext {
         let built_kernel_path = format!("{}/anemone-kernel", self.cargo_build_dir());
         std::fs::copy(built_kernel_path, "build/anemone.elf")?;
 
-        self.build_uboot_image()?;
+        kernel_output::build_uboot_image(
+            &self.resolved.platform.build.arch,
+            self.resolved.platform.uboot.as_ref(),
+        )?;
 
         if self.presentation.disasm {
             log_progress!("DISASM", "Generating kernel disassembly");
@@ -255,78 +252,6 @@ impl BuildContext {
             sh.write_file("build/anemone.disasm", disasm)?;
         }
         Ok(())
-    }
-
-    fn build_uboot_image(&self) -> anyhow::Result<()> {
-        let uboot = match self.uboot_plan() {
-            UbootPlan::Skip => return Ok(()),
-            UbootPlan::Build(uboot) => uboot,
-        };
-
-        let output_path = Path::new("build").join(&uboot.filename);
-        if let Some(parent) = output_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let bin_path = PathBuf::from(format!("{}.bin", output_path.display()));
-
-        log_progress!(
-            "UBOOT",
-            &format!("Generating raw kernel binary '{}'", bin_path.display())
-        );
-        let mut objcopy =
-            Command::new(self.resolved.platform.build.arch.target_triple().objcopy());
-        objcopy
-            .arg("-O")
-            .arg("binary")
-            .arg("build/anemone.elf")
-            .arg(&bin_path);
-        cmd_echo(&objcopy);
-        let status = objcopy.status()?;
-        if !status.success() {
-            anyhow::bail!(
-                "objcopy ({:?}) failed with status: {}",
-                objcopy.get_program(),
-                status
-            );
-        }
-
-        log_progress!(
-            "UBOOT",
-            &format!("Generating U-Boot image '{}'", output_path.display())
-        );
-        let mut mkimage = Command::new("mkimage");
-        mkimage
-            .arg("-A")
-            .arg(&uboot.arch)
-            .arg("-O")
-            .arg(&uboot.os_type)
-            .arg("-T")
-            .arg(&uboot.image_type)
-            .arg("-C")
-            .arg(&uboot.compression)
-            .arg("-a")
-            .arg(format!("0x{:x}", uboot.load_addr))
-            .arg("-e")
-            .arg(format!("0x{:x}", uboot.entry))
-            .arg("-n")
-            .arg(&uboot.name)
-            .arg("-d")
-            .arg(&bin_path)
-            .arg(&output_path);
-        cmd_echo(&mkimage);
-        let status = mkimage.status()?;
-        if !status.success() {
-            anyhow::bail!("mkimage failed with status: {}", status);
-        }
-
-        Ok(())
-    }
-
-    fn uboot_plan(&self) -> UbootPlan<'_> {
-        match &self.resolved.platform.uboot {
-            Some(uboot) => UbootPlan::Build(uboot),
-            None => UbootPlan::Skip,
-        }
     }
 
     fn postbuild(&self) -> anyhow::Result<()> {
@@ -353,20 +278,5 @@ impl BuildContext {
         let mut all_flags = Self::GENERAL_RUSTFLAGS.to_vec();
         all_flags.extend_from_slice(flags);
         all_flags.join(" ")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{config::reference::KernelConfigRef, config::resolve::ConfigLoader};
-
-    #[test]
-    fn no_uboot_build_plan_skips_post_link_commands() {
-        let action = ConfigLoader::new(Path::new("../.."))
-            .resolve_legacy_build(KernelConfigRef::new("conf/.defconfig").unwrap())
-            .unwrap();
-        let context = BuildContext::new(action.system, action.presentation);
-        assert!(matches!(context.uboot_plan(), UbootPlan::Skip));
     }
 }
