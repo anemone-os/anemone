@@ -73,6 +73,20 @@ impl<T: Copy, const N: usize> RingBuffer<T, N> {
         }
     }
 
+    /// Remove and return the newest item currently stored in the buffer.
+    #[inline]
+    pub fn try_pop_back(&mut self) -> Option<T> {
+        if self.is_empty() {
+            return None;
+        }
+
+        self.head = if self.head == 0 { N - 1 } else { self.head - 1 };
+        self.len -= 1;
+        // SAFETY: before decrementing `len`, the slot immediately preceding
+        // `head` was part of the initialized live range.
+        Some(unsafe { self.buf[self.head].assume_init() })
+    }
+
     /// Try to push a slice of items into the ring buffer. Returns the number of
     /// items successfully pushed.
     ///
