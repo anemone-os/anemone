@@ -7,6 +7,36 @@ use anyhow::Context;
 use serde::{Deserialize, Deserializer};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct AppRef(String);
+
+impl AppRef {
+    pub fn new(value: &str) -> anyhow::Result<Self> {
+        validate_slug("app", value)?;
+        Ok(Self(value.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for AppRef {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl<'de> Deserialize<'de> for AppRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(&value).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct BuildPresetRef(String);
 
 impl BuildPresetRef {
@@ -179,6 +209,7 @@ mod tests {
     #[test]
     fn slug_references_are_strict() {
         for valid in ["qemu-virt-rv64", "visionfive2-rv64", "0-test", "a-"] {
+            assert!(AppRef::new(valid).is_ok(), "{valid}");
             assert!(BuildPresetRef::new(valid).is_ok(), "{valid}");
             assert!(SystemTargetRef::new(valid).is_ok(), "{valid}");
             assert!(PlatformRef::new(valid).is_ok(), "{valid}");
@@ -193,6 +224,7 @@ mod tests {
             "../target",
             "/target",
         ] {
+            assert!(AppRef::new(invalid).is_err(), "{invalid}");
             assert!(BuildPresetRef::new(invalid).is_err(), "{invalid}");
             assert!(SystemTargetRef::new(invalid).is_err(), "{invalid}");
             assert!(PlatformRef::new(invalid).is_err(), "{invalid}");

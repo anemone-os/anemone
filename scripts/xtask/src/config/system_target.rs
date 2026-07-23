@@ -6,7 +6,7 @@
 
 use serde::Deserialize;
 
-use super::reference::PlatformRef;
+use super::reference::{AppRef, PlatformRef};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -73,6 +73,7 @@ impl RootSource {
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum InitialProgramSource {
     RootfsEntry,
+    EmbeddedApp { app: AppRef },
 }
 
 #[cfg(test)]
@@ -104,8 +105,33 @@ type = "rootfs-entry"
 
     #[test]
     fn rejects_unsupported_initial_program_tag() {
-        let content = VALID_TARGET.replace("rootfs-entry", "embedded-app");
+        let content = VALID_TARGET.replace("rootfs-entry", "unknown");
         assert!(Config::from_str(&content).is_err());
+    }
+
+    #[test]
+    fn parses_embedded_app_target() {
+        let content = VALID_TARGET.replace(
+            "type = \"rootfs-entry\"",
+            "type = \"embedded-app\"\napp = \"init\"",
+        );
+        let config = Config::from_str(&content).unwrap();
+        assert!(matches!(
+            config.initial_program,
+            InitialProgramSource::EmbeddedApp { app } if app.as_str() == "init"
+        ));
+
+        let missing_app = VALID_TARGET.replace(
+            "type = \"rootfs-entry\"",
+            "type = \"embedded-app\"",
+        );
+        assert!(Config::from_str(&missing_app).is_err());
+
+        let invalid_app = VALID_TARGET.replace(
+            "type = \"rootfs-entry\"",
+            "type = \"embedded-app\"\napp = \"../init\"",
+        );
+        assert!(Config::from_str(&invalid_app).is_err());
     }
 
     #[test]

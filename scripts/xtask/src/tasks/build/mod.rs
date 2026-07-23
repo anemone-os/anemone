@@ -4,11 +4,13 @@
 //! (e.g., QEMU, or real hardware), and produce bootable images.
 
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{BufRead, BufReader},
+    os::unix::fs::PermissionsExt,
     path::Path,
 };
 
+use anyhow::Context;
 use clap::Args;
 use xshell::Shell;
 
@@ -17,9 +19,10 @@ use crate::{
         build_preset::CargoProfile,
         resolve::{ConfigLoader, ResolvedSystemBuild},
         selection::SelectionArgs,
+        system_target::InitialProgramSource,
     },
     log_progress,
-    tasks::app::build::build_app,
+    tasks::app::build::{BuildCtx, BuiltArtifactInfo, build_app},
     warn,
     workspace::*,
 };
@@ -128,14 +131,65 @@ impl BuildContext {
             .resolved
             .platform
             .gen_platform_defs(&self.resolved.target.root);
+        let boot_defs = self.gen_boot_defs()?;
         // write to both loader and kernel src directories
         let kconfig_defs_path = format!("anemone-kernel/src/kconfig_defs.rs",);
         let platform_defs_path = format!("anemone-kernel/src/platform_defs.rs",);
-        log_progress!("GENDEFS", "Generating kconfig_defs.rs and platform_defs.rs");
+        let boot_defs_path = "anemone-kernel/src/boot_defs.rs";
+        log_progress!(
+            "GENDEFS",
+            "Generating kconfig_defs.rs, platform_defs.rs, and boot_defs.rs"
+        );
         let sh = Shell::new()?;
         sh.write_file(&kconfig_defs_path, &kconfig_defs)?;
         sh.write_file(&platform_defs_path, &platform_defs)?;
+        sh.write_file(boot_defs_path, &boot_defs)?;
         Ok(())
+    }
+
+    fn gen_boot_defs(&self) -> anyhow::Result<String> {
+        match &self.resolved.target.initial_program {
+            InitialProgramSource::RootfsEntry => {
+                log_progress!("BOOT", "initial-program=rootfs-entry");
+                Ok(render_rootfs_entry_boot_defs())
+            },
+            InitialProgramSource::EmbeddedApp { app } => {
+                log_progress!(
+                    "BOOT",
+                    &format!("initial-program=embedded-app app={app}")
+                );
+                let context = BuildCtx::new(self.resolved.platform.build.arch.clone())?;
+                let artifacts = build_app(app.as_str(), &[], &context, false).with_context(|| {
+                    format!(
+                        "failed to prepare embedded app `{app}` for system target `{}`",
+                        self.resolved.target_ref
+                    )
+                })?;
+                let artifact = validate_embedded_artifact(
+                    self.resolved.target_ref.as_str(),
+                    app.as_str(),
+                    &artifacts,
+                )?;
+                let byte_count = fs::metadata(&artifact.output_path)
+                    .with_context(|| {
+                        format!(
+                            "failed to inspect embedded app `{app}` export `{}` for system target `{}`",
+                            artifact.output_path.display(),
+                            self.resolved.target_ref
+                        )
+                    })?
+                    .len();
+                log_progress!(
+                    "BOOT",
+                    &format!(
+                        "embedded app={} export={} bytes={byte_count}",
+                        app,
+                        artifact.output_path.display()
+                    )
+                );
+                render_embedded_app_boot_defs(&artifact.output_path)
+            },
+        }
     }
 
     fn gen_kernel_lds(&self) -> anyhow::Result<()> {
@@ -227,6 +281,72 @@ impl BuildContext {
     }
 }
 
+fn validate_embedded_artifact<'a>(
+    target: &str,
+    app: &str,
+    artifacts: &'a [BuiltArtifactInfo],
+) -> anyhow::Result<&'a BuiltArtifactInfo> {
+    let [artifact] = artifacts else {
+        anyhow::bail!(
+            "system target `{target}` embedded app `{app}` must export exactly one artifact, got {}",
+            artifacts.len()
+        );
+    };
+    let metadata = fs::metadata(&artifact.output_path).with_context(|| {
+        format!(
+            "failed to inspect system target `{target}` embedded app `{app}` export `{}`",
+            artifact.output_path.display()
+        )
+    })?;
+    if !metadata.is_file() {
+        anyhow::bail!(
+            "system target `{target}` embedded app `{app}` export `{}` is not a regular file",
+            artifact.output_path.display()
+        );
+    }
+    if metadata.permissions().mode() & 0o111 == 0 {
+        anyhow::bail!(
+            "system target `{target}` embedded app `{app}` export `{}` has no execute bit",
+            artifact.output_path.display()
+        );
+    }
+    Ok(artifact)
+}
+
+fn render_rootfs_entry_boot_defs() -> String {
+    render_boot_defs("InitialProgramSource::RootfsEntry")
+}
+
+fn render_embedded_app_boot_defs(path: &Path) -> anyhow::Result<String> {
+    let path = path
+        .to_str()
+        .context("embedded app export path must be valid UTF-8")?;
+    let path_literal = format!("{path:?}");
+    let initial_program = format!(
+        r#"InitialProgramSource::EmbeddedApp {{
+    bytes: include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../",
+        {path_literal}
+    )),
+}}"#
+    );
+    Ok(render_boot_defs(&initial_program))
+}
+
+fn render_boot_defs(initial_program: &str) -> String {
+    format!(
+        r#"// @generated by `xtask build`; do not edit.
+pub(crate) enum InitialProgramSource {{
+    RootfsEntry,
+    EmbeddedApp {{ bytes: &'static [u8] }},
+}}
+
+pub(crate) const INITIAL_PROGRAM_SOURCE: InitialProgramSource = {initial_program};
+"#
+    )
+}
+
 impl BuildContext {
     const GENERAL_RUSTFLAGS: &'static [&'static str] =
         &["-C", "force-frame-pointers", "-C", "link-arg=--no-relax"];
@@ -245,5 +365,88 @@ impl BuildContext {
         let mut all_flags = Self::GENERAL_RUSTFLAGS.to_vec();
         all_flags.extend_from_slice(flags);
         all_flags.join(" ")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestDirectory(std::path::PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "anemone-xtask-embedded-app-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn artifact(&self, name: &str, mode: u32) -> BuiltArtifactInfo {
+            let path = self.0.join(name);
+            fs::write(&path, b"artifact").unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            BuiltArtifactInfo {
+                source_path: path.clone(),
+                output_path: path,
+            }
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn embedded_artifact_requires_one_executable_regular_file() {
+        let root = TestDirectory::new();
+        let executable = root.artifact("executable", 0o751);
+        assert!(validate_embedded_artifact("target", "app", &[executable.clone()]).is_ok());
+
+        assert!(validate_embedded_artifact("target", "app", &[]).is_err());
+        assert!(
+            validate_embedded_artifact(
+                "target",
+                "app",
+                &[executable.clone(), executable.clone()]
+            )
+            .is_err()
+        );
+        let non_executable = root.artifact("non-executable", 0o640);
+        assert!(validate_embedded_artifact("target", "app", &[non_executable]).is_err());
+        let directory = root.0.join("directory");
+        fs::create_dir(&directory).unwrap();
+        assert!(
+            validate_embedded_artifact(
+                "target",
+                "app",
+                &[BuiltArtifactInfo {
+                    source_path: directory.clone(),
+                    output_path: directory,
+                }]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn generated_boot_defs_are_closed_and_track_embedded_bytes() {
+        let rootfs = render_rootfs_entry_boot_defs();
+        assert!(rootfs.contains("InitialProgramSource::RootfsEntry"));
+        assert!(!rootfs.contains("include_bytes!"));
+
+        let embedded = render_embedded_app_boot_defs(Path::new("build/apps/init/init")).unwrap();
+        assert!(embedded.contains("InitialProgramSource::EmbeddedApp"));
+        assert!(embedded.contains("include_bytes!"));
+        assert!(embedded.contains("build/apps/init/init"));
     }
 }

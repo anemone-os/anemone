@@ -42,6 +42,9 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 
 - Confirm which selection source, SystemTarget, Platform, KernelConfig, and kernel Cargo profile were resolved.
 - Check generated inputs before interpreting compiler failures.
+- Check that the generated boot definition matches the selected initial-program variant. For `EmbeddedApp`, verify
+  the app identity, single executable regular export, reported byte count, and `include_bytes!` dependency all come
+  from the current invocation rather than a stale `build/apps/` artifact.
 - When the selected Platform declares a DTS, verify that normal build compiled the committed source
   to `build/generated/device-tree/platform.dtb`; normal build must not launch QEMU to obtain it.
 - Verify the kernel ELF and every post-link output required by the selected Platform.

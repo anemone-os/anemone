@@ -58,14 +58,35 @@
         },
         "initial-program": {
             "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "type": {
-                    "const": "rootfs-entry"
+            "oneOf": [
+                {
+                    "additionalProperties": false,
+                    "properties": {
+                        "type": {
+                            "const": "rootfs-entry"
+                        }
+                    },
+                    "required": [
+                        "type"
+                    ]
+                },
+                {
+                    "additionalProperties": false,
+                    "properties": {
+                        "type": {
+                            "const": "embedded-app"
+                        },
+                        "app": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]*$",
+                            "description": "Canonical app directory and manifest-name slug."
+                        }
+                    },
+                    "required": [
+                        "type",
+                        "app"
+                    ]
                 }
-            },
-            "required": [
-                "type"
             ]
         }
     },

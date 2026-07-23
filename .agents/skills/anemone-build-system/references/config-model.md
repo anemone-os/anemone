@@ -28,7 +28,12 @@ complete low-level tuple, while only interactive calls may use local/default sel
 
 ### System Target
 
-`conf/system-targets/` owns the selected Platform reference, root mount/source, and initial-program source. A SystemTarget does not own machine constants, kernel parameters, kernel Cargo profile, QEMU invocation values, or Platform kernel-output formats.
+`conf/system-targets/` owns the selected Platform reference, root mount/source, and closed initial-program source:
+rootfs metadata or a referenced embedded app. An embedded app reference names an existing app manifest; kernel build
+uses the common app exporter and rejects identity mismatch, non-singleton output, non-regular output, or an artifact
+without an execute bit before kernel compilation. A SystemTarget does not own machine constants, kernel parameters,
+kernel Cargo profile, QEMU invocation values, Platform kernel-output formats, embedded argv/env configuration, or an
+artifact selector.
 
 ### Platform And Architecture
 
@@ -55,6 +60,7 @@ Before executing or accepting a configuration change, verify:
 - platform architecture agrees with target, linker, DTB, firmware, and QEMU choices;
 - the build produces every kernel output required by the selected Platform;
 - app architecture, driver output, and declared export agree;
+- an embedded initial app reference matches its manifest identity and resolves to one executable regular export;
 - rootfs architecture and installed apps agree with the intended kernel;
 - every QEMU bind value matches a selected Platform declaration and the intended wrapper mapping;
 - fixed-path consumers run after their documented producer and stop when it fails;

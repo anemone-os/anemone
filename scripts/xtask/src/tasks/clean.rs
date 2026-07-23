@@ -17,6 +17,7 @@ pub fn run() -> anyhow::Result<()> {
         .arg("-f")
         .arg("anemone-kernel/src/kconfig_defs.rs")
         .arg("anemone-kernel/src/platform_defs.rs")
+        .arg("anemone-kernel/src/boot_defs.rs")
         .arg("anemone-kernel/src/arch/riscv64/generated.dtb")
         .arg("anemone-kernel/src/arch/loongarch64/generated.dtb")
         .run_echo()?;

@@ -85,6 +85,7 @@ pub fn build_app(
         )
     })?;
     let app = App::from_str(&content)?;
+    validate_app_reference(name, &app, &manifest_path)?;
 
     let app_dir = manifest_path
         .parent()
@@ -125,6 +126,18 @@ pub fn build_app(
     }
 
     Ok(built)
+}
+
+fn validate_app_reference(name: &str, app: &App, manifest_path: &Path) -> anyhow::Result<()> {
+    if app.name != name {
+        bail!(
+            "app reference '{}' does not match manifest name '{}' at '{}'",
+            name,
+            app.name,
+            manifest_path.display()
+        );
+    }
+    Ok(())
 }
 
 fn copy_artifact(
@@ -357,5 +370,19 @@ mod tests {
             assert!(error.contains(path), "{error}");
             assert!(!out_dir.join(path).exists());
         }
+    }
+
+    #[test]
+    fn referenced_app_must_match_manifest_name() {
+        let app = source_app(Vec::new());
+        let error = validate_app_reference(
+            "reference-name",
+            &app,
+            Path::new("anemone-apps/reference-name/app.toml"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("reference-name"), "{error}");
+        assert!(error.contains("prebuilt"), "{error}");
     }
 }

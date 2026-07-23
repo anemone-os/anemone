@@ -39,6 +39,12 @@ Keep each concern in its owning layer:
 - `conf/rootfs/`: rootfs composition and installed apps/files;
 - Justfile and `scripts/xtask/src/tasks/`: orchestration and command behavior.
 
+Kernel build owns the generated initial-program input. `RootfsEntry` emits only its typed tag;
+`EmbeddedApp` resolves the referenced app through the same architecture-specific `build_app()` exporter used by
+ordinary app/rootfs actions, requires exactly one executable regular artifact, and emits an ignored typed Rust
+definition whose `include_bytes!` points at that export. The kernel must not parse SystemTarget or app manifests,
+and `clean` must remove the generated boot definition.
+
 Build and ordinary QEMU use the same selection syntax. Automation and wrappers must pass an explicit
 `--preset` or a complete `--target` / `--kernel-config` / `--profile` tuple; they must not depend on
 interactive local selection. QEMU host paths are action inputs supplied with the selected Platform's

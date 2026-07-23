@@ -8,6 +8,7 @@ platform = "example"
 fstype = "ext4"
 source = { type = "block", path = "vda" }
 
-# Stage 1 supports the existing rootfs metadata boot path only.
+# Rootfs metadata remains the default initial-program source. To embed one
+# app artifact instead, use `type = "embedded-app"` with `app = "<app-slug>"`.
 [initial-program]
 type = "rootfs-entry"

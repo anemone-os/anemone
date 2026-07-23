@@ -32,7 +32,6 @@ mod ramfs;
 
 pub mod api;
 
-pub(crate) use self::uio::{UserBufferSegment, UserBufferSink, UserBufferSource};
 pub use self::{
     anonymous::*,
     dentry::Dentry,
@@ -58,6 +57,10 @@ pub use self::{
     path::PathRef,
     permission::{FsAccess, FsPermChecker},
     superblock::SuperBlock,
+};
+pub(crate) use self::{
+    inode::RenameFlags,
+    uio::{UserBufferSegment, UserBufferSink, UserBufferSource},
 };
 pub use cache_stats::resident_file_inode_cache_pages;
 
