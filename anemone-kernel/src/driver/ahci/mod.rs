@@ -124,7 +124,7 @@ impl DriverOps for AhciDriver {
 impl PlatformDriver for AhciDriver {
     /// Matches only the standard firmware fallback for a generic AHCI HBA.
     fn match_table(&self) -> &[&str] {
-        &["generic-ahci"]
+        &["generic-ahci", "loongson,ls-ahci"]
     }
 }
 
