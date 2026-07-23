@@ -81,6 +81,10 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         }
 
         let tg = task.get_thread_group();
+        // Capture the stable owner identity before last-member topology detach
+        // can remove the numeric session lookup. The TTY handoff itself runs
+        // later with no topology or ThreadGroup guard held.
+        let tty_session_leader = crate::task::jobctl::TtySessionLeader::from_thread_group(&tg);
 
         defer_to_dispose(task.clone());
 
@@ -113,6 +117,9 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         // a longer critical section must be held here to avoid races. TODO: explain
         // why.
         if is_last {
+            if let Some(leader) = tty_session_leader {
+                crate::device::tty::detach_exiting_session(leader);
+            }
             let mut tg_inner = tg.inner.write();
 
             let xcode = match tg_inner.status.life_cycle {
@@ -251,6 +258,7 @@ pub fn kernel_exit_group(code: ExitCode) -> ! {
             panic!("init task shall not exit");
         }
         let tg = task.get_thread_group();
+        let tty_session_leader = crate::task::jobctl::TtySessionLeader::from_thread_group(&tg);
         let (is_exiting, terminal_transition) = {
             let mut inner = tg.inner.write();
             match inner.status.life_cycle {
@@ -268,6 +276,13 @@ pub fn kernel_exit_group(code: ExitCode) -> ! {
             }
         };
         tg.finish_job_control_transition(terminal_transition);
+
+        if !is_exiting && let Some(leader) = tty_session_leader {
+            // First Alive -> Exiting owns eager disassociation. Relation
+            // cleanup is idempotent because the last member repeats the same
+            // guards-out notification after topology detach.
+            crate::device::tty::detach_exiting_session(leader);
+        }
 
         if is_exiting {
             // someone already started exiting this thread group. we can just exit this

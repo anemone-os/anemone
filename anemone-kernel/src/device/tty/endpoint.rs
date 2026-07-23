@@ -10,9 +10,10 @@ use crate::{
     utils::any_opaque::NilOpaque,
 };
 
-use super::{TtyEndpoint, TtyPortId, TtyWakeHandle, file};
+use super::{TtyEndpoint, TtyPortId, TtyWakeHandle, file, relation};
 
 const TTY_SERIAL_MINOR_BASE: usize = 64;
+const TTY_CONTROLLING_MINOR: usize = 0;
 
 struct TtyNodeOps {
     endpoint: Weak<TtyEndpoint>,
@@ -28,6 +29,21 @@ impl TtyNodeOps {
 impl DevfsNodeOps for TtyNodeOps {
     fn open(&self, _inode: &InodeRef) -> Result<OpenedFile, SysError> {
         self.opened_file()
+    }
+
+    fn get_attr(&self, inode: &InodeRef, attr: DevfsNodeAttr) -> Result<InodeStat, SysError> {
+        Ok(endpoint_stat(inode, attr.rdev))
+    }
+}
+
+struct ControllingTtyNodeOps;
+
+impl DevfsNodeOps for ControllingTtyNodeOps {
+    fn open(&self, _inode: &InodeRef) -> Result<OpenedFile, SysError> {
+        let caller = crate::task::jobctl::TtyCaller::current()
+            .map_err(|_| SysError::NoSuchDeviceOrAddress)?;
+        let endpoint = relation::current_endpoint(&caller)?;
+        opened_endpoint_file(&endpoint)
     }
 
     fn get_attr(&self, inode: &InodeRef, attr: DevfsNodeAttr) -> Result<InodeStat, SysError> {
@@ -95,6 +111,8 @@ fn select_identity_index(
 }
 
 pub(crate) struct TtyBootPublication {
+    controlling_publish: DevfsPublish,
+    relations: relation::PreparedRelations,
     endpoints: Vec<PreparedEndpoint>,
     published: Vec<PublishedEndpoint>,
     boot_files: [Option<File>; 3],
@@ -127,6 +145,27 @@ pub(crate) fn prepare_system_boot() -> Result<TtyBootPublication, SysError> {
         endpoints.push(endpoint);
     }
     drop(ports);
+
+    let relations = relation::prepare(&endpoints)?;
+    let controlling_ops: Arc<dyn DevfsNodeOps> =
+        Arc::try_new(ControllingTtyNodeOps).map_err(|_| SysError::OutOfMemory)?;
+    let mut controlling_name = String::new();
+    controlling_name
+        .try_reserve_exact(3)
+        .map_err(|_| SysError::OutOfMemory)?;
+    controlling_name.push_str("tty");
+    let controlling_publish = DevfsPublish {
+        name: controlling_name,
+        attr: DevfsNodeAttr {
+            ty: InodeType::Char,
+            perm: InodePerm::all_rw(),
+            rdev: DeviceId::Char(CharDevNum::new(
+                MajorNum::new(devnum::char::major::TTY_AUX),
+                MinorNum::new(TTY_CONTROLLING_MINOR),
+            )),
+        },
+        ops: controlling_ops,
+    };
 
     assert!(
         identities.windows(2).all(|pair| pair[0] < pair[1]),
@@ -193,6 +232,8 @@ pub(crate) fn prepare_system_boot() -> Result<TtyBootPublication, SysError> {
         });
     }
     Ok(TtyBootPublication {
+        controlling_publish,
+        relations,
         endpoints: prepared,
         published,
         boot_files,
@@ -206,10 +247,15 @@ pub(crate) fn prepare_system_boot() -> Result<TtyBootPublication, SysError> {
 impl TtyBootPublication {
     pub(crate) fn publish(self) -> Result<(), SysError> {
         let Self {
+            controlling_publish,
+            relations,
             endpoints,
             published,
             boot_files,
         } = self;
+
+        relation::install(relations);
+        devfs_publish(controlling_publish)?;
 
         for prepared in endpoints {
             assert_eq!(
@@ -253,7 +299,7 @@ fn selected_endpoint() -> Result<&'static PublishedEndpoint, SysError> {
 fn opened_endpoint_file(endpoint: &Arc<TtyEndpoint>) -> Result<OpenedFile, SysError> {
     let wake_source = endpoint.wake_source.upgrade().ok_or(SysError::NotFound)?;
     Ok(file::opened_file(
-        endpoint.terminal.clone(),
+        endpoint.clone(),
         TtyWakeHandle {
             source: wake_source,
         },

@@ -2,10 +2,12 @@ mod discipline;
 mod endpoint;
 mod file;
 mod port;
+mod relation;
 mod terminal;
 
 pub(crate) use endpoint::{open_boot_terminal, prepare_system_boot};
 pub(crate) use port::{TtyLineSnapshot, TtyParity, TtyPort, TtyPortId};
+pub(crate) use relation::detach_exiting_session;
 
 use crate::{
     prelude::*,
@@ -92,7 +94,7 @@ impl TtyPortAttachment {
 
     pub(crate) fn opened_file(&self) -> OpenedFile {
         file::opened_file(
-            self.endpoint.terminal.clone(),
+            self.endpoint.clone(),
             TtyWakeHandle {
                 source: self
                     .wake_source

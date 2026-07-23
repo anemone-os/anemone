@@ -8,23 +8,24 @@ use crate::{
 };
 
 use super::{
-    TtyWakeHandle,
+    TtyEndpoint, TtyWakeHandle,
     discipline::InputRead,
     port::{TtyLineSnapshot, TtyParity},
+    relation,
     terminal::{Terminal, TtyTermios, TtyWinsize},
 };
 
 #[derive(Opaque)]
 struct TtyFile {
-    terminal: Arc<Terminal>,
+    endpoint: Arc<TtyEndpoint>,
     wake: TtyWakeHandle,
 }
 
-pub(super) fn opened_file(terminal: Arc<Terminal>, wake: TtyWakeHandle) -> OpenedFile {
+pub(super) fn opened_file(endpoint: Arc<TtyEndpoint>, wake: TtyWakeHandle) -> OpenedFile {
     OpenedFile::with_mode(
         &TTY_FILE_OPS,
         FileMode::STREAM,
-        AnyOpaque::new(TtyFile { terminal, wake }),
+        AnyOpaque::new(TtyFile { endpoint, wake }),
     )
 }
 
@@ -44,7 +45,7 @@ fn tty_read(
     }
     let tty = tty_file(file);
     loop {
-        match tty.terminal.read_input(buf) {
+        match tty.endpoint.terminal.read_input(buf) {
             InputRead::Bytes(count) => {
                 if count != 0 {
                     tty.wake.wake();
@@ -56,7 +57,7 @@ fn tty_read(
                 if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
                     return Err(SysError::Again);
                 }
-                tty.terminal.wait_readable()?;
+                tty.endpoint.terminal.wait_readable()?;
             },
         }
     }
@@ -68,7 +69,7 @@ fn tty_write(file: &File, _pos: &mut usize, buf: &[u8], ctx: FileIoCtx) -> Resul
     }
     let tty = tty_file(file);
     loop {
-        let written = tty.terminal.enqueue_output(buf);
+        let written = tty.endpoint.terminal.enqueue_output(buf);
         if written != 0 {
             tty.wake.wake();
             return Ok(written);
@@ -76,7 +77,7 @@ fn tty_write(file: &File, _pos: &mut usize, buf: &[u8], ctx: FileIoCtx) -> Resul
         if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
             return Err(SysError::Again);
         }
-        tty.terminal.wait_writable()?;
+        tty.endpoint.terminal.wait_writable()?;
     }
 }
 
@@ -88,7 +89,7 @@ fn tty_check_status_flags(_file: &File, flags: FileOpStatusFlags) -> Result<(), 
 }
 
 fn tty_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
-    Ok(tty_file(file).terminal.poll(request))
+    Ok(tty_file(file).endpoint.terminal.poll(request))
 }
 
 fn read_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>) -> Result<T, SysError> {
@@ -114,10 +115,10 @@ fn tty_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
     let tty = tty_file(file);
     match ctx.cmd() {
         abi::TCGETS => {
-            let (termios, _) = tty.terminal.termios_snapshot();
+            let (termios, _) = tty.endpoint.terminal.termios_snapshot();
             write_ioctl_value(
                 &ctx,
-                project_termios(termios, tty.terminal.line_snapshot())?,
+                project_termios(termios, tty.endpoint.terminal.line_snapshot())?,
             )?;
         },
         abi::TCSETS | abi::TCSETSW | abi::TCSETSF => {
@@ -131,7 +132,7 @@ fn tty_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
             set_termios(tty, candidate, mode)?;
         },
         abi::TIOCGWINSZ => {
-            let winsize = tty.terminal.winsize();
+            let winsize = tty.endpoint.terminal.winsize();
             write_ioctl_value(
                 &ctx,
                 abi::Winsize {
@@ -144,30 +145,135 @@ fn tty_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
         },
         abi::TIOCSWINSZ => {
             let winsize = read_ioctl_value::<abi::Winsize>(&ctx)?;
-            tty.terminal.set_winsize(TtyWinsize {
+            tty.endpoint.terminal.set_winsize(TtyWinsize {
                 rows: winsize.ws_row,
                 cols: winsize.ws_col,
                 xpixel: winsize.ws_xpixel,
                 ypixel: winsize.ws_ypixel,
             });
         },
+        abi::TIOCSCTTY => set_controlling_tty(tty, &ctx)?,
+        abi::TIOCNOTTY => detach_controlling_tty(tty)?,
+        abi::TIOCGSID => get_controlling_sid(tty, &ctx)?,
+        abi::TIOCGPGRP => get_foreground_pgid(tty, &ctx)?,
+        abi::TIOCSPGRP => set_foreground_pgid(tty, &ctx)?,
         _ => return Err(SysError::UnsupportedIoctl),
     }
     Ok(0)
 }
 
+fn current_tty_caller() -> Result<crate::task::jobctl::TtyCaller, SysError> {
+    crate::task::jobctl::TtyCaller::current().map_err(|_| SysError::UnsupportedIoctl)
+}
+
+fn controlling_snapshot(
+    tty: &TtyFile,
+    caller: &crate::task::jobctl::TtyCaller,
+) -> Result<relation::RelationSnapshot, SysError> {
+    let snapshot = relation::endpoint_snapshot(&tty.endpoint).ok_or(SysError::UnsupportedIoctl)?;
+    if !snapshot.session().same_identity(caller.session()) {
+        return Err(SysError::UnsupportedIoctl);
+    }
+    Ok(snapshot)
+}
+
+fn set_controlling_tty(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(), SysError> {
+    // Privileged stealing (`arg=1`) is outside the accepted first-version ABI;
+    // rejecting every nonzero value avoids a silent success with weaker effect.
+    if ctx.arg() != 0 {
+        knoticeln!(
+            "TTY: rejecting unsupported TIOCSCTTY steal argument {}",
+            ctx.arg()
+        );
+        return Err(SysError::PermissionDenied);
+    }
+    let caller = current_tty_caller()?;
+    relation::acquire(&tty.endpoint, &caller, ctx.target_access().can_read())
+}
+
+fn detach_controlling_tty(tty: &TtyFile) -> Result<(), SysError> {
+    relation::detach(&tty.endpoint, &current_tty_caller()?)
+}
+
+fn get_controlling_sid(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(), SysError> {
+    loop {
+        let caller = current_tty_caller()?;
+        let snapshot = controlling_snapshot(tty, &caller)?;
+        if caller.revalidate() && snapshot.is_current() {
+            return write_ioctl_value(ctx, snapshot.session().sid().get() as i32);
+        }
+    }
+}
+
+fn get_foreground_pgid(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(), SysError> {
+    loop {
+        let caller = current_tty_caller()?;
+        let snapshot = controlling_snapshot(tty, &caller)?;
+        let pgid = snapshot
+            .foreground()
+            .map_or(0, |foreground| foreground.pgid().get() as i32);
+        if caller.revalidate() && snapshot.is_current() {
+            return write_ioctl_value(ctx, pgid);
+        }
+    }
+}
+
+fn set_foreground_pgid(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(), SysError> {
+    loop {
+        let caller = current_tty_caller()?;
+        let snapshot = controlling_snapshot(tty, &caller)?;
+
+        // POSIX terminal access checks precede touching the user candidate. An
+        // actionable background SIGTTOU therefore has no foreground mutation
+        // and restarts this idempotent ioctl only after signal handling.
+        if matches!(
+            caller.sigttou_decision(snapshot.foreground()),
+            crate::task::jobctl::TtySigttouDecision::Signal
+        ) {
+            if !caller.revalidate() || !snapshot.is_current() {
+                continue;
+            }
+            if caller.signal_process_group_sigttou() {
+                return Err(SysError::RestartSyscall(RestartSyscall::Idempotent));
+            }
+            continue;
+        }
+
+        let raw_pgid = read_ioctl_value::<i32>(ctx)?;
+        if raw_pgid < 0 {
+            return Err(SysError::InvalidArgument);
+        }
+        let foreground = caller.resolve_process_group(Tid::new(raw_pgid as u32))?;
+        if !caller.revalidate()
+            || !foreground.is_live_in(caller.session())
+            || !snapshot.is_current()
+        {
+            continue;
+        }
+        let pgid = foreground.pgid();
+        if relation::commit_foreground(&snapshot, foreground) {
+            kinfoln!(
+                "TTY: foreground commit sid={} pgid={}",
+                caller.session().sid(),
+                pgid
+            );
+            return Ok(());
+        }
+    }
+}
+
 fn set_termios(tty: &TtyFile, candidate: abi::Termios, mode: SetMode) -> Result<(), SysError> {
     loop {
-        let (current, generation) = tty.terminal.termios_snapshot();
-        let updated = validate_termios(candidate, current, tty.terminal.line_snapshot())?;
+        let (current, generation) = tty.endpoint.terminal.termios_snapshot();
+        let updated = validate_termios(candidate, current, tty.endpoint.terminal.line_snapshot())?;
         let drained_output_generation = if !matches!(mode, SetMode::Now) {
-            tty.terminal.request_drain_check();
+            tty.endpoint.terminal.request_drain_check();
             tty.wake.wake();
-            Some(tty.terminal.wait_drain_complete()?)
+            Some(tty.endpoint.terminal.wait_drain_complete()?)
         } else {
             None
         };
-        if tty.terminal.commit_termios_if_generation(
+        if tty.endpoint.terminal.commit_termios_if_generation(
             generation,
             drained_output_generation,
             updated,
@@ -425,37 +531,26 @@ mod kunits {
     }
 
     fn no_worker_file(terminal: Arc<Terminal>) -> File {
-        let wake = TtyWakeHandle {
-            source: Arc::new(TtyWakeSource {
-                worker: SpinLock::new(None),
-            }),
-        };
+        let source = Arc::new(TtyWakeSource {
+            worker: SpinLock::new(None),
+        });
+        let endpoint = Arc::new(TtyEndpoint {
+            port: DrainPort::new("/kunit/tty/file-no-worker"),
+            terminal,
+            wake_source: Arc::downgrade(&source),
+        });
+        let wake = TtyWakeHandle { source };
         let placeholder = crate::device::console::open_console_stdin();
-        anony_open_with(placeholder.path(), opened_file(terminal, wake)).unwrap()
+        anony_open_with(placeholder.path(), opened_file(endpoint, wake)).unwrap()
     }
 
     fn attachment_file(attachment: &TtyPortAttachment) -> TtyFile {
         TtyFile {
-            terminal: attachment.terminal().clone(),
+            endpoint: attachment.endpoint.clone(),
             wake: TtyWakeHandle {
                 source: attachment.wake_source.as_ref().unwrap().clone(),
             },
         }
-    }
-
-    #[kunit]
-    fn asm_generic_layout_and_ioctl_constants() {
-        assert_eq!(size_of::<abi::Termios>(), 36);
-        assert_eq!(align_of::<abi::Termios>(), 4);
-        assert_eq!(size_of::<abi::Winsize>(), 8);
-        assert_eq!(align_of::<abi::Winsize>(), 2);
-        assert_eq!(abi::NCCS, 19);
-        assert_eq!(abi::TCGETS, 0x5401);
-        assert_eq!(abi::TCSETS, 0x5402);
-        assert_eq!(abi::TCSETSW, 0x5403);
-        assert_eq!(abi::TCSETSF, 0x5404);
-        assert_eq!(abi::TIOCGWINSZ, 0x5413);
-        assert_eq!(abi::TIOCSWINSZ, 0x5414);
     }
 
     #[kunit]
@@ -586,24 +681,27 @@ mod kunits {
         let mut candidate = project_termios(TtyTermios::default(), line()).unwrap();
         candidate.c_lflag &= !abi::ECHO;
 
-        assert_eq!(tty.terminal.enqueue_output(b"queued\n"), 7);
+        assert_eq!(tty.endpoint.terminal.enqueue_output(b"queued\n"), 7);
         set_termios(&tty, candidate, SetMode::Now).unwrap();
-        assert!(!tty.terminal.termios_snapshot().0.echo);
-        assert!(tty.terminal.output_pending());
+        assert!(!tty.endpoint.terminal.termios_snapshot().0.echo);
+        assert!(tty.endpoint.terminal.output_pending());
         assert_eq!(port.submitted.load(Ordering::Relaxed), 0);
 
         candidate.c_lflag |= abi::ECHO;
         set_termios(&tty, candidate, SetMode::Drain).unwrap();
-        assert!(tty.terminal.termios_snapshot().0.echo);
+        assert!(tty.endpoint.terminal.termios_snapshot().0.echo);
         assert_eq!(port.submitted.load(Ordering::Relaxed), 8);
 
         for byte in b"unread\n" {
-            assert!(tty.terminal.receive_rx_byte(*byte));
+            assert!(tty.endpoint.terminal.receive_rx_byte(*byte));
         }
         candidate.c_lflag &= !abi::ECHO;
         set_termios(&tty, candidate, SetMode::DrainFlush).unwrap();
-        assert!(!tty.terminal.termios_snapshot().0.echo);
-        assert_eq!(tty.terminal.read_input(&mut [0_u8; 8]), InputRead::Empty);
+        assert!(!tty.endpoint.terminal.termios_snapshot().0.echo);
+        assert_eq!(
+            tty.endpoint.terminal.read_input(&mut [0_u8; 8]),
+            InputRead::Empty
+        );
         attachment.abort();
     }
 

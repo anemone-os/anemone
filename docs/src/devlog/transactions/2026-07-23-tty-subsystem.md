@@ -1,11 +1,11 @@
 # 2026-07-23 - TTY Subsystem
 
-**Status:** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Closed / Stage 3 Ready / Not Started
+**Status:** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Outline / Unauthorized
 **Owners:** doruche, Codex
 **Area:** device / TTY / serial / VFS / signal / task topology / job control
 **Canonical Plan:** [RFC-20260722-tty-subsystem](../../rfcs/tty-subsystem/index.md), [目标与不变量](../../rfcs/tty-subsystem/invariants.md), [迁移实施计划](../../rfcs/tty-subsystem/implementation.md)
 **Canonical Revision:** R1
-**Current Phase:** Stage 3 Ready / Not Started / Unauthorized; `TTY-DATA-CUTOVER` Effective
+**Current Phase:** Stage 3 Closed / Stage 4 Outline / Unauthorized; `TTY-DATA-CUTOVER` Effective; `TTY-JOBCTL-CUTOVER` Not Cut Over
 
 ## Scope and contract boundary
 
@@ -947,3 +947,57 @@ cutover unit，不产生R2，不修改invariants、tracking issues、current con
 ID与`TTY-JOBCTL-CUTOVER`继续Not Cut Over。Stage 3现在是**Ready / Not Started / Unauthorized**；本gate只修改
 canonical docs并同步transaction/navigation，没有修改实现源码，也没有运行kernel/app build、KUnit、QEMU、
 BusyBox、LTP或hardware test。本轮在解析关闭后停止，不自动激活Stage 3。
+
+## Stage 3 activation - 2026-07-23
+
+**Authorization / entry:** 用户明确授权以本轮唯一GOAL完成Stage 3，并要求一个不可拆checkpoint、一个`tty:`提交，
+关闭后不得自动进入下一gate。实现入口为`dev/drc/omega@61271f8b`，active platform为
+`qemu-virt-rv64-pretest`；canonical第8节的单一vertical slice、ABI/errno matrix、review gate、RV64-only
+validation floor与Resolved Write Set Manifest保持冻结。Stage 4、`TTY-JOBCTL-CUTOVER`、current contracts、
+register、invariants与tracking issues均未获授权。
+
+**Preflight / activation:** live source再次确认同步open/ioctl entry足以构造短命caller；Session、ProcessGroup、Signal、
+ThreadGroup lifecycle与TTY endpoint分别保留原owner。实现不需要修改generic VFS/devfs/CharDev、topology membership、
+Signal pending/generation/delivery、job-control truth、scheduler/wait、architecture、rootfs或wrapper。Stage 3因此进入
+**Active**；四个relation/job-control ID与`TTY-JOBCTL-CUTOVER`继续Not Cut Over。
+
+## Stage 3 controlling relation candidate and review closure - 2026-07-23
+
+**Implementation:** `device::tty::relation`以预分配single-guard registry唯一拥有session-terminal relation、
+foreground stable capability与checked generation；所有task/topology/Signal decision、日志与复杂drop均在guard外。
+task/jobctl提供TTY专用caller、stable Session/ProcessGroup与session-leader lifecycle capability，Signal只暴露
+`SIGTTOU` blocked/ignored/actionable窄分类。TTY发布caller-relative 5:0 `/dev/tty`，在现有FileOps实现
+`TIOCSCTTY`、`TIOCNOTTY`、`TIOCGSID`、`TIOCGPGRP`和`TIOCSPGRP`，并通过exit owner的guards-out handoff完成
+显式/退出cleanup。`TtyFile`只保存endpoint，不再复制Terminal引用；foreground blocked/ignored/actionable三分支、
+errno、restart/no-mutation与generation revalidation均在同一relation route闭合。
+
+**Userspace oracle:** `anemone-rs`只补现有`setsid`与TTY ioctl的最小typed wrapper；既有`tty-test` auto mode追加12项
+relation/errno/lifecycle case，没有增加app、manifest、launcher或wrapper mode。每个Stage 3 child使用有界wait；
+错误、超时与poll失败统一进入`SIGKILL`加`WNOHANG`有界清理。按用户要求删除纯重复的
+`asm_generic_layout_and_ioctl_constants`内核KUnit，并同时删除ABI crate中没有独立oracle的同类普通test；
+ABI owner的编译期layout/offset assertions继续保留。
+
+**Review / corrections:** 首轮独立终审报告1 Apollyon、0 Keter、2 Euclid。Apollyon指出explicit/exit detach可能因
+并发foreground generation推进而一次性失败；两条路径现均在guards-out循环重新snapshot，generation mismatch只
+触发重试。两个Euclid分别是child清理仍含提前返回/阻塞wait，以及asm-generic普通test仍重复常量定义；均按上文
+修复。最终复审为**0 Apollyon / 0 Keter / 0 Euclid**。source audit确认relation/session/foreground没有第二份cache，
+guard内不调用topology、Signal、Event、Terminal或devfs，复杂capability drop均guards-out；冻结manifest外与
+Stage 4 source diff为零。
+
+## Stage 3 RV64 validation and closure - 2026-07-23
+
+**Final validation:** 最终candidate通过`git diff --check`、`just fmt --check`、active
+`qemu-virt-rv64-pretest`的repository kernel build与`just app build tty-test --arch riscv64`。完整repository
+wrapper日志`build/tty-stage3-rv64.log`记录base `61271f8bb464a3a553db5b01091d0accb6514582`、BusyBox 1.33.1
+SHA-256 `fd9cb9dc66ba740dc94b055b564de0597453adfceef9be158b3774ca58b95241`、rootfs SHA-256
+`644eb2fdfb2354f4b42b4fc39444179d5b1fbaae322c905fa5a3a5eb2d8e17f6`与kernel SHA-256
+`2db81acb4beeff3ae37f718c52aef2416a3a3f3054d7ec83ebabb6ab5646e777`。239项enabled KUnit全部通过；
+总数相对Stage 2减少1项仅来自用户要求删除的重复KUnit。guest为`TTYTEST:SUMMARY:PASS:34`且零FAIL，其中12项
+Stage 3 relation/job-control case全部PASS；既有data-plane、BusyBox stty/vi与binary/ONLCR/drain/row-29 host byte
+oracle继续通过，wrapper正常关机。LA64 compile/runtime与hardware均Not Run，RV64结果不得外推。
+
+**Closure / stop:** Stage 3全部manifest diff、ABI matrix、eager/lazy cleanup、review与RV64 floor闭合，且未引入
+临时success stub、双relation truth或新register缺口；Stage 3记为**Closed**。本阶段只验证Gate P2 candidate，
+不执行contract cutover：`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`、`TTY-ABI-001`与
+`TTY-JOBCTL-CUTOVER`全部继续**Not Cut Over**，RFC保持**Accepted for Implementation**。Stage 4仍为
+**Outline / Unauthorized**；本轮在Stage 3 closure后立即停止，没有解析`3 -> 4` gate或进入Stage 4。

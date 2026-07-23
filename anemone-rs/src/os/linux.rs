@@ -180,7 +180,8 @@ pub mod fs {
 
 pub mod tty {
     use anemone_abi::tty::linux::{
-        TCGETS, TCSETS, TCSETSF, TCSETSW, TIOCGWINSZ, TIOCSWINSZ, Termios, Winsize,
+        TCGETS, TCSETS, TCSETSF, TCSETSW, TIOCGPGRP, TIOCGSID, TIOCGWINSZ, TIOCNOTTY,
+        TIOCSCTTY, TIOCSPGRP, TIOCSWINSZ, Termios, Winsize,
     };
 
     use crate::{os::linux::fs::Fd, prelude::*, sys::linux::fs};
@@ -228,6 +229,34 @@ pub mod tty {
             winsize as *const Winsize as u64,
         )
         .map(|_| ())
+    }
+
+    pub fn tiocsctty(fd: Fd, argument: u64) -> Result<(), Errno> {
+        fs::ioctl(fd as u64, TIOCSCTTY as u64, argument).map(|_| ())
+    }
+
+    pub fn tiocnotty(fd: Fd) -> Result<(), Errno> {
+        fs::ioctl(fd as u64, TIOCNOTTY as u64, 0).map(|_| ())
+    }
+
+    pub fn tcgetsid(fd: Fd) -> Result<i32, Errno> {
+        let mut sid = 0i32;
+        fs::ioctl(fd as u64, TIOCGSID as u64, &mut sid as *mut i32 as u64)?;
+        Ok(sid)
+    }
+
+    pub fn tcgetpgrp(fd: Fd) -> Result<i32, Errno> {
+        let mut pgid = 0i32;
+        fs::ioctl(
+            fd as u64,
+            TIOCGPGRP as u64,
+            &mut pgid as *mut i32 as u64,
+        )?;
+        Ok(pgid)
+    }
+
+    pub fn tcsetpgrp(fd: Fd, pgid: i32) -> Result<(), Errno> {
+        fs::ioctl(fd as u64, TIOCSPGRP as u64, &pgid as *const i32 as u64).map(|_| ())
     }
 
     /// Issues an ioctl whose command has no argument payload.
@@ -614,6 +643,10 @@ pub mod process {
 
     pub fn setpgid(pid: i32, pgid: i32) -> Result<(), Errno> {
         process::setpgid(pid, pgid).map(|_| ())
+    }
+
+    pub fn setsid() -> Result<Tid, Errno> {
+        process::setsid().map(|sid| sid as Tid)
     }
 
     #[repr(transparent)]

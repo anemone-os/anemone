@@ -11,10 +11,12 @@ use anemone_rs::{
             poll::{POLLIN, POLLOUT, PollFd},
             select::FdSet,
         },
+        process::linux::signal::{self as linux_signal, SigAction, SigSet},
         system::native::power::SHUTDOWN_MAGIC,
         time::linux::TimeSpec,
         tty::linux::{
-            ECHO, ICANON, ICRNL, ONLCR, OPOST, Termios, VEOF, VERASE, VKILL, VMIN, VTIME, Winsize,
+            ECHO, ICANON, ICRNL, ONLCR, OPOST, TIOCGSID, Termios, VEOF, VERASE, VKILL, VMIN, VTIME,
+            Winsize,
         },
     },
     os::{
@@ -25,12 +27,16 @@ use anemone_rs::{
                 openat, pipe2, ppoll, pselect, read, write,
             },
             process::{
-                WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork,
-                signal::{SigNo, kill},
+                WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, getpid, sched_yield,
+                setpgid, setsid,
+                signal::{SigNo, SigProcMaskHow, kill, sigaction, sigprocmask},
                 wait4,
             },
             time::nanosleep,
-            tty::{SetTermiosWhen, get_winsize, ioctl_noarg, set_winsize, tcgetattr, tcsetattr},
+            tty::{
+                SetTermiosWhen, get_winsize, ioctl_noarg, set_winsize, tcgetattr, tcgetpgrp,
+                tcgetsid, tcsetattr, tcsetpgrp, tiocnotty, tiocsctty,
+            },
         },
     },
     prelude::*,
@@ -54,6 +60,11 @@ const VI_OBSERVE_TICK: TimeSpec = TimeSpec {
     tv_nsec: 20_000_000,
 };
 const VI_OBSERVE_RETRIES: usize = 100;
+const CHILD_WAIT_RETRIES: usize = 300;
+const CHILD_WAIT_TICK: TimeSpec = TimeSpec {
+    tv_sec: 0,
+    tv_nsec: 10_000_000,
+};
 const UNKNOWN_TTY_IOCTL: u32 = 0x54ff;
 const STDIN_FILENO: Fd = anemone_rs::abi::fs::linux::STDIN_FILENO as Fd;
 const STDOUT_FILENO: Fd = anemone_rs::abi::fs::linux::STDOUT_FILENO as Fd;
@@ -193,6 +204,395 @@ fn wait_child(pid: u32) -> Result<(), Errno> {
         WaitOptions::empty(),
     )?;
     expect(waited == Some(pid) && matches!(status.read(), WStatus::Exited(0)))
+}
+
+fn kill_and_reap_child_bounded(pid: u32) {
+    let _ = kill(pid as i32, SigNo::SIGKILL);
+    for _ in 0..CHILD_WAIT_RETRIES {
+        let mut status = WStatusRaw::EMPTY;
+        match wait4(
+            WaitFor::ChildWithTgid(pid),
+            Some(&mut status),
+            WaitOptions::NOHANG,
+        ) {
+            Ok(Some(_)) | Err(ECHILD) => return,
+            Ok(None) | Err(_) => {
+                let _ = nanosleep(CHILD_WAIT_TICK);
+            },
+        }
+    }
+}
+
+fn wait_child_bounded(pid: u32, options: WaitOptions) -> Result<WStatus, Errno> {
+    let option_bits = options.bits() | WaitOptions::NOHANG.bits();
+    for _ in 0..CHILD_WAIT_RETRIES {
+        let mut status = WStatusRaw::EMPTY;
+        match wait4(
+            WaitFor::ChildWithTgid(pid),
+            Some(&mut status),
+            WaitOptions::from_bits_retain(option_bits),
+        ) {
+            Ok(Some(waited)) if waited == pid => return Ok(status.read()),
+            Ok(Some(waited)) => {
+                let _ = waited;
+                kill_and_reap_child_bounded(pid);
+                return Err(EIO);
+            },
+            Ok(None) => {
+                if let Err(errno) = nanosleep(CHILD_WAIT_TICK) {
+                    kill_and_reap_child_bounded(pid);
+                    return Err(errno);
+                }
+            },
+            Err(errno) => {
+                kill_and_reap_child_bounded(pid);
+                return Err(errno);
+            },
+        }
+    }
+    kill_and_reap_child_bounded(pid);
+    Err(EIO)
+}
+
+fn finish_child(result: Result<(), Errno>) -> ! {
+    exit(if result.is_ok() { 0 } else { 1 })
+}
+
+fn run_new_session(body: fn() -> Result<(), Errno>) -> Result<(), Errno> {
+    match fork()? {
+        Some(pid) => expect(matches!(
+            wait_child_bounded(pid, WaitOptions::empty())?,
+            WStatus::Exited(0)
+        )),
+        None => finish_child(setsid().and_then(|_| body())),
+    }
+}
+
+fn tty_serial(flags: u32) -> Result<Fd, Errno> {
+    openat(AtFd::Cwd, Path::new("/dev/ttyS0"), flags, 0)
+}
+
+fn expect_open_dev_tty(errno: Errno) -> Result<(), Errno> {
+    match openat(AtFd::Cwd, Path::new("/dev/tty"), O_RDWR, 0) {
+        Err(actual) if actual == errno => Ok(()),
+        Ok(fd) => {
+            close(fd)?;
+            Err(EIO)
+        },
+        Err(_) => Err(EIO),
+    }
+}
+
+fn install_sigttou_ignore() -> Result<(), Errno> {
+    sigaction(
+        SigNo::SIGTTOU,
+        Some(&SigAction {
+            sighandler: linux_signal::SIG_IGN as *const (),
+            sa_flags: 0,
+            sa_restorer: core::ptr::null(),
+            sa_mask: SigSet { bits: 0 },
+        }),
+        None,
+    )
+}
+
+fn sigttou_set() -> SigSet {
+    SigSet {
+        bits: 1u64 << (SigNo::SIGTTOU.as_usize() - 1),
+    }
+}
+
+fn test_controlling_node_without_relation(_baseline: &Baseline) -> Result<(), Errno> {
+    let stat = fstatat(AtFd::Cwd, Path::new("/dev/tty"))?;
+    expect(stat.st_mode & S_IFMT == S_IFCHR)?;
+    expect(device_numbers(stat.st_rdev) == (5, 0))?;
+    expect_open_dev_tty(ENXIO)
+}
+
+fn test_plain_open_does_not_attach(_baseline: &Baseline) -> Result<(), Errno> {
+    let fd = tty_serial(O_RDWR)?;
+    expect_open_dev_tty(ENXIO)?;
+    close(fd)
+}
+
+fn acquire_query_idempotent_body() -> Result<(), Errno> {
+    let pid = getpid()?;
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    expect(tcgetsid(fd)? == pid as i32)?;
+    expect(tcgetpgrp(fd)? == pid as i32)?;
+    let controlling = openat(AtFd::Cwd, Path::new("/dev/tty"), O_RDWR, 0)?;
+    let stat = fstat(controlling)?;
+    expect(device_numbers(stat.st_rdev) == (5, 0))?;
+    close(controlling)?;
+
+    // Exact-relation idempotence precedes the first-acquire readable check.
+    let write_only = tty_serial(O_WRONLY)?;
+    tiocsctty(write_only, 0)?;
+    close(write_only)?;
+    match ioctl_noarg(fd, TIOCGSID) {
+        Err(EFAULT) => {},
+        _ => return Err(EIO),
+    }
+    expect(tcgetsid(fd)? == pid as i32)?;
+    close(fd)
+}
+
+fn test_acquire_query_idempotent(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(acquire_query_idempotent_body)
+}
+
+fn rejected_acquire_body() -> Result<(), Errno> {
+    let fd = tty_serial(O_RDWR)?;
+    match tiocsctty(fd, 1) {
+        Err(EPERM) => {},
+        _ => return Err(EIO),
+    }
+    let write_only = tty_serial(O_WRONLY)?;
+    match tiocsctty(write_only, 0) {
+        Err(EPERM) => {},
+        _ => return Err(EIO),
+    }
+    expect_open_dev_tty(ENXIO)?;
+    close(write_only)?;
+
+    match fork()? {
+        Some(pid) => {
+            expect(matches!(
+                wait_child_bounded(pid, WaitOptions::empty())?,
+                WStatus::Exited(0)
+            ))?;
+        },
+        None => finish_child(match tiocsctty(fd, 0) {
+            Err(EPERM) => Ok(()),
+            _ => Err(EIO),
+        }),
+    }
+    close(fd)
+}
+
+fn test_rejected_acquire_paths(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(rejected_acquire_body)
+}
+
+fn occupied_relation_body() -> Result<(), Errno> {
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    match fork()? {
+        Some(pid) => expect(matches!(
+            wait_child_bounded(pid, WaitOptions::empty())?,
+            WStatus::Exited(0)
+        )),
+        None => finish_child((|| {
+            let pid = setsid()?;
+            match tiocsctty(fd, 0) {
+                Err(EPERM) => {},
+                _ => return Err(EIO),
+            }
+            match tcgetsid(fd) {
+                Err(ENOTTY) => {},
+                _ => return Err(EIO),
+            }
+            match tcgetpgrp(fd) {
+                Err(ENOTTY) => {},
+                _ => return Err(EIO),
+            }
+            match tcsetpgrp(fd, pid as i32) {
+                Err(ENOTTY) => {},
+                _ => return Err(EIO),
+            }
+            match tiocnotty(fd) {
+                Err(ENOTTY) => Ok(()),
+                _ => Err(EIO),
+            }
+        })()),
+    }
+}
+
+fn test_occupied_and_wrong_session(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(occupied_relation_body)
+}
+
+fn foreground_allow_body() -> Result<(), Errno> {
+    let pid = getpid()?;
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    tcsetpgrp(fd, pid as i32)?;
+    expect(tcgetpgrp(fd)? == pid as i32)
+}
+
+fn test_foreground_allow(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(foreground_allow_body)
+}
+
+#[derive(Clone, Copy)]
+enum BackgroundDisposition {
+    Blocked,
+    Ignored,
+}
+
+fn background_reclaim(disposition: BackgroundDisposition) -> Result<(), Errno> {
+    let leader = getpid()?;
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    match fork()? {
+        Some(pid) => {
+            expect(matches!(
+                wait_child_bounded(pid, WaitOptions::empty())?,
+                WStatus::Exited(0)
+            ))?;
+            expect(tcgetpgrp(fd)? == 0)?;
+            tcsetpgrp(fd, leader as i32)?;
+            expect(tcgetpgrp(fd)? == leader as i32)
+        },
+        None => finish_child((|| {
+            let pid = getpid()?;
+            setpgid(0, 0)?;
+            match disposition {
+                BackgroundDisposition::Blocked => {
+                    sigprocmask(SigProcMaskHow::Block, Some(&sigttou_set()), None)?
+                },
+                BackgroundDisposition::Ignored => install_sigttou_ignore()?,
+            }
+            tcsetpgrp(fd, pid as i32)
+        })()),
+    }
+}
+
+fn blocked_reclaim_body() -> Result<(), Errno> {
+    background_reclaim(BackgroundDisposition::Blocked)
+}
+
+fn ignored_reclaim_body() -> Result<(), Errno> {
+    background_reclaim(BackgroundDisposition::Ignored)
+}
+
+fn test_background_blocked_reclaim(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(blocked_reclaim_body)
+}
+
+fn test_background_ignored_reclaim(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(ignored_reclaim_body)
+}
+
+fn actionable_sigttou_body() -> Result<(), Errno> {
+    let leader = getpid()?;
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    let pid = match fork()? {
+        Some(pid) => pid,
+        None => {
+            let result = (|| {
+                let pid = getpid()?;
+                setpgid(0, 0)?;
+                tcsetpgrp(fd, pid as i32)?;
+                Err(EIO)
+            })();
+            finish_child(result)
+        },
+    };
+    let stopped = wait_child_bounded(pid, WaitOptions::UNTRACED)?;
+    let foreground_unchanged = tcgetpgrp(fd) == Ok(leader as i32);
+    let _ = kill(pid as i32, SigNo::SIGKILL);
+    let reaped = wait_child_bounded(pid, WaitOptions::empty());
+    expect(matches!(
+        stopped,
+        WStatus::Stopped(signo) if signo == SigNo::SIGTTOU.as_usize() as i8
+    ))?;
+    expect(foreground_unchanged)?;
+    expect(matches!(reaped?, WStatus::Signal(_)))
+}
+
+fn test_actionable_sigttou(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(actionable_sigttou_body)
+}
+
+fn candidate_errno_body() -> Result<(), Errno> {
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    match tcsetpgrp(fd, -1) {
+        Err(EINVAL) => {},
+        _ => return Err(EIO),
+    }
+    match tcsetpgrp(fd, i32::MAX) {
+        Err(ESRCH) => {},
+        _ => return Err(EIO),
+    }
+
+    let other = match fork()? {
+        Some(pid) => pid,
+        None => finish_child(setsid().and_then(|_| {
+            loop {
+                sched_yield()?;
+            }
+        })),
+    };
+    let mut observed_other_session = false;
+    let mut poll_error = None;
+    for _ in 0..CHILD_WAIT_RETRIES {
+        match tcsetpgrp(fd, other as i32) {
+            Err(EPERM) => {
+                observed_other_session = true;
+                break;
+            },
+            Err(ESRCH) => {
+                if let Err(errno) = nanosleep(CHILD_WAIT_TICK) {
+                    poll_error = Some(errno);
+                    break;
+                }
+            },
+            _ => break,
+        }
+    }
+    let _ = kill(other as i32, SigNo::SIGKILL);
+    let reaped = wait_child_bounded(other, WaitOptions::empty());
+    if let Some(errno) = poll_error {
+        let _ = reaped;
+        return Err(errno);
+    }
+    expect(observed_other_session)?;
+    expect(matches!(reaped?, WStatus::Signal(_)))
+}
+
+fn test_candidate_errno(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(candidate_errno_body)
+}
+
+fn detach_reacquire_body() -> Result<(), Errno> {
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    match fork()? {
+        Some(pid) => expect(matches!(
+            wait_child_bounded(pid, WaitOptions::empty())?,
+            WStatus::Exited(0)
+        ))?,
+        None => finish_child(match tiocnotty(fd) {
+            Err(EPERM) => Ok(()),
+            _ => Err(EIO),
+        }),
+    }
+    tiocnotty(fd)?;
+    expect_open_dev_tty(ENXIO)?;
+    match tiocnotty(fd) {
+        Err(ENOTTY) => {},
+        _ => return Err(EIO),
+    }
+    tiocsctty(fd, 0)?;
+    let controlling = openat(AtFd::Cwd, Path::new("/dev/tty"), O_RDWR, 0)?;
+    close(controlling)
+}
+
+fn test_detach_reacquire(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(detach_reacquire_body)
+}
+
+fn attach_and_exit_body() -> Result<(), Errno> {
+    tiocsctty(tty_serial(O_RDWR)?, 0)
+}
+
+fn test_exit_cleanup_reuse(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(attach_and_exit_body)?;
+    run_new_session(attach_and_exit_body)
 }
 
 fn spawn_busybox(argv: &[&str]) -> Result<(), Errno> {
@@ -682,6 +1082,58 @@ fn run_auto(baseline: &Baseline) -> Results {
     results.case("unsupported-rollback", baseline, test_unsupported_rollback);
     results.case("poll-pselect-readiness", baseline, test_readiness);
     results.case("unknown-ioctl", baseline, test_unknown_ioctl);
+    results.case(
+        "controlling-node-without-relation",
+        baseline,
+        test_controlling_node_without_relation,
+    );
+    results.case(
+        "plain-open-does-not-attach",
+        baseline,
+        test_plain_open_does_not_attach,
+    );
+    results.case(
+        "controlling-acquire-query-idempotent",
+        baseline,
+        test_acquire_query_idempotent,
+    );
+    results.case(
+        "controlling-rejected-acquire-paths",
+        baseline,
+        test_rejected_acquire_paths,
+    );
+    results.case(
+        "controlling-occupied-wrong-session",
+        baseline,
+        test_occupied_and_wrong_session,
+    );
+    results.case("foreground-allow", baseline, test_foreground_allow);
+    results.case(
+        "background-blocked-sigttou-reclaim",
+        baseline,
+        test_background_blocked_reclaim,
+    );
+    results.case(
+        "background-ignored-sigttou-reclaim",
+        baseline,
+        test_background_ignored_reclaim,
+    );
+    results.case(
+        "background-actionable-sigttou-stop",
+        baseline,
+        test_actionable_sigttou,
+    );
+    results.case("foreground-candidate-errno", baseline, test_candidate_errno);
+    results.case(
+        "controlling-detach-reacquire",
+        baseline,
+        test_detach_reacquire,
+    );
+    results.case(
+        "controlling-exit-cleanup-reuse",
+        baseline,
+        test_exit_cleanup_reuse,
+    );
     results.case("busybox-stty-roundtrip", baseline, test_busybox_stty);
     results.case("busybox-vi-auto", baseline, test_busybox_vi);
     results

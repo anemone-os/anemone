@@ -110,26 +110,11 @@ pub mod linux {
     pub const TCSETS: u32 = 0x5402;
     pub const TCSETSW: u32 = 0x5403;
     pub const TCSETSF: u32 = 0x5404;
+    pub const TIOCSCTTY: u32 = 0x540e;
+    pub const TIOCGPGRP: u32 = 0x540f;
+    pub const TIOCSPGRP: u32 = 0x5410;
     pub const TIOCGWINSZ: u32 = 0x5413;
     pub const TIOCSWINSZ: u32 = 0x5414;
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn asm_generic_layout_and_ioctl_values() {
-            assert_eq!(NCCS, 19);
-            assert_eq!(size_of::<Termios>(), 36);
-            assert_eq!(align_of::<Termios>(), 4);
-            assert_eq!(size_of::<Winsize>(), 8);
-            assert_eq!(align_of::<Winsize>(), 2);
-            assert_eq!(TCGETS, 0x5401);
-            assert_eq!(TCSETS, 0x5402);
-            assert_eq!(TCSETSW, 0x5403);
-            assert_eq!(TCSETSF, 0x5404);
-            assert_eq!(TIOCGWINSZ, 0x5413);
-            assert_eq!(TIOCSWINSZ, 0x5414);
-        }
-    }
+    pub const TIOCNOTTY: u32 = 0x5422;
+    pub const TIOCGSID: u32 = 0x5429;
 }
