@@ -84,7 +84,7 @@ impl TtyDiscipline {
             return ReceiveResult::Consumed;
         }
 
-        if byte == termios.erase {
+        if termios.matches_control(termios.erase, byte) {
             if self.canonical_pending_len == 0 {
                 return ReceiveResult::Consumed;
             }
@@ -98,7 +98,7 @@ impl TtyDiscipline {
             return ReceiveResult::Consumed;
         }
 
-        if byte == termios.kill {
+        if termios.matches_control(termios.kill, byte) {
             let echo = termios.kill_echo();
             if !output.can_enqueue(&echo, termios) {
                 return ReceiveResult::Backpressured;
@@ -108,7 +108,7 @@ impl TtyDiscipline {
             return ReceiveResult::Consumed;
         }
 
-        if byte == termios.eof {
+        if termios.matches_control(termios.eof, byte) {
             if !self.can_commit_record(self.canonical_pending_len) {
                 return ReceiveResult::Backpressured;
             }

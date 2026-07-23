@@ -1,6 +1,9 @@
 pub mod fs {
     use alloc::ffi::CString;
-    use anemone_abi::fs::linux::{fcntl, open, stat::Stat};
+    use anemone_abi::{
+        fs::linux::{fcntl, open, poll::PollFd, stat::Stat},
+        time::linux::TimeSpec,
+    };
     use bitflags::bitflags;
 
     use crate::{prelude::*, sys::linux::fs};
@@ -91,6 +94,17 @@ pub mod fs {
         fs::fcntl(fd as u64, fcntl::F_SETFL as u64, flags as u64).map(|_| ())
     }
 
+    pub fn ppoll(fds: &mut [PollFd], timeout: Option<&TimeSpec>) -> Result<usize, Errno> {
+        fs::ppoll(
+            fds.as_mut_ptr() as u64,
+            fds.len() as u64,
+            timeout.map_or(0, |timeout| timeout as *const TimeSpec as u64),
+            0,
+            0,
+        )
+        .map(|ready| ready as usize)
+    }
+
     pub fn unlinkat(dirfd: AtFd, path: &Path, flags: u32) -> Result<(), Errno> {
         let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
         fs::unlinkat(dirfd.to_raw() as u64, path.as_ptr() as u64, flags as u64).map(|_| ())
@@ -137,6 +151,59 @@ pub mod fs {
     pub fn umount(target: &Path) -> Result<(), Errno> {
         let target_cstr = CString::new(target.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
         fs::umount(target_cstr.as_ptr() as u64, 0).map(|_| ())
+    }
+}
+
+pub mod tty {
+    use anemone_abi::tty::linux::{
+        TCGETS, TCSETS, TCSETSF, TCSETSW, TIOCGWINSZ, TIOCSWINSZ, Termios, Winsize,
+    };
+
+    use crate::{os::linux::fs::Fd, prelude::*, sys::linux::fs};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum SetTermiosWhen {
+        Now,
+        Drain,
+        DrainFlush,
+    }
+
+    pub fn tcgetattr(fd: Fd) -> Result<Termios, Errno> {
+        let mut termios = Termios::default();
+        fs::ioctl(
+            fd as u64,
+            TCGETS as u64,
+            &mut termios as *mut Termios as u64,
+        )?;
+        Ok(termios)
+    }
+
+    pub fn tcsetattr(fd: Fd, when: SetTermiosWhen, termios: &Termios) -> Result<(), Errno> {
+        let command = match when {
+            SetTermiosWhen::Now => TCSETS,
+            SetTermiosWhen::Drain => TCSETSW,
+            SetTermiosWhen::DrainFlush => TCSETSF,
+        };
+        fs::ioctl(fd as u64, command as u64, termios as *const Termios as u64).map(|_| ())
+    }
+
+    pub fn get_winsize(fd: Fd) -> Result<Winsize, Errno> {
+        let mut winsize = Winsize::default();
+        fs::ioctl(
+            fd as u64,
+            TIOCGWINSZ as u64,
+            &mut winsize as *mut Winsize as u64,
+        )?;
+        Ok(winsize)
+    }
+
+    pub fn set_winsize(fd: Fd, winsize: &Winsize) -> Result<(), Errno> {
+        fs::ioctl(
+            fd as u64,
+            TIOCSWINSZ as u64,
+            winsize as *const Winsize as u64,
+        )
+        .map(|_| ())
     }
 }
 
@@ -455,9 +522,7 @@ pub mod process {
             raw_clone_thread(
                 flags.bits() as u64,
                 stack_top as u64,
-                parent_tid
-                    .map(|tid| tid as *mut Tid as u64)
-                    .unwrap_or(0),
+                parent_tid.map(|tid| tid as *mut Tid as u64).unwrap_or(0),
                 tls_ptr as u64,
                 child_tid.map(|tid| tid as *mut Tid as u64).unwrap_or(0),
                 entry as usize,

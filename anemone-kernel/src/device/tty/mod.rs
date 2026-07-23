@@ -1,4 +1,5 @@
 mod discipline;
+mod file;
 mod port;
 mod terminal;
 
@@ -55,6 +56,20 @@ struct TtyWakeSource {
     worker: SpinLock<Option<KThreadHandle>>,
 }
 
+#[derive(Clone)]
+pub(super) struct TtyWakeHandle {
+    source: Arc<TtyWakeSource>,
+}
+
+impl TtyWakeHandle {
+    pub(super) fn wake(&self) {
+        let worker = self.source.worker.lock().as_ref().cloned();
+        if let Some(worker) = worker {
+            worker.wake();
+        }
+    }
+}
+
 /// Owns one unpublished endpoint and its worker until the publication stage.
 ///
 /// Dropping the attachment is the pre-publication abort path. It first removes
@@ -68,6 +83,19 @@ pub(crate) struct TtyPortAttachment {
 impl TtyPortAttachment {
     pub(crate) fn terminal(&self) -> &Arc<Terminal> {
         &self.endpoint.terminal
+    }
+
+    pub(crate) fn opened_file(&self) -> OpenedFile {
+        file::opened_file(
+            self.endpoint.terminal.clone(),
+            TtyWakeHandle {
+                source: self
+                    .wake_source
+                    .as_ref()
+                    .expect("detached TTY attachment opened a file")
+                    .clone(),
+            },
+        )
     }
 
     pub(crate) fn abort(mut self) {

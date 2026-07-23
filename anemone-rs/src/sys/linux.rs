@@ -64,6 +64,30 @@ pub mod fs {
         unsafe { syscall(SYS_FCNTL, fd, cmd, arg, 0, 0, 0) }
     }
 
+    pub fn ioctl(fd: u64, cmd: u64, arg: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_IOCTL, fd, cmd, arg, 0, 0, 0) }
+    }
+
+    pub fn ppoll(
+        fds_ptr: u64,
+        nfds: u64,
+        timeout_ptr: u64,
+        sigmask_ptr: u64,
+        sigsetsize: u64,
+    ) -> Result<u64, Errno> {
+        unsafe {
+            syscall(
+                SYS_PPOLL,
+                fds_ptr,
+                nfds,
+                timeout_ptr,
+                sigmask_ptr,
+                sigsetsize,
+                0,
+            )
+        }
+    }
+
     pub fn getcwd(buf_ptr: u64, size: u64) -> Result<u64, Errno> {
         unsafe { syscall(SYS_GETCWD, buf_ptr, size, 0, 0, 0, 0) }
     }
@@ -167,17 +191,7 @@ pub mod process {
         #[cfg(not(target_arch = "loongarch64"))]
         let (arg3, arg4) = (tls_ptr, child_tid_ptr);
 
-        unsafe {
-            syscall(
-                SYS_CLONE,
-                flags,
-                stack_ptr,
-                parent_tid_ptr,
-                arg3,
-                arg4,
-                0,
-            )
-        }
+        unsafe { syscall(SYS_CLONE, flags, stack_ptr, parent_tid_ptr, arg3, arg4, 0) }
     }
 
     pub fn exit(code: u64) -> Result<u64, Errno> {
@@ -254,17 +268,7 @@ pub mod process {
         use super::*;
 
         pub fn kill(pid: i32, sig: u32) -> Result<u64, Errno> {
-            unsafe {
-                syscall(
-                    SYS_KILL,
-                    pid as i64 as u64,
-                    sig as u64,
-                    0,
-                    0,
-                    0,
-                    0,
-                )
-            }
+            unsafe { syscall(SYS_KILL, pid as i64 as u64, sig as u64, 0, 0, 0, 0) }
         }
 
         pub fn sigaltstack(uss: u64, uoss: u64) -> Result<u64, Errno> {

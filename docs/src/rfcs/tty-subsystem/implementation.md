@@ -1,6 +1,6 @@
 # TTY Subsystem 迁移实施计划
 
-**状态：** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Active / Checkpoint 1 Closed / Checkpoint 2 Active
+**状态：** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Active / Checkpoint 1 Closed / Checkpoint 2 Closed / Checkpoint 3 Not Started
 **最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-tty-subsystem](./index.md)
 **目标与不变量：** [TTY Subsystem 目标与不变量](./invariants.md)
@@ -153,7 +153,7 @@ transaction 中临时切块。
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 只读闭合 live interface、oracle、carrier 候选与模块边界 | None | 已关闭；后续Stage 1 resolution亦已独立完成 |
 | Stage 1 | Closed | 建立 unpublished port/Terminal transport vertical slice，闭合 IRQ、RX、TX 与 pre-publish transaction | None | 三个checkpoint已独立关闭；RV64 candidate验证完成，LA64未验证 |
-| Stage 2 | Active / Checkpoint 1 Closed / Checkpoint 2 Active | 交付 line discipline、termios、read/write/poll、`/dev/ttyS<N>` 与 real boot stdio | `TTY-DATA-CUTOVER` | C2获准增加immutable typed File private-data accessor；C3未授权 |
+| Stage 2 | Active / Checkpoint 1 Closed / Checkpoint 2 Closed / Checkpoint 3 Not Started | 交付 line discipline、termios、read/write/poll、`/dev/ttyS<N>` 与 real boot stdio | `TTY-DATA-CUTOVER` | C2已关闭；C3未授权，不得连续进入 |
 | Stage 3 | Outline | 建立 controlling relation、`/dev/tty`、caller/topology handoff、foreground ioctls 与 cleanup | None | Stage 2 独立关闭后 |
 | Stage 4 | Outline | 闭合 terminal signals、background access、ash job control、register 与 current contract | `TTY-JOBCTL-CUTOVER` | Stage 3 独立关闭后 |
 
@@ -416,8 +416,8 @@ Validation-only inputs：
 
 阶段成熟度：
 
-- `Active / Checkpoint 1 Closed / Checkpoint 2 Active`。本节已冻结完整路线、四个checkpoint、验证、cutover和
-  resolved manifest；Checkpoint 2获准实现，Checkpoint 3仍未授权，不能连续进入。
+- `Active / Checkpoint 1 Closed / Checkpoint 2 Closed / Checkpoint 3 Not Started`。本节已冻结完整路线、四个
+  checkpoint、验证、cutover和resolved manifest；Checkpoint 2已经独立关闭，Checkpoint 3仍未授权，不能连续进入。
 - Stage 2只交付relationless serial Terminal data plane。它可以执行`TTY-DATA-CUTOVER`，但不建立
   controlling relation、`/dev/tty`、foreground selector或job-control signal effect，也不激活
   `TTY-REL-*`、`TTY-JOBCTL-*`、`TTY-LIFE-*`或完整`TTY-ABI-001`。
@@ -512,7 +512,8 @@ Validation-only inputs：
    `VMIN/VTIME`；BusyBox vi清除的`IXON`、`IEXTEN`等compatibility bit在旧snapshot本来为0时可保持0，
    但不能被设置。未支持mask、其它`c_cc`、`c_line`或hardware line bits只允许与旧snapshot相同；任何
    实际改变、noncanonical非`VMIN=1,VTIME=0`或未知组合返回`EINVAL`并完整保留旧snapshot。不得静默接受
-   会产生未实现可见行为的变化。
+   会产生未实现可见行为的变化。asm-generic `_POSIX_VDISABLE`值0可用于列出的特殊字符；discipline
+   必须把对应动作视为disabled，不能把普通NUL input误判为control action。
 5. **setter ordering。** `TCSETS`通过validation后立即commit；`TCSETSW`先等待真实output drain，再在
    terminal guard内重验generation和candidate后commit；`TCSETSF`执行同一drain/revalidation，再原子flush
    unread canonical/noncanonical input并commit。被signal中断、copy fault或revalidation失败时不发布部分

@@ -22,6 +22,14 @@ pub(super) struct TtyTermios {
     pub(super) kill: u8,
     pub(super) eof: u8,
     pub(super) susp: u8,
+    pub(super) start: u8,
+    pub(super) stop: u8,
+    pub(super) reprint: u8,
+    pub(super) discard: u8,
+    pub(super) werase: u8,
+    pub(super) lnext: u8,
+    pub(super) vmin: u8,
+    pub(super) vtime: u8,
 }
 
 impl Default for TtyTermios {
@@ -42,13 +50,29 @@ impl Default for TtyTermios {
             kill: 0x15,
             eof: 0x04,
             susp: 0x1a,
+            start: 0x11,
+            stop: 0x13,
+            reprint: 0x12,
+            discard: 0x0f,
+            werase: 0x17,
+            lnext: 0x16,
+            vmin: 1,
+            vtime: 0,
         }
     }
 }
 
 impl TtyTermios {
+    pub(super) fn matches_control(self, control: u8, byte: u8) -> bool {
+        // asm-generic uses NUL as _POSIX_VDISABLE. A disabled control
+        // character must not turn ordinary binary NUL input into an action.
+        control != 0 && byte == control
+    }
+
     pub(super) fn is_signal_control(self, byte: u8) -> bool {
-        byte == self.intr || byte == self.quit || byte == self.susp
+        self.matches_control(self.intr, byte)
+            || self.matches_control(self.quit, byte)
+            || self.matches_control(self.susp, byte)
     }
 
     pub(super) fn echo_for_byte(self, byte: u8) -> EchoBytes {
@@ -122,12 +146,14 @@ impl EchoBytes {
 
 pub(super) struct TerminalOutput {
     queue: Box<RingBuffer<u8, TTY_OUTPUT_CAPACITY_BYTES>>,
+    generation: usize,
 }
 
 impl TerminalOutput {
     fn try_new() -> Result<Self, SysError> {
         Ok(Self {
             queue: Box::try_new(RingBuffer::new()).map_err(|_| SysError::OutOfMemory)?,
+            generation: 0,
         })
     }
 
@@ -153,6 +179,9 @@ impl TerminalOutput {
             assert_eq!(self.queue.try_push_slice(token.as_slice()), token.len);
             consumed += 1;
         }
+        if consumed != 0 {
+            self.bump_generation();
+        }
         consumed
     }
 
@@ -172,14 +201,32 @@ impl TerminalOutput {
                 "Terminal output queue changed while the port owned the front snapshot"
             );
         }
+        if !expected.is_empty() {
+            self.bump_generation();
+        }
     }
 
     pub(super) fn clear(&mut self) {
+        if self.queue.is_empty() {
+            return;
+        }
         self.queue.clear();
+        self.bump_generation();
     }
 
     fn is_empty(&self) -> bool {
         self.queue.is_empty()
+    }
+
+    fn generation(&self) -> usize {
+        self.generation
+    }
+
+    fn bump_generation(&mut self) {
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .expect("TTY output generation overflow");
     }
 }
 
@@ -224,10 +271,42 @@ struct TerminalInner {
     discipline: TtyDiscipline,
     output: TerminalOutput,
     drain_check_pending: bool,
+    last_drain_generation: usize,
+    termios_generation: usize,
+    winsize: TtyWinsize,
+    poll_triggers: Vec<TtyPollTrigger>,
+    poll_spare: Vec<TtyPollTrigger>,
+    poll_handoff_active: bool,
+    poll_dirty: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct TtyWinsize {
+    pub(super) rows: u16,
+    pub(super) cols: u16,
+    pub(super) xpixel: u16,
+    pub(super) ypixel: u16,
+}
+
+impl Default for TtyWinsize {
+    fn default() -> Self {
+        Self {
+            rows: 24,
+            cols: 80,
+            xpixel: 0,
+            ypixel: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TtyPollTrigger {
+    trigger: LatchTrigger,
 }
 
 pub(crate) struct Terminal {
     inner: SpinLock<TerminalInner>,
+    state_changed: Event,
     counters: TerminalCounters,
 }
 
@@ -237,6 +316,7 @@ struct TerminalCounters {
     input_backpressure: AtomicUsize,
     output_backpressure: AtomicUsize,
     no_foreground_isig: AtomicUsize,
+    no_foreground_winsize: AtomicUsize,
     partial_port_progress: AtomicUsize,
     drain_checks: AtomicUsize,
 }
@@ -247,6 +327,7 @@ impl TerminalCounters {
             input_backpressure: AtomicUsize::new(0),
             output_backpressure: AtomicUsize::new(0),
             no_foreground_isig: AtomicUsize::new(0),
+            no_foreground_winsize: AtomicUsize::new(0),
             partial_port_progress: AtomicUsize::new(0),
             drain_checks: AtomicUsize::new(0),
         }
@@ -257,6 +338,17 @@ impl Terminal {
     pub(crate) fn try_new(line: TtyLineSnapshot) -> Result<Arc<Self>, SysError> {
         let discipline = TtyDiscipline::try_new()?;
         let output = TerminalOutput::try_new()?;
+        let mut poll_triggers = Vec::new();
+        // Poll registration fails closed when this pre-publish allocation is
+        // exhausted. `LatchTrigger::wait_id()` is diagnostic-only, so the
+        // Terminal never merges registrations by that value.
+        poll_triggers
+            .try_reserve_exact(MAX_PROCESSES as usize)
+            .map_err(|_| SysError::OutOfMemory)?;
+        let mut poll_spare = Vec::new();
+        poll_spare
+            .try_reserve_exact(MAX_PROCESSES as usize)
+            .map_err(|_| SysError::OutOfMemory)?;
         Arc::try_new(Self {
             inner: SpinLock::new(TerminalInner {
                 line,
@@ -264,7 +356,15 @@ impl Terminal {
                 discipline,
                 output,
                 drain_check_pending: false,
+                last_drain_generation: 0,
+                termios_generation: 0,
+                winsize: TtyWinsize::default(),
+                poll_triggers,
+                poll_spare,
+                poll_handoff_active: false,
+                poll_dirty: false,
             }),
+            state_changed: Event::new(),
             counters: TerminalCounters::new(),
         })
         .map_err(|_| SysError::OutOfMemory)
@@ -276,7 +376,7 @@ impl Terminal {
         let TerminalInner {
             discipline, output, ..
         } = &mut *inner;
-        match discipline.receive(byte, termios, output) {
+        let consumed = match discipline.receive(byte, termios, output) {
             ReceiveResult::Consumed => true,
             ReceiveResult::ConsumedSignalControl => {
                 self.counters
@@ -290,7 +390,12 @@ impl Terminal {
                     .fetch_add(1, Ordering::Relaxed);
                 false
             },
+        };
+        drop(inner);
+        if consumed {
+            self.notify_state_change();
         }
+        consumed
     }
 
     /// Queue user bytes through the current output transform.
@@ -306,6 +411,10 @@ impl Terminal {
                 .output_backpressure
                 .fetch_add(1, Ordering::Relaxed);
         }
+        drop(inner);
+        if consumed != 0 {
+            self.notify_state_change();
+        }
         consumed
     }
 
@@ -319,6 +428,7 @@ impl Terminal {
 
     pub(crate) fn consume_output(&self, expected: &[u8]) {
         self.inner.lock().output.consume(expected);
+        self.notify_state_change();
     }
 
     pub(crate) fn record_partial_port_progress(&self) {
@@ -329,6 +439,7 @@ impl Terminal {
 
     pub(crate) fn request_drain_check(&self) {
         self.inner.lock().drain_check_pending = true;
+        self.notify_state_change();
     }
 
     pub(crate) fn drain_check_pending(&self) -> bool {
@@ -339,7 +450,10 @@ impl Terminal {
         let mut inner = self.inner.lock();
         if inner.drain_check_pending && inner.output.is_empty() && port_idle {
             inner.drain_check_pending = false;
+            inner.last_drain_generation = inner.output.generation();
             self.counters.drain_checks.fetch_add(1, Ordering::Relaxed);
+            drop(inner);
+            self.notify_state_change();
             true
         } else {
             false
@@ -354,11 +468,219 @@ impl Terminal {
     pub(super) fn read_input(&self, dst: &mut [u8]) -> InputRead {
         let mut inner = self.inner.lock();
         let termios = inner.termios;
-        inner.discipline.read(termios, dst)
+        let result = inner.discipline.read(termios, dst);
+        drop(inner);
+        if result != InputRead::Empty {
+            self.notify_state_change();
+        }
+        result
     }
 
     pub(super) fn line_snapshot(&self) -> TtyLineSnapshot {
         self.inner.lock().line
+    }
+
+    pub(super) fn termios_snapshot(&self) -> (TtyTermios, usize) {
+        let inner = self.inner.lock();
+        (inner.termios, inner.termios_generation)
+    }
+
+    pub(super) fn commit_termios_if_generation(
+        &self,
+        generation: usize,
+        drained_output_generation: Option<usize>,
+        termios: TtyTermios,
+        flush_input: bool,
+    ) -> bool {
+        let mut inner = self.inner.lock();
+        if inner.termios_generation != generation
+            || drained_output_generation
+                .is_some_and(|generation| inner.output.generation() != generation)
+        {
+            return false;
+        }
+        if inner.termios.icanon != termios.icanon {
+            inner.discipline.set_canonical(termios.icanon);
+        }
+        if flush_input {
+            inner.discipline.flush_input();
+        }
+        inner.termios = termios;
+        inner.termios_generation = inner
+            .termios_generation
+            .checked_add(1)
+            .expect("TTY termios generation overflow");
+        drop(inner);
+        self.notify_state_change();
+        true
+    }
+
+    pub(super) fn winsize(&self) -> TtyWinsize {
+        self.inner.lock().winsize
+    }
+
+    pub(super) fn set_winsize(&self, winsize: TtyWinsize) {
+        let mut inner = self.inner.lock();
+        if inner.winsize == winsize {
+            return;
+        }
+        inner.winsize = winsize;
+        self.counters
+            .no_foreground_winsize
+            .fetch_add(1, Ordering::Relaxed);
+        drop(inner);
+        self.notify_state_change();
+    }
+
+    pub(super) fn writable(&self) -> bool {
+        let inner = self.inner.lock();
+        inner.output.queue.available()
+            >= if inner.termios.opost && inner.termios.onlcr {
+                2
+            } else {
+                1
+            }
+    }
+
+    pub(super) fn wait_readable(&self) -> Result<(), SysError> {
+        self.wait_until(|| self.readable())
+    }
+
+    pub(super) fn wait_writable(&self) -> Result<(), SysError> {
+        self.wait_until(|| self.writable())
+    }
+
+    pub(super) fn wait_drain_complete(&self) -> Result<usize, SysError> {
+        self.wait_until(|| !self.drain_check_pending())?;
+        Ok(self.inner.lock().last_drain_generation)
+    }
+
+    pub(super) fn poll(&self, request: &PollRequest<'_>) -> PollRegisterResult {
+        let supported = request.interests() & (PollEvent::READABLE | PollEvent::WRITABLE);
+        let mut stale = None;
+        let result = {
+            let mut inner = self.inner.lock();
+            let ready = Self::poll_events_locked(&inner, supported);
+            if !ready.is_empty() || !request.is_register() {
+                PollRegisterResult::Ready(ready)
+            } else if supported.is_empty() {
+                PollRegisterResult::Unsupported
+            } else {
+                let trigger = request.trigger().expect("register poll without trigger");
+                if inner.poll_triggers.len() < inner.poll_triggers.capacity() {
+                    inner.poll_triggers.push(TtyPollTrigger {
+                        trigger: trigger.clone(),
+                    });
+                } else if let Some(index) = inner
+                    .poll_triggers
+                    .iter()
+                    .position(|item| item.trigger.is_prunable())
+                {
+                    stale = Some(core::mem::replace(
+                        &mut inner.poll_triggers[index],
+                        TtyPollTrigger {
+                            trigger: trigger.clone(),
+                        },
+                    ));
+                } else {
+                    return PollRegisterResult::Unsupported;
+                }
+                let ready = Self::poll_events_locked(&inner, supported);
+                if ready.is_empty() {
+                    PollRegisterResult::Armed
+                } else {
+                    PollRegisterResult::Ready(ready)
+                }
+            }
+        };
+        drop(stale);
+        result
+    }
+
+    fn wait_until(&self, predicate: impl Fn() -> bool) -> Result<(), SysError> {
+        if self.state_changed.listen(false, predicate) {
+            Ok(())
+        } else {
+            Err(SysError::Interrupted)
+        }
+    }
+
+    fn poll_events_locked(inner: &TerminalInner, interests: PollEvent) -> PollEvent {
+        let mut ready = PollEvent::empty();
+        if interests.contains(PollEvent::READABLE) && inner.discipline.readable(inner.termios) {
+            ready |= PollEvent::READABLE;
+        }
+        let token = if inner.termios.opost && inner.termios.onlcr {
+            2
+        } else {
+            1
+        };
+        if interests.contains(PollEvent::WRITABLE) && inner.output.queue.available() >= token {
+            ready |= PollEvent::WRITABLE;
+        }
+        ready
+    }
+
+    fn notify_state_change(&self) {
+        self.state_changed.publish(usize::MAX, true);
+
+        // Latch edges are hints; every waiter rechecks Terminal-owned
+        // predicates. Wake all registered poll rounds on any state change so
+        // no waiter can miss a brief ready transition while another task
+        // consumes the newly available input/output capacity. Two pre-reserved
+        // vectors provide a guard-out handoff without allocating or dropping a
+        // LatchTrigger under the Terminal guard.
+        let mut detached = {
+            let mut inner = self.inner.lock();
+            if inner.poll_handoff_active {
+                inner.poll_dirty = true;
+                return;
+            }
+            inner.poll_handoff_active = true;
+            Self::begin_poll_handoff(&mut inner)
+        };
+
+        loop {
+            for detached in detached.drain(..) {
+                if !detached.trigger.is_prunable() {
+                    detached.trigger.trigger();
+                }
+            }
+
+            let next = {
+                let mut inner = self.inner.lock();
+                assert!(
+                    inner.poll_spare.is_empty(),
+                    "TTY poll handoff scratch was replaced concurrently"
+                );
+                inner.poll_spare = detached;
+                if inner.poll_dirty {
+                    inner.poll_dirty = false;
+                    Some(Self::begin_poll_handoff(&mut inner))
+                } else {
+                    inner.poll_handoff_active = false;
+                    None
+                }
+            };
+            let Some(next) = next else {
+                break;
+            };
+            detached = next;
+        }
+    }
+
+    fn begin_poll_handoff(inner: &mut TerminalInner) -> Vec<TtyPollTrigger> {
+        assert!(
+            inner.poll_spare.is_empty(),
+            "TTY poll handoff scratch was reused before drain"
+        );
+        let TerminalInner {
+            poll_triggers,
+            poll_spare,
+            ..
+        } = inner;
+        core::mem::swap(poll_triggers, poll_spare);
+        core::mem::take(&mut inner.poll_spare)
     }
 
     #[cfg(feature = "kunit")]
@@ -376,7 +698,10 @@ impl Terminal {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::device::tty::port::TtyParity;
+    use crate::{
+        device::tty::port::TtyParity,
+        sched::{Latch, LatchCancelReason, LatchWaitOutcome},
+    };
 
     fn terminal() -> Arc<Terminal> {
         Terminal::try_new(TtyLineSnapshot {
@@ -503,6 +828,31 @@ mod kunits {
     }
 
     #[kunit]
+    fn disabled_special_characters_leave_nul_as_input() {
+        let terminal = terminal();
+        terminal.set_termios_for_test(|termios| {
+            termios.intr = 0;
+            termios.quit = 0;
+            termios.erase = 0;
+            termios.kill = 0;
+            termios.eof = 0;
+            termios.susp = 0;
+            termios.echo = false;
+        });
+        assert!(terminal.receive_rx_byte(0));
+        assert!(!terminal.readable());
+        assert!(terminal.receive_rx_byte(b'\n'));
+
+        let mut dst = [0xff_u8; 2];
+        assert_eq!(terminal.read_input(&mut dst), InputRead::Bytes(2));
+        assert_eq!(dst, [0, b'\n']);
+        assert_eq!(
+            terminal.counters.no_foreground_isig.load(Ordering::Relaxed),
+            0
+        );
+    }
+
+    #[kunit]
     fn drain_completion_requires_empty_queue_and_idle_port() {
         let terminal = terminal();
         assert_eq!(terminal.enqueue_output(b"x"), 1);
@@ -512,5 +862,67 @@ mod kunits {
         assert!(!terminal.complete_drain_if(false));
         assert!(terminal.complete_drain_if(true));
         assert!(!terminal.drain_check_pending());
+
+        let drained_generation = terminal.wait_drain_complete().unwrap();
+        let (mut updated, termios_generation) = terminal.termios_snapshot();
+        updated.echo = false;
+        assert_eq!(terminal.enqueue_output(b"y"), 1);
+        assert!(!terminal.commit_termios_if_generation(
+            termios_generation,
+            Some(drained_generation),
+            updated,
+            false,
+        ));
+
+        assert_eq!(drain_output(&terminal), b"y");
+        terminal.request_drain_check();
+        assert!(terminal.complete_drain_if(true));
+        let drained_generation = terminal.wait_drain_complete().unwrap();
+        assert!(terminal.commit_termios_if_generation(
+            termios_generation,
+            Some(drained_generation),
+            updated,
+            false,
+        ));
+    }
+
+    #[kunit]
+    fn poll_register_before_after_notification_and_stale_cleanup() {
+        let registered = terminal();
+        let latch = Latch::begin_current(true);
+        let trigger = latch.make_trigger();
+        assert_eq!(
+            registered.poll(&PollRequest::register(PollEvent::READABLE, &trigger)),
+            PollRegisterResult::Armed
+        );
+        assert!(registered.receive_rx_byte(b'x'));
+        assert!(registered.receive_rx_byte(b'\n'));
+        latch.schedule_with_timeout(Some(Duration::from_secs(1)));
+        assert_eq!(latch.finish(), LatchWaitOutcome::Triggered);
+
+        let ready_latch = Latch::begin_current(true);
+        let ready_trigger = ready_latch.make_trigger();
+        assert_eq!(
+            registered.poll(&PollRequest::register(PollEvent::READABLE, &ready_trigger,)),
+            PollRegisterResult::Ready(PollEvent::READABLE)
+        );
+        ready_latch.cancel(LatchCancelReason::PredicateReady);
+        let _ = ready_latch.finish();
+
+        let full = terminal();
+        let fill = vec![b'x'; TTY_OUTPUT_CAPACITY_BYTES];
+        assert_eq!(full.enqueue_output(&fill), fill.len());
+        let stale_latch = Latch::begin_current(true);
+        let stale_trigger = stale_latch.make_trigger();
+        assert_eq!(
+            full.poll(&PollRequest::register(PollEvent::WRITABLE, &stale_trigger)),
+            PollRegisterResult::Armed
+        );
+        stale_latch.cancel(LatchCancelReason::RegisterError);
+        let _ = stale_latch.finish();
+        full.consume_output(b"x");
+        let inner = full.inner.lock();
+        assert!(inner.poll_triggers.is_empty());
+        assert!(inner.poll_spare.is_empty());
     }
 }

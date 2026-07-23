@@ -1,11 +1,11 @@
 # 2026-07-23 - TTY Subsystem
 
-**Status:** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Active / Checkpoint 2 Active
+**Status:** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Active / Checkpoint 2 Closed / Checkpoint 3 Not Started
 **Owners:** doruche, Codex
 **Area:** device / TTY / serial / VFS / signal / task topology / job control
 **Canonical Plan:** [RFC-20260722-tty-subsystem](../../rfcs/tty-subsystem/index.md), [目标与不变量](../../rfcs/tty-subsystem/invariants.md), [迁移实施计划](../../rfcs/tty-subsystem/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 2 Active / Checkpoint 1 Closed / Checkpoint 2 Active
+**Current Phase:** Stage 2 Active / Checkpoint 1 Closed / Checkpoint 2 Closed / Checkpoint 3 Not Started
 
 ## Scope and contract boundary
 
@@ -687,3 +687,52 @@ R0不递增，current contracts/register保持不变。
 用RV64外推。若实现需要第二个generic accessor、mutable private state、FileOps ctx扩张或其它`fs/`写入，立即重新停止。
 
 **Activation:** Checkpoint 2恢复并进入**Active**。只实现C2，不进入Checkpoint 3；全部`TTY-*`继续Not Cut Over。
+
+## Stage 2 / Checkpoint 2 FileOps, UAPI and readiness closure - 2026-07-23
+
+**Change:** `anemone-abi::tty::linux`集中定义Linux 6.6.32 asm-generic `Termios`/`Winsize`布局、目标flags、
+control-character indices和六个ioctl值，并用compile-time assertion固定size/alignment/offset；kernel与
+`anemone-rs`共同消费同一ABI owner。四项TTY参数的合法性仍只由kernel `static_assert!`拥有，xtask没有复制
+validation规则。`File::private<T>()`是本轮唯一generic VFS扩展，只把open owner安装的private data投影为
+immutable `&T`；没有暴露`AnyOpaque` mutable access、Task、fd table、VFS guard或新的FileOps context。
+
+TTY-owned FileOps通过该typed capability持有shared `Terminal`与窄wake handle，提供zero-length、blocking/
+nonblocking、canonical boundary、empty VEOF、binary/short-progress read/write，seek与positioned I/O返回`ESPIPE`。
+`TCGETS/TCSETS/TCSETSW/TCSETSF`、winsize和unknown-ioctl `ENOTTY`路径接线；unsupported termios变化返回`EINVAL`
+且不发布部分snapshot。`anemone-rs`只增加raw `ioctl`/`ppoll`入口和typed TTY helpers。endpoint继续unpublished，
+没有devfs、console、boot stdio、deterministic numbering或其它Checkpoint 3 production变化。
+
+**Concurrency / engineering review:** `TCSETSW/F`在drain完成时记录Terminal-output mutation generation，提交前同时
+重验termios generation和output generation；drain后出现新output会重新drain，不提前发布candidate。poll readiness
+只由Terminal guard内的input/output predicate决定，`LatchTrigger::wait_id()`只保留诊断用途；两个pre-reserved vector
+完成guard-out trigger/drop handoff，`poll_handoff_active/poll_dirty`只防止并发handoff遗漏下一轮通知，不形成第二份
+readiness truth。notification仍只是提示，iomux醒来后重验owner predicate。初次review没有发现Apollyon、Keter或Euclid；
+没有为低概率竞态引入跨owner atomic状态机、global side table或其它别扭兼容层，剩余边界保持明确fail closed。
+最终独立复审另发现一个Keter：setter允许特殊control character取asm-generic `_POSIX_VDISABLE`值0，但discipline
+曾把NUL误判为signal/edit/EOF action。现统一由control matcher先排除0，再匹配VINTR/VQUIT/VSUSP/VERASE/VKILL/
+VEOF，并增加binary NUL regression；复审后该项Closed。
+
+**Validation:** `git diff --check`与最终`just fmt kernel --check`通过。全仓`just fmt --check`只在本checkpoint未修改的
+`anemone-apps/float-test/src/sig.rs`报告既有import排序漂移；未把该文件纳入C2 diff。xtask的package-form
+`just fmt anemone-abi/anemone-rs --check`在rustfmt前即因两个独立manifest不是root workspace member而失败；不为验证
+扩展xtask。最终repository `just build`在RV64 release + KUnit + ext4 + irqsave配置完成compile/link；沙箱内同一入口曾因
+seccomp以`Bad system call`阻断lwext4 C compiler，沙箱外原命令通过。`just app build --arch riscv64 args`完成
+`anemone-rs`与共享ABI的RV64交叉编译。
+
+repository RV64端到端wrapper使用显式选择的初赛master副本，重建rootfs/kernel并启动QEMU。最终日志
+`build/tty-stage2-c2-rv64.log`显示238项enabled KUnit全部通过，新增TTY ABI/FileOps/termios/readiness与
+`_POSIX_VDISABLE` binary-NUL用例均为`ok`，
+随后真实`init`与userspace启动；进入后续userspace test flow后由QEMU monitor正常终止。停止前没有panic、deadlock或
+pure-kernel uaccess错误；post-KUnit userspace结果不计入本checkpoint证明。
+
+一次较早的unknown-ioctl KUnit错误地让pure kernel task执行userspace pointer access，触发
+`cannot access user space of a pure kernel task`；该测试违反IoctlCtx/uaccess测试边界，已删除，不能冒充ENOTTY证明。
+最终source audit确认TTY default arm返回`SysError::UnsupportedIoctl`，静态errno映射为`ENOTTY`，且最终238项日志干净。
+较早的host `anemone-abi` test尝试也在TTY tests前命中既有x86_64 `UContext`/`SigContext`架构缺口；target layout由
+compile-time assertion、RV64 kernel build/KUnit和app cross-build覆盖，不能把host失败写成目标架构ABI失败。
+本轮按用户处置没有运行LA64 build/runtime、hardware RX、BusyBox交互TTY或Checkpoint 3 publication；RV64证据不外推。
+
+**Contract / result:** typed accessor只闭合既有private-data producer/consumer pair，未改变owner、external ABI、
+visible semantics、R0 target或current contract。全部`TTY-*`继续Not Cut Over，`TTY-DATA-CUTOVER`与
+`TTY-JOBCTL-CUTOVER`均未执行。Checkpoint 2 **Closed**，Stage 2保持Active；Checkpoint 3为
+**Not Started / Unauthorized**，本轮在此停止。
