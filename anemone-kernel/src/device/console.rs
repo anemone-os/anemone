@@ -2,7 +2,12 @@
 //!
 //! Here lies /dev/console.
 
-use crate::{debug::printk::KERNEL_LOG, prelude::*, utils::any_opaque::NilOpaque};
+use crate::{
+    debug::printk::KERNEL_LOG,
+    fs::devfs::{DevfsNodeAttr, DevfsNodeOps, DevfsPublish, publish as devfs_publish},
+    prelude::*,
+    utils::{any_opaque::NilOpaque, identity::AnyIdentity},
+};
 
 use core::fmt::{Debug, Write};
 
@@ -30,6 +35,7 @@ impl Write for ConsoleWriter<'_> {
 struct ConsoleDesc {
     ops: Arc<dyn Console>,
     flags: ConsoleFlags,
+    terminal_identity: Option<ConsoleTerminalIdentity>,
 }
 
 impl ConsoleDesc {
@@ -71,12 +77,16 @@ bitflags! {
 
 struct ConsoleSubSys {
     consoles: SpinLock<Vec<ConsoleDesc>>,
+    /// Authoritative stable boot-selection snapshot. This is not a diagnostic
+    /// cache: TTY consumes it after Late init without copying console policy.
+    selected_terminal: MonoOnce<Option<ConsoleTerminalIdentity>>,
 }
 
 impl ConsoleSubSys {
     fn new() -> Self {
         Self {
             consoles: SpinLock::new(Vec::new()),
+            selected_terminal: unsafe { MonoOnce::new() },
         }
     }
 }
@@ -84,7 +94,35 @@ impl ConsoleSubSys {
 static SUBSYS: Lazy<ConsoleSubSys> = Lazy::new(|| ConsoleSubSys::new());
 
 /// Register a console.
-pub fn register_console(ops: Arc<dyn Console>, mut flags: ConsoleFlags) {
+pub fn register_console(ops: Arc<dyn Console>, flags: ConsoleFlags) {
+    register_console_with_terminal_identity(ops, flags, None);
+}
+
+/// Immutable serial-terminal identity carried by a console registration.
+///
+/// The value does not make console depend on TTY internals. Console owns only
+/// the selected registration; TTY later revalidates this opaque identity
+/// against its own port registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConsoleTerminalIdentity(AnyIdentity);
+
+impl ConsoleTerminalIdentity {
+    pub(crate) fn try_from_str(value: &str) -> Result<Self, SysError> {
+        AnyIdentity::try_from(value)
+            .map(Self)
+            .map_err(|_| SysError::NameTooLong)
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+pub(crate) fn register_console_with_terminal_identity(
+    ops: Arc<dyn Console>,
+    mut flags: ConsoleFlags,
+    terminal_identity: Option<ConsoleTerminalIdentity>,
+) {
     if flags.contains(ConsoleFlags::EARLY) {
         // If the console is registered with EARLY flag, it will be automatically
         // enabled during early boot.
@@ -104,10 +142,11 @@ pub fn register_console(ops: Arc<dyn Console>, mut flags: ConsoleFlags) {
         }
     }
 
-    SUBSYS
-        .consoles
-        .lock_irqsave()
-        .push(ConsoleDesc { ops, flags });
+    SUBSYS.consoles.lock_irqsave().push(ConsoleDesc {
+        ops,
+        flags,
+        terminal_identity,
+    });
 }
 
 /// Output a message to all enabled consoles.
@@ -156,6 +195,13 @@ pub unsafe fn on_system_boot() {
         let desc = consoles.first_mut().unwrap();
         desc.enable();
     }
+    let selected_terminal = consoles
+        .iter()
+        .find(|desc| desc.enabled())
+        .and_then(|desc| desc.terminal_identity.clone());
+    SUBSYS.selected_terminal.init(|slot| {
+        slot.write(selected_terminal);
+    });
     drop(consoles);
 
     if !has_normal_con {
@@ -163,6 +209,10 @@ pub unsafe fn on_system_boot() {
     } else {
         kinfoln!("normal console(s) registered, early consoles have been unregistered");
     }
+}
+
+pub(crate) fn selected_terminal_identity() -> Option<ConsoleTerminalIdentity> {
+    SUBSYS.selected_terminal.get().clone()
 }
 
 fn console_read(
@@ -195,6 +245,29 @@ fn console_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
         uid: inode.uid(),
         gid: inode.gid(),
         rdev: DeviceId::None,
+        size: inode.size(),
+        atime: inode.atime(),
+        mtime: inode.mtime(),
+        ctime: inode.ctime(),
+    })
+}
+
+fn console_devnum() -> CharDevNum {
+    CharDevNum::new(
+        MajorNum::new(devnum::char::major::TTY_AUX),
+        MinorNum::new(devnum::char::minor::CONSOLE),
+    )
+}
+
+fn console_devfs_get_attr(inode: &InodeRef, attr: DevfsNodeAttr) -> Result<InodeStat, SysError> {
+    Ok(InodeStat {
+        fs_dev: DeviceId::None,
+        ino: inode.ino(),
+        mode: InodeMode::new(attr.ty, inode.perm()),
+        nlink: inode.nlink(),
+        uid: inode.uid(),
+        gid: inode.gid(),
+        rdev: attr.rdev,
         size: inode.size(),
         atime: inode.atime(),
         mtime: inode.mtime(),
@@ -267,6 +340,63 @@ static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
     fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
+
+static CONSOLE_DEVFS_FILE_OPS: FileOps = FileOps {
+    read: console_read,
+    write: console_write,
+    read_at: |_, _, _, _| Err(SysError::IllegalSeek),
+    write_at: |_, _, _, _| Err(SysError::IllegalSeek),
+    read_user_at: None,
+    write_user_at: None,
+    check_status_flags: accept_file_op_status_flags,
+    seek: |_, _, _| Err(SysError::IllegalSeek),
+    read_dir: |_, _, _| Err(SysError::NotDir),
+    poll: |_, _| Err(SysError::NotYetImplemented),
+    fcntl: None,
+    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
+};
+
+struct ConsoleDevfsNodeOps;
+
+impl DevfsNodeOps for ConsoleDevfsNodeOps {
+    fn open(&self, _inode: &InodeRef) -> Result<OpenedFile, SysError> {
+        Ok(OpenedFile::new(&CONSOLE_DEVFS_FILE_OPS, NilOpaque::new()))
+    }
+
+    fn get_attr(&self, inode: &InodeRef, attr: DevfsNodeAttr) -> Result<InodeStat, SysError> {
+        console_devfs_get_attr(inode, attr)
+    }
+}
+
+pub(crate) struct ConsoleDevfsPublication(DevfsPublish);
+
+impl ConsoleDevfsPublication {
+    pub(crate) fn publish(self) -> Result<Ino, SysError> {
+        devfs_publish(self.0)
+    }
+}
+
+/// Prepare the permanent console-owned `/dev/console` node after all Late
+/// device activation has completed. The descriptor retains console's EOF-input,
+/// UTF-8 output, and non-TTY ioctl behavior; publication happens only after
+/// the boot coordinator has also prepared every TTY endpoint and stdio file.
+pub(crate) fn prepare_devfs() -> Result<ConsoleDevfsPublication, SysError> {
+    let ops: Arc<dyn DevfsNodeOps> =
+        Arc::try_new(ConsoleDevfsNodeOps).map_err(|_| SysError::OutOfMemory)?;
+    let mut name = String::new();
+    name.try_reserve_exact("console".len())
+        .map_err(|_| SysError::OutOfMemory)?;
+    name.push_str("console");
+    Ok(ConsoleDevfsPublication(DevfsPublish {
+        name,
+        attr: DevfsNodeAttr {
+            ty: InodeType::Char,
+            perm: InodePerm::all_rw(),
+            rdev: DeviceId::Char(console_devnum()),
+        },
+        ops,
+    }))
+}
 
 static CONSOLE_STDIN_PATHREF: Lazy<PathRef> = Lazy::new(|| {
     anony_new_inode(InodeType::Char, &CONSOLE_STDIN_INODE_OPS, NilOpaque::new())

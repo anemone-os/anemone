@@ -8,7 +8,7 @@
 **事务日志：** [2026-07-23 - TTY Subsystem](../../devlog/transactions/2026-07-23-tty-subsystem.md)
 **影响契约：** [目标与不变量](./invariants.md)接受引入 `TTY-PORT-001`、`TTY-TERM-001`、`TTY-INPUT-001`、`TTY-OUTPUT-001`、`TTY-ENDPOINT-001`、`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001` 的 R0 target，并 Preserve 现有 Signal、process-group、job-control、task-lifecycle 与 user-entry contract；R0 接受不改变 current contract，全部 `TTY-*` 仍为 Not Cut Over。
 **开放问题：** None；已关闭的设计 finding 及重新打开条件见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** [Stage 2](./implementation.md#7-stage-2-readyterminal-data-plane-与-tty-data-cutover) 处于Active；Checkpoint 1与2已关闭，Checkpoint 3保持Not Started且未授权，不得连续进入。
+**下一步：** [Stage 2](./implementation.md#7-stage-2-readyterminal-data-plane-与-tty-data-cutover) 处于Active；Checkpoint 1至3已关闭，Checkpoint 4保持Not Started且未授权，不得连续进入。
 
 ## 摘要
 

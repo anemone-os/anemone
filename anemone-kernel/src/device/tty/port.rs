@@ -38,6 +38,12 @@ impl core::fmt::Display for TtyPortId {
     }
 }
 
+impl TtyPortId {
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
 /// Narrow transport capability implemented by a physical serial-port owner.
 ///
 /// The port remains the only owner of raw RX storage and TX serialization. The

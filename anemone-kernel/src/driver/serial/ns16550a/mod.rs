@@ -7,7 +7,7 @@
 use crate::{
     device::{
         bus::platform::{self, PlatformDriver},
-        console::{ConsoleFlags, register_console},
+        console::{ConsoleFlags, ConsoleTerminalIdentity, register_console_with_terminal_identity},
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
         resource::Resource,
         tty::TtyPortId,
@@ -153,6 +153,7 @@ impl DriverOps for Ns16550ADriver {
             .node()
             .path();
         let port_id = TtyPortId::try_from(of_path.as_str())?;
+        let console_terminal_identity = ConsoleTerminalIdentity::try_from_str(port_id.as_str())?;
         let stdout = fwnode.stdout_config();
         let line = match stdout {
             Some(config) => {
@@ -250,7 +251,7 @@ impl DriverOps for Ns16550ADriver {
                 line.data_bits
             );
         }
-        register_console(console, flags);
+        register_console_with_terminal_identity(console, flags, Some(console_terminal_identity));
 
         kinfoln!("{}: probed with RX quiescent", pdev.name());
 

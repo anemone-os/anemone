@@ -1,8 +1,10 @@
 mod discipline;
+mod endpoint;
 mod file;
 mod port;
 mod terminal;
 
+pub(crate) use endpoint::{open_boot_terminal, prepare_system_boot};
 pub(crate) use port::{TtyLineSnapshot, TtyParity, TtyPort, TtyPortId};
 
 use crate::{
@@ -42,6 +44,9 @@ static UNPUBLISHED_PORTS: Lazy<SpinLock<BTreeMap<TtyPortId, Weak<TtyEndpoint>>>>
 struct TtyEndpoint {
     port: Arc<dyn TtyPort>,
     terminal: Arc<Terminal>,
+    /// Weak projection only; the driver attachment remains the sole
+    /// long-lived strong owner of the worker wake source.
+    wake_source: Weak<TtyWakeSource>,
 }
 
 #[derive(Opaque)]
@@ -160,10 +165,14 @@ pub(crate) fn attach_unpublished_port(
     port: Arc<dyn TtyPort>,
 ) -> Result<(TtyPortAttachment, TtyRxNotifier), SysError> {
     let terminal = Terminal::try_new(port.line_snapshot())?;
-    let endpoint =
-        Arc::try_new(TtyEndpoint { port, terminal }).map_err(|_| SysError::OutOfMemory)?;
     let wake_source = Arc::try_new(TtyWakeSource {
         worker: SpinLock::new(None),
+    })
+    .map_err(|_| SysError::OutOfMemory)?;
+    let endpoint = Arc::try_new(TtyEndpoint {
+        port,
+        terminal,
+        wake_source: Arc::downgrade(&wake_source),
     })
     .map_err(|_| SysError::OutOfMemory)?;
     let id = endpoint.port.id().clone();

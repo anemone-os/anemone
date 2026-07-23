@@ -130,12 +130,12 @@ fn exec_init_proc() {
 
     // open initial stdio fds so that they can be inherited.
     {
-        use device::console::{open_console_stdin, open_console_stdout};
         let kinit = get_current_task();
         let open_stdio = |file: File, access| {
             let status = FileStatusFlags::empty();
-            // Boot stdio is an anonymous console protocol: no Linux open flags
-            // are accepted here, but keep the status hook boundary explicit.
+            // Boot stdio uses three normal files backed by one shared Terminal;
+            // no Linux open flags are accepted here, but keep the status hook
+            // boundary explicit.
             file.check_status_flags(status.to_file_op_status_flags())
                 .expect("initial stdio status rejected");
             kinit
@@ -148,9 +148,18 @@ fn exec_init_proc() {
                 )
                 .expect("failed to open initial stdio fd");
         };
-        open_stdio(open_console_stdin(), OpenAccessMode::Read);
-        open_stdio(open_console_stdout(), OpenAccessMode::Write);
-        open_stdio(open_console_stdout(), OpenAccessMode::Write);
+        open_stdio(
+            device::tty::open_boot_terminal().expect("failed to open boot TTY stdin"),
+            OpenAccessMode::Read,
+        );
+        open_stdio(
+            device::tty::open_boot_terminal().expect("failed to open boot TTY stdout"),
+            OpenAccessMode::Write,
+        );
+        open_stdio(
+            device::tty::open_boot_terminal().expect("failed to open boot TTY stderr"),
+            OpenAccessMode::Write,
+        );
     }
 
     // set up initial root and cwd for inheritance.
@@ -203,6 +212,16 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         // has completed local init and marked itself online before late services
         // publish their workers. `kthreadd` remains a hand-built boot invariant.
         run_initcalls(InitCallLevel::Late);
+        let console_publication =
+            device::console::prepare_devfs().expect("failed to prepare console-owned /dev/console");
+        let tty_publication =
+            device::tty::prepare_system_boot().expect("failed to prepare boot TTY endpoints");
+        console_publication
+            .publish()
+            .expect("failed to publish console-owned /dev/console");
+        tty_publication
+            .publish()
+            .expect("failed to publish boot TTY endpoints");
         kinfoln!("BSP {} kinit finished", bsp_id);
     }
 
