@@ -101,17 +101,18 @@ pub fn build_app(
         workdir: &workdir,
         context,
     };
-    let mut cmd = driver::build_command(&driver_ctx, extra_args)?;
-    cmd_echo(&cmd);
-    let status = cmd
-        .status()
-        .with_context(|| format!("failed to execute build command for app '{}'", app.name))?;
-    if !status.success() {
-        bail!(
-            "build command for app '{}' exited with status {}",
-            app.name,
-            status
-        );
+    if let Some(mut cmd) = driver::build_command(&driver_ctx, extra_args)? {
+        cmd_echo(&cmd);
+        let status = cmd
+            .status()
+            .with_context(|| format!("failed to execute build command for app '{}'", app.name))?;
+        if !status.success() {
+            bail!(
+                "build command for app '{}' exited with status {}",
+                app.name,
+                status
+            );
+        }
     }
 
     let mut built = Vec::with_capacity(app.artifacts.len());
@@ -241,4 +242,120 @@ fn expand_artifact_path(artifact: &Artifact, context: &BuildCtx) -> String {
         .path
         .replace("${ARCH}", context.arch.as_str())
         .replace("${TARGET_TRIPLE}", context.target_triple().as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{
+        app::{Build, BuildDriver, SourceBuild},
+        platform::Arch,
+    };
+    use std::{
+        os::unix::fs::{PermissionsExt, symlink},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "anemone-xtask-source-app-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn source_app(artifacts: Vec<Artifact>) -> App {
+        App {
+            name: "prebuilt".to_string(),
+            build: Build {
+                workdir: ".".to_string(),
+                driver: BuildDriver::Source(SourceBuild {}),
+            },
+            artifacts,
+        }
+    }
+
+    #[test]
+    fn source_artifacts_share_expansion_and_export() {
+        let root = TestDirectory::new();
+        let workdir = root.0.join("work");
+        let out_dir = root.0.join("out");
+        fs::create_dir_all(workdir.join("riscv64/riscv64-unknown-anemone-elf")).unwrap();
+        fs::create_dir_all(&out_dir).unwrap();
+
+        let binary = workdir.join("riscv64/riscv64-unknown-anemone-elf/prebuilt");
+        let script = workdir.join("script.sh");
+        fs::write(&binary, b"prebuilt-binary\0bytes").unwrap();
+        fs::write(&script, b"#!/bin/sh\nexit 97\n").unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o751)).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o640)).unwrap();
+
+        let artifacts = vec![
+            Artifact {
+                path: "${ARCH}/${TARGET_TRIPLE}/prebuilt".to_string(),
+            },
+            Artifact {
+                path: "script.sh".to_string(),
+            },
+        ];
+        let app = source_app(artifacts.clone());
+        let context = BuildCtx::new(Arch::RiscV64).unwrap();
+
+        for artifact in &artifacts {
+            let exported = copy_artifact(&app, &workdir, artifact, &out_dir, &context).unwrap();
+            let source_bytes = fs::read(&exported.source_path).unwrap();
+            let output_bytes = fs::read(&exported.output_path).unwrap();
+            assert_eq!(source_bytes, output_bytes);
+
+            let source_mode = fs::metadata(&exported.source_path)
+                .unwrap()
+                .permissions()
+                .mode();
+            let output_mode = fs::metadata(&exported.output_path)
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(source_mode, output_mode);
+        }
+    }
+
+    #[test]
+    fn source_artifacts_fail_before_export_when_input_is_invalid() {
+        let root = TestDirectory::new();
+        let workdir = root.0.join("work");
+        let out_dir = root.0.join("out");
+        fs::create_dir_all(workdir.join("directory")).unwrap();
+        fs::create_dir_all(&out_dir).unwrap();
+        let device = workdir.join("device");
+        symlink("/dev/null", &device).unwrap();
+
+        let context = BuildCtx::new(Arch::RiscV64).unwrap();
+        for path in ["missing", "directory", "device"] {
+            let artifact = Artifact {
+                path: path.to_string(),
+            };
+            let app = source_app(vec![artifact.clone()]);
+            let error = copy_artifact(&app, &workdir, &artifact, &out_dir, &context)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("prebuilt"), "{error}");
+            assert!(error.contains(path), "{error}");
+            assert!(!out_dir.join(path).exists());
+        }
+    }
 }

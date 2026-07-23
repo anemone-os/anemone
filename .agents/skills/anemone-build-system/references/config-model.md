@@ -36,7 +36,11 @@ complete low-level tuple, while only interactive calls may use local/default sel
 
 ### App Manifest
 
-`anemone-apps/<app>/app.toml` owns the app build driver and artifact export contract. The app task locates the manifest, runs its driver for a chosen architecture, and exports declared artifacts. Keep locator name, manifest identity, driver profile, and artifact path coherent.
+`anemone-apps/<app>/app.toml` owns the closed Cargo/Source app driver and artifact export contract.
+Cargo runs its declared architecture-specific command. Source accepts no driver args and runs no
+command; it submits already-existing ordinary files to the same path expansion and export path.
+Neither driver proves runtime compatibility. Keep locator name, manifest identity, driver choice,
+and artifact path coherent.
 
 ### Rootfs Manifest
 

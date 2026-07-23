@@ -5,7 +5,7 @@
 **Area:** build system / configuration / platform / repository workflow
 **Canonical Plan:** [RFC-20260722-system-target-model](../../rfcs/system-target-model/index.md), [目标与不变量](../../rfcs/system-target-model/invariants.md), [迁移实施计划](../../rfcs/system-target-model/implementation.md)
 **Canonical Revision:** R2（R0初始接受；Stage 3期间完成R1 DT authority renegotiation；Stage 3关闭后接受R2 metadata correction）
-**Current Phase:** Stage 1-3 Closed / Stage 4 Ready / Checkpoint 4A Not Activated
+**Current Phase:** Stage 1-4 Closed / Stage 5 Outline / Not Resolved
 
 ## Scope
 
@@ -729,3 +729,63 @@ Checkpoint 4A Not Activated；旧physical 4A要求只保留在前一节append-on
 `scripts/xtask/src/tasks/rootfs/mkfs.rs`的`stage_apps()`仍以空args调用同一`build_app()`，没有Source专用rootfs
 路径。Xtask tests、app/rootfs/kernel build、QEMU、physical board、LTP与final harness均Not Run；本correction
 只调整尚未激活checkpoint的文档验证边界，不把它们误述为本轮证据。
+
+## Checkpoint 4A activation - 2026-07-24
+
+**Status:** Active；Stage 4 Active；Stage 5保持Outline / Not Resolved。
+
+用户以“完成Stage 4”为本轮唯一授权，明确要求执行对应gate/checkpoint并禁止自动进入下一gate。Activation
+preflight重新读取AGENTS/LOCAL、R2 canonical RFC/invariants、4A Ready definition、closed tracking issues、
+register/current limitations、current transaction和live app/rootfs owners；确认Stage 1-3与R2 correction均已
+关闭，Stage 4 resolution及其validation-route correction已完成，register没有重叠blocker，rootfs仍以空
+extra args调用同一`build_app()`，且current worktree从`3eec81c6`开始clean。
+
+本activation只开放canonical `implementation.md`冻结的单一Checkpoint 4A manifest：closed Source parser、
+optional command dispatch、公共artifact export的定向测试、`conf/app.toml`、build-system skill及本RFC/
+transaction/navigation write-back。Production Platform/SystemTarget/BuildPreset、kernel、QEMU/DT、post-link、
+rootfs实现、现有app manifests、current contract与Stage 5均不进入write set。Contract cutover为None；
+`BOOT-PROTOCOL-001` effective baseline与R2 pending successor保持不变。若命中4A停止条件、需要tracked修改
+validation-only/禁止路径，或改变target invariant、owner、ABI、visible semantics、acceptance boundary，立即
+停止并按expansion/renegotiation合同报告。
+
+## Checkpoint 4A closure - 2026-07-24
+
+**Status:** Closed；Stage 4 Closed；Stage 5保持Outline / Not Resolved。
+
+**Change:** `BuildDriver`增加closed、零参数`Source` variant；其empty typed payload拒绝manifest `args`，
+dispatch在收到CLI extra args时fail-closed，否则返回`None`。`build_app()`只对Cargo的`Some(Command)`保留
+原command echo/status/failure路径；Source不启动shell、`true`、dummy executable或任何子进程，随后与Cargo
+共用原有`${ARCH}` / `${TARGET_TRIPLE}` expansion、普通文件检查、`fs::copy`、`BuiltArtifactInfo`与显式
+post-export disasm。`conf/app.toml`和build-system skill同步closed Cargo/Source driver、机械export及“不证明
+runtime compatibility”边界。
+
+**Direct consumer audit:** Validation-only `scripts/xtask/src/tasks/rootfs/mkfs.rs`零diff；`stage_apps()`继续以
+空extra args和`disasm = false`调用同一`build_app()`，再复制其`BuiltArtifactInfo`，没有Source专用schema、
+collector、staging、Boot Protocol或artifact handoff。`cargo.rs`、全部tracked app manifests及禁止路径零diff。
+
+**Review:** 独立只读latest-byte review为Apollyon 0 / Keter 0 / Euclid 0，确认closed parser、manifest/CLI
+args fail-close、`Option<Command>` no-command边界、single exporter、Cargo保持、binary/shebang与invalid-input测试、
+rootfs owner及write set均满足4A。唯一Safe是tracked manifest回归测试当前断言所有现有app均为Cargo；它准确
+保护当前baseline，未来首次增加tracked Source consumer时需同步调整，不影响4A closure。
+
+**Validation:** 最终代码字节运行`just xtask-test`，64 passed / 0 failed；新增6项测试覆盖Source manifest正例与
+manifest `args`拒绝、全部tracked Cargo manifest、Source dispatch `None`、CLI extra args拒绝、binary/shebang
+bytes与mode共用export，以及missing/directory/non-regular input在export前失败。Disposable live Source fixture
+先以extra args运行并非零退出，输出目录保持无artifact；随后无参数运行成功，预构建artifact与会在执行时
+`exit 97`的shebang script均导出，source/export SHA-256分别一致为`d79a768d...23af8`与
+`d3b5f42d...2542e`，四个文件mode均为`0751`，证明默认Source没有执行command/script。Fixture和对应
+`build/apps/`输出已清理。现有Cargo `args` app通过live `just app build --arch riscv64 args`真实build，输出
+command保持既有Cargo argv与absolute target spec并成功export。
+
+Live `just xtask app build --help`保持原CLI；source audit确认`--disasm`仍只在公共artifact export后显式执行，
+tracked app/rootfs consumer、Source/Cargo residual、lifecycle/status与resolved write set audit通过。
+`git diff --check`与`mdbook build docs`通过，mdBook只报告既有large search-index warning。
+`just fmt xtask --check`仍在
+运行rustfmt前命中既有`package xtask is not a member of the workspace` fmt-owner错误；本checkpoint没有越出
+manifest修复该owner，xtask tests已重新编译全部修改Rust文件。Kernel build、rootfs materialization、QEMU、
+physical board、LTP与final harness均Not Run；它们不属于4A floor。
+
+**Contract / Exit:** 没有命中Source/rootfs/Cargo、target-invariant、owner、ABI、visible-semantics、acceptance或
+write-set停止条件。Contract cutover为None；`BOOT-PROTOCOL-001` effective baseline与R2 pending successor保持
+不变。Checkpoint 4A与Stage 4 Closed；本closure没有运行、解析或激活
+`Stage 4 -> Stage 5 Implementation Resolution Gate`。
