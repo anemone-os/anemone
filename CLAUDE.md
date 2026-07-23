@@ -1,1 +1,1 @@
-阅读AGENTS.md
+AGENTS.md
