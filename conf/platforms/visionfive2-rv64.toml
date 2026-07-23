@@ -1,6 +1,4 @@
 [build]
-name = "visionfive2-rv64"
-abbrs = ["visionfive2", "vf2"]
 arch = "riscv64"
 exec_env = "sbi"
 

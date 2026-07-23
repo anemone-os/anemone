@@ -1,6 +1,4 @@
 [build]
-name = "qemu-virt-rv64-pretest"
-abbrs = ["rv-pretest", "rv64-pretest", "pretest-rv", "pretest-rv64"]
 arch = "riscv64"
 exec_env = "sbi"
 
@@ -13,16 +11,12 @@ max_phys_cpu_id = 15
 frame_section_shift_mb = 7
 
 [qemu]
-qemu = "qemu-system-riscv64"
 machine = "virt"
 cpu = "rv64"
 smp = 1
 memory = "1G"
 bios = "default"
 args = [
-    "-nographic",
-    "-serial",
-    "mon:stdio",
     "-rtc",
     "base=utc",
     "-device",
@@ -32,15 +26,29 @@ args = [
     "-accel",
     "tcg,thread=multi",
 
-    "-drive",
-    "file=sdcard-rv.img,format=raw,if=none,id=x0",
-    "-device",
-    "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",                 # vdb
     "-no-reboot",
+]
+
+[[qemu.bind]]
+name = "kernel-image"
+template = ["-kernel", "{{}}"]
+
+[[qemu.bind]]
+name = "disk-x0"
+template = [
     "-drive",
-    "file=build/rootfs/pretest-rv64/rootfs.img,format=raw,if=none,id=x1",
+    "file={{}},format=raw,if=none,id=x0",
     "-device",
-    "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",                 # vda
+    "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
+]
+
+[[qemu.bind]]
+name = "disk-x1"
+template = [
+    "-drive",
+    "file={{}},format=raw,if=none,id=x1",
+    "-device",
+    "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",
 ]
 
 [dtb]

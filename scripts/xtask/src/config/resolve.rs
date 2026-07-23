@@ -44,30 +44,6 @@ impl<'a> ConfigLoader<'a> {
         })
     }
 
-    pub fn resolve_legacy_build(
-        &self,
-        kernel_config_ref: KernelConfigRef,
-    ) -> anyhow::Result<ResolvedBuildAction> {
-        let config = self.load_resolved_kconfig(&kernel_config_ref)?;
-        let target_ref = SystemTargetRef::new(&config.build.target)?;
-        let profile = config.build.profile;
-        let presentation = BuildPresentation {
-            disasm: config.build.disasm,
-        };
-        let system = self.resolve_owned_system(
-            target_ref,
-            kernel_config_ref,
-            config.into_kernel_config(),
-            profile,
-        )?;
-
-        Ok(ResolvedBuildAction {
-            selection_source: SelectionSource::LegacyKconfig,
-            system,
-            presentation,
-        })
-    }
-
     pub fn resolve_selection(
         &self,
         request: SelectionRequest,
@@ -119,10 +95,8 @@ impl<'a> ConfigLoader<'a> {
                 path.display()
             )
         })?;
-        let platform = PlatformConfig::from_str(&content)
-            .with_context(|| format!("failed to parse platform `{platform_ref}`"))?;
-        ensure_platform_identity(platform_ref, &platform)?;
-        Ok(platform)
+        PlatformConfig::from_str(&content)
+            .with_context(|| format!("failed to parse platform `{platform_ref}`"))
     }
 
     pub fn load_kernel_config(&self, reference: &KernelConfigRef) -> anyhow::Result<KernelConfig> {
@@ -143,6 +117,12 @@ impl<'a> ConfigLoader<'a> {
         })?;
         BuildPreset::from_str(&content)
             .with_context(|| format!("failed to parse build preset `{preset_ref}`"))
+    }
+
+    pub fn implicit_preset(&self) -> anyhow::Result<(BuildPresetRef, SelectionSource)> {
+        let (selection, source) = self.load_implicit_selection()?;
+        self.load_preset(&selection.preset)?;
+        Ok((selection.preset, source))
     }
 
     fn resolve_preset(
@@ -285,12 +265,6 @@ pub struct LoadedSystemBuildInputs {
     pub kernel_config: KernelConfig,
 }
 
-pub struct ResolvedBuildAction {
-    pub selection_source: SelectionSource,
-    pub system: ResolvedSystemBuild,
-    pub presentation: BuildPresentation,
-}
-
 pub struct ResolvedSelection {
     pub selection_source: SelectionSource,
     pub system: ResolvedSystemBuild,
@@ -306,13 +280,8 @@ pub struct ResolvedSystemBuild {
     pub profile: CargoProfile,
 }
 
-pub struct BuildPresentation {
-    pub disasm: bool,
-}
-
 #[derive(Clone, Copy)]
 pub enum SelectionSource {
-    LegacyKconfig,
     ExplicitPreset,
     ExplicitTuple,
     LocalPreset,
@@ -322,7 +291,6 @@ pub enum SelectionSource {
 impl SelectionSource {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::LegacyKconfig => "legacy-kconfig",
             Self::ExplicitPreset => "explicit-preset",
             Self::ExplicitTuple => "explicit-tuple",
             Self::LocalPreset => "local-preset",
@@ -331,24 +299,12 @@ impl SelectionSource {
     }
 }
 
-fn ensure_platform_identity(
-    platform_ref: &PlatformRef,
-    platform: &PlatformConfig,
-) -> anyhow::Result<()> {
-    if platform.build.name != platform_ref.as_str() {
-        anyhow::bail!(
-            "platform filename identity `{platform_ref}` does not match legacy build.name `{}`",
-            platform.build.name
-        );
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const TARGETS: [(&str, &str); 5] = [
+    const TARGETS: [(&str, &str); 6] = [
+        ("example", "vda"),
         ("qemu-virt-rv64", "vda"),
         ("qemu-virt-rv64-pretest", "vda"),
         ("qemu-virt-la64", "vda"),
@@ -356,7 +312,8 @@ mod tests {
         ("visionfive2-rv64", "mmcblk0"),
     ];
 
-    const PRESETS: [(&str, &str, CargoProfile); 6] = [
+    const PRESETS: [(&str, &str, CargoProfile); 7] = [
+        ("example", "example", CargoProfile::Release),
         (
             "qemu-virt-rv64-release",
             "qemu-virt-rv64",
@@ -404,7 +361,6 @@ mod tests {
             assert_eq!(inputs.target_ref.as_str(), target);
             assert_eq!(inputs.platform_ref.as_str(), target);
             assert_eq!(inputs.target.platform.as_str(), target);
-            assert_eq!(inputs.platform.build.name, target);
             assert_eq!(inputs.kernel_config_ref, kernel_config_ref);
             assert!(matches!(
                 inputs.target.initial_program,
@@ -449,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_all_concrete_presets_without_changing_production_entry() {
+    fn resolves_all_tracked_presets() {
         let loader = ConfigLoader::new(workspace_root());
         for (preset, target, profile) in PRESETS {
             let action = loader
@@ -609,12 +565,12 @@ mod tests {
             workspace
                 .0
                 .join("conf/platforms/qemu-virt-rv64-pretest.toml"),
-            "name = \"qemu-virt-rv64-pretest\"",
-            "name = \"mutated-platform\"",
+            "memory = \"1G\"",
+            "memory = \"2G\"",
         );
 
         assert_eq!(action.system.target.root.fstype, "ext4");
-        assert_eq!(action.system.platform.build.name, "qemu-virt-rv64-pretest");
+        assert_eq!(action.system.platform.qemu.as_ref().unwrap().memory, "1G");
         assert_eq!(action.system.profile, CargoProfile::Release);
         assert!(before.contains("pub const MAX_LOGICAL_CPUS: usize = 16;"));
         assert!(before.contains("pub const SYSTEM_HZ: u16 = 100;"));
@@ -625,99 +581,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_platform_filename_name_mismatch() {
-        let platform = PlatformConfig::from_str(
-            r#"
-[build]
-name = "other-platform"
-abbrs = []
-arch = "riscv64"
-exec_env = "sbi"
-
-[constants]
-phys_ram_start = 0x80000000
-max_phys_ram_size = 0x80000000
-kernel_la_base = 0x80200000
-kernel_va_base = 0xffffffff80200000
-max_phys_cpu_id = 0
-frame_section_shift_mb = 7
-"#,
-        )
-        .unwrap();
-        assert!(
-            ensure_platform_identity(&PlatformRef::new("expected-platform").unwrap(), &platform)
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn kernel_config_value_excludes_legacy_build_selection() {
+    fn kernel_config_rejects_legacy_build_selection() {
         let content = fs::read_to_string(workspace_root().join("conf/.defconfig")).unwrap();
-        let changed_selection = content
-            .replace(
-                "target = \"qemu-virt-rv64-pretest\"",
-                "target = \"visionfive2-rv64\"",
-            )
-            .replace("profile = \"release\"", "profile = \"dev\"")
-            .replace("disasm = false", "disasm = true");
-
-        let original = KConfig::from_str(&content).unwrap().into_kernel_config();
-        let changed = KConfig::from_str(&changed_selection)
-            .unwrap()
-            .into_kernel_config();
-        assert_eq!(original, changed);
-    }
-
-    #[test]
-    fn legacy_build_resolves_owned_snapshot() {
-        let loader = ConfigLoader::new(workspace_root());
-        let action = loader
-            .resolve_legacy_build(KernelConfigRef::new("conf/.defconfig").unwrap())
-            .unwrap();
-
-        assert_eq!(action.selection_source.as_str(), "legacy-kconfig");
-        assert_eq!(action.system.target_ref.as_str(), "qemu-virt-rv64-pretest");
-        assert_eq!(
-            action.system.platform_ref.as_str(),
-            "qemu-virt-rv64-pretest"
+        let legacy = format!(
+            "[build]\ntarget = \"qemu-virt-rv64-pretest\"\nprofile = \"release\"\ndisasm = false\n\n{content}"
         );
-        assert_eq!(
-            action.system.kernel_config_ref.to_string(),
-            "conf/.defconfig"
-        );
-        assert_eq!(action.system.profile, CargoProfile::Release);
-        assert!(!action.presentation.disasm);
-        assert!(action.system.platform.uboot.is_none());
-    }
-
-    #[test]
-    fn legacy_build_resolves_same_target_with_dev_and_release_profiles() {
-        let loader = ConfigLoader::new(workspace_root());
-        let release = loader
-            .resolve_legacy_build(KernelConfigRef::new("conf/.defconfig").unwrap())
-            .unwrap();
-        let release_content = fs::read_to_string(workspace_root().join("conf/.defconfig")).unwrap();
-        let dev_path = workspace_root().join("build").join(format!(
-            "xtask-test-dev-kconfig-{}.toml",
-            std::process::id()
-        ));
-        fs::create_dir_all(dev_path.parent().unwrap()).unwrap();
-        fs::write(
-            &dev_path,
-            release_content.replace("profile = \"release\"", "profile = \"dev\""),
-        )
-        .unwrap();
-        let dev_ref =
-            KernelConfigRef::new(dev_path.strip_prefix(workspace_root()).unwrap()).unwrap();
-        let dev = loader.resolve_legacy_build(dev_ref);
-        fs::remove_file(dev_path).unwrap();
-        let dev = dev.unwrap();
-
-        assert_eq!(release.system.target_ref, dev.system.target_ref);
-        assert_eq!(release.system.platform_ref, dev.system.platform_ref);
-        assert_eq!(release.system.profile, CargoProfile::Release);
-        assert_eq!(dev.system.profile, CargoProfile::Dev);
-        assert_eq!(release.system.kernel_config, dev.system.kernel_config);
+        assert!(KConfig::from_str(&legacy).is_err());
     }
 
     #[test]
@@ -725,7 +594,9 @@ frame_section_shift_mb = 7
         let workspace = TestWorkspace::new();
         let loader = ConfigLoader::new(&workspace.0);
         let action = loader
-            .resolve_legacy_build(KernelConfigRef::new("kconfig").unwrap())
+            .resolve_selection(SelectionRequest::explicit_preset(
+                BuildPresetRef::new("test-release").unwrap(),
+            ))
             .unwrap();
         let before = action.system.kernel_config.parameters.gen_kconfig_defs();
 
@@ -750,12 +621,12 @@ frame_section_shift_mb = 7
             workspace
                 .0
                 .join("conf/platforms/qemu-virt-rv64-pretest.toml"),
-            "name = \"qemu-virt-rv64-pretest\"",
-            "name = \"mutated-platform\"",
+            "memory = \"1G\"",
+            "memory = \"2G\"",
         );
 
         assert_eq!(action.system.target.root.fstype, "ext4");
-        assert_eq!(action.system.platform.build.name, "qemu-virt-rv64-pretest");
+        assert_eq!(action.system.platform.qemu.as_ref().unwrap().memory, "1G");
         assert!(before.contains("pub const MAX_LOGICAL_CPUS: usize = 16;"));
         assert!(before.contains("pub const SYSTEM_HZ: u16 = 100;"));
         assert_eq!(

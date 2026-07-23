@@ -2,10 +2,6 @@
 default:
     @just --list
 
-[doc("clean the build artifacts of xtask itself")]
-xtask-clean:
-    @cd scripts/xtask && cargo clean
-
 [doc("run an xtask command, e.g. `just xtask help`")]
 xtask *args:
     @cd scripts/xtask && cargo run -q -- {{ args }}
@@ -18,14 +14,13 @@ xtask-test:
 clean:
     @just xtask clean
 
-[doc("clean the build artifacts of Anemone kernel, including the configuration files")]
-mrproper:
-    @just xtask mrproper
-    @rm -f disk.img
-
 [doc("build Anemone kernel")]
-build:
-    @just xtask build
+build *args:
+    @just xtask build {{ args }}
+
+[doc("run Anemone with the selected QEMU Platform")]
+qemu *args:
+    @just xtask qemu {{ args }}
 
 [doc("format Rust sources. optionally pass `kernel` or an app name")]
 fmt *args:
@@ -34,6 +29,10 @@ fmt *args:
 [doc("manage configurations. type `just conf -h` for more details.")]
 conf *args:
     @just xtask conf {{ args }}
+
+[doc("manage the developer-local interactive selection")]
+selection *args:
+    @just xtask selection {{ args }}
 
 [doc("app related commands. type `just app -h` for more details.")]
 app *args:
@@ -47,12 +46,6 @@ rootfs *args:
 defconfig:
     @just log "DEFCONFIG" "Copying .defconfig to kconfig"
     @cp conf/.defconfig ./kconfig
-
-[doc("generate an empty disk image")]
-gendisk size:
-    @just log "GENDISK" "Generating disk image"
-    @rm -f disk.img
-    @fallocate -l {{ size }} disk.img
 
 [private]
 log topic msg:

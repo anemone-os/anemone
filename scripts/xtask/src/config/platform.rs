@@ -66,9 +66,8 @@ impl TargetTriple {
 }
 
 #[derive(Deserialize, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Build {
-    pub name: String,
-    pub abbrs: Vec<String>,
     pub arch: Arch,
     pub exec_env: ExecEnv,
 }
@@ -84,8 +83,8 @@ pub struct Constants {
 }
 
 #[derive(Deserialize, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Qemu {
-    pub qemu: String,
     pub machine: String,
     pub cpu: Option<String>,
     pub smp: u64,
@@ -145,6 +144,7 @@ pub enum DtbProvider {
 }
 
 #[derive(Deserialize, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub build: Build,
     pub constants: Constants,
@@ -278,6 +278,27 @@ mod tests {
     }
 
     #[test]
+    fn rejects_legacy_platform_identity_and_host_tool_fields() {
+        let valid = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
+        assert!(
+            Config::from_str(&valid.replacen(
+                "[build]\n",
+                "[build]\nname = \"qemu-virt-rv64\"\nabbrs = [\"rv64\"]\n",
+                1,
+            ))
+            .is_err()
+        );
+        assert!(
+            Config::from_str(&valid.replacen(
+                "[qemu]\n",
+                "[qemu]\nqemu = \"qemu-system-riscv64\"\n",
+                1,
+            ))
+            .is_err()
+        );
+    }
+
+    #[test]
     fn accepts_supported_dtb_contracts() {
         let firmware = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
         let embedded = std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
@@ -315,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn validates_dormant_qemu_bind_declarations() {
+    fn validates_qemu_bind_declarations() {
         let valid = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap()
             + r#"
 
@@ -324,7 +345,7 @@ name = "disk-x0"
 template = ["-drive", "file={{}},backup={{}},format=raw"]
 "#;
         let config = Config::from_str(&valid).unwrap();
-        assert_eq!(config.qemu.unwrap().bind.len(), 1);
+        assert_eq!(config.qemu.unwrap().bind.len(), 2);
 
         for invalid in [
             valid.replace("name = \"disk-x0\"", "name = \"Disk_X0\""),

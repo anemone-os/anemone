@@ -26,6 +26,8 @@ struct Cli {
 enum Commands {
     #[command(about = "Manage Anemone build configurations")]
     Conf(tasks::conf::Conf),
+    #[command(about = "Manage the developer-local interactive selection")]
+    Selection(tasks::conf::Selection),
     #[command(about = "Anemone rootfs related tasks")]
     Rootfs(tasks::rootfs::RootfsArgs),
     #[command(about = "App related tasks")]
@@ -38,8 +40,6 @@ enum Commands {
     Qemu(tasks::qemu::QemuArgs),
     #[command(about = "Clean build artifacts")]
     Clean,
-    #[command(about = "Clean everything including config files")]
-    Mrproper,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -50,12 +50,65 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Conf(conf) => tasks::conf::run(conf),
+        Commands::Selection(selection) => tasks::conf::run_selection(selection),
         Commands::Rootfs(args) => tasks::rootfs::run(args),
         Commands::App(args) => tasks::app::run(args),
         Commands::Build(args) => tasks::build::run(args),
         Commands::Fmt(args) => tasks::fmt::run(args),
         Commands::Qemu(args) => tasks::qemu::run(args),
         Commands::Clean => tasks::clean::run(),
-        Commands::Mrproper => tasks::mrproper::run(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn production_cli_rejects_legacy_commands_and_options() {
+        for arguments in [
+            vec!["xtask", "build", "-k", "kconfig"],
+            vec![
+                "xtask",
+                "qemu",
+                "--platform",
+                "qemu-virt-rv64",
+                "--image",
+                "build/anemone.elf",
+            ],
+            vec!["xtask", "conf", "switch", "qemu-virt-rv64"],
+            vec!["xtask", "mrproper"],
+        ] {
+            assert!(Cli::try_parse_from(arguments).is_err());
+        }
+    }
+
+    #[test]
+    fn production_cli_exposes_selection_aware_build_and_qemu() {
+        assert!(
+            Cli::try_parse_from([
+                "xtask",
+                "build",
+                "--preset",
+                "qemu-virt-rv64-pretest-release",
+                "--disasm",
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xtask",
+                "qemu",
+                "--target",
+                "qemu-virt-rv64-pretest",
+                "--kernel-config",
+                "conf/.defconfig",
+                "--profile",
+                "release",
+                "--bind",
+                "kernel-image=build/anemone.elf",
+            ])
+            .is_ok()
+        );
     }
 }

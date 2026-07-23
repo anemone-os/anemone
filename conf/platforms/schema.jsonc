@@ -5,18 +5,8 @@
     "properties": {
         "build": {
             "type": "object",
-            "description": "Guest Platform identity and kernel build architecture.",
+            "description": "Guest Platform kernel build architecture.",
             "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Platform filename slug."
-                },
-                "abbrs": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
                 "arch": {
                     "enum": [
                         "riscv64",
@@ -31,11 +21,10 @@
                 }
             },
             "required": [
-                "name",
-                "abbrs",
                 "arch",
                 "exec_env"
-            ]
+            ],
+            "additionalProperties": false
         },
         "constants": {
             "type": "object",
@@ -79,9 +68,6 @@
             "type": "object",
             "description": "Optional QEMU provider for a virtual Platform.",
             "properties": {
-                "qemu": {
-                    "type": "string"
-                },
                 "machine": {
                     "type": "string"
                 },
@@ -103,14 +89,42 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "bind": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9-]*$"
+                            },
+                            "template": {
+                                "type": "array",
+                                "minItems": 1,
+                                "contains": {
+                                    "type": "string",
+                                    "pattern": "\\{\\{\\}\\}"
+                                },
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "required": [
+                            "name",
+                            "template"
+                        ],
+                        "additionalProperties": false
+                    }
                 }
             },
             "required": [
-                "qemu",
                 "machine",
                 "smp",
                 "memory"
-            ]
+            ],
+            "additionalProperties": false
         },
         "dtb": {
             "type": "object",
@@ -219,5 +233,6 @@
     "required": [
         "build",
         "constants"
-    ]
+    ],
+    "additionalProperties": false
 }

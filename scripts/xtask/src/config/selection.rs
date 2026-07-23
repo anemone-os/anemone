@@ -1,3 +1,4 @@
+use clap::Args;
 use serde::Deserialize;
 
 use super::{
@@ -22,6 +23,45 @@ pub struct SelectionRequest {
     target: Option<SystemTargetRef>,
     kernel_config: Option<KernelConfigRef>,
     profile: Option<CargoProfile>,
+}
+
+#[derive(Args, Debug)]
+pub struct SelectionArgs {
+    #[arg(long, value_name = "PRESET")]
+    #[arg(help = "Select a tracked build preset")]
+    preset: Option<String>,
+
+    #[arg(long, value_name = "TARGET")]
+    #[arg(help = "Select a system target as part of a complete low-level tuple")]
+    target: Option<String>,
+
+    #[arg(long, value_name = "PATH")]
+    #[arg(help = "Select a KernelConfig as part of a complete low-level tuple")]
+    kernel_config: Option<String>,
+
+    #[arg(long, value_name = "PROFILE")]
+    #[arg(help = "Select the kernel Cargo profile as part of a complete low-level tuple")]
+    profile: Option<CargoProfile>,
+}
+
+impl SelectionArgs {
+    pub fn into_request(self) -> anyhow::Result<SelectionRequest> {
+        Ok(SelectionRequest::new(
+            self.preset
+                .as_deref()
+                .map(BuildPresetRef::new)
+                .transpose()?,
+            self.target
+                .as_deref()
+                .map(SystemTargetRef::new)
+                .transpose()?,
+            self.kernel_config
+                .as_deref()
+                .map(KernelConfigRef::new)
+                .transpose()?,
+            self.profile,
+        ))
+    }
 }
 
 impl SelectionRequest {
@@ -92,7 +132,15 @@ pub(super) enum SelectionChoice {
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
+
     use super::*;
+
+    #[derive(Parser)]
+    struct SelectionCli {
+        #[command(flatten)]
+        selection: SelectionArgs,
+    }
 
     #[test]
     fn selection_file_is_closed() {
@@ -161,5 +209,38 @@ mod tests {
         ] {
             assert!(incomplete.classify().is_err());
         }
+    }
+
+    #[test]
+    fn clap_selection_args_feed_the_same_classifier() {
+        let preset = SelectionCli::try_parse_from(["test", "--preset", "test-release"])
+            .unwrap()
+            .selection
+            .into_request()
+            .unwrap();
+        assert!(matches!(
+            preset.classify().unwrap(),
+            SelectionChoice::Preset(_)
+        ));
+
+        let tuple = SelectionCli::try_parse_from([
+            "test",
+            "--target",
+            "qemu-virt-rv64",
+            "--kernel-config",
+            "conf/.defconfig",
+            "--profile",
+            "dev",
+        ])
+        .unwrap()
+        .selection
+        .into_request()
+        .unwrap();
+        assert!(matches!(
+            tuple.classify().unwrap(),
+            SelectionChoice::Tuple { .. }
+        ));
+
+        assert!(SelectionCli::try_parse_from(["test", "--profile", "unsupported"]).is_err());
     }
 }

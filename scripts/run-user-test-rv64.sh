@@ -22,11 +22,10 @@ usage() {
 Usage: run-user-test-rv64.sh <sdcard-image> [log-file]
 
 Runs the rv64 test chain:
-  1. switch the legacy target selection to qemu-virt-rv64-pretest if needed
-  2. build the rootfs with sudo
-  3. stage the provided sdcard image as a temporary copy
-  4. build the kernel
-  5. launch QEMU and tee the output to a log file
+  1. build the rootfs with sudo
+  2. stage the provided sdcard image as a build-local temporary copy
+  3. explicitly select the pretest preset and build the kernel
+  4. launch QEMU with the complete tracked bind map and tee the output to a log file
 
 Uses conf/rootfs/pretest-rv64.toml as the public pretest rootfs manifest.
 EOF
@@ -41,18 +40,15 @@ rootfs_config=conf/rootfs/pretest-rv64.toml
 sdcard_image=$1
 log_file=${2:-build/user-test-rv64.log}
 
-system_target=qemu-virt-rv64-pretest
-# Stage 2 removes both this mutable target bridge and the direct legacy QEMU
-# Platform selection. Keep the identities separate even while their slugs match.
-legacy_qemu_platform=qemu-virt-rv64-pretest
+preset=qemu-virt-rv64-pretest-release
 target_arch=riscv64
-sdcard_target=sdcard-rv.img
+runtime_dir=build/runtime/pretest-rv64
+sdcard_target=$runtime_dir/disk-x0.img
 rootfs_target=build/rootfs/pretest-rv64/rootfs.img
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/.." && pwd)
 cd "$repo_root"
-
 
 if [[ ! -f "$rootfs_config" ]]; then
     error "rootfs config not found: $rootfs_config"
@@ -64,31 +60,23 @@ if [[ ! -f "$sdcard_image" ]]; then
     exit 1
 fi
 
-if [[ -e "$sdcard_target" ]]; then
+for runtime_parent in build build/runtime "$runtime_dir"; do
+    if [[ -L "$runtime_parent" ]]; then
+        error "runtime directory component must not be a symlink: $runtime_parent"
+        exit 1
+    fi
+done
+
+if [[ -e "$sdcard_target" || -L "$sdcard_target" ]]; then
     warn "$sdcard_target already exists; will be overwritten"
 fi
 
 mkdir -p -- "$(dirname -- "$log_file")"
 
-current_target=$(
-    awk -F'"' '/^[[:space:]]*target[[:space:]]*=/ { print $2; exit }' kconfig
-)
-
-if [[ -z "$current_target" ]]; then
-    error "could not read current target from kconfig"
-    exit 1
-fi
-
-log_progress "PRETEST" "target $system_target ($target_arch)"
-log_progress "PRETEST" "legacy qemu platform $legacy_qemu_platform"
+log_progress "PRETEST" "preset $preset ($target_arch)"
 log_progress "PRETEST" "rootfs config $rootfs_config"
 log_progress "PRETEST" "sdcard image $sdcard_image"
 log_progress "PRETEST" "log file $log_file"
-
-if [[ "$current_target" != "$system_target" ]]; then
-    log_progress "PRETEST" "switching kconfig from $current_target to $system_target"
-    just conf switch "$system_target"
-fi
 
 log_progress "PRETEST" "rebuilding rootfs"
 rm -rf -- build/rootfs
@@ -108,15 +96,25 @@ fi
 
 rootfs_image=${rootfs_images[0]}
 if [[ "$rootfs_image" != "$rootfs_target" ]]; then
-    mkdir -p -- "$(dirname -- "$rootfs_target")"
-    ln -sf -- "$rootfs_image" "$rootfs_target"
+    error "unexpected rootfs output: $rootfs_image (expected $rootfs_target)"
+    exit 1
 fi
 
 log_progress "PRETEST" "staging sdcard image"
-cp -- "$sdcard_image" "$sdcard_target"
+mkdir -p -- "$runtime_dir"
+sdcard_source=$(realpath -- "$sdcard_image")
+sdcard_destination=$(realpath -m -- "$sdcard_target")
+if [[ "$sdcard_source" == "$sdcard_destination" ]]; then
+    error "sdcard source and runtime destination must be different files"
+    exit 1
+fi
+cp --remove-destination -- "$sdcard_image" "$sdcard_target"
 
 log_progress "PRETEST" "building kernel"
-just build
+just build --preset "$preset"
 
 log_progress "PRETEST" "running qemu"
-just xtask qemu --platform "$legacy_qemu_platform" --image build/anemone.elf 2>&1 | tee "$log_file"
+just qemu --preset "$preset" \
+    --bind kernel-image=build/anemone.elf \
+    --bind disk-x0="$sdcard_target" \
+    --bind disk-x1="$rootfs_target" 2>&1 | tee "$log_file"

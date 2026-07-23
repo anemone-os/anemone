@@ -4,10 +4,6 @@
 # This section defines how to build Anemone kernel for the target platform.
 
 [build]
-# Platform filename slug; `example.toml` therefore has identity `example`.
-name = "example"
-# Abbreviations for the platform, used for command line arguments and such.
-abbrs = ["eg", "example"]
 # Architecture of the target platform
 # e.g., riscv64, x86_64, arm64, loongarch64
 arch = "riscv64"
@@ -34,8 +30,6 @@ frame_section_shift_mb = 7
 # This section defines how to run the target platform in QEMU,
 # if applicable.
 [qemu]
-# QEMU binary to use
-qemu = "qemu-system-riscv64"
 # QEMU machine type
 machine = "virt"
 # CPU type, optional
@@ -48,13 +42,17 @@ memory = "1G"
 bios = "default"
 # Additional QEMU arguments
 args = [
-    "-serial",
-    "mon:stdio",
     "-device",
     "virtio-net-device,netdev=net0",
     "-netdev",
     "user,id=net0,hostfwd=tcp::2222-:22",
 ]
+
+# Each declaration is an ordered argv template. Invocation values are supplied
+# with `just qemu ... --bind name=path`; tracked config never stores host paths.
+[[qemu.bind]]
+name = "kernel-image"
+template = ["-kernel", "{{}}"]
 
 # Device Tree Blob configuration for the platform, optional
 [dtb]

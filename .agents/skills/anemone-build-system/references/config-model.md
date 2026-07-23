@@ -17,7 +17,14 @@ Do not copy a current configuration snapshot into the skill. Point to its owner 
 
 ### Kernel Configuration
 
-Root `kconfig` and `conf/.defconfig` own kernel feature, policy, and capacity values. Until the selection CLI cutover, root `kconfig` also carries a legacy SystemTarget/profile/presentation selection bridge; the resolver must keep that bridge outside the owned KernelConfig value. Before changing either file, inspect which values may fall back and which generated definitions the build writes.
+Root `kconfig` and `conf/.defconfig` own kernel feature, policy, and capacity values only. Build selection, kernel Cargo profile, action presentation, and QEMU host paths are rejected from KernelConfig. Before changing either file, inspect which parameter values may fall back and which generated definitions the build writes.
+
+### Build Selection
+
+`conf/build-presets/` names a SystemTarget, workspace-relative KernelConfig, and kernel-only Cargo
+profile. Tracked `conf/default-selection.toml` and ignored `conf/.selection.toml` each contain only a
+preset reference. Build and ordinary QEMU share one resolver; automation uses an explicit preset or
+complete low-level tuple, while only interactive calls may use local/default selection.
 
 ### System Target
 
@@ -25,7 +32,7 @@ Root `kconfig` and `conf/.defconfig` own kernel feature, policy, and capacity va
 
 ### Platform And Architecture
 
-`conf/platforms/` owns a platform's architecture-facing and launch-facing configuration plus boot-ABI-required kernel output formats. `conf/arch/` owns architecture templates and target specifications. The build, configuration, QEMU, and DTB tasks may consume different parts of this layer; inspect every consumer affected by a change.
+`conf/platforms/` owns a platform's architecture-facing and launch-facing configuration plus boot-ABI-required kernel output formats. QEMU sections own fixed argv and ordered bind templates, but never the host executable or invocation path values. `conf/arch/` owns architecture templates and target specifications. The build, configuration, QEMU, and DTB tasks may consume different parts of this layer; inspect every consumer affected by a change.
 
 ### App Manifest
 
@@ -40,12 +47,12 @@ Root `kconfig` and `conf/.defconfig` own kernel feature, policy, and capacity va
 Before executing or accepting a configuration change, verify:
 
 - the selected SystemTarget resolves to the intended Platform;
-- the legacy kconfig bridge, while present, resolves the intended SystemTarget and does not leak into the owned KernelConfig value;
+- the selected preset or complete low-level tuple resolves the intended SystemTarget and does not merge with interactive local state;
 - platform architecture agrees with target, linker, DTB, firmware, and QEMU choices;
 - the build produces every kernel output required by the selected Platform;
 - app architecture, driver output, and declared export agree;
 - rootfs architecture and installed apps agree with the intended kernel;
-- rootfs output and QEMU device/image wiring agree when the platform uses that image;
+- every QEMU bind value matches a selected Platform declaration and the intended wrapper mapping;
 - fixed-path consumers run after their documented producer and stop when it fails;
 - cleanup and wrapper behavior does not invalidate another layer's required input;
 - validation observes outputs from the current invocation, not stale conditional artifacts.

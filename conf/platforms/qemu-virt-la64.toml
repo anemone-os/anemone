@@ -1,6 +1,4 @@
 [build]
-name = "qemu-virt-la64"
-abbrs = ["la", "la64", "loongarch", "loongarch64"]
 arch = "loongarch64"
 exec_env = "sbi"
 
@@ -13,15 +11,11 @@ max_phys_cpu_id = 3
 frame_section_shift_mb = 7
 
 [qemu]
-qemu = "qemu-system-loongarch64"
 machine = "virt"
 smp = 1
 memory = "1G"
 # cpu = default
 args = [
-    "-nographic",
-    "-serial",
-    "mon:stdio",
     "-rtc",
     "base=utc",
     "-accel",
@@ -31,16 +25,11 @@ args = [
     "-device",
     "pcie-root-port,id=pcie.1,bus=pcie.0",
 
-    # "-drive",
-    # "file=build/rootfs/minimal-la/rootfs.img,format=raw,if=none,id=x0", # vda
-    # "-device",
-    # "virtio-blk-pci-transitional,drive=x0,bus=pcie.0",
-
-    # "-drive",
-    # "file=sdcard-la.img,format=raw,if=none,id=x1",     # vdb
-    # "-device",
-    # "virtio-blk-pci-transitional,drive=x1,bus=pcie.0",
 ]
+
+[[qemu.bind]]
+name = "kernel-image"
+template = ["-kernel", "{{}}"]
 
 [dtb]
 source = "conf/platforms/qemu-virt-la64.dts"

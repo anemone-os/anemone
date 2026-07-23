@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
 use super::reference::{BuildPresetRef, KernelConfigRef, SystemTargetRef};
@@ -36,6 +38,18 @@ impl CargoProfile {
         match self {
             Self::Dev => "dev",
             Self::Release => "release",
+        }
+    }
+}
+
+impl FromStr for CargoProfile {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "dev" => Ok(Self::Dev),
+            "release" => Ok(Self::Release),
+            _ => anyhow::bail!("unsupported kernel Cargo profile `{value}`"),
         }
     }
 }

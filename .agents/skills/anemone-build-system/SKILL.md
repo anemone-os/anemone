@@ -30,12 +30,18 @@ Read [references/build-playbook.md](references/build-playbook.md) for task routi
 
 Keep each concern in its owning layer:
 
-- root `kconfig` and `conf/.defconfig`: kernel features and parameters plus the current legacy build-selection bridge;
+- root `kconfig` and `conf/.defconfig`: kernel features, policy, and capacity only;
+- `conf/build-presets/`, `conf/default-selection.toml`, and ignored `conf/.selection.toml`: reusable explicit selection and the developer-local interactive preset reference;
 - `conf/system-targets/`: selected Platform reference, root mount/source, and initial-program source;
-- `conf/platforms/` and `conf/arch/`: platform identity, architecture, hardware constants, boot environment, QEMU, DTB, linker inputs, and Platform-required kernel outputs;
+- `conf/platforms/` and `conf/arch/`: platform identity, architecture, hardware constants, boot environment, tracked QEMU argv/bind templates, DTB, linker inputs, and Platform-required kernel outputs;
 - `anemone-apps/<app>/app.toml`: app driver and exported artifacts;
 - `conf/rootfs/`: rootfs composition and installed apps/files;
 - Justfile and `scripts/xtask/src/tasks/`: orchestration and command behavior.
+
+Build and ordinary QEMU use the same selection syntax. Automation and wrappers must pass an explicit
+`--preset` or a complete `--target` / `--kernel-config` / `--profile` tuple; they must not depend on
+interactive local selection. QEMU host paths are action inputs supplied with the selected Platform's
+declared `--bind name=path` values, not tracked configuration.
 
 When prose, examples, schemas, active configuration, and Rust code disagree, treat live deserialization and task code as authoritative. Re-read them instead of preserving a possibly stale fact in this skill.
 

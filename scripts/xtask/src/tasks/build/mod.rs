@@ -14,9 +14,9 @@ use xshell::Shell;
 
 use crate::{
     config::{
-        kconfig::Profile,
-        reference::KernelConfigRef,
-        resolve::{BuildPresentation, ConfigLoader, ResolvedSystemBuild},
+        build_preset::CargoProfile,
+        resolve::{ConfigLoader, ResolvedSystemBuild},
+        selection::SelectionArgs,
     },
     log_progress,
     tasks::app::build::build_app,
@@ -30,17 +30,20 @@ pub mod symtab;
 
 #[derive(Args)]
 pub struct BuildArgs {
-    #[arg(short, long, default_value = KCONFIG_PATH)]
-    #[arg(help = "Path to the kconfig file")]
-    pub kconfig: String,
+    #[command(flatten)]
+    selection: SelectionArgs,
+
+    #[arg(long)]
+    #[arg(help = "Generate a disassembly as an action-local presentation output")]
+    disasm: bool,
 }
 
 pub fn run(args: BuildArgs) -> anyhow::Result<()> {
     log_progress!("BUILD", "Starting build process");
 
-    log_progress!("RESOLVE", "Resolving legacy build selection");
-    let kernel_config_ref = KernelConfigRef::new(args.kconfig)?;
-    let action = ConfigLoader::new(Path::new(".")).resolve_legacy_build(kernel_config_ref)?;
+    log_progress!("RESOLVE", "Resolving build selection");
+    let action =
+        ConfigLoader::new(Path::new(".")).resolve_selection(args.selection.into_request()?)?;
     log_progress!(
         "RESOLVE",
         &format!(
@@ -60,7 +63,7 @@ pub fn run(args: BuildArgs) -> anyhow::Result<()> {
         )
     );
 
-    let context = BuildContext::new(action.system, action.presentation);
+    let context = BuildContext::new(action.system, args.disasm);
     context.build()?;
 
     Ok(())
@@ -68,15 +71,12 @@ pub fn run(args: BuildArgs) -> anyhow::Result<()> {
 
 struct BuildContext {
     resolved: ResolvedSystemBuild,
-    presentation: BuildPresentation,
+    disasm: bool,
 }
 
 impl BuildContext {
-    fn new(resolved: ResolvedSystemBuild, presentation: BuildPresentation) -> Self {
-        Self {
-            resolved,
-            presentation,
-        }
+    fn new(resolved: ResolvedSystemBuild, disasm: bool) -> Self {
+        Self { resolved, disasm }
     }
 
     fn build(&self) -> anyhow::Result<()> {
@@ -206,7 +206,7 @@ impl BuildContext {
             self.resolved.platform.uboot.as_ref(),
         )?;
 
-        if self.presentation.disasm {
+        if self.disasm {
             log_progress!("DISASM", "Generating kernel disassembly");
 
             let disasm = sh
@@ -235,8 +235,8 @@ impl BuildContext {
             "target/{}/{}",
             self.resolved.platform.build.arch.target_triple().as_str(),
             match self.resolved.profile {
-                Profile::Dev => "debug", // dev builds go to debug/
-                Profile::Release => "release",
+                CargoProfile::Dev => "debug", // dev builds go to debug/
+                CargoProfile::Release => "release",
             },
         )
     }

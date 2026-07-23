@@ -17,14 +17,14 @@ Then read the corresponding Justfile recipe and xtask task. Help output defines 
 
 | Task | Preferred entrypoint | Inspect before use |
 | --- | --- | --- |
-| Initialize or reset local build configuration | `just defconfig` | Justfile, `conf/.defconfig`, existing root `kconfig` |
-| List or switch platforms | `just conf ...` | conf task, root `kconfig`, platform files |
+| Initialize or reset local KernelConfig | `just defconfig` | Justfile, `conf/.defconfig`, existing root `kconfig` |
+| List targets or manage interactive selection | `just conf ...`, `just selection ...` | conf/selection task, target/preset/default files |
 | Build the kernel | `just build` or the build xtask interface | selected kconfig, platform, build task |
 | Format Rust | `just fmt ...` | fmt help and fmt task |
 | Build an app | `just app ...` or the app xtask interface | app manifest, app task, selected architecture |
 | Materialize a rootfs | `just rootfs ...` or the rootfs xtask interface | rootfs manifest, host inputs, app manifests, rootfs task |
-| Run QEMU | qemu xtask interface | platform, kernel provenance, firmware/device/image inputs |
-| Clean outputs | `just clean`, `just mrproper`, or `just xtask-clean` | live recipe and cleanup task |
+| Run QEMU | `just qemu ...` | explicit selection for automation, selected Platform bind declarations, firmware/device/image inputs |
+| Clean outputs | `just clean` | live recipe and cleanup task |
 | Run pretest/end-to-end validation | existing architecture-specific repository wrapper | the entire wrapper, local prerequisites, requested validation scope |
 
 Use `--help` to obtain current arguments instead of copying detailed invocations from this reference.
@@ -33,13 +33,13 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 
 ### Configuration
 
-- Confirm whether the command creates, overwrites, or edits root `kconfig`.
-- Re-read the selected platform after a switch.
-- Separate local configuration from tracked defaults.
+- Confirm whether the command creates or overwrites root `kconfig`, or only manages the ignored local preset reference.
+- Resolve the selected target and Platform through the shared selection path.
+- Separate local selection from tracked defaults and explicit automation input.
 
 ### Kernel Build
 
-- Confirm which selection source, SystemTarget, platform, KernelConfig, and kernel Cargo profile were resolved.
+- Confirm which selection source, SystemTarget, Platform, KernelConfig, and kernel Cargo profile were resolved.
 - Check generated inputs before interpreting compiler failures.
 - When the selected Platform declares a DTS, verify that normal build compiled the committed source
   to `build/generated/device-tree/platform.dtb`; normal build must not launch QEMU to obtain it.
@@ -63,7 +63,7 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 ### QEMU
 
 - Confirm the kernel was built for the selected platform.
-- Validate firmware, device, disk, and image inputs from the live platform file.
+- Validate firmware and fixed device tokens from the live Platform file, then provide every declared QEMU bind as an invocation path.
 - Distinguish launch/configuration failures from guest boot failures.
 - When DTB is involved, inspect both the build-time generator and runtime QEMU path rather than assuming they use identical inputs.
 

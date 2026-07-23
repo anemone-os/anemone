@@ -24,8 +24,7 @@ repository root, use this order with the same `visionfive2-rv64` selection:
 
 ```text
 source .envrc
-just conf switch visionfive2-rv64
-just xtask build -k kconfig
+just build --preset visionfive2-rv64-release
 just rootfs mkfs -c conf/rootfs/visionfive2/rootfs.toml --sudo
 ```
 

@@ -7,11 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::workspace::*;
 
-// The legacy production build keeps this owner-local name until the atomic 2C
-// cutover removes `[build]`; it aliases the sole profile enum and is not a
-// second source of profile state.
-pub use crate::config::build_preset::CargoProfile as Profile;
-
 #[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq)]
 pub enum SchedDefaultPolicy {
     #[serde(rename = "fair")]
@@ -30,14 +25,6 @@ impl SchedDefaultPolicy {
             Self::RtFifo => "RtFifo",
         }
     }
-}
-
-#[derive(Deserialize, Debug, Serialize)]
-pub struct Build {
-    pub target: String,
-    pub profile: Profile,
-
-    pub disasm: bool,
 }
 
 #[derive(Deserialize, Debug, Serialize, PartialEq, Eq)]
@@ -79,22 +66,20 @@ pub struct Parameters {
 
 impl Parameters {
     /// Materialize the optional parameter syntax into the complete value owned
-    /// by a resolved KernelConfig. Build consumers must not consult `.defconfig`
-    /// after this boundary.
-    pub(super) fn materialize_defaults(
-        &mut self,
-        defaults: Option<&Self>,
-    ) -> anyhow::Result<()> {
+    /// by a resolved KernelConfig. Build consumers must not consult
+    /// `.defconfig` after this boundary.
+    pub(super) fn materialize_defaults(&mut self, defaults: Option<&Self>) -> anyhow::Result<()> {
         macro_rules! materialize {
             ($field:ident) => {
                 if self.$field.is_none() {
-                    self.$field = Some(defaults.and_then(|value| value.$field).ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "default value for {} must be specified in {}",
-                            stringify!($field),
-                            DEF_KCONFIG_PATH
-                        )
-                    })?);
+                    self.$field =
+                        Some(defaults.and_then(|value| value.$field).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "default value for {} must be specified in {}",
+                                stringify!($field),
+                                DEF_KCONFIG_PATH
+                            )
+                        })?);
                 }
             };
         }
@@ -142,11 +127,12 @@ impl Parameters {
     pub fn gen_kconfig_defs(&self) -> String {
         macro_rules! resolved {
             ($field:ident) => {
-                self.$field
-                    .unwrap_or_else(|| panic!(
+                self.$field.unwrap_or_else(|| {
+                    panic!(
                         "resolved KernelConfig is missing parameter {}",
                         stringify!($field),
-                    ))
+                    )
+                })
             };
         }
 
@@ -290,8 +276,8 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
 }
 
 #[derive(Deserialize, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
-    pub build: Build,
     pub features: HashMap<String, bool>,
     pub parameters: Parameters,
 }
@@ -365,27 +351,31 @@ mod tests {
         };
 
         assert!(
-            Config::from_str(
-                &replace_parameter("sched_default_policy", "sched_default_policy = \"fair\"")
-            )
+            Config::from_str(&replace_parameter(
+                "sched_default_policy",
+                "sched_default_policy = \"fair\""
+            ))
             .is_ok()
         );
         assert!(
-            Config::from_str(
-                &replace_parameter("sched_default_policy", "sched_default_policy = \"rt_rr\"")
-            )
+            Config::from_str(&replace_parameter(
+                "sched_default_policy",
+                "sched_default_policy = \"rt_rr\""
+            ))
             .is_ok()
         );
         assert!(
-            Config::from_str(
-                &replace_parameter("sched_default_policy", "sched_default_policy = \"rt_fifo\"")
-            )
+            Config::from_str(&replace_parameter(
+                "sched_default_policy",
+                "sched_default_policy = \"rt_fifo\""
+            ))
             .is_ok()
         );
         assert!(
-            Config::from_str(
-                &replace_parameter("sched_default_policy", "sched_default_policy = \"invalid\"")
-            )
+            Config::from_str(&replace_parameter(
+                "sched_default_policy",
+                "sched_default_policy = \"invalid\""
+            ))
             .is_err()
         );
         assert!(
@@ -441,12 +431,14 @@ mod tests {
         };
 
         assert!(
-            Config::from_str(&replace_parameter("print_log_level", "print_log_level = 8"))
-                .is_err()
+            Config::from_str(&replace_parameter("print_log_level", "print_log_level = 8")).is_err()
         );
         assert!(
-            Config::from_str(&replace_parameter("record_log_level", "record_log_level = 8"))
-                .is_err()
+            Config::from_str(&replace_parameter(
+                "record_log_level",
+                "record_log_level = 8"
+            ))
+            .is_err()
         );
     }
 }
