@@ -3,4 +3,5 @@ base/*
 !base/etc
 !base/tests
 !base/install_sys.sh
+!base/symlinks.sh
 !.gitignore

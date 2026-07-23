@@ -6,7 +6,7 @@
                                                
 ================== Anemone OS ==================
 
-Anemone OS - dev (riscv64)
-Architecture: RISC-V 64-bit (RV64GC)
-Platform:     StarFive VisionFive 2 - JH7110 SoC
+Anemone OS - dev (loongarch64-2k1000)
+Architecture: LoongArch 64-bit
+Platform:     Loongson 2K1000
 Toolchain:    musl-libc / BusyBox

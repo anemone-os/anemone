@@ -1,12 +1,20 @@
 #!/busybox sh
 
+# set -x
+
 echo Installing Anemone userspace into rootfs...
-set -eu
+# BusyBox 1.33.1 hush rejects `set -u`; restore nounset only after /bin/sh
+# switches to ash or the selected hush implementation supports it.
+set -e
 
 BUSYBOX=/busybox
 
 "$BUSYBOX" mkdir -p /bin /dev /dev/shm /etc /mnt /proc /root /run /tmp /usr /var
 "$BUSYBOX" --install -s /bin
+
+if [ -f /symlinks.sh ]; then
+    "$BUSYBOX" sh /symlinks.sh
+fi
 
 for link in /sbin /usr/bin /usr/sbin; do
     if [ ! -e "$link" ]; then
@@ -22,13 +30,6 @@ for name in include lib libexec share; do
     fi
 done
 
-# The Alpine LP64D binaries request this exact interpreter. Alpine installs
-# musl's combined libc and dynamic loader under the ABI-specific libc name.
-MUSL_LOADER=/lib/ld-musl-riscv64.so.1
-if [ ! -e "$MUSL_LOADER" ]; then
-    "$BUSYBOX" ln -s libc.musl-riscv64.so.1 "$MUSL_LOADER"
-fi
-
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export HOME=/root
 export TERM=linux
@@ -43,7 +44,7 @@ export LD_LIBRARY_PATH=/lib:/usr/lib
 "$BUSYBOX" chmod 1777 /tmp
 
 if [ -f /tests/try_build.sh ]; then
-    echo "Running native GCC smoke test from /tests..."
+    echo "Running native GCC/Git smoke test from /tests..."
     if ! (cd /tests && "$BUSYBOX" sh ./try_build.sh); then
         echo "Native GCC smoke test failed; continuing to the interactive shell."
     fi

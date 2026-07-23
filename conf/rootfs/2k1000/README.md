@@ -15,3 +15,5 @@ build/rootfs/visionfive2/rootfs.img
 
 `rootfs-alpine.img` must be a pre-sized raw ext4 image containing a complete
 Alpine loongarch userspace.
+
+`base/busybox` must be a valid busybox binary.

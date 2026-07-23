@@ -9,11 +9,12 @@ arch = "loongarch64"
 [fs]
 # Filesystem type to use.
 fstype = "ext4"
-# Start from the pre-sized Alpine ext4 image and recursively copy the Anemone
-# override tree into it. Image bases own their capacity and reject `size`.
-base = "conf/rootfs/2k1000/rootfs-alpine.img"
-override = "conf/rootfs/2k1000/base"
-type = "image"
+# Build a fresh ext4 image from the LoongArch folder root. This root carries a
+# strict-align musl/GCC toolchain instead of using the full Alpine image base.
+base = "conf/rootfs/2k1000/base"
+type = "folder"
+# Leave room for ext4 metadata, the GCC toolchain, and the small test tree.
+size = "512M"
 
 # Init process configuration. This will be written into /.anemone/init and used by kernel to launch the init process.
 [init]
@@ -29,3 +30,7 @@ path = "/mnt"
 [[files]]
 source = "build/anemoneImage-la64-raw"
 installed_path = "/boot/anemoneImage-raw"
+
+[[files]]
+source = "conf/rootfs/2k1000/base/busybox"
+installed_path = "/sbin/init"
