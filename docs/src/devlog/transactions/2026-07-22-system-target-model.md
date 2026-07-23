@@ -5,7 +5,7 @@
 **Area:** build system / configuration / platform / repository workflow
 **Canonical Plan:** [RFC-20260722-system-target-model](../../rfcs/system-target-model/index.md), [目标与不变量](../../rfcs/system-target-model/invariants.md), [迁移实施计划](../../rfcs/system-target-model/implementation.md)
 **Canonical Revision:** R2（R0初始接受；Stage 3期间完成R1 DT authority renegotiation；Stage 3关闭后接受R2 metadata correction）
-**Current Phase:** Stage 1-4 Closed / Stage 5 Outline / Not Resolved
+**Current Phase:** Stage 1-4 Closed / Stage 5 Ready / Checkpoint 5A Not Activated
 
 ## Scope
 
@@ -789,3 +789,32 @@ physical board、LTP与final harness均Not Run；它们不属于4A floor。
 write-set停止条件。Contract cutover为None；`BOOT-PROTOCOL-001` effective baseline与R2 pending successor保持
 不变。Checkpoint 4A与Stage 4 Closed；本closure没有运行、解析或激活
 `Stage 4 -> Stage 5 Implementation Resolution Gate`。
+
+## Stage 4 -> Stage 5 Implementation Resolution - 2026-07-24
+
+**Status:** Completed；Stage 5 Ready / Checkpoint 5A Not Activated。
+
+用户在Stage 4独立关闭后授权解析Stage 5。Resolution preflight读取R2 target/invariants、4A最终diff与
+review/validation、effective Boot Protocol、register/current limitations，以及live SystemTarget resolver、
+app exporter、kernel root mount/VFS/ramfs/exec/shebang、pretest RV64 wrapper和rootfs/QEMU owner；并核对
+`just --list`、`just xtask build --help`、`just xtask app build --help`与`just xtask clean --help`当前接口。
+Register没有重叠blocker。
+
+Live path确认`File`只适合物化，ordinary `kernel_execve()`与shebang interpreter reopen需要稳定绝对VFS path。
+Authoritative `implementation.md`因此把Stage 5解析为单一原子Checkpoint 5A：build action复用唯一
+`build_app()` exporter，把closed `RootfsEntry | EmbeddedApp { app }`生成typed Rust input；kernel在root mount
+后确保`/.anemone`目录、overmount本boot独有ramfs，以private temp完整写入并固定`0555`后rename发布
+`/.anemone/embedded-init`，最后两种variant统一进入ordinary `kernel_execve()`。Ramfs保持整个boot以支持
+shebang reopen；boot-fatal后不主动unlink/unmount/rollback，下一次boot的新ramfs负责失败隔离，持久rootfs
+最多留下空`/.anemone`目录。当前没有只读root mount机制，本stage不增加其schema、fallback或实现。
+
+Schema/build/runtime没有可独立暴露的安全半能力，也不需要读取前一子步骤实际diff才能继续解析，因此不拆
+checkpoint或probe。Resolution冻结了parser/export/generator/kernel materializer、RV64 ELF/shebang/missing
+interpreter smoke、RootfsEntry regression、incremental `include_bytes!`重建、cutover与完整resolved write set；
+具体交付、验证、停止和禁止路径只以canonical `implementation.md`为authority，本事务不复制第二份计划。
+
+本gate只更新RFC、transaction和navigation状态。R2 target、owner、ABI、visible semantics、acceptance boundary
+与Contract Impact不变，修订不递增；`BOOT-PROTOCOL-001` effective baseline继续生效，只有5A完整验证、review
+和closure时才允许cut over。本gate未激活5A，未修改current contract、代码或production config，也未运行
+xtask tests、kernel/rootfs build、QEMU、physical board、LTP或final harness；这些仍是未来execution evidence，
+不是本docs-only resolution证据。
