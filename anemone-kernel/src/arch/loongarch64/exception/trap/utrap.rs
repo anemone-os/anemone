@@ -29,13 +29,15 @@ use crate::{
 
 // User trap entry point. The kernel does not save or restore floating-point
 // registers here because user-mode traps currently do not use them.
-// Hidden trap entries and local PC-relative loads avoid preemptible address references that require a GOT.
+// Hidden trap entries and local PC-relative loads avoid preemptible address
+// references that require a GOT.
 core::arch::global_asm!(
     "   .section .text",
     "   .global __utrap_entry",
     "   .hidden __utrap_entry",
 
-    "   .balign 4",
+    // EENTRY stores a page base (bits [63:12]); keep the symbol itself aligned.
+    "   .balign 4096",
     "__utrap_entry:",
     "   csrwr $sp, {save1}",
     "   csrrd $sp, {save0}",
@@ -324,7 +326,7 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                 },
                 _ => {
                     kerrln!(
-                        "({}) user {} aborted with unhandled exception: {:?}, pc: {:#x}, badv: {:#x}\n\ttask return value not implemented yet",
+                        "({}) user {} aborted with unhandled exception: {:?}, pc: {:#x}, badv: {:#x}",
                         cur_cpu_id(),
                         current_task_id(),
                         reason,

@@ -23,8 +23,9 @@ core::arch::global_asm!(
     "   .global __ktrap_entry",
     "   .hidden __ktrap_entry",
 
+    // EENTRY stores a page base (bits [63:12]); keep the symbol itself aligned.
+    "   .balign 4096",
     "__ktrap_entry:",
-    "   .align 12",
     "   addi.d $sp, $sp, -{trapframe_bytes}",
     "   st.d $r0, $sp, 0",
     "   st.d $r1, $sp, 8",
