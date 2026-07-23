@@ -1,7 +1,7 @@
 # TTY Subsystem 迁移实施计划
 
-**状态：** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Closed / Stage 3 Ready / Not Started
-**最后更新：** 2026-07-23
+**状态：** Active / Stage 0-3 Closed / Stage 4 Ready / Not Started
+**最后更新：** 2026-07-24
 **父 RFC：** [RFC-20260722-tty-subsystem](./index.md)
 **目标与不变量：** [TTY Subsystem 目标与不变量](./invariants.md)
 **当前契约：** [TTY data plane](../../contracts/tty/data-plane.md)中的五个`TTY-*` ID为Active；Preserve项及其链接见[Contract Impact](./invariants.md#contract-impact)。
@@ -15,8 +15,9 @@
 Stage 0 -> Stage 1 Resolution Gate 随后在新的明确授权下完成。Stage 1的三个checkpoint现已独立关闭；
 Checkpoint 3采用获准的driver-local quiescent probe / Late activation路线完成production transport
 candidate。Stage 1 -> Stage 2 Resolution Gate解析的四个checkpoint现已逐项完成，RV64自动matrix与用户人工
-vi evidence达到floor，`TTY-DATA-CUTOVER`已经Effective并关闭Stage 2。独立`2 -> 3` Implementation
-Resolution Gate已经依据live source把Stage 3解析为Ready；本轮没有激活Stage 3或修改实现源码。
+vi evidence达到floor，`TTY-DATA-CUTOVER`已经Effective并关闭Stage 2。Stage 3随后以单一vertical slice闭合
+relation/caller/ioctl/cleanup并通过RV64验证。独立`3 -> 4` Implementation Resolution Gate现已依据live source
+把最终Stage 4解析为Ready；本轮没有激活Stage 4或修改实现源码。
 
 ## 1. 计划角色与 authority
 
@@ -155,15 +156,15 @@ transaction 中临时切块。
 | Stage 0 | Closed | 只读闭合 live interface、oracle、carrier 候选与模块边界 | None | 已关闭；后续Stage 1 resolution亦已独立完成 |
 | Stage 1 | Closed | 建立 unpublished port/Terminal transport vertical slice，闭合 IRQ、RX、TX 与 pre-publish transaction | None | 三个checkpoint已独立关闭；RV64 candidate验证完成，LA64未验证 |
 | Stage 2 | Closed / Checkpoint 1-4 Closed | 交付 line discipline、termios、read/write/poll、`/dev/ttyS<N>` 与 real boot stdio | `TTY-DATA-CUTOVER` Effective | RV64自动与人工floor完成；Stage-wide audit关闭 |
-| Stage 3 | Ready / Not Started | 建立 controlling relation、`/dev/tty`、caller/topology handoff、foreground ioctls 与 cleanup | None | 已完成独立`2 -> 3` resolution；等待新的明确实现授权 |
-| Stage 4 | Outline | 闭合 terminal signals、background access、ash job control、register 与 current contract | `TTY-JOBCTL-CUTOVER` | Stage 3 独立关闭后 |
+| Stage 3 | Closed | 建立 controlling relation、`/dev/tty`、caller/topology handoff、foreground ioctls 与 cleanup | None | 单一vertical slice与RV64 floor已关闭；Gate P2 candidate成立 |
+| Stage 4 | Ready / Not Started | 闭合 terminal signals、background access、ash job control、register 与 current contract | `TTY-JOBCTL-CUTOVER` | 已完成独立`3 -> 4` resolution；等待新的明确实现授权 |
 
 阶段顺序保护“先闭合真实数据通路，再接 relation/jobctl”的验证路径，不冻结最终文件数量。
 当前粒度只表示语义路线，不表示每个 Stage 应在一个执行单元内完成。Stage 1的三个checkpoint和Stage 2的
-四个checkpoint已经分别由对应resolution gate冻结；Stage 3已解析为一个不再拆checkpoint的vertical slice。
-Stage 4仍只保留terminal signal-access / ash-vi acceptance / docs cutover等future Outline候选切面，不冻结编号、
-精确顺序、文件或授权。后续resolution gate可在保持target和两个cutover unit不变时收窄、合并或改画future切面；
-不得为了缩短checkpoint发布半初始化能力、提前执行cutover，或把跨checkpoint bridge留成长期抽象。
+四个checkpoint已经分别由对应resolution gate冻结；Stage 3以一个不拆checkpoint的vertical slice关闭。Stage 4同样
+解析为一个不拆checkpoint的最终stage：terminal effect、background read、现有harness中的ash验收和原子cutover
+共同证明同一组relation/job-control target，拆成更多阶段不会形成可独立cutover的能力。若自动或用户证据尚缺，
+Stage 4保持Active / Awaiting Evidence，不额外建立验收stage或临时contract。
 
 ## 6. Stage 1 Ready：unpublished transport vertical slice
 
@@ -764,10 +765,10 @@ Validation-only inputs：
 
 阶段成熟度：
 
-- `Ready / Not Started`。本节已冻结完整交付、route、ABI matrix、验证与manifest，但不自动授权实现。
+- `Closed`。本节保留当时冻结的完整交付、route、ABI matrix、验证与manifest；实际执行与关闭证据见transaction。
 - 本阶段不再拆分checkpoint。relation registry、caller/topology decision、`/dev/tty`/ioctl和exit cleanup
   是一个不可再拆的vertical slice；拆开会引入对外可见的无条件成功、临时errno或双重relation truth。
-- Stage 3只验证Gate P2 candidate，不执行`TTY-JOBCTL-CUTOVER`。四个relation/job-control ID继续Not Cut Over。
+- Stage 3只验证Gate P2 candidate且已关闭，不执行`TTY-JOBCTL-CUTOVER`。四个relation/job-control ID继续Not Cut Over。
 
 ### 8.1 前置条件与受保护边界
 
@@ -927,53 +928,170 @@ Validation-only inputs：live Stage 2 diff/log、TTY data-plane与全部Preserve
 `main.rs`、driver/console/IRQ/kthread/Event/wait/scheduler、rootfs manifest、wrapper、pretest/user-test/LTP、architecture、
 current contracts、register与Stage 4实现。越过这些边界必须先扩展，不得用相邻“顺手修复”掩盖。
 
-## 9. Stage 4 Outline：terminal job control、完整验收与 `TTY-JOBCTL-CUTOVER`
+## 9. Stage 4 Ready：terminal job control、完整验收与 `TTY-JOBCTL-CUTOVER`
 
-概括目的：
+阶段成熟度：
 
-- 让 foreground `VINTR/VQUIT/VSUSP`、winsize `SIGWINCH`、ordinary background read `SIGTTIN`
-  通过 relation snapshot、membership revalidation和现有process-group Signal/jobctl路径真实生效。
-- 在Stage 3已经闭合的`TIOCSPGRP`非orphan三分支上接入ash完整流程并复验：foreground allow、
-  background + blocked/ignored `SIGTTOU` allow，以及background + actionable `SIGTTOU`
-  signal-and-restart且mutation不提前提交；不得在Stage 4另建第二条foreground mutation路径。
-- 以 BusyBox ash/vi和定向oracle覆盖controlling acquisition、`/dev/tty`、Ctrl-C/Ctrl-Z、
-  `jobs/fg/bg`、background read、foreground reclaim和relation撤销cleanup；明确标注relation-disassociation
-  `SIGHUP`/`SIGCONT`与其它延期corner。
-- 扩展`tty-test`以复用Stage 3 relation/foreground regression并增加可判定的terminal-signal/background-read路径；
-  对控制字符、ash交互状态与vi显示只保留冻结的自动smoke和用户人工checklist，不让手测承担全部回归。
-- 原子完成`TTY-JOBCTL-CUTOVER`，回写current contracts、transaction、register/current limitations、
-  RFC/tracker/devlog并关闭或明确Not Cut Over。
+- `Ready / Not Started / Unauthorized`。本节已冻结交付、单一路线、signal/access matrix、RV64验证、
+  cutover与resolved manifest，但不自动授权实现。
+- 本阶段不拆checkpoint。三条terminal effect都复用Stage 3 relation snapshot与同一个process-group Signal入口；
+  `tty-test`、BusyBox ash验收和current-contract cutover是这条最终路径的proof与收口，不建立第二套实现owner。
+  如果自动floor已过但用户人工ash证据尚缺，Stage 4保持`Active / Awaiting User Evidence`，不另建验收stage。
 
-前置依赖：
+### 9.1 前置条件与受保护边界
 
-- Stage 3 Closed；relation/caller/topology API、cleanup顺序、retry/revalidation与errno已经过定向验证。
-- `TTY-DATA-CUTOVER`已Effective；若为Not Cut Over，Stage 4不得以job-control代码绕过数据面缺口。
+- Stage 3已经Closed；`5bf8024a`中的single-registry relation、stable session/process-group capability、
+  checked generation、caller-relative`/dev/tty`、五个ioctl与detach/exit cleanup是live输入，不重新设计。
+- `TTY-DATA-CUTOVER` Effective；239项KUnit、`TTYTEST:SUMMARY:PASS:34`、Stage 3 relation matrix与既有
+  data-plane/BusyBox vi RV64回归已经通过。LA64 compile/runtime与hardware按R1保持Not Run。
+- 保护`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`、`TTY-ABI-001`、
+  `TTY-LOCAL-001/002/005/006`和全部Preserve IDs。TTY只产生terminal-side decision/request；task topology、
+  Signal与ThreadGroup jobctl分别继续拥有membership、occurrence/action和stop/continue/report truth。
+- `TIOCSPGRP`继续使用Stage 3唯一foreground mutation路线；Stage 4不得复制foreground selector、从Signal/wait
+  结果反推relation，或为ash增加global PGID、opener identity、success stub和kernel test backdoor。
+- `TOSTOP` write、其它terminal-modifying`SIGTTOU`、orphaned-pgrp errno/effect、relation-disassociation
+  `SIGHUP`/`SIGCONT`、runtime line change、hardware hangup/backend fatal、PTY与`/proc/<tgid>/stat` TTY字段保持
+  target之外。Stage 4不因最终cutover顺手补这些corner。
 
-受保护边界：
+### 9.2 单一实现路线
 
-- `TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`、`TTY-ABI-001`、
-  `TTY-LOCAL-001/002/005/006`和全部Preserve contract IDs，包括`SIGNAL-PENDING-001/002`与
-  `SIGNAL-ACTION-001/002`。
-- TTY不得写ThreadGroup stop/report/user-entry truth；Signal result不得反向决定foreground selector。
-- ash源码和定向路径已经为`TIOCSPGRP`非orphan三分支提供oracle，不能把它们降为limitation。
-- `TOSTOP`、其它terminal-modifying `SIGTTOU` matrix、orphaned-pgrp errno/effect、runtime line change、
-  relation-disassociation `SIGHUP`/`SIGCONT`、hardware hangup/backend fatal与PTY继续在target之外；
-  unsupported必须ABI诚实。
+**Control-character effect：** `discipline.rs`继续在Terminal guard内完成`VINTR/VQUIT/VSUSP`识别、已接受的
+input/output flush与echo，但不再只返回无target诊断。receive结果携带一个窄、无分配的terminal signal request，
+分别映射到`SIGINT/SIGQUIT/SIGTSTP`；worker在确认byte已消费并释放Terminal guard后，立即通过endpoint relation
+snapshot取得live foreground capability，再调用task-side窄process-group signal API。request不进入持久队列，
+worker wake/notification也不成为signal truth。relation或foreground不存在/失效时只累计限频诊断，不回退到current
+task、最近reader或全局PGID；并发relation切换允许effect线性化到已重验的合法前态。
 
-解析触发点：
+**Background read：** `tty_read`在每次可能消费input之前、以及blocking wait返回后的下一轮，使用同步current caller
+和endpoint relation snapshot执行同一套owner revalidation。caller不受该terminal控制或位于foreground时继续；
+同session background caller的`SIGTTIN`为actionable时，向caller当前process group生成kernel-origin occurrence并
+返回`RestartSyscall::Idempotent`，本次不得消费input；blocked/ignored时按Linux/POSIX可见语义返回`EIO`，不得让
+background reader窃取input。没有live foreground selector时同样fail closed为`EIO`。首版不增加orphaned-pgrp检测；
+该延期边界保持显式，不能用它跳过上述非orphan路径。
 
-- Stage 3 关闭后读取实际relation/caller diff、jobctl current contract、`tty-test`结果、用户提供的
-  BusyBox artifact identity/调用序列、轻量rootfs/launcher证据、runtime evidence与register状态，冻结
-  signal/access矩阵、自动smoke、用户人工checklist、cutover docs manifest与review责任。
+Signal owner把现有只服务`SIGTTOU`的mask/disposition查询收窄泛化为只接受`SIGTTIN/SIGTTOU`的TTY job-control
+查询；它仍只返回blocked-or-ignored/actionable分类，不暴露mask或disposition。task-side capability复用一个受限的
+kernel-origin process-group signal helper发送`SIGINT/SIGQUIT/SIGTSTP/SIGTTIN/SIGTTOU/SIGWINCH`，每次发送前重验
+stable group/session identity；不修改Signal pending/generation/delivery或ProcessGroup membership实现。
 
-Contract cutover：
+**Winsize effect：** Terminal的winsize setter返回snapshot是否真实变化；`TIOCSWINSZ`只在成功提交不同值后、
+Terminal guard外对当时live foreground group生成一次`SIGWINCH`。相同值不生成重复signal；无relation/foreground
+只记录诊断。winsize仍唯一归Terminal，relation只提供target snapshot，不缓存尺寸或effect结果。
 
-- 原子激活`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`、`TTY-ABI-001`；任一proof不足时
-  整个unit保持Not Cut Over，已Effective的`TTY-DATA-*`不因此被伪装成完整RFC closure。
-- 按实际证据 Narrow/Split/Unchanged `ANE-20260527-PROCESS-GROUP-SESSION-STAGE1`与
-  `ANE-20260604-IOCTL-LTP-STAGE1-GAPS`；`ANE-20260529-PROC-TGID-STAT-STAGE1`保持不变，
-  除非另一次target review明确扩展范围。process-group/session residual必须继续显式保留
-  relation-disassociation `SIGHUP`/`SIGCONT`和newly orphaned stopped process-group policy。
+**Userspace与ash验收：** 不新增app、rootfs manifest、通用launcher或测试框架。现有`tty-test` auto mode追加
+foreground control、winsize和background-read定向cases，并在全部定向case后以子进程执行显式
+`setsid -> TIOCSCTTY(arg=0) -> foreground -> BusyBox ash -i`序列。现有RV64 wrapper继续驱动serial byte输入，
+自动ash smoke至少证明没有`job control turned off`降级、Ctrl-Z产生Stopped job、`jobs`可见、`fg`收回foreground、
+Ctrl-C终止foreground job并返回shell、shell exit后launcher可reap且relation cleanup允许复用。既有34项matrix、
+BusyBox stty/vi与host byte oracle全部继续回归。
+
+wrapper只增加一个`jobctl`人工mode并复用同一rootfs/staging/BusyBox；`conf/rootfs/tty-acceptance.md`冻结以下RV64
+checklist：启动ash无降级提示；foreground job Ctrl-C返回prompt；执行
+`Ctrl-Z -> jobs -> fg -> Ctrl-Z -> bg -> jobs -> fg -> Ctrl-C`两轮交接；background `cat`因`SIGTTIN`停止并可由
+`fg`恢复；最后退出ash并观察launcher PASS与正常关机。命令使用现有BusyBox applet和ash builtin，不增加rootfs
+symlink或外部脚本。Stage 2用户vi证据不冒充本checklist，但同一auto run中的vi回归无需重复人工执行。
+
+### 9.3 审计、可观测性与review
+
+- source/lock audit证明Terminal guard只形成effect request，relation guard只复制stable snapshot；Signal、Event、
+  task topology、process-group broadcast、echo TX和复杂drop全部guards-out。request、counter和日志均不是行为truth。
+- 每个terminal signal必须来自snapshot中live、same-session foreground或caller process group；source audit核对
+  `SIGINT/SIGQUIT/SIGTSTP/SIGTTIN/SIGWINCH`映射、相同winsize suppression、read-before-consume与wait后重验。
+- 审计Stage 2留下的`no_foreground_isig/no_foreground_winsize`relationless bridge：计数器可保留为纯诊断，
+  但production relation存在时必须走真实effect；不得保留“总是consume但从不signal”的第二条路径。
+- 全树搜索并分类global/recent/opener PGID、direct ThreadGroup stop、TTY内pending occurrence、relation/foreground
+  duplicate、polling watchdog、success stub与test-only injection；允许项必须有owner和target依据。
+- 只在缺失/失效foreground、blocked/ignored background read和unsupported延期边界做限频诊断；普通control char、
+  read和winsize成功不刷日志。最终review为0 Apollyon / 0 Keter / 0 Euclid，Safe不扩大scope。
+
+### 9.4 RV64验证与用户证据
+
+tracked验证：
+
+1. `git diff --check`；
+2. `just fmt --check`；
+3. active `qemu-virt-rv64-pretest`下`just build`；
+4. `just app build tty-test --arch riscv64`；
+5. `mdbook build docs`；
+6. agent-run自动matrix：
+   `./scripts/run-tty-test-rv64.sh --busybox <rv64-busybox> --sdcard <rv64-sdcard-master> --mode auto --log build/tty-stage4-rv64.log`；
+7. user-run人工ash checklist：同一commit、platform、BusyBox与测试盘，使用
+   `--mode jobctl --log build/tty-stage4-rv64-jobctl.log`。
+
+自动定向matrix至少覆盖：`VINTR -> SIGINT`、`VQUIT -> SIGQUIT`、`VSUSP -> SIGTSTP`只命中live foreground
+process group；changed winsize只产生一次`SIGWINCH`且same-value不重复；background actionable`SIGTTIN`使helper被
+`wait4(WUNTRACED)`观察为Stopped且input未消费，blocked/ignored为`EIO`；detach/exit后旧relation不再产生effect；
+Stage 3全部relation/`TIOCSPGRP`case与五个Active data-plane ID不回归。每个child有界reap，失败路径不得留下
+stopped/background child。日志记录base/candidate、platform、BusyBox/rootfs/kernel hash、KUnit总数、逐case、
+ash host oracle、正常关机和agent/user provenance。
+
+只测试RV64。LA64 compile/runtime、hardware和LTP均明确Not Run；RV64证据不得外推为这些层级。用户人工checklist
+只证明无法稳定自动判定的ash交互序列，不能替代自动signal/access matrix、KUnit、source audit或contract atomicity。
+
+### 9.5 停止、cutover与退出条件
+
+立即停止并上报manifest expansion或Target Renegotiation：
+
+- 必须修改generic VFS ctx、task topology/ProcessGroup membership、Signal pending/generation/delivery、ThreadGroup
+  jobctl group/report/user-entry、scheduler/wait、driver/console/IRQ、architecture或rootfs manifest才能继续；
+- 必须建立persistent effect queue、第二relation/foreground cache、完整Task持久引用、global/opener/recent-reader
+  fallback，或持Terminal/relation guard进入Signal/topology；
+- control character无法在consume后guards-out生成准确foreground signal，background read无法在consume前闭合
+  actionable/restart与blocked/ignored`EIO`，或winsize无法抑制same-value重复signal；
+- BusyBox ash只能以`job control turned off`、无条件`TIOCSPGRP`、匿名console或专用kernel后门运行；
+- 任一Active data-plane contract、Stage 3 relation matrix、RV64 build/KUnit/auto/vi回归失败，wrapper不能正常关机，
+  或review仍有Apollyon/Keter/Euclid；
+- 关闭目标需要把orphaned-pgrp、disassociation signals、`TOSTOP`、PTY、hangup或procfs TTY字段静默纳入本stage。
+
+`TTY-JOBCTL-CUTOVER`只在全部source/lock/bypass audit、RV64 build/KUnit/auto ash+signal matrix、既有vi回归、用户人工
+ash checklist与final review闭合后执行。cutover作为一个docs/contract unit：
+
+- 在`docs/src/contracts/tty/job-control.md`原子激活`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`、
+  `TTY-ABI-001`，同步TTY contract索引与全局导航；四个ID不得部分生效；
+- 将`ANE-20260527-PROCESS-GROUP-SESSION-STAGE1`收窄为仍未实现的relation-disassociation signals、newly orphaned
+  stopped process-group policy和其它明确residual；按实际serial TTY证据收窄或保持
+  `ANE-20260604-IOCTL-LTP-STAGE1-GAPS`，不得声称运行过LTP或关闭PTY/devpts/ptmx缺口；
+  `ANE-20260529-PROC-TGID-STAT-STAGE1`保持不变；
+- 同步RFC/implementation/tracker、transaction/index、`rfcs.md`和当前双周devlog，把R1与Stage 4记为Closed，
+  区分agent-run、user-run、Not Run与accepted limitations。
+
+任一proof不足时四个ID整体保持Not Cut Over，Stage 4保持Active / Awaiting Evidence或按finding停止；五个Active
+data-plane ID不回退，也不能被写成完整RFC closure。退出条件是四个ID原子Active、register residual诚实、所有临时
+bridge disposition明确、RFC R1与transaction关闭。Stage 4之后没有自动进入的下一stage。
+
+### 9.6 Resolved Write Set Manifest
+
+允许实现文件：
+
+- `anemone-kernel/src/device/tty/{discipline.rs,terminal.rs,mod.rs,file.rs,relation.rs}`：control request、
+  worker guards-out effect、background read gate、winsize change effect与owner-local KUnit；
+- `anemone-kernel/src/task/jobctl/{mod.rs,terminal.rs}`：现有TTY caller/process-group capability上的窄read decision、
+  stable identity revalidation与kernel-origin terminal signal request；
+- `anemone-kernel/src/task/sig/{mod.rs,terminal.rs}`：只把现有TTY mask/disposition分类收窄泛化到
+  `SIGTTIN/SIGTTOU`，不修改pending/generation/delivery truth；
+- `anemone-apps/tty-test/src/main.rs`：追加定向signal/background/winsize matrix、自动ash smoke与人工ash launcher；
+- `scripts/run-tty-test-rv64.sh`：复用现有QEMU route，增加auto ash host oracle与`jobctl` mode；
+- `conf/rootfs/tty-acceptance.md`：补充Stage 4 RV64人工ash checklist。现有
+  `conf/rootfs/tty-acceptance-rv64.toml`保持不变。
+
+允许cutover/生命周期文档写回：
+
+- `docs/src/contracts/tty/{index.md,job-control.md}`、`docs/src/contracts.md`、`docs/src/SUMMARY.md`；
+- `docs/src/rfcs/tty-subsystem/{index.md,invariants.md,implementation.md,tracking-issues.md}`、`docs/src/rfcs.md`；
+- `docs/src/devlog/transactions/{2026-07-23-tty-subsystem.md,index.md}`、
+  `docs/src/devlog/2026-07-20_to_2026-08-02.md`；
+- `docs/src/register/current-limitations.md`只允许上述三个entry的Narrow/Split/Unchanged回写。
+
+Validation-only inputs：Stage 3 commit/diff/review与`build/tty-stage3-rv64.log`、TTY data-plane/current task Signal/
+process-group/jobctl/lifecycle/user-entry contracts、register、Linux 6.6.32 `tty_jobctrl.c`/`n_tty.c`/winsize路线、
+BusyBox 1.33.1 source与只读RV64 artifact、现有rootfs/Justfile/xtask/wrapper owners及只读RV64测试盘master。
+公共文档不记录个人staging或artifact路径。
+
+明确不允许：`anemone-abi/**`、`anemone-rs/**`、`anemone-kernel/src/fs/**`、`device/char/**`、TTY port/endpoint/
+driver/console/IRQ、`task/topology/**`、`task/jobctl/{group.rs,report.rs,user_entry.rs}`、
+`task/sig/{generation.rs,pending.rs,delivery.rs}`、task lifecycle/exit、scheduler/wait/Event、Kconfig、rootfs TOML、
+pretest/user-test/LTP、architecture、external source/artifact/master。越过这些边界必须先扩展；owner、ABI、
+visible semantics、cutover unit或acceptance boundary变化必须进入RFC review / Target Renegotiation Gate。
 
 ## 10. Stage 0 Ready：live interface、oracle 与 route resolution
 
@@ -1168,9 +1286,9 @@ validation-only输入：
   boundary无需更改。第6节已经冻结单一路线、三个checkpoint与exact manifest，Stage 1达到`Ready`。
 - 用户只授权完成本resolution gate；仍需另行用户授权Stage 1或Checkpoint 1，不自动开始代码实现。
 
-`1 -> 2` gate的完成记录见第12节，`2 -> 3` gate见第12.1节。后续`3 -> 4` resolution gate遵循同一协议，
-并额外读取前一Stage实际diff、runtime evidence、bridge状态、module pressure与cutover结果。每次只解析下一个Stage，
-并按第4节为预期的多checkpoint Stage冻结完整checkpoint map；不提前解析更远Stage的checkpoint细节。
+`1 -> 2` gate的完成记录见第12节，`2 -> 3` gate见第12.1节，`3 -> 4` gate见第12.2节。每个gate
+都额外读取前一Stage实际diff、runtime evidence、bridge状态、module pressure与cutover结果，只解析下一个完整Stage
+且不自动激活。
 
 ## 12. Stage 1 -> Stage 2 Implementation Resolution Gate（Completed 2026-07-23）
 
@@ -1246,6 +1364,42 @@ Target / contract / authorization结论：
 - 第8节已经冻结单一路线、ABI matrix、review/validation、stop/exit与exact manifest，Stage 3达到
   `Ready / Not Started`。本gate只修改canonical docs并同步transaction/navigation；没有运行kernel/app build、
   KUnit、QEMU、BusyBox、LTP或hardware test，也不自动激活Stage 3。
+
+## 12.2 Stage 3 -> Stage 4 Implementation Resolution Gate（Completed 2026-07-24）
+
+前置与只读preflight：
+
+- Stage 3已经在`5bf8024a`关闭；gate读取其实际diff、0 Apollyon / 0 Keter / 0 Euclid终审、239项KUnit、
+  `TTYTEST:SUMMARY:PASS:34`与RV64 wrapper evidence，并核对R1 target、五个Active data-plane IDs、四个
+  Not Cut Over IDs、全部Preserve contracts与register。LA64按R1继续Not Run。
+- live source审计覆盖discipline signal-control结果、Terminal flush/echo/winsize与diagnostic bridge、TTY worker、
+  FileOps read/ioctl、relation snapshot/generation、Stage 3 caller/process-group capability、Signal mask/disposition和
+  process-group generation、现有`tty-test`、rootfs、RV64 wrapper及BusyBox ash/vi调用序列。
+- Linux 6.6.32 `n_tty.c`、`tty_jobctrl.c`与winsize route只用于确认control-char mapping、background read的
+  `SIGTTIN`/restart/`EIO`边界和changed-only`SIGWINCH`行为；不复制Linux tasklist/RCU/tty内部对象。
+
+解析决定：
+
+- Stage 4保持一个不拆checkpoint的最终stage。control char、background read与winsize都能复用Stage 3
+  relation snapshot和现有ProcessGroup Signal入口；实现、自动/人工proof与四ID原子cutover没有第二个独立owner
+  或可单独生效的中间contract，额外stage/checkpoint只会复制lifecycle。
+- control char采用Terminal guard内形成无分配request、worker guards-out立即执行的直达路线，不增加persistent
+  effect queue、generic notifier或第二work source；winsize setter只返回changed bit，effect同样guards-out。
+- background read在现有TTY FileOps同步entry内构造caller并在每次消费前重验，不扩展`FileIoCtx`。Signal只把
+  既有`SIGTTOU`分类窄化泛化到`SIGTTIN/SIGTTOU`；task capability提供受限terminal signal request，不改
+  pending/generation/delivery、topology membership或ThreadGroup jobctl truth。
+- userspace复用单一`tty-test`、`tty-acceptance-rv64` rootfs与wrapper；只给wrapper增加auto ash oracle和一个
+  `jobctl`人工mode，不增加app、rootfs TOML、通用launcher或anemone-rs/ABI wrapper。验证仅RV64。
+- final cutover建立一个TTY job-control contract surface并原子激活四个ID；register只按实际证据收窄，proc stat
+  条目保持不变。人工证据缺失时Stage 4保持Active / Awaiting User Evidence，不拆新验收阶段。
+
+Target / contract / authorization结论：
+
+- 解析保持R1 target、owner、ABI、visible semantics、accepted limitations、RV64-only acceptance与
+  `TTY-JOBCTL-CUTOVER`组成，不产生R2，不提前修改current contracts或register。
+- 第9节已经冻结单一路线、signal/access matrix、review/validation、stop/exit/cutover与exact manifest，Stage 4
+  达到`Ready / Not Started / Unauthorized`。本gate只修改canonical docs并同步transaction/navigation；没有修改
+  kernel/app/wrapper实现，也没有运行build、KUnit、QEMU、BusyBox、LTP、LA64或hardware test，不自动激活Stage 4。
 
 ## 13. Probe / Vertical Slice Gates
 

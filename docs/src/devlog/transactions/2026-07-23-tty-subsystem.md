@@ -1,11 +1,11 @@
 # 2026-07-23 - TTY Subsystem
 
-**Status:** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Outline / Unauthorized
+**Status:** Active / Stage 0-3 Closed / Stage 4 Ready / Not Started
 **Owners:** doruche, Codex
 **Area:** device / TTY / serial / VFS / signal / task topology / job control
 **Canonical Plan:** [RFC-20260722-tty-subsystem](../../rfcs/tty-subsystem/index.md), [目标与不变量](../../rfcs/tty-subsystem/invariants.md), [迁移实施计划](../../rfcs/tty-subsystem/implementation.md)
 **Canonical Revision:** R1
-**Current Phase:** Stage 3 Closed / Stage 4 Outline / Unauthorized; `TTY-DATA-CUTOVER` Effective; `TTY-JOBCTL-CUTOVER` Not Cut Over
+**Current Phase:** Stage 4 Ready / Not Started / Unauthorized; `TTY-DATA-CUTOVER` Effective; `TTY-JOBCTL-CUTOVER` Not Cut Over
 
 ## Scope and contract boundary
 
@@ -1001,3 +1001,31 @@ oracle继续通过，wrapper正常关机。LA64 compile/runtime与hardware均Not
 不执行contract cutover：`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`、`TTY-ABI-001`与
 `TTY-JOBCTL-CUTOVER`全部继续**Not Cut Over**，RFC保持**Accepted for Implementation**。Stage 4仍为
 **Outline / Unauthorized**；本轮在Stage 3 closure后立即停止，没有解析`3 -> 4` gate或进入Stage 4。
+
+## Stage 3 -> Stage 4 Implementation Resolution Gate - 2026-07-24
+
+**Preflight:** gate从Stage 3 closure commit `5bf8024a`与clean worktree开始，读取Stage 3实际diff、最终
+0 Apollyon / 0 Keter / 0 Euclid review、239项KUnit、`TTYTEST:SUMMARY:PASS:34`与RV64 wrapper evidence，
+并核对R1 target、五个Active data-plane contract ID、四个Not Cut Over ID、全部Preserve contracts与register。
+live source审计覆盖discipline control result、Terminal flush/echo/winsize、worker、FileOps read/ioctl、relation
+snapshot/generation、caller/process-group capability、Signal classification/generation、现有`tty-test`、rootfs、
+RV64 wrapper和BusyBox ash/vi调用序列。Linux 6.6.32只作为control mapping、background-read errno/effect ordering
+和changed-only winsize signal参考，不作为内部结构模板。
+
+**Resolution:** canonical [Stage 4 Ready计划](../../rfcs/tty-subsystem/implementation.md#9-stage-4-readyterminal-job-control完整验收与-tty-jobctl-cutover)
+将最终阶段解析为一个不拆checkpoint的集成单元。control char在Terminal guard内形成无分配request，由worker在
+guard外经现有relation/foreground capability发送；background read在每次消费前和wait后以同步caller重验，
+actionable `SIGTTIN`走process-group Signal/jobctl并restart，blocked/ignored和无foreground为`EIO`；winsize只在
+changed commit后guards-out发送一次`SIGWINCH`。三条effect均复用Stage 3 relation和现有Signal owner，不增加
+persistent effect queue、generic notifier、VFS ctx、topology/jobctl truth或第二foreground路径。
+
+**Harness / cutover:** 复用单一`tty-test`、`tty-acceptance-rv64` rootfs与repository wrapper，只增加定向
+signal/background/winsize cases、auto ash host oracle和一个`jobctl`人工mode；不增加app、rootfs TOML、通用launcher
+或anemone-rs/ABI wrapper。Stage 4只测试RV64，LA64 compile/runtime、hardware与LTP为Not Run。自动floor通过但
+用户人工ash checklist缺失时，Stage 4保持Active / Awaiting User Evidence，不拆新验收stage。全部proof闭合后，
+`TTY-JOBCTL-CUTOVER`才原子建立TTY job-control current contract、激活四个ID、收窄register residual并关闭R1。
+
+**Target / authorization:** 解析保持R1 owner、ABI、visible semantics、accepted limitations、RV64-only acceptance
+和cutover unit，不产生R2，不提前修改current contracts或register。Stage 4现在是**Ready / Not Started /
+Unauthorized**；本gate只修改canonical docs并同步transaction/navigation，没有修改kernel/app/wrapper实现，也没有
+运行build、KUnit、QEMU、BusyBox、LTP、LA64或hardware test。本轮在解析关闭后停止，不自动激活Stage 4。
