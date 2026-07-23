@@ -6,7 +6,7 @@
 
 ## Active
 
-- [TTY Subsystem](./2026-07-23-tty-subsystem.md)：R0 已接受，Stage 0与Stage 1已关闭；Stage 2 Checkpoint 1至3已关闭，deterministic endpoint publication与real boot stdio完成RV64验证，Checkpoint 4未授权。全部`TTY-*`仍未cut over。
+- [TTY Subsystem](./2026-07-23-tty-subsystem.md)：R1 已接受；Stage 0至Stage 2已关闭，`TTY-DATA-CUTOVER`建立五个Active data-plane contract ID。relation/job-control四个ID仍未cut over，Stage 3保持Outline且未解析或授权。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)

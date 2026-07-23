@@ -1,13 +1,16 @@
 # TTY Subsystem Tracking Issues
 
-**状态：** Closed（0 个 Keter 开放，11 个 Keter 已中和）
+**状态：** Closed（0 个 Keter 开放，12 个 Keter 已中和）
 **最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-tty-subsystem](./index.md)
 **事务日志：** [2026-07-23 - TTY Subsystem](../../devlog/transactions/2026-07-23-tty-subsystem.md)
 
 本文只跟踪已经确认、会影响 target、状态所有权、ABI 边界、实现顺序、review gate、停止边界或验收判断的 design issue。普通 TODO、尚未冻结的工程参数和背景材料中已经被正文吸收的现状缺口不在这里重复登记。
 
-当前没有开放 blocker。十一个 Keter 均保留在 Neutralized 区，记录原问题、修复位置、首版接受边界和重新打开条件；实现证据若突破这些条件，必须重新进入文档 review，不能只在 implementation 中改变语义。
+当前没有开放 blocker。Stage 2 closure review为0 Apollyon / 0 Keter / 0 Euclid，`TTY-DATA-CUTOVER`已经
+Effective；该结果只关闭data-plane proof，不改变下列future relation/job-control finding的重新打开条件。
+十二个Keter均保留在Neutralized区，记录原问题、修复位置、首版接受边界和重新打开条件；实现证据若突破这些
+条件，必须重新进入文档review，不能只在implementation中改变语义。
 
 ## Apollyon
 
@@ -26,6 +29,18 @@ None.
 None.
 
 ## Neutralized
+
+### KETER-012 — C4 双架构 proof 与明确的 RV64-only validation disposition 冲突
+
+**状态：** Neutralized（2026-07-23）
+
+**原问题：** R0 的 Stage 2 C4 把 RV64 与 LA64 自动 matrix 同时列为 `TTY-DATA-CUTOVER` 必要证据，但本轮用户明确不运行 LA64 build/runtime，并要求后续同类 checkpoint 采用相同处置。若静默把 LA64 写成 Not Run 后仍按 R0 cut over，会让 accepted proof boundary 与 transaction evidence 冲突；若为满足文档强行运行 LA64，又违反明确 validation disposition。
+
+**决策：** 形成 R1 accepted revision。TTY 功能目标、correctness invariant、owner、ABI、visible semantics、两个 cutover unit与完整case matrix全部保持不变；只把本 RFC 的 build/runtime acceptance architecture 收窄为 RV64。C4只交付RV64 rootfs/wrapper并以用户指定的初赛musl BusyBox完成RV64自动matrix和人工vi checklist；LA64 compile/runtime明确为Not Run，不阻塞cutover，也不得由RV64证据外推。source/KUnit、agent-run与user-run证据仍必须分层，不能借架构处置删除语义case。
+
+**修复位置：** [接受边界](./index.md#接受边界)、[Prospective cutover 边界](./invariants.md#prospective-cutover-边界)、[`TTY-LOCAL-005`](./invariants.md#tty-local-005--验收证据必须分层且诚实)、[Stage 2 C4](./implementation.md#checkpoint-4--userspace-acceptance-与-tty-data-cutover)和[Gate P3](./implementation.md#gate-p3--busybox-ashvi-acceptance)。
+
+**重新打开条件：** 后续目标或consumer要求LA64成为发布承诺、出现LoongArch专属TTY实现差异、RV64-only proof被误写成LA64兼容结论，或准备恢复多架构cutover floor。
 
 ### KETER-010 — Signal direct dependencies 未进入 Contract Impact
 

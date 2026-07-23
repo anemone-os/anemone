@@ -1,14 +1,14 @@
 # RFC-20260722-tty-subsystem
 
 **状态：** Accepted for Implementation
-**修订：** R0
+**修订：** R1
 **负责人：** doruche, Codex
 **最后更新：** 2026-07-23
 **领域：** device / TTY / serial / VFS / signal / task topology / job control
 **事务日志：** [2026-07-23 - TTY Subsystem](../../devlog/transactions/2026-07-23-tty-subsystem.md)
-**影响契约：** [目标与不变量](./invariants.md)接受引入 `TTY-PORT-001`、`TTY-TERM-001`、`TTY-INPUT-001`、`TTY-OUTPUT-001`、`TTY-ENDPOINT-001`、`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001` 的 R0 target，并 Preserve 现有 Signal、process-group、job-control、task-lifecycle 与 user-entry contract；R0 接受不改变 current contract，全部 `TTY-*` 仍为 Not Cut Over。
+**影响契约：** `TTY-DATA-CUTOVER` 已原子建立 [TTY data-plane current contract](../../contracts/tty/data-plane.md)，`TTY-PORT-001`、`TTY-TERM-001`、`TTY-INPUT-001`、`TTY-OUTPUT-001` 与 `TTY-ENDPOINT-001` 为 Active；[目标与不变量](./invariants.md)中的 `TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001` 仍为 R1 accepted target / Not Cut Over。现有 Signal、process-group、job-control、task-lifecycle 与 user-entry contract 全程 Preserve；R1 的 RV64-only acceptance 不外推 LA64。
 **开放问题：** None；已关闭的设计 finding 及重新打开条件见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** [Stage 2](./implementation.md#7-stage-2-readyterminal-data-plane-与-tty-data-cutover) 处于Active；Checkpoint 1至3已关闭，Checkpoint 4保持Not Started且未授权，不得连续进入。
+**下一步：** [Stage 2](./implementation.md#7-stage-2-readyterminal-data-plane-与-tty-data-cutover) 与四个checkpoint已经关闭，`TTY-DATA-CUTOVER` Effective。Stage 3保持Outline；必须经独立`2 -> 3` Implementation Resolution Gate和新授权才能解析或执行，本次不进入。
 
 ## 摘要
 
@@ -59,6 +59,7 @@ RFC target：
 
 Current contracts：
 
+- [TTY serial data plane](../../contracts/tty/data-plane.md)
 - [Signal pending/action](../../contracts/signal/pending-routing.md)
 - [Process-group signal targeting](../../contracts/task/process-group-signaling.md)
 - [Unix job control](../../contracts/task/job-control.md)
@@ -73,6 +74,7 @@ Current contracts：
 
 | 修订 | 日期 | 状态 | 摘要 | 证据 |
 | --- | --- | --- | --- | --- |
+| R1 | 2026-07-23 | Accepted for Implementation | 保持 R0 功能目标与两个 cutover unit，只把本 RFC 的 build/runtime acceptance evidence 收窄为 RV64；LA64 明确 Not Run 且不得由 RV64 证据外推 | [事务日志](../../devlog/transactions/2026-07-23-tty-subsystem.md) |
 | R0 | 2026-07-23 | Accepted for Implementation | 接受 serial TTY owner、ABI 包络、两个 cutover unit 与 proof obligations；全部 `TTY-*` 保持 Not Cut Over | [事务日志](../../devlog/transactions/2026-07-23-tty-subsystem.md) |
 
 ## 兼容与工程原则
@@ -181,7 +183,7 @@ foreground group消失只使 selector失效，不拆 relation；newly orphaned s
 
 ## 接受边界
 
-接受 R0 表示上述 owner、serial TTY ABI包络、两个 cutover unit与proof obligations可以进入实现；不表示任何 `TTY-*` contract已经生效，也不自动授权 Stage 0。data-plane checkpoint可以先执行 `TTY-DATA-CUTOVER`，但完整 closure仍要求 `TTY-JOBCTL-CUTOVER`和ash/vi验收。
+接受 R1 表示上述 owner、serial TTY ABI包络、两个 cutover unit与proof obligations可以继续实现；它不自动授权下一 stage。Stage 2已经完成data-plane checkpoint并执行`TTY-DATA-CUTOVER`，对应五个ID的current truth现由[TTY data-plane contract](../../contracts/tty/data-plane.md)拥有；这不表示`TTY-REL-*`、`TTY-JOBCTL-*`、`TTY-LIFE-*`或完整`TTY-ABI-001`已经生效。R1 的 build/runtime acceptance只要求RV64 repository build、自动matrix与冻结的人工checklist；LA64 compile/runtime明确为Not Run，RV64证据不得外推为LA64 proof。完整RFC closure仍要求`TTY-JOBCTL-CUTOVER`和ash/job-control验收。
 
 以下属于 correctness boundary：单一 hardware/input/terminal/relation/jobctl owner，stable identity revalidation，guards-out cross-owner effect，bounded IRQ work，no lost wake/work，ABI不伪造与publish/cleanup原子性。以下属于 target guarantee：首版 `/dev/tty*`、termios/data-plane、controlling relation、`TIOCSPGRP`三分支与ash/vi包络。类型名、字段、锁类型、container、容量、deferred carrier、TX mode和模块拆分是 implementation preference。
 
@@ -227,10 +229,10 @@ foreground group消失只使 selector失效，不拆 relation；newly orphaned s
 
 ## 收口
 
-R0 已接受并建立 transaction，Stage 0 的 live interface、oracle、route 与模块边界审计已经关闭；
-Stage 0 -> Stage 1 Resolution Gate与Stage 1三个checkpoint已经完成，Stage 1现已关闭。独立的
-Stage 1 -> Stage 2 Resolution Gate也已完成，并把Stage 2的discipline/worker、FileOps/UAPI、
-publication/boot、userspace/cutover四个checkpoint完整解析为Ready / Not Started。全部`TTY-*`仍为
-Not Cut Over，current contracts与register未因resolution改变。已完成的设计 finding 保存在
+R1 已接受并由现有 active transaction 继续实施；Stage 0与Stage 1已经关闭。独立的Stage 1 -> Stage 2
+Resolution Gate解析的discipline/worker、FileOps/UAPI、publication/boot、userspace/cutover四个checkpoint现已
+逐项关闭；RV64自动matrix和用户人工vi checklist达到floor后，`TTY-DATA-CUTOVER`原子建立五个Active data-plane
+contract ID并关闭Stage 2。`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`与`TTY-ABI-001`继续Not Cut Over，
+RFC保持Accepted for Implementation。Stage 3仍为Outline，本轮未执行`2 -> 3` resolution或激活。已完成的设计 finding 保存在
 [Tracking Issues](./tracking-issues.md)，本次执行证据与carrier owner处置见[事务日志](../../devlog/transactions/2026-07-23-tty-subsystem.md)，
 历史调查保存在[背景材料](./backgrounds/index.md)。

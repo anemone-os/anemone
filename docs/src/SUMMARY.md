@@ -14,6 +14,8 @@
 		- [Unix job control](./contracts/task/job-control.md)
 		- [Child wait](./contracts/task/child-wait.md)
 		- [User entry](./contracts/task/user-entry.md)
+	- [TTY 当前契约](./contracts/tty/index.md)
+		- [Serial TTY data plane](./contracts/tty/data-plane.md)
 - [代码库地图](./codebase-map.md)
 - [开发日志](./development-log.md)
 	- [2026-05-11 至 2026-05-24](./devlog/2026-05-11_to_2026-05-24.md)

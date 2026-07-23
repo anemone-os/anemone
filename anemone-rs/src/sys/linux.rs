@@ -24,6 +24,27 @@ pub mod fs {
         unsafe { syscall(SYS_FSTAT, fd, statbuf_ptr, 0, 0, 0, 0) }
     }
 
+    pub fn pselect6(
+        nfds: u64,
+        readfds_ptr: u64,
+        writefds_ptr: u64,
+        exceptfds_ptr: u64,
+        timeout_ptr: u64,
+        sigmask_ptr: u64,
+    ) -> Result<u64, Errno> {
+        unsafe {
+            syscall(
+                SYS_PSELECT6,
+                nfds,
+                readfds_ptr,
+                writefds_ptr,
+                exceptfds_ptr,
+                timeout_ptr,
+                sigmask_ptr,
+            )
+        }
+    }
+
     pub fn mkdirat(dirfd: u64, path_ptr: u64, mode: u64) -> Result<u64, Errno> {
         unsafe { syscall(SYS_MKDIRAT, dirfd, path_ptr, mode, 0, 0, 0) }
     }

@@ -1,7 +1,7 @@
 pub mod fs {
     use alloc::ffi::CString;
     use anemone_abi::{
-        fs::linux::{fcntl, open, poll::PollFd, stat::Stat},
+        fs::linux::{fcntl, open, poll::PollFd, select::FdSet, stat::Stat},
         time::linux::TimeSpec,
     };
     use bitflags::bitflags;
@@ -73,6 +73,11 @@ pub mod fs {
         .map(|_| statbuf)
     }
 
+    pub fn fstat(fd: Fd) -> Result<Stat, Errno> {
+        let mut statbuf = Stat::default();
+        fs::fstat(fd as u64, &mut statbuf as *mut Stat as u64).map(|_| statbuf)
+    }
+
     pub fn mkdirat(dirfd: AtFd, path: &Path, mode: u32) -> Result<(), Errno> {
         let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
         fs::mkdirat(dirfd.to_raw() as u64, path.as_ptr() as u64, mode as u64).map(|_| ())
@@ -100,6 +105,25 @@ pub mod fs {
             fds.len() as u64,
             timeout.map_or(0, |timeout| timeout as *const TimeSpec as u64),
             0,
+            0,
+        )
+        .map(|ready| ready as usize)
+    }
+
+    /// Calls `pselect6` without a temporary signal mask.
+    pub fn pselect(
+        nfds: usize,
+        readfds: Option<&mut FdSet>,
+        writefds: Option<&mut FdSet>,
+        exceptfds: Option<&mut FdSet>,
+        timeout: Option<&TimeSpec>,
+    ) -> Result<usize, Errno> {
+        fs::pselect6(
+            nfds as u64,
+            readfds.map_or(0, |fds| fds as *mut FdSet as u64),
+            writefds.map_or(0, |fds| fds as *mut FdSet as u64),
+            exceptfds.map_or(0, |fds| fds as *mut FdSet as u64),
+            timeout.map_or(0, |timeout| timeout as *const TimeSpec as u64),
             0,
         )
         .map(|ready| ready as usize)
@@ -204,6 +228,11 @@ pub mod tty {
             winsize as *const Winsize as u64,
         )
         .map(|_| ())
+    }
+
+    /// Issues an ioctl whose command has no argument payload.
+    pub fn ioctl_noarg(fd: Fd, command: u32) -> Result<(), Errno> {
+        fs::ioctl(fd as u64, command as u64, 0).map(|_| ())
     }
 }
 
