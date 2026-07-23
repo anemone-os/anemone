@@ -6,7 +6,6 @@
 
 ## Active
 
-- [System Target Model](./2026-07-22-system-target-model.md)：R2 Stage 1-5与Checkpoint 1A-1D、2A-2D、3A、4A、5A已关闭；`BOOT-PROTOCOL-001`已Refine为typed `RootfsEntry | EmbeddedApp` ordinary VFS exec current contract；Stage 6保持Outline / Not Resolved。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
@@ -24,6 +23,7 @@
 
 ## Completed
 
+- [System Target Model](./2026-07-22-system-target-model.md)：R2 Stage 1-6与全部checkpoint已关闭；current VisionFive explicit-preset `build -> rootfs`及镜像内容回归通过；`BOOT-PROTOCOL-001`保持typed `RootfsEntry | EmbeddedApp` ordinary VFS exec current contract；final harness分流为独立adopter。
 - [IOCTL Loop](./2026-06-04-ioctl-loop.md)：VFS ioctl 分发、统一 block ioctl、静态 loop 设备池与第一阶段 loop ioctl 已完成；扩展 LTP 缺口由 register 跟踪。
 - [Unix Job Control](./2026-07-20-unix-jobctl.md)
 - [Sched Dynamic Attributes](./2026-07-15-sched-dynamic-attributes.md)

@@ -1,11 +1,11 @@
 # 2026-07-22 - System Target Model
 
-**Status:** Active
+**Status:** Completed
 **Owners:** doruche, Codex
 **Area:** build system / configuration / platform / repository workflow
 **Canonical Plan:** [RFC-20260722-system-target-model](../../rfcs/system-target-model/index.md), [目标与不变量](../../rfcs/system-target-model/invariants.md), [迁移实施计划](../../rfcs/system-target-model/implementation.md)
 **Canonical Revision:** R2（R0初始接受；Stage 3期间完成R1 DT authority renegotiation；Stage 3关闭后接受R2 metadata correction）
-**Current Phase:** Stage 1-5 Closed / Stage 6 Outline / Not Resolved
+**Current Phase:** Stage 1-6 Closed / Transaction Completed
 
 ## Scope
 
@@ -915,3 +915,100 @@ target invariant、owner、ABI、visible-semantics、acceptance或publication停
 transitional contract。Checkpoint 5A与Stage 5 Closed。本closure没有运行、解析或激活
 `Stage 5 -> Stage 6 Implementation Resolution Gate`；transaction继续Active，Stage 6保持Outline /
 Not Resolved。
+
+## Stage 5 -> Stage 6 resolution and Checkpoint 6A activation - 2026-07-24
+
+**Status:** Completed / Active；Stage 6与单一Checkpoint 6A Active。
+
+用户以“完成Stage 6”为本轮唯一授权。Preflight重新读取AGENTS/LOCAL、R2 canonical RFC/invariants、Stage 5
+最终diff与review/validation、effective `BOOT-PROTOCOL-001`、closed tracking issues、register/current
+limitations、current transaction和live selection/build/app/rootfs/QEMU/DT owner；并核对Justfile、tracked
+config/schema/examples、pretest wrappers、build docs、repo-local build skill与current clean worktree。Live
+`just --list`、build/rootfs help确认current explicit-preset和rootfs command surface；register没有重叠blocker。
+
+Authoritative `implementation.md`把最终stage解析为单一6A：只做production residual与current owner surface
+审计、existing evidence matrix汇总、VisionFive current explicit-preset `build -> rootfs`物化/equality回归，
+以及RFC/transaction/navigation/devlog原子收口。没有新的实现、public API、owner、ABI、visible semantics、
+shared contract或acceptance delta，Contract cutover为None；`BOOT-PROTOCOL-001`保持5A形成的effective状态。
+
+本次完成Stage 6的明确授权同时激活6A。Frozen tracked manifest只包括RFC index/implementation、current
+transaction/index、`docs/src/rfcs.md`和当期devlog；代码、production config、schema、wrapper、contract、
+register与build skill均为read-only audit/validation input。若required workflow要求修改这些owner，或发现第二
+truth、target/contract/acceptance变化，立即按canonical停止合同报告，不在closure中夹带工程修复。
+
+### 6A closure-only invariants write-set expansion
+
+Final lifecycle audit发现RFC `invariants.md`虽然已经把`BOOT-PROTOCOL-001`表格同步为Active，却仍在页首标记
+`Accepted for Implementation`，并在闭合条件中声称RFC acceptance、transaction creation与Refine cutover尚未
+发生。若保持该文件只读，最终RFC状态、current contract结果与canonical proof surface会互相矛盾。Implementer
+按6A停止合同暂停，没有编辑越界文件或提交checkpoint；连续等待明确授权后，用户批准把
+`docs/src/rfcs/system-target-model/invariants.md`加入6A resolved manifest。
+
+该扩展只允许同步`Closed`生命周期和已经完成的acceptance/transaction/Checkpoint 5A cutover事实，不修改R2
+target invariant、owner、ABI、visible semantics、shared contract或acceptance boundary，不增加R3。
+`BOOT-PROTOCOL-001`保持现有effective typed contract。验证继续使用6A既有lifecycle/residual、relative-link、
+whitespace、mdBook和latest-byte review floor。
+
+## Checkpoint 6A closure and transaction completion - 2026-07-24
+
+**Status:** Completed；Checkpoint 6A与Stage 6 Closed；RFC Closed；transaction Completed。
+
+### Current workflow and residual result
+
+最终字节运行`just xtask-test`为68 passed / 0 failed，覆盖全部supported SystemTarget、Platform、preset、
+single resolver、legacy config/CLI rejection、QEMU bind/DT maintenance、Cargo/Source app、RootfsEntry与
+EmbeddedApp generated input。三份Platform/SystemTarget/BuildPreset schema通过`json5 --validate`；
+`just --list`与conf/selection/build/app/rootfs/qemu/clean live help均核对current surface。
+
+Production residual audit只发现两类合法文本：QEMU DT maintenance的直接Platform选择，以及拒绝
+`--platform/--image`的legacy CLI tests。Live build/QEMU共享`ConfigLoader::resolve_selection()`；local/default
+selection只保存preset reference；tracked Platform只保存QEMU bind declaration/template，host path仍由invocation
+提供。Justfile、pretest wrappers、tracked defaults/schema/examples、rootfs recipe/README、build docs与
+repo-local skill没有第二selection、resolver、host-path truth或compatibility bridge，不需要production修复。
+
+### VisionFive current command regression
+
+从repository root与current `PATH`依次运行：
+
+```text
+just build --preset visionfive2-rv64-release
+just rootfs mkfs -c conf/rootfs/visionfive2/rootfs.toml --sudo
+```
+
+Build打印`selection source=explicit-preset target=visionfive2-rv64 platform=visionfive2-rv64`，从committed
+`visionfive2-board.dts`生成build-local DTB，release kernel compile通过，并由Platform `[uboot]`运行
+`rust-objcopy + mkimage`生成3,486,392-byte `build/anemoneImage-rv64`。DTC保留既有baseline warning，没有
+action failure或source-tree generated DTB。
+
+Rootfs action先复制只读15,032,385,536-byte developer-local base，再只修改
+`build/rootfs/visionfive2/rootfs.img`。首次非sudo `virt-cat`只读抽取因host supermin权限失败且没有读取内容；
+按rootfs action相同的sudo/libguestfs环境重跑后，`cmp`确认镜像内`/boot/anemoneImage`与本轮Platform output
+逐字节相等，二者SHA-256均为
+`07e1aa158bdb49d0a49b10d8ddc4bef0d9ffc6434c55c4b1fd1e979b3f7ade54`。Base/master在物化前后
+SHA-256均为`2f7e3529cee1f88fb88535c0dcb0b1a7ee463ebdb76131180623af0519a5e9fb`，未被QEMU或rootfs task修改。
+
+### Evidence matrix and closure boundary
+
+- 五份supported Platform/SystemTarget与全部tracked preset由本轮68项tests重新覆盖；Stage 2-3保留
+  RV64/LA64 explicit normal build、四份QEMU Platform真实DT check、VisionFive/RV64/LA64 failing-QEMU build
+  和RV64真实QEMU正常关机证据。真实LA64 QEMU仍Not Run。
+- Stage 4保留Cargo regression与Source binary/shebang机械export证据；本轮owner audit确认rootfs仍以空args
+  消费同一`build_app()`，没有Source专用collector或第二export path。
+- Stage 5保留RootfsEntry regression、Embedded ELF、shebang reopen、missing-interpreter boot-fatal、
+  incremental embedded bytes与212项RV64 KUnit证据；`BOOT-PROTOCOL-001`保持5A形成的effective typed contract。
+- 本轮重新证明current VisionFive explicit-preset `build -> rootfs`顺序、Platform post-link和最终镜像内容。
+  Physical board、完整LTP、final harness与正常关机证明没有在6A运行；它们不属于closure floor。Final harness
+  只作为后续独立adopter iteration，不使本transaction保持Active。
+
+用户批准的closure-only expansion把RFC `invariants.md`加入6A manifest，只同步Closed状态与已完成的
+acceptance/transaction/5A cutover事实，不改变R2语义。Tracking issues继续Closed；register/current
+limitations没有重叠条目；current contract、代码、config、schema、wrapper、skill与validation-only base均零
+tracked diff。Final latest-byte review为Apollyon 0 / Keter 0 / Euclid 0；lifecycle/status、relative-link、
+write-set、whitespace与mdBook验证通过。
+
+### Contract / Exit
+
+6A没有命中second-truth、workflow、target invariant、owner、ABI、visible-semantics、shared-contract、acceptance
+或扩展后的write-set停止条件。Contract cutover为None；`BOOT-PROTOCOL-001`保持Checkpoint 5A形成的effective
+typed contract。Checkpoint 6A与Stage 6 Closed，R2 RFC Closed，transaction Completed。Stage 6是最终stage，
+本closure不解析或进入任何下一gate。

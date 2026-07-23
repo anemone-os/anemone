@@ -103,7 +103,6 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
-- [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R2 / Accepted for Implementation；重分配Platform、SystemTarget、KernelConfig、BuildPreset、resolved build与QEMU invocation的唯一owner，保持Justfile/xtask单一编排面。[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)已Refine为typed `RootfsEntry | EmbeddedApp` ordinary VFS exec；Stage 1-5与Checkpoint 1A-1D、2A-2D、3A、4A、5A已关闭，Stage 6保持Outline / Not Resolved。
 - [RFC-20260720-unix-jobctl](./rfcs/unix-jobctl/index.md)：R1已实现并关闭；`UJ-CUTOVER`将ThreadGroup-owned stop/continue phase、mandatory user-entry barrier、stopped/continued child report、Signal control ordering与procfs projection作为同一个integrated unit切换为[current contract](./contracts/task/job-control.md)。R1保留reservation-first造成的窄SIGKILL递送延迟；TTY、orphaned-pgrp、ptrace、`si_uid = 0`与SIGCHLD publication order继续由register跟踪。
 - [RFC-20260716-dw-mshc-sd-cold-discovery](./rfcs/dw-mshc-sd-cold-discovery/index.md)：Accepted / Runtime Validation；固化 protocol-neutral DW-MSHC host、one-shot SD Memory discovery、typed card bus、`mmcblkN` endpoint 与 VisionFive 2 whole-disk `mmcblk0` ext4 rootfs 边界。两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已同步；实机 attach/read/write/rootfs 仍待验证。
 - [RFC-20260714-cpu-logical-physical-id](./rfcs/cpu-logical-physical-id/index.md)：已实现并关闭；platform `MAX_PHYS_CPU_ID` 与 kconfig `MAX_LOGICAL_CPUS` 分开约束物理 ID backing 和最大启用逻辑 CPU 数，固定 per-CPU 表使用槽位内建 `CachePadded<T>` 的 `CpuTable` / `PhysCpuTable` 编码索引域与缓存布局。VisionFive 2 容量修正由用户复验通过，最终 table 布局与 LoongArch correction build 未由 agent 运行。
@@ -128,6 +127,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 已关闭或延期 RFC
 
+- [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R2已实现并关闭；Platform、SystemTarget、KernelConfig、BuildPreset、single resolved build与QEMU invocation已形成唯一owner，current VisionFive explicit-preset `build -> rootfs`及镜像内容回归通过。[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)已Refine为typed `RootfsEntry | EmbeddedApp` ordinary VFS exec current contract；final harness分流为独立adopter。
 - [RFC-20260603-IOCTL-LOOP](./rfcs/ioctl-loop/index.md)：已实现并关闭；完成 `ioctl(2)` VFS 分发、统一 block ioctl、静态 loop 设备池与第一阶段 loop ioctl。扩展 loop sysfs、partscan、direct I/O、autoclear 和 ioctl LTP 缺口继续由 register 跟踪。
 - [RFC-20260622-sched-eevdf-lite](./rfcs/sched-eevdf-lite/index.md)：Stage 3/R1 runtime acceptance 失败后延期关闭，不是 Completed；关闭时 default 曾恢复为 RR，后续已由 Fair / Stride 切换为 Fair。EEVDF 保留为可运行实验原型，但显著吞吐回归与百万级 yield self-pick 仍存在，`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 保持未解决 Keter。事务日志见 [2026-07-09-sched-eevdf-lite](./devlog/transactions/2026-07-09-sched-eevdf-lite.md)，证据见 [Stage 3 eligibility 回归背景](./rfcs/sched-eevdf-lite/backgrounds/stage3-eligibility-regression-20260711.md)。
 
