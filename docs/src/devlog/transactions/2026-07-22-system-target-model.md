@@ -699,3 +699,33 @@ boundary；Contract cutover为None。
 lifecycle/status、manifest与navigation audit，并运行`mdbook build docs`。Xtask tests、app/rootfs build、kernel
 build、QEMU、physical board、LTP与final harness均Not Run；它们属于4A execution floor或明确非目标，不是
 docs-only resolution证据。Resolution不自动激活Checkpoint 4A，也不解析Stage 5。
+
+## Post-resolution Stage 4 validation route correction - 2026-07-24
+
+**Status:** Completed；Stage 4保持Ready / Checkpoint 4A Not Activated，Stage 5保持Outline。
+
+用户在resolution后指出，Source driver的目标是接纳已经构建完成、或可直接执行/交付的app产物；其证明边界是
+closed零参数driver不启动command，并复用既有artifact expansion、普通文件检查与export。VisionFive当前
+explicit-preset `build -> rootfs`完整物化与Source实现没有因果关系，将它作为4A硬退出条件会让一个简单driver
+改动被无关的base image、host tool和sudo环境阻塞。
+
+Authoritative `implementation.md`据此收窄4A：保留单一Checkpoint 4A，只覆盖Source manifest/CLI args
+fail-close、binary与shebang live export、missing/directory/non-regular错误、现有Cargo app回归，以及rootfs继续
+以空args消费公共`build_app()`的source audit；移除VisionFive完整物化floor及其Platform/SystemTarget/post-link
+validation-only路径。该workflow验证不是豁免，而是移动到Stage 6最终closure：届时使用current command surface
+依次运行`just build --preset visionfive2-rv64-release`与
+`just rootfs mkfs -c conf/rootfs/visionfive2/rootfs.toml --sudo`，并证明最终镜像
+`/boot/anemoneImage`等于本轮Platform output。缺少developer-local base image、host tool或sudo只阻塞Stage 6
+最终关闭，不阻塞Source 4A。
+
+本节是保持target的validation route与stage-order correction，不改R2 target、owner、ABI、public CLI、visible
+semantics、acceptance boundary或current contract，不增加checkpoint，也不激活4A或解析Stage 5。前一节保留为
+append-only的当时resolution记录；Stage 4的当前Ready definition以RFC `implementation.md`及本correction为准。
+`BOOT-PROTOCOL-001` effective baseline与pending successor状态不变。
+
+**Validation:** `git diff --check`与`mdbook build docs`通过，mdBook只报告既有large search-index warning。
+Lifecycle/status/write-set与residual audit确认public RFC、navigation和transaction phase均仍为Stage 4 Ready /
+Checkpoint 4A Not Activated；旧physical 4A要求只保留在前一节append-only历史中。Source audit确认
+`scripts/xtask/src/tasks/rootfs/mkfs.rs`的`stage_apps()`仍以空args调用同一`build_app()`，没有Source专用rootfs
+路径。Xtask tests、app/rootfs/kernel build、QEMU、physical board、LTP与final harness均Not Run；本correction
+只调整尚未激活checkpoint的文档验证边界，不把它们误述为本轮证据。
