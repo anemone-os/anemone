@@ -30,10 +30,13 @@ impl KThreadLaunch {
 }
 
 pub(super) fn kthread_entry_shim() -> ! {
-    let task = get_current_task();
-    let (control, launch) = task.take_kthread_launch();
-    let ctx = KThreadCtx::new(control.clone());
+    let code: i32;
+    {
+        let task = get_current_task();
+        let (control, launch) = task.take_kthread_launch();
+        let ctx = KThreadCtx::new(control.clone());
 
-    let code = (launch.entry)(ctx, launch.arg);
+        code = (launch.entry)(ctx, launch.arg);
+    }
     kthread_exit(code)
 }
