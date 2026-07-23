@@ -5,7 +5,7 @@
 **Area:** build system / configuration / platform / repository workflow
 **Canonical Plan:** [RFC-20260722-system-target-model](../../rfcs/system-target-model/index.md), [目标与不变量](../../rfcs/system-target-model/invariants.md), [迁移实施计划](../../rfcs/system-target-model/implementation.md)
 **Canonical Revision:** R2（R0初始接受；Stage 3期间完成R1 DT authority renegotiation；Stage 3关闭后接受R2 metadata correction）
-**Current Phase:** Stage 1-3 Closed / Stage 4 Outline / Not Resolved
+**Current Phase:** Stage 1-3 Closed / Stage 4 Ready / Checkpoint 4A Not Activated
 
 ## Scope
 
@@ -672,3 +672,30 @@ Not Run；本次删除不可达配置surface，不改变这些路径。
 runtime FDT接受、physical U-Boot handoff、root-mount ABI、public runtime API或current contract。
 `BOOT-PROTOCOL-001` effective baseline与R2 pending successor保持不变；没有运行、解析或激活
 `Stage 3 -> Stage 4 Implementation Resolution Gate`。
+
+## Stage 3 -> Stage 4 Implementation Resolution - 2026-07-23
+
+**Status:** Completed；Stage 4 Ready / Checkpoint 4A Not Activated。
+
+本gate在Stage 3与其R2 feedback correction独立关闭后只读执行，重新读取Stage 3最终diff、3A/R2 review与
+validation、live app parser/driver dispatch/artifact export、rootfs app/file staging、VisionFive Platform/
+SystemTarget/preset、U-Boot post-link、rootfs recipe/README、register/current limitations、R2 target/invariants与
+本事务。Preflight确认current register没有重叠blocker，`BOOT-PROTOCOL-001`继续由effective baseline生效。
+
+Live app action当前只有Cargo driver，并在必选command成功后通过唯一artifact expansion/check/copy路径导出；
+rootfs又以空extra args调用相同`build_app()`。因此4A只把dispatch收窄为`Option<Command>`：Cargo保持
+`Some`，closed Source在拒绝manifest/CLI extra args后返回`None`，不启动dummy process并复用公共export。
+VisionFive `[uboot]`、post-link、既有output name与rootfs fixed-path顺序已经闭合，但Stage 1完整组合证据早于
+Stage 2 CLI cutover，Stage 3只验证current explicit-preset build。4A因此必须在当前命令面实际重跑
+`build -> rootfs`并检查镜像内kernel bytes；该physical closure没有独立代码交付，仍作为同一4A的Preserve
+validation，不建立第二个board checkpoint，也不要求实机验证。
+
+三部分没有独立cutover、恢复或前序证据依赖，gate因此只解析单一Checkpoint 4A。Authoritative Ready
+definition、validation floor、stop/recovery与manifest只位于RFC `implementation.md`。该解析不改变R2 target、
+owner、public CLI、Boot Protocol、physical deployment、shared contract、ABI、visible semantics或acceptance
+boundary；Contract cutover为None。
+
+**Resolution review / validation:** Apollyon 0 / Keter 0 / Euclid 0。运行`git diff --check`、public relative-link、
+lifecycle/status、manifest与navigation audit，并运行`mdbook build docs`。Xtask tests、app/rootfs build、kernel
+build、QEMU、physical board、LTP与final harness均Not Run；它们属于4A execution floor或明确非目标，不是
+docs-only resolution证据。Resolution不自动激活Checkpoint 4A，也不解析Stage 5。
