@@ -47,7 +47,7 @@ mod pending;
 pub use pending::PendingSignals;
 pub mod set;
 mod terminal;
-pub(crate) use terminal::TtySigttouDisposition;
+pub(crate) use terminal::TtyJobControlDisposition;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SigNo(usize);

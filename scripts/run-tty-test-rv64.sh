@@ -13,9 +13,9 @@ readonly sdcard_target=sdcard-rv.img
 
 usage() {
     cat <<'EOF'
-Usage: run-tty-test-rv64.sh --busybox PATH --sdcard PATH --mode auto|vi [--log PATH]
+Usage: run-tty-test-rv64.sh --busybox PATH --sdcard PATH --mode auto|vi|jobctl [--log PATH]
 
-Builds and runs the Stage 2 RV64 TTY acceptance rootfs. External BusyBox and
+Builds and runs the RV64 TTY acceptance rootfs. External BusyBox and
 sdcard inputs are validated and copied; the originals remain read-only.
 EOF
 }
@@ -32,7 +32,7 @@ progress() {
 busybox=
 sdcard=
 mode=
-log_file=build/tty-stage2-rv64.log
+log_file=build/tty-stage4-rv64.log
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -47,7 +47,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --mode)
-            [[ $# -ge 2 ]] || fail "--mode requires auto or vi"
+            [[ $# -ge 2 ]] || fail "--mode requires auto, vi, or jobctl"
             mode=$2
             shift 2
             ;;
@@ -69,7 +69,8 @@ done
 
 [[ -n $busybox ]] || fail "--busybox is required"
 [[ -n $sdcard ]] || fail "--sdcard is required"
-[[ $mode == auto || $mode == vi ]] || fail "--mode must be auto or vi"
+[[ $mode == auto || $mode == vi || $mode == jobctl ]] \
+    || fail "--mode must be auto, vi, or jobctl"
 [[ -f $busybox ]] || fail "BusyBox not found: $busybox"
 [[ -f $sdcard ]] || fail "sdcard master not found: $sdcard"
 
@@ -96,7 +97,7 @@ if command -v qemu-riscv64 >/dev/null; then
     busybox_help=$(qemu-riscv64 "$busybox" --help 2>&1)
     [[ $busybox_help == *"BusyBox v1.33.1"* ]] || fail "expected BusyBox v1.33.1"
     busybox_applets=$(qemu-riscv64 "$busybox" --list)
-    for applet in ash stty vi mount stat poweroff; do
+    for applet in ash sleep stty vi mount stat poweroff; do
         grep -qx -- "$applet" <<<"$busybox_applets" || fail "BusyBox applet missing: $applet"
     done
     busybox_runtime_check=host-qemu-riscv64
@@ -181,10 +182,28 @@ inputs = {
     b"@@TTY READY noncanonical-vmin1-vtime0@@": b"\x00A",
     b"@@TTY READY tcsetsf-flush@@": b"dropme\n",
     b"@@TTY READY readiness@@": b"ready\n",
+    b"@@TTY READY isig-int@@": b"\x03",
+    b"@@TTY READY isig-quit@@": b"\x1c",
+    b"@@TTY READY isig-suspend@@": b"\x1a",
+    b"@@TTY READY background-sigttin@@": b"background-read\n",
+    b"@@TTY READY background-sigttin-handler-no-restart@@": b"background-no-restart\n",
+    b"@@TTY READY background-sigttin-handler-restart@@": b"background-restart\n",
+    b"@@TTY READY detached-no-effect@@": b"\x03",
 }
 vi_seed = b"TTYVI-SEED-71C4"
 vi_ready = b"@@TTY VI raw-ready@@"
-vi_keys = (b"G", b"o", b"alpha\n", b"beta", b"\x1b", b":wq\n")
+vi_steps = (
+    (b"G", 0.05),
+    (b"o", 0.05),
+    (b"alpha\n", 0.05),
+    (b"beta", 0.05),
+    (b"\x1b", 0.20),
+    (b":wq\n", 0.05),
+)
+ash_marker = b"@@TTY ASH auto-start@@"
+ash_phase = "waiting-marker"
+ash_offset = 0
+ash_deadline = None
 sent = set()
 seen = bytearray()
 deadline = time.monotonic() + 240
@@ -219,15 +238,65 @@ with open(log_path, "ab", buffering=0) as log:
                         # Keep ESC separate from the following command. BusyBox vi
                         # distinguishes a standalone mode switch from an escape
                         # sequence using arrival timing while the terminal is raw.
-                        for keys in vi_keys:
+                        for keys, delay_after in vi_steps:
                             proc.stdin.write(keys)
                             proc.stdin.flush()
-                            time.sleep(0.05)
+                            time.sleep(delay_after)
                         sent.add(vi_ready)
+                    ash_view = bytes(seen[ash_offset:])
+                    if ash_phase == "waiting-marker" and ash_marker in seen:
+                        ash_offset = seen.find(ash_marker) + len(ash_marker)
+                        ash_phase = "waiting-prompt"
+                        ash_view = bytes(seen[ash_offset:])
+                    if ash_phase == "waiting-prompt" and b"# " in ash_view:
+                        proc.stdin.write(b"echo TTYASH-READY\n")
+                        proc.stdin.flush()
+                        ash_offset = len(seen)
+                        ash_phase = "waiting-ready"
+                    elif ash_phase == "waiting-ready" and b"TTYASH-READY" in ash_view:
+                        proc.stdin.write(b"/bin/busybox sleep 30\n")
+                        proc.stdin.flush()
+                        ash_offset = len(seen)
+                        ash_deadline = time.monotonic() + 0.25
+                        ash_phase = "sleep-starting"
+                    elif ash_phase == "waiting-stopped" and b"Stopped" in ash_view:
+                        proc.stdin.write(b"jobs\n")
+                        proc.stdin.flush()
+                        ash_offset = len(seen)
+                        ash_phase = "waiting-jobs"
+                    elif (
+                        ash_phase == "waiting-jobs"
+                        and b"Stopped" in ash_view
+                        and b"sleep" in ash_view
+                    ):
+                        proc.stdin.write(b"fg\n")
+                        proc.stdin.flush()
+                        ash_offset = len(seen)
+                        ash_deadline = time.monotonic() + 0.25
+                        ash_phase = "foreground-starting"
+                    elif (
+                        ash_phase == "waiting-shell-return"
+                        and b"^C" in ash_view
+                        and b"# " in ash_view
+                    ):
+                        proc.stdin.write(b"exit\n")
+                        proc.stdin.flush()
+                        ash_offset = len(seen)
+                        ash_phase = "exit-sent"
                 elif proc.poll() is not None:
                     break
             elif proc.poll() is not None:
                 break
+            if ash_phase == "sleep-starting" and time.monotonic() >= ash_deadline:
+                proc.stdin.write(b"\x1a")
+                proc.stdin.flush()
+                ash_offset = len(seen)
+                ash_phase = "waiting-stopped"
+            elif ash_phase == "foreground-starting" and time.monotonic() >= ash_deadline:
+                proc.stdin.write(b"\x03")
+                proc.stdin.flush()
+                ash_offset = len(seen)
+                ash_phase = "waiting-shell-return"
         returncode = proc.wait(timeout=5)
     except BaseException:
         try:
@@ -247,12 +316,26 @@ data = bytes(seen)
 missing = [marker.decode("ascii") for marker in inputs if marker not in sent]
 if vi_ready not in sent:
     missing.append(vi_ready.decode("ascii"))
+if ash_phase != "exit-sent":
+    missing.append("ash-state:" + ash_phase)
 if missing:
     raise SystemExit("TTY-HARNESS:FAIL:unsent-input:" + ",".join(missing))
 if returncode != 0:
     raise SystemExit(f"TTY-HARNESS:FAIL:qemu-exit:{returncode}")
 if b"TTYTEST:SUMMARY:PASS:" not in data or b"TTYTEST:FAIL:" in data:
     raise SystemExit("TTY-HARNESS:FAIL:guest-summary")
+ash_start = data.find(ash_marker)
+ash_end = data.find(b"TTYTEST:PASS:busybox-ash-auto", ash_start + 1)
+if (
+    ash_start < 0
+    or ash_end < 0
+    or b"job control turned off" in data[ash_start:ash_end].lower()
+    or b"Stopped" not in data[ash_start:ash_end]
+    or b"jobs" not in data[ash_start:ash_end]
+    or b"fg" not in data[ash_start:ash_end]
+    or b"^C" not in data[ash_start:ash_end]
+):
+    raise SystemExit("TTY-HARNESS:FAIL:busybox-ash-jobctl")
 vi_start = data.find(b"@@TTY VI auto-start@@")
 vi_end = data.find(b"TTYTEST:PASS:busybox-vi-auto", vi_start + 1)
 if (
@@ -283,11 +366,11 @@ with open(log_path, "ab", buffering=0) as log:
 sys.stdout.buffer.write(message)
 PY
 else
-    progress "qemu-manual-vi"
+    progress "qemu-manual-$mode"
     just xtask qemu --platform "$platform" --image build/anemone.elf 2>&1 | tee -a "$log_file"
-    grep -aq 'TTYTEST:SUMMARY:PASS:' "$log_file" || fail "manual vi summary did not pass"
+    grep -aq 'TTYTEST:SUMMARY:PASS:' "$log_file" || fail "manual $mode summary did not pass"
     if grep -aq 'TTYTEST:FAIL:' "$log_file"; then
-        fail "manual vi log contains a failed case"
+        fail "manual $mode log contains a failed case"
     fi
 fi
 

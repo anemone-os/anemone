@@ -1,14 +1,14 @@
 # RFC-20260722-tty-subsystem
 
-**状态：** Accepted for Implementation
+**状态：** Closed
 **修订：** R1
 **负责人：** doruche, Codex
 **最后更新：** 2026-07-24
 **领域：** device / TTY / serial / VFS / signal / task topology / job control
 **事务日志：** [2026-07-23 - TTY Subsystem](../../devlog/transactions/2026-07-23-tty-subsystem.md)
-**影响契约：** `TTY-DATA-CUTOVER` 已原子建立 [TTY data-plane current contract](../../contracts/tty/data-plane.md)，`TTY-PORT-001`、`TTY-TERM-001`、`TTY-INPUT-001`、`TTY-OUTPUT-001` 与 `TTY-ENDPOINT-001` 为 Active；[目标与不变量](./invariants.md)中的 `TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001` 仍为 R1 accepted target / Not Cut Over。现有 Signal、process-group、job-control、task-lifecycle 与 user-entry contract 全程 Preserve；R1 的 RV64-only acceptance 不外推 LA64。
+**影响契约：** `TTY-DATA-CUTOVER` 与 `TTY-JOBCTL-CUTOVER` 均已 Effective；九个 `TTY-*` ID 分别由 [TTY data-plane current contract](../../contracts/tty/data-plane.md)与[TTY controlling relation / job-control current contract](../../contracts/tty/job-control.md)拥有并全部 Active。现有 Signal、process-group、job-control、task-lifecycle 与 user-entry contract 全程 Preserve；R1 的 RV64-only acceptance 不外推 LA64。
 **开放问题：** None；已关闭的设计 finding 及重新打开条件见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** [Stage 4](./implementation.md#9-stage-4-readyterminal-job-control完整验收与-tty-jobctl-cutover) 已完成独立`3 -> 4`解析并达到Ready / Not Started / Unauthorized；必须取得新的明确实现授权，本次不进入实现。
+**下一步：** None。R1、Stage 4与两个cutover unit均已关闭；未交付的orphan/disassociation、PTY、hangup、`TOSTOP`及procfs TTY字段继续由register或后续独立RFC推进，不自动进入下一gate。
 
 ## 摘要
 
@@ -60,6 +60,7 @@ RFC target：
 Current contracts：
 
 - [TTY serial data plane](../../contracts/tty/data-plane.md)
+- [TTY controlling relation 与 job control](../../contracts/tty/job-control.md)
 - [Signal pending/action](../../contracts/signal/pending-routing.md)
 - [Process-group signal targeting](../../contracts/task/process-group-signaling.md)
 - [Unix job control](../../contracts/task/job-control.md)
@@ -74,7 +75,7 @@ Current contracts：
 
 | 修订 | 日期 | 状态 | 摘要 | 证据 |
 | --- | --- | --- | --- | --- |
-| R1 | 2026-07-23 | Accepted for Implementation | 保持 R0 功能目标与两个 cutover unit，只把本 RFC 的 build/runtime acceptance evidence 收窄为 RV64；LA64 明确 Not Run 且不得由 RV64 证据外推 | [事务日志](../../devlog/transactions/2026-07-23-tty-subsystem.md) |
+| R1 | 2026-07-23 | Closed | 保持 R0 功能目标与两个 cutover unit，只把本 RFC 的 build/runtime acceptance evidence 收窄为 RV64；Stage 4于2026-07-24完成RV64自动、focused与用户人工验收并执行`TTY-JOBCTL-CUTOVER`，LA64仍明确Not Run | [事务日志](../../devlog/transactions/2026-07-23-tty-subsystem.md) |
 | R0 | 2026-07-23 | Accepted for Implementation | 接受 serial TTY owner、ABI 包络、两个 cutover unit 与 proof obligations；全部 `TTY-*` 保持 Not Cut Over | [事务日志](../../devlog/transactions/2026-07-23-tty-subsystem.md) |
 
 ## 兼容与工程原则
@@ -229,14 +230,13 @@ foreground group消失只使 selector失效，不拆 relation；newly orphaned s
 
 ## 收口
 
-R1 已接受并由现有 active transaction 继续实施；Stage 0与Stage 1已经关闭。独立的Stage 1 -> Stage 2
-Resolution Gate解析的discipline/worker、FileOps/UAPI、publication/boot、userspace/cutover四个checkpoint现已
-逐项关闭；RV64自动matrix和用户人工vi checklist达到floor后，`TTY-DATA-CUTOVER`原子建立五个Active data-plane
-contract ID并关闭Stage 2。`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`与`TTY-ABI-001`继续Not Cut Over，
-RFC保持Accepted for Implementation。Stage 3已经以单个、不再拆checkpoint的vertical slice关闭：TTY-owned
-relation、caller-relative `/dev/tty`、五个foreground ioctl、非orphan `TIOCSPGRP`三分支与detach/exit cleanup
-均通过最终0 Apollyon / 0 Keter / 0 Euclid review及RV64自动matrix。`TTY-JOBCTL-CUTOVER`与四个relation/job-control
-ID仍Not Cut Over。独立`3 -> 4` gate已把最终Stage 4解析为一个不拆checkpoint的Ready stage，但尚未授权或进入；
-完整route与RV64-only validation floor见[实施计划](./implementation.md#9-stage-4-readyterminal-job-control完整验收与-tty-jobctl-cutover)。已完成的设计 finding 保存在
+R1的Stage 0至Stage 4均已关闭。Stage 2在RV64自动matrix和用户人工vi checklist达到floor后执行
+`TTY-DATA-CUTOVER`，原子建立五个Active data-plane ID；Stage 3以单一vertical slice闭合TTY-owned relation、
+caller-relative `/dev/tty`、五个foreground ioctl、非orphan `TIOCSPGRP`三分支与detach/exit cleanup。最终Stage 4
+完成terminal signal、background read、changed-only winsize、BusyBox ash/vi、unix-jobctl focused回归和用户人工
+ash job-control checklist；最终review为0 Apollyon / 0 Keter / 0 Euclid，`TTY-JOBCTL-CUTOVER`原子建立
+`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`与`TTY-ABI-001`四个Active current-contract ID并关闭R1。
+LA64 compile/runtime、hardware与LTP均Not Run，不由RV64证据外推。完整route与分层证据见
+[实施计划](./implementation.md#9-stage-4-closedterminal-job-control完整验收与-tty-jobctl-cutover)。已完成的设计 finding 保存在
 [Tracking Issues](./tracking-issues.md)，本次执行证据与carrier owner处置见[事务日志](../../devlog/transactions/2026-07-23-tty-subsystem.md)，
 历史调查保存在[背景材料](./backgrounds/index.md)。

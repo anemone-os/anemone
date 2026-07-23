@@ -45,6 +45,7 @@ fn tty_read(
     }
     let tty = tty_file(file);
     loop {
+        check_read_access(tty)?;
         match tty.endpoint.terminal.read_input(buf) {
             InputRead::Bytes(count) => {
                 if count != 0 {
@@ -58,6 +59,47 @@ fn tty_read(
                     return Err(SysError::Again);
                 }
                 tty.endpoint.terminal.wait_readable()?;
+            },
+        }
+    }
+}
+
+fn check_read_access(tty: &TtyFile) -> Result<(), SysError> {
+    loop {
+        let caller = match crate::task::jobctl::TtyCaller::current_user_or_kernel()? {
+            Some(caller) => caller,
+            None => {
+                // Kernel-internal FileOps users and KUnit workers have no user
+                // session, so this terminal cannot be their controlling terminal.
+                return Ok(());
+            },
+        };
+        let Some(snapshot) = relation::endpoint_snapshot(&tty.endpoint) else {
+            if caller.revalidate() {
+                return Ok(());
+            }
+            continue;
+        };
+        if !snapshot.session().same_identity(caller.session()) {
+            if caller.revalidate() && snapshot.is_current() {
+                return Ok(());
+            }
+            continue;
+        }
+        let decision = caller.read_decision(snapshot.foreground());
+        if !caller.revalidate() || !snapshot.is_current() {
+            continue;
+        }
+        match decision {
+            crate::task::jobctl::TtyReadDecision::Continue => return Ok(()),
+            crate::task::jobctl::TtyReadDecision::Signal => {
+                if caller.signal_process_group(crate::task::jobctl::TtyTerminalSignal::Input) {
+                    return Err(SysError::RestartSyscall(RestartSyscall::Idempotent));
+                }
+            },
+            crate::task::jobctl::TtyReadDecision::Eio => {
+                tty.endpoint.terminal.record_background_read_eio();
+                return Err(SysError::IO);
             },
         }
     }
@@ -145,12 +187,20 @@ fn tty_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
         },
         abi::TIOCSWINSZ => {
             let winsize = read_ioctl_value::<abi::Winsize>(&ctx)?;
-            tty.endpoint.terminal.set_winsize(TtyWinsize {
+            let changed = tty.endpoint.terminal.set_winsize(TtyWinsize {
                 rows: winsize.ws_row,
                 cols: winsize.ws_col,
                 xpixel: winsize.ws_xpixel,
                 ypixel: winsize.ws_ypixel,
             });
+            if changed
+                && !relation::signal_foreground(
+                    &tty.endpoint,
+                    crate::task::jobctl::TtyTerminalSignal::WindowChanged,
+                )
+            {
+                tty.endpoint.terminal.record_no_foreground_winsize();
+            }
         },
         abi::TIOCSCTTY => set_controlling_tty(tty, &ctx)?,
         abi::TIOCNOTTY => detach_controlling_tty(tty)?,

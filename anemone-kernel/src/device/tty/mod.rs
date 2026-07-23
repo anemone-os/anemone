@@ -15,6 +15,7 @@ use crate::{
     utils::any_opaque::AnyOpaque,
 };
 
+use discipline::TtySignalControl;
 use terminal::Terminal;
 
 static_assert!(
@@ -273,10 +274,25 @@ fn tty_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
         }
 
         while rx_cursor < rx_len {
-            if !endpoint.terminal.receive_rx_byte(rx_batch[rx_cursor]) {
+            let effect = endpoint
+                .terminal
+                .receive_rx_byte_effect(rx_batch[rx_cursor]);
+            if !effect.consumed() {
                 break;
             }
             rx_cursor += 1;
+            if let Some(signal) = effect.signal() {
+                let signal = match signal {
+                    TtySignalControl::Interrupt => {
+                        crate::task::jobctl::TtyTerminalSignal::Interrupt
+                    },
+                    TtySignalControl::Quit => crate::task::jobctl::TtyTerminalSignal::Quit,
+                    TtySignalControl::Suspend => crate::task::jobctl::TtyTerminalSignal::Suspend,
+                };
+                if !relation::signal_foreground(endpoint, signal) {
+                    endpoint.terminal.record_no_foreground_isig();
+                }
+            }
         }
 
         let prepared = endpoint.terminal.peek_output(&mut tx_batch);

@@ -2,7 +2,7 @@
 
 use crate::{
     prelude::*,
-    task::jobctl::{TtyCaller, TtyProcessGroup, TtySession, TtySessionLeader},
+    task::jobctl::{TtyCaller, TtyProcessGroup, TtySession, TtySessionLeader, TtyTerminalSignal},
 };
 
 use super::TtyEndpoint;
@@ -172,6 +172,20 @@ pub(super) fn endpoint_snapshot(endpoint: &Arc<TtyEndpoint>) -> Option<RelationS
             return Some(snapshot);
         }
     }
+}
+
+pub(super) fn signal_foreground(endpoint: &Arc<TtyEndpoint>, signal: TtyTerminalSignal) -> bool {
+    let Some(snapshot) = endpoint_snapshot(endpoint) else {
+        return false;
+    };
+    let Some(foreground) = snapshot.foreground() else {
+        return false;
+    };
+    // The relation guard was released when the snapshot was formed. The task
+    // owner revalidates both stable identities before broadcasting; a
+    // concurrent foreground replacement may therefore linearize this effect
+    // to the last legal relation state observed by the worker.
+    foreground.signal_terminal(snapshot.session(), signal)
 }
 
 pub(super) fn current_endpoint(caller: &TtyCaller) -> Result<Arc<TtyEndpoint>, SysError> {

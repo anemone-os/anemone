@@ -8,8 +8,8 @@
 **不覆盖：** controlling-terminal relation、caller-relative `/dev/tty`、foreground/background access、terminal-generated signal、relation cleanup、runtime line reconfiguration、hangup、hotplug 或 PTY
 **实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/driver/serial/ns16550a/`、`anemone-kernel/src/device/{console,devnum}.rs`、`anemone-kernel/src/main.rs`
 **依赖：** None；本页定义后续 TTY relation/job-control contract 使用的数据面 baseline
-**Pending Successor：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md) 的 `TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001`（Not Cut Over）
-**最后核验：** 2026-07-23
+**Companion Contract：** [TTY controlling relation 与 job control](./job-control.md) 中的 `TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001`（Active）
+**最后核验：** 2026-07-24
 
 ## 状态与能力所有权
 
@@ -131,8 +131,8 @@ registry/port bypass audit。
 
 ## 当前接受边界
 
-- 本页只证明relationless serial TTY data plane。`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`与
-  `TTY-ABI-001`仍为Not Cut Over；`/dev/tty`、controlling relation和terminal job control不能从本页推断。
+- 本页只定义serial TTY data plane；`/dev/tty`、controlling relation和terminal job control由已生效的
+  [companion contract](./job-control.md)定义，不能从本页单独推断。
 - build/runtime acceptance只在RV64验证；LA64 compile/runtime与hardware均Not Run，RV64结果不得外推。
 - runtime line reconfiguration、hardware hangup/backend fatal、hotplug/unpublish、完整`VMIN/VTIME`、PTY/devpts/ptmx
   与完整Linux termios/ioctl corner不在本页。

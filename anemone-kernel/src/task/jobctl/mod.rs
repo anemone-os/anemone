@@ -8,7 +8,8 @@ mod report;
 pub(in crate::task) use report::ChildJobControlStatus;
 mod terminal;
 pub(crate) use terminal::{
-    TtyCaller, TtyProcessGroup, TtySession, TtySessionLeader, TtySigttouDecision,
+    TtyCaller, TtyProcessGroup, TtyReadDecision, TtySession, TtySessionLeader, TtySigttouDecision,
+    TtyTerminalSignal,
 };
 mod user_entry;
 pub(in crate::task) use user_entry::UserEntryOutcome;

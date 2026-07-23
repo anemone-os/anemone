@@ -1,7 +1,7 @@
 use crate::{prelude::*, utils::ring_buffer::RingBuffer};
 
 use super::{
-    discipline::{InputRead, ReceiveResult, TtyDiscipline},
+    discipline::{InputRead, ReceiveResult, TtyDiscipline, TtySignalControl},
     port::TtyLineSnapshot,
 };
 
@@ -69,10 +69,19 @@ impl TtyTermios {
         control != 0 && byte == control
     }
 
-    pub(super) fn is_signal_control(self, byte: u8) -> bool {
-        self.matches_control(self.intr, byte)
-            || self.matches_control(self.quit, byte)
-            || self.matches_control(self.susp, byte)
+    pub(super) fn signal_control(self, byte: u8) -> Option<TtySignalControl> {
+        if !self.isig {
+            return None;
+        }
+        if self.matches_control(self.intr, byte) {
+            Some(TtySignalControl::Interrupt)
+        } else if self.matches_control(self.quit, byte) {
+            Some(TtySignalControl::Quit)
+        } else if self.matches_control(self.susp, byte) {
+            Some(TtySignalControl::Suspend)
+        } else {
+            None
+        }
     }
 
     pub(super) fn echo_for_byte(self, byte: u8) -> EchoBytes {
@@ -317,6 +326,7 @@ struct TerminalCounters {
     output_backpressure: AtomicUsize,
     no_foreground_isig: AtomicUsize,
     no_foreground_winsize: AtomicUsize,
+    background_read_eio: AtomicUsize,
     partial_port_progress: AtomicUsize,
     drain_checks: AtomicUsize,
 }
@@ -328,6 +338,7 @@ impl TerminalCounters {
             output_backpressure: AtomicUsize::new(0),
             no_foreground_isig: AtomicUsize::new(0),
             no_foreground_winsize: AtomicUsize::new(0),
+            background_read_eio: AtomicUsize::new(0),
             partial_port_progress: AtomicUsize::new(0),
             drain_checks: AtomicUsize::new(0),
         }
@@ -370,32 +381,32 @@ impl Terminal {
         .map_err(|_| SysError::OutOfMemory)
     }
 
-    pub(crate) fn receive_rx_byte(&self, byte: u8) -> bool {
+    pub(super) fn receive_rx_byte_effect(&self, byte: u8) -> TtyRxEffect {
         let mut inner = self.inner.lock();
         let termios = inner.termios;
         let TerminalInner {
             discipline, output, ..
         } = &mut *inner;
-        let consumed = match discipline.receive(byte, termios, output) {
-            ReceiveResult::Consumed => true,
-            ReceiveResult::ConsumedSignalControl => {
-                self.counters
-                    .no_foreground_isig
-                    .fetch_add(1, Ordering::Relaxed);
-                true
-            },
+        let effect = match discipline.receive(byte, termios, output) {
+            ReceiveResult::Consumed => TtyRxEffect::Consumed,
+            ReceiveResult::ConsumedSignalControl(signal) => TtyRxEffect::Signal(signal),
             ReceiveResult::Backpressured => {
                 self.counters
                     .input_backpressure
                     .fetch_add(1, Ordering::Relaxed);
-                false
+                TtyRxEffect::Backpressured
             },
         };
         drop(inner);
-        if consumed {
+        if effect.consumed() {
             self.notify_state_change();
         }
-        consumed
+        effect
+    }
+
+    #[cfg(feature = "kunit")]
+    pub(crate) fn receive_rx_byte(&self, byte: u8) -> bool {
+        self.receive_rx_byte_effect(byte).consumed()
     }
 
     /// Queue user bytes through the current output transform.
@@ -519,17 +530,33 @@ impl Terminal {
         self.inner.lock().winsize
     }
 
-    pub(super) fn set_winsize(&self, winsize: TtyWinsize) {
+    pub(super) fn set_winsize(&self, winsize: TtyWinsize) -> bool {
         let mut inner = self.inner.lock();
         if inner.winsize == winsize {
-            return;
+            return false;
         }
         inner.winsize = winsize;
+        drop(inner);
+        self.notify_state_change();
+        true
+    }
+
+    pub(super) fn record_no_foreground_isig(&self) {
+        self.counters
+            .no_foreground_isig
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(super) fn record_no_foreground_winsize(&self) {
         self.counters
             .no_foreground_winsize
             .fetch_add(1, Ordering::Relaxed);
-        drop(inner);
-        self.notify_state_change();
+    }
+
+    pub(super) fn record_background_read_eio(&self) {
+        self.counters
+            .background_read_eio
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     pub(super) fn writable(&self) -> bool {
@@ -695,6 +722,26 @@ impl Terminal {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TtyRxEffect {
+    Consumed,
+    Signal(TtySignalControl),
+    Backpressured,
+}
+
+impl TtyRxEffect {
+    pub(super) fn consumed(self) -> bool {
+        !matches!(self, Self::Backpressured)
+    }
+
+    pub(super) fn signal(self) -> Option<TtySignalControl> {
+        match self {
+            Self::Signal(signal) => Some(signal),
+            Self::Consumed | Self::Backpressured => None,
+        }
+    }
+}
+
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
@@ -809,7 +856,7 @@ mod kunits {
     }
 
     #[kunit]
-    fn relationless_signal_control_flushes_without_input_commit() {
+    fn signal_control_flushes_and_forms_guards_out_effect() {
         let terminal = terminal();
         terminal.set_termios_for_test(|termios| termios.echo = false);
         for &byte in b"pending" {
@@ -818,12 +865,15 @@ mod kunits {
         terminal.set_termios_for_test(|termios| termios.echo = true);
         let fill = vec![b'x'; TTY_OUTPUT_CAPACITY_BYTES];
         assert_eq!(terminal.enqueue_output(&fill), fill.len());
-        assert!(terminal.receive_rx_byte(0x03));
+        assert_eq!(
+            terminal.receive_rx_byte_effect(0x03),
+            TtyRxEffect::Signal(TtySignalControl::Interrupt)
+        );
         assert!(!terminal.readable());
         assert_eq!(drain_output(&terminal), b"^C\r\n");
         assert_eq!(
             terminal.counters.no_foreground_isig.load(Ordering::Relaxed),
-            1
+            0
         );
     }
 

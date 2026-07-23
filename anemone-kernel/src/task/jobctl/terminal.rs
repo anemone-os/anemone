@@ -3,7 +3,7 @@
 use crate::{
     prelude::*,
     task::sig::{
-        SigNo, Signal, TtySigttouDisposition,
+        SigNo, Signal, TtyJobControlDisposition,
         info::{SiCode, SigInfoFields, SigKill},
     },
 };
@@ -34,6 +34,36 @@ pub(crate) struct TtySessionLeader(TtySession);
 pub(crate) enum TtySigttouDecision {
     Continue,
     Signal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TtyReadDecision {
+    Continue,
+    Signal,
+    Eio,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TtyTerminalSignal {
+    Interrupt,
+    Quit,
+    Suspend,
+    Input,
+    Output,
+    WindowChanged,
+}
+
+impl TtyTerminalSignal {
+    fn signo(self) -> SigNo {
+        match self {
+            Self::Interrupt => SigNo::SIGINT,
+            Self::Quit => SigNo::SIGQUIT,
+            Self::Suspend => SigNo::SIGTSTP,
+            Self::Input => SigNo::SIGTTIN,
+            Self::Output => SigNo::SIGTTOU,
+            Self::WindowChanged => SigNo::SIGWINCH,
+        }
+    }
 }
 
 impl TtySession {
@@ -71,18 +101,60 @@ impl TtyProcessGroup {
         self.group.sid() == session.sid()
             && get_process_group(&self.pgid()).is_some_and(|group| Arc::ptr_eq(&group, &self.group))
     }
+
+    fn signal_from_terminal(
+        &self,
+        session: &TtySession,
+        signal: TtyTerminalSignal,
+        sender: SigKill,
+    ) -> bool {
+        if !session.is_live() || !self.is_live_in(session) {
+            return false;
+        }
+        self.group.recv_signal(Signal::new(
+            signal.signo(),
+            SiCode::Kernel,
+            SigInfoFields::Kill(sender),
+        ));
+        true
+    }
+
+    pub(crate) fn signal_terminal(&self, session: &TtySession, signal: TtyTerminalSignal) -> bool {
+        self.signal_from_terminal(
+            session,
+            signal,
+            SigKill {
+                pid: Tid::new(0),
+                uid: Uid::new(0),
+            },
+        )
+    }
 }
 
 impl TtyCaller {
     pub(crate) fn current() -> Result<Self, SysError> {
         let task = get_current_task();
         let thread_group = task.get_thread_group();
-        if thread_group.ty() != ThreadGroupType::User
-            || !matches!(
-                thread_group.status().life_cycle(),
-                ThreadGroupLifeCycle::Alive
-            )
-        {
+        if thread_group.ty() != ThreadGroupType::User {
+            return Err(SysError::NoSuchProcess);
+        }
+        Self::current_user(task, thread_group)
+    }
+
+    pub(crate) fn current_user_or_kernel() -> Result<Option<Self>, SysError> {
+        let task = get_current_task();
+        let thread_group = task.get_thread_group();
+        if thread_group.ty() == ThreadGroupType::KThread {
+            return Ok(None);
+        }
+        Self::current_user(task, thread_group).map(Some)
+    }
+
+    fn current_user(task: Arc<Task>, thread_group: Arc<ThreadGroup>) -> Result<Self, SysError> {
+        if !matches!(
+            thread_group.status().life_cycle(),
+            ThreadGroupLifeCycle::Alive
+        ) {
             return Err(SysError::NoSuchProcess);
         }
         let sid = thread_group.sid();
@@ -145,25 +217,41 @@ impl TtyCaller {
         if foreground.is_none_or(|foreground| foreground.same_identity(&self.process_group)) {
             return TtySigttouDecision::Continue;
         }
-        match self.task.tty_sigttou_disposition() {
-            TtySigttouDisposition::BlockedOrIgnored => TtySigttouDecision::Continue,
-            TtySigttouDisposition::Actionable => TtySigttouDecision::Signal,
+        match self.task.tty_job_control_disposition(SigNo::SIGTTOU) {
+            TtyJobControlDisposition::BlockedOrIgnored => TtySigttouDecision::Continue,
+            TtyJobControlDisposition::Actionable => TtySigttouDecision::Signal,
+        }
+    }
+
+    pub(crate) fn read_decision(&self, foreground: Option<&TtyProcessGroup>) -> TtyReadDecision {
+        let Some(foreground) = foreground else {
+            return TtyReadDecision::Eio;
+        };
+        if foreground.same_identity(&self.process_group) {
+            return TtyReadDecision::Continue;
+        }
+        match self.task.tty_job_control_disposition(SigNo::SIGTTIN) {
+            TtyJobControlDisposition::BlockedOrIgnored => TtyReadDecision::Eio,
+            TtyJobControlDisposition::Actionable => TtyReadDecision::Signal,
         }
     }
 
     pub(crate) fn signal_process_group_sigttou(&self) -> bool {
+        self.signal_process_group(TtyTerminalSignal::Output)
+    }
+
+    pub(crate) fn signal_process_group(&self, signal: TtyTerminalSignal) -> bool {
         if !self.revalidate() {
             return false;
         }
-        self.process_group.group.recv_signal(Signal::new(
-            SigNo::SIGTTOU,
-            SiCode::Kernel,
-            SigInfoFields::Kill(SigKill {
+        self.process_group.signal_from_terminal(
+            &self.session,
+            signal,
+            SigKill {
                 pid: self.thread_group.tgid(),
                 uid: self.task.cred().uid.real,
-            }),
-        ));
-        true
+            },
+        )
     }
 }
 

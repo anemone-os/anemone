@@ -59,7 +59,7 @@ impl TtyDiscipline {
             byte
         };
 
-        if termios.isig && termios.is_signal_control(byte) {
+        if let Some(signal) = termios.signal_control(byte) {
             let echo = termios.signal_echo(byte);
             assert!(
                 output.can_enqueue_after_clear(&echo, termios),
@@ -68,7 +68,7 @@ impl TtyDiscipline {
             self.flush_input();
             output.clear();
             assert!(output.enqueue(&echo, termios));
-            return ReceiveResult::ConsumedSignalControl;
+            return ReceiveResult::ConsumedSignalControl(signal);
         }
 
         if !termios.icanon {
@@ -278,6 +278,13 @@ impl TtyDiscipline {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ReceiveResult {
     Consumed,
-    ConsumedSignalControl,
+    ConsumedSignalControl(TtySignalControl),
     Backpressured,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TtySignalControl {
+    Interrupt,
+    Quit,
+    Suspend,
 }

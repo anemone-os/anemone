@@ -1,17 +1,17 @@
 # 2026-07-23 - TTY Subsystem
 
-**Status:** Active / Stage 0-3 Closed / Stage 4 Ready / Not Started
+**Status:** Completed / Stage 0-4 Closed
 **Owners:** doruche, Codex
 **Area:** device / TTY / serial / VFS / signal / task topology / job control
 **Canonical Plan:** [RFC-20260722-tty-subsystem](../../rfcs/tty-subsystem/index.md), [目标与不变量](../../rfcs/tty-subsystem/invariants.md), [迁移实施计划](../../rfcs/tty-subsystem/implementation.md)
 **Canonical Revision:** R1
-**Current Phase:** Stage 4 Ready / Not Started / Unauthorized; `TTY-DATA-CUTOVER` Effective; `TTY-JOBCTL-CUTOVER` Not Cut Over
+**Current Phase:** Closed; `TTY-DATA-CUTOVER` Effective; `TTY-JOBCTL-CUTOVER` Effective
 
 ## Scope and contract boundary
 
-本事务最初实现 R0，现继续实现已接受的 R1 滚动 stage。R1 保持 serial TTY owner、用户可见 ABI 包络、
-`TTY-DATA-CUTOVER`、`TTY-JOBCTL-CUTOVER` 与 proof obligations，但不表示任何 TTY 能力已经
-生效。Stage 0 只读审计 live VFS、UART、endpoint/boot、task topology、oracle 和模块边界；
+本事务最初实现R0，随后继续实现已接受的R1滚动stage。R1保持serial TTY owner、用户可见ABI包络、
+`TTY-DATA-CUTOVER`、`TTY-JOBCTL-CUTOVER`与proof obligations；两个cutover现均已生效。Stage 0只读审计
+live VFS、UART、endpoint/boot、task topology、oracle和模块边界；
 它不修改 kernel、apps、rootfs、tests、register 或 current contracts。
 
 Prospective `Introduce` IDs 为 `TTY-PORT-001`、`TTY-TERM-001`、`TTY-INPUT-001`、
@@ -21,8 +21,8 @@ Prospective `Introduce` IDs 为 `TTY-PORT-001`、`TTY-TERM-001`、`TTY-INPUT-001
 `TASK-LIFE-001..003` 与 `USER-ENTRY-002`。
 
 `TTY-DATA-CUTOVER`已经建立`TTY-PORT-001`、`TTY-TERM-001`、`TTY-INPUT-001`、
-`TTY-OUTPUT-001`与`TTY-ENDPOINT-001`五个Active current contract；`TTY-JOBCTL-CUTOVER`仍为Not Cut Over，
-`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`与`TTY-ABI-001`仍不是current contract。
+`TTY-OUTPUT-001`与`TTY-ENDPOINT-001`五个Active current contract；`TTY-JOBCTL-CUTOVER`已经建立
+`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`与`TTY-ABI-001`四个Active current contract。
 
 ## R0 acceptance and Stage 0 activation
 
@@ -1012,7 +1012,7 @@ snapshot/generation、caller/process-group capability、Signal classification/ge
 RV64 wrapper和BusyBox ash/vi调用序列。Linux 6.6.32只作为control mapping、background-read errno/effect ordering
 和changed-only winsize signal参考，不作为内部结构模板。
 
-**Resolution:** canonical [Stage 4 Ready计划](../../rfcs/tty-subsystem/implementation.md#9-stage-4-readyterminal-job-control完整验收与-tty-jobctl-cutover)
+**Resolution:** canonical [Stage 4 Ready计划](../../rfcs/tty-subsystem/implementation.md#9-stage-4-closedterminal-job-control完整验收与-tty-jobctl-cutover)
 将最终阶段解析为一个不拆checkpoint的集成单元。control char在Terminal guard内形成无分配request，由worker在
 guard外经现有relation/foreground capability发送；background read在每次消费前和wait后以同步caller重验，
 actionable `SIGTTIN`走process-group Signal/jobctl并restart，blocked/ignored和无foreground为`EIO`；winsize只在
@@ -1029,3 +1029,151 @@ signal/background/winsize cases、auto ash host oracle和一个`jobctl`人工mod
 和cutover unit，不产生R2，不提前修改current contracts或register。Stage 4现在是**Ready / Not Started /
 Unauthorized**；本gate只修改canonical docs并同步transaction/navigation，没有修改kernel/app/wrapper实现，也没有
 运行build、KUnit、QEMU、BusyBox、LTP、LA64或hardware test。本轮在解析关闭后停止，不自动激活Stage 4。
+
+## Stage 4 activation and first candidate - 2026-07-24
+
+**Authorization / preflight:** 用户明确授权以本轮唯一GOAL完成Stage 4，一个不拆checkpoint的最终candidate，关闭后
+没有下一stage。实现从`3249034c`开始；preflight重读R1、canonical第9节、tracking/register、transaction、五个
+Active data-plane IDs、四个Not Cut Over IDs和全部Preserve contracts。live owner确认原路线不需要generic VFS、
+topology membership、Signal pending/generation/delivery、jobctl truth、driver/devfs或rootfs manifest扩展，因此Stage 4
+进入**Active**，`TTY-JOBCTL-CUTOVER`继续Not Cut Over。
+
+**Candidate:** Terminal guard内形成无分配`VINTR/VQUIT/VSUSP` effect，worker guards-out经relation/foreground
+capability发送`SIGINT/SIGQUIT/SIGTSTP`；TTY read在每次consume前与blocking wait后重验caller/relation，actionable
+`SIGTTIN`发送caller process group并返回idempotent restart，blocked/ignored或无foreground返回`EIO`；changed
+`TIOCSWINSZ`只在commit后对live foreground发送一次`SIGWINCH`。Signal disposition helper只接受
+`SIGTTIN/SIGTTOU`；新增counter纯诊断，不参与行为。`tty-test`、wrapper与acceptance checklist追加定向matrix、
+显式`setsid -> TIOCSCTTY -> foreground -> ash -i` launcher、auto ash oracle和人工jobctl mode。
+
+## Stage 4 first RV64 matrix and approved manifest expansion - 2026-07-24
+
+**Evidence:** `just app build tty-test --arch riscv64`与repository RV64 kernel build通过。首次完整auto wrapper的239项
+KUnit全部通过；Stage 3/data-plane、VINTR/VQUIT/VSUSP、blocked/ignored background read、changed-only winsize和
+detach-no-effect均PASS。actionable background read由parent观察到`SIGTTIN` Stopped，foreground切换与`SIGCONT`
+成功，但child最终为`Exited(1)`；新增阶段日志把失败定位为恢复后的read返回`EINTR`。失败路径一度未reclaim
+foreground，导致后续vi等待；QEMU已由harness cleanup终止，没有残留进程。日志为`build/tty-stage4-rv64.log`，
+该失败运行不是cutover evidence。
+
+**Root cause / stop:** TTY FileOps已经正确返回`RestartSyscall::Idempotent`。Signal `arbitrate_user_entry()`在首轮
+`handle_signals()`前对restart option执行`take()`；conditional default-stop提交jobctl stop并进入mandatory gate，
+但短命restart capability没有跨`UserEntryOutcome::Recheck`保留。直接在default-stop分支无条件恢复会绕过恢复后
+custom `SIGCONT` handler的live `SA_RESTART`语义。问题要求修改原manifest明确排除的
+`anemone-kernel/src/task/sig/delivery.rs`，因此实现按第9.5节停止并上报。
+
+**Expansion approval:** 用户审阅unix-jobctl影响后明确批准该精确扩展。canonical第12.3节与第9.6节现在只允许
+Signal-owned、trap-return-local restart capability跨jobctl park保留；禁止把restart写入ThreadGroup/jobctl/Signal
+pending、禁止让`SIGCONT` wake携带permit，custom handler仍由live `SA_RESTART`决定。R1 target、owner、ABI、
+visible semantics、acceptance和cutover unit不变，不产生R2。后续验证在原Stage 4 floor外增加unix-jobctl
+focused/KUnit与Signal/user-entry source audit；全部证据闭合前四个ID整体Not Cut Over。
+
+## Stage 4 automated floor and user-evidence handoff - 2026-07-24
+
+**Corrections:** 第一轮ash自动oracle完整完成`Ctrl-Z -> jobs -> fg -> Ctrl-C -> exit`，但launcher错误要求
+interactive shell必须`Exited(0)`；BusyBox ash的无参数`exit`继承刚被Ctrl-C中断的foreground command状态130，
+在当前signed wait wrapper中显示为`Exited(-126)`。launcher现接受任意正常`WStatus::Exited(_)`，仍拒绝signal
+termination与bounded-wait失败，并以关键注释记录该ABI/测试判断。另一次运行在BusyBox vi中因ESC与`:wq`的
+50ms边界抖动超时；wrapper只把ESC后的隔离窗口增至200ms，没有改变guest语义或缩小oracle。
+
+**Automated evidence:** `build/tty-stage4-rv64.log`记录base `3249034c`、RV64
+`qemu-virt-rv64-pretest`、kernel SHA-256
+`b157b6f36c3a413283d86a827c60f777554806a21da5f5b98eb921ec7df7554e`、BusyBox SHA-256
+`fd9cb9dc66ba740dc94b055b564de0597453adfceef9be158b3774ca58b95241`。239项KUnit全部通过，TTY matrix为
+`TTYTEST:SUMMARY:PASS:45`，host byte checks、BusyBox vi与ash job-control oracle全部PASS，QEMU正常关机。
+`build/tty-stage4-jobctl-regression-rv64.log`中的19项既有`jobctl-test` case全部通过；附带signal/wait LTP因测试盘
+缺少executable而`attempted=0`，明确不是LTP通过证据。
+
+**Audit / review:** restart capability仍只存在于当前trap-return arbitration局部值；`Recheck`只由真实
+user-entry park返回，`SIGCONT`只提供重扫机会，custom handler继续由live `SA_RESTART`消费或取消restart。
+ThreadGroup phase/epoch/exposure/report、Signal pending/generation、ProcessGroup membership、ordinary wait结果和
+architecture API均未修改。Terminal/relation guard在Signal/topology调用前释放；未发现global/opener/recent-reader
+PGID、第二relation/foreground cache、persistent effect queue、polling watchdog、success stub或test-only injection。
+
+对抗review随后发现一个Keter：`check_read_access()`把`TtyCaller::current()`的所有`Err`都解释为kernel-internal
+caller并`Ok(())`，而user ThreadGroup的terminal lifecycle或topology revalidation失败也走同一错误值，存在
+background user reader fail-open并消费input的窗口。修复在既有`task/jobctl/terminal.rs`窄接口内新增
+`current_user_or_kernel()`：仅KThread返回`Ok(None)`，user caller构造/重验失败继续作为错误向FileOps传播。
+该修复不增加状态、不修改topology owner或public API，仍在Stage 4 manifest内。修复后重新运行完整RV64 auto
+wrapper：239项KUnit、TTY 45/45、BusyBox vi/ash和host byte oracle全部PASS，kernel SHA-256更新为
+`b157b6f36c3a413283d86a827c60f777554806a21da5f5b98eb921ec7df7554e`；重新运行pretest wrapper，19项
+`jobctl-test`全部PASS。辅助对抗review复核其余lock/bypass/owner边界后，代码层final review为
+0 Apollyon / 0 Keter / 0 Euclid。
+
+**Validation:** `just fmt --check`、`just app build tty-test --arch riscv64`、
+`just app build jobctl-test --arch riscv64`、`mdbook build docs`与`git diff --check`通过。完整auto与focused runtime
+如上通过；LA64、hardware和LTP均Not Run。
+
+**Handoff / stop:** 修复后的agent-run floor已经闭合，Stage 4转为**Active / Awaiting User Evidence**。下一步只能
+由用户在同一candidate、platform、BusyBox和测试盘输入上运行`--mode jobctl`并完成冻结checklist。证据回传前不执行
+`TTY-JOBCTL-CUTOVER`，不修改current contracts/register，不关闭RFC/transaction，也不创建Stage 4 checkpoint commit。
+
+## Stage 4 first manual attempt and harness correction - 2026-07-24
+
+**User-run evidence:** 用户首次执行`--mode jobctl`时尚未输入完第一条命令，guest即自动结束；
+`build/tty-stage4-rv64-jobctl.log`在不完整的`/bin/busy...`输入后直接记录
+`TTYTEST:FAIL:manual-ash-jobctl:5`和失败汇总。该运行未执行冻结checklist，不是TTY/job-control acceptance evidence，
+四个ID继续整体Not Cut Over。
+
+**Root cause / correction:** 人工ash launcher错误复用了自动oracle的`CHILD_WAIT_RETRIES=300`与10ms tick，约3秒
+deadline后`wait_child_bounded()`主动kill/reap仍在交互的ash，随后harness汇总并关机。修复保持自动ash的有界deadline，
+人工ash则阻塞等待用户显式`exit`；新的blocking helper仍使用exact-child selector并在异常返回时cleanup child。修改只
+涉及既有Stage 4 manifest中的`anemone-apps/tty-test/src/main.rs`，不改变target、owner、ABI、visible semantics或
+acceptance boundary。
+
+**Handoff:** 修复后必须先重跑格式/app build与完整RV64 auto wrapper，确认自动oracle deadline未回归；随后用户重新
+执行完整人工checklist。两层证据都通过前Stage 4保持**Active / Awaiting User Evidence**，不执行
+`TTY-JOBCTL-CUTOVER`、不修改current contracts/register、不关闭RFC/transaction，也不创建checkpoint commit。
+
+**Auto regression correction:** 首次重跑中239项KUnit与前44项TTY case通过，但auto ash在prompt出现后仍触发
+3秒deadline。日志显示ash marker与`# ` prompt被同一次host read合并；wrapper的`if/elif`状态机只把phase推进到
+`waiting-prompt`，没有在同一buffer重验已经可见的prompt，直到guest超时输出才发送第一条命令。修复让marker分支
+更新view后立即独立检查prompt，保留后续命令序列与bounded deadline不变。该运行属于host oracle chunking failure，
+不是kernel/TTY/job-control evidence。
+
+**Corrected auto evidence:** 修正后的`build/tty-stage4-rv64.log`记录同一base/candidate、BusyBox hash与
+kernel SHA-256 `b157b6f36c3a413283d86a827c60f777554806a21da5f5b98eb921ec7df7554e`；239项KUnit、TTY
+`TTYTEST:SUMMARY:PASS:45`、BusyBox vi/ash oracle与host byte checks全部通过，QEMU正常关机。自动deadline与既有
+Stage 4语义没有回归。当前只剩用户重新执行完整人工checklist，证据通过前仍不cutover、不关闭、不提交。
+
+**Approved docs write-set expansion:** cutover preflight发现现有`docs/src/contracts/tty/data-plane.md`仍持有
+四个job-control ID为Not Cut Over的pending-successor声明；若只创建新contract会让current-contract层形成矛盾真相。
+用户明确批准把该文件加入Stage 4 lifecycle docs manifest，只允许把两处pending状态改为已生效companion contract并
+同步最后核验日期。该扩展不改变R1 target、owner、ABI、visible semantics、acceptance或cutover unit；验证增加
+current-contract状态/链接audit、`git diff --check`与`mdbook build docs`。
+
+## Stage 4 user evidence, TTY-JOBCTL-CUTOVER, and closure - 2026-07-24
+
+**User-run evidence:** 用户在修正后的同一candidate上执行完整人工ash checklist。日志
+`build/tty-stage4-rv64-jobctl.log`记录base `3249034c`、platform `qemu-virt-rv64-pretest`、BusyBox SHA-256
+`fd9cb9dc66ba740dc94b055b564de0597453adfceef9be158b3774ca58b95241`、kernel SHA-256
+`b157b6f36c3a413283d86a827c60f777554806a21da5f5b98eb921ec7df7554e`与239项KUnit全部通过。冻结序列覆盖
+Ctrl-C、Ctrl-Z、`jobs`、`fg`、`bg`；background `cat`显示`Stopped (tty input)`，置于foreground后完成输入并由
+Ctrl-C终止，最终由用户显式`exit`退出。日志同时给出`TTYTEST:PASS:manual-ash-jobctl`、
+`TTYTEST:SUMMARY:PASS:2`与`TTY-HARNESS:PASS:jobctl`，且没有`job control turned off`。用户额外执行的`ls`、
+`busybox`、`clear`与`jobs`不改变验收断言或结论。
+
+**Integrated evidence and review:** agent-run `build/tty-stage4-rv64.log`证明239项KUnit、TTY 45/45、BusyBox
+vi/ash oracle、host byte checks与正常关机；`build/tty-stage4-jobctl-regression-rv64.log`证明19项既有
+`jobctl-test`全部通过。最终source、owner、lock、bypass、lifecycle与contract review为
+**0 Apollyon / 0 Keter / 0 Euclid**。LTP profile因测试盘缺少对应executable而`attempted=0`，不是LTP通过证据；
+LA64 compile/runtime与hardware均Not Run，RV64结果不得外推。
+
+**Atomic cutover:** 全部proof obligations闭合后，`TTY-JOBCTL-CUTOVER`作为单一unit原子激活
+`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`与`TTY-ABI-001`，current truth由
+[TTY controlling relation与job-control contract](../../contracts/tty/job-control.md)拥有；
+[TTY data-plane contract](../../contracts/tty/data-plane.md)同步改为Active companion，不形成并列或部分真相。
+Signal、ProcessGroup、ThreadGroup jobctl、task lifecycle与user-entry的Preserve owner均未改变。
+
+**Register disposition:** `ANE-20260527-PROCESS-GROUP-SESSION-STAGE1`为**Narrowed**：controlling TTY、
+foreground/background、terminal signals与non-orphan ash主路径已完成，residual保留relation-disassociation
+`SIGHUP/SIGCONT`、newly orphaned stopped group、orphaned-pgrp、`TOSTOP`与其它terminal-modifying operations。
+`ANE-20260604-IOCTL-LTP-STAGE1-GAPS`为**Narrowed**：serial TTY基础ioctl有focused RV64证据，但LTP未运行，
+PTY/devpts/ptmx及其它ioctl子域继续Active。`ANE-20260529-PROC-TGID-STAT-STAGE1`为**Unchanged**。
+
+**Final validation:** 当前closure diff通过`just fmt --check`、`just build`、
+`just app build tty-test --arch riscv64`、`just app build jobctl-test --arch riscv64`、`mdbook build docs`、
+`git diff --check`与`bash -n scripts/run-tty-test-rv64.sh`。受限sandbox内`just build`的lwext4 C编译曾以
+`Bad system call`失败；同一repository命令在获准的非sandbox环境通过。最终没有残留QEMU进程。runtime不重复运行，
+继续使用上文同一candidate的auto、focused与user-run日志。
+
+**Closure / stop:** Stage 4、RFC R1与本transaction全部记为**Closed / Completed**，两个TTY cutover均为
+Effective。最终验证结果记录于本次checkpoint；Stage 4之后没有下一stage，本轮不解析或进入任何后续gate。

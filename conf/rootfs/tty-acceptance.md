@@ -1,4 +1,4 @@
-# TTY Stage 2 RV64 acceptance rootfs
+# TTY RV64 acceptance rootfs
 
 `tty-acceptance-rv64.toml`只引用仓库内ignored staging路径，不拥有外部BusyBox或测试盘。
 使用者必须通过repository wrapper显式传入两份只读输入：
@@ -8,12 +8,12 @@
   --busybox /path/to/rv64-musl-busybox \
   --sdcard /path/to/rv64-sdcard-master \
   --mode auto \
-  --log build/tty-stage2-rv64.log
+  --log build/tty-stage4-rv64.log
 ```
 
 wrapper在复制前验证BusyBox是static RISC-V ELF、SHA-256为
 `fd9cb9dc66ba740dc94b055b564de0597453adfceef9be158b3774ca58b95241`；host有
-`qemu-riscv64`时预检版本及`ash/stty/vi/mount/stat/poweroff` applet，host没有qemu-user时，launcher在任何
+`qemu-riscv64`时预检版本及`ash/sleep/stty/vi/mount/stat/poweroff` applet，host没有qemu-user时，launcher在任何
 acceptance case前执行同一runtime核对并fail closed。原件不被修改；运行副本分别位于
 `build/tty-acceptance/staging/riscv64/busybox`与worktree根目录`sdcard-rv.img`。
 
@@ -32,3 +32,20 @@ launcher显示人工提示后：
 
 人工观察只证明RV64 user-run checklist，不能替代自动matrix；R1中LA64 compile/runtime为Not Run，RV64结果不得
 外推到LA64。
+
+## 人工ash job-control checklist
+
+使用与自动matrix相同的commit、platform、BusyBox路径和测试盘master，把`--mode`改为`jobctl`，日志写入
+`build/tty-stage4-rv64-jobctl.log`。出现`TTYTEST:MANUAL:ASH:launcher-ready`和ash prompt后：
+
+1. 确认启动期间没有`job control turned off`。
+2. 执行`/bin/busybox sleep 30`，按Ctrl-C；确认foreground job终止并返回prompt。
+3. 再执行`/bin/busybox sleep 30`，按Ctrl-Z，运行`jobs`，确认job为Stopped。
+4. 运行`fg`，再次按Ctrl-Z；运行`bg`与`jobs`，确认job在background继续运行。
+5. 运行`fg`并按Ctrl-C，确认终止job并返回prompt。
+6. 执行`/bin/busybox cat`，按Ctrl-Z后运行`bg`；确认background read因`SIGTTIN`再次停止且`jobs`可见Stopped。
+7. 运行`fg`，输入一行并回车，按Ctrl-C结束`cat`，确认输入没有被background read提前消费。
+8. 输入`exit`；launcher必须报告`TTYTEST:PASS:manual-ash-jobctl`，随后出现`TTYTEST:SUMMARY:PASS`并正常关机。
+
+这份人工证据只覆盖无法稳定自动判定的RV64 ash交互交接；它不替代自动signal/access matrix、KUnit、source audit，
+也不证明LA64、hardware或LTP。

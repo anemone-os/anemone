@@ -6,7 +6,6 @@
 
 ## Active
 
-- [TTY Subsystem](./2026-07-23-tty-subsystem.md)：R1 已接受；Stage 0至Stage 3已关闭，`TTY-DATA-CUTOVER`建立五个Active data-plane contract ID。relation/job-control四个ID与`TTY-JOBCTL-CUTOVER`仍Not Cut Over；Stage 4已解析为一个不拆checkpoint的Ready最终stage，尚未授权或激活。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
@@ -24,6 +23,7 @@
 
 ## Completed
 
+- [TTY Subsystem](./2026-07-23-tty-subsystem.md)：Stage 0至Stage 4、R1与transaction已关闭；`TTY-DATA-CUTOVER`和`TTY-JOBCTL-CUTOVER`原子建立九个Active TTY contract ID。RV64自动、unix-jobctl focused与用户人工ash evidence通过；LA64、hardware和LTP未运行。
 - [IOCTL Loop](./2026-06-04-ioctl-loop.md)：VFS ioctl 分发、统一 block ioctl、静态 loop 设备池与第一阶段 loop ioctl 已完成；扩展 LTP 缺口由 register 跟踪。
 - [Unix Job Control](./2026-07-20-unix-jobctl.md)
 - [Sched Dynamic Attributes](./2026-07-15-sched-dynamic-attributes.md)

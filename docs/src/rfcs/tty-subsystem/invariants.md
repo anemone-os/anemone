@@ -1,11 +1,11 @@
 # TTY Subsystem 目标与不变量
 
-**状态：** Accepted Target
-**最后更新：** 2026-07-23
+**状态：** R1 / Closed / Effective via `TTY-DATA-CUTOVER` and `TTY-JOBCTL-CUTOVER`
+**最后更新：** 2026-07-24
 **父 RFC：** [RFC-20260722-tty-subsystem](./index.md)
 **适用修订：** R1
 
-本文定义本 RFC 的 accepted contract delta、target invariants，以及只服务本次迁移、checkpoint 和验收的 RFC-local proof obligations。当前已经生效的共享规则仍以 `docs/src/contracts/` 中的稳定 ID 为唯一权威；`TTY-DATA-CUTOVER` 已使 `TTY-PORT-001`、`TTY-TERM-001`、`TTY-INPUT-001`、`TTY-OUTPUT-001` 与 `TTY-ENDPOINT-001` 生效，其 current truth 见 [TTY data-plane contract](../../contracts/tty/data-plane.md)。`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001` 仍只是 R1 accepted target、尚未 cut over。R1 保持 R0 的功能、owner、ABI、visible semantics 与 cutover unit，只把本 RFC 的 build/runtime acceptance evidence 收窄为 RV64。
+本文保留本 RFC 的 accepted contract delta、target invariants，以及只服务迁移、checkpoint 和验收的 RFC-local proof obligations。两个cutover均已完成，当前生效的共享规则以 `docs/src/contracts/` 中的稳定 ID 为唯一权威：`TTY-PORT-001`、`TTY-TERM-001`、`TTY-INPUT-001`、`TTY-OUTPUT-001` 与 `TTY-ENDPOINT-001` 见 [TTY data-plane contract](../../contracts/tty/data-plane.md)，`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001` 见 [TTY job-control contract](../../contracts/tty/job-control.md)。本页不成为并列current contract。R1 保持 R0 的功能、owner、ABI、visible semantics 与 cutover unit，只把本 RFC 的 build/runtime acceptance evidence 收窄为 RV64。
 
 ## 规则分类
 
@@ -15,7 +15,7 @@
 
 ## Contract Impact
 
-`TTY-DATA-CUTOVER` 与 `TTY-JOBCTL-CUTOVER` 是独立语义切换单元。[迁移实施计划](./implementation.md)负责按滚动gate解析具体stage、write set、验证floor、停止条件和transaction evidence；前者已经在 Stage 2 closure 生效，后者仍为 Not Cut Over。
+`TTY-DATA-CUTOVER` 与 `TTY-JOBCTL-CUTOVER` 是独立语义切换单元。[迁移实施计划](./implementation.md)负责按滚动gate解析具体stage、write set、验证floor、停止条件和transaction evidence；前者已在Stage 2 closure生效，后者已在Stage 4 closure生效。
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | 生效 Gate |
 | --- | --- | --- | --- | --- |
@@ -24,10 +24,10 @@
 | `TTY-INPUT-001` | Introduce | [Active](../../contracts/tty/data-plane.md#tty-input-001--input-ownershiprecord-boundary与readiness同源) | RX handoff、discipline、read 与 readiness 保持有序、有界、无 lost wake 且不复制 input truth | `TTY-DATA-CUTOVER`（Effective） |
 | `TTY-OUTPUT-001` | Introduce | [Active](../../contracts/tty/data-plane.md#tty-output-001--输出按用户byte计量并由port最终序列化) | TTY 输出是 byte stream；console/TTY 共用 UART 时由 driver 唯一序列化 TX | `TTY-DATA-CUTOVER`（Effective） |
 | `TTY-ENDPOINT-001` | Introduce | [Active](../../contracts/tty/data-plane.md#tty-endpoint-001--endpoint-publication是稳定的单向transaction) | serial endpoint 在完整初始化后单向发布，名称与 identity 稳定到重启 | `TTY-DATA-CUTOVER`（Effective） |
-| `TTY-REL-001` | Introduce | None（尚未生效） | TTY relation owner 唯一持有 session-terminal binding 与 foreground selector | `TTY-JOBCTL-CUTOVER` |
-| `TTY-JOBCTL-001` | Introduce | None（尚未生效） | terminal access 与 signal generation 通过 guards-out、identity-revalidated handoff 接入现有 topology/Signal/jobctl owner | `TTY-JOBCTL-CUTOVER` |
-| `TTY-LIFE-001` | Introduce | None（尚未生效） | relation cleanup 先撤销可发现性，再完成 owner-local wake/drop；首版不生成 disassociation signal | `TTY-JOBCTL-CUTOVER` |
-| `TTY-ABI-001` | Introduce | None（尚未生效） | 真实交付 BusyBox ash/vi 所需的 `/dev/tty*`、termios、iomux 与常用 foreground job-control 包络 | `TTY-JOBCTL-CUTOVER` |
+| `TTY-REL-001` | Introduce | [Active](../../contracts/tty/job-control.md#tty-rel-001--controlling-terminal-relation是唯一双向binding-truth) | TTY relation owner 唯一持有 session-terminal binding 与 foreground selector | `TTY-JOBCTL-CUTOVER`（Effective） |
+| `TTY-JOBCTL-001` | Introduce | [Active](../../contracts/tty/job-control.md#tty-jobctl-001--terminal-policy只产生经重验的guards-out-effect) | terminal access 与 signal generation 通过 guards-out、identity-revalidated handoff 接入现有 topology/Signal/jobctl owner | `TTY-JOBCTL-CUTOVER`（Effective） |
+| `TTY-LIFE-001` | Introduce | [Active](../../contracts/tty/job-control.md#tty-life-001--relation-cleanup先撤销可发现性再执行外部效果) | relation cleanup 先撤销可发现性，再完成 owner-local wake/drop；首版不生成 disassociation signal | `TTY-JOBCTL-CUTOVER`（Effective） |
+| `TTY-ABI-001` | Introduce | [Active](../../contracts/tty/job-control.md#tty-abi-001--首版兼容包络必须真实可观察) | 真实交付 BusyBox ash/vi 所需的 `/dev/tty*`、termios、iomux 与常用 foreground job-control 包络 | `TTY-JOBCTL-CUTOVER`（Effective） |
 | [`SIGNAL-PENDING-001/002`](../../contracts/signal/pending-routing.md) | Preserve | task-private / ThreadGroup-shared pending各有唯一owner，group-directed publication与member notification分离 | terminal-generated ordinary occurrence只通过现有Signal pending owner发布；TTY不保存occurrence或以wake结果驱动policy | 全程 |
 | [`SIGNAL-ACTION-001/002`](../../contracts/signal/pending-routing.md) | Preserve | live disposition拥有ignored admission与ordinary action selection；条件stop只在DefaultStop选择后进入jobctl | TTY只请求Signal owner判断blocked/ignored/actionable并生成occurrence，不自行提交ignore、handler、default-stop或restart后的action | 全程 |
 | [`PGRP-SIGNAL-001/002`](../../contracts/task/process-group-signaling.md) | Preserve | ProcessGroup 只选择成员，每个 ThreadGroup 独立接受 occurrence | TTY 只提交准确的 process-group signal request，不取得 membership 或 signal truth | 全程 |

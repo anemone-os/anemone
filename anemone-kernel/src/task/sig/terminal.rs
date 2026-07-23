@@ -5,14 +5,17 @@ use crate::{prelude::*, task::sig::SigNo};
 /// This deliberately exports neither the task mask nor the shared disposition;
 /// both remain Signal truth and are sampled only for this one decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TtySigttouDisposition {
+pub(crate) enum TtyJobControlDisposition {
     BlockedOrIgnored,
     Actionable,
 }
 
 impl Task {
-    pub(crate) fn tty_sigttou_disposition(&self) -> TtySigttouDisposition {
-        let no = SigNo::SIGTTOU;
+    pub(crate) fn tty_job_control_disposition(&self, no: SigNo) -> TtyJobControlDisposition {
+        assert!(
+            matches!(no, SigNo::SIGTTIN | SigNo::SIGTTOU),
+            "TTY disposition query used for a non-job-control signal"
+        );
         if self.is_current_sig_mask_blocking(no)
             || self
                 .sig_disposition
@@ -21,9 +24,9 @@ impl Task {
                 .action
                 .is_ignored()
         {
-            TtySigttouDisposition::BlockedOrIgnored
+            TtyJobControlDisposition::BlockedOrIgnored
         } else {
-            TtySigttouDisposition::Actionable
+            TtyJobControlDisposition::Actionable
         }
     }
 }

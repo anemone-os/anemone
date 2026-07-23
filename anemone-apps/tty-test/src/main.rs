@@ -1,7 +1,10 @@
 #![no_std]
 #![no_main]
 
-use core::str;
+use core::{
+    str,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use anemone_rs::{
     abi::{
@@ -65,10 +68,23 @@ const CHILD_WAIT_TICK: TimeSpec = TimeSpec {
     tv_sec: 0,
     tv_nsec: 10_000_000,
 };
+const EFFECT_SETTLE: TimeSpec = TimeSpec {
+    tv_sec: 0,
+    tv_nsec: 500_000_000,
+};
 const UNKNOWN_TTY_IOCTL: u32 = 0x54ff;
 const STDIN_FILENO: Fd = anemone_rs::abi::fs::linux::STDIN_FILENO as Fd;
 const STDOUT_FILENO: Fd = anemone_rs::abi::fs::linux::STDOUT_FILENO as Fd;
 const STDERR_FILENO: Fd = anemone_rs::abi::fs::linux::STDERR_FILENO as Fd;
+
+static TERMINAL_SIGNAL_COUNT: AtomicUsize = AtomicUsize::new(0);
+static TERMINAL_SIGNAL_LAST: AtomicUsize = AtomicUsize::new(0);
+
+#[anemone_rs::signal_handler]
+fn terminal_signal_handler(signo: SigNo) {
+    TERMINAL_SIGNAL_LAST.store(signo.as_usize(), Ordering::SeqCst);
+    TERMINAL_SIGNAL_COUNT.fetch_add(1, Ordering::SeqCst);
+}
 
 #[derive(Clone, Copy)]
 struct Baseline {
@@ -254,6 +270,36 @@ fn wait_child_bounded(pid: u32, options: WaitOptions) -> Result<WStatus, Errno> 
     Err(EIO)
 }
 
+fn wait_child_blocking(pid: u32) -> Result<WStatus, Errno> {
+    let mut status = WStatusRaw::EMPTY;
+    match wait4(
+        WaitFor::ChildWithTgid(pid),
+        Some(&mut status),
+        WaitOptions::empty(),
+    ) {
+        Ok(Some(waited)) if waited == pid => Ok(status.read()),
+        Ok(Some(_)) | Ok(None) => {
+            kill_and_reap_child_bounded(pid);
+            Err(EIO)
+        },
+        Err(errno) => {
+            kill_and_reap_child_bounded(pid);
+            Err(errno)
+        },
+    }
+}
+
+fn pipe_notify(fd: Fd) -> Result<(), Errno> {
+    expect(write(fd, &[1])? == 1)?;
+    close(fd)
+}
+
+fn pipe_wait(fd: Fd) -> Result<(), Errno> {
+    let mut byte = [0u8; 1];
+    expect(read(fd, &mut byte)? == 1 && byte[0] == 1)?;
+    close(fd)
+}
+
 fn finish_child(result: Result<(), Errno>) -> ! {
     exit(if result.is_ok() { 0 } else { 1 })
 }
@@ -284,8 +330,12 @@ fn expect_open_dev_tty(errno: Errno) -> Result<(), Errno> {
 }
 
 fn install_sigttou_ignore() -> Result<(), Errno> {
+    install_signal_ignore(SigNo::SIGTTOU)
+}
+
+fn install_signal_ignore(signo: SigNo) -> Result<(), Errno> {
     sigaction(
-        SigNo::SIGTTOU,
+        signo,
         Some(&SigAction {
             sighandler: linux_signal::SIG_IGN as *const (),
             sa_flags: 0,
@@ -296,10 +346,29 @@ fn install_sigttou_ignore() -> Result<(), Errno> {
     )
 }
 
-fn sigttou_set() -> SigSet {
+fn signal_set(signo: SigNo) -> SigSet {
     SigSet {
-        bits: 1u64 << (SigNo::SIGTTOU.as_usize() - 1),
+        bits: 1u64 << (signo.as_usize() - 1),
     }
+}
+
+fn install_terminal_signal_handler(signo: SigNo) -> Result<(), Errno> {
+    install_terminal_signal_handler_with_flags(signo, 0)
+}
+
+fn install_terminal_signal_handler_with_flags(signo: SigNo, flags: u64) -> Result<(), Errno> {
+    TERMINAL_SIGNAL_COUNT.store(0, Ordering::SeqCst);
+    TERMINAL_SIGNAL_LAST.store(0, Ordering::SeqCst);
+    sigaction(
+        signo,
+        Some(&SigAction {
+            sighandler: terminal_signal_handler as *const (),
+            sa_flags: flags,
+            sa_restorer: core::ptr::null(),
+            sa_mask: SigSet { bits: 0 },
+        }),
+        None,
+    )
 }
 
 fn test_controlling_node_without_relation(_baseline: &Baseline) -> Result<(), Errno> {
@@ -449,9 +518,11 @@ fn background_reclaim(disposition: BackgroundDisposition) -> Result<(), Errno> {
             let pid = getpid()?;
             setpgid(0, 0)?;
             match disposition {
-                BackgroundDisposition::Blocked => {
-                    sigprocmask(SigProcMaskHow::Block, Some(&sigttou_set()), None)?
-                },
+                BackgroundDisposition::Blocked => sigprocmask(
+                    SigProcMaskHow::Block,
+                    Some(&signal_set(SigNo::SIGTTOU)),
+                    None,
+                )?,
                 BackgroundDisposition::Ignored => install_sigttou_ignore()?,
             }
             tcsetpgrp(fd, pid as i32)
@@ -593,6 +664,423 @@ fn attach_and_exit_body() -> Result<(), Errno> {
 fn test_exit_cleanup_reuse(_baseline: &Baseline) -> Result<(), Errno> {
     run_new_session(attach_and_exit_body)?;
     run_new_session(attach_and_exit_body)
+}
+
+#[derive(Clone, Copy)]
+enum ControlSignalCase {
+    Interrupt,
+    Quit,
+    Suspend,
+}
+
+impl ControlSignalCase {
+    fn signo(self) -> SigNo {
+        match self {
+            Self::Interrupt => SigNo::SIGINT,
+            Self::Quit => SigNo::SIGQUIT,
+            Self::Suspend => SigNo::SIGTSTP,
+        }
+    }
+
+    fn marker(self) -> &'static str {
+        match self {
+            Self::Interrupt => "isig-int",
+            Self::Quit => "isig-quit",
+            Self::Suspend => "isig-suspend",
+        }
+    }
+}
+
+fn control_signal_body(case: ControlSignalCase) -> Result<(), Errno> {
+    let leader = getpid()?;
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    install_sigttou_ignore()?;
+    let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
+    let child = match fork()? {
+        Some(pid) => pid,
+        None => finish_child((|| {
+            close(ready_read)?;
+            setpgid(0, 0)?;
+            if !matches!(case, ControlSignalCase::Suspend) {
+                install_terminal_signal_handler(case.signo())?;
+            }
+            pipe_notify(ready_write)?;
+            loop {
+                if TERMINAL_SIGNAL_COUNT.load(Ordering::SeqCst) != 0 {
+                    return expect(
+                        TERMINAL_SIGNAL_COUNT.load(Ordering::SeqCst) == 1
+                            && TERMINAL_SIGNAL_LAST.load(Ordering::SeqCst)
+                                == case.signo().as_usize(),
+                    );
+                }
+                sched_yield()?;
+            }
+        })()),
+    };
+    close(ready_write)?;
+    pipe_wait(ready_read)?;
+    tcsetpgrp(fd, child as i32)?;
+    ready(case.marker());
+
+    let observed = wait_child_bounded(
+        child,
+        if matches!(case, ControlSignalCase::Suspend) {
+            WaitOptions::UNTRACED
+        } else {
+            WaitOptions::empty()
+        },
+    )?;
+    let valid = if matches!(case, ControlSignalCase::Suspend) {
+        let valid = matches!(
+            observed,
+            WStatus::Stopped(signo) if signo == SigNo::SIGTSTP.as_usize() as i8
+        );
+        let _ = kill(child as i32, SigNo::SIGKILL);
+        let reaped = wait_child_bounded(child, WaitOptions::empty())?;
+        valid && matches!(reaped, WStatus::Signal(_))
+    } else {
+        matches!(observed, WStatus::Exited(0))
+    };
+    tcsetpgrp(fd, leader as i32)?;
+    expect(valid)
+}
+
+fn interrupt_signal_body() -> Result<(), Errno> {
+    control_signal_body(ControlSignalCase::Interrupt)
+}
+
+fn quit_signal_body() -> Result<(), Errno> {
+    control_signal_body(ControlSignalCase::Quit)
+}
+
+fn suspend_signal_body() -> Result<(), Errno> {
+    control_signal_body(ControlSignalCase::Suspend)
+}
+
+fn test_interrupt_signal(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(interrupt_signal_body)
+}
+
+fn test_quit_signal(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(quit_signal_body)
+}
+
+fn test_suspend_signal(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(suspend_signal_body)
+}
+
+#[derive(Clone, Copy)]
+enum BackgroundRestartCase {
+    Default,
+    HandlerNoRestart,
+    HandlerRestart,
+}
+
+impl BackgroundRestartCase {
+    fn marker(self) -> &'static str {
+        match self {
+            Self::Default => "background-sigttin",
+            Self::HandlerNoRestart => "background-sigttin-handler-no-restart",
+            Self::HandlerRestart => "background-sigttin-handler-restart",
+        }
+    }
+
+    fn input(self) -> &'static [u8] {
+        match self {
+            Self::Default => b"background-read\n",
+            Self::HandlerNoRestart => b"background-no-restart\n",
+            Self::HandlerRestart => b"background-restart\n",
+        }
+    }
+}
+
+fn background_sigttin_body(case: BackgroundRestartCase) -> Result<(), Errno> {
+    let leader = getpid()?;
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    install_sigttou_ignore()?;
+
+    let child = match fork()? {
+        Some(pid) => pid,
+        None => finish_child((|| {
+            setpgid(0, 0)?;
+            TERMINAL_SIGNAL_COUNT.store(0, Ordering::SeqCst);
+            TERMINAL_SIGNAL_LAST.store(0, Ordering::SeqCst);
+            match case {
+                BackgroundRestartCase::Default => {},
+                BackgroundRestartCase::HandlerNoRestart => {
+                    install_terminal_signal_handler_with_flags(SigNo::SIGCONT, 0)?;
+                },
+                BackgroundRestartCase::HandlerRestart => {
+                    install_terminal_signal_handler_with_flags(
+                        SigNo::SIGCONT,
+                        linux_signal::SA_RESTART,
+                    )?;
+                },
+            }
+            ready(case.marker());
+            let mut input = [0u8; 32];
+            let count = match case {
+                BackgroundRestartCase::HandlerNoRestart => {
+                    expect(matches!(read(fd, &mut input), Err(EINTR)))?;
+                    read(fd, &mut input)?
+                },
+                BackgroundRestartCase::Default | BackgroundRestartCase::HandlerRestart => {
+                    read(fd, &mut input)?
+                },
+            };
+            expect(&input[..count] == case.input())?;
+            if matches!(case, BackgroundRestartCase::Default) {
+                expect(TERMINAL_SIGNAL_COUNT.load(Ordering::SeqCst) == 0)
+            } else {
+                expect(
+                    TERMINAL_SIGNAL_COUNT.load(Ordering::SeqCst) == 1
+                        && TERMINAL_SIGNAL_LAST.load(Ordering::SeqCst) == SigNo::SIGCONT.as_usize(),
+                )
+            }
+        })()),
+    };
+    let mut child_reaped = false;
+    let mut child_foreground = false;
+    let result = (|| {
+        let stopped = wait_child_bounded(child, WaitOptions::UNTRACED)?;
+        if !matches!(
+            stopped,
+            WStatus::Stopped(signo) if signo == SigNo::SIGTTIN.as_usize() as i8
+        ) {
+            println!("TTYTEST:DETAIL:{}-stop:{stopped:?}", case.marker());
+            return Err(EIO);
+        }
+        if let Err(errno) = tcsetpgrp(fd, child as i32) {
+            println!("TTYTEST:DETAIL:{}-foreground:{errno}", case.marker());
+            return Err(errno);
+        }
+        child_foreground = true;
+        if let Err(errno) = kill(child as i32, SigNo::SIGCONT) {
+            println!("TTYTEST:DETAIL:{}-continue:{errno}", case.marker());
+            return Err(errno);
+        }
+        let reaped = wait_child_bounded(child, WaitOptions::empty())?;
+        child_reaped = true;
+        if !matches!(reaped, WStatus::Exited(0)) {
+            println!("TTYTEST:DETAIL:{}-reap:{reaped:?}", case.marker());
+            return Err(EIO);
+        }
+        Ok(())
+    })();
+
+    if !child_reaped {
+        kill_and_reap_child_bounded(child);
+    }
+    let reclaim = if child_foreground {
+        tcsetpgrp(fd, leader as i32)
+    } else {
+        Ok(())
+    };
+    match (result, reclaim) {
+        (Err(errno), _) => Err(errno),
+        (Ok(()), Err(errno)) => {
+            println!("TTYTEST:DETAIL:{}-reclaim:{errno}", case.marker());
+            Err(errno)
+        },
+        (Ok(()), Ok(())) => Ok(()),
+    }
+}
+
+fn background_read_eio(disposition: BackgroundDisposition) -> Result<(), Errno> {
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    match fork()? {
+        Some(pid) => expect(matches!(
+            wait_child_bounded(pid, WaitOptions::empty())?,
+            WStatus::Exited(0)
+        )),
+        None => finish_child((|| {
+            setpgid(0, 0)?;
+            match disposition {
+                BackgroundDisposition::Blocked => sigprocmask(
+                    SigProcMaskHow::Block,
+                    Some(&signal_set(SigNo::SIGTTIN)),
+                    None,
+                )?,
+                BackgroundDisposition::Ignored => install_signal_ignore(SigNo::SIGTTIN)?,
+            }
+            let mut byte = [0u8; 1];
+            match read(fd, &mut byte) {
+                Err(EIO) => Ok(()),
+                _ => Err(EIO),
+            }
+        })()),
+    }
+}
+
+fn background_read_blocked_body() -> Result<(), Errno> {
+    background_read_eio(BackgroundDisposition::Blocked)
+}
+
+fn background_read_ignored_body() -> Result<(), Errno> {
+    background_read_eio(BackgroundDisposition::Ignored)
+}
+
+fn test_background_sigttin(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(|| background_sigttin_body(BackgroundRestartCase::Default))
+}
+
+fn test_background_sigttin_handler_no_restart(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(|| background_sigttin_body(BackgroundRestartCase::HandlerNoRestart))
+}
+
+fn test_background_sigttin_handler_restart(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(|| background_sigttin_body(BackgroundRestartCase::HandlerRestart))
+}
+
+fn test_background_read_blocked(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(background_read_blocked_body)
+}
+
+fn test_background_read_ignored(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(background_read_ignored_body)
+}
+
+fn winsize_signal_body() -> Result<(), Errno> {
+    let leader = getpid()?;
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    install_sigttou_ignore()?;
+    install_terminal_signal_handler(SigNo::SIGWINCH)?;
+    let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
+    let (seen_read, seen_write) = pipe2(PipeFlags::empty())?;
+    let (finish_read, finish_write) = pipe2(PipeFlags::empty())?;
+    let child = match fork()? {
+        Some(pid) => pid,
+        None => finish_child((|| {
+            close(ready_read)?;
+            close(seen_read)?;
+            close(finish_write)?;
+            setpgid(0, 0)?;
+            TERMINAL_SIGNAL_COUNT.store(0, Ordering::SeqCst);
+            TERMINAL_SIGNAL_LAST.store(0, Ordering::SeqCst);
+            pipe_notify(ready_write)?;
+            while TERMINAL_SIGNAL_COUNT.load(Ordering::SeqCst) == 0 {
+                sched_yield()?;
+            }
+            pipe_notify(seen_write)?;
+            pipe_wait(finish_read)?;
+            nanosleep(EFFECT_SETTLE)?;
+            expect(
+                TERMINAL_SIGNAL_COUNT.load(Ordering::SeqCst) == 1
+                    && TERMINAL_SIGNAL_LAST.load(Ordering::SeqCst) == SigNo::SIGWINCH.as_usize(),
+            )
+        })()),
+    };
+    close(ready_write)?;
+    close(seen_write)?;
+    close(finish_read)?;
+    pipe_wait(ready_read)?;
+    tcsetpgrp(fd, child as i32)?;
+    let current = get_winsize(fd)?;
+    let changed = Winsize {
+        ws_row: current.ws_row.saturating_add(1),
+        ws_col: current.ws_col.saturating_add(1),
+        ws_xpixel: current.ws_xpixel,
+        ws_ypixel: current.ws_ypixel,
+    };
+    set_winsize(fd, &changed)?;
+    pipe_wait(seen_read)?;
+    set_winsize(fd, &changed)?;
+    pipe_notify(finish_write)?;
+    let reaped = wait_child_bounded(child, WaitOptions::empty())?;
+    tcsetpgrp(fd, leader as i32)?;
+    expect(
+        matches!(reaped, WStatus::Exited(0)) && TERMINAL_SIGNAL_COUNT.load(Ordering::SeqCst) == 0,
+    )
+}
+
+fn test_winsize_signal(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(winsize_signal_body)
+}
+
+fn detached_effect_body() -> Result<(), Errno> {
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    install_terminal_signal_handler(SigNo::SIGINT)?;
+    tiocnotty(fd)?;
+    let current = get_winsize(fd)?;
+    set_winsize(
+        fd,
+        &Winsize {
+            ws_row: current.ws_row.saturating_add(1),
+            ..current
+        },
+    )?;
+    ready("detached-no-effect");
+    nanosleep(EFFECT_SETTLE)?;
+    expect(TERMINAL_SIGNAL_COUNT.load(Ordering::SeqCst) == 0)
+}
+
+fn test_detached_effect(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(detached_effect_body)
+}
+
+enum InteractiveAshWait {
+    AutoDeadline,
+    UserExit,
+}
+
+fn launch_interactive_ash(marker: &str, wait: InteractiveAshWait) -> Result<(), Errno> {
+    println!("{marker}");
+    let child = match fork()? {
+        Some(pid) => pid,
+        None => {
+            let result = (|| {
+                setsid()?;
+                let fd = tty_serial(O_RDWR)?;
+                tiocsctty(fd, 0)?;
+                tcsetpgrp(fd, getpid()? as i32)?;
+                dup3(fd, STDIN_FILENO, 0)?;
+                dup3(fd, STDOUT_FILENO, 0)?;
+                dup3(fd, STDERR_FILENO, 0)?;
+                if fd > STDERR_FILENO {
+                    close(fd)?;
+                }
+                execve(BUSYBOX, &["busybox", "ash", "-i"], &["PATH=/bin"])?;
+                Ok(())
+            })();
+            finish_child(result)
+        },
+    };
+    // The manual checklist is deliberately user-paced: it must wait until the
+    // user exits ash, while the host-driven oracle keeps its bounded deadline.
+    let status = match wait {
+        InteractiveAshWait::AutoDeadline => wait_child_bounded(child, WaitOptions::empty())?,
+        InteractiveAshWait::UserExit => wait_child_blocking(child)?,
+    };
+    // Interactive ash inherits the status of the foreground command when
+    // `exit` has no explicit operand. After the oracle interrupts `sleep`, a
+    // normal shell exit is therefore commonly 130 (displayed as -126 by the
+    // signed wait-status wrapper). Only signal termination or timeout means
+    // the launcher/job-control lifecycle failed.
+    if !matches!(status, WStatus::Exited(_)) {
+        println!("TTYTEST:DETAIL:ash-exit:{status:?}");
+        return Err(EIO);
+    }
+    if let Err(errno) = run_new_session(attach_and_exit_body) {
+        println!("TTYTEST:DETAIL:ash-relation-reuse:{errno}");
+        return Err(errno);
+    }
+    Ok(())
+}
+
+fn test_busybox_ash_auto(_baseline: &Baseline) -> Result<(), Errno> {
+    launch_interactive_ash("@@TTY ASH auto-start@@", InteractiveAshWait::AutoDeadline)
+}
+
+fn test_busybox_ash_manual(_baseline: &Baseline) -> Result<(), Errno> {
+    launch_interactive_ash(
+        "TTYTEST:MANUAL:ASH:launcher-ready",
+        InteractiveAshWait::UserExit,
+    )
 }
 
 fn spawn_busybox(argv: &[&str]) -> Result<(), Errno> {
@@ -959,7 +1447,15 @@ fn test_busybox_identity(_baseline: &Baseline) -> Result<(), Errno> {
     let help = capture_busybox(&["busybox", "--help"])?;
     expect(contains_bytes(&help, b"BusyBox v1.33.1"))?;
     let applets = capture_busybox(&["busybox", "--list"])?;
-    let required_applets: [&[u8]; 6] = [b"ash", b"stty", b"vi", b"mount", b"stat", b"poweroff"];
+    let required_applets: [&[u8]; 7] = [
+        b"ash",
+        b"sleep",
+        b"stty",
+        b"vi",
+        b"mount",
+        b"stat",
+        b"poweroff",
+    ];
     for applet in required_applets {
         expect(contains_line(&applets, applet))?;
     }
@@ -1134,8 +1630,39 @@ fn run_auto(baseline: &Baseline) -> Results {
         baseline,
         test_exit_cleanup_reuse,
     );
+    results.case("isig-vintr-sigint", baseline, test_interrupt_signal);
+    results.case("isig-vquit-sigquit", baseline, test_quit_signal);
+    results.case("isig-vsusp-sigtstp", baseline, test_suspend_signal);
+    results.case("background-read-sigttin", baseline, test_background_sigttin);
+    results.case(
+        "background-read-sigttin-handler-no-restart",
+        baseline,
+        test_background_sigttin_handler_no_restart,
+    );
+    results.case(
+        "background-read-sigttin-handler-restart",
+        baseline,
+        test_background_sigttin_handler_restart,
+    );
+    results.case(
+        "background-read-blocked-eio",
+        baseline,
+        test_background_read_blocked,
+    );
+    results.case(
+        "background-read-ignored-eio",
+        baseline,
+        test_background_read_ignored,
+    );
+    results.case("winsize-sigwinch-on-change", baseline, test_winsize_signal);
+    results.case(
+        "detached-relation-no-effect",
+        baseline,
+        test_detached_effect,
+    );
     results.case("busybox-stty-roundtrip", baseline, test_busybox_stty);
     results.case("busybox-vi-auto", baseline, test_busybox_vi);
+    results.case("busybox-ash-auto", baseline, test_busybox_ash_auto);
     results
 }
 
@@ -1210,6 +1737,15 @@ fn run_manual_vi(baseline: &Baseline) -> Results {
     results
 }
 
+fn run_manual_jobctl(baseline: &Baseline) -> Results {
+    let mut results = Results::new();
+    results.case("busybox-identity", baseline, test_busybox_identity);
+    if results.failed == 0 {
+        results.case("manual-ash-jobctl", baseline, test_busybox_ash_manual);
+    }
+    results
+}
+
 fn selected_mode() -> Result<String, Errno> {
     let bytes = read_all(MODE_PATH)?;
     Ok(trim_ascii(&bytes)?.into())
@@ -1231,6 +1767,7 @@ fn main() -> Result<(), Errno> {
         Ok(()) => match selected_mode().as_deref() {
             Ok("auto") => run_auto(&baseline),
             Ok("vi") => run_manual_vi(&baseline),
+            Ok("jobctl") => run_manual_jobctl(&baseline),
             Ok(_) => {
                 println!("TTYTEST:FAIL:mode-invalid:{EINVAL}");
                 Results {
