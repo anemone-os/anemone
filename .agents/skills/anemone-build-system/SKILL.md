@@ -49,7 +49,8 @@ baseline explicitly owned by the QEMU provider. A QEMU-backed normative DTS is c
 action must not read normal selection, runtime binds, rootfs, disks, network backends, or physical
 firmware baselines, and it must never update a normative DTS. Treat DT delivery and authority as
 independent: an embedded DTS may still be a QEMU provider-derived baseline. Physical firmware
-baselines require explicit provenance, allowed differences, and a runtime-validation owner.
+baseline provenance, allowed differences, and revalidation responsibility require human review and
+must not be modeled as machine-maintained fields without a real consumer.
 
 When prose, examples, schemas, active configuration, and Rust code disagree, treat live deserialization and task code as authoritative. Re-read them instead of preserving a possibly stale fact in this skill.
 

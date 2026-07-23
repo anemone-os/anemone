@@ -4,7 +4,7 @@
 **Owners:** doruche, Codex
 **Area:** build system / configuration / platform / repository workflow
 **Canonical Plan:** [RFC-20260722-system-target-model](../../rfcs/system-target-model/index.md), [目标与不变量](../../rfcs/system-target-model/invariants.md), [迁移实施计划](../../rfcs/system-target-model/implementation.md)
-**Canonical Revision:** R1（R0初始接受；Stage 3期间完成DT authority renegotiation）
+**Canonical Revision:** R2（R0初始接受；Stage 3期间完成R1 DT authority renegotiation；Stage 3关闭后接受R2 metadata correction）
 **Current Phase:** Stage 1-3 Closed / Stage 4 Outline / Not Resolved
 
 ## Scope
@@ -22,7 +22,7 @@ schema、typed reference与loader，1B完成single resolver snapshot和build con
 
 ## Contract and register boundary
 
-本Stage不执行current-contract cutover。`BOOT-PROTOCOL-001`在R0中引入且未被R1改变的Refine保持pending
+本Stage不执行current-contract cutover。`BOOT-PROTOCOL-001`在R0中引入且未被R1/R2改变的Refine保持pending
 successor，现有rootfs metadata到ordinary `kernel_execve()`的effective baseline继续生效。2026-07-23 preflight读取
 register、open issues与current limitations，未发现与Stage 1冲突的active build/boot issue。
 
@@ -641,3 +641,34 @@ floor。
 **Contract / Exit:** 没有新增current-contract cutover；`BOOT-PROTOCOL-001` effective baseline与R1 pending
 successor不变。Checkpoint 3A和Stage 3关闭不激活、运行或解析`Stage 3 -> Stage 4 Implementation Resolution
 Gate`。
+
+## Post-Stage 3 R2 feedback correction - 2026-07-23
+
+**Status:** Closed；R2 Accepted for Implementation；Stage 1-3保持Closed，Stage 4保持Outline / Not
+Resolved。
+
+Stage 3关闭后的consumer审计发现，VisionFive `[dtb.firmware-baseline]`中的capture provenance、允许runtime
+差异和validation owner只被Platform parser、JSON Schema与单元测试读取。QEMU maintenance capability只由
+`authority + provider`决定，physical `provider = "firmware"`已经fail-closed；没有action使用这三个字段抓取、
+比较或批准physical runtime FDT。三个只有唯一合法值的typed声明不能证明capture来源，也不能执行板级或
+U-Boot变化后的人工复核。
+
+用户接受该结论为实现反馈。R2保留VisionFive DTS来自supported硬件经U-Boot导出、只允许volatile
+`/chosen/rng-seed`差异及Platform maintainer复核责任，但将它们恢复为Platform baseline相邻说明和
+review/transaction证据；删除无consumer的manifest嵌套块、Rust类型/enum、schema分支和对应parser tests。
+Build docs与repo-local build skill同步明确：没有真实action consumer时不得把physical维护责任伪装成
+machine-maintained配置。
+
+**Validation:** 最终代码字节运行`just xtask-test`，58 passed / 0 failed，覆盖全部tracked Platform解析、
+DT authority/delivery矩阵和physical firmware maintenance fail-close；`json5 --validate
+conf/platforms/schema.jsonc`通过。active config/schema/Rust/skill residual audit确认三个旧字段及对应类型零
+匹配，只有R1历史和本R2 correction证据保留旧名称。`git diff --check`与`mdbook build docs`通过，mdBook
+只报告既有large search-index warning。`just fmt xtask --check`仍因现有fmt owner把standalone xtask当作根
+workspace package而以`package xtask is not a member of the workspace`失败；本correction不越界修复fmt task，
+xtask测试已重新编译修改文件。Kernel build、QEMU runtime、physical board、rootfs、LTP与final harness均
+Not Run；本次删除不可达配置surface，不改变这些路径。
+
+该correction不改变DTS bytes、DT delivery/authority/provider、QEMU refresh/check、normal build、kernel
+runtime FDT接受、physical U-Boot handoff、root-mount ABI、public runtime API或current contract。
+`BOOT-PROTOCOL-001` effective baseline与R2 pending successor保持不变；没有运行、解析或激活
+`Stage 3 -> Stage 4 Implementation Resolution Gate`。

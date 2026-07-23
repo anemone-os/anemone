@@ -20,8 +20,9 @@
 - `just qemu dt refresh --platform <qemu-platform> [--check]` maintains only a
   `provider-derived` baseline whose provider is `qemu`. It loads the Platform directly, uses only
   its topology fields, and never consumes ordinary selection or runtime binds. A QEMU-backed
-  normative DTS is check-only; physical `provider = "firmware"` baselines fail closed and must carry
-  closed provenance, allowed-runtime-difference and runtime-validation-owner metadata.
+  normative DTS is check-only; physical `provider = "firmware"` baselines fail closed. Physical
+  capture provenance, allowed runtime differences and validation responsibility are human-reviewed
+  Platform maintenance facts, not machine-maintained configuration.
 
 TODO:
 - explain the necessity of certain settings in target spec json files;

@@ -74,9 +74,11 @@ from live QEMU task code instead of assuming they exist.
 A `provider = "qemu"` DT contract grants the QEMU-local maintenance action write authority over a
 provider-derived baseline. A `provider = "firmware"` contract records a physical firmware-derived
 baseline and grants no QEMU refresh capability. Both remain Platform-owned; neither changes the
-runtime FDT acceptance contract. Physical firmware baselines must also record closed capture
-provenance, allowed runtime differences, and the validation owner. A QEMU-backed normative DTS has a
-check-only comparison surface; the maintenance action must reject any attempt to update it.
+runtime FDT acceptance contract. Physical capture provenance, allowed runtime differences, and the
+responsibility to revalidate after board or firmware changes are human-reviewed maintenance facts;
+keep them adjacent to the Platform baseline without inventing typed fields that no action consumes.
+A QEMU-backed normative DTS has a check-only comparison surface; the maintenance action must reject
+any attempt to update it.
 
 ## Staleness Check
 

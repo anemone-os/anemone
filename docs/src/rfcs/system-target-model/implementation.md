@@ -1,11 +1,11 @@
 # System Target Model 迁移实施计划
 
-**状态：** R1（Stage 1-3 Closed；Stage 4 Outline / Not Resolved）
+**状态：** R2（Stage 1-3 Closed；Stage 4 Outline / Not Resolved）
 **最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
 **当前契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--rootfs-metadata选择初始用户程序)；Refine target 尚未 cut over
-**当前修订：** R1
+**当前修订：** R2
 **事务日志：** [2026-07-22-system-target-model](../../devlog/transactions/2026-07-22-system-target-model.md)
 
 本文定义后续实施的 stage envelope、resolution/feedback gate、停止条件与回写路径。当前
@@ -15,6 +15,10 @@ RFC 已完成 public promotion、初始 `Implementation Resolution Gate` 与 R0 
 `Stage 2 -> Stage 3 Implementation Resolution Gate`已于2026-07-23完成；Stage 3已解析为一个有序
 checkpoint，并在独立用户授权与activation preflight后执行、验证和关闭。Stage 4保持Outline / Not
 Resolved；本轮没有运行其resolution gate。
+
+Stage 3关闭后的用户反馈已作为独立R2 target correction完成：删除physical firmware baseline中没有
+action consumer的typed provenance/允许差异/validation-owner字段，把这些无法软件自动维护的事实恢复为
+人类review责任。该correction不重开Stage 3，也不运行或解析Stage 4 gate。
 
 ## 迁移原则
 
@@ -834,6 +838,26 @@ transaction、transaction index、RFC navigation、当期biweekly devlog。`conf
 **Contract / Stage Exit：** Contract cutover为None，`BOOT-PROTOCOL-001` effective baseline与pending successor
 不变。Checkpoint 3A完成全部validation floor、independent review与transaction/RFC/durable-surface write-back后，
 Stage 3才可Closed；关闭不运行或解析`Stage 3 -> Stage 4 Implementation Resolution Gate`。
+
+## Post-Stage 3 R2 Feedback Correction：physical baseline元数据收缩
+
+**状态：** Closed（2026-07-23）；不属于Stage 4 activation。
+
+Stage 3关闭后的source/consumer审计确认，`firmware-baseline`下三个字段只被Platform parser、schema和
+单元测试读取。QEMU DT maintenance权限只消费`authority + provider`，physical Platform已经由
+`provider = "firmware"`稳定fail-close；仓库没有读取这些字段并抓取、比较或批准physical runtime FDT的
+action。把单值声明写入typed配置不能证明DTS capture来源，也不能代替板级/U-Boot变化后的人工复核。
+
+用户将该结论确认为实现反馈并接受R2：保留VisionFive `firmware + provider-derived + provider=firmware`
+分类、U-Boot hardware export来源、只允许`/chosen/rng-seed`差异和Platform maintainer复核责任，但后三项只
+作为baseline相邻说明与review/transaction证据存在。删除`FirmwareDtbBaseline`及其三个单值enum、Platform
+schema和manifest嵌套块、仅验证这些声明的测试；同步build docs和skill，明确没有真实consumer时不得重建
+machine-maintained字段。
+
+该correction不改变DTS内容、DT delivery/authority、QEMU refresh/check capability、normal build、kernel
+runtime FDT接受、physical U-Boot handoff、root-mount ABI、current contract或Stage 4 Outline。验证只需覆盖
+xtask parser/schema矩阵、旧字段零残留、QEMU physical fail-close现有测试、文档生命周期/链接与格式；不要求
+physical board、QEMU runtime、kernel build或LTP，且不得把本correction当作`Stage 3 -> Stage 4` gate。
 
 ## Stage 4：App/rootfs workflow 与 physical-board closure
 

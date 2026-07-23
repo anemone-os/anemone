@@ -1,7 +1,7 @@
 # System Target Model Tracking Issues
 
 **状态：** Closed（当前无 live design issue）
-**最后更新：** 2026-07-22
+**最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **迁移计划：** [迁移实施计划](./implementation.md)
 **事务日志：** [2026-07-22-system-target-model](../../devlog/transactions/2026-07-22-system-target-model.md)
@@ -32,6 +32,7 @@ None.
 
 | ID | 原问题 | Neutralize / 分流依据 |
 | --- | --- | --- |
+| `STM-R2-K1` | Stage 3把physical firmware provenance、允许差异与runtime validation owner做成三个只有唯一合法值的typed配置字段；它们没有action consumer，既不能证明capture来源，也不能执行板级复核。 | 用户将该审计结论接受为Stage 3关闭后的实现反馈。R2保留`provider = "firmware"`的authority分类与QEMU maintenance fail-close，把capture来源、只允许`/chosen/rng-seed`差异和板级/U-Boot变化后的复核责任恢复为baseline相邻说明与人类review证据，并删除对应parser/schema/test surface。DT delivery/authority、runtime FDT、current contract与Stage 4边界不变。 |
 | `STM-R1-K1` | R0把DT delivery与authority绑定，误将QEMU-derived LA64 DTS分类为embedded normative；VisionFive physical baseline又只有generic firmware标签，缺少真实capture provenance、允许差异和runtime validation owner。 | Stage 3在latest-byte review后停止；用户确认LA64 machine-fact owner仍是QEMU，并确认`visionfive2-board.dts`来自supported硬件经U-Boot导出的runtime FDT且应删除未使用的官方DTS。R1将两维解耦，LA64改为embedded/provider-derived/QEMU；VisionFive closed metadata固定U-Boot hardware export、只允许`/chosen/rng-seed`差异并由Platform maintainer在板级/U-Boot更新时验证。该修订不改变runtime delivery或current contract。 |
 | `STM-DRAFT-K1` | Resolved identity 与 provenance failure contract 尚未闭合 | 初版以 canonical semantic-input closure equality 收口，但该方向在 `STM-DRAFT-K8` review 中被确认粒度过粗、实现代价过高；当前有效修复由 K8 和 [STM-WORKFLOW-ORDER-001](./invariants.md#stm-workflow-order-001---固定路径依赖由明确命令顺序拥有) 取代，不再实施原 sidecar/digest/equality probe，也不承诺跨action freshness。 |
 | `STM-DRAFT-K2` | Package output/backend 与 U-Boot owner handoff 尚未闭合 | 后续 review 证明问题前提过宽：当前只有 VisionFive Platform 要求的单一 legacy-image post-link，没有独立 package 抽象的真实压力。[STM-PLATFORM-OUTPUT-001](./invariants.md#stm-platform-output-001---platform-kernel-output-是-build-的一部分)现固定 U-Boot 为 Platform-owned normal-build output；独立 package CLI/backend/`[[outputs]]`已删除，Stage 4只核对字段推导与板级 Preserve。 |
