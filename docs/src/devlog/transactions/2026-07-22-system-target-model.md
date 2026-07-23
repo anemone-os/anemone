@@ -5,7 +5,7 @@
 **Area:** build system / configuration / platform / repository workflow
 **Canonical Plan:** [RFC-20260722-system-target-model](../../rfcs/system-target-model/index.md), [目标与不变量](../../rfcs/system-target-model/invariants.md), [迁移实施计划](../../rfcs/system-target-model/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 1 Closed / Stage 2 Closed / Checkpoints 2A-2D Closed / Stage 3 Outline
+**Current Phase:** Stage 1 Closed / Stage 2 Closed / Checkpoints 2A-2D Closed / Stage 3 Ready
 
 ## Scope
 
@@ -514,3 +514,30 @@ write-set、ignored-local、tracked residual、相对链接、状态残留、`gi
 ABI/visible-semantics/acceptance停止条件；Contract cutover仍为None，`BOOT-PROTOCOL-001` effective baseline
 与pending successor不变。Stage 3保持Outline，本closure没有运行或解析`Stage 2 -> Stage 3
 Implementation Resolution Gate`。
+
+## Stage 2 -> Stage 3 Implementation Resolution - 2026-07-23
+
+**Status:** Completed；Stage 3 Ready / Checkpoint 3A Not Activated。
+
+本gate在Stage 2独立关闭后只读执行，重新读取Stage 2最终diff、2A/2D review与validation、live Platform
+parser/schema、全部tracked Platform、QEMU/normal-build DT owner、两份QEMU DTS与两份现存VisionFive DTS、
+register/current limitations、R0 target/invariants与current transaction。Stage 2的single resolver、normal-build
+QEMU independence、RV64 firmware/provider-derived baseline和LA64 embedded/normative delivery均保持成立。
+
+Preflight确认剩余工作属于同一个Platform/QEMU-DT owner-local闭包，不需要用多个checkpoint串联取证。Gate因此
+只解析Checkpoint 3A：nested `qemu dt refresh`直接加载PlatformRef，共用单一
+`dumpdtb -> compile/decompile -> canonicalize -> compare`管线，提供check drift专用exit classification与
+provider-derived baseline原子写回；同时把VisionFive现存board DTS分类为physical firmware-derived
+conformance baseline，并完成全部6份tracked Platform的authority/delivery矩阵。另一份未被live Platform引用的
+VisionFive DTS不成为并列owner。
+
+Provider枚举只增加`firmware` provenance分类；QEMU refresh capability仍只属于`provider = "qemu"`，LA64
+normative source与VisionFive firmware source都不可被maintenance action改写。该解析不改变target、kernel runtime
+FDT接受、root-mount ABI、public runtime API、shared contract、visible semantics或acceptance boundary；
+Contract cutover仍为None，`BOOT-PROTOCOL-001` effective baseline与pending successor不变。Authoritative Ready
+definition、validation floor、stop/recovery与完整manifest只位于RFC `implementation.md`。
+
+**Resolution review / validation:** Apollyon 0 / Keter 0 / Euclid 0。运行`git diff --check`、public relative-link、
+lifecycle/status与write-set文本审计，并运行`mdbook build docs`。Xtask tests、真实QEMU DT check、normal build、
+physical board、LTP与final harness均Not Run；它们属于Checkpoint 3A execution floor，不是docs-only resolution
+证据。Resolution不自动激活3A。
