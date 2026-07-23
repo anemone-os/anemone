@@ -1,11 +1,11 @@
 # 2026-07-23 - TTY Subsystem
 
-**Status:** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Closed / Stage 3 Outline
+**Status:** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Closed / Stage 3 Ready / Not Started
 **Owners:** doruche, Codex
 **Area:** device / TTY / serial / VFS / signal / task topology / job control
 **Canonical Plan:** [RFC-20260722-tty-subsystem](../../rfcs/tty-subsystem/index.md), [目标与不变量](../../rfcs/tty-subsystem/invariants.md), [迁移实施计划](../../rfcs/tty-subsystem/implementation.md)
 **Canonical Revision:** R1
-**Current Phase:** Stage 2 Closed / `TTY-DATA-CUTOVER` Effective / Stage 3 Outline and Unauthorized
+**Current Phase:** Stage 3 Ready / Not Started / Unauthorized; `TTY-DATA-CUTOVER` Effective
 
 ## Scope and contract boundary
 
@@ -921,3 +921,29 @@ current truth。`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`与`TTY-ABI-001
 **Closure / stop:** Checkpoint 4 **Closed**，Stage 2四个checkpoint全部**Closed**，`TTY-DATA-CUTOVER`
 **Effective**。RFC保持**Accepted for Implementation**；Stage 3保持**Outline / Unauthorized**。本轮在Stage 2
 closure后立即停止，没有解析`2 -> 3` gate、扩大write set或进入relation/job-control实现。
+
+## Stage 2 -> Stage 3 Implementation Resolution Gate - 2026-07-23
+
+**Preflight:** gate从Stage 2 closure commit `4f15e23d`与clean worktree开始，读取Stage 2实际diff、RV64
+自动/人工证据、final review、R1 target、五个Active data-plane contract ID、全部Preserve contracts与register。
+live source审计覆盖TTY endpoint/FileOps/boot publication、同步VFS open/ioctl entry、Session/ProcessGroup/
+ThreadGroup identity与lifecycle、Signal disposition/generation、exit路径、asm-generic UAPI和既有`tty-test`/
+rootfs/RV64 wrapper。Linux 6.6.32只作为ABI/errno与effect ordering参考，不作为内部结构模板。
+
+**Resolution:** Stage 3采用一个不再拆checkpoint的vertical slice，同时交付TTY-owned relation registry、
+caller-relative `/dev/tty`、五个job-control ioctl、完整非orphan `TIOCSPGRP`三分支和detach/exit cleanup；
+拆开这些职责会形成可见success stub、临时errno或第二份relation truth。同步entry可以从current task派生短命
+capability，因此不修改generic VFS ctx、devfs或CharDev。task侧只增加TTY窄caller/topology/Signal decision与
+opaque stable identity，TTY以单registry、checked generation和guards-out owner revalidation保持唯一relation/
+foreground truth；exit只增加直接、幂等的session-leader handoff，不建立generic callback/observer framework。
+
+**Frozen scope and validation:** canonical [Stage 3 Ready计划](../../rfcs/tty-subsystem/implementation.md#8-stage-3-readycontrolling-relation-与-callertopology-vertical-slice)
+冻结一个source manifest、ABI/errno matrix、lock/lifecycle audit、stop/exit条件与RV64-only validation floor。
+userspace复用现有`tty-test` auto mode、rootfs和`run-tty-test-rv64.sh`，不增加app、manifest、launcher或wrapper
+mode。LA64 compile/runtime与hardware均Not Run，RV64证据不得外推。
+
+**Target / contract / authorization:** 解析保持R1 target、owner、visible semantics、accepted limitations与两个
+cutover unit，不产生R2，不修改invariants、tracking issues、current contracts或register。四个relation/job-control
+ID与`TTY-JOBCTL-CUTOVER`继续Not Cut Over。Stage 3现在是**Ready / Not Started / Unauthorized**；本gate只修改
+canonical docs并同步transaction/navigation，没有修改实现源码，也没有运行kernel/app build、KUnit、QEMU、
+BusyBox、LTP或hardware test。本轮在解析关闭后停止，不自动激活Stage 3。

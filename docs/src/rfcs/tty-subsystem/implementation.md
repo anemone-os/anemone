@@ -1,6 +1,6 @@
 # TTY Subsystem 迁移实施计划
 
-**状态：** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Closed / Stage 3 Outline
+**状态：** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Closed / Stage 3 Ready / Not Started
 **最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-tty-subsystem](./index.md)
 **目标与不变量：** [TTY Subsystem 目标与不变量](./invariants.md)
@@ -15,8 +15,8 @@
 Stage 0 -> Stage 1 Resolution Gate 随后在新的明确授权下完成。Stage 1的三个checkpoint现已独立关闭；
 Checkpoint 3采用获准的driver-local quiescent probe / Late activation路线完成production transport
 candidate。Stage 1 -> Stage 2 Resolution Gate解析的四个checkpoint现已逐项完成，RV64自动matrix与用户人工
-vi evidence达到floor，`TTY-DATA-CUTOVER`已经Effective并关闭Stage 2。Stage 3保持Outline；本轮没有执行
-`2 -> 3` resolution gate或激活。
+vi evidence达到floor，`TTY-DATA-CUTOVER`已经Effective并关闭Stage 2。独立`2 -> 3` Implementation
+Resolution Gate已经依据live source把Stage 3解析为Ready；本轮没有激活Stage 3或修改实现源码。
 
 ## 1. 计划角色与 authority
 
@@ -155,16 +155,15 @@ transaction 中临时切块。
 | Stage 0 | Closed | 只读闭合 live interface、oracle、carrier 候选与模块边界 | None | 已关闭；后续Stage 1 resolution亦已独立完成 |
 | Stage 1 | Closed | 建立 unpublished port/Terminal transport vertical slice，闭合 IRQ、RX、TX 与 pre-publish transaction | None | 三个checkpoint已独立关闭；RV64 candidate验证完成，LA64未验证 |
 | Stage 2 | Closed / Checkpoint 1-4 Closed | 交付 line discipline、termios、read/write/poll、`/dev/ttyS<N>` 与 real boot stdio | `TTY-DATA-CUTOVER` Effective | RV64自动与人工floor完成；Stage-wide audit关闭 |
-| Stage 3 | Outline | 建立 controlling relation、`/dev/tty`、caller/topology handoff、foreground ioctls 与 cleanup | None | 独立`2 -> 3` resolution gate；尚未执行或授权 |
+| Stage 3 | Ready / Not Started | 建立 controlling relation、`/dev/tty`、caller/topology handoff、foreground ioctls 与 cleanup | None | 已完成独立`2 -> 3` resolution；等待新的明确实现授权 |
 | Stage 4 | Outline | 闭合 terminal signals、background access、ash job control、register 与 current contract | `TTY-JOBCTL-CUTOVER` | Stage 3 独立关闭后 |
 
 阶段顺序保护“先闭合真实数据通路，再接 relation/jobctl”的验证路径，不冻结最终文件数量。
 当前粒度只表示语义路线，不表示每个 Stage 应在一个执行单元内完成。Stage 1的三个checkpoint和Stage 2的
-四个checkpoint已经分别由对应resolution gate冻结；Stage 3与Stage 4仍只保留caller handoff /
-relation-ioctl / lifecycle cleanup，以及terminal signal-access / ash-vi acceptance / docs cutover等候选切面，
-这些future Outline scope envelope不冻结编号、精确顺序、文件或授权。相应resolution gate可在保持target和
-两个cutover unit不变时收窄、合并或改画future切面；不得为了缩短checkpoint发布半初始化endpoint、提前
-执行cutover，或把跨checkpoint bridge留成长期抽象。
+四个checkpoint已经分别由对应resolution gate冻结；Stage 3已解析为一个不再拆checkpoint的vertical slice。
+Stage 4仍只保留terminal signal-access / ash-vi acceptance / docs cutover等future Outline候选切面，不冻结编号、
+精确顺序、文件或授权。后续resolution gate可在保持target和两个cutover unit不变时收窄、合并或改画future切面；
+不得为了缩短checkpoint发布半初始化能力、提前执行cutover，或把跨checkpoint bridge留成长期抽象。
 
 ## 6. Stage 1 Ready：unpublished transport vertical slice
 
@@ -761,47 +760,172 @@ Validation-only inputs：
   FileOps/UAPI/readiness、identity/publication/boot和userspace/cutover；integrator在Checkpoint 4执行全manifest、
   RV64 acceptance、artifact、bypass与contract atomicity审计。任何角色都不能把Ready或长期scope envelope当作执行授权。
 
-## 8. Stage 3 Outline：controlling relation 与 caller/topology vertical slice
+## 8. Stage 3 Ready：controlling relation 与 caller/topology vertical slice
 
-概括目的：
+阶段成熟度：
 
-- 建立 session-terminal 单一 relation registry 与 stable identity/generation revalidation；成功
-  `TIOCSCTTY(arg=0)` 同时建立 relation 并把 foreground PGID 初始化为 caller 当前 process group。
-- 提供 `/dev/tty` caller-relative open、`TIOCGSID`、`TIOCGPGRP`、`TIOCSPGRP` 与 session-leader
-  `TIOCNOTTY` 的结构性路径；`arg=1` steal 和 non-leader局部 detach按 target稳定拒绝。
-- 在同步 VFS entry构造短命 caller capability/snapshot，建立 topology/Signal窄 decision API和
-  relation-generation commit revalidation；完整 `Task`、topology guard与Signal state不进入Terminal。
-- 接入 session leader exit/detach cleanup：先撤销 `/dev/tty` 与foreground check可发现性，再
-  guards-out 完成必要wake/drop；首版不生成relation-disassociation `SIGHUP`/`SIGCONT`。foreground
-  group消失只使selector失效，不拆relation或endpoint。
+- `Ready / Not Started`。本节已冻结完整交付、route、ABI matrix、验证与manifest，但不自动授权实现。
+- 本阶段不再拆分checkpoint。relation registry、caller/topology decision、`/dev/tty`/ioctl和exit cleanup
+  是一个不可再拆的vertical slice；拆开会引入对外可见的无条件成功、临时errno或双重relation truth。
+- Stage 3只验证Gate P2 candidate，不执行`TTY-JOBCTL-CUTOVER`。四个relation/job-control ID继续Not Cut Over。
 
-前置依赖：
+### 8.1 前置条件与受保护边界
 
-- Stage 2 Closed且`TTY-DATA-CUTOVER`结果明确；真实Terminal FileOps、boot stdio和endpoint identity
-  已稳定，不能再用anonymous console验证relation。
+- Stage 2已经Closed，`TTY-DATA-CUTOVER` Effective；live endpoint、real boot stdio、Terminal FileOps与
+  `tty-test` RV64 harness均来自`4f15e23d`，不能退回anonymous console或另建测试入口。
+- 保护`TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`和全部Preserve contract IDs，特别是
+  `SIGNAL-PENDING-001/002`、`SIGNAL-ACTION-001/002`、`PGRP-SIGNAL-001/002`、`JOBCTL-*`与`TASK-LIFE-*`。
+- `Session`/`ProcessGroup`继续唯一拥有membership；Signal继续拥有mask/disposition与occurrence；
+  ThreadGroup继续唯一拥有terminal lifecycle与job-control phase。TTY只拥有relation、foreground selector
+  和terminal-side decision orchestration。
+- numeric SID/PGID只在UAPI边界使用。跨lock/lifecycle保存的session、process-group、caller和terminal
+  identity必须是task/TTY owner提供的opaque stable capability，并以owner lookup + identity equality重验。
+- last close不拆relation；detach/exit不销毁Terminal、`/dev/ttyS<N>`或`/dev/console`。relation-disassociation
+  `SIGHUP`/`SIGCONT`、orphaned-pgrp policy、hardware hangup、backend fatal、`TOSTOP`与其它terminal-modifying
+  matrix保持非目标。
 
-受保护边界：
+### 8.2 单一路线
 
-- `TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001`以及所有Preserve contract IDs，特别是
-  `SIGNAL-PENDING-001/002`与`SIGNAL-ACTION-001/002`。
-- `Session`/`ProcessGroup`继续唯一拥有membership；TTY relation registry唯一拥有binding与foreground。
-- relation commit必须在topology decision后重验generation；numeric SID/PGID reuse不得复活旧binding。
-- last close不拆relation；session exit/detach不销毁Terminal、`/dev/ttyS<N>`或`/dev/console`。
-- orphan transition/effect、hardware hangup、backend fatal、`TOSTOP`与完整terminal-modifying matrix不进入本阶段。
-- 本阶段只形成relation/caller vertical slice，不执行`TTY-JOBCTL-CUTOVER`。
-- Stage 3 candidate可以定向运行验证，但不能独立宣称relation/job-control已经effective；尚未闭合的
-  background/signal分支必须稳定拒绝或保持不可达，不能先无条件成功再等待Stage 4修正。
+**Caller与task-side capability：** 在`task/jobctl`下增加TTY专用的窄caller/session/process-group
+capability。`/dev/tty` open和TTY ioctl在同步entry即时从`get_current_task()`构造短命caller；capability内部可以
+短暂持有live task/thread-group引用，但完整`Task`、Signal state和topology guard不得存入`Terminal`、opened file或
+relation。live `FileIoCtx`、`IoctlCtx`和`DevfsNodeOps`已经足够，本阶段不修改generic VFS ctx、devfs或CharDev。
 
-解析触发点：
+task-side API负责：验证caller仍是live user ThreadGroup、解析并重验stable Session/ProcessGroup identity、判断
+session leader、验证candidate foreground group仍属于同一session，以及把current caller的`SIGTTOU` mask/shared
+disposition分类为blocked/ignored或actionable。Signal owner另提供一个只返回该分类的窄查询；TTY不得读取或缓存
+Signal内部字段。
 
-- Stage 2 关闭后重新审计 `FileIoCtx`/`IoctlCtx`/open provider、`setsid`/topology/lifecycle、Signal
-  disposition与process-group selector；以 live lock graph冻结caller capability、relation index、
-  cleanup hook、retry/errno和逐文件 manifest。
+**Relation owner：** 新建`device::tty::relation`，以单个registry guard拥有全部relation entry；一个entry只保存
+同一份published endpoint、stable controlling-session capability、optional stable foreground process-group capability
+和checked generation。registry在boot prepare按published endpoint数量一次性预留容量；runtime acquire/remove/
+foreground replacement不得在guard内扩容、复杂drop或调用task/Signal/Event。session与terminal uniqueness均在
+同一个guard内检查，不在`Session`或`Terminal`另存binding/PGID副本。
 
-预计范围（不是写入授权）：
+所有跨owner操作使用同一循环：relation guard内取得immutable snapshot并释放guard；task/topology/Signal owner
+执行decision或effect；mutation回到relation owner，以endpoint + session identity + generation重验后commit，失配则
+重试或返回当前owner决定的errno。generation使用checked单调推进；remove/replacement取出旧capability后先释放guard，
+再drop。foreground group已退出时，下一次snapshot/revalidation只清空selector并保留relation；`TIOCGPGRP`投影0，
+合法same-session caller仍可安装新的foreground group。
 
-- `device::tty` relation/file/ioctl modules、窄VFS operation ctx、task topology/session lifecycle、
-  process-group/Signal decision API，以及定向 relation/caller userspace tests。
+**Publication与open：** 在现有`prepare_system_boot()`的首个devfs commit之前准备TTY-owned major 5/minor 0
+`/dev/tty` provider与空relation registry；沿用当前console -> TTY单向publish transaction，不修改devfs或
+`/dev/console` owner。`/dev/tty` open从同步caller解析live controlling relation并返回该published endpoint的正常
+Terminal file；没有relation、relation已撤销或caller session不匹配时返回`ENXIO`。`/dev/ttyS<N>`和boot files
+仍直接打开endpoint，打开本身不会隐式取得controlling terminal，`O_NOCTTY`继续不需要新增TTY特判。
+
+**Ioctl与完整`TIOCSPGRP`非orphan core：** `anemone-abi`补齐asm-generic五个job-control ioctl常量，TTY
+FileOps在同一relation route实现`TIOCSCTTY`、`TIOCNOTTY`、`TIOCGSID`、`TIOCGPGRP`和`TIOCSPGRP`。
+Stage 3不保留“先无条件成功、Stage 4再修”的临时路径：
+
+- `TIOCSCTTY`先拒绝任意非零arg为`EPERM`；`arg=0`只允许live session leader以可读file建立relation，初始
+  foreground为caller当前process group。同一session/terminal的`arg=0`重复调用在file-mode检查前幂等成功；
+  非leader、session已控制其它terminal、terminal已被其它live session控制或首次acquire使用不可读file返回
+  `EPERM`。`arg=1` privileged steal不伪造支持。
+- `TIOCGSID`/`TIOCGPGRP`只允许当前caller session控制该terminal；否则`ENOTTY`。前者写回SID，后者写回live
+  foreground PGID或0；copyout fault保持`EFAULT`且不改变relation。
+- `TIOCSPGRP`先按当前relation snapshot执行background decision，再读取signed PGID并验证candidate。负值
+  `EINVAL`，不存在/已失效`ESRCH`，不同session `EPERM`，caller不控制该terminal `ENOTTY`。foreground caller或
+  background + blocked/ignored `SIGTTOU`继续；background + actionable `SIGTTOU`由Signal/process-group owner向
+  caller process group发布kernel-origin occurrence并返回`RestartSyscall::Idempotent`，不得提前commit foreground。
+  candidate通过后才回relation owner按generation提交。orphaned-pgrp errno/effect仍不在本阶段或首版target内，
+  Stage 3不得为它修改topology owner或把未验证行为写成支持。
+- `TIOCNOTTY`要求caller控制该terminal；首版只有session leader可以撤销，non-leader返回`EPERM`，无relation/
+  wrong terminal返回`ENOTTY`。成功只撤relation与foreground selector，不发送`SIGHUP`/`SIGCONT`。
+
+上述ABI取舍必须在command dispatch和narrow decision API旁写关键注释；unsupported steal/non-leader detach等
+拒绝路径保留限频/非热路径诊断，不能用success stub或静默状态丢弃。
+
+**Lifecycle handoff：** task lifecycle不保存relation truth，也不引入callback registry或generic observer。
+`task/api/exit`只在session-leader ThreadGroup第一次`Alive -> Exiting`以及未经过`exit_group`的最后member退出路径，
+于ThreadGroup/topology guard外向TTY传递opaque session-leader identity。TTY hook幂等移除匹配relation，先撤销
+discoverability，再在guard外drop；后续last-member重复通知是no-op。acquire与exit的窄竞态仍由每次relation lookup/
+mutation对session-leader lifecycle的owner revalidation闭合：即使exit通知与尚未commit的acquire交错，旧relation
+也不能被`/dev/tty`或foreground mutation重新发现，并会在下一次owner操作惰性清除。
+
+### 8.3 审计、可观测性与review
+
+- relation/source audit必须证明：每个session/terminal至多一个entry；foreground capability属于同一session；
+  generation不回绕；所有Arc/drop、Signal/Event和task/topology调用均在relation guard外；无Session/Terminal双cache。
+- lock graph固定为“TTY snapshot -> guards-out task/Signal decision -> TTY generation commit”；不允许relation guard
+  嵌套topology、ThreadGroup、Signal、Terminal、port或devfs guard，也不允许task lifecycle持owner guard调用TTY。
+- source audit确认`FileIoCtx`、`IoctlCtx`、`DevfsNodeOps`、generic devfs/CharDev、process-group/session core、
+  Signal pending/generation、ThreadGroup jobctl state与scheduler/wait均无diff。
+- 只在relation acquire、foreground commit、explicit/exit detach和unsupported steal等稀有边界记录sid/pgid/
+  generation与结果；不对每次`/dev/tty` lookup或普通ioctl成功刷日志。diagnostic字段/日志不得驱动行为。
+- review按relation owner/identity、caller+Signal decision、lifecycle、UAPI/errno、userspace oracle五个切面一次完成；
+  不为这些切面建立checkpoint。最终必须为0 Apollyon / 0 Keter / 0 Euclid，Safe只记录不扩scope。
+
+### 8.4 RV64验证
+
+tracked验证：
+
+1. `git diff --check`；
+2. `just fmt --check`；
+3. active `qemu-virt-rv64-pretest`下`just build`；
+4. `just app build tty-test --arch riscv64`；
+5. 复用现有repository wrapper与rootfs，不新增mode/manifest/launcher：
+   `./scripts/run-tty-test-rv64.sh --busybox <rv64-busybox> --sdcard <rv64-sdcard-master> --mode auto --log build/tty-stage3-rv64.log`。
+
+`tty-test`在既有auto matrix后追加自动relation组，至少覆盖：`/dev/tty`为5:0且无relation时`ENXIO`；普通open不
+隐式attach；session leader acquisition与same-relation幂等；nonleader/occupied/nonzero-arg拒绝；`TIOCGSID`/
+`TIOCGPGRP`；foreground allow；background blocked与ignored `SIGTTOU`两条reclaim；actionable `SIGTTOU`使
+background helper被`wait4(WUNTRACED)`观察为Stopped且foreground未提前改变，随后由parent kill/reap；candidate
+负值/不存在/其它session errno；nonleader `TIOCNOTTY`拒绝；leader detach后`/dev/tty`失效并可重新acquire；
+session leader exit后另一个session可取得同一terminal。每个child都必须有界reap，失败路径不得留下stopped child。
+
+同一wrapper必须继续通过既有data-plane、BusyBox stty/vi与host byte oracle，证明Stage 3没有退化五个Active
+`TTY-DATA-*` contract ID。日志记录commit/candidate、platform、BusyBox/rootfs/kernel hash、KUnit总数、逐case
+PASS/FAIL和正常关机。只测试RV64；LA64 compile/runtime与hardware明确Not Run，RV64结果不得外推。
+
+### 8.5 停止与退出条件
+
+立即停止并上报manifest expansion或Target Renegotiation：
+
+- 必须修改generic VFS ctx、devfs/CharDev、task topology membership结构、Signal pending/generation、ThreadGroup
+  jobctl truth、scheduler/wait、architecture代码或现有data-plane owner才能继续；
+- 需要把relation/foreground同时缓存到Session/Terminal，保存裸SID/PGID跨lifecycle，或持relation guard调用
+  topology/Signal/Event；
+- exit cleanup只能通过generic callback framework、第二lifecycle truth、轮询或relation-disassociation signals闭合；
+- `/dev/tty`不能在现有single-way boot transaction中完成fallible prepare，或runtime test需要新rootfs/wrapper模式；
+- 非orphan `TIOCSPGRP`三分支、errno、restart/no-mutation或generation revalidation无法在accepted target内成立；
+- 任一Active data-plane contract回归、RV64 wrapper未正常关机，或review仍有Apollyon/Keter/Euclid。
+
+退出条件：全部manifest diff与ABI matrix闭合；RV64 build/app/KUnit/auto relation+data regression通过；eager exit hook与
+lazy missed-race revalidation均经source/runtime审计；无临时bridge、success stub、双relation truth或新register缺口。
+Stage 3随后记为Closed，但`TTY-JOBCTL-CUTOVER`仍Not Cut Over，RFC保持Accepted for Implementation并立即停止；
+不得自动解析或进入Stage 4。
+
+### 8.6 Resolved Write Set Manifest
+
+允许实现文件：
+
+- `anemone-abi/src/tty.rs`：只增加asm-generic job-control ioctl常量与layout/value测试；
+- `anemone-kernel/src/device/tty/{mod.rs,endpoint.rs,file.rs}`、新建
+  `anemone-kernel/src/device/tty/relation.rs`：relation owner、5:0 provider、FileOps ioctl与owner-local测试；
+- `anemone-kernel/src/task/jobctl/{mod.rs,terminal.rs}`：短命caller与stable session/process-group capability、
+  topology decision/revalidation；
+- `anemone-kernel/src/task/sig/{mod.rs,terminal.rs}`：只提供current mask/shared disposition的TTY窄分类，不修改
+  pending/generation/delivery truth；
+- `anemone-kernel/src/task/api/exit/mod.rs`：只增加guards-out session-leader identity handoff；
+- `anemone-rs/src/{sys/linux.rs,os/linux.rs}`：补齐现有syscall/ioctl的最小safe wrappers；
+- `anemone-apps/tty-test/src/main.rs`：在既有auto mode追加Stage 3自动relation/errno/lifecycle matrix。
+
+允许文档写回：
+
+- `docs/src/devlog/transactions/2026-07-23-tty-subsystem.md`追加activation、review、RV64 evidence与closure/stop；
+- 本文只在获准route correction/manifest expansion时更新；RFC入口、`docs/src/rfcs.md`、transaction index与当前
+  双周devlog只在Stage 3 lifecycle变化时同步。Stage 3不修改current contracts、register、invariants或tracking issues；
+  若真实finding要求这些surface，先按正常RFC review/Target Renegotiation Gate停止。
+
+Validation-only inputs：live Stage 2 diff/log、TTY data-plane与全部Preserve contracts、register、Linux 6.6.32
+`tty_jobctrl.c`/asm-generic UAPI、BusyBox source/artifact、现有rootfs/wrapper/Justfile/xtask owners。external artifact与
+测试盘master保持只读；公共文档不记录个人路径。
+
+明确不允许：`anemone-kernel/src/fs/**`、`device/char/**`、`device/tty/{terminal.rs,discipline.rs,port.rs}`、
+`task/topology/**`、`task/jobctl/{group.rs,report.rs,user_entry.rs}`、`task/sig/{generation.rs,pending.rs,delivery.rs}`、
+`main.rs`、driver/console/IRQ/kthread/Event/wait/scheduler、rootfs manifest、wrapper、pretest/user-test/LTP、architecture、
+current contracts、register与Stage 4实现。越过这些边界必须先扩展，不得用相邻“顺手修复”掩盖。
 
 ## 9. Stage 4 Outline：terminal job control、完整验收与 `TTY-JOBCTL-CUTOVER`
 
@@ -809,12 +933,13 @@ Validation-only inputs：
 
 - 让 foreground `VINTR/VQUIT/VSUSP`、winsize `SIGWINCH`、ordinary background read `SIGTTIN`
   通过 relation snapshot、membership revalidation和现有process-group Signal/jobctl路径真实生效。
-- 闭合 `TIOCSPGRP` 非orphan三分支：foreground allow、background + blocked/ignored `SIGTTOU`
-  allow，以及background + actionable `SIGTTOU` signal-and-restart且mutation不提前提交。
+- 在Stage 3已经闭合的`TIOCSPGRP`非orphan三分支上接入ash完整流程并复验：foreground allow、
+  background + blocked/ignored `SIGTTOU` allow，以及background + actionable `SIGTTOU`
+  signal-and-restart且mutation不提前提交；不得在Stage 4另建第二条foreground mutation路径。
 - 以 BusyBox ash/vi和定向oracle覆盖controlling acquisition、`/dev/tty`、Ctrl-C/Ctrl-Z、
   `jobs/fg/bg`、background read、foreground reclaim和relation撤销cleanup；明确标注relation-disassociation
   `SIGHUP`/`SIGCONT`与其它延期corner。
-- 扩展`tty-test`以自动覆盖relation、foreground/background decision和可判定的terminal-signal路径；
+- 扩展`tty-test`以复用Stage 3 relation/foreground regression并增加可判定的terminal-signal/background-read路径；
   对控制字符、ash交互状态与vi显示只保留冻结的自动smoke和用户人工checklist，不让手测承担全部回归。
 - 原子完成`TTY-JOBCTL-CUTOVER`，回写current contracts、transaction、register/current limitations、
   RFC/tracker/devlog并关闭或明确Not Cut Over。
@@ -1043,8 +1168,8 @@ validation-only输入：
   boundary无需更改。第6节已经冻结单一路线、三个checkpoint与exact manifest，Stage 1达到`Ready`。
 - 用户只授权完成本resolution gate；仍需另行用户授权Stage 1或Checkpoint 1，不自动开始代码实现。
 
-`1 -> 2` gate的完成记录见第12节。后续`2 -> 3`与`3 -> 4` resolution gate遵循同一协议，并额外读取
-前一Stage实际diff、runtime evidence、bridge状态、module pressure与cutover结果。每次只解析下一个Stage，
+`1 -> 2` gate的完成记录见第12节，`2 -> 3` gate见第12.1节。后续`3 -> 4` resolution gate遵循同一协议，
+并额外读取前一Stage实际diff、runtime evidence、bridge状态、module pressure与cutover结果。每次只解析下一个Stage，
 并按第4节为预期的多checkpoint Stage冻结完整checkpoint map；不提前解析更远Stage的checkpoint细节。
 
 ## 12. Stage 1 -> Stage 2 Implementation Resolution Gate（Completed 2026-07-23）
@@ -1087,6 +1212,41 @@ cutover unit不变；除C4 acceptance文件集合按RV64收窄外，其余source
 LA64明确Not Run。
 该修订不改写上述R0 resolution的历史输入或当时结论，当前执行以第7节R1正文为准。
 
+## 12.1 Stage 2 -> Stage 3 Implementation Resolution Gate（Completed 2026-07-23）
+
+前置与只读preflight：
+
+- Stage 2四个checkpoint已经Closed，`4f15e23d`原子完成`TTY-DATA-CUTOVER`；gate读取Stage 2实际diff、
+  240项KUnit与RV64自动/人工证据、0 Apollyon / 0 Keter / 0 Euclid review、R1 target、五个Active TTY
+  data-plane IDs、全部Preserve contracts、register和clean worktree。LA64按R1明确Not Run。
+- live审计覆盖TTY endpoint/FileOps/boot publication、`FileIoCtx`/`IoctlCtx`/`DevfsNodeOps`、
+  Session/ProcessGroup/ThreadGroup stable object、`setsid`/group move/removal、Signal mask/disposition/generation、
+  `kernel_exit_group`与last-member exit、asm-generic TTY UAPI，以及现有`tty-test`/rootfs/RV64 wrapper。
+- Linux 6.6.32 `tty_jobctrl.c`只作为ABI/errno与effect ordering参考；不复制Linux的`signal_struct::tty`、
+  tasklist/RCU或内部锁结构。
+
+解析决定：
+
+- generic VFS ctx无需扩展：caller-relative open与TTY ioctl都能在同步entry即时派生短命caller capability；
+  `fs/**`、devfs和CharDev因而保持只读。
+- relation采用TTY-owned单registry、stable task-side capability与checked generation；runtime容量由boot endpoint
+  数量预留，不增加Kconfig常量、第二索引或Session/Terminal mutable cache。
+- Stage 3一次完成`/dev/tty`、五个ioctl、完整非orphan `TIOCSPGRP`三分支和detach/exit cleanup。只实现
+  “结构路径、Stage 4再补真正decision”会制造可见临时ABI，因此本stage不拆checkpoint；Stage 4只增加
+  terminal-generated signals/background read、ash集成与最终cutover。
+- lifecycle使用task owner的opaque session-leader identity做一个直接、guards-out、幂等handoff，不建立generic
+  callback/observer framework；所有lookup/mutation仍做live lifecycle revalidation，以关闭exit与late acquire交错。
+- userspace复用现有`tty-test` auto mode、rootfs与RV64 wrapper，只追加relation matrix和最小anemone-rs wrapper；
+  不增加app、manifest、launcher、wrapper mode或个人path。Stage 3验证只要求RV64。
+
+Target / contract / authorization结论：
+
+- 解析保持R1 target、owner、ABI包络、visible semantics、accepted limitations与两个cutover unit，不产生R2，
+  不修改invariants、tracking issues、current contracts或register。`TTY-JOBCTL-CUTOVER`仍Not Cut Over。
+- 第8节已经冻结单一路线、ABI matrix、review/validation、stop/exit与exact manifest，Stage 3达到
+  `Ready / Not Started`。本gate只修改canonical docs并同步transaction/navigation；没有运行kernel/app build、
+  KUnit、QEMU、BusyBox、LTP或hardware test，也不自动激活Stage 3。
+
 ## 13. Probe / Vertical Slice Gates
 
 ### Gate P1 — UART-to-Terminal transport
@@ -1126,14 +1286,14 @@ snapshot -> guards-out decision -> generation revalidation -> commit闭合`/dev/
 
 **Contract Impact:** Stage 3只验证candidate；不cutover。
 
-**Minimum Write Set:** 由`2 -> 3` gate冻结到TTY relation/FileOps、窄VFS ctx、topology/Signal decision、
-lifecycle hook、定向test和transaction；不修改ThreadGroup jobctl truth或scheduler/wait owner。
+**Minimum Write Set:** 第8.6节已经冻结到TTY relation/FileOps、task-side窄caller/topology/Signal decision、
+lifecycle handoff、定向test和transaction；不修改generic VFS ctx、ThreadGroup jobctl truth或scheduler/wait owner。
 
 **Non-goals:**完整Task持久引用、双向mutable cache、relation-disassociation signals、orphan policy、
 hangup、`TOSTOP`完整matrix、PTY。
 
 **Validation Floor:** KUnit/source lock audit、定向userspace acquisition/lookup/foreground/reuse/cleanup cases、
-repository build与QEMU smoke；精确命令由Stage 3 Ready冻结。
+repository build与RV64 QEMU auto regression；精确命令见第8.4节，LA64明确Not Run。
 
 **Failure Signals:** session外target、ID reuse复活、detach后仍discoverable、mutation先于decision、锁反转、
 需要第二份membership/foreground truth或无法取得current caller。

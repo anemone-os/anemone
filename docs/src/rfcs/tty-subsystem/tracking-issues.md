@@ -50,7 +50,7 @@ None.
 
 **决策：** 最小contract闭包增加`SIGNAL-PENDING-001/002`和`SIGNAL-ACTION-001/002`为Preserve。TTY只请求Signal owner完成blocked/ignored/actionable decision与ordinary occurrence publication，不保存pending、不自行提交ignore/handler/default-stop，也不让notification或signal结果反向驱动relation。`SIGNAL-TEMP-MASK-*`没有直接target delta，本次不扩大闭包。
 
-**修复位置：** [`Contract Impact`](./invariants.md#contract-impact)、[`TTY-JOBCTL-001`](./invariants.md#tty-jobctl-001--terminal-policy-只产生经重验的-guards-out-effect)、[Stage 3 Outline](./implementation.md#8-stage-3-outlinecontrolling-relation-与-callertopology-vertical-slice)和[Stage 4 Outline](./implementation.md#9-stage-4-outlineterminal-job-control完整验收与-tty-jobctl-cutover)。
+**修复位置：** [`Contract Impact`](./invariants.md#contract-impact)、[`TTY-JOBCTL-001`](./invariants.md#tty-jobctl-001--terminal-policy-只产生经重验的-guards-out-effect)、[Stage 3 Ready](./implementation.md#8-stage-3-readycontrolling-relation-与-callertopology-vertical-slice)和[Stage 4 Outline](./implementation.md#9-stage-4-outlineterminal-job-control完整验收与-tty-jobctl-cutover)。
 
 **重新打开条件：** implementation绕过Signal owner读取或缓存mask/disposition/pending，新增handoff改变temporary-mask responsibility，或terminal signal不再通过现有pending/action/jobctl路径闭合。
 
@@ -62,7 +62,7 @@ None.
 
 **决策：** 首版session-leader `TIOCNOTTY`和exit cleanup只撤销controlling relation与foreground selector，使旧relation不能再被`/dev/tty`、access check或mutation取得；不生成relation-disassociation `SIGHUP`/`SIGCONT`。这两个effects作为scoped limitation留在首版target之外，并与hardware hangup及newly orphaned stopped process-group effects分开记录。后续加入时必须通过target review定义触发条件、旧foreground snapshot、Signal handoff、oracle和register disposition，implementation stage无权自行扩展。
 
-**修复位置：** [目标与非目标](./index.md#目标)、[Controlling terminal 与 job-control handoff](./index.md#8-controlling-terminal-与-job-control-handoff)、[Lifecycle cleanup](./index.md#9-lifecyclerelation-cleanup-与延后的-hangup)、[`TTY-LIFE-001`](./invariants.md#tty-life-001--relation-cleanup-先撤销可发现性再执行外部效果)、[`TTY-ABI-001`](./invariants.md#tty-abi-001--首版兼容包络必须真实可观察)、[Stage 3](./implementation.md#8-stage-3-outlinecontrolling-relation-与-callertopology-vertical-slice)和[Stage 4](./implementation.md#9-stage-4-outlineterminal-job-control完整验收与-tty-jobctl-cutover)。
+**修复位置：** [目标与非目标](./index.md#目标)、[Controlling terminal 与 job-control handoff](./index.md#8-controlling-terminal-与-job-control-handoff)、[Lifecycle cleanup](./index.md#9-lifecyclerelation-cleanup-与延后的-hangup)、[`TTY-LIFE-001`](./invariants.md#tty-life-001--relation-cleanup-先撤销可发现性再执行外部效果)、[`TTY-ABI-001`](./invariants.md#tty-abi-001--首版兼容包络必须真实可观察)、[Stage 3](./implementation.md#8-stage-3-readycontrolling-relation-与-callertopology-vertical-slice)和[Stage 4](./implementation.md#9-stage-4-outlineterminal-job-control完整验收与-tty-jobctl-cutover)。
 
 **重新打开条件：** 新增consumer或oracle要求detach/exit signal effects，implementation需要依赖旧foreground snapshot生成signal，或register/验收试图把relation撤销证明写成`SIGHUP`/`SIGCONT`能力。
 
