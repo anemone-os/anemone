@@ -1,6 +1,6 @@
 # TTY Subsystem 迁移实施计划
 
-**状态：** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Ready / Not Started
+**状态：** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Active / Checkpoint 1 Closed / Checkpoint 2 Active
 **最后更新：** 2026-07-23
 **父 RFC：** [RFC-20260722-tty-subsystem](./index.md)
 **目标与不变量：** [TTY Subsystem 目标与不变量](./invariants.md)
@@ -153,7 +153,7 @@ transaction 中临时切块。
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 只读闭合 live interface、oracle、carrier 候选与模块边界 | None | 已关闭；后续Stage 1 resolution亦已独立完成 |
 | Stage 1 | Closed | 建立 unpublished port/Terminal transport vertical slice，闭合 IRQ、RX、TX 与 pre-publish transaction | None | 三个checkpoint已独立关闭；RV64 candidate验证完成，LA64未验证 |
-| Stage 2 | Ready / Not Started | 交付 line discipline、termios、read/write/poll、`/dev/ttyS<N>` 与 real boot stdio | `TTY-DATA-CUTOVER` | resolution已完成；仍需另行授权Checkpoint 1 |
+| Stage 2 | Active / Checkpoint 1 Closed / Checkpoint 2 Active | 交付 line discipline、termios、read/write/poll、`/dev/ttyS<N>` 与 real boot stdio | `TTY-DATA-CUTOVER` | C2获准增加immutable typed File private-data accessor；C3未授权 |
 | Stage 3 | Outline | 建立 controlling relation、`/dev/tty`、caller/topology handoff、foreground ioctls 与 cleanup | None | Stage 2 独立关闭后 |
 | Stage 4 | Outline | 闭合 terminal signals、background access、ash job control、register 与 current contract | `TTY-JOBCTL-CUTOVER` | Stage 3 独立关闭后 |
 
@@ -416,8 +416,8 @@ Validation-only inputs：
 
 阶段成熟度：
 
-- `Ready / Not Started`。本节已冻结完整路线、四个checkpoint、验证、cutover和resolved manifest；
-  Stage 1 -> Stage 2 Resolution Gate或用户对长期scope envelope的授权都不自动激活Checkpoint 1。
+- `Active / Checkpoint 1 Closed / Checkpoint 2 Active`。本节已冻结完整路线、四个checkpoint、验证、cutover和
+  resolved manifest；Checkpoint 2获准实现，Checkpoint 3仍未授权，不能连续进入。
 - Stage 2只交付relationless serial Terminal data plane。它可以执行`TTY-DATA-CUTOVER`，但不建立
   controlling relation、`/dev/tty`、foreground selector或job-control signal effect，也不激活
   `TTY-REL-*`、`TTY-JOBCTL-*`、`TTY-LIFE-*`或完整`TTY-ABI-001`。
@@ -587,9 +587,11 @@ ioctl和真实drain/revalidation；新增`anemone-abi::tty::linux`及`anemone-rs
 ABI tests闭合7.2--7.4的input/output/ioctl/errno/layout/readiness matrix；endpoint仍unpublished，boot行为不变。
 
 **允许写集：** Checkpoint 1已建立的TTY/port文件、计划新建`device/tty/file.rs`、
+`anemone-kernel/src/fs/file.rs`中唯一的immutable typed private-data accessor、
 `anemone-abi/src/{lib.rs,tty.rs}`、`anemone-rs/src/{sys/linux.rs,os/linux.rs}`与transaction。generic
-`fs/file.rs`、`fs/iomux.rs`和syscall adapters是validation-only；若现有ctx/poll contract不足，必须停止上报，
-不得在本checkpoint扩大generic surface。
+`fs/iomux.rs`和syscall adapters是validation-only；除上述accessor外若现有ctx/poll contract不足，必须停止上报，
+不得在本checkpoint继续扩大generic surface。accessor只返回owner安装的具体`&T`，不得暴露mutable `AnyOpaque`、Task、
+fd table或VFS guard。
 
 **Review / validation floor：** `git diff --check`、`just fmt --check`，依次执行
 `just conf switch qemu-virt-rv64-pretest && just build`、`just conf switch qemu-virt-la64-pretest && just build`，
@@ -597,6 +599,7 @@ ABI tests闭合7.2--7.4的input/output/ioctl/errno/layout/readiness matrix；end
 NCCS/layout/ioctl constants，fake Terminal/File KUnit覆盖canonical boundary、empty VEOF、nonblock/short progress、
 binary write、TCSETS三种ordering、unsupported candidate不发布、winsize和register-plus-recheck race。review确认
 `O_NONBLOCK`来自operation ctx、copyout无rollback shadow、trigger在guard外drop/execute、unknown ioctl为ENOTTY。
+另审查typed accessor只完成既有`OpenedFile` private-data producer/consumer pair，不被TTY用于取得owner外状态。
 
 **停止条件：** 必须把Task/caller放入generic FileOps、缓存per-file termios/nonblock、用raw RX或wake count作为
 readable、success-stub unsupported bits、`TCSETSW/F`在drain前发布snapshot，或需要Stage 3 relation/Signal才能
@@ -716,6 +719,8 @@ Stage-wide停止条件：
 
 - `anemone-kernel/src/device/tty/{mod.rs,port.rs}`，新建
   `anemone-kernel/src/device/tty/{terminal.rs,discipline.rs,file.rs,endpoint.rs}`；
+- `anemone-kernel/src/fs/file.rs`只允许Checkpoint 2增加immutable typed、crate-internal file private-data
+  accessor；不得改变FileOps签名、operation ctx、status owner、cursor/copy semantics或其它backend行为；
 - `anemone-kernel/src/driver/serial/ns16550a/{mod.rs,port.rs,regs.rs}`，只用于line/idle capability、console
   identity registration和本阶段transport/KUnit适配；
 - `anemone-kernel/src/device/{console.rs,devnum.rs}`与`anemone-kernel/src/main.rs`，只用于7.4的selected identity、
@@ -732,7 +737,7 @@ Stage-wide停止条件：
 
 Validation-only inputs：
 
-- `anemone-kernel/src/fs/{file.rs,iomux.rs,devfs/,api/read_write/,api/iomux/}`、`device/char/`、
+- `anemone-kernel/src/fs/{iomux.rs,devfs/,api/read_write/,api/iomux/}`、`device/char/`、
   `device/discovery/open_firmware/`、kthread/Event/Latch/wait/scheduler、task topology/Signal/jobctl；
 - Stage 1全部diff/source/log、current contracts、register、RFC invariants/tracking/backgrounds与Linux 6.6.32
   asm-generic UAPI/TTY source；
@@ -742,8 +747,9 @@ Validation-only inputs：
 
 不允许触碰：
 
-- generic VFS/FileOps/iomux/devfs implementation、CharDev、IRQ core、kthread/Event/Latch/wait/scheduler、task
-  topology/Session/ProcessGroup/Signal/jobctl、pretest rootfs、`user-test`/LTP profile、register/current limitations；
+- generic VFS/FileOps implementation（除上述typed accessor）、iomux/devfs implementation、CharDev、IRQ core、
+  kthread/Event/Latch/wait/scheduler、task topology/Session/ProcessGroup/Signal/jobctl、pretest rootfs、
+  `user-test`/LTP profile、register/current limitations；
 - Stage 3/4 relation、`/dev/tty`、signal/access/lifecycle实现；alpha worktree、external source、BusyBox原件和
   测试盘master。
 

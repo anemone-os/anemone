@@ -1,11 +1,11 @@
 # 2026-07-23 - TTY Subsystem
 
-**Status:** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Active / Checkpoint 2 Stopped at Preflight
+**Status:** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Active / Checkpoint 2 Active
 **Owners:** doruche, Codex
 **Area:** device / TTY / serial / VFS / signal / task topology / job control
 **Canonical Plan:** [RFC-20260722-tty-subsystem](../../rfcs/tty-subsystem/index.md), [目标与不变量](../../rfcs/tty-subsystem/invariants.md), [迁移实施计划](../../rfcs/tty-subsystem/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 2 Active / Checkpoint 1 Closed / Checkpoint 2 Not Started / Stopped at Preflight
+**Current Phase:** Stage 2 Active / Checkpoint 1 Closed / Checkpoint 2 Active
 
 ## Scope and contract boundary
 
@@ -668,3 +668,22 @@ generic VFS文件并扩大crate-internal API，命中checkpoint write-set/public
 **Result:** Checkpoint 2保持**Not Started / Stopped at Preflight**。没有C2 source、ABI、FileOps、readiness或contract diff；
 全部`TTY-*`继续Not Cut Over。等待对上述单文件generic VFS扩展的明确处置，不得改走global registry旁路，也不得进入
 Checkpoint 3。
+
+## Stage 2 / Checkpoint 2 write-set correction and activation - 2026-07-23
+
+**Authorization:** 用户审阅preflight stop后明确批准所报单文件扩展。C2 resolved source manifest新增
+`anemone-kernel/src/fs/file.rs`，且只允许增加immutable typed、crate-internal file private-data accessor；
+`fs/iomux.rs`、read/write/ioctl adapters和其它generic VFS仍为validation-only。入口为`dev/drc/omega@51825ad7`、
+worktree clean。
+
+**Route / boundary:** accessor只把`OpenedFile` owner安装的`AnyOpaque`按请求具体类型投影为共享`&T`，不返回mutable
+storage，不携带Task、fd table、status flags、position、uaccess或VFS guard，也不改变FileOps签名或其它backend行为。
+TTY opened file据此直接持`Arc<Terminal>`和窄wake capability，禁止改走rdev/inode/global registry lookup。该修正补全
+现有private-data producer/consumer pair，不改变R0 target、owner、external ABI、visible semantics、acceptance或contract；
+R0不递增，current contracts/register保持不变。
+
+**Review / validation delta:** C2 review增加accessor immutable/lifetime/type边界以及现有anonymous/char/eventfd backend
+不变审计；RV64 build/KUnit仍覆盖完整FileOps/UAPI/readiness matrix。用户本轮已处置LA64 build/runtime为Not Run，不能
+用RV64外推。若实现需要第二个generic accessor、mutable private state、FileOps ctx扩张或其它`fs/`写入，立即重新停止。
+
+**Activation:** Checkpoint 2恢复并进入**Active**。只实现C2，不进入Checkpoint 3；全部`TTY-*`继续Not Cut Over。
