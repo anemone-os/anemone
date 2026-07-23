@@ -5,7 +5,7 @@
 **Area:** build system / configuration / platform / repository workflow
 **Canonical Plan:** [RFC-20260722-system-target-model](../../rfcs/system-target-model/index.md), [目标与不变量](../../rfcs/system-target-model/invariants.md), [迁移实施计划](../../rfcs/system-target-model/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 1 Closed / Stage 2 Active / Checkpoints 2A-2C Closed / 2D Ready, Not Activated
+**Current Phase:** Stage 1 Closed / Stage 2 Closed / Checkpoints 2A-2D Closed / Stage 3 Outline
 
 ## Scope
 
@@ -432,3 +432,85 @@ legacy residual均闭合；Reviewer只读，未编辑、暂存、提交或进入
 **Result:** Checkpoint 2C Closed；没有命中target/owner/public API/shared-contract/ABI/visible-semantics/
 acceptance停止条件；Contract cutover仍为None，`BOOT-PROTOCOL-001` effective baseline与pending successor不变。
 Checkpoint 2D保持Ready / Not Activated，不因本closure自动进入。
+
+## Checkpoint 2D activation - 2026-07-23
+
+**Status:** Active；Stage 2仍为Active；Stage 3保持Outline。
+
+用户对Stage 2最后两个checkpoint的明确授权在2C独立关闭并以`1daea8fa`提交后才单独激活2D。Activation
+preflight读取2C committed diff、latest independent review、validation evidence、Stage 2 Ready definition/
+full manifest、R0 target/invariants、register/current limitations、current transaction与live build/QEMU/
+wrapper/cleanup owner。2C atomic cutover保持single resolver、Platform bind与wrapper master-safety边界；没有
+新的target/owner/public API/shared-contract/ABI/visible-semantics/acceptance变化。
+
+2D只执行Ready definition中的normal-build independence、selection/clean matrix、fake exact QEMU、real RV64
+production wrapper、docs/status/residual与final review floor，并在finding只需Stage 2 full manifest内修复时继续。
+Root `kconfig`、local selection、root-level legacy disks与final master均视为validation-only用户状态：执行前记录
+身份/内容，必要的临时隐藏或重置后逐字节恢复，master只读。若缺master/sudo/host tool/runtime资源，2D保持
+Active并准确记录Not Run；若命中Stage 2停止条件则停止。Contract cutover仍为None；不得运行或解析Stage 3
+resolution gate。
+
+## Checkpoint 2D write-set expansion - 2026-07-23
+
+**Status:** Approved；Checkpoint 2D与Stage 2仍为Active；Stage 3保持Outline。
+
+Latest-byte tracked residual audit发现`.github/workflows/ci.yml`仍通过`conf switch`依赖并改写interactive
+selection，`.vscode/tasks.json`的两份QEMU task仍发布已删除的`--platform/--image`入口；两者均是live
+automation/workflow consumer，且原frozen manifest未包含它们。Implementer据此先停止，没有提前修改越界文件，
+并上报扩展理由、文件范围、contract影响和验证计划。
+
+用户批准把两份文件纳入2D，且明确CI必须同步适配。Authoritative manifest先扩展为
+`.github/workflows/ci.yml`与`.vscode/tasks.json`，随后才允许编辑consumer：CI改用显式RV64/LA64 release
+preset，VS Code QEMU task改用对应显式preset和`kernel-image` bind，并保留现有debug与日志目的地。该扩展只
+迁移2C cutover遗漏的workflow consumer，不改变target、owner、public API、shared contract、ABI、visible
+semantics或acceptance boundary；R0、Contract cutover None与Stage 3边界不变。验证增加workflow syntax、CI
+两条显式preset build、两份task的fake-QEMU exact invocation以及全tracked legacy CLI residual audit。
+
+## Checkpoint 2D closure - 2026-07-23
+
+**Status:** Closed；Stage 2 Closed；Stage 3保持Outline / Not Resolved。
+
+**Change:** 2D完成2A-2C latest bytes的integration/production validation、consumer residual closure、
+independent final review与lifecycle write-back。获批扩展把CI迁移为显式
+`qemu-virt-{rv64,la64}-release` preset build，并把两份VS Code QEMU task迁移为对应显式preset、唯一
+`kernel-image` bind、既有debug与日志目的地。没有修改current contract、register、其它RFC或Stage 3实现。
+
+**Build/config validation:** `just clean`保留用户`kconfig`与初始缺席的local selection；`just defconfig`
+只生成KernelConfig且不含legacy `[build]`，随后将用户文件逐字节恢复。Default/local set-show-clear、invalid
+local fail-closed、explicit覆盖invalid local、complete/incomplete low-level tuple与physical-QEMU unsupported
+matrix通过。Rootfs/runtime/legacy disk路径缺席且PATH前置必失败fake QEMU时，RV64/LA64 explicit pretest
+preset normal build均成功，证明build不启动QEMU或读取runtime bind；两架构均从committed DTS产生build-local
+DTB，source tree没有generated DTB。沙箱内首次lwext4 build因seccomp触发`Bad system call (159)`；相同构建
+在沙箱外成功，归类为执行环境限制而非source failure。
+
+**Workflow validation:** CI中的精确命令
+`just build --preset qemu-virt-rv64-release && just build --preset qemu-virt-la64-release`在沙箱外原样通过；
+RV64与LA64均完成release build。`actionlint`在host不可用；Ruby YAML parser与source assertion验证CI语法和
+显式preset，JSONC结构解析与`jq` assertion验证两份VS Code命令。PATH前置`true` fake并以`strace execve`
+捕获两份task，分别得到fixed `qemu-system-riscv64` / `qemu-system-loongarch64`、`-s -S`及
+`-kernel build/anemone.elf`的exact argv；sandbox禁止ptrace，捕获在沙箱外完成且未启动真实QEMU。
+Live workflow residual audit未发现`conf switch`、legacy build `-k`、QEMU `--platform/--image`或dbg launcher
+consumer；Cred Merge旧implementation中的`conf switch`经用户确认属于已关闭RFC的历史材料，不迁移。
+
+**Runtime validation:** Fake pretest QEMU exact argv继续为RV64 34 tokens、LA64 28 tokens，bind order、debug
+tokens与三个host path精确；show-bindings、live help、legacy rejection和两份wrapper `bash -n`通过。真实
+`./scripts/run-user-test-rv64.sh etc/final/images/sdcard-rv.img
+build/system-target-stage2-rv64.log`退出0：wrapper使用显式preset与完整bind map，runtime test disk位于
+`build/runtime/pretest-rv64/disk-x0.img`，guest打印`user-test: all competition tests finished.`与
+`user-test: all tests finished, shutting down.`并正常关机。只读master前后SHA-256均为
+`2f7e3529cee1f88fb88535c0dcb0b1a7ee463ebdb76131180623af0519a5e9fb`，master与runtime副本为不同regular-file
+inode；用户`kconfig`最终SHA-256保持
+`afc5faf697f2d7ef095c83d7412b7f2e7bb16db5b29afb30977ce6852c2a569f`，local selection恢复为初始缺席。
+Final image缺少LTP executable，配置的signal/wait groups只报告skip，因此本次不声明完整LTP证据。
+
+**Tests/docs/review:** `just xtask-test`为50 passed / 0 failed；tracked Platform/SystemTarget/BuildPreset与
+default selection schema/load matrix通过；live help与全部legacy CLI rejection通过；wrapper syntax、
+write-set、ignored-local、tracked residual、相对链接、状态残留、`git diff --check`与`mdbook build docs`
+通过。Independent latest-byte reviewer结论为Apollyon 0 / Keter 0 / Euclid 0 / Safe 0；reviewer只读，
+没有编辑、暂存、提交或运行Stage 3 gate。
+
+**Not Run / Result:** 真实LA64 QEMU、physical board、完整LTP与final harness均Not Run，按Ready definition
+不属于Stage 2 closure floor。2A-2D已分别关闭，Stage 2没有命中target/owner/public API/shared-contract/
+ABI/visible-semantics/acceptance停止条件；Contract cutover仍为None，`BOOT-PROTOCOL-001` effective baseline
+与pending successor不变。Stage 3保持Outline，本closure没有运行或解析`Stage 2 -> Stage 3
+Implementation Resolution Gate`。
