@@ -72,7 +72,8 @@ impl<'a> UbootPostLink<'a> {
             fs::create_dir_all(parent)?;
         }
 
-        // A failed post-link must not leave a previous image looking like this build's output.
+        // A failed post-link must not leave a previous image looking like this build's
+        // output.
         self.remove_outputs()?;
         let result = [PostLinkStep::Objcopy, PostLinkStep::Mkimage]
             .into_iter()
@@ -114,10 +115,7 @@ impl<'a> UbootPostLink<'a> {
             PostLinkStep::Mkimage => {
                 log_progress!(
                     "UBOOT",
-                    &format!(
-                        "Generating U-Boot image '{}'",
-                        self.legacy_output.display()
-                    )
+                    &format!("Generating U-Boot image '{}'", self.legacy_output.display())
                 );
                 let mut command = Command::new("mkimage");
                 command
@@ -232,11 +230,7 @@ mod tests {
         );
         let mut commands = Vec::new();
         plan.execute_with(|step, command| {
-            commands.push((
-                step,
-                command.get_program().to_os_string(),
-                args(command),
-            ));
+            commands.push((step, command.get_program().to_os_string(), args(command)));
             Ok(())
         })
         .unwrap();

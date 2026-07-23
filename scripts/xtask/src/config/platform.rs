@@ -109,6 +109,16 @@ pub struct Dtb {
     pub delivery: DtbDelivery,
     pub authority: DtsAuthority,
     pub provider: Option<DtbProvider>,
+    #[serde(rename = "firmware-baseline")]
+    pub firmware_baseline: Option<FirmwareDtbBaseline>,
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct FirmwareDtbBaseline {
+    pub provenance: FirmwareDtbProvenance,
+    pub allowed_runtime_differences: Vec<FirmwareRuntimeDifference>,
+    pub runtime_validation_owner: FirmwareRuntimeValidationOwner,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -141,6 +151,25 @@ pub enum DtsAuthority {
 #[serde(rename_all = "kebab-case")]
 pub enum DtbProvider {
     Qemu,
+    Firmware,
+}
+
+#[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum FirmwareDtbProvenance {
+    UbootHardwareExport,
+}
+
+#[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum FirmwareRuntimeDifference {
+    ChosenRngSeed,
+}
+
+#[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum FirmwareRuntimeValidationOwner {
+    PlatformMaintainer,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -248,11 +277,37 @@ impl Dtb {
         {
             anyhow::bail!("DT source must be a workspace-relative path");
         }
-        match (self.delivery, self.authority, self.provider) {
-            (DtbDelivery::Firmware, DtsAuthority::ProviderDerived, Some(DtbProvider::Qemu))
-            | (DtbDelivery::Embedded, DtsAuthority::Normative, None) => Ok(()),
+        match (
+            self.delivery,
+            self.authority,
+            self.provider,
+            self.firmware_baseline.as_ref(),
+        ) {
+            (
+                DtbDelivery::Firmware | DtbDelivery::Embedded,
+                DtsAuthority::ProviderDerived,
+                Some(DtbProvider::Qemu),
+                None,
+            )
+            | (DtbDelivery::Embedded, DtsAuthority::Normative, None, None) => Ok(()),
+            (
+                DtbDelivery::Firmware,
+                DtsAuthority::ProviderDerived,
+                Some(DtbProvider::Firmware),
+                Some(baseline),
+            ) => {
+                let unique = baseline
+                    .allowed_runtime_differences
+                    .iter()
+                    .copied()
+                    .collect::<HashSet<_>>();
+                if unique.len() != baseline.allowed_runtime_differences.len() {
+                    anyhow::bail!("firmware DT allowed runtime differences must be unique");
+                }
+                Ok(())
+            },
             _ => anyhow::bail!(
-                "invalid DT contract: firmware delivery requires provider-derived authority and provider=qemu; embedded delivery requires normative authority and no provider"
+                "invalid DT contract: qemu-derived authority supports firmware or embedded delivery without firmware-baseline metadata; firmware-derived authority requires firmware delivery and firmware-baseline metadata; embedded normative authority has no provider or firmware-baseline metadata"
             ),
         }
     }
@@ -301,10 +356,84 @@ mod tests {
     #[test]
     fn accepts_supported_dtb_contracts() {
         let firmware = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
+        let physical =
+            std::fs::read_to_string("../../conf/platforms/visionfive2-rv64.toml").unwrap();
         let embedded = std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
 
         assert!(Config::from_str(&firmware).is_ok());
+        let physical = Config::from_str(&physical).unwrap();
+        let baseline = physical.dtb.unwrap().firmware_baseline.unwrap();
+        assert_eq!(
+            baseline.provenance,
+            FirmwareDtbProvenance::UbootHardwareExport
+        );
+        assert_eq!(
+            baseline.allowed_runtime_differences,
+            [FirmwareRuntimeDifference::ChosenRngSeed]
+        );
+        assert_eq!(
+            baseline.runtime_validation_owner,
+            FirmwareRuntimeValidationOwner::PlatformMaintainer
+        );
         assert!(Config::from_str(&embedded).is_ok());
+    }
+
+    #[test]
+    fn tracked_platforms_form_the_complete_dt_authority_matrix() {
+        for (name, delivery, authority, provider, qemu) in [
+            (
+                "example",
+                DtbDelivery::Firmware,
+                DtsAuthority::ProviderDerived,
+                Some(DtbProvider::Qemu),
+                true,
+            ),
+            (
+                "qemu-virt-rv64",
+                DtbDelivery::Firmware,
+                DtsAuthority::ProviderDerived,
+                Some(DtbProvider::Qemu),
+                true,
+            ),
+            (
+                "qemu-virt-rv64-pretest",
+                DtbDelivery::Firmware,
+                DtsAuthority::ProviderDerived,
+                Some(DtbProvider::Qemu),
+                true,
+            ),
+            (
+                "qemu-virt-la64",
+                DtbDelivery::Embedded,
+                DtsAuthority::ProviderDerived,
+                Some(DtbProvider::Qemu),
+                true,
+            ),
+            (
+                "qemu-virt-la64-pretest",
+                DtbDelivery::Embedded,
+                DtsAuthority::ProviderDerived,
+                Some(DtbProvider::Qemu),
+                true,
+            ),
+            (
+                "visionfive2-rv64",
+                DtbDelivery::Firmware,
+                DtsAuthority::ProviderDerived,
+                Some(DtbProvider::Firmware),
+                false,
+            ),
+        ] {
+            let content =
+                std::fs::read_to_string(format!("../../conf/platforms/{name}.toml")).unwrap();
+            let config = Config::from_str(&content).unwrap();
+            let dtb = config.dtb.unwrap();
+            assert_eq!(dtb.delivery, delivery, "{name}");
+            assert_eq!(dtb.authority, authority, "{name}");
+            assert_eq!(dtb.provider, provider, "{name}");
+            assert_eq!(dtb.firmware_baseline.is_some(), name == "visionfive2-rv64");
+            assert_eq!(config.qemu.is_some(), qemu, "{name}");
+        }
     }
 
     #[test]
@@ -313,7 +442,6 @@ mod tests {
 
         for invalid in [
             valid.replace("provider = \"qemu\"\n", ""),
-            valid.replace("delivery = \"firmware\"", "delivery = \"embedded\""),
             valid.replace(
                 "authority = \"provider-derived\"",
                 "authority = \"normative\"",
@@ -332,7 +460,27 @@ mod tests {
         }
 
         let embedded = std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
-        assert!(Config::from_str(&format!("{embedded}\nprovider = \"qemu\"\n")).is_err());
+        let normative = embedded
+            .replace(
+                "authority = \"provider-derived\"",
+                "authority = \"normative\"",
+            )
+            .replace("provider = \"qemu\"\n", "");
+        assert!(Config::from_str(&normative).is_ok());
+
+        let physical =
+            std::fs::read_to_string("../../conf/platforms/visionfive2-rv64.toml").unwrap();
+        for invalid in [
+            physical.replace("delivery = \"firmware\"", "delivery = \"embedded\""),
+            physical.replace("provider = \"firmware\"", "provider = \"qemu\""),
+            physical.replace(
+                "allowed-runtime-differences = [\"chosen-rng-seed\"]",
+                "allowed-runtime-differences = [\"chosen-rng-seed\", \"chosen-rng-seed\"]",
+            ),
+            physical.replace("runtime-validation-owner = \"platform-maintainer\"\n", ""),
+        ] {
+            assert!(Config::from_str(&invalid).is_err(), "{invalid}");
+        }
     }
 
     #[test]

@@ -24,6 +24,7 @@ Then read the corresponding Justfile recipe and xtask task. Help output defines 
 | Build an app | `just app ...` or the app xtask interface | app manifest, app task, selected architecture |
 | Materialize a rootfs | `just rootfs ...` or the rootfs xtask interface | rootfs manifest, host inputs, app manifests, rootfs task |
 | Run QEMU | `just qemu ...` | explicit selection for automation, selected Platform bind declarations, firmware/device/image inputs |
+| Check or refresh a QEMU DT baseline | `just qemu dt refresh ...` | explicit Platform, DT authority/provider, topology-only QEMU inputs, source write authorization |
 | Clean outputs | `just clean` | live recipe and cleanup task |
 | Run pretest/end-to-end validation | existing architecture-specific repository wrapper | the entire wrapper, local prerequisites, requested validation scope |
 
@@ -66,6 +67,11 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 - Validate firmware and fixed device tokens from the live Platform file, then provide every declared QEMU bind as an invocation path.
 - Distinguish launch/configuration failures from guest boot failures.
 - When DTB is involved, inspect both the build-time generator and runtime QEMU path rather than assuming they use identical inputs.
+- For DT maintenance, use the nested QEMU action with an explicit Platform. Confirm it does not
+  resolve a SystemTarget or consume ordinary QEMU args/binds, and use check mode before accepting a
+  provider-derived baseline update. This write authority is independent of firmware versus embedded
+  delivery. QEMU-backed normative baselines are check-only, while physical firmware baselines do not
+  support the action.
 
 ### Cleanup And End-To-End Wrappers
 

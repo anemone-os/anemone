@@ -9,6 +9,7 @@
 #![allow(unused)]
 
 use clap::{Parser, Subcommand};
+use std::process::ExitCode;
 
 mod config;
 mod tasks;
@@ -42,7 +43,17 @@ enum Commands {
     Clean,
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Error: {error:#}");
+            ExitCode::from(tasks::qemu::error_exit_status(&error))
+        },
+    }
+}
+
+fn run() -> anyhow::Result<()> {
     // xtask cwd: scripts/xtask
     // we need to cd to workspace root
     std::env::set_current_dir("../..")?;
@@ -109,6 +120,31 @@ mod tests {
                 "kernel-image=build/anemone.elf",
             ])
             .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xtask",
+                "qemu",
+                "dt",
+                "refresh",
+                "--platform",
+                "qemu-virt-rv64",
+                "--check",
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xtask",
+                "qemu",
+                "--preset",
+                "qemu-virt-rv64-release",
+                "dt",
+                "refresh",
+                "--platform",
+                "qemu-virt-rv64",
+            ])
+            .is_err()
         );
     }
 }

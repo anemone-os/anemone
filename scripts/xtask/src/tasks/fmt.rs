@@ -4,7 +4,7 @@ use std::{
     process::Command,
 };
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use clap::Args;
 
 use crate::{log_progress, tasks::utils::cmd_echo};

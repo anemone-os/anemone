@@ -1,7 +1,8 @@
 //! SystemTarget-owned boot and root selection.
 //!
 //! The Stage 1B cutover removed the legacy Platform root fields. Production
-//! build resolution must use this value and must not recreate a Platform fallback.
+//! build resolution must use this value and must not recreate a Platform
+//! fallback.
 
 use serde::Deserialize;
 

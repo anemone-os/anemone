@@ -49,9 +49,7 @@ impl FsType {
                     Command::new("virt-make-fs")
                 };
 
-                command
-                    .arg("--type=ext4")
-                    .arg("--format=raw");
+                command.arg("--type=ext4").arg("--format=raw");
                 if let Some(size) = size {
                     command.arg(format!("--size={size}"));
                 }
@@ -97,18 +95,11 @@ impl FsType {
         match self {
             FsType::Ext4 => {
                 let mut command = Command::new("cp");
-                command
-                    .arg(base_image)
-                    .arg(output);
+                command.arg(base_image).arg(output);
                 run_command(&mut command, "failed to copy rootfs base image")?;
 
                 if let Some(override_tree) = override_tree {
-                    copy_tree_into_image(
-                        override_tree,
-                        output,
-                        use_sudo,
-                        "rootfs override",
-                    )?;
+                    copy_tree_into_image(override_tree, output, use_sudo, "rootfs override")?;
                 }
                 copy_tree_into_image(
                     generated_tree,

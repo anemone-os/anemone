@@ -4,8 +4,8 @@
 **Owners:** doruche, Codex
 **Area:** build system / configuration / platform / repository workflow
 **Canonical Plan:** [RFC-20260722-system-target-model](../../rfcs/system-target-model/index.md), [目标与不变量](../../rfcs/system-target-model/invariants.md), [迁移实施计划](../../rfcs/system-target-model/implementation.md)
-**Canonical Revision:** R0
-**Current Phase:** Stage 1 Closed / Stage 2 Closed / Checkpoints 2A-2D Closed / Stage 3 Ready
+**Canonical Revision:** R1（R0初始接受；Stage 3期间完成DT authority renegotiation）
+**Current Phase:** Stage 1-3 Closed / Stage 4 Outline / Not Resolved
 
 ## Scope
 
@@ -17,10 +17,13 @@ schema、typed reference与loader，1B完成single resolver snapshot和build con
 后续用户明确授权完成Stage 2最后两个checkpoint。该授权仍按2C、2D分别activation、review、验证、
 回写和提交；2C关闭不自动启动2D，2D关闭不自动运行Stage 3 resolution gate。
 
+用户随后以“完成Stage 3”为唯一授权；Stage 2关闭后的独立resolution gate只解析Checkpoint 3A，
+该checkpoint关闭不运行或解析Stage 4 resolution gate。
+
 ## Contract and register boundary
 
-本Stage不执行current-contract cutover。`BOOT-PROTOCOL-001` R0 Refine保持pending successor，现有
-rootfs metadata到ordinary `kernel_execve()`的effective baseline继续生效。2026-07-23 preflight读取
+本Stage不执行current-contract cutover。`BOOT-PROTOCOL-001`在R0中引入且未被R1改变的Refine保持pending
+successor，现有rootfs metadata到ordinary `kernel_execve()`的effective baseline继续生效。2026-07-23 preflight读取
 register、open issues与current limitations，未发现与Stage 1冲突的active build/boot issue。
 
 ## R0 acceptance and Stage 1 activation - 2026-07-23
@@ -541,3 +544,100 @@ definition、validation floor、stop/recovery与完整manifest只位于RFC `impl
 lifecycle/status与write-set文本审计，并运行`mdbook build docs`。Xtask tests、真实QEMU DT check、normal build、
 physical board、LTP与final harness均Not Run；它们属于Checkpoint 3A execution floor，不是docs-only resolution
 证据。Resolution不自动激活3A。
+
+## Checkpoint 3A activation - 2026-07-23
+
+**Status:** Active；Stage 3 Active；Stage 4保持Outline / Not Resolved。
+
+用户对“完成Stage 3”的唯一授权在Stage 2独立关闭且`Stage 2 -> Stage 3 Implementation Resolution
+Gate`完成后激活Checkpoint 3A。Activation preflight重新读取AGENTS/LOCAL、R0 target/invariants、Ready
+definition、tracking/register、current transaction、Stage 2最终证据，以及live Platform parser/schema、
+全部tracked Platform、normal-build DT pipeline、ordinary QEMU task/help和build-system skill。
+
+Preflight确认3A仍是单一Platform/QEMU-DT owner-local闭包：nested maintenance action直接加载
+PlatformRef，QEMU provider只消费topology snapshot；VisionFive只增加firmware-derived conformance
+baseline分类，不改变physical runtime FDT或U-Boot/firmware handoff。未发现target、owner、public API、
+shared contract、ABI、visible semantics或acceptance boundary变化；Contract cutover为None，
+`BOOT-PROTOCOL-001` effective baseline与pending successor不变。执行严格使用Ready definition冻结的
+write subset与validation floor；命中停止信号时先停止，不进入Stage 4 resolution gate。
+
+## Checkpoint 3A route correction - 2026-07-23
+
+**Status:** Applied；Checkpoint 3A与Stage 3仍为Active。
+
+Latest-byte review发现Ready解析把“只有`provider = "qemu"`允许maintenance action”写得过窄，若按字面实现会
+连LA64 normative DTS的`--check`一起拒绝；R0 accepted `STM-QEMU-DT-001`明确规定normative source只允许
+`--check`、只禁止mutating refresh。该差异是保持target的stage-plan错误，不是target renegotiation。
+
+Authoritative Ready definition先修正为三类权限：QEMU provider-derived允许check与mutating；QEMU-backed
+normative只允许check；physical firmware/no-QEMU全部fail-closed。实现与验证随后按该矩阵修复，并增加真实
+LA64 check、normative mutating拒绝与source哈希不变证据。该correction不改变owner、public API、shared
+contract、ABI、visible target semantics或acceptance boundary，不扩大write set；R0与Contract cutover None
+保持不变。
+
+## Checkpoint 3A review hold and R1 target renegotiation - 2026-07-23
+
+**Status:** R1 Accepted for Implementation；Checkpoint 3A与Stage 3恢复Active；Stage 4保持Outline / Not
+Resolved。
+
+Independent latest-byte review首先形成Apollyon 0 / Keter 3 / Euclid 1。Keter指出VisionFive只写
+`provider = "firmware"`不能证明实际firmware provenance、允许差异或runtime validation owner；新增DTS注释
+不是refresh drift，越出frozen write set；RFC/navigation仍有stale lifecycle。Euclid指出disposable directory与
+atomic-update failure cleanup吞掉删除错误。Implementer删除越界DTS注释，并只读审计Git history、notes、refs、
+相邻事务与source：`visionfive2-board.dts`只可追溯到`c2c37747 feat: mmc scanner`，仓库没有capture来源。
+由于无法指出machine-fact唯一owner，3A按停止合同暂停，没有提交或关闭Stage 3。
+
+用户随后提供并确认两项authority证据：LA64 DTS由QEMU导出且QEMU继续拥有machine fact，embedded只描述
+delivery；`visionfive2-board.dts`由当前supported VisionFive 2硬件通过U-Boot导出，应作为唯一canonical
+baseline，未被live Platform引用且与硬件结果不同的官方
+`jh7110-starfive-visionfive-2-v1.3b.dts`删除。该决定改变R0的DT authority target，因此进入并接受R1 Target
+Renegotiation Gate，而不是作为implementation correction静默吸收。
+
+R1将delivery与authority解耦：RV64和LA64 QEMU Platform均为provider-derived，分别保持firmware与embedded
+delivery；VisionFive closed firmware-baseline metadata记录`uboot-hardware-export` provenance、只允许volatile
+`/chosen/rng-seed`差异，并指定Platform maintainer在板级/U-Boot更新时拥有runtime FDT对照验证。其它差异必须
+先回Platform DT review；本gate不新增kernel runtime拒绝语义。Write set获批最小扩展到RFC `invariants.md`/
+`tracking-issues.md`、两份LA64 manifest和删除未使用官方DTS。Contract Impact仍只有pending
+`BOOT-PROTOCOL-001` Refine；current contract、physical U-Boot handoff、root-mount ABI、public runtime API和
+Stage 4边界不变。
+
+## Checkpoint 3A closure - 2026-07-23
+
+**Status:** Closed；Stage 3 Closed；Stage 4保持Outline / Not Resolved。
+
+**Change:** ordinary QEMU namespace新增`dt refresh --platform <qemu-platform> [--check]`，直接读取
+Platform topology snapshot并共用一条`dumpdtb -> dtc canonicalize -> compare`管线。Drift使用专用status
+3；config/tool/QEMU/cleanup失败保持status 1。Default refresh只可原子更新
+`provider-derived + provider=qemu` baseline，并记录provider/command provenance；normative source只可
+check，physical firmware source与无QEMU capability的Platform fail-closed。临时目录与同目录atomic-update
+文件的清理失败进入action result；drift与cleanup同时失败时保留两条诊断并返回status 1。
+
+R1最终DT矩阵将RV64与LA64 QEMU Platform都标为provider-derived/QEMU authority，分别保持firmware与
+embedded delivery；VisionFive使用当前supported硬件经U-Boot导出的`visionfive2-board.dts`作为唯一
+firmware-derived baseline，并记录capture provenance、允许的`/chosen/rng-seed`差异与runtime validation
+owner。未被live Platform消费且与硬件导出不同的官方DTS已删除。普通build仍只消费committed DTS，不启动
+QEMU；delivery不再反向决定authority或maintenance write permission。
+
+**Review:** closure前latest-byte复核为Apollyon 0 / Keter 1 / Euclid 0 / Safe 0；唯一Keter是RFC、transaction
+与导航尚未原子同步Stage 3 closure，本节及同一write-back已neutralize。最终latest-byte复核逐项检查实现、
+R1 authority/delivery矩阵、删除未使用官方DTS、lifecycle、Stage 4边界、write set与证据诚实性，结论为
+Apollyon 0 / Keter 0 / Euclid 0 / Safe 0。
+
+**Validation:** 最终代码字节运行`just xtask-test`，58 passed / 0 failed，覆盖closed DT schema矩阵、nested
+CLI、topology-only argv、canonicalization、drift/error/cleanup exit分类、atomic update与temporary cleanup。
+四份QEMU Platform真实`--check`通过；LA64 embedded/provider-derived default refresh返回0且source SHA-256
+不变。Disposable LA64 drift fixture证明check为3且不写source、mutating refresh为0并写入provenance、再次
+check为0；normative/physical maintenance fail-close返回普通error且不改source。Fake QEMU failure返回1且
+没有遗留`/tmp/anemone-qemu-dt-*`。
+
+RV64、LA64与VisionFive explicit release build均在PATH前置failing QEMU时通过，证明normal build不启动QEMU；
+VisionFive选择`visionfive2-board.dts`并生成有效U-Boot image。三类selected DTS的compile/decompile通过，只有
+既有dtc warning；live QEMU/DT help、Draft 7 JSON Schema与全部6份Platform验证通过。最终relative-link、
+lifecycle、write-set/residual、targeted rustfmt、whitespace与mdBook验证通过，mdBook只报告既有large
+search-index warning；`/tmp`没有遗留`anemone-*`临时项。Rustfmt递归触及的四个相邻xtask文件只有机械格式
+变化，按仓库AGENTS格式化规则保留。Physical board、LTP与final harness均Not Run，不属于Stage 3 closure
+floor。
+
+**Contract / Exit:** 没有新增current-contract cutover；`BOOT-PROTOCOL-001` effective baseline与R1 pending
+successor不变。Checkpoint 3A和Stage 3关闭不激活、运行或解析`Stage 3 -> Stage 4 Implementation Resolution
+Gate`。

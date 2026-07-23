@@ -147,7 +147,37 @@
                     ]
                 },
                 "provider": {
-                    "const": "qemu"
+                    "enum": [
+                        "qemu",
+                        "firmware"
+                    ]
+                },
+                "firmware-baseline": {
+                    "type": "object",
+                    "description": "Closed provenance and runtime-validation contract for a physical firmware-derived baseline.",
+                    "properties": {
+                        "provenance": {
+                            "const": "uboot-hardware-export"
+                        },
+                        "allowed-runtime-differences": {
+                            "type": "array",
+                            "items": {
+                                "enum": [
+                                    "chosen-rng-seed"
+                                ]
+                            },
+                            "uniqueItems": true
+                        },
+                        "runtime-validation-owner": {
+                            "const": "platform-maintainer"
+                        }
+                    },
+                    "required": [
+                        "provenance",
+                        "allowed-runtime-differences",
+                        "runtime-validation-owner"
+                    ],
+                    "additionalProperties": false
                 }
             },
             "required": [
@@ -159,15 +189,37 @@
             "oneOf": [
                 {
                     "properties": {
+                        "authority": {
+                            "const": "provider-derived"
+                        },
+                        "provider": {
+                            "const": "qemu"
+                        }
+                    },
+                    "required": [
+                        "provider"
+                    ],
+                    "not": {
+                        "required": [
+                            "firmware-baseline"
+                        ]
+                    }
+                },
+                {
+                    "properties": {
                         "delivery": {
                             "const": "firmware"
                         },
                         "authority": {
                             "const": "provider-derived"
+                        },
+                        "provider": {
+                            "const": "firmware"
                         }
                     },
                     "required": [
-                        "provider"
+                        "provider",
+                        "firmware-baseline"
                     ]
                 },
                 {
@@ -180,8 +232,17 @@
                         }
                     },
                     "not": {
-                        "required": [
-                            "provider"
+                        "anyOf": [
+                            {
+                                "required": [
+                                    "provider"
+                                ]
+                            },
+                            {
+                                "required": [
+                                    "firmware-baseline"
+                                ]
+                            }
                         ]
                     }
                 }

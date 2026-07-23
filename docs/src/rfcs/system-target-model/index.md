@@ -1,27 +1,27 @@
 # RFC-20260722-system-target-model
 
-**状态：** Accepted for Implementation（Stage 1-2 Closed；2A-2D Closed；Stage 3 Ready）
-**修订：** R0
+**状态：** Accepted for Implementation（Stage 1-3 Closed；Stage 4 Outline / Not Resolved）
+**修订：** R1
 **负责人：** doruche
 **最后更新：** 2026-07-23
 **领域：** build system / configuration / platform / repository workflow
 **事务日志：** [2026-07-22-system-target-model](../../devlog/transactions/2026-07-22-system-target-model.md)
-**影响契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--rootfs-metadata选择初始用户程序)（Refine；当前仍由 effective baseline 生效，R0 target 尚未 cut over）。
+**影响契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--rootfs-metadata选择初始用户程序)（Refine；当前仍由 effective baseline 生效，R1 target 尚未 cut over）。
 **开放问题：** None；已确认问题已折回 target 或分流到
 [迁移实施计划](./implementation.md) 的 feedback/preflight gate。
-**下一步：** Stage 2已关闭；Stage 3已由独立Resolution Gate解析为单一Checkpoint 3A并保持Ready，
-等待既有用户授权下的独立activation。
+**下一步：** Stage 3与唯一Checkpoint 3A已关闭；Stage 4保持Outline / Not Resolved，尚未运行
+`Stage 3 -> Stage 4 Implementation Resolution Gate`。
 
 ## 文档状态
 
-本文是 R0 accepted target 的 canonical source；它不是 current contract 或 resolved write set。
+本文是 R1 accepted target 的 canonical source；它不是 current contract 或 resolved write set。
 本文把已经形成的 system-target 定位共识展开为实施目标，并取代历史 positioning 文档作为
 本 RFC 的 target authority。
 
 本目录同时提供 [迁移实施计划](./implementation.md)，用于约束后续 stage envelope、feedback
 gate、停止条件与回写路径。Stage 1与Stage 2的全部checkpoint均已独立关闭；Stage 3已解析为
-Ready，但尚未激活。实际执行证据由transaction记录；
-`BOOT-PROTOCOL-001` contract cutover仍未发生。Stage 3 Ready不自动进入Active。
+Ready，并已由独立用户授权执行和关闭。实际执行证据由transaction记录；
+`BOOT-PROTOCOL-001` contract cutover仍未发生。
 
 ## 摘要
 
@@ -147,7 +147,7 @@ live build path 当前具有以下事实：
 
 ## 文档地图
 
-当前 R0 accepted target：
+当前 R1 accepted target：
 
 - [目标与不变量](./invariants.md)：target rules、唯一 owner、resolved snapshot、action scope、
   platform kernel outputs、DT 与 workflow 同步边界。
@@ -171,7 +171,7 @@ Review 状态：
 已完成；Stage 1 Ready definition/manifest已冻结。R0 acceptance、transaction creation 与
 Stage 1 activation 已在 2026-07-23 独立闭合；Checkpoint 1A-1D已依次独立关闭，Stage 1 Closed。
 后续独立resolution gate已把Stage 2解析为Ready；2A-2D随后分别独立激活并关闭。Stage 3现已由
-后续独立resolution gate解析为Ready。
+后续独立resolution gate解析并激活；R1 DT authority renegotiation在Stage 3停止后由用户接受。
 
 ## 术语与 owner
 
@@ -484,12 +484,14 @@ bind不会把人工path映射升级为artifact consumer关系，也不能从temp
 ### Device tree
 
 每个 supported platform 提交可 review 的 DTS；生成 DTB 位于 build output，不提交。
-Platform 必须声明 `firmware` 或 `embedded` delivery，并为 manifest 与 DTS 中的每项
-machine fact 指定唯一规范 owner。
+Platform 必须分别声明 runtime delivery、committed DTS authority与provider，并为manifest、DTS和runtime
+FDT中的每项machine fact指定唯一规范owner。Delivery与authority是正交维度：前者说明DTB如何进入内核，
+后者说明committed DTS是规范source还是provider snapshot。
 
-- `embedded`：committed DTS 是 normative source，普通 build 使用 `dtc` 生成并嵌入；
-- `firmware`：runtime FDT 由 firmware/provider 提供，committed DTS 是带 provenance
-  的 conformance baseline，并声明允许差异与验证 owner；
+- `embedded`：普通build使用`dtc`生成并嵌入DTB；DTS可以是normative source，也可以是QEMU
+  provider-derived baseline；
+- `firmware`：runtime FDT由firmware/provider提供；当前supported Platform使用带provenance的
+  provider-derived conformance baseline，并声明允许差异与验证owner；
 - QEMU dumpdtb 只用于显式 `qemu dt refresh [--check]`，不属于普通 build dependency；
 - 该 action 不读取用户 rootfs 或测试盘，不要求真实 runtime backend 占位；
 - 所有 platform 的 DTS compile、authority 与 delivery consistency validation 仍由 Platform DT
@@ -569,11 +571,13 @@ R0 acceptance gate 已于 2026-07-23 核对并确认：
 - [迁移实施计划](./implementation.md) 已通过初始 `Implementation Resolution Gate` 把 Stage 1
   的交付、实现路线或 probe、审计、可观测性、验证、停止/退出条件、contract cutover 与
   `Resolved Write Set Manifest` 完整解析为 Ready，Stage 1现已完成并关闭；后续独立resolution gate
-  已把Stage 2完整解析为Ready，2A-2D随后分别独立关闭，Stage 3及更远阶段保持Outline。
+  已依次把Stage 2与Stage 3完整解析为Ready，2A-2D与3A随后分别独立关闭；Stage 4及更远阶段
+  保持Outline。
 
 [迁移实施计划](./implementation.md) 已记录允许带入实现的不确定性。Public promotion、首个
 Implementation Resolution Gate、R0 acceptance、transaction creation 与 Stage 1 activation 已按独立
-gate 完成；Checkpoint 1A-1D与2A-2D已独立关闭。Stage 3 Resolution Gate尚未运行。若
+gate 完成；Checkpoint 1A-1D与2A-2D已独立关闭，Stage 3已解析并激活。Stage 3 implementation反馈触发的
+DT authority renegotiation已由用户接受为R1，Checkpoint 3A与Stage 3随后关闭；Stage 4仍未解析。若后续
 feedback需要改变target invariant、owner、ABI、`Contract Impact`或acceptance boundary，当前gate必须
 停止并回到RFC review。
 
@@ -652,16 +656,18 @@ repackage 或 ELF-only 高频工作流来证明抽象价值。内部 post-link s
 
 ## 收口
 
-R0 已接受进入实现，Stage 1 已按用户授权完成，Checkpoint 1A-1D已依次独立关闭；独立的
+R1是当前accepted target。Stage 1已按用户授权完成，Checkpoint 1A-1D已依次独立关闭；独立的
 `Stage 1 -> Stage 2 Implementation Resolution Gate`已把Stage 2解析为Ready，2A随后独立激活并关闭。该gate
 确认ignored source-tree DTB使原Stage 2/3顺序无法直接成立，并在不改变R0 target的前提下把最小
 normal-build DT输入前移为2A；QEMU refresh和剩余per-platform closure仍留在Stage 3。R0 已删除独立
 package/output graph，并把 U-Boot固定为Platform-owned build post-link output；2B已以dormant foundation
 关闭，2C已完成atomic production cutover，2D已完成integration/production validation并关闭Stage 2。
-transaction记录实际checkpoint与resolution证据；Stage 3现为Ready / Not Activated。
+transaction记录实际checkpoint、resolution与R1 renegotiation证据；Stage 3与Checkpoint 3A已关闭，Stage 4保持
+Outline / Not Resolved。
 
 ## 修订记录
 
 | 修订 | 日期 | 状态 | 语义变化 | Review / 事务 |
 | --- | --- | --- | --- | --- |
+| R1 | 2026-07-23 | Accepted for Implementation | 将DT delivery与authority解耦；LA64 embedded DTS改为QEMU provider-derived baseline；VisionFive以硬件经U-Boot导出的DTS为唯一baseline并删除未使用的官方副本，补齐physical firmware provenance、允许差异与runtime validation owner。Contract Impact保持不变。 | [2026-07-22-system-target-model](../../devlog/transactions/2026-07-22-system-target-model.md) |
 | R0 | 2026-07-23 | Accepted for Implementation | 初始 accepted target；定义 system target、Platform、KernelConfig、BuildPreset、single resolved snapshot、Platform output 与 staged Boot Protocol Refine。 | [2026-07-22-system-target-model](../../devlog/transactions/2026-07-22-system-target-model.md) |

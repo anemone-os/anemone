@@ -52,4 +52,5 @@ template = [
 [dtb]
 source = "conf/platforms/qemu-virt-la64.dts"
 delivery = "embedded"
-authority = "normative"
+authority = "provider-derived"
+provider = "qemu"

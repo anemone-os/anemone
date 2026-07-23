@@ -67,8 +67,16 @@ Do not describe a proposed DTB workflow as an existing capability. Keep future d
 
 Normal kernel build compiles the selected Platform's committed DTS into a build-local DTB and does
 not launch QEMU or consume runtime disks. A firmware-delivered DTB may use the committed DTS as a
-provider conformance baseline; an embedded DTB consumes the committed normative source. Derive
-refresh/check capabilities from live QEMU task code instead of assuming they exist.
+provider conformance baseline; an embedded DTB may consume either a normative source or a QEMU
+provider-derived baseline. Delivery and authority are independent. Derive refresh/check capabilities
+from live QEMU task code instead of assuming they exist.
+
+A `provider = "qemu"` DT contract grants the QEMU-local maintenance action write authority over a
+provider-derived baseline. A `provider = "firmware"` contract records a physical firmware-derived
+baseline and grants no QEMU refresh capability. Both remain Platform-owned; neither changes the
+runtime FDT acceptance contract. Physical firmware baselines must also record closed capture
+provenance, allowed runtime differences, and the validation owner. A QEMU-backed normative DTS has a
+check-only comparison surface; the maintenance action must reject any attempt to update it.
 
 ## Staleness Check
 
