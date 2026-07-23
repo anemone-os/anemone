@@ -1,11 +1,11 @@
 # 2026-07-23 - TTY Subsystem
 
-**Status:** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Active / Checkpoint 1 Closed
+**Status:** Active / Stage 0 Closed / Stage 1 Closed / Stage 2 Active / Checkpoint 2 Stopped at Preflight
 **Owners:** doruche, Codex
 **Area:** device / TTY / serial / VFS / signal / task topology / job control
 **Canonical Plan:** [RFC-20260722-tty-subsystem](../../rfcs/tty-subsystem/index.md), [目标与不变量](../../rfcs/tty-subsystem/invariants.md), [迁移实施计划](../../rfcs/tty-subsystem/implementation.md)
 **Canonical Revision:** R0
-**Current Phase:** Stage 2 Active / Checkpoint 1 Closed / Checkpoint 2 Not Started
+**Current Phase:** Stage 2 Active / Checkpoint 1 Closed / Checkpoint 2 Not Started / Stopped at Preflight
 
 ## Scope and contract boundary
 
@@ -638,3 +638,33 @@ Checkpoint 3 publication；RV64证据不外推到这些层级。
 **Contract / result:** Contract cutover为None，全部`TTY-*`继续Not Cut Over；endpoint仍unpublished，boot stdio、devfs和
 外部ABI可见行为不变。Checkpoint 1 **Closed**，Stage 2保持Active；Checkpoint 2仍为Not Started，必须先执行独立
 C1 -> C2 live preflight，不得把本closure解释为Checkpoint 3或`TTY-DATA-CUTOVER`授权。
+
+## Stage 2 / Checkpoint 2 preflight stop - 2026-07-23
+
+**Entry / scope:** 入口为`dev/drc/omega@0014efb5`、worktree clean。依照一次只激活一个checkpoint的合同，本节
+只读核对C1 live Terminal、generic FileOps/operation ctx、IoctlCtx/uaccess、iomux Latch和anonymous/devfs open shape；
+没有激活C2，也没有创建`device/tty/file.rs`、UAPI或userspace wrapper diff。
+
+**Sufficient live contracts:** `FileIoCtx::status_flags()`可让每次read/write直接读取opened-description的
+`NONBLOCK` snapshot，不需要per-open cache；`IoctlCtx`拥有cmd/arg、target access与UserSpaceHandle，现有
+`UserReadPtr`/`UserWritePtr`路径能保持unknown command `ENOTTY`和pointer fault `EFAULT`。`PollRequest`/
+`PollRegisterResult`要求source在同一predicate guard内保存`LatchTrigger`后才能返回`Armed`，iomux wait loop会在
+register前后重扫，因此C2不需要扩大generic operation、ioctl、poll syscall或wait-core contract。
+
+**Keter / blocked private capability handoff:** public `OpenedFile`允许owner安装`AnyOpaque` private data，但live
+`File::prv()`在`fs/file.rs`中是`pub(super)`。因此位于resolved C2 owner `device::tty/file.rs`的FileOps function
+无法取得每个opened file必须持有的`Arc<Terminal>`和窄wake capability。当前char-dev route依靠rdev -> global registry
+lookup而不消费file private data，但把该路线复制到TTY会让global endpoint mapping替代opened-file capability truth、提前
+绑定C3 devnum/numbering并违背7.2.2/7.2.8；把TTY FileOps移入`fs/`则移动owner。success stub、test-only global map和
+inode identity side table均不能关闭C2。
+
+**Expansion report / recommended minimum:** 最小自然修复是在`anemone-kernel/src/fs/file.rs`增加只读、typed、
+crate-internal private-data downcast，使FileOps owner只能按自己安装的具体类型取得`&T`，不暴露mutable `AnyOpaque`、Task、
+fd table或VFS guard。该变化补全现有`OpenedFile` private-data producer/consumer pair，但仍修改C2明确列为validation-only的
+generic VFS文件并扩大crate-internal API，命中checkpoint write-set/public-surface停止条件；批准前不得实现。若批准，manifest
+只新增`fs/file.rs`这一文件，review需确认immutable/lifetime/type boundary，validation增加现有anonymous/char/eventfd FileOps
+回归和全量RV64 build/KUnit；不改变外部ABI、visible semantics、owner、current contract或acceptance boundary。
+
+**Result:** Checkpoint 2保持**Not Started / Stopped at Preflight**。没有C2 source、ABI、FileOps、readiness或contract diff；
+全部`TTY-*`继续Not Cut Over。等待对上述单文件generic VFS扩展的明确处置，不得改走global registry旁路，也不得进入
+Checkpoint 3。
