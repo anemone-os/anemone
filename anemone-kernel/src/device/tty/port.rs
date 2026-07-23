@@ -1,5 +1,24 @@
 use crate::{prelude::SysError, utils::identity::AnyIdentity};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TtyParity {
+    None,
+    Odd,
+    Even,
+}
+
+/// Immutable, owner-neutral view of the line configuration applied at boot.
+///
+/// The physical driver remains authoritative for hardware state. A Terminal
+/// copies this stable snapshot exactly once while the endpoint is unpublished;
+/// runtime register reads must not replace it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TtyLineSnapshot {
+    pub(crate) baud: u32,
+    pub(crate) parity: TtyParity,
+    pub(crate) data_bits: u8,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct TtyPortId(AnyIdentity);
 
@@ -27,6 +46,8 @@ impl core::fmt::Display for TtyPortId {
 pub(crate) trait TtyPort: Send + Sync {
     fn id(&self) -> &TtyPortId;
 
+    fn line_snapshot(&self) -> TtyLineSnapshot;
+
     fn rx_pending(&self) -> bool;
 
     /// Dequeue up to `dst.len()` bytes in FIFO order.
@@ -38,4 +59,10 @@ pub(crate) trait TtyPort: Send + Sync {
     /// Submit bytes through the port owner's bounded TX serialization and
     /// return the number accepted before timeout or backpressure.
     fn submit_tx(&self, src: &[u8]) -> usize;
+
+    /// Observe whether the physical transmitter has completely drained.
+    ///
+    /// This is a snapshot, not a completion notification. Callers must pair it
+    /// with their own register-plus-recheck protocol.
+    fn tx_idle(&self) -> bool;
 }

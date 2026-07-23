@@ -22,6 +22,7 @@ const LSR_PARITY_ERROR: u8 = 1 << 2;
 const LSR_FRAMING_ERROR: u8 = 1 << 3;
 const LSR_BREAK_INTERRUPT: u8 = 1 << 4;
 const LSR_THRE: u8 = 1 << 5;
+const LSR_TRANSMITTER_EMPTY: u8 = 1 << 6;
 const LSR_RX_ERROR_MASK: u8 =
     LSR_OVERRUN_ERROR | LSR_PARITY_ERROR | LSR_FRAMING_ERROR | LSR_BREAK_INTERRUPT;
 
@@ -153,6 +154,11 @@ impl Ns16550ARegisters {
         }
         self.write_reg(REG_RBR_THR_DLL, byte);
         Some(byte)
+    }
+
+    /// True only after both the holding register and shift register drain.
+    pub(super) fn tx_idle(&self) -> bool {
+        self.read_reg(REG_LSR) & LSR_TRANSMITTER_EMPTY != 0
     }
 
     pub(super) fn interrupt_reason(&self) -> InterruptReason {

@@ -1,7 +1,10 @@
 use crate::{
     device::{
         console::Console,
-        tty::{TtyPort, TtyPortAttachment, TtyPortId, TtyRxNotifier, attach_unpublished_port},
+        tty::{
+            TtyLineSnapshot, TtyParity, TtyPort, TtyPortAttachment, TtyPortId, TtyRxNotifier,
+            attach_unpublished_port,
+        },
     },
     mm::remap::IoRemap,
     prelude::*,
@@ -24,6 +27,18 @@ pub(super) struct AppliedLine {
 impl AppliedLine {
     pub(super) fn new(config: UartLineConfig, divisor: u16) -> Self {
         Self { config, divisor }
+    }
+
+    fn tty_snapshot(self) -> TtyLineSnapshot {
+        TtyLineSnapshot {
+            baud: self.config.baud,
+            parity: match self.config.parity {
+                super::UartParity::None => TtyParity::None,
+                super::UartParity::Odd => TtyParity::Odd,
+                super::UartParity::Even => TtyParity::Even,
+            },
+            data_bits: self.config.data_bits,
+        }
     }
 }
 
@@ -245,6 +260,10 @@ impl TtyPort for Ns16550ATtyPort {
         self.port.id()
     }
 
+    fn line_snapshot(&self) -> TtyLineSnapshot {
+        self.port.applied_line.tty_snapshot()
+    }
+
     fn rx_pending(&self) -> bool {
         !self.port.raw_rx.lock_irqsave().fifo.is_empty()
     }
@@ -255,6 +274,10 @@ impl TtyPort for Ns16550ATtyPort {
 
     fn submit_tx(&self, src: &[u8]) -> usize {
         self.port.submit_tx_bytes(src)
+    }
+
+    fn tx_idle(&self) -> bool {
+        self.port.regs().tx_idle()
     }
 }
 

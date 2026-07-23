@@ -84,6 +84,10 @@ pub struct Parameters {
     pub loop_device_count: Option<usize>,
     pub ns16550a_default_baud: Option<u32>,
     pub tty_raw_rx_capacity_bytes: Option<usize>,
+    pub tty_canonical_line_capacity_bytes: Option<usize>,
+    pub tty_input_capacity_bytes: Option<usize>,
+    pub tty_output_capacity_bytes: Option<usize>,
+    pub tty_worker_batch_bytes: Option<usize>,
     pub ns16550a_irq_rx_budget_bytes: Option<usize>,
     pub ns16550a_tx_batch_bytes: Option<usize>,
     pub ns16550a_tx_poll_iterations: Option<usize>,
@@ -214,6 +218,14 @@ pub const LOOP_DEVICE_COUNT: usize = {};
 pub const NS16550A_DEFAULT_BAUD: u32 = {};
 /// Per-port fixed raw TTY RX FIFO capacity in bytes.
 pub const TTY_RAW_RX_CAPACITY_BYTES: usize = {};
+/// Maximum canonical TTY line size including its delimiter.
+pub const TTY_CANONICAL_LINE_CAPACITY_BYTES: usize = {};
+/// Per-Terminal committed input capacity in bytes.
+pub const TTY_INPUT_CAPACITY_BYTES: usize = {};
+/// Per-Terminal transformed output capacity in bytes.
+pub const TTY_OUTPUT_CAPACITY_BYTES: usize = {};
+/// Maximum RX/TX bytes advanced by one endpoint worker batch.
+pub const TTY_WORKER_BATCH_BYTES: usize = {};
 /// Maximum RX bytes drained by one NS16550A IRQ handler invocation.
 pub const NS16550A_IRQ_RX_BUDGET_BYTES: usize = {};
 /// Maximum bytes submitted while holding the NS16550A TX lock.
@@ -260,6 +272,10 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             default_or!(loop_device_count),
             default_or!(ns16550a_default_baud),
             default_or!(tty_raw_rx_capacity_bytes),
+            default_or!(tty_canonical_line_capacity_bytes),
+            default_or!(tty_input_capacity_bytes),
+            default_or!(tty_output_capacity_bytes),
+            default_or!(tty_worker_batch_bytes),
             default_or!(ns16550a_irq_rx_budget_bytes),
             default_or!(ns16550a_tx_batch_bytes),
             default_or!(ns16550a_tx_poll_iterations),
@@ -443,7 +459,6 @@ mod tests {
                 "{name} accepted zero"
             );
         }
-
         let mut config = Config::from_str(&content).unwrap();
         config.parameters.tty_raw_rx_capacity_bytes = None;
         config.parameters.ns16550a_irq_rx_budget_bytes = None;
@@ -457,6 +472,24 @@ mod tests {
         assert!(defs.contains("pub const NS16550A_IRQ_RX_BUDGET_BYTES: usize = 256;"));
         assert!(defs.contains("pub const NS16550A_TX_BATCH_BYTES: usize = 16;"));
         assert!(defs.contains("pub const NS16550A_TX_POLL_ITERATIONS: usize = 65536;"));
+    }
+
+    #[test]
+    fn test_tty_terminal_parameters_are_defaulted() {
+        let content = std::fs::read_to_string("../../conf/.defconfig").unwrap();
+        let mut config = Config::from_str(&content).unwrap();
+        config.parameters.tty_canonical_line_capacity_bytes = None;
+        config.parameters.tty_input_capacity_bytes = None;
+        config.parameters.tty_output_capacity_bytes = None;
+        config.parameters.tty_worker_batch_bytes = None;
+        let defaults = Config::from_str(&content).unwrap();
+        let defs = config
+            .parameters
+            .gen_kconfig_defs_with_defaults(&defaults);
+        assert!(defs.contains("pub const TTY_CANONICAL_LINE_CAPACITY_BYTES: usize = 4096;"));
+        assert!(defs.contains("pub const TTY_INPUT_CAPACITY_BYTES: usize = 4096;"));
+        assert!(defs.contains("pub const TTY_OUTPUT_CAPACITY_BYTES: usize = 4096;"));
+        assert!(defs.contains("pub const TTY_WORKER_BATCH_BYTES: usize = 256;"));
     }
 
     #[test]
