@@ -127,7 +127,7 @@ fn exec_init_proc() {
 
     let init_path = vfs_read_to_string(PathResolution::normal(&Path::new(INIT_PATH)))
         .unwrap_or_else(|e| panic!("failed to read init path from {}: {:?}", INIT_PATH, e));
-
+    kinfoln!("Resolved init path to {}", init_path);
     // open initial stdio fds so that they can be inherited.
     {
         use device::console::{open_console_stdin, open_console_stdout};
@@ -215,7 +215,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
             KUNIT_SYNC_COUNTER.sync_with_counter();
         }
     }
-
+    kinfoln!("Running init process...");
     exec_init_proc();
 }
 
@@ -255,5 +255,6 @@ unsafe extern "C" fn ap_kinit(ap_id: usize) {
         #[cfg(feature = "kunit")]
         KUNIT_SYNC_COUNTER.sync_with_counter();
     }
+    // loop {}
     // exit
 }

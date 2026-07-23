@@ -290,7 +290,7 @@
 		};
 
 		ahci@400e0000 {
-			compatible = "loongson,ls-ahci";
+			compatible = "loongson,ls-ahci", "generic-ahci";
 			reg = <0x00 0x400e0000 0x00 0x10000>;
 			interrupt-parent = <0x03>;
 			interrupts = <0x13>;
