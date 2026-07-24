@@ -27,6 +27,23 @@ impl SchedDefaultPolicy {
     }
 }
 
+#[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum TidAllocPolicy {
+    #[serde(rename = "bitmap")]
+    Bitmap,
+    #[serde(rename = "oneshot")]
+    OneShot,
+}
+
+impl TidAllocPolicy {
+    fn kernel_variant(self) -> &'static str {
+        match self {
+            Self::Bitmap => "Bitmap",
+            Self::OneShot => "OneShot",
+        }
+    }
+}
+
 #[derive(Deserialize, Debug, Serialize, PartialEq, Eq)]
 pub struct Parameters {
     pub bootstrap_heap_shift_kb: Option<u64>,
@@ -40,6 +57,7 @@ pub struct Parameters {
     pub max_ident_len_bytes: Option<usize>,
     pub max_path_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
+    pub tid_alloc_policy: Option<TidAllocPolicy>,
     pub system_hz: Option<u16>,
     pub sched_default_policy: Option<SchedDefaultPolicy>,
     pub rt_rr_timeslice_ms: Option<u64>,
@@ -110,6 +128,7 @@ impl Parameters {
         materialize!(max_ident_len_bytes);
         materialize!(max_path_len_bytes);
         materialize!(max_processes);
+        materialize!(tid_alloc_policy);
         materialize!(system_hz);
         materialize!(sched_default_policy);
         materialize!(rt_rr_timeslice_ms);
@@ -205,6 +224,14 @@ pub const MAX_FILE_NAME_LEN_BYTES: usize = MAX_IDENT_LEN_BYTES;
 pub const MAX_PATH_LEN_BYTES: usize = {};
 /// Maximum number of processes
 pub const MAX_PROCESSES: u64 = {};
+/// Allocation policy for ordinary task IDs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TidAllocPolicy {{
+    Bitmap,
+    OneShot,
+}}
+/// Selected allocation policy for ordinary task IDs.
+pub const TID_ALLOC_POLICY: TidAllocPolicy = TidAllocPolicy::{};
 /// System timer frequency in hertz, i.e. number of timer interrupts
 /// per second
 pub const SYSTEM_HZ: u16 = {};
@@ -304,6 +331,7 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             resolved!(max_ident_len_bytes),
             resolved!(max_path_len_bytes),
             resolved!(max_processes),
+            resolved!(tid_alloc_policy).kernel_variant(),
             resolved!(system_hz),
             resolved!(sched_default_policy).kernel_variant(),
             resolved!(rt_rr_timeslice_ms),

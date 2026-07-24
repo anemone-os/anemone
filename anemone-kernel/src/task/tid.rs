@@ -5,7 +5,7 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use idalloc::{Bijection, BitmapAlloc, IdAllocator};
+use idalloc::{AllocStrategy, Bijection, BitmapAlloc, IdAllocator, OneShotAlloc};
 
 use crate::{prelude::*, syscall::handler::TryFromSyscallArg};
 
@@ -28,8 +28,42 @@ impl Bijection for TidBijection {
 const ORDINARY_TID_START: u64 = 3;
 const ORDINARY_TID_CAPACITY: u64 = MAX_PROCESSES - ORDINARY_TID_START + 1;
 
-static ID_ALLOC: Lazy<SpinLock<IdAllocator<BitmapAlloc, TidBijection>>> = Lazy::new(|| {
-    SpinLock::new(IdAllocator::new(BitmapAlloc::new(
+enum TidAlloc {
+    /// Recycle an ordinary numeric TID after its owning handle is dropped.
+    Bitmap(BitmapAlloc),
+    /// Keep numeric TIDs unique for the whole boot. Dropping a handle does not
+    /// reclaim its ID, so allocation eventually exhausts the configured range.
+    OneShot(OneShotAlloc),
+}
+
+impl TidAlloc {
+    fn new(policy: TidAllocPolicy, start: u64, capacity: u64) -> Self {
+        match policy {
+            TidAllocPolicy::Bitmap => Self::Bitmap(BitmapAlloc::new(start, capacity)),
+            TidAllocPolicy::OneShot => Self::OneShot(OneShotAlloc::new(start, start + capacity)),
+        }
+    }
+}
+
+impl AllocStrategy for TidAlloc {
+    fn alloc(&mut self) -> Option<u64> {
+        match self {
+            Self::Bitmap(alloc) => alloc.alloc(),
+            Self::OneShot(alloc) => alloc.alloc(),
+        }
+    }
+
+    fn dealloc(&mut self, id: u64) {
+        match self {
+            Self::Bitmap(alloc) => alloc.dealloc(id),
+            Self::OneShot(alloc) => alloc.dealloc(id),
+        }
+    }
+}
+
+static ID_ALLOC: Lazy<SpinLock<IdAllocator<TidAlloc, TidBijection>>> = Lazy::new(|| {
+    SpinLock::new(IdAllocator::new(TidAlloc::new(
+        TID_ALLOC_POLICY,
         ORDINARY_TID_START,
         ORDINARY_TID_CAPACITY,
     )))
@@ -125,13 +159,7 @@ impl Drop for TidHandle {
             return;
         }
 
-        // With reuse disabled, allocation bits intentionally remain set so a
-        // numeric TID identifies at most one task during the whole boot. This
-        // diagnostic policy trades reuse for eventual exhaustion at
-        // MAX_PROCESSES; enable `tid_reuse` to restore ordinary recycling.
-        if cfg!(feature = "tid_reuse") {
-            ID_ALLOC.lock_irqsave().dealloc(Tid(self.0));
-        }
+        ID_ALLOC.lock_irqsave().dealloc(Tid(self.0));
     }
 }
 
@@ -164,4 +192,34 @@ pub(in crate::task) fn alloc_kthreadd_tid() -> TidHandle {
         "kthreadd fixed TID handle consumed more than once"
     );
     TidHandle(Tid::KTHREADD.get())
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    fn allocator(policy: TidAllocPolicy) -> IdAllocator<TidAlloc, TidBijection> {
+        IdAllocator::new(TidAlloc::new(policy, 3, 3))
+    }
+
+    #[kunit]
+    fn test_bitmap_tid_allocator_reuses_released_id() {
+        let mut alloc = allocator(TidAllocPolicy::Bitmap);
+        let first = alloc.alloc().unwrap();
+        assert_eq!(alloc.alloc(), Some(Tid::new(4)));
+
+        alloc.dealloc(first);
+        assert_eq!(alloc.alloc(), Some(first));
+    }
+
+    #[kunit]
+    fn test_oneshot_tid_allocator_never_reuses_released_id() {
+        let mut alloc = allocator(TidAllocPolicy::OneShot);
+        let first = alloc.alloc().unwrap();
+        assert_eq!(alloc.alloc(), Some(Tid::new(4)));
+
+        alloc.dealloc(first);
+        assert_eq!(alloc.alloc(), Some(Tid::new(5)));
+        assert_eq!(alloc.alloc(), None);
+    }
 }
