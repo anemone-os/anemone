@@ -1234,7 +1234,7 @@ validation-only输入：
 不允许触碰：
 
 - kernel、apps、rootfs、test profile、build config、current contracts、register与RFC target文本；
-- alpha worktree、共享`etc/final`/`etc/xref`资源和任何测试盘master。
+- alpha worktree、共享的私人测试/参考资源和任何测试盘 master。
 
 若审计本身需要代码instrumentation、test app或background evidence packet，Stage 0先停止并申请manifest
 扩展；批准前不得先写。长证据包只有确有必要时才使用具体命名的`backgrounds/<topic>-probe-YYYYMMDD.md`，

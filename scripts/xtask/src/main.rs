@@ -31,6 +31,8 @@ enum Commands {
     Rootfs(tasks::rootfs::RootfsArgs),
     #[command(about = "App related tasks")]
     App(tasks::app::AppArgs),
+    #[command(about = "Manage curated external source references")]
+    Xref(tasks::xref::XrefArgs),
     #[command(about = "Build Anemone")]
     Build(tasks::build::BuildArgs),
     #[command(about = "Format Rust sources")]
@@ -61,6 +63,7 @@ fn run() -> anyhow::Result<()> {
         Commands::Conf(conf) => tasks::conf::run(conf),
         Commands::Rootfs(args) => tasks::rootfs::run(args),
         Commands::App(args) => tasks::app::run(args),
+        Commands::Xref(args) => tasks::xref::run(args),
         Commands::Build(args) => tasks::build::run(args),
         Commands::Fmt(args) => tasks::fmt::run(args),
         Commands::Qemu(args) => tasks::qemu::run(args),
@@ -106,6 +109,19 @@ mod tests {
             .is_ok()
         );
         assert!(Cli::try_parse_from(["xtask", "fmt", "all", "--check"]).is_ok());
+        assert!(Cli::try_parse_from(["xtask", "xref", "list"]).is_ok());
+        assert!(Cli::try_parse_from(["xtask", "xref", "fetch", "linux-6.6.32"]).is_ok());
+        assert!(
+            Cli::try_parse_from([
+                "xtask",
+                "xref",
+                "fetch",
+                "linux-6.6.32",
+                "--root",
+                "elsewhere",
+            ])
+            .is_err()
+        );
         assert!(
             Cli::try_parse_from([
                 "xtask",

@@ -1,6 +1,6 @@
 # RFC 模板
 
-创建、review、提升和实现期记录的完整流程见 [RFC 工作流](./rfc-workflow.md)。跨 RFC 已生效规则见 [当前契约](./contracts.md)，契约文档形状见 [当前契约模板](./contract-template.md)。本页只定义 RFC 目录结构和单页内容模板。
+创建、review、提升和实现期记录的完整流程见 [RFC 工作流](./rfc-workflow.md)。跨 RFC 已生效规则见 [当前契约](./contracts.md)，契约文档形状见 [当前契约模板](./contract-template.md)。外部源码证据使用[公共引用规则](./external-source-references.md)，不得链接私人 checkout 路径。本页只定义 RFC 目录结构和单页内容模板。
 
 RFC 默认使用目录结构，而不是单个 Markdown 文件。
 
@@ -82,6 +82,10 @@ Current contracts：
 背景材料：
 
 - [背景材料索引](./backgrounds/index.md)
+
+公共外部源码证据（如果使用；详细 citation 放在所支持的 claim 附近）：
+
+- `xref:<source-id>:<repo-relative-path>#<locator>`，或 `None`。
 
 ## 修订记录
 

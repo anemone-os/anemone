@@ -1,6 +1,6 @@
 # 模板
 
-以下模板可直接复制使用。条目应保持简短、事实化。活动登记册默认只写最小必填字段；只有在可选字段能明显降低沟通成本时，才把它们加上。
+以下模板可直接复制使用。条目应保持简短、事实化。活动登记册默认只写最小必填字段；只有在可选字段能明显降低沟通成本时，才把它们加上。RFC、small-change 或调查证据引用仓库公共参考源码时，使用[外部源码引用规则](./external-source-references.md)；不得把私人 checkout 路径写入公共文档。
 
 ## 开发日志条目
 
@@ -80,6 +80,7 @@
 - Current contract:
 - Register / limitations:
 - RFC / transaction:
+- 外部源码证据：`xref:<source-id>:<repo-relative-path>#<locator>` / 无
 - Issue / PR / commit:
 ```
 

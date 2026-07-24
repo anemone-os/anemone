@@ -34,6 +34,10 @@ conf *args:
 app *args:
     @just xtask app {{ args }}
 
+[doc("manage curated external source references")]
+xref *args:
+    @just xtask xref {{ args }}
+
 [doc("rootfs management. type `just rootfs -h` for more details.")]
 rootfs *args:
     @just xtask rootfs {{ args }}

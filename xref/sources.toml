@@ -1,0 +1,14 @@
+schema = 1
+
+[[source]]
+id = "linux-6.6.32"
+scope = "Primary reference for Linux-compatible UAPI, errno, and observable behavior; implementation details are non-normative."
+url = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+tag = "v6.6.32"
+commit = "91de249b6804473d49984030836381c3b9b3cfb0"
+
+[[source]]
+id = "xv6-riscv-20260717"
+scope = "Educational reference for a compact RISC-V kernel; not an ABI or production-design authority."
+url = "https://github.com/mit-pdos/xv6-riscv.git"
+commit = "b6dd660d4903947e5eb75ae9a457854f3707eb14"
