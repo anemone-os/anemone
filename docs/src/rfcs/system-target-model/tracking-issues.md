@@ -1,10 +1,12 @@
 # System Target Model Tracking Issues
 
-**状态：** Closed（当前无 live design issue）
+**状态：** Active（R4A Ready；当前无 live design issue）
 **最后更新：** 2026-07-24
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **迁移计划：** [迁移实施计划](./implementation.md)
-**事务日志：** [R3 explicit-input cleanup](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)；
+**事务日志：** R4 transaction将在R4A获得独立实施授权时按预留路径
+`docs/src/devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md`建立；
+[R3 explicit-input cleanup](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)；
 [R0-R2 history](../../devlog/transactions/2026-07-22-system-target-model.md)
 
 本文只跟踪会改变 RFC target、owner、contract delta、实现顺序、review gate、停止边界或
@@ -27,19 +29,27 @@ None.
 
 ## Safe
 
-None.
+### STM-R4-S1 - Embedded QEMU raw DTB 保留 build-time rng-seed
+
+**结论：** 用户明确接受R4A直接发布QEMU raw provider DTB。LA64 embedded kernel artifact可能因
+`/chosen/rng-seed`不可复现，同一artifact重复boot也可能复用该build-time seed；当前kernel不消费该属性，
+R4A不增加property scrub、randomness-off参数、deterministic canonicalization或double dump。这是已记录的
+accepted limitation，不是R4A blocker；出现真实consumer、安全要求或reproducible-build要求时再建立
+follow-up gate。
 
 ## Neutralized
 
 | ID | 原问题 | Neutralize / 分流依据 |
 | --- | --- | --- |
+| `STM-R4-K3` | R4A草案曾把QEMU firmware/embedded均视为合法，但live kernel只由RV64 bootstrap接收firmware FDT，LA64则无条件嵌入build-local DTB；反向组合在kernel只读write set内不可达。 | R4A由xtask resolved Platform validation固定`riscv64 = firmware`、`loongarch64 = embedded`，对QEMU/physical一视同仁并在action side effect前拒绝RV64 embedded与LA64 firmware；JSON schema只描述字段形状，不加入该条件。扩大kernel delivery capability不属于R4A。 |
+| `STM-R4-K1` | R3要求所有supported Platform提交DTS，并为QEMU provider-derived baseline保留refresh/check；这把QEMU machine model复制成第二份仓库truth，SMP variant还会放大baseline与维护成本。 | 用户接受R4 target correction：QEMU Platform不再提交DTS；firmware delivery使用runtime FDT，embedded delivery由normal build从selected provider自动生成build-local DTB；所有bind必须DT-neutral且build不提供placeholder；`qemu dt` maintenance surface删除。Physical DTS source/baseline保持。R4A已Ready但未激活，R4B保持Outline。 |
 | `STM-R3-K1` | R2保留local selection -> tracked default fallback和future preset presentation defaults；rootfs type、QEMU CPU与fmt scope还存在省略驱动的策略选择。 | 用户将其接受为R3 target correction：system action只接受显式preset或完整tuple，删除local/default selection与preset presentation defaults；rootfs type、QEMU CPU和fmt scope显式。Folder容量统一自动计算；BIOS是有意保留的optional capability，省略只表示不传`-bios`。R3A负责原子清理与验证。 |
 | `STM-R2-K1` | Stage 3把physical firmware provenance、允许差异与runtime validation owner做成三个只有唯一合法值的typed配置字段；它们没有action consumer，既不能证明capture来源，也不能执行板级复核。 | 用户将该审计结论接受为Stage 3关闭后的实现反馈。R2保留`provider = "firmware"`的authority分类与QEMU maintenance fail-close，把capture来源、只允许`/chosen/rng-seed`差异和板级/U-Boot变化后的复核责任恢复为baseline相邻说明与人类review证据，并删除对应parser/schema/test surface。DT delivery/authority、runtime FDT、current contract与Stage 4边界不变。 |
 | `STM-R1-K1` | R0把DT delivery与authority绑定，误将QEMU-derived LA64 DTS分类为embedded normative；VisionFive physical baseline又只有generic firmware标签，缺少真实capture provenance、允许差异和runtime validation owner。 | Stage 3在latest-byte review后停止；用户确认LA64 machine-fact owner仍是QEMU，并确认`visionfive2-board.dts`来自supported硬件经U-Boot导出的runtime FDT且应删除未使用的官方DTS。R1将两维解耦，LA64改为embedded/provider-derived/QEMU；VisionFive closed metadata固定U-Boot hardware export、只允许`/chosen/rng-seed`差异并由Platform maintainer在板级/U-Boot更新时验证。该修订不改变runtime delivery或current contract。 |
 | `STM-DRAFT-K1` | Resolved identity 与 provenance failure contract 尚未闭合 | 初版以 canonical semantic-input closure equality 收口，但该方向在 `STM-DRAFT-K8` review 中被确认粒度过粗、实现代价过高；当前有效修复由 K8 和 [STM-WORKFLOW-ORDER-001](./invariants.md#stm-workflow-order-001---固定路径依赖由明确命令顺序拥有) 取代，不再实施原 sidecar/digest/equality probe，也不承诺跨action freshness。 |
 | `STM-DRAFT-K2` | Package output/backend 与 U-Boot owner handoff 尚未闭合 | 后续 review 证明问题前提过宽：当前只有 VisionFive Platform 要求的单一 legacy-image post-link，没有独立 package 抽象的真实压力。[STM-PLATFORM-OUTPUT-001](./invariants.md#stm-platform-output-001---platform-kernel-output-是-build-的一部分)现固定 U-Boot 为 Platform-owned normal-build output；独立 package CLI/backend/`[[outputs]]`已删除，Stage 4只核对字段推导与板级 Preserve。 |
-| `STM-DRAFT-K3` | Platform manifest、DTS 与 runtime FDT authority matrix 未完成 | [STM-DT-001](./invariants.md#stm-dt-001---dts-authority-与-dtb-delivery-必须显式) 已固定唯一 authority 与 delivery target；完整 matrix 改为[迁移实施计划](./implementation.md) Stage 3 按 platform 滚动解析，未分类 platform 不得迁移。 |
-| `STM-DRAFT-K4` | DT refresh/check 的 CLI、QEMU-only owner 与写入边界未闭合 | [STM-QEMU-DT-001](./invariants.md#stm-qemu-dt-001---dt-refresh-是-qemu-local-单管线维护-action) 已固定 `just qemu dt refresh --platform <qemu-platform> [--check]`：它与普通 execution 共用 QEMU namespace，但直接维护 QEMU Platform；default refresh 与 `--check` 共享单一 snapshot/canonicalization/compare 管线，只有 provider-derived conformance baseline 可原子写回，normative DTS fail-closed，physical platform 不建立通用 provider 抽象。验证与 per-platform 分类进入[迁移实施计划](./implementation.md) Stage 3。 |
+| `STM-DRAFT-K3` | Platform manifest、DTS 与 runtime FDT authority matrix 未完成 | R0-R3 Stage 3完成初始matrix；R4由[STM-DT-001](./invariants.md#stm-dt-001---dt-authoritydelivery-与-build-materialization-必须显式)进一步固定QEMU provider output、可选physical DTS与runtime FDT的唯一authority/delivery，R4A负责新matrix cutover。 |
+| `STM-DRAFT-K4` | DT refresh/check 的 CLI、QEMU-only owner 与写入边界未闭合 | R0-R3期间由Stage 3的QEMU-local单管线与写入授权闭合；R4后续确认该baseline/maintenance surface本身没有长期consumer，并由`STM-R4-K1` supersede。当前[STM-QEMU-DT-001](./invariants.md#stm-qemu-dt-001---qemu-dt-只由-runtime-delivery-或-normal-build-物化)固定runtime/build materialization二选一，R4A负责删除旧CLI。 |
 | `STM-DRAFT-K5` | Boot Protocol baseline 与 EmbeddedApp 生命周期未闭合 | [BOOT-PROTOCOL-001](./invariants.md#boot-protocol-001---initial-program-source-统一收口到普通-vfs-exec) 已固定 ordinary VFS exec、materializer publication/cleanup 与 VFS reopen lifetime 的唯一责任；baseline 已在 public acceptance 前提取，mount/path/mode/materialization 由[迁移实施计划](./implementation.md) Stage 5 vertical slice 验证。 |
 | `STM-DRAFT-K6` | QEMU完全人工bind无法证明SystemTarget role或先前action result | 用户明确接受当前阶段保持完全人工映射。[STM-QEMU-BIND-001](./invariants.md#stm-qemu-bind-001---qemu-bind-只参数化-tracked-argv-template)现只承诺declaration/map/path机械校验，并明确有效但内容选错的path可在QEMU/guest/wrapper验证中失败；不增加typed attachment/role/slot/result handoff，也不得把该边界误述为resolver已证明runtime artifact compatibility。 |
 | `STM-DRAFT-K7` | Stage 1验证依赖Stage 2才选择的schema/reference与`inspect`接口 | [迁移实施计划](./implementation.md)已把最小canonical object schema、stable reference identity与resolver/Platform-output vertical slice前移到Stage 1 manifest；用户进一步确认第一版不需要inspect，现已删除该命令、JSON view与proof obligation。Stage 2不得建立第二resolver或改写已经进入snapshot的reference identity。 |

@@ -103,6 +103,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
+- [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R4已接受，R4A Ready但未激活；目标删除QEMU committed DTS与`qemu dt` maintenance surface，firmware delivery使用runtime FDT，embedded delivery由normal build从selected provider生成build-local DTB，bind保持DT-neutral。R4B将在R4A关闭后另行解析SMP hardware Platform/adopter迁移。R3 explicit-input cleanup与R0-R2历史均已关闭；[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)保持typed `RootfsEntry | EmbeddedApp` ordinary VFS exec current contract。
 - [RFC-20260723-ahci-controller](./rfcs/ahci-controller/index.md)：PR #136带入的generic AHCI 1.x、
   ATA block facade与2K1000 platform integration文档入口；本次merge保留其RFC、transaction和register
   页面，但不重新裁决或同步AHCI lifecycle/completion，状态与开放项以RFC页为准。
@@ -131,7 +132,6 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 ## 已关闭或延期 RFC
 
 - [RFC-20260722-tty-subsystem](./rfcs/tty-subsystem/index.md)：R1已实现并关闭；serial TTY的专属Terminal/FileOps、稳定`/dev/ttyS<N>`与`/dev/tty`、termios/data-plane、controlling relation和BusyBox ash/vi foreground job-control包络均已交付。`TTY-DATA-CUTOVER`与`TTY-JOBCTL-CUTOVER`分别由[data-plane](./contracts/tty/data-plane.md)和[job-control](./contracts/tty/job-control.md) current contract拥有九个Active ID。RV64自动、focused与用户人工证据通过；LA64、hardware和LTP明确Not Run。
-- [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R3已实现并关闭；system action只接受显式preset或完整tuple，rootfs type、QEMU CPU和fmt scope已显式，folder容量统一自动计算，BIOS保持optional。[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)保持typed `RootfsEntry | EmbeddedApp` ordinary VFS exec current contract。
 - [RFC-20260603-IOCTL-LOOP](./rfcs/ioctl-loop/index.md)：已实现并关闭；完成 `ioctl(2)` VFS 分发、统一 block ioctl、静态 loop 设备池与第一阶段 loop ioctl。扩展 loop sysfs、partscan、direct I/O、autoclear 和 ioctl LTP 缺口继续由 register 跟踪。
 - [RFC-20260622-sched-eevdf-lite](./rfcs/sched-eevdf-lite/index.md)：Stage 3/R1 runtime acceptance 失败后延期关闭，不是 Completed；关闭时 default 曾恢复为 RR，后续已由 Fair / Stride 切换为 Fair。EEVDF 保留为可运行实验原型，但显著吞吐回归与百万级 yield self-pick 仍存在，`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 保持未解决 Keter。事务日志见 [2026-07-09-sched-eevdf-lite](./devlog/transactions/2026-07-09-sched-eevdf-lite.md)，证据见 [Stage 3 eligibility 回归背景](./rfcs/sched-eevdf-lite/backgrounds/stage3-eligibility-regression-20260711.md)。
 
