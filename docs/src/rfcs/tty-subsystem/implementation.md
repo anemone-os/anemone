@@ -1641,3 +1641,15 @@ acceptance，不产生revision bump或Ready-manifest扩展。
 - Route Correction若保持target，只更新本文future Outline/Ready和transaction，不增加RFC修订。
 - target/owner/ABI/visible semantics/acceptance变化先更新RFC review与tracking；接受后才形成新revision。
 - current contract只在两个approved cutover gate原子更新；Draft RFC、probe与partial candidate不能生效。
+
+## 18. 收口后验收工具维护
+
+2026-07-24对公共TTY验收工具做一次target-preserving maintenance：repository wrapper不再用
+SHA-256、BusyBox版本或host `qemu-riscv64`锁定某个本地artifact。wrapper只核对当前最小
+rootfs真实需要的RV64 static ELF条件；guest launcher只核对验收case实际调用的
+`ash`/`sleep`/`stty`/`vi` applet，再由原有data-plane、vi和ash matrix判定外部可见行为。
+
+第3、7和9节的固定artifact identity文本仅记录R1当时的冻结计划与cutover输入；实际使用的
+BusyBox 1.33.1、BusyBox/rootfs/kernel hash与同一candidate关系仍保留在transaction作为历史
+provenance，不再成为live runner的兼容门槛。本维护不改变TTY target、owner、ABI、visible semantics、
+current contract或R1 cutover结论，因此不产生R2，也不改写已完成stage与transaction证据。

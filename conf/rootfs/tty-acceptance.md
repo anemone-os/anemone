@@ -11,10 +11,9 @@
   --log build/tty-stage4-rv64.log
 ```
 
-wrapper在复制前验证BusyBox是static RISC-V ELF、SHA-256为
-`fd9cb9dc66ba740dc94b055b564de0597453adfceef9be158b3774ca58b95241`；host有
-`qemu-riscv64`时预检版本及`ash/sleep/stty/vi/mount/stat/poweroff` applet，host没有qemu-user时，launcher在任何
-acceptance case前执行同一runtime核对并fail closed。原件不被修改；运行副本分别位于
+wrapper在复制前验证BusyBox是static RISC-V ELF；不限制其版本、构建来源或artifact identity。
+launcher在任何acceptance case前核对测试实际依赖的`ash/sleep/stty/vi` applet，缺失时fail closed。
+原件不被修改；运行副本分别位于
 `build/tty-acceptance/staging/riscv64/busybox`与worktree根目录`sdcard-rv.img`。
 
 ## 人工vi checklist

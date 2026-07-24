@@ -1431,31 +1431,15 @@ fn trim_ascii(bytes: &[u8]) -> Result<&str, Errno> {
     Ok(text.trim_matches(|ch: char| ch.is_ascii_whitespace()))
 }
 
-fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack
-        .windows(needle.len())
-        .any(|window| window == needle)
-}
-
 fn contains_line(bytes: &[u8], expected: &[u8]) -> bool {
     bytes
         .split(|byte| *byte == b'\n')
         .any(|line| line.strip_suffix(b"\r").unwrap_or(line) == expected)
 }
 
-fn test_busybox_identity(_baseline: &Baseline) -> Result<(), Errno> {
-    let help = capture_busybox(&["busybox", "--help"])?;
-    expect(contains_bytes(&help, b"BusyBox v1.33.1"))?;
+fn test_busybox_capabilities(_baseline: &Baseline) -> Result<(), Errno> {
     let applets = capture_busybox(&["busybox", "--list"])?;
-    let required_applets: [&[u8]; 7] = [
-        b"ash",
-        b"sleep",
-        b"stty",
-        b"vi",
-        b"mount",
-        b"stat",
-        b"poweroff",
-    ];
+    let required_applets: [&[u8]; 4] = [b"ash", b"sleep", b"stty", b"vi"];
     for applet in required_applets {
         expect(contains_line(&applets, applet))?;
     }
@@ -1551,7 +1535,7 @@ fn test_busybox_vi(baseline: &Baseline) -> Result<(), Errno> {
 
 fn run_auto(baseline: &Baseline) -> Results {
     let mut results = Results::new();
-    results.case("busybox-identity", baseline, test_busybox_identity);
+    results.case("busybox-capabilities", baseline, test_busybox_capabilities);
     if results.failed != 0 {
         return results;
     }
@@ -1677,7 +1661,7 @@ fn manual_input_check(baseline: &Baseline, name: &str, expected: &[u8]) -> Resul
 
 fn run_manual_vi(baseline: &Baseline) -> Results {
     let mut results = Results::new();
-    results.case("busybox-identity", baseline, test_busybox_identity);
+    results.case("busybox-capabilities", baseline, test_busybox_capabilities);
     if results.failed != 0 {
         return results;
     }
@@ -1739,7 +1723,7 @@ fn run_manual_vi(baseline: &Baseline) -> Results {
 
 fn run_manual_jobctl(baseline: &Baseline) -> Results {
     let mut results = Results::new();
-    results.case("busybox-identity", baseline, test_busybox_identity);
+    results.case("busybox-capabilities", baseline, test_busybox_capabilities);
     if results.failed == 0 {
         results.case("manual-ash-jobctl", baseline, test_busybox_ash_manual);
     }

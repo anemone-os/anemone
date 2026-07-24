@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly expected_busybox_sha256=fd9cb9dc66ba740dc94b055b564de0597453adfceef9be158b3774ca58b95241
 readonly platform=qemu-virt-rv64-pretest
 readonly rootfs_config=conf/rootfs/tty-acceptance-rv64.toml
 readonly staging_dir=build/tty-acceptance/staging/riscv64
@@ -74,7 +73,7 @@ done
 [[ -f $busybox ]] || fail "BusyBox not found: $busybox"
 [[ -f $sdcard ]] || fail "sdcard master not found: $sdcard"
 
-for command in file readelf sha256sum python3; do
+for command in file readelf python3; do
     command -v "$command" >/dev/null || fail "required host command not found: $command"
 done
 
@@ -87,25 +86,6 @@ busybox_file=$(file -b -- "$busybox")
 [[ $busybox_file == *statically\ linked* ]] || fail "BusyBox is not statically linked: $busybox_file"
 readelf -h -- "$busybox" | grep -Eq 'Machine:[[:space:]]+RISC-V' \
     || fail "readelf did not report RISC-V"
-
-busybox_sha256=$(sha256sum -- "$busybox")
-busybox_sha256=${busybox_sha256%% *}
-[[ $busybox_sha256 == "$expected_busybox_sha256" ]] \
-    || fail "BusyBox SHA-256 mismatch: $busybox_sha256"
-
-if command -v qemu-riscv64 >/dev/null; then
-    busybox_help=$(qemu-riscv64 "$busybox" --help 2>&1)
-    [[ $busybox_help == *"BusyBox v1.33.1"* ]] || fail "expected BusyBox v1.33.1"
-    busybox_applets=$(qemu-riscv64 "$busybox" --list)
-    for applet in ash sleep stty vi mount stat poweroff; do
-        grep -qx -- "$applet" <<<"$busybox_applets" || fail "BusyBox applet missing: $applet"
-    done
-    busybox_runtime_check=host-qemu-riscv64
-else
-    # tty-test repeats the version/applet checks before any acceptance case.
-    # This fallback keeps artifact identity fail-closed on hosts without qemu-user.
-    busybox_runtime_check=guest-launcher
-fi
 
 mkdir -p -- "$staging_dir" "$(dirname -- "$log_file")" "$(dirname -- "$platform_rootfs")"
 cp --preserve=mode -- "$busybox" "$staged_busybox"
@@ -129,9 +109,6 @@ fi
     progress "candidate-dirty:$candidate_dirty"
     progress "platform:$platform"
     progress "mode:$mode"
-    progress "busybox-sha256:$busybox_sha256"
-    progress "busybox-version:1.33.1"
-    progress "busybox-runtime-check:$busybox_runtime_check"
     progress "rootfs-config:$rootfs_config"
 } | tee "$log_file"
 
@@ -144,15 +121,9 @@ just rootfs mkfs -c "$rootfs_config" --sudo 2>&1 | tee -a "$log_file"
 # rootfs image without changing the tracked platform configuration.
 cp -- "$acceptance_rootfs" "$platform_rootfs"
 cp -- "$sdcard" "$sdcard_target"
-rootfs_sha256=$(sha256sum -- "$acceptance_rootfs")
-rootfs_sha256=${rootfs_sha256%% *}
-progress "rootfs-sha256:$rootfs_sha256" | tee -a "$log_file"
 
 progress "build-kernel"
 just build 2>&1 | tee -a "$log_file"
-kernel_sha256=$(sha256sum -- build/anemone.elf)
-kernel_sha256=${kernel_sha256%% *}
-progress "kernel-sha256:$kernel_sha256" | tee -a "$log_file"
 
 if [[ $mode == auto ]]; then
     progress "qemu-auto"
