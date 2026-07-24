@@ -1,8 +1,0 @@
-platform = "qemu-virt-la64-pretest"
-
-[root]
-fstype = "ext4"
-source = { type = "block", path = "vda" }
-
-[initial-program]
-type = "rootfs-entry"

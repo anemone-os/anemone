@@ -24,7 +24,7 @@ Usage: run-user-test-la64.sh <sdcard-image> [log-file]
 Runs the la64 test chain:
   1. build the rootfs with sudo
   2. stage the provided sdcard image as a build-local temporary copy
-  3. explicitly select the pretest preset and build the kernel
+  3. build the generic QEMU target with the preliminary topology
   4. launch QEMU with the complete tracked bind map and tee the output to a log file
 
 Uses conf/rootfs/pretest-la64.toml as the public pretest rootfs manifest.
@@ -40,11 +40,12 @@ rootfs_config=conf/rootfs/pretest-la64.toml
 sdcard_image=$1
 log_file=${2:-build/user-test-la64.log}
 
-preset=qemu-virt-la64-pretest-release
+preset=qemu-virt-la64-release
 target_arch=loongarch64
 runtime_dir=build/runtime/pretest-la64
 sdcard_target=$runtime_dir/disk-x1.img
 rootfs_target=build/rootfs/pretest-la64/rootfs.img
+provider_bindings=(--bind smp=1 --bind memory=1G)
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/.." && pwd)
@@ -74,29 +75,16 @@ fi
 mkdir -p -- "$(dirname -- "$log_file")"
 
 log_progress "PRETEST" "preset $preset ($target_arch)"
+log_progress "PRETEST" "topology smp=1 memory=1G"
 log_progress "PRETEST" "rootfs config $rootfs_config"
 log_progress "PRETEST" "sdcard image $sdcard_image"
 log_progress "PRETEST" "log file $log_file"
 
 log_progress "PRETEST" "rebuilding rootfs"
-rm -rf -- build/rootfs
 just rootfs mkfs -c "$rootfs_config" --sudo
 
-mapfile -t rootfs_images < <(find build/rootfs -mindepth 2 -maxdepth 2 -type f -name rootfs.img | sort)
-if [[ ${#rootfs_images[@]} -ne 1 ]]; then
-    error "expected exactly one rootfs image, found ${#rootfs_images[@]}"
-    if [[ ${#rootfs_images[@]} -gt 0 ]]; then
-        error "candidates:"
-        for rootfs_candidate in "${rootfs_images[@]}"; do
-            error "  $rootfs_candidate"
-        done
-    fi
-    exit 1
-fi
-
-rootfs_image=${rootfs_images[0]}
-if [[ "$rootfs_image" != "$rootfs_target" ]]; then
-    error "unexpected rootfs output: $rootfs_image (expected $rootfs_target)"
+if [[ ! -f "$rootfs_target" ]]; then
+    error "rootfs output not found: $rootfs_target"
     exit 1
 fi
 
@@ -111,10 +99,10 @@ fi
 cp --remove-destination -- "$sdcard_image" "$sdcard_target"
 
 log_progress "PRETEST" "building kernel"
-just build --preset "$preset"
+just build --preset "$preset" "${provider_bindings[@]}"
 
 log_progress "PRETEST" "running qemu"
-just qemu --preset "$preset" \
+just qemu --preset "$preset" "${provider_bindings[@]}" \
     --bind kernel-image=build/anemone.elf \
     --bind disk-x0="$rootfs_target" \
     --bind disk-x1="$sdcard_target" 2>&1 | tee "$log_file"

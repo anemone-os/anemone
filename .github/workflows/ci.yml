@@ -42,4 +42,4 @@ jobs:
             -w /workspace \
             --entrypoint /bin/sh \
             anemone:ci \
-            -c "just build --preset qemu-virt-rv64-release && just build --preset qemu-virt-la64-release"
+            -c "just build --preset qemu-virt-rv64-release --bind smp=8 --bind memory=1G && just build --preset qemu-virt-la64-release --bind smp=8 --bind memory=1G"

@@ -1,1 +1,59 @@
-qemu-virt-rv64-smp-8.toml
+[build]
+arch = "riscv64"
+exec_env = "sbi"
+
+[constants]
+phys_ram_start = 0x80000000
+max_phys_ram_size = 0x200000000     # 8GB
+kernel_la_base = 0x80200000
+kernel_va_base = 0xffffffff80200000
+max_phys_cpu_id = 7
+frame_section_shift_mb = 7
+
+[qemu]
+machine = "virt"
+cpu = "rv64"
+smp = "{{smp}}"
+memory = "{{memory}}"
+bios = "default"
+args = [
+    "-rtc",
+    "base=utc",
+    "-device",
+    "virtio-net-device,netdev=net",
+    "-netdev",
+    "user,id=net",
+    "-accel",
+    "tcg,thread=multi",
+    "-no-reboot",
+]
+
+[[qemu.bind]]
+name = "kernel-image"
+optional = false
+template = ["-kernel", "{{kernel-image}}"]
+
+[[qemu.bind]]
+name = "disk-x0"
+optional = true
+template = [
+    "-drive",
+    "file={{disk-x0}},format=raw,if=none,id=x0",
+    "-device",
+    "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
+]
+
+[[qemu.bind]]
+name = "disk-x1"
+optional = true
+template = [
+    "-drive",
+    "file={{disk-x1}},format=raw,if=none,id=x1",
+    "-device",
+    "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",
+]
+
+[dtb]
+delivery = "firmware"
+authority = "provider-derived"
+provider = "qemu"

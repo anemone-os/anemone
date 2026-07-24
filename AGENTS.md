@@ -225,4 +225,8 @@ rootfs 配置由仓库跟踪的 `conf/rootfs/pretest-rv64.toml` 和
 调用者显式选择，不能依赖无阶段含义的默认路径；个人环境中的初赛/决赛资源位置以
 `LOCAL.md` 为准。日志参数可省略，默认写入 `build/user-test-rv(la)64.log`。
 
+`scripts/run-final-test-rv64.sh` 和 `scripts/run-final-test-la64.sh` 用固定内嵌 BusyBox
+启动决赛测试环境。基本调用形式为
+`./scripts/run-final-test-rv(la)64.sh <sdcard-image> [log-file]`。
+
 修改anemone-apps/user-test/ltp/profile.txt可以选择执行的测试组合，这样可以针对性地执行某些测试，或者跳过一些测试。

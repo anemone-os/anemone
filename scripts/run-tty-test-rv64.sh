@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly preset=qemu-virt-rv64-pretest-release
+readonly preset=qemu-virt-rv64-release
+readonly smp=1
+readonly memory=1G
+readonly -a provider_bindings=(--bind "smp=$smp" --bind "memory=$memory")
 readonly rootfs_config=conf/rootfs/tty-acceptance-rv64.toml
 readonly staging_dir=build/tty-acceptance/staging/riscv64
 readonly staged_busybox=$staging_dir/busybox
@@ -105,6 +108,7 @@ fi
     progress "base-commit:$(git rev-parse HEAD)"
     progress "candidate-dirty:$candidate_dirty"
     progress "preset:$preset"
+    progress "topology:smp=$smp,memory=$memory"
     progress "mode:$mode"
     progress "rootfs-config:$rootfs_config"
 } | tee "$log_file"
@@ -120,11 +124,11 @@ sdcard_destination=$(realpath -m -- "$sdcard_target")
 cp --remove-destination -- "$sdcard" "$sdcard_target"
 
 progress "build-kernel"
-just build --preset "$preset" 2>&1 | tee -a "$log_file"
+just build --preset "$preset" "${provider_bindings[@]}" 2>&1 | tee -a "$log_file"
 
 if [[ $mode == auto ]]; then
     progress "qemu-auto"
-    python3 - "$log_file" "$preset" "$sdcard_target" "$acceptance_rootfs" <<'PY'
+    python3 - "$log_file" "$preset" "$smp" "$memory" "$sdcard_target" "$acceptance_rootfs" <<'PY'
 import os
 import select
 import signal
@@ -132,10 +136,12 @@ import subprocess
 import sys
 import time
 
-log_path, preset, sdcard_path, rootfs_path = sys.argv[1:]
+log_path, preset, smp, memory, sdcard_path, rootfs_path = sys.argv[1:]
 command = [
     "just", "qemu",
     "--preset", preset,
+    "--bind", "smp=" + smp,
+    "--bind", "memory=" + memory,
     "--bind", "kernel-image=build/anemone.elf",
     "--bind", "disk-x0=" + sdcard_path,
     "--bind", "disk-x1=" + rootfs_path,
@@ -337,7 +343,7 @@ sys.stdout.buffer.write(message)
 PY
 else
     progress "qemu-manual-$mode"
-    just qemu --preset "$preset" \
+    just qemu --preset "$preset" "${provider_bindings[@]}" \
         --bind kernel-image=build/anemone.elf \
         --bind disk-x0="$sdcard_target" \
         --bind disk-x1="$acceptance_rootfs" 2>&1 | tee -a "$log_file"

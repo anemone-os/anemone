@@ -21,7 +21,7 @@ print_log_level = 0 # Maximum log level printed to consoles: Emerg=0 ... Debug=7
 record_log_level = 7 # Maximum log level recorded: Emerg=0 ... Debug=7; higher levels are no-ops
 kstack_shift_kb = 9 # Kernel stack size as a power of 2 in KB
 remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
-max_logical_cpus = 16 # Maximum number of logical CPUs enabled by this kernel
+max_logical_cpus = 1 # Maximum number of logical CPUs enabled by this kernel
 max_ident_len_bytes = 255 # Maximum length of identity strings in bytes
 max_path_len_bytes = 4096 # Maximum length of file paths in bytes
 max_processes = 32768 # Maximum number of processes

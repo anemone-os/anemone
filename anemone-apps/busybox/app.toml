@@ -2,7 +2,8 @@ name = "busybox"
 
 [build]
 workdir = "."
-driver = "source"
+driver = "cargo"
+args = ["build"]
 
 [[artifacts]]
-path = "bin/${ARCH}/busybox"
+path = "target/${TARGET_TRIPLE}/debug/busybox"
