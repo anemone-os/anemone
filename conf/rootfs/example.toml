@@ -1,8 +1,8 @@
-#! This manifest describes the minimal rootfs configuration for Anemone.
+#! Example rootfs configuration for Anemone.
 
 [build]
 # Generated image name.
-name = "minimal"
+name = "example"
 # Target architecture for the generated image. This determines how user-space binaries are built.
 arch = "loongarch64"
 

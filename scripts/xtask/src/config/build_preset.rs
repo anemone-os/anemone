@@ -58,16 +58,10 @@ impl FromStr for CargoProfile {
 mod tests {
     use super::*;
 
-    const VALID: &str = r#"
-target = "qemu-virt-rv64-pretest"
-kernel-config = "conf/.defconfig"
-profile = "release"
-"#;
-
     #[test]
     fn parses_closed_build_preset() {
-        let preset = BuildPreset::from_str(VALID).unwrap();
-        assert_eq!(preset.target.as_str(), "qemu-virt-rv64-pretest");
+        let preset = BuildPreset::from_str(&example_preset()).unwrap();
+        assert_eq!(preset.target.as_str(), "example");
         assert_eq!(preset.kernel_config.to_string(), "conf/.defconfig");
         assert_eq!(preset.profile, CargoProfile::Release);
         assert_eq!(CargoProfile::Dev.as_cargo_arg(), ["--profile", "dev"]);
@@ -76,11 +70,12 @@ profile = "release"
 
     #[test]
     fn rejects_non_preset_fields_and_profiles() {
+        let valid = example_preset();
         for invalid in [
-            VALID.replace("profile = \"release\"", "profile = \"other\""),
-            format!("{VALID}\ndisasm = true\n"),
-            format!("{VALID}\nqemu = \"path\"\n"),
-            format!("{VALID}\nbind = []\n"),
+            valid.replace("profile = \"release\"", "profile = \"other\""),
+            format!("{valid}\ndisasm = true\n"),
+            format!("{valid}\nqemu = \"path\"\n"),
+            format!("{valid}\nbind = []\n"),
         ] {
             assert!(BuildPreset::from_str(&invalid).is_err(), "{invalid}");
         }
@@ -88,7 +83,12 @@ profile = "release"
 
     #[test]
     fn build_preset_ref_remains_filename_identity() {
-        assert!(BuildPresetRef::new("qemu-virt-rv64-pretest-release").is_ok());
+        assert!(BuildPresetRef::new("example").is_ok());
         assert!(BuildPresetRef::new("../preset").is_err());
+    }
+
+    fn example_preset() -> String {
+        std::fs::read_to_string("../../conf/build-presets/example.toml")
+            .expect("failed to read example build preset")
     }
 }

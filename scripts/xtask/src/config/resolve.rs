@@ -241,87 +241,38 @@ impl SelectionSource {
 mod tests {
     use super::*;
 
-    const TARGETS: [(&str, &str); 7] = [
-        ("2k1000-la64", "sda"),
-        ("example", "vda"),
-        ("qemu-virt-rv64", "vda"),
-        ("qemu-virt-rv64-pretest", "vda"),
-        ("qemu-virt-la64", "vda"),
-        ("qemu-virt-la64-pretest", "vda"),
-        ("visionfive2-rv64", "mmcblk0"),
-    ];
-
-    const PRESETS: [(&str, &str, CargoProfile); 8] = [
-        ("2k1000-la64-release", "2k1000-la64", CargoProfile::Release),
-        ("example", "example", CargoProfile::Release),
-        (
-            "qemu-virt-rv64-release",
-            "qemu-virt-rv64",
-            CargoProfile::Release,
-        ),
-        (
-            "qemu-virt-rv64-pretest-release",
-            "qemu-virt-rv64-pretest",
-            CargoProfile::Release,
-        ),
-        (
-            "qemu-virt-rv64-pretest-dev",
-            "qemu-virt-rv64-pretest",
-            CargoProfile::Dev,
-        ),
-        (
-            "qemu-virt-la64-release",
-            "qemu-virt-la64",
-            CargoProfile::Release,
-        ),
-        (
-            "qemu-virt-la64-pretest-release",
-            "qemu-virt-la64-pretest",
-            CargoProfile::Release,
-        ),
-        (
-            "visionfive2-rv64-release",
-            "visionfive2-rv64",
-            CargoProfile::Release,
-        ),
-    ];
-
     #[test]
-    fn loads_all_supported_system_targets() {
-        let loader = ConfigLoader::new(workspace_root());
-        let kernel_config_ref = KernelConfigRef::new("conf/.defconfig").unwrap();
+    fn resolves_example_preset_and_tuple() {
+        let workspace = TestWorkspace::new();
+        let loader = ConfigLoader::new(&workspace.0);
 
-        for (target, expected_root_path) in TARGETS {
-            let inputs = loader
-                .load_inputs(
-                    SystemTargetRef::new(target).unwrap(),
-                    kernel_config_ref.clone(),
-                )
-                .unwrap_or_else(|error| panic!("failed to load {target}: {error:#}"));
-            assert_eq!(inputs.target_ref.as_str(), target);
-            assert_eq!(inputs.platform_ref.as_str(), target);
-            assert_eq!(inputs.target.platform.as_str(), target);
-            assert_eq!(inputs.kernel_config_ref, kernel_config_ref);
-            assert!(matches!(
-                inputs.target.initial_program,
-                super::super::system_target::InitialProgramSource::RootfsEntry
-            ));
-            assert!(!inputs.kernel_config.features.is_empty());
-            assert_eq!(inputs.target.root.fstype, "ext4");
-            match &inputs.target.root.source {
-                super::super::system_target::RootSource::Block { path } => {
-                    assert_eq!(path, expected_root_path);
-                },
-                super::super::system_target::RootSource::Pseudo => {
-                    panic!("tracked target {target} unexpectedly uses pseudo root")
-                },
-            }
-        }
+        let preset = loader
+            .resolve_selection(SelectionRequest::explicit_preset(
+                BuildPresetRef::new("example").unwrap(),
+            ))
+            .unwrap();
+        assert_eq!(preset.selection_source.as_str(), "explicit-preset");
+        assert_eq!(preset.system.target_ref.as_str(), "example");
+        assert_eq!(preset.system.platform_ref.as_str(), "example");
+        assert_eq!(preset.system.profile, CargoProfile::Release);
+
+        let tuple = loader
+            .resolve_selection(SelectionRequest::explicit_tuple(
+                SystemTargetRef::new("example").unwrap(),
+                KernelConfigRef::new("kconfig").unwrap(),
+                CargoProfile::Release,
+            ))
+            .unwrap();
+        assert_eq!(tuple.selection_source.as_str(), "explicit-tuple");
+        assert_eq!(tuple.system.target_ref.as_str(), "example");
+        assert_eq!(tuple.system.platform_ref.as_str(), "example");
+        assert_eq!(tuple.system.profile, CargoProfile::Release);
     }
 
     #[test]
     fn rejects_missing_canonical_inputs() {
-        let loader = ConfigLoader::new(workspace_root());
+        let workspace = TestWorkspace::new();
+        let loader = ConfigLoader::new(&workspace.0);
         assert!(
             loader
                 .load_target(&SystemTargetRef::new("missing-target").unwrap())
@@ -345,37 +296,18 @@ mod tests {
     }
 
     #[test]
-    fn resolves_all_tracked_presets() {
-        let loader = ConfigLoader::new(workspace_root());
-        for (preset, target, profile) in PRESETS {
-            let action = loader
-                .resolve_selection(SelectionRequest::explicit_preset(
-                    BuildPresetRef::new(preset).unwrap(),
-                ))
-                .unwrap_or_else(|error| panic!("failed to resolve preset {preset}: {error:#}"));
-            assert_eq!(action.selection_source.as_str(), "explicit-preset");
-            assert_eq!(action.system.target_ref.as_str(), target);
-            assert_eq!(action.system.profile, profile);
-            assert_eq!(
-                action.system.kernel_config_ref.to_string(),
-                "conf/.defconfig"
-            );
-        }
-    }
-
-    #[test]
     fn preset_rejects_missing_kernel_config() {
         let workspace = TestWorkspace::new();
-        fs::write(
-            workspace.0.join("conf/build-presets/missing-kconfig.toml"),
-            "target = \"qemu-virt-rv64-pretest\"\nkernel-config = \"missing\"\nprofile = \"release\"\n",
-        )
-        .unwrap();
+        replace_file_text(
+            workspace.0.join("conf/build-presets/example.toml"),
+            "kernel-config = \"kconfig\"",
+            "kernel-config = \"missing\"",
+        );
         let loader = ConfigLoader::new(&workspace.0);
         assert!(
             loader
                 .resolve_selection(SelectionRequest::explicit_preset(
-                    BuildPresetRef::new("missing-kconfig").unwrap(),
+                    BuildPresetRef::new("example").unwrap(),
                 ))
                 .is_err()
         );
@@ -387,12 +319,12 @@ mod tests {
         let loader = ConfigLoader::new(&workspace.0);
         let action = loader
             .resolve_selection(SelectionRequest::explicit_preset(
-                BuildPresetRef::new("test-release").unwrap(),
+                BuildPresetRef::new("example").unwrap(),
             ))
             .unwrap();
 
         fs::write(
-            workspace.0.join("conf/build-presets/test-release.toml"),
+            workspace.0.join("conf/build-presets/example.toml"),
             "invalid = true\n",
         )
         .unwrap();
@@ -407,16 +339,12 @@ mod tests {
             "max_logical_cpus = 99",
         );
         replace_file_text(
-            workspace
-                .0
-                .join("conf/system-targets/qemu-virt-rv64-pretest.toml"),
+            workspace.0.join("conf/system-targets/example.toml"),
             "fstype = \"ext4\"",
             "fstype = \"ramfs\"",
         );
         replace_file_text(
-            workspace
-                .0
-                .join("conf/platforms/qemu-virt-rv64-pretest.toml"),
+            workspace.0.join("conf/platforms/example.toml"),
             "memory = \"1G\"",
             "memory = \"2G\"",
         );
@@ -433,9 +361,10 @@ mod tests {
 
     #[test]
     fn kernel_config_rejects_legacy_build_selection() {
-        let content = fs::read_to_string(workspace_root().join("conf/.defconfig")).unwrap();
+        let workspace = TestWorkspace::new();
+        let default_kconfig = fs::read_to_string(workspace.0.join("conf/.defconfig")).unwrap();
         let legacy = format!(
-            "[build]\ntarget = \"qemu-virt-rv64-pretest\"\nprofile = \"release\"\ndisasm = false\n\n{content}"
+            "[build]\ntarget = \"example\"\nprofile = \"release\"\ndisasm = false\n\n{default_kconfig}"
         );
         assert!(KConfig::from_str(&legacy).is_err());
     }
@@ -456,9 +385,16 @@ mod tests {
             fs::create_dir_all(root.join("conf/platforms")).unwrap();
             fs::create_dir_all(root.join("conf/build-presets")).unwrap();
 
-            let default_content =
-                fs::read_to_string(workspace_root().join("conf/.defconfig")).unwrap();
-            fs::write(root.join("conf/.defconfig"), &default_content).unwrap();
+            for relative in [
+                "conf/.defconfig",
+                "conf/system-targets/example.toml",
+                "conf/platforms/example.toml",
+                "conf/build-presets/example.toml",
+            ] {
+                fs::copy(Path::new("../..").join(relative), root.join(relative)).unwrap();
+            }
+
+            let default_content = fs::read_to_string(root.join("conf/.defconfig")).unwrap();
             let selected_content = default_content
                 .lines()
                 .filter(|line| {
@@ -468,22 +404,11 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n");
             fs::write(root.join("kconfig"), selected_content).unwrap();
-
-            for relative in [
-                "conf/system-targets/qemu-virt-rv64-pretest.toml",
-                "conf/platforms/qemu-virt-rv64-pretest.toml",
-            ] {
-                fs::copy(workspace_root().join(relative), root.join(relative)).unwrap();
-            }
-            for (name, profile) in [("test-release", "release"), ("test-dev", "dev")] {
-                fs::write(
-                    root.join(format!("conf/build-presets/{name}.toml")),
-                    format!(
-                        "target = \"qemu-virt-rv64-pretest\"\nkernel-config = \"kconfig\"\nprofile = \"{profile}\"\n"
-                    ),
-                )
-                .unwrap();
-            }
+            replace_file_text(
+                root.join("conf/build-presets/example.toml"),
+                "kernel-config = \"conf/.defconfig\"",
+                "kernel-config = \"kconfig\"",
+            );
             Self(root)
         }
     }
@@ -499,9 +424,5 @@ mod tests {
         let content = fs::read_to_string(path).unwrap();
         assert!(content.contains(old));
         fs::write(path, content.replace(old, new)).unwrap();
-    }
-
-    fn workspace_root() -> &'static Path {
-        Path::new("../..")
     }
 }

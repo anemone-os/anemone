@@ -234,6 +234,8 @@ fn remove_file_if_present(path: &Path) -> anyhow::Result<()> {
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
+    use crate::config::platform::Arch;
+
     use super::*;
 
     #[test]
@@ -242,7 +244,7 @@ mod tests {
         let output = workspace.path.join("platform.dtb");
         fs::write(&output, b"stale").unwrap();
         fs::write(temporary_path(&output).unwrap(), b"partial").unwrap();
-        let platform = load_platform("qemu-virt-rv64.toml");
+        let platform = example_platform();
 
         materialize_at(&platform, &output, OsStr::new("/bin/false")).unwrap();
 
@@ -254,10 +256,8 @@ mod tests {
     fn physical_embedded_source_is_compiled() {
         let workspace = TestWorkspace::new();
         let temporary = workspace.path.join("platform.dtb.tmp");
-
         let repository = Path::new("../..").canonicalize().unwrap();
-        compile_source_from_root(&repository, "conf/platforms/2k1000-board.dts", &temporary)
-            .unwrap();
+        compile_source_from_root(&repository, "conf/platforms/example.dts", &temporary).unwrap();
 
         validate_dtb(&temporary).unwrap();
     }
@@ -266,7 +266,7 @@ mod tests {
     fn qemu_provider_uses_only_topology_and_cleans_failures() {
         let workspace = TestWorkspace::new();
         let output = workspace.path.join("platform.dtb");
-        let platform = load_platform("qemu-virt-la64.toml");
+        let platform = embedded_example_platform();
         let qemu = platform.qemu.as_ref().unwrap();
         let command = qemu_provider_command(qemu, OsStr::new("qemu-test"), &output).unwrap();
         assert_eq!(
@@ -275,11 +275,13 @@ mod tests {
                 "-machine",
                 &format!("virt,dumpdtb={}", output.display()),
                 "-cpu",
-                "la464",
+                "rv64",
                 "-smp",
-                "1",
+                "3",
                 "-m",
                 "1G",
+                "-bios",
+                "default",
             ]
             .map(OsStr::new)
         );
@@ -299,7 +301,7 @@ mod tests {
     fn qemu_provider_rejects_invalid_output_and_atomically_publishes_valid_dtb() {
         let workspace = TestWorkspace::new();
         let output = workspace.path.join("platform.dtb");
-        let platform = load_platform("qemu-virt-la64.toml");
+        let platform = embedded_example_platform();
         let invalid = workspace.provider_script("printf invalid > \"${2#*,dumpdtb=}\"");
 
         let error = materialize_at(&platform, &output, invalid.as_os_str()).unwrap_err();
@@ -319,9 +321,20 @@ mod tests {
         assert!(!temporary_path(&output).unwrap().exists());
     }
 
-    fn load_platform(name: &str) -> Config {
-        Config::from_str(&fs::read_to_string(Path::new("../../conf/platforms").join(name)).unwrap())
-            .unwrap()
+    fn example_platform() -> Config {
+        Config::from_str(
+            &fs::read_to_string("../../conf/platforms/example.toml")
+                .expect("failed to read example Platform"),
+        )
+        .unwrap()
+    }
+
+    fn embedded_example_platform() -> Config {
+        let mut platform = example_platform();
+        platform.build.arch = Arch::LoongArch64;
+        platform.qemu.as_mut().unwrap().smp = 3;
+        platform.dtb.as_mut().unwrap().delivery = DtbDelivery::Embedded;
+        platform
     }
 
     fn minimal_fdt() -> Vec<u8> {

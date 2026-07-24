@@ -197,7 +197,7 @@ mod tests {
         let tuple = SelectionCli::try_parse_from([
             "test",
             "--target",
-            "qemu-virt-rv64",
+            "example",
             "--kernel-config",
             "conf/.defconfig",
             "--profile",

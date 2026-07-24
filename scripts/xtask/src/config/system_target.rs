@@ -80,21 +80,10 @@ pub enum InitialProgramSource {
 mod tests {
     use super::*;
 
-    const VALID_TARGET: &str = r#"
-platform = "qemu-virt-rv64"
-
-[root]
-fstype = "ext4"
-source = { type = "block", path = "vda" }
-
-[initial-program]
-type = "rootfs-entry"
-"#;
-
     #[test]
-    fn parses_minimal_rootfs_entry_target() {
-        let config = Config::from_str(VALID_TARGET).unwrap();
-        assert_eq!(config.platform.as_str(), "qemu-virt-rv64");
+    fn parses_example_rootfs_entry_target() {
+        let config = Config::from_str(&example_target()).unwrap();
+        assert_eq!(config.platform.as_str(), "example");
         assert_eq!(config.root.fstype, "ext4");
         assert!(matches!(config.root.source, RootSource::Block { .. }));
         assert!(matches!(
@@ -105,13 +94,14 @@ type = "rootfs-entry"
 
     #[test]
     fn rejects_unsupported_initial_program_tag() {
-        let content = VALID_TARGET.replace("rootfs-entry", "unknown");
+        let content = example_target().replace("rootfs-entry", "unknown");
         assert!(Config::from_str(&content).is_err());
     }
 
     #[test]
     fn parses_embedded_app_target() {
-        let content = VALID_TARGET.replace(
+        let valid = example_target();
+        let content = valid.replace(
             "type = \"rootfs-entry\"",
             "type = \"embedded-app\"\napp = \"init\"",
         );
@@ -121,11 +111,10 @@ type = "rootfs-entry"
             InitialProgramSource::EmbeddedApp { app } if app.as_str() == "init"
         ));
 
-        let missing_app =
-            VALID_TARGET.replace("type = \"rootfs-entry\"", "type = \"embedded-app\"");
+        let missing_app = valid.replace("type = \"rootfs-entry\"", "type = \"embedded-app\"");
         assert!(Config::from_str(&missing_app).is_err());
 
-        let invalid_app = VALID_TARGET.replace(
+        let invalid_app = valid.replace(
             "type = \"rootfs-entry\"",
             "type = \"embedded-app\"\napp = \"../init\"",
         );
@@ -134,27 +123,34 @@ type = "rootfs-entry"
 
     #[test]
     fn rejects_invalid_root_source() {
-        let empty_fstype = VALID_TARGET.replace("fstype = \"ext4\"", "fstype = \"\"");
+        let valid = example_target();
+        let empty_fstype = valid.replace("fstype = \"ext4\"", "fstype = \"\"");
         assert!(Config::from_str(&empty_fstype).is_err());
 
-        let empty_block_path = VALID_TARGET.replace("path = \"vda\"", "path = \"\"");
+        let empty_block_path = valid.replace("path = \"vda\"", "path = \"\"");
         assert!(Config::from_str(&empty_block_path).is_err());
     }
 
     #[test]
     fn rejects_fields_owned_by_other_layers() {
+        let valid = example_target();
         for field in [
             "preset = \"dev\"",
             "profile = \"release\"",
             "qemu = {}",
             "outputs = []",
         ] {
-            let content = VALID_TARGET.replacen(
-                "platform = \"qemu-virt-rv64\"",
-                &format!("platform = \"qemu-virt-rv64\"\n{field}"),
+            let content = valid.replacen(
+                "platform = \"example\"",
+                &format!("platform = \"example\"\n{field}"),
                 1,
             );
             assert!(Config::from_str(&content).is_err(), "{field}");
         }
+    }
+
+    fn example_target() -> String {
+        std::fs::read_to_string("../../conf/system-targets/example.toml")
+            .expect("failed to read example SystemTarget")
     }
 }

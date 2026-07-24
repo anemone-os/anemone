@@ -32,6 +32,7 @@
 
 ## 当前记录
 
+- [2026-07-24 - QEMU SMP Platform用途别名](./2026-07-24-qemu-smp-platform-aliases.md)
 - [2026-07-24 - mount fstype/source compatibility](./2026-07-24-mount-fstype-source-compat.md)
 - [2026-07-24 - FIONBIO opened-description status 更新](./2026-07-24-fionbio.md)
 - [2026-07-24 - github/main PR #136 集成](./2026-07-24-github-main-pr136-integration.md)

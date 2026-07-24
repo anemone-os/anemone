@@ -86,15 +86,14 @@ pub struct File {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::{Path, PathBuf};
 
     #[test]
-    fn test_parsing() {
-        let rootfs = parse_manifest("../../conf/rootfs/minimal.toml");
+    fn example_manifest_parses() {
+        let rootfs = parse_manifest("../../conf/rootfs/example.toml");
+        assert_eq!(rootfs.build.name, "example");
         assert_eq!(rootfs.fs.base_type, BaseType::Folder);
         assert!(rootfs.dirs.iter().any(|dir| dir.path == "/dev"));
         assert!(rootfs.dirs.iter().any(|dir| dir.path == "/mnt"));
-        println!("{:#?}", rootfs);
     }
 
     #[test]
@@ -162,52 +161,8 @@ path = "/sbin/init"
         assert!(result.is_err());
     }
 
-    #[test]
-    fn pretest_manifests_reference_public_inputs() {
-        let rv64 = parse_manifest("../../conf/rootfs/pretest-rv64.toml");
-        assert_eq!(rv64.build.name, "pretest-rv64");
-        assert_eq!(rv64.build.arch.as_str(), "riscv64");
-        assert_manifest_inputs_exist(&rv64);
-        assert_mount_dirs(&rv64);
-
-        let la64 = parse_manifest("../../conf/rootfs/pretest-la64.toml");
-        assert_eq!(la64.build.name, "pretest-la64");
-        assert_eq!(la64.build.arch.as_str(), "loongarch64");
-        assert_manifest_inputs_exist(&la64);
-        assert_mount_dirs(&la64);
-    }
-
     fn parse_manifest(path: &str) -> Rootfs {
         let content = std::fs::read_to_string(path).expect("Failed to read rootfs.toml");
         Rootfs::from_str(&content).expect("Failed to parse rootfs.toml")
-    }
-
-    fn assert_manifest_inputs_exist(rootfs: &Rootfs) {
-        if let Some(base) = &rootfs.fs.base {
-            assert!(workspace_path(base).is_dir(), "missing rootfs base: {base}");
-        }
-        if let Some(override_dir) = &rootfs.fs.override_dir {
-            assert!(
-                workspace_path(override_dir).is_dir(),
-                "missing rootfs override: {override_dir}"
-            );
-        }
-
-        for file in &rootfs.files {
-            assert!(
-                workspace_path(&file.source).is_file(),
-                "missing staged rootfs file: {}",
-                file.source
-            );
-        }
-    }
-
-    fn assert_mount_dirs(rootfs: &Rootfs) {
-        assert!(rootfs.dirs.iter().any(|dir| dir.path == "/dev"));
-        assert!(rootfs.dirs.iter().any(|dir| dir.path == "/mnt"));
-    }
-
-    fn workspace_path(path: &str) -> PathBuf {
-        Path::new("../..").join(path)
     }
 }

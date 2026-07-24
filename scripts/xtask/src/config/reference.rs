@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn slug_references_are_strict() {
-        for valid in ["qemu-virt-rv64", "visionfive2-rv64", "0-test", "a-"] {
+        for valid in ["example", "test-target", "0-test", "a-"] {
             assert!(AppRef::new(valid).is_ok(), "{valid}");
             assert!(BuildPresetRef::new(valid).is_ok(), "{valid}");
             assert!(SystemTargetRef::new(valid).is_ok(), "{valid}");

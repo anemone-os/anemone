@@ -1,11 +1,11 @@
 # System Target Model 目标与不变量
 
-**状态：** Accepted for Implementation（R4A Closed；R4B Outline）
+**状态：** Implemented / Closed
 **最后更新：** 2026-07-24
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
-**适用修订：** R4
+**适用修订：** R5
 
-本文定义 R4 accepted target invariants 与 RFC-local proof obligations。它不描述
+本文定义 R5 accepted target invariants 与 RFC-local proof obligations。它不描述
 当前已经实现的 build behavior，也不构成 `docs/src/contracts/` 的 effective contract。
 
 ## Contract Impact
@@ -751,4 +751,4 @@ Draft target 的文档层闭包要求：
 - `BOOT-PROTOCOL-001` baseline 已在public acceptance前提取；target contract、唯一生命周期责任
   与cutover gate输入已闭合，具体materialization机制已由Stage 5 vertical slice验证；
 - public promotion、R0-R3 acceptance/implementation、`BOOT-PROTOCOL-001` Refine target cutover与
-  R4A QEMU provider DT cutover均已完成；R4B保持Outline，不由R4A关闭自动解析或激活。
+  R4A QEMU provider DT cutover均已完成；R5已将未激活的R4B配置应用移出RFC acceptance boundary。

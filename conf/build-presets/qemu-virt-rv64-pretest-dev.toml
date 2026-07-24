@@ -1,3 +1,0 @@
-target = "qemu-virt-rv64-pretest"
-kernel-config = "conf/.defconfig"
-profile = "dev"

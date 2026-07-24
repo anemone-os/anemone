@@ -83,11 +83,11 @@ mod tests {
                 "xtask",
                 "qemu",
                 "--platform",
-                "qemu-virt-rv64",
+                "example",
                 "--image",
                 "build/anemone.elf",
             ],
-            vec!["xtask", "conf", "switch", "qemu-virt-rv64"],
+            vec!["xtask", "conf", "switch", "example"],
             vec!["xtask", "mrproper"],
             vec!["xtask", "selection", "show"],
             vec!["xtask", "fmt"],
@@ -99,14 +99,7 @@ mod tests {
     #[test]
     fn production_cli_exposes_selection_aware_build_and_qemu() {
         assert!(
-            Cli::try_parse_from([
-                "xtask",
-                "build",
-                "--preset",
-                "qemu-virt-rv64-pretest-release",
-                "--disasm",
-            ])
-            .is_ok()
+            Cli::try_parse_from(["xtask", "build", "--preset", "example", "--disasm",]).is_ok()
         );
         assert!(Cli::try_parse_from(["xtask", "fmt", "all", "--check"]).is_ok());
         assert!(Cli::try_parse_from(["xtask", "xref", "list"]).is_ok());
@@ -127,7 +120,7 @@ mod tests {
                 "xtask",
                 "qemu",
                 "--target",
-                "qemu-virt-rv64-pretest",
+                "example",
                 "--kernel-config",
                 "conf/.defconfig",
                 "--profile",
@@ -138,15 +131,8 @@ mod tests {
             .is_ok()
         );
         assert!(
-            Cli::try_parse_from([
-                "xtask",
-                "qemu",
-                "dt",
-                "refresh",
-                "--platform",
-                "qemu-virt-rv64",
-            ])
-            .is_err()
+            Cli::try_parse_from(["xtask", "qemu", "dt", "refresh", "--platform", "example",])
+                .is_err()
         );
     }
 }

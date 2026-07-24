@@ -1,7 +1,7 @@
 # RFC-20260722-system-target-model
 
-**状态：** Accepted for Implementation（R4A Closed；R4B Outline）
-**修订：** R4
+**状态：** Implemented / Closed
+**修订：** R5
 **负责人：** doruche
 **最后更新：** 2026-07-24
 **领域：** build system / configuration / platform / repository workflow
@@ -9,12 +9,13 @@
 [R3 explicit-input cleanup](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)；
 [R0-R2 implementation history](../../devlog/transactions/2026-07-22-system-target-model.md)
 **影响契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--typed-initial-program-source统一收口到普通-vfs-exec)（Refine；Checkpoint 5A已于2026-07-24 cut over并生效）。
-**开放问题：** None；R4A已关闭，R4B保持Outline。
-**下一步：** 不自动解析或激活R4B；只有新的独立授权才能进入`R4A -> R4B Implementation Resolution Gate`。
+**开放问题：** None。
+**下一步：** None；hardware-semantic QEMU Platform与用途别名作为独立
+[小迭代](../../devlog/changes/2026-07-24-qemu-smp-platform-aliases.md)维护。
 
 ## 文档状态
 
-本文是 R4 accepted target 的 canonical source；它不是 current contract 或 resolved write set。
+本文是 R5 accepted target 的 canonical source；它不是 current contract 或 resolved write set。
 本文把已经形成的 system-target 定位共识展开为实施目标，并取代历史 positioning 文档作为
 本 RFC 的 target authority。
 
@@ -24,8 +25,8 @@ Stage 5与单一Checkpoint 5A已独立关闭；`BOOT-PROTOCOL-001`已在5A原子
 Checkpoint 6A已完成current workflow回归、审计和生命周期write-back并关闭。R3以新的transaction
 清理R2遗留的隐式输入并已关闭，没有重开或改写Completed的R0-R2 transaction。R4接受QEMU DT
 provider反馈：QEMU不再提交或维护DTS baseline；firmware delivery直接消费runtime FDT，embedded
-delivery由normal build从已解析QEMU provider物化build-local DTB。R4A只实现该DT cutover，R4B再迁移
-hardware-semantic SMP Platform与business-semantic adopter配置。
+delivery由normal build从已解析QEMU provider物化build-local DTB。R4A实现并关闭该DT cutover。R5把
+从未进入Ready或Active的R4B adopter迁移移出本RFC；对应Platform配置应用不属于target model本身。
 
 ## 摘要
 
@@ -600,8 +601,8 @@ R4反馈进一步确认：QEMU machine model已经是可执行machine-fact autho
 refresh/check只形成第二份provider镜像。QEMU Platform因此不再提交DTS；RV64类firmware delivery直接
 接受runtime FDT，LA64类embedded delivery由normal build自动物化build-local DTB。QEMU bind必须
 DT-neutral，build不提供占位符；QEMU DT maintenance CLI整体删除。Physical Platform在没有等价可执行
-provider输入时继续提交稳定DTS source/baseline。R4A先完成该DT cutover；R4B只保留hardware-semantic
-SMP Platform与business-semantic target/preset迁移的Outline，不在R4A提前改名。
+provider输入时继续提交稳定DTS source/baseline。R4A完成该DT cutover；hardware-semantic SMP Platform
+与business-semantic target/preset映射由R5移出本RFC，作为模型之上的独立配置应用维护。
 
 若后续feedback需要
 改变target invariant、owner、ABI、
@@ -693,8 +694,8 @@ repackage 或 ELF-only 高频工作流来证明抽象价值。内部 post-link s
 
 ## 收口
 
-R4是当前accepted target。R0-R2的Stage 1-6、R3A与R4A均已关闭；R4不重开历史stage或Completed transaction，
-而是在新revision下以R4A Closed、R4B Outline继续。Stage 1已按用户授权完成，Checkpoint 1A-1D已依次独立关闭；独立的
+R5是当前accepted target。R0-R2的Stage 1-6、R3A与R4A均已关闭；R5不重开历史stage或Completed transaction，
+并把从未解析或激活的R4B应用迁移从RFC acceptance boundary中移除。Stage 1已按用户授权完成，Checkpoint 1A-1D已依次独立关闭；独立的
 `Stage 1 -> Stage 2 Implementation Resolution Gate`已把Stage 2解析为Ready，2A随后独立激活并关闭。该gate
 确认ignored source-tree DTB使原Stage 2/3顺序无法直接成立，并在不改变R0 target的前提下把最小
 normal-build DT输入前移为2A；QEMU refresh和剩余per-platform closure仍留在Stage 3。R0 已删除独立
@@ -707,12 +708,13 @@ provenance、允许差异与复核责任无法由
 当前软件自动维护；R2删除没有action consumer的typed metadata，同时保留`provider = "firmware"`的
 fail-closed行为和人类review义务。R3A随后关闭explicit-input cleanup。R4接受进一步owner纠偏：QEMU
 provider不再拥有committed DTS mirror或maintenance CLI；R4A已原子完成schema、materialization、CLI与
-repository surface cutover。R4B保持Outline，未解析或激活。
+repository surface cutover。R5确认该RFC没有剩余实施阶段并关闭。
 
 ## 修订记录
 
 | 修订 | 日期 | 状态 | 语义变化 | Review / 事务 |
 | --- | --- | --- | --- | --- |
+| R5 | 2026-07-24 | Implemented / Closed | 将从未Ready或Active的R4B hardware-semantic Platform/adopter迁移移出本RFC；该变化不撤销R4A DT target、实现或验证，也不改变current contract。对应配置作为独立小迭代落地。 | [QEMU SMP Platform用途别名](../../devlog/changes/2026-07-24-qemu-smp-platform-aliases.md) |
 | R4 | 2026-07-24 | Accepted for Implementation | QEMU Platform不再提交DTS或暴露DT refresh/check；firmware delivery使用runtime FDT，embedded delivery由normal build从selected provider自动生成build-local DTB；QEMU bind必须DT-neutral且build不提供占位符。Physical DTS source/baseline保持。R4A负责DT cutover并已关闭，R4B迁移SMP硬件Platform与业务target且保持Outline。 | [R4A QEMU provider DT cutover](../../devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md) |
 | R3 | 2026-07-24 | Implemented / Closed | 删除developer-local/repository-default selection和preset presentation defaults；system action只接受显式preset或完整tuple。Rootfs type、QEMU CPU和fmt scope显式；folder容量固定自动计算；BIOS保持optional且省略时不传`-bios`。 | [2026-07-24-system-target-model-r3-explicit-inputs](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md) |
 | R2 | 2026-07-23 | Accepted for Implementation | 接受Stage 3关闭后的配置反馈：physical firmware provenance、允许差异与复核责任保留为人类review事实，删除无action consumer的typed Platform metadata；DT authority/delivery、QEMU maintenance权限、runtime FDT与Contract Impact均不变。 | [2026-07-22-system-target-model](../../devlog/transactions/2026-07-22-system-target-model.md) |

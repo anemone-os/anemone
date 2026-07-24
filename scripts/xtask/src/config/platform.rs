@@ -331,14 +331,14 @@ mod tests {
 
     #[test]
     fn qemu_cpu_is_required_and_nonempty() {
-        let valid = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
+        let valid = example_platform_text();
         assert!(Config::from_str(&valid.replace("cpu = \"rv64\"\n", "")).is_err());
         assert!(Config::from_str(&valid.replace("cpu = \"rv64\"", "cpu = \"\"")).is_err());
     }
 
     #[test]
     fn rejects_incoherent_dtb_contracts() {
-        let valid = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
+        let valid = example_platform_text();
 
         for invalid in [
             valid.replace("provider = \"qemu\"\n", ""),
@@ -353,7 +353,10 @@ mod tests {
             assert!(Config::from_str(&invalid).is_err(), "{invalid}");
         }
 
-        let embedded = std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
+        let mut embedded = example_platform();
+        embedded.build.arch = Arch::LoongArch64;
+        embedded.dtb.as_mut().unwrap().delivery = DtbDelivery::Embedded;
+        let embedded = toml::to_string(&embedded).unwrap();
         assert!(
             Config::from_str(
                 &embedded.replace("delivery = \"embedded\"", "delivery = \"firmware\"")
@@ -361,36 +364,40 @@ mod tests {
             .is_err()
         );
 
-        let physical =
-            std::fs::read_to_string("../../conf/platforms/visionfive2-rv64.toml").unwrap();
+        let physical = physical_platform(
+            Arch::RiscV64,
+            DtbDelivery::Firmware,
+            DtAuthority::ProviderDerived,
+            Some(DtbProvider::Firmware),
+        );
         for invalid in [
-            physical.replace("source = \"conf/platforms/visionfive2-board.dts\"\n", ""),
+            physical.replace("source = \"conf/platforms/example.dts\"\n", ""),
+            physical.replace("source = \"conf/platforms/example.dts\"", "source = \"\""),
             physical.replace(
-                "source = \"conf/platforms/visionfive2-board.dts\"",
-                "source = \"\"",
-            ),
-            physical.replace(
-                "source = \"conf/platforms/visionfive2-board.dts\"",
-                "source = \"../visionfive2-board.dts\"",
+                "source = \"conf/platforms/example.dts\"",
+                "source = \"../example.dts\"",
             ),
             physical.replace("provider = \"firmware\"", "provider = \"qemu\""),
         ] {
             assert!(Config::from_str(&invalid).is_err(), "{invalid}");
         }
 
-        let normative = std::fs::read_to_string("../../conf/platforms/2k1000-la64.toml").unwrap();
+        let normative = physical_platform(
+            Arch::LoongArch64,
+            DtbDelivery::Embedded,
+            DtAuthority::Normative,
+            None,
+        );
         assert!(Config::from_str(&normative).is_ok());
         assert!(
-            Config::from_str(
-                &normative.replace("source = \"conf/platforms/2k1000-board.dts\"\n", "")
-            )
-            .is_err()
+            Config::from_str(&normative.replace("source = \"conf/platforms/example.dts\"\n", ""))
+                .is_err()
         );
     }
 
     #[test]
     fn validates_qemu_bind_declarations() {
-        let valid = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap()
+        let valid = example_platform_text()
             + r#"
 
 [[qemu.bind]]
@@ -412,5 +419,31 @@ template = ["-drive", "file={{}},backup={{}},format=raw"]
         ] {
             assert!(Config::from_str(&invalid).is_err(), "{invalid}");
         }
+    }
+
+    fn example_platform_text() -> String {
+        std::fs::read_to_string("../../conf/platforms/example.toml")
+            .expect("failed to read example Platform")
+    }
+
+    fn example_platform() -> Config {
+        Config::from_str(&example_platform_text()).unwrap()
+    }
+
+    fn physical_platform(
+        arch: Arch,
+        delivery: DtbDelivery,
+        authority: DtAuthority,
+        provider: Option<DtbProvider>,
+    ) -> String {
+        let mut platform = example_platform();
+        platform.build.arch = arch;
+        platform.qemu = None;
+        let dtb = platform.dtb.as_mut().unwrap();
+        dtb.source = Some("conf/platforms/example.dts".to_string());
+        dtb.delivery = delivery;
+        dtb.authority = authority;
+        dtb.provider = provider;
+        toml::to_string(&platform).unwrap()
     }
 }

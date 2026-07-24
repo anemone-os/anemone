@@ -30,6 +30,7 @@
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-07-24 - QEMU SMP Platform用途别名](./devlog/changes/2026-07-24-qemu-smp-platform-aliases.md)
 		- [2026-07-24 - mount fstype/source compatibility](./devlog/changes/2026-07-24-mount-fstype-source-compat.md)
 		- [2026-07-24 - github/main PR #136 集成](./devlog/changes/2026-07-24-github-main-pr136-integration.md)
 		- [2026-07-24 - xref 外部源码注册表](./devlog/changes/2026-07-24-xref-source-registry.md)
