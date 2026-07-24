@@ -2,7 +2,7 @@
 
 use crate::{
     boot_defs::{INITIAL_PROGRAM_SOURCE, InitialProgramSource},
-    device::console::{open_console_stdin, open_console_stdout},
+    device::boot_io::InitStdio,
     fs::{RenameFlags, api::fchmod::kernel_fchmod},
     prelude::*,
     task::{
@@ -199,14 +199,16 @@ fn write_all(file: &File, mut bytes: &[u8], path: &Path) -> Result<(), Materiali
     Ok(())
 }
 
-fn prepare_initial_task() {
+fn prepare_initial_task(init_stdio: InitStdio) {
     // Initial stdio is inherited by the first user program.
     {
         let kinit = get_current_task();
+        let [stdin, stdout, stderr] = init_stdio.into_files();
         let open_stdio = |file: File, access| {
             let status = FileStatusFlags::empty();
-            // Boot stdio is an anonymous console protocol: no Linux open flags
-            // are accepted here, but keep the status hook boundary explicit.
+            // Boot stdio uses three normal files backed by one shared Terminal;
+            // no Linux open flags are accepted here, but keep the status hook
+            // boundary explicit.
             file.check_status_flags(status.to_file_op_status_flags())
                 .expect("initial stdio status rejected");
             kinit
@@ -219,17 +221,17 @@ fn prepare_initial_task() {
                 )
                 .expect("failed to open initial stdio fd");
         };
-        open_stdio(open_console_stdin(), OpenAccessMode::Read);
-        open_stdio(open_console_stdout(), OpenAccessMode::Write);
-        open_stdio(open_console_stdout(), OpenAccessMode::Write);
+        open_stdio(stdin, OpenAccessMode::Read);
+        open_stdio(stdout, OpenAccessMode::Write);
+        open_stdio(stderr, OpenAccessMode::Write);
     }
 
     get_current_task().set_fs_state(FsState::new_root());
 }
 
-pub(crate) fn exec_initial_program() {
+pub(crate) fn exec_initial_program(init_stdio: InitStdio) {
     let program = resolve_initial_program();
-    prepare_initial_task();
+    prepare_initial_task(init_stdio);
     kinfoln!("boot protocol: ordinary exec handoff path={}", program.path);
     kernel_execve(&program.path, &program.argv, &program.envp).unwrap_or_else(|error| {
         panic!(

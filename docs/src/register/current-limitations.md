@@ -187,17 +187,17 @@
 ## ANE-20260527-PROCESS-GROUP-SESSION-STAGE1
 
 **Type:** Limitation
-**Status:** Active
+**Status:** Narrowed
 **Severity:** Medium
 **Area:** task topology / process group / session / job control
 
-**Summary:** 当前进程组与会话实现是从`69bff4b`之后引入的stage-1主干，已经覆盖PGID/SID拓扑、`setpgid / getpgid / setsid / getsid`、process-group `kill`，并由Unix Job Control R1补齐ThreadGroup stop/continue、stopped/continued child wait、SIGCHLD与procfs投影。它仍不是完整terminal job-control实现：尚未接入controlling TTY、foreground/background process group、terminal-generated job-control signal与orphaned process group的`SIGHUP / SIGCONT`规则。
+**Summary:** 当前进程组与会话实现已经覆盖PGID/SID拓扑、`setpgid / getpgid / setsid / getsid`、process-group `kill`，并由Unix Job Control R1补齐ThreadGroup stop/continue、stopped/continued child wait、SIGCHLD与procfs投影。TTY R1进一步完成controlling TTY、foreground/background process group、foreground control-character signal、ordinary background read `SIGTTIN`、changed winsize `SIGWINCH`与BusyBox ash所需的non-orphan foreground handoff。剩余范围是relation-disassociation `SIGHUP/SIGCONT`、newly orphaned stopped process-group effect、orphaned-pgrp corner、`TOSTOP` write和其它terminal-modifying background operations；这些能力没有被本次cutover伪装为已支持。
 
-**Exit Condition:** 接入controlling TTY和foreground process-group管理，并为background terminal access、session leader退出、newly orphaned stopped process group等路径补齐Linux/POSIX对齐的回归测试。
+**Exit Condition:** 后续独立target为relation-disassociation、newly orphaned stopped process group与orphaned-pgrp建立明确owner/effect ordering，并闭合`TOSTOP`及其它terminal-modifying background access的signal/errno matrix；完成对应source、ABI与lifecycle回归后再继续收窄或关闭。
 
 **Owner:** doruche
-**Last Verified:** 2026-07-21
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [waitid 小迭代记录](../devlog/changes/2026-06-14-waitid.md), [Unix Job Control RFC](../rfcs/unix-jobctl/index.md), [Unix Job Control事务日志](../devlog/transactions/2026-07-20-unix-jobctl.md)
+**Last Verified:** 2026-07-24
+**Related:** [TTY job-control当前契约](../contracts/tty/job-control.md), [TTY Subsystem RFC](../rfcs/tty-subsystem/index.md), [TTY Subsystem事务日志](../devlog/transactions/2026-07-23-tty-subsystem.md), [Unix Job Control RFC](../rfcs/unix-jobctl/index.md), [Unix Job Control事务日志](../devlog/transactions/2026-07-20-unix-jobctl.md)
 
 ## ANE-20260721-JOBCTL-PTRACE-DEFERRED
 
@@ -587,19 +587,19 @@ nonblocking 和动态 pipe capacity 需要单独设计。
 ## ANE-20260604-IOCTL-LTP-STAGE1-GAPS
 
 **Type:** Limitation
-**Status:** Active
+**Status:** Narrowed
 **Severity:** Medium
 **Area:** ioctl / block / loop / random / procfs / user-test
 
-**Summary:** LTP ioctl 组的直接小缺口已经部分收口：block EOF read 在 EOF 处返回 `0`，通用 block devfs 支持 `BLKRASET` / `BLKRAGET` 读回，`/dev/urandom` 已发布，user-test 为 LTP 的 loop built-in driver 检测安装 `/lib/modules/6.6.32/modules.dep` 和 `modules.builtin` fixture。但这不是完整 ioctl 组闭环：`ioctl01` 仍依赖 pty/devpts/ptmx，`ioctl02` 的本地 group entry 尚未改为 upstream wrapper，`ioctl03` 仍缺 TUN/TAP，`ioctl04` 后续还需要可靠 mkfs/setup 与 `BLKROGET` / `BLKROSET` 加只读 mount 语义，`ioctl07` 进入下一层后仍需要 `RNDGETENTCNT` 和 `/proc/sys/kernel/random/entropy_avail`，`ioctl08` / `ioctl09` 分别依赖 btrfs、parted、partscan、loop partition nodes 和 `/sys/block` 可观察面。`ioctl_loop01..07` 现在可以越过 driver availability false-negative；最新 `ioctl_loop01` 已找到 `/dev/loop0`，但继续暴露 `parted` 环境缺失与 `/sys/block/loop0/loop/partscan` 缺失。后续仍会暴露 `LOOP_CHANGE_FD`、`LOOP_SET_CAPACITY`、`LOOP_SET_BLOCK_SIZE`、`LOOP_CONFIGURE`、partscan、direct I/O、autoclear 和 loop sysfs 等真实语义缺口。
+**Summary:** LTP ioctl 组的直接小缺口已经部分收口：block EOF read 在 EOF 处返回 `0`，通用 block devfs 支持 `BLKRASET` / `BLKRAGET` 读回，`/dev/urandom` 已发布，user-test 为 LTP 的 loop built-in driver 检测安装 `/lib/modules/6.6.32/modules.dep` 和 `modules.builtin` fixture。TTY R1还交付了serial TTY的`TCGETS/TCSETS*`、winsize、controlling relation与foreground process-group ioctl，并由focused RV64自动/人工matrix验证；本次LTP profile为`attempted=0`，所以这不是LTP case通过证据。完整ioctl组仍未闭环：`ioctl01`依赖PTY/devpts/ptmx，`ioctl02`的本地group entry尚未改为upstream wrapper，`ioctl03`仍缺TUN/TAP，`ioctl04`后续还需要可靠mkfs/setup与`BLKROGET/BLKROSET`加只读mount语义，`ioctl07`仍需要`RNDGETENTCNT`和`/proc/sys/kernel/random/entropy_avail`，`ioctl08/ioctl09`分别依赖btrfs、parted、partscan、loop partition nodes和`/sys/block`可观察面。loop扩展ioctl、partscan、direct I/O、autoclear与loop sysfs等真实缺口也继续存在。
 
 **Decision:** 当前不为 `ioctl_loop01` 单独伪造 `/sys/block/loopN/loop/{partscan,autoclear,backing_file}`，也不把 `LO_FLAGS_PARTSCAN` / `LO_FLAGS_DIRECT_IO` / 未具备释放 hook 的 `LO_FLAGS_AUTOCLEAR` 伪装成成功。补一个只读 `partscan` 文件只能解除首个 `ENOENT`，随后会马上遇到 flag 回显、sysfs 状态、partition node 和真实 partscan 语义要求；这属于 loop sysfs / partition 子域，不纳入本轮实现。
 
 **Exit Condition:** 按子域分阶段补齐并重新验证 ioctl 组：tty/pty wrapper 与基础 tty ioctl、TUN/TAP feature gating、generic block readonly ioctl 与 readonly mount、random ioctl/procfs entropy 面、loop 扩展 ioctl/sysfs/partscan/partition nodes、以及 rootfs 工具与 btrfs/parted 环境边界。每个子域完成后用对应 LTP case 重新归类，避免把 prerequisite false-negative 与真实 ioctl 语义混在一起。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-04
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [IOCTL Loop 事务日志](../devlog/transactions/2026-06-04-ioctl-loop.md), [rv64 LTP ioctl 运行证据](../rfcs/ioctl-loop/backgrounds/ltp-ioctl-rv64-20260604/index.md), [RFC-20260603-IOCTL-LOOP](../rfcs/ioctl-loop/index.md)
+**Last Verified:** 2026-07-24
+**Related:** [TTY job-control当前契约](../contracts/tty/job-control.md), [TTY Subsystem事务日志](../devlog/transactions/2026-07-23-tty-subsystem.md), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [IOCTL Loop 事务日志](../devlog/transactions/2026-06-04-ioctl-loop.md), [rv64 LTP ioctl 运行证据](../rfcs/ioctl-loop/backgrounds/ltp-ioctl-rv64-20260604/index.md), [RFC-20260603-IOCTL-LOOP](../rfcs/ioctl-loop/index.md)
 
 ## ANE-20260607-SIGNAL-LTP-INFRA-STAGE1
 

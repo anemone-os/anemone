@@ -18,8 +18,8 @@ pub mod char {
     pub mod major {
         pub const MEMORY: usize = 1;
         pub const TTY: usize = 4;
+        pub const TTY_AUX: usize = 5;
         pub const MISC: usize = 10;
-        pub const RAW_SERIAL: usize = 234;
     }
     pub mod minor {
         pub const NULL: usize = 3;
@@ -27,6 +27,7 @@ pub mod char {
         pub const FULL: usize = 7;
         pub const RANDOM: usize = 8;
         pub const URANDOM: usize = 9;
+        pub const CONSOLE: usize = 1;
     }
 }
 
@@ -176,8 +177,8 @@ mod kunits {
         let char_majors = [
             char::major::MEMORY,
             char::major::TTY,
+            char::major::TTY_AUX,
             char::major::MISC,
-            char::major::RAW_SERIAL,
         ];
         let block_majors = [
             block::major::RAMDISK,

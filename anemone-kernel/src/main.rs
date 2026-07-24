@@ -126,7 +126,7 @@ fn ls_dir(path: &Path) {
 ///   sie::stimer and sie::sext interrupts should be disabled.)
 unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     let bsp_id = CpuId::new(bsp_id);
-    unsafe {
+    let init_stdio = unsafe {
         kinfoln!("BSP {} kinit running on {}...", bsp_id, current_task_id());
         syscall::register_syscall_handlers();
         fs::register_filesystem_drivers();
@@ -142,7 +142,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         IntrArch::init_local_irq();
         task::kthread::init_kthreadd();
 
-        device::console::on_system_boot();
+        let console_selection = device::console::finish_boot_selection();
         INIT_SYNC_COUNTER.sync_with_counter();
 
         FINISH_SYNC_COUNTER.sync_with_counter();
@@ -150,8 +150,11 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         // has completed local init and marked itself online before late services
         // publish their workers. `kthreadd` remains a hand-built boot invariant.
         run_initcalls(InitCallLevel::Late);
+        let init_stdio = device::boot_io::finalize(console_selection)
+            .expect("failed to finalize boot console and TTY endpoints");
         kinfoln!("BSP {} kinit finished", bsp_id);
-    }
+        init_stdio
+    };
 
     mount_rootfs();
 
@@ -163,7 +166,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         }
     }
 
-    boot::exec_initial_program();
+    boot::exec_initial_program(init_stdio);
 }
 
 fn parse_bootargs() {

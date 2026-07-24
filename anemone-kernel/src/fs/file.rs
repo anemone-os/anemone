@@ -4,7 +4,7 @@ use crate::{
         uio::{UserBufferSink, UserBufferSource},
     },
     prelude::*,
-    utils::any_opaque::{AnyOpaque, NilOpaque},
+    utils::any_opaque::{AnyOpaque, NilOpaque, Opaque},
 };
 
 bitflags! {
@@ -622,6 +622,15 @@ impl File {
 
     pub(super) fn prv(&self) -> &AnyOpaque {
         &self.prv
+    }
+
+    /// Project immutable private state installed by this file's open owner.
+    ///
+    /// This is the narrow consumer half of `OpenedFile::prv`: it exposes
+    /// neither the type-erased container nor mutable access, so a FileOps owner
+    /// can only retrieve the concrete capability type it installed.
+    pub(crate) fn private<T: Opaque>(&self) -> Option<&T> {
+        self.prv.cast::<T>()
     }
 }
 

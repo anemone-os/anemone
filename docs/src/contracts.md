@@ -121,3 +121,6 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
   - [Child wait](./contracts/task/child-wait.md)
   - [Anemone Boot Protocol](./contracts/task/boot-protocol.md)
   - [User entry](./contracts/task/user-entry.md)
+- [TTY 当前契约](./contracts/tty/index.md)
+  - [Serial TTY data plane](./contracts/tty/data-plane.md)
+  - [TTY controlling relation 与 job control](./contracts/tty/job-control.md)

@@ -365,6 +365,7 @@ pub(crate) fn arbitrate_user_entry(
     trapframe: &mut TrapFrame,
     mut restart_syscall: Option<(RestartSyscall, SyscallCtx)>,
 ) {
+    let mut restart_crossed_jobctl_park = false;
     loop {
         if !IntrArch::local_intr_enabled() {
             // Fresh, clone, and exec entries arrive from the scheduler with
@@ -374,14 +375,37 @@ pub(crate) fn arbitrate_user_entry(
                 IntrArch::local_intr_enable();
             }
         }
-        handle_signals(trapframe, restart_syscall.take());
+        handle_signals(trapframe, &mut restart_syscall);
         unsafe {
             IntrArch::local_intr_disable();
         }
 
         match get_current_task().before_user_entry() {
-            UserEntryOutcome::Admitted => return,
-            UserEntryOutcome::Recheck => {},
+            UserEntryOutcome::Admitted => {
+                // A default job-control stop has no user handler that can own
+                // syscall restart. Keep the trap-local capability across the
+                // mandatory park, then restore it only after Signal has
+                // rescanned the resume path and the final gate admits user
+                // execution. Ordinary no-handler signal paths retain their
+                // existing EINTR behavior because they never crossed a park.
+                if restart_crossed_jobctl_park {
+                    if let Some((restart, syscall_ctx)) = restart_syscall.take() {
+                        match restart {
+                            RestartSyscall::Idempotent => {
+                                kdebugln!(
+                                    "restarting syscall after job-control park: sysno = {}",
+                                    syscall_ctx.syscall_no()
+                                );
+                                TrapArch::restore_syscall_ctx(trapframe, &syscall_ctx);
+                            },
+                        }
+                    }
+                }
+                return;
+            },
+            UserEntryOutcome::Recheck => {
+                restart_crossed_jobctl_park |= restart_syscall.is_some();
+            },
             UserEntryOutcome::Exit(code) => {
                 // User-entry exclusion is decided atomically under the owner
                 // with interrupts disabled, but lifecycle teardown may close
@@ -410,12 +434,12 @@ pub(crate) fn arbitrate_user_entry(
 /// signals we handle in one go? idk.
 pub fn handle_signals(
     trapframe: &mut TrapFrame,
-    mut restart_syscall: Option<(RestartSyscall, SyscallCtx)>,
+    restart_syscall: &mut Option<(RestartSyscall, SyscallCtx)>,
 ) {
     let mut committed_handler_frame = false;
     loop {
         if let Some(FetchedSignal { signal, reserved }) = get_current_task().fetch_signal() {
-            match perform_signal_action(signal, trapframe, &mut restart_syscall) {
+            match perform_signal_action(signal, trapframe, restart_syscall) {
                 SignalActionResult::Continue => {
                     if reserved {
                         // Reservation retirement ends this ordinary scan even
@@ -509,6 +533,12 @@ fn perform_signal_action(
             return SignalActionResult::Continue;
         },
         SignalAction::Custom(handler_addr) => {
+            if !flags.contains(SaFlags::RESTART) {
+                // A live custom action without SA_RESTART converts any
+                // syscall-restart request into the user-visible EINTR already
+                // stored in the trapframe, including after a job-control park.
+                restart_syscall.take();
+            }
             let mask_to_save = task.sigmask_to_save_for_signal_frame();
             task.mutate_current_sig_mask_for_signal_delivery(|sig_mask| {
                 assert!(
