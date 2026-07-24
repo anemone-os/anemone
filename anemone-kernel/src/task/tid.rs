@@ -125,7 +125,13 @@ impl Drop for TidHandle {
             return;
         }
 
-        ID_ALLOC.lock_irqsave().dealloc(Tid(self.0));
+        // With reuse disabled, allocation bits intentionally remain set so a
+        // numeric TID identifies at most one task during the whole boot. This
+        // diagnostic policy trades reuse for eventual exhaustion at
+        // MAX_PROCESSES; enable `tid_reuse` to restore ordinary recycling.
+        if cfg!(feature = "tid_reuse") {
+            ID_ALLOC.lock_irqsave().dealloc(Tid(self.0));
+        }
     }
 }
 

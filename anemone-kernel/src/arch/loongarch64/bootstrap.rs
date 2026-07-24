@@ -6,22 +6,24 @@ use la_insc::{
     reg::{
         csr::{
             CR_CPUID, CR_CRMD, CR_DMW0, CR_DMW1, CR_DMW2, CR_PGDH, CR_PGDL, CR_PWCH, CR_PWCL,
-            CR_TLBRENTRY, dmw2, euen,
+            CR_STLBPS, CR_TLBIDX, CR_TLBREHI, CR_TLBRENTRY, dmw2, euen,
         },
         dmw::Dmw,
         euen::Euen,
     },
     utils::{mem::MemAccessType, privl::PrivilegeFlags},
 };
-use loongArch64::ipi::csr_mail_send;
-
 use crate::{
     arch::{
         clear_bss,
         loongarch64::{
             cpu::early_scan_cpu_count,
             exception::install_ktrap_handler,
-            mm::{BOOT_DMW0_DM, BOOTSTRAP_PTABLE, PWCH, PWCL, refill::__tlb_rfill},
+            machine::{select_machine, wake_secondary},
+            mm::{
+                BOOT_DMW0_DM, BOOTSTRAP_PTABLE, LA64KernelLayout, PWCH, PWCL,
+                refill::__tlb_rfill,
+            },
         },
     },
     device::discovery::open_firmware::{EarlyMemoryScanner, early_scan_clock_freq},
@@ -36,29 +38,22 @@ use crate::{
 #[unsafe(link_section = ".bss.stack0")]
 /// Per-CPU bootstrap stacks used before the regular per-CPU stack remap is in
 /// place.
-/// Unlike other per-CPU stacks, this one is indexed by [PhysCpuId], so that it can be used before the CPU topology is fully initialized.
+/// Unlike other per-CPU stacks, this one is indexed by [PhysCpuId], so that it
+/// can be used before the CPU topology is fully initialized.
 static mut STACK0: PhysCpuTable<RawKernelStack> =
-    PhysCpuTable::new(
-        [const { CachePadded::new(RawKernelStack::ZEROED) }; MAX_PHYS_CPU_ID + 1],
-    );
+    PhysCpuTable::new([const { CachePadded::new(RawKernelStack::ZEROED) }; MAX_PHYS_CPU_ID + 1]);
 
 // Entry assembly uses the raw KSTACK_SIZE as its slot stride. Keep both
 // assertions so future stack or cache alignment changes cannot add padding
 // and silently change the STACK0 layout seen by assembly.
 static_assert!(
-    core::mem::size_of::<RawKernelStack>()
-        == (1 << KSTACK_SHIFT_KB) as usize * 1024,
+    core::mem::size_of::<RawKernelStack>() == (1 << KSTACK_SHIFT_KB) as usize * 1024,
     "RawKernelStack size must match the bootstrap assembly stride"
 );
 static_assert!(
-    core::mem::size_of::<CachePadded<RawKernelStack>>()
-        == core::mem::size_of::<RawKernelStack>(),
+    core::mem::size_of::<CachePadded<RawKernelStack>>() == core::mem::size_of::<RawKernelStack>(),
     "cache padding must not change the bootstrap stack stride"
 );
-
-/// Temporary I/O space base address used during early boot before the full
-/// memory manager is online.
-const TEMP_IO_SPACE: u64 = 0x8000_0000_0000_0000;
 
 /// Flattened device tree blob embedded by the build.
 static DTB_BYTES: &[u8] = include_bytes_aligned_as!(PhantomAligned8, "generated.dtb");
@@ -87,24 +82,35 @@ pub unsafe extern "C" fn __nun() -> ! {
             
             li.d    $t0, {boot_dmw1}
             csrwr   $t0, {cr_dmw1}
+            ibar    0
+
+            // Strip the DMW VSEG from a nearby PC-relative label so later symbol loads resolve from the low alias.
+            la.local    $t0, 2f
+            bstrpick.d  $t0, $t0, 59, 0
+            jirl        $zero, $t0, 0
+        2:
 
             li.d    $t0, {boot_dmw2}
             csrwr   $t0, {cr_dmw2}
-
-            li.w    $t0, 0xb8   // IE=0, PLV=0, DA=0, PG=1
-            csrwr   $t0, {cr_crmd}
         ",
         // Set up page table configuration
         "
+            // Do not inherit firmware TLB page-size state before the first refill.
+            li.w    $t0, {tlbidx_page_size}
+            csrwr   $t0, {cr_tlbidx}
+            li.w    $t0, {tlb_page_size}
+            csrwr   $t0, {cr_stlbps}
+            csrwr   $t0, {cr_tlbrehi}
+
             li.d    $t0, {pwcl}
             csrwr   $t0, {cr_pwcl}
             li.d    $t0, {pwch}
             csrwr   $t0, {cr_pwch}
             li.d    $t2, {k_offset}
-            la.global   $t0, {bootstrap_ptable}
+            la.local    $t0, {bootstrap_ptable}
             #sub.d       $t0, $t0, $t2
             csrwr   $t0, {cr_pgdh}
-            la.global   $t0, {bootstrap_ptable}
+            la.local    $t0, {bootstrap_ptable}
             #sub.d       $t0, $t0, $t2
             csrwr   $t0, {cr_pgdl}
         ",
@@ -112,28 +118,37 @@ pub unsafe extern "C" fn __nun() -> ! {
         "
 
             li.d        $t2, {k_offset}
-            la.global   $sp, {boot_stack}
+            la.local   $sp, {boot_stack}
             csrrd       $t0, {cr_cpuid}
             li.d        $t1, {stack_size}
             addi.d      $t0, $t0, 0x1
             mul.d       $t0, $t0, $t1
             add.d       $sp, $sp, $t0
-            or          $sp, $sp, $t2
+            add.d       $sp, $sp, $t2
 
 
-            la.global   $t0, {tlb_rfill}
+            la.local   $t0, {tlb_rfill}
             #sub.d       $t0, $t0, $t2
             csrwr       $t0, {tlbr_entry}
         ",
         // Jump
         "
+            // Enter mapped mode only after the page table and refill state are ready.
+            li.w    $t0, 0xb0   // IE=0, PLV=0, DA=0, PG=1, DATF=CC, DATM=CC
+            csrwr   $t0, {cr_crmd}
+            ibar    0
+
             // remove dmw1
             li.d    $t0, 0
             csrwr   $t0, {cr_dmw1}
+            ibar    0
 
             csrrd       $a0, {cr_cpuid} // arg0: hart_id
-            la.global   $t0, {rusty_nun}
-            or          $t0, $t0, $t2
+            la.local   $t0, 4f
+            add.d       $t0, $t0, $t2
+            jirl        $zero,$t0,0
+        4:
+            la.local   $t0, {rusty_nun}
             jirl        $zero,$t0,0
         ",
         boot_dmw0 = const BOOT_DMW0_DM.to_u64(),
@@ -147,7 +162,7 @@ pub unsafe extern "C" fn __nun() -> ! {
         boot_dmw2 = const Dmw::new(
                 PrivilegeFlags::PLV0,
                 MemAccessType::StrongNonCache,
-                Dmw::vseg_from_addr(TEMP_IO_SPACE),
+                Dmw::vseg_from_addr(LA64KernelLayout::TEMPORARY_IO_ADDR),
             ).to_u64(),
         cr_dmw0 = const CR_DMW0,
         cr_dmw1 = const CR_DMW1,
@@ -156,6 +171,11 @@ pub unsafe extern "C" fn __nun() -> ! {
         tlbr_entry = const CR_TLBRENTRY,
 
         cr_crmd = const CR_CRMD,
+        cr_tlbidx = const CR_TLBIDX,
+        cr_stlbps = const CR_STLBPS,
+        cr_tlbrehi = const CR_TLBREHI,
+        tlb_page_size = const PagingArch::PAGE_SIZE_BITS,
+        tlbidx_page_size = const (PagingArch::PAGE_SIZE_BITS << 24),
         // cr_prmd = const CR_PRMD,
         cr_cpuid = const CR_CPUID,
 
@@ -181,7 +201,7 @@ pub unsafe extern "C" fn __nun() -> ! {
 
 #[unsafe(no_mangle)]
 extern "C" fn rusty_nun(hart_id: usize) -> ! {
-    #[unsafe(link_section = ".bss.nonzero_init")]
+    #[unsafe(link_section = ".data")]
     static mut BSP_ARRIVED: bool = false;
     unsafe {
         euen::csr_write(Euen::SXE | Euen::ASXE | Euen::BTE);
@@ -206,10 +226,9 @@ pub fn register_debugcon() {
         driver::Ns16550ARegisters,
     };
 
-    const DEBUG_CON_REG: u64 = 0x1fe0_01e0;
     let con = unsafe {
         Ns16550ARegisters::from_raw(
-            (TEMP_IO_SPACE + DEBUG_CON_REG) as *const u8 as *mut u8,
+            (LA64KernelLayout::TEMPORARY_IO_ADDR + EARLYCON_REG.get()) as *const u8 as *mut u8,
             0,
             1,
         )
@@ -236,6 +255,7 @@ pub fn register_debugcon() {
     let debug_con = DebugCon {
         con: SpinLock::new(con),
     };
+
     register_console(
         Arc::new(debug_con),
         ConsoleFlags::EARLY | ConsoleFlags::REPLAY,
@@ -254,20 +274,21 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
 
     register_debugcon();
 
+    kdebugln!(
+        "bootstrap {} started, fdt at {:#x}",
+        bsp_physical_id,
+        fdt_va.get()
+    );
+
     unsafe {
+        // sending ipi is machine-specific, so we need to select the machine before sending ipi.
+        select_machine(fdt_va);
+
         // needed by percpu initialization.
         early_scan_cpu_count(fdt_va, bsp_physical_id);
-        let bsp_id = CpuId::from_physical_id(bsp_physical_id).unwrap_or_else(|| {
-            panic!(
-                "bootstrap {} was not registered",
-                bsp_physical_id
-            )
-        });
-        kinfoln!(
-            "anemone kernel booting on {} ({})",
-            bsp_id,
-            bsp_physical_id
-        );
+        let bsp_id = CpuId::from_physical_id(bsp_physical_id)
+            .unwrap_or_else(|| panic!("bootstrap {} was not registered", bsp_physical_id));
+        kinfoln!("anemone kernel booting on {} ({})", bsp_id, bsp_physical_id);
 
         // needed by timer initialization.
         if let Some(freq_hz) = early_scan_clock_freq(fdt_va) {
@@ -278,9 +299,7 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
 
         let mut scanner = EarlyMemoryScanner::new(fdt_va);
 
-        percpu::bsp_init(bsp_id, |npages| {
-            scanner.early_alloc_folio(npages as u64)
-        });
+        percpu::bsp_init(bsp_id, |npages| scanner.early_alloc_folio(npages as u64));
         kinfoln!("percpu data initialized");
 
         wake_up_aps(bsp_id);
@@ -333,15 +352,10 @@ static BOOT_SYNC_COUNTER: CpuSync = CpuSync::new("boot");
 
 unsafe fn ap_setup(ap_physical_id: PhysCpuId) -> ! {
     unsafe {
-        let ap_id = CpuId::from_physical_id(ap_physical_id).unwrap_or_else(|| {
-            panic!("unregistered {} started", ap_physical_id)
-        });
+        let ap_id = CpuId::from_physical_id(ap_physical_id)
+            .unwrap_or_else(|| panic!("unregistered {} started", ap_physical_id));
         BOOT_SYNC_COUNTER.sync_with_counter();
-        kdebugln!(
-            "anemone kernel booting on {} ({})",
-            ap_id,
-            ap_physical_id
-        );
+        kdebugln!("anemone kernel booting on {} ({})", ap_id, ap_physical_id);
         install_ktrap_handler();
         percpu::ap_init(ap_id);
         mm::kptable::activate_kernel_mapping();
@@ -382,8 +396,7 @@ pub fn wake_up_aps(bsp_id: CpuId) {
                 continue;
             }
             let physical_id = cpu_id.physical_id();
-            csr_mail_send(st_addr, physical_id.get(), 0);
-            IntrArch::send_ipi(physical_id);
+            wake_secondary(physical_id, PhysAddr::new(st_addr));
         }
     }
 }
@@ -425,9 +438,8 @@ unsafe fn remap_boot_stack() {
     let stack0_sppn =
         unsafe { VirtAddr::new(core::ptr::addr_of!(STACK0) as u64).kvirt_to_phys() }.page_down();
 
-    let mut tops: PhysCpuTable<VirtAddr> = PhysCpuTable::new(
-        [const { CachePadded::new(VirtAddr::new(0)) }; MAX_PHYS_CPU_ID + 1],
-    );
+    let mut tops: PhysCpuTable<VirtAddr> =
+        PhysCpuTable::new([const { CachePadded::new(VirtAddr::new(0)) }; MAX_PHYS_CPU_ID + 1]);
 
     for logical_id in 0..ncpus() {
         let cpu_id = CpuId::new(logical_id);

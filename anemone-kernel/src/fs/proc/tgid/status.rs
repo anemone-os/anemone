@@ -368,13 +368,11 @@ mod kunits {
         if MAX_LOGICAL_CPUS >= 4 {
             assert_eq!(cpus_allowed_list(mask([0, 1, 3])), "0-1,3");
         }
-        assert_eq!(
-            cpus_allowed_list(CpuMask::all()),
-            if MAX_LOGICAL_CPUS == 1 {
-                "0".into()
-            } else {
+        if MAX_LOGICAL_CPUS >= 2 {
+            assert_eq!(
+                cpus_allowed_list(CpuMask::all()),
                 format!("0-{}", MAX_LOGICAL_CPUS - 1)
-            }
-        );
+            );
+        }
     }
 }

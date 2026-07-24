@@ -15,6 +15,5 @@ build/rootfs/visionfive2/rootfs.img
 
 `rootfs-alpine.img` must be a pre-sized raw ext4 image containing a complete
 Alpine riscv64 userspace. It must provide the LP64D musl interpreter at
-`/lib/ld-musl-riscv64.so.1` and the native GNU tools required by the tests,
-including GCC, binutils, development headers, libraries, and make. The rootfs
-task copies this image before modifying it and never resizes the source image.
+
+`base/busybox` must be a valid busybox binary.

@@ -14,6 +14,8 @@ use alloc::{alloc::AllocError, collections::LinkedList};
 
 use crate::prelude::*;
 
+const IPI_WAIT_ALERT_SPINS: usize = 100_000;
+
 #[derive(Debug)]
 pub enum IpiPayload {
     TlbShootdown {
@@ -82,9 +84,30 @@ fn alloc_ipi_msg(payload: IpiPayload) -> Result<Arc<IpiMsg>, IpiError> {
 }
 
 fn wait_ipi_accomplished(msg: &Arc<IpiMsg>) -> Option<WakeEnqueueResult> {
+    if IntrArch::local_intr_disabled() {
+        kwarningln!(
+            "IPI completion wait entered with local interrupts disabled on {}; deadlock is possible",
+            cur_cpu_id()
+        );
+    }
+
+    let mut spins = 0usize;
+    let mut alerted = false;
     loop {
         if msg.is_accomplished.load(Ordering::Acquire) {
             return *msg.wake_result.lock();
+        }
+
+        spins = spins.saturating_add(1);
+        // Log only once: repeated output in this busy wait would create a
+        // console-lock storm and obscure the original IPI stall.
+        if !alerted && spins > IPI_WAIT_ALERT_SPINS {
+            kerrln!(
+                "IPI completion wait exceeded {} spin iterations on {}",
+                IPI_WAIT_ALERT_SPINS,
+                cur_cpu_id()
+            );
+            alerted = true;
         }
         spin_loop();
     }

@@ -102,6 +102,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
+- [RFC-20260723-ahci-controller](./rfcs/ahci-controller/index.md)：Draft / Review Hold；固化 generic AHCI 1.x 单 port、slot-zero 同步 DMA、ATA IDENTIFY 与 `sda` block facade 合同，并记录 probe rollback、capacity boundary、shutdown quiesce 和硬件验证 gate。实现已先于 RFC 落地，模块现位于 `driver/ahci`。
 - [RFC-20260716-dw-mshc-sd-cold-discovery](./rfcs/dw-mshc-sd-cold-discovery/index.md)：Accepted / Runtime Validation；固化 protocol-neutral DW-MSHC host、one-shot SD Memory discovery、typed card bus、`mmcblkN` endpoint 与 VisionFive 2 whole-disk `mmcblk0` ext4 rootfs 边界。两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已同步；实机 attach/read/write/rootfs 仍待验证。
 - [RFC-20260714-cpu-logical-physical-id](./rfcs/cpu-logical-physical-id/index.md)：已实现并关闭；platform `MAX_PHYS_CPU_ID` 与 kconfig `MAX_LOGICAL_CPUS` 分开约束物理 ID backing 和最大启用逻辑 CPU 数，固定 per-CPU 表使用槽位内建 `CachePadded<T>` 的 `CpuTable` / `PhysCpuTable` 编码索引域与缓存布局。VisionFive 2 容量修正由用户复验通过，最终 table 布局与 LoongArch correction build 未由 agent 运行。
 - [RFC-20260629-vfs-direct-user-io](./rfcs/vfs-direct-user-io/index.md)：已实现第一版；定义普通文件 `read` / `readv` / `pread*` 与 `write` / `writev` / `pwrite*` 的 direct userspace copy 边界、VFS-owned user-buffer cursor、fanotify transaction adapter，以及 ramfs/ext4 regular file read/write hook。`RWF_*`、完整 Linux `O_DIRECT`、mmap coherency、splice family 和 non-regular backend hook 仍按 register / follow-up 边界处理。

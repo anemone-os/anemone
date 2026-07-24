@@ -84,6 +84,13 @@ pub struct Parameters {
     pub loop_device_count: Option<usize>,
     pub ns16550a_default_baud: Option<u32>,
     pub dw_mshc_poll_timeout_ms: Option<u64>,
+    pub ahci_hba_reset_timeout_ms: Option<u64>,
+    pub ahci_engine_timeout_ms: Option<u64>,
+    pub ahci_port_timeout_ms: Option<u64>,
+    pub ahci_command_timeout_ms: Option<u64>,
+    pub ahci_read_warn_ms: Option<u64>,
+    pub ahci_read_timeout_ms: Option<u64>,
+    pub ahci_bounce_kb: Option<usize>,
     pub eevdf_base_slice_us: Option<u64>,
     pub eevdf_wake_clamp_us: Option<u64>,
     pub eevdf_yield_penalty_us: Option<u64>,
@@ -205,6 +212,20 @@ pub const LOOP_DEVICE_COUNT: usize = {};
 pub const NS16550A_DEFAULT_BAUD: u32 = {};
 /// Bounded DW-MSHC register polling timeout in milliseconds.
 pub const DW_MSHC_POLL_TIMEOUT_MS: u64 = {};
+/// AHCI global reset deadline in milliseconds.
+pub const AHCI_HBA_RESET_TIMEOUT_MS: u64 = {};
+/// AHCI command-list/FIS engine transition deadline in milliseconds.
+pub const AHCI_ENGINE_TIMEOUT_MS: u64 = {};
+/// AHCI link and device-ready deadline in milliseconds.
+pub const AHCI_PORT_TIMEOUT_MS: u64 = {};
+/// AHCI ATA command completion deadline in milliseconds.
+pub const AHCI_COMMAND_TIMEOUT_MS: u64 = {};
+/// ATA read latency threshold for emitting a warning.
+pub const AHCI_READ_WARN_MS: u64 = {};
+/// ATA read deadline after which the kernel panics.
+pub const AHCI_READ_TIMEOUT_MS: u64 = {};
+/// Per-port AHCI DMA bounce buffer size in KiB.
+pub const AHCI_BOUNCE_KB: usize = {};
 /// EEVDF-lite base slice in microseconds.
 pub const EEVDF_BASE_SLICE_US: u64 = {};
 /// EEVDF-lite wake placement clamp window in microseconds.
@@ -243,6 +264,13 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             default_or!(loop_device_count),
             default_or!(ns16550a_default_baud),
             default_or!(dw_mshc_poll_timeout_ms),
+            default_or!(ahci_hba_reset_timeout_ms),
+            default_or!(ahci_engine_timeout_ms),
+            default_or!(ahci_port_timeout_ms),
+            default_or!(ahci_command_timeout_ms),
+            default_or!(ahci_read_warn_ms),
+            default_or!(ahci_read_timeout_ms),
+            default_or!(ahci_bounce_kb),
             default_or!(eevdf_base_slice_us),
             default_or!(eevdf_wake_clamp_us),
             default_or!(eevdf_yield_penalty_us),
@@ -266,6 +294,31 @@ impl Config {
         }
         if config.parameters.dw_mshc_poll_timeout_ms == Some(0) {
             anyhow::bail!("dw_mshc_poll_timeout_ms must be non-zero");
+        }
+        if config.parameters.ahci_hba_reset_timeout_ms == Some(0)
+            || config.parameters.ahci_engine_timeout_ms == Some(0)
+            || config.parameters.ahci_port_timeout_ms == Some(0)
+            || config.parameters.ahci_command_timeout_ms == Some(0)
+            || config.parameters.ahci_read_warn_ms == Some(0)
+            || config.parameters.ahci_read_timeout_ms == Some(0)
+        {
+            anyhow::bail!("AHCI timeouts must be non-zero");
+        }
+        if matches!(
+            (
+                config.parameters.ahci_read_warn_ms,
+                config.parameters.ahci_read_timeout_ms,
+            ),
+            (Some(warn), Some(timeout)) if warn >= timeout
+        ) {
+            anyhow::bail!("ahci_read_warn_ms must be less than ahci_read_timeout_ms");
+        }
+        if config
+            .parameters
+            .ahci_bounce_kb
+            .is_some_and(|size| size == 0 || size > 4096)
+        {
+            anyhow::bail!("ahci_bounce_kb must be in the range 1..=4096");
         }
         if config
             .parameters
@@ -370,6 +423,38 @@ mod tests {
             ))
             .is_err()
         );
+    }
+
+    #[test]
+    fn test_ahci_read_thresholds_are_constrained() {
+        let content = std::fs::read_to_string("../../conf/.defconfig").unwrap();
+        let replace_parameter = |content: &str, name: &str, replacement: &str| {
+            content
+                .lines()
+                .map(|line| {
+                    if line.trim_start().starts_with(name) {
+                        replacement
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let zero_warning = replace_parameter(
+            &content,
+            "ahci_read_warn_ms",
+            "ahci_read_warn_ms = 0",
+        );
+        assert!(Config::from_str(&zero_warning).is_err());
+
+        let invalid_order = replace_parameter(
+            &content,
+            "ahci_read_warn_ms",
+            "ahci_read_warn_ms = 10000",
+        );
+        assert!(Config::from_str(&invalid_order).is_err());
     }
 
     #[test]

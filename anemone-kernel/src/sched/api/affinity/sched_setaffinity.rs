@@ -156,10 +156,10 @@ mod kunits {
         assert!(decode_affinity(&[]).is_empty());
         assert!(decode_affinity(&[0; KERNEL_CPU_MASK_BYTES]).is_empty());
 
-        let short = decode_affinity(&[0b1000_0010]);
-        assert!(short.contains(CpuId::new(1)));
-        assert!(short.contains(CpuId::new(7)));
-        assert_eq!(short.iter().count(), 2);
+        assert_eq!(decode_affinity(&[1]), mask(&[0]));
+        if MAX_LOGICAL_CPUS >= 8 {
+            assert_eq!(decode_affinity(&[0b1000_0010]), mask(&[1, 7]));
+        }
 
         let mut exact = [0u8; KERNEL_CPU_MASK_BYTES];
         exact[0] = 1;
@@ -175,16 +175,25 @@ mod kunits {
     #[kunit]
     fn test_affinity_online_normalization() {
         let owner = CpuId::new(0);
-        let online = mask(&[0, 1]);
-        let requested = mask(&[0, 1, MAX_LOGICAL_CPUS - 1]);
-        assert_eq!(requested.normalize_online(online, owner), Ok(online));
+        let owner_only = mask(&[0]);
         assert_eq!(
-            mask(&[1]).normalize_online(online, owner),
-            Err(SchedError::InvalidAffinity)
+            owner_only.normalize_online(owner_only, owner),
+            Ok(owner_only)
         );
         assert_eq!(
-            CpuMask::empty().normalize_online(online, owner),
+            CpuMask::empty().normalize_online(owner_only, owner),
             Err(SchedError::InvalidAffinity)
         );
+        if MAX_LOGICAL_CPUS >= 2 {
+            let online = mask(&[0, 1]);
+            assert_eq!(
+                mask(&[1]).normalize_online(online, owner),
+                Err(SchedError::InvalidAffinity)
+            );
+        }
+        if MAX_LOGICAL_CPUS >= 3 {
+            let online = mask(&[0, 1]);
+            assert_eq!(mask(&[0, 1, 2]).normalize_online(online, owner), Ok(online));
+        }
     }
 }

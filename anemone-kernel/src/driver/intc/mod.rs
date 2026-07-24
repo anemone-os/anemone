@@ -5,4 +5,6 @@ pub mod riscv_intc;
 pub mod sifive_plic;
 
 #[cfg(target_arch = "loongarch64")]
+pub mod loongson_2k1000;
+#[cfg(target_arch = "loongarch64")]
 pub mod loongson_platic;

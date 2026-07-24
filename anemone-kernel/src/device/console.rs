@@ -2,12 +2,18 @@
 //!
 //! Here lies /dev/console.
 
+pub(crate) mod simple_stdin;
+
 use crate::{debug::printk::KERNEL_LOG, prelude::*, utils::any_opaque::NilOpaque};
 
 use core::fmt::{Debug, Write};
 
 pub trait Console: Send + Sync {
     fn output(&self, s: &str);
+}
+
+pub trait ConsoleStdin: Send + Sync {
+    fn read(&self, buf: &mut [u8], ctx: FileIoCtx) -> Result<usize, SysError>;
 }
 
 impl dyn Console {
@@ -71,12 +77,14 @@ bitflags! {
 
 struct ConsoleSubSys {
     consoles: SpinLock<Vec<ConsoleDesc>>,
+    stdin: SpinLock<Option<Arc<dyn ConsoleStdin>>>,
 }
 
 impl ConsoleSubSys {
     fn new() -> Self {
         Self {
             consoles: SpinLock::new(Vec::new()),
+            stdin: SpinLock::new(None),
         }
     }
 }
@@ -108,6 +116,13 @@ pub fn register_console(ops: Arc<dyn Console>, mut flags: ConsoleFlags) {
         .consoles
         .lock_irqsave()
         .push(ConsoleDesc { ops, flags });
+}
+
+/// Register the sole input source for `/dev/console`.
+pub fn register_console_stdin(stdin: Arc<dyn ConsoleStdin>) {
+    let mut slot = SUBSYS.stdin.lock_irqsave();
+    assert!(slot.is_none(), "console stdin registered more than once");
+    *slot = Some(stdin);
 }
 
 /// Output a message to all enabled consoles.
@@ -168,11 +183,16 @@ pub unsafe fn on_system_boot() {
 fn console_read(
     _file: &File,
     _pos: &mut usize,
-    _buf: &mut [u8],
-    _ctx: FileIoCtx,
+    buf: &mut [u8],
+    ctx: FileIoCtx,
 ) -> Result<usize, SysError> {
-    // currently no-op. always return EOF.
-    Ok(0)
+    let stdin = SUBSYS.stdin.lock_irqsave().clone();
+    match stdin {
+        Some(stdin) => stdin.read(buf, ctx),
+        // Platforms without an input-capable console retain the old stub
+        // behavior instead of blocking forever during early userspace startup.
+        None => Ok(0),
+    }
 }
 
 fn console_write(

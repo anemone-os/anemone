@@ -59,6 +59,10 @@
                     "type": "integer",
                     "description": "Virtual address where the kernel is mapped during runtime."
                 },
+                "earlycon_reg": {
+                    "type": "integer",
+                    "description": "Physical address of the early console register."
+                },
                 "max_phys_cpu_id": {
                     "type": "integer",
                     "minimum": 0,
@@ -150,6 +154,71 @@
                 "smp",
                 "memory",
                 "bios"
+            ]
+        },
+        "uboot": {
+            "description": "U-Boot artifact generation configuration.",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "type": {
+                            "const": "image"
+                        },
+                        "arch": {
+                            "type": "string"
+                        },
+                        "os_type": {
+                            "type": "string"
+                        },
+                        "image_type": {
+                            "type": "string"
+                        },
+                        "compression": {
+                            "type": "string"
+                        },
+                        "load_addr": {
+                            "type": "integer"
+                        },
+                        "entry": {
+                            "type": "integer"
+                        },
+                        "name": {
+                            "type": "string"
+                        },
+                        "filename": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "type",
+                        "arch",
+                        "os_type",
+                        "image_type",
+                        "compression",
+                        "load_addr",
+                        "entry",
+                        "name",
+                        "filename"
+                    ]
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "type": {
+                            "const": "raw"
+                        },
+                        "filename": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "type",
+                        "filename"
+                    ]
+                }
             ]
         }
     },

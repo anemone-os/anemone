@@ -34,6 +34,24 @@ pub mod refill;
 pub use layout::LA64KernelLayout;
 pub use paging::LA64PagingArch;
 
+/// Expands at the call site because `la.local` needs a link-time symbol, producing PC-relative addressing without a GOT.
+macro_rules! load_addr_local {
+    ($symbol:path) => {{
+        let address: u64;
+        unsafe {
+            core::arch::asm!(
+                "la.local {address}, {symbol}",
+                address = out(reg) address,
+                symbol = sym $symbol,
+                options(nomem, nostack),
+            );
+        }
+        address
+    }};
+}
+
+pub(crate) use load_addr_local;
+
 /// DM space
 pub const BOOT_DMW0_DM: Dmw = Dmw::new(
     PrivilegeFlags::PLV0,

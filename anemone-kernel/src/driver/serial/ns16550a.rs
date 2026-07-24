@@ -10,7 +10,10 @@ use crate::{
     device::{
         bus::platform::{self, PlatformDriver},
         char::{CharDev, CharDriver, register_char_device, register_char_driver},
-        console::{Console, ConsoleFlags, register_console},
+        console::{
+            Console, ConsoleFlags, ConsoleStdin, register_console, register_console_stdin,
+            simple_stdin::SimpleStdin,
+        },
         devnum::GeneralMinorAllocator,
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
         resource::Resource,
@@ -140,6 +143,7 @@ struct Ns16550AStateInner {
     reg_shift: usize,
     reg_io_width: usize,
     remap: IoRemap,
+    stdin: Arc<SimpleStdin>,
 }
 
 impl Console for Ns16550AState {
@@ -163,7 +167,7 @@ impl CharDev for Ns16550AState {
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
-        unimplemented!()
+        self.stdin.read(buf, FileIoCtx::blocking())
     }
 
     fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
@@ -299,7 +303,7 @@ mod driver_core {
             Some(byte)
         }
 
-        pub fn try_drain_irq(&self) -> bool {
+        pub fn try_drain_irq(&self, mut receive: impl FnMut(u8)) -> bool {
             let mut handled = false;
 
             loop {
@@ -312,13 +316,13 @@ mod driver_core {
                 match iir & IIR_ID_MASK {
                     IIR_ID_RX_AVAILABLE | IIR_ID_RX_TIMEOUT => {
                         while self.read_reg(REG_LSR) & LSR_DR != 0 {
-                            let _ = self.read_reg(REG_RBR_THR_DLL);
+                            receive(self.read_reg(REG_RBR_THR_DLL));
                         }
                     },
                     IIR_ID_RX_LINE_STATUS => {
                         let lsr = self.read_reg(REG_LSR);
                         if lsr & LSR_DR != 0 {
-                            let _ = self.read_reg(REG_RBR_THR_DLL);
+                            receive(self.read_reg(REG_RBR_THR_DLL));
                         }
                     },
                     IIR_ID_MODEM_STATUS => {
@@ -456,6 +460,8 @@ impl DriverOps for Ns16550ADriver {
 
         regs.init_line(divisor, line);
 
+        let stdin = Arc::new(SimpleStdin::new());
+
         let state = Ns16550AState {
             rc: Arc::new(Ns16550AStateInner {
                 devnum: unsafe {
@@ -468,6 +474,7 @@ impl DriverOps for Ns16550ADriver {
                 reg_shift,
                 reg_io_width,
                 remap,
+                stdin: stdin.clone(),
             }),
         };
 
@@ -510,6 +517,7 @@ impl DriverOps for Ns16550ADriver {
         let mut flags = ConsoleFlags::empty();
         if stdout.is_some() {
             flags |= ConsoleFlags::ENABLE_ON_BOOT;
+            register_console_stdin(stdin);
             kinfoln!(
                 "{}: registered as stdout console ({}{}{})",
                 pdev.name(),
@@ -574,7 +582,11 @@ fn handle_irq(prv_data: &AnyOpaque) {
         )
     };
 
-    if !regs.try_drain_irq() {
+    if !regs.try_drain_irq(|byte| {
+        for echo_byte in inner.stdin.receive_from_irq(byte).bytes() {
+            while regs.write_byte(*echo_byte).is_none() {}
+        }
+    }) {
         kdebugln!("ns16550a: spurious irq at {:#x}", inner.base.get());
     }
 

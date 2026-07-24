@@ -1196,12 +1196,19 @@ pub fn handle_signals(
 ) {
     let mut committed_handler_frame = false;
     loop {
-        if let Some(signal) = get_current_task().fetch_signal() {
-            if perform_signal_action(signal, trapframe, &mut restart_syscall) {
-                committed_handler_frame = true;
-                break;
-            }
-        } else {
+        // Keep the current-task Arc out of `perform_signal_action()`: a default
+        // action may terminate without returning, and an if-let scrutinee
+        // temporary would then remain forever on the exiting task's own stack.
+        let signal = {
+            let task = get_current_task();
+            task.fetch_signal()
+        };
+        let Some(signal) = signal else {
+            break;
+        };
+
+        if perform_signal_action(signal, trapframe, &mut restart_syscall) {
+            committed_handler_frame = true;
             break;
         }
     }

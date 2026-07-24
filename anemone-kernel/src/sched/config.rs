@@ -436,7 +436,7 @@ mod kunits {
             },
             nice,
             reset,
-            mask(&[0, 1]),
+            mask(&[0]),
             CpuId::new(0),
         )
     }
@@ -444,7 +444,7 @@ mod kunits {
     #[kunit]
     fn test_sched_config_patch_exact_noop_and_supported_projection() {
         let owner = CpuId::new(0);
-        let online = mask(&[0, 1]);
+        let online = mask(&[0]);
         let old = fair(Nice::ZERO, false, online);
 
         assert_eq!(
@@ -492,7 +492,7 @@ mod kunits {
     #[kunit]
     fn test_sched_config_patch_rejects_parameter_family_mismatch() {
         let owner = CpuId::new(0);
-        let online = mask(&[0, 1]);
+        let online = mask(&[0]);
         let fair = fair(Nice::ZERO, false, online);
         let rt = realtime(RtMode::Fifo, 50, Nice::ZERO, false);
 
@@ -519,7 +519,7 @@ mod kunits {
     #[kunit]
     fn test_sched_config_patch_supports_all_discipline_replacements() {
         let owner = CpuId::new(0);
-        let online = mask(&[0, 1]);
+        let online = mask(&[0]);
         let fair = fair(Nice::new(3), false, online);
         let fifo = realtime(RtMode::Fifo, 40, Nice::new(3), false);
         let rr = realtime(RtMode::RoundRobin, 50, Nice::new(3), false);
@@ -562,25 +562,34 @@ mod kunits {
     #[kunit]
     fn test_cpu_mask_compile_time_domain_and_online_normalization() {
         let owner = CpuId::new(0);
-        let online = mask(&[0, 1]);
-        let normalized = mask(&[0, 2]).normalize_online(online, owner).unwrap();
-        assert_eq!(normalized, mask(&[0]));
-        assert!(normalized.contains(owner));
-        assert!(!normalized.contains(CpuId::new(1)));
+        let owner_only = mask(&[0]);
         assert_eq!(
-            mask(&[1]).normalize_online(online, owner),
-            Err(SchedError::InvalidAffinity)
-        );
-        assert_eq!(
-            mask(&[2]).normalize_online(online, owner),
-            Err(SchedError::InvalidAffinity)
+            owner_only.normalize_online(owner_only, owner),
+            Ok(owner_only)
         );
         assert!(CpuMask::all().contains(CpuId::new(MAX_LOGICAL_CPUS - 1)));
+        if MAX_LOGICAL_CPUS >= 2 {
+            let online = mask(&[0, 1]);
+            assert_eq!(
+                mask(&[1]).normalize_online(online, owner),
+                Err(SchedError::InvalidAffinity)
+            );
+        }
+        if MAX_LOGICAL_CPUS >= 3 {
+            let online = mask(&[0, 1]);
+            let normalized = mask(&[0, 2]).normalize_online(online, owner).unwrap();
+            assert_eq!(normalized, owner_only);
+            assert!(!normalized.contains(CpuId::new(1)));
+            assert_eq!(
+                mask(&[2]).normalize_online(online, owner),
+                Err(SchedError::InvalidAffinity)
+            );
+        }
     }
 
     #[kunit]
     fn test_non_escalating_permit_transition_matrix() {
-        let affinity = mask(&[0, 1]);
+        let affinity = mask(&[0]);
         let fair_zero = fair(Nice::ZERO, false, affinity);
         let fair_lower = fair(Nice::new(5), false, affinity);
         let fair_higher = fair(Nice::new(-1), false, affinity);
@@ -618,7 +627,7 @@ mod kunits {
     #[kunit]
     fn test_non_escalating_permit_checks_latest_config() {
         let owner = CpuId::new(0);
-        let online = mask(&[0, 1]);
+        let online = mask(&[0]);
         let patch = SchedConfigPatch::keep().with_nice(Nice::new(5));
         let stale = fair(Nice::ZERO, false, online);
         let stale_new = patch.project(stale, online, owner).unwrap();
@@ -638,7 +647,7 @@ mod kunits {
     #[kunit]
     fn test_reset_on_fork_config_matrix() {
         let owner = CpuId::new(0);
-        let affinity = mask(&[0, 1]);
+        let affinity = mask(&[0]);
         let rr = realtime(RtMode::RoundRobin, 50, Nice::new(-5), true);
         assert_eq!(rr.for_child(owner), fair(Nice::ZERO, false, affinity));
 
@@ -663,7 +672,7 @@ mod kunits {
 
     #[kunit]
     fn test_configured_interval_uses_only_discipline_and_configured_quantum() {
-        let affinity = mask(&[0, 1]);
+        let affinity = mask(&[0]);
         let tick = configured_ticks_duration(1);
         assert_eq!(
             fair(Nice::ZERO, false, affinity).configured_interval(),

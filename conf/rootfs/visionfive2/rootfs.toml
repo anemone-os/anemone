@@ -29,3 +29,7 @@ path = "/mnt"
 [[files]]
 source = "build/anemoneImage-rv64"
 installed_path = "/boot/anemoneImage"
+
+[[files]]
+source = "conf/rootfs/visionfive2/base/busybox"
+installed_path = "/sbin/init"

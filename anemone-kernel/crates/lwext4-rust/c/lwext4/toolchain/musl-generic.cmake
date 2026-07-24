@@ -73,7 +73,9 @@ elseif(ARCH STREQUAL "aarch64")
 elseif(ARCH STREQUAL "riscv64")
     set(ARCH_C_FLAGS "-march=rv64gc -mabi=lp64d -mcmodel=medany")
 elseif(ARCH STREQUAL "loongarch64")
-    set(ARCH_C_FLAGS "-mabi=lp64d")
+    # Static kernel symbols cannot be interposed, so direct external access emits PC-relative relocations instead of GOT loads.
+    # Match the kernel target's -ual contract: LS2K traps on widened loads or stores that are not naturally aligned.
+    set(ARCH_C_FLAGS "-mabi=lp64d -mdirect-extern-access -mstrict-align")
 else()
     set(ARCH_C_FLAGS "")
 endif()
