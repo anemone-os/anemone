@@ -85,7 +85,7 @@ path = "bin/${ARCH}/prebuilt"
     }
 
     #[test]
-    fn tracked_app_manifests_remain_valid_cargo_drivers() {
+    fn tracked_app_manifests_use_expected_drivers() {
         for entry in std::fs::read_dir("../../anemone-apps").unwrap() {
             let entry = entry.unwrap();
             let manifest = entry.path().join("app.toml");
@@ -96,11 +96,14 @@ path = "bin/${ARCH}/prebuilt"
             let content = std::fs::read_to_string(&manifest).unwrap();
             let app = App::from_str(&content)
                 .unwrap_or_else(|error| panic!("{}: {error:#}", manifest.display()));
-            assert!(
-                matches!(app.build.driver, BuildDriver::Cargo(_)),
-                "tracked app '{}' unexpectedly changed driver",
-                app.name
-            );
+            match app.name.as_str() {
+                "busybox" => assert!(matches!(app.build.driver, BuildDriver::Source(_))),
+                _ => assert!(
+                    matches!(app.build.driver, BuildDriver::Cargo(_)),
+                    "tracked app '{}' unexpectedly changed driver",
+                    app.name
+                ),
+            }
         }
     }
 }

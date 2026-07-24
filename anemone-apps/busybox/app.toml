@@ -1,0 +1,8 @@
+name = "busybox"
+
+[build]
+workdir = "."
+driver = "source"
+
+[[artifacts]]
+path = "bin/${ARCH}/busybox"
