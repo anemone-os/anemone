@@ -61,6 +61,7 @@
 		- [2026-06-05 - Block Byte I/O Loop Mkfs](./devlog/changes/2026-06-05-block-byte-io-loop-mkfs.md)
 	- [事务日志](./devlog/transactions/index.md)
 		- [AHCI Controller](./devlog/transactions/2026-07-23-ahci-controller.md)
+		- [System Target Model R6 Named Bind and Initial Argv](./devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)
 		- [System Target Model R4A QEMU Provider DT Cutover](./devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md)
 		- [System Target Model R3 Explicit Inputs](./devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)
 		- [TTY Subsystem](./devlog/transactions/2026-07-23-tty-subsystem.md)

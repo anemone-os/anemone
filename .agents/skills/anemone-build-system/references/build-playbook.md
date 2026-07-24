@@ -41,6 +41,8 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 
 - Confirm which selection source, SystemTarget, Platform, KernelConfig, and kernel Cargo profile were resolved.
 - Check generated inputs before interpreting compiler failures.
+- Provide every binding referenced by selected QEMU provider fields; build rejects runtime-only or otherwise
+  unconsumed values before side effects.
 - Check that the generated boot definition matches the selected initial-program variant. For `EmbeddedApp`, verify
   the app identity, single executable regular export, reported byte count, and `include_bytes!` dependency all come
   from the current invocation rather than a stale `build/apps/` artifact.
@@ -71,12 +73,14 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 ### QEMU
 
 - Confirm the kernel was built for the selected platform.
-- Validate the explicit CPU, optional BIOS, firmware and fixed device tokens from the live Platform
-  file, then provide every declared QEMU bind as an invocation path. Omitted BIOS emits no `-bios`.
+- Validate the CPU, optional BIOS, firmware and fixed device tokens from the live Platform file, then provide every
+  provider/fixed-arg binding and every required runtime group. Optional groups may be omitted. Values are opaque;
+  xtask does not validate paths, units, ranges, or QEMU keyval semantics. Omitted BIOS emits no `-bios`.
 - Distinguish launch/configuration failures from guest boot failures.
 - When DTB is involved, inspect both the build-time generator and runtime QEMU path rather than assuming they use identical inputs.
 - QEMU exposes no DT maintenance command. When embedded QEMU DT materialization is involved, inspect
-  the normal build command and output publication; it must not consume ordinary args or binds.
+  the normal build command and output publication; it may consume provider-field bindings but not ordinary args or
+  runtime groups.
 
 ### Cleanup And End-To-End Wrappers
 

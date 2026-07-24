@@ -2,15 +2,16 @@
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsString,
-    path::{Path, PathBuf},
-    str::FromStr,
+    path::Path,
 };
 
 use crate::{
     config::{
-        platform::{Arch, Qemu, QemuBind, validate_qemu_bindings},
+        platform::{
+            Arch, Qemu, QemuBind, expand_placeholders, placeholder_names, resolve_qemu_provider,
+        },
         resolve::ConfigLoader,
-        selection::SelectionArgs,
+        selection::{BindArgs, BindValues, SelectionArgs, reject_unconsumed_bindings},
     },
     tasks::utils::{cmd_echo, log_progress},
 };
@@ -21,12 +22,11 @@ pub struct QemuArgs {
     #[command(flatten)]
     selection: SelectionArgs,
 
-    #[arg(long = "bind", value_name = "NAME=PATH")]
-    #[arg(help = "Bind a declared QEMU argv slot to a host path")]
-    bind: Vec<QemuBindValue>,
+    #[command(flatten)]
+    bindings: BindArgs,
 
     #[arg(long)]
-    #[arg(help = "Show the selected Platform's required bindings and exit")]
+    #[arg(help = "Show the selected Platform's required and optional bindings and exit")]
     show_bindings: bool,
 
     #[arg(short, long)]
@@ -35,26 +35,6 @@ pub struct QemuArgs {
         default_value = "false"
     )]
     debug: bool,
-}
-
-#[derive(Clone, Debug)]
-struct QemuBindValue {
-    name: String,
-    path: PathBuf,
-}
-
-impl FromStr for QemuBindValue {
-    type Err = anyhow::Error;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let (name, path) = value
-            .split_once('=')
-            .ok_or_else(|| anyhow::anyhow!("QEMU bind must use NAME=PATH"))?;
-        Ok(Self {
-            name: name.to_owned(),
-            path: PathBuf::from(path),
-        })
-    }
 }
 
 pub fn gen_qemu_cmd(
@@ -67,7 +47,7 @@ pub fn gen_qemu_cmd(
     cmd.arg("-machine")
         .arg(&qemu.machine)
         .arg("-smp")
-        .arg(qemu.smp.to_string())
+        .arg(&qemu.smp)
         .arg("-m")
         .arg(&qemu.memory)
         .arg("-nographic")
@@ -94,51 +74,21 @@ pub(crate) fn qemu_program(arch: &Arch) -> &'static str {
 
 pub fn expand_bindings(
     declarations: &[QemuBind],
-    values: &[(String, PathBuf)],
+    values: &BindValues,
+    consumed: &mut HashSet<String>,
 ) -> anyhow::Result<Vec<OsString>> {
-    validate_qemu_bindings(declarations)?;
-    let declared = declarations
-        .iter()
-        .map(|binding| binding.name.as_str())
-        .collect::<HashSet<_>>();
-    let mut provided = HashMap::new();
-    for (name, path) in values {
-        if !declared.contains(name.as_str()) {
-            anyhow::bail!("unknown QEMU bind `{name}`");
-        }
-        if provided.insert(name.as_str(), path.as_path()).is_some() {
-            anyhow::bail!("duplicate QEMU bind value `{name}`");
-        }
-        if path.as_os_str().is_empty() {
-            anyhow::bail!("QEMU bind `{name}` path must not be empty");
-        }
-        if path.to_string_lossy().contains(',') {
-            anyhow::bail!("QEMU bind `{name}` path must not contain a comma");
-        }
-        let metadata = std::fs::metadata(path)
-            .map_err(|error| anyhow::anyhow!("invalid QEMU bind `{name}` path: {error}"))?;
-        if !metadata.is_file() {
-            anyhow::bail!("QEMU bind `{name}` path is not a regular file");
-        }
-    }
-
     let mut expanded = Vec::new();
     for declaration in declarations {
-        let path = provided
-            .get(declaration.name.as_str())
-            .ok_or_else(|| anyhow::anyhow!("missing QEMU bind `{}`", declaration.name))?;
-        for template in &declaration.template {
-            // Preserve each declared token and splice host paths as OsString
-            // segments: bind expansion never invokes a shell or splits on
-            // whitespace, and declaration order is the argv order contract.
-            let mut argument = OsString::new();
-            for (index, literal) in template.split("{{}}").enumerate() {
-                if index != 0 {
-                    argument.push(path);
-                }
-                argument.push(literal);
+        if !values.contains_key(&declaration.name) {
+            if declaration.optional {
+                continue;
             }
-            expanded.push(argument);
+            anyhow::bail!("missing bind `{}`", declaration.name);
+        }
+        for template in &declaration.template {
+            expanded.push(OsString::from(expand_placeholders(
+                template, values, consumed,
+            )?));
         }
     }
     Ok(expanded)
@@ -165,34 +115,51 @@ pub fn run(args: QemuArgs) -> anyhow::Result<()> {
             action.system.platform_ref
         )
     })?;
+    let bindings = args.bindings.into_values()?;
     if args.show_bindings {
-        if !args.bind.is_empty() {
+        if !bindings.is_empty() {
             anyhow::bail!("--show-bindings does not accept bind values");
         }
+        let mut provider_names = HashSet::new();
+        for value in [&qemu.machine, &qemu.cpu, &qemu.smp, &qemu.memory]
+            .into_iter()
+            .chain(qemu.bios.iter())
+            .chain(qemu.args.iter())
+        {
+            provider_names.extend(placeholder_names(value)?);
+        }
+        let mut provider_names = provider_names.into_iter().collect::<Vec<_>>();
+        provider_names.sort();
+        for name in provider_names {
+            println!("{name} = required");
+        }
         for binding in &qemu.bind {
-            println!("{} = {:?}", binding.name, binding.template);
+            println!(
+                "{} = {} {:?}",
+                binding.name,
+                if binding.optional {
+                    "optional"
+                } else {
+                    "required"
+                },
+                binding.template
+            );
         }
         return Ok(());
     }
 
-    let values = args
-        .bind
-        .iter()
-        .map(|binding| (binding.name.clone(), binding.path.clone()))
-        .collect::<Vec<_>>();
-    let expanded = expand_bindings(&qemu.bind, &values)?;
-    for binding in &args.bind {
-        log_progress(
-            "BIND",
-            &format!("{}={}", binding.name, binding.path.display()),
-        );
+    let (qemu, mut consumed) = resolve_qemu_provider(qemu, &bindings, true)?;
+    let expanded = expand_bindings(&qemu.bind, &bindings, &mut consumed)?;
+    reject_unconsumed_bindings(&bindings, &consumed)?;
+    for (name, value) in &bindings {
+        log_progress("BIND", &format!("{name}={value}"));
     }
 
     log_progress("QEMU", "Launching QEMU emulator...");
     let program = qemu_program(&action.system.platform.build.arch);
     let mut cmd = gen_qemu_cmd(
         &action.system.platform.build.arch,
-        qemu,
+        &qemu,
         args.debug,
         &expanded,
     );
@@ -215,7 +182,7 @@ mod tests {
         let qemu = Qemu {
             machine: "virt".to_string(),
             cpu: "rv64".to_string(),
-            smp: 1,
+            smp: "1".to_string(),
             memory: "1G".to_string(),
             bios: None,
             args: vec!["-rtc".to_string(), "base=utc".to_string()],
@@ -254,116 +221,65 @@ mod tests {
 
     #[test]
     fn bind_expansion_is_ordered_and_token_preserving() {
-        let workspace = BindWorkspace::new();
-        let disk = workspace.file("disk with space.img");
-        let kernel = workspace.file("kernel.elf");
         let declarations = vec![
             QemuBind {
                 name: "kernel-image".to_string(),
-                template: vec!["-kernel".to_string(), "{{}}".to_string()],
+                optional: false,
+                template: vec!["-kernel".to_string(), "{{kernel-image}}".to_string()],
             },
             QemuBind {
                 name: "disk-x0".to_string(),
+                optional: false,
                 template: vec![
                     "-drive".to_string(),
-                    "file={{}},backup={{}},format=raw,if=none,id=x0".to_string(),
+                    "file={{disk-x0}},backup={{disk-x0}},format=raw,if=none,id=x0".to_string(),
                 ],
             },
         ];
-
-        let expanded = expand_bindings(
-            &declarations,
-            &[
-                ("disk-x0".to_string(), disk.clone()),
-                ("kernel-image".to_string(), kernel.clone()),
-            ],
-        )
-        .unwrap();
+        let values = HashMap::from([
+            ("disk-x0".to_string(), "disk with space.img".to_string()),
+            ("kernel-image".to_string(), "kernel.elf".to_string()),
+        ]);
+        let mut consumed = HashSet::new();
+        let expanded = expand_bindings(&declarations, &values, &mut consumed).unwrap();
         assert_eq!(
             expanded,
             vec![
                 OsString::from("-kernel"),
-                kernel.as_os_str().to_owned(),
+                OsString::from("kernel.elf"),
                 OsString::from("-drive"),
-                OsString::from(format!(
-                    "file={},backup={},format=raw,if=none,id=x0",
-                    disk.display(),
-                    disk.display()
-                )),
+                OsString::from(
+                    "file=disk with space.img,backup=disk with space.img,format=raw,if=none,id=x0",
+                ),
             ]
+        );
+        assert_eq!(
+            consumed,
+            HashSet::from(["kernel-image".to_string(), "disk-x0".to_string()])
         );
     }
 
     #[test]
-    fn bind_expansion_rejects_invalid_maps_and_paths() {
-        let workspace = BindWorkspace::new();
-        let file = workspace.file("disk.img");
-        let comma_file = workspace.file("disk,comma.img");
-        let missing = workspace.0.join("missing.img");
-        let declarations = vec![QemuBind {
-            name: "disk-x0".to_string(),
-            template: vec!["file={{}}".to_string()],
-        }];
-
-        for values in [
-            vec![],
-            vec![("unknown".to_string(), file.clone())],
-            vec![
-                ("disk-x0".to_string(), file.clone()),
-                ("disk-x0".to_string(), file.clone()),
-            ],
-            vec![("disk-x0".to_string(), PathBuf::new())],
-            vec![("disk-x0".to_string(), missing)],
-            vec![("disk-x0".to_string(), workspace.0.clone())],
-            vec![("disk-x0".to_string(), comma_file)],
-        ] {
-            assert!(
-                expand_bindings(&declarations, &values).is_err(),
-                "{values:?}"
-            );
-        }
-
-        let duplicate_declarations = vec![
+    fn optional_group_is_omitted_atomically_and_required_group_fails() {
+        let declarations = vec![
             QemuBind {
-                name: "disk-x0".to_string(),
-                template: vec!["file={{}}".to_string()],
+                name: "kernel-image".to_string(),
+                optional: false,
+                template: vec!["-kernel".to_string(), "{{kernel-image}}".to_string()],
             },
             QemuBind {
-                name: "disk-x0".to_string(),
-                template: vec!["backup={{}}".to_string()],
+                name: "disk-x1".to_string(),
+                optional: true,
+                template: vec!["-drive".to_string(), "file={{disk-x1}}".to_string()],
             },
         ];
-        assert!(
-            expand_bindings(&duplicate_declarations, &[("disk-x0".to_string(), file)]).is_err()
+        assert!(expand_bindings(&declarations, &HashMap::new(), &mut HashSet::new()).is_err());
+
+        let values = HashMap::from([("kernel-image".to_string(), "kernel.elf".to_string())]);
+        let expanded = expand_bindings(&declarations, &values, &mut HashSet::new()).unwrap();
+        assert_eq!(
+            expanded,
+            [OsString::from("-kernel"), OsString::from("kernel.elf")]
         );
-    }
-
-    struct BindWorkspace(PathBuf);
-
-    impl BindWorkspace {
-        fn new() -> Self {
-            let root = std::env::temp_dir().join(format!(
-                "anemone-xtask-qemu-bind-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            std::fs::create_dir_all(&root).unwrap();
-            Self(root)
-        }
-
-        fn file(&self, name: &str) -> PathBuf {
-            let path = self.0.join(name);
-            std::fs::write(&path, b"fixture").unwrap();
-            path
-        }
-    }
-
-    impl Drop for BindWorkspace {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
     }
 }

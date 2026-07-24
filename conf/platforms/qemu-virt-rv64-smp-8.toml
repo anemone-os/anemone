@@ -13,7 +13,7 @@ frame_section_shift_mb = 7
 [qemu]
 machine = "virt"
 cpu = "rv64"
-smp = 8
+smp = "8"
 memory = "1G"
 bios = "default"
 args = [
@@ -30,22 +30,25 @@ args = [
 
 [[qemu.bind]]
 name = "kernel-image"
-template = ["-kernel", "{{}}"]
+optional = false
+template = ["-kernel", "{{kernel-image}}"]
 
 [[qemu.bind]]
 name = "disk-x0"
+optional = false
 template = [
     "-drive",
-    "file={{}},format=raw,if=none,id=x0",
+    "file={{disk-x0}},format=raw,if=none,id=x0",
     "-device",
     "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
 ]
 
 [[qemu.bind]]
 name = "disk-x1"
+optional = false
 template = [
     "-drive",
-    "file={{}},format=raw,if=none,id=x1",
+    "file={{disk-x1}},format=raw,if=none,id=x1",
     "-device",
     "virtio-blk-device,drive=x1,bus=virtio-mmio-bus.1",
 ]

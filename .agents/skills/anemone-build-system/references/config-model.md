@@ -29,15 +29,16 @@ presets do not carry presentation defaults.
 ### System Target
 
 `conf/system-targets/` owns the selected Platform reference, root mount/source, and closed initial-program source:
-rootfs metadata or a referenced embedded app. An embedded app reference names an existing app manifest; kernel build
+rootfs metadata or a referenced embedded app. Either variant may carry a complete non-empty argv including argv[0];
+omission uses the resolved executable path as the sole argument. An embedded app reference names an existing app manifest; kernel build
 uses the common app exporter and rejects identity mismatch, non-singleton output, non-regular output, or an artifact
 without an execute bit before kernel compilation. A SystemTarget does not own machine constants, kernel parameters,
-kernel Cargo profile, QEMU invocation values, Platform kernel-output formats, embedded argv/env configuration, or an
+kernel Cargo profile, QEMU invocation values, Platform kernel-output formats, env configuration, or an
 artifact selector.
 
 ### Platform And Architecture
 
-`conf/platforms/` owns a platform's architecture-facing and launch-facing configuration plus boot-ABI-required kernel output formats. QEMU sections own an explicit CPU, an optional BIOS, fixed argv and ordered bind templates, but never the host executable or invocation path values. Omitting BIOS emits no `-bios` argument. `conf/arch/` owns architecture templates and target specifications. The build, configuration, QEMU, and DTB tasks may consume different parts of this layer; inspect every consumer affected by a change.
+`conf/platforms/` owns a platform's architecture-facing and launch-facing configuration plus boot-ABI-required kernel output formats. QEMU sections own an explicit CPU shape, an optional BIOS, fixed argv, named opaque-string placeholders, and ordered required/optional bind groups, but never the host executable or invocation values. Omitting BIOS emits no `-bios` argument. `conf/arch/` owns architecture templates and target specifications. The build, configuration, QEMU, and DTB tasks may consume different parts of this layer; inspect every consumer affected by a change.
 
 ### App Manifest
 
@@ -68,7 +69,7 @@ Before executing or accepting a configuration change, verify:
 - app architecture, driver output, and declared export agree;
 - an embedded initial app reference matches its manifest identity and resolves to one executable regular export;
 - rootfs architecture and installed apps agree with the intended kernel;
-- every QEMU bind value matches a selected Platform declaration and the intended wrapper mapping;
+- every build/QEMU bind value is consumed by a selected Platform placeholder and matches the intended wrapper mapping;
 - fixed-path consumers run after their documented producer and stop when it fails;
 - cleanup and wrapper behavior does not invalidate another layer's required input;
 - validation observes outputs from the current invocation, not stale conditional artifacts.
@@ -83,8 +84,8 @@ Do not describe a proposed DTB workflow as an existing capability. Keep future d
 
 Normal kernel build removes stale DTB output for firmware delivery. For embedded delivery it either
 compiles a physical normative source, or asks the selected QEMU provider to dump a build-local DTB
-using only machine, CPU, SMP, memory, and optional BIOS. It never consumes ordinary QEMU args,
-runtime disks, or bind values for DT materialization.
+using only resolved machine, CPU, SMP, memory, and optional BIOS. It may consume bindings referenced by those
+provider fields, but never consumes ordinary QEMU args, runtime disks, or runtime bind groups for DT materialization.
 
 QEMU Platforms keep no committed provider mirror and expose no refresh/check command. A physical
 `provider = "firmware"` contract records a firmware-derived conformance baseline without making it

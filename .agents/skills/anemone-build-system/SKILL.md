@@ -39,15 +39,17 @@ Keep each concern in its owning layer:
 - `conf/rootfs/`: rootfs composition and installed apps/files;
 - Justfile and `scripts/xtask/src/tasks/`: orchestration and command behavior.
 
-Kernel build owns the generated initial-program input. `RootfsEntry` emits only its typed tag;
+Kernel build owns the generated initial-program input. `RootfsEntry` emits its typed tag and optional complete argv;
 `EmbeddedApp` resolves the referenced app through the same architecture-specific `build_app()` exporter used by
 ordinary app/rootfs actions, requires exactly one executable regular artifact, and emits an ignored typed Rust
-definition whose `include_bytes!` points at that export. The kernel must not parse SystemTarget or app manifests,
+definition whose `include_bytes!` points at that export and which carries the same optional argv shape. Explicit argv
+includes argv[0]; omission uses the resolved executable path as the sole argument. The kernel must not parse SystemTarget or app manifests,
 and `clean` must remove the generated boot definition.
 
 Build and ordinary QEMU require an explicit `--preset` or a complete `--target` / `--kernel-config`
-/ `--profile` tuple. Bare invocation has no local or repository-default fallback. QEMU host paths are action inputs supplied with the selected Platform's
-declared `--bind name=path` values, not tracked configuration.
+/ `--profile` tuple. Bare invocation has no local or repository-default fallback. Build/QEMU bind values are opaque
+action inputs supplied as `--bind name=value`, not tracked configuration. Provider-field placeholders are consumed by
+build and QEMU; fixed QEMU args and required/optional argv groups are QEMU-only.
 
 Formatting also requires an explicit scope: `all`, `kernel`, or an app name.
 Rootfs manifests require an explicit filesystem base type; folder roots use the repository's single
@@ -55,8 +57,9 @@ automatic sizing policy rather than a manifest capacity option. QEMU Platforms r
 CPU model, while an omitted BIOS means xtask emits no `-bios` argument.
 
 QEMU DT has no maintenance or source write-back action. Firmware delivery consumes the runtime FDT;
-embedded QEMU delivery is materialized only by normal build from the selected provider's machine,
-CPU, SMP, memory, and optional BIOS. Build must not consume ordinary QEMU args, binds, rootfs,
+embedded QEMU delivery is materialized only by normal build from the selected provider's resolved machine,
+CPU, SMP, memory, and optional BIOS. Build may consume bindings referenced by those provider fields, but must not
+consume ordinary QEMU args, runtime bind groups, rootfs,
 disks, or network backends for that dump. QEMU Platforms keep no committed DTS mirror. Physical
 Platforms may retain a normative source or firmware conformance baseline; baseline provenance,
 allowed differences, and revalidation responsibility remain human-reviewed facts rather than

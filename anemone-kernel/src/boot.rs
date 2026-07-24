@@ -25,9 +25,15 @@ struct ResolvedInitialProgram {
 }
 
 impl ResolvedInitialProgram {
-    fn new(path: String) -> Self {
+    fn new(path: String, argv: Option<&[&str]>) -> Self {
         Self {
-            argv: vec![path.clone()],
+            argv: argv
+                .map(|argv| {
+                    argv.iter()
+                        .map(|argument| (*argument).to_string())
+                        .collect()
+                })
+                .unwrap_or_else(|| vec![path.clone()]),
             path,
             envp: vec![
                 "OS=anemone".to_string(),
@@ -67,7 +73,7 @@ fn step<T>(
 
 fn resolve_initial_program() -> ResolvedInitialProgram {
     match &INITIAL_PROGRAM_SOURCE {
-        InitialProgramSource::RootfsEntry => {
+        InitialProgramSource::RootfsEntry { argv } => {
             kinfoln!(
                 "boot protocol: resolving variant=rootfs-entry metadata={}",
                 ROOTFS_ENTRY_METADATA
@@ -80,9 +86,9 @@ fn resolve_initial_program() -> ResolvedInitialProgram {
                             ROOTFS_ENTRY_METADATA, error
                         )
                     });
-            ResolvedInitialProgram::new(path)
+            ResolvedInitialProgram::new(path, *argv)
         },
-        InitialProgramSource::EmbeddedApp { bytes } => {
+        InitialProgramSource::EmbeddedApp { bytes, argv } => {
             kinfoln!(
                 "boot protocol: materializing variant=embedded-app path={} bytes={}",
                 EMBEDDED_PATH,
@@ -99,7 +105,7 @@ fn resolve_initial_program() -> ResolvedInitialProgram {
                 "boot protocol: publication complete variant=embedded-app path={}",
                 path
             );
-            ResolvedInitialProgram::new(path)
+            ResolvedInitialProgram::new(path, *argv)
         },
     }
 }

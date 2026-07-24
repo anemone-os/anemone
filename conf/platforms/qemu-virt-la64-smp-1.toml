@@ -14,7 +14,7 @@ frame_section_shift_mb = 7
 [qemu]
 machine = "virt"
 cpu = "la464"
-smp = 1
+smp = "1"
 memory = "1G"
 args = [
     "-rtc",
@@ -28,22 +28,25 @@ args = [
 
 [[qemu.bind]]
 name = "kernel-image"
-template = ["-kernel", "{{}}"]
+optional = false
+template = ["-kernel", "{{kernel-image}}"]
 
 [[qemu.bind]]
 name = "disk-x0"
+optional = false
 template = [
     "-drive",
-    "file={{}},format=raw,if=none,id=x0",
+    "file={{disk-x0}},format=raw,if=none,id=x0",
     "-device",
     "virtio-blk-pci-transitional,drive=x0,bus=pcie.0",
 ]
 
 [[qemu.bind]]
 name = "disk-x1"
+optional = false
 template = [
     "-drive",
-    "file={{}},format=raw,if=none,id=x1",
+    "file={{disk-x1}},format=raw,if=none,id=x1",
     "-device",
     "virtio-blk-pci-transitional,drive=x1,bus=pcie.0",
 ]

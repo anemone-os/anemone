@@ -1,8 +1,67 @@
 use super::{
     build_preset::CargoProfile,
-    reference::{BuildPresetRef, KernelConfigRef, SystemTargetRef},
+    reference::{BuildPresetRef, KernelConfigRef, SystemTargetRef, validate_slug},
 };
 use clap::Args;
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+};
+
+pub type BindValues = HashMap<String, String>;
+
+#[derive(Args, Debug, Default)]
+pub struct BindArgs {
+    #[arg(long = "bind", value_name = "NAME=VALUE")]
+    #[arg(help = "Bind an opaque value referenced by the selected QEMU Platform")]
+    bind: Vec<BindValue>,
+}
+
+impl BindArgs {
+    pub fn into_values(self) -> anyhow::Result<BindValues> {
+        let mut values = HashMap::new();
+        for binding in self.bind {
+            validate_slug("bind", &binding.name)?;
+            if binding.value.is_empty() {
+                anyhow::bail!("bind `{}` value must not be empty", binding.name);
+            }
+            if values.insert(binding.name.clone(), binding.value).is_some() {
+                anyhow::bail!("duplicate bind value `{}`", binding.name);
+            }
+        }
+        Ok(values)
+    }
+}
+
+pub fn reject_unconsumed_bindings(
+    values: &BindValues,
+    consumed: &HashSet<String>,
+) -> anyhow::Result<()> {
+    if let Some(name) = values.keys().find(|name| !consumed.contains(*name)) {
+        anyhow::bail!("unknown or unconsumed bind `{name}`");
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct BindValue {
+    name: String,
+    value: String,
+}
+
+impl FromStr for BindValue {
+    type Err = anyhow::Error;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let (name, value) = input
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("bind must use NAME=VALUE"))?;
+        Ok(Self {
+            name: name.to_owned(),
+            value: value.to_owned(),
+        })
+    }
+}
 
 pub struct SelectionRequest {
     preset: Option<BuildPresetRef>,
@@ -125,6 +184,12 @@ mod tests {
         selection: SelectionArgs,
     }
 
+    #[derive(Parser)]
+    struct BindCli {
+        #[command(flatten)]
+        bindings: BindArgs,
+    }
+
     #[test]
     fn explicit_sources_are_complete_and_mutually_exclusive() {
         let preset = BuildPresetRef::new("preset").unwrap();
@@ -180,6 +245,41 @@ mod tests {
         ] {
             assert!(incomplete.classify().is_err());
         }
+    }
+
+    #[test]
+    fn bindings_are_opaque_nonempty_and_unique() {
+        let bindings = BindCli::try_parse_from([
+            "test",
+            "--bind",
+            "memory=8G",
+            "--bind",
+            "disk-x1=path,with={{literal}}",
+        ])
+        .unwrap()
+        .bindings
+        .into_values()
+        .unwrap();
+        assert_eq!(bindings["memory"], "8G");
+        assert_eq!(bindings["disk-x1"], "path,with={{literal}}");
+
+        for arguments in [
+            vec!["test", "--bind", "memory="],
+            vec!["test", "--bind", "memory=1G", "--bind", "memory=8G"],
+            vec!["test", "--bind", "not_valid=1"],
+        ] {
+            let parsed = BindCli::try_parse_from(arguments).unwrap();
+            assert!(parsed.bindings.into_values().is_err());
+        }
+
+        assert!(reject_unconsumed_bindings(&bindings, &HashSet::new()).is_err());
+        assert!(
+            reject_unconsumed_bindings(
+                &bindings,
+                &HashSet::from(["memory".to_string(), "disk-x1".to_string()]),
+            )
+            .is_ok()
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //! under the `conf/platforms/` directory.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Component, Path},
 };
 
@@ -83,12 +83,12 @@ pub struct Constants {
     pub frame_section_shift_mb: usize,
 }
 
-#[derive(Deserialize, Debug, Serialize)]
+#[derive(Deserialize, Debug, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Qemu {
     pub machine: String,
     pub cpu: String,
-    pub smp: u64,
+    pub smp: String,
     pub memory: String,
     pub bios: Option<String>,
     #[serde(default)]
@@ -97,10 +97,11 @@ pub struct Qemu {
     pub bind: Vec<QemuBind>,
 }
 
-#[derive(Deserialize, Debug, Serialize)]
+#[derive(Deserialize, Debug, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct QemuBind {
     pub name: String,
+    pub optional: bool,
     pub template: Vec<String>,
 }
 
@@ -177,7 +178,7 @@ impl Config {
             if qemu.cpu.trim().is_empty() {
                 anyhow::bail!("QEMU CPU model must not be empty");
             }
-            validate_qemu_bindings(&qemu.bind)?;
+            validate_qemu(qemu)?;
         }
         match (&config.dtb, &config.qemu) {
             (Some(dtb), qemu) => dtb.validate(&config.build.arch, qemu.is_some())?,
@@ -244,29 +245,124 @@ pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
     }
 }
 
-pub fn validate_qemu_bindings(bindings: &[QemuBind]) -> anyhow::Result<()> {
+fn validate_qemu(qemu: &Qemu) -> anyhow::Result<()> {
+    for value in [&qemu.machine, &qemu.cpu, &qemu.smp, &qemu.memory]
+        .into_iter()
+        .chain(qemu.bios.iter())
+        .chain(qemu.args.iter())
+    {
+        placeholder_names(value)?;
+    }
+    validate_qemu_bindings(&qemu.bind)
+}
+
+fn validate_qemu_bindings(bindings: &[QemuBind]) -> anyhow::Result<()> {
     let mut names = HashSet::new();
     for binding in bindings {
         validate_slug("QEMU bind", &binding.name)?;
         if !names.insert(binding.name.as_str()) {
             anyhow::bail!("duplicate QEMU bind `{}`", binding.name);
         }
-        let mut placeholders = 0;
+        let mut placeholders = HashSet::new();
         for token in &binding.template {
-            placeholders += token.matches("{{}}").count();
-            let literal = token.replace("{{}}", "");
-            if literal.contains("{{") || literal.contains("}}") {
-                anyhow::bail!(
-                    "QEMU bind `{}` contains an unsupported placeholder",
-                    binding.name
-                );
-            }
+            placeholders.extend(placeholder_names(token)?);
         }
-        if placeholders == 0 {
-            anyhow::bail!("QEMU bind `{}` has no `{{{{}}}}` placeholder", binding.name);
+        if placeholders != HashSet::from([binding.name.clone()]) {
+            anyhow::bail!(
+                "QEMU bind `{}` template must reference only `{{{{{}}}}}`",
+                binding.name,
+                binding.name
+            );
         }
     }
     Ok(())
+}
+
+pub fn resolve_qemu_provider(
+    qemu: &Qemu,
+    values: &HashMap<String, String>,
+    include_args: bool,
+) -> anyhow::Result<(Qemu, HashSet<String>)> {
+    let mut resolved = qemu.clone();
+    let mut consumed = HashSet::new();
+    resolved.machine = expand_placeholders(&qemu.machine, values, &mut consumed)?;
+    resolved.cpu = expand_placeholders(&qemu.cpu, values, &mut consumed)?;
+    resolved.smp = expand_placeholders(&qemu.smp, values, &mut consumed)?;
+    resolved.memory = expand_placeholders(&qemu.memory, values, &mut consumed)?;
+    resolved.bios = qemu
+        .bios
+        .as_deref()
+        .map(|value| expand_placeholders(value, values, &mut consumed))
+        .transpose()?;
+    if include_args {
+        resolved.args = qemu
+            .args
+            .iter()
+            .map(|value| expand_placeholders(value, values, &mut consumed))
+            .collect::<anyhow::Result<_>>()?;
+    }
+    Ok((resolved, consumed))
+}
+
+pub fn expand_placeholders(
+    input: &str,
+    values: &HashMap<String, String>,
+    consumed: &mut HashSet<String>,
+) -> anyhow::Result<String> {
+    let mut output = String::new();
+    let mut remainder = input;
+    while let Some(start) = remainder.find("{{") {
+        let literal = &remainder[..start];
+        if literal.contains("}}") {
+            anyhow::bail!("unsupported placeholder in `{input}`");
+        }
+        output.push_str(literal);
+        let after_start = &remainder[start + 2..];
+        let end = after_start
+            .find("}}")
+            .ok_or_else(|| anyhow::anyhow!("unterminated placeholder in `{input}`"))?;
+        let name = &after_start[..end];
+        if name.contains("{{") {
+            anyhow::bail!("unsupported placeholder in `{input}`");
+        }
+        validate_slug("placeholder", name)?;
+        let value = values
+            .get(name)
+            .ok_or_else(|| anyhow::anyhow!("missing bind `{name}`"))?;
+        output.push_str(value);
+        consumed.insert(name.to_owned());
+        remainder = &after_start[end + 2..];
+    }
+    if remainder.contains("}}") {
+        anyhow::bail!("unsupported placeholder in `{input}`");
+    }
+    output.push_str(remainder);
+    Ok(output)
+}
+
+pub fn placeholder_names(input: &str) -> anyhow::Result<HashSet<String>> {
+    let mut names = HashSet::new();
+    let mut remainder = input;
+    while let Some(start) = remainder.find("{{") {
+        if remainder[..start].contains("}}") {
+            anyhow::bail!("unsupported placeholder in `{input}`");
+        }
+        let after_start = &remainder[start + 2..];
+        let end = after_start
+            .find("}}")
+            .ok_or_else(|| anyhow::anyhow!("unterminated placeholder in `{input}`"))?;
+        let name = &after_start[..end];
+        if name.contains("{{") {
+            anyhow::bail!("unsupported placeholder in `{input}`");
+        }
+        validate_slug("placeholder", name)?;
+        names.insert(name.to_owned());
+        remainder = &after_start[end + 2..];
+    }
+    if remainder.contains("}}") {
+        anyhow::bail!("unsupported placeholder in `{input}`");
+    }
+    Ok(names)
 }
 
 impl Dtb {
@@ -402,7 +498,8 @@ mod tests {
 
 [[qemu.bind]]
 name = "disk-x0"
-template = ["-drive", "file={{}},backup={{}},format=raw"]
+optional = true
+template = ["-drive", "file={{disk-x0}},backup={{disk-x0}},format=raw"]
 "#;
         let config = Config::from_str(&valid).unwrap();
         assert_eq!(config.qemu.unwrap().bind.len(), 2);
@@ -410,15 +507,43 @@ template = ["-drive", "file={{}},backup={{}},format=raw"]
         for invalid in [
             valid.replace("name = \"disk-x0\"", "name = \"Disk_X0\""),
             valid.replace(
-                "template = [\"-drive\", \"file={{}},backup={{}},format=raw\"]",
+                "template = [\"-drive\", \"file={{disk-x0}},backup={{disk-x0}},format=raw\"]",
                 "template = [\"-drive\", \"file=fixed,format=raw\"]",
             ),
-            valid.replace("file={{}}", "file={{path}}"),
-            format!("{valid}\n[[qemu.bind]]\nname = \"disk-x0\"\ntemplate = [\"file={{}}\"]\n"),
+            valid.replace("file={{disk-x0}}", "file={{path}}"),
+            format!(
+                "{valid}\n[[qemu.bind]]\nname = \"disk-x0\"\noptional = false\ntemplate = [\"file={{disk-x0}}\"]\n"
+            ),
             format!("{valid}\nunknown = true\n"),
         ] {
             assert!(Config::from_str(&invalid).is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn provider_bind_expansion_is_named_and_single_pass() {
+        let mut qemu = example_platform().qemu.unwrap();
+        qemu.smp = "{{smp}}".to_string();
+        qemu.memory = "{{memory}}".to_string();
+        qemu.args = vec!["value={{runtime}}".to_string()];
+        let values = HashMap::from([
+            ("smp".to_string(), "8".to_string()),
+            ("memory".to_string(), "{{not-recursive}}".to_string()),
+            ("runtime".to_string(), "opaque, value".to_string()),
+        ]);
+
+        let (build, build_consumed) = resolve_qemu_provider(&qemu, &values, false).unwrap();
+        assert_eq!(build.smp, "8");
+        assert_eq!(build.memory, "{{not-recursive}}");
+        assert_eq!(build.args, qemu.args);
+        assert_eq!(
+            build_consumed,
+            HashSet::from(["smp".to_string(), "memory".to_string()])
+        );
+
+        let (runtime, runtime_consumed) = resolve_qemu_provider(&qemu, &values, true).unwrap();
+        assert_eq!(runtime.args, ["value=opaque, value"]);
+        assert_eq!(runtime_consumed.len(), 3);
     }
 
     fn example_platform_text() -> String {

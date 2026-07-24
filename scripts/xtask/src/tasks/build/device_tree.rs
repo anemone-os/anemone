@@ -169,7 +169,7 @@ fn qemu_provider_command(
         .arg("-cpu")
         .arg(&qemu.cpu)
         .arg("-smp")
-        .arg(qemu.smp.to_string())
+        .arg(&qemu.smp)
         .arg("-m")
         .arg(&qemu.memory);
     if let Some(bios) = &qemu.bios {
@@ -332,7 +332,7 @@ mod tests {
     fn embedded_example_platform() -> Config {
         let mut platform = example_platform();
         platform.build.arch = Arch::LoongArch64;
-        platform.qemu.as_mut().unwrap().smp = 3;
+        platform.qemu.as_mut().unwrap().smp = "3".to_string();
         platform.dtb.as_mut().unwrap().delivery = DtbDelivery::Embedded;
         platform
     }

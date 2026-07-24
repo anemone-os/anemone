@@ -64,6 +64,13 @@
                     "properties": {
                         "type": {
                             "const": "rootfs-entry"
+                        },
+                        "argv": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "string"
+                            }
                         }
                     },
                     "required": [
@@ -80,6 +87,13 @@
                             "type": "string",
                             "pattern": "^[a-z0-9][a-z0-9-]*$",
                             "description": "Canonical app directory and manifest-name slug."
+                        },
+                        "argv": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "string"
+                            }
                         }
                     },
                     "required": [

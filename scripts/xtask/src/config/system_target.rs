@@ -21,6 +21,7 @@ impl Config {
     pub fn from_str(content: &str) -> anyhow::Result<Self> {
         let config: Self = toml::from_str(content)?;
         config.root.validate()?;
+        config.initial_program.validate()?;
         Ok(config)
     }
 }
@@ -72,8 +73,27 @@ impl RootSource {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum InitialProgramSource {
-    RootfsEntry,
-    EmbeddedApp { app: AppRef },
+    RootfsEntry {
+        #[serde(default)]
+        argv: Option<Vec<String>>,
+    },
+    EmbeddedApp {
+        app: AppRef,
+        #[serde(default)]
+        argv: Option<Vec<String>>,
+    },
+}
+
+impl InitialProgramSource {
+    fn validate(&self) -> anyhow::Result<()> {
+        let argv = match self {
+            Self::RootfsEntry { argv } | Self::EmbeddedApp { argv, .. } => argv,
+        };
+        if argv.as_ref().is_some_and(Vec::is_empty) {
+            anyhow::bail!("initial-program argv must not be empty");
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -88,7 +108,7 @@ mod tests {
         assert!(matches!(config.root.source, RootSource::Block { .. }));
         assert!(matches!(
             config.initial_program,
-            InitialProgramSource::RootfsEntry
+            InitialProgramSource::RootfsEntry { argv: None }
         ));
     }
 
@@ -108,7 +128,7 @@ mod tests {
         let config = Config::from_str(&content).unwrap();
         assert!(matches!(
             config.initial_program,
-            InitialProgramSource::EmbeddedApp { app } if app.as_str() == "init"
+            InitialProgramSource::EmbeddedApp { app, argv: None } if app.as_str() == "init"
         ));
 
         let missing_app = valid.replace("type = \"rootfs-entry\"", "type = \"embedded-app\"");
@@ -119,6 +139,29 @@ mod tests {
             "type = \"embedded-app\"\napp = \"../init\"",
         );
         assert!(Config::from_str(&invalid_app).is_err());
+    }
+
+    #[test]
+    fn initial_program_argv_is_complete_and_nonempty_when_present() {
+        let valid = example_target();
+        for replacement in [
+            "type = \"rootfs-entry\"\nargv = [\"busybox\", \"sh\"]",
+            "type = \"embedded-app\"\napp = \"init\"\nargv = [\"init\", \"--test\"]",
+        ] {
+            let config =
+                Config::from_str(&valid.replace("type = \"rootfs-entry\"", replacement)).unwrap();
+            let argv = match config.initial_program {
+                InitialProgramSource::RootfsEntry { argv }
+                | InitialProgramSource::EmbeddedApp { argv, .. } => argv.unwrap(),
+            };
+            assert_eq!(argv.len(), 2);
+        }
+
+        let empty = valid.replace(
+            "type = \"rootfs-entry\"",
+            "type = \"rootfs-entry\"\nargv = []",
+        );
+        assert!(Config::from_str(&empty).is_err());
     }
 
     #[test]

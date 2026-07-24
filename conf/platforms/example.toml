@@ -35,7 +35,7 @@ machine = "virt"
 # CPU type, optional
 cpu = "rv64"
 # number of CPUs
-smp = 1
+smp = "1"
 # Amount of memory
 memory = "1G"
 # Platform firmware to use, optional
@@ -49,10 +49,11 @@ args = [
 ]
 
 # Each declaration is an ordered argv template. Invocation values are supplied
-# with `just qemu ... --bind name=path`; tracked config never stores host paths.
+# with `just qemu ... --bind name=value`; tracked config never stores invocation values.
 [[qemu.bind]]
 name = "kernel-image"
-template = ["-kernel", "{{}}"]
+optional = false
+template = ["-kernel", "{{kernel-image}}"]
 
 # Device Tree contract for the platform, optional
 [dtb]

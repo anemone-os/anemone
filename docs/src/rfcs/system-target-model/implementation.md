@@ -1,12 +1,13 @@
 # System Target Model 迁移实施计划
 
-**状态：** Completed
+**状态：** Implemented / Closed
 **最后更新：** 2026-07-24
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
-**当前契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--typed-initial-program-source统一收口到普通-vfs-exec)；Refine已于Checkpoint 5A cut over
-**当前修订：** R5
-**事务日志：** [R4A QEMU provider DT cutover](../../devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md)；
+**当前契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--typed-initial-program-source统一收口到普通-vfs-exec)；argv Refine已于Checkpoint R6A cut over
+**当前修订：** R6
+**事务日志：** [R6 named bind and initial argv](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)；
+[R4A QEMU provider DT cutover](../../devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md)；
 [R3 explicit-input cleanup](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)；
 [R0-R2 implementation history](../../devlog/transactions/2026-07-22-system-target-model.md)
 
@@ -32,6 +33,8 @@ firmware delivery使用runtime FDT，QEMU embedded delivery由normal build自动
 DTB。Build不展开QEMU bind，所有bind必须DT-neutral；`qemu dt` maintenance CLI整体删除。Physical DTS
 source/baseline保持。R4A已完成并关闭。2026-07-24用户接受R5，将从未进入Ready或Active的R4B
 Platform/adopter应用移出本RFC；本计划没有剩余可执行阶段。
+2026-07-24用户接受并授权R6；R6A已实现、验证、review并关闭。下文R0-R5阶段与checkpoint定义只作为
+历史执行证据；其中与R6 provider-field bind能力冲突的R4禁止项已由R6 supersede，不再构成当前证明义务。
 
 ## 迁移原则
 
@@ -54,10 +57,9 @@ Platform/adopter应用移出本RFC；本计划没有剩余可执行阶段。
   stage 接受其形状后才能保留；否则删除或改写。
 - Final harness 仍是后续 adopter，不进入本 RFC 的通用 schema、首个 executable stage 或
   acceptance floor。
-- 普通 QEMU bind 保持完全人工映射。Stage 1/2 只验证 declaration、map 与 host path 的机械
-  正确性，不增加 product role/slot/prior-action-result handoff；语义选错但 path 有效的情况由
-  QEMU/guest/wrapper 验证暴露，并保留 bind name/path 诊断。R4进一步要求bind保持DT-neutral；build-time
-  provider dump不展开或伪造bind。
+- QEMU bind 保持完全人工映射。Binding layer只验证declaration、map与opaque value的机械正确性，不增加
+  product role/slot/prior-action-result handoff；语义选错但string有效的情况由QEMU/guest/wrapper验证暴露。
+  R6允许build-time provider dump展开provider字段引用的bind；runtime bind组继续保持DT-neutral且不参与build。
 - App `Source` driver 是 command no-op，不是 app action no-op。它不得启动shell或dummy command，
   但必须复用公共artifact path expansion、普通文件校验与export；binary/script的runtime兼容性
   继续由对应consumer和ordinary exec/binfmt验证。
@@ -1512,3 +1514,61 @@ cutover或验证结果需要撤销；R4A的DT authority、delivery、materializa
 对应SMP Platform与用途别名由独立
 [小迭代](../../devlog/changes/2026-07-24-qemu-smp-platform-aliases.md)实现和验证。该小迭代不重新打开本RFC，
 也不把final runner、root/initial-program或harness能力写成本RFC closure事实。
+
+## R6：具名 bind 与 initial-program argv
+
+**状态：** Checkpoint R6A Closed（2026-07-24）。
+
+R6只增加xtask/config/kernel boot input的通用机制，不增加决赛脚本、决赛Platform/SystemTarget实例或
+业务用途别名。它以`{{name}}`作为唯一string replacement语法，不引入typed bind、range/unit/path检查或
+第二种object binding写法。
+
+### Checkpoint R6A - Named opaque bindings and initial argv
+
+**交付：**
+
+1. Build与QEMU共享`--bind NAME=VALUE`解析，拒绝invalid name、duplicate和empty value。Platform parser
+   验证具名placeholder语法、bind declaration name唯一、template只引用本项name且至少一次；不验证value
+   type、range、unit、path、file、comma或QEMU keyval语义。
+2. QEMU provider的machine、CPU、SMP、memory、optional BIOS及固定args均可使用具名placeholder；SMP改为
+   string以保持literal/bind同形。Build在side effect前只展开DT provider字段并拒绝未消费输入；QEMU展开
+   provider字段、fixed args与runtime groups并拒绝未消费输入。替换单次非递归且不经过shell。
+3. `[[qemu.bind]]`固定为`name + optional + template`。Required组缺值失败；optional组缺值时整个argv token
+   array省略；每个expanded token直接进入`Command::arg()`。现有tracked Platform迁移为具名placeholder并
+   显式`optional = false`，不改变现有machine/topology/attachment顺序。
+4. `RootfsEntry`与`EmbeddedApp`均接受optional完整`argv`；显式值必须非空并包含`argv[0]`，省略时以resolved
+   executable path作为唯一argv。Generated boot input携带optional static argv；kernel解析path后选择显式
+   argv或默认path argv。`/.anemone/init`保持path-only，envp与exec/materialization生命周期不变。
+5. 同步Platform/SystemTarget schema、example、build-system skill、current contract、RFC/transaction/public
+   navigation。Current `BOOT-PROTOCOL-001`只在本checkpoint验证完成时原子Refine。
+
+**Resolved Write Set Manifest：** `scripts/xtask/src/config/{mod.rs,platform.rs,selection.rs,system_target.rs}`、
+`scripts/xtask/src/tasks/{qemu.rs,build/mod.rs,build/device_tree.rs}`、`scripts/xtask/src/main.rs`；
+`anemone-kernel/src/{boot.rs,boot_defs.rs}`；`conf/platforms/*.toml`、`conf/platforms/schema.jsonc`、
+`conf/system-targets/{example.toml,schema.jsonc}`；`.agents/skills/anemone-build-system/SKILL.md`及其直接引用中
+因本次语义失效的说明；本RFC四份canonical文档、`docs/src/contracts/task/boot-protocol.md`、新R6 transaction、
+transaction index、`docs/src/{SUMMARY.md,rfcs.md}`与当前双周devlog。决赛/初赛脚本、具体决赛配置、rootfs、
+app、其它kernel/runtime owner、register/current limitations与历史transactions均为read-only。
+
+**Validation / Exit：** `just xtask-test`覆盖placeholder语法、single-pass替换、provider build消费、required/
+optional group、unknown/duplicate/empty/unconsumed输入和generated boot argv；schema验证全部tracked配置；
+`just fmt all --check`、`git diff --check`、`mdbook build docs`通过。RV64与LA64 current tracked release build
+串行通过，证明literal provider保持工作且kernel接受新generated boot shape。QEMU guest、rootfs、LTP、physical
+runtime、final harness与决赛脚本Not Run。Latest-byte review无Apollyon/Keter/Euclid后，原子更新contract、
+transaction和RFC状态，形成一个commit。
+
+**停止条件：** 实现需要typed/value-aware validator、generic launcher/binding API、修改rootfs metadata格式、
+可配置envp、runtime group参与DT build、决赛专用branch或write set外owner；任一出现即停在cutover前回到R6
+target review，不以兼容写法并存。
+
+### R6A closure（2026-07-24）
+
+R6A按上述边界完成具名opaque-string bind、required/optional QEMU argv组，以及两种initial-program source
+共享的完整argv。`just xtask-test` 55项、全部tracked Platform/SystemTarget schema validation、串行RV64与
+LA64 release build、`just fmt all --check`、`git diff --check`与`mdbook build docs`通过。负向build在side
+effect前拒绝未消费bind，`--show-bindings`输出符合新声明。QEMU guest、rootfs、LTP、physical runtime、final
+harness与决赛脚本Not Run。
+
+最终subagent review未发现实现级Apollyon/Keter；其报告的一项文档Keter已在cutover前修复：R6 current
+invariants不再把R4的provider-bind禁令误写为现行规则，历史R0-R5内容明确只保留为执行证据。
+`BOOT-PROTOCOL-001`已原子Refine，R6A、transaction与RFC均Closed。

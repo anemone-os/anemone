@@ -24,6 +24,7 @@
 
 ## Completed
 
+- [System Target Model R6 Named Bind and Initial Argv](./2026-07-24-system-target-model-r6-bind-argv.md)：R6A已完成具名opaque bind、optional QEMU argv group与两种initial-program source共享的完整argv；`BOOT-PROTOCOL-001`已Refine，决赛脚本/配置不在范围。
 - [System Target Model R4A QEMU Provider DT Cutover](./2026-07-24-system-target-model-r4-qemu-dt.md)：QEMU committed DTS与DT maintenance CLI已删除；firmware使用runtime FDT，embedded由normal build生成build-local DTB。R4A关闭，R4B保持Outline；LA64 runtime按用户指示Not Run。
 - [System Target Model R3 Explicit Inputs](./2026-07-24-system-target-model-r3-explicit-inputs.md)：R3A已删除implicit local/default selection与preset presentation defaults，rootfs type、QEMU CPU和fmt scope已显式；双架构build与四份DT check通过，contract cutover为None。
 - [TTY Subsystem](./2026-07-23-tty-subsystem.md)：Stage 0至Stage 4、R1与transaction已关闭；`TTY-DATA-CUTOVER`和`TTY-JOBCTL-CUTOVER`原子建立九个Active TTY contract ID。RV64自动、unix-jobctl focused与用户人工ash evidence通过；LA64、hardware和LTP未运行。

@@ -103,7 +103,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
-- [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R5已实现并关闭；R4A删除QEMU committed DTS与`qemu dt` maintenance surface，firmware delivery使用runtime FDT，embedded delivery由normal build从selected provider生成build-local DTB，bind保持DT-neutral。未激活的R4B Platform/adopter应用已移出RFC并由独立小迭代承接。R3 explicit-input cleanup与R0-R2历史均已关闭；[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)保持typed `RootfsEntry | EmbeddedApp` ordinary VFS exec current contract。
+- [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R6已实现并关闭；QEMU参数化统一为具名opaque-string bind并允许optional runtime argv group，两种initial-program source支持完整argv。决赛脚本与具体决赛配置不在RFC。R0-R5历史均保持关闭；[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)已在R6A原子Refine。
 - [RFC-20260723-ahci-controller](./rfcs/ahci-controller/index.md)：PR #136带入的generic AHCI 1.x、
   ATA block facade与2K1000 platform integration文档入口；本次merge保留其RFC、transaction和register
   页面，但不重新裁决或同步AHCI lifecycle/completion，状态与开放项以RFC页为准。

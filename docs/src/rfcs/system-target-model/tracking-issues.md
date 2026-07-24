@@ -1,10 +1,11 @@
 # System Target Model Tracking Issues
 
-**状态：** Closed（R5；当前无 live design issue）
+**状态：** Closed（R6；无 live design issue）
 **最后更新：** 2026-07-24
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **迁移计划：** [迁移实施计划](./implementation.md)
-**事务日志：** [R4A QEMU provider DT cutover](../../devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md)；
+**事务日志：** [R6 named bind and initial argv](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)；
+[R4A QEMU provider DT cutover](../../devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md)；
 [R3 explicit-input cleanup](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)；
 [R0-R2 history](../../devlog/transactions/2026-07-22-system-target-model.md)
 
@@ -50,10 +51,10 @@ follow-up gate。
 | `STM-DRAFT-K3` | Platform manifest、DTS 与 runtime FDT authority matrix 未完成 | R0-R3 Stage 3完成初始matrix；R4由[STM-DT-001](./invariants.md#stm-dt-001---dt-authoritydelivery-与-build-materialization-必须显式)进一步固定QEMU provider output、可选physical DTS与runtime FDT的唯一authority/delivery，R4A负责新matrix cutover。 |
 | `STM-DRAFT-K4` | DT refresh/check 的 CLI、QEMU-only owner 与写入边界未闭合 | R0-R3期间由Stage 3的QEMU-local单管线与写入授权闭合；R4后续确认该baseline/maintenance surface本身没有长期consumer，并由`STM-R4-K1` supersede。当前[STM-QEMU-DT-001](./invariants.md#stm-qemu-dt-001---qemu-dt-只由-runtime-delivery-或-normal-build-物化)固定runtime/build materialization二选一，R4A负责删除旧CLI。 |
 | `STM-DRAFT-K5` | Boot Protocol baseline 与 EmbeddedApp 生命周期未闭合 | [BOOT-PROTOCOL-001](./invariants.md#boot-protocol-001---initial-program-source-统一收口到普通-vfs-exec) 已固定 ordinary VFS exec、materializer publication/cleanup 与 VFS reopen lifetime 的唯一责任；baseline 已在 public acceptance 前提取，mount/path/mode/materialization 由[迁移实施计划](./implementation.md) Stage 5 vertical slice 验证。 |
-| `STM-DRAFT-K6` | QEMU完全人工bind无法证明SystemTarget role或先前action result | 用户明确接受当前阶段保持完全人工映射。[STM-QEMU-BIND-001](./invariants.md#stm-qemu-bind-001---qemu-bind-只参数化-tracked-argv-template)现只承诺declaration/map/path机械校验，并明确有效但内容选错的path可在QEMU/guest/wrapper验证中失败；不增加typed attachment/role/slot/result handoff，也不得把该边界误述为resolver已证明runtime artifact compatibility。 |
+| `STM-DRAFT-K6` | QEMU完全人工bind无法证明SystemTarget role或先前action result | 用户明确接受当前阶段保持完全人工映射。[STM-QEMU-BIND-001](./invariants.md#stm-qemu-bind-001---qemu-bind-是具名-opaque-string-替换)现只承诺declaration/map/value的机械校验，并明确语义选错但字符串有效的value可在QEMU/guest/wrapper验证中失败；不增加typed attachment/role/slot/result handoff，也不得把该边界误述为resolver已证明runtime artifact compatibility。 |
 | `STM-DRAFT-K7` | Stage 1验证依赖Stage 2才选择的schema/reference与`inspect`接口 | [迁移实施计划](./implementation.md)已把最小canonical object schema、stable reference identity与resolver/Platform-output vertical slice前移到Stage 1 manifest；用户进一步确认第一版不需要inspect，现已删除该命令、JSON view与proof obligation。Stage 2不得建立第二resolver或改写已经进入snapshot的reference identity。 |
 | `STM-DRAFT-K8` | Provenance使用完整resolution作为通用artifact identity，既错误禁止无关复用，又要求补齐昂贵的per-artifact/tool closure | 此后进一步收缩：跨action固定路径允许依赖明确命令顺序，不承诺typed publication/freshness。[STM-WORKFLOW-ORDER-001](./invariants.md#stm-workflow-order-001---固定路径依赖由明确命令顺序拥有)要求recipe/docs/wrapper写明顺序且验证运行完整流程，但不增加mtime、sidecar、invocation history或artifact graph；跨resolution cache、per-artifact closure与tool fingerprint均为非目标。 |
-| `STM-DRAFT-K9` | Bind description、HostEnvironment resolver与inspect为第一版增加没有真实consumer的配置、CLI和验证面 | QEMU bind现只保留`name + argv template`；[STM-TOOL-001](./invariants.md#stm-tool-001---host-tool-按仓库固定程序名从-path-调用)要求xtask直接调用`qemu-system-*`/`dtc`/`mkimage`等固定程序名并依赖开发者`PATH`，不提供override/local binding/version/capability机制；inspect命令、JSON view和Stage 1 inspect slice已删除，实际action只打印必要的selection/resolution摘要。 |
+| `STM-DRAFT-K9` | Bind description、HostEnvironment resolver与inspect为第一版增加没有真实consumer的配置、CLI和验证面 | QEMU bind不增加description或typed metadata；R6只保留provider/fixed string中的具名placeholder及runtime group的`name + optional + argv template`。[STM-TOOL-001](./invariants.md#stm-tool-001---host-tool-按仓库固定程序名从-path-调用)要求xtask直接调用`qemu-system-*`/`dtc`/`mkimage`等固定程序名并依赖开发者`PATH`，不提供override/local binding/version/capability机制；inspect命令、JSON view和Stage 1 inspect slice已删除，实际action只打印必要的selection/resolution摘要。 |
 | `STM-DRAFT-K10` | 实施草案只描述滚动冻结 write set，并把首个 Stage 1 manifest 推迟到 RFC acceptance 与 transaction creation 之后，无法满足接受时首个可执行阶段已经 Ready 的工作流边界 | [迁移实施计划](./implementation.md)现使用 `Outline / Ready / Active / Closed` 成熟度，并把初始 `Implementation Resolution Gate` 放在 public promotion 后、RFC acceptance 前；该 gate 同时解析 Stage 1 的完整交付、路线/probe、审计、可观测性、验证、停止/退出、cutover 与 manifest。Transaction 只在实现开始时记录证据、批准和链接，Stage 1 仍需单独授权才进入 Active。 |
 | `STM-DRAFT-K11` | App build对已有binary/script的采纳边界与目标相反：草案要求source/copy路径“不使用no-op driver”，也没有区分build-command no-op、artifact export和runtime compatibility | [STM-APP-SOURCE-001](./invariants.md#stm-app-source-001---source-driver-只采纳已有-artifact)现固定closed Source driver：不启动build command，但复用公共path expansion、普通文件校验和export；不执行shell、转换或推断内容，不静默接受extra args。Stage 4验证Source/Cargo app build边界，Stage 5另行验证ELF/shebang经ordinary VFS exec/binfmt运行，避免把文件存在误述为runtime proof。 |
 | `STM-DRAFT-E1` | 最小目录与 schema 命名尚未选择 | 最小canonical schema与reference identity由[迁移实施计划](./implementation.md)初始 `Implementation Resolution Gate` 选择，并在 Stage 1 Ready 定义中冻结；未参与identity的剩余目录组织、文件名、内部Rust类型和CLI形状保留为后续工程自由度，owner、host-path与single-resolver禁止退化项继续约束结果。 |
@@ -63,7 +64,6 @@ follow-up gate。
 | `STM-DRAFT-N1` | SystemTarget 与 BuildPreset owner 重叠 | Target拥有boot/deploy、root/entry selection与required capabilities；Platform拥有kernel output format；preset只选择target + KernelConfig + kernel-only `CargoProfile`，不携带presentation defaults。 |
 | `STM-DRAFT-N2` | Final harness 被误当作 RFC 主目标 | RFC 主目标固定为通用 build/config/orchestration model；Final harness 只提供表达压力与后续 adopter。 |
 | `STM-DRAFT-N3` | CLI、local selection 与 host tool binding 形成第二真相源 | R2先固定single resolver，R3再删除local/default source；[STM-CLI-001](./invariants.md#stm-cli-001---system-action-只有一条显式输入解析路径)只接受显式完整输入。[STM-TOOL-001](./invariants.md#stm-tool-001---host-tool-按仓库固定程序名从-path-调用)继续要求xtask调用固定程序名并依赖开发者`PATH`。 |
-| `STM-DRAFT-N4` | QEMU runtime path 被过度泛化为跨 action binding | [STM-QEMU-BIND-001](./invariants.md#stm-qemu-bind-001---qemu-bind-只参数化-tracked-argv-template) 将该能力收缩为 platform-local tracked argv template + invocation value；不建立 provider-neutral role/slot/binding API。 |
+| `STM-DRAFT-N4` | QEMU runtime path 被过度泛化为跨 action binding | [STM-QEMU-BIND-001](./invariants.md#stm-qemu-bind-001---qemu-bind-是具名-opaque-string-替换) 将该能力收缩为 platform-local tracked argv template + invocation value；不建立 provider-neutral role/slot/binding API。 |
 
-上述 neutralize 只表示 RFC design issue 已有规范修复或受控实施归属，不表示对应代码、
-validation、public acceptance 或 contract cutover 已完成。
+上述 neutralize 均已有规范修复和对应实现归属；R6A关闭后没有剩余live issue。
