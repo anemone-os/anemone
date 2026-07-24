@@ -17,10 +17,6 @@ cfg_select! {
                 source: "/fixtures/user-test/tools/mke2fs",
                 dest: "/bin/mkfs.ext3",
             },
-            StagedCompetitionFixture {
-                source: "/bin/jobctl-test",
-                dest: "/bin/jobctl-test",
-            },
         ];
     },
     target_arch = "loongarch64" => {

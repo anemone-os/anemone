@@ -72,19 +72,20 @@ fn run_local_tests() {
     println!("user-test: running sched attr test...");
     local_run_cmd("/bin/sched-attr-test", &["sched-attr-test"], &[]);
     println!("user-test: sched attr test finished.");
-}
 
-/// competition tests.
-fn run_comp_tests() {
-    guest::enter_competition_root();
-    guest::init_competition_environment();
-
+    // 10. job control test
     #[cfg(target_arch = "riscv64")]
     {
         println!("user-test: running jobctl test...");
         local_run_cmd("/bin/jobctl-test", &["jobctl-test"], &[]);
         println!("user-test: jobctl test finished.");
     }
+}
+
+/// competition tests.
+fn run_comp_tests() {
+    guest::enter_competition_root();
+    guest::init_competition_environment();
 
     ltp::install_ltp_fixtures();
 

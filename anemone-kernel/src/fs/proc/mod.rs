@@ -67,7 +67,10 @@ fn procfs_kill_sb(_sb: Arc<SuperBlock>) {
 
 static PROC_FS_OPS: FileSystemOps = FileSystemOps {
     name: "proc",
-    flags: FileSystemFlags::empty(),
+    // PROCFS_SB and the seeded PDE inode numbers are process-lifetime
+    // singletons. Keep their icache alive when the last mount goes away so a
+    // later mount cannot reuse an emptied superblock.
+    flags: FileSystemFlags::PERSISTENT_SB,
     mount: FileSystemMountOps::NoDevice(procfs_mount),
     sync_fs: procfs_sync_fs,
     kill_sb: procfs_kill_sb,

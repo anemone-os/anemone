@@ -21,7 +21,7 @@ use anemone_rs::{
     fs::OpenOptions,
     io::Read,
     os::linux::{
-        fs::{Fd, PipeFlags, close, pipe2, read, write},
+        fs::{Fd, PipeFlags, close, mount, pipe2, read, umount, write},
         process::{
             self, CloneFlags, MmapFlags, MmapProt, Tid, WStatus, WStatusRaw, WaitFor, WaitOptions,
             mmap, munmap, sched_yield,
@@ -1590,11 +1590,13 @@ fn test_multimember_sigkill() -> Result<(), Errno> {
     Ok(())
 }
 
-fn require_procfs() -> Result<(), Errno> {
-    read_text(PROC_INIT_STATUS).map(|_| ()).map_err(|errno| {
-        eprintln!("jobctl-test: the harness must provide the single mounted /proc: {errno:?}");
-        errno
-    })
+fn ensure_procfs() -> Result<bool, Errno> {
+    if read_text(PROC_INIT_STATUS).is_ok() {
+        return Ok(false);
+    }
+
+    mount(Path::new("proc"), Path::new("/proc"), "proc")?;
+    Ok(true)
 }
 
 fn run_tests() -> Result<(), Errno> {
@@ -1630,8 +1632,16 @@ pub fn main() -> Result<(), Errno> {
         return Ok(());
     }
 
-    require_procfs()?;
-    run_tests()?;
+    let mounted_procfs = ensure_procfs()?;
+    let result = run_tests();
+    let unmount_result = if mounted_procfs {
+        umount(Path::new("/proc"))
+    } else {
+        Ok(())
+    };
+
+    result?;
+    unmount_result?;
     println!("jobctl-test: all cases passed");
     Ok(())
 }
