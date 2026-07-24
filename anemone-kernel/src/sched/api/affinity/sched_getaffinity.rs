@@ -95,12 +95,15 @@ mod kunits {
 
     #[kunit]
     fn test_affinity_native_word_encoding() {
-        let affinity = mask(&[0, 1, MAX_LOGICAL_CPUS - 1]);
-        let raw = encode_affinity(affinity);
-        assert_eq!(raw[0] & 0b11, 0b11);
-        assert_ne!(
-            raw[(MAX_LOGICAL_CPUS - 1) / 8] & (1 << ((MAX_LOGICAL_CPUS - 1) % 8)),
-            0
-        );
+        assert_eq!(encode_affinity(mask(&[0]))[0] & 1, 1);
+        if MAX_LOGICAL_CPUS >= 2 {
+            let affinity = mask(&[0, 1, MAX_LOGICAL_CPUS - 1]);
+            let raw = encode_affinity(affinity);
+            assert_eq!(raw[0] & 0b11, 0b11);
+            assert_ne!(
+                raw[(MAX_LOGICAL_CPUS - 1) / 8] & (1 << ((MAX_LOGICAL_CPUS - 1) % 8)),
+                0
+            );
+        }
     }
 }

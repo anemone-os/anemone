@@ -19,6 +19,7 @@ authority = "provider-derived"
 provider = "firmware"
 
 [uboot]
+type = "image"
 arch = "riscv"
 os_type = "linux"
 image_type = "kernel"

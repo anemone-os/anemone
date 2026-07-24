@@ -3,9 +3,11 @@ use la_insc::reg::{
     csr::ecfg,
     exception::{Ecfg, IntrFlags},
 };
-use loongArch64::{iocsr::iocsr_write_w, ipi::send_ipi_single};
 
-use crate::{arch::loongarch64::exception::trap::LA64Interrupt, prelude::*};
+use crate::{
+    arch::loongarch64::{exception::trap::LA64Interrupt, machine},
+    prelude::*,
+};
 
 pub struct LA64IntrArch;
 impl IntrArchTrait for LA64IntrArch {
@@ -33,19 +35,21 @@ impl IntrArchTrait for LA64IntrArch {
 
     /// Send an inter-processor interrupt to the target CPU.
     fn send_ipi(cpu_id: PhysCpuId) {
-        send_ipi_single(cpu_id.get(), 1);
+        machine::send_ipi(cpu_id);
     }
 
-    /// Claim a pending IPI by clearing the platform IOCSR state.
+    /// Claim a pending IPI through the selected machine.
     unsafe fn claim_ipi() {
-        iocsr_write_w(0x100c, u32::MAX);
+        unsafe {
+            machine::claim_ipi();
+        }
     }
 
     /// Enable local interrupts and unmask platform interrupt sources.
     unsafe fn init_local_irq() {
         unsafe {
             ecfg::csr_write(Ecfg::new(IntrFlags::all(), 0));
-            iocsr_write_w(0x1004, u32::MAX);
+            machine::init_local_ipi();
             crmd::set_ie(true);
             knoticeln!("({})local irq initialized", cur_cpu_id());
         }

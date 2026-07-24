@@ -241,7 +241,8 @@ impl SelectionSource {
 mod tests {
     use super::*;
 
-    const TARGETS: [(&str, &str); 6] = [
+    const TARGETS: [(&str, &str); 7] = [
+        ("2k1000-la64", "sda"),
         ("example", "vda"),
         ("qemu-virt-rv64", "vda"),
         ("qemu-virt-rv64-pretest", "vda"),
@@ -250,7 +251,8 @@ mod tests {
         ("visionfive2-rv64", "mmcblk0"),
     ];
 
-    const PRESETS: [(&str, &str, CargoProfile); 7] = [
+    const PRESETS: [(&str, &str, CargoProfile); 8] = [
+        ("2k1000-la64-release", "2k1000-la64", CargoProfile::Release),
         ("example", "example", CargoProfile::Release),
         (
             "qemu-virt-rv64-release",

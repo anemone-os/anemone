@@ -1,5 +1,25 @@
 # 开放问题
 
+## ANE-20260723-AHCI-PROBE-LIFECYCLE-AND-CAPACITY
+
+**Type:** Issue
+**Status:** Open
+**Severity:** Apollyon
+**Area:** AHCI / DMA / block / device lifecycle
+
+**Symptom / Trigger:** AHCI engine/FIS receive 已启动后，IDENTIFY、capacity parse、minor allocation
+或 block registration 失败可能直接释放 `AhciPort` / DMA metadata；同时异常 IDENTIFY capacity
+尚未在进入 LBA48 FIS 前完成上界校验。
+
+**Impact:** HBA 可能继续 DMA 到已释放内存，或设备返回值触发内部 FIS assertion，造成内存破坏或
+kernel panic。
+
+**Owner:** EDGW, Codex
+**Last Verified:** 2026-07-23
+**Exit Condition:** 所有 post-start failure path 先停止 engine/FIS receive 再释放 DMA/MMIO owner；
+IDENTIFY 明确拒绝超出 LBA48 domain 的 capacity，并由 focused KUnit/source audit 证明。
+**Related:** [AHCI Controller Tracking Issues](../rfcs/ahci-controller/tracking-issues.md#ahci-001---probe-failure-can-release-live-dma-owner), [AHCI Controller RFC](../rfcs/ahci-controller/index.md), [AHCI Controller 事务日志](../devlog/transactions/2026-07-23-ahci-controller.md)
+
 ## ANE-20260527-LTP-CHDIR01-DEVICE-POOL
 
 **Type:** Issue

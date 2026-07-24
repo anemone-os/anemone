@@ -1,0 +1,34 @@
+#! This manifest describes the minimal rootfs configuration for Anemone.
+
+[build]
+# Generated image name.
+name = "2k1000"
+# Target architecture for the generated image. This determines how user-space binaries are built.
+arch = "loongarch64"
+
+[fs]
+# Filesystem type to use.
+fstype = "ext4"
+# Build a fresh ext4 image from the LoongArch folder root. The developer-provided
+# base tree carries the strict-align musl/GCC toolchain.
+base = "conf/rootfs/2k1000/base"
+type = "folder"
+
+# Init process configuration. This will be written into /.anemone/init and used by kernel to launch the init process.
+[init]
+path = "/sbin/init"
+
+# Directories to create in the generated rootfs.
+[[dirs]]
+path = "/dev"
+
+[[dirs]]
+path = "/mnt"
+
+[[files]]
+source = "build/anemoneImage-la64-raw"
+installed_path = "/boot/anemoneImage-raw"
+
+[[files]]
+source = "conf/rootfs/2k1000/base/busybox"
+installed_path = "/sbin/init"

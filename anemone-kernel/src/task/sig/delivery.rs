@@ -438,7 +438,14 @@ pub fn handle_signals(
 ) {
     let mut committed_handler_frame = false;
     loop {
-        if let Some(FetchedSignal { signal, reserved }) = get_current_task().fetch_signal() {
+        // Keep the current-task Arc out of `perform_signal_action()`: a default
+        // action may terminate without returning, and an if-let scrutinee
+        // temporary would then remain forever on the exiting task's own stack.
+        let fetched = {
+            let task = get_current_task();
+            task.fetch_signal()
+        };
+        if let Some(FetchedSignal { signal, reserved }) = fetched {
             match perform_signal_action(signal, trapframe, restart_syscall) {
                 SignalActionResult::Continue => {
                     if reserved {

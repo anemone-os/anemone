@@ -22,6 +22,7 @@ use crate::{
 // interrupt controller.
 pub mod intc;
 
+mod ahci;
 mod block;
 mod clock_source;
 mod mmc;

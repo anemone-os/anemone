@@ -46,6 +46,11 @@
                     "type": "integer",
                     "minimum": 0
                 },
+                "earlycon_reg": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Physical address of the early console register."
+                },
                 "max_phys_cpu_id": {
                     "type": "integer",
                     "minimum": 0
@@ -210,45 +215,70 @@
             ]
         },
         "uboot": {
-            "type": "object",
-            "description": "Optional Platform-owned U-Boot legacy kernel output.",
-            "properties": {
-                "arch": {
-                    "type": "string"
+            "description": "Optional Platform-owned U-Boot kernel output.",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "type": {
+                            "const": "image"
+                        },
+                        "arch": {
+                            "type": "string"
+                        },
+                        "os_type": {
+                            "type": "string"
+                        },
+                        "image_type": {
+                            "type": "string"
+                        },
+                        "compression": {
+                            "type": "string"
+                        },
+                        "load_addr": {
+                            "type": "integer",
+                            "minimum": 0
+                        },
+                        "entry": {
+                            "type": "integer",
+                            "minimum": 0
+                        },
+                        "name": {
+                            "type": "string"
+                        },
+                        "filename": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "type",
+                        "arch",
+                        "os_type",
+                        "image_type",
+                        "compression",
+                        "load_addr",
+                        "entry",
+                        "name",
+                        "filename"
+                    ]
                 },
-                "os_type": {
-                    "type": "string"
-                },
-                "image_type": {
-                    "type": "string"
-                },
-                "compression": {
-                    "type": "string"
-                },
-                "load_addr": {
-                    "type": "integer",
-                    "minimum": 0
-                },
-                "entry": {
-                    "type": "integer",
-                    "minimum": 0
-                },
-                "name": {
-                    "type": "string"
-                },
-                "filename": {
-                    "type": "string"
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "type": {
+                            "const": "raw"
+                        },
+                        "filename": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "type",
+                        "filename"
+                    ]
                 }
-            },
-            "required": [
-                "arch",
-                "os_type",
-                "image_type",
-                "compression",
-                "load_addr",
-                "entry",
-                "name",
-                "filename"
             ]
         }
     },

@@ -78,6 +78,7 @@ pub struct Constants {
     pub max_phys_ram_size: u64,
     pub kernel_la_base: u64,
     pub kernel_va_base: u64,
+    pub earlycon_reg: Option<u64>,
     pub max_phys_cpu_id: usize,
     pub frame_section_shift_mb: usize,
 }
@@ -113,15 +114,29 @@ pub struct Dtb {
 }
 
 #[derive(Deserialize, Debug, Serialize)]
-pub struct Uboot {
-    pub arch: String,
-    pub os_type: String,
-    pub image_type: String,
-    pub compression: String,
-    pub load_addr: u64,
-    pub entry: u64,
-    pub name: String,
-    pub filename: String,
+#[serde(tag = "type", deny_unknown_fields)]
+pub enum Uboot {
+    #[serde(rename = "image")]
+    Image {
+        arch: String,
+        os_type: String,
+        image_type: String,
+        compression: String,
+        load_addr: u64,
+        entry: u64,
+        name: String,
+        filename: String,
+    },
+    #[serde(rename = "raw")]
+    Raw { filename: String },
+}
+
+impl Uboot {
+    pub fn filename(&self) -> &str {
+        match self {
+            Self::Image { filename, .. } | Self::Raw { filename } => filename,
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -176,6 +191,16 @@ impl Config {
             .map(|path| format!("Some({path:?})"))
             .unwrap_or_else(|| "None".to_string());
 
+        let earlycon_reg = self
+            .constants
+            .earlycon_reg
+            .map(|addr| {
+                format!(
+                    "/// Physical address of the early console register\npub const EARLYCON_REG: PhysAddr = PhysAddr::new({addr:#x});\n"
+                )
+            })
+            .unwrap_or_default();
+
         format!(
             r#"//! Auto-generated platform constants, do not edit manually.
 #![allow(unused)]
@@ -190,7 +215,7 @@ pub const MAX_PHYS_RAM_SIZE: u64 = {:#x};
 pub const KERNEL_LA_BASE: PhysAddr = PhysAddr::new({:#x});
 /// Kernel virtual address base
 pub const KERNEL_VA_BASE: VirtAddr = VirtAddr::new({:#x});
-/// Inclusive upper bound of firmware-visible physical CPU IDs
+{}/// Inclusive upper bound of firmware-visible physical CPU IDs
 pub const MAX_PHYS_CPU_ID: usize = {};
 /// Frame section size shift in megabytes
 pub const FRAME_SECTION_SHIFT_MB: usize = {};
@@ -205,6 +230,7 @@ pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
             self.constants.max_phys_ram_size,
             self.constants.kernel_la_base,
             self.constants.kernel_va_base,
+            earlycon_reg,
             self.constants.max_phys_cpu_id,
             self.constants.frame_section_shift_mb,
             root.fstype,
@@ -271,11 +297,39 @@ impl Dtb {
 mod tests {
     use super::*;
 
+    fn test_root() -> Root {
+        Root {
+            fstype: "ext4".to_string(),
+            source: super::super::system_target::RootSource::Block {
+                path: "vda".to_string(),
+            },
+        }
+    }
+
     #[test]
-    fn test_parsing() {
+    fn omits_earlycon_reg_when_not_configured() {
         let content = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
         let config = Config::from_str(&content).unwrap();
-        println!("{:#x?}", config);
+
+        assert_eq!(config.constants.earlycon_reg, None);
+        assert!(
+            !config
+                .gen_platform_defs(&test_root())
+                .contains("EARLYCON_REG")
+        );
+    }
+
+    #[test]
+    fn generates_earlycon_reg_when_configured() {
+        let content = std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
+        let config = Config::from_str(&content).unwrap();
+
+        assert_eq!(config.constants.earlycon_reg, Some(0x1fe0_01e0));
+        assert!(
+            config
+                .gen_platform_defs(&test_root())
+                .contains("pub const EARLYCON_REG: PhysAddr = PhysAddr::new(0x1fe001e0);")
+        );
     }
 
     #[test]
@@ -371,6 +425,13 @@ mod tests {
                 Some(DtbProvider::Firmware),
                 false,
             ),
+            (
+                "2k1000-la64",
+                DtbDelivery::Embedded,
+                DtsAuthority::Normative,
+                None,
+                false,
+            ),
         ] {
             let content =
                 std::fs::read_to_string(format!("../../conf/platforms/{name}.toml")).unwrap();
@@ -445,5 +506,21 @@ template = ["-drive", "file={{}},backup={{}},format=raw"]
         ] {
             assert!(Config::from_str(&invalid).is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn parses_platform_owned_uboot_output_variants() {
+        let visionfive =
+            std::fs::read_to_string("../../conf/platforms/visionfive2-rv64.toml").unwrap();
+        let visionfive = Config::from_str(&visionfive).unwrap();
+        assert!(matches!(visionfive.uboot, Some(Uboot::Image { .. })));
+
+        let loongson = std::fs::read_to_string("../../conf/platforms/2k1000-la64.toml").unwrap();
+        let loongson = Config::from_str(&loongson).unwrap();
+        assert!(matches!(
+            loongson.uboot,
+            Some(Uboot::Raw { ref filename }) if filename == "anemoneImage-la64-raw"
+        ));
+        assert_eq!(loongson.constants.earlycon_reg, Some(0x1fe2_0000));
     }
 }

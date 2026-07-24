@@ -16,7 +16,7 @@ use crate::{
 const KERNEL_ELF: &str = "build/anemone.elf";
 const BUILD_DIR: &str = "build";
 
-pub(super) fn build_uboot_image(arch: &Arch, uboot: Option<&Uboot>) -> anyhow::Result<()> {
+pub(super) fn build_uboot_artifact(arch: &Arch, uboot: Option<&Uboot>) -> anyhow::Result<()> {
     let Some(uboot) = uboot else {
         return Ok(());
     };
@@ -29,7 +29,7 @@ struct UbootPostLink<'a> {
     uboot: &'a Uboot,
     kernel_elf: PathBuf,
     raw_output: PathBuf,
-    legacy_output: PathBuf,
+    legacy_output: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -49,8 +49,14 @@ impl PostLinkStep {
 
 impl<'a> UbootPostLink<'a> {
     fn new(arch: &Arch, uboot: &'a Uboot, kernel_elf: &Path, output_dir: &Path) -> Self {
-        let legacy_output = output_dir.join(&uboot.filename);
-        let raw_output = PathBuf::from(format!("{}.bin", legacy_output.display()));
+        let (raw_output, legacy_output) = match uboot {
+            Uboot::Image { filename, .. } => {
+                let legacy_output = output_dir.join(filename);
+                let raw_output = PathBuf::from(format!("{}.bin", legacy_output.display()));
+                (raw_output, Some(legacy_output))
+            },
+            Uboot::Raw { filename } => (output_dir.join(filename), None),
+        };
         Self {
             objcopy: arch.target_triple().objcopy(),
             uboot,
@@ -68,19 +74,22 @@ impl<'a> UbootPostLink<'a> {
         &self,
         mut run: impl FnMut(PostLinkStep, &mut Command) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
-        if let Some(parent) = self.legacy_output.parent() {
+        if let Some(parent) = self.raw_output.parent() {
             fs::create_dir_all(parent)?;
         }
 
         // A failed post-link must not leave a previous image looking like this build's
         // output.
         self.remove_outputs()?;
-        let result = [PostLinkStep::Objcopy, PostLinkStep::Mkimage]
-            .into_iter()
-            .try_for_each(|step| {
-                let mut command = self.command(step);
-                run(step, &mut command)
-            });
+        let result = (|| -> anyhow::Result<()> {
+            let mut objcopy = self.command(PostLinkStep::Objcopy);
+            run(PostLinkStep::Objcopy, &mut objcopy)?;
+            if self.legacy_output.is_some() {
+                let mut mkimage = self.command(PostLinkStep::Mkimage);
+                run(PostLinkStep::Mkimage, &mut mkimage)?;
+            }
+            Ok(())
+        })();
 
         if let Err(error) = result {
             return match self.remove_outputs() {
@@ -113,36 +122,54 @@ impl<'a> UbootPostLink<'a> {
                 command
             },
             PostLinkStep::Mkimage => {
+                let Uboot::Image {
+                    arch,
+                    os_type,
+                    image_type,
+                    compression,
+                    load_addr,
+                    entry,
+                    name,
+                    ..
+                } = self.uboot
+                else {
+                    unreachable!("raw U-Boot outputs do not run mkimage")
+                };
+                let legacy_output = self
+                    .legacy_output
+                    .as_ref()
+                    .expect("image U-Boot output must have a legacy destination");
                 log_progress!(
                     "UBOOT",
-                    &format!("Generating U-Boot image '{}'", self.legacy_output.display())
+                    &format!("Generating U-Boot image '{}'", legacy_output.display())
                 );
                 let mut command = Command::new("mkimage");
                 command
                     .arg("-A")
-                    .arg(&self.uboot.arch)
+                    .arg(arch)
                     .arg("-O")
-                    .arg(&self.uboot.os_type)
+                    .arg(os_type)
                     .arg("-T")
-                    .arg(&self.uboot.image_type)
+                    .arg(image_type)
                     .arg("-C")
-                    .arg(&self.uboot.compression)
+                    .arg(compression)
                     .arg("-a")
-                    .arg(format!("0x{:x}", self.uboot.load_addr))
+                    .arg(format!("0x{load_addr:x}"))
                     .arg("-e")
-                    .arg(format!("0x{:x}", self.uboot.entry))
+                    .arg(format!("0x{entry:x}"))
                     .arg("-n")
-                    .arg(&self.uboot.name)
+                    .arg(name)
                     .arg("-d")
                     .arg(&self.raw_output)
-                    .arg(&self.legacy_output);
+                    .arg(legacy_output);
                 command
             },
         }
     }
 
     fn remove_outputs(&self) -> anyhow::Result<()> {
-        for output in [&self.raw_output, &self.legacy_output] {
+        let outputs = core::iter::once(&self.raw_output).chain(self.legacy_output.as_ref());
+        for output in outputs {
             match fs::remove_file(output) {
                 Ok(()) => {},
                 Err(error) if error.kind() == ErrorKind::NotFound => {},
@@ -184,7 +211,7 @@ mod tests {
     use super::*;
 
     fn uboot() -> Uboot {
-        Uboot {
+        Uboot::Image {
             arch: "riscv".to_string(),
             os_type: "linux".to_string(),
             image_type: "kernel".to_string(),
@@ -215,7 +242,7 @@ mod tests {
 
     #[test]
     fn no_uboot_config_skips_post_link() {
-        build_uboot_image(&Arch::RiscV64, None).unwrap();
+        build_uboot_artifact(&Arch::RiscV64, None).unwrap();
     }
 
     #[test]
@@ -277,6 +304,40 @@ mod tests {
     }
 
     #[test]
+    fn raw_output_runs_only_objcopy_to_the_declared_filename() {
+        let output_dir = temp_dir("raw-command");
+        let uboot = Uboot::Raw {
+            filename: "anemoneImage-la64-raw".to_string(),
+        };
+        let plan = UbootPostLink::new(
+            &Arch::LoongArch64,
+            &uboot,
+            Path::new("build/anemone.elf"),
+            &output_dir,
+        );
+        let mut commands = Vec::new();
+        plan.execute_with(|step, command| {
+            commands.push((step, command.get_program().to_os_string(), args(command)));
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(plan.legacy_output.is_none());
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].0, PostLinkStep::Objcopy);
+        assert_eq!(commands[0].1, "rust-objcopy");
+        assert_eq!(
+            commands[0].2,
+            ["-O", "binary", "build/anemone.elf"]
+                .into_iter()
+                .map(OsString::from)
+                .chain([output_dir.join("anemoneImage-la64-raw").into_os_string()])
+                .collect::<Vec<_>>()
+        );
+        fs::remove_dir_all(output_dir).unwrap();
+    }
+
+    #[test]
     fn objcopy_failure_short_circuits_and_removes_partial_outputs() {
         let output_dir = temp_dir("objcopy-failure");
         let uboot = uboot();
@@ -287,7 +348,7 @@ mod tests {
             &output_dir,
         );
         fs::write(&plan.raw_output, b"stale raw").unwrap();
-        fs::write(&plan.legacy_output, b"stale image").unwrap();
+        fs::write(plan.legacy_output.as_ref().unwrap(), b"stale image").unwrap();
         let mut steps = Vec::new();
         let error = plan
             .execute_with(|step, _| {
@@ -300,7 +361,7 @@ mod tests {
         assert!(error.to_string().contains("objcopy fixture failed"));
         assert_eq!(steps, [PostLinkStep::Objcopy]);
         assert!(!plan.raw_output.exists());
-        assert!(!plan.legacy_output.exists());
+        assert!(!plan.legacy_output.as_ref().unwrap().exists());
         fs::remove_dir_all(output_dir).unwrap();
     }
 
@@ -321,7 +382,7 @@ mod tests {
                 match step {
                     PostLinkStep::Objcopy => fs::write(&plan.raw_output, b"raw").unwrap(),
                     PostLinkStep::Mkimage => {
-                        fs::write(&plan.legacy_output, b"partial image").unwrap();
+                        fs::write(plan.legacy_output.as_ref().unwrap(), b"partial image").unwrap();
                         anyhow::bail!("mkimage fixture failed");
                     },
                 }
@@ -332,7 +393,7 @@ mod tests {
         assert!(error.to_string().contains("mkimage fixture failed"));
         assert_eq!(steps, [PostLinkStep::Objcopy, PostLinkStep::Mkimage]);
         assert!(!plan.raw_output.exists());
-        assert!(!plan.legacy_output.exists());
+        assert!(!plan.legacy_output.as_ref().unwrap().exists());
         fs::remove_dir_all(output_dir).unwrap();
     }
 

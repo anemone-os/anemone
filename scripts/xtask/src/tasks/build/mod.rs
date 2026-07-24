@@ -61,7 +61,7 @@ pub fn run(args: BuildArgs) -> anyhow::Result<()> {
                 .platform
                 .uboot
                 .as_ref()
-                .map(|uboot| uboot.filename.as_str())
+                .map(|uboot| uboot.filename())
                 .unwrap_or("elf-only")
         )
     );
@@ -253,7 +253,7 @@ impl BuildContext {
         let built_kernel_path = format!("{}/anemone-kernel", self.cargo_build_dir());
         std::fs::copy(built_kernel_path, "build/anemone.elf")?;
 
-        kernel_output::build_uboot_image(
+        kernel_output::build_uboot_artifact(
             &self.resolved.platform.build.arch,
             self.resolved.platform.uboot.as_ref(),
         )?;

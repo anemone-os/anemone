@@ -66,6 +66,13 @@ pub struct Parameters {
     pub ns16550a_tx_batch_bytes: Option<usize>,
     pub ns16550a_tx_poll_iterations: Option<usize>,
     pub dw_mshc_poll_timeout_ms: Option<u64>,
+    pub ahci_hba_reset_timeout_ms: Option<u64>,
+    pub ahci_engine_timeout_ms: Option<u64>,
+    pub ahci_port_timeout_ms: Option<u64>,
+    pub ahci_command_timeout_ms: Option<u64>,
+    pub ahci_read_warn_ms: Option<u64>,
+    pub ahci_read_timeout_ms: Option<u64>,
+    pub ahci_bounce_kb: Option<usize>,
     pub eevdf_base_slice_us: Option<u64>,
     pub eevdf_wake_clamp_us: Option<u64>,
     pub eevdf_yield_penalty_us: Option<u64>,
@@ -129,6 +136,13 @@ impl Parameters {
         materialize!(ns16550a_tx_batch_bytes);
         materialize!(ns16550a_tx_poll_iterations);
         materialize!(dw_mshc_poll_timeout_ms);
+        materialize!(ahci_hba_reset_timeout_ms);
+        materialize!(ahci_engine_timeout_ms);
+        materialize!(ahci_port_timeout_ms);
+        materialize!(ahci_command_timeout_ms);
+        materialize!(ahci_read_warn_ms);
+        materialize!(ahci_read_timeout_ms);
+        materialize!(ahci_bounce_kb);
         materialize!(eevdf_base_slice_us);
         materialize!(eevdf_wake_clamp_us);
         materialize!(eevdf_yield_penalty_us);
@@ -261,6 +275,20 @@ pub const NS16550A_TX_BATCH_BYTES: usize = {};
 pub const NS16550A_TX_POLL_ITERATIONS: usize = {};
 /// Bounded DW-MSHC register polling timeout in milliseconds.
 pub const DW_MSHC_POLL_TIMEOUT_MS: u64 = {};
+/// AHCI global reset deadline in milliseconds.
+pub const AHCI_HBA_RESET_TIMEOUT_MS: u64 = {};
+/// AHCI command-list/FIS engine transition deadline in milliseconds.
+pub const AHCI_ENGINE_TIMEOUT_MS: u64 = {};
+/// AHCI link and device-ready deadline in milliseconds.
+pub const AHCI_PORT_TIMEOUT_MS: u64 = {};
+/// AHCI ATA command completion deadline in milliseconds.
+pub const AHCI_COMMAND_TIMEOUT_MS: u64 = {};
+/// ATA read latency threshold for emitting a warning.
+pub const AHCI_READ_WARN_MS: u64 = {};
+/// ATA read deadline after which the kernel panics.
+pub const AHCI_READ_TIMEOUT_MS: u64 = {};
+/// Per-port AHCI DMA bounce buffer size in KiB.
+pub const AHCI_BOUNCE_KB: usize = {};
 /// EEVDF-lite base slice in microseconds.
 pub const EEVDF_BASE_SLICE_US: u64 = {};
 /// EEVDF-lite wake placement clamp window in microseconds.
@@ -307,6 +335,13 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             resolved!(ns16550a_tx_batch_bytes),
             resolved!(ns16550a_tx_poll_iterations),
             resolved!(dw_mshc_poll_timeout_ms),
+            resolved!(ahci_hba_reset_timeout_ms),
+            resolved!(ahci_engine_timeout_ms),
+            resolved!(ahci_port_timeout_ms),
+            resolved!(ahci_command_timeout_ms),
+            resolved!(ahci_read_warn_ms),
+            resolved!(ahci_read_timeout_ms),
+            resolved!(ahci_bounce_kb),
             resolved!(eevdf_base_slice_us),
             resolved!(eevdf_wake_clamp_us),
             resolved!(eevdf_yield_penalty_us),
@@ -330,6 +365,49 @@ impl Config {
         }
         if config.parameters.dw_mshc_poll_timeout_ms == Some(0) {
             anyhow::bail!("dw_mshc_poll_timeout_ms must be non-zero");
+        }
+        for (name, value) in [
+            (
+                "ahci_hba_reset_timeout_ms",
+                config.parameters.ahci_hba_reset_timeout_ms,
+            ),
+            (
+                "ahci_engine_timeout_ms",
+                config.parameters.ahci_engine_timeout_ms,
+            ),
+            (
+                "ahci_port_timeout_ms",
+                config.parameters.ahci_port_timeout_ms,
+            ),
+            (
+                "ahci_command_timeout_ms",
+                config.parameters.ahci_command_timeout_ms,
+            ),
+            ("ahci_read_warn_ms", config.parameters.ahci_read_warn_ms),
+            (
+                "ahci_read_timeout_ms",
+                config.parameters.ahci_read_timeout_ms,
+            ),
+        ] {
+            if value == Some(0) {
+                anyhow::bail!("{name} must be non-zero");
+            }
+        }
+        if matches!(
+            (
+                config.parameters.ahci_read_warn_ms,
+                config.parameters.ahci_read_timeout_ms,
+            ),
+            (Some(warn), Some(timeout)) if warn >= timeout
+        ) {
+            anyhow::bail!("ahci_read_warn_ms must be less than ahci_read_timeout_ms");
+        }
+        if config
+            .parameters
+            .ahci_bounce_kb
+            .is_some_and(|size| size == 0 || size > 4096)
+        {
+            anyhow::bail!("ahci_bounce_kb must be in the range 1..=4096");
         }
         for (name, value) in [
             (
@@ -538,6 +616,71 @@ mod tests {
         assert!(defs.contains("pub const TTY_INPUT_CAPACITY_BYTES: usize = 4096;"));
         assert!(defs.contains("pub const TTY_OUTPUT_CAPACITY_BYTES: usize = 4096;"));
         assert!(defs.contains("pub const TTY_WORKER_BATCH_BYTES: usize = 256;"));
+    }
+
+    #[test]
+    fn test_ahci_parameters_are_constrained_and_defaulted() {
+        let content = std::fs::read_to_string("../../conf/.defconfig").unwrap();
+        let replace_parameter = |name: &str, replacement: &str| {
+            content
+                .lines()
+                .map(|line| {
+                    if line.trim_start().starts_with(name) {
+                        replacement
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        for name in [
+            "ahci_hba_reset_timeout_ms",
+            "ahci_engine_timeout_ms",
+            "ahci_port_timeout_ms",
+            "ahci_command_timeout_ms",
+            "ahci_read_warn_ms",
+            "ahci_read_timeout_ms",
+            "ahci_bounce_kb",
+        ] {
+            assert!(
+                Config::from_str(&replace_parameter(name, &format!("{name} = 0"))).is_err(),
+                "{name} accepted zero"
+            );
+        }
+        assert!(
+            Config::from_str(&replace_parameter(
+                "ahci_read_warn_ms",
+                "ahci_read_warn_ms = 10000"
+            ))
+            .is_err()
+        );
+        assert!(
+            Config::from_str(&replace_parameter(
+                "ahci_bounce_kb",
+                "ahci_bounce_kb = 4097"
+            ))
+            .is_err()
+        );
+
+        let mut config = Config::from_str(&content).unwrap();
+        config.parameters.ahci_hba_reset_timeout_ms = None;
+        config.parameters.ahci_engine_timeout_ms = None;
+        config.parameters.ahci_port_timeout_ms = None;
+        config.parameters.ahci_command_timeout_ms = None;
+        config.parameters.ahci_read_warn_ms = None;
+        config.parameters.ahci_read_timeout_ms = None;
+        config.parameters.ahci_bounce_kb = None;
+        let defaults = Config::from_str(&content).unwrap();
+        config
+            .parameters
+            .materialize_defaults(Some(&defaults.parameters))
+            .unwrap();
+        let defs = config.parameters.gen_kconfig_defs();
+        assert!(defs.contains("pub const AHCI_HBA_RESET_TIMEOUT_MS: u64 = 1000;"));
+        assert!(defs.contains("pub const AHCI_READ_TIMEOUT_MS: u64 = 10000;"));
+        assert!(defs.contains("pub const AHCI_BOUNCE_KB: usize = 128;"));
     }
 
     #[test]

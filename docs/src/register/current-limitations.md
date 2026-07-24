@@ -2,6 +2,29 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260723-AHCI-STAGE1-SCOPE
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** AHCI / SATA / ATA / block / DMA
+
+**Summary:** 当前 AHCI 第一阶段只支持 firmware-described AHCI 1.x 的单一 implemented port、slot-zero
+同步 polling、单 PRD DMA bounce buffer、ATA IDENTIFY 与 512-byte LBA48 DMA EXT read/write。IRQ
+completion、NCQ、multi-port、ATAPI、port multiplier、runtime hotplug、partition scan、power
+management 和明确的 cache-flush durability contract 尚未实现；当前 generic controller 仍依赖
+firmware 完成 pinmux/clock/reset/PHY/coherency setup。`just build` 已通过，但 KUnit runtime、2K1000
+实机 probe/read/write/shutdown/reboot 尚未运行。RFC 还保持 Review Hold，因为 probe rollback 释放
+DMA owner 和 IDENTIFY capacity boundary 两项 Apollyon 尚未修复。
+
+**Exit Condition:** 关闭 [AHCI Controller RFC](../rfcs/ahci-controller/index.md) 的 lifecycle/capacity
+tracking issues，明确 shutdown/cache 语义，并完成 focused KUnit 与用户侧 controller/sector/read/write
+证据；新增异步、多 port、hotplug 或 ATAPI 能力时建立新的 owner/RFC gate。
+
+**Owner:** EDGW, Codex
+**Last Verified:** 2026-07-23
+**Related:** [AHCI Controller 事务日志](../devlog/transactions/2026-07-23-ahci-controller.md), [开放问题](./open-issues.md)
+
 ## ANE-20260713-SCHED-RT-NOIRQ-BUCKET-ALLOCATION
 
 **Type:** Limitation

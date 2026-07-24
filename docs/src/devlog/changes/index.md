@@ -32,6 +32,7 @@
 
 ## 当前记录
 
+- [2026-07-24 - github/main PR #136 集成](./2026-07-24-github-main-pr136-integration.md)
 - [2026-07-24 - xref 外部源码注册表](./2026-07-24-xref-source-registry.md)
 - [2026-07-24 - alpha/omega RFC 结果合流](./2026-07-24-alpha-omega-integration.md)
 - [2026-07-22 - RFC rolling stage resolution 与 target renegotiation](./2026-07-22-rfc-stage-resolution-renegotiation.md)

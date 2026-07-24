@@ -1,0 +1,6 @@
+# Install the userspace environment once, then keep an interactive shell alive.
+::sysinit:/install_sys.sh
+# This direct root shell remains the board image's login boundary while no
+# getty/login layer owns session setup and the controlling terminal. Login mode
+# loads /etc/profile.
+::respawn:/bin/sh -il
