@@ -584,13 +584,13 @@ nonblocking 和动态 pipe capacity 需要单独设计。
 **Severity:** Low
 **Area:** fs / mount / filesystem compatibility / LTP
 
-**Summary:** legacy `mount(2)` syscall adapter 仍保留临时 LTP 兼容桥：`tmpfs`、`ext2`、`ext3`、`vfat` 会在 syscall 边界归一化到 `ramfs`。该桥只服务当前 mount LTP setup 和评分观测，不代表 Anemone 已提供真实 tmpfs/ext2/ext3/vfat filesystem 语义，也不得下沉为 `MountTree`、`MountAttrFlags`、`FileSystemOps` 或 backend 状态。
+**Summary:** legacy `mount(2)` syscall adapter 仍保留临时 LTP 兼容桥：`tmpfs`、`ext2`、`ext3`、`vfat` 会在 syscall 边界归一化到 `ramfs`。该桥只服务当前 mount LTP setup 和评分观测，不代表 Anemone 已提供真实 tmpfs/ext2/ext3/vfat filesystem 语义，也不得下沉为 filesystem registry、tagged mount operation、`MountTree`、`MountAttrFlags`、`SuperBlock` 或 backend 状态。procfs 的唯一 canonical name 已改为 `proc`，不保留 `procfs -> proc` legacy alias。
 
 **Exit Condition:** 为需要支持的真实 filesystem 类型提供对应 backend 或测试环境替代路径；删除 `ext2` / `ext3` / `vfat -> ramfs` 兼容桥，保留或重新定义 `tmpfs` 的正式语义；重新验证 mount LTP 中依赖这些 fstype 名称的 setup 路径不会把 alias 成功误报为真实 filesystem coverage。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-19
-**Related:** [Mount Tree Legacy API 事务日志](../devlog/transactions/2026-06-18-mount-tree-legacy-api.md), [mount-tree-legacy-api RFC](../rfcs/mount-tree-legacy-api/index.md)
+**Last Verified:** 2026-07-24
+**Related:** [VFS Mount Admission当前契约](../contracts/vfs/mount-admission.md), [mount fstype/source compatibility小迭代](../devlog/changes/2026-07-24-mount-fstype-source-compat.md), [Mount Tree Legacy API事务日志](../devlog/transactions/2026-06-18-mount-tree-legacy-api.md), [mount-tree-legacy-api RFC](../rfcs/mount-tree-legacy-api/index.md)
 
 ## ANE-20260619-MOUNT-UNMOUNT-CLEANUP-STAGE1
 

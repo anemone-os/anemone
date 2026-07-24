@@ -1747,7 +1747,7 @@ fn main() -> Result<(), Errno> {
         },
     };
 
-    let mut results = match mount(None, Path::new("/dev"), "devfs") {
+    let mut results = match mount(Path::new("devfs"), Path::new("/dev"), "devfs") {
         Ok(()) => match selected_mode().as_deref() {
             Ok("auto") => run_auto(&baseline),
             Ok("vi") => run_manual_vi(&baseline),

@@ -43,8 +43,9 @@ struct StagedCompetitionFixture {
 }
 
 pub(crate) fn enter_competition_root() {
-    mount(None, Path::new("/dev"), "devfs").expect("user-test: failed to mount devfs on /dev");
-    mount(Some(Path::new(COMPETITION_DISK)), Path::new("/mnt"), "ext4")
+    mount(Path::new("devfs"), Path::new("/dev"), "devfs")
+        .expect("user-test: failed to mount devfs on /dev");
+    mount(Path::new(COMPETITION_DISK), Path::new("/mnt"), "ext4")
         .expect("user-test: failed to mount /dev/vdb on /mnt with ext4");
     // Staged tools live on the boot rootfs and disappear after chroot, so copy
     // them into the mounted competition image before entering it.
@@ -57,15 +58,18 @@ pub(crate) fn enter_competition_root() {
 
 pub(crate) fn init_competition_environment() {
     ensure_dir("/dev");
-    mount(None, Path::new("/dev"), "devfs").expect("user-test: failed to mount devfs on /dev");
-    mount(None, Path::new("/dev/shm"), "ramfs")
+    mount(Path::new("devfs"), Path::new("/dev"), "devfs")
+        .expect("user-test: failed to mount devfs on /dev");
+    mount(Path::new("ramfs"), Path::new("/dev/shm"), "ramfs")
         .expect("user-test: failed to mount ramfs on /dev/shm");
 
     ensure_dir("/tmp");
-    mount(None, Path::new("/tmp"), "ramfs").expect("user-test: failed to mount ramfs on /tmp");
+    mount(Path::new("ramfs"), Path::new("/tmp"), "ramfs")
+        .expect("user-test: failed to mount ramfs on /tmp");
 
     ensure_dir("/proc");
-    mount(None, Path::new("/proc"), "procfs").expect("user-test: failed to mount procfs on /proc");
+    mount(Path::new("proc"), Path::new("/proc"), "proc")
+        .expect("user-test: failed to mount procfs on /proc");
 
     ensure_dir("/bin");
     ensure_dir("/usr");

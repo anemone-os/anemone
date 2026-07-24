@@ -3,7 +3,7 @@
 use crate::{
     fs::{
         anonymous::ANONY_FS,
-        filesystem::FileSystemFlags,
+        filesystem::{FileSystemFlags, FileSystemMountOps},
         inode::Inode,
         superblock::{FsMagic, FsStat, SuperBlockOps},
         vfs::mount_early_anonymous_root,
@@ -17,9 +17,10 @@ use anemone_abi::fs::linux::stat::ANON_INODE_FS_MAGIC;
 static ANONY_FS_OPS: FileSystemOps = FileSystemOps {
     name: "anonymous",
     flags: FileSystemFlags::KERNEL_FS,
-    mount: |source, data| {
-        assert!(matches!(source, MountSource::Pseudo));
+    mount: FileSystemMountOps::NoDevice(|data| {
         assert!(data.is_empty());
+
+        let source = MountSource::Pseudo;
 
         let fs = ANONY_FS.get().clone();
 
@@ -61,7 +62,7 @@ static ANONY_FS_OPS: FileSystemOps = FileSystemOps {
                 }),
             )
             .expect("anonymous filesystem should have only one superblock"))
-    },
+    }),
     sync_fs: |_| Ok(()),
     kill_sb: |_| panic!("anonymous filesystem should never be unmounted"),
 };

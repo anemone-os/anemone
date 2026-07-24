@@ -1,6 +1,6 @@
 //! Global singleton /dev publish layer.
 
-use crate::{prelude::*, utils::any_opaque::NilOpaque};
+use crate::{fs::filesystem::FileSystemMountOps, prelude::*, utils::any_opaque::NilOpaque};
 
 use self::{
     inode::{devfs_new_node_inode, devfs_new_root_inode},
@@ -160,10 +160,7 @@ fn devfs_publish_static_dir(name: &str) -> Result<Ino, SysError> {
     )
 }
 
-fn devfs_mount(source: MountSource, data: MountData) -> Result<Arc<SuperBlock>, SysError> {
-    if !matches!(source, MountSource::Pseudo) {
-        return Err(SysError::InvalidArgument);
-    }
+fn devfs_mount(data: MountData) -> Result<Arc<SuperBlock>, SysError> {
     data.reject_nonempty_for("devfs")?;
 
     Ok(DEVFS_SB.get().clone())
@@ -178,7 +175,7 @@ fn devfs_kill_sb(_sb: Arc<SuperBlock>) {}
 static DEVFS_FS_OPS: FileSystemOps = FileSystemOps {
     name: "devfs",
     flags: FileSystemFlags::PERSISTENT_SB,
-    mount: devfs_mount,
+    mount: FileSystemMountOps::NoDevice(devfs_mount),
     sync_fs: devfs_sync_fs,
     kill_sb: devfs_kill_sb,
 };

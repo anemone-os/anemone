@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use crate::prelude::*;
+use crate::{device::block::BlockDev, prelude::*};
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,10 +23,17 @@ bitflags! {
 }
 
 /// VTable a file system type must implement to be mountable.
+pub enum FileSystemMountOps {
+    /// The filesystem does not use the legacy mount source as backing state.
+    NoDevice(fn(MountData) -> Result<Arc<SuperBlock>, SysError>),
+    /// The filesystem requires a resolved block device as backing state.
+    BlockDevice(fn(Arc<dyn BlockDev>, MountData) -> Result<Arc<SuperBlock>, SysError>),
+}
+
 pub struct FileSystemOps {
     pub name: &'static str,
     pub flags: FileSystemFlags,
-    pub mount: fn(MountSource, MountData) -> Result<Arc<SuperBlock>, SysError>,
+    pub mount: FileSystemMountOps,
 
     /// Synchronize filesystem state associated with the given superblock to its
     /// backing store.
@@ -125,6 +132,17 @@ impl FileSystem {
         self.ops.flags
     }
 
+    /// Whether this filesystem requires a resolved block-device source.
+    ///
+    /// This is derived from the tagged callback rather than stored as a second
+    /// source-requirement field.
+    pub fn requires_block_device(&self) -> bool {
+        match &self.ops.mount {
+            FileSystemMountOps::NoDevice(_) => false,
+            FileSystemMountOps::BlockDevice(_) => true,
+        }
+    }
+
     /// Mount a file system from the given source.
     ///
     /// The implementation must return a fully initialized [Arc<SuperBlock>].
@@ -146,7 +164,22 @@ impl FileSystem {
     /// to the file system implementation to decide how to manage superblocks
     /// and mounts.
     pub fn mount(&self, source: MountSource, data: MountData) -> Result<Arc<SuperBlock>, SysError> {
-        (self.ops.mount)(source, data)
+        // Syscall admission and internal mount callers must resolve the source
+        // from this same tagged callback before entering VFS.
+        assert!(
+            matches!(
+                (&self.ops.mount, &source),
+                (FileSystemMountOps::NoDevice(_), MountSource::Pseudo)
+                    | (FileSystemMountOps::BlockDevice(_), MountSource::Block(_))
+            ),
+            "filesystem mount source does not match mount operation"
+        );
+
+        match (&self.ops.mount, source) {
+            (FileSystemMountOps::NoDevice(mount), MountSource::Pseudo) => mount(data),
+            (FileSystemMountOps::BlockDevice(mount), MountSource::Block(dev)) => mount(dev, data),
+            _ => unreachable!(),
+        }
     }
 
     /// Kill a superblock, i.e. clean up all physical resources associated with

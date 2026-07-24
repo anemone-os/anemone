@@ -167,16 +167,13 @@ pub mod fs {
     }
 
     /// flags and data are currently not supported.
-    pub fn mount(source: Option<&Path>, target: &Path, fstype: &str) -> Result<(), Errno> {
-        let source_cstr = source
-            .map(|s| CString::new(s.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL))
-            .transpose()?;
-
+    pub fn mount(source: &Path, target: &Path, fstype: &str) -> Result<(), Errno> {
+        let source_cstr = CString::new(source.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
         let target_cstr = CString::new(target.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
         let fstype_cstr = CString::new(fstype).map_err(|_| EINVAL)?;
 
         fs::mount(
-            source_cstr.as_ref().map(|s| s.as_ptr() as u64).unwrap_or(0),
+            source_cstr.as_ptr() as u64,
             target_cstr.as_ptr() as u64,
             fstype_cstr.as_ptr() as u64,
             0,

@@ -34,12 +34,11 @@ export HOME=/root
 export TERM=linux
 export LD_LIBRARY_PATH=/lib:/usr/lib
 
-# Anemone currently represents devfs/procfs pseudo mounts with a null source,
-# which BusyBox mount cannot express. Keep their mountpoints ready; the kernel
-# has already installed the selected TTY-backed stdio inherited by init.
+"$BUSYBOX" mount -n -t devfs devfs /dev
 "$BUSYBOX" mount -n -t ramfs none /dev/shm
 "$BUSYBOX" mount -n -t ramfs none /run
 "$BUSYBOX" mount -n -t ramfs none /tmp
+"$BUSYBOX" mount -n -t proc proc /proc
 "$BUSYBOX" chmod 1777 /tmp
 
 if [ -f /tests/try_build.sh ]; then
