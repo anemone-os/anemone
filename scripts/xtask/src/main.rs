@@ -48,7 +48,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("Error: {error:#}");
-            ExitCode::from(tasks::qemu::error_exit_status(&error))
+            ExitCode::FAILURE
         },
     }
 }
@@ -141,20 +141,6 @@ mod tests {
             Cli::try_parse_from([
                 "xtask",
                 "qemu",
-                "dt",
-                "refresh",
-                "--platform",
-                "qemu-virt-rv64",
-                "--check",
-            ])
-            .is_ok()
-        );
-        assert!(
-            Cli::try_parse_from([
-                "xtask",
-                "qemu",
-                "--preset",
-                "qemu-virt-rv64-release",
                 "dt",
                 "refresh",
                 "--platform",

@@ -1,6 +1,6 @@
 # System Target Model 目标与不变量
 
-**状态：** Accepted for Implementation（R4A Ready；尚未激活）
+**状态：** Accepted for Implementation（R4A Closed；R4B Outline）
 **最后更新：** 2026-07-24
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **适用修订：** R4
@@ -750,5 +750,5 @@ Draft target 的文档层闭包要求：
 - final harness保持后续adopter，不是首个implementation stage的隐藏目标；
 - `BOOT-PROTOCOL-001` baseline 已在public acceptance前提取；target contract、唯一生命周期责任
   与cutover gate输入已闭合，具体materialization机制已由Stage 5 vertical slice验证；
-- public promotion、R0-R3 acceptance/implementation与`BOOT-PROTOCOL-001` Refine target cutover
-  均已完成；R4A Ready但尚未激活，新transaction只在独立授权时建立。
+- public promotion、R0-R3 acceptance/implementation、`BOOT-PROTOCOL-001` Refine target cutover与
+  R4A QEMU provider DT cutover均已完成；R4B保持Outline，不由R4A关闭自动解析或激活。

@@ -1,11 +1,10 @@
 # System Target Model Tracking Issues
 
-**状态：** Active（R4A Ready；当前无 live design issue）
+**状态：** Active（R4A Closed；R4B Outline；当前无 live design issue）
 **最后更新：** 2026-07-24
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **迁移计划：** [迁移实施计划](./implementation.md)
-**事务日志：** R4 transaction将在R4A获得独立实施授权时按预留路径
-`docs/src/devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md`建立；
+**事务日志：** [R4A QEMU provider DT cutover](../../devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md)；
 [R3 explicit-input cleanup](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)；
 [R0-R2 history](../../devlog/transactions/2026-07-22-system-target-model.md)
 
@@ -42,7 +41,7 @@ follow-up gate。
 | ID | 原问题 | Neutralize / 分流依据 |
 | --- | --- | --- |
 | `STM-R4-K3` | R4A草案曾把QEMU firmware/embedded均视为合法，但live kernel只由RV64 bootstrap接收firmware FDT，LA64则无条件嵌入build-local DTB；反向组合在kernel只读write set内不可达。 | R4A由xtask resolved Platform validation固定`riscv64 = firmware`、`loongarch64 = embedded`，对QEMU/physical一视同仁并在action side effect前拒绝RV64 embedded与LA64 firmware；JSON schema只描述字段形状，不加入该条件。扩大kernel delivery capability不属于R4A。 |
-| `STM-R4-K1` | R3要求所有supported Platform提交DTS，并为QEMU provider-derived baseline保留refresh/check；这把QEMU machine model复制成第二份仓库truth，SMP variant还会放大baseline与维护成本。 | 用户接受R4 target correction：QEMU Platform不再提交DTS；firmware delivery使用runtime FDT，embedded delivery由normal build从selected provider自动生成build-local DTB；所有bind必须DT-neutral且build不提供placeholder；`qemu dt` maintenance surface删除。Physical DTS source/baseline保持。R4A已Ready但未激活，R4B保持Outline。 |
+| `STM-R4-K1` | R3要求所有supported Platform提交DTS，并为QEMU provider-derived baseline保留refresh/check；这把QEMU machine model复制成第二份仓库truth，SMP variant还会放大baseline与维护成本。 | 用户接受R4 target correction：QEMU Platform不再提交DTS；firmware delivery使用runtime FDT，embedded delivery由normal build从selected provider自动生成build-local DTB；所有bind必须DT-neutral且build不提供placeholder；`qemu dt` maintenance surface删除。Physical DTS source/baseline保持。R4A已完成并关闭，R4B保持Outline。 |
 | `STM-R3-K1` | R2保留local selection -> tracked default fallback和future preset presentation defaults；rootfs type、QEMU CPU与fmt scope还存在省略驱动的策略选择。 | 用户将其接受为R3 target correction：system action只接受显式preset或完整tuple，删除local/default selection与preset presentation defaults；rootfs type、QEMU CPU和fmt scope显式。Folder容量统一自动计算；BIOS是有意保留的optional capability，省略只表示不传`-bios`。R3A负责原子清理与验证。 |
 | `STM-R2-K1` | Stage 3把physical firmware provenance、允许差异与runtime validation owner做成三个只有唯一合法值的typed配置字段；它们没有action consumer，既不能证明capture来源，也不能执行板级复核。 | 用户将该审计结论接受为Stage 3关闭后的实现反馈。R2保留`provider = "firmware"`的authority分类与QEMU maintenance fail-close，把capture来源、只允许`/chosen/rng-seed`差异和板级/U-Boot变化后的复核责任恢复为baseline相邻说明与人类review证据，并删除对应parser/schema/test surface。DT delivery/authority、runtime FDT、current contract与Stage 4边界不变。 |
 | `STM-R1-K1` | R0把DT delivery与authority绑定，误将QEMU-derived LA64 DTS分类为embedded normative；VisionFive physical baseline又只有generic firmware标签，缺少真实capture provenance、允许差异和runtime validation owner。 | Stage 3在latest-byte review后停止；用户确认LA64 machine-fact owner仍是QEMU，并确认`visionfive2-board.dts`来自supported硬件经U-Boot导出的runtime FDT且应删除未使用的官方DTS。R1将两维解耦，LA64改为embedded/provider-derived/QEMU；VisionFive closed metadata固定U-Boot hardware export、只允许`/chosen/rng-seed`差异并由Platform maintainer在板级/U-Boot更新时验证。该修订不改变runtime delivery或current contract。 |

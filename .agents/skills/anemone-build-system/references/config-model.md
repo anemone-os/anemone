@@ -81,20 +81,16 @@ Treat DTB generation as a cross-cutting build concern. Before modifying it, read
 
 Do not describe a proposed DTB workflow as an existing capability. Keep future design in the appropriate plan or RFC until code and commands implement it.
 
-Normal kernel build compiles the selected Platform's committed DTS into a build-local DTB and does
-not launch QEMU or consume runtime disks. A firmware-delivered DTB may use the committed DTS as a
-provider conformance baseline; an embedded DTB may consume either a normative source or a QEMU
-provider-derived baseline. Delivery and authority are independent. Derive refresh/check capabilities
-from live QEMU task code instead of assuming they exist.
+Normal kernel build removes stale DTB output for firmware delivery. For embedded delivery it either
+compiles a physical normative source, or asks the selected QEMU provider to dump a build-local DTB
+using only machine, CPU, SMP, memory, and optional BIOS. It never consumes ordinary QEMU args,
+runtime disks, or bind values for DT materialization.
 
-A `provider = "qemu"` DT contract grants the QEMU-local maintenance action write authority over a
-provider-derived baseline. A `provider = "firmware"` contract records a physical firmware-derived
-baseline and grants no QEMU refresh capability. Both remain Platform-owned; neither changes the
-runtime FDT acceptance contract. Physical capture provenance, allowed runtime differences, and the
-responsibility to revalidate after board or firmware changes are human-reviewed maintenance facts;
-keep them adjacent to the Platform baseline without inventing typed fields that no action consumes.
-A QEMU-backed normative DTS has a check-only comparison surface; the maintenance action must reject
-any attempt to update it.
+QEMU Platforms keep no committed provider mirror and expose no refresh/check command. A physical
+`provider = "firmware"` contract records a firmware-derived conformance baseline without making it
+a build input. Physical capture provenance, allowed runtime differences, and the responsibility to
+revalidate after board or firmware changes are human-reviewed maintenance facts; keep them adjacent
+to the Platform baseline without inventing typed fields that no action consumes.
 
 ## Staleness Check
 

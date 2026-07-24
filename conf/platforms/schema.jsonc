@@ -129,7 +129,7 @@
         },
         "dtb": {
             "type": "object",
-            "description": "Committed DTS input and its Platform-owned authority/delivery contract.",
+            "description": "Platform-owned DT authority and delivery contract; only physical Platforms have a committed source.",
             "properties": {
                 "source": {
                     "type": "string",
@@ -155,57 +155,10 @@
                 }
             },
             "required": [
-                "source",
                 "delivery",
                 "authority"
             ],
-            "additionalProperties": false,
-            "oneOf": [
-                {
-                    "properties": {
-                        "authority": {
-                            "const": "provider-derived"
-                        },
-                        "provider": {
-                            "const": "qemu"
-                        }
-                    },
-                    "required": [
-                        "provider"
-                    ]
-                },
-                {
-                    "properties": {
-                        "delivery": {
-                            "const": "firmware"
-                        },
-                        "authority": {
-                            "const": "provider-derived"
-                        },
-                        "provider": {
-                            "const": "firmware"
-                        }
-                    },
-                    "required": [
-                        "provider"
-                    ]
-                },
-                {
-                    "properties": {
-                        "delivery": {
-                            "const": "embedded"
-                        },
-                        "authority": {
-                            "const": "normative"
-                        }
-                    },
-                    "not": {
-                        "required": [
-                            "provider"
-                        ]
-                    }
-                }
-            ]
+            "additionalProperties": false
         },
         "uboot": {
             "description": "Optional Platform-owned U-Boot kernel output.",

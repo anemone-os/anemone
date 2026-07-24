@@ -1,17 +1,16 @@
 # RFC-20260722-system-target-model
 
-**状态：** Accepted for Implementation（R4A Ready；尚未激活）
+**状态：** Accepted for Implementation（R4A Closed；R4B Outline）
 **修订：** R4
 **负责人：** doruche
 **最后更新：** 2026-07-24
 **领域：** build system / configuration / platform / repository workflow
-**事务日志：** R4 transaction将在R4A获得独立实施授权时按预留路径
-`docs/src/devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md`建立；
+**事务日志：** [R4A QEMU provider DT cutover](../../devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md)；
 [R3 explicit-input cleanup](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)；
 [R0-R2 implementation history](../../devlog/transactions/2026-07-22-system-target-model.md)
 **影响契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--typed-initial-program-source统一收口到普通-vfs-exec)（Refine；Checkpoint 5A已于2026-07-24 cut over并生效）。
-**开放问题：** None；R4A已完整解析为Ready，R4B保持Outline。
-**下一步：** 完成R4 latest-byte review；R4A只有在新transaction建立并获得独立授权后才能进入Active。
+**开放问题：** None；R4A已关闭，R4B保持Outline。
+**下一步：** 不自动解析或激活R4B；只有新的独立授权才能进入`R4A -> R4B Implementation Resolution Gate`。
 
 ## 文档状态
 
@@ -694,8 +693,8 @@ repackage 或 ELF-only 高频工作流来证明抽象价值。内部 post-link s
 
 ## 收口
 
-R4是当前accepted target。R0-R2的Stage 1-6与R3A均已关闭；R4不重开历史stage或Completed transaction，
-而是在新revision下以R4A Ready、R4B Outline继续。Stage 1已按用户授权完成，Checkpoint 1A-1D已依次独立关闭；独立的
+R4是当前accepted target。R0-R2的Stage 1-6、R3A与R4A均已关闭；R4不重开历史stage或Completed transaction，
+而是在新revision下以R4A Closed、R4B Outline继续。Stage 1已按用户授权完成，Checkpoint 1A-1D已依次独立关闭；独立的
 `Stage 1 -> Stage 2 Implementation Resolution Gate`已把Stage 2解析为Ready，2A随后独立激活并关闭。该gate
 确认ignored source-tree DTB使原Stage 2/3顺序无法直接成立，并在不改变R0 target的前提下把最小
 normal-build DT输入前移为2A；QEMU refresh和剩余per-platform closure仍留在Stage 3。R0 已删除独立
@@ -707,13 +706,14 @@ Stage 3关闭后的反馈确认physical baseline
 provenance、允许差异与复核责任无法由
 当前软件自动维护；R2删除没有action consumer的typed metadata，同时保留`provider = "firmware"`的
 fail-closed行为和人类review义务。R3A随后关闭explicit-input cleanup。R4接受进一步owner纠偏：QEMU
-provider不再拥有committed DTS mirror或maintenance CLI；R4A尚未激活，live代码仍保持R3行为。
+provider不再拥有committed DTS mirror或maintenance CLI；R4A已原子完成schema、materialization、CLI与
+repository surface cutover。R4B保持Outline，未解析或激活。
 
 ## 修订记录
 
 | 修订 | 日期 | 状态 | 语义变化 | Review / 事务 |
 | --- | --- | --- | --- | --- |
-| R4 | 2026-07-24 | Accepted for Implementation | QEMU Platform不再提交DTS或暴露DT refresh/check；firmware delivery使用runtime FDT，embedded delivery由normal build从selected provider自动生成build-local DTB；QEMU bind必须DT-neutral且build不提供占位符。Physical DTS source/baseline保持。R4A负责DT cutover，R4B迁移SMP硬件Platform与业务target。 | R4 transaction待R4A独立授权时按预留路径`docs/src/devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md`建立 |
+| R4 | 2026-07-24 | Accepted for Implementation | QEMU Platform不再提交DTS或暴露DT refresh/check；firmware delivery使用runtime FDT，embedded delivery由normal build从selected provider自动生成build-local DTB；QEMU bind必须DT-neutral且build不提供占位符。Physical DTS source/baseline保持。R4A负责DT cutover并已关闭，R4B迁移SMP硬件Platform与业务target且保持Outline。 | [R4A QEMU provider DT cutover](../../devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md) |
 | R3 | 2026-07-24 | Implemented / Closed | 删除developer-local/repository-default selection和preset presentation defaults；system action只接受显式preset或完整tuple。Rootfs type、QEMU CPU和fmt scope显式；folder容量固定自动计算；BIOS保持optional且省略时不传`-bios`。 | [2026-07-24-system-target-model-r3-explicit-inputs](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md) |
 | R2 | 2026-07-23 | Accepted for Implementation | 接受Stage 3关闭后的配置反馈：physical firmware provenance、允许差异与复核责任保留为人类review事实，删除无action consumer的typed Platform metadata；DT authority/delivery、QEMU maintenance权限、runtime FDT与Contract Impact均不变。 | [2026-07-22-system-target-model](../../devlog/transactions/2026-07-22-system-target-model.md) |
 | R1 | 2026-07-23 | Accepted for Implementation | 将DT delivery与authority解耦；LA64 embedded DTS改为QEMU provider-derived baseline；VisionFive以硬件经U-Boot导出的DTS为唯一baseline并删除未使用的官方副本，补齐physical firmware provenance、允许差异与runtime validation owner。Contract Impact保持不变。 | [2026-07-22-system-target-model](../../devlog/transactions/2026-07-22-system-target-model.md) |

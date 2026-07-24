@@ -34,7 +34,6 @@ name = "kernel-image"
 template = ["-kernel", "{{}}"]
 
 [dtb]
-source = "conf/platforms/qemu-virt-rv64.dts"
 delivery = "firmware"
 authority = "provider-derived"
 provider = "qemu"

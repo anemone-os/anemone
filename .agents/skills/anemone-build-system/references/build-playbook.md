@@ -24,7 +24,6 @@ Then read the corresponding Justfile recipe and xtask task. Help output defines 
 | Build an app | `just app ...` or the app xtask interface | app manifest, app task, selected architecture |
 | Materialize a rootfs | `just rootfs ...` or the rootfs xtask interface | rootfs manifest, host inputs, app manifests, rootfs task |
 | Run QEMU | `just qemu ...` | explicit selection for automation, selected Platform bind declarations, firmware/device/image inputs |
-| Check or refresh a QEMU DT baseline | `just qemu dt refresh ...` | explicit Platform, DT authority/provider, topology-only QEMU inputs, source write authorization |
 | Clean outputs | `just clean` | live recipe and cleanup task |
 | Run pretest/end-to-end validation | existing architecture-specific repository wrapper | the entire wrapper, local prerequisites, requested validation scope |
 
@@ -45,8 +44,9 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 - Check that the generated boot definition matches the selected initial-program variant. For `EmbeddedApp`, verify
   the app identity, single executable regular export, reported byte count, and `include_bytes!` dependency all come
   from the current invocation rather than a stale `build/apps/` artifact.
-- When the selected Platform declares a DTS, verify that normal build compiled the committed source
-  to `build/generated/device-tree/platform.dtb`; normal build must not launch QEMU to obtain it.
+- For firmware delivery, verify normal build removes stale `build/generated/device-tree/platform.dtb`.
+  For embedded delivery, verify it compiled the physical normative DTS or dumped a build-local DTB
+  from the selected QEMU provider using topology fields only.
 - Verify the kernel ELF and every post-link output required by the selected Platform.
 - Treat an existing artifact as evidence only when its timestamp and provenance match the invocation.
 
@@ -75,11 +75,8 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
   file, then provide every declared QEMU bind as an invocation path. Omitted BIOS emits no `-bios`.
 - Distinguish launch/configuration failures from guest boot failures.
 - When DTB is involved, inspect both the build-time generator and runtime QEMU path rather than assuming they use identical inputs.
-- For DT maintenance, use the nested QEMU action with an explicit Platform. Confirm it does not
-  resolve a SystemTarget or consume ordinary QEMU args/binds, and use check mode before accepting a
-  provider-derived baseline update. This write authority is independent of firmware versus embedded
-  delivery. QEMU-backed normative baselines are check-only, while physical firmware baselines do not
-  support the action.
+- QEMU exposes no DT maintenance command. When embedded QEMU DT materialization is involved, inspect
+  the normal build command and output publication; it must not consume ordinary args or binds.
 
 ### Cleanup And End-To-End Wrappers
 

@@ -54,13 +54,14 @@ args = [
 name = "kernel-image"
 template = ["-kernel", "{{}}"]
 
-# Device Tree Blob configuration for the platform, optional
+# Device Tree contract for the platform, optional
 [dtb]
-# Workspace-relative committed DTS input for normal build.
-source = "conf/platforms/qemu-virt-rv64.dts"
-# Runtime delivery and committed-source authority are independent dimensions.
-# Firmware receives the runtime FDT; this file is a provider conformance baseline.
+# QEMU Platforms have no committed source. Firmware delivery consumes the runtime
+# FDT; embedded delivery makes normal build dump a build-local DTB from this provider.
 delivery = "firmware"
 authority = "provider-derived"
-# `qemu` enables the QEMU-local refresh action; physical baselines use `firmware`.
 provider = "qemu"
+
+# Physical firmware baselines instead omit [qemu] and declare a committed source
+# with provider = "firmware". Physical embedded Platforms omit both [qemu] and
+# provider, set authority = "normative", and declare their committed source.

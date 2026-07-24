@@ -24,6 +24,7 @@
 
 ## Completed
 
+- [System Target Model R4A QEMU Provider DT Cutover](./2026-07-24-system-target-model-r4-qemu-dt.md)：QEMU committed DTS与DT maintenance CLI已删除；firmware使用runtime FDT，embedded由normal build生成build-local DTB。R4A关闭，R4B保持Outline；LA64 runtime按用户指示Not Run。
 - [System Target Model R3 Explicit Inputs](./2026-07-24-system-target-model-r3-explicit-inputs.md)：R3A已删除implicit local/default selection与preset presentation defaults，rootfs type、QEMU CPU和fmt scope已显式；双架构build与四份DT check通过，contract cutover为None。
 - [TTY Subsystem](./2026-07-23-tty-subsystem.md)：Stage 0至Stage 4、R1与transaction已关闭；`TTY-DATA-CUTOVER`和`TTY-JOBCTL-CUTOVER`原子建立九个Active TTY contract ID。RV64自动、unix-jobctl focused与用户人工ash evidence通过；LA64、hardware和LTP未运行。
 - [System Target Model R0-R2](./2026-07-22-system-target-model.md)：R2 Stage 1-6与全部checkpoint已关闭；current VisionFive explicit-preset `build -> rootfs`及镜像内容回归通过；`BOOT-PROTOCOL-001`保持typed `RootfsEntry | EmbeddedApp` ordinary VFS exec current contract；final harness分流为独立adopter。

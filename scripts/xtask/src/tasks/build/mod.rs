@@ -117,10 +117,8 @@ impl BuildContext {
         self.gen_rust_defs()?;
         self.gen_kernel_lds()?;
 
-        if self.resolved.platform.dtb.is_some() {
-            log_progress!("DTB", "Compiling committed platform DTS");
-        }
-        device_tree::materialize(self.resolved.platform.dtb.as_ref())?;
+        log_progress!("DTB", "Applying resolved Platform DT contract");
+        device_tree::materialize(&self.resolved.platform)?;
 
         Ok(())
     }

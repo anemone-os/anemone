@@ -54,14 +54,13 @@ Rootfs manifests require an explicit filesystem base type; folder roots use the 
 automatic sizing policy rather than a manifest capacity option. QEMU Platforms require an explicit
 CPU model, while an omitted BIOS means xtask emits no `-bios` argument.
 
-QEMU DT maintenance is a separate nested action under the QEMU namespace. It selects a Platform
-directly, consumes only the Platform's topology snapshot, and may update only a provider-derived
-baseline explicitly owned by the QEMU provider. A QEMU-backed normative DTS is check-only. The
-action must not read normal selection, runtime binds, rootfs, disks, network backends, or physical
-firmware baselines, and it must never update a normative DTS. Treat DT delivery and authority as
-independent: an embedded DTS may still be a QEMU provider-derived baseline. Physical firmware
-baseline provenance, allowed differences, and revalidation responsibility require human review and
-must not be modeled as machine-maintained fields without a real consumer.
+QEMU DT has no maintenance or source write-back action. Firmware delivery consumes the runtime FDT;
+embedded QEMU delivery is materialized only by normal build from the selected provider's machine,
+CPU, SMP, memory, and optional BIOS. Build must not consume ordinary QEMU args, binds, rootfs,
+disks, or network backends for that dump. QEMU Platforms keep no committed DTS mirror. Physical
+Platforms may retain a normative source or firmware conformance baseline; baseline provenance,
+allowed differences, and revalidation responsibility remain human-reviewed facts rather than
+machine-maintained fields without a real consumer.
 
 When prose, examples, schemas, active configuration, and Rust code disagree, treat live deserialization and task code as authoritative. Re-read them instead of preserving a possibly stale fact in this skill.
 

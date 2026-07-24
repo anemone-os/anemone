@@ -107,9 +107,9 @@ pub struct QemuBind {
 #[derive(Deserialize, Debug, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Dtb {
-    pub source: String,
+    pub source: Option<String>,
     pub delivery: DtbDelivery,
-    pub authority: DtsAuthority,
+    pub authority: DtAuthority,
     pub provider: Option<DtbProvider>,
 }
 
@@ -148,7 +148,7 @@ pub enum DtbDelivery {
 
 #[derive(Deserialize, Debug, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum DtsAuthority {
+pub enum DtAuthority {
     ProviderDerived,
     Normative,
 }
@@ -173,14 +173,18 @@ pub struct Config {
 impl Config {
     pub fn from_str(content: &str) -> anyhow::Result<Self> {
         let config: Config = toml::from_str(&content)?;
-        if let Some(dtb) = &config.dtb {
-            dtb.validate()?;
-        }
         if let Some(qemu) = &config.qemu {
             if qemu.cpu.trim().is_empty() {
                 anyhow::bail!("QEMU CPU model must not be empty");
             }
             validate_qemu_bindings(&qemu.bind)?;
+        }
+        match (&config.dtb, &config.qemu) {
+            (Some(dtb), qemu) => dtb.validate(&config.build.arch, qemu.is_some())?,
+            (None, Some(_)) => {
+                anyhow::bail!("QEMU Platform must declare a provider=qemu DT contract")
+            },
+            (None, None) => {},
         }
         Ok(config)
     }
@@ -266,28 +270,56 @@ pub fn validate_qemu_bindings(bindings: &[QemuBind]) -> anyhow::Result<()> {
 }
 
 impl Dtb {
-    fn validate(&self) -> anyhow::Result<()> {
-        let source = Path::new(&self.source);
-        if self.source.is_empty()
-            || source.components().any(|component| {
-                matches!(
-                    component,
-                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
-                )
-            })
-        {
-            anyhow::bail!("DT source must be a workspace-relative path");
+    fn validate(&self, arch: &Arch, has_qemu: bool) -> anyhow::Result<()> {
+        if let Some(source) = &self.source {
+            let path = Path::new(source);
+            if source.is_empty()
+                || path.components().any(|component| {
+                    matches!(
+                        component,
+                        Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                    )
+                })
+            {
+                anyhow::bail!("DT source must be a workspace-relative path");
+            }
         }
-        match (self.delivery, self.authority, self.provider) {
+
+        match (arch, self.delivery) {
+            (Arch::RiscV64, DtbDelivery::Firmware) | (Arch::LoongArch64, DtbDelivery::Embedded) => {
+            },
+            (Arch::RiscV64, DtbDelivery::Embedded) => {
+                anyhow::bail!("riscv64 Platform requires firmware DT delivery")
+            },
+            (Arch::LoongArch64, DtbDelivery::Firmware) => {
+                anyhow::bail!("loongarch64 Platform requires embedded DT delivery")
+            },
+        }
+
+        match (
+            has_qemu,
+            self.delivery,
+            self.authority,
+            self.provider,
+            self.source.is_some(),
+        ) {
             (
+                true,
                 DtbDelivery::Firmware | DtbDelivery::Embedded,
-                DtsAuthority::ProviderDerived,
+                DtAuthority::ProviderDerived,
                 Some(DtbProvider::Qemu),
+                false,
             )
-            | (DtbDelivery::Firmware, DtsAuthority::ProviderDerived, Some(DtbProvider::Firmware))
-            | (DtbDelivery::Embedded, DtsAuthority::Normative, None) => Ok(()),
+            | (
+                false,
+                DtbDelivery::Firmware,
+                DtAuthority::ProviderDerived,
+                Some(DtbProvider::Firmware),
+                true,
+            )
+            | (false, DtbDelivery::Embedded, DtAuthority::Normative, None, true) => Ok(()),
             _ => anyhow::bail!(
-                "invalid DT contract: qemu-derived authority supports firmware or embedded delivery; firmware-derived authority requires firmware delivery; embedded normative authority has no provider"
+                "invalid DT contract: QEMU Platforms require provider-derived provider=qemu without source; physical firmware baselines require provider-derived provider=firmware with source; physical embedded Platforms require normative source"
             ),
         }
     }
@@ -315,31 +347,45 @@ mod tests {
                 "authority = \"normative\"",
             ),
             valid.replace("provider = \"qemu\"", "provider = \"other\""),
-            valid.replace(
-                "source = \"conf/platforms/qemu-virt-rv64.dts\"",
-                "source = \"\"",
-            ),
-            valid.replace(
-                "source = \"conf/platforms/qemu-virt-rv64.dts\"",
-                "source = \"../qemu-virt-rv64.dts\"",
-            ),
+            valid.replace("[dtb]\n", "[dtb]\nsource = \"unexpected.dts\"\n"),
+            valid.replace("delivery = \"firmware\"", "delivery = \"embedded\""),
         ] {
             assert!(Config::from_str(&invalid).is_err(), "{invalid}");
         }
 
         let embedded = std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
-        let normative = embedded
-            .replace(
-                "authority = \"provider-derived\"",
-                "authority = \"normative\"",
+        assert!(
+            Config::from_str(
+                &embedded.replace("delivery = \"embedded\"", "delivery = \"firmware\"")
             )
-            .replace("provider = \"qemu\"\n", "");
-        assert!(Config::from_str(&normative).is_ok());
+            .is_err()
+        );
 
         let physical =
             std::fs::read_to_string("../../conf/platforms/visionfive2-rv64.toml").unwrap();
-        let invalid = physical.replace("delivery = \"firmware\"", "delivery = \"embedded\"");
-        assert!(Config::from_str(&invalid).is_err(), "{invalid}");
+        for invalid in [
+            physical.replace("source = \"conf/platforms/visionfive2-board.dts\"\n", ""),
+            physical.replace(
+                "source = \"conf/platforms/visionfive2-board.dts\"",
+                "source = \"\"",
+            ),
+            physical.replace(
+                "source = \"conf/platforms/visionfive2-board.dts\"",
+                "source = \"../visionfive2-board.dts\"",
+            ),
+            physical.replace("provider = \"firmware\"", "provider = \"qemu\""),
+        ] {
+            assert!(Config::from_str(&invalid).is_err(), "{invalid}");
+        }
+
+        let normative = std::fs::read_to_string("../../conf/platforms/2k1000-la64.toml").unwrap();
+        assert!(Config::from_str(&normative).is_ok());
+        assert!(
+            Config::from_str(
+                &normative.replace("source = \"conf/platforms/2k1000-board.dts\"\n", "")
+            )
+            .is_err()
+        );
     }
 
     #[test]
