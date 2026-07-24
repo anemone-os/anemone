@@ -1,10 +1,10 @@
 /dts-v1/;
 
-// Initial normative source derived from a topology-only QEMU 10.0.50
-// (v10.0.0-2143-gdf6fe2abf2) dump on 2026-07-23 using:
-// qemu-system-loongarch64 -machine virt,dumpdtb=<temp> -smp 1 -m 1G
-// The volatile /chosen/rng-seed property is intentionally omitted. This file,
-// rather than future provider output, owns the embedded DT delivered by build.
+// Provider-derived conformance baseline captured with QEMU 10.0.50
+// (v10.0.0-2143-gdf6fe2abf2) on 2026-07-23 using:
+// qemu-system-loongarch64 -machine virt,dumpdtb=<temp> -cpu la464 -smp 1 -m 1G
+// The volatile /chosen/rng-seed property is intentionally omitted. Stage 3 owns
+// refresh and drift policy; build embeds the committed baseline.
 
 / {
 	#size-cells = <0x02>;

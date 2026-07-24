@@ -23,7 +23,8 @@
 
 ## Completed
 
-- [System Target Model](./2026-07-22-system-target-model.md)：R2 Stage 1-6与全部checkpoint已关闭；current VisionFive explicit-preset `build -> rootfs`及镜像内容回归通过；`BOOT-PROTOCOL-001`保持typed `RootfsEntry | EmbeddedApp` ordinary VFS exec current contract；final harness分流为独立adopter。
+- [System Target Model R3 Explicit Inputs](./2026-07-24-system-target-model-r3-explicit-inputs.md)：R3A已删除implicit local/default selection与preset presentation defaults，rootfs type、QEMU CPU和fmt scope已显式；双架构build与四份DT check通过，contract cutover为None。
+- [System Target Model R0-R2](./2026-07-22-system-target-model.md)：R2 Stage 1-6与全部checkpoint已关闭；current VisionFive explicit-preset `build -> rootfs`及镜像内容回归通过；`BOOT-PROTOCOL-001`保持typed `RootfsEntry | EmbeddedApp` ordinary VFS exec current contract；final harness分流为独立adopter。
 - [IOCTL Loop](./2026-06-04-ioctl-loop.md)：VFS ioctl 分发、统一 block ioctl、静态 loop 设备池与第一阶段 loop ioctl 已完成；扩展 LTP 缺口由 register 跟踪。
 - [Unix Job Control](./2026-07-20-unix-jobctl.md)
 - [Sched Dynamic Attributes](./2026-07-15-sched-dynamic-attributes.md)

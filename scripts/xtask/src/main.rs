@@ -27,8 +27,6 @@ struct Cli {
 enum Commands {
     #[command(about = "Manage Anemone build configurations")]
     Conf(tasks::conf::Conf),
-    #[command(about = "Manage the developer-local interactive selection")]
-    Selection(tasks::conf::Selection),
     #[command(about = "Anemone rootfs related tasks")]
     Rootfs(tasks::rootfs::RootfsArgs),
     #[command(about = "App related tasks")]
@@ -61,7 +59,6 @@ fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Conf(conf) => tasks::conf::run(conf),
-        Commands::Selection(selection) => tasks::conf::run_selection(selection),
         Commands::Rootfs(args) => tasks::rootfs::run(args),
         Commands::App(args) => tasks::app::run(args),
         Commands::Build(args) => tasks::build::run(args),
@@ -89,6 +86,8 @@ mod tests {
             ],
             vec!["xtask", "conf", "switch", "qemu-virt-rv64"],
             vec!["xtask", "mrproper"],
+            vec!["xtask", "selection", "show"],
+            vec!["xtask", "fmt"],
         ] {
             assert!(Cli::try_parse_from(arguments).is_err());
         }
@@ -106,6 +105,7 @@ mod tests {
             ])
             .is_ok()
         );
+        assert!(Cli::try_parse_from(["xtask", "fmt", "all", "--check"]).is_ok());
         assert!(
             Cli::try_parse_from([
                 "xtask",

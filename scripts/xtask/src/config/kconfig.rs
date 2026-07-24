@@ -150,7 +150,7 @@ pub const BOOTSTRAP_HEAP_SHIFT_KB: u64 = {};
 /// Log buffer size as a power of 2 in KB, excluding metadata overhead
 pub const LOG_BUFFER_SHIFT_KB: u64 = {};
 /// Log record size as a power of 2 in bytes
-/// Note that the actual log record size will be 
+/// Note that the actual log record size will be
 /// 2^LOG_RECORD_SHIFT_BYTES + some metadata overhead.
 pub const LOG_RECORD_SHIFT_BYTES: u64 = {};
 /// Maximum numeric log level that may be printed to consoles.
@@ -171,16 +171,16 @@ pub const REMAP_SHIFT_GB: u64 = {};
 pub const MAX_LOGICAL_CPUS: usize = {};
 /// Maximum length of identity strings in bytes
 pub const MAX_IDENT_LEN_BYTES: usize = {};
-/// Maximum length of file names in bytes. This is always equal to 
+/// Maximum length of file names in bytes. This is always equal to
 /// MAX_IDENT_LEN_BYTES,
-/// since file names are commonly used as identity strings in kernel 
+/// since file names are commonly used as identity strings in kernel
 /// objects.
 pub const MAX_FILE_NAME_LEN_BYTES: usize = MAX_IDENT_LEN_BYTES;
 /// Maximum length of file paths in bytes
 pub const MAX_PATH_LEN_BYTES: usize = {};
 /// Maximum number of processes
 pub const MAX_PROCESSES: u64 = {};
-/// System timer frequency in hertz, i.e. number of timer interrupts 
+/// System timer frequency in hertz, i.e. number of timer interrupts
 /// per second
 pub const SYSTEM_HZ: u16 = {};
 /// Compile-time scheduler policy for fresh non-idle tasks.
@@ -202,23 +202,23 @@ pub const USER_STACK_SHIFT_KB: u64 = {};
 pub const USER_INIT_STACK_SHIFT_KB: u64 = {};
 /// Max user heap size as a power of 2 in MB
 pub const USER_HEAP_SHIFT_MB: u64 = {};
-/// Default maximum size in bytes for a single System V shared memory 
+/// Default maximum size in bytes for a single System V shared memory
 /// segment.
 pub const SHMMAX: usize = {};
-/// Default maximum number of pages that may be allocated to System V 
+/// Default maximum number of pages that may be allocated to System V
 /// shared memory.
 pub const SHMALL: usize = {};
 /// Default maximum number of System V shared memory segments.
 pub const SHMMNI: usize = {};
-/// Physical memory usage percentage above which the inode shrinker worker 
+/// Physical memory usage percentage above which the inode shrinker worker
 /// runs a scan.
 pub const IO_SHRINK_THRESHOLD: u8 = {};
-/// Physical memory usage percentage above which the OOM killer worker 
+/// Physical memory usage percentage above which the OOM killer worker
 /// is woken.
 pub const OOM_KILL_THRESHOLD: u8 = {};
 /// Maximum number of symbolic links to resolve in a single path resolution
 pub const SYMLINK_RESOLVE_LIMIT: usize = {};
-/// Default maximum number of file descriptors per process. 
+/// Default maximum number of file descriptors per process.
 /// Might be overridden by certain syscalls.
 pub const MAX_FD_PER_PROCESS: usize = {};
 /// Number of static ramdisk block devices to publish at boot.
@@ -237,7 +237,7 @@ pub const EEVDF_WAKE_CLAMP_US: u64 = {};
 pub const EEVDF_YIELD_PENALTY_US: u64 = {};
 /// Consecutive EEVDF no-eligible fallback count before an extra error summary.
 pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
-        "#,
+"#,
             resolved!(bootstrap_heap_shift_kb),
             resolved!(log_buffer_shift_kb),
             resolved!(log_record_shift_bytes),

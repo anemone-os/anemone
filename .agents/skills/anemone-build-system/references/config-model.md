@@ -19,12 +19,12 @@ Do not copy a current configuration snapshot into the skill. Point to its owner 
 
 Root `kconfig` and `conf/.defconfig` own kernel feature, policy, and capacity values only. Build selection, kernel Cargo profile, action presentation, and QEMU host paths are rejected from KernelConfig. Before changing either file, inspect which parameter values may fall back and which generated definitions the build writes.
 
-### Build Selection
+### Explicit Build Input
 
 `conf/build-presets/` names a SystemTarget, workspace-relative KernelConfig, and kernel-only Cargo
-profile. Tracked `conf/default-selection.toml` and ignored `conf/.selection.toml` each contain only a
-preset reference. Build and ordinary QEMU share one resolver; automation uses an explicit preset or
-complete low-level tuple, while only interactive calls may use local/default selection.
+profile. Build and ordinary QEMU share one resolver and require either an explicit preset or a
+complete low-level tuple. There is no developer-local or tracked default selection source, and
+presets do not carry presentation defaults.
 
 ### System Target
 
@@ -37,7 +37,7 @@ artifact selector.
 
 ### Platform And Architecture
 
-`conf/platforms/` owns a platform's architecture-facing and launch-facing configuration plus boot-ABI-required kernel output formats. QEMU sections own fixed argv and ordered bind templates, but never the host executable or invocation path values. `conf/arch/` owns architecture templates and target specifications. The build, configuration, QEMU, and DTB tasks may consume different parts of this layer; inspect every consumer affected by a change.
+`conf/platforms/` owns a platform's architecture-facing and launch-facing configuration plus boot-ABI-required kernel output formats. QEMU sections own an explicit CPU, an optional BIOS, fixed argv and ordered bind templates, but never the host executable or invocation path values. Omitting BIOS emits no `-bios` argument. `conf/arch/` owns architecture templates and target specifications. The build, configuration, QEMU, and DTB tasks may consume different parts of this layer; inspect every consumer affected by a change.
 
 ### App Manifest
 
@@ -49,14 +49,20 @@ and artifact path coherent.
 
 ### Rootfs Manifest
 
-`conf/rootfs/` owns filesystem composition: architecture, base tree, init, apps, directories, and host files. Rootfs construction consumes app manifests and may consume fixed-path outputs from a prior repository action. The recipe or adjacent documentation owns that command order; the rootfs task does not infer invocation history or freshness from path existence.
+`conf/rootfs/` owns filesystem composition: architecture, explicit base type, base tree, init, apps,
+directories, and host files. Folder image capacity is one implementation policy: `virt-make-fs`
+computes it automatically, so manifests have no capacity field. Rootfs construction consumes app
+manifests and may consume fixed-path outputs from a prior repository action. The recipe or adjacent
+documentation owns that command order; the rootfs task does not infer invocation history or freshness
+from path existence.
 
 ## Cross-Layer Invariants
 
 Before executing or accepting a configuration change, verify:
 
 - the selected SystemTarget resolves to the intended Platform;
-- the selected preset or complete low-level tuple resolves the intended SystemTarget and does not merge with interactive local state;
+- the explicit preset or complete low-level tuple resolves the intended SystemTarget; bare, mixed,
+  and partial input fails rather than merging with hidden state;
 - platform architecture agrees with target, linker, DTB, firmware, and QEMU choices;
 - the build produces every kernel output required by the selected Platform;
 - app architecture, driver output, and declared export agree;

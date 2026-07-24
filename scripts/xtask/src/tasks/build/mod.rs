@@ -154,17 +154,15 @@ impl BuildContext {
                 Ok(render_rootfs_entry_boot_defs())
             },
             InitialProgramSource::EmbeddedApp { app } => {
-                log_progress!(
-                    "BOOT",
-                    &format!("initial-program=embedded-app app={app}")
-                );
+                log_progress!("BOOT", &format!("initial-program=embedded-app app={app}"));
                 let context = BuildCtx::new(self.resolved.platform.build.arch.clone())?;
-                let artifacts = build_app(app.as_str(), &[], &context, false).with_context(|| {
-                    format!(
-                        "failed to prepare embedded app `{app}` for system target `{}`",
-                        self.resolved.target_ref
-                    )
-                })?;
+                let artifacts =
+                    build_app(app.as_str(), &[], &context, false).with_context(|| {
+                        format!(
+                            "failed to prepare embedded app `{app}` for system target `{}`",
+                            self.resolved.target_ref
+                        )
+                    })?;
                 let artifact = validate_embedded_artifact(
                     self.resolved.target_ref.as_str(),
                     app.as_str(),
@@ -414,12 +412,8 @@ mod tests {
 
         assert!(validate_embedded_artifact("target", "app", &[]).is_err());
         assert!(
-            validate_embedded_artifact(
-                "target",
-                "app",
-                &[executable.clone(), executable.clone()]
-            )
-            .is_err()
+            validate_embedded_artifact("target", "app", &[executable.clone(), executable.clone()])
+                .is_err()
         );
         let non_executable = root.artifact("non-executable", 0o640);
         assert!(validate_embedded_artifact("target", "app", &[non_executable]).is_err());

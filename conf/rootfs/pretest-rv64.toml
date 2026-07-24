@@ -3,6 +3,7 @@ name = "pretest-rv64"
 arch = "riscv64"
 
 [fs]
+type = "folder"
 fstype = "ext4"
 base = "conf/rootfs/pretest-rv64-base"
 

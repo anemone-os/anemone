@@ -9,9 +9,9 @@ use core::{
 
 use anemone_rs::{
     os::linux::process::{
-        self, clone, getpid, mlock, mmap, mprotect, mremap, msync, munlock, munmap, wait4,
-        CloneFlags, MmapFlags, MmapProt, MremapFlags, MsyncFlags, WStatus, WStatusRaw, WaitFor,
-        WaitOptions,
+        self, CloneFlags, MmapFlags, MmapProt, MremapFlags, MsyncFlags, WStatus, WStatusRaw,
+        WaitFor, WaitOptions, clone, getpid, mlock, mmap, mprotect, mremap, msync, munlock, munmap,
+        wait4,
     },
     prelude::*,
 };

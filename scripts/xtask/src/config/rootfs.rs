@@ -25,11 +25,6 @@ impl Rootfs {
             if rootfs.fs.base.is_none() {
                 anyhow::bail!("fs.type = 'image' requires fs.base");
             }
-            if rootfs.fs.size.is_some() {
-                anyhow::bail!(
-                    "fs.size is not supported with fs.type = 'image'; resize the base image before running rootfs mkfs"
-                );
-            }
         }
         Ok(rootfs)
     }
@@ -42,20 +37,18 @@ pub struct Build {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Fs {
     pub fstype: FsType,
     pub base: Option<String>,
     #[serde(rename = "override", default)]
     pub override_dir: Option<String>,
-    #[serde(rename = "type", default)]
+    #[serde(rename = "type")]
     pub base_type: BaseType,
-    #[serde(default)]
-    pub size: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BaseType {
-    #[default]
     #[serde(rename = "folder")]
     Folder,
     #[serde(rename = "image")]
@@ -127,21 +120,38 @@ path = "/sbin/init"
         assert_eq!(rootfs.fs.base_type, BaseType::Image);
         assert_eq!(rootfs.fs.base.as_deref(), Some("rootfs.img"));
         assert_eq!(rootfs.fs.override_dir.as_deref(), Some("root-overlay"));
-        assert_eq!(rootfs.fs.size, None);
     }
 
     #[test]
-    fn image_base_rejects_size() {
+    fn rootfs_type_is_required() {
         let result = Rootfs::from_str(
             r#"
 [build]
-name = "image-base"
+name = "folder-base"
 arch = "riscv64"
 
 [fs]
 fstype = "ext4"
-base = "rootfs.img"
-type = "image"
+
+[init]
+path = "/sbin/init"
+"#,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rootfs_size_policy_is_not_configurable() {
+        let result = Rootfs::from_str(
+            r#"
+[build]
+name = "folder-base"
+arch = "riscv64"
+
+[fs]
+fstype = "ext4"
+type = "folder"
 size = "1G"
 
 [init]
@@ -169,7 +179,7 @@ path = "/sbin/init"
 
     fn parse_manifest(path: &str) -> Rootfs {
         let content = std::fs::read_to_string(path).expect("Failed to read rootfs.toml");
-        toml::from_str(&content).expect("Failed to parse rootfs.toml")
+        Rootfs::from_str(&content).expect("Failed to parse rootfs.toml")
     }
 
     fn assert_manifest_inputs_exist(rootfs: &Rootfs) {

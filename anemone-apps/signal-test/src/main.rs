@@ -12,9 +12,10 @@ use anemone_rs::{
         ucontext::UContext,
     },
     os::linux::process::{
-        self, getpid, gettid, mmap, sched_yield,
+        self, CloneFlags, MmapFlags, MmapProt, WStatus, WStatusRaw, WaitFor, WaitOptions, getpid,
+        gettid, mmap, sched_yield,
         signal::{self, SigNo, SigProcMaskHow},
-        wait4, CloneFlags, MmapFlags, MmapProt, WStatus, WStatusRaw, WaitFor, WaitOptions,
+        wait4,
     },
     prelude::*,
 };

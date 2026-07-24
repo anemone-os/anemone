@@ -9,7 +9,7 @@ use core::{
 use anemone_rs::{
     env,
     os::linux::process::{
-        self, mmap, sched_yield, spawn_raw_thread, CloneFlags, MmapFlags, MmapProt, Tid,
+        self, CloneFlags, MmapFlags, MmapProt, Tid, mmap, sched_yield, spawn_raw_thread,
     },
     prelude::*,
 };

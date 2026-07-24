@@ -141,15 +141,8 @@ pub fn gen_qemu_cmd(
         .arg("-nographic")
         .arg("-serial")
         .arg("mon:stdio")
-        .args(
-            qemu.args
-                .as_ref()
-                .map(|args| args.as_slice())
-                .unwrap_or(&[]),
-        );
-    if let Some(cpu) = &qemu.cpu {
-        cmd.arg("-cpu").arg(cpu);
-    }
+        .args(&qemu.args);
+    cmd.arg("-cpu").arg(&qemu.cpu);
     if let Some(bios) = &qemu.bios {
         cmd.arg("-bios").arg(bios);
     }
@@ -179,9 +172,7 @@ fn gen_qemu_dt_cmd(arch: &Arch, qemu: &Qemu, dump_path: &Path) -> anyhow::Result
     command
         .arg("-machine")
         .arg(format!("{},dumpdtb={dump_path}", qemu.machine));
-    if let Some(cpu) = &qemu.cpu {
-        command.arg("-cpu").arg(cpu);
-    }
+    command.arg("-cpu").arg(&qemu.cpu);
     command
         .arg("-smp")
         .arg(qemu.smp.to_string())
@@ -305,9 +296,7 @@ fn qemu_dt_provenance(arch: &Arch, qemu: &Qemu) -> String {
         "-machine".to_string(),
         format!("{},dumpdtb=<temp>", qemu.machine),
     ];
-    if let Some(cpu) = &qemu.cpu {
-        tokens.extend(["-cpu".to_string(), cpu.clone()]);
-    }
+    tokens.extend(["-cpu".to_string(), qemu.cpu.clone()]);
     tokens.extend([
         "-smp".to_string(),
         qemu.smp.to_string(),
@@ -753,11 +742,11 @@ mod tests {
     fn qemu_command_uses_action_owned_program_and_presentation_tokens() {
         let qemu = Qemu {
             machine: "virt".to_string(),
-            cpu: Some("rv64".to_string()),
+            cpu: "rv64".to_string(),
             smp: 1,
             memory: "1G".to_string(),
-            bios: Some("default".to_string()),
-            args: Some(vec!["-rtc".to_string(), "base=utc".to_string()]),
+            bios: None,
+            args: vec!["-rtc".to_string(), "base=utc".to_string()],
             bind: Vec::new(),
         };
         let expanded = vec![OsString::from("-kernel"), OsString::from("kernel.elf")];
@@ -780,8 +769,6 @@ mod tests {
                 "base=utc",
                 "-cpu",
                 "rv64",
-                "-bios",
-                "default",
                 "-s",
                 "-S",
                 "-kernel",
@@ -797,11 +784,11 @@ mod tests {
     fn dt_command_uses_only_topology_snapshot() {
         let qemu = Qemu {
             machine: "virt".to_string(),
-            cpu: Some("rv64".to_string()),
+            cpu: "rv64".to_string(),
             smp: 2,
             memory: "2G".to_string(),
             bios: Some("default".to_string()),
-            args: Some(vec!["-device".to_string(), "ignored".to_string()]),
+            args: vec!["-device".to_string(), "ignored".to_string()],
             bind: vec![QemuBind {
                 name: "ignored".to_string(),
                 template: vec!["{{}}".to_string()],

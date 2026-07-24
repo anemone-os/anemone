@@ -22,17 +22,13 @@ build *args:
 qemu *args:
     @just xtask qemu {{ args }}
 
-[doc("format Rust sources. optionally pass `kernel` or an app name")]
-fmt *args:
-    @just xtask fmt {{ args }}
+[doc("format Rust sources in the explicit `all`, `kernel`, or app scope")]
+fmt scope *args:
+    @just xtask fmt {{ scope }} {{ args }}
 
 [doc("manage configurations. type `just conf -h` for more details.")]
 conf *args:
     @just xtask conf {{ args }}
-
-[doc("manage the developer-local interactive selection")]
-selection *args:
-    @just xtask selection {{ args }}
 
 [doc("app related commands. type `just app -h` for more details.")]
 app *args:

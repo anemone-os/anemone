@@ -11,12 +11,15 @@
 - `conf/.defconfig` and local `kconfig` contain only kernel features, policy and capacity. System
   selection, kernel Cargo profile and action-local presentation do not belong to KernelConfig.
 - `conf/build-presets/<slug>.toml` names a closed target, workspace-relative KernelConfig and
-  kernel-only Cargo profile tuple. `conf/default-selection.toml` selects one tracked preset, while
-  ignored `conf/.selection.toml` is reserved for a developer-local preset selection.
-- Build and ordinary QEMU share one selection resolver. Explicit callers use either `--preset` or
-  the complete `--target` + `--kernel-config` + `--profile` tuple; interactive calls may use the
-  local/default preset reference. QEMU host paths are supplied only through the selected
+  kernel-only Cargo profile tuple. Presets contain no action presentation defaults.
+- Build and ordinary QEMU require either `--preset` or the complete `--target` + `--kernel-config`
+  + `--profile` tuple. They have no local or repository-default selection. QEMU host paths are
+  supplied only through the selected
   Platform's ordered `[[qemu.bind]]` declarations.
+- Every QEMU Platform names its CPU model explicitly. `bios` remains optional: omission means xtask
+  emits no `-bios` option.
+- Every rootfs manifest names `fs.type` explicitly. Folder roots always use `virt-make-fs`
+  automatic sizing; capacity is not configurable through the manifest.
 - `just qemu dt refresh --platform <qemu-platform> [--check]` maintains only a
   `provider-derived` baseline whose provider is `qemu`. It loads the Platform directly, uses only
   its topology fields, and never consumes ordinary selection or runtime binds. A QEMU-backed

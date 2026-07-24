@@ -7,6 +7,8 @@ name = "minimal"
 arch = "loongarch64"
 
 [fs]
+# Folder roots always use automatic image sizing.
+type = "folder"
 # Filesystem type to use.
 fstype = "ext4"
 # Base directory will be copied into the rootfs tree as a basis for the generated image.

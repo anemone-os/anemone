@@ -18,9 +18,9 @@ Then read the corresponding Justfile recipe and xtask task. Help output defines 
 | Task | Preferred entrypoint | Inspect before use |
 | --- | --- | --- |
 | Initialize or reset local KernelConfig | `just defconfig` | Justfile, `conf/.defconfig`, existing root `kconfig` |
-| List targets or manage interactive selection | `just conf ...`, `just selection ...` | conf/selection task, target/preset/default files |
-| Build the kernel | `just build` or the build xtask interface | selected kconfig, platform, build task |
-| Format Rust | `just fmt ...` | fmt help and fmt task |
+| List targets | `just conf ...` | target and Platform files |
+| Build the kernel | `just build --preset ...` or the complete low-level tuple | selected KernelConfig, target, Platform, build task |
+| Format Rust | `just fmt <scope> ...` | explicit `all`, `kernel`, or app scope; fmt help and task |
 | Build an app | `just app ...` or the app xtask interface | app manifest, app task, selected architecture |
 | Materialize a rootfs | `just rootfs ...` or the rootfs xtask interface | rootfs manifest, host inputs, app manifests, rootfs task |
 | Run QEMU | `just qemu ...` | explicit selection for automation, selected Platform bind declarations, firmware/device/image inputs |
@@ -34,9 +34,9 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 
 ### Configuration
 
-- Confirm whether the command creates or overwrites root `kconfig`, or only manages the ignored local preset reference.
-- Resolve the selected target and Platform through the shared selection path.
-- Separate local selection from tracked defaults and explicit automation input.
+- Confirm whether the command creates or overwrites root `kconfig`.
+- Resolve the explicitly selected target and Platform through the shared resolver.
+- Reject bare, partial, or mixed preset/tuple input instead of filling it from local state.
 
 ### Kernel Build
 
@@ -61,6 +61,8 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 ### Rootfs
 
 - Validate the manifest's base tree, declared host files, and app inputs before execution.
+- Confirm `fs.type` is explicit. Folder images always use automatic sizing; there is no manifest
+  capacity policy.
 - Confirm architecture and installed artifacts agree with the intended kernel/platform.
 - When a recipe consumes a fixed repository output, run the documented producer action first and stop if it fails; path existence alone is not freshness evidence.
 - Determine the exact output directory that will be replaced.
@@ -69,7 +71,8 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 ### QEMU
 
 - Confirm the kernel was built for the selected platform.
-- Validate firmware and fixed device tokens from the live Platform file, then provide every declared QEMU bind as an invocation path.
+- Validate the explicit CPU, optional BIOS, firmware and fixed device tokens from the live Platform
+  file, then provide every declared QEMU bind as an invocation path. Omitted BIOS emits no `-bios`.
 - Distinguish launch/configuration failures from guest boot failures.
 - When DTB is involved, inspect both the build-time generator and runtime QEMU path rather than assuming they use identical inputs.
 - For DT maintenance, use the nested QEMU action with an explicit Platform. Confirm it does not

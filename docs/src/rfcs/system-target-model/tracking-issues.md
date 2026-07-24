@@ -1,10 +1,11 @@
 # System Target Model Tracking Issues
 
 **状态：** Closed（当前无 live design issue）
-**最后更新：** 2026-07-23
+**最后更新：** 2026-07-24
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **迁移计划：** [迁移实施计划](./implementation.md)
-**事务日志：** [2026-07-22-system-target-model](../../devlog/transactions/2026-07-22-system-target-model.md)
+**事务日志：** [R3 explicit-input cleanup](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)；
+[R0-R2 history](../../devlog/transactions/2026-07-22-system-target-model.md)
 
 本文只跟踪会改变 RFC target、owner、contract delta、实现顺序、review gate、停止边界或
 验收判断的 confirmed design issues。普通实现选择、live-owner inventory、逐 platform
@@ -32,6 +33,7 @@ None.
 
 | ID | 原问题 | Neutralize / 分流依据 |
 | --- | --- | --- |
+| `STM-R3-K1` | R2保留local selection -> tracked default fallback和future preset presentation defaults；rootfs type、QEMU CPU与fmt scope还存在省略驱动的策略选择。 | 用户将其接受为R3 target correction：system action只接受显式preset或完整tuple，删除local/default selection与preset presentation defaults；rootfs type、QEMU CPU和fmt scope显式。Folder容量统一自动计算；BIOS是有意保留的optional capability，省略只表示不传`-bios`。R3A负责原子清理与验证。 |
 | `STM-R2-K1` | Stage 3把physical firmware provenance、允许差异与runtime validation owner做成三个只有唯一合法值的typed配置字段；它们没有action consumer，既不能证明capture来源，也不能执行板级复核。 | 用户将该审计结论接受为Stage 3关闭后的实现反馈。R2保留`provider = "firmware"`的authority分类与QEMU maintenance fail-close，把capture来源、只允许`/chosen/rng-seed`差异和板级/U-Boot变化后的复核责任恢复为baseline相邻说明与人类review证据，并删除对应parser/schema/test surface。DT delivery/authority、runtime FDT、current contract与Stage 4边界不变。 |
 | `STM-R1-K1` | R0把DT delivery与authority绑定，误将QEMU-derived LA64 DTS分类为embedded normative；VisionFive physical baseline又只有generic firmware标签，缺少真实capture provenance、允许差异和runtime validation owner。 | Stage 3在latest-byte review后停止；用户确认LA64 machine-fact owner仍是QEMU，并确认`visionfive2-board.dts`来自supported硬件经U-Boot导出的runtime FDT且应删除未使用的官方DTS。R1将两维解耦，LA64改为embedded/provider-derived/QEMU；VisionFive closed metadata固定U-Boot hardware export、只允许`/chosen/rng-seed`差异并由Platform maintainer在板级/U-Boot更新时验证。该修订不改变runtime delivery或current contract。 |
 | `STM-DRAFT-K1` | Resolved identity 与 provenance failure contract 尚未闭合 | 初版以 canonical semantic-input closure equality 收口，但该方向在 `STM-DRAFT-K8` review 中被确认粒度过粗、实现代价过高；当前有效修复由 K8 和 [STM-WORKFLOW-ORDER-001](./invariants.md#stm-workflow-order-001---固定路径依赖由明确命令顺序拥有) 取代，不再实施原 sidecar/digest/equality probe，也不承诺跨action freshness。 |
@@ -46,12 +48,12 @@ None.
 | `STM-DRAFT-K10` | 实施草案只描述滚动冻结 write set，并把首个 Stage 1 manifest 推迟到 RFC acceptance 与 transaction creation 之后，无法满足接受时首个可执行阶段已经 Ready 的工作流边界 | [迁移实施计划](./implementation.md)现使用 `Outline / Ready / Active / Closed` 成熟度，并把初始 `Implementation Resolution Gate` 放在 public promotion 后、RFC acceptance 前；该 gate 同时解析 Stage 1 的完整交付、路线/probe、审计、可观测性、验证、停止/退出、cutover 与 manifest。Transaction 只在实现开始时记录证据、批准和链接，Stage 1 仍需单独授权才进入 Active。 |
 | `STM-DRAFT-K11` | App build对已有binary/script的采纳边界与目标相反：草案要求source/copy路径“不使用no-op driver”，也没有区分build-command no-op、artifact export和runtime compatibility | [STM-APP-SOURCE-001](./invariants.md#stm-app-source-001---source-driver-只采纳已有-artifact)现固定closed Source driver：不启动build command，但复用公共path expansion、普通文件校验和export；不执行shell、转换或推断内容，不静默接受extra args。Stage 4验证Source/Cargo app build边界，Stage 5另行验证ELF/shebang经ordinary VFS exec/binfmt运行，避免把文件存在误述为runtime proof。 |
 | `STM-DRAFT-E1` | 最小目录与 schema 命名尚未选择 | 最小canonical schema与reference identity由[迁移实施计划](./implementation.md)初始 `Implementation Resolution Gate` 选择，并在 Stage 1 Ready 定义中冻结；未参与identity的剩余目录组织、文件名、内部Rust类型和CLI形状保留为后续工程自由度，owner、host-path与single-resolver禁止退化项继续约束结果。 |
-| `STM-DRAFT-E2` | Presentation defaults 需要预先给出白名单 | [STM-PRESET-001](./invariants.md#stm-preset-001---preset-是选择器不是-overlay) 改为 closed typed set，第一版允许为空；只有真实重复 consumer 出现后才增加具体字段，不建立开放字典或任意 args。 |
+| `STM-DRAFT-E2` | Presentation defaults 需要预先给出白名单 | R2曾允许未来closed typed set；R3进一步删除该扩展点。[STM-PRESET-001](./invariants.md#stm-preset-001---preset-是选择器不是-overlay)现要求presentation input只能由本次action显式提供。 |
 | `STM-DRAFT-E3` | Preset中的Cargo profile是否覆写app profile不明确 | 名称固定为`CargoProfile`，并在[STM-PRESET-001](./invariants.md#stm-preset-001---preset-是选择器不是-overlay)明确只选择kernel Cargo build profile、只作为kernel build input；app/rootfs task继续由自身manifest/driver拥有Cargo参数与profile。 |
 | `STM-DRAFT-S1` | Final harness 具体接入尚未设计 | Final harness 已明确为 RFC 收口后的独立 adopter iteration；runner、scoring、image compatibility 与 local wrapper 不影响本 target 或首个 implementation stage。 |
-| `STM-DRAFT-N1` | SystemTarget 与 BuildPreset owner 重叠 | Target 拥有 boot/deploy、root/entry selection与required capabilities；Platform拥有kernel output format；preset只选择target + KernelConfig + kernel-only `CargoProfile`，并最多携带closed typed presentation defaults。 |
+| `STM-DRAFT-N1` | SystemTarget 与 BuildPreset owner 重叠 | Target拥有boot/deploy、root/entry selection与required capabilities；Platform拥有kernel output format；preset只选择target + KernelConfig + kernel-only `CargoProfile`，不携带presentation defaults。 |
 | `STM-DRAFT-N2` | Final harness 被误当作 RFC 主目标 | RFC 主目标固定为通用 build/config/orchestration model；Final harness 只提供表达压力与后续 adopter。 |
-| `STM-DRAFT-N3` | CLI、local selection 与 host tool binding 形成第二真相源 | [STM-CLI-001](./invariants.md#stm-cli-001---selection-与-action-cli-只有一条解析路径)固定单一resolver与互斥selection source；[STM-TOOL-001](./invariants.md#stm-tool-001---host-tool-按仓库固定程序名从-path-调用)直接删除host tool binding系统，xtask只调用固定程序名并依赖开发者`PATH`。迁移事实进入Stage 2。 |
+| `STM-DRAFT-N3` | CLI、local selection 与 host tool binding 形成第二真相源 | R2先固定single resolver，R3再删除local/default source；[STM-CLI-001](./invariants.md#stm-cli-001---system-action-只有一条显式输入解析路径)只接受显式完整输入。[STM-TOOL-001](./invariants.md#stm-tool-001---host-tool-按仓库固定程序名从-path-调用)继续要求xtask调用固定程序名并依赖开发者`PATH`。 |
 | `STM-DRAFT-N4` | QEMU runtime path 被过度泛化为跨 action binding | [STM-QEMU-BIND-001](./invariants.md#stm-qemu-bind-001---qemu-bind-只参数化-tracked-argv-template) 将该能力收缩为 platform-local tracked argv template + invocation value；不建立 provider-neutral role/slot/binding API。 |
 
 上述 neutralize 只表示 RFC design issue 已有规范修复或受控实施归属，不表示对应代码、

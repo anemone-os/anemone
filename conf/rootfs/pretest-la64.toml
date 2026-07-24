@@ -3,6 +3,7 @@ name = "pretest-la64"
 arch = "loongarch64"
 
 [fs]
+type = "folder"
 fstype = "ext4"
 base = "conf/rootfs/pretest-la64-base"
 

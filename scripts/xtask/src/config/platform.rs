@@ -86,11 +86,12 @@ pub struct Constants {
 #[serde(deny_unknown_fields)]
 pub struct Qemu {
     pub machine: String,
-    pub cpu: Option<String>,
+    pub cpu: String,
     pub smp: u64,
     pub memory: String,
     pub bios: Option<String>,
-    pub args: Option<Vec<String>>,
+    #[serde(default)]
+    pub args: Vec<String>,
     #[serde(default)]
     pub bind: Vec<QemuBind>,
 }
@@ -161,6 +162,9 @@ impl Config {
             dtb.validate()?;
         }
         if let Some(qemu) = &config.qemu {
+            if qemu.cpu.trim().is_empty() {
+                anyhow::bail!("QEMU CPU model must not be empty");
+            }
             validate_qemu_bindings(&qemu.bind)?;
         }
         Ok(config)
@@ -196,8 +200,7 @@ pub const ROOTFS_FS_TYPE: &str = {:?};
 pub const ROOTFS_SOURCE_KIND: &str = {:?};
 /// Root filesystem source path
 pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
-
-        "#,
+"#,
             self.constants.phys_ram_start,
             self.constants.max_phys_ram_size,
             self.constants.kernel_la_base,
@@ -255,11 +258,7 @@ impl Dtb {
                 DtsAuthority::ProviderDerived,
                 Some(DtbProvider::Qemu),
             )
-            | (
-                DtbDelivery::Firmware,
-                DtsAuthority::ProviderDerived,
-                Some(DtbProvider::Firmware),
-            )
+            | (DtbDelivery::Firmware, DtsAuthority::ProviderDerived, Some(DtbProvider::Firmware))
             | (DtbDelivery::Embedded, DtsAuthority::Normative, None) => Ok(()),
             _ => anyhow::bail!(
                 "invalid DT contract: qemu-derived authority supports firmware or embedded delivery; firmware-derived authority requires firmware delivery; embedded normative authority has no provider"
@@ -306,6 +305,13 @@ mod tests {
             ))
             .is_err()
         );
+    }
+
+    #[test]
+    fn qemu_cpu_is_required_and_nonempty() {
+        let valid = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
+        assert!(Config::from_str(&valid.replace("cpu = \"rv64\"\n", "")).is_err());
+        assert!(Config::from_str(&valid.replace("cpu = \"rv64\"", "cpu = \"\"")).is_err());
     }
 
     #[test]

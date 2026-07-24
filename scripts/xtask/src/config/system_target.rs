@@ -121,10 +121,8 @@ type = "rootfs-entry"
             InitialProgramSource::EmbeddedApp { app } if app.as_str() == "init"
         ));
 
-        let missing_app = VALID_TARGET.replace(
-            "type = \"rootfs-entry\"",
-            "type = \"embedded-app\"",
-        );
+        let missing_app =
+            VALID_TARGET.replace("type = \"rootfs-entry\"", "type = \"embedded-app\"");
         assert!(Config::from_str(&missing_app).is_err());
 
         let invalid_app = VALID_TARGET.replace(

@@ -14,8 +14,9 @@ const RUSTFMT_CONFIG: &str = "rustfmt.toml";
 
 #[derive(Args, Debug)]
 pub struct FmtArgs {
-    #[arg(help = "Package group or app to format. Omit to format kernel and all apps.")]
-    pub package: Option<String>,
+    #[arg(value_name = "SCOPE")]
+    #[arg(help = "Explicit scope: `all`, `kernel`, or an app name")]
+    pub scope: String,
 
     #[arg(long, help = "Run rustfmt in check mode without writing changes")]
     pub check: bool,
@@ -26,19 +27,22 @@ pub fn run(args: FmtArgs) -> anyhow::Result<()> {
         .canonicalize()
         .with_context(|| format!("failed to locate repository {}", RUSTFMT_CONFIG))?;
 
-    match args.package.as_deref() {
-        None | Some("all") => {
+    match args.scope.as_str() {
+        "all" => {
             fmt_kernel_workspace(&config_path, args.check)?;
+            fmt_xtask(&config_path, args.check)?;
             for app in app_names()? {
                 fmt_app(&app, &config_path, args.check)?;
             }
             Ok(())
         },
-        Some("kernel") => fmt_kernel_workspace(&config_path, args.check),
-        Some(package) if app_manifest_path(package).exists() => {
+        "kernel" => fmt_kernel_workspace(&config_path, args.check),
+        package if app_manifest_path(package).exists() => {
             fmt_app(package, &config_path, args.check)
         },
-        Some(package) => fmt_kernel_package(package, &config_path, args.check),
+        package => {
+            bail!("unknown format scope `{package}`; expected `all`, `kernel`, or an app name")
+        },
     }
 }
 
@@ -51,16 +55,12 @@ fn fmt_kernel_workspace(config_path: &Path, check: bool) -> anyhow::Result<()> {
     run_cmd(cmd, "kernel workspace")
 }
 
-fn fmt_kernel_package(package: &str, config_path: &Path, check: bool) -> anyhow::Result<()> {
-    log_progress!("FMT", &format!("Formatting package '{}'", package));
-
+fn fmt_xtask(config_path: &Path, check: bool) -> anyhow::Result<()> {
+    log_progress!("FMT", "Formatting xtask");
     let mut cmd = base_cargo_fmt_cmd(check);
-    cmd.arg("--manifest-path")
-        .arg("Cargo.toml")
-        .arg("--package")
-        .arg(package);
+    cmd.arg("--manifest-path").arg("scripts/xtask/Cargo.toml");
     add_rustfmt_config(&mut cmd, config_path);
-    run_cmd(cmd, &format!("package '{}'", package))
+    run_cmd(cmd, "xtask")
 }
 
 fn fmt_app(app: &str, config_path: &Path, check: bool) -> anyhow::Result<()> {

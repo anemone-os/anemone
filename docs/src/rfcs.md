@@ -127,7 +127,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 已关闭或延期 RFC
 
-- [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R2已实现并关闭；Platform、SystemTarget、KernelConfig、BuildPreset、single resolved build与QEMU invocation已形成唯一owner，current VisionFive explicit-preset `build -> rootfs`及镜像内容回归通过。[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)已Refine为typed `RootfsEntry | EmbeddedApp` ordinary VFS exec current contract；final harness分流为独立adopter。
+- [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R3已实现并关闭；system action只接受显式preset或完整tuple，rootfs type、QEMU CPU和fmt scope已显式，folder容量统一自动计算，BIOS保持optional。[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)保持typed `RootfsEntry | EmbeddedApp` ordinary VFS exec current contract。
 - [RFC-20260603-IOCTL-LOOP](./rfcs/ioctl-loop/index.md)：已实现并关闭；完成 `ioctl(2)` VFS 分发、统一 block ioctl、静态 loop 设备池与第一阶段 loop ioctl。扩展 loop sysfs、partscan、direct I/O、autoclear 和 ioctl LTP 缺口继续由 register 跟踪。
 - [RFC-20260622-sched-eevdf-lite](./rfcs/sched-eevdf-lite/index.md)：Stage 3/R1 runtime acceptance 失败后延期关闭，不是 Completed；关闭时 default 曾恢复为 RR，后续已由 Fair / Stride 切换为 Fair。EEVDF 保留为可运行实验原型，但显著吞吐回归与百万级 yield self-pick 仍存在，`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 保持未解决 Keter。事务日志见 [2026-07-09-sched-eevdf-lite](./devlog/transactions/2026-07-09-sched-eevdf-lite.md)，证据见 [Stage 3 eligibility 回归背景](./rfcs/sched-eevdf-lite/backgrounds/stage3-eligibility-regression-20260711.md)。
 

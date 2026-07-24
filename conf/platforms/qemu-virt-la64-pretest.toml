@@ -12,9 +12,9 @@ frame_section_shift_mb = 7
 
 [qemu]
 machine = "virt"
+cpu = "la464"
 smp = 1
 memory = "1G"
-# cpu = default
 args = [
     "-rtc",
     "base=utc",

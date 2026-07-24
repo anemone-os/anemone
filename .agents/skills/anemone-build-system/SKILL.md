@@ -9,7 +9,7 @@ description: Use when building, cleaning, configuring, formatting, packaging roo
 
 1. Work from the repository root.
 2. Use `just ...` for common flows, `just xtask ...` for specific xtask interfaces, and existing repository wrappers for their complete end-to-end flows.
-3. Do not substitute bare `cargo`, `rustc`, formatter, linker, target, or cleanup commands for repository-owned orchestration. Xtask owns generated inputs, target selection, artifact export, and platform wiring.
+3. Do not substitute bare `cargo`, `rustc`, formatter, linker, target, or cleanup commands for repository-owned orchestration. Xtask owns generated inputs, explicit target selection, artifact export, and platform wiring.
 4. Inspect user-facing exports under `build/` first. Treat cargo `target/` trees as internal unless diagnosis requires them.
 5. Change the Justfile or `scripts/xtask/` when orchestration is the owner. Do not add a parallel build entrypoint or one-off wrapper.
 
@@ -31,7 +31,7 @@ Read [references/build-playbook.md](references/build-playbook.md) for task routi
 Keep each concern in its owning layer:
 
 - root `kconfig` and `conf/.defconfig`: kernel features, policy, and capacity only;
-- `conf/build-presets/`, `conf/default-selection.toml`, and ignored `conf/.selection.toml`: reusable explicit selection and the developer-local interactive preset reference;
+- `conf/build-presets/`: reusable explicit target, KernelConfig, and kernel Cargo-profile tuples;
 - `conf/system-targets/`: selected Platform reference, root mount/source, and initial-program source;
 - `conf/platforms/` and `conf/arch/`: platform identity, architecture, hardware constants, boot environment, tracked QEMU argv/bind templates, DTB, linker inputs, and Platform-required kernel outputs;
 - `anemone-apps/<app>/app.toml`: closed Cargo/Source driver and exported artifacts; Source runs no
@@ -45,10 +45,14 @@ ordinary app/rootfs actions, requires exactly one executable regular artifact, a
 definition whose `include_bytes!` points at that export. The kernel must not parse SystemTarget or app manifests,
 and `clean` must remove the generated boot definition.
 
-Build and ordinary QEMU use the same selection syntax. Automation and wrappers must pass an explicit
-`--preset` or a complete `--target` / `--kernel-config` / `--profile` tuple; they must not depend on
-interactive local selection. QEMU host paths are action inputs supplied with the selected Platform's
+Build and ordinary QEMU require an explicit `--preset` or a complete `--target` / `--kernel-config`
+/ `--profile` tuple. Bare invocation has no local or repository-default fallback. QEMU host paths are action inputs supplied with the selected Platform's
 declared `--bind name=path` values, not tracked configuration.
+
+Formatting also requires an explicit scope: `all`, `kernel`, or an app name.
+Rootfs manifests require an explicit filesystem base type; folder roots use the repository's single
+automatic sizing policy rather than a manifest capacity option. QEMU Platforms require an explicit
+CPU model, while an omitted BIOS means xtask emits no `-bios` argument.
 
 QEMU DT maintenance is a separate nested action under the QEMU namespace. It selects a Platform
 directly, consumes only the Platform's topology snapshot, and may update only a provider-derived

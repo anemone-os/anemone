@@ -1,22 +1,8 @@
-use clap::Args;
-use serde::Deserialize;
-
 use super::{
     build_preset::CargoProfile,
     reference::{BuildPresetRef, KernelConfigRef, SystemTargetRef},
 };
-
-#[derive(Deserialize, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct SelectionFile {
-    pub preset: BuildPresetRef,
-}
-
-impl SelectionFile {
-    pub fn from_str(content: &str) -> anyhow::Result<Self> {
-        Ok(toml::from_str(content)?)
-    }
-}
+use clap::Args;
 
 pub struct SelectionRequest {
     preset: Option<BuildPresetRef>,
@@ -79,10 +65,6 @@ impl SelectionRequest {
         }
     }
 
-    pub fn implicit() -> Self {
-        Self::new(None, None, None, None)
-    }
-
     pub fn explicit_preset(preset: BuildPresetRef) -> Self {
         Self::new(Some(preset), None, None, None)
     }
@@ -107,7 +89,9 @@ impl SelectionRequest {
         }
 
         match (self.target, self.kernel_config, self.profile) {
-            (None, None, None) => Ok(SelectionChoice::Implicit),
+            (None, None, None) => anyhow::bail!(
+                "system action requires either --preset or --target, --kernel-config, and --profile together"
+            ),
             (Some(target), Some(kernel_config), Some(profile)) => Ok(SelectionChoice::Tuple {
                 target,
                 kernel_config,
@@ -127,7 +111,6 @@ pub(super) enum SelectionChoice {
         kernel_config: KernelConfigRef,
         profile: CargoProfile,
     },
-    Implicit,
 }
 
 #[cfg(test)]
@@ -140,19 +123,6 @@ mod tests {
     struct SelectionCli {
         #[command(flatten)]
         selection: SelectionArgs,
-    }
-
-    #[test]
-    fn selection_file_is_closed() {
-        let selection =
-            SelectionFile::from_str("preset = \"qemu-virt-rv64-pretest-release\"\n").unwrap();
-        assert_eq!(selection.preset.as_str(), "qemu-virt-rv64-pretest-release");
-        assert!(
-            SelectionFile::from_str(
-                "preset = \"qemu-virt-rv64-pretest-release\"\ntarget = \"other\"\n"
-            )
-            .is_err()
-        );
     }
 
     #[test]
@@ -177,10 +147,11 @@ mod tests {
             .unwrap(),
             SelectionChoice::Tuple { .. }
         ));
-        assert!(matches!(
-            SelectionRequest::implicit().classify().unwrap(),
-            SelectionChoice::Implicit
-        ));
+        assert!(
+            SelectionRequest::new(None, None, None, None)
+                .classify()
+                .is_err()
+        );
 
         assert!(
             SelectionRequest::new(

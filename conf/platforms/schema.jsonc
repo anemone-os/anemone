@@ -72,7 +72,8 @@
                     "type": "string"
                 },
                 "cpu": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Explicit QEMU CPU model; provider defaults are not part of the Platform contract."
                 },
                 "smp": {
                     "type": "integer",
@@ -82,7 +83,8 @@
                     "type": "string"
                 },
                 "bios": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Optional explicit QEMU BIOS argument. Omission emits no -bios option."
                 },
                 "args": {
                     "type": "array",
@@ -121,6 +123,7 @@
             },
             "required": [
                 "machine",
+                "cpu",
                 "smp",
                 "memory"
             ],
