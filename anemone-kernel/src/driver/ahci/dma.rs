@@ -24,6 +24,12 @@ enum CommandTableOffset {
 const COMMAND_TABLE_BYTES: usize = 0x90;
 /// Largest transfer representable by one AHCI physical region descriptor.
 const MAX_PRD_BYTES: usize = 4 * 1024 * 1024;
+static_assert!(AHCI_BOUNCE_KB > 0, "AHCI_BOUNCE_KB must be non-zero");
+static_assert!(
+    AHCI_BOUNCE_KB <= MAX_PRD_BYTES / 1024,
+    "AHCI_BOUNCE_KB exceeds one physical region descriptor"
+);
+const BOUNCE_BYTES: usize = AHCI_BOUNCE_KB * 1024;
 /// DWORD count of the register host-to-device FIS placed in a command table.
 const COMMAND_FIS_DWORDS: u16 = (COMMAND_FIS_BYTES / core::mem::size_of::<u32>()) as u16;
 
@@ -64,7 +70,6 @@ static_assert!((MetadataOffset::CommandTable as usize).is_multiple_of(128));
 static_assert!(
     MetadataOffset::CommandTable as usize + COMMAND_TABLE_BYTES <= PagingArch::PAGE_SIZE_BYTES
 );
-
 /// DMA-owned command metadata and data bounce buffer for one AHCI port.
 pub(super) struct AhciPortDma {
     metadata: DmaRegion,
@@ -80,10 +85,7 @@ impl AhciPortDma {
     /// mask.
     pub(super) fn new(effective_mask: u64) -> Result<Self, SysError> {
         let metadata = dma_alloc(PagingArch::PAGE_SIZE_BYTES)?;
-        let bounce_len = AHCI_BOUNCE_KB
-            .checked_mul(1024)
-            .filter(|bytes| *bytes != 0 && *bytes <= MAX_PRD_BYTES)
-            .ok_or(SysError::InvalidArgument)?;
+        let bounce_len = BOUNCE_BYTES;
         let bounce = dma_alloc(bounce_len)?;
         let metadata_phys = metadata.ppn().to_phys_addr().get();
         let bounce_phys = bounce.ppn().to_phys_addr().get();

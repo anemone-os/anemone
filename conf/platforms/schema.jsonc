@@ -31,33 +31,26 @@
             "description": "Guest-visible machine and kernel placement constants.",
             "properties": {
                 "phys_ram_start": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "integer"
                 },
                 "max_phys_ram_size": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "integer"
                 },
                 "kernel_la_base": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "integer"
                 },
                 "kernel_va_base": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "integer"
                 },
                 "earlycon_reg": {
                     "type": "integer",
-                    "minimum": 0,
                     "description": "Physical address of the early console register."
                 },
                 "max_phys_cpu_id": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "integer"
                 },
                 "frame_section_shift_mb": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "integer"
                 }
             },
             "required": [

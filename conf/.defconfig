@@ -18,7 +18,7 @@ tid_reuse = false # Reuse ordinary TIDs after their owning handles are dropped
 bootstrap_heap_shift_kb = 10 # Size of bootstrap heap as a power of 2 in KB
 log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
 log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
-print_log_level = 0 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; capped by record_log_level
+print_log_level = 0 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; must not exceed record_log_level
 record_log_level = 7 # Maximum log level recorded: Emerg=0 ... Debug=7; higher levels are no-ops
 kstack_shift_kb = 9 # Kernel stack size as a power of 2 in KB
 remap_shift_gb = 6 # Size of remap region as a power of 2 in GB

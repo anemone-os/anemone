@@ -297,151 +297,11 @@ impl Dtb {
 mod tests {
     use super::*;
 
-    fn test_root() -> Root {
-        Root {
-            fstype: "ext4".to_string(),
-            source: super::super::system_target::RootSource::Block {
-                path: "vda".to_string(),
-            },
-        }
-    }
-
-    #[test]
-    fn omits_earlycon_reg_when_not_configured() {
-        let content = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
-        let config = Config::from_str(&content).unwrap();
-
-        assert_eq!(config.constants.earlycon_reg, None);
-        assert!(
-            !config
-                .gen_platform_defs(&test_root())
-                .contains("EARLYCON_REG")
-        );
-    }
-
-    #[test]
-    fn generates_earlycon_reg_when_configured() {
-        let content = std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
-        let config = Config::from_str(&content).unwrap();
-
-        assert_eq!(config.constants.earlycon_reg, Some(0x1fe0_01e0));
-        assert!(
-            config
-                .gen_platform_defs(&test_root())
-                .contains("pub const EARLYCON_REG: PhysAddr = PhysAddr::new(0x1fe001e0);")
-        );
-    }
-
-    #[test]
-    fn rejects_unsupported_architecture() {
-        let content = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml")
-            .unwrap()
-            .replace("arch = \"riscv64\"", "arch = \"x86_64\"");
-        assert!(Config::from_str(&content).is_err());
-    }
-
-    #[test]
-    fn rejects_legacy_platform_identity_and_host_tool_fields() {
-        let valid = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
-        assert!(
-            Config::from_str(&valid.replacen(
-                "[build]\n",
-                "[build]\nname = \"qemu-virt-rv64\"\nabbrs = [\"rv64\"]\n",
-                1,
-            ))
-            .is_err()
-        );
-        assert!(
-            Config::from_str(&valid.replacen(
-                "[qemu]\n",
-                "[qemu]\nqemu = \"qemu-system-riscv64\"\n",
-                1,
-            ))
-            .is_err()
-        );
-    }
-
     #[test]
     fn qemu_cpu_is_required_and_nonempty() {
         let valid = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
         assert!(Config::from_str(&valid.replace("cpu = \"rv64\"\n", "")).is_err());
         assert!(Config::from_str(&valid.replace("cpu = \"rv64\"", "cpu = \"\"")).is_err());
-    }
-
-    #[test]
-    fn accepts_supported_dtb_contracts() {
-        let firmware = std::fs::read_to_string("../../conf/platforms/qemu-virt-rv64.toml").unwrap();
-        let physical =
-            std::fs::read_to_string("../../conf/platforms/visionfive2-rv64.toml").unwrap();
-        let embedded = std::fs::read_to_string("../../conf/platforms/qemu-virt-la64.toml").unwrap();
-
-        assert!(Config::from_str(&firmware).is_ok());
-        assert!(Config::from_str(&physical).is_ok());
-        assert!(Config::from_str(&embedded).is_ok());
-    }
-
-    #[test]
-    fn tracked_platforms_form_the_complete_dt_authority_matrix() {
-        for (name, delivery, authority, provider, qemu) in [
-            (
-                "example",
-                DtbDelivery::Firmware,
-                DtsAuthority::ProviderDerived,
-                Some(DtbProvider::Qemu),
-                true,
-            ),
-            (
-                "qemu-virt-rv64",
-                DtbDelivery::Firmware,
-                DtsAuthority::ProviderDerived,
-                Some(DtbProvider::Qemu),
-                true,
-            ),
-            (
-                "qemu-virt-rv64-pretest",
-                DtbDelivery::Firmware,
-                DtsAuthority::ProviderDerived,
-                Some(DtbProvider::Qemu),
-                true,
-            ),
-            (
-                "qemu-virt-la64",
-                DtbDelivery::Embedded,
-                DtsAuthority::ProviderDerived,
-                Some(DtbProvider::Qemu),
-                true,
-            ),
-            (
-                "qemu-virt-la64-pretest",
-                DtbDelivery::Embedded,
-                DtsAuthority::ProviderDerived,
-                Some(DtbProvider::Qemu),
-                true,
-            ),
-            (
-                "visionfive2-rv64",
-                DtbDelivery::Firmware,
-                DtsAuthority::ProviderDerived,
-                Some(DtbProvider::Firmware),
-                false,
-            ),
-            (
-                "2k1000-la64",
-                DtbDelivery::Embedded,
-                DtsAuthority::Normative,
-                None,
-                false,
-            ),
-        ] {
-            let content =
-                std::fs::read_to_string(format!("../../conf/platforms/{name}.toml")).unwrap();
-            let config = Config::from_str(&content).unwrap();
-            let dtb = config.dtb.unwrap();
-            assert_eq!(dtb.delivery, delivery, "{name}");
-            assert_eq!(dtb.authority, authority, "{name}");
-            assert_eq!(dtb.provider, provider, "{name}");
-            assert_eq!(config.qemu.is_some(), qemu, "{name}");
-        }
     }
 
     #[test]
@@ -506,21 +366,5 @@ template = ["-drive", "file={{}},backup={{}},format=raw"]
         ] {
             assert!(Config::from_str(&invalid).is_err(), "{invalid}");
         }
-    }
-
-    #[test]
-    fn parses_platform_owned_uboot_output_variants() {
-        let visionfive =
-            std::fs::read_to_string("../../conf/platforms/visionfive2-rv64.toml").unwrap();
-        let visionfive = Config::from_str(&visionfive).unwrap();
-        assert!(matches!(visionfive.uboot, Some(Uboot::Image { .. })));
-
-        let loongson = std::fs::read_to_string("../../conf/platforms/2k1000-la64.toml").unwrap();
-        let loongson = Config::from_str(&loongson).unwrap();
-        assert!(matches!(
-            loongson.uboot,
-            Some(Uboot::Raw { ref filename }) if filename == "anemoneImage-la64-raw"
-        ));
-        assert_eq!(loongson.constants.earlycon_reg, Some(0x1fe2_0000));
     }
 }

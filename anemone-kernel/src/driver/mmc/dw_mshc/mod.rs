@@ -22,6 +22,11 @@ use crate::{
     prelude::*,
 };
 
+static_assert!(
+    DW_MSHC_POLL_TIMEOUT_MS > 0,
+    "DW_MSHC_POLL_TIMEOUT_MS must be non-zero"
+);
+
 #[derive(Debug, KObject, Driver)]
 /// Platform-bus wrapper; the controller itself is not a second `Device`.
 struct DwMshcPlatformDriver {

@@ -22,6 +22,32 @@ use crate::{
     utils::any_opaque::AnyOpaque,
 };
 
+static_assert!(
+    AHCI_HBA_RESET_TIMEOUT_MS > 0,
+    "AHCI_HBA_RESET_TIMEOUT_MS must be non-zero"
+);
+static_assert!(
+    AHCI_ENGINE_TIMEOUT_MS > 0,
+    "AHCI_ENGINE_TIMEOUT_MS must be non-zero"
+);
+static_assert!(
+    AHCI_PORT_TIMEOUT_MS > 0,
+    "AHCI_PORT_TIMEOUT_MS must be non-zero"
+);
+static_assert!(
+    AHCI_COMMAND_TIMEOUT_MS > 0,
+    "AHCI_COMMAND_TIMEOUT_MS must be non-zero"
+);
+static_assert!(AHCI_READ_WARN_MS > 0, "AHCI_READ_WARN_MS must be non-zero");
+static_assert!(
+    AHCI_READ_TIMEOUT_MS > 0,
+    "AHCI_READ_TIMEOUT_MS must be non-zero"
+);
+static_assert!(
+    AHCI_READ_WARN_MS < AHCI_READ_TIMEOUT_MS,
+    "AHCI_READ_WARN_MS must be less than AHCI_READ_TIMEOUT_MS"
+);
+
 const fn devnum_for(id: usize) -> BlockDevNum {
     BlockDevNum::new(MajorNum::new(devnum::block::major::SCSI), MinorNum::new(id))
 }

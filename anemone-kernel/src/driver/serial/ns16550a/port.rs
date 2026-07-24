@@ -16,6 +16,23 @@ use super::{
     regs::{InterruptReason, Ns16550ARegisters, RxSample},
 };
 
+static_assert!(
+    TTY_RAW_RX_CAPACITY_BYTES > 0,
+    "TTY_RAW_RX_CAPACITY_BYTES must be non-zero"
+);
+static_assert!(
+    NS16550A_IRQ_RX_BUDGET_BYTES > 0,
+    "NS16550A_IRQ_RX_BUDGET_BYTES must be non-zero"
+);
+static_assert!(
+    NS16550A_TX_BATCH_BYTES > 0,
+    "NS16550A_TX_BATCH_BYTES must be non-zero"
+);
+static_assert!(
+    NS16550A_TX_POLL_ITERATIONS > 0,
+    "NS16550A_TX_POLL_ITERATIONS must be non-zero"
+);
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct AppliedLine {
     /// Immutable boot-applied line truth. Stage 1 does not expose it yet, but a

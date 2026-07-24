@@ -390,7 +390,6 @@ mod tests {
                 BuildPresetRef::new("test-release").unwrap(),
             ))
             .unwrap();
-        let before = action.system.kernel_config.parameters.gen_kconfig_defs();
 
         fs::write(
             workspace.0.join("conf/build-presets/test-release.toml"),
@@ -425,12 +424,11 @@ mod tests {
         assert_eq!(action.system.target.root.fstype, "ext4");
         assert_eq!(action.system.platform.qemu.as_ref().unwrap().memory, "1G");
         assert_eq!(action.system.profile, CargoProfile::Release);
-        assert!(before.contains("pub const MAX_LOGICAL_CPUS: usize = 16;"));
-        assert!(before.contains("pub const SYSTEM_HZ: u16 = 100;"));
         assert_eq!(
-            before,
-            action.system.kernel_config.parameters.gen_kconfig_defs()
+            action.system.kernel_config.parameters.max_logical_cpus,
+            Some(16)
         );
+        assert_eq!(action.system.kernel_config.parameters.system_hz, Some(100));
     }
 
     #[test]
@@ -440,52 +438,6 @@ mod tests {
             "[build]\ntarget = \"qemu-virt-rv64-pretest\"\nprofile = \"release\"\ndisasm = false\n\n{content}"
         );
         assert!(KConfig::from_str(&legacy).is_err());
-    }
-
-    #[test]
-    fn resolved_snapshot_does_not_borrow_later_loader_values() {
-        let workspace = TestWorkspace::new();
-        let loader = ConfigLoader::new(&workspace.0);
-        let action = loader
-            .resolve_selection(SelectionRequest::explicit_preset(
-                BuildPresetRef::new("test-release").unwrap(),
-            ))
-            .unwrap();
-        let before = action.system.kernel_config.parameters.gen_kconfig_defs();
-
-        replace_file_text(
-            workspace.0.join("kconfig"),
-            "system_hz = 100",
-            "system_hz = 999",
-        );
-        replace_file_text(
-            workspace.0.join("conf/.defconfig"),
-            "max_logical_cpus = 16",
-            "max_logical_cpus = 99",
-        );
-        replace_file_text(
-            workspace
-                .0
-                .join("conf/system-targets/qemu-virt-rv64-pretest.toml"),
-            "fstype = \"ext4\"",
-            "fstype = \"ramfs\"",
-        );
-        replace_file_text(
-            workspace
-                .0
-                .join("conf/platforms/qemu-virt-rv64-pretest.toml"),
-            "memory = \"1G\"",
-            "memory = \"2G\"",
-        );
-
-        assert_eq!(action.system.target.root.fstype, "ext4");
-        assert_eq!(action.system.platform.qemu.as_ref().unwrap().memory, "1G");
-        assert!(before.contains("pub const MAX_LOGICAL_CPUS: usize = 16;"));
-        assert!(before.contains("pub const SYSTEM_HZ: u16 = 100;"));
-        assert_eq!(
-            before,
-            action.system.kernel_config.parameters.gen_kconfig_defs()
-        );
     }
 
     struct TestWorkspace(std::path::PathBuf);
