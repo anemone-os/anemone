@@ -5,7 +5,7 @@ mod port;
 mod relation;
 mod terminal;
 
-pub(crate) use endpoint::{open_boot_terminal, prepare_system_boot};
+pub(crate) use endpoint::prepare_system_boot;
 pub(crate) use port::{TtyLineSnapshot, TtyParity, TtyPort, TtyPortId};
 pub(crate) use relation::detach_exiting_session;
 

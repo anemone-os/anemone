@@ -29,6 +29,7 @@ pub use devnum::{BlockDevNum, CharDevNum, MajorNum, MinorNum};
 
 // subsystems
 pub mod block;
+pub(crate) mod boot_io;
 pub mod char;
 pub mod console;
 pub mod mmc;

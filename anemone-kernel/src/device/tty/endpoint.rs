@@ -2,7 +2,7 @@ use core::fmt::Write as _;
 
 use crate::{
     device::{
-        console,
+        console::ConsoleTerminalIdentity,
         devnum::{self, MINOR_BITS},
     },
     fs::devfs::{DevfsNodeAttr, DevfsNodeOps, DevfsPublish, publish as devfs_publish},
@@ -67,9 +67,10 @@ struct PublishedEndpoint {
 
 struct PublishedEndpoints {
     endpoints: Vec<PublishedEndpoint>,
-    /// Pre-published boot files. Slot occupancy is the only handoff truth;
-    /// files are consumed exactly once by `exec_init_proc()`.
-    boot_files: SpinLock<[Option<File>; 3]>,
+    /// Stable selected-endpoint snapshot used by the anonymous boot inode for
+    /// inherited `fstat`/reopen behavior. The indexed endpoint remains the
+    /// authoritative source of terminal identity and published device number.
+    boot_index: usize,
 }
 
 static PUBLISHED_ENDPOINTS: MonoOnce<PublishedEndpoints> = unsafe { MonoOnce::new() };
@@ -115,10 +116,13 @@ pub(crate) struct TtyBootPublication {
     relations: relation::PreparedRelations,
     endpoints: Vec<PreparedEndpoint>,
     published: Vec<PublishedEndpoint>,
-    boot_files: [Option<File>; 3],
+    boot_index: usize,
+    boot_files: [File; 3],
 }
 
-pub(crate) fn prepare_system_boot() -> Result<TtyBootPublication, SysError> {
+pub(crate) fn prepare_system_boot(
+    selected: Option<&ConsoleTerminalIdentity>,
+) -> Result<TtyBootPublication, SysError> {
     let port_count = super::UNPUBLISHED_PORTS.lock().len();
     let mut endpoints = Vec::new();
     let mut identities = Vec::new();
@@ -171,11 +175,8 @@ pub(crate) fn prepare_system_boot() -> Result<TtyBootPublication, SysError> {
         identities.windows(2).all(|pair| pair[0] < pair[1]),
         "TTY attachment registry lost its unique sorted identity invariant"
     );
-    let selected = console::selected_terminal_identity();
-    let selected_index = select_identity_index(
-        &identities,
-        selected.as_ref().map(|identity| identity.as_str()),
-    )?;
+    let selected_index =
+        select_identity_index(&identities, selected.map(ConsoleTerminalIdentity::as_str))?;
 
     let mut prepared = Vec::new();
     prepared
@@ -208,18 +209,9 @@ pub(crate) fn prepare_system_boot() -> Result<TtyBootPublication, SysError> {
     let boot_path = anony_new_inode(InodeType::Char, &BOOT_TTY_INODE_OPS, NilOpaque::new())?;
     let selected = &prepared[selected_index].endpoint;
     let boot_files = [
-        Some(anony_open_with(
-            &boot_path,
-            opened_endpoint_file(selected)?,
-        )?),
-        Some(anony_open_with(
-            &boot_path,
-            opened_endpoint_file(selected)?,
-        )?),
-        Some(anony_open_with(
-            &boot_path,
-            opened_endpoint_file(selected)?,
-        )?),
+        anony_open_with(&boot_path, opened_endpoint_file(selected)?)?,
+        anony_open_with(&boot_path, opened_endpoint_file(selected)?)?,
+        anony_open_with(&boot_path, opened_endpoint_file(selected)?)?,
     ];
     let mut published = Vec::new();
     published
@@ -236,6 +228,7 @@ pub(crate) fn prepare_system_boot() -> Result<TtyBootPublication, SysError> {
         relations,
         endpoints: prepared,
         published,
+        boot_index: selected_index,
         boot_files,
     })
 }
@@ -245,12 +238,13 @@ pub(crate) fn prepare_system_boot() -> Result<TtyBootPublication, SysError> {
 /// error is boot-fatal at the caller; runtime unpublish/renumber is
 /// deliberately outside the first-version protocol.
 impl TtyBootPublication {
-    pub(crate) fn publish(self) -> Result<(), SysError> {
+    pub(crate) fn publish(self) -> Result<[File; 3], SysError> {
         let Self {
             controlling_publish,
             relations,
             endpoints,
             published,
+            boot_index,
             boot_files,
         } = self;
 
@@ -272,28 +266,26 @@ impl TtyBootPublication {
             devfs_publish(prepared.publish)?;
         }
 
+        assert!(
+            boot_index < published.len(),
+            "TTY boot selection escaped its published endpoint snapshot"
+        );
         PUBLISHED_ENDPOINTS.init(|slot| {
             slot.write(PublishedEndpoints {
                 endpoints: published,
-                boot_files: SpinLock::new(boot_files),
+                boot_index,
             });
         });
-        Ok(())
+        Ok(boot_files)
     }
 }
 
 fn selected_endpoint() -> Result<&'static PublishedEndpoint, SysError> {
     let registry = PUBLISHED_ENDPOINTS.get();
-    let selected = console::selected_terminal_identity();
-    let index = match selected.as_ref() {
-        Some(selected) => registry
-            .endpoints
-            .iter()
-            .position(|entry| entry.endpoint.port.id().as_str() == selected.as_str())
-            .unwrap_or(0),
-        None => 0,
-    };
-    registry.endpoints.get(index).ok_or(SysError::NotFound)
+    registry
+        .endpoints
+        .get(registry.boot_index)
+        .ok_or(SysError::NotFound)
 }
 
 fn opened_endpoint_file(endpoint: &Arc<TtyEndpoint>) -> Result<OpenedFile, SysError> {
@@ -308,16 +300,6 @@ fn opened_endpoint_file(endpoint: &Arc<TtyEndpoint>) -> Result<OpenedFile, SysEr
 
 fn selected_opened_file() -> Result<OpenedFile, SysError> {
     opened_endpoint_file(&selected_endpoint()?.endpoint)
-}
-
-pub(crate) fn open_boot_terminal() -> Result<File, SysError> {
-    let registry = PUBLISHED_ENDPOINTS.get();
-    registry
-        .boot_files
-        .lock()
-        .iter_mut()
-        .find_map(Option::take)
-        .ok_or(SysError::NotFound)
 }
 
 fn endpoint_stat(inode: &InodeRef, rdev: DeviceId) -> InodeStat {

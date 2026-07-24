@@ -122,7 +122,7 @@ fn ls_dir(path: &Path) {
 
 /// According to Anemone Boot Protocol, /.anemone/init is a file containing a
 /// absolute path pointing to the init process executable.
-fn exec_init_proc() {
+fn exec_init_proc(init_stdio: device::boot_io::InitStdio) {
     const INIT_PATH: &str = "/.anemone/init";
 
     let init_path = vfs_read_to_string(PathResolution::normal(&Path::new(INIT_PATH)))
@@ -131,6 +131,7 @@ fn exec_init_proc() {
     // open initial stdio fds so that they can be inherited.
     {
         let kinit = get_current_task();
+        let [stdin, stdout, stderr] = init_stdio.into_files();
         let open_stdio = |file: File, access| {
             let status = FileStatusFlags::empty();
             // Boot stdio uses three normal files backed by one shared Terminal;
@@ -148,18 +149,9 @@ fn exec_init_proc() {
                 )
                 .expect("failed to open initial stdio fd");
         };
-        open_stdio(
-            device::tty::open_boot_terminal().expect("failed to open boot TTY stdin"),
-            OpenAccessMode::Read,
-        );
-        open_stdio(
-            device::tty::open_boot_terminal().expect("failed to open boot TTY stdout"),
-            OpenAccessMode::Write,
-        );
-        open_stdio(
-            device::tty::open_boot_terminal().expect("failed to open boot TTY stderr"),
-            OpenAccessMode::Write,
-        );
+        open_stdio(stdin, OpenAccessMode::Read);
+        open_stdio(stdout, OpenAccessMode::Write);
+        open_stdio(stderr, OpenAccessMode::Write);
     }
 
     // set up initial root and cwd for inheritance.
@@ -188,7 +180,7 @@ fn exec_init_proc() {
 ///   sie::stimer and sie::sext interrupts should be disabled.)
 unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     let bsp_id = CpuId::new(bsp_id);
-    unsafe {
+    let init_stdio = unsafe {
         kinfoln!("BSP {} kinit running on {}...", bsp_id, current_task_id());
         syscall::register_syscall_handlers();
         fs::register_filesystem_drivers();
@@ -204,7 +196,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         IntrArch::init_local_irq();
         task::kthread::init_kthreadd();
 
-        device::console::on_system_boot();
+        let console_selection = device::console::finish_boot_selection();
         INIT_SYNC_COUNTER.sync_with_counter();
 
         FINISH_SYNC_COUNTER.sync_with_counter();
@@ -212,18 +204,11 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         // has completed local init and marked itself online before late services
         // publish their workers. `kthreadd` remains a hand-built boot invariant.
         run_initcalls(InitCallLevel::Late);
-        let console_publication =
-            device::console::prepare_devfs().expect("failed to prepare console-owned /dev/console");
-        let tty_publication =
-            device::tty::prepare_system_boot().expect("failed to prepare boot TTY endpoints");
-        console_publication
-            .publish()
-            .expect("failed to publish console-owned /dev/console");
-        tty_publication
-            .publish()
-            .expect("failed to publish boot TTY endpoints");
+        let init_stdio = device::boot_io::finalize(console_selection)
+            .expect("failed to finalize boot console and TTY endpoints");
         kinfoln!("BSP {} kinit finished", bsp_id);
-    }
+        init_stdio
+    };
 
     mount_rootfs();
 
@@ -235,7 +220,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         }
     }
 
-    exec_init_proc();
+    exec_init_proc(init_stdio);
 }
 
 fn parse_bootargs() {

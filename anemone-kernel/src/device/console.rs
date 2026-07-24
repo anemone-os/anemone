@@ -70,7 +70,7 @@ bitflags! {
         const REPLAY = 0b0010;
         /// Whether the console is enabled.
         const ENABLED = 0b0100;
-        /// Enable the console during [on_system_boot()]
+        /// Enable the console during [finish_boot_selection()]
         const ENABLE_ON_BOOT = 0b1000;
     }
 }
@@ -78,15 +78,16 @@ bitflags! {
 struct ConsoleSubSys {
     consoles: SpinLock<Vec<ConsoleDesc>>,
     /// Authoritative stable boot-selection snapshot. This is not a diagnostic
-    /// cache: TTY consumes it after Late init without copying console policy.
-    selected_terminal: MonoOnce<Option<ConsoleTerminalIdentity>>,
+    /// cache: the boot coordinator passes it to TTY after Late init without
+    /// copying console policy.
+    selection: MonoOnce<ConsoleSelection>,
 }
 
 impl ConsoleSubSys {
     fn new() -> Self {
         Self {
             consoles: SpinLock::new(Vec::new()),
-            selected_terminal: unsafe { MonoOnce::new() },
+            selection: unsafe { MonoOnce::new() },
         }
     }
 }
@@ -115,6 +116,17 @@ impl ConsoleTerminalIdentity {
 
     pub(crate) fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+}
+
+/// Immutable capability for the console owner's finalized boot selection.
+pub(crate) struct ConsoleSelection {
+    terminal_identity: Option<ConsoleTerminalIdentity>,
+}
+
+impl ConsoleSelection {
+    pub(crate) fn terminal_identity(&self) -> Option<&ConsoleTerminalIdentity> {
+        self.terminal_identity.as_ref()
     }
 }
 
@@ -165,15 +177,13 @@ pub fn output(msg: &str) {
         .for_each(|desc| desc.ops.output(msg));
 }
 
-/// If there are any non-early consoles registered but none of them is enabled,
-/// enable the first one. If there are only early consoles registered, keep them
-/// as is and print a warning message, as this might indicate a problem with the
-/// console registration order.
+/// Finalize the boot console selection after every boot console has registered.
 ///
-/// # Safety
-///
-/// Timing.
-pub unsafe fn on_system_boot() {
+/// The BSP calls this exactly once after physical/virtual device discovery and
+/// before Late services or boot endpoint publication. Calling it earlier would
+/// freeze an incomplete selection; the returned capability is the only input
+/// through which the boot coordinator may ask TTY to resolve a terminal.
+pub(crate) fn finish_boot_selection() -> &'static ConsoleSelection {
     let mut consoles = SUBSYS.consoles.lock_irqsave();
 
     let mut has_normal_con = false;
@@ -195,12 +205,12 @@ pub unsafe fn on_system_boot() {
         let desc = consoles.first_mut().unwrap();
         desc.enable();
     }
-    let selected_terminal = consoles
+    let terminal_identity = consoles
         .iter()
         .find(|desc| desc.enabled())
         .and_then(|desc| desc.terminal_identity.clone());
-    SUBSYS.selected_terminal.init(|slot| {
-        slot.write(selected_terminal);
+    SUBSYS.selection.init(|slot| {
+        slot.write(ConsoleSelection { terminal_identity });
     });
     drop(consoles);
 
@@ -209,10 +219,8 @@ pub unsafe fn on_system_boot() {
     } else {
         kinfoln!("normal console(s) registered, early consoles have been unregistered");
     }
-}
 
-pub(crate) fn selected_terminal_identity() -> Option<ConsoleTerminalIdentity> {
-    SUBSYS.selected_terminal.get().clone()
+    SUBSYS.selection.get()
 }
 
 fn console_read(

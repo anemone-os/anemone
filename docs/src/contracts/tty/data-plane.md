@@ -6,7 +6,7 @@
 **参与领域：** serial driver / console / TTY / devfs / VFS / boot stdio
 **覆盖范围：** boot-applied serial capability、共享 Terminal truth、canonical/raw input、byte output、readiness、termios/winsize data-plane 与稳定 `/dev/ttyS<N>` publication
 **不覆盖：** controlling-terminal relation、caller-relative `/dev/tty`、foreground/background access、terminal-generated signal、relation cleanup、runtime line reconfiguration、hangup、hotplug 或 PTY
-**实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/driver/serial/ns16550a/`、`anemone-kernel/src/device/{console,devnum}.rs`、`anemone-kernel/src/main.rs`
+**实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/driver/serial/ns16550a/`、`anemone-kernel/src/device/{boot_io,console,devnum}.rs`、`anemone-kernel/src/main.rs`
 **依赖：** None；本页定义后续 TTY relation/job-control contract 使用的数据面 baseline
 **Companion Contract：** [TTY controlling relation 与 job control](./job-control.md) 中的 `TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001`（Active）
 **最后核验：** 2026-07-24
