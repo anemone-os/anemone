@@ -20,6 +20,10 @@ fn local_run_cmd(cmd: &str, args: &[&str], envs: &[&str]) {
 
 /// local tests for development.
 fn run_local_tests() {
+    println!("user-test: running ioctl test...");
+    local_run_cmd("/bin/ioctl-test", &["ioctl-test"], &[]);
+    println!("user-test: ioctl test finished.");
+
     // 1. signal test
     // println!("user-test: running signal test...");
     // local_run_cmd("/bin/signal-test", &["signal-test"], &[]);

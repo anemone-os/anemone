@@ -437,6 +437,7 @@ pub mod linux {
         }
 
         pub const FIONREAD: u32 = 0x541B;
+        pub const FIONBIO: u32 = 0x5421;
 
         pub const BLKGETSIZE: u32 = io(0x12, 96);
         pub const BLKSSZGET: u32 = io(0x12, 104);

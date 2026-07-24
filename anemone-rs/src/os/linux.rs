@@ -1,7 +1,7 @@
 pub mod fs {
     use alloc::ffi::CString;
     use anemone_abi::{
-        fs::linux::{fcntl, open, poll::PollFd, select::FdSet, stat::Stat},
+        fs::linux::{fcntl, ioctl, open, poll::PollFd, select::FdSet, stat::Stat},
         time::linux::TimeSpec,
     };
     use bitflags::bitflags;
@@ -91,12 +91,26 @@ pub mod fs {
         fs::dup3(oldfd as u64, newfd as u64, flags as u64).map(|fd| fd as Fd)
     }
 
+    pub fn dup(fd: Fd) -> Result<Fd, Errno> {
+        fs::dup(fd as u64).map(|fd| fd as Fd)
+    }
+
     pub fn fcntl_getfl(fd: Fd) -> Result<u32, Errno> {
         fs::fcntl(fd as u64, fcntl::F_GETFL as u64, 0).map(|flags| flags as u32)
     }
 
     pub fn fcntl_setfl(fd: Fd, flags: u32) -> Result<(), Errno> {
         fs::fcntl(fd as u64, fcntl::F_SETFL as u64, flags as u64).map(|_| ())
+    }
+
+    pub fn ioctl_set_nonblocking(fd: Fd, enabled: bool) -> Result<(), Errno> {
+        let enabled = if enabled { 1i32 } else { 0i32 };
+        fs::ioctl(
+            fd as u64,
+            ioctl::FIONBIO as u64,
+            &enabled as *const i32 as u64,
+        )
+        .map(|_| ())
     }
 
     pub fn ppoll(fds: &mut [PollFd], timeout: Option<&TimeSpec>) -> Result<usize, Errno> {

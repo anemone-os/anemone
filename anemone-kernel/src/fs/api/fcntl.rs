@@ -130,23 +130,8 @@ fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
             // F_SETFL can change only a narrow dynamic subset. Access mode,
             // O_PATH, O_CLOEXEC, creation flags, and saved compatibility bits
             // stay fixed on the open file description / fd.
-            let mut flags = file.file_flags();
             let settable = FileStatusFlags::settable_from_linux_flags(raw_flags);
-            flags.set(
-                FileStatusFlags::APPEND,
-                settable.contains(FileStatusFlags::APPEND),
-            );
-            flags.set(
-                FileStatusFlags::NONBLOCK,
-                settable.contains(FileStatusFlags::NONBLOCK),
-            );
-            flags.set(
-                FileStatusFlags::DIRECT,
-                settable.contains(FileStatusFlags::DIRECT),
-            );
-            file.vfs_file()
-                .check_status_flags(flags.to_file_op_status_flags())?;
-            file.set_file_flags(flags);
+            file.replace_settable_file_flags(settable)?;
             Ok(0)
         },
         FcntlCmd::GetPipeSize | FcntlCmd::SetPipeSize => {

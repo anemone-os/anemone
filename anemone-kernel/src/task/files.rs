@@ -224,6 +224,30 @@ impl Drop for FdReservation {
     }
 }
 
+fn update_status_flags(
+    status_flags: &SpinLock<FileStatusFlags>,
+    update: impl Fn(FileStatusFlags) -> FileStatusFlags,
+    mut validate: impl FnMut(FileStatusFlags) -> Result<(), SysError>,
+) -> Result<(), SysError> {
+    loop {
+        let observed = *status_flags.lock();
+        let candidate = update(observed);
+
+        // Backend validation must remain outside the opened-description lock:
+        // FileOps may inspect its owning object and must not inherit a task/files
+        // lock-order dependency. Recheck the snapshot before committing so a
+        // concurrent F_SETFL or FIONBIO update cannot be overwritten.
+        validate(candidate)?;
+
+        let mut current = status_flags.lock();
+        if *current != observed {
+            continue;
+        }
+        *current = candidate;
+        return Ok(());
+    }
+}
+
 // re-export FileOps here, with permission checked.
 //
 // TODO: we only checked permission of fd, but we haven't checked permission of
@@ -320,8 +344,46 @@ impl FileDesc {
         Ok(FcntlCtx::new(cmd, arg, access))
     }
 
-    pub fn set_file_flags(&self, flags: FileStatusFlags) {
-        *self.pfile.status_flags.lock() = flags;
+    fn update_file_flags(
+        &self,
+        update: impl Fn(FileStatusFlags) -> FileStatusFlags,
+    ) -> Result<(), SysError> {
+        update_status_flags(&self.pfile.status_flags, update, |candidate| {
+            self.pfile
+                .file
+                .check_status_flags(candidate.to_file_op_status_flags())
+        })
+    }
+
+    pub fn replace_settable_file_flags(&self, settable: FileStatusFlags) -> Result<(), SysError> {
+        let allowed = FileStatusFlags::APPEND | FileStatusFlags::NONBLOCK | FileStatusFlags::DIRECT;
+        assert!(
+            (settable - allowed).is_empty(),
+            "non-settable opened-description flags reached F_SETFL commit"
+        );
+
+        self.update_file_flags(|mut flags| {
+            flags.set(
+                FileStatusFlags::APPEND,
+                settable.contains(FileStatusFlags::APPEND),
+            );
+            flags.set(
+                FileStatusFlags::NONBLOCK,
+                settable.contains(FileStatusFlags::NONBLOCK),
+            );
+            flags.set(
+                FileStatusFlags::DIRECT,
+                settable.contains(FileStatusFlags::DIRECT),
+            );
+            flags
+        })
+    }
+
+    pub fn set_nonblocking(&self, enabled: bool) -> Result<(), SysError> {
+        self.update_file_flags(|mut flags| {
+            flags.set(FileStatusFlags::NONBLOCK, enabled);
+            flags
+        })
     }
 
     pub fn to_linux_getfl_flags(&self) -> u32 {
@@ -1343,5 +1405,61 @@ impl Task {
             let closed = files_state.write().close_range(first, last);
             Self::release_description_refs(closed);
         }
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod status_flag_kunits {
+    use core::cell::Cell;
+
+    use super::*;
+
+    #[kunit]
+    fn rejected_status_update_leaves_opened_description_unchanged() {
+        let status = SpinLock::new(FileStatusFlags::APPEND);
+
+        let error = update_status_flags(
+            &status,
+            |mut flags| {
+                flags.insert(FileStatusFlags::NONBLOCK);
+                flags
+            },
+            |_| Err(SysError::InvalidArgument),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, SysError::InvalidArgument);
+        assert_eq!(*status.lock(), FileStatusFlags::APPEND);
+    }
+
+    #[kunit]
+    fn status_update_retries_after_concurrent_commit() {
+        let status = SpinLock::new(FileStatusFlags::APPEND);
+        let validation_count = Cell::new(0usize);
+
+        update_status_flags(
+            &status,
+            |mut flags| {
+                flags.insert(FileStatusFlags::NONBLOCK);
+                flags
+            },
+            |_| {
+                let count = validation_count.get();
+                validation_count.set(count + 1);
+                if count == 0 {
+                    // Model another status writer committing after our snapshot
+                    // but before our compare-and-commit step.
+                    *status.lock() = FileStatusFlags::DIRECT;
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(validation_count.get(), 2);
+        assert_eq!(
+            *status.lock(),
+            FileStatusFlags::DIRECT | FileStatusFlags::NONBLOCK
+        );
     }
 }

@@ -3,7 +3,13 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/ioctl.2.html
 
-use crate::{prelude::*, syscall::handler::TryFromSyscallArg, task::files::Fd};
+use anemone_abi::fs::linux::ioctl::FIONBIO;
+
+use crate::{
+    prelude::*,
+    syscall::{handler::TryFromSyscallArg, user_access::UserReadPtr},
+    task::files::Fd,
+};
 
 fn lookup_ioctl_arg_fd(raw_fd: u64) -> Result<IoctlArgFile, SysError> {
     let fd = Fd::try_from_syscall_arg(raw_fd)?;
@@ -22,11 +28,20 @@ fn sys_ioctl(fd: Fd, cmd: u32, arg: u64) -> Result<u64, SysError> {
 
     let task = get_current_task();
     let file = task.get_fd(fd)?;
-    let target_access = file.ioctl_access();
-    if target_access.is_path_only() {
+    if file.is_path_only() {
         return Err(SysError::BadFileDescriptor);
     }
 
+    if cmd == FIONBIO {
+        let usp = task.clone_uspace_handle();
+        let enabled = usp.with_usp(|usp| {
+            Ok(UserReadPtr::<i32>::try_new(VirtAddr::new(arg), usp)?.read() != 0)
+        })?;
+        file.set_nonblocking(enabled)?;
+        return Ok(0);
+    }
+
+    let target_access = file.ioctl_access();
     let vfs_file = file.vfs_file().clone();
     let usp = task.clone_uspace_handle();
     drop(file);
