@@ -1,6 +1,4 @@
 [build]
-name = "2k1000-la64"
-abbrs = ["2k1000", "2k1"]
 arch = "loongarch64"
 exec_env = "sbi"
 
@@ -13,15 +11,10 @@ earlycon_reg = 0x1fe20000
 max_phys_cpu_id = 0
 frame_section_shift_mb = 7
 
-
-[rootfs]
-fstype = "ext4"
-source = { type = "block", path = "sda" }
-
 [dtb]
-type = "file"
-path = "arch/loongarch64/generated.dtb"
-source = "conf/platforms/2k1000-board.dtb"
+source = "conf/platforms/2k1000-board.dts"
+delivery = "embedded"
+authority = "normative"
 
 [uboot]
 type = "raw"

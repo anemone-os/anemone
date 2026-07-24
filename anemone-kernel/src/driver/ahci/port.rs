@@ -239,11 +239,8 @@ impl AhciPort {
             GlobalControl::AHCI_ENABLE.bits(),
         );
         let _ = self.regs.read_host(HostRegister::GlobalControl);
-        self.regs.update_host(
-            HostRegister::GlobalControl,
-            0,
-            GlobalControl::RESET.bits(),
-        );
+        self.regs
+            .update_host(HostRegister::GlobalControl, 0, GlobalControl::RESET.bits());
         let _ = self.regs.read_host(HostRegister::GlobalControl);
         if !self.poll_until(AHCI_HBA_RESET_TIMEOUT_MS, || {
             self.regs.read_host(HostRegister::GlobalControl) & GlobalControl::RESET.bits() == 0
@@ -256,7 +253,8 @@ impl AhciPort {
             GlobalControl::AHCI_ENABLE.bits(),
         );
         self.stop_engines()?;
-        self.regs.write_port(self.port, PortRegister::InterruptEnable, 0);
+        self.regs
+            .write_port(self.port, PortRegister::InterruptEnable, 0);
         self.program_dma_bases();
         self.clear_status();
 
@@ -277,17 +275,21 @@ impl AhciPort {
         if !self.regs.sata_status(self.port).device_present() {
             self.comreset()?;
         }
-        if !self.poll_until(AHCI_PORT_TIMEOUT_MS, || self.regs.task_file(self.port).ready()) {
+        if !self.poll_until(AHCI_PORT_TIMEOUT_MS, || {
+            self.regs.task_file(self.port).ready()
+        }) {
             return Err(AhciError::DeviceBusyTimeout);
         }
-        if self.regs.read_port(self.port, PortRegister::Signature)
-            != DeviceSignature::Ata as u32
-        {
+        if self.regs.read_port(self.port, PortRegister::Signature) != DeviceSignature::Ata as u32 {
             return Err(AhciError::UnsupportedController);
         }
 
-        self.regs
-            .update_port(self.port, PortRegister::Command, 0, PortCommand::START.bits());
+        self.regs.update_port(
+            self.port,
+            PortRegister::Command,
+            0,
+            PortCommand::START.bits(),
+        );
         Ok(())
     }
 
@@ -295,15 +297,21 @@ impl AhciPort {
     fn program_dma_bases(&self) {
         let command_list = self.dma.command_list_phys();
         let received_fis = self.dma.received_fis_phys();
-        self.regs
-            .write_port(self.port, PortRegister::CommandListBase, command_list as u32);
+        self.regs.write_port(
+            self.port,
+            PortRegister::CommandListBase,
+            command_list as u32,
+        );
         self.regs.write_port(
             self.port,
             PortRegister::CommandListBaseUpper,
             (command_list >> 32) as u32,
         );
-        self.regs
-            .write_port(self.port, PortRegister::ReceivedFisBase, received_fis as u32);
+        self.regs.write_port(
+            self.port,
+            PortRegister::ReceivedFisBase,
+            received_fis as u32,
+        );
         self.regs.write_port(
             self.port,
             PortRegister::ReceivedFisBaseUpper,
@@ -313,8 +321,12 @@ impl AhciPort {
 
     /// Stops command-list processing before disabling FIS reception.
     fn stop_engines(&self) -> Result<(), AhciError> {
-        self.regs
-            .update_port(self.port, PortRegister::Command, PortCommand::START.bits(), 0);
+        self.regs.update_port(
+            self.port,
+            PortRegister::Command,
+            PortCommand::START.bits(),
+            0,
+        );
         if !self.poll_until(AHCI_ENGINE_TIMEOUT_MS, || {
             self.regs.read_port(self.port, PortRegister::Command)
                 & PortCommand::COMMAND_LIST_RUNNING.bits()
@@ -339,14 +351,12 @@ impl AhciPort {
         Ok(())
     }
 
-    /// Performs the AHCI SControl COMRESET sequence and waits for link recovery.
+    /// Performs the AHCI SControl COMRESET sequence and waits for link
+    /// recovery.
     fn comreset(&self) -> Result<(), AhciError> {
         let baseline = self.regs.read_port(self.port, PortRegister::SataControl) & !0x0f;
-        self.regs.write_port(
-            self.port,
-            PortRegister::SataControl,
-            baseline | 1,
-        );
+        self.regs
+            .write_port(self.port, PortRegister::SataControl, baseline | 1);
         let start = Instant::now();
         while start.elapsed() < Duration::from_millis(COMRESET_ASSERT_MS) {
             core::hint::spin_loop();
@@ -398,7 +408,8 @@ impl AhciPort {
         result
     }
 
-    /// Issues slot zero and polls its interrupt, task-file, and transfer status.
+    /// Issues slot zero and polls its interrupt, task-file, and transfer
+    /// status.
     fn issue_and_wait(
         &mut self,
         data_len: usize,
@@ -435,7 +446,8 @@ impl AhciPort {
         let timeout = Duration::from_millis(AHCI_COMMAND_TIMEOUT_MS);
         let completion = loop {
             let interrupts = PortInterrupt::from_bits_retain(
-                self.regs.read_port(self.port, PortRegister::InterruptStatus),
+                self.regs
+                    .read_port(self.port, PortRegister::InterruptStatus),
             );
             let completed = !CommandIssue::from_bits_retain(
                 self.regs.read_port(self.port, PortRegister::CommandIssue),
@@ -462,7 +474,8 @@ impl AhciPort {
 
         self.dma.sync_for_cpu(data_len != 0);
         let interrupts = PortInterrupt::from_bits_retain(
-            self.regs.read_port(self.port, PortRegister::InterruptStatus),
+            self.regs
+                .read_port(self.port, PortRegister::InterruptStatus),
         );
         let task_file = self.regs.task_file(self.port);
         let link_present = self.regs.sata_status(self.port).device_present();
@@ -499,7 +512,8 @@ impl AhciPort {
                 self.regs.read_host(HostRegister::GlobalControl),
                 self.regs.read_host(HostRegister::InterruptStatus),
                 self.regs.read_port(self.port, PortRegister::Command),
-                self.regs.read_port(self.port, PortRegister::InterruptStatus),
+                self.regs
+                    .read_port(self.port, PortRegister::InterruptStatus),
                 self.regs.task_file(self.port).raw(),
                 self.regs.read_port(self.port, PortRegister::Signature),
                 self.regs.sata_status(self.port).raw(),
@@ -522,7 +536,8 @@ impl AhciPort {
                 self.regs.read_host(HostRegister::GlobalControl),
                 self.regs.read_host(HostRegister::InterruptStatus),
                 self.regs.read_port(self.port, PortRegister::Command),
-                self.regs.read_port(self.port, PortRegister::InterruptStatus),
+                self.regs
+                    .read_port(self.port, PortRegister::InterruptStatus),
                 self.regs.task_file(self.port).raw(),
                 self.regs.read_port(self.port, PortRegister::Signature),
                 self.regs.sata_status(self.port).raw(),
@@ -532,7 +547,8 @@ impl AhciPort {
         }
     }
 
-    /// Logs a failed request, attempts recovery, and maps it to the block errno domain.
+    /// Logs a failed request, attempts recovery, and maps it to the block errno
+    /// domain.
     fn finish_request(
         &mut self,
         phase: &str,
@@ -551,7 +567,9 @@ impl AhciPort {
 
     /// Restarts a still-connected port or leaves it permanently offline.
     fn recover_after_error(&mut self, error: AhciError) {
-        if matches!(error, AhciError::LinkLost) || !self.regs.sata_status(self.port).device_present() {
+        if matches!(error, AhciError::LinkLost)
+            || !self.regs.sata_status(self.port).device_present()
+        {
             self.readiness = PortReadiness::Offline;
             return;
         }
@@ -576,8 +594,12 @@ impl AhciPort {
             self.readiness = PortReadiness::Offline;
             return;
         }
-        self.regs
-            .update_port(self.port, PortRegister::Command, 0, PortCommand::START.bits());
+        self.regs.update_port(
+            self.port,
+            PortRegister::Command,
+            0,
+            PortCommand::START.bits(),
+        );
         self.readiness = PortReadiness::Ready;
     }
 
@@ -627,7 +649,8 @@ impl AhciPort {
             self.regs.read_host(HostRegister::GlobalControl),
             self.regs.read_host(HostRegister::InterruptStatus),
             self.regs.read_port(self.port, PortRegister::Command),
-            self.regs.read_port(self.port, PortRegister::InterruptStatus),
+            self.regs
+                .read_port(self.port, PortRegister::InterruptStatus),
             self.regs.task_file(self.port).raw(),
             self.regs.read_port(self.port, PortRegister::Signature),
             self.regs.sata_status(self.port).raw(),

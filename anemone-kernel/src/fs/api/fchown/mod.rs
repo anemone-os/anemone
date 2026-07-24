@@ -2,7 +2,7 @@
 //!
 //! References:
 //! - https://www.man7.org/linux/man-pages/man2/chown.2.html
-//! - `etc/linux-6.6.32/fs/open.c`
+//! - Linux 6.6.32 `fs/open.c`
 
 pub mod fchown;
 pub mod fchownat;

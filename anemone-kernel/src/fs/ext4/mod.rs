@@ -14,7 +14,10 @@ use lwext4_rust::{
 };
 
 use crate::{
-    device::block::BlockDev, fs::register_filesystem, prelude::*, utils::any_opaque::AnyOpaque,
+    device::block::BlockDev,
+    fs::{filesystem::FileSystemMountOps, register_filesystem},
+    prelude::*,
+    utils::any_opaque::AnyOpaque,
 };
 
 use self::superblock::EXT4_SB_OPS;
@@ -193,10 +196,7 @@ pub(super) fn map_vfs_inode_type(ty: InodeType) -> Result<LwExt4InodeType, SysEr
     }
 }
 
-fn ext4_mount(source: MountSource, data: MountData) -> Result<Arc<SuperBlock>, SysError> {
-    let MountSource::Block(dev) = source else {
-        return Err(SysError::InvalidArgument);
-    };
+fn ext4_mount(dev: Arc<dyn BlockDev>, data: MountData) -> Result<Arc<SuperBlock>, SysError> {
     data.reject_nonempty_for("ext4")?;
 
     if dev.block_size().bytes() != lwext4_rust::EXT4_DEV_BSIZE {
@@ -264,7 +264,7 @@ fn ext4_sync_fs(sb: &SuperBlock) -> Result<(), SysError> {
 static EXT4_FS_OPS: FileSystemOps = FileSystemOps {
     name: "ext4",
     flags: FileSystemFlags::SHRINKABLE_ICACHE,
-    mount: ext4_mount,
+    mount: FileSystemMountOps::BlockDevice(ext4_mount),
     sync_fs: ext4_sync_fs,
     kill_sb: ext4_kill_sb,
 };

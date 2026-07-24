@@ -1,12 +1,12 @@
 # AHCI Controller / ATA Block Device
 
-**状态：** Draft / Review Hold  
-**修订：** `Draft`  
-**负责人：** EDGW, Codex  
-**最后更新：** 2026-07-23  
-**领域：** AHCI / SATA / ATA / DMA / block  
-**开放问题：** [Tracking Issues](./tracking-issues.md)  
-**事务日志：** [AHCI Controller 事务日志](../../devlog/transactions/2026-07-23-ahci-controller.md)  
+**状态：** Draft / Review Hold
+**修订：** `Draft`
+**负责人：** EDGW, Codex
+**最后更新：** 2026-07-23
+**领域：** AHCI / SATA / ATA / DMA / block
+**开放问题：** [Tracking Issues](./tracking-issues.md)
+**事务日志：** [AHCI Controller 事务日志](../../devlog/transactions/2026-07-23-ahci-controller.md)
 **下一步：** 先修复 probe 失败路径的 DMA 生命周期和 IDENTIFY 容量边界，再进入硬件读写验证。
 
 ## 背景

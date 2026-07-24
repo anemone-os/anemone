@@ -2,8 +2,6 @@
 
 use core::fmt::Debug;
 
-use idalloc::{IdAllocator, IdentityBijection, OneShotAlloc};
-
 use crate::{prelude::*, utils::iter_ctx::IterCtx};
 
 /// Nothing too much. Just a simple wrapper to prevent invalid block sizes.
@@ -61,6 +59,8 @@ impl TryFrom<usize> for BlockSize {
 /// A block device is a device that can be read/written in fixed-size blocks.
 /// Examples include hard drives, SSDs, or virtual block devices like ramdisks.
 pub trait BlockDev: Send + Sync {
+    /// Immutable endpoint identity. The block registry derives its key from
+    /// this value during registration; it must not change afterward.
     fn devnum(&self) -> BlockDevNum;
 
     /// Get the block size of this device. This is the minimum unit of
@@ -222,56 +222,7 @@ impl Debug for dyn BlockDev {
     }
 }
 
-/// Class of block devices.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum BlockDevClass {
-    Virtio,
-    Scsi,
-    Mmc,
-    Loop,
-    RamDisk,
-}
-
-impl BlockDevClass {
-    /// This will introduce a heap allocation. Pay attention.
-    fn format_name(self, index: usize) -> String {
-        match self {
-            Self::Virtio => format_alpha_disk_name("vd", index),
-            Self::Scsi => format_alpha_disk_name("sd", index),
-            // The block registry currently owns names as `String`; keep this
-            // compatibility at the existing owner boundary rather than
-            // introducing another mutable string into the MMC driver.
-            Self::Mmc => format!("mmcblk{}", index),
-            Self::Loop => format!("loop{}", index),
-            Self::RamDisk => format!("ram{}", index),
-        }
-    }
-}
-
-/// Generate names like "a", "b", ..., "z", "aa", "ab", ... for block devices
-/// based on their index.
-fn format_alpha_disk_name(prefix: &str, index: usize) -> String {
-    let mut suffix = Vec::new();
-    let mut value = index;
-
-    loop {
-        suffix.push((b'a' + (value % 26) as u8) as char);
-        if value < 26 {
-            break;
-        }
-        value = value / 26 - 1;
-    }
-
-    let mut name = String::with_capacity(prefix.len() + suffix.len());
-    name.push_str(prefix);
-    for ch in suffix.iter().rev() {
-        name.push(*ch);
-    }
-    name
-}
-
 struct BlockDevDesc {
-    class: BlockDevClass,
     name: String,
     ops: Arc<dyn BlockDev>,
     io_lock: Arc<Mutex<()>>,
@@ -282,7 +233,6 @@ struct BlockDevDesc {
 impl Debug for BlockDevDesc {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("BlockDevDesc")
-            .field("class", &self.class)
             .field("name", &self.name)
             .field("readahead", &self.readahead.load(Ordering::Relaxed))
             .finish()
@@ -294,25 +244,18 @@ impl Debug for BlockDevDesc {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockDevEntry {
     pub devnum: BlockDevNum,
-    pub class: BlockDevClass,
     pub name: String,
-}
-
-pub trait BlockDriver: Driver {
-    fn major(&self) -> MajorNum;
 }
 
 /// POD struct for registering a block device with the subsystem.
 pub struct BlockDevRegistration {
-    pub devnum: BlockDevNum,
-    pub class: BlockDevClass,
+    pub name: String,
     pub device: Arc<dyn BlockDev>,
 }
 
 struct BlockDevRegistry {
     devices: HashMap<BlockDevNum, BlockDevDesc>,
     names: HashMap<String, BlockDevNum>,
-    next_name_idx: HashMap<BlockDevClass, usize>,
     ordered: Vec<BlockDevNum>,
 }
 
@@ -321,100 +264,57 @@ impl BlockDevRegistry {
         Self {
             devices: HashMap::new(),
             names: HashMap::new(),
-            next_name_idx: HashMap::new(),
             ordered: Vec::new(),
         }
     }
 
-    fn alloc_name_for(&mut self, class: BlockDevClass) -> String {
-        let idx = self.next_name_idx.entry(class).or_insert(0);
-        let name = class.format_name(*idx);
-        *idx += 1;
-        name
+    fn register(&mut self, registration: BlockDevRegistration) -> Result<(), SysError> {
+        let devnum = registration.device.devnum();
+        if self.devices.contains_key(&devnum) || self.names.contains_key(registration.name.as_str())
+        {
+            return Err(SysError::DevAlreadyRegistered);
+        }
+
+        let desc = BlockDevDesc {
+            name: registration.name,
+            ops: registration.device,
+            io_lock: Arc::new(Mutex::new(())),
+            transient_refs: Arc::new(AtomicUsize::new(0)),
+            readahead: AtomicUsize::new(0),
+        };
+
+        kinfoln!(
+            "block device registered: devnum={}, name={}",
+            devnum,
+            desc.name
+        );
+
+        self.names.insert(desc.name.clone(), devnum);
+        self.devices.insert(devnum, desc);
+        self.ordered.push(devnum);
+
+        Ok(())
     }
 }
 
 /// Block device subsystem state. Singleton instance.
-///
-/// **LOCK ORDERING**:
-/// **`registry` -> `drivers` -> `major_alloc`**
 struct BlockDevSubSys {
     registry: RwLock<BlockDevRegistry>,
-    drivers: RwLock<HashMap<MajorNum, Arc<dyn BlockDriver>>>,
-    major_alloc: SpinLock<IdAllocator<OneShotAlloc, IdentityBijection<MajorNum>>>,
 }
 
 impl BlockDevSubSys {
     fn new() -> Self {
         Self {
-            drivers: RwLock::new(HashMap::new()),
             registry: RwLock::new(BlockDevRegistry::new()),
-            major_alloc: SpinLock::new(IdAllocator::new(OneShotAlloc::new(
-                devnum::block::major::DYNAMIC_ALLOC.0 as u64,
-                devnum::block::major::DYNAMIC_ALLOC.1 as u64,
-            ))),
         }
     }
 }
 
 static SUBSYS: Lazy<BlockDevSubSys> = Lazy::new(|| BlockDevSubSys::new());
 
-/// Register a block driver and return the allocated major number for it.
-pub fn register_block_driver(driver: Arc<dyn BlockDriver>) -> Result<MajorNum, SysError> {
-    let major = SUBSYS
-        .major_alloc
-        .lock_irqsave()
-        .alloc()
-        .expect("this panic indicates that we should increase the dynamic major number range");
-
-    kinfoln!(
-        "register {:?} as block driver with major number {}",
-        driver.name(),
-        major.get()
-    );
-
-    let prev = SUBSYS.drivers.write_irqsave().insert(major, driver);
-    debug_assert!(prev.is_none());
-
-    Ok(major)
-}
-
-/// Register a block device with metadata describing its provenance, and return
-/// the allocated device name for it.
-pub fn register_block_device(registration: BlockDevRegistration) -> Result<String, SysError> {
-    let mut registry = SUBSYS.registry.write_irqsave();
-    if registry.devices.contains_key(&registration.devnum) {
-        return Err(SysError::DevAlreadyRegistered);
-    }
-
-    let name = registry.alloc_name_for(registration.class);
-    assert!(
-        !registry.names.contains_key(&name),
-        "allocated name {} is already taken",
-        name
-    );
-
-    let desc = BlockDevDesc {
-        class: registration.class,
-        name: name.clone(),
-        ops: registration.device,
-        io_lock: Arc::new(Mutex::new(())),
-        transient_refs: Arc::new(AtomicUsize::new(0)),
-        readahead: AtomicUsize::new(0),
-    };
-
-    registry.names.insert(name.clone(), registration.devnum);
-    registry.devices.insert(registration.devnum, desc);
-    registry.ordered.push(registration.devnum);
-
-    kinfoln!(
-        "block device registered: devnum={}, name={}, class={:?}",
-        registration.devnum,
-        name,
-        registration.class
-    );
-
-    Ok(name)
+/// Register a named block endpoint. The capability owns its device number.
+pub fn register_block_device(registration: BlockDevRegistration) -> Result<(), SysError> {
+    SUBSYS.registry.write_irqsave().register(registration)
 }
 
 /// Get the block device corresponding to the given device number, if it exists.
@@ -489,7 +389,6 @@ pub fn next_block_dev(ctx: &mut IterCtx) -> Option<BlockDevEntry> {
 
     Some(BlockDevEntry {
         devnum,
-        class: desc.class,
         name: desc.name.clone(),
     })
 }
@@ -501,12 +400,62 @@ mod ramdisk;
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
+
+    struct TestBlockDev(BlockDevNum);
+
+    impl BlockDev for TestBlockDev {
+        fn devnum(&self) -> BlockDevNum {
+            self.0
+        }
+
+        fn block_size(&self) -> BlockSize {
+            BlockSize::new(1)
+        }
+
+        fn total_blocks(&self) -> usize {
+            0
+        }
+
+        fn read_blocks(&self, _block_idx: usize, _buf: &mut [u8]) -> Result<(), SysError> {
+            Ok(())
+        }
+
+        fn write_blocks(&self, _block_idx: usize, _buf: &[u8]) -> Result<(), SysError> {
+            Ok(())
+        }
+    }
+
+    fn test_devnum(minor: usize) -> BlockDevNum {
+        BlockDevNum::new(
+            MajorNum::new(devnum::block::major::RAMDISK),
+            MinorNum::new(minor),
+        )
+    }
+
     #[kunit]
-    fn test_alpha_disk_name_encoding() {
-        assert_eq!(format_alpha_disk_name("vd", 0), "vda");
-        assert_eq!(format_alpha_disk_name("vd", 25), "vdz");
-        assert_eq!(format_alpha_disk_name("vd", 26), "vdaa");
-        assert_eq!(format_alpha_disk_name("sd", 27), "sdab");
-        assert_eq!(BlockDevClass::Mmc.format_name(0), "mmcblk0");
+    fn registry_derives_devnum_and_rejects_duplicate_keys() {
+        let mut registry = BlockDevRegistry::new();
+        registry
+            .register(BlockDevRegistration {
+                name: "first".to_string(),
+                device: Arc::new(TestBlockDev(test_devnum(1))),
+            })
+            .unwrap();
+        assert_eq!(registry.names.get("first"), Some(&test_devnum(1)));
+
+        assert_eq!(
+            registry.register(BlockDevRegistration {
+                name: "second".to_string(),
+                device: Arc::new(TestBlockDev(test_devnum(1))),
+            }),
+            Err(SysError::DevAlreadyRegistered)
+        );
+        assert_eq!(
+            registry.register(BlockDevRegistration {
+                name: "first".to_string(),
+                device: Arc::new(TestBlockDev(test_devnum(2))),
+            }),
+            Err(SysError::DevAlreadyRegistered)
+        );
     }
 }

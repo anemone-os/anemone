@@ -210,22 +210,21 @@ impl TaskFileData {
         self.0
     }
 
-    /// Returns true when the device is neither busy, requesting data, nor in error.
+    /// Returns true when the device is neither busy, requesting data, nor in
+    /// error.
     pub(super) const fn ready(self) -> bool {
-        !TaskFileStatus::from_bits_retain(self.0)
-            .intersects(TaskFileStatus::from_bits_retain(
-                TaskFileStatus::BUSY.bits()
-                    | TaskFileStatus::DATA_REQUEST.bits()
-                    | TaskFileStatus::ERROR.bits(),
-            ))
+        !TaskFileStatus::from_bits_retain(self.0).intersects(TaskFileStatus::from_bits_retain(
+            TaskFileStatus::BUSY.bits()
+                | TaskFileStatus::DATA_REQUEST.bits()
+                | TaskFileStatus::ERROR.bits(),
+        ))
     }
 
     /// Returns true while the device cannot accept a new command.
     pub(super) const fn busy_or_drq(self) -> bool {
-        TaskFileStatus::from_bits_retain(self.0)
-            .intersects(TaskFileStatus::from_bits_retain(
-                TaskFileStatus::BUSY.bits() | TaskFileStatus::DATA_REQUEST.bits(),
-            ))
+        TaskFileStatus::from_bits_retain(self.0).intersects(TaskFileStatus::from_bits_retain(
+            TaskFileStatus::BUSY.bits() | TaskFileStatus::DATA_REQUEST.bits(),
+        ))
     }
 
     /// Returns true when the task-file error bit is set.
@@ -349,7 +348,8 @@ impl AhciRegs {
         );
     }
 
-    /// Acknowledges host interrupt status bits using AHCI write-one-to-clear semantics.
+    /// Acknowledges host interrupt status bits using AHCI write-one-to-clear
+    /// semantics.
     pub(super) fn acknowledge_host_interrupts(&self, bits: u32) {
         self.write_host(HostRegister::InterruptStatus, bits);
     }
@@ -360,7 +360,8 @@ impl AhciRegs {
         self.acknowledge_host_interrupts(1u32 << port);
     }
 
-    /// Acknowledges port interrupt status bits using AHCI write-one-to-clear semantics.
+    /// Acknowledges port interrupt status bits using AHCI write-one-to-clear
+    /// semantics.
     pub(super) fn acknowledge_port_interrupts(&self, port: usize, bits: PortInterrupt) {
         self.write_port(port, PortRegister::InterruptStatus, bits.bits());
     }

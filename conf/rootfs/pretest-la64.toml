@@ -3,6 +3,7 @@ name = "pretest-la64"
 arch = "loongarch64"
 
 [fs]
+type = "folder"
 fstype = "ext4"
 base = "conf/rootfs/pretest-la64-base"
 
@@ -21,6 +22,10 @@ installed_dir = "/sbin"
 
 [[apps]]
 name = "user-test"
+installed_dir = "/bin"
+
+[[apps]]
+name = "ioctl-test"
 installed_dir = "/bin"
 
 # [[apps]]

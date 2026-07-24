@@ -130,7 +130,7 @@ fn build_stat_line(inode: &InodeRef) -> Result<String, SysError> {
 
     let pid = tg.tgid().get();
     let comm = proc_comm(&leader);
-    let state = proc_state(&leader);
+    let state = proc_state(tg, &leader).character();
     let display = tg.proc_display_parentage();
     let ppid = display.ppid.get();
     let pgrp = display.pgrp.get();
@@ -254,16 +254,55 @@ pub(super) fn proc_comm(task: &Task) -> String {
     comm.chars().take(15).collect()
 }
 
-pub(super) fn proc_state(leader: &Task) -> char {
-    match leader.status() {
-        TaskStatus::Runnable => 'R',
-        TaskStatus::Zombie => 'Z',
+#[derive(Debug, Clone, Copy)]
+pub(super) enum ProcTaskState {
+    Running,
+    Zombie,
+    Sleeping,
+    DiskSleep,
+    Stopped,
+}
+
+impl ProcTaskState {
+    pub(super) const fn character(self) -> char {
+        match self {
+            Self::Running => 'R',
+            Self::Zombie => 'Z',
+            Self::Sleeping => 'S',
+            Self::DiskSleep => 'D',
+            Self::Stopped => 'T',
+        }
+    }
+
+    pub(super) const fn name(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Zombie => "zombie",
+            Self::Sleeping => "sleeping",
+            Self::DiskSleep => "disk sleep",
+            Self::Stopped => "stopped",
+        }
+    }
+}
+
+pub(super) fn proc_state(tg: &ThreadGroup, leader: &Task) -> ProcTaskState {
+    let task_status = leader.status();
+    if matches!(task_status, TaskStatus::Zombie) {
+        return ProcTaskState::Zombie;
+    }
+    if tg.is_job_control_stopped() {
+        return ProcTaskState::Stopped;
+    }
+
+    match task_status {
+        TaskStatus::Runnable => ProcTaskState::Running,
+        TaskStatus::Zombie => unreachable!(),
         TaskStatus::Waiting {
             interruptible: true,
-        } => 'S',
+        } => ProcTaskState::Sleeping,
         TaskStatus::Waiting {
             interruptible: false,
-        } => 'D',
+        } => ProcTaskState::DiskSleep,
     }
 }
 

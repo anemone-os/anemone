@@ -23,8 +23,4 @@ chmod 0755 c-test
 echo Running c-test program...
 ./c-test
 
-# echo Compiling xv6
-# 
-# make -C xv6/xv6-riscv
-
 echo All tests passed successfully!

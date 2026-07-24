@@ -13,6 +13,20 @@ Keep the review scoped to the requested files, subsystem, or patch unless eviden
 
 Also check the repository-level coding rules in `AGENTS.md`, especially the kernel code-shape constraints. Treat violations of single-source-of-truth, diagnostic-field boundaries, narrow interfaces, assertion policy, or temporary-bridge exit conditions as review issues, not as cosmetic style comments.
 
+For an RFC-driven or cross-subsystem change, read `docs/src/contracts.md`, the relevant effective contract IDs, the RFC `Contract Impact` / target invariants, and the transaction cutover record before treating a rule as current. Existing RFC text may be historical or proposal-local; it must not override an extracted current contract. If no contract has been extracted yet and the change is the first cross-RFC reuse or replacement, require the minimum contract closure rather than a repository-wide invariant inventory.
+
+## RFC Plan Maturity and Engineering Compromise
+
+For an RFC document or RFC-driven implementation review, read each stage's maturity before judging precision:
+
+- A future `Outline` needs a coherent purpose, prerequisites, protected target / contract / correctness boundaries, and a resolution trigger. Do not emit a finding merely because it omits concrete types, function signatures, algorithms, per-file paths, a complete corner-case matrix, or exact test commands.
+- The next `Ready` stage must be directly executable and reviewable: deliverables, implementation route or explicit probe, audit, observability, validation, stop/exit conditions, cutover, and resolved write set are all required. Ready does not imply authorization to become Active.
+- An Outline becomes a finding only when a missing dependency or protected boundary breaks target reachability, or when a possible protocol/state owner, public API, shared-contract, ABI, visible-semantics, or acceptance change is deferred without a resolution or renegotiation gate.
+
+Engineering cost may justify proposing a weaker target, but never silent degradation. Review a `Target Renegotiation Gate` for concrete cost evidence, the original target impact, non-negotiable correctness invariants, completed-slice/code disposition, comparable options, candidate reduced-target semantics, revision/contract impact, validation, decision authority, and remaining-gap routing. A coherent reduced target must be independently useful, ABI-honest, explicitly reject unsupported behavior, preserve ownership/lifetime/concurrency safety, and avoid cementing the wrong abstraction. The agent proposing it cannot approve it.
+
+Do not treat correctness invariants as negotiable scope. Shared mutable truth, unowned cleanup, memory-safety holes, lost wakeups, concurrency races, or user-visible success that hides unsupported semantics remain blockers. Target capabilities and coverage may change only after RFC acceptance; limitations belong outside the revised target, while defects inside it remain open issues.
+
 ## Issue Levels
 
 Use explicit issue levels to keep reviews bounded by real risk. Always use the current level names below. Older notes may map these to P0/P1/P2/P3 in the same order, but review output should not use the old names.
@@ -30,10 +44,13 @@ When reviewing, stop issue hunting once remaining observations are Safe unless t
 
 1. **System architecture**
    - Does the change fit the current subsystem boundaries, ownership model, and layering?
+   - Does it preserve the relevant effective contract IDs, or is every intentional delta named in the RFC and activated only at its approved cutover gate?
+   - Are accepted targets still pending clearly separated from current behavior and review evidence?
    - Are policy decisions kept at the right layer instead of leaking into low-level helpers?
    - Does it preserve shared contracts such as syscall semantics, VFS rules, memory management invariants, scheduler expectations, and platform abstractions?
    - Do subsystems communicate through explicit interfaces instead of reaching into another subsystem's private types, locks, storage, or internal state?
    - Does a cross-subsystem dependency preserve direction and ownership, or does it make one subsystem implement another subsystem's policy?
+   - For a true cross-domain handoff, is there one protocol owner, one owner for each mutable state, explicit participant-local obligations, a handoff/linearization point, and a final cleanup owner?
    - Is the abstraction justified by real reuse or complexity reduction, or is a direct local implementation clearer?
    - If a file keeps growing, is the growth still one owner doing one job, or is it accumulating multiple roles that should be split by boundary?
    - Would a behavior-preserving split inside the same owner make future changes safer without creating a new abstraction layer?
@@ -92,6 +109,7 @@ When reviewing, stop issue hunting once remaining observations are Safe unless t
 
 10. **Tests and evidence**
     - Match verification to risk: targeted tests for narrow behavior, broader regression runs for shared contracts.
+    - For a contract cutover, verify the transaction names every changed ID, records old/new effective semantics and scope, and provides evidence for all participating domains; a passing narrow test cannot prove a broader contract transition.
     - Prefer tests that encode externally visible semantics, race-prone paths, and failure cases instead of only the happy path.
     - When a finding is uncertain, state the missing evidence and suggest the smallest log, test, or inspection that would confirm it.
 

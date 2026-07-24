@@ -17,7 +17,7 @@ static void get_now_str(char *buf, size_t len) {
 void test_start(const char* name) {
     char time_buf[64];
     get_now_str(time_buf, sizeof(time_buf));
-    
+
     // 记录高精度起始时间
     clock_gettime(CLOCK_MONOTONIC, &start_time);
 
@@ -30,13 +30,13 @@ void test_start(const char* name) {
 void test_end(const char *name) {
     struct timespec end_time;
     char time_buf[64];
-    
+
     // 获取结束时间
     clock_gettime(CLOCK_MONOTONIC, &end_time);
     get_now_str(time_buf, sizeof(time_buf));
 
     // 计算毫秒差值
-    long ms = (end_time.tv_sec - start_time.tv_sec) * 1000 + 
+    long ms = (end_time.tv_sec - start_time.tv_sec) * 1000 +
               (end_time.tv_nsec - start_time.tv_nsec) / 1000000;
 
     printf("--------------------------------\n");

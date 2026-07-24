@@ -1,0 +1,8 @@
+platform = "qemu-virt-rv64"
+
+[root]
+fstype = "ext4"
+source = { type = "block", path = "vda" }
+
+[initial-program]
+type = "rootfs-entry"

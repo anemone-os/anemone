@@ -8,8 +8,8 @@
 use crate::{
     device::{
         block::{
-            BlockDev, BlockDevClass, BlockDevRegistration, BlockDriver, BlockSize,
-            devfs::publish_block_device, register_block_device, register_block_driver,
+            BlockDev, BlockDevRegistration, BlockSize, devfs::publish_block_device,
+            register_block_device,
         },
         devnum::GeneralMinorAllocator,
         kobject::{KObjIdent, KObjectBase, KObjectOps},
@@ -22,6 +22,14 @@ use crate::{
     },
     prelude::*,
 };
+
+const fn devnum_for(id: usize) -> BlockDevNum {
+    BlockDevNum::new(MajorNum::new(devnum::block::major::MMC), MinorNum::new(id))
+}
+
+fn name_for(id: usize) -> String {
+    format!("mmcblk{}", id)
+}
 
 #[derive(Debug, KObject, Driver)]
 struct SdMemoryBlockDriver {
@@ -68,22 +76,20 @@ impl DriverOps for SdMemoryBlockDriver {
             .lock_irqsave()
             .alloc()
             .ok_or(SysError::NoMinorAvailable)?;
-        let devnum = BlockDevNum::new(*MAJOR.get(), minor);
+        let devnum = devnum_for(minor.get());
         let endpoint = Arc::new(SdMemoryBlockDev {
             devnum,
             card: card.clone(),
             total_blocks,
         });
-        let name = register_block_device(BlockDevRegistration {
-            devnum,
-            class: BlockDevClass::Mmc,
+        register_block_device(BlockDevRegistration {
+            name: name_for(minor.get()),
             device: endpoint,
         })?;
 
         kinfoln!(
-            "sd-memory card{}: registered as {} devnum={} blocks={} block_size={}B",
+            "sd-memory card{}: registered as devnum={} blocks={} block_size={}B",
             card.id().get(),
-            name,
             devnum,
             total_blocks,
             BlockSize::UNIT_BYTES
@@ -92,7 +98,7 @@ impl DriverOps for SdMemoryBlockDriver {
             knoticeln!(
                 "sd-memory card{} registered as {}, but devfs publish failed: {:?}",
                 card.id().get(),
-                name,
+                devnum,
                 error
             );
         }
@@ -115,12 +121,6 @@ impl MmcCardDriver for SdMemoryBlockDriver {
         &[MmcCardMatch {
             kind: MmcCardKind::SdMemory,
         }]
-    }
-}
-
-impl BlockDriver for SdMemoryBlockDriver {
-    fn major(&self) -> MajorNum {
-        *MAJOR.get()
     }
 }
 
@@ -303,7 +303,6 @@ fn write_one(
     Ok(())
 }
 
-static MAJOR: MonoOnce<MajorNum> = unsafe { MonoOnce::new() };
 static MINORS: Lazy<SpinLock<GeneralMinorAllocator>> =
     Lazy::new(|| SpinLock::new(GeneralMinorAllocator::new()));
 
@@ -313,12 +312,13 @@ fn init() {
         kobj_base: KObjectBase::new(KObjIdent::try_from("sd-memory-block").unwrap()),
         drv_base: DriverBase::new(),
     });
-    let major = register_block_driver(driver.clone())
-        .unwrap_or_else(|error| panic!("failed to register SD Memory block driver: {:?}", error));
-    MAJOR.init(|slot| {
-        slot.write(major);
-    });
     register_driver(driver);
+}
+
+#[kunit]
+fn endpoint_identity_uses_one_local_id() {
+    assert_eq!(devnum_for(0).minor(), MinorNum::new(0));
+    assert_eq!(name_for(0), "mmcblk0");
 }
 
 #[kunit]

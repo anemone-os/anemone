@@ -8,4 +8,5 @@ pub mod process;
 pub mod syscall;
 pub mod system;
 pub mod time;
+pub mod tty;
 pub mod uts;

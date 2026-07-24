@@ -1,6 +1,6 @@
 # 模板
 
-以下模板可直接复制使用。条目应保持简短、事实化。活动登记册默认只写最小必填字段；只有在可选字段能明显降低沟通成本时，才把它们加上。
+以下模板可直接复制使用。条目应保持简短、事实化。活动登记册默认只写最小必填字段；只有在可选字段能明显降低沟通成本时，才把它们加上。RFC、small-change 或调查证据引用仓库公共参考源码时，使用[外部源码引用规则](./external-source-references.md)；不得把私人 checkout 路径写入公共文档。
 
 ## 开发日志条目
 
@@ -77,8 +77,10 @@
 ## Links
 
 - Biweekly devlog:
+- Current contract:
 - Register / limitations:
 - RFC / transaction:
+- 外部源码证据：`xref:<source-id>:<repo-relative-path>#<locator>` / 无
 - Issue / PR / commit:
 ```
 
@@ -102,8 +104,9 @@ docs/src/devlog/changes/2026-05-22-short-slug/
 **Status:** Active / Blocked / Completed
 **Owners:** name1, name2
 **Area:** scheduler / futex / timer
-**Canonical Plan:** 计划、不变量文档或 RFC 链接。
+**Canonical Plan:** RFC 或计划链接。
 **Canonical Revision:** `R0` / `R1` / ...；非 RFC 事务写 `N/A`。
+**Contract Impact:** contract IDs、变化类型和计划 cutover gate；没有则写 `None`。
 **Current Phase:** 阶段名或阶段编号。
 
 ## Scope
@@ -123,9 +126,23 @@ docs/src/devlog/changes/2026-05-22-short-slug/
 **Change:** 本阶段实际推进的内容。
 **Audit:** 旁路审计、关键命中分类或 review 结论。
 **Observability:** 新增或验证的 debug / trace / 断言 / 日志证据。
-**Feedback:** `None`，或说明实现期反馈写回了 transaction devlog / `implementation.md` / `invariants.md` / `tracking-issues.md` / register / current limitations；必须说明是否保持原目标和不变量，不能用反馈名义削弱它们。
+**Feedback:** `None` / `Execution Fact` / `Route Correction` / `Target Renegotiation Proposed` / `Target Renegotiation Decided`；说明写回了 transaction devlog / RFC target / `Contract Impact` / current contract / `implementation.md` / `tracking-issues.md` / register / current limitations。target renegotiation 在批准前必须保持当前 gate 未 cut over，agent 提案不能自行批准。
+**Contract Cutover:** 本阶段切换的 contract IDs、旧/新 effective 规则、生效范围和证据；未切换写 `None`。
 **Validation:** 实际运行的命令、测试或复现步骤。
 **Next:** 下一阶段入口条件。
+
+### YYYY-MM-DD - Target Renegotiation（仅在需要时）
+
+**Status:** Proposed / Accepted / Rejected / Superseded。
+**Trigger / Cost Evidence:** 真实接口、实现、测试或集成证据，以及具体成本来源。
+**Original Target:** 受影响的目标、target guarantees、ABI / acceptance boundary、contract IDs 和验证要求。
+**Correctness Invariants:** 不允许通过工程妥协削弱的状态 owner、并发、生命周期、cleanup、内存安全和 ABI 诚实性边界。
+**Completed Slice / Code Disposition:** 已完成能力，以及代码保留、dormant、删除或拆分决定。
+**Options / Proposed Reduced Target:** Route Correction / Accepted Reduced Target / Follow-up RFC / Not Cut Over；若建议降级，说明它为何独立有用、ABI 诚实、可验证且不固化错误 owner / abstraction。
+**Revision / Contract Impact:** RFC revision、`Contract Impact` 和计划 cutover；决定前 effective contract 不变。
+**Validation:** 新 target 自己必须满足的验证。
+**Decision / Authority:** reviewer / owner 的决定与证据链接。
+**Remaining Gap:** follow-up RFC、current limitations 或 open issues；新 target 范围内的错误不能登记为 limitation。
 
 ## Open Items
 
@@ -133,7 +150,7 @@ docs/src/devlog/changes/2026-05-22-short-slug/
 
 ## Closure
 
-事务完成时记录最终验证、剩余限制和相关 register / devlog 链接。
+事务完成时记录最终验证、每个受影响 contract ID 的 cutover / pending / Not Cut Over 结果、剩余限制和相关 register / devlog 链接。
 ```
 
 ## 问题条目
@@ -235,3 +252,7 @@ docs/src/devlog/changes/2026-05-22-short-slug/
 ## RFC 模板
 
 RFC 使用单独页面模板，见 [RFC 模板](./rfc-template.md)。
+
+## 当前契约模板
+
+跨 RFC 已生效规则使用单独页面模板，见 [当前契约模板](./contract-template.md)。不要在小迭代或 transaction 中复制 current contract 正文。

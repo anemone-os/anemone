@@ -7,6 +7,15 @@ const LOG_BUFFER_CAPACITY: usize = (1 << LOG_BUFFER_SHIFT_KB) * 1024 / LOG_RECOR
 
 use crate::{prelude::*, utils::circular_log::CircularLog};
 
+static_assert!(
+    RECORD_LOG_LEVEL <= LogLevel::Debug as u8,
+    "RECORD_LOG_LEVEL exceeds the supported log-level domain"
+);
+static_assert!(
+    PRINT_LOG_LEVEL <= RECORD_LOG_LEVEL,
+    "PRINT_LOG_LEVEL must not exceed RECORD_LOG_LEVEL"
+);
+
 #[derive(Debug, Clone, Copy)]
 pub enum LogLevel {
     Emerg = 0,

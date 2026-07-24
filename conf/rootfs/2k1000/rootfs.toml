@@ -9,12 +9,10 @@ arch = "loongarch64"
 [fs]
 # Filesystem type to use.
 fstype = "ext4"
-# Build a fresh ext4 image from the LoongArch folder root. This root carries a
-# strict-align musl/GCC toolchain instead of using the full Alpine image base.
+# Build a fresh ext4 image from the LoongArch folder root. The developer-provided
+# base tree carries the strict-align musl/GCC toolchain.
 base = "conf/rootfs/2k1000/base"
 type = "folder"
-# Leave room for ext4 metadata, the GCC toolchain, and the small test tree.
-size = "512M"
 
 # Init process configuration. This will be written into /.anemone/init and used by kernel to launch the init process.
 [init]

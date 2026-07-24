@@ -20,7 +20,7 @@ export HOME USER LOGNAME
 umask 022
 
 # A real login process normally enters the account's home before starting the
-# shell. The direct init shell has no login/getty layer until TTY support lands.
+# shell. The direct init shell still has no login/getty layer.
 if [ "$PWD" = "/" ] && [ -d "$HOME" ]; then
     cd "$HOME"
 fi

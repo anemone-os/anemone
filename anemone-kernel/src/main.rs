@@ -18,6 +18,9 @@
 
 extern crate alloc;
 
+mod boot;
+mod boot_defs;
+
 pub mod kconfig_defs;
 pub mod platform_defs;
 
@@ -53,11 +56,7 @@ use crate::{
     percpu::percpu_login,
     prelude::*,
     sync::{counter::CpuSync, mono::MonoOnce},
-    task::{
-        execve::kernel::kernel_execve,
-        files::{FdFlags, FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
-        task_fs::FsState,
-    },
+    task::{execve::kernel::kernel_execve, files::FdFlags, task_fs::FsState},
 };
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
@@ -120,58 +119,6 @@ fn ls_dir(path: &Path) {
     }
 }
 
-/// According to Anemone Boot Protocol, /.anemone/init is a file containing a
-/// absolute path pointing to the init process executable.
-fn exec_init_proc() {
-    const INIT_PATH: &str = "/.anemone/init";
-
-    let init_path = vfs_read_to_string(PathResolution::normal(&Path::new(INIT_PATH)))
-        .unwrap_or_else(|e| panic!("failed to read init path from {}: {:?}", INIT_PATH, e));
-    kinfoln!("Resolved init path to {}", init_path);
-    // open initial stdio fds so that they can be inherited.
-    {
-        use device::console::{open_console_stdin, open_console_stdout};
-        let kinit = get_current_task();
-        let open_stdio = |file: File, access| {
-            let status = FileStatusFlags::empty();
-            // Boot stdio is an anonymous console protocol: no Linux open flags
-            // are accepted here, but keep the status hook boundary explicit.
-            file.check_status_flags(status.to_file_op_status_flags())
-                .expect("initial stdio status rejected");
-            kinit
-                .open_fd(
-                    file,
-                    access,
-                    status,
-                    LinuxOpenCompat::empty(),
-                    FdFlags::empty(),
-                )
-                .expect("failed to open initial stdio fd");
-        };
-        open_stdio(open_console_stdin(), OpenAccessMode::Read);
-        open_stdio(open_console_stdout(), OpenAccessMode::Write);
-        open_stdio(open_console_stdout(), OpenAccessMode::Write);
-    }
-
-    // set up initial root and cwd for inheritance.
-    {
-        let kinit = get_current_task();
-        kinit.set_fs_state(FsState::new_root());
-    }
-
-    kernel_execve(
-        &init_path,
-        &[&init_path],
-        &["OS=anemone", "one=1", "two=2", "three=3", "MIKU=39"],
-    )
-    .unwrap_or_else(|e| {
-        panic!(
-            "failed to execve init process at path specified by {}: {:?}",
-            INIT_PATH, e
-        );
-    });
-}
-
 /// **System Invariant**
 ///
 /// - When bootstrap processor reaches [bsp_kinit], interrupts are disabled in
@@ -179,7 +126,7 @@ fn exec_init_proc() {
 ///   sie::stimer and sie::sext interrupts should be disabled.)
 unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     let bsp_id = CpuId::new(bsp_id);
-    unsafe {
+    let init_stdio = unsafe {
         kinfoln!("BSP {} kinit running on {}...", bsp_id, current_task_id());
         syscall::register_syscall_handlers();
         fs::register_filesystem_drivers();
@@ -195,7 +142,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         IntrArch::init_local_irq();
         task::kthread::init_kthreadd();
 
-        device::console::on_system_boot();
+        let console_selection = device::console::finish_boot_selection();
         INIT_SYNC_COUNTER.sync_with_counter();
 
         FINISH_SYNC_COUNTER.sync_with_counter();
@@ -203,8 +150,11 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         // has completed local init and marked itself online before late services
         // publish their workers. `kthreadd` remains a hand-built boot invariant.
         run_initcalls(InitCallLevel::Late);
+        let init_stdio = device::boot_io::finalize(console_selection)
+            .expect("failed to finalize boot console and TTY endpoints");
         kinfoln!("BSP {} kinit finished", bsp_id);
-    }
+        init_stdio
+    };
 
     mount_rootfs();
 
@@ -215,8 +165,8 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
             KUNIT_SYNC_COUNTER.sync_with_counter();
         }
     }
-    kinfoln!("Running init process...");
-    exec_init_proc();
+
+    boot::exec_initial_program(init_stdio);
 }
 
 fn parse_bootargs() {
@@ -255,6 +205,5 @@ unsafe extern "C" fn ap_kinit(ap_id: usize) {
         #[cfg(feature = "kunit")]
         KUNIT_SYNC_COUNTER.sync_with_counter();
     }
-    // loop {}
     // exit
 }

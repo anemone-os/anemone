@@ -55,8 +55,11 @@ static_assert!(
     "cache padding must not change the bootstrap stack stride"
 );
 
-/// Flattened device tree blob embedded by the build.
-static DTB_BYTES: &[u8] = include_bytes_aligned_as!(PhantomAligned8, "generated.dtb");
+/// Flattened device tree blob generated from the selected Platform's normative DTS.
+static DTB_BYTES: &[u8] = include_bytes_aligned_as!(
+    PhantomAligned8,
+    "../../../../build/generated/device-tree/platform.dtb"
+);
 
 /// # Note
 /// LoongArch64 boots without SBI, so the entry point is fixed and [`__nun`]

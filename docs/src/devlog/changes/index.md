@@ -32,6 +32,15 @@
 
 ## 当前记录
 
+- [2026-07-24 - QEMU SMP Platform用途别名](./2026-07-24-qemu-smp-platform-aliases.md)
+- [2026-07-24 - mount fstype/source compatibility](./2026-07-24-mount-fstype-source-compat.md)
+- [2026-07-24 - FIONBIO opened-description status 更新](./2026-07-24-fionbio.md)
+- [2026-07-24 - github/main PR #136 集成](./2026-07-24-github-main-pr136-integration.md)
+- [2026-07-24 - xref 外部源码注册表](./2026-07-24-xref-source-registry.md)
+- [2026-07-24 - alpha/omega RFC 结果合流](./2026-07-24-alpha-omega-integration.md)
+- [2026-07-22 - RFC rolling stage resolution 与 target renegotiation](./2026-07-22-rfc-stage-resolution-renegotiation.md)
+- [2026-07-22 - device devnum ownership](./2026-07-22-device-devnum-ownership.md)
+- [2026-07-16 - Current contract layer](./2026-07-16-current-contract-layer.md)
 - [2026-07-14 - RFC semantic revision workflow](./2026-07-14-rfc-semantic-revisions.md)
 - [2026-07-14 - PLIC device-tree context 解析](./2026-07-14-plic-dt-context.md)
 - [2026-07-13 - RISC-V Svade A/D 位兼容](./2026-07-13-riscv-ad-bits-svade.md)

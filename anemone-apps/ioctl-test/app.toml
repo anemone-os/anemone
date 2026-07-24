@@ -1,0 +1,9 @@
+name = "ioctl-test"
+
+[build]
+workdir = "."
+driver = "cargo"
+args = ["build", "--release"]
+
+[[artifacts]]
+path = "target/${TARGET_TRIPLE}/release/ioctl-test"

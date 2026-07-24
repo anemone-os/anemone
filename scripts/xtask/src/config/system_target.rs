@@ -1,0 +1,199 @@
+//! SystemTarget-owned boot and root selection.
+//!
+//! The Stage 1B cutover removed the legacy Platform root fields. Production
+//! build resolution must use this value and must not recreate a Platform
+//! fallback.
+
+use serde::Deserialize;
+
+use super::reference::{AppRef, PlatformRef};
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Config {
+    pub platform: PlatformRef,
+    pub root: Root,
+    #[serde(rename = "initial-program")]
+    pub initial_program: InitialProgramSource,
+}
+
+impl Config {
+    pub fn from_str(content: &str) -> anyhow::Result<Self> {
+        let config: Self = toml::from_str(content)?;
+        config.root.validate()?;
+        config.initial_program.validate()?;
+        Ok(config)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Root {
+    pub fstype: String,
+    pub source: RootSource,
+}
+
+impl Root {
+    fn validate(&self) -> anyhow::Result<()> {
+        if self.fstype.is_empty() {
+            anyhow::bail!("system target root filesystem type must not be empty");
+        }
+        if let RootSource::Block { path } = &self.source
+            && path.is_empty()
+        {
+            anyhow::bail!("system target block root path must not be empty");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum RootSource {
+    Block { path: String },
+    Pseudo,
+}
+
+impl RootSource {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Block { .. } => "block",
+            Self::Pseudo => "pseudo",
+        }
+    }
+
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            Self::Block { path } => Some(path),
+            Self::Pseudo => None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum InitialProgramSource {
+    RootfsEntry {
+        #[serde(default)]
+        argv: Option<Vec<String>>,
+    },
+    EmbeddedApp {
+        app: AppRef,
+        #[serde(default)]
+        argv: Option<Vec<String>>,
+    },
+}
+
+impl InitialProgramSource {
+    fn validate(&self) -> anyhow::Result<()> {
+        let argv = match self {
+            Self::RootfsEntry { argv } | Self::EmbeddedApp { argv, .. } => argv,
+        };
+        if argv.as_ref().is_some_and(Vec::is_empty) {
+            anyhow::bail!("initial-program argv must not be empty");
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_example_rootfs_entry_target() {
+        let config = Config::from_str(&example_target()).unwrap();
+        assert_eq!(config.platform.as_str(), "example");
+        assert_eq!(config.root.fstype, "ext4");
+        assert!(matches!(config.root.source, RootSource::Block { .. }));
+        assert!(matches!(
+            config.initial_program,
+            InitialProgramSource::RootfsEntry { argv: None }
+        ));
+    }
+
+    #[test]
+    fn rejects_unsupported_initial_program_tag() {
+        let content = example_target().replace("rootfs-entry", "unknown");
+        assert!(Config::from_str(&content).is_err());
+    }
+
+    #[test]
+    fn parses_embedded_app_target() {
+        let valid = example_target();
+        let content = valid.replace(
+            "type = \"rootfs-entry\"",
+            "type = \"embedded-app\"\napp = \"init\"",
+        );
+        let config = Config::from_str(&content).unwrap();
+        assert!(matches!(
+            config.initial_program,
+            InitialProgramSource::EmbeddedApp { app, argv: None } if app.as_str() == "init"
+        ));
+
+        let missing_app = valid.replace("type = \"rootfs-entry\"", "type = \"embedded-app\"");
+        assert!(Config::from_str(&missing_app).is_err());
+
+        let invalid_app = valid.replace(
+            "type = \"rootfs-entry\"",
+            "type = \"embedded-app\"\napp = \"../init\"",
+        );
+        assert!(Config::from_str(&invalid_app).is_err());
+    }
+
+    #[test]
+    fn initial_program_argv_is_complete_and_nonempty_when_present() {
+        let valid = example_target();
+        for replacement in [
+            "type = \"rootfs-entry\"\nargv = [\"busybox\", \"sh\"]",
+            "type = \"embedded-app\"\napp = \"init\"\nargv = [\"init\", \"--test\"]",
+        ] {
+            let config =
+                Config::from_str(&valid.replace("type = \"rootfs-entry\"", replacement)).unwrap();
+            let argv = match config.initial_program {
+                InitialProgramSource::RootfsEntry { argv }
+                | InitialProgramSource::EmbeddedApp { argv, .. } => argv.unwrap(),
+            };
+            assert_eq!(argv.len(), 2);
+        }
+
+        let empty = valid.replace(
+            "type = \"rootfs-entry\"",
+            "type = \"rootfs-entry\"\nargv = []",
+        );
+        assert!(Config::from_str(&empty).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_root_source() {
+        let valid = example_target();
+        let empty_fstype = valid.replace("fstype = \"ext4\"", "fstype = \"\"");
+        assert!(Config::from_str(&empty_fstype).is_err());
+
+        let empty_block_path = valid.replace("path = \"vda\"", "path = \"\"");
+        assert!(Config::from_str(&empty_block_path).is_err());
+    }
+
+    #[test]
+    fn rejects_fields_owned_by_other_layers() {
+        let valid = example_target();
+        for field in [
+            "preset = \"dev\"",
+            "profile = \"release\"",
+            "qemu = {}",
+            "outputs = []",
+        ] {
+            let content = valid.replacen(
+                "platform = \"example\"",
+                &format!("platform = \"example\"\n{field}"),
+                1,
+            );
+            assert!(Config::from_str(&content).is_err(), "{field}");
+        }
+    }
+
+    fn example_target() -> String {
+        std::fs::read_to_string("../../conf/system-targets/example.toml")
+            .expect("failed to read example SystemTarget")
+    }
+}

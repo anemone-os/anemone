@@ -14,7 +14,6 @@
 - [Fanotify](./2026-06-08-fanotify.md)
 - [Signal Temporary Mask Restore](./2026-06-06-signal-temp-mask-restore.md)
 - [FileOps Seek and Char Device ioctl](./2026-06-05-fileops-seek-char-ioctl.md)
-- [IOCTL Loop](./2026-06-04-ioctl-loop.md)
 - [PROC TGID FD](./2026-06-04-proc-tgid-fd.md)
 - [Cred Merge](./2026-06-02-cred-merge.md)
 - [Sched Latch](./2026-06-03-sched-latch.md)
@@ -25,6 +24,13 @@
 
 ## Completed
 
+- [System Target Model R6 Named Bind and Initial Argv](./2026-07-24-system-target-model-r6-bind-argv.md)：R6A已完成具名opaque bind、optional QEMU argv group与两种initial-program source共享的完整argv；`BOOT-PROTOCOL-001`已Refine，决赛脚本/配置不在范围。
+- [System Target Model R4A QEMU Provider DT Cutover](./2026-07-24-system-target-model-r4-qemu-dt.md)：QEMU committed DTS与DT maintenance CLI已删除；firmware使用runtime FDT，embedded由normal build生成build-local DTB。R4A关闭，R4B保持Outline；LA64 runtime按用户指示Not Run。
+- [System Target Model R3 Explicit Inputs](./2026-07-24-system-target-model-r3-explicit-inputs.md)：R3A已删除implicit local/default selection与preset presentation defaults，rootfs type、QEMU CPU和fmt scope已显式；双架构build与四份DT check通过，contract cutover为None。
+- [TTY Subsystem](./2026-07-23-tty-subsystem.md)：Stage 0至Stage 4、R1与transaction已关闭；`TTY-DATA-CUTOVER`和`TTY-JOBCTL-CUTOVER`原子建立九个Active TTY contract ID。RV64自动、unix-jobctl focused与用户人工ash evidence通过；LA64、hardware和LTP未运行。
+- [System Target Model R0-R2](./2026-07-22-system-target-model.md)：R2 Stage 1-6与全部checkpoint已关闭；current VisionFive explicit-preset `build -> rootfs`及镜像内容回归通过；`BOOT-PROTOCOL-001`保持typed `RootfsEntry | EmbeddedApp` ordinary VFS exec current contract；final harness分流为独立adopter。
+- [IOCTL Loop](./2026-06-04-ioctl-loop.md)：VFS ioctl 分发、统一 block ioctl、静态 loop 设备池与第一阶段 loop ioctl 已完成；扩展 LTP 缺口由 register 跟踪。
+- [Unix Job Control](./2026-07-20-unix-jobctl.md)
 - [Sched Dynamic Attributes](./2026-07-15-sched-dynamic-attributes.md)
 - [CPU Logical / Physical ID](./2026-07-14-cpu-logical-physical-id.md)：物理 ID 上界/逻辑 CPU 容量拆分、无锁 registry 和内建 cache padding 的 typed table 已完成；VisionFive 2 由用户复验通过，最终 table 布局与 LoongArch correction build 未由 agent 运行。
 - [Sched RT Class R1](./2026-07-14-sched-rt-class-r1.md)

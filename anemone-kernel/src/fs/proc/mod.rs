@@ -11,6 +11,7 @@
 
 use crate::{
     fs::{
+        filesystem::FileSystemMountOps,
         inode::Inode,
         proc::{
             root::{PROC_ROOT_INO, PROC_ROOT_INODE_OPS},
@@ -49,10 +50,7 @@ fn procfs_root_dentries() -> Vec<Arc<Dentry>> {
     dentries
 }
 
-fn procfs_mount(source: MountSource, data: MountData) -> Result<Arc<SuperBlock>, SysError> {
-    if !matches!(source, MountSource::Pseudo) {
-        return Err(SysError::InvalidArgument);
-    }
+fn procfs_mount(data: MountData) -> Result<Arc<SuperBlock>, SysError> {
     data.reject_nonempty_for("procfs")?;
 
     Ok(PROCFS_SB.get().clone())
@@ -68,9 +66,12 @@ fn procfs_kill_sb(_sb: Arc<SuperBlock>) {
 }
 
 static PROC_FS_OPS: FileSystemOps = FileSystemOps {
-    name: "procfs",
-    flags: FileSystemFlags::empty(),
-    mount: procfs_mount,
+    name: "proc",
+    // PROCFS_SB and the seeded PDE inode numbers are process-lifetime
+    // singletons. Keep their icache alive when the last mount goes away so a
+    // later mount cannot reuse an emptied superblock.
+    flags: FileSystemFlags::PERSISTENT_SB,
+    mount: FileSystemMountOps::NoDevice(procfs_mount),
     sync_fs: procfs_sync_fs,
     kill_sb: procfs_kill_sb,
 };

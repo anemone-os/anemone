@@ -58,7 +58,7 @@ impl ProcessGroup {
     /// [ThreadGroup::recv_signal].
     pub fn recv_signal(&self, signal: Signal) {
         for tg in self.get_members() {
-            tg.recv_signal(signal.clone());
+            tg.recv_signal_from_process_group(signal.clone(), self.pgid);
         }
     }
 }

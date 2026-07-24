@@ -282,6 +282,29 @@ impl DeviceId {
             Self::Raw(value) => value,
         }
     }
+
+    /// Encode a char/block device number using Linux's userspace `dev_t`
+    /// layout (`huge_encode_dev`). `Raw` values already come from an ABI-facing
+    /// owner and retain their existing representation.
+    fn linux_dev_t(self) -> u64 {
+        let devnum = match self {
+            Self::Char(devnum) => devnum.decompose(),
+            Self::Block(devnum) => devnum.decompose(),
+            Self::None => return 0,
+            Self::Raw(value) => return value,
+        };
+        let major = devnum.0.get() as u64;
+        let minor = devnum.1.get() as u64;
+
+        // Linux's current userspace layout has 12 major bits and 20 minor
+        // bits. Anemone's internal 16/16 key remains unchanged, so reject a
+        // future namespace assignment that cannot be represented at this ABI
+        // boundary instead of silently truncating it.
+        assert!(major < (1 << 12));
+        assert!(minor < (1 << 20));
+
+        (minor & 0xff) | (major << 8) | ((minor & !0xff) << 12)
+    }
 }
 
 /// Unlike Linux's way, we explicit split file type and permission bits into two
@@ -376,11 +399,21 @@ impl InodeStat {
     }
 
     fn linux_statx_dev_parts(dev: DeviceId) -> (u32, u32) {
-        let raw = dev.raw();
-        let major = raw >> crate::device::devnum::MINOR_BITS;
-        let minor = raw & ((1 << crate::device::devnum::MINOR_BITS) - 1);
-
-        (major as u32, minor as u32)
+        match dev {
+            DeviceId::Char(devnum) => {
+                let (major, minor) = devnum.decompose();
+                (major.get() as u32, minor.get() as u32)
+            },
+            DeviceId::Block(devnum) => {
+                let (major, minor) = devnum.decompose();
+                (major.get() as u32, minor.get() as u32)
+            },
+            DeviceId::None => (0, 0),
+            DeviceId::Raw(raw) => (
+                (raw >> crate::device::devnum::MINOR_BITS) as u32,
+                (raw & ((1 << crate::device::devnum::MINOR_BITS) - 1)) as u32,
+            ),
+        }
     }
 
     /// Convert to Linux's `struct statx`.
@@ -460,13 +493,13 @@ impl InodeStat {
     /// Convert to Linux's `struct stat`.
     pub fn to_linux_stat(self) -> LinuxStat {
         LinuxStat {
-            st_dev: self.fs_dev.raw(),
+            st_dev: self.fs_dev.linux_dev_t(),
             st_ino: self.ino.get(),
             st_mode: self.mode.to_linux_mode(),
             st_nlink: self.nlink.min(u32::MAX as u64) as u32,
             st_uid: self.uid.get(),
             st_gid: self.gid.get(),
-            st_rdev: self.rdev.raw(),
+            st_rdev: self.rdev.linux_dev_t(),
             __pad1: 0,
             st_size: self.size as i64,
             st_blksize: Self::linux_blksize(),
@@ -480,6 +513,67 @@ impl InodeStat {
             st_ctime_nsec: self.ctime.subsec_nanos() as u64,
             __unused: [0; 2],
         }
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod stat_kunits {
+    use super::*;
+
+    fn inode_stat_for(dev: DeviceId) -> InodeStat {
+        InodeStat {
+            fs_dev: dev,
+            ino: Ino::new(1),
+            mode: InodeMode::new(InodeType::Regular, InodePerm::empty()),
+            nlink: 1,
+            uid: Uid::ROOT,
+            gid: Gid::ROOT,
+            rdev: dev,
+            size: 0,
+            atime: Duration::ZERO,
+            mtime: Duration::ZERO,
+            ctime: Duration::ZERO,
+        }
+    }
+
+    fn decode_linux_dev_t(encoded: u64) -> (u32, u32) {
+        let major = (encoded & 0x000f_ff00) >> 8;
+        let minor = (encoded & 0xff) | ((encoded >> 12) & 0x000f_ff00);
+        (major as u32, minor as u32)
+    }
+
+    #[kunit]
+    fn stat_and_statx_report_the_same_device_parts() {
+        let devices = [
+            DeviceId::Char(CharDevNum::new(MajorNum::new(1), MinorNum::new(3))),
+            DeviceId::Block(BlockDevNum::new(MajorNum::new(7), MinorNum::new(0))),
+            DeviceId::Block(BlockDevNum::new(MajorNum::new(179), MinorNum::new(0))),
+            DeviceId::Block(BlockDevNum::new(MajorNum::new(2048), MinorNum::new(0))),
+        ];
+
+        for dev in devices {
+            let inode_stat = inode_stat_for(dev);
+            let stat = inode_stat.to_linux_stat();
+            let statx = inode_stat.to_linux_statx(linux_statx::BASIC_STATS);
+            assert_eq!(
+                decode_linux_dev_t(stat.st_dev),
+                (statx.stx_dev_major, statx.stx_dev_minor)
+            );
+            assert_eq!(
+                decode_linux_dev_t(stat.st_rdev),
+                (statx.stx_rdev_major, statx.stx_rdev_minor)
+            );
+        }
+    }
+
+    #[kunit]
+    fn raw_device_id_keeps_its_existing_abi_projection() {
+        let inode_stat = inode_stat_for(DeviceId::Raw(0x1234_5678));
+        let stat = inode_stat.to_linux_stat();
+        let statx = inode_stat.to_linux_statx(linux_statx::BASIC_STATS);
+
+        assert_eq!(stat.st_dev, 0x1234_5678);
+        assert_eq!((statx.stx_dev_major, statx.stx_dev_minor), (0x1234, 0x5678));
     }
 }
 

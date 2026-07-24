@@ -1,0 +1,3 @@
+target = "2k1000-la64"
+kernel-config = "conf/.defconfig"
+profile = "release"

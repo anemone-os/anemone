@@ -2,6 +2,8 @@
 
 use crate::prelude::*;
 
+static_assert!(SYSTEM_HZ > 0, "SYSTEM_HZ must be non-zero");
+
 /// A valid realtime priority in the Linux-compatible `[1, 99]` domain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -232,7 +234,6 @@ impl SchedConfig {
 }
 
 fn configured_ticks_duration(ticks: u32) -> Duration {
-    assert!(SYSTEM_HZ > 0, "SYSTEM_HZ must be non-zero");
     let nanos = (ticks as u128) * 1_000_000_000u128 / (SYSTEM_HZ as u128);
     assert!(
         nanos <= u64::MAX as u128,

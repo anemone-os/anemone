@@ -3,6 +3,7 @@ name = "pretest-rv64"
 arch = "riscv64"
 
 [fs]
+type = "folder"
 fstype = "ext4"
 base = "conf/rootfs/pretest-rv64-base"
 
@@ -15,6 +16,9 @@ path = "/dev"
 [[dirs]]
 path = "/mnt"
 
+[[dirs]]
+path = "/proc"
+
 [[apps]]
 name = "init"
 installed_dir = "/sbin"
@@ -24,11 +28,19 @@ name = "user-test"
 installed_dir = "/bin"
 
 [[apps]]
+name = "ioctl-test"
+installed_dir = "/bin"
+
+[[apps]]
 name = "fair-test"
 installed_dir = "/bin"
 
 [[apps]]
 name = "sched-attr-test"
+installed_dir = "/bin"
+
+[[apps]]
+name = "jobctl-test"
 installed_dir = "/bin"
 
 # [[apps]]

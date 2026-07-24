@@ -1,12 +1,12 @@
 # RFC-20260603-IOCTL-LOOP
 
-**状态：** Draft，已提升为公开 RFC 草案
+**状态：** Implemented / Closed
 **负责人：** doruche, Codex
-**最后更新：** 2026-06-04
+**最后更新：** 2026-07-22
 **领域：** syscall ABI / VFS / devfs / block device / mount / LTP
 **事务日志：** [IOCTL Loop 事务日志](../../devlog/transactions/2026-06-04-ioctl-loop.md)
-**开放问题：** None；design review 发现的 Keter/Euclid 项已吸收到本文、[不变量需求](./invariants.md) 和 [迁移实施计划](./implementation.md)，历史记录见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** 按 [Agent 编排建议](./backgrounds/agent-orchestration.md) 执行 Agent 0 只读前置审计；通过后进入 [迁移实施计划](./implementation.md) 的 UAPI 与 VFS ioctl 分发阶段。
+**开放问题：** None；design review 问题均已 neutralize。第一阶段外的 loop sysfs、partscan、扩展 ioctl 等能力由 [ANE-20260604-IOCTL-LTP-STAGE1-GAPS](../../register/current-limitations.md#ane-20260604-ioctl-ltp-stage1-gaps) 跟踪。
+**下一步：** None。后续扩展 loop sysfs、partscan、direct I/O、autoclear 或控制设备时，按影响范围建立小迭代或 follow-up RFC。
 
 ## 摘要
 
@@ -18,7 +18,7 @@
 
 LTP 中大量 `.needs_device` 用例依赖测试框架创建临时块设备。Linux 用户态通常通过 loop 设备把普通 image 文件绑定成块设备，再对该块设备执行 mkfs、mount、umount 和释放动作。如果内核缺少 loop ioctl、块设备 size ioctl 或 `/dev/loopN`，这些用例会失败在测试基础设施阶段，而不是失败在目标 syscall 语义上。
 
-Anemone 当前已有 mount、devfs、块设备注册和 ext4 block mount 的基础路径，但 `ioctl(2)` 还没有 VFS 级分发，loop 设备池也不存在。因此这个 RFC 的核心是先补齐设备协议入口，而不是把 `mount -o loop` 当成 kernel mount option 特判。
+实现前 Anemone 已有 mount、devfs、块设备注册和 ext4 block mount 的基础路径，但 `ioctl(2)` 尚无 VFS 级分发，loop 设备池也不存在。本 RFC 已在不引入 kernel mount option 特判的前提下补齐设备协议入口。
 
 ## 目标
 
@@ -67,24 +67,14 @@ Canonical：
 
 loop 设备持有 backing file 的长期内核句柄，将普通文件的 `read_at` / `write_at` 转换成块设备 `read_blocks` / `write_blocks`。mount 层继续只理解块设备 source；用户态 `mount -o loop` 仍由 mount 工具转换为 loop 绑定加普通 `mount(2)`。
 
-## 当前基础设施判断
+## 实现结果
 
-已有基础：
-
-- VFS 已有 `mount(2)` 入口，并能把 source path 解析为 `DeviceId::Block` 后构造 `MountSource::Block`。
-- 块设备子系统已有 `BlockDev`、块设备注册表、`BlockDevClass::Loop` 命名空间，以及 devfs 发布路径。
-- devfs 已转向发布层模型，叶子节点可以由设备侧决定 `open` 后的 `FileOps`。
-- ext4 mount 已经接受任意 `BlockDev`，只要求块大小为 512 字节。
-- 普通文件对象已有 `read_at` / `write_at`，loop 后端可以持有 backing file 并做偏移换算。
-
-主要缺口：
-
-- `sys_ioctl()` 当前只有 `FIONREAD` 特判，没有通用文件或设备分发。
-- `FileOps` 没有 `ioctl` 方法，设备无法在打开文件后接收命令。
-- 通用块设备文件没有 `BLK*` ioctl。
-- loop 设备不存在，`/dev/loop*` 和 loop 状态机都不存在。
-- mount data/options 当前被忽略，mount flags 只处理 `MS_RDONLY`。
-- `statfs()` 和 `/proc/self/mounts` 仍是弱实现，会影响 mount flag 类 LTP，但不是 loop 第一阶段阻塞项。
+- `sys_ioctl()` 已通过短生命周期 `IoctlCtx` 分发到打开文件对象；默认 unsupported ioctl 稳定映射为 `ENOTTY`，`O_PATH` 与 `FIONREAD` 边界已通过 review。
+- 统一 block devfs file ops 已处理 `BLKGETSIZE64`、`BLKGETSIZE`、`BLKSSZGET`、`BLKRASET` 和 `BLKRAGET`，未匹配命令再进入 block-owned private ioctl hook。
+- kconfig 控制的静态 `/dev/loop0..loopN` 设备池、`Unbound | Bound` 状态机和第一阶段 `LOOP_*` ioctl 已落地；空闲 discovery 使用 `ENXIO`，未发布半成品 `/dev/loop-control`。
+- loop 状态保存窄 `BackingFileHandle`，不保存 raw fd、`FileDesc`、task 或 fd table；后续 fileops RFC 的 capability 收紧没有改变本 RFC 的 block/loop owner 边界。
+- rv64 LTP 已越过 built-in loop driver false-negative 并发现 `/dev/loop0`；继续暴露的 sysfs、partscan、扩展 ioctl 和测试工具缺口属于明确的第一阶段外范围。
+- 实现与直接修补已通过当时记录的 `just build` 和静态审计，并由 `dev/drc/ioctl` 合并进入主线。完整手工 mkfs/mount smoke 的原始日志未保存在本事务中；2026-07-22 用户确认第一阶段早已完成，据此关闭 RFC，不把扩展 LTP 覆盖误算为本 RFC 的未完成项。
 
 ## 设计边界
 
@@ -181,9 +171,6 @@ loop 位于块设备子系统下是一个明确的 VFS-backed bridge 例外：lo
 
 ## 收口
 
-完成后需要在事务日志中记录：
+RFC 第一阶段已经实现并关闭。VFS ioctl 分发、通用 block ioctl、静态 loop 设备池、loop 基础 ioctl、review 修复和 rv64 LTP 失败归类见 [Completed 事务日志](../../devlog/transactions/2026-06-04-ioctl-loop.md)。2026-07-22 的关闭只同步既有实现事实和用户确认，不改变 accepted target，因此修订保持既有 baseline，不新增语义修订号。
 
-- VFS ioctl 分发和 `FIONREAD` 回归验证结果。
-- 块设备 `BLKGETSIZE64` / `BLKGETSIZE` / `BLKSSZGET` 验证结果。
-- `/dev/loopN` 发现、绑定、mkfs、mount、umount、release 的最小闭环日志。
-- LTP `.needs_device` 用例的通过/失败分类，以及仍属于 mount flags、sysfs、partscan、direct I/O 或文件系统类型支持的剩余限制。
+loop sysfs、partscan、partition nodes、direct I/O、完整 autoclear、扩展 `LOOP_*`、random ioctl/procfs 和完整 mount option 语义不属于本 RFC 第一阶段；它们继续由 register 或独立 follow-up 承接。

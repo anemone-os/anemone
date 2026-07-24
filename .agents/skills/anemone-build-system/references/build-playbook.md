@@ -17,14 +17,14 @@ Then read the corresponding Justfile recipe and xtask task. Help output defines 
 
 | Task | Preferred entrypoint | Inspect before use |
 | --- | --- | --- |
-| Initialize or reset local build configuration | `just defconfig` | Justfile, `conf/.defconfig`, existing root `kconfig` |
-| List or switch platforms | `just conf ...` | conf task, root `kconfig`, platform files |
-| Build the kernel | `just build` or the build xtask interface | selected kconfig, platform, build task |
-| Format Rust | `just fmt ...` | fmt help and fmt task |
+| Initialize or reset local KernelConfig | `just defconfig` | Justfile, `conf/.defconfig`, existing root `kconfig` |
+| List targets | `just conf ...` | target and Platform files |
+| Build the kernel | `just build --preset ...` or the complete low-level tuple | selected KernelConfig, target, Platform, build task |
+| Format Rust | `just fmt <scope> ...` | explicit `all`, `kernel`, or app scope; fmt help and task |
 | Build an app | `just app ...` or the app xtask interface | app manifest, app task, selected architecture |
 | Materialize a rootfs | `just rootfs ...` or the rootfs xtask interface | rootfs manifest, host inputs, app manifests, rootfs task |
-| Run QEMU | qemu xtask interface | platform, kernel provenance, firmware/device/image inputs |
-| Clean outputs | `just clean`, `just mrproper`, or `just xtask-clean` | live recipe and cleanup task |
+| Run QEMU | `just qemu ...` | explicit selection for automation, selected Platform bind declarations, firmware/device/image inputs |
+| Clean outputs | `just clean` | live recipe and cleanup task |
 | Run pretest/end-to-end validation | existing architecture-specific repository wrapper | the entire wrapper, local prerequisites, requested validation scope |
 
 Use `--help` to obtain current arguments instead of copying detailed invocations from this reference.
@@ -33,36 +33,54 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 
 ### Configuration
 
-- Confirm whether the command creates, overwrites, or edits root `kconfig`.
-- Re-read the selected platform after a switch.
-- Separate local configuration from tracked defaults.
+- Confirm whether the command creates or overwrites root `kconfig`.
+- Resolve the explicitly selected target and Platform through the shared resolver.
+- Reject bare, partial, or mixed preset/tuple input instead of filling it from local state.
 
 ### Kernel Build
 
-- Confirm which kconfig and platform were selected.
+- Confirm which selection source, SystemTarget, Platform, KernelConfig, and kernel Cargo profile were resolved.
 - Check generated inputs before interpreting compiler failures.
-- Verify only outputs enabled by the active configuration.
+- Provide every binding referenced by selected QEMU provider fields; build rejects runtime-only or otherwise
+  unconsumed values before side effects.
+- Check that the generated boot definition matches the selected initial-program variant. For `EmbeddedApp`, verify
+  the app identity, single executable regular export, reported byte count, and `include_bytes!` dependency all come
+  from the current invocation rather than a stale `build/apps/` artifact.
+- For firmware delivery, verify normal build removes stale `build/generated/device-tree/platform.dtb`.
+  For embedded delivery, verify it compiled the physical normative DTS or dumped a build-local DTB
+  from the selected QEMU provider using topology fields only.
+- Verify the kernel ELF and every post-link output required by the selected Platform.
 - Treat an existing artifact as evidence only when its timestamp and provenance match the invocation.
 
 ### App Build
 
 - Confirm the CLI app name locates the intended manifest.
-- Confirm requested architecture, driver profile, and declared artifact path agree.
+- Confirm requested architecture, closed Cargo/Source driver, and declared artifact path agree.
+- Treat Source as a command no-op only: reject manifest or caller driver args, then retain the same
+  path expansion, ordinary-file check, export, and explicit post-export diagnostics as Cargo.
 - Inspect exported artifacts under `build/`; use app-local target output only for diagnosis.
 
 ### Rootfs
 
 - Validate the manifest's base tree, declared host files, and app inputs before execution.
+- Confirm `fs.type` is explicit. Folder images always use automatic sizing; there is no manifest
+  capacity policy.
 - Confirm architecture and installed artifacts agree with the intended kernel/platform.
+- When a recipe consumes a fixed repository output, run the documented producer action first and stop if it fails; path existence alone is not freshness evidence.
 - Determine the exact output directory that will be replaced.
 - Separate staging failures from host image-tool or privilege failures.
 
 ### QEMU
 
 - Confirm the kernel was built for the selected platform.
-- Validate firmware, device, disk, and image inputs from the live platform file.
+- Validate the CPU, optional BIOS, firmware and fixed device tokens from the live Platform file, then provide every
+  provider/fixed-arg binding and every required runtime group. Optional groups may be omitted. Values are opaque;
+  xtask does not validate paths, units, ranges, or QEMU keyval semantics. Omitted BIOS emits no `-bios`.
 - Distinguish launch/configuration failures from guest boot failures.
 - When DTB is involved, inspect both the build-time generator and runtime QEMU path rather than assuming they use identical inputs.
+- QEMU exposes no DT maintenance command. When embedded QEMU DT materialization is involved, inspect
+  the normal build command and output publication; it may consume provider-field bindings but not ordinary args or
+  runtime groups.
 
 ### Cleanup And End-To-End Wrappers
 

@@ -1,5 +1,7 @@
 # IOCTL Loop Agent 编排建议
 
+**状态：** Historical；RFC 与事务已于 2026-07-22 关闭。
+
 本文记录 `IOCTL Loop` 进入实现阶段时的 agent 编排方式。Canonical 协议仍以
 [RFC 入口](../index.md)、[不变量需求](../invariants.md)、[迁移实施计划](../implementation.md)
 和 [Tracking Issues](../tracking-issues.md) 为准；本文只说明如何按这些 gate 组织

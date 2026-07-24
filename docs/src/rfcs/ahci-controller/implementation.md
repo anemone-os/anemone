@@ -1,9 +1,9 @@
 # AHCI Controller 迁移与验证计划
 
-**状态：** Active / Review Hold  
-**父 RFC：** [AHCI Controller / ATA Block Device](./index.md)  
-**不变量：** [AHCI Controller 不变量](./invariants.md)  
-**Tracking Issues：** [AHCI Controller Tracking Issues](./tracking-issues.md)  
+**状态：** Active / Review Hold
+**父 RFC：** [AHCI Controller / ATA Block Device](./index.md)
+**不变量：** [AHCI Controller 不变量](./invariants.md)
+**Tracking Issues：** [AHCI Controller Tracking Issues](./tracking-issues.md)
 **事务日志：** [2026-07-23 AHCI Controller](../../devlog/transactions/2026-07-23-ahci-controller.md)
 
 ## 当前基线
@@ -90,4 +90,3 @@ docs/src/devlog/transactions/2026-07-23-ahci-controller.md
   queue。
 - 不通过放宽 DMA/MMIO/capacity checks 或静默吞错来通过 gate。
 - 不恢复 `driver/block/ahci` 旧路径；结构移动已经是当前 owner boundary。
-

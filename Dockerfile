@@ -49,6 +49,7 @@ RUN apt update && apt install -y \
     linux-image-kvm \
     libglib2.0-0 \
     libslirp0 \
+    device-tree-compiler \
     u-boot-tools \
     sudo
 COPY --from=build_lwext4_toolchains /opt/toolchains /opt/toolchains
@@ -112,6 +113,7 @@ RUN apt update && apt install -y \
     linux-image-kvm \
     libglib2.0-0 \
     libslirp0 \
+    device-tree-compiler \
     u-boot-tools \
     sudo
 

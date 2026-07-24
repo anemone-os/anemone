@@ -4,7 +4,7 @@
 		{
 			"label": "Qemu Virt RISC-V",
 			"type": "shell",
-			"command": "just xtask qemu --platform qemu-virt-rv64 --image build/anemone.elf --debug | tee etc/qemu-virt-rv64.log",
+			"command": "just qemu --preset qemu-virt-rv64-release --bind smp=8 --bind memory=1G --bind kernel-image=build/anemone.elf --debug | tee etc/qemu-virt-rv64.log",
 			"args": [],
 			"problemMatcher": [],
 			"isBackground": true,
@@ -15,7 +15,7 @@
 		{
 			"label": "Qemu Virt Loongarch64",
 			"type": "shell",
-			"command": "just xtask qemu --platform qemu-virt-la64 --image build/anemone.elf --debug | tee etc/qemu-virt-la64.log",
+			"command": "just qemu --preset qemu-virt-la64-release --bind smp=8 --bind memory=1G --bind kernel-image=build/anemone.elf --debug | tee etc/qemu-virt-la64.log",
 			"args": [],
 			"problemMatcher": [],
 			"isBackground": true,

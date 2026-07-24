@@ -34,7 +34,7 @@ impl CharDev for Full {
 
 #[initcall(probe)]
 fn init() {
-    match register_char_device(FULL_DEVNUM, "full".to_string(), Arc::new(Full)) {
+    match register_char_device("full".to_string(), Arc::new(Full)) {
         Ok(()) => {
             knoticeln!("full device registered");
         },

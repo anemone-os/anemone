@@ -8,8 +8,6 @@ use crate::{
 pub(super) const SECTOR_BYTES: usize = 512;
 /// Number of 16-bit words returned by IDENTIFY DEVICE.
 const IDENTIFY_WORDS: usize = SECTOR_BYTES / 2;
-/// Byte-granular block size exposed through the kernel block-device API.
-const BLOCK_API_UNIT_BYTES: usize = 1;
 /// Words occupied by the serial-number field in IDENTIFY DEVICE.
 const SERIAL_WORDS: usize = 10;
 /// Words occupied by the firmware-revision field in IDENTIFY DEVICE.
@@ -71,7 +69,7 @@ pub(super) struct AtaIdentity {
     pub total_blocks: usize,
 }
 
-/// Byte-addressable block-device facade over one ATA disk.
+/// Sector-addressed block-device facade over one ATA disk.
 pub(super) struct AtaDisk {
     devnum: BlockDevNum,
     controller: Arc<AhciController>,
@@ -124,12 +122,12 @@ impl BlockDev for AtaDisk {
         self.devnum
     }
 
-    /// Exposes byte units while enforcing sector alignment in I/O methods.
+    /// Exposes one 512-byte block-layer unit per ATA logical sector.
     fn block_size(&self) -> BlockSize {
-        BlockSize::new(BLOCK_API_UNIT_BYTES)
+        BlockSize::new(1)
     }
 
-    /// Returns the disk capacity in the block API's byte units.
+    /// Returns the disk capacity in 512-byte logical sectors.
     fn total_blocks(&self) -> usize {
         self.identity.total_blocks
     }
@@ -182,7 +180,8 @@ pub(super) fn parse_identify(bytes: &[u8; SECTOR_BYTES]) -> Result<AtaIdentity, 
         *word = u16::from_le_bytes([bytes[0], bytes[1]]);
     }
 
-    let capabilities = AtaCapabilities::from_bits_retain(words[IdentifyWord::Capabilities as usize]);
+    let capabilities =
+        AtaCapabilities::from_bits_retain(words[IdentifyWord::Capabilities as usize]);
     if !capabilities.contains(AtaCapabilities::LBA | AtaCapabilities::DMA) {
         return Err(SysError::NotSupported);
     }
@@ -241,11 +240,7 @@ pub(super) fn parse_identify(bytes: &[u8; SECTOR_BYTES]) -> Result<AtaIdentity, 
 }
 
 /// Selects a fixed-width string field from an IDENTIFY response.
-fn identify_string(
-    words: &[u16; IDENTIFY_WORDS],
-    start: IdentifyWord,
-    len: usize,
-) -> &[u16] {
+fn identify_string(words: &[u16; IDENTIFY_WORDS], start: IdentifyWord, len: usize) -> &[u16] {
     &words[start as usize..start as usize + len]
 }
 
@@ -280,7 +275,8 @@ fn ata_string(words: &[u16]) -> Box<str> {
 }
 
 #[kunit]
-/// Covers required features, capacity decoding, strings, and sector-size rejection.
+/// Covers required features, capacity decoding, strings, and sector-size
+/// rejection.
 fn identify_requires_lba48_dma_flush_and_512_byte_sectors() {
     let mut bytes = [0u8; SECTOR_BYTES];
     set_word(&mut bytes, 49, (1 << 9) | (1 << 8));

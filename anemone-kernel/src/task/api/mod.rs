@@ -14,6 +14,5 @@ pub mod futex;
 pub mod getpid;
 pub mod getppid;
 pub mod gettid;
-pub mod jobctl;
 pub mod set_tid_address;
 pub mod wait;

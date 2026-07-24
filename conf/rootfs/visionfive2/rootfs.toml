@@ -27,9 +27,7 @@ path = "/dev"
 path = "/mnt"
 
 [[files]]
+# Fixed-path handoff: run a successful build with the same visionfive2-rv64
+# selection immediately before this rootfs action.
 source = "build/anemoneImage-rv64"
 installed_path = "/boot/anemoneImage"
-
-[[files]]
-source = "conf/rootfs/visionfive2/base/busybox"
-installed_path = "/sbin/init"

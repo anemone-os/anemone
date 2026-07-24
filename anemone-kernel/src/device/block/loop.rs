@@ -1,7 +1,7 @@
 use crate::{
     device::block::{
-        BlockDev, BlockDevClass, BlockDevRegistration, BlockIoctlCtx, BlockSize,
-        devfs::publish_block_device, register_block_device,
+        BlockDev, BlockDevRegistration, BlockIoctlCtx, BlockSize, devfs::publish_block_device,
+        register_block_device,
     },
     fs::BackingFileHandle,
     prelude::*,
@@ -17,6 +17,10 @@ const LOOP_BLOCK_SIZE: BlockSize = BlockSize::new(1);
 
 const fn devnum_for(id: usize) -> BlockDevNum {
     BlockDevNum::new(MajorNum::new(devnum::block::major::LOOP), MinorNum::new(id))
+}
+
+fn name_for(id: usize) -> String {
+    format!("loop{}", id)
 }
 
 #[derive(Debug)]
@@ -457,12 +461,12 @@ fn init() {
 
     for id in 0..LOOP_DEVICE_COUNT {
         let dev = LoopDevice::new(id);
+        let name = name_for(id);
         match register_block_device(BlockDevRegistration {
-            devnum: dev.devnum(),
-            class: BlockDevClass::Loop,
+            name: name.clone(),
             device: Arc::new(dev),
         }) {
-            Ok(name) => {
+            Ok(()) => {
                 if let Err(err) = publish_block_device(devnum_for(id)) {
                     knoticeln!("{} registered, but devfs publish failed: {:?}", name, err);
                 } else {
@@ -474,4 +478,10 @@ fn init() {
             },
         }
     }
+}
+
+#[kunit]
+fn endpoint_identity_uses_one_local_id() {
+    assert_eq!(devnum_for(0).minor(), MinorNum::new(0));
+    assert_eq!(name_for(0), "loop0");
 }

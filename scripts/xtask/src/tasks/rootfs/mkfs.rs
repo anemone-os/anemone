@@ -90,12 +90,10 @@ pub fn run(args: MkfsArgs) -> anyhow::Result<()> {
             args.sudo,
         )?;
     } else {
-        rootfs.fs.fstype.mkfs(
-            &staging_dir,
-            &image_path,
-            rootfs.fs.size.as_deref(),
-            args.sudo,
-        )?;
+        rootfs
+            .fs
+            .fstype
+            .mkfs(&staging_dir, &image_path, args.sudo)?;
     }
 
     Ok(())
@@ -296,7 +294,6 @@ mod tests {
                 base: None,
                 override_dir: None,
                 base_type: BaseType::Folder,
-                size: None,
             },
             init: Init {
                 path: "/sbin/init".to_string(),

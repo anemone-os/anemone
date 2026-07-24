@@ -9,7 +9,7 @@ description: Use when building, cleaning, configuring, formatting, packaging roo
 
 1. Work from the repository root.
 2. Use `just ...` for common flows, `just xtask ...` for specific xtask interfaces, and existing repository wrappers for their complete end-to-end flows.
-3. Do not substitute bare `cargo`, `rustc`, formatter, linker, target, or cleanup commands for repository-owned orchestration. Xtask owns generated inputs, target selection, artifact export, and platform wiring.
+3. Do not substitute bare `cargo`, `rustc`, formatter, linker, target, or cleanup commands for repository-owned orchestration. Xtask owns generated inputs, explicit target selection, artifact export, and platform wiring.
 4. Inspect user-facing exports under `build/` first. Treat cargo `target/` trees as internal unless diagnosis requires them.
 5. Change the Justfile or `scripts/xtask/` when orchestration is the owner. Do not add a parallel build entrypoint or one-off wrapper.
 
@@ -30,11 +30,40 @@ Read [references/build-playbook.md](references/build-playbook.md) for task routi
 
 Keep each concern in its owning layer:
 
-- root `kconfig` and `conf/.defconfig`: kernel build selection, features, and parameters;
-- `conf/platforms/` and `conf/arch/`: platform identity, architecture, hardware constants, boot environment, QEMU, DTB, and linker inputs;
-- `anemone-apps/<app>/app.toml`: app driver and exported artifacts;
+- root `kconfig` and `conf/.defconfig`: kernel features, policy, and capacity only;
+- `conf/build-presets/`: reusable explicit target, KernelConfig, and kernel Cargo-profile tuples;
+- `conf/system-targets/`: selected Platform reference, root mount/source, and initial-program source;
+- `conf/platforms/` and `conf/arch/`: platform identity, architecture, hardware constants, boot environment, tracked QEMU argv/bind templates, DTB, linker inputs, and Platform-required kernel outputs;
+- `anemone-apps/<app>/app.toml`: closed Cargo/Source driver and exported artifacts; Source runs no
+  command and only admits existing ordinary files through the common export path;
 - `conf/rootfs/`: rootfs composition and installed apps/files;
 - Justfile and `scripts/xtask/src/tasks/`: orchestration and command behavior.
+
+Kernel build owns the generated initial-program input. `RootfsEntry` emits its typed tag and optional complete argv;
+`EmbeddedApp` resolves the referenced app through the same architecture-specific `build_app()` exporter used by
+ordinary app/rootfs actions, requires exactly one executable regular artifact, and emits an ignored typed Rust
+definition whose `include_bytes!` points at that export and which carries the same optional argv shape. Explicit argv
+includes argv[0]; omission uses the resolved executable path as the sole argument. The kernel must not parse SystemTarget or app manifests,
+and `clean` must remove the generated boot definition.
+
+Build and ordinary QEMU require an explicit `--preset` or a complete `--target` / `--kernel-config`
+/ `--profile` tuple. Bare invocation has no local or repository-default fallback. Build/QEMU bind values are opaque
+action inputs supplied as `--bind name=value`, not tracked configuration. Provider-field placeholders are consumed by
+build and QEMU; fixed QEMU args and required/optional argv groups are QEMU-only.
+
+Formatting also requires an explicit scope: `all`, `kernel`, or an app name.
+Rootfs manifests require an explicit filesystem base type; folder roots use the repository's single
+automatic sizing policy rather than a manifest capacity option. QEMU Platforms require an explicit
+CPU model, while an omitted BIOS means xtask emits no `-bios` argument.
+
+QEMU DT has no maintenance or source write-back action. Firmware delivery consumes the runtime FDT;
+embedded QEMU delivery is materialized only by normal build from the selected provider's resolved machine,
+CPU, SMP, memory, and optional BIOS. Build may consume bindings referenced by those provider fields, but must not
+consume ordinary QEMU args, runtime bind groups, rootfs,
+disks, or network backends for that dump. QEMU Platforms keep no committed DTS mirror. Physical
+Platforms may retain a normative source or firmware conformance baseline; baseline provenance,
+allowed differences, and revalidation responsibility remain human-reviewed facts rather than
+machine-maintained fields without a real consumer.
 
 When prose, examples, schemas, active configuration, and Rust code disagree, treat live deserialization and task code as authoritative. Re-read them instead of preserving a possibly stale fact in this skill.
 

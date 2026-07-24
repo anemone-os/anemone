@@ -87,28 +87,62 @@ impl NormalizedFsType<'_> {
     }
 }
 
-/// Currently we only support following mount sources:
-/// - none. i.e. mounting a pseudo filesystem, which is used for procfs, sysfs,
-///   etc.
-/// - path to a block device. this often comes with a form of /dev/xxx.
-///
-/// Uuid, label, partition, etc. are not supported for now.
-fn parse_mount_source(raw: Option<Box<str>>) -> Result<MountSource, SysError> {
-    match raw.as_deref() {
-        None => Ok(MountSource::Pseudo),
-        Some(s) => {
-            // we treat this as a path.
-            let dev = get_current_task().lookup_path(&Path::new(s), ResolveFlags::empty())?;
+/// Resolve the raw source for a filesystem whose tagged mount operation
+/// requires a block device. UUIDs, labels, ordinary files, and network sources
+/// are not supported.
+fn parse_block_mount_source(fstype: &str, raw: Option<Box<str>>) -> Result<MountSource, SysError> {
+    let Some(raw) = raw else {
+        knoticeln!(
+            "mount: rejecting source fstype={} source_kind=block-device source_empty=true reason=null-source errno={:?}",
+            fstype,
+            SysError::InvalidArgument
+        );
+        return Err(SysError::InvalidArgument);
+    };
 
-            match dev.inode().get_attr()?.rdev {
-                DeviceId::Block(bdev) => {
-                    let bdev = get_block_dev(bdev).ok_or(SysError::NotFound)?;
-                    Ok(MountSource::Block(bdev))
-                },
-                _ => Err(SysError::InvalidArgument.into()),
-            }
+    let dev = match get_current_task().lookup_path(Path::new(raw.as_ref()), ResolveFlags::empty()) {
+        Ok(dev) => dev,
+        Err(err) => {
+            knoticeln!(
+                "mount: rejecting source fstype={} source_kind=block-device source_empty=false reason=path-lookup errno={:?}",
+                fstype,
+                err
+            );
+            return Err(err);
         },
-    }
+    };
+
+    let attr = match dev.inode().get_attr() {
+        Ok(attr) => attr,
+        Err(err) => {
+            knoticeln!(
+                "mount: rejecting source fstype={} source_kind=block-device source_empty=false reason=source-attributes errno={:?}",
+                fstype,
+                err
+            );
+            return Err(err);
+        },
+    };
+
+    let DeviceId::Block(devnum) = attr.rdev else {
+        knoticeln!(
+            "mount: rejecting source fstype={} source_kind=block-device source_empty=false reason=not-block-device errno={:?}",
+            fstype,
+            SysError::InvalidArgument
+        );
+        return Err(SysError::InvalidArgument);
+    };
+
+    let Some(dev) = get_block_dev(devnum) else {
+        knoticeln!(
+            "mount: rejecting source fstype={} source_kind=block-device source_empty=false reason=unregistered-block-device errno={:?}",
+            fstype,
+            SysError::NotFound
+        );
+        return Err(SysError::NotFound);
+    };
+
+    Ok(MountSource::Block(dev))
 }
 
 fn normalize_fstype(fstype: &str) -> NormalizedFsType<'_> {
@@ -253,13 +287,12 @@ fn do_new_mount(
     if fs.flags().contains(FileSystemFlags::KERNEL_FS) {
         return Err(SysError::PermissionDenied);
     }
-    drop(fs);
-
-    let source = if fstype.normalized == "ramfs" {
-        MountSource::Pseudo
+    let source = if fs.requires_block_device() {
+        parse_block_mount_source(fstype.normalized, source)?
     } else {
-        parse_mount_source(source)?
+        MountSource::Pseudo
     };
+    drop(fs);
 
     let target =
         get_current_task().lookup_path(Path::new(target.as_ref()), ResolveFlags::empty())?;
@@ -577,6 +610,14 @@ mod kunits {
 
     #[kunit]
     fn test_fstype_alias_stays_in_syscall_adapter() {
+        let proc = normalize_fstype("proc");
+        assert_eq!(proc.normalized, "proc");
+        assert_eq!(proc.alias, None);
+
+        let procfs = normalize_fstype("procfs");
+        assert_eq!(procfs.normalized, "procfs");
+        assert_eq!(procfs.alias, None);
+
         let tmpfs = normalize_fstype("tmpfs");
         assert_eq!(tmpfs.normalized, "ramfs");
         assert_eq!(tmpfs.alias, Some(FsAliasKind::TmpfsAsRamfs));
@@ -588,6 +629,23 @@ mod kunits {
         let ext4 = normalize_fstype("ext4");
         assert_eq!(ext4.normalized, "ext4");
         assert_eq!(ext4.alias, None);
+    }
+
+    #[kunit]
+    fn test_loop_data_rejection_precedes_fstype_admission() {
+        for fstype in ["missing", "anonymous"] {
+            assert_eq!(
+                do_new_mount(
+                    None,
+                    Box::from("/"),
+                    Some(Box::from(fstype)),
+                    MountAttrFlags::empty(),
+                    MountData::Text(Box::from("loop")),
+                )
+                .unwrap_err(),
+                SysError::InvalidArgument
+            );
+        }
     }
 
     #[kunit]

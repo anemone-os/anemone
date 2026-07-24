@@ -23,12 +23,18 @@ pub struct Build {
 pub enum BuildDriver {
     #[serde(rename = "cargo")]
     Cargo(CargoBuild),
+    #[serde(rename = "source")]
+    Source(SourceBuild),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CargoBuild {
     pub args: Vec<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceBuild {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Artifact {
@@ -48,10 +54,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parsing() {
-        let content =
-            std::fs::read_to_string("../../conf/app.toml").expect("Failed to read app.toml");
-        let app: App = toml::from_str(&content).expect("Failed to parse app.toml");
-        println!("{:#?}", app);
+    fn template_parses_as_cargo_driver() {
+        let content = example_app();
+        let app = App::from_str(&content).expect("Failed to parse app.toml");
+        assert!(matches!(app.build.driver, BuildDriver::Cargo(_)));
+    }
+
+    #[test]
+    fn source_driver_is_closed_and_has_no_manifest_args() {
+        let source = example_app()
+            .replace("driver = \"cargo\"", "driver = \"source\"")
+            .replace("args = [\"build\"]\n", "");
+        let app = App::from_str(&source).expect("source manifest should parse");
+        assert!(matches!(app.build.driver, BuildDriver::Source(_)));
+
+        let source_with_args = source.replace(
+            "driver = \"source\"",
+            "driver = \"source\"\nargs = [\"ignored\"]",
+        );
+        let error = format!("{:#}", App::from_str(&source_with_args).unwrap_err());
+        assert!(error.contains("unknown field `args`"), "{error}");
+    }
+
+    fn example_app() -> String {
+        std::fs::read_to_string("../../conf/app.toml").expect("failed to read example app manifest")
     }
 }

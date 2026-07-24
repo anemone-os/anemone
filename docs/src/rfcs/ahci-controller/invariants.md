@@ -56,4 +56,3 @@
 - 不得在 block registry 中再维护一份 AHCI port readiness、capacity 或 DMA address 真相源。
 - 不得在当前 RFC 内增加 hotplug、NCQ、ATAPI、multi-port、IRQ queue、partition scan 或 cache flush
   的半实现；这些能力需要新的 owner/lifecycle review 和验证 gate。
-

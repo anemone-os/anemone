@@ -2,6 +2,7 @@
 
 use crate::{
     fs::{
+        filesystem::FileSystemMountOps,
         inode::Inode,
         ramfs::{
             inode::{RAMFS_DIR_INODE_OPS, RamfsDir, RamfsReg, RamfsSymlink},
@@ -51,11 +52,10 @@ fn ramfs_symlink(inode: &InodeRef) -> Result<&RamfsSymlink, SysError> {
         .ok_or(SysError::NotSymlink)
 }
 
-fn ramfs_mount(source: MountSource, data: MountData) -> Result<Arc<SuperBlock>, SysError> {
-    if !matches!(source, MountSource::Pseudo) {
-        return Err(SysError::InvalidArgument);
-    }
+fn ramfs_mount(data: MountData) -> Result<Arc<SuperBlock>, SysError> {
     data.reject_nonempty_for("ramfs")?;
+
+    let source = MountSource::Pseudo;
 
     let sb_prv = AnyOpaque::new(RamfsSb::new());
 
@@ -106,7 +106,7 @@ fn ramfs_sync_fs(_sb: &SuperBlock) -> Result<(), SysError> {
 static RAMFS_FS_OPS: FileSystemOps = FileSystemOps {
     name: "ramfs",
     flags: FileSystemFlags::empty(),
-    mount: ramfs_mount,
+    mount: FileSystemMountOps::NoDevice(ramfs_mount),
     sync_fs: ramfs_sync_fs,
     kill_sb: ramfs_kill_sb,
 };

@@ -1,4 +1,5 @@
 src/platform_defs.rs
 src/kconfig_defs.rs
+src/boot_defs.rs
 src/arch/riscv64/generated.*
 src/arch/loongarch64/generated.*

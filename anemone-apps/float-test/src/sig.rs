@@ -6,12 +6,12 @@ use core::{
 
 use anemone_rs::{
     abi::process::linux::{
-        signal::{SigAction, SigInfo, SigSet, SA_SIGINFO},
+        signal::{SA_SIGINFO, SigAction, SigInfo, SigSet},
         ucontext::UContext,
     },
     os::linux::process::{
         getpid, gettid,
-        signal::{sigaction, tgkill, SigNo},
+        signal::{SigNo, sigaction, tgkill},
     },
     prelude::*,
 };

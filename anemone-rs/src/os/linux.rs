@@ -1,6 +1,9 @@
 pub mod fs {
     use alloc::ffi::CString;
-    use anemone_abi::fs::linux::{fcntl, open, stat::Stat};
+    use anemone_abi::{
+        fs::linux::{fcntl, ioctl, open, poll::PollFd, select::FdSet, stat::Stat},
+        time::linux::TimeSpec,
+    };
     use bitflags::bitflags;
 
     use crate::{prelude::*, sys::linux::fs};
@@ -70,6 +73,11 @@ pub mod fs {
         .map(|_| statbuf)
     }
 
+    pub fn fstat(fd: Fd) -> Result<Stat, Errno> {
+        let mut statbuf = Stat::default();
+        fs::fstat(fd as u64, &mut statbuf as *mut Stat as u64).map(|_| statbuf)
+    }
+
     pub fn mkdirat(dirfd: AtFd, path: &Path, mode: u32) -> Result<(), Errno> {
         let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
         fs::mkdirat(dirfd.to_raw() as u64, path.as_ptr() as u64, mode as u64).map(|_| ())
@@ -83,12 +91,56 @@ pub mod fs {
         fs::dup3(oldfd as u64, newfd as u64, flags as u64).map(|fd| fd as Fd)
     }
 
+    pub fn dup(fd: Fd) -> Result<Fd, Errno> {
+        fs::dup(fd as u64).map(|fd| fd as Fd)
+    }
+
     pub fn fcntl_getfl(fd: Fd) -> Result<u32, Errno> {
         fs::fcntl(fd as u64, fcntl::F_GETFL as u64, 0).map(|flags| flags as u32)
     }
 
     pub fn fcntl_setfl(fd: Fd, flags: u32) -> Result<(), Errno> {
         fs::fcntl(fd as u64, fcntl::F_SETFL as u64, flags as u64).map(|_| ())
+    }
+
+    pub fn ioctl_set_nonblocking(fd: Fd, enabled: bool) -> Result<(), Errno> {
+        let enabled = if enabled { 1i32 } else { 0i32 };
+        fs::ioctl(
+            fd as u64,
+            ioctl::FIONBIO as u64,
+            &enabled as *const i32 as u64,
+        )
+        .map(|_| ())
+    }
+
+    pub fn ppoll(fds: &mut [PollFd], timeout: Option<&TimeSpec>) -> Result<usize, Errno> {
+        fs::ppoll(
+            fds.as_mut_ptr() as u64,
+            fds.len() as u64,
+            timeout.map_or(0, |timeout| timeout as *const TimeSpec as u64),
+            0,
+            0,
+        )
+        .map(|ready| ready as usize)
+    }
+
+    /// Calls `pselect6` without a temporary signal mask.
+    pub fn pselect(
+        nfds: usize,
+        readfds: Option<&mut FdSet>,
+        writefds: Option<&mut FdSet>,
+        exceptfds: Option<&mut FdSet>,
+        timeout: Option<&TimeSpec>,
+    ) -> Result<usize, Errno> {
+        fs::pselect6(
+            nfds as u64,
+            readfds.map_or(0, |fds| fds as *mut FdSet as u64),
+            writefds.map_or(0, |fds| fds as *mut FdSet as u64),
+            exceptfds.map_or(0, |fds| fds as *mut FdSet as u64),
+            timeout.map_or(0, |timeout| timeout as *const TimeSpec as u64),
+            0,
+        )
+        .map(|ready| ready as usize)
     }
 
     pub fn unlinkat(dirfd: AtFd, path: &Path, flags: u32) -> Result<(), Errno> {
@@ -115,16 +167,13 @@ pub mod fs {
     }
 
     /// flags and data are currently not supported.
-    pub fn mount(source: Option<&Path>, target: &Path, fstype: &str) -> Result<(), Errno> {
-        let source_cstr = source
-            .map(|s| CString::new(s.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL))
-            .transpose()?;
-
+    pub fn mount(source: &Path, target: &Path, fstype: &str) -> Result<(), Errno> {
+        let source_cstr = CString::new(source.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
         let target_cstr = CString::new(target.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
         let fstype_cstr = CString::new(fstype).map_err(|_| EINVAL)?;
 
         fs::mount(
-            source_cstr.as_ref().map(|s| s.as_ptr() as u64).unwrap_or(0),
+            source_cstr.as_ptr() as u64,
             target_cstr.as_ptr() as u64,
             fstype_cstr.as_ptr() as u64,
             0,
@@ -137,6 +186,93 @@ pub mod fs {
     pub fn umount(target: &Path) -> Result<(), Errno> {
         let target_cstr = CString::new(target.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
         fs::umount(target_cstr.as_ptr() as u64, 0).map(|_| ())
+    }
+}
+
+pub mod tty {
+    use anemone_abi::tty::linux::{
+        TCGETS, TCSETS, TCSETSF, TCSETSW, TIOCGPGRP, TIOCGSID, TIOCGWINSZ, TIOCNOTTY,
+        TIOCSCTTY, TIOCSPGRP, TIOCSWINSZ, Termios, Winsize,
+    };
+
+    use crate::{os::linux::fs::Fd, prelude::*, sys::linux::fs};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum SetTermiosWhen {
+        Now,
+        Drain,
+        DrainFlush,
+    }
+
+    pub fn tcgetattr(fd: Fd) -> Result<Termios, Errno> {
+        let mut termios = Termios::default();
+        fs::ioctl(
+            fd as u64,
+            TCGETS as u64,
+            &mut termios as *mut Termios as u64,
+        )?;
+        Ok(termios)
+    }
+
+    pub fn tcsetattr(fd: Fd, when: SetTermiosWhen, termios: &Termios) -> Result<(), Errno> {
+        let command = match when {
+            SetTermiosWhen::Now => TCSETS,
+            SetTermiosWhen::Drain => TCSETSW,
+            SetTermiosWhen::DrainFlush => TCSETSF,
+        };
+        fs::ioctl(fd as u64, command as u64, termios as *const Termios as u64).map(|_| ())
+    }
+
+    pub fn get_winsize(fd: Fd) -> Result<Winsize, Errno> {
+        let mut winsize = Winsize::default();
+        fs::ioctl(
+            fd as u64,
+            TIOCGWINSZ as u64,
+            &mut winsize as *mut Winsize as u64,
+        )?;
+        Ok(winsize)
+    }
+
+    pub fn set_winsize(fd: Fd, winsize: &Winsize) -> Result<(), Errno> {
+        fs::ioctl(
+            fd as u64,
+            TIOCSWINSZ as u64,
+            winsize as *const Winsize as u64,
+        )
+        .map(|_| ())
+    }
+
+    pub fn tiocsctty(fd: Fd, argument: u64) -> Result<(), Errno> {
+        fs::ioctl(fd as u64, TIOCSCTTY as u64, argument).map(|_| ())
+    }
+
+    pub fn tiocnotty(fd: Fd) -> Result<(), Errno> {
+        fs::ioctl(fd as u64, TIOCNOTTY as u64, 0).map(|_| ())
+    }
+
+    pub fn tcgetsid(fd: Fd) -> Result<i32, Errno> {
+        let mut sid = 0i32;
+        fs::ioctl(fd as u64, TIOCGSID as u64, &mut sid as *mut i32 as u64)?;
+        Ok(sid)
+    }
+
+    pub fn tcgetpgrp(fd: Fd) -> Result<i32, Errno> {
+        let mut pgid = 0i32;
+        fs::ioctl(
+            fd as u64,
+            TIOCGPGRP as u64,
+            &mut pgid as *mut i32 as u64,
+        )?;
+        Ok(pgid)
+    }
+
+    pub fn tcsetpgrp(fd: Fd, pgid: i32) -> Result<(), Errno> {
+        fs::ioctl(fd as u64, TIOCSPGRP as u64, &pgid as *const i32 as u64).map(|_| ())
+    }
+
+    /// Issues an ioctl whose command has no argument payload.
+    pub fn ioctl_noarg(fd: Fd, command: u32) -> Result<(), Errno> {
+        fs::ioctl(fd as u64, command as u64, 0).map(|_| ())
     }
 }
 
@@ -455,9 +591,7 @@ pub mod process {
             raw_clone_thread(
                 flags.bits() as u64,
                 stack_top as u64,
-                parent_tid
-                    .map(|tid| tid as *mut Tid as u64)
-                    .unwrap_or(0),
+                parent_tid.map(|tid| tid as *mut Tid as u64).unwrap_or(0),
                 tls_ptr as u64,
                 child_tid.map(|tid| tid as *mut Tid as u64).unwrap_or(0),
                 entry as usize,
@@ -520,6 +654,10 @@ pub mod process {
 
     pub fn setpgid(pid: i32, pgid: i32) -> Result<(), Errno> {
         process::setpgid(pid, pgid).map(|_| ())
+    }
+
+    pub fn setsid() -> Result<Tid, Errno> {
+        process::setsid().map(|sid| sid as Tid)
     }
 
     #[repr(transparent)]
@@ -715,6 +853,10 @@ pub mod process {
 
         pub fn tgkill(tgid: Tid, tid: Tid, sig: SigNo) -> Result<(), Errno> {
             signal::tgkill(tgid as u64, tid as u64, sig.as_usize() as u64).map(|_| ())
+        }
+
+        pub fn tkill(tid: Tid, sig: SigNo) -> Result<(), Errno> {
+            signal::tkill(tid as u64, sig.as_usize() as u64).map(|_| ())
         }
 
         pub fn sigqueueinfo(pid: Tid, sig: SigNo, siginfo: &SigInfoWrapper) -> Result<(), Errno> {

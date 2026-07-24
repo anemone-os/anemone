@@ -59,7 +59,7 @@ fn sys_kill(target: KillTarget, sig: KillSignal) -> Result<u64, SysError> {
                 if let Some(leader) = tg.leader() {
                     if can_send_kill_signal_to(&leader, sig) {
                         if let KillSignal::Armed(signo) = sig {
-                            tg.recv_signal(kill_signal(signo));
+                            tg.recv_signal_from_process_group(kill_signal(signo), pgid);
                         }
                         delivered = true;
                     }
@@ -76,7 +76,7 @@ fn sys_kill(target: KillTarget, sig: KillSignal) -> Result<u64, SysError> {
                 if let Some(leader) = tg.leader() {
                     if can_send_kill_signal_to(&leader, sig) {
                         if let KillSignal::Armed(signo) = sig {
-                            tg.recv_signal(kill_signal(signo));
+                            tg.recv_signal_from_process_group(kill_signal(signo), pgid);
                         }
                         delivered = true;
                     }

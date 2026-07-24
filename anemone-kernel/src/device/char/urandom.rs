@@ -33,7 +33,7 @@ impl CharDev for URandom {
 
 #[initcall(probe)]
 fn init() {
-    match register_char_device(URANDOM_DEVNUM, "urandom".to_string(), Arc::new(URandom)) {
+    match register_char_device("urandom".to_string(), Arc::new(URandom)) {
         Ok(()) => {
             if let Err(err) = publish_char_device(URANDOM_DEVNUM) {
                 knoticeln!(

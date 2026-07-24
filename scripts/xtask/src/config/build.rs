@@ -29,13 +29,7 @@ impl TargetTriple {
 }
 
 impl FsType {
-    pub fn mkfs(
-        &self,
-        root_tree: &Path,
-        output: &Path,
-        size: Option<&str>,
-        use_sudo: bool,
-    ) -> anyhow::Result<()> {
+    pub fn mkfs(&self, root_tree: &Path, output: &Path, use_sudo: bool) -> anyhow::Result<()> {
         match self {
             FsType::Ext4 => {
                 let mut command = if use_sudo && !is_effective_root() {
@@ -49,12 +43,7 @@ impl FsType {
                     Command::new("virt-make-fs")
                 };
 
-                command
-                    .arg("--type=ext4")
-                    .arg("--format=raw");
-                if let Some(size) = size {
-                    command.arg(format!("--size={size}"));
-                }
+                command.arg("--type=ext4").arg("--format=raw");
                 command.arg(root_tree).arg(output);
 
                 cmd_echo(&command);
@@ -97,18 +86,11 @@ impl FsType {
         match self {
             FsType::Ext4 => {
                 let mut command = Command::new("cp");
-                command
-                    .arg(base_image)
-                    .arg(output);
+                command.arg(base_image).arg(output);
                 run_command(&mut command, "failed to copy rootfs base image")?;
 
                 if let Some(override_tree) = override_tree {
-                    copy_tree_into_image(
-                        override_tree,
-                        output,
-                        use_sudo,
-                        "rootfs override",
-                    )?;
+                    copy_tree_into_image(override_tree, output, use_sudo, "rootfs override")?;
                 }
                 copy_tree_into_image(
                     generated_tree,

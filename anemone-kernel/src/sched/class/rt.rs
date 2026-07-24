@@ -12,13 +12,12 @@ use super::{
     entity::{SchedClassPrv, SchedEntity, SchedEntityMutToken},
 };
 
-const fn rt_rr_full_quantum_ticks() -> u32 {
-    assert!(SYSTEM_HZ > 0, "SYSTEM_HZ must be non-zero");
-    assert!(
-        RT_RR_TIMESLICE_MS > 0,
-        "RT_RR_TIMESLICE_MS must be non-zero"
-    );
+static_assert!(
+    RT_RR_TIMESLICE_MS > 0,
+    "RT_RR_TIMESLICE_MS must be non-zero"
+);
 
+const fn rt_rr_full_quantum_ticks() -> u32 {
     // Both inputs are narrower than u128, so the multiplication and ceil
     // adjustment cannot overflow this intermediate representation.
     let product = (RT_RR_TIMESLICE_MS as u128) * (SYSTEM_HZ as u128);

@@ -1,6 +1,6 @@
 use crate::{
     prelude::*,
-    task::{cpu_usage::Privilege, execve::binfmt::dispatch_execve, futex::exit_robust_list},
+    task::{execve::binfmt::dispatch_execve, futex::exit_robust_list},
 };
 
 /// **This function must be run in a process context.**
@@ -99,7 +99,6 @@ pub fn kernel_execve_from_pathref(
                 task.switch_exec_ctx(name, usp, flags, false);
 
                 let ksp = task.kstack().stack_top();
-                task.on_prv_change(Privilege::User);
                 task.vfork_done.publish(1, true);
 
                 // DROP

@@ -22,11 +22,11 @@ ln_sf() {
 echo "Creating symlinks for Anemone userspace..."
 
 # ln_sf ld-musl-loongarch64.so.1 /lib/libc.musl-loongarch64.so.1
-# 
+#
 # ln_sf gcc /usr/bin/cc
 # ln_sf loongarch64-alpine-linux-musl-gcc /usr/bin/loongarch64-alpine-linux-musl-cc
 # ln_sf make /usr/bin/gmake
-# 
+#
 # ln_sf /usr/libexec/gcc/loongarch64-alpine-linux-musl/14.2.0/liblto_plugin.so /usr/lib/bfd-plugins/liblto_plugin.so
 # ln_sf libatomic.so.1.2.0 /usr/lib/libatomic.so
 # ln_sf libatomic.so.1.2.0 /usr/lib/libatomic.so.1
@@ -57,11 +57,11 @@ echo "Creating symlinks for Anemone userspace..."
 # ln_sf libunistring.so.5.1.0 /usr/lib/libunistring.so.5
 # ln_sf libz.so.1.3.1 /usr/lib/libz.so.1
 # ln_sf libzstd.so.1.5.6 /usr/lib/libzstd.so.1
-# 
+#
 # ln_sf git /usr/bin/git-receive-pack
 # ln_sf git /usr/bin/git-upload-archive
 # ln_sf git /usr/bin/git-upload-pack
-# 
+#
 # ln_sf ../../bin/git /usr/libexec/git-core/git
 # # for name in \
 # #     blame add am annotate apply archive bisect branch bugreport bundle cat-file \
@@ -84,7 +84,7 @@ echo "Creating symlinks for Anemone userspace..."
 # # do
 # #     ln_sf ../../bin/git "/usr/libexec/git-core/git-$name"
 # # done
-# 
+#
 # ln_sf git-remote-http /usr/libexec/git-core/git-remote-ftp
 # ln_sf git-remote-http /usr/libexec/git-core/git-remote-ftps
 # ln_sf git-remote-http /usr/libexec/git-core/git-remote-https

@@ -22,11 +22,10 @@ usage() {
 Usage: run-user-test-rv64.sh <sdcard-image> [log-file]
 
 Runs the rv64 test chain:
-  1. switch kconfig to qemu-virt-rv64-pretest if needed
-  2. build the rootfs with sudo
-  3. stage the provided sdcard image as a temporary copy
-  4. build the kernel
-  5. launch QEMU and tee the output to a log file
+  1. build the rootfs with sudo
+  2. stage the provided sdcard image as a build-local temporary copy
+  3. build the generic QEMU target with the preliminary topology
+  4. launch QEMU with the complete tracked bind map and tee the output to a log file
 
 Uses conf/rootfs/pretest-rv64.toml as the public pretest rootfs manifest.
 EOF
@@ -41,15 +40,16 @@ rootfs_config=conf/rootfs/pretest-rv64.toml
 sdcard_image=$1
 log_file=${2:-build/user-test-rv64.log}
 
-platform=qemu-virt-rv64-pretest
-platform_arch=riscv64
-sdcard_target=sdcard-rv.img
+preset=qemu-virt-rv64-release
+target_arch=riscv64
+runtime_dir=build/runtime/pretest-rv64
+sdcard_target=$runtime_dir/disk-x0.img
 rootfs_target=build/rootfs/pretest-rv64/rootfs.img
+provider_bindings=(--bind smp=1 --bind memory=1G)
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/.." && pwd)
 cd "$repo_root"
-
 
 if [[ ! -f "$rootfs_config" ]]; then
     error "rootfs config not found: $rootfs_config"
@@ -61,58 +61,48 @@ if [[ ! -f "$sdcard_image" ]]; then
     exit 1
 fi
 
-if [[ -e "$sdcard_target" ]]; then
+for runtime_parent in build build/runtime "$runtime_dir"; do
+    if [[ -L "$runtime_parent" ]]; then
+        error "runtime directory component must not be a symlink: $runtime_parent"
+        exit 1
+    fi
+done
+
+if [[ -e "$sdcard_target" || -L "$sdcard_target" ]]; then
     warn "$sdcard_target already exists; will be overwritten"
 fi
 
 mkdir -p -- "$(dirname -- "$log_file")"
 
-current_platform=$(
-    awk -F'"' '/^[[:space:]]*platform[[:space:]]*=/ { print $2; exit }' kconfig
-)
-
-if [[ -z "$current_platform" ]]; then
-    error "could not read current platform from kconfig"
-    exit 1
-fi
-
-log_progress "PRETEST" "platform $platform ($platform_arch)"
+log_progress "PRETEST" "preset $preset ($target_arch)"
+log_progress "PRETEST" "topology smp=1 memory=1G"
 log_progress "PRETEST" "rootfs config $rootfs_config"
 log_progress "PRETEST" "sdcard image $sdcard_image"
 log_progress "PRETEST" "log file $log_file"
 
-if [[ "$current_platform" != "$platform" ]]; then
-    log_progress "PRETEST" "switching kconfig from $current_platform to $platform"
-    just conf switch "$platform"
-fi
-
 log_progress "PRETEST" "rebuilding rootfs"
-rm -rf -- build/rootfs
 just rootfs mkfs -c "$rootfs_config" --sudo
 
-mapfile -t rootfs_images < <(find build/rootfs -mindepth 2 -maxdepth 2 -type f -name rootfs.img | sort)
-if [[ ${#rootfs_images[@]} -ne 1 ]]; then
-    error "expected exactly one rootfs image, found ${#rootfs_images[@]}"
-    if [[ ${#rootfs_images[@]} -gt 0 ]]; then
-        error "candidates:"
-        for rootfs_candidate in "${rootfs_images[@]}"; do
-            error "  $rootfs_candidate"
-        done
-    fi
+if [[ ! -f "$rootfs_target" ]]; then
+    error "rootfs output not found: $rootfs_target"
     exit 1
 fi
 
-rootfs_image=${rootfs_images[0]}
-if [[ "$rootfs_image" != "$rootfs_target" ]]; then
-    mkdir -p -- "$(dirname -- "$rootfs_target")"
-    ln -sf -- "$rootfs_image" "$rootfs_target"
-fi
-
 log_progress "PRETEST" "staging sdcard image"
-cp -- "$sdcard_image" "$sdcard_target"
+mkdir -p -- "$runtime_dir"
+sdcard_source=$(realpath -- "$sdcard_image")
+sdcard_destination=$(realpath -m -- "$sdcard_target")
+if [[ "$sdcard_source" == "$sdcard_destination" ]]; then
+    error "sdcard source and runtime destination must be different files"
+    exit 1
+fi
+cp --remove-destination -- "$sdcard_image" "$sdcard_target"
 
 log_progress "PRETEST" "building kernel"
-just build
+just build --preset "$preset" "${provider_bindings[@]}"
 
 log_progress "PRETEST" "running qemu"
-just xtask qemu --platform "$platform" --image build/anemone.elf 2>&1 | tee "$log_file"
+just qemu --preset "$preset" "${provider_bindings[@]}" \
+    --bind kernel-image=build/anemone.elf \
+    --bind disk-x0="$sdcard_target" \
+    --bind disk-x1="$rootfs_target" 2>&1 | tee "$log_file"

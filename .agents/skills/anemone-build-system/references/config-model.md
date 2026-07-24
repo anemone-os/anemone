@@ -17,29 +17,60 @@ Do not copy a current configuration snapshot into the skill. Point to its owner 
 
 ### Kernel Configuration
 
-Root `kconfig` selects kernel build policy and a platform. `conf/.defconfig` owns tracked defaults. Before changing either, inspect how the build task parses the selected file, which values may fall back, and which generated definitions it writes.
+Root `kconfig` and `conf/.defconfig` own kernel feature, policy, and capacity values only. Build selection, kernel Cargo profile, action presentation, and QEMU host paths are rejected from KernelConfig. Before changing either file, inspect which parameter values may fall back and which generated definitions the build writes.
+
+### Explicit Build Input
+
+`conf/build-presets/` names a SystemTarget, workspace-relative KernelConfig, and kernel-only Cargo
+profile. Build and ordinary QEMU share one resolver and require either an explicit preset or a
+complete low-level tuple. There is no developer-local or tracked default selection source, and
+presets do not carry presentation defaults.
+
+### System Target
+
+`conf/system-targets/` owns the selected Platform reference, root mount/source, and closed initial-program source:
+rootfs metadata or a referenced embedded app. Either variant may carry a complete non-empty argv including argv[0];
+omission uses the resolved executable path as the sole argument. An embedded app reference names an existing app manifest; kernel build
+uses the common app exporter and rejects identity mismatch, non-singleton output, non-regular output, or an artifact
+without an execute bit before kernel compilation. A SystemTarget does not own machine constants, kernel parameters,
+kernel Cargo profile, QEMU invocation values, Platform kernel-output formats, env configuration, or an
+artifact selector.
 
 ### Platform And Architecture
 
-`conf/platforms/` owns a platform's architecture-facing and launch-facing configuration. `conf/arch/` owns architecture templates and target specifications. The build, configuration, QEMU, and DTB tasks may consume different parts of this layer; inspect every consumer affected by a change.
+`conf/platforms/` owns a platform's architecture-facing and launch-facing configuration plus boot-ABI-required kernel output formats. QEMU sections own an explicit CPU shape, an optional BIOS, fixed argv, named opaque-string placeholders, and ordered required/optional bind groups, but never the host executable or invocation values. Omitting BIOS emits no `-bios` argument. `conf/arch/` owns architecture templates and target specifications. The build, configuration, QEMU, and DTB tasks may consume different parts of this layer; inspect every consumer affected by a change.
 
 ### App Manifest
 
-`anemone-apps/<app>/app.toml` owns the app build driver and artifact export contract. The app task locates the manifest, runs its driver for a chosen architecture, and exports declared artifacts. Keep locator name, manifest identity, driver profile, and artifact path coherent.
+`anemone-apps/<app>/app.toml` owns the closed Cargo/Source app driver and artifact export contract.
+Cargo runs its declared architecture-specific command. Source accepts no driver args and runs no
+command; it submits already-existing ordinary files to the same path expansion and export path.
+Neither driver proves runtime compatibility. Keep locator name, manifest identity, driver choice,
+and artifact path coherent.
 
 ### Rootfs Manifest
 
-`conf/rootfs/` owns filesystem composition: architecture, base tree, init, apps, directories, and host files. Rootfs construction consumes app manifests and produces an image used by some platform/QEMU flows. Keep composition inputs and the consuming platform aligned.
+`conf/rootfs/` owns filesystem composition: architecture, explicit base type, base tree, init, apps,
+directories, and host files. Folder image capacity is one implementation policy: `virt-make-fs`
+computes it automatically, so manifests have no capacity field. Rootfs construction consumes app
+manifests and may consume fixed-path outputs from a prior repository action. The recipe or adjacent
+documentation owns that command order; the rootfs task does not infer invocation history or freshness
+from path existence.
 
 ## Cross-Layer Invariants
 
 Before executing or accepting a configuration change, verify:
 
-- kconfig platform selection resolves to the intended platform;
+- the selected SystemTarget resolves to the intended Platform;
+- the explicit preset or complete low-level tuple resolves the intended SystemTarget; bare, mixed,
+  and partial input fails rather than merging with hidden state;
 - platform architecture agrees with target, linker, DTB, firmware, and QEMU choices;
+- the build produces every kernel output required by the selected Platform;
 - app architecture, driver output, and declared export agree;
+- an embedded initial app reference matches its manifest identity and resolves to one executable regular export;
 - rootfs architecture and installed apps agree with the intended kernel;
-- rootfs output and QEMU device/image wiring agree when the platform uses that image;
+- every build/QEMU bind value is consumed by a selected Platform placeholder and matches the intended wrapper mapping;
+- fixed-path consumers run after their documented producer and stop when it fails;
 - cleanup and wrapper behavior does not invalidate another layer's required input;
 - validation observes outputs from the current invocation, not stale conditional artifacts.
 
@@ -50,6 +81,17 @@ These are system invariants even when xtask does not enforce all of them directl
 Treat DTB generation as a cross-cutting build concern. Before modifying it, read the live platform model, build task, QEMU command construction, architecture paths, and active platform files. Determine which inputs affect build-time generation versus runtime launch, and validate both paths when their contract changes.
 
 Do not describe a proposed DTB workflow as an existing capability. Keep future design in the appropriate plan or RFC until code and commands implement it.
+
+Normal kernel build removes stale DTB output for firmware delivery. For embedded delivery it either
+compiles a physical normative source, or asks the selected QEMU provider to dump a build-local DTB
+using only resolved machine, CPU, SMP, memory, and optional BIOS. It may consume bindings referenced by those
+provider fields, but never consumes ordinary QEMU args, runtime disks, or runtime bind groups for DT materialization.
+
+QEMU Platforms keep no committed provider mirror and expose no refresh/check command. A physical
+`provider = "firmware"` contract records a firmware-derived conformance baseline without making it
+a build input. Physical capture provenance, allowed runtime differences, and the responsibility to
+revalidate after board or firmware changes are human-reviewed maintenance facts; keep them adjacent
+to the Platform baseline without inventing typed fields that no action consumes.
 
 ## Staleness Check
 

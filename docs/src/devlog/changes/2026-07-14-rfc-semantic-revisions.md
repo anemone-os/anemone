@@ -60,6 +60,10 @@ None.
 
 如果实际使用中 `R<n>` 与某份 RFC 自己的阶段编号冲突，应在该 RFC 的显示文本中写完整的“RFC 修订 `R<n>`”，但不另造 SemVer 层级。
 
+## Supersession
+
+2026-07-16 的 [current contract layer](./2026-07-16-current-contract-layer.md) 保留“Git 保存物理历史、RFC `R<n>` 标记 accepted target 修订”的结论，但取代了“每份 RFC `index.md` / `invariants.md` 持续维护跨 RFC current consolidated contract”的部分。后续共享规则按 owner / contract surface 提取到 `docs/src/contracts/`，RFC 保存 target 与 delta；本文继续作为旧两层模型的历史决策记录。
+
 ## Links
 
 - Biweekly devlog: [2026-07-06 至 2026-07-19](../2026-07-06_to_2026-07-19.md)

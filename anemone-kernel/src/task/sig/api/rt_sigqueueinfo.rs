@@ -84,8 +84,9 @@ fn sys_rt_sigqueueinfo(pid: i32, sig: KillSignal, uinfo: u64) -> Result<u64, Sys
     let target = get_task(&pid).ok_or(SysError::NoSuchProcess)?;
     reject_kthread_task_signal_target(&target)?;
     check_send_kill_signal_permission(&target, sig)?;
+    let target_tg = get_thread_group(&target.tgid()).ok_or(SysError::NoSuchProcess)?;
     let signal = Signal::new_with_errno(signo, si_code, si_fields, si_errno);
-    target.get_thread_group().recv_signal(signal);
+    target_tg.recv_signal_for_exact_member(signal, &target);
 
     Ok(0)
 }

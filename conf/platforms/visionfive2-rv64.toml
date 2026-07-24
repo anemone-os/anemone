@@ -1,6 +1,4 @@
 [build]
-name = "visionfive2-rv64"
-abbrs = ["visionfive2", "vf2"]
 arch = "riscv64"
 exec_env = "sbi"
 
@@ -12,10 +10,13 @@ kernel_va_base = 0xffffffff80200000
 max_phys_cpu_id = 4
 frame_section_shift_mb = 7
 
-
-[rootfs]
-fstype = "ext4"
-source = { type = "block", path = "mmcblk0" }
+[dtb]
+# Human-maintained conformance baseline exported from the supported board through U-Boot.
+# Revalidate after board or U-Boot changes; only /chosen/rng-seed may differ at runtime.
+source = "conf/platforms/visionfive2-board.dts"
+delivery = "firmware"
+authority = "provider-derived"
+provider = "firmware"
 
 [uboot]
 type = "image"

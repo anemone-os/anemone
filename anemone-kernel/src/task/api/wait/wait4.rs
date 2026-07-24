@@ -3,7 +3,7 @@
 use anemone_abi::syscall::SYS_WAIT4;
 use kernel_macros::syscall;
 
-use super::{WaitDisposition, WaitOptions, WaitTarget, wait_for_exited_child};
+use super::{ChildWaitStatus, WaitDisposition, WaitOptions, WaitTarget, wait_for_child_status};
 use crate::prelude::{
     user_access::{SyscallArgValidatorExt, UserWritePtr, user_addr},
     *,
@@ -21,7 +21,10 @@ enum WStatus {
         signal: u8,
         core_dumped: bool,
     },
-    // TODO: stopped, continued, etc. their bit representations are all different.
+    Stopped {
+        signal: u8,
+    },
+    Continued,
 }
 
 impl WStatus {
@@ -40,18 +43,28 @@ impl WStatus {
                     *kbuf |= 0x80;
                 }
             },
+            Self::Stopped { signal } => {
+                *kbuf = ((signal as i32) << 8) | 0x7f;
+            },
+            Self::Continued => {
+                *kbuf = 0xffff;
+            },
         }
     }
 }
 
-impl From<ExitCode> for WStatus {
-    fn from(value: ExitCode) -> Self {
+impl From<ChildWaitStatus> for WStatus {
+    fn from(value: ChildWaitStatus) -> Self {
         match value {
-            ExitCode::Exited(exit_code) => Self::Exited { exit_code },
-            ExitCode::Signaled(signal) => Self::Signaled {
+            ChildWaitStatus::Exited(ExitCode::Exited(exit_code)) => Self::Exited { exit_code },
+            ChildWaitStatus::Exited(ExitCode::Signaled(signal)) => Self::Signaled {
                 signal: signal.as_usize() as u8,
                 core_dumped: false, // TODO
             },
+            ChildWaitStatus::Stopped(signal) => Self::Stopped {
+                signal: signal.as_usize() as u8,
+            },
+            ChildWaitStatus::Continued => Self::Continued,
         }
     }
 }
@@ -64,11 +77,14 @@ fn sys_wait4(
     // todo.
     _rusage: u64,
 ) -> Result<u64, SysError> {
-    let Some(outcome) = wait_for_exited_child(target, waitoptions, WaitDisposition::Reap)? else {
+    // wait4 always observes terminal children; WUNTRACED/WCONTINUED add the
+    // corresponding job-control reports.
+    let waitoptions = waitoptions | WaitOptions::EXITED;
+    let Some(outcome) = wait_for_child_status(target, waitoptions, WaitDisposition::Reap)? else {
         return Ok(0);
     };
 
-    let wstatus = WStatus::from(outcome.exit_code);
+    let wstatus = WStatus::from(outcome.status);
     let mut kbuf: i32 = 0;
     wstatus.serialize_to_posix(&mut kbuf);
     if let Some(wstatus_ptr) = wstatus_ptr {

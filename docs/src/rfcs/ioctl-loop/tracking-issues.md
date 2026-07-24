@@ -1,13 +1,15 @@
 # IOCTL 与 Loop 设备 Tracking Issues
 
-**状态：** Active
-**最后更新：** 2026-06-04
+**状态：** Closed；无 active design issue
+**最后更新：** 2026-07-22
 **父 RFC：** [RFC-20260603-IOCTL-LOOP](./index.md)
 **事务日志：** [IOCTL Loop 事务日志](../../devlog/transactions/2026-06-04-ioctl-loop.md)
 
 本文只跟踪 design review 后确认的 RFC 草案缺陷、证明缺口、边界冲突或需要回到草案修改的设计问题。
 
 实现前已知缺口、当前基础设施状态、暂缓范围和阶段性交付项不写入本文；它们属于 [RFC index](./index.md) 的背景、非目标、风险，或 [迁移实施计划](./implementation.md) 的阶段内容。
+
+RFC 关闭时没有 Apollyon、Keter 或 Euclid 遗留项。`SAFE-001` 是已接受且已登记到 register 的第一阶段外限制，不是 active RFC blocker。
 
 ## Apollyon
 

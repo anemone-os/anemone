@@ -11,10 +11,7 @@ use port::AhciController;
 
 use crate::{
     device::{
-        block::{
-            BlockDevClass, BlockDevRegistration, BlockDriver, devfs::publish_block_device,
-            register_block_device, register_block_driver,
-        },
+        block::{BlockDevRegistration, devfs::publish_block_device, register_block_device},
         bus::platform::{self as platform_bus, PlatformDriver},
         devnum::GeneralMinorAllocator,
         kobject::{KObjIdent, KObjectBase, KObjectOps},
@@ -24,6 +21,57 @@ use crate::{
     prelude::*,
     utils::any_opaque::AnyOpaque,
 };
+
+static_assert!(
+    AHCI_HBA_RESET_TIMEOUT_MS > 0,
+    "AHCI_HBA_RESET_TIMEOUT_MS must be non-zero"
+);
+static_assert!(
+    AHCI_ENGINE_TIMEOUT_MS > 0,
+    "AHCI_ENGINE_TIMEOUT_MS must be non-zero"
+);
+static_assert!(
+    AHCI_PORT_TIMEOUT_MS > 0,
+    "AHCI_PORT_TIMEOUT_MS must be non-zero"
+);
+static_assert!(
+    AHCI_COMMAND_TIMEOUT_MS > 0,
+    "AHCI_COMMAND_TIMEOUT_MS must be non-zero"
+);
+static_assert!(AHCI_READ_WARN_MS > 0, "AHCI_READ_WARN_MS must be non-zero");
+static_assert!(
+    AHCI_READ_TIMEOUT_MS > 0,
+    "AHCI_READ_TIMEOUT_MS must be non-zero"
+);
+static_assert!(
+    AHCI_READ_WARN_MS < AHCI_READ_TIMEOUT_MS,
+    "AHCI_READ_WARN_MS must be less than AHCI_READ_TIMEOUT_MS"
+);
+
+const fn devnum_for(id: usize) -> BlockDevNum {
+    BlockDevNum::new(MajorNum::new(devnum::block::major::SCSI), MinorNum::new(id))
+}
+
+/// Generate Linux-style SCSI disk names: `sda`, `sdz`, `sdaa`, ...
+fn name_for(id: usize) -> String {
+    let mut suffix = Vec::new();
+    let mut value = id;
+
+    loop {
+        suffix.push((b'a' + (value % 26) as u8) as char);
+        if value < 26 {
+            break;
+        }
+        value = value / 26 - 1;
+    }
+
+    let mut name = String::with_capacity(2 + suffix.len());
+    name.push_str("sd");
+    for ch in suffix.iter().rev() {
+        name.push(*ch);
+    }
+    name
+}
 
 #[derive(Debug, KObject, Driver)]
 struct AhciDriver {
@@ -61,11 +109,11 @@ impl DriverOps for AhciDriver {
             .lock_irqsave()
             .alloc()
             .ok_or(SysError::NoMinorAvailable)?;
-        let devnum = BlockDevNum::new(*MAJOR.get(), minor);
+        let devnum = devnum_for(minor.get());
         let disk = Arc::new(AtaDisk::new(devnum, controller, identity));
-        let name = register_block_device(BlockDevRegistration {
-            devnum,
-            class: BlockDevClass::Scsi,
+        let name = name_for(minor.get());
+        register_block_device(BlockDevRegistration {
+            name: name.clone(),
             device: disk.clone(),
         })?;
 
@@ -128,28 +176,27 @@ impl PlatformDriver for AhciDriver {
     }
 }
 
-impl BlockDriver for AhciDriver {
-    /// Returns the dynamically allocated major number for AHCI disks.
-    fn major(&self) -> MajorNum {
-        *MAJOR.get()
-    }
-}
-
-static MAJOR: MonoOnce<MajorNum> = unsafe { MonoOnce::new() };
 static MINORS: Lazy<SpinLock<GeneralMinorAllocator>> =
     Lazy::new(|| SpinLock::new(GeneralMinorAllocator::new()));
 
 #[initcall(driver)]
-/// Registers the generic AHCI platform and block drivers.
+/// Registers the generic AHCI platform driver.
 fn init() {
     let driver = Arc::new(AhciDriver {
         kobj_base: KObjectBase::new(KObjIdent::try_from("ahci").unwrap()),
         drv_base: DriverBase::new(),
     });
-    let major = register_block_driver(driver.clone())
-        .unwrap_or_else(|error| panic!("failed to register AHCI block driver: {:?}", error));
-    MAJOR.init(|slot| {
-        slot.write(major);
-    });
     platform_bus::register_driver(driver);
+}
+
+#[kunit]
+fn endpoint_identity_uses_one_local_id() {
+    assert_eq!(
+        devnum_for(0).major(),
+        MajorNum::new(devnum::block::major::SCSI)
+    );
+    assert_eq!(devnum_for(0).minor(), MinorNum::new(0));
+    assert_eq!(name_for(0), "sda");
+    assert_eq!(name_for(25), "sdz");
+    assert_eq!(name_for(26), "sdaa");
 }

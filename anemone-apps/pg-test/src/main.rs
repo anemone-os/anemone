@@ -13,8 +13,8 @@ use anemone_rs::{
     },
     env::args,
     os::linux::process::{
-        execve, exit, fork, getpid, getppid, mmap, sched_yield, wait4, MmapFlags, MmapProt,
-        WStatus, WStatusRaw, WaitFor, WaitOptions,
+        MmapFlags, MmapProt, WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, getpid,
+        getppid, mmap, sched_yield, wait4,
     },
     prelude::*,
 };
@@ -24,8 +24,14 @@ const WAIT_RETRIES: usize = 100_000;
 type TestFn = fn() -> Result<(), Errno>;
 
 const TESTS: &[(&str, TestFn)] = &[
-    ("identity-and-invalid-arguments", test_identity_and_invalid_arguments),
-    ("fork-inherits-pgid-and-sid", test_fork_inherits_pgid_and_sid),
+    (
+        "identity-and-invalid-arguments",
+        test_identity_and_invalid_arguments,
+    ),
+    (
+        "fork-inherits-pgid-and-sid",
+        test_fork_inherits_pgid_and_sid,
+    ),
     ("setpgid-self", test_setpgid_self),
     (
         "parent-setpgid-existing-group-and-broadcast",
@@ -36,8 +42,14 @@ const TESTS: &[(&str, TestFn)] = &[
         "setpgid-child-different-session",
         test_setpgid_child_different_session,
     ),
-    ("setsid-success-and-leader-failures", test_setsid_success_and_leader_failures),
-    ("wait4-process-group-selection", test_wait4_process_group_selection),
+    (
+        "setsid-success-and-leader-failures",
+        test_setsid_success_and_leader_failures,
+    ),
+    (
+        "wait4-process-group-selection",
+        test_wait4_process_group_selection,
+    ),
     (
         "wait4-current-process-group-selection",
         test_wait4_current_process_group_selection,
@@ -88,18 +100,7 @@ fn getsid(pid: i32) -> Result<u32, Errno> {
 }
 
 fn kill(pid: i32, sig: u32) -> Result<(), Errno> {
-    unsafe {
-        syscall(
-            SYS_KILL,
-            pid as i64 as u64,
-            sig as u64,
-            0,
-            0,
-            0,
-            0,
-        )
-    }
-    .map(|_| ())
+    unsafe { syscall(SYS_KILL, pid as i64 as u64, sig as u64, 0, 0, 0, 0) }.map(|_| ())
 }
 
 fn wait4_raw(
@@ -268,7 +269,11 @@ fn test_parent_setpgid_existing_group_and_broadcast() -> Result<(), Errno> {
         },
     };
     setpgid(leader as i32, leader as i32)?;
-    assert_eq!(getpgid(leader as i32)?, leader, "pg-test: group leader pgid");
+    assert_eq!(
+        getpgid(leader as i32)?,
+        leader,
+        "pg-test: group leader pgid"
+    );
 
     let member = match fork()? {
         Some(pid) => pid,
@@ -277,7 +282,11 @@ fn test_parent_setpgid_existing_group_and_broadcast() -> Result<(), Errno> {
         },
     };
     setpgid(member as i32, leader as i32)?;
-    assert_eq!(getpgid(member as i32)?, leader, "pg-test: group member pgid");
+    assert_eq!(
+        getpgid(member as i32)?,
+        leader,
+        "pg-test: group member pgid"
+    );
 
     kill(-(leader as i32), SIGKILL)?;
     wait_child_signal(leader, SIGKILL as i8, "group kill leader")?;
@@ -306,7 +315,11 @@ fn test_setpgid_child_after_exec() -> Result<(), Errno> {
     }
 
     kill(child as i32, SIGKILL)?;
-    wait_child_signal(child, SIGKILL as i8, "setpgid child after exec timeout cleanup")?;
+    wait_child_signal(
+        child,
+        SIGKILL as i8,
+        "setpgid child after exec timeout cleanup",
+    )?;
     panic!("pg-test: setpgid child after exec never returned EACCES");
 }
 
@@ -330,7 +343,11 @@ fn test_setpgid_child_different_session() -> Result<(), Errno> {
         || shared.ready.load(Ordering::SeqCst) == 1,
         "different-session child readiness",
     )?;
-    assert_eq!(getsid(child as i32)?, child, "pg-test: different-session child sid");
+    assert_eq!(
+        getsid(child as i32)?,
+        child,
+        "pg-test: different-session child sid"
+    );
     expect_errno(
         setpgid(child as i32, child as i32),
         EPERM,
@@ -421,7 +438,11 @@ fn test_wait4_process_group_selection() -> Result<(), Errno> {
     shared.go.store(1, Ordering::SeqCst);
     loop {
         let mut status = WStatusRaw::EMPTY;
-        match wait4_raw(-(child_in_group as i32), Some(&mut status), WaitOptions::empty()) {
+        match wait4_raw(
+            -(child_in_group as i32),
+            Some(&mut status),
+            WaitOptions::empty(),
+        ) {
             Ok(Some(waited)) => {
                 assert_eq!(
                     waited, child_in_group,

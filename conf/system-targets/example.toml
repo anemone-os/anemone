@@ -1,0 +1,15 @@
+#! Example SystemTarget configuration.
+
+# Canonical Platform reference. The filename slug is the Platform identity.
+platform = "example"
+
+# SystemTarget owns root mount and root source selection.
+[root]
+fstype = "ext4"
+source = { type = "block", path = "vda" }
+
+# Rootfs metadata remains the default initial-program source. To embed one
+# app artifact instead, use `type = "embedded-app"` with `app = "<app-slug>"`.
+# Either variant may add a complete non-empty `argv`, including `argv[0]`.
+[initial-program]
+type = "rootfs-entry"

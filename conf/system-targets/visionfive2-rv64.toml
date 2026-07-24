@@ -1,0 +1,8 @@
+platform = "visionfive2-rv64"
+
+[root]
+fstype = "ext4"
+source = { type = "block", path = "mmcblk0" }
+
+[initial-program]
+type = "rootfs-entry"

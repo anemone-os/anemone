@@ -7,7 +7,7 @@ use anemone_rs::{
     abi::process::linux::signal::SIGCHLD,
     env::*,
     os::linux::process::{
-        clone, execve, sched_yield, wait4, CloneFlags, WStatusRaw, WaitFor, WaitOptions,
+        CloneFlags, WStatusRaw, WaitFor, WaitOptions, clone, execve, sched_yield, wait4,
     },
     prelude::*,
     process::process_id,

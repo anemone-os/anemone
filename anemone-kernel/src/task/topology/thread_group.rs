@@ -4,10 +4,7 @@ use crate::{
     prelude::*,
     task::{
         ThreadGroupType,
-        sig::{
-            SigNo, Signal,
-            info::{SiCode, SigInfoFields, SigKill},
-        },
+        sig::{SigNo, Signal},
         topology::{TOPOLOGY, TaskNode, ThreadGroup},
     },
 };
@@ -275,7 +272,7 @@ impl Task {
         let mut session_inner = session.inner.write();
         let mut pg_inner = pg.inner.write();
         let mut tg_inner = tg.inner.write();
-        assert!(tg_inner.members.remove(&self.tid()));
+        assert!(tg_inner.members.remove_unexposed_user(&self.tid()));
         let is_last = tg_inner.members.is_empty();
         let pg_empty = if is_last {
             assert!(
@@ -363,13 +360,9 @@ impl Task {
         };
 
         for member in members_to_kill {
-            member.recv_signal(Signal::new(
-                SigNo::SIGKILL,
-                SiCode::Kernel,
-                SigInfoFields::Kill(SigKill {
-                    pid: tg.tgid(),
-                    uid: self.cred().uid.real,
-                }),
+            member.recv_signal(Signal::new_dethread_victim_kill(
+                tg.tgid(),
+                self.cred().uid.real,
             ));
         }
 
@@ -412,12 +405,8 @@ impl Task {
             // member map is still the old TID, and we should update it to
             // leader TID.
             assert!(
-                tg_inner.members.remove(&old_tid),
-                "task topology: old TID not found in thread group when dethreading"
-            );
-            assert!(
-                tg_inner.members.insert(new_tid),
-                "task topology: duplicate TID in thread group when dethreading"
+                tg_inner.members.rekey_unexposed_user(old_tid, new_tid),
+                "task topology: old TID missing or new TID duplicated when dethreading"
             );
         }
 

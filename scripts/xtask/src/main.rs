@@ -9,6 +9,7 @@
 #![allow(unused)]
 
 use clap::{Parser, Subcommand};
+use std::process::ExitCode;
 
 mod config;
 mod tasks;
@@ -30,6 +31,8 @@ enum Commands {
     Rootfs(tasks::rootfs::RootfsArgs),
     #[command(about = "App related tasks")]
     App(tasks::app::AppArgs),
+    #[command(about = "Manage curated external source references")]
+    Xref(tasks::xref::XrefArgs),
     #[command(about = "Build Anemone")]
     Build(tasks::build::BuildArgs),
     #[command(about = "Format Rust sources")]
@@ -38,11 +41,19 @@ enum Commands {
     Qemu(tasks::qemu::QemuArgs),
     #[command(about = "Clean build artifacts")]
     Clean,
-    #[command(about = "Clean everything including config files")]
-    Mrproper,
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Error: {error:#}");
+            ExitCode::FAILURE
+        },
+    }
+}
+
+fn run() -> anyhow::Result<()> {
     // xtask cwd: scripts/xtask
     // we need to cd to workspace root
     std::env::set_current_dir("../..")?;
@@ -52,10 +63,76 @@ fn main() -> anyhow::Result<()> {
         Commands::Conf(conf) => tasks::conf::run(conf),
         Commands::Rootfs(args) => tasks::rootfs::run(args),
         Commands::App(args) => tasks::app::run(args),
+        Commands::Xref(args) => tasks::xref::run(args),
         Commands::Build(args) => tasks::build::run(args),
         Commands::Fmt(args) => tasks::fmt::run(args),
         Commands::Qemu(args) => tasks::qemu::run(args),
         Commands::Clean => tasks::clean::run(),
-        Commands::Mrproper => tasks::mrproper::run(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn production_cli_rejects_legacy_commands_and_options() {
+        for arguments in [
+            vec!["xtask", "build", "-k", "kconfig"],
+            vec![
+                "xtask",
+                "qemu",
+                "--platform",
+                "example",
+                "--image",
+                "build/anemone.elf",
+            ],
+            vec!["xtask", "conf", "switch", "example"],
+            vec!["xtask", "mrproper"],
+            vec!["xtask", "selection", "show"],
+            vec!["xtask", "fmt"],
+        ] {
+            assert!(Cli::try_parse_from(arguments).is_err());
+        }
+    }
+
+    #[test]
+    fn production_cli_exposes_selection_aware_build_and_qemu() {
+        assert!(
+            Cli::try_parse_from(["xtask", "build", "--preset", "example", "--disasm",]).is_ok()
+        );
+        assert!(Cli::try_parse_from(["xtask", "fmt", "all", "--check"]).is_ok());
+        assert!(Cli::try_parse_from(["xtask", "xref", "list"]).is_ok());
+        assert!(Cli::try_parse_from(["xtask", "xref", "fetch", "linux-6.6.32"]).is_ok());
+        assert!(
+            Cli::try_parse_from([
+                "xtask",
+                "xref",
+                "fetch",
+                "linux-6.6.32",
+                "--root",
+                "elsewhere",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xtask",
+                "qemu",
+                "--target",
+                "example",
+                "--kernel-config",
+                "conf/.defconfig",
+                "--profile",
+                "release",
+                "--bind",
+                "kernel-image=build/anemone.elf",
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from(["xtask", "qemu", "dt", "refresh", "--platform", "example",])
+                .is_err()
+        );
     }
 }

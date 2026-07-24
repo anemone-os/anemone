@@ -72,16 +72,11 @@ pub fn dispose_deferred_tasks() {
     // TODO: make these kconfig items
     const DISPOSE_BATCH_LIMIT: usize = 16;
     const SCAN_BATCH_LIMIT: usize = 64;
-    const QUEUE_INFO_THRESHOLD: usize = 5;
-    const QUEUE_WARNING_THRESHOLD: usize = 10;
 
     let mut can_be_disposed = vec![];
-    let queue_len_before_scan;
-    let queued_tasks_for_log;
     {
         let mut tasks = TASKS_TO_DISPOSE.lock_irqsave();
 
-        queue_len_before_scan = tasks.len();
         let scan_budget = tasks.len().min(SCAN_BATCH_LIMIT);
 
         for _ in 0..scan_budget {
@@ -99,36 +94,7 @@ pub fn dispose_deferred_tasks() {
                 tasks.push_back(task);
             }
         }
-        // Snapshot only after the strong-count eligibility checks. Cloning an
-        // Arc before those checks would itself make every task ineligible.
-        queued_tasks_for_log = if queue_len_before_scan > QUEUE_INFO_THRESHOLD {
-            can_be_disposed
-                .iter()
-                .chain(tasks.iter())
-                .cloned()
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
     }
-    if queue_len_before_scan > QUEUE_WARNING_THRESHOLD {
-        kwarningln!(
-            "deferred task disposal queue pressure high: {} task(s) queued before scan",
-            queue_len_before_scan
-        );
-        for task in &queued_tasks_for_log {
-            kwarningln!("deferred task queued: tid={} name={}", task.tid(), task.name());
-        }
-    } else if queue_len_before_scan > QUEUE_INFO_THRESHOLD {
-        kinfoln!(
-            "deferred task disposal queue pressure elevated: {} task(s) queued before scan",
-            queue_len_before_scan
-        );
-        for task in &queued_tasks_for_log {
-            kinfoln!("deferred task queued: tid={} name={}", task.tid(), task.name());
-        }
-    }
-    drop(queued_tasks_for_log);
     while let Some(task) = can_be_disposed.pop() {
         kdebugln!("disposing {} with tid {}", task.name(), task.tid());
     }

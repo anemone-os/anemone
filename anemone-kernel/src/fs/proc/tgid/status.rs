@@ -150,6 +150,7 @@ fn build_status_text(inode: &InodeRef) -> Result<String, SysError> {
     let cpu_list = cpus_allowed_list(affinity);
     let cpu_mask = cpus_allowed_mask(affinity);
     let kthread = is_kthread as u8;
+    let state = proc_state(tg, &leader);
 
     // Stage-1 placeholders:
     // - no resident, locked, per-segment, or page-table accounting is wired yet.
@@ -178,13 +179,7 @@ fn build_status_text(inode: &InodeRef) -> Result<String, SysError> {
 
     let mut out = String::new();
     writeln!(out, "Name:\t{}", proc_comm(&leader)).unwrap();
-    writeln!(
-        out,
-        "State:\t{} ({})",
-        proc_state(&leader),
-        proc_state_name(&leader)
-    )
-    .unwrap();
+    writeln!(out, "State:\t{} ({})", state.character(), state.name()).unwrap();
     writeln!(out, "Tgid:\t{}", tgid).unwrap();
     writeln!(out, "Ngid:\t{}", ngid).unwrap();
     writeln!(out, "Pid:\t{}", pid).unwrap();
@@ -247,19 +242,6 @@ fn build_status_text(inode: &InodeRef) -> Result<String, SysError> {
     writeln!(out, "nonvoluntary_ctxt_switches:\t0").unwrap();
 
     Ok(out)
-}
-
-fn proc_state_name(leader: &Task) -> &'static str {
-    match leader.status() {
-        TaskStatus::Runnable => "running",
-        TaskStatus::Zombie => "zombie",
-        TaskStatus::Waiting {
-            interruptible: true,
-        } => "sleeping",
-        TaskStatus::Waiting {
-            interruptible: false,
-        } => "disk sleep",
-    }
 }
 
 fn ids_line<T: UserId>(ids: Credentials<T>) -> String {
