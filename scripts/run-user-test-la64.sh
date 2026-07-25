@@ -103,6 +103,7 @@ just build --preset "$preset" "${provider_bindings[@]}"
 
 log_progress "PRETEST" "running qemu"
 just qemu --preset "$preset" "${provider_bindings[@]}" \
+    --bind net-user-options=restrict=off \
     --bind kernel-image=build/anemone.elf \
     --bind disk-x0="$rootfs_target" \
     --bind disk-x1="$sdcard_target" 2>&1 | tee "$log_file"
