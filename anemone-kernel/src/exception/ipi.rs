@@ -23,7 +23,7 @@ pub enum IpiPayload {
         tid: Tid,
     },
     WakeUpTaskStaleSafe {
-        tid: Tid,
+        task: Arc<Task>,
         park: ParkState,
     },
     SchedulerRequest(Box<SchedRequest>),
@@ -39,9 +39,8 @@ impl IpiPayload {
         match self {
             Self::TlbShootdown { vpn } => Self::TlbShootdown { vpn: *vpn },
             Self::EnqueueNewTask { tid } => Self::EnqueueNewTask { tid: *tid },
-            Self::WakeUpTaskStaleSafe { tid, park } => Self::WakeUpTaskStaleSafe {
-                tid: *tid,
-                park: *park,
+            Self::WakeUpTaskStaleSafe { .. } => {
+                panic!("wake placement cannot be copied for IPI broadcast")
             },
             Self::SchedulerRequest(_) => {
                 panic!("scheduler request cannot be copied for IPI broadcast")
@@ -57,7 +56,6 @@ impl IpiPayload {
 struct IpiMsg {
     payload: IpiPayload,
     is_accomplished: AtomicBool,
-    wake_result: NoIrqSpinLock<Option<WakeEnqueueResult>>,
 }
 
 impl IpiMsg {
@@ -65,7 +63,6 @@ impl IpiMsg {
         Self {
             payload,
             is_accomplished: AtomicBool::new(false),
-            wake_result: NoIrqSpinLock::new(None),
         }
     }
 }
@@ -81,10 +78,10 @@ fn alloc_ipi_msg(payload: IpiPayload) -> Result<Arc<IpiMsg>, IpiError> {
     Arc::try_new(IpiMsg::new(payload)).map_err(IpiError::Alloc)
 }
 
-fn wait_ipi_accomplished(msg: &Arc<IpiMsg>) -> Option<WakeEnqueueResult> {
+fn wait_ipi_accomplished(msg: &Arc<IpiMsg>) {
     loop {
         if msg.is_accomplished.load(Ordering::Acquire) {
-            return *msg.wake_result.lock();
+            return;
         }
         spin_loop();
     }
@@ -113,33 +110,20 @@ pub fn send_ipi(cpu_id: CpuId, payload: IpiPayload) -> Result<(), IpiError> {
 
     let msg = alloc_ipi_msg(payload)?;
     enqueue_ipi(cpu_id, Arc::clone(&msg));
-    let _ = wait_ipi_accomplished(&msg);
+    wait_ipi_accomplished(&msg);
 
     Ok(())
-}
-
-pub fn send_ipi_wait_result(
-    cpu_id: CpuId,
-    payload: IpiPayload,
-) -> Result<WakeEnqueueResult, IpiError> {
-    if cpu_id == cur_cpu_id() {
-        panic!("cannot send ipi to self");
-    }
-    if !target_online(cpu_id) {
-        return Err(IpiError::TargetOffline);
-    }
-
-    let msg = alloc_ipi_msg(payload)?;
-    enqueue_ipi(cpu_id, Arc::clone(&msg));
-    Ok(wait_ipi_accomplished(&msg).unwrap_or(WakeEnqueueResult::Stale))
 }
 
 /// Broadcast an IPI to all other CPUs, synchronously waiting for all of them to
 /// handle the IPI before returning.
 pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
     assert!(
-        !matches!(&payload, IpiPayload::SchedulerRequest(_)),
-        "scheduler request cannot be broadcast"
+        !matches!(
+            &payload,
+            IpiPayload::SchedulerRequest(_) | IpiPayload::WakeUpTaskStaleSafe { .. }
+        ),
+        "single-target IPI payload cannot be broadcast"
     );
     let cur_cpuid = cur_cpu_id();
     let ncpus = ncpus();
@@ -160,7 +144,7 @@ pub fn broadcast_ipi(payload: IpiPayload) -> Result<(), IpiError> {
     }
 
     for msg in pending {
-        let _ = wait_ipi_accomplished(&msg);
+        wait_ipi_accomplished(&msg);
     }
     Ok(())
 }
@@ -188,8 +172,11 @@ pub fn send_ipi_async(cpu_id: CpuId, payload: IpiPayload) -> Result<(), IpiError
 /// Broadcast an IPI to all other CPUs asynchronously.
 pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
     assert!(
-        !matches!(&payload, IpiPayload::SchedulerRequest(_)),
-        "scheduler request cannot be broadcast"
+        !matches!(
+            &payload,
+            IpiPayload::SchedulerRequest(_) | IpiPayload::WakeUpTaskStaleSafe { .. }
+        ),
+        "single-target IPI payload cannot be broadcast"
     );
     let cur_cpuid = cur_cpu_id();
     let ncpus = ncpus();
@@ -253,17 +240,8 @@ pub fn handle_ipi() {
                     local_enqueue_new_task(task);
                     msg.is_accomplished.store(true, Ordering::Release);
                 },
-                WakeUpTaskStaleSafe { tid, park } => {
-                    let tid = *tid;
-                    let task = get_task(&tid).expect("internal error: no such task to wake up");
-                    let placement = wake_enqueue(task, *park);
-                    *msg.wake_result.lock() = Some(placement);
-                    kdebugln!(
-                        "ipi wake placement: tid={} park={:?} placement={:?}",
-                        tid,
-                        park,
-                        placement
-                    );
+                WakeUpTaskStaleSafe { task, park } => {
+                    handle_remote_wake_placement(task.clone(), *park);
                     msg.is_accomplished.store(true, Ordering::Release);
                 },
                 SchedulerRequest(request) => {
@@ -293,11 +271,6 @@ mod kunits {
         let copies = [
             IpiPayload::TlbShootdown { vpn: None }.copy_for_broadcast(),
             IpiPayload::EnqueueNewTask { tid }.copy_for_broadcast(),
-            IpiPayload::WakeUpTaskStaleSafe {
-                tid,
-                park: ParkState::Parked,
-            }
-            .copy_for_broadcast(),
             IpiPayload::RunKUnitPerCpu {
                 test_fn: unused_test,
             }
@@ -313,13 +286,6 @@ mod kunits {
         assert!(matches!(
             copies.next().unwrap(),
             IpiPayload::EnqueueNewTask { tid: copied } if copied == tid
-        ));
-        assert!(matches!(
-            copies.next().unwrap(),
-            IpiPayload::WakeUpTaskStaleSafe {
-                tid: copied,
-                park: ParkState::Parked,
-            } if copied == tid
         ));
         assert!(matches!(
             copies.next().unwrap(),

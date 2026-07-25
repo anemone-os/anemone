@@ -339,19 +339,10 @@ impl WaitOutcome {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WakeEnqueueResult {
-    Stale,
-    AlreadyCurrent,
-    ParkPending,
-    AlreadyQueued,
-    Enqueued,
-}
-
 /// Result for wake attempts through the wait core.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum WakeResult {
-    Woke { placement: WakeEnqueueResult },
+    Woke,
     ModeBlocked,
     Stale,
     AlreadyCompleted(WaitReason),
@@ -550,7 +541,7 @@ impl From<WaitTransition> for WakeCommit {
 /// cleanup paths.
 ///
 /// `WakeResult::Woke` means the wait core has completed the logical wake and
-/// executed one stale-safe physical placement attempt.
+/// the scheduler has accepted the physical-placement obligation.
 pub(super) fn wake_wait(
     task: &Arc<Task>,
     token: &WakeToken,
@@ -633,7 +624,7 @@ pub(super) fn wake_wait(
 /// local cleanup paths.
 ///
 /// `WakeResult::Woke` means the wait core has completed the logical wake and
-/// executed one stale-safe physical placement attempt.
+/// the scheduler has accepted the physical-placement obligation.
 pub(super) fn wake_active_wait(task: &Arc<Task>, reason: WaitReason, mode: WakeMode) -> WakeResult {
     let mut wait_id = None;
     let commit = task.update_sched_state_with(|prev| match prev {
@@ -763,8 +754,8 @@ fn finish_wake_attempt(
 ) -> WakeResult {
     let result = match commit {
         WakeCommit::Woke { park } => {
-            let placement = crate::sched::wake_enqueue(task.clone(), park);
-            WakeResult::Woke { placement }
+            crate::sched::submit_wake_placement(task.clone(), park);
+            WakeResult::Woke
         },
         WakeCommit::ModeBlocked => WakeResult::ModeBlocked,
         WakeCommit::Stale => WakeResult::Stale,

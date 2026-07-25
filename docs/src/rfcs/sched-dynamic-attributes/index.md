@@ -3,16 +3,19 @@
 **状态：** Closed
 **修订：** R1
 **负责人：** doruche, Codex
-**最后更新：** 2026-07-16
+**最后更新：** 2026-07-25
 **领域：** scheduler / dynamic attributes / syscall ABI / IPI / affinity
 **事务日志：** [2026-07-15-sched-dynamic-attributes](../../devlog/transactions/2026-07-15-sched-dynamic-attributes.md)
 **开放问题：** None；已关闭问题见 [Tracking Issues](./tracking-issues.md)
-**下层问题：** [KETER-WAIT-001：synchronous remote placement 不能组合进 cross-CPU IPI completion](../sched-wait-refactor/tracking-issues.md#keter-wait-001synchronous-remote-placement-不能组合进-cross-cpu-ipi-completion)
-**下一步：** R1 已关闭；后续只做独立维护或 follow-up RFC。wait-core `KETER-WAIT-001` 关闭后可按本页退出条件移除临时 remote submission gate
+**下层问题：** None；KETER-WAIT-001 已由后继 current contract neutralize
+**当前后继：** [SCHED-WAKE 当前契约](../../contracts/scheduler/wake-delivery.md)
+**下一步：** R1 保持历史 Closed；临时 remote submission gate 已由后继 cutover 删除
 
 ## 摘要
 
 本 RFC R1 定义 Anemone 第一版动态调度配置事务和对应 Linux syscall 观察面。已发布 task 的 policy、policy parameters、nice、`reset_on_fork` 与 affinity 不再允许通过 TCB 字段旁路修改；所有会影响调度行为的修改都转换为 scheduler-owned `SchedConfigPatch`，并在 task 的固定 owner CPU 上由 `RunQueue` transaction 串行提交。
+
+本页保留 R1 accepted target 与当时包含临时 gate 的历史正文。2026-07-25 起，remote wake handoff 与 gate 退出后的 effective 语义由 [SCHED-WAKE 当前契约](../../contracts/scheduler/wake-delivery.md)维护；本页不原地重写为后继实现。
 
 远端 setter 使用现有 per-CPU IPI queue 传递唯一拥有的 `Box<SchedRequest>`。IPI transport 是异步的，但 syscall 对用户态保持同步：调用 task 创建新的 dormant `sched::oneshot::channel::<T>()`，只有结果尚未发布时，`recv_uninterruptible()` 才建立 wait 并 park；owner CPU 写入结果并完成 one-shot 后 syscall 再返回。wait-core `Force` 只结束当前 receive-local Latch round；receiver 在 channel 仍 empty 时内部 rearm，不把 Force 暴露成 channel error。所有 remote setter 在 request 发布前获取 `sched/request` 私有的全局 `Mutex<()>` `REMOTE_SCHED_REQUEST_GATE`，并持有到 `recv_uninterruptible()` 观察真正 terminal phase 后返回，使任意时刻最多只有一个仍持有开放 receiver、其 completion 仍可能进入 wait-core placement 的 remote scheduler request；该 gate 只约束 syscall producer graph，不是 RunQueue transaction lock，也不建立 multi-target 原子性。
 

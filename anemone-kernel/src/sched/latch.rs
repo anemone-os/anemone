@@ -286,12 +286,11 @@ impl LatchTrigger {
 
         let result = wait::wake_wait(&task, &self.token, WaitReason::Latch, WakeMode::AnyWait);
         match result {
-            WakeResult::Woke { placement } => {
+            WakeResult::Woke => {
                 kdebugln!(
-                    "latch: trigger woke task={} wait={:#x} placement={:?}",
+                    "latch: trigger woke task={} wait={:#x}",
                     self.diagnostic_tid,
                     wait_id,
-                    placement,
                 );
             },
             WakeResult::Stale => {

@@ -210,8 +210,8 @@ pub fn restore_pending_resched(pending: PendingResched) {
 ///
 /// This entry point is for non-wait-tail placement of tasks that are already
 /// known to be runnable, primarily new task publication. Wait completion tails
-/// must use [wake_enqueue] so late or stale wake placement is revalidated
-/// instead of asserted through this path.
+/// must use [submit_wake_placement] so late or stale wake placement is
+/// revalidated instead of asserted through this path.
 ///
 /// This function will disable interrupts.
 ///
@@ -259,7 +259,16 @@ pub fn local_enqueue_new_task(task: Arc<Task>) {
 /// Unlike [local_enqueue], this entry point never asserts on stale wake tails.
 /// It only performs physical placement if the task is still runnable and not
 /// already current or queued.
-pub fn local_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WakeEnqueueResult {
+    Stale,
+    AlreadyCurrent,
+    ParkPending,
+    AlreadyQueued,
+    Enqueued,
+}
+
+fn local_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
     assert!(task.cpuid() == cur_cpu_id());
 
     with_intr_disabled(|| {
@@ -456,43 +465,38 @@ pub(crate) fn pick_next_cpu_in(affinity: CpuMask) -> CpuId {
 /// bit expensive.
 ///
 /// This is a strict non-wait-tail placement path. Wait completion tails must
-/// use [wake_enqueue].
+/// use [submit_wake_placement].
 pub fn remote_enqueue_new_task(task: Arc<Task>) {
     assert!(task.is_sched_runnable());
     send_ipi(task.cpuid(), IpiPayload::EnqueueNewTask { tid: task.tid() })
         .expect("failed to enqueue task to another cpu");
 }
 
-pub fn remote_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
+fn remote_wake_enqueue(task: Arc<Task>, park: ParkState) {
     assert!(task.cpuid() != cur_cpu_id());
-    let state = task.sched_state();
-    if !matches!(state, TaskSchedState::Runnable) {
-        kdebugln!(
-            "wake_enqueue: task={} stale before remote placement sched_state={:?}",
-            task.tid(),
-            state,
-        );
-        return WakeEnqueueResult::Stale;
-    }
-
     let tid = task.tid();
-    let placement =
-        send_ipi_wait_result(task.cpuid(), IpiPayload::WakeUpTaskStaleSafe { tid, park })
-            .expect("failed to enqueue task to another cpu");
+    let owner_cpu = task.cpuid();
+
+    // Logical completion is already committed, so transport failure cannot be
+    // rolled back or exposed to Event/Latch as an ordinary wake outcome. The
+    // strong payload owns the task until the owner CPU revalidates placement.
+    send_ipi_async(owner_cpu, IpiPayload::WakeUpTaskStaleSafe { task, park })
+        .expect("failed to submit remote wake placement after logical completion");
 
     kdebugln!(
-        "wake_enqueue: task={} remote placement requested park={:?}",
+        "wake_enqueue: task={} remote placement submitted owner_cpu={:?} park={:?}",
         tid,
+        owner_cpu,
         park
     );
-    placement
 }
 
 /// Strict non-wait-tail placement wrapper around [local_enqueue_new_task] and
 /// [remote_enqueue_new_task].
 ///
 /// New task publication can use this path because the task is already known
-/// runnable and has no late wake tail. Wait completion must use [wake_enqueue].
+/// runnable and has no late wake tail. Wait completion must use
+/// [submit_wake_placement].
 pub fn enqueue_new_task(task: Arc<Task>) {
     assert!(task.is_sched_runnable());
     if task.cpuid() == cur_cpu_id() {
@@ -502,24 +506,36 @@ pub fn enqueue_new_task(task: Arc<Task>) {
     }
 }
 
-/// Stale-safe physical placement used only after wait-core logical wake
-/// completion.
-pub fn wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
-    let state = task.sched_state();
-    if !matches!(state, TaskSchedState::Runnable) {
-        kdebugln!(
-            "wake_enqueue: task={} stale before placement sched_state={:?}",
-            task.tid(),
-            state,
-        );
-        return WakeEnqueueResult::Stale;
-    }
-
+/// Accept the physical-placement obligation after wait-core logical
+/// completion. Local placement is resolved immediately; remote placement is
+/// reliably handed to the owner CPU before this function returns.
+pub(crate) fn submit_wake_placement(task: Arc<Task>, park: ParkState) {
     if task.cpuid() == cur_cpu_id() {
-        local_wake_enqueue(task, park)
+        let _ = local_wake_enqueue(task, park);
     } else {
-        remote_wake_enqueue(task, park)
+        remote_wake_enqueue(task, park);
     }
+}
+
+/// Consume an asynchronous wake-placement obligation on its owner CPU.
+///
+/// The IPI payload holds the strong task lifetime capability. This entry point
+/// is deliberately owner-local so the handler cannot select another remote
+/// path or resolve the task again through topology.
+pub(crate) fn handle_remote_wake_placement(task: Arc<Task>, park: ParkState) {
+    assert_eq!(
+        task.cpuid(),
+        cur_cpu_id(),
+        "remote wake placement reached the wrong owner CPU"
+    );
+    let tid = task.tid();
+    let placement = local_wake_enqueue(task, park);
+    kdebugln!(
+        "ipi wake placement: tid={} park={:?} placement={:?}",
+        tid,
+        park,
+        placement
+    );
 }
 
 pub mod init_routines {

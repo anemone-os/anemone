@@ -7,7 +7,7 @@
 
 本文只跟踪 confirmed design issue。implementation checkpoint、write set或验证尚未执行本身不作为design issue；只有阶段边界暴露出错误owner、contract、停止条件或无法完成的验证义务时才进入本页。accepted contract 必须修回 [RFC 入口](./index.md)、[不变量需求](./invariants.md) 或[迁移实施计划](./implementation.md)；本文不替代canonical正文。
 
-R1收口时本RFC owner内没有开放finding；下层wait-core `KETER-WAIT-001`继续由其公开tracker保持Open，不改变本页Closed状态。
+R1收口时本RFC owner内没有开放finding；下层wait-core `KETER-WAIT-001` 后续已由 `SCHED-WAKE` current contract neutralize，不改变本页历史 Closed 状态。
 
 ## Apollyon
 
@@ -108,3 +108,5 @@ R1收口时本RFC owner内没有开放finding；下层wait-core `KETER-WAIT-001`
 **Exactly-once repair：** `IpiPayload::SchedulerRequest(Box<SchedRequest>)`只有一个transport owner，payload不提供包含request的通用clone；`SchedRequest`内仍只有一个`NoIrqSpinLock<Option<SchedRequestBody>>`，body拥有target、patch、permit和non-clone sender。handler在transaction前take body，第二次execute或double-complete由常开断言暴露。broadcast误用是内核bug，在任何发送副作用前panic，不作为可恢复IPI error。
 
 **验证与退出：** Phase 1决定性one-shot KUnit覆盖send-before-receive、send-between-latch-begin-and-trigger-registration、send-after-registration、sender/receiver提前drop、Force各窗口内部retry、repeated Force、Force与terminal竞争及payload exactly-once drop；Phase 2B focused tests覆盖request exactly-once、Force不释放gate和`SenderClosed`确定失败。Phase 3 runtime只要求双CPU并发互调setter、`Mutex<()>` gate contention、receive前transport failure关闭/丢弃dormant endpoints后再release gate、request/read-back一致与正常shutdown，不要求时序不可控的user-space Force smoke。测试断言的是不会同时存在两个仍有开放receiver且可触发placement的published request，不是request envelope总数。wait-core接受hardirq-safe remote placement并完成实现后，移除gate并复跑同一双向stress；在此之前不得把KETER-WAIT-001标记为已修复。
+
+**后继 cutover：** 2026-07-25 的 [SCHED-WAKE 当前契约](../../contracts/scheduler/wake-delivery.md)删除 remote wake 的 synchronous result edge，并删除 `REMOTE_SCHED_REQUEST_GATE`。该后继小迭代以 source/lifecycle audit 和初赛 RV64 普通启动作为 acceptance；R1 退出说明中的无 gate 双向 SMP stress 未运行，明确不作为 gate removal 或 KETER-WAIT-001 neutralization 的证据。
