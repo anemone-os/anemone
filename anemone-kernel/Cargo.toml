@@ -26,7 +26,7 @@ fast_radix_trie = { workspace = true }
 safe-mmio = { workspace = true }
 virtio-drivers = { workspace = true }
 typed-path = { workspace = true }
-lwext4_rust = { path = "crates/lwext4-rust", default-features = false, features = [
+lwext4_rust = { path = "crates/anemos/lwext4-rust", default-features = false, features = [
     "print",
 ] }
 buddy-system = { path = "crates/buddy-system", features = ["stats"] }

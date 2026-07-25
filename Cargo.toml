@@ -2,8 +2,22 @@
 
 [workspace]
 resolver = "2"
-members = ["anemone-kernel", "anemone-kernel/crates/*"]
-exclude = ["scripts/xtask", "anemone-apps", "anemone-rs", "anemone-abi"]
+members = [
+    "anemone-kernel",
+    "anemone-kernel/crates/buddy-system",
+    "anemone-kernel/crates/device-tree",
+    "anemone-kernel/crates/idalloc",
+    "anemone-kernel/crates/kernel-macros",
+    "anemone-kernel/crates/la-insc",
+    "anemone-kernel/crates/range-allocator",
+    "anemone-kernel/crates/anemos/*",
+]
+exclude = [
+    "scripts/xtask",
+    "anemone-apps",
+    "anemone-rs",
+    "anemone-abi",
+]
 
 [workspace.dependencies]
 sbi-rt = { version = "0.0.3", features = ["legacy"] }
