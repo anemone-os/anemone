@@ -1,1 +1,1 @@
-mod virtio;
+pub(crate) mod virtio;

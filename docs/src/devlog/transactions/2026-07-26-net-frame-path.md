@@ -1,6 +1,6 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / Stage 1 Checkpoint 1-3 Closed; Checkpoint 4 Not Activated
+**Status:** Active / Stage 1 Checkpoint 1-4 Closed; Stage 2 Outline Not Resolved
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260726-net-frame-path R0](../../rfcs/net-frame-path/index.md),
@@ -24,6 +24,10 @@ manifest、默认只读 owner、target 与 cutover 边界保持不变。
 
 用户随后再次独立授权完成 Stage 1 Checkpoint 3，并明确不得进入 Checkpoint 4；本次仍按 frozen manifest、
 review/validation/write-back 与单 checkpoint commit 合同执行，不授予 target/contract/cutover 扩展。
+
+用户现已独立授权完成 Stage 1 Checkpoint 4，并要求持续推进至 checkpoint closure 或停止条件；本授权只覆盖
+kernel attach、IRQ/worker/time wiring、RV64 双向 vertical slice、stage-wide review、validation 与 write-back，
+不得自动解析或进入 Stage 2，仍不授予 current-contract cutover。
 
 ## R0 acceptance and activation preflight
 
@@ -250,3 +254,86 @@ attach/worker/time wiring、真实双向网络流量、queue saturation、LA64�
 **Not Run**，不得从 build/KUnit evidence外推。Stage 1 保持 Active，shared surface继续 provisional；六个
 network IDs 与 System Power Refine均 Not Effective。Checkpoint 4 为 **Not Activated / Unauthorized**，本事务
 停在 Checkpoint 3 closure。
+
+### 2026-07-26 - Stage 1 Checkpoint 4 activated
+
+Checkpoint 4 从 commit `3a36a858` 的干净 `dev/drc/alpha` 工作树独立激活。Preflight 重新读取
+AGENTS/LOCAL、R0 正文、Stage 1 Ready 定义、tracking issues、register、current System Power contract、
+Checkpoint 1-3 transaction 与 live provider/stack/device/kthread/timer/IRQ source；`just --list`、build/qemu
+help 与 RV64 wrapper 仍匹配 canonical commands，preliminary RV64 master 仍是只读共享资源。
+
+Live owner 已提供冻结范围内所需的窄能力：concrete driver 可通过既有 `Driver::for_each_device()` 取得每个
+已绑定设备的一次性 published capability；`KThreadHandle::wake()` 与 predicate wait 只传递 edge；threaded
+timer 接受 process-context one-shot callback，stale callback 可只造成额外 wake。generic bus/IRQ、kthread、
+timer/scheduler、vendored smoltcp/virtio-drivers 与 power owner均无需修改，没有命中 Stage 1 停止条件。
+
+**Write-set lock:** 只写 frozen manifest 内的 stack `src/{lib.rs,pump.rs}`、kernel `device/net`、
+`driver/net`、`net/{mod.rs,worker.rs}`、必要 manifest/feature wiring 与 canonical docs。generic bus/IRQ、
+task/kthread、time/timer、scheduler、power、apps/rootfs/LTP/LA64 owner继续只读；若真实 runtime 迫使修改这些
+owner，必须停止并报告扩展。
+
+**Planned proof:** Stage 1 host validation gate；focused source/dependency/unsafe review；RV64 release build；
+RV64 wrapper 日志中的 active attach、真实 VirtIO TX/TX completion、IRQ recheck、RX completion 与 echo reply；
+全量 KUnit `All tests passed!`、正常 shutdown、`git diff --check` 与 `mdbook build docs`。
+
+**Activation-time cutover:** Not Cut Over。六个 network IDs 与 System Power Refine 全部保持 pending；Stage 2
+未解析、未激活。
+
+### 2026-07-26 - Checkpoint 4 implementation and stage-wide review
+
+`anemone-kernel::net` 成为唯一 attach authority：它一次移动 concrete driver 暂存的 published capability，
+创建 stack-local `InterfaceId` mapping，完成 worker、provider wake 与 time wiring，再在同一 registry 临界窗口
+提交 active predicate 和 active entry。attach 前缺少 MAC 或 worker spawn 失败均不产生 active entry；后者先
+撤销 stack-local mapping。R0 没有 IRQ removal/reset rollback，失败 provider/backing 因此按既有 boot-only
+lifetime 保留到 power-off，不伪造可安全析构。
+
+每条 active path 由一个 ordinary kthread 独占 `Stack + VirtIONetProvider + InterfaceId`。worker 先清 edge，
+再重读 provider queue/recheck 与 stack deadline truth；有限 pump round耗尽后显式 requeue、yield。kernel
+monotonic time只在 attach owner 转为 `anemone-net-api::Instant`。threaded timer callback只持 worker wake
+capability；worker-local arm去重相同 deadline，旧 callback 只会触发一次无状态 recheck，不成为第二份
+deadline truth。
+
+`kunit-probe` feature只在 concrete stack 私有边界建立 `10.0.2.15/24` 与 ICMP socket；`SocketHandle`、地址、
+endpoint和完成读取均不出 stack。kernel KUnit只请求一次 probe，并观察完成 fact与 provider-local diagnostic
+counters。非 KUnit kernel不启用该 address/endpoint；shared API、netdev registry 与 production driver surface
+没有获得 control-plane、socket、readiness 或 packet injection能力。
+
+Stage-wide review 在最终形状前修正四项问题：active registry最初会在 active predicate 前短暂可见；普通
+IRQ/work pump会为同一 future deadline重复挂 one-shot timer；IRQ wake读取一次安装的 handle/capability时仍会
+取得 owner-local spin lock；RX callback已消费后若 refill异常，Drop会尝试 Reserved-only cancellation并形成
+二次 panic。最终实现分别采用同一临界窗口 publication、worker-local deadline arm、`spin::Once` 的无锁
+只读 capability publication，以及 refill 前提交 consumed 状态。复审后无剩余 Apollyon、Keter 或 Euclid；
+没有强引用环、provider-global callback guard、第二份 queue/deadline/mapping truth，四个 VirtIO unsafe window
+仍与同一 boxed backing和 matching begin/complete token一一对应。
+
+### 2026-07-26 - Checkpoint 4 validation and Stage 1 closure
+
+- `cargo test -p anemone-net-api -p anemone-smoltcp-stack`：最终源码通过；1 个 stack unit、9 个 integration
+  tests 与 2 个 compile-fail doctests证明 real-stack pump、ownership/Drop、capacity、budget、time、双实例隔离
+  与 callback borrow non-escape。
+- `cargo check -p anemone-smoltcp-stack --no-default-features --features kunit-probe`：通过；kernel 使用的
+  `no_std + alloc + test-only ICMP` feature graph成立。dependency audit显示 `anemone-net-api` 无 normal
+  dependency，production stack只有 `anemone-net-api + smoltcp`；shared API/production signature source audit
+  未发现 smoltcp object、socket/control-plane、host object或 unsafe。
+- `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`：最终源码在 sandbox 外完整通过。
+  checkpoint内同一命令在 sandbox内的 lwext4 C build曾触发 `SIGSYS / Bad system call`，归类为已知环境限制，
+  不作为 kernel build失败。
+- `./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-frame-stage1-rv64.log`：最终
+  wrapper exit 0。KUnit运行 260 个 tests；network probe直接打印 active `eth0` / ifindex 1 /
+  `InterfaceId(0)`，RX completion 2、TX submit/completion 2/2、IRQ recheck 2、queue-full 0、live/high-water
+  mappings 32/33，随后打印 `All tests passed!`。这证明 echo reply经真实 VirtIO TX、TX completion、IRQ、RX
+  completion、worker和 stack返回。user-test完成后依次记录 filesystem/device shutdown与 PowerOff machine
+  action。
+- wrapper中的既有 signal/wait LTP profile实际运行：attempted 120、passed 106、failed 10、skipped 4、
+  infra_failed 0。该 profile结果未作为 network correctness或全量 LTP结论，也未因既有失败阻止 wrapper
+  正常完成。
+- `just fmt kernel --check`：已运行，exit 1；全部 formatter diff仅位于既有 vendored
+  `anemone-kernel/crates/anemos/smoltcp/**`。本 checkpoint六个修改 Rust 文件的独立 `rustfmt --check`通过。
+  `git diff --check`、Stage 1 aggregate diff whitespace check 与 `mdbook build docs` 均通过；mdBook只有 search
+  index size warning。
+
+Checkpoint 4 delivery、stage-wide review、validation 与退出条件全部闭合，Stage 1 为 **Closed**。没有触发
+停止条件，也没有改变 R0 target、owner、public API/shared contract、ABI、visible semantics 或 acceptance。
+RV64 SMP>1、LA64 build/runtime、virtio-pci、hardware、queue saturation/Stage 2 conformance、final harness 与
+其它 LTP profile均 **Not Run**，不得从本次证据外推。六个 network IDs 与 System Power Refine继续
+**Not Effective**；Stage 2 保持 **Outline / Not Resolved / Unauthorized**，本事务停止在 Stage 1 closure。

@@ -18,10 +18,9 @@
 
 ## Euclid
 
-当前无项。RV64 virtio-mmio 尚未取得 network runtime evidence 是后续 validation gap，不是已经确认的
-设计缺陷；它由 RFC acceptance floor 和后续 implementation gate 负责。LA64 / virtio-pci 不属于当前
-R0 target。如果实际证据要求改变 shared ownership、public semantic surface 或 acceptance boundary，
-再新增对应 finding。
+当前无项。Stage 1 已取得 RV64 virtio-mmio network runtime evidence；LA64 / virtio-pci 不属于当前
+R0 target。Stage 2/3 尚未解析或执行的 proof obligation 不是已经确认的设计缺陷；如果后续实际证据要求
+改变 shared ownership、public semantic surface 或 acceptance boundary，再新增对应 finding。
 
 ## Safe
 

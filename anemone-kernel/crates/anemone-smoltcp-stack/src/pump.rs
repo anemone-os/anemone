@@ -1,9 +1,19 @@
+#[cfg(feature = "kunit-probe")]
+use alloc::vec;
 use alloc::vec::Vec;
 
 use anemone_net_api::{EthernetAddress, FrameProvider, Instant, InterfaceId, PumpOutcome, Recheck};
 use smoltcp::{
     iface::{Config, Interface, PollIngressSingleResult, PollResult, SocketSet},
     wire::{EthernetAddress as SmoltcpEthernetAddress, HardwareAddress},
+};
+
+#[cfg(feature = "kunit-probe")]
+use smoltcp::{
+    iface::SocketHandle,
+    phy::ChecksumCapabilities,
+    socket::icmp,
+    wire::{Icmpv4Packet, Icmpv4Repr, IpAddress, IpCidr, Ipv4Address},
 };
 
 use crate::adapter::{FrameDevice, from_smoltcp_instant, to_smoltcp_instant};
@@ -37,6 +47,17 @@ struct InterfaceEntry {
     frame_capacity: usize,
     interface: Interface,
     sockets: SocketSet<'static>,
+    #[cfg(feature = "kunit-probe")]
+    kunit_probe: Option<KunitIcmpProbe>,
+}
+
+#[cfg(feature = "kunit-probe")]
+struct KunitIcmpProbe {
+    socket: SocketHandle,
+    remote: Ipv4Address,
+    ident: u16,
+    sequence: u16,
+    completed: bool,
 }
 
 /// Owns the private smoltcp interface resources and their opaque ID mapping.
@@ -85,8 +106,23 @@ impl Stack {
             frame_capacity,
             interface,
             sockets: SocketSet::new(Vec::new()),
+            #[cfg(feature = "kunit-probe")]
+            kunit_probe: None,
         });
         id
+    }
+
+    /// Withdraws a transaction-local mapping before active publication.
+    ///
+    /// Interface IDs remain monotonic and are not reused. Runtime detach is not
+    /// part of R0; the kernel attach authority only uses this for rollback when
+    /// worker/wake/time preparation fails.
+    pub fn remove_interface(&mut self, id: InterfaceId) -> Result<(), PumpError> {
+        let Some(index) = self.interfaces.iter().position(|entry| entry.id == id) else {
+            return Err(PumpError::UnknownInterface(id));
+        };
+        self.interfaces.remove(index);
+        Ok(())
     }
 
     pub fn pump<P: FrameProvider>(
@@ -181,6 +217,109 @@ impl Stack {
             assert!(addresses.push(cidr).is_ok());
         });
         Ok(())
+    }
+
+    /// Installs and queues the single RV64 Stage 1 ICMP validation probe.
+    ///
+    /// This feature is absent from production kernels. The socket handle,
+    /// address, and endpoint remain inside the stack owner; the kernel only
+    /// observes the eventual boolean completion fact.
+    #[cfg(feature = "kunit-probe")]
+    pub fn start_kunit_icmp_echo(
+        &mut self,
+        id: InterfaceId,
+        local: [u8; 4],
+        prefix_len: u8,
+        remote: [u8; 4],
+    ) -> Result<(), PumpError> {
+        const IDENT: u16 = 0x4e46;
+        const SEQUENCE: u16 = 1;
+        const PAYLOAD: &[u8] = b"anemone-frame-stage1";
+
+        let Some(entry) = self.interfaces.iter_mut().find(|entry| entry.id == id) else {
+            return Err(PumpError::UnknownInterface(id));
+        };
+        assert!(
+            entry.kunit_probe.is_none(),
+            "KUnit ICMP probe started more than once"
+        );
+
+        let local = Ipv4Address::from_octets(local);
+        let remote = Ipv4Address::from_octets(remote);
+        entry.interface.update_ip_addrs(|addresses| {
+            addresses.clear();
+            addresses
+                .push(IpCidr::new(IpAddress::Ipv4(local), prefix_len))
+                .expect("KUnit IPv4 address slot must be available");
+        });
+
+        let rx = icmp::PacketBuffer::new(vec![icmp::PacketMetadata::EMPTY], vec![0; 128]);
+        let tx = icmp::PacketBuffer::new(vec![icmp::PacketMetadata::EMPTY], vec![0; 128]);
+        let mut socket = icmp::Socket::new(rx, tx);
+        socket
+            .bind(icmp::Endpoint::Ident(IDENT))
+            .expect("fresh KUnit ICMP socket must bind");
+        let repr = Icmpv4Repr::EchoRequest {
+            ident: IDENT,
+            seq_no: SEQUENCE,
+            data: PAYLOAD,
+        };
+        let payload = socket
+            .send(repr.buffer_len(), IpAddress::Ipv4(remote))
+            .expect("fresh KUnit ICMP socket must have TX capacity");
+        repr.emit(
+            &mut Icmpv4Packet::new_unchecked(payload),
+            &ChecksumCapabilities::default(),
+        );
+        let socket = entry.sockets.add(socket);
+        entry.kunit_probe = Some(KunitIcmpProbe {
+            socket,
+            remote,
+            ident: IDENT,
+            sequence: SEQUENCE,
+            completed: false,
+        });
+        Ok(())
+    }
+
+    /// Reaps the validation-only echo reply without exposing a smoltcp handle.
+    #[cfg(feature = "kunit-probe")]
+    pub fn kunit_icmp_echo_completed(&mut self, id: InterfaceId) -> Result<bool, PumpError> {
+        let Some(entry) = self.interfaces.iter_mut().find(|entry| entry.id == id) else {
+            return Err(PumpError::UnknownInterface(id));
+        };
+        let Some(probe) = entry.kunit_probe.as_mut() else {
+            return Ok(false);
+        };
+        if probe.completed {
+            return Ok(true);
+        }
+
+        let socket = entry.sockets.get_mut::<icmp::Socket>(probe.socket);
+        if !socket.can_recv() {
+            return Ok(false);
+        }
+        let (payload, remote) = socket
+            .recv()
+            .expect("KUnit ICMP socket reported receive readiness without a packet");
+        assert_eq!(remote, IpAddress::Ipv4(probe.remote));
+        let packet = Icmpv4Packet::new_checked(payload)
+            .expect("KUnit ICMP response must contain a valid packet");
+        let repr = Icmpv4Repr::parse(&packet, &ChecksumCapabilities::default())
+            .expect("KUnit ICMP response checksum must be valid");
+        assert!(
+            matches!(
+                repr,
+                Icmpv4Repr::EchoReply {
+                    ident,
+                    seq_no,
+                    ..
+                } if ident == probe.ident && seq_no == probe.sequence
+            ),
+            "KUnit ICMP socket received an unexpected response: {repr:?}"
+        );
+        probe.completed = true;
+        Ok(true)
     }
 }
 

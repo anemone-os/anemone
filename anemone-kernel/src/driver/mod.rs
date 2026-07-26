@@ -26,7 +26,7 @@ mod ahci;
 mod block;
 mod clock_source;
 mod mmc;
-mod net;
+pub(crate) mod net;
 pub use mmc::consts::{
     MMC_CARD_INIT_POLL_INTERVAL_MS, MMC_CARD_INIT_TIMEOUT_MS, MMC_IDENTIFICATION_CLOCK_HZ,
     MMC_SD_DATA_CLOCK_HZ,

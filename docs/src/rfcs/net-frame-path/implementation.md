@@ -1,6 +1,6 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** R0 / Stage 1 Active；Checkpoint 1-3 Closed，Checkpoint 4 Not Activated
+**状态：** R0 / Stage 1 Closed；Stage 2 Outline / Not Resolved / Unauthorized
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **目标与不变量：** [Network Frame Path 目标与不变量](./invariants.md)
@@ -14,7 +14,8 @@ cutover 要求
 
 > 本文是 R0 的实施顺序、stage maturity、验证与 write-set 权威。用户已于 2026-07-26 接受 R0、
 > 授权建立 transaction，并独立激活 Stage 1 Checkpoint 1。用户随后分别独立授权并关闭 Checkpoint 2
-> 与 Checkpoint 3；当前授权不进入 Checkpoint 4，也不授予 contract cutover。
+> 与 Checkpoint 3，并独立授权、关闭 Checkpoint 4 与 Stage 1。本授权不授予 contract cutover，也不自动
+> 解析或进入 Stage 2。
 
 ## 1. 计划角色与 authority
 
@@ -135,13 +136,13 @@ contract，再把下一个 Outline 完整解析为 Ready。
 
 | Stage | 成熟度 | 跨层结果 | Contract 状态 |
 | --- | --- | --- | --- |
-| Stage 1 — Four-layer walking skeleton | Active | hostable seam、真实 stack/provider、VirtIO-Net、netdev publication、kernel attach/IRQ/worker、RV64 一次真实双向纵切 | 全部 Not Effective |
+| Stage 1 — Four-layer walking skeleton | Closed | hostable seam、真实 stack/provider、VirtIO-Net、netdev publication、kernel attach/IRQ/worker、RV64 一次真实双向纵切 | 全部 Not Effective |
 | Stage 2 — Bounded progress conformance | Outline | exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 saturation proof | 全部 Not Effective |
 | Stage 3 — Multi-instance/lifecycle closure | Outline | 双实例隔离、attach rollback、shutdown handoff、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
 
 ## 6. Stage 1 Ready：Four-layer walking skeleton
 
-**状态：** Active / Checkpoint 1-3 Closed；Checkpoint 4 Not Activated
+**状态：** Closed / Checkpoint 1-4 Closed（2026-07-26）；Stage 2 仍为未解析、未授权的 Outline
 
 ### 6.1 目的与退出形状
 
@@ -320,6 +321,9 @@ generic device lifecycle 必须扩大才能安全 publication，停止 Stage 1 �
 影响。Checkpoint 3 关闭不自动进入 Checkpoint 4。
 
 ### 6.6 Checkpoint 4 — Kernel attach、IRQ/worker/time wiring 与 RV64 vertical slice
+
+**状态：** Closed（2026-07-26）；交付、stage-wide review、validation 与 write-back 已闭合；
+Stage 2 resolution / activation 未获授权。
 
 **交付：**
 

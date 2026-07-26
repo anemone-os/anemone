@@ -2,7 +2,7 @@
 
 use core::{
     mem::size_of,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use anemone_net_api::{
@@ -51,6 +51,102 @@ static_assert!(
 );
 
 type RawNet = VirtIONetRaw<VirtIOHalImpl, SomeTransport<'static>, QUEUE_SIZE>;
+
+/// Pure worker-wake capability installed by the kernel attach authority.
+///
+/// The IRQ path commits the provider-owned recheck predicate before invoking
+/// this edge. Implementations must not read driver state or run protocol work.
+pub(crate) trait VirtIONetRecheckWake: Send + Sync {
+    fn wake(&self);
+}
+
+/// Diagnostic-only provider counters. They never drive queue or worker state.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct VirtIONetStats {
+    rx_completions: usize,
+    tx_submissions: usize,
+    tx_completions: usize,
+    irq_rechecks: usize,
+    queue_full: usize,
+    live_mappings: usize,
+    mapping_high_water: usize,
+}
+
+impl VirtIONetStats {
+    pub(crate) const fn rx_completions(self) -> usize {
+        self.rx_completions
+    }
+
+    pub(crate) const fn tx_submissions(self) -> usize {
+        self.tx_submissions
+    }
+
+    pub(crate) const fn tx_completions(self) -> usize {
+        self.tx_completions
+    }
+
+    pub(crate) const fn irq_rechecks(self) -> usize {
+        self.irq_rechecks
+    }
+
+    pub(crate) const fn queue_full(self) -> usize {
+        self.queue_full
+    }
+
+    pub(crate) const fn live_mappings(self) -> usize {
+        self.live_mappings
+    }
+
+    pub(crate) const fn mapping_high_water(self) -> usize {
+        self.mapping_high_water
+    }
+}
+
+struct VirtIONetDiagnostics {
+    rx_completions: AtomicUsize,
+    tx_submissions: AtomicUsize,
+    tx_completions: AtomicUsize,
+    irq_rechecks: AtomicUsize,
+    queue_full: AtomicUsize,
+    live_mappings: AtomicUsize,
+    mapping_high_water: AtomicUsize,
+}
+
+impl VirtIONetDiagnostics {
+    const fn new() -> Self {
+        Self {
+            rx_completions: AtomicUsize::new(0),
+            tx_submissions: AtomicUsize::new(0),
+            tx_completions: AtomicUsize::new(0),
+            irq_rechecks: AtomicUsize::new(0),
+            queue_full: AtomicUsize::new(0),
+            live_mappings: AtomicUsize::new(0),
+            mapping_high_water: AtomicUsize::new(0),
+        }
+    }
+
+    fn mapping_opened(&self) {
+        let live = self.live_mappings.fetch_add(1, Ordering::Relaxed) + 1;
+        self.mapping_high_water.fetch_max(live, Ordering::Relaxed);
+    }
+
+    fn mapping_closed(&self) {
+        let previous = self.live_mappings.fetch_sub(1, Ordering::Relaxed);
+        assert!(previous > 0, "VirtIO-Net mapping counter underflow");
+    }
+
+    fn snapshot(&self) -> VirtIONetStats {
+        VirtIONetStats {
+            rx_completions: self.rx_completions.load(Ordering::Relaxed),
+            tx_submissions: self.tx_submissions.load(Ordering::Relaxed),
+            tx_completions: self.tx_completions.load(Ordering::Relaxed),
+            irq_rechecks: self.irq_rechecks.load(Ordering::Relaxed),
+            queue_full: self.queue_full.load(Ordering::Relaxed),
+            live_mappings: self.live_mappings.load(Ordering::Relaxed),
+            mapping_high_water: self.mapping_high_water.load(Ordering::Relaxed),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RxOwnership {
@@ -131,6 +227,9 @@ struct VirtIONetDevice {
     raw: SpinLock<RawNet>,
     /// Edge-only wake hint. Queue completion remains the durable truth.
     recheck_requested: AtomicBool,
+    recheck_wake: spin::Once<Weak<dyn VirtIONetRecheckWake>>,
+    /// Diagnostic-only mirrors of owner transitions; never behavior inputs.
+    diagnostics: VirtIONetDiagnostics,
 }
 
 impl VirtIONetDevice {
@@ -141,6 +240,8 @@ impl VirtIONetDevice {
             Arc::new(Self {
                 raw: SpinLock::new(raw),
                 recheck_requested: AtomicBool::new(false),
+                recheck_wake: spin::Once::new(),
+                diagnostics: VirtIONetDiagnostics::new(),
             }),
             mac,
         ))
@@ -159,6 +260,7 @@ impl VirtIONetDevice {
         // was committed, so the provider retains CPU ownership.
         let queue_token = unsafe { raw.receive_begin(&mut slot.backing)? };
         slot.ownership = RxOwnership::Device { queue_token };
+        self.diagnostics.mapping_opened();
         Ok(())
     }
 
@@ -181,13 +283,39 @@ impl VirtIONetDevice {
             queue_token,
             total_len,
         };
+        self.diagnostics
+            .tx_submissions
+            .fetch_add(1, Ordering::Relaxed);
+        self.diagnostics.mapping_opened();
         Ok(())
     }
 
     fn handle_irq(&self) {
         if !self.raw.lock_irqsave().ack_interrupt().is_empty() {
             self.recheck_requested.store(true, Ordering::Release);
+            self.diagnostics
+                .irq_rechecks
+                .fetch_add(1, Ordering::Relaxed);
+            if let Some(wake) = self.recheck_wake.get().and_then(Weak::upgrade) {
+                wake.wake();
+            }
         }
+    }
+
+    fn install_recheck_wake(&self, wake: Weak<dyn VirtIONetRecheckWake>) {
+        assert!(
+            self.recheck_wake.get().is_none(),
+            "VirtIO-Net recheck wake installed twice"
+        );
+        self.recheck_wake.call_once(|| wake);
+    }
+
+    fn recheck_requested(&self) -> bool {
+        self.recheck_requested.load(Ordering::Acquire)
+    }
+
+    fn take_recheck_requested(&self) -> bool {
+        self.recheck_requested.swap(false, Ordering::AcqRel)
     }
 
     fn enable_interrupts(&self) {
@@ -204,7 +332,7 @@ impl VirtIONetDevice {
 /// The IRQ handler only touches `device.raw` and an edge bit. Therefore the
 /// exclusive `&mut FrameProvider` borrow is sufficient to expose one slot to a
 /// protocol callback without a provider-global or IRQ-off guard.
-struct VirtIONetProvider {
+pub(crate) struct VirtIONetProvider {
     // Declared first so pre-IRQ initialization failures drop RawNet (and unset
     // both queues) before releasing the following backing slots. Once an IRQ
     // is registered, R0 never drops this provider: publication failure retains
@@ -253,6 +381,11 @@ impl VirtIONetProvider {
             raw.receive_complete(queue_token, &mut slot.backing)
                 .unwrap_or_else(|error| panic!("VirtIO-Net RX completion failed: {error}"))
         };
+        self.device.diagnostics.mapping_closed();
+        self.device
+            .diagnostics
+            .rx_completions
+            .fetch_add(1, Ordering::Relaxed);
         assert!(frame_offset + len <= slot.backing.len());
         slot.ownership = RxOwnership::Ready { frame_offset, len };
     }
@@ -287,12 +420,33 @@ impl VirtIONetProvider {
                 raw.transmit_complete(queue_token, &slot.backing[..total_len])
                     .unwrap_or_else(|error| panic!("VirtIO-Net TX completion failed: {error}"));
             }
+            self.device.diagnostics.mapping_closed();
+            self.device
+                .diagnostics
+                .tx_completions
+                .fetch_add(1, Ordering::Relaxed);
             slot.ownership = TxOwnership::Available;
         }
     }
+
+    pub(crate) fn install_recheck_wake(&self, wake: Weak<dyn VirtIONetRecheckWake>) {
+        self.device.install_recheck_wake(wake);
+    }
+
+    pub(crate) fn recheck_requested(&self) -> bool {
+        self.device.recheck_requested()
+    }
+
+    pub(crate) fn take_recheck_requested(&self) -> bool {
+        self.device.take_recheck_requested()
+    }
+
+    pub(crate) fn stats(&self) -> VirtIONetStats {
+        self.device.diagnostics.snapshot()
+    }
 }
 
-struct VirtIORxToken<'a> {
+pub(crate) struct VirtIORxToken<'a> {
     device: &'a VirtIONetDevice,
     slot: &'a mut RxSlot,
     consumed: bool,
@@ -308,6 +462,10 @@ impl RxToken for VirtIORxToken<'_> {
         };
         let result = f(&self.slot.backing[frame_offset..frame_offset + len]);
         self.slot.ownership = RxOwnership::RequeuePending;
+        // The frame has been consumed and must not be restored as Ready if an
+        // invariant-breaking refill error panics. Commit the token state first
+        // so unwinding preserves the original failure instead of attempting a
+        // second Reserved-only cancellation from Drop.
         self.consumed = true;
         self.device
             .submit_rx(self.slot)
@@ -324,7 +482,7 @@ impl Drop for VirtIORxToken<'_> {
     }
 }
 
-struct VirtIOTxToken<'a> {
+pub(crate) struct VirtIOTxToken<'a> {
     device: &'a VirtIONetDevice,
     slot: &'a mut TxSlot,
     consumed: bool,
@@ -374,10 +532,18 @@ impl FrameProvider for VirtIONetProvider {
             return ReceiveOutcome::Empty;
         };
         if !self.device.raw.lock_irqsave().can_send() {
+            self.device
+                .diagnostics
+                .queue_full
+                .fetch_add(1, Ordering::Relaxed);
             self.rx_slots[rx_index].cancel_reservation();
             return ReceiveOutcome::TransmitExhausted;
         }
         let Some(tx_index) = self.tx_slots.iter_mut().position(TxSlot::reserve) else {
+            self.device
+                .diagnostics
+                .queue_full
+                .fetch_add(1, Ordering::Relaxed);
             self.rx_slots[rx_index].cancel_reservation();
             return ReceiveOutcome::TransmitExhausted;
         };
@@ -399,9 +565,17 @@ impl FrameProvider for VirtIONetProvider {
     fn transmit(&mut self, _now: Instant) -> TransmitOutcome<Self::TxToken<'_>> {
         self.harvest_tx();
         if !self.device.raw.lock_irqsave().can_send() {
+            self.device
+                .diagnostics
+                .queue_full
+                .fetch_add(1, Ordering::Relaxed);
             return TransmitOutcome::Exhausted;
         }
         let Some(index) = self.tx_slots.iter_mut().position(TxSlot::reserve) else {
+            self.device
+                .diagnostics
+                .queue_full
+                .fetch_add(1, Ordering::Relaxed);
             return TransmitOutcome::Exhausted;
         };
         TransmitOutcome::Ready(VirtIOTxToken {
@@ -542,6 +716,28 @@ impl VirtIODriver for VirtIONetDriver {
 
 static IRQ_HANDLER: IrqHandler = IrqHandler::new(irq_handler);
 
+static VIRTIO_NET_DRIVER: Lazy<Arc<VirtIONetDriver>> = Lazy::new(|| {
+    Arc::new(VirtIONetDriver {
+        kobj_base: KObjectBase::new(KObjIdent::try_from("virtio-net").unwrap()),
+        drv_base: DriverBase::new(),
+    })
+});
+
+pub(crate) fn take_published_netdevs() -> Vec<PublishedNetdev<VirtIONetProvider>> {
+    let mut published = Vec::new();
+    let driver: &dyn Driver = VIRTIO_NET_DRIVER.as_ref();
+    driver.for_each_device(|device| {
+        let state = device
+            .drv_state()
+            .cast::<VirtIONetState>()
+            .expect("VirtIO-Net device must carry VirtIONetState");
+        if let Some(netdev) = state.published.lock().take() {
+            published.push(netdev);
+        }
+    });
+    published
+}
+
 fn irq_handler(prv_data: &AnyOpaque) {
     let irq = prv_data
         .cast::<VirtIONetIrq>()
@@ -553,10 +749,7 @@ fn irq_handler(prv_data: &AnyOpaque) {
 
 #[initcall(driver)]
 fn init() {
-    bus::virtio::register_driver(Arc::new(VirtIONetDriver {
-        kobj_base: KObjectBase::new(KObjIdent::try_from("virtio-net").unwrap()),
-        drv_base: DriverBase::new(),
-    }));
+    bus::virtio::register_driver(VIRTIO_NET_DRIVER.clone());
 }
 
 #[kunit]
