@@ -2,8 +2,7 @@
 
 use bitflags::bitflags;
 use byteorder::{ByteOrder, NetworkEndian};
-use core::iter;
-use core::iter::Iterator;
+use core::{iter, iter::Iterator};
 
 use super::{Error, Result};
 #[cfg(feature = "proto-ipv4")]
@@ -179,7 +178,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
                         let label = &bytes[1..1 + len];
                         bytes = &bytes[1 + len..];
                         return Some(Ok(label));
-                    }
+                    },
                     x if x & 0xC0 == 0xC0 => {
                         if bytes.len() < 2 {
                             return Some(Err(Error));
@@ -190,21 +189,24 @@ impl<T: AsRef<[u8]>> Packet<T> {
                             return Some(Err(Error));
                         }
 
-                        // RFC1035 says: "In this scheme, an entire domain name or a list of labels at
-                        //      the end of a domain name is replaced with a pointer to a ***prior*** occurrence
-                        //      of the same name.
+                        // RFC1035 says: "In this scheme, an entire domain name or a list of labels
+                        // at      the end of a domain name is replaced with
+                        // a pointer to a ***prior*** occurrence      of the
+                        // same name.
                         //
-                        // Is it unclear if this means the pointer MUST point backwards in the packet or not. Either way,
-                        // pointers that don't point backwards are never seen in the fields, so use this to check that
+                        // Is it unclear if this means the pointer MUST point backwards in the
+                        // packet or not. Either way, pointers that don't
+                        // point backwards are never seen in the fields, so use this to check that
                         // there are no pointer loops.
 
                         // Split packet into parts before and after `ptr`.
-                        // parse the part after, keep only the part before in `packet`. This ensure we never
-                        // parse the same byte twice, therefore eliminating pointer loops.
+                        // parse the part after, keep only the part before in `packet`. This ensure
+                        // we never parse the same byte twice, therefore
+                        // eliminating pointer loops.
 
                         bytes = &packet[ptr..];
                         packet = &packet[..ptr];
-                    }
+                    },
                     _ => return Some(Err(Error)),
                 }
             }
@@ -258,7 +260,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
 }
 
 /// Parse part of a name from `bytes`, not following pointers.
-/// Returns the unused part of `bytes`, and the pointer offset if the sequence ends with a pointer.
+/// Returns the unused part of `bytes`, and the pointer offset if the sequence
+/// ends with a pointer.
 fn parse_name_part<'a>(
     mut bytes: &'a [u8],
     mut f: impl FnMut(&'a [u8]),
@@ -273,14 +276,14 @@ fn parse_name_part<'a>(
                 let label = bytes.get(..len).ok_or(Error)?;
                 bytes = &bytes[len..];
                 f(label);
-            }
+            },
             x if x & 0xC0 == 0xC0 => {
                 let y = *bytes.first().ok_or(Error)?;
                 bytes = &bytes[1..];
 
                 let ptr = ((x & 0x3F) as usize) << 8 | (y as usize);
                 return Ok((bytes, Some(ptr)));
-            }
+            },
             _ => return Err(Error),
         }
     }
@@ -312,7 +315,8 @@ impl<'a> Question<'a> {
         Ok((rest, Question { name, type_ }))
     }
 
-    /// Return the length of a packet that will be emitted from this high-level representation.
+    /// Return the length of a packet that will be emitted from this high-level
+    /// representation.
     pub const fn buffer_len(&self) -> usize {
         self.name.len() + 4
     }
@@ -407,7 +411,8 @@ pub struct Repr<'a> {
 }
 
 impl<'a> Repr<'a> {
-    /// Return the length of a packet that will be emitted from this high-level representation.
+    /// Return the length of a packet that will be emitted from this high-level
+    /// representation.
     pub const fn buffer_len(&self) -> usize {
         field::HEADER_END + self.question.buffer_len()
     }

@@ -4,10 +4,12 @@ use core::fmt;
 
 use managed::{ManagedMap, ManagedSlice};
 
-use crate::config::{FRAGMENTATION_BUFFER_SIZE, REASSEMBLY_BUFFER_COUNT, REASSEMBLY_BUFFER_SIZE};
-use crate::storage::Assembler;
-use crate::time::{Duration, Instant};
-use crate::wire::*;
+use crate::{
+    config::{FRAGMENTATION_BUFFER_SIZE, REASSEMBLY_BUFFER_COUNT, REASSEMBLY_BUFFER_SIZE},
+    storage::Assembler,
+    time::{Duration, Instant},
+    wire::*,
+};
 
 use core::result::Result;
 
@@ -44,11 +46,12 @@ impl fmt::Display for AssemblerFullError {
 #[cfg(feature = "std")]
 impl std::error::Error for AssemblerFullError {}
 
-/// Holds different fragments of one packet, used for assembling fragmented packets.
+/// Holds different fragments of one packet, used for assembling fragmented
+/// packets.
 ///
-/// The buffer used for the `PacketAssembler` should either be dynamically sized (ex: Vec<u8>)
-/// or should be statically allocated based upon the MTU of the type of packet being
-/// assembled (ex: 1280 for a IPv6 frame).
+/// The buffer used for the `PacketAssembler` should either be dynamically sized
+/// (ex: Vec<u8>) or should be statically allocated based upon the MTU of the
+/// type of packet being assembled (ex: 1280 for a IPv6 frame).
 #[derive(Debug)]
 pub struct PacketAssembler<K> {
     key: Option<K>,
@@ -136,8 +139,8 @@ impl<K> PacketAssembler<K> {
     ///
     /// # Errors
     ///
-    /// - Returns [`Error::PacketAssemblerBufferTooSmall`] when trying to add data into the buffer at a non-existing
-    ///   place.
+    /// - Returns [`Error::PacketAssemblerBufferTooSmall`] when trying to add
+    ///   data into the buffer at a non-existing place.
     pub(crate) fn add(&mut self, data: &[u8], offset: usize) -> Result<(), AssemblerError> {
         #[cfg(not(feature = "alloc"))]
         if self.buffer.len() < offset + data.len() {
@@ -162,8 +165,9 @@ impl<K> PacketAssembler<K> {
         Ok(())
     }
 
-    /// Get an immutable slice of the underlying packet data, if reassembly complete.
-    /// This will mark the assembler as empty, so that it can be reused.
+    /// Get an immutable slice of the underlying packet data, if reassembly
+    /// complete. This will mark the assembler as empty, so that it can be
+    /// reused.
     pub(crate) fn assemble(&mut self) -> Option<&'_ [u8]> {
         if !self.is_complete() {
             return None;
@@ -238,8 +242,9 @@ impl<K: Eq + Copy> PacketAssemblerSet<K> {
     }
 }
 
-// Max len of non-fragmented packets after decompression (including ipv6 header and payload)
-// TODO: lower. Should be (6lowpan mtu) - (min 6lowpan header size) + (max ipv6 header size)
+// Max len of non-fragmented packets after decompression (including ipv6 header
+// and payload) TODO: lower. Should be (6lowpan mtu) - (min 6lowpan header size)
+// + (max ipv6 header size)
 pub(crate) const MAX_DECOMPRESSED_LEN: usize = 1500;
 
 #[cfg(feature = "_proto-fragmentation")]
@@ -277,7 +282,8 @@ impl Fragmenter {
 pub(crate) struct Fragmenter {
     /// The buffer that holds the unfragmented 6LoWPAN packet.
     pub buffer: [u8; FRAGMENTATION_BUFFER_SIZE],
-    /// The size of the packet without the IEEE802.15.4 header and the fragmentation headers.
+    /// The size of the packet without the IEEE802.15.4 header and the
+    /// fragmentation headers.
     pub packet_len: usize,
     /// The amount of bytes that already have been transmitted.
     pub sent_bytes: usize,

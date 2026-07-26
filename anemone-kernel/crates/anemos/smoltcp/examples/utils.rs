@@ -5,18 +5,21 @@ use env_logger::Builder;
 use getopts::{Matches, Options};
 #[cfg(feature = "log")]
 use log::{Level, LevelFilter, trace};
-use std::env;
-use std::fs::File;
-use std::io::{self, Write};
-use std::process;
-use std::str::{self, FromStr};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    env,
+    fs::File,
+    io::{self, Write},
+    process,
+    str::{self, FromStr},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 #[cfg(feature = "phy-tuntap_interface")]
 use smoltcp::phy::TunTapInterface;
-use smoltcp::phy::{Device, FaultInjector, Medium, Tracer};
-use smoltcp::phy::{PcapMode, PcapWriter};
-use smoltcp::time::{Duration, Instant};
+use smoltcp::{
+    phy::{Device, FaultInjector, Medium, PcapMode, PcapWriter, Tracer},
+    time::{Duration, Instant},
+};
 
 #[cfg(feature = "log")]
 pub fn setup_logging_with_clock<F>(filter: &str, since_startup: F)
@@ -75,7 +78,7 @@ pub fn parse_options(options: &Options, free: Vec<&str>) -> Matches {
         Err(err) => {
             println!("{err}");
             process::exit(1)
-        }
+        },
         Ok(matches) => {
             if matches.opt_present("h") || matches.free.len() != free.len() {
                 let brief = format!(
@@ -87,7 +90,7 @@ pub fn parse_options(options: &Options, free: Vec<&str>) -> Matches {
                 process::exit((matches.free.len() != free.len()) as _);
             }
             matches
-        }
+        },
     }
 }
 

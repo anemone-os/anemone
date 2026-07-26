@@ -2,17 +2,18 @@ use core::cmp::min;
 #[cfg(feature = "async")]
 use core::task::Waker;
 
-use crate::iface::Context;
-use crate::socket::PollAt;
 #[cfg(feature = "async")]
 use crate::socket::WakerRegistration;
+use crate::{iface::Context, socket::PollAt};
 
-use crate::storage::Empty;
-use crate::wire::{IpProtocol, IpRepr, IpVersion};
 #[cfg(feature = "proto-ipv4")]
 use crate::wire::{Ipv4Packet, Ipv4Repr};
 #[cfg(feature = "proto-ipv6")]
 use crate::wire::{Ipv6Packet, Ipv6Repr};
+use crate::{
+    storage::Empty,
+    wire::{IpProtocol, IpRepr, IpVersion},
+};
 
 /// Error returned by [`Socket::bind`]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -95,8 +96,8 @@ pub struct Socket<'a> {
 }
 
 impl<'a> Socket<'a> {
-    /// Create a raw IP socket bound to the given IP version and datagram protocol,
-    /// with the given buffers.
+    /// Create a raw IP socket bound to the given IP version and datagram
+    /// protocol, with the given buffers.
     pub fn new(
         ip_version: Option<IpVersion>,
         ip_protocol: Option<IpProtocol>,
@@ -122,11 +123,12 @@ impl<'a> Socket<'a> {
     ///
     /// Notes:
     ///
-    /// - Only one waker can be registered at a time. If another waker was previously registered,
-    ///   it is overwritten and will no longer be woken.
-    /// - The Waker is woken only once. Once woken, you must register it again to receive more wakes.
-    /// - "Spurious wakes" are allowed: a wake doesn't guarantee the result of `recv` has
-    ///   necessarily changed.
+    /// - Only one waker can be registered at a time. If another waker was
+    ///   previously registered, it is overwritten and will no longer be woken.
+    /// - The Waker is woken only once. Once woken, you must register it again
+    ///   to receive more wakes.
+    /// - "Spurious wakes" are allowed: a wake doesn't guarantee the result of
+    ///   `recv` has necessarily changed.
     #[cfg(feature = "async")]
     pub fn register_recv_waker(&mut self, waker: &Waker) {
         self.rx_waker.register(waker)
@@ -140,11 +142,12 @@ impl<'a> Socket<'a> {
     ///
     /// Notes:
     ///
-    /// - Only one waker can be registered at a time. If another waker was previously registered,
-    ///   it is overwritten and will no longer be woken.
-    /// - The Waker is woken only once. Once woken, you must register it again to receive more wakes.
-    /// - "Spurious wakes" are allowed: a wake doesn't guarantee the result of `send` has
-    ///   necessarily changed.
+    /// - Only one waker can be registered at a time. If another waker was
+    ///   previously registered, it is overwritten and will no longer be woken.
+    /// - The Waker is woken only once. Once woken, you must register it again
+    ///   to receive more wakes.
+    /// - "Spurious wakes" are allowed: a wake doesn't guarantee the result of
+    ///   `send` has necessarily changed.
     #[cfg(feature = "async")]
     pub fn register_send_waker(&mut self, waker: &Waker) {
         self.tx_waker.register(waker)
@@ -200,9 +203,9 @@ impl<'a> Socket<'a> {
 
     /// Enqueue a packet to send, and return a pointer to its payload.
     ///
-    /// This function returns `Err(Error::Exhausted)` if the transmit buffer is full,
-    /// and `Err(Error::Truncated)` if there is not enough transmit buffer capacity
-    /// to ever send this packet.
+    /// This function returns `Err(Error::Exhausted)` if the transmit buffer is
+    /// full, and `Err(Error::Truncated)` if there is not enough transmit
+    /// buffer capacity to ever send this packet.
     ///
     /// If the buffer is filled in a way that does not match the socket's
     /// IP version or protocol, the packet will be silently dropped.
@@ -257,7 +260,8 @@ impl<'a> Socket<'a> {
 
     /// Dequeue a packet, and return a pointer to the payload.
     ///
-    /// This function returns `Err(Error::Exhausted)` if the receive buffer is empty.
+    /// This function returns `Err(Error::Exhausted)` if the receive buffer is
+    /// empty.
     ///
     /// **Note:** The IP header is parsed and re-serialized, and may not match
     /// the header actually received bit for bit.
@@ -275,8 +279,9 @@ impl<'a> Socket<'a> {
 
     /// Dequeue a packet, and copy the payload into the given slice.
     ///
-    /// **Note**: when the size of the provided buffer is smaller than the size of the payload,
-    /// the packet is dropped and a `RecvError::Truncated` error is returned.
+    /// **Note**: when the size of the provided buffer is smaller than the size
+    /// of the payload, the packet is dropped and a `RecvError::Truncated`
+    /// error is returned.
     ///
     /// See also [recv](#method.recv).
     pub fn recv_slice(&mut self, data: &mut [u8]) -> Result<usize, RecvError> {
@@ -308,12 +313,14 @@ impl<'a> Socket<'a> {
         Ok(packet_buf)
     }
 
-    /// Peek at a packet in the receive buffer, copy the payload into the given slice,
-    /// and return the amount of octets copied without removing the packet from the receive buffer.
-    /// This function otherwise behaves identically to [recv_slice](#method.recv_slice).
+    /// Peek at a packet in the receive buffer, copy the payload into the given
+    /// slice, and return the amount of octets copied without removing the
+    /// packet from the receive buffer. This function otherwise behaves
+    /// identically to [recv_slice](#method.recv_slice).
     ///
-    /// **Note**: when the size of the provided buffer is smaller than the size of the payload,
-    /// no data is copied into the provided buffer and a `RecvError::Truncated` error is returned.
+    /// **Note**: when the size of the provided buffer is smaller than the size
+    /// of the payload, no data is copied into the provided buffer and a
+    /// `RecvError::Truncated` error is returned.
     ///
     /// See also [peek](#method.peek).
     pub fn peek_slice(&mut self, data: &mut [u8]) -> Result<usize, RecvError> {
@@ -372,7 +379,7 @@ impl<'a> Socket<'a> {
             Ok(buf) => {
                 ip_repr.emit(&mut buf[..header_len], &cx.checksum_caps());
                 buf[header_len..].copy_from_slice(payload);
-            }
+            },
             Err(_) => net_trace!(
                 "raw:{:?}:{:?}: buffer full, dropped incoming packet",
                 self.ip_version,
@@ -400,7 +407,7 @@ impl<'a> Socket<'a> {
                         Err(_) => {
                             net_trace!("raw: malformed ipv6 packet in queue, dropping.");
                             return Ok(());
-                        }
+                        },
                     };
                     if ip_protocol.is_some_and(|next_header| next_header != packet.next_header()) {
                         net_trace!("raw: sent packet with wrong ip protocol, dropping.");
@@ -420,11 +427,11 @@ impl<'a> Socket<'a> {
                         Err(_) => {
                             net_trace!("raw: malformed ipv4 packet in queue, dropping.");
                             return Ok(());
-                        }
+                        },
                     };
                     net_trace!("raw:{:?}:{:?}: sending", ip_version, ip_protocol);
                     emit(cx, (IpRepr::Ipv4(ipv4_repr), packet.payload()))
-                }
+                },
                 #[cfg(feature = "proto-ipv6")]
                 Ok(IpVersion::Ipv6) => {
                     let packet = match Ipv6Packet::new_checked(buffer) {
@@ -432,7 +439,7 @@ impl<'a> Socket<'a> {
                         Err(_) => {
                             net_trace!("raw: malformed ipv6 packet in queue, dropping.");
                             return Ok(());
-                        }
+                        },
                     };
                     if ip_protocol.is_some_and(|next_header| next_header != packet.next_header()) {
                         net_trace!("raw: sent ipv6 packet with wrong ip protocol, dropping.");
@@ -444,16 +451,16 @@ impl<'a> Socket<'a> {
                         Err(_) => {
                             net_trace!("raw: malformed ipv6 packet in queue, dropping.");
                             return Ok(());
-                        }
+                        },
                     };
 
                     net_trace!("raw:{:?}:{:?}: sending", ip_version, ip_protocol);
                     emit(cx, (IpRepr::Ipv6(ipv6_repr), packet.payload()))
-                }
+                },
                 Err(_) => {
                     net_trace!("raw: sent packet with invalid IP version, dropping.");
                     Ok(())
-                }
+                },
             }
         });
         match res {
@@ -463,7 +470,7 @@ impl<'a> Socket<'a> {
                 #[cfg(feature = "async")]
                 self.tx_waker.wake();
                 Ok(())
-            }
+            },
         }
     }
 
@@ -478,8 +485,7 @@ impl<'a> Socket<'a> {
 
 #[cfg(test)]
 mod test {
-    use crate::phy::Medium;
-    use crate::tests::setup;
+    use crate::{phy::Medium, tests::setup};
     use rstest::*;
 
     use super::*;
@@ -877,8 +883,8 @@ mod test {
     #[case::ieee802154(Medium::Ieee802154)]
     #[cfg(feature = "medium-ieee802154")]
     fn test_unfiltered_sends_all(#[case] medium: Medium) {
-        // Test a single unfiltered socket can send packets with different IP versions and next
-        // headers
+        // Test a single unfiltered socket can send packets with different IP versions
+        // and next headers
         let mut socket = Socket::new(None, None, buffer(0), buffer(2));
         #[cfg(feature = "proto-ipv4")]
         {
@@ -921,7 +927,8 @@ mod test {
     #[case::proto(IpProtocol::Tcp)]
     #[case::proto(IpProtocol::Udp)]
     fn test_unfiltered_accepts_all(#[case] proto: IpProtocol) {
-        // Test an unfiltered socket can accept packets with different IP versions and next headers
+        // Test an unfiltered socket can accept packets with different IP versions and
+        // next headers
         let socket = Socket::new(None, None, buffer(0), buffer(0));
         #[cfg(feature = "proto-ipv4")]
         {

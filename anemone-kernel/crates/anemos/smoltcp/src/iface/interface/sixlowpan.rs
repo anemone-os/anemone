@@ -1,8 +1,9 @@
 use super::*;
 use crate::wire::Result;
 
-// Max len of non-fragmented packets after decompression (including ipv6 header and payload)
-// TODO: lower. Should be (6lowpan mtu) - (min 6lowpan header size) + (max ipv6 header size)
+// Max len of non-fragmented packets after decompression (including ipv6 header
+// and payload) TODO: lower. Should be (6lowpan mtu) - (min 6lowpan header size)
+// + (max ipv6 header size)
 pub(crate) const MAX_DECOMPRESSED_LEN: usize = 1500;
 
 impl Interface {
@@ -65,11 +66,11 @@ impl InterfaceInner {
                     use the `proto-sixlowpan-fragmentation` feature to add support."
                 );
                 return None;
-            }
+            },
             #[cfg(feature = "proto-sixlowpan-fragmentation")]
             SixlowpanPacket::FragmentHeader => {
                 self.process_sixlowpan_fragment(ieee802154_repr, payload, f)?
-            }
+            },
             SixlowpanPacket::IphcHeader => {
                 match Self::sixlowpan_to_ipv6(
                     &self.sixlowpan_address_context,
@@ -82,9 +83,9 @@ impl InterfaceInner {
                     Err(e) => {
                         net_debug!("sixlowpan decompress failed: {:?}", e);
                         return None;
-                    }
+                    },
                 }
-            }
+            },
         };
 
         self.process_ipv6(
@@ -111,10 +112,11 @@ impl InterfaceInner {
         // unless we have a complete one after processing this fragment.
         let frag = check!(SixlowpanFragPacket::new_checked(payload));
 
-        // From RFC 4944 § 5.3: "The value of datagram_size SHALL be 40 octets more than the value
-        // of Payload Length in the IPv6 header of the packet."
-        // We should check that this is true, otherwise `buffer.split_at_mut(40)` will panic, since
-        // we assume that the decompressed packet is at least 40 bytes.
+        // From RFC 4944 § 5.3: "The value of datagram_size SHALL be 40 octets more than
+        // the value of Payload Length in the IPv6 header of the packet."
+        // We should check that this is true, otherwise `buffer.split_at_mut(40)` will
+        // panic, since we assume that the decompressed packet is at least 40
+        // bytes.
         if frag.datagram_size() < 40 {
             net_debug!("6LoWPAN: fragment size too small");
             return None;
@@ -137,7 +139,7 @@ impl InterfaceInner {
             Err(AssemblerFullError) => {
                 net_debug!("No available packet assembler for fragmented packet");
                 return None;
-            }
+            },
         };
 
         if frag.is_first_fragment() {
@@ -181,20 +183,22 @@ impl InterfaceInner {
             Some(payload) => {
                 net_trace!("6LoWPAN: fragmented packet now complete");
                 Some(payload)
-            }
+            },
             None => None,
         }
     }
 
     /// Decompress a 6LoWPAN packet into an IPv6 packet.
     ///
-    /// The return value is the length of the decompressed packet, but not including the total
-    /// length of the payload of the UDP packet. This value is then used by the assembler to know
-    /// how far in the assembler buffer the packet is.
+    /// The return value is the length of the decompressed packet, but not
+    /// including the total length of the payload of the UDP packet. This
+    /// value is then used by the assembler to know how far in the assembler
+    /// buffer the packet is.
     ///
-    /// **NOTE**: when decompressing a fragmented packet, the `total_len` parameter should be
-    /// passed. This is the total length of the IPv6 packet, including the IPv6 header. It is used
-    /// for calculating the length field in the UDP header.
+    /// **NOTE**: when decompressing a fragmented packet, the `total_len`
+    /// parameter should be passed. This is the total length of the IPv6
+    /// packet, including the IPv6 header. It is used for calculating the
+    /// length field in the UDP header.
     fn sixlowpan_to_ipv6(
         address_context: &[SixlowpanAddressContext],
         ieee802154_repr: &Ieee802154Repr,
@@ -210,18 +214,20 @@ impl InterfaceInner {
             address_context,
         )?;
 
-        // The first thing we have to decompress is the IPv6 header. However, at this point we
-        // don't know the total size of the packet, neither the next header, since that can be a
-        // compressed header. However, we know that the IPv6 header is 40 bytes, so we can reserve
-        // this space in the buffer such that we can decompress the IPv6 header into it at a later
+        // The first thing we have to decompress is the IPv6 header. However, at this
+        // point we don't know the total size of the packet, neither the next
+        // header, since that can be a compressed header. However, we know that
+        // the IPv6 header is 40 bytes, so we can reserve this space in the
+        // buffer such that we can decompress the IPv6 header into it at a later
         // point.
         let (ipv6_buffer, mut buffer) = buffer.split_at_mut(40);
         let mut ipv6_header = Ipv6Packet::new_unchecked(ipv6_buffer);
 
-        // If the total length is given, we are dealing with a fragmented packet. The total
-        // length is then used to calculate the length field for the UDP header. If the total
-        // length is not given, we are not working with a fragmented packet, and we need to
-        // calculate the length of the payload ourselves.
+        // If the total length is given, we are dealing with a fragmented packet. The
+        // total length is then used to calculate the length field for the UDP
+        // header. If the total length is not given, we are not working with a
+        // fragmented packet, and we need to calculate the length of the payload
+        // ourselves.
         let mut payload_len = 40;
         let mut decompressed_len = 40;
 
@@ -239,7 +245,7 @@ impl InterfaceInner {
                             &mut payload_len,
                             &mut decompressed_len,
                         )?;
-                    }
+                    },
                     SixlowpanNhcPacket::UdpHeader => {
                         decompress_udp(
                             data,
@@ -251,7 +257,7 @@ impl InterfaceInner {
                         )?;
 
                         break;
-                    }
+                    },
                 },
                 SixlowpanNextHeader::Uncompressed(proto) => {
                     // We have a 6LoWPAN uncompressed header.
@@ -268,13 +274,13 @@ impl InterfaceInner {
                             payload_len += data.len();
                             decompressed_len += data.len();
                             break;
-                        }
+                        },
                         proto => {
                             net_debug!("Unsupported uncompressed next header: {:?}", proto);
                             return Err(Error);
-                        }
+                        },
                     }
-                }
+                },
             }
         }
 
@@ -304,8 +310,8 @@ impl InterfaceInner {
             Packet::Ipv6(packet) => packet,
         };
 
-        // First we calculate the size we are going to need. If the size is bigger than the MTU,
-        // then we use fragmentation.
+        // First we calculate the size we are going to need. If the size is bigger than
+        // the MTU, then we use fragmentation.
         let (total_size, compressed_size, uncompressed_size) =
             Self::compressed_packet_size(&packet, &ieee_repr);
 
@@ -321,8 +327,8 @@ impl InterfaceInner {
                 // When `poll` is called again, we check if frag was fully sent, otherwise we
                 // call `dispatch_ieee802154_frag`, which will transmit the other fragments.
 
-                // `dispatch_ieee802154_frag` requires some information about the total packet size,
-                // the link local source and destination address...
+                // `dispatch_ieee802154_frag` requires some information about the total packet
+                // size, the link local source and destination address...
 
                 let pkt = frag;
                 if pkt.buffer.len() < total_size {
@@ -347,13 +353,13 @@ impl InterfaceInner {
                 pkt.sixlowpan.ll_src_addr = ieee_repr.src_addr.unwrap();
                 pkt.packet_len = total_size;
 
-                // The datagram size that we need to set in the first fragment header is equal to the
-                // IPv6 payload length + 40.
+                // The datagram size that we need to set in the first fragment header is equal
+                // to the IPv6 payload length + 40.
                 pkt.sixlowpan.datagram_size = (payload_length + 40) as u16;
 
                 let tag = self.get_sixlowpan_fragment_tag();
-                // We save the tag for the other fragments that will be created when calling `poll`
-                // multiple times.
+                // We save the tag for the other fragments that will be created when calling
+                // `poll` multiple times.
                 pkt.sixlowpan.datagram_tag = tag;
 
                 let frag1 = SixlowpanFragRepr::FirstFragment {
@@ -367,9 +373,10 @@ impl InterfaceInner {
                 };
 
                 // We calculate how much data we can send in the first fragment and the other
-                // fragments. The eventual IPv6 sizes of these fragments need to be a multiple of eight
-                // (except for the last fragment) since the offset field in the fragment is an offset
-                // in multiples of 8 octets. This is explained in [RFC 4944 § 5.3].
+                // fragments. The eventual IPv6 sizes of these fragments need to be a multiple
+                // of eight (except for the last fragment) since the offset
+                // field in the fragment is an offset in multiples of 8 octets.
+                // This is explained in [RFC 4944 § 5.3].
                 //
                 // [RFC 4944 § 5.3]: https://datatracker.ietf.org/doc/html/rfc4944#section-5.3
 
@@ -518,7 +525,7 @@ impl InterfaceInner {
                     &mut Icmpv6Packet::new_unchecked(&mut buffer[..icmp_repr.buffer_len()]),
                     checksum_caps,
                 );
-            }
+            },
             #[cfg(any(feature = "socket-udp", feature = "socket-dns"))]
             IpPayload::Udp(udp_repr, payload) => {
                 let udp_repr = SixlowpanUdpNhcRepr(*udp_repr);
@@ -532,7 +539,7 @@ impl InterfaceInner {
                     |buf| buf.copy_from_slice(payload),
                     checksum_caps,
                 );
-            }
+            },
             #[cfg(feature = "socket-tcp")]
             IpPayload::Tcp(tcp_repr) => {
                 tcp_repr.emit(
@@ -541,7 +548,7 @@ impl InterfaceInner {
                     &packet.header.dst_addr.into(),
                     checksum_caps,
                 );
-            }
+            },
             #[cfg(feature = "socket-raw")]
             IpPayload::Raw(_raw) => todo!(),
 
@@ -553,7 +560,8 @@ impl InterfaceInner {
     /// Calculates three sizes:
     ///  - total size: the size of a compressed IPv6 packet
     ///  - compressed header size: the size of the compressed headers
-    ///  - uncompressed header size: the size of the headers that are not compressed
+    ///  - uncompressed header size: the size of the headers that are not
+    ///    compressed
     ///
     /// They are returned as a tuple in the same order.
     fn compressed_packet_size(
@@ -641,10 +649,10 @@ impl InterfaceInner {
                 compressed_hdr_size += udp_hdr.header_len();
 
                 total_size += udp_hdr.header_len() + payload.len();
-            }
+            },
             _ => {
                 total_size += packet.header.payload_len;
-            }
+            },
         }
 
         (total_size, compressed_hdr_size, uncompressed_hdr_size)
@@ -697,14 +705,15 @@ fn decompress_next_header(next_header: SixlowpanNextHeader, payload: &[u8]) -> R
             SixlowpanNhcPacket::ExtHeader => {
                 let ext_hdr = SixlowpanExtHeaderPacket::new_checked(payload)?;
                 Ok(ext_hdr.extension_header_id().into())
-            }
+            },
             SixlowpanNhcPacket::UdpHeader => Ok(IpProtocol::Udp),
         },
         SixlowpanNextHeader::Uncompressed(proto) => Ok(proto),
     }
 }
 
-// NOTE: we always inline this function into the sixlowpan_to_ipv6 function, since it is only used there.
+// NOTE: we always inline this function into the sixlowpan_to_ipv6 function,
+// since it is only used there.
 #[inline(always)]
 fn decompress_ext_hdr<'d>(
     mut data: &'d [u8],
@@ -740,7 +749,8 @@ fn decompress_ext_hdr<'d>(
     Ok((buffer, data))
 }
 
-// NOTE: we always inline this function into the sixlowpan_to_ipv6 function, since it is only used there.
+// NOTE: we always inline this function into the sixlowpan_to_ipv6 function,
+// since it is only used there.
 #[inline(always)]
 fn decompress_udp(
     data: &[u8],

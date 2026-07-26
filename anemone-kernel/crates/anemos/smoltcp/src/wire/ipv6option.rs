@@ -139,7 +139,8 @@ mod field {
 }
 
 impl<T: AsRef<[u8]>> Ipv6Option<T> {
-    /// Create a raw octet buffer with an IPv6 Extension Header Option structure.
+    /// Create a raw octet buffer with an IPv6 Extension Header Option
+    /// structure.
     pub const fn new_unchecked(buffer: T) -> Ipv6Option<T> {
         Ipv6Option { buffer }
     }
@@ -260,7 +261,7 @@ impl<T: AsRef<[u8]> + ?Sized> fmt::Display for Ipv6Option<&T> {
             Err(err) => {
                 write!(f, "IPv6 Extension Option ({err})")?;
                 Ok(())
-            }
+            },
         }
     }
 }
@@ -283,7 +284,8 @@ pub enum Repr<'a> {
 }
 
 impl<'a> Repr<'a> {
-    /// Parse an IPv6 Extension Header Option and return a high-level representation.
+    /// Parse an IPv6 Extension Header Option and return a high-level
+    /// representation.
     pub fn parse<T>(opt: &Ipv6Option<&'a T>) -> Result<Repr<'a>>
     where
         T: AsRef<[u8]> + ?Sized,
@@ -299,7 +301,7 @@ impl<'a> Repr<'a> {
                 } else {
                     Err(Error)
                 }
-            }
+            },
             #[cfg(feature = "proto-rpl")]
             Type::Rpl => Ok(Repr::Rpl(RplHopByHopRepr::parse(
                 &RplHopByHopPacket::new_checked(opt.data())?,
@@ -319,7 +321,8 @@ impl<'a> Repr<'a> {
         }
     }
 
-    /// Return the length of a header that will be emitted from this high-level representation.
+    /// Return the length of a header that will be emitted from this high-level
+    /// representation.
     pub const fn buffer_len(&self) -> usize {
         match *self {
             Repr::Pad1 => 1,
@@ -342,12 +345,12 @@ impl<'a> Repr<'a> {
                 for x in opt.data_mut().iter_mut() {
                     *x = 0
                 }
-            }
+            },
             Repr::RouterAlert(router_alert) => {
                 opt.set_option_type(Type::RouterAlert);
                 opt.set_data_len(RouterAlert::DATA_LEN);
                 NetworkEndian::write_u16(opt.data_mut(), router_alert.into());
-            }
+            },
             #[cfg(feature = "proto-rpl")]
             Repr::Rpl(rpl) => {
                 opt.set_option_type(Type::Rpl);
@@ -355,7 +358,7 @@ impl<'a> Repr<'a> {
                 rpl.emit(&mut crate::wire::RplHopByHopPacket::new_unchecked(
                     opt.data_mut(),
                 ));
-            }
+            },
             Repr::Unknown {
                 type_,
                 length,
@@ -364,7 +367,7 @@ impl<'a> Repr<'a> {
                 opt.set_option_type(type_);
                 opt.set_data_len(length);
                 opt.data_mut().copy_from_slice(&data[..length as usize]);
-            }
+            },
         }
     }
 }
@@ -406,16 +409,16 @@ impl<'a> Iterator for Ipv6OptionsIterator<'a> {
                     Ok(repr) => {
                         self.pos += repr.buffer_len();
                         Some(Ok(repr))
-                    }
+                    },
                     Err(e) => {
                         self.hit_error = true;
                         Some(Err(e))
-                    }
+                    },
                 },
                 Err(e) => {
                     self.hit_error = true;
                     Some(Err(e))
-                }
+                },
             }
         } else {
             // If we failed to parse a previous option or hit the end of the

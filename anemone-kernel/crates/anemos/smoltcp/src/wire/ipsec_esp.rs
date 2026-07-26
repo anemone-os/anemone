@@ -1,7 +1,8 @@
 use super::{Error, Result};
 use byteorder::{ByteOrder, NetworkEndian};
 
-/// A read/write wrapper around an IPSec Encapsulating Security Payload (ESP) packet buffer.
+/// A read/write wrapper around an IPSec Encapsulating Security Payload (ESP)
+/// packet buffer.
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Packet<T: AsRef<[u8]>> {
@@ -16,7 +17,8 @@ mod field {
 }
 
 impl<T: AsRef<[u8]>> Packet<T> {
-    /// Imbue a raw octet buffer with IPsec Encapsulating Security Payload packet structure.
+    /// Imbue a raw octet buffer with IPsec Encapsulating Security Payload
+    /// packet structure.
     pub const fn new_unchecked(buffer: T) -> Packet<T> {
         Packet { buffer }
     }
@@ -89,7 +91,8 @@ pub struct Repr {
 }
 
 impl Repr {
-    /// Parse an IPSec Encapsulating Security Payload packet and return a high-level representation.
+    /// Parse an IPSec Encapsulating Security Payload packet and return a
+    /// high-level representation.
     pub fn parse<T: AsRef<[u8]>>(packet: &Packet<T>) -> Result<Repr> {
         packet.check_len()?;
         Ok(Repr {
@@ -98,12 +101,14 @@ impl Repr {
         })
     }
 
-    /// Return the length of a packet that will be emitted from this high-level representation.
+    /// Return the length of a packet that will be emitted from this high-level
+    /// representation.
     pub const fn buffer_len(&self) -> usize {
         field::SEQUENCE_NUMBER.end
     }
 
-    /// Emit a high-level representation into an IPSec Encapsulating Security Payload.
+    /// Emit a high-level representation into an IPSec Encapsulating Security
+    /// Payload.
     pub fn emit<T: AsRef<[u8]> + AsMut<[u8]>>(&self, packet: &mut Packet<T>) {
         packet.set_security_parameters_index(self.security_parameters_index);
         packet.set_sequence_number(self.sequence_number);

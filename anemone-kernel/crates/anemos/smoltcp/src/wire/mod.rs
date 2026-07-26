@@ -314,7 +314,8 @@ impl fmt::Display for Error {
 
 pub type Result<T> = core::result::Result<T, Error>;
 
-/// Representation of an hardware address, such as an Ethernet address or an IEEE802.15.4 address.
+/// Representation of an hardware address, such as an Ethernet address or an
+/// IEEE802.15.4 address.
 #[cfg(any(
     feature = "medium-ip",
     feature = "medium-ethernet",
@@ -524,7 +525,7 @@ impl RawHardwareAddress {
                 Ok(HardwareAddress::Ethernet(EthernetAddress::from_bytes(
                     self.as_bytes(),
                 )))
-            }
+            },
             #[cfg(feature = "medium-ieee802154")]
             Medium::Ieee802154 => {
                 if self.len() != 8 {
@@ -533,7 +534,7 @@ impl RawHardwareAddress {
                 Ok(HardwareAddress::Ieee802154(Ieee802154Address::from_bytes(
                     self.as_bytes(),
                 )))
-            }
+            },
             #[cfg(feature = "medium-ip")]
             Medium::Ip => unreachable!(),
         }
@@ -598,9 +599,9 @@ mod tests {
     ) {
         let (medium, input) = input;
 
-        // NOTE: we check the length since `RawHardwareAddress::parse()` panics if the length is
-        // invalid. MAX_HARDWARE_ADDRESS_LEN is based on the medium, and depending on the feature
-        // flags, it can be different.
+        // NOTE: we check the length since `RawHardwareAddress::parse()` panics if the
+        // length is invalid. MAX_HARDWARE_ADDRESS_LEN is based on the medium,
+        // and depending on the feature flags, it can be different.
         if input.len() < MAX_HARDWARE_ADDRESS_LEN {
             let raw = RawHardwareAddress::from_bytes(input);
             assert_eq!(raw.parse(medium), expected);

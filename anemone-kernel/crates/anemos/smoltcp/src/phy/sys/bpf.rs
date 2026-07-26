@@ -1,12 +1,12 @@
-use std::io;
-use std::mem;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::{
+    io, mem,
+    os::unix::io::{AsRawFd, RawFd},
+};
 
 use libc;
 
 use super::{ifreq, ifreq_for};
-use crate::phy::Medium;
-use crate::wire::ETHERNET_HEADER_LEN;
+use crate::{phy::Medium, wire::ETHERNET_HEADER_LEN};
 
 /// set interface
 #[cfg(any(
@@ -41,11 +41,12 @@ const SIZEOF_BPF_HDR: usize = 18;
 /// set bpf_hdr struct size
 #[cfg(any(target_os = "openbsd", target_os = "freebsd"))]
 const SIZEOF_BPF_HDR: usize = 24;
-/// The actual header length may be larger than the bpf_hdr struct due to aligning
-/// see <https://github.com/openbsd/src/blob/37ecb4d066e5566411cc16b362d3960c93b1d0be/sys/net/bpf.c#L1649>
+/// The actual header length may be larger than the bpf_hdr struct due to
+/// aligning see <https://github.com/openbsd/src/blob/37ecb4d066e5566411cc16b362d3960c93b1d0be/sys/net/bpf.c#L1649>
 /// and <https://github.com/apple/darwin-xnu/blob/8f02f2a044b9bb1ad951987ef5bab20ec9486310/bsd/net/bpf.c#L3580>
 /// and <https://github.com/NetBSD/src/blob/13d937d9ba3db87c9a898a40a8ed9d2aab2b1b95/sys/net/bpf.c#L1988>
-/// for FreeBSD, core::mem::size_of::<libc::bpf_hdr>() = 32 when run on a FreeBSD system.
+/// for FreeBSD, core::mem::size_of::<libc::bpf_hdr>() = 32 when run on a
+/// FreeBSD system.
 #[cfg(any(
     target_os = "macos",
     target_os = "ios",
@@ -114,23 +115,26 @@ impl BpfDevice {
     /// but it returns the size of the buffer that the app needs to allocate
     /// for the BPF device
     ///
-    /// The `SIOGIFMTU` cant be called on a BPF descriptor. There is a workaround
-    /// to get the actual interface mtu, but this should work better
+    /// The `SIOGIFMTU` cant be called on a BPF descriptor. There is a
+    /// workaround to get the actual interface mtu, but this should work
+    /// better
     ///
     /// To get the interface MTU, you would need to create a raw socket first,
-    /// and then call `SIOGIFMTU` for the same interface your BPF device is "bound" to.
-    /// This MTU that you would get would not include the length of `struct bpf_hdr`
-    /// which gets prepended to every packet by BPF,
+    /// and then call `SIOGIFMTU` for the same interface your BPF device is
+    /// "bound" to. This MTU that you would get would not include the length
+    /// of `struct bpf_hdr` which gets prepended to every packet by BPF,
     /// and your packet will be truncated if it has the length of the MTU.
     ///
-    /// The buffer size for BPF is usually 4096 bytes, MTU is typically 1500 bytes.
-    /// You could do something like `mtu += BPF_HDRLEN`,
-    /// but you must change the buffer size the BPF device expects using `BIOCSBLEN` accordingly,
-    /// and you must set it before setting the interface with the `BIOCSETIF` ioctl.
+    /// The buffer size for BPF is usually 4096 bytes, MTU is typically 1500
+    /// bytes. You could do something like `mtu += BPF_HDRLEN`,
+    /// but you must change the buffer size the BPF device expects using
+    /// `BIOCSBLEN` accordingly, and you must set it before setting the
+    /// interface with the `BIOCSETIF` ioctl.
     ///
-    /// The reason I said this should work better is because you might see some unexpected behavior,
-    /// truncated/unaligned packets, I/O errors on read()
-    /// if you change the buffer size to the actual MTU of the interface.
+    /// The reason I said this should work better is because you might see some
+    /// unexpected behavior, truncated/unaligned packets, I/O errors on
+    /// read() if you change the buffer size to the actual MTU of the
+    /// interface.
     pub fn interface_mtu(&mut self) -> io::Result<usize> {
         let mut bufsize: libc::c_int = 1;
         try_ioctl!(self.fd, BIOCIMMEDIATE, &mut bufsize as *mut libc::c_int);

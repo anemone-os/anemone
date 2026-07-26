@@ -1,7 +1,9 @@
 use super::*;
 use crate::phy::Medium;
-use std::io;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::{
+    io,
+    os::unix::io::{AsRawFd, RawFd},
+};
 
 #[derive(Debug)]
 pub struct TunTapInterfaceDesc {
@@ -72,7 +74,8 @@ impl TunTapInterfaceDesc {
         let ip_mtu = ip_mtu?;
 
         // SIOCGIFMTU returns the IP MTU (typically 1500 bytes.)
-        // smoltcp counts the entire Ethernet packet in the MTU, so add the Ethernet header size to it.
+        // smoltcp counts the entire Ethernet packet in the MTU, so add the Ethernet
+        // header size to it.
         let mtu = match medium {
             #[cfg(feature = "medium-ip")]
             Medium::Ip => ip_mtu,

@@ -59,7 +59,7 @@ impl Meta {
             NeighborState::Waiting { neighbor, .. } if has_neighbor(neighbor) => socket_poll_at,
             NeighborState::Waiting { silent_until, .. } if timestamp >= silent_until => {
                 socket_poll_at
-            }
+            },
             NeighborState::Waiting { silent_until, .. } => PollAt::Time(silent_until),
         }
     }
@@ -92,7 +92,7 @@ impl Meta {
                 } else {
                     false
                 }
-            }
+            },
         }
     }
 

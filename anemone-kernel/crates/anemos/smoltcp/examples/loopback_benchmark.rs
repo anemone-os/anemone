@@ -2,11 +2,13 @@ mod utils;
 
 use log::debug;
 
-use smoltcp::iface::{Config, Interface, SocketSet};
-use smoltcp::phy::{Device, Loopback, Medium};
-use smoltcp::socket::tcp;
-use smoltcp::time::Instant;
-use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr};
+use smoltcp::{
+    iface::{Config, Interface, SocketSet},
+    phy::{Device, Loopback, Medium},
+    socket::tcp,
+    time::Instant,
+    wire::{EthernetAddress, IpAddress, IpCidr},
+};
 
 fn main() {
     let device = Loopback::new(Medium::Ethernet);
@@ -18,14 +20,14 @@ fn main() {
         utils::add_middleware_options(&mut opts, &mut free);
 
         let mut matches = utils::parse_options(&opts, free);
-        utils::parse_middleware_options(&mut matches, device, /*loopback=*/ true)
+        utils::parse_middleware_options(&mut matches, device, /* loopback= */ true)
     };
 
     // Create interface
     let config = match device.capabilities().medium {
         Medium::Ethernet => {
             Config::new(EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]).into())
-        }
+        },
         Medium::Ip => Config::new(smoltcp::wire::HardwareAddress::Ip),
         Medium::Ieee802154 => todo!(),
     };

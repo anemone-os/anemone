@@ -680,7 +680,8 @@ fn test_icmpv4_socket(#[case] medium: Medium) {
     // socket.
     assert!(!sockets.get_mut::<icmp::Socket>(socket_handle).can_recv());
 
-    // Confirm we still get EchoReply from `smoltcp` even with the ICMP socket listening
+    // Confirm we still get EchoReply from `smoltcp` even with the ICMP socket
+    // listening
     let echo_reply = Icmpv4Repr::EchoReply {
         ident,
         seq_no,
@@ -729,7 +730,7 @@ fn test_handle_igmp(#[case] medium: Medium) {
                     Medium::Ethernet => {
                         let eth_frame = EthernetFrame::new_checked(frame).ok()?;
                         Ipv4Packet::new_checked(eth_frame.payload()).ok()?
-                    }
+                    },
                     #[cfg(feature = "medium-ip")]
                     Medium::Ip => Ipv4Packet::new_checked(&frame[..]).ok()?,
                     #[cfg(feature = "medium-ieee802154")]
@@ -911,7 +912,8 @@ fn check_no_reply_raw_socket(medium: Medium, frame: &crate::wire::ipv4::Packet<&
 #[cfg(all(feature = "socket-raw", feature = "medium-ip"))]
 #[case(Medium::Ethernet)]
 #[cfg(all(feature = "socket-raw", feature = "medium-ethernet"))]
-/// Test no reply to received UDP when using raw socket which accepts all protocols
+/// Test no reply to received UDP when using raw socket which accepts all
+/// protocols
 fn test_raw_socket_no_reply_udp(#[case] medium: Medium) {
     use crate::wire::{UdpPacket, UdpRepr};
 
@@ -958,7 +960,8 @@ fn test_raw_socket_no_reply_udp(#[case] medium: Medium) {
 #[cfg(all(feature = "socket-raw", feature = "medium-ip"))]
 #[case(Medium::Ethernet)]
 #[cfg(all(feature = "socket-raw", feature = "medium-ethernet"))]
-/// Test no reply to received TCP when using raw socket which accepts all protocols
+/// Test no reply to received TCP when using raw socket which accepts all
+/// protocols
 fn test_raw_socket_no_reply_tcp(#[case] medium: Medium) {
     use crate::wire::{TcpPacket, TcpRepr};
 
@@ -1019,8 +1022,10 @@ fn test_raw_socket_no_reply_tcp(#[case] medium: Medium) {
     feature = "medium-ethernet"
 ))]
 fn test_raw_socket_with_udp_socket(#[case] medium: Medium) {
-    use crate::socket::udp;
-    use crate::wire::{IpEndpoint, IpVersion, UdpPacket, UdpRepr};
+    use crate::{
+        socket::udp,
+        wire::{IpEndpoint, IpVersion, UdpPacket, UdpRepr},
+    };
 
     static UDP_PAYLOAD: [u8; 5] = [0x48, 0x65, 0x6c, 0x6c, 0x6f];
 
@@ -1106,7 +1111,8 @@ fn test_raw_socket_with_udp_socket(#[case] medium: Medium) {
         None
     );
 
-    // Make sure the UDP socket can still receive in presence of a Raw socket that handles UDP
+    // Make sure the UDP socket can still receive in presence of a Raw socket that
+    // handles UDP
     let socket = sockets.get_mut::<udp::Socket>(udp_socket_handle);
     assert!(socket.can_recv());
     assert_eq!(
@@ -1247,12 +1253,14 @@ fn test_raw_socket_tx_fragmentation(#[case] medium: Medium) {
                 .inner
                 .dispatch_ipv4_frag(TestFragmentTxToken {}, &mut iface.fragmenter);
         }
-        // Process the final fragment. It is the remainder of the data and does not have to be aligned.
+        // Process the final fragment. It is the remainder of the data and does not have
+        // to be aligned.
         iface
             .inner
             .dispatch_ipv4_frag(MockTxToken {}, &mut iface.fragmenter);
 
-        // The fragment offset should be the complete payload length once transmission is complete.
+        // The fragment offset should be the complete payload length once transmission
+        // is complete.
         let frag_offset = iface.fragmenter.ipv4.frag_offset;
         assert_eq!(frag_offset as usize, payload_len);
     }
@@ -1364,7 +1372,8 @@ fn test_raw_socket_rx_fragmentation(#[case] medium: Medium) {
         None
     );
 
-    // Validate the raw socket received one defragmented packet with correct payload.
+    // Validate the raw socket received one defragmented packet with correct
+    // payload.
     let socket = sockets.get_mut::<raw::Socket>(handle);
     assert!(socket.can_recv());
     let data = socket.recv().expect("raw socket should have a packet");

@@ -184,12 +184,12 @@ impl Address {
                 bytes[0] ^= 1 << 1;
 
                 Some(bytes)
-            }
+            },
         }
     }
 
-    /// Convert an extended address to a link-local IPv6 address using the EUI-64 format from
-    /// RFC2464.
+    /// Convert an extended address to a link-local IPv6 address using the
+    /// EUI-64 format from RFC2464.
     pub fn as_link_local_address(&self) -> Option<Ipv6Address> {
         let mut bytes = [0; 16];
         bytes[0] = 0xfe;
@@ -288,7 +288,8 @@ impl<T: AsRef<[u8]>> Frame<T> {
             return Err(Error);
         }
 
-        // We don't handle absent addressing mode with PAN ID compression for older frame versions.
+        // We don't handle absent addressing mode with PAN ID compression for older
+        // frame versions.
         if matches!(
             packet.frame_version(),
             FrameVersion::Ieee802154_2003 | FrameVersion::Ieee802154_2006
@@ -408,7 +409,7 @@ impl<T: AsRef<[u8]>> Frame<T> {
                 let data = self.buffer.as_ref();
                 let raw = data[field::SEQUENCE_NUMBER];
                 Some(raw)
-            }
+            },
             FrameType::Extended | FrameType::FragmentOrFrak | FrameType::Unknown(_) => None,
         }
     }
@@ -457,7 +458,7 @@ impl<T: AsRef<[u8]>> Frame<T> {
                     (dst, src) if !pan_id_compression => Some((true, dst, true, src)),
                     _ => None,
                 }
-            }
+            },
             FrameVersion::Ieee802154 => {
                 Some(match (dst_addr_mode, src_addr_mode, pan_id_compression) {
                     (Absent, Absent, false) => (false, Absent, false, Absent),
@@ -476,7 +477,7 @@ impl<T: AsRef<[u8]>> Frame<T> {
                     (Short, Short, true) => (true, Short, false, Short),
                     _ => return None,
                 })
-            }
+            },
             _ => None,
         }
     }
@@ -506,13 +507,13 @@ impl<T: AsRef<[u8]>> Frame<T> {
                     raw.clone_from_slice(&addressing_fields[offset..offset + 2]);
                     raw.reverse();
                     Some(Address::short_from_bytes(raw))
-                }
+                },
                 AddressingMode::Extended => {
                     let mut raw = [0u8; 8];
                     raw.clone_from_slice(&addressing_fields[offset..offset + 8]);
                     raw.reverse();
                     Some(Address::extended_from_bytes(raw))
-                }
+                },
                 AddressingMode::Unknown(_) => None,
             }
         } else {
@@ -551,13 +552,13 @@ impl<T: AsRef<[u8]>> Frame<T> {
                     raw.clone_from_slice(&addressing_fields[offset..offset + 2]);
                     raw.reverse();
                     Some(Address::short_from_bytes(raw))
-                }
+                },
                 AddressingMode::Extended => {
                     let mut raw = [0u8; 8];
                     raw.clone_from_slice(&addressing_fields[offset..offset + 8]);
                     raw.reverse();
                     Some(Address::extended_from_bytes(raw))
-                }
+                },
                 AddressingMode::Unknown(_) => None,
             }
         } else {
@@ -629,7 +630,8 @@ impl<T: AsRef<[u8]>> Frame<T> {
         (b >> 3) & 0b11
     }
 
-    /// Return `true` when the frame counter in the security header is suppressed.
+    /// Return `true` when the frame counter in the security header is
+    /// suppressed.
     pub fn frame_counter_suppressed(&self) -> bool {
         let index = self.aux_security_header_start();
         let b = self.buffer.as_ref()[index..][0];
@@ -707,7 +709,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Frame<&'a T> {
                 let data = &self.buffer.as_ref();
 
                 Some(&data[index..])
-            }
+            },
             _ => None,
         }
     }
@@ -768,14 +770,14 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Frame<T> {
                 let data = self.buffer.as_mut();
                 data[field::ADDRESSING][2..2 + 2].copy_from_slice(&value);
                 value.reverse();
-            }
+            },
             Address::Extended(mut value) => {
                 value.reverse();
                 self.set_dst_addressing_mode(AddressingMode::Extended);
                 let data = &mut self.buffer.as_mut()[field::ADDRESSING];
                 data[2..2 + 8].copy_from_slice(&value);
                 value.reverse();
-            }
+            },
         }
     }
 
@@ -823,14 +825,14 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Frame<T> {
                 let data = &mut self.buffer.as_mut()[field::ADDRESSING];
                 data[offset..offset + 2].copy_from_slice(&value);
                 value.reverse();
-            }
+            },
             Address::Extended(mut value) => {
                 value.reverse();
                 self.set_src_addressing_mode(AddressingMode::Extended);
                 let data = &mut self.buffer.as_mut()[field::ADDRESSING];
                 data[offset..offset + 8].copy_from_slice(&value);
                 value.reverse();
-            }
+            },
         }
     }
 
@@ -852,7 +854,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Frame<T> {
                 let index = self.payload_start();
                 let data = self.buffer.as_mut();
                 Some(&mut data[index..])
-            }
+            },
             _ => None,
         }
     }
@@ -951,7 +953,8 @@ impl Repr {
         })
     }
 
-    /// Return the length of a buffer required to hold a packet with the payload of a given length.
+    /// Return the length of a buffer required to hold a packet with the payload
+    /// of a given length.
     #[inline]
     pub const fn buffer_len(&self) -> usize {
         3 + 2

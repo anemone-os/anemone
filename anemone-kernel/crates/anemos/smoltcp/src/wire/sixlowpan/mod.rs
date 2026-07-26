@@ -1,12 +1,10 @@
-//! Implementation of [RFC 6282] which specifies a compression format for IPv6 datagrams over
-//! IEEE802.154-based networks.
+//! Implementation of [RFC 6282] which specifies a compression format for IPv6
+//! datagrams over IEEE802.154-based networks.
 //!
 //! [RFC 6282]: https://datatracker.ietf.org/doc/html/rfc6282
 
 use super::{Error, Result};
-use crate::wire::IpProtocol;
-use crate::wire::ieee802154::Address as LlAddress;
-use crate::wire::ipv6;
+use crate::wire::{IpProtocol, ieee802154::Address as LlAddress, ipv6};
 
 pub mod frag;
 pub mod iphc;
@@ -18,9 +16,9 @@ const ADDRESS_CONTEXT_LENGTH: usize = 8;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct AddressContext(pub [u8; ADDRESS_CONTEXT_LENGTH]);
 
-/// The representation of an unresolved address. 6LoWPAN compression of IPv6 addresses can be with
-/// and without context information. The decompression with context information is not yet
-/// implemented.
+/// The representation of an unresolved address. 6LoWPAN compression of IPv6
+/// addresses can be with and without context information. The decompression
+/// with context information is not yet implemented.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum UnresolvedAddress<'a> {
@@ -39,13 +37,14 @@ pub enum AddressMode<'a> {
     /// carried in-line.
     InLine64bits(&'a [u8]),
     /// The first 112 bits of the address are elided. The value of the first
-    /// 64 bits is the link-local prefix padded with zeros. The following 64 bits
-    /// are 0000:00ff:fe00:XXXX, where XXXX are the 16 bits carried in-line.
+    /// 64 bits is the link-local prefix padded with zeros. The following 64
+    /// bits are 0000:00ff:fe00:XXXX, where XXXX are the 16 bits carried
+    /// in-line.
     InLine16bits(&'a [u8]),
     /// The address is fully elided. The first 64 bits of the address are
     /// the link-local prefix padded with zeros. The remaining 64 bits are
-    /// computed from the encapsulating header (e.g., 802.15.4 or IPv6 source address)
-    /// as specified in Section 3.2.2.
+    /// computed from the encapsulating header (e.g., 802.15.4 or IPv6 source
+    /// address) as specified in Section 3.2.2.
     FullyElided,
     /// The address takes the form ffXX::00XX:XXXX:XXXX
     Multicast48bits(&'a [u8]),
@@ -84,25 +83,25 @@ impl<'a> UnresolvedAddress<'a> {
             UnresolvedAddress::WithoutContext(mode) => match mode {
                 AddressMode::FullInline(addr) => {
                     Ok(ipv6::Address::from_octets(addr.try_into().unwrap()))
-                }
+                },
                 AddressMode::InLine64bits(inline) => {
                     bytes[0..2].copy_from_slice(&LINK_LOCAL_PREFIX[..]);
                     bytes[8..].copy_from_slice(inline);
                     Ok(ipv6::Address::from_octets(bytes))
-                }
+                },
                 AddressMode::InLine16bits(inline) => {
                     bytes[0..2].copy_from_slice(&LINK_LOCAL_PREFIX[..]);
                     bytes[11..13].copy_from_slice(&EUI64_MIDDLE_VALUE[..]);
                     bytes[14..].copy_from_slice(inline);
                     Ok(ipv6::Address::from_octets(bytes))
-                }
+                },
                 AddressMode::FullyElided => {
                     bytes[0..2].copy_from_slice(&LINK_LOCAL_PREFIX[..]);
                     match ll_address {
                         Some(LlAddress::Short(ll)) => {
                             bytes[11..13].copy_from_slice(&EUI64_MIDDLE_VALUE[..]);
                             bytes[14..].copy_from_slice(&ll);
-                        }
+                        },
                         Some(addr @ LlAddress::Extended(_)) => match addr.as_eui_64() {
                             Some(addr) => bytes[8..].copy_from_slice(&addr),
                             None => return Err(Error),
@@ -111,25 +110,25 @@ impl<'a> UnresolvedAddress<'a> {
                         None => return Err(Error),
                     }
                     Ok(ipv6::Address::from_octets(bytes))
-                }
+                },
                 AddressMode::Multicast48bits(inline) => {
                     bytes[0] = 0xff;
                     bytes[1] = inline[0];
                     bytes[11..].copy_from_slice(&inline[1..][..5]);
                     Ok(ipv6::Address::from_octets(bytes))
-                }
+                },
                 AddressMode::Multicast32bits(inline) => {
                     bytes[0] = 0xff;
                     bytes[1] = inline[0];
                     bytes[13..].copy_from_slice(&inline[1..][..3]);
                     Ok(ipv6::Address::from_octets(bytes))
-                }
+                },
                 AddressMode::Multicast8bits(inline) => {
                     bytes[0] = 0xff;
                     bytes[1] = 0x02;
                     bytes[15] = inline[0];
                     Ok(ipv6::Address::from_octets(bytes))
-                }
+                },
                 _ => Err(Error),
             },
             UnresolvedAddress::WithContext(mode) => match mode {
@@ -138,18 +137,18 @@ impl<'a> UnresolvedAddress<'a> {
                     copy_context(index, &mut bytes[..])?;
                     bytes[16 - inline.len()..].copy_from_slice(inline);
                     Ok(ipv6::Address::from_octets(bytes))
-                }
+                },
                 (index, AddressMode::InLine16bits(inline)) => {
                     copy_context(index, &mut bytes[..])?;
                     bytes[16 - inline.len()..].copy_from_slice(inline);
                     Ok(ipv6::Address::from_octets(bytes))
-                }
+                },
                 (index, AddressMode::FullyElided) => {
                     match ll_address {
                         Some(LlAddress::Short(ll)) => {
                             bytes[11..13].copy_from_slice(&EUI64_MIDDLE_VALUE[..]);
                             bytes[14..].copy_from_slice(&ll);
-                        }
+                        },
                         Some(addr @ LlAddress::Extended(_)) => match addr.as_eui_64() {
                             Some(addr) => bytes[8..].copy_from_slice(&addr),
                             None => return Err(Error),
@@ -161,7 +160,7 @@ impl<'a> UnresolvedAddress<'a> {
                     copy_context(index, &mut bytes[..])?;
 
                     Ok(ipv6::Address::from_octets(bytes))
-                }
+                },
                 _ => Err(Error),
             },
             UnresolvedAddress::Reserved => Err(Error),
@@ -187,8 +186,8 @@ impl SixlowpanPacket {
     /// This can either be a fragment header or an IPHC header.
     ///
     /// # Errors
-    /// Returns `[Error::Unrecognized]` when neither the Fragment Header dispatch or the IPHC
-    /// dispatch is recognized.
+    /// Returns `[Error::Unrecognized]` when neither the Fragment Header
+    /// dispatch or the IPHC dispatch is recognized.
     pub fn dispatch(buffer: impl AsRef<[u8]>) -> Result<Self> {
         let raw = buffer.as_ref();
 
@@ -270,9 +269,10 @@ mod test {
 
     #[test]
     fn sixlowpan_three_fragments() {
-        use crate::wire::Ieee802154Address;
-        use crate::wire::ieee802154::Frame as Ieee802154Frame;
-        use crate::wire::ieee802154::Repr as Ieee802154Repr;
+        use crate::wire::{
+            Ieee802154Address,
+            ieee802154::{Frame as Ieee802154Frame, Repr as Ieee802154Repr},
+        };
 
         let key = frag::Key {
             ll_src_addr: Ieee802154Address::Extended([50, 147, 130, 47, 40, 8, 62, 217]),

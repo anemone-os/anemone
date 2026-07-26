@@ -40,7 +40,8 @@ macro_rules! set_field {
 /// A read/write wrapper around a 6LoWPAN IPHC header.
 /// [RFC 6282 § 3.1] specifies the format of the header.
 ///
-/// The header always start with the following base format (from [RFC 6282 § 3.1.1]):
+/// The header always start with the following base format (from [RFC 6282 §
+/// 3.1.1]): 
 /// ```txt
 ///    0                                       1
 ///    0   1   2   3   4   5   6   7   8   9   0   1   2   3   4   5
@@ -59,7 +60,8 @@ macro_rules! set_field {
 /// - DAC: Destination Address Compression
 /// - DAM: Destination Address Mode
 ///
-/// Depending on the flags in the base format, the following fields are added to the header:
+/// Depending on the flags in the base format, the following fields are added to
+/// the header:
 /// - Traffic Class and Flow Label
 /// - Next Header
 /// - Hop Limit
@@ -145,7 +147,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
 
                 let data = self.buffer.as_ref();
                 data[start..start + 1][0]
-            }
+            },
             0b01 => 1,
             0b10 => 64,
             0b11 => 255,
@@ -179,7 +181,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
             0b00..=0b10 => {
                 let start = self.ip_fields_start() as usize;
                 Some(self.buffer.as_ref()[start..][0] & 0b1100_0000)
-            }
+            },
             0b11 => None,
             _ => unreachable!(),
         }
@@ -191,7 +193,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
             0b00 | 0b10 => {
                 let start = self.ip_fields_start() as usize;
                 Some(self.buffer.as_ref()[start..][0] & 0b111111)
-            }
+            },
             0b01 | 0b11 => None,
             _ => unreachable!(),
         }
@@ -205,13 +207,13 @@ impl<T: AsRef<[u8]>> Packet<T> {
                 Some(NetworkEndian::read_u16(
                     &self.buffer.as_ref()[start..][2..4],
                 ))
-            }
+            },
             0b01 => {
                 let start = self.ip_fields_start() as usize;
                 Some(NetworkEndian::read_u16(
                     &self.buffer.as_ref()[start..][1..3],
                 ))
-            }
+            },
             0b10 | 0b11 => None,
             _ => unreachable!(),
         }
@@ -249,7 +251,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
                 } else {
                     Err(Error)
                 }
-            }
+            },
             (1, 0b10) => {
                 if let Some(id) = self.src_context_id() {
                     Ok(UnresolvedAddress::WithContext((
@@ -259,7 +261,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
                 } else {
                     Err(Error)
                 }
-            }
+            },
             (1, 0b11) => {
                 if let Some(id) = self.src_context_id() {
                     Ok(UnresolvedAddress::WithContext((
@@ -269,7 +271,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
                 } else {
                     Err(Error)
                 }
-            }
+            },
             _ => Err(Error),
         }
     }
@@ -304,7 +306,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
                 } else {
                     Err(Error)
                 }
-            }
+            },
             (0, 1, 0b10) => {
                 if let Some(id) = self.dst_context_id() {
                     Ok(UnresolvedAddress::WithContext((
@@ -314,7 +316,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
                 } else {
                     Err(Error)
                 }
-            }
+            },
             (0, 1, 0b11) => {
                 if let Some(id) = self.dst_context_id() {
                     Ok(UnresolvedAddress::WithContext((
@@ -324,7 +326,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
                 } else {
                     Err(Error)
                 }
-            }
+            },
             (1, 0, 0b00) => Ok(UnresolvedAddress::WithoutContext(AddressMode::FullInline(
                 &data[start..][..16],
             ))),
@@ -483,14 +485,15 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
 
     /// Set the Next Header.
     ///
-    /// **NOTE**: `idx` is the offset at which the Next Header needs to be written to.
+    /// **NOTE**: `idx` is the offset at which the Next Header needs to be
+    /// written to.
     fn set_next_header(&mut self, nh: NextHeader, mut idx: usize) -> usize {
         match nh {
             NextHeader::Uncompressed(nh) => {
                 self.set_nh_field(0);
                 self.set_field(idx, &[nh.into()]);
                 idx += 1;
-            }
+            },
             NextHeader::Compressed => self.set_nh_field(1),
         }
 
@@ -499,7 +502,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
 
     /// Set the Hop Limit.
     ///
-    /// **NOTE**: `idx` is the offset at which the Next Header needs to be written to.
+    /// **NOTE**: `idx` is the offset at which the Next Header needs to be
+    /// written to.
     fn set_hop_limit(&mut self, hl: u8, mut idx: usize) -> usize {
         match hl {
             255 => self.set_hlim_field(0b11),
@@ -509,15 +513,17 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
                 self.set_hlim_field(0b00);
                 self.set_field(idx, &[hl]);
                 idx += 1;
-            }
+            },
         }
 
         idx
     }
 
-    /// Set the Source Address based on the IPv6 address and the Link-Local address.
+    /// Set the Source Address based on the IPv6 address and the Link-Local
+    /// address.
     ///
-    /// **NOTE**: `idx` is the offset at which the Next Header needs to be written to.
+    /// **NOTE**: `idx` is the offset at which the Next Header needs to be
+    /// written to.
     fn set_src_address(
         &mut self,
         src_addr: ipv6::Address,
@@ -581,9 +587,11 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
         idx
     }
 
-    /// Set the Destination Address based on the IPv6 address and the Link-Local address.
+    /// Set the Destination Address based on the IPv6 address and the Link-Local
+    /// address.
     ///
-    /// **NOTE**: `idx` is the offset at which the Next Header needs to be written to.
+    /// **NOTE**: `idx` is the offset at which the Next Header needs to be
+    /// written to.
     fn set_dst_address(
         &mut self,
         dst_addr: ipv6::Address,
@@ -719,8 +727,8 @@ impl defmt::Format for Repr {
 impl Repr {
     /// Parse a 6LoWPAN IPHC header and return a high-level representation.
     ///
-    /// The `ll_src_addr` and `ll_dst_addr` are the link-local addresses used for resolving the
-    /// IPv6 packets.
+    /// The `ll_src_addr` and `ll_dst_addr` are the link-local addresses used
+    /// for resolving the IPv6 packets.
     pub fn parse<T: AsRef<[u8]> + ?Sized>(
         packet: &Packet<&T>,
         ll_src_addr: Option<LlAddress>,
@@ -751,13 +759,15 @@ impl Repr {
         })
     }
 
-    /// Return the length of a header that will be emitted from this high-level representation.
+    /// Return the length of a header that will be emitted from this high-level
+    /// representation.
     pub fn buffer_len(&self) -> usize {
         let mut len = 0;
         len += 2; // The minimal header length
 
         len += match self.next_header {
-            NextHeader::Compressed => 0, // The next header is compressed (we don't need to inline what the next header is)
+            NextHeader::Compressed => 0, /* The next header is compressed (we don't need to
+                                           * inline what the next header is) */
             NextHeader::Uncompressed(_) => 1, // The next header field is inlined
         };
 

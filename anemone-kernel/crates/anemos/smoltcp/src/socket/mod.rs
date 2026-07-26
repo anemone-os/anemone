@@ -11,8 +11,7 @@ The interface implemented by this module uses explicit buffering: you decide on 
 size for a buffer, allocate it, and let the networking stack use it.
 */
 
-use crate::iface::Context;
-use crate::time::Instant;
+use crate::{iface::Context, time::Instant};
 
 #[cfg(feature = "socket-dhcpv4")]
 pub mod dhcpv4;
@@ -47,9 +46,10 @@ pub(crate) enum PollAt {
 
 /// A network socket.
 ///
-/// This enumeration abstracts the various types of sockets based on the IP protocol.
-/// To downcast a `Socket` value to a concrete socket, use the [AnySocket] trait,
-/// e.g. to get `udp::Socket`, call `udp::Socket::downcast(socket)`.
+/// This enumeration abstracts the various types of sockets based on the IP
+/// protocol. To downcast a `Socket` value to a concrete socket, use the
+/// [AnySocket] trait, e.g. to get `udp::Socket`, call
+/// `udp::Socket::downcast(socket)`.
 ///
 /// It is usually more convenient to use [SocketSet::get] instead.
 ///

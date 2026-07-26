@@ -92,11 +92,11 @@ mod field {
     // |                            Reserved                           |
     // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     // |                                                               |
-    // +                                                               +
+    // + +
     // |                                                               |
-    // +                         Home Address                          +
+    // + Home Address                          +
     // |                                                               |
-    // +                                                               +
+    // + +
     // |                                                               |
     // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
@@ -188,7 +188,8 @@ impl<T: AsRef<[u8]>> Header<T> {
     /// Return the IPv6 Home Address
     ///
     /// # Panics
-    /// This function may panic if this header is not the Type2 Routing Header routing type.
+    /// This function may panic if this header is not the Type2 Routing Header
+    /// routing type.
     pub fn home_address(&self) -> Address {
         let data = self.buffer.as_ref();
         Address::from_octets(data[field::HOME_ADDRESS].try_into().unwrap())
@@ -200,16 +201,19 @@ impl<T: AsRef<[u8]>> Header<T> {
     /// Return the number of prefix octets elided from addresses[1..n-1].
     ///
     /// # Panics
-    /// This function may panic if this header is not the RPL Source Routing Header routing type.
+    /// This function may panic if this header is not the RPL Source Routing
+    /// Header routing type.
     pub fn cmpr_i(&self) -> u8 {
         let data = self.buffer.as_ref();
         data[field::CMPR] >> 4
     }
 
-    /// Return the number of prefix octets elided from the last address (`addresses[n]`).
+    /// Return the number of prefix octets elided from the last address
+    /// (`addresses[n]`).
     ///
     /// # Panics
-    /// This function may panic if this header is not the RPL Source Routing Header routing type.
+    /// This function may panic if this header is not the RPL Source Routing
+    /// Header routing type.
     pub fn cmpr_e(&self) -> u8 {
         let data = self.buffer.as_ref();
         data[field::CMPR] & 0xf
@@ -218,7 +222,8 @@ impl<T: AsRef<[u8]>> Header<T> {
     /// Return the number of octets used for padding after `addresses[n]`.
     ///
     /// # Panics
-    /// This function may panic if this header is not the RPL Source Routing Header routing type.
+    /// This function may panic if this header is not the RPL Source Routing
+    /// Header routing type.
     pub fn pad(&self) -> u8 {
         let data = self.buffer.as_ref();
         data[field::PAD] >> 4
@@ -227,7 +232,8 @@ impl<T: AsRef<[u8]>> Header<T> {
     /// Return the address vector in bytes
     ///
     /// # Panics
-    /// This function may panic if this header is not the RPL Source Routing Header routing type.
+    /// This function may panic if this header is not the RPL Source Routing
+    /// Header routing type.
     pub fn addresses(&self) -> &[u8] {
         let data = self.buffer.as_ref();
         &data[field::ADDRESSES..]
@@ -265,13 +271,13 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Header<T> {
                 data[3] = 0;
                 data[4] = 0;
                 data[5] = 0;
-            }
+            },
             Type::Rpl => {
                 // Retain the higher order 4 bits of the padding field
                 data[field::PAD] &= 0xF0;
                 data[4] = 0;
                 data[5] = 0;
-            }
+            },
 
             _ => panic!("Unrecognized routing type when clearing reserved fields."),
         }
@@ -283,7 +289,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Header<T> {
     /// Set the Ipv6 Home Address
     ///
     /// # Panics
-    /// This function may panic if this header is not the Type 2 Routing Header routing type.
+    /// This function may panic if this header is not the Type 2 Routing Header
+    /// routing type.
     pub fn set_home_address(&mut self, value: Address) {
         let data = self.buffer.as_mut();
         data[field::HOME_ADDRESS].copy_from_slice(&value.octets());
@@ -295,17 +302,20 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Header<T> {
     /// Set the number of prefix octets elided from addresses[1..n-1].
     ///
     /// # Panics
-    /// This function may panic if this header is not the RPL Source Routing Header routing type.
+    /// This function may panic if this header is not the RPL Source Routing
+    /// Header routing type.
     pub fn set_cmpr_i(&mut self, value: u8) {
         let data = self.buffer.as_mut();
         let raw = (value << 4) | (data[field::CMPR] & 0xF);
         data[field::CMPR] = raw;
     }
 
-    /// Set the number of prefix octets elided from the last address (`addresses[n]`).
+    /// Set the number of prefix octets elided from the last address
+    /// (`addresses[n]`).
     ///
     /// # Panics
-    /// This function may panic if this header is not the RPL Source Routing Header routing type.
+    /// This function may panic if this header is not the RPL Source Routing
+    /// Header routing type.
     pub fn set_cmpr_e(&mut self, value: u8) {
         let data = self.buffer.as_mut();
         let raw = (value & 0xF) | (data[field::CMPR] & 0xF0);
@@ -315,7 +325,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Header<T> {
     /// Set the number of octets used for padding after `addresses[n]`.
     ///
     /// # Panics
-    /// This function may panic if this header is not the RPL Source Routing Header routing type.
+    /// This function may panic if this header is not the RPL Source Routing
+    /// Header routing type.
     pub fn set_pad(&mut self, value: u8) {
         let data = self.buffer.as_mut();
         data[field::PAD] = value << 4;
@@ -324,7 +335,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Header<T> {
     /// Set address data
     ///
     /// # Panics
-    /// This function may panic if this header is not the RPL Source Routing Header routing type.
+    /// This function may panic if this header is not the RPL Source Routing
+    /// Header routing type.
     pub fn set_addresses(&mut self, value: &[u8]) {
         let data = self.buffer.as_mut();
         let addresses = &mut data[field::ADDRESSES..];
@@ -339,7 +351,7 @@ impl<T: AsRef<[u8]> + ?Sized> fmt::Display for Header<&T> {
             Err(err) => {
                 write!(f, "IPv6 Routing ({err})")?;
                 Ok(())
-            }
+            },
         }
     }
 }
@@ -358,12 +370,13 @@ pub enum Repr<'a> {
     Rpl {
         /// Number of route segments remaining.
         segments_left: u8,
-        /// Number of prefix octets from each segment, except the last segment, that are elided.
+        /// Number of prefix octets from each segment, except the last segment,
+        /// that are elided.
         cmpr_i: u8,
         /// Number of prefix octets from the last segment that are elided.
         cmpr_e: u8,
-        /// Number of octets that are used for padding after `address[n]` at the end of the
-        /// RPL Source Route Header.
+        /// Number of octets that are used for padding after `address[n]` at the
+        /// end of the RPL Source Route Header.
         pad: u8,
         /// Vector of addresses, numbered 1 to `n`.
         addresses: &'a [u8],
@@ -394,8 +407,8 @@ impl<'a> Repr<'a> {
         }
     }
 
-    /// Return the length, in bytes, of a header that will be emitted from this high-level
-    /// representation.
+    /// Return the length, in bytes, of a header that will be emitted from this
+    /// high-level representation.
     pub const fn buffer_len(&self) -> usize {
         match self {
             // Routing Type + Segments Left + Reserved + Home Address
@@ -415,7 +428,7 @@ impl<'a> Repr<'a> {
                 header.set_segments_left(segments_left);
                 header.clear_reserved();
                 header.set_home_address(home_address);
-            }
+            },
             Repr::Rpl {
                 segments_left,
                 cmpr_i,
@@ -430,7 +443,7 @@ impl<'a> Repr<'a> {
                 header.set_pad(pad);
                 header.clear_reserved();
                 header.set_addresses(addresses);
-            }
+            },
         }
     }
 }
@@ -449,7 +462,7 @@ impl<'a> fmt::Display for Repr<'a> {
                     segments_left,
                     home_address
                 )
-            }
+            },
             Repr::Rpl {
                 segments_left,
                 cmpr_i,
@@ -466,7 +479,7 @@ impl<'a> fmt::Display for Repr<'a> {
                     cmpr_e,
                     pad
                 )
-            }
+            },
         }
     }
 }

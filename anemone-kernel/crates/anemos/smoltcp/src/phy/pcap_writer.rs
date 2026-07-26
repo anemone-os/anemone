@@ -4,8 +4,10 @@ use phy::Medium;
 #[cfg(feature = "std")]
 use std::io::Write;
 
-use crate::phy::{self, Device, DeviceCapabilities};
-use crate::time::Instant;
+use crate::{
+    phy::{self, Device, DeviceCapabilities},
+    time::Instant,
+};
 
 enum_with_unknown! {
     /// Captured packet header type.
@@ -55,7 +57,8 @@ pub trait PcapSink {
 
     /// Write the libpcap global header into the sink.
     ///
-    /// This method may be overridden e.g. if special synchronization is necessary.
+    /// This method may be overridden e.g. if special synchronization is
+    /// necessary.
     fn global_header(&mut self, link_type: PcapLinkType) {
         self.write_u32(0xa1b2c3d4); // magic number
         self.write_u16(2); // major version
@@ -143,15 +146,17 @@ impl<D: Device, S: PcapSink> PcapWriter<D, S> {
 
     /// Get a reference to the underlying device.
     ///
-    /// Even if the device offers reading through a standard reference, it is inadvisable to
-    /// directly read from the device as doing so will circumvent the packet capture.
+    /// Even if the device offers reading through a standard reference, it is
+    /// inadvisable to directly read from the device as doing so will
+    /// circumvent the packet capture.
     pub fn get_ref(&self) -> &D {
         &self.lower
     }
 
     /// Get a mutable reference to the underlying device.
     ///
-    /// It is inadvisable to directly read from the device as doing so will circumvent the packet capture.
+    /// It is inadvisable to directly read from the device as doing so will
+    /// circumvent the packet capture.
     pub fn get_mut(&mut self) -> &mut D {
         &mut self.lower
     }
@@ -253,7 +258,7 @@ impl<'a, Tx: phy::TxToken, S: PcapSink> phy::TxToken for TxToken<'a, Tx, S> {
             match self.mode {
                 PcapMode::Both | PcapMode::TxOnly => {
                     self.sink.borrow_mut().packet(self.timestamp, buffer)
-                }
+                },
                 PcapMode::RxOnly => (),
             };
             result

@@ -2,15 +2,17 @@ use byteorder::{ByteOrder, NetworkEndian};
 use core::{cmp, fmt};
 
 use super::{Error, Result};
-use crate::phy::ChecksumCapabilities;
-use crate::wire::MldRepr;
 #[cfg(any(feature = "medium-ethernet", feature = "medium-ieee802154"))]
 use crate::wire::NdiscRepr;
 #[cfg(feature = "proto-rpl")]
 use crate::wire::RplRepr;
-use crate::wire::ip::checksum;
-use crate::wire::{IPV6_HEADER_LEN, IPV6_MIN_MTU};
-use crate::wire::{IpProtocol, Ipv6Address, Ipv6Packet, Ipv6Repr};
+use crate::{
+    phy::ChecksumCapabilities,
+    wire::{
+        IPV6_HEADER_LEN, IPV6_MIN_MTU, IpProtocol, Ipv6Address, Ipv6Packet, Ipv6Repr, MldRepr,
+        ip::checksum,
+    },
+};
 
 /// Error packets must not exceed min MTU
 const MAX_ERROR_PACKET_LEN: usize = IPV6_MIN_MTU - IPV6_HEADER_LEN;
@@ -141,7 +143,7 @@ impl fmt::Display for DstUnreachable {
             DstUnreachable::PortUnreachable => write!(f, "port unreachable"),
             DstUnreachable::FailedPolicy => {
                 write!(f, "source address failed ingress/egress policy")
-            }
+            },
             DstUnreachable::RejectRoute => write!(f, "reject route to destination"),
             DstUnreachable::Unknown(id) => write!(f, "{id}"),
         }
@@ -191,7 +193,8 @@ impl fmt::Display for TimeExceeded {
     }
 }
 
-/// A read/write wrapper around an Internet Control Message Protocol version 6 packet buffer.
+/// A read/write wrapper around an Internet Control Message Protocol version 6
+/// packet buffer.
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Packet<T: AsRef<[u8]>> {
@@ -296,7 +299,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
                 if len < field::HEADER_END || len < self.header_len() {
                     return Err(Error);
                 }
-            }
+            },
             #[cfg(feature = "proto-rpl")]
             Message::RplControl => match super::rpl::RplControlMessage::from(self.msg_code()) {
                 super::rpl::RplControlMessage::DodagInformationSolicitation => {
@@ -304,25 +307,25 @@ impl<T: AsRef<[u8]>> Packet<T> {
                     if len < 6 {
                         return Err(Error);
                     }
-                }
+                },
                 super::rpl::RplControlMessage::DodagInformationObject => {
                     // TODO(thvdveld): replace magic number
                     if len < 28 {
                         return Err(Error);
                     }
-                }
+                },
                 super::rpl::RplControlMessage::DestinationAdvertisementObject => {
                     // TODO(thvdveld): replace magic number
                     if len < 8 || (self.dao_dodag_id_present() && len < 24) {
                         return Err(Error);
                     }
-                }
+                },
                 super::rpl::RplControlMessage::DestinationAdvertisementObjectAck => {
                     // TODO(thvdveld): replace magic number
                     if len < 8 || (self.dao_dodag_id_present() && len < 24) {
                         return Err(Error);
                     }
-                }
+                },
                 super::rpl::RplControlMessage::SecureDodagInformationSolicitation
                 | super::rpl::RplControlMessage::SecureDodagInformationObject
                 | super::rpl::RplControlMessage::SecureDestinationAdvertisementObject
@@ -474,16 +477,16 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
             | Message::Redirect => {
                 let data = self.buffer.as_mut();
                 NetworkEndian::write_u32(&mut data[field::UNUSED], 0);
-            }
+            },
             Message::MldQuery => {
                 let data = self.buffer.as_mut();
                 NetworkEndian::write_u16(&mut data[field::QUERY_RESV], 0);
                 data[field::SQRV] &= 0xf;
-            }
+            },
             Message::MldReport => {
                 let data = self.buffer.as_mut();
                 NetworkEndian::write_u16(&mut data[field::RECORD_RESV], 0);
-            }
+            },
             ty => panic!("Message type `{ty}` does not have any reserved fields."),
         }
     }
@@ -497,7 +500,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     /// Set the identifier field (for echo request and reply packets).
     ///
     /// # Panics
-    /// This function may panic if this packet is not an echo request or reply packet.
+    /// This function may panic if this packet is not an echo request or reply
+    /// packet.
     #[inline]
     pub fn set_echo_ident(&mut self, value: u16) {
         let data = self.buffer.as_mut();
@@ -507,7 +511,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     /// Set the sequence number field (for echo request and reply packets).
     ///
     /// # Panics
-    /// This function may panic if this packet is not an echo request or reply packet.
+    /// This function may panic if this packet is not an echo request or reply
+    /// packet.
     #[inline]
     pub fn set_echo_seq_no(&mut self, value: u16) {
         let data = self.buffer.as_mut();
@@ -527,7 +532,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     /// Set the pointer field (for parameter problem messages).
     ///
     /// # Panics
-    /// This function may panic if this packet is not a parameter problem message.
+    /// This function may panic if this packet is not a parameter problem
+    /// message.
     #[inline]
     pub fn set_param_problem_ptr(&mut self, value: u32) {
         let data = self.buffer.as_mut();
@@ -567,7 +573,8 @@ impl<T: AsRef<[u8]>> AsRef<[u8]> for Packet<T> {
     }
 }
 
-/// A high-level representation of an Internet Control Message Protocol version 6 packet header.
+/// A high-level representation of an Internet Control Message Protocol version
+/// 6 packet header.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[non_exhaustive]
@@ -628,9 +635,10 @@ impl<'a> Repr<'a> {
         where
             T: AsRef<[u8]> + ?Sized,
         {
-            // The packet must be truncated to fit the min MTU. Since we don't know the offset of
-            // the ICMPv6 header in the L2 frame, we should only check whether the payload's IPv6
-            // header is present, the rest is allowed to be truncated.
+            // The packet must be truncated to fit the min MTU. Since we don't know the
+            // offset of the ICMPv6 header in the L2 frame, we should only check
+            // whether the payload's IPv6 header is present, the rest is allowed
+            // to be truncated.
             let ip_packet = if packet.payload().len() >= IPV6_HEADER_LEN {
                 Ipv6Packet::new_unchecked(packet.payload())
             } else {
@@ -660,7 +668,7 @@ impl<'a> Repr<'a> {
                     header: repr,
                     data: payload,
                 })
-            }
+            },
             (Message::PktTooBig, 0) => {
                 let (payload, repr) = create_packet_from_payload(packet)?;
                 Ok(Repr::PktTooBig {
@@ -668,7 +676,7 @@ impl<'a> Repr<'a> {
                     header: repr,
                     data: payload,
                 })
-            }
+            },
             (Message::TimeExceeded, code) => {
                 let (payload, repr) = create_packet_from_payload(packet)?;
                 Ok(Repr::TimeExceeded {
@@ -676,7 +684,7 @@ impl<'a> Repr<'a> {
                     header: repr,
                     data: payload,
                 })
-            }
+            },
             (Message::ParamProblem, code) => {
                 let (payload, repr) = create_packet_from_payload(packet)?;
                 Ok(Repr::ParamProblem {
@@ -685,7 +693,7 @@ impl<'a> Repr<'a> {
                     header: repr,
                     data: payload,
                 })
-            }
+            },
             (Message::EchoRequest, 0) => Ok(Repr::EchoRequest {
                 ident: packet.echo_ident(),
                 seq_no: packet.echo_seq_no(),
@@ -705,7 +713,8 @@ impl<'a> Repr<'a> {
         }
     }
 
-    /// Return the length of a packet that will be emitted from this high-level representation.
+    /// Return the length of a packet that will be emitted from this high-level
+    /// representation.
     pub fn buffer_len(&self) -> usize {
         match self {
             &Repr::DstUnreachable { header, data, .. }
@@ -717,7 +726,7 @@ impl<'a> Repr<'a> {
             ),
             &Repr::EchoRequest { data, .. } | &Repr::EchoReply { data, .. } => {
                 field::ECHO_SEQNO.end + data.len()
-            }
+            },
             #[cfg(any(feature = "medium-ethernet", feature = "medium-ieee802154"))]
             &Repr::Ndisc(ndisc) => ndisc.buffer_len(),
             &Repr::Mld(mld) => mld.buffer_len(),
@@ -726,8 +735,8 @@ impl<'a> Repr<'a> {
         }
     }
 
-    /// Emit a high-level representation into an Internet Control Message Protocol version 6
-    /// packet.
+    /// Emit a high-level representation into an Internet Control Message
+    /// Protocol version 6 packet.
     pub fn emit<T>(
         &self,
         src_addr: &Ipv6Address,
@@ -745,8 +754,9 @@ impl<'a> Repr<'a> {
             let mut ip_packet = Ipv6Packet::new_unchecked(packet.payload_mut());
             header.emit(&mut ip_packet);
             let payload = &mut ip_packet.into_inner()[header.buffer_len()..];
-            // FIXME: this should rather be checked at link level, as we can't know in advance how
-            // much space we have for the packet due to IPv6 options and etc
+            // FIXME: this should rather be checked at link level, as we can't know in
+            // advance how much space we have for the packet due to IPv6 options
+            // and etc
             let payload_len = cmp::min(
                 data.len(),
                 MAX_ERROR_PACKET_LEN - icmp_header_len - IPV6_HEADER_LEN,
@@ -764,7 +774,7 @@ impl<'a> Repr<'a> {
                 packet.set_msg_code(reason.into());
 
                 emit_contained_packet(packet, header, data);
-            }
+            },
 
             Repr::PktTooBig { mtu, header, data } => {
                 packet.set_msg_type(Message::PktTooBig);
@@ -772,7 +782,7 @@ impl<'a> Repr<'a> {
                 packet.set_pkt_too_big_mtu(mtu);
 
                 emit_contained_packet(packet, header, data);
-            }
+            },
 
             Repr::TimeExceeded {
                 reason,
@@ -783,7 +793,7 @@ impl<'a> Repr<'a> {
                 packet.set_msg_code(reason.into());
 
                 emit_contained_packet(packet, header, data);
-            }
+            },
 
             Repr::ParamProblem {
                 reason,
@@ -796,7 +806,7 @@ impl<'a> Repr<'a> {
                 packet.set_param_problem_ptr(pointer);
 
                 emit_contained_packet(packet, header, data);
-            }
+            },
 
             Repr::EchoRequest {
                 ident,
@@ -809,7 +819,7 @@ impl<'a> Repr<'a> {
                 packet.set_echo_seq_no(seq_no);
                 let data_len = cmp::min(packet.payload_mut().len(), data.len());
                 packet.payload_mut()[..data_len].copy_from_slice(&data[..data_len])
-            }
+            },
 
             Repr::EchoReply {
                 ident,
@@ -822,7 +832,7 @@ impl<'a> Repr<'a> {
                 packet.set_echo_seq_no(seq_no);
                 let data_len = cmp::min(packet.payload_mut().len(), data.len());
                 packet.payload_mut()[..data_len].copy_from_slice(&data[..data_len])
-            }
+            },
 
             #[cfg(any(feature = "medium-ethernet", feature = "medium-ieee802154"))]
             Repr::Ndisc(ndisc) => ndisc.emit(packet),
@@ -836,7 +846,8 @@ impl<'a> Repr<'a> {
         if checksum_caps.icmpv6.tx() {
             packet.fill_checksum(src_addr, dst_addr);
         } else {
-            // make sure we get a consistently zeroed checksum, since implementations might rely on it
+            // make sure we get a consistently zeroed checksum, since implementations might
+            // rely on it
             packet.set_checksum(0);
         }
     }

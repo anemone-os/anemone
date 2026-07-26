@@ -22,7 +22,7 @@ fn parse_ipv6(data: &[u8]) -> crate::wire::Result<Packet<'_>> {
                 &Default::default(),
             )?;
             Ok(Packet::new_ipv6(ipv6, IpPayload::Icmpv6(icmp)))
-        }
+        },
         IpProtocol::Ipv6NoNxt => todo!(),
         IpProtocol::Ipv6Opts => todo!(),
         IpProtocol::Unknown(_) => todo!(),
@@ -37,8 +37,8 @@ fn parse_ipv6(data: &[u8]) -> crate::wire::Result<Packet<'_>> {
 #[case::ieee802154(Medium::Ieee802154)]
 #[cfg(feature = "medium-ieee802154")]
 fn any_ip(#[case] medium: Medium) {
-    // An empty echo request with destination address fdbe::3, which is not part of the interface
-    // address list.
+    // An empty echo request with destination address fdbe::3, which is not part of
+    // the interface address list.
     let data = [
         0x60, 0x0, 0x0, 0x0, 0x0, 0x8, 0x3a, 0x40, 0xfd, 0xbe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
         0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, 0xfd, 0xbe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
@@ -65,7 +65,8 @@ fn any_ip(#[case] medium: Medium) {
 
     let (mut iface, mut sockets, _device) = setup(medium);
 
-    // Add a route to the interface, otherwise, we don't know if the packet is routed localy.
+    // Add a route to the interface, otherwise, we don't know if the packet is
+    // routed localy.
     iface.routes_mut().update(|routes| {
         routes
             .push(crate::iface::Route {
@@ -285,8 +286,8 @@ fn hop_by_hop_discard_with_multicast(#[case] medium: Medium) {
     //  - Unknown option (discard (0b11) + ParamProblem)
     // - ICMP echo request
     //
-    // In this case, even if the destination address is a multicast address, an ICMPv6 ParamProblem
-    // should be transmitted.
+    // In this case, even if the destination address is a multicast address, an
+    // ICMPv6 ParamProblem should be transmitted.
     let data = [
         0x60, 0x0, 0x0, 0x0, 0x0, 0x1b, 0x0, 0x40, 0xfd, 0xbe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
         0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, 0xff, 0x02, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
@@ -558,7 +559,8 @@ fn unknown_proto_with_multicast_dst_address(#[case] medium: Medium) {
 #[case::ieee802154(Medium::Ieee802154)]
 #[cfg(feature = "medium-ieee802154")]
 fn unknown_proto(#[case] medium: Medium) {
-    // Since the destination address is multicast, we should answer with an ICMPv6 message.
+    // Since the destination address is multicast, we should answer with an ICMPv6
+    // message.
     let data = [
         0x60, 0x0, 0x0, 0x0, 0x0, 0x0, 0xc, 0x40, 0xfd, 0xbe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
         0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, 0xfd, 0xbe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
@@ -858,7 +860,7 @@ fn test_router_advertisement(#[case] medium: Medium) {
                     Medium::Ethernet => {
                         let eth_frame = EthernetFrame::new_checked(frame).ok()?;
                         Ipv6Packet::new_checked(eth_frame.payload()).ok()?
-                    }
+                    },
                     #[cfg(feature = "medium-ip")]
                     Medium::Ip => Ipv6Packet::new_checked(&frame[..]).ok()?,
                     #[cfg(feature = "medium-ieee802154")]
@@ -1138,8 +1140,7 @@ fn test_solicited_node_addrs(#[case] medium: Medium) {
 #[case(Medium::Ieee802154)]
 #[cfg(all(feature = "socket-udp", feature = "medium-ieee802154"))]
 fn test_icmp_reply_size(#[case] medium: Medium) {
-    use crate::wire::IPV6_MIN_MTU as MIN_MTU;
-    use crate::wire::Icmpv6DstUnreachable;
+    use crate::wire::{IPV6_MIN_MTU as MIN_MTU, Icmpv6DstUnreachable};
     const MAX_PAYLOAD_LEN: usize = 1192;
 
     let (mut iface, mut sockets, _device) = setup(medium);
@@ -1538,7 +1539,7 @@ fn test_join_ipv6_multicast_group(#[case] medium: Medium) {
                     Medium::Ethernet => {
                         let eth_frame = EthernetFrame::new_checked(frame).ok()?;
                         Ipv6Packet::new_checked(eth_frame.payload()).ok()?
-                    }
+                    },
                     #[cfg(feature = "medium-ip")]
                     Medium::Ip => Ipv6Packet::new_checked(&frame[..]).ok()?,
                     #[cfg(feature = "medium-ieee802154")]
@@ -1621,7 +1622,7 @@ fn test_join_ipv6_multicast_group(#[case] medium: Medium) {
             }) => {
                 assert_eq!(nr_mcast_addr_rcrds, 1);
                 data
-            }
+            },
             other => panic!("unexpected icmpv6_repr: {:?}", other),
         };
 
@@ -1665,7 +1666,7 @@ fn test_handle_valid_multicast_query(#[case] medium: Medium) {
                     Medium::Ethernet => {
                         let eth_frame = EthernetFrame::new_checked(frame).ok()?;
                         Ipv6Packet::new_checked(eth_frame.payload()).ok()?
-                    }
+                    },
                     #[cfg(feature = "medium-ip")]
                     Medium::Ip => Ipv6Packet::new_checked(&frame[..]).ok()?,
                     #[cfg(feature = "medium-ieee802154")]
@@ -1798,7 +1799,7 @@ fn test_handle_valid_multicast_query(#[case] medium: Medium) {
             }) => {
                 assert_eq!(nr_mcast_addr_rcrds, results.len() as u16);
                 data
-            }
+            },
             other => panic!("unexpected icmpv6_repr: {:?}", other),
         };
 

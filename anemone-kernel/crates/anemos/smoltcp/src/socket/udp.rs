@@ -2,26 +2,29 @@ use core::cmp::min;
 #[cfg(feature = "async")]
 use core::task::Waker;
 
-use crate::iface::Context;
-use crate::phy::PacketMeta;
-use crate::socket::PollAt;
 #[cfg(feature = "async")]
 use crate::socket::WakerRegistration;
-use crate::storage::Empty;
-use crate::wire::{IpAddress, IpEndpoint, IpListenEndpoint, IpProtocol, IpRepr, UdpRepr};
+use crate::{
+    iface::Context,
+    phy::PacketMeta,
+    socket::PollAt,
+    storage::Empty,
+    wire::{IpAddress, IpEndpoint, IpListenEndpoint, IpProtocol, IpRepr, UdpRepr},
+};
 
 /// Metadata for a sent or received UDP packet.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct UdpMetadata {
-    /// The IP endpoint from which an incoming datagram was received, or to which an outgoing
-    /// datagram will be sent.
+    /// The IP endpoint from which an incoming datagram was received, or to
+    /// which an outgoing datagram will be sent.
     pub endpoint: IpEndpoint,
-    /// The IP address to which an incoming datagram was sent, or from which an outgoing datagram
-    /// will be sent. Incoming datagrams always have this set. On outgoing datagrams, if it is not
-    /// set, and the socket is not bound to a single address anyway, a suitable address will be
-    /// determined using the algorithms of RFC 6724 (candidate source address selection) or some
-    /// heuristic (for IPv4).
+    /// The IP address to which an incoming datagram was sent, or from which an
+    /// outgoing datagram will be sent. Incoming datagrams always have this
+    /// set. On outgoing datagrams, if it is not set, and the socket is not
+    /// bound to a single address anyway, a suitable address will be
+    /// determined using the algorithms of RFC 6724 (candidate source address
+    /// selection) or some heuristic (for IPv4).
     pub local_address: Option<IpAddress>,
     pub meta: PacketMeta,
 }
@@ -121,7 +124,8 @@ pub struct Socket<'a> {
     endpoint: IpListenEndpoint,
     rx_buffer: PacketBuffer<'a>,
     tx_buffer: PacketBuffer<'a>,
-    /// The time-to-live (IPv4) or hop limit (IPv6) value used in outgoing packets.
+    /// The time-to-live (IPv4) or hop limit (IPv6) value used in outgoing
+    /// packets.
     hop_limit: Option<u8>,
     #[cfg(feature = "async")]
     rx_waker: WakerRegistration,
@@ -151,11 +155,12 @@ impl<'a> Socket<'a> {
     ///
     /// Notes:
     ///
-    /// - Only one waker can be registered at a time. If another waker was previously registered,
-    ///   it is overwritten and will no longer be woken.
-    /// - The Waker is woken only once. Once woken, you must register it again to receive more wakes.
-    /// - "Spurious wakes" are allowed: a wake doesn't guarantee the result of `recv` has
-    ///   necessarily changed.
+    /// - Only one waker can be registered at a time. If another waker was
+    ///   previously registered, it is overwritten and will no longer be woken.
+    /// - The Waker is woken only once. Once woken, you must register it again
+    ///   to receive more wakes.
+    /// - "Spurious wakes" are allowed: a wake doesn't guarantee the result of
+    ///   `recv` has necessarily changed.
     #[cfg(feature = "async")]
     pub fn register_recv_waker(&mut self, waker: &Waker) {
         self.rx_waker.register(waker)
@@ -169,11 +174,12 @@ impl<'a> Socket<'a> {
     ///
     /// Notes:
     ///
-    /// - Only one waker can be registered at a time. If another waker was previously registered,
-    ///   it is overwritten and will no longer be woken.
-    /// - The Waker is woken only once. Once woken, you must register it again to receive more wakes.
-    /// - "Spurious wakes" are allowed: a wake doesn't guarantee the result of `send` has
-    ///   necessarily changed.
+    /// - Only one waker can be registered at a time. If another waker was
+    ///   previously registered, it is overwritten and will no longer be woken.
+    /// - The Waker is woken only once. Once woken, you must register it again
+    ///   to receive more wakes.
+    /// - "Spurious wakes" are allowed: a wake doesn't guarantee the result of
+    ///   `send` has necessarily changed.
     #[cfg(feature = "async")]
     pub fn register_send_waker(&mut self, waker: &Waker) {
         self.tx_waker.register(waker)
@@ -185,21 +191,24 @@ impl<'a> Socket<'a> {
         self.endpoint
     }
 
-    /// Return the time-to-live (IPv4) or hop limit (IPv6) value used in outgoing packets.
+    /// Return the time-to-live (IPv4) or hop limit (IPv6) value used in
+    /// outgoing packets.
     ///
     /// See also the [set_hop_limit](#method.set_hop_limit) method
     pub fn hop_limit(&self) -> Option<u8> {
         self.hop_limit
     }
 
-    /// Set the time-to-live (IPv4) or hop limit (IPv6) value used in outgoing packets.
+    /// Set the time-to-live (IPv4) or hop limit (IPv6) value used in outgoing
+    /// packets.
     ///
-    /// A socket without an explicitly set hop limit value uses the default [IANA recommended]
-    /// value (64).
+    /// A socket without an explicitly set hop limit value uses the default
+    /// [IANA recommended] value (64).
     ///
     /// # Panics
     ///
-    /// This function panics if a hop limit value of 0 is given. See [RFC 1122 § 3.2.1.7].
+    /// This function panics if a hop limit value of 0 is given. See [RFC 1122 §
+    /// 3.2.1.7].
     ///
     /// [IANA recommended]: https://www.iana.org/assignments/ip-parameters/ip-parameters.xhtml
     /// [RFC 1122 § 3.2.1.7]: https://tools.ietf.org/html/rfc1122#section-3.2.1.7
@@ -296,13 +305,13 @@ impl<'a> Socket<'a> {
         self.tx_buffer.payload_capacity()
     }
 
-    /// Enqueue a packet to be sent to a given remote endpoint, and return a pointer
-    /// to its payload.
+    /// Enqueue a packet to be sent to a given remote endpoint, and return a
+    /// pointer to its payload.
     ///
-    /// This function returns `Err(Error::Exhausted)` if the transmit buffer is full,
-    /// `Err(Error::Unaddressable)` if local or remote port, or remote address are unspecified,
-    /// and `Err(Error::Truncated)` if there is not enough transmit buffer capacity
-    /// to ever send this packet.
+    /// This function returns `Err(Error::Exhausted)` if the transmit buffer is
+    /// full, `Err(Error::Unaddressable)` if local or remote port, or remote
+    /// address are unspecified, and `Err(Error::Truncated)` if there is not
+    /// enough transmit buffer capacity to ever send this packet.
     pub fn send(
         &mut self,
         size: usize,
@@ -333,9 +342,9 @@ impl<'a> Socket<'a> {
         Ok(payload_buf)
     }
 
-    /// Enqueue a packet to be send to a given remote endpoint and pass the buffer
-    /// to the provided closure. The closure then returns the size of the data written
-    /// into the buffer.
+    /// Enqueue a packet to be send to a given remote endpoint and pass the
+    /// buffer to the provided closure. The closure then returns the size of
+    /// the data written into the buffer.
     ///
     /// Also see [send](#method.send).
     pub fn send_with<F>(
@@ -372,7 +381,8 @@ impl<'a> Socket<'a> {
         Ok(size)
     }
 
-    /// Enqueue a packet to be sent to a given remote endpoint, and fill it from a slice.
+    /// Enqueue a packet to be sent to a given remote endpoint, and fill it from
+    /// a slice.
     ///
     /// See also [send](#method.send).
     pub fn send_slice(
@@ -384,10 +394,11 @@ impl<'a> Socket<'a> {
         Ok(())
     }
 
-    /// Dequeue a packet received from a remote endpoint, and return the endpoint as well
-    /// as a pointer to the payload.
+    /// Dequeue a packet received from a remote endpoint, and return the
+    /// endpoint as well as a pointer to the payload.
     ///
-    /// This function returns `Err(Error::Exhausted)` if the receive buffer is empty.
+    /// This function returns `Err(Error::Exhausted)` if the receive buffer is
+    /// empty.
     pub fn recv(&mut self) -> Result<(&[u8], UdpMetadata), RecvError> {
         let (remote_endpoint, payload_buf) =
             self.rx_buffer.dequeue().map_err(|_| RecvError::Exhausted)?;
@@ -401,11 +412,13 @@ impl<'a> Socket<'a> {
         Ok((payload_buf, remote_endpoint))
     }
 
-    /// Dequeue a packet received from a remote endpoint, copy the payload into the given slice,
-    /// and return the amount of octets copied as well as the endpoint.
+    /// Dequeue a packet received from a remote endpoint, copy the payload into
+    /// the given slice, and return the amount of octets copied as well as
+    /// the endpoint.
     ///
-    /// **Note**: when the size of the provided buffer is smaller than the size of the payload,
-    /// the packet is dropped and a `RecvError::Truncated` error is returned.
+    /// **Note**: when the size of the provided buffer is smaller than the size
+    /// of the payload, the packet is dropped and a `RecvError::Truncated`
+    /// error is returned.
     ///
     /// See also [recv](#method.recv).
     pub fn recv_slice(&mut self, data: &mut [u8]) -> Result<(usize, UdpMetadata), RecvError> {
@@ -420,9 +433,10 @@ impl<'a> Socket<'a> {
         Ok((length, endpoint))
     }
 
-    /// Peek at a packet received from a remote endpoint, and return the endpoint as well
-    /// as a pointer to the payload without removing the packet from the receive buffer.
-    /// This function otherwise behaves identically to [recv](#method.recv).
+    /// Peek at a packet received from a remote endpoint, and return the
+    /// endpoint as well as a pointer to the payload without removing the
+    /// packet from the receive buffer. This function otherwise behaves
+    /// identically to [recv](#method.recv).
     ///
     /// It returns `Err(Error::Exhausted)` if the receive buffer is empty.
     pub fn peek(&mut self) -> Result<(&[u8], &UdpMetadata), RecvError> {
@@ -440,13 +454,15 @@ impl<'a> Socket<'a> {
         )
     }
 
-    /// Peek at a packet received from a remote endpoint, copy the payload into the given slice,
-    /// and return the amount of octets copied as well as the endpoint without removing the
-    /// packet from the receive buffer.
-    /// This function otherwise behaves identically to [recv_slice](#method.recv_slice).
+    /// Peek at a packet received from a remote endpoint, copy the payload into
+    /// the given slice, and return the amount of octets copied as well as
+    /// the endpoint without removing the packet from the receive buffer.
+    /// This function otherwise behaves identically to
+    /// [recv_slice](#method.recv_slice).
     ///
-    /// **Note**: when the size of the provided buffer is smaller than the size of the payload,
-    /// no data is copied into the provided buffer and a `RecvError::Truncated` error is returned.
+    /// **Note**: when the size of the provided buffer is smaller than the size
+    /// of the payload, no data is copied into the provided buffer and a
+    /// `RecvError::Truncated` error is returned.
     ///
     /// See also [peek](#method.peek).
     pub fn peek_slice(&mut self, data: &mut [u8]) -> Result<(usize, &UdpMetadata), RecvError> {
@@ -463,16 +479,19 @@ impl<'a> Socket<'a> {
 
     /// Return the amount of octets queued in the transmit buffer.
     ///
-    /// Note that the Berkeley sockets interface does not have an equivalent of this API.
+    /// Note that the Berkeley sockets interface does not have an equivalent of
+    /// this API.
     pub fn send_queue(&self) -> usize {
         self.tx_buffer.payload_bytes_count()
     }
 
-    /// Return the amount of octets queued in the receive buffer. This value can be larger than
-    /// the slice read by the next `recv` or `peek` call because it includes all queued octets,
-    /// and not only the octets that may be returned as a contiguous slice.
+    /// Return the amount of octets queued in the receive buffer. This value can
+    /// be larger than the slice read by the next `recv` or `peek` call
+    /// because it includes all queued octets, and not only the octets that
+    /// may be returned as a contiguous slice.
     ///
-    /// Note that the Berkeley sockets interface does not have an equivalent of this API.
+    /// Note that the Berkeley sockets interface does not have an equivalent of
+    /// this API.
     pub fn recv_queue(&self) -> usize {
         self.rx_buffer.payload_bytes_count()
     }
@@ -557,7 +576,7 @@ impl<'a> Socket<'a> {
                                 packet_meta.endpoint
                             );
                             return Ok(());
-                        }
+                        },
                     },
                 }
             };
@@ -590,7 +609,7 @@ impl<'a> Socket<'a> {
                 #[cfg(feature = "async")]
                 self.tx_waker.wake();
                 Ok(())
-            }
+            },
         }
     }
 
@@ -608,8 +627,7 @@ mod test {
     use super::*;
     use crate::wire::{IpRepr, UdpRepr};
 
-    use crate::phy::Medium;
-    use crate::tests::setup;
+    use crate::{phy::Medium, tests::setup};
     use rstest::*;
 
     fn buffer(packets: usize) -> PacketBuffer<'static> {

@@ -4,9 +4,11 @@ use heapless::{LinearMap, Vec};
 use super::{Interface, InterfaceInner};
 #[cfg(any(feature = "proto-ipv4", feature = "proto-ipv6"))]
 use super::{IpPayload, Packet, check};
-use crate::config::{IFACE_MAX_ADDR_COUNT, IFACE_MAX_MULTICAST_GROUP_COUNT};
-use crate::phy::{Device, PacketMeta};
-use crate::wire::*;
+use crate::{
+    config::{IFACE_MAX_ADDR_COUNT, IFACE_MAX_MULTICAST_GROUP_COUNT},
+    phy::{Device, PacketMeta},
+    wire::*,
+};
 
 /// Error type for `join_multicast_group`, `leave_multicast_group`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,7 +153,8 @@ impl Interface {
         Ok(())
     }
 
-    /// Check whether the interface listens to given destination multicast IP address.
+    /// Check whether the interface listens to given destination multicast IP
+    /// address.
     pub fn has_multicast_group<T: Into<IpAddress>>(&self, addr: T) -> bool {
         self.inner.has_multicast_group(addr)
     }
@@ -182,8 +185,8 @@ impl Interface {
     /// Do multicast egress.
     ///
     /// - Send join/leave packets according to the multicast group state.
-    /// - Depending on `igmp_report_state` and the therein contained
-    ///   timeouts, send IGMP membership reports.
+    /// - Depending on `igmp_report_state` and the therein contained timeouts,
+    ///   send IGMP membership reports.
     pub(crate) fn multicast_egress(&mut self, device: &mut (impl Device + ?Sized)) {
         // Process multicast joins.
         while let Some((&addr, _)) = self
@@ -201,12 +204,13 @@ impl Interface {
                             break;
                         };
 
-                        // NOTE(unwrap): packet destination is multicast, which is always routable and doesn't require neighbor discovery.
+                        // NOTE(unwrap): packet destination is multicast, which is always routable
+                        // and doesn't require neighbor discovery.
                         self.inner
                             .dispatch_ip(tx_token, PacketMeta::default(), pkt, &mut self.fragmenter)
                             .unwrap();
                     }
-                }
+                },
                 #[cfg(feature = "proto-ipv6")]
                 IpAddress::Ipv6(addr) => {
                     if let Some(pkt) = self.inner.mldv2_report_packet(&[MldAddressRecordRepr::new(
@@ -217,15 +221,17 @@ impl Interface {
                             break;
                         };
 
-                        // NOTE(unwrap): packet destination is multicast, which is always routable and doesn't require neighbor discovery.
+                        // NOTE(unwrap): packet destination is multicast, which is always routable
+                        // and doesn't require neighbor discovery.
                         self.inner
                             .dispatch_ip(tx_token, PacketMeta::default(), pkt, &mut self.fragmenter)
                             .unwrap();
                     }
-                }
+                },
             }
 
-            // NOTE(unwrap): this is always replacing an existing entry, so it can't fail due to the map being full.
+            // NOTE(unwrap): this is always replacing an existing entry, so it can't fail
+            // due to the map being full.
             self.inner
                 .multicast
                 .groups
@@ -249,12 +255,13 @@ impl Interface {
                             break;
                         };
 
-                        // NOTE(unwrap): packet destination is multicast, which is always routable and doesn't require neighbor discovery.
+                        // NOTE(unwrap): packet destination is multicast, which is always routable
+                        // and doesn't require neighbor discovery.
                         self.inner
                             .dispatch_ip(tx_token, PacketMeta::default(), pkt, &mut self.fragmenter)
                             .unwrap();
                     }
-                }
+                },
                 #[cfg(feature = "proto-ipv6")]
                 IpAddress::Ipv6(addr) => {
                     if let Some(pkt) = self.inner.mldv2_report_packet(&[MldAddressRecordRepr::new(
@@ -265,12 +272,13 @@ impl Interface {
                             break;
                         };
 
-                        // NOTE(unwrap): packet destination is multicast, which is always routable and doesn't require neighbor discovery.
+                        // NOTE(unwrap): packet destination is multicast, which is always routable
+                        // and doesn't require neighbor discovery.
                         self.inner
                             .dispatch_ip(tx_token, PacketMeta::default(), pkt, &mut self.fragmenter)
                             .unwrap();
                     }
-                }
+                },
             }
 
             self.inner.multicast.groups.remove(&addr);
@@ -286,14 +294,15 @@ impl Interface {
                 if let Some(pkt) = self.inner.igmp_report_packet(version, group) {
                     // Send initial membership report
                     if let Some(tx_token) = device.transmit(self.inner.now) {
-                        // NOTE(unwrap): packet destination is multicast, which is always routable and doesn't require neighbor discovery.
+                        // NOTE(unwrap): packet destination is multicast, which is always routable
+                        // and doesn't require neighbor discovery.
                         self.inner
                             .dispatch_ip(tx_token, PacketMeta::default(), pkt, &mut self.fragmenter)
                             .unwrap();
                         self.inner.multicast.igmp_report_state = IgmpReportState::Inactive;
                     }
                 }
-            }
+            },
             IgmpReportState::ToGeneralQuery {
                 version,
                 timeout,
@@ -317,7 +326,8 @@ impl Interface {
                         if let Some(pkt) = self.inner.igmp_report_packet(version, addr) {
                             // Send initial membership report
                             if let Some(tx_token) = device.transmit(self.inner.now) {
-                                // NOTE(unwrap): packet destination is multicast, which is always routable and doesn't require neighbor discovery.
+                                // NOTE(unwrap): packet destination is multicast, which is always
+                                // routable and doesn't require neighbor discovery.
                                 self.inner
                                     .dispatch_ip(
                                         tx_token,
@@ -337,13 +347,13 @@ impl Interface {
                                     };
                             }
                         }
-                    }
+                    },
                     None => {
                         self.inner.multicast.igmp_report_state = IgmpReportState::Inactive;
-                    }
+                    },
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
         #[cfg(feature = "proto-ipv6")]
         match self.inner.multicast.mld_report_state {
@@ -370,20 +380,21 @@ impl Interface {
                         .unwrap();
                 };
                 self.inner.multicast.mld_report_state = MldReportState::Inactive;
-            }
+            },
             MldReportState::ToSpecificQuery { group, timeout } if self.inner.now >= timeout => {
                 let record = MldAddressRecordRepr::new(MldRecordType::ModeIsExclude, group);
                 if let Some(pkt) = self.inner.mldv2_report_packet(&[record])
                     && let Some(tx_token) = device.transmit(self.inner.now)
                 {
-                    // NOTE(unwrap): packet destination is multicast, which is always routable and doesn't require neighbor discovery.
+                    // NOTE(unwrap): packet destination is multicast, which is always routable and
+                    // doesn't require neighbor discovery.
                     self.inner
                         .dispatch_ip(tx_token, PacketMeta::default(), pkt, &mut self.fragmenter)
                         .unwrap();
                 }
                 self.inner.multicast.mld_report_state = MldReportState::Inactive;
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 }
@@ -391,9 +402,10 @@ impl Interface {
 impl InterfaceInner {
     /// Host duties of the **IGMPv2** protocol.
     ///
-    /// Sets up `igmp_report_state` for responding to IGMP general/specific membership queries.
-    /// Membership must not be reported immediately in order to avoid flooding the network
-    /// after a query is broadcasted by a router; this is not currently done.
+    /// Sets up `igmp_report_state` for responding to IGMP general/specific
+    /// membership queries. Membership must not be reported immediately in
+    /// order to avoid flooding the network after a query is broadcasted by
+    /// a router; this is not currently done.
     #[cfg(feature = "proto-ipv4")]
     pub(super) fn process_igmp<'frame>(
         &mut self,
@@ -431,7 +443,7 @@ impl InterfaceInner {
                                 // but at least spread reports evenly across max_resp_time.
                                 let intervals = ipv4_multicast_group_count as u32 + 1;
                                 max_resp_time / intervals
-                            }
+                            },
                         };
                         self.multicast.igmp_report_state = IgmpReportState::ToGeneralQuery {
                             version,
@@ -452,7 +464,7 @@ impl InterfaceInner {
                         };
                     }
                 }
-            }
+            },
             // Ignore membership reports
             IgmpRepr::MembershipReport { .. } => (),
             // Ignore hosts leaving groups
@@ -507,9 +519,10 @@ impl InterfaceInner {
 
     /// Host duties of the **MLDv2** protocol.
     ///
-    /// Sets up `mld_report_state` for responding to MLD general/specific membership queries.
-    /// Membership must not be reported immediately in order to avoid flooding the network
-    /// after a query is broadcasted by a router; Currently the delay is fixed and not randomized.
+    /// Sets up `mld_report_state` for responding to MLD general/specific
+    /// membership queries. Membership must not be reported immediately in
+    /// order to avoid flooding the network after a query is broadcasted by
+    /// a router; Currently the delay is fixed and not randomized.
     #[cfg(feature = "proto-ipv6")]
     pub(super) fn process_mldv2<'frame>(
         &mut self,
@@ -553,7 +566,7 @@ impl InterfaceInner {
                     };
                 }
                 None
-            }
+            },
             MldRepr::Report { .. } => None,
             MldRepr::ReportRecordReprs { .. } => None,
         }

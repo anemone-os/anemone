@@ -1,5 +1,4 @@
-use core::convert::From;
-use core::fmt;
+use core::{convert::From, fmt};
 
 use super::{Error, Result};
 use crate::phy::ChecksumCapabilities;
@@ -168,7 +167,8 @@ impl Address {
     }
 
     /// If `self` is a CIDR-compatible subnet mask, return `Some(prefix_len)`,
-    /// where `prefix_len` is the number of leading zeroes. Return `None` otherwise.
+    /// where `prefix_len` is the number of leading zeroes. Return `None`
+    /// otherwise.
     pub fn prefix_len(&self) -> Option<u8> {
         match self {
             #[cfg(feature = "proto-ipv4")]
@@ -251,7 +251,8 @@ impl Cidr {
     /// Create a CIDR block from the given address and prefix length.
     ///
     /// # Panics
-    /// This function panics if the given prefix length is invalid for the given address.
+    /// This function panics if the given prefix length is invalid for the given
+    /// address.
     pub const fn new(addr: Address, prefix_len: u8) -> Cidr {
         match addr {
             #[cfg(feature = "proto-ipv4")]
@@ -424,10 +425,11 @@ impl<T: Into<Address>> From<(T, u16)> for Endpoint {
 
 /// An internet endpoint address for listening.
 ///
-/// In contrast with [`Endpoint`], `ListenEndpoint` allows not specifying the address,
-/// in order to listen on a given port at all our addresses.
+/// In contrast with [`Endpoint`], `ListenEndpoint` allows not specifying the
+/// address, in order to listen on a given port at all our addresses.
 ///
-/// An endpoint can be constructed from a port, in which case the address is unspecified.
+/// An endpoint can be constructed from a port, in which case the address is
+/// unspecified.
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default)]
 pub struct ListenEndpoint {
     pub addr: Option<Address>,
@@ -514,8 +516,8 @@ impl<T: Into<Address>> From<(T, u16)> for ListenEndpoint {
 
 /// An IP packet representation.
 ///
-/// This enum abstracts the various versions of IP packets. It either contains an IPv4
-/// or IPv6 concrete high-level representation.
+/// This enum abstracts the various versions of IP packets. It either contains
+/// an IPv4 or IPv6 concrete high-level representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Repr {
@@ -553,8 +555,8 @@ mod field {
 }
 
 impl<T: AsRef<[u8]>> Packet<T> {
-    /// Create a raw octet buffer with an IP packet structure. This packet structure can be either
-    /// IPv4 or Ipv6
+    /// Create a raw octet buffer with an IP packet structure. This packet
+    /// structure can be either IPv4 or Ipv6
     pub const fn new_unchecked(buffer: T) -> Packet<T> {
         Packet { buffer }
     }
@@ -569,11 +571,11 @@ impl<T: AsRef<[u8]>> Packet<T> {
         Ok(packet)
     }
 
-    /// Ensure that reading the version field of the buffer will not panic if called.
-    /// Returns `Err(Error)` if the buffer is too short.
+    /// Ensure that reading the version field of the buffer will not panic if
+    /// called. Returns `Err(Error)` if the buffer is too short.
     pub fn check_len(&self) -> Result<()> {
-        // Both IPv4 and IPv6 headers contain Internet Protocol version in the upper nibble of the
-        // first packet byte
+        // Both IPv4 and IPv6 headers contain Internet Protocol version in the upper
+        // nibble of the first packet byte
         if self.buffer.as_ref().len() < field::VER.end {
             Err(Error)
         } else {
@@ -594,7 +596,8 @@ impl<T: AsRef<[u8]>> Packet<T> {
 }
 
 impl Repr {
-    /// Create a new IpRepr, choosing the right IP version for the src/dst addrs.
+    /// Create a new IpRepr, choosing the right IP version for the src/dst
+    /// addrs.
     ///
     /// # Panics
     ///
@@ -628,12 +631,13 @@ impl Repr {
         }
     }
 
-    /// Parse an Internet Protocol packet and return an [IpRepr] containing either an Internet
-    /// Protocol version 4 or Internet Protocol version 6 packet. Delegates the parsing to the
-    /// specific Internet Protocol parsing function. Includes [ChecksumCapabilities] to handle
-    /// Internet Protocol version 4 parsing.
-    /// Returns `Err(Error)` if the packet does not include a valid IPv4 or IPv6 packet, or if the
-    /// specific Internet Protocol version feature is not enabled for the supplied packet
+    /// Parse an Internet Protocol packet and return an [IpRepr] containing
+    /// either an Internet Protocol version 4 or Internet Protocol version 6
+    /// packet. Delegates the parsing to the specific Internet Protocol
+    /// parsing function. Includes [ChecksumCapabilities] to handle Internet
+    /// Protocol version 4 parsing. Returns `Err(Error)` if the packet does
+    /// not include a valid IPv4 or IPv6 packet, or if the specific Internet
+    /// Protocol version feature is not enabled for the supplied packet
     pub fn parse<T: AsRef<[u8]> + ?Sized>(
         packet: &Packet<&T>,
         checksum_caps: &ChecksumCapabilities,
@@ -645,13 +649,13 @@ impl Repr {
                 let packet = Ipv4Packet::new_checked(packet.buffer)?;
                 let ipv4_repr = Ipv4Repr::parse(&packet, checksum_caps)?;
                 Ok(Repr::Ipv4(ipv4_repr))
-            }
+            },
             #[cfg(feature = "proto-ipv6")]
             6 => {
                 let packet = Ipv6Packet::new_checked(packet.buffer)?;
                 let ipv6_repr = Ipv6Repr::parse(&packet)?;
                 Ok(Repr::Ipv6(ipv6_repr))
-            }
+            },
             _ => Err(Error),
         }
     }
@@ -726,7 +730,8 @@ impl Repr {
         }
     }
 
-    /// Return the length of a header that will be emitted from this high-level representation.
+    /// Return the length of a header that will be emitted from this high-level
+    /// representation.
     pub const fn header_len(&self) -> usize {
         match *self {
             #[cfg(feature = "proto-ipv4")]
@@ -856,11 +861,11 @@ pub mod checksum {
             #[cfg(feature = "proto-ipv4")]
             (Address::Ipv4(src_addr), Address::Ipv4(dst_addr)) => {
                 pseudo_header_v4(src_addr, dst_addr, next_header, length)
-            }
+            },
             #[cfg(feature = "proto-ipv6")]
             (Address::Ipv6(src_addr), Address::Ipv6(dst_addr)) => {
                 pseudo_header_v6(src_addr, dst_addr, next_header, length)
-            }
+            },
             #[allow(unreachable_patterns)]
             _ => unreachable!(),
         }
@@ -896,8 +901,7 @@ pub fn pretty_print_ip_payload<T: Into<Repr>>(
     use super::pretty_print::PrettyPrint;
     #[cfg(feature = "proto-ipv4")]
     use crate::wire::Icmpv4Packet;
-    use crate::wire::ip::checksum::format_checksum;
-    use crate::wire::{TcpPacket, TcpRepr, UdpPacket, UdpRepr};
+    use crate::wire::{TcpPacket, TcpRepr, UdpPacket, UdpRepr, ip::checksum::format_checksum};
 
     let checksum_caps = ChecksumCapabilities::ignored();
     let repr = ip_repr.into();
@@ -906,7 +910,7 @@ pub fn pretty_print_ip_payload<T: Into<Repr>>(
         Protocol::Icmp => {
             indent.increase(f)?;
             Icmpv4Packet::<&[u8]>::pretty_print(&payload, f, indent)
-        }
+        },
         Protocol::Udp => {
             indent.increase(f)?;
             match UdpPacket::<&[u8]>::new_checked(payload) {
@@ -933,11 +937,11 @@ pub fn pretty_print_ip_payload<T: Into<Repr>>(
                                 .verify_partial_checksum(&repr.src_addr(), &repr.dst_addr());
 
                             format_checksum(f, valid, partially_valid)
-                        }
+                        },
                     }
-                }
+                },
             }
-        }
+        },
         Protocol::Tcp => {
             indent.increase(f)?;
             match TcpPacket::<&[u8]>::new_checked(payload) {
@@ -958,11 +962,11 @@ pub fn pretty_print_ip_payload<T: Into<Repr>>(
                                 .verify_partial_checksum(&repr.src_addr(), &repr.dst_addr());
 
                             format_checksum(f, valid, partially_valid)
-                        }
+                        },
                     }
-                }
+                },
             }
-        }
+        },
         _ => Ok(()),
     }
 }

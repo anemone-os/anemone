@@ -46,17 +46,19 @@ pub(super) enum AnyController {
 
 impl AnyController {
     /// Create a new congestion controller.
-    /// `AnyController::new()` selects the best congestion controller based on the features.
+    /// `AnyController::new()` selects the best congestion controller based on
+    /// the features.
     ///
     /// - If `socket-tcp-cubic` feature is enabled, it will use `Cubic`.
     /// - If `socket-tcp-reno` feature is enabled, it will use `Reno`.
-    /// - If both `socket-tcp-cubic` and `socket-tcp-reno` features are enabled, it will use `Cubic`.
+    /// - If both `socket-tcp-cubic` and `socket-tcp-reno` features are enabled,
+    ///   it will use `Cubic`.
     ///    - `Cubic` is more efficient regarding throughput.
     ///    - `Reno` is more conservative and is suitable for low-power devices.
     /// - If no congestion controller is available, it will use `NoControl`.
     ///
-    /// Users can also select a congestion controller manually by [`super::Socket::set_congestion_control()`]
-    /// method at run-time.
+    /// Users can also select a congestion controller manually by
+    /// [`super::Socket::set_congestion_control()`] method at run-time.
     #[allow(unreachable_code)]
     #[inline]
     pub fn new() -> Self {

@@ -1,17 +1,14 @@
-use std::cell::RefCell;
-use std::collections::BinaryHeap;
-use std::fmt::Write as _;
-use std::io::Write as _;
-use std::sync::Mutex;
+use std::{cell::RefCell, collections::BinaryHeap, fmt::Write as _, io::Write as _, sync::Mutex};
 
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use smoltcp::iface::{Config, Interface, SocketSet};
-use smoltcp::phy::Tracer;
-use smoltcp::phy::{self, ChecksumCapabilities, Device, DeviceCapabilities, Medium};
-use smoltcp::socket::tcp;
-use smoltcp::time::{Duration, Instant};
-use smoltcp::wire::{EthernetAddress, HardwareAddress, IpAddress, IpCidr};
+use smoltcp::{
+    iface::{Config, Interface, SocketSet},
+    phy::{self, ChecksumCapabilities, Device, DeviceCapabilities, Medium, Tracer},
+    socket::tcp,
+    time::{Duration, Instant},
+    wire::{EthernetAddress, HardwareAddress, IpAddress, IpCidr},
+};
 
 const MAC_A: HardwareAddress = HardwareAddress::Ethernet(EthernetAddress([2, 0, 0, 0, 0, 1]));
 const MAC_B: HardwareAddress = HardwareAddress::Ethernet(EthernetAddress([2, 0, 0, 0, 0, 2]));

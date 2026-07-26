@@ -1,8 +1,8 @@
 //! 6lowpan benchmark example
 //!
-//! This example runs a simple TCP throughput benchmark using the 6lowpan implementation in smoltcp
-//! It is designed to run using the Linux ieee802154/6lowpan support,
-//! using mac802154_hwsim.
+//! This example runs a simple TCP throughput benchmark using the 6lowpan
+//! implementation in smoltcp It is designed to run using the Linux
+//! ieee802154/6lowpan support, using mac802154_hwsim.
 //!
 //! mac802154_hwsim allows you to create multiple "virtual" radios and specify
 //! which is in range with which. This is very useful for testing without
@@ -34,31 +34,33 @@
 //! # Running
 //!
 //! Compile with `cargo build --release --example sixlowpan_benchmark`
-//! Run it with `sudo ./target/release/examples/sixlowpan_benchmark [reader|writer]`.
+//! Run it with `sudo ./target/release/examples/sixlowpan_benchmark
+//! [reader|writer]`.
 //!
 //! # Teardown
 //!
 //!     rmmod mac802154_hwsim
-//!
 
 mod utils;
 
-use std::os::unix::io::AsRawFd;
-use std::str;
+use std::{os::unix::io::AsRawFd, str};
 
-use smoltcp::iface::{Config, Interface, SocketSet};
-use smoltcp::phy::{Device, Medium, RawSocket, wait as phy_wait};
-use smoltcp::socket::tcp;
-use smoltcp::wire::{EthernetAddress, Ieee802154Address, Ieee802154Pan, IpAddress, IpCidr};
+use smoltcp::{
+    iface::{Config, Interface, SocketSet},
+    phy::{Device, Medium, RawSocket, wait as phy_wait},
+    socket::tcp,
+    wire::{EthernetAddress, Ieee802154Address, Ieee802154Pan, IpAddress, IpCidr},
+};
 
 //For benchmark
 use smoltcp::time::{Duration, Instant};
-use std::cmp;
-use std::io::{Read, Write};
-use std::net::SocketAddrV6;
-use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
+use std::{
+    cmp,
+    io::{Read, Write},
+    net::{SocketAddrV6, TcpStream},
+    sync::atomic::{AtomicBool, Ordering},
+    thread,
+};
 
 use std::fs;
 
@@ -108,7 +110,7 @@ fn client(kind: Client) {
             Ok(result) => {
                 // print!("(P:{})", result);
                 processed += result
-            }
+            },
             Err(err) => panic!("cannot process: {err}"),
         }
     }
@@ -138,7 +140,7 @@ fn main() {
 
     let fd = device.as_raw_fd();
     let mut device =
-        utils::parse_middleware_options(&mut matches, device, /*loopback=*/ false);
+        utils::parse_middleware_options(&mut matches, device, /* loopback= */ false);
 
     let mode = match matches.free[0].as_ref() {
         "reader" => Client::Reader,
@@ -150,7 +152,7 @@ fn main() {
     let mut config = match device.capabilities().medium {
         Medium::Ethernet => {
             Config::new(EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]).into())
-        }
+        },
         Medium::Ip => Config::new(smoltcp::wire::HardwareAddress::Ip),
         Medium::Ieee802154 => Config::new(
             Ieee802154Address::Extended([0x1a, 0x0b, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42]).into(),
@@ -225,11 +227,11 @@ fn main() {
         match iface.poll_at(timestamp, &sockets) {
             Some(poll_at) if timestamp < poll_at => {
                 phy_wait(fd, Some(poll_at - timestamp)).expect("wait error");
-            }
+            },
             Some(_) => (),
             None => {
                 phy_wait(fd, default_timeout).expect("wait error");
-            }
+            },
         }
     }
 }

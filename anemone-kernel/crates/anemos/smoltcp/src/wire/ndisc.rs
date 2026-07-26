@@ -2,12 +2,14 @@ use bitflags::bitflags;
 use byteorder::{ByteOrder, NetworkEndian};
 
 use super::{Error, Result};
-use crate::time::Duration;
-use crate::wire::Ipv6Address;
-use crate::wire::RawHardwareAddress;
-use crate::wire::icmpv6::{Message, Packet, field};
-use crate::wire::{NdiscOption, NdiscOptionRepr};
-use crate::wire::{NdiscPrefixInformation, NdiscRedirectedHeader};
+use crate::{
+    time::Duration,
+    wire::{
+        Ipv6Address, NdiscOption, NdiscOptionRepr, NdiscPrefixInformation, NdiscRedirectedHeader,
+        RawHardwareAddress,
+        icmpv6::{Message, Packet, field},
+    },
+};
 
 bitflags! {
     #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -67,8 +69,8 @@ impl<T: AsRef<[u8]>> Packet<T> {
     }
 }
 
-/// Common getters for the [Neighbor Solicitation], [Neighbor Advertisement], and
-/// [Redirect] message types.
+/// Common getters for the [Neighbor Solicitation], [Neighbor Advertisement],
+/// and [Redirect] message types.
 ///
 /// [Neighbor Solicitation]: https://tools.ietf.org/html/rfc4861#section-4.3
 /// [Neighbor Advertisement]: https://tools.ietf.org/html/rfc4861#section-4.4
@@ -148,8 +150,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     }
 }
 
-/// Common setters for the [Neighbor Solicitation], [Neighbor Advertisement], and
-/// [Redirect] message types.
+/// Common setters for the [Neighbor Solicitation], [Neighbor Advertisement],
+/// and [Redirect] message types.
 ///
 /// [Neighbor Solicitation]: https://tools.ietf.org/html/rfc4861#section-4.3
 /// [Neighbor Advertisement]: https://tools.ietf.org/html/rfc4861#section-4.4
@@ -247,7 +249,7 @@ impl<'a> Repr<'a> {
                     NdiscOptionRepr::PrefixInformation(prefix) => prefix_info = Some(prefix),
                     NdiscOptionRepr::RedirectedHeader(redirect) => redirected_hdr = Some(redirect),
                     NdiscOptionRepr::Mtu(m) => mtu = Some(m),
-                    _ => {}
+                    _ => {},
                 }
             }
 
@@ -296,7 +298,7 @@ impl<'a> Repr<'a> {
             &Repr::RouterSolicit { lladdr } => match lladdr {
                 Some(addr) => {
                     field::UNUSED.end + { NdiscOptionRepr::SourceLinkLayerAddr(addr).buffer_len() }
-                }
+                },
                 None => field::UNUSED.end,
             },
             &Repr::RouterAdvert {
@@ -316,14 +318,14 @@ impl<'a> Repr<'a> {
                     offset += NdiscOptionRepr::PrefixInformation(prefix_info).buffer_len();
                 }
                 field::RETRANS_TM.end + offset
-            }
+            },
             &Repr::NeighborSolicit { lladdr, .. } | &Repr::NeighborAdvert { lladdr, .. } => {
                 let mut offset = field::TARGET_ADDR.end;
                 if let Some(lladdr) = lladdr {
                     offset += NdiscOptionRepr::SourceLinkLayerAddr(lladdr).buffer_len();
                 }
                 offset
-            }
+            },
             &Repr::Redirect {
                 lladdr,
                 redirected_hdr,
@@ -339,7 +341,7 @@ impl<'a> Repr<'a> {
                             .buffer_len();
                 }
                 offset
-            }
+            },
         }
     }
 
@@ -356,7 +358,7 @@ impl<'a> Repr<'a> {
                     let mut opt_pkt = NdiscOption::new_unchecked(packet.payload_mut());
                     NdiscOptionRepr::SourceLinkLayerAddr(lladdr).emit(&mut opt_pkt);
                 }
-            }
+            },
 
             Repr::RouterAdvert {
                 hop_limit,
@@ -393,7 +395,7 @@ impl<'a> Repr<'a> {
                         NdiscOption::new_unchecked(&mut packet.payload_mut()[offset..]);
                     NdiscOptionRepr::PrefixInformation(prefix_info).emit(&mut opt_pkt)
                 }
-            }
+            },
 
             Repr::NeighborSolicit {
                 target_addr,
@@ -407,7 +409,7 @@ impl<'a> Repr<'a> {
                     let mut opt_pkt = NdiscOption::new_unchecked(packet.payload_mut());
                     NdiscOptionRepr::SourceLinkLayerAddr(lladdr).emit(&mut opt_pkt);
                 }
-            }
+            },
 
             Repr::NeighborAdvert {
                 flags,
@@ -423,7 +425,7 @@ impl<'a> Repr<'a> {
                     let mut opt_pkt = NdiscOption::new_unchecked(packet.payload_mut());
                     NdiscOptionRepr::TargetLinkLayerAddr(lladdr).emit(&mut opt_pkt);
                 }
-            }
+            },
 
             Repr::Redirect {
                 target_addr,
@@ -441,7 +443,7 @@ impl<'a> Repr<'a> {
                         let mut opt_pkt = NdiscOption::new_unchecked(packet.payload_mut());
                         NdiscOptionRepr::TargetLinkLayerAddr(lladdr).emit(&mut opt_pkt);
                         NdiscOptionRepr::TargetLinkLayerAddr(lladdr).buffer_len()
-                    }
+                    },
                     None => 0,
                 };
                 if let Some(redirected_hdr) = redirected_hdr {
@@ -449,7 +451,7 @@ impl<'a> Repr<'a> {
                         NdiscOption::new_unchecked(&mut packet.payload_mut()[offset..]);
                     NdiscOptionRepr::RedirectedHeader(redirected_hdr).emit(&mut opt_pkt);
                 }
-            }
+            },
         }
     }
 }
@@ -458,9 +460,10 @@ impl<'a> Repr<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::phy::ChecksumCapabilities;
-    use crate::wire::EthernetAddress;
-    use crate::wire::Icmpv6Repr;
+    use crate::{
+        phy::ChecksumCapabilities,
+        wire::{EthernetAddress, Icmpv6Repr},
+    };
 
     const MOCK_IP_ADDR_1: Ipv6Address = Ipv6Address::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
     const MOCK_IP_ADDR_2: Ipv6Address = Ipv6Address::new(0xfe80, 0, 0, 0, 0, 0, 0, 2);

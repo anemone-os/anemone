@@ -263,17 +263,17 @@ impl<T: AsRef<[u8]>> PrettyPrint for Frame<T> {
             EtherType::Arp => {
                 indent.increase(f)?;
                 super::ArpPacket::<&[u8]>::pretty_print(&frame.payload(), f, indent)
-            }
+            },
             #[cfg(feature = "proto-ipv4")]
             EtherType::Ipv4 => {
                 indent.increase(f)?;
                 super::Ipv4Packet::<&[u8]>::pretty_print(&frame.payload(), f, indent)
-            }
+            },
             #[cfg(feature = "proto-ipv6")]
             EtherType::Ipv6 => {
                 indent.increase(f)?;
                 super::Ipv6Packet::<&[u8]>::pretty_print(&frame.payload(), f, indent)
-            }
+            },
             _ => Ok(()),
         }
     }
@@ -299,7 +299,8 @@ impl Repr {
         })
     }
 
-    /// Return the length of a header that will be emitted from this high-level representation.
+    /// Return the length of a header that will be emitted from this high-level
+    /// representation.
     pub const fn buffer_len(&self) -> usize {
         HEADER_LEN
     }

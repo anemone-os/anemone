@@ -13,13 +13,16 @@ use super::{Empty, Full};
 ///
 /// This ring buffer implementation provides many ways to interact with it:
 ///
-///   * Enqueueing or dequeueing one element from corresponding side of the buffer;
-///   * Enqueueing or dequeueing a slice of elements from corresponding side of the buffer;
+///   * Enqueueing or dequeueing one element from corresponding side of the
+///     buffer;
+///   * Enqueueing or dequeueing a slice of elements from corresponding side of
+///     the buffer;
 ///   * Accessing allocated and unallocated areas directly.
 ///
-/// It is also zero-copy; all methods provide references into the buffer's storage.
-/// Note that all references are mutable; it is considered more important to allow
-/// in-place processing than to protect from accidental mutation.
+/// It is also zero-copy; all methods provide references into the buffer's
+/// storage. Note that all references are mutable; it is considered more
+/// important to allow in-place processing than to protect from accidental
+/// mutation.
 ///
 /// This implementation is suitable for both simple uses such as a FIFO queue
 /// of UDP packets, and advanced ones such as a TCP reassembly buffer.
@@ -111,8 +114,8 @@ impl<'a, T: 'a> RingBuffer<'a, T> {
     }
 }
 
-/// This is the "discrete" ring buffer interface: it operates with single elements,
-/// and boundary conditions (empty/full) are errors.
+/// This is the "discrete" ring buffer interface: it operates with single
+/// elements, and boundary conditions (empty/full) are errors.
 impl<'a, T: 'a> RingBuffer<'a, T> {
     /// Call `f` with a single buffer element, and enqueue the element if `f`
     /// returns successfully, or return `Err(Full)` if the buffer is full.
@@ -169,11 +172,11 @@ impl<'a, T: 'a> RingBuffer<'a, T> {
     }
 }
 
-/// This is the "continuous" ring buffer interface: it operates with element slices,
-/// and boundary conditions (empty/full) simply result in empty slices.
+/// This is the "continuous" ring buffer interface: it operates with element
+/// slices, and boundary conditions (empty/full) simply result in empty slices.
 impl<'a, T: 'a> RingBuffer<'a, T> {
-    /// Call `f` with the largest contiguous slice of unallocated buffer elements,
-    /// and enqueue the amount of elements returned by `f`.
+    /// Call `f` with the largest contiguous slice of unallocated buffer
+    /// elements, and enqueue the amount of elements returned by `f`.
     ///
     /// # Panics
     /// This function panics if the amount of elements returned by `f` is larger
@@ -210,8 +213,8 @@ impl<'a, T: 'a> RingBuffer<'a, T> {
         .1
     }
 
-    /// Enqueue as many elements from the given slice into the buffer as possible,
-    /// and return the amount of elements that could fit.
+    /// Enqueue as many elements from the given slice into the buffer as
+    /// possible, and return the amount of elements that could fit.
     #[must_use]
     pub fn enqueue_slice(&mut self, data: &[T]) -> usize
     where
@@ -267,8 +270,8 @@ impl<'a, T: 'a> RingBuffer<'a, T> {
         .1
     }
 
-    /// Dequeue as many elements from the buffer into the given slice as possible,
-    /// and return the amount of elements that could fit.
+    /// Dequeue as many elements from the buffer into the given slice as
+    /// possible, and return the amount of elements that could fit.
     #[must_use]
     pub fn dequeue_slice(&mut self, data: &mut [T]) -> usize
     where
@@ -288,11 +291,13 @@ impl<'a, T: 'a> RingBuffer<'a, T> {
     }
 }
 
-/// This is the "random access" ring buffer interface: it operates with element slices,
-/// and allows to access elements of the buffer that are not adjacent to its head or tail.
+/// This is the "random access" ring buffer interface: it operates with element
+/// slices, and allows to access elements of the buffer that are not adjacent to
+/// its head or tail.
 impl<'a, T: 'a> RingBuffer<'a, T> {
-    /// Return the largest contiguous slice of unallocated buffer elements starting
-    /// at the given offset past the last allocated element, and up to the given size.
+    /// Return the largest contiguous slice of unallocated buffer elements
+    /// starting at the given offset past the last allocated element, and up
+    /// to the given size.
     #[must_use]
     pub fn get_unallocated(&mut self, offset: usize, mut size: usize) -> &mut [T] {
         let start_at = self.get_idx(self.length + offset);
@@ -314,9 +319,9 @@ impl<'a, T: 'a> RingBuffer<'a, T> {
         &mut self.storage[start_at..start_at + size]
     }
 
-    /// Write as many elements from the given slice into unallocated buffer elements
-    /// starting at the given offset past the last allocated element, and return
-    /// the amount written.
+    /// Write as many elements from the given slice into unallocated buffer
+    /// elements starting at the given offset past the last allocated
+    /// element, and return the amount written.
     #[must_use]
     pub fn write_unallocated(&mut self, offset: usize, data: &[T]) -> usize
     where
@@ -340,14 +345,16 @@ impl<'a, T: 'a> RingBuffer<'a, T> {
     /// Enqueue the given number of unallocated buffer elements.
     ///
     /// # Panics
-    /// Panics if the number of elements given exceeds the number of unallocated elements.
+    /// Panics if the number of elements given exceeds the number of unallocated
+    /// elements.
     pub fn enqueue_unallocated(&mut self, count: usize) {
         assert!(count <= self.window());
         self.length += count;
     }
 
-    /// Return the largest contiguous slice of allocated buffer elements starting
-    /// at the given offset past the first allocated element, and up to the given size.
+    /// Return the largest contiguous slice of allocated buffer elements
+    /// starting at the given offset past the first allocated element, and
+    /// up to the given size.
     #[must_use]
     pub fn get_allocated(&self, offset: usize, mut size: usize) -> &[T] {
         let start_at = self.get_idx(offset);
@@ -369,9 +376,9 @@ impl<'a, T: 'a> RingBuffer<'a, T> {
         &self.storage[start_at..start_at + size]
     }
 
-    /// Read as many elements from allocated buffer elements into the given slice
-    /// starting at the given offset past the first allocated element, and return
-    /// the amount read.
+    /// Read as many elements from allocated buffer elements into the given
+    /// slice starting at the given offset past the first allocated element,
+    /// and return the amount read.
     #[must_use]
     pub fn read_allocated(&mut self, offset: usize, data: &mut [T]) -> usize
     where
@@ -393,7 +400,8 @@ impl<'a, T: 'a> RingBuffer<'a, T> {
     /// Dequeue the given number of allocated buffer elements.
     ///
     /// # Panics
-    /// Panics if the number of elements given exceeds the number of allocated elements.
+    /// Panics if the number of elements given exceeds the number of allocated
+    /// elements.
     pub fn dequeue_allocated(&mut self, count: usize) {
         assert!(count <= self.len());
         self.length -= count;

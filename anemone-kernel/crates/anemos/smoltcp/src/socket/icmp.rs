@@ -2,20 +2,24 @@ use core::cmp;
 #[cfg(feature = "async")]
 use core::task::Waker;
 
-use crate::phy::ChecksumCapabilities;
 #[cfg(feature = "async")]
 use crate::socket::WakerRegistration;
-use crate::socket::{Context, PollAt};
+use crate::{
+    phy::ChecksumCapabilities,
+    socket::{Context, PollAt},
+};
 
-use crate::storage::Empty;
-use crate::wire::IcmpRepr;
 #[cfg(feature = "proto-ipv4")]
 use crate::wire::{Icmpv4Packet, Icmpv4Repr, Ipv4Repr};
 #[cfg(feature = "proto-ipv6")]
 use crate::wire::{Icmpv6Packet, Icmpv6Repr, Ipv6Repr};
-use crate::wire::{IpAddress, IpListenEndpoint, IpProtocol, IpRepr};
-use crate::wire::{TcpPacket, TcpRepr};
-use crate::wire::{UdpPacket, UdpRepr};
+use crate::{
+    storage::Empty,
+    wire::{
+        IcmpRepr, IpAddress, IpListenEndpoint, IpProtocol, IpRepr, TcpPacket, TcpRepr, UdpPacket,
+        UdpRepr,
+    },
+};
 
 /// Error returned by [`Socket::bind`]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -123,7 +127,8 @@ pub struct Socket<'a> {
     tx_buffer: PacketBuffer<'a>,
     /// The endpoint this socket is communicating with
     endpoint: Endpoint,
-    /// The time-to-live (IPv4) or hop limit (IPv6) value used in outgoing packets.
+    /// The time-to-live (IPv4) or hop limit (IPv6) value used in outgoing
+    /// packets.
     hop_limit: Option<u8>,
     #[cfg(feature = "async")]
     rx_waker: WakerRegistration,
@@ -153,11 +158,12 @@ impl<'a> Socket<'a> {
     ///
     /// Notes:
     ///
-    /// - Only one waker can be registered at a time. If another waker was previously registered,
-    ///   it is overwritten and will no longer be woken.
-    /// - The Waker is woken only once. Once woken, you must register it again to receive more wakes.
-    /// - "Spurious wakes" are allowed: a wake doesn't guarantee the result of `recv` has
-    ///   necessarily changed.
+    /// - Only one waker can be registered at a time. If another waker was
+    ///   previously registered, it is overwritten and will no longer be woken.
+    /// - The Waker is woken only once. Once woken, you must register it again
+    ///   to receive more wakes.
+    /// - "Spurious wakes" are allowed: a wake doesn't guarantee the result of
+    ///   `recv` has necessarily changed.
     #[cfg(feature = "async")]
     pub fn register_recv_waker(&mut self, waker: &Waker) {
         self.rx_waker.register(waker)
@@ -171,31 +177,35 @@ impl<'a> Socket<'a> {
     ///
     /// Notes:
     ///
-    /// - Only one waker can be registered at a time. If another waker was previously registered,
-    ///   it is overwritten and will no longer be woken.
-    /// - The Waker is woken only once. Once woken, you must register it again to receive more wakes.
-    /// - "Spurious wakes" are allowed: a wake doesn't guarantee the result of `send` has
-    ///   necessarily changed.
+    /// - Only one waker can be registered at a time. If another waker was
+    ///   previously registered, it is overwritten and will no longer be woken.
+    /// - The Waker is woken only once. Once woken, you must register it again
+    ///   to receive more wakes.
+    /// - "Spurious wakes" are allowed: a wake doesn't guarantee the result of
+    ///   `send` has necessarily changed.
     #[cfg(feature = "async")]
     pub fn register_send_waker(&mut self, waker: &Waker) {
         self.tx_waker.register(waker)
     }
 
-    /// Return the time-to-live (IPv4) or hop limit (IPv6) value used in outgoing packets.
+    /// Return the time-to-live (IPv4) or hop limit (IPv6) value used in
+    /// outgoing packets.
     ///
     /// See also the [set_hop_limit](#method.set_hop_limit) method
     pub fn hop_limit(&self) -> Option<u8> {
         self.hop_limit
     }
 
-    /// Set the time-to-live (IPv4) or hop limit (IPv6) value used in outgoing packets.
+    /// Set the time-to-live (IPv4) or hop limit (IPv6) value used in outgoing
+    /// packets.
     ///
-    /// A socket without an explicitly set hop limit value uses the default [IANA recommended]
-    /// value (64).
+    /// A socket without an explicitly set hop limit value uses the default
+    /// [IANA recommended] value (64).
     ///
     /// # Panics
     ///
-    /// This function panics if a hop limit value of 0 is given. See [RFC 1122 § 3.2.1.7].
+    /// This function panics if a hop limit value of 0 is given. See [RFC 1122 §
+    /// 3.2.1.7].
     ///
     /// [IANA recommended]: https://www.iana.org/assignments/ip-parameters/ip-parameters.xhtml
     /// [RFC 1122 § 3.2.1.7]: https://tools.ietf.org/html/rfc1122#section-3.2.1.7
@@ -219,9 +229,9 @@ impl<'a> Socket<'a> {
     /// ## Bind to ICMP Error messages associated with a specific UDP port:
     ///
     /// To [recv] ICMP error messages that are associated with a specific local
-    /// UDP port, the socket may be bound to a given port using [IcmpEndpoint::Udp].
-    /// This may be useful for applications using UDP attempting to detect and/or
-    /// diagnose connection problems.
+    /// UDP port, the socket may be bound to a given port using
+    /// [IcmpEndpoint::Udp]. This may be useful for applications using UDP
+    /// attempting to detect and/or diagnose connection problems.
     ///
     /// ```
     /// use smoltcp::wire::IpListenEndpoint;
@@ -239,10 +249,10 @@ impl<'a> Socket<'a> {
     ///
     /// ## Bind to a specific ICMP identifier:
     ///
-    /// To [send] and [recv] ICMP packets that are not associated with a specific UDP
-    /// port, the socket may be bound to a specific ICMP identifier using
-    /// [IcmpEndpoint::Ident]. This is useful for sending and receiving Echo Request/Reply
-    /// messages.
+    /// To [send] and [recv] ICMP packets that are not associated with a
+    /// specific UDP port, the socket may be bound to a specific ICMP
+    /// identifier using [IcmpEndpoint::Ident]. This is useful for sending
+    /// and receiving Echo Request/Reply messages.
     ///
     /// ```
     /// use smoltcp::wire::IpListenEndpoint;
@@ -325,12 +335,13 @@ impl<'a> Socket<'a> {
         self.endpoint != Endpoint::Unspecified
     }
 
-    /// Enqueue a packet to be sent to a given remote address, and return a pointer
-    /// to its payload.
+    /// Enqueue a packet to be sent to a given remote address, and return a
+    /// pointer to its payload.
     ///
-    /// This function returns `Err(Error::Exhausted)` if the transmit buffer is full,
-    /// `Err(Error::Truncated)` if the requested size is larger than the packet buffer
-    /// size, and `Err(Error::Unaddressable)` if the remote address is unspecified.
+    /// This function returns `Err(Error::Exhausted)` if the transmit buffer is
+    /// full, `Err(Error::Truncated)` if the requested size is larger than
+    /// the packet buffer size, and `Err(Error::Unaddressable)` if the
+    /// remote address is unspecified.
     pub fn send(&mut self, size: usize, endpoint: IpAddress) -> Result<&mut [u8], SendError> {
         if endpoint.is_unspecified() {
             return Err(SendError::Unaddressable);
@@ -345,9 +356,9 @@ impl<'a> Socket<'a> {
         Ok(packet_buf)
     }
 
-    /// Enqueue a packet to be send to a given remote address and pass the buffer
-    /// to the provided closure. The closure then returns the size of the data written
-    /// into the buffer.
+    /// Enqueue a packet to be send to a given remote address and pass the
+    /// buffer to the provided closure. The closure then returns the size of
+    /// the data written into the buffer.
     ///
     /// Also see [send](#method.send).
     pub fn send_with<F>(
@@ -372,7 +383,8 @@ impl<'a> Socket<'a> {
         Ok(size)
     }
 
-    /// Enqueue a packet to be sent to a given remote address, and fill it from a slice.
+    /// Enqueue a packet to be sent to a given remote address, and fill it from
+    /// a slice.
     ///
     /// See also [send](#method.send).
     pub fn send_slice(&mut self, data: &[u8], endpoint: IpAddress) -> Result<(), SendError> {
@@ -381,10 +393,11 @@ impl<'a> Socket<'a> {
         Ok(())
     }
 
-    /// Dequeue a packet received from a remote endpoint, and return the `IpAddress` as well
-    /// as a pointer to the payload.
+    /// Dequeue a packet received from a remote endpoint, and return the
+    /// `IpAddress` as well as a pointer to the payload.
     ///
-    /// This function returns `Err(Error::Exhausted)` if the receive buffer is empty.
+    /// This function returns `Err(Error::Exhausted)` if the receive buffer is
+    /// empty.
     pub fn recv(&mut self) -> Result<(&[u8], IpAddress), RecvError> {
         let (endpoint, packet_buf) = self.rx_buffer.dequeue().map_err(|_| RecvError::Exhausted)?;
 
@@ -396,11 +409,13 @@ impl<'a> Socket<'a> {
         Ok((packet_buf, endpoint))
     }
 
-    /// Dequeue a packet received from a remote endpoint, copy the payload into the given slice,
-    /// and return the amount of octets copied as well as the `IpAddress`
+    /// Dequeue a packet received from a remote endpoint, copy the payload into
+    /// the given slice, and return the amount of octets copied as well as
+    /// the `IpAddress`
     ///
-    /// **Note**: when the size of the provided buffer is smaller than the size of the payload,
-    /// the packet is dropped and a `RecvError::Truncated` error is returned.
+    /// **Note**: when the size of the provided buffer is smaller than the size
+    /// of the payload, the packet is dropped and a `RecvError::Truncated`
+    /// error is returned.
     ///
     /// See also [recv](#method.recv).
     pub fn recv_slice(&mut self, data: &mut [u8]) -> Result<(usize, IpAddress), RecvError> {
@@ -455,7 +470,7 @@ impl<'a> Socket<'a> {
                     Ok(repr) => endpoint.port == repr.src_port,
                     Err(_) => false,
                 }
-            }
+            },
             // If we are bound to ICMP errors associated to a TCP port, only
             // accept Destination Unreachable or Time Exceeded messages with
             // the data containing a UDP packet send from the local port we
@@ -475,14 +490,14 @@ impl<'a> Socket<'a> {
                     Ok(repr) => endpoint.port == repr.src_port,
                     Err(_) => false,
                 }
-            }
+            },
             // If we are bound to a specific ICMP identifier value, only accept an
             // Echo Request/Reply with the identifier field matching the endpoint
             // port.
             (&Endpoint::Ident(bound_ident), &Icmpv4Repr::EchoRequest { ident, .. })
             | (&Endpoint::Ident(bound_ident), &Icmpv4Repr::EchoReply { ident, .. }) => {
                 ident == bound_ident
-            }
+            },
             _ => false,
         }
     }
@@ -517,7 +532,7 @@ impl<'a> Socket<'a> {
                     Ok(repr) => endpoint.port == repr.src_port,
                     Err(_) => false,
                 }
-            }
+            },
             // If we are bound to ICMP errors associated to a TCP port, only
             // accept Destination Unreachable or Time Exceeded messages with
             // the data containing a UDP packet send from the local port we
@@ -537,7 +552,7 @@ impl<'a> Socket<'a> {
                     Ok(repr) => endpoint.port == repr.src_port,
                     Err(_) => false,
                 }
-            }
+            },
             // If we are bound to a specific ICMP identifier value, only accept an
             // Echo Request/Reply with the identifier field matching the endpoint
             // port.
@@ -567,7 +582,7 @@ impl<'a> Socket<'a> {
                     &mut Icmpv4Packet::new_unchecked(packet_buf),
                     &ChecksumCapabilities::default(),
                 );
-            }
+            },
             Err(_) => net_trace!("icmp: buffer full, dropped incoming packet"),
         }
 
@@ -623,7 +638,7 @@ impl<'a> Socket<'a> {
                                 remote_endpoint
                             );
                             return Ok(());
-                        }
+                        },
                     };
                     let packet = Icmpv4Packet::new_unchecked(&*packet_buf);
                     let repr = match Icmpv4Repr::parse(&packet, &ChecksumCapabilities::ignored()) {
@@ -634,7 +649,7 @@ impl<'a> Socket<'a> {
                                 remote_endpoint
                             );
                             return Ok(());
-                        }
+                        },
                     };
                     let ip_repr = IpRepr::Ipv4(Ipv4Repr {
                         src_addr,
@@ -644,7 +659,7 @@ impl<'a> Socket<'a> {
                         hop_limit,
                     });
                     emit(cx, (ip_repr, IcmpRepr::Ipv4(repr)))
-                }
+                },
                 #[cfg(feature = "proto-ipv6")]
                 IpAddress::Ipv6(dst_addr) => {
                     let src_addr = cx.get_source_address_ipv6(&dst_addr);
@@ -663,7 +678,7 @@ impl<'a> Socket<'a> {
                                 remote_endpoint
                             );
                             return Ok(());
-                        }
+                        },
                     };
                     let ip_repr = IpRepr::Ipv6(Ipv6Repr {
                         src_addr,
@@ -673,7 +688,7 @@ impl<'a> Socket<'a> {
                         hop_limit,
                     });
                     emit(cx, (ip_repr, IcmpRepr::Ipv6(repr)))
-                }
+                },
             }
         });
         match res {
@@ -683,7 +698,7 @@ impl<'a> Socket<'a> {
                 #[cfg(feature = "async")]
                 self.tx_waker.wake();
                 Ok(())
-            }
+            },
         }
     }
 
@@ -724,8 +739,7 @@ mod tests_common {
 
 #[cfg(all(test, feature = "proto-ipv4"))]
 mod test_ipv4 {
-    use crate::phy::Medium;
-    use crate::tests::setup;
+    use crate::{phy::Medium, tests::setup};
     use rstest::*;
 
     use super::tests_common::*;
@@ -985,8 +999,7 @@ mod test_ipv4 {
 
 #[cfg(all(test, feature = "proto-ipv6"))]
 mod test_ipv6 {
-    use crate::phy::Medium;
-    use crate::tests::setup;
+    use crate::{phy::Medium, tests::setup};
     use rstest::*;
 
     use super::tests_common::*;

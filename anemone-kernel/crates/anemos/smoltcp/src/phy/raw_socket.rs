@@ -1,11 +1,15 @@
-use std::cell::RefCell;
-use std::io;
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::rc::Rc;
-use std::vec::Vec;
+use std::{
+    cell::RefCell,
+    io,
+    os::unix::io::{AsRawFd, RawFd},
+    rc::Rc,
+    vec::Vec,
+};
 
-use crate::phy::{self, Device, DeviceCapabilities, Medium, sys};
-use crate::time::Instant;
+use crate::{
+    phy::{self, Device, DeviceCapabilities, Medium, sys},
+    time::Instant,
+};
 
 /// A socket that captures or transmits the complete frame.
 #[derive(Debug)]
@@ -36,8 +40,8 @@ impl RawSocket {
         if medium == Medium::Ieee802154 {
             // SIOCGIFMTU returns 127 - (ACK_PSDU - FCS - 1) - FCS.
             //                    127 - (5 - 2 - 1) - 2 = 123
-            // For IEEE802154, we want to add (ACK_PSDU - FCS - 1), since that is what SIOCGIFMTU
-            // uses as the size of the link layer header.
+            // For IEEE802154, we want to add (ACK_PSDU - FCS - 1), since that is what
+            // SIOCGIFMTU uses as the size of the link layer header.
             //
             // https://github.com/torvalds/linux/blob/7475e51b87969e01a6812eac713a1c8310372e8a/net/mac802154/iface.c#L541
             mtu += 2;
@@ -46,7 +50,8 @@ impl RawSocket {
         #[cfg(feature = "medium-ethernet")]
         if medium == Medium::Ethernet {
             // SIOCGIFMTU returns the IP MTU (typically 1500 bytes.)
-            // smoltcp counts the entire Ethernet packet in the MTU, so add the Ethernet header size to it.
+            // smoltcp counts the entire Ethernet packet in the MTU, so add the Ethernet
+            // header size to it.
             mtu += crate::wire::EthernetFrame::<&[u8]>::header_len()
         }
 
@@ -87,7 +92,7 @@ impl Device for RawSocket {
                     lower: self.lower.clone(),
                 };
                 Some((rx, tx))
-            }
+            },
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => None,
             Err(err) => panic!("{}", err),
         }
@@ -128,10 +133,10 @@ impl phy::TxToken for TxToken {
         let mut buffer = vec![0; len];
         let result = f(&mut buffer);
         match lower.send(&buffer[..]) {
-            Ok(_) => {}
+            Ok(_) => {},
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
                 net_debug!("phy: tx failed due to WouldBlock")
-            }
+            },
             Err(err) => panic!("{}", err),
         }
         result

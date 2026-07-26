@@ -4,13 +4,12 @@ mod utils;
 use log::*;
 use std::os::unix::io::AsRawFd;
 
-use smoltcp::iface::{Config, Interface, SocketSet};
-use smoltcp::socket::dhcpv4;
-use smoltcp::time::Instant;
-use smoltcp::wire::{EthernetAddress, IpCidr, Ipv4Cidr};
 use smoltcp::{
+    iface::{Config, Interface, SocketSet},
     phy::{Device, Medium, wait as phy_wait},
-    time::Duration,
+    socket::dhcpv4,
+    time::{Duration, Instant},
+    wire::{EthernetAddress, IpCidr, Ipv4Cidr},
 };
 
 fn main() {
@@ -25,13 +24,13 @@ fn main() {
     let device = utils::parse_tuntap_options(&mut matches);
     let fd = device.as_raw_fd();
     let mut device =
-        utils::parse_middleware_options(&mut matches, device, /*loopback=*/ false);
+        utils::parse_middleware_options(&mut matches, device, /* loopback= */ false);
 
     // Create interface
     let mut config = match device.capabilities().medium {
         Medium::Ethernet => {
             Config::new(EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]).into())
-        }
+        },
         Medium::Ip => Config::new(smoltcp::wire::HardwareAddress::Ip),
         Medium::Ieee802154 => todo!(),
     };
@@ -42,8 +41,8 @@ fn main() {
     let mut dhcp_socket = dhcpv4::Socket::new();
 
     // Set a ridiculously short max lease time to show DHCP renews work properly.
-    // This will cause the DHCP client to start renewing after 5 seconds, and give up the
-    // lease after 10 seconds if renew hasn't succeeded.
+    // This will cause the DHCP client to start renewing after 5 seconds, and give
+    // up the lease after 10 seconds if renew hasn't succeeded.
     // IMPORTANT: This should be removed in production.
     dhcp_socket.set_max_lease_duration(Some(Duration::from_secs(10)));
 
@@ -56,7 +55,7 @@ fn main() {
 
         let event = sockets.get_mut::<dhcpv4::Socket>(dhcp_handle).poll();
         match event {
-            None => {}
+            None => {},
             Some(dhcpv4::Event::Configured(config)) => {
                 debug!("DHCP config acquired!");
 
@@ -74,12 +73,12 @@ fn main() {
                 for (i, s) in config.dns_servers.iter().enumerate() {
                     debug!("DNS server {}:    {}", i, s);
                 }
-            }
+            },
             Some(dhcpv4::Event::Deconfigured) => {
                 debug!("DHCP lost config!");
                 iface.update_ip_addrs(|addrs| addrs.clear());
                 iface.routes_mut().remove_default_ipv4_route();
-            }
+            },
         }
 
         phy_wait(fd, iface.poll_delay(timestamp, &sockets)).expect("wait error");

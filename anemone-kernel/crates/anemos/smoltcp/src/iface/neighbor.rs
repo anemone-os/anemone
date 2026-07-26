@@ -3,9 +3,11 @@
 
 use heapless::LinearMap;
 
-use crate::config::IFACE_NEIGHBOR_CACHE_COUNT;
-use crate::time::{Duration, Instant};
-use crate::wire::{HardwareAddress, IpAddress};
+use crate::{
+    config::IFACE_NEIGHBOR_CACHE_COUNT,
+    time::{Duration, Instant},
+    wire::{HardwareAddress, IpAddress},
+};
 
 /// A cached neighbor.
 ///
@@ -115,12 +117,13 @@ impl Cache {
                         old_neighbor.hardware_addr
                     );
                 }
-            }
+            },
             Ok(None) => {
                 net_trace!("filled {} => {} (was empty)", protocol_addr, hardware_addr);
-            }
+            },
             Err((protocol_addr, neighbor)) => {
-                // If we're going down this branch, it means the cache is full, and we need to evict an entry.
+                // If we're going down this branch, it means the cache is full, and we need to
+                // evict an entry.
                 let old_protocol_addr = *self
                     .storage
                     .iter()
@@ -138,11 +141,11 @@ impl Cache {
                             old_protocol_addr,
                             _old_neighbor.hardware_addr
                         );
-                    }
+                    },
                     // We've covered everything else above.
                     _ => unreachable!(),
                 }
-            }
+            },
         }
     }
 

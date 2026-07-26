@@ -2,9 +2,10 @@ use super::*;
 
 use crate::iface::Route;
 
-/// Enum used for the process_hopbyhop function. In some cases, when discarding a packet, an ICMP
-/// parameter problem message needs to be transmitted to the source of the address. In other cases,
-/// the processing of the IP packet can continue.
+/// Enum used for the process_hopbyhop function. In some cases, when discarding
+/// a packet, an ICMP parameter problem message needs to be transmitted to the
+/// source of the address. In other cases, the processing of the IP packet can
+/// continue.
 #[allow(clippy::large_enum_variant)]
 enum HopByHopResponse<'frame> {
     /// Continue processing the IPv6 packet.
@@ -21,8 +22,8 @@ impl Default for HopByHopResponse<'_> {
 }
 
 impl InterfaceInner {
-    /// Return the IPv6 address that is a candidate source address for the given destination
-    /// address, based on RFC 6724.
+    /// Return the IPv6 address that is a candidate source address for the given
+    /// destination address, based on RFC 6724.
     ///
     /// # Panics
     /// This function panics if the destination address is unspecified.
@@ -32,8 +33,8 @@ impl InterfaceInner {
 
         // See RFC 6724 Section 4: Candidate source address
         fn is_candidate_source_address(dst_addr: &Ipv6Address, src_addr: &Ipv6Address) -> bool {
-            // For all multicast and link-local destination addresses, the candidate address MUST
-            // only be an address from the same link.
+            // For all multicast and link-local destination addresses, the candidate address
+            // MUST only be an address from the same link.
             if dst_addr.is_link_local() && !src_addr.is_link_local() {
                 return false;
             }
@@ -46,9 +47,10 @@ impl InterfaceInner {
                 return false;
             }
 
-            // Unspecified addresses and multicast address can not be in the candidate source address
-            // list. Except when the destination multicast address has a link-local scope, then the
-            // source address can also be link-local multicast.
+            // Unspecified addresses and multicast address can not be in the candidate
+            // source address list. Except when the destination multicast
+            // address has a link-local scope, then the source address can also
+            // be link-local multicast.
             if src_addr.is_unspecified() || src_addr.is_multicast() {
                 return false;
             }
@@ -74,8 +76,9 @@ impl InterfaceInner {
             bits as usize
         }
 
-        // If the destination address is a loopback address, or when there are no IPv6 addresses in
-        // the interface, then the loopback address is the only candidate source address.
+        // If the destination address is a loopback address, or when there are no IPv6
+        // addresses in the interface, then the loopback address is the only
+        // candidate source address.
         if dst_addr.is_loopback()
             || self
                 .ip_addrs
@@ -107,7 +110,8 @@ impl InterfaceInner {
                 continue;
             }
 
-            // Rule 1: prefer the address that is the same as the output destination address.
+            // Rule 1: prefer the address that is the same as the output destination
+            // address.
             if candidate.address() != *dst_addr && addr.address() == *dst_addr {
                 candidate = addr;
             }
@@ -154,7 +158,7 @@ impl InterfaceInner {
                     // Take the lower order 24 bits of the IPv6 address and
                     // append those bits to FF02:0:0:0:0:1:FF00::/104.
                     addr.octets()[14..] == cidr.address().octets()[14..]
-                }
+                },
                 _ => false,
             }
         })
@@ -182,7 +186,7 @@ impl InterfaceInner {
                 } else {
                     None
                 }
-            }
+            },
         })
     }
 
@@ -287,28 +291,28 @@ impl InterfaceInner {
         for opt_repr in &hbh_repr.options {
             match opt_repr {
                 Ipv6OptionRepr::Pad1 | Ipv6OptionRepr::PadN(_) | Ipv6OptionRepr::RouterAlert(_) => {
-                }
+                },
                 #[cfg(feature = "proto-rpl")]
-                Ipv6OptionRepr::Rpl(_) => {}
+                Ipv6OptionRepr::Rpl(_) => {},
 
                 Ipv6OptionRepr::Unknown { type_, .. } => {
                     match Ipv6OptionFailureType::from(*type_) {
                         Ipv6OptionFailureType::Skip => (),
                         Ipv6OptionFailureType::Discard => {
                             return HopByHopResponse::Discard(None);
-                        }
+                        },
                         Ipv6OptionFailureType::DiscardSendAll => {
                             return HopByHopResponse::Discard(param_problem());
-                        }
+                        },
                         Ipv6OptionFailureType::DiscardSendUnicast => {
                             if !ipv6_repr.dst_addr.is_multicast() {
                                 return HopByHopResponse::Discard(param_problem());
                             } else {
                                 return HopByHopResponse::Discard(None);
                             }
-                        }
+                        },
                     }
-                }
+                },
             }
         }
 
@@ -344,7 +348,7 @@ impl InterfaceInner {
             #[cfg(feature = "socket-tcp")]
             IpProtocol::Tcp => {
                 self.process_tcp(sockets, handled_by_raw_socket, ipv6_repr.into(), ip_payload)
-            }
+            },
 
             #[cfg(feature = "socket-raw")]
             _ if handled_by_raw_socket => None,
@@ -361,7 +365,7 @@ impl InterfaceInner {
                     data: &ip_payload[0..payload_len],
                 };
                 self.icmpv6_reply(ipv6_repr, icmp_reply_repr)
-            }
+            },
         }
     }
 
@@ -410,7 +414,7 @@ impl InterfaceInner {
                     data,
                 };
                 self.icmpv6_reply(ip_repr, icmp_reply_repr)
-            }
+            },
 
             // Ignore any echo replies.
             Icmpv6Repr::EchoReply { .. } => None,
@@ -432,7 +436,7 @@ impl InterfaceInner {
                     if ip_repr.hop_limit == 1 && ip_repr.src_addr.is_link_local() =>
                 {
                     self.process_mldv2(ip_repr, repr)
-                }
+                },
                 _ => None,
             },
 
@@ -472,7 +476,7 @@ impl InterfaceInner {
                     }
                 }
                 None
-            }
+            },
             NdiscRepr::NeighborSolicit {
                 target_addr,
                 lladdr,
@@ -505,7 +509,7 @@ impl InterfaceInner {
                 } else {
                     None
                 }
-            }
+            },
             #[cfg(feature = "proto-ipv6-slaac")]
             NdiscRepr::RouterAdvert {
                 hop_limit: _,
@@ -530,7 +534,7 @@ impl InterfaceInner {
                     )
                 }
                 None
-            }
+            },
             _ => None,
         }
     }
@@ -577,8 +581,9 @@ impl InterfaceInner {
         // [RFC 3810 § 5.2.14]: https://tools.ietf.org/html/rfc3810#section-5.2.14
         let dst_addr = IPV6_LINK_LOCAL_ALL_MLDV2_ROUTERS;
 
-        // Create a dummy IPv6 extension header so we can calculate the total length of the packet.
-        // The actual extension header will be created later by Packet::emit_payload().
+        // Create a dummy IPv6 extension header so we can calculate the total length of
+        // the packet. The actual extension header will be created later by
+        // Packet::emit_payload().
         let dummy_ext_hdr = Ipv6ExtHeaderRepr {
             next_header: IpProtocol::Unknown(0),
             length: 0,
@@ -684,7 +689,7 @@ impl Interface {
                     if routes.iter().all(|r| match (&r.cidr, &r.via_router) {
                         (IpCidr::Ipv6(cidr), IpAddress::Ipv6(via_router)) => {
                             !route.same_route(cidr, via_router)
-                        }
+                        },
                         _ => false,
                     }) {
                         let _ = routes.push(Route {
@@ -707,7 +712,8 @@ impl Interface {
         self.inner.slaac_updated
     }
 
-    /// Emit a router solicitation when required by the interface's slaac state machine.
+    /// Emit a router solicitation when required by the interface's slaac state
+    /// machine.
     #[cfg(feature = "proto-ipv6-slaac")]
     pub(super) fn ndisc_rs_egress(&mut self, device: &mut (impl Device + ?Sized)) {
         if !self.inner.slaac.rs_required(self.inner.now) {
@@ -727,7 +733,8 @@ impl Interface {
         let Some(tx_token) = device.transmit(self.inner.now) else {
             return;
         };
-        // NOTE(unwrap): packet destination is multicast, which is always routable and doesn't require neighbor discovery.
+        // NOTE(unwrap): packet destination is multicast, which is always routable and
+        // doesn't require neighbor discovery.
         self.inner
             .dispatch_ip(
                 tx_token,

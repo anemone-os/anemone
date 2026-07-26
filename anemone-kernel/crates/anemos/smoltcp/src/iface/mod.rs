@@ -24,7 +24,9 @@ pub use self::interface::{
     Config, Interface, InterfaceInner as Context, PollIngressSingleResult, PollResult,
 };
 
-pub use self::route::{Route, RouteTableFull, Routes};
 #[cfg(feature = "proto-ipv6-slaac")]
 pub use self::slaac::Slaac;
-pub use self::socket_set::{SocketHandle, SocketSet, SocketStorage};
+pub use self::{
+    route::{Route, RouteTableFull, Routes},
+    socket_set::{SocketHandle, SocketSet, SocketStorage},
+};

@@ -38,17 +38,18 @@ use super::fragmentation::{Fragmenter, FragmentsBuffer};
 #[cfg(any(feature = "medium-ethernet", feature = "medium-ieee802154"))]
 use super::neighbor::{Answer as NeighborAnswer, Cache as NeighborCache};
 use super::socket_set::SocketSet;
-use crate::config::{
-    IFACE_MAX_ADDR_COUNT, IFACE_MAX_PREFIX_COUNT, IFACE_MAX_SIXLOWPAN_ADDRESS_CONTEXT_COUNT,
-};
-use crate::iface::Routes;
 #[cfg(feature = "proto-ipv6-slaac")]
 use crate::iface::Slaac;
-use crate::phy::PacketMeta;
-use crate::phy::{ChecksumCapabilities, Device, DeviceCapabilities, Medium, RxToken, TxToken};
-use crate::rand::Rand;
-use crate::socket::*;
-use crate::time::{Duration, Instant};
+use crate::{
+    config::{
+        IFACE_MAX_ADDR_COUNT, IFACE_MAX_PREFIX_COUNT, IFACE_MAX_SIXLOWPAN_ADDRESS_CONTEXT_COUNT,
+    },
+    iface::Routes,
+    phy::{ChecksumCapabilities, Device, DeviceCapabilities, Medium, PacketMeta, RxToken, TxToken},
+    rand::Rand,
+    socket::*,
+    time::{Duration, Instant},
+};
 
 use crate::wire::*;
 
@@ -63,7 +64,7 @@ macro_rules! check {
                 #[cfg(feature = "defmt")]
                 net_trace!("iface: malformed");
                 return Default::default();
-            }
+            },
         }
     };
 }
@@ -77,7 +78,8 @@ use check;
 pub enum PollResult {
     /// Socket state is guaranteed to not have changed.
     None,
-    /// You should check the state of sockets again for received data or completion of operations.
+    /// You should check the state of sockets again for received data or
+    /// completion of operations.
     SocketStateChanged,
 }
 
@@ -88,30 +90,33 @@ pub enum PollResult {
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum PollIngressSingleResult {
-    /// No packet was processed. You don't need to call [`Interface::poll_ingress_single`]
-    /// again, until more packets arrive.
+    /// No packet was processed. You don't need to call
+    /// [`Interface::poll_ingress_single`] again, until more packets arrive.
     ///
     /// Socket state is guaranteed to not have changed.
     None,
     /// A packet was processed.
     ///
-    /// There may be more packets in the device's RX queue, so you should call [`Interface::poll_ingress_single`] again.
+    /// There may be more packets in the device's RX queue, so you should call
+    /// [`Interface::poll_ingress_single`] again.
     ///
     /// Socket state is guaranteed to not have changed.
     PacketProcessed,
     /// A packet was processed, which might have caused socket state to change.
     ///
-    /// There may be more packets in the device's RX queue, so you should call [`Interface::poll_ingress_single`] again.
+    /// There may be more packets in the device's RX queue, so you should call
+    /// [`Interface::poll_ingress_single`] again.
     ///
-    /// You should check the state of sockets again for received data or completion of operations.
+    /// You should check the state of sockets again for received data or
+    /// completion of operations.
     SocketStateChanged,
 }
 
 /// A  network interface.
 ///
-/// The network interface logically owns a number of other data structures; to avoid
-/// a dependency on heap allocation, it instead owns a `BorrowMut<[T]>`, which can be
-/// a `&mut [T]`, or `Vec<T>` if a heap is available.
+/// The network interface logically owns a number of other data structures; to
+/// avoid a dependency on heap allocation, it instead owns a `BorrowMut<[T]>`,
+/// which can be a `&mut [T]`, or `Vec<T>` if a heap is available.
 pub struct Interface {
     pub(crate) inner: InterfaceInner,
     fragments: FragmentsBuffer,
@@ -120,11 +125,12 @@ pub struct Interface {
 
 /// The device independent part of an Ethernet network interface.
 ///
-/// Separating the device from the data required for processing and dispatching makes
-/// it possible to borrow them independently. For example, the tx and rx tokens borrow
-/// the `device` mutably until they're used, which makes it impossible to call other
-/// methods on the `Interface` in this time (since its `device` field is borrowed
-/// exclusively). However, it is still possible to call methods on its `inner` field.
+/// Separating the device from the data required for processing and dispatching
+/// makes it possible to borrow them independently. For example, the tx and rx
+/// tokens borrow the `device` mutably until they're used, which makes it
+/// impossible to call other methods on the `Interface` in this time (since its
+/// `device` field is borrowed exclusively). However, it is still possible to
+/// call methods on its `inner` field.
 pub struct InterfaceInner {
     caps: DeviceCapabilities,
     now: Instant,
@@ -162,8 +168,8 @@ pub struct InterfaceInner {
 pub struct Config {
     /// Random seed.
     ///
-    /// It is strongly recommended that the random seed is different on each boot,
-    /// to avoid problems with TCP port/sequence collisions.
+    /// It is strongly recommended that the random seed is different on each
+    /// boot, to avoid problems with TCP port/sequence collisions.
     ///
     /// The seed doesn't have to be cryptographically secure.
     pub random_seed: u64,
@@ -319,8 +325,8 @@ impl Interface {
     /// Set the HardwareAddress address of the interface.
     ///
     /// # Panics
-    /// This function panics if the address is not unicast, and if the medium is not Ethernet or
-    /// Ieee802154.
+    /// This function panics if the address is not unicast, and if the medium is
+    /// not Ethernet or Ieee802154.
     #[cfg(any(feature = "medium-ethernet", feature = "medium-ieee802154"))]
     pub fn set_hardware_addr(&mut self, addr: HardwareAddress) {
         #[cfg(all(feature = "medium-ethernet", not(feature = "medium-ieee802154")))]
@@ -356,24 +362,25 @@ impl Interface {
     }
 
     /// Get an address from the interface that could be used as source address.
-    /// For IPv4, this function tries to find a registered IPv4 address in the same
-    /// subnet as the destination, falling back to the first IPv4 address if none is
-    /// found. For IPv6, the selection is based on RFC6724.
+    /// For IPv4, this function tries to find a registered IPv4 address in the
+    /// same subnet as the destination, falling back to the first IPv4
+    /// address if none is found. For IPv6, the selection is based on
+    /// RFC6724.
     pub fn get_source_address(&self, dst_addr: &IpAddress) -> Option<IpAddress> {
         self.inner.get_source_address(dst_addr)
     }
 
-    /// Get an IPv4 source address based on a destination address. This function tries
-    /// to find the first IPv4 address from the interface that is in the same subnet as
-    /// the destination address. If no such address is found, the first IPv4 address
-    /// from the interface is returned.
+    /// Get an IPv4 source address based on a destination address. This function
+    /// tries to find the first IPv4 address from the interface that is in
+    /// the same subnet as the destination address. If no such address is
+    /// found, the first IPv4 address from the interface is returned.
     #[cfg(feature = "proto-ipv4")]
     pub fn get_source_address_ipv4(&self, dst_addr: &Ipv4Address) -> Option<Ipv4Address> {
         self.inner.get_source_address_ipv4(dst_addr)
     }
 
-    /// Get an address from the interface that could be used as source address. The selection is
-    /// based on RFC6724.
+    /// Get an address from the interface that could be used as source address.
+    /// The selection is based on RFC6724.
     #[cfg(feature = "proto-ipv6")]
     pub fn get_source_address_ipv6(&self, dst_addr: &Ipv6Address) -> Ipv6Address {
         self.inner.get_source_address_ipv6(dst_addr)
@@ -414,9 +421,10 @@ impl Interface {
     /// Enable or disable the AnyIP capability.
     ///
     /// AnyIP allowins packets to be received
-    /// locally on IP addresses other than the interface's configured [ip_addrs].
-    /// When AnyIP is enabled and a route prefix in [`routes`](Self::routes) specifies one of
-    /// the interface's [`ip_addrs`](Self::ip_addrs) as its gateway, the interface will accept
+    /// locally on IP addresses other than the interface's configured
+    /// [ip_addrs]. When AnyIP is enabled and a route prefix in
+    /// [`routes`](Self::routes) specifies one of the interface's
+    /// [`ip_addrs`](Self::ip_addrs) as its gateway, the interface will accept
     /// packets addressed to that prefix.
     pub fn set_any_ip(&mut self, any_ip: bool) {
         self.inner.any_ip = any_ip;
@@ -460,11 +468,12 @@ impl Interface {
     ///
     /// If this is a concern for your application (i.e. your environment doesn't
     /// have preemptive scheduling, or `poll()` is called from a main loop where
-    /// other important things are processed), you may use the lower-level methods
-    /// [`poll_egress()`](Self::poll_egress), [`poll_maintenance()`](Self::poll_maintenance)
+    /// other important things are processed), you may use the lower-level
+    /// methods [`poll_egress()`](Self::poll_egress),
+    /// [`poll_maintenance()`](Self::poll_maintenance)
     /// and [`poll_ingress_single()`](Self::poll_ingress_single).
-    /// This allows you to insert yields or process other events between processing
-    /// individual ingress packets.
+    /// This allows you to insert yields or process other events between
+    /// processing individual ingress packets.
     pub fn poll(
         &mut self,
         timestamp: Instant,
@@ -481,7 +490,7 @@ impl Interface {
         loop {
             match self.socket_ingress(device, sockets) {
                 PollIngressSingleResult::None => break,
-                PollIngressSingleResult::PacketProcessed => {}
+                PollIngressSingleResult::PacketProcessed => {},
                 PollIngressSingleResult::SocketStateChanged => res = PollResult::SocketStateChanged,
             }
         }
@@ -516,12 +525,12 @@ impl Interface {
             Medium::Ieee802154 => {
                 #[cfg(feature = "proto-sixlowpan-fragmentation")]
                 self.sixlowpan_egress(device);
-            }
+            },
             #[cfg(any(feature = "medium-ethernet", feature = "medium-ip"))]
             _ => {
                 #[cfg(feature = "proto-ipv4-fragmentation")]
                 self.ipv4_egress(device);
-            }
+            },
         }
 
         #[cfg(feature = "proto-ipv6-slaac")]
@@ -538,10 +547,12 @@ impl Interface {
     /// Process one incoming packet queued in the device.
     ///
     /// Returns a value indicating:
-    /// - whether a packet was processed, in which case you have to call this method again in case there's more packets queued.
+    /// - whether a packet was processed, in which case you have to call this
+    ///   method again in case there's more packets queued.
     /// - whether the state of any socket might have changed.
     ///
-    /// Since it processes at most one packet, this is guaranteed to always perform a bounded amount of work.
+    /// Since it processes at most one packet, this is guaranteed to always
+    /// perform a bounded amount of work.
     pub fn poll_ingress_single(
         &mut self,
         timestamp: Instant,
@@ -613,10 +624,10 @@ impl Interface {
     }
 
     /// Return an _advisory wait time_ for calling [poll] the next time.
-    /// The [Duration] returned is the time left to wait before calling [poll] next.
-    /// It is harmless (but wastes energy) to call it before the [Duration] has passed,
-    /// and potentially harmful (impacting quality of service) to call it after the
-    /// [Duration] has passed.
+    /// The [Duration] returned is the time left to wait before calling [poll]
+    /// next. It is harmless (but wastes energy) to call it before the
+    /// [Duration] has passed, and potentially harmful (impacting quality of
+    /// service) to call it after the [Duration] has passed.
     ///
     /// [poll]: #method.poll
     /// [Duration]: struct.Duration.html
@@ -654,7 +665,7 @@ impl Interface {
                     {
                         net_debug!("Failed to send response: {:?}", err);
                     }
-                }
+                },
                 #[cfg(feature = "medium-ip")]
                 Medium::Ip => {
                     if let Some(packet) =
@@ -669,7 +680,7 @@ impl Interface {
                     {
                         net_debug!("Failed to send response: {:?}", err);
                     }
-                }
+                },
                 #[cfg(feature = "medium-ieee802154")]
                 Medium::Ieee802154 => {
                     if let Some(packet) =
@@ -684,7 +695,7 @@ impl Interface {
                     {
                         net_debug!("Failed to send response: {:?}", err);
                     }
-                }
+                },
             }
 
             // TODO: Propagate the PollIngressSingleResult from deeper.
@@ -762,13 +773,13 @@ impl Interface {
                         #[allow(unreachable_patterns)]
                         _ => unreachable!(),
                     })
-                }
+                },
                 #[cfg(feature = "socket-udp")]
                 Socket::Udp(socket) => {
                     socket.dispatch(&mut self.inner, |inner, meta, (ip, udp, payload)| {
                         respond(inner, meta, Packet::new(ip, IpPayload::Udp(udp, payload)))
                     })
-                }
+                },
                 #[cfg(feature = "socket-tcp")]
                 Socket::Tcp(socket) => socket.dispatch(&mut self.inner, |inner, (ip, tcp)| {
                     respond(
@@ -786,7 +797,7 @@ impl Interface {
                             Packet::new_ipv4(ip, IpPayload::Dhcpv4(udp, dhcp)),
                         )
                     })
-                }
+                },
                 #[cfg(feature = "socket-dns")]
                 Socket::Dns(socket) => socket.dispatch(&mut self.inner, |inner, (ip, udp, dns)| {
                     respond(
@@ -808,8 +819,8 @@ impl Interface {
                         self.inner.now,
                         neighbor_addr.expect("non-IP response packet"),
                     );
-                }
-                Ok(()) => {}
+                },
+                Ok(()) => {},
             }
         }
         result
@@ -893,7 +904,8 @@ impl InterfaceInner {
         self.ip_addrs.iter().any(|probe| probe.address() == addr)
     }
 
-    /// Check whether the interface listens to given destination multicast IP address.
+    /// Check whether the interface listens to given destination multicast IP
+    /// address.
     fn has_multicast_group<T: Into<IpAddress>>(&self, addr: T) -> bool {
         let addr = addr.into();
 
@@ -910,7 +922,7 @@ impl InterfaceInner {
             #[cfg(feature = "proto-ipv6")]
             IpAddress::Ipv6(key) => {
                 key == IPV6_LINK_LOCAL_ALL_NODES || self.has_solicited_node(key)
-            }
+            },
             #[allow(unreachable_patterns)]
             _ => false,
         }
@@ -929,12 +941,12 @@ impl InterfaceInner {
             Ok(IpVersion::Ipv4) => {
                 let ipv4_packet = check!(Ipv4Packet::new_checked(ip_payload));
                 self.process_ipv4(sockets, meta, HardwareAddress::Ip, &ipv4_packet, frag)
-            }
+            },
             #[cfg(feature = "proto-ipv6")]
             Ok(IpVersion::Ipv6) => {
                 let ipv6_packet = check!(Ipv6Packet::new_checked(ip_payload));
                 self.process_ipv6(sockets, meta, HardwareAddress::Ip, &ipv6_packet)
-            }
+            },
             // Drop all other traffic.
             _ => None,
         }
@@ -1000,10 +1012,10 @@ impl InterfaceInner {
                     let mut packet = ArpPacket::new_unchecked(frame.payload_mut());
                     arp_repr.emit(&mut packet);
                 })
-            }
+            },
             EthernetPacket::Ip(packet) => {
                 self.dispatch_ip(tx_token, PacketMeta::default(), packet, frag)
-            }
+            },
         }
     }
 
@@ -1013,8 +1025,9 @@ impl InterfaceInner {
 
     fn route(&self, addr: &IpAddress, timestamp: Instant) -> Option<IpAddress> {
         // Send directly.
-        // note: no need to use `self.is_broadcast()` to check for subnet-local broadcast addrs
-        //       here because `in_same_network` will already return true.
+        // note: no need to use `self.is_broadcast()` to check for subnet-local
+        // broadcast addrs       here because `in_same_network` will already
+        // return true.
         if self.in_same_network(addr) || addr.is_broadcast() {
             return Some(*addr);
         }
@@ -1075,7 +1088,7 @@ impl InterfaceInner {
                             b[2],
                             b[3],
                         ]))
-                    }
+                    },
                     #[cfg(feature = "medium-ieee802154")]
                     Medium::Ieee802154 => unreachable!(),
                     #[cfg(feature = "medium-ip")]
@@ -1089,12 +1102,12 @@ impl InterfaceInner {
                         HardwareAddress::Ethernet(EthernetAddress::from_bytes(&[
                             0x33, 0x33, b[12], b[13], b[14], b[15],
                         ]))
-                    }
+                    },
                     #[cfg(feature = "medium-ieee802154")]
                     Medium::Ieee802154 => {
                         // Not sure if this is correct
                         HardwareAddress::Ieee802154(Ieee802154Address::BROADCAST)
-                    }
+                    },
                     #[cfg(feature = "medium-ip")]
                     Medium::Ip => unreachable!(),
                 },
@@ -1143,7 +1156,7 @@ impl InterfaceInner {
                     net_debug!("Failed to dispatch ARP request: {:?}", e);
                     return Err(DispatchError::NeighborPending);
                 }
-            }
+            },
 
             #[cfg(feature = "proto-ipv6")]
             IpAddress::Ipv6(dst_addr) => {
@@ -1174,7 +1187,7 @@ impl InterfaceInner {
                     net_debug!("Failed to dispatch NDISC solicit: {:?}", e);
                     return Err(DispatchError::NeighborPending);
                 }
-            }
+            },
 
             #[allow(unreachable_patterns)]
             _ => (),
@@ -1230,7 +1243,8 @@ impl InterfaceInner {
             total_len = EthernetFrame::<&[u8]>::buffer_len(total_len);
         }
 
-        // If the medium is Ethernet, then we need to retrieve the destination hardware address.
+        // If the medium is Ethernet, then we need to retrieve the destination hardware
+        // address.
         #[cfg(feature = "medium-ethernet")]
         let (dst_hardware_addr, mut tx_token) = match self.caps.medium {
             Medium::Ethernet => {
@@ -1238,7 +1252,7 @@ impl InterfaceInner {
                     (HardwareAddress::Ethernet(addr), tx_token) => (addr, tx_token),
                     (_, _) => unreachable!(),
                 }
-            }
+            },
             _ => (EthernetAddress([0; 6]), tx_token),
         };
 
@@ -1303,8 +1317,8 @@ impl InterfaceInner {
                             frag.ipv4.dst_hardware_addr = dst_hardware_addr;
                         }
 
-                        // Save the total packet len (without the Ethernet header, but with the first
-                        // IP header).
+                        // Save the total packet len (without the Ethernet header, but with the
+                        // first IP header).
                         frag.packet_len = total_ip_len;
 
                         // Save the IP header for other fragments.
@@ -1372,7 +1386,7 @@ impl InterfaceInner {
 
                     Ok(())
                 }
-            }
+            },
             // We don't support IPv6 fragmentation yet.
             #[cfg(feature = "proto-ipv6")]
             IpRepr::Ipv6(_) => {
@@ -1392,7 +1406,7 @@ impl InterfaceInner {
                     });
                     Ok(())
                 }
-            }
+            },
         }
     }
 }

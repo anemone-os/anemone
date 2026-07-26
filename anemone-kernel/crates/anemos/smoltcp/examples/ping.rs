@@ -2,22 +2,17 @@ mod utils;
 
 use byteorder::{ByteOrder, NetworkEndian};
 use smoltcp::iface::{Interface, SocketSet};
-use std::cmp;
-use std::collections::HashMap;
-use std::os::unix::io::AsRawFd;
-use std::str::FromStr;
+use std::{cmp, collections::HashMap, os::unix::io::AsRawFd, str::FromStr};
 
-use smoltcp::iface::Config;
-use smoltcp::phy::Device;
-use smoltcp::phy::wait as phy_wait;
-use smoltcp::socket::icmp;
-use smoltcp::wire::{
-    EthernetAddress, Icmpv4Packet, Icmpv4Repr, Icmpv6Packet, Icmpv6Repr, IpAddress, IpCidr,
-    Ipv4Address, Ipv6Address,
-};
 use smoltcp::{
-    phy::Medium,
+    iface::Config,
+    phy::{Device, Medium, wait as phy_wait},
+    socket::icmp,
     time::{Duration, Instant},
+    wire::{
+        EthernetAddress, Icmpv4Packet, Icmpv4Repr, Icmpv6Packet, Icmpv6Repr, IpAddress, IpCidr,
+        Ipv4Address, Ipv6Address,
+    },
 };
 
 macro_rules! send_icmp_ping {
@@ -86,7 +81,7 @@ fn main() {
     let device = utils::parse_tuntap_options(&mut matches);
     let fd = device.as_raw_fd();
     let mut device =
-        utils::parse_middleware_options(&mut matches, device, /*loopback=*/ false);
+        utils::parse_middleware_options(&mut matches, device, /* loopback= */ false);
     let device_caps = device.capabilities();
     let remote_addr = IpAddress::from_str(&matches.free[0]).expect("invalid address format");
     let count = matches
@@ -108,7 +103,7 @@ fn main() {
     let mut config = match device.capabilities().medium {
         Medium::Ethernet => {
             Config::new(EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]).into())
-        }
+        },
         Medium::Ip => Config::new(smoltcp::wire::HardwareAddress::Ip),
         Medium::Ieee802154 => todo!(),
     };
@@ -175,7 +170,7 @@ fn main() {
                         remote_addr
                     );
                     icmp_repr.emit(&mut icmp_packet, &device_caps.checksum);
-                }
+                },
                 IpAddress::Ipv6(address) => {
                     let (icmp_repr, mut icmp_packet) = send_icmp_ping!(
                         Icmpv6Repr,
@@ -192,7 +187,7 @@ fn main() {
                         &mut icmp_packet,
                         &device_caps.checksum,
                     );
-                }
+                },
             }
 
             waiting_queue.insert(seq_no, timestamp);
@@ -216,7 +211,7 @@ fn main() {
                         timestamp,
                         received
                     );
-                }
+                },
                 IpAddress::Ipv6(address) => {
                     let icmp_packet = Icmpv6Packet::new_checked(&payload).unwrap();
                     let icmp_repr = Icmpv6Repr::parse(
@@ -235,7 +230,7 @@ fn main() {
                         timestamp,
                         received
                     );
-                }
+                },
             }
         }
 
@@ -257,11 +252,11 @@ fn main() {
             Some(poll_at) if timestamp < poll_at => {
                 let resume_at = cmp::min(poll_at, send_at);
                 phy_wait(fd, Some(resume_at - timestamp)).expect("wait error");
-            }
+            },
             Some(_) => (),
             None => {
                 phy_wait(fd, Some(send_at - timestamp)).expect("wait error");
-            }
+            },
         }
     }
 

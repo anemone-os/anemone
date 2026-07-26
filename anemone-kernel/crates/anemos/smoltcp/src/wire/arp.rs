@@ -1,8 +1,7 @@
 use byteorder::{ByteOrder, NetworkEndian};
 use core::fmt;
 
-use super::{Error, Result};
-use super::{EthernetAddress, Ipv4Address};
+use super::{Error, EthernetAddress, Ipv4Address, Result};
 
 pub use super::EthernetProtocol as Protocol;
 
@@ -267,8 +266,9 @@ pub enum Repr {
 }
 
 impl Repr {
-    /// Parse an Address Resolution Protocol packet and return a high-level representation,
-    /// or return `Err(Error)` if the packet is not recognized.
+    /// Parse an Address Resolution Protocol packet and return a high-level
+    /// representation, or return `Err(Error)` if the packet is not
+    /// recognized.
     pub fn parse<T: AsRef<[u8]>>(packet: &Packet<T>) -> Result<Repr> {
         packet.check_len()?;
 
@@ -293,14 +293,16 @@ impl Repr {
         }
     }
 
-    /// Return the length of a packet that will be emitted from this high-level representation.
+    /// Return the length of a packet that will be emitted from this high-level
+    /// representation.
     pub const fn buffer_len(&self) -> usize {
         match *self {
             Repr::EthernetIpv4 { .. } => field::TPA(6, 4).end,
         }
     }
 
-    /// Emit a high-level representation into an Address Resolution Protocol packet.
+    /// Emit a high-level representation into an Address Resolution Protocol
+    /// packet.
     pub fn emit<T: AsRef<[u8]> + AsMut<[u8]>>(&self, packet: &mut Packet<T>) {
         match *self {
             Repr::EthernetIpv4 {
@@ -319,7 +321,7 @@ impl Repr {
                 packet.set_source_protocol_addr(&source_protocol_addr.octets());
                 packet.set_target_hardware_addr(target_hardware_addr.as_bytes());
                 packet.set_target_protocol_addr(&target_protocol_addr.octets());
-            }
+            },
         }
     }
 }
@@ -348,7 +350,7 @@ impl<T: AsRef<[u8]>> fmt::Display for Packet<T> {
                     self.target_protocol_addr()
                 )?;
                 Ok(())
-            }
+            },
         }
     }
 }
@@ -367,7 +369,7 @@ impl fmt::Display for Repr {
                     f,
                     "ARP type=Ethernet+IPv4 src={source_hardware_addr}/{source_protocol_addr} tgt={target_hardware_addr}/{target_protocol_addr} op={operation:?}"
                 )
-            }
+            },
         }
     }
 }

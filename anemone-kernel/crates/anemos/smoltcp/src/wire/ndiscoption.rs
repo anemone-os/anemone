@@ -3,8 +3,10 @@ use byteorder::{ByteOrder, NetworkEndian};
 use core::fmt;
 
 use super::{Error, Result};
-use crate::time::Duration;
-use crate::wire::{Ipv6Address, Ipv6AddressExt, Ipv6Packet, Ipv6Repr, MAX_HARDWARE_ADDRESS_LEN};
+use crate::{
+    time::Duration,
+    wire::{Ipv6Address, Ipv6AddressExt, Ipv6Packet, Ipv6Repr, MAX_HARDWARE_ADDRESS_LEN},
+};
 
 use crate::wire::RawHardwareAddress;
 
@@ -95,11 +97,11 @@ mod field {
     //  |                           Reserved2                           |
     //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     //  |                                                               |
-    //  +                                                               +
+    //  + +
     //  |                                                               |
-    //  +                            Prefix                             +
+    //  + Prefix                             +
     //  |                                                               |
-    //  +                                                               +
+    //  + +
     //  |                                                               |
     //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
@@ -387,7 +389,7 @@ impl<T: AsRef<[u8]> + ?Sized> fmt::Display for NdiscOption<&T> {
             Err(err) => {
                 write!(f, "NDISC Option ({err})")?;
                 Ok(())
-            }
+            },
         }
     }
 }
@@ -450,14 +452,14 @@ impl<'a> Repr<'a> {
                 } else {
                     Err(Error)
                 }
-            }
+            },
             Type::TargetLinkLayerAddr => {
                 if opt.data_len() >= 1 {
                     Ok(Repr::TargetLinkLayerAddr(opt.link_layer_addr()))
                 } else {
                     Err(Error)
                 }
-            }
+            },
             Type::PrefixInformation => {
                 if opt.data_len() == 4 {
                     Ok(Repr::PrefixInformation(PrefixInformation {
@@ -470,7 +472,7 @@ impl<'a> Repr<'a> {
                 } else {
                     Err(Error)
                 }
-            }
+            },
             Type::RedirectedHeader => {
                 // If the options data length is less than 6, the option
                 // does not have enough data to fill out the IP header
@@ -488,14 +490,14 @@ impl<'a> Repr<'a> {
                         data: &redirected_packet[ip_repr.buffer_len()..][..ip_repr.payload_len],
                     }))
                 }
-            }
+            },
             Type::Mtu => {
                 if opt.data_len() == 1 {
                     Ok(Repr::Mtu(opt.mtu()))
                 } else {
                     Err(Error)
                 }
-            }
+            },
             Type::Unknown(id) => {
                 // A length of 0 is invalid.
                 if opt.data_len() != 0 {
@@ -507,22 +509,23 @@ impl<'a> Repr<'a> {
                 } else {
                     Err(Error)
                 }
-            }
+            },
         }
     }
 
-    /// Return the length of a header that will be emitted from this high-level representation.
+    /// Return the length of a header that will be emitted from this high-level
+    /// representation.
     pub const fn buffer_len(&self) -> usize {
         match self {
             &Repr::SourceLinkLayerAddr(addr) | &Repr::TargetLinkLayerAddr(addr) => {
                 let len = 2 + addr.len();
                 // Round up to next multiple of 8
                 len.div_ceil(8) * 8
-            }
+            },
             &Repr::PrefixInformation(_) => field::PREFIX.end,
             &Repr::RedirectedHeader(RedirectedHeader { header, data }) => {
                 (8 + header.buffer_len() + data.len()).div_ceil(8) * 8
-            }
+            },
             &Repr::Mtu(_) => field::MTU.end,
             &Repr::Unknown { length, .. } => field::DATA(length).end,
         }
@@ -539,13 +542,13 @@ impl<'a> Repr<'a> {
                 let opt_len = addr.len() + 2;
                 opt.set_data_len(opt_len.div_ceil(8) as u8); // round to next multiple of 8.
                 opt.set_link_layer_addr(addr);
-            }
+            },
             Repr::TargetLinkLayerAddr(addr) => {
                 opt.set_option_type(Type::TargetLinkLayerAddr);
                 let opt_len = addr.len() + 2;
                 opt.set_data_len(opt_len.div_ceil(8) as u8); // round to next multiple of 8.
                 opt.set_link_layer_addr(addr);
-            }
+            },
             Repr::PrefixInformation(PrefixInformation {
                 prefix_len,
                 flags,
@@ -561,7 +564,7 @@ impl<'a> Repr<'a> {
                 opt.set_valid_lifetime(valid_lifetime);
                 opt.set_preferred_lifetime(preferred_lifetime);
                 opt.set_prefix(prefix);
-            }
+            },
             Repr::RedirectedHeader(RedirectedHeader { header, data }) => {
                 // TODO(thvdveld): I think we need to check if the data we are sending is not
                 // exceeding the MTU.
@@ -572,12 +575,12 @@ impl<'a> Repr<'a> {
                 let mut ip_packet = Ipv6Packet::new_unchecked(&mut packet);
                 header.emit(&mut ip_packet);
                 ip_packet.payload_mut().copy_from_slice(data);
-            }
+            },
             Repr::Mtu(mtu) => {
                 opt.set_option_type(Type::Mtu);
                 opt.set_data_len(1);
                 opt.set_mtu(mtu);
-            }
+            },
             Repr::Unknown {
                 type_: id,
                 length,
@@ -586,7 +589,7 @@ impl<'a> Repr<'a> {
                 opt.set_option_type(Type::Unknown(id));
                 opt.set_data_len(length);
                 opt.data_mut().copy_from_slice(data);
-            }
+            },
         }
     }
 }
@@ -597,26 +600,26 @@ impl<'a> fmt::Display for Repr<'a> {
         match *self {
             Repr::SourceLinkLayerAddr(addr) => {
                 write!(f, "SourceLinkLayer addr={addr}")
-            }
+            },
             Repr::TargetLinkLayerAddr(addr) => {
                 write!(f, "TargetLinkLayer addr={addr}")
-            }
+            },
             Repr::PrefixInformation(PrefixInformation {
                 prefix, prefix_len, ..
             }) => {
                 write!(f, "PrefixInformation prefix={prefix}/{prefix_len}")
-            }
+            },
             Repr::RedirectedHeader(RedirectedHeader { header, .. }) => {
                 write!(f, "RedirectedHeader header={header}")
-            }
+            },
             Repr::Mtu(mtu) => {
                 write!(f, "MTU mtu={mtu}")
-            }
+            },
             Repr::Unknown {
                 type_: id, length, ..
             } => {
                 write!(f, "Unknown({id}) length={length}")
-            }
+            },
         }
     }
 }
@@ -635,7 +638,7 @@ impl<T: AsRef<[u8]>> PrettyPrint for NdiscOption<T> {
                 Err(_) => Ok(()),
                 Ok(repr) => {
                     write!(f, "{indent}{repr}")
-                }
+                },
             },
         }
     }
@@ -644,10 +647,8 @@ impl<T: AsRef<[u8]>> PrettyPrint for NdiscOption<T> {
 #[cfg(any(feature = "medium-ethernet", feature = "medium-ieee802154"))]
 #[cfg(test)]
 mod test {
-    use super::Error;
-    use super::{NdiscOption, PrefixInfoFlags, PrefixInformation, Repr, Type};
-    use crate::time::Duration;
-    use crate::wire::Ipv6Address;
+    use super::{Error, NdiscOption, PrefixInfoFlags, PrefixInformation, Repr, Type};
+    use crate::{time::Duration, wire::Ipv6Address};
 
     #[cfg(feature = "medium-ethernet")]
     use crate::wire::EthernetAddress;

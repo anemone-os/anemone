@@ -4,8 +4,7 @@ use byteorder::{ByteOrder, NetworkEndian};
 use core::fmt;
 
 use super::{Error, Result};
-use crate::wire::HardwareAddress;
-use crate::wire::ip::pretty_print_ip_payload;
+use crate::wire::{HardwareAddress, ip::pretty_print_ip_payload};
 
 pub use super::IpProtocol as Protocol;
 
@@ -78,7 +77,8 @@ impl From<u8> for MulticastScope {
 pub use core::net::Ipv6Addr as Address;
 
 pub(crate) trait AddressExt {
-    /// Create an IPv6 address based on the provided prefix and hardware identifier.
+    /// Create an IPv6 address based on the provided prefix and hardware
+    /// identifier.
     fn from_link_prefix(
         link_prefix: &Cidr,
         interface_identifier: HardwareAddress,
@@ -88,7 +88,8 @@ pub(crate) trait AddressExt {
     ///
     /// [unicast address]: https://tools.ietf.org/html/rfc4291#section-2.5
     ///
-    /// `x_` prefix is to avoid a collision with the still-unstable method in `core::ip`.
+    /// `x_` prefix is to avoid a collision with the still-unstable method in
+    /// `core::ip`.
     fn x_is_unicast(&self) -> bool;
 
     /// Query whether the IPv6 address is a [global unicast address].
@@ -116,7 +117,8 @@ pub(crate) trait AddressExt {
 
     /// Return the scope of the address.
     ///
-    /// `x_` prefix is to avoid a collision with the still-unstable method in `core::ip`.
+    /// `x_` prefix is to avoid a collision with the still-unstable method in
+    /// `core::ip`.
     fn x_multicast_scope(&self) -> MulticastScope;
 
     /// Query whether the IPv6 address is a [solicited-node multicast address].
@@ -125,7 +127,8 @@ pub(crate) trait AddressExt {
     fn is_solicited_node_multicast(&self) -> bool;
 
     /// If `self` is a CIDR-compatible subnet mask, return `Some(prefix_len)`,
-    /// where `prefix_len` is the number of leading zeroes. Return `None` otherwise.
+    /// where `prefix_len` is the number of leading zeroes. Return `None`
+    /// otherwise.
     fn prefix_len(&self) -> Option<u8>;
 }
 
@@ -231,8 +234,8 @@ impl AddressExt for Address {
     }
 }
 
-/// A specification of an IPv6 CIDR block, containing an address and a variable-length
-/// subnet masking prefix length.
+/// A specification of an IPv6 CIDR block, containing an address and a
+/// variable-length subnet masking prefix length.
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct Cidr {
     address: Address,
@@ -266,7 +269,8 @@ impl Cidr {
         }
     }
 
-    /// Create an IPv6 CIDR based on the provided prefix and hardware identifier.
+    /// Create an IPv6 CIDR based on the provided prefix and hardware
+    /// identifier.
     pub fn from_link_prefix(
         link_prefix: &Cidr,
         interface_identifier: HardwareAddress,
@@ -332,19 +336,19 @@ pub struct Packet<T: AsRef<[u8]>> {
 // |         Payload Length        |  Next Header  |   Hop Limit   |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |                                                               |
-// +                                                               +
+// + +
 // |                                                               |
-// +                         Source Address                        +
+// + Source Address                        +
 // |                                                               |
-// +                                                               +
+// + +
 // |                                                               |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |                                                               |
-// +                                                               +
+// + +
 // |                                                               |
-// +                      Destination Address                      +
+// + Destination Address                      +
 // |                                                               |
-// +                                                               +
+// + +
 // |                                                               |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //
@@ -575,7 +579,7 @@ impl<T: AsRef<[u8]> + ?Sized> fmt::Display for Packet<&T> {
             Err(err) => {
                 write!(f, "IPv6 ({err})")?;
                 Ok(())
-            }
+            },
         }
     }
 }
@@ -602,7 +606,8 @@ pub struct Repr {
 }
 
 impl Repr {
-    /// Parse an Internet Protocol version 6 packet and return a high-level representation.
+    /// Parse an Internet Protocol version 6 packet and return a high-level
+    /// representation.
     pub fn parse<T: AsRef<[u8]> + ?Sized>(packet: &Packet<&T>) -> Result<Repr> {
         // Ensure basic accessors will work
         packet.check_len()?;
@@ -618,13 +623,16 @@ impl Repr {
         })
     }
 
-    /// Return the length of a header that will be emitted from this high-level representation.
+    /// Return the length of a header that will be emitted from this high-level
+    /// representation.
     pub const fn buffer_len(&self) -> usize {
-        // This function is not strictly necessary, but it can make client code more readable.
+        // This function is not strictly necessary, but it can make client code more
+        // readable.
         field::DST_ADDR.end
     }
 
-    /// Emit a high-level representation into an Internet Protocol version 6 packet.
+    /// Emit a high-level representation into an Internet Protocol version 6
+    /// packet.
     pub fn emit<T: AsRef<[u8]> + AsMut<[u8]>>(&self, packet: &mut Packet<T>) {
         // Make no assumptions about the original state of the packet buffer.
         // Make sure to set every byte.
@@ -680,7 +688,7 @@ impl<T: AsRef<[u8]>> PrettyPrint for Packet<T> {
                 Ok(ip_repr) => {
                     write!(f, "{indent}{ip_repr}")?;
                     (ip_repr, ip_packet.payload())
-                }
+                },
             },
         };
 

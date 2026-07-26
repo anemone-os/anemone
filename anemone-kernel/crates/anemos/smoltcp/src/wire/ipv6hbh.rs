@@ -1,6 +1,5 @@
 use super::{Error, Ipv6Option, Ipv6OptionRepr, Ipv6OptionsIterator, Result};
-use crate::config;
-use crate::wire::ipv6option::RouterAlert;
+use crate::{config, wire::ipv6option::RouterAlert};
 use heapless::Vec;
 
 /// A read/write wrapper around an IPv6 Hop-by-Hop Header buffer.
@@ -89,8 +88,8 @@ impl<'a> Repr<'a> {
         Ok(Self { options })
     }
 
-    /// Return the length, in bytes, of a header that will be emitted from this high-level
-    /// representation.
+    /// Return the length, in bytes, of a header that will be emitted from this
+    /// high-level representation.
     pub fn buffer_len(&self) -> usize {
         self.options.iter().map(|o| o.buffer_len()).sum()
     }

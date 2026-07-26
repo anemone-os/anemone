@@ -1,15 +1,19 @@
 mod utils;
 
 use log::debug;
-use std::os::unix::io::AsRawFd;
-use std::str::{self, FromStr};
+use std::{
+    os::unix::io::AsRawFd,
+    str::{self, FromStr},
+};
 use url::Url;
 
-use smoltcp::iface::{Config, Interface, SocketSet};
-use smoltcp::phy::{Device, Medium, wait as phy_wait};
-use smoltcp::socket::tcp;
-use smoltcp::time::Instant;
-use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address, Ipv6Address};
+use smoltcp::{
+    iface::{Config, Interface, SocketSet},
+    phy::{Device, Medium, wait as phy_wait},
+    socket::tcp,
+    time::Instant,
+    wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address, Ipv6Address},
+};
 
 fn main() {
     utils::setup_logging("");
@@ -24,7 +28,7 @@ fn main() {
     let device = utils::parse_tuntap_options(&mut matches);
     let fd = device.as_raw_fd();
     let mut device =
-        utils::parse_middleware_options(&mut matches, device, /*loopback=*/ false);
+        utils::parse_middleware_options(&mut matches, device, /* loopback= */ false);
     let address = IpAddress::from_str(&matches.free[0]).expect("invalid address format");
     let url = Url::parse(&matches.free[1]).expect("invalid url format");
 
@@ -32,7 +36,7 @@ fn main() {
     let mut config = match device.capabilities().medium {
         Medium::Ethernet => {
             Config::new(EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]).into())
-        }
+        },
         Medium::Ip => Config::new(smoltcp::wire::HardwareAddress::Ip),
         Medium::Ieee802154 => todo!(),
     };
@@ -89,7 +93,7 @@ fn main() {
                     .connect(cx, (address, url.port().unwrap_or(80)), local_port)
                     .unwrap();
                 State::Request
-            }
+            },
             State::Request if socket.may_send() => {
                 debug!("sending request");
                 let http_get = "GET ".to_owned() + url.path() + " HTTP/1.1\r\n";
@@ -101,7 +105,7 @@ fn main() {
                     .expect("cannot send");
                 socket.send_slice(b"\r\n").expect("cannot send");
                 State::Response
-            }
+            },
             State::Response if socket.can_recv() => {
                 socket
                     .recv(|data| {
@@ -110,11 +114,11 @@ fn main() {
                     })
                     .unwrap();
                 State::Response
-            }
+            },
             State::Response if !socket.may_recv() => {
                 debug!("received complete response");
                 break;
-            }
+            },
             _ => state,
         };
 

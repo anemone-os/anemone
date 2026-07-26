@@ -1,11 +1,15 @@
 use getopts::Options;
-use smoltcp::phy::{PcapLinkType, PcapSink};
-use smoltcp::time::Instant;
-use std::env;
-use std::fs::File;
-use std::io::{self, Read};
-use std::path::Path;
-use std::process::exit;
+use smoltcp::{
+    phy::{PcapLinkType, PcapSink},
+    time::Instant,
+};
+use std::{
+    env,
+    fs::File,
+    io::{self, Read},
+    path::Path,
+    process::exit,
+};
 
 fn convert(
     packet_filename: &Path,
@@ -46,7 +50,7 @@ fn main() {
         Err(e) => {
             eprintln!("{e}");
             return;
-        }
+        },
     };
 
     let link_type = match matches.opt_str("t").as_ref().map(|s| &s[..]) {
@@ -69,6 +73,6 @@ fn main() {
         Err(e) => {
             eprintln!("Cannot convert packet to pcap: {e}");
             exit(1);
-        }
+        },
     }
 }

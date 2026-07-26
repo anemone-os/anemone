@@ -19,7 +19,7 @@ pub struct Packet<T: AsRef<[u8]>> {
 //   |                    Sequence Number Field                      |
 //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //   |                                                               |
-//   +                Integrity Check Value-ICV (variable)           |
+//   + Integrity Check Value-ICV (variable)           |
 //   |                                                               |
 //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 mod field {
@@ -34,7 +34,8 @@ mod field {
     pub const SEQUENCE_NUMBER: Field = 8..12;
 
     pub const fn ICV(payload_len: u8) -> Field {
-        // The `payload_len` is the length of this Authentication Header in 4-octet units, minus 2.
+        // The `payload_len` is the length of this Authentication Header in 4-octet
+        // units, minus 2.
         let header_len = (payload_len as usize + 2) * 4;
 
         SEQUENCE_NUMBER.end..header_len
@@ -42,7 +43,8 @@ mod field {
 }
 
 impl<T: AsRef<[u8]>> Packet<T> {
-    /// Imbue a raw octet buffer with IPsec Authentication Header packet structure.
+    /// Imbue a raw octet buffer with IPsec Authentication Header packet
+    /// structure.
     pub const fn new_unchecked(buffer: T) -> Packet<T> {
         Packet { buffer }
     }
@@ -58,7 +60,8 @@ impl<T: AsRef<[u8]>> Packet<T> {
     }
 
     /// Ensure that no accessor method will panic if called.
-    /// Returns `Err(Error)` if the buffer is too short or shorter than payload length.
+    /// Returns `Err(Error)` if the buffer is too short or shorter than payload
+    /// length.
     ///
     /// The result of this check is invalidated by calling [set_payload_len].
     ///
@@ -88,7 +91,8 @@ impl<T: AsRef<[u8]>> Packet<T> {
         IpProtocol::from(data[field::NEXT_HEADER])
     }
 
-    /// Return the length of this Authentication Header in 4-octet units, minus 2
+    /// Return the length of this Authentication Header in 4-octet units, minus
+    /// 2
     pub fn payload_len(&self) -> u8 {
         let data = self.buffer.as_ref();
         data[field::PAYLOAD_LEN]
@@ -172,7 +176,8 @@ pub struct Repr<'a> {
 }
 
 impl<'a> Repr<'a> {
-    /// Parse an IPSec Authentication Header packet and return a high-level representation.
+    /// Parse an IPSec Authentication Header packet and return a high-level
+    /// representation.
     pub fn parse<T: AsRef<[u8]> + ?Sized>(packet: &Packet<&'a T>) -> Result<Repr<'a>> {
         packet.check_len()?;
         Ok(Repr {
@@ -183,7 +188,8 @@ impl<'a> Repr<'a> {
         })
     }
 
-    /// Return the length of a packet that will be emitted from this high-level representation.
+    /// Return the length of a packet that will be emitted from this high-level
+    /// representation.
     pub const fn buffer_len(&self) -> usize {
         self.integrity_check_value.len() + field::SEQUENCE_NUMBER.end
     }

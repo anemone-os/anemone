@@ -2,14 +2,16 @@ use byteorder::{ByteOrder, NetworkEndian};
 use core::{cmp, fmt, ops};
 
 use super::{Error, Result};
-use crate::phy::ChecksumCapabilities;
-use crate::wire::ip::checksum;
-use crate::wire::{IpAddress, IpProtocol};
+use crate::{
+    phy::ChecksumCapabilities,
+    wire::{IpAddress, IpProtocol, ip::checksum},
+};
 
 /// A TCP sequence number.
 ///
-/// A sequence number is a monotonically advancing integer modulo 2<sup>32</sup>.
-/// Sequence numbers do not have a discontiguity when compared pairwise across a signed overflow.
+/// A sequence number is a monotonically advancing integer modulo
+/// 2<sup>32</sup>. Sequence numbers do not have a discontiguity when compared
+/// pairwise across a signed overflow.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub struct SeqNumber(pub i32);
 
@@ -327,9 +329,8 @@ impl<T: AsRef<[u8]>> Packet<T> {
         Ok(false)
     }
 
-    /// Return the selective acknowledgement ranges, if any. If there are none in the packet, an
-    /// array of ``None`` values will be returned.
-    ///
+    /// Return the selective acknowledgement ranges, if any. If there are none
+    /// in the packet, an array of ``None`` values will be returned.
     pub fn selective_ack_ranges(&self) -> Result<[Option<(u32, u32)>; 3]> {
         let data = self.buffer.as_ref();
         let mut options = &data[field::OPTIONS(self.header_len())];
@@ -346,8 +347,8 @@ impl<T: AsRef<[u8]>> Packet<T> {
     /// Validate the partial checksum.
     ///
     /// # Panics
-    /// This function panics unless `src_addr` and `dst_addr` belong to the same family,
-    /// and that family is IPv4 or IPv6.
+    /// This function panics unless `src_addr` and `dst_addr` belong to the same
+    /// family, and that family is IPv4 or IPv6.
     ///
     /// # Fuzzing
     /// This function always returns `true` when fuzzing.
@@ -365,8 +366,8 @@ impl<T: AsRef<[u8]>> Packet<T> {
     /// Validate the packet checksum.
     ///
     /// # Panics
-    /// This function panics unless `src_addr` and `dst_addr` belong to the same family,
-    /// and that family is IPv4 or IPv6.
+    /// This function panics unless `src_addr` and `dst_addr` belong to the same
+    /// family, and that family is IPv4 or IPv6.
     ///
     /// # Fuzzing
     /// This function always returns `true` when fuzzing.
@@ -589,8 +590,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     /// Compute and fill in the header checksum.
     ///
     /// # Panics
-    /// This function panics unless `src_addr` and `dst_addr` belong to the same family,
-    /// and that family is IPv4 or IPv6.
+    /// This function panics unless `src_addr` and `dst_addr` belong to the same
+    /// family, and that family is IPv4 or IPv6.
     pub fn fill_checksum(&mut self, src_addr: &IpAddress, dst_addr: &IpAddress) {
         self.set_checksum(0);
         let checksum = {
@@ -647,11 +648,11 @@ impl<'a> TcpOption<'a> {
             field::OPT_END => {
                 length = 1;
                 option = TcpOption::EndOfList;
-            }
+            },
             field::OPT_NOP => {
                 length = 1;
                 option = TcpOption::NoOperation;
-            }
+            },
             kind => {
                 length = *buffer.get(1).ok_or(Error)? as usize;
                 let data = buffer.get(2..length).ok_or(Error)?;
@@ -659,7 +660,7 @@ impl<'a> TcpOption<'a> {
                     (field::OPT_END, _) | (field::OPT_NOP, _) => unreachable!(),
                     (field::OPT_MSS, 4) => {
                         option = TcpOption::MaxSegmentSize(NetworkEndian::read_u16(data))
-                    }
+                    },
                     (field::OPT_MSS, _) => return Err(Error),
                     (field::OPT_WS, 3) => option = TcpOption::WindowScale(data[0]),
                     (field::OPT_WS, _) => return Err(Error),
@@ -699,15 +700,15 @@ impl<'a> TcpOption<'a> {
                             };
                         });
                         option = TcpOption::SackRange(sack_ranges);
-                    }
+                    },
                     (field::OPT_TSTAMP, 10) => {
                         let tsval = NetworkEndian::read_u32(&data[0..4]);
                         let tsecr = NetworkEndian::read_u32(&data[4..8]);
                         option = TcpOption::TimeStamp { tsval, tsecr };
-                    }
+                    },
                     (_, _) => option = TcpOption::Unknown { kind, data },
                 }
-            }
+            },
         }
         Ok((&buffer[length..], option))
     }
@@ -734,11 +735,11 @@ impl<'a> TcpOption<'a> {
                 for p in buffer.iter_mut() {
                     *p = field::OPT_END;
                 }
-            }
+            },
             TcpOption::NoOperation => {
                 length = 1;
                 buffer[0] = field::OPT_NOP;
-            }
+            },
             _ => {
                 length = self.buffer_len();
                 buffer[1] = length as u8;
@@ -747,14 +748,14 @@ impl<'a> TcpOption<'a> {
                     &TcpOption::MaxSegmentSize(value) => {
                         buffer[0] = field::OPT_MSS;
                         NetworkEndian::write_u16(&mut buffer[2..], value)
-                    }
+                    },
                     &TcpOption::WindowScale(value) => {
                         buffer[0] = field::OPT_WS;
                         buffer[2] = value;
-                    }
+                    },
                     &TcpOption::SackPermitted => {
                         buffer[0] = field::OPT_SACKPERM;
-                    }
+                    },
                     &TcpOption::SackRange(slice) => {
                         buffer[0] = field::OPT_SACKRNG;
                         slice
@@ -767,21 +768,21 @@ impl<'a> TcpOption<'a> {
                                 NetworkEndian::write_u32(&mut buffer[pos..], first);
                                 NetworkEndian::write_u32(&mut buffer[pos + 4..], second);
                             });
-                    }
+                    },
                     &TcpOption::TimeStamp { tsval, tsecr } => {
                         buffer[0] = field::OPT_TSTAMP;
                         NetworkEndian::write_u32(&mut buffer[2..], tsval);
                         NetworkEndian::write_u32(&mut buffer[6..], tsecr);
-                    }
+                    },
                     &TcpOption::Unknown {
                         kind,
                         data: provided,
                     } => {
                         buffer[0] = kind;
                         buffer[2..].copy_from_slice(provided)
-                    }
+                    },
                 }
-            }
+            },
         }
         &mut buffer[length..]
     }
@@ -860,7 +861,8 @@ impl TcpTimestampRepr {
 }
 
 impl<'a> Repr<'a> {
-    /// Parse a Transmission Control Protocol packet and return a high-level representation.
+    /// Parse a Transmission Control Protocol packet and return a high-level
+    /// representation.
     pub fn parse<T>(
         packet: &Packet<&'a T>,
         src_addr: &IpAddress,
@@ -897,9 +899,10 @@ impl<'a> Repr<'a> {
             false => None,
         };
         // The PSH flag is ignored.
-        // The URG flag and the urgent field is ignored. This behavior is standards-compliant,
-        // however, most deployed systems (e.g. Linux) are *not* standards-compliant, and would
-        // cut the byte at the urgent pointer from the stream.
+        // The URG flag and the urgent field is ignored. This behavior is
+        // standards-compliant, however, most deployed systems (e.g. Linux) are
+        // *not* standards-compliant, and would cut the byte at the urgent
+        // pointer from the stream.
 
         let mut max_seg_size = None;
         let mut window_scale = None;
@@ -930,12 +933,12 @@ impl<'a> Repr<'a> {
                     } else {
                         Some(value)
                     };
-                }
+                },
                 TcpOption::SackPermitted => sack_permitted = true,
                 TcpOption::SackRange(slice) => sack_ranges = slice,
                 TcpOption::TimeStamp { tsval, tsecr } => {
                     timestamp = Some(TcpTimestampRepr::new(tsval, tsecr));
-                }
+                },
                 _ => (),
             }
             options = next_options;
@@ -957,7 +960,8 @@ impl<'a> Repr<'a> {
         })
     }
 
-    /// Return the length of a header that will be emitted from this high-level representation.
+    /// Return the length of a header that will be emitted from this high-level
+    /// representation.
     ///
     /// This should be used for buffer space calculations.
     /// The TCP header length is a multiple of 4.
@@ -989,12 +993,14 @@ impl<'a> Repr<'a> {
         length
     }
 
-    /// Return the length of a packet that will be emitted from this high-level representation.
+    /// Return the length of a packet that will be emitted from this high-level
+    /// representation.
     pub fn buffer_len(&self) -> usize {
         self.header_len() + self.payload.len()
     }
 
-    /// Emit a high-level representation into a Transmission Control Protocol packet.
+    /// Emit a high-level representation into a Transmission Control Protocol
+    /// packet.
     pub fn emit<T>(
         &self,
         packet: &mut Packet<&mut T>,
@@ -1123,10 +1129,13 @@ impl<T: AsRef<[u8]> + ?Sized> fmt::Display for Packet<&T> {
                 TcpOption::MaxSegmentSize(value) => write!(f, " mss={value}")?,
                 TcpOption::WindowScale(value) => write!(f, " ws={value}")?,
                 TcpOption::SackPermitted => write!(f, " sACK")?,
-                TcpOption::SackRange(slice) => write!(f, " sACKr{slice:?}")?, // debug print conveniently includes the []s
+                TcpOption::SackRange(slice) => write!(f, " sACKr{slice:?}")?, /* debug print
+                                                                                * conveniently
+                                                                                * includes the
+                                                                                * []s */
                 TcpOption::TimeStamp { tsval, tsecr } => {
                     write!(f, " tsval {tsval:08x} tsecr {tsecr:08x}")?
-                }
+                },
                 TcpOption::Unknown { kind, .. } => write!(f, " opt({kind})")?,
             }
             options = next_options;

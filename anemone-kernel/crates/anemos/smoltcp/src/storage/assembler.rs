@@ -14,7 +14,8 @@ impl fmt::Display for TooManyHolesError {
 #[cfg(feature = "std")]
 impl std::error::Error for TooManyHolesError {}
 
-/// A contiguous chunk of absent data, followed by a contiguous chunk of present data.
+/// A contiguous chunk of absent data, followed by a contiguous chunk of present
+/// data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Contig {
     hole_size: usize,
@@ -93,7 +94,8 @@ impl Contig {
 
 /// A buffer (re)assembler.
 ///
-/// Currently, up to a hardcoded limit of 4 or 32 holes can be tracked in the buffer.
+/// Currently, up to a hardcoded limit of 4 or 32 holes can be tracked in the
+/// buffer.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Assembler {
     contigs: [Contig; ASSEMBLER_MAX_SEGMENT_COUNT],
@@ -128,7 +130,8 @@ impl defmt::Format for Assembler {
 }
 
 // Invariant on Assembler::contigs:
-// - There's an index `i` where all contigs before have data, and all contigs after don't (are unused).
+// - There's an index `i` where all contigs before have data, and all contigs
+//   after don't (are unused).
 // - All contigs with data must have hole_size != 0, except the first.
 
 impl Assembler {
@@ -148,7 +151,8 @@ impl Assembler {
         self.contigs[0]
     }
 
-    /// Return length of the front contiguous range without removing it from the assembler
+    /// Return length of the front contiguous range without removing it from the
+    /// assembler
     pub fn peek_front(&self) -> usize {
         let front = self.front();
         if front.has_hole() { 0 } else { front.data_size }
@@ -193,7 +197,8 @@ impl Assembler {
     }
 
     /// Add a new contiguous range to the assembler,
-    /// or return `Err(TooManyHolesError)` if too many discontinuities are already recorded.
+    /// or return `Err(TooManyHolesError)` if too many discontinuities are
+    /// already recorded.
     pub fn add(&mut self, mut offset: usize, size: usize) -> Result<(), TooManyHolesError> {
         if size == 0 {
             return Ok(());
@@ -204,7 +209,8 @@ impl Assembler {
         // Find index of the contig containing the start of the range.
         loop {
             if i == self.contigs.len() {
-                // The new range is after all the previous ranges, but there/s no space to add it.
+                // The new range is after all the previous ranges, but there/s no space to add
+                // it.
                 return Err(TooManyHolesError);
             }
             let contig = &mut self.contigs[i];
@@ -295,8 +301,8 @@ impl Assembler {
     ///
     /// This is equivalent to calling `add` then `remove_front` individually,
     /// except it's guaranteed to not fail when offset = 0.
-    /// This is required for TCP: we must never drop the next expected segment, or
-    /// the protocol might get stuck.
+    /// This is required for TCP: we must never drop the next expected segment,
+    /// or the protocol might get stuck.
     pub fn add_then_remove_front(
         &mut self,
         offset: usize,

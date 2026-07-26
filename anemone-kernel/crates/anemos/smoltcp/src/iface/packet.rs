@@ -1,5 +1,4 @@
-use crate::phy::DeviceCapabilities;
-use crate::wire::*;
+use crate::{phy::DeviceCapabilities, wire::*};
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, PartialEq)]
@@ -80,7 +79,7 @@ impl<'p> Packet<'p> {
             #[cfg(feature = "proto-ipv4")]
             IpPayload::Icmpv4(icmpv4_repr) => {
                 icmpv4_repr.emit(&mut Icmpv4Packet::new_unchecked(payload), &caps.checksum)
-            }
+            },
             #[cfg(all(feature = "proto-ipv4", feature = "multicast"))]
             IpPayload::Igmp(igmp_repr) => igmp_repr.emit(&mut IgmpPacket::new_unchecked(payload)),
             #[cfg(feature = "proto-ipv6")]
@@ -97,7 +96,7 @@ impl<'p> Packet<'p> {
                     &mut Icmpv6Packet::new_unchecked(payload),
                     &caps.checksum,
                 )
-            }
+            },
             #[cfg(feature = "proto-ipv6")]
             IpPayload::HopByHopIcmpv6(hbh_repr, icmpv6_repr) => {
                 let ipv6_repr = match _ip_repr {
@@ -127,13 +126,13 @@ impl<'p> Packet<'p> {
                     &mut Icmpv6Packet::new_unchecked(&mut payload[hbh_end..]),
                     &caps.checksum,
                 );
-            }
+            },
 
             #[cfg(feature = "socket-raw")]
             IpPayload::Raw(raw_packet) => {
                 let len = raw_packet.len();
                 payload[..len].copy_from_slice(raw_packet)
-            }
+            },
             #[cfg(any(feature = "socket-udp", feature = "socket-dns"))]
             IpPayload::Udp(udp_repr, inner_payload) => udp_repr.emit(
                 &mut UdpPacket::new_unchecked(payload),
@@ -169,7 +168,7 @@ impl<'p> Packet<'p> {
                     &_ip_repr.dst_addr(),
                     &caps.checksum,
                 );
-            }
+            },
             #[cfg(feature = "socket-dhcpv4")]
             IpPayload::Dhcpv4(udp_repr, dhcp_repr) => udp_repr.emit(
                 &mut UdpPacket::new_unchecked(payload),

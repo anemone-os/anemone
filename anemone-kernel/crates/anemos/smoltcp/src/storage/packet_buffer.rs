@@ -46,10 +46,11 @@ pub struct PacketBuffer<'a, H: 'a> {
 }
 
 impl<'a, H> PacketBuffer<'a, H> {
-    /// Create a new packet buffer with the provided metadata and payload storage.
+    /// Create a new packet buffer with the provided metadata and payload
+    /// storage.
     ///
-    /// Metadata storage limits the maximum _number_ of packets in the buffer and payload
-    /// storage limits the maximum _total size_ of packets.
+    /// Metadata storage limits the maximum _number_ of packets in the buffer
+    /// and payload storage limits the maximum _total size_ of packets.
     pub fn new<MS, PS>(metadata_storage: MS, payload_storage: PS) -> PacketBuffer<'a, H>
     where
         MS: Into<ManagedSlice<'a, PacketMetadata<H>>>,
@@ -71,8 +72,8 @@ impl<'a, H> PacketBuffer<'a, H> {
         self.metadata_ring.is_full()
     }
 
-    // There is currently no enqueue_with() because of the complexity of managing padding
-    // in case of failure.
+    // There is currently no enqueue_with() because of the complexity of managing
+    // padding in case of failure.
 
     /// Enqueue a single packet with the given header into the buffer, and
     /// return a reference to its payload, or return `Err(Full)`
@@ -117,8 +118,9 @@ impl<'a, H> PacketBuffer<'a, H> {
         Ok(payload_buf)
     }
 
-    /// Call `f` with a packet from the buffer large enough to fit `max_size` bytes. The packet
-    /// is shrunk to the size returned from `f` and enqueued into the buffer.
+    /// Call `f` with a packet from the buffer large enough to fit `max_size`
+    /// bytes. The packet is shrunk to the size returned from `f` and
+    /// enqueued into the buffer.
     pub fn enqueue_with_infallible<'b, F>(
         &'b mut self,
         max_size: usize,
@@ -175,8 +177,9 @@ impl<'a, H> PacketBuffer<'a, H> {
         });
     }
 
-    /// Call `f` with a single packet from the buffer, and dequeue the packet if `f`
-    /// returns successfully, or return `Err(EmptyError)` if the buffer is empty.
+    /// Call `f` with a single packet from the buffer, and dequeue the packet if
+    /// `f` returns successfully, or return `Err(EmptyError)` if the buffer
+    /// is empty.
     pub fn dequeue_with<'c, R, E, F>(&'c mut self, f: F) -> Result<Result<R, E>, Empty>
     where
         F: FnOnce(&mut H, &'c mut [u8]) -> Result<R, E>,
@@ -200,8 +203,9 @@ impl<'a, H> PacketBuffer<'a, H> {
         })
     }
 
-    /// Dequeue a single packet from the buffer, and return a reference to its payload
-    /// as well as its header, or return `Err(Error::Exhausted)` if the buffer is empty.
+    /// Dequeue a single packet from the buffer, and return a reference to its
+    /// payload as well as its header, or return `Err(Error::Exhausted)` if
+    /// the buffer is empty.
     pub fn dequeue(&mut self) -> Result<(H, &mut [u8]), Empty> {
         self.dequeue_padding();
 
@@ -212,10 +216,12 @@ impl<'a, H> PacketBuffer<'a, H> {
         Ok((meta.header.take().unwrap(), payload_buf))
     }
 
-    /// Peek at a single packet from the buffer without removing it, and return a reference to
-    /// its payload as well as its header, or return `Err(Error:Exhausted)` if the buffer is empty.
+    /// Peek at a single packet from the buffer without removing it, and return
+    /// a reference to its payload as well as its header, or return
+    /// `Err(Error:Exhausted)` if the buffer is empty.
     ///
-    /// This function otherwise behaves identically to [dequeue](#method.dequeue).
+    /// This function otherwise behaves identically to
+    /// [dequeue](#method.dequeue).
     pub fn peek(&mut self) -> Result<(&H, &[u8]), Empty> {
         self.dequeue_padding();
 

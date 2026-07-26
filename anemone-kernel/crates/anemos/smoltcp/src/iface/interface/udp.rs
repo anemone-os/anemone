@@ -62,7 +62,7 @@ impl InterfaceInner {
                     data: &ip_payload[0..payload_len],
                 };
                 self.icmpv4_reply(ipv4_repr, icmpv4_reply_repr)
-            }
+            },
             #[cfg(feature = "proto-ipv6")]
             IpRepr::Ipv6(ipv6_repr) => {
                 let payload_len =
@@ -73,7 +73,7 @@ impl InterfaceInner {
                     data: &ip_payload[0..payload_len],
                 };
                 self.icmpv6_reply(ipv6_repr, icmpv6_reply_repr)
-            }
+            },
         }
     }
 }

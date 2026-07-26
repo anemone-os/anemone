@@ -40,8 +40,7 @@ assert_eq!(
 ```
 */
 
-use core::fmt;
-use core::marker::PhantomData;
+use core::{fmt, marker::PhantomData};
 
 /// Indentation state.
 #[derive(Debug)]
@@ -52,8 +51,9 @@ pub struct PrettyIndent {
 }
 
 impl PrettyIndent {
-    /// Create an indentation state. The entire listing will be indented by the width
-    /// of `prefix`, and `prefix` will appear at the start of the first line.
+    /// Create an indentation state. The entire listing will be indented by the
+    /// width of `prefix`, and `prefix` will appear at the start of the
+    /// first line.
     pub fn new(prefix: &'static str) -> PrettyIndent {
         PrettyIndent { prefix, level: 0 }
     }
@@ -78,11 +78,12 @@ impl fmt::Display for PrettyIndent {
 
 /// Interface for printing listings.
 pub trait PrettyPrint {
-    /// Write a concise, formatted representation of a packet contained in the provided
-    /// buffer, and any nested packets it may contain.
+    /// Write a concise, formatted representation of a packet contained in the
+    /// provided buffer, and any nested packets it may contain.
     ///
-    /// `pretty_print` accepts a buffer and not a packet wrapper because the packet might
-    /// be truncated, and so it might not be possible to create the packet wrapper.
+    /// `pretty_print` accepts a buffer and not a packet wrapper because the
+    /// packet might be truncated, and so it might not be possible to create
+    /// the packet wrapper.
     fn pretty_print(
         buffer: &dyn AsRef<[u8]>,
         fmt: &mut fmt::Formatter,
@@ -98,7 +99,8 @@ pub struct PrettyPrinter<'a, T: PrettyPrint> {
 }
 
 impl<'a, T: PrettyPrint> PrettyPrinter<'a, T> {
-    /// Format the listing with the recorded parameters when Display::fmt is called.
+    /// Format the listing with the recorded parameters when Display::fmt is
+    /// called.
     pub fn new(prefix: &'static str, buffer: &'a dyn AsRef<[u8]>) -> PrettyPrinter<'a, T> {
         PrettyPrinter {
             prefix: prefix,

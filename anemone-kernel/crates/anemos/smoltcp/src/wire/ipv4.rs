@@ -2,8 +2,10 @@ use byteorder::{ByteOrder, NetworkEndian};
 use core::fmt;
 
 use super::{Error, Result};
-use crate::phy::ChecksumCapabilities;
-use crate::wire::ip::{checksum, pretty_print_ip_payload};
+use crate::{
+    phy::ChecksumCapabilities,
+    wire::ip::{checksum, pretty_print_ip_payload},
+};
 
 pub use super::IpProtocol as Protocol;
 
@@ -45,11 +47,13 @@ pub use core::net::Ipv4Addr as Address;
 pub(crate) trait AddressExt {
     /// Query whether the address is an unicast address.
     ///
-    /// `x_` prefix is to avoid a collision with the still-unstable method in `core::ip`.
+    /// `x_` prefix is to avoid a collision with the still-unstable method in
+    /// `core::ip`.
     fn x_is_unicast(&self) -> bool;
 
     /// If `self` is a CIDR-compatible subnet mask, return `Some(prefix_len)`,
-    /// where `prefix_len` is the number of leading zeroes. Return `None` otherwise.
+    /// where `prefix_len` is the number of leading zeroes. Return `None`
+    /// otherwise.
     fn prefix_len(&self) -> Option<u8>;
 }
 
@@ -84,8 +88,8 @@ impl AddressExt for Address {
     }
 }
 
-/// A specification of an IPv4 CIDR block, containing an address and a variable-length
-/// subnet masking prefix length.
+/// A specification of an IPv4 CIDR block, containing an address and a
+/// variable-length subnet masking prefix length.
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct Cidr {
     address: Address,
@@ -230,7 +234,8 @@ impl<T: AsRef<[u8]>> Packet<T> {
     /// Returns `Err(Error)` if the buffer is too short.
     /// Returns `Err(Error)` if the header length is greater
     /// than total length.
-    /// Returns `Err(Error)` if the header length is less than minimum allowed IHL
+    /// Returns `Err(Error)` if the header length is less than minimum allowed
+    /// IHL
     ///
     /// The result of this check is invalidated by calling [set_header_len]
     /// and [set_total_len].
@@ -539,7 +544,8 @@ pub struct Repr {
 }
 
 impl Repr {
-    /// Parse an Internet Protocol version 4 packet and return a high-level representation.
+    /// Parse an Internet Protocol version 4 packet and return a high-level
+    /// representation.
     pub fn parse<T: AsRef<[u8]> + ?Sized>(
         packet: &Packet<&T>,
         checksum_caps: &ChecksumCapabilities,
@@ -562,9 +568,10 @@ impl Repr {
 
         let payload_len = packet.total_len() as usize - packet.header_len() as usize;
 
-        // All DSCP values are acceptable, since they are of no concern to receiving endpoint.
-        // All ECN values are acceptable, since ECN requires opt-in from both endpoints.
-        // All TTL values are acceptable, since we do not perform routing.
+        // All DSCP values are acceptable, since they are of no concern to receiving
+        // endpoint. All ECN values are acceptable, since ECN requires opt-in
+        // from both endpoints. All TTL values are acceptable, since we do not
+        // perform routing.
         Ok(Repr {
             src_addr: packet.src_addr(),
             dst_addr: packet.dst_addr(),
@@ -574,13 +581,15 @@ impl Repr {
         })
     }
 
-    /// Return the length of a header that will be emitted from this high-level representation.
+    /// Return the length of a header that will be emitted from this high-level
+    /// representation.
     pub const fn buffer_len(&self) -> usize {
         // We never emit any options.
         field::DST_ADDR.end
     }
 
-    /// Emit a high-level representation into an Internet Protocol version 4 packet.
+    /// Emit a high-level representation into an Internet Protocol version 4
+    /// packet.
     pub fn emit<T: AsRef<[u8]> + AsMut<[u8]>>(
         &self,
         packet: &mut Packet<T>,
@@ -652,7 +661,7 @@ impl<T: AsRef<[u8]> + ?Sized> fmt::Display for Packet<&T> {
                     write!(f, " id={}", self.ident())?;
                 }
                 Ok(())
-            }
+            },
         }
     }
 }
@@ -698,7 +707,7 @@ impl<T: AsRef<[u8]>> PrettyPrint for Packet<T> {
                         format_checksum(f, ip_packet.verify_checksum(), false)?;
                         (ip_repr, ip_packet.payload())
                     }
-                }
+                },
             },
         };
 

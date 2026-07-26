@@ -5,11 +5,15 @@ use core::task::Waker;
 use heapless::Vec;
 use managed::ManagedSlice;
 
-use crate::config::{DNS_MAX_NAME_SIZE, DNS_MAX_RESULT_COUNT, DNS_MAX_SERVER_COUNT};
-use crate::socket::{Context, PollAt};
-use crate::time::{Duration, Instant};
-use crate::wire::dns::{Flags, Opcode, Packet, Question, Rcode, Record, RecordData, Repr, Type};
-use crate::wire::{self, IpAddress, IpProtocol, IpRepr, UdpRepr};
+use crate::{
+    config::{DNS_MAX_NAME_SIZE, DNS_MAX_RESULT_COUNT, DNS_MAX_SERVER_COUNT},
+    socket::{Context, PollAt},
+    time::{Duration, Instant},
+    wire::{
+        self, IpAddress, IpProtocol, IpRepr, UdpRepr,
+        dns::{Flags, Opcode, Packet, Question, Rcode, Record, RecordData, Repr, Type},
+    },
+};
 
 #[cfg(feature = "async")]
 use super::WakerRegistration;
@@ -143,7 +147,8 @@ pub struct Socket<'a> {
     servers: Vec<IpAddress, DNS_MAX_SERVER_COUNT>,
     queries: ManagedSlice<'a, Option<DnsQuery>>,
 
-    /// The time-to-live (IPv4) or hop limit (IPv6) value used in outgoing packets.
+    /// The time-to-live (IPv4) or hop limit (IPv6) value used in outgoing
+    /// packets.
     hop_limit: Option<u8>,
 }
 
@@ -176,21 +181,24 @@ impl<'a> Socket<'a> {
         }
     }
 
-    /// Return the time-to-live (IPv4) or hop limit (IPv6) value used in outgoing packets.
+    /// Return the time-to-live (IPv4) or hop limit (IPv6) value used in
+    /// outgoing packets.
     ///
     /// See also the [set_hop_limit](#method.set_hop_limit) method
     pub fn hop_limit(&self) -> Option<u8> {
         self.hop_limit
     }
 
-    /// Set the time-to-live (IPv4) or hop limit (IPv6) value used in outgoing packets.
+    /// Set the time-to-live (IPv4) or hop limit (IPv6) value used in outgoing
+    /// packets.
     ///
-    /// A socket without an explicitly set hop limit value uses the default [IANA recommended]
-    /// value (64).
+    /// A socket without an explicitly set hop limit value uses the default
+    /// [IANA recommended] value (64).
     ///
     /// # Panics
     ///
-    /// This function panics if a hop limit value of 0 is given. See [RFC 1122 § 3.2.1.7].
+    /// This function panics if a hop limit value of 0 is given. See [RFC 1122 §
+    /// 3.2.1.7].
     ///
     /// [IANA recommended]: https://www.iana.org/assignments/ip-parameters/ip-parameters.xhtml
     /// [RFC 1122 § 3.2.1.7]: https://tools.ietf.org/html/rfc1122#section-3.2.1.7
@@ -217,7 +225,7 @@ impl<'a> Socket<'a> {
                 queries.push(None);
                 let index = queries.len() - 1;
                 Some(QueryHandle(index))
-            }
+            },
         }
     }
 
@@ -331,11 +339,11 @@ impl<'a> Socket<'a> {
                 let res = q.addresses.clone();
                 *slot = None; // Free up the slot for recycling.
                 Ok(res)
-            }
+            },
             State::Failure => {
                 *slot = None; // Free up the slot for recycling.
                 Err(GetQueryResultError::Failed)
-            }
+            },
         }
     }
 
@@ -354,7 +362,8 @@ impl<'a> Socket<'a> {
 
     /// Assign a waker to a query slot
     ///
-    /// The waker will be woken when the query completes, either successfully or failed.
+    /// The waker will be woken when the query completes, either successfully or
+    /// failed.
     ///
     /// # Panics
     ///
@@ -400,7 +409,7 @@ impl<'a> Socket<'a> {
             Err(_) => {
                 net_trace!("dns packet malformed");
                 return;
-            }
+            },
         };
         if p.opcode() != Opcode::Query {
             net_trace!("unwanted opcode {:?}", p.opcode());
@@ -436,7 +445,7 @@ impl<'a> Socket<'a> {
                     Err(_) => {
                         net_trace!("question malformed");
                         return;
-                    }
+                    },
                 };
 
                 if question.type_ != pq.type_ {
@@ -445,15 +454,15 @@ impl<'a> Socket<'a> {
                 }
 
                 match eq_names(p.parse_name(question.name), p.parse_name(&pq.name)) {
-                    Ok(true) => {}
+                    Ok(true) => {},
                     Ok(false) => {
                         net_trace!("question name mismatch");
                         return;
-                    }
+                    },
                     Err(_) => {
                         net_trace!("dns question name malformed");
                         return;
-                    }
+                    },
                 }
 
                 let mut addresses = Vec::new();
@@ -464,20 +473,20 @@ impl<'a> Socket<'a> {
                         Err(_) => {
                             net_trace!("dns answer record malformed");
                             return;
-                        }
+                        },
                     };
                     payload = payload2;
 
                     match eq_names(p.parse_name(r.name), p.parse_name(&pq.name)) {
-                        Ok(true) => {}
+                        Ok(true) => {},
                         Ok(false) => {
                             net_trace!("answer name mismatch: {:?}", r);
                             continue;
-                        }
+                        },
                         Err(_) => {
                             net_trace!("dns answer record name malformed");
                             return;
-                        }
+                        },
                     }
 
                     match r.data {
@@ -487,14 +496,14 @@ impl<'a> Socket<'a> {
                             if addresses.push(addr.into()).is_err() {
                                 net_trace!("too many addresses in response, ignoring {:?}", addr);
                             }
-                        }
+                        },
                         #[cfg(feature = "proto-ipv6")]
                         RecordData::Aaaa(addr) => {
                             net_trace!("AAAA: {:?}", addr);
                             if addresses.push(addr.into()).is_err() {
                                 net_trace!("too many addresses in response, ignoring {:?}", addr);
                             }
-                        }
+                        },
                         RecordData::Cname(name) => {
                             net_trace!("CNAME: {:?}", name);
 
@@ -509,10 +518,10 @@ impl<'a> Socket<'a> {
                                 net_trace!("dns answer cname malformed");
                                 return;
                             }
-                        }
+                        },
                         RecordData::Other(type_, data) => {
                             net_trace!("unknown: {:?} {:?}", type_, data)
-                        }
+                        },
                     }
                 }
 
@@ -622,7 +631,7 @@ impl<'a> Socket<'a> {
                         net_trace!("no source address for destination {}", dst_addr);
                         q.set_state(State::Failure);
                         continue;
-                    }
+                    },
                 };
 
                 let ip_repr = IpRepr::new(
@@ -689,7 +698,7 @@ fn eq_names<'a>(
                 if la != lb {
                     return Ok(false);
                 }
-            }
+            },
         }
     }
 }

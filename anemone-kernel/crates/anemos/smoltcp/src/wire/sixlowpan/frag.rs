@@ -3,11 +3,11 @@
 //! [RFC 4944 § 5.3]: https://datatracker.ietf.org/doc/html/rfc4944#section-5.3
 
 use super::{DISPATCH_FIRST_FRAGMENT_HEADER, DISPATCH_FRAGMENT_HEADER};
-use crate::wire::{Error, Result};
-use crate::wire::{Ieee802154Address, Ieee802154Repr};
+use crate::wire::{Error, Ieee802154Address, Ieee802154Repr, Result};
 use byteorder::{ByteOrder, NetworkEndian};
 
-/// Key used for identifying all the link fragments that belong to the same packet.
+/// Key used for identifying all the link fragments that belong to the same
+/// packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Key {
@@ -97,7 +97,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
             DISPATCH_FIRST_FRAGMENT_HEADER if buffer.len() >= FIRST_FRAGMENT_HEADER_SIZE => Ok(()),
             DISPATCH_FIRST_FRAGMENT_HEADER if buffer.len() < FIRST_FRAGMENT_HEADER_SIZE => {
                 Err(Error)
-            }
+            },
             DISPATCH_FRAGMENT_HEADER if buffer.len() >= NEXT_FRAGMENT_HEADER_SIZE => Ok(()),
             DISPATCH_FRAGMENT_HEADER if buffer.len() < NEXT_FRAGMENT_HEADER_SIZE => Err(Error),
             _ => Err(Error),
@@ -134,7 +134,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
             DISPATCH_FRAGMENT_HEADER => {
                 let raw = self.buffer.as_ref();
                 raw[field::DATAGRAM_OFFSET]
-            }
+            },
             _ => unreachable!(),
         }
     }
@@ -162,11 +162,11 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Packet<&'a T> {
             DISPATCH_FIRST_FRAGMENT_HEADER => {
                 let raw = self.buffer.as_ref();
                 &raw[field::FIRST_FRAGMENT_REST]
-            }
+            },
             DISPATCH_FRAGMENT_HEADER => {
                 let raw = self.buffer.as_ref();
                 &raw[field::NEXT_FRAGMENT_REST]
-            }
+            },
             _ => unreachable!(),
         }
     }
@@ -209,10 +209,10 @@ impl core::fmt::Display for Repr {
         match self {
             Repr::FirstFragment { size, tag } => {
                 write!(f, "FirstFrag size={size} tag={tag}")
-            }
+            },
             Repr::Fragment { size, tag, offset } => {
                 write!(f, "NthFrag size={size} tag={tag} offset={offset}")
-            }
+            },
         }
     }
 }
@@ -223,10 +223,10 @@ impl defmt::Format for Repr {
         match self {
             Repr::FirstFragment { size, tag } => {
                 defmt::write!(fmt, "FirstFrag size={} tag={}", size, tag);
-            }
+            },
             Repr::Fragment { size, tag, offset } => {
                 defmt::write!(fmt, "NthFrag size={} tag={} offset={}", size, tag, offset);
-            }
+            },
         }
     }
 }
@@ -264,13 +264,13 @@ impl Repr {
                 packet.set_dispatch_field(DISPATCH_FIRST_FRAGMENT_HEADER);
                 packet.set_datagram_size(*size);
                 packet.set_datagram_tag(*tag);
-            }
+            },
             Self::Fragment { size, tag, offset } => {
                 packet.set_dispatch_field(DISPATCH_FRAGMENT_HEADER);
                 packet.set_datagram_size(*size);
                 packet.set_datagram_tag(*tag);
                 packet.set_datagram_offset(*offset);
-            }
+            },
         }
     }
 }

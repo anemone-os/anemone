@@ -39,8 +39,8 @@ pub(crate) struct ParentSet {
 }
 
 impl ParentSet {
-    /// Add a new parent to the parent set. The Rank of the new parent should be lower than the
-    /// Rank of the node that holds this parent set.
+    /// Add a new parent to the parent set. The Rank of the new parent should be
+    /// lower than the Rank of the node that holds this parent set.
     pub(crate) fn add(&mut self, address: Ipv6Address, parent: Parent) {
         if let Some(p) = self.parents.get_mut(&address) {
             *p = parent;
@@ -134,8 +134,8 @@ mod tests {
             );
         }
 
-        // This one is not added to the set, because its Rank is worse than any other parent in the
-        // set.
+        // This one is not added to the set, because its Rank is worse than any other
+        // parent in the set.
         let address = Ipv6Address::new(0, 0, 0, 0, 0, 0, 0, 8);
         set.add(
             address,

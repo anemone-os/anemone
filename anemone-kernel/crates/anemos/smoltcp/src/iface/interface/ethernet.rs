@@ -10,7 +10,8 @@ impl InterfaceInner {
     ) -> Option<EthernetPacket<'frame>> {
         let eth_frame = check!(EthernetFrame::new_checked(frame));
 
-        // Ignore any packets not directed to our hardware address or any of the multicast groups.
+        // Ignore any packets not directed to our hardware address or any of the
+        // multicast groups.
         if !eth_frame.dst_addr().is_broadcast()
             && !eth_frame.dst_addr().is_multicast()
             && HardwareAddress::Ethernet(eth_frame.dst_addr()) != self.hardware_addr
@@ -33,13 +34,13 @@ impl InterfaceInner {
                     fragments,
                 )
                 .map(EthernetPacket::Ip)
-            }
+            },
             #[cfg(feature = "proto-ipv6")]
             EthernetProtocol::Ipv6 => {
                 let ipv6_packet = check!(Ipv6Packet::new_checked(eth_frame.payload()));
                 self.process_ipv6(sockets, meta, eth_frame.src_addr().into(), &ipv6_packet)
                     .map(EthernetPacket::Ip)
-            }
+            },
             // Drop all other traffic.
             _ => None,
         }

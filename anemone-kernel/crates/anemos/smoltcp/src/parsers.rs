@@ -3,8 +3,7 @@
     allow(dead_code)
 )]
 
-use core::result;
-use core::str::FromStr;
+use core::{result, str::FromStr};
 
 #[cfg(feature = "medium-ethernet")]
 use crate::wire::EthernetAddress;
@@ -42,7 +41,7 @@ impl<'a> Parser<'a> {
             Some(&chr) => {
                 self.pos += 1;
                 Ok(chr)
-            }
+            },
             None => Err(()),
         }
     }
@@ -57,7 +56,7 @@ impl<'a> Parser<'a> {
             Err(()) => {
                 self.pos = pos;
                 None
-            }
+            },
         }
     }
 
@@ -113,7 +112,7 @@ impl<'a> Parser<'a> {
                 Some(digit) => {
                     value *= if hex { 16 } else { 10 };
                     value += digit as u32;
-                }
+                },
                 None => break,
             }
         }
@@ -173,12 +172,12 @@ impl<'a> Parser<'a> {
                 // this is the last character we can parse.
                 use_tail = true;
                 true
-            }
+            },
             Some(_) => {
                 // This is a bad address. Only one double colon is
                 // allowed and an address is only 128 bits.
                 return Err(());
-            }
+            },
             None => {
                 if *head_idx != 0 || use_tail && *tail_idx != 0 {
                     // If this is not the first number or the position following
@@ -186,7 +185,7 @@ impl<'a> Parser<'a> {
                     self.accept_char(b':')?;
                 }
                 false
-            }
+            },
         };
 
         match self.try_do(|p| p.accept_number(4, 0x10000, true)) {
@@ -202,7 +201,7 @@ impl<'a> Parser<'a> {
                     });
                 }
                 Ok(())
-            }
+            },
             Some(part) if *tail_idx < 6 => {
                 // Valid u16 to be added to the address
                 tail[*tail_idx] = part as u16;
@@ -215,19 +214,19 @@ impl<'a> Parser<'a> {
                     });
                 }
                 Ok(())
-            }
+            },
             Some(_) => {
                 // Tail or head section is too long
                 Err(())
-            }
+            },
             None if double_colon => {
                 // The address ends with "::". E.g. 1234:: or ::
                 Ok(())
-            }
+            },
             None => {
                 // Invalid address
                 Err(())
-            }
+            },
         }?;
 
         if *head_idx + *tail_idx > 8 {

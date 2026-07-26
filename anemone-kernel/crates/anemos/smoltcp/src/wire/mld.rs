@@ -7,8 +7,10 @@
 use byteorder::{ByteOrder, NetworkEndian};
 
 use super::{Error, Result};
-use crate::wire::Ipv6Address;
-use crate::wire::icmpv6::{Message, Packet, field};
+use crate::wire::{
+    Ipv6Address,
+    icmpv6::{Message, Packet, field},
+};
 
 enum_with_unknown! {
     /// MLDv2 Multicast Listener Report Record Type. See [RFC 3810 § 5.2.12] for
@@ -294,7 +296,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> AddressRecord<T> {
     }
 }
 
-/// A high level representation of an MLDv2 Listener Report Message Address Record.
+/// A high level representation of an MLDv2 Listener Report Message Address
+/// Record.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct AddressRecordRepr<'a> {
@@ -391,7 +394,8 @@ impl<'a> Repr<'a> {
         }
     }
 
-    /// Return the length of a packet that will be emitted from this high-level representation.
+    /// Return the length of a packet that will be emitted from this high-level
+    /// representation.
     pub const fn buffer_len(&self) -> usize {
         match self {
             Repr::Query { data, .. } => field::QUERY_NUM_SRCS.end + data.len(),
@@ -429,7 +433,7 @@ impl<'a> Repr<'a> {
                 packet.set_qqic(*qqic);
                 packet.set_num_srcs(*num_srcs);
                 packet.payload_mut().copy_from_slice(&data[..]);
-            }
+            },
             Repr::Report {
                 nr_mcast_addr_rcrds,
                 data,
@@ -439,7 +443,7 @@ impl<'a> Repr<'a> {
                 packet.clear_reserved();
                 packet.set_nr_mcast_addr_rcrds(*nr_mcast_addr_rcrds);
                 packet.payload_mut().copy_from_slice(&data[..]);
-            }
+            },
             Repr::ReportRecordReprs(records) => {
                 packet.set_msg_type(Message::MldReport);
                 packet.set_msg_code(0);
@@ -450,7 +454,7 @@ impl<'a> Repr<'a> {
                     record.emit(&mut AddressRecord::new_unchecked(&mut *payload));
                     payload = &mut payload[record.buffer_len()..];
                 }
-            }
+            },
         }
     }
 }
@@ -458,9 +462,12 @@ impl<'a> Repr<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::phy::ChecksumCapabilities;
-    use crate::wire::icmpv6::Message;
-    use crate::wire::{IPV6_LINK_LOCAL_ALL_NODES, IPV6_LINK_LOCAL_ALL_ROUTERS, Icmpv6Repr};
+    use crate::{
+        phy::ChecksumCapabilities,
+        wire::{
+            IPV6_LINK_LOCAL_ALL_NODES, IPV6_LINK_LOCAL_ALL_ROUTERS, Icmpv6Repr, icmpv6::Message,
+        },
+    };
 
     static QUERY_PACKET_BYTES: [u8; 44] = [
         0x82, 0x00, 0x73, 0x74, 0x04, 0x00, 0x00, 0x00, 0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -502,7 +509,7 @@ mod test {
             }),
             _ => {
                 panic!("Message type must be a MLDv2 message type");
-            }
+            },
         }
     }
 

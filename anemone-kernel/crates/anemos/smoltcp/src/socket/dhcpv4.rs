@@ -1,15 +1,15 @@
 #[cfg(feature = "async")]
 use core::task::Waker;
 
-use crate::iface::Context;
-use crate::time::{Duration, Instant};
-use crate::wire::dhcpv4::field as dhcpv4_field;
-use crate::wire::{
-    DHCP_CLIENT_PORT, DHCP_MAX_DNS_SERVER_COUNT, DHCP_SERVER_PORT, DhcpMessageType, DhcpPacket,
-    DhcpRepr, IpAddress, IpProtocol, Ipv4Address, Ipv4AddressExt, Ipv4Cidr, Ipv4Repr,
-    UDP_HEADER_LEN, UdpRepr,
+use crate::{
+    iface::Context,
+    time::{Duration, Instant},
+    wire::{
+        DHCP_CLIENT_PORT, DHCP_MAX_DNS_SERVER_COUNT, DHCP_SERVER_PORT, DhcpMessageType, DhcpOption,
+        DhcpPacket, DhcpRepr, HardwareAddress, IpAddress, IpProtocol, Ipv4Address, Ipv4AddressExt,
+        Ipv4Cidr, Ipv4Repr, UDP_HEADER_LEN, UdpRepr, dhcpv4::field as dhcpv4_field,
+    },
 };
-use crate::wire::{DhcpOption, HardwareAddress};
 use heapless::Vec;
 
 #[cfg(feature = "async")]
@@ -49,8 +49,8 @@ pub struct Config<'a> {
 pub struct ServerInfo {
     /// IP address to use as destination in outgoing packets
     pub address: Ipv4Address,
-    /// Server identifier to use in outgoing packets. Usually equal to server_address,
-    /// but may differ in some situations (eg DHCP relays)
+    /// Server identifier to use in outgoing packets. Usually equal to
+    /// server_address, but may differ in some situations (eg DHCP relays)
     pub identifier: Ipv4Address,
 }
 
@@ -96,8 +96,8 @@ struct RenewState {
     /// Whether the T2 time has elapsed
     rebinding: bool,
 
-    /// Expiration timer. When reached, this lease is no longer valid, so it must be
-    /// thrown away and the ethernet interface deconfigured.
+    /// Expiration timer. When reached, this lease is no longer valid, so it
+    /// must be thrown away and the ethernet interface deconfigured.
     expires_at: Instant,
 }
 
@@ -124,7 +124,8 @@ pub struct RetryConfig {
     pub min_renew_timeout: Duration,
     /// An upper bound on how long to wait between retrying a renew or rebind.
     ///
-    /// Set this to [`Duration::MAX`] if you don't want to impose an upper bound.
+    /// Set this to [`Duration::MAX`] if you don't want to impose an upper
+    /// bound.
     pub max_renew_timeout: Duration,
 }
 
@@ -154,13 +155,15 @@ pub enum Event<'a> {
 pub struct Socket<'a> {
     /// State of the DHCP client.
     state: ClientState,
-    /// Set to true on config/state change, cleared back to false by the `config` function.
+    /// Set to true on config/state change, cleared back to false by the
+    /// `config` function.
     config_changed: bool,
     /// xid of the last sent message.
     transaction_id: u32,
 
-    /// Max lease duration. If set, it sets a maximum cap to the server-provided lease duration.
-    /// Useful to react faster to IP configuration changes and to test whether renews work correctly.
+    /// Max lease duration. If set, it sets a maximum cap to the server-provided
+    /// lease duration. Useful to react faster to IP configuration changes
+    /// and to test whether renews work correctly.
     max_lease_duration: Option<Duration>,
 
     retry_config: RetryConfig,
@@ -180,7 +183,8 @@ pub struct Socket<'a> {
     /// A buffer containing all requested parameters.
     parameter_request_list: Option<&'a [u8]>,
 
-    /// Incoming DHCP packets are copied into this buffer, overwriting the previous.
+    /// Incoming DHCP packets are copied into this buffer, overwriting the
+    /// previous.
     receive_packet_buffer: Option<&'a mut [u8]>,
 
     /// Waker registration
@@ -191,8 +195,8 @@ pub struct Socket<'a> {
 /// DHCP client socket.
 ///
 /// The socket acquires an IP address configuration through DHCP autonomously.
-/// You must query the configuration with `.poll()` after every call to `Interface::poll()`,
-/// and apply the configuration to the `Interface`.
+/// You must query the configuration with `.poll()` after every call to
+/// `Interface::poll()`, and apply the configuration to the `Interface`.
 impl<'a> Socket<'a> {
     /// Create a DHCPv4 socket
     #[allow(clippy::new_without_default)]
@@ -253,11 +257,13 @@ impl<'a> Socket<'a> {
 
     /// Set the max lease duration.
     ///
-    /// When set, the lease duration will be capped at the configured duration if the
-    /// DHCP server gives us a longer lease. This is generally not recommended, but
-    /// can be useful for debugging or reacting faster to network configuration changes.
+    /// When set, the lease duration will be capped at the configured duration
+    /// if the DHCP server gives us a longer lease. This is generally not
+    /// recommended, but can be useful for debugging or reacting faster to
+    /// network configuration changes.
     ///
-    /// If None, no max is applied (the lease duration from the DHCP server is used.)
+    /// If None, no max is applied (the lease duration from the DHCP server is
+    /// used.)
     pub fn set_max_lease_duration(&mut self, max_lease_duration: Option<Duration>) {
         self.max_lease_duration = max_lease_duration;
     }
@@ -282,7 +288,8 @@ impl<'a> Socket<'a> {
     /// Set the server/client port
     ///
     /// Allows you to specify the ports used by DHCP.
-    /// This is meant to support esoteric usecases allowed by the dhclient program.
+    /// This is meant to support esoteric usecases allowed by the dhclient
+    /// program.
     pub fn set_ports(&mut self, server_port: u16, client_port: u16) {
         self.server_port = server_port;
         self.client_port = client_port;
@@ -319,14 +326,14 @@ impl<'a> Socket<'a> {
             Err(e) => {
                 net_debug!("DHCP invalid pkt from {}: {:?}", src_ip, e);
                 return;
-            }
+            },
         };
         let dhcp_repr = match DhcpRepr::parse(&dhcp_packet) {
             Ok(dhcp_repr) => dhcp_repr,
             Err(e) => {
                 net_debug!("DHCP error parsing pkt from {}: {:?}", src_ip, e);
                 return;
-            }
+            },
         };
 
         let HardwareAddress::Ethernet(ethernet_addr) = cx.hardware_addr() else {
@@ -347,7 +354,7 @@ impl<'a> Socket<'a> {
                     dhcp_repr.message_type
                 );
                 return;
-            }
+            },
         };
 
         net_debug!(
@@ -380,7 +387,7 @@ impl<'a> Socket<'a> {
                     },
                     requested_ip: dhcp_repr.your_ip, // use the offered ip
                 });
-            }
+            },
             (ClientState::Requesting(state), DhcpMessageType::Ack) => {
                 if let Some((config, renew_at, rebind_at, expires_at)) =
                     Self::parse_ack(cx.now(), &dhcp_repr, self.max_lease_duration, state.server)
@@ -394,12 +401,12 @@ impl<'a> Socket<'a> {
                     });
                     self.config_changed();
                 }
-            }
+            },
             (ClientState::Requesting(_), DhcpMessageType::Nak) => {
                 if !self.ignore_naks {
                     self.reset();
                 }
-            }
+            },
             (ClientState::Renewing(state), DhcpMessageType::Ack) => {
                 if let Some((config, renew_at, rebind_at, expires_at)) = Self::parse_ack(
                     cx.now(),
@@ -425,18 +432,18 @@ impl<'a> Socket<'a> {
                         self.config_changed();
                     }
                 }
-            }
+            },
             (ClientState::Renewing(_), DhcpMessageType::Nak) => {
                 if !self.ignore_naks {
                     self.reset();
                 }
-            }
+            },
             _ => {
                 net_debug!(
                     "DHCP ignoring {:?}: unexpected in current state",
                     dhcp_repr.message_type
                 );
-            }
+            },
         }
     }
 
@@ -451,7 +458,7 @@ impl<'a> Socket<'a> {
             None => {
                 net_debug!("DHCP ignoring ACK because missing subnet_mask");
                 return None;
-            }
+            },
         };
 
         let prefix_len = match IpAddress::Ipv4(subnet_mask).prefix_len() {
@@ -459,7 +466,7 @@ impl<'a> Socket<'a> {
             None => {
                 net_debug!("DHCP ignoring ACK because subnet_mask is not a valid mask");
                 return None;
-            }
+            },
         };
 
         if !dhcp_repr.your_ip.x_is_unicast() {
@@ -476,7 +483,8 @@ impl<'a> Socket<'a> {
         }
 
         // Cleanup the DNS servers list, keeping only unicasts/
-        // TP-Link TD-W8970 sends 0.0.0.0 as second DNS server if there's only one configured :(
+        // TP-Link TD-W8970 sends 0.0.0.0 as second DNS server if there's only one
+        // configured :(
         let mut dns_servers = Vec::new();
 
         dhcp_repr
@@ -516,7 +524,7 @@ impl<'a> Socket<'a> {
                 if renew_duration < rebind_duration && rebind_duration < lease_duration =>
             {
                 (renew_duration, rebind_duration)
-            }
+            },
             // RFC 2131 does not say what to do if only one value is
             // provided, so:
 
@@ -534,14 +542,14 @@ impl<'a> Socket<'a> {
             // duration_of_lease) or T2.
             (None, Some(rebind_duration)) if rebind_duration < lease_duration => {
                 ((lease_duration / 2).min(rebind_duration), rebind_duration)
-            }
+            },
 
             // Use the defaults if the following order is not met:
             // T1 < T2 < lease_duration
             (_, _) => {
                 net_debug!("using default T1 and T2 values since the provided values are invalid");
                 (lease_duration / 2, lease_duration * 7 / 8)
-            }
+            },
         };
         let renew_at = now + renew_duration;
         let rebind_at = now + rebind_duration;
@@ -636,7 +644,7 @@ impl<'a> Socket<'a> {
                 state.retry_at = cx.now() + self.retry_config.discover_timeout;
                 self.transaction_id = next_transaction_id;
                 Ok(())
-            }
+            },
             ClientState::Requesting(state) => {
                 if cx.now() < state.retry_at {
                     return Ok(());
@@ -666,7 +674,7 @@ impl<'a> Socket<'a> {
                 state.retry += 1;
 
                 Ok(())
-            }
+            },
             ClientState::Renewing(state) => {
                 let now = cx.now();
                 if state.expires_at <= now {
@@ -721,7 +729,7 @@ impl<'a> Socket<'a> {
 
                 self.transaction_id = next_transaction_id;
                 Ok(())
-            }
+            },
         }
     }
 
@@ -765,8 +773,9 @@ impl<'a> Socket<'a> {
     }
 
     /// This function _must_ be called when the configuration provided to the
-    /// interface, by this DHCP socket, changes. It will update the `config_changed` field
-    /// so that a subsequent call to `poll` will yield an event, and wake a possible waker.
+    /// interface, by this DHCP socket, changes. It will update the
+    /// `config_changed` field so that a subsequent call to `poll` will
+    /// yield an event, and wake a possible waker.
     pub(crate) fn config_changed(&mut self) {
         self.config_changed = true;
         #[cfg(feature = "async")]
@@ -776,14 +785,15 @@ impl<'a> Socket<'a> {
     /// Register a waker.
     ///
     /// The waker is woken on state changes that might affect the return value
-    /// of `poll` method calls, which indicates a new state in the DHCP configuration
-    /// provided by this DHCP socket.
+    /// of `poll` method calls, which indicates a new state in the DHCP
+    /// configuration provided by this DHCP socket.
     ///
     /// Notes:
     ///
-    /// - Only one waker can be registered at a time. If another waker was previously registered,
-    ///   it is overwritten and will no longer be woken.
-    /// - The Waker is woken only once. Once woken, you must register it again to receive more wakes.
+    /// - Only one waker can be registered at a time. If another waker was
+    ///   previously registered, it is overwritten and will no longer be woken.
+    /// - The Waker is woken only once. Once woken, you must register it again
+    ///   to receive more wakes.
     #[cfg(feature = "async")]
     pub fn register_waker(&mut self, waker: &Waker) {
         self.waker.register(waker)
@@ -1075,8 +1085,7 @@ mod test {
     // =========================================================================================//
     // Tests
 
-    use crate::phy::Medium;
-    use crate::tests::setup;
+    use crate::{phy::Medium, tests::setup};
     use rstest::*;
 
     fn socket(medium: Medium) -> TestSocket {
@@ -1156,7 +1165,7 @@ mod test {
                 assert_eq!(r.renew_at, Instant::from_secs(500));
                 assert_eq!(r.rebind_at, Instant::from_secs(875));
                 assert_eq!(r.expires_at, Instant::from_secs(1000));
-            }
+            },
             _ => panic!("Invalid state"),
         }
     }
@@ -1194,7 +1203,7 @@ mod test {
                 assert_eq!(r.renew_at, Instant::from_secs(500));
                 assert_eq!(r.rebind_at, Instant::from_secs(875));
                 assert_eq!(r.expires_at, Instant::from_secs(1000));
-            }
+            },
             _ => panic!("Invalid state"),
         }
     }
@@ -1239,7 +1248,7 @@ mod test {
             ClientState::Renewing(r) => {
                 assert_eq!(r.renew_at, Instant::from_secs(20 + 500));
                 assert_eq!(r.expires_at, Instant::from_secs(20 + 1000));
-            }
+            },
             _ => panic!("Invalid state"),
         }
     }
@@ -1296,7 +1305,7 @@ mod test {
                 // the expiration still hasn't been bumped, because
                 // we haven't received the ACK yet
                 assert_eq!(r.expires_at, Instant::from_secs(1000));
-            }
+            },
             _ => panic!("Invalid state"),
         }
 
@@ -1308,7 +1317,7 @@ mod test {
                 // NOW the expiration gets bumped
                 assert_eq!(r.renew_at, Instant::from_secs(500 + 500));
                 assert_eq!(r.expires_at, Instant::from_secs(500 + 1000));
-            }
+            },
             _ => panic!("Invalid state"),
         }
     }
@@ -1350,7 +1359,7 @@ mod test {
                 // NOW the expiration gets bumped
                 assert_eq!(r.renew_at, Instant::from_secs(999 + 500));
                 assert_eq!(r.expires_at, Instant::from_secs(999 + 1000));
-            }
+            },
             _ => panic!("Invalid state"),
         }
     }
@@ -1380,7 +1389,7 @@ mod test {
         // No more rebinds due to minimum interval
         recv!(s, time 1_000_000, [(IP_BROADCAST, UDP_SEND, DHCP_DISCOVER)]);
         match &s.state {
-            ClientState::Discovering(_) => {}
+            ClientState::Discovering(_) => {},
             _ => panic!("Invalid state"),
         }
     }

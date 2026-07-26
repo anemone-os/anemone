@@ -1,10 +1,11 @@
 #![deny(missing_docs)]
 use heapless::{LinearMap, Vec};
 
-use crate::config::{IFACE_MAX_PREFIX_COUNT, IFACE_MAX_ROUTE_COUNT};
-use crate::time::{Duration, Instant};
-use crate::wire::NdiscPrefixInfoFlags;
-use crate::wire::{Ipv6Address, Ipv6Cidr, NdiscPrefixInformation, ipv6::AddressExt};
+use crate::{
+    config::{IFACE_MAX_PREFIX_COUNT, IFACE_MAX_ROUTE_COUNT},
+    time::{Duration, Instant},
+    wire::{Ipv6Address, Ipv6Cidr, NdiscPrefixInfoFlags, NdiscPrefixInformation, ipv6::AddressExt},
+};
 
 const MAX_RTR_SOLICITATIONS: u8 = 3;
 const RTR_SOLICITATION_INTERVAL: Duration = Duration::from_secs(4);
@@ -77,7 +78,8 @@ impl Route {
 /// Tracks router solicitations and collects information from all received
 /// router advertisements.
 ///
-/// State must be synchronized with the IP addresses and routes in the `Interface`.
+/// State must be synchronized with the IP addresses and routes in the
+/// `Interface`.
 #[derive(Debug)]
 pub struct Slaac {
     /// Set of prefixes received.
@@ -108,8 +110,8 @@ impl Slaac {
 
     /// Get whether router advertisement information is updated.
     ///
-    /// This flags whether new prefixes or routes have been received, or current prefixes and
-    /// routes have expired.
+    /// This flags whether new prefixes or routes have been received, or current
+    /// prefixes and routes have expired.
     pub(crate) fn has_ra_update(&self) -> bool {
         self.sync_required
     }
@@ -214,7 +216,8 @@ impl Slaac {
         self.routes.iter().any(|r| !r.is_valid(now))
     }
 
-    /// Get whether a route and prefix information must be synchronized with the interface.
+    /// Get whether a route and prefix information must be synchronized with the
+    /// interface.
     pub(crate) fn sync_required(&self, now: Instant) -> bool {
         self.has_ra_update()
             || self.prefix_expire_sync_required(now)
@@ -248,7 +251,7 @@ impl Slaac {
                 if self.retry_rs_at <= now && self.num_solicitations > 0 =>
             {
                 true
-            }
+            },
             _ => false,
         }
     }
@@ -266,7 +269,7 @@ impl Slaac {
                     self.phase = Phase::Discovering;
                     self.retry_rs_at = now + RTR_SOLICITATION_INTERVAL;
                 }
-            }
+            },
             _ => (),
         }
     }
@@ -291,7 +294,7 @@ impl Slaac {
                     }
                 });
                 prefix_at.chain(routes_at).min()
-            }
+            },
             _ => None,
         }
     }

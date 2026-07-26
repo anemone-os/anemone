@@ -2,13 +2,15 @@ mod utils;
 
 use std::os::unix::io::AsRawFd;
 
-use smoltcp::iface::{Config, Interface, SocketSet};
-use smoltcp::phy::{Device, Medium, wait as phy_wait};
-use smoltcp::socket::{raw, udp};
-use smoltcp::time::Instant;
-use smoltcp::wire::{
-    EthernetAddress, IgmpPacket, IgmpRepr, IpAddress, IpCidr, IpProtocol, IpVersion, Ipv4Address,
-    Ipv4Packet, Ipv6Address,
+use smoltcp::{
+    iface::{Config, Interface, SocketSet},
+    phy::{Device, Medium, wait as phy_wait},
+    socket::{raw, udp},
+    time::Instant,
+    wire::{
+        EthernetAddress, IgmpPacket, IgmpRepr, IpAddress, IpCidr, IpProtocol, IpVersion,
+        Ipv4Address, Ipv4Packet, Ipv6Address,
+    },
 };
 
 const MDNS_PORT: u16 = 5353;
@@ -25,13 +27,13 @@ fn main() {
     let device = utils::parse_tuntap_options(&mut matches);
     let fd = device.as_raw_fd();
     let mut device =
-        utils::parse_middleware_options(&mut matches, device, /*loopback=*/ false);
+        utils::parse_middleware_options(&mut matches, device, /* loopback= */ false);
 
     // Create interface
     let mut config = match device.capabilities().medium {
         Medium::Ethernet => {
             Config::new(EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]).into())
-        }
+        },
         Medium::Ip => Config::new(smoltcp::wire::HardwareAddress::Ip),
         Medium::Ieee802154 => todo!(),
     };
@@ -90,8 +92,8 @@ fn main() {
         let socket = sockets.get_mut::<raw::Socket>(raw_handle);
 
         if socket.can_recv() {
-            // For display purposes only - normally we wouldn't process incoming IGMP packets
-            // in the application layer
+            // For display purposes only - normally we wouldn't process incoming IGMP
+            // packets in the application layer
             match socket.recv() {
                 Err(e) => println!("Recv IGMP error: {e:?}"),
                 Ok(buf) => {
@@ -100,7 +102,7 @@ fn main() {
                         .and_then(|igmp_packet| IgmpRepr::parse(&igmp_packet))
                         .map(|igmp_repr| println!("IGMP packet: {igmp_repr:?}"))
                         .unwrap_or_else(|e| println!("parse IGMP error: {e:?}"));
-                }
+                },
             }
         }
 

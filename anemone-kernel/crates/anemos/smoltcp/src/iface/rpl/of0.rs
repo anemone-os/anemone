@@ -1,5 +1,4 @@
-use super::parents::*;
-use super::rank::Rank;
+use super::{parents::*, rank::Rank};
 
 pub struct ObjectiveFunction0;
 

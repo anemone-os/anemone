@@ -75,7 +75,8 @@ impl Controller for Cubic {
 
         let now_millis = now.total_millis();
 
-        // If the last update was less than 100ms ago, don't update the congestion window.
+        // If the last update was less than 100ms ago, don't update the congestion
+        // window.
         if self.last_update > recovery_start && now_millis - self.last_update.total_millis() < 100 {
             return;
         }

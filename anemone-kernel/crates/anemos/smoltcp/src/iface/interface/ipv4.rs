@@ -3,9 +3,9 @@ use super::*;
 impl Interface {
     /// Process fragments that still need to be sent for IPv4 packets.
     ///
-    /// This function returns a boolean value indicating whether any packets were
-    /// processed or emitted, and thus, whether the readiness of any socket might
-    /// have changed.
+    /// This function returns a boolean value indicating whether any packets
+    /// were processed or emitted, and thus, whether the readiness of any
+    /// socket might have changed.
     #[cfg(feature = "proto-ipv4-fragmentation")]
     pub(super) fn ipv4_egress(&mut self, device: &mut (impl Device + ?Sized)) {
         // Reset the buffer when we transmitted everything.
@@ -78,7 +78,8 @@ impl InterfaceInner {
             .any(|broadcast_address| address == broadcast_address)
     }
 
-    /// Checks if an ipv4 address is unicast, taking into account subnet broadcast addresses
+    /// Checks if an ipv4 address is unicast, taking into account subnet
+    /// broadcast addresses
     fn is_unicast_v4(&self, address: Ipv4Address) -> bool {
         address.x_is_unicast() && !self.is_broadcast_v4(address)
     }
@@ -117,7 +118,7 @@ impl InterfaceInner {
                     Err(_) => {
                         net_debug!("No available packet assembler for fragmented packet");
                         return None;
-                    }
+                    },
                 };
 
                 if !ipv4_packet.more_frags() {
@@ -164,8 +165,9 @@ impl InterfaceInner {
                     .items_mut()
                     .find_map(|i| Dhcpv4Socket::downcast_mut(&mut i.socket))
                 {
-                    // First check for source and dest ports, then do `UdpRepr::parse` if they match.
-                    // This way we avoid validating the UDP checksum twice for all non-DHCP UDP packets (one here, one in `process_udp`)
+                    // First check for source and dest ports, then do `UdpRepr::parse` if they
+                    // match. This way we avoid validating the UDP checksum
+                    // twice for all non-DHCP UDP packets (one here, one in `process_udp`)
                     if udp_packet.src_port() == dhcp_socket.server_port
                         && udp_packet.dst_port() == dhcp_socket.client_port
                     {
@@ -186,7 +188,8 @@ impl InterfaceInner {
             && !self.has_multicast_group(ipv4_repr.dst_addr)
             && !self.is_broadcast_v4(ipv4_repr.dst_addr)
         {
-            // Ignore IP packets not directed at us, or broadcast, or any of the multicast groups.
+            // Ignore IP packets not directed at us, or broadcast, or any of the multicast
+            // groups.
 
             if !ipv4_repr.dst_addr.x_is_unicast() {
                 net_trace!(
@@ -228,12 +231,12 @@ impl InterfaceInner {
             #[cfg(any(feature = "socket-udp", feature = "socket-dns"))]
             IpProtocol::Udp => {
                 self.process_udp(sockets, meta, handled_by_raw_socket, ip_repr, ip_payload)
-            }
+            },
 
             #[cfg(feature = "socket-tcp")]
             IpProtocol::Tcp => {
                 self.process_tcp(sockets, handled_by_raw_socket, ip_repr, ip_payload)
-            }
+            },
 
             _ if handled_by_raw_socket => None,
 
@@ -247,7 +250,7 @@ impl InterfaceInner {
                     data: &ip_payload[0..payload_len],
                 };
                 self.icmpv4_reply(ipv4_repr, icmp_reply_repr)
-            }
+            },
         }
     }
 
@@ -290,10 +293,11 @@ impl InterfaceInner {
                     return None;
                 }
 
-                // Fill the ARP cache from any ARP packet aimed at us (both request or response).
-                // We fill from requests too because if someone is requesting our address they
-                // are probably going to talk to us, so we avoid having to request their address
-                // when we later reply to them.
+                // Fill the ARP cache from any ARP packet aimed at us (both request or
+                // response). We fill from requests too because if someone is
+                // requesting our address they are probably going to talk to us,
+                // so we avoid having to request their address when we later
+                // reply to them.
                 self.neighbor_cache.fill(
                     source_protocol_addr.into(),
                     source_hardware_addr.into(),
@@ -313,7 +317,7 @@ impl InterfaceInner {
                 } else {
                     None
                 }
-            }
+            },
         }
     }
 
@@ -354,7 +358,7 @@ impl InterfaceInner {
                     data,
                 };
                 self.icmpv4_reply(ip_repr, icmp_reply_repr)
-            }
+            },
 
             // Ignore any echo replies.
             Icmpv4Repr::EchoReply { .. } => None,
@@ -407,7 +411,7 @@ impl InterfaceInner {
                             ipv4_reply_repr,
                             IpPayload::Icmpv4(icmp_repr),
                         ))
-                    }
+                    },
                     None => None,
                 },
                 _ => None,

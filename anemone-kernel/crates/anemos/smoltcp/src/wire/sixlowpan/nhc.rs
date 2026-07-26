@@ -58,8 +58,8 @@ impl NhcPacket {
     /// This can either be an Extension header or an 6LoWPAN Udp header.
     ///
     /// # Errors
-    /// Returns `[Error::Unrecognized]` when neither the Extension Header dispatch or the Udp
-    /// dispatch is recognized.
+    /// Returns `[Error::Unrecognized]` when neither the Extension Header
+    /// dispatch or the Udp dispatch is recognized.
     pub fn dispatch(buffer: impl AsRef<[u8]>) -> Result<Self> {
         let raw = buffer.as_ref();
         if raw.is_empty() {
@@ -251,7 +251,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> ExtHeaderPacket<T> {
                 let start = 1;
                 let data = self.buffer.as_mut();
                 data[start] = nh.into();
-            }
+            },
         }
     }
 
@@ -274,7 +274,8 @@ pub struct ExtHeaderRepr {
 }
 
 impl ExtHeaderRepr {
-    /// Parse a 6LoWPAN NHC Extension Header packet and return a high-level representation.
+    /// Parse a 6LoWPAN NHC Extension Header packet and return a high-level
+    /// representation.
     pub fn parse<T: AsRef<[u8]> + ?Sized>(packet: &ExtHeaderPacket<&T>) -> Result<Self> {
         // Ensure basic accessors will work.
         packet.check_len()?;
@@ -290,7 +291,8 @@ impl ExtHeaderRepr {
         })
     }
 
-    /// Return the length of a header that will be emitted from this high-level representation.
+    /// Return the length of a header that will be emitted from this high-level
+    /// representation.
     pub fn buffer_len(&self) -> usize {
         let mut len = 1; // The minimal header size
 
@@ -303,7 +305,8 @@ impl ExtHeaderRepr {
         len
     }
 
-    /// Emit a high-level representation into a 6LoWPAN NHC Extension Header packet.
+    /// Emit a high-level representation into a 6LoWPAN NHC Extension Header
+    /// packet.
     pub fn emit<T: AsRef<[u8]> + AsMut<[u8]>>(&self, packet: &mut ExtHeaderPacket<T>) {
         packet.set_dispatch_field();
         packet.set_extension_header_id(self.ext_header_id);
@@ -359,7 +362,7 @@ mod tests {
                         sender_rank: 0x0300,
                     }
                 );
-            }
+            },
             _ => unreachable!(),
         }
     }
@@ -523,21 +526,21 @@ impl<T: AsRef<[u8]>> UdpNhcPacket<T> {
                 let start = self.nhc_fields_start();
 
                 NetworkEndian::read_u16(&data[start..start + 2])
-            }
+            },
             0b10 => {
                 // The first 8 bits are elided.
                 let data = self.buffer.as_ref();
                 let start = self.nhc_fields_start();
 
                 0xf000 + data[start] as u16
-            }
+            },
             0b11 => {
                 // The first 12 bits are elided.
                 let data = self.buffer.as_ref();
                 let start = self.nhc_fields_start();
 
                 0xf0b0 + (data[start] >> 4) as u16
-            }
+            },
             _ => unreachable!(),
         }
     }
@@ -551,28 +554,28 @@ impl<T: AsRef<[u8]>> UdpNhcPacket<T> {
                 let idx = self.nhc_fields_start();
 
                 NetworkEndian::read_u16(&data[idx + 2..idx + 4])
-            }
+            },
             0b01 => {
                 // The first 8 bits are elided.
                 let data = self.buffer.as_ref();
                 let idx = self.nhc_fields_start();
 
                 0xf000 + data[idx] as u16
-            }
+            },
             0b10 => {
                 // The full 16 bits are carried in-line.
                 let data = self.buffer.as_ref();
                 let idx = self.nhc_fields_start();
 
                 NetworkEndian::read_u16(&data[idx + 1..idx + 1 + 2])
-            }
+            },
             0b11 => {
                 // The first 12 bits are elided.
                 let data = self.buffer.as_ref();
                 let start = self.nhc_fields_start();
 
                 0xf0b0 + (data[start] & 0xff) as u16
-            }
+            },
             _ => unreachable!(),
         }
     }
@@ -585,7 +588,8 @@ impl<T: AsRef<[u8]>> UdpNhcPacket<T> {
             let start = self.nhc_fields_start() + self.ports_size();
             Some(NetworkEndian::read_u16(&data[start..start + 2]))
         } else {
-            // The checksum is elided and needs to be recomputed on the 6LoWPAN termination point.
+            // The checksum is elided and needs to be recomputed on the 6LoWPAN termination
+            // point.
             None
         }
     }
@@ -644,7 +648,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> UdpNhcPacket<T> {
                 self.set_ports_field(0b11);
                 let data = self.buffer.as_mut();
                 data[idx] = (((src_port - 0xf0b0) as u8) << 4) & ((dst_port - 0xf0b0) as u8);
-            }
+            },
             (0xf000..=0xf0ff, _) => {
                 // We can compress the source port, but not the destination port.
                 self.set_ports_field(0b10);
@@ -653,7 +657,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> UdpNhcPacket<T> {
                 idx += 1;
 
                 NetworkEndian::write_u16(&mut data[idx..idx + 2], dst_port);
-            }
+            },
             (_, 0xf000..=0xf0ff) => {
                 // We can compress the destination port, but not the source port.
                 self.set_ports_field(0b01);
@@ -661,7 +665,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> UdpNhcPacket<T> {
                 NetworkEndian::write_u16(&mut data[idx..idx + 2], src_port);
                 idx += 2;
                 data[idx] = (dst_port - 0xf000) as u8;
-            }
+            },
             (_, _) => {
                 // We cannot compress any port.
                 self.set_ports_field(0b00);
@@ -669,7 +673,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> UdpNhcPacket<T> {
                 NetworkEndian::write_u16(&mut data[idx..idx + 2], src_port);
                 idx += 2;
                 NetworkEndian::write_u16(&mut data[idx..idx + 2], dst_port);
-            }
+            },
         };
     }
 
@@ -728,7 +732,8 @@ impl<'a> UdpNhcRepr {
         }))
     }
 
-    /// Return the length of a packet that will be emitted from this high-level representation.
+    /// Return the length of a packet that will be emitted from this high-level
+    /// representation.
     pub fn header_len(&self) -> usize {
         let mut len = 1; // The minimal header size
 

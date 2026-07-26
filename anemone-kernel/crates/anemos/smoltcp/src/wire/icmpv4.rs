@@ -2,9 +2,10 @@ use byteorder::{ByteOrder, NetworkEndian};
 use core::{cmp, fmt};
 
 use super::{Error, Result};
-use crate::phy::ChecksumCapabilities;
-use crate::wire::ip::checksum;
-use crate::wire::{Ipv4Packet, Ipv4Repr};
+use crate::{
+    phy::ChecksumCapabilities,
+    wire::{Ipv4Packet, Ipv4Repr, ip::checksum},
+};
 
 enum_with_unknown! {
     /// Internet protocol control message type.
@@ -106,7 +107,7 @@ impl fmt::Display for DstUnreachable {
             DstUnreachable::HostUnreachToS => write!(f, "host unreachable for ToS"),
             DstUnreachable::CommProhibited => {
                 write!(f, "communication administratively prohibited")
-            }
+            },
             DstUnreachable::HostPrecedViol => write!(f, "host precedence violation"),
             DstUnreachable::PrecedCutoff => write!(f, "precedence cutoff in effect"),
             DstUnreachable::Unknown(id) => write!(f, "{id}"),
@@ -160,7 +161,8 @@ enum_with_unknown! {
     }
 }
 
-/// A read/write wrapper around an Internet Control Message Protocol version 4 packet buffer.
+/// A read/write wrapper around an Internet Control Message Protocol version 4
+/// packet buffer.
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Packet<T: AsRef<[u8]>> {
@@ -242,7 +244,8 @@ impl<T: AsRef<[u8]>> Packet<T> {
     /// Return the identifier field (for echo request and reply packets).
     ///
     /// # Panics
-    /// This function may panic if this packet is not an echo request or reply packet.
+    /// This function may panic if this packet is not an echo request or reply
+    /// packet.
     #[inline]
     pub fn echo_ident(&self) -> u16 {
         let data = self.buffer.as_ref();
@@ -252,7 +255,8 @@ impl<T: AsRef<[u8]>> Packet<T> {
     /// Return the sequence number field (for echo request and reply packets).
     ///
     /// # Panics
-    /// This function may panic if this packet is not an echo request or reply packet.
+    /// This function may panic if this packet is not an echo request or reply
+    /// packet.
     #[inline]
     pub fn echo_seq_no(&self) -> u16 {
         let data = self.buffer.as_ref();
@@ -318,7 +322,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     /// Set the identifier field (for echo request and reply packets).
     ///
     /// # Panics
-    /// This function may panic if this packet is not an echo request or reply packet.
+    /// This function may panic if this packet is not an echo request or reply
+    /// packet.
     #[inline]
     pub fn set_echo_ident(&mut self, value: u16) {
         let data = self.buffer.as_mut();
@@ -328,7 +333,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     /// Set the sequence number field (for echo request and reply packets).
     ///
     /// # Panics
-    /// This function may panic if this packet is not an echo request or reply packet.
+    /// This function may panic if this packet is not an echo request or reply
+    /// packet.
     #[inline]
     pub fn set_echo_seq_no(&mut self, value: u16) {
         let data = self.buffer.as_mut();
@@ -362,7 +368,8 @@ impl<T: AsRef<[u8]>> AsRef<[u8]> for Packet<T> {
     }
 }
 
-/// A high-level representation of an Internet Control Message Protocol version 4 packet header.
+/// A high-level representation of an Internet Control Message Protocol version
+/// 4 packet header.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[non_exhaustive]
@@ -440,7 +447,7 @@ impl<'a> Repr<'a> {
                     },
                     data: payload,
                 })
-            }
+            },
 
             (Message::TimeExceeded, code) => {
                 let ip_packet = Ipv4Packet::new_checked(packet.data())?;
@@ -463,27 +470,28 @@ impl<'a> Repr<'a> {
                     },
                     data: payload,
                 })
-            }
+            },
 
             _ => Err(Error),
         }
     }
 
-    /// Return the length of a packet that will be emitted from this high-level representation.
+    /// Return the length of a packet that will be emitted from this high-level
+    /// representation.
     pub const fn buffer_len(&self) -> usize {
         match self {
             &Repr::EchoRequest { data, .. } | &Repr::EchoReply { data, .. } => {
                 field::ECHO_SEQNO.end + data.len()
-            }
+            },
             &Repr::DstUnreachable { header, data, .. }
             | &Repr::TimeExceeded { header, data, .. } => {
                 field::UNUSED.end + header.buffer_len() + data.len()
-            }
+            },
         }
     }
 
-    /// Emit a high-level representation into an Internet Control Message Protocol version 4
-    /// packet.
+    /// Emit a high-level representation into an Internet Control Message
+    /// Protocol version 4 packet.
     pub fn emit<T>(&self, packet: &mut Packet<&mut T>, checksum_caps: &ChecksumCapabilities)
     where
         T: AsRef<[u8]> + AsMut<[u8]> + ?Sized,
@@ -501,7 +509,7 @@ impl<'a> Repr<'a> {
                 packet.set_echo_seq_no(seq_no);
                 let data_len = cmp::min(packet.data_mut().len(), data.len());
                 packet.data_mut()[..data_len].copy_from_slice(&data[..data_len])
-            }
+            },
 
             Repr::EchoReply {
                 ident,
@@ -514,7 +522,7 @@ impl<'a> Repr<'a> {
                 packet.set_echo_seq_no(seq_no);
                 let data_len = cmp::min(packet.data_mut().len(), data.len());
                 packet.data_mut()[..data_len].copy_from_slice(&data[..data_len])
-            }
+            },
 
             Repr::DstUnreachable {
                 reason,
@@ -528,7 +536,7 @@ impl<'a> Repr<'a> {
                 header.emit(&mut ip_packet, checksum_caps);
                 let payload = &mut ip_packet.into_inner()[header.buffer_len()..];
                 payload.copy_from_slice(data)
-            }
+            },
 
             Repr::TimeExceeded {
                 reason,
@@ -542,7 +550,7 @@ impl<'a> Repr<'a> {
                 header.emit(&mut ip_packet, checksum_caps);
                 let payload = &mut ip_packet.into_inner()[header.buffer_len()..];
                 payload.copy_from_slice(data)
-            }
+            },
         }
 
         if checksum_caps.icmpv4.tx() {
@@ -565,13 +573,13 @@ impl<T: AsRef<[u8]> + ?Sized> fmt::Display for Packet<&T> {
                 match self.msg_type() {
                     Message::DstUnreachable => {
                         write!(f, " code={:?}", DstUnreachable::from(self.msg_code()))
-                    }
+                    },
                     Message::TimeExceeded => {
                         write!(f, " code={:?}", TimeExceeded::from(self.msg_code()))
-                    }
+                    },
                     _ => write!(f, " code={}", self.msg_code()),
                 }
-            }
+            },
         }
     }
 }
@@ -603,10 +611,10 @@ impl<'a> fmt::Display for Repr<'a> {
             ),
             Repr::DstUnreachable { reason, .. } => {
                 write!(f, "ICMPv4 destination unreachable ({reason})")
-            }
+            },
             Repr::TimeExceeded { reason, .. } => {
                 write!(f, "ICMPv4 time exceeded ({reason})")
-            }
+            },
         }
     }
 }
@@ -629,7 +637,7 @@ impl<T: AsRef<[u8]>> PrettyPrint for Packet<T> {
             Message::DstUnreachable | Message::TimeExceeded => {
                 indent.increase(f)?;
                 super::Ipv4Packet::<&[u8]>::pretty_print(&packet.data(), f, indent)
-            }
+            },
             _ => Ok(()),
         }
     }
