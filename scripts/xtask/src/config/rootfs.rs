@@ -25,6 +25,11 @@ impl Rootfs {
             if rootfs.fs.base.is_none() {
                 anyhow::bail!("fs.type = 'image' requires fs.base");
             }
+            if rootfs.fs.extra_size.is_some() {
+                anyhow::bail!(
+                    "fs.extra-size is not supported with fs.type = 'image'; resize the base image before running rootfs mkfs"
+                );
+            }
         }
         Ok(rootfs)
     }
@@ -45,6 +50,8 @@ pub struct Fs {
     pub override_dir: Option<String>,
     #[serde(rename = "type")]
     pub base_type: BaseType,
+    #[serde(rename = "extra-size", default)]
+    pub extra_size: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,6 +126,7 @@ path = "/sbin/init"
         assert_eq!(rootfs.fs.base_type, BaseType::Image);
         assert_eq!(rootfs.fs.base.as_deref(), Some("rootfs.img"));
         assert_eq!(rootfs.fs.override_dir.as_deref(), Some("root-overlay"));
+        assert_eq!(rootfs.fs.extra_size, None);
     }
 
     #[test]
@@ -141,7 +149,51 @@ path = "/sbin/init"
     }
 
     #[test]
-    fn rootfs_size_policy_is_not_configurable() {
+    fn folder_extra_size_is_configurable() {
+        let rootfs = Rootfs::from_str(
+            r#"
+[build]
+name = "folder-base"
+arch = "riscv64"
+
+[fs]
+fstype = "ext4"
+type = "folder"
+extra-size = "256M"
+
+[init]
+path = "/sbin/init"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(rootfs.fs.extra_size.as_deref(), Some("256M"));
+    }
+
+    #[test]
+    fn image_extra_size_is_rejected() {
+        let result = Rootfs::from_str(
+            r#"
+[build]
+name = "image-base"
+arch = "riscv64"
+
+[fs]
+fstype = "ext4"
+base = "rootfs.img"
+type = "image"
+extra-size = "256M"
+
+[init]
+path = "/sbin/init"
+"#,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn absolute_size_is_not_configurable() {
         let result = Rootfs::from_str(
             r#"
 [build]

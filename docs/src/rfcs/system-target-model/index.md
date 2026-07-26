@@ -1,11 +1,12 @@
 # RFC-20260722-system-target-model
 
 **状态：** Implemented / Closed
-**修订：** R6
+**修订：** R7
 **负责人：** doruche
-**最后更新：** 2026-07-24
+**最后更新：** 2026-07-27
 **领域：** build system / configuration / platform / repository workflow
-**事务日志：** [R6 named bind and initial argv](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)；
+**事务日志：** [R7 rootfs incremental extra size](../../devlog/transactions/2026-07-27-system-target-model-r7-rootfs-extra-size.md)；
+[R6 named bind and initial argv](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)；
 [R4A QEMU provider DT cutover](../../devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md)；
 [R3 explicit-input cleanup](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)；
 [R0-R2 implementation history](../../devlog/transactions/2026-07-22-system-target-model.md)
@@ -15,7 +16,7 @@
 
 ## 文档状态
 
-本文是已实现R6 target的canonical source；current contract与历史resolved write set分别由contract文档和
+本文是已实现R7 target的canonical source；current contract与历史resolved write set分别由contract文档和
 `implementation.md`拥有。
 本文把已经形成的 system-target 定位共识展开为实施目标，并取代历史 positioning 文档作为
 本 RFC 的 target authority。
@@ -30,7 +31,8 @@ delivery由normal build从已解析QEMU provider物化build-local DTB。R4A实�
 从未进入Ready或Active的R4B adopter迁移移出本RFC；对应Platform配置应用不属于target model本身。
 R6进一步统一QEMU参数化语法并扩展Boot Protocol argv：bind value保持opaque string，唯一占位符为
 `{{name}}`，可选性只作用于完整`[[qemu.bind]]` argv组；initial-program可以携带包含`argv[0]`的完整
-`argv`，省略时保持既有path-only默认。
+`argv`，省略时保持既有path-only默认。R7根据folder rootfs真实`ENOSPC`反馈保留自动估算，同时允许manifest
+通过`extra-size`声明增量余量；image base继续由自身拥有容量。
 
 ## 摘要
 
@@ -100,8 +102,8 @@ live build path 当前具有以下事实：
   KernelConfig、app/rootfs task 或 invocation 语义。
 - 要求每个system action显式提供一个named preset或完整low-level tuple；不读取developer-local或
   repository-default selection，不允许preset携带presentation defaults。
-- 要求rootfs base type、QEMU CPU和format scope显式；folder rootfs容量统一自动计算。QEMU BIOS
-  仍是有意义的optional capability，省略表示不传`-bios`。
+- 要求rootfs base type、QEMU CPU和format scope显式；folder rootfs默认自动计算容量，并可通过
+  `extra-size`增加非绝对余量。QEMU BIOS仍是有意义的optional capability，省略表示不传`-bios`。
 - 将 Anemone Boot Protocol 从固定的 `/.anemone/init` entry 扩展为 typed
   `InitialProgramSource`；`RootfsEntry` 与 `EmbeddedApp` 最终都解析为稳定 VFS path，
   并统一进入普通 `kernel_execve()`；两种source均可声明包含`argv[0]`的完整非空`argv`，省略时
@@ -558,7 +560,7 @@ target review 证明治理 contract 本身需要变化时，才另行提出 repo
 | `gendisk` 覆盖固定 `disk.img` | 从 common surface 删除；需要的 filesystem/disk preparation由具体 workflow 拥有 |
 | `clean` / `mrproper` / `xtask-clean` 重叠 | 收敛为单一ordinary clean；不删除用户KernelConfig |
 | bare `just fmt` | 删除隐式all scope；要求显式`all`、`kernel`或app name，`all`覆盖kernel、xtask和全部apps |
-| rootfs省略`fs.type`或配置容量 | `fs.type`必填；folder容量统一由`virt-make-fs`自动计算，不暴露容量策略字段 |
+| rootfs省略`fs.type`或配置容量 | `fs.type`必填；folder由`virt-make-fs`自动估算，可选`extra-size`只增加余量；绝对`size`仍不暴露，image base不接受增量余量 |
 | QEMU省略CPU依赖provider default | 每个QEMU Platform显式固定CPU；BIOS保持optional，省略只表示不发出`-bios` |
 | pretest wrapper 解析 `kconfig`、切 platform、寻找/链接 artifact、直接调 QEMU | wrapper显式选择preset，复制只读master后按`qemu --show-bindings`/tracked config提供QEMU bind，并保留日志与host prerequisite；不再拼raw QEMU argv或制造根目录固定文件名 |
 
@@ -610,6 +612,10 @@ R3反馈已由用户接受：删除implicit local/default selection与preset pre
 rootfs type、QEMU CPU和format scope收口为显式输入；folder自动容量与optional BIOS是唯一记录的
 省略语义。自然可空collection、optional Platform capability与opt-in action flag的省略只表示“没有
 该项”，不得选择另一套target/config/policy。
+
+R7根据2k1000 folder rootfs在`virt-make-fs`默认估算下导入失败的工程证据修正容量边界：省略
+`extra-size`仍使用自动估算；显式值只作为`--size=+<value>`增加余量，不成为绝对容量或第二套估算器；
+image base继续拒绝该字段。该修订不改变kernel/runtime ABI或current contract。
 
 R4反馈进一步确认：QEMU machine model已经是可执行machine-fact authority，提交由它导出的DTS并维护
 refresh/check只形成第二份provider镜像。QEMU Platform因此不再提交DTS；RV64类firmware delivery直接
@@ -729,6 +735,7 @@ optional runtime argv组与两种initial-program source共享的完整argv；唯
 
 | 修订 | 日期 | 状态 | 语义变化 | Review / 事务 |
 | --- | --- | --- | --- | --- |
+| R7 | 2026-07-27 | Implemented / Closed | Folder rootfs保留`virt-make-fs`自动估算，并新增optional `extra-size`增量余量；绝对`size`仍拒绝，image base容量所有权不变。 | [R7 rootfs incremental extra size](../../devlog/transactions/2026-07-27-system-target-model-r7-rootfs-extra-size.md) |
 | R6 | 2026-07-24 | Implemented / Closed | QEMU参数化统一为`{{name}}` opaque-string替换；provider字段可由build/QEMU共同绑定，runtime argv组可显式optional；两种initial-program source支持包含`argv[0]`的完整非空argv。 | [R6 named bind and initial argv](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md) |
 | R5 | 2026-07-24 | Implemented / Closed | 将从未Ready或Active的R4B hardware-semantic Platform/adopter迁移移出本RFC；该变化不撤销R4A DT target、实现或验证，也不改变current contract。对应配置作为独立小迭代落地。 | [QEMU SMP Platform用途别名](../../devlog/changes/2026-07-24-qemu-smp-platform-aliases.md) |
 | R4 | 2026-07-24 | Accepted for Implementation | QEMU Platform不再提交DTS或暴露DT refresh/check；firmware delivery使用runtime FDT，embedded delivery由normal build从selected provider自动生成build-local DTB；QEMU bind必须DT-neutral且build不提供占位符。Physical DTS source/baseline保持。R4A负责DT cutover并已关闭，R4B迁移SMP硬件Platform与业务target且保持Outline。 | [R4A QEMU provider DT cutover](../../devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md) |

@@ -13,6 +13,8 @@ fstype = "ext4"
 # base tree carries the strict-align musl/GCC toolchain.
 base = "conf/rootfs/2k1000/base"
 type = "folder"
+# Keep enough free space for ext4 metadata and native test build outputs.
+extra-size = "256M"
 
 # Init process configuration. This will be written into /.anemone/init and used by kernel to launch the init process.
 [init]

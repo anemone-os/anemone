@@ -1,12 +1,13 @@
 # System Target Model 迁移实施计划
 
 **状态：** Implemented / Closed
-**最后更新：** 2026-07-24
+**最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
 **当前契约：** [`BOOT-PROTOCOL-001`](../../contracts/task/boot-protocol.md#boot-protocol-001--typed-initial-program-source统一收口到普通-vfs-exec)；argv Refine已于Checkpoint R6A cut over
-**当前修订：** R6
-**事务日志：** [R6 named bind and initial argv](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)；
+**当前修订：** R7
+**事务日志：** [R7 rootfs incremental extra size](../../devlog/transactions/2026-07-27-system-target-model-r7-rootfs-extra-size.md)；
+[R6 named bind and initial argv](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)；
 [R4A QEMU provider DT cutover](../../devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md)；
 [R3 explicit-input cleanup](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)；
 [R0-R2 implementation history](../../devlog/transactions/2026-07-22-system-target-model.md)
@@ -1572,3 +1573,33 @@ harness与决赛脚本Not Run。
 最终subagent review未发现实现级Apollyon/Keter；其报告的一项文档Keter已在cutover前修复：R6 current
 invariants不再把R4的provider-bind禁令误写为现行规则，历史R0-R5内容明确只保留为执行证据。
 `BOOT-PROTOCOL-001`已原子Refine，R6A、transaction与RFC均Closed。
+
+## R7：folder rootfs增量余量
+
+**状态：** Checkpoint R7A Closed（2026-07-27）。
+
+2k1000 staging tree约234 MiB、1927个普通文件；`virt-make-fs`默认估算在导入ext4时于Git pack处返回
+`ENOSPC`。R7保留R3建立的默认自动估算，但允许folder manifest通过optional `extra-size`增加余量。
+
+### Checkpoint R7A - Incremental rootfs extra size
+
+**交付：** Rootfs `Fs`接受TOML `extra-size`；folder构建将其映射为
+`virt-make-fs --size=+<value>`。省略字段时命令保持不变；absolute `size`继续由unknown-field校验拒绝；
+image base显式拒绝`extra-size`，因为其容量由base image拥有。2k1000声明`extra-size = "256M"`。
+
+**Resolved Write Set Manifest：** `scripts/xtask/src/config/{rootfs.rs,build.rs}`、
+`scripts/xtask/src/tasks/rootfs/mkfs.rs`、`conf/rootfs/2k1000/rootfs.toml`、`conf/README.md`、
+`.agents/skills/anemone-build-system/SKILL.md`及两份直接reference、本RFC的`index.md`、
+`invariants.md`、`implementation.md`、`tracking-issues.md`、新R7 transaction、transaction index、
+`docs/src/SUMMARY.md`与当前双周devlog。Kernel/runtime、其它rootfs manifests、历史transactions与
+current contracts保持不变。
+
+**Validation / Exit：** `just xtask-test`编译新命令路径，新增folder parse与image rejection测试均通过；
+全套57项中55项通过，两个失败是当前工作树既有resolver fixture和DT error-text断言，与本checkpoint无关。
+执行xtask format check、`git diff --check`与`mdbook build docs`。当前agent环境没有`virt-make-fs`，因此
+2k1000实际materialization Not Run，不将源码测试写成镜像成功证据。
+
+### R7A closure（2026-07-27）
+
+R7A已完成optional增量余量接线、2k1000配置与所有current documentation surface同步。Contract impact为
+None；R7A与RFC Closed。实际2k1000镜像生成仍需在具备libguestfs的Linux环境复验。

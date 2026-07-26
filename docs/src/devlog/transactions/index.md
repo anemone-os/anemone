@@ -24,6 +24,7 @@
 
 ## Completed
 
+- [System Target Model R7 Rootfs Incremental Extra Size](./2026-07-27-system-target-model-r7-rootfs-extra-size.md)：folder rootfs新增optional `extra-size`并映射为`virt-make-fs --size=+<value>`；image base继续拥有容量，2k1000配置256 MiB增量余量。
 - [System Target Model R6 Named Bind and Initial Argv](./2026-07-24-system-target-model-r6-bind-argv.md)：R6A已完成具名opaque bind、optional QEMU argv group与两种initial-program source共享的完整argv；`BOOT-PROTOCOL-001`已Refine，决赛脚本/配置不在范围。
 - [System Target Model R4A QEMU Provider DT Cutover](./2026-07-24-system-target-model-r4-qemu-dt.md)：QEMU committed DTS与DT maintenance CLI已删除；firmware使用runtime FDT，embedded由normal build生成build-local DTB。R4A关闭，R4B保持Outline；LA64 runtime按用户指示Not Run。
 - [System Target Model R3 Explicit Inputs](./2026-07-24-system-target-model-r3-explicit-inputs.md)：R3A已删除implicit local/default selection与preset presentation defaults，rootfs type、QEMU CPU和fmt scope已显式；双架构build与四份DT check通过，contract cutover为None。

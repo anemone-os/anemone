@@ -26,9 +26,10 @@
   names are relative symlinks to SMP1; existing names without a workload suffix are relative
   symlinks to SMP8. Both variants retain the three runtime binds and persistent fixed QEMU argv,
   including `-no-reboot`.
-- Every rootfs manifest names `fs.type` explicitly. Folder roots always use `virt-make-fs`
-  automatic sizing; capacity is not configurable through the manifest. The format example is
-  `conf/rootfs/example.toml`.
+- Every rootfs manifest names `fs.type` explicitly. Folder roots use `virt-make-fs` automatic
+  sizing and may add free space with `fs.extra-size`, which is passed as an incremental
+  `--size=+<value>` rather than an absolute image capacity. Image roots reject `extra-size` because
+  their base image owns capacity. The format example is `conf/rootfs/example.toml`.
 - QEMU has no DT refresh/check command or source write-back path. Firmware delivery consumes the
   runtime FDT; embedded QEMU delivery is materialized only by normal build. Physical capture
   provenance, allowed runtime differences and validation responsibility remain human-reviewed

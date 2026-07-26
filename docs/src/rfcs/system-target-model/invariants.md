@@ -1,11 +1,11 @@
 # System Target Model 目标与不变量
 
 **状态：** Implemented / Closed
-**最后更新：** 2026-07-24
+**最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
-**适用修订：** R6
+**适用修订：** R7
 
-本文定义已实现的 R6 target invariants 与 RFC-local proof obligations。跨 RFC 生效的
+本文定义已实现的 R7 target invariants 与 RFC-local proof obligations。跨 RFC 生效的
 Boot Protocol 规则由 `docs/src/contracts/` 的 current contract 拥有。
 
 ## Contract Impact
@@ -420,8 +420,9 @@ selected Platform具名placeholder；任何未知、重复、缺失required、�
 resolved snapshot摘要；不增加独立inspect命令或JSON resolution view。
 
 `fmt`要求显式`all`、`kernel`或app scope；bare invocation不得解释为all。Rootfs manifest必须
-显式给出base type，folder容量统一自动计算且不是配置字段。每个QEMU provider显式给出CPU；BIOS
-保持optional，省略时不发出`-bios`。
+显式给出base type；folder容量默认自动估算，optional `extra-size`只作为增量余量传给
+`virt-make-fs`，不得解释为绝对容量。Image base拒绝该字段并继续拥有自身容量。每个QEMU provider
+显式给出CPU；BIOS保持optional，省略时不发出`-bios`。
 
 QEMU namespace不提供DT maintenance subcommand。QEMU embedded DTB只作为normal build内部stage，
 复用同一次system selection形成的resolved Platform snapshot；不得增加绕过selection的裸Platform入口。
