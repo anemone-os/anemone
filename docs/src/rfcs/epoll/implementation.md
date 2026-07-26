@@ -198,6 +198,10 @@ iomux userspace 路径覆盖。不为 route getter、identity equality 或 debug
 
 ### Checkpoint 0A - Opened-description Terminal Liveness
 
+**执行状态：** Closed / 2026-07-26。实现与验证证据见
+[transaction checkpoint log](../../devlog/transactions/2026-07-26-epoll.md#checkpoint-0a---opened-description-terminal-liveness---2026-07-26)；
+本项关闭只解除 0B 的前置依赖，不表示 Stage 0 Closed 或任何 contract cutover。
+
 **交付与 write subset：** 只修改 `anemone-kernel/src/task/files.rs`、本文与对应 transaction。
 在 `ProcFile` owner 内实现 opaque identity/liveness capability、operation-local live lease 与 terminal
 retirement；全量审计 publication/release caller，并增加前述 owner-local KUnit。不得修改

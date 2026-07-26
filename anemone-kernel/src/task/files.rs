@@ -51,13 +51,57 @@ struct ProcFile {
     access: OpenAccessMode,
     status_flags: SpinLock<FileStatusFlags>,
     compat: LinuxOpenCompat,
-    /// Counts published fd-table slots, not transient `Arc<FileDesc>` borrows.
+    /// Sole lifecycle truth for this opened file description.
     ///
-    /// Final-release callbacks use this as the opened-file-description lifetime
-    /// boundary, so syscall-local clones from `get_fd()` cannot keep semantic
-    /// close teardown from running.
+    /// Zero means never published, `1..RETIRED_DESCRIPTION_REFS` is the live
+    /// published-slot count, and `RETIRED_DESCRIPTION_REFS` is terminal. This
+    /// is deliberately not an `Arc` count: syscall-local borrows and live
+    /// leases must neither delay final release nor revive a retired identity.
     description_refs: AtomicUsize,
     description_ops: FileDescOps,
+}
+
+const RETIRED_DESCRIPTION_REFS: usize = usize::MAX;
+
+/// Non-owning identity and terminal-liveness capability for an opened file
+/// description.
+///
+/// The private weak target is identity only; successfully upgrading it does
+/// not imply that published references still exist.
+#[derive(Clone, Debug)]
+pub(crate) struct OpenedDescriptionCapability {
+    target: Weak<ProcFile>,
+}
+
+impl OpenedDescriptionCapability {
+    pub(crate) fn same_identity(&self, other: &Self) -> bool {
+        Weak::ptr_eq(&self.target, &other.target)
+    }
+
+    /// Acquire storage for one operation if the description is live at this
+    /// check. Retirement may race after return, so commit paths must call
+    /// [`OpenedDescriptionLease::is_live`] immediately before publication.
+    pub(crate) fn try_lease(&self) -> Option<OpenedDescriptionLease> {
+        let target = self.target.upgrade()?;
+        target
+            .description_is_live()
+            .then_some(OpenedDescriptionLease { target })
+    }
+}
+
+/// Operation-local strong hold for an opened file description.
+///
+/// This keeps the target storage available while an operation rechecks it; it
+/// does not keep semantic liveness and is intentionally not cloneable.
+#[derive(Debug)]
+pub(crate) struct OpenedDescriptionLease {
+    target: Arc<ProcFile>,
+}
+
+impl OpenedDescriptionLease {
+    pub(crate) fn is_live(&self) -> bool {
+        self.target.description_is_live()
+    }
 }
 
 #[derive(Debug)]
@@ -157,26 +201,72 @@ impl ProcFile {
     }
 
     fn acquire_description_ref(&self) {
-        let prev = self.description_refs.fetch_add(1, Ordering::AcqRel);
-        assert!(
-            prev < usize::MAX,
-            "opened file description refcount overflow"
-        );
+        let mut observed = self.description_refs.load(Ordering::Acquire);
+        loop {
+            assert_ne!(
+                observed, RETIRED_DESCRIPTION_REFS,
+                "retired opened file description cannot be republished"
+            );
+            assert!(
+                observed < RETIRED_DESCRIPTION_REFS - 1,
+                "opened file description refcount overflow"
+            );
+
+            match self.description_refs.compare_exchange_weak(
+                observed,
+                observed + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return,
+                Err(current) => observed = current,
+            }
+        }
     }
 
     fn release_description_ref(&self) {
-        let prev = self.description_refs.fetch_sub(1, Ordering::AcqRel);
-        assert!(prev > 0, "opened file description refcount underflow");
+        let mut observed = self.description_refs.load(Ordering::Acquire);
+        loop {
+            assert!(
+                observed != 0 && observed != RETIRED_DESCRIPTION_REFS,
+                "opened file description refcount underflow"
+            );
+            let next = if observed == 1 {
+                RETIRED_DESCRIPTION_REFS
+            } else {
+                observed - 1
+            };
 
-        if prev == 1 {
-            if let Some(final_release) = self.description_ops.final_release {
-                final_release(OpenedFileFinalReleaseCtx {
-                    file: self.file.as_ref(),
-                    access: self.access,
-                    notification_suppressed: self.description_ops.notification_suppressed,
-                });
+            match self.description_refs.compare_exchange_weak(
+                observed,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    if observed == 1 {
+                        if let Some(final_release) = self.description_ops.final_release {
+                            final_release(OpenedFileFinalReleaseCtx {
+                                file: self.file.as_ref(),
+                                access: self.access,
+                                notification_suppressed: self
+                                    .description_ops
+                                    .notification_suppressed,
+                            });
+                        }
+                    }
+                    return;
+                },
+                Err(current) => observed = current,
             }
         }
+    }
+
+    fn description_is_live(&self) -> bool {
+        matches!(
+            self.description_refs.load(Ordering::Acquire),
+            1..RETIRED_DESCRIPTION_REFS
+        )
     }
 }
 
@@ -294,6 +384,19 @@ impl FileDesc {
         let was_published = self.published.swap(false, Ordering::AcqRel);
         assert!(was_published, "unpublishing unpublished file descriptor");
         self.pfile.clone()
+    }
+
+    /// Capture this opened-description identity only while it is live.
+    ///
+    /// A concurrent final close may retire it immediately after this check;
+    /// callers therefore use the capability's lease and commit-time recheck
+    /// rather than treating successful capture as an alive bit.
+    pub(crate) fn opened_description_capability(&self) -> Option<OpenedDescriptionCapability> {
+        self.pfile
+            .description_is_live()
+            .then(|| OpenedDescriptionCapability {
+                target: Arc::downgrade(&self.pfile),
+            })
     }
 
     pub fn vfs_file(&self) -> &Arc<File> {
@@ -1405,6 +1508,47 @@ impl Task {
             let closed = files_state.write().close_range(first, last);
             Self::release_description_refs(closed);
         }
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod opened_description_liveness_kunits {
+    use super::*;
+
+    #[kunit]
+    fn aliases_keep_description_live_until_terminal_release() {
+        let mut files = FilesState::new();
+        let first = files
+            .open_fd(
+                vfs_open(Path::new("/")).unwrap(),
+                OpenAccessMode::Read,
+                FileStatusFlags::empty(),
+                LinuxOpenCompat::empty(),
+                FdFlags::empty(),
+            )
+            .unwrap();
+        let second = files.dup(first).unwrap();
+
+        let capability = files
+            .get_fd(first)
+            .unwrap()
+            .opened_description_capability()
+            .unwrap();
+        let alias_capability = files
+            .get_fd(second)
+            .unwrap()
+            .opened_description_capability()
+            .unwrap();
+        assert!(capability.same_identity(&alias_capability));
+        let lease = capability.try_lease().unwrap();
+
+        files.close_fd(first).unwrap().release_description_ref();
+        assert!(capability.try_lease().is_some());
+        assert!(lease.is_live());
+
+        files.close_fd(second).unwrap().release_description_ref();
+        assert!(capability.try_lease().is_none());
+        assert!(!lease.is_live());
     }
 }
 
