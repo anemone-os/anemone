@@ -1,6 +1,6 @@
 # Epoll 实施计划
 
-**状态：** Active / Stage 0
+**状态：** Active / Stage 0 Closed / Stage 1 Resolution Gate Not Entered
 **适用修订：** R0
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-epoll](./index.md)
@@ -11,8 +11,8 @@
 
 本文把公共 R0 中已经闭合的 accepted target 解析成滚动实施路线。Stage 0 已解析为
 Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后进入 Active。
-初始授权覆盖 0A、0B；后续授权覆盖 0C、0D。前一 checkpoint 的交付、review 与验证关闭后
-才能进入后一项，且 Stage 0 closure 不会自动授权后续 Stage。
+初始授权覆盖 0A、0B；后续授权覆盖 0C、0D。四个 checkpoint 已逐项独立关闭；Stage 1
+resolution gate 尚未进入或获执行授权，且 Stage 0 closure 不会自动授权后续 Stage。
 
 ## 实施原则
 
@@ -62,11 +62,11 @@ Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后
 
 | 阶段 | 成熟度 | 目的 | contract cutover | 解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 0 | Active | 用 production-shaped vertical slice 证明 observer route、consumer retirement、terminal liveness 与三类 source context 可以共存 | None | Ready 解析与 activation preflight 已完成 |
+| Stage 0 | Closed | 用 production-shaped vertical slice 证明 observer route、consumer retirement、terminal liveness 与三类 source context 可以共存 | None | 0A-0D closure evidence 已记录 |
 | Stage 1 | Outline | 迁移全部 pollable source 与 poll/select，删除 `LatchTrigger` source bridge，并原子切换 subscription / opened-description contract | `SUBSCRIPTION-CUTOVER`、`OPENED-DESC-CAPABILITY-CUTOVER` | Stage 0 独立关闭后 |
 | Stage 2 | Outline | 实现 epoll core、anonymous file、syscall ABI、focused tests 与 LTP，完成首版 epoll cutover | `EPOLL-CUTOVER` | Stage 1 独立关闭后 |
 
-## Stage 0 Ready：Subscription 与 Liveness Proof-First Slice
+## Stage 0 Closed：Subscription 与 Liveness Proof-First Slice
 
 ### 前置条件
 
@@ -262,8 +262,10 @@ notify/drop 或削弱容量耗尽的可观察失败，停止 Stage 并进入 Tar
 
 ### Checkpoint 0D - TTY Preallocated Handoff 与 Stage Closure
 
-**执行状态：** Authorized / Not Started。0C 已独立关闭；0D 仍须在自己的 write subset、review、
-runtime closure 与 write-back 全部闭合后才能关闭 Stage 0。
+**执行状态：** Closed / 2026-07-26。0C 已独立关闭，获批的 0B correction 已由独立 commit
+`a693b628` 重新关闭；0D 的 TTY subset、Stage-level audit、RV64 closure wrapper、完整 diff review
+与 write-back 已闭合。详细证据与 proof boundary 见对应
+[transaction checkpoint log](../../devlog/transactions/2026-07-26-epoll.md#checkpoint-0d---tty-preallocated-handoff--stage-closure---2026-07-26)。
 
 **0B correction 前置项：** 0D 的真实-route KUnit preflight 发现 `IomuxWaitRound` 与 private
 `fs::iomux` façade 只允许 `crate::fs` 命名，`device::tty` 因而既不能保存 production `PollRoute`，
@@ -271,10 +273,13 @@ runtime closure 与 write-back 全部闭合后才能关闭 Stage 0。
 最小重开 0B subset 修改 `fs/iomux/{mod,wait}.rs`：只精确导出 crate-internal `PollRoute`，且只在
 `kunit` 构建向 TTY 暴露 production `IomuxWaitRound`；observer、route constructor 与
 `register_with_route` 继续保持原 owner-private。该 correction 必须独立验证、review、提交并重新关闭
-0B，随后 0D code subset 仍只修改 `terminal.rs`。
+0B，随后 0D code subset 修改 `terminal.rs`，并只在 `fs/mod.rs` 删除 TTY import 落地后已满足
+退出条件的两个临时 unused allowance。
 
-**交付与 write subset：** 只修改 `anemone-kernel/src/device/tty/terminal.rs`、本文与对应 transaction。
-把 TTY poll entry 迁移到 0B protocol，保持 `poll_triggers` / `poll_spare` 的预分配容量、
+**交付与 write subset：** 只修改 `anemone-kernel/src/device/tty/terminal.rs`、`anemone-kernel/src/fs/mod.rs`
+的上述 allowance cleanup、本文、对应 transaction，以及获批用于最终状态同步的 `index.md` /
+`invariants.md`。
+把 TTY poll entry 迁移到 0B protocol，保持 `poll_routes` / `poll_spare` 的预分配容量、
 `poll_handoff_active` / `poll_dirty` 重入 handoff 与 guard-out notify/drop；改写既有 focused KUnit，
 不增加平行状态机。随后完成 Stage 级 caller/source/publication audit 与 closure write-back。
 

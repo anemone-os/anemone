@@ -1,4 +1,4 @@
-use crate::{prelude::*, utils::ring_buffer::RingBuffer};
+use crate::{fs::PollRoute, prelude::*, utils::ring_buffer::RingBuffer};
 
 use super::{
     discipline::{InputRead, ReceiveResult, TtyDiscipline, TtySignalControl},
@@ -283,8 +283,8 @@ struct TerminalInner {
     last_drain_generation: usize,
     termios_generation: usize,
     winsize: TtyWinsize,
-    poll_triggers: Vec<TtyPollTrigger>,
-    poll_spare: Vec<TtyPollTrigger>,
+    poll_routes: Vec<TtyPollRoute>,
+    poll_spare: Vec<TtyPollRoute>,
     poll_handoff_active: bool,
     poll_dirty: bool,
 }
@@ -309,8 +309,20 @@ impl Default for TtyWinsize {
 }
 
 #[derive(Debug, Clone)]
-struct TtyPollTrigger {
-    trigger: LatchTrigger,
+struct TtyPollRoute {
+    route: PollRoute,
+}
+
+impl TtyPollRoute {
+    fn new(route: &PollRoute) -> Self {
+        Self {
+            route: route.clone(),
+        }
+    }
+
+    fn is_prunable(&self) -> bool {
+        self.route.is_prunable()
+    }
 }
 
 pub(crate) struct Terminal {
@@ -349,11 +361,12 @@ impl Terminal {
     pub(crate) fn try_new(line: TtyLineSnapshot) -> Result<Arc<Self>, SysError> {
         let discipline = TtyDiscipline::try_new()?;
         let output = TerminalOutput::try_new()?;
-        let mut poll_triggers = Vec::new();
+        let mut poll_routes = Vec::new();
         // Poll registration fails closed when this pre-publish allocation is
-        // exhausted. `LatchTrigger::wait_id()` is diagnostic-only, so the
-        // Terminal never merges registrations by that value.
-        poll_triggers
+        // exhausted. Routes are notification capabilities rather than
+        // readiness truth, so the Terminal never merges registrations by
+        // route identity.
+        poll_routes
             .try_reserve_exact(MAX_PROCESSES as usize)
             .map_err(|_| SysError::OutOfMemory)?;
         let mut poll_spare = Vec::new();
@@ -370,7 +383,7 @@ impl Terminal {
                 last_drain_generation: 0,
                 termios_generation: 0,
                 winsize: TtyWinsize::default(),
-                poll_triggers,
+                poll_routes,
                 poll_spare,
                 poll_handoff_active: false,
                 poll_dirty: false,
@@ -585,42 +598,55 @@ impl Terminal {
     pub(super) fn poll(&self, request: &PollRequest<'_>) -> PollRegisterResult {
         let supported = request.interests() & (PollEvent::READABLE | PollEvent::WRITABLE);
         let mut stale = None;
+        let mut capacity_exhausted = false;
         let result = {
             let mut inner = self.inner.lock();
             let ready = Self::poll_events_locked(&inner, supported);
-            if !ready.is_empty() || !request.is_register() {
+            if !request.is_register() {
                 PollRegisterResult::Ready(ready)
             } else if supported.is_empty() {
                 PollRegisterResult::Unsupported
-            } else {
-                let trigger = request.trigger().expect("register poll without trigger");
-                if inner.poll_triggers.len() < inner.poll_triggers.capacity() {
-                    inner.poll_triggers.push(TtyPollTrigger {
-                        trigger: trigger.clone(),
-                    });
-                } else if let Some(index) = inner
-                    .poll_triggers
-                    .iter()
-                    .position(|item| item.trigger.is_prunable())
+            } else if let Some(route) = request.route() {
+                assert!(
+                    inner.poll_routes.capacity() >= MAX_PROCESSES as usize,
+                    "TTY poll registry lost its preallocated capacity"
+                );
+                let installed = if inner.poll_routes.len() < MAX_PROCESSES as usize {
+                    inner.poll_routes.push(TtyPollRoute::new(route));
+                    true
+                } else if let Some(index) =
+                    inner.poll_routes.iter().position(TtyPollRoute::is_prunable)
                 {
                     stale = Some(core::mem::replace(
-                        &mut inner.poll_triggers[index],
-                        TtyPollTrigger {
-                            trigger: trigger.clone(),
-                        },
+                        &mut inner.poll_routes[index],
+                        TtyPollRoute::new(route),
                     ));
+                    true
                 } else {
-                    return PollRegisterResult::Unsupported;
-                }
-                let ready = Self::poll_events_locked(&inner, supported);
-                if ready.is_empty() {
-                    PollRegisterResult::Armed
+                    capacity_exhausted = true;
+                    false
+                };
+                if installed {
+                    PollRegisterResult::Subscribed(Self::poll_events_locked(&inner, supported))
                 } else {
-                    PollRegisterResult::Ready(ready)
+                    PollRegisterResult::Unsupported
                 }
+            } else if ready.is_empty() {
+                // Stage 0 legacy callers carry no persistent route. They may
+                // still consume an already-ready snapshot, but must fail
+                // closed when notification would be required.
+                PollRegisterResult::Unsupported
+            } else {
+                PollRegisterResult::Ready(ready)
             }
         };
         drop(stale);
+        if capacity_exhausted {
+            kwarningln!(
+                "tty: poll route capacity exhausted capacity={}",
+                MAX_PROCESSES,
+            );
+        }
         result
     }
 
@@ -651,13 +677,13 @@ impl Terminal {
     fn notify_state_change(&self) {
         self.state_changed.publish(usize::MAX, true);
 
-        // Latch edges are hints; every waiter rechecks Terminal-owned
-        // predicates. Wake all registered poll rounds on any state change so
-        // no waiter can miss a brief ready transition while another task
-        // consumes the newly available input/output capacity. Two pre-reserved
-        // vectors provide a guard-out handoff without allocating or dropping a
-        // LatchTrigger under the Terminal guard.
-        let mut detached = {
+        // Poll-route notifications are hints; every waiter rechecks
+        // Terminal-owned predicates. Wake all registered poll rounds on any
+        // state change so no waiter can miss a brief ready transition while
+        // another task consumes the newly available input/output capacity. Two
+        // pre-reserved vectors provide a guard-out handoff without allocating
+        // or dropping a PollRoute under the Terminal guard.
+        let mut handoff = {
             let mut inner = self.inner.lock();
             if inner.poll_handoff_active {
                 inner.poll_dirty = true;
@@ -668,9 +694,9 @@ impl Terminal {
         };
 
         loop {
-            for detached in detached.drain(..) {
-                if !detached.trigger.is_prunable() {
-                    detached.trigger.trigger();
+            for route in handoff.drain(..) {
+                if !route.is_prunable() {
+                    route.route.notify();
                 }
             }
 
@@ -680,7 +706,7 @@ impl Terminal {
                     inner.poll_spare.is_empty(),
                     "TTY poll handoff scratch was replaced concurrently"
                 );
-                inner.poll_spare = detached;
+                inner.poll_spare = handoff;
                 if inner.poll_dirty {
                     inner.poll_dirty = false;
                     Some(Self::begin_poll_handoff(&mut inner))
@@ -692,21 +718,33 @@ impl Terminal {
             let Some(next) = next else {
                 break;
             };
-            detached = next;
+            handoff = next;
         }
     }
 
-    fn begin_poll_handoff(inner: &mut TerminalInner) -> Vec<TtyPollTrigger> {
+    fn begin_poll_handoff(inner: &mut TerminalInner) -> Vec<TtyPollRoute> {
         assert!(
             inner.poll_spare.is_empty(),
             "TTY poll handoff scratch was reused before drain"
         );
-        let TerminalInner {
-            poll_triggers,
-            poll_spare,
-            ..
-        } = inner;
-        core::mem::swap(poll_triggers, poll_spare);
+        assert!(
+            inner.poll_spare.capacity() >= MAX_PROCESSES as usize,
+            "TTY poll handoff lost its preallocated capacity"
+        );
+        let mut index = 0;
+        while index < inner.poll_routes.len() {
+            assert!(
+                inner.poll_spare.len() < MAX_PROCESSES as usize,
+                "TTY poll handoff exceeded preallocated capacity"
+            );
+            if inner.poll_routes[index].is_prunable() {
+                let stale = inner.poll_routes.swap_remove(index);
+                inner.poll_spare.push(stale);
+            } else {
+                inner.poll_spare.push(inner.poll_routes[index].clone());
+                index += 1;
+            }
+        }
         core::mem::take(&mut inner.poll_spare)
     }
 
@@ -747,7 +785,8 @@ mod kunits {
     use super::*;
     use crate::{
         device::tty::port::TtyParity,
-        sched::{Latch, LatchCancelReason, LatchWaitOutcome},
+        fs::IomuxWaitRound,
+        sched::{LatchCancelReason, LatchWaitOutcome},
     };
 
     fn terminal() -> Arc<Terminal> {
@@ -939,40 +978,35 @@ mod kunits {
     #[kunit]
     fn poll_register_before_after_notification_and_stale_cleanup() {
         let registered = terminal();
-        let latch = Latch::begin_current(true);
-        let trigger = latch.make_trigger();
+        let notified_round = IomuxWaitRound::begin_current();
         assert_eq!(
-            registered.poll(&PollRequest::register(PollEvent::READABLE, &trigger)),
-            PollRegisterResult::Armed
+            registered.poll(&notified_round.poll_request(PollEvent::READABLE)),
+            PollRegisterResult::Subscribed(PollEvent::empty())
         );
         assert!(registered.receive_rx_byte(b'x'));
         assert!(registered.receive_rx_byte(b'\n'));
-        latch.schedule_with_timeout(Some(Duration::from_secs(1)));
-        assert_eq!(latch.finish(), LatchWaitOutcome::Triggered);
+        {
+            let inner = registered.inner.lock();
+            assert_eq!(inner.poll_routes.len(), 1);
+            assert!(inner.poll_spare.is_empty());
+        }
+        notified_round.schedule_with_timeout(Some(Duration::from_secs(1)));
+        assert_eq!(notified_round.finish(), LatchWaitOutcome::Triggered);
 
-        let ready_latch = Latch::begin_current(true);
-        let ready_trigger = ready_latch.make_trigger();
+        let ready_round = IomuxWaitRound::begin_current();
         assert_eq!(
-            registered.poll(&PollRequest::register(PollEvent::READABLE, &ready_trigger,)),
-            PollRegisterResult::Ready(PollEvent::READABLE)
+            registered.poll(&ready_round.poll_request(PollEvent::READABLE)),
+            PollRegisterResult::Subscribed(PollEvent::READABLE)
         );
-        ready_latch.cancel(LatchCancelReason::PredicateReady);
-        let _ = ready_latch.finish();
+        assert_eq!(registered.inner.lock().poll_routes.len(), 2);
+        ready_round.cancel(LatchCancelReason::PredicateReady);
+        let _ = ready_round.finish();
 
-        let full = terminal();
-        let fill = vec![b'x'; TTY_OUTPUT_CAPACITY_BYTES];
-        assert_eq!(full.enqueue_output(&fill), fill.len());
-        let stale_latch = Latch::begin_current(true);
-        let stale_trigger = stale_latch.make_trigger();
-        assert_eq!(
-            full.poll(&PollRequest::register(PollEvent::WRITABLE, &stale_trigger)),
-            PollRegisterResult::Armed
-        );
-        stale_latch.cancel(LatchCancelReason::RegisterError);
-        let _ = stale_latch.finish();
-        full.consume_output(b"x");
-        let inner = full.inner.lock();
-        assert!(inner.poll_triggers.is_empty());
+        let mut input = [0_u8; 2];
+        assert_eq!(registered.read_input(&mut input), InputRead::Bytes(2));
+        assert_eq!(&input, b"x\n");
+        let inner = registered.inner.lock();
+        assert!(inner.poll_routes.is_empty());
         assert!(inner.poll_spare.is_empty());
     }
 }

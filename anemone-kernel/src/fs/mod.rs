@@ -33,9 +33,6 @@ mod ramfs;
 pub mod api;
 
 #[cfg(feature = "kunit")]
-// Stage 0B publishes the real wait-round seam before the 0D TTY KUnit lands.
-// Remove this allowance when terminal.rs imports the round in that checkpoint.
-#[allow(unused_imports)]
 pub(crate) use self::iomux::IomuxWaitRound;
 pub use self::{
     anonymous::*,
@@ -65,12 +62,9 @@ pub use self::{
 };
 pub(crate) use self::{
     inode::RenameFlags,
+    iomux::PollRoute,
     uio::{UserBufferSegment, UserBufferSink, UserBufferSource},
 };
-// Stage 0B publishes the source capability before the 0D TTY consumer lands.
-// Remove this allowance when terminal.rs imports the route in that checkpoint.
-#[allow(unused_imports)]
-pub(crate) use self::iomux::PollRoute;
 pub use cache_stats::resident_file_inode_cache_pages;
 
 // We prefer gathering all public APIs in this module, and keep the global state
