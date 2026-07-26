@@ -39,6 +39,60 @@ pub mod linux {
         pub const EFD_NONBLOCK: u32 = O_NONBLOCK;
     }
 
+    pub mod epoll {
+        use core::mem::{offset_of, size_of};
+
+        use super::open::O_CLOEXEC;
+
+        pub const EPOLL_CLOEXEC: u32 = O_CLOEXEC;
+
+        pub const EPOLLIN: u32 = 0x0000_0001;
+        pub const EPOLLPRI: u32 = 0x0000_0002;
+        pub const EPOLLOUT: u32 = 0x0000_0004;
+        pub const EPOLLERR: u32 = 0x0000_0008;
+        pub const EPOLLHUP: u32 = 0x0000_0010;
+        pub const EPOLLRDNORM: u32 = 0x0000_0040;
+        pub const EPOLLRDBAND: u32 = 0x0000_0080;
+        pub const EPOLLWRNORM: u32 = 0x0000_0100;
+        pub const EPOLLWRBAND: u32 = 0x0000_0200;
+        pub const EPOLLMSG: u32 = 0x0000_0400;
+        pub const EPOLLRDHUP: u32 = 0x0000_2000;
+        pub const EPOLLEXCLUSIVE: u32 = 1 << 28;
+        pub const EPOLLWAKEUP: u32 = 1 << 29;
+        pub const EPOLLONESHOT: u32 = 1 << 30;
+        pub const EPOLLET: u32 = 1 << 31;
+
+        pub const EPOLL_CTL_ADD: i32 = 1;
+        pub const EPOLL_CTL_DEL: i32 = 2;
+        pub const EPOLL_CTL_MOD: i32 = 3;
+
+        /// asm-generic Linux `struct epoll_event` layout on RV64 and LA64.
+        ///
+        /// The explicit padding keeps `data` at offset 8. Kernel adapters copy
+        /// this record as bytes because Linux permits unaligned event pointers.
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct EpollEvent {
+            pub events: u32,
+            pub __padding: u32,
+            pub data: u64,
+        }
+
+        impl EpollEvent {
+            pub const fn new(events: u32, data: u64) -> Self {
+                Self {
+                    events,
+                    __padding: 0,
+                    data,
+                }
+            }
+        }
+
+        const _: [(); 16] = [(); size_of::<EpollEvent>()];
+        const _: [(); 0] = [(); offset_of!(EpollEvent, events)];
+        const _: [(); 8] = [(); offset_of!(EpollEvent, data)];
+    }
+
     pub mod close_range {
         pub const CLOSE_RANGE_UNSHARE: u32 = 1 << 1;
         pub const CLOSE_RANGE_CLOEXEC: u32 = 1 << 2;

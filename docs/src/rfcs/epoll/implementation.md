@@ -1,8 +1,8 @@
 # Epoll 实施计划
 
-**状态：** Stage 0-1 Closed / Stage 2 Checkpoint 2B Closed / 2C Not Authorized
+**状态：** Stage 0-1 Closed / Stage 2 Checkpoint 2C Closed / 2D Authorized, Not Started
 **适用修订：** R0
-**最后更新：** 2026-07-26
+**最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **目标不变量：** [Epoll 与 Poll Subscription 不变量需求](./invariants.md)
 **当前契约：** [`SCHED-LATCH-*`](../../contracts/scheduler/latch-wait-round.md)、[`SIGNAL-TEMP-MASK-*`](../../contracts/signal/temporary-mask-delivery.md)、[`IOMUX-POLL-*`](../../contracts/iomux/poll-wait.md)、[`OPENED-DESC-*`](../../contracts/task/opened-description-lifecycle.md)、[`TTY-TERM-001` / `TTY-INPUT-001`](../../contracts/tty/data-plane.md)
@@ -15,7 +15,8 @@ Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后
 执行 `0 -> 1` resolution gate；该 gate 把 Stage 1 完整解析为 Ready。后续独立授权完成了 Stage 1
 代码、review、验证与两个 foundation cutover。开发者随后授权执行 `1 -> 2` resolution gate；
 该 gate 已把 Stage 2 完整解析为 Ready。后续独立授权与精确 write-set expansion 批准已完成 2A，新的独立授权
-也已完成 2B ready/wait protocol；2C-2D 与 `EPOLL-CUTOVER` 未授权。
+也已完成 2B ready/wait protocol。当前目标授权覆盖2C与2D；2C已关闭，2D尚未激活，`EPOLL-CUTOVER`
+仍未执行。
 
 ## 实施原则
 
@@ -67,7 +68,7 @@ Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 用 production-shaped vertical slice 证明 observer route、consumer retirement、terminal liveness 与三类 source context 可以共存 | None | 0A-0D closure evidence 已记录 |
 | Stage 1 | Closed | 迁移 eventfd/fanotify 两个剩余 poll bridge，删除 source-facing `LatchTrigger` / `Armed` 路径，并原子切换 subscription / opened-description contract | `SUBSCRIPTION-CUTOVER`、`OPENED-DESC-CAPABILITY-CUTOVER` 已同步生效 | closure evidence 已记录；Stage 2 gate 已独立完成 |
-| Stage 2 | Active / 2B Closed / 2C Not Authorized | 以2A-2D四个有序checkpoint实现 epoll core、anonymous file、syscall ABI、focused tests 与 LTP，完成首版 epoll cutover | `EPOLL-CUTOVER`，尚未生效 | 2A-2B closure evidence 已记录；等待2C独立实现授权 |
+| Stage 2 | Active / 2C Closed / 2D Authorized, Not Started | 以2A-2D四个有序checkpoint实现 epoll core、anonymous file、syscall ABI、focused tests 与 LTP，完成首版 epoll cutover | `EPOLL-CUTOVER`，尚未生效 | 2A-2C closure evidence 已记录；2D等待激活 |
 
 ## Stage 0 Closed：Subscription 与 Liveness Proof-First Slice
 
@@ -663,12 +664,12 @@ Stage 1 独立关闭后已执行一次只读 preflight：
 
 ### 阶段成熟度与授权边界
 
-- **Active / Checkpoint 2B Closed / 2C Not Authorized。** Stage 0-1 已 Closed，`SUBSCRIPTION-CUTOVER` 与
+- **Active / Checkpoint 2C Closed / 2D Authorized, Not Started。** Stage 0-1 已 Closed，`SUBSCRIPTION-CUTOVER` 与
   `OPENED-DESC-CAPABILITY-CUTOVER` 已 effective；上一节 resolution gate 已完成 live owner、ABI、LTP、
   test harness 与 current-contract preflight。
 - 开发者先授权解析 Stage 2 implementation，并明确允许后续测试需要时把 `anemone-rs` 与
-  `anemone-apps` 纳入写集；后续独立授权已分别关闭 2A 与 2B，不授权 2C-2D、QEMU、LTP 或
-  `EPOLL-CUTOVER`。
+  `anemone-apps` 纳入写集；后续独立授权已分别关闭 2A 与 2B，当前目标授权继续覆盖2C与2D。
+  2C已完成build-only closure；QEMU、LTP与`EPOLL-CUTOVER`只在2D激活后执行。
 - Stage 2 保持一个原子 integration / acceptance unit，但实现拆成 2A-2D 四个有序 checkpoint。2A-2C 只形成
   不可独立合入的 stacked implementation evidence；在 2D 完成 kernel ABI、focused test、LTP、review、current
   contract 与 transaction write-back 前，任何 partial core、syscall handler 或单独 contract page 都不得合入

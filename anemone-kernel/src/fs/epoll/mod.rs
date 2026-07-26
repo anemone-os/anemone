@@ -8,6 +8,7 @@ mod ready;
 mod watch;
 
 use file::EpollFileRoutes;
+pub(in crate::fs) use file::{create_epoll_file, epoll_from_file, teardown_epoll_file};
 use ready::{DirtySlots, ReadySlots, SLOT_COUNT, SlotId, WatchSlots};
 use watch::EpollWatch;
 pub(in crate::fs) use watch::WatchPolicy;
