@@ -1,22 +1,10 @@
-#[cfg(feature = "kunit-probe")]
-use alloc::vec;
-use alloc::vec::Vec;
+use anemone_net_api::{FrameProvider, Instant, InterfaceId, PumpOutcome, Recheck};
+use smoltcp::iface::{PollIngressSingleResult, PollResult};
 
-use anemone_net_api::{EthernetAddress, FrameProvider, Instant, InterfaceId, PumpOutcome, Recheck};
-use smoltcp::{
-    iface::{Config, Interface, PollIngressSingleResult, PollResult, SocketSet},
-    wire::{EthernetAddress as SmoltcpEthernetAddress, HardwareAddress},
+use crate::{
+    adapter::{FrameDevice, from_smoltcp_instant, to_smoltcp_instant},
+    stack::{PumpError, Stack},
 };
-
-#[cfg(feature = "kunit-probe")]
-use smoltcp::{
-    iface::SocketHandle,
-    phy::ChecksumCapabilities,
-    socket::icmp,
-    wire::{Icmpv4Packet, Icmpv4Repr, IpAddress, IpCidr, Ipv4Address},
-};
-
-use crate::adapter::{FrameDevice, from_smoltcp_instant, to_smoltcp_instant};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PumpBudget {
@@ -35,96 +23,7 @@ impl PumpBudget {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PumpError {
-    UnknownInterface(InterfaceId),
-}
-
-struct InterfaceEntry {
-    id: InterfaceId,
-    // Stable attach-time snapshot required by smoltcp. The provider remains
-    // the truth source; every pump asserts that this snapshot is not stale.
-    frame_capacity: usize,
-    interface: Interface,
-    sockets: SocketSet<'static>,
-    #[cfg(feature = "kunit-probe")]
-    kunit_probe: Option<KunitIcmpProbe>,
-}
-
-#[cfg(feature = "kunit-probe")]
-struct KunitIcmpProbe {
-    socket: SocketHandle,
-    remote: Ipv4Address,
-    ident: u16,
-    sequence: u16,
-    completed: bool,
-}
-
-/// Owns the private smoltcp interface resources and their opaque ID mapping.
-///
-/// `&mut Stack` is the unique pump capability. The kernel wiring owner may put
-/// the stack behind its chosen synchronization primitive, but admission,
-/// contention, and requeue policy stay outside this protocol-state owner.
-#[derive(Default)]
-pub struct Stack {
-    interfaces: Vec<InterfaceEntry>,
-    next_interface_id: u32,
-}
-
 impl Stack {
-    pub const fn new() -> Self {
-        Self {
-            interfaces: Vec::new(),
-            next_interface_id: 0,
-        }
-    }
-
-    pub fn add_interface<P: FrameProvider>(
-        &mut self,
-        provider: &mut P,
-        ethernet_address: EthernetAddress,
-        now: Instant,
-    ) -> InterfaceId {
-        let raw_id = self.next_interface_id;
-        self.next_interface_id = raw_id
-            .checked_add(1)
-            .expect("InterfaceId namespace exhausted");
-        let id = InterfaceId::from_index(raw_id);
-        let frame_capacity = provider.capabilities().max_frame_len;
-        let mut device = FrameDevice::new(provider);
-        let hardware_address = HardwareAddress::Ethernet(SmoltcpEthernetAddress::from_bytes(
-            &ethernet_address.octets(),
-        ));
-        let interface = Interface::new(
-            Config::new(hardware_address),
-            &mut device,
-            to_smoltcp_instant(now),
-        );
-
-        self.interfaces.push(InterfaceEntry {
-            id,
-            frame_capacity,
-            interface,
-            sockets: SocketSet::new(Vec::new()),
-            #[cfg(feature = "kunit-probe")]
-            kunit_probe: None,
-        });
-        id
-    }
-
-    /// Withdraws a transaction-local mapping before active publication.
-    ///
-    /// Interface IDs remain monotonic and are not reused. Runtime detach is not
-    /// part of R0; the kernel attach authority only uses this for rollback when
-    /// worker/wake/time preparation fails.
-    pub fn remove_interface(&mut self, id: InterfaceId) -> Result<(), PumpError> {
-        let Some(index) = self.interfaces.iter().position(|entry| entry.id == id) else {
-            return Err(PumpError::UnknownInterface(id));
-        };
-        self.interfaces.remove(index);
-        Ok(())
-    }
-
     pub fn pump<P: FrameProvider>(
         &mut self,
         id: InterfaceId,
@@ -132,9 +31,7 @@ impl Stack {
         now: Instant,
         budget: PumpBudget,
     ) -> Result<PumpOutcome, PumpError> {
-        let Some(entry) = self.interfaces.iter_mut().find(|entry| entry.id == id) else {
-            return Err(PumpError::UnknownInterface(id));
-        };
+        let entry = self.interface_mut(id)?;
 
         // smoltcp snapshots this capability when the interface is created. A
         // different value here means the caller supplied the wrong provider.
@@ -190,137 +87,6 @@ impl Stack {
             next_deadline,
         })
     }
-
-    /// Installs an IPv4 address solely for the deterministic host fixture.
-    ///
-    /// `host-test` is absent from the kernel dependency, so this control cannot
-    /// become a production address API. Remove it when the fixture can stay
-    /// crate-private or an accepted control-plane owner replaces it.
-    #[cfg(feature = "host-test")]
-    pub fn configure_ipv4_for_host_validation(
-        &mut self,
-        id: InterfaceId,
-        address: [u8; 4],
-        prefix_len: u8,
-    ) -> Result<(), PumpError> {
-        use smoltcp::wire::{IpAddress, IpCidr, Ipv4Address};
-
-        let Some(entry) = self.interfaces.iter_mut().find(|entry| entry.id == id) else {
-            return Err(PumpError::UnknownInterface(id));
-        };
-        let cidr = IpCidr::new(
-            IpAddress::Ipv4(Ipv4Address::from_octets(address)),
-            prefix_len,
-        );
-        entry.interface.update_ip_addrs(|addresses| {
-            addresses.clear();
-            assert!(addresses.push(cidr).is_ok());
-        });
-        Ok(())
-    }
-
-    /// Installs and queues the single RV64 Stage 1 ICMP validation probe.
-    ///
-    /// This feature is absent from production kernels. The socket handle,
-    /// address, and endpoint remain inside the stack owner; the kernel only
-    /// observes the eventual boolean completion fact.
-    #[cfg(feature = "kunit-probe")]
-    pub fn start_kunit_icmp_echo(
-        &mut self,
-        id: InterfaceId,
-        local: [u8; 4],
-        prefix_len: u8,
-        remote: [u8; 4],
-    ) -> Result<(), PumpError> {
-        const IDENT: u16 = 0x4e46;
-        const SEQUENCE: u16 = 1;
-        const PAYLOAD: &[u8] = b"anemone-frame-stage1";
-
-        let Some(entry) = self.interfaces.iter_mut().find(|entry| entry.id == id) else {
-            return Err(PumpError::UnknownInterface(id));
-        };
-        assert!(
-            entry.kunit_probe.is_none(),
-            "KUnit ICMP probe started more than once"
-        );
-
-        let local = Ipv4Address::from_octets(local);
-        let remote = Ipv4Address::from_octets(remote);
-        entry.interface.update_ip_addrs(|addresses| {
-            addresses.clear();
-            addresses
-                .push(IpCidr::new(IpAddress::Ipv4(local), prefix_len))
-                .expect("KUnit IPv4 address slot must be available");
-        });
-
-        let rx = icmp::PacketBuffer::new(vec![icmp::PacketMetadata::EMPTY], vec![0; 128]);
-        let tx = icmp::PacketBuffer::new(vec![icmp::PacketMetadata::EMPTY], vec![0; 128]);
-        let mut socket = icmp::Socket::new(rx, tx);
-        socket
-            .bind(icmp::Endpoint::Ident(IDENT))
-            .expect("fresh KUnit ICMP socket must bind");
-        let repr = Icmpv4Repr::EchoRequest {
-            ident: IDENT,
-            seq_no: SEQUENCE,
-            data: PAYLOAD,
-        };
-        let payload = socket
-            .send(repr.buffer_len(), IpAddress::Ipv4(remote))
-            .expect("fresh KUnit ICMP socket must have TX capacity");
-        repr.emit(
-            &mut Icmpv4Packet::new_unchecked(payload),
-            &ChecksumCapabilities::default(),
-        );
-        let socket = entry.sockets.add(socket);
-        entry.kunit_probe = Some(KunitIcmpProbe {
-            socket,
-            remote,
-            ident: IDENT,
-            sequence: SEQUENCE,
-            completed: false,
-        });
-        Ok(())
-    }
-
-    /// Reaps the validation-only echo reply without exposing a smoltcp handle.
-    #[cfg(feature = "kunit-probe")]
-    pub fn kunit_icmp_echo_completed(&mut self, id: InterfaceId) -> Result<bool, PumpError> {
-        let Some(entry) = self.interfaces.iter_mut().find(|entry| entry.id == id) else {
-            return Err(PumpError::UnknownInterface(id));
-        };
-        let Some(probe) = entry.kunit_probe.as_mut() else {
-            return Ok(false);
-        };
-        if probe.completed {
-            return Ok(true);
-        }
-
-        let socket = entry.sockets.get_mut::<icmp::Socket>(probe.socket);
-        if !socket.can_recv() {
-            return Ok(false);
-        }
-        let (payload, remote) = socket
-            .recv()
-            .expect("KUnit ICMP socket reported receive readiness without a packet");
-        assert_eq!(remote, IpAddress::Ipv4(probe.remote));
-        let packet = Icmpv4Packet::new_checked(payload)
-            .expect("KUnit ICMP response must contain a valid packet");
-        let repr = Icmpv4Repr::parse(&packet, &ChecksumCapabilities::default())
-            .expect("KUnit ICMP response checksum must be valid");
-        assert!(
-            matches!(
-                repr,
-                Icmpv4Repr::EchoReply {
-                    ident,
-                    seq_no,
-                    ..
-                } if ident == probe.ident && seq_no == probe.sequence
-            ),
-            "KUnit ICMP socket received an unexpected response: {repr:?}"
-        );
-        probe.completed = true;
-        Ok(true)
-    }
 }
 
 #[cfg(test)]
@@ -328,8 +94,8 @@ mod tests {
     use alloc::vec;
 
     use anemone_net_api::{
-        FrameCapabilities, FrameSizeError, LinkState, ReceiveOutcome, RxToken, TransmitOutcome,
-        TxToken,
+        EthernetAddress, FrameCapabilities, FrameSizeError, LinkState, ReceiveOutcome, RxToken,
+        TransmitOutcome, TxToken,
     };
     use smoltcp::{
         phy::ChecksumCapabilities,
@@ -385,7 +151,7 @@ mod tests {
             TransmitOutcome::Exhausted
         }
 
-        fn capabilities(&self) -> anemone_net_api::FrameCapabilities {
+        fn capabilities(&self) -> FrameCapabilities {
             FrameCapabilities { max_frame_len: 128 }
         }
 
@@ -422,14 +188,11 @@ mod tests {
             &ChecksumCapabilities::default(),
         );
         raw_socket.send_slice(&packet).unwrap();
-        {
-            let entry = stack
-                .interfaces
-                .iter_mut()
-                .find(|entry| entry.id == interface)
-                .unwrap();
-            entry.sockets.add(raw_socket);
-        }
+        stack
+            .interface_mut(interface)
+            .unwrap()
+            .sockets
+            .add(raw_socket);
 
         let outcome = stack
             .pump(

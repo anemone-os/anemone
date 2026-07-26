@@ -2,8 +2,7 @@ use anemone_net_api::{Instant as NetworkInstant, InterfaceId, Recheck};
 use anemone_smoltcp_stack::{PumpBudget, Stack};
 
 use crate::{
-    device::net::{NetdevSnapshot, PublishedNetdev},
-    driver::net::virtio::{VirtIONetProvider, VirtIONetRecheckWake, VirtIONetStats},
+    device::net::{NetdevFrameProvider, NetdevSnapshot, PublishedNetdev, RecheckWake},
     prelude::*,
     task::kthread::{KThreadBuilder, KThreadCtx, KThreadHandle},
     time::timer::schedule_threaded_timer_event,
@@ -72,9 +71,6 @@ pub(super) struct PumpControl {
     probe_completed: AtomicBool,
     #[cfg(feature = "kunit")]
     probe_event: Event,
-    /// Diagnostic-only completion snapshot; it never drives worker behavior.
-    #[cfg(feature = "kunit")]
-    probe_stats: SpinLock<Option<VirtIONetStats>>,
 }
 
 impl PumpControl {
@@ -89,8 +85,6 @@ impl PumpControl {
             probe_completed: AtomicBool::new(false),
             #[cfg(feature = "kunit")]
             probe_event: Event::new(),
-            #[cfg(feature = "kunit")]
-            probe_stats: SpinLock::new(None),
         }
     }
 
@@ -138,10 +132,11 @@ impl PumpControl {
     }
 
     #[cfg(feature = "kunit")]
-    fn complete_kunit_probe(&self, stats: VirtIONetStats) {
-        let old = self.probe_stats.lock().replace(stats);
-        assert!(old.is_none(), "network KUnit probe completed twice");
-        self.probe_completed.store(true, Ordering::Release);
+    fn complete_kunit_probe(&self) {
+        assert!(
+            !self.probe_completed.swap(true, Ordering::AcqRel),
+            "network KUnit probe completed twice"
+        );
         self.probe_event.publish(usize::MAX, true);
     }
 
@@ -151,7 +146,7 @@ impl PumpControl {
     }
 
     #[cfg(feature = "kunit")]
-    pub(super) fn wait_for_kunit_probe(&self, timeout: Duration) -> Option<VirtIONetStats> {
+    pub(super) fn wait_for_kunit_probe(&self, timeout: Duration) {
         let outcome =
             self.probe_event
                 .listen_with_timeout(false, || self.kunit_probe_completed(), timeout);
@@ -163,34 +158,33 @@ impl PumpControl {
             !matches!(outcome, Some(TimeoutListenException::Signaled)),
             "RV64 network vertical slice wait was interrupted"
         );
-        *self.probe_stats.lock()
     }
 }
 
-impl VirtIONetRecheckWake for PumpControl {
+impl RecheckWake for PumpControl {
     fn wake(&self) {
         self.wake_worker();
     }
 }
 
-struct PumpCore {
+struct PumpCore<P: NetdevFrameProvider> {
     stack: Stack,
-    provider: VirtIONetProvider,
+    provider: P,
     interface: InterfaceId,
 }
 
-struct WorkerLaunch {
-    core: SpinLock<Option<PumpCore>>,
+struct WorkerLaunch<P: NetdevFrameProvider> {
+    core: SpinLock<Option<PumpCore<P>>>,
 }
 
-impl WorkerLaunch {
-    fn new(core: PumpCore) -> Self {
+impl<P: NetdevFrameProvider> WorkerLaunch<P> {
+    fn new(core: PumpCore<P>) -> Self {
         Self {
             core: SpinLock::new(Some(core)),
         }
     }
 
-    fn take(&self) -> PumpCore {
+    fn take(&self) -> PumpCore<P> {
         self.core
             .lock()
             .take()
@@ -199,13 +193,13 @@ impl WorkerLaunch {
 }
 
 #[derive(Opaque)]
-struct WorkerArg {
-    launch: Arc<WorkerLaunch>,
+struct WorkerArg<P: NetdevFrameProvider> {
+    launch: Arc<WorkerLaunch<P>>,
     control: Arc<PumpControl>,
 }
 
-pub(super) fn prepare(
-    published: PublishedNetdev<VirtIONetProvider>,
+pub(super) fn prepare<P: NetdevFrameProvider>(
+    published: PublishedNetdev<P>,
 ) -> Result<PreparedPath, AttachFailure> {
     let (snapshot, mut provider) = published.into_parts();
     let Some(ethernet_address) = snapshot.facts().ethernet_address else {
@@ -219,7 +213,7 @@ pub(super) fn prepare(
     let mut stack = Stack::new();
     let interface = stack.add_interface(&mut provider, ethernet_address, network_now());
     let control = Arc::new(PumpControl::new());
-    let wake: Arc<dyn VirtIONetRecheckWake> = control.clone();
+    let wake: Arc<dyn RecheckWake> = control.clone();
     provider.install_recheck_wake(Arc::downgrade(&wake));
     drop(wake);
 
@@ -229,7 +223,7 @@ pub(super) fn prepare(
         interface,
     }));
     let worker = match KThreadBuilder::new(format!("net:{}", snapshot.name())).spawn(
-        network_worker_entry,
+        network_worker_entry::<P>,
         AnyOpaque::new(WorkerArg {
             launch: launch.clone(),
             control: control.clone(),
@@ -255,9 +249,9 @@ pub(super) fn prepare(
     })
 }
 
-fn network_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
+fn network_worker_entry<P: NetdevFrameProvider>(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
     let arg = arg
-        .cast::<WorkerArg>()
+        .cast::<WorkerArg<P>>()
         .expect("network worker received invalid private data");
     let control = arg.control.clone();
     let mut core = arg.launch.take();
@@ -294,7 +288,7 @@ fn network_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
         #[cfg(feature = "kunit")]
         if control.take_kunit_probe_request() {
             core.stack
-                .start_kunit_icmp_echo(core.interface, [10, 0, 2, 15], 24, [10, 0, 2, 2])
+                .start_icmp_echo_probe(core.interface, [10, 0, 2, 15], 24, [10, 0, 2, 2])
                 .expect("active network path lost its KUnit interface mapping");
             probe_started = true;
         }
@@ -314,21 +308,10 @@ fn network_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
             if probe_started
                 && core
                     .stack
-                    .kunit_icmp_echo_completed(core.interface)
+                    .icmp_echo_probe_completed(core.interface)
                     .expect("active network path lost its KUnit interface mapping")
             {
-                let stats = core.provider.stats();
-                kinfoln!(
-                    "net-frame probe complete: RX completion {}, TX submit/completion {}/{}, IRQ recheck {}, queue-full {}, live/high-water mappings {}/{}",
-                    stats.rx_completions(),
-                    stats.tx_submissions(),
-                    stats.tx_completions(),
-                    stats.irq_rechecks(),
-                    stats.queue_full(),
-                    stats.live_mappings(),
-                    stats.mapping_high_water(),
-                );
-                control.complete_kunit_probe(stats);
+                control.complete_kunit_probe();
                 probe_started = false;
             }
 

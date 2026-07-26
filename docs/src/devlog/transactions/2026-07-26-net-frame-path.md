@@ -1,6 +1,6 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / Stage 1 Checkpoint 1-4 Closed; Stage 2 Outline Not Resolved
+**Status:** Active / Stage 1 and Boundary Interlude Closed; Stage 2 Outline Not Resolved
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260726-net-frame-path R0](../../rfcs/net-frame-path/index.md),
@@ -337,3 +337,61 @@ Checkpoint 4 delivery、stage-wide review、validation 与退出条件全部闭�
 RV64 SMP>1、LA64 build/runtime、virtio-pci、hardware、queue saturation/Stage 2 conformance、final harness 与
 其它 LTP profile均 **Not Run**，不得从本次证据外推。六个 network IDs 与 System Power Refine继续
 **Not Effective**；Stage 2 保持 **Outline / Not Resolved / Unauthorized**，本事务停止在 Stage 1 closure。
+
+### 2026-07-26 - Stage 1 -> 2 Boundary Interlude activated
+
+Stage 1关闭后的独立module-boundary review重新读取R0、Stage 1 aggregate diff、transaction/runtime evidence、
+tracking issues、current contracts、live API/stack/device/driver/worker source与Cargo feature graph。Review确认
+Stage 1行为与proof仍成立，但发现三项实现反馈：concrete VirtIO provider/wake/diagnostics通过crate-wide
+module visibility进入通用worker；KUnit harness vocabulary跨入first-party stack crate；多个已有stable role
+仍集中在少数文件并已开始推动错误visibility。分别记录为NFP-004 Keter、NFP-005与NFP-006 Euclid。
+
+用户将该反馈授权为Stage 1与Stage 2之间的独立间章并要求完成。authoritative delivery、owner route、review、
+validation、停止条件与resolved manifest见
+[Boundary Interlude](../../rfcs/net-frame-path/implementation.md#7-stage-1---2-boundary-interludeowner-与-validation-boundary-整理)。
+本次route preservation不改变R0 target、状态owner、shared semantics、ABI、visible behavior或acceptance，
+因此不递增revision；Stage 1历史closure保持不变，Stage 2仍未解析且未授权。
+
+**Activation baseline:** `dev/drc/alpha@044ac1ec`，工作树在文档解析前clean；live build入口仍为显式
+`just build --preset ... --bind ...`与repository RV64 wrapper。六个network IDs与
+`SYSTEM-POWER-ORDERLY-001` Refine全部保持Not Effective。
+
+**Write-set lock:** production、validation与docs范围以interlude resolved manifest为准。vendored smoltcp、
+generic device/bus/IRQ、kthread/timer/scheduler、power、apps/rootfs/LTP profile、LA64/PCIe与current contracts
+保持只读。若实现要求进入这些owner或改变shared `FrameProvider`，必须停止并报告。
+
+### 2026-07-26 - Stage 1 -> 2 Boundary Interlude closed
+
+实现按 authoritative manifest 完成行为保持的 owner split。`anemone-net-api` 现在由 private
+`interface/time/frame/pump` modules 组成并保持原 root re-export；`anemone-smoltcp-stack` 分离
+adapter、interface mapping、bounded pump 与 ICMP validation，kernel feature只转发
+`icmp-validation-probe`，两个 first-party crate中已无 KUnit vocabulary。
+
+kernel-local `device/net::{NetdevFrameProvider, RecheckWake}` 现在拥有 provider/worker handoff：provider继续
+唯一拥有 durable recheck predicate，wake只携带 stateless edge；generic worker只依赖该port并以 concrete
+provider泛型化，不再import或命名VirtIO类型。`driver::net::virtio`恢复private，窄facade只导出一次性
+published-netdev move与KUnit-only `stage1_probe_stats()`；后者明确是Stage 1单NIC evidence query，Stage 3
+多设备验收前必须替换，不形成control-plane API。
+
+`device/net`按registry/provider拆分，VirtIO-Net按registration/publication、raw device/IRQ与frame slot/token
+拆分。复审确认四个unsafe begin/complete点的buffer/token identity、device ownership window与sync条件未变；
+provider field drop order、publication failure retention、attach prepare-before-publish与IRQ edge-only行为未变。
+diagnostic counters不驱动queue/worker/probe completion；非KUnit build不编译stats snapshot/query。
+
+**Validation:**
+
+- `cargo test -p anemone-net-api -p anemone-smoltcp-stack`通过：1个stack unit、9个integration、2个
+  compile-fail doctest；
+- base与`icmp-validation-probe`两种`--no-default-features` check通过；warning仅来自既有vendored smoltcp；
+- canonical RV64 release build在sandbox外通过；sandbox内仍由已知lwext4 `SIGSYS / Bad system call`环境限制
+  阻断，不记为代码失败；
+- RV64 wrapper `build/net-frame-boundary-interlude-rv64.log`通过并正常关机：260/260 KUnit通过；真实纵切
+  观测RX completion 2、TX submit/completion 2/2、IRQ recheck 2、queue-full 0、live/high-water mappings
+  32/33；现有signal/wait profile为106/120、10 failed、4 skipped，与网络proof无关且未据此扩展结论；
+- focused changed-file `rustfmt --check`通过；`just fmt kernel --check`仍只报告vendored smoltcp的三个既有
+  diff；dependency/visibility/unsafe/source audit无剩余Apollyon、Keter或Euclid；`git diff --check`与
+  `mdbook build docs`通过。
+
+NFP-004、NFP-005与NFP-006已Neutralized。间章没有触发停止条件，也没有改变R0 target/revision、owner、
+shared `FrameProvider` semantics、ABI、visible behavior或acceptance；current contracts继续Not Effective。
+Stage 2保持**Outline / Not Resolved / Unauthorized**，本次没有运行resolution gate或进入Stage 2。

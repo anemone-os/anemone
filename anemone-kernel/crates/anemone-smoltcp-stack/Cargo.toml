@@ -7,7 +7,7 @@ edition = "2024"
 default = ["host-test"]
 host-test = ["std", "smoltcp/auto-icmp-echo-reply"]
 std = ["smoltcp/std"]
-kunit-probe = ["smoltcp/socket-icmp"]
+icmp-validation-probe = ["smoltcp/socket-icmp"]
 
 [dependencies]
 anemone-net-api = { path = "../anemone-net-api" }
@@ -18,7 +18,7 @@ smoltcp = { path = "../anemos/smoltcp", default-features = false, features = [
     # smoltcp 0.13 makes `medium-ethernet` enable its private socket enum and
     # rejects an empty variant set. Raw is only the compile anchor here: this
     # crate exposes and constructs no production endpoint. ICMP remains gated
-    # by `kunit-probe`. Remove this anchor when smoltcp supports a socketless
+    # by `icmp-validation-probe`. Remove this anchor when smoltcp supports a socketless
     # Ethernet interface or an accepted production socket feature replaces it.
     "socket-raw",
 ] }

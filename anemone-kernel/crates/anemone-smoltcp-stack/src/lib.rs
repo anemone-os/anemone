@@ -4,5 +4,9 @@ extern crate alloc;
 
 mod adapter;
 mod pump;
+mod stack;
+#[cfg(feature = "icmp-validation-probe")]
+mod validation;
 
-pub use pump::{PumpBudget, PumpError, Stack};
+pub use pump::PumpBudget;
+pub use stack::{PumpError, Stack};

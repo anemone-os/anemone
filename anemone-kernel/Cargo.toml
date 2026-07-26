@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-kunit = ["anemone-smoltcp-stack/kunit-probe"]
+kunit = ["anemone-smoltcp-stack/icmp-validation-probe"]
 fs_ext4 = []
 kernel_preempt = []
 spin_lock_irqsave = []

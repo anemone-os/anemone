@@ -1,6 +1,6 @@
 # Network Frame Path Tracking Issues
 
-**状态：** Active
+**状态：** Active RFC / 当前无开放 Apollyon、Keter 或 Euclid
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)
@@ -18,9 +18,7 @@
 
 ## Euclid
 
-当前无项。Stage 1 已取得 RV64 virtio-mmio network runtime evidence；LA64 / virtio-pci 不属于当前
-R0 target。Stage 2/3 尚未解析或执行的 proof obligation 不是已经确认的设计缺陷；如果后续实际证据要求
-改变 shared ownership、public semantic surface 或 acceptance boundary，再新增对应 finding。
+当前无项。
 
 ## Safe
 
@@ -28,6 +26,44 @@ R0 target。Stage 2/3 尚未解析或执行的 proof obligation 不是已经确�
 后续 stage 解析输入，不作为 Safe issue 堆放。
 
 ## Neutralized
+
+### NFP-004 — concrete VirtIO boundary 泄漏到通用 worker
+
+**状态：** Neutralized by Stage 1 -> 2 Boundary Interlude
+**来源：** 2026-07-26 Stage 1 post-close module-boundary review
+**影响：** `NET-BOUNDARY-001`、`NET-FRAME-PROGRESS-001`、`NET-STACK-PUMP-001`
+**依据：** [Boundary Interlude closure](./implementation.md#75-closure)与
+[transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)
+
+原实现让`net::worker`直接import concrete VirtIO provider、VirtIO-named wake trait与diagnostic snapshot，
+迫使driver module扩大crate-wide visibility。间章把durable predicate + stateless wake handoff放入kernel-local
+`device/net` port；worker只依赖`NetdevFrameProvider` / `RecheckWake`并对provider泛型化，
+`driver::net::virtio`恢复private。kernel wake没有进入shared API，task/driver private state也没有跨边界泄漏。
+
+### NFP-005 — KUnit harness vocabulary 跨入 stack crate
+
+**状态：** Neutralized by Stage 1 -> 2 Boundary Interlude
+**来源：** 2026-07-26 Stage 1 post-close module-boundary review
+**影响：** validation boundary、dependency direction、temporary-probe exit condition
+**依据：** [Boundary Interlude closure](./implementation.md#75-closure)与
+[transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)
+
+stack feature、type与method现只表达`icmp-validation-probe` / `IcmpEchoProbe` capability；两个first-party
+crate中不再出现KUnit vocabulary，request/wait/assert全部留在kernel validation module。probe仍是临时
+validation seam，正式control-plane出现或`NFP-FINAL-CUTOVER`审计时必须删除或替换，不能成为production
+endpoint API。
+
+### NFP-006 — stable module roles集中在少数文件
+
+**状态：** Neutralized by Stage 1 -> 2 Boundary Interlude
+**来源：** 2026-07-26 Stage 1 post-close module-boundary review
+**影响：** Stage 2 implementation order、visibility与reviewability
+**依据：** [Boundary Interlude closure](./implementation.md#75-closure)与
+[transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)
+
+API、stack、device/net与VirtIO-Net均按已经存在的stable owner role做same-owner directory split，root
+re-export和public API不变，也没有增加新crate/framework。source/unsafe/runtime audit确认begin/complete
+window、drop order、publication与attach行为未变；结构拆分不再迫使concrete driver visibility向外扩张。
 
 ### NFP-002 — System Power R0 已提供显式 network cleanup route
 

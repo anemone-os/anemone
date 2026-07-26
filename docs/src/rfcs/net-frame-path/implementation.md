@@ -1,6 +1,6 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** R0 / Stage 1 Closed；Stage 2 Outline / Not Resolved / Unauthorized
+**状态：** R0 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Outline / Not Resolved / Unauthorized
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **目标与不变量：** [Network Frame Path 目标与不变量](./invariants.md)
@@ -14,8 +14,10 @@ cutover 要求
 
 > 本文是 R0 的实施顺序、stage maturity、验证与 write-set 权威。用户已于 2026-07-26 接受 R0、
 > 授权建立 transaction，并独立激活 Stage 1 Checkpoint 1。用户随后分别独立授权并关闭 Checkpoint 2
-> 与 Checkpoint 3，并独立授权、关闭 Checkpoint 4 与 Stage 1。本授权不授予 contract cutover，也不自动
-> 解析或进入 Stage 2。
+> 与 Checkpoint 3，并独立授权、关闭 Checkpoint 4 与 Stage 1。Stage 1 关闭后的 module-boundary review
+> 又发现 concrete driver、通用 worker 与 validation vocabulary 之间的局部耦合；用户已授权在 Stage 1
+> 与 Stage 2 之间完成本文定义的 Boundary Interlude。本授权不授予 contract cutover，也不自动解析或
+> 进入 Stage 2。
 
 ## 1. 计划角色与 authority
 
@@ -137,6 +139,7 @@ contract，再把下一个 Outline 完整解析为 Ready。
 | Stage | 成熟度 | 跨层结果 | Contract 状态 |
 | --- | --- | --- | --- |
 | Stage 1 — Four-layer walking skeleton | Closed | hostable seam、真实 stack/provider、VirtIO-Net、netdev publication、kernel attach/IRQ/worker、RV64 一次真实双向纵切 | 全部 Not Effective |
+| Stage 1 -> 2 Boundary Interlude | Closed | same-owner module split、kernel-local provider/wake handoff、artifact-neutral validation seam 与 visibility 收窄 | 全部 Not Effective |
 | Stage 2 — Bounded progress conformance | Outline | exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 saturation proof | 全部 Not Effective |
 | Stage 3 — Multi-instance/lifecycle closure | Outline | 双实例隔离、attach rollback、shutdown handoff、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
 
@@ -475,14 +478,124 @@ Stage 1 默认只读：
 network contract；register/current-limitations 只有在出现真实 issue/accepted gap 并获 write-set expansion
 后才写。已退役的私有草案路径不得成为公共链接或执行事实权威。
 
-## 7. Stage 2 Outline：Bounded progress conformance
+## 7. Stage 1 -> 2 Boundary Interlude：Owner 与 validation boundary 整理
+
+**状态：** Closed（2026-07-26）；Stage 2 仍未解析且未授权
+
+### 7.1 反馈与边界判断
+
+Stage 1 的 runtime、frame ownership 与 pump evidence 保持有效；本间章不重新打开或改写其历史 closure。
+关闭后的 live module review 发现三项结构反馈：
+
+- `anemone-net-api`、`anemone-smoltcp-stack` 与 VirtIO-Net implementation 已形成多个稳定职责，但部分职责
+  仍集中在单个文件；继续向其中加入 Stage 2 progress logic 会固化混合边界；
+- kernel `kunit` feature 直接向 stack crate 传播 `kunit-probe`，stack 的 feature、类型和方法因而理解具体
+  test harness，而不是只表达 artifact-neutral validation capability；
+- `anemone-kernel::net::worker` 直接依赖 `driver::net::virtio` 的 provider、wake trait 与 diagnostics，迫使
+  concrete driver module crate-wide visible，并把 attach-owned wake capability命名为 VirtIO policy。
+
+这些问题没有改变 R0 target：shared frame semantics、stack state owner、driver queue/DMA owner、kernel attach/
+worker owner 与 IRQ edge-only 规则均保持不变。它们属于 Stage 1 实现反馈后的 route correction，不递增 RFC
+revision，也不触发 current-contract cutover。
+
+### 7.2 交付与 owner route
+
+1. `anemone-net-api` 按 interface、time、frame 与 pump stable surface 拆成 private modules；crate root 保持
+   现有 public re-export，consumer path 与 shared semantics 不变。
+2. `anemone-smoltcp-stack` 分离 smoltcp adapter、interface/mapping owner、bounded pump 与 validation-only
+   ICMP probe；probe feature/type/method 按 capability 命名，不出现 KUnit vocabulary。kernel 可以由自己的
+   `kunit` feature启用该 validation seam，但 stack 不理解调用者使用的 harness。
+3. `device/net` 定义 kernel-local frame-provider handoff：provider仍唯一拥有 durable recheck predicate，
+   attach owner只提供不携带 task/driver state 的 narrow wake capability。该 handoff不进入
+   `anemone-net-api`，host provider也不被迫实现 kernel scheduling policy。
+4. worker通过上述 kernel-local provider port消费 concrete provider，不 import `driver::net::virtio`；
+   `PumpControl`实现通用 wake capability，不实现 VirtIO-named trait。VirtIO module恢复 private，
+   `driver::net`只保留 attach/validation实际需要的窄 facade。
+5. VirtIO-Net按 registration/publication、raw device/IRQ、frame slot/token职责做 same-owner directory split。
+   provider diagnostics保持只读诊断，不驱动 queue、worker或probe completion状态；KUnit-specific wait/assert
+   留在 kernel `net` validation boundary。
+
+本间章不增加第二种 production driver、trait-object/type-erased frame framework、通用 test-support crate、
+endpoint/control-plane API、shutdown能力或 Stage 2 progress semantics。
+
+### 7.3 Review、验证与停止条件
+
+Review必须确认：
+
+- root re-export与 frame/pump visible semantics未改变；新 module visibility只收窄不扩大；
+- stack production feature graph仍为 `no_std + alloc`，非 validation build没有地址、ICMP endpoint或 probe；
+- wake只发布 edge，provider recheck predicate仍是durable truth，worker醒来后仍重新读取；
+- worker不依赖 concrete VirtIO module、descriptor/DMA/queue token或 driver-private lock；
+- 文件拆分没有改变 unsafe begin/complete window、provider/slot drop order或 publication/attach顺序；
+- validation completion与diagnostic counters仍分离，纯诊断字段不驱动 production行为。
+
+验证 floor：
+
+1. `cargo test -p anemone-net-api -p anemone-smoltcp-stack`；
+2. `cargo check -p anemone-smoltcp-stack --no-default-features` 与启用 artifact-neutral validation feature 的
+   no-default check；
+3. `just fmt kernel --check` 与 focused changed-file format audit；
+4. `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`；
+5. RV64 wrapper重新证明 active attach、真实 TX/TX completion、IRQ recheck、RX completion、echo reply、
+   全量 KUnit通过与正常shutdown；
+6. dependency/visibility/unsafe/source audit、`git diff --check` 与 `mdbook build docs`。
+
+若实现需要改变 `FrameProvider` shared semantics、把kernel wake加入`anemone-net-api`、让driver访问stack/task
+内部状态、修改generic bus/IRQ/kthread/timer/power owner，或改变R0 acceptance boundary，立即停止并进入
+RFC owner review。普通Rust module拆分或为既有handoff增加kernel-local窄trait不命中该停止条件。
+
+### 7.4 Resolved Write Set Manifest
+
+Production/source：
+
+- `anemone-kernel/Cargo.toml`；
+- `anemone-kernel/crates/anemone-net-api/src/{lib.rs,interface.rs,time.rs,frame.rs,pump.rs}`；
+- `anemone-kernel/crates/anemone-smoltcp-stack/{Cargo.toml,src/lib.rs,src/adapter.rs,src/stack.rs,src/pump.rs,src/validation.rs}`；
+- `anemone-kernel/src/device/net/{mod.rs,registry.rs,provider.rs}`；
+- `anemone-kernel/src/driver/{mod.rs,net/mod.rs,net/virtio/mod.rs,net/virtio/device.rs,net/virtio/frame.rs}`；
+- `anemone-kernel/src/net/{mod.rs,worker.rs,validation.rs}`。
+
+Validation-only与文档：
+
+- 上述owner文件中的`cfg(test)`、kernel KUnit与artifact-neutral validation feature；
+- `docs/src/rfcs/net-frame-path/{index.md,implementation.md,tracking-issues.md}`；
+- `docs/src/devlog/transactions/2026-07-26-net-frame-path.md`；
+- `docs/src/devlog/2026-07-20_to_2026-08-02.md`；
+- repository owner生成的`build/**`与wrapper runtime disk copy。
+
+`Cargo.lock`仅在feature graph实际改变lock resolution时写入。vendored smoltcp、generic device/bus/IRQ、
+task/kthread、timer/scheduler、power、apps/rootfs/LTP profile、LA64/PCIe与current contracts全部只读。
+
+间章关闭后才开始独立的`1 -> 2 Implementation Resolution Gate`；本间章不是Stage 2 Ready定义，也不授予
+Stage 2执行权限。
+
+### 7.5 Closure
+
+间章按原 R0 route 保持行为不变并于 2026-07-26 关闭：shared API 的 root re-export 与语义未变；stack
+只理解 `icmp-validation-probe`，KUnit request/wait/assert 只存在于 kernel；`device/net` 的
+`NetdevFrameProvider` / `RecheckWake` 是 kernel-local port，worker 不再命名 concrete VirtIO 类型；
+`driver::net::virtio` 恢复 private，Stage 1 单 NIC diagnostic query 也只在 KUnit build 中存在并带 Stage 3
+替换条件。same-owner directory split 没有改变 publication、attach、slot ownership、unsafe begin/complete
+window 或 drop order。
+
+验证证据见 transaction：host gate 的 1 个 stack unit、9 个 integration 与 2 个 compile-fail doctest通过；
+base 和 `icmp-validation-probe` 两种 no-default check通过；RV64 release build通过；RV64 wrapper中 260/260
+KUnit、真实 RX/TX completion、IRQ recheck、ICMP echo与正常 power-off通过。focused changed-file format audit、
+dependency/visibility/unsafe/source audit、whitespace和文档构建通过；repository-wide formatter只报告三个既有
+vendored smoltcp diff。没有命中停止条件，NFP-004/005/006 已 neutralize。
+
+本 closure 不修改 current contract、R0 target/revision、ABI、visible semantics 或 acceptance boundary。
+六个 network IDs 与 System Power Refine继续 Not Effective；Stage 2仍为 Outline / Not Resolved /
+Unauthorized，必须由后续独立 resolution gate解析。
+
+## 8. Stage 2 Outline：Bounded progress conformance
 
 **目的：** 在 Stage 1 walking skeleton 上系统证明 `NET-FRAME-OWN-001`、
 `NET-FRAME-PROGRESS-001` 与 `NET-STACK-PUMP-001`，收敛真实资源耗尽、completion、recheck、budget、
 deadline、link change 与跨方向进展。
 
-**前置依赖：** Stage 1 Closed；真实 diff、unsafe audit、host/QEMU probe evidence 和所有 Stage 1 review
-finding 已进入 transition preflight。
+**前置依赖：** Stage 1 与 Boundary Interlude Closed；真实 diff、unsafe audit、host/QEMU probe evidence 和
+所有 Stage 1 / interlude review finding 已进入 transition preflight。
 
 **受保护边界：**
 
@@ -501,7 +614,7 @@ saturation、completion recovery、IRQ re-arm、live mapping high-water 回落�
 决定 case inventory、budget 数值、是否需要 owner-local split、精确 write set 与 RV64 traffic fixture。
 任何需要改变 shared semantic surface、owner 或 acceptance boundary 的结果先进入 RFC review。
 
-## 8. Stage 3 Outline：Multi-instance、lifecycle 与最终 cutover
+## 9. Stage 3 Outline：Multi-instance、lifecycle 与最终 cutover
 
 **目的：** 完成 `NETDEV-LIFE-001` 与 `NET-ATTACH-001`，把 host 多实例、publication/attach rollback、
 link lifecycle、network-local shutdown cleanup、RV64 final production proof 和 current-contract cutover
@@ -528,7 +641,7 @@ admission；RV64 active attach、双向收发、queue recovery、network-before-
 与剩余 review findings 完整解析 Stage 3。只有 host、RV64、source audit 与 contract write-back 全部达到
 floor，才执行 `NFP-FINAL-CUTOVER`；不得按 contract ID 或 checkpoint 部分 cut over。
 
-## 9. 全局反馈分流
+## 10. 全局反馈分流
 
 | 反馈影响 | 处理位置 | 当前 gate 行为 |
 | --- | --- | --- |
@@ -542,7 +655,7 @@ floor，才执行 `NFP-FINAL-CUTOVER`；不得按 contract ID 或 checkpoint 部
 影响、correctness invariant、已完成代码处置、候选新语义、验证和剩余 gap 路由；接受前保持 Not Cut
 Over。
 
-## 10. 全局完成定义
+## 11. 全局完成定义
 
 本 RFC 只有在 Stage 1 到 Stage 3 依次 Closed、`NFP-PROOF-001` 到 `NFP-PROOF-004` 都有可审计证据、
 host 与 RV64 production proof 互补闭合、所有临时 probe/旁路按边界收口，并在一个原子 gate 更新六个
