@@ -14,7 +14,7 @@ use anemone_rs::{
                 EPOLLHUP, EPOLLIN, EPOLLONESHOT, EPOLLOUT, EPOLLPRI, EPOLLRDHUP, EPOLLWAKEUP,
                 EpollEvent,
             },
-            open::{O_CREAT, O_RDWR},
+            open::O_RDONLY,
             poll::{POLLIN, PollFd},
         },
         process::linux::signal as linux_signal,
@@ -197,12 +197,7 @@ fn test_ctl_errno_and_unaligned() -> Result<(), Errno> {
     let nested = epoll_create1(EpollCreateFlags::empty())?;
     expect_errno(add(epfd, nested, EPOLLIN, 1), EINVAL)?;
 
-    let regular = openat(
-        AtFd::Cwd,
-        Path::new("/tmp/epoll-snapshot-only"),
-        O_CREAT | O_RDWR,
-        0o600,
-    )?;
+    let regular = openat(AtFd::Cwd, Path::new("/bin/epoll-test"), O_RDONLY, 0)?;
     expect_errno(add(epfd, regular, EPOLLIN, 1), EPERM)?;
 
     add(epfd, rx, EPOLLPRI | EPOLLRDHUP | EPOLLWAKEUP, 2)?;

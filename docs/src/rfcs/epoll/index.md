@@ -1,14 +1,16 @@
 # RFC-20260726-epoll
 
-**状态：** Accepted for Implementation / Stage 0-1 Closed / Stage 2 Checkpoint 2C Closed / 2D Authorized, Not Started / Epoll Not Effective
+**状态：** Accepted for Implementation / Stage 0-1 Closed / Stage 2 Checkpoint 2D Active, Stopped at Runtime Blocker / Epoll Not Effective
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-27
 **领域：** fs / iomux / epoll / task files / scheduler wait
 **事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 **影响契约：** Preserve `SCHED-LATCH-001..003`、`SIGNAL-TEMP-MASK-001..003`、`IOMUX-POLL-003`、`OPENED-DESC-003`、`TTY-TERM-001`、`TTY-INPUT-001`；Refine `IOMUX-POLL-001`、`OPENED-DESC-001/002`；Replace `IOMUX-POLL-002`；Introduce `OPENED-DESC-LIVENESS-001`、`EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`。完整 delta 与 cutover 见 [Contract Impact](./invariants.md#contract-impact)。
-**开放问题：** [Tracking Issues](./tracking-issues.md) 当前无开放 Keter。
-**下一步：** 在已记录授权下激活 Stage 2 Checkpoint 2D；2C closure本身不执行`EPOLL-CUTOVER`。
+**开放问题：** [Tracking Issues](./tracking-issues.md) 当前无RFC target-level开放Keter；2D epoll-file register
+runtime blocker记录在[事务日志](../../devlog/transactions/2026-07-26-epoll.md#stage-2-checkpoint-2d-runtime-stop---2026-07-27)。
+**下一步：** 先独立解析epoll-file non-sleeping register/route publication修正；不得在修正与runtime复验前执行
+`EPOLL-CUTOVER`或关闭Stage 2。
 
 ## 文档状态
 
@@ -23,7 +25,8 @@ cutover 前保持不变；初始授权覆盖 Stage 0 的 0A、0B，后续明确�
 `OPENED-DESC-CAPABILITY-CUTOVER` 已同步生效。独立 `1 -> 2` resolution gate 已把 Stage 2 解析为
 Ready；后续独立授权与精确write-set expansion批准已完成2A dormant watch/lifecycle core，新的独立授权也已
 完成2B ready/wait protocol。当前目标授权覆盖2C与2D；2C已完成ABI adapter与focused oracle的build-only
-checkpoint，但未运行focused runtime、未执行cutover，三个`EPOLL-*` target ID仍未生效。
+checkpoint。2D首次RV64 wrapper在focused runtime暴露epoll-file register于active wait内获取sleepable mutex并
+panic，当前已停止且未执行cutover，三个`EPOLL-*` target ID仍未生效。
 
 ## 摘要
 
@@ -154,7 +157,7 @@ Review 状态：
 Keter 均已在 R0 target 中 neutralize；独立 `0 -> 1` gate 冻结的 Stage 1 原子 checkpoint 与
 resolved manifest 已按授权完成。后续 `1 -> 2` gate 已依据 live owner、ABI与固定LTP资产冻结
 [Stage 2 Ready](./implementation.md#stage-2-readyepoll-coreabi-与最终-cutover)；2A已按独立授权与扩集批准关闭，
-2B与2C也已依次关闭；2D已获授权但尚未激活。
+2B与2C也已依次关闭；2D已激活但在首次RV64 runtime发现前序epoll-file协议blocker后停止。
 
 ## 修订记录
 
@@ -357,5 +360,5 @@ R0 已接受，transaction 已建立，Stage 0 已完成 0A-0D，Stage 1 也已�
 neutralize，target / current / RFC-local 分层和 [实施计划](./implementation.md) 保持权威；两个
 foundation cutover 已在同一 checkpoint 生效，epoll core 与三个 `EPOLL-*` contract ID 仍未生效。
 Stage 2 resolution 已完成，权威 Ready 计划与 manifest 位于
-[实施计划](./implementation.md#stage-2-readyepoll-coreabi-与最终-cutover)；2A-2C已关闭，2D已获授权但尚未激活，
-`EPOLL-CUTOVER` 与三个 `EPOLL-*` ID 保持 Not Effective。
+[实施计划](./implementation.md#stage-2-readyepoll-coreabi-与最终-cutover)；2A-2C已关闭，2D保持Active但因
+runtime blocker停止，`EPOLL-CUTOVER` 与三个 `EPOLL-*` ID 保持 Not Effective，Stage 2不得关闭。

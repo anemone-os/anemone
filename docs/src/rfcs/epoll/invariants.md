@@ -1,7 +1,7 @@
 # Epoll 与 Poll Subscription 不变量需求
 
-**状态：** Accepted Target / Foundation Effective / Stage 2 Ready / Epoll Not Effective
-**最后更新：** 2026-07-26
+**状态：** Accepted Target / Foundation Effective / Stage 2 Active, Runtime Blocked / Epoll Not Effective
+**最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **适用修订：** R0
 
