@@ -1,6 +1,6 @@
 # Epoll 实施计划
 
-**状态：** Stage 0-1 Closed / Stage 2 Ready / Not Started
+**状态：** Stage 0-1 Closed / Stage 2 Checkpoint 2A Closed / 2B Not Authorized
 **适用修订：** R0
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-epoll](./index.md)
@@ -13,8 +13,9 @@
 Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后进入 Active。
 初始授权覆盖 0A、0B；后续授权覆盖 0C、0D。四个 checkpoint 已逐项独立关闭。开发者随后授权
 执行 `0 -> 1` resolution gate；该 gate 把 Stage 1 完整解析为 Ready。后续独立授权完成了 Stage 1
-代码、review、验证与两个 foundation cutover。开发者随后只授权执行 `1 -> 2` resolution gate；
-该 gate 已把 Stage 2 完整解析为 Ready，但没有授权 Stage 2 实现或 `EPOLL-CUTOVER`。
+代码、review、验证与两个 foundation cutover。开发者随后授权执行 `1 -> 2` resolution gate；
+该 gate 已把 Stage 2 完整解析为 Ready。后续独立授权与精确 write-set expansion 批准已完成 2A；2B-2D 与
+`EPOLL-CUTOVER` 未授权。
 
 ## 实施原则
 
@@ -66,7 +67,7 @@ Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 用 production-shaped vertical slice 证明 observer route、consumer retirement、terminal liveness 与三类 source context 可以共存 | None | 0A-0D closure evidence 已记录 |
 | Stage 1 | Closed | 迁移 eventfd/fanotify 两个剩余 poll bridge，删除 source-facing `LatchTrigger` / `Armed` 路径，并原子切换 subscription / opened-description contract | `SUBSCRIPTION-CUTOVER`、`OPENED-DESC-CAPABILITY-CUTOVER` 已同步生效 | closure evidence 已记录；Stage 2 gate 已独立完成 |
-| Stage 2 | Ready / Not Started | 以2A-2D四个有序checkpoint实现 epoll core、anonymous file、syscall ABI、focused tests 与 LTP，完成首版 epoll cutover | `EPOLL-CUTOVER`，尚未生效 | 2026-07-26 resolution与checkpoint refinement已完成；等待2A独立实现授权 |
+| Stage 2 | Active / 2A Closed / 2B Not Authorized | 以2A-2D四个有序checkpoint实现 epoll core、anonymous file、syscall ABI、focused tests 与 LTP，完成首版 epoll cutover | `EPOLL-CUTOVER`，尚未生效 | 2A closure evidence 已记录；等待2B独立实现授权 |
 
 ## Stage 0 Closed：Subscription 与 Liveness Proof-First Slice
 
@@ -662,12 +663,11 @@ Stage 1 独立关闭后已执行一次只读 preflight：
 
 ### 阶段成熟度与授权边界
 
-- **Ready / Not Started。** Stage 0-1 已 Closed，`SUBSCRIPTION-CUTOVER` 与
+- **Active / Checkpoint 2A Closed / 2B Not Authorized。** Stage 0-1 已 Closed，`SUBSCRIPTION-CUTOVER` 与
   `OPENED-DESC-CAPABILITY-CUTOVER` 已 effective；上一节 resolution gate 已完成 live owner、ABI、LTP、
   test harness 与 current-contract preflight。
-- 本轮开发者只授权解析 Stage 2 implementation，并明确允许后续测试需要时把 `anemone-rs` 与
-  `anemone-apps` 纳入写集；该授权已经用于冻结下文 test manifest，不授权任何 Stage 2 code/test/contract
-  修改、build、QEMU、LTP 或 `EPOLL-CUTOVER`。
+- 开发者先授权解析 Stage 2 implementation，并明确允许后续测试需要时把 `anemone-rs` 与
+  `anemone-apps` 纳入写集；后续独立授权只覆盖 2A，不授权 2B-2D、QEMU、LTP 或 `EPOLL-CUTOVER`。
 - Stage 2 保持一个原子 integration / acceptance unit，但实现拆成 2A-2D 四个有序 checkpoint。2A-2C 只形成
   不可独立合入的 stacked implementation evidence；在 2D 完成 kernel ABI、focused test、LTP、review、current
   contract 与 transaction write-back 前，任何 partial core、syscall handler 或单独 contract page 都不得合入
@@ -721,6 +721,11 @@ production 文件可以在后续 checkpoint 为真实 finding 做局部修正，
 
 ### Checkpoint 2A - Watch / Lifecycle Core
 
+**执行状态：** Closed / 2026-07-26。candidate实现、expansion report/批准、最终owner/lifecycle review与
+验证证据见
+[transaction checkpoint log](../../devlog/transactions/2026-07-26-epoll.md#stage-2-checkpoint-2a-closure---2026-07-26)；
+本项关闭只证明dormant core可继续，不开放syscall、current contract或2B。
+
 #### Ctl publication、replacement 与 retirement
 
 - ADD 在 operation mutex 下取得 target fd、capture capability、reserve unused slot/generation并构造 watch；
@@ -750,7 +755,7 @@ production 文件可以在后续 checkpoint 为真实 finding 做局部修正，
 
 #### 2A write subset、验证与关闭
 
-- write subset限于 `anemone-kernel/src/fs/{mod.rs,file.rs,iomux/subscription.rs}`、
+- write subset限于 `anemone-kernel/src/fs/{mod.rs,file.rs,iomux/{mod.rs,subscription.rs}}`、
   `anemone-kernel/src/fs/epoll/{mod.rs,watch.rs,ready.rs}` 与 `anemone-kernel/src/task/files.rs`。`ready.rs`
   在本 checkpoint 只提供 watch publication/retirement 所需的 slot、generation 与 dirty obligation；完整
   refresh/harvest policy 由 2B 关闭。
@@ -1010,7 +1015,7 @@ Checkpoint 2D执行Stage 2唯一 `EPOLL-CUTOVER`：
 
 - `anemone-kernel/src/fs/mod.rs`
 - `anemone-kernel/src/fs/file.rs`
-- `anemone-kernel/src/fs/iomux/subscription.rs`
+- `anemone-kernel/src/fs/iomux/{mod.rs,subscription.rs}`
 - `anemone-kernel/src/fs/epoll/{mod.rs,watch.rs,ready.rs,file.rs}`（新增）
 - `anemone-kernel/src/task/files.rs`
 - `anemone-kernel/src/task/sig/delivery.rs`

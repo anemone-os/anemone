@@ -2,9 +2,9 @@ use crate::prelude::*;
 
 /// Consumer-owned endpoint behind a source-facing poll route.
 ///
-/// This trait stays private to iomux. Sources receive only `PollRoute`, so they
+/// This trait stays private to `fs`. Sources receive only `PollRoute`, so they
 /// cannot inspect consumer state or branch on notification results.
-pub(super) trait PollObserver: Send + Sync {
+pub(in crate::fs) trait PollObserver: Send + Sync {
     fn notify(&self);
 }
 
@@ -19,7 +19,7 @@ pub(crate) struct PollRoute {
 }
 
 impl PollRoute {
-    pub(super) fn new(observer: &Arc<dyn PollObserver>) -> Self {
+    pub(in crate::fs) fn new(observer: &Arc<dyn PollObserver>) -> Self {
         Self {
             observer: Arc::downgrade(observer),
         }

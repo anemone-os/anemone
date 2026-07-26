@@ -5,8 +5,8 @@
 
 use crate::{
     fs::{
-        FcntlAccess, FcntlCtx, FileFcntlCmd, FileIoCtx, FileOpStatusFlags, UserBufferSink,
-        UserBufferSource,
+        FcntlAccess, FcntlCtx, FileFcntlCmd, FileIoCtx, FileOpStatusFlags, FileOps,
+        PollRegisterResult, PollRequest, UserBufferSink, UserBufferSource,
     },
     prelude::{handler::TryFromSyscallArg, *},
     utils::bitmap::Bitmap,
@@ -101,6 +101,20 @@ pub(crate) struct OpenedDescriptionLease {
 impl OpenedDescriptionLease {
     pub(crate) fn is_live(&self) -> bool {
         self.target.description_is_live()
+    }
+
+    /// Poll through this operation-local hold without exposing `ProcFile` or
+    /// allowing the lease to escape into persistent feature state.
+    pub(crate) fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
+        self.target.file.poll(request)
+    }
+
+    /// Probe backend identity for operation-local admission decisions only.
+    ///
+    /// Opened-description identity and liveness remain owned by `ProcFile`;
+    /// callers must not promote this vtable identity into a watch key.
+    pub(crate) fn uses_file_ops(&self, ops: &'static FileOps) -> bool {
+        self.target.file.uses_file_ops(ops)
     }
 }
 

@@ -4,6 +4,7 @@
 mod anonymous;
 mod cache_stats;
 mod dentry;
+mod epoll;
 mod eventfd;
 pub mod fanotify;
 // mod error;

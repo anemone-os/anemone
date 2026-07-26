@@ -5,6 +5,7 @@ use crate::prelude::*;
 mod subscription;
 mod wait;
 
+pub(in crate::fs) use subscription::PollObserver;
 pub(crate) use subscription::PollRoute;
 pub(crate) use wait::IomuxWaitRound;
 
