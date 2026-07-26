@@ -443,7 +443,8 @@ UAPI parser 位于 `fs::api::iomux::epoll*` 或保持同一依赖方向的现有
   Target Renegotiation Gate，不能在 future implementation stage 中静默降低语义。
 - Stage 0 已在 document review 前解析为 Ready；R0 acceptance、transaction 与开发者启动授权
   已于 2026-07-26 完成。0A-0D 已逐项独立关闭，Stage 0 现为 Closed；本次 closure 不执行任何
-  contract cutover，也不自动进入或授权 Stage 1 resolution gate。
+  contract cutover。后续独立 `0 -> 1` resolution gate 已把 Stage 1 解析为 Ready / Not Started，
+  但不自动授权代码实现或 foundation cutover。
 
 ### 文档层完成标准
 

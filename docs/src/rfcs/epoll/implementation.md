@@ -1,6 +1,6 @@
 # Epoll 实施计划
 
-**状态：** Active / Stage 0 Closed / Stage 1 Resolution Gate Not Entered
+**状态：** Active / Stage 0 Closed / Stage 1 Ready / Not Started
 **适用修订：** R0
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-epoll](./index.md)
@@ -11,8 +11,9 @@
 
 本文把公共 R0 中已经闭合的 accepted target 解析成滚动实施路线。Stage 0 已解析为
 Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后进入 Active。
-初始授权覆盖 0A、0B；后续授权覆盖 0C、0D。四个 checkpoint 已逐项独立关闭；Stage 1
-resolution gate 尚未进入或获执行授权，且 Stage 0 closure 不会自动授权后续 Stage。
+初始授权覆盖 0A、0B；后续授权覆盖 0C、0D。四个 checkpoint 已逐项独立关闭。开发者随后只授权
+执行 `0 -> 1` resolution gate；该 gate 已把 Stage 1 完整解析为 Ready，但没有激活代码实现，且
+Stage 0 closure / Stage 1 Ready 都不会自动授权后续 Stage。
 
 ## 实施原则
 
@@ -63,7 +64,7 @@ resolution gate 尚未进入或获执行授权，且 Stage 0 closure 不会自�
 | 阶段 | 成熟度 | 目的 | contract cutover | 解析触发点 |
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 用 production-shaped vertical slice 证明 observer route、consumer retirement、terminal liveness 与三类 source context 可以共存 | None | 0A-0D closure evidence 已记录 |
-| Stage 1 | Outline | 迁移全部 pollable source 与 poll/select，删除 `LatchTrigger` source bridge，并原子切换 subscription / opened-description contract | `SUBSCRIPTION-CUTOVER`、`OPENED-DESC-CAPABILITY-CUTOVER` | Stage 0 独立关闭后 |
+| Stage 1 | Ready / Not Started | 迁移 eventfd/fanotify 两个剩余 poll bridge，删除 source-facing `LatchTrigger` / `Armed` 路径，并原子切换 subscription / opened-description contract | `SUBSCRIPTION-CUTOVER`、`OPENED-DESC-CAPABILITY-CUTOVER` | `0 -> 1` gate 已完成；等待独立实现授权 |
 | Stage 2 | Outline | 实现 epoll core、anonymous file、syscall ABI、focused tests 与 LTP，完成首版 epoll cutover | `EPOLL-CUTOVER` | Stage 1 独立关闭后 |
 
 ## Stage 0 Closed：Subscription 与 Liveness Proof-First Slice
@@ -392,9 +393,9 @@ bundle：
   已写入 transaction。
 - Stage 0 独立 Closed。Stage 1 是否已经解析不属于本阶段 closure。
 
-## Stage 0 -> Stage 1 Implementation Resolution Gate
+## Stage 0 -> Stage 1 Implementation Resolution Gate（Completed 2026-07-26）
 
-Stage 0 Closed 后执行一次只读 preflight：
+Stage 0 Closed 后已执行一次只读 preflight：
 
 - 读取 Stage 0 实际 diff、transaction 证据、review findings、KUnit 取舍、source 分类表与
   current `IOMUX-POLL-*` / `OPENED-DESC-*` contract。
@@ -402,39 +403,223 @@ Stage 0 Closed 后执行一次只读 preflight：
   临时 surface 默认为长期 public API。
 - 枚举所有剩余 `FileOps::poll` / `PollRequest::register(&LatchTrigger)` source 和 snapshot-only
   source，解析各自 capacity、allocation、lock、notify、prune 与 unsupported/`EPERM` 路径。
-- 把 Stage 1 展开为完整 Ready：精确 source/file manifest、bridge 删除点、poll/select final-scan
+- Stage 0 的 route / liveness encoding 直接吸收。live audit 证明 persistent route source 已是 pipe、
+  timerfd 与 TTY；只剩 eventfd、fanotify 的 poll registry 保存 `LatchTrigger` 并返回 `Armed`。
+  ext4、ramfs、procfs 等 regular/snapshot-only source 继续通过 `ready_or_unsupported()` 明确表达
+  “当前 ready 可返回、未 ready 不可阻塞”，console/devfs/device stub 继续显式 unsupported。
+- `PollRequest::register(&LatchTrigger)` 已无 production constructor caller；bridge 只通过
+  `IomuxWaitRound::poll_request()` 内部同时携带 route/trigger，再由 eventfd/fanotify 读取 trigger。
+  因而 Stage 1 可以一次删除 trigger 字段、legacy constructor/getter 与 `PollRegisterResult::Armed`，
+  不需要 transitional contract、第二个 registry 或新的 probe。
+- `task::files` publication/final-release surface 自 0D closure 后未漂移；
+  `OpenedDescriptionCapability` / operation-local lease 保持 0A encoding，Stage 1 只完成再次 source audit
+  与 current-contract cutover，不修改 `task/files.rs`。
+- 下节已把 Stage 1 展开为完整 Ready：精确 source/file manifest、bridge 删除点、poll/select final-scan
   回归、contract 原子 cutover、失败时旧 contract 保留边界，以及一次 closure bundle。
 - 若需要改变 owner、public API、contract delta、ABI 或 acceptance boundary，停止在本 gate，
   进入 RFC review / Target Renegotiation Gate；Stage 1 不得自动 Active。
 
-## Stage 1 Outline：全量 Subscription 与 Poll/Select Cutover
+## Stage 1 Ready：全量 Subscription 与 Poll/Select Cutover
 
-概括目的：
+### 阶段成熟度与授权边界
 
-- 把 eventfd、fanotify、其余 TTY/file backend 与所有参与阻塞的 source 迁移到同一个
-  source-facing subscription protocol；regular/snapshot-only source 明确返回 capability
-  不支持，而不是伪造 persistent route。
-- 让 ppoll/pselect 的 `IomuxWaitRound` 成为唯一 register consumer，删除 source-facing
-  `LatchTrigger` bridge 与旧 trigger registries。
-- 完成 Stage 0 terminal liveness capability 的全 publication audit，原子更新
-  `IOMUX-POLL-001/002`、`OPENED-DESC-001/002` 与 `OPENED-DESC-LIVENESS-001`；保持
-  `SCHED-LATCH-*`、`IOMUX-POLL-003`、`OPENED-DESC-003`。
+- `Ready / Not Started`。Stage 0 已独立关闭；上一节 resolution gate 已核对 live source、实际
+  Stage 0 diff、review/validation evidence、current contracts、register 与测试入口，并冻结本节完整
+  deliverable、cutover 和 manifest。
+- 本阶段是一个原子 checkpoint，不再拆 source-migration / bridge-removal 子 checkpoint。live tree 只剩
+  两个普通 task-context dynamic registry，继续拆 gate 只会制造不可单独生效的混合协议中间态。
+- 开发者本轮只授权解析 Stage 1；Stage 1、任一代码修改或两个 contract cutover 都未激活。新的明确
+  授权必须在 transaction 记录 branch、HEAD、dirty state、current contracts 与 manifest 后才能开始。
 
-前置依赖：Stage 0 Closed，且 route/lifecycle encoding、所有 remaining source 与 contract
-cutover manifest 已在 resolution gate 中解析。
+### 前置证据与受保护边界
 
-受保护边界：
+- 直接吸收 Stage 0 的 `PollObserver` / non-owning `PollRoute`、`IomuxWaitRound`、pipe COW registry、
+  timerfd fixed-capacity noirq batch、TTY preallocated dirty handoff，以及 opened-description terminal
+  liveness encoding；不把其中任何 probe-only visibility 扩成 public API。
+- 保持 `SCHED-LATCH-001..003` 与 `SIGNAL-TEMP-MASK-001..003`。`IomuxWaitRound` 内部可以继续持有
+  本轮 `LatchTrigger`，但 source-facing `PollRequest`、source registry 与 `FileOps::poll` 不再看见它；
+  ppoll/pselect 的 temporary-mask classifier、schedule/finish/final-scan 顺序保持不变。
+- readiness truth、interest filtering 与 registry storage 仍由各 source state 拥有。route 是 non-owning
+  recheck capability；source guard 内只安装/选择 route 和读取 predicate，observer notification、被替换
+  registry 的最后 drop 与 wait completion 必须发生在 guard 外。
+- eventfd blocking read/write 与 fanotify blocking read 仍是各自 owner 的 one-round `LatchTrigger`
+  consumer，不属于 source-facing poll bridge，不能为了 `rg` 清零而迁移或改写。
+- regular/snapshot-only source 不获得伪 persistent route。register scan 中当前 ready 可返回
+  `Ready(events)`；未 ready 必须返回 `Unsupported`，不能让 syscall 睡在未订阅 source 上。
+- 不引入 epoll core、anonymous epoll file、Linux UAPI/syscall、watch/ready state 或 nested epoll；不让
+  foundation cutover 与 Stage 2 混成一次不可回滚变更。
 
-- 不引入 epoll core/ABI；不让完整 source cutover 与 Stage 2 混成一次不可回滚变更。
-- cutover checkpoint 中不能长期存在两套 source registry；任一 source 未迁移或 final-scan
-  回归时，current contract 全部保持旧版本。
-- 不为每个 source 复制 KUnit。优先复用 owner 既有测试；运行时用一次组合 profile 覆盖
-  `iomux`、`eventfd`、`timerfd` 与 target 内 fanotify 路径，TTY 由既有 focused test/KUnit 与
-  source audit 补充。
-- Stage 1 closure 以一次 RV64 wrapper、一次 LA64 build、source audit、format/diff check 和
-  review 为一组证据；不再拆 gate。
+### 交付与实现路线
 
-解析触发点：仅由上一节 resolution gate 解析为 Ready，不能因 Stage 0 成功自动实施。
+#### Iomux bridge 删除
+
+- `PollRequest` 只保留 interests 与可选 `PollRoute`：snapshot 没有 route，register 只由
+  `IomuxWaitRound` 构造并携带 route。删除 `PollRequest::register(&LatchTrigger)`、trigger 字段/getter
+  和“route + trigger”双携带形状；`is_register()` 只由 route 是否存在推导。
+- `PollRegisterResult` 收窄为 `Ready(PollEvent)`、`Subscribed(PollEvent)` 与 `Unsupported`，删除
+  `Armed`。`Subscribed` 同时证明 route 已发布并携带 publication point 的 current readiness；
+  `Ready` 在 register scan 中只允许非空、无需睡眠的 snapshot-only result。
+- `IomuxWaitRound` 继续唯一拥有 observer acceptance 与本轮 latch，source-facing request 只取得 route。
+  ppoll/pselect 删除 `Armed` 分支，保留 unexpected snapshot-subscribe、empty register-ready、unsupported、
+  register abort 和 final-scan 的 fail-closed mapping。
+
+#### Eventfd poll route
+
+- blocking read/write trigger queue 保持不变；只把 `EventFdPollTrigger` / `poll_triggers` 替换为
+  source-local、interest-bearing `PollRoute` registry。register 在 eventfd state guard 内先 fallibly 构造
+  已 prune stale entry 的 replacement，再原子替换 registry并读取 current counter predicate；分配失败在
+  publication 前返回 `ENOMEM`，已发布 registry 不变。
+- registry 使用 owner-local COW snapshot，避免 counter transition 为通知分配内存。read/write 在 state
+  guard 内更新 counter、detach 对应 blocking-I/O triggers，并 clone 当前 poll-route snapshot；释放 guard
+  后分别触发 blocking waiter、按 READABLE/WRITABLE interest 发布 route hint并 drop snapshot。live route
+  不因一次 notification 删除；被替换的旧 registry 在 guard 外 drop。
+- ready-at-subscribe 仍保存 route。eventfd counter/read/write/semaphore 语义、blocking I/O、status flag、
+  copy 和 errno 不在本阶段改变。
+
+#### Fanotify poll route
+
+- 只迁移 group-fd poll registry；`FanReadTrigger`、mark registry、event queue、overflow/dead truth、read、
+  ioctl 与 final-release owner 保持不变。`FanQueue::poll` / `FanGroup::poll` 只为 fallible route publication
+  收窄成可返回 `SysError` 的 owner-local path，Linux-facing `FileOps::poll` 继续直接传播结果。
+- poll registry 使用 source-local COW `PollRoute` snapshot。register 在同一 group mutex 内 fallibly prune /
+  replace registry并读取 queue/dead predicate，分配失败前不发布；旧 snapshot 在 mutex 外 drop。empty-to-
+  nonempty enqueue 选择 READABLE candidates，group-dead/HANG_UP 选择所有 candidates；notification 与 route
+  drop 均在 group mutex 和 global fanotify registry mutex 外发生，live route 保留到 consumer retirement
+  后的后续 owner cleanup。
+- 不把 fanotify 的 sleepable mutex/COW 形状抽成所有 source 的通用 registry，也不改变 Stage 5 backlog、
+  permission/FID/name/merge-order 或现有 fanotify LTP acceptance boundary。
+
+#### Opened-description capability cutover
+
+- 对 `open_fd*`、reservation commit、dup/dup3、fork/`CLONE_FILES`、unshare、close/close_range、cloexec、
+  table replacement 与 exit cleanup 重做只读 publication/final-release audit。确认所有 publication 都在
+  `Unpublished` 或仍有 live alias 时增加 ref，terminal `Live(1) -> Retired` 后不能重新 publication。
+- 保留 Stage 0 的 `OpenedDescriptionCapability` / non-cloneable operation lease 与静态
+  `FileDescOps::final_release`；本阶段不修改 `task/files.rs`，不新增 dynamic observer、epoll-side alive bit
+  或长期 target strong hold。
+
+### 审计与可观测性
+
+- 全量分类 `FileOps::poll`、`PollRequest` constructor/accessor、`PollRegisterResult`、`LatchTrigger`、
+  `poll_triggers` 与 `poll_routes`。cutover 后 source-facing bridge 的禁止搜索必须为零；eventfd/fanotify/
+  timerfd 的 blocking-I/O trigger 命中单独登记，不能误删。
+- 审计 eventfd 的 counter `0 <-> nonzero` / writable boundary 与 fanotify queue empty/nonempty、clear、dead
+  transition，确认 predicate update 与 route snapshot selection 同 guard、notify/drop 在 guard 外，且 source
+  行为不读取 callback 结果。
+- route allocation failure 返回现有 `SysError::OutOfMemory`，capacity/unsupported 保持现有 warning/debug
+  边界；不增加每次 notification 日志、diagnostic route id 或行为化计数器。
+- 不新增 KUnit。Stage 0 已通过真实 pipe/timerfd/TTY production transition证明 observer、普通/noirq/
+  预分配三类 context；本阶段用 enum/bridge 删除的编译闭包、剩余两 source 的 owner audit、全部既有 KUnit
+  与组合 userspace/LTP runtime 证明吸收，不为两个同类 dynamic registry 复制测试状态机。
+
+### Contract cutover 与失败原子性
+
+本阶段在同一最终 integration checkpoint 执行两个 foundation cutover：
+
+- `SUBSCRIPTION-CUTOVER`：Refine `IOMUX-POLL-001`、Replace `IOMUX-POLL-002`，保持
+  `IOMUX-POLL-003` 与 `SCHED-LATCH-*`；更新 iomux current contract 与 owner index，使 source-facing
+  protocol 只剩 non-owning route + current snapshot。
+- `OPENED-DESC-CAPABILITY-CUTOVER`：Refine `OPENED-DESC-001/002`、Introduce
+  `OPENED-DESC-LIVENESS-001`，保持 `OPENED-DESC-003`；更新 opened-description current contract 与 owner
+  index，使 terminal lifecycle / capability 成为 effective foundation。
+
+代码、current contract 与 transaction cutover evidence 是一个原子合入单元。实现期间允许工作树短暂出现
+混合形状，但任何中间 commit / partial source migration 都不能单独合入有效分支或被 Stage 2 依赖。任一
+source 未迁移、bridge 搜索未清零、build/runtime/review 未闭合或 contract 文本未同步时，两个 cutover 都
+保持 Not Cut Over，旧 current contract 继续有效；不得只切换其中一个 foundation ID 集合。
+
+### 验证与 review
+
+1. 运行 source/caller/publication audit：证明仅 `IomuxWaitRound` 构造 register request，source-facing
+   `LatchTrigger` / `Armed` / legacy poll registry 为零；snapshot-only source 分类没有漂移；opened-description
+   publication/release caller 与 0D closure 一致。
+2. 运行 `just fmt kernel --check`、`git diff --check` 与 `mdbook build docs`。
+3. 串行运行
+   `just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G`。该命令只证明 LA64 build，
+   不冒充 LA64 runtime、SMP、hardware 或 LTP。
+4. 临时把 tracked profile 精确设为 `iomux`、`eventfd`、`timerfd`、`fanotify`，运行一次
+   `./scripts/run-user-test-rv64.sh <preliminary-rv64-sdcard-image> build/epoll-stage1-rv64.log`。同一 image
+   必须完成 repository-owned build、全部 enabled KUnit、glibc/musl 两轮 group matrix 与正常关机；随后
+   恢复 profile 并核对调用者选择的 master image 未写入。
+5. runtime 证据按 owner 分层：iomux 记录 Stage 0 已知 timer-accuracy case 而不把它们归因于 route；
+   eventfd 以 `eventfd01..05`、`eventfd2_01..03` 为既有 target，`eventfd06` AIO/overflow 保持原边界；
+   timerfd 要求 tracked active cases 完成；fanotify 只要求 tracked active subset 与既有 RFC target 形成
+   可归因矩阵，不把 Stage 5 backlog 失败算成 subscription regression。任何新 timeout、unsupported-register、
+   panic/deadlock 或 source notification failure 都必须停止并归因，不能用历史失败掩盖。
+6. 对完整 Stage 1 diff 做 architecture/concurrency review，重点检查 route lifetime、COW replacement、
+   allocation failure、source guard-out notify/drop、ppoll/pselect final-scan、terminal retirement 与 contract
+   原子性。finding 在 Stage 内修正并重跑受影响证据；不另建形式化 review gate。
+
+### 停止条件
+
+- eventfd/fanotify 只能通过 source 强持 consumer、同步 drain、guard 内 callback/最后 drop、notification-time
+  fallible allocation或第二份 readiness truth 保持正确；
+- 删除 trigger/`Armed` 后发现新的参与阻塞 source、source-specific escape hatch，或 snapshot-only source
+  会在未订阅状态进入 schedule；
+- opened-description publication audit 发现 terminal retirement 后可复活、需要 final close 主动进入 epoll，
+  或 capability 必须长期强持 target；
+- ppoll/pselect 的 final-scan、temporary-mask outcome、现有 source readiness/errno 或 fanotify accepted target
+  必须改变才能完成迁移；
+- 实现需要修改 scheduler/wait core、public ABI、RFC owner/Contract Impact/acceptance boundary，或扩大到 epoll
+  core/nesting。命中这些条件时在 cutover 前停止，按影响进入 write-set expansion、Route Correction 或
+  Target Renegotiation Gate，不能用兼容分支绕过。
+
+### 退出条件
+
+- eventfd/fanotify 已返回 `Subscribed(current)`，ready-at-subscribe 保留 route，所有 predicate transition
+  guard-out notify且 live route 不按 callback 次数消费；pipe/timerfd/TTY 保持 Stage 0 owner-local边界。
+- production source-facing `PollRequest::register(&LatchTrigger)`、trigger getter、`Armed` 与 legacy poll
+  registry 为零；blocking-I/O `LatchTrigger` 均有明确 owner 分类。
+- ppoll/pselect register-abort、schedule/finish/final-scan、temporary-mask 与 snapshot-only unsupported 语义
+  无回退；opened-description terminal liveness audit闭合且 `task/files.rs` 无第二 truth。
+- format/diff/docs、LA64 build、一次 RV64 closure wrapper、完整 review 与 profile/image restoration 全部闭合；
+  Not Run 边界逐项记录，没有用 build/docs/RV64 结果外推 SMP、LA64 runtime、hardware、final harness 或
+  epoll LTP。
+- 两个 foundation cutover 在同一 transaction checkpoint 记录旧/新规则、验证与生效点；无未关闭
+  Apollyon、Keter 或 Euclid。Stage 1 独立 Closed；Stage 2 是否已解析不属于本阶段 closure。
+
+### Resolved Write Set Manifest
+
+允许修改的 kernel 文件：
+
+- `anemone-kernel/src/fs/iomux/mod.rs`
+- `anemone-kernel/src/fs/iomux/wait.rs`
+- `anemone-kernel/src/fs/api/iomux/ppoll.rs`
+- `anemone-kernel/src/fs/api/iomux/pselect6.rs`
+- `anemone-kernel/src/fs/eventfd.rs`
+- `anemone-kernel/src/fs/fanotify/queue.rs`
+- `anemone-kernel/src/fs/fanotify/group.rs`
+- `anemone-kernel/src/fs/fanotify/file.rs`
+
+允许修改的 code/contract 状态回写：
+
+- `docs/src/rfcs/epoll/{index.md,invariants.md,implementation.md}`
+- `docs/src/devlog/transactions/2026-07-26-epoll.md`
+- `docs/src/contracts/iomux/{index.md,poll-wait.md}`
+- `docs/src/contracts/task/{index.md,opened-description-lifecycle.md}`
+- `docs/src/rfcs.md`
+- `docs/src/devlog/transactions/index.md`
+- `docs/src/devlog/2026-07-20_to_2026-08-02.md`
+
+Validation-only 输入：
+
+- `anemone-kernel/src/fs/{pipe.rs,timerfd.rs,file.rs,mod.rs}`、
+  `anemone-kernel/src/device/tty/{file.rs,terminal.rs}`、`anemone-kernel/src/task/files.rs`
+- `anemone-apps/user-test/ltp/groups/{iomux,eventfd,timerfd,fanotify}.txt`
+- `anemone-apps/user-test/ltp/profile.txt`：只允许 closure wrapper 临时选择四组，完成后恢复调用者原内容；
+  profile diff 不得进入 checkpoint
+- `conf/rootfs/pretest-rv64.toml`
+- 调用者显式选择的初赛 RV64 sdcard master；只由 wrapper 复制，不能作为公共运行接口写入文档
+
+不得修改：
+
+- `anemone-kernel/src/sched/**`、wait core、Signal owner、architecture trap/IPI、`Event`
+- `anemone-kernel/src/task/files.rs`、`FileDescOps`、epoll core/UAPI/syscall、socket/nested epoll
+- pipe/timerfd/TTY 与 snapshot-only source 的 production code；本阶段只审计和回归它们
+- `anemone-apps/**` tracked source/group、rootfs/build orchestration、public ABI、register 与未列 current contract
+
+若真实 owner boundary 需要触碰未列文件，worker 必须先报告文件、原因、contract/验证影响；批准后先更新
+本 manifest 和 transaction，再继续。不能在已列文件内增加 source-specific compatibility branch 规避扩展。
 
 ## Stage 1 -> Stage 2 Implementation Resolution Gate
 

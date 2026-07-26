@@ -1,6 +1,6 @@
 # RFC-20260726-epoll
 
-**状态：** Accepted for Implementation / Stage 0 Closed / Not Effective
+**状态：** Accepted for Implementation / Stage 0 Closed / Stage 1 Ready / Not Effective
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-26
@@ -8,7 +8,7 @@
 **事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 **影响契约：** Preserve `SCHED-LATCH-001..003`、`SIGNAL-TEMP-MASK-001..003`、`IOMUX-POLL-003`、`OPENED-DESC-003`、`TTY-TERM-001`、`TTY-INPUT-001`；Refine `IOMUX-POLL-001`、`OPENED-DESC-001/002`；Replace `IOMUX-POLL-002`；Introduce `OPENED-DESC-LIVENESS-001`、`EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`。完整 delta 与 cutover 见 [Contract Impact](./invariants.md#contract-impact)。
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前无开放 Keter。
-**下一步：** 停在 Stage 0 closure；Stage 1 resolution gate 尚未进入或获执行授权。
+**下一步：** 等待独立授权 Stage 1；Ready 不构成代码实现或 foundation contract cutover 授权。
 
 ## 文档状态
 
@@ -19,7 +19,8 @@ epoll 定位共识整理为已接受的实现目标，并通过
 已经解析三阶段滚动路线与首个 Ready stage；R0 acceptance、transaction bootstrap 与本轮开发者授权
 已在 [事务日志](../../devlog/transactions/2026-07-26-epoll.md) 中记录。current contract 在对应
 cutover 前保持不变；初始授权覆盖 Stage 0 的 0A、0B，后续明确授权覆盖 0C、0D。四个 checkpoint
-现已独立关闭，Stage 1 resolution gate 尚未进入或获执行授权。
+现已独立关闭，后续 `0 -> 1` resolution gate 只把 Stage 1 解析为 Ready / Not Started，没有激活
+代码实现或 foundation contract cutover。
 
 ## 摘要
 
@@ -113,8 +114,8 @@ epoll 额外要求：
   follow-up target；首版 `EPOLL_CTL_ADD` 对 epoll target 返回 `EINVAL` 并记录 notice，
   不能让尚未验证 cycle/depth 与并发 admission 的 nesting 因对象可组合而意外生效。
 - 不要求复制 Linux `eventpoll` 的红黑树、RCU、slab 或 `ovflist` 具体结构。
-- R0 acceptance 与 Stage 0 activation 不替代 checkpoint gate；0C、0D 由后续明确授权单独激活，
-  任何 Stage 0 checkpoint 都不授权后续 Stage。
+- R0 acceptance、Stage 0 activation/closure 与 Stage 1 Ready 都不替代独立执行授权；任何已关闭
+  checkpoint 或 resolution gate 都不自动授权后续 Stage。
 
 ## 文档地图
 
@@ -144,11 +145,11 @@ Review 状态：
 - [背景材料索引](./backgrounds/index.md)
 - [epoll 设计定位共识](./backgrounds/positioning.md)
 
-[实施计划](./implementation.md) 已按开发者授权补充 rolling stages，并把 Stage 0 解析为
-0A terminal liveness、0B observer/pipe、0C timerfd noirq、0D TTY/closure 四个顺序
-checkpoint，分别冻结 write subset、proof-first validation floor、review 与停止/恢复条件。当前所有
-Keter 均已在 R0 target 中 neutralize；Stage 0 已通过 transaction preflight 进入 Active，但每个
-checkpoint 仍需按自己的交付、review、验证和停止/恢复条件独立关闭。
+[实施计划](./implementation.md) 已按开发者授权补充 rolling stages。Stage 0 的
+0A terminal liveness、0B observer/pipe、0C timerfd noirq、0D TTY/closure 四个顺序 checkpoint
+均已按各自 write subset、proof-first validation floor、review 与停止/恢复条件独立关闭。当前所有
+Keter 均已在 R0 target 中 neutralize；独立 `0 -> 1` gate 已冻结 Stage 1 的单一原子 checkpoint 与
+resolved manifest，当前等待新的代码实现授权。
 
 ## 修订记录
 
@@ -282,13 +283,14 @@ consumer-owned validity/lifetime 与 source-owned 有界 route cleanup 分别承
 资源卫生；opened description 通过 non-owning terminal liveness capability 被 epoll
 验证，final close 不同步进入 epoll。
 
-[实施计划](./implementation.md) 已把首个 proof-first slice 解析为 Stage 0，并在本轮授权下进入
-Active：0A 先
+[实施计划](./implementation.md) 已把首个 proof-first slice 解析为 Stage 0，并按独立授权完成：0A 先
 fail-fast 验证 opened-description terminal liveness，0B 用 pipe 建立公共 observer/route 与
 ordinary task-context slice，0C/0D 再分别证明 timerfd noirq/fixed-capacity 与 TTY 预分配
 handoff，最后由 0D 完成一次 Stage 级 runtime/review closure。Stage 0 不执行 contract cutover，
-任一 checkpoint 都不能单独合入。后续全量 source cutover 与 epoll ABI 仍保持 Outline，只在前一
-阶段独立关闭后解析。影响 owner、ABI、可见语义或接受边界的反馈仍必须回到 RFC review。
+任一 checkpoint 都不能单独形成 effective capability。独立 `0 -> 1` gate 已确认只剩 eventfd / fanotify
+poll bridge，并把全量 source migration、bridge 删除与两个 foundation cutover 解析为一个原子 Stage 1
+Ready；Stage 2 epoll ABI 仍保持 Outline。影响 owner、ABI、可见语义或接受边界的反馈仍必须回到
+RFC review。
 
 ## 备选方案
 
@@ -346,4 +348,5 @@ completion 边界。
 
 R0 已接受，transaction 已建立，Stage 0 已按开发者授权完成 0A-0D 并独立关闭。当前 Keter 已
 neutralize，target / current / RFC-local 分层和 [实施计划](./implementation.md) 保持权威；Stage 1
-resolution gate 尚未进入或获执行授权，Stage 0 closure 没有修改 current contract。
+现为 Ready / Not Started，尚未获得代码实现或 cutover 授权，current contract 仍保持 Stage 0
+closure 时的 effective baseline。
