@@ -33,6 +33,34 @@ impl WatchPolicy {
             user_data,
         }
     }
+
+    fn route_interests(self) -> PollEvent {
+        // Epoll policy stays consumer-owned. Subscribe to every readiness class
+        // so a source that only supports one class (for example timerfd's
+        // READABLE route) can still carry later ERROR/HANG_UP recheck hints;
+        // delivery is filtered separately by the user policy below.
+        PollEvent::READABLE | PollEvent::WRITABLE | PollEvent::ERROR | PollEvent::HANG_UP
+    }
+
+    fn delivery_interests(self) -> PollEvent {
+        self.interests | PollEvent::ERROR | PollEvent::HANG_UP
+    }
+
+    pub(super) fn deliverable(self, snapshot: PollEvent) -> PollEvent {
+        snapshot & self.delivery_interests()
+    }
+
+    pub(super) const fn edge_triggered(self) -> bool {
+        self.edge_triggered
+    }
+
+    pub(super) const fn one_shot(self) -> bool {
+        self.one_shot
+    }
+
+    pub(super) const fn user_data(self) -> u64 {
+        self.user_data
+    }
 }
 
 pub(super) struct EpollWatch {
@@ -84,6 +112,10 @@ impl EpollWatch {
         &self.target
     }
 
+    pub(super) const fn policy(&self) -> WatchPolicy {
+        self.policy
+    }
+
     pub(super) fn subscribe(
         self: &Arc<Self>,
         lease: &OpenedDescriptionLease,
@@ -91,12 +123,26 @@ impl EpollWatch {
         let observer: Arc<dyn PollObserver> = self.clone();
         let route = PollRoute::new(&observer);
         drop(observer);
-        let request = PollRequest::register_with_route(self.policy.interests, &route);
+        let request = PollRequest::register_with_route(self.policy.route_interests(), &route);
 
         match lease.poll(&request)? {
             PollRegisterResult::Subscribed(current) => Ok(current),
             PollRegisterResult::Ready(_) | PollRegisterResult::Unsupported => {
                 Err(SysError::PermissionDenied)
+            },
+        }
+    }
+
+    pub(super) fn snapshot(&self, lease: &OpenedDescriptionLease) -> Result<PollEvent, SysError> {
+        let request = PollRequest::snapshot(self.policy.route_interests());
+        match lease.poll(&request)? {
+            PollRegisterResult::Ready(current) => Ok(current),
+            unexpected => {
+                kwarningln!(
+                    "epoll: target snapshot returned unexpected result {:?}",
+                    unexpected,
+                );
+                Err(SysError::IO)
             },
         }
     }

@@ -1,6 +1,6 @@
 # RFC-20260726-epoll
 
-**状态：** Accepted for Implementation / Stage 0-1 Closed / Stage 2 Checkpoint 2A Closed / Epoll Not Effective
+**状态：** Accepted for Implementation / Stage 0-1 Closed / Stage 2 Checkpoint 2B Closed / Epoll Not Effective
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-26
@@ -8,7 +8,7 @@
 **事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 **影响契约：** Preserve `SCHED-LATCH-001..003`、`SIGNAL-TEMP-MASK-001..003`、`IOMUX-POLL-003`、`OPENED-DESC-003`、`TTY-TERM-001`、`TTY-INPUT-001`；Refine `IOMUX-POLL-001`、`OPENED-DESC-001/002`；Replace `IOMUX-POLL-002`；Introduce `OPENED-DESC-LIVENESS-001`、`EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`。完整 delta 与 cutover 见 [Contract Impact](./invariants.md#contract-impact)。
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前无开放 Keter。
-**下一步：** 等待独立授权后才能激活 Stage 2 Checkpoint 2B；2A closure不授权后续实现或`EPOLL-CUTOVER`。
+**下一步：** 等待独立授权后才能激活 Stage 2 Checkpoint 2C；2B closure不授权后续实现或`EPOLL-CUTOVER`。
 
 ## 文档状态
 
@@ -21,8 +21,8 @@ epoll 定位共识整理为已接受的实现目标，并通过
 cutover 前保持不变；初始授权覆盖 Stage 0 的 0A、0B，后续明确授权覆盖 0C、0D。四个 checkpoint
 与后续 Stage 1 原子 checkpoint 均已独立关闭；`SUBSCRIPTION-CUTOVER` 与
 `OPENED-DESC-CAPABILITY-CUTOVER` 已同步生效。独立 `1 -> 2` resolution gate 已把 Stage 2 解析为
-Ready；后续独立授权与精确write-set expansion批准已完成2A dormant watch/lifecycle core，但没有开放ABI或
-执行cutover；三个`EPOLL-*` target ID仍未生效。
+Ready；后续独立授权与精确write-set expansion批准已完成2A dormant watch/lifecycle core，新的独立授权也已
+完成2B ready/wait protocol，但没有开放ABI或执行cutover；三个`EPOLL-*` target ID仍未生效。
 
 ## 摘要
 
@@ -153,7 +153,7 @@ Review 状态：
 Keter 均已在 R0 target 中 neutralize；独立 `0 -> 1` gate 冻结的 Stage 1 原子 checkpoint 与
 resolved manifest 已按授权完成。后续 `1 -> 2` gate 已依据 live owner、ABI与固定LTP资产冻结
 [Stage 2 Ready](./implementation.md#stage-2-readyepoll-coreabi-与最终-cutover)；2A已按独立授权与扩集批准关闭，
-当前等待2B的独立实现授权。
+2B也已按新的独立授权关闭，当前等待2C的独立实现授权。
 
 ## 修订记录
 
@@ -356,5 +356,5 @@ R0 已接受，transaction 已建立，Stage 0 已完成 0A-0D，Stage 1 也已�
 neutralize，target / current / RFC-local 分层和 [实施计划](./implementation.md) 保持权威；两个
 foundation cutover 已在同一 checkpoint 生效，epoll core 与三个 `EPOLL-*` contract ID 仍未生效。
 Stage 2 resolution 已完成，权威 Ready 计划与 manifest 位于
-[实施计划](./implementation.md#stage-2-readyepoll-coreabi-与最终-cutover)；2A已关闭，2B-2D仍未授权，
+[实施计划](./implementation.md#stage-2-readyepoll-coreabi-与最终-cutover)；2A-2B已关闭，2C-2D仍未授权，
 `EPOLL-CUTOVER` 与三个 `EPOLL-*` ID 保持 Not Effective。

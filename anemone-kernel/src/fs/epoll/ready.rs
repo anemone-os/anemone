@@ -5,18 +5,23 @@ use crate::{
 
 use super::watch::EpollWatch;
 
-const SLOT_COUNT: usize = MAX_FD_PER_PROCESS;
-const DIRTY_WORDS: usize = SLOT_COUNT / u64::BITS as usize;
+pub(super) const SLOT_COUNT: usize = MAX_FD_PER_PROCESS;
+const SLOT_WORDS: usize = SLOT_COUNT / u64::BITS as usize;
 
 static_assert!(
     SLOT_COUNT.is_multiple_of(u64::BITS as usize),
-    "epoll slot capacity must fill the dirty bitmap"
+    "epoll slot capacity must fill the slot bitmaps"
 );
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct SlotId(usize);
 
 impl SlotId {
+    pub(super) const fn from_index(index: usize) -> Self {
+        assert!(index < SLOT_COUNT, "epoll slot index out of range");
+        Self(index)
+    }
+
     pub(super) const fn index(self) -> usize {
         self.0
     }
@@ -158,7 +163,14 @@ impl WatchSlots {
             SlotOccupant::Vacant,
         ) {
             SlotOccupant::Current(watch) => watch,
-            _ => panic!("epoll DEL removed a non-current slot"),
+            _ => panic!("epoll removed a non-current slot"),
+        }
+    }
+
+    pub(super) fn current(&self, slot: SlotId) -> Option<Arc<EpollWatch>> {
+        match &self.records[slot.index()].occupant {
+            SlotOccupant::Current(watch) => Some(watch.clone()),
+            SlotOccupant::Vacant | SlotOccupant::Reserved(_) => None,
         }
     }
 
@@ -197,8 +209,134 @@ impl WatchSlots {
     }
 }
 
+#[derive(Clone, Copy)]
+struct SlotSet {
+    words: [u64; SLOT_WORDS],
+}
+
+impl SlotSet {
+    const fn empty() -> Self {
+        Self {
+            words: [0; SLOT_WORDS],
+        }
+    }
+
+    fn contains(&self, slot: SlotId) -> bool {
+        let (word, bit) = Self::position(slot);
+        self.words[word] & bit != 0
+    }
+
+    fn insert(&mut self, slot: SlotId) {
+        let (word, bit) = Self::position(slot);
+        self.words[word] |= bit;
+    }
+
+    fn remove(&mut self, slot: SlotId) {
+        let (word, bit) = Self::position(slot);
+        self.words[word] &= !bit;
+    }
+
+    fn clear(&mut self) {
+        self.words.fill(0);
+    }
+
+    fn position(slot: SlotId) -> (usize, u64) {
+        let word = slot.index() / u64::BITS as usize;
+        let bit = slot.index() % u64::BITS as usize;
+        (word, 1u64 << bit)
+    }
+}
+
+/// Operation-owned candidate membership, one-shot disable state and fairness
+/// cursor. None of these bits are target readiness truth.
+pub(super) struct ReadySlots {
+    candidates: SlotSet,
+    disabled: SlotSet,
+    cursor: usize,
+}
+
+impl ReadySlots {
+    pub(super) const fn new() -> Self {
+        Self {
+            candidates: SlotSet::empty(),
+            disabled: SlotSet::empty(),
+            cursor: 0,
+        }
+    }
+
+    pub(super) fn is_candidate(&self, slot: SlotId) -> bool {
+        self.candidates.contains(slot)
+    }
+
+    pub(super) fn is_disabled(&self, slot: SlotId) -> bool {
+        self.disabled.contains(slot)
+    }
+
+    pub(super) fn make_candidate(&mut self, slot: SlotId) {
+        assert!(
+            !self.is_disabled(slot),
+            "disabled epoll watch became a ready candidate"
+        );
+        self.candidates.insert(slot);
+    }
+
+    pub(super) fn consume_candidate(&mut self, slot: SlotId) {
+        self.candidates.remove(slot);
+    }
+
+    pub(super) fn disable(&mut self, slot: SlotId) {
+        assert!(
+            !self.is_candidate(slot),
+            "epoll ONESHOT disabled a still-claimed candidate"
+        );
+        self.disabled.insert(slot);
+    }
+
+    pub(super) fn reset(&mut self, slot: SlotId) {
+        self.candidates.remove(slot);
+        self.disabled.remove(slot);
+    }
+
+    pub(super) fn reset_all(&mut self) {
+        self.candidates.clear();
+        self.disabled.clear();
+        self.cursor = 0;
+    }
+
+    pub(super) fn claim_next(&mut self) -> Option<SlotId> {
+        for offset in 0..SLOT_COUNT {
+            let index = (self.cursor + offset) % SLOT_COUNT;
+            let slot = SlotId(index);
+            if self.is_candidate(slot) {
+                self.consume_candidate(slot);
+                self.cursor = (index + 1) % SLOT_COUNT;
+                return Some(slot);
+            }
+        }
+        None
+    }
+}
+
+pub(super) struct DirtySnapshot {
+    words: [u64; SLOT_WORDS],
+}
+
+impl DirtySnapshot {
+    pub(super) fn slots(&self) -> impl Iterator<Item = SlotId> + '_ {
+        self.words
+            .iter()
+            .enumerate()
+            .flat_map(|(word_index, word)| {
+                (0..u64::BITS as usize).filter_map(move |bit_index| {
+                    (word & (1u64 << bit_index) != 0)
+                        .then_some(SlotId(word_index * u64::BITS as usize + bit_index))
+                })
+            })
+    }
+}
+
 pub(super) struct DirtySlots {
-    words: [AtomicU64; DIRTY_WORDS],
+    words: [AtomicU64; SLOT_WORDS],
 }
 
 impl DirtySlots {
@@ -210,11 +348,18 @@ impl DirtySlots {
 
     /// Publish a sticky recheck obligation without taking the operation mutex.
     /// The bit is a candidate hint only; generation and target readiness must
-    /// be revalidated by the operation owner before it can affect user
-    /// behavior.
+    /// be revalidated by the operation owner before it can affect behavior.
     pub(super) fn mark(&self, slot: SlotId) {
         let word = slot.index() / u64::BITS as usize;
         let bit = slot.index() % u64::BITS as usize;
         self.words[word].fetch_or(1u64 << bit, Ordering::Release);
+    }
+
+    /// Atomically claim the obligations visible at this point. Notifications
+    /// racing after an individual swap remain set for the next refresh.
+    pub(super) fn take(&self) -> DirtySnapshot {
+        DirtySnapshot {
+            words: core::array::from_fn(|index| self.words[index].swap(0, Ordering::AcqRel)),
+        }
     }
 }
