@@ -1,7 +1,7 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** R0 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Ready / Not Started / Unauthorized
-**最后更新：** 2026-07-26
+**状态：** R0 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Checkpoint 1 Stopped / Not Closed
+**最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **目标与不变量：** [Network Frame Path 目标与不变量](./invariants.md)
 **当前契约：**
@@ -140,7 +140,7 @@ contract，再把下一个 Outline 完整解析为 Ready。
 | --- | --- | --- | --- |
 | Stage 1 — Four-layer walking skeleton | Closed | hostable seam、真实 stack/provider、VirtIO-Net、netdev publication、kernel attach/IRQ/worker、RV64 一次真实双向纵切 | 全部 Not Effective |
 | Stage 1 -> 2 Boundary Interlude | Closed | same-owner module split、kernel-local provider/wake handoff、artifact-neutral validation seam 与 visibility 收窄 | 全部 Not Effective |
-| Stage 2 — Bounded progress conformance | Ready / Not Started | exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 saturation proof | 全部 Not Effective |
+| Stage 2 — Bounded progress conformance | Stopped / Checkpoint 1 Not Closed | exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 saturation proof | 全部 Not Effective |
 | Stage 3 — Multi-instance/lifecycle closure | Outline | 双实例隔离、attach rollback、shutdown handoff、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
 
 ## 6. Stage 1 Ready：Four-layer walking skeleton
@@ -590,8 +590,12 @@ Unauthorized，必须由后续独立 resolution gate解析。
 
 ## 8. Stage 2 Ready：Bounded progress conformance
 
-**状态：** Ready / Not Started / Unauthorized。2026-07-26 的独立 `1 -> 2 Implementation Resolution Gate`
-已完整解析本节；Ready 不授予 Checkpoint 1 或后续 checkpoint 的实现权限。
+**状态：** Stopped at Checkpoint 1 failure signal / Not Closed。2026-07-27 的真实RV64 burst未观察到
+TX exhaustion，临时probe已删除；Checkpoint 2/3均未激活。原Ready route不再可执行。
+
+继续前必须运行独立的Checkpoint 1 route-correction gate：读取本次负证据与live pump/provider时序，只更新
+保持R0 target所需的probe路线、failure signal、validation和下游复用关系，并重新建立Ready状态。该gate未获
+授权前不得机械重跑下述burst、激活Checkpoint 2/3或进入Stage 3。
 
 ### 8.1 Resolution preflight 与 live gap
 
@@ -658,6 +662,10 @@ write-back 与 closure，前一项关闭不自动激活后一项：
 
 ### 8.3 Checkpoint 1 — RV64 saturation observability probe
 
+**执行状态：** Stopped / Not Closed。以下内容保留2026-07-26解析出的失败路线；它不是当前可执行计划。
+128-packet真实RV64 probe未观察到`queue-full > 0`，已按本节failure signal删除并停止Stage 2；负证据见
+[transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)。
+
 **假设：** 现有 validation-only ICMP seam 可以在同一个真实 stack/provider/worker 路径预排超过
 `TX_SLOT_COUNT` 的有界 burst，使 RV64 TCG 至少一次观察到正常 `TransmitOutcome::Exhausted`，随后由真实
 VirtIO completion/IRQ恢复并把 live TX mappings归还，而不需要暂停device、伪造completion或sleep决定正确性。
@@ -685,6 +693,8 @@ provider port加入production test-control、使用任意sleep作为成功条件
 final audit删除或由accepted production control-plane替换。
 
 ### 8.4 Checkpoint 2 — host ownership/progress/pump conformance
+
+**状态：** Not Activated / Unauthorized。Checkpoint 1未关闭，不得进入本checkpoint。
 
 先把当前单个、已超过六百行的 integration test按测试owner做最小拆分：现有walking-skeleton/identity test
 保留在`tests/frame_path.rs`；共享 deterministic provider/clock/frame builder移入`tests/support/mod.rs`；新增
@@ -715,6 +725,9 @@ Checkpoint 2 不调整默认KernelConfig数值。若host矩阵只能通过改变
 `FrameProvider` outcome、smoltcp fork或固定response reserve才能通过，立即停止并进入RFC review。
 
 ### 8.5 Checkpoint 3 — provider/recheck/worker closure 与 RV64 acceptance
+
+**状态：** Not Activated / Unauthorized。原“复用Checkpoint 1 burst”依赖已失效，必须由后续
+Checkpoint 1 route-correction gate同步更新后才可重新解析或执行。
 
 concrete provider保持slot为唯一frame/queue-token owner，并只做以下局部硬化：
 

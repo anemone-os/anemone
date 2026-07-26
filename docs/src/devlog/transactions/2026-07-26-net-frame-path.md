@@ -1,6 +1,6 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / Stage 1 and Boundary Interlude Closed; Stage 2 Ready Not Started
+**Status:** Active / Stage 2 Stopped at Checkpoint 1 Failure Signal
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260726-net-frame-path R0](../../rfcs/net-frame-path/index.md),
@@ -32,6 +32,10 @@ kernel attach、IRQ/worker/time wiring、RV64 双向 vertical slice、stage-wide
 Stage 1 与 Boundary Interlude 关闭后，用户独立授权解析 Stage 2 implementation。本授权仅覆盖只读
 `1 -> 2 Implementation Resolution Gate`与docs write-back，不授权Stage 2 Checkpoint 1或任何实现、runtime
 validation、contract cutover。
+
+用户于2026-07-27独立授权完成Stage 2 Checkpoint 1，并要求持续推进至checkpoint closure或停止条件；本授权
+只覆盖RV64 saturation observability probe、checkpoint-scoped review/validation/write-back与单独commit，
+不得自动进入Checkpoint 2，也不授予target、owner、shared API/current contract或resolved manifest扩展。
 
 ## R0 acceptance and activation preflight
 
@@ -444,3 +448,62 @@ Unauthorized**；Checkpoint 1没有激活，后续必须取得独立实现授权
 `smp`/`memory`与runtime disk绑定路线；没有运行cargo test/check、formatter、kernel build、QEMU、LA64、hardware、
 LTP或final harness，Stage 2 saturation/recovery全部Not Run。`git diff --check`与`mdbook build docs`通过；
 mdBook只报告既有large search-index warning，新增Stage 2 anchor与跨页链接命中生成HTML。
+
+### 2026-07-27 - Stage 2 Checkpoint 1 activated
+
+**Authorization / entry:** 用户独立授权完成Stage 2 Checkpoint 1并明确不得自动进入下一gate。入口为
+`dev/drc/alpha@c9120890`，tracked/untracked worktree均clean；上一commit只完成Stage 2 docs resolution，
+Checkpoint 1尚无实现或runtime evidence。本次没有用户dirty change与frozen manifest重叠。
+
+**Preflight evidence:** 重新读取AGENTS/LOCAL、R0正文/invariants、Stage 2 Ready、tracking issues、register、
+System Power current contract、当前transaction与live stack/provider/worker/validation owner。feature graph仍由
+kernel `kunit`单向启用stack `icmp-validation-probe`；provider仍固定64-entry queue、32个RX slot、32个TX slot，
+现有KUnit-only snapshot已包含RX/TX completion、TX submit、queue-full、IRQ recheck与live/high-water mapping，
+生产代码不读取这些diagnostic counters。现有单echo seam尚不能产生saturation，正是本checkpoint获准闭合的
+live gap。
+
+`just --list`与build/qemu/fmt help未漂移；RV64 preset仍要求provider `smp`/`memory`，runtime仍显式绑定kernel
+与可选disk；wrapper继续使用`smp=1`、`memory=1G`、tracked pretest rootfs，并把调用者提供的只读master复制到
+`build/runtime/pretest-rv64/disk-x0.img`后运行。master存在且为4 GiB ordinary file。wrapper会重建
+`build/rootfs/pretest-rv64/rootfs.img`并覆盖上述runtime disk；本次validation接受这些generated side effect。
+
+**Activated route / boundaries:** 只在Stage 2 Checkpoint 1 manifest内把validation-only ICMP seam扩成
+`2 * VIRTIO_NET_QUEUE_SIZE`有界burst，由普通pump/provider/IRQ/completion路径制造并恢复真实exhaustion；KUnit
+只比较owner snapshot并用`yield_now()`与monotonic deadline等待durable predicates。禁止暂停/吞掉completion、
+伪造queue state、sleep-as-correctness、diagnostics驱动production或generic provider test-control。shared API、
+vendored dependencies、`device/net`、generic runtime owner、platform/wrapper、power、register/current contracts均
+只读；Checkpoint 2未激活。
+
+**Activation-time contract state:** Stage 2 cutover为None；六个network IDs与
+`SYSTEM-POWER-ORDERLY-001` Refine继续Not Effective。
+
+### 2026-07-27 - Stage 2 Checkpoint 1 stopped at saturation failure signal
+
+**Implementation / probe:** 在frozen manifest内把validation-only ICMP seam临时扩成128个不同sequence的
+有界burst（`2 * VIRTIO_NET_QUEUE_SIZE`），沿原`PumpControl`、普通stack pump、concrete provider、真实IRQ与
+completion路径运行。KUnit在请求前后读取同一owner-scoped snapshot，并只用`yield_now()`与monotonic deadline
+等待TX submit/completion匹配、live mappings回到probe前persistent RX baseline；没有暂停/吞掉completion、
+伪造queue state、修改slot ownership、加入sleep-as-correctness或让diagnostics驱动production。
+
+**Validation evidence:** host gate通过：1个stack unit、9个integration与2个compile-fail doctest；base与
+`icmp-validation-probe`两种`--no-default-features` check通过。`just fmt kernel --check`对本checkpoint三个
+Rust文件无diff，只保留Stage 1已记录的三个vendored smoltcp baseline diff。canonical RV64 release build在
+sandbox内先被既有lwext4 C compile `SIGSYS / Bad system call`阻断，同一命令在sandbox外通过。
+
+RV64 wrapper使用只读`etc/preliminary/images/sdcard-rv.img`的worktree-local副本并写入
+`build/net-frame-stage2-c1-rv64.log`。保留日志直接证明KUnit触发
+`ICMP burst did not observe normal VirtIO TX exhaustion` panic，随后走System Power emergency
+`PowerOff machine action`；它没有打印最终counter summary，因此不能从持久证据断言精确submit/completion、
+mapping数值或completion相对下一轮pump的时序。当前工作假设是TCG/virtio completion回收过快，但必须由后续
+route-correction gate重新验证。全量260项KUnit未完成，本次也没有normal orderly shutdown；该日志是明确
+负证据，不是Stage 2 saturation PASS。
+
+**Failure disposition / stop:** 命中Checkpoint 1局部failure signal后，全部临时probe source已删除；最终
+tracked source相对`c9120890`无diff，只保留本transaction与stage lifecycle write-back。没有尝试调小production
+budget、暂停device、伪造completion、增加test-control或把QEMU proof降级为host-only。Checkpoint 1为
+**Stopped / Not Closed**，Stage 2在此停止；Checkpoint 2未激活。后续若继续，必须先独立review真实saturation
+route并更新authoritative implementation route，不能机械重跑当前burst。
+
+**Contract / Not Run:** Stage 2 cutover仍为None；六个network IDs与`SYSTEM-POWER-ORDERLY-001` Refine继续
+Not Effective。RV64 saturation/recovery acceptance、完整KUnit、两次fresh-disk final run、SMP、LA64、
+virtio-pci、hardware、LTP、final harness与Stage 3均Not Run / Not Achieved。

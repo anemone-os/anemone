@@ -3,7 +3,7 @@
 **状态：** Accepted for Implementation
 **修订：** `R0`
 **负责人：** doruche
-**最后更新：** 2026-07-26
+**最后更新：** 2026-07-27
 **领域：** network-device / VirtIO / frame-path / smoltcp integration
 **事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)
 **影响契约：** `NET-BOUNDARY-001`、`NETDEV-LIFE-001`、`NET-FRAME-OWN-001`、
@@ -13,9 +13,9 @@
 （proposed `Refine`）
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前没有 Apollyon、Keter 或 Euclid；NFP-002
 已由 System Power R0 与本 R0 的 best-effort cleanup boundary neutralize
-**下一步：** Stage 1 Checkpoint 1-4、stage-wide review 与 Stage 1 -> 2 Boundary Interlude 已关闭；
-独立 `1 -> 2 Implementation Resolution Gate` 已把 Stage 2 解析为 Ready / Not Started，但未授权进入
-Checkpoint 1
+**下一步：** Stage 2 Checkpoint 1 的真实 RV64 burst 未能稳定制造 TX exhaustion，已按局部 failure signal
+删除 probe 并停止；Checkpoint 1 未关闭，Checkpoint 2 未激活。继续前须独立 review saturation route 并更新
+authoritative implementation route
 
 > 本目录是 `net-frame-path` R0 accepted target 的公共 canonical source。R0 尚未成为 current contract；
 > 六个 network IDs 与 power Refine 只可在 `NFP-FINAL-CUTOVER` 原子生效。

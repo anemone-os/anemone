@@ -107,8 +107,8 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 - [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R0 Accepted for Implementation；建立 boot-time netdev、
   VirtIO-Net frame provider、move-only frame ownership、single-owner bounded pump、kernel attach 与
-  System Power best-effort cleanup 的目标边界。Stage 1 与 Boundary Interlude 已关闭；Stage 2 已完成独立
-  resolution，当前为 Ready / Not Started / Unauthorized。执行见
+  System Power best-effort cleanup 的目标边界。Stage 1 与 Boundary Interlude 已关闭；Stage 2 Checkpoint 1
+  的真实RV64 burst未观察到TX exhaustion，已删除probe并按failure signal停止，Checkpoint 1未关闭。执行见
   [transaction](./devlog/transactions/2026-07-26-net-frame-path.md)；network contract 仍全部 Not Effective。
   后续 `net-udp` 与 `net-tcp` 是 sibling RFC，
   只依赖完成 cutover 的 current contract，不以目录或 parent RFC 建立权威关系。
