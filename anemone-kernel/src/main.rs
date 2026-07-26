@@ -61,8 +61,6 @@ use crate::{
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
 static FINISH_SYNC_COUNTER: CpuSync = CpuSync::new("finish");
-#[cfg(feature = "kunit")]
-static KUNIT_SYNC_COUNTER: CpuSync = CpuSync::new("kunit");
 
 fn mount_rootfs() {
     match ROOTFS_SOURCE_KIND {
@@ -159,12 +157,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     mount_rootfs();
 
     #[cfg(feature = "kunit")]
-    {
-        crate::debug::kunit::kunit_runner();
-        unsafe {
-            KUNIT_SYNC_COUNTER.sync_with_counter();
-        }
-    }
+    crate::debug::kunit::kunit_runner();
 
     boot::exec_initial_program(init_stdio);
 }
@@ -201,9 +194,6 @@ unsafe extern "C" fn ap_kinit(ap_id: usize) {
 
         FINISH_SYNC_COUNTER.sync_with_counter();
         kinfoln!("AP {} kinit finished", ap_id);
-
-        #[cfg(feature = "kunit")]
-        KUNIT_SYNC_COUNTER.sync_with_counter();
     }
     // exit
 }

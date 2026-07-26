@@ -1,8 +1,9 @@
-//! NS16550A serial port driver code.
+//! UART16550 and UART16550Dw serial port drivers.
 //!
 //! References:
 //! - https://datasheet4u.com/datasheets/National-Semiconductor/NS16550A/605590
 //! - https://www.kernel.org/doc/Documentation/devicetree/bindings/serial/8250.yaml
+//! - https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/serial/snps-dw-apb-uart.yaml
 
 use crate::{
     device::{
@@ -20,8 +21,9 @@ use crate::{
 mod port;
 mod regs;
 
-use port::{AppliedLine, Ns16550ADevice};
+use port::{AppliedLine, Uart16550Device};
 pub use regs::Ns16550ARegisters;
+use regs::UartVariant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UartParity {
@@ -124,150 +126,209 @@ fn calculate_divisor(uartclk: u32, baud: u32) -> Option<u16> {
 }
 
 #[derive(Debug, KObject, Driver)]
-struct Ns16550ADriver {
+struct Uart16550Driver {
     #[kobject]
     kobj_base: KObjectBase,
     #[driver]
     drv_base: DriverBase,
 }
 
-static NS16550A_DRIVER: Lazy<Arc<Ns16550ADriver>> = Lazy::new(|| {
-    Arc::new(Ns16550ADriver {
-        kobj_base: KObjectBase::new(KObjIdent::try_from("ns16550a").unwrap()),
+#[derive(Debug, KObject, Driver)]
+struct Uart16550DwDriver {
+    #[kobject]
+    kobj_base: KObjectBase,
+    #[driver]
+    drv_base: DriverBase,
+}
+
+static UART16550_DRIVER: Lazy<Arc<Uart16550Driver>> = Lazy::new(|| {
+    Arc::new(Uart16550Driver {
+        kobj_base: KObjectBase::new(KObjIdent::try_from("uart16550").unwrap()),
         drv_base: DriverBase::new(),
     })
 });
 
-impl KObjectOps for Ns16550ADriver {}
+static UART16550_DW_DRIVER: Lazy<Arc<Uart16550DwDriver>> = Lazy::new(|| {
+    Arc::new(Uart16550DwDriver {
+        kobj_base: KObjectBase::new(KObjIdent::try_from("uart16550-dw").unwrap()),
+        drv_base: DriverBase::new(),
+    })
+});
 
-impl DriverOps for Ns16550ADriver {
-    fn probe(&self, device: Arc<dyn Device>) -> Result<(), SysError> {
-        let pdev = device
-            .as_platform_device()
-            .expect("platform driver should only be probed with platform device");
+impl KObjectOps for Uart16550Driver {}
+impl KObjectOps for Uart16550DwDriver {}
 
-        let fwnode = pdev.fwnode().ok_or(SysError::MissingFwNode)?;
-        let of_path = fwnode
-            .as_of_node()
-            .ok_or(SysError::MissingFwNode)?
-            .node()
-            .path();
-        let port_id = TtyPortId::try_from(of_path.as_str())?;
-        let console_terminal_identity = ConsoleTerminalIdentity::try_from_str(port_id.as_str())?;
-        let stdout = fwnode.stdout_config();
-        let line = match stdout {
-            Some(config) => {
-                let options = parse_stdout_options(config.options()).unwrap_or_else(|error| {
-                    // The platform bus currently logs and swallows ordinary probe
-                    // failures. An explicitly selected boot console must instead
-                    // fail closed: silently falling back can leave the system on a
-                    // different baud/parity without an observable diagnostic. Move
-                    // this policy to the boot coordinator once required-device
-                    // probe failures can propagate through the bus.
-                    panic!(
-                        "{}: invalid stdout UART options {:?}: {:?}",
-                        pdev.name(),
-                        config.options(),
-                        error
-                    )
-                });
-                kdebugln!(
-                    "{}: read stdout UART options {:?} -> {:?}",
+fn probe_uart16550(device: Arc<dyn Device>, variant: UartVariant) -> Result<(), SysError> {
+    let pdev = device
+        .as_platform_device()
+        .expect("platform driver should only be probed with platform device");
+
+    let fwnode = pdev.fwnode().ok_or(SysError::MissingFwNode)?;
+    let of_path = fwnode
+        .as_of_node()
+        .ok_or(SysError::MissingFwNode)?
+        .node()
+        .path();
+    let port_id = TtyPortId::try_from(of_path.as_str())?;
+    let console_terminal_identity = ConsoleTerminalIdentity::try_from_str(port_id.as_str())?;
+    let stdout = fwnode.stdout_config();
+    let line = match stdout {
+        Some(config) => {
+            let options = parse_stdout_options(config.options()).unwrap_or_else(|error| {
+                // The platform bus currently logs and swallows ordinary probe
+                // failures. An explicitly selected boot console must instead
+                // fail closed: silently falling back can leave the system on a
+                // different baud/parity without an observable diagnostic. Move
+                // this policy to the boot coordinator once required-device
+                // probe failures can propagate through the bus.
+                panic!(
+                    "{}: invalid stdout UART options {:?}: {:?}",
                     pdev.name(),
                     config.options(),
-                    options
-                );
+                    error
+                )
+            });
+            kdebugln!(
+                "{}: read stdout UART options {:?} -> {:?}",
+                pdev.name(),
+                config.options(),
                 options
-            },
-            None => {
-                kdebugln!(
-                    "{}: no stdout UART options found, using default",
-                    pdev.name()
-                );
-                UartLineConfig::default()
-            },
-        };
-        let uartclk = fwnode
-            .prop_read_u32("clock-frequency")
-            .ok_or(SysError::FwNodeLookupFailed)?;
-
-        let reg_shift = fwnode.prop_read_u32("reg-shift").unwrap_or(0) as usize;
-        let reg_io_width = fwnode.prop_read_u32("reg-io-width").unwrap_or(1) as usize;
-        if !matches!(reg_io_width, 1 | 2 | 4) {
-            kerrln!(
-                "{}: unsupported reg-io-width={}, expected one of {{1,2,4}}",
-                pdev.name(),
-                reg_io_width
             );
-            return Err(SysError::FwNodeLookupFailed);
-        }
-
-        let divisor = match calculate_divisor(uartclk, line.baud) {
-            Some(divisor) => divisor,
-            None if stdout.is_some() => {
-                panic!(
-                    "{}: stdout baud {} cannot be derived from UART clock {}",
-                    pdev.name(),
-                    line.baud,
-                    uartclk
-                );
-            },
-            None => return Err(SysError::FwNodeLookupFailed),
-        };
-
-        let (base, len) = pdev
-            .resources()
-            .iter()
-            .find_map(|resource| match resource {
-                Resource::Mmio { base, len } => Some((*base, *len)),
-            })
-            .ok_or(SysError::MissingResource)?;
-
-        let remap = unsafe { ioremap(base, len) }?;
-        let regs = unsafe {
-            Ns16550ARegisters::from_raw(remap.as_ptr().as_ptr().cast(), reg_shift, reg_io_width)
-        };
-
-        regs.init_line_quiescent(divisor, line);
-
-        let (state, console) = Ns16550ADevice::new(
-            port_id,
-            base,
-            reg_shift,
-            reg_io_width,
-            remap,
-            AppliedLine::new(line, divisor),
-        )?;
-        pdev.set_drv_state(AnyOpaque::new(state));
-
-        let mut flags = ConsoleFlags::empty();
-        if stdout.is_some() {
-            flags |= ConsoleFlags::ENABLE_ON_BOOT;
-            kinfoln!(
-                "{}: registered as stdout console ({}{}{})",
-                pdev.name(),
-                line.baud,
-                line.parity.as_char(),
-                line.data_bits
+            options
+        },
+        None => {
+            kdebugln!(
+                "{}: no stdout UART options found, using default",
+                pdev.name()
             );
-        }
-        register_console_with_terminal_identity(console, flags, Some(console_terminal_identity));
+            UartLineConfig::default()
+        },
+    };
+    let uartclk = fwnode.prop_read_u32("clock-frequency").unwrap_or_else(|| {
+        // Some firmware describes the UART input only through a clock
+        // provider, which Anemone cannot resolve yet. Keep the console
+        // usable with an observable fallback until baudclk resolution is
+        // available, then remove this compatibility path.
+        kwarningln!(
+            "{}: clock-frequency is missing; using fallback UART clock {} Hz",
+            pdev.name(),
+            NS16550A_FALLBACK_CLOCK_HZ
+        );
+        NS16550A_FALLBACK_CLOCK_HZ
+    });
 
-        kinfoln!("{}: probed with RX quiescent", pdev.name());
-
-        Ok(())
+    let reg_shift = fwnode.prop_read_u32("reg-shift").unwrap_or(0) as usize;
+    let reg_io_width = fwnode.prop_read_u32("reg-io-width").unwrap_or(1) as usize;
+    if !matches!(reg_io_width, 1 | 2 | 4) {
+        kerrln!(
+            "{}: unsupported reg-io-width={}, expected one of {{1,2,4}}",
+            pdev.name(),
+            reg_io_width
+        );
+        return Err(SysError::FwNodeLookupFailed);
     }
 
-    fn shutdown(&self, device: &dyn Device) {}
+    let divisor = match calculate_divisor(uartclk, line.baud) {
+        Some(divisor) => divisor,
+        None if stdout.is_some() => {
+            panic!(
+                "{}: stdout baud {} cannot be derived from UART clock {}",
+                pdev.name(),
+                line.baud,
+                uartclk
+            );
+        },
+        None => return Err(SysError::FwNodeLookupFailed),
+    };
+
+    let (base, len) = pdev
+        .resources()
+        .iter()
+        .find_map(|resource| match resource {
+            Resource::Mmio { base, len } => Some((*base, *len)),
+        })
+        .ok_or(SysError::MissingResource)?;
+
+    let remap = unsafe { ioremap(base, len) }?;
+    let regs = unsafe {
+        Ns16550ARegisters::from_raw_variant(
+            remap.as_ptr().as_ptr().cast(),
+            reg_shift,
+            reg_io_width,
+            variant,
+        )
+    };
+
+    regs.init_line_quiescent(divisor, line)?;
+
+    let (state, console) = Uart16550Device::new(
+        port_id,
+        base,
+        reg_shift,
+        reg_io_width,
+        variant,
+        remap,
+        AppliedLine::new(line, divisor),
+    )?;
+    pdev.set_drv_state(AnyOpaque::new(state));
+
+    let mut flags = ConsoleFlags::empty();
+    if stdout.is_some() {
+        flags |= ConsoleFlags::ENABLE_ON_BOOT;
+        kinfoln!(
+            "{}: registered as stdout console ({}{}{})",
+            pdev.name(),
+            line.baud,
+            line.parity.as_char(),
+            line.data_bits
+        );
+    }
+    register_console_with_terminal_identity(console, flags, Some(console_terminal_identity));
+
+    kinfoln!("{}: probed with RX quiescent", pdev.name());
+
+    Ok(())
+}
+
+impl DriverOps for Uart16550Driver {
+    fn probe(&self, device: Arc<dyn Device>) -> Result<(), SysError> {
+        probe_uart16550(device, UartVariant::Uart16550)
+    }
+
+    fn shutdown(&self, _device: &dyn Device) {}
 
     fn as_platform_driver(&self) -> Option<&dyn PlatformDriver> {
         Some(self)
     }
 }
 
-impl PlatformDriver for Ns16550ADriver {
+impl PlatformDriver for Uart16550Driver {
     fn match_table(&self) -> &[&str] {
         &["ns16550a"]
+    }
+}
+
+impl DriverOps for Uart16550DwDriver {
+    fn probe(&self, device: Arc<dyn Device>) -> Result<(), SysError> {
+        let fwnode = device.fwnode().ok_or(SysError::MissingFwNode)?;
+        // The binding defines this property only for DW instances that do not
+        // implement the busy functionality. Such ports retain standard 16550
+        // IIR and line-programming behavior while remaining owned by this
+        // binding-specific driver.
+        let busy_detect = fwnode.prop_read_raw("snps,uart-16550-compatible").is_none();
+        probe_uart16550(device, UartVariant::Uart16550Dw { busy_detect })
+    }
+
+    fn shutdown(&self, _device: &dyn Device) {}
+
+    fn as_platform_driver(&self) -> Option<&dyn PlatformDriver> {
+        Some(self)
+    }
+}
+
+impl PlatformDriver for Uart16550DwDriver {
+    fn match_table(&self) -> &[&str] {
+        &["snps,dw-apb-uart"]
     }
 }
 
@@ -348,23 +409,29 @@ fn stdout_line_control_bits() {
 
 #[initcall(driver)]
 fn init() {
-    platform::register_driver(NS16550A_DRIVER.clone());
+    platform::register_driver(UART16550_DRIVER.clone());
+    platform::register_driver(UART16550_DW_DRIVER.clone());
 }
 
 #[initcall(late)]
 fn activate_tty_ports() {
-    let driver: &dyn Driver = NS16550A_DRIVER.as_ref();
+    activate_driver_tty_ports(UART16550_DRIVER.as_ref(), "Uart16550");
+    activate_driver_tty_ports(UART16550_DW_DRIVER.as_ref(), "Uart16550Dw");
+}
+
+fn activate_driver_tty_ports(driver: &dyn Driver, driver_name: &str) {
     let mut device_count = 0_usize;
     driver.for_each_device(|_| {
         device_count = device_count
             .checked_add(1)
-            .expect("NS16550A device count overflow");
+            .expect("UART16550 device count overflow");
     });
 
     let mut devices = Vec::new();
     if devices.try_reserve_exact(device_count).is_err() {
         kerrln!(
-            "NS16550A: failed to reserve activation snapshot for {} device(s)",
+            "{}: failed to reserve activation snapshot for {} device(s)",
+            driver_name,
             device_count
         );
         return;
@@ -373,21 +440,21 @@ fn activate_tty_ports() {
     driver.for_each_device(|device| {
         assert!(
             devices.len() < devices.capacity(),
-            "NS16550A devices changed while taking the boot-time activation snapshot"
+            "UART16550 devices changed while taking the boot-time activation snapshot"
         );
         devices.push(device.clone());
     });
     assert_eq!(
         devices.len(),
         device_count,
-        "NS16550A devices changed while taking the boot-time activation snapshot"
+        "UART16550 devices changed while taking the boot-time activation snapshot"
     );
 
     for device in devices {
         let state = device
             .drv_state()
-            .cast::<Ns16550ADevice>()
-            .expect("NS16550A device has invalid driver state");
+            .cast::<Uart16550Device>()
+            .expect("UART16550 device has invalid driver state");
         match state.activate(device.as_ref()) {
             Ok(()) => {
                 kinfoln!(

@@ -43,6 +43,7 @@ max_fd_per_process = 1024 # Default maximum number of file descriptors per proce
 ramdisk_count = 16 # Number of static ramdisk block devices to publish at boot.
 loop_device_count = 8 # Number of static loop block devices to publish at boot.
 ns16550a_default_baud = 115200 # Default baud when stdout-path has no serial options.
+ns16550a_fallback_clock_hz = 24000000 # UART input clock used when firmware omits clock-frequency.
 tty_raw_rx_capacity_bytes = 4096 # Per-port fixed raw RX FIFO capacity.
 tty_canonical_line_capacity_bytes = 4096 # Maximum canonical line size including its delimiter.
 tty_input_capacity_bytes = 4096 # Per-Terminal committed input capacity.

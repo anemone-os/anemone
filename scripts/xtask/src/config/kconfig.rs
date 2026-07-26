@@ -75,6 +75,7 @@ pub struct Parameters {
     pub ramdisk_count: Option<usize>,
     pub loop_device_count: Option<usize>,
     pub ns16550a_default_baud: Option<u32>,
+    pub ns16550a_fallback_clock_hz: Option<u32>,
     pub tty_raw_rx_capacity_bytes: Option<usize>,
     pub tty_canonical_line_capacity_bytes: Option<usize>,
     pub tty_input_capacity_bytes: Option<usize>,
@@ -146,6 +147,7 @@ impl Parameters {
         materialize!(ramdisk_count);
         materialize!(loop_device_count);
         materialize!(ns16550a_default_baud);
+        materialize!(ns16550a_fallback_clock_hz);
         materialize!(tty_raw_rx_capacity_bytes);
         materialize!(tty_canonical_line_capacity_bytes);
         materialize!(tty_input_capacity_bytes);
@@ -279,6 +281,8 @@ pub const RAMDISK_COUNT: usize = {};
 pub const LOOP_DEVICE_COUNT: usize = {};
 /// Default NS16550A baud used when stdout-path has no device-specific options.
 pub const NS16550A_DEFAULT_BAUD: u32 = {};
+/// NS16550A input clock used when firmware omits clock-frequency.
+pub const NS16550A_FALLBACK_CLOCK_HZ: u32 = {};
 /// Per-port fixed raw TTY RX FIFO capacity in bytes.
 pub const TTY_RAW_RX_CAPACITY_BYTES: usize = {};
 /// Maximum canonical TTY line size including its delimiter.
@@ -349,6 +353,7 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             resolved!(ramdisk_count),
             resolved!(loop_device_count),
             resolved!(ns16550a_default_baud),
+            resolved!(ns16550a_fallback_clock_hz),
             resolved!(tty_raw_rx_capacity_bytes),
             resolved!(tty_canonical_line_capacity_bytes),
             resolved!(tty_input_capacity_bytes),
