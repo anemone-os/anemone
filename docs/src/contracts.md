@@ -116,6 +116,8 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
   - [Temporary-mask delivery handoff](./contracts/signal/temporary-mask-delivery.md)
 - [Procfs 当前契约](./contracts/procfs/index.md)
   - [TGID task-state projection](./contracts/procfs/task-state-projection.md)
+- [System Power 当前契约](./contracts/power/index.md)
+  - [Shutdown lifecycle](./contracts/power/shutdown-lifecycle.md)
 - [Task 当前契约](./contracts/task/index.md)
   - [Process-group signal targeting](./contracts/task/process-group-signaling.md)
   - [ThreadGroup lifecycle](./contracts/task/thread-group-lifecycle.md)
