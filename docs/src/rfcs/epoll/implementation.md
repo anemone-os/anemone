@@ -11,8 +11,8 @@
 
 本文把公共 R0 中已经闭合的 accepted target 解析成滚动实施路线。Stage 0 已解析为
 Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后进入 Active。
-本轮授权只覆盖 0A、0B；前一 checkpoint 的交付、review 与验证关闭后才能进入后一项，
-且不会自动授权 0C、0D 或后续 Stage。
+初始授权覆盖 0A、0B；后续授权覆盖 0C、0D。前一 checkpoint 的交付、review 与验证关闭后
+才能进入后一项，且 Stage 0 closure 不会自动授权后续 Stage。
 
 ## 实施原则
 
@@ -241,10 +241,15 @@ Renegotiation Gate。普通实现失败只回退 0B subset；0A 保持 Closed，
 
 ### Checkpoint 0C - Timerfd Noirq / Fixed-capacity Route
 
+**执行状态：** Closed / 2026-07-26。实现、noirq/resource review、KUnit 取舍与验证证据见
+[transaction checkpoint log](../../devlog/transactions/2026-07-26-epoll.md#checkpoint-0c---timerfd-noirq--fixed-capacity-route---2026-07-26)；
+本项关闭只解除 0D 的前置依赖，不表示 Stage 0 Closed 或任何 contract cutover。
+
 **交付与 write subset：** 只修改 `anemone-kernel/src/fs/timerfd.rs`、本文与对应 transaction。
 把 timerfd poll route 迁移到 0B protocol，保留 blocking-read trigger；保持 fixed-capacity storage，
-在 noirq guard 内只 detach 到 caller-owned batch，并在 guard 外 notify/drop。按前述条件保留或放弃
-owner-local KUnit，transaction 必须记录理由。
+在 noirq guard 内把 live route clone 到 caller-owned notify batch 并保留在 registry，只把 stale route
+移入 drop batch，随后在 guard 外 notify/drop。按前述条件保留或放弃 owner-local KUnit，transaction
+必须记录理由。
 
 **定向验证 / review：** 审计 timerfd 每个 predicate-changing transition、容量耗尽和 stale route
 回收；确认无 IRQ-off allocation、sleepable lock、最后引用 drop 或 observer notification。运行与
@@ -256,6 +261,9 @@ notify/drop 或削弱容量耗尽的可观察失败，停止 Stage 并进入 Tar
 回退 0C；0A/0B 保持 Closed，0D 不得开始。
 
 ### Checkpoint 0D - TTY Preallocated Handoff 与 Stage Closure
+
+**执行状态：** Authorized / Not Started。0C 已独立关闭；0D 仍须在自己的 write subset、review、
+runtime closure 与 write-back 全部闭合后才能关闭 Stage 0。
 
 **交付与 write subset：** 只修改 `anemone-kernel/src/device/tty/terminal.rs`、本文与对应 transaction。
 把 TTY poll entry 迁移到 0B protocol，保持 `poll_triggers` / `poll_spare` 的预分配容量、
