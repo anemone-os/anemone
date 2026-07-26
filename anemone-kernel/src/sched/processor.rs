@@ -525,6 +525,20 @@ pub fn wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
 pub mod init_routines {
     use super::*;
 
+    /// Replace the bootstrap task's early affinity snapshot after every CPU is
+    /// online.
+    pub(crate) fn reset_affinity() {
+        let current = get_current_task();
+        let online = CpuMask::online();
+        apply_config_patch(
+            &current,
+            SchedConfigPatch::keep().with_affinity(online),
+            SchedChangePermit::unrestricted(),
+        )
+        .expect("failed to reset bootstrap task affinity to online CPUs");
+        assert_eq!(current.sched_config().affinity(), online);
+    }
+
     /// First task to be scheduled on each cpu must be treated specially, since
     /// there is no running task on the cpu at that time. But
     /// [local_enqueue_new_task] assumes that there is always a running task.

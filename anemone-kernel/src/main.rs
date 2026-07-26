@@ -144,6 +144,9 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         INIT_SYNC_COUNTER.sync_with_counter();
 
         FINISH_SYNC_COUNTER.sync_with_counter();
+        // The BSP task captured its affinity before APs logged in, and exec keeps
+        // the same scheduler entity. Publish the complete mask before it becomes init.
+        sched::init_routines::reset_affinity();
         // Ordinary kthreads may round-robin onto any CPU, so wait until every CPU
         // has completed local init and marked itself online before late services
         // publish their workers. `kthreadd` remains a hand-built boot invariant.
