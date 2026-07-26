@@ -13,7 +13,7 @@
 - [ThreadGroup lifecycle](./thread-group-lifecycle.md)：`Alive / Exiting / Exited`、member detach、exit-code 与 waitability。
 - [Unix job control](./job-control.md)：ThreadGroup-owned stop / continue phase、user exposure、control-signal handoff、lifecycle cleanup和parent report。
 - [Child wait](./child-wait.md)：terminal与job-control child status、selection、Event重扫和peek / consume / reap claim。
-- [Opened-description lifecycle](./opened-description-lifecycle.md)：published fd-slot identity、dup/fork sharing 与 final release。
+- [Opened-description lifecycle](./opened-description-lifecycle.md)：terminal published-slot lifecycle、non-owning identity/liveness capability、dup/fork sharing 与 final release。
 - [Anemone Boot Protocol](./boot-protocol.md)：rootfs metadata选择初始用户程序、kernel boot准备与ordinary exec handoff。
 - [User entry](./user-entry.md)：RV64 / LA64 ordinary、fresh、clone和exec entry的统一Signal/lifecycle/jobctl arbitration。
 

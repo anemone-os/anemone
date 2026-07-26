@@ -100,14 +100,6 @@ fn scan_pselect_fdset(
                 *unsupported = true;
             },
             Ok(PollRegisterResult::Ready(_)) => {},
-            Ok(PollRegisterResult::Armed) if request.is_register() => {},
-            Ok(PollRegisterResult::Armed) => {
-                kwarningln!(
-                    "sys_pselect6: snapshot scan unexpectedly armed fd {}",
-                    fd_idx
-                );
-                return Err(SysError::IO);
-            },
             Ok(PollRegisterResult::Unsupported) => {
                 kdebugln!(
                     "sys_pselect6: unsupported register source fd {} interests={:?}",

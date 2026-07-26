@@ -1,27 +1,21 @@
-use crate::prelude::*;
+use crate::{fs::iomux::PollRoute, prelude::*};
 
 use super::event::FanEvent;
 
 pub const DEFAULT_MAX_EVENTS: usize = 16_384;
 
 #[derive(Clone, Debug)]
-pub(super) struct FanPollTrigger {
-    trigger: LatchTrigger,
-    // Diagnostic only: readiness is recomputed under the group lock when poll()
-    // wakes. Stored interests only make wake logs explain which waiter fired.
+pub(super) struct FanPollRoute {
+    route: PollRoute,
     interests: PollEvent,
 }
 
-impl FanPollTrigger {
-    fn new(trigger: &LatchTrigger, interests: PollEvent) -> Self {
+impl FanPollRoute {
+    fn new(route: &PollRoute, interests: PollEvent) -> Self {
         Self {
-            trigger: trigger.clone(),
+            route: route.clone(),
             interests,
         }
-    }
-
-    fn is_prunable(&self) -> bool {
-        self.trigger.is_prunable()
     }
 }
 
@@ -44,14 +38,16 @@ impl FanReadTrigger {
 
 #[derive(Debug)]
 pub(super) struct FanDetachedTriggers {
-    poll: Vec<FanPollTrigger>,
+    poll_routes: Option<Arc<Vec<FanPollRoute>>>,
+    changed: PollEvent,
     read: Vec<FanReadTrigger>,
 }
 
 impl FanDetachedTriggers {
     fn empty() -> Self {
         Self {
-            poll: Vec::new(),
+            poll_routes: None,
+            changed: PollEvent::empty(),
             read: Vec::new(),
         }
     }
@@ -65,7 +61,10 @@ pub struct FanQueue {
     // Telemetry only until a later resource-limit/fdinfo gate deliberately
     // exposes overflow accounting. Queue behavior is driven by overflow_queued.
     dropped_events: u64,
-    poll_triggers: Vec<FanPollTrigger>,
+    /// Subscription builds a replacement before publication. Queue/dead
+    /// transitions clone this snapshot while locked; route notification and
+    /// old-snapshot drop happen after the group mutex is released.
+    poll_routes: Arc<Vec<FanPollRoute>>,
     read_triggers: Vec<FanReadTrigger>,
 }
 
@@ -77,7 +76,7 @@ impl FanQueue {
             max_events,
             overflow_queued: false,
             dropped_events: 0,
-            poll_triggers: Vec::new(),
+            poll_routes: Arc::new(Vec::new()),
             read_triggers: Vec::new(),
         }
     }
@@ -118,7 +117,7 @@ impl FanQueue {
         }
 
         if was_empty && !self.events.is_empty() {
-            self.detach_wait_triggers("enqueue")
+            self.collect_waiters(PollEvent::READABLE, "enqueue")
         } else {
             FanDetachedTriggers::empty()
         }
@@ -127,37 +126,51 @@ impl FanQueue {
     pub fn clear(&mut self) -> FanDetachedTriggers {
         self.events.clear();
         self.overflow_queued = false;
-        self.detach_wait_triggers("clear")
+        self.collect_waiters(PollEvent::HANG_UP, "clear")
     }
 
-    pub fn poll(&mut self, request: &PollRequest<'_>, dead: bool) -> PollRegisterResult {
+    pub fn poll(
+        &mut self,
+        request: &PollRequest<'_>,
+        dead: bool,
+    ) -> Result<(PollRegisterResult, Option<Arc<Vec<FanPollRoute>>>), SysError> {
+        if !request.is_register() {
+            return Ok((
+                PollRegisterResult::Ready(self.revents(request.interests(), dead)),
+                None,
+            ));
+        }
+
+        let route = request
+            .route()
+            .expect("register request disappeared after is_register");
+        let (previous_routes, pruned) =
+            replace_fan_poll_routes(&mut self.poll_routes, route, request.interests())?;
+        let revents = self.revents(request.interests(), dead);
+        let queue_len = self.poll_routes.len();
+
+        kdebugln!(
+            "fanotify: subscribed poll interests={:?} queue_len={} pruned={}",
+            request.interests(),
+            queue_len,
+            pruned,
+        );
+
+        Ok((
+            PollRegisterResult::Subscribed(revents),
+            Some(previous_routes),
+        ))
+    }
+
+    fn revents(&self, interests: PollEvent, dead: bool) -> PollEvent {
         let mut revents = PollEvent::empty();
-        if request.interests().contains(PollEvent::READABLE) && !self.events.is_empty() {
+        if interests.contains(PollEvent::READABLE) && !self.events.is_empty() {
             revents |= PollEvent::READABLE;
         }
         if dead {
             revents |= PollEvent::HANG_UP;
         }
-
-        if !revents.is_empty() || !request.is_register() {
-            return PollRegisterResult::Ready(revents);
-        }
-
-        let trigger = request
-            .trigger()
-            .expect("register request disappeared after is_register");
-        self.prune_poll_triggers();
-        self.poll_triggers
-            .push(FanPollTrigger::new(trigger, request.interests()));
-
-        kdebugln!(
-            "fanotify: armed poll wait={:#x} interests={:?} queue_len={}",
-            trigger.wait_id(),
-            request.interests(),
-            self.poll_triggers.len(),
-        );
-
-        PollRegisterResult::Armed
+        revents
     }
 
     pub fn register_read_wait(&mut self, trigger: &LatchTrigger) {
@@ -171,25 +184,8 @@ impl FanQueue {
         );
     }
 
-    fn prune_poll_triggers(&mut self) {
-        self.poll_triggers.retain(|trigger| !trigger.is_prunable());
-    }
-
     fn prune_read_triggers(&mut self) {
         self.read_triggers.retain(|trigger| !trigger.is_prunable());
-    }
-
-    fn detach_poll_triggers(&mut self, reason: &'static str) -> Vec<FanPollTrigger> {
-        self.prune_poll_triggers();
-        let detached = core::mem::take(&mut self.poll_triggers);
-        if !detached.is_empty() {
-            kdebugln!(
-                "fanotify: detached {} poll triggers reason={}",
-                detached.len(),
-                reason,
-            );
-        }
-        detached
     }
 
     fn detach_read_triggers(&mut self, reason: &'static str) -> Vec<FanReadTrigger> {
@@ -205,23 +201,51 @@ impl FanQueue {
         detached
     }
 
-    fn detach_wait_triggers(&mut self, reason: &'static str) -> FanDetachedTriggers {
+    fn collect_waiters(&mut self, changed: PollEvent, reason: &'static str) -> FanDetachedTriggers {
         FanDetachedTriggers {
-            poll: self.detach_poll_triggers(reason),
+            poll_routes: Some(self.poll_routes.clone()),
+            changed,
             read: self.detach_read_triggers(reason),
         }
     }
 }
 
+fn replace_fan_poll_routes(
+    routes: &mut Arc<Vec<FanPollRoute>>,
+    route: &PollRoute,
+    interests: PollEvent,
+) -> Result<(Arc<Vec<FanPollRoute>>, usize), SysError> {
+    let retained = routes
+        .iter()
+        .filter(|entry| !entry.route.is_prunable())
+        .count();
+    let capacity = retained.checked_add(1).ok_or(SysError::OutOfMemory)?;
+    let mut replacement = Vec::new();
+    replacement
+        .try_reserve(capacity)
+        .map_err(|_| SysError::OutOfMemory)?;
+    replacement.extend(
+        routes
+            .iter()
+            .filter(|entry| !entry.route.is_prunable())
+            .cloned(),
+    );
+    let pruned = routes.len() - replacement.len();
+    replacement.push(FanPollRoute::new(route, interests));
+
+    let replacement = Arc::try_new(replacement).map_err(|_| SysError::OutOfMemory)?;
+    Ok((core::mem::replace(routes, replacement), pruned))
+}
+
 pub(super) fn trigger_detached_triggers(triggers: FanDetachedTriggers, reason: &'static str) {
-    for trigger in triggers.poll {
-        kdebugln!(
-            "fanotify: trigger poll wait={:#x} interests={:?} reason={}",
-            trigger.trigger.wait_id(),
-            trigger.interests,
-            reason,
-        );
-        trigger.trigger.trigger();
+    if let Some(routes) = triggers.poll_routes {
+        for entry in routes.iter() {
+            if triggers.changed.contains(PollEvent::HANG_UP)
+                || entry.interests.intersects(triggers.changed)
+            {
+                entry.route.notify();
+            }
+        }
     }
 
     for trigger in triggers.read {

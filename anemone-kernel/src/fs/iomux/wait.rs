@@ -59,7 +59,7 @@ impl IomuxWaitRound {
     }
 
     pub(crate) fn poll_request(&self, interests: super::PollEvent) -> PollRequest<'_> {
-        PollRequest::register_with_route(interests, &self.route, &self.observer.trigger)
+        PollRequest::register_with_route(interests, &self.route)
     }
 
     pub(in crate::fs) fn wait_id(&self) -> usize {

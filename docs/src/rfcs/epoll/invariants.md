@@ -1,26 +1,30 @@
 # Epoll 与 Poll Subscription 不变量需求
 
-**状态：** Accepted Target / Not Effective
+**状态：** Accepted Target / Foundation Effective / Epoll Not Effective
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **适用修订：** R0
 
-本文保存 epoll R0 相对 current effective contract 的 target delta，以及本 RFC
-自己的 proof obligations。当前生效规则以 `docs/src/contracts/` 为唯一权威；本文是
-accepted target，但在 contract cutover 前不是 current behavior。
+本文保存 epoll R0 相对接受时 effective contract 的 target delta，以及本 RFC
+自己的 proof obligations。当前生效规则以 `docs/src/contracts/` 为唯一权威；Stage 1 已完成
+foundation cutover，但 epoll core target 与三个 `EPOLL-*` contract ID 仍未生效。
 
 ## Contract Impact
 
 下表中的 cutover 名称只是语义切换单元，不是 implementation stage，也不授权执行。
 [实施计划](./implementation.md) 已把它们绑定到三阶段滚动路线、验证和回滚边界；
 Stage 0 不切换 contract，Stage 1 / Stage 2 分别拥有 foundation 与 epoll cutover。
+表中“当前规则”保留 R0 接受时的 pre-cutover baseline，便于审计 target delta；2026-07-26 Stage 1 closure
+已原子完成 `SUBSCRIPTION-CUTOVER` 与 `OPENED-DESC-CAPABILITY-CUTOVER`，因此 `IOMUX-POLL-001/002`、
+`OPENED-DESC-001/002` 的 Refine/Replace 与 `OPENED-DESC-LIVENESS-001` 现已 effective。`EPOLL-WATCH-001`、
+`EPOLL-READY-001`、`EPOLL-FILE-001` 继续等待 `EPOLL-CUTOVER`，不得由 foundation closure 推导为有效。
 
-| Contract ID | 变化 | 当前规则 | Target 摘要 | 生效边界 |
+| Contract ID | 变化 | R0 接受时规则 | Target 摘要 | 生效边界 |
 | --- | --- | --- | --- | --- |
 | [`SCHED-LATCH-001..003`](../../contracts/scheduler/latch-wait-round.md) | Preserve | 单轮 wait identity、owner-bound lifecycle、no-return stale-safe trigger | `Latch` 继续只承载 task-local 单轮等待；persistent subscription 不进入 scheduler | 全程 |
 | [`SIGNAL-TEMP-MASK-001..003`](../../contracts/signal/temporary-mask-delivery.md) | Preserve | temporary mask、delivery reservation 与 restore responsibility 由 Signal owner 线性收口 | `IomuxWaitRound` 只替换 readiness registration owner，不取得或复制 mask/restore truth，现有 ppoll/pselect outcome classification 保持 | 全程 |
 | [`IOMUX-POLL-001`](../../contracts/iomux/poll-wait.md#iomux-poll-001--阻塞前必须完成-snapshotregister-gate) | Refine | snapshot/register/final-scan 使用单轮 `LatchTrigger` register | poll/select 通过 `IomuxWaitRound` 建立 persistent observer routes，仍保留阻塞前完整 arm gate | `SUBSCRIPTION-CUTOVER` |
-| [`IOMUX-POLL-002`](../../contracts/iomux/poll-wait.md#iomux-poll-002--source-锁拥有-readiness-与-trigger-publication) | Replace | source 锁内发布并 detach 单轮 `LatchTrigger`，锁外 trigger | source 锁内安装非拥有 observer route 并返回 current readiness；状态变化锁内选择 observer、锁外 callback；consumer retirement 使旧 hint fail closed，source 有界清理 stale routes | `SUBSCRIPTION-CUTOVER` |
+| [`IOMUX-POLL-002`](../../contracts/iomux/poll-wait.md#iomux-poll-002--source-锁拥有-readiness-与-route-publication) | Replace | source 锁内发布并 detach 单轮 `LatchTrigger`，锁外 trigger | source 锁内安装非拥有 observer route 并返回 current readiness；状态变化锁内选择 observer、锁外 callback；consumer retirement 使旧 hint fail closed，source 有界清理 stale routes | `SUBSCRIPTION-CUTOVER` |
 | [`IOMUX-POLL-003`](../../contracts/iomux/poll-wait.md#iomux-poll-003--wake-只是-hint最终-predicate-决定返回) | Preserve | wake 只是 hint，final predicate 决定返回 | poll/select 与 epoll 都不得把 callback/queue payload 当成 target readiness truth | 全程 |
 | [`OPENED-DESC-001`](../../contracts/task/opened-description-lifecycle.md#opened-desc-001--published-slot-refcount-是-final-release-的唯一真相) | Refine | published fd-slot refcount 决定 semantic final release | 保持 `task::files` 的唯一真相，并使 lifecycle 单调推进 `Unpublished -> Live(n) -> Retired`；首次最终 `1 -> 0` 后不可重新 publication | `OPENED-DESC-CAPABILITY-CUTOVER` |
 | [`OPENED-DESC-002`](../../contracts/task/opened-description-lifecycle.md#opened-desc-002--dupfork-共享-descriptionfd-table-只拥有-publication) | Refine | dup/fork 共享 opened description；fd reuse 不保留旧 identity | 保持 sharing/identity truth，并提供不暴露 `task::files` 私有状态的 non-owning identity/liveness capability；watch key 组合该 identity 与用户 fd key | `OPENED-DESC-CAPABILITY-CUTOVER` |
@@ -426,10 +430,11 @@ UAPI parser 位于 `fs::api::iomux::epoll*` 或保持同一依赖方向的现有
 以下规则只约束本 RFC 的迁移、review 与验收，不自动成为长期 current contract：
 
 - 三个 cutover unit 必须保持 effective / target 分离；任何 probe、partial integration
-  或 R0 acceptance 都不能提前改变 `docs/src/contracts/`。
-- `PollRequest::register(&LatchTrigger)` 是 `SUBSCRIPTION-CUTOVER` 前的 current
-  effective path，不是已经被接受的长期 target；未来迁移桥必须带删除条件，且不得
-  成为 poll/select 与 epoll 的永久并列 registry。
+  或 R0 acceptance 都不能提前改变 `docs/src/contracts/`。Stage 1 已原子完成两个 foundation
+  cutover；`EPOLL-CUTOVER` 仍保持 Not Cut Over。
+- `PollRequest::register(&LatchTrigger)` 是 `SUBSCRIPTION-CUTOVER` 前的 historical effective
+  path；Stage 1 已删除该 bridge，current source-facing protocol 只保留 non-owning route 与
+  publication-point snapshot，不得重新引入 poll/select 与 epoll 的并列 registry。
 - [实施计划](./implementation.md) 的 Stage 0 必须先执行 proof-first vertical slice：至少覆盖
   普通非睡眠 source 路径与 noirq/fixed-capacity source 路径，并在全量 cutover 前审计 TTY
   一类预分配、可重入 dirty handoff。Stage 0 已按 0A terminal liveness、0B observer/pipe、
@@ -442,9 +447,9 @@ UAPI parser 位于 `fs::api::iomux::epoll*` 或保持同一依赖方向的现有
 - target owner、ABI、可见语义或 acceptance boundary 若因实现证据需要改变，必须进入
   Target Renegotiation Gate，不能在 future implementation stage 中静默降低语义。
 - Stage 0 已在 document review 前解析为 Ready；R0 acceptance、transaction 与开发者启动授权
-  已于 2026-07-26 完成。0A-0D 已逐项独立关闭，Stage 0 现为 Closed；本次 closure 不执行任何
-  contract cutover。后续独立 `0 -> 1` resolution gate 已把 Stage 1 解析为 Ready / Not Started，
-  但不自动授权代码实现或 foundation cutover。
+  已于 2026-07-26 完成。0A-0D 已逐项独立关闭，Stage 0 现为 Closed；该 closure 不执行任何
+  contract cutover。后续独立 `0 -> 1` resolution gate 与新的实现授权已完成 Stage 1 原子 checkpoint；
+  两个 foundation cutover 同步生效，Stage 2 resolution 仍未进入或获授权。
 
 ### 文档层完成标准
 

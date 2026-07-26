@@ -123,11 +123,6 @@ fn scan_ppoll_fds(
                 break;
             },
             Ok(PollRegisterResult::Ready(_)) => {},
-            Ok(PollRegisterResult::Armed) if mode.is_register() => {},
-            Ok(PollRegisterResult::Armed) => {
-                kwarningln!("sys_ppoll: snapshot scan unexpectedly armed fd {:?}", fd);
-                return Err(SysError::IO);
-            },
             Ok(PollRegisterResult::Unsupported) => {
                 kdebugln!(
                     "sys_ppoll: unsupported register source fd {:?} interests={:?}",

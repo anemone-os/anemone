@@ -1,6 +1,6 @@
 # Epoll 实施计划
 
-**状态：** Active / Stage 0 Closed / Stage 1 Ready / Not Started
+**状态：** Stage 0-1 Closed / Stage 2 Outline
 **适用修订：** R0
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-epoll](./index.md)
@@ -11,9 +11,9 @@
 
 本文把公共 R0 中已经闭合的 accepted target 解析成滚动实施路线。Stage 0 已解析为
 Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后进入 Active。
-初始授权覆盖 0A、0B；后续授权覆盖 0C、0D。四个 checkpoint 已逐项独立关闭。开发者随后只授权
-执行 `0 -> 1` resolution gate；该 gate 已把 Stage 1 完整解析为 Ready，但没有激活代码实现，且
-Stage 0 closure / Stage 1 Ready 都不会自动授权后续 Stage。
+初始授权覆盖 0A、0B；后续授权覆盖 0C、0D。四个 checkpoint 已逐项独立关闭。开发者随后授权
+执行 `0 -> 1` resolution gate；该 gate 把 Stage 1 完整解析为 Ready。后续独立授权完成了 Stage 1
+代码、review、验证与两个 foundation cutover；本事务停在 Stage 1 closure，不得自动进入 Stage 2。
 
 ## 实施原则
 
@@ -64,7 +64,7 @@ Stage 0 closure / Stage 1 Ready 都不会自动授权后续 Stage。
 | 阶段 | 成熟度 | 目的 | contract cutover | 解析触发点 |
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 用 production-shaped vertical slice 证明 observer route、consumer retirement、terminal liveness 与三类 source context 可以共存 | None | 0A-0D closure evidence 已记录 |
-| Stage 1 | Ready / Not Started | 迁移 eventfd/fanotify 两个剩余 poll bridge，删除 source-facing `LatchTrigger` / `Armed` 路径，并原子切换 subscription / opened-description contract | `SUBSCRIPTION-CUTOVER`、`OPENED-DESC-CAPABILITY-CUTOVER` | `0 -> 1` gate 已完成；等待独立实现授权 |
+| Stage 1 | Closed | 迁移 eventfd/fanotify 两个剩余 poll bridge，删除 source-facing `LatchTrigger` / `Armed` 路径，并原子切换 subscription / opened-description contract | `SUBSCRIPTION-CUTOVER`、`OPENED-DESC-CAPABILITY-CUTOVER` 已同步生效 | closure evidence 已记录；Stage 2 gate 未进入 |
 | Stage 2 | Outline | 实现 epoll core、anonymous file、syscall ABI、focused tests 与 LTP，完成首版 epoll cutover | `EPOLL-CUTOVER` | Stage 1 独立关闭后 |
 
 ## Stage 0 Closed：Subscription 与 Liveness Proof-First Slice
@@ -423,13 +423,14 @@ Stage 0 Closed 后已执行一次只读 preflight：
 
 ### 阶段成熟度与授权边界
 
-- `Ready / Not Started`。Stage 0 已独立关闭；上一节 resolution gate 已核对 live source、实际
+- `Closed / 2026-07-26`。Stage 0 已独立关闭；上一节 resolution gate 已核对 live source、实际
   Stage 0 diff、review/validation evidence、current contracts、register 与测试入口，并冻结本节完整
   deliverable、cutover 和 manifest。
 - 本阶段是一个原子 checkpoint，不再拆 source-migration / bridge-removal 子 checkpoint。live tree 只剩
   两个普通 task-context dynamic registry，继续拆 gate 只会制造不可单独生效的混合协议中间态。
-- 开发者本轮只授权解析 Stage 1；Stage 1、任一代码修改或两个 contract cutover 都未激活。新的明确
-  授权必须在 transaction 记录 branch、HEAD、dirty state、current contracts 与 manifest 后才能开始。
+- 开发者已在新的明确授权中要求完成 Stage 1；transaction 已记录 branch、HEAD、clean state、current
+  contracts 与 manifest 后激活本阶段。代码、验证、review、write-back 与两个 foundation cutover 已在
+  同一 checkpoint 闭合；该授权不覆盖 Stage 2 resolution 或实现。
 
 ### 前置证据与受保护边界
 
