@@ -63,3 +63,8 @@ eevdf_base_slice_us = 3000 # EEVDF-lite base slice in microseconds.
 eevdf_wake_clamp_us = 3000 # EEVDF-lite wake placement clamp window in microseconds.
 eevdf_yield_penalty_us = 3000 # EEVDF-lite bounded yield penalty window in microseconds.
 eevdf_anomaly_threshold = 8 # Consecutive EEVDF no-eligible fallbacks before an extra error summary.
+virtio_net_queue_size = 64 # Descriptor capacity of each VirtIO-Net RX/TX queue; kernel requires a power of two in 4..=1024.
+virtio_net_frame_capacity_bytes = 2048 # Per-slot backing bytes including the VirtIO-Net header; kernel requires at least 1526.
+net_pump_ingress_budget_frames = 32 # Maximum ingress frames advanced by one stack pump.
+net_pump_egress_budget_steps = 32 # Maximum egress steps advanced by one stack pump.
+net_worker_repoll_rounds = 8 # Maximum immediate repoll rounds before the network worker yields.

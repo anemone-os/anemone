@@ -13,7 +13,7 @@
 （proposed `Refine`）
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前没有 Apollyon、Keter 或 Euclid；NFP-002
 已由 System Power R0 与本 R0 的 best-effort cleanup boundary neutralize
-**下一步：** Stage 1 Checkpoint 1-2 已关闭；Checkpoint 3 未激活，等待独立执行授权
+**下一步：** Stage 1 Checkpoint 1-3 已关闭；Checkpoint 4 未激活，等待独立执行授权
 
 > 本目录是 `net-frame-path` R0 accepted target 的公共 canonical source。R0 尚未成为 current contract；
 > 六个 network IDs 与 power Refine 只可在 `NFP-FINAL-CUTOVER` 原子生效。

@@ -34,6 +34,7 @@ pub mod exception;
 pub mod fs;
 pub mod initcall;
 pub mod mm;
+pub mod net;
 pub mod panic;
 pub mod percpu;
 pub mod power;

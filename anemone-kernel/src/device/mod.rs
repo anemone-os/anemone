@@ -33,6 +33,7 @@ pub(crate) mod boot_io;
 pub mod char;
 pub mod console;
 pub mod mmc;
+pub(crate) mod net;
 pub(crate) mod tty;
 
 /// Common data shared by all devices.

@@ -1,6 +1,6 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / Stage 1 Checkpoint 1-2 Closed; Checkpoint 3 Not Activated
+**Status:** Active / Stage 1 Checkpoint 1-3 Closed; Checkpoint 4 Not Activated
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260726-net-frame-path R0](../../rfcs/net-frame-path/index.md),
@@ -21,6 +21,9 @@ owner、改变 target/owner/public API/shared contract/ABI/visible semantics/acc
 用户随后在同日独立授权 Stage 1 Checkpoint 2，要求完成 real smoltcp owner 与 host vertical slice，按
 checkpoint 执行 review、validation、write-back 并单独提交。该授权不进入 Checkpoint 3，其余 frozen
 manifest、默认只读 owner、target 与 cutover 边界保持不变。
+
+用户随后再次独立授权完成 Stage 1 Checkpoint 3，并明确不得进入 Checkpoint 4；本次仍按 frozen manifest、
+review/validation/write-back 与单 checkpoint commit 合同执行，不授予 target/contract/cutover 扩展。
 
 ## R0 acceptance and activation preflight
 
@@ -173,3 +176,77 @@ Checkpoint 2 delivery、review 与 validation floor 已闭合；没有改变 R0 
 semantics 或 acceptance，也没有 current contract cutover。kernel build、RV64/LA64、QEMU、hardware、LTP
 与 final harness 均 Not Run，且不属于本 checkpoint floor。Stage 1 保持 Active，shared surface 继续
 provisional；Checkpoint 3 未激活，本事务停在 Checkpoint 2 closure。
+
+### 2026-07-26 - Stage 1 Checkpoint 3 activated
+
+Checkpoint 3 从 commit `262bfbca` 的干净 `dev/drc/alpha` 工作树独立激活。Preflight 重新读取 R0、Stage 1
+Ready 定义、tracking issues、register、current System Power contract、Checkpoint 1-2 transaction 与 live
+VirtIO/device/IRQ/Kconfig owner；`VirtIODevice::take_transport()`、`VirtIONetRaw` begin/complete、
+`VirtIOHalImpl::share/unshare`、boot-only device lifecycle 与 repository build/QEMU 入口仍匹配 canonical
+baseline，没有命中停止条件。
+
+**Write-set lock:** 只写 frozen manifest 内的 kernel `main`/module declaration、`device/net`、
+`driver/net`、`net/worker`、xtask KernelConfig owner、默认配置与 canonical docs。generic bus/IRQ、
+`driver/virtio`、vendored `virtio-drivers`/smoltcp、power、scheduler/time、apps/rootfs/LTP/LA64 owner 全部只读。
+
+**Activation-time cutover:** Not Cut Over。六个 network IDs 与 System Power Refine 全部保持 pending；
+Checkpoint 4 未激活。
+
+### 2026-07-26 - Checkpoint 3 implementation and review
+
+新增 `device/net` boot registry，唯一拥有单调 `NetdevId`、ifindex、`ethN`、origin 与 immutable normalized
+publication snapshot。`ReadyNetdev<P>` / `PublishedNetdev<P>` 保留 concrete typed provider capability；registry
+只保存 snapshot，不保存 driver backing、queue、transport 或另一份 lifecycle truth。VirtIO driver 在 queue
+建立、32 个 initial RX refill、IRQ request 与 notification enable 后才调用 publication；成功 capability 暂存于
+driver state，Checkpoint 4 才可一次移动给 attach authority。
+
+VirtIO provider 分别独占 32 个 RX 与 32 个 TX stable boxed slot。slot state 把 begin 返回的 queue token 与
+原 buffer identity 保存在同一 owner；RX 只有 matching `receive_complete` / HAL unshare 后才进入 Ready，TX
+只有 matching `transmit_complete` 后回到 Available。protocol callback 只持具体 slot 的独占借用，不持 raw
+queue `SpinLock`、IRQ-off guard 或 provider-global lock。IRQ-shared object 只拥有 raw queue lock 与
+edge-only atomic；handler 只 ack hardware interrupt并发布 recheck edge，不 consume/submit frame 或进入 stack。
+
+Checkpoint-scoped review 的早期形状暴露两个 Keter 并在最终实现前修正：slot 若放入 IRQ-shared `Arc` 会迫使
+callback 跨 raw lock/IRQ-off，IRQ/driver state 若持 strong `Arc<VirtIONetDevice>` 又可能让 raw queue 比 slot
+backing 活得更久。最终 provider 是唯一 durable strong owner，IRQ 与 driver state 只持 `Weak`。R0 明确没有
+runtime removal：pre-IRQ failure 依靠 struct field drop order 先 unset raw queues；IRQ 注册后成功 provider
+存活到 power-off，publication failure则先抑制 queue notification再有意保留 provider/backing到 reset。
+运行时 removal 若未来进入 target，必须先阻止 Weak upgrade并 quiesce/reset queue，不能沿用当前析构前提。
+
+最终 failure-path audit 另修正了 publication failure 仍保持 notification enable 的缺口；现在失败 entry 不会
+进入 registry，IRQ handler 保留安全 backing lifetime，但 queue notification先被关闭。复审后无剩余
+Apollyon、Keter 或 Euclid；没有修改/fork dependency、公开 descriptor/DMA/backing、建立镜像 queue truth、
+扩大 generic lifecycle，或进入 attach/worker/time wiring。
+
+五项 KernelConfig 只在 xtask `Parameters`、materialization、generated constant template 与 `.defconfig` 增加。
+数值语义不由 xtask parser 拒绝或 fallback：VirtIO consumer 用 `static_assert!` 检查 queue `4..=1024`、2 的幂
+与 backing `>= 1526`，worker consumer检查 ingress/egress budget和 repoll round均非零。
+
+### 2026-07-26 - Checkpoint 3 validation and closure
+
+- matching buffer/token 与 mapping audit：四个 unsafe block仅包围
+  `receive_begin/receive_complete/transmit_begin/transmit_complete`；每次 begin/complete 都使用 slot 保存的同一
+  queue token 与同一 boxed slice。每个 direct queue request只有一个 shared slice，正常 live bounce mapping
+  上界为 32 RX + 最多 32 TX，并在 matching completion unshare；pre-IRQ failure先 unset queue，IRQ 注册后的
+  不可安全回收路径按上述 boot-only规则保留到 reset/power-off。
+- publication/owner audit：registry 不保存 provider/backing；duplicate origin在 commit 前拒绝，identity/name
+  单调；queue/refill/IRQ 先于 publication；IRQ 只 ack + edge；callback 路径不跨 raw/provider-global lock。
+- `cargo test -p anemone-net-api -p anemone-smoltcp-stack`：通过；1 个 unit、9 个 integration 与 2 个
+  compile-fail doctests 保持通过，production provider feedback没有退化 host contract。
+- `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`：sandbox 内首次在 lwext4 C
+  compiler触发环境性 `SIGSYS / Bad system call`；同一 canonical 命令在 sandbox 外对最终源码完整通过。
+- focused RV64 KUnit smoke 使用从只读 preliminary master 新建的 worktree-local runtime copy与最终 kernel：
+  259/259，包含 netdev identity/name/duplicate 与 RX/TX owner-local cancellation 两个新增用例。复用先前已被
+  KUnit 修改的 runtime disk曾使既有 openat 用例因残留文件得到 `AlreadyExists`；fresh copy重跑通过，故归类为
+  validation-media contamination。KUnit 后因该盘缺少 `/.anemone/init` 按既有 boot protocol panic并 PowerOff；
+  本结果不是完整 boot、Checkpoint 4 wiring 或网络流量证据。
+- `just fmt kernel --check`：已运行，exit 1；formatter diff仍只位于 frozen read-only 的既有 vendored
+  smoltcp baseline，本 checkpoint 修改的 Rust 文件没有 formatter diff，未扩大 write set。
+- `git diff --check`：通过。`mdbook build docs` 在本次 write-back 后通过。
+
+Checkpoint 3 delivery、unsafe/owner/failure-path review 与 validation floor 已闭合，没有命中 Stage 1 停止条件，
+也没有改变 R0 target、owner、public API/shared contract、ABI、visible semantics 或 acceptance。RV64
+attach/worker/time wiring、真实双向网络流量、queue saturation、LA64、hardware、LTP 与 final harness均
+**Not Run**，不得从 build/KUnit evidence外推。Stage 1 保持 Active，shared surface继续 provisional；六个
+network IDs 与 System Power Refine均 Not Effective。Checkpoint 4 为 **Not Activated / Unauthorized**，本事务
+停在 Checkpoint 3 closure。
