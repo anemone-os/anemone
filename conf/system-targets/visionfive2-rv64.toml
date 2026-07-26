@@ -6,3 +6,4 @@ source = { type = "block", path = "mmcblk0" }
 
 [initial-program]
 type = "rootfs-entry"
+argv = ["busybox", "--materialize", "--args", "init"]

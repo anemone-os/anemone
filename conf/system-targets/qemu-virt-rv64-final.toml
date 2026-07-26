@@ -7,4 +7,4 @@ source = { type = "block", path = "vda" }
 [initial-program]
 type = "embedded-app"
 app = "busybox"
-argv = ["busybox", "sh"]
+argv = ["busybox", "--materialize", "--init-tty", "--args", "busybox sh"]

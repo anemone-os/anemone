@@ -1,3 +1,3 @@
 target = "visionfive2-rv64"
-kernel-config = "conf/.defconfig"
+kernel-config = "conf/kconfs/visionfive2-rv64.toml"
 profile = "release"
