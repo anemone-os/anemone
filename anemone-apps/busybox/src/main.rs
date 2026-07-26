@@ -28,6 +28,46 @@ const BUSYBOX_IMAGE: &[u8] = include_bytes!("../bin/riscv64/busybox");
 #[cfg(target_arch = "loongarch64")]
 const BUSYBOX_IMAGE: &[u8] = include_bytes!("../bin/loongarch64/busybox");
 
+struct LauncherOptions {
+    materialize: bool,
+    init_tty: bool,
+    busybox_args: Vec<&'static str>,
+}
+
+fn parse_launcher_options() -> Result<LauncherOptions, Errno> {
+    let mut input = args();
+    input.next().ok_or(EINVAL)?;
+
+    let mut materialize = false;
+    let mut init_tty = false;
+    let mut busybox_args = None;
+
+    while let Some(argument) = input.next() {
+        match argument {
+            "--materialize" if !materialize => materialize = true,
+            "--init-tty" if !init_tty => init_tty = true,
+            "--args" if busybox_args.is_none() => {
+                let arguments = input.next().ok_or(EINVAL)?;
+                if input.next().is_some() {
+                    return Err(EINVAL);
+                }
+                let parsed = arguments.split_ascii_whitespace().collect::<Vec<_>>();
+                if parsed.is_empty() {
+                    return Err(EINVAL);
+                }
+                busybox_args = Some(parsed);
+            },
+            _ => return Err(EINVAL),
+        }
+    }
+
+    Ok(LauncherOptions {
+        materialize,
+        init_tty,
+        busybox_args: busybox_args.ok_or(EINVAL)?,
+    })
+}
+
 fn materialize_busybox() -> Result<(), Errno> {
     let fd = openat(
         AtFd::Cwd,
@@ -55,17 +95,19 @@ fn materialize_busybox() -> Result<(), Errno> {
 
 #[anemone_rs::main]
 fn main() -> Result<(), Errno> {
-    materialize_busybox()?;
+    let options = parse_launcher_options()?;
 
-    // PID 1 is already its session and process-group leader. Boot installed
-    // stdin on the selected Terminal, so only the controlling relation is
-    // missing before the fixed BusyBox shell takes over this process.
-    tiocsctty(STDIN_FILENO as u32, 0)?;
-
-    let argv = args().collect::<Vec<_>>();
-    if argv.len() < 2 {
-        return Err(EINVAL);
+    if options.materialize {
+        materialize_busybox()?;
     }
-    execve(BUSYBOX_PATH, &argv, BUSYBOX_ENV)?;
+
+    if options.init_tty {
+        // The final launcher is already its session and process-group leader.
+        // Boot installed stdin on the selected Terminal, so this explicit
+        // option only establishes the missing controlling relation.
+        tiocsctty(STDIN_FILENO as u32, 0)?;
+    }
+
+    execve(BUSYBOX_PATH, &options.busybox_args, BUSYBOX_ENV)?;
     unreachable!();
 }
