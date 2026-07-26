@@ -93,6 +93,20 @@ fn scan_ppoll_fds(
         };
 
         match file.poll(&mode.poll_request(poll_fd.events)) {
+            Ok(PollRegisterResult::Subscribed(revents)) if mode.is_register() => {
+                if !revents.is_empty() {
+                    poll_fd.revents = LinuxPollEvent::from_kernel_poll_event(revents);
+                    nready += 1;
+                    break;
+                }
+            },
+            Ok(PollRegisterResult::Subscribed(_)) => {
+                kwarningln!(
+                    "sys_ppoll: snapshot scan unexpectedly subscribed fd {:?}",
+                    fd,
+                );
+                return Err(SysError::IO);
+            },
             Ok(PollRegisterResult::Ready(revents)) if !revents.is_empty() => {
                 poll_fd.revents = LinuxPollEvent::from_kernel_poll_event(revents);
                 nready += 1;

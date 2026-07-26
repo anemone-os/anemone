@@ -220,8 +220,12 @@ Renegotiation Gate。局部 encoding 失败但 target 不变时，只回退到 0
 
 ### Checkpoint 0B - Observer Core、IomuxWaitRound 与 Pipe Slice
 
-**交付与 write subset：** 修改 `anemone-kernel/src/fs/iomux.rs`，新建
-`anemone-kernel/src/fs/iomux/{subscription,wait}.rs`，修改
+**执行状态：** Closed / 2026-07-26。实现、source classification、concurrency review 与验证证据见
+[transaction checkpoint log](../../devlog/transactions/2026-07-26-epoll.md#checkpoint-0b---observer-coreiomuxwaitround-与-pipe-slice---2026-07-26)；
+Stage 0 仍为 Active，0C Not Started 且未获本轮授权。
+
+**交付与 write subset：** 将 iomux owner 目录化为
+`anemone-kernel/src/fs/iomux/{mod,subscription,wait}.rs`，修改
 `anemone-kernel/src/fs/api/iomux/{wait,ppoll,pselect6}.rs`、`anemone-kernel/src/fs/pipe.rs`、本文与
 对应 transaction。建立 source-neutral route、round-owned observer acceptance、ready-at-subscribe
 结果与 Stage 1 删除的旧 `LatchTrigger` bridge；只迁移 pipe 这一 ordinary dynamic-registry source。
@@ -285,7 +289,7 @@ checkpoint 或其组合都不能单独合入有效分支，也不能被公共调
 
 Stage 0 Active 时允许修改下列并集；每个 checkpoint 的实际 write subset 由上一节进一步收窄：
 
-- `anemone-kernel/src/fs/iomux.rs`
+- `anemone-kernel/src/fs/iomux/mod.rs`
 - `anemone-kernel/src/fs/iomux/subscription.rs`（新建）
 - `anemone-kernel/src/fs/iomux/wait.rs`（新建）
 - `anemone-kernel/src/fs/api/iomux/wait.rs`

@@ -2,6 +2,12 @@
 
 use crate::prelude::*;
 
+mod subscription;
+mod wait;
+
+pub(crate) use subscription::PollRoute;
+pub(in crate::fs) use wait::IomuxWaitRound;
+
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct PollEvent: u32 {
@@ -16,6 +22,11 @@ bitflags! {
 #[derive(Debug, Clone, Copy)]
 pub struct PollRequest<'a> {
     interests: PollEvent,
+    route: Option<&'a PollRoute>,
+    /// Stage 0 compatibility bridge for sources not yet migrated to routes.
+    ///
+    /// New source code must consume `route`; this field and the two-argument
+    /// register constructor disappear at Stage 1 `SUBSCRIPTION-CUTOVER`.
     trigger: Option<&'a LatchTrigger>,
 }
 
@@ -23,13 +34,28 @@ impl<'a> PollRequest<'a> {
     pub const fn snapshot(interests: PollEvent) -> Self {
         Self {
             interests,
+            route: None,
             trigger: None,
         }
     }
 
+    /// Legacy register request retained only until `SUBSCRIPTION-CUTOVER`.
     pub const fn register(interests: PollEvent, trigger: &'a LatchTrigger) -> Self {
         Self {
             interests,
+            route: None,
+            trigger: Some(trigger),
+        }
+    }
+
+    pub(in crate::fs) const fn register_with_route(
+        interests: PollEvent,
+        route: &'a PollRoute,
+        trigger: &'a LatchTrigger,
+    ) -> Self {
+        Self {
+            interests,
+            route: Some(route),
             trigger: Some(trigger),
         }
     }
@@ -40,6 +66,10 @@ impl<'a> PollRequest<'a> {
 
     pub const fn trigger(&self) -> Option<&'a LatchTrigger> {
         self.trigger
+    }
+
+    pub(crate) const fn route(&self) -> Option<&'a PollRoute> {
+        self.route
     }
 
     pub const fn is_register(&self) -> bool {
@@ -63,6 +93,8 @@ impl<'a> PollRequest<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollRegisterResult {
     Ready(PollEvent),
+    /// A persistent route was installed before this readiness snapshot.
+    Subscribed(PollEvent),
     Armed,
     Unsupported,
 }

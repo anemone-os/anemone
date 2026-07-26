@@ -21,18 +21,20 @@ use crate::{
     },
 };
 
+use super::iomux::PollRoute;
+
 const PIPE_CAPACITY_BYTES: usize = PagingArch::PAGE_SIZE_BYTES;
 
 #[derive(Clone, Debug)]
-struct PipePollTrigger {
-    trigger: LatchTrigger,
+struct PipePollRoute {
+    route: PollRoute,
     interests: PollEvent,
 }
 
-impl PipePollTrigger {
-    fn new(trigger: &LatchTrigger, interests: PollEvent) -> Self {
+impl PipePollRoute {
+    fn new(route: &PollRoute, interests: PollEvent) -> Self {
         Self {
-            trigger: trigger.clone(),
+            route: route.clone(),
             interests,
         }
     }
@@ -83,8 +85,12 @@ struct Pipe {
     rx_cnt: usize,
     tx_cnt: usize,
 
-    rx_poll_triggers: Vec<PipePollTrigger>,
-    tx_poll_triggers: Vec<PipePollTrigger>,
+    /// Copy-on-write registries let predicate transitions clone a snapshot
+    /// under the pipe lock without allocating. Subscription builds a fallible
+    /// replacement before publication; callbacks and old-registry drop happen
+    /// after releasing the pipe lock.
+    rx_poll_routes: Arc<Vec<PipePollRoute>>,
+    tx_poll_routes: Arc<Vec<PipePollRoute>>,
 }
 
 impl Pipe {
@@ -93,8 +99,8 @@ impl Pipe {
             buf: Box::new(RingBuffer::new()),
             rx_cnt: 1,
             tx_cnt: 1,
-            rx_poll_triggers: Vec::new(),
-            tx_poll_triggers: Vec::new(),
+            rx_poll_routes: Arc::new(Vec::new()),
+            tx_poll_routes: Arc::new(Vec::new()),
         };
 
         let pipe = Arc::new(SpinLock::new(pipe));
@@ -105,40 +111,6 @@ impl Pipe {
     fn capacity(&self) -> usize {
         self.buf.len() + self.buf.available()
     }
-
-    fn prune_rx_poll_triggers(&mut self) {
-        prune_pipe_poll_triggers(&mut self.rx_poll_triggers, "rx");
-    }
-
-    fn prune_tx_poll_triggers(&mut self) {
-        prune_pipe_poll_triggers(&mut self.tx_poll_triggers, "tx");
-    }
-
-    fn detach_rx_poll_triggers(&mut self, reason: &'static str) -> Vec<PipePollTrigger> {
-        self.prune_rx_poll_triggers();
-        let detached = core::mem::take(&mut self.rx_poll_triggers);
-        if !detached.is_empty() {
-            kdebugln!(
-                "pipe: detach rx poll triggers reason={} count={}",
-                reason,
-                detached.len(),
-            );
-        }
-        detached
-    }
-
-    fn detach_tx_poll_triggers(&mut self, reason: &'static str) -> Vec<PipePollTrigger> {
-        self.prune_tx_poll_triggers();
-        let detached = core::mem::take(&mut self.tx_poll_triggers);
-        if !detached.is_empty() {
-            kdebugln!(
-                "pipe: detach tx poll triggers reason={} count={}",
-                reason,
-                detached.len(),
-            );
-        }
-        detached
-    }
 }
 
 #[derive(Opaque)]
@@ -148,18 +120,18 @@ struct PipeRx {
 
 impl Drop for PipeRx {
     fn drop(&mut self) {
-        let detached = {
+        let routes = {
             let mut pipe = self.pipe.lock();
             pipe.rx_cnt -= 1;
 
             if pipe.rx_cnt == 0 {
-                pipe.detach_tx_poll_triggers("rx_drop")
+                Some(pipe.tx_poll_routes.clone())
             } else {
-                Vec::new()
+                None
             }
         };
 
-        trigger_pipe_poll_triggers(detached, "tx", "rx_drop");
+        notify_pipe_poll_routes(routes, None, "tx", "rx_drop");
     }
 }
 
@@ -170,18 +142,18 @@ struct PipeTx {
 
 impl Drop for PipeTx {
     fn drop(&mut self) {
-        let detached = {
+        let routes = {
             let mut pipe = self.pipe.lock();
             pipe.tx_cnt -= 1;
 
             if pipe.tx_cnt == 0 {
-                pipe.detach_rx_poll_triggers("tx_drop")
+                Some(pipe.rx_poll_routes.clone())
             } else {
-                Vec::new()
+                None
             }
         };
 
-        trigger_pipe_poll_triggers(detached, "rx", "tx_drop");
+        notify_pipe_poll_routes(routes, None, "rx", "tx_drop");
     }
 }
 
@@ -226,29 +198,58 @@ pub fn pipe_endpoints_same_pipe(lhs: &File, rhs: &File) -> Result<bool, SysError
     Ok(Arc::ptr_eq(lhs, rhs))
 }
 
-fn prune_pipe_poll_triggers(queue: &mut Vec<PipePollTrigger>, side: &'static str) {
-    let before = queue.len();
-    queue.retain(|entry| !entry.trigger.is_prunable());
-    let pruned = before - queue.len();
-    if pruned > 0 {
-        kdebugln!("pipe: pruned {} {} poll triggers", pruned, side);
-    }
+fn replace_pipe_poll_routes(
+    routes: &mut Arc<Vec<PipePollRoute>>,
+    route: &PollRoute,
+    interests: PollEvent,
+) -> Result<(Arc<Vec<PipePollRoute>>, usize), SysError> {
+    let retained = routes
+        .iter()
+        .filter(|entry| !entry.route.is_prunable())
+        .count();
+    let capacity = retained.checked_add(1).ok_or(SysError::OutOfMemory)?;
+    let mut replacement = Vec::new();
+    replacement
+        .try_reserve(capacity)
+        .map_err(|_| SysError::OutOfMemory)?;
+
+    replacement.extend(
+        routes
+            .iter()
+            .filter(|entry| !entry.route.is_prunable())
+            .cloned(),
+    );
+    let pruned = routes.len() - replacement.len();
+    replacement.push(PipePollRoute::new(route, interests));
+
+    let replacement = Arc::try_new(replacement).map_err(|_| SysError::OutOfMemory)?;
+    Ok((core::mem::replace(routes, replacement), pruned))
 }
 
-fn trigger_pipe_poll_triggers(
-    triggers: Vec<PipePollTrigger>,
+fn notify_pipe_poll_routes(
+    routes: Option<Arc<Vec<PipePollRoute>>>,
+    changed: Option<PollEvent>,
     side: &'static str,
     reason: &'static str,
 ) {
-    for entry in triggers {
+    let Some(routes) = routes else {
+        return;
+    };
+
+    let mut candidates = 0usize;
+    for entry in routes.iter() {
+        if changed.is_none_or(|changed| entry.interests.intersects(changed)) {
+            entry.route.notify();
+            candidates += 1;
+        }
+    }
+    if candidates > 0 {
         kdebugln!(
-            "pipe: trigger {} poll wait={:#x} interests={:?} reason={}",
+            "pipe: issued {} {} poll route hints reason={}",
+            candidates,
             side,
-            entry.trigger.wait_id(),
-            entry.interests,
             reason,
         );
-        entry.trigger.trigger();
     }
 }
 
@@ -280,32 +281,24 @@ fn pipe_tx_revents(pipe: &Pipe, interests: PollEvent) -> PollEvent {
     revents
 }
 
-fn pipe_read_locked(
-    pipe: &mut Pipe,
-    buf: &mut [u8],
-    reason: &'static str,
-) -> (usize, Vec<PipePollTrigger>) {
+fn pipe_read_locked(pipe: &mut Pipe, buf: &mut [u8]) -> (usize, Option<Arc<Vec<PipePollRoute>>>) {
     let read = pipe.buf.try_pop_slice(buf);
-    let detached = if read > 0 {
-        pipe.detach_tx_poll_triggers(reason)
+    let routes = if read > 0 {
+        Some(pipe.tx_poll_routes.clone())
     } else {
-        Vec::new()
+        None
     };
-    (read, detached)
+    (read, routes)
 }
 
-fn pipe_write_locked(
-    pipe: &mut Pipe,
-    buf: &[u8],
-    reason: &'static str,
-) -> (usize, Vec<PipePollTrigger>) {
+fn pipe_write_locked(pipe: &mut Pipe, buf: &[u8]) -> (usize, Option<Arc<Vec<PipePollRoute>>>) {
     let written = pipe.buf.try_push_slice(buf);
-    let detached = if written > 0 {
-        pipe.detach_rx_poll_triggers(reason)
+    let routes = if written > 0 {
+        Some(pipe.rx_poll_routes.clone())
     } else {
-        Vec::new()
+        None
     };
-    (written, detached)
+    (written, routes)
 }
 
 fn pipe_rx_read(
@@ -321,12 +314,12 @@ fn pipe_rx_read(
 
     let mut pipe = rx.pipe.lock();
 
-    let (result, detached) = if pipe.buf.is_empty() {
+    let (result, routes) = if pipe.buf.is_empty() {
         if pipe.tx_cnt == 0 {
             // no tx alive. return EOF.
-            (Ok(0), Vec::new())
+            (Ok(0), None)
         } else if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
-            (Err(SysError::Again), Vec::new())
+            (Err(SysError::Again), None)
         } else {
             while pipe.buf.is_empty() && pipe.tx_cnt > 0 {
                 if get_current_task().has_unmasked_signal() {
@@ -340,20 +333,20 @@ fn pipe_rx_read(
             // out of loop. see what happened.
             if pipe.buf.is_empty() {
                 // all tx dead
-                (Ok(0), Vec::new())
+                (Ok(0), None)
             } else {
                 // data available!
-                let (read, detached) = pipe_read_locked(&mut pipe, buf, "rx_read");
-                (Ok(read), detached)
+                let (read, routes) = pipe_read_locked(&mut pipe, buf);
+                (Ok(read), routes)
             }
         }
     } else {
-        let (read, detached) = pipe_read_locked(&mut pipe, buf, "rx_read");
-        (Ok(read), detached)
+        let (read, routes) = pipe_read_locked(&mut pipe, buf);
+        (Ok(read), routes)
     };
 
     drop(pipe);
-    trigger_pipe_poll_triggers(detached, "tx", "rx_read");
+    notify_pipe_poll_routes(routes, Some(PollEvent::WRITABLE), "tx", "rx_read");
     result
 }
 
@@ -364,26 +357,36 @@ fn pipe_rx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterRe
         .expect("internal error: pipe rx file without correct private data");
 
     let mut pipe = rx.pipe.lock();
-    let revents = pipe_rx_revents(&pipe, request.interests());
-    if !revents.is_empty() || !request.is_register() {
-        return Ok(PollRegisterResult::Ready(revents));
+    if !request.is_register() {
+        return Ok(PollRegisterResult::Ready(pipe_rx_revents(
+            &pipe,
+            request.interests(),
+        )));
     }
 
-    let trigger = request
-        .trigger()
-        .expect("register request disappeared after is_register");
-    pipe.prune_rx_poll_triggers();
-    pipe.rx_poll_triggers
-        .push(PipePollTrigger::new(trigger, request.interests()));
+    let Some(route) = request.route() else {
+        let revents = pipe_rx_revents(&pipe, request.interests());
+        return Ok(if revents.is_empty() {
+            PollRegisterResult::Unsupported
+        } else {
+            PollRegisterResult::Ready(revents)
+        });
+    };
+    let (previous_routes, pruned) =
+        replace_pipe_poll_routes(&mut pipe.rx_poll_routes, route, request.interests())?;
+    let revents = pipe_rx_revents(&pipe, request.interests());
+    let queue_len = pipe.rx_poll_routes.len();
+    drop(pipe);
+    drop(previous_routes);
 
     kdebugln!(
-        "pipe: armed rx poll wait={:#x} interests={:?} queue_len={}",
-        trigger.wait_id(),
+        "pipe: subscribed rx poll interests={:?} queue_len={} pruned={}",
         request.interests(),
-        pipe.rx_poll_triggers.len(),
+        queue_len,
+        pruned,
     );
 
-    Ok(PollRegisterResult::Armed)
+    Ok(PollRegisterResult::Subscribed(revents))
 }
 
 fn pipe_tx_write(
@@ -404,7 +407,7 @@ fn pipe_tx_write(
         return Err(SysError::BrokenPipe);
     }
 
-    let (result, detached) = if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
+    let (result, routes) = if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
         let available = pipe.buf.available();
         if available == 0 || (buf.len() <= PIPE_CAPACITY_BYTES && available < buf.len()) {
             return Err(SysError::Again);
@@ -415,8 +418,8 @@ fn pipe_tx_write(
         } else {
             buf.len()
         };
-        let (written, detached) = pipe_write_locked(&mut pipe, &buf[..to_write], "tx_write");
-        (Ok(written), detached)
+        let (written, routes) = pipe_write_locked(&mut pipe, &buf[..to_write]);
+        (Ok(written), routes)
     } else {
         let needs_atomic_write = buf.len() <= PIPE_CAPACITY_BYTES;
 
@@ -437,23 +440,23 @@ fn pipe_tx_write(
 
         if pipe.rx_cnt == 0 {
             send_sigpipe();
-            (Err(SysError::BrokenPipe), Vec::new())
+            (Err(SysError::BrokenPipe), None)
         } else if needs_atomic_write {
-            let (written, detached) = pipe_write_locked(&mut pipe, buf, "tx_write");
+            let (written, routes) = pipe_write_locked(&mut pipe, buf);
             assert!(
                 written == buf.len(),
                 "we should have enough space to write all data"
             );
-            (Ok(written), detached)
+            (Ok(written), routes)
         } else {
             let to_write = pipe.buf.available().min(buf.len());
-            let (written, detached) = pipe_write_locked(&mut pipe, &buf[..to_write], "tx_write");
-            (Ok(written), detached)
+            let (written, routes) = pipe_write_locked(&mut pipe, &buf[..to_write]);
+            (Ok(written), routes)
         }
     };
 
     drop(pipe);
-    trigger_pipe_poll_triggers(detached, "rx", "tx_write");
+    notify_pipe_poll_routes(routes, Some(PollEvent::READABLE), "rx", "tx_write");
     result
 }
 
@@ -561,26 +564,36 @@ fn pipe_tx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterRe
         .expect("internal error: pipe tx file without correct private data");
 
     let mut pipe = tx.pipe.lock();
-    let revents = pipe_tx_revents(&pipe, request.interests());
-    if !revents.is_empty() || !request.is_register() {
-        return Ok(PollRegisterResult::Ready(revents));
+    if !request.is_register() {
+        return Ok(PollRegisterResult::Ready(pipe_tx_revents(
+            &pipe,
+            request.interests(),
+        )));
     }
 
-    let trigger = request
-        .trigger()
-        .expect("register request disappeared after is_register");
-    pipe.prune_tx_poll_triggers();
-    pipe.tx_poll_triggers
-        .push(PipePollTrigger::new(trigger, request.interests()));
+    let Some(route) = request.route() else {
+        let revents = pipe_tx_revents(&pipe, request.interests());
+        return Ok(if revents.is_empty() {
+            PollRegisterResult::Unsupported
+        } else {
+            PollRegisterResult::Ready(revents)
+        });
+    };
+    let (previous_routes, pruned) =
+        replace_pipe_poll_routes(&mut pipe.tx_poll_routes, route, request.interests())?;
+    let revents = pipe_tx_revents(&pipe, request.interests());
+    let queue_len = pipe.tx_poll_routes.len();
+    drop(pipe);
+    drop(previous_routes);
 
     kdebugln!(
-        "pipe: armed tx poll wait={:#x} interests={:?} queue_len={}",
-        trigger.wait_id(),
+        "pipe: subscribed tx poll interests={:?} queue_len={} pruned={}",
         request.interests(),
-        pipe.tx_poll_triggers.len(),
+        queue_len,
+        pruned,
     );
 
-    Ok(PollRegisterResult::Armed)
+    Ok(PollRegisterResult::Subscribed(revents))
 }
 
 static PIPE_RX_FILE_OPS: FileOps = FileOps {

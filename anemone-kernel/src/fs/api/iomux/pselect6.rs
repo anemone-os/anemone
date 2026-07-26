@@ -74,6 +74,19 @@ fn scan_pselect_fdset(
         let fd = task.get_fd(fd)?;
 
         match fd.poll(&request) {
+            Ok(PollRegisterResult::Subscribed(revents)) if request.is_register() => {
+                if !revents.is_empty() {
+                    ready_fds.set(fd_idx);
+                    *nready += 1;
+                }
+            },
+            Ok(PollRegisterResult::Subscribed(_)) => {
+                kwarningln!(
+                    "sys_pselect6: snapshot scan unexpectedly subscribed fd {}",
+                    fd_idx,
+                );
+                return Err(SysError::IO);
+            },
             Ok(PollRegisterResult::Ready(revents)) if !revents.is_empty() => {
                 ready_fds.set(fd_idx);
                 *nready += 1;
