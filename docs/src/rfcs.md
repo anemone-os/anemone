@@ -103,6 +103,16 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
+### 网络
+
+- [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：公共 Draft；建立 boot-time netdev、
+  VirtIO-Net frame provider、move-only frame ownership、single-owner bounded pump、kernel attach 与
+  System Power best-effort cleanup 的目标边界。Stage 1 已解析为 Ready，但尚未形成 R0、transaction、
+  implementation activation 或 effective network contract。后续 `net-udp` 与 `net-tcp` 是 sibling RFC，
+  只依赖完成 cutover 的 current contract，不以目录或 parent RFC 建立权威关系。
+
+### 其它领域
+
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 以静态 `filesystem -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入
